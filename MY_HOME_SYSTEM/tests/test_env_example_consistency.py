@@ -29,9 +29,21 @@ _INT_ENV_RE = re.compile(r"""_get_int_env\(\s*["']([A-Z][A-Z0-9_]*)["']""")
 _ENV_LINE_RE = re.compile(r"^([A-Z][A-Z0-9_]*)\s*=", re.MULTILINE)
 
 
+# Issue #663: DDD は MY_HOME_SYSTEM の .venv/.env を共用しつつ config.py 外で os.getenv する
+# (ENABLE_YOUTUBE_DL / VIDEO_SAVE_DIR / DDD_* / YOUTUBE_COOKIES_FILE / MY_HOME_SYSTEM_ROOT)。
+# これらも .env.example に載せる対象とし、逆に .env.example の「stale」判定からも外す。
+DDD_DIR = BASE_DIR.parent / "DDD"
+_DDD_SOURCES = sorted(p for p in DDD_DIR.glob("*.py") if not p.name.startswith("test_") and p.name != "conftest.py")
+_ENV_INT_RE = re.compile(r"""_env_int\(\s*["']([A-Z][A-Z0-9_]*)["']""")
+
+
 def _config_env_keys() -> set[str]:
     text = CONFIG_PATH.read_text(encoding="utf-8")
-    return set(_GETENV_RE.findall(text)) | set(_INT_ENV_RE.findall(text))
+    keys = set(_GETENV_RE.findall(text)) | set(_INT_ENV_RE.findall(text))
+    for src in _DDD_SOURCES:
+        ddd_text = src.read_text(encoding="utf-8")
+        keys |= set(_GETENV_RE.findall(ddd_text)) | set(_ENV_INT_RE.findall(ddd_text))
+    return keys
 
 
 def _example_env_keys() -> set[str]:

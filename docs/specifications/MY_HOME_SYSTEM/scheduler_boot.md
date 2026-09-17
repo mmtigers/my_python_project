@@ -19,7 +19,7 @@
 
 * 指定された間隔（秒）で、プロジェクト内のPythonスクリプトを定期的にサブプロセスとして実行し管理する無限ループのスケジューラ。
 * `ThreadPoolExecutor` により各タスクを並列実行する。1タスクの長時間化が他のタスクの実行タイミングを丸ごと遅延させないための設計。
-* 根拠: `main` 関数内のループおよび `TASKS` 定義 (行番号: 94-126, 29-43 / 抜粋: "with ThreadPoolExecutor(...", "TASKS: List[Task] = [")
+* 根拠: `main` 関数内のループおよび `TASKS` 定義 (行番号: 199〜235, 30〜44 / 抜粋: "with ThreadPoolExecutor(...", "TASKS: List[Task] = [")
 
 
 
@@ -29,18 +29,18 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `time` | 標準ライブラリ | 現在時刻の取得、待機処理（スリープ） | `import time` (行番号: 2 / 抜粋: "import time") |
-| `subprocess` | 標準ライブラリ | 外部スクリプトのサブプロセス実行 | `import subprocess` (行番号: 3 / 抜粋: "import subprocess") |
-| `sys` | 標準ライブラリ | モジュール検索パスの追加、プロセス終了処理、Pythonインタープリタパス取得 | `import sys` (行番号: 4 / 抜粋: "import sys") |
-| `os` | 標準ライブラリ | パスの絶対パス解決・結合・存在確認、環境変数の取得 | `import os` (行番号: 5 / 抜粋: "import os") |
-| `ThreadPoolExecutor`, `Future` | 標準ライブラリ (`concurrent.futures`) | タスクの並列実行、実行中タスクの完了状態管理 | `from concurrent.futures import ThreadPoolExecutor, Future` (行番号: 6 / 抜粋: "from concurrent.futures import") |
-| `datetime` | 標準ライブラリ | 未使用（コード内に使用箇所なし） | `from datetime import datetime` (行番号: 7 / 抜粋: "from datetime import datetime") |
-| `List` | 標準ライブラリ | 型ヒント（リスト） | `from typing import List, ...` (行番号: 8 / 抜粋: "from typing import List, Dict,") |
-| `Dict` | 標準ライブラリ | 型ヒント（辞書、`in_flight`の型等） | `from typing import ... Dict, ...` (行番号: 8, 106 / 抜粋: "in_flight: Dict[str, Future] = {}") |
-| `Any` | 標準ライブラリ | 未使用（コード内に使用箇所なし） | `from typing import ... Any, ...` (行番号: 8 / 抜粋: "from typing import List, Dict,") |
-| `TypedDict` | 標準ライブラリ | 辞書型の構造定義 | `from typing import ... TypedDict` (行番号: 8 / 抜粋: "from typing import List, Dict,") |
-| `config` | ローカルモジュール | 未使用（コード内に使用箇所なし。インポートの副作用利用の可能性あり） | `import config` (行番号: 14 / 抜粋: "import config") |
-| `setup_logging` | ローカルモジュール | ロガーの初期化と取得 | `from core.logger import setup_logging` (行番号: 15 / 抜粋: "from core.logger import setup_log") |
+| `collections` | 標準ライブラリ | 実行履歴の保持(`deque`)等 | `import collections` (行番号: 2 / 抜粋: "import collections") |
+| `time` | 標準ライブラリ | 現在時刻の取得、待機処理（スリープ） | `import time` (行番号: 3 / 抜粋: "import time") |
+| `signal` | 標準ライブラリ | SIGTERM/SIGINT を捕捉してタスクを止めてから終了する | `import signal` (行番号: 4 / 抜粋: "import signal") |
+| `subprocess` | 標準ライブラリ | 外部スクリプトのサブプロセス実行 | `import subprocess` (行番号: 5 / 抜粋: "import subprocess") |
+| `sys` | 標準ライブラリ | モジュール検索パスの追加、プロセス終了処理、Pythonインタープリタパス取得 | `import sys` (行番号: 6 / 抜粋: "import sys") |
+| `os` | 標準ライブラリ | パスの絶対パス解決・結合・存在確認、環境変数の取得 | `import os` (行番号: 7 / 抜粋: "import os") |
+| `threading` | 標準ライブラリ | 停止フラグ(`Event`)・ロックによるスレッド間の同期 | `import threading` (行番号: 8 / 抜粋: "import threading") |
+| `ThreadPoolExecutor`, `Future` | 標準ライブラリ (`concurrent.futures`) | タスクの並列実行、実行中タスクの完了状態管理 | `from concurrent.futures import ThreadPoolExecutor, Future` (行番号: 9 / 抜粋: "from concurrent.futures import") |
+| `List` / `Dict` / `Optional` / `Set` / `TypedDict` | 標準ライブラリ (`typing`) | 型ヒント(`in_flight: Dict[str, Future]` 等) | `from typing import List, Dict, Optional, Set, TypedDict` (行番号: 10) |
+| `setup_logging` | ローカルモジュール | ロガーの初期化と取得 | `from core.logger import setup_logging` (行番号: 16 / 抜粋: "from core.logger import setup_log") |
+
+**(Issue #657 で訂正)** 以前この表には `from datetime import datetime`・`typing.Any`・`import config` が「未使用import」として載っていたが、現行の `scheduler_boot.py` にこれらの import は存在しない(§8 の注意喚起も削除済み)。代わりに実在する `collections`・`signal`・`threading` が欠けていた。
 
 ### ブラックボックスとなる外部要素
 
@@ -143,14 +143,14 @@
 
 
 * **エラーハンドリング**: 関数内での明示的な例外キャッチはなし（各タスクの例外は `run_script` 内、または `Future` 内部で捕捉・保持される）。
-* 根拠: 関数内部の処理 (行番号: 94-126)
+* 根拠: 関数内部の処理 (行番号: 199〜235)
 
 
 
 ### `__main__` 実行ブロック
 
 * **役割**: `main` 関数を呼び出してスケジューラを起動し、停止命令や予期せぬエラー時にプロセスを終了させる。
-* 根拠: `if __name__ == "__main__":` (行番号: 128 / 抜粋: "if **name** == "**main**":")
+* 根拠: `if __name__ == "__main__":` (行番号: 237 / 抜粋: "if **name** == "**main**":")
 
 
 * **引数/リクエスト**: なし
@@ -224,17 +224,15 @@ graph TD
     Scheduler["scheduler_boot.py"]
     SysLib["標準ライブラリ: sys, os, time, subprocess"]
     ConcurrentLib["標準ライブラリ: concurrent.futures (ThreadPoolExecutor, Future)"]
-    TypingLib["標準ライブラリ: typing (未使用含む)"]
-    DateLib["標準ライブラリ: datetime (未使用)"]
-    Config["外部: config (ブラックボックス)"]
+    TypingLib["標準ライブラリ: typing"]
+    ThreadLib["標準ライブラリ: threading, signal, collections"]
     Logger["外部: core.logger (ブラックボックス)"]
     Scripts["外部: TASKSで定義されたスクリプト群 (ブラックボックス)"]
 
     Scheduler --> SysLib
     Scheduler --> ConcurrentLib
     Scheduler --> TypingLib
-    Scheduler --> DateLib
-    Scheduler --> Config
+    Scheduler --> ThreadLib
     Scheduler --> Logger
     Scheduler --> Scripts
 
@@ -262,7 +260,6 @@ graph TD
 * 根拠: `timeout=3600` のコメントおよび `TimeoutExpired` 時のログ (行番号: 75, 88)
 
 
-* **未使用のインポート**: `datetime`, `Any`（`Dict`は`in_flight`の型ヒントで使用）はインポートされているがコード内で使用されていない。また `config` も明示的な使用箇所がない。
 * **パス解決の依存**: 外部スクリプトの実行パスは `__file__` を基準とした `PROJECT_ROOT` に依存しているため、このファイル自身のディレクトリ階層を変更するとすべてのタスク実行が失敗する。
 * **[修正済み・Issue #575] シャットダウン時の意図的terminateが「タスク失敗」の偽Discordアラートを出していた**: Issue #360で`terminate_running_children()`によるシャットダウン時の子プロセス`terminate()`が追加されたが、当時は`run_script`側の対応が漏れており、`terminate()`を受けた子プロセスが負のreturncode（SIGTERM由来で典型的には-15）で終了すると、`run_script`はこれを区別なく「タスク失敗」と判定してERRORログ（`core/logger.py`の`DiscordErrorHandler`経由でDiscordへ通知）を出していた。監視スクリプトの実行間隔は最大3600秒（`nas_monitor.py`）あるため、通常の再起動・デプロイのたびに実行中タスクがあれば毎回この偽アラートが発生しうる状態だった。現在は`terminate_running_children`が`proc.terminate()`を呼ぶ直前にモジュールレベル集合`_intentionally_terminated`へ対象スクリプトを記録し、`run_script`は非0のreturncodeを受け取った際にまずこの集合を確認（該当すれば`discard`して消費）することで、「意図的な停止」はINFOログのみ（Discord通知なし）、「真の失敗」のみ従来どおりERRORログ（→Discord通知）に振り分けるようになった。
 * 根拠: `_intentionally_terminated: Set[str] = set()` (行番号: 52〜56)、`with _children_lock: _intentionally_terminated.add(script)` (行番号: 69〜70)、`was_intentionally_terminated = script_path in _intentionally_terminated` 以下の分岐 (行番号: 169〜175)

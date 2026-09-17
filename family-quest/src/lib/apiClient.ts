@@ -1,6 +1,7 @@
 // family-quest/src/lib/apiClient.ts
 
 import { InventoryResponse } from "../types";
+import { inventoryResponseSchema } from './gameDataSchema';
 
 // 現在の環境に最も適したBASE_URLを動的に判定する
 const getBaseUrl = (): string => {
@@ -127,7 +128,9 @@ export class ApiClient {
 
     // --- Inventory Methods ---
     async fetchInventory(userId: string): Promise<InventoryResponse> {
-        return this.get<InventoryResponse>(`/api/quest/inventory/${userId}`);
+        // #659: 取得境界で形状を検証する(gameData / purchase と同じ方針)。
+        const raw = await this.get<unknown>(`/api/quest/inventory/${userId}`);
+        return inventoryResponseSchema.parse(raw) as InventoryResponse;
     }
 
     async useItem(userId: string, inventoryId: number): Promise<ApiResponse> {

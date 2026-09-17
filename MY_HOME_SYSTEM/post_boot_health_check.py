@@ -38,7 +38,9 @@ def resolve_target_bluetooth_mac():
     """
     if not getattr(config, "ENABLE_BLUETOOTH", False):
         return None
-    return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)
+    # #665: SPEAKER_BLUETOOTH_MAC の既定値は空文字(個人のMACアドレスをリポジトリに
+    # 焼き込まない)。未設定ならBTチェックは無効時と同じくサウンドカード確認に倒す。
+    return getattr(config, "SPEAKER_BLUETOOTH_MAC", None) or None
 
 TARGET_BLUETOOTH_MAC = resolve_target_bluetooth_mac()
 # ==========================================
@@ -362,7 +364,7 @@ class PostBootHealthCheck:
 
         if error_lines:
             display_errors = error_lines[-2:]
-            error_details = "\n".join([f"> `{l}`" for l in display_errors])
+            error_details = "\n".join([f"> `{line}`" for line in display_errors])
             msg = f"{len(error_lines)} Errors in last 10min\n{error_details}"
             self.results.append(CheckResult("Logs", STATUS_WARN, msg))
         else:

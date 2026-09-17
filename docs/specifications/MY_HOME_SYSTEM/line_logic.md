@@ -22,7 +22,7 @@
 * 2026年のリファクタリング（コミット `1ecbe3b`）により、`handle_message`、`ask_outing_question`、`handle_child_record`、`handle_stomach_record` および `USER_INPUT_STATE` ステートマシンは削除された。これらは本番のLINE Webhook経路（`handlers/line_handler.py`）から一切呼び出されない到達不能コードだったため。テキストメッセージの自由文処理は現在 `handlers/line_handler.py` の `_process_message_async()` → `services/ai_service.py` に一本化されている。
 * コミット `8525dc2`（H-7修正）により、`all_genki`・`child_check`・`food_record_direct`の3記録フローは`sync_run(save_log_async(...))`(または`all_genki`は後述の`save_logs_batch_async`)の戻り値（保存成否のbool）を検査するようになった。保存に失敗した場合は成功メッセージを返さず「⚠️ 記録に失敗しました。もう一度お試しください。」を返信しエラーログを出力する。これに伴い`sync_run`自体も、内部で例外が発生した場合に暗黙の`None`ではなく明示的に`False`を返すよう変更された。**（Issue #231で修正）** `all_genki`は以前、`TARGET_MEMBERS`分の`save_log_async`をそれぞれ独立に呼びリスト内包表記で結果を`all()`判定していたため、各呼び出しが個別にcommitされ、一部だけ失敗しても既に成功していた分がコミット済みのまま残った。案内どおりユーザーが再試行すると成功済み分まで重複INSERTされていた。現在は`save_logs_batch_async`(単一トランザクションで全件保存)を1回呼び出す方式に変更し、1件でも失敗すれば全件ロールバックされる真のall-or-nothingにしている。
 * 根拠: `if not save_all_ok:\n                logger.error(...)\n                send_reply_text(..., "⚠️ 記録に失敗しました。もう一度お試しください。")` (行番号: 226-228 / 抜粋: "if not save_all_ok:"), `except Exception as e:\n        logger.error(f"Sync execution error: {e}")\n        return False` (行番号: 44-46 / 抜粋: "return False")
-* 根拠: [ファイル全体の構成] (行番号: 177-408 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
+* 根拠: [ファイル全体の構成] (行番号: 401-459 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
 
 ## 3. 外部依存関係
 
@@ -169,7 +169,7 @@
 
 * **役割**: SQLiteデータベースに直接接続し、対象メンバーの今日の最新の体調記録を取得して文字列のサマリを作成する。メンバーごとに `condition` 文字列の内容から表示アイコン（✅/⚠️/❓）を選択する。
 * **（Issue #571で修正）** アイコン選択は以前 `icon = "✅" if "元気" in status else "⚠️"` という部分文字列マッチのみだった。`handlers/line_handler.py` の `_detect_condition_keyword()`（Issue #375で追加）は「元気ない」「元気がない」「元気なし」「元気じゃない」「元気ではない」等の否定表現をすべて固定文字列 `CONDITION_NOT_GENKI = "元気なし"` に正規化してDBへ保存するが、この`"元気なし"`自体が`"元気"`を部分文字列として含むため、否定表現（体調不良）が記録された場合でも`"元気" in status`が真になり、誤って✅（元気）アイコンが選択され意味が反転して表示されていた。否定表現（`"元気なし"`）を先に判定し、それに該当しない場合のみ肯定表現（`"元気"`）を判定するよう修正した。
-* 根拠: `def get_daily_health_summary():` (行番号: 129-172 / 抜粋: "def get_daily_health_summary():")
+* 根拠: `def get_daily_health_summary():` (行番号: 129-170 / 抜粋: "def get_daily_health_summary():")
 * 根拠: `icon = "⚠️" if "元気なし" in status else ("✅" if "元気" in status else "⚠️")` (行番号: 164 / 抜粋: "icon = "⚠️" if "元気なし" in status else ("✅" if "元気" in status else "⚠️")")
 * 根拠: `# #571: 部分文字列マッチ("元気" in status)だと、Issue #375で否定表現用に\n                    # 正規化される固定文字列(handlers/line_handler.py の\n                    # CONDITION_NOT_GENKI = "元気なし")も"元気"を含むため誤って\n                    # ✅(元気)と判定していた(「元気ない」等の否定入力が意味の反転した\n                    # 表示になっていた)。否定表現を先に判定する。` (行番号: 159-163 / 抜粋: "# #571: 部分文字列マッチ")
 
@@ -197,17 +197,19 @@
 
 ### 関数 `handle_postback`
 
+* **（Issue #662 で分割）** 以前は232行・ネスト9段の1関数に6アクション分の分岐を直書きし、全体を単一の `try/except Exception` で包んでいたため、どの分岐で失敗したのかがログから判別できなかった。現在は「アクション名 → ハンドラ関数」の dict(`POSTBACK_HANDLERS`)によるディスパッチで、各アクションは `_handle_all_genki` / `_handle_show_health_input` / `_handle_child_check` / `_handle_check_status` / `_handle_food_record_direct` / `_handle_food_manual` に分かれている。処理に必要な入力(イベント、API クライアント、user_id、表示名、reply_token、パース済み dict、`LinePostbackData`)は凍結 dataclass `PostbackContext` にまとめて各ハンドラへ渡す(`ctx.target_name` は `pb.child` のエイリアス)。未定義のアクションは従来どおり warning ログと案内メッセージで返す。例外ログには `action=...` が含まれる。新しい Postback を足すときは `POSTBACK_HANDLERS` に1行追加する。
+
 * **（2026-09-06 品質監査で修正）** 本関数内の全 `line_bot_api.reply_message(...)` 呼び出し(5箇所)に `_request_timeout=config.LINE_API_REQUEST_TIMEOUT` を渡す。
 * 根拠: (行番号: 257, 271, 315, 356, 404 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
 
 * **役割**: ボタン押下などのPostbackEventを受信し、設定された `action` ごとに適切な記録（全件元気、子別記録、食事アンケート等）やUI表示を行う。`InputMode`/`UserInputState`ベースの手入力継続状態はもはや設定しない（コミット `1ecbe3b` で該当ロジックを撤去済み）。「その他（手入力）」系の分岐（`child_check`の`status=other`、`food_manual`）では状態を設定する代わりに案内テキストのみ返信し、続く自由文メッセージは `handlers/line_handler.py` のAIフォールバック(`services/ai_service.py`)経由で処理される前提になっている。コミット`8525dc2`（H-7修正）以降、`all_genki`・`child_check`（`target_name`ありの保存分岐）・`food_record_direct`の3フローは、DB保存結果（bool）を検査してから応答を分岐する。保存成功時のみ従来通りの完了メッセージ（Flex/テキスト）を返し、失敗時は「⚠️ 記録に失敗しました。もう一度お試しください。」を返信してエラーログを出力する。**（Issue #231で修正）** `all_genki`は以前、`TARGET_MEMBERS`分の`save_log_async`をそれぞれ独立に呼び出しリスト内包表記で結果を`all()`判定していたため、各呼び出しが個別にcommitされ、1件でも失敗すると「全体を失敗扱い」として案内する一方で既に成功していた分はコミット済みのまま残っていた。ユーザーが案内どおり再試行すると、成功済み分まで再度INSERTされ重複行が生じる不具合があった。現在は`save_logs_batch_async`(単一トランザクションで全件保存し1件でも失敗すれば全件ロールバックする)を1回呼び出すことで、真にall-or-nothingにし再試行を安全にしている。**（保守性 #410で修正）** `check_status`の記録確認画面の日付表示(`today_disp`)を、naiveな`datetime.datetime.now()`（サーバーのローカルタイムゾーン依存）から`core.utils.get_display_date()`（JST基準・`"%m/%d"`形式）へ変更した。また、`LinePostbackData(**raw_dict)`のバリデーション失敗時に`action`のみで再構築するtry/exceptフォールバックを削除した——`LinePostbackData`は`action`必須以外は全て`Optional`で`extra`設定も既定(未知フィールドは無視)のため、`raw_dict`に`action`キーが含まれる限り例外は送出されず、このフォールバックは到達不能だった。削除後、万一`action`キーが無い等でモデル構築が失敗しても、関数末尾の`except Exception`で握り潰される（挙動は実質変わらない: 到達不能だった旧フォールバックが動いていた場合の出力と、削除後に末尾の汎用ハンドラで捕捉された場合とで、ユーザーへの応答が「不明な操作」相当になる点は同じ）。**（Issue #583で修正）** `food_record_direct`アクションがDB保存する`food_records.meal_time_category`列は、以前は実際の記録時刻に関わらず常に固定文字列`"Dinner"`を保存していたが、現在は新設の`core.utils.get_meal_time_category_from_now()`（呼び出し時点のJST時刻から"Breakfast"/"Lunch"/"Snack"/"Dinner"のいずれかを判定するヘルパー）の戻り値をそのまま渡すよう修正されている。ここでの`category`変数（クイックリプライの選択肢が渡す麺類等の食品ジャンルラベル）はこの修正でも扱いが変わっておらず、従来どおり`menu_category`列（`f"{category}: {item}"`の形）にのみ使われる。
-* 根拠: `def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):` (行番号: 177-408 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
+* 根拠: `def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):` (行番号: 401-459 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
 * 根拠: `save_all_ok = sync_run(save_logs_batch_async(` (行番号: 220-224 / 抜粋: "save_all_ok = sync_run(save_logs_batch_async(")、`if not save_all_ok:` (行番号: 226 / 抜粋: "if not save_all_ok:")、`pb = LinePostbackData(**raw_dict)` (行番号: 203)、`today_disp = get_display_date()` (行番号: 324)
 * 根拠: `elif action == "food_record_direct":` (行番号: 360)、`save_ok = sync_run(save_log_async(` (行番号: 369-373 / 抜粋: "(user_id, user_name, get_today_date_str(), get_meal_time_category_from_now(), final_rec, get_now_iso())")
 
 
 * **引数/リクエスト**: `event` (PostbackEvent), `line_bot_api` (MessagingApi)
-* 根拠: 引数定義 (行番号: 177 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
+* 根拠: 引数定義 (行番号: 401 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
 
 
 * **戻り値/レスポンス**: なし

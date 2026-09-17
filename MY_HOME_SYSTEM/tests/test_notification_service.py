@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
+from core import discord as core_discord
 from services import notification_service
 
 
@@ -52,7 +53,7 @@ class TestSendDiscordWebhook:
 
         fake_response = MagicMock(status_code=500, text="Internal Server Error")
         monkeypatch.setattr(
-            notification_service.requests, "post", lambda *a, **kw: fake_response
+            core_discord.requests, "post", lambda *a, **kw: fake_response
         )
 
         result = notification_service._send_discord_webhook([{"type": "text", "text": "hi"}])
@@ -62,7 +63,7 @@ class TestSendDiscordWebhook:
         monkeypatch.setattr(config, "DISCORD_WEBHOOK_NOTIFY", "https://discord.example/webhook")
         fake_response = MagicMock(status_code=204)
         monkeypatch.setattr(
-            notification_service.requests, "post", lambda *a, **kw: fake_response
+            core_discord.requests, "post", lambda *a, **kw: fake_response
         )
 
         result = notification_service._send_discord_webhook([{"type": "text", "text": "hi"}])
@@ -74,7 +75,7 @@ class TestSendDiscordWebhook:
         def _raise(*a, **kw):
             raise ConnectionError("simulated network failure")
 
-        monkeypatch.setattr(notification_service.requests, "post", _raise)
+        monkeypatch.setattr(core_discord.requests, "post", _raise)
 
         result = notification_service._send_discord_webhook([{"type": "text", "text": "hi"}])
         assert result is False
@@ -149,7 +150,7 @@ class TestSendPushFallbackBehavior:
     def test_both_succeed(self, monkeypatch):
         monkeypatch.setattr(config, "DISCORD_WEBHOOK_NOTIFY", "https://discord.example/webhook")
         monkeypatch.setattr(
-            notification_service.requests, "post", lambda *a, **kw: MagicMock(status_code=204)
+            core_discord.requests, "post", lambda *a, **kw: MagicMock(status_code=204)
         )
         _install_fake_line_sdk(monkeypatch)
 
@@ -167,7 +168,7 @@ class TestSendPushFallbackBehavior:
             return MagicMock(status_code=204)
 
         monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/error-channel")
-        monkeypatch.setattr(notification_service.requests, "post", _fake_post)
+        monkeypatch.setattr(core_discord.requests, "post", _fake_post)
         _install_fake_line_sdk(monkeypatch, push_side_effect=Exception("LINE API down"))
 
         result = notification_service.send_push(
@@ -184,7 +185,7 @@ class TestSendPushFallbackBehavior:
         """
         monkeypatch.setattr(config, "DISCORD_WEBHOOK_NOTIFY", "https://discord.example/webhook")
         monkeypatch.setattr(
-            notification_service.requests, "post", lambda *a, **kw: MagicMock(status_code=500, text="err")
+            core_discord.requests, "post", lambda *a, **kw: MagicMock(status_code=500, text="err")
         )
         fake_api = _install_fake_line_sdk(monkeypatch)
 
@@ -205,7 +206,7 @@ class TestSendPushSignatureRedesign:
     def test_discord_only_call_does_not_require_user_id(self, monkeypatch):
         monkeypatch.setattr(config, "DISCORD_WEBHOOK_NOTIFY", "https://discord.example/webhook")
         monkeypatch.setattr(
-            notification_service.requests, "post", lambda *a, **kw: MagicMock(status_code=204)
+            core_discord.requests, "post", lambda *a, **kw: MagicMock(status_code=204)
         )
 
         result = notification_service.send_push(

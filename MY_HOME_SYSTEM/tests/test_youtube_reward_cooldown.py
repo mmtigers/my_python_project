@@ -169,6 +169,8 @@ class TestGracePeriodBeforeEnforcement:
     """
 
     def _set_enforce_from_in_future(self, monkeypatch, days_from_now: int = 7):
+        # #658: 施行日は実時刻からの相対ではなく、JST の現在日付を基準に明示的に置く。
+        # (JST の日付境界そのものの検証は tests/test_jst_day_boundary.py が受け持つ。)
         future_date = (datetime.datetime.now(JST) + datetime.timedelta(days=days_from_now)).date()
         monkeypatch.setattr(qs_module.config, "YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM", future_date)
         return future_date

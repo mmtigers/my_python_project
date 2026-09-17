@@ -4,14 +4,36 @@ After=network.target
 RequiresMountsFor=/mnt/nas
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+# Issue #646: 以前は Type=oneshot + RemainAfterExit=yes で start_all.sh が unified_server.py を
+# nohup/disown でバックグラウンド起動しており、サーバーが systemd の管理外にあった。
+# unified_server.py がクラッシュしても systemd は何もせず(oneshot には Restart= が効かない)、
+# 復旧は Discord 通知を受けた人手だった。Type=simple でサーバー本体をフォアグラウンドの
+# メインプロセスにし、異常終了時は Restart=on-failure で自動復旧する。
+Type=simple
 User=masahiro
 WorkingDirectory=/home/masahiro/develop/MY_HOME_SYSTEM
-ExecStart=/home/masahiro/develop/MY_HOME_SYSTEM/start_all.sh
-#Restart=always
-RestartSec=10
 Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PYTHONPATH=/home/masahiro/develop:/home/masahiro/develop/MY_HOME_SYSTEM
+
+# 前処理(旧プロセスの掃除・NAS マウント待ち・.venv/dist の鮮度チェック・Webhook 再登録)。
+# サーバー本体は起動しない(--prepare)。失敗しても start_all.sh 自身が警告のみで exit 0 する。
+ExecStartPre=/home/masahiro/develop/MY_HOME_SYSTEM/start_all.sh --prepare
+# サーバー本体。unified_server.py が内部で scheduler_boot.py / monitors/camera_monitor.py を起動し、
+# 死活監視・再起動も行う(unified_server.py の restart_dead_children)。
+ExecStart=/home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python3 unified_server.py
+
+# 異常終了(非0 exit / シグナル死)時のみ 10 秒後に再起動する。systemctl stop では再起動しない。
+Restart=on-failure
+RestartSec=10
+# 短時間にクラッシュを繰り返す場合の歯止め(5 分間に 5 回まで。超えたら failed で停止し、
+# health_watch.py(毎時 cron)のチェック1「home_system.service が active か」で検知される)
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# 停止時は SIGTERM をメインプロセスに送り、lifespan の終了処理(子プロセス terminate → 5 秒待ち →
+# kill、ffmpeg 停止)を待つ。残った子は TimeoutStopSec 後に SIGKILL される。
+KillMode=mixed
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target

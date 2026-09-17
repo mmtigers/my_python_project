@@ -235,11 +235,14 @@ class TestTargetBluetoothMac:
     def test_uses_configured_speaker_mac_when_enabled(self, monkeypatch):
         """再有効化時は設定済みMACでBT接続を確認する"""
         monkeypatch.setattr(config, "ENABLE_BLUETOOTH", True, raising=False)
-        assert (
-            health_check_module.resolve_target_bluetooth_mac()
-            == config.SPEAKER_BLUETOOTH_MAC
-        )
-        assert health_check_module.resolve_target_bluetooth_mac()
+        monkeypatch.setattr(config, "SPEAKER_BLUETOOTH_MAC", "AA:BB:CC:DD:EE:FF", raising=False)
+        assert health_check_module.resolve_target_bluetooth_mac() == "AA:BB:CC:DD:EE:FF"
+
+    def test_returns_none_when_speaker_mac_is_empty(self, monkeypatch):
+        """#665: SPEAKER_BLUETOOTH_MAC 未設定(既定の空文字)ならBT有効でもNone(チェックをスキップ)"""
+        monkeypatch.setattr(config, "ENABLE_BLUETOOTH", True, raising=False)
+        monkeypatch.setattr(config, "SPEAKER_BLUETOOTH_MAC", "", raising=False)
+        assert health_check_module.resolve_target_bluetooth_mac() is None
 
     def test_module_default_matches_current_config(self):
         """import時に解決されるTARGET_BLUETOOTH_MACは現在のconfigと整合する"""

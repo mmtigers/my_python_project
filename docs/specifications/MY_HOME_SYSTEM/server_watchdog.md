@@ -58,7 +58,7 @@
 
 
 * **引数/リクエスト**: `service_name: str`
-* 根拠: `service_name: str` (行番号: 43 / 抜粋: "def get_service_status(service...")
+* 根拠: `service_name: str` (行番号: 45 / 抜粋: "def get_service_status(service...")
 
 
 * **戻り値/レスポンス**: `str`
@@ -83,7 +83,7 @@
 
 
 * **引数/リクエスト**: `process_keyword: str`
-* 根拠: `process_keyword: str` (行番号: 59 / 抜粋: "def is_process_alive(process_k...")
+* 根拠: `process_keyword: str` (行番号: 61 / 抜粋: "def is_process_alive(process_k...")
 
 
 * **戻り値/レスポンス**: `bool`
@@ -102,11 +102,11 @@
 ### `_get_boot_id`
 
 * **役割**: `/proc/sys/kernel/random/boot_id`を読み取り、現在のブートを一意に識別する文字列を返す。`_is_new_history`がスロットリング履歴の通知済み状態をブート単位で判定するために使用する。
-* 根拠: `_get_boot_id` (行番号: 80〜84 / 抜粋: "def _get_boot_id() -> str:")
+* 根拠: `_get_boot_id` (行番号: 82〜86 / 抜粋: "def _get_boot_id() -> str:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def _get_boot_id() -> str:` (行番号: 80 / 抜粋: "def _get_boot_id() -> str:")
+* 根拠: `def _get_boot_id() -> str:` (行番号: 82 / 抜粋: "def _get_boot_id() -> str:")
 
 
 * **戻り値/レスポンス**: `str`
@@ -126,11 +126,11 @@
 
 * **役割**: `check_throttling_status`が検出したスロットリング履歴ビット（`history_issues`）のうち、現在のブートでまだ通知していない未通知ビットが含まれるかを判定する。`THROTTLE_STATE_FILE`に保存された「前回のブートID + 通知済みビット（16進数）」を読み込み、ブートIDが一致すれば通知済みビットとの差分を取る。未通知ビットが1つでもあれば状態ファイルを更新して`True`を返し、既に全ビット通知済みであれば`False`を返す。ブートIDが変わっていた場合や状態ファイルが存在しない・壊れている場合は`notified_bits`を`0`として扱う（＝全ビット未通知扱い）。
 * **（Issue #449 で修正）** 以前は`THROTTLE_STATE_FILE.read_text()`と`.write_text()`をそれぞれ独立した`try/except`で個別に呼び出しており、このスクリプトが（通常は逐次実行される前提だが）複数プロセスで同時実行された場合、読み取りから書き込みまでの間に他プロセスが割り込むと状態が上書き競合（lost update）する可能性があった。現在は状態ファイルを`r+`モードで一度だけ開き、読み取りから書き込みまでの区間全体を`fcntl.flock`による排他ロック（`fcntl.LOCK_EX`）で1つの不可分な区間にし、`finally`節で確実にロックを解放する。戻り値・挙動自体（判定ロジック）は変更されておらず、プロセス境界をまたいだアトミック性のみが追加された。
-* 根拠: `_is_new_history` (行番号: 86〜128 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")、[flockによる排他区間] (行番号: 103〜125 / 抜粋: "THROTTLE_STATE_FILE.touch(exist_ok=True)\n        with open(THROTTLE_STATE_FILE, "r+", encoding="utf-8") as f:\n            fcntl.flock(f.fileno(), fcntl.LOCK_EX)\n            try:\n                ...\n            finally:\n                fcntl.flock(f.fileno(), fcntl.LOCK_UN)")
+* 根拠: `_is_new_history` (行番号: 88〜130 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")、[flockによる排他区間] (行番号: 103〜125 / 抜粋: "THROTTLE_STATE_FILE.touch(exist_ok=True)\n        with open(THROTTLE_STATE_FILE, "r+", encoding="utf-8") as f:\n            fcntl.flock(f.fileno(), fcntl.LOCK_EX)\n            try:\n                ...\n            finally:\n                fcntl.flock(f.fileno(), fcntl.LOCK_UN)")
 
 
 * **引数/リクエスト**: `history_issues: int`
-* 根拠: `def _is_new_history(history_issues: int) -> bool:` (行番号: 86 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")
+* 根拠: `def _is_new_history(history_issues: int) -> bool:` (行番号: 88 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`
@@ -149,15 +149,15 @@
 ### `check_throttling_status`
 
 * **役割**: `vcgencmd get_throttled`コマンドを実行し、ハードウェアのスロットリング状況を確認する。現在異常が発生している場合はERRORレベルでログのみ記録し（後述の通り`send_push`直接呼び出しは行わない）、過去履歴のみの場合は`_is_new_history`で当該ブートにおいて未通知のビットがあるかを判定し、未通知であればWARNINGレベルでログを記録、既に通知済みであればDEBUGレベルでログを記録するのみに留める。
-* 根拠: `check_throttling_status` (行番号: 130〜176 / 抜粋: "def check_throttling_status():")
+* 根拠: `check_throttling_status` (行番号: 132〜178 / 抜粋: "def check_throttling_status():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_throttling_status():` (行番号: 130 / 抜粋: "def check_throttling_status():")
+* 根拠: `def check_throttling_status():` (行番号: 132 / 抜粋: "def check_throttling_status():")
 
 
 * **戻り値/レスポンス**: なし（定義なし）
-* 根拠: `def check_throttling_status():` (行番号: 130 / 抜粋: "def check_throttling_status():")
+* 根拠: `def check_throttling_status():` (行番号: 132 / 抜粋: "def check_throttling_status():")
 
 
 * **副作用**: OSコマンド（`vcgencmd`）の実行、`_is_new_history`経由での`THROTTLE_STATE_FILE`の読み書き、ログ出力のみ。**`send_push`の直接呼び出しは行わない**（コード中のコメント「修正点2」により、`core/logger.py`側の仕様で`logger.error`がDiscordへ自動転送されることを理由に、二重通知防止のため意図的に削除されている）。
@@ -172,11 +172,11 @@
 ### `check_health`
 
 * **役割**: サービスとプロセスのステータスを確認し、両方が正常であればロックファイルを解除し復旧通知を送信する。異常であれば、初回は停止通知を送信してロックファイルを作成し、その後は一定時間（6時間）ごとにリマインダー通知を送信する。
-* 根拠: `check_health` (行番号: 178〜219 / 抜粋: "def check_health() -> None:")
+* 根拠: `check_health` (行番号: 180〜221 / 抜粋: "def check_health() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_health() -> None:` (行番号: 178 / 抜粋: "def check_health() -> None:")
+* 根拠: `def check_health() -> None:` (行番号: 180 / 抜粋: "def check_health() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -332,6 +332,7 @@ flowchart TD
 * 過去のスロットリング履歴（`history_issues`）は、Raspberry Piの仕様上ブート（再起動）まで自動的にクリアされないビットマスクである。そのため`check_throttling_status`が10分間隔などで繰り返し呼び出されると、対策前は毎回`logger.warning`が発生してDiscord通知がノイズになっていた。この対策として`_is_new_history`が`THROTTLE_STATE_FILE`（`watchdog_throttle_history.state`、`config.BASE_DIR`直下）に「ブートID + これまでに通知済みのビット（16進数）」を保存し、同一ブート内で既に通知済みのビットのみであれば`logger.debug`に留めて再通知しない仕組みになっている。
 * **[修正済み] `THROTTLE_STATE_FILE`への同時アクセス（Issue #449）**: 以前は読み書きにファイルロックが掛かっておらず、複数プロセスからの同時実行に対する排他制御が行われていなかった（通常はcron等から`server_watchdog.py`が逐次起動される想定のため実害は小さいと考えられるが、並行実行環境では通知済みビットの読み書きが競合(lost update)する可能性があった）。現在は`_is_new_history`が状態ファイルを`r+`で一度だけ開き、読み取りから書き込みまでの区間全体を`fcntl.flock`(`fcntl.LOCK_EX`)で保護し、`finally`節で確実に解放するため、プロセス境界をまたいだ排他制御が行われる。
 * `_get_boot_id`が`/proc/sys/kernel/random/boot_id`の読み取りに失敗した場合は固定文字列`"unknown"`を返す。この場合、実際のブートが変わっても`THROTTLE_STATE_FILE`側の`boot_id`が常に`"unknown"`で一致し続ける可能性があり、本来ブート跨ぎで再通知されるべき履歴ビットが再通知されないまま扱われるケースが理論上ありうる（Raspberry Pi環境では通常`/proc/sys/kernel/random/boot_id`は利用可能なため、実運用上の発生可能性は不明）。
+* **（Issue #651 で変更）** `systemctl is-active` / `pgrep` / `vcgencmd get_throttled` の `subprocess.run` に `timeout=SUBPROCESS_TIMEOUT_SEC`(30秒)を付与した。応答しないコマンドで監視ループ(scheduler の 10 分周期)を止めないため。
 
 ## 9. 不明事項一覧
 

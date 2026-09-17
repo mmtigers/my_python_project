@@ -17,6 +17,8 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #660 で変更）** 効果音のパスは `import.meta.env.BASE_URL` から組み立てる(`soundUrl()`)。以前は `/quest/...` を直書きしており `vite.config.ts` の `base` と二重管理で、`base` を変えると音だけ 404 になる状態だった。あわせて `vite.config.ts` の `workbox.globPatterns` に `mp3` を追加し、効果音6ファイルがプリキャッシュ(17→28エントリ)に含まれるようにした。
+
 * Reactコンポーネント内で効果音を再生するためのカスタムフック `useSound` を提供する。
 * 音声ファイルのパスを一元管理し、`HTMLAudioElement` のインスタンスをキャッシュすることで、連続再生やリソースの効率的な利用を行う。
 

@@ -173,3 +173,78 @@ def test_handles_parallel_citations_elementwise(fake_repo):
     assert len(findings) == 2
     checker.scan(fix=True)
     assert "行番号: 5, 9" in path.read_text(encoding="utf-8")
+
+
+def test_resolves_parent_prefixed_spec_name(fake_repo):
+    """Issue #655: `<親dir>_<stem>.md` の曖昧性解消規約でも対応ソースを解決できること。
+
+    以前は素の stem でしか索引していなかったため、`views/dashboard/common.py` に対応する
+    `dashboard_common.md` は「候補が1件でない」として無言でスキップされ、
+    シグネチャがずれても CI は緑のままだった。
+    """
+    deep_dir = fake_repo / "MY_HOME_SYSTEM" / "views" / "dashboard"
+    deep_dir.mkdir(parents=True)
+    (deep_dir / "widget.py").write_text(
+        textwrap.dedent(
+            '''\
+            """ウィジェット描画。"""
+
+
+            def render_card(title, value):
+                return title + value
+            '''
+        ),
+        encoding="utf-8",
+    )
+    spec = fake_repo / "docs" / "specifications" / "MY_HOME_SYSTEM" / "dashboard_widget.md"
+    spec.write_text('* 根拠: 定義 (行番号: 99 / 抜粋: "def render_card(title, value):")\n', encoding="utf-8")
+
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert len(findings) == 1
+    assert findings[0].actual == 4
+
+
+def test_flat_spec_prefers_shallow_source_when_disambiguated_one_exists(fake_repo):
+    """同名 stem が2件あっても、深い方が `<親dir>_<stem>.md` を持つならフラット名は浅い方を指すこと。"""
+    (fake_repo / "MY_HOME_SYSTEM" / "helper.py").write_text(
+        "def shallow_only():\n    return 1\n", encoding="utf-8"
+    )
+    deep_dir = fake_repo / "MY_HOME_SYSTEM" / "views" / "dashboard"
+    deep_dir.mkdir(parents=True)
+    (deep_dir / "helper.py").write_text("def deep_only():\n    return 2\n", encoding="utf-8")
+    specs = fake_repo / "docs" / "specifications" / "MY_HOME_SYSTEM"
+    (specs / "dashboard_helper.md").write_text(
+        '* 根拠: 定義 (行番号: 1 / 抜粋: "def deep_only():")\n', encoding="utf-8"
+    )
+    (specs / "helper.md").write_text(
+        '* 根拠: 定義 (行番号: 1 / 抜粋: "def shallow_only():")\n', encoding="utf-8"
+    )
+
+    findings, checked = checker.scan(fix=False)
+    assert checked == 2
+    assert findings == []
+
+
+def test_skipped_specs_are_reported_not_silently_dropped(fake_repo):
+    """対応ソースを一意に決められない仕様書は、無言で捨てずに呼び出し元へ伝えること。"""
+    spec = fake_repo / "docs" / "specifications" / "MY_HOME_SYSTEM" / "ghost.md"
+    spec.write_text('* 根拠: 定義 (行番号: 1 / 抜粋: "def gone():")\n', encoding="utf-8")
+
+    skipped = []
+    checker.scan(fix=False, skipped=skipped)
+    assert [p.name for p, _ in skipped] == ["ghost.md"]
+
+
+def test_report_counts_non_definition_citations(fake_repo):
+    """--report は def/class 以外の引用を「抜粋の先頭行が引用行±1にあるか」で粗く数えること。"""
+    _write_spec(
+        fake_repo,
+        '* 根拠: 実装 (行番号: 9 / 抜粋: "return \\"bye \\" + name")\n'
+        '* 根拠: 実装 (行番号: 1 / 抜粋: "return \\"bye \\" + name")\n',
+    )
+    per_spec, total_bad, total_checked = checker.report_non_definition_citations()
+    assert total_checked == 2
+    # 9行目は一致(farewell の return は10行目なので ±1 の窓に入る)、1行目は不一致。
+    assert total_bad == 1
+    assert per_spec["MY_HOME_SYSTEM/sample.md"] == (1, 2)

@@ -17,6 +17,8 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #659 で変更）** `getInventory()` は応答を `inventoryResponseSchema.parse()` で検証してから返す(以前は `get<InventoryResponse>` の型引数だけで、実行時には無検証だった)。
+
 * 本ファイルは、アプリケーションからバックエンドAPIへ通信するためのHTTPクライアント（`ApiClient` クラスおよびそのインスタンス `apiClient`）を定義し、提供する責務を持つ。
 * 環境に応じたベースURLの解決、リクエストヘッダの共通設定（`application/json`）、JSONデータの送受信、およびHTTPエラー時の共通エラーハンドリング（例外送出）をカプセル化している。
 * `Inventory`（インベントリ）関連の各APIエンドポイントを呼び出すためのラッパーメソッド群を定義している。

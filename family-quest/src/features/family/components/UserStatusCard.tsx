@@ -27,7 +27,7 @@ const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) 
                         未設定時の絵文字デフォルト値の場合がある。パス以外を<img src>に渡すと
                         壊れた画像アイコンになるため、Header.tsxと同様にパス形式かどうかを判定する */}
                     {isSameOriginAvatarPath(user.avatar) ? (
-                        <img src={user.avatar} alt="avatar" className="w-full h-full object-cover" />
+                        <img src={user.avatar} alt={`${user.name} のアバター`} className="w-full h-full object-cover" />
                     ) : (
                         user.avatar || '🙂'
                     )}

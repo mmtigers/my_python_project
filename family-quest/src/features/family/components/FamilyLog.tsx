@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { VIEW_SWIPE_THRESHOLD_PX } from '../../../lib/uiConstants';
 import { motion } from 'framer-motion';
 import { History, Clock } from 'lucide-react';
 import { ChronicleItem } from '@/hooks/useGameData';
@@ -116,9 +117,9 @@ const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users, initialUserId }
         // スマホ幅でのみスワイプ判定を行う(App.tsxのlayoutMode==='portrait'限定のスワイプと同じ考え方)。
         if (typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches) return;
         if (selectedIndex === -1) return;
-        if (offsetX < -60 && selectedIndex < users.length - 1) {
+        if (offsetX < -VIEW_SWIPE_THRESHOLD_PX && selectedIndex < users.length - 1) {
             setSelectedUserId(users[selectedIndex + 1].user_id);
-        } else if (offsetX > 60 && selectedIndex > 0) {
+        } else if (offsetX > VIEW_SWIPE_THRESHOLD_PX && selectedIndex > 0) {
             setSelectedUserId(users[selectedIndex - 1].user_id);
         }
     };

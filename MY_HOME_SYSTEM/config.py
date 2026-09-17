@@ -195,8 +195,13 @@ class DeviceConfig(BaseModel):
 # 再有効化する場合はTrueにした上で、OS側の `sudo systemctl enable --now bluetooth`
 # と起動時自動接続(tools/connect_speaker.sh の定期実行)の整備が必要。
 ENABLE_BLUETOOTH: bool = False
+# Issue #665: core/logger.setup_logging のログレベル。以前は INFO 固定で DEBUG 化の手段が無かった。
+# DEBUG / INFO / WARNING / ERROR / CRITICAL(不正値は INFO にフォールバック)。
+LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
 # Anker SoundCore 2 (tools/connect_speaker.sh, tools/keep_alive_anker.sh と同一デバイス)
-SPEAKER_BLUETOOTH_MAC: str = os.getenv("SPEAKER_BLUETOOTH_MAC", "F4:4E:FC:B6:65:D4")
+# Issue #663: 以前は実機の MAC アドレスがデフォルト値としてコミットされていた。個人環境値は .env に置く。
+# 未設定なら空文字(post_boot_health_check はスピーカーチェックをスキップする)。
+SPEAKER_BLUETOOTH_MAC: str = os.getenv("SPEAKER_BLUETOOTH_MAC", "")
 
 # ==========================================
 # 2. 認証・API設定 (Secrets)
@@ -234,6 +239,15 @@ AUTHORIZED_LINE_USER_IDS: List[str] = [
 # 任意で共有シークレットをクエリパラメータ(?token=...)で要求できるようにする。
 # 未設定の場合は従来通り検証なし（後方互換）。
 SWITCHBOT_WEBHOOK_TOKEN: Optional[str] = os.getenv("SWITCHBOT_WEBHOOK_TOKEN")
+# Issue #648: トークン未設定時の挙動。/webhook/switchbot は ip_restriction_middleware の
+# 対象外かつエッジの Cloudflare Access もバイパスする設計(#321/#517)のため、トークンが
+# 唯一の防御になる。未設定のまま受け付けると第三者が任意の deviceMac を POST して
+# DB書き込み・LINE/Discord通知・SwitchBot API呼び出しを誘発できるため、既定では 503 で
+# 拒否する(フェイルクローズ)。実機のトークン設定が済むまでの移行用に、明示的な
+# オプトインでのみ従来どおり無検証で受け付ける。
+ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK: bool = (
+    os.getenv("ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK", "false").strip().lower() == "true"
+)
 # switchbot_webhook_fix.py が SwitchBot/LINE の Webhook URL を再登録する際の公開ベースURL
 # (例: https://home.example.com)。#405: 以前はスクリプト側で os.environ.get() を直接読んでいた。
 WEBHOOK_BASE_URL: Optional[str] = os.getenv("WEBHOOK_BASE_URL")
@@ -296,7 +310,11 @@ SQLITE_TABLE_SHOPPING: str = "shopping_records"
 SQLITE_TABLE_NAS: str = "nas_records"
 SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"
 
-BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", ".env", "devices.json"]
+# Issue #649: 以前は ".env" も含めていたが、全シークレット(SwitchBot/LINE/Discord/Gemini)を
+# NAS の db_backups/ へ平文でコピーすることになり、NAS 共有の閲覧権限がそのままシークレットの
+# 閲覧権限になっていた。.env はリポジトリ外の秘匿情報として別管理(パスワードマネージャ等)とし、
+# バックアップ対象から外す。復元手順は docs/runbooks/db_restore.md を参照。
+BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", "devices.json"]
 
 # デフォルトアセット
 DEFAULT_SOUND_SOURCE: str = os.path.join(BASE_DIR, "defaults", "sounds")
@@ -354,13 +372,18 @@ _frontend_origin = "{0.scheme}://{0.netloc}".format(urlparse(FRONTEND_URL))
 # オリジンリストがあり、実際に使われるのは unified_server.py 側のハードコード
 # だけだったため、config.py側やALLOW_ALL_ORIGINS環境変数を変更しても
 # CORS設定に一切反映されない「死に設定」になっていた。ここに一本化する。
+# Issue #663: 以前は公開ドメイン(Cloudflare Tunnel)と LAN 内の開発サーバーのオリジンがここに直書き
+# されていた。個人環境値は .env の CORS_EXTRA_ORIGINS(カンマ区切り)で追加する。
+# 例: CORS_EXTRA_ORIGINS=https://home.example.com,http://192.168.1.200:5173
+CORS_EXTRA_ORIGINS: List[str] = [
+    o.strip() for o in os.getenv("CORS_EXTRA_ORIGINS", "").split(",") if o.strip()
+]
 CORS_ORIGINS: List[str] = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:8501",   # Streamlitダッシュボード
-    "http://192.168.1.200:5173",  # LAN内フロントエンド開発サーバー
-    "https://m-mhts.com",      # Cloudflare Tunnel公開ドメイン
     _frontend_origin,
+    *CORS_EXTRA_ORIGINS,
 ]
 ALLOW_ALL_ORIGINS: bool = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "true"
 if ALLOW_ALL_ORIGINS:

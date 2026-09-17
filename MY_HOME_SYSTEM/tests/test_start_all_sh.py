@@ -191,3 +191,55 @@ class TestStartAllShGitHooksRegistration:
             content = f.read()
         assert content.startswith("#!"), "shebang が無い"
         assert "deploy.sh" in content and "--if-stale" in content
+
+
+class TestStartAllShPrepareMode:
+    """Issue #646: systemd(home_system.service, Type=simple)の ExecStartPre から呼ばれる
+    `--prepare` モード。Phase 0〜3(前処理)だけを行い、サーバー本体(unified_server.py)と
+    ダッシュボード(streamlit)は起動しない(前者は systemd の ExecStart、後者は
+    home_dashboard.service が起動する)。"""
+
+    def test_prepare_flag_is_recognized(self):
+        script = _read_script()
+        assert 'if [ "${1:-}" = "--prepare" ]; then' in script
+        assert "PREPARE_ONLY=true" in script
+
+    def test_prepare_mode_exits_after_phase3_before_server_launch(self):
+        """--prepare の exit 0 は Phase 3(Webhook修正)の後、Phase 4(サーバー起動)の前にあること。"""
+        script = _read_script()
+        webhook_idx = script.index("switchbot_webhook_fix.py")
+        prepare_exit_idx = script.index("Preparation finished (--prepare)")
+        server_launch_idx = script.index("Start Home System Server")
+        assert webhook_idx < prepare_exit_idx < server_launch_idx
+        exit_block = script[prepare_exit_idx: server_launch_idx]
+        assert "exit 0" in exit_block
+
+    def test_prepare_mode_excludes_streamlit_from_cleanup_targets(self):
+        """ダッシュボードは home_dashboard.service が管理するため、--prepare では
+        streamlit を pkill 対象から外す(systemd 側が予期しない停止と扱うのを避ける)。
+        それ以外(unified_server/子プロセス/ffmpeg)は引き続き掃除する。"""
+        script = _read_script()
+        filter_block = script[script.index('if [ "$PREPARE_ONLY" = true ]; then'): script.index("# まずは優しく停止")]
+        assert '"$target" != "streamlit run"' in filter_block
+        assert 'CLEANUP_TARGETS=("${filtered_targets[@]}")' in filter_block
+
+    def test_systemd_unit_uses_prepare_mode_and_restarts_on_failure(self):
+        """home_system.service は --prepare を ExecStartPre に、unified_server.py を ExecStart に置き、
+        Type=simple + Restart=on-failure で自動復旧すること(oneshot + nohup/disown からの移行)。"""
+        unit_path = os.path.join(os.path.dirname(__file__), "..", "deploy", "systemd", "home_system.service")
+        with open(unit_path, "r", encoding="utf-8") as f:
+            unit = [line.strip() for line in f if line.strip() and not line.lstrip().startswith("#")]
+        assert "Type=simple" in unit
+        assert "Restart=on-failure" in unit
+        assert any(line.startswith("ExecStartPre=") and line.endswith("start_all.sh --prepare") for line in unit)
+        assert any(line.startswith("ExecStart=") and line.endswith("unified_server.py") for line in unit)
+        assert not any(line.startswith("RemainAfterExit") for line in unit)
+
+    def test_dashboard_has_its_own_systemd_unit_bound_to_localhost(self):
+        unit_path = os.path.join(os.path.dirname(__file__), "..", "deploy", "systemd", "home_dashboard.service")
+        assert os.path.isfile(unit_path), "home_dashboard.service がリポジトリに無い"
+        with open(unit_path, "r", encoding="utf-8") as f:
+            unit = f.read()
+        assert "streamlit run dashboard.py" in unit
+        assert "--server.address 127.0.0.1" in unit
+        assert "Restart=on-failure" in unit

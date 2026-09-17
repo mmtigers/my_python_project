@@ -61,9 +61,9 @@ MY_HOME_SYSTEM/work/
 
 # MY_HOME_SYSTEM: ローカル専用の設定・認証情報(いずれも *.example がテンプレート)
 MY_HOME_SYSTEM/devices.json
-MY_HOME_SYSTEM/family_events.json
-MY_HOME_SYSTEM/google_photos_credentials.json
-MY_HOME_SYSTEM/google_photos_token.json
+# Issue #664: family_events.json は Issue #488 で読み込み処理ごと削除済み、
+# google_photos_* も Issue #488 の Google Photos 連携削除で参照が無くなったため、
+# 対応する ignore 行を削除した(実ファイルを生成するコードはもう存在しない)。
 MY_HOME_SYSTEM/switchbot_device_states.json
 *.local.json
 # MY_HOME_SYSTEM: 実行時に生成される個人データの保存先

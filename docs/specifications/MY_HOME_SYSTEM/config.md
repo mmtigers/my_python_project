@@ -3,6 +3,7 @@
 | 項目 | 内容 |
 | --- | --- |
 | 対象ファイル | `config.py` |
+| 解析基準コミット | Issue #657 対応時点(2026-09-16)の master + 本PR |
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
@@ -25,11 +26,11 @@
 * 根拠: [環境変数読み込み処理] (行番号: 204 / 抜粋: `SWITCHBOT_API_TOKEN: Optional[str] = os.getenv("SWITCHBOT_API_TOKEN")`)
 
 
-* BTスピーカー運用の有効/無効を切り替えるフラグ`ENABLE_BLUETOOTH`（既定`False`）を定義する。`False`の間は`post_boot_health_check.py`のSpeakerチェックがBluetooth確認をスキップしサウンドカード確認へフォールバックする。あわせて、Anker SoundCore 2（`tools/connect_speaker.sh`, `tools/keep_alive_anker.sh`と同一デバイス）のMACアドレス`SPEAKER_BLUETOOTH_MAC`（既定値は環境変数未設定時`"F4:4E:FC:B6:65:D4"`）も同じ「1. 環境・機能フラグ設定」セクションで定義されている。Issue #488で、このセクションにあった未参照の`ENV`定数は削除された（現在このセクションは`ENABLE_BLUETOOTH`/`SPEAKER_BLUETOOTH_MAC`の2定数のみ）。
+* BTスピーカー運用の有効/無効を切り替えるフラグ`ENABLE_BLUETOOTH`（既定`False`）を定義する。`False`の間は`post_boot_health_check.py`のSpeakerチェックがBluetooth確認をスキップしサウンドカード確認へフォールバックする。あわせて、Anker SoundCore 2（`tools/connect_speaker.sh`, `tools/keep_alive_anker.sh`と同一デバイス）のMACアドレス`SPEAKER_BLUETOOTH_MAC`（環境変数`SPEAKER_BLUETOOTH_MAC`から読み、未設定時は空文字。Issue #663で実機のMACアドレスがデフォルト値としてコミットされていたのを除去し、個人環境値は`.env`に置く方針にした。空文字の場合`post_boot_health_check.py`の`resolve_target_bluetooth_mac`は`None`を返しBTチェックをスキップする）も同じ「1. 環境・機能フラグ設定」セクションで定義されている。同セクションには Issue #665 で`LOG_LEVEL`（環境変数`LOG_LEVEL`、既定`"INFO"`、大文字化・前後空白除去済み。`core/logger.setup_logging`がロガーのレベルに使い、不正値はlogger側で`INFO`にフォールバックする）も追加された。Issue #488で、このセクションにあった未参照の`ENV`定数は削除された（現在このセクションは`ENABLE_BLUETOOTH`/`LOG_LEVEL`/`SPEAKER_BLUETOOTH_MAC`の3定数）。
 * 根拠: [ENABLE_BLUETOOTH/SPEAKER_BLUETOOTH_MAC定義とコメント] (行番号: 190〜199 / 抜粋: "# ==========================================\n# 1. 環境・機能フラグ設定\n# ==========================================\n# BTスピーカー運用の有効/無効。Falseの間はpost_boot_health_checkのSpeakerチェックが\n# BT確認をスキップしサウンドカード確認にフォールバックする。\n# 再有効化する場合はTrueにした上で、OS側の `sudo systemctl enable --now bluetooth`\n# と起動時自動接続(tools/connect_speaker.sh の定期実行)の整備が必要。\nENABLE_BLUETOOTH: bool = False\n# Anker SoundCore 2 (tools/connect_speaker.sh, tools/keep_alive_anker.sh と同一デバイス)\nSPEAKER_BLUETOOTH_MAC: str = os.getenv(\"SPEAKER_BLUETOOTH_MAC\", \"F4:4E:FC:B6:65:D4\")")
 
 
-* SwitchBot Webhookの共有シークレット検証用トークン(`SWITCHBOT_WEBHOOK_TOKEN`)を環境変数から読み込む(`routers/webhook_router.py`が参照。未設定時は検証をスキップする後方互換設計)。
+* SwitchBot Webhookの共有シークレット検証用トークン(`SWITCHBOT_WEBHOOK_TOKEN`)を環境変数から読み込む(`routers/webhook_router.py`が参照)。**（Issue #648）** 未設定時は同ルーターが HTTP 503 で拒否する(フェイルクローズ)。移行用のオプトイン `ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK`(環境変数、既定 `false`)を `true` にした場合のみ従来どおり無検証で受け付ける。
 * 根拠: [環境変数読み込み処理] (行番号: 224 / 抜粋: `SWITCHBOT_WEBHOOK_TOKEN: Optional[str] = os.getenv("SWITCHBOT_WEBHOOK_TOKEN")`)
 
 
@@ -69,7 +70,7 @@
 * 根拠: [保持期間設定セクション] (行番号: 389 / 抜粋: `RECORDING_RETENTION_DAYS: int = _get_int_env(`)
 
 
-* CORS許可オリジン(`CORS_ORIGINS`)を定義する。以前は`unified_server.py`側にも別のハードコードされたオリジンリストが存在し、実際に使われるのはそちらだけで本ファイルの値は参照されない「死に設定」だったが、Streamlitダッシュボード・LAN内開発サーバー・Cloudflare Tunnel公開ドメインを含む形でこちらに一本化された（`unified_server.py`側は本リストを直接参照するよう変更済み）。`FRONTEND_URL`（既定値はパス付きの`"http://192.168.1.200:8000/quest"`）を`CORS_ORIGINS`へ追加する際は、`urlparse`で`scheme://netloc`部分のみを取り出した`_frontend_origin`を使う（Issue #112の修正。ブラウザが送信する`Origin`ヘッダーはscheme://host[:port]のみでパスを含まないため、Starletteの`CORSMiddleware`の完全一致比較ではパス付きの値が永久に一致しない「死にエントリ」になっていた）。`FRONTEND_URL`自体は`post_boot_health_check.py`等が実際にHTTPリクエストを送る完全なURLとして使われているため、パスを保持したまま変更していない。
+* CORS許可オリジン(`CORS_ORIGINS`)を定義する。以前は`unified_server.py`側にも別のハードコードされたオリジンリストが存在し、実際に使われるのはそちらだけで本ファイルの値は参照されない「死に設定」だったが、こちらに一本化された（`unified_server.py`側は本リストを直接参照するよう変更済み）。リポジトリにハードコードされるのは`localhost`/`127.0.0.1`のVite開発サーバー（5173）とStreamlitダッシュボード（8501）、および`_frontend_origin`のみで、LAN内開発サーバーのIPやCloudflare Tunnel公開ドメインのような個人環境値は環境変数`CORS_EXTRA_ORIGINS`（カンマ区切り、前後空白除去、空要素は無視）から`CORS_EXTRA_ORIGINS`リストとして読み込み`CORS_ORIGINS`末尾に展開する（Issue #663。以前は`http://192.168.1.200:5173`と`https://m-mhts.com`が直書きされていた）。`FRONTEND_URL`（既定値はパス付きの`"http://192.168.1.200:8000/quest"`）を`CORS_ORIGINS`へ追加する際は、`urlparse`で`scheme://netloc`部分のみを取り出した`_frontend_origin`を使う（Issue #112の修正。ブラウザが送信する`Origin`ヘッダーはscheme://host[:port]のみでパスを含まないため、Starletteの`CORSMiddleware`の完全一致比較ではパス付きの値が永久に一致しない「死にエントリ」になっていた）。`FRONTEND_URL`自体は`post_boot_health_check.py`等が実際にHTTPリクエストを送る完全なURLとして使われているため、パスを保持したまま変更していない。
 * 根拠: [CORS許可オリジン定義] (行番号: 337〜344 / 抜粋: `CORS_ORIGINS: List[str] = [`)
 * 根拠: [_frontend_originの算出(Issue #112)] (行番号: 326, 332 / 抜粋: `FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")`, `_frontend_origin = "{0.scheme}://{0.netloc}".format(urlparse(FRONTEND_URL))`)
 
@@ -137,6 +138,31 @@ Issue #488で、未実装のタイムラプススケジュール機能(`TIMELAPS
 Issue #488で、`family_events.json`（家族の記念日・イベント設定`IMPORTANT_DATES`用）の読み込み処理は本ファイルから完全に削除されたため、外部依存としては存在しなくなった。
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
+
+### 未記載だったモジュールレベル定数（Issue #657 で追記）
+
+本仕様書に記載が漏れていた定数。いずれも `config.py` のモジュールレベルで定義され、各所から直接参照される。
+
+| 定数 | 値 | 用途 |
+| --- | --- | --- |
+| `SQLITE_TABLE_BICYCLE` | `"bicycle_parking_records"` | 駐輪場記録テーブル名 |
+| `BACKUP_FILES` | `[SQLITE_DB_PATH, "config.py", "devices.json"]` | `services/backup_service.py` が NAS へ退避する対象。**Issue #649 で `.env` を除外**(NAS 共有の閲覧権限がそのままシークレットの閲覧権限になるため) |
+| `DEFAULT_SOUND_SOURCE` | `{BASE_DIR}/defaults/sounds` | 効果音の配布元(NAS 側 `SOUND_DIR` へ同期する元) |
+| `NAS_CHECK_TIMEOUT` | `5` | NAS 疎通確認のタイムアウト秒 |
+| `NVR_RECORD_DIR` | `{NAS_MOUNT_POINT}/home_system/nvr_recordings` | NVR 録画の保存先(`camera_monitor` のスナップショット抽出元) |
+| `TIMELAPSE_FONT_FILE` | `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc` | タイムラプスの焼き込み文字フォント |
+| `DB_BACKUPS_DIR` | `{NAS_PROJECT_ROOT}/db_backups` | DBバックアップの出力先 |
+| `SOUND_PLAYER_ARGS` | `["-o", "pulse"]` | `core/sound_manager.py` が再生コマンドへ渡す追加引数 |
+| `MEMORY_ALERT_LAST_NOTIFY_FILE` | `{FALLBACK_ROOT}/last_memory_alert.txt` | `memory_monitor` の通知クールダウン用状態ファイル |
+
+* 根拠: `SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"` (行番号: 311)、`BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", "devices.json"]` (行番号: 317)、`DEFAULT_SOUND_SOURCE: str = os.path.join(BASE_DIR, "defaults", "sounds")` (行番号: 320)、`NAS_CHECK_TIMEOUT: int = 5` (行番号: 354)、`NVR_RECORD_DIR` (行番号: 409)、`TIMELAPSE_FONT_FILE` (行番号: 431)、`DB_BACKUPS_DIR` (行番号: 443)、`SOUND_PLAYER_ARGS` (行番号: 451)、`MEMORY_ALERT_LAST_NOTIFY_FILE` (行番号: 500)
+
+### `_resolve_assets_dir` / `__getattr__` / `prewarm_nas_paths`（Issue #330 の遅延解決、#657 で追記）
+
+* **役割**: NAS 依存パス定数の遅延解決(PEP 562)。`_resolve_assets_dir()` が `ensure_safe_path_with_backoff` で `ASSETS_DIR` を検証・解決し、`_ASSETS_SUBDIRS_TO_CREATE` の各サブディレクトリを作る。モジュールの `__getattr__(name)` は `ASSETS_DIR` と `_ASSETS_DERIVED_PATHS` の派生パス(`UPLOAD_DIR`・`SOUND_DIR` 等)を初回アクセス時にだけ解決し、結果を `globals()` に書き込むため以降は通常の属性解決になる(=キャッシュ。テストは `monkeypatch.setattr`/`delattr` で上書き・再解決できる)。`prewarm_nas_paths()` は `unified_server.py` の `lifespan` から呼ばれ、遅延化前と同じく起動時点で NAS の検証・フォールバック判定を済ませる。
+* **戻り値/レスポンス**: `_resolve_assets_dir` / `__getattr__` は `str`、`prewarm_nas_paths` は `None`。未知の属性名では `__getattr__` が `AttributeError` を送出する。
+* **副作用**: NAS 上のディレクトリ作成、`globals()` への書き込み、失敗時の warning ログ(例外は送出せずローカルへフォールバック)。
+* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 559)、`def __getattr__(name: str) -> str:` (行番号: 573)、`def prewarm_nas_paths() -> None:` (行番号: 593)
 
 ### `verify_and_initialize_storage`
 

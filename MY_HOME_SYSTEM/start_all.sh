@@ -3,6 +3,22 @@
 # ==========================================
 # MY_HOME_SYSTEM 起動スクリプト (Systemd-Hybrid Fix)
 # ==========================================
+# 使い方:
+#   ./start_all.sh            Phase 0〜4 をすべて実行する(旧プロセス掃除 → 前処理 →
+#                             unified_server.py / ダッシュボードを nohup でバックグラウンド起動)。
+#                             手動運用・開発用の経路。
+#   ./start_all.sh --prepare  Phase 0〜3(前処理)だけを実行し、サーバー本体は起動しない。
+#                             deploy/systemd/home_system.service の ExecStartPre から呼ばれる経路で、
+#                             unified_server.py 本体は systemd が ExecStart でフォアグラウンド起動する
+#                             (Type=simple + Restart=on-failure。クラッシュ時に systemd が自動復旧する。
+#                             Issue #646: 以前は oneshot + nohup/disown でサーバーが systemd の管理外に
+#                             あり、落ちても通知のみで人手復旧だった)。
+#                             ダッシュボードは home_dashboard.service が別ユニットで管理するため、
+#                             この経路では起動も掃除もしない。
+PREPARE_ONLY=false
+if [ "${1:-}" = "--prepare" ]; then
+    PREPARE_ONLY=true
+fi
 
 # ★修正1: 親ディレクトリ(develop)も含めないと "No module named 'MY_HOME_SYSTEM'" エラーになる
 export PYTHONPATH="/home/masahiro/develop:/home/masahiro/develop/MY_HOME_SYSTEM"
@@ -46,6 +62,20 @@ CLEANUP_TARGETS=(
   "python.*monitors/(switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor)\.py"
   "ffmpeg.*hls_streams"
 )
+
+if [ "$PREPARE_ONLY" = true ]; then
+  # systemd 経路(--prepare)では、ダッシュボード(streamlit)は home_dashboard.service が
+  # 別ユニットで管理している。ここで SIGTERM すると systemd 側が「予期しない停止」と扱うため
+  # 掃除対象から外す。unified_server.py・孤児化しうる子プロセス・ffmpeg は引き続き掃除する
+  # (旧来の nohup 起動が残っている場合の回収、および前世代の孤児の掃除)。
+  filtered_targets=()
+  for target in "${CLEANUP_TARGETS[@]}"; do
+    if [ "$target" != "streamlit run" ]; then
+      filtered_targets+=("$target")
+    fi
+  done
+  CLEANUP_TARGETS=("${filtered_targets[@]}")
+fi
 
 # まずは優しく停止 (SIGTERM)
 for target in "${CLEANUP_TARGETS[@]}"; do
@@ -152,7 +182,8 @@ fi
 # post-merge フックが発火せず、dist/ が旧世代のままサーバーだけ新コードで
 # 起動してAPIスキーマ不整合を起こすことがある(2026-09-01の障害)。
 # サーバー起動前に必ず冪等チェックを通し、ビルド漏れをここで回収する。
-# ビルド失敗でもサーバー起動は続行する(旧distを配信し続ける方がマシなため)。
+# ビルド失敗でもサーバー起動は続行する。deploy.sh はビルドを dist.next/ で行い成功時だけ
+# dist/ と入れ替える(Issue #650)ため、失敗時・ビルド中も旧 dist/ がそのまま配信され続ける。
 echo "--- Ensure family-quest dist is fresh ---"
 if ! bash "$QUEST_DIR/deploy.sh" --if-stale > logs/quest_deploy.log 2>&1; then
     echo "⚠️ family-quest build failed. Serving existing dist/. See logs/quest_deploy.log"
@@ -162,7 +193,14 @@ fi
 echo "--- Check & Fix Webhooks (Cloudflare Tunnel) ---"
 $PYTHON_EXEC switchbot_webhook_fix.py > logs/webhook_fix.log 2>&1
 
-# --- Phase 4: サーバー起動 (ここだけにする) ---
+if [ "$PREPARE_ONLY" = true ]; then
+  # systemd 経路: サーバー本体(unified_server.py)は home_system.service の ExecStart が、
+  # ダッシュボードは home_dashboard.service がそれぞれフォアグラウンドで起動する。
+  echo "✅ Preparation finished (--prepare). unified_server.py は systemd (ExecStart) が起動します。"
+  exit 0
+fi
+
+# --- Phase 4: サーバー起動 (手動運用・開発用の経路。実機の systemd 経路では上の --prepare で終了する) ---
 echo "--- Start Home System Server ---"
 # unified_server.py が内部で scheduler_boot.py を起動します
 # ★修正: '&'のみのバックグラウンド化はSSHログアウト時にシェルからSIGHUPが

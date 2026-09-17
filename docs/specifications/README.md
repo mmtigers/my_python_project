@@ -7,8 +7,8 @@
 | ディレクトリ / ファイル | 内容 |
 | --- | --- |
 | [全体設計書.md](./全体設計書.md) | 3サブシステムの役割・データフロー・システム間連携をまとめた全体アーキテクチャ概要。個別ソースファイルには対応しない例外ドキュメント。 |
-| [MY_HOME_SYSTEM/](./MY_HOME_SYSTEM/README.md) | IoT制御・環境監視・API統合ルーティングを担うFastAPIバックエンド(76件、廃止済み3件は同ディレクトリのREADME末尾に一覧のみ記録)。 |
-| [family-quest/](./family-quest/README.md) | クエスト管理をRPG風UIで提供するReact/TypeScriptフロントエンド(59件、`src/`構造をミラー。廃止済み11件は同ディレクトリのREADME末尾に一覧のみ記録)。 |
+| [MY_HOME_SYSTEM/](./MY_HOME_SYSTEM/README.md) | IoT制御・環境監視・API統合ルーティングを担うFastAPIバックエンド(79件、廃止済み3件は同ディレクトリのREADME末尾に一覧のみ記録)。 |
+| [family-quest/](./family-quest/README.md) | クエスト管理をRPG風UIで提供するReact/TypeScriptフロントエンド(60件、`src/`構造をミラー。廃止済み11件は同ディレクトリのREADME末尾に一覧のみ記録)。 |
 | [DDD/](./DDD/README.md) | 動画・画像等のデータ自動収集バッチ処理群(6件)。 |
 
 ## 仕様書の規約
@@ -25,6 +25,22 @@
   抜粋が `def X(` / `class X` で始まる引用について、`行番号:` が実ソースのその定義の開始行と一致するかを見ます。
   ソース側の行がずれて失敗した場合は `python3 .github/scripts/check_spec_line_refs.py --fix` で一括追従できます(定義名が変わった・削除された場合は `--fix` では直せないため、仕様書の記述自体を直してください)。
   `check_spec_drift.py` はコミット日時の前後関係しか見ないため、この種のズレは検知できません(死角の補完という位置づけ)。
+
+#### チェッカーが保証する範囲(Issue #655)
+
+`check_spec_line_refs.py` が**ブロッキングで保証する**のは、`MY_HOME_SYSTEM/**/*.py` と `DDD/**/*.py` に
+1対1対応する仕様書のうち、抜粋が `def X(` / `class X` で始まる引用の行番号だけです。次のものは保証しません。
+
+| 対象 | 状態 |
+| --- | --- |
+| 抜粋が `def`/`class` で始まる引用(Python) | **検証する**(不一致は CI 失敗。`--fix` で追従) |
+| 式・文・コメントなど、定義以外の抜粋 | 検証しない。`--report` で「抜粋の先頭行が引用行±1に実在するか」を粗く数えられる(**非ゲート**。表記ゆれによる偽陽性を含む) |
+| `.sh` / TypeScript(family-quest)の仕様書 | 行番号引用は検証しない(`--report` の対象にはなる) |
+| 記述内容そのものの正しさ(役割・副作用の説明) | 検証しない(`check_spec_drift.py` も含めて機械では見ない) |
+
+`<親dir>_<stem>.md` の曖昧性解消規約(例: `views/dashboard/common.py` → `dashboard_common.md`)も
+解決します(Issue #655 以前は解決できず、`dashboard_common.md`・`quest_*.md` など10件が無言で
+スキップされていました)。対応ソースを一意に決められない仕様書は `⚠️ 検証をスキップ` として表示されます。
 
 ### 解析基準コミット (Issue #287)
 

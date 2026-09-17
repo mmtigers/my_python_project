@@ -1,6 +1,6 @@
 # family-quest 仕様書一覧
 
-タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された59件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
+タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された60件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
 
 対応するソースファイル自体が削除済みの仕様書は、末尾の「廃止済み仕様書一覧」に記録のみ残しています(Issue #402 で仕様書ファイル自体は削除済み。新規の実装・参照の対象ではありません)。
 
@@ -110,6 +110,7 @@
 | [currentUserStorage.md](./src/lib/currentUserStorage.md) | 選択中ユーザーの`user_id`を`localStorage`へ読み書きするヘルパー(`loadSavedUserId`/`saveCurrentUserId`)。Issue #552で`App.tsx`から新規抽出。 |
 | [errorDetail.md](./src/lib/errorDetail.md) | `apiClient`がスローした例外から表示用文字列を取り出す`extractErrorDetail`と、`/api/quest/data`取得失敗（Zod検証失敗を含む）をバナー向けに要約する`describeGameDataError`を提供する。 |
 | [gameDataSchema.md](./src/lib/gameDataSchema.md) | `GET /api/quest/data`のレスポンスをランタイム検証するZodスキーマ`gameDataResponseSchema`と、購入APIレスポンス検証用の`purchaseResponseSchema`（Issue #444）を提供する。 |
+| [uiConstants.md](./src/lib/uiConstants.md) | 画面をまたいで共有する UI の閾値・間隔(スワイプ判定の移動量、インベントリのポーリング間隔)を1箇所に集約した定数モジュール。Issue #660 で App.tsx / FamilyLog.tsx / ApprovalList.tsx / InventoryList.tsx の直書きを寄せた。 |
 | [masterData.md](./src/lib/masterData.md) | サーバー接続エラー発生時のみ使用されるフォールバック用のダミーデータを定義・エクスポートする。 |
 | [outOfScopeReload.md](./src/lib/outOfScopeReload.md) | Service Workerのスコープ(`/quest/`)外のページ（`/camera`）向けに、`controllerchange`(Issue #362)の代わりとなる更新検知を提供する`isOutsideServiceWorkerScope`・`createUpdateChecker`を提供する（Issue #591）。 |
 | [pathSegments.md](./src/lib/pathSegments.md) | `routing.ts`の`isCameraRoute`と`outOfScopeReload.ts`の`isOutsideServiceWorkerScope`で重複していたパスセグメント分割ロジックを集約した共有ヘルパー`getPathSegments`を提供する（コードレビュー指摘対応、2026-09-10）。 |

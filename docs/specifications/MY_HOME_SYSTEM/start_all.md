@@ -6,7 +6,7 @@
 | 言語 | Bash (Shell Script) ※指定フォーマット外ですが実態に合わせて記載 |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `0e15b41` (+同一PR内のPhase 1.6追加変更) |
+| 解析基準コミット | `5111d08` (+同一PR内の Issue #646 `--prepare` モード追加) |
 
 ## 関連ドキュメント
 
@@ -17,7 +17,7 @@
 
 ## 2. ファイルの概要
 
-* システム全体において、`MY_HOME_SYSTEM`のクリーンアップ、初期設定、および関連するプロセス群の起動を統括するスクリプト。環境変数の設定、`CLEANUP_TARGETS`配列に列挙された既存プロセス群への段階的な終了処理（優しい停止→最大5秒待機→対象ごとの強制終了フォールバック）、NASのマウント確認（自動マウントのトリガーとExponential Backoffによるリトライ）、Python依存関係の鮮度チェック（`requirements.txt`のSHA256ハッシュ比較による冪等`pip install`、Issue #483）、gitフックの登録（リポジトリ管理の`deploy/git-hooks/`を`core.hooksPath`として冪等に設定）、family-questフロントエンドの鮮度チェック（`deploy.sh --if-stale`による冪等リビルド）、Webhookの修正スクリプト実行、そしてコアサーバーとダッシュボードのバックグラウンド起動を担っている。
+* システム全体において、`MY_HOME_SYSTEM`のクリーンアップ、初期設定、および関連するプロセス群の起動を統括するスクリプト。環境変数の設定、`CLEANUP_TARGETS`配列に列挙された既存プロセス群への段階的な終了処理（優しい停止→最大5秒待機→対象ごとの強制終了フォールバック）、NASのマウント確認（自動マウントのトリガーとExponential Backoffによるリトライ）、Python依存関係の鮮度チェック（`requirements.txt`のSHA256ハッシュ比較による冪等`pip install`、Issue #483）、gitフックの登録（リポジトリ管理の`deploy/git-hooks/`を`core.hooksPath`として冪等に設定）、family-questフロントエンドの鮮度チェック（`deploy.sh --if-stale`による冪等リビルド）、Webhookの修正スクリプト実行、そしてコアサーバーとダッシュボードのバックグラウンド起動を担っている。引数`--prepare`を付けると前処理(Phase 0〜3)だけを実行してサーバー本体は起動しない(Issue #646。実機の`deploy/systemd/home_system.service`は`ExecStartPre`でこのモードを呼び、`unified_server.py`本体は`Type=simple`+`Restart=on-failure`の`ExecStart`としてsystemdがフォアグラウンド起動する。ダッシュボードは`home_dashboard.service`が別ユニットで起動する)。
 * 根拠: スクリプト全体 (行番号: 4〜151 / 抜粋: "MY_HOME_SYSTEM 起動スクリプト")
 
 ## 3. 外部依存関係
@@ -71,25 +71,27 @@
 ### [要素名2：Phase 0: クリーンアップ処理]
 
 * **役割**: 停止対象プロセス名の配列`CLEANUP_TARGETS`(`unified_server.py`, `camera_monitor.py`, `scheduler_boot.py`, `streamlit run`)を定義し、各対象へ`pkill`でSIGTERMを送って優しく停止させる。以前は`scheduler.py`という実在しないプロセス名を対象にしており実体の`scheduler_boot.py`にマッチしないため旧schedulerプロセスが再起動のたびに生き残っていた点と、存在しない`bluetooth_monitor.py`を対象にしていた点を修正し、実ファイル名の配列に置き換えている。
-* 根拠: クリーンアップ処理ブロックおよび修正コメント (行番号: 24〜36 / 抜粋: "CLEANUP_TARGETS=(")
-* **（Issue #360 で修正）** `CLEANUP_TARGETS` に `python.*monitors/[a-z_]*\.py`（scheduler が起動した監視スクリプト）と `ffmpeg.*hls_streams`（ライブ配信/VOD 生成の ffmpeg）を追加。旧世代が孤児化して残ると、新世代と同じ HLS パスへ二重書き込みしたり古い設定で DB 書き込み・保持期間削除を続けたりするため。
-* 根拠: `CLEANUP_TARGETS=(` (行番号: 34〜41)
+* 根拠: クリーンアップ処理ブロックおよび修正コメント (行番号: 44〜64 / 抜粋: "CLEANUP_TARGETS=(")
+* **（Issue #360 で修正）** `CLEANUP_TARGETS` に scheduler が起動する監視スクリプト6本に限定した正規表現（`python.*monitors/(switchbot_power_monitor|...|nas_monitor)\.py`）と `ffmpeg.*hls_streams`（ライブ配信/VOD 生成の ffmpeg）を追加。旧世代が孤児化して残ると、新世代と同じ HLS パスへ二重書き込みしたり古い設定で DB 書き込み・保持期間削除を続けたりするため。
+* 根拠: `CLEANUP_TARGETS=(` (行番号: 57〜64)
+* **（Issue #646 で追加）** `--prepare`モード(`PREPARE_ONLY=true`)では、ダッシュボード(`streamlit run`)を`CLEANUP_TARGETS`から除外する。ダッシュボードは`home_dashboard.service`が別ユニットで管理しており、ここでSIGTERMするとsystemd側が予期しない停止と扱うため。`unified_server.py`・子プロセス・ffmpegは引き続き掃除する(旧来の`nohup`起動が残っている場合の回収、および前世代の孤児の掃除)。
+* 根拠: `if [ "$PREPARE_ONLY" = true ]; then` 〜 `CLEANUP_TARGETS=("${filtered_targets[@]}")` (行番号: 66〜78 / 抜粋: "if [ "$target" != "streamlit run" ]; then")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数受け取り処理なし (行番号: 24-66)
+* 根拠: 引数受け取り処理なし (行番号: 41-108)
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: 戻り値返却なし (行番号: 24-66)
+* 根拠: 戻り値返却なし (行番号: 41-108)
 
 
 * **副作用**: `CLEANUP_TARGETS`内の各プロセスを停止・強制終了させる。標準出力へのログ表示。
-* 根拠: `for target in "${CLEANUP_TARGETS[@]}"; do pkill -f "$target"; done` (行番号: 39〜41 / 抜粋: "pkill -f "$target"")
+* 根拠: `for target in "${CLEANUP_TARGETS[@]}"; do pkill -f "$target"; done` (行番号: 81〜83 / 抜粋: "pkill -f "$target"")
 
 
 * **エラーハンドリング**: 最大5秒間、`CLEANUP_TARGETS`内のいずれかがまだ実行中かを`pgrep`でループ確認し、5秒経過後もなお生存している対象に対しては、対象ごとに個別に強制終了(`pkill -9 -f "$target"`)を実施する（以前は強制終了ループが`unified_server.py`のみを対象としており、他プロセスが生き残る余地があった）。
-* 根拠: 待機ループおよび強制終了ループ (行番号: 43〜66 / 抜粋: "pkill -9 -f "$target"")
+* 根拠: 待機ループおよび強制終了ループ (行番号: 85〜108 / 抜粋: "pkill -9 -f "$target"")
 
 
 
@@ -187,24 +189,47 @@
 
 ### [要素名6：Phase 3 & 4: 初期化およびサーバー起動]
 
-* **役割**: Webhook修正スクリプト(`switchbot_webhook_fix.py`)を実行し、その後`unified_server.py`と`dashboard.py`(Streamlit)をバックグラウンドで起動する。各プロセスの標準出力・標準エラー出力は`logs/`ディレクトリ内のログファイルにリダイレクトする。
-* 根拠: 起動処理ブロック (行番号: 133〜151 / 抜粋: "echo "--- Start Home System Server ---"")
+* **役割**: Webhook修正スクリプト(`switchbot_webhook_fix.py`)を実行し、その後`unified_server.py`と`dashboard.py`(Streamlit)をバックグラウンドで起動する。各プロセスの標準出力・標準エラー出力は`logs/`ディレクトリ内のログファイルにリダイレクトする。`--prepare`モードではPhase 3の直後に`exit 0`で終了し、Phase 4(サーバー起動)は実行しない。
+* 根拠: 起動処理ブロック (行番号: 192〜217 / 抜粋: "echo "--- Start Home System Server ---"")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数受け取り処理なし (行番号: 133-151)
+* 根拠: 引数受け取り処理なし (行番号: 192-217)
 
 
-* **戻り値/レスポンス**: なし
-* 根拠: 戻り値返却なし (行番号: 133-151)
+* **戻り値/レスポンス**: なし（`--prepare`時は`exit 0`）
+* 根拠: `exit 0` (行番号: 200)
 
 
-* **副作用**: 3つのPythonスクリプトの実行（うち2つはバックグラウンドプロセスとして常駐）。`logs/webhook_fix.log`, `logs/server_boot.log`, `logs/dashboard_boot.log` ファイルの作成および上書き。
-* 根拠: 実行・リダイレクト処理 (行番号: 135, 142, 148 / 抜粋: "> logs/server_boot.log 2>&1 &")
+* **副作用**: 3つのPythonスクリプトの実行（うち2つはバックグラウンドプロセスとして常駐。`--prepare`時は`switchbot_webhook_fix.py`のみ）。`logs/webhook_fix.log`, `logs/server_boot.log`, `logs/dashboard_boot.log` ファイルの作成および上書き。
+* 根拠: 実行・リダイレクト処理 (行番号: 194, 208, 214 / 抜粋: "> logs/server_boot.log 2>&1 &")
 
 
 * **エラーハンドリング**: なし（各Pythonスクリプト内のエラーはログファイルへ書き込まれるが、本スクリプト側でのプロセス起動失敗時のハンドリングはない）。
-* 根拠: バックグラウンド実行処理 (行番号: 142, 148 / 抜粋: "&")
+* 根拠: バックグラウンド実行処理 (行番号: 208, 214 / 抜粋: "&")
+
+
+
+### [要素名7：`--prepare` モード（systemd ExecStartPre 経路、Issue #646）]
+
+* **役割**: 第1引数が`--prepare`のとき`PREPARE_ONLY=true`とし、(1) Phase 0の掃除対象から`streamlit run`を外し、(2) Phase 3の直後に`exit 0`して Phase 4(サーバー/ダッシュボードの`nohup`起動)を行わない。実機の`deploy/systemd/home_system.service`はこのモードを`ExecStartPre`で呼び、`unified_server.py`本体を`ExecStart`(`Type=simple`)としてフォアグラウンド起動し、異常終了時は`Restart=on-failure`で自動復旧する。以前は`Type=oneshot`+`RemainAfterExit=yes`のもとで本スクリプトが`nohup ... & disown`でサーバーを起動しており、サーバー本体がsystemdの管理外にあった(落ちても通知のみ・人手復旧)。引数なしの従来経路(手動運用・開発用)は残している。
+* 根拠: `PREPARE_ONLY=false` / `if [ "${1:-}" = "--prepare" ]; then` (行番号: 18〜21 / 抜粋: "PREPARE_ONLY=true")、掃除対象の絞り込み (行番号: 66〜78)、`exit 0` (行番号: 196〜201 / 抜粋: "Preparation finished (--prepare)")
+
+
+* **引数/リクエスト**: `$1`（`--prepare`のみ解釈。それ以外・省略時は従来動作）
+* 根拠: `if [ "${1:-}" = "--prepare" ]; then` (行番号: 19)
+
+
+* **戻り値/レスポンス**: `--prepare`時はPhase 3完了後に`exit 0`
+* 根拠: `exit 0` (行番号: 200)
+
+
+* **副作用**: Phase 0〜3の副作用のみ（サーバー・ダッシュボードは起動しない）
+* 根拠: 行番号: 196〜201
+
+
+* **エラーハンドリング**: なし（Phase 0〜3の各処理は従来どおり失敗しても警告のみで続行し、最終的に`exit 0`する。`ExecStartPre`の失敗でサーバー起動を止めない設計）
+* 根拠: 行番号: 138〜157（pip install失敗時の警告）、187〜190（deploy.sh失敗時の警告）
 
 
 
@@ -288,9 +313,9 @@ graph TD
 
 * **ハードコードされた絶対パス**: 環境変数 `PYTHONPATH`, `DEVELOP_ROOT`(およびそれを基点にした `PROJECT_DIR`, `QUEST_DIR`, `HOOKS_DIR`) が `/home/masahiro/develop/...` としてハードコードされているため、実行環境（ユーザー名やディレクトリ構成）が変わると動作しない。
 * **[修正済み] 未使用変数だった`QUEST_DIR`**: 以前は`QUEST_DIR`変数が定義のみで一度も参照されていなかったが、Phase 2(family-quest鮮度チェック)の追加により`bash "$QUEST_DIR/deploy.sh" --if-stale`(103行目)で使用されるようになった。
-* **Phase 2はビルド失敗を握りつぶす設計**: `deploy.sh --if-stale`が失敗しても警告表示のみで後続フェーズへ進むため、フロントのビルドが壊れている場合は旧`dist/`が配信され続ける。ビルド失敗の検知は`logs/quest_deploy.log`の確認に依存する。また、鮮度判定は`dist/.built-tree`に記録されたgitツリーハッシュとHEADの比較であり、未コミットのローカル変更は検知対象外(詳細は`family-quest/deploy.sh`のコメントを参照)。
-* **影響範囲の広いプロセス停止 (`pkill -f`)**: `pkill -f "streamlit run"` などは部分一致でプロセスを終了させるため、このシステムとは無関係の別プロジェクトのStreamlitプロセスが実行中の場合、巻き込んで終了させてしまう危険性がある。
-* **プロセスの起動監視漏れ**: `unified_server.py` および `dashboard.py` をバックグラウンドで起動しているが、プロセスが正常に立ち上がったかどうか（即座にクラッシュしていないか）の死活監視・エラー検知のロジックは存在しない。
+* **Phase 2はビルド失敗を握りつぶす設計**: `deploy.sh --if-stale`が失敗しても警告表示のみで後続フェーズへ進むため、フロントのビルドが壊れている場合は旧`dist/`が配信され続ける(Issue #650で`deploy.sh`が`dist.next/`にビルドして成功時だけ`dist/`と入れ替えるアトミック方式になったため、この「旧`dist/`が配信され続ける」は実際に成立する。以前はviteが`dist/`を先に空にしていたため、ビルド中・失敗時に`index.html`が存在しない窓があった)。ビルド失敗の検知は`logs/quest_deploy.log`の確認に依存する。また、鮮度判定は`dist/.built-tree`に記録されたgitツリーハッシュとHEADの比較であり、未コミットのローカル変更は検知対象外(詳細は`family-quest/deploy.sh`のコメントを参照)。
+* **影響範囲の広いプロセス停止 (`pkill -f`)**: `pkill -f "streamlit run"` などは部分一致でプロセスを終了させるため、このシステムとは無関係の別プロジェクトのStreamlitプロセスが実行中の場合、巻き込んで終了させてしまう危険性がある(`--prepare`モードでは`streamlit run`は対象外)。
+* **[修正済み] プロセスの起動監視漏れ (Issue #646)**: 以前は`unified_server.py`および`dashboard.py`を`nohup`でバックグラウンド起動するだけで、即座にクラッシュしていないかの死活監視・エラー検知のロジックが存在しなかった。現在、実機経路では`deploy/systemd/home_system.service`(`Type=simple`+`Restart=on-failure`)が`unified_server.py`を、`home_dashboard.service`が`dashboard.py`をそれぞれフォアグラウンドで管理し、本スクリプトは`--prepare`で前処理のみ行う。引数なしの手動経路では従来どおり死活監視は無い。
 * **[修正済み] pkill対象名の実体不一致**: 以前は`CLEANUP_TARGETS`に相当する停止対象が`scheduler.py`という実在しないプロセス名で個別に`pkill`されており、実体`scheduler_boot.py`にマッチしないため再起動のたびに旧schedulerプロセスが生き残り、`unified_server.py`起動時に新しいschedulerプロセスと重複起動する不具合があった。存在しない`bluetooth_monitor.py`への`pkill`も無害だが無意味であった。現在は実ファイル名を用いた`CLEANUP_TARGETS`配列に置き換えられ、この2点は解消されている。
 * **[修正済み] NASマウント確認が待たずに次フェーズへ進んでいた**: 以前のPhase 1は`mountpoint -q`を1回チェックするのみで、未マウントでも警告を表示するだけで即座にPhase 3(Webhook修正)・Phase 4(サーバー起動)へ進んでいた。起動直後はautofsのアイドルアンマウント後の自動マウント完了まで数秒かかることがあり、これは`config.py`の`verify_and_initialize_storage`（Exponential Backoffで自己修復）が扱う遅延と同種の事象であるにもかかわらず、本スクリプト側にはリトライが一切なかった。現在はパスアクセスによる自動マウントのトリガーと、最大5回・Exponential Backoff（1s/2s/4s/8s/16s）のリトライへ変更されている（74〜99行目）。ただしリトライを尽くしても未マウントの場合は依然として警告のみで後続フェーズへ進む点（アプリ側のバックオフ・フォールバックに委ねる設計）は変わらない。
 * **[修正済み] requirements.txt変更時に.venvが追従しない問題(Issue #483)**: 以前は本スクリプトにPython依存関係を更新する経路が一切なく、`requirements.txt`を変更するPRをマージして実機で`git pull`しても`.venv`は古いままだった。新規パッケージをimportするコードが含まれていれば`unified_server.py`が`ImportError`で起動失敗し、2026-09-01のfamily-quest dist不整合障害と同型の穴がバックエンド側に残っていた。現在はPhase 1.5で`requirements.txt`のSHA256ハッシュを`.venv/.requirements-sha256`と比較し、不一致なら`pip install -r requirements.txt`を実行してハッシュを更新するようになっている（101〜120行目）。`requirements.txt`変更後の初回起動はpipインストール分だけ遅くなる点、およびネットワーク断時は`pip install`が失敗し既存の`.venv`のまま起動を続行する点に留意。
@@ -313,7 +338,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `switchbot_webhook_fix.py`の仕様 | `switchbot_webhook_fix.md`の解析によれば、環境変数`WEBHOOK_BASE_URL`を用いてSwitchBotおよびLINE BotのWebhookエンドポイントURLを問い合わせ、現状と異なる場合のみ削除・再登録(SwitchBot)または更新(LINE)を行い、実際に更新が発生した場合のみ`common.send_push`で通知するスクリプトとされる。 | switchbot_webhook_fix.md |
-| `unified_server.py`の仕様 | `unified_server.md`の解析によれば、FastAPI製のAPIサーバーであり、`lifespan`内で`monitors/camera_monitor.py`と`scheduler_boot.py`をサブプロセスとして起動し、終了時にはそれらを停止させる構成になっているとされる。ただし`camera_monitor.py`の起動は`try-except`で保護されておらず、起動失敗時はアプリ全体が起動できない可能性がある点が`unified_server.md`の保守上の注意点として挙げられている。 | unified_server.md, scheduler_boot.md |
+| `unified_server.py`の仕様 | `unified_server.md`の解析によれば、FastAPI製のAPIサーバーであり、`lifespan`内で`monitors/camera_monitor.py`と`scheduler_boot.py`をサブプロセスとして起動し、終了時にはそれらを停止させる構成になっているとされる。以前は`camera_monitor.py`の起動が`try-except`で保護されておらず起動失敗時にアプリ全体が起動できない可能性が`unified_server.md`の保守上の注意点として挙げられていたが、Issue #360で両子プロセスの起動が共通の`_spawn_child_process`内で保護され、Issue #646で30秒ごとの死活監視・自動再起動(`restart_dead_children`)も加わった。 | unified_server.md, scheduler_boot.md |
 | `dashboard.py`の仕様 | `dashboard.md`の解析によれば、Streamlit製のダッシュボードアプリであり、`services.analysis_service`からセンサー・子供・食事等のデータを読み込み、11個のタブ(クエスト、電車遅延、防犯カメラ等)を`views.dashboard`配下の各ビューモジュールに委譲してレンダリングするとされる。 | dashboard.md |
 | 未起動スクリプトの用途 | `unified_server.md`の解析によれば、`camera_monitor.py`は`start_all.sh`自体ではなく`unified_server.py`の`lifespan`によってサブプロセスとして起動されることが判明した(`start_all.sh`側の`pkill`対象と`unified_server.py`側の起動元が一致)。以前は`bluetooth_monitor.py`と`scheduler.py`(`scheduler_boot.py`とは別名で実在しないプロセス名)についても対応する起動元の記述が見つからず不明であったが、修正コミット(`fix(H-9)`)により`start_all.sh`の`CLEANUP_TARGETS`から存在しない`bluetooth_monitor.py`は削除され、`scheduler.py`は本ファイル85行目のコメント("unified_server.py が内部で scheduler_boot.py を起動します")および`unified_server.md`の解析結果と一致する実名`scheduler_boot.py`に修正されたため、この2点の不明点は解消された。 | unified_server.md |
 | `deploy.sh --if-stale`の冪等判定の詳細 | `family-quest/deploy.sh`を直接確認した。判定材料は**`git rev-parse HEAD:family-quest` で得られる「family-questディレクトリのツリーハッシュ」**で、ビルド成功時に`dist/.built-tree`へ記録される(59行目〜)。`--if-stale`(33〜41行目)は`current_tree_hash()`の値と`dist/.built-tree`の内容を比較し、**(1) 現在のハッシュが取得できる (2) 記録済みハッシュが存在する (3) 両者が一致する (4) `dist/index.html`が実在する** の4条件がすべて成立したときだけ`exit 0`でビルドをスキップする。どれか1つでも欠ければ再ビルドに倒れる(`current_tree_hash()`はgitが使えない等で取得失敗した場合に空文字を返し、26行目のコメントどおり「常にビルド」へフォールバックする)。ツリーハッシュを使うため、`git pull`だけでなく`git reset --hard`やファイルの直接編集でもソースが変われば必ず再ビルドされる。`dist/.built-tree`を更新できなかった場合は警告を出したうえで記録をスキップし、以後`--if-stale`は常にビルドすることになる(64行目)。ビルド本体は`npm ci`(CIの`frontend`ジョブと同じ。Issue #489: `npm install`だとlockfileを書き換えて実機のgitツリーがdirtyになり次回のpullが失敗する)を用いる。 | 直接ソース確認: `family-quest/deploy.sh:9-14,26-41,59-64` |

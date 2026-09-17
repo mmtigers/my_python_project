@@ -20,7 +20,7 @@
 
 * SQLiteデータベースへの接続、クエリ実行、データの書き込みを管理するユーティリティ機能を提供する。
 * 接続のリトライ機構（接続確立時のみ、ロック時の待機）、WALモードおよび外部キー制約(`PRAGMA foreign_keys`)の有効化、読み取り専用モードでの安全なデータ検索、および同期・非同期に対応した汎用的なデータ挿入（INSERT）機能を実装している。**（Issue #231で追加）** 単一行の`save_log_generic`/`save_log_async`に加え、複数行を単一トランザクションでまとめて保存する`save_logs_batch_generic`/`save_logs_batch_async`を提供する。複数行を独立にINSERTすると、途中の1件が失敗しても既に成功した分がコミット済みのまま残り、失敗通知を受けたユーザーの再試行で重複保存を招くケース(`handlers/line_logic.py`の`all_genki`)があったため、真のall-or-nothingを実現する手段として追加された。
-* 根拠: `get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async` 関数の定義 (行番号: 20-96 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ", "読み取り専用モードで安全にSELECTを実行する", "汎用データ保存関数")、`save_logs_batch_generic`/`save_logs_batch_async` (行番号: 98-124 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:")
+* 根拠: `get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async` 関数の定義 (行番号: 20-96 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ", "読み取り専用モードで安全にSELECTを実行する", "汎用データ保存関数")、`save_logs_batch_generic`/`save_logs_batch_async` (行番号: 115-141 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:")
 * **（B3で追加、Issue #409 Q-L9で`save_logs_batch_generic`にも同一の検証を追加）** `save_log_generic`はSQL文字列へ直接展開せざるを得ない`table`/`columns_list`（プレースホルダ化不可）について、実行前にモジュールレベル正規表現`_SQL_IDENTIFIER_RE`によるSQLite識別子ホワイトリスト検証（英数字・アンダースコアのみ、数字始まり不可）を行うようになった。現状の全呼び出し元はリテラル固定値かconfig定数のみのため実害はないが、将来動的な値が渡された場合のSQLインジェクションに対する構造的な防御として追加された。`save_logs_batch_generic`も同じ文字列展開方式でSQLを組み立てるため、Issue #409（Q-L9）で同一の`_SQL_IDENTIFIER_RE`検証が追加されており、現在は両関数とも同じチェックを経由する（詳細は8節を参照）。
 * 根拠: `_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")` (行番号: 18 / 抜粋: "_SQL_IDENTIFIER_RE = re.compile(r\"^[A-Za-z_][A-Za-z0-9_]*$\")")、`if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):` (行番号: 79〜81 / 抜粋: "logger.error(f\"データ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")、`save_logs_batch_generic`側の同じ検証 (行番号: 111〜113 / 抜粋: "logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
 
@@ -172,7 +172,7 @@
 ### `save_logs_batch_generic`（Issue #231で追加）
 
 * **役割**: 複数行をまとめて単一トランザクションで保存する汎用関数。**（Issue #231で追加）** `save_log_generic`を複数回呼び出す実装(`handlers/line_logic.py`の`all_genki`等)では、各呼び出しがそれぞれ独立に`commit`されるため、複数行のうち途中の1件が失敗しても、既に成功した分はコミット済みのまま残ってしまう不具合があった。呼び出し元は「1件でも失敗すれば全体を失敗扱いとする」と案内しユーザーに再試行を促す設計だったが、実際には成功済み分が残ったままのため、再試行すると重複して保存されていた。本関数は単一の`get_db_cursor(commit=True)`ブロック内で全件INSERTすることで、1件でも失敗すれば例外が`get_db_cursor`側の`rollback`へ伝播し全件ロールバックされる、真のall-or-nothingを実現する。**`save_log_generic`と同様、Issue #409（Q-L9）でB3の`_SQL_IDENTIFIER_RE`による`table`/`columns_list`の識別子検証が追加されている**（詳細は次項および8節を参照）。
-* 根拠: [関数定義とDocstring] (行番号: 98-124 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:\n    """複数行をまとめて単一トランザクションで保存する汎用関数。")
+* 根拠: [関数定義とDocstring] (行番号: 115-141 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:\n    """複数行をまとめて単一トランザクションで保存する汎用関数。")
 * **（Issue #409 Q-L9 で修正）** `save_log_generic` と同じ `_SQL_IDENTIFIER_RE` によるテーブル名・カラム名の検証を追加。現在は両関数とも同一の識別子ホワイトリスト検証を経由する。
 * 根拠: `if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):` (行番号: 111-113 / 抜粋: "logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
 
@@ -181,7 +181,7 @@
 * `table` (str): 保存対象のテーブル名。
 * `columns_list` (List[str]): 保存対象のカラム名のリスト（全行共通）。
 * `values_list` (List[tuple]): 保存する各行の値のタプルのリスト。
-* 根拠: (行番号: 98 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:")
+* 根拠: (行番号: 115 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`: 全件の保存に成功した場合は`True`、いずれか1件でも失敗した場合は`False`（この場合、全件がロールバックされテーブルには一切残らない）。
@@ -200,7 +200,7 @@
 ### `save_logs_batch_async`（Issue #231で追加）
 
 * **役割**: `save_logs_batch_generic` を非同期で実行するためのラッパー関数。
-* 根拠: (行番号: 126-129 / 抜粋: "async def save_logs_batch_async(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:\n    """save_logs_batch_generic の非同期ラッパー"""")
+* 根拠: (行番号: 143-146 / 抜粋: "async def save_logs_batch_async(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:\n    """save_logs_batch_generic の非同期ラッパー"""")
 
 
 * **引数/リクエスト**: `table` (str), `columns_list` (List[str]), `values_list` (List[tuple]) （`save_logs_batch_generic` と同等）

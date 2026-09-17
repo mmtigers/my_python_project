@@ -1,7 +1,6 @@
 import contextlib
 import json
 import os
-import sys
 import subprocess
 import threading
 import time
@@ -9,6 +8,8 @@ import urllib.parse
 import glob
 from datetime import datetime
 from typing import Optional, Dict, Any
+# #661: WSDL 探索は core/onvif_utils.py に一本化(以前は本ファイルと camera_monitor/camera_service に同一実装が重複)
+from core.onvif_utils import find_wsdl_path
 from core.logger import setup_logging
 from core.utils import get_now_jst
 import config
@@ -183,17 +184,6 @@ def init_output_dir(base_dir: str, camera_id: str) -> str:
     os.makedirs(cam_dir, exist_ok=True)
     return cam_dir
 
-def find_wsdl_path() -> Optional[str]:
-    """camera_monitor.pyと同等のWSDL動的探索ロジック"""
-    for path in sys.path:
-        if not os.path.exists(path):
-            continue
-        candidate_standard = os.path.join(path, 'onvif', 'wsdl')
-        candidate_direct = os.path.join(path, 'wsdl')
-        for candidate in [candidate_standard, candidate_direct]:
-            if os.path.exists(os.path.join(candidate, 'devicemgmt.wsdl')):
-                return candidate
-    return None
 
 def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:
     cam_id = cam_conf['id']

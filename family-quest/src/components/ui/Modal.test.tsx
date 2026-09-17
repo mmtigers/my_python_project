@@ -59,3 +59,24 @@ describe('Modal (#394)', () => {
         expect(onClose).toHaveBeenCalledTimes(1);
     });
 });
+
+// #660: アイコンのみの閉じるボタンにアクセシブルな名前が無く、スクリーンリーダーでは
+// 「ボタン」としか読み上げられなかった。並行セッションからの指摘で、修正(aria-label 付与)は
+// 入れたのに回帰テストが無いことが分かったため取り込む。
+describe('Modal a11y (#660)', () => {
+    afterEach(() => {
+        cleanup();
+    });
+
+    it('閉じるボタンがアクセシブルな名前を持つ', () => {
+        render(<Modal isOpen onClose={vi.fn()} title="タイトル">本文</Modal>);
+        expect(screen.getByRole('button', { name: '閉じる' })).toBeInTheDocument();
+    });
+
+    it('閉じるボタンの名前でクリックできる', () => {
+        const onClose = vi.fn();
+        render(<Modal isOpen onClose={onClose} title="タイトル">本文</Modal>);
+        fireEvent.click(screen.getByRole('button', { name: '閉じる' }));
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+});

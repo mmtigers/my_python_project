@@ -298,10 +298,15 @@ class TestIpRestrictionMiddlewareCurrentBehavior:
 
 
 class _FakeProcess:
-    def __init__(self):
+    def __init__(self, returncode=None):
         self.terminated = False
         self.killed = False
         self.pid = 12345
+        # poll() の戻り値。None = 生存中、int = 終了済み(exit code)
+        self.returncode = returncode
+
+    def poll(self):
+        return self.returncode
 
     def terminate(self):
         self.terminated = True
@@ -340,6 +345,122 @@ class TestLifespan:
         # シャットダウン後は起動したプロセスすべてに terminate が呼ばれていること
         for _args, proc in spawned:
             assert proc.terminated is True
+
+
+class TestChildProcessSupervisor:
+    """Issue #646: 監視子プロセス(camera_monitor / scheduler_boot)の死活監視と自動再起動。
+
+    以前は lifespan 起動時に Popen するだけで、その後の死活を見ていなかった
+    (scheduler が落ちると配下の監視タスクが静かに止まり、復旧は人手だった)。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_supervisor_state(self, monkeypatch):
+        monkeypatch.setattr(unified_server, "camera_process", None)
+        monkeypatch.setattr(unified_server, "scheduler_process", None)
+        monkeypatch.setattr(unified_server, "_child_restart_history", {})
+        monkeypatch.setattr(unified_server, "_child_restart_disabled", set())
+
+    def _install_fake_popen(self, monkeypatch):
+        spawned = []
+
+        def _fake_popen(args, **kwargs):
+            proc = _FakeProcess()
+            spawned.append((args, proc))
+            return proc
+
+        monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+        return spawned
+
+    def test_alive_children_are_left_untouched(self, monkeypatch):
+        spawned = self._install_fake_popen(monkeypatch)
+        alive_cam, alive_sched = _FakeProcess(), _FakeProcess()
+        monkeypatch.setattr(unified_server, "camera_process", alive_cam)
+        monkeypatch.setattr(unified_server, "scheduler_process", alive_sched)
+
+        assert unified_server.restart_dead_children(now=1000.0) == []
+        assert spawned == []
+        assert unified_server.camera_process is alive_cam
+        assert unified_server.scheduler_process is alive_sched
+
+    def test_dead_scheduler_is_restarted_and_camera_untouched(self, monkeypatch):
+        spawned = self._install_fake_popen(monkeypatch)
+        alive_cam, dead_sched = _FakeProcess(), _FakeProcess(returncode=1)
+        monkeypatch.setattr(unified_server, "camera_process", alive_cam)
+        monkeypatch.setattr(unified_server, "scheduler_process", dead_sched)
+
+        assert unified_server.restart_dead_children(now=1000.0) == ["scheduler"]
+        assert len(spawned) == 1
+        assert spawned[0][0][1].endswith("scheduler_boot.py")
+        assert unified_server.scheduler_process is spawned[0][1]
+        assert unified_server.camera_process is alive_cam
+
+    def test_never_started_child_is_not_spawned_by_supervisor(self, monkeypatch):
+        """起動時に Popen が失敗して None のままの子は、監視ループの対象外(起動失敗の
+        無限リトライにしない。起動失敗は lifespan の logger.error で既に通知済み)。"""
+        spawned = self._install_fake_popen(monkeypatch)
+        monkeypatch.setattr(unified_server, "camera_process", None)
+        monkeypatch.setattr(unified_server, "scheduler_process", _FakeProcess())
+        assert unified_server.restart_dead_children(now=1000.0) == []
+        assert spawned == []
+
+    def test_crash_loop_stops_restarting_after_hourly_limit_and_logs_critical(self, monkeypatch):
+        self._install_fake_popen(monkeypatch)
+        # core.logger のロガーは propagate=False で caplog に届かないため、ロガー自体を差し替える
+        fake_logger = MagicMock()
+        monkeypatch.setattr(unified_server, "logger", fake_logger)
+        limit = unified_server.CHILD_RESTART_MAX_PER_HOUR
+        monkeypatch.setattr(unified_server, "camera_process", _FakeProcess())
+
+        # 上限回数までは毎回再起動される(再起動直後にまた死ぬ、を繰り返す)
+        for i in range(limit):
+            monkeypatch.setattr(unified_server, "scheduler_process", _FakeProcess(returncode=137))
+            assert unified_server.restart_dead_children(now=1000.0 + i * 60) == ["scheduler"]
+        assert fake_logger.critical.call_count == 0
+
+        # 上限を超えた次の死亡では再起動せず、自動再起動を止めて CRITICAL を出す
+        dead_again = _FakeProcess(returncode=137)
+        monkeypatch.setattr(unified_server, "scheduler_process", dead_again)
+        assert unified_server.restart_dead_children(now=1000.0 + limit * 60) == []
+        assert unified_server.scheduler_process is dead_again
+        assert "scheduler" in unified_server._child_restart_disabled
+        assert fake_logger.critical.call_count == 1
+        assert "自動再起動を停止" in fake_logger.critical.call_args.args[0]
+
+        # 以降は死んでいても触らない(CRITICAL の連打もしない)
+        assert unified_server.restart_dead_children(now=1000.0 + limit * 60 + 30) == []
+        assert fake_logger.critical.call_count == 1
+
+    def test_restart_history_outside_one_hour_window_is_forgotten(self, monkeypatch):
+        self._install_fake_popen(monkeypatch)
+        limit = unified_server.CHILD_RESTART_MAX_PER_HOUR
+        monkeypatch.setattr(unified_server, "camera_process", _FakeProcess())
+        for i in range(limit):
+            monkeypatch.setattr(unified_server, "scheduler_process", _FakeProcess(returncode=1))
+            unified_server.restart_dead_children(now=1000.0 + i)
+
+        # 1時間以上あとの死亡は、古い履歴が窓から外れているので再起動される
+        monkeypatch.setattr(unified_server, "scheduler_process", _FakeProcess(returncode=1))
+        assert unified_server.restart_dead_children(now=1000.0 + limit + 3601.0) == ["scheduler"]
+        assert "scheduler" not in unified_server._child_restart_disabled
+
+    def test_lifespan_starts_supervisor_task_and_cancels_it_on_shutdown(self, isolated_db, monkeypatch):
+        self._install_fake_popen(monkeypatch)
+        monkeypatch.setattr(unified_server, "apply_pending_migrations", lambda conn: None)
+        created = []
+        real_create_task = unified_server.asyncio.create_task
+
+        def _spy_create_task(coro, *args, **kwargs):
+            task = real_create_task(coro, *args, **kwargs)
+            created.append(task)
+            return task
+
+        monkeypatch.setattr(unified_server.asyncio, "create_task", _spy_create_task)
+        with TestClient(unified_server.app) as client:
+            assert client.get("/health").status_code == 200
+            assert len(created) == 1
+            assert not created[0].done()
+        assert created[0].cancelled()
 
 
 class TestSecretRedactionFilter:

@@ -20,6 +20,8 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #659 で変更）** `chronicle` クエリも取得境界で `chronicleResponseSchema.parse()` によるランタイム検証を行う(以前は `gameData` と `purchase` だけが検証され、`chronicle` は無検証で `apiClient.get` の戻り値をそのまま返していた)。あわせて mutation 経路(`completeQuest` / `cancelQuest` / `approveQuest` / `rejectQuest` / `refreshData`)の回帰テストを `src/hooks/useGameData.mutations.test.tsx` に追加し、本フックのカバレッジは 42.85% から 81.41% になった。
+
 * React Queryを活用し、ゲーム内の各種データ（ユーザー、クエスト、報酬、完了/申請中履歴、家族の年代記（チャットログ）など）の取得、定期更新（ポーリング）、および状態変更（完了・承認・却下・取消・購入）のAPIリクエストを統合管理するカスタムフック `useGameData` を提供する。
 * データのローディング状態や、サーバーデータが欠損している場合のフォールバックデータ（マスターデータ等）の適用を責務としている。引数`currentUserIdx`に対応する閲覧中ユーザーの`user_id`を`viewerUserIdRef`に保持し、次回の`gameData`取得時に`viewer_user_id`クエリパラメータとして送信することで、共有クエストのボーナス計算をサーバー側で「閲覧中のユーザー」の履歴を代表として行えるようにしている。
 * **（#412で修正）** クエスト完了・キャンセル・承認・却下・報酬購入の各ミューテーションは、以前はリクエストボディに`quest.quest_id`/`historyItem.id`/`reward.reward_id`（いずれも`Quest`/`QuestHistory`/`Reward`型では表示用途向けにoptional）をそのまま渡していたため、これらが`undefined`のまま渡ると`JSON.stringify`でキーごと落ち、バックエンドの必須フィールド検証（`QuestAction`/`HistoryAction`/`RewardAction`、いずれも`int`必須）により422になる経路が型上防がれていなかった。各ラッパー関数（`completeQuest`/`cancelQuest`/`approveQuest`/`rejectQuest`/`buyReward`）の先頭でnullチェックを行い、`useMutation`の`mutationFn`自体の引数を`questId`/`historyId`/`rewardId: ID`（必須）に分離することで、undefinedがリクエスト送信経路に乗る余地をコンパイル時に断つようにした。
@@ -47,7 +49,7 @@
 | `apiClient` の内部実装 | ベースURL、ヘッダ付与、認証トークン処理、エラー詳細などの具体的な通信仕様が本ファイルからは読み取れないため。 | 根拠: (行番号: 86〜91 / 抜粋: "queryFn: async () => {\n            const viewerUserId = viewerUserIdRef.current;") |
 | 各APIエンドポイントの仕様 | リクエスト後のDBの挙動、トランザクション、外部影響が不明であるため。 | 根拠: (行番号: 125 / 抜粋: "return apiClient.post<QuestResult>('/api/quest/complete', { // 型指定") |
 | マスターデータの実体 | `INITIAL_USERS`, `MASTER_QUESTS`, `MASTER_REWARDS` 等の具体的なオブジェクト構造・値が不明であるため。 | 根拠: (行番号: 360〜362 / 抜粋: "users: gameData?.users \|\| INITIAL_USERS,") |
-| `gameDataResponseSchema` の詳細なフィールド定義 | `../lib/gameDataSchema.ts`に実装があり、各フィールドの厳密なZod型（`optional`/`nullable`の組み合わせ等）は本ファイルからは呼び出し結果（`.parse()`の成否）のみで、定義の全容は不明。 | 根拠: (行番号: 5, 95 / 抜粋: "import { gameDataResponseSchema } from '../lib/gameDataSchema';", "return gameDataResponseSchema.parse(raw) as GameDataResponse;") |
+| `gameDataResponseSchema` の詳細なフィールド定義 | `../lib/gameDataSchema.ts`に実装があり、各フィールドの厳密なZod型（`optional`/`nullable`の組み合わせ等）は本ファイルからは呼び出し結果（`.parse()`の成否）のみで、定義の全容は不明。 | 根拠: (行番号: 5, 95 / 抜粋: "import { gameDataResponseSchema, purchaseResponseSchema } from '../lib/gameDataSchema';", "return gameDataResponseSchema.parse(raw) as GameDataResponse;") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -307,8 +309,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **ポーリング対象の縮小**: `useQuery` で `refetchInterval` が設定されているのは `gameData`（10秒間隔）のみである。`chronicle`は`staleTime`（5分）のみでポーリングされない。以前存在した`familyMileage`・`bounties`のポーリングは廃止されている。加えて、アイテム使用承認フローの廃止（2026-08-29 コミット`9d5edec`）に伴い、以前存在した`pendingInventory`クエリ（および対応する10秒間隔のポーリング）自体が削除された。
-* 根拠: (行番号: 97〜98, 110 / 抜粋: "staleTime: 1000 * 30,\n        refetchInterval: 1000 * 10, // 10秒に1回のポーリングに制限", "staleTime: 1000 * 60 * 5,")
+* **ポーリング対象の縮小**: `useQuery` で `refetchInterval` が設定されているのは `gameData`(10秒間隔)と `chronicle`(60秒間隔)の2つである。**(Issue #657 で訂正)** 以前ここには「`chronicle` は `staleTime`(5分)のみでポーリングされない」と書かれていたが、2026-09-06 の品質監査で 60 秒ポーリングを追加済みで、本仕様書の §4(`refetchInterval: 1000 * 60`)とも食い違っていた。以前存在した`familyMileage`・`bounties`のポーリングは廃止されている。加えて、アイテム使用承認フローの廃止（2026-08-29 コミット`9d5edec`）に伴い、以前存在した`pendingInventory`クエリ（および対応する10秒間隔のポーリング）自体が削除された。
+* 根拠: (行番号: 97〜98, 129 / 抜粋: "staleTime: 1000 * 30,\n        refetchInterval: 1000 * 10, // 10秒に1回のポーリングに制限", "refetchInterval: 1000 * 60,")
 * **（#291で追加）ランタイム型検証層の導入**: `gameData`クエリはOpenAPI→TS生成パイプラインが存在しないバックエンドとの型契約のズレを検知する目的で、Zodスキーマ`gameDataResponseSchema`（`../lib/gameDataSchema.ts`）によるランタイム検証を経由するようになった。`.strict()`は意図的に使われておらず、未知のフィールドは無視される（将来バックエンドが新フィールドを追加してもparseは失敗しない。**#412**でこの性質を利用して`logs`フィールドをスキーマから削除しても、バックエンドが引き続き`logs`を返すこと自体は`.parse()`の成否に影響しない）。一方、スキーマに定義された必須フィールドが欠けている、または型が一致しない場合は`.parse()`が例外を送出し、`useQuery`はエラー状態になる。`chronicleData`クエリ（`/api/quest/family/chronicle`）は対象外であり、この検証を経由しない。新しいフィールドを`GameDataResponse`関連の型に追加する際は、`gameDataSchema.ts`側のスキーマも合わせて更新しないと、実際にはバックエンドから返っているフィールドがランタイム検証をすり抜けず`.parse()`失敗の原因になる可能性がある（逆に、スキーマ側にだけフィールドを追加し忘れても、`.strict()`でない以上parse自体は失敗せず、単に検証対象から漏れるだけである点に注意）。
 * 根拠: (行番号: 86〜95 / 抜粋: "queryFn: async () => {\n            const viewerUserId = viewerUserIdRef.current;\n            const endpoint = viewerUserId\n                ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`\n                : '/api/quest/data';\n            const raw = await apiClient.get<unknown>(endpoint);\n            // #291: バックエンドのレスポンス形状がここで定義したスキーマ(gameDataSchema.ts)と\n            // 食い違っている場合、コンポーネント側で無言でundefinedを参照する幽霊フィールド\n            // バグとしてではなく、ここで即座にエラーとして検知させる。\n            return gameDataResponseSchema.parse(raw) as GameDataResponse;\n        },")
 * **`chronicle`キャッシュの無効化漏れ修正**: `completeQuest`/`cancelQuest`/`approveQuest`/`buyReward`の成功時には`gameData`に加えて`chronicle`クエリも無効化されるようになった（以前は`completeQuest`成功時に`chronicle`を無効化しておらず、`staleTime`（5分）が切れるまで冒険の記録に反映されなかったバグの修正）。ただし`rejectQuest`は`gameData`のみを無効化し、`chronicle`は無効化されない（却下は記録に載らないため）。新しい状態変更アクションを追加する際は、そのアクションが年代記に影響するかどうかを踏まえて`chronicle`の無効化要否を判断する必要がある。

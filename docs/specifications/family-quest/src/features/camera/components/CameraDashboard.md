@@ -22,6 +22,8 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #659 で変更）** `/api/cameras/settings` の応答を `cameraSettingsResponseSchema.parse()` で検証してから `order` で並べ替える(以前は型引数のみで実行時は無検証だった)。
+
 * 監視カメラ機能全体のエントリーポイントとなる、独立した全画面レイアウトのダッシュボードコンポーネント。
 * **Issue #326 (M12) でReact Query化**: 以前は生の`useEffect`+ローカルステート(`allCameras`/`loading`/`fetchError`)でデータ取得しており、他画面が従っているReact Query規約(`useGameData.ts`方式)から外れた最後の1箇所だった。現在は`useQuery`(queryKey: `['cameraSettings']`)でカメラ設定一覧を取得し、`order`昇順でのソートは`queryFn`内で行う。表示に使う`cameras`は取得結果`allCameras`から`enabled`が`true`のものだけを`useMemo`で抽出した派生値である。
 * 根拠: `useQuery`と`cameras`の定義 (行番号: 30〜41, 48 / 抜粋: "} = useQuery<CameraConfig[]>({\n        queryKey: ['cameraSettings'],", "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")

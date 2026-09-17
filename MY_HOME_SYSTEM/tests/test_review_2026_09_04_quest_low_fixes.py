@@ -14,7 +14,6 @@ Issue #409(Family Quest の Low・保守性指摘)の回帰テスト。
 import datetime
 import os
 import sys
-from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
@@ -26,7 +25,7 @@ import common
 from core import database as core_db
 from models.quest import MasterQuest, MasterReward, QuestAction
 from services import quest_service as qs_module
-from services.quest_service import ROLE_ADULT, ROLE_CHILD
+from services.quest_service import ROLE_ADULT
 
 
 def _seed(role=ROLE_ADULT, gold=0):

@@ -1,5 +1,4 @@
 # MY_HOME_SYSTEM/services/line_service.py
-import asyncio
 from typing import List, Union
 
 # LINE Messaging API Models

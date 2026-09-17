@@ -328,3 +328,49 @@ class TestCheckDeployConfigDrift:
 
         assert health_watch.run_checks() == 0
         assert sent and "crontab: 差分 1行" in sent[0][0]["text"]
+
+
+class TestHealthWatchMainLock:
+    """Issue #651: 毎時 cron 起動の多重起動防止(flock LOCK_NB)と、外部コマンドの timeout。"""
+
+    def test_main_runs_checks_when_lock_is_free(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(health_watch, "LOCK_FILE", str(tmp_path / "hw.lock"))
+        monkeypatch.setattr(health_watch, "run_checks", lambda: 0)
+        assert health_watch.main() == 0
+
+    def test_main_skips_when_previous_run_still_holds_lock(self, tmp_path, monkeypatch):
+        import fcntl
+
+        lock_path = tmp_path / "hw.lock"
+        monkeypatch.setattr(health_watch, "LOCK_FILE", str(lock_path))
+        called = []
+        monkeypatch.setattr(health_watch, "run_checks", lambda: called.append(True) or 0)
+
+        holder = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            assert health_watch.main() == 0  # 前回実行中はスキップ(異常ではない)
+            assert called == []
+        finally:
+            os.close(holder)
+
+        # ロック解放後は実行される
+        assert health_watch.main() == 0
+        assert called == [True]
+
+    def test_external_commands_have_timeout(self, monkeypatch):
+        seen = []
+
+        def fake_run(cmd, **kwargs):
+            seen.append((cmd[0], kwargs.get("timeout")))
+            return health_watch.subprocess.CompletedProcess(cmd, returncode=0, stdout="active\nMem: 1 1 1 1 1 1\n", stderr="")
+
+        monkeypatch.setattr(health_watch.subprocess, "run", fake_run)
+        health_watch.check_service_active()
+        health_watch.check_journal_errors(datetime.datetime(2026, 9, 16, 0, 0, 0))
+        try:
+            health_watch.check_memory_usage()
+        except Exception:
+            pass  # 出力の解析はこのテストの対象外
+        assert seen, "subprocess.run が呼ばれていない"
+        assert all(timeout == health_watch.SUBPROCESS_TIMEOUT_SEC for _, timeout in seen), seen

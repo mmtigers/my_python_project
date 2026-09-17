@@ -132,11 +132,11 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 * 根拠: (行番号: 174 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
 
 * **役割**: LINE Messaging API (v3) を利用し、指定ユーザーIDに対してプッシュメッセージを送信する。辞書型で渡されたメッセージをv3用オブジェクト(`TextMessage`等)に変換する互換性維持処理を含む。
-* 根拠: [関数定義] (行番号: 123〜180 / 抜粋: "def _send_line_push(user_id: str...")
+* 根拠: [関数定義] (行番号: 104〜161 / 抜粋: "def _send_line_push(user_id: str...")
 
 
 * **引数/リクエスト**: `user_id: str`, `messages: List[Any]`
-* 根拠: [関数定義] (行番号: 123 / 抜粋: "def _send_line_push(user_id: str...")
+* 根拠: [関数定義] (行番号: 104 / 抜粋: "def _send_line_push(user_id: str...")
 
 
 * **戻り値/レスポンス**: `bool` (送信成功時にTrue)
@@ -155,11 +155,11 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 ### `send_push`
 
 * **役割**: 指定されたターゲット(discord, line, both)に応じてメッセージを各プラットフォームへ統合送信する。LINEに画像は送信せず注記を付与し、LINEの送信に失敗した場合はDiscordのerrorチャンネルへフォールバック通知を行う。`filename`はDiscord送信時にそのまま`_send_discord_webhook`へ引き継がれる。Issue #289で、LINE宛先(`user_id`)の解決をこの関数に一元化するようシグネチャを再設計した: `messages`のみが位置引数として渡せ、それ以外はすべてキーワード専用(`*`以降)。`user_id`は target に "line"/"both" を含む場合のみ使われ、省略時は`config.LINE_USER_ID`にフォールバックする。`target="discord"`のみの呼び出しでは`user_id`は一切不要になった。
-* 根拠: [関数定義] (行番号: 182〜229 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
+* 根拠: [関数定義] (行番号: 163〜210 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
 
 
 * **引数/リクエスト**: `messages: List[Any]`（唯一の位置引数）、以降キーワード専用で `target: str = "both"`, `channel: str = "notify"`, `user_id: Optional[str] = None`, `image_data: Optional[bytes] = None`, `filename: str = "snapshot.jpg"`
-* 根拠: [関数定義] (行番号: 182〜229 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
+* 根拠: [関数定義] (行番号: 163〜210 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`

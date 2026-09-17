@@ -18,7 +18,7 @@
 ## 2. ファイルの概要
 
 システム全体のログ出力設定を管轄するモジュール。コンソールへの標準出力、ログファイル(`home_system.log`)への書き込み、およびエラー発生時（ERRORレベル以上のログ）にスタックトレースを含めてDiscordのWebhookへ自動通知する機能を提供する。ログファイルのローテーション自体は本ファイルでは行わず、`WatchedFileHandler`（書き込み専用）を用いて外部の`logrotate`にローテーション処理を一元化する設計になっている（`home_system.log`が`unified_server`・`monitors`・cronスクリプト等の複数プロセスから同時に開かれるため、各プロセスが独自にファイルをrenameする方式のハンドラではローテーションが壊れることを避けるための設計、191〜195行目のコメント参照）。Discord通知（`DiscordErrorHandler.emit`）は、Webhook送信中に呼び出し元のスレッドをブロックしないよう、バックグラウンドスレッド上で行われる。`setup_logging`とは別に、同名の呼び出しパターン(`from core.logger import get_logger`)を期待する呼び出し元向けの単純なエイリアス関数`get_logger`も提供する。**（2026-09-06 品質監査で修正）** `setup_logging`は同名ロガーの再セットアップ時に既存ハンドラを`removeHandler`したうえで`close()`するようになり（以前は`handlers.clear()`のみでファイルディスクリプタがリークしていた）、`_send_webhook`の失敗ログはWebhook URLのトークン部分を`_redact_webhook_url`でマスクし、`exc_info`を付けずに例外種別とマスク済みメッセージのみを出力するようになった。
-* 根拠: `[get_logger]` (行番号: 213〜215 / 抜粋: "def get_logger(name: str) -> logging.Logger:")、`[setup_loggingのハンドラclose]` (行番号: 169〜174 / 抜粋: "for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()")、`[_redact_webhook_url]` (行番号: 70〜72 / 抜粋: "def _redact_webhook_url(text: str) -> str:")
+* 根拠: `[get_logger]` (行番号: 216〜218 / 抜粋: "def get_logger(name: str) -> logging.Logger:")、`[setup_loggingのハンドラclose]` (行番号: 169〜174 / 抜粋: "for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()")、`[_redact_webhook_url]` (行番号: 69〜71 / 抜粋: "def _redact_webhook_url(text: str) -> str:")
 
 ## 3. 外部依存関係
 
@@ -49,15 +49,15 @@
 ### `DiscordErrorHandler`
 
 * **役割**: エラーログをDiscordに通知するカスタムハンドラ。`logging.Handler`を継承し、指定されたWebhook URLの保持を担う。`__init__`時に`webhook_url`を明示的に渡された場合はそれを、渡されなければ`emit()`実行時に`config.DISCORD_WEBHOOK_ERROR`をフォールバックとして使用する（コード内コメント「初期化時にWebhook URLを受け取れるようにする」「指定されたURLがあれば使い、なければデフォルト設定を使う」参照）。
-* 根拠: `[DiscordErrorHandler]` (行番号: 83〜157 / 抜粋: "class DiscordErrorHandler(logging.Handler):\n    \"\"\"エラーログをDiscordに通知するハンドラ (スタックトレース対応版)\"\"\"\n    # ★追加: 初期化時にWebhook URLを受け取れるようにする\n    def __init__(self, webhook_url=None):")
+* 根拠: `[DiscordErrorHandler]` (行番号: 82〜158 / 抜粋: "class DiscordErrorHandler(logging.Handler):\n    \"\"\"エラーログをDiscordに通知するハンドラ (スタックトレース対応版)\"\"\"\n    # ★追加: 初期化時にWebhook URLを受け取れるようにする\n    def __init__(self, webhook_url=None):")
 
 
 * **引数/リクエスト**: `webhook_url` (型: 明示なし/デフォルト `None`。Discordの通知先URL)
-* 根拠: `[__init__]` (行番号: 86 / 抜粋: "def __init__(self, webhook_url=None):")
+* 根拠: `[__init__]` (行番号: 85 / 抜粋: "def __init__(self, webhook_url=None):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `[__init__]` (行番号: 86〜88 / 抜粋: "def __init__(self, webhook_url=None):\n        super().__init__()\n        self.webhook_url = webhook_url")
+* 根拠: `[__init__]` (行番号: 85〜87 / 抜粋: "def __init__(self, webhook_url=None):\n        super().__init__()\n        self.webhook_url = webhook_url")
 
 
 * **副作用**: なし
@@ -65,20 +65,20 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[__init__]` (行番号: 86〜88 / 抜粋: "def __init__(self, webhook_url=None):")
+* 根拠: `[__init__]` (行番号: 85〜87 / 抜粋: "def __init__(self, webhook_url=None):")
 
 
 
 ### `DiscordErrorHandler.emit`
 
 * **役割**: ロガーから渡されたレコードがERRORレベル以上かつメッセージに"Discord"が含まれない場合、スタックトレース（最大1000文字）を付与したペイロードを組み立て、`_send_webhook`をバックグラウンドスレッドで起動してDiscordへ非同期に送信する。`record.msg`は例外オブジェクト等の非文字列が渡される場合もあるため、`str()`化してから`"Discord"`の包含チェックを行う（コード内コメント「record.msg は例外オブジェクト等の非文字列が渡される場合もあるため...」参照）。
-* 根拠: `[emit]` (行番号: 91〜141 / 抜粋: "def emit(self, record):\n        # M-5-5(Low): record.msg は例外オブジェクト等の非文字列が渡される場合もあるため、\n        # str化してから比較する(\"Discord\" not in record.msg は非文字列だとTypeErrorになりうる)。\n        if record.levelno >= logging.ERROR and \"Discord\" not in str(record.msg):")
+* 根拠: `[emit]` (行番号: 90〜140 / 抜粋: "def emit(self, record):\n        # M-5-5(Low): record.msg は例外オブジェクト等の非文字列が渡される場合もあるため、\n        # str化してから比較する(\"Discord\" not in record.msg は非文字列だとTypeErrorになりうる)。\n        if record.levelno >= logging.ERROR and \"Discord\" not in str(record.msg):")
 * **（Issue #361 で修正）** (1) スタックトレースは `record.exc_info` がある場合のみ付ける（以前は exc_info の無い ERROR でも `format_stack()` を常に付け、本文が約900字を超えると Discord の2000字制限で 400 になり通知が無言で消えていた）。(2) 本文は `DISCORD_CONTENT_LIMIT`（1900）−200 字で切り詰め、トレースは残り容量の範囲で末尾を付け、最終的な content は `_truncate_discord_content` で 1900 字以内に収める。(3) 送信スレッドは `_register_sender` で追跡し、生存数が `DISCORD_MAX_INFLIGHT_SENDERS`（16）以上なら送信をスキップする。
 * 根拠: `if record.exc_info:` (行番号: 87〜88)、`body_limit = DISCORD_CONTENT_LIMIT - 200` (行番号: 92〜94)、`if _inflight_count() >= DISCORD_MAX_INFLIGHT_SENDERS:` (行番号: 110〜111)、`_register_sender(sender)` (行番号: 115)
 
 
 * **引数/リクエスト**: `record` (型: 明示なし、暗黙的に`logging.LogRecord`。判定およびフォーマット対象のログレコード)
-* 根拠: `[emit]` (行番号: 91 / 抜粋: "def emit(self, record):")
+* 根拠: `[emit]` (行番号: 90 / 抜粋: "def emit(self, record):")
 
 
 * **戻り値/レスポンス**: なし (URLが存在しない場合は早期 `return`)
@@ -127,11 +127,11 @@
 
 
 * **引数/リクエスト**: `url` (型: 明示なし。送信先のDiscord Webhook URL)、`payload` (型: 明示なし、`emit`が組み立てた`dict`。送信するJSONペイロード)
-* 根拠: `[引数定義]` (行番号: 144 / 抜粋: "def _send_webhook(url, payload):")
+* 根拠: `[引数定義]` (行番号: 143 / 抜粋: "def _send_webhook(url, payload):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `[メソッド本体]` (行番号: 144〜157 / 抜粋: "def _send_webhook(url, payload):\n        try:\n            requests.post(url, json=payload, timeout=5)")
+* 根拠: `[メソッド本体]` (行番号: 143〜158 / 抜粋: "def _send_webhook(url, payload):\n        try:\n            requests.post(url, json=payload, timeout=5)")
 
 
 * **副作用**: `requests.post`によるDiscord Webhookへの外部API通信（タイムアウト5秒）。失敗時は`_webhook_failure_logger`への警告ログ出力（**（2026-09-06 品質監査で修正）** URLはトークン部分をマスク済み、スタックトレースは含まない）。
@@ -162,7 +162,7 @@
 * **役割**: `_WEBHOOK_URL_RE`はDiscord Webhook URLの`/api/webhooks/<数字ID>/<トークン>`部分にマッチするコンパイル済み正規表現。`_redact_webhook_url(text)`は引数を`str()`化したうえで、トークン部分を`<redacted>`に置換（ID部分は残す）した文字列を返す。`_send_webhook`の失敗ログでURLおよび例外メッセージをマスクするために使う。
 * 根拠: `[定義]` (行番号: 67〜72 / 抜粋: "_WEBHOOK_URL_RE = re.compile(r\"(/api/webhooks/\\d+)/[A-Za-z0-9_\\-]+\")\n\n\ndef _redact_webhook_url(text: str) -> str:\n    \"\"\"Discord Webhook URL のトークン部分をマスクする(ログ出力用)。\"\"\"\n    return _WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))")
 * **引数/リクエスト**: `text: str`（`str()`化されるため例外オブジェクト等の非文字列も渡せる）
-* 根拠: `[シグネチャとstr化]` (行番号: 70, 72 / 抜粋: "def _redact_webhook_url(text: str) -> str:", "str(text)")
+* 根拠: `[シグネチャとstr化]` (行番号: 69, 72 / 抜粋: "def _redact_webhook_url(text: str) -> str:", "str(text)")
 * **戻り値/レスポンス**: `str`（マスク済み文字列。パターンに一致しなければ入力の`str()`化結果がそのまま返る）
 * 根拠: `[return]` (行番号: 72 / 抜粋: "return _WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))")
 * **副作用**: なし
@@ -175,15 +175,17 @@
 ### `setup_logging`
 
 * **役割**: 指定された名前でロガーを初期化し、既存のハンドラを外した後、コンソール出力、ファイル出力、Discord通知の3種のハンドラを登録して返す。ロガーの`propagate`を`False`に設定し、rootロガーへの伝播を行わない。
-* 根拠: `[setup_logging]` (行番号: 159〜210 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:\n    \"\"\"ロガーのセットアップ\"\"\"\n    logger = logging.getLogger(name)\n    logger.propagate = False")
+* 根拠: `[setup_logging]` (行番号: 160〜213 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:\n    \"\"\"ロガーのセットアップ\"\"\"\n    logger = logging.getLogger(name)\n    logger.propagate = False")
 * **（2026-09-06 品質監査で修正）** 同名ロガーの再セットアップ時は、`list(logger.handlers)`のコピーを走査して各ハンドラを`logger.removeHandler()`で外したうえで`close()`する（`close()`の例外は`except Exception: pass`で無視）。以前は`if logger.handlers: logger.handlers.clear()`のみだったため、`WatchedFileHandler`が開いていた`home_system.log`のファイルディスクリプタが閉じられずに残り、関数内で`get_logger()`を呼ぶ経路（コメントによれば`DDD/newface_monitor.py`の`storage_warmup`等）では呼び出しのたびにfdがリークしていた（pytestの`ResourceWarning`でも検出）。
 * 根拠: `[既存ハンドラのremove+close]` (行番号: 164〜174 / 抜粋: "# 同名ロガーの再セットアップ時は、既存ハンドラを close() してから外す。\n    # 以前は handlers.clear() だけだったため、WatchedFileHandler が開いていた\n    # home_system.log のファイルディスクリプタが閉じられずに残り、\n    ...\n    for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()\n        except Exception:\n            pass")
 * **（Issue #384 で修正）** ファイル出力先は `config.LOG_DIR`（書き込み失敗時のフォールバック解決済み）を使う。以前は `config.BASE_DIR/logs` 固定だったため、`LOG_DIR` が `temp_fallback/logs` に落ちた場合に `health_watch`/`log_analyzer` が読む場所と実際の出力先が食い違っていた。
 * 根拠: `log_dir = getattr(config, "LOG_DIR", None) or os.path.join(config.BASE_DIR, "logs")` (行番号: 188)
+* **（Issue #665 で修正）** ロガーのレベルは`config.LOG_LEVEL`（環境変数`LOG_LEVEL`、既定`"INFO"`）を大文字化して`logging`モジュールの同名定数に解決する。定数が存在しない・整数でない不正値のときは`logging.INFO`にフォールバックする。以前は`logging.INFO`固定で、実機で DEBUG ログを出す手段が無かった。
+* 根拠: `level_name = str(getattr(config, "LOG_LEVEL", "INFO") or "INFO").upper()` (行番号: 177)
 
 
 * **引数/リクエスト**: `name` (型: `str`。取得するロガーの名前)、`webhook_url` (型: `str`、デフォルト `None`。Discord通知先URL)
-* 根拠: `[setup_logging]` (行番号: 159 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
+* 根拠: `[setup_logging]` (行番号: 160 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
 
 
 * **戻り値/レスポンス**: `logging.Logger` (セットアップが完了したロガーインスタンス)
@@ -195,18 +197,18 @@
 
 
 * **エラーハンドリング**: 既存ハンドラの`close()`で発生した`Exception`のみ`pass`で無視する（**（2026-09-06 品質監査で修正）**）。それ以外に明示的な例外捕捉はない。
-* 根拠: `[close()の例外無視]` (行番号: 171〜174 / 抜粋: "try:\n            existing_handler.close()\n        except Exception:\n            pass")、`[setup_logging関数全体]` (行番号: 159〜210 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
+* 根拠: `[close()の例外無視]` (行番号: 171〜174 / 抜粋: "try:\n            existing_handler.close()\n        except Exception:\n            pass")、`[setup_logging関数全体]` (行番号: 160〜213 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
 
 
 
 ### `get_logger`
 
 * **役割**: `setup_logging()`のエイリアス。`from core.logger import get_logger`という形で本関数を参照する呼び出し元向けに、`webhook_url`を渡さず`setup_logging(name)`をそのまま呼び出して結果を返す。
-* 根拠: `[get_logger]` (行番号: 213〜215 / 抜粋: "def get_logger(name: str) -> logging.Logger:\n    \"\"\"setup_logging() のエイリアス。`from core.logger import get_logger` で参照される呼び出し元向け。\"\"\"\n    return setup_logging(name)")
+* 根拠: `[get_logger]` (行番号: 216〜218 / 抜粋: "def get_logger(name: str) -> logging.Logger:\n    \"\"\"setup_logging() のエイリアス。`from core.logger import get_logger` で参照される呼び出し元向け。\"\"\"\n    return setup_logging(name)")
 
 
 * **引数/リクエスト**: `name` (型: `str`。取得するロガーの名前。`setup_logging`と異なり`webhook_url`引数は受け取らない)
-* 根拠: `[関数シグネチャ]` (行番号: 213 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
+* 根拠: `[関数シグネチャ]` (行番号: 216 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
 
 
 * **戻り値/レスポンス**: `logging.Logger` (`setup_logging(name)`の戻り値をそのまま返却)
@@ -218,7 +220,7 @@
 
 
 * **エラーハンドリング**: なし（`setup_logging`のエラーハンドリングに依存。`setup_logging`自体も明示的な例外捕捉を持たない）
-* 根拠: `[get_logger関数全体]` (行番号: 213〜215 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
+* 根拠: `[get_logger関数全体]` (行番号: 216〜218 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
 
 
 
@@ -230,7 +232,7 @@ flowchart TD
         S1["開始"] --> S2["ロガー取得 (プロパゲート無効化)"]
         S2 --> S3{"既存ハンドラがあるか"}
         S3 -- Yes --> S4["各ハンドラを removeHandler() してから close()<br>(close()の例外は無視、2026-09-06 品質監査で修正)"]
-        S3 -- No --> S5["ログレベル(INFO)・フォーマッタ設定"]
+        S3 -- No --> S5["ログレベル(config.LOG_LEVEL、既定INFO)・フォーマッタ設定"]
         S4 --> S5
         S5 --> S6["コンソール出力用 StreamHandler 追加"]
         S6 --> S7["外部：os.makedirs(ディレクトリ作成)"]

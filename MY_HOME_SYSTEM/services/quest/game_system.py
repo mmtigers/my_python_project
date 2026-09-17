@@ -1,4 +1,5 @@
 """services/quest_service.py から分割(Issue #550)。"""
+import collections
 import datetime
 import importlib
 from typing import Any, Dict, List, Optional
@@ -272,30 +273,38 @@ class GameSystem:
                 "SELECT * FROM quest_history WHERE status='pending' ORDER BY completed_at DESC"
             )]
 
+            # #662: 以前は filtered_quests × recent_completed の二重ループで、
+            # クエスト数 Q・履歴数 H に対して O(Q×H) だった(履歴は直近30日分すべて)。
+            # quest_id で1度だけ索引を作れば O(Q+H) になる。recent_completed は
+            # completed_at の降順で取得済みで、defaultdict への追加もその順序を保つため、
+            # 「ユーザーごとの最新履歴を先に見る」という下の判定はそのまま成り立つ。
+            completed_by_quest: Dict[Any, List[Dict[str, Any]]] = collections.defaultdict(list)
+            for c in recent_completed:
+                completed_by_quest[c['quest_id']].append(c)
+
             valid_completed = []
 
             for q in filtered_quests:
                 q_id = q['quest_id']
                 reset_period = q.get('reset_period') or 'daily'
                 is_infinite = (q.get('quest_type') == 'infinite')
+                history_for_quest = completed_by_quest.get(q_id, ())
 
                 if is_infinite:
                     # 無限クエストは条件を満たす全履歴を追加
-                    for c in recent_completed:
-                        if c['quest_id'] == q_id:
-                            if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
-                                valid_completed.append(c)
+                    for c in history_for_quest:
+                        if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
+                            valid_completed.append(c)
                 else:
                     # 通常クエストの場合、ユーザーごとに最新の履歴を評価する
                     users_processed = set()
-                    for c in recent_completed:
-                        if c['quest_id'] == q_id:
-                            uid = c['user_id']
-                            if uid not in users_processed:
-                                if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
-                                    valid_completed.append(c)
-                                # 期間外であっても最新履歴を処理済みにし、同ユーザーの過去履歴検索を終了する
-                                users_processed.add(uid)
+                    for c in history_for_quest:
+                        uid = c['user_id']
+                        if uid not in users_processed:
+                            if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
+                                valid_completed.append(c)
+                            # 期間外であっても最新履歴を処理済みにし、同ユーザーの過去履歴検索を終了する
+                            users_processed.add(uid)
 
             # Q-M3/F-M5 (#371): 以前ここにあった target_user が 'role_' プレフィックスの
             # クエストの共有表示判定(is_shared_completed_by/is_shared_pending_by)は、

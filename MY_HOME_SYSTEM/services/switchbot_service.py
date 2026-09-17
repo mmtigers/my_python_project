@@ -65,7 +65,13 @@ def request_switchbot_api(url: str, headers: Dict[str, str], max_retries: int = 
 
 
 def post_switchbot_api(url: str, headers: Dict[str, str], json_data: Dict[str, Any]) -> Dict[str, Any]:
-    """SwitchBot APIへのPOSTリクエスト（リトライ付き・コマンド動作用）"""
+    """SwitchBot APIへのPOSTリクエスト（コマンド動作用。単発・リトライなし）。
+
+    #661: docstring に「リトライ付き」とあったが実装は単発の `requests.post` で、
+    リトライを行うのは GET 側の `request_switchbot_api` だけ。コマンド送信は
+    「消灯を2回送る」等の二重実行が副作用として現れうるため、単発のままにして
+    説明の方を実装に合わせた(リトライを入れる場合は冪等性の検討とセットで行うこと)。
+    """
     response = requests.post(url, headers=headers, json=json_data, timeout=10)
     response.raise_for_status()
     # コマンド送信レスポンスは汎用的なJSONが返るため、モデルバリデーションは行わずに返す
