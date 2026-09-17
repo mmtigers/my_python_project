@@ -122,7 +122,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `keep_alive_anker.sh`との使い分け基準 | `MY_HOME_SYSTEM/tools/keep_alive_anker.sh`を直接確認した。本ファイル(`keep_alive_speaker.sh`)は`/usr/bin/mpg123 -o pulse "$SOUND_FILE"`(20行目)で無音に近い音源ファイル`silent.mp3`をPulseAudio出力で再生するだけの単純な方式であるのに対し、`keep_alive_anker.sh`は(1)`pactl list sinks short`でAnker SoundCoreのMACアドレス(`F4:4E:FC:B6:65:D4`、10行目)がシンク一覧に含まれるかを先に確認し(24〜28行目)、未接続なら`connect_speaker.sh`を呼び出して再接続を試みた上で(35〜46行目)、(2)接続確認後に`sox`で15Hzの可聴域外の正弦波を音量0.01で2秒間生成し`paplay`にパイプで渡す(59〜61行目)という、接続監視・自動再接続・無音信号生成を組み合わせたより高機能な方式である点が直接確認できた。ただし両スクリプトのうちどちらが実際にどのデバイス/環境向けのcrontab等に登録されているかは、該当するcrontab/systemd設定がリポジトリ内に存在しないため確認できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/tools/keep_alive_anker.sh:8-61`(参考: `MY_HOME_SYSTEM/tools/keep_alive_speaker.sh:8,20`) |
+| `keep_alive_anker.sh`との使い分け基準 | `MY_HOME_SYSTEM/tools/keep_alive_anker.sh`を直接確認した。本ファイル(`keep_alive_speaker.sh`)は`/usr/bin/mpg123 -o pulse "$SOUND_FILE"`(20行目)で無音に近い音源ファイル`silent.mp3`をPulseAudio出力で再生するだけの単純な方式であるのに対し、`keep_alive_anker.sh`は(1)`pactl list sinks short`でAnker SoundCoreのMACアドレス(`.env` の `SPEAKER_BLUETOOTH_MAC`(Issue #663 以前は直書きだった))がシンク一覧に含まれるかを先に確認し(24〜28行目)、未接続なら`connect_speaker.sh`を呼び出して再接続を試みた上で(35〜46行目)、(2)接続確認後に`sox`で15Hzの可聴域外の正弦波を音量0.01で2秒間生成し`paplay`にパイプで渡す(59〜61行目)という、接続監視・自動再接続・無音信号生成を組み合わせたより高機能な方式である点が直接確認できた。ただし両スクリプトのうちどちらが実際にどのデバイス/環境向けのcrontab等に登録されているかは、該当するcrontab/systemd設定がリポジトリ内に存在しないため確認できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/tools/keep_alive_anker.sh:8-61`(参考: `MY_HOME_SYSTEM/tools/keep_alive_speaker.sh:8,20`) |
 
 ## 10. 自己検証結果
 

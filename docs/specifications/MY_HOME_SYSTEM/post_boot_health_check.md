@@ -365,7 +365,7 @@
 ### `PostBootHealthCheck._wait_for_service`
 
 * **役割**: 1つのサービス対象（`target`辞書）について、`type`（`"port"`または`"http"`）に応じて`_check_port`/`_check_http`で疎通確認し、成功するまで最大`max_retries`回・`retry_interval`秒間隔でリトライしたうえで判定結果の`CheckResult`を返す。`check_services`から`ThreadPoolExecutor`経由で対象ごとに並列に呼び出されることを前提とした、旧`check_services`本体のリトライループを1対象分に切り出したメソッド。`critical=True`の対象（Backend Server, Family Quest, Dashboard の3件すべて）が全リトライ失敗した場合は`STATUS_ERR`とする（`critical=False`の対象は現状存在しないため`STATUS_WARN`に倒れる分岐は到達しない）。
-* 根拠: `def _wait_for_service(self, target: dict) -> CheckResult:` (行番号: 221〜244 / 抜粋: "def _wait_for_service(self, target: dict) -> CheckResult:")
+* 根拠: `def _wait_for_service(self, target: dict) -> CheckResult:` (行番号: 222〜245 / 抜粋: "def _wait_for_service(self, target: dict) -> CheckResult:")
 
 
 * **引数/リクエスト**: `target: dict`（`"name"`, `"type"`, `"val"`, `"critical"`の各キーを持つ、`check_services`内で定義される対象定義。`Dashboard`は`{"name": "Dashboard", "type": "port", "val": 8501, "critical": True}`）
@@ -388,11 +388,11 @@
 ### `PostBootHealthCheck.check_peripherals`
 
 * **役割**: NASのマウント状況と書き込み権限、防犯カメラ群のポート疎通、スピーカー（サウンドカードまたはBluetooth接続）の状態をチェックする。NAS書き込み権限エラー時は即座にDiscord通知を送信する。カメラは `config.CAMERAS` が空（`devices.json` 読み込み失敗等）の場合 `STATUS_WARN "No Config"` とする。スピーカーは `TARGET_BLUETOOTH_MAC`（モジュールレベルで `resolve_target_bluetooth_mac()` により、`config.ENABLE_BLUETOOTH` が真の場合のみ `config.SPEAKER_BLUETOOTH_MAC` から取得され、それ以外は `None` となりサウンドカード確認にフォールバックする）が設定されていれば、`stdin=subprocess.DEVNULL`・`timeout=15`を指定した `bluetoothctl info` による実際のBluetooth接続確認を行う。
-* 根拠: `def check_peripherals(self) -> None:` (行番号: 247〜330 / 抜粋: "def check_peripherals(self) -> None:")
+* 根拠: `def check_peripherals(self) -> None:` (行番号: 248〜332 / 抜粋: "def check_peripherals(self) -> None:")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 247 / 抜粋: "def check_peripherals(self) -> None:")
+* 根拠: (行番号: 248 / 抜粋: "def check_peripherals(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`（`self.results` へNAS・カメラ・スピーカーの各 `CheckResult` を追加）
@@ -412,11 +412,11 @@
 ### `PostBootHealthCheck.check_recent_logs`
 
 * **役割**: ログファイルの末尾200行を取得し、直近10分以内に出力された `ERROR` または `CRITICAL` を含む行のみを抽出して結果を判定する。`tail` サブプロセス実行自体が失敗した場合は、ログを読めていない旨を `STATUS_WARN` として明示し、以降の行走査には進まない（旧実装では例外を捕捉してログ出力するのみで `error_lines` が空のまま `STATUS_OK "Clean"` に落ちていたが、修正済み）。
-* 根拠: `def check_recent_logs(self):` (行番号: 333〜375 / 抜粋: "def check_recent_logs(self):")
+* 根拠: `def check_recent_logs(self):` (行番号: 335〜377 / 抜粋: "def check_recent_logs(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 333 / 抜粋: "def check_recent_logs(self):")
+* 根拠: (行番号: 335 / 抜粋: "def check_recent_logs(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ `CheckResult` を追加。ログファイル未存在時・`tail` 失敗時はいずれも途中で `return`）
@@ -435,15 +435,15 @@
 ### `PostBootHealthCheck.run`
 
 * **役割**: 各チェックメソッド（ネットワーク・システムリソース・DB・周辺機器・サービス・ログ）を順に実行し、最後にレポート送信を行う。
-* 根拠: `def run(self):` (行番号: 378〜386 / 抜粋: "def run(self):")
+* 根拠: `def run(self):` (行番号: 380〜388 / 抜粋: "def run(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 378 / 抜粋: "def run(self):")
+* 根拠: (行番号: 380 / 抜粋: "def run(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 378〜386 / 抜粋: "def run(self):")
+* 根拠: (行番号: 380〜388 / 抜粋: "def run(self):")
 
 
 * **副作用**: `logger.info` によるログ出力、各チェックメソッドの実行、`self._send_report()` の呼び出し。
@@ -451,22 +451,22 @@
 
 
 * **エラーハンドリング**: なし（各チェックメソッド内部で個別に処理される前提）
-* 根拠: (行番号: 378〜386 / 抜粋: "def run(self):")
+* 根拠: (行番号: 380〜388 / 抜粋: "def run(self):")
 
 
 
 ### `PostBootHealthCheck._send_report`
 
 * **役割**: `self.results` の内容からステータスアイコン付きのレポート文字列を組み立て、ログ出力とDiscord通知を行う。
-* 根拠: `def _send_report(self):` (行番号: 388〜421 / 抜粋: "def _send_report(self):")
+* 根拠: `def _send_report(self):` (行番号: 390〜423 / 抜粋: "def _send_report(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 388 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 390 / 抜粋: "def _send_report(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 388〜421 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 390〜423 / 抜粋: "def _send_report(self):")
 
 
 * **副作用**: `self._get_uptime()` の呼び出し、`logger.info` によるレポート全文のログ出力、`services.notification_service.send_push` によるDiscord通知送信。
@@ -474,7 +474,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 388〜421 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 390〜423 / 抜粋: "def _send_report(self):")
 
 
 
@@ -643,7 +643,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `core.logger.setup_logging` / `services.notification_service.send_push` の実装 | `MY_HOME_SYSTEM/common.py`15行目・31〜37行目を直接確認したところ、`setup_logging`は`core.logger`から、`send_push`は`services.notification_service`からそのまま再エクスポートされるFacadeであることを確認した。実体の`core/logger.py`の`setup_logging(name, webhook_url=None)`(46〜86行目)はコンソール出力・`config.BASE_DIR/logs/home_system.log`への日次ローテーションファイル出力・ERRORレベルログのDiscord通知(`DiscordErrorHandler`)の3種のハンドラを登録する。実体の`services/notification_service.py`の`send_push(user_id, messages, image_data=None, target="both", channel="notify", filename="snapshot.jpg")`(116〜140行目)は`target`に応じてDiscord Webhook(`_send_discord_webhook`)およびLINE Messaging API(`_send_line_push`)へ送信し、LINE送信失敗時は135〜137行目で`_send_discord_webhook(fallback, None, 'error')`によりDiscordのエラーチャンネルへフォールバック通知する設計であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:15, 31-37`, `MY_HOME_SYSTEM/core/logger.py:46-86`, `MY_HOME_SYSTEM/services/notification_service.py:116-140` |
-| `config` の各設定値の実体 | `MY_HOME_SYSTEM/config.py`を直接確認した。`LOG_DIR`(230〜233行目)は`ensure_safe_path_with_backoff(os.path.join(BASE_DIR, "logs"), "logs")`の戻り値(通常`{BASE_DIR}/logs`)。`SQLITE_DB_PATH`(224行目)は`os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "home_system.db")`。`NAS_IP`(410行目)は既定`"192.168.1.20"`(環境変数`NAS_IP`で上書き可)。`NAS_MOUNT_POINT`(218行目)は既定`"/mnt/nas"`。`FRONTEND_URL`(416行目)は既定`"http://192.168.1.200:8000/quest"`。`CAMERAS`(299〜307行目)は`devices.json`の`"cameras"`配列を`CameraConfig`で検証したリスト。`LINE_USER_ID`(187行目)は`os.getenv("LINE_USER_ID")`で値そのものは`.env`(gitignore対象)依存のため未確認。`NATURE_REMO_ACCESS_TOKEN`(182行目)は`os.getenv("NATURE_REMO_ACCESS_TOKEN")`。`SPEAKER_BLUETOOTH_MAC`(174行目)は既定`"F4:4E:FC:B6:65:D4"`(環境変数`SPEAKER_BLUETOOTH_MAC`で上書き可。`tools/connect_speaker.sh`, `tools/keep_alive_anker.sh`と同一のAnker SoundCore 2のMACアドレス)。なお`BACKEND_URL`は`config.py`内に定義が一切存在しない。以前`post_boot_health_check.py`185行目に`backend_url = getattr(config, "BACKEND_URL", "http://localhost:8000")`という代入があったが、この変数は他のどこからも参照されておらず(Issue #290でデッドコードとして削除)、"Backend Server"の疎通確認は`check_services`内の`targets`リストで常にポート8000への疎通確認としてハードコードされていることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:174, 182, 187, 218, 224, 230-233, 299-307, 410, 416`（参考: `MY_HOME_SYSTEM/post_boot_health_check.py`の`check_services`） |
+| `config` の各設定値の実体 | `MY_HOME_SYSTEM/config.py`を直接確認した。`LOG_DIR`(230〜233行目)は`ensure_safe_path_with_backoff(os.path.join(BASE_DIR, "logs"), "logs")`の戻り値(通常`{BASE_DIR}/logs`)。`SQLITE_DB_PATH`(224行目)は`os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "home_system.db")`。`NAS_IP`は既定`""`(環境変数`NAS_IP`で設定する。Issue #663 で実環境の IP を既定値から外した)。`NAS_MOUNT_POINT`(218行目)は既定`"/mnt/nas"`。`FRONTEND_URL`は既定`"http://127.0.0.1:8000/quest"`(Issue #663 でループバックへ変更)。`CAMERAS`(299〜307行目)は`devices.json`の`"cameras"`配列を`CameraConfig`で検証したリスト。`LINE_USER_ID`(187行目)は`os.getenv("LINE_USER_ID")`で値そのものは`.env`(gitignore対象)依存のため未確認。`NATURE_REMO_ACCESS_TOKEN`(182行目)は`os.getenv("NATURE_REMO_ACCESS_TOKEN")`。`SPEAKER_BLUETOOTH_MAC`は既定`""`(環境変数`SPEAKER_BLUETOOTH_MAC`で設定する。Issue #663 で実機の MAC アドレスを既定値から外し、`tools/connect_speaker.sh`・`tools/keep_alive_anker.sh` も同じキーを `.env` から読むようにした)。なお`BACKEND_URL`は`config.py`内に定義が一切存在しない。以前`post_boot_health_check.py`185行目に`backend_url = getattr(config, "BACKEND_URL", "http://localhost:8000")`という代入があったが、この変数は他のどこからも参照されておらず(Issue #290でデッドコードとして削除)、"Backend Server"の疎通確認は`check_services`内の`targets`リストで常にポート8000への疎通確認としてハードコードされていることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:174, 182, 187, 218, 224, 230-233, 299-307, 410, 416`（参考: `MY_HOME_SYSTEM/post_boot_health_check.py`の`check_services`） |
 | DBスキーマ | `config.SQLITE_DB_PATH`(既定`{BASE_DIR}/home_system.db`)の初期化を担う`MY_HOME_SYSTEM/init_unified_db.py`、および実際のスキーマダンプである`MY_HOME_SYSTEM/current_schema.sql`(全346行)を直接確認した。`current_schema.sql`には`device_records`, `ohayo_records`, `daily_records`, `health_records`, `quest_users`, `quest_master`, `quest_history`, `reward_master`, `switchbot_meter_logs`, `power_usage`等、計36個の`CREATE TABLE`文が存在することを確認した。本ファイルの`PRAGMA quick_check;`(172行目)はテーブル単位ではなくDBファイル全体の整合性チェックであり、対象サイズそのものはDBファイルの実データ量に依存するため本ファイル・スキーマ定義からは判断できない。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql:1-346`（参考: `MY_HOME_SYSTEM/post_boot_health_check.py:160-180`, `MY_HOME_SYSTEM/init_unified_db.py`） |
 | 実行環境の前提 | **（旧版の根拠だった`MY_HOME_SYSTEM/old/README.md`は削除済みのため、現行ツリーで取り直した）** 本ファイルが呼ぶ`vcgencmd measure_temp`(98行目)・`aplay -l`(298行目)・`bluetoothctl info`(304〜307行目)は、いずれもRaspberry Pi(およびPipeWire/BlueZを備えたLinux)固有のコマンドである。実行環境がRaspberry Piであることは、リポジトリ内の複数の現行ファイルから裏付けられる: `deploy/cron/README.md`3行目「実機(Raspberry Pi)の `masahiro` ユーザーの crontab を…このリポジトリでも管理する」、`MY_HOME_SYSTEM/deploy/systemd/README.md`3行目「実機(Raspberry Pi)の `/etc/systemd/system/` に配置されている systemd ユニットファイル…」、および`MY_HOME_SYSTEM/start_all.sh`8・10行目が固定のデプロイ先パス`/home/masahiro/develop`を前提にしている点。ただしこれらはいずれもリポジトリ全体の運用環境を示すものであり、`post_boot_health_check.py`自体を「どの契機で起動するか」を定義する記述は`deploy/cron/crontab`・`deploy/systemd/`のどちらにも見当たらない(`start_all.sh`からの呼び出しも無い)ため、本スクリプトの実行契機だけは依然として未特定である。 | 直接ソース確認: `MY_HOME_SYSTEM/post_boot_health_check.py:98,298,304-307`, `deploy/cron/README.md:3`, `MY_HOME_SYSTEM/deploy/systemd/README.md:3`, `MY_HOME_SYSTEM/start_all.sh:8,10`（参考: [start_all.md](./start_all.md)） |
 

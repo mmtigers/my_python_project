@@ -15,6 +15,7 @@
 ## 2. ファイルの概要
 
 * 指定されたMACアドレスのBluetoothスピーカーの接続状態を監視し、切断状態であれば自動で再接続（最大3回）を試みる。
+* **（Issue #663 で変更）** 対象の MAC アドレスは、以前はスクリプト冒頭に実機の値が直書きされていた。現在は `.env` を読み込んだ後に `MAC="${SPEAKER_BLUETOOTH_MAC:-}"` として受け取る（`config.py` の `SPEAKER_BLUETOOTH_MAC` と同じキー）。未設定の場合はスピーカー運用をしていない環境とみなし、ログに1行残して**何もせず正常終了**する（`config.ENABLE_BLUETOOTH=False` のときと同じ扱い）。`.env` の読み込みより後に代入する必要がある点に注意。
 * 接続状態の変化（復旧、切断検知、再接続成功、失敗）に応じて、ログファイルへの記録とDiscordのWebhookを利用した通知を行う。
 * 再接続にすべて失敗した場合は、自動調査機能としてシステムのBluetoothおよびオーディオ関連のステータスを取得しログに残す。
 
@@ -30,7 +31,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `.env` の内容 | スクリプト外で定義されており、具体的なURLや他の設定値が存在するかどうか不明なため | 変数定義と読み込み (行番号: 8, 18 / 抜粋: `ENV_FILE="$PROJECT_DIR/.env"`) |
+| `.env` の内容 | スクリプト外で定義されており、具体的なURL・`SPEAKER_BLUETOOTH_MAC` の値が不明なため（gitignore 対象。Issue #663 で MAC アドレスもここから読むようになった） | 変数定義と読み込み (行番号: 7, 17 / 抜粋: `ENV_FILE="$PROJECT_DIR/.env"`) |
 | Discord API (Webhook) | 外部のAPIであり、リクエスト成功後の詳細な振る舞いやAPI仕様（レートリミット等）が不明なため | `send_discord`関数 (行番号: 44〜47 / 抜粋: `curl -H "Content-Type: applic...`) |
 | 各種Linuxコマンド | `bluetoothctl`, `pactl`, `rfkill`, `systemctl`等は外部コマンドであり、内部の実装やOS環境による挙動の違いは判断不可なため | `run_diagnostics`関数等 (行番号: 56, 62, 68 / 抜粋: `bluetoothctl info "$MAC"`) |
 

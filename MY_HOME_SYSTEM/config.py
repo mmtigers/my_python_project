@@ -362,7 +362,13 @@ MOTION_COOLDOWN_SEC: int = _get_int_env("MOTION_COOLDOWN_SEC", 60)
 # ==========================================
 # 5. NAS & Network設定
 # ==========================================
-NAS_IP: str = os.getenv("NAS_IP", "192.168.1.20")
+# Issue #663: 以前は実環境の LAN IP を既定値にしていた(.env.example 冒頭の
+# 「個人データを含めない」方針と矛盾していた)。未設定なら空文字とし、
+# NAS の疎通確認(ping)はスキップされる — マウント状態と書き込みテストが
+# NAS の健全性判定の本体で、ping はその補助的な手掛かりでしかないため、
+# 「アドレスが分からないので ping では何も判定できない」を「到達不可」と
+# 取り違えて誤ってフォールバックへ退避しないようにする。
+NAS_IP: str = os.getenv("NAS_IP", "")
 NAS_CHECK_TIMEOUT: int = 5
 # 書き込みテストがタイムアウトした際の再試行回数。
 # autofsのアイドルアンマウント後の初回アクセスやNAS本体のディスクスピンアップは
@@ -373,7 +379,11 @@ NAS_WRITE_CHECK_RETRIES: int = 3
 _default_quest_dir = os.path.join(os.path.dirname(BASE_DIR), "family-quest", "dist")
 QUEST_DIST_DIR: str = os.getenv("QUEST_DIST_DIR", _default_quest_dir)
 
-FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")
+# Issue #663: 既定値は実環境の LAN IP ではなくループバックとする。この URL を使う
+# post_boot_health_check.py は unified_server と同じホストで動くため、ループバックの
+# 方がむしろ確実に到達する(RESET_GAME_API_BASE_URL と同じ考え方)。LAN 内の他端末から
+# のアクセスを想定したホスト指定は .env の FRONTEND_URL で与える。
+FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://127.0.0.1:8000/quest")
 # ブラウザが送信する Origin ヘッダーは scheme://host[:port] のみでパスを含まない
 # (Starlette の CORSMiddleware は allow_origins との完全一致で比較する)。
 # FRONTEND_URL は post_boot_health_check.py 等で実際にHTTPリクエストを送る
@@ -386,7 +396,7 @@ _frontend_origin = "{0.scheme}://{0.netloc}".format(urlparse(FRONTEND_URL))
 # CORS設定に一切反映されない「死に設定」になっていた。ここに一本化する。
 # Issue #663: 以前は公開ドメイン(Cloudflare Tunnel)と LAN 内の開発サーバーのオリジンがここに直書き
 # されていた。個人環境値は .env の CORS_EXTRA_ORIGINS(カンマ区切り)で追加する。
-# 例: CORS_EXTRA_ORIGINS=https://home.example.com,http://192.168.1.200:5173
+# 例: CORS_EXTRA_ORIGINS=https://home.example.com,http://192.168.0.2:5173
 CORS_EXTRA_ORIGINS: List[str] = [
     o.strip() for o in os.getenv("CORS_EXTRA_ORIGINS", "").split(",") if o.strip()
 ]
