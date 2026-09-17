@@ -504,3 +504,39 @@ class TestSecretRedactionFilter:
         with TestClient(unified_server.app):
             filters = logging.getLogger("uvicorn.access").filters
             assert any(isinstance(f, unified_server.SecretRedactionFilter) for f in filters)
+
+
+class TestSecurityHeadersMiddleware:
+    """Issue #665: 最小限のセキュリティヘッダーが全レスポンスに付与されることの回帰テスト。"""
+
+    def test_headers_are_present_on_normal_response(self, api_client):
+        res = api_client.get("/health")
+        assert res.status_code == 200
+        assert res.headers["X-Content-Type-Options"] == "nosniff"
+        assert res.headers["X-Frame-Options"] == "SAMEORIGIN"
+        assert res.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+
+    def test_headers_are_present_on_error_response(self, api_client):
+        """404 等のエラー応答にも付与されること(ミドルウェアが例外経路を素通りしない)。"""
+        res = api_client.get("/api/definitely-not-a-real-route")
+        assert res.status_code == 404
+        assert res.headers["X-Content-Type-Options"] == "nosniff"
+
+    def test_disabled_flag_suppresses_all_headers(self, api_client, monkeypatch):
+        """エッジ側で同じヘッダーを付与している構成向けに、オリジン側の付与を止められること。"""
+        monkeypatch.setattr(config, "SECURITY_HEADERS_ENABLED", False)
+        res = api_client.get("/health")
+        assert "X-Content-Type-Options" not in res.headers
+        assert "X-Frame-Options" not in res.headers
+        assert "Referrer-Policy" not in res.headers
+
+    def test_empty_x_frame_options_skips_only_that_header(self, api_client, monkeypatch):
+        monkeypatch.setattr(config, "SECURITY_HEADER_X_FRAME_OPTIONS", "")
+        res = api_client.get("/health")
+        assert "X-Frame-Options" not in res.headers
+        assert res.headers["X-Content-Type-Options"] == "nosniff"
+
+    def test_x_frame_options_value_is_configurable(self, api_client, monkeypatch):
+        monkeypatch.setattr(config, "SECURITY_HEADER_X_FRAME_OPTIONS", "DENY")
+        res = api_client.get("/health")
+        assert res.headers["X-Frame-Options"] == "DENY"

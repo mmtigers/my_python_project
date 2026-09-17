@@ -202,6 +202,16 @@ LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
 # Issue #663: 以前は実機の MAC アドレスがデフォルト値としてコミットされていた。個人環境値は .env に置く。
 # 未設定なら空文字(post_boot_health_check はスピーカーチェックをスキップする)。
 SPEAKER_BLUETOOTH_MAC: str = os.getenv("SPEAKER_BLUETOOTH_MAC", "")
+# Issue #665: レスポンスに付与するセキュリティヘッダー(unified_server.security_headers_middleware)。
+# 既にエッジ(Cloudflare)側で同じヘッダーを付与している場合はヘッダーが重複しうるため、
+# SECURITY_HEADERS_ENABLED=false でオリジン側の付与を止められるようにしてある。
+# なお本ミドルウェアは「既に値が入っているヘッダーは上書きしない」実装なので、
+# アプリ内の個別レスポンスが明示的に設定した値を壊すことはない。
+SECURITY_HEADERS_ENABLED: bool = os.getenv("SECURITY_HEADERS_ENABLED", "true").strip().lower() != "false"
+# X-Frame-Options の値。既定は SAMEORIGIN(DENYにすると Echo Show 等からの
+# 同一オリジンiframe埋め込みまで壊れるため、既定では同一オリジンを許す)。
+# 空文字にするとこのヘッダーだけ付与しない。
+SECURITY_HEADER_X_FRAME_OPTIONS: str = os.getenv("SECURITY_HEADER_X_FRAME_OPTIONS", "SAMEORIGIN").strip()
 
 # ==========================================
 # 2. 認証・API設定 (Secrets)
