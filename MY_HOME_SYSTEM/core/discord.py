@@ -224,6 +224,13 @@ def post_webhook(
             ステータスコードごとに分岐したい呼び出し元専用で、`requests` の例外は
             握り潰さずそのまま伝播する(成功時は True を返す)。
     """
+    if files and embeds:
+        # #695レビュー指摘: files 送信は multipart になり、_send_chunks の
+        # files分岐が組む data には embeds を含めない(Discordでembedを
+        # multipartに乗せるには本来 payload_json フィールドが要るため、
+        # 単純に data へ足しても正しく送れない)。呼び出し元の設定ミスとして
+        # 無言でembedを握り潰す(#695で発見)のではなく、ここで即座に失敗させる。
+        raise ValueError("post_webhook: files と embeds は同時に指定できません")
     if not url:
         return False
     args = (url, content, files, timeout, embeds, username, session, raise_for_status)

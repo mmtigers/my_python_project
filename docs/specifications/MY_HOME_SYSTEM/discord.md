@@ -120,10 +120,10 @@ Discord Webhook への POST を1箇所へ集約する低レベルユーティリ
 
 ### `post_webhook`
 
-* **役割**: 1つの Webhook URL へ content(必要なら添付・embed つき)を送る高レベル API。上限を超える場合は `split_content` で分割し、添付(`files`)と `embeds` は先頭チャンクにのみ付ける。URL 未設定なら何もせず `False`。
-* **引数/リクエスト**: `url: str | None`、`content: str = ""`、`files: dict | None = None`、`timeout: float = 10`、以下はキーワード専用 — `embeds: Sequence[dict] | None = None`(Discord webhook API の `embeds` 配列)、`username: str | None = None`(webhook 表示名の上書き)、`session: Any | None = None`(送信に使う `requests.Session`。渡すとこちら側のリトライは行わない)、`raise_for_status: bool = False`
+* **役割**: 1つの Webhook URL へ content(必要なら添付・embed つき)を送る高レベル API。上限を超える場合は `split_content` で分割し、添付(`files`)と `embeds` は先頭チャンクにのみ付ける。URL 未設定なら何もせず `False`。**`files` と `embeds` は同時に指定できない**(`files` 送信は multipart になり、embed を載せる口が無いため。指定すると `ValueError`)。
+* **引数/リクエスト**: `url: str | None`、`content: str = ""`、`files: dict | None = None`、`timeout: float = 10`、以下はキーワード専用 — `embeds: Sequence[dict] | None = None`(Discord webhook API の `embeds` 配列。`files` と併用不可)、`username: str | None = None`(webhook 表示名の上書き)、`session: Any | None = None`(送信に使う `requests.Session`。渡すとこちら側のリトライは行わない)、`raise_for_status: bool = False`
 * **戻り値/レスポンス**: `bool`(全チャンクが成功ステータスなら `True`)
-* **エラーハンドリング**: 既定では非成功ステータス・全例外を warning ログ(URL はマスク)にして `False` を返し、通知の失敗で呼び出し元の本処理を止めない。`raise_for_status=True` のときだけは例外を握り潰さずそのまま伝播させる(ステータスコードごとに分岐したい呼び出し元専用。成功時は `True`)。
+* **エラーハンドリング**: `files` と `embeds` を同時に指定した場合は呼び出し元の設定ミスとして `ValueError` を送出する(以前は multipart 送信時に embed が無言で消えていた。PR #695 レビュー指摘)。それ以外は既定では非成功ステータス・全例外を warning ログ(URL はマスク)にして `False` を返し、通知の失敗で呼び出し元の本処理を止めない。`raise_for_status=True` のときだけは例外を握り潰さずそのまま伝播させる(ステータスコードごとに分岐したい呼び出し元専用。成功時は `True`)。
 * 根拠: `post_webhook` (行番号: 201 / 抜粋: "def post_webhook(")
 
 ## 5. 処理フロー図
