@@ -6,6 +6,11 @@ Issue #490: このスクリプトは scheduler_boot.py により5分間隔(1日2
 実行される高頻度ジョブだが、本番コードカバレッジが0%だった。
 毎日深夜2:00〜2:05の時間帯にのみSwitchBotプラグをOFFにし、当日分の
 重複実行をLAST_RUN_FILEで防止するロジックをカバーする。
+
+Issue #592: 「深夜2時」判定はホストOSのタイムゾーン設定に依存しないよう
+core.utils.get_now_jst()経由でJSTの現在時刻を取得するよう修正した。
+テストは`datetime`モジュールをパッチする代わりに、tv_lock_monitorが
+importしている`get_now_jst`関数そのものを固定値を返す関数に差し替える。
 """
 import os
 import sys
@@ -31,12 +36,7 @@ class TestTvLockMonitor:
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "tv-plug-1", raising=False)
         outside_window = datetime(2026, 9, 5, 2, 6, 0)
 
-        class _FixedDatetime(datetime):
-            @classmethod
-            def now(cls, tz=None):
-                return outside_window
-
-        with patch.object(tv_lock_monitor, "datetime", _FixedDatetime), \
+        with patch.object(tv_lock_monitor, "get_now_jst", lambda: outside_window), \
              patch.object(tv_lock_monitor.switchbot_service, "send_device_command") as mock_cmd:
             tv_lock_monitor.main()
 
@@ -49,12 +49,7 @@ class TestTvLockMonitor:
 
         in_window = datetime(2026, 9, 5, 2, 3, 0)
 
-        class _FixedDatetime(datetime):
-            @classmethod
-            def now(cls, tz=None):
-                return in_window
-
-        with patch.object(tv_lock_monitor, "datetime", _FixedDatetime), \
+        with patch.object(tv_lock_monitor, "get_now_jst", lambda: in_window), \
              patch.object(
                  tv_lock_monitor.switchbot_service,
                  "send_device_command",
@@ -76,12 +71,7 @@ class TestTvLockMonitor:
 
         in_window = datetime(2026, 9, 5, 2, 1, 0)
 
-        class _FixedDatetime(datetime):
-            @classmethod
-            def now(cls, tz=None):
-                return in_window
-
-        with patch.object(tv_lock_monitor, "datetime", _FixedDatetime), \
+        with patch.object(tv_lock_monitor, "get_now_jst", lambda: in_window), \
              patch.object(tv_lock_monitor.switchbot_service, "send_device_command") as mock_cmd:
             tv_lock_monitor.main()
 
@@ -96,12 +86,7 @@ class TestTvLockMonitor:
 
         in_window = datetime(2026, 9, 5, 2, 1, 0)
 
-        class _FixedDatetime(datetime):
-            @classmethod
-            def now(cls, tz=None):
-                return in_window
-
-        with patch.object(tv_lock_monitor, "datetime", _FixedDatetime), \
+        with patch.object(tv_lock_monitor, "get_now_jst", lambda: in_window), \
              patch.object(
                  tv_lock_monitor.switchbot_service,
                  "send_device_command",
@@ -120,12 +105,7 @@ class TestTvLockMonitor:
 
         in_window = datetime(2026, 9, 5, 2, 1, 0)
 
-        class _FixedDatetime(datetime):
-            @classmethod
-            def now(cls, tz=None):
-                return in_window
-
-        with patch.object(tv_lock_monitor, "datetime", _FixedDatetime), \
+        with patch.object(tv_lock_monitor, "get_now_jst", lambda: in_window), \
              patch.object(
                  tv_lock_monitor.switchbot_service,
                  "send_device_command",
@@ -142,12 +122,7 @@ class TestTvLockMonitor:
 
         in_window = datetime(2026, 9, 5, 2, 1, 0)
 
-        class _FixedDatetime(datetime):
-            @classmethod
-            def now(cls, tz=None):
-                return in_window
-
-        with patch.object(tv_lock_monitor, "datetime", _FixedDatetime), \
+        with patch.object(tv_lock_monitor, "get_now_jst", lambda: in_window), \
              patch.object(
                  tv_lock_monitor.switchbot_service,
                  "send_device_command",
@@ -157,3 +132,23 @@ class TestTvLockMonitor:
             tv_lock_monitor.main()
 
         assert not os.path.exists(last_run_file)
+
+    def test_hour_check_uses_jst_regardless_of_host_timezone(self, tmp_path, monkeypatch):
+        """Issue #592: get_now_jst()由来のawareなJST時刻でも、naiveなdatetimeを
+        使っていた以前のテストと同じ判定結果になること(hour/minute/strftimeの
+        扱いはaware/naiveで変わらないことの確認)。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "tv-plug-1", raising=False)
+        last_run_file = str(tmp_path / "last_tv_lock.txt")
+        monkeypatch.setattr(tv_lock_monitor, "LAST_RUN_FILE", last_run_file)
+        import pytz
+        aware_in_window = pytz.timezone("Asia/Tokyo").localize(datetime(2026, 9, 5, 2, 3, 0))
+
+        with patch.object(tv_lock_monitor, "get_now_jst", lambda: aware_in_window), \
+             patch.object(
+                 tv_lock_monitor.switchbot_service,
+                 "send_device_command",
+                 return_value={"statusCode": 100},
+             ) as mock_cmd:
+            tv_lock_monitor.main()
+
+        mock_cmd.assert_called_once_with("tv-plug-1", "turnOff")

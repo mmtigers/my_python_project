@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `6007292` |
+| 解析基準コミット | `0d67384` (+同一ブランチ内でエラートースト重複ロジックのonErrorへの集約を追加修正) |
 
 ## 関連ドキュメント
 
@@ -16,17 +16,22 @@
 * [../../quest/hooks/useQuestStatus.md](../../quest/hooks/useQuestStatus.md) - `getQuestLockState`の実装元。「今日やることがあるか」の判定に使用
 * [../../shop/components/RewardShop.md](../../shop/components/RewardShop.md) - パネル内「ごほうび」タブの表示コンポーネント
 * [../../shop/components/InventoryList.md](../../shop/components/InventoryList.md) - パネル内「もちもの」タブの表示コンポーネント（`panelMode`付き）
-* [../../../types/index.md](../../../types/index.md) - `ID`/`User`/`Quest`/`QuestHistory`/`Reward`型の定義元
-* [../../../../App.md](../../../../App.md) - 呼び出し元（横画面レイアウト時のメイン表示コンポーネントとして使用）
+* [../../quest/context/useQuestActivity.md](../../quest/context/useQuestActivity.md) - **（Issue #659で新規追加）** `completedSignal`/`processingQuestKeys`/`busyHistoryIds`をPropsの素通しではなくContextから読むためのフック。`FamilyDashboard`と`FamilyPanel`の2箇所で呼ぶ
+* [../../quest/context/questActivityShared.md](../../quest/context/questActivityShared.md) - **（Issue #659で新規追加）** 上記フックが返す`QuestActivityValue`型とProvider未設置時の既定値`QUEST_ACTIVITY_IDLE`の定義元
+* [../../../types/index.md](../../../types/index.md) - `User`/`Quest`/`QuestHistory`/`Reward`型の定義元
+* [../../../hooks/useRoutineData.md](../../../hooks/useRoutineData.md) - **（すごろく機能で新規追加）** `FamilyPanel`が`user.user_id`ごとに個別に呼び出す、「きょうのすごろく」の当日フロー状態取得・ステップ完了報告フック
+* [../../routine/components/RoutineFlow.md](../../routine/components/RoutineFlow.md) - **（すごろく機能で新規追加）** `FamilyPanel`の`quest`タブが`compact`付きで表示するすごろくUI本体（デフォルトエクスポート`RoutineFlow`と名前付きエクスポート`RoutineFreeTimeBanner`の両方）
+* [../../../lib/routineDataSchema.md](../../../lib/routineDataSchema.md) - **（すごろく機能で新規追加、コードレビューでApp.tsx側との重複をselectRoutineFlowへ集約）** `selectRoutineFlow`（誘導中/自由時間中のフローキーをam優先で判定するヘルパー）の実装元
+* [../../../../App.md](../../../../App.md) - 呼び出し元（横画面レイアウト時のメイン表示コンポーネントとして使用）。縦画面側でも同様の`useRoutineData`+`RoutineFlow`/`RoutineFreeTimeBanner`パターンを採る
 
 ## 2. ファイルの概要
 
 横画面（Echo Show 15等の常設デバイス）用のメインレイアウトコンポーネント`FamilyDashboard`と、その内部で使われるユーザー単位のパネルコンポーネント`FamilyPanel`を定義する。パパ・ママ・兄・妹（**Issue #412 品質で修正**: 以前は`FAMILY_ORDER`というハードコードされた配列で固定していたが、サーバー側(`quest_service.py`の`GameSystem.get_all_view_data`)が既に`quest_data.USERS`の宣言順(同じdad→mom→son→daughter)でソート済みの`users`を返すため、クライアント側の再ソートは重複と判断し削除した。現在は受け取った`users`の順序をそのまま使う）を1行4列のグリッドで常時表示し、各パネル内でそのユーザーのステータスと、クエスト/ごほうび/もちものの3タブの内容が完結する（別画面への誘導をしない）。親向けの承認機能は独立画面を持たず、メイン画面上部に常時統合表示される。テーマカラーは`useSettings`から取得し、直前に操作したパネルのみリング（強調枠）でハイライトする。
 
-* 根拠: コンポーネント直前のコメント (行番号: 44〜47 / 抜粋: "// 横画面(Echo Show 15等の常設デバイス)用メインレイアウト。\n// パパ・ママ・兄・妹を1行4列で常時表示し、各パネル内でその人のステータスと\n// その日のクエスト一覧が完結する(別画面への誘導をしない)。親向けの承認機能は\n// 独立画面を持たず、このメイン画面上部に常時統合表示する。")
-* 根拠: `FamilyDashboard`関数定義 (行番号: 48 / 抜粋: "const FamilyDashboard: React.FC<FamilyDashboardProps> = ({")
+* 根拠: コンポーネント直前のコメント (行番号: 42〜45 / 抜粋: "// 横画面(Echo Show 15等の常設デバイス)用メインレイアウト。\n// パパ・ママ・兄・妹を1行4列で常時表示し、各パネル内でその人のステータスと\n// その日のクエスト一覧が完結する(別画面への誘導をしない)。親向けの承認機能は\n// 独立画面を持たず、このメイン画面上部に常時統合表示する。")
+* 根拠: `FamilyDashboard`関数定義 (行番号: 46 / 抜粋: "const FamilyDashboard: React.FC<FamilyDashboardProps> = ({")
 * 根拠: `FamilyPanel`関数定義およびタブ状態 (行番号: 135, 139 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({", "const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');")
-* 根拠: バグ修正コメント（テーマカラーとリングの分離） (行番号: 141〜144 / 抜粋: "// ★バグ修正: 以前はテーマカラーを isActive(直前に操作したパネル)の時だけ適用していたため、\n    // 設定画面で色を選んでも、操作するまでメイン画面(横画面)に何も反映されなかった。\n    // パネルの縁取りは常にそのユーザーのテーマカラーを表示し、リング(強調枠)だけを\n    // 「直前に操作した」ことの一時的なハイライトとして使う。")
+* 根拠: バグ修正コメント（テーマカラーとリングの分離） (行番号: 165〜168 / 抜粋: "// ★バグ修正: 以前はテーマカラーを isActive(直前に操作したパネル)の時だけ適用していたため、\n    // 設定画面で色を選んでも、操作するまでメイン画面(横画面)に何も反映されなかった。\n    // パネルの縁取りは常にそのユーザーのテーマカラーを表示し、リング(強調枠)だけを\n    // 「直前に操作した」ことの一時的なハイライトとして使う。")
 
 ## 3. 外部依存関係
 
@@ -36,7 +41,8 @@
 | --- | --- | --- | --- |
 | `React`, `useState` | ライブラリ | コンポーネント定義とパネルごとのタブ状態・直前操作パネルの状態管理 | `import React, { useState } from 'react';` (行番号: 1) |
 | `Sword`, `ShoppingBag`, `Package` | アイコンコンポーネント | パネル内タブ（クエスト/ごほうび/もちもの）ボタンのアイコン表示 | `import { Sword, ShoppingBag, Package } from 'lucide-react';` (行番号: 2) |
-| `ID`, `User`, `Quest`, `QuestHistory`, `Reward` | 型定義 | Propsおよび内部変数の型指定。`ID`はIssue #102で追加された`completedSignal`（`{ id: ID; nonce: number } \| null`）の型に使う。 | `import { ID, User, Quest, QuestHistory, Reward } from '@/types';` (行番号: 3) |
+| `User`, `Quest`, `QuestHistory`, `Reward` | 型定義 | Propsおよび内部変数の型指定。**（Issue #659）** 以前あった`CompletedSignal`・`ID`のimportは、`completedSignal`/`busyHistoryIds`がPropsから`QuestActivityContext`へ移ったため不要になり削除された。 | `import { User, Quest, QuestHistory, Reward } from '@/types';` (行番号: 3) |
+| `useQuestActivity` | Custom Hook | **（Issue #659）** 進行中のクエスト操作（`completedSignal`/`processingQuestKeys`/`busyHistoryIds`）をPropsではなくContextから読むために使う。`FamilyDashboard`と`FamilyPanel`の2箇所で呼ぶ。 | `import { useQuestActivity } from '../../quest/context/useQuestActivity';` (行番号: 18) |
 | `UserStatusCard` | コンポーネント | 各パネル上部のユーザーステータス表示 | `import UserStatusCard from './UserStatusCard';` (行番号: 4) |
 | `QuestList` | コンポーネント | パネル内のクエスト一覧表示（`panelMode`/`iconFirst`付き） | `import QuestList from '../../quest/components/QuestList';` (行番号: 5) |
 | `ApprovalList` | コンポーネント | メイン画面上部の承認待ち一覧表示 | `import ApprovalList from '../../quest/components/ApprovalList';` (行番号: 6) |
@@ -45,12 +51,20 @@
 | `useSettings` | フック | テーマ設定（アイコン優先ユーザー、ユーザーごとのテーマカラー）の取得 | `import { useSettings } from '@/context/useSettings';` (行番号: 9) |
 | `THEME_BORDER_CLASSES`, `THEME_RING_CLASSES` | 定数オブジェクト | テーマカラーキーに対応するボーダー/リングのTailwindクラス名解決 | `import { THEME_BORDER_CLASSES, THEME_RING_CLASSES } from '@/context/settingsShared';` (行番号: 10) |
 | `getQuestLockState` | 関数 | クエストのロック状態・完了状態を判定し、パネルの「今日やることがない」判定に使用 | `import { getQuestLockState } from '../../quest/hooks/useQuestStatus';` (行番号: 11) |
+| `isQuestVisibleToUser` | 関数（Issue #412 品質で`lib/questTargeting`へ集約） | `hasNothingToDo`内でのクエスト対象判定に使用 | `import { isQuestVisibleToUser } from '@/lib/questTargeting';` (行番号: 12) |
+| `useRoutineData` | カスタムフック（すごろく機能で新規追加） | `FamilyPanel`が`user.user_id`ごとに個別に呼び出す、当日のすごろくフロー状態取得・ステップ完了報告 | `import { useRoutineData } from '@/hooks/useRoutineData';` (行番号: 13) |
+| `RoutineFlow` (default), `RoutineFreeTimeBanner` | コンポーネント（すごろく機能で新規追加） | `RoutineFlow`はすごろく誘導中の全ステップ表示（`compact`付き）、`RoutineFreeTimeBanner`は自由時間中の現在地バナー表示 | `import RoutineFlow, { RoutineFreeTimeBanner } from '../../routine/components/RoutineFlow';` (行番号: 14) |
+| `selectRoutineFlow` | 関数（すごろく機能で新規追加、コードレビューで重複解消のため導入） | `routineFlows.am`/`routineFlows.pm`から誘導中/自由時間中のフローキーをam優先でまとめて算出するヘルパー | `import { selectRoutineFlow } from '@/lib/routineDataSchema';` (行番号: 15) |
+| `useSound` | フック（すごろく機能で新規追加） | `FamilyPanel`内でLEVEL UP演出(`play('levelUp')`)・エラー通知(`play('cancel')`)の効果音を再生するために使用 | `import { useSound } from '@/hooks/useSound';` (行番号: 16) |
+| `useToast` | フック（すごろく機能で新規追加） | `FamilyPanel`内でLEVEL UPトースト・エラートーストを表示するために使用。`FamilyDashboard`から`App.tsx`経由で渡されるProps ではなく、`FamilyPanel`が直接Reactコンテキストとして取得する | `import { useToast } from '@/context/useToast';` (行番号: 17) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `UserStatusCard`, `QuestList`, `ApprovalList`, `RewardShop`, `InventoryList` | 実装ファイルが本タスクでは提供されておらず（`InventoryList`のみ別ファイルとして解析済みだが、本ファイル側では利用箇所の観測のみ）、内部のレンダリング内容や副作用の全容は本ファイル単体からは不明 | インポート文 (行番号: 4〜8) |
+| `UserStatusCard`, `QuestList`, `ApprovalList`, `RewardShop`, `InventoryList`, `RoutineFlow`, `RoutineFreeTimeBanner` | 実装ファイルが本タスクでは提供されておらず（`InventoryList`/`RoutineFlow`は別ファイルとして解析済みだが、本ファイル側では利用箇所の観測のみ）、内部のレンダリング内容や副作用の全容は本ファイル単体からは不明 | インポート文 (行番号: 4〜8, 14) |
+| `useRoutineData` | `@/hooks/useRoutineData`に実装があり、ポーリング間隔・エラーハンドリングの詳細は本ファイルからは呼び出し結果の利用箇所のみ確認できる | `import { useRoutineData } from '@/hooks/useRoutineData';` (行番号: 13) |
+| `selectRoutineFlow` | `@/lib/routineDataSchema`に実装があり、優先順位判定の詳細は本ファイルからは呼び出し結果の利用箇所のみ確認できる（詳細は`routineDataSchema.md`参照） | `import { selectRoutineFlow } from '@/lib/routineDataSchema';` (行番号: 15) |
 | `useSettings` | `@/context/useSettings`に実装があり、`iconFirstUserIds`/`userThemeColors`をどのように算出・永続化しているかが本ファイルからは不明 | `import { useSettings } from '@/context/useSettings';` (行番号: 9) |
 | `THEME_BORDER_CLASSES`, `THEME_RING_CLASSES` | `@/context/settingsShared`に定義された定数オブジェクトであり、取りうるキーの全容が本ファイルからは不明 | `import { THEME_BORDER_CLASSES, THEME_RING_CLASSES } from '@/context/settingsShared';` (行番号: 10) |
 | `getQuestLockState` | `../../quest/hooks/useQuestStatus`に実装があり、ロック判定・完了判定の詳細ロジックは本ファイルからは呼び出し結果の型（`isLocked`/`isDone`）のみ確認可能 | `import { getQuestLockState } from '../../quest/hooks/useQuestStatus';` (行番号: 11) |
@@ -66,26 +80,26 @@
 
 ### `FamilyDashboardProps` (型定義)
 
-* **役割**: `FamilyDashboard`コンポーネントが受け取るPropsの型定義。Issue #102で、完了APIが実際に成功した時点でのみ対象クエストの完了音・無限クエストのクールダウンを発火させるための通知`completedSignal: CompletedSignal | null`が追加された（呼び出し元の`App.tsx`から渡され、各`FamilyPanel`へそのまま転送される）。**（Issue #391）** さらに任意の`processingQuestKeys?: string[]`（完了/取消APIが送信中の`(user_id, quest_id)`キー集合。各`FamilyPanel`→`QuestList`へ透過的に渡す）、`busyHistoryIds?: ID[]`と`isApprovingAll?: boolean`（承認APIの送信中履歴idと一括承認中フラグ。上部の`ApprovalList`へ渡す）が追加された。**（Issue #363）** `CompletedSignal`（`@/types`）は`{ id, userId, nonce }`を持ち、同じシグナルが4パネル全員へ渡されても、各パネルの`QuestItem`が`userId`と自パネルのユーザーを照合して自分の完了にだけ反応する（以前は`{ id, nonce }`のみで、兄の無限クエスト完了が他3人のパネルにもクールダウンを掛けていた）。
-* 根拠: (行番号: 3, 40〜49, 99〜100, 121 / 抜粋: "import { CompletedSignal, ID, User, Quest, QuestHistory, Reward } from '@/types';", "// クールダウンを発火させるための通知(App側で管理)。#363: userId を含み、\n    // 各パネルの QuestItem は自分のユーザーの完了にのみ反応する。\n    completedSignal: CompletedSignal | null;\n    // #391: 完了/取消APIが送信中の (user_id, quest_id) キー集合。各パネルの QuestList へ透過的に渡す。\n    processingQuestKeys?: string[];\n    // #391(F-L8): 承認APIが送信中の履歴id集合と一括承認中フラグ。ApprovalList のボタン表示に使う。\n    busyHistoryIds?: ID[];\n    isApprovingAll?: boolean;", "busyHistoryIds={busyHistoryIds}\n                    isApprovingAll={isApprovingAll}", "processingQuestKeys={processingQuestKeys}")
-* 根拠: (行番号: 29〜44 / 抜粋: "interface FamilyDashboardProps {\n    users: User[];\n    quests: Quest[];\n    completedQuests: QuestHistory[];\n    pendingQuests: QuestHistory[];\n    rewards: Reward[];\n    onQuestClick: (user: User, quest: Quest) => void;\n    onBuyReward: (user: User, reward: Reward) => void;\n    onApprove: (history: QuestHistory) => void;\n    onReject: (history: QuestHistory) => void;\n    onApproveAll: () => void;\n    // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの\n    // クールダウンを発火させるための通知(App側で管理)。\n    completedSignal: { id: ID; nonce: number } | null;\n    onAvatarClick: (user: User) => void;\n}")
+* **役割**: `FamilyDashboard`コンポーネントが受け取るPropsの型定義。**（Issue #659）** 以前ここにあった`completedSignal`・`processingQuestKeys`・`busyHistoryIds`の3つは削除され、`QuestActivityContext`から読むようになった。ソース中のコメントによれば、これは「以前はここと`FamilyPanelProps`に素通しのpropsとして並んでおり、中継する2つのコンポーネントは値を使わないのに型と引数だけを持たされていた」ためである。承認バーの`isApprovingAll?: boolean`（一括承認中フラグ）はPropsに残っている。
+* 根拠: (行番号: 3, 30〜35, 84〜85 / 抜粋: "import { User, Quest, QuestHistory, Reward } from '@/types';", "    // #659: completedSignal / processingQuestKeys / busyHistoryIds は\n    // QuestActivityContext から読む。以前はここと FamilyPanelProps に素通しの\n    // props として並んでおり、中継する2つのコンポーネントは値を使わないのに\n    // 型と引数だけを持たされていた。\n    isApprovingAll?: boolean;", "busyHistoryIds={busyHistoryIds}\n                    isApprovingAll={isApprovingAll}")
+* 根拠: (行番号: 20 / 抜粋: "interface FamilyDashboardProps {")
 
 
 ### `FamilyDashboard`
 
-* **役割**: 代表の親（`role === 'role_adult'`、無ければ先頭）を`ApprovalList`の`currentUser`として渡して承認バーを表示したのち、`users`（**Issue #412 品質で修正**: サーバーが返す順のまま。以前の`sortByFamilyOrder`呼び出しは削除）の各ユーザーについて`FamilyPanel`をグリッド表示する。承認バーの記録名義は「親」で固定し、実際にどちらの親が画面をタップしたかは区別しない（要件5）。直前に操作したパネルのIDを`activeUserId`として保持し、各`FamilyPanel`へ渡す。各ユーザーについて`hasNothingToDo`で「今日やることが1件もないか」を判定し`isIdle`として渡す。Issue #102で追加された`completedSignal`（Propsで受け取る）はここでは判定に一切関与せず、そのまま各`FamilyPanel`へ転送するだけである。
-* 根拠: (行番号: 50〜118 / 抜粋: "const FamilyDashboard: React.FC<FamilyDashboardProps> = ({")
-* 根拠: 代表の親のコメント (行番号: 56〜58 / 抜粋: "// 承認バーの記録名義は「親」で固定し、実際に画面をタップしたのがどちらの親かは\n    // 区別しない(要件5: 現状も厳密なセキュリティ境界ではないための最もシンプルな方式)。\n    const representativeParent = orderedUsers.find(u => u.role === 'role_adult') || orderedUsers[0];")
-* 根拠: `activeUserId`のコメント (行番号: 60〜62 / 抜粋: "// 角度⑥: 直前に操作したパネルを枠でハイライトし、常時4人表示でも\n    // 「今どこを触っているか」が一目でわかるようにする。\n    const [activeUserId, setActiveUserId] = useState<string | null>(null);")
-* 根拠: `FamilyPanel`への`completedSignal`転送 (行番号: 111 / 抜粋: "completedSignal={completedSignal}")
+* **役割**: 代表の親（`role === 'role_adult'`、無ければ先頭）を`ApprovalList`の`currentUser`として渡して承認バーを表示したのち、`users`（**Issue #412 品質で修正**: サーバーが返す順のまま。以前の`sortByFamilyOrder`呼び出しは削除）の各ユーザーについて`FamilyPanel`をグリッド表示する。承認バーの記録名義は「親」で固定し、実際にどちらの親が画面をタップしたかは区別しない（要件5）。直前に操作したパネルのIDを`activeUserId`として保持し、各`FamilyPanel`へ渡す。各ユーザーについて`hasNothingToDo`で「今日やることが1件もないか」を判定し`isIdle`として渡す。**（Issue #659）** `completedSignal`と`processingQuestKeys`はここでは受け取らず、各`FamilyPanel`が自分で`useQuestActivity()`から読む。本コンポーネントが`useQuestActivity()`から読むのは`busyHistoryIds`だけで、上部の`ApprovalList`へPropsとして渡すために使う。
+* 根拠: (行番号: 46〜114 / 抜粋: "const FamilyDashboard: React.FC<FamilyDashboardProps> = ({")
+* 根拠: 代表の親のコメント (行番号: 58〜60 / 抜粋: "// 承認バーの記録名義は「親」で固定し、実際に画面をタップしたのがどちらの親かは\n    // 区別しない(要件5: 現状も厳密なセキュリティ境界ではないための最もシンプルな方式)。\n    const representativeParent = orderedUsers.find(u => u.role === 'role_adult') || orderedUsers[0];")
+* 根拠: `activeUserId`のコメント (行番号: 62〜64 / 抜粋: "// 角度⑥: 直前に操作したパネルを枠でハイライトし、常時4人表示でも\n    // 「今どこを触っているか」が一目でわかるようにする。\n    const [activeUserId, setActiveUserId] = useState<string | null>(null);")
+* 根拠: `useQuestActivity`からの`busyHistoryIds`取得と`ApprovalList`への受け渡し (行番号: 49, 84 / 抜粋: "    const { busyHistoryIds } = useQuestActivity();", "busyHistoryIds={busyHistoryIds}")
 
 
 * **引数/リクエスト**: `FamilyDashboardProps`
-* 根拠: (行番号: 50〜53 / 抜粋: "const FamilyDashboard: React.FC<FamilyDashboardProps> = ({\n    users, quests, completedQuests, pendingQuests, rewards,\n    onQuestClick, onBuyReward, onApprove, onReject, onApproveAll, completedSignal, onAvatarClick,\n}) => {")
+* 根拠: (行番号: 43 / 抜粋: "const FamilyDashboard: React.FC<FamilyDashboardProps> = ({")
 
 
 * **戻り値/レスポンス**: JSX.Element
-* 根拠: (行番号: 83〜117 / 抜粋: "return (\n        <div className=\"flex flex-col gap-4 animate-in fade-in duration-300\">")
+* 根拠: (行番号: 77〜111 / 抜粋: "return (\n        <div className=\"flex flex-col gap-4 animate-in fade-in duration-300\">")
 
 
 * **副作用**: `activeUserId`ローカルステートの更新（`onInteract`経由）。それ以外は描画のみで、実際の副作用は`onQuestClick`/`onBuyReward`/`onApprove`/`onReject`/`onApproveAll`/`onAvatarClick`のコールバック経由で親コンポーネントに委譲される。
@@ -93,7 +107,7 @@
 
 
 * **エラーハンドリング**: `representativeParent`が存在する場合のみ`ApprovalList`を描画する（`orderedUsers`が空配列で`representativeParent`が`undefined`になった場合は`ApprovalList`を描画しない）。
-* 根拠: (行番号: 85 / 抜粋: "{representativeParent && (")
+* 根拠: (行番号: 79 / 抜粋: "{representativeParent && (")
 
 
 
@@ -111,32 +125,34 @@
 
 ### `FamilyPanelProps` (型定義)
 
-* **役割**: `FamilyPanel`コンポーネントが受け取るPropsの型定義。Issue #102で、`FamilyDashboard`から転送される`completedSignal: CompletedSignal | null`が追加された（Issue #363で`userId`を含む`CompletedSignal`型に変更）。Issue #391で同じく転送用の`processingQuestKeys?: string[]`が追加され、`QuestList`へそのまま渡される。
-* 根拠: (行番号: 143〜144, 214 / 抜粋: "completedSignal: CompletedSignal | null;\n    processingQuestKeys?: string[];", "processingQuestKeys={processingQuestKeys}")
-* 根拠: (行番号: 120〜135 / 抜粋: "interface FamilyPanelProps {\n    user: User;\n    quests: Quest[];\n    completedQuests: QuestHistory[];\n    pendingQuests: QuestHistory[];\n    rewards: Reward[];\n    iconFirst: boolean;\n    isActive: boolean;\n    themeColorKey?: keyof typeof THEME_BORDER_CLASSES;\n    isIdle: boolean;\n    onInteract: () => void;\n    onQuestClick: (quest: Quest) => void;\n    onBuyReward: (reward: Reward) => void;\n    completedSignal: { id: ID; nonce: number } | null;\n    onAvatarClick: () => void;\n}")
+* **役割**: `FamilyPanel`コンポーネントが受け取るPropsの型定義。**（Issue #659）** 以前あった転送用の`completedSignal`・`processingQuestKeys`は削除され、`FamilyPanel`の本体が`useQuestActivity()`から直接読むようになった。
+* 根拠: (行番号: 135, 236〜237 / 抜粋: "    const { completedSignal, processingQuestKeys } = useQuestActivity();", "completedSignal={completedSignal}\n                            processingQuestKeys={processingQuestKeys}")
+* 根拠: (行番号: 113 / 抜粋: "interface FamilyPanelProps {")
 
 
 ### `FamilyPanel`
 
-* **役割**: 1ユーザー分のパネルを描画する。パネルのボーダー色は常に`themeColorKey`（あれば`THEME_BORDER_CLASSES`、無ければ`isActive`時`border-yellow-400`／それ以外`border-gray-700`）を反映し、リング（強調枠）は`isActive`の時のみ付与する。`isIdle`の場合はパネル全体に`opacity-70`を適用する。パネル上部に`UserStatusCard`、その下にタブ切替（`quest`/`shop`/`inventory`、Echo Show 15でのタッチ操作を想定し44px以上のタップ領域を確保、アイコンのみ表示）、下部に選択中タブに応じて`QuestList`（`panelMode`固定、`iconFirst`とIssue #102で追加された`completedSignal`をProps経由でそのまま転送）、`RewardShop`、または`InventoryList`（`panelMode`固定）を表示する。コンテンツ領域はパネルごとに独立スクロール（`max-h-[60vh] overflow-y-auto`）を持つ。パネル内のどこかをクリックすると`onInteract`（`onClickCapture`）が発火する。
-* 根拠: (行番号: 137〜220 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({")
-* 根拠: ボーダー/リングのバグ修正コメント (行番号: 143〜146)
-* 根拠: 独立スクロールのコメント (行番号: 193 / 抜粋: "{/* パネルごとに独立スクロール(要件5) */}")
-* 根拠: タブ切替コメント (行番号: 163〜165 / 抜粋: "{/* タブ切替: Echo Show 15でのタッチ操作を想定し、タップ領域を大きめに確保。\n                ★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す。\n                テキストは不要のためアイコンのみ表示する(aria-labelで読み上げは維持) */}")
-* 根拠: `onClickCapture={onInteract}` (行番号: 156)
-* 根拠: `QuestList`への`completedSignal`転送 (行番号: 202 / 抜粋: "completedSignal={completedSignal}")
+* **役割**: 1ユーザー分のパネルを描画する。パネルのボーダー色は常に`themeColorKey`（あれば`THEME_BORDER_CLASSES`、無ければ`isActive`時`border-yellow-400`／それ以外`border-gray-700`）を反映し、リング（強調枠）は`isActive`の時のみ付与する。`isIdle`の場合はパネル全体に`opacity-70`を適用する。パネル上部に`UserStatusCard`、その下にタブ切替（`quest`/`shop`/`inventory`、Echo Show 15でのタッチ操作を想定し44px以上のタップ領域を確保、アイコンのみ表示）、下部に選択中タブに応じたコンテンツを表示する。**（すごろく機能で変更）** `quest`タブの中身は単純な`QuestList`直接描画ではなくなり、`activeRoutineKey`（後述）が真であれば`QuestList`の代わりに`RoutineFlow`（`compact`付き）を表示し、`activeRoutineKey`が無ければ、`freeTimeRoutineKey`（後述）が真の場合のみ`RoutineFreeTimeBanner`を`QuestList`の直前に挟んだうえで、従来通りの`QuestList`（`panelMode`固定、`iconFirst`をPropsから、`completedSignal`と`processingQuestKeys`は**Issue #659以降`useQuestActivity()`から読んだ値**を渡す）を表示する。`shop`/`inventory`タブの中身（`RewardShop`/`InventoryList`（`panelMode`固定））はすごろく機能による変更を受けていない。コンテンツ領域はパネルごとに独立スクロール（`max-h-[60vh] overflow-y-auto`）を持つ。パネル内のどこかをクリックすると`onInteract`（`onClickCapture`）が発火する。
+* 根拠: (行番号: 135〜242 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({")
+* 根拠: ボーダー/リングのバグ修正コメント (行番号: 150〜153)
+* 根拠: 独立スクロールのコメント (行番号: 215 / 抜粋: "{/* パネルごとに独立スクロール(要件5) */}")
+* 根拠: タブ切替コメント (行番号: 185〜187 / 抜粋: "{/* タブ切替: Echo Show 15でのタッチ操作を想定し、タップ領域を大きめに確保。\n                ★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す。\n                テキストは不要のためアイコンのみ表示する(aria-labelで読み上げは維持) */}")
+* 根拠: `onClickCapture={onInteract}` (行番号: 161)
+* **（すごろく機能で追加）** 根拠: `quest`タブの`RoutineFlow`/`RoutineFreeTimeBanner`分岐 (行番号: 217〜234 / 抜粋: "{tab === 'quest' && activeRoutineKey && routineFlows && (\n                    <RoutineFlow\n                        flowKey={activeRoutineKey}\n                        flow={routineFlows[activeRoutineKey]}\n                        onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}\n                        isCompleting={isCompletingRoutine}\n                        compact\n                    />\n                )}\n\n                {tab === 'quest' && !activeRoutineKey && (\n                    <>\n                        {freeTimeRoutineKey && routineFlows && (\n                            <div className=\"mb-2\">\n                                <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />\n                            </div>\n                        )}\n                        <QuestList")
+* 根拠: `QuestList`への`completedSignal`受け渡し (行番号: 236 / 抜粋: "completedSignal={completedSignal}")
 
 
 * **引数/リクエスト**: `FamilyPanelProps`
-* 根拠: (行番号: 137〜140 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({\n    user, quests, completedQuests, pendingQuests, rewards, iconFirst, isActive, themeColorKey, isIdle,\n    onInteract, onQuestClick, onBuyReward, completedSignal, onAvatarClick,\n}) => {")
+* 根拠: (行番号: 129 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({")
 
 
 * **戻り値/レスポンス**: JSX.Element
-* 根拠: (行番号: 154〜219 / 抜粋: "return (\n        <div\n            onClickCapture={onInteract}")
+* 根拠: (行番号: 176〜256 / 抜粋: "return (\n        <div\n            onClickCapture={onInteract}")
 
 
-* **副作用**: `tab`ローカルステート（`'quest' | 'shop' | 'inventory'`、初期値`'quest'`）の更新。`onInteract`の呼び出しによる親（`FamilyDashboard`）側の`activeUserId`更新。
-* 根拠: (行番号: 141 / 抜粋: "const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');")
+* **副作用**: `tab`ローカルステート（`'quest' | 'shop' | 'inventory'`、初期値`'quest'`）の更新。`onInteract`の呼び出しによる親（`FamilyDashboard`）側の`activeUserId`更新。**（すごろく機能で追加）** `useRoutineData(user.user_id, onLevelUp, onError)`の呼び出しによる`GET /api/routine/today`の15秒間隔ポーリング（`user.user_id`ごとに独立したReact Queryの`queryKey`を持つため、4パネル分が個別に発火する）。チェックポイント通過ボーナスでレベルアップした場合は`onLevelUp`コールバック内で`play('levelUp')`と`showToast`によるLEVEL UP演出を行う。**（さらに別のコードレビューで発覚した重複を追加修正）** 完了報告失敗時のエラー通知（`showToast`＋`play('cancel')`）は`onError`コールバックとして`useRoutineData`へ渡され、`completeStep`内部の`catch`節から直接呼ばれる。**（大人用フロー分離で追加）** 第4引数`onStepReward`も渡すようになり、大人用フロー(パパ・ママ用のすごろく)でデイリークエストから移設されたステップを完了した際に`play('clear')`＋「クリア！ / {user.name}は {gold} G を手に入れた！」のトーストを出す(横画面は4人分のパネルが並ぶため、`App.tsx`側と異なり誰が獲得したかを文面に含める)。以前は本ファイル自前の`handleRoutineStepComplete`が`completeRoutineStep`の戻り値を見て同じ処理をしていたが（`App.tsx`にも一字一句同じ関数が重複していたため）、`useRoutineData.ts`の`onError`引数へ集約され、本ファイルからは削除された。
+* 根拠: (行番号: 139 / 抜粋: "const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');")
+* 根拠: `useSound`/`useToast`取得と`useRoutineData`呼び出し・`selectRoutineFlow` (行番号: 140〜158 / 抜粋: "const { play } = useSound();\n    const { showToast } = useToast();\n\n    // 「きょうのすごろく」: パネルごとに自分のペースで進む(全員同じフロー定義を\n    // 個別に進行する想定、CLAUDE.md参照)。誘導中はクエスト一覧より優先表示する。\n    // #(コードレビューで発覚): 完了報告失敗時のエラートースト表示(旧handleRoutineStepComplete)\n    // がApp.tsx側と一字一句重複していたため、useRoutineData自体のonErrorへ集約した。\n    const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(\n        user.user_id,\n        (info) => {\n            play('levelUp');\n            showToast({ title: 'LEVEL UP!', text: `${user.name}は Lv.${info.newLevel} になった！`, icon: '⚡' });\n        },\n        (detail) => {\n            showToast({ title: 'エラー', text: detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });\n            play('cancel');\n        },\n        // 大人用フローに寄せたステップ(ママの「夕食を作る」等)の即時報酬。\n        (reward) => {\n            play('clear');\n            showToast({ title: 'クリア！', text: `${user.name}は ${reward.gold} G を手に入れた！`, icon: '💰' });\n        }\n    );\n    const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);")
 
 
 * **エラーハンドリング**: なし
@@ -160,9 +176,15 @@ flowchart TD
     IdleCheck --> PanelRender["FamilyPanel Render (userごと)"]
 
     subgraph "FamilyPanel 内部"
-        PanelRender --> BorderCalc["borderClass/ringClass を themeColorKey と isActive から算出"]
+        PanelRender --> RoutineHook["useRoutineData(user.user_id, onLevelUp, onError, onStepReward) でrouteFlows等を取得(すごろく機能、追加修正・大人用フロー分離でonStepRewardを追加)"]
+        RoutineHook --> RoutineKeys["selectRoutineFlow(routineFlows) で\nactiveRoutineKey / freeTimeRoutineKey を算出\n(コードレビューでApp.tsxとの重複ロジックをこの関数へ集約)"]
+        RoutineKeys --> BorderCalc["borderClass/ringClass を themeColorKey と isActive から算出"]
         BorderCalc --> TabState{"tab の値は？(初期値 'quest')"}
-        TabState -- "quest" --> RenderQuestList["QuestList を panelMode 付きで描画\n(iconFirst = iconFirstUserIds.includes(user.user_id)、completedSignal をそのまま転送 #102)"]
+        TabState -- "quest" --> RoutineActiveCheck{"activeRoutineKey が真?\n(すごろく機能)"}
+        RoutineActiveCheck -- Yes --> RenderRoutineFlow["RoutineFlow を compact 付きで描画\n(onCompleteStep→completeRoutineStep)"]
+        RoutineActiveCheck -- No --> FreeTimeCheck{"freeTimeRoutineKey が真?"}
+        FreeTimeCheck -- Yes --> RenderBannerThenQuestList["RoutineFreeTimeBanner を表示したうえで\nQuestList を panelMode 付きで描画\n(iconFirst = iconFirstUserIds.includes(user.user_id)、completedSignal は useQuestActivity から #659)"]
+        FreeTimeCheck -- No --> RenderQuestList["QuestList を panelMode 付きで描画\n(iconFirst = iconFirstUserIds.includes(user.user_id)、completedSignal は useQuestActivity から #659)"]
         TabState -- "shop" --> RenderRewardShop["RewardShop を描画"]
         TabState -- "inventory" --> RenderInventoryList["InventoryList を panelMode 付きで描画"]
         TabClickQuest["「クエスト」ボタンクリック"] --> SetTabQuest["setTab('quest')"]
@@ -175,11 +197,13 @@ flowchart TD
     end
 
     RenderQuestList --> QuestClickCb["onQuestClick(quest) → 親へ onQuestClick(user, quest) として伝播"]
+    RenderBannerThenQuestList --> QuestClickCb
     RenderRewardShop --> BuyCb["onBuy(reward) → 親へ onBuyReward(user, reward) として伝播"]
 
     QuestClickCb --> End["End"]
     BuyCb --> End
     RenderInventoryList --> End
+    RenderRoutineFlow --> End
     Interact --> End
 
 ```
@@ -198,10 +222,14 @@ graph TD
     UI_ApprovalList["ApprovalList (../../quest/components/ApprovalList)"]
     UI_RewardShop["RewardShop (../../shop/components/RewardShop)"]
     UI_InventoryList["InventoryList (../../shop/components/InventoryList)"]
+    UI_RoutineFlow["RoutineFlow (default) / RoutineFreeTimeBanner\n(../../routine/components/RoutineFlow、すごろく機能で新規追加)"]
 
     Hook_useSettings["useSettings (@/context/useSettings)"]
     Const_settingsShared["THEME_BORDER_CLASSES/THEME_RING_CLASSES (@/context/settingsShared)"]
     Hook_useQuestStatus["getQuestLockState (../../quest/hooks/useQuestStatus)"]
+    Lib_questTargeting["isQuestVisibleToUser (@/lib/questTargeting)"]
+    Hook_useRoutineData["useRoutineData (@/hooks/useRoutineData、すごろく機能で新規追加)"]
+    Lib_routineDataSchema["selectRoutineFlow\n(@/lib/routineDataSchema、すごろく機能で新規追加、\nコードレビューでApp.tsxとの重複ロジックを集約)"]
 
     Types["@/types (ID, User, Quest, QuestHistory, Reward)"]
 
@@ -211,11 +239,15 @@ graph TD
     FamilyDashboard --> Hook_useSettings
     FamilyDashboard --> UI_ApprovalList
     hasNothingToDo --> Hook_useQuestStatus
+    hasNothingToDo --> Lib_questTargeting
     FamilyDashboard -->|Render (userごと)| FamilyPanel
 
     FamilyPanel --> UI_UserStatusCard
     FamilyPanel --> Const_settingsShared
-    FamilyPanel -->|tab==='quest'| UI_QuestList
+    FamilyPanel -->|"すごろく機能で追加(user.user_idごとに個別呼び出し)"| Hook_useRoutineData
+    FamilyPanel -->|"すごろく機能で追加(判定関数)"| Lib_routineDataSchema
+    FamilyPanel -->|"tab==='quest' かつ activeRoutineKey真(すごろく機能)"| UI_RoutineFlow
+    FamilyPanel -->|"tab==='quest' かつ activeRoutineKey偽(すごろく機能)"| UI_QuestList
     FamilyPanel -->|tab==='shop'| UI_RewardShop
     FamilyPanel -->|tab==='inventory'| UI_InventoryList
     FamilyPanel -->|import| Types
@@ -231,6 +263,8 @@ graph TD
 | 中 | `../../quest/hooks/useQuestStatus.ts` | `getQuestLockState`の判定ロジック（`isLocked`/`isDone`の算出条件）を把握し、`hasNothingToDo`の正確な意味を確認するため。 | `import { getQuestLockState } from '../../quest/hooks/useQuestStatus';` (行番号: 11) |
 | 中 | `../../quest/components/ApprovalList.tsx` | メイン画面上部に常時統合表示される承認機能（`onApproveAll`含む）の内部実装を把握するため。 | `import ApprovalList from '../../quest/components/ApprovalList';` (行番号: 6) |
 | 低 | `@/types` | `User`の`role`/`user_id`や`Quest`/`Reward`の詳細なスキーマを把握するため。 | `import { ID, User, Quest, QuestHistory, Reward } from '@/types';` (行番号: 3) |
+| 中 | `@/hooks/useRoutineData.ts`（すごろく機能で新規追加） | 各`FamilyPanel`が個別に呼び出す`useRoutineData(user.user_id)`のポーリング間隔・キャッシュキー設計を把握するため（既に`useRoutineData.md`で解析済み）。 | `import { useRoutineData } from '@/hooks/useRoutineData';` (行番号: 13) |
+| 中 | `../../routine/components/RoutineFlow.tsx`（すごろく機能で新規追加） | `compact`付きで描画される`RoutineFlow`/`RoutineFreeTimeBanner`の内部実装を把握するため（既に`RoutineFlow.md`で解析済み）。 | `import RoutineFlow, { RoutineFreeTimeBanner } from '../../routine/components/RoutineFlow';` (行番号: 14) |
 
 ## 8. 保守上の注意点
 
@@ -239,9 +273,9 @@ graph TD
 * **アイコン優先表示の外部化**: 以前はモジュール定数`ICON_FIRST_USER_IDS`でハードコードされていたが、現在は`useSettings()`から取得する`iconFirstUserIds`に置き換えられ、設定画面側で管理される構成になっている。
 * 根拠: (行番号: 52, 101 / 抜粋: "const { iconFirstUserIds, userThemeColors } = useSettings();", "iconFirst={iconFirstUserIds.includes(user.user_id)}")
 * **[修正済み] テーマカラーとハイライトリングの分離**: パネルのボーダー色は常にそのユーザーのテーマカラー（`themeColorKey`）を反映し、リング（強調枠）だけを「直前に操作した」ことの一時的なハイライトとして使う設計に変更された。以前はテーマカラーが`isActive`時のみ適用されていたため、設定画面で色を選んでも操作するまで反映されないという不具合があった。
-* 根拠: (行番号: 141〜150)
+* 根拠: (行番号: 160〜169)
 * **[修正済み] タブ構成の再変更**: 一時的にごほうび画面へ「もちもの」を統合していたが、クエスト/ごほうび/もちものの3タブ構成に戻された。
-* 根拠: (行番号: 162 / 抜粋: "★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す。")
+* 根拠: (行番号: 186 / 抜粋: "★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す。")
 * **パネルごとに独立したタブ状態**: 各`FamilyPanel`は`tab`ステートを個別に持つため、あるユーザーのパネルで「ごほうび」タブを開いていても他ユーザーのパネルには影響しない。
 * 根拠: (行番号: 139 / 抜粋: "const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');")
 * **承認バーの代表親固定**: `ApprovalList`に渡す`currentUser`は常に`representativeParent`（`role_adult`の先頭、無ければ配列先頭）であり、実際にどちらの親が操作したかはUIレベルでは区別されない。
@@ -250,8 +284,15 @@ graph TD
 * 根拠: (行番号: 62〜63, 155 / 抜粋: "// 今日やることが1件もない人は、パネル自体は残しつつ視覚的な優先度を下げる", "${isIdle ? 'opacity-70' : ''}")
 * **[修正済み] 兄妹連携クエスト(`target_user === 'siblings'`)対応**: 以前は`target === 'siblings'`（兄妹連携クエスト）が`all`/`role_*`/`user_id`完全一致のいずれにも一致せず全ユーザーから除外されていた（画面に表示されず機能が起動不能だった）バグを修正済み。**（Issue #412 品質で修正）** この判定ロジック自体は`QuestList.tsx`にも重複していたため`lib/questTargeting.ts`の`isQuestVisibleToUser`に集約された（本ファイルは同関数を呼び出すのみ）。**（#291で修正）** 参照フィールド名は`q.target`から`q.target_user`（`quest_master`の実カラム名）に変更された。
 * 根拠: `../../../lib/questTargeting.md`（判定ロジック本体）
-* **`completedSignal`の単純な素通し（Issue #102）**: `FamilyDashboardProps`/`FamilyPanelProps`に追加された`completedSignal: { id: ID; nonce: number } | null`は、`App.tsx`が完了APIの成功時にのみセットする値であり、`FamilyDashboard`・`FamilyPanel`自身はこの値を判定・加工せず、そのまま`FamilyPanel`経由で`QuestList`（さらにその内部の`QuestItem`）へ転送するだけである。実際の発火判定（無限クエストのクールダウン開始・完了音再生）は`App.tsx`の`runQuestAction`および`QuestList.tsx`の`QuestItem`内`useEffect`側の責務であり、本ファイルの管轄外。
-* 根拠: (行番号: 111, 202 / 抜粋: "completedSignal={completedSignal}")
+* **`completedSignal`はContextから読むが、判定は依然として本ファイルの管轄外（Issue #102 → #659）**: `App.tsx`が完了APIの成功時にのみセットする値で、`FamilyDashboard`・`FamilyPanel`自身はこの値を判定・加工しない。Issue #659でPropsの素通しをやめ`useQuestActivity()`から読むようになったが、`QuestList`（さらにその内部の`QuestItem`）へPropsで渡す点と、実際の発火判定（無限クエストのクールダウン開始・完了音再生）が`App.tsx`の`runQuestAction`および`QuestList.tsx`の`QuestItem`内`useEffect`側の責務である点は変わっていない。
+* **`useQuestActivity()`はProvider未設置でもthrowしない。** `QuestActivityProvider`（`App.tsx`が設置）の外で本コンポーネントを描画すると、例外ではなく「何も進行中でない」既定値で黙って描画される。配線が切れてもクラッシュしないので、`FamilyDashboard.test.tsx`の「完了した本人のパネルだけがクールダウンに入る」等の組み上がりテストで担保している。
+* 根拠: (行番号: 135, 236 / 抜粋: "    const { completedSignal, processingQuestKeys } = useQuestActivity();", "completedSignal={completedSignal}")
+* **（すごろく機能で追加）** `useRoutineData`は`FamilyDashboard`ではなく各`FamilyPanel`が個別に呼び出す: `App.tsx`（縦画面）は`currentUser`1人分のみ`useRoutineData`を呼び出すのに対し、本ファイルの横画面レイアウトでは`FamilyPanel`が4人ぶん並行してマウントされるため、`useRoutineData(user.user_id, onLevelUp, onError)`もユーザーごとに独立したインスタンス（独立したReact Queryの`queryKey`、独立した15秒ポーリング）として4回呼び出される。`FamilyDashboardProps`/`FamilyPanelProps`に`routineFlows`等を渡すためのProps追加は行われておらず、あくまで`FamilyPanel`内部で完結する。
+* 根拠: (行番号: 147〜157 / 抜粋: "const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(\n        user.user_id,\n        (info) => {\n            play('levelUp');\n            showToast({ title: 'LEVEL UP!', text: `${user.name}は Lv.${info.newLevel} になった！`, icon: '⚡' });\n        },\n        (detail) => {\n            showToast({ title: 'エラー', text: detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });\n            play('cancel');\n        }\n    );")
+* **（すごろく機能で追加、コードレビューで重複解消）** `activeRoutineKey`/`freeTimeRoutineKey`の判定ロジックは、以前は`App.tsx`と本ファイルにそれぞれ同じ三項演算子の連鎖（`am`を`pm`より優先）が重複実装されていたが、`@/lib/routineDataSchema.ts`の`selectRoutineFlow(routineFlows)`ヘルパーに集約され、本ファイルはその戻り値`{ activeKey, freeTimeKey }`を分割代入で受け取るだけになった。判定内容自体（amがブロッキング中ならpm側は評価せず`'am'`を採用）は変わっていない。
+* 根拠: (行番号: 163 / 抜粋: "const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);")、判定ロジック本体は `../../../lib/routineDataSchema.md` を参照
+* **（さらに別のコードレビューで発覚した重複を追加修正）** 完了報告失敗時のエラートースト表示ロジック（`res.success`を見て`showToast`＋`play('cancel')`を呼ぶ`handleRoutineStepComplete`）は、以前は`App.tsx`にも一字一句同じ形で重複していた。`onLevelUp`と同じ設計方針に倣い、`useRoutineData`の第3引数`onError`へこのロジックを集約し、本ファイルからは`handleRoutineStepComplete`自体が削除された（`onCompleteStep`は`completeRoutineStep`を直接呼ぶだけになった）。
+* 根拠: (行番号: 147〜157, 216)
 
 ## 9. 不明事項一覧
 
@@ -263,6 +304,7 @@ graph TD
 | `ApprovalList`の内部実装 | `pendingQuests`/`users`/`onApproveAll`をどう描画し、`onApprove`/`onReject`をどう発火させるかが不明なため。 | `../../quest/components/ApprovalList.tsx` |
 | `RewardShop`/`InventoryList`の内部実装 | パネル内「ごほうび」「もちもの」タブの描画内容・操作フローの詳細が不明なため。 | `../../shop/components/RewardShop.tsx`, `../../shop/components/InventoryList.tsx` |
 | `User.role`の取りうる値の全容 | `'role_adult'`以外の値（子ども側の`role`文字列）が本ファイルからは特定できないため。 | `@/types` |
+| （すごろく機能で追加）`routineFlows`のバックエンド側生成条件 | 各`FamilyPanel`が個別に取得する`routineFlows.am`/`routineFlows.pm`の実際の値がどのタイミングでどう変わるか（チェックポイント通過等）は`useRoutineData.ts`/`routineDataSchema.ts`側の解析に譲る。 | `@/hooks/useRoutineData.ts`, `@/lib/routineDataSchema.ts` |
 
 ## 相互参照による補足情報
 
@@ -274,6 +316,7 @@ graph TD
 | `ApprovalList`の内部実装 | `family-quest/src/features/quest/components/ApprovalList.tsx`を直接確認した。Props(7〜13行目)は`pendingQuests: QuestHistory[], users: User[], onApprove, onReject, onApproveAll`のみであり、`pendingItems`/`currentUser`といったアイテム承認関連のフィールドは存在しない。`pendingQuests.length === 0`の場合に`null`を返す(60行目)。クエスト行(91〜119行目)は`SwipeableRow`(19〜50行目、`framer-motion`の`useMotionValue`/`useTransform`によるドラッグ検知、`SWIPE_THRESHOLD`は90px、15行目)でラップされ、右スワイプ(`info.offset.x > SWIPE_THRESHOLD`)で`onApprove(quest)`、左スワイプ(`info.offset.x < -SWIPE_THRESHOLD`)で`onReject(quest)`を発火する。「却下」ボタン(110行目)で`onReject(quest)`、「承認」ボタン(113行目)で`onApprove(quest)`を直接呼ぶボタンも併存させている。`pendingQuests.length > 1`の場合のみ表示される一括承認ボタン(79〜84行目)から`onApproveAll`が呼ばれる。なお、コード中に`{/* --- クエスト承認リスト (既存) --- */}`(90行目)という、かつて別のリスト（アイテム使用承認と見られる）が併存していたことを示唆するコメントが残るが、2026-08-29のコミット`9d5edec`（アイテム使用時の親承認フロー廃止）以降、`consumeMutation`/`Modal`/`pendingItems`等のアイテム承認関連コードは本ファイルには存在しない。 | 直接ソース確認: `family-quest/src/features/quest/components/ApprovalList.tsx:1-128` |
 | `RewardShop`/`InventoryList`の内部実装 | `family-quest/src/features/shop/components/RewardShop.tsx`と`family-quest/src/features/shop/components/InventoryList.tsx`を直接確認した。`RewardShop`(14〜25行目)はProps`rewards, currentUser, onBuy`をそのまま`RewardList`コンポーネント(17〜22行目)へ委譲するラッパーで、コメント(11〜13行目)の通り所持ゴールド表示や「もちもの」表示はここでは行わない。`InventoryList`(29〜145行目)はProps`userId, panelMode?`(20〜27行目)を受け取り、`useQuery({ queryKey: ['inventory', userId], queryFn: () => apiClient.fetchInventory(userId), refetchInterval: 5000 })`(39〜43行目)でアイテム一覧を5秒間隔ポーリング取得する。`panelMode`時はグリッドを`grid-cols-1`固定・アイコンを縮小する(93〜94行目)。各アイテムカードは（`item.status`による分岐なく）常にクリック可能で(103行目、`onClick={() => setItemToUse(item)}`)、「つかう」確認モーダル(122〜142行目)を開き、モーダルの「はい」で`useMutationAction.mutate(itemToUse.id)`(`apiClient.useItem`、46行目)を実行する。使用は即座に確定し、成功時はキャッシュから当該アイテムを`filter`で完全に除去する(47〜54行目、コメント「アイテム使用は即座に消費が確定する(親の承認は不要)ため」)。承認待ちを示す中間ステータスへの更新、それを取り消す「やめる」ボタン、`cancelMutation`はいずれも存在しない（2026-08-29のコミット`9d5edec`、アイテム使用時の親承認フロー廃止以降）。**バグ修正(M-6-3)**: 使用ミューテーション（`useMutationAction`）に`onError`が追加され、通信エラー時は`showToast`でエラー内容を通知するようになった(62〜67行目)。 | 直接ソース確認: `family-quest/src/features/shop/components/RewardShop.tsx:11-25`, `family-quest/src/features/shop/components/InventoryList.tsx:1-145` |
 | `User.role`の取りうる値の全容 | `family-quest/src/types/index.ts`の`User`インターフェースでは`role?: string;`(19行目)と汎用の文字列型のみが定義され、列挙型（enum/union）による値の限定はない。実際に使用される値はリポジトリ全体を検索して直接確認した。`family-quest/src/App.tsx`18行目のコメント「保護者判定は`quest_users.role`('role_adult'/'role_child')を唯一の判定基準とする」、および22行目`const isParentUser = (user: User) => user.role === 'role_adult';`。バックエンド側`MY_HOME_SYSTEM/services/quest_service.py`24〜25行目でも`ROLE_ADULT = 'role_adult'`, `ROLE_CHILD = 'role_child'`という定数がコメント「quest_users.roleの値(親権限判定はこの2値のみを唯一の判定基準とする)」付きで定義されており、DB上の`quest_users.role`カラムは`'role_adult'`と`'role_child'`の2値のみを取ることを確認した。 | 直接ソース確認: `family-quest/src/types/index.ts:19`, `family-quest/src/App.tsx:18-22`, `MY_HOME_SYSTEM/services/quest_service.py:23-25` |
+| （すごろく機能で追加）`routineFlows`のバックエンド側生成条件 | `family-quest/src/hooks/useRoutineData.ts`とバックエンドを直接確認した。`routineFlows`の実体は`GET /api/routine/today?user_id=...`のレスポンス`flows`で、フック側は`refetchInterval: POLL_INTERVAL_MS`で定期取得し`routineTodayResponseSchema`で検証する(28〜32行目)。バックエンドの生成条件は`RoutineService.get_today_state`(`services/routine_service.py:463-481`)にあり、`ROUTINE_FLOWS`(`routine_data.py`)の全フロー(`am`/`pm`)について**`_is_flow_started_today(flow, now)`が偽なら`{started: false, title}`の2キーだけ**を返し、真なら`_get_or_create_progress`→`_apply_forced_transition`→`_serialize_flow`で13キーの完全な状態を返す。つまり「まだ開始時刻に達していないフローは中身を持たない」という条件分岐がバックエンド側にあり、フロント(`routineDataSchema.ts`)が`started: z.literal(true)`/`z.literal(false)`の判別共用体で受けているのはこれに対応する。ユーザーが未登録(`quest_users`に行が無い)の場合は`HTTPException(404, "User not found")`になる。 | 直接ソース確認: `family-quest/src/hooks/useRoutineData.ts:28-32`, `MY_HOME_SYSTEM/services/routine_service.py:463-481`, `MY_HOME_SYSTEM/routine_data.py`（参考: [useRoutineData.md](../../../hooks/useRoutineData.md)・[routine_service.md](../../../../../MY_HOME_SYSTEM/routine_service.md)） |
 
 ## 10. 自己検証結果
 

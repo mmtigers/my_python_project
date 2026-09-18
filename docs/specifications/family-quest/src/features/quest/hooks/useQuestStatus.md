@@ -85,6 +85,19 @@
 
 
 
+### `canCancelQuest` **（2026-09-06 品質監査で修正）**
+
+* **役割**: 「長押しで取り消せるか」を判定する純粋関数。`isDone || isPending` かつ `!isEffectivelyLocked` のとき `true`。無限クエストは `isDone` が常に `false`(周回前提)だが、子どもの申請は無限クエストでも `pending` 行として残るため申請中の取消は通常クエストと同様に許可する。以前 `QuestList.tsx` 側で `!isInfinite && (isDone || isPending) && ...` と一律に除外していたため、無限クエストを申請した子どものカードが「確認待ち / 長押しで取消」と表示されるのに長押しが効かず、タップすると「すでに申請中です」になる袋小路だった。
+* 根拠: (行番号: 91〜101 / 抜粋: "export function canCancelQuest(state: Pick<QuestLockState, 'isDone' | 'isPending'>, isEffectivelyLocked: boolean): boolean {\n    return (state.isDone || state.isPending) && !isEffectivelyLocked;")
+* **引数/リクエスト**: `state: Pick<QuestLockState, 'isDone' | 'isPending'>`, `isEffectivelyLocked: boolean`
+* 根拠: (行番号: 99)
+* **戻り値/レスポンス**: `boolean`
+* 根拠: (行番号: 100)
+* **副作用**: なし
+* 根拠: 純粋関数(行番号: 99〜101)
+* **エラーハンドリング**: なし
+* 根拠: 同上
+
 ### `useQuestStatus`
 
 * **役割**: `getQuestLockState`の結果をもとに、無限クエストの表示回数付きタイトル(`displayTitle`)とUI表示用の`variant`を算出し、メモ化されたオブジェクトとして返すCustom Hook。
@@ -209,10 +222,9 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `Quest` オブジェクトの完全なスキーマ | `family-quest/src/types/index.ts`を直接確認した。**（#291で修正）** `Quest`インターフェースの`id?: ID`と`type?: string`は、`id`/`exp`/`gold`/`desc`とともに「バックエンドAPIから一度も送られてこない幽霊フィールドだった」ことが判明したため型定義から削除され、現在は`quest_id?: ID`と`quest_type?: 'daily' | 'weekly' | 'infinite' | 'challenge' | string`のみが定義されている。これにより本ファイルの`qId = quest.quest_id`（37行目）や`isInfinite = quest.quest_type === 'infinite' || !!quest._isInfinite`（40行目）というフィールド参照は、型定義上も実カラム名のみを参照する形と一致するようになった。共有クエスト判定用の`is_shared_completed_by`等には引き続き「バックエンドの`get_available_quests`が付与するフィールド」というコメントがある。 | 直接ソース確認: `family-quest/src/types/index.ts` |
-| 履歴データ（`completedQuests`）の取得・抽出ロジック | フロントエンド側は`family-quest/src/hooks/useGameData.ts`を直接確認した。`completedQuests`は`GET /api/quest/data`のレスポンス(`gameData?.completedQuests`)をそのまま返しているのみで(87〜92, 284行目)、フロントエンド側に「今日」への絞り込み処理は存在しない。バックエンド側は`MY_HOME_SYSTEM/services/quest_service.py`の`GameSystem.get_all_view_data`(797〜891行目)を直接確認した結果、実際には「今日」固定ではなく、直近1ヶ月分の`quest_history`(822〜836行目、`WHERE status='approved' AND completed_at >= (30日前のJST日付)`)を取得したうえで、クエストごとの`reset_period`（未設定時は既定`'daily'`、849行目）と`is_within_reset_period`判定(856, 865行目)によって「その周期内に完了済みか」を個別に絞り込み、結果を`completedQuests`として返す(883, 889行目)仕様であることが判明した。フロントエンドのコメント「completedQuests には『今日』の承認済みデータのみが入っている前提」は、`reset_period`が既定値の`'daily'`であるクエストに関しては概ね正しいが、週次等の`reset_period`を持つクエストでは「今日」より広い期間のデータが含まれうる点で、コメントは正確には「クエストごとのリセット周期内の承認済みデータ」と言うべきものであった。 | 直接ソース確認: `family-quest/src/hooks/useGameData.ts:86-92,280-284`, `MY_HOME_SYSTEM/services/quest_service.py:797-891` |
+| `Quest` オブジェクトの完全なスキーマ | `family-quest/src/types/index.ts`を直接確認した。**（#291で修正）** `Quest`インターフェースの`id?: ID`と`type?: string`は、`id`/`exp`/`gold`/`desc`とともに「バックエンドAPIから一度も送られてこない幽霊フィールドだった」ことが判明したため型定義から削除され、現在は`quest_id?: ID`と`quest_type?: 'daily' \| 'weekly' \| 'infinite' \| 'challenge' \| string`のみが定義されている。これにより本ファイルの`qId = quest.quest_id`（37行目）や`isInfinite = quest.quest_type === 'infinite' \|\| !!quest._isInfinite`（40行目）というフィールド参照は、型定義上も実カラム名のみを参照する形と一致するようになった。共有クエスト判定用の`is_shared_completed_by`等には引き続き「バックエンドの`get_available_quests`が付与するフィールド」というコメントがある。 | 直接ソース確認: `family-quest/src/types/index.ts` |
+| 履歴データ（`completedQuests`）の取得・抽出ロジック | フロントエンド側は`family-quest/src/hooks/useGameData.ts`を直接確認した。`completedQuests`は`GET /api/quest/data`のレスポンス(`gameData?.completedQuests`)をそのまま返しているのみで(87〜92, 284行目)、フロントエンド側に「今日」への絞り込み処理は存在しない。バックエンド側は**（Issue #550で`services/quest/game_system.py`へ移設された）**`GameSystem.get_all_view_data`(168〜318行目)を直接確認した結果、実際には「今日」固定ではなく、直近1ヶ月分の`quest_history`(264〜269行目、`WHERE status='approved' AND completed_at >= (30日前のJST日付)`)を取得したうえで、クエストごとの`reset_period`（未設定時は既定`'daily'`、279行目）と`is_within_reset_period`判定(286, 295行目)によって「その周期内に完了済みか」を個別に絞り込み、結果を`completedQuests`として返す(310, 317行目)仕様であることが判明した。フロントエンドのコメント「completedQuests には『今日』の承認済みデータのみが入っている前提」は、`reset_period`が既定値の`'daily'`であるクエストに関しては概ね正しいが、週次等の`reset_period`を持つクエストでは「今日」より広い期間のデータが含まれうる点で、コメントは正確には「クエストごとのリセット周期内の承認済みデータ」と言うべきものであった。 | 直接ソース確認: `family-quest/src/hooks/useGameData.ts:43,385`, `MY_HOME_SYSTEM/services/quest/game_system.py:168-318`（参考: [quest_game_system.md](../../../../../MY_HOME_SYSTEM/quest_game_system.md)） |
 | `App.tsx`のクリックハンドラにおける現状の実装 | `family-quest/src/App.tsx`を直接確認した。16行目で`import { getQuestLockState } from './features/quest/hooks/useQuestStatus';`として本ファイルの`getQuestLockState`を直接インポートしている。`handleQuestClick`(219〜252行目)は、履歴タブからの呼び出し(`isHistory`が真)ならワンタップで即`cancel`(223〜226行目)、クエストリストからの呼び出しでは`getQuestLockState(q as Quest, user, completedQuests, pendingQuests)`(230〜231行目)を呼んで`isInfinite`/`pendingEntry`/`completedEntry`を取得し、無限クエストなら常に`complete`(234〜237行目)、`pendingEntry`または`completedEntry`が存在すればその履歴を対象に`cancel`(240〜247行目)、いずれもなければ`complete`(249〜250行目)を実行する。コメントで言及されていた「以前の3箇所の重複実装」のうち`App.tsx`側は、確かに共通化後の`getQuestLockState`に置き換わっており、独自の重複ロジックは残っていないことを直接確認した。 | 直接ソース確認: `family-quest/src/App.tsx:16,219-252` |
-
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

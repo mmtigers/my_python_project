@@ -17,7 +17,7 @@
 ## 2. ファイルの概要
 
 * Streamlitダッシュボードの「電車遅延」「防犯カメラ」「駐輪場」タブを描画するモジュール。公開関数`render_traffic`, `render_photos`, `render_bicycle`と、内部ヘルパー関数`_render_route_search`で構成される。
-* 根拠: `def render_traffic():`, `def render_photos(df_security_log: pd.DataFrame):`, `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 15, 91, 117 / 抜粋: "def render_traffic():")
+* 根拠: `def render_traffic():`, `def render_photos(df_security_log: pd.DataFrame):`, `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 20, 98, 124 / 抜粋: "def render_traffic():")
 * `render_traffic`は、JR宝塚線・神戸線の運行状況を`train_service.get_jr_traffic_status()`から取得し、遅延中(赤)・情報取得不可(グレー)・平常運転(緑)の3状態に応じて背景色を変えたHTMLカードで表示する。取得不可を平常運転と同じ緑色で表示しないための区別であり、さらに現在時刻に応じて出勤ルート（4〜11時台）または帰宅ルート（それ以外）の経路検索結果を表示する。**（B4で修正）** カード内に埋め込む運行状況の`status`/`detail`文字列は`html.escape()`を通してから埋め込むようになった。
 * 根拠: `jr_status = train_service.get_jr_traffic_status()` (行番号: 17 / 抜粋: "jr_status = train_service.get_jr_traffic_status()"), `elif line.get("is_unavailable"):` (行番号: 25 / 抜粋: "elif line.get(\"is_unavailable\"):"), `if COMMUTE_ROUTE_START_HOUR <= current_hour < COMMUTE_ROUTE_END_HOUR:` (行番号: 51 / 抜粋: "if COMMUTE_ROUTE_START_HOUR <= current_hour < COMMUTE_ROUTE_END_HOUR:")（Issue #451でリテラル`4`/`12`からモジュールレベル定数へ変更、値は不変）、エスケープ (行番号: 34〜35 / 抜粋: "{html.escape(line['status'])}", "{html.escape(line['detail'])}")
 * `_render_route_search`は、指定された出発駅・到着駅間のルート情報を`train_service.get_route_info`から取得し、乗換ステップをアイコン（⬇️/🔄）に応じたHTMLに整形して表示する。**（B4で修正）** 乗換ステップの各文字列、および`departure`/`arrival`/`duration`/`cost`/`transfer`の各フィールドは、いずれも`html.escape()`を通してからHTMLに埋め込まれるようになった。
@@ -58,15 +58,15 @@
 ### `render_traffic`
 
 * **役割**: JR宝塚線・神戸線の運行状況を、遅延中(赤)・情報取得不可(グレー)・平常運転(緑)の3状態に応じた背景色のカードで表示し、さらに現在時刻に応じた通勤/帰宅ルートの検索結果を表示する。**（B4で修正）** カードに埋め込む`line['status']`/`line['detail']`（JR運行情報APIのスクレイピング結果由来）は`html.escape()`を通してから埋め込む。
-* 根拠: `def render_traffic():` (行番号: 15〜52 / 抜粋: "def render_traffic():"), `elif line.get("is_unavailable"):` (行番号: 25 / 抜粋: "elif line.get(\"is_unavailable\"):")、エスケープ (行番号: 34〜35 / 抜粋: "<h2 style=\"margin:5px 0; color:{status_color};\">{html.escape(line['status'])}</h2>\n                <p style=\"margin:0;\">{html.escape(line['detail'])}</p>")
+* 根拠: `def render_traffic():` (行番号: 20〜59 / 抜粋: "def render_traffic():"), `elif line.get("is_unavailable"):` (行番号: 25 / 抜粋: "elif line.get(\"is_unavailable\"):")、エスケープ (行番号: 34〜35 / 抜粋: "<h2 style=\"margin:5px 0; color:{status_color};\">{html.escape(line['status'])}</h2>\n                <p style=\"margin:0;\">{html.escape(line['detail'])}</p>")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def render_traffic():` (行番号: 15 / 抜粋: "def render_traffic():")
+* 根拠: `def render_traffic():` (行番号: 20 / 抜粋: "def render_traffic():")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `def render_traffic():` (行番号: 15 / 抜粋: "def render_traffic():")
+* 根拠: `def render_traffic():` (行番号: 20 / 抜粋: "def render_traffic():")
 
 
 * **副作用**: `train_service.get_jr_traffic_status()`経由の外部データ取得。`st.subheader`, `st.columns`, `st.markdown`(HTML埋め込み), `st.caption`によるUI描画。内部で`_render_route_search`を呼び出す。
@@ -74,22 +74,22 @@
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `def render_traffic():` 全体 (行番号: 15〜52 / 抜粋: "def render_traffic():")
+* 根拠: `def render_traffic():` 全体 (行番号: 20〜59 / 抜粋: "def render_traffic():")
 
 
 
 ### `_render_route_search`
 
 * **役割**: 指定区間（`from_st`から`to_st`）の経路情報を取得し、区切り線（⬇️）や乗換（🔄）を含む乗換ステップをHTMLに整形した「経路カード」として表示する。取得失敗時は警告を表示する。**（B4で修正）** 乗換ステップの各文字列(`d`)、および`data['departure']`/`data['arrival']`/`data['duration']`/`data['cost']`/`data['transfer']`（いずれもYahoo!路線情報のスクレイピング結果由来）は`html.escape()`を通してからHTMLに埋め込む（`data['url']`は`st.link_button`にそのまま渡され、HTML文字列への埋め込みではないためエスケープ対象外）。
-* 根拠: `def _render_route_search(col, from_st: str, to_st: str, label_icon: str):` (行番号: 54〜89 / 抜粋: "def _render_route_search(col, from_st: str, to_st: str, label_icon: str):")、エスケープ (行番号: 63, 72, 74, 77〜78, 81 / 抜粋: "d_esc = html.escape(d)")
+* 根拠: `def _render_route_search(col, from_st: str, to_st: str, label_icon: str):` (行番号: 61〜96 / 抜粋: "def _render_route_search(col, from_st: str, to_st: str, label_icon: str):")、エスケープ (行番号: 63, 72, 74, 77〜78, 81 / 抜粋: "d_esc = html.escape(d)")
 
 
 * **引数/リクエスト**: `col` (型: 明示なし。Streamlitのコンテナ/カラムオブジェクト)、`from_st` (型: `str`。出発駅名)、`to_st` (型: `str`。到着駅名)、`label_icon` (型: `str`。見出しに付与するアイコン付きラベル)
-* 根拠: `def _render_route_search(col, from_st: str, to_st: str, label_icon: str):` (行番号: 54 / 抜粋: "def _render_route_search(col, from_st: str, to_st: str, label_icon: str):")
+* 根拠: `def _render_route_search(col, from_st: str, to_st: str, label_icon: str):` (行番号: 61 / 抜粋: "def _render_route_search(col, from_st: str, to_st: str, label_icon: str):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `def _render_route_search(col, from_st: str, to_st: str, label_icon: str):` (行番号: 54 / 抜粋: "def _render_route_search(col, from_st: str, to_st: str, label_icon: str):")
+* 根拠: `def _render_route_search(col, from_st: str, to_st: str, label_icon: str):` (行番号: 61 / 抜粋: "def _render_route_search(col, from_st: str, to_st: str, label_icon: str):")
 
 
 * **副作用**: `train_service.get_route_info()`経由の外部データ取得。`st.markdown`(HTML埋め込み)、`st.link_button`、`st.warning`によるUI描画。
@@ -104,15 +104,15 @@
 ### `render_photos`
 
 * **役割**: `config.ASSETS_DIR`配下のスナップショット画像をギャラリー表示し、渡された防犯ログ（`df_security_log`）を検知種別・画像パス列を含めて表形式表示する。
-* 根拠: `def render_photos(df_security_log: pd.DataFrame):` (行番号: 91〜115 / 抜粋: "def render_photos(df_security_log: pd.DataFrame):")
+* 根拠: `def render_photos(df_security_log: pd.DataFrame):` (行番号: 98〜122 / 抜粋: "def render_photos(df_security_log: pd.DataFrame):")
 
 
 * **引数/リクエスト**: `df_security_log` (型: `pd.DataFrame`。`timestamp`, `friendly_name`列を必須とし、`classification`, `image_path`列を任意で含む防犯ログデータ)
-* 根拠: `def render_photos(df_security_log: pd.DataFrame):` (行番号: 91 / 抜粋: "def render_photos(df_security_log: pd.DataFrame):")
+* 根拠: `def render_photos(df_security_log: pd.DataFrame):` (行番号: 98 / 抜粋: "def render_photos(df_security_log: pd.DataFrame):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `def render_photos(df_security_log: pd.DataFrame):` (行番号: 91 / 抜粋: "def render_photos(df_security_log: pd.DataFrame):")
+* 根拠: `def render_photos(df_security_log: pd.DataFrame):` (行番号: 98 / 抜粋: "def render_photos(df_security_log: pd.DataFrame):")
 
 
 * **副作用**: `glob.glob`によるローカルファイルシステムの走査（画像一覧取得）。`st.columns`, `st.image`, `st.expander`, `st.dataframe`, `st.info`によるUI描画。
@@ -127,11 +127,11 @@
 ### `render_bicycle`
 
 * **役割**: 渡された`df_bicycle`を特定の3駐輪場エリアに絞り込み、待機台数の時系列推移を折れ線グラフ表示し、直近の状況を表形式でも表示する。
-* 根拠: `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 117〜140 / 抜粋: "def render_bicycle(df_bicycle: pd.DataFrame):")
+* 根拠: `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 124〜147 / 抜粋: "def render_bicycle(df_bicycle: pd.DataFrame):")
 
 
 * **引数/リクエスト**: `df_bicycle` (型: `pd.DataFrame`。`area_name`, `timestamp`, `waiting_count`, `status_text`列を含む駐輪場データ)
-* 根拠: `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 117 / 抜粋: "def render_bicycle(df_bicycle: pd.DataFrame):")
+* 根拠: `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 124 / 抜粋: "def render_bicycle(df_bicycle: pd.DataFrame):")
 
 
 * **戻り値/レスポンス**: なし（`df_bicycle`が空、または対象エリアに一致するデータが無い場合はメッセージ表示後に早期`return`）
@@ -143,7 +143,7 @@
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `def render_bicycle(df_bicycle: pd.DataFrame):` 全体 (行番号: 117〜140 / 抜粋: "def render_bicycle(df_bicycle: pd.DataFrame):")
+* 根拠: `def render_bicycle(df_bicycle: pd.DataFrame):` 全体 (行番号: 124〜147 / 抜粋: "def render_bicycle(df_bicycle: pd.DataFrame):")
 
 
 
@@ -267,7 +267,7 @@ graph TD
 
 
 * **エラーハンドリングの欠如**: 本ファイル内のいずれの関数にも`try/except`による例外捕捉がなく（`_render_route_search`内の`summary`チェックのみで代替）、`train_service`や画像ファイルアクセスで例外が送出された場合はタブ全体の描画が中断する可能性がある。
-* 根拠: `def render_traffic():` 以降の全関数定義 (行番号: 15〜140 / 抜粋: "def render_traffic():")
+* 根拠: `def render_traffic():` 以降の全関数定義 (行番号: 20〜59 / 抜粋: "def render_traffic():")
 
 
 ## 9. 不明事項一覧

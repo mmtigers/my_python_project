@@ -1,68 +1,57 @@
 # MY_HOME_SYSTEM/tests/test_current_schema_sql.py
 """
-current_schema.sql (本番DBのスキーマダンプとしてドキュメント上参照される静的ファイル)が、
-migrations/配下の全マイグレーションを反映済みであることを検証する。
+current_schema.sql が migrations/ からの生成結果と一致することを検証する。
 
-current_schema.sqlはコードから実行されない参考ドキュメントのため、マイグレーションを
-追加してもこのファイルの更新を忘れても何のエラーも起きない(Issue #115で顕在化: 0006の
-nas_usage_percent列とschema_migrationsテーブル自体が未反映のままだった)。このテストは、
-各マイグレーションがALTER TABLEで追加するカラムが対応するCREATE TABLE文に含まれているかを
-機械的にチェックすることで、今後の更新忘れを検知する。
+current_schema.sql はコードから実行されない参考ドキュメントのため、マイグレーションを
+追加しても更新を忘れて何のエラーも起きなかった(Issue #115)。以前は「ALTER TABLE で
+追加された列が含まれているか」の一方向チェックと、手で維持する既知差分の許容リスト
+(Issue #411/#543)で守っていたが、本ファイルは `init_unified_db.py --dump-schema`
+による生成物になったため、「ファイルの内容 == 再生成結果」の完全一致で検証する。
+許容リストの維持は不要になった。
+
+失敗したら MY_HOME_SYSTEM/ で `python init_unified_db.py --dump-schema` を実行し、
+再生成された current_schema.sql をコミットすること。
 """
 import os
-import re
+import sys
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-MIGRATIONS_DIR = os.path.join(BASE_DIR, "migrations")
 SCHEMA_FILE = os.path.join(BASE_DIR, "current_schema.sql")
+sys.path.append(BASE_DIR)
 
-_ALTER_ADD_COLUMN_RE = re.compile(
-    r"ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)", re.IGNORECASE
-)
-
-
-def _migration_added_columns():
-    """migrations/*.sql から ALTER TABLE ... ADD COLUMN で追加される(テーブル名, カラム名, ファイル名)を全て抽出する"""
-    pairs = []
-    for filename in sorted(os.listdir(MIGRATIONS_DIR)):
-        if not filename.endswith(".sql"):
-            continue
-        with open(os.path.join(MIGRATIONS_DIR, filename), "r", encoding="utf-8") as f:
-            content = f.read()
-        for table, column in _ALTER_ADD_COLUMN_RE.findall(content):
-            pairs.append((table, column, filename))
-    return pairs
+import init_unified_db  # noqa: E402
 
 
-def _create_table_statement(schema_sql: str, table: str) -> str:
-    """current_schema.sql から指定テーブルの CREATE TABLE 文本体を抜き出す(次の CREATE TABLE またはファイル末尾まで)"""
-    match = re.search(
-        rf"CREATE TABLE {re.escape(table)}\s*\(.*?(?=\nCREATE TABLE |\Z)",
-        schema_sql,
-        re.DOTALL,
+def test_current_schema_sql_matches_generated_dump():
+    with open(SCHEMA_FILE, "r", encoding="utf-8") as f:
+        committed = f.read()
+    generated = init_unified_db.dump_schema_sql()
+    assert committed == generated, (
+        "current_schema.sql が migrations/ の再生成結果と一致しません。"
+        "MY_HOME_SYSTEM/ で `python init_unified_db.py --dump-schema` を実行して再生成し、コミットしてください。"
     )
-    return match.group(0) if match else ""
 
 
-def test_all_migration_added_columns_are_present_in_current_schema_sql():
-    with open(SCHEMA_FILE, "r", encoding="utf-8") as f:
-        schema_sql = f.read()
-
-    missing = []
-    for table, column, filename in _migration_added_columns():
-        statement = _create_table_statement(schema_sql, table)
-        if not statement:
-            missing.append(f"{filename}: table '{table}' not found in current_schema.sql")
-            continue
-        if not re.search(rf"\b{re.escape(column)}\b", statement):
-            missing.append(f"{filename}: column '{table}.{column}' missing from current_schema.sql")
-
-    assert not missing, "current_schema.sql is stale (Issue #115): " + "; ".join(missing)
+def test_generated_dump_reflects_all_migrations():
+    """再生成結果に schema_migrations と、最後のマイグレーションが追加した列が含まれること
+    (生成関数自体が migrations/ を全適用していることの自己検証)。"""
+    generated = init_unified_db.dump_schema_sql()
+    assert "CREATE TABLE schema_migrations" in generated
+    assert "medals_earned" in generated  # 0009_add_quest_history_medals_earned.sql
+    assert "nas_usage_percent" in generated  # 0006_add_device_records_nas_usage_percent.sql
+    assert generated.startswith("-- このファイルは生成物です")
 
 
-def test_schema_migrations_tracking_table_is_present_in_current_schema_sql():
-    """core/migrations.py が実際に作成する schema_migrations テーブルも
-    current_schema.sql のスナップショットに含まれているべき"""
-    with open(SCHEMA_FILE, "r", encoding="utf-8") as f:
-        schema_sql = f.read()
-    assert "CREATE TABLE schema_migrations" in schema_sql
+def test_dump_schema_does_not_touch_configured_db(tmp_path, monkeypatch):
+    """生成は :memory: で完結し、config.SQLITE_DB_PATH のファイルを作成・変更しないこと。"""
+    import config
+    db_path = tmp_path / "should_not_be_created.db"
+    monkeypatch.setattr(config, "SQLITE_DB_PATH", str(db_path))
+    init_unified_db.dump_schema_sql()
+    assert not db_path.exists()
+
+
+def test_write_current_schema_and_cli(tmp_path):
+    out = tmp_path / "schema.sql"
+    assert init_unified_db.main(["--dump-schema", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == init_unified_db.dump_schema_sql()

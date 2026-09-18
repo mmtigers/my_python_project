@@ -58,7 +58,6 @@ class TestFileManagerSaveFilenameByteLength:
             urls=["https://example.test/1"],
             source_url="https://example.test/list",
             channel_name="い" * 200,
-            is_playlist=True,
         )
 
         manager = module.FileManager()

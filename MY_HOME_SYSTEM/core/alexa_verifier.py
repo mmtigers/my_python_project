@@ -58,6 +58,14 @@ _cert_cache: Dict[str, Tuple[x509.Certificate, float]] = {}
 # 無制限に増え(かつ都度 requests.get でスレッドプールを占有し)ていた。正規化キーを使い、
 # 上限を超えたら最も古いエントリから捨てる。
 CERT_CACHE_MAX_ENTRIES = 8
+# Issue #541: 証明書取得に失敗した URL は短時間だけ「取得失敗」として記憶し、同じ URL への
+# 再フェッチでスレッドプールのワーカーを最大5秒ずつ拘束され続けないようにする(負キャッシュ)。
+CERT_NEGATIVE_CACHE_TTL_SECONDS = 60
+_cert_negative_cache: Dict[str, float] = {}
+# Alexa の署名は RSA(SHA1withRSA)で、RSA-2048 なら 256 バイト。RSA 鍵長として現実的な
+# 範囲(1024〜4096bit = 128〜512 バイト)から外れる Signature は、証明書を取りに行く前に拒否する。
+SIGNATURE_MIN_BYTES = 128
+SIGNATURE_MAX_BYTES = 512
 
 
 def _cert_cache_key(url: str) -> str:
@@ -94,12 +102,26 @@ def _validate_cert_chain_url(url: str) -> None:
         raise AlexaVerificationError("SignatureCertChainUrl must not contain query or fragment")
 
 
+def _remember_fetch_failure(cache_key: str, now: float) -> None:
+    """証明書取得失敗を負キャッシュに記録する(期限切れエントリの掃除と上限維持も行う)。"""
+    for key in [k for k, exp in _cert_negative_cache.items() if exp <= now]:
+        _cert_negative_cache.pop(key, None)
+    while len(_cert_negative_cache) >= CERT_CACHE_MAX_ENTRIES:
+        oldest_key = min(_cert_negative_cache, key=lambda k: _cert_negative_cache[k])
+        _cert_negative_cache.pop(oldest_key, None)
+    _cert_negative_cache[cache_key] = now + CERT_NEGATIVE_CACHE_TTL_SECONDS
+
+
 def _fetch_leaf_certificate(cert_chain_url: str) -> x509.Certificate:
     now = time.time()
     cache_key = _cert_cache_key(cert_chain_url)
     cached = _cert_cache.get(cache_key)
     if cached and cached[1] > now:
         return cached[0]
+    # Issue #541: 直近に取得失敗した URL は外部フェッチせず即座に検証エラーにする
+    negative_until = _cert_negative_cache.get(cache_key)
+    if negative_until and negative_until > now:
+        raise AlexaVerificationError("Certificate chain fetch recently failed (negative cache)")
 
     # #179: requests.get/raise_for_status が送出する例外(Timeout/ConnectionError/
     # HTTPError等の requests.exceptions.RequestException)はAlexaVerificationErrorでは
@@ -111,6 +133,7 @@ def _fetch_leaf_certificate(cert_chain_url: str) -> x509.Certificate:
         resp = requests.get(cert_chain_url, timeout=5)
         resp.raise_for_status()
     except requests.exceptions.RequestException as exc:
+        _remember_fetch_failure(cache_key, now)
         raise AlexaVerificationError(f"Failed to fetch certificate chain: {exc}") from exc
 
     # #385: PEMとして解釈できない応答は ValueError であり AlexaVerificationError ではないため、
@@ -118,8 +141,10 @@ def _fetch_leaf_certificate(cert_chain_url: str) -> x509.Certificate:
     try:
         certs = x509.load_pem_x509_certificates(resp.content)
     except ValueError as exc:
+        _remember_fetch_failure(cache_key, now)
         raise AlexaVerificationError(f"Certificate chain is not valid PEM: {exc}") from exc
     if not certs:
+        _remember_fetch_failure(cache_key, now)
         raise AlexaVerificationError("Certificate chain response is empty")
 
     leaf = certs[0]
@@ -142,6 +167,19 @@ def verify_signature(raw_body: bytes, signature_b64: str, cert_chain_url: str) -
         raise AlexaVerificationError("Missing Signature or SignatureCertChainUrl header")
 
     _validate_cert_chain_url(cert_chain_url)
+
+    # Issue #541: 証明書を取りに行く(外部 HTTP、最大5秒)前に Signature 自体の形式を検査する。
+    # 以前は base64 デコードを証明書取得の後で行っていたため、未認証の呼び出し側が
+    # 毎回異なる SignatureCertChainUrl を付けるだけでスレッドプールのワーカーを拘束できた。
+    try:
+        signature = base64.b64decode(signature_b64, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise AlexaVerificationError(f"Invalid base64 Signature header: {exc}") from exc
+    if not (SIGNATURE_MIN_BYTES <= len(signature) <= SIGNATURE_MAX_BYTES):
+        raise AlexaVerificationError(
+            f"Signature length {len(signature)} bytes is outside the expected RSA range"
+        )
+
     leaf_cert = _fetch_leaf_certificate(cert_chain_url)
 
     now = datetime.now(timezone.utc)
@@ -157,11 +195,6 @@ def verify_signature(raw_body: bytes, signature_b64: str, cert_chain_url: str) -
     dns_names = san_ext.value.get_values_for_type(x509.DNSName)
     if REQUIRED_SAN not in dns_names:
         raise AlexaVerificationError(f"Signing certificate SAN does not include {REQUIRED_SAN}")
-
-    try:
-        signature = base64.b64decode(signature_b64)
-    except (ValueError, TypeError) as exc:
-        raise AlexaVerificationError(f"Invalid base64 Signature header: {exc}") from exc
 
     public_key = leaf_cert.public_key()
     try:

@@ -29,10 +29,9 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `asyncio` | 標準ライブラリ | 非同期処理の実行と制御 | 根拠: [インポート宣言] (行番号: 2 / 抜粋: "`import asyncio`") |
-| `fcntl` | 標準ライブラリ（Unix系限定） | `_load_persisted_states`/`_save_persisted_states`での状態ファイル`flock`（共有/排他ロック）取得 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "`import fcntl`")、[使用箇所] (行番号: 44, 48, 59, 63 / 抜粋: "`fcntl.flock(f.fileno(), fcntl.LOCK_SH)`", "`fcntl.flock(f.fileno(), fcntl.LOCK_EX)`") |
+| `core.state_file`（Issue #661 で追加。`fcntl`/`json`の直接importを置き換え） | ローカルモジュール | 状態ファイルの原子的な読み書き（`read_json`/`write_json_atomic`）。`flock`・一時ファイル・`fsync`・`os.replace`はすべてこのモジュール側が担う | 根拠: [インポート宣言] (行番号: 13 / 抜粋: "`from core import state_file`") |
 | `sys` | 標準ライブラリ | モジュール検索パスの操作 | 根拠: [インポート宣言] (行番号: 4 / 抜粋: "`import sys`") |
 | `os` | 標準ライブラリ | パスの絶対パス解決・操作 | 根拠: [インポート宣言] (行番号: 5 / 抜粋: "`import os`") |
-| `json` | 標準ライブラリ | 状態キャッシュのJSON永続化（読み込み・書き込み） | 根拠: [`_load_persisted_states`/`_save_persisted_states`内での使用] (行番号: 6, 46, 61 / 抜粋: "`import json`", "`return json.load(f)`", "`json.dump(states, f)`") |
 | `typing` | 標準ライブラリ | 型アノテーションの提供 | 根拠: [インポート宣言] (行番号: 7 / 抜粋: "`from typing import Dict, Any, Optional, List, Set`") |
 | `config` | 外部モジュール | デバイスリスト設定の取得 | 根拠: [インポート宣言] (行番号: 12 / 抜粋: "`import config`") |
 | `sb_tool` | 外部モジュール | SwitchBot APIからの状態取得 | 根拠: [インポート宣言] (行番号: 13 / 抜粋: "`from services import switchbot_service as sb_tool`") |
@@ -77,48 +76,46 @@
 
 ### `_load_persisted_states`
 
-* **役割**: `_STATE_FILE`が存在すればその内容をJSONとして読み込み、辞書として返す。前回プロセス実行時の状態を復元するために`main`から呼び出される。**（Issue #449で追加）** 読み込み中は`fcntl.flock`による共有ロック(`LOCK_SH`)をファイル記述子に対して取得し、他プロセスによる書き込みとの競合を防ぐ。ロックは`json.load`実行後に`finally`節で必ず解放される。本スクリプトは通常`scheduler_boot.py`により逐次（単一プロセスずつ）実行される前提だが、手動実行等でこの前提が崩れた場合への備えとしてコメントされている。
-* 根拠: [関数定義] (行番号: 37-51 / 抜粋: "`def _load_persisted_states() -> Dict[str, Dict[str, Any]]:`")、[flock取得コメント] (行番号: 38-40 / 抜粋: "`# #449: 状態ファイルは通常scheduler_boot.pyにより逐次実行される前提だが、`")、[flock取得・解放] (行番号: 44, 47-48 / 抜粋: "`fcntl.flock(f.fileno(), fcntl.LOCK_SH)`", "`finally:`", "`fcntl.flock(f.fileno(), fcntl.LOCK_UN)`")
+* **役割**: `_STATE_FILE`の内容をJSONとして読み込み、辞書として返す。前回プロセス実行時の状態を復元するために`main`から呼び出される。**（Issue #449で追加）** 読み込み中は`flock`による共有ロック(`LOCK_SH`)を取得し、他プロセスによる書き込みとの競合を防ぐ。本スクリプトは通常`scheduler_boot.py`により逐次（単一プロセスずつ）実行される前提だが、手動実行等でこの前提が崩れた場合への備え。**（Issue #661で修正）** `open` + `flock` + `json.load` の実装本体は`core/state_file.py`の`read_json`へ移した（このモジュールの実装が同ファイルの参照実装になっている）。本関数は`state_file.read_json(_STATE_FILE, default={})`を呼び、返り値が`dict`でなければ`{}`へ倒す薄いラッパーになっている。壊れている・読めない場合に`{}`（全デバイス初期状態扱い）へフォールバックする方針は従来どおり。
+* 根拠: `def _load_persisted_states() -> Dict[str, Dict[str, Any]]:` (行番号: 36 / 抜粋: "def _load_persisted_states() -> Dict[str, Dict[str, Any]]:")、[state_fileへの委譲] (行番号: 44-45 / 抜粋: "states = state_file.read_json(_STATE_FILE, default={})\n    return states if isinstance(states, dict) else {}")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数の引数定義] (行番号: 37 / 抜粋: "`()`")
+* 根拠: `def _load_persisted_states() -> Dict[str, Dict[str, Any]]:` (行番号: 36 / 抜粋: "def _load_persisted_states() -> Dict[str, Dict[str, Any]]:")
 
 
-* **戻り値/レスポンス**: `Dict[str, Dict[str, Any]]` (`_STATE_FILE`が存在せず、または読み込みに失敗した場合は空の辞書)
-* 根拠: [関数の戻り値型定義と例外時の返却] (行番号: 37, 51 / 抜粋: "`-> Dict[str, Dict[str, Any]]:`" および "`return {}`")
+* **戻り値/レスポンス**: `Dict[str, Dict[str, Any]]`（`_STATE_FILE`が存在しない・読み込みに失敗した・JSONの中身が辞書でない場合はいずれも空の辞書）
+* 根拠: [返り値の型ガード] (行番号: 45 / 抜粋: "return states if isinstance(states, dict) else {}")
 
 
-* **副作用**: `_STATE_FILE`の存在確認およびファイル読み込みを行う。読み込み中はファイル記述子に対する`flock`共有ロックの取得・解放を行う。
-* 根拠: [ファイルI/O] (行番号: 42-46 / 抜粋: "`if os.path.exists(_STATE_FILE):`", "`fcntl.flock(f.fileno(), fcntl.LOCK_SH)`" および "`return json.load(f)`")
+* **副作用**: `_STATE_FILE`の読み込み（`state_file.read_json`が存在確認と`flock`共有ロックの取得・解放を行う）。
+* 根拠: [state_fileへの委譲] (行番号: 44 / 抜粋: "states = state_file.read_json(_STATE_FILE, default={})")
 
 
-* **エラーハンドリング**: 処理全体を`try-except`で囲み、読み込み失敗時（ファイル破損等）は警告ログを出力して空の辞書を返す（例外を再送出しない）。ロック解放自体は`try/finally`により、`json.load`が例外を送出した場合でも実行される。
-* 根拠: [例外捕捉] (行番号: 49-50 / 抜粋: "`except Exception as e:`" および "`logger.warning(f"⚠️ Failed to load persisted device states: {e}")`")、[finally節] (行番号: 45, 47-48 / 抜粋: "`try:`", "`finally:`", "`fcntl.flock(f.fileno(), fcntl.LOCK_UN)`")
-
+* **エラーハンドリング**: 例外は`core/state_file.read_json`側が捕捉して警告ログを出し`default`を返すため、本関数からは例外が送出されない（永続状態が読めなくても`main`は継続する）。
+* 根拠: [state_fileへの委譲] (行番号: 44 / 抜粋: "states = state_file.read_json(_STATE_FILE, default={})")
 
 
 ### `_save_persisted_states`
 
-* **役割**: 渡された状態辞書をJSONとして`_STATE_FILE`へ書き込み、次回プロセス実行時に復元できるようにする。`main`の終了直前に呼び出される。**（Issue #449で追加）** 書き込み中は`fcntl.flock`による排他ロック(`LOCK_EX`)をファイル記述子に対して取得し、他プロセスによる読み取り/書き込みとの競合を防ぐ。ロックは`json.dump`実行後に`finally`節で必ず解放される。
-* 根拠: [関数定義] (行番号: 54-65 / 抜粋: "`def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:`")、[flock取得コメント] (行番号: 55-56 / 抜粋: "`# #449: 書き込み中に他プロセスの読み取り/書き込みと競合しないよう`")、[flock取得・解放] (行番号: 59, 62-63 / 抜粋: "`fcntl.flock(f.fileno(), fcntl.LOCK_EX)`", "`finally:`", "`fcntl.flock(f.fileno(), fcntl.LOCK_UN)`")
+* **役割**: 渡された状態辞書をJSONとして`_STATE_FILE`へ書き込み、次回プロセス実行時に復元できるようにする。`main`の終了直前に呼び出される。**（Issue #449で追加 / 2026-09-06 品質監査で修正）** 書き込みは`flock`排他ロック(`LOCK_EX`)のもとで一時ファイル`{_STATE_FILE}.tmp.{pid}`へ書き切り、`flush`/`fsync`の後`os.replace`で原子的に差し替える。`open(..., "w")`は`flock`取得より前にファイルを切り詰めるため、その瞬間に`LOCK_SH`で読んだ側が空ファイル → `JSONDecodeError` → `{}`（全デバイス初期状態扱い）になっていた（#449のflock追加では閉じていなかった競合）。**（Issue #661で修正）** この「flock + tmp + fsync + os.replace」方式そのものを`core/state_file.py`の`write_json_atomic`へ集約し、本関数はその呼び出しだけになった。失敗時に一時ファイルを削除する挙動も`state_file`側が持つ。
+* 根拠: `def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:` (行番号: 47 / 抜粋: "def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:")、[state_fileへの委譲] (行番号: 56 / 抜粋: "state_file.write_json_atomic(_STATE_FILE, states)")
 
 
 * **引数/リクエスト**: `states` (`Dict[str, Dict[str, Any]]`: 永続化するデバイス状態の辞書)
-* 根拠: [関数の引数定義] (行番号: 54 / 抜粋: "`(states: Dict[str, Dict[str, Any]])`")
+* 根拠: `def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:` (行番号: 47 / 抜粋: "def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [関数の戻り値型定義] (行番号: 54 / 抜粋: "`-> None:`")
+* 根拠: `def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:` (行番号: 47 / 抜粋: "def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:")
 
 
-* **副作用**: `_STATE_FILE`へのファイル書き込み（上書き）を行う。書き込み中はファイル記述子に対する`flock`排他ロックの取得・解放を行う。
-* 根拠: [ファイルI/O] (行番号: 58-61 / 抜粋: "`with open(_STATE_FILE, "w", encoding="utf-8") as f:`", "`fcntl.flock(f.fileno(), fcntl.LOCK_EX)`" および "`json.dump(states, f)`")
+* **副作用**: `_STATE_FILE`の原子的な差し替え（一時ファイルの作成・`fsync`・`os.replace`）。`state_file.write_json_atomic`が行う。
+* 根拠: [state_fileへの委譲] (行番号: 56 / 抜粋: "state_file.write_json_atomic(_STATE_FILE, states)")
 
 
-* **エラーハンドリング**: 処理全体を`try-except`で囲み、書き込み失敗時は警告ログを出力するのみで例外を再送出しない（永続化に失敗しても`main`の処理は継続する）。ロック解放自体は`try/finally`により、`json.dump`が例外を送出した場合でも実行される。
-* 根拠: [例外捕捉] (行番号: 64-65 / 抜粋: "`except Exception as e:`" および "`logger.warning(f"⚠️ Failed to persist device states: {e}")`")、[finally節] (行番号: 60, 62-63 / 抜粋: "`try:`", "`finally:`", "`fcntl.flock(f.fileno(), fcntl.LOCK_UN)`")
-
+* **エラーハンドリング**: 例外は`core/state_file.write_json_atomic`側が捕捉して警告ログを出し`False`を返すため、本関数からは例外が送出されない（永続化に失敗しても`main`の処理は継続する）。
+* 根拠: [state_fileへの委譲] (行番号: 56 / 抜粋: "state_file.write_json_atomic(_STATE_FILE, states)")
 
 
 ### `fetch_device_status_sync`
@@ -181,7 +178,7 @@
 * 根拠: [関数の戻り値型定義] (行番号: 163 / 抜粋: "`-> None:`")
 
 
-* **副作用**: グローバル変数 `_last_device_states` の更新（起動時のクリアと復元、状態変化時の更新）、`_STATE_FILE`への状態の読み込み・書き込み（`_load_persisted_states`/`_save_persisted_states`経由、いずれも内部で`flock`によるロック取得・解放を伴う）、および `sensor_service` 内の非同期関数呼び出し。
+* **副作用**: グローバル変数 `_last_device_states` の更新（起動時のクリアと復元、状態変化時の更新）、`_STATE_FILE`への状態の読み込み・書き込み（`_load_persisted_states`/`_save_persisted_states`経由。Issue #661 以降は`core/state_file.py`が`flock`・一時ファイル・`os.replace`を担う）、および `sensor_service` 内の非同期関数呼び出し。
 * 根拠: [状態の復元・保存と外部呼出] (行番号: 168-169, 200, 223 / 抜粋: "`_last_device_states.update(_load_persisted_states())`", "`_last_device_states[did] = status`" および "`_save_persisted_states(_last_device_states)`")
 
 
@@ -323,6 +320,7 @@ graph TD
 | SwitchBot APIのレスポンス仕様 | `switchbot_service.md`の解析によれば、`sb_tool.get_device_status`(=`get_device_status`)は`request_switchbot_api`経由でGETリクエストを送り、レスポンスを`models.switchbot.DeviceStatusResponse`でバリデーションした辞書を返すとされ、失敗時は`None`を返すフェイルソフト設計とされる。`switchbot.md`の解析によれば、`DeviceStatusResponse`は`statusCode`, `message`, `body`(型は`Dict[str, Any]`)を持つモデルで、`body`の中身はデバイス種別により大きく異なり厳密な型定義はされていないとされる。 | switchbot_service.md, switchbot.md |
 | データ処理時のエラー制御 | `sensor_service.md`の解析によれば、`process_meter_data`は明示的な例外処理を持たず、`process_power_data`はDBからの前回値取得時の例外を`except Exception`で捕捉し前回値を`0.0`として処理を継続する(例外を再送出しない)とされる。 | sensor_service.md |
 | ログの出力先・フォーマット | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`home_system.log`)・ERRORレベル以上のDiscord Webhook通知の3種のハンドラを登録するとされる。 | logger.md |
+| `config.BASE_DIR`の実際のパス値 | `MY_HOME_SYSTEM/config.py`253行目に`BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))`と定義されている。`config.py`自身が置かれたディレクトリの絶対パス、すなわち**`MY_HOME_SYSTEM/` ディレクトリそのもの**であり、環境変数による上書き経路は無い。実機(Raspberry Pi)では`/home/masahiro/develop/MY_HOME_SYSTEM`、CI・ローカルではチェックアウト先の`MY_HOME_SYSTEM/`に解決される。カレントディレクトリに依存しない(`os.path.abspath(__file__)`起点)ため、cron経由(`run_task.sh`)でも直接実行でも同じ値になる。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:253`（参考: [config.md](./config.md)） |
 
 ## 10. 自己検証結果
 

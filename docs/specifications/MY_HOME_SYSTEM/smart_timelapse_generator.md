@@ -59,11 +59,11 @@
 ### `get_ffmpeg_stderr`
 
 * **役割**: `DEBUG_FFMPEG`設定が有効な場合は`sys.stderr`を、無効な場合は`subprocess.DEVNULL`を返す。FFmpeg実行時の標準エラー出力先を一元的に切り替えるためのヘルパー関数。
-* 根拠: 関数定義 (行番号: 68-69 / 抜粋: "def get_ffmpeg_stderr():\n    return sys.stderr if DEBUG_FFMPEG else subprocess.DEVNULL")
+* 根拠: 関数定義 (行番号: 75-76 / 抜粋: "def get_ffmpeg_stderr():\n    return sys.stderr if DEBUG_FFMPEG else subprocess.DEVNULL")
 
 
 * **引数/リクエスト**: なし。
-* 根拠: 関数シグネチャ (行番号: 68 / 抜粋: "def get_ffmpeg_stderr():")
+* 根拠: 関数シグネチャ (行番号: 75 / 抜粋: "def get_ffmpeg_stderr():")
 
 
 * **戻り値/レスポンス**: `sys.stderr`または`subprocess.DEVNULL`（型ヒントなし）。
@@ -80,7 +80,7 @@
 ### `MotionRecord` (dataclass)
 
 * **役割**: 動体検知処理(`MotionDetector`)が1秒単位で記録する、検知時刻・最大輪郭面積・輪郭数を保持するデータ構造。
-* 根拠: `@dataclass class MotionRecord:` (行番号: 74-78 / 抜粋: "class MotionRecord:\n    time_sec: int\n    largest_area: float\n    contour_count: int")
+* 根拠: `@dataclass class MotionRecord:` (行番号: 82-85 / 抜粋: "class MotionRecord:\n    time_sec: int\n    largest_area: float\n    contour_count: int")
 
 
 * **フィールド**: `time_sec: int`, `largest_area: float`, `contour_count: int`
@@ -96,7 +96,7 @@
 ### `EventRecord` (dataclass)
 
 * **役割**: `MotionRecord`をグルーピングして生成される「イベント」（一連の動きのまとまり）のデータ構造。開始・終了秒、スコア、検出物体数（人物・車両・動物・顔）などを保持する。`__post_init__`で`duration`（継続時間）を自動計算する。
-* 根拠: `@dataclass class EventRecord:` および `def __post_init__(self):` (行番号: 93-94 / 抜粋: "self.duration = (self.end_sec - self.start_sec) + 1")
+* 根拠: `@dataclass class EventRecord:` および `def __post_init__(self):` (行番号: 100-101 / 抜粋: "self.duration = (self.end_sec - self.start_sec) + 1")
 
 
 * **フィールド**: `event_id: str`, `start_sec: int`, `end_sec: int`, `max_area: float`, `score: float = 0.0`, `duration: int = 0`, `person_count: int = 0`, `vehicle_count: int = 0`, `animal_count: int = 0`, `face_detected: int = 0`
@@ -112,7 +112,7 @@
 ### `SummaryInfo` (dataclass)
 
 * **役割**: 1回のタイムラプス生成ジョブ全体の結果サマリ（対象日、イベント数、処理時間、出力パス、ファイルサイズ、バージョン情報等）を保持し、`mark_as_done`で完了記録ファイル(`.done`)としてJSON出力される。
-* 根拠: `@dataclass class SummaryInfo:` (行番号: 96-107 / 抜粋: "class SummaryInfo:\n    target_date: str")
+* 根拠: `@dataclass class SummaryInfo:` (行番号: 104-114 / 抜粋: "class SummaryInfo:\n    target_date: str")
 
 
 * **フィールド**: `target_date: str`, `events: int = 0`, `summary_duration: int = 0`, `total_processing_time: float = 0.0`, `output_path: str = ""`, `file_size_bytes: int = 0`, `version: str = __version__`, `ffmpeg_version: str = ""`, `opencv_version: str = cv2.__version__`, `fast_stream_copy_mode: bool = FAST_STREAM_COPY_MODE`
@@ -128,7 +128,7 @@
 ### `sec_to_time`
 
 * **役割**: 秒数(int)を`datetime.timedelta`経由で`H:MM:SS`形式の文字列に変換する。
-* 根拠: 関数定義 (行番号: 112-113 / 抜粋: "def sec_to_time(sec: int) -> str:\n    return str(datetime.timedelta(seconds=sec))")
+* 根拠: 関数定義 (行番号: 119-120 / 抜粋: "def sec_to_time(sec: int) -> str:\n    return str(datetime.timedelta(seconds=sec))")
 
 
 * **引数/リクエスト**: `sec: int`
@@ -217,7 +217,7 @@
 * **引数/リクエスト**: `input_path` (str), `retries` (int = 3)。
 
 
-* 根拠: 関数シグネチャ (行番号: 139 / 抜粋: "def get_video_info(input_path: s...")
+* 根拠: 関数シグネチャ (行番号: 146 / 抜粋: "def get_video_info(input_path: s...")
 
 
 
@@ -260,7 +260,7 @@
 * **引数/リクエスト**: `input_path` (str), `video_info` (Dict[str, Any])。
 
 
-* 根拠: 関数シグネチャ (行番号: 163 / 抜粋: "def get_video_start_dt(input_p...")
+* 根拠: 関数シグネチャ (行番号: 170 / 抜粋: "def get_video_start_dt(input_p...")
 
 
 
@@ -361,7 +361,7 @@
 * **引数/リクエスト**: なし。
 
 
-* 根拠: 関数シグネチャ (行番号: 205 / 抜粋: "def setup_directories() -> Tup...")
+* 根拠: 関数シグネチャ (行番号: 212 / 抜粋: "def setup_directories() -> Tup...")
 
 
 
@@ -443,7 +443,7 @@
 * **引数/リクエスト**: コンストラクタ引数なし。`detect`メソッド: `input_path` (str), `work_dir` (str), `duration_sec` (float)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 246 / 抜粋: "def detect(self, input_path: s...")
+* 根拠: メソッドシグネチャ (行番号: 282 / 抜粋: "def detect(self, input_path: s...")
 
 
 
@@ -486,7 +486,7 @@
 * **引数/リクエスト**: `build`メソッド: `motion_records` (List[MotionRecord]), `work_dir` (str)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 332 / 抜粋: "def build(self, motion_records...")
+* 根拠: メソッドシグネチャ (行番号: 390 / 抜粋: "def build(self, motion_records...")
 
 
 
@@ -529,7 +529,7 @@
 * **引数/リクエスト**: `build`メソッド: `input_path` (str), `events` (List[EventRecord]), `output_path` (str), `temp_dir` (str), `video_start_dt` (datetime.datetime)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 405 / 抜粋: "def build(self, input_path: st...")
+* 根拠: メソッドシグネチャ (行番号: 463 / 抜粋: "def build(self, input_path: st...")
 
 
 
@@ -573,7 +573,7 @@
 * **引数/リクエスト**: `split_and_send`メソッド: `summary` (SummaryInfo), `base_filename` (str)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 566 / 抜粋: "def split_and_send(self, summa...")
+* 根拠: メソッドシグネチャ (行番号: 570 / 抜粋: "def split_and_send(self, summa...")
 
 
 
@@ -616,7 +616,7 @@
 * **引数/リクエスト**: `input_video` (str)。
 
 
-* 根拠: 関数シグネチャ (行番号: 577 / 抜粋: "def run_smart_timelapse_job(in...")
+* 根拠: 関数シグネチャ (行番号: 655 / 抜粋: "def run_smart_timelapse_job(in...")
 
 
 

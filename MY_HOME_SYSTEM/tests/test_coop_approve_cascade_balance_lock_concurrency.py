@@ -20,8 +20,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
-from services.quest_service import QuestService
+from core.utils import get_now_iso
+from core.database import get_db_cursor
+from services.quest_service import ApprovalService, QuestService
 
 N_SOLO_PENDING = 11
 GOLD_PER_QUEST = 10
@@ -48,7 +49,7 @@ def _seed_family_with_pending_history(cur):
         cur.execute(
             "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, "
             "completed_at, status) VALUES ('daughter', ?, ?, ?, ?, ?, 'pending')",
-            (9000 + i, f"SoloQuest{i}", EXP_PER_QUEST, GOLD_PER_QUEST, common.get_now_iso()),
+            (9000 + i, f"SoloQuest{i}", EXP_PER_QUEST, GOLD_PER_QUEST, get_now_iso()),
         )
         daughter_solo_history_ids.append(cur.lastrowid)
     return daughter_solo_history_ids
@@ -56,15 +57,17 @@ def _seed_family_with_pending_history(cur):
 
 class TestCoopApproveCascadeBalanceLock:
     def test_concurrent_approvals_do_not_lose_partner_balance_updates(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             daughter_solo_history_ids = _seed_family_with_pending_history(cur)
 
         quest_service = QuestService()
 
+        approval_service = ApprovalService()
+
         # 兄妹連携クエストのpendingペアを作成(息子が報告すると、娘側にも
         # 連結されたpending行が自動生成される)
         quest_service.process_complete_quest("son", 501)
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             son_coop_hist = cur.execute(
                 "SELECT id FROM quest_history WHERE user_id = 'son' AND quest_id = 501"
             ).fetchone()
@@ -76,12 +79,12 @@ class TestCoopApproveCascadeBalanceLock:
 
         with ThreadPoolExecutor(max_workers=len(all_targets)) as pool:
             results = list(pool.map(
-                lambda hid: quest_service.process_approve_quest("dad", hid), all_targets
+                lambda hid: approval_service.process_approve_quest("dad", hid), all_targets
             ))
 
         assert all(r["status"] == "success" for r in results)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             daughter = cur.execute("SELECT gold, exp FROM quest_users WHERE user_id = 'daughter'").fetchone()
             approved_count = cur.execute(
                 "SELECT COUNT(*) c FROM quest_history WHERE user_id='daughter' AND status='approved'"

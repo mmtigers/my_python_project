@@ -16,9 +16,11 @@
 - [useQuestStatus.md](../features/quest/hooks/useQuestStatus.md) — `User`/`Quest`/`QuestHistory`型を用いたロック・完了判定ロジックの実装元。
 - [QuestList.md](../features/quest/components/QuestList.md) — `Quest`型の共有クエスト判定フィールド（`is_shared_completed_by`等）の利用元。
 - [RewardList.md](../features/shop/components/RewardList.md) — `Reward`/`User`型の利用元。
-- [quest_router.md](../../../MY_HOME_SYSTEM/quest_router.md) — `Quest`の共有クエスト判定フィールドを付与するバックエンドAPIの実装元。
+- [quest_router.md](../../../MY_HOME_SYSTEM/quest_router.md) — `Quest`の共有クエスト判定フィールドを付与(**2026-09-06 品質監査**: バックエンド `services/quest_service.py` に `get_available_quests` は存在せず、`is_shared_*` は現行の `GET /api/quest/data` 応答に含まれない。Issue #371 で撤去済みのため型定義のみが残る)するバックエンドAPIの実装元。
 
 ## 2. ファイルの概要
+
+* **（Issue #657 で訂正）** `InventoryItem` の上のコメントが参照していた `models/quest.py` の `InventoryItem` は Issue #409 で削除済みのため、対応先を「バックエンドの `/api/quest/inventory` 応答そのもの」に改めた。型の形状自体は変えていない(#659 で `inventoryResponseSchema` による実行時検証も入った)。
 
 * アプリケーション全体で使用される共通のデータ構造（型定義、インターフェース）を定義し、提供する。
 * ユーザー、クエスト、クエスト履歴、報酬、インベントリ、クエスト完了結果のドメインモデルの型を網羅している。装備・ボス・ギルド依頼・ファミリーマイレージ関連の型（`Equipment`, `Boss`, `OwnedEquipment`, `BossEffect`, `FamilyMileage`, `Bounty`）は、それらの機能自体の廃止に伴い本ファイルには存在しない。承認待ちインベントリを表す型（`PendingInventory`）も、アイテム使用時の親承認フローの廃止（2026-08-29 コミット`9d5edec`、`family-quest/CLAUDE.md`の改訂メモに記載）に伴い本ファイルには存在しない。**（YouTubeごほうび券クールダウン機能で追加）** `GET /api/quest/inventory/{user_id}`のレスポンス全体を表す`InventoryResponse`型が追加された。**（猶予期間機能で追加）** クールダウンの猶予期間中(実際の制限開始前)に表示する予告情報を表す`YoutubeCooldownAnnouncement`型も追加され、`interface`/`type`の宣言は9件になった。
@@ -68,6 +70,9 @@
 * **エラーハンドリング**: なし
 
 ### `Quest`
+
+* **（Issue #530 で修正）** `quest_type` の union を `'daily' | 'special' | 'infinite' | 'limited' | 'random' | string` に変更(以前の `'weekly' | 'challenge'` はサーバーが送出しない値)。`is_shared_completed_by` / `shared_completed_by_name` / `is_shared_pending_by` / `shared_pending_by_name` はバックエンドが #371 以降送出しない幽霊フィールドのため削除した。
+* 根拠: (行番号: 54, 71〜73 / 抜粋: "quest_type?: 'daily' | 'special' | 'infinite' | 'limited' | 'random' | string;", "#530: 以前ここにあった is_shared_completed_by")
 
 * **役割**: クエスト情報のデータ構造の定義。`is_shared_completed_by`等、共有クエスト判定用のフィールド（バックエンドの`get_available_quests`が付与）を含む。**（Issue #291で修正）** 以前はDBの実カラム名(`quest_id`/`exp_gain`/`gold_gain`/`icon_key`/`quest_type`/`target_user`)に加え、バックエンドが一部のみ付与していた別名(`id`/`exp`/`gold`/`icon`/`type`/`target`)も型として許容しており、どちらが実際に送られてくるか不明瞭だった。調査の結果`id`/`exp`/`gold`/`desc`は実際には一度もAPIから送られてこない「幽霊フィールド」だったと判明し、サーバー側の実カラム名のみに一本化された（`desc`はそもそも別名として型に含まれていなかったが、同種の問題として言及されている）。
 * **（Issue #390で修正）** `difficulty?: number`はバックエンドが送出しない幽霊フィールドだったため削除。`description`はNULL可カラムのため`string | null`を許容する。**（Issue #412 F-L10で追加）** `_isFallback?: boolean`は`_isInfinite`と同じ位置づけのフロントエンド拡張フラグで、`masterData.js`の`MASTER_QUESTS`（サーバー接続エラー時の案内専用の疑似クエスト、完了APIを持たない）であることを示す。バックエンドは送出しない。根拠: 49行目 `_isFallback?: boolean;`

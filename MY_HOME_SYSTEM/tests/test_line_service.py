@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import config
 from services import line_service
 from linebot.v3.messaging import TextMessage
@@ -22,7 +22,7 @@ class TestLogChildHealth:
         result = await line_service.log_child_health("U1", "太郎", "daughter", "元気")
         assert "daughter" in result.text or "元気" in result.text
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 f"SELECT * FROM {config.SQLITE_TABLE_CHILD} WHERE child_name='daughter'"
             ).fetchone()
@@ -36,7 +36,7 @@ class TestLogFoodRecord:
         result = await line_service.log_food_record("U1", "太郎", "自炊", "カレー", is_manual=True)
         assert "カレー" in result.text
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_FOOD}").fetchone()
         assert "(手入力)" in row["menu_category"]
 
@@ -79,7 +79,7 @@ class TestSaveFailureIsReportedToUser:
 
     async def test_log_child_health_reports_failure_on_real_db_error(self, isolated_db):
         """モックではなく実際のDBエラー(テーブル欠落)経由でも失敗メッセージになること"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(f"DROP TABLE {config.SQLITE_TABLE_CHILD}")
 
         result = await line_service.log_child_health("U1", "太郎", "智矢", "元気")
@@ -87,7 +87,7 @@ class TestSaveFailureIsReportedToUser:
         assert result.text.startswith(line_service.SAVE_FAILED_PREFIX)
 
     async def test_log_food_record_reports_failure_on_real_db_error(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(f"DROP TABLE {config.SQLITE_TABLE_FOOD}")
 
         result = await line_service.log_food_record("U1", "太郎", "夕食", "カレー")
@@ -144,3 +144,49 @@ class TestSplitTextIntoLineMessages:
         result = line_service.split_text_into_line_messages(text)
         for m in result[:-1]:
             assert len(m.text) == line_service.LINE_TEXT_MAX_CHARS
+
+
+class TestLineTextLengthCountsUtf16CodeUnits:
+    """Issue #588の回帰テスト。
+
+    LINE Messaging APIは文字数をUTF-16コードユニット単位で数え、BMP外の文字
+    (絵文字等)はサロゲートペア=2コードユニットとしてカウントされる
+    (https://developers.line.biz/en/docs/messaging-api/text-character-count/)。
+    以前はPython の len(str)(コードポイント単位)で数えていたため、絵文字を
+    多用するテキストでは実際のLINE側カウントより少なく見積もり、この関数が
+    「上限内」と誤判定したメッセージがMessaging API側では上限超過になりうった。
+    """
+
+    def test_astral_plane_emoji_counts_as_two_chars_not_one(self):
+        # U+1F34E(🍎)はPythonでは1コードポイントだが、UTF-16ではサロゲート
+        # ペア(2コードユニット)になる。
+        assert len("🍎") == 1
+        assert line_service._line_text_length("🍎") == 2
+
+    def test_bmp_text_length_matches_python_len(self):
+        assert line_service._line_text_length("こんにちは") == len("こんにちは")
+
+    def test_emoji_heavy_text_is_split_even_when_python_len_is_within_limit(self):
+        # Python基準(len())ではちょうど上限文字数だが、UTF-16基準(LINE基準)では
+        # その2倍のため、以前のlen()ベースの実装では誤って「単一メッセージで
+        # 送信可能」と判定していた(実際にはMessaging API側で上限超過になりうった)。
+        text = "🍎" * line_service.LINE_TEXT_MAX_CHARS
+        assert len(text) == line_service.LINE_TEXT_MAX_CHARS
+
+        result = line_service.split_text_into_line_messages(text)
+
+        assert isinstance(result, list)
+        assert len(result) > 1
+        for m in result:
+            assert line_service._line_text_length(m.text) <= line_service.LINE_TEXT_MAX_CHARS
+        assert "".join(m.text for m in result) == text
+
+    def test_split_boundary_right_before_an_emoji_recombines_losslessly(self):
+        # 分割境界の直前に絵文字が来るケースでも、各チャンクが往復可能な
+        # 有効なテキストであり、結合すると元のテキストに完全一致すること。
+        text = "a" * (line_service.LINE_TEXT_MAX_CHARS - 1) + "🍎" * 5
+        result = line_service.split_text_into_line_messages(text)
+        assert isinstance(result, list)
+        for m in result:
+            m.text.encode("utf-16-le")  # 有効な文字列であることの確認
+        assert "".join(m.text for m in result) == text

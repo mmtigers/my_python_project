@@ -77,6 +77,8 @@ def stub_run_dependencies(monkeypatch):
     monkeypatch.setattr(module, "WebMonitor", MagicMock(return_value=monitor))
 
     notifier = MagicMock()
+
+    notifier.notify_casts.return_value = (1, [])
     # D-L9: notify()はint(実際に送信できた件数)を返す契約になったため、
     # 呼び出し元(record_daily_new_casts)が比較演算できるようMagicMockの
     # 戻り値を明示的にintへ固定する。
@@ -175,6 +177,30 @@ class TestIsLocalFallbackDir:
 
     def test_nas_dir_is_not_fallback(self, tmp_path):
         assert MonitorConfig.is_local_fallback_dir(tmp_path) is False
+
+
+class TestLocalFallbackDirIsIsolatedFromOtherScripts:
+    """Issue #580の回帰テスト。
+
+    以前はnewface_monitor.pyとextract_youtube_urls.pyが同じ`BASE_DIR / 'data'`
+    をローカルフォールバック先として共有していた。NAS未マウント中に一方が
+    書いたフォールバックデータを、NAS復旧後にもう一方の
+    core.nas_utils.sync_fallback_to_nas呼び出しが誤って自分のNASディレクトリへ
+    丸ごと移動してしまう経路があったため、スクリプトごとに専用サブディレクトリへ
+    分離した。両モジュールの値が一致しないことを固定する。
+    """
+
+    def test_local_dir_differs_from_extract_youtube_urls(self):
+        import extract_youtube_urls
+
+        newface_local = Path(MonitorConfig.LOCAL_DIR_STR).resolve()
+        youtube_local = Path(extract_youtube_urls.AppConfig.LOCAL_DIR_STR).resolve()
+
+        assert newface_local != youtube_local
+        # 親(DDD/data)は共有してよいが、直下ではなく専用サブディレクトリであること
+        assert newface_local.parent == youtube_local.parent
+        assert newface_local.name == "newface_monitor"
+        assert youtube_local.name == "youtube_extractor"
 
 
 if __name__ == "__main__":

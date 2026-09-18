@@ -21,7 +21,7 @@ import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import config
 from handlers import line_handler
 from services import ai_service
@@ -76,7 +76,7 @@ class TestPostbackPromptFollowedByFreeTextReachesDb:
         # postbackで「その他」を選んだ後、ユーザーが自由文を送るのと同じ経路
         await line_handler._process_message_async("U1", "パパ", "少し元気がない", "tok")
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 f"SELECT * FROM {config.SQLITE_TABLE_CHILD} WHERE child_name='智矢'"
             ).fetchone()
@@ -98,7 +98,7 @@ class TestPostbackPromptFollowedByFreeTextReachesDb:
 
         await line_handler._process_message_async("U1", "パパ", "オムライス作った", "tok")
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_FOOD}").fetchone()
         assert row is not None
         assert "オムライス" in row["menu_category"]

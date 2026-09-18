@@ -44,7 +44,7 @@ class TestEmitDoesNotBlockOnSlowDiscord:
             release_post.wait(2)
             return None
 
-        with patch("core.logger.requests.post", side_effect=slow_post) as mock_post:
+        with patch("core.discord.requests.post", side_effect=slow_post) as mock_post:
             start = time.monotonic()
             handler.emit(_make_error_record())
             elapsed = time.monotonic() - start
@@ -69,7 +69,7 @@ class TestEmitHandlesNonStringMsg:
         handler = DiscordErrorHandler()
         record = _make_error_record(msg=ValueError("non-string msg"))
 
-        with patch("core.logger.requests.post") as mock_post:
+        with patch("core.discord.requests.post") as mock_post:
             # 例外を投げずに完了すること(修正前は "Discord" not in record.msg で
             # TypeErrorになりうる)。
             handler.emit(record)
@@ -116,7 +116,35 @@ class TestEmitSkipsDiscordOriginatedMessages:
         handler = DiscordErrorHandler()
         record = _make_error_record(msg="Discord webhook failed")
 
-        with patch("core.logger.requests.post") as mock_post:
+        with patch("core.discord.requests.post") as mock_post:
             handler.emit(record)
             time.sleep(0.3)
             assert mock_post.call_count == 0
+
+
+class TestWebhookFailureLogDoesNotLeakToken:
+    def test_redact_webhook_url_masks_token_segment(self):
+        from core import logger as core_logger
+        url = "https://discord.com/api/webhooks/123456789012345678/AbC-dEf_123"
+        assert core_logger._redact_webhook_url(url) == "https://discord.com/api/webhooks/123456789012345678/<redacted>"
+
+    def test_send_webhook_failure_log_hides_token(self, monkeypatch, caplog):
+        import logging
+        from core import logger as core_logger
+
+        def boom(*a, **k):
+            raise RuntimeError("Max retries exceeded with url: /api/webhooks/1/AbC-dEf_123")
+
+        # #661: 送信の実体は core/discord.py へ移った。
+        from core import discord as core_discord
+        monkeypatch.setattr(core_discord.requests, "post", boom)
+        core_logger._webhook_failure_logger.propagate = True
+        try:
+            with caplog.at_level(logging.WARNING, logger=core_logger._webhook_failure_logger.name):
+                core_logger.DiscordErrorHandler._send_webhook(
+                    "https://discord.com/api/webhooks/1/AbC-dEf_123", {"content": "x"}
+                )
+        finally:
+            core_logger._webhook_failure_logger.propagate = False
+        assert "AbC-dEf_123" not in caplog.text
+        assert "<redacted>" in caplog.text

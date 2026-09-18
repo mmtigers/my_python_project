@@ -26,3 +26,6 @@ sudo logrotate -d /etc/logrotate.d/home_system
 Debian系では `logrotate.timer` が毎日自動実行するため、cron等の追加登録は不要。
 
 実機の設定を変更した場合は、このファイルにも反映してコミットすること。
+反映漏れは、毎時cronの `monitors/health_watch.py`(チェック7: 実機構成ドリフト検知)が
+本ディレクトリのファイル(README除く)と `/etc/logrotate.d/` 側の同名ファイルをコメント・空行を除いて比較し、
+差分・未導入があれば Discord の error チャンネルへ通知する(自動で書き戻しはしない)。

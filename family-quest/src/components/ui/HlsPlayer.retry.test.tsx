@@ -15,7 +15,9 @@ const mockState = vi.hoisted(() => ({
     }>,
 }));
 
-vi.mock('hls.js', () => {
+// #660: コンポーネントは light ビルド('hls.js/light')を import するため、
+// モック先も同じ指定子にする(別指定子をモックしても差し替わらない)。
+vi.mock('hls.js/light', () => {
     class FakeHls {
         static Events = { ERROR: 'hlsError', MANIFEST_PARSED: 'hlsManifestParsed', FRAG_LOADED: 'hlsFragLoaded' };
         static ErrorTypes = { NETWORK_ERROR: 'networkError', MEDIA_ERROR: 'mediaError', OTHER_ERROR: 'otherError' };

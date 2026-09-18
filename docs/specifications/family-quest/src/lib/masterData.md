@@ -40,6 +40,9 @@
 
 ### 定数：`INITIAL_USERS`
 
+* **（Issue #530 で修正）** `INITIAL_USERS` から `hp` / `maxHp` / `inventory` を削除した(#327 で `User` 型から削除済みのフィールド)。
+* 根拠: (行番号: 13 / 抜粋: "// #530: hp/maxHp/inventory は #327 で User 型から削除済みのため撤去")
+
 * **役割**: 接続エラー時に使用されるゲストユーザーのフォールバックデータを定義する。
 * 根拠: [定数定義] (行番号: 4〜18 / 抜粋: "export const INITIAL_USERS = [")
 
@@ -155,8 +158,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| フォールバックデータの利用箇所と適用条件 | `useGameData.md`の解析によれば、`useGameData`フックの戻り値オブジェクトにおいて`users: gameData?.users || INITIAL_USERS`のように、`useQuery`によるサーバーからの取得データが存在しない場合のフォールバック値として`INITIAL_USERS`/`MASTER_QUESTS`/`MASTER_REWARDS`が使われているとされている。 | `../hooks/useGameData.md` |
-
+| フォールバックデータの利用箇所と適用条件 | `useGameData.md`の解析によれば、`useGameData`フックの戻り値オブジェクトにおいて`users: gameData?.users \|\| INITIAL_USERS`のように、`useQuery`によるサーバーからの取得データが存在しない場合のフォールバック値として`INITIAL_USERS`/`MASTER_QUESTS`/`MASTER_REWARDS`が使われているとされている。 | `../hooks/useGameData.md` |
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

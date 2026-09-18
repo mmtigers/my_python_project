@@ -7,12 +7,21 @@
 # 週間ログ分析 (日曜 08:50)
 50 8 * * 0 /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/log_analyzer.py
 
+# 週間レポート(電気代・センサー集計の Discord 通知、月曜 08:30)
+# weekly_analyze_report.py は「月曜の8時台」以外は no-op で、同日二重起動は
+# FALLBACK_ROOT/last_weekly_report.txt の実行済みフラグ(#234)で抑止される。
+# Issue #528: 以前はこのリポジトリ外の cron でのみ起動されていて復旧手順から漏れていた。
+30 8 * * 1 /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh weekly_analyze_report.py
+
 # データベースバックアップ (毎日 04:00)
 # Note: 元コメントは日曜03:00でしたが、コードは毎日04:00でした。コードを優先しています。
 0 4 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh /home/masahiro/develop/MY_HOME_SYSTEM/services/backup_service.py
 
-# 毎日 AM 4:00 に、30日(mtime +30)より古いmp4ファイルをNASから削除する
-0 4 * * * find /mnt/nas/home_system/nvr_recordings -type f -name "*.mp4" -mtime +30 -delete
+# 録画(nvr_recordings)・HLS VOD キャッシュの保持期間削除は monitors/nas_monitor.py の
+# run_retention_cleanup(scheduler_boot 経由・1日1回)が .env の RECORDING_RETENTION_DAYS /
+# HLS_VOD_RETENTION_DAYS を参照して行う。以前ここにあった find -mtime +30 -delete は
+# 設定値と無関係に30日で消してしまい(Issue #527)、削除件数も Discord サマリに計上されない
+# ため撤去した。cron 側に同種の削除を追加しないこと。
 
 # 2. 一括ダウンロード (毎日 2:00 に変更)
 0 2 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh /home/masahiro/develop/DDD/batch_download_discord.py
@@ -26,7 +35,26 @@
 15 15 * * * cd /home/masahiro/develop/MY_HOME_SYSTEM && /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python monitors/daily_timelapse_job.py entrance --date $(date +\%Y-\%m-\%d) --start 13:00 --end 15:00
 
 # newface monitor per 1hour
-0 * * * * cd /home/masahiro/develop/DDD &&  /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python newface_monitor.py >> /home/masahiro/develop/DDD/logs/newface_monitor.log 2>&1
+# Issue #587: DDD/logs はリポジトリ管理外(.gitignore対象)で、他のcronエントリと
+# 異なりrun_task.sh(起動のたびにMY_HOME_SYSTEM/logsをmkdir -pするstart_all.shに
+# 依存)を経由しないため、このディレクトリを作成する手段がどこにも無かった。
+# 存在しない場合はリダイレクト自体が失敗しPythonプロセスが一切起動しない
+# (cronはシェルのリダイレクトエラーを検知できず無言で失敗する)。mkdir -pを追加する。
+0 * * * * cd /home/masahiro/develop/DDD && mkdir -p /home/masahiro/develop/DDD/logs && /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python newface_monitor.py >> /home/masahiro/develop/DDD/logs/newface_monitor.log 2>&1
 
-# 毎日 04:00 に、30日(mtime +30)より古いカメラ録画VODキャッシュ(HLS)をローカルディスクから削除する
-0 4 * * * find /home/masahiro/develop/MY_HOME_SYSTEM/data/hls_streams/vod -type f -mtime +30 -delete
+# Bluetoothスピーカー(Anker SoundCore 2)のキープアライブ (Issue #585)
+# tools/keep_alive_anker.sh自身が「cron実行時でもPipeWireソケットを見つけられる
+# ように」という前提のコメントを持つ(=cron起動を前提に書かれている)にも関わらず、
+# 本ファイル・MY_HOME_SYSTEM/deploy/systemd/のいずれにも実行契機が無く、実質的に
+# 一度も実行されていなかった可能性がある。オーディオアンプの無音自動オフを防ぐ
+# という目的上、一般的なBluetoothスピーカーのオートパワーオフ時間(10〜20分程度)
+# より十分短い間隔として5分毎に設定する(実機の実際のオートオフ時間に応じて
+# 調整の余地あり)。
+*/5 * * * * /home/masahiro/develop/MY_HOME_SYSTEM/tools/keep_alive_anker.sh
+
+# 同じBluetoothスピーカー経路向けの、別方式(mpg123での無音MP3再生)のハートビート。
+# keep_alive_anker.sh(上記)とkeep_alive_speaker.shはdocs/specifications側で
+# 「同じログファイルを共有する、別方式のキープアライブスクリプト」として並記されて
+# おり、どちらかが他方の後継/レガシーであるとは明記されていない。両方に実行契機が
+# 無かった状態を解消するため、干渉を避けるべく上記と時刻をずらして同じ間隔で登録する。
+2-59/5 * * * * /home/masahiro/develop/MY_HOME_SYSTEM/tools/keep_alive_speaker.sh

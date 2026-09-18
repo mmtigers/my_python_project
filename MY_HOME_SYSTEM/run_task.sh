@@ -26,7 +26,9 @@ LOG_FILE="${LOG_DIR}/$(basename "${SCRIPT_NAME}" .py).log"
 cd "${PROJECT_ROOT}" || exit 1
 
 # ★修正: 親ディレクトリ(develop)もパスに追加する
-export PYTHONPATH="${DEVELOP_ROOT}:${PROJECT_ROOT}:${PYTHONPATH}"
+# (cron では PYTHONPATH が未設定のため、末尾の ":" で空要素(=カレントディレクトリ)が
+#  暗黙の import ルートに加わらないよう、設定済みのときだけ連結する)
+export PYTHONPATH="${DEVELOP_ROOT}:${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 # 実行 & ログ出力
 echo "--- [$(date '+%Y-%m-%d %H:%M:%S')] Start: ${SCRIPT_NAME} ---" >> "${LOG_FILE}"

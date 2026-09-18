@@ -1,0 +1,109 @@
+name: Dependabot Auto-merge
+
+# Dependabot が起票した minor/patch 更新の PR を、CI(test.yml の4ジョブ)が緑になった
+# 時点で自動マージする。メジャー更新(破壊的変更の可能性)は対象外で、従来どおり人が
+# 判断してマージする。
+#
+# 背景: dependabot.yml は minor/patch をグループ化して週次で起票するが、マージは
+# 毎回手作業だった(直近3週間の65コミット中11件が deps マージ)。CI が緑の
+# minor/patch を人が確認する価値は低く、滞留した Dependabot PR が本物の CI 失敗を
+# 見落とすリスク(Issue #482)の方が大きいため、自動化する。
+#
+# 前提(リポジトリ設定。docs/runbooks/issue_509_repo_settings_and_branch_cleanup.md 参照):
+#   1. master の branch protection で `Lint` / `Test + Coverage` / `Security Scan` /
+#      `Frontend Build (family-quest)` を required status checks にしていること。
+#      required checks が無いと GitHub は PR を「即マージ可能」とみなすため、
+#      本ワークフローは安全側に倒して何もせず失敗する(下の mergeStateStatus ガード)。
+#   2. Settings → General → Pull Requests → "Allow auto-merge" が有効なこと。
+#
+# 安全策:
+#   - 自分でマージは実行しない。GitHub の auto-merge を有効化するだけで、実際の
+#     マージは required checks が全て成功した時点で GitHub 側が行う。
+#   - auto-merge を有効化するのは、GitHub が PR を BLOCKED(required checks 待ち等)と
+#     判定しているときだけ。CLEAN/UNSTABLE(= required checks が無い、または既に
+#     完了済み)のときは、CI 未完了のままマージされる余地を残さないため何もしない。
+#   - permissions は本ワークフローに必要な最小限のみ明示する(Dependabot が起こす
+#     pull_request イベントでは、明示した permissions だけが GITHUB_TOKEN に付与される)。
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  auto-merge:
+    name: Enable auto-merge (minor/patch only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        # 他のアクションと同様にコミットSHAへピン留めする(Issue #399)。Dependabot の
+        # github-actions エコシステム設定により、更新は週次 PR で自動起票される。
+        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2.5.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip major updates
+        if: >-
+          steps.metadata.outputs.update-type != 'version-update:semver-patch' &&
+          steps.metadata.outputs.update-type != 'version-update:semver-minor'
+        env:
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+        run: |
+          echo "update-type='${UPDATE_TYPE}' は自動マージ対象外です(minor/patch のみ)。人が確認してマージしてください。"
+
+      - name: Enable auto-merge
+        if: >-
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+        run: |
+          set -euo pipefail
+          echo "update-type=${UPDATE_TYPE}"
+
+          # 既に有効なら何もしない(synchronize で再実行された場合の冪等性)
+          if [ "$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest != null')" = "true" ]; then
+            echo "auto-merge は既に有効です。"
+            exit 0
+          fi
+
+          # PR 作成直後は GitHub のマージ可否計算が終わっておらず UNKNOWN になるため、少し待つ
+          status="UNKNOWN"
+          for _ in 1 2 3 4 5 6; do
+            status="$(gh pr view "$PR_URL" --json mergeStateStatus --jq '.mergeStateStatus')"
+            [ "$status" != "UNKNOWN" ] && break
+            sleep 10
+          done
+          echo "mergeStateStatus=${status}"
+
+          case "$status" in
+            BLOCKED)
+              # required checks 待ち(または失敗中)。auto-merge を有効化し、マージ自体は
+              # GitHub が required checks の成功後に行う。
+              gh pr merge --auto --squash "$PR_URL"
+              echo "auto-merge を有効化しました。required checks が全て成功した時点でマージされます。"
+              ;;
+            CLEAN|UNSTABLE|HAS_HOOKS)
+              echo "::error::PR が '${status}' 状態のため auto-merge を有効化しませんでした。" \
+                   "branch protection で required status checks が設定されていないか、既に CI が完了しています。" \
+                   "前者なら docs/runbooks/issue_509_repo_settings_and_branch_cleanup.md の手順で設定し、" \
+                   "後者なら手動でマージしてください(CI 未完了のまま自動マージしないための安全策です)。"
+              exit 1
+              ;;
+            *)
+              # DIRTY(コンフリクト)/BEHIND/DRAFT/UNKNOWN 等。Dependabot がリベースし直すか、人が確認する。
+              echo "::warning::PR が '${status}' 状態のため auto-merge を有効化しませんでした。"
+              ;;
+          esac

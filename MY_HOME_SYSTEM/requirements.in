@@ -1,0 +1,54 @@
+# MY_HOME_SYSTEM/requirements.in — 実行時の直接依存(このリポジトリのソースが import する、
+# または FastAPI 等が実行時に要求するパッケージ)だけを列挙する。
+#
+# requirements.txt はこのファイルから pip-compile(pip-tools)で生成した lock ファイルであり、
+# 手で編集しない(Issue #647)。以前は pip freeze 形式の requirements.txt(117 行、うち直接
+# import されるのは約 30)を手で保守しており、Dependabot が pydantic と pydantic_core を
+# 独立に最新化して ResolutionImpossible になる(PR #636)など、推移的依存を固定していることが
+# 更新の障害になっていた。
+#
+# 依存を追加・変更したら:
+#   pip install pip-tools
+#   pip-compile requirements.in            # 既存の pin は維持され、追加分だけ解決される
+#   pip-compile requirements-dev.in        # -c requirements.txt で実行時側の版に揃える(ファイル内に指定済み)
+# 更新は Dependabot(pip-compile 形式を認識する)か、`pip-compile --upgrade-package <name>` で行う。
+# バージョンの上限は付けない(lock 側で固定する)。Python は .python-version(3.11)で解決すること。
+
+# --- Web / API ---
+fastapi
+uvicorn
+pydantic
+# ダッシュボード(Streamlit)を unified_server 経由で配信するリバースプロキシで直接 import する
+# (services/dashboard_proxy_service.py): HTTP中継に httpx、WebSocket中継に websockets。
+# どちらも従来は fastapi/uvicorn の推移的依存として入っていただけだった。
+httpx
+websockets
+# FastAPI の UploadFile / Form が実行時に要求する(routers/quest_router.py の upload_image)
+python-multipart
+aiofiles
+
+# --- 外部連携 ---
+requests
+urllib3
+line-bot-sdk
+google-genai
+ask-sdk-core
+ask-sdk-model
+# Alexa リクエストの署名検証(core/alexa_verifier.py)
+cryptography
+tenacity
+python-dotenv
+
+# --- IoT / カメラ ---
+onvif_zeep
+opencv-python-headless
+psutil
+
+# --- 解析・ダッシュボード ---
+pandas
+numpy
+plotly
+streamlit
+pytz
+beautifulsoup4
+lxml

@@ -240,7 +240,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `family-quest/src/lib/apiClient.ts` | `/api/cameras/record/{id}/{date}/info`呼び出しの認証・エラー処理仕様を確認するため（本ファイルの`catch`は`apiClient`が投げる例外を前提としている）。 | 根拠: [`apiClient.get`] (行番号: 48 / 抜粋: "const data = await apiClient.get<{ offset_seconds: number }>(...)") |
-| 高 | `family-quest/src/components/ui/HlsPlayer.tsx` | 録画映像の実際の再生・シーク（`startPosition`の適用方法）・エラー処理ロジックを確認するため。 | 根拠: [`<HlsPlayer ... startPosition={startOffsets[camera.id] || 0} .../>`] (行番号: 123〜129) |
+| 高 | `family-quest/src/components/ui/HlsPlayer.tsx` | 録画映像の実際の再生・シーク（`startPosition`の適用方法）・エラー処理ロジックを確認するため。 | 根拠: [`<HlsPlayer ... startPosition={startOffsets[camera.id] \|\| 0} .../>`] (行番号: 123〜129) |
 | 中 | バックエンドの`/api/cameras/record/{id}/{date}/info`エンドポイント実装 | `offset_seconds`の算出根拠（録画ファイルの分割規則、タイムゾーン処理等）を確認するため。 | 根拠: [`offset_seconds`] (行番号: 48 / 抜粋: "const data = await apiClient.get<{ offset_seconds: number }>(...)") |
 | 中 | バックエンドの録画ファイル生成処理（`record_{date}.m3u8`命名規則） | コメントに「バックエンドが生成するファイル名」との記載があり、命名規則の実装元を確認するため。 | 根拠: [コメント] (行番号: 58 / 抜粋: "// バックエンドが生成するファイル名 (record_YYYYMMDD.m3u8) と一致させる") |
 

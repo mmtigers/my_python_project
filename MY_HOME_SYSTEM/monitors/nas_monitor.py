@@ -1,20 +1,19 @@
 import errno
 import os
-import json
 import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime
 from typing import Dict, Optional, Any, Tuple
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # 自作モジュール
 import config
+from core import state_file
 from core.logger import setup_logging
 from core.database import save_log_generic
-from core.utils import get_now_iso, retry_with_backoff
+from core.utils import get_now_iso, retry_with_backoff, get_now_jst
 from services.notification_service import send_push
 
 # ロガー設定
@@ -24,7 +23,9 @@ class NasMonitor:
     """NASの状態監視、ディスク使用量の確認、および障害復旧時の自動切り戻しを行うクラス"""
     
     def __init__(self) -> None:
-        self.ip: str = getattr(config, "NAS_IP", "192.168.1.20")
+        # Issue #663: 既定値の重複(config.py と同じ IP をここにも書く)を排した。
+        # 未設定なら空文字で、check_ping() が疎通確認をスキップする。
+        self.ip: str = getattr(config, "NAS_IP", "")
         self.mount_point: str = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
         # NAS_PROJECT_ROOT は mount_point 配下のアプリ専用ディレクトリ(home_system)。
         # ASSETS_DIR 等はNAS未マウント時にフォールバックパスへ動的に切り替わるため、
@@ -46,34 +47,62 @@ class NasMonitor:
         )
 
     def _load_state(self) -> Dict[str, Any]:
-        """前回の監視状態をファイルから読み込む"""
-        if os.path.exists(self.state_file):
-            try:
-                with open(self.state_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.error(f"State load error: {e}")
-        return {"is_healthy": True}  # デフォルトは正常とみなす
+        """前回の監視状態をファイルから読み込む。
+
+        Issue #653: ファイルが存在するのに読めない/JSONとして壊れている場合は、電源断等で
+        書き込み途中のまま残った可能性が高い。以前はこの場合も「正常」にフォールバックしており、
+        NAS 障害中に状態が壊れると「障害中だった」事実が失われて、復旧時のフォールバック同期
+        (sync_fallback_data)がスキップされていた。破損時は安全側(異常継続扱い)に倒す。
+        ファイルが無い(初回)場合だけ正常とみなす。
+        """
+        if not os.path.exists(self.state_file):
+            return {"is_healthy": True}  # 初回(ファイル無し)は正常とみなす
+        # #661: 読み書きは core/state_file.py(flock + tmp + os.replace)へ一本化した。
+        # 破損時は sentinel を返すので、ここで異常継続側に倒す。
+        sentinel = object()
+        state = state_file.read_json(self.state_file, default=sentinel)
+        if state is sentinel or not isinstance(state, dict):
+            logger.error("State load error (異常継続扱いにフォールバック)")
+            return {"is_healthy": False}
+        return state
 
     def _save_state(self, state: Dict[str, Any]) -> None:
-        """現在の監視状態をファイルへ保存する"""
-        try:
-            os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
-            with open(self.state_file, 'w', encoding='utf-8') as f:
-                json.dump(state, f)
-        except Exception as e:
-            logger.error(f"State save error: {e}")
+        """現在の監視状態をファイルへ保存する。
+
+        Issue #653: 素の open('w') は書き込み途中のクラッシュ・電源断で不完全な JSON を残すため、
+        一時ファイルに書き切って fsync したうえで os.replace で原子的に差し替える
+        (switchbot_power_monitor._save_persisted_states と同じ方式)。
+        """
+        # #661: 書き込みは core/state_file.write_json_atomic に一本化(同じ tmp+fsync+replace 方式)。
+        if not state_file.write_json_atomic(self.state_file, state):
+            logger.error("State save error")
 
     def check_ping(self) -> bool:
-        """NASへのPing疎通確認"""
+        """NASへのPing疎通確認。
+
+        Issue #663: NAS_IP が未設定の場合は ping せず True を返す。この戻り値は
+        run() で check_mount()/check_write_permission() を実行するかどうかの
+        ゲートになっているため、ここで False を返すと「アドレスを知らない」だけで
+        NAS障害と判定され、通知を飛ばしてローカルフォールバックへ退避してしまう。
+        マウント状態と書き込みテストが健全性判定の本体なので、そちらに委ねる。
+        """
+        if not self.ip:
+            logger.debug("NAS_IP が未設定のため ping 疎通確認をスキップします(マウント/書き込みで判定)。")
+            return True
         try:
             cmd = ["ping", "-c", "1", "-W", str(self.timeout), self.ip]
+            # #651: -W は ping 自身の応答待ちしか縛らないため、ping プロセス自体が
+            # 固まると呼び出し元(監視ループ)が戻らない。外側にも上限を置く。
             res = subprocess.run(
-                cmd, 
-                stdout=subprocess.DEVNULL, 
-                stderr=subprocess.DEVNULL
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=self.timeout + 5,
             )
             return res.returncode == 0
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Ping check timed out ({self.timeout + 5}s): {self.ip}")
+            return False
         except Exception as e:
             logger.error(f"Ping check error: {e}")
             return False
@@ -277,6 +306,13 @@ class NasMonitor:
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".mp4",)),
             ("スナップショット", os.path.join(getattr(config, "ASSETS_DIR", ""), "snapshots"),
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".jpg", ".jpeg")),
+            # Issue #537: camera_monitor は起動時に NAS が落ちていると FALLBACK_ROOT/assets/snapshots
+            # に書き続け(ASSETS_DIR は import 時に1回だけ解決)、sync_fallback_data は
+            # 「異常→正常」遷移時にしか rsync しないため、その後に書かれた退避ファイルは
+            # 誰にも掃除されず SD カードに蓄積していた。退避先も同じ保持期間で削除する。
+            ("スナップショット(ローカル退避)",
+             os.path.join(getattr(config, "FALLBACK_ROOT", ""), "assets", "snapshots"),
+             getattr(config, "RECORDING_RETENTION_DAYS", 30), (".jpg", ".jpeg")),
             # タイムラプス動画の生成先(monitors/smart_timelapse_generator.pyの
             # setup_directories)はNAS(config.ASSETS_DIR)ではなくローカルの
             # config.BASE_DIR/assets/timelapse であり、以前はここがNAS側の
@@ -406,15 +442,20 @@ class NasMonitor:
 
         # 通知判定 (容量不足または定期レポート)
         is_full = usage['percent'] > 90
-        now = datetime.now()
-        is_report_time = (now.hour == 8)
+        # Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン
+        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。
+        now = get_now_jst()
+        today_str = now.strftime("%Y-%m-%d")
+        # 日次レポートも保持期間削除(#388)と同じ理由で「hour == 8」の一致判定ではなく
+        # 「今日まだ送っていない かつ 8時以降」で判定する(7:5x → 9:0x とずれた日に
+        # レポートが丸ごと飛んでいた)。
+        is_report_time = now.hour >= 8 and previous_state.get("last_report_date") != today_str
 
         # 保持期間を超えた録画・バックアップの自動削除(1日1回)。
         # #388: 以前は「実行時刻の hour == 8」だけで判定していたが、scheduler の実行間隔は
         # 毎回 3600〜3610s と少しずつ後ろにずれるため、7:59 台の次が 9:00 台になる日は
         # 8時台の実行が無く、その日の削除がまるごとスキップされていた。状態ファイルに
         # 最終実行日を持ち、「今日まだ実行していない かつ 8時以降」で判定する。
-        today_str = now.strftime("%Y-%m-%d")
         if now.hour >= 8 and previous_state.get("last_cleanup_date") != today_str:
             self.run_retention_cleanup()
             previous_state["last_cleanup_date"] = today_str
@@ -440,6 +481,9 @@ class NasMonitor:
             [{"type": "text", "text": msg}],
             target="discord", channel=channel
         )
+        if is_report_time:
+            previous_state["last_report_date"] = today_str
+            self._save_state(previous_state)
 
 if __name__ == "__main__":
     monitor = NasMonitor()

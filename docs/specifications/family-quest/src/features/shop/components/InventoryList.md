@@ -23,6 +23,8 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #660 で変更）** ポーリング間隔を5秒から `src/lib/uiConstants.ts` の `INVENTORY_POLL_INTERVAL_MS`(15秒)に緩和した。他のクエリ(gameData 10秒 / chronicle 60秒)より短く、横画面で4パネルを常時表示するキオスク端末では毎分48リクエストの上乗せになっていた。所持アイテムは自分の操作以外で増減せず、購入・使用時は `invalidateQueries` が走るため、取りこぼしの保険としては15秒で足りる。
+
 * ユーザーの所持アイテム（インベントリ）一覧を取得・表示し、アイテムを即座に使用するUIコンポーネント。アイテムカードをクリックすると使用確認`Modal`を開き、「はい」を選ぶと`useMutationAction`が`apiClient.useItem`（`POST /api/quest/inventory/use`）を呼び出す。親（大人ユーザー）による承認を待つ状態は存在せず、成功と同時にそのアイテムを一覧から即座に取り除く。「はい」の連打（ダブルタップ）による同一アイテムへの多重使用リクエストは`isUsingItemRef`（`useRef`）で同期的に防ぐ（Issue #119）。
 * 根拠: (行番号: 50〜51, 55〜59, 130〜156 / 抜粋: "const useMutationAction = useMutation({\n        mutationFn: (inventoryId: number) => apiClient.useItem(userId, inventoryId),", "// アイテム使用は即座に消費が確定する(親の承認は不要)ため、\n            // リストからも即座に取り除く。\n            const usedInventoryId = variables;\n            queryClient.setQueryData<InventoryItem[]>(queryKey, (oldItems) => {\n                if (!oldItems) return [];\n                return oldItems.filter(item => item.id !== usedInventoryId);\n            });", "<Modal\n                isOpen={!!itemToUse}")
 * React Queryを用いてサーバーとの定期的な同期（5秒間隔のポーリング）を行いつつ、使用成功時には画面への即時反映（`setQueryData`によるフィルタ除去。楽観的UI更新）を行う責務を持つ。

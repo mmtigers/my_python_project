@@ -16,12 +16,16 @@
 - [webhook_router.md](./webhook_router.md) — 呼び出し元(`get_device_name_by_id`を利用)
 - [switchbot_webhook_fix.md](./switchbot_webhook_fix.md) — 呼び出し元(`create_switchbot_auth_headers`を利用)
 - [tv_lock_monitor.md](./tv_lock_monitor.md) — 呼び出し元(`send_device_command`を利用)
+- [quest_quest_service.md](./quest_quest_service.md) — 呼び出し元(`services/quest/quest_service.py`のクエスト承認処理から`trigger_tv_unlock`を利用)
+- [routine_service.md](./routine_service.md) — 呼び出し元(朝の準備チェックリスト全項目達成時に`trigger_tv_unlock`を利用)
+- [notification_service.md](./notification_service.md) — `trigger_tv_unlock`のFail-Soft通知先(`send_push`)を提供
 
 ## 2. ファイルの概要
 
 * SwitchBot APIとのHTTP通信（GET/POSTリクエスト、Exponential Backoffによるリトライ処理、HMAC認証ヘッダーの生成）を担う。
 * デバイスのステータス取得、デバイスへのコマンド送信処理を提供する。
 * デバイスリストを取得し、デバイスIDとデバイス名のマッピングをメモリ上のキャッシュ（グローバル変数）に保持・取得する機能を提供する。
+* TVプラグの電源ON処理（`trigger_tv_unlock`）を、複数の呼び出し元（`services/quest/quest_service.py`のクエスト承認処理、`services/routine_service.py`の朝の準備チェックリスト完了処理）から共有される非同期・Fail-Softなヘルパーとして提供する（毎朝ミッション統合で追加）。
 
 ## 3. 外部依存関係
 
@@ -39,7 +43,9 @@
 | `requests` | 外部ライブラリ | 外部API（SwitchBot API）へのHTTPリクエスト送信 | 根拠: `import requests` (行番号: 10 / 抜粋: "import requests") |
 | `config` | 内部モジュール | APIホストURL、トークン、シークレット等の設定値取得 | 根拠: `import config` (行番号: 11 / 抜粋: "import config") |
 | `core.logger` | 内部モジュール | ロガー（`setup_logging`）の取得 | 根拠: `from core.logger import...` (行番号: 14 / 抜粋: "from core.logger import setup_logging") |
-| `models.switchbot` | 内部モジュール | レスポンスデータ検証用のPydanticモデル取得 | 根拠: `from models.switchbot import...` (行番号: 15 / 抜粋: "from models.switchbot import DeviceStatusResponse") |
+| `core.utils`（#661で追加） | 内部モジュール | Exponential Backoff リトライの共通実装（`retry_with_backoff`）の取得。`request_switchbot_api` の独自ループを置き換えた | 根拠: `from core.utils import...` (行番号: 15 / 抜粋: "from core.utils import retry_with_backoff") |
+| `models.switchbot` | 内部モジュール | レスポンスデータ検証用のPydanticモデル取得 | 根拠: `from models.switchbot import...` (行番号: 16 / 抜粋: "from models.switchbot import DeviceStatusResponse") |
+| `services.notification_service`（毎朝ミッション統合で追加） | 内部モジュール | `trigger_tv_unlock`のFail-Soft通知（TV電源ON失敗時に親グループへLINE Push） | 根拠: `from services import notification_service` (行番号: 17 / 抜粋: "from services import notification_service") |
 
 ### ブラックボックスとなる外部要素
 
@@ -54,36 +60,41 @@
 ### `request_switchbot_api`
 
 * **役割**: SwitchBot APIに対してGETリクエストを送信する。タイムアウトや接続エラー時にはExponential Backoffを用いて最大指定回数リトライする。取得したデータをモデルでバリデーションして返す。
-* 根拠: `request_switchbot_api` (行番号: 20〜48 / 抜粋: "def request_switchbot_api(url: str, ...")
+* 根拠: `request_switchbot_api` (行番号: 37〜86 / 抜粋: "def request_switchbot_api(url: str, headers: Dict[str, str], max_retries: int = 4) -> Optional[Dict[str, Any]]:")
+* バックオフのループ自体は `core.utils.retry_with_backoff` へ委譲している。docstringによれば、これは #661 で独自ループを共通実装へ寄せたものであり、「GETは冪等なので再送して安全」であるのに対しコマンド送信の `post_switchbot_api` は二重実行の副作用がありうるため統合の対象外である、と説明されている。
+* 根拠: [docstring および委譲呼び出し] (行番号: 40〜41, 70〜76 / 抜粋: "#661: バックオフのループ自体は `core.utils.retry_with_backoff` に寄せた", "        return retry_with_backoff(")
+* `max_retries` は初回を含む総試行回数として扱われ、`retry_with_backoff` へは `max_retries - 1`(初回を含まない追加リトライ回数)として渡される。
+* 根拠: (行番号: 72 / 抜粋: "            max_retries=max_retries - 1,  # max_retries は初回を含む総試行回数")
 
 
 * **引数/リクエスト**:
 * `url`: `str` (リクエスト先URL)
 * `headers`: `Dict[str, str]` (リクエストヘッダー)
 * `max_retries`: `int` (最大リトライ回数、デフォルト4)
-* 根拠: `request_switchbot_api` (行番号: 20 / 抜粋: "url: str, headers: Dict[str, str], max_retries: int = 4")
+* 根拠: `request_switchbot_api` (行番号: 37 / 抜粋: "def request_switchbot_api(url: str, headers: Dict[str, str], max_retries: int = 4) -> Optional[Dict[str, Any]]:")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` (バリデーション済みの辞書データ。全リトライ失敗時はNone)
-* 根拠: `request_switchbot_api` (行番号: 20 / 抜粋: "-> Optional[Dict[str, Any]]:")
+* 根拠: `request_switchbot_api` (行番号: 37 / 抜粋: "def request_switchbot_api(url: str, headers: Dict[str, str], max_retries: int = 4) -> Optional[Dict[str, Any]]:")
 
 
-* **副作用**: ロガーへの出力（警告、エラー、デバッグ）
-* 根拠: `logger.warning`, `logger.error`, `logger.debug` (行番号: 33, 37, 43 / 抜粋: "logger.warning(f"⚠️ SwitchBot API ...")
+* **副作用**: ロガーへの出力（警告、エラー、デバッグ）。失敗した試行ごとに1本の警告と、最後に「完全失敗」の警告1本が出る。最終試行ぶんの警告は `on_retry` が呼ばれないため例外ハンドラ側から同じ書式で出している。
+* 根拠: (行番号: 60〜62, 79〜80, 85 / 抜粋: "        logger.warning(f"⚠️ SwitchBot API connection issue (Attempt {attempts['n']}/{max_retries}): {error}")", "        _warn_connection_issue(e)", "    logger.warning("⚠️ SwitchBot API completely failed after retries. Operating in Fail-Soft mode.")")
 
 
 * **エラーハンドリング**:
-* `requests.exceptions.Timeout`, `requests.exceptions.ConnectionError`: 警告ログを出力し、待機後にリトライ。
-* `requests.exceptions.RequestException`: エラーログを出力し、リトライを中断。
-* リトライ最大数到達時は警告ログを出力し `None` を返す（フェイルソフト）。
-* 根拠: `except` (行番号: 31〜48 / 抜粋: "except (requests.exceptions.Timeout, ...")
+* `requests.exceptions.Timeout`, `requests.exceptions.ConnectionError`: `retryable_exceptions` に指定され、警告ログを出力して待機後にリトライされる。全リトライを使い切ると `retry_with_backoff` が再送出し、呼び出し側の `except` が受けて `None` を返す。
+* その他の `requests.exceptions.RequestException`: `retryable_exceptions` に含まれないため `retry_with_backoff` から即座に伝播し、エラーログを出力して `None` を返す(リトライしない)。
+* 上記いずれの経路でも最後に「完全失敗」の警告ログを出力し `None` を返す（フェイルソフト）。
+* `requests.exceptions.RequestException` に該当しない例外(APIの応答が想定外の形だった場合のPydanticの検証エラー等)は捕捉せず呼び出し元へ送出する。docstringによれば、これは `None` に混ぜると「通信できなかった」と区別がつかなくなるためである。
+* 根拠: (行番号: 46〜49, 69〜84 / 抜粋: "    ただしAPIの応答が想定外の形", "    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:")
 
 
 
 ### `post_switchbot_api`
 
 * **役割**: SwitchBot APIに対してPOSTリクエストを送信する。モデルによるバリデーションは行わず生データを返す。
-* 根拠: `post_switchbot_api` (行番号: 51〜56 / 抜粋: "def post_switchbot_api(url: str, ...")
+* 根拠: `post_switchbot_api` (行番号: 88〜99 / 抜粋: "def post_switchbot_api(url: str, ...")
 
 
 * **引数/リクエスト**:
@@ -109,7 +120,7 @@
 ### `send_device_command`
 
 * **役割**: 指定されたデバイスIDに対し、エンドポイントURLと認証ヘッダー、ペイロードを構築し、コマンド送信リクエストを行う。
-* 根拠: `send_device_command` (行番号: 58〜76 / 抜粋: "def send_device_command(device_id: str, ...")
+* 根拠: `send_device_command` (行番号: 101〜119 / 抜粋: "def send_device_command(device_id: str, ...")
 
 
 * **引数/リクエスト**:
@@ -133,14 +144,36 @@
 
 
 
+### `trigger_tv_unlock`（毎朝ミッション統合で追加）
+
+* **役割**: TVプラグ（`config.TV_PLUG_DEVICE_ID`）の電源をONにする処理を、デーモンスレッド上で非同期・Fail-Softに実行する共有ヘルパー。元は`services/quest/quest_service.py`の`QuestService._trigger_tv_unlock`（クエスト承認時のTVロック解除専用）だったが、`services/routine_service.py`（朝の準備チェックリスト全項目達成時）でも同じ処理が必要になったため本ファイルへ切り出され、両呼び出し元から共有される。呼び出し元は事前に`config.TV_PLUG_DEVICE_ID`が設定されているかを確認する必要があり、本関数自体はその設定有無をガードしない（切り出し前の`QuestService._trigger_tv_unlock`の挙動をそのまま踏襲）。
+* 根拠: `trigger_tv_unlock` (行番号: 121〜152 / 抜粋: "def trigger_tv_unlock(context: str) -> None:")、切り出し元に関する説明 (行番号: 97〜100 / 抜粋: "quest_service(クエスト承認時のTVロック解除)・routine_service(朝の準備\n    チェックリスト全項目達成時)など、複数の呼び出し元から共有される処理。")
+
+
+* **引数/リクエスト**: `context`: `str`（ログ出力にのみ使う識別用の文字列。例: `"quest_id=101"`、`"朝の準備チェックリスト全項目達成"`）
+* 根拠: `trigger_tv_unlock` (行番号: 121 / 抜粋: "def trigger_tv_unlock(context: str) -> None:")
+
+
+* **戻り値/レスポンス**: `None`（結果はログ出力とFail-Soft通知のみで呼び出し元へは返さない。TV電源ONの成否を呼び出し元が同期的に知る手段はない）
+* 根拠: `trigger_tv_unlock` (行番号: 94 / 抜粋: "-> None:")
+
+
+* **副作用**: `daemon=True`の`threading.Thread`を起動し、その中で`send_device_command(config.TV_PLUG_DEVICE_ID, "turnOn")`を呼び出す。成功時は情報ログのみ。失敗時（`send_device_command`が`None`または`statusCode`が100以外を返した場合、または例外発生時）はエラーログを出力し、さらに`config.LINE_PARENTS_GROUP_ID`が設定されていれば`notification_service.send_push`で親グループへLINE通知を送る。呼び出し元スレッド（APIルーティング処理）はこのスレッド起動をブロックしない。
+* 根拠: `unlock_task` 定義とスレッド起動 (行番号: 132〜148 / 抜粋: "def unlock_task():\n        logger.info(f\"📺 Initiating TV Unlock (Turn ON) for {context}\")"), スレッド起動 (行番号: 124〜125 / 抜粋: "t = threading.Thread(target=unlock_task, daemon=True)\n    t.start()"), Fail-Soft通知 (行番号: 116〜121 / 抜粋: "if config.LINE_PARENTS_GROUP_ID:\n                msg = \"⚠️ テレビの電源ON（自動ロック解除）に失敗しました。お手数ですが、SwitchBotアプリ等から手動でつけてあげてください。\"\n                notification_service.send_push(")
+
+
+* **エラーハンドリング**: `unlock_task`内で`send_device_command`の戻り値が偽値または`statusCode != 100`の場合は`Exception`を送出して直後の`except Exception as e:`で捕捉し、任意の例外（`send_device_command`自体が投げうる例外も含む）をエラーログ出力とFail-Soft通知（LINE Push失敗時の例外は捕捉しない）で処理する。デーモンスレッド内で例外が伝播してもプロセス全体やAPIルーティングには影響しない。
+* 根拠: `raise Exception` (行番号: 112 / 抜粋: "raise Exception(f\"API returned error: {res}\")")、`except Exception as e` (行番号: 113〜114 / 抜粋: "except Exception as e:\n            logger.error(f\"❌ TV Unlock failed: {e}\")")
+
+
 ### `create_switchbot_auth_headers`
 
 * **役割**: トークン、タイムスタンプ、nonceを用いてHMAC-SHA256署名を生成し、APIリクエストに必要な認証ヘッダー群を構築する。
-* 根拠: `create_switchbot_auth_headers` (行番号: 78〜105 / 抜粋: "def create_switchbot_auth_headers() -> Dict[str, str]:")
+* 根拠: `create_switchbot_auth_headers` (行番号: 155〜182 / 抜粋: "def create_switchbot_auth_headers() -> Dict[str, str]:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `create_switchbot_auth_headers` (行番号: 78 / 抜粋: "def create_switchbot_auth_headers()")
+* 根拠: `create_switchbot_auth_headers` (行番号: 155 / 抜粋: "def create_switchbot_auth_headers()")
 
 
 * **戻り値/レスポンス**: `Dict[str, str]` (認証情報の入ったヘッダー辞書、設定不備時は空辞書)
@@ -159,11 +192,11 @@
 ### `fetch_device_name_cache`
 
 * **役割**: SwitchBot APIのデバイス一覧エンドポイントからデバイス情報を取得し、グローバル変数 `DEVICE_NAME_CACHE` にデバイスIDと名前のペアを格納する。**（Issue #439で修正）** 以前はAPIから取得したデバイス名を`DEVICE_NAME_CACHE`へループの都度ロック無しで直接書き込んでいたが、現在はまずローカル辞書`new_names`（ネットワークI/O中はロックを取得しない）へ全件を集め、最後に`_device_cache_lock`保持下で`DEVICE_NAME_CACHE.update(new_names)`によりまとめてマージする。
-* 根拠: `fetch_device_name_cache` (行番号: 117〜156 / 抜粋: "def fetch_device_name_cache() -> bool:")、[ローカル辞書への集約とロック下でのマージ] (行番号: 137〜148 / 抜粋: "new_names: Dict[str, str] = {}\n            # 通常デバイス\n            for d in body.get('deviceList', []):\n                new_names[d['deviceId']] = d['deviceName']", "with _device_cache_lock:\n                DEVICE_NAME_CACHE.update(new_names)\n                cache_size = len(DEVICE_NAME_CACHE)")
+* 根拠: `fetch_device_name_cache` (行番号: 184〜223 / 抜粋: "def fetch_device_name_cache() -> bool:")、[ローカル辞書への集約とロック下でのマージ] (行番号: 137〜148 / 抜粋: "new_names: Dict[str, str] = {}\n            # 通常デバイス\n            for d in body.get('deviceList', []):\n                new_names[d['deviceId']] = d['deviceName']", "with _device_cache_lock:\n                DEVICE_NAME_CACHE.update(new_names)\n                cache_size = len(DEVICE_NAME_CACHE)")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `fetch_device_name_cache` (行番号: 117 / 抜粋: "def fetch_device_name_cache()")
+* 根拠: `fetch_device_name_cache` (行番号: 184 / 抜粋: "def fetch_device_name_cache()")
 
 
 * **戻り値/レスポンス**: `bool` (処理の成功・失敗)
@@ -185,8 +218,11 @@
 
 ### `get_device_name_by_id`
 
+* **（Issue #533 で修正）** 遅延ロードの制御を bool の `_fetch_attempted` から最終試行時刻 `_last_fetch_attempt_at`(`time.monotonic()`)に変更し、キャッシュが空のまま `DEVICE_NAME_FETCH_RETRY_SEC`(600秒)経過したら再取得を試みる。以前は一度失敗すると再起動まで再試行しなかった。
+* 根拠: (行番号: 27〜28, 168〜174 / 抜粋: "retry_due = (\n            _last_fetch_attempt_at is None\n            or (now - _last_fetch_attempt_at) >= DEVICE_NAME_FETCH_RETRY_SEC\n        )")
+
 * **役割**: `DEVICE_NAME_CACHE` から指定されたデバイスIDに対応するデバイス名を取得する。**（Issue #439で修正）** 「キャッシュが空かつ未試行かをチェックしてから`_fetch_attempted`を立てる」処理と、最終的なキャッシュ読み取りは、いずれも`_device_cache_lock`保持下で行うよう修正された。以前はロード無しでこのチェックを行っており、Webhookリクエストが集中する起動直後に複数スレッドが同時に「キャッシュ空・未試行」と判定してしまい、`fetch_device_name_cache`（SwitchBotのデバイス一覧API呼び出し）が並行して複数回走りうる状態だった。ネットワークI/Oを伴う`fetch_device_name_cache()`自体の呼び出しは、`_device_cache_lock`を一度解放してから（ロックの外側で）行う。
-* 根拠: `get_device_name_by_id` (行番号: 158〜169 / 抜粋: "def get_device_name_by_id(device_id: str) -> Optional[str]:")、[ロック下でのcheck-and-set] (行番号: 161〜164 / 抜粋: "with _device_cache_lock:\n        should_fetch = not DEVICE_NAME_CACHE and not _fetch_attempted\n        if should_fetch:\n            _fetch_attempted = True")、[ロック外での遅延ロード呼び出し] (行番号: 165〜167 / 抜粋: "if should_fetch:\n        # APIリクエスト(ネットワークI/O)は_device_cache_lock保持中に行わない\n        fetch_device_name_cache()")、[ロック下での最終読み取り] (行番号: 168〜169 / 抜粋: "with _device_cache_lock:\n        return DEVICE_NAME_CACHE.get(device_id, None)")
+* 根拠: `get_device_name_by_id` (行番号: 225〜241 / 抜粋: "def get_device_name_by_id(device_id: str) -> Optional[str]:")、[ロック下でのcheck-and-set] (行番号: 161〜164 / 抜粋: "with _device_cache_lock:\n        should_fetch = not DEVICE_NAME_CACHE and not _fetch_attempted\n        if should_fetch:\n            _fetch_attempted = True")、[ロック外での遅延ロード呼び出し] (行番号: 165〜167 / 抜粋: "if should_fetch:\n        # APIリクエスト(ネットワークI/O)は_device_cache_lock保持中に行わない\n        fetch_device_name_cache()")、[ロック下での最終読み取り] (行番号: 168〜169 / 抜粋: "with _device_cache_lock:\n        return DEVICE_NAME_CACHE.get(device_id, None)")
 
 
 * **引数/リクエスト**: `device_id`: `str` (デバイスID)
@@ -209,7 +245,7 @@
 ### `get_device_status`
 
 * **役割**: 指定されたデバイスのステータス取得用URLを構築し、APIリクエストを送信して結果を取得する。
-* 根拠: `get_device_status` (行番号: 171〜184 / 抜粋: "def get_device_status(device_id: str) -> Optional[Dict[str, Any]]:")
+* 根拠: `get_device_status` (行番号: 243〜256 / 抜粋: "def get_device_status(device_id: str) -> Optional[Dict[str, Any]]:")
 
 
 * **引数/リクエスト**: `device_id`: `str` (対象デバイスのID)
@@ -235,17 +271,18 @@
 
 ```mermaid
 flowchart TD
-    Start["Start: request_switchbot_api"] --> LoopInit["リトライループ開始 (最大 max_retries 回)"]
-    LoopInit --> TryRequest["外部：requests.get()"]
+    Start["Start: request_switchbot_api"] --> Delegate["core.utils.retry_with_backoff に _fetch を委譲<br/>(max_retries - 1 回まで再試行)"]
+    Delegate --> TryRequest["_fetch: 外部 requests.get()"]
     TryRequest -- 成功 --> Validate["外部：DeviceStatusResponseでバリデーション"]
     Validate --> ReturnDict["戻り値: 辞書データ"] --> End["End"]
-    
-    TryRequest -- Timeout / ConnectionError --> LogWarn["警告ログ出力"]
-    LogWarn --> CheckRetry{"最大リトライ回数到達?"}
-    CheckRetry -- No --> Wait["Exponential Backoff 待機"] --> LoopInit
-    CheckRetry -- Yes --> LogFailSoft["完全失敗警告ログ出力"] --> ReturnNone["戻り値: None"] --> End
-    
-    TryRequest -- その他のRequestException --> LogErr["エラーログ出力"] --> ReturnNone
+
+    TryRequest -- "Timeout / ConnectionError<br/>(retryable_exceptions)" --> CheckRetry{"再試行の余地あり?"}
+    CheckRetry -- Yes --> OnRetry["on_retry: 警告ログ出力"] --> Wait["Exponential Backoff 待機<br/>(1s, 2s, 4s...)"] --> TryRequest
+    CheckRetry -- No --> Reraise["retry_with_backoff が再送出"] --> LogLast["最終試行ぶんの警告ログ出力"] --> LogFailSoft["完全失敗警告ログ出力"] --> ReturnNone["戻り値: None"] --> End
+
+    TryRequest -- "その他のRequestException<br/>(非リトライ対象)" --> LogErr["エラーログ出力"] --> LogFailSoft
+
+    TryRequest -- "その他の例外(Pydantic検証エラー等)" --> Propagate["捕捉せず呼び出し元へ送出"] --> End
 
 ```
 
@@ -260,6 +297,7 @@ graph TD
         request_switchbot_api["request_switchbot_api()"]
         post_switchbot_api["post_switchbot_api()"]
         send_device_command["send_device_command()"]
+        trigger_tv_unlock["trigger_tv_unlock()（毎朝ミッション統合で追加）"]
         create_switchbot_auth_headers["create_switchbot_auth_headers()"]
         fetch_device_name_cache["fetch_device_name_cache()"]
         get_device_name_by_id["get_device_name_by_id()"]
@@ -269,20 +307,28 @@ graph TD
     subgraph "外部依存"
         config["config"]
         core_logger["core.logger"]
+        core_utils["core.utils (retry_with_backoff)"]
         models_switchbot["models.switchbot"]
         requests["requests"]
         threading_mod["threading"]
+        notification_service["services.notification_service"]
     end
 
     logger --> core_logger
     create_switchbot_auth_headers --> config
     request_switchbot_api --> models_switchbot
     request_switchbot_api --> requests
+    request_switchbot_api --> core_utils
     post_switchbot_api --> requests
 
     send_device_command --> create_switchbot_auth_headers
     send_device_command --> config
     send_device_command --> post_switchbot_api
+
+    trigger_tv_unlock --> send_device_command
+    trigger_tv_unlock --> config
+    trigger_tv_unlock --> threading_mod
+    trigger_tv_unlock --> notification_service
 
     fetch_device_name_cache --> create_switchbot_auth_headers
     fetch_device_name_cache --> request_switchbot_api

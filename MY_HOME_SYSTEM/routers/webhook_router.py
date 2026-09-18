@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/routers/webhook_router.py
+import asyncio
 import hmac
 import time
 from typing import Optional
@@ -69,14 +70,49 @@ TARGET_DEVICE_TYPES = {
     "WoContact", "WoPresence",  # 公式Webhookペイロードの語彙
 }
 
+# Issue #648: トークン未設定の拒否をERRORで通知するのはプロセス起動後の最初の1回だけにする。
+_unconfigured_webhook_error_logged: bool = False
+
+
 @router.post("/webhook/switchbot")
 async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):
     """SwitchBot Webhook受信・処理"""
     # SwitchBotにはLINEのような署名検証機構がないため、
-    # config.SWITCHBOT_WEBHOOK_TOKEN が設定されている場合のみ、
     # クエリパラメータ ?token=... による簡易な共有シークレット検証を行う。
-    if config.SWITCHBOT_WEBHOOK_TOKEN:
-        if not token or not hmac.compare_digest(token, config.SWITCHBOT_WEBHOOK_TOKEN):
+    # Issue #648: トークン未設定時は 503 で拒否する(フェイルクローズ)。このエンドポイントは
+    # ip_restriction_middleware の対象外で、エッジの Cloudflare Access もバイパスする設計
+    # (#321/#517)のため、トークンが唯一の防御になる。無検証で受け付けると第三者が任意の
+    # deviceMac を POST して device_records/daily_logs への書き込み、LINE/Discord通知、
+    # SwitchBot API 呼び出し(リトライ込み)を誘発できる。
+    # 実機のトークン設定(#318)が済むまでの移行用に、明示的なオプトイン
+    # (ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK=true)でのみ従来動作を残す。
+    if not config.SWITCHBOT_WEBHOOK_TOKEN:
+        if not getattr(config, "ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK", False):
+            # ERROR は core/logger の DiscordErrorHandler 経由で通知が飛ぶ。拒否のたびに出すと、
+            # 外部から誰でも通知を大量発火させられるため、プロセスごとに最初の1回だけにする。
+            global _unconfigured_webhook_error_logged
+            if not _unconfigured_webhook_error_logged:
+                _unconfigured_webhook_error_logged = True
+                logger.error(
+                    "❌ SWITCHBOT_WEBHOOK_TOKEN が未設定のため /webhook/switchbot を拒否しました(503)。"
+                    ".env に SWITCHBOT_WEBHOOK_TOKEN を設定し、SwitchBot 側の Webhook URL にも "
+                    "?token=... を付けてください(移行中は ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK=true で従来動作)。"
+                    " ※以降の同じ拒否は debug ログのみ。"
+                )
+            else:
+                logger.debug("SWITCHBOT_WEBHOOK_TOKEN 未設定のため /webhook/switchbot を拒否(503)。")
+            raise HTTPException(
+                status_code=503,
+                detail="SwitchBot webhook is not configured (SWITCHBOT_WEBHOOK_TOKEN is unset)",
+            )
+    else:
+        # hmac.compare_digest は str 同士だと非ASCII文字を含む場合に TypeError を送出する
+        # ("comparing strings with non-ASCII characters is not supported")。このエンドポイントは
+        # 外部公開されているため、?token=%C3%A9 のような1リクエストで 500 + Discordエラー通知
+        # (global_exception_handler 経由)を誰でも発生させられていた。bytes に揃えて比較する。
+        if not token or not hmac.compare_digest(
+            token.encode("utf-8"), config.SWITCHBOT_WEBHOOK_TOKEN.encode("utf-8")
+        ):
             raise HTTPException(status_code=401, detail="Invalid token")
 
     ctx = body.context
@@ -117,7 +153,11 @@ async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):
     # --- これ以降は重複していない有効なイベントのみが通過する ---
     
     # デバイス情報の解決 (既存ロジック)
-    api_name = sb_tool.get_device_name_by_id(mac)
+    # get_device_name_by_id はキャッシュ未取得時(プロセス起動後の最初のイベント)に
+    # SwitchBot API へ同期HTTP(最大 10秒×4回 + バックオフ ≒ 47秒)を行う。async ハンドラ内で
+    # 直接呼ぶとその間イベントループ全体(LINE callback・Alexa・/health・quest API)が停止する
+    # ため、スレッドプールへ逃がす。
+    api_name = await asyncio.to_thread(sb_tool.get_device_name_by_id, mac)
     device_conf = next((d for d in config.MONITOR_DEVICES if d.get("id") == mac), None)
     
     name = api_name or (device_conf.get("name") if device_conf else f"Unknown_{mac}")

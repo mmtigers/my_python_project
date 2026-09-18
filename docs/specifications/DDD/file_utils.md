@@ -17,11 +17,12 @@
 ## 2. ファイルの概要
 
 * DDD配下の複数スクリプト（モジュールDocstringによれば`batch_download_discord.py`および`extract_youtube_urls.py`）で個別に重複実装されていたファイル名サニタイズ処理を、DRY違反解消のため1箇所に集約した共通ユーティリティモジュールである。**（品質で追加）** 加えて、DDD配下の各スクリプトから姉妹サブシステムMY_HOME_SYSTEMのルートディレクトリを解決する`resolve_my_home_system_root`も提供する。
-* 提供する機能は、ファイルシステム上で使用できない記号をアンダースコアに置換し、かつ長さを制限した安全なファイル名文字列を生成する関数`sanitize_filename`、Discord Webhookへの連続送信失敗を検知して以降の送信をスキップするプロセス内サーキットブレーカークラス`DiscordCircuitBreaker`、MY_HOME_SYSTEMルートディレクトリを解決する`resolve_my_home_system_root`の3つである。変換結果が空文字列になった場合（入力が`".."`や`"."`等の記号のみで構成されていた場合等）は、呼び出し元が拡張子を連結するだけの用途（例: `sanitize_filename(video_id) + ".mp4"`）で空stemの隠しファイルが生成されるのを防ぐため、`"untitled"`というフォールバック名を補う。**（Issue #469で追加）** 禁止記号8種に加えてASCII制御文字(`0x00`〜`0x1F`、`0x7F`)もアンダースコアへ置換対象とし、さらに置換・切り詰め後の名前がWindows予約デバイス名（`CON`/`PRN`/`AUX`/`NUL`/`COM1`〜`9`/`LPT1`〜`9`、大文字小文字区別なしの完全一致）と一致する場合は末尾に`_`を付与する（モジュールレベル定数`_WINDOWS_RESERVED_NAMES`で定義）。
+* 提供する機能は、ファイルシステム上で使用できない記号をアンダースコアに置換し、かつ長さを制限した安全なファイル名文字列を生成する関数`sanitize_filename`、Discord Webhookへの連続送信失敗を検知して以降の送信をスキップするプロセス内サーキットブレーカークラス`DiscordCircuitBreaker`、MY_HOME_SYSTEMルートディレクトリを解決する`resolve_my_home_system_root`の3つに加え、**（2026-09-06 品質監査で修正）** ログ出力前に文字列中のDiscord Webhook URLのトークン部分をマスクする`redact_discord_webhook_url`（4つ目）である。変換結果が空文字列になった場合（入力が`".."`や`"."`等の記号のみで構成されていた場合等）は、呼び出し元が拡張子を連結するだけの用途（例: `sanitize_filename(video_id) + ".mp4"`）で空stemの隠しファイルが生成されるのを防ぐため、`"untitled"`というフォールバック名を補う。**（Issue #469で追加）** 禁止記号8種に加えてASCII制御文字(`0x00`〜`0x1F`、`0x7F`)もアンダースコアへ置換対象とし、さらに置換・切り詰め後の名前がWindows予約デバイス名（`CON`/`PRN`/`AUX`/`NUL`/`COM1`〜`9`/`LPT1`〜`9`、大文字小文字区別なしの完全一致）と一致する場合は末尾に`_`を付与する（モジュールレベル定数`_WINDOWS_RESERVED_NAMES`で定義）。
 * 根拠: [モジュールDocstring] (行番号: 1〜5 / 抜粋: "batch_download_discord.py / extract_youtube_urls.py がそれぞれ個別に\nほぼ同一のロジックを実装していた（DRY違反）ため、ここに集約する。")
+* 根拠: [redact_discord_webhook_url定義] (行番号: 111〜122 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(r\"(/api/webhooks/\\d+)/[A-Za-z0-9_\\-]+\")" / "def redact_discord_webhook_url(text: str) -> str:\n    \"\"\"文字列中の Discord Webhook URL のトークン部分をマスクする。")
 * 根拠: [untitledフォールバックとコメント] (行番号: 22〜28 / 抜粋: "if not safe:\n        # Low: 入力が \"..\" や \".\" 等の記号のみで構成されている場合、ここまでの\n        # 処理で空文字列になりうる。呼び出し側は戻り値へ拡張子を連結するだけの\n        # ものが多く(例: sanitize_filename(video_id) + \".mp4\")、空文字のままだと\n        # \".mp4\" のような隠しファイル(空stem)が生成されてしまうため、安全な\n        # フォールバック名を補う。\n        safe = \"untitled\"")
 * 根拠: [_WINDOWS_RESERVED_NAMES定義とコメント] (行番号: 10〜17 / 抜粋: "# #469: Windows予約デバイス名(拡張子の有無に関わらず作成できない)。\n# NASがWindows系ファイルシステム(SMB/CIFS等)を経由する場合の互換性のため、\n# サニタイズ後の名前がこれらに一致する場合はサフィックスを付与する。\n_WINDOWS_RESERVED_NAMES = frozenset(\n    {\"CON\", \"PRN\", \"AUX\", \"NUL\"}\n    | {f\"COM{i}\" for i in range(1, 10)}\n    | {f\"LPT{i}\" for i in range(1, 10)}\n)")、制御文字置換 (行番号: 32〜34 / 抜粋: "# #469: 禁止文字に加え、制御文字(0x00-0x1F、0x7F)もWindows/一部ファイル\n    # システムで問題になるため同様に置換する。\n    safe = re.sub(r'[\\\\/*?:\"<>|\\x00-\\x1f\\x7f]', '_', filename).strip()")、予約名サフィックス付与 (行番号: 54〜57 / 抜粋: "# #469: Windows予約名(拡張子なしの完全一致、大文字小文字区別なし)は\n    # そのままだとファイル作成に失敗しうるため、サフィックスを付けて回避する。\n    if safe.upper() in _WINDOWS_RESERVED_NAMES:\n        safe = f\"{safe}_\"")
-* 根拠: [DiscordCircuitBreaker クラスDocstring] (行番号: 43〜58 / 抜粋: "class DiscordCircuitBreaker:\n    \"\"\"Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする\n    プロセス内サーキットブレーカー。")
+* 根拠: [DiscordCircuitBreaker クラスDocstring] (行番号: 158〜208 / 抜粋: "class DiscordCircuitBreaker:\n    \"\"\"Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする\n    プロセス内サーキットブレーカー。")
 
 ## 3. 外部依存関係
 
@@ -30,7 +31,7 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `os` | 標準ライブラリ | `resolve_my_home_system_root`の`MY_HOME_SYSTEM_ROOT`環境変数の読み取り(`os.getenv`)（品質で追加） | 根拠: [import文] (行番号: 6 / 抜粋: "import os") |
-| `re` | 標準ライブラリ | 禁止文字を検出・置換するための正規表現処理(`re.sub`) | 根拠: [import文] (行番号: 7 / 抜粋: "import re") |
+| `re` | 標準ライブラリ | 禁止文字を検出・置換するための正規表現処理(`re.sub`)。**（2026-09-06 品質監査で修正）** 加えてDiscord Webhook URLのトークン部分を検出する`_DISCORD_WEBHOOK_URL_RE`のコンパイル(`re.compile`)と置換(`.sub`) | 根拠: [import文] (行番号: 7 / 抜粋: "import re")、[利用箇所] (行番号: 111, 122 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(r\"(/api/webhooks/\\d+)/[A-Za-z0-9_\\-]+\")" / "return _DISCORD_WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))") |
 | `Path` (`pathlib`) | 標準ライブラリ | `resolve_my_home_system_root`の引数・戻り値の型、ディレクトリ存在確認（品質で追加） | 根拠: [import文] (行番号: 8 / 抜粋: "from pathlib import Path") |
 
 ### ブラックボックスとなる外部要素
@@ -57,7 +58,7 @@
 ### `sanitize_filename`（Issue #469で変更）
 
 * **役割**: ファイル名として使用できない記号（`\`, `/`, `*`, `?`, `:`, `"`, `<`, `>`, `|`）およびASCII制御文字(`0x00`〜`0x1F`、`0x7F`)をアンダースコア(`_`)に置換し、前後の空白を除去したうえで、指定バイト数以内（UTF-8エンコード後）に切り詰め、さらに末尾のピリオドと空白を除去する。この時点で結果が空文字列になった場合は`"untitled"`にフォールバックする。**（Issue #469で追加）** 最後に、得られた名前を大文字化したものが`_WINDOWS_RESERVED_NAMES`（`CON`/`PRN`/`AUX`/`NUL`/`COM1`〜`9`/`LPT1`〜`9`）に完全一致する場合、末尾に`_`を1つ付与して衝突を回避する（例: `"con"` → `"con_"`）。**（Issue #175で修正）** 以前は`safe[:max_length]`という「文字数」ベースの切り詰めだったため、UTF-8で1文字3バイトになる日本語では`max_length`文字が最大その3倍のバイト数になり、ext4等の255バイト制限を容易に超過してENAMETOOLONGを引き起こしていた。現在はUTF-8エンコード後のバイト列を切り詰めており、マルチバイト文字の境界で分断された末尾の不完全なバイト列は`errors='ignore'`で安全に除去する。
-* 根拠: [関数定義とDocstring] (行番号: 20〜31 / 抜粋: "def sanitize_filename(filename: str, max_length: int = 200) -> str:\n    """ファイル名として使用できない文字を置換し、長さを制限する。")、制御文字を含む置換 (行番号: 32〜34 / 抜粋: "# #469: 禁止文字に加え、制御文字(0x00-0x1F、0x7F)もWindows/一部ファイル\n    # システムで問題になるため同様に置換する。\n    safe = re.sub(r'[\\/*?:"<>|\\x00-\\x1f\\x7f]', '_', filename).strip()")、バイト単位の切り詰め (行番号: 36〜39 / 抜粋: "#175: 以前は safe[:max_length] で「文字数」を制限していたが、UTF-8では\n    # 日本語1文字が3バイトになるため")、予約名サフィックス付与 (行番号: 54〜57 / 抜粋: "# #469: Windows予約名(拡張子なしの完全一致、大文字小文字区別なし)は\n    # そのままだとファイル作成に失敗しうるため、サフィックスを付けて回避する。\n    if safe.upper() in _WINDOWS_RESERVED_NAMES:\n        safe = f\"{safe}_\"")
+* 根拠: [関数定義とDocstring] (行番号: 21〜60 / 抜粋: "def sanitize_filename(filename: str, max_length: int = 200) -> str:\n    """ファイル名として使用できない文字を置換し、長さを制限する。")、制御文字を含む置換 (行番号: 32〜34 / 抜粋: "# #469: 禁止文字に加え、制御文字(0x00-0x1F、0x7F)もWindows/一部ファイル\n    # システムで問題になるため同様に置換する。\n    safe = re.sub(r'[\\/*?:"<>|\\x00-\\x1f\\x7f]', '_', filename).strip()")、バイト単位の切り詰め (行番号: 36〜39 / 抜粋: "#175: 以前は safe[:max_length] で「文字数」を制限していたが、UTF-8では\n    # 日本語1文字が3バイトになるため")、予約名サフィックス付与 (行番号: 54〜57 / 抜粋: "# #469: Windows予約名(拡張子なしの完全一致、大文字小文字区別なし)は\n    # そのままだとファイル作成に失敗しうるため、サフィックスを付けて回避する。\n    if safe.upper() in _WINDOWS_RESERVED_NAMES:\n        safe = f\"{safe}_\"")
 
 
 * **引数/リクエスト**: `filename: str`（元の文字列）, `max_length: int = 200`（生成するファイル名の最大バイト数。UTF-8エンコード後、拡張子は含まない前提。ext4等の255バイト制限に対する安全マージンとして既定200バイト）
@@ -79,7 +80,7 @@
 ### `resolve_my_home_system_root` (品質で追加)
 
 * **役割**: DDD配下の各スクリプトから、姉妹サブシステムMY_HOME_SYSTEMのルートディレクトリを解決する共通ヘルパー。以前は`batch_download_discord.py`(`MY_HOME_SYSTEM_ROOT`環境変数 + "services"ディレクトリを上位探索するロバストな方式)と、`newface_monitor.py`/`extract_youtube_urls.py`(`current_dir.parent / "MY_HOME_SYSTEM"`という固定の兄弟ディレクトリ前提のみの単純な方式)という異なる2方式が個別に実装されていた(DRY違反かつ挙動の不統一。前者は探索に失敗すると`current_dir`自身にフォールバックしていたため、実際には`run_task.sh`が渡すPYTHONPATHに暗黙依存する形で動いていた)。解決順序は、(1) `MY_HOME_SYSTEM_ROOT`環境変数を最優先、(2) `current_dir.parent / "MY_HOME_SYSTEM"`に`services`ディレクトリが実在すればそれを使用、(3) 無ければ`current_dir`から親ディレクトリを最大`search_depth`階層まで遡り`services`サブディレクトリを持つ最初のディレクトリを使用、(4) いずれも見つからなければ個人環境固有の固定パスへフォールバックせず`current_dir`自身を返す(呼出し元のImportErrorハンドリングによるフェイルソフトに委ねる)。
-* 根拠: [関数定義とDocstring] (行番号: 45〜73 / 抜粋: "def resolve_my_home_system_root(current_dir: Path, search_depth: int = 3) -> Path:")、環境変数優先 (行番号: 76〜78 / 抜粋: "env_root = os.getenv(\"MY_HOME_SYSTEM_ROOT\")\n    if env_root:\n        return Path(env_root)")、兄弟ディレクトリ判定 (行番号: 80〜82 / 抜粋: "sibling_root = current_dir.parent / \"MY_HOME_SYSTEM\"\n    if (sibling_root / \"services\").exists():\n        return sibling_root")、上位探索とフォールバック (行番号: 84〜90 / 抜粋: "candidate = current_dir\n    for _ in range(search_depth):\n        if (candidate / \"services\").exists():\n            return candidate\n        candidate = candidate.parent\n\n    return current_dir")
+* 根拠: [関数定義とDocstring] (行番号: 63〜108 / 抜粋: "def resolve_my_home_system_root(current_dir: Path, search_depth: int = 3) -> Path:")、環境変数優先 (行番号: 76〜78 / 抜粋: "env_root = os.getenv(\"MY_HOME_SYSTEM_ROOT\")\n    if env_root:\n        return Path(env_root)")、兄弟ディレクトリ判定 (行番号: 80〜82 / 抜粋: "sibling_root = current_dir.parent / \"MY_HOME_SYSTEM\"\n    if (sibling_root / \"services\").exists():\n        return sibling_root")、上位探索とフォールバック (行番号: 84〜90 / 抜粋: "candidate = current_dir\n    for _ in range(search_depth):\n        if (candidate / \"services\").exists():\n            return candidate\n        candidate = candidate.parent\n\n    return current_dir")
 
 
 * **引数/リクエスト**: `current_dir: Path`（呼出し元スクリプトの`Path(__file__).resolve().parent`）, `search_depth: int = 3`（上位探索で遡る最大階層数）
@@ -98,22 +99,89 @@
 * 根拠: [関数本体全体] (行番号: 45〜90)
 
 
+### `DEFAULT_NAS_MOUNT_POINT` / `resolve_nas_mount_point` / `resolve_nas_data_dir`（Issue #663 で追加）
+
+* **役割**: NASのマウントポイントと、スクリプトごとのNASデータディレクトリを環境変数から解決する。`resolve_nas_mount_point()`は環境変数`NAS_MOUNT_POINT`を読み、未設定・空文字なら`DEFAULT_NAS_MOUNT_POINT`(`"/mnt/nas"`)へフォールバックした`Path`を返す。`resolve_nas_data_dir(script_name)`はそれを使って`<マウントポイント>/home_system/<script_name>/data`の文字列を組み立てる。Issue #663 以前は、`batch_download_discord.py`の`NAS_MOUNT_POINT`、`newface_monitor.py`/`extract_youtube_urls.py`の`NAS_DIR_STR`・`MOUNT_POINT`がいずれもソースに`/mnt/nas`を直書きしており、後者2つはコメントで「本環境のNASパスに適宜変更してください」= 環境ごとにコードを編集する前提になっていた。環境変数のキー名はMY_HOME_SYSTEM/config.pyが読むものと同じ(DDDは同じ`.env`を共用するため、同じNASを指すのに2つのキーを持たせない)。ただしここでは`config`を`import`せず環境変数を直接読む — DDDがMY_HOME_SYSTEM無しでも単独で動く性質(`DDD_REQUIRE_NAS_MOUNT=false`の単独環境向け設計)を崩さないため。
+* 根拠: `def resolve_nas_mount_point() -> Path:` (行番号: 114 / 抜粋: "def resolve_nas_mount_point() -> Path:")
+* 根拠: `def resolve_nas_data_dir(script_name: str) -> str:` (行番号: 134 / 抜粋: "def resolve_nas_data_dir(script_name: str) -> str:")
+
+
+* **引数/リクエスト**: `resolve_nas_mount_point()`は引数なし。`resolve_nas_data_dir(script_name: str)`はNASデータディレクトリ名に使うスクリプト名(`"newface_monitor"` / `"youtube_extractor"`)。
+* 根拠: `def resolve_nas_data_dir(script_name: str) -> str:` (行番号: 134 / 抜粋: "def resolve_nas_data_dir(script_name: str) -> str:")
+
+
+* **戻り値/レスポンス**: `resolve_nas_mount_point()`は`Path`、`resolve_nas_data_dir()`は`str`(呼び出し元の`NAS_DIR_STR`が`str`のため)。
+* 根拠: [組み立て] (行番号: 142 / 抜粋: "return str(resolve_nas_mount_point() / \"home_system\" / script_name / \"data\")")
+
+
+* **副作用**: なし（環境変数の読み取りのみ。ディレクトリの作成・存在確認は行わない）。
+* 根拠: [環境変数の読み取り] (行番号: 132 / 抜粋: "raw = os.getenv(\"NAS_MOUNT_POINT\")")
+
+
+* **エラーハンドリング**: 例外を送出しない。未設定・空文字・空白のみの値はすべて既定値へフォールバックする。
+* 根拠: [フォールバック] (行番号: 133-134 / 抜粋: "if raw is None or raw.strip() == \"\":\n        return Path(DEFAULT_NAS_MOUNT_POINT)")
+
+
+### `_DISCORD_WEBHOOK_URL_RE`（モジュールレベル変数、**（2026-09-06 品質監査で修正）**追加）
+
+* **役割**: `redact_discord_webhook_url`が使用するコンパイル済み正規表現。Discord Webhook URLのパス部分`/api/webhooks/<数字ID>`をグループ1として捕捉し、その直後の`/`に続くトークン部分（`A-Za-z0-9_-`の1文字以上）までを一致範囲とする。
+* 根拠: [変数定義] (行番号: 111 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(r\"(/api/webhooks/\\d+)/[A-Za-z0-9_\\-]+\")")
+
+
+* **引数/リクエスト**: 該当なし（モジュールレベル定数）
+* 根拠: [変数定義] (行番号: 111 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(...)")
+
+
+* **戻り値/レスポンス**: 該当なし（`re.Pattern`オブジェクト）
+* 根拠: [変数定義] (行番号: 111 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(...)")
+
+
+* **副作用**: なし（モジュールimport時にコンパイルされるのみ）
+* 根拠: [変数定義] (行番号: 111 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(...)")
+
+
+* **エラーハンドリング**: なし
+* 根拠: [変数定義] (行番号: 111 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(...)")
+
+
+### `redact_discord_webhook_url`（**（2026-09-06 品質監査で修正）**追加）
+
+* **役割**: 文字列中のDiscord Webhook URLのトークン部分をマスクする関数。Docstringによれば、`requests.HTTPError`/`ConnectionError`の`str()`は"... for url: https://discord.com/api/webhooks/<id>/<token>"のように送信先URLを丸ごと含み、これを`logger.error`でそのまま出力するとログファイルだけでなく`core.logger.DiscordErrorHandler`経由でエラー通知チャンネルにもWebhookトークンが転記されてしまうため、ログ出力前に必ずこの関数を通すことを意図している。
+* 根拠: [関数定義とDocstring] (行番号: 146〜155 / 抜粋: "def redact_discord_webhook_url(text: str) -> str:\n    \"\"\"文字列中の Discord Webhook URL のトークン部分をマスクする。\n\n    requests.HTTPError / ConnectionError の str() は \"... for url: https://discord.com/\n    api/webhooks/<id>/<token>\" のように送信先URLを丸ごと含む。これを logger.error で\n    そのまま出力すると、ログファイルだけでなく core.logger.DiscordErrorHandler 経由で\n    エラー通知チャンネルにも Webhook トークンが転記されてしまうため、ログ出力前に\n    必ずこの関数を通す。")
+
+
+* **引数/リクエスト**: `text: str` — マスク対象の文字列。実装は`str(text)`で文字列化してから処理するため、呼び出し元（`batch_download_discord.py`・`newface_monitor.py`）は例外オブジェクトをそのまま渡している。
+* 根拠: [引数定義とstr()変換] (行番号: 146, 122 / 抜粋: "def redact_discord_webhook_url(text: str) -> str:" / "return _DISCORD_WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))")
+
+
+* **戻り値/レスポンス**: `str` — `_DISCORD_WEBHOOK_URL_RE`に一致した各箇所を「グループ1（`/api/webhooks/<id>`）＋`/<redacted>`」に置換した文字列。一致箇所が無ければ`str(text)`がそのまま返る。
+* 根拠: [return文] (行番号: 122 / 抜粋: "return _DISCORD_WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))")
+
+
+* **副作用**: なし（純粋な文字列変換のみ）
+* 根拠: [関数本体] (行番号: 122 / 抜粋: "return _DISCORD_WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))")
+
+
+* **エラーハンドリング**: なし（例外を捕捉・送出する処理は含まれていない）
+* 根拠: [関数本体] (行番号: 114〜122 / 抜粋: 前掲)
+
+
 ### `DiscordCircuitBreaker`
 
 * **役割**: Discord Webhookへの送信が連続して失敗した回数を数え、指定した閾値(`failure_threshold`)に達すると「開いた(is_open=True)」状態になり、それ以降の送信呼び出し元に送信をスキップさせるためのプロセス内サーキットブレーカー。クラスDocstringによれば、`newface_monitor.py`の`DiscordNotifier.notify()`には元々401/404限定の簡易的な打ち切りロジックしかなく、タイムアウトや接続エラーには対応していなかった問題と、`batch_download_discord.py`側の`DiscordNotifier.send()`には同種の仕組みが一切無かった問題を、両スクリプトで共通利用できる形で解消するために追加された。cron等で毎回新規プロセスとして起動される運用を前提に、プロセスをまたいだ状態の永続化は行わない(インスタンス変数のみで状態を保持する)。
-* 根拠: [クラス定義とDocstring] (行番号: 43〜58 / 抜粋: "class DiscordCircuitBreaker:\n    \"\"\"Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする\n    プロセス内サーキットブレーカー。")
+* 根拠: [クラス定義とDocstring] (行番号: 158〜208 / 抜粋: "class DiscordCircuitBreaker:\n    \"\"\"Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする\n    プロセス内サーキットブレーカー。")
 
 
 * **引数/リクエスト**: `__init__(self, failure_threshold: int = 3)` — 連続失敗が何回に達したら開くかの閾値。`is_open`(プロパティ、引数なし)、`record_success()`(引数なし)、`record_failure()`(引数なし)、`trip()`(引数なし)。
-* 根拠: [各メソッド定義] (行番号: 60, 65〜66, 70, 75, 81 / 抜粋: "def __init__(self, failure_threshold: int = 3):", "def is_open(self) -> bool:", "def record_success(self) -> None:", "def record_failure(self) -> None:", "def trip(self) -> None:")
+* 根拠: [各メソッド定義] (行番号: 179, 186〜189, 191, 197, 204 / 抜粋: "def __init__(self, failure_threshold: int = 3):", "def is_open(self) -> bool:", "def record_success(self) -> None:", "def record_failure(self) -> None:", "def trip(self) -> None:")
 
 
 * **戻り値/レスポンス**: `is_open`(プロパティ)は`bool`(送信をスキップすべきならTrue)。`__init__`/`record_success`/`record_failure`/`trip`はいずれも`None`。
-* 根拠: [型ヒント] (行番号: 60, 66, 70, 75, 81 / 抜粋: "def is_open(self) -> bool:", "def record_success(self) -> None:", "def record_failure(self) -> None:", "def trip(self) -> None:")
+* 根拠: [型ヒント] (行番号: 186, 191, 197, 204 / 抜粋: "def is_open(self) -> bool:", "def record_success(self) -> None:", "def record_failure(self) -> None:", "def trip(self) -> None:")
 
 
 * **副作用**: いずれもインスタンス変数(`self._consecutive_failures`, `self._open`)の書き換えのみで、外部I/Oは行わない。`record_success()`は連続失敗カウントを0にリセットしブレーカーを閉じる。`record_failure()`は連続失敗カウントを1増やし、`failure_threshold`に達した場合のみブレーカーを開く。`trip()`は閾値を無視して即座にブレーカーを開く(Docstringによれば、Webhook自体が無効/失効している等、再試行が明らかに無意味と判明した場合向け)。**[修正済み・Issue #458]** `newface_monitor.py`がサイト巡回をThreadPoolExecutorで並列化し、1つの`DiscordNotifier`(=1つの本インスタンス)が複数スレッドから同時に呼び出されうるようになったため、`is_open`の読み取りと`record_success`/`record_failure`/`trip`によるインスタンス変数の書き換えは、すべて`__init__`で生成する`threading.Lock`(`self._lock`)で保護するようになった。
-* 根拠: [record_success本体] (行番号: 70〜73 / 抜粋: "def record_success(self) -> None:\n        \"\"\"送信成功時に呼び出し、連続失敗カウントとブレーカー状態をリセットする。\"\"\"\n        self._consecutive_failures = 0\n        self._open = False")、[record_failure本体] (行番号: 75〜79 / 抜粋: "def record_failure(self) -> None:\n        \"\"\"送信失敗時に呼び出す。連続失敗数が閾値に達すると自動的にブレーカーを開く。\"\"\"\n        self._consecutive_failures += 1\n        if self._consecutive_failures >= self._failure_threshold:\n            self._open = True")、[trip本体] (行番号: 81〜84 / 抜粋: "def trip(self) -> None:\n        \"\"\"Webhook自体が無効/失効している等、再試行が明らかに無意味と判明した\n        場合に、閾値を待たず即座にブレーカーを開く。\"\"\"\n        self._open = True")
+* 根拠: [record_success本体] (行番号: 191〜195 / 抜粋: "def record_success(self) -> None:\n        \"\"\"送信成功時に呼び出し、連続失敗カウントとブレーカー状態をリセットする。\"\"\"\n        self._consecutive_failures = 0\n        self._open = False")、[record_failure本体] (行番号: 197〜202 / 抜粋: "def record_failure(self) -> None:\n        \"\"\"送信失敗時に呼び出す。連続失敗数が閾値に達すると自動的にブレーカーを開く。\"\"\"\n        self._consecutive_failures += 1\n        if self._consecutive_failures >= self._failure_threshold:\n            self._open = True")、[trip本体] (行番号: 204〜208 / 抜粋: "def trip(self) -> None:\n        \"\"\"Webhook自体が無効/失効している等、再試行が明らかに無意味と判明した\n        場合に、閾値を待たず即座にブレーカーを開く。\"\"\"\n        self._open = True")
 
 
 * **エラーハンドリング**: なし(例外を送出する処理は含まれていない。呼び出し順序の妥当性チェックも存在せず、`record_success`/`record_failure`/`trip`はいつ何度呼び出されても単に内部カウンタと`_open`フラグを更新するだけである)
@@ -180,6 +248,8 @@ graph TD
         WindowsReserved["_WINDOWS_RESERVED_NAMES<br>(#469で追加)"]
         DiscordCircuitBreaker["DiscordCircuitBreaker"]
         resolve_my_home_system_root["resolve_my_home_system_root()"]
+        redact["redact_discord_webhook_url()<br>(2026-09-06 品質監査で追加)"]
+        WebhookRe["_DISCORD_WEBHOOK_URL_RE"]
     end
 
     subgraph "外部依存"
@@ -189,7 +259,7 @@ graph TD
     end
 
     subgraph "呼び出し元 (別ファイル)"
-        batch_dl["batch_download_discord.py: DiscordNotifier.send() / PROJECT_ROOT解決"]
+        batch_dl["batch_download_discord.py: DiscordNotifier.send() / _standalone_send_discord_webhook() / PROJECT_ROOT解決"]
         newface["newface_monitor.py: DiscordNotifier / PROJECT_ROOT解決"]
         extract_urls["extract_youtube_urls.py: PROJECT_ROOT解決"]
     end
@@ -203,6 +273,10 @@ graph TD
     newface --> DiscordCircuitBreaker
     newface --> resolve_my_home_system_root
     extract_urls --> resolve_my_home_system_root
+    redact --> WebhookRe
+    WebhookRe --> re_mod
+    batch_dl --> redact
+    newface --> redact
 ```
 
 ## 7. 次のステップ（リバースエンジニアリングの提案）

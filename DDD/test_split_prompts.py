@@ -119,6 +119,31 @@ def test_fully_matching_input_does_not_warn_about_format(tmp_path, caplog):
     assert not any("フォーマット" in record.message for record in caplog.records)
 
 
+def test_empty_prompt_content_does_not_swallow_the_next_item(tmp_path):
+    """#581: `Prompt:`直後の内容が空(末尾空白のみ)の場合でも、次項目の
+    「番号. タイトル」行を内容として誤って取り込まず、両方の項目が個別に
+    抽出されること。以前は`Prompt:\\s+([^\\n]+)`の`\\s+`が改行も消費してしまい、
+    次項目のタイトル行までがこの項目のPrompt内容として取り込まれ、
+    次項目自体が丸ごと消失していた。"""
+    input_file = tmp_path / "input.md"
+    input_file.write_text(
+        "1. タイトルA\n\nPrompt: \n\n2. タイトルB\n\nPrompt: 内容B\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "out"
+
+    written = split_prompts(input_file, output_dir)
+
+    assert written == 2
+    filenames = sorted(f.name for f in output_dir.glob("*.md"))
+    assert filenames == ["01_タイトルA.md", "02_タイトルB.md"]
+
+    content_a = (output_dir / "01_タイトルA.md").read_text(encoding="utf-8")
+    content_b = (output_dir / "02_タイトルB.md").read_text(encoding="utf-8")
+    assert "タイトルB" not in content_a, "次項目のタイトル行が内容として取り込まれてはならない"
+    assert "内容B" in content_b
+
+
 if __name__ == "__main__":
     import pytest
 

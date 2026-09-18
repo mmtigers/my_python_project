@@ -14,7 +14,6 @@ Issue #409(Family Quest の Low・保守性指摘)の回帰テスト。
 import datetime
 import os
 import sys
-from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
@@ -22,15 +21,15 @@ from pydantic import ValidationError
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 from core import database as core_db
 from models.quest import MasterQuest, MasterReward, QuestAction
 from services import quest_service as qs_module
-from services.quest_service import ROLE_ADULT, ROLE_CHILD
+from services.quest_service import ROLE_ADULT
 
 
 def _seed(role=ROLE_ADULT, gold=0):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, medal_count, role) "
             "VALUES ('dad', 'Dad', 'Warrior', 1, 0, ?, 0, ?)", (gold, role),
@@ -53,7 +52,7 @@ def test_bonus_treats_pending_day_as_done(isolated_db):
     now_jst = datetime.datetime.now(qs_module.JST)
     three_days_ago = (now_jst - datetime.timedelta(days=3)).isoformat()
     two_days_ago = (now_jst - datetime.timedelta(days=2)).isoformat()
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         # 3日前: approved、2日前: pending(承認待ち)。昨日は無し → 欠席は1日だけ
         cur.execute("INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
                     "VALUES ('dad', 901, 'テスト', 10, 100, ?, 'approved')", (three_days_ago,))
@@ -71,7 +70,7 @@ def test_weekly_reset_period_daily_quest_gets_no_missed_day_bonus(isolated_db):
     days_diff が常に約7となり、以前は「連続達成ボーナス」ロジックが誤って
     +60%相当を加点する潜在バグがあった。reset_period='weekly'ではボーナス自体を
     発生させないことを確認する。"""
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, medal_count, role) "
             "VALUES ('dad', 'Dad', 'Warrior', 1, 0, 0, 0, ?)", (ROLE_ADULT,),
@@ -95,13 +94,14 @@ def test_cancel_reverts_medals(isolated_db, monkeypatch):
     monkeypatch.setattr(qs_module.game_logic.GameLogic, "calculate_drop_rewards",
                         staticmethod(lambda g, e: {"gold": g, "exp": e, "medals": 2, "is_lucky": True}))
     service = qs_module.QuestService()
+    approval = qs_module.ApprovalService()
     service.process_complete_quest("dad", 901)
-    with common.get_db_cursor() as cur:
+    with get_db_cursor() as cur:
         assert cur.execute("SELECT medal_count FROM quest_users WHERE user_id='dad'").fetchone()[0] == 2
         hist = cur.execute("SELECT id, medals_earned FROM quest_history ORDER BY id DESC LIMIT 1").fetchone()
         assert hist["medals_earned"] == 2
-    service.process_cancel_quest("dad", hist["id"])
-    with common.get_db_cursor() as cur:
+    approval.process_cancel_quest("dad", hist["id"])
+    with get_db_cursor() as cur:
         assert cur.execute("SELECT medal_count FROM quest_users WHERE user_id='dad'").fetchone()[0] == 0
 
 
@@ -114,7 +114,7 @@ def test_request_model_rejects_out_of_range_ids():
 
 def test_total_quests_excludes_pending_and_item_usage(isolated_db):
     _seed()
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         for qid, status in ((901, 'approved'), (901, 'pending'), (0, 'approved'), (901, 'rejected')):
             cur.execute("INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
                         "VALUES ('dad', ?, 't', 0, 0, datetime('now'), ?)", (qid, status))

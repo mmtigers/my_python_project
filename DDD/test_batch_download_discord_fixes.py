@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import pytest
+from unittest.mock import MagicMock
 
 DDD_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(DDD_DIR))
@@ -264,6 +265,58 @@ class TestUniversalYtDlpStrategyNoPlaylist:
         strategy.download(task)
 
         assert captured_opts.get("noplaylist") is True
+
+
+class TestUniversalYtDlpStrategyRejectsPlaylistTypeInfo:
+    """#566回帰防止: 'noplaylist'は動画IDを含まない純粋なプレイリスト/チャンネル
+    URLには効果がない(yt-dlpのInfoExtractor._yes_playlistがvideo_id不在時は
+    noplaylistを一切参照しないため)。extract_infoの戻り値の_typeが'playlist'/
+    'multi_video'の場合、ダウンロードを行わずFalseを返すこと。"""
+
+    def _make_strategy(self, tmp_path, monkeypatch, info):
+        strategy = module.UniversalYtDlpStrategy.__new__(module.UniversalYtDlpStrategy)
+        monkeypatch.setattr(strategy, "_determine_save_dir", lambda *a, **k: tmp_path)
+
+        class _FakeYoutubeDL:
+            def __init__(self, opts):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, url, download=False):
+                return info
+
+            def prepare_filename(self, info):
+                if info.get("_type") in ("playlist", "multi_video"):
+                    raise AssertionError("プレイリスト型infoに対してprepare_filenameを呼んではならない")
+                return str(tmp_path / "dummy.mp4")
+
+            def process_ie_result(self, info, download=True):
+                raise AssertionError("プレイリスト型infoに対してprocess_ie_resultを呼んではならない")
+
+        monkeypatch.setattr(module.yt_dlp, "YoutubeDL", _FakeYoutubeDL)
+        return strategy
+
+    @pytest.mark.parametrize("type_value", ["playlist", "multi_video"])
+    def test_playlist_type_info_is_rejected(self, tmp_path, monkeypatch, type_value):
+        info = {"_type": type_value, "title": "dummy playlist"}
+        strategy = self._make_strategy(tmp_path, monkeypatch, info)
+        task = module.DownloadTask(url="https://www.youtube.com/playlist?list=dummy", source_name="test_list")
+
+        assert strategy.download(task) is False
+
+    def test_single_video_type_info_is_not_rejected(self, tmp_path, monkeypatch):
+        """_typeが'video'(または未設定)の通常の単一動画は従来どおり処理を継続すること。"""
+        info = {"_type": "video", "title": "dummy video"}
+        strategy = self._make_strategy(tmp_path, monkeypatch, info)
+        monkeypatch.setattr(strategy, "_should_skip", lambda filename: True)
+        task = module.DownloadTask(url="https://www.youtube.com/watch?v=dummy", source_name="test_list")
+
+        assert strategy.download(task) is True
 
 
 class TestPackerBaseNDigits:
@@ -1104,3 +1157,143 @@ class TestDiscordNotifierCircuitBreaker:
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+class TestIsBotDetectionErrorIgnoresIdentifiersWithSeparators:
+    """正規表現の単語境界(\\b)は "-" "/" "." も境界とみなすため、品番・パス・
+    一時ファイル名に含まれる数字列にも一致していた。通信エラー1件で
+    BotDetectionError → 12時間クールダウンに入る誤検知の回帰テスト。"""
+
+    @pytest.mark.parametrize("message", [
+        "Max retries exceeded with url: /dm18/ja/ssis-403 (Caused by NewConnectionError)",
+        "ERROR: [generic] ipx-403: Unable to download webpage: HTTP Error 404: Not Found",
+        "ERROR: Postprocessing: file /tmp/x/ssni-429.mp4.fragments.tmp/ssni-429.mp4 does not exist",
+        "https://cdn.example.test/seg-403-v1-a1.ts: Connection reset by peer",
+        "ERROR: [generic] video/503/index: Unsupported URL",
+        "HTTPSConnectionPool(host='example.test', port=443): /path/429/",
+    ])
+    def test_does_not_misfire_on_ids_and_paths(self, message):
+        assert module._is_bot_detection_error(Exception(message)) is False
+
+    @pytest.mark.parametrize("message", [
+        "HTTP Error 403: Forbidden",
+        "https://example.test/seg_000.ts: HTTP 403（ボット検知/レート制限の可能性）",
+        "requests.exceptions.RetryError: too many 503 error responses",
+        "ERROR: Unable to download webpage: HTTP Error 429: Too Many Requests (caused by ...)",
+        "status=403",
+        "Server returned error 429.",
+        "(429) rate limited",
+    ])
+    def test_genuine_status_code_messages_are_still_detected(self, message):
+        assert module._is_bot_detection_error(Exception(message)) is True
+
+
+class TestDiscordWebhookUrlIsNotLogged:
+    def test_standalone_send_failure_log_does_not_contain_webhook_token(self, monkeypatch, caplog):
+        webhook = "https://discord.com/api/webhooks/123456789/AbCdEfGhIjKlMnOpQrStUvWxYz-_0123456789"
+        monkeypatch.setenv("DISCORD_WEBHOOK_NOTIFY", webhook)
+
+        def fake_post(url, **kwargs):
+            raise module.requests.ConnectionError(
+                f"HTTPSConnectionPool(host='discord.com'): Max retries exceeded with url: {url}"
+            )
+
+        monkeypatch.setattr(module.requests, "post", fake_post)
+        module.logger.propagate = True
+        try:
+            with caplog.at_level(logging.WARNING, logger=module.logger.name):
+                assert module._standalone_send_discord_webhook([{"text": "hello"}]) is False
+        finally:
+            module.logger.propagate = False
+        assert "Discord Webhook送信に失敗しました" in caplog.text
+        assert "AbCdEfGhIjKlMnOpQrStUvWxYz" not in caplog.text
+
+
+class TestTopLevelListSentinelDoesNotCollideWithListDirFile:
+    """Issue #535: list/list.txt(stem="list")がトップレベル list.txt のセンチネルと衝突し、
+    保存先がカテゴリルートになる・パージ先が誤るバグの回帰テスト。"""
+
+    def test_determine_save_dir_distinguishes_sentinel_from_list_stem(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(module.FileSystemManager, "ensure_dir", staticmethod(lambda p: True))
+        monkeypatch.setattr(module.FileSystemManager, "check_disk_space", staticmethod(lambda p: True))
+        strategy = module.UniversalYtDlpStrategy(save_base_dir=tmp_path, session=MagicMock())
+        assert strategy._determine_save_dir(module.TOP_LEVEL_LIST_SOURCE, "cat") == tmp_path / "cat"
+        assert strategy._determine_save_dir("list", "cat") == tmp_path / "cat" / "list"
+
+    def test_collect_tasks_tags_top_level_and_list_dir_file_differently(self, tmp_path, monkeypatch):
+        import dataclasses
+        list_file = tmp_path / "list.txt"
+        list_file.write_text("https://example.test/top\n", encoding="utf-8")
+        list_dir = tmp_path / "list"
+        list_dir.mkdir()
+        (list_dir / "list.txt").write_text("https://example.test/inner\n", encoding="utf-8")
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(
+            module.CONFIG, LIST_FILE_PATH=list_file, LIST_DIR_PATH=list_dir,
+            HISTORY_FILE_PATH=tmp_path / "history.txt", BASE_SAVE_DIR=tmp_path / "save",
+        ))
+        monkeypatch.setattr(module.HistoryManager, "load_history", staticmethod(lambda: set()))
+        downloader = module.BatchDownloader.__new__(module.BatchDownloader)
+        downloader.history = set()
+        tasks = downloader._collect_tasks()
+        by_url = {t.url: t.source_name for t in tasks}
+        assert by_url["https://example.test/top"] == module.TOP_LEVEL_LIST_SOURCE
+        assert by_url["https://example.test/inner"] == "list"
+
+    def test_purge_writes_back_to_the_right_file(self, tmp_path, monkeypatch):
+        import dataclasses
+        list_file = tmp_path / "list.txt"
+        list_file.write_text("https://example.test/top\nhttps://example.test/keep\n", encoding="utf-8")
+        list_dir = tmp_path / "list"
+        list_dir.mkdir()
+        inner = list_dir / "list.txt"
+        inner.write_text("https://example.test/inner\nhttps://example.test/keep2\n", encoding="utf-8")
+        save_dir = tmp_path / "save"
+        save_dir.mkdir()
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(
+            module.CONFIG, LIST_FILE_PATH=list_file, LIST_DIR_PATH=list_dir,
+            HISTORY_FILE_PATH=tmp_path / "history.txt", BASE_SAVE_DIR=save_dir,
+        ))
+        downloader = module.BatchDownloader.__new__(module.BatchDownloader)
+        downloader._purge_skipped_tasks([
+            module.DownloadTask("https://example.test/top", module.TOP_LEVEL_LIST_SOURCE),
+            module.DownloadTask("https://example.test/inner", "list"),
+        ])
+        assert list_file.read_text(encoding="utf-8").strip().splitlines() == ["https://example.test/keep"]
+        assert inner.read_text(encoding="utf-8").strip().splitlines() == ["https://example.test/keep2"]
+
+
+class TestMasterPlaylistVariantSelection:
+    """Issue #538: 'source'(マスタープレイリスト)へのフォールバック時に variant を辿る。"""
+
+    MASTER = (
+        "#EXTM3U\n"
+        "#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=842x480\n"
+        "480p/index.m3u8\n"
+        "#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720\n"
+        "720p/index.m3u8\n"
+    )
+    MEDIA = "#EXTM3U\n#EXTINF:2.0,\nhttps://cdn.example.test/seg_000.ts\n#EXT-X-ENDLIST\n"
+
+    def test_picks_highest_bandwidth_variant_as_absolute_url(self):
+        url = module.ScrapingStrategy._select_variant_from_master(self.MASTER, "https://cdn.example.test/v/playlist.m3u8")
+        assert url == "https://cdn.example.test/v/720p/index.m3u8"
+
+    def test_media_playlist_returns_none(self):
+        assert module.ScrapingStrategy._select_variant_from_master(self.MEDIA, "https://cdn.example.test/v/playlist.m3u8") is None
+
+    def test_download_with_ytdlp_refetches_variant(self, tmp_path, monkeypatch):
+        strategy = module.ScrapingStrategy(save_base_dir=tmp_path, session=MagicMock())
+        fetched = []
+
+        def fake_fetch(m3u8_url, page_url):
+            fetched.append(m3u8_url)
+            return self.MASTER if m3u8_url.endswith("playlist.m3u8") else self.MEDIA
+
+        monkeypatch.setattr(strategy, "_fetch_m3u8_manifest", fake_fetch)
+        localized = {}
+        monkeypatch.setattr(strategy, "_localize_m3u8_manifest", lambda text, url: localized.setdefault("url", url) or text)
+        # 一時ディレクトリ準備で False を返して以降(セグメント取得・結合)には進ませない
+        monkeypatch.setattr(strategy, "_prepare_fragment_tmp_dir", lambda d: False)
+        assert strategy._download_with_ytdlp("https://cdn.example.test/v/playlist.m3u8", tmp_path / "out.mp4", "https://page", tmp_path) is False
+        assert fetched == ["https://cdn.example.test/v/playlist.m3u8", "https://cdn.example.test/v/720p/index.m3u8"]
+        assert localized["url"] == "https://cdn.example.test/v/720p/index.m3u8"

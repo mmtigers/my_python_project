@@ -17,6 +17,8 @@
     12. ラズパイ監視(health_watch)設定
     13. NASパスの遅延解決 (Issue #330 PR-B)
     14. Family Quest: YouTubeごほうび券クールダウン設定
+    15. 週次レポート設定
+    16. ダッシュボード(Streamlit)公開設定
 """
 import os
 import time
@@ -195,8 +197,23 @@ class DeviceConfig(BaseModel):
 # 再有効化する場合はTrueにした上で、OS側の `sudo systemctl enable --now bluetooth`
 # と起動時自動接続(tools/connect_speaker.sh の定期実行)の整備が必要。
 ENABLE_BLUETOOTH: bool = False
+# Issue #665: core/logger.setup_logging のログレベル。以前は INFO 固定で DEBUG 化の手段が無かった。
+# DEBUG / INFO / WARNING / ERROR / CRITICAL(不正値は INFO にフォールバック)。
+LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
 # Anker SoundCore 2 (tools/connect_speaker.sh, tools/keep_alive_anker.sh と同一デバイス)
-SPEAKER_BLUETOOTH_MAC: str = os.getenv("SPEAKER_BLUETOOTH_MAC", "F4:4E:FC:B6:65:D4")
+# Issue #663: 以前は実機の MAC アドレスがデフォルト値としてコミットされていた。個人環境値は .env に置く。
+# 未設定なら空文字(post_boot_health_check はスピーカーチェックをスキップする)。
+SPEAKER_BLUETOOTH_MAC: str = os.getenv("SPEAKER_BLUETOOTH_MAC", "")
+# Issue #665: レスポンスに付与するセキュリティヘッダー(unified_server.security_headers_middleware)。
+# 既にエッジ(Cloudflare)側で同じヘッダーを付与している場合はヘッダーが重複しうるため、
+# SECURITY_HEADERS_ENABLED=false でオリジン側の付与を止められるようにしてある。
+# なお本ミドルウェアは「既に値が入っているヘッダーは上書きしない」実装なので、
+# アプリ内の個別レスポンスが明示的に設定した値を壊すことはない。
+SECURITY_HEADERS_ENABLED: bool = os.getenv("SECURITY_HEADERS_ENABLED", "true").strip().lower() != "false"
+# X-Frame-Options の値。既定は SAMEORIGIN(DENYにすると Echo Show 等からの
+# 同一オリジンiframe埋め込みまで壊れるため、既定では同一オリジンを許す)。
+# 空文字にするとこのヘッダーだけ付与しない。
+SECURITY_HEADER_X_FRAME_OPTIONS: str = os.getenv("SECURITY_HEADER_X_FRAME_OPTIONS", "SAMEORIGIN").strip()
 
 # ==========================================
 # 2. 認証・API設定 (Secrets)
@@ -211,11 +228,38 @@ LINE_CHANNEL_ACCESS_TOKEN: Optional[str] = os.getenv("LINE_CHANNEL_ACCESS_TOKEN"
 LINE_CHANNEL_SECRET: Optional[str] = os.getenv("LINE_CHANNEL_SECRET")
 LINE_USER_ID: Optional[str] = os.getenv("LINE_USER_ID")
 LINE_PARENTS_GROUP_ID: str = os.getenv("LINE_PARENTS_GROUP_ID", "")
+# LINE Messaging API 呼び出し(reply/push/get_profile 等)の (接続, 読み取り) タイムアウト秒。
+# line-bot-sdk v3 は _request_timeout 未指定だと urllib3 に timeout=None(無期限ブロック)を
+# 渡すため、api.line.me への TCP がブラックホール化した場合に BackgroundTasks の
+# ワーカースレッドが永久に塞がり、anyio のスレッドプール(既定40)が枯渇すると同期 def の
+# 全エンドポイント(/api/quest/* 等)まで停止する。Discord/SwitchBot 系は元々タイムアウト付き。
+LINE_API_REQUEST_TIMEOUT: tuple = (5.0, 15.0)
+
+# Issue #620: LINE公式アカウントを友だち追加すれば誰でもメッセージを送信できてしまうため、
+# 体調・食事記録の書き込み(services/line_service.py の log_child_health/log_food_record)と
+# AI経由のDB検索(services/ai_service.py の analyze_text_and_execute。
+# ai_service.ALLOWED_SEARCH_TABLES経由で体調・食事・買い物・電力使用量を検索できる)を、
+# 認可済みの家族のLINEユーザーID(event.source.user_id、"U"+32桁hex形式)のみに許可する。
+# カンマ区切りで複数指定可能。未設定(空)の場合は検証なし(後方互換。認可を有効にするには
+# .envで明示的に設定すること)。Issue #648でフェイルクローズ化したSWITCHBOT_WEBHOOK_TOKENとは挙動が異なる。
+_authorized_line_user_ids_str: str = os.getenv("AUTHORIZED_LINE_USER_IDS", "")
+AUTHORIZED_LINE_USER_IDS: List[str] = [
+    uid.strip() for uid in _authorized_line_user_ids_str.split(",") if uid.strip()
+]
 
 # SwitchBot WebhookはLINEと異なり署名検証機構がないため、
 # 任意で共有シークレットをクエリパラメータ(?token=...)で要求できるようにする。
-# 未設定の場合は従来通り検証なし（後方互換）。
+# 未設定時の挙動は直下のALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOKを参照(既定は503で拒否)。
 SWITCHBOT_WEBHOOK_TOKEN: Optional[str] = os.getenv("SWITCHBOT_WEBHOOK_TOKEN")
+# Issue #648: トークン未設定時の挙動。/webhook/switchbot は ip_restriction_middleware の
+# 対象外かつエッジの Cloudflare Access もバイパスする設計(#321/#517)のため、トークンが
+# 唯一の防御になる。未設定のまま受け付けると第三者が任意の deviceMac を POST して
+# DB書き込み・LINE/Discord通知・SwitchBot API呼び出しを誘発できるため、既定では 503 で
+# 拒否する(フェイルクローズ)。実機のトークン設定が済むまでの移行用に、明示的な
+# オプトインでのみ従来どおり無検証で受け付ける。
+ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK: bool = (
+    os.getenv("ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK", "false").strip().lower() == "true"
+)
 # switchbot_webhook_fix.py が SwitchBot/LINE の Webhook URL を再登録する際の公開ベースURL
 # (例: https://home.example.com)。#405: 以前はスクリプト側で os.environ.get() を直接読んでいた。
 WEBHOOK_BASE_URL: Optional[str] = os.getenv("WEBHOOK_BASE_URL")
@@ -248,10 +292,11 @@ SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "hom
 # Exponential Backoff(最悪 約31秒)で全importerをブロックしていたため、
 # Issue #330 PR-Bで遅延解決(ファイル末尾のモジュール__getattr__)へ移行した。
 # 利用側は従来どおり config.ASSETS_DIR で参照できる(初回アクセス時に検証・キャッシュ)。
-LOG_DIR: str = ensure_safe_path_with_backoff(
-    os.path.join(BASE_DIR, "logs"),
-    "logs"
-)
+# Issue #664: LOG_DIR も ASSETS_DIR と同じくここで ensure_safe_path_with_backoff を
+# 呼んでおり、ディスクフル・権限異常時には import だけで最大約31秒ブロックしていた
+# (Issue #330 PR-B で ASSETS_DIR を遅延化した際の取り残し)。同じモジュール__getattr__
+# による遅延解決へ移す(利用側は従来どおり config.LOG_DIR で参照できる)。
+_PREFERRED_LOG_DIR: str = os.path.join(BASE_DIR, "logs")
 DEVICES_JSON_PATH: str = os.path.join(BASE_DIR, "devices.json")
 
 # --- DBテーブル名定義 ---
@@ -265,12 +310,24 @@ SQLITE_TABLE_FOOD: str = "food_records"
 SQLITE_TABLE_CAR: str = "car_records"
 SQLITE_TABLE_CHILD: str = "child_health_records"
 SQLITE_TABLE_DEFECATION: str = "defecation_records"
+# Issue #584: このテーブルへのINSERT/UPDATE経路はこのリポジトリ内には存在しない
+# (`analysis_service.load_ai_report`による読み取りのみ)。`dashboard.py`が
+# `timestamp`列を新形式(core.utils.get_now_ioのISO8601)・旧形式("YYYY-MM-DD
+# HH:MM:SS"のnaive文字列)の両方でパースできるよう作られている(Issue #410 L-L2)
+# ことから、過去に実データが書き込まれていたと考えられ、このリポジトリ管理外の
+# 外部プロセス(実機で手動運用、または別リポジトリのスクリプト)がこのテーブルへ
+# 書き込む前提の設計と判断している。本リポジトリ側に書込コードを追加する対応は
+# 不要(表示側のみで完結する)。
 SQLITE_TABLE_AI_REPORT: str = "ai_report_records"
 SQLITE_TABLE_SHOPPING: str = "shopping_records"
 SQLITE_TABLE_NAS: str = "nas_records"
 SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"
 
-BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", ".env", "devices.json"]
+# Issue #649: 以前は ".env" も含めていたが、全シークレット(SwitchBot/LINE/Discord/Gemini)を
+# NAS の db_backups/ へ平文でコピーすることになり、NAS 共有の閲覧権限がそのままシークレットの
+# 閲覧権限になっていた。.env はリポジトリ外の秘匿情報として別管理(パスワードマネージャ等)とし、
+# バックアップ対象から外す。復元手順は docs/runbooks/db_restore.md を参照。
+BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", "devices.json"]
 
 # デフォルトアセット
 DEFAULT_SOUND_SOURCE: str = os.path.join(BASE_DIR, "defaults", "sounds")
@@ -306,7 +363,13 @@ MOTION_COOLDOWN_SEC: int = _get_int_env("MOTION_COOLDOWN_SEC", 60)
 # ==========================================
 # 5. NAS & Network設定
 # ==========================================
-NAS_IP: str = os.getenv("NAS_IP", "192.168.1.20")
+# Issue #663: 以前は実環境の LAN IP を既定値にしていた(.env.example 冒頭の
+# 「個人データを含めない」方針と矛盾していた)。未設定なら空文字とし、
+# NAS の疎通確認(ping)はスキップされる — マウント状態と書き込みテストが
+# NAS の健全性判定の本体で、ping はその補助的な手掛かりでしかないため、
+# 「アドレスが分からないので ping では何も判定できない」を「到達不可」と
+# 取り違えて誤ってフォールバックへ退避しないようにする。
+NAS_IP: str = os.getenv("NAS_IP", "")
 NAS_CHECK_TIMEOUT: int = 5
 # 書き込みテストがタイムアウトした際の再試行回数。
 # autofsのアイドルアンマウント後の初回アクセスやNAS本体のディスクスピンアップは
@@ -317,7 +380,11 @@ NAS_WRITE_CHECK_RETRIES: int = 3
 _default_quest_dir = os.path.join(os.path.dirname(BASE_DIR), "family-quest", "dist")
 QUEST_DIST_DIR: str = os.getenv("QUEST_DIST_DIR", _default_quest_dir)
 
-FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")
+# Issue #663: 既定値は実環境の LAN IP ではなくループバックとする。この URL を使う
+# post_boot_health_check.py は unified_server と同じホストで動くため、ループバックの
+# 方がむしろ確実に到達する(RESET_GAME_API_BASE_URL と同じ考え方)。LAN 内の他端末から
+# のアクセスを想定したホスト指定は .env の FRONTEND_URL で与える。
+FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://127.0.0.1:8000/quest")
 # ブラウザが送信する Origin ヘッダーは scheme://host[:port] のみでパスを含まない
 # (Starlette の CORSMiddleware は allow_origins との完全一致で比較する)。
 # FRONTEND_URL は post_boot_health_check.py 等で実際にHTTPリクエストを送る
@@ -328,17 +395,28 @@ _frontend_origin = "{0.scheme}://{0.netloc}".format(urlparse(FRONTEND_URL))
 # オリジンリストがあり、実際に使われるのは unified_server.py 側のハードコード
 # だけだったため、config.py側やALLOW_ALL_ORIGINS環境変数を変更しても
 # CORS設定に一切反映されない「死に設定」になっていた。ここに一本化する。
+# Issue #663: 以前は公開ドメイン(Cloudflare Tunnel)と LAN 内の開発サーバーのオリジンがここに直書き
+# されていた。個人環境値は .env の CORS_EXTRA_ORIGINS(カンマ区切り)で追加する。
+# 例: CORS_EXTRA_ORIGINS=https://home.example.com,http://192.168.0.2:5173
+CORS_EXTRA_ORIGINS: List[str] = [
+    o.strip() for o in os.getenv("CORS_EXTRA_ORIGINS", "").split(",") if o.strip()
+]
 CORS_ORIGINS: List[str] = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:8501",   # Streamlitダッシュボード
-    "http://192.168.1.200:5173",  # LAN内フロントエンド開発サーバー
-    "https://m-mhts.com",      # Cloudflare Tunnel公開ドメイン
     _frontend_origin,
+    *CORS_EXTRA_ORIGINS,
 ]
 ALLOW_ALL_ORIGINS: bool = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "true"
 if ALLOW_ALL_ORIGINS:
     CORS_ORIGINS = ["*"]
+
+# Issue #547: reset_game.py が管理者向けリセットAPI(POST /api/quest/admin/reset_user)を
+# 呼び出す際のサーバーのベースURL。reset_game.pyはunified_serverと同じホストで実行される
+# 前提の対話スクリプトのため、既定値はループバックアドレスとする(FRONTEND_URLはLAN内の
+# 他端末からのアクセスを想定したホストのIP指定のため、この用途には流用しない)。
+RESET_GAME_API_BASE_URL: str = os.getenv("RESET_GAME_API_BASE_URL", "http://127.0.0.1:8000")
 
 UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
 # M-9-3: /api/quest/upload にファイルサイズ上限が無く、巨大アップロードで
@@ -516,14 +594,21 @@ def _resolve_assets_dir() -> str:
 
 
 def __getattr__(name: str) -> str:
-    """NAS依存パス定数の遅延解決 (PEP 562)。
+    """検証I/Oを伴うパス定数の遅延解決 (PEP 562)。
 
     通常の属性解決(モジュールglobals)に失敗した場合のみ呼ばれるため、
     一度解決して globals() に書き込んだ後は本関数を経由しない(=キャッシュ)。
     テストが monkeypatch.setattr/delattr で上書き・再解決させることも可能。
+
+    Issue #664: ASSETS_DIR(NAS上)に加え、LOG_DIR(ローカルの BASE_DIR/logs)も
+    ここで解決する。LOG_DIR は NAS 依存ではないが、同じ
+    ensure_safe_path_with_backoff を import 時に呼んでいたため、ディスクフル・
+    権限異常時に config を import するだけで最大約31秒ブロックしていた。
     """
     if name == "ASSETS_DIR":
         value = _resolve_assets_dir()
+    elif name == "LOG_DIR":
+        value = ensure_safe_path_with_backoff(_PREFERRED_LOG_DIR, "logs")
     elif name in _ASSETS_DERIVED_PATHS:
         # ASSETS_DIR の解決(必要なら)を経由して派生パスを組み立てる
         assets_dir = globals().get("ASSETS_DIR") or __getattr__("ASSETS_DIR")
@@ -542,7 +627,9 @@ def prewarm_nas_paths() -> None:
     NASの検証・フォールバック判定を済ませる。失敗してもensure_safe_path_with_backoff
     自体がローカルへフォールバックするため例外は送出しない。
     """
-    for name in ("ASSETS_DIR", *_ASSETS_DERIVED_PATHS):
+    # Issue #664: LOG_DIR も遅延化したため、ここで一緒に解決しておく
+    # (遅延化前と同じく、起動時点で検証・フォールバック判定を済ませる)。
+    for name in ("ASSETS_DIR", "LOG_DIR", *_ASSETS_DERIVED_PATHS):
         getattr(sys.modules[__name__], name)
     logger.info("✅ NAS依存パスのプリウォーム完了")
 
@@ -575,3 +662,37 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM parse error: {e}. 即時強制にフォールバックします。")
     YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM = _date(2000, 1, 1)
+
+# ==========================================
+# 15. 週次レポート設定
+# ==========================================
+# weekly_analyze_report.py が電力量(kWh)から電気代を概算するときの単価(円/kWh)。
+# Issue #663: 以前は weekly_analyze_report.py に直書きされており、コメント自身が
+# 「本来はconfig.pyまたは.envから読み込むべき値」と書いていた。電気料金は地域・
+# 契約で変わる個人環境値のため、.env で上書きできるようにする。
+ELEC_PRICE_PER_KWH: int = _get_int_env("ELEC_PRICE_PER_KWH", 31)
+
+
+# ==========================================
+# 16. ダッシュボード(Streamlit)公開設定
+# ==========================================
+# Streamlitダッシュボード(dashboard.py)は認証機構を持たず、家族の健康記録・防犯ログの
+# 閲覧と `sudo systemctl restart` ボタンを備えるため、`home_dashboard.service`/
+# `start_all.sh` では 127.0.0.1 にのみバインドしている
+# (`docs/reports/CODE_REVIEW_REPORT_ALL.md` の Critical 指摘)。
+# そのままではスマートフォンから到達できないため、`unified_server.py` が
+# DASHBOARD_BASE_PATH 配下でリバースプロキシし、外部からのアクセス制御は
+# 他のパスと同じくエッジのCloudflare Accessに委譲する(Issue #321・2026-09-03決定)。
+#
+# 重要: このパスは `unified_server.py` の `allowed_webhook_paths` とは逆で、
+# **Cloudflare Access側でバイパス設定をしてはいけない**(バイパスすると無認証で
+# ダッシュボードが外部公開される)。詳細は
+# `docs/runbooks/cloudflare_access_connectivity_check.md` を参照。
+DASHBOARD_PROXY_ENABLED: bool = os.getenv("DASHBOARD_PROXY_ENABLED", "true").strip().lower() != "false"
+# プロキシ先(Streamlitの待ち受け先)。localhost以外を指定する運用は想定していない。
+DASHBOARD_INTERNAL_URL: str = os.getenv("DASHBOARD_INTERNAL_URL", "http://127.0.0.1:8501").strip().rstrip("/")
+# 公開パス。Streamlit側の `--server.baseUrlPath` と一致していなければ静的アセットが404になる。
+# 先頭のスラッシュを保証し、末尾のスラッシュは落とす("/dashboard" 形式に正規化)。
+DASHBOARD_BASE_PATH: str = "/" + os.getenv("DASHBOARD_BASE_PATH", "dashboard").strip().strip("/")
+# プロキシのタイムアウト(秒)。Streamlitは初回レンダリングで数秒かかることがある。
+DASHBOARD_PROXY_TIMEOUT_SEC: int = _get_int_env("DASHBOARD_PROXY_TIMEOUT_SEC", 30)

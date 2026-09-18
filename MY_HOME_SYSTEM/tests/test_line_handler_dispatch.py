@@ -131,6 +131,80 @@ class TestProcessMessageAsyncDispatch:
         assert "うまく処理できませんでした" in reply_arg.text
 
 
+@pytest.mark.asyncio
+class TestAuthorizedLineUserGuard:
+    """Issue #620 の回帰テスト: allowlist(`config.AUTHORIZED_LINE_USER_IDS`)が設定されている
+    場合、未認可のLINEユーザーからのメッセージは体調・食事記録の書き込み
+    (line_service.log_child_health/log_food_record 経由)にもAI経由のDB検索
+    (ai_service.analyze_text_and_execute 経由)にも一切到達しないこと。
+    allowlist自体が未設定(空)の場合は従来通り誰でも利用できる(後方互換)こと。"""
+
+    async def test_unauthorized_user_is_blocked_from_health_record(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", ["Uauthorized"])
+        mock_health = AsyncMock()
+        monkeypatch.setattr(line_handler.line_service, "log_child_health", mock_health)
+        mock_ai = AsyncMock()
+        monkeypatch.setattr(line_handler.ai_service, "analyze_text_and_execute", mock_ai)
+        mock_reply = MagicMock()
+        monkeypatch.setattr(line_handler, "reply_message", mock_reply)
+
+        await line_handler._process_message_async("Uintruder", "何者か", "体調 智矢 元気", "tok")
+
+        mock_health.assert_not_called()
+        mock_ai.assert_not_called()
+        mock_reply.assert_not_called()
+
+    async def test_unauthorized_user_is_blocked_from_ai_search(self, monkeypatch):
+        """record_food/search_db は ai_service.analyze_text_and_execute 経由でのみ
+        呼ばれるため、AIフォールバック自体がブロックされることを確認すれば十分。"""
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", ["Uauthorized"])
+        mock_ai = AsyncMock()
+        monkeypatch.setattr(line_handler.ai_service, "analyze_text_and_execute", mock_ai)
+        mock_reply = MagicMock()
+        monkeypatch.setattr(line_handler, "reply_message", mock_reply)
+
+        await line_handler._process_message_async("Uintruder", "何者か", "こんにちは", "tok")
+
+        mock_ai.assert_not_called()
+        mock_reply.assert_not_called()
+
+    async def test_authorized_user_is_processed_normally(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", ["U1"])
+        mock_health = AsyncMock(return_value=MagicMock(text="logged"))
+        monkeypatch.setattr(line_handler.line_service, "log_child_health", mock_health)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        await line_handler._process_message_async("U1", "パパ", "体調 智矢 元気", "tok")
+
+        mock_health.assert_called_once_with("U1", "パパ", "智矢", "元気")
+
+    async def test_empty_allowlist_allows_everyone_backward_compatible(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", [])
+        mock_ai = AsyncMock(return_value="AI reply")
+        monkeypatch.setattr(line_handler.ai_service, "analyze_text_and_execute", mock_ai)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        await line_handler._process_message_async("Uanyone", "誰でも", "こんにちは", "tok")
+
+        mock_ai.assert_called_once_with("Uanyone", "誰でも", "こんにちは")
+
+
+class TestIsAuthorizedLineUser:
+    """`_is_authorized_line_user` 単体のテスト。"""
+
+    def test_returns_true_when_allowlist_empty(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", [])
+        assert line_handler._is_authorized_line_user("Uanyone") is True
+
+    def test_returns_true_for_listed_user(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", ["U1", "U2"])
+        assert line_handler._is_authorized_line_user("U2") is True
+
+    def test_returns_false_for_unlisted_user(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", ["U1", "U2"])
+        assert line_handler._is_authorized_line_user("U9") is False
+
+
 class TestReplyMessage:
     def test_noop_when_line_api_not_configured(self, monkeypatch):
         monkeypatch.setattr(line_handler, "line_bot_api", None)
@@ -231,6 +305,67 @@ class TestHandlePostbackWrapper:
         mock_delegate.assert_called_once()
         mock_logger.error.assert_called_once()
         assert "Logic Delegation Error" in mock_logger.error.call_args[0][0]
+
+    def test_none_user_id_skips_delegation(self, monkeypatch):
+        # #572 (L-L6 #410 の修正漏れ): handle_message には既にuser_id=Noneガードが
+        # あったが、Postback経路(体調ボタン等)には無く、グループでのプロフィール
+        # 未共有時にuser_id=NULLのまま記録が保存されてしまっていた。
+        mock_delegate = MagicMock()
+        monkeypatch.setattr(line_handler.line_logic, "handle_postback", mock_delegate)
+
+        event = MagicMock()
+        event.source.user_id = None
+        event.postback.data = "child_check&child=智矢&status=genki"
+        event.reply_token = "tok"
+
+        line_handler.handle_postback(event)
+
+        mock_delegate.assert_not_called()
+
+
+class TestHandlePostbackAuthorizedUserGuard:
+    """Issue #623 の回帰テスト: handle_message(_process_message_async)には#620で
+    allowlist(`config.AUTHORIZED_LINE_USER_IDS`)ガードが既にあったが、Postback経路
+    (line_logic.handle_postbackへの委譲)には無かった。未認可のLINEユーザーからの
+    Postbackがline_logic.handle_postbackに一切到達しないこと。
+    allowlist自体が未設定(空)の場合は従来通り誰でも利用できる(後方互換)こと。"""
+
+    def _event(self, data="show_health_input", user_id="Uintruder"):
+        event = MagicMock()
+        event.source.user_id = user_id
+        event.postback.data = data
+        event.reply_token = "tok"
+        event.delivery_context.is_redelivery = False
+        return event
+
+    def test_unauthorized_user_postback_is_blocked(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", ["Uauthorized"])
+        mock_delegate = MagicMock()
+        monkeypatch.setattr(line_handler.line_logic, "handle_postback", mock_delegate)
+
+        line_handler.handle_postback(self._event(user_id="Uintruder"))
+
+        mock_delegate.assert_not_called()
+
+    def test_authorized_user_postback_is_processed_normally(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", ["U1"])
+        mock_delegate = MagicMock()
+        monkeypatch.setattr(line_handler.line_logic, "handle_postback", mock_delegate)
+        event = self._event(user_id="U1")
+
+        line_handler.handle_postback(event)
+
+        mock_delegate.assert_called_once_with(event, line_handler.line_bot_api)
+
+    def test_empty_allowlist_allows_everyone_backward_compatible(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", [])
+        mock_delegate = MagicMock()
+        monkeypatch.setattr(line_handler.line_logic, "handle_postback", mock_delegate)
+        event = self._event(user_id="Uanyone")
+
+        line_handler.handle_postback(event)
+
+        mock_delegate.assert_called_once_with(event, line_handler.line_bot_api)
 
 
 # ==========================================
@@ -556,6 +691,56 @@ class TestHandleMessageUserIdNoneGuard:
 
         line_handler.handle_message(event)
 
+        mock_process.assert_called_once()
+
+
+class TestHandleMessageAuthorizationBeforeProfileFetch:
+    """Issue #620 の追加回帰テスト: allowlistが設定されている場合、未認可ユーザーの
+    メッセージは `_get_display_name`(LINE Profile API呼び出し + `_profile_cache` への
+    登録)にも到達しないこと。以前は `_process_message_async` 側でしか弾いていなかったため、
+    第三者が1メッセージにつき1回の外部API呼び出しを発生させ、上限つきの
+    `_profile_cache` を自分のuser_idで埋めて家族のエントリを押し出せた。"""
+
+    def _event(self, user_id="Uintruder", text="こんにちは"):
+        event = MagicMock()
+        event.source.user_id = user_id
+        event.message.text = text
+        event.reply_token = "tok"
+        event.delivery_context.is_redelivery = False
+        return event
+
+    def test_unauthorized_message_does_not_call_profile_api(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", ["Uauthorized"])
+        mock_display_name = MagicMock()
+        monkeypatch.setattr(line_handler, "_get_display_name", mock_display_name)
+        mock_process = AsyncMock()
+        monkeypatch.setattr(line_handler, "_process_message_async", mock_process)
+
+        line_handler.handle_message(self._event(user_id="Uintruder"))
+
+        mock_display_name.assert_not_called()
+        mock_process.assert_not_called()
+
+    def test_authorized_message_is_processed_normally(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", ["U1"])
+        monkeypatch.setattr(line_handler, "_get_display_name", MagicMock(return_value="パパ"))
+        mock_process = AsyncMock()
+        monkeypatch.setattr(line_handler, "_process_message_async", mock_process)
+
+        line_handler.handle_message(self._event(user_id="U1"))
+
+        mock_process.assert_called_once()
+
+    def test_empty_allowlist_allows_everyone_backward_compatible(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", [])
+        mock_display_name = MagicMock(return_value="誰でも")
+        monkeypatch.setattr(line_handler, "_get_display_name", mock_display_name)
+        mock_process = AsyncMock()
+        monkeypatch.setattr(line_handler, "_process_message_async", mock_process)
+
+        line_handler.handle_message(self._event(user_id="Uanyone"))
+
+        mock_display_name.assert_called_once_with("Uanyone")
         mock_process.assert_called_once()
 
 

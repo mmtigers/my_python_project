@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import Hls from 'hls.js';
+// #660: コンポーネントが light ビルドを使うため、スパイ対象も同じモジュールにする
+// (別モジュールを spy しても差し替わらない)。
+import Hls from 'hls.js/light';
 import HlsPlayer from './HlsPlayer';
 
 // #295: Safari(hls.js非対応・ネイティブHLS対応)パスでは video 要素に

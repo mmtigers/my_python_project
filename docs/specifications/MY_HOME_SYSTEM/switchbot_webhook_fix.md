@@ -9,9 +9,9 @@
 
 ## 関連ドキュメント
 
-- [common.md](./common.md) — `setup_logging`・`send_push`を再エクスポートするFacadeモジュール
-- [logger.md](./logger.md) — `common.setup_logging`の実体(`core.logger.setup_logging`)
-- [notification_service.md](./notification_service.md) — `common.send_push`の実体(`services.notification_service.send_push`)
+- [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
+- [logger.md](./logger.md) — `core.logger.setup_logging`の実体(`core.logger.setup_logging`)
+- [notification_service.md](./notification_service.md) — `services.notification_service.send_push`の実体(`services.notification_service.send_push`)
 - [config.md](./config.md) — `LINE_CHANNEL_ACCESS_TOKEN`等の設定値を提供
 - [switchbot_service.md](./switchbot_service.md) — `create_switchbot_auth_headers`(SwitchBot API認証ヘッダー生成)の実装元
 - [webhook_router.md](./webhook_router.md) — 同じSwitchBot/LINE Webhookエコシステムに属する、Webhook受信側のルーター
@@ -35,7 +35,8 @@
 | `traceback` | 標準ライブラリ | 本ファイル内では未使用 | `import traceback` (行番号: 4) |
 | `requests` | サードパーティ | 外部API（SwitchBot, LINE）へのHTTPリクエスト送信 | `import requests` (行番号: 5, 36, 46, 51, 86, 91) |
 | `time` | 標準ライブラリ | APIコール間のスリープ処理（待機） | `import time` (行番号: 6, 47) |
-| `common` | カスタムモジュール | ロガー設定の初期化、および完了時のプッシュ通知送信 | `import common` (行番号: 18, 26, 117) |
+| `core.logger.setup_logging` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.logger import setup_logging` (行番号: 18 / 抜粋: "from core.logger import setup_logging") |
+| `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 19 / 抜粋: "from services.notification_service import send_push") |
 | `config` | カスタムモジュール | LINEチャネルアクセストークンやユーザーIDの設定値取得。**（Issue #318で追加）** `SWITCHBOT_WEBHOOK_TOKEN`(登録URLに付与するトークン)の取得にも使用する。 | `import config` (行番号: 18), `if config.SWITCHBOT_WEBHOOK_TOKEN:` (行番号: 38) |
 | `services.switchbot_service` (as `sb_tool`) | カスタムモジュール | SwitchBot API通信用の認証ヘッダー生成 | `from services import switchbot_service as sb_tool` (行番号: 20, 33, 50) |
 
@@ -43,8 +44,8 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `common.setup_logging` | ロガーの初期化処理、ログの出力先やフォーマットの実装が不明。 | `logger = common.setup_logging("webhook_fix")` (行番号: 26) |
-| `common.send_push` | 引数に渡されるDiscord指定などの処理内容や、実際の通知送信ロジックが不明。 | `common.send_push([...], target="discord", ...)` (行番号: 142, 148) |
+| `core.logger.setup_logging` | ロガーの初期化処理、ログの出力先やフォーマットの実装が不明。 | `logger = core.logger.setup_logging("webhook_fix")` (行番号: 26) |
+| `services.notification_service.send_push` | 引数に渡されるDiscord指定などの処理内容や、実際の通知送信ロジックが不明。 | `services.notification_service.send_push([...], target="discord", ...)` (行番号: 142, 148) |
 | `config.LINE_CHANNEL_ACCESS_TOKEN` | 環境変数等からの読み込み処理など、具体的な定義内容や値が不明。 | `if not config.LINE_CHANNEL_ACCESS_TOKEN:` (行番号: 73) |
 | `sb_tool.create_switchbot_auth_headers` | APIリクエストに必要なトークンや署名生成などの具体的な認証ロジックが不明。 | `headers = sb_tool.create_switchbot_auth_headers()` (行番号: 33) |
 
@@ -52,12 +53,28 @@
 
 ### `update_switchbot_webhook`
 
+* **（2026-09-06 品質監査で修正）** 「設定確認」「古い設定を削除」の2つの INFO ログは `_mask_token(url)` でクエリの `token=` の値を `***` にマスクして出力する(以前は共有シークレット `SWITCHBOT_WEBHOOK_TOKEN` が `home_system.log` に平文で残っていた)。
+* 根拠: (行番号: 53, 70 / 抜粋: "logger.info(f\"🔧 [SwitchBot] 設定確認: {_mask_token(target_url)}\")", "logger.info(f\"   🗑️ 古い設定を削除: {_mask_token(old_url)}\")")
+
+### `_mask_token` **（2026-09-06 品質監査で修正）**
+
+* **役割**: URL 文字列中の `?token=...` / `&token=...` の値部分を `***` に置換して返す(ログ出力用)。
+* 根拠: (行番号: 28〜33 / 抜粋: "_TOKEN_QUERY_RE = re.compile(", "def _mask_token(url: str) -> str:")
+* **引数/リクエスト**: `url: str`
+* 根拠: (行番号: 31)
+* **戻り値/レスポンス**: マスク済み文字列
+* 根拠: (行番号: 33)
+* **副作用**: なし
+* 根拠: 純粋関数(行番号: 28〜33)
+* **エラーハンドリング**: なし
+* 根拠: 同上
+
 * **役割**: SwitchBot APIを利用してWebhook URLの現在設定を取得し、必要に応じて古い設定の削除と新しいURLの登録を行う。**（Issue #318で追加）** `config.SWITCHBOT_WEBHOOK_TOKEN`が設定されている場合、登録・照会に用いる`target_url`に`?token=...`を付与する(`webhook_router.py`側のトークン検証と一致させるため)。
 * 根拠: [関数定義およびDocstring] (行番号: 27〜36 / 抜粋: "SwitchBotのWebhook URLを更新"), `if config.SWITCHBOT_WEBHOOK_TOKEN:\n        ...\n        target_url = f"{target_url}?token={config.SWITCHBOT_WEBHOOK_TOKEN}"` (行番号: 38〜42)
 
 
 * **引数/リクエスト**: `base_url` (型: 不明 / 環境変数から取得されたベースURLの文字列)
-* 根拠: [関数定義] (行番号: 28 / 抜粋: "def update_switchbot_webhook(base_url):")
+* 根拠: [関数定義] (行番号: 37 / 抜粋: "def update_switchbot_webhook(base_url):")
 
 
 * **戻り値/レスポンス**: `Optional[bool]` — `True`: 新しいURLの登録に成功した(変更あり)。`False`: 既に設定済み、またはURL照会自体に失敗し何も変更していない。`None`: 旧URLを削除した後、新URLの登録に失敗した(Issue #166。SwitchBotのWebhookが未設定のまま残っている危険な状態を、「既に設定済みで変更不要」の`False`と区別するために導入された)。
@@ -84,7 +101,7 @@
 
 
 * **引数/リクエスト**: `base_url` (型: 不明 / 環境変数から取得されたベースURLの文字列)
-* 根拠: [関数定義] (行番号: 68 / 抜粋: "def update_line_webhook(base_url):")
+* 根拠: [関数定義] (行番号: 101 / 抜粋: "def update_line_webhook(base_url):")
 
 
 * **戻り値/レスポンス**: `bool` (更新が成功した場合は `True`、スキップ・設定済み・失敗時は `False`)
@@ -112,7 +129,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 120 / 抜粋: "def fix_all_webhooks():")
+* 根拠: [関数定義] (行番号: 135 / 抜粋: "def fix_all_webhooks():")
 
 
 * **戻り値/レスポンス**: なし
@@ -121,9 +138,9 @@
 
 * **副作用**:
 * 環境変数取得: `os.environ.get("WEBHOOK_BASE_URL")`
-* 外部モジュール呼び出し: `common.send_push` によるプッシュ通知送信(SwitchBot側が危険な状態(`None`)の場合のエラー通知、および更新成功時の完了通知の最大2回)
+* 外部モジュール呼び出し: `services.notification_service.send_push` によるプッシュ通知送信(SwitchBot側が危険な状態(`None`)の場合のエラー通知、および更新成功時の完了通知の最大2回)
 * システム終了: 設定がない場合の `sys.exit(1)`
-* 根拠: [処理内容] (行番号: 124, 127, 142, 148 / 抜粋: "sys.exit(1)", "common.send_push(...)")
+* 根拠: [処理内容] (行番号: 124, 127, 142, 148 / 抜粋: "sys.exit(1)", "services.notification_service.send_push(...)")
 
 
 * **エラーハンドリング**: `WEBHOOK_BASE_URL` が取得できない場合、エラーログを出力して `sys.exit(1)` でプロセスを終了させる。`update_switchbot_webhook`が例外を送出することはない(関数内で`Exception`を捕捉し`False`/`None`を返す設計のため)。
@@ -163,11 +180,11 @@ flowchart TD
     LINECond -- No --> PutLINE[外部: API PUT endpoint]
     PutLINE --> CheckDanger
 
-    CheckDanger -- Yes --> SendErrorAlert["外部: common.send_push\n(channel=error)"]
+    CheckDanger -- Yes --> SendErrorAlert["外部: services.notification_service.send_push\n(channel=error)"]
     CheckDanger -- No --> CheckUpdate
     SendErrorAlert --> CheckUpdate{sb_updated(=bool(sb_result))\nOR line_updated ?}
 
-    CheckUpdate -- Yes --> SendPush["外部: common.send_push\n(channel=report)"]
+    CheckUpdate -- Yes --> SendPush["外部: services.notification_service.send_push\n(channel=report)"]
     SendPush --> End
     
     CheckUpdate -- No --> End
@@ -203,7 +220,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `common.py` | ロギングの設定内容や、更新完了時の通知（Discordへの送信仕様など）の具体的な挙動を把握するため。 | `import common` (行番号: 18 / 抜粋: "logger = common.setup_logging...") |
+| 高 | `common.py` | ロギングの設定内容や、更新完了時の通知（Discordへの送信仕様など）の具体的な挙動を把握するため。 | `import common` (行番号: 18 / 抜粋: "logger = setup_logging...") |
 | 高 | `services/switchbot_service.py` | SwitchBot API通信に必須となる認証ヘッダーの生成仕様（暗号化やトークン仕様）を確認するため。 | `from services import switchbot_service as sb_tool` (行番号: 20 / 抜粋: "sb_tool.create_switchbot_auth_headers()") |
 | 中 | `config.py` | LINE関連のトークンやユーザーIDがどのように管理・取得されているか（環境変数かファイルか）を特定するため。 | `import config` (行番号: 19 / 抜粋: "config.LINE_CHANNEL_ACCESS_TOKEN") |
 
@@ -220,8 +237,8 @@ graph TD
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| `common.setup_logging` の詳細仕様 | ログフォーマットや出力先（ファイル、コンソール等）が不明のため。 | `common.py` |
-| `common.send_push` の詳細仕様 | 引数の `target="discord"` や `channel="report"` がどのように処理されるか不明のため。 | `common.py` |
+| `core.logger.setup_logging` の詳細仕様 | ログフォーマットや出力先（ファイル、コンソール等）が不明のため。 | `common.py` |
+| `services.notification_service.send_push` の詳細仕様 | 引数の `target="discord"` や `channel="report"` がどのように処理されるか不明のため。 | `common.py` |
 | `config` 内の変数定義方法 | `LINE_CHANNEL_ACCESS_TOKEN` 等が環境変数から取得されているのか、ファイルに直書きされているのか不明のため。 | `config.py` |
 | API認証ヘッダーの生成ロジック | SwitchBot API仕様に準拠したハッシュ生成などがどのように実装されているか不明のため。 | `services/switchbot_service.py` |
 | 外部APIの例外レスポンス構造 | API側で想定外のエラーが発生した場合のステータスコードやJSON構造の詳細が不明のため。（リポジトリ内を「API仕様」「openapi」等で検索したが該当ファイルは存在せず、解消不可。SwitchBot/LINE等の公式APIドキュメントを要参照） | 各外部API仕様書 |
@@ -230,8 +247,8 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `common.setup_logging` の詳細仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`TimedRotatingFileHandler`、ログファイル名`home_system.log`固定)に加え、ERRORレベル以上のログをDiscord Webhookへ通知する`DiscordErrorHandler`を登録する設計であることが判明した。 | logger.md |
-| `common.send_push` の詳細仕様 | `notification_service.md`の解析によれば、`send_push`は`target`引数(`discord`/`line`/`both`)に応じてDiscord Webhookおよび/またはLINE Messaging APIへ送信し、LINE送信失敗時はDiscordの`error`チャンネルへフォールバック通知する関数(戻り値`bool`)と推測される。 | notification_service.md |
+| `core.logger.setup_logging` の詳細仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`TimedRotatingFileHandler`、ログファイル名`home_system.log`固定)に加え、ERRORレベル以上のログをDiscord Webhookへ通知する`DiscordErrorHandler`を登録する設計であることが判明した。 | logger.md |
+| `services.notification_service.send_push` の詳細仕様 | `notification_service.md`の解析によれば、`send_push`は`target`引数(`discord`/`line`/`both`)に応じてDiscord Webhookおよび/またはLINE Messaging APIへ送信し、LINE送信失敗時はDiscordの`error`チャンネルへフォールバック通知する関数(戻り値`bool`)と推測される。 | notification_service.md |
 | `config` 内の変数定義方法 | `config.md`の解析によれば、`config.py`は`load_dotenv()`により`.env`ファイルから環境変数を読み込む設計であることが判明した。ただし`LINE_CHANNEL_ACCESS_TOKEN`個別の値は`config.md`側でも確認できていない。 | config.md |
 | API認証ヘッダーの生成ロジック | `switchbot_service.md`の解析によれば、`create_switchbot_auth_headers`はトークン・タイムスタンプ・nonceを用いてHMAC-SHA256署名を生成し認証ヘッダー辞書を構築する関数であり、トークンまたはシークレット未設定時は警告ログを出力して空辞書を返すことが判明した。 | switchbot_service.md |
 

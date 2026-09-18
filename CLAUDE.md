@@ -23,6 +23,12 @@
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
 
+# 依存の追加・変更は requirements.in / requirements-dev.in(直接依存のみ)を編集し、
+# pip-compile で lock(requirements.txt / requirements-dev.txt)を再生成する(手で編集しない。Issue #647)
+pip install pip-tools
+pip-compile --strip-extras --no-emit-index-url --output-file requirements.txt requirements.in
+pip-compile --strip-extras --no-emit-index-url --output-file requirements-dev.txt requirements-dev.in
+
 # 全テストスイート実行 (pytest.iniの asyncio_mode=auto によりasyncテストも自動実行される)
 python -m pytest tests/ -v
 
@@ -31,7 +37,7 @@ python -m pytest tests/test_quest_service.py -v
 python -m pytest tests/test_quest_service.py::test_something -v
 
 # カバレッジ付き (CIの閾値と同じ)
-python -m pytest tests/ --cov=. --cov-report=term-missing --cov-fail-under=45
+python -m pytest tests/ --cov=. --cov-report=term-missing --cov-fail-under=70
 
 # Lint (CIでブロックされるのは未定義名・構文エラーのみ。フルレポートは参考情報)
 ruff check . --select F821,F822,F823,E9
@@ -53,6 +59,8 @@ export NOTIFICATION_TARGET="none"
 
 `tests/conftest.py` は `isolated_db` フィクスチャ（テストごとに新規SQLiteファイルを作成し `init_unified_db.init_db()` でスキーマ初期化、`config.SQLITE_DB_PATH` をmonkeypatch）と `api_client` フィクスチャ（`unified_server.app` に対する `TestClient` で、`lifespan` コンテキストを**実行しない**ため、カメラ監視/スケジューラ等のバックグラウンドサブプロセスがテスト中に一切起動しない）を提供する。新規テストはこれらのフィクスチャを優先して使うこと。これらより古いテストファイルは、各自の `setUp`/`setup_method` 内で `config.SQLITE_DB_PATH` の上書きと `init_unified_db.init_db()` をコピペするパターンを使っているが、挙動を変えるリスクを避けるため、既存ファイルを編集する際はついでにリファクタリングせず、そのファイル内の既存パターンにそのまま従うこと。
 
+日付・時刻に依存するテストは実時刻に任せず `freezegun` の `freeze_time` で固定すること（Issue #658）。タイムゾーン依存は `core/utils` の JST 固定ヘルパー（`get_now_jst`/`get_today_date_str` 等）で解消済みで、TZ を UTC/America/New_York/Pacific/Honolulu/Pacific/Kiritimati に変えても全テストが通ることは確認済みだが、「JST の日付が変わる瞬間」に走ると結果が変わる判定（`tv_lock_monitor` の深夜2時、YouTubeごほうび券の施行日 `YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM` 等）は残る。境界そのものの回帰テストは `tests/test_jst_day_boundary.py` にある。
+
 `conftest.py` は `config` がロードされる**前**に、import時点でDiscord/LINEのwebhook・トークン系環境変数をすべて空文字にしている。これは、実際の認証情報が入ったローカル `.env` によってテストが本物の通知を発火させてしまった事故が過去にあったため。`notification_service`/`line_service` の経路を通るテストを書く際は、この仕組みを回避しないこと。
 
 ### family-quest (フロントエンド)
@@ -65,7 +73,7 @@ npm run build    # tsc -b && vite build -> dist/
 npm run lint     # ESLint
 ```
 
-ビルド成果物 `dist/` はバックエンドが直接配信する (`unified_server.py` が `QUEST_DIST_DIR`、デフォルトは `../family-quest/dist`、を `/quest` にマウントする) — **ビルド完了 = デプロイ完了**であり、別途のデプロイ/再起動手順は不要。`./deploy.sh` がビルドを実行し、成功時にビルド元のgitツリーハッシュを `dist/.built-tree` に記録する。`./deploy.sh --if-stale` はそのハッシュがHEADの `family-quest` ツリーと一致すればビルドをスキップする冪等モードで、ローカルの `.git/hooks/post-merge` フック（gitでは管理されておらず、リポジトリをclone後に再設置が必要）が `git pull` のたびに、また `MY_HOME_SYSTEM/start_all.sh` がサーバー起動前に、これを呼び出す（`git reset --hard` 等のpull以外の経路で更新された場合でも、次のサーバー起動時にビルド漏れが回収される。2026-09-01のAPIスキーマ不整合障害の再発防止）。
+ビルド成果物 `dist/` はバックエンドが直接配信する (`unified_server.py` が `QUEST_DIST_DIR`、デフォルトは `../family-quest/dist`、を `/quest` にマウントする) — **ビルド完了 = デプロイ完了**であり、別途のデプロイ/再起動手順は不要。`./deploy.sh` がビルドを実行し（`dist.next/` にビルドして検証し、成功時だけ `dist/` と rename で入れ替えるアトミック方式。ビルド中・失敗時も旧 `dist/` が配信され続ける — Issue #650。Node のメジャーが `package.json` の `engines` 範囲外なら失敗、`.nvmrc` と異なれば警告する）、成功時にビルド元のgitツリーハッシュを `dist/.built-tree` に記録する。`./deploy.sh --if-stale` はそのハッシュがHEADの `family-quest` ツリーと一致すればビルドをスキップする冪等モードで、リポジトリ管理の `deploy/git-hooks/post-merge` フック（`MY_HOME_SYSTEM/start_all.sh` が起動時に `core.hooksPath` として冪等に登録する。以前は `.git/hooks/` へのローカル設置でclone後に再設置が必要だった）が `git pull` のたびに、また `MY_HOME_SYSTEM/start_all.sh` がサーバー起動前に、これを呼び出す（`git reset --hard` 等のpull以外の経路で更新された場合でも、次のサーバー起動時にビルド漏れが回収される。2026-09-01のAPIスキーマ不整合障害の再発防止）。
 
 ### DDD (バッチ処理)
 
@@ -73,25 +81,33 @@ npm run lint     # ESLint
 
 ### CI (`.github/workflows/test.yml`)
 
-4つの独立したジョブがある: `lint`（`MY_HOME_SYSTEM`・`DDD`両方にruffを実行、PRをブロックするのは `F821,F822,F823,E9` のみ。加えてpyright・shellcheckの非ブロッキングレポートも出力する）、`test`（`MY_HOME_SYSTEM` のpytest + カバレッジ、`--cov-fail-under=67`。続けて `DDD` のpytestも常に実行する）、`security`（bandit + pip-audit、ブロックするのはbanditのHigh severityのみ）、`frontend`（`family-quest` で `npm ci && npm run lint && npm run build && npm test`、つまりESLint・`tsc -b` によるTSの型チェック・Vitestがゲートになっている）。もう2つのワークフロー（`spec-drift-pr-check.yml`、`spec-drift-weekly-audit.yml`）は `.github/scripts/check_spec_drift.py` を実行するが、検知結果に関わらず**常に非ブロッキング**（exit 0）である。`pip-audit-weekly-audit.yml` は `MY_HOME_SYSTEM/requirements.txt`・`requirements-dev.txt`・`DDD/requirements.txt` の3ファイル（`security` ジョブの pip-audit は `MY_HOME_SYSTEM/requirements.txt` のみが対象で、両者は同じ対象ではない。Issue #400 で週次監査側の対象を拡張した）を週次で監査し、検知が1件以上あれば `pip-audit-audit` ラベルのIssueを自動起票/更新する（Issue #324: PRのCIを常時安定させるため、pip-audit自体はブロッキング化せず定期監査Issue方式を採用）。
+4つの独立したジョブがある: `lint`（`MY_HOME_SYSTEM`・`DDD`両方にruffを実行、PRをブロックするのは `F821,F822,F823,E9` と、merge-base 比で**増えた**指摘（`.github/scripts/check_lint_ratchet.py`。既存指摘は対象外）。加えて `MY_HOME_SYSTEM` の pyright（`MY_HOME_SYSTEM/pyrightconfig.json` で未定義名・未束縛変数・await漏れ等の明確なバグ診断だけを error にした設定。Issue #532）と、全シェルスクリプトの shellcheck、および `pytest .github/scripts/`（`check_spec_drift.py` 等の回帰テストに加え、仕様書の「根拠」行番号引用が実ソースの定義位置と一致するかを検証する `check_spec_line_refs.py` のゲートを含む。ずれた場合は `python3 .github/scripts/check_spec_line_refs.py --fix` で一括追従できる。ゲートの対象は `def`/`class` で始まる抜粋の引用だけで、式・文の抜粋や `.sh`・TypeScript 側は非ゲートの `--report` で件数を見るのみ(Issue #655。保証範囲は `docs/specifications/README.md` を参照)。抜粋の書き方は「行番号の後ろ」(`(行番号: 28 / 抜粋: "def foo(")`)と「行番号の前」(`` `def foo(...)` (行番号: 28) ``)の2通りとも解析する(Issue #679。以前は前者だけで後者87件が無言で素通りしていた)）もブロッキングで実行する）、`test`（`MY_HOME_SYSTEM` のpytest + カバレッジ、固定閾値 `--cov-fail-under=70` を床として、PRでは master の直近成功 run の実測から 0.5pt を超えて下がると失敗するラチェット `.github/scripts/check_coverage_ratchet.py` も走る。閾値の手動引き上げは不要。続けて `DDD` のpytestも常に実行する）、`security`（bandit + pip-audit、ブロックするのはbanditのHigh severity（`MY_HOME_SYSTEM`・`DDD`とも）と、merge-base 比で増えた Medium 以上（severity・confidence とも `-ll -ii`）の指摘のみ）、`frontend`（`family-quest` で `npm ci && npm run lint && npm run build && npm test`、つまりESLint・`tsc -b` によるTSの型チェック・Vitestがゲートになっており、カバレッジはバックエンドと同じ master 比ラチェットのみで固定閾値は無い）。ラチェット系のチェックは `pull_request` イベントでのみ走り、比較元が取得できない場合（成果物の保持期限切れ等）はスキップされる。もう2つのワークフロー（`spec-drift-pr-check.yml`、`spec-drift-weekly-audit.yml`）は `.github/scripts/check_spec_drift.py` を実行するが、検知結果に関わらず**常に非ブロッキング**（exit 0）である。`dependabot-auto-merge.yml` は Dependabot の minor/patch 更新PRに対して GitHub の auto-merge を有効化する（マージ自体は required status checks が全て成功した時点で GitHub が行う。メジャー更新は対象外。branch protection の required checks と「Allow auto-merge」設定が前提で、PRが `BLOCKED` 以外の状態なら安全側に倒して何もしない。詳細は同ファイル冒頭のコメントと `docs/runbooks/issue_509_repo_settings_and_branch_cleanup.md`）。ドキュメントに転記された `--cov-fail-under` の値は `.github/scripts/test_docs_ci_consistency.py` が test.yml と突き合わせる。`pip-audit-weekly-audit.yml` は `MY_HOME_SYSTEM/requirements.txt`・`requirements-dev.txt`・`DDD/requirements.txt` の3ファイル（`security` ジョブの pip-audit は `MY_HOME_SYSTEM/requirements.txt` のみが対象で、両者は同じ対象ではない。Issue #400 で週次監査側の対象を拡張した）を週次で監査し（MY_HOME_SYSTEMの2ファイルとDDDは別々の `.venv` で動く独立環境で、同じパッケージを異なるバージョン制約で固定しうるため、1回の `pip-audit` 呼び出しにまとめず環境ごとに個別に実行して結果を結合する。まとめると `ResolutionImpossible` で毎週「チェック自体が失敗」のIssueが立つ）、検知が1件以上あれば `pip-audit-audit` ラベルのIssueを自動起票/更新する（Issue #324: PRのCIを常時安定させるため、pip-audit自体はブロッキング化せず定期監査Issue方式を採用）。GitHub Actions の外側では、Claude Code の Routine（定期起動セッション）として「週次リポジトリ品質監査」（前週の master 差分をレビューして Issue 起票）と「週次仕様書ドリフト解消」（Issue #20 の検知を `spec-drift-sync` スキルで追従して Draft PR 作成）が毎週月曜に動く。スケジュールとプロンプトの正は `docs/runbooks/claude_routines.md`。
 
 ## アーキテクチャ
 
 ### MY_HOME_SYSTEM: リクエストフローとレイヤリング
 
-`unified_server.py` が唯一のFastAPIエントリーポイント。起動時 (`lifespan`) に未適用のSQLマイグレーションを適用し、その後 `monitors/camera_monitor.py` と `scheduler_boot.py` を（asyncioタスクではなく）**別プロセス**として起動する — これが `tests/conftest.py` の `api_client` フィクスチャが `lifespan` の実行を一切避けている理由である。ルーターは薄く作られており、`routers/*.py` はリクエストのパース・検証のみを行い、ロジックは `services/*.py` に委譲し、そこから永続化のために `core/database.py` を呼ぶ。新規エンドポイントを追加する際は、ロジックをルーターに直接書かずこのレイヤリングに従うこと。
+`unified_server.py` が唯一のFastAPIエントリーポイント。起動時 (`lifespan`) に未適用のSQLマイグレーションを適用し、その後 `monitors/camera_monitor.py` と `scheduler_boot.py` を（asyncioタスクではなく）**別プロセス**として起動し、30秒ごとに死活監視して予期せず終了していれば再起動する（1時間に5回を超えたらクラッシュループとみなして停止しCRITICALを通知。`restart_dead_children`、Issue #646） — これが `tests/conftest.py` の `api_client` フィクスチャが `lifespan` の実行を一切避けている理由である。実機では `deploy/systemd/home_system.service`（`Type=simple` + `Restart=on-failure`）が `unified_server.py` 本体をフォアグラウンドで管理し、`start_all.sh --prepare` は `ExecStartPre` の前処理（旧プロセス掃除・NAS待機・`.venv`/`dist` 鮮度チェック）のみを担う。ダッシュボードは `home_dashboard.service` で別管理。ルーターは薄く作られており、`routers/*.py` はリクエストのパース・検証のみを行い、ロジックは `services/*.py` に委譲し、そこから永続化のために `core/database.py` を呼ぶ。新規エンドポイントを追加する際は、ロジックをルーターに直接書かずこのレイヤリングに従うこと。
 
 新規エンドポイントに関わる独自ミドルウェアが2つある:
-- `ip_restriction_middleware` は非プライベートネットワークからのリクエストをログに記録するが（ブロックはしない）、`/webhook/switchbot` と `/callback/line` は外部からのトラフィックを受け付ける必要があるため無条件に許可している。**これは意図的な設計として正式に確定している**（Issue #321・2026-09-03決定）: アプリ層では`Cf-Access-Jwt-Assertion`のJWT検証を行わず（一度PR #80で実装したが2026-08-28の障害でrevert済みで、再実装しない方針を採用）、外部アクセス制御はエッジのCloudflare Accessに委譲する。この設計は、オリジンへの直接到達がCloudflareのIPレンジ経由に限定されていること（ルーター/FW側の設定）を前提とする。
+- `ip_restriction_middleware` は非プライベートネットワークからのリクエストをログに記録するが（ブロックはしない）、`/webhook/switchbot`・`/callback/line`・`/webhook/alexa` は外部からのトラフィックを受け付ける必要があるため無条件に許可している（`allowed_webhook_paths`。このリストは同時に「エッジのCloudflare Access側でバイパス設定が必要なパス」の一覧でもあり、設定漏れがあるとWebhookがサーバーまで届かない — Issue #517。新しい外部Webhookを追加したら必ずここに追記すること。`tests/test_unified_server_app.py` がマウント済みルートとの一致を検証する）。**これは意図的な設計として正式に確定している**（Issue #321・2026-09-03決定）: アプリ層では`Cf-Access-Jwt-Assertion`のJWT検証を行わず（一度PR #80で実装したが2026-08-28の障害でrevert済みで、再実装しない方針を採用）、外部アクセス制御はエッジのCloudflare Accessに委譲する。この設計は、オリジンへの直接到達がCloudflareのIPレンジ経由に限定されていること（ルーター/FW側の設定）を前提とする。
 - CORSの許可オリジンは `config.CORS_ORIGINS` の1箇所だけに存在する（環境変数 `ALLOW_ALL_ORIGINS=true` で `["*"]` に上書き可能）。`unified_server.py` 側に別のハードコードされたオリジンリストを追加しないこと — 過去に2つの別々のリストが存在し、片方しか実際には反映されていないというバグがあった。
 
+Family Quest APIの認可設計にも既知の妥協点が1つある: リクエストボディ中の `user_id`/`approver_id` はクライアント入力のまま信頼しており、サーバー側でセッション等から認可を検証していない。これは個人用IoTシステム・単一プロセス・LAN内を信頼境界とする前提のもとで「意思決定によりスコープ外」と合意済みの設計（`docs/reports/CODE_REVIEW_REPORT_ALL.md` Critical#1、2026-09-02棚卸し課題4）であり、追跡はIssue #614で行う。この判断を覆す場合は、LAN外からの到達経路（Cloudflare Access委譲の前提、上記参照）とセットで再検討すること。
+
 `/quest/{full_path}` と `/camera/{full_path}` のルートは、`family-quest` のSPAビルドを静的ファイルとして配信する。パストラバーサル対策（realpath化したdistディレクトリに対する `os.path.commonpath` チェック）を行い、クライアント側ルーティングのために `index.html` へフォールバックする。
+
+### 依存性注入(DI)について
+
+`MY_HOME_SYSTEM/` は意図的にDIコンテナ・FastAPIの `Depends()` を導入していない（Issue #554で採否を検討し、現状維持を採用）。サービス（`services/*.py`）はモジュールレベルのシングルトンとしてインスタンス化され、ルーターはこれを直接importして使う（例: `routers/quest_router.py` の `from services.quest_service import game_system, quest_service, shop_service, user_service, inventory_service`）。設定も `config` モジュールのグローバル定数を各所が直接参照する（`config.UPLOAD_DIR`、`config.CAMERAS` 等）。個人用IoTシステム・単一プロセス・SQLiteという前提では、DIコンテナを導入する利益より複雑化のコストの方が大きいと判断したための意図的な設計であり、欠陥ではない。テストの分離は `tests/conftest.py` の `isolated_db` フィクスチャや、個々のテストによる `config.SQLITE_DB_PATH` 等の直接monkeypatchで行っており、この方式で十分に成立している。新規のルーター・サービスを追加する際も `Depends()` によるDIは導入せず、既存のモジュールレベルシングルトン+直接importのパターンに従うこと。
 
 ### データベース
 
 SQLiteのみを使用し、単一ファイル `config.SQLITE_DB_PATH`（デフォルトは `config.py` と同じ場所の `home_system.db`。環境変数 `SQLITE_DB_PATH` で上書き可能で、CIではこれを `:memory:` に設定している。ただし `isolated_db` フィクスチャや既存テストの大半はこの環境変数ではなく `config.SQLITE_DB_PATH` をテストごとの一時ファイルへ直接monkeypatch/再代入している）。読み書きの標準的な方法は `core/database.py` の `get_db_cursor()` コンテキストマネージャで、`sqlite3.OperationalError`（"database is locked"）時のリトライ、WALモード・外部キー制約の設定、例外時のロールバックを行う。新規コードでは生の `sqlite3.connect()` を直接開くのではなく、これ（または単純なINSERT用の `save_log_generic`/`save_log_async`）を使うこと。
 
-スキーマ変更は **`migrations/NNNN_description.sql`**（ゼロ埋め連番、`core/migrations.py` の `apply_pending_migrations()` がファイル名の昇順で適用し、適用済みバージョンは `schema_migrations` テーブルで管理）を経由して行う。`ALTER TABLE ... ADD COLUMN` を先頭に書き、データ移行系の文をその後に続けること — マイグレーションは、既に列が存在するDBに対して再実行されても安全でなければならない（ランナーは "duplicate column"/"already exists" エラーを「既に適用済み」として扱い処理を継続するが、それ以外の `OperationalError` は致命的な失敗として扱う）。**`migrations/` がスキーマの唯一の定義元である**（Issue #330）: 全テーブルのベースラインは `migrations/0000_baseline_schema.sql`（全文 `CREATE TABLE IF NOT EXISTS`）にあり、`init_unified_db.init_db()` はマイグレーション適用と検証だけを行う薄いラッパー、`services/quest_service.py` に残っていたレガシーな実行時「SELECTを試して失敗したらALTER」チェックも退役済みで、このパターンを復活させないこと。新しいテーブルの追加もベースラインの書き換えではなく新しい `NNNN_*.sql` で行う。詳細は `MY_HOME_SYSTEM/migrations/README.md` を参照。
+横断的に使う低レベル処理は `core/` の共通モジュールに集約してある（Issue #661）。新しい経路を足すときは同種の実装を書き起こさずこれらを使うこと: Discord Webhook への送信は `core/discord.py`（分割・リトライ・URLマスク。`core.logger` を import しない制約あり）、監視スクリプトの状態ファイルは `core/state_file.py`（flock + tmp + `os.replace`）、読み取り専用のDB接続は `core/database.py` の `get_ro_connection()`（timeout 30秒）、ONVIF の WSDL 探索は `core/onvif_utils.py`。
+
+スキーマ変更は **`migrations/NNNN_description.sql`**（ゼロ埋め連番、`core/migrations.py` の `apply_pending_migrations()` がファイル名の昇順で適用し、適用済みバージョンは `schema_migrations` テーブルで管理）を経由して行う。`ALTER TABLE ... ADD COLUMN` を先頭に書き、データ移行系の文をその後に続けること — マイグレーションは、既に列が存在するDBに対して再実行されても安全でなければならない（ランナーは "duplicate column"/"already exists" エラーを「既に適用済み」として扱い処理を継続するが、それ以外の `OperationalError` は致命的な失敗として扱う）。**`migrations/` がスキーマの唯一の定義元である**（Issue #330）: 全テーブルのベースラインは `migrations/0000_baseline_schema.sql`（全文 `CREATE TABLE IF NOT EXISTS`）にあり、`init_unified_db.init_db()` はマイグレーション適用と検証だけを行う薄いラッパー、`services/quest_service.py` に残っていたレガシーな実行時「SELECTを試して失敗したらALTER」チェックも退役済みで、このパターンを復活させないこと。新しいテーブルの追加もベースラインの書き換えではなく新しい `NNNN_*.sql` で行う。`MY_HOME_SYSTEM/current_schema.sql` は `python init_unified_db.py --dump-schema` で `migrations/` から生成される参照用ダンプであり、手で編集せず、マイグレーションを追加・変更したPRでは再生成してコミットすること（`tests/test_current_schema_sql.py` が再生成結果との完全一致を検証する）。詳細は `MY_HOME_SYSTEM/migrations/README.md` を参照。
 
 ### 設定 (Configuration)
 
@@ -109,7 +125,17 @@ SQLiteのみを使用し、単一ファイル `config.SQLITE_DB_PATH`（デフ�
 
 ### DDD バッチ処理
 
-他の2サブシステムとは、NASマウントを共有している点を除き独立している（MY_HOME_SYSTEM側の `nas_monitor.py` は、DDDによってNAS容量が逼迫した際にスロットリング/アラートを行うことができる）。`batch_download_discord.py` は `DownloadStrategy` を軸としたストラテジーパターン（`UniversalYtDlpStrategy` vs `ScrapingStrategy`）を採用し、同時実行を防ぐために `fcntl.flock` によるロックファイルを使用している — この領域に新しい長時間稼働のcron的スクリプトを追加する際は、同じロック方式に従うこと。
+NASマウントを共有している（ただし `nas_monitor.py` はNASの死活・容量を監視して通知するだけで、DDDのバッチを止める・絞る機構は実装されていない。DDD側は `batch_download_discord.py` の `check_disk_space` で自前に空き容量を判定する。Issue #656）だけでなく、`sys.path` に `MY_HOME_SYSTEM/` を追加して `core.*` を直接importする実依存もある（Issue #553）。ルート解決は `DDD/file_utils.py` の `resolve_my_home_system_root()` に集約されている。
+
+| ファイル | import 内容 |
+| --- | --- |
+| `newface_monitor.py` | `core.logger.get_logger`、`core.nas_utils.get_managed_target_directory`、`core.utils.wait_for_storage_warmup` |
+| `extract_youtube_urls.py` | `core.logger.get_logger`、`core.nas_utils.get_managed_target_directory` |
+| `batch_download_discord.py` | `services.notification_service._send_discord_webhook`（`_standalone_send_discord_webhook` フォールバックあり） |
+
+各スクリプトに `try/except ImportError` のフォールバックはあるが、本番（ラズパイ）経路では MY_HOME_SYSTEM が存在する前提で `core` を使うため、CI・単体テストだけでは気づけない実依存になっている。`core.logger` は import 時に `config` をロードするため、**`MY_HOME_SYSTEM/core/logger.py`・`nas_utils.py`・`utils.py` のシグネチャを変更した場合は、DDD のテスト（`DDD/conftest.py` が同じ `core.*` を import する前提で書かれている）も必ず実行すること**。
+
+`batch_download_discord.py` は `DownloadStrategy` を軸としたストラテジーパターン（`UniversalYtDlpStrategy` vs `ScrapingStrategy`）を採用し、同時実行を防ぐために `fcntl.flock` によるロックファイルを使用している — この領域に新しい長時間稼働のcron的スクリプトを追加する際は、同じロック方式に従うこと。
 
 ## 仕様書ドリフト規約
 

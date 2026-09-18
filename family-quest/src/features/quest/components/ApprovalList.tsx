@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { APPROVAL_SWIPE_THRESHOLD_PX } from '../../../lib/uiConstants';
 import { CheckCircle, XCircle, ChevronDown, ChevronUp, CheckCheck } from 'lucide-react';
 import { motion, useMotionValue, useTransform, PanInfo } from 'framer-motion';
 import { ID, QuestHistory, User } from '@/types';
@@ -17,7 +18,8 @@ type Props = {
     isApprovingAll?: boolean;
 };
 
-const SWIPE_THRESHOLD = 90;
+// #660: 閾値は src/lib/uiConstants.ts に集約した(既存の呼び名は残す)。
+const SWIPE_THRESHOLD = APPROVAL_SWIPE_THRESHOLD_PX;
 
 // スワイプで承認/却下できる行ラッパー。右スワイプ=承認、左スワイプ=却下。
 // ボタンは廃止せず併存させ、スワイプに気づかない人でも従来通り操作できるようにする。
@@ -112,7 +114,7 @@ const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReje
                                             {quest.quest_title}
                                         </p>
                                         <p className="text-sm text-gray-500">
-                                            担当: {getUserName(quest.user_id)} / 報酬: {quest.gold_earned}G
+                                            担当: {getUserName(quest.user_id)} / 報酬: {quest.gold_earned ?? 0}G
                                         </p>
                                     </div>
                                     <div className="flex gap-2 flex-shrink-0">

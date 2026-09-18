@@ -105,6 +105,9 @@
 
 ### `run_daily_timelapse`
 
+* **（Issue #497 C-4 で修正）** 時間帯フィルタリングの分岐(`if target_files and (start_time_str or end_time_str):`)に入る前に `start_time = None` / `end_time = None` を束縛する。以前は `target_files` が空で `start_time_str`/`end_time_str` が指定されていると未束縛のまま後段の出力ファイル名組み立てで参照され `NameError` になり得た(pyright の reportPossiblyUnboundVariable で検出)。
+* 根拠: (行番号: 91〜96 / 抜粋: "start_time = None\n    end_time = None\n    if target_files and (start_time_str or end_time_str):")
+
 * **役割**: 対象カメラの録画ディレクトリから、指定日付および時間帯の動画ファイルを取得・フィルタリングし、動き検知エンジンのパイプライン（検知・イベント構築・クリップ生成・結合・サムネイル作成）を実行して結果をDiscordへアップロード・通知する。
 
 

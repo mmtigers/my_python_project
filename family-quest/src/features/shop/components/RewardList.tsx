@@ -59,6 +59,10 @@ const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy, curre
           <Card
             key={rId}
             onClick={() => canAfford && onBuy(reward)}
+            // #660: 買えない商品も onClick を渡すため role="button" のままだが、
+            // 支援技術には「押せない」ことが伝わっていなかった。
+            aria-disabled={!canAfford}
+            tabIndex={canAfford ? 0 : -1}
             className={`
               flex justify-between items-center p-2 transition-all select-none
               ${canAfford

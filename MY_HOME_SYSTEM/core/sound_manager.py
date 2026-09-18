@@ -2,6 +2,7 @@
 import os
 import subprocess
 import shutil
+import threading
 import config
 
 # 基本設計書に準拠し、coreモジュールからloggerをインポート
@@ -50,11 +51,16 @@ def play(event_key: str) -> None:
 
         # 実行 (Fire and Forget)
         # stdout/stderr に DEVNULL を指定し、外部プロセスの出力を完全に遮断
-        subprocess.Popen(
+        proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL, 
             stderr=subprocess.DEVNULL
         )
+        # Issue #654: 呼び出し元は長期稼働の uvicorn プロセスで SIGCHLD を処理しないため、
+        # wait() しないと再生プロセスが終了後も <defunct>(ゾンビ)としてプロセステーブルに残り、
+        # 再生回数分だけ蓄積して pgrep/psutil ベースの監視のノイズになっていた。
+        # 再生をブロックしないよう、デーモンスレッドで終了を回収する。
+        threading.Thread(target=proc.wait, name=f"sound-reap-{proc.pid}", daemon=True).start()
     except OSError as e:
         # コマンドが見つからない、権限がない等のOSレベルのエラー
         logger.error(f"❌ OS error occurred during sound playback (Event: {event_key}): {e}")

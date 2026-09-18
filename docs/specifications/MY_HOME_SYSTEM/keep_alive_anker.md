@@ -16,7 +16,7 @@
 
 ## 2. ファイルの概要
 
-Anker SoundCore 2 Bluetoothスピーカー(PipeWire/PulseAudio環境)向けのキープアライブ用シェルスクリプト。`pactl`でシンク一覧を取得しスピーカーのMACアドレスが含まれるか確認して接続状態を判定し(根拠: `[STATUS判定]` (行番号: 30〜34 / 抜粋: "if pactl list sinks short | grep -q \"${SPEAKER_MAC//:/_}\"; then")、切断中であれば再接続スクリプトを実行して再接続を試みる(根拠: `[再接続処理]` (行番号: 37〜53 / 抜粋: "if [ \"$STATUS\" = \"DISCONNECTED\" ]; then"))。接続が確認できた場合は、人間の可聴域外(15Hz)の正弦波を`sox`で生成し`paplay`へパイプで渡して2秒間再生することで、Bluetoothアンプが無音判定によりスリープ(オートパワーオフ)するのを防ぐ(根拠: `[keep-alive再生]` (行番号: 56〜64 / 抜粋: "sox -n -r 48000 -b 16 -c 2 -t wav - synth 2 sin 15 vol 0.01 2>/dev/null | \\"))。処理結果は全て`log()`関数経由でログファイルへ追記される。**（Issue #249で修正）** 以前は`TIMESTAMP`変数をスクリプト起動時に1回だけ評価し`log()`がそれを参照し続けていたため、再接続処理(`sleep 5`等)を挟んで複数回`log()`が呼ばれても、記録される時刻は常に起動時刻のまま(全ログ行が同一時刻)になっていた。現在は`log()`関数内で呼び出しのたびに`date`コマンドを実行し、都度最新の時刻を取得する(根拠: `[log関数]` (行番号: 22〜26 / 抜粋: "log() {\n    local timestamp\n    timestamp=$(date '+%Y-%m-%d %H:%M:%S')\n    echo \"$timestamp - $1\" >> \"$LOGFILE\"\n}"))。またcron実行下でもPipeWire/PulseAudioソケットに接続できるよう、`XDG_RUNTIME_DIR`と`DBUS_SESSION_BUS_ADDRESS`を明示的にエクスポートしている(根拠: `[環境変数設定]` (行番号: 14〜15 / 抜粋: "export XDG_RUNTIME_DIR=\"/run/user/$(id -u)\""))。
+Anker SoundCore 2 Bluetoothスピーカー(PipeWire/PulseAudio環境)向けのキープアライブ用シェルスクリプト。`pactl`でシンク一覧を取得しスピーカーのMACアドレスが含まれるか確認して接続状態を判定し(根拠: `[STATUS判定]` (行番号: 30〜34 / 抜粋: "if pactl list sinks short \| grep -q \"${SPEAKER_MAC//:/_}\"; then")、切断中であれば再接続スクリプトを実行して再接続を試みる(根拠: `[再接続処理]` (行番号: 37〜53 / 抜粋: "if [ \"$STATUS\" = \"DISCONNECTED\" ]; then"))。接続が確認できた場合は、人間の可聴域外(15Hz)の正弦波を`sox`で生成し`paplay`へパイプで渡して2秒間再生することで、Bluetoothアンプが無音判定によりスリープ(オートパワーオフ)するのを防ぐ(根拠: `[keep-alive再生]` (行番号: 56〜64 / 抜粋: "sox -n -r 48000 -b 16 -c 2 -t wav - synth 2 sin 15 vol 0.01 2>/dev/null | \\"))。処理結果は全て`log()`関数経由でログファイルへ追記される。**（Issue #249で修正）** 以前は`TIMESTAMP`変数をスクリプト起動時に1回だけ評価し`log()`がそれを参照し続けていたため、再接続処理(`sleep 5`等)を挟んで複数回`log()`が呼ばれても、記録される時刻は常に起動時刻のまま(全ログ行が同一時刻)になっていた。現在は`log()`関数内で呼び出しのたびに`date`コマンドを実行し、都度最新の時刻を取得する(根拠: `[log関数]` (行番号: 22〜26 / 抜粋: "log() {\n    local timestamp\n    timestamp=$(date '+%Y-%m-%d %H:%M:%S')\n    echo \"$timestamp - $1\" >> \"$LOGFILE\"\n}"))。またcron実行下でもPipeWire/PulseAudioソケットに接続できるよう、`XDG_RUNTIME_DIR`と`DBUS_SESSION_BUS_ADDRESS`を明示的にエクスポートしている(根拠: `[環境変数設定]` (行番号: 14〜15 / 抜粋: "export XDG_RUNTIME_DIR=\"/run/user/$(id -u)\""))。
 
 ## 3. 外部依存関係
 
@@ -25,8 +25,8 @@ Anker SoundCore 2 Bluetoothスピーカー(PipeWire/PulseAudio環境)向けの�
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `date` | coreutils(外部コマンド) | ログ用タイムスタンプ(`YYYY-MM-DD HH:MM:SS`)の生成。**Issue #249で修正**: 以前はスクリプト起動時に1回だけ呼び出されグローバル変数`TIMESTAMP`に保存されていたが、現在は`log()`関数内で呼び出しのたびに実行される | 根拠: `[log()内のdate呼び出し]` (行番号: 24 / 抜粋: "timestamp=$(date '+%Y-%m-%d %H:%M:%S')") |
-| `id` | coreutils(外部コマンド) | 実行ユーザーのUIDを取得し`XDG_RUNTIME_DIR`を組み立てる | 根拠: `[id -u]` (行番号: 15 / 抜粋: "export XDG_RUNTIME_DIR=\"/run/user/$(id -u)\"") |
-| `pactl` | 外部コマンド(PipeWire/PulseAudio制御CLI) | シンク一覧を取得し、対象スピーカーが接続済みシンクに含まれるか確認 | 根拠: `[pactl list sinks short]` (行番号: 25, 45 / 抜粋: "pactl list sinks short | grep -q") |
+| `id` | coreutils(外部コマンド) | 実行ユーザーのUIDを取得し`XDG_RUNTIME_DIR`を組み立てる | 根拠: `[id -u]` (行番号: 14〜15 / 抜粋: "XDG_RUNTIME_DIR=\"/run/user/$(id -u)\"" / "export XDG_RUNTIME_DIR") |
+| `pactl` | 外部コマンド(PipeWire/PulseAudio制御CLI) | シンク一覧を取得し、対象スピーカーが接続済みシンクに含まれるか確認 | 根拠: `[pactl list sinks short]` (行番号: 25, 45 / 抜粋: "pactl list sinks short \| grep -q") |
 | `grep` | coreutils(外部コマンド) | `pactl`の出力からMACアドレス(`:`を`_`に置換した文字列)を検索 | 根拠: `[grep -q]` (行番号: 25, 45 / 抜粋: "grep -q \"${SPEAKER_MAC//:/_}\"") |
 | `command` | Bashビルトイン | `sox`コマンドがPATH上に存在するか確認 | 根拠: `[command -v sox]` (行番号: 57 / 抜粋: "if command -v sox &> /dev/null; then") |
 | `sox` | 外部コマンド(音声生成ツール) | 15Hzの正弦波(可聴域外)を2秒間・WAV形式で標準出力へ生成 | 根拠: `[sox -n ...]` (行番号: 58 / 抜粋: "sox -n -r 48000 -b 16 -c 2 -t wav - synth 2 sin 15 vol 0.01") |
@@ -70,7 +70,7 @@ Anker SoundCore 2 Bluetoothスピーカー(PipeWire/PulseAudio環境)向けの�
 
 
 * **引数/リクエスト**: コマンドライン引数は使用しない。cron実行を想定した環境変数`XDG_RUNTIME_DIR`・`DBUS_SESSION_BUS_ADDRESS`を自ら設定する。
-* 根拠: `[環境変数エクスポート]` (行番号: 14〜15 / 抜粋: "export DBUS_SESSION_BUS_ADDRESS=\"unix:path=${XDG_RUNTIME_DIR}/bus\"")
+* 根拠: `[環境変数エクスポート]` (行番号: 14〜16 / 抜粋: "export DBUS_SESSION_BUS_ADDRESS=\"unix:path=${XDG_RUNTIME_DIR}/bus\"")
 
 
 * **戻り値/レスポンス**: 明示的な`exit`コードは設定されていない(最後に実行したコマンドの終了コードがそのままスクリプトの終了コードとなる)。
@@ -167,12 +167,15 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `connect_speaker.sh` | 本スクリプトが切断検知時に実行する再接続処理の実装を確認するため。 | 根拠: `[CONNECT_SCRIPT]` (行番号: 11, 37 / 抜粋: "CONNECT_SCRIPT=\"/home/masahiro/develop/MY_HOME_SYSTEM/tools/connect_speaker.sh\"") |
 | 中 | `keep_alive_speaker.sh` | 同一ログファイルを使う類似目的のスクリプトとの役割分担(対象デバイスの違い)を確認するため。 | 根拠: `[LOGFILE]` (行番号: 8 / 抜粋: "LOGFILE=\"/home/masahiro/develop/MY_HOME_SYSTEM/logs/bluetooth_monitor.log\"") |
-| 中 | crontab設定または systemd タイマー定義(ファイル名不明・推測) | 本スクリプトが定期実行される仕組み(実行間隔・実行ユーザー)を確認するため。本ファイル単体では実行契機が不明。 | 根拠: `[cron実行を前提としたコメント]` (行番号: 14 / 抜粋: "# cron実行時でもPipeWireソケットを見つけられるようにする") |
+| 低（Issue #585で`deploy/cron/crontab`へ5分毎のエントリを追加済み） | `deploy/cron/crontab` | 追加した5分毎の間隔が実機の対象デバイスのオートパワーオフ防止として妥当か、実機での動作確認が今後必要。 | 根拠: `[deploy/cron/crontabのkeep_alive_anker.shエントリ]` (`deploy/cron/crontab`、Issue #585) |
 
 ## 8. 保守上の注意点
 
+* **（Issue #532 で変更）shellcheck ブロッキング化に伴う整理**: CI の `lint` ジョブで `shellcheck -x` が本ファイルを対象にブロッキング実行されるようになった。`export XDG_RUNTIME_DIR="/run/user/$(id -u)"` の 1 行は、コマンド置換の失敗が `export` の戻り値に隠れる SC2155 を避けるため「代入」と「`export`」の 2 行に分割した(値・意味は同じ)。以降本ファイルを編集する際は、ローカルでも `shellcheck -x MY_HOME_SYSTEM/tools/keep_alive_anker.sh` が 0 件であることを確認すること。
+* 根拠: `XDG_RUNTIME_DIR="/run/user/$(id -u)"` (行番号: 14)、`export XDG_RUNTIME_DIR` (行番号: 15)
+
 * **ハードコードされた絶対パス**: `LOGFILE`・`CONNECT_SCRIPT`が`/home/masahiro/develop/MY_HOME_SYSTEM/...`という特定ユーザー環境のパスで固定されており、環境変数や設定ファイルによる切り替えができない。 根拠: `[LOGFILE, CONNECT_SCRIPT定義]` (行番号: 8, 10 / 抜粋: "LOGFILE=\"/home/masahiro/develop/MY_HOME_SYSTEM/logs/bluetooth_monitor.log\"")
-* **ハードコードされたMACアドレス**: `SPEAKER_MAC`がコード中に直接埋め込まれており、機種変更時はスクリプト自体の書き換えが必要。 根拠: `[SPEAKER_MAC定義]` (行番号: 9 / 抜粋: "SPEAKER_MAC=\"F4:4E:FC:B6:65:D4\" # Anker SoundCore 2 MAC Address")
+* **~~ハードコードされたMACアドレス~~（Issue #663 で解消）**: 以前は `SPEAKER_MAC` がコード中に直接埋め込まれており、機種変更時はスクリプト自体の書き換えが必要だった。現在は `.env` の `SPEAKER_BLUETOOTH_MAC`(config.py と同じキー)から受け取り、未設定なら何もせず正常終了する。 根拠: `[SPEAKER_MAC定義]` (行番号: 9 / 抜粋: "SPEAKER_MAC=\"${SPEAKER_BLUETOOTH_MAC:-}\"  # Anker SoundCore 2 等のBTスピーカー")
 * **パイプの終了コード判定**: `sox | paplay`のパイプ実行後に取得している`RET=$?`は、`set -o pipefail`が設定されていないBashの仕様上、パイプ中の最後のコマンド(`paplay`)の終了コードのみを表しており、`sox`側の失敗(音声生成エラー)は検知できない可能性がある。 根拠: `[RET=$?]` (行番号: 63〜66 / 抜粋: "paplay --stream-name=\"Anker KeepAlive\" --property=media.role=event >/dev/null 2>&1\n        \n        RET=$?")
 * **ログ出力の抑制コメント**: 成功時のログ出力は`log`呼び出しがコメントアウトされ、代わりにno-opの`:`が置かれている。デバッグ時にコメントを戻す運用が想定されているが、現状では成功回数を追跡できない。 根拠: `[成功ログのコメントアウト]` (行番号: 68〜70 / 抜粋: "# log \"[SUCCESS] Keep-alive signal sent (15Hz).\"\n            :")
 * **ログディレクトリの存在前提**: `LOGFILE`の親ディレクトリ(`logs/`)を`mkdir`等で作成する処理がなく、ディレクトリが存在しない環境では`log()`内の`echo >> ...`がエラーとなり、そのエラー自体もどこにも記録されない。 根拠: `[log関数]` (行番号: 22〜26 / 抜粋: "log() {\n    local timestamp\n    timestamp=$(date '+%Y-%m-%d %H:%M:%S')\n    echo \"$timestamp - $1\" >> \"$LOGFILE\"\n}")
@@ -182,9 +185,11 @@ graph TD
 
 ## 9. 不明事項一覧
 
+**（Issue #585で判明・部分解消）** 実行契機が本当にどこにも存在しないことを確認したうえで、`deploy/cron/crontab`に5分毎(`*/5 * * * *`)のエントリを追加した(本ファイル単体では推測不可だったため`deploy/cron/crontab`側の追加で対応)。ただしこの間隔は「一般的なBluetoothスピーカーのオートパワーオフ時間より十分短い」という一般論に基づく暫定値で、対象デバイスの実際のオートオフ時間や実機での動作確認はできていない(下表に残す)。
+
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| 本スクリプトの実行契機(定期実行の間隔・トリガー) | crontabやsystemdタイマー等の設定が本ファイルには含まれていないため。（リポジトリ全体を`crontab`/`systemd`/`.service`等のファイル名・記述で検索したが該当ファイルは存在せず、解消不可） | crontab設定ファイルまたはsystemdユニットファイル(ファイル名不明) |
+| 本スクリプトの定期実行間隔(5分毎)が対象デバイスのオートパワーオフ防止として十分か | `deploy/cron/crontab`に5分毎のエントリを追加した(Issue #585)が、対象Bluetoothスピーカーの実際のオートオフ時間は本リポジトリからは確認できないため、間隔の妥当性は未検証。 | 実機での動作確認(鳴動頻度・オートオフの再発有無) |
 | `connect_speaker.sh`の再接続ロジックの詳細 | 呼び出し箇所のみが存在し、実装内容は本ファイルに含まれていないため。 | `connect_speaker.sh` |
 | `logs/`ディレクトリの作成主体 | 本ファイルにはディレクトリ作成処理がなく、他のセットアップ処理で作成されている可能性があるため。 | プロジェクトのセットアップ/デプロイ関連スクリプト |
 
@@ -192,7 +197,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `connect_speaker.sh`の再接続ロジックの詳細 | `MY_HOME_SYSTEM/tools/connect_speaker.sh`(全156行)を直接確認した。対象MACアドレス`F4:4E:FC:B6:65:D4`(6行目、本ファイルの`SPEAKER_MAC`と同一値)に対し、`bluetoothctl info "$MAC"`の出力を`grep -q "Connected: yes"`で判定する処理(86行目)で接続状態を判定する。切断時は`bluetoothctl trust "$MAC"`(118行目)で信頼設定を念押しした上で、`MAX_RETRIES=3`(11行目)回、`bluetoothctl connect "$MAC"`→`sleep 5`(124〜125行目)を繰り返す再接続ループ(120〜140行目)を実行し、成功時は`pactl set-default-sink`/`set-sink-volume`(134〜135行目)で出力先を再設定してDiscordへ成功通知(131行目)、全リトライ失敗時は`run_diagnostics`(49〜71行目、`systemctl status bluetooth`・`rfkill list`・`bluetoothctl info`・`dmesg`・`pactl list sinks`・`pgrep pulse`の出力をログに追記)を実行した上で失敗通知(152行目)を送る、という設計であることを確認した。また、本ファイル(`keep_alive_anker.sh`)11行目の`CONNECT_SCRIPT="/home/masahiro/develop/MY_HOME_SYSTEM/tools/connect_speaker.sh"`は`tools/`を含む実際の配置(`MY_HOME_SYSTEM/tools/connect_speaker.sh`)と一致するパスを指しており、両者のパスに不一致は無いことを直接確認した(Issue #126で指摘された、旧版のCONNECT_SCRIPTが`tools/`を含まないパスを指していた時期のパス不一致は既に修正済みである)。 | 直接ソース確認: `MY_HOME_SYSTEM/tools/connect_speaker.sh:1-156`（参考: `MY_HOME_SYSTEM/tools/keep_alive_anker.sh:11`） |
+| `connect_speaker.sh`の再接続ロジックの詳細 | `MY_HOME_SYSTEM/tools/connect_speaker.sh`(全156行)を直接確認した。対象MACアドレス(`.env` の `SPEAKER_BLUETOOTH_MAC`。本ファイルの`SPEAKER_MAC`と同一値)に対し、`bluetoothctl info "$MAC"`の出力を`grep -q "Connected: yes"`で判定する処理(86行目)で接続状態を判定する。切断時は`bluetoothctl trust "$MAC"`(118行目)で信頼設定を念押しした上で、`MAX_RETRIES=3`(11行目)回、`bluetoothctl connect "$MAC"`→`sleep 5`(124〜125行目)を繰り返す再接続ループ(120〜140行目)を実行し、成功時は`pactl set-default-sink`/`set-sink-volume`(134〜135行目)で出力先を再設定してDiscordへ成功通知(131行目)、全リトライ失敗時は`run_diagnostics`(49〜71行目、`systemctl status bluetooth`・`rfkill list`・`bluetoothctl info`・`dmesg`・`pactl list sinks`・`pgrep pulse`の出力をログに追記)を実行した上で失敗通知(152行目)を送る、という設計であることを確認した。また、本ファイル(`keep_alive_anker.sh`)11行目の`CONNECT_SCRIPT="/home/masahiro/develop/MY_HOME_SYSTEM/tools/connect_speaker.sh"`は`tools/`を含む実際の配置(`MY_HOME_SYSTEM/tools/connect_speaker.sh`)と一致するパスを指しており、両者のパスに不一致は無いことを直接確認した(Issue #126で指摘された、旧版のCONNECT_SCRIPTが`tools/`を含まないパスを指していた時期のパス不一致は既に修正済みである)。 | 直接ソース確認: `MY_HOME_SYSTEM/tools/connect_speaker.sh:1-156`（参考: `MY_HOME_SYSTEM/tools/keep_alive_anker.sh:11`） |
 | `logs/`ディレクトリの作成主体 | リポジトリ全体を`makedirs`/`mkdir`と`logs`の組み合わせで検索した結果、`logs/`ディレクトリを作成している箇所は`MY_HOME_SYSTEM/core/logger.py`63〜64行目の`log_dir = os.path.join(config.BASE_DIR, "logs")` / `os.makedirs(log_dir, exist_ok=True)`(`setup_logging`関数内)の1箇所のみであった。これは`config.BASE_DIR`(`MY_HOME_SYSTEM/`直下)配下に`logs/`を作成するもので、`setup_logging`はほぼ全てのPythonモジュールから呼び出されている。本ファイル(`keep_alive_anker.sh`)および`connect_speaker.sh`はbashスクリプトであり、ログファイルへは`>>`によるリダイレクトで追記するのみでディレクトリ自体を作成する処理は無い(8行目の`LOGFILE`、および`connect_speaker.sh`9行目の`LOGFILE`はいずれも`.../MY_HOME_SYSTEM/logs/bluetooth_monitor.log`を指しており、`core/logger.py`が作成する`MY_HOME_SYSTEM/logs/`と同じディレクトリである)。したがって、リポジトリ内で確認できる限り、`logs/`ディレクトリは`core/logger.py`の`setup_logging`が(Python側のいずれかのモジュール実行時に)作成しているという可能性が最も高いが、本シェルスクリプト自体との明示的な依存関係(呼び出し順序の保証)はリポジトリ内には見つからず、確実な断定はできなかった。リポジトリ直下`.gitignore`21行目に`logs/`規則があり、`logs/`ディレクトリ自体もgit追跡対象外であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:63-65`, `MY_HOME_SYSTEM/tools/keep_alive_anker.sh:8`, `MY_HOME_SYSTEM/tools/connect_speaker.sh:9`, `.gitignore:21` |
 
 ## 10. 自己検証結果

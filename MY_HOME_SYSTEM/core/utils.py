@@ -20,6 +20,39 @@ def get_today_date_str() -> str:
 def get_display_date() -> str:
     return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).strftime("%m/%d")
 
+def get_now_jst() -> datetime.datetime:
+    """現在時刻をJSTのaware datetimeで返す。
+
+    Issue #592の追加調査で判明した問題への対応: `monitors/tv_lock_monitor.py`の
+    深夜2時判定、`monitors/nas_monitor.py`の8時判定、`services/train_service.py`の
+    乗換案内API検索時刻のように、「実際の現地時刻(JST)」を前提に組まれた判定・
+    計算がホストOSのタイムゾーン設定に依存する`datetime.now()`(naive、ローカル
+    タイムゾーン)を使っていた。ホストがJST以外の設定だと、意図した実時刻と
+    ずれた時刻で判定・計算されてしまう(#382/#293と同じ不具合クラス)。
+    これらの呼び出し元をこの関数に置き換えることで、ホストのOS設定に関わらず
+    常に正しいJST時刻を基準にする。
+    """
+    return datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+
+def get_meal_time_category_from_now() -> str:
+    """現在時刻(JST)から食事記録の時間帯カテゴリ(food_records.meal_time_category)を推定する。
+
+    Issue #583: 以前はlog_food_record/food_record_directのいずれも、実際の記録時刻に
+    関わらずこの値を常に固定文字列"Dinner"で保存していた。呼び出し元が受け取る
+    "category"引数(AIが渡す朝食/昼食/夕食等、または食事アンケートの麺類等の
+    食品ジャンル)は用途が呼び出し元ごとに異なり食事の時間帯を必ずしも表さないため、
+    ここでは記録時刻そのものから時間帯を判定する(食品ジャンルの文字列は
+    menu_category側にそのまま残す)。
+    """
+    hour = datetime.datetime.now(pytz.timezone("Asia/Tokyo")).hour
+    if 4 <= hour < 11:
+        return "Breakfast"
+    if 11 <= hour < 15:
+        return "Lunch"
+    if 15 <= hour < 18:
+        return "Snack"
+    return "Dinner"
+
 
 class RefCountedLockRegistry:
     """キー単位の threading.Lock を参照カウント付きで管理するレジストリ。
@@ -29,8 +62,9 @@ class RefCountedLockRegistry:
     無制限に蓄積していた。参照している呼び出しが居なくなった時点で
     エントリを辞書から削除することでこれを防ぐ。
 
-    services/camera_service.py の _RefCountedLock/_vod_generation_lock と
-    同じ考え方: ロック取得中(参照カウント>0)のエントリは絶対に削除しない。
+    Issue #661: services/camera_service.py に同じ実装(_RefCountedLock +
+    _vod_generation_lock/_live_stream_lock)が重複していたため、そちらも
+    このレジストリへ寄せた。ロック取得中(参照カウント>0)のエントリは絶対に削除しない。
     単純に「lock.locked()がFalseなら削除」する方式だと、辞書からロック
     オブジェクトを取り出した直後・実際にwith文で獲得する直前の隙間で
     別スレッドが剪定してしまい、同一キーに対して2つの別々のLockオブジェクトが
@@ -75,6 +109,19 @@ class RefCountedLockRegistry:
     def __contains__(self, key: Any) -> bool:
         with self._guard:
             return key in self._entries
+
+    def __len__(self) -> int:
+        with self._guard:
+            return len(self._entries)
+
+    def clear(self) -> None:
+        """全エントリを破棄する(テストの前後処理用)。
+
+        取得中のロックがあっても辞書からは消える点に注意。本番コードから
+        呼ぶことは想定していない(剪定は acquire の finally が行う)。
+        """
+        with self._guard:
+            self._entries.clear()
 
 def with_exponential_backoff(
     base_delay: int = 5, 

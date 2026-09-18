@@ -7,7 +7,7 @@ import sys
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, Future
-from typing import List, Dict, Optional, TypedDict
+from typing import List, Dict, Optional, Set, TypedDict
 
 # プロジェクトルートへのパス解決
 PROJECT_ROOT: str = os.path.dirname(os.path.abspath(__file__))
@@ -49,6 +49,12 @@ _running_children: Dict[str, subprocess.Popen] = {}
 _children_lock = threading.Lock()
 _shutdown_event = threading.Event()
 
+# #575: terminate_running_children が意図的に停止したスクリプトを記録する。
+# 以前はここでの記録が無く、SIGTERM由来のreturncode(-15)をrun_script側が
+# 無条件に「タスク失敗」として判定し、シャットダウン・デプロイのたびに
+# 実行中タスクがあれば偽のDiscordエラー通知が出ていた。
+_intentionally_terminated: Set[str] = set()
+
 
 def terminate_running_children(timeout: float = 5.0) -> int:
     """実行中の子プロセスを terminate(→timeout後 kill)し、停止した数を返す。"""
@@ -58,6 +64,10 @@ def terminate_running_children(timeout: float = 5.0) -> int:
     for script, proc in children:
         try:
             if proc.poll() is None:
+                # run_script側のproc.wait()がこのterminateにより負のreturncodeで
+                # 返るより前に記録しておく(実際にシグナルを送る前にマークする)。
+                with _children_lock:
+                    _intentionally_terminated.add(script)
                 proc.terminate()
                 try:
                     proc.wait(timeout=timeout)
@@ -153,6 +163,15 @@ def run_script(script_path: str, args: List[str]) -> bool:
             logger.debug(f"✅ Finished: {script_path}")
             return True
         else:
+            # #575: terminate_running_children によって意図的に停止された場合
+            # (SIGTERM由来のreturncode -15等)は、失敗ではなく想定どおりの停止のため
+            # ERROR(→Discord通知)ではなくINFOでログを残す。
+            with _children_lock:
+                was_intentionally_terminated = script_path in _intentionally_terminated
+                _intentionally_terminated.discard(script_path)
+            if was_intentionally_terminated:
+                logger.info(f"🛑 Task terminated intentionally [{script_path}] (Exit code: {proc.returncode})")
+                return False
             logger.error(f"⚠️ Task failed [{script_path}] (Exit code: {proc.returncode})")
             if stderr_tail:
                 # #361: Discord 通知は 2000 字上限のため、stderr は末尾 20 行程度に絞る

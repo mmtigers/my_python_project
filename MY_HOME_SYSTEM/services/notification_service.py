@@ -1,6 +1,5 @@
 # MY_HOME_SYSTEM/services/notification_service.py
 import time
-import requests
 from typing import List, Optional, Any
 
 # ▼▼▼ v3 Imports ▼▼▼
@@ -16,6 +15,7 @@ from linebot.v3.messaging import (
 )
 # ▲▲▲ ▲▲▲
 import config
+from core import discord as core_discord
 from core.logger import setup_logging # 修正: core.loggerを使用
 
 logger = setup_logging("service.notification") # 修正: 統一ロガーを使用
@@ -74,51 +74,32 @@ def _send_discord_webhook(messages: List[Any], image_data: Optional[bytes] = Non
         return False
 
 
-# Discord の content 上限(2000)に対する安全側のチャンクサイズ
-DISCORD_CONTENT_CHUNK_SIZE = 1900
-# 429/5xx 時のリトライ回数(初回を除く)と、Retry-After が無い/異常な場合の待機秒数
-DISCORD_RETRY_ATTEMPTS = 1
-DISCORD_RETRY_MAX_WAIT_SECONDS = 5.0
+# #661: 実体は core/discord.py。既存の参照名は互換のため残す。
+DISCORD_CONTENT_CHUNK_SIZE = core_discord.CONTENT_CHUNK_SIZE
+DISCORD_RETRY_ATTEMPTS = core_discord.RETRY_ATTEMPTS
+DISCORD_RETRY_MAX_WAIT_SECONDS = core_discord.RETRY_MAX_WAIT_SECONDS
 _retry_sleep = time.sleep
 
 
+# #661: 分割・リトライ・URL マスクの実体は core/discord.py に一本化した。
+# ここでは既存の呼び出し元とテストが使っている名前をそのまま維持するための薄い委譲だけを置く
+# (チャンネルの振り分けや LINE メッセージオブジェクトのテキスト化は上位の責務としてこのまま残す)。
 def _split_discord_content(text: str, limit: int = DISCORD_CONTENT_CHUNK_SIZE) -> List[str]:
-    """text を limit 文字以下のチャンクに分割する(できるだけ改行位置で切る)。空文字は1チャンク。"""
-    if len(text) <= limit:
-        return [text]
-    chunks: List[str] = []
-    rest = text
-    while len(rest) > limit:
-        cut = rest.rfind("\n", 0, limit)
-        if cut <= 0:
-            cut = limit
-        chunks.append(rest[:cut])
-        rest = rest[cut:].lstrip("\n")
-    if rest:
-        chunks.append(rest)
-    return chunks
+    """text を limit 文字以下のチャンクに分割する(core.discord.split_content への委譲)。"""
+    return core_discord.split_content(text, limit)
 
 
 def _post_discord_with_retry(url: str, **kwargs):
-    """requests.post を呼び、429/5xx なら Retry-After(または短い固定待機)の後に限定回数リトライする。"""
-    res = requests.post(url, **kwargs)
-    for _ in range(DISCORD_RETRY_ATTEMPTS):
-        status = getattr(res, "status_code", None)
-        if status != 429 and not (isinstance(status, int) and status >= 500):
-            break
-        wait = 1.0
-        headers = getattr(res, "headers", None) or {}
-        retry_after = headers.get("Retry-After") or headers.get("X-RateLimit-Reset-After")
-        try:
-            if retry_after is not None:
-                wait = float(retry_after)
-        except (TypeError, ValueError):
-            wait = 1.0
-        wait = max(0.0, min(wait, DISCORD_RETRY_MAX_WAIT_SECONDS))
-        logger.warning(f"Discord API {status} — {wait:.1f}s 後にリトライします")
-        _retry_sleep(wait)
-        res = requests.post(url, **kwargs)
-    return res
+    """429/5xx を限定回数リトライする POST(core.discord.post_with_retry への委譲)。"""
+    # テストが notification_service._retry_sleep を差し替える契約を維持するため、
+    # 実際の待機関数も合わせて渡す(core.discord 側のモジュール属性を一時的に差し替える)。
+    original_sleep = core_discord._retry_sleep
+    core_discord._retry_sleep = _retry_sleep
+    try:
+        return core_discord.post_with_retry(url, **kwargs)
+    finally:
+        core_discord._retry_sleep = original_sleep
+
 
 def _send_line_push(user_id: str, messages: List[Any]) -> bool:
     """LINE Push API送信 (v3対応版)"""
@@ -170,7 +151,8 @@ def _send_line_push(user_id: str, messages: List[Any]) -> bool:
                 PushMessageRequest(
                     to=user_id,
                     messages=sdk_messages
-                )
+                ),
+                _request_timeout=config.LINE_API_REQUEST_TIMEOUT
             )
         return True
 

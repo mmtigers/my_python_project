@@ -9,18 +9,22 @@
 # 突き合わせた原因調査と GitHub Issue/Draft PR 起票を行わせる。
 # 詳細設計・ガードレールは docs/runbooks/raspi_claude_log_monitoring.md を参照。
 #
-# ★重要(未検証フラグ): --permission-mode / --allowedTools / --max-turns /
-#   --output-format の各フラグ名・値はCLIのバージョンによって変わりうる。
-#   運用開始前に必ず実機で `claude --help` / `claude -p --help` を確認し、
-#   実際に使えるフラグへ合わせること。ここを確認せずに動かすと
-#   「ガードレールが効いていない」状態になりうる。
+# 実機検証済み(Issue #339, 2026-09-07, ラズパイ実機の Claude Code CLI v2.1.263
+#   `claude -p --help` で確認): --permission-mode / --allowedTools /
+#   --disallowedTools / --output-format は下記の値・書式のまま動作する。
+#   ただし --max-turns はこのバージョンのCLIには存在せず、代わりに
+#   --print 専用のドル建て上限である --max-budget-usd を暴走対策として採用した
+#   (timeoutによる壁時計時間の上限と併用)。CLIの将来のアップデートでフラグが
+#   変わる可能性は残るため、claude -p の起動が失敗し始めたら真っ先に
+#   `claude -p --help` を再確認すること。
 #
 # ガードレール(runbook準拠):
 #   - 自動適用・自動デプロイ・systemctl restart は行わない。Issue/Draft PR起票と
 #     通知のみ。--allowedTools を読み取り系 + gh issue create / gh pr create --draft
 #     に機械的に制限し、--dangerously-skip-permissions は絶対に使わない。
 #   - 多重起動防止: flock (DDDバッチと同じロックファイル方式)
-#   - 暴走対策: timeout + --max-turns
+#   - 暴走対策: timeout(壁時計時間の上限) + --max-budget-usd(APIコストの上限。
+#     --max-turnsはこのCLIバージョンに存在しないため採用)
 #   - Issue #379: 標準入力の異常サマリ(層1のログ検知内容。line_handler.py:92のLINE
 #     表示名+メッセージ本文やアクセスログのパス等、外部由来の文字列を含みうる)には
 #     プロンプトインジェクションを試みる文字列が混入する可能性がある。対策として
@@ -45,7 +49,10 @@
 #                                    と食い違っていたため、cd失敗+set -eで層2調査が
 #                                    無言で一度も動かない不具合があった)
 #   CLAUDE_INVESTIGATE_TIMEOUT_SEC : claude -p 全体のタイムアウト秒 (既定: 900)
-#   CLAUDE_INVESTIGATE_MAX_TURNS   : --max-turns の値 (既定: 30)
+#   CLAUDE_INVESTIGATE_MAX_BUDGET_USD : --max-budget-usd の値、ドル単位 (既定: 2.00。
+#                                    Issue #339: 実機確認の結果 --max-turns は
+#                                    このCLIバージョンに存在しないため、コスト上限に
+#                                    よる暴走対策に変更した)
 #   CLAUDE_INVESTIGATE_DRY_RUN     : 1でドライラン(gh起票なし・調査結果の通知のみ)。
 #                                    導入初期はこのモードで様子を見ることを推奨
 #   CLAUDE_INVESTIGATE_SUMMARY_MAX_CHARS : プロンプトへ埋め込む異常サマリの文字数上限
@@ -63,10 +70,25 @@ PROJECT_DIR="${CLAUDE_INVESTIGATE_PROJECT_DIR:-/home/masahiro/develop}"
 HOME_SYSTEM_DIR="$PROJECT_DIR/MY_HOME_SYSTEM"
 LOCK_FILE="$HOME_SYSTEM_DIR/logs/.claude_investigate.lock"
 TIMEOUT_SEC="${CLAUDE_INVESTIGATE_TIMEOUT_SEC:-900}"
-MAX_TURNS="${CLAUDE_INVESTIGATE_MAX_TURNS:-30}"
+MAX_BUDGET_USD="${CLAUDE_INVESTIGATE_MAX_BUDGET_USD:-2.00}"
 DRY_RUN="${CLAUDE_INVESTIGATE_DRY_RUN:-0}"
 # Issue #379: 異常サマリをプロンプトへ埋め込む際の文字数上限。
 SUMMARY_MAX_CHARS="${CLAUDE_INVESTIGATE_SUMMARY_MAX_CHARS:-4000}"
+
+# Issue #577: 異常サマリ・調査結果は日本語主体(health_watch.py等の文言)で
+# 1文字あたり約3バイトのため、wc -c/head -c によるバイト単位の判定・切り詰めだと
+# 実質の上限が文字数換算で約1/3になるうえ、マルチバイト文字の途中で切断され
+# 不正なUTF-8バイト列がプロンプト/通知へ埋め込まれうる。wc -m/cut -c は
+# ロケール設定次第でバイト単位にフォールバックしうるため、ロケールに依存せず
+# 確実にUTF-8文字単位で数える/切り詰めるためPython3を使う。
+utf8_char_count() {
+  python3 -c 'import sys; print(len(sys.stdin.read()))'
+}
+
+truncate_utf8_chars() {
+  # $1: 最大文字数。標準入力の文字列を先頭からその文字数までに切り詰めて出力する。
+  python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:int(sys.argv[1])])' "$1"
+}
 
 # Issue #380: パス不一致でcdが無言で失敗する(set -eで即終了し、層2調査が
 # 一度も動いていないこと自体に気づけない)事態を避けるため、明示的にチェックする。
@@ -100,9 +122,9 @@ echo "$ANOMALY_SUMMARY"
 # 外部由来文字列を含みうる。プロンプトへ無制限に埋め込むとプロンプトインジェクションの
 # 経路になるため、埋め込み前に長さを上限で切り詰める(通知時のDiscord向け切り詰めとは
 # 別に、プロンプト自体への埋め込み量を制限する)。
-ANOMALY_SUMMARY_LEN=$(printf '%s' "$ANOMALY_SUMMARY" | wc -c)
+ANOMALY_SUMMARY_LEN=$(printf '%s' "$ANOMALY_SUMMARY" | utf8_char_count)
 if [ "$ANOMALY_SUMMARY_LEN" -gt "$SUMMARY_MAX_CHARS" ]; then
-  ANOMALY_SUMMARY="$(printf '%s' "$ANOMALY_SUMMARY" | head -c "$SUMMARY_MAX_CHARS")
+  ANOMALY_SUMMARY="$(printf '%s' "$ANOMALY_SUMMARY" | truncate_utf8_chars "$SUMMARY_MAX_CHARS")
 ...(${SUMMARY_MAX_CHARS}字を超えたため以下省略)"
 fi
 
@@ -144,7 +166,11 @@ EOF
 )
 
 # --- Claude Code CLI をヘッドレス起動 ---
-# ★フラグは未検証(冒頭の注意参照)。timeoutはSIGTERM後10秒でSIGKILLに昇格させる。
+# フラグは実機検証済み(冒頭の注意参照)。timeoutはSIGTERM後10秒でSIGKILLに昇格させる。
+# stderr は jq に流さない(以前は 2>&1 で合流させていたため、CLI が警告を1行でも stderr に
+# 出すと JSON が壊れて RESULT が空になり、pipefail で CLAUDE_EXIT が jq のパースエラー
+# コードになって「失敗理由不明」の通知になっていた)。stderr は本スクリプトの stderr
+# (health_watch が claude_investigate.log へ取り込む)へそのまま流す。
 # Issue #379: --disallowedTools "Read(.env*)" で .env* の読み取りを機械的に禁止する
 # (--allowedTools はワイルドカードで既に絞ってあるが、Readツール自体は元々パス無制限
 # だったため、ログ由来の誘導文でルート直下の.env等を読ませてIssue本文へ貼らせる経路が
@@ -154,8 +180,8 @@ RESULT=$(timeout --kill-after=10 "$TIMEOUT_SEC" claude -p "$PROMPT" \
   --permission-mode dontAsk \
   --allowedTools "$ALLOWED_TOOLS" \
   --disallowedTools "Read(.env*)" \
-  --max-turns "$MAX_TURNS" \
-  --output-format json 2>&1 | jq -r '.result // .')
+  --max-budget-usd "$MAX_BUDGET_USD" \
+  --output-format json | jq -r '.result // .')
 CLAUDE_EXIT=$?
 set -e
 
@@ -169,7 +195,7 @@ echo "$RESULT"
 # --- 通知 (notification_service.pyと同じDiscord WebhookのURLを再利用する想定) ---
 if [ -n "${WATCHDOG_NOTIFY_WEBHOOK_URL:-}" ]; then
   # Discordのcontent上限(2000字)に収まるよう調査結果は先頭1500字に切り詰める
-  SNIPPET=$(printf '%s' "$RESULT" | head -c 1500)
+  SNIPPET=$(printf '%s' "$RESULT" | truncate_utf8_chars 1500)
   PAYLOAD=$(jq -n --arg content "[ラズパイ監視] 異常検知・自動調査の結果:
 ${SNIPPET}" '{content: $content}')
   curl -fsS -X POST "$WATCHDOG_NOTIFY_WEBHOOK_URL" \

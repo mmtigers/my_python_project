@@ -2,6 +2,7 @@
 import sys
 import os
 import requests
+import re
 import time
 
 # --- 1. 強制パス設定 (Path Injection) ---
@@ -14,7 +15,8 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(1, PARENT_DIR)
 
 try:
-    import common
+    from core.logger import setup_logging
+    from services.notification_service import send_push
     import config
     from services import switchbot_service as sb_tool
 except ImportError as e:
@@ -22,7 +24,15 @@ except ImportError as e:
     sys.exit(1)
 
 # ロガー設定
-logger = common.setup_logging("webhook_fix")
+logger = setup_logging("webhook_fix")
+
+_TOKEN_QUERY_RE = re.compile(r"((?:^|[?&])token=)[^&\s]*")
+
+
+def _mask_token(url: str) -> str:
+    """URL中の ?token=... の値をマスクする(ログ出力用)。"""
+    return _TOKEN_QUERY_RE.sub(r"\1***", url)
+
 
 def update_switchbot_webhook(base_url):
     """SwitchBotのWebhook URLを更新
@@ -40,7 +50,8 @@ def update_switchbot_webhook(base_url):
         # ?token=... が一致しないリクエストを401で拒否する(Issue #318)。ここでtokenを
         # 付与しないと、SwitchBot側から届く実際のWebhookが全て401で弾かれてしまう。
         target_url = f"{target_url}?token={config.SWITCHBOT_WEBHOOK_TOKEN}"
-    logger.info(f"🔧 [SwitchBot] 設定確認: {target_url}")
+    # 共有シークレット(token)をログ(home_system.log / Discord経由のログ転記)に残さない
+    logger.info(f"🔧 [SwitchBot] 設定確認: {_mask_token(target_url)}")
 
     headers = sb_tool.create_switchbot_auth_headers()
 
@@ -57,7 +68,7 @@ def update_switchbot_webhook(base_url):
 
     # 古い設定を削除
     for old_url in urls:
-        logger.info(f"   🗑️ 古い設定を削除: {old_url}")
+        logger.info(f"   🗑️ 古い設定を削除: {_mask_token(old_url)}")
         try:
             requests.post("https://api.switch-bot.com/v1.1/webhook/deleteWebhook", headers=headers, json={"action": "deleteWebhook", "url": old_url}, timeout=10)
         except Exception as e:
@@ -144,13 +155,13 @@ def fix_all_webhooks():
             "SwitchBotの旧Webhook設定を削除しましたが、新しいURLの登録に失敗しました。\n"
             f"SwitchBotイベント連携が停止している可能性があります。手動確認が必要です。\nURL: {base_url}"
         )
-        common.send_push([{"type": "text", "text": alert_body}], target="discord", channel="error")
+        send_push([{"type": "text", "text": alert_body}], target="discord", channel="error")
 
     # 実際に更新が走った時のみ通知を送信するよう最適化
     sb_updated = bool(sb_result)
     if sb_updated or line_updated:
         msg_body = f"✨ **Webhook設定修復完了** ✨\n新しいエンドポイントに更新されました:\n{base_url}"
-        common.send_push([{"type": "text", "text": msg_body}], target="discord", channel="report")
+        send_push([{"type": "text", "text": msg_body}], target="discord", channel="report")
 
 if __name__ == "__main__":
     fix_all_webhooks()

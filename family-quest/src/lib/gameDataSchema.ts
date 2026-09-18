@@ -55,10 +55,7 @@ const questSchema = z.object({
     days: z.union([z.array(z.number()), z.null()]).optional(),
     target_user: z.string().nullable().optional(),
     pre_requisite_quest_id: z.number().nullable().optional(),
-    is_shared_completed_by: z.string().optional(),
-    shared_completed_by_name: z.string().optional(),
-    is_shared_pending_by: z.string().optional(),
-    shared_pending_by_name: z.string().optional(),
+    // #530: is_shared_* / shared_*_name はバックエンドが送出しないため削除
 });
 
 const rewardSchema = z.object({
@@ -105,3 +102,58 @@ export const purchaseResponseSchema = z.object({
     status: z.string(),
     newGold: z.number(),
 });
+
+// #659: 検証が gameData / purchase / routine の3つに留まっており、chronicle・inventory・
+// cameraSettings は無検証のまま(冒頭に掲げた「幽霊フィールド即検知」が半分しか効いて
+// いなかった)。残る取得境界もここで明示する。
+const chronicleItemSchema = z.object({
+    type: z.string().optional(),
+    timestamp: z.string().optional(),
+    dateStr: z.string().optional(),
+    userId: z.string().optional(),
+    userName: z.string().optional(),
+    userAvatar: z.string().nullable().optional(),
+    title: z.string().optional(),
+    text: z.string().optional(),
+    gold: z.number().optional(),
+    exp: z.number().optional(),
+});
+
+export const chronicleResponseSchema = z.object({
+    chronicle: z.array(chronicleItemSchema),
+});
+
+const youtubeCooldownAnnouncementSchema = z.object({
+    starts_on: z.string(),
+    days_remaining: z.number(),
+});
+
+const inventoryItemSchema = z.object({
+    id: z.number(),
+    reward_id: z.number(),
+    title: z.string(),
+    icon: z.string(),
+    desc: z.string().nullable().optional(),
+    status: z.enum(['owned', 'consumed']),
+    purchased_at: z.string(),
+    used_at: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    is_youtube_reward: z.boolean(),
+});
+
+export const inventoryResponseSchema = z.object({
+    items: z.array(inventoryItemSchema),
+    youtube_cooldown_remaining_seconds: z.number(),
+    youtube_cooldown_announcement: youtubeCooldownAnnouncementSchema.nullable(),
+});
+
+// GET /api/cameras/settings のレスポンス(camera_router.py の CameraSettingsResponse)。
+export const cameraSettingsResponseSchema = z.array(
+    z.object({
+        id: z.string(),
+        name: z.string(),
+        // 表示順。camera_router.get_camera_settings が config.CAMERAS の並び順から採番する。
+        order: z.number(),
+        enabled: z.boolean(),
+    }),
+);

@@ -4,9 +4,9 @@ import threading
 import time
 import traceback
 import os
-import requests
 from logging.handlers import WatchedFileHandler
 import config
+from core import discord as core_discord
 
 # Discord の content 上限は 2000 文字。コードフェンス等の装飾分の余裕を見て
 # 1900 文字で切り詰める(#361: 以前は無制限に連結しており、長いエラーほど 400 で
@@ -61,6 +61,14 @@ def flush_pending_discord_notifications(timeout: float = DISCORD_ATEXIT_FLUSH_SE
 
 
 atexit.register(flush_pending_discord_notifications)
+
+
+# #661: 正規表現の実体は core/discord.py へ移した(ここは後方互換のための残置なし)。
+
+
+def _redact_webhook_url(text: str) -> str:
+    """Discord Webhook URL のトークン部分をマスクする(core.discord への委譲。#661)。"""
+    return core_discord.redact_webhook_url(text)
 
 
 def _truncate_discord_content(content: str, limit: int = DISCORD_CONTENT_LIMIT) -> str:
@@ -134,22 +142,41 @@ class DiscordErrorHandler(logging.Handler):
     @staticmethod
     def _send_webhook(url, payload):
         try:
-            requests.post(url, json=payload, timeout=5)
-        except Exception:
+            # #661: 送信(と 429/5xx の限定リトライ)は core/discord.py に一本化した。
+            # core.discord は core.logger を import しないため循環にはならない。
+            core_discord.post_with_retry(url, json=payload, timeout=5)
+        except Exception as e:
             # #436: 以前はここで完全に握りつぶしており、Webhook URL失効やネットワーク障害で
             # 通知システム自体が壊れていても誰も気づけなかった。最低限の可視化として
             # 標準エラー出力に警告ログを残す。
-            _webhook_failure_logger.warning("Discord webhook送信に失敗しました: %s", url, exc_info=True)
+            # URL にはWebhookトークンが含まれるため、ID部分だけ残してマスクして出力する。
+            # exc_info(トレースバック)は requests の例外メッセージ経由で生URLを含むため付けず、
+            # 例外種別とマスク済みメッセージのみを残す。
+            _webhook_failure_logger.warning(
+                "Discord webhook送信に失敗しました: %s (%s: %s)",
+                _redact_webhook_url(url), type(e).__name__, _redact_webhook_url(e),
+            )
 
 def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:
     """ロガーのセットアップ"""
     logger = logging.getLogger(name)
     logger.propagate = False
     
-    if logger.handlers:
-        logger.handlers.clear()
+    # 同名ロガーの再セットアップ時は、既存ハンドラを close() してから外す。
+    # 以前は handlers.clear() だけだったため、WatchedFileHandler が開いていた
+    # home_system.log のファイルディスクリプタが閉じられずに残り、関数内で
+    # get_logger() を呼ぶ経路(DDD/newface_monitor.py の storage_warmup 等)では
+    # 呼び出しのたびに fd がリークしていた(pytest の ResourceWarning でも検出)。
+    for existing_handler in list(logger.handlers):
+        logger.removeHandler(existing_handler)
+        try:
+            existing_handler.close()
+        except Exception:
+            pass
     
-    logger.setLevel(logging.INFO)
+    # Issue #665: レベルは config.LOG_LEVEL(環境変数 LOG_LEVEL、既定 INFO)。不正値は INFO。
+    level_name = str(getattr(config, "LOG_LEVEL", "INFO") or "INFO").upper()
+    logger.setLevel(getattr(logging, level_name, None) if isinstance(getattr(logging, level_name, None), int) else logging.INFO)
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
     # コンソール出力

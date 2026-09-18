@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { CompletedSignal, User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
 import { CooldownRing } from '@/components/ui/CooldownRing';
-import { useQuestStatus, getQuestLockState, getQuestProcessingKey } from '../hooks/useQuestStatus';
+import { useQuestStatus, getQuestLockState, getQuestProcessingKey, canCancelQuest } from '../hooks/useQuestStatus';
 import { isQuestVisibleToUser } from '@/lib/questTargeting';
 import { useSound } from '@/hooks/useSound';
 import { useLongPress } from '@/hooks/useLongPress';
@@ -70,13 +70,30 @@ const QuestItem: React.FC<{
     // クエストidだけでなく「誰の完了か」(userId)も一致する場合のみクールダウンに入れる。
     // 以前は id しか見ておらず、兄が完了した無限クエストが妹・パパ・ママのパネルでも
     // 60秒 "Wait..." になっていた(サーバー側のクールダウンは (user, quest) 単位)。
+    // #567: 上記のuserId一致チェックだけでは2つの誤動作が残っていた。
+    // (a) 兄が完了しクールダウン中に妹へユーザー切替すると、userId不一致でeffectは
+    //     早期returnするが、既にtrueになっているisCooldownを戻す処理が無く、
+    //     切り替え先のパネルが操作不能のまま固着していた。
+    // (b) タブ切替等でQuestListが再マウントされると、isCooldown(state)は初期化される
+    //     一方でcompletedSignal(props)は古いままのため、id/userId一致だけを見ると
+    //     とっくに終わっているはずのクールダウンが丸ごと(60秒)再発火していた。
+    // completedSignal.nonceは発火時刻(Date.now())であるため、不一致時は明示的に
+    // isCooldownを解除し(a)、一致時も経過時間を差し引いた残り時間のみをロックする(b)。
     const questId = quest.quest_id;
     const currentUserId = currentUser.user_id;
     useEffect(() => {
         if (!isInfinite || !completedSignal) return;
-        if (completedSignal.id !== questId || completedSignal.userId !== currentUserId) return;
+        if (completedSignal.id !== questId || completedSignal.userId !== currentUserId) {
+            setIsCooldown(false);
+            return;
+        }
+        const remainingMs = COOLDOWN_MS - (Date.now() - completedSignal.nonce);
+        if (remainingMs <= 0) {
+            setIsCooldown(false);
+            return;
+        }
         setIsCooldown(true);
-        const timer = setTimeout(() => setIsCooldown(false), COOLDOWN_MS);
+        const timer = setTimeout(() => setIsCooldown(false), remainingMs);
         return () => clearTimeout(timer);
     }, [completedSignal, isInfinite, questId, currentUserId]);
 
@@ -89,18 +106,18 @@ const QuestItem: React.FC<{
     const baseGold = quest.gold_gain || 0;
     const totalGold = baseGold + bonusGold;
 
-    const isSharedCompleted = !!quest.is_shared_completed_by && quest.is_shared_completed_by !== currentUser.user_id;
-    const isSharedPending = !!quest.is_shared_pending_by && quest.is_shared_pending_by !== currentUser.user_id;
-    const isSharedDoneByOther = isSharedCompleted || isSharedPending;
-    const sharedName = quest.shared_completed_by_name || quest.shared_pending_by_name;
     // #412(F-L10): masterData.js のフォールバック(案内専用の疑似クエスト、
     // quest._isFallback)は完了APIを叩けないため、ロック中と同様にタップ・長押しを
     // 無効化する(以前はタップ可能で、完了しようとすると404等のエラーモーダルになっていた)。
-    const isEffectivelyLocked = isLocked || isSharedDoneByOther || !!quest._isFallback;
+    // #530: 以前ここで OR していた共有クエスト判定(is_shared_* 由来)は、バックエンドが
+    // 送出しないフィールドに基づく常に false の分岐だったため削除した。
+    const isEffectivelyLocked = isLocked || !!quest._isFallback;
 
     // 完了済み/申請中の取り消しは「長押し」でのみ発火させ、うっかりタップでの
-    // 誤取り消しを防ぐ。無限クエストは取り消し概念がないため対象外。
-    const canCancel = !isInfinite && (isDone || isPending) && !isEffectivelyLocked;
+    // 誤取り消しを防ぐ。
+    // (無限クエストは完了済み(isDone)にはならないが、子どもの申請中(isPending)は
+    // 通常クエストと同様に取り消し可能。判定は useQuestStatus.canCancelQuest に集約)
+    const canCancel = canCancelQuest({ isDone, isPending }, isEffectivelyLocked);
 
     const runComplete = () => {
         // #102: 完了音・クールダウン開始はここでは行わない(上のuseEffect/App側を参照)。
@@ -116,7 +133,7 @@ const QuestItem: React.FC<{
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
 
-    const { isPressing, pressProgress, wasFiredRecently, handlers: longPressHandlers } = useLongPress({
+    const { isPressing, pressProgress, wasFiredRecently, clearFiredFlag, handlers: longPressHandlers } = useLongPress({
         onLongPress: runCancel,
         disabled: !canCancel || isProcessing,
         thresholdMs: 550,
@@ -130,7 +147,15 @@ const QuestItem: React.FC<{
         // 100〜300ms)が指を離すより先に終わると、同じDOMノードに本ハンドラが付いた状態で
         // pointerup 由来の click が届き、直前に取り消したクエストの完了確認モーダルが
         // 開いてしまう(子どもが「はい」を押せば即再申請)。長押し発火直後の click は無視する。
-        if (wasFiredRecently()) return;
+        if (wasFiredRecently()) {
+            // #568: 取消が成立した直後はcanCancelがfalseに変わり、longPressHandlers
+            // (onPointerDown等)自体がこの要素から外れる(下記JSX参照)ため、次の
+            // pointerdownを待つだけではフラグが二度とリセットされない。ここで
+            // 1回抑止に使った時点で明示的に消費し、以降の正当なタップ(完了確認)を
+            // 恒久的にブロックしないようにする。
+            clearFiredFlag();
+            return;
+        }
         runComplete();
     };
 
@@ -151,20 +176,11 @@ const QuestItem: React.FC<{
 
     // ▼ バッジ候補を優先度付きで作り、上位2件だけを表示する(角度①: バッジ過多の整理)
     const badgeCandidates: BadgeCandidate[] = [];
-    if (isLocked && !isSharedDoneByOther) {
+    if (isLocked) {
         badgeCandidates.push({
             key: 'locked', priority: 0, node: (
                 <span key="locked" className={`bg-gray-500 text-white ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5`}>
                     <Lock size={10} /> 未開放
-                </span>
-            )
-        });
-    }
-    if (isSharedDoneByOther) {
-        badgeCandidates.push({
-            key: 'shared', priority: 1, node: (
-                <span key="shared" className={`bg-gray-600 text-white ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold border border-gray-400`}>
-                    {sharedName}が対応済み
                 </span>
             )
         });
@@ -203,6 +219,22 @@ const QuestItem: React.FC<{
             <Card
                 variant={variant}
                 onClick={canCancel ? undefined : handleTapComplete}
+                {...(canCancel
+                    ? {
+                          // #660: 取消は長押し専用で、onClick を外すと Card が role/tabIndex を
+                          // 付けなくなるためキーボードから一切到達できなかった。長押し相当の
+                          // 操作をキーボードに用意する(Enter/Space で取消を実行)。
+                          role: 'button' as const,
+                          tabIndex: isEffectivelyLocked || isProcessing ? -1 : 0,
+                          'aria-label': `${quest.title} の完了を取り消す`,
+                          onKeyDown: (e: React.KeyboardEvent) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  runCancel();
+                              }
+                          },
+                      }
+                    : {})}
                 className={`${cardSizeClasses} transition-all duration-300 relative
                     ${!isEffectivelyLocked ? 'cursor-pointer active:scale-[0.98] select-none' : ''}
                     ${isEffectivelyLocked ? 'opacity-50 grayscale cursor-not-allowed bg-gray-200 border-gray-400' : ''}

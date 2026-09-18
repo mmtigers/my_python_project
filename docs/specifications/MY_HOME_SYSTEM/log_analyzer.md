@@ -10,7 +10,7 @@
 ## 関連ドキュメント
 
 * [config.md](./config.md) - `LOG_DIR`, `LINE_USER_ID`等の設定値を提供
-* [common.md](./common.md) - `setup_logging`, `send_push`を再エクスポートするFacade
+* [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
 * [logger.md](./logger.md) - `setup_logging`の実体
 * [notification_service.md](./notification_service.md) - `send_push`の実体
 
@@ -31,15 +31,16 @@
 | `logging` | 標準ライブラリ | インポートのみ（直接的な利用箇所はファイル内に見当たらない） | `import logging` (行番号: 5 / 抜粋: "import logging") |
 | `typing` | 標準ライブラリ | 型ヒント（List, Dict, Any, Optional。いずれもクラス変数・メソッドの型注釈で使用されている） | `from typing import List, Dict, Any, Optional` (行番号: 6 / 抜粋: "from typing import List, Dict, Any, Optional") |
 | `config` | 自作モジュール | ログディレクトリパス、通知先IDの取得 | `import config` (行番号: 9 / 抜粋: "import config") |
-| `common` | 自作モジュール | ロガー設定、プッシュ通知送信の呼び出し | `import common` (行番号: 10 / 抜粋: "import common") |
+| `core.logger.setup_logging` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.logger import setup_logging` (行番号: 9 / 抜粋: "from core.logger import setup_logging") |
+| `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 10 / 抜粋: "from services.notification_service import send_push") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config.LOG_DIR` | 外部ファイルで定義されており、具体的なパスや型が提供されていないため。 | `self.log_dir = config.LOG_DIR` (行番号: 41 / 抜粋: "self.log_dir = config.LOG_DIR") |
-| `common.setup_logging` | 外部ファイルで定義されており、内部処理や戻り値の型仕様が不明なため。 | `logger = common.setup_logging(...` (行番号: 13 / 抜粋: "logger = common.setup_logging("log_analyzer")") |
-| `common.send_push` | 外部ファイルで定義されており、引数の詳細仕様やエラー挙動が不明なため。 | `common.send_push([...` (行番号: 164, 190 / 抜粋: "common.send_push([{"type": "text", "text": msg}], target="discord", channel="report")") |
+| `core.logger.setup_logging` | 外部ファイルで定義されており、内部処理や戻り値の型仕様が不明なため。 | `logger = core.logger.setup_logging(...` (行番号: 13 / 抜粋: "logger = setup_logging("log_analyzer")") |
+| `services.notification_service.send_push` | 外部ファイルで定義されており、引数の詳細仕様やエラー挙動が不明なため。 | `services.notification_service.send_push([...` (行番号: 164, 190 / 抜粋: "send_push([{"type": "text", "text": msg}], target="discord", channel="report")") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -114,8 +115,11 @@
 
 ### `_parse_timestamp`
 
+* **（2026-09-06 品質監査で修正）** syslog 形式(年なし)を現在年で補完した結果が現在時刻より1日以上未来になる場合は前年のログとみなして1年戻す。以前は「簡易的に現在年とする」コメントのまま未対応で、年明け直後に前年12月の行を読むと未来日付になり `start_date` のフィルタを素通りして必ずカウントされていた。
+* 根拠: (行番号: 88〜89 / 抜粋: "if dt > self.now + datetime.timedelta(days=1):\n                    dt = dt.replace(year=self.now.year - 1)")
+
 * **役割**: ログの行頭文字列からタイムスタンプを抽出し、`datetime`オブジェクトに変換する。
-* 根拠: `_parse_timestamp` (行番号: 62-92 / 抜粋: "def _parse_timestamp(self, line: str) -> Optional[datetime.datetime]:")
+* 根拠: `_parse_timestamp` (行番号: 62-95 / 抜粋: "def _parse_timestamp(self, line: str) -> Optional[datetime.datetime]:")
 
 
 * **引数/リクエスト**: `line: str` (ログの1行)
@@ -138,17 +142,17 @@
 ### `_analyze_file`
 
 * **役割**: ファイルを1行ずつ読み込み、無視パターンを除外した上でタイムスタンプを評価し、エラーまたは警告キーワードが含まれる行をカウント・集計する。
-* 根拠: `_analyze_file` (行番号: 94-133 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
+* 根拠: `_analyze_file` (行番号: 97-145 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
 * **（Issue #381 で修正）** タイムスタンプの無い行（トレースバック継続行）は、直前にパースできたタイムスタンプ `last_dt` を引き継いで `start_date` フィルタを適用する。以前はこれらの行が必ずカウントされ、1回トレースバックが出るとその日 logrotate されるまで毎時「異常」が立ち続けていた。
 * 根拠: `last_dt = None` (行番号: 111)、`effective_dt = dt if dt is not None else last_dt` (行番号: 120〜122)
 
 
 * **引数/リクエスト**: `filepath: str` (解析対象のファイルパス)
-* 根拠: `_analyze_file` (行番号: 94 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
+* 根拠: `_analyze_file` (行番号: 97 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `_analyze_file` (行番号: 94 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
+* 根拠: `_analyze_file` (行番号: 97 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
 
 
 * **副作用**: `self.report_data` の更新、ファイル読み込み、`logger` を用いたログ出力。
@@ -163,15 +167,15 @@
 ### `run_analysis`
 
 * **役割**: 対象となる全てのログファイルを取得し、直近の更新があるファイルに対して解析処理を順次実行した後、レポート送信処理を呼び出す。
-* 根拠: `run_analysis` (行番号: 135-153 / 抜粋: "def run_analysis(self) -> None:")
+* 根拠: `run_analysis` (行番号: 147-165 / 抜粋: "def run_analysis(self) -> None:")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
-* 根拠: `run_analysis` (行番号: 135 / 抜粋: "def run_analysis(self) -> None:")
+* 根拠: `run_analysis` (行番号: 147 / 抜粋: "def run_analysis(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `run_analysis` (行番号: 135 / 抜粋: "def run_analysis(self) -> None:")
+* 根拠: `run_analysis` (行番号: 147 / 抜粋: "def run_analysis(self) -> None:")
 
 
 * **副作用**: 外部ファイル一覧の取得、`logger` を用いたログ出力。
@@ -186,23 +190,23 @@
 ### `_send_report`
 
 * **役割**: 集計結果(`self.report_data`)をもとにMarkdown形式のレポートメッセージを組み立て、外部通知モジュールを呼び出す。
-* 根拠: `_send_report` (行番号: 155-190 / 抜粋: "def _send_report(self) -> None:")
+* 根拠: `_send_report` (行番号: 167-202 / 抜粋: "def _send_report(self) -> None:")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
-* 根拠: `_send_report` (行番号: 155 / 抜粋: "def _send_report(self) -> None:")
+* 根拠: `_send_report` (行番号: 167 / 抜粋: "def _send_report(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `_send_report` (行番号: 155 / 抜粋: "def _send_report(self) -> None:")
+* 根拠: `_send_report` (行番号: 167 / 抜粋: "def _send_report(self) -> None:")
 
 
-* **副作用**: `common.send_push` による外部システムへの通信。
-* 根拠: 外部モジュール呼び出し (行番号: 164, 190 / 抜粋: "common.send_push([{"type": "text", "text": msg}], target="discord", channel="report")")
+* **副作用**: `services.notification_service.send_push` による外部システムへの通信。
+* 根拠: 外部モジュール呼び出し (行番号: 164, 190 / 抜粋: "send_push([{"type": "text", "text": msg}], target="discord", channel="report")")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `_send_report`内部処理 (行番号: 155-190 / 抜粋: "def _send_report(self) -> None:")
+* 根拠: `_send_report`内部処理 (行番号: 167-202 / 抜粋: "def _send_report(self) -> None:")
 
 
 
@@ -285,7 +289,7 @@ graph TD
     __init__ --> config
     _send_report --> config
     _send_report --> common
-    _analyze_file --> logger["logger (common.setup_logging)"]
+    _analyze_file --> logger["logger (core.logger.setup_logging)"]
     run_analysis --> logger
 
 ```
@@ -294,12 +298,12 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `common.py` | ログ設定の実態や、`send_push`のエラー発生時の挙動（リトライの有無、同期・非同期など）を特定するため。 | `common.send_push([{"type": "text", "text": msg}], target="discord", channel="report")` の呼び出しから |
+| 高 | `common.py` | ログ設定の実態や、`send_push`のエラー発生時の挙動（リトライの有無、同期・非同期など）を特定するため。 | `services.notification_service.send_push([{"type": "text", "text": msg}], target="discord", channel="report")` の呼び出しから |
 | 高 | `config.py` | `LOG_DIR`の具体的なパス構造を確認するため。 | `self.log_dir = config.LOG_DIR` の参照から |
 
 ## 8. 保守上の注意点
 
-* **エラーハンドリング**: `_send_report` 内の `common.send_push` 呼び出しでネットワークエラー等が発生した場合の例外ハンドリングが存在しない。
+* **エラーハンドリング**: `_send_report` 内の `services.notification_service.send_push` 呼び出しでネットワークエラー等が発生した場合の例外ハンドリングが存在しない。
 * **年情報の補完処理**: `_parse_timestamp` 内のSyslog解析において、年情報が含まれないため一律で「現在年」を補完している。年またぎのタイミング（例：1月1日に12月31日のログを解析する際など）でパース結果が未来の日付となる可能性がある。
 * **ファイルアクセス時の例外**: `_analyze_file` においてファイルの読み込み処理は `try-except Exception` で包括的にキャッチされているため、意図しないバグもファイル解析エラーとしてロギングされ処理が継続される。
 

@@ -13,11 +13,12 @@ import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.utils import get_now_iso
+from core.database import get_db_cursor
 
 
 def _seed_basic_data():
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
             "('dad', 'Dad', 'Warrior', 1, 0, 100, 'role_adult'), "
@@ -44,7 +45,7 @@ class TestSyncMasterAndSeed:
         assert res.status_code == 200
         assert res.json()["status"] == "synced"
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             user_count = cur.execute("SELECT COUNT(*) as c FROM quest_users").fetchone()["c"]
             quest_count = cur.execute("SELECT COUNT(*) as c FROM quest_master").fetchone()["c"]
         # quest_dataの実データが投入され、既存のquest_users/quest_masterへupsertされていること
@@ -90,7 +91,7 @@ class TestUpdateUserAvatar:
         assert res.status_code == 200
         assert res.json()["avatar"] == self.UPLOADED
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute("SELECT avatar FROM quest_users WHERE user_id='dad'").fetchone()
         assert row["avatar"] == self.UPLOADED
 
@@ -115,6 +116,74 @@ class TestUpdateUserAvatar:
         assert res.status_code == 404
 
 
+class TestAdminResetUser:
+    """Issue #547: reset_game.pyが直接DBを書き換えていたユーザーリセットを
+    POST /api/quest/admin/reset_user 経由に置き換えた回帰テスト。"""
+
+    def test_adult_can_reset_a_users_level_exp_gold_and_medals(self, seeded_client):
+        with get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "UPDATE quest_users SET level=5, exp=120, gold=300, medal_count=2 WHERE user_id='daughter'"
+            )
+            cur.execute(
+                "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, "
+                "completed_at, status) VALUES ('daughter', 101, 'TestQuest', 10, 5, '2026-09-08T08:00:00+09:00', 'approved')"
+            )
+            cur.execute(
+                "INSERT INTO reward_history (user_id, reward_id, reward_title, cost_gold, redeemed_at) "
+                "VALUES ('daughter', 201, 'TestReward', 50, '2026-09-08T08:30:00+09:00')"
+            )
+            cur.execute(
+                "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) "
+                "VALUES ('daughter', 201, 'owned', '2026-09-08T08:30:00+09:00')"
+            )
+
+        res = seeded_client.post(
+            "/api/quest/admin/reset_user", json={"admin_id": "dad", "target_user_id": "daughter"}
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["status"] == "reset"
+        assert body["deletedHistoryCount"] == 1
+        assert body["deletedInventoryCount"] == 1
+
+        with get_db_cursor() as cur:
+            daughter = cur.execute(
+                "SELECT level, exp, gold, medal_count FROM quest_users WHERE user_id='daughter'"
+            ).fetchone()
+            history_count = cur.execute(
+                "SELECT COUNT(*) c FROM quest_history WHERE user_id='daughter'"
+            ).fetchone()["c"]
+            inventory_count = cur.execute(
+                "SELECT COUNT(*) c FROM user_inventory WHERE user_id='daughter'"
+            ).fetchone()["c"]
+            # reward_history(購入ログ)は残高に影響しない監査用の記録のため対象外(#544踏襲)
+            reward_history_count = cur.execute(
+                "SELECT COUNT(*) c FROM reward_history WHERE user_id='daughter'"
+            ).fetchone()["c"]
+
+        assert (daughter["level"], daughter["exp"], daughter["gold"], daughter["medal_count"]) == (1, 0, 0, 0)
+        assert history_count == 0
+        assert inventory_count == 0
+        assert reward_history_count == 1
+
+    def test_child_cannot_reset_another_user(self, seeded_client):
+        res = seeded_client.post(
+            "/api/quest/admin/reset_user", json={"admin_id": "daughter", "target_user_id": "dad"}
+        )
+        assert res.status_code == 403
+
+        with get_db_cursor() as cur:
+            dad = cur.execute("SELECT gold FROM quest_users WHERE user_id='dad'").fetchone()
+        assert dad["gold"] == 100
+
+    def test_returns_404_for_unknown_target_user(self, seeded_client):
+        res = seeded_client.post(
+            "/api/quest/admin/reset_user", json={"admin_id": "dad", "target_user_id": "nobody"}
+        )
+        assert res.status_code == 404
+
+
 class TestSound:
     def test_valid_sound_key_returns_200(self, seeded_client, monkeypatch):
         from core import sound_manager
@@ -132,7 +201,7 @@ class TestInventoryEndpoints:
     def _purchase_reward(self, client, user_id="dad"):
         res = client.post("/api/quest/reward/purchase", json={"user_id": user_id, "reward_id": 201})
         assert res.status_code == 200
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT id FROM user_inventory WHERE user_id=? ORDER BY id DESC LIMIT 1", (user_id,)
             ).fetchone()
@@ -150,7 +219,7 @@ class TestInventoryEndpoints:
         """Issue #116回帰防止: 以前はSELECT対象にreward_master.descriptionが含まれておらず、
         レスポンスにdescキー自体が存在しなかったため、フロントで常に「説明はありません」に
         フォールバックしていた。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "UPDATE reward_master SET description = ? WHERE reward_id = 201", ("テスト用の説明文",)
             )
@@ -166,11 +235,11 @@ class TestInventoryEndpoints:
         'owned'|'consumed'しか知らないため、タップするとuse_itemが400
         'Cannot use this item'を返す押せないアイテムになってしまう。"""
         self._purchase_reward(seeded_client)
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) "
                 "VALUES ('dad', 201, 'pending', ?)",
-                (common.get_now_iso(),),
+                (get_now_iso(),),
             )
 
         res = seeded_client.get("/api/quest/inventory/dad")
@@ -189,7 +258,7 @@ class TestInventoryEndpoints:
         assert res.status_code == 200
         assert res.json()["status"] == "consumed"
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute("SELECT status FROM user_inventory WHERE id=?", (inventory_id,)).fetchone()
         assert row["status"] == "consumed"
 

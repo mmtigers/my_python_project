@@ -1,7 +1,6 @@
 # MY_HOME_SYSTEM/monitors/tv_lock_monitor.py
 import sys
 import os
-from datetime import datetime
 
 # プロジェクトルートへのパス解決
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -9,7 +8,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 import config
+from core import state_file
 from core.logger import setup_logging
+from core.utils import get_now_jst
 from services import switchbot_service
 
 logger = setup_logging("monitor.tv_lock")
@@ -22,18 +23,19 @@ def main():
         logger.debug("TV_PLUG_DEVICE_ID is not set. Skipping.")
         return
 
-    now = datetime.now()
-    
+    # Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()
+    # ではなく明示的にJSTの現在時刻を使う(この「深夜2時」判定はJSTの深夜2時を
+    # 意図しており、ホストがJST以外の設定だと別の実時刻に実行されてしまう)。
+    now = get_now_jst()
+
     # 毎日 深夜 2:00 〜 2:05 の間に実行する
     if now.hour == 2 and 0 <= now.minute <= 5:
         today_str = now.strftime("%Y-%m-%d")
         
         # すでに本日実行済みかチェック
-        if os.path.exists(LAST_RUN_FILE):
-            with open(LAST_RUN_FILE, "r") as f:
-                last_run = f.read().strip()
-            if last_run == today_str:
-                return # すでに実行済み
+        # #661: 読み書きは core/state_file.py(tmp+fsync+os.replace)へ一本化した。
+        if state_file.read_text(LAST_RUN_FILE) == today_str:
+            return # すでに実行済み
 
         logger.info("📺 [TV Lock] Executing midnight TV lock (Turn OFF).")
         try:
@@ -42,9 +44,7 @@ def main():
                 logger.info("✅ [TV Lock] Successfully turned off TV plug.")
                 
                 # 実行完了の記録を保存
-                os.makedirs(os.path.dirname(LAST_RUN_FILE), exist_ok=True)
-                with open(LAST_RUN_FILE, "w") as f:
-                    f.write(today_str)
+                state_file.write_text_atomic(LAST_RUN_FILE, today_str)
             else:
                 logger.error(f"❌ [TV Lock] API Error: {res}")
         except Exception as e:

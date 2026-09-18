@@ -16,7 +16,7 @@ import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import config
 from services import sensor_service
 
@@ -28,9 +28,11 @@ def _reset_sensor_state():
     sensor_service.LAST_NOTIFY_TIME.clear()
     sensor_service.EVENT_CACHE.clear()
     sensor_service.MOTION_TASKS.clear()
+    sensor_service._mac_last_seen.clear()
     yield
     sensor_service.cancel_all_tasks()
     sensor_service.MOTION_TASKS.clear()
+    sensor_service._mac_last_seen.clear()
 
 
 class TestIsDuplicateWebhook:
@@ -169,7 +171,7 @@ class TestProcessSensorDataContact:
 class TestProcessMeterData:
     async def test_saves_temperature_and_humidity(self, isolated_db):
         await sensor_service.process_meter_data("dev1", "リビング温湿度計", 25.5, 48.0)
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 f"SELECT * FROM {config.SQLITE_TABLE_SWITCHBOT_LOGS} WHERE device_id='dev1'"
             ).fetchone()
@@ -186,7 +188,7 @@ class TestProcessPowerData:
         with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
             await sensor_service.process_power_data("dev1", "エアコン", 500, {"power_threshold_watts": 100})
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 f"SELECT * FROM {config.SQLITE_TABLE_POWER_USAGE} WHERE device_id='dev1'"
             ).fetchone()
@@ -200,7 +202,7 @@ class TestProcessPowerData:
         mock_send.assert_not_called()
 
     async def test_crossing_threshold_upward_sends_on_notification(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
                 "VALUES ('dev1', 'エアコン', 5, '2026-01-01T00:00:00')"
@@ -213,7 +215,7 @@ class TestProcessPowerData:
         assert "使用開始" in msg
 
     async def test_crossing_threshold_downward_sends_off_notification(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
                 "VALUES ('dev1', 'エアコン', 500, '2026-01-01T00:00:00')"
@@ -226,7 +228,7 @@ class TestProcessPowerData:
         assert "使用終了" in msg
 
     async def test_staying_below_threshold_does_not_notify(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
                 "VALUES ('dev1', 'エアコン', 5, '2026-01-01T00:00:00')"
@@ -234,3 +236,94 @@ class TestProcessPowerData:
         with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
             await sensor_service.process_power_data("dev1", "エアコン", 10, {"power_threshold_watts": 100})
         mock_send.assert_not_called()
+
+
+@pytest.mark.asyncio
+class TestInactiveStateIsClearedBeforeSending:
+    """Issue #534: 「止まりました」送信中に再検知が来ても再開通知が出るよう、
+    IS_ACTIVE は送信前に False へ落とす。"""
+
+    async def test_is_active_is_false_when_send_push_runs(self):
+        sensor_service.IS_ACTIVE["mac_motion"] = True
+        sensor_service.MOTION_TASKS["mac_motion"] = MagicMock()
+        observed = {}
+
+        def fake_send(*a, **k):
+            observed["active_during_send"] = sensor_service.IS_ACTIVE.get("mac_motion")
+            return True
+
+        with patch.object(sensor_service, "send_push", fake_send):
+            await sensor_service.send_inactive_notification("mac_motion", "テスト", "リビング", 0)
+
+        assert observed["active_during_send"] is False
+        assert sensor_service.IS_ACTIVE["mac_motion"] is False
+
+    async def test_detection_during_send_is_reported_as_resumed(self):
+        """送信中に届いた検知は「非アクティブ→アクティブ」として再開通知を送ること。"""
+        sensor_service.IS_ACTIVE["mac_motion"] = True
+        sensor_service.MOTION_TASKS["mac_motion"] = MagicMock()
+        sent = []
+
+        def fake_send(*a, **k):
+            sent.append(k["messages"][0]["text"])
+            return True
+
+        with patch.object(sensor_service, "send_push", fake_send):
+            stop_task = asyncio.create_task(
+                sensor_service.send_inactive_notification("mac_motion", "テスト", "リビング", 0)
+            )
+            # タスク開始 → 内部の sleep(0) 通過 → IS_ACTIVE=False まで進める(2回譲る)
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            await sensor_service.process_sensor_data("mac_motion", "テスト", "リビング", "Motion Sensor", "detected")
+            await stop_task
+            for t in list(sensor_service.MOTION_TASKS.values()):
+                if isinstance(t, asyncio.Task):
+                    t.cancel()
+
+        assert any("止まりました" in m for m in sent)
+        assert any("動きがありました" in m for m in sent)
+        assert sensor_service.IS_ACTIVE["mac_motion"] is True
+
+
+@pytest.mark.asyncio
+class TestCacheEviction:
+    """Issue #621の回帰テスト: 攻撃者が制御可能な context.deviceMac をキーにした
+    4つのキャッシュ/タスク管理(EVENT_CACHE/IS_ACTIVE/LAST_NOTIFY_TIME/MOTION_TASKS)
+    が上限を超えて無制限に成長しないこと。"""
+
+    async def test_event_cache_eviction_bounds_size(self, monkeypatch):
+        monkeypatch.setattr(sensor_service, "_MAC_CACHE_MAX_SIZE", 5)
+        for i in range(8):
+            sensor_service.is_duplicate_webhook(f"mac{i}", "open", float(i))
+
+        assert len(sensor_service.EVENT_CACHE) == 5
+        assert len(sensor_service._mac_last_seen) == 5
+        # 古い順(mac0〜mac2)は削除され、直近5件だけが残る
+        assert set(sensor_service.EVENT_CACHE.keys()) == {"mac3", "mac4", "mac5", "mac6", "mac7"}
+
+    async def test_motion_state_eviction_cancels_pending_task_and_clears_all_caches(self, monkeypatch):
+        """MOTION_TASKS/IS_ACTIVE/LAST_NOTIFY_TIMEも同じMAC単位で連動して削除され、
+        削除されるタスクが未完了ならキャンセルされること。"""
+        monkeypatch.setattr(sensor_service, "_MAC_CACHE_MAX_SIZE", 2)
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)):
+            await sensor_service.process_sensor_data("mac_old", "古いセンサー", "リビング", "Motion Sensor", "detected")
+            old_task = sensor_service.MOTION_TASKS["mac_old"]
+
+            await sensor_service.process_sensor_data("mac_mid", "中間センサー", "リビング", "Motion Sensor", "detected")
+            # 上限(2)を超える3件目の追加により mac_old が最も古いエントリとして追い出される
+            await sensor_service.process_sensor_data("mac_new", "新しいセンサー", "リビング", "Motion Sensor", "detected")
+
+        assert "mac_old" not in sensor_service.MOTION_TASKS
+        assert "mac_old" not in sensor_service.IS_ACTIVE
+        assert "mac_old" not in sensor_service._mac_last_seen
+
+        # send_inactive_notification は CancelledError を内部で捕捉して静かに
+        # returnする(既存のTestSendInactiveNotification.test_cancellation_leaves_active_state_untouched
+        # と同じ挙動)ため、キャンセル要求が実際に伝播したことは正常終了で確認する。
+        await old_task
+        assert old_task.done()
+
+        for t in list(sensor_service.MOTION_TASKS.values()):
+            if isinstance(t, asyncio.Task):
+                t.cancel()

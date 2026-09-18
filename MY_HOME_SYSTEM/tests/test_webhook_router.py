@@ -69,9 +69,41 @@ async def test_allows_correct_token(configured_token):
 
 
 @pytest.mark.asyncio
-async def test_no_token_required_when_not_configured():
-    """SWITCHBOT_WEBHOOK_TOKEN 未設定時は従来通り検証なしで通ること(後方互換)"""
-    assert config.SWITCHBOT_WEBHOOK_TOKEN is None
+async def test_rejects_with_503_when_token_not_configured(monkeypatch):
+    """#648: トークン未設定時は 503 で拒否する(フェイルクローズ)。
+
+    /webhook/switchbot は ip_restriction_middleware の対象外かつ Cloudflare Access も
+    バイパスする設計(#321/#517)で、トークンが唯一の防御になるため。
+    """
+    monkeypatch.setattr(config, "SWITCHBOT_WEBHOOK_TOKEN", None, raising=False)
+    monkeypatch.setattr(config, "ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK", False, raising=False)
+    with pytest.raises(HTTPException) as exc_info:
+        await webhook_router.switchbot_webhook(_make_body(), token=None)
+    assert exc_info.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_rejection_logs_error_only_once_per_process(monkeypatch):
+    """#648: 拒否のたびに ERROR(=Discord通知)を出すと外部から通知を大量発火できるため1回だけ。"""
+    monkeypatch.setattr(config, "SWITCHBOT_WEBHOOK_TOKEN", None, raising=False)
+    monkeypatch.setattr(config, "ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK", False, raising=False)
+    monkeypatch.setattr(webhook_router, "_unconfigured_webhook_error_logged", False, raising=False)
+    fake_logger = MagicMock()
+    monkeypatch.setattr(webhook_router, "logger", fake_logger)
+
+    for _ in range(3):
+        with pytest.raises(HTTPException):
+            await webhook_router.switchbot_webhook(_make_body(), token=None)
+
+    assert fake_logger.error.call_count == 1
+    assert fake_logger.debug.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_opt_in_allows_unauthenticated_webhook(monkeypatch):
+    """#648: 移行用オプトイン時のみ、従来どおり検証なしで受け付ける。"""
+    monkeypatch.setattr(config, "SWITCHBOT_WEBHOOK_TOKEN", None, raising=False)
+    monkeypatch.setattr(config, "ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK", True, raising=False)
     with patch("routers.webhook_router.save_log_async", new=AsyncMock(return_value=True)), \
          patch.object(webhook_router.sensor_service, "process_sensor_data", new=AsyncMock(return_value=None)), \
          patch.object(webhook_router.sb_tool, "get_device_name_by_id", return_value="玄関ドア"):
@@ -408,3 +440,54 @@ class TestLineCallbackWebhookEventIdIdempotency:
 
         assert res.status_code == 200
         assert processed == [("U1", "ステータス"), ("U1", "ステータス")]
+
+
+# ---------------------------------------------------------------------------
+# 非ASCIIトークン / イベントループ阻害の回帰テスト
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_non_ascii_token_is_rejected_with_401_not_typeerror(configured_token):
+    """hmac.compare_digest は str 同士だと非ASCII文字で TypeError を送出する。
+    公開エンドポイントのため、以前は ?token=%C3%A9 の1リクエストで 500 + Discord
+    エラー通知を誰でも発生させられた。401 で静かに拒否されること。"""
+    with pytest.raises(HTTPException) as exc_info:
+        await webhook_router.switchbot_webhook(_make_body(), token="é")
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_non_ascii_configured_token_still_matches(monkeypatch):
+    """設定側のトークンが非ASCIIでも、一致していれば受理されること(bytes比較の対称性)"""
+    monkeypatch.setattr(config, "SWITCHBOT_WEBHOOK_TOKEN", "ひみつ")
+    with patch("routers.webhook_router.save_log_async", new=AsyncMock(return_value=True)), \
+         patch.object(webhook_router.sensor_service, "process_sensor_data", new=AsyncMock(return_value=None)), \
+         patch.object(webhook_router.sb_tool, "get_device_name_by_id", return_value="玄関ドア"):
+        result = await webhook_router.switchbot_webhook(_make_body(), token="ひみつ")
+    assert result["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_device_name_lookup_runs_off_the_event_loop_thread(monkeypatch):
+    """get_device_name_by_id はキャッシュ未取得時に SwitchBot API へ同期HTTP(最大約47秒)を
+    行うため、イベントループのスレッド上で直接呼ぶと全リクエストが停止する。
+    ワーカースレッドで実行されていることを検証する。
+
+    (#648 でトークン未設定時は 503 になったため、ここでは移行用オプトインで素通りさせる。)"""
+    import threading
+
+    monkeypatch.setattr(config, "ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK", True, raising=False)
+
+    loop_thread_id = threading.get_ident()
+    seen_thread_ids = []
+
+    def fake_lookup(mac):
+        seen_thread_ids.append(threading.get_ident())
+        return "玄関ドア"
+
+    with patch("routers.webhook_router.save_log_async", new=AsyncMock(return_value=True)), \
+         patch.object(webhook_router.sensor_service, "process_sensor_data", new=AsyncMock(return_value=None)), \
+         patch.object(webhook_router.sb_tool, "get_device_name_by_id", side_effect=fake_lookup):
+        result = await webhook_router.switchbot_webhook(_make_body(mac="mac_thread_test"), token=None)
+
+    assert result["status"] == "success"
+    assert seen_thread_ids and seen_thread_ids[0] != loop_thread_id

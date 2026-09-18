@@ -1,0 +1,14 @@
+# DDD/.coveragerc — Issue #665
+# DDD のテストは test_*.py がスクリプト本体と同じディレクトリに並ぶため、`pytest --cov=.` の
+# 集計にテストファイル自身が混入して TOTAL が実態より高く出ていた(2026-09-16 実測: 全体 90% に
+# 対しソースのみ 77%)。テストと conftest を除外して、ソースだけのカバレッジを見る。
+[run]
+source = .
+omit =
+    test_*.py
+    conftest.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:

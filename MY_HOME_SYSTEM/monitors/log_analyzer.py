@@ -6,10 +6,11 @@ from typing import List, Dict, Any, Optional
 
 # 自作モジュール
 import config
-import common
+from core.logger import setup_logging
+from services.notification_service import send_push
 
 # ロガー設定
-logger = common.setup_logging("log_analyzer")
+logger = setup_logging("log_analyzer")
 
 class LogAnalyzer:
     """ログディレクトリおよびシステムログを走査し、システムエラーを集計・通知するクラス。"""
@@ -82,8 +83,11 @@ class LogAnalyzer:
                 dt = datetime.datetime.strptime(ts_str, '%b %d %H:%M:%S')
                 # 年を補正 (現在年)
                 dt = dt.replace(year=self.now.year)
-                # もし未来の日付になってしまった場合（12/31に翌年1/1のログを読んだ場合など）、1年引く処理も必要だが
-                # 今回は簡易的に「現在年」とする
+                # syslog 形式には年が無いため、年明け直後に前年12月のログを読むと「現在年の12月」
+                # (=未来)になり、start_date のフィルタを素通りして必ずカウントされていた。
+                # 現在時刻より1日以上未来なら前年のログとみなして1年戻す。
+                if dt > self.now + datetime.timedelta(days=1):
+                    dt = dt.replace(year=self.now.year - 1)
                 return dt
             except ValueError:
                 pass
@@ -169,7 +173,7 @@ class LogAnalyzer:
                 f"📊 **週間ログ分析レポート ({target_period})**\n\n"
                 f"✅ **異常なし**\nシステムログ・サーバー含め正常です✨"
             )
-            common.send_push([{"type": "text", "text": msg}], target="discord", channel="report")
+            send_push([{"type": "text", "text": msg}], target="discord", channel="report")
             return
 
         total_errors = sum(d["errors"] for d in self.report_data.values())
@@ -195,7 +199,7 @@ class LogAnalyzer:
         msg += "━━━━━━━━━━━━━━━━━━━\n"
         msg += "※ `logs/` または `/var/log/` を確認してください。"
 
-        common.send_push([{"type": "text", "text": msg}], target="discord", channel="report")
+        send_push([{"type": "text", "text": msg}], target="discord", channel="report")
 
 if __name__ == "__main__":
     analyzer = LogAnalyzer(days_back=7)

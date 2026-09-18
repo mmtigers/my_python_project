@@ -21,6 +21,7 @@ import yt_dlp
 
 from file_utils import sanitize_filename as _shared_sanitize_filename
 from file_utils import resolve_my_home_system_root
+from file_utils import resolve_nas_data_dir, resolve_nas_mount_point
 
 # ==========================================
 # 0. 環境設定 & ロギング (Unified Logging)
@@ -71,9 +72,16 @@ class AppConfig:
     
     # File Paths
     BASE_DIR: Path = CURRENT_DIR
-    NAS_DIR_STR: str = '/mnt/nas/home_system/youtube_extractor/data'  # 本環境のNASパスに適宜変更してください
-    LOCAL_DIR_STR: str = str(BASE_DIR / 'data')
-    MOUNT_POINT: str = '/mnt/nas'
+    # Issue #663: 以前は '/mnt/nas/...' の直書きで、コメントも「本環境のNASパスに適宜変更して
+    # ください」= 環境ごとにコードを編集する前提だった。環境変数 NAS_MOUNT_POINT(MY_HOME_SYSTEM と
+    # 共用の .env のキー)から組み立てる。未設定なら従来どおり /mnt/nas 配下。
+    NAS_DIR_STR: str = resolve_nas_data_dir('youtube_extractor')
+    # #580: 以前はnewface_monitor.pyと同じ`BASE_DIR / 'data'`を共有していたため、
+    # NAS未マウント中に片方のスクリプトが書いたフォールバックデータを、NAS復旧後に
+    # もう片方のnas_utils.sync_fallback_to_nas呼び出しが誤って自分のNASディレクトリへ
+    # 移動してしまう経路があった。スクリプトごとにサブディレクトリを分離する。
+    LOCAL_DIR_STR: str = str(BASE_DIR / 'data' / 'youtube_extractor')
+    MOUNT_POINT: str = str(resolve_nas_mount_point())
 
     SUB_DIR_NAME: str = "list"
 
@@ -116,13 +124,11 @@ class ExtractionResult:
         urls (List[str]): 抽出されたURLのリスト。
         source_url (str): 抽出元のURL。
         channel_name (str): チャンネル名。不明な場合は 'unknown_channel'。
-        is_playlist (bool): プレイリストの場合は True。
     """
     title: str
     urls: List[str]
     source_url: str
     channel_name: str = "unknown_channel"
-    is_playlist: bool = False
 
 # ==========================================
 # 2. コアロジック (Extractor)
@@ -261,8 +267,7 @@ class YouTubeExtractor:
                     title=f"{video_result.title} - All Videos",
                     urls=video_result.urls,
                     source_url=video_result.source_url,
-                    channel_name=video_result.channel_name,
-                    is_playlist=False
+                    channel_name=video_result.channel_name
                 )
 
             # #227: /videos と /playlists は同一チャンネルに対する連続リクエストで
@@ -290,7 +295,6 @@ class YouTubeExtractor:
                                     time.sleep(random.uniform(*AppConfig.INTRA_CHANNEL_SLEEP_RANGE))
                                 res = self._extract_single_list(pl_url, force_title=pl_title)
                                 if res:
-                                    res.is_playlist = True
                                     yield res
                                 else:
                                     # #227: 個々のプレイリスト取得失敗を呼び出し元の
@@ -310,18 +314,6 @@ class YouTubeExtractor:
 class FileManager:
     """ファイル保存に関する責務を持つクラス。"""
     
-    @staticmethod
-    def _sanitize_filename(filename: str, max_length: int = 200) -> str:
-        """ファイル名として使用できない文字を置換する。
-
-        Args:
-            filename (str): 元の文字列。
-            max_length (int): 生成する文字列の最大バイト数（UTF-8エンコード後）。
-
-        Returns:
-            str: 安全なファイル名文字列。
-        """
-        return _shared_sanitize_filename(filename, max_length=max_length)
 
     def save(self, result: ExtractionResult, base_dir: Optional[Path] = None) -> bool:
         """抽出結果をテキストファイルに保存する。
@@ -357,8 +349,8 @@ class FileManager:
         # ext4等の255バイト上限を確実に超過する。チャンネル名と動画タイトルの
         # 両方を含めても合計が255バイトに収まるよう、それぞれの上限を100バイトに
         # 抑える(100+1(区切り)+100+4(".txt")=205バイト、安全マージンあり)。
-        safe_channel = self._sanitize_filename(result.channel_name, max_length=100)
-        safe_title = self._sanitize_filename(result.title, max_length=100)
+        safe_channel = _shared_sanitize_filename(result.channel_name, max_length=100)
+        safe_title = _shared_sanitize_filename(result.title, max_length=100)
 
         filename = f"{safe_title}.txt" if safe_channel == "unknown_channel" else f"{safe_channel}_{safe_title}.txt"
         output_path = target_dir / filename

@@ -13,6 +13,9 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
   4. ルートディスク使用率が閾値超過していないか
   5. メモリ使用率が閾値超過していないか
   6. NASがマウントされているか
+  7. 実機構成(crontab / systemdユニット / logrotate設定)がリポジトリの deploy/ 配下と
+     一致しているか(構成ドリフト検知。各READMEの「実機を変更したらこのファイルにも
+     反映してコミットすること」を人手に頼らず機械的に検知する)
 
 異常があれば notification_service 経由でDiscordのerrorチャンネルへ要約を通知する。
 自動復旧(systemctl restart等)は行わない(ランブックのガードレール参照)。
@@ -24,18 +27,20 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
 """
 
 import datetime
+import difflib
+import fcntl
 import glob
 import hashlib
-import json
 import os
 import shutil
 import subprocess
 import sys
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
+from core import state_file
 from core.logger import setup_logging
 from services.notification_service import send_push
 from monitors.log_analyzer import LogAnalyzer
@@ -57,26 +62,58 @@ DEFAULT_LOOKBACK_SEC: int = 3600
 # 通知に載せるログ抜粋の最大文字数
 SNIPPET_LIMIT: int = 400
 
+# === 実機構成のドリフト検知 (チェック7) ===
+# リポジトリで管理している実機構成と、実機に実際に導入されている内容の対応。
+# 導入先パスは各READMEの導入手順(deploy/cron/README.md、
+# MY_HOME_SYSTEM/deploy/systemd/README.md、同 logrotate/README.md)と一致させること。
+REPO_ROOT: str = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+HOME_SYSTEM_DIR: str = os.path.join(REPO_ROOT, "MY_HOME_SYSTEM")
+# リポジトリ管理の crontab (crontab -l と突き合わせる)
+TRACKED_CRONTAB: str = os.path.join(REPO_ROOT, "deploy", "cron", "crontab")
+# (リポジトリ側ディレクトリ, globパターン, 実機側の導入先ディレクトリ)。
+# リポジトリ側ディレクトリ内の各ファイルは、実機側の同名ファイルと突き合わせる。
+TRACKED_CONFIG_DIRS: List[Tuple[str, str, str]] = [
+    (os.path.join(HOME_SYSTEM_DIR, "deploy", "systemd"), "*.service", "/etc/systemd/system"),
+    (os.path.join(HOME_SYSTEM_DIR, "deploy", "logrotate"), "*", "/etc/logrotate.d"),
+]
+# 構成ファイル比較で無視するファイル名(READMEは導入対象ではない)
+CONFIG_IGNORE_BASENAMES: Tuple[str, ...] = ("README.md",)
+# 通知に載せる差分行(+/-)の最大本数(ファイルごと)
+DIFF_LINES_LIMIT: int = 3
+
 
 def _read_marker() -> datetime.datetime:
-    """前回チェック完了時刻を読む。無ければ既定の遡り時間で補完する。"""
-    try:
-        with open(MARKER_FILE, "r", encoding="utf-8") as f:
-            return datetime.datetime.fromisoformat(f.read().strip())
-    except (OSError, ValueError):
-        return datetime.datetime.now() - datetime.timedelta(seconds=DEFAULT_LOOKBACK_SEC)
+    """前回チェック完了時刻を読む。無ければ既定の遡り時間で補完する。
+
+    Issue #661: 読み書きは core/state_file.py へ寄せた(書き込みは tmp + fsync +
+    os.replace の原子的差し替えになる)。ファイル自体が無い/壊れている場合に
+    既定の遡り時間へ倒す方針は従来どおり。
+    """
+    raw = state_file.read_text(MARKER_FILE)
+    if raw:
+        try:
+            return datetime.datetime.fromisoformat(raw)
+        except ValueError:
+            pass
+    return datetime.datetime.now() - datetime.timedelta(seconds=DEFAULT_LOOKBACK_SEC)
 
 
 def _write_marker(dt: datetime.datetime) -> None:
-    with open(MARKER_FILE, "w", encoding="utf-8") as f:
-        f.write(dt.isoformat())
+    state_file.write_text_atomic(MARKER_FILE, dt.isoformat())
+
+
+# Issue #651: 外部コマンドの待ち時間上限(秒)。systemd/journald が応答しない状況で無限待ちになると、
+# 毎時 cron の次回起動と重なって多重起動する(下記 LOCK_FILE と合わせて防ぐ)。
+SUBPROCESS_TIMEOUT_SEC: int = 30
+# 多重起動防止のロックファイル(cron 起動。他の長時間スクリプトと同じ flock LOCK_NB 方式)
+LOCK_FILE: str = os.path.join(config.BASE_DIR, ".health_watch.lock")
 
 
 def check_service_active() -> Optional[str]:
     """home_system.service の稼働確認。activeでなければ異常。"""
     res = subprocess.run(
         ["systemctl", "is-active", WATCH_SERVICE_NAME],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC,
     )
     status = res.stdout.strip() or "unknown"
     if status != "active":
@@ -92,7 +129,7 @@ def check_journal_errors(since: datetime.datetime) -> Optional[str]:
             "--since", since.strftime("%Y-%m-%d %H:%M:%S"),
             "-p", "err..emerg", "-n", "100",
         ],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC,
     )
     lines = [
         ln for ln in res.stdout.strip().splitlines()
@@ -117,8 +154,12 @@ def check_app_logs(since: datetime.datetime) -> Optional[str]:
     # home_system.log 経由で翌回の自分のチェックに引っかかる自己発火を防ぐ)
     analyzer.IGNORE_PATTERNS = analyzer.IGNORE_PATTERNS + ["health_watch"]
     for filepath in glob.glob(os.path.join(config.LOG_DIR, "*.log")):
-        # run_task.shが書くERROR行(タイムスタンプなし)での自己発火も防ぐ
-        if os.path.basename(filepath) == "health_watch.log":
+        # run_task.shが書くERROR行(タイムスタンプなし)での自己発火も防ぐ。
+        # claude_investigate.log は層2フック(_run_investigation_hook)自身の出力先で、
+        # 調査結果の本文に "ERROR"/"Traceback" 等の語が含まれるのが常態のため、これを
+        # 読むと翌回のチェックが「新規エラー」として再発報→再度フック起動→さらに出力、
+        # という自己増殖ループになる(runbook/コメントは除外済みと記していたが未実装だった)。
+        if os.path.basename(filepath) in ("health_watch.log", "claude_investigate.log"):
             continue
         # Issue #339層2調査で発覚: pip_install.log等、行に一切タイムスタンプが
         # 無いファイルは LogAnalyzer._analyze_file 内の effective_dt が常に None に
@@ -154,7 +195,7 @@ def check_disk_usage() -> Optional[str]:
 
 def check_memory_usage() -> Optional[str]:
     """メモリ使用率の閾値チェック(analysis_serviceと同じ free -m 方式)。"""
-    res = subprocess.run(["free", "-m"], capture_output=True, text=True, check=False)
+    res = subprocess.run(["free", "-m"], capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC)
     lines = res.stdout.strip().split("\n")
     if len(lines) < 2:
         raise RuntimeError("free -m の出力を解析できません")
@@ -174,6 +215,102 @@ def check_nas_mount() -> Optional[str]:
     return None
 
 
+def _normalize_config_lines(text: str) -> List[str]:
+    """構成ファイルの比較用に正規化する。
+
+    行末の空白を落とし、空行とコメント行(#始まり)を除く。crontab -l は
+    導入時のファイルをそのまま返すが、crontab -e で編集した場合や環境によって
+    先頭にコメントヘッダが付く場合があるため、実行内容(ジョブ行・設定行)だけを
+    比較対象にする。
+    """
+    lines = []
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line or line.lstrip().startswith("#"):
+            continue
+        lines.append(line)
+    return lines
+
+
+def _config_diff_summary(label: str, expected: str, actual: str) -> Optional[str]:
+    """リポジトリ側(expected)と実機側(actual)の正規化後の差分を1行要約にする。差分が無ければNone。"""
+    exp_lines = _normalize_config_lines(expected)
+    act_lines = _normalize_config_lines(actual)
+    if exp_lines == act_lines:
+        return None
+    changes = [
+        ln for ln in difflib.unified_diff(exp_lines, act_lines, lineterm="", n=0)
+        if (ln.startswith("+") or ln.startswith("-"))
+        and not ln.startswith("+++") and not ln.startswith("---")
+    ]
+    shown = "; ".join(ln[:80] for ln in changes[:DIFF_LINES_LIMIT])
+    more = f" ほか{len(changes) - DIFF_LINES_LIMIT}行" if len(changes) > DIFF_LINES_LIMIT else ""
+    return f"{label}: 差分 {len(changes)}行 ({shown}{more})"
+
+
+def _check_crontab_drift() -> Optional[str]:
+    """crontab -l とリポジトリ管理の deploy/cron/crontab の差分を返す。"""
+    if not os.path.isfile(TRACKED_CRONTAB):
+        return None  # リポジトリ側に無ければ比較対象外(チェックの失敗ではない)
+    with open(TRACKED_CRONTAB, "r", encoding="utf-8") as f:
+        expected = f.read()
+    res = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC)
+    if res.returncode != 0:
+        # "no crontab for <user>" は未登録。それ以外の失敗も未登録相当として報告する
+        detail = (res.stderr or res.stdout).strip().splitlines()
+        reason = detail[0][:80] if detail else f"exit {res.returncode}"
+        return f"crontab: 実機に未登録です ({reason})"
+    return _config_diff_summary("crontab", expected, res.stdout)
+
+
+def _check_host_files_drift() -> List[str]:
+    """systemdユニット・logrotate設定など、リポジトリ管理ファイルと実機側ファイルの差分一覧を返す。"""
+    findings: List[str] = []
+    for repo_dir, pattern, host_dir in TRACKED_CONFIG_DIRS:
+        for repo_path in sorted(glob.glob(os.path.join(repo_dir, pattern))):
+            name = os.path.basename(repo_path)
+            if name in CONFIG_IGNORE_BASENAMES or not os.path.isfile(repo_path):
+                continue
+            host_path = os.path.join(host_dir, name)
+            with open(repo_path, "r", encoding="utf-8") as f:
+                expected = f.read()
+            try:
+                with open(host_path, "r", encoding="utf-8") as f:
+                    actual = f.read()
+            except FileNotFoundError:
+                findings.append(f"{host_path}: 実機に未導入です")
+                continue
+            except OSError as e:
+                findings.append(f"{host_path}: 読み取れません ({e.__class__.__name__})")
+                continue
+            summary = _config_diff_summary(host_path, expected, actual)
+            if summary:
+                findings.append(summary)
+    return findings
+
+
+def check_deploy_config_drift() -> Optional[str]:
+    """実機構成(crontab / systemd / logrotate)がリポジトリの deploy/ 配下と一致しているか。
+
+    各READMEは「実機の設定を変更した場合は、このファイルにも反映してコミットすること」
+    と人手の同期を前提にしているが、忘れると故障時の復旧手順(リポジトリからの再導入)が
+    実機の実態と食い違う。比較はコメント・空行を除いた実行内容のみで行い、
+    差分・未導入・未登録があれば異常として報告する(自動で書き戻しはしない)。
+    """
+    findings: List[str] = []
+    crontab_finding = _check_crontab_drift()
+    if crontab_finding:
+        findings.append(crontab_finding)
+    findings.extend(_check_host_files_drift())
+    if findings:
+        return (
+            "実機構成がリポジトリ(deploy/)と一致しません:\n"
+            + "\n".join(f"  - {f}" for f in findings)
+            + "\n  → 実機側が正なら deploy/ 配下へ反映してコミット、リポジトリ側が正なら各READMEの導入手順で再導入してください"
+        )
+    return None
+
+
 def _should_notify(anomaly_keys: List[str], now: datetime.datetime) -> bool:
     """同一の異常セットが継続している間の再通知を抑制する。
 
@@ -181,18 +318,21 @@ def _should_notify(anomaly_keys: List[str], now: datetime.datetime) -> bool:
     が経過するまで再通知しない。セットが変化したら即座に通知する。
     """
     fingerprint = hashlib.sha256("|".join(sorted(anomaly_keys)).encode()).hexdigest()
-    try:
-        with open(NOTIFY_STATE_FILE, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        if state.get("fingerprint") == fingerprint:
+    # Issue #661: 状態ファイルの読み書きは core/state_file.py に集約した。
+    # 壊れている/読めない場合に「通知する」側へ倒す方針は従来どおり
+    # (異常の通知を取りこぼすより、重複して通知する方が安全側)。
+    state = state_file.read_json(NOTIFY_STATE_FILE)
+    if isinstance(state, dict) and state.get("fingerprint") == fingerprint:
+        try:
             last = datetime.datetime.fromisoformat(state["last_notified"])
             if (now - last).total_seconds() < RENOTIFY_INTERVAL_SEC:
                 return False
-    except (OSError, ValueError, KeyError):
-        pass
+        except (KeyError, TypeError, ValueError):
+            pass
 
-    with open(NOTIFY_STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump({"fingerprint": fingerprint, "last_notified": now.isoformat()}, f)
+    state_file.write_json_atomic(
+        NOTIFY_STATE_FILE, {"fingerprint": fingerprint, "last_notified": now.isoformat()}
+    )
     return True
 
 
@@ -203,7 +343,7 @@ def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None
     設定されている場合、異常サマリを標準入力で渡してスクリプトを
     fire-and-forget のサブプロセスとして起動する(完了は待たない。
     調査は数分かかりうるが、毎時cronの層1を長時間ブロックしないため)。
-    多重起動防止(flock)・タイムアウト・--max-turns 等のガードレールは
+    多重起動防止(flock)・タイムアウト・--max-budget-usd 等のガードレールは
     フックスクリプト側が持つ。本関数は _should_notify と同じ抑制の内側で
     呼ばれるため、同一異常セット継続中の再発火も通知と同じ6時間間隔に収まる。
     フックの起動失敗は層1の検知・通知を巻き込まない(ログのみ)。
@@ -221,7 +361,7 @@ def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None
     )
     try:
         # フックの出力はrun_task.sh経由の自ログではなく専用ファイルへ残す
-        # (check_app_logsはhealth_watch関連行を除外するため自己発火もしない)
+        # (check_app_logs はこのファイル名を明示的に除外するため自己発火しない)
         out_path = os.path.join(config.LOG_DIR, "claude_investigate.log")
         with open(out_path, "a", encoding="utf-8") as out:
             proc = subprocess.Popen(
@@ -251,6 +391,7 @@ def run_checks() -> int:
         ("disk", check_disk_usage),
         ("memory", check_memory_usage),
         ("nas", check_nas_mount),
+        ("deploy_config", check_deploy_config_drift),
     ]
 
     anomalies: List[str] = []
@@ -296,5 +437,24 @@ def run_checks() -> int:
     return exit_code
 
 
+def main() -> int:
+    """エントリポイント。flock(LOCK_NB)で多重起動を防いでから run_checks() を実行する。
+
+    Issue #651: 以前は多重起動防止が無く、外部コマンド(systemctl/journalctl)の応答待ちで前回の
+    実行が残っていると、毎時 cron の次回起動が重なって二重に通知・マーカー更新していた。
+    ロックが取れない場合は前回がまだ動いているとみなして 0 で終了する(異常ではない)。
+    """
+    lock_fd = os.open(LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            logger.warning("前回の health_watch がまだ実行中のためスキップします")
+            return 0
+        return run_checks()
+    finally:
+        os.close(lock_fd)
+
+
 if __name__ == "__main__":
-    sys.exit(run_checks())
+    sys.exit(main())

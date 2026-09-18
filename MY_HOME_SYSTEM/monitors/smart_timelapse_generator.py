@@ -642,8 +642,12 @@ class Uploader:
     def _send_completion_notice(self, webhook_url: str, count: int):
         try:
             requests.post(webhook_url, data={"content": f"✅ {count}ファイルの送信が完了しました。"}, timeout=10)
-        except Exception:
-            pass
+        except Exception as e:
+            # #661: 以前は `except Exception: pass` で完全に黙殺しており、完了通知が
+            # 届かない原因(Webhook URL の失効・レート制限・ネットワーク断)が
+            # どこにも残らなかった。通知自体は本処理ではないので失敗しても続行するが、
+            # 記録は残す(URL のトークンは載せない)。
+            logger.warning(f"⚠️ 完了通知の送信に失敗しました(処理自体は成功しています): {type(e).__name__}")
 
 # ==========================================
 # Main

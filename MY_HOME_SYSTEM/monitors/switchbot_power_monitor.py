@@ -1,9 +1,7 @@
 # MY_HOME_SYSTEM/monitors/switchbot_power_monitor.py
 import asyncio
-import fcntl
 import sys
 import os
-import json
 from typing import Dict, Any, Optional, List, Set
 
 # プロジェクトルートへのパス解決
@@ -12,6 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from services import switchbot_service as sb_tool
 from services import sensor_service
+from core import state_file
 from core.logger import setup_logging
 
 logger = setup_logging("device_monitor")
@@ -38,31 +37,22 @@ def _load_persisted_states() -> Dict[str, Dict[str, Any]]:
     # #449: 状態ファイルは通常scheduler_boot.pyにより逐次実行される前提だが、
     # 手動実行等でこの前提が崩れた場合に備え、読み取り中に他プロセスの書き込みと
     # 競合しないようflock(共有ロック)で保護する。
-    try:
-        if os.path.exists(_STATE_FILE):
-            with open(_STATE_FILE, "r", encoding="utf-8") as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-                try:
-                    return json.load(f)
-                finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to load persisted device states: {e}")
-    return {}
+    # Issue #661: ここにあった flock + json.load の実装は core/state_file.py へ
+    # 移した(このモジュールの実装が同ファイルの参照実装になっている)。
+    # 壊れている・読めない場合に {} (全デバイス初期状態扱い)へ倒す方針は従来どおり。
+    states = state_file.read_json(_STATE_FILE, default={})
+    return states if isinstance(states, dict) else {}
 
 
 def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:
     # #449: 書き込み中に他プロセスの読み取り/書き込みと競合しないよう
     # flock(排他ロック)で保護する。
-    try:
-        with open(_STATE_FILE, "w", encoding="utf-8") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
-                json.dump(states, f)
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to persist device states: {e}")
+    # ただし open(..., "w") はロック取得より前にファイルを切り詰めるため、その瞬間に
+    # LOCK_SH で読んだ側は空ファイル → JSONDecodeError → {} (全デバイス初期状態扱い)
+    # になっていた。一時ファイルに書き切ってから os.replace で原子的に差し替える
+    # (読み手は常に「旧の完全な内容」か「新の完全な内容」のどちらかを見る)。
+    # Issue #661: この方式そのものを core/state_file.write_json_atomic へ集約した。
+    state_file.write_json_atomic(_STATE_FILE, states)
 
 def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[str, Any]]:
     """SwitchBot APIからステータスを取得する（同期処理ラッパー）。"""

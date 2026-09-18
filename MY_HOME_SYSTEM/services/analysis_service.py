@@ -6,11 +6,12 @@ import shutil
 import subprocess
 from datetime import datetime, timedelta, date
 import pytz
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import pandas as pd
 
 import config
+from core.database import RO_CONNECT_TIMEOUT_SEC
 from core.logger import setup_logging
 
 # ロガー設定
@@ -33,9 +34,14 @@ def get_ro_db_connection() -> sqlite3.Connection:
     """
     読み取り専用でデータベース接続を取得します。
     Service層内部またはView層でキャッシュする際に使用します。
+
+    #661: タイムアウトは core/database.RO_CONNECT_TIMEOUT_SEC(30秒)に揃える。
+    以前は10秒で、バックアップや保持期間削除と重なると "database is locked" になりえた。
+    呼び出し元が接続オブジェクト自体をキャッシュするため、ここはコンテキストマネージャ
+    (get_ro_connection)ではなく接続を返す形のままにしている。
     """
     return sqlite3.connect(
-        f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True, timeout=10.0
+        f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True, timeout=RO_CONNECT_TIMEOUT_SEC
     )
 
 # #456: naive/aware混在カラムをベクトル化で処理するため、末尾のtzオフセット
@@ -435,10 +441,15 @@ def get_disk_usage() -> Optional[Dict[str, float]]:
         logger.error(f"Disk usage check failed: {e}")
         return None
 
+# Issue #651: ダッシュボードから呼ぶ外部コマンド(free/journalctl)の待ち時間上限(秒)。
+# journalctl -n 5000 が応答しない場合に Streamlit のリクエストを無限に固めない。
+SUBPROCESS_TIMEOUT_SEC: int = 30
+
+
 def get_memory_usage() -> Optional[Dict[str, float]]:
     """メモリ使用状況を取得"""
     try:
-        res = subprocess.run(["free", "-m"], capture_output=True, text=True, check=False)
+        res = subprocess.run(["free", "-m"], capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC)
         lines = res.stdout.strip().split("\n")
         if len(lines) >= 2:
             parts = lines[1].split()
@@ -469,7 +480,7 @@ def get_system_logs(lines: int = 50, priority: Optional[str] = None, target_date
         if priority:
             cmd.extend(["-p", priority])
 
-        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC)
         return res.stdout
     except Exception as e:
         return f"ログ取得エラー: {e}"

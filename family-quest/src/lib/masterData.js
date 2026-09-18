@@ -10,10 +10,8 @@ export const INITIAL_USERS = [
         exp: 0,
         nextLevelExp: 100,
         gold: 0,
-        hp: 1,
-        maxHp: 1,
+        // #530: hp/maxHp/inventory は #327 で User 型から削除済みのため撤去
         avatar: '🔌',
-        inventory: []
     }
 ];
 

@@ -12,7 +12,7 @@ from unittest.mock import patch
 # プロジェクトルートにパスを通す
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import config
 from monitors.nas_monitor import NasMonitor
 
@@ -414,7 +414,7 @@ class TestNasMonitorSaveToDbWritesNasRecords:
 
         monitor.save_to_db(ping_ok=True, mount_ok=True, usage=usage)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT * FROM nas_records ORDER BY id DESC LIMIT 1"
             ).fetchone()
@@ -434,7 +434,7 @@ class TestNasMonitorSaveToDbWritesNasRecords:
 
         monitor.save_to_db(ping_ok=False, mount_ok=False, usage=None)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT * FROM nas_records ORDER BY id DESC LIMIT 1"
             ).fetchone()
@@ -451,7 +451,7 @@ class TestNasMonitorSaveToDbWritesNasRecords:
 
         monitor.save_to_db(ping_ok=True, mount_ok=True, usage=usage)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT * FROM device_records WHERE device_name='NAS_Monitor' ORDER BY id DESC LIMIT 1"
             ).fetchone()
@@ -463,3 +463,102 @@ class TestNasMonitorSaveToDbWritesNasRecords:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNasMonitorDailyReportOncePerDay:
+    """日次レポートは「hour == 8」の一致判定だと、scheduler の実行間隔(3600〜3610s)の
+    ずれで 7:5x → 9:0x になった日に丸ごと飛んでいた(#388 で保持期間削除側だけ修正済み)。
+    「今日まだ送っていない かつ 8時以降」で判定し、送信後に last_report_date を保存すること。
+
+    Issue #592: この「8時」はJSTの8時を意図しており、monitors/nas_monitor.py は
+    core.utils.get_now_jst() で明示的にJST時刻を取得するようになった。
+    freeze_time() はタイムゾーン指定の無い文字列をUTCとして解釈するため、
+    以下の各テストはJSTでの意図した時刻から9時間引いたUTC時刻を指定している
+    (例: JST 09:05 を意図する場合は freeze_time("... 00:05:00"))。"""
+
+    def _make_monitor(self, monkeypatch, state):
+        monitor = NasMonitor()
+        monkeypatch.setattr(monitor, "check_ping", lambda: True)
+        monkeypatch.setattr(monitor, "check_mount", lambda: True)
+        monkeypatch.setattr(monitor, "check_write_permission", lambda: True)
+        monkeypatch.setattr(monitor, "get_disk_usage", lambda: {"percent": 50.0, "used_gb": 1, "total_gb": 2, "free_gb": 1})
+        monkeypatch.setattr(monitor, "save_to_db", lambda *a, **k: None)
+        monkeypatch.setattr(monitor, "run_retention_cleanup", lambda: None)
+        monkeypatch.setattr(monitor, "_load_state", lambda: state)
+        monkeypatch.setattr(monitor, "_save_state", lambda s: state.update(s))
+        return monitor
+
+    def test_report_is_sent_at_9am_when_8am_run_was_skipped(self, monkeypatch):
+        from freezegun import freeze_time
+        import monitors.nas_monitor as nm
+        state = {"is_healthy": True}
+        sent = []
+        monkeypatch.setattr(nm, "send_push", lambda *a, **k: sent.append(k.get("channel")))
+        with freeze_time("2026-09-06 00:05:00"):  # JST 09:05
+            self._make_monitor(monkeypatch, state).run()
+        assert sent == ["report"]
+        assert state["last_report_date"] == "2026-09-06"
+
+    def test_report_is_not_sent_twice_on_the_same_day(self, monkeypatch):
+        from freezegun import freeze_time
+        import monitors.nas_monitor as nm
+        state = {"is_healthy": True, "last_report_date": "2026-09-06", "last_cleanup_date": "2026-09-06"}
+        sent = []
+        monkeypatch.setattr(nm, "send_push", lambda *a, **k: sent.append(k.get("channel")))
+        with freeze_time("2026-09-06 03:05:00"):  # JST 12:05
+            self._make_monitor(monkeypatch, state).run()
+        assert sent == []
+
+    def test_report_is_not_sent_before_8am(self, monkeypatch):
+        from freezegun import freeze_time
+        import monitors.nas_monitor as nm
+        state = {"is_healthy": True}
+        sent = []
+        monkeypatch.setattr(nm, "send_push", lambda *a, **k: sent.append(k.get("channel")))
+        with freeze_time("2026-09-05 22:55:00"):  # JST 09/06 07:55
+            self._make_monitor(monkeypatch, state).run()
+        assert sent == []
+        assert "last_report_date" not in state
+
+
+class TestFallbackSnapshotsAreCleanedUp:
+    """Issue #537: NAS 障害時の退避先 FALLBACK_ROOT/assets/snapshots も保持期間削除の対象にする。"""
+
+    def test_fallback_snapshot_dir_is_a_retention_target(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "FALLBACK_ROOT", str(tmp_path / "fb"))
+        monitor = NasMonitor()
+        seen = []
+        monkeypatch.setattr(monitor, "cleanup_old_files", lambda d, days, ext: seen.append((d, ext)) or {"deleted_count": 0, "freed_gb": 0.0})
+        monitor.run_retention_cleanup()
+        assert (str(tmp_path / "fb" / "assets" / "snapshots"), (".jpg", ".jpeg")) in seen
+
+
+class TestNasMonitorStateFileRobustness(unittest.TestCase):
+    """Issue #653: 状態ファイルの原子的な書き込みと、破損時の安全側フォールバック。"""
+
+    def test_corrupted_state_file_falls_back_to_unhealthy(self):
+        """書き込み途中(電源断等)で壊れた JSON が残っていた場合、「正常」ではなく
+        「異常継続」扱いにする(障害中だった事実を失って復旧同期をスキップしない)。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(config, "BASE_DIR", tmp):
+                monitor = NasMonitor()
+                os.makedirs(os.path.dirname(monitor.state_file), exist_ok=True)
+                with open(monitor.state_file, "w", encoding="utf-8") as f:
+                    f.write('{"is_healthy": fal')  # 途中で切れた JSON
+                self.assertEqual(monitor._load_state(), {"is_healthy": False})
+
+    def test_missing_state_file_is_treated_as_healthy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(config, "BASE_DIR", tmp):
+                self.assertEqual(NasMonitor()._load_state(), {"is_healthy": True})
+
+    def test_save_state_writes_atomically_and_leaves_no_temp_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(config, "BASE_DIR", tmp):
+                monitor = NasMonitor()
+                monitor._save_state({"is_healthy": False, "last_cleanup_date": "2026-09-16"})
+                state_dir = os.path.dirname(monitor.state_file)
+                self.assertEqual(sorted(os.listdir(state_dir)), ["nas_monitor_state.json"])
+                self.assertEqual(
+                    monitor._load_state(), {"is_healthy": False, "last_cleanup_date": "2026-09-16"}
+                )

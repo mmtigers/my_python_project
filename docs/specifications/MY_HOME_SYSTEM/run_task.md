@@ -6,6 +6,7 @@
 | 言語 | Bash (※指示にはPython/Reactとありましたが、提供されたファイルはシェルスクリプトです) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a1d2738` |
 
 ## 関連ドキュメント
 
@@ -146,11 +147,20 @@ graph TD
 * `PROJECT_ROOT` および `DEVELOP_ROOT` にハードコードされた絶対パス (`/home/masahiro/develop/...`) が使用されており、実行環境（ユーザー名など）が変わると動作しません。
 * 第一引数 (`$1`) に対して、パスや拡張子の検証が行われていないため、任意のコマンドや意図しないファイルが実行される可能性があります。
 
+* **（2026-09-06 品質監査で修正）** `PYTHONPATH` の組み立てを `"${DEVELOP_ROOT}:${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"` に変更した。cron では `PYTHONPATH` が未設定のため、以前の `...:${PYTHONPATH}` は末尾に空要素(=カレントディレクトリ)を暗黙の import ルートとして加えていた。
+* 根拠: (行番号: 31 / 抜粋: "export PYTHONPATH=\"${DEVELOP_ROOT}:${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}\"")
+
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | 実行されるPythonスクリプトの実態と引数 | 本ファイルは汎用的なラッパーであり、具体的に何の処理が実行されるかは渡される引数に依存するため。（リポジトリ内を`crontab`, `*.service`等のファイル名および`run_task.sh`という文字列で検索したが、呼び出し元のCron設定ファイルやsystemdユニットファイルは存在せず、`run_task.sh`を参照している他ファイルも見つからなかった。第一引数として渡される具体的なPythonスクリプトも実行時のコマンドライン引数に依存するため単一のファイルに特定できず、解消不可） | 呼び出し元の設定ファイル（Cron等）および各対象Pythonスクリプト |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 実行されるPythonスクリプトの実態と引数 | **（Issue #528で解消。「リポジトリ内に呼び出し元のCron設定が存在せず解消不可」という旧版の結論は現在は誤り）** 実機(Raspberry Pi)の crontab が`deploy/cron/crontab`としてリポジトリ管理下に入り(`deploy/cron/README.md`が「実機(Raspberry Pi)の `masahiro` ユーザーの crontab を、故障時の復旧・変更履歴管理のためにこのリポジトリでも管理する」「対象ジョブは `MY_HOME_SYSTEM`・`DDD`・`docs` にまたがるため…リポジトリルートの `deploy/` 配下で管理する」と明記)、本スクリプトの実際の呼び出し元と引数がすべて特定できるようになった。現行の crontab から本スクリプトを起動しているのは次の5件である: `10 * * * *`→`monitors/health_watch.py`(ラズパイ一次ヘルスチェック、Issue #339 層1、5行目)、`50 8 * * 0`→`monitors/log_analyzer.py`(週間ログ分析・日曜08:50、8行目)、`30 8 * * 1`→`weekly_analyze_report.py`(週間レポート・月曜08:30、14行目)、`0 4 * * *`→`services/backup_service.py`(DBバックアップ・毎日04:00、18行目)、`0 2 * * *`→`DDD/batch_download_discord.py`(一括ダウンロード・毎日02:00、27行目)。第1引数は`monitors/health_watch.py`のような`PROJECT_ROOT`相対パスと`/home/masahiro/develop/DDD/batch_download_discord.py`のような絶対パスの両方が実際に使われており(本スクリプトは`cd "${PROJECT_ROOT}"`後にそのまま`"${VENV_PYTHON}" "${SCRIPT_NAME}"`へ渡すためどちらでも動作する)、**`MY_HOME_SYSTEM`配下だけでなく`DDD`配下のスクリプトも本ラッパー経由で起動される**点が重要である(`PYTHONPATH`に`DEVELOP_ROOT`を加える処理が、DDD側から`core.*`をimportする実依存を成立させている)。第2引数以降を渡す呼び出しは現時点の crontab には存在しない。なお crontab には本スクリプトを経由**しない**起動も併存する(`monitors/daily_timelapse_job.py`・`DDD/newface_monitor.py`・`tools/keep_alive_*.sh`は`.venv/bin/python`等を直接叩く)ため、「全cronジョブが run_task.sh 経由」ではない。 | 直接ソース確認: `deploy/cron/crontab`（全体、特に5・8・14・18・27行目）, `deploy/cron/README.md:1-16`, `MY_HOME_SYSTEM/run_task.sh`（全体）（参考: [health_watch.md](./health_watch.md)・[log_analyzer.md](./log_analyzer.md)・[weekly_analyze_report.md](./weekly_analyze_report.md)・[backup_service.md](./backup_service.md)・[batch_download_discord.md](../DDD/batch_download_discord.md)） |
 
 ## 10. 自己検証結果
 

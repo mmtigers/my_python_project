@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import types
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
@@ -20,15 +20,21 @@ from freezegun import freeze_time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
-import config
-from services import notification_service, switchbot_service
+from core.utils import get_now_iso
+from core.database import get_db_cursor
 from services import quest_service as quest_service_module
-from services.quest_service import QuestService, GameSystem
+from services.quest_service import ApprovalService, QuestService, GameSystem
+# Issue #550でGameSystem/QuestServiceの実装はservices/quest/配下へ分割された。
+# loggerはモジュールごとに束縛された別オブジェクトの属性ではなく、各モジュールの
+# グローバル名として個別にimportされているため、`logger`自体を差し替える
+# (patch.objectで名前を丸ごと置き換える)テストは、実際にログ出力するメソッドが
+# 定義されているモジュールを直接指定する必要がある。
+from services.quest import game_system as game_system_impl_module
+from services.quest import quest_service as quest_service_impl_module
 
 
 def _seed_user_and_quest(gold_gain=10, exp_gain=20, day_of_week=None):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES "
             "('dad', 'Dad', 'Warrior', 5, 0, 100)"
@@ -42,7 +48,7 @@ def _seed_user_and_quest(gold_gain=10, exp_gain=20, day_of_week=None):
 
 class TestProcessRejectQuest:
     def test_parent_can_reject_pending_quest(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
@@ -58,11 +64,11 @@ class TestProcessRejectQuest:
             """)
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
-        result = quest_service.process_reject_quest("dad", history_id)
+        approval_service = ApprovalService()
+        result = approval_service.process_reject_quest("dad", history_id)
 
         assert result["status"] == "rejected"
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute("SELECT * FROM quest_history WHERE id=?", (history_id,)).fetchone()
         # 却下しても履歴行は削除されず、status='rejected' として残ること。
         # (以前はDELETEしていたため status='rejected' は実際には生成されず、
@@ -72,18 +78,18 @@ class TestProcessRejectQuest:
         assert row["status"] == "rejected"
 
     def test_reject_nonexistent_history_returns_404(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult')"
             )
-        quest_service = QuestService()
+        approval_service = ApprovalService()
         with pytest.raises(HTTPException) as exc_info:
-            quest_service.process_reject_quest("dad", 999999)
+            approval_service.process_reject_quest("dad", 999999)
         assert exc_info.value.status_code == 404
 
     def test_reject_already_processed_history_returns_400(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
@@ -95,9 +101,9 @@ class TestProcessRejectQuest:
             """)
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
+        approval_service = ApprovalService()
         with pytest.raises(HTTPException) as exc_info:
-            quest_service.process_reject_quest("dad", history_id)
+            approval_service.process_reject_quest("dad", history_id)
         assert exc_info.value.status_code == 400
 
     def test_rejected_history_is_excluded_from_family_chronicle_total_quests(self, isolated_db):
@@ -105,7 +111,7 @@ class TestProcessRejectQuest:
         ことで、UserService.get_family_chronicle の totalQuests(COUNT(*) FROM
         quest_history)が却下された申請まで「達成したクエスト数」として誤集計しない
         よう明示的な除外が必要になった。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
@@ -125,8 +131,8 @@ class TestProcessRejectQuest:
             """)
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
-        quest_service.process_reject_quest("dad", history_id)
+        approval_service = ApprovalService()
+        approval_service.process_reject_quest("dad", history_id)
 
         game_system = GameSystem()
         chronicle = game_system.user_service.get_family_chronicle()
@@ -157,7 +163,7 @@ class TestGetLockUserIdsForHistory:
         )
 
     def test_no_linked_history_returns_only_the_owner(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             self._seed_users(cur)
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
@@ -165,13 +171,13 @@ class TestGetLockUserIdsForHistory:
             """)
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
-        lock_user_ids = quest_service._get_lock_user_ids_for_history(history_id)
+        approval_service = ApprovalService()
+        lock_user_ids = approval_service._get_lock_user_ids_for_history(history_id)
 
         assert lock_user_ids == ['son']
 
     def test_linked_history_includes_the_partner(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             self._seed_users(cur)
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
@@ -184,31 +190,31 @@ class TestGetLockUserIdsForHistory:
             """, (partner_history_id,))
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
-        lock_user_ids = quest_service._get_lock_user_ids_for_history(history_id)
+        approval_service = ApprovalService()
+        lock_user_ids = approval_service._get_lock_user_ids_for_history(history_id)
 
         assert lock_user_ids == ['son', 'daughter']
 
     def test_missing_history_without_primary_user_id_raises_404(self, isolated_db):
         """process_approve_quest/process_reject_quest の従来の挙動: primary_user_idを
         指定しない呼び出しでは、存在しないhistory_idに対して404を送出する。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             self._seed_users(cur)
 
-        quest_service = QuestService()
+        approval_service = ApprovalService()
         with pytest.raises(HTTPException) as exc_info:
-            quest_service._get_lock_user_ids_for_history(999999)
+            approval_service._get_lock_user_ids_for_history(999999)
         assert exc_info.value.status_code == 404
 
     def test_missing_history_with_primary_user_id_does_not_raise(self, isolated_db):
         """process_cancel_questの従来の挙動: primary_user_idを指定した場合、
         history_idの存在確認自体は_process_cancel_quest_locked側に委ねるため、
         ここでは404を送出せずprimary_user_idのみを返す。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             self._seed_users(cur)
 
-        quest_service = QuestService()
-        lock_user_ids = quest_service._get_lock_user_ids_for_history(999999, primary_user_id='son')
+        approval_service = ApprovalService()
+        lock_user_ids = approval_service._get_lock_user_ids_for_history(999999, primary_user_id='son')
 
         assert lock_user_ids == ['son']
 
@@ -226,7 +232,7 @@ class TestProcessRejectQuestConcurrentWithApprove:
     """
 
     def test_reject_loses_race_cleanly_when_approve_completes_first(self, isolated_db, monkeypatch):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
@@ -242,14 +248,14 @@ class TestProcessRejectQuestConcurrentWithApprove:
             """)
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
+        approval_service = ApprovalService()
 
         # 承認処理がquest_usersへの報酬加算(_apply_quest_rewards)後、コミット前に
         # 少し待機するようにする。承認はロック取得後この時間だけロックを保持し
         # 続けるため、その間に却下側がロック取得を試みてブロックされることを
         # 利用し、確実に「承認が先にロックを取得して完走し終えてから却下が
         # 動き出す」という、Issueが報告した不整合が起きうる順序を再現する。
-        original_apply_rewards = quest_service._apply_quest_rewards
+        original_apply_rewards = approval_service._apply_quest_rewards
 
         def _slow_apply_rewards(cur, user, quest, now_iso, history_id=None, override_rewards=None):
             result = original_apply_rewards(
@@ -258,20 +264,20 @@ class TestProcessRejectQuestConcurrentWithApprove:
             time.sleep(0.2)
             return result
 
-        monkeypatch.setattr(quest_service, "_apply_quest_rewards", _slow_apply_rewards)
+        monkeypatch.setattr(approval_service, "_apply_quest_rewards", _slow_apply_rewards)
 
         results = {}
         errors = {}
 
         def _approve():
             try:
-                results["approve"] = quest_service.process_approve_quest("dad", history_id)
+                results["approve"] = approval_service.process_approve_quest("dad", history_id)
             except Exception as e:  # noqa: BLE001 - スレッド内例外を主スレッドへ伝える
                 errors["approve"] = e
 
         def _reject():
             try:
-                results["reject"] = quest_service.process_reject_quest("dad", history_id)
+                results["reject"] = approval_service.process_reject_quest("dad", history_id)
             except Exception as e:  # noqa: BLE001
                 errors["reject"] = e
 
@@ -285,7 +291,7 @@ class TestProcessRejectQuestConcurrentWithApprove:
 
         assert not t_approve.is_alive() and not t_reject.is_alive()
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             hist = cur.execute("SELECT * FROM quest_history WHERE id=?", (history_id,)).fetchone()
             user = cur.execute("SELECT * FROM quest_users WHERE user_id='daughter'").fetchone()
 
@@ -316,6 +322,7 @@ class TestIsWithinResetPeriod:
 
     def setup_method(self):
         self.quest_service = QuestService()
+        self.approval_service = ApprovalService()
 
     def test_daily_true_for_today(self):
         today_jst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime("%Y-%m-%d")
@@ -351,7 +358,7 @@ class TestIsWithinResetPeriod:
 
     def test_naive_timestamp_late_at_night_is_interpreted_as_jst_not_utc(self):
         """M-1-4回帰防止: tzinfoの無いレガシー完了時刻は、保存規約
-        (common.get_now_iso)に合わせてJSTとして記録されているとみなす。
+        (get_now_iso)に合わせてJSTとして記録されているとみなす。
         以前はUTCとみなして変換していたため、日付境界付近(夜遅く)の
         naiveタイムスタンプが日付跨ぎで誤判定されていた
         (23:00をUTCとみなして+9hすると翌日05:00になってしまう)。"""
@@ -362,9 +369,10 @@ class TestIsWithinResetPeriod:
 class TestCalculateQuestBoost:
     def setup_method(self):
         self.quest_service = QuestService()
+        self.approval_service = ApprovalService()
 
     def test_non_daily_quest_type_has_no_boost(self, isolated_db):
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES "
                 "(101, 'T', 'infinite', 10, 5)"
@@ -375,14 +383,14 @@ class TestCalculateQuestBoost:
 
     def test_day_of_week_limited_quest_has_no_boost(self, isolated_db):
         _seed_user_and_quest(day_of_week="Mon")
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id=101").fetchone()
             boost = self.quest_service.calculate_quest_boost(cur, "dad", quest)
         assert boost == {"gold": 0, "exp": 0}
 
     def test_no_prior_history_has_no_boost(self, isolated_db):
         _seed_user_and_quest()
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id=101").fetchone()
             boost = self.quest_service.calculate_quest_boost(cur, "dad", quest)
         assert boost == {"gold": 0, "exp": 0}
@@ -398,12 +406,12 @@ class TestCalculateQuestBoost:
         _seed_user_and_quest(gold_gain=100, exp_gain=100)
         JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
         three_days_ago = (datetime.datetime.now(JST) - datetime.timedelta(days=3)).isoformat()
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                 VALUES ('dad', 101, 'DailyQuest', 100, 100, ?, 'approved')
             """, (three_days_ago,))
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id=101").fetchone()
             boost = self.quest_service.calculate_quest_boost(cur, "dad", quest)
         # days_diff=3 -> missed_days=2 -> bonus_ratio=0.2
@@ -412,12 +420,12 @@ class TestCalculateQuestBoost:
     def test_bonus_ratio_is_capped_at_one(self, isolated_db):
         _seed_user_and_quest(gold_gain=100, exp_gain=100)
         long_ago = (datetime.datetime.now() - datetime.timedelta(days=30)).isoformat()
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                 VALUES ('dad', 101, 'DailyQuest', 100, 100, ?, 'approved')
             """, (long_ago,))
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id=101").fetchone()
             boost = self.quest_service.calculate_quest_boost(cur, "dad", quest)
         assert boost == {"gold": 100, "exp": 100}
@@ -436,13 +444,13 @@ class TestCalculateQuestBoost:
         missed_days=1 -> ratio=0.1 になってしまう(修正前の不具合)。
         """
         _seed_user_and_quest(gold_gain=100, exp_gain=100)
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                 VALUES ('dad', 101, 'DailyQuest', 100, 100, '2026-08-17T12:00:00', 'approved')
             """)
         with freeze_time("2026-08-19 18:00:00", tz_offset=0):
-            with common.get_db_cursor() as cur:
+            with get_db_cursor() as cur:
                 quest = cur.execute("SELECT * FROM quest_master WHERE quest_id=101").fetchone()
                 boost = self.quest_service.calculate_quest_boost(cur, "dad", quest)
         assert boost == {"gold": 20, "exp": 20}
@@ -450,7 +458,7 @@ class TestCalculateQuestBoost:
 
 class TestGetAllViewDataTargetedQuestBoost:
     def test_targeted_quest_includes_bonus_fields(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES "
                 "('dad', 'Dad', 'Warrior', 1, 0, 0)"
@@ -484,7 +492,7 @@ class TestGetAllViewDataUsersOrder:
         # あえて quest_data.USERS の宣言順(dad, mom, son, daughter)とは異なる
         # 順序でINSERTし、かつ user_id のアルファベット順(dad, daughter, mom, son)
         # とも異なる順序にすることで、DBの内部的な返却順に依存していないことを確認する。
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             for user_id, name in [
                 ("son", "Son"), ("daughter", "Daughter"), ("dad", "Dad"), ("mom", "Mom"),
             ]:
@@ -543,7 +551,7 @@ class TestGetAllViewDataSharedQuestBoostViewer:
         ビューでviewer_user_idを渡さない/兄妹でない場合)、'siblings'クエストは
         兄妹のいずれかのuser_idの履歴で正しくボーナスが算出されるべきで、
         以前のように常に0になってはならない。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             self._seed_shared_quest_with_history(cur)
 
         game_system = GameSystem()
@@ -558,7 +566,7 @@ class TestGetAllViewDataSharedQuestBoostViewer:
         """F-L6(#412): viewer_user_idが兄妹のどちらでもない(親等)場合も、
         'siblings'クエストのボーナスは兄妹の履歴で算出されるべきで、
         親自身にはこのクエストの履歴が無いため以前は常に0になっていた。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             self._seed_shared_quest_with_history(cur)
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
@@ -578,7 +586,7 @@ class TestGetAllViewDataSharedQuestBoostViewer:
         「今日」判定とずれてCI実行環境(UTC)かつ実行時刻がJST 0時〜9時に相当する
         時間帯だとdays_diffが決定的にずれていた。_seed_shared_quest_with_history
         自体をJST基準のtimezone-awareな「今」でseedするよう修正済み。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             self._seed_shared_quest_with_history(cur)
 
         game_system = GameSystem()
@@ -622,7 +630,7 @@ class TestSyncMasterData:
         """Issue #330の回帰テスト: レガシー実行時ALTERを退役させた後も、
         migrations経由で構築されたDB(isolated_db)には role/reset_period/description が
         最初から存在し、sync_master_data がrole値を正しく投入できること。"""
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             assert "role" in self._column_names(cur, "quest_users")
             assert "reset_period" in self._column_names(cur, "quest_master")
             assert "description" in self._column_names(cur, "reward_master")
@@ -631,7 +639,7 @@ class TestSyncMasterData:
         result = game_system.sync_master_data()
 
         assert result["status"] == "synced"
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             dad_role = cur.execute(
                 "SELECT role FROM quest_users WHERE user_id='dad'"
             ).fetchone()["role"]
@@ -658,7 +666,7 @@ class TestSyncMasterData:
         monkeypatch.setattr(quest_service_module, "quest_data", fake_quest_data)
         monkeypatch.setattr(quest_service_module.importlib, "reload", lambda module: None)
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO reward_master (reward_id, title, cost_gold) VALUES (999, 'Stale Reward', 100)"
             )
@@ -667,7 +675,7 @@ class TestSyncMasterData:
         result = game_system.sync_master_data()
 
         assert result["status"] == "synced"
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             reward_count = cur.execute("SELECT COUNT(*) c FROM reward_master").fetchone()["c"]
         assert reward_count == 0
 
@@ -688,18 +696,18 @@ class TestSyncMasterData:
         monkeypatch.setattr(quest_service_module, "quest_data", fake_quest_data)
         monkeypatch.setattr(quest_service_module.importlib, "reload", lambda module: None)
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) "
                 "VALUES (999, 'Stale Quest', 'daily', 1, 1)"
             )
 
         game_system = GameSystem()
-        with patch.object(quest_service_module, "logger") as mock_logger:
+        with patch.object(game_system_impl_module, "logger") as mock_logger:
             result = game_system.sync_master_data()
 
         assert result["status"] == "synced"
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             quest_count = cur.execute("SELECT COUNT(*) c FROM quest_master").fetchone()["c"]
         assert quest_count == 1, "quest_data.QUESTSが空でもquest_masterの既存行を無条件削除してはならない"
         mock_logger.warning.assert_any_call(
@@ -719,21 +727,21 @@ class TestSyncMasterData:
         monkeypatch.setattr(quest_service_module, "quest_data", fake_quest_data)
         monkeypatch.setattr(quest_service_module.importlib, "reload", lambda module: None)
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO reward_master (reward_id, title, cost_gold) VALUES (999, 'Owned Reward', 100)"
             )
             cur.execute(
                 "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) "
                 "VALUES ('dad', 999, 'owned', ?)",
-                (common.get_now_iso(),),
+                (get_now_iso(),),
             )
 
         game_system = GameSystem()
         result = game_system.sync_master_data()
 
         assert result["status"] == "synced"
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             reward_row = cur.execute(
                 "SELECT reward_id FROM reward_master WHERE reward_id = 999"
             ).fetchone()
@@ -742,102 +750,6 @@ class TestSyncMasterData:
             ).fetchone()
         assert reward_row is not None, "参照が残っている報酬は削除されずに残ること"
         assert inventory_row is not None
-
-
-class TestTriggerTvUnlock:
-    """
-    QuestService._trigger_tv_unlock() のテスト。
-    実装は threading.Thread(daemon=True) でバックグラウンド実行するため、
-    そのままでは実スレッドが絡みテストが非決定的(flaky)になる。
-    threading.Thread.start を threading.Thread.run に差し替え、
-    start()呼び出し時にターゲット関数を「同じスレッドで同期的に」実行させることで、
-    実スレッド生成を避けつつ決定的にテストする。
-    switchbot_service/notification_serviceは全てモックし、実際のAPI呼び出しは行わない。
-    """
-
-    @pytest.fixture(autouse=True)
-    def _run_background_thread_synchronously(self, monkeypatch):
-        monkeypatch.setattr(threading.Thread, "start", threading.Thread.run)
-
-    def test_success_status_code_does_not_notify_parents(self, monkeypatch):
-        monkeypatch.setattr(
-            switchbot_service, "send_device_command", MagicMock(return_value={"statusCode": 100})
-        )
-        mock_send_push = MagicMock()
-        monkeypatch.setattr(notification_service, "send_push", mock_send_push)
-        monkeypatch.setattr(config, "LINE_PARENTS_GROUP_ID", "group123")
-
-        quest_service = QuestService()
-        quest_service._trigger_tv_unlock(quest_id=101)
-
-        mock_send_push.assert_not_called()
-
-    def test_non_success_status_code_notifies_parents_group(self, monkeypatch):
-        monkeypatch.setattr(
-            switchbot_service,
-            "send_device_command",
-            MagicMock(return_value={"statusCode": 190, "message": "Invalid auth"}),
-        )
-        mock_send_push = MagicMock()
-        monkeypatch.setattr(notification_service, "send_push", mock_send_push)
-        monkeypatch.setattr(config, "LINE_PARENTS_GROUP_ID", "group123")
-
-        quest_service = QuestService()
-        quest_service._trigger_tv_unlock(quest_id=101)
-
-        mock_send_push.assert_called_once()
-        call_kwargs = mock_send_push.call_args.kwargs
-        assert call_kwargs["user_id"] == "group123"
-        assert "失敗" in call_kwargs["messages"][0]["text"]
-
-    def test_no_response_from_switchbot_is_treated_as_failure(self, monkeypatch):
-        """switchbot_service側がFail-Soft設計上Noneを返すケース(未設定/通信失敗)でも
-        例外として扱われ、親グループへの通知分岐に入ること。"""
-        monkeypatch.setattr(switchbot_service, "send_device_command", MagicMock(return_value=None))
-        mock_send_push = MagicMock()
-        monkeypatch.setattr(notification_service, "send_push", mock_send_push)
-        monkeypatch.setattr(config, "LINE_PARENTS_GROUP_ID", "group123")
-
-        quest_service = QuestService()
-        quest_service._trigger_tv_unlock(quest_id=101)
-
-        mock_send_push.assert_called_once()
-
-    def test_failure_without_parents_group_configured_skips_notification(self, monkeypatch):
-        """LINE_PARENTS_GROUP_ID が未設定の場合は、失敗しても通知を試みない
-        (通知失敗で二重に例外を出さないためのFail-Soft分岐)。"""
-        monkeypatch.setattr(
-            switchbot_service, "send_device_command", MagicMock(return_value={"statusCode": 190})
-        )
-        mock_send_push = MagicMock()
-        monkeypatch.setattr(notification_service, "send_push", mock_send_push)
-        monkeypatch.setattr(config, "LINE_PARENTS_GROUP_ID", "")
-
-        quest_service = QuestService()
-        quest_service._trigger_tv_unlock(quest_id=101)
-
-        mock_send_push.assert_not_called()
-
-    def test_does_not_spawn_a_real_background_thread(self, monkeypatch):
-        """daemon=Trueのスレッドとして起動されることの回帰確認(実装の意図を固定する)。"""
-        monkeypatch.setattr(
-            switchbot_service, "send_device_command", MagicMock(return_value={"statusCode": 100})
-        )
-        captured_threads = []
-        real_thread_cls = threading.Thread
-
-        class _CapturingThread(real_thread_cls):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                captured_threads.append(self)
-
-        monkeypatch.setattr(threading, "Thread", _CapturingThread)
-
-        quest_service = QuestService()
-        quest_service._trigger_tv_unlock(quest_id=101)
-
-        assert len(captured_threads) == 1
-        assert captured_threads[0].daemon is True
 
 
 class TestProcessApproveQuestWithDeletedMasterQuest:
@@ -857,21 +769,21 @@ class TestProcessApproveQuestWithDeletedMasterQuest:
         )
 
     def test_approve_succeeds_when_quest_was_removed_from_master(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             self._seed_child_and_adult(cur)
             # quest_masterには一切登録せず、削除済みクエストのpending履歴のみを再現する
             cur.execute(
                 "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, "
                 "completed_at, status) VALUES ('son', 9999, 'DeletedQuest', 10, 20, ?, 'pending')",
-                (common.get_now_iso(),),
+                (get_now_iso(),),
             )
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
-        result = quest_service.process_approve_quest("dad", history_id)
+        approval_service = ApprovalService()
+        result = approval_service.process_approve_quest("dad", history_id)
 
         assert result["status"] == "success"
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             hist_after = cur.execute(
                 "SELECT status FROM quest_history WHERE id = ?", (history_id,)
             ).fetchone()
@@ -900,7 +812,7 @@ class TestFilterActiveQuestsDateParseErrorLogging:
             "day_of_week": None,
         }
 
-        with patch.object(quest_service_module, "logger") as mock_logger:
+        with patch.object(quest_service_impl_module, "logger") as mock_logger:
             result = quest_service.filter_active_quests([bad_quest])
 
         assert result == []  # パースエラー時は除外される(既存挙動)
@@ -969,7 +881,7 @@ class TestSyncMasterDataSyncsRewardTarget:
         game_system = GameSystem()
         game_system.sync_master_data()
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             children_reward = cur.execute(
                 "SELECT target FROM reward_master WHERE reward_id = 10"
             ).fetchone()
@@ -984,12 +896,12 @@ class TestSyncMasterDataSyncsRewardTarget:
         game_system = GameSystem()
         game_system.sync_master_data()
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute("UPDATE reward_master SET target = 'all' WHERE reward_id = 120")
 
         game_system.sync_master_data()
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             adults_reward = cur.execute(
                 "SELECT target FROM reward_master WHERE reward_id = 120"
             ).fetchone()
@@ -1020,7 +932,7 @@ class TestProcessPurchaseRewardTargetRestriction:
     def test_child_cannot_purchase_adults_only_reward(self, isolated_db):
         from services.quest_service import ShopService
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             self._seed_users(cur)
             self._seed_reward(cur, "adults")
 
@@ -1032,7 +944,7 @@ class TestProcessPurchaseRewardTargetRestriction:
     def test_adult_can_purchase_adults_only_reward(self, isolated_db):
         from services.quest_service import ShopService
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             self._seed_users(cur)
             self._seed_reward(cur, "adults")
 
@@ -1043,7 +955,7 @@ class TestProcessPurchaseRewardTargetRestriction:
     def test_adult_cannot_purchase_children_only_reward(self, isolated_db):
         from services.quest_service import ShopService
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             self._seed_users(cur)
             self._seed_reward(cur, "children")
 
@@ -1055,7 +967,7 @@ class TestProcessPurchaseRewardTargetRestriction:
     def test_all_target_reward_is_purchasable_by_anyone(self, isolated_db):
         from services.quest_service import ShopService
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             self._seed_users(cur)
             self._seed_reward(cur, "all")
 

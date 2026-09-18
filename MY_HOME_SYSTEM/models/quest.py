@@ -32,7 +32,11 @@ class MasterQuest(BaseModel):
     id: int = Field(ge=1, le=_SQLITE_INT_MAX)
     title: str = Field(min_length=1, max_length=200)
     desc: Optional[str] = None
-    type: Literal['daily', 'special', 'infinite']
+    # #529: 'limited'(start_date/end_date による期間限定)と 'random'(occurrence_chance による
+    # 日替わり出現抽選)は services/quest_service.py の _is_quest_currently_active・フロントエンド
+    # (useQuestStatus.ts/QuestList.tsx)・仕様書がいずれも対応済みなのに、本 Literal だけが
+    # 許容しておらず、quest_data.py に追加した瞬間 sync_master_data が 500 で全体中断していた。
+    type: Literal['daily', 'special', 'infinite', 'limited', 'random']
     target: str = 'all'
     exp: int = Field(ge=0)
     gold: int = Field(ge=0)
@@ -40,7 +44,7 @@ class MasterQuest(BaseModel):
     days: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
-    chance: Optional[float] = 1.0
+    chance: Optional[float] = Field(default=1.0, ge=0.0, le=1.0)
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     pre_requisite_quest_id: Optional[int] = None
@@ -75,7 +79,7 @@ class RewardAction(BaseModel):
     reward_id: int = Field(ge=1, le=_SQLITE_INT_MAX)
 
 class HistoryAction(BaseModel):
-    user_id: str
+    user_id: str = Field(min_length=1, max_length=64)
     history_id: int = Field(ge=1, le=_SQLITE_INT_MAX)
 
 class ApproveAction(BaseModel):
@@ -84,6 +88,14 @@ class ApproveAction(BaseModel):
     # 却下理由(プリセット選択、フロントエンドのみで完結していたUXにログ用の裏付けを追加)。
     # 任意項目なので既存クライアント(未送信)との後方互換は崩さない。
     reason: Optional[str] = Field(default=None, max_length=500)
+
+# Issue #547: reset_game.py が別プロセスから直接DBを書き換えていたリセット処理を
+# サーバーAPI経由に置き換えるための入力モデル。admin_idはApproveAction.approver_id等と
+# 同様、サービス層(UserService.reset_user_data)がquest_users.role='role_adult'かどうかを
+# 検証する。
+class ResetUserAction(BaseModel):
+    admin_id: str = Field(min_length=1, max_length=64)
+    target_user_id: str = Field(min_length=1, max_length=64)
 
 # #372: アップロード経由のアバターURLは routers/quest_router.py の upload_image が生成する
 # 「/uploads/<uuid4>.<拡張子>」の形のみを受け付ける。任意の /uploads/ パスを許すと、
@@ -97,7 +109,7 @@ _EMOJI_AVATAR_MAX_LEN = 16
 
 
 class UpdateUserAction(BaseModel):
-    user_id: str
+    user_id: str = Field(min_length=1, max_length=64)
     avatar_url: str
 
     @field_validator("avatar_url")
@@ -141,6 +153,11 @@ class CompleteResponse(BaseModel):
 class CancelResponse(BaseModel):
     status: str
 
+class ResetUserResponse(BaseModel):
+    status: str
+    deletedHistoryCount: int
+    deletedInventoryCount: int
+
 class PurchaseResponse(BaseModel):
     status: str
     newGold: int
@@ -151,5 +168,7 @@ class UseItemResponse(BaseModel):
     message: str
 
 class UseItemAction(BaseModel):
-    user_id: str
-    inventory_id: int
+    # Q-L4 の上限(2**63-1)が本モデルだけ漏れており、inventory_id=2**64 で
+    # sqlite3 の OverflowError → 500 になっていた(/quest/cancel 等は 422)。
+    user_id: str = Field(min_length=1, max_length=64)
+    inventory_id: int = Field(ge=1, le=_SQLITE_INT_MAX)

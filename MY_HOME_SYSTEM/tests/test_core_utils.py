@@ -10,10 +10,12 @@ core/utils.py (指数バックオフ・ストレージ復帰待機) のテスト
 デッドコードだったため、#411 品質でモジュールごと削除しファイル名も
 test_core_utils.py に改名した。
 """
+import datetime
 import os
 import sys
 
 import pytest
+import pytz
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -242,3 +244,87 @@ class TestWaitForStorageWarmup:
         assert result is True
         assert call_count["n"] == 2
 
+
+
+class TestGetMealTimeCategoryFromNow:
+    """Issue #583の回帰テスト。
+
+    food_records.meal_time_categoryは以前、記録時刻に関わらず常に固定文字列
+    "Dinner"を保存していた(呼び出し元が渡す"category"はAIの朝食/昼食/夕食等、
+    または食事アンケートの麺類等の食品ジャンルであり、そのいずれも記録時刻の
+    時間帯とは限らないため、時間帯カテゴリは記録時刻そのものから判定するよう
+    修正した)。本テストは、実際の時刻(JST)から正しい時間帯カテゴリへ
+    分類できることを検証する。
+    """
+
+    @staticmethod
+    def _fixed_now(monkeypatch, hour, minute=0):
+        jst = pytz.timezone("Asia/Tokyo")
+        fixed = jst.localize(datetime.datetime(2026, 9, 8, hour, minute, 0))
+
+        class _FixedDatetime(utils.datetime.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed
+
+        monkeypatch.setattr(utils.datetime, "datetime", _FixedDatetime)
+
+    @pytest.mark.parametrize(
+        "hour,expected",
+        [
+            (4, "Breakfast"),
+            (7, "Breakfast"),
+            (10, "Breakfast"),
+            (11, "Lunch"),
+            (13, "Lunch"),
+            (14, "Lunch"),
+            (15, "Snack"),
+            (17, "Snack"),
+            (18, "Dinner"),
+            (21, "Dinner"),
+            (23, "Dinner"),
+            (0, "Dinner"),
+            (3, "Dinner"),
+        ],
+    )
+    def test_buckets_hour_into_expected_category(self, monkeypatch, hour, expected):
+        self._fixed_now(monkeypatch, hour)
+        assert utils.get_meal_time_category_from_now() == expected
+
+
+class TestGetNowJst:
+    """Issue #592の追加調査の回帰テスト。
+
+    monitors/tv_lock_monitor.py・monitors/nas_monitor.py・services/camera_service.py・
+    services/train_service.pyが、ホストOSのタイムゾーン設定に依存するnaiveな
+    datetime.now()の代わりに使うようになったget_now_jst()自体の単体テスト。
+    freezegunでUTCの特定時刻に固定し、JSTへの変換が常に+9時間になることを検証する。
+    """
+
+    def test_returns_aware_datetime_in_jst(self):
+        result = utils.get_now_jst()
+        assert result.tzinfo is not None
+        assert result.utcoffset() == datetime.timedelta(hours=9)
+
+    def test_converts_frozen_utc_instant_to_jst_correctly(self):
+        from freezegun import freeze_time
+
+        with freeze_time("2026-09-05 22:55:00"):  # UTC
+            result = utils.get_now_jst()
+
+        # UTC 22:55 + 9h = JST 07:55 (翌日)
+        assert (result.year, result.month, result.day) == (2026, 9, 6)
+        assert (result.hour, result.minute) == (7, 55)
+
+    def test_result_is_always_nine_hours_ahead_of_utc(self):
+        """明示的にAsia/Tokyoタイムゾーンを指定しているため、UTCとの差は
+        常に+9時間で固定されること(サマータイムの無いJSTの特性)。"""
+        from freezegun import freeze_time
+
+        with freeze_time("2026-01-15 03:00:00"):
+            winter_result = utils.get_now_jst()
+        with freeze_time("2026-07-15 03:00:00"):
+            summer_result = utils.get_now_jst()
+
+        assert winter_result.utcoffset() == datetime.timedelta(hours=9)
+        assert summer_result.utcoffset() == datetime.timedelta(hours=9)

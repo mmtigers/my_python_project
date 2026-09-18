@@ -185,3 +185,67 @@ class TestResolveMyHomeSystemRoot:
         current_dir.mkdir(parents=True)
 
         assert resolve_my_home_system_root(current_dir) == current_dir
+
+
+class TestRedactDiscordWebhookUrl:
+    def test_token_segment_is_masked(self):
+        from file_utils import redact_discord_webhook_url
+        text = ("HTTPSConnectionPool(host='discord.com'): Max retries exceeded with url: "
+                "/api/webhooks/123456789012345678/AbCdEf-GhIj_KlMn0123456789 (Caused by ...)")
+        out = redact_discord_webhook_url(text)
+        assert "AbCdEf-GhIj_KlMn0123456789" not in out
+        assert "/api/webhooks/123456789012345678/<redacted>" in out
+
+    def test_full_url_form_is_masked(self):
+        from file_utils import redact_discord_webhook_url
+        out = redact_discord_webhook_url("404 Client Error for url: https://discord.com/api/webhooks/1/tok3n")
+        assert out == "404 Client Error for url: https://discord.com/api/webhooks/1/<redacted>"
+
+    def test_non_string_input_and_unrelated_text_pass_through(self):
+        from file_utils import redact_discord_webhook_url
+        assert redact_discord_webhook_url(ValueError("boom")) == "boom"
+        assert redact_discord_webhook_url("nothing to hide") == "nothing to hide"
+
+
+class TestResolveNasMountPoint:
+    """Issue #663: DDDの各スクリプトが直書きしていた `/mnt/nas` を、
+    環境変数 `NAS_MOUNT_POINT`(MY_HOME_SYSTEM と共用の .env のキー)で
+    上書きできるようにしたことの回帰テスト。"""
+
+    def test_defaults_to_mnt_nas_when_env_is_unset(self, monkeypatch):
+        from pathlib import Path
+
+        from file_utils import resolve_nas_mount_point
+
+        monkeypatch.delenv("NAS_MOUNT_POINT", raising=False)
+        assert resolve_nas_mount_point() == Path("/mnt/nas")
+
+    def test_empty_env_falls_back_to_default(self, monkeypatch):
+        from pathlib import Path
+
+        from file_utils import resolve_nas_mount_point
+
+        monkeypatch.setenv("NAS_MOUNT_POINT", "   ")
+        assert resolve_nas_mount_point() == Path("/mnt/nas")
+
+    def test_env_override_is_honoured(self, monkeypatch):
+        from pathlib import Path
+
+        from file_utils import resolve_nas_mount_point
+
+        monkeypatch.setenv("NAS_MOUNT_POINT", "/srv/storage")
+        assert resolve_nas_mount_point() == Path("/srv/storage")
+
+    def test_nas_data_dir_is_built_from_the_mount_point(self, monkeypatch):
+        from file_utils import resolve_nas_data_dir
+
+        monkeypatch.setenv("NAS_MOUNT_POINT", "/srv/storage")
+        assert resolve_nas_data_dir("newface_monitor") == "/srv/storage/home_system/newface_monitor/data"
+
+    def test_nas_data_dir_default_matches_the_previous_hardcoded_paths(self, monkeypatch):
+        """既定値は、env 化する前にソースへ直書きされていたパスと一致すること。"""
+        from file_utils import resolve_nas_data_dir
+
+        monkeypatch.delenv("NAS_MOUNT_POINT", raising=False)
+        assert resolve_nas_data_dir("newface_monitor") == "/mnt/nas/home_system/newface_monitor/data"
+        assert resolve_nas_data_dir("youtube_extractor") == "/mnt/nas/home_system/youtube_extractor/data"

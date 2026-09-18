@@ -3,7 +3,6 @@
 # ==========================================
 # 設定
 # ==========================================
-MAC="F4:4E:FC:B6:65:D4"
 PROJECT_DIR="/home/masahiro/develop/MY_HOME_SYSTEM"
 ENV_FILE="$PROJECT_DIR/.env"
 LOGFILE="$PROJECT_DIR/logs/bluetooth_monitor.log"
@@ -15,11 +14,22 @@ MAX_RETRIES=3
 # ==========================================
 if [ -f "$ENV_FILE" ]; then
     set -a
+    # shellcheck source=/dev/null
     source "$ENV_FILE"
     set +a
 fi
 
 WEBHOOK_URL="${DISCORD_WEBHOOK_ERROR:-$DISCORD_WEBHOOK_NOTIFY}"
+
+# Issue #663: 以前は実機のMACアドレスをこのスクリプトに直書きしていた。
+# config.py 側(SPEAKER_BLUETOOTH_MAC)と同じキーで .env から受け取る。
+# 未設定ならスピーカー運用をしていない環境とみなし、何もせず正常終了する
+# (config.ENABLE_BLUETOOTH=False のときと同じ扱い)。
+MAC="${SPEAKER_BLUETOOTH_MAC:-}"
+if [ -z "$MAC" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - [INFO] SPEAKER_BLUETOOTH_MAC is not set. Skipping." >> "$LOGFILE"
+    exit 0
+fi
 
 # ==========================================
 # ヘルパー関数
@@ -83,11 +93,9 @@ if [ ! -f "$STATUS_FILE" ]; then
 fi
 
 LAST_STATUS=$(cat "$STATUS_FILE")
-CURRENT_STATUS="UNKNOWN"
 
 # 1. 接続状態チェック
 if bluetoothctl info "$MAC" | grep -q "Connected: yes"; then
-    CURRENT_STATUS="OK"
     
     # 切断状態から復旧した場合のみ通知
     if [ "$LAST_STATUS" = "NG" ]; then
@@ -105,7 +113,6 @@ if bluetoothctl info "$MAC" | grep -q "Connected: yes"; then
 fi
 
 # 2. 切断検知時の処理
-CURRENT_STATUS="NG"
 
 # 初回検知時のみ通知する（連発防止）
 if [ "$LAST_STATUS" != "NG" ]; then

@@ -17,5 +17,7 @@ export function cn(...inputs: ClassValue[]) {
  * 差し替えを許してしまう)。"//" で始まるものは除外する。
  */
 export function isSameOriginAvatarPath(url: string | undefined | null): url is string {
-    return !!url && url.startsWith('/') && !url.startsWith('//');
+    // Issue #540: '//' だけでなく '/\\' も拒否する。ブラウザは http(s) URL のバックスラッシュを
+    // スラッシュに正規化するため、'/\\evil.example/x' はプロトコル相対の外部 URL になる。
+    return !!url && url.startsWith('/') && !/^\/[\\/]/.test(url);
 }

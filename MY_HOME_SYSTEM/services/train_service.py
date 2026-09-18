@@ -2,14 +2,15 @@
 import requests
 from bs4 import BeautifulSoup
 import re
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Dict, Any, List
 
 # 自作モジュール
-import common
+from core.logger import setup_logging
+from core.utils import get_now_jst
 
 # ロガー設定
-logger = common.setup_logging("train_service")
+logger = setup_logging("train_service")
 
 # JR西日本 運行情報API
 JR_WEST_JSON_URL: str = "https://www.train-guide.westjr.co.jp/api/v3/area_kinki_trafficinfo.json"
@@ -89,7 +90,11 @@ def get_route_info(from_station: str = "伊丹(兵庫県)", to_station: str = "�
     
     try:
         # 現在時刻 + 20分 を計算
-        future_time = datetime.now() + timedelta(minutes=20)
+        # Issue #592: Yahoo!路線情報は日本国内の実時刻を前提とした検索APIのため、
+        # ホストOSのタイムゾーン設定に依存するnaiveなdatetime.now()ではなく
+        # 明示的にJSTの現在時刻を使う(ホストがJST以外の設定だと、実際とは
+        # 異なる日時で検索してしまい誤った経路が返る)。
+        future_time = get_now_jst() + timedelta(minutes=20)
         
         # 検索パラメータ設定
         params = {
@@ -140,7 +145,7 @@ def get_route_info(from_station: str = "伊丹(兵庫県)", to_station: str = "�
             detail_elm = soup.select_one('.routeDetail')
             if detail_elm:
                 stations = [s.get_text(strip=True) for s in detail_elm.select('.station dt')]
-                lines = [l.get_text(strip=True) for l in detail_elm.select('.transport div')]
+                lines = [el.get_text(strip=True) for el in detail_elm.select('.transport div')]
                 
                 details_list: List[str] = []
                 if stations: 
@@ -167,7 +172,7 @@ def get_route_info(from_station: str = "伊丹(兵庫県)", to_station: str = "�
 
 if __name__ == "__main__":
     # テスト実行用の設定
-    # common.setup_logging済みなのでコンソールにも出るはずだが念のため
+    # core.logger.setup_logging済みなのでコンソールにも出るはずだが念のため
     print("--- JR Status ---")
     print(get_jr_traffic_status())
     

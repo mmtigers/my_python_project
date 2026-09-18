@@ -122,7 +122,7 @@ class TestFixAllWebhooksNotifiesOnDangerousState:
         monkeypatch.setattr(wf, "update_switchbot_webhook", lambda base_url: None)
         monkeypatch.setattr(wf, "update_line_webhook", lambda base_url: False)
         mock_send_push = MagicMock()
-        monkeypatch.setattr(wf.common, "send_push", mock_send_push)
+        monkeypatch.setattr(wf, "send_push", mock_send_push)
 
         wf.fix_all_webhooks()
 
@@ -137,7 +137,7 @@ class TestFixAllWebhooksNotifiesOnDangerousState:
         monkeypatch.setattr(wf, "update_switchbot_webhook", lambda base_url: True)
         monkeypatch.setattr(wf, "update_line_webhook", lambda base_url: False)
         mock_send_push = MagicMock()
-        monkeypatch.setattr(wf.common, "send_push", mock_send_push)
+        monkeypatch.setattr(wf, "send_push", mock_send_push)
 
         wf.fix_all_webhooks()
 
@@ -151,8 +151,33 @@ class TestFixAllWebhooksNotifiesOnDangerousState:
         monkeypatch.setattr(wf, "update_switchbot_webhook", lambda base_url: False)
         monkeypatch.setattr(wf, "update_line_webhook", lambda base_url: False)
         mock_send_push = MagicMock()
-        monkeypatch.setattr(wf.common, "send_push", mock_send_push)
+        monkeypatch.setattr(wf, "send_push", mock_send_push)
 
         wf.fix_all_webhooks()
 
         mock_send_push.assert_not_called()
+
+
+class TestTokenIsNotLogged:
+    def test_mask_token_helper(self):
+        assert wf._mask_token(f"{TARGET_URL}?token=secret-token") == f"{TARGET_URL}?token=***"
+        assert wf._mask_token(TARGET_URL) == TARGET_URL
+
+    def test_token_value_never_appears_in_log_output(self, monkeypatch, caplog):
+        """SWITCHBOT_WEBHOOK_TOKEN は共有シークレットであり、設定確認ログや旧URL削除ログに
+        平文で残ってはならない(home_system.log は log_analyzer 経由で Issue 本文にも転記される)。"""
+        import logging
+        monkeypatch.setattr(wf.config, "SWITCHBOT_WEBHOOK_TOKEN", "secret-token")
+        query_resp = _mock_response({"body": {"urls": [f"{TARGET_URL}?token=old-secret"]}})
+        setup_resp = _mock_response({"statusCode": 100})
+        with patch.object(wf.requests, "post", side_effect=[query_resp, MagicMock(), setup_resp]), \
+             patch.object(wf.time, "sleep"), \
+             caplog.at_level(logging.INFO, logger=wf.logger.name):
+            wf.logger.propagate = True
+            try:
+                wf.update_switchbot_webhook(BASE_URL)
+            finally:
+                wf.logger.propagate = False
+        assert "secret-token" not in caplog.text
+        assert "old-secret" not in caplog.text
+        assert "token=***" in caplog.text

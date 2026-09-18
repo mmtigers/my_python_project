@@ -16,6 +16,7 @@
   monitors/health_watch.py （run_task.sh経由、home_system.serviceから独立）
     - service active / journalctl err..emerg / logs/*.log のERROR
     - ディスク・メモリ閾値 / NASマウント
+    - 実機構成(crontab / systemd / logrotate)とリポジトリ deploy/ の乖離
     - 異常あり → Discord errorチャンネルへ要約通知（同一異常の再通知は6時間抑制）
     - 異常なし → 通知せず終了
 
@@ -86,6 +87,7 @@
 - `logs/*.log` に前回マーカー以降で `ERROR`/`CRITICAL` 等を含む行がある（キーワード・除外は `log_analyzer.py` と共通。WARNINGは週次レポートに任せる）
 - ルートディスク使用率 ≥ 90% / メモリ使用率 ≥ 90%（`services/analysis_service.py` と同じ取得方法）
 - `NAS_MOUNT_POINT` がマウントされていない
+- 実機構成がリポジトリと乖離している(チェック7・構成ドリフト検知): `crontab -l` と `deploy/cron/crontab`、`/etc/systemd/system/*.service` と `MY_HOME_SYSTEM/deploy/systemd/*.service`、`/etc/logrotate.d/home_system` と `MY_HOME_SYSTEM/deploy/logrotate/home_system` を、コメント・空行を除いた内容で比較し、差分・未導入・crontab未登録を報告する。各READMEの「実機を変更したらこのファイルにも反映してコミット」の反映漏れを機械的に拾う位置づけで、自動で書き戻しはしない(実機側が正なら `crontab -l > deploy/cron/crontab` 等でリポジトリへ反映、リポジトリ側が正なら各READMEの導入手順で再導入)
 
 誤検知（flakyな一時的エラー等）が続く場合は、`LogAnalyzer.IGNORE_PATTERNS` や閾値側を見直す。
 
@@ -93,12 +95,12 @@
 
 リポジトリ側の実装（Issue #339）:
 
-- `monitors/health_watch.py` の `_fire_investigate_hook()`: 異常検知かつ通知抑制(`_should_notify`)を通過したときのみ、`config.HEALTH_WATCH_INVESTIGATE_HOOK` のスクリプトを異常サマリ(標準入力)つきでfire-and-forget起動する。未設定なら完全no-op。フックの出力は `logs/claude_investigate.log` に追記される（`check_app_logs` の自己発火除外対象）。
-- `scripts/claude_investigate.sh`: 調査専用スクリプト。flockによる多重起動防止、`timeout`(既定900秒)+`--max-turns`(既定30)、`--allowedTools` の機械的制限、`CLAUDE_INVESTIGATE_DRY_RUN=1` でのドライラン(gh起票なし)に対応。環境変数は `.env.example` の「ラズパイ監視 層2」セクション参照。
+- `monitors/health_watch.py` の `_fire_investigate_hook()`: 異常検知かつ通知抑制(`_should_notify`)を通過したときのみ、`config.HEALTH_WATCH_INVESTIGATE_HOOK` のスクリプトを異常サマリ(標準入力)つきでfire-and-forget起動する。未設定なら完全no-op。フックの出力は `logs/claude_investigate.log` に追記される（`check_app_logs` はこのファイル名を明示的に除外する。2026-09-06 品質監査: 以前は除外が未実装だった）。
+- `scripts/claude_investigate.sh`: 調査専用スクリプト。flockによる多重起動防止、`timeout`(既定900秒)+`--max-budget-usd`(既定2.00ドル)、`--allowedTools` の機械的制限、`CLAUDE_INVESTIGATE_DRY_RUN=1` でのドライラン(gh起票なし)に対応。環境変数は `.env.example` の「ラズパイ監視 層2」セクション参照。
 
 有効化手順（ラズパイ側。下の「準備」完了後）:
 
-1. `claude -p --help` で `--permission-mode` / `--allowedTools` / `--max-turns` / `--output-format` の実フラグ名を確認し、`claude_investigate.sh` を実態に合わせて修正する（★スクリプト内のフラグは未検証の想定値）。
+1. ~~`claude -p --help` で `--permission-mode` / `--allowedTools` / `--max-turns` / `--output-format` の実フラグ名を確認~~ **完了(Issue #339, 2026-09-07)**: ラズパイ実機の Claude Code CLI v2.1.263 で確認済み。`--permission-mode`/`--allowedTools`/`--disallowedTools`/`--output-format`は想定どおりだったが、`--max-turns`はこのバージョンに存在せず、`claude_investigate.sh`側を`--max-budget-usd`(ドル建て上限)に修正済み。CLIが更新された場合は再確認すること。
 2. `.env` に `HEALTH_WATCH_INVESTIGATE_HOOK` と `CLAUDE_INVESTIGATE_DRY_RUN=1` を設定（まずドライラン）。
 3. 異常サマリを手で流して単体検証: `echo "テスト異常" | MY_HOME_SYSTEM/scripts/claude_investigate.sh`
 4. 1〜2週間ドライランで観察し、問題なければ `CLAUDE_INVESTIGATE_DRY_RUN` を外してgh起票を有効化する。
@@ -108,8 +110,8 @@
 - コード修正の自動適用・自動デプロイは行わない（GitHub IssueまたはDraft PRとして提案するのみ）。`claude -p` の `--allowedTools` を読み取り系 + `gh issue create`/`gh pr create --draft` のみに機械的に制限する。
 - `systemctl restart` 等の破壊的操作は自動実行しない（`log_tab.py` の再起動ボタンが確認チェックボックス必須になっているのと同じ思想）。許可リストにこれらを含めないことで担保する。
 - `--dangerously-skip-permissions`（全許可モード）は絶対に使わない。
-- `--permission-mode` / `--allowedTools` 等のフラグ名・値はCLIのバージョンによって変わりうるため、実装前に必ず実機で `claude --help` / `claude -p --help` を確認してから設定する（ここを飛ばすと「ガードレールが効いていない」状態になりうる）。
-- 多重起動防止は `fcntl.flock`（DDDのバッチと同じ方式）、暴走対策はタイムアウトと `--max-turns`。
+- `--permission-mode` / `--allowedTools` 等のフラグ名・値はCLIのバージョンによって変わりうる。2026-09-07に実機のv2.1.263で確認済みだが、CLIが更新されたら `claude -p --help` で再確認すること（ここを飛ばすと「ガードレールが効いていない」状態になりうる）。
+- 多重起動防止は `fcntl.flock`（DDDのバッチと同じ方式）、暴走対策はタイムアウトと `--max-budget-usd`（`--max-turns`はCLIに存在しないため不採用）。
 - 通知は `notification_service.py` の既存Webhook設定を再利用し、新たな認証情報経路を増やさない。
 - 詳細調査を毎回発火させる方向でのチューニングは行わない（コスト増につながるため）。層1の検知精度側を直す。
 

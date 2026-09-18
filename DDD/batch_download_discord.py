@@ -41,7 +41,9 @@ from dataclasses import dataclass, field
 
 from file_utils import sanitize_filename as _shared_sanitize_filename
 from file_utils import DiscordCircuitBreaker
+from file_utils import redact_discord_webhook_url
 from file_utils import resolve_my_home_system_root
+from file_utils import resolve_nas_mount_point
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -65,6 +67,23 @@ FORCE_MODE = "--force" in sys.argv
 CLEAR_COOLDOWN_MODE = "--clear-cooldown" in sys.argv
 
 CURRENT_DIR = Path(__file__).resolve().parent
+
+
+def _env_int(name: str, default: int) -> int:
+    """整数系の環境変数を読む。空文字・数値でない値は default にフォールバックする。
+
+    Issue #663: 以前は int(os.getenv(...)) を直書きしており、.env に "10GB" のような
+    誤った値を書くとモジュール import 時に ValueError で cron 起動が黙って落ちていた
+    (MY_HOME_SYSTEM/config.py の _get_int_env と同じ方針)。
+    """
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        logger.warning("環境変数 %s の値 %r は整数として解釈できないため既定値 %d を使います", name, raw, default)
+        return default
 # 品質: プロジェクトルート解決をfile_utils.resolve_my_home_system_rootへ集約。
 # notification_service が見つからない場合は下の except ImportError で無効化
 # されるだけなので、ここで解決に失敗しても他の環境で安全に動く。
@@ -93,7 +112,8 @@ def _standalone_send_discord_webhook(messages, image_data=None, channel="notify"
         resp.raise_for_status()
         return True
     except Exception as e:
-        logger.warning(f"⚠️ Discord Webhook送信に失敗しました: {e}")
+        # 例外文字列には送信先の Webhook URL(トークン込み)が含まれるためマスクする
+        logger.warning(f"⚠️ Discord Webhook送信に失敗しました: {redact_discord_webhook_url(e)}")
         return False
 
 try:
@@ -133,12 +153,14 @@ class AppConfig:
 
     # 【追加】機能フラグ: 環境変数で制御可能にする (デフォルトはFalse=無効のまま維持)
     ENABLE_YOUTUBE_DL: bool = os.getenv("ENABLE_YOUTUBE_DL", "false").lower() == "true"
-    BASE_SAVE_DIR: Path = Path(os.getenv("VIDEO_SAVE_DIR", "/mnt/nas/ddd"))
+    BASE_SAVE_DIR: Path = Path(os.getenv("VIDEO_SAVE_DIR") or "/mnt/nas/ddd")  # 空文字は未設定扱い(#663)
     LIST_FILE_PATH: Path = CURRENT_DIR / "list.txt"
     LIST_DIR_PATH: Path = CURRENT_DIR / "list"
     HISTORY_FILE_PATH: Path = CURRENT_DIR / "history.txt"
     LOCK_FILE_PATH: Path = CURRENT_DIR / ".batch_download_discord.lock"
-    NAS_MOUNT_POINT: Path = Path("/mnt/nas")
+    # Issue #663: 以前は `Path("/mnt/nas")` の直書きで環境変数による変更ができなかった。
+    # `NAS_MOUNT_POINT`(MY_HOME_SYSTEM と共用の .env のキー)で上書きできる。未設定なら従来どおり /mnt/nas。
+    NAS_MOUNT_POINT: Path = field(default_factory=resolve_nas_mount_point)
     NAS_MARKER_FILE: str = ".mounted"
     # NASを経由せずローカルディスク(外付けHDD等)に直接保存する単独環境向け。
     # falseにするとverify_nas_mount()自体をスキップし、NAS未マウントでも起動できる。
@@ -155,16 +177,16 @@ class AppConfig:
     # 構成を含む）では、動画1本分(数GB)の書き込みでメモリを圧迫し、OOMや
     # SSH切断を引き起こしうる。そのためCURRENT_DIR（本スクリプトの設置先、
     # list.txt/history.txt等と同じ実ディスク上のディレクトリ）を既定値とする。
-    LOCAL_TMP_DIR: Path = Path(os.getenv("DDD_LOCAL_TMP_DIR", str(CURRENT_DIR / "tmp_fragments")))
+    LOCAL_TMP_DIR: Path = Path(os.getenv("DDD_LOCAL_TMP_DIR") or str(CURRENT_DIR / "tmp_fragments"))  # 空文字は未設定扱い(#663)
     # LOCAL_TMP_DIRの空き容量がこれを下回る場合、フラグメント書き込みで
     # ディスクを圧迫する前に安全側でダウンロードを中断する。
-    LOCAL_TMP_MIN_FREE_SPACE_GB: int = int(os.getenv("DDD_LOCAL_TMP_MIN_FREE_SPACE_GB", "10"))
+    LOCAL_TMP_MIN_FREE_SPACE_GB: int = _env_int("DDD_LOCAL_TMP_MIN_FREE_SPACE_GB", 10)
 
     # セグメント取得等のHTTPタイムアウト(秒)。単身赴任先PC等、自宅回線より
     # 低速な回線では既定の20秒だと大きめのHLSセグメントが間に合わずタイムアウト
     # →連続失敗でレート制限とみなされ処理中断、が起きうるため環境変数で調整可能にする
     # (未設定時は従来通り20秒=自宅ラズパイ側の挙動は変わらない)。
-    REQUEST_TIMEOUT: int = int(os.getenv("DDD_REQUEST_TIMEOUT", "20"))
+    REQUEST_TIMEOUT: int = _env_int("DDD_REQUEST_TIMEOUT", 20)
     MAX_RETRIES: int = 3
     # #397: HLSセグメント1個あたりの取得試行回数と、リトライ前の初回待機秒
     # (指数バックオフ: 1秒→2秒)。数千セグメント中1つの一時的なタイムアウトで
@@ -281,7 +303,19 @@ def _is_bot_detection_error(exc: Exception) -> bool:
     if any(excluded in message for excluded in CONFIG.BOT_DETECTION_EXCLUDED_MARKERS):
         return False
     for marker in CONFIG.BOT_DETECTION_MARKERS:
-        if re.search(rf"\b{re.escape(marker)}\b", message):
+        if marker.isdigit():
+            # 数字マーカー(403/429/503)は \b だけでは不十分: 正規表現の単語境界は
+            # "-" "/" "." も境界とみなすため、品番・パス・一時ファイル名に含まれる
+            # 数字列("ssis-403" "ipx-403:" "/dm18/ja/ssis-403" "ssni-429.mp4.fragments"
+            # "seg-403-v1")にも一致し、単なる通信エラー1件で BotDetectionError →
+            # 12時間クールダウンに入っていた。前後が英数字・"-"・"/"・"."(直後に
+            # 英数字が続く場合)のいずれかであれば「識別子の一部」とみなして除外する。
+            # "HTTP Error 403: Forbidden" / "too many 503 error responses" /
+            # "error 429." のような本来の文言は引き続き一致する。
+            pattern = rf"(?<![\w\-/.]){re.escape(marker)}(?![\w\-/]|\.\w)"
+        else:
+            pattern = rf"\b{re.escape(marker)}\b"
+        if re.search(pattern, message):
             return True
     return False
 
@@ -356,6 +390,14 @@ def _looks_like_block_page(html: str) -> bool:
     """
     lowered = html.lower()
     return any(marker in lowered for marker in CONFIG.SCRAPING_BLOCK_PAGE_MARKERS)
+
+
+# Issue #535: トップレベル list.txt 由来タスクの source_name に使うセンチネル。以前は "list"
+# という文字列を使っていたため、list/list.txt(stem = "list")のタスクと区別できず、保存先が
+# カテゴリルートになる・_purge_skipped_tasks が list/list.txt ではなく CURRENT_DIR/list.txt
+# を書き換える(スキップ済み URL が毎回再アーカイブされる)問題があった。
+# 通常のファイル stem として現れない名前にする。
+TOP_LEVEL_LIST_SOURCE: str = "__list_txt__"
 
 
 class DownloadTask(NamedTuple):
@@ -612,7 +654,7 @@ class DownloadStrategy(ABC):
         pass
 
     def _determine_save_dir(self, source_name: str, category: str = "others") -> Optional[Path]:
-        if source_name == "list":
+        if source_name == TOP_LEVEL_LIST_SOURCE:
             target_dir = self.save_base_dir / category
         else:
             target_dir = self.save_base_dir / category / source_name
@@ -677,6 +719,21 @@ class UniversalYtDlpStrategy(DownloadStrategy):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(task.url, download=False)
+
+                # #566: yt-dlpの'noplaylist'は「動画とプレイリストの両方を指すURL
+                # (watch?v=X&list=Y)で動画側だけを選ぶ」オプションであり、動画IDを
+                # 含まない純粋なプレイリスト/チャンネルURLには効果がない
+                # (yt-dlp内部のInfoExtractor._yes_playlistがvideo_id不在時は
+                # noplaylistを一切参照せず常にプレイリスト全体を返す実装のため)。
+                # 'noplaylist'指定だけでは防げないこのケースを、抽出結果の_typeで
+                # 明示的に検知し、MAX_TASKS_PER_RUN等の1回あたりの上限governanceが
+                # 迂回されないようにする。
+                if info.get('_type') in ('playlist', 'multi_video'):
+                    logger.warning(
+                        f"⚠️ プレイリスト/チャンネルURLは対象外です(1動画のみ処理可能): {task.url}"
+                    )
+                    return False
+
                 filename = Path(ydl.prepare_filename(info)).with_suffix('.mp4')
 
                 if self._should_skip(filename): return True
@@ -811,6 +868,25 @@ class ScrapingStrategy(DownloadStrategy):
             return fallback.group(1)
             
         return None
+
+    @staticmethod
+    def _select_variant_from_master(manifest_text: str, manifest_url: str) -> Optional[str]:
+        """マスタープレイリスト(#EXT-X-STREAM-INF を含む)なら、BANDWIDTH が最大の variant の
+        絶対 URL を返す。メディアプレイリスト(セグメント列挙)なら None を返す(Issue #538)。"""
+        if "#EXT-X-STREAM-INF" not in manifest_text:
+            return None
+        best: Tuple[int, Optional[str]] = (-1, None)
+        lines = [ln.strip() for ln in manifest_text.splitlines()]
+        for i, line in enumerate(lines):
+            if not line.startswith("#EXT-X-STREAM-INF"):
+                continue
+            m = re.search(r"BANDWIDTH=(\d+)", line)
+            bandwidth = int(m.group(1)) if m else 0
+            # 属性行の直後にある最初の非コメント・非空行が variant の URI
+            uri = next((ln for ln in lines[i + 1:] if ln and not ln.startswith("#")), None)
+            if uri and bandwidth > best[0]:
+                best = (bandwidth, urljoin(manifest_url, uri))
+        return best[1]
 
     def _fetch_m3u8_manifest(self, m3u8_url: str, page_url: str) -> Optional[str]:
         """m3u8マニフェスト本体を、ブラウザ偽装(impersonate)付きで直接取得する。
@@ -971,7 +1047,7 @@ class ScrapingStrategy(DownloadStrategy):
                 for future in as_completed(futures):
                     idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる
                     resolved[idx] = local_uri
-            except Exception:
+            except BaseException:
                 # ボット検知(403/429/503)等で一部セグメントが例外を出した場合、
                 # 「即時セッション中断」を実際に機能させるため、まだ実行が
                 # 始まっていない残りのセグメント取得をキャンセルする。
@@ -980,6 +1056,11 @@ class ScrapingStrategy(DownloadStrategy):
                 # ブロック中のCDNへのHTTP GETを完走し終えるまで例外の伝播が
                 # 遅延してしまっていた(実行中の最大_FRAGMENT_DOWNLOAD_WORKERS件は
                 # 完了を待つが、キュー済みの残りはリクエスト自体を送らずに済む)。
+                # Exception ではなく BaseException を捕捉する: 2回目の停止シグナルで
+                # _handle_signal が送出する KeyboardInterrupt は Exception の派生ではなく、
+                # 以前はここを素通りして with ブロック終了時の shutdown(wait=True)
+                # (cancel_futures なし)に落ち、「即時強制中断」のはずが数千件の
+                # キュー済みセグメントを完走するまで止まらなかった。
                 executor.shutdown(wait=True, cancel_futures=True)
                 raise
 
@@ -1138,6 +1219,19 @@ class ScrapingStrategy(DownloadStrategy):
         if manifest_text is None:
             return False
 
+        # Issue #538: _extract_m3u8_url が source1280/source842 を見つけられず 'source'
+        # (マスタープレイリスト)にフォールバックした場合、以前は variant の .m3u8 を
+        # 「セグメント」として取得してしまい、file:// 基準の相対 URI 解決に失敗して
+        # merge 失敗・tmp 削除・失敗カウントになっていた。#EXT-X-STREAM-INF を含む場合は
+        # 最も帯域の大きい variant を辿ってメディアプレイリストを取り直す(1段のみ)。
+        variant_url = self._select_variant_from_master(manifest_text, m3u8_url)
+        if variant_url:
+            logger.info(f"🎚️ マスタープレイリストを検出。variant を取得します: {variant_url}")
+            manifest_text = self._fetch_m3u8_manifest(variant_url, page_url)
+            if manifest_text is None:
+                return False
+            m3u8_url = variant_url
+
         localized_manifest = self._localize_m3u8_manifest(manifest_text, m3u8_url)
 
         # フラグメントはNAS上のsave_dirではなくローカルディスクに一時保存する
@@ -1210,14 +1304,10 @@ class BatchDownloader:
         logger.critical("🛑🛑 2回目の停止シグナルを検知したため、実行中の処理を強制中断します")
         raise KeyboardInterrupt("second interrupt signal received; forcing immediate shutdown")
 
-    def _get_strategy(self, url: str) -> Optional[DownloadStrategy]:
-        # 【修正】ハードコードではなく、設定フラグで制御するように変更
-        if "youtube.com" in url or "youtu.be" in url:
-            if not CONFIG.ENABLE_YOUTUBE_DL:
-                logger.info(f"🚫 YouTube機能は設定により無効化されています: {url}")
-                return None
-            # 有効な場合は通常のフローへ進む
-
+    def _get_strategy(self, url: str) -> DownloadStrategy:
+        # Issue #535: 以前ここにあった「YouTube 無効時は None を返す」分岐は、_prepare_tasks が
+        # ENABLE_YOUTUBE_DL=False のとき YouTube タスクを先に除外(パージ)するため到達不能な
+        # デッドコードだった。戻り値を非 Optional にし、呼び出し側の None チェックも削除した。
         # missavなら専用ストラテジー、それ以外はUniversal
         if "missav" in url:
             return ScrapingStrategy(CONFIG.BASE_SAVE_DIR, self.session)
@@ -1252,7 +1342,7 @@ class BatchDownloader:
                         if url and not url.startswith("#"):
                             url = _normalize_url(url)
                             if url not in self.history:
-                                _add(url, "list")
+                                _add(url, TOP_LEVEL_LIST_SOURCE)
             except Exception as e:
                 logger.error(f"リスト読み込みエラー ({CONFIG.LIST_FILE_PATH.name}): {e}", exc_info=True)
 
@@ -1305,7 +1395,7 @@ class BatchDownloader:
 
         # 3. 元ファイルからの物理削除（インメモリでフィルタリングして上書き）
         for source_name, urls_to_remove in tasks_by_source.items():
-            if source_name == "list":
+            if source_name == TOP_LEVEL_LIST_SOURCE:
                 file_path = CONFIG.LIST_FILE_PATH
             else:
                 file_path = CONFIG.LIST_DIR_PATH / f"{source_name}.txt"
@@ -1476,10 +1566,6 @@ class BatchDownloader:
 
             try:
                 strategy = self._get_strategy(task.url)
-
-                # 【追加】YouTube等のスキップ対象（None）だった場合は次へ
-                if strategy is None:
-                    continue
 
                 if strategy.download(task):
                     HistoryManager.add_history(task.url)

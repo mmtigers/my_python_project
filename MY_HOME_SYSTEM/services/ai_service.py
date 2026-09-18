@@ -21,7 +21,7 @@ from tenacity import (
 )
 
 import config
-import common
+from core.database import get_db_cursor
 from core.logger import setup_logging
 from core.utils import get_now_iso
 
@@ -301,7 +301,7 @@ def _execute_restricted_read_query(query: str, params: tuple = ()) -> str:
     認可コールバックはこのAI経路にのみ適用する。
     """
     try:
-        with common.get_db_cursor() as cursor:
+        with get_db_cursor() as cursor:
             cursor.connection.set_authorizer(_search_db_authorizer)
             cursor.execute(query, params)
             rows = cursor.fetchall()
@@ -353,12 +353,12 @@ async def tool_search_db(args: Dict[str, Any]) -> str:
 
     try:
         # Issue #357: 許可テーブル以外の読み取りをSQLiteの認可コールバックで
-        # 構造的に拒否する専用関数で実行する(以前は common.execute_read_query)。
+        # 構造的に拒否する専用関数で実行する(以前は execute_read_query)。
         result = await asyncio.to_thread(_execute_restricted_read_query, sql)
     except Exception as e:
         return f"DB検索エラー: {e}"
 
-    # #180: _execute_restricted_read_query(旧 common.execute_read_query)は例外発生時も
+    # #180: _execute_restricted_read_query(旧 execute_read_query)は例外発生時も
     # "検索エラー: ..."という非空文字列を返す設計のため、以前の`if not rows:`は
     # 常に偽となり到達しないデッドコードだった。加えて、SQL実行時エラーの文字列が
     # そのまま正常な検索結果としてAIへ渡っていた(呼び出し元はログにも残らず気づけない)。

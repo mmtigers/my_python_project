@@ -5,13 +5,28 @@
 # ==========================================
 
 # --- Configuration ---
-LOGFILE="/home/masahiro/develop/MY_HOME_SYSTEM/logs/bluetooth_monitor.log"
-SPEAKER_MAC="F4:4E:FC:B6:65:D4" # Anker SoundCore 2 MAC Address
-CONNECT_SCRIPT="/home/masahiro/develop/MY_HOME_SYSTEM/tools/connect_speaker.sh"
+PROJECT_DIR="/home/masahiro/develop/MY_HOME_SYSTEM"
+LOGFILE="$PROJECT_DIR/logs/bluetooth_monitor.log"
+CONNECT_SCRIPT="$PROJECT_DIR/tools/connect_speaker.sh"
+
+# Issue #663: 以前は実機のMACアドレスをこのスクリプトに直書きしていた。
+# connect_speaker.sh と同じく .env の SPEAKER_BLUETOOTH_MAC から受け取る。
+if [ -f "$PROJECT_DIR/.env" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$PROJECT_DIR/.env"
+    set +a
+fi
+SPEAKER_MAC="${SPEAKER_BLUETOOTH_MAC:-}"  # Anker SoundCore 2 等のBTスピーカー
+if [ -z "$SPEAKER_MAC" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - [INFO] SPEAKER_BLUETOOTH_MAC is not set. Skipping." >> "$LOGFILE"
+    exit 0
+fi
 
 # --- Environment Setup for PipeWire/PulseAudio (CRUCIAL) ---
 # cron実行時でもPipeWireソケットを見つけられるようにする
-export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export XDG_RUNTIME_DIR
 export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
 
 # ログ関数

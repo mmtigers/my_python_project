@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
+import { fileURLToPath } from 'url'
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -12,7 +13,16 @@ export default defineConfig({
     useCredentials: true,
     registerType: 'autoUpdate', // ユーザーへの通知なしに自動更新（シンプル構成）
     includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'vite.svg'],
+    workbox: {
+      // #660: 既定の globPatterns は js/css/html/ico/png/svg のみで、効果音の mp3
+      // (public/*.mp3、計6ファイル 約190KB)がプリキャッシュから漏れていた。
+      // オフライン・初回タップ時に音が鳴らない/遅れる原因になるため明示的に含める。
+      globPatterns: ['**/*.{js,css,html,ico,png,svg,mp3}'],
+    },
     manifest: {
+      // #660: 既定では manifest.lang が "en" になるが、UI もコンテンツも日本語のため ja とする
+      // (index.html の <html lang="ja"> とも揃う)。
+      lang: 'ja',
       name: 'Family Quest',
       short_name: 'Quest',
       description: '家族で楽しむタスク管理RPG',
@@ -39,7 +49,8 @@ export default defineConfig({
   base: '/quest/',
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      // Issue #539: ESM 設定ファイルでは __dirname は非推奨(Vite 8 で警告)のため import.meta.url から解決する
+      '@': path.resolve(fileURLToPath(new URL('.', import.meta.url)), './src'),
     },
   },
   server: {
