@@ -105,20 +105,20 @@
 
 ### `_EXCLUDED_RESPONSE_HEADERS`
 
-* **役割**: 中継先のレスポンスからブラウザへ引き継がないヘッダー名の集合。`_HOP_BY_HOP_HEADERS` に `content-length` を加えたもの。
-* 根拠: [定数宣言] (行番号: 75 / 抜粋: '_EXCLUDED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | {"content-length"}')
+* **役割**: 中継先のレスポンスからブラウザへ引き継がないヘッダー名の集合。`_HOP_BY_HOP_HEADERS` に `content-length`・`date`・`server` を加えたもの。`date`/`server` は uvicorn が自前で付けるため、持ち越すと1レスポンスに2つずつ並ぶ（実機の `curl -D -` で確認した）。
+* 根拠: [定数宣言] (行番号: 76 / 抜粋: '_EXCLUDED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | {"content-length", "date", "server"}')
 
 * **引数/リクエスト**: 該当なし
-* 根拠: [定数宣言] (行番号: 75 / 抜粋: '_EXCLUDED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | {"content-length"}')
+* 根拠: [定数宣言] (行番号: 76 / 抜粋: '_EXCLUDED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | {"content-length", "date", "server"}')
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [定数宣言] (行番号: 75 / 抜粋: '_EXCLUDED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | {"content-length"}')
+* 根拠: [定数宣言] (行番号: 76 / 抜粋: '_EXCLUDED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | {"content-length", "date", "server"}')
 
 * **副作用**: なし
-* 根拠: [定数宣言] (行番号: 75 / 抜粋: '_EXCLUDED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | {"content-length"}')
+* 根拠: [定数宣言] (行番号: 76 / 抜粋: '_EXCLUDED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | {"content-length", "date", "server"}')
 
 * **エラーハンドリング**: なし
-* 根拠: [定数宣言] (行番号: 75 / 抜粋: '_EXCLUDED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | {"content-length"}')
+* 根拠: [定数宣言] (行番号: 76 / 抜粋: '_EXCLUDED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | {"content-length", "date", "server"}')
 
 
 ### `_UPSTREAM_UNAVAILABLE_MESSAGE`
@@ -142,46 +142,46 @@
 ### `class DashboardProxyService`
 
 * **役割**: Streamlitダッシュボードへのリバースプロキシ本体。docstringに、DIコンテナを導入しない既存方針（CLAUDE.md）に合わせて設定は都度 `config` から読む旨が記されている。
-* 根拠: [クラス宣言] (行番号: 83〜88 / 抜粋: "class DashboardProxyService:")
+* 根拠: [クラス宣言] (行番号: 84〜306 / 抜粋: "class DashboardProxyService:")
 
 * **引数/リクエスト**: 該当なし
-* 根拠: [クラス宣言] (行番号: 83 / 抜粋: "class DashboardProxyService:")
+* 根拠: [クラス宣言] (行番号: 84 / 抜粋: "class DashboardProxyService:")
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [クラス宣言] (行番号: 83 / 抜粋: "class DashboardProxyService:")
+* 根拠: [クラス宣言] (行番号: 84 / 抜粋: "class DashboardProxyService:")
 
 * **副作用**: なし
-* 根拠: [クラス宣言] (行番号: 83 / 抜粋: "class DashboardProxyService:")
+* 根拠: [クラス宣言] (行番号: 84 / 抜粋: "class DashboardProxyService:")
 
 * **エラーハンドリング**: なし
-* 根拠: [クラス宣言] (行番号: 83 / 抜粋: "class DashboardProxyService:")
+* 根拠: [クラス宣言] (行番号: 84 / 抜粋: "class DashboardProxyService:")
 
 
 ### `DashboardProxyService.__init__`
 
 * **役割**: `_client`（`httpx.AsyncClient` または `None`）と `_client_lock`（`asyncio.Lock`）を初期化する。クライアントはimport時ではなく最初のリクエスト時に生成する方針がコメントに記されている。
-* 根拠: [メソッド定義] (行番号: 90〜94 / 抜粋: "def __init__(self) -> None:")
+* 根拠: [メソッド定義] (行番号: 91〜95 / 抜粋: "def __init__(self) -> None:")
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: [メソッド定義] (行番号: 90 / 抜粋: "def __init__(self) -> None:")
+* 根拠: [メソッド定義] (行番号: 91 / 抜粋: "def __init__(self) -> None:")
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [メソッド定義] (行番号: 90 / 抜粋: "def __init__(self) -> None:")
+* 根拠: [メソッド定義] (行番号: 91 / 抜粋: "def __init__(self) -> None:")
 
 * **副作用**: インスタンス属性 `_client` / `_client_lock` の設定。
 * 根拠: [代入] (行番号: 93〜94 / 抜粋: "self._client: Optional[httpx.AsyncClient] = None")
 
 * **エラーハンドリング**: なし
-* 根拠: [メソッド定義] (行番号: 90〜94 / 抜粋: "def __init__(self) -> None:")
+* 根拠: [メソッド定義] (行番号: 91〜95 / 抜粋: "def __init__(self) -> None:")
 
 
 ### `DashboardProxyService._get_client`
 
 * **役割**: `httpx.AsyncClient` を遅延生成して返す。未生成または既に閉じている場合のみ、`_client_lock` を取得したうえで二重チェックして生成する。タイムアウトは `config.DASHBOARD_PROXY_TIMEOUT_SEC`、`follow_redirects=False`（中継先が返すリダイレクトは追わずブラウザへそのまま返す）。
-* 根拠: [メソッド定義] (行番号: 98〜109 / 抜粋: "async def _get_client(self) -> httpx.AsyncClient:")
+* 根拠: [メソッド定義] (行番号: 99〜110 / 抜粋: "async def _get_client(self) -> httpx.AsyncClient:")
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: [メソッド定義] (行番号: 98 / 抜粋: "async def _get_client(self) -> httpx.AsyncClient:")
+* 根拠: [メソッド定義] (行番号: 99 / 抜粋: "async def _get_client(self) -> httpx.AsyncClient:")
 
 * **戻り値/レスポンス**: `httpx.AsyncClient`
 * 根拠: [return文] (行番号: 109 / 抜粋: "return self._client")
@@ -190,49 +190,49 @@
 * 根拠: [代入] (行番号: 102〜108 / 抜粋: "self._client = httpx.AsyncClient(")
 
 * **エラーハンドリング**: なし（`try`/`except` を持たない）
-* 根拠: [メソッド定義] (行番号: 98〜109 / 抜粋: "async def _get_client(self) -> httpx.AsyncClient:")
+* 根拠: [メソッド定義] (行番号: 99〜110 / 抜粋: "async def _get_client(self) -> httpx.AsyncClient:")
 
 
 ### `DashboardProxyService.aclose`
 
 * **役割**: `unified_server.py` の lifespan 終了時に呼ぶ後始末。`_client` が存在し未クローズなら `aclose()` し、その後 `_client` を `None` に戻す。
-* 根拠: [メソッド定義] (行番号: 111〜115 / 抜粋: "async def aclose(self) -> None:")
+* 根拠: [メソッド定義] (行番号: 112〜116 / 抜粋: "async def aclose(self) -> None:")
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: [メソッド定義] (行番号: 111 / 抜粋: "async def aclose(self) -> None:")
+* 根拠: [メソッド定義] (行番号: 112 / 抜粋: "async def aclose(self) -> None:")
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [メソッド定義] (行番号: 111 / 抜粋: "async def aclose(self) -> None:")
+* 根拠: [メソッド定義] (行番号: 112 / 抜粋: "async def aclose(self) -> None:")
 
 * **副作用**: HTTP接続プールのクローズと `self._client = None`。
 * 根拠: [代入] (行番号: 114〜115 / 抜粋: "await self._client.aclose()")
 
 * **エラーハンドリング**: なし（呼び出し側の `unified_server.py` が `try`/`except` で包んでいる）
-* 根拠: [メソッド定義] (行番号: 111〜115 / 抜粋: "async def aclose(self) -> None:")
+* 根拠: [メソッド定義] (行番号: 112〜116 / 抜粋: "async def aclose(self) -> None:")
 
 
 ### `DashboardProxyService._upstream_url`
 
 * **役割**: 公開パス配下の `path` を、中継先の同じパスへ写像したURL文字列を返す。`scheme == "ws"` のときは `config.DASHBOARD_INTERNAL_URL` の `https://` → `wss://`、`http://` → `ws://` を各1回だけ置換する。`path` が `/` 始まりでなければ先頭に `/` を補い、`query_string` が空でなければ `?` で連結する（`latin-1` でデコード）。docstringに、Streamlitは `--server.baseUrlPath` 付きで起動するためベースパスを剥がさずそのまま渡す旨が記されている。
-* 根拠: [メソッド定義] (行番号: 119〜134 / 抜粋: "def _upstream_url(self, path: str, query_string: bytes, *, scheme: str) -> str:")
+* 根拠: [メソッド定義] (行番号: 120〜135 / 抜粋: "def _upstream_url(self, path: str, query_string: bytes, *, scheme: str) -> str:")
 
 * **引数/リクエスト**: `path: str`、`query_string: bytes`、キーワード専用の `scheme: str`
-* 根拠: [メソッド定義] (行番号: 119 / 抜粋: "def _upstream_url(self, path: str, query_string: bytes, *, scheme: str) -> str:")
+* 根拠: [メソッド定義] (行番号: 120 / 抜粋: "def _upstream_url(self, path: str, query_string: bytes, *, scheme: str) -> str:")
 
 * **戻り値/レスポンス**: 連結済みのURL文字列
 * 根拠: [return文] (行番号: 134 / 抜粋: "return url")
 
 * **副作用**: なし
-* 根拠: [メソッド定義] (行番号: 119〜134 / 抜粋: "def _upstream_url(self, path: str, query_string: bytes, *, scheme: str) -> str:")
+* 根拠: [メソッド定義] (行番号: 120〜135 / 抜粋: "def _upstream_url(self, path: str, query_string: bytes, *, scheme: str) -> str:")
 
 * **エラーハンドリング**: なし
-* 根拠: [メソッド定義] (行番号: 119〜134 / 抜粋: "def _upstream_url(self, path: str, query_string: bytes, *, scheme: str) -> str:")
+* 根拠: [メソッド定義] (行番号: 120〜135 / 抜粋: "def _upstream_url(self, path: str, query_string: bytes, *, scheme: str) -> str:")
 
 
 ### `DashboardProxyService._upstream_headers`
 
 * **役割**: 中継先へ渡すヘッダー辞書を組み立てる。(1) `_HOP_BY_HOP_HEADERS`（`drop_handshake_headers=True` のときは `_WEBSOCKET_HANDSHAKE_HEADERS` も）に含まれる名前を小文字比較で除外する。(2) `client_host` があれば `x-forwarded-for` に追記（既存値があれば `", "` 区切りで連結）する。(3) `x-forwarded-proto` を `forwarded_proto` で設定する。(4) `origin` が存在する場合のみ `config.DASHBOARD_INTERNAL_URL` に書き換える。(4)についてはコメントに、Streamlit(Tornado)がOriginとHostの一致を検証するため書き換えないとハンドシェイクが拒否され画面が "Connecting..." のまま進まないこと、`--server.enableCORS false` / `--server.enableXsrfProtection false` による無効化の回避策を取らずに済ませるための処理であることが記されている。
-* 根拠: [メソッド定義] (行番号: 136〜168 / 抜粋: "def _upstream_headers(")
+* 根拠: [メソッド定義] (行番号: 137〜169 / 抜粋: "def _upstream_headers(")
 
 * **引数/リクエスト**: `headers: Iterable[Tuple[str, str]]`、キーワード専用の `client_host: Optional[str]`・`forwarded_proto: str`・`drop_handshake_headers: bool = False`
 * 根拠: [メソッド定義] (行番号: 136〜143 / 抜粋: "headers: Iterable[Tuple[str, str]],")
@@ -244,16 +244,35 @@
 * 根拠: [辞書内包表記] (行番号: 149〜151 / 抜粋: "forwarded: Dict[str, str] = {")
 
 * **エラーハンドリング**: なし
-* 根拠: [メソッド定義] (行番号: 136〜168 / 抜粋: "def _upstream_headers(")
+* 根拠: [メソッド定義] (行番号: 137〜169 / 抜粋: "def _upstream_headers(")
+
+
+### `DashboardProxyService._pin_accept_encoding` （静的メソッド）
+
+* **役割**: 転送ヘッダーの `accept-encoding` を、ブラウザが送ってきた値に固定する（送ってこなければ `"identity"` を補う）。docstringに、httpxは明示しないと既定の `Accept-Encoding: gzip, deflate, ...` を付けるため、圧縮を要求していないクライアントにも中継先が gzip で返し、それをそのまま流してしまう（=クライアントが解凍できずバイナリのまま表示される）こと、ヘルスチェックや `Accept-Encoding` を送らないクライアントで実際に再現したことが記されている。
+* 根拠: `def _pin_accept_encoding(headers: Dict[str, str]) -> Dict[str, str]:` (行番号: 172〜182 / 抜粋: "def _pin_accept_encoding(headers: Dict[str, str]) -> Dict[str, str]:")
+
+* **引数/リクエスト**: `headers: Dict[str, str]`
+* 根拠: (行番号: 172 / 抜粋: "def _pin_accept_encoding(headers: Dict[str, str]) -> Dict[str, str]:")
+
+* **戻り値/レスポンス**: `accept-encoding` を補った新しい `Dict[str, str]`
+* 根拠: `return pinned` (行番号: 182 / 抜粋: "return pinned")
+
+* **副作用**: なし（引数の辞書を変更せずコピーを返す）
+* 根拠: `pinned = dict(headers)` (行番号: 180 / 抜粋: "pinned = dict(headers)")
+
+* **エラーハンドリング**: なし
+* 根拠: (行番号: 172〜182 / 抜粋: "def _pin_accept_encoding(headers: Dict[str, str]) -> Dict[str, str]:")
+
 
 
 ### `DashboardProxyService.forward_http`
 
-* **役割**: HTTPリクエストを中継先へ送り、レスポンスをストリームで返す。`_upstream_url`（`scheme="http"`）でURLを、`_upstream_headers` でヘッダーを組み立て、`client.build_request` にリクエストボディ（`await request.body()`）を載せて `client.send(..., stream=True)` する。成功時は `_EXCLUDED_RESPONSE_HEADERS` を除いたヘッダーと中継先のステータスコードを持つ `StreamingResponse` を返し、ボディは `aiter_raw()` で無加工のまま流す。
-* 根拠: [メソッド定義] (行番号: 172〜208 / 抜粋: "async def forward_http(self, request: Request, path: str) -> StreamingResponse | PlainTextResponse:")
+* **役割**: HTTPリクエストを中継先へ送り、レスポンスをストリームで返す。`_upstream_url`（`scheme="http"`）でURLを、`_upstream_headers` + `_pin_accept_encoding` でヘッダーを組み立て、`client.build_request` にリクエストボディ（`await request.body()`）を載せて `client.send(..., stream=True)` する。成功時は `_EXCLUDED_RESPONSE_HEADERS` を除いたヘッダーと中継先のステータスコードを持つ `StreamingResponse` を返し、ボディは `aiter_raw()` で無加工のまま流す。
+* 根拠: [メソッド定義] (行番号: 186〜224 / 抜粋: "async def forward_http(self, request: Request, path: str) -> StreamingResponse | PlainTextResponse:")
 
 * **引数/リクエスト**: `request: Request`（FastAPIのリクエスト）、`path: str`（中継先へ渡すパス）
-* 根拠: [メソッド定義] (行番号: 172 / 抜粋: "async def forward_http(self, request: Request, path: str)")
+* 根拠: [メソッド定義] (行番号: 186 / 抜粋: "async def forward_http(self, request: Request, path: str)")
 
 * **戻り値/レスポンス**: 成功時は `StreamingResponse`、中継失敗時は本文が `_UPSTREAM_UNAVAILABLE_MESSAGE` の `PlainTextResponse`（ステータス503）
 * 根拠: [return文] (行番号: 194, 202〜208 / 抜粋: "return PlainTextResponse(_UPSTREAM_UNAVAILABLE_MESSAGE, status_code=503)")
@@ -268,13 +287,13 @@
 ### `DashboardProxyService.forward_websocket`
 
 * **役割**: StreamlitのWebSocket（`_stcore/stream`）を双方向に中継する。`_upstream_url`（`scheme="ws"`）でURLを組み立て、ブラウザが要求したサブプロトコル（`scope["subprotocols"]`）と `drop_handshake_headers=True` で組み立てたヘッダーを渡して `websockets.connect` する。接続オプションは `max_size=None`（コメント: Streamlitのメッセージはデフォルト上限1MiBを超えうる）、`open_timeout=config.DASHBOARD_PROXY_TIMEOUT_SEC`、`ping_interval=None`（コメント: 中継区間で独自にpingを打って切断判定を二重化しない）。接続後にブラウザ側を `accept(subprotocol=upstream.subprotocol)` し、`_pump_until_either_side_closes` で転送する。
-* 根拠: [メソッド定義] (行番号: 212〜251 / 抜粋: "async def forward_websocket(self, client_ws: WebSocket, path: str) -> None:")
+* 根拠: [メソッド定義] (行番号: 228〜267 / 抜粋: "async def forward_websocket(self, client_ws: WebSocket, path: str) -> None:")
 
 * **引数/リクエスト**: `client_ws: WebSocket`（ブラウザ側の接続）、`path: str`
-* 根拠: [メソッド定義] (行番号: 212 / 抜粋: "async def forward_websocket(self, client_ws: WebSocket, path: str) -> None:")
+* 根拠: [メソッド定義] (行番号: 228 / 抜粋: "async def forward_websocket(self, client_ws: WebSocket, path: str) -> None:")
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [メソッド定義] (行番号: 212 / 抜粋: "async def forward_websocket(self, client_ws: WebSocket, path: str) -> None:")
+* 根拠: [メソッド定義] (行番号: 228 / 抜粋: "async def forward_websocket(self, client_ws: WebSocket, path: str) -> None:")
 
 * **副作用**: 中継先へのWebSocket接続の確立・切断、ブラウザ側接続の `accept` / `close`。
 * 根拠: [呼び出し] (行番号: 224, 242, 245, 247 / 抜粋: "upstream = await websockets.connect(")
@@ -286,13 +305,13 @@
 ### `DashboardProxyService._pump_until_either_side_closes`
 
 * **役割**: `_client_to_upstream` と `_upstream_to_client` をタスクとして起動し、`asyncio.wait(..., return_when=asyncio.FIRST_COMPLETED)` でどちらかの完了を待つ。`finally` で両タスクを `cancel()` し、`asyncio.gather(..., return_exceptions=True)` で回収する。
-* 根拠: [メソッド定義] (行番号: 253〜264 / 抜粋: "async def _pump_until_either_side_closes(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 269〜280 / 抜粋: "async def _pump_until_either_side_closes(self, client_ws: WebSocket, upstream) -> None:")
 
 * **引数/リクエスト**: `client_ws: WebSocket`、`upstream`（型注釈なし。`websockets.connect` の戻り値）
-* 根拠: [メソッド定義] (行番号: 253 / 抜粋: "async def _pump_until_either_side_closes(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 269 / 抜粋: "async def _pump_until_either_side_closes(self, client_ws: WebSocket, upstream) -> None:")
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [メソッド定義] (行番号: 253 / 抜粋: "async def _pump_until_either_side_closes(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 269 / 抜粋: "async def _pump_until_either_side_closes(self, client_ws: WebSocket, upstream) -> None:")
 
 * **副作用**: 2つのasyncioタスクの生成とキャンセル。
 * 根拠: [呼び出し] (行番号: 255〜258, 262〜264 / 抜粋: "asyncio.create_task(self._client_to_upstream(client_ws, upstream)),")
@@ -304,10 +323,10 @@
 ### `DashboardProxyService._client_to_upstream`
 
 * **役割**: ブラウザ→中継先方向の転送。`client_ws.receive()` を繰り返し、`type` が `"websocket.disconnect"` なら終了、`text` があればそれを、なければ `bytes` を中継先へ `send` する。
-* 根拠: [メソッド定義] (行番号: 266〜280 / 抜粋: "async def _client_to_upstream(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 282〜296 / 抜粋: "async def _client_to_upstream(self, client_ws: WebSocket, upstream) -> None:")
 
 * **引数/リクエスト**: `client_ws: WebSocket`、`upstream`
-* 根拠: [メソッド定義] (行番号: 266 / 抜粋: "async def _client_to_upstream(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 282 / 抜粋: "async def _client_to_upstream(self, client_ws: WebSocket, upstream) -> None:")
 
 * **戻り値/レスポンス**: `None`
 * 根拠: [return文] (行番号: 271, 280 / 抜粋: "return")
@@ -322,10 +341,10 @@
 ### `DashboardProxyService._upstream_to_client`
 
 * **役割**: 中継先→ブラウザ方向の転送。`async for` で受け取ったメッセージが `str` なら `send_text`、それ以外は `send_bytes` でブラウザへ送る。
-* 根拠: [メソッド定義] (行番号: 282〜290 / 抜粋: "async def _upstream_to_client(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 298〜306 / 抜粋: "async def _upstream_to_client(self, client_ws: WebSocket, upstream) -> None:")
 
 * **引数/リクエスト**: `client_ws: WebSocket`、`upstream`
-* 根拠: [メソッド定義] (行番号: 282 / 抜粋: "async def _upstream_to_client(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 298 / 抜粋: "async def _upstream_to_client(self, client_ws: WebSocket, upstream) -> None:")
 
 * **戻り値/レスポンス**: `None`
 * 根拠: [return文] (行番号: 290 / 抜粋: "return")

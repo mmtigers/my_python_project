@@ -14,10 +14,12 @@ routers/dashboard_router.py)のテスト。
 - 中継先が落ちていても 8000番 側を巻き込んで 500 にしないこと
 """
 import asyncio
+import gzip
 import os
 import socket
 import sys
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
 import pytest
@@ -168,6 +170,119 @@ class TestUpstreamUnavailable:
 
         assert res.status_code == 503
         assert "home_dashboard.service" in res.text
+
+
+class _RecordingHttpUpstream:
+    """中継先のStreamlitに見立てたHTTPサーバー。
+
+    受け取ったリクエストヘッダーを記録し、`Accept-Encoding` に gzip が含まれていれば
+    gzip 圧縮した本文を `Content-Encoding: gzip` 付きで返す(Tornado/Streamlit と同じ挙動)。
+    ついでに `Date` / `Server` ヘッダーも返し、中継側で二重にならないことを確認する。
+    """
+
+    BODY = b"<html>dashboard</html>"
+
+    def __init__(self) -> None:
+        self.port = _free_port()
+        self.received_headers: dict = {}
+        self._server: ThreadingHTTPServer | None = None
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> "_RecordingHttpUpstream":
+        upstream = self
+
+        class _Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler の規約)
+                upstream.received_headers = {k.lower(): v for k, v in self.headers.items()}
+                accept_encoding = upstream.received_headers.get("accept-encoding", "")
+                if "gzip" in accept_encoding:
+                    body = gzip.compress(upstream.BODY)
+                    encoding = "gzip"
+                else:
+                    body = upstream.BODY
+                    encoding = None
+
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                if encoding:
+                    self.send_header("Content-Encoding", encoding)
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args) -> None:
+                pass
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", self.port), _Handler)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+
+
+class TestResponsePassthrough:
+    """実機(Streamlit + uvicorn)での疎通確認で見つかった2件の回帰テスト。"""
+
+    def _get(self, monkeypatch, upstream, *, accept_encoding: str | None):
+        """`accept_encoding=None` は「ヘッダーを一切送らないクライアント」を再現する。"""
+        monkeypatch.setattr(config, "DASHBOARD_INTERNAL_URL", f"http://127.0.0.1:{upstream.port}")
+        app = FastAPI()
+        app.include_router(dashboard_router.router)
+        with TestClient(app) as client:
+            # TestClient(httpx)は既定で accept-encoding を付けるため、明示的に取り除く
+            client.headers.pop("accept-encoding", None)
+            headers = {} if accept_encoding is None else {"accept-encoding": accept_encoding}
+            return client.get(f"{config.DASHBOARD_BASE_PATH}/", headers=headers)
+
+    def test_body_is_not_gzipped_when_the_client_did_not_ask_for_it(self, monkeypatch):
+        """httpx は明示しないと既定で `Accept-Encoding: gzip, ...` を付けるため、
+        圧縮を要求していないクライアントにも gzip 本文をそのまま流してしまい、
+        画面がバイナリのまま表示される(curl や `Accept-Encoding` を送らない
+        ヘルスチェックで実際に再現した)。"""
+        with _RecordingHttpUpstream() as upstream:
+            res = self._get(monkeypatch, upstream, accept_encoding=None)
+
+        assert upstream.received_headers["accept-encoding"] == "identity"
+        assert res.content == _RecordingHttpUpstream.BODY
+
+    def test_client_accept_encoding_is_honored(self, monkeypatch):
+        """ブラウザが gzip を要求した場合は、中継先の圧縮をそのまま通す。"""
+        with _RecordingHttpUpstream() as upstream:
+            res = self._get(monkeypatch, upstream, accept_encoding="gzip")
+
+        assert upstream.received_headers["accept-encoding"] == "gzip"
+        # httpx(TestClient)側が Content-Encoding に従って解凍できること
+        assert res.content == _RecordingHttpUpstream.BODY
+
+    def test_upstream_date_and_server_headers_are_not_carried_over(self, monkeypatch):
+        """`date`/`server` は uvicorn が自前で付けるため、中継先の値を持ち越すと
+        1レスポンスに2つずつ並ぶ(実機の `curl -D -` で `server: uvicorn` と
+        `server: TornadoServer/...`、`date` 2つを確認した)。中継先の値は落とす。"""
+        with _RecordingHttpUpstream() as upstream:
+            res = self._get(monkeypatch, upstream, accept_encoding="gzip")
+
+        # 中継先(http.server)は "BaseHTTP/..." を名乗る。これが出てこないこと。
+        assert "BaseHTTP" not in res.headers.get("server", "")
+        assert len(res.headers.get_list("date")) <= 1
+        assert len(res.headers.get_list("server")) <= 1
+
+
+class TestPinAcceptEncoding:
+    def test_identity_is_used_when_the_client_sent_none(self):
+        assert DashboardProxyService._pin_accept_encoding({})["accept-encoding"] == "identity"
+
+    def test_client_value_is_kept(self):
+        pinned = DashboardProxyService._pin_accept_encoding({"accept-encoding": "br, gzip"})
+
+        assert pinned["accept-encoding"] == "br, gzip"
 
 
 class _UpstreamWebSocketEcho:

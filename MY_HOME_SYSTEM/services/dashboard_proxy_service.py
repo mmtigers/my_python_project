@@ -72,7 +72,8 @@ _WEBSOCKET_HANDSHAKE_HEADERS = frozenset(
 
 # レスポンス側で落とすヘッダー。ボディは `aiter_raw()` で無加工のまま流すが、
 # 長さ・チャンク制御は Starlette 側が改めて決めるため中継先の値を持ち越さない。
-_EXCLUDED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | {"content-length"}
+# `date`/`server` は uvicorn が自前で付けるため、持ち越すと二重になる。
+_EXCLUDED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | {"content-length", "date", "server"}
 
 _UPSTREAM_UNAVAILABLE_MESSAGE = (
     "ダッシュボード(Streamlit)に接続できませんでした。"
@@ -167,15 +168,30 @@ class DashboardProxyService:
             forwarded["origin"] = config.DASHBOARD_INTERNAL_URL
         return forwarded
 
+    @staticmethod
+    def _pin_accept_encoding(headers: Dict[str, str]) -> Dict[str, str]:
+        """`accept-encoding` をブラウザが送ってきた値に固定する。
+
+        httpx は明示しないと既定の `Accept-Encoding: gzip, deflate, ...` を付けるため、
+        ブラウザが圧縮を要求していない場合でも中継先が gzip で返し、こちらはそれを
+        そのまま流してしまう(=クライアントが解凍できずバイナリのまま表示される)。
+        ヘルスチェックや `Accept-Encoding` を送らないクライアントで実際に壊れる。
+        """
+        pinned = dict(headers)
+        pinned.setdefault("accept-encoding", "identity")
+        return pinned
+
     # --- HTTP ---
 
     async def forward_http(self, request: Request, path: str) -> StreamingResponse | PlainTextResponse:
         """HTTPリクエストをStreamlitへ中継し、レスポンスをストリームで返す。"""
         url = self._upstream_url(path, request.url.query.encode("latin-1"), scheme="http")
-        headers = self._upstream_headers(
-            request.headers.items(),
-            client_host=request.client.host if request.client else None,
-            forwarded_proto=request.url.scheme,
+        headers = self._pin_accept_encoding(
+            self._upstream_headers(
+                request.headers.items(),
+                client_host=request.client.host if request.client else None,
+                forwarded_proto=request.url.scheme,
+            )
         )
 
         client = await self._get_client()
