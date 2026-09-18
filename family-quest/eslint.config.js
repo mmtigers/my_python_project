@@ -34,4 +34,19 @@ export default defineConfig([
       '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', argsIgnorePattern: '^_' }],
     },
   },
+  {
+    // main.tsx はアプリのエントリポイント(ReactDOM.createRoot でツリーを起動するだけで
+    // 何もexportしない)ため、Fast Refresh の対象になることが原理的に無い。
+    // eslint-plugin-react-refresh 0.5 でルールが厳格化され、lazy() の戻り値も
+    // 「コンポーネント定義」として数えるようになった結果、
+    // `const CameraDashboard = lazy(() => import(...))` が
+    // 「exportが無いファイルにコンポーネントがある」として報告されるようになった。
+    // このlazy importは /camera 専用チャンクを本体バンドルから分離するためのもので
+    // (main.tsx 冒頭のコメント参照)、別ファイルへ移すと分離の意図が読み取りにくくなる。
+    // エントリポイントだけをこのルールの対象外にする。
+    files: ['src/main.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ])
