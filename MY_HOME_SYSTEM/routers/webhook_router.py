@@ -44,7 +44,7 @@ async def callback_line(
     # いたため、AI経路の遅延がそのまま reply token(約1分で失効)の失効リスクに直結して
     # いた。ここでは署名検証とイベントのパースのみを同期的に行い(HMAC計算とJSONパースの
     # みでネットワークI/Oを伴わないため軽量)、即座に200を返す。実処理
-    # (handlers/line_handler.dispatch_events、イベント単位の例外隔離・再配信スキップ・
+    # (handlers/line_handler.dispatch_events_async、イベント単位の例外隔離・再配信スキップ・
     # webhookEventIdベースの冪等化・AI呼び出し等はそちら側で行う)はBackgroundTasksで
     # レスポンス送信後に実行する。
     try:
@@ -57,7 +57,15 @@ async def callback_line(
         logger.error(f"LINE callback parse error: {e}")
         return "OK"
 
-    background_tasks.add_task(line_handler.dispatch_events, events)
+    # Issue #664: コルーチン(`dispatch_events_async`)を渡すことで、Starlette が
+    # スレッドプールではなくこのサーバーのイベントループ上で await する。以前は同期版の
+    # `dispatch_events` を渡しており、その内側で着信メッセージ1件ごとに `asyncio.run(...)`
+    # が新しいイベントループを生成しては破棄していた(`services/ai_service` の
+    # Gemini 非同期クライアントはモジュールレベルで1度だけ生成されるため、
+    # 毎回別のループから使われる構成になっていた)。
+    # ループを塞ぐ同期I/O(LINE Profile/reply API・Postback経路の line_logic)は
+    # line_handler 側で `asyncio.to_thread` へ逃がしてある。
+    background_tasks.add_task(line_handler.dispatch_events_async, events)
     return "OK"
 
 # 対象とするセンサーのデバイスタイプ（温湿度計やプラグ等は除外）

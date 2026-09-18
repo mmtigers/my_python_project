@@ -146,18 +146,19 @@ class TestLineCallback:
         fake_handler.handle.assert_not_called()
 
     def test_parsed_events_are_handed_to_dispatch_events_in_background(self, api_client, monkeypatch):
-        """署名検証後にパースされたイベント一覧が、BackgroundTasks経由でdispatch_eventsに渡ること"""
+        """署名検証後にパースされたイベント一覧が、BackgroundTasks経由でdispatch_events_asyncに渡ること"""
         fake_handler = MagicMock()
         sentinel_events = [MagicMock(name="parsed_event")]
         fake_handler.parser.parse.return_value = sentinel_events
         monkeypatch.setattr(webhook_router.line_handler, "line_handler", fake_handler)
-        mock_dispatch = MagicMock()
-        monkeypatch.setattr(webhook_router.line_handler, "dispatch_events", mock_dispatch)
+        # #664: 渡すのはコルーチン版。スレッドプールではなくイベントループ上で await される。
+        mock_dispatch = AsyncMock()
+        monkeypatch.setattr(webhook_router.line_handler, "dispatch_events_async", mock_dispatch)
 
         res = api_client.post("/callback/line", content=b'{"events": []}', headers={"X-Line-Signature": "valid-sig"})
 
         assert res.status_code == 200
-        mock_dispatch.assert_called_once_with(sentinel_events)
+        mock_dispatch.assert_awaited_once_with(sentinel_events)
 
     def test_returns_400_on_invalid_signature(self, api_client, monkeypatch):
         fake_handler = MagicMock()
@@ -205,13 +206,13 @@ class TestLineCallbackReturnsBeforeBackgroundWorkCompletes:
     async def test_response_is_returned_before_dispatch_events_runs(self, monkeypatch):
         order = []
 
-        def slow_dispatch(events):
+        async def slow_dispatch(events):
             order.append("dispatch_ran")
 
         fake_handler = MagicMock()
         fake_handler.parser.parse.return_value = ["evt1"]
         monkeypatch.setattr(webhook_router.line_handler, "line_handler", fake_handler)
-        monkeypatch.setattr(webhook_router.line_handler, "dispatch_events", slow_dispatch)
+        monkeypatch.setattr(webhook_router.line_handler, "dispatch_events_async", slow_dispatch)
 
         request = MagicMock()
         request.body = AsyncMock(return_value=b'{"events": []}')
@@ -220,7 +221,7 @@ class TestLineCallbackReturnsBeforeBackgroundWorkCompletes:
         result = await webhook_router.callback_line(request, background_tasks, x_line_signature="sig")
         order.append("handler_returned")
 
-        # ルーター関数が値を返した時点では、まだ dispatch_events は実行されていない
+        # ルーター関数が値を返した時点では、まだ dispatch_events_async は実行されていない
         # (スケジュールされているだけ)。
         assert result == "OK"
         assert order == ["handler_returned"]
@@ -230,6 +231,36 @@ class TestLineCallbackReturnsBeforeBackgroundWorkCompletes:
         # バックグラウンドタスクをここで初めて実行する。
         await background_tasks()
         assert order == ["handler_returned", "dispatch_ran"]
+
+    @pytest.mark.asyncio
+    async def test_scheduled_background_task_is_a_coroutine_not_a_threadpool_call(self, monkeypatch):
+        """Issue #664: BackgroundTasks へ渡すのは**コルーチン関数**であること。
+
+        Starlette の `BackgroundTask` は関数がコルーチン関数なら実行中のイベントループ上で
+        await し、同期関数なら `run_in_threadpool` で別スレッドへ回す(`is_async` フラグ)。
+        同期版の `dispatch_events` へ戻すと、その内側で着信メッセージ1件ごとに
+        `asyncio.run(...)` が新しいイベントループを作り直す構成に逆戻りする。
+
+        `dispatch_events` は内部で `dispatch_events_async` を呼ぶため、
+        「渡された関数が呼ばれたか」を見るテストでは退行を検知できない。ここでは
+        スケジュールされたタスクそのものを検査する。
+        """
+        fake_handler = MagicMock()
+        fake_handler.parser.parse.return_value = ["evt1"]
+        monkeypatch.setattr(webhook_router.line_handler, "line_handler", fake_handler)
+
+        request = MagicMock()
+        request.body = AsyncMock(return_value=b'{"events": []}')
+        background_tasks = BackgroundTasks()
+
+        await webhook_router.callback_line(request, background_tasks, x_line_signature="sig")
+
+        assert len(background_tasks.tasks) == 1
+        task = background_tasks.tasks[0]
+        assert task.is_async is True, (
+            "同期関数を渡すと run_in_threadpool 経由になり、#664 の修正が無効化される"
+        )
+        assert task.func is webhook_router.line_handler.dispatch_events_async
 
 
 # ==========================================

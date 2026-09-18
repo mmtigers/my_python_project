@@ -255,8 +255,24 @@ def _extract_health_targets(msg_text: str) -> List[tuple]:
 # SDKへの登録(line_handler.add)のみを `if line_handler:` 配下で行うことで、
 # 認証情報が無い環境(テスト等)でもロジック単体をimport・実行できるようにしている。
 
-def handle_message(event: MessageEvent):
-    """テキストメッセージ受信時の処理"""
+async def handle_message_async(event: MessageEvent):
+    """テキストメッセージ受信時の処理(非同期版・実体)。
+
+    Issue #664: 以前はこの本体が同期関数 `handle_message` で、末尾で
+    `asyncio.run(_process_message_async(...))` を呼んでいた。`dispatch_events` が
+    BackgroundTasks のスレッドプールで動くため、**着信メッセージ1件ごとに新しい
+    イベントループを生成しては破棄していた**。`services/ai_service` の Gemini
+    クライアント(`client.aio.chats`)のようにモジュールレベルで1度だけ生成される
+    非同期クライアントは、内部の接続プールを生成時のループに紐づけるため、
+    毎回別のループから使われる構成は本質的に不安定である
+    (`ai_service.SimpleRateLimiter` が `asyncio.Lock` を使えず `threading.Lock` に
+    しているのも、同じ「メッセージごとに別ループ」が原因だった)。
+
+    現在は `webhook_router` が `dispatch_events_async` を BackgroundTasks へ渡すため、
+    この関数はサーバー本体と同じイベントループ上で await される。
+    ループを塞ぐ同期I/O(LINE Profile API・reply/push API)は `asyncio.to_thread` で
+    別スレッドへ逃がしており、イベントループ上で実行しても従来同様ブロックしない。
+    """
     # Issue #376 / L-L1: 複数イベント一括配信時、1件目の例外で SDK の handle() ループが
     # 中断し以降のイベントが処理されない(のに 200 が返る)ため、イベント単位で例外を隔離する。
     try:
@@ -286,15 +302,46 @@ def handle_message(event: MessageEvent):
         msg_text = event.message.text.strip()
         reply_token = event.reply_token
 
-        user_name = _get_display_name(user_id)
+        # `_get_display_name` は LINE の Profile API を叩く同期HTTP
+        # (`config.LINE_API_REQUEST_TIMEOUT` = 接続5秒/読み取り15秒)。イベントループ上で
+        # 直接呼ぶとその間サーバー全体が止まるため、別スレッドへ逃がす
+        # (TTLキャッシュにヒットする通常ケースでは即座に返る)。
+        user_name = await asyncio.to_thread(_get_display_name, user_id)
 
         logger.info(f"📩 Recv [{user_name}]: {msg_text}")
 
-        asyncio.run(
-            _process_message_async(user_id, user_name, msg_text, reply_token)
-        )
+        await _process_message_async(user_id, user_name, msg_text, reply_token)
     except Exception as e:
         logger.error(f"handle_message Error: {e}", exc_info=True)
+
+
+def handle_message(event: MessageEvent):
+    """テキストメッセージ受信時の処理(同期版の入口)。
+
+    LINE SDK の `WebhookHandler.add(...)` へ登録するため、および実行中のイベント
+    ループを持たない文脈(既存テスト等)から呼ぶための薄いラッパー。本番の
+    Webhook 経路は `dispatch_events_async` から `handle_message_async` を直接
+    await するため、ここは通らない。
+
+    実行中のイベントループ上からは `asyncio.run` が `RuntimeError` になるため
+    呼べない。ループ上からは `handle_message_async` を await すること。
+    """
+    asyncio.run(handle_message_async(event))
+
+
+async def _reply_message_async(reply_token: str, messages: List[Any], user_id: Optional[str] = None):
+    """`reply_message`(LINE APIへの同期HTTP)をイベントループを塞がずに呼ぶラッパー。
+
+    Issue #664: `_process_message_async` はサーバー本体のイベントループ上で await
+    されるようになった。`reply_message` は最大で接続5秒+読み取り15秒
+    (`config.LINE_API_REQUEST_TIMEOUT`)ブロックしうえ、失敗時は push_message への
+    フォールバックでもう一度同じだけ待つ可能性があるため、必ず別スレッドで実行する。
+
+    `reply_message` はモジュールグローバルとして解決するので、テストの
+    `monkeypatch.setattr(line_handler, "reply_message", ...)` はこれまでどおり効く。
+    """
+    await asyncio.to_thread(reply_message, reply_token, messages, user_id=user_id)
+
 
 async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):
     """非同期メッセージ処理ロジック"""
@@ -322,7 +369,7 @@ async def _process_message_async(user_id: str, user_name: str, msg_text: str, re
             for child, cond in targets:
                 responses.append(await line_service.log_child_health(user_id, user_name, child, cond))
             # LINEのreplyは1回につき最大5メッセージ。メンバー数(4名)はこれに収まる。
-            reply_message(reply_token, responses[:5], user_id=user_id)
+            await _reply_message_async(reply_token, responses[:5], user_id=user_id)
             return
 
     # 2. AI Analysis (Fallback)
@@ -334,17 +381,17 @@ async def _process_message_async(user_id: str, user_name: str, msg_text: str, re
         )
         if ai_resp_text:
             # Issue #377: Gemini応答は長さ無制限のため、LINEの5000字制限を超えうる。
-            reply_message(reply_token, line_service.split_text_into_line_messages(ai_resp_text), user_id=user_id)
+            await _reply_message_async(reply_token, line_service.split_text_into_line_messages(ai_resp_text), user_id=user_id)
     except asyncio.TimeoutError:
         logger.error(f"AI Processing Timeout (> {AI_REPLY_TIMEOUT_SEC}s) for user {user_id}")
-        reply_message(
+        await _reply_message_async(
             reply_token,
             TextMessage(text="⏳ 処理に時間がかかりすぎたため中断しました。記録が反映されているか確認のうえ、少し時間を置いて再度お試しください。"),
             user_id=user_id,
         )
     except Exception as e:
         logger.error(f"AI Processing Error: {e}")
-        reply_message(reply_token, TextMessage(text="😓 すみません、うまく処理できませんでした。"), user_id=user_id)
+        await _reply_message_async(reply_token, TextMessage(text="😓 すみません、うまく処理できませんでした。"), user_id=user_id)
 
 def handle_postback(event: PostbackEvent):
     """Postbackイベント（ボタン押下など）の処理"""
@@ -397,7 +444,7 @@ if line_handler:
     line_handler.add(PostbackEvent)(handle_postback)
 
 
-def dispatch_events(events: List[Any]) -> None:
+async def dispatch_events_async(events: List[Any]) -> None:
     """
     Issue #376: routers/webhook_router.py が署名検証・パース済みのイベント一覧を
     BackgroundTasks 経由で渡してくる、実処理のエントリポイント。
@@ -417,6 +464,15 @@ def dispatch_events(events: List[Any]) -> None:
     冪等化漏れが起きないようにする)。1件のイベント処理で例外が起きても後続イベントの
     処理を止めない(handle_message/handle_postback 自体も内部で例外を握り潰すが、
     このループでも二重に防御する)。
+
+    Issue #664: コルーチンとして定義してあるため、`BackgroundTasks.add_task` に
+    渡すと Starlette がスレッドプールではなく**サーバー本体のイベントループ上で
+    await** する。これにより、着信メッセージ1件ごとに `asyncio.run(...)` で
+    新しいイベントループを作って捨てる構成が解消される
+    (詳細は `handle_message_async` の docstring を参照)。
+
+    イベントを1件ずつ順に await する点は従来の逐次処理と同じで、複数イベントが
+    並行実行されるようにはしていない(体調記録等の順序・冪等化の前提を変えないため)。
     """
     for event in events:
         try:
@@ -427,8 +483,24 @@ def dispatch_events(events: List[Any]) -> None:
                 continue
 
             if isinstance(event, MessageEvent) and isinstance(event.message, TextMessageContent):
-                handle_message(event)
+                await handle_message_async(event)
             elif isinstance(event, PostbackEvent):
-                handle_postback(event)
+                # Postback 経路だけは別スレッドのまま残す。委譲先の
+                # `handlers/line_logic.py` は DB 保存を `sync_run()`(= `asyncio.run`)で
+                # 同期的に待つ作りで、実行中のイベントループ上で呼ぶと
+                # `RuntimeError: asyncio.run() cannot be called from a running event loop`
+                # になり、Postback(体調ボタン・全員元気・食事アンケート等)が
+                # 丸ごと動かなくなる。line_logic 側を async 化するまではここで隔離する。
+                await asyncio.to_thread(handle_postback, event)
         except Exception as e:
             logger.error(f"dispatch_events Error: {e}", exc_info=True)
+
+
+def dispatch_events(events: List[Any]) -> None:
+    """`dispatch_events_async` の同期版の入口(後方互換)。
+
+    実行中のイベントループを持たない文脈(既存テスト、将来の同期的な呼び出し元)から
+    使う。イベントループ上からは `asyncio.run` が `RuntimeError` になるため呼べない
+    — その場合は `dispatch_events_async` を await すること。
+    """
+    asyncio.run(dispatch_events_async(events))
