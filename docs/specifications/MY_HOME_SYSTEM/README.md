@@ -66,12 +66,12 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [quest_shop_service.md](./quest_shop_service.md) | 報酬購入時のゴールド減算・在庫付与をアトミックに行う。 |
 | [quest_inventory_service.md](./quest_inventory_service.md) | 所持アイテムの一覧取得と、YouTubeごほうび券のクールダウンを考慮したアイテム使用処理。 |
 | [quest_game_system.md](./quest_game_system.md) | quest_data(マスターデータ)とDBの同期、およびFamily Questフロントエンド向け画面集約データの生成。 |
-| [quest_master_sync_sql.md](./quest_master_sync_sql.md) | quest_master/reward_masterへのUPSERT文とパラメータ組み立ての一元管理(Issue #664)。GameSystem.sync_master_dataとsync_strict.pyの両方が使う。 |
+| [quest_master_sync_sql.md](./quest_master_sync_sql.md) | quest_master/reward_masterへのUPSERT文とパラメータ組み立ての一元管理(Issue #664)。GameSystem.sync_master_dataが使う。 |
 | [game_logic.md](./game_logic.md) | レベルアップ必要経験値・最大HP・ドロップ報酬計算といったゲームルールロジック。旧版に記載のあった「ボス討伐状況の更新」はボス機能の廃止（`d1599d6`）に伴い該当ロジックが削除されている。 |
 | [quest.md](./quest.md) | クエストシステムのドメイン/リクエスト/レスポンス/インベントリモデルを定義するPydanticモデル群。 |
 | [quest_data.md](./quest_data.md) | Family Questのマスターデータ（ユーザー情報、クエスト定義、報酬定義）を定義する純粋なデータ定義モジュール。 |
 | [reset_game.md](./reset_game.md) | Family QuestのDB上のユーザーゲームデータ（レベル・経験値・ゴールド・メダル数）をリセットするCLIスクリプト。 |
-| [sync_strict.md](./sync_strict.md) | マスターデータ（QUESTS, REWARDS）とDBのマスターテーブルを完全同期する。 |
+| [sync_strict.md](./sync_strict.md) | マスターデータ（QUESTS, REWARDS）とDBのマスターテーブルを完全同期する手動CLI。同期の実体はGameSystem.sync_master_data(strict=True)にあり(Issue #664)、本体は引数解析と安全ガードのみ。 |
 
 ## F. インフラ・監視タスク (フェイルソフト機構)
 

@@ -1,172 +1,30 @@
+"""quest_data.py の内容で quest_master/reward_master を完全同期する手動実行CLI。
+
+Issue #664: 同期の実体(`DELETE ... NOT IN` + UPSERT)は
+`services/quest/game_system.py` の `GameSystem.sync_master_data(strict=True)` へ統合した。
+以前はここと `GameSystem.sync_master_data()` に「マスタ→DB同期」が二重に書かれており、
+UPSERT の列リストが食い違う事故が #100(`reset_period` 欠落)・#164(時間帯/期間/出現率/
+前提クエスト欠落)・#165(`description` 欠落)と3度起きていた。#664 の前段で SQL 自体は
+`services/quest/master_sync_sql.py` へ寄せてあったが、削除方針とUPSERTのループは
+残っていたため、ここで完全に1本化する。
+
+本ファイルに残るのはCLIの責務だけである:
+
+- 引数解析(`--dry-run` / `--yes` / `--allow-empty-master`)
+- 破壊的操作に対する安全ガード(M-9-6): マスタが空のままの実行を拒否し、
+  非dry-run時は対話的な確認プロンプトを出す
+
+`strict=True` が API 経路(`POST /api/quest/seed` = `strict=False`)と違う点は
+`GameSystem.sync_master_data` のdocstringにまとめてある。
+"""
 import argparse
 import sys
+
 from core.logger import setup_logging
-from core.database import get_db_cursor
-from quest_data import QUESTS, REWARDS  # マスターデータ
-from services.quest.master_sync_sql import (
-    QUEST_UPSERT_SQL,
-    REWARD_UPSERT_SQL,
-    quest_upsert_params,
-    reward_upsert_params,
-)
+from services.quest.game_system import game_system, load_master_module
 
 # ロガー設定
 logger = setup_logging("strict_sync")
-
-
-def _count_rows_to_delete(cur, table: str, id_column: str, master_ids: list) -> int:
-    """quest_master/reward_master のうち、マスタに存在しないため削除対象になる行数を数える。"""
-    if master_ids:
-        placeholders = ','.join(['?'] * len(master_ids))
-        row = cur.execute(
-            f"SELECT COUNT(*) as c FROM {table} WHERE {id_column} NOT IN ({placeholders})", master_ids
-        ).fetchone()
-    else:
-        row = cur.execute(f"SELECT COUNT(*) as c FROM {table}").fetchone()
-    return row['c'] if row else 0
-
-
-def sync_quests(cur, dry_run: bool = False):
-    """クエスト定義の完全同期 (不要なデータは削除)"""
-    logger.info("--- Syncing Quests (Strict Mode) ---")
-
-    # 1. マスターデータ内のIDリストを取得
-    master_ids = [q['id'] for q in QUESTS]
-
-    if dry_run:
-        stale_count = _count_rows_to_delete(cur, "quest_master", "quest_id", master_ids)
-        logger.info(f"[dry-run] Would delete obsolete quests: {stale_count} rows")
-        logger.info(f"[dry-run] Would upsert {len(QUESTS)} quests.")
-        return
-
-    # 2. マスターに存在しない古いデータをDBから削除 (Clean Up)
-    if master_ids:
-        placeholders = ','.join(['?'] * len(master_ids))
-        sql_delete = f"DELETE FROM quest_master WHERE quest_id NOT IN ({placeholders})"
-        cur.execute(sql_delete, master_ids)
-        logger.info(f"Deleted obsolete quests: {cur.rowcount} rows")
-    else:
-        cur.execute("DELETE FROM quest_master")
-        logger.info("Deleted ALL quests (Master is empty)")
-
-    # 3. マスターデータをUpsert
-    for q in QUESTS:
-        exp_val = q.get('exp_gain', q.get('exp', 0))
-        gold_val = q.get('gold_gain', q.get('gold', 0))
-        icon_val = q.get('icon_key', q.get('icon', '📝'))
-
-        # ★修正: days, type, target, desc などの主要カラムも同期するように拡張
-        # (init_unified_db.py の定義と一致させる)
-        # M-9-6: quest_master の実カラム名は day_of_week であり、存在しない
-        # `days` カラムを参照していたため実行すると必ず sqlite3.OperationalError
-        # になっていた(テスト作成時に発覚)。
-
-        # #100: reset_period 列を明示的にINSERTしないと、quest_master.reset_period の
-        # DB列デフォルト('weekly_monday'。current_schema.sql/migrations/0002で焼き付いており
-        # ALTER TABLEでは変更不能)がそのまま入ってしまう。'weekly_monday' は
-        # is_within_reset_period() が扱えない値のため、周期内多重完了ガードが機能せず、
-        # クリアしても未クリア表示になる不具合(0005で一度修正済み)が新規/再UPSERT行で
-        # 再発する。quest_data.py の各クエストは reset_period キーを持たないため、
-        # models.quest.MasterQuest.reset_period のデフォルトと同じ 'daily' を使う。
-        reset_period_val = q.get('reset_period', 'daily')
-
-        # #164: 時間帯(start_time/end_time)・期間(start_date/end_date)・出現率
-        # (occurrence_chance)・前提クエスト(pre_requisite_quest_id)も
-        # sync_master_data()(services/quest_service.py)と同じ完全同期対象とする。
-        # これらを列リストから欠落させると、時間帯限定クエストが再UPSERT時に
-        # NULL(=filter_active_quests()で終日扱い)に上書きされてしまう。
-        # models.quest.MasterQuest のデフォルトと合わせ、occurrence_chanceのみ
-        # 未指定時のデフォルトを1.0とする。
-        # Issue #664: UPSERT の SQL と値の並びは services/quest/master_sync_sql.py へ
-        # 一本化した。以前はここと services/quest/game_system.py に別々のSQLがあり、
-        # 列リストが食い違う事故が #100/#164/#165 と3度起きていた。
-        cur.execute(QUEST_UPSERT_SQL, quest_upsert_params(
-            quest_id=q['id'],
-            title=q['title'],
-            description=q.get('desc'),          # desc -> description
-            quest_type=q.get('type', 'daily'),
-            target_user=q.get('target', 'all'),
-            exp_gain=exp_val,
-            gold_gain=gold_val,
-            icon_key=icon_val,
-            day_of_week=q.get('days'),          # days (0,1,2...)
-            start_date=q.get('start_date'),
-            end_date=q.get('end_date'),
-            occurrence_chance=q.get('chance', 1.0),  # chance -> occurrence_chance
-            start_time=q.get('start_time'),
-            end_time=q.get('end_time'),
-            pre_requisite_quest_id=q.get('pre_requisite_quest_id'),
-            reset_period=reset_period_val,
-        ))
-    logger.info(f"Upserted {len(QUESTS)} quests.")
-
-def sync_rewards(cur, dry_run: bool = False):
-    """報酬データの完全同期"""
-    logger.info("--- Syncing Rewards ---")
-    master_ids = [r['id'] for r in REWARDS]
-
-    if dry_run:
-        stale_count = _count_rows_to_delete(cur, "reward_master", "reward_id", master_ids)
-        logger.info(f"[dry-run] Would delete obsolete rewards: {stale_count} rows")
-        logger.info(f"[dry-run] Would upsert {len(REWARDS)} rewards.")
-        return
-
-    # 削除対象の抽出(削除自体は下のFKチェック付きループで行う)
-    if master_ids:
-        placeholders = ','.join(['?'] * len(master_ids))
-        stale_rewards = cur.execute(
-            f"SELECT reward_id FROM reward_master WHERE reward_id NOT IN ({placeholders})", master_ids
-        ).fetchall()
-    else:
-        stale_rewards = cur.execute("SELECT reward_id FROM reward_master").fetchall()
-        logger.info("Master is empty: all rewards are candidates for deletion")
-
-    # #165: user_inventory は reward_master(reward_id) へのFK(PRAGMA foreign_keys=ON、
-    # core/database.py:24)を持つため、所持者がいる(所有中/申請中/使用済問わず
-    # user_inventoryに行が残る)報酬を無条件でDELETEするとIntegrityErrorとなり、
-    # run_sync全体がexit 1する。services/quest_service.pyのsync_master_data()側では
-    # M-1-2としてこの対策済み(参照が残っている報酬は削除をスキップし警告ログのみ出す)
-    # だが、sync_strict.py側には未展開だった。同じ対策をここにも適用する。
-    for row in stale_rewards:
-        stale_reward_id = row['reward_id']
-        still_referenced = cur.execute(
-            "SELECT 1 FROM user_inventory WHERE reward_id = ? LIMIT 1", (stale_reward_id,)
-        ).fetchone()
-        if still_referenced:
-            logger.warning(
-                f"⚠️ reward_id={stale_reward_id} はマスタから削除されましたが、"
-                "user_inventoryに参照が残っているため削除をスキップします。"
-            )
-            continue
-        cur.execute("DELETE FROM reward_master WHERE reward_id = ?", (stale_reward_id,))
-
-    # Upsert
-    for r in REWARDS:
-        cost_val = r.get('cost_gold', r.get('cost', 0))
-        icon_val = r.get('icon_key', r.get('icon', '🎁'))
-
-        # ★修正: target と desc を同期対象に追加
-        target_val = r.get('target', 'all')
-        desc_val = r.get('desc', '')
-
-        # #165: 従来はレガシー列の desc のみ書き込んでおり、アプリが実際に読む
-        # description 列(InventoryService.get_user_inventoryの`rm.description as desc`。
-        # services/quest_service.py:848)が更新されないままだった。sync_strict経由で
-        # 登録・更新された報酬は所持済みアイテム一覧で説明が空表示になり、
-        # sync_master_data(descriptionへ書く)との実行順で表示が食い違っていた。
-        # 両列を同じ値で同期する。
-        # Issue #664: 上のクエスト側と同じく services/quest/master_sync_sql.py へ集約。
-        # レガシー列 desc には description と同じ値が入る(#165 の対応をそのまま維持)。
-        cur.execute(REWARD_UPSERT_SQL, reward_upsert_params(
-            reward_id=r['id'],
-            title=r['title'],
-            category=r.get('category', 'small'),
-            cost_gold=cost_val,
-            icon_key=icon_val,
-            description=desc_val,
-            target=target_val,
-        ))
-    logger.info(f"Upserted {len(REWARDS)} rewards.")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -233,22 +91,20 @@ def confirm_or_abort(
 
 
 def run_sync(dry_run: bool = False, assume_yes: bool = False, allow_empty_master: bool = False, input_func=input) -> None:
-    logger.info("Starting Strict Master Data Sync (v2.1)...")
-
-    master_quest_ids = [q['id'] for q in QUESTS]
-    master_reward_ids = [r['id'] for r in REWARDS]
+    logger.info("Starting Strict Master Data Sync (v3.0)...")
 
     if not dry_run:
-        confirm_or_abort(master_quest_ids, master_reward_ids, allow_empty_master, assume_yes, input_func=input_func)
+        # 安全ガードは「これから同期されるマスタ」を数える必要があるため、
+        # sync_master_data と同じ読み込み口(load_master_module)を使う。
+        # 別々に読むと、ガードが見たマスタと実際に書かれるマスタがずれうる。
+        quest_data = load_master_module()
+        confirm_or_abort(
+            [q['id'] for q in quest_data.QUESTS],
+            [r['id'] for r in quest_data.REWARDS],
+            allow_empty_master, assume_yes, input_func=input_func,
+        )
 
-    with get_db_cursor(commit=not dry_run) as cur:
-        sync_quests(cur, dry_run=dry_run)
-        sync_rewards(cur, dry_run=dry_run)
-
-    if dry_run:
-        logger.info("✅ Dry-run completed. No changes were made.")
-    else:
-        logger.info("✅ Sync completed successfully.")
+    game_system.sync_master_data(strict=True, dry_run=dry_run)
 
 
 def main(argv=None):

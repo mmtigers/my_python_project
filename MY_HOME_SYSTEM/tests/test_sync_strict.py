@@ -7,8 +7,16 @@ M-9-6: このスクリプトは quest_data.py(マスタ)に無い行を quest_ma
 quest_data.py のID変更ミス一発で本番マスタが消えるリスクがあるため、実行前に
 (1) 空マスタでの全件削除を拒否する安全ガード、(2) 対話的な確認プロンプト、
 (3) 何も変更しないdry-runモード、を追加した。
+
+Issue #664: 同期の実体は `GameSystem.sync_master_data(strict=True)` へ統合され、
+sync_strict.py は引数解析と上記の安全ガードだけを持つ薄いCLIになった。それに伴い
+マスタの差し替え先も `sync_strict.QUESTS/REWARDS` というモジュールグローバルから
+互換シム(`services.quest_service.quest_data`)へ移っている(`_patch_master`)。
+**各テストのアサーションは統合前から一切変えていない** — strict 経路の結果が
+旧実装と同じであることを、この既存テスト群がそのまま固定している。
 """
 import os
+import pathlib
 import sys
 
 import pytest
@@ -18,6 +26,24 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.utils import get_now_iso
 from core.database import get_db_cursor
 import sync_strict
+
+
+def _patch_master(monkeypatch, quests=None, rewards=None, users=None):
+    """互換シム経由で参照される quest_data を差し替える(Issue #664)。
+
+    `GameSystem.sync_master_data` は `importlib.reload` してから読むため、実モジュール
+    ではないフェイクを渡せるよう reload も恒等関数に差し替える(他のquest系テストと同じ手順)。
+    """
+    from services import quest_service as qs
+
+    fake_quest_data = type("FakeQuestData", (), {
+        "USERS": list(users or []),
+        "QUESTS": list(quests or []),
+        "REWARDS": list(rewards or []),
+    })
+    monkeypatch.setattr(qs, "quest_data", fake_quest_data)
+    monkeypatch.setattr("services.quest.game_system.importlib.reload", lambda module: module)
+    return fake_quest_data
 
 
 def _seed_quest_master_row(quest_id: int = 9999, title: str = "Stale Quest"):
@@ -105,8 +131,7 @@ class TestRunSyncDryRun:
     def test_dry_run_does_not_delete_or_upsert_anything(self, isolated_db, monkeypatch):
         _seed_quest_master_row()
         _seed_reward_master_row()
-        monkeypatch.setattr(sync_strict, "QUESTS", [], raising=False)
-        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
+        _patch_master(monkeypatch)
 
         # dry-runは確認プロンプトなしで実行できる(何も変更しないため)。
         sync_strict.run_sync(dry_run=True, assume_yes=False)
@@ -124,8 +149,7 @@ class TestRunSyncDestructiveDeleteIsGated:
     def test_empty_master_without_flag_leaves_database_untouched(self, isolated_db, monkeypatch):
         _seed_quest_master_row()
         _seed_reward_master_row()
-        monkeypatch.setattr(sync_strict, "QUESTS", [], raising=False)
-        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
+        _patch_master(monkeypatch)
 
         with pytest.raises(sync_strict.SyncAborted):
             sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=False)
@@ -138,12 +162,10 @@ class TestRunSyncDestructiveDeleteIsGated:
 
     def test_declined_confirmation_leaves_database_untouched(self, isolated_db, monkeypatch):
         _seed_quest_master_row()
-        monkeypatch.setattr(
-            sync_strict, "QUESTS",
-            [{"id": 1, "title": "Kept Quest", "type": "daily", "target": "all", "exp": 1, "gold": 1}],
-            raising=False,
+        _patch_master(
+            monkeypatch,
+            quests=[{"id": 1, "title": "Kept Quest", "type": "daily", "target": "all", "exp": 1, "gold": 1}],
         )
-        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
 
         with pytest.raises(sync_strict.SyncAborted):
             sync_strict.run_sync(
@@ -157,12 +179,10 @@ class TestRunSyncDestructiveDeleteIsGated:
 
     def test_confirmed_sync_deletes_stale_rows_and_upserts_master(self, isolated_db, monkeypatch):
         _seed_quest_master_row(quest_id=9999, title="Stale Quest")
-        monkeypatch.setattr(
-            sync_strict, "QUESTS",
-            [{"id": 1, "title": "Kept Quest", "type": "daily", "target": "all", "exp": 1, "gold": 1}],
-            raising=False,
+        _patch_master(
+            monkeypatch,
+            quests=[{"id": 1, "title": "Kept Quest", "type": "daily", "target": "all", "exp": 1, "gold": 1}],
         )
-        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
@@ -182,12 +202,10 @@ class TestSyncQuestsResetPeriod:
     """
 
     def test_new_quest_gets_daily_reset_period_not_db_column_default(self, isolated_db, monkeypatch):
-        monkeypatch.setattr(
-            sync_strict, "QUESTS",
-            [{"id": 1, "title": "New Quest", "type": "daily", "target": "all", "exp": 1, "gold": 1}],
-            raising=False,
+        _patch_master(
+            monkeypatch,
+            quests=[{"id": 1, "title": "New Quest", "type": "daily", "target": "all", "exp": 1, "gold": 1}],
         )
-        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
@@ -205,12 +223,10 @@ class TestSyncQuestsResetPeriod:
                 "VALUES (1, 'Old Quest', 'daily', 1, 1, 'weekly_monday')"
             )
 
-        monkeypatch.setattr(
-            sync_strict, "QUESTS",
-            [{"id": 1, "title": "New Quest", "type": "daily", "target": "all", "exp": 1, "gold": 1}],
-            raising=False,
+        _patch_master(
+            monkeypatch,
+            quests=[{"id": 1, "title": "New Quest", "type": "daily", "target": "all", "exp": 1, "gold": 1}],
         )
-        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
@@ -229,19 +245,14 @@ class TestSyncQuestsFullColumnSync:
     終日扱いになってしまう不具合。"""
 
     def test_new_quest_time_window_and_period_columns_are_synced(self, isolated_db, monkeypatch):
-        monkeypatch.setattr(
-            sync_strict, "QUESTS",
-            [{
-                "id": 1, "title": "朝ミッション", "type": "daily", "target": "all",
-                "exp": 1, "gold": 1,
-                "start_time": "06:00", "end_time": "09:30",
-                "start_date": "2026-01-01", "end_date": "2026-12-31",
-                "chance": 0.5,
-                "pre_requisite_quest_id": 42,
-            }],
-            raising=False,
-        )
-        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
+        _patch_master(monkeypatch, quests=[{
+            "id": 1, "title": "朝ミッション", "type": "daily", "target": "all",
+            "exp": 1, "gold": 1,
+            "start_time": "06:00", "end_time": "09:30",
+            "start_date": "2026-01-01", "end_date": "2026-12-31",
+            "chance": 0.5,
+            "pre_requisite_quest_id": 42,
+        }])
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
@@ -266,15 +277,10 @@ class TestSyncQuestsFullColumnSync:
                 "start_time, end_time) VALUES (1, 'Old Quest', 'daily', 1, 1, '05:00', '06:00')"
             )
 
-        monkeypatch.setattr(
-            sync_strict, "QUESTS",
-            [{
-                "id": 1, "title": "New Quest", "type": "daily", "target": "all",
-                "exp": 1, "gold": 1, "start_time": "06:00", "end_time": "09:30",
-            }],
-            raising=False,
-        )
-        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
+        _patch_master(monkeypatch, quests=[{
+            "id": 1, "title": "New Quest", "type": "daily", "target": "all",
+            "exp": 1, "gold": 1, "start_time": "06:00", "end_time": "09:30",
+        }])
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
@@ -288,12 +294,10 @@ class TestSyncQuestsFullColumnSync:
     def test_quest_without_time_window_keys_syncs_as_null(self, isolated_db, monkeypatch):
         """start_time/end_time等のキーを持たないクエストは、NULL(終日扱い)としてそのまま
         同期されること(occurrence_chanceのみデフォルト1.0)。"""
-        monkeypatch.setattr(
-            sync_strict, "QUESTS",
-            [{"id": 1, "title": "終日クエスト", "type": "daily", "target": "all", "exp": 1, "gold": 1}],
-            raising=False,
+        _patch_master(
+            monkeypatch,
+            quests=[{"id": 1, "title": "終日クエスト", "type": "daily", "target": "all", "exp": 1, "gold": 1}],
         )
-        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
@@ -322,8 +326,7 @@ class TestSyncRewardsSkipsDeleteWhenReferencedByUserInventory:
         _seed_reward_master_row(reward_id=8888, title="Stale Reward")
         _seed_user_inventory_row(reward_id=8888)
 
-        monkeypatch.setattr(sync_strict, "QUESTS", [], raising=False)
-        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
+        _patch_master(monkeypatch)
 
         # 修正前はここでsqlite3.IntegrityErrorが送出され、run_sync全体が失敗していた。
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
@@ -335,8 +338,7 @@ class TestSyncRewardsSkipsDeleteWhenReferencedByUserInventory:
         _seed_reward_master_row(reward_id=7777, title="Unreferenced Stale Reward")
         _seed_user_inventory_row(reward_id=8888)
 
-        monkeypatch.setattr(sync_strict, "QUESTS", [], raising=False)
-        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
+        _patch_master(monkeypatch)
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
@@ -359,12 +361,10 @@ class TestSyncRewardsWritesDescriptionColumn:
     空表示になってしまう不具合。"""
 
     def test_new_reward_description_column_is_populated(self, isolated_db, monkeypatch):
-        monkeypatch.setattr(
-            sync_strict, "REWARDS",
-            [{"id": 1, "title": "New Reward", "desc": "とても良い報酬です"}],
-            raising=False,
+        _patch_master(
+            monkeypatch,
+            rewards=[{"id": 1, "title": "New Reward", "desc": "とても良い報酬です"}],
         )
-        monkeypatch.setattr(sync_strict, "QUESTS", [], raising=False)
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
@@ -382,12 +382,10 @@ class TestSyncRewardsWritesDescriptionColumn:
                 "VALUES (1, 'Old Reward', 100, '古い説明', '古い説明')"
             )
 
-        monkeypatch.setattr(
-            sync_strict, "REWARDS",
-            [{"id": 1, "title": "New Reward", "desc": "新しい説明"}],
-            raising=False,
+        _patch_master(
+            monkeypatch,
+            rewards=[{"id": 1, "title": "New Reward", "desc": "新しい説明"}],
         )
-        monkeypatch.setattr(sync_strict, "QUESTS", [], raising=False)
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
@@ -410,14 +408,27 @@ class TestMasterSyncSqlIsSharedWithGameSystem:
     を固定する。
     """
 
-    def test_both_paths_import_the_same_sql_constants(self):
+    def test_the_cli_no_longer_has_its_own_sync_implementation(self):
+        """Issue #664: sync_strict.py 側の重複実装(独自SQL・DELETE・UPSERTループ)が
+        復活していないこと。CLI に残ってよいのは引数解析と安全ガードだけ。"""
         from services.quest import game_system as gs
         from services.quest import master_sync_sql as msql
 
-        assert sync_strict.QUEST_UPSERT_SQL is msql.QUEST_UPSERT_SQL
-        assert sync_strict.REWARD_UPSERT_SQL is msql.REWARD_UPSERT_SQL
         assert gs.QUEST_UPSERT_SQL is msql.QUEST_UPSERT_SQL
         assert gs.REWARD_UPSERT_SQL is msql.REWARD_UPSERT_SQL
+
+        for removed in ("QUEST_UPSERT_SQL", "REWARD_UPSERT_SQL", "sync_quests", "sync_rewards"):
+            assert not hasattr(sync_strict, removed), (
+                f"sync_strict.{removed} が復活しています。マスタ同期の実体は "
+                "GameSystem.sync_master_data(strict=True) の1箇所だけに置くこと"
+            )
+        # CLI は DB に触らない(接続もカーソル実行も持たない)。
+        assert not hasattr(sync_strict, "get_db_cursor")
+        source = pathlib.Path(sync_strict.__file__).read_text(encoding="utf-8")
+        code = "\n".join(
+            line for line in source.splitlines() if not line.lstrip().startswith(("#", "-"))
+        )
+        assert "cur.execute" not in code, "SQL の実行が CLI 側に再び書かれています"
 
     def test_quest_param_builder_order_matches_the_sql_column_list(self):
         """値タプルの並びが SQL の列リストとずれていないこと(並べ替え事故の防止)。"""
@@ -464,8 +475,7 @@ class TestMasterSyncSqlIsSharedWithGameSystem:
             "start_time, end_time, pre_requisite_quest_id, reset_period"
         )
 
-        monkeypatch.setattr(sync_strict, "QUESTS", [quest])
-        monkeypatch.setattr(sync_strict, "REWARDS", [])
+        _patch_master(monkeypatch, quests=[quest])
         sync_strict.run_sync(assume_yes=True, allow_empty_master=True)
         with get_db_cursor() as cur:
             strict_row = tuple(cur.execute(
@@ -475,11 +485,6 @@ class TestMasterSyncSqlIsSharedWithGameSystem:
         with get_db_cursor(commit=True) as cur:
             cur.execute("DELETE FROM quest_master WHERE quest_id = ?", (quest["id"],))
 
-        fake_quest_data = type("FakeQuestData", (), {"USERS": [], "QUESTS": [quest], "REWARDS": []})
-        monkeypatch.setattr(qs, "quest_data", fake_quest_data)
-        monkeypatch.setattr(
-            "services.quest.game_system.importlib.reload", lambda module: module
-        )
         qs.game_system.sync_master_data()
         with get_db_cursor() as cur:
             service_row = tuple(cur.execute(
@@ -490,3 +495,171 @@ class TestMasterSyncSqlIsSharedWithGameSystem:
             "sync_strict.py と GameSystem.sync_master_data で書き込まれる行が異なります "
             f"(strict={strict_row}, service={service_row})"
         )
+
+
+class TestStrictFlagPreservesLegacySyncStrictBehaviour:
+    """Issue #664: `sync_strict.py` の同期実体を `sync_master_data(strict=True)` に
+    統合するにあたり、**旧 sync_strict.py 固有の挙動**をここで固定する。
+
+    上の既存テスト群は CLI(`sync_strict.run_sync`)経由で結果を見ているが、
+    ここでは `sync_master_data` を直接呼び、`strict` の有無で何が変わるのかを
+    1つずつ対にして示す。統合で失われやすいのは「strict だけが持っていた側」である。
+    """
+
+    def test_empty_master_deletes_all_quests_only_in_strict_mode(self, isolated_db, monkeypatch):
+        """マスタが空のとき: strict は全削除、非strictは #242 の安全弁で削除をスキップ。"""
+        from services import quest_service as qs
+
+        _seed_quest_master_row(quest_id=9999)
+        _patch_master(monkeypatch)
+
+        qs.game_system.sync_master_data()
+        with get_db_cursor() as cur:
+            assert cur.execute("SELECT COUNT(*) as c FROM quest_master").fetchone()["c"] == 1, (
+                "strict=False はマスタが空でも quest_master を消してはいけない(#242)"
+            )
+
+        qs.game_system.sync_master_data(strict=True)
+        with get_db_cursor() as cur:
+            assert cur.execute("SELECT COUNT(*) as c FROM quest_master").fetchone()["c"] == 0, (
+                "strict=True はマスタが空なら全削除する(旧 sync_strict.py の挙動)"
+            )
+
+    def test_strict_mode_does_not_touch_quest_users(self, isolated_db, monkeypatch):
+        """旧 sync_strict.py は quest_users を一切同期しなかった。CLIの対象範囲を広げない。"""
+        from services import quest_service as qs
+
+        users = [{
+            "user_id": "dad", "name": "まさひろ", "job_class": "会社員",
+            "level": 1, "exp": 0, "gold": 0, "avatar": "⚔️", "role": "role_adult",
+        }]
+        _patch_master(monkeypatch, users=users, quests=[], rewards=[])
+
+        qs.game_system.sync_master_data(strict=True)
+        with get_db_cursor() as cur:
+            assert cur.execute("SELECT COUNT(*) as c FROM quest_users").fetchone()["c"] == 0
+
+        qs.game_system.sync_master_data()
+        with get_db_cursor() as cur:
+            assert cur.execute("SELECT COUNT(*) as c FROM quest_users").fetchone()["c"] == 1, (
+                "strict=False(POST /api/quest/seed 経路)は従来どおりユーザーも同期する"
+            )
+
+    def test_dry_run_writes_nothing_even_in_strict_mode(self, isolated_db, monkeypatch):
+        from services import quest_service as qs
+
+        _seed_quest_master_row(quest_id=9999)
+        _seed_reward_master_row(reward_id=8888)
+        _patch_master(
+            monkeypatch,
+            quests=[{"id": 1, "title": "New Quest", "type": "daily", "target": "all",
+                     "exp": 1, "gold": 1, "icon": "📝"}],
+        )
+
+        result = qs.game_system.sync_master_data(strict=True, dry_run=True)
+
+        assert result["status"] == "dry-run"
+        with get_db_cursor() as cur:
+            assert cur.execute("SELECT COUNT(*) as c FROM quest_master").fetchone()["c"] == 1, (
+                "dry-run は削除もUPSERTもしてはいけない"
+            )
+            assert cur.execute("SELECT COUNT(*) as c FROM reward_master").fetchone()["c"] == 1
+
+    def test_strict_mode_keeps_the_legacy_defaults_for_missing_keys(self, isolated_db, monkeypatch):
+        """旧 sync_strict.py は生dictを直接UPSERTしており、`type`/`icon`/`category`/
+        `cost_gold`/`icon_key`/`desc` が無いエントリも既定値で通していた。検証を
+        `MasterQuest`/`MasterReward` に一本化したあともCLIの受理範囲を狭めないこと。"""
+        from services import quest_service as qs
+
+        _patch_master(
+            monkeypatch,
+            quests=[{"id": 1, "title": "キー欠損クエスト", "exp": 1, "gold": 1}],
+            rewards=[{"id": 1, "title": "キー欠損報酬"}],
+        )
+
+        qs.game_system.sync_master_data(strict=True)
+
+        with get_db_cursor() as cur:
+            quest = cur.execute(
+                "SELECT quest_type, target_user, icon_key, occurrence_chance, reset_period "
+                "FROM quest_master WHERE quest_id = 1"
+            ).fetchone()
+            reward = cur.execute(
+                "SELECT category, cost_gold, icon_key, target, desc, description "
+                "FROM reward_master WHERE reward_id = 1"
+            ).fetchone()
+
+        assert quest["quest_type"] == "daily"
+        assert quest["target_user"] == "all"
+        assert quest["icon_key"] == "📝"
+        assert quest["occurrence_chance"] == 1.0
+        assert quest["reset_period"] == "daily"
+
+        assert reward["category"] == "small"
+        assert reward["cost_gold"] == 0
+        assert reward["icon_key"] == "🎁"
+        assert reward["target"] == "all"
+        # 旧実装の `r.get('desc', '')` は空文字。MasterReward の既定値(None)ではない。
+        assert reward["desc"] == ""
+        assert reward["description"] == ""
+
+    def test_strict_mode_accepts_the_legacy_column_name_aliases(self, isolated_db, monkeypatch):
+        """旧 sync_strict.py が許容していた別名(`exp_gain`/`gold_gain`/`icon_key`、
+        報酬の `cost`/`icon`)も引き続き受け付けること。"""
+        from services import quest_service as qs
+
+        _patch_master(
+            monkeypatch,
+            quests=[{"id": 1, "title": "別名クエスト", "type": "daily",
+                     "exp_gain": 7, "gold_gain": 8, "icon_key": "🔧"}],
+            rewards=[{"id": 1, "title": "別名報酬", "category": "small",
+                      "cost": 55, "icon": "🍰", "desc": "説明"}],
+        )
+
+        qs.game_system.sync_master_data(strict=True)
+
+        with get_db_cursor() as cur:
+            quest = cur.execute(
+                "SELECT exp_gain, gold_gain, icon_key FROM quest_master WHERE quest_id = 1"
+            ).fetchone()
+            reward = cur.execute(
+                "SELECT cost_gold, icon_key FROM reward_master WHERE reward_id = 1"
+            ).fetchone()
+
+        assert (quest["exp_gain"], quest["gold_gain"], quest["icon_key"]) == (7, 8, "🔧")
+        assert (reward["cost_gold"], reward["icon_key"]) == (55, "🍰")
+
+    def test_strict_mode_still_skips_deleting_rewards_referenced_by_inventory(
+        self, isolated_db, monkeypatch
+    ):
+        """#165 の FK 対策が strict 側にも残っていること(全削除の方針と両立する)。"""
+        from services import quest_service as qs
+
+        _seed_reward_master_row(reward_id=8888, title="Referenced")
+        _seed_reward_master_row(reward_id=7777, title="Unreferenced")
+        _seed_user_inventory_row(reward_id=8888)
+        _patch_master(monkeypatch)
+
+        qs.game_system.sync_master_data(strict=True)
+
+        with get_db_cursor() as cur:
+            assert cur.execute(
+                "SELECT COUNT(*) as c FROM reward_master WHERE reward_id = 8888"
+            ).fetchone()["c"] == 1
+            assert cur.execute(
+                "SELECT COUNT(*) as c FROM reward_master WHERE reward_id = 7777"
+            ).fetchone()["c"] == 0
+
+    def test_cli_guard_reads_the_same_master_as_the_sync(self, isolated_db, monkeypatch):
+        """安全ガードが数えるマスタと、実際に同期されるマスタが同じ読み込み口である
+        こと(別々に読むと「ガードは通ったが別のデータで全削除された」が起こりうる)。"""
+        _seed_quest_master_row(quest_id=9999)
+        _patch_master(monkeypatch, quests=[], rewards=[{"id": 1, "title": "R", "category": "small",
+                                                        "cost_gold": 1, "icon_key": "🎁"}])
+
+        # QUESTS が空なので --allow-empty-master 無しでは拒否される。
+        with pytest.raises(sync_strict.SyncAborted):
+            sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=False)
+
+        with get_db_cursor() as cur:
+            assert cur.execute("SELECT COUNT(*) as c FROM quest_master").fetchone()["c"] == 1
