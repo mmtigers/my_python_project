@@ -210,8 +210,12 @@ disown
 echo "🚀 System started. Check logs/server_boot.log for details."
 
 # ★修正: ダッシュボードは認証なしのため、外部公開せずローカルホストのみに限定する
-# (必要な場合は信頼できるリバースプロキシ経由でアクセスすること)
-nohup $PYTHON_EXEC -m streamlit run dashboard.py --server.port 8501 --server.address 127.0.0.1 < /dev/null > logs/dashboard_boot.log 2>&1 &
+# スマートフォン等からの閲覧は unified_server.py(8000番)の ${DASHBOARD_BASE_PATH} 配下への
+# リバースプロキシ経由で行う(routers/dashboard_router.py)。Streamlit 側の
+# --server.baseUrlPath は config.DASHBOARD_BASE_PATH と一致している必要があり、
+# ずれると静的アセットのURLが合わず画面が真っ白になる。
+DASHBOARD_BASE_PATH="${DASHBOARD_BASE_PATH:-dashboard}"
+nohup $PYTHON_EXEC -m streamlit run dashboard.py --server.port 8501 --server.address 127.0.0.1 --server.baseUrlPath "${DASHBOARD_BASE_PATH#/}" < /dev/null > logs/dashboard_boot.log 2>&1 &
 disown
 echo "📊 Dashboard started."
 

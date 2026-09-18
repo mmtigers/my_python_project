@@ -68,6 +68,8 @@ except (PermissionError, OSError) as e:
 BINDING_NAME: str = '{http://www.onvif.org/ver10/events/wsdl}PullPointSubscriptionBinding'
 PRIORITY_MAP: Dict[str, int] = {"intrusion": 100, "person": 80, "vehicle": 50, "motion": 10}
 SESSION_LIFETIME: int = 3600
+# 玄関カメラ専用: 10分の購読期限が切れる前に自発的に張り直す間隔(秒)
+FORCE_RECONNECT_INTERVAL_SEC: int = 540
 # PullMessages がこの回数連続で失敗したら、SESSION_LIFETIME を待たずに再接続する
 PULL_FAILURE_RECONNECT_THRESHOLD: int = 3
 RENEW_DURATION: str = "PT600S"
@@ -487,24 +489,315 @@ def process_camera_event(msg: Any, cam_conf: Dict[str, Any]) -> None:
         logger.debug(f"🧹 [{cam_name}] Event processing completed / Local resources released.")
 
 
+class _ReconnectBackoff:
+    """
+    再接続のバックオフ状態(#662)。
+
+    以前は `monitor_single_camera` のループ外で初期化した3つのローカル変数を
+    `try`/`except` の両方から書き換えていた。カウントが1つずれるだけで再接続間隔が
+    指数的に変わる(10 * 2**n)ため、更新規則ごとここへ閉じ込めている。
+    """
+
+    MAX_BACKOFF_SEC: int = 3600          # 最大1時間の待機 (サスペンド)
+    TRANSIENT_WINDOW_SEC: int = 15       # これ以内に再発したら「連続」とみなす
+    TRANSIENT_WARN_THRESHOLD: int = 3    # 連続何回でWARNINGへ格上げするか
+
+    def __init__(self) -> None:
+        self.consecutive_errors: int = 0
+        self.transient_error_count: int = 0
+        self.last_transient_error_time: float = 0
+
+    def record_failure(self) -> int:
+        """失敗を1件数え、次に待つ秒数を返す。"""
+        self.consecutive_errors += 1
+        return min(10 * (2 ** self.consecutive_errors), self.MAX_BACKOFF_SEC)
+
+    def note_transient(self, now: float) -> bool:
+        """一時的障害を記録し、WARNINGへ格上げすべきかを返す。"""
+        if now - self.last_transient_error_time < self.TRANSIENT_WINDOW_SEC:
+            self.transient_error_count += 1
+        else:
+            self.transient_error_count = 1
+        self.last_transient_error_time = now
+        return self.transient_error_count >= self.TRANSIENT_WARN_THRESHOLD
+
+    def reset(self) -> None:
+        """接続成功時に呼ぶ。次の失敗は再び最小の待機から始まる。"""
+        self.consecutive_errors = 0
+
+
+class _CameraSession:
+    """
+    1回の接続セッションが確保したリソース(#662)。
+
+    `pullpoint` には `CreatePullPointSubscription()` の**生の戻り値**がいったん入り、
+    その後 `ONVIFService` インスタンスで上書きされる。これは「`ONVIFService` の構築に
+    失敗しても生のサブスクリプションを Unsubscribe できる」ようにするための意図的な
+    2段階代入で、`release()` はどちらの状態でも動く必要がある。
+    """
+
+    def __init__(self) -> None:
+        self.mycam: Any = None
+        self.events_service: Any = None
+        self.pullpoint: Any = None
+
+    def release(self, cam_name: str) -> None:
+        """確保したリソースを解放する(どの段階で失敗していても呼べる)。"""
+        logger.debug(f"🧹 [{cam_name}] Starting resource cleanup...")
+        if self.pullpoint:
+            _discard_pullpoint(self.pullpoint)
+            try:
+                self.pullpoint.Unsubscribe()
+                logger.debug(f"🗑️ [{cam_name}] Unsubscribed from PullPoint successfully.")
+            except Exception as e:
+                logger.debug(f"⚠️ [{cam_name}] PullPoint Unsubscribe skipped or failed: {e}")
+
+            force_close_session(self.pullpoint)
+
+        if self.events_service:
+            force_close_session(self.events_service)
+            logger.debug(f"🔌 [{cam_name}] Events service session closed.")
+
+        if self.mycam:
+            force_close_session(self.mycam)
+            logger.debug(f"🔌 [{cam_name}] Camera devicemgmt session closed.")
+
+        logger.debug(f"✨ [{cam_name}] Resource cleanup completed.")
+
+
+def _connect_and_subscribe(
+    cam_conf: Dict[str, Any], session: _CameraSession, is_first_connect: bool
+) -> bool:
+    """
+    ONVIF接続からイベント購読までを行い、確保したリソースを `session` に詰める。
+
+    戻り値は更新後の `is_first_connect`(初回接続だけINFOでモデル名を出すため)。
+    途中で失敗した場合は例外をそのまま送出し、解放は呼び出し元の `finally` に任せる。
+    """
+    cam_name: str = cam_conf['name']
+
+    wsdl_path: Optional[str] = find_wsdl_path()
+    if not wsdl_path: raise FileNotFoundError("WSDL path could not be determined.")
+
+    # 設定ファイルで指定されたポートのみを使用し、勝手な切り替えを禁止する
+    target_port: int = cam_conf.get('port', 80)
+
+    # 2. カメラ接続 (ONVIFCamera)
+    session.mycam = ONVIFCamera(
+        cam_conf['ip'],
+        target_port,
+        cam_conf['user'],
+        cam_conf['pass'],
+        wsdl_dir=wsdl_path,
+        encrypt=True
+    )
+
+    devicemgmt: Any = session.mycam.create_devicemgmt_service()
+    devicemgmt.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
+
+    if not check_camera_time(devicemgmt, cam_name):
+        raise ConnectionRefusedError(f"[{cam_name}] Time verification failed. Check camera clock.")
+
+    device_info: Any = devicemgmt.GetDeviceInformation()
+    if is_first_connect:
+        logger.info(f"📡 [{cam_name}] Connected. Model: {device_info.Model}")
+        is_first_connect = False
+    else:
+        logger.debug(f"📡 [{cam_name}] Connected. Model: {device_info.Model} (Reconnected)")
+
+    # 3. イベント購読
+    session.events_service = session.mycam.create_events_service()
+    session.events_service.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
+
+    logger.debug(f"[{cam_name}] Creating subscription with TopicFilter...")
+    # いったん生の戻り値を持たせる。次の ONVIFService 構築で失敗しても release() が
+    # これを Unsubscribe できるようにするため(カメラ側に購読を残さない)。
+    session.pullpoint = session.events_service.CreatePullPointSubscription()
+
+    try:
+        plp_address: str = session.pullpoint.SubscriptionReference.Address._value_1
+    except AttributeError:
+        plp_address: str = session.pullpoint.SubscriptionReference.Address
+
+    events_wsdl: str = os.path.join(wsdl_path, 'events.wsdl')
+    pullpoint: Any = ONVIFService(
+        xaddr=plp_address,
+        user=cam_conf['user'],
+        passwd=cam_conf['pass'],
+        url=events_wsdl,
+        encrypt=True,
+        binding_name=BINDING_NAME
+    )
+
+    pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
+
+    _add_pullpoint(pullpoint)
+    session.pullpoint = pullpoint
+    return is_first_connect
+
+
+def _pull_events_until_reconnect(cam_conf: Dict[str, Any], pullpoint: Any) -> None:
+    """
+    購読済みのセッションでイベントを受け続ける。再接続すべき状況になったら return する。
+
+    return する条件は4つ: セッション寿命(SESSION_LIFETIME)の到達、devices.json での
+    無効化、玄関カメラの自発的再接続タイマー、PullMessages の失敗。
+    """
+    cam_name: str = cam_conf['name']
+    session_start_time: float = time.time()
+
+    # --- 玄関カメラ専用の再接続（Subscribeし直し）タイマー ---
+    # 10分の有効期限が切れる前に、自発的にセッションを切り替える
+    last_subscribe_time: float = time.time()
+
+    # PullMessages の連続失敗回数(玄関以外のカメラ用)。カメラの再起動等で
+    # サブスクリプションが消えた場合、以前は SESSION_LIFETIME(3600秒)が経過する
+    # まで毎 0.5 秒 debug ログを出しながら events=None で回り続け、最長1時間
+    # 動体検知が止まっていた。閾値に達したらループを抜けて再接続する。
+    consecutive_pull_failures: int = 0
+
+    while True:
+        current_time = time.time()
+
+        # SESSION_LIFETIME (3600秒) 経過時のみ、安全にループを抜けてセッションを作り直す
+        if current_time - session_start_time > SESSION_LIFETIME:
+            logger.debug(f"🔄 [{cam_name}] Session lifetime reached. Refreshing gracefully...")
+            return
+
+        # #652: UI から無効化されたら購読を解除して外側ループの待機へ移る
+        if not is_camera_enabled(cam_conf):
+            logger.info(f"⏸️ [{cam_name}] enabled=false に変更されたため購読を解除します。")
+            return
+
+        # --- 玄関カメラ専用の自発的再接続ロジック ---
+        if cam_name == "玄関カメラ":
+            if current_time - last_subscribe_time > FORCE_RECONNECT_INTERVAL_SEC:
+                logger.info(f"🔄 [{cam_name}] 9 minutes passed. Reconnecting to avoid silent timeout...")
+                return  # 安全に再接続（外側のループへ）
+        # -----------------------------------------------------------
+
+        try:
+            events: Any = pullpoint.PullMessages({'Timeout': timedelta(seconds=2), 'MessageLimit': 100})
+            consecutive_pull_failures = 0
+            if events:
+                # Low: 元々はデバッグ目的で玄関カメラのみ info に変更されていたが、
+                # 全イベント属性(dir(events))・全ペイロードを本番ログに残す設計上の
+                # 意図はなく、ノイズ・情報量ともに大きいため debug に降格する。
+                if cam_name == "玄関カメラ":
+                    logger.debug(f"🔬 [RAW EVENTS] {cam_name}: Type={type(events)}, Attrs={dir(events)}")
+                    if hasattr(events, 'NotificationMessage'):
+                        logger.debug(f"📦 [EVENT PAYLOAD] {cam_name}: 含まれるメッセージ数: {len(events.NotificationMessage)}")
+                        logger.debug(f"📝 [PAYLOAD DETAIL] {events.NotificationMessage}")
+        except Exception as e:
+            if cam_name == "玄関カメラ":
+                # Renew非対応カメラのため、通信断エラーが出た場合はWARNINGとし、再接続へ移行
+                logger.warning(f"⚠️ [{cam_name}] Failed to pull messages: {e}. Breaking loop to reconnect.")
+                return  # 例外を握りつぶさず、外側の Exponential Backoff 再接続へ移行
+
+            # 駐車場カメラ・庭カメラ: 単発の失敗は従来どおり debug に留めるが、
+            # 連続して失敗する場合は接続が死んでいる(サブスクリプション消失等)
+            # とみなして玄関カメラと同様に再接続へ移行する。
+            consecutive_pull_failures += 1
+            events = None
+            if consecutive_pull_failures >= PULL_FAILURE_RECONNECT_THRESHOLD:
+                logger.warning(
+                    f"⚠️ [{cam_name}] PullMessages failed {consecutive_pull_failures} times in a row: {e}. "
+                    "Breaking loop to reconnect."
+                )
+                return
+            logger.debug(f"[{cam_name}] Failed to pull messages: {e}")
+
+        time.sleep(0.5)
+
+        if events and hasattr(events, 'NotificationMessage'):
+            for msg in events.NotificationMessage:
+                process_camera_event(msg, cam_conf)
+
+
+def _suspend_after_transient_error(cam_name: str, error: Exception, backoff: _ReconnectBackoff) -> None:
+    """一時的障害(通信断)向けのExponential Backoff。単発はdebug、連発のみWARNINGにする。"""
+    wait_time: int = backoff.record_failure()
+
+    if backoff.note_transient(time.time()):
+        logger.warning(
+            f"⚠️ [{cam_name}] 接続失敗 (Transient Network Error: {error}). "
+            f"{backoff.consecutive_errors}回目の失敗。{wait_time}秒間監視をサスペンドします。"
+        )
+    else:
+        logger.debug(f"🔄 [{cam_name}] Connection lost (Intentional/Transient): {error}. Reconnecting in {wait_time}s...")
+
+    time.sleep(wait_time)
+
+
+def _suspend_after_fatal_error(
+    cam_conf: Dict[str, Any], error: Exception, backoff: _ReconnectBackoff, session: _CameraSession
+) -> None:
+    """致命的障害時のバックオフ・管理者通知・緊急診断。無意味なポート切り替えは行わない。"""
+    cam_name: str = cam_conf['name']
+    ip_address: str = cam_conf['ip']
+    wait_time_fatal: int = backoff.record_failure()
+
+    err_msg: str = str(error)
+    detailed_info: str = ""
+    if hasattr(error, 'detail'):
+        detailed_info += f" | Detail: {error.detail}"
+    if hasattr(error, 'content'):
+        detailed_info += f" | Content: {str(error.content)[:200]}"
+
+    full_err_msg: str = f"{err_msg}{detailed_info}"
+
+    if backoff.consecutive_errors >= 5:
+        logger.error(f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}")
+        if backoff.consecutive_errors == 5 or backoff.consecutive_errors % 12 == 0:
+            try:
+                alert_msg: str = (
+                    f"🚨 **カメラ監視アラート**\n[{cam_name}] の接続障害が継続しています"
+                    f"（連続{backoff.consecutive_errors}回失敗）。\n詳細: {err_msg}"
+                )
+                send_push(
+                    [{"type": "text", "text": alert_msg}],
+                    target="discord",
+                    channel="error"
+                )
+                logger.info(f"📤 [{cam_name}] 管理者へ障害通知を送信しました。")
+            except Exception as push_err:
+                logger.error(f"🚨 通知送信に失敗しました: {push_err}")
+
+        if "Unknown error" in err_msg or "Unauthorized" in err_msg:
+            logger.error("💡 Hint: Check PASSWORD and CAMERA TIME settings.")
+
+    if session.pullpoint:
+        _discard_pullpoint(session.pullpoint)
+
+    # ホストが生きている場合のみ緊急診断を実行
+    if is_host_reachable(ip_address):
+        perform_emergency_diagnosis(ip_address)
+    else:
+        logger.warning(f"⚠️ [{cam_name}] Host is unreachable. Skipping diagnosis.")
+
+    logger.warning(
+        f"⚠️ [{cam_name}] 接続失敗 (Connection/ONVIF Error). "
+        f"{backoff.consecutive_errors}回目の失敗。{wait_time_fatal}秒間監視をサスペンドします。"
+    )
+    time.sleep(wait_time_fatal)
+
+
 def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     """
     単一のカメラに対してONVIF接続を行い、イベントストリームを監視するプロセス。
-    接続断時のリトライロジックおよびイベントパースの安全性を含む。
+
+    このループが直接持つ状態は「バックオフ(`_ReconnectBackoff`)」「初回接続かどうか」
+    「無効化中かどうか」の3つだけで、接続・購読・イベント受信・障害時の待機は
+    それぞれ専用の関数に分けてある(#662)。
     """
     cam_name: str = cam_conf['name']
     ip_address: str = cam_conf['ip']
-    consecutive_errors: int = 0
-    # 設定ファイルで指定されたポートのみを使用し、勝手な切り替えを禁止する
-    port_candidates: List[int] = [cam_conf.get('port', 80)]
-    max_backoff_time: int = 3600  # 最大1時間の待機 (サスペンド)
 
-    transient_error_count: int = 0
-    last_transient_error_time: float = 0
+    backoff = _ReconnectBackoff()
     is_first_connect: bool = True
+    was_disabled: bool = False
 
     logger.info(f"🚀 [{cam_name}] Monitor thread started.")
-    was_disabled: bool = False
 
     while True:
         # 0. #652: devices.json 上で無効化されていれば接続せず待機する(再有効化で再開)
@@ -520,243 +813,35 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
 
         # 1. L3到達性の事前チェック (ホストダウン時の即時サスペンド)
         if not is_host_reachable(ip_address):
-            consecutive_errors += 1
-            backoff_time: int = min(10 * (2 ** consecutive_errors), max_backoff_time)
+            backoff_time: int = backoff.record_failure()
             logger.warning(
                 f"⚠️ [{cam_name}] 接続失敗 (No route to host). "
-                f"{consecutive_errors}回目の失敗。{backoff_time}秒間監視をサスペンドします。"
+                f"{backoff.consecutive_errors}回目の失敗。{backoff_time}秒間監視をサスペンドします。"
             )
             time.sleep(backoff_time)
             continue
 
-        mycam: Any = None
-        current_pullpoint: Any = None
-        events_service: Any = None
+        session = _CameraSession()
 
         try:
-            wsdl_path: Optional[str] = find_wsdl_path()
-            if not wsdl_path: raise FileNotFoundError("WSDL path could not be determined.")
-
-            target_port: int = port_candidates[0]
-            
-            # 2. カメラ接続 (ONVIFCamera)
-            mycam = ONVIFCamera(
-                ip_address, 
-                target_port, 
-                cam_conf['user'], 
-                cam_conf['pass'],
-                wsdl_dir=wsdl_path,
-                encrypt=True
-            )
-
-            devicemgmt: Any = mycam.create_devicemgmt_service()
-            devicemgmt.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
-            
-            if not check_camera_time(devicemgmt, cam_name):
-                raise ConnectionRefusedError(f"[{cam_name}] Time verification failed. Check camera clock.")
-            
-            device_info: Any = devicemgmt.GetDeviceInformation()
-            if is_first_connect:
-                logger.info(f"📡 [{cam_name}] Connected. Model: {device_info.Model}")
-                is_first_connect = False
-            else:
-                logger.debug(f"📡 [{cam_name}] Connected. Model: {device_info.Model} (Reconnected)")
-
-            # 3. イベント購読
-            events_service = mycam.create_events_service()
-            events_service.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
-            
-            logger.debug(f"[{cam_name}] Creating subscription with TopicFilter...")
-            current_pullpoint = events_service.CreatePullPointSubscription()
-            
-            try:
-                plp_address: str = current_pullpoint.SubscriptionReference.Address._value_1
-            except AttributeError:
-                plp_address: str = current_pullpoint.SubscriptionReference.Address
-
-            events_wsdl: str = os.path.join(wsdl_path, 'events.wsdl')
-            pullpoint: Any = ONVIFService(
-                xaddr=plp_address,
-                user=cam_conf['user'],
-                passwd=cam_conf['pass'],
-                url=events_wsdl,
-                encrypt=True,
-                binding_name=BINDING_NAME
-            )
-            
-            pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
-
-            _add_pullpoint(pullpoint)
-            current_pullpoint = pullpoint
-            
+            # 2-3. カメラ接続とイベント購読
+            is_first_connect = _connect_and_subscribe(cam_conf, session, is_first_connect)
             # 接続成功時にエラーカウントをリセット
-            consecutive_errors = 0
-            session_start_time: float = time.time()
-            
-            # --- 修正: 玄関カメラ専用の再接続（Subscribeし直し）タイマー ---
-            # 10分の有効期限が切れる前に、自発的にセッションを切り替える
-            last_subscribe_time = time.time()
-            FORCE_RECONNECT_INTERVAL_SEC = 540  # 9分
-
-            # PullMessages の連続失敗回数(玄関以外のカメラ用)。カメラの再起動等で
-            # サブスクリプションが消えた場合、以前は SESSION_LIFETIME(3600秒)が経過する
-            # まで毎 0.5 秒 debug ログを出しながら events=None で回り続け、最長1時間
-            # 動体検知が止まっていた。閾値に達したらループを抜けて再接続する。
-            consecutive_pull_failures = 0
+            backoff.reset()
 
             # 4. 監視ループ
-            while True:
-                current_time = time.time()
-                
-                # SESSION_LIFETIME (3600秒) 経過時のみ、安全にループを抜けてセッションを作り直す
-                if current_time - session_start_time > SESSION_LIFETIME:
-                    logger.debug(f"🔄 [{cam_name}] Session lifetime reached. Refreshing gracefully...")
-                    break
-
-                # #652: UI から無効化されたら購読を解除して外側ループの待機へ移る
-                if not is_camera_enabled(cam_conf):
-                    logger.info(f"⏸️ [{cam_name}] enabled=false に変更されたため購読を解除します。")
-                    break
-
-                # --- 修正: 玄関カメラ専用の自発的再接続ロジック ---
-                if cam_name == "玄関カメラ":
-                    if current_time - last_subscribe_time > FORCE_RECONNECT_INTERVAL_SEC:
-                        logger.info(f"🔄 [{cam_name}] 9 minutes passed. Reconnecting to avoid silent timeout...")
-                        break # ループを抜けて安全に再接続（外側のループへ）
-                # -----------------------------------------------------------
-
-                try:
-                    events: Any = pullpoint.PullMessages({'Timeout': timedelta(seconds=2), 'MessageLimit': 100})
-                    consecutive_pull_failures = 0
-                    # ... (ログ出力等は省略せず元の通り) ...
-                    if events:
-                        # Low: 元々はデバッグ目的で玄関カメラのみ info に変更されていたが、
-                        # 全イベント属性(dir(events))・全ペイロードを本番ログに残す設計上の
-                        # 意図はなく、ノイズ・情報量ともに大きいため debug に降格する。
-                        if cam_name == "玄関カメラ":
-                            logger.debug(f"🔬 [RAW EVENTS] {cam_name}: Type={type(events)}, Attrs={dir(events)}")
-                            if hasattr(events, 'NotificationMessage'):
-                                logger.debug(f"📦 [EVENT PAYLOAD] {cam_name}: 含まれるメッセージ数: {len(events.NotificationMessage)}")
-                                logger.debug(f"📝 [PAYLOAD DETAIL] {events.NotificationMessage}")
-                except Exception as e:
-                    # --- 修正: 玄関カメラのみ例外ハンドリングを強化し、他は既存ロジックを維持 ---
-                    if cam_name == "玄関カメラ":
-                        # Renew非対応カメラのため、通信断エラーが出た場合はWARNINGとし、再接続へ移行
-                        logger.warning(f"⚠️ [{cam_name}] Failed to pull messages: {e}. Breaking loop to reconnect.")
-                        break # 例外を握りつぶさず、ループを抜けて外側の Exponential Backoff 再接続へ移行
-                    else:
-                        # 駐車場カメラ・庭カメラ: 単発の失敗は従来どおり debug に留めるが、
-                        # 連続して失敗する場合は接続が死んでいる(サブスクリプション消失等)
-                        # とみなして玄関カメラと同様に再接続へ移行する。
-                        consecutive_pull_failures += 1
-                        events = None
-                        if consecutive_pull_failures >= PULL_FAILURE_RECONNECT_THRESHOLD:
-                            logger.warning(
-                                f"⚠️ [{cam_name}] PullMessages failed {consecutive_pull_failures} times in a row: {e}. "
-                                "Breaking loop to reconnect."
-                            )
-                            break
-                        logger.debug(f"[{cam_name}] Failed to pull messages: {e}")
-
-                time.sleep(0.5)
-
-                if events and hasattr(events, 'NotificationMessage'):
-                    for msg in events.NotificationMessage:
-                        process_camera_event(msg, cam_conf)
+            _pull_events_until_reconnect(cam_conf, session.pullpoint)
 
         except (RemoteDisconnected, ProtocolError, BrokenPipeError, ConnectionResetError) as e:
-            # 【修正点】一時的障害に対するExponential Backoffの適用とサスペンドログ
-            consecutive_errors += 1
-            now: float = time.time()
-            if now - last_transient_error_time < 15:
-                transient_error_count += 1
-            else:
-                transient_error_count = 1
-            
-            last_transient_error_time = now
-
-            wait_time: int = min(10 * (2 ** consecutive_errors), max_backoff_time)
-
-            if transient_error_count >= 3:
-                logger.warning(
-                    f"⚠️ [{cam_name}] 接続失敗 (Transient Network Error: {e}). "
-                    f"{consecutive_errors}回目の失敗。{wait_time}秒間監視をサスペンドします。"
-                )
-            else:
-                logger.debug(f"🔄 [{cam_name}] Connection lost (Intentional/Transient): {e}. Reconnecting in {wait_time}s...")
-            
-            time.sleep(wait_time)
+            _suspend_after_transient_error(cam_name, e, backoff)
             continue
 
         except Exception as e:
-            # 【修正点】致命的障害時のバックオフと無意味なポート切り替えの抑止
-            consecutive_errors += 1
-            err_msg: str = str(e)
-
-            detailed_info: str = ""
-            if hasattr(e, 'detail'):
-                detailed_info += f" | Detail: {e.detail}"
-            if hasattr(e, 'content'):
-                detailed_info += f" | Content: {str(e.content)[:200]}"
-            
-            full_err_msg: str = f"{err_msg}{detailed_info}"
-
-            wait_time_fatal: int = min(10 * (2 ** consecutive_errors), max_backoff_time)
-            
-            if consecutive_errors >= 5:
-                logger.error(f"❌ [{cam_name}] Persistent Error ({consecutive_errors} times): {full_err_msg}")
-                if consecutive_errors == 5 or consecutive_errors % 12 == 0:
-                    try:
-                        alert_msg: str = f"🚨 **カメラ監視アラート**\n[{cam_name}] の接続障害が継続しています（連続{consecutive_errors}回失敗）。\n詳細: {err_msg}"
-                        send_push(
-                            [{"type": "text", "text": alert_msg}],
-                            target="discord",
-                            channel="error"
-                        )
-                        logger.info(f"📤 [{cam_name}] 管理者へ障害通知を送信しました。")
-                    except Exception as push_err:
-                        logger.error(f"🚨 通知送信に失敗しました: {push_err}")
-                
-                if "Unknown error" in err_msg or "Unauthorized" in err_msg:
-                    logger.error(f"💡 Hint: Check PASSWORD and CAMERA TIME settings.")
-            
-            if current_pullpoint:
-                _discard_pullpoint(current_pullpoint)
-
-            # ホストが生きている場合のみ緊急診断を実行
-            if is_host_reachable(ip_address):
-                perform_emergency_diagnosis(ip_address)
-            else:
-                logger.warning(f"⚠️ [{cam_name}] Host is unreachable. Skipping diagnosis.")
-
-            logger.warning(
-                f"⚠️ [{cam_name}] 接続失敗 (Connection/ONVIF Error). "
-                f"{consecutive_errors}回目の失敗。{wait_time_fatal}秒間監視をサスペンドします。"
-            )
-            time.sleep(wait_time_fatal)
+            _suspend_after_fatal_error(cam_conf, e, backoff, session)
 
         finally:
             # 【修正2】リソース解放処理の明示的な記録
-            logger.debug(f"🧹 [{cam_name}] Starting resource cleanup...")
-            if current_pullpoint:
-                _discard_pullpoint(current_pullpoint)
-                try:
-                    current_pullpoint.Unsubscribe()
-                    logger.debug(f"🗑️ [{cam_name}] Unsubscribed from PullPoint successfully.")
-                except Exception as e:
-                    logger.debug(f"⚠️ [{cam_name}] PullPoint Unsubscribe skipped or failed: {e}")
-                
-                force_close_session(current_pullpoint)
-
-            if events_service:
-                force_close_session(events_service)
-                logger.debug(f"🔌 [{cam_name}] Events service session closed.")
-
-            if mycam:
-                force_close_session(mycam)
-                logger.debug(f"🔌 [{cam_name}] Camera devicemgmt session closed.")
-            
-            logger.debug(f"✨ [{cam_name}] Resource cleanup completed.")
+            session.release(cam_name)
             # カメラ側のリソース解放（Unsubscribe等）が完了するまで待機する（Race condition防止）
             time.sleep(3)
 

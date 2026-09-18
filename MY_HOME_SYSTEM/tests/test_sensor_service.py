@@ -16,7 +16,7 @@ import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import config
 from services import sensor_service
 
@@ -171,7 +171,7 @@ class TestProcessSensorDataContact:
 class TestProcessMeterData:
     async def test_saves_temperature_and_humidity(self, isolated_db):
         await sensor_service.process_meter_data("dev1", "リビング温湿度計", 25.5, 48.0)
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 f"SELECT * FROM {config.SQLITE_TABLE_SWITCHBOT_LOGS} WHERE device_id='dev1'"
             ).fetchone()
@@ -188,7 +188,7 @@ class TestProcessPowerData:
         with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
             await sensor_service.process_power_data("dev1", "エアコン", 500, {"power_threshold_watts": 100})
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 f"SELECT * FROM {config.SQLITE_TABLE_POWER_USAGE} WHERE device_id='dev1'"
             ).fetchone()
@@ -202,7 +202,7 @@ class TestProcessPowerData:
         mock_send.assert_not_called()
 
     async def test_crossing_threshold_upward_sends_on_notification(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
                 "VALUES ('dev1', 'エアコン', 5, '2026-01-01T00:00:00')"
@@ -215,7 +215,7 @@ class TestProcessPowerData:
         assert "使用開始" in msg
 
     async def test_crossing_threshold_downward_sends_off_notification(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
                 "VALUES ('dev1', 'エアコン', 500, '2026-01-01T00:00:00')"
@@ -228,7 +228,7 @@ class TestProcessPowerData:
         assert "使用終了" in msg
 
     async def test_staying_below_threshold_does_not_notify(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
                 "VALUES ('dev1', 'エアコン', 5, '2026-01-01T00:00:00')"

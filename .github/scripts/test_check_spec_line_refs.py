@@ -175,6 +175,104 @@ def test_handles_parallel_citations_elementwise(fake_repo):
     assert "行番号: 5, 9" in path.read_text(encoding="utf-8")
 
 
+# --- 書式B(抜粋が行番号の手前にある引用)の解析 — Issue #679 ---------------------
+#
+# 仕様書には根拠の書き方が2通りある。
+#
+#     書式A: `(行番号: 9 / 抜粋: "def farewell(name):")`      … 抜粋が後ろ
+#     書式B: ``` `def farewell(name):` (行番号: 9) ```        … 抜粋が前
+#
+# 以前は書式Aしか解析しておらず、書式Bの def/class 引用が**無言で**ゲートを
+# 素通りしていた(検出も報告もされないので、ずれていてもCIは緑だった)。
+# 以下は、書式Bを拾えること／拾ってはいけないものを拾わないことの両方を固定する。
+
+
+def test_backtick_format_is_verified(fake_repo):
+    """書式Bの引用も検証されること(以前は無言で素通りしていた)。"""
+    _write_spec(fake_repo, '* 根拠: `def farewell(name):` (行番号: 42)\n')
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert len(findings) == 1
+    assert findings[0].symbol == "farewell"
+    assert findings[0].actual == 9
+
+
+def test_backtick_format_accepts_correct_line(fake_repo):
+    _write_spec(fake_repo, '* 根拠: `def farewell(name):` (行番号: 9〜10)\n')
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert findings == []
+
+
+def test_backtick_format_is_fixable(fake_repo):
+    path = _write_spec(fake_repo, '* 根拠: `def farewell(name):` (行番号: 40〜44)\n')
+    checker.scan(fix=True)
+    assert "行番号: 9〜10" in path.read_text(encoding="utf-8")
+
+
+def test_backtick_format_handles_parallel_citations_elementwise(fake_repo):
+    """`` `def a` と `def b` (行番号: A, B) `` も位置対応で検証されること。
+
+    実例: `dashboard_common.md` の「CSS定数 と `def render_status_card_html(...)` (行番号: 18, 143)」
+    """
+    path = _write_spec(
+        fake_repo,
+        '* 根拠: `def greet(self, name):` と `def farewell(name):` (行番号: 99, 98)\n',
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 2
+    assert len(findings) == 2
+    checker.scan(fix=True)
+    assert "行番号: 5, 9" in path.read_text(encoding="utf-8")
+
+
+def test_backtick_format_does_not_leak_into_the_next_citation(fake_repo):
+    """1行に根拠が複数並ぶとき、手前の抜粋を後ろのブロックのものと取り違えないこと。
+
+    2つ目の `行番号: 6` は `return "hello " + name` を指しており、`def greet` の
+    定義位置ではない。窓を直前のブロックの終わりまでに限っていないと、ここで
+    `def greet` と対応づけて誤検出する。
+    """
+    _write_spec(
+        fake_repo,
+        '* 根拠: `def greet(self, name):` (行番号: 5)、戻り値 (行番号: 6)\n',
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1  # 1つ目だけが検証対象
+    assert findings == []
+
+
+def test_backtick_excerpt_of_format_a_is_not_reused_by_the_next_block(fake_repo):
+    """書式Aの抜粋がバッククォートで書かれていても、次のブロックが流用しないこと。
+
+    実例: `config.md` の ``(行番号: 40 / 抜粋: `def verify_...`), [委譲] (行番号: 78〜85 / ...)``
+    2つ目の行番号は委譲先の呼び出し箇所であって、`def` の定義位置ではない。
+    """
+    _write_spec(
+        fake_repo,
+        '* 根拠: [定義] (行番号: 9 / 抜粋: `def farewell(name):`), [呼び出し] (行番号: 40〜44)\n',
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 0
+    assert findings == []
+
+
+def test_backtick_citation_naming_another_source_file_is_skipped(fake_repo):
+    """別ファイルの行番号を明示している引用は検証対象にしないこと。
+
+    実例: ``切り出し先 `def trigger_tv_unlock(...)` (`services/switchbot_service.py`側、行番号: 94〜125)``
+    この行番号は仕様書に対応するソースではなく移動先ファイルの行を指すため、
+    こちらのソースと突き合わせても意味がない(検証したことにする方が有害)。
+    """
+    _write_spec(
+        fake_repo,
+        '* 根拠: 切り出し先 `def farewell(name):` (`MY_HOME_SYSTEM/other.py`側、行番号: 400〜420)\n',
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 0
+    assert findings == []
+
+
 def test_resolves_parent_prefixed_spec_name(fake_repo):
     """Issue #655: `<親dir>_<stem>.md` の曖昧性解消規約でも対応ソースを解決できること。
 

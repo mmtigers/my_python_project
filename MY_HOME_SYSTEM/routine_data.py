@@ -34,7 +34,15 @@ class _RoutineStepBase(TypedDict):
 
 
 class RoutineStep(_RoutineStepBase, total=False):
-    """ステップ個別の即時報酬(任意)。
+    """任意フィールド(省略時はそれぞれ 0 / False)。
+
+    `weekday_skip` は `weekend_skip` の逆で、Trueなら平日はこのステップ自体を
+    スキップする(要件: パパの平日の昼は「お仕事」だけにし、キッチン/リビング
+    リセットは土日にだけ出す)。`weekend_skip` と同じく判定は routine_service 側
+    (_resolve_skip_keys)で行う。必須フィールド側に置かなかったのは、既存の全ステップ
+    リテラルを書き換えずに済ませるため。
+
+    `gold`/`exp` はステップ個別の即時報酬。
 
     大人用フロー(ROUTINE_FLOW_SETS)で、生活動線そのものだったデイリークエスト
     (例: ママの「夕食を作る」)を quest_data.QUESTS から「すごろく」側へ寄せる
@@ -45,6 +53,7 @@ class RoutineStep(_RoutineStepBase, total=False):
     """
     gold: int
     exp: int
+    weekday_skip: bool
 
 
 class RoutineFlow(TypedDict):
@@ -108,18 +117,21 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
             # 金曜に完了していれば土日は不要、土曜に完了していれば日曜は不要
             # (要件確認済み)。判定はroutine_service._resolve_skip_keysが行う。
             {'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},
-            # 明日の準備も宿題と同じ繰越ルール(要件確認済み: 金曜/土曜に完了していれば
-            # 以降の土日は不要)。
-            {'key': 'tomorrow_prep', 'label': '明日の準備', 'icon_key': 'tomorrow_prep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},
-            # 自由時間→寝る準備の締切を18:00に変更(要件確認済み)。土日も平日と同じ
-            # 18:00のまま(要件確認済み: 現状維持)。
-            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '18:00', 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+            # 自由時間→寝る準備の締切は17:30(要件確認済み。以前は18:00だった)。
+            # 土日も平日と同じ17:30のまま(要件確認済み: 現状維持)。
+            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '17:30', 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
             # 寝る準備4項目は朝の準備と同様、順番を強制しないチェックリスト
             # (要件確認済み)。チェックポイント(free)通過後に一括で'current'になる。
             {'key': 'dinner', 'label': '晩ごはん', 'icon_key': 'meal', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             {'key': 'bath', 'label': 'お風呂', 'icon_key': 'bath', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             {'key': 'nightclothes', 'label': '着替え', 'icon_key': 'clothes', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             {'key': 'nightteeth', 'label': '歯磨き', 'icon_key': 'teeth', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+            # 明日の準備は「宿題の次」の一本道から寝る準備チェックリストへ移した
+            # (要件確認済み: 智矢の「明日の準備は別枠にしてほしい」)。これにより
+            # 自由時間(チェックポイント)に入る条件は手洗い・おやつ・宿題の3つだけになり、
+            # 明日の準備は晩ごはん〜歯磨きと同じく順不同でチェックできる。繰越ルール
+            # (金曜/土曜に完了していれば以降の土日は不要)は移設後もそのまま維持する。
+            {'key': 'tomorrow_prep', 'label': '明日の準備', 'icon_key': 'tomorrow_prep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': True},
             {'key': 'sleep', 'label': '就寝', 'icon_key': 'sleep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
         ],
     },
@@ -150,7 +162,7 @@ _ADULT_AM_CHECKLIST: List[RoutineStep] = [
     {'key': 'toilet', 'label': 'トイレ', 'icon_key': 'toilet', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
 ]
 
-# 寝る準備も子どもと同じ4項目。チェックポイント(18:00)通過後に一括で'current'になる。
+# 寝る準備も子どもと同じ4項目。チェックポイント(17:30)通過後に一括で'current'になる。
 _ADULT_PM_CHECKLIST: List[RoutineStep] = [
     {'key': 'dinner', 'label': '晩ごはん', 'icon_key': 'meal', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
     {'key': 'bath', 'label': 'お風呂', 'icon_key': 'bath', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
@@ -159,20 +171,17 @@ _ADULT_PM_CHECKLIST: List[RoutineStep] = [
 ]
 
 
-def _build_adult_flows(
-    task_steps: List[RoutineStep], lead_steps: Optional[List[RoutineStep]] = None
-) -> dict[str, RoutineFlow]:
+def _build_adult_flows(pm_path_steps: List[RoutineStep]) -> dict[str, RoutineFlow]:
     """大人1人分のam/pmフローを組み立てる。
 
-    `task_steps` は pm フローの一本道(帰宅→ひと休み→ここ→自由時間)に差し込む、
-    その人固有のタスク。子ども用フローで「宿題」「明日の準備」が置かれている
-    位置に相当する。
+    `pm_path_steps` は pm フローのチェックポイント(自由時間)より前の一本道を
+    まるごと渡す。子ども用フローの「手洗い・うがい→おやつ休憩→宿題→明日の準備」に
+    相当する区間で、その人の生活動線によって中身も並びも異なるため
+    (パパは14:00時点でまだ勤務中なので先頭が「お仕事」、ママは帰宅済みなので
+    「帰宅・手洗い」から始まる)、共通の前置きは持たせず呼び出し側に任せている。
 
-    `lead_steps` は「帰宅・手洗い」より前に差し込むステップ。pmフローは14:00開始
-    なので、その時刻にまだ帰宅していない人(パパの「お仕事」)はここに入る。
-
-    どちらもチェックポイント(18:00)より前にあるため、出発ボーナスの按分対象になる
-    (_eligible_done_ratio)。
+    ここに置いたステップはチェックポイント(17:30)より前にあるため、出発ボーナスの
+    按分対象になる(_eligible_done_ratio)。
     """
     return {
         'am': {
@@ -190,12 +199,8 @@ def _build_adult_flows(
             'day_of_week': ALL_DAYS,
             'start_trigger_time': '14:00',
             'steps': [
-                *(lead_steps or []),
-                # 子ども用と同じく、土日は「帰宅・手洗い」をスキップしてひと休みから始める。
-                {'key': 'handwash', 'label': '帰宅・手洗い', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
-                {'key': 'snack', 'label': 'ひと休み', 'icon_key': 'snack', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
-                *task_steps,
-                {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '18:00', 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+                *pm_path_steps,
+                {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '17:30', 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
                 *_ADULT_PM_CHECKLIST,
                 {'key': 'sleep', 'label': '就寝', 'icon_key': 'sleep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
             ],
@@ -203,16 +208,21 @@ def _build_adult_flows(
     }
 
 
-# パパ: pmフローは14:00開始だが、平日のその時刻はまだ勤務中のため、一本道の先頭
-# (「帰宅・手洗い」より前)に「お仕事」を置く(要件確認済み)。報酬は既存デイリー
-# クエスト id=10「会社勤務 (通常)」がそのまま持ち続けるため、このステップ自体は
-# gold/exp を持たない(二重計上を避ける)。土日は勤務が無いので weekend_skip=True。
-DAD_ROUTINE_FLOWS = _build_adult_flows(
-    [],
-    lead_steps=[
-        {'key': 'work', 'label': 'お仕事', 'icon_key': 'work', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
-    ],
-)
+# パパ: 平日の昼は「お仕事」だけ(要件確認済み)。pmフローは14:00開始で、その時刻は
+# まだ勤務中のため一本道の先頭に置く。報酬は既存デイリークエスト id=10「会社勤務
+# (通常)」がそのまま持ち続けるため、このステップ自体は gold/exp を持たない
+# (二重計上を避ける)。「帰宅・手洗い」「ひと休み」は置かない。
+#
+# 土日は勤務が無いので「お仕事」をスキップするが、それだけだとチェックポイントより
+# 前のステップが0個になり、何もせずに満額ボーナスが入ってしまう(要件確認済み: 土日は
+# 別のステップを出す)。そこで旧デイリークエスト id=12「キッチンリセット」・id=13
+# 「リビングリセット」(どちらも土日のみ、exp80/gold50)を quest_data.QUESTS から
+# 退役させてここへ移設し、weekday_skip=True で土日だけ出るようにした。
+DAD_ROUTINE_FLOWS = _build_adult_flows([
+    {'key': 'work', 'label': 'お仕事', 'icon_key': 'work', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
+    {'key': 'kitchen_reset', 'label': 'キッチンリセット', 'icon_key': 'kitchen', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False, 'weekday_skip': True, 'gold': 50, 'exp': 80},
+    {'key': 'living_reset', 'label': 'リビングリセット', 'icon_key': 'living', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False, 'weekday_skip': True, 'gold': 50, 'exp': 80},
+])
 
 # ママ: 旧デイリークエスト id=21「夕食を作る」(exp150/gold150)を quest_data.QUESTS
 # から退役させてここへ移設した(要件確認済み)。毎日行うため weekend_skip=False で、
@@ -220,11 +230,17 @@ DAD_ROUTINE_FLOWS = _build_adult_flows(
 # (id=1000〜1002)・日中の家庭運営(id=23)は、曜日や時間帯で内容が変わるため
 # デイリークエストのまま残す(すごろくには載せない)。
 MOM_ROUTINE_FLOWS = _build_adult_flows([
+    # 子ども用と同じく、土日は「帰宅・手洗い」をスキップしてひと休みから始める。
+    {'key': 'handwash', 'label': '帰宅・手洗い', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
+    {'key': 'snack', 'label': 'ひと休み', 'icon_key': 'snack', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
     {'key': 'cook_dinner', 'label': '夕食を作る', 'icon_key': 'kitchen', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False, 'gold': 150, 'exp': 150},
 ])
 
 # 上記2人以外の大人(将来ユーザーが増えた場合)向け。固有タスクを持たない素の骨格。
-ADULT_DEFAULT_ROUTINE_FLOWS = _build_adult_flows([])
+ADULT_DEFAULT_ROUTINE_FLOWS = _build_adult_flows([
+    {'key': 'handwash', 'label': '帰宅・手洗い', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
+    {'key': 'snack', 'label': 'ひと休み', 'icon_key': 'snack', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+])
 
 # user_id → その人のフローセット。ここに無いユーザーは role で解決する(get_flow_set)。
 ROUTINE_FLOW_SETS: dict[str, dict[str, RoutineFlow]] = {
@@ -252,6 +268,12 @@ def get_flow_set(user_id: str, role: Optional[str]) -> dict[str, RoutineFlow]:
 def get_step_reward(step: RoutineStep) -> Tuple[int, int]:
     """ステップ個別の即時報酬 (gold, exp) を返す。未設定なら (0, 0)。"""
     return step.get('gold', 0), step.get('exp', 0)
+
+
+def is_weekday_skip(step: RoutineStep) -> bool:
+    """平日はこのステップをスキップするか(任意フィールド、未設定ならFalse)。"""
+    return step.get('weekday_skip', False)
+
 
 def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:
     """フロー内でチェックポイント(強制切替の境界)を持つステップのインデックスを返す。"""

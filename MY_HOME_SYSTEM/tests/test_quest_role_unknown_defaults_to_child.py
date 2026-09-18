@@ -16,12 +16,12 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 from services.quest_service import QuestService, ROLE_ADULT, ROLE_CHILD
 
 
 def _seed_user_and_quest(role):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) "
             "VALUES ('u1', 'U1', 'Novice', 1, 0, 0, ?)",
@@ -45,7 +45,7 @@ def test_null_role_goes_to_pending_not_immediate_reward(isolated_db):
     assert result["earnedGold"] == 0
     assert result["earnedExp"] == 0
 
-    with common.get_db_cursor() as cur:
+    with get_db_cursor() as cur:
         user = cur.execute("SELECT gold, exp FROM quest_users WHERE user_id = 'u1'").fetchone()
     assert user["gold"] == 0
     assert user["exp"] == 0

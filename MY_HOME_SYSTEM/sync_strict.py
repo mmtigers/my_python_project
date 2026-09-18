@@ -1,10 +1,17 @@
 import argparse
 import sys
-import common  # プロジェクト共通モジュール
+from core.logger import setup_logging
+from core.database import get_db_cursor
 from quest_data import QUESTS, REWARDS  # マスターデータ
+from services.quest.master_sync_sql import (
+    QUEST_UPSERT_SQL,
+    REWARD_UPSERT_SQL,
+    quest_upsert_params,
+    reward_upsert_params,
+)
 
 # ロガー設定
-logger = common.setup_logging("strict_sync")
+logger = setup_logging("strict_sync")
 
 
 def _count_rows_to_delete(cur, table: str, id_column: str, master_ids: list) -> int:
@@ -70,48 +77,26 @@ def sync_quests(cur, dry_run: bool = False):
         # NULL(=filter_active_quests()で終日扱い)に上書きされてしまう。
         # models.quest.MasterQuest のデフォルトと合わせ、occurrence_chanceのみ
         # 未指定時のデフォルトを1.0とする。
-        cur.execute("""
-            INSERT INTO quest_master (
-                quest_id, title, quest_type, target_user,
-                exp_gain, gold_gain, icon_key,
-                day_of_week, description, reset_period,
-                start_time, end_time, start_date, end_date,
-                occurrence_chance, pre_requisite_quest_id
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(quest_id) DO UPDATE SET
-                title = excluded.title,
-                quest_type = excluded.quest_type,
-                target_user = excluded.target_user,
-                exp_gain = excluded.exp_gain,
-                gold_gain = excluded.gold_gain,
-                icon_key = excluded.icon_key,
-                day_of_week = excluded.day_of_week,
-                description = excluded.description,
-                reset_period = excluded.reset_period,
-                start_time = excluded.start_time,
-                end_time = excluded.end_time,
-                start_date = excluded.start_date,
-                end_date = excluded.end_date,
-                occurrence_chance = excluded.occurrence_chance,
-                pre_requisite_quest_id = excluded.pre_requisite_quest_id
-        """, (
-            q['id'],
-            q['title'],
-            q.get('type', 'daily'),     # type
-            q.get('target', 'all'),     # target
-            exp_val,
-            gold_val,
-            icon_val,
-            q.get('days'),              # days (0,1,2...)
-            q.get('desc'),              # desc -> description
-            reset_period_val,
-            q.get('start_time'),
-            q.get('end_time'),
-            q.get('start_date'),
-            q.get('end_date'),
-            q.get('chance', 1.0),       # chance -> occurrence_chance
-            q.get('pre_requisite_quest_id'),
+        # Issue #664: UPSERT の SQL と値の並びは services/quest/master_sync_sql.py へ
+        # 一本化した。以前はここと services/quest/game_system.py に別々のSQLがあり、
+        # 列リストが食い違う事故が #100/#164/#165 と3度起きていた。
+        cur.execute(QUEST_UPSERT_SQL, quest_upsert_params(
+            quest_id=q['id'],
+            title=q['title'],
+            description=q.get('desc'),          # desc -> description
+            quest_type=q.get('type', 'daily'),
+            target_user=q.get('target', 'all'),
+            exp_gain=exp_val,
+            gold_gain=gold_val,
+            icon_key=icon_val,
+            day_of_week=q.get('days'),          # days (0,1,2...)
+            start_date=q.get('start_date'),
+            end_date=q.get('end_date'),
+            occurrence_chance=q.get('chance', 1.0),  # chance -> occurrence_chance
+            start_time=q.get('start_time'),
+            end_time=q.get('end_time'),
+            pre_requisite_quest_id=q.get('pre_requisite_quest_id'),
+            reset_period=reset_period_val,
         ))
     logger.info(f"Upserted {len(QUESTS)} quests.")
 
@@ -170,28 +155,16 @@ def sync_rewards(cur, dry_run: bool = False):
         # 登録・更新された報酬は所持済みアイテム一覧で説明が空表示になり、
         # sync_master_data(descriptionへ書く)との実行順で表示が食い違っていた。
         # 両列を同じ値で同期する。
-        cur.execute("""
-            INSERT INTO reward_master (
-                reward_id, title, category, cost_gold, icon_key, target, desc, description
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(reward_id) DO UPDATE SET
-                title = excluded.title,
-                category = excluded.category,
-                cost_gold = excluded.cost_gold,
-                icon_key = excluded.icon_key,
-                target = excluded.target,
-                desc = excluded.desc,
-                description = excluded.description
-        """, (
-            r['id'],
-            r['title'],
-            r.get('category', 'small'),
-            cost_val,
-            icon_val,
-            target_val,
-            desc_val,
-            desc_val
+        # Issue #664: 上のクエスト側と同じく services/quest/master_sync_sql.py へ集約。
+        # レガシー列 desc には description と同じ値が入る(#165 の対応をそのまま維持)。
+        cur.execute(REWARD_UPSERT_SQL, reward_upsert_params(
+            reward_id=r['id'],
+            title=r['title'],
+            category=r.get('category', 'small'),
+            cost_gold=cost_val,
+            icon_key=icon_val,
+            description=desc_val,
+            target=target_val,
         ))
     logger.info(f"Upserted {len(REWARDS)} rewards.")
 
@@ -268,7 +241,7 @@ def run_sync(dry_run: bool = False, assume_yes: bool = False, allow_empty_master
     if not dry_run:
         confirm_or_abort(master_quest_ids, master_reward_ids, allow_empty_master, assume_yes, input_func=input_func)
 
-    with common.get_db_cursor(commit=not dry_run) as cur:
+    with get_db_cursor(commit=not dry_run) as cur:
         sync_quests(cur, dry_run=dry_run)
         sync_rewards(cur, dry_run=dry_run)
 

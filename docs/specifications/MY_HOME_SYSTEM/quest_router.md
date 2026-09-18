@@ -147,7 +147,7 @@
 * 根拠: レスポンス型指定 (行番号: 52 / 抜粋: "response_model=CompleteResponse")
 
 
-* **副作用**: 不明（外部関数 `quest_service.process_approve_quest()` に依存）
+* **副作用**: 不明（外部関数 `approval_service.process_approve_quest()` に依存）
 * 根拠: メソッド呼び出し (行番号: 54 / 抜粋: "return quest_service.process_")
 
 
@@ -170,7 +170,7 @@
 * 根拠: レスポンス型指定 (行番号: 56 / 抜粋: "response_model=CancelResponse")
 
 
-* **副作用**: 不明（外部関数 `quest_service.process_reject_quest()` に依存）
+* **副作用**: 不明（外部関数 `approval_service.process_reject_quest()` に依存）
 * 根拠: メソッド呼び出し (行番号: 58 / 抜粋: "return quest_service.process_")
 
 
@@ -193,7 +193,7 @@
 * 根拠: レスポンス型指定 (行番号: 60 / 抜粋: "response_model=CancelResponse")
 
 
-* **副作用**: 不明（外部関数 `quest_service.process_cancel_quest()` に依存）
+* **副作用**: 不明（外部関数 `approval_service.process_cancel_quest()` に依存）
 * 根拠: メソッド呼び出し (行番号: 62 / 抜粋: "return quest_service.process_")
 
 
@@ -512,7 +512,7 @@ graph TD
 * 根拠: [ルーティング定義] (行番号: 83-85 / 抜粋: "@router.post(\"/admin/reset_user\", response_model=ResetUserResponse)\ndef reset_user(action: ResetUserAction):\n    return user_service.reset_user_data(action.admin_id, action.target_user_id)")
 * **（Issue #551で修正）** `upload_image`は、拡張子・マジックバイト検証・チャンク書き込み・サイズ上限チェック等の実装を`services/quest/user_service.py`の`UserService.save_avatar_image`へ全面的に移設した。本ファイル側に残るのは`await user_service.save_avatar_image(file)`の呼び出しと、`InvalidImageError`→400、`ImageTooLargeError`→413、その他の`Exception`→500（`logger.exception`でスタックトレース付きログ出力後）という例外ハンドリングのみである。以前あったモジュール関数`validate_image_header`（マジックバイト判定）も、この移設に伴い本ファイルからは完全に削除されている。実際のファイルI/O・検証ロジックの詳細は[quest_user_service.md](./quest_user_service.md)を参照。
 * 根拠: [関数定義] (行番号: 99-109 / 抜粋: "async def upload_image(file: UploadFile = File(...)):\n    try:\n        url = await user_service.save_avatar_image(file)")
-* かつて存在した `purchase_equipment` (`POST /equip/purchase`), `change_equipment` (`POST /equip/change`), `admin_update_boss` (`POST /admin/boss/update`), `get_family_mileage` (`GET /family-mileage`), `update_family_mileage` (`PUT /family-mileage`), `get_weekly_analytics` (`GET /analytics/weekly`) の各エンドポイントは、ボス戦闘・装備・ファミリーマイレージ・週間ランキング機能の廃止に伴い削除されている。特に `admin_update_boss` は本ファイル内で `common.get_db_cursor` を用いて `party_state` テーブルへ直接SQLを実行する唯一の箇所だったため、これに伴い `common` モジュールへのインポートも削除されている。
+* かつて存在した `purchase_equipment` (`POST /equip/purchase`), `change_equipment` (`POST /equip/change`), `admin_update_boss` (`POST /admin/boss/update`), `get_family_mileage` (`GET /family-mileage`), `update_family_mileage` (`PUT /family-mileage`), `get_weekly_analytics` (`GET /analytics/weekly`) の各エンドポイントは、ボス戦闘・装備・ファミリーマイレージ・週間ランキング機能の廃止に伴い削除されている。特に `admin_update_boss` は本ファイル内で `core.database.get_db_cursor` を用いて `party_state` テーブルへ直接SQLを実行する唯一の箇所だったため、これに伴い `common` モジュールへのインポートも削除されている。
 * かつて存在した `consume_item` (`POST /inventory/consume`), `cancel_item_usage` (`POST /inventory/cancel`), `get_admin_pending_inventory` (`GET /inventory/admin/pending`) の各エンドポイントは、アイテム使用時の親承認フロー廃止（コミット`9d5edec`）に伴い削除されている。これに伴い、インポートしていた `ConsumeItemAction` モデルも削除されている。`use_item` (`POST /inventory/use`) 自体のルーティング・実装コードは変更されていない。
 * `get_all_data` は `viewer_user_id`（`Optional[str]`、クエリパラメータ、既定`None`）を新たに受け取り、`game_system.get_all_view_data()` へそのまま渡すようになっている。本ファイルからは、この値が閲覧者スコープの絞り込み以外にどう使われるかは不明。
 * 根拠: 関数定義 (行番号: 37 / 抜粋: "def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:")

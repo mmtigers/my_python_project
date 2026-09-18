@@ -11,7 +11,7 @@
 
 * [config.md](./config.md) - `LINE_CHANNEL_ACCESS_TOKEN`, `DISCORD_WEBHOOK_*`等の設定値を提供
 * [logger.md](./logger.md) - `setup_logging`の実体
-* [common.md](./common.md) - `send_push`等を再エクスポートするFacade（**Issue #未採番で修正**: 本ファイルから`send_reply`・`get_line_message_quota`は未使用のため削除済み。`common.py`側が引き続きこれらを再エクスポートしようとしている場合は`common.md`側で要確認）
+* [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
 * 呼び出し元多数: [memory_monitor.md](./memory_monitor.md), [nas_monitor.md](./nas_monitor.md), [nas_utils.md](./nas_utils.md), [sensor_service.md](./sensor_service.md), [post_boot_health_check.md](./post_boot_health_check.md), [quest_service.md](./quest_service.md)(`InventoryService.use_item`経由)
 
 ## 2. ファイルの概要
@@ -116,7 +116,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 ### `_split_discord_content` / `_post_discord_with_retry`（Issue #361 で追加）
 
 * **役割**: `_split_discord_content(text, limit=1900)` は text を limit 字以下のチャンクに分割する（できるだけ改行位置で切る。空文字は1チャンク）。`_post_discord_with_retry(url, **kwargs)` は `requests.post` を呼び、429/5xx なら `Retry-After` 等に従って `_retry_sleep`（既定 `time.sleep`、テストで差し替え可能）で待機したうえで限定回数リトライし、最後のレスポンスを返す。
-* 根拠: `def _split_discord_content(text: str, limit: int = DISCORD_CONTENT_CHUNK_SIZE) -> List[str]:` (行番号: 86〜100)、`def _post_discord_with_retry(url: str, **kwargs):` (行番号: 103〜121)
+* 根拠: `def _split_discord_content(text: str, limit: int = DISCORD_CONTENT_CHUNK_SIZE) -> List[str]:` (行番号: 87〜89)、`def _post_discord_with_retry(url: str, **kwargs):` (行番号: 92〜101)
 * **引数/リクエスト**: `text: str, limit: int` / `url: str, **kwargs`（`requests.post` に渡す）
 * 根拠: (行番号: 86, 103)
 * **戻り値/レスポンス**: `List[str]` / `requests.Response`

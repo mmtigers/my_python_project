@@ -15,7 +15,7 @@ from models.quest import (
     UpdateUserAction, SoundTestRequest, UseItemAction, ResetUserAction, ResetUserResponse
 )
 from services.quest_service import (
-    game_system, quest_service, shop_service, user_service, inventory_service,
+    game_system, quest_service, approval_service, shop_service, user_service, inventory_service,
     ImageTooLargeError, InvalidImageError,
 )
 
@@ -51,15 +51,15 @@ def complete_quest(action: QuestAction):
 
 @router.post("/approve", response_model=CompleteResponse)
 def approve_quest(action: ApproveAction):
-    return quest_service.process_approve_quest(action.approver_id, action.history_id)
+    return approval_service.process_approve_quest(action.approver_id, action.history_id)
 
 @router.post("/reject", response_model=CancelResponse)
 def reject_quest(action: ApproveAction):
-    return quest_service.process_reject_quest(action.approver_id, action.history_id, action.reason)
+    return approval_service.process_reject_quest(action.approver_id, action.history_id, action.reason)
 
 @router.post("/quest/cancel", response_model=CancelResponse)
 def cancel_quest(action: HistoryAction):
-    return quest_service.process_cancel_quest(action.user_id, action.history_id)
+    return approval_service.process_cancel_quest(action.user_id, action.history_id)
 
 @router.post("/reward/purchase", response_model=PurchaseResponse)
 def purchase_reward(action: RewardAction):

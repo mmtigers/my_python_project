@@ -16,13 +16,13 @@
 * [quest_locks.md](./quest_locks.md) - `ROLE_ADULT`/`_get_purchase_lock`/`_get_user_balance_lock`/`_seconds_since_iso_timestamp`/`logger`の提供元
 * [quest_quest_service.md](./quest_quest_service.md) - 同じ`_get_user_balance_lock`を取得し、`quest_users`を書き換えうる経路として本ファイルと直列化の対象を共有する（`process_complete_quest`/`process_approve_quest`/`process_cancel_quest`）
 * [quest_game_system.md](./quest_game_system.md) - `GameSystem.__init__`が`ShopService()`インスタンスを保持し、`shop_service = game_system.shop_service`としてモジュールレベルのシングルトンを公開する
-* [common.md](./common.md) - `common.get_db_cursor`/`common.get_now_iso`を提供するモジュール
+* [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
 * [quest_router.md](./quest_router.md) - `process_purchase_reward`の呼び出し元と推測されるFastAPIルーター（下位互換シム経由でimportしている）
 
 ## 2. ファイルの概要
 
 報酬購入の実処理を担う`ShopService`クラス1つを定義するファイル。`process_purchase_reward`は`user_id`単位の`_get_user_balance_lock`と`(user_id, reward_id)`単位の`_get_purchase_lock`を常にこの順(balance lock→purchase lock)で取得したうえで実処理(`_process_purchase_reward_locked`)に委譲する。実処理は、直近10秒以内の同一購入を拒否するスパムチェック、`reward['target']`によるターゲットユーザー判定、`WHERE gold >= ?`条件付きの単一UPDATEによるアトミックな残高減算、`reward_history`/`user_inventory`への挿入を1つのDBトランザクション内で行う。
-根拠: `class ShopService:` (行番号: 16)、`def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 17〜35)
+根拠: `class ShopService:` (行番号: 17)、`def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 18〜36)
 
 ## 3. 外部依存関係
 
@@ -32,14 +32,15 @@
 | --- | --- | --- | --- |
 | `typing` (`Any`, `Dict`) | 標準ライブラリ | 型ヒント | `from typing import Any, Dict` (行番号: 2) |
 | `fastapi.HTTPException` | 外部ライブラリ | エラーレスポンス生成 | `from fastapi import HTTPException` (行番号: 4) |
-| `common` | 内部モジュール | DBカーソル取得、現在時刻(ISO)取得 | `import common` (行番号: 6) |
+| `core.utils.get_now_iso` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.utils import get_now_iso` (行番号: 6 / 抜粋: "from core.utils import get_now_iso") |
+| `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 7 / 抜粋: "from core.database import get_db_cursor") |
 | `services.quest.locks` (`ROLE_ADULT`, `_get_purchase_lock`, `_get_user_balance_lock`, `_seconds_since_iso_timestamp`, `logger`) | 内部モジュール | 定数・ロックヘルパー・経過秒数計算・ロガーの共有基盤（詳細は[quest_locks.md](./quest_locks.md)参照） | `from services.quest.locks import (\n    ROLE_ADULT,\n    _get_purchase_lock,\n    _get_user_balance_lock,\n    _seconds_since_iso_timestamp,\n    logger,\n)` (行番号: 7〜13) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `common.get_db_cursor()` / `common.get_now_iso()` | トランザクションスコープや接続の詳細、生成されるISO文字列のフォーマットが本ファイルからは不明 | `with common.get_db_cursor(commit=True) as cur:` (行番号: 38) |
+| `core.database.get_db_cursor()` / `core.utils.get_now_iso()` | トランザクションスコープや接続の詳細、生成されるISO文字列のフォーマットが本ファイルからは不明 | `with core.database.get_db_cursor(commit=True) as cur:` (行番号: 38) |
 | DBの各テーブルスキーマ | `reward_master`/`quest_users`/`reward_history`/`user_inventory`の各カラムの型・制約は本ファイルからは不明 | `cur.execute("SELECT * FROM reward_master WHERE reward_id = ?", (reward_id,))` (行番号: 39) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -47,7 +48,7 @@
 ### `ShopService.process_purchase_reward`
 
 * **役割**: `user_id`単位の`_get_user_balance_lock`と`(user_id, reward_id)`単位の`_get_purchase_lock`を、常にこの順(balance lock→purchase lock)でネストして取得したうえで、実処理を`_process_purchase_reward_locked`に委譲する薄いラッパー。purchase lockは「直近の購入履歴を読む→履歴を書く」スパムチェックのTOCTOUを防ぐためのもので、残高減算自体はアトミックなUPDATEで別途保護されている。balance lockを追加取得するのは、承認/取消(`QuestService`)が行う「SELECT→Pythonで計算→絶対値でSET」という更新と、購入のアトミック減算とが競合して減算が上書きされ消失する経路を防ぐため。
-* 根拠: `def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 17〜35)
+* 根拠: `def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 18〜36)
 * 根拠: `with _get_user_balance_lock(user_id):\n            with _get_purchase_lock((user_id, reward_id)):\n                return self._process_purchase_reward_locked(user_id, reward_id)` (行番号: 33〜35)
 * **引数/リクエスト**: `user_id: str`, `reward_id: int`
 * 根拠: (行番号: 17)
@@ -61,10 +62,10 @@
 ### `ShopService._process_purchase_reward_locked`
 
 * **役割**: 報酬購入の実処理。`reward_master`/`quest_users`の存在確認後、直近の購入履歴(`reward_history`)から経過秒数を`_seconds_since_iso_timestamp`で算出し10秒未満なら429エラーとするスパムチェックを行う。`reward['target']`が`'all'`以外の場合、ユーザーのroleと`target`(`'children'`/`'adults'`/特定`user_id`)を照合し不一致なら403エラー。`UPDATE quest_users SET gold = gold - ? ... WHERE user_id = ? AND gold >= ?`という単一のアトミックUPDATEで残高チェックと減算を同時に行い、`rowcount == 0`なら残高不足として400エラー。成功後、`reward_history`へ購入履歴を、`user_inventory`へ`'owned'`ステータスの所持アイテムを挿入する。
-* 根拠: `def _process_purchase_reward_locked(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 37〜101)
+* 根拠: `def _process_purchase_reward_locked(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 38〜102)
 * 根拠: `if last_purchase and last_purchase['redeemed_at']:\n                elapsed = _seconds_since_iso_timestamp(last_purchase['redeemed_at'])\n                if elapsed is not None and elapsed < 10:\n                    raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")` (行番号: 58〜61)
 * 根拠: `target = reward['target'] or 'all'\n            if target != 'all':\n                is_adult = user['role'] == ROLE_ADULT\n                allowed = (\n                    (target == 'children' and not is_adult) or\n                    (target == 'adults' and is_adult) or\n                    (target == user_id)\n                )\n                if not allowed:\n                    raise HTTPException(status_code=403, detail="This reward is not available for you")` (行番号: 63〜72)
-* 根拠: `cur.execute(\n                "UPDATE quest_users SET gold = gold - ?, updated_at = ? WHERE user_id = ? AND gold >= ?",\n                (reward['cost_gold'], common.get_now_iso(), user_id, reward['cost_gold'])\n            )\n            if cur.rowcount == 0:\n                raise HTTPException(status_code=400, detail="Not enough gold")` (行番号: 77〜82)
+* 根拠: `cur.execute(\n                "UPDATE quest_users SET gold = gold - ?, updated_at = ? WHERE user_id = ? AND gold >= ?",\n                (reward['cost_gold'], core.utils.get_now_iso(), user_id, reward['cost_gold'])\n            )\n            if cur.rowcount == 0:\n                raise HTTPException(status_code=400, detail="Not enough gold")` (行番号: 77〜82)
 * **引数/リクエスト**: `user_id: str`, `reward_id: int`
 * 根拠: (行番号: 37)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`{"status": "purchased", "newGold": new_gold}`）
@@ -124,7 +125,7 @@ graph TD
 
 | 優先度 | ファイル名 | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `common.py`（[common.md](./common.md)） | トランザクションスコープの境界や`get_now_iso`の日時フォーマットを確認するため。 | `with common.get_db_cursor(commit=True) as cur:` (行番号: 38) |
+| 高 | `common.py`（[common.md](./common.md)） | トランザクションスコープの境界や`get_now_iso`の日時フォーマットを確認するため。 | `with core.database.get_db_cursor(commit=True) as cur:` (行番号: 38) |
 | 高 | `services/quest/locks.py`（[quest_locks.md](./quest_locks.md)） | 本ファイルが取得するロックの取得順序・レースコンディション対策の全体像を理解するため。 | `from services.quest.locks import (...)` (行番号: 7〜13) |
 | 中 | `routers/quest_router.py`（[quest_router.md](./quest_router.md)） | `process_purchase_reward`の実際の呼び出しコンテキスト(エンドポイントパス・リクエストモデル)を確認するため。 | 関連ドキュメント欄参照 |
 
@@ -142,7 +143,7 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | DB各テーブルのスキーマ | `reward_master`/`quest_users`/`reward_history`/`user_inventory`の各カラムの型・制約が本ファイルからは不明。 | DBのDDL、マイグレーション定義ファイル |
-| `common.get_now_iso`の形式 | ミリ秒・タイムゾーン情報の有無が本ファイルからは不明。 | `common.py` |
+| `core.utils.get_now_iso`の形式 | ミリ秒・タイムゾーン情報の有無が本ファイルからは不明。 | `common.py` |
 | `reward['target']`が取りうる値の完全な一覧 | 本ファイルからは`'all'`/`'children'`/`'adults'`/特定`user_id`の4パターンの扱いのみ確認できるが、`reward_master`テーブル・`quest_data.py`側の実データにこれ以外の値が存在するかは不明。 | `quest_data.py`, `reward_master`テーブルの実データ |
 
 ## 相互参照による補足情報
@@ -150,7 +151,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | DB各テーブルのスキーマ | スキーマの唯一の定義元である`MY_HOME_SYSTEM/migrations/`から生成された`MY_HOME_SYSTEM/current_schema.sql`を直接確認した。`reward_master(reward_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, cost_gold INTEGER, category TEXT, icon_key TEXT, desc TEXT, target TEXT DEFAULT 'all', description TEXT)`(`desc`と`description`が併存するのは`sync_strict.py`による移行の名残)、`quest_users(user_id TEXT PRIMARY KEY, name TEXT, job_class TEXT, level INTEGER DEFAULT 1, exp INTEGER DEFAULT 0, gold INTEGER DEFAULT 0, medal_count INTEGER DEFAULT 0, avatar TEXT DEFAULT '🙂', updated_at DATETIME, role TEXT)`、`reward_history(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, reward_id INTEGER, reward_title TEXT, cost_gold INTEGER, redeemed_at DATETIME NOT NULL)`、`user_inventory(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, reward_id INTEGER, status TEXT DEFAULT 'owned', purchased_at DATETIME NOT NULL, used_at DATETIME, FOREIGN KEY(reward_id) REFERENCES reward_master(reward_id))`。`gold`カラムには`CHECK (gold >= 0)`のような制約が無いため、残高が負にならないことは本ファイルのアトミックUPDATE(`WHERE gold >= ?`)のみが保証している。`reward_master.target`にもCHECK制約は無い。`user_inventory.reward_id`だけが`reward_master(reward_id)`への外部キーを持つ(`core/database.py`が接続ごとに`PRAGMA foreign_keys`を有効化する)。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql`（`MY_HOME_SYSTEM/migrations/`から`python init_unified_db.py --dump-schema`で生成。参考: [init_unified_db.md](./init_unified_db.md)） |
-| `common.get_now_iso`の形式 | `MY_HOME_SYSTEM/common.py`16行目の`from core.utils import get_now_iso`による再エクスポートであり、実体は`MY_HOME_SYSTEM/core/utils.py`14〜15行目の`return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()`である。戻り値は**JSTのタイムゾーン情報付き(`+09:00`)・マイクロ秒6桁を含むISO 8601文字列**(例: `2026-09-16T07:30:00.123456+09:00`)。固定長・ゼロ埋めのため文字列比較・`MAX()`が時系列順と一致し、`_seconds_since_iso_timestamp`が`fromisoformat`でそのままパースできる。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:14-15`, `MY_HOME_SYSTEM/common.py:16`（参考: [utils.md](./utils.md)・[common.md](./common.md)） |
+| `core.utils.get_now_iso`の形式 | `MY_HOME_SYSTEM/common.py`16行目の`from core.utils import get_now_iso`による再エクスポートであり、実体は`MY_HOME_SYSTEM/core/utils.py`14〜15行目の`return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()`である。戻り値は**JSTのタイムゾーン情報付き(`+09:00`)・マイクロ秒6桁を含むISO 8601文字列**(例: `2026-09-16T07:30:00.123456+09:00`)。固定長・ゼロ埋めのため文字列比較・`MAX()`が時系列順と一致し、`_seconds_since_iso_timestamp`が`fromisoformat`でそのままパースできる。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:14-15`, `MY_HOME_SYSTEM/common.py:16`（参考: [utils.md](./utils.md)・[common.md](./common.md)） |
 | `reward['target']`が取りうる値の完全な一覧 | `MY_HOME_SYSTEM/quest_data.py`の`REWARDS`(221行目〜)に実際に出現する`target`値を全件抽出したところ、**`'all'` / `'children'` / `'adults'` / `'dad'` / `'mom'` / `'son'` / `'daughter'` / `'siblings'` の8種類**であった。本ファイルが明示的に分岐しているのは`'all'`・`'children'`・`'adults'`と「特定`user_id`」の4パターンだが、`'dad'`/`'mom'`/`'son'`/`'daughter'`は`quest_data.USERS`(34行目〜)に実在する`user_id`そのものなので「特定`user_id`」分岐で正しく処理される。**残る`'siblings'`だけが`quest_users.user_id`に存在しないグループ指定**であり、本ファイルの分岐ではどのユーザーにも一致しない＝そのごほうびは誰のショップにも並ばない扱いになる(`quest_master.target_user`側では`'siblings'`が兄妹連携クエストとして`services/quest/game_system.py:204-212`で特別扱いされるのに対し、`reward_master.target`側には同等の処理が無い)。`reward_master`テーブルは`sync_master_data`が`quest_data.REWARDS`から同期するため、上記以外の値が実DBに入る経路は`quest_data.py`の編集のみである。 | 直接ソース確認: `MY_HOME_SYSTEM/quest_data.py:221-266`, `MY_HOME_SYSTEM/services/quest/game_system.py:204-212`（参考: [quest_data.md](./quest_data.md)・[quest_game_system.md](./quest_game_system.md)） |
 
 ## 10. 自己検証結果

@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 from services.quest_service import QuestService
 
 
@@ -37,7 +37,7 @@ def _seed_family(cur):
 
 class TestCoopQuestCompletionConcurrency:
     def test_concurrent_completion_reports_produce_single_pending_pair(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             _seed_family(cur)
 
         quest_service = QuestService()
@@ -55,7 +55,7 @@ class TestCoopQuestCompletionConcurrency:
         # どちらか一方だけが完了報告として受理され、もう一方はブロックされること
         assert len(successes) == 1
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             rows = cur.execute(
                 "SELECT * FROM quest_history WHERE quest_id = 501 ORDER BY id"
             ).fetchall()

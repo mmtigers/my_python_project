@@ -15,9 +15,9 @@ from fastapi import HTTPException
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
-import common
+from core.database import get_db_cursor
 import init_unified_db
-from services.quest_service import QuestService
+from services.quest_service import ApprovalService, QuestService
 
 
 class TestApprovalAuthorization:
@@ -29,7 +29,9 @@ class TestApprovalAuthorization:
 
         self.quest_service = QuestService()
 
-        with common.get_db_cursor(commit=True) as cur:
+        self.approval_service = ApprovalService()
+
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 ("dad", "Dad", "Warrior", 1, 0, 0, "role_adult"),
@@ -58,18 +60,18 @@ class TestApprovalAuthorization:
 
     def test_approve_by_non_parent_is_rejected(self):
         with pytest.raises(HTTPException) as exc_info:
-            self.quest_service.process_approve_quest("daughter", self.history_id)
+            self.approval_service.process_approve_quest("daughter", self.history_id)
         assert exc_info.value.status_code == 403
 
     def test_reject_by_non_parent_is_rejected(self):
         with pytest.raises(HTTPException) as exc_info:
-            self.quest_service.process_reject_quest("daughter", self.history_id)
+            self.approval_service.process_reject_quest("daughter", self.history_id)
         assert exc_info.value.status_code == 403
 
     def test_approve_by_parent_succeeds(self):
-        result = self.quest_service.process_approve_quest("dad", self.history_id)
+        result = self.approval_service.process_approve_quest("dad", self.history_id)
         assert result["status"] == "success"
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             hist = cur.execute("SELECT status FROM quest_history WHERE id = ?", (self.history_id,)).fetchone()
         assert hist["status"] == "approved"

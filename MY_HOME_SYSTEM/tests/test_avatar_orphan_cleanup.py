@@ -9,15 +9,16 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
-import common
+from core.utils import get_now_iso
+from core.database import get_db_cursor
 from services.quest_service import user_service
 
 
 def _insert_user(user_id="test_user", avatar="🙂"):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, avatar, updated_at) VALUES (?, ?, ?, ?)",
-            (user_id, "テスト", avatar, common.get_now_iso()),
+            (user_id, "テスト", avatar, get_now_iso()),
         )
 
 

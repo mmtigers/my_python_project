@@ -15,7 +15,7 @@
 ## 2. ファイルの概要
 
 * Streamlitダッシュボードの「電力・環境」「気温詳細」「高砂実家」タブを描画するモジュール。3つの公開関数`render_electricity`, `render_temperature`, `render_takasago`で構成される。
-* 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):`, `def render_temperature(df_sensor: pd.DataFrame, now: datetime):`, `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 16, 56, 106 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
+* 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):`, `def render_temperature(df_sensor: pd.DataFrame, now: datetime):`, `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 16, 64, 114 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
 * `render_electricity`は、渡された`df_sensor`から「Nature Remo E Lite」デバイスの消費電力を今日・昨日で重ねた折れ線グラフ、および「Plug」を含むデバイスタイプの本日の個別家電電力を表示する。
 * 根拠: `df_sensor["device_type"] == DEVICE_TYPE_NATURE_REMO_E_LITE` (行番号: 30 / 抜粋: "(df_sensor[\"device_type\"] == DEVICE_TYPE_NATURE_REMO_E_LITE) &"), `df_sensor["device_type"].str.contains(DEVICE_TYPE_KEYWORD_PLUG, na=False)` (行番号: 54 / 抜粋: "(df_sensor[\"device_type\"].str.contains(DEVICE_TYPE_KEYWORD_PLUG, na=False)) &")（Issue #451でリテラル文字列からモジュールレベル定数へ変更、値は不変）
 * `render_temperature`は、「Meter」を含むデバイスタイプの本日の室温・湿度推移を折れ線グラフで表示し、加えて`analysis_service.load_yearly_temperature_stats`から取得した年間の室内外最高/最低気温推移を表示する。

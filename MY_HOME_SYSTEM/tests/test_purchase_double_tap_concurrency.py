@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 from services.quest_service import ShopService
 
 N_TAPS = 8
@@ -41,7 +41,7 @@ def _seed_user_and_reward(cur):
 
 class TestPurchaseDoubleTapConcurrency:
     def test_concurrent_double_taps_result_in_single_purchase(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             _seed_user_and_reward(cur)
 
         shop_service = ShopService()
@@ -60,7 +60,7 @@ class TestPurchaseDoubleTapConcurrency:
         assert len(successes) == 1
         assert successes[0]["status"] == "purchased"
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             son = cur.execute("SELECT gold FROM quest_users WHERE user_id = 'son'").fetchone()
             history_count = cur.execute(
                 "SELECT COUNT(*) c FROM reward_history WHERE user_id = 'son' AND reward_id = 500"

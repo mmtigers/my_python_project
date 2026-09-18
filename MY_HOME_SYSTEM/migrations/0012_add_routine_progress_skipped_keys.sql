@@ -1,0 +1,23 @@
+-- その日「実施せずにdone扱いで始まった」ステップのkeyをJSON配列で保持する列。
+--
+-- 背景: 土日スキップ(weekend_skip)・繰越(weekend_carryover)・平日スキップ
+-- (weekday_skip)に該当するステップは、routine_progress.steps_status に最初から
+-- 'done' として書き込まれる。そのため routine_service._eligible_done_ratio が
+-- チェックポイント通過ボーナスを按分する際、「本人が当日やったステップ」と
+-- 「やらずにdone扱いになったステップ」を区別できず、何もしていなくても
+-- スキップ分だけボーナスが入っていた(例: パパの土日pmは「お仕事」がスキップ
+-- されるため、何もしなくても 1/3 = 50Gold が入る)。
+--
+-- steps_status の値を {status, source} のような構造へ拡張しない理由は
+-- 0011_add_routine_step_events.sql の冒頭と同じ(値を素の文字列として比較して
+-- いる関数が複数あり、形を変えると同時に壊れる)。スキップ判定は行の作成時に
+-- 一度だけ確定するため、当日分の行に確定値として持たせるのが最も素直。
+--
+-- routine_step_events(source='carryover_skip')にも同じ情報は残るが、あちらは
+-- 集計・分析用の追記専用テーブルであり、ボーナス按分のたびに別テーブルを
+-- 引きにいく設計にはしない。
+--
+-- 既存行のデフォルトは '[]'(スキップ無し)。過去日の行にさかのぼって埋める
+-- バックフィルは行わない — 按分が計算されるのは当日分の行だけで、過去日の
+-- 行は表示・集計にしか使われないため。
+ALTER TABLE routine_progress ADD COLUMN skipped_keys TEXT NOT NULL DEFAULT '[]';

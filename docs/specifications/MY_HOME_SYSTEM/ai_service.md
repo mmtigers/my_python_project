@@ -10,8 +10,8 @@
 ## 関連ドキュメント
 
 - [config.md](./config.md) — `GEMINI_API_KEY` や `SQLITE_TABLE_*` など、本ファイルが参照する各種定数・共通設定を提供する。
-- [common.md](./common.md) — `line_service` は直接importしているが、`common.execute_read_query` 相当のDB読み取り処理を提供するFacadeモジュール。
-- [database.md](./database.md) — `common.execute_read_query` の実体（`core/database.py`）の仕様書。
+- [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
+- [database.md](./database.md) — `core.database.execute_read_query` の実体（`core/database.py`）の仕様書。
 - [line_service.md](./line_service.md) — `tool_record_child_health`/`tool_record_food` の呼び出し先（`log_child_health`/`log_food_record`）。
 - [logger.md](./logger.md) — `setup_logging` の実装元。
 - [utils.md](./utils.md) — `get_now_iso` の実装元。
@@ -41,7 +41,7 @@
 | `retry_if_exception` | 外部ライブラリ | クォータ超過(429)判定関数によるリトライ条件指定 | `from tenacity import (... retry_if_exception,)` (行番号: 21 / 抜粋: "retry_if_exception,") |
 | `tenacity` | 外部ライブラリ | API呼び出し失敗時のリトライ制御 | `from tenacity import (...)` (抜粋: "from tenacity import (") |
 | `config` | 内部モジュール | APIキー、DBテーブル名、家族設定などの定数参照 | `import config` (抜粋: "import config") |
-| `common` | 内部モジュール | **（Issue #357で用途変更）** `common.get_db_cursor`によるDB接続の取得（以前は`common.execute_read_query`でクエリ実行を委譲していた） | `import common` (抜粋: "import common")、`with common.get_db_cursor() as cursor:` (行番号: 281) |
+| `core.database.get_db_cursor`・`core.database.execute_read_query` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor, execute_read_query` (行番号: 24 / 抜粋: "from core.database import get_db_cursor, execute_read_query") |
 | `setup_logging` | 内部モジュール | ロガーの初期化 | `from core.logger import setup_logging` (抜粋: "from core.logger import setup_logging") |
 | `get_now_iso` | 内部モジュール | 現在時刻のISO文字列取得 | `from core.utils import get_now_iso` (抜粋: "from core.utils import get_now_iso") |
 | `line_service` | 内部モジュール | LINEサービス連携（記録機能の実装） | `from services import line_service` (抜粋: "from services import line_service") |
@@ -51,7 +51,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config` の各種プロパティ | APIキーや各種定数の具体的な値や構造が不明なため | `config.GEMINI_API_KEY` 等 (抜粋: "if config.GEMINI_API_KEY:") |
-| `common.get_db_cursor` | **（Issue #357で`common.execute_read_query`から置き換え）** 接続確立・リトライ・PRAGMA設定・row_factory・close等の内部仕様は本ファイルからは分からない。本ファイルはyieldされたカーソルの`.connection`に`set_authorizer`を設定し`execute`/`fetchall`を呼ぶこと、および行が`dict(r)`で辞書化できること（`sqlite3.Row`相当）のみを前提とする（[database.md](./database.md)参照） | `with common.get_db_cursor() as cursor:` (行番号: 281 / 抜粋: "cursor.connection.set_authorizer(_search_db_authorizer)") |
+| `core.database.get_db_cursor` | **（Issue #357で`core.database.execute_read_query`から置き換え）** 接続確立・リトライ・PRAGMA設定・row_factory・close等の内部仕様は本ファイルからは分からない。本ファイルはyieldされたカーソルの`.connection`に`set_authorizer`を設定し`execute`/`fetchall`を呼ぶこと、および行が`dict(r)`で辞書化できること（`sqlite3.Row`相当）のみを前提とする（[database.md](./database.md)参照） | `with core.database.get_db_cursor() as cursor:` (行番号: 281 / 抜粋: "cursor.connection.set_authorizer(_search_db_authorizer)") |
 | `line_service.log_child_health` | 関数内部の挙動、戻り値（`msg_obj.text`を持つオブジェクト）の詳細な型が不明なため | `line_service.log_child_health` (抜粋: "await line_service.log_child_health") |
 | `line_service.log_food_record` | 関数内部の挙動、戻り値（`msg_obj.text`を持つオブジェクト）の詳細な型が不明なため | `line_service.log_food_record` (抜粋: "await line_service.log_food_record") |
 | `setup_logging` | ロガーの具体的な出力先やフォーマット仕様が不明なため | `setup_logging("ai_service")` (抜粋: "setup_logging("ai_service")") |
@@ -66,7 +66,7 @@
 
 
 * **引数/リクエスト**: `limit: int` (デフォルト: `REQUESTS_PER_MINUTE_LIMIT`)
-* 根拠: `def __init__(self, limit: int = REQUESTS_PER_MINUTE_LIMIT):` (行番号: 57 / 抜粋: "def **init**(self, limit: int")
+* 根拠: `def __init__(self, limit: int = REQUESTS_PER_MINUTE_LIMIT):` (行番号: 66 / 抜粋: "def **init**(self, limit: int")
 
 
 * **戻り値/レスポンス**: オブジェクトインスタンス
@@ -177,7 +177,7 @@
 ### `_strip_sql_comments` (関数、B3で追加)
 
 * **役割**: `_SQL_COMMENT_RE`を使い、渡されたSQL文字列中のブロックコメント・行コメントをすべて半角スペース1文字に置換して返す。`tool_search_db`がSELECT判定・`_extract_referenced_tables`によるテーブル抽出の前段でこれを呼び出し、以降の判定・実行はすべてコメント除去後のSQLに対して行う。
-* 根拠: `def _strip_sql_comments(sql: str) -> str:\n    return _SQL_COMMENT_RE.sub(" ", sql)` (行番号: 180〜181)
+* 根拠: `def _strip_sql_comments(sql: str) -> str:\n    return _SQL_COMMENT_RE.sub(" ", sql)` (行番号: 203〜204)
 
 
 * **引数/リクエスト**: `sql: str`
@@ -233,7 +233,7 @@
 ### `_search_db_authorizer` (関数、Issue #357で追加)
 
 * **役割**: AIツール`search_db`専用のSQLite認可コールバック（`sqlite3.Connection.set_authorizer`に渡す）。SQLiteは文の準備時に、読み取るテーブル/列ごとに`SQLITE_READ`、使用する関数ごとに`SQLITE_FUNCTION`等をこのコールバックへ問い合わせ、`SQLITE_DENY`が返ると文全体をエラーにする。これにより、引用符の有無・スキーマ修飾・サブクエリ・UNION・テーブル値関数（`json_each`/`pragma_table_info`等。これらは関数名がテーブル名として`SQLITE_READ`に渡る）を問わず、SQLiteエンジン自身が「`ALLOWED_SEARCH_TABLES`以外は読めない」ことを強制する構造的な防御となる。
-* 根拠: `def _search_db_authorizer(action: int, arg1, arg2, db_name, trigger_or_view) -> int:` (行番号: 239)
+* 根拠: `def _search_db_authorizer(action: int, arg1, arg2, db_name, trigger_or_view) -> int:` (行番号: 262)
 
 
 * **引数/リクエスト**: `action: int`（SQLiteの認可アクションコード）, `arg1`（`SQLITE_READ`時はテーブル名）, `arg2`（`SQLITE_READ`時は列名、`SQLITE_FUNCTION`時は関数名）, `db_name`, `trigger_or_view`（sqlite3の`set_authorizer`コールバック規約に従う5引数）
@@ -253,8 +253,8 @@
 
 ### `_execute_restricted_read_query` (関数、Issue #357で追加)
 
-* **役割**: `common.get_db_cursor()`で取得した接続に`_search_db_authorizer`を設定してからSQLを実行する、AIツール`search_db`専用の読み取り関数。`core.database.execute_read_query`と同じ戻り値の契約（0件: `"該当するデータはありませんでした。"` / 正常: JSON文字列 / 失敗: `"検索エラー: ..."`で例外は送出しない）を維持し、`tool_search_db`側の既存のエラー判定（Issue #180）をそのまま使えるようにしている。`execute_read_query`自体は他の呼び出し元と共有されるため変更せず、認可コールバックはこのAI経路にのみ適用する。
-* 根拠: `def _execute_restricted_read_query(query: str, params: tuple = ()) -> str:` (行番号: 268)、`cursor.connection.set_authorizer(_search_db_authorizer)` (行番号: 282)
+* **役割**: `core.database.get_db_cursor()`で取得した接続に`_search_db_authorizer`を設定してからSQLを実行する、AIツール`search_db`専用の読み取り関数。`core.database.execute_read_query`と同じ戻り値の契約（0件: `"該当するデータはありませんでした。"` / 正常: JSON文字列 / 失敗: `"検索エラー: ..."`で例外は送出しない）を維持し、`tool_search_db`側の既存のエラー判定（Issue #180）をそのまま使えるようにしている。`execute_read_query`自体は他の呼び出し元と共有されるため変更せず、認可コールバックはこのAI経路にのみ適用する。
+* 根拠: `def _execute_restricted_read_query(query: str, params: tuple = ()) -> str:` (行番号: 291)、`cursor.connection.set_authorizer(_search_db_authorizer)` (行番号: 282)
 
 
 * **引数/リクエスト**: `query: str`, `params: tuple = ()`
@@ -265,7 +265,7 @@
 * 根拠: (行番号: 286〜290 / 抜粋: "return \"該当するデータはありませんでした。\"" / "return json.dumps(...)" / "return f\"検索エラー: {str(e)}\"")
 
 
-* **副作用**: `common.get_db_cursor()`によるDB接続の確立・クローズ、接続への`set_authorizer`設定、SQLの実行（認可コールバックにより読み取り以外は拒否される）。
+* **副作用**: `core.database.get_db_cursor()`によるDB接続の確立・クローズ、接続への`set_authorizer`設定、SQLの実行（認可コールバックにより読み取り以外は拒否される）。
 * 根拠: (行番号: 281〜284)
 
 
@@ -274,7 +274,7 @@
 
 ### `tool_search_db` (関数)
 
-* **役割**: 引数で渡されたSQLクエリが `SELECT` で始まり、かつ参照テーブルが `ALLOWED_SEARCH_TABLES` に含まれることを確認したうえで読み取り専用のDB検索を行い、結果を文字列で返す。**（Issue #357で修正）** SELECT判定の直後・テーブル抽出の前に`_QUOTED_IDENTIFIER_CHARS`（`"` `` ` `` `[`）のいずれかを含むSQLを警告ログ付きで即拒否するようになった（引用符付き識別子は`_extract_referenced_tables`が検出できず許可テーブル判定を素通りしていたため）。加えて実行先を`common.execute_read_query`から`_execute_restricted_read_query`（`set_authorizer`により許可テーブル以外の読み取り・ATTACH・PRAGMA・危険関数をSQLiteエンジン側で構造的に拒否する）へ変更した。**（B3で修正）** SQLクエリを受け取った直後、SELECT判定やテーブル抽出より前に`_strip_sql_comments`を通し、ブロックコメント(`/* */`)・行コメント(`--`)を空白に置換したうえで以降の判定・実行を行うようになった。以前は`FROM/**/tablename`のようにキーワードと識別子の間にSQLコメントを挟むことで`_extract_referenced_tables`の抽出をすり抜け、UNION SELECTと組み合わせて`ALLOWED_SEARCH_TABLES`外のテーブルを読み取れることが実証されていた。**（Issue #180で修正）** `common.execute_read_query`（実体は`core/database.py`の`execute_read_query`）は例外発生時も送出せず内部で捕捉し、"検索エラー: ..."という非空文字列として返す設計になっている。以前はこの戻り値の実際の型・意味を誤認しており、`if not rows:`（`rows`は常に非空文字列のため恒偽でデッドコード）と`except Exception`（`execute_read_query`自体は例外を送出しないため到達不能）の両方が実質機能しておらず、DB実行時エラーの文字列がそのまま正常な検索結果としてログにも残らずAIへ渡っていた。`execute_read_query`の内部エラープレフィックス（`"検索エラー:"`）を判定し、検出時は警告ログを出力したうえでAIへエラーであることが分かる形（`"DB検索エラー: ..."`）で返すよう修正した。
+* **役割**: 引数で渡されたSQLクエリが `SELECT` で始まり、かつ参照テーブルが `ALLOWED_SEARCH_TABLES` に含まれることを確認したうえで読み取り専用のDB検索を行い、結果を文字列で返す。**（Issue #357で修正）** SELECT判定の直後・テーブル抽出の前に`_QUOTED_IDENTIFIER_CHARS`（`"` `` ` `` `[`）のいずれかを含むSQLを警告ログ付きで即拒否するようになった（引用符付き識別子は`_extract_referenced_tables`が検出できず許可テーブル判定を素通りしていたため）。加えて実行先を`core.database.execute_read_query`から`_execute_restricted_read_query`（`set_authorizer`により許可テーブル以外の読み取り・ATTACH・PRAGMA・危険関数をSQLiteエンジン側で構造的に拒否する）へ変更した。**（B3で修正）** SQLクエリを受け取った直後、SELECT判定やテーブル抽出より前に`_strip_sql_comments`を通し、ブロックコメント(`/* */`)・行コメント(`--`)を空白に置換したうえで以降の判定・実行を行うようになった。以前は`FROM/**/tablename`のようにキーワードと識別子の間にSQLコメントを挟むことで`_extract_referenced_tables`の抽出をすり抜け、UNION SELECTと組み合わせて`ALLOWED_SEARCH_TABLES`外のテーブルを読み取れることが実証されていた。**（Issue #180で修正）** `core.database.execute_read_query`（実体は`core/database.py`の`execute_read_query`）は例外発生時も送出せず内部で捕捉し、"検索エラー: ..."という非空文字列として返す設計になっている。以前はこの戻り値の実際の型・意味を誤認しており、`if not rows:`（`rows`は常に非空文字列のため恒偽でデッドコード）と`except Exception`（`execute_read_query`自体は例外を送出しないため到達不能）の両方が実質機能しておらず、DB実行時エラーの文字列がそのまま正常な検索結果としてログにも残らずAIへ渡っていた。`execute_read_query`の内部エラープレフィックス（`"検索エラー:"`）を判定し、検出時は警告ログを出力したうえでAIへエラーであることが分かる形（`"DB検索エラー: ..."`）で返すよう修正した。
 * 根拠: `async def tool_search_db` (行番号: 316 / 抜粋: "async def tool_search_db")、コメント除去 (行番号: 309 / 抜粋: "sql = _strip_sql_comments(sql)")、引用符付き識別子の拒否 (行番号: 318〜320 / 抜粋: "if any(ch in sql for ch in _QUOTED_IDENTIFIER_CHARS):")、実行先 (行番号: 334 / 抜粋: "result = await asyncio.to_thread(_execute_restricted_read_query, sql)")
 
 
@@ -357,7 +357,7 @@
 ### `_extract_function_calls` (関数、Issue #374で追加)
 
 * **役割**: 応答の`parts`をすべて走査し、`function_call`を持つパートの`function_call`をリストで返す（L-L4対応。以前は`response.parts[0]`のみを検査していたため、テキスト+`function_call`の複数パート応答でツール呼び出しが無視され雑談扱いになっていた）。
-* 根拠: `def _extract_function_calls(response) -> List[Any]:` (行番号: 474〜486)
+* 根拠: `def _extract_function_calls(response) -> List[Any]:` (行番号: 491〜503)
 
 
 * **引数/リクエスト**: `response`（Gemini応答オブジェクト。`parts`属性を持つ）
@@ -378,7 +378,7 @@
 ### `_response_text_or_none` (関数、Issue #374で追加)
 
 * **役割**: `response.text`を安全に取り出す。旧SDK(`google-generativeai`)の`response.text`は`function_call`パートしか無い応答や空応答で`ValueError`を送出した。**（Issue #520で確認）** `google-genai`では同じ状況で`None`が返るようになったが、SDKの版差で再び送出する側に戻っても壊れないよう`try/except`は残している（空文字も`None`）。
-* 根拠: `def _response_text_or_none(response) -> Optional[str]:` (行番号: 489〜498)
+* 根拠: `def _response_text_or_none(response) -> Optional[str]:` (行番号: 506〜517)
 
 
 * **引数/リクエスト**: `response`
@@ -399,7 +399,7 @@
 ### `_dispatch_tool` (関数、Issue #374で追加)
 
 * **役割**: `function_call`の名前に応じて`tool_record_child_health`/`tool_record_food`/`tool_search_db`を実行し結果文字列を返す。未知の名前は`"エラー: 未知のツールが呼び出されました。"`を返す（以前`analyze_text_and_execute`内にインラインで書かれていた分岐を切り出したもの）。
-* 根拠: `async def _dispatch_tool(...)` (行番号: 501〜509)
+* 根拠: `async def _dispatch_tool(...)` (行番号: 520〜528)
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `fname: str`, `fargs: Dict[str, Any]`
@@ -420,7 +420,7 @@
 ### `_tool_results_fallback` (関数、Issue #374で追加)
 
 * **役割**: ツールは実行済みだが最終応答を生成できなかった場合に、蓄積した`tool_results`を改行連結し末尾に`(注記)`を添えた文字列を返す。
-* 根拠: `def _tool_results_fallback(tool_results: List[str], note: str) -> str:` (行番号: 512〜514)
+* 根拠: `def _tool_results_fallback(tool_results: List[str], note: str) -> str:` (行番号: 531〜533)
 
 
 * **引数/リクエスト**: `tool_results: List[str]`, `note: str`
@@ -616,7 +616,7 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `config.py` | AIがツールを使用する際のスキーマ定義や動作フラグ、各種DBのテーブル名などのコア定数が定義されているため。 | `config.GEMINI_API_KEY`, `config.FAMILY_SETTINGS`, 各種 `config.SQLITE_TABLE_*` の参照 |
 | 高 | `services/line_service.py` | 実際にデータの記録を行っている実体であり、その挙動と戻り値構造の特定が副作用の理解に必須なため。 | `line_service.log_child_health`, `line_service.log_food_record` の呼び出し |
-| 中 | `common.py` / `core/database.py` | `_execute_restricted_read_query`が使うDB接続（`get_db_cursor`）の実体であり、接続のリトライ・PRAGMA・row_factory等の内部仕様を把握するため。 | `common.get_db_cursor()` の呼び出し |
+| 中 | `common.py` / `core/database.py` | `_execute_restricted_read_query`が使うDB接続（`get_db_cursor`）の実体であり、接続のリトライ・PRAGMA・row_factory等の内部仕様を把握するため。 | `core.database.get_db_cursor()` の呼び出し |
 
 ## 8. 保守上の注意点
 
@@ -648,7 +648,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | 外部モジュールの詳細仕様（`config`, `FAMILY_SETTINGS`） | `MY_HOME_SYSTEM/config.py`を直接確認した。`GEMINI_API_KEY`（203行目、`os.getenv("GEMINI_API_KEY")`）、`SQLITE_TABLE_CHILD`（245行目、値`"child_health_records"`）、`SQLITE_TABLE_FOOD`（242行目、値`"food_records"`）、`SQLITE_TABLE_SHOPPING`（248行目、値`"shopping_records"`）、`SQLITE_TABLE_POWER_USAGE`（237行目、値`"power_usage"`）がいずれもモジュールレベルの単純な定数として定義されていることを確認した。`FAMILY_SETTINGS`（469〜477行目）は`{"members": [...], "styles": {...}}`という辞書であり、本ファイル(ai_service.py)が参照する`config.FAMILY_SETTINGS.get('members', [])`（ai_service.py:197）は実在する4名（智矢・涼花・将博・春菜）の氏名リストを返すことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:203, 237, 242, 245, 248, 469-477` |
-| 外部モジュールの詳細仕様（`common.execute_read_query`。**Issue #357以降、本ファイルからは呼ばれなくなり`_execute_restricted_read_query`が同じ戻り値契約を自前で実装している**） | `MY_HOME_SYSTEM/common.py:22-27`を直接確認したところ、`execute_read_query`は`core.database`からの再エクスポートであることが確定した。実体である`MY_HOME_SYSTEM/core/database.py:52-65`の`execute_read_query(query: str, params: tuple = ()) -> str`を直接確認した結果、`sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True)`により読み取り専用モードで接続し、`cursor.execute(query, params)`でクエリを実行、結果が空なら`"該当するデータはありませんでした。"`という文字列を、結果があれば`json.dumps([dict(r) for r in rows], ensure_ascii=False, default=str)`によるJSON文字列を返す。例外発生時は`except Exception as e:`で捕捉し、例外を送出せず`f"検索エラー: {str(e)}"`という文字列を返す実装であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:22-27`, `MY_HOME_SYSTEM/core/database.py:52-65` |
+| 外部モジュールの詳細仕様（`core.database.execute_read_query`。**Issue #357以降、本ファイルからは呼ばれなくなり`_execute_restricted_read_query`が同じ戻り値契約を自前で実装している**） | `MY_HOME_SYSTEM/common.py:22-27`を直接確認したところ、`execute_read_query`は`core.database`からの再エクスポートであることが確定した。実体である`MY_HOME_SYSTEM/core/database.py:52-65`の`execute_read_query(query: str, params: tuple = ()) -> str`を直接確認した結果、`sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True)`により読み取り専用モードで接続し、`cursor.execute(query, params)`でクエリを実行、結果が空なら`"該当するデータはありませんでした。"`という文字列を、結果があれば`json.dumps([dict(r) for r in rows], ensure_ascii=False, default=str)`によるJSON文字列を返す。例外発生時は`except Exception as e:`で捕捉し、例外を送出せず`f"検索エラー: {str(e)}"`という文字列を返す実装であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:22-27`, `MY_HOME_SYSTEM/core/database.py:52-65` |
 | 外部モジュールの詳細仕様（`setup_logging`） | `MY_HOME_SYSTEM/core/logger.py:46-86`の`setup_logging(name: str, webhook_url: str = None) -> logging.Logger`を直接確認した。`logging.getLogger(name)`を取得後、既存ハンドラをクリアしログレベルを`INFO`に設定、コンソール出力用の`StreamHandler`と、`logs/home_system.log`への日次ローテーション（`TimedRotatingFileHandler`, `when='midnight'`, `backupCount=7`）を行う`FileHandler`を追加する。さらに`webhook_url`引数（未指定時は`config.DISCORD_WEBHOOK_ERROR`、78行目）が設定されている場合、`DiscordErrorHandler`を`logging.ERROR`レベルで追加し、ERROR以上のログをDiscordへ自動通知する構成であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:46-86` |
 | 外部モジュールの詳細仕様（`get_now_iso`） | `MY_HOME_SYSTEM/core/utils.py:12-13`を直接確認した。`get_now_iso() -> str`は`datetime.datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()`を返すのみの実装であり、"Asia/Tokyo"タイムゾーンの現在時刻をISO 8601形式の文字列で返すことを確定した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:12-13` |
 | 外部モジュールの詳細仕様（`line_service.log_child_health`/`log_food_record` の戻り値） | `MY_HOME_SYSTEM/services/line_service.py:8-9, 34-41, 43-51`を直接確認した。8〜9行目で`from linebot.v3.messaging import (TextMessage, ...)`をインポートしており、`log_child_health`（34〜41行目）は`return TextMessage(text=f"【{child_name}】{condition} を記録しました！🏥")`、`log_food_record`（43〜51行目）は`return TextMessage(text=f"🍽️ {category}「{item}」を記録しました！")`を返す実装であることを確認した。本ファイル(ai_service.py)が参照する`msg_obj.text`（109〜110行目, 128〜129行目）は、この`TextMessage`インスタンスの`text`属性（コンストラクタ引数としてセットされたメッセージ文字列）に対応することが確定した。ただし`linebot`ライブラリ自体（`TextMessage`クラスの定義）はリポジトリ内には存在しない（外部パッケージ）。 | 直接ソース確認: `MY_HOME_SYSTEM/services/line_service.py:8-9, 34-41, 43-51` |

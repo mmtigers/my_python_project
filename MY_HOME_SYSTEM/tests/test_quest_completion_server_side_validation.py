@@ -24,7 +24,7 @@ import pytest
 from fastapi import HTTPException
 from freezegun import freeze_time
 
-import common
+from core.database import get_db_cursor
 from services.quest_service import QuestService
 
 
@@ -45,7 +45,7 @@ def _seed_two_children(cur):
 
 class TestQuestCompletionTargetUserValidation:
     def test_completing_other_users_targeted_quest_is_rejected(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             _seed_adult(cur, "dad")
             _seed_adult(cur, "mom")
             cur.execute(
@@ -58,12 +58,12 @@ class TestQuestCompletionTargetUserValidation:
             quest_service.process_complete_quest("dad", 101)
         assert exc_info.value.status_code == 403
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             count = cur.execute("SELECT COUNT(*) c FROM quest_history").fetchone()["c"]
         assert count == 0, "拒否されたクエスト完了は履歴を残さないこと"
 
     def test_completing_own_targeted_quest_succeeds(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             _seed_adult(cur, "dad")
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, target_user) "
@@ -75,7 +75,7 @@ class TestQuestCompletionTargetUserValidation:
         assert result["status"] == "success"
 
     def test_completing_all_targeted_quest_succeeds(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             _seed_adult(cur, "dad")
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, target_user) "
@@ -92,7 +92,7 @@ class TestSiblingTargetedQuestRequiresChildRole:
         """target_user='siblings'は兄妹連携クエストの前提(_process_coop_quest_completion
         で2人分のpending行を作成)を持つため、role_adultが完了すると、その前提を
         通らず単独即時報酬になってしまっていた(修正前)。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             _seed_adult(cur, "dad")
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, target_user) "
@@ -104,12 +104,12 @@ class TestSiblingTargetedQuestRequiresChildRole:
             quest_service.process_complete_quest("dad", 101)
         assert exc_info.value.status_code == 403
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             count = cur.execute("SELECT COUNT(*) c FROM quest_history").fetchone()["c"]
         assert count == 0
 
     def test_child_completing_sibling_targeted_quest_still_succeeds(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             _seed_two_children(cur)
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, target_user) "
@@ -120,14 +120,14 @@ class TestSiblingTargetedQuestRequiresChildRole:
         result = quest_service.process_complete_quest("son", 101)
         assert result["status"] == "pending"
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             rows = cur.execute("SELECT user_id FROM quest_history").fetchall()
         assert {r["user_id"] for r in rows} == {"son", "daughter"}
 
 
 class TestQuestCompletionTimeWindowValidation:
     def test_completing_outside_time_window_is_rejected(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             _seed_adult(cur, "dad")
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, "
@@ -142,7 +142,7 @@ class TestQuestCompletionTimeWindowValidation:
         assert exc_info.value.status_code == 403
 
     def test_completing_within_time_window_succeeds(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             _seed_adult(cur, "dad")
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, "
@@ -160,7 +160,7 @@ class TestQuestCompletionDayOfWeekValidation:
     def test_completing_on_wrong_day_of_week_is_rejected(self, isolated_db):
         anchor_weekday = datetime.date(2026, 8, 24).weekday()
         wrong_weekday = (anchor_weekday + 1) % 7
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             _seed_adult(cur, "dad")
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, day_of_week) "
@@ -175,7 +175,7 @@ class TestQuestCompletionDayOfWeekValidation:
 
     def test_completing_on_matching_day_of_week_succeeds(self, isolated_db):
         anchor_weekday = datetime.date(2026, 8, 24).weekday()
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             _seed_adult(cur, "dad")
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, day_of_week) "

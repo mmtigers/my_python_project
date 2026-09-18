@@ -15,7 +15,8 @@ from fastapi import HTTPException
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.utils import get_now_iso
+from core.database import get_db_cursor
 from services import quest_service as qs_module
 from services.quest_service import JST, ROLE_CHILD
 
@@ -24,7 +25,7 @@ OTHER_REWARD_ID = 703
 
 
 def _seed_user(user_id: str) -> None:
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) "
             "VALUES (?, ?, 'Warrior', 1, 0, 0, ?)",
@@ -33,7 +34,7 @@ def _seed_user(user_id: str) -> None:
 
 
 def _seed_reward_master() -> None:
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO reward_master (reward_id, title, cost_gold, target) "
             "VALUES (701, 'Youtube (10:00)', 50, 'children')"
@@ -54,11 +55,11 @@ def _seed(user_id: str = "son") -> None:
 
 
 def _grant_item(user_id: str, reward_id: int, used_at: str = None, status: str = 'owned') -> int:
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at, used_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            (user_id, reward_id, status, common.get_now_iso(), used_at),
+            (user_id, reward_id, status, get_now_iso(), used_at),
         )
         return cur.execute("SELECT id FROM user_inventory ORDER BY id DESC LIMIT 1").fetchone()["id"]
 
@@ -90,7 +91,7 @@ def test_second_youtube_ticket_is_blocked_within_cooldown(isolated_db):
     assert exc.value.status_code == 429
     assert "分" in str(exc.value.detail)
 
-    with common.get_db_cursor() as cur:
+    with get_db_cursor() as cur:
         assert cur.execute(
             "SELECT status FROM user_inventory WHERE id=?", (second_id,)
         ).fetchone()["status"] == "owned"

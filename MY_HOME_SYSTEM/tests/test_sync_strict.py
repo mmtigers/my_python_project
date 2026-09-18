@@ -15,12 +15,13 @@ import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.utils import get_now_iso
+from core.database import get_db_cursor
 import sync_strict
 
 
 def _seed_quest_master_row(quest_id: int = 9999, title: str = "Stale Quest"):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES (?, ?, ?, ?, ?)",
             (quest_id, title, "daily", 10, 5),
@@ -28,7 +29,7 @@ def _seed_quest_master_row(quest_id: int = 9999, title: str = "Stale Quest"):
 
 
 def _seed_reward_master_row(reward_id: int = 8888, title: str = "Stale Reward"):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO reward_master (reward_id, title, cost_gold) VALUES (?, ?, ?)",
             (reward_id, title, 100),
@@ -36,10 +37,10 @@ def _seed_reward_master_row(reward_id: int = 8888, title: str = "Stale Reward"):
 
 
 def _seed_user_inventory_row(reward_id: int, user_id: str = "dad", status: str = "owned"):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) VALUES (?, ?, ?, ?)",
-            (user_id, reward_id, status, common.get_now_iso()),
+            (user_id, reward_id, status, get_now_iso()),
         )
 
 
@@ -110,7 +111,7 @@ class TestRunSyncDryRun:
         # dry-runは確認プロンプトなしで実行できる(何も変更しないため)。
         sync_strict.run_sync(dry_run=True, assume_yes=False)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             quest_count = cur.execute("SELECT COUNT(*) as c FROM quest_master").fetchone()["c"]
             reward_count = cur.execute("SELECT COUNT(*) as c FROM reward_master").fetchone()["c"]
         assert quest_count == 1, "dry-run should not delete the stale quest row"
@@ -129,7 +130,7 @@ class TestRunSyncDestructiveDeleteIsGated:
         with pytest.raises(sync_strict.SyncAborted):
             sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=False)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             quest_count = cur.execute("SELECT COUNT(*) as c FROM quest_master").fetchone()["c"]
             reward_count = cur.execute("SELECT COUNT(*) as c FROM reward_master").fetchone()["c"]
         assert quest_count == 1, "aborted sync must not delete anything"
@@ -150,7 +151,7 @@ class TestRunSyncDestructiveDeleteIsGated:
                 input_func=lambda prompt: "n",
             )
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             quest_count = cur.execute("SELECT COUNT(*) as c FROM quest_master WHERE quest_id = 9999").fetchone()["c"]
         assert quest_count == 1, "declining the confirmation prompt must not delete the stale row"
 
@@ -165,7 +166,7 @@ class TestRunSyncDestructiveDeleteIsGated:
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             stale = cur.execute("SELECT COUNT(*) as c FROM quest_master WHERE quest_id = 9999").fetchone()["c"]
             kept = cur.execute("SELECT title FROM quest_master WHERE quest_id = 1").fetchone()
         assert stale == 0, "confirmed sync should still delete rows not present in the master data"
@@ -190,7 +191,7 @@ class TestSyncQuestsResetPeriod:
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             reset_period = cur.execute(
                 "SELECT reset_period FROM quest_master WHERE quest_id = 1"
             ).fetchone()["reset_period"]
@@ -198,7 +199,7 @@ class TestSyncQuestsResetPeriod:
 
     def test_reupserted_existing_quest_is_corrected_to_daily(self, isolated_db, monkeypatch):
         """既に不正値('weekly_monday')になっている既存行も、再UPSERT時に補正されること。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, reset_period) "
                 "VALUES (1, 'Old Quest', 'daily', 1, 1, 'weekly_monday')"
@@ -213,7 +214,7 @@ class TestSyncQuestsResetPeriod:
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             reset_period = cur.execute(
                 "SELECT reset_period FROM quest_master WHERE quest_id = 1"
             ).fetchone()["reset_period"]
@@ -244,7 +245,7 @@ class TestSyncQuestsFullColumnSync:
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT start_time, end_time, start_date, end_date, occurrence_chance, "
                 "pre_requisite_quest_id FROM quest_master WHERE quest_id = 1"
@@ -259,7 +260,7 @@ class TestSyncQuestsFullColumnSync:
     def test_existing_quest_time_window_is_updated_not_left_stale(self, isolated_db, monkeypatch):
         """既存行のstart_time/end_timeが変更された場合、再UPSERT時に反映されること
         (欠落列だったため、以前は永久にDB側の古い値のまま反映されなかった)。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, "
                 "start_time, end_time) VALUES (1, 'Old Quest', 'daily', 1, 1, '05:00', '06:00')"
@@ -277,7 +278,7 @@ class TestSyncQuestsFullColumnSync:
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT start_time, end_time FROM quest_master WHERE quest_id = 1"
             ).fetchone()
@@ -296,7 +297,7 @@ class TestSyncQuestsFullColumnSync:
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT start_time, end_time, start_date, end_date, occurrence_chance, "
                 "pre_requisite_quest_id FROM quest_master WHERE quest_id = 1"
@@ -339,7 +340,7 @@ class TestSyncRewardsSkipsDeleteWhenReferencedByUserInventory:
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             referenced = cur.execute(
                 "SELECT COUNT(*) as c FROM reward_master WHERE reward_id = 8888"
             ).fetchone()["c"]
@@ -367,7 +368,7 @@ class TestSyncRewardsWritesDescriptionColumn:
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT desc, description FROM reward_master WHERE reward_id = 1"
             ).fetchone()
@@ -375,7 +376,7 @@ class TestSyncRewardsWritesDescriptionColumn:
         assert row["description"] == "とても良い報酬です"
 
     def test_existing_reward_description_column_is_updated_not_left_stale(self, isolated_db, monkeypatch):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO reward_master (reward_id, title, cost_gold, desc, description) "
                 "VALUES (1, 'Old Reward', 100, '古い説明', '古い説明')"
@@ -390,9 +391,102 @@ class TestSyncRewardsWritesDescriptionColumn:
 
         sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT desc, description FROM reward_master WHERE reward_id = 1"
             ).fetchone()
         assert row["desc"] == "新しい説明"
         assert row["description"] == "新しい説明"
+
+
+class TestMasterSyncSqlIsSharedWithGameSystem:
+    """Issue #664: quest_master/reward_master への UPSERT は
+    `services/quest/master_sync_sql.py` に一本化した。
+
+    以前は sync_strict.py と services/quest/game_system.py に別々のSQLがあり、
+    列リストが食い違う事故が #100(reset_period 欠落)・#164(時間帯/期間/出現率/
+    前提クエスト欠落)・#165(description 欠落)と3度起きていた。ここでは
+    「両経路が同じSQLを使っていること」と「同じマスタ入力から同じ行になること」
+    を固定する。
+    """
+
+    def test_both_paths_import_the_same_sql_constants(self):
+        from services.quest import game_system as gs
+        from services.quest import master_sync_sql as msql
+
+        assert sync_strict.QUEST_UPSERT_SQL is msql.QUEST_UPSERT_SQL
+        assert sync_strict.REWARD_UPSERT_SQL is msql.REWARD_UPSERT_SQL
+        assert gs.QUEST_UPSERT_SQL is msql.QUEST_UPSERT_SQL
+        assert gs.REWARD_UPSERT_SQL is msql.REWARD_UPSERT_SQL
+
+    def test_quest_param_builder_order_matches_the_sql_column_list(self):
+        """値タプルの並びが SQL の列リストとずれていないこと(並べ替え事故の防止)。"""
+        from services.quest import master_sync_sql as msql
+
+        params = msql.quest_upsert_params(
+            quest_id=1, title="t", description="d", quest_type="daily", target_user="all",
+            exp_gain=10, gold_gain=5, icon_key="📝", day_of_week="1",
+            start_date="2026-01-01", end_date="2026-12-31", occurrence_chance=0.5,
+            start_time="07:00", end_time="09:00", pre_requisite_quest_id=2, reset_period="daily",
+        )
+        assert params == (
+            1, "t", "d", "daily", "all",
+            10, 5, "📝", "1",
+            "2026-01-01", "2026-12-31", 0.5,
+            "07:00", "09:00", 2, "daily",
+        )
+        assert msql.QUEST_UPSERT_SQL.count("?") == len(params)
+
+    def test_reward_param_builder_writes_description_to_the_legacy_desc_column_too(self):
+        from services.quest import master_sync_sql as msql
+
+        params = msql.reward_upsert_params(
+            reward_id=1, title="t", category="small", cost_gold=100,
+            icon_key="🎁", description="説明", target="all",
+        )
+        assert params == (1, "t", "small", 100, "🎁", "説明", "説明", "all")
+        assert msql.REWARD_UPSERT_SQL.count("?") == len(params)
+
+    def test_both_paths_produce_the_same_quest_row(self, isolated_db, monkeypatch):
+        """同じマスタ1件に対して、sync_strict と sync_master_data が同じ行を書くこと。"""
+        from services import quest_service as qs
+
+        quest = {
+            "id": 4242, "title": "共有SQLの検証", "type": "daily", "target": "son",
+            "exp": 11, "gold": 22, "icon": "🧪", "days": "1",
+            "desc": "説明テキスト", "start_time": "07:00", "end_time": "09:00",
+            "start_date": "2026-01-01", "end_date": "2026-12-31",
+            "chance": 0.5, "pre_requisite_quest_id": None,
+        }
+        columns = (
+            "quest_id, title, description, quest_type, target_user, exp_gain, gold_gain, "
+            "icon_key, day_of_week, start_date, end_date, occurrence_chance, "
+            "start_time, end_time, pre_requisite_quest_id, reset_period"
+        )
+
+        monkeypatch.setattr(sync_strict, "QUESTS", [quest])
+        monkeypatch.setattr(sync_strict, "REWARDS", [])
+        sync_strict.run_sync(assume_yes=True, allow_empty_master=True)
+        with get_db_cursor() as cur:
+            strict_row = tuple(cur.execute(
+                f"SELECT {columns} FROM quest_master WHERE quest_id = ?", (quest["id"],)
+            ).fetchone())
+
+        with get_db_cursor(commit=True) as cur:
+            cur.execute("DELETE FROM quest_master WHERE quest_id = ?", (quest["id"],))
+
+        fake_quest_data = type("FakeQuestData", (), {"USERS": [], "QUESTS": [quest], "REWARDS": []})
+        monkeypatch.setattr(qs, "quest_data", fake_quest_data)
+        monkeypatch.setattr(
+            "services.quest.game_system.importlib.reload", lambda module: module
+        )
+        qs.game_system.sync_master_data()
+        with get_db_cursor() as cur:
+            service_row = tuple(cur.execute(
+                f"SELECT {columns} FROM quest_master WHERE quest_id = ?", (quest["id"],)
+            ).fetchone())
+
+        assert strict_row == service_row, (
+            "sync_strict.py と GameSystem.sync_master_data で書き込まれる行が異なります "
+            f"(strict={strict_row}, service={service_row})"
+        )

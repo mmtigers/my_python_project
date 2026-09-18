@@ -1,5 +1,8 @@
 import config
-import common
+from core.logger import setup_logging
+from core.database import get_db_cursor
+from services.notification_service import send_push
+from core import state_file
 import datetime
 import os
 import pytz
@@ -7,11 +10,12 @@ import sys
 from typing import Dict, Optional, Any
 
 # ロガー設定 (設計書 8.1: core.loggerの使用ラッパー) [cite: 144]
-logger = common.setup_logging("weekly_report")
+logger = setup_logging("weekly_report")
 
-# 定数定義 (本来はconfig.pyまたは.envから読み込むべき値)
-# 設計書 9.2: 機密情報・設定値の分離 
-DEFAULT_ELEC_PRICE_PER_KWH = 31
+# 電気代の概算単価(円/kWh)。Issue #663: ここに直書きされていた値(コメント自身が
+# 「本来はconfig.pyまたは.envから読み込むべき値」と書いていた)を config.py の
+# セクション15へ移し、.env の ELEC_PRICE_PER_KWH で上書きできるようにした。
+# 既定値(31)は従来と同じ。
 
 # #234: 外部cron(リポジトリ管理外)による月曜8時台の多重起動時に重複送信するのを防ぐための
 # 実行済みフラグファイル。monitors/tv_lock_monitor.pyのLAST_RUN_FILEと同じ方式。
@@ -51,7 +55,7 @@ def get_analysis_data(start_dt: datetime.datetime) -> Optional[Dict[str, Any]]:
     Returns:
         Optional[Dict[str, Any]]: 集計結果を含む辞書。エラー時はNone。
     """
-    with common.get_db_cursor() as cursor:
+    with get_db_cursor() as cursor:
         if not cursor:
             return None
 
@@ -129,7 +133,7 @@ def get_analysis_data(start_dt: datetime.datetime) -> Optional[Dict[str, Any]]:
                     elapsed_hours = 0
                 
                 kwh = (avg_watts * elapsed_hours) / 1000
-                bill = int(kwh * DEFAULT_ELEC_PRICE_PER_KWH)
+                bill = int(kwh * config.ELEC_PRICE_PER_KWH)
                 data["elec_bill"] = bill
             else:
                 data["elec_bill"] = 0
@@ -212,13 +216,12 @@ def run_report() -> None:
         return
 
     # #234: 実行済みフラグチェック (外部cronの多重起動による重複送信防止)
+    # Issue #661: 状態ファイルの読み書きは core/state_file.py に集約した
+    # (読めない場合は None が返り「未送信」として扱う。重複送信より欠落の方が困るため)。
     today_str = now.strftime("%Y-%m-%d")
-    if not is_force and os.path.exists(LAST_RUN_FILE):
-        with open(LAST_RUN_FILE, "r") as f:
-            last_run = f.read().strip()
-        if last_run == today_str:
-            logger.debug(f"⏭️ 本日は既に週間レポートを送信済みのためスキップします ({today_str})")
-            return
+    if not is_force and state_file.read_text(LAST_RUN_FILE) == today_str:
+        logger.debug(f"⏭️ 本日は既に週間レポートを送信済みのためスキップします ({today_str})")
+        return
 
     logger.info("📊 週間レポート生成プロセスを開始します...")
     
@@ -280,14 +283,12 @@ def run_report() -> None:
     full_msg = msg_header + msg_body + msg_footer
     
     # LINE通知実行 (設計書 4.4: LINE Bot連携) [cite: 72]
-    # common.send_push は設計書外の共通関数と想定されるが、ロガー運用に従い結果を記録
-    if common.send_push([{"type": "text", "text": full_msg}], target="discord"):
+    # send_push は設計書外の共通関数と想定されるが、ロガー運用に従い結果を記録
+    if send_push([{"type": "text", "text": full_msg}], target="discord"):
         logger.info("✅ レポート送信完了")
         # #234: 定時実行のときのみフラグを記録する(強制実行時は手動テスト用途のため記録しない)
         if not is_force:
-            os.makedirs(os.path.dirname(LAST_RUN_FILE), exist_ok=True)
-            with open(LAST_RUN_FILE, "w") as f:
-                f.write(today_str)
+            state_file.write_text_atomic(LAST_RUN_FILE, today_str)
     else:
         logger.error("❌ レポート送信失敗")
 

@@ -26,8 +26,8 @@
 * 根拠: [環境変数読み込み処理] (行番号: 204 / 抜粋: `SWITCHBOT_API_TOKEN: Optional[str] = os.getenv("SWITCHBOT_API_TOKEN")`)
 
 
-* BTスピーカー運用の有効/無効を切り替えるフラグ`ENABLE_BLUETOOTH`（既定`False`）を定義する。`False`の間は`post_boot_health_check.py`のSpeakerチェックがBluetooth確認をスキップしサウンドカード確認へフォールバックする。あわせて、Anker SoundCore 2（`tools/connect_speaker.sh`, `tools/keep_alive_anker.sh`と同一デバイス）のMACアドレス`SPEAKER_BLUETOOTH_MAC`（環境変数`SPEAKER_BLUETOOTH_MAC`から読み、未設定時は空文字。Issue #663で実機のMACアドレスがデフォルト値としてコミットされていたのを除去し、個人環境値は`.env`に置く方針にした。空文字の場合`post_boot_health_check.py`の`resolve_target_bluetooth_mac`は`None`を返しBTチェックをスキップする）も同じ「1. 環境・機能フラグ設定」セクションで定義されている。同セクションには Issue #665 で`LOG_LEVEL`（環境変数`LOG_LEVEL`、既定`"INFO"`、大文字化・前後空白除去済み。`core/logger.setup_logging`がロガーのレベルに使い、不正値はlogger側で`INFO`にフォールバックする）も追加された。Issue #488で、このセクションにあった未参照の`ENV`定数は削除された（現在このセクションは`ENABLE_BLUETOOTH`/`LOG_LEVEL`/`SPEAKER_BLUETOOTH_MAC`の3定数）。
-* 根拠: [ENABLE_BLUETOOTH/SPEAKER_BLUETOOTH_MAC定義とコメント] (行番号: 190〜199 / 抜粋: "# ==========================================\n# 1. 環境・機能フラグ設定\n# ==========================================\n# BTスピーカー運用の有効/無効。Falseの間はpost_boot_health_checkのSpeakerチェックが\n# BT確認をスキップしサウンドカード確認にフォールバックする。\n# 再有効化する場合はTrueにした上で、OS側の `sudo systemctl enable --now bluetooth`\n# と起動時自動接続(tools/connect_speaker.sh の定期実行)の整備が必要。\nENABLE_BLUETOOTH: bool = False\n# Anker SoundCore 2 (tools/connect_speaker.sh, tools/keep_alive_anker.sh と同一デバイス)\nSPEAKER_BLUETOOTH_MAC: str = os.getenv(\"SPEAKER_BLUETOOTH_MAC\", \"F4:4E:FC:B6:65:D4\")")
+* BTスピーカー運用の有効/無効を切り替えるフラグ`ENABLE_BLUETOOTH`（既定`False`）を定義する。`False`の間は`post_boot_health_check.py`のSpeakerチェックがBluetooth確認をスキップしサウンドカード確認へフォールバックする。あわせて、Anker SoundCore 2（`tools/connect_speaker.sh`, `tools/keep_alive_anker.sh`と同一デバイス）のMACアドレス`SPEAKER_BLUETOOTH_MAC`（環境変数`SPEAKER_BLUETOOTH_MAC`から読み、未設定時は空文字。Issue #663で実機のMACアドレスがデフォルト値としてコミットされていたのを除去し、個人環境値は`.env`に置く方針にした。空文字の場合`post_boot_health_check.py`の`resolve_target_bluetooth_mac`は`None`を返しBTチェックをスキップする）も同じ「1. 環境・機能フラグ設定」セクションで定義されている。同セクションには Issue #665 で`LOG_LEVEL`（環境変数`LOG_LEVEL`、既定`"INFO"`、大文字化・前後空白除去済み。`core/logger.setup_logging`がロガーのレベルに使い、不正値はlogger側で`INFO`にフォールバックする）も追加された。Issue #665では、`unified_server.security_headers_middleware`が参照する`SECURITY_HEADERS_ENABLED`（環境変数`SECURITY_HEADERS_ENABLED`、既定`true`。`"false"`のときだけ偽になる）と`SECURITY_HEADER_X_FRAME_OPTIONS`（環境変数`SECURITY_HEADER_X_FRAME_OPTIONS`、既定`"SAMEORIGIN"`。空文字にすると`X-Frame-Options`だけ付与しない）も同セクションに追加された。Issue #488で、このセクションにあった未参照の`ENV`定数は削除された（現在このセクションは`ENABLE_BLUETOOTH`/`LOG_LEVEL`/`SPEAKER_BLUETOOTH_MAC`/`SECURITY_HEADERS_ENABLED`/`SECURITY_HEADER_X_FRAME_OPTIONS`の5定数）。
+* 根拠: [ENABLE_BLUETOOTH/SPEAKER_BLUETOOTH_MAC定義とコメント] (行番号: 190〜199 / 抜粋: "# ==========================================\n# 1. 環境・機能フラグ設定\n# ==========================================\n# BTスピーカー運用の有効/無効。Falseの間はpost_boot_health_checkのSpeakerチェックが\n# BT確認をスキップしサウンドカード確認にフォールバックする。\n# 再有効化する場合はTrueにした上で、OS側の `sudo systemctl enable --now bluetooth`\n# と起動時自動接続(tools/connect_speaker.sh の定期実行)の整備が必要。\nENABLE_BLUETOOTH: bool = False\n# Anker SoundCore 2 (tools/connect_speaker.sh, tools/keep_alive_anker.sh と同一デバイス)\nSPEAKER_BLUETOOTH_MAC: str = os.getenv(\"SPEAKER_BLUETOOTH_MAC\", \"\")\nSECURITY_HEADERS_ENABLED: bool = os.getenv(\"SECURITY_HEADERS_ENABLED\", \"true\").strip().lower() != \"false\"\nSECURITY_HEADER_X_FRAME_OPTIONS: str = os.getenv(\"SECURITY_HEADER_X_FRAME_OPTIONS\", \"SAMEORIGIN\").strip()")
 
 
 * SwitchBot Webhookの共有シークレット検証用トークン(`SWITCHBOT_WEBHOOK_TOKEN`)を環境変数から読み込む(`routers/webhook_router.py`が参照)。**（Issue #648）** 未設定時は同ルーターが HTTP 503 で拒否する(フェイルクローズ)。移行用のオプトイン `ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK`(環境変数、既定 `false`)を `true` にした場合のみ従来どおり無検証で受け付ける。
@@ -38,7 +38,7 @@
 * 根拠: [定数定義とコメント] (行番号: 213〜219 / 抜粋: "# LINE Messaging API 呼び出し(reply/push/get_profile 等)の (接続, 読み取り) タイムアウト秒。", "LINE_API_REQUEST_TIMEOUT: tuple = (5.0, 15.0)")
 
 
-* **（Issue #620で追加）** 「2. 認証・API設定」セクションに、認可済みの家族のLINEユーザーID(`event.source.user_id`、`"U"`+32桁hex形式)のallowlist`AUTHORIZED_LINE_USER_IDS`(環境変数`AUTHORIZED_LINE_USER_IDS`、カンマ区切り)を追加した。`handlers/line_handler.py`の`_is_authorized_line_user`が、体調・食事記録の書き込みとAI経由のDB検索をこのallowlistで制限する際に参照する。パース方式は`TV_UNLOCK_QUEST_IDS`等と同様の「カンマ分割してstrip、空要素は除外」だが、`isdigit()`によるフィルタは行わない(LINEユーザーIDは`U`始まりの文字列のため)。`SWITCHBOT_WEBHOOK_TOKEN`と同じく、未設定(空文字列)の場合は空リストとなり後方互換(検証なし)として扱われる。
+* **（Issue #620で追加）** 「2. 認証・API設定」セクションに、認可済みの家族のLINEユーザーID(`event.source.user_id`、`"U"`+32桁hex形式)のallowlist`AUTHORIZED_LINE_USER_IDS`(環境変数`AUTHORIZED_LINE_USER_IDS`、カンマ区切り)を追加した。`handlers/line_handler.py`の`_is_authorized_line_user`が、体調・食事記録の書き込みとAI経由のDB検索をこのallowlistで制限する際に参照する。パース方式は`TV_UNLOCK_QUEST_IDS`等と同様の「カンマ分割してstrip、空要素は除外」だが、`isdigit()`によるフィルタは行わない(LINEユーザーIDは`U`始まりの文字列のため)。未設定(空文字列)の場合は空リストとなり後方互換(検証なし)として扱われる。Issue #648でフェイルクローズ化した`SWITCHBOT_WEBHOOK_TOKEN`とは異なり、こちらはフェイルオープンのままである。
 * 根拠: [AUTHORIZED_LINE_USER_IDS定義とコメント] (行番号: 221〜230 / 抜粋: "# Issue #620: LINE公式アカウントを友だち追加すれば誰でもメッセージを送信できてしまうため、", "_authorized_line_user_ids_str: str = os.getenv(\"AUTHORIZED_LINE_USER_IDS\", \"\")", "AUTHORIZED_LINE_USER_IDS: List[str] = [\n    uid.strip() for uid in _authorized_line_user_ids_str.split(\",\") if uid.strip()\n]")
 
 
@@ -70,9 +70,9 @@
 * 根拠: [保持期間設定セクション] (行番号: 389 / 抜粋: `RECORDING_RETENTION_DAYS: int = _get_int_env(`)
 
 
-* CORS許可オリジン(`CORS_ORIGINS`)を定義する。以前は`unified_server.py`側にも別のハードコードされたオリジンリストが存在し、実際に使われるのはそちらだけで本ファイルの値は参照されない「死に設定」だったが、こちらに一本化された（`unified_server.py`側は本リストを直接参照するよう変更済み）。リポジトリにハードコードされるのは`localhost`/`127.0.0.1`のVite開発サーバー（5173）とStreamlitダッシュボード（8501）、および`_frontend_origin`のみで、LAN内開発サーバーのIPやCloudflare Tunnel公開ドメインのような個人環境値は環境変数`CORS_EXTRA_ORIGINS`（カンマ区切り、前後空白除去、空要素は無視）から`CORS_EXTRA_ORIGINS`リストとして読み込み`CORS_ORIGINS`末尾に展開する（Issue #663。以前は`http://192.168.1.200:5173`と`https://m-mhts.com`が直書きされていた）。`FRONTEND_URL`（既定値はパス付きの`"http://192.168.1.200:8000/quest"`）を`CORS_ORIGINS`へ追加する際は、`urlparse`で`scheme://netloc`部分のみを取り出した`_frontend_origin`を使う（Issue #112の修正。ブラウザが送信する`Origin`ヘッダーはscheme://host[:port]のみでパスを含まないため、Starletteの`CORSMiddleware`の完全一致比較ではパス付きの値が永久に一致しない「死にエントリ」になっていた）。`FRONTEND_URL`自体は`post_boot_health_check.py`等が実際にHTTPリクエストを送る完全なURLとして使われているため、パスを保持したまま変更していない。
+* CORS許可オリジン(`CORS_ORIGINS`)を定義する。以前は`unified_server.py`側にも別のハードコードされたオリジンリストが存在し、実際に使われるのはそちらだけで本ファイルの値は参照されない「死に設定」だったが、こちらに一本化された（`unified_server.py`側は本リストを直接参照するよう変更済み）。リポジトリにハードコードされるのは`localhost`/`127.0.0.1`のVite開発サーバー（5173）とStreamlitダッシュボード（8501）、および`_frontend_origin`のみで、LAN内開発サーバーのIPやCloudflare Tunnel公開ドメインのような個人環境値は環境変数`CORS_EXTRA_ORIGINS`（カンマ区切り、前後空白除去、空要素は無視）から`CORS_EXTRA_ORIGINS`リストとして読み込み`CORS_ORIGINS`末尾に展開する（Issue #663。以前は LAN 内開発サーバーのIPと公開ドメインが直書きされていた）。`FRONTEND_URL`（既定値はパス付きのループバック`"http://127.0.0.1:8000/quest"`。**Issue #663 で実環境の LAN IP から変更**した — この URL を使う `post_boot_health_check.py` は `unified_server` と同じホストで動くため、ループバックの方が確実に到達する。LAN 内の他端末を指す値は `.env` の `FRONTEND_URL` で与える）を`CORS_ORIGINS`へ追加する際は、`urlparse`で`scheme://netloc`部分のみを取り出した`_frontend_origin`を使う（Issue #112の修正。ブラウザが送信する`Origin`ヘッダーはscheme://host[:port]のみでパスを含まないため、Starletteの`CORSMiddleware`の完全一致比較ではパス付きの値が永久に一致しない「死にエントリ」になっていた）。`FRONTEND_URL`自体は`post_boot_health_check.py`等が実際にHTTPリクエストを送る完全なURLとして使われているため、パスを保持したまま変更していない。
 * 根拠: [CORS許可オリジン定義] (行番号: 337〜344 / 抜粋: `CORS_ORIGINS: List[str] = [`)
-* 根拠: [_frontend_originの算出(Issue #112)] (行番号: 326, 332 / 抜粋: `FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")`, `_frontend_origin = "{0.scheme}://{0.netloc}".format(urlparse(FRONTEND_URL))`)
+* 根拠: [_frontend_originの算出(Issue #112)] (行番号: 326, 332 / 抜粋: `FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://127.0.0.1:8000/quest")`, `_frontend_origin = "{0.scheme}://{0.netloc}".format(urlparse(FRONTEND_URL))`)
 
 
 * `reset_game.py`が管理者向けリセットAPI(`POST /api/quest/admin/reset_user`)を呼び出す際のサーバーのベースURL(`RESET_GAME_API_BASE_URL`、既定値`"http://127.0.0.1:8000"`)を定義する(Issue #547)。`reset_game.py`は`unified_server`と同じホストで実行される対話スクリプトという前提のため既定値はループバックアドレスとしており、LAN内の他端末からのアクセスを想定したホストIP指定である`FRONTEND_URL`とは用途が異なるためこの用途には流用しない、という趣旨のコメントが付されている。
@@ -91,7 +91,7 @@
 * 根拠: [HEALTH_WATCH_INVESTIGATE_HOOK定義とコメント] (行番号: 476〜486 / 抜粋: "# ==========================================\n# 12. ラズパイ監視(health_watch)設定\n# ==========================================\n# Issue #339: 層2(異常検知時のClaude自動調査)のフックスクリプトの絶対パス。", "HEALTH_WATCH_INVESTIGATE_HOOK: Optional[str] = os.getenv(\"HEALTH_WATCH_INVESTIGATE_HOOK\")")
 
 
-* 「13. NASパスの遅延解決 (Issue #330 PR-B)」セクション(Issue #488でモジュールdocstring目次の番号が旧20番から13番へ振り直された)で、NAS上のパス定数(`ASSETS_DIR`とその派生`SOUND_DIR`のみ)をPEP 562のモジュール`__getattr__`により**初回アクセス時に解決してモジュール属性へキャッシュ**する。以前はimport時に`ensure_safe_path_with_backoff`(書き込みテスト+Exponential Backoff、最悪 約31秒/パス)を実行しており、NAS障害・マウント遅延時にconfigをimportするだけのテスト・CLIツール・cronスクリプトまでブロックしていた。Issue #488で、未実装の給与PDF機能・小児科予約監視機能が削除されたことに伴い、`__getattr__`が扱っていた`TMP_VIDEO_DIR`分岐(旧・タイムラプス機能の残置設定)、および派生パス辞書`_ASSETS_DERIVED_PATHS`が保持していた`SALARY_IMAGE_DIR`/`CLINIC_HTML_DIR`/`CLINIC_STATS_CSV`/`CLINIC_GRAPH_PATH`は削除され、`_ASSETS_DERIVED_PATHS`は`{"SOUND_DIR": "sounds"}`の1エントリのみとなった。同様に、`ASSETS_DIR`配下で自動作成するサブディレクトリのリスト`_ASSETS_SUBDIRS_TO_CREATE`も(旧`["salary_images", "clinic_html"]`から)空リスト`[]`になった。`prewarm_nas_paths()`が解決する名前のタプルからも`TMP_VIDEO_DIR`が外れ、現在は`("ASSETS_DIR", *_ASSETS_DERIVED_PATHS)`のみとなっている。サーバー起動時は`unified_server.py`のlifespanが`prewarm_nas_paths()`を呼び、遅延化前と同じく起動時点で検証を済ませる。利用側の書き方(`config.ASSETS_DIR`等)は不変で、未知の属性名は従来どおり`AttributeError`を送出する。
+* 「13. NASパスの遅延解決 (Issue #330 PR-B)」セクション(Issue #488でモジュールdocstring目次の番号が旧20番から13番へ振り直された)で、NAS上のパス定数(`ASSETS_DIR`とその派生`SOUND_DIR`のみ)をPEP 562のモジュール`__getattr__`により**初回アクセス時に解決してモジュール属性へキャッシュ**する。以前はimport時に`ensure_safe_path_with_backoff`(書き込みテスト+Exponential Backoff、最悪 約31秒/パス)を実行しており、NAS障害・マウント遅延時にconfigをimportするだけのテスト・CLIツール・cronスクリプトまでブロックしていた。Issue #488で、未実装の給与PDF機能・小児科予約監視機能が削除されたことに伴い、`__getattr__`が扱っていた`TMP_VIDEO_DIR`分岐(旧・タイムラプス機能の残置設定)、および派生パス辞書`_ASSETS_DERIVED_PATHS`が保持していた`SALARY_IMAGE_DIR`/`CLINIC_HTML_DIR`/`CLINIC_STATS_CSV`/`CLINIC_GRAPH_PATH`は削除され、`_ASSETS_DERIVED_PATHS`は`{"SOUND_DIR": "sounds"}`の1エントリのみとなった。同様に、`ASSETS_DIR`配下で自動作成するサブディレクトリのリスト`_ASSETS_SUBDIRS_TO_CREATE`も(旧`["salary_images", "clinic_html"]`から)空リスト`[]`になった。`prewarm_nas_paths()`が解決する名前のタプルからも`TMP_VIDEO_DIR`が外れ、現在は`("ASSETS_DIR", *_ASSETS_DERIVED_PATHS)`のみとなっている。サーバー起動時は`unified_server.py`のlifespanが`prewarm_nas_paths()`を呼び、遅延化前と同じく起動時点で検証を済ませる。利用側の書き方(`config.ASSETS_DIR`等)は不変で、未知の属性名は従来どおり`AttributeError`を送出する。 **（Issue #664 で追加）** `LOG_DIR`(`BASE_DIR/logs`)も同じ仕組みへ移した。NAS依存ではないローカルパスだが、同じ`ensure_safe_path_with_backoff`をimport時に呼んでいたため、ディスクフル・権限異常時にはconfigをimportするだけで最大約31秒ブロックしうる取り残しだった(Issue #330 PR-B で`ASSETS_DIR`を遅延化した際に見落とされていた)。解決先のパスは`_PREFERRED_LOG_DIR`定数として残り、`prewarm_nas_paths()`が解決する名前のタプルも`("ASSETS_DIR", "LOG_DIR", *_ASSETS_DERIVED_PATHS)`になっている。`core/logger.py`は`getattr(config, "LOG_DIR", None)`で参照しており、遅延解決でも実パスが返る。
 * 根拠: [遅延解決セクション] (行番号: 488〜553 / 抜粋: "# 13. NASパスの遅延解決 (Issue #330 PR-B)", "_ASSETS_SUBDIRS_TO_CREATE: List[str] = []", "_ASSETS_DERIVED_PATHS: Dict[str, str] = {\n    \"SOUND_DIR\": \"sounds\",\n}", "def __getattr__(name: str) -> str:", "def prewarm_nas_paths() -> None:\n    ...\n    for name in (\"ASSETS_DIR\", *_ASSETS_DERIVED_PATHS):")
 
 
@@ -99,6 +99,19 @@
 * 根拠: [Family Quest: YouTubeごほうび券クールダウン設定セクション] (行番号: 555〜569 / 抜粋: "# 14. Family Quest: YouTubeごほうび券クールダウン設定", "_youtube_reward_ids_str: str = os.getenv(\"YOUTUBE_REWARD_IDS\", \"10,11,12\")", "YOUTUBE_REWARD_IDS: List[int] = []")
 * 同セクションに、クールダウンを実際に強制し始める日を表す`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`(環境変数`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`、`YYYY-MM-DD`形式、既定値`"2026-09-12"`、`datetime.date`型)を追加した。いきなり制限がかかると子どもが困惑するため、この日を迎えるまでは`InventoryService.use_item`が実際には使用を拒否せず、family-quest側に予告バナーのみを表示する猶予期間を設ける目的。パース失敗時は`logger.warning`を出したうえで`date(2000, 1, 1)`(=常に施行済み扱い、安全側の即時強制)にフォールバックする。
 * 根拠: [YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM定義] (行番号: 577〜583 / 抜粋: "from datetime import date as _date\n_youtube_cooldown_enforce_from_str: str = os.getenv(\"YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM\", \"2026-09-12\")\ntry:\n    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM: _date = _date.fromisoformat(_youtube_cooldown_enforce_from_str)\nexcept Exception as e:\n    logger.warning(...)\n    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM = _date(2000, 1, 1)")
+
+
+* **（Issue #663で追加）** 「15. 週次レポート設定」セクションを新設し、`weekly_analyze_report.py`が電力量(kWh)から電気代を概算する単価`ELEC_PRICE_PER_KWH`(環境変数`ELEC_PRICE_PER_KWH`、`_get_int_env`経由、既定31)を定義する。以前は`weekly_analyze_report.py`に`DEFAULT_ELEC_PRICE_PER_KWH = 31`として直書きされており、コメント自身が「本来はconfig.pyまたは.envから読み込むべき値」と書いていた。電気料金は地域・契約で変わる個人環境値のため`.env`へ寄せる。
+* 根拠: [週次レポート設定セクション] (行番号: 655〜661 / 抜粋: "# 15. 週次レポート設定", "ELEC_PRICE_PER_KWH: int = _get_int_env(\"ELEC_PRICE_PER_KWH\", 31)")
+
+
+* **（スマホ対応で追加）** 「16. ダッシュボード(Streamlit)公開設定」セクションを新設し、`unified_server.py`がStreamlitダッシュボードをリバースプロキシするための4定数を定義する。
+    * `DASHBOARD_PROXY_ENABLED`（環境変数 `DASHBOARD_PROXY_ENABLED`、既定 `true`。`"false"` 以外はすべて真）— `unified_server.py` が `routers/dashboard_router.py` をincludeするかどうかの分岐。
+    * `DASHBOARD_INTERNAL_URL`（環境変数 `DASHBOARD_INTERNAL_URL`、既定 `"http://127.0.0.1:8501"`。前後の空白を除去し末尾スラッシュを落とす）— 中継先。コメントに「localhost以外を指定する運用は想定していない」と記されている。
+    * `DASHBOARD_BASE_PATH`（環境変数 `DASHBOARD_BASE_PATH`、既定 `"dashboard"`）— 先頭に `/` を付け、前後のスラッシュを落として `"/dashboard"` 形式へ正規化する。Streamlit起動時の `--server.baseUrlPath` と一致していなければ静的アセットが404になる旨がコメントに記されている。
+    * `DASHBOARD_PROXY_TIMEOUT_SEC`（`_get_int_env` 経由、既定 `30`）— 中継のタイムアウト秒数。
+  セクション冒頭のコメントには、ダッシュボードが認証機構を持たず家族の健康記録・防犯ログの閲覧と `sudo systemctl restart` ボタンを備えるため 127.0.0.1 にのみバインドしていること、スマートフォンからの到達はこの中継経由に一本化すること、そして**このパスを Cloudflare Access のバイパス対象に設定してはならない**（`allowed_webhook_paths` とは逆で、バイパスすると無認証で外部公開される）ことが明記されている。
+* 根拠: [ダッシュボード公開設定セクション] (行番号: 666〜688 / 抜粋: "# 16. ダッシュボード(Streamlit)公開設定", "DASHBOARD_PROXY_ENABLED: bool = os.getenv(\"DASHBOARD_PROXY_ENABLED\", \"true\").strip().lower() != \"false\"")、バイパス禁止の注意書き (行番号: 677〜680 / 抜粋: "# 重要: このパスは `unified_server.py` の `allowed_webhook_paths` とは逆で、")
 
 
 * 「11. Alexaスキル設定」セクション(Issue #488でモジュールdocstring目次の番号が旧18番から11番へ振り直された)で、`routers/alexa_router.py`経由のリクエスト検証に使う`ALEXA_SKILL_ID`（Alexa Developer Consoleで発行される`"amzn1.ask.skill.xxxx"`形式のID）を定義する。設定されていれば`ask-sdk-core`がリクエストの`context.System.application.applicationId`との一致を検証し他人のスキルからのリクエストを拒否するが、未設定でも動作する（署名検証のみになる）後方互換設計であることがコメントに明記されている。
@@ -133,7 +146,7 @@ Issue #488で、未実装のタイムラプススケジュール機能(`TIMELAPS
 | `.env`ファイル | 外部ファイルであり、実行時の環境変数の実際の内容がコードから読み取れないため。 | 根拠: `load_dotenv()` (行番号: 161 / 抜粋: `load_dotenv()`) |
 | `devices.json` | システムに接続されるカメラやモニター等のデバイス設定情報を持つ外部ファイルであり、具体的な内容が不明なため。 | 根拠: `with open(DEVICES_JSON_PATH, ` (行番号: 295 / 抜粋: `with open(DEVICES_JSON_PATH, `) |
 | `family_members.local.json` | Git管理対象外(gitignore)の外部ファイルであり、`FAMILY_SETTINGS["styles"]` の年齢等の実データがどのような値・構造で上書きされるか不明なため。 | 根拠: `# family_members.local.json (gitignore対象) から読み込み、` (行番号: 416 / 抜粋: `family_members.local.json`) |
-| `Pydantic`の内部実装 | 外部ライブラリであり、バリデーションの厳密な挙動（例：エイリアスやデフォルトファクトリの処理詳細）は提供コードから読み取れないため。 | 根拠: `class CameraConfig(BaseModel):` (行番号: 166 / 抜粋: `class CameraConfig(BaseModel):`) |
+| `Pydantic`の内部実装 | 外部ライブラリであり、バリデーションの厳密な挙動（例：エイリアスやデフォルトファクトリの処理詳細）は提供コードから読み取れないため。 | 根拠: `class CameraConfig(BaseModel):` (行番号: 168 / 抜粋: `class CameraConfig(BaseModel):`) |
 
 Issue #488で、`family_events.json`（家族の記念日・イベント設定`IMPORTANT_DATES`用）の読み込み処理は本ファイルから完全に削除されたため、外部依存としては存在しなくなった。
 
@@ -159,10 +172,10 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 
 ### `_resolve_assets_dir` / `__getattr__` / `prewarm_nas_paths`（Issue #330 の遅延解決、#657 で追記）
 
-* **役割**: NAS 依存パス定数の遅延解決(PEP 562)。`_resolve_assets_dir()` が `ensure_safe_path_with_backoff` で `ASSETS_DIR` を検証・解決し、`_ASSETS_SUBDIRS_TO_CREATE` の各サブディレクトリを作る。モジュールの `__getattr__(name)` は `ASSETS_DIR` と `_ASSETS_DERIVED_PATHS` の派生パス(`UPLOAD_DIR`・`SOUND_DIR` 等)を初回アクセス時にだけ解決し、結果を `globals()` に書き込むため以降は通常の属性解決になる(=キャッシュ。テストは `monkeypatch.setattr`/`delattr` で上書き・再解決できる)。`prewarm_nas_paths()` は `unified_server.py` の `lifespan` から呼ばれ、遅延化前と同じく起動時点で NAS の検証・フォールバック判定を済ませる。
+* **役割**: 検証I/Oを伴うパス定数の遅延解決(PEP 562)。`_resolve_assets_dir()` が `ensure_safe_path_with_backoff` で `ASSETS_DIR` を検証・解決し、`_ASSETS_SUBDIRS_TO_CREATE` の各サブディレクトリを作る。モジュールの `__getattr__(name)` は `ASSETS_DIR` と `_ASSETS_DERIVED_PATHS` の派生パス(`UPLOAD_DIR`・`SOUND_DIR` 等)を初回アクセス時にだけ解決し、結果を `globals()` に書き込むため以降は通常の属性解決になる(=キャッシュ。テストは `monkeypatch.setattr`/`delattr` で上書き・再解決できる)。**（Issue #664）** `__getattr__` は `LOG_DIR` も扱い、`ensure_safe_path_with_backoff(_PREFERRED_LOG_DIR, "logs")` で解決する。`prewarm_nas_paths()` は `unified_server.py` の `lifespan` から呼ばれ、遅延化前と同じく起動時点で `ASSETS_DIR`・`LOG_DIR`・派生パスの検証・フォールバック判定を済ませる。
 * **戻り値/レスポンス**: `_resolve_assets_dir` / `__getattr__` は `str`、`prewarm_nas_paths` は `None`。未知の属性名では `__getattr__` が `AttributeError` を送出する。
 * **副作用**: NAS 上のディレクトリ作成、`globals()` への書き込み、失敗時の warning ログ(例外は送出せずローカルへフォールバック)。
-* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 559)、`def __getattr__(name: str) -> str:` (行番号: 573)、`def prewarm_nas_paths() -> None:` (行番号: 593)
+* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 582)、`def __getattr__(name: str) -> str:` (行番号: 596)、`def prewarm_nas_paths() -> None:` (行番号: 623)
 
 ### `verify_and_initialize_storage`
 
@@ -199,15 +212,15 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 ### `_get_int_env`
 
 * **役割**: 環境変数を整数として読み込む共通ヘルパー（**#411 S-L6で追加**）。以前は `MOTION_COOLDOWN_SEC`・`UPLOAD_MAX_FILE_SIZE_MB`・`RECORDING_RETENTION_DAYS`・`HLS_VOD_RETENTION_DAYS`・`DB_BACKUP_RETENTION_DAYS`に加え、小児科予約監視の`CLINIC_MONITOR_START_HOUR`・`CLINIC_MONITOR_END_HOUR`・`CLINIC_REQUEST_TIMEOUT`の計8変数それぞれで `int(os.getenv(name, "default"))` を直書きしており、`.env` に空文字や非数値（例: コメント混じりの値）が誤って設定されると `int()` が `ValueError` を送出し、`config` モジュール全体のimportが失敗してサーバーが起動不能になっていた。未設定/空文字はデフォルト値、非数値は警告ログを出してデフォルト値にフォールバックするようにした。なお小児科予約監視機能自体は未実装のままIssue #488で`config.py`から削除されたため、現在この関数を呼び出しているのは前者5箇所のみである。
-* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 96〜111)、呼出し例: `MOTION_COOLDOWN_SEC: int = _get_int_env("MOTION_COOLDOWN_SEC", 60)` (行番号: 310)
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 98〜113)、呼出し例: `MOTION_COOLDOWN_SEC: int = _get_int_env("MOTION_COOLDOWN_SEC", 60)` (行番号: 310)
 
 
 * **引数/リクエスト**: `name: str` (環境変数名), `default: int` (未設定/パース失敗時のデフォルト値)
-* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 96)
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 98)
 
 
 * **戻り値/レスポンス**: `int`
-* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 96)
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 98)
 
 
 * **副作用**: パース失敗時に `logger.warning` を出力
@@ -400,7 +413,7 @@ flowchart TD
 
 ## 8. 保守上の注意点
 
-* モジュールロード時にファイルI/O（ディレクトリ作成・テストファイルの書き込み）や`time.sleep`を伴う処理（`verify_and_initialize_storage`）が実行されるため、マウント失敗時などはインポート自体に最大で数秒〜数十秒の遅延が発生する可能性がある。
+* ~~モジュールロード時にファイルI/O（ディレクトリ作成・テストファイルの書き込み）や`time.sleep`を伴う処理（`verify_and_initialize_storage`）が実行されるため、マウント失敗時などはインポート自体に最大で数秒〜数十秒の遅延が発生する可能性がある。~~ **（Issue #330 PR-B と Issue #664 で解消）** `ASSETS_DIR`・`LOG_DIR`ともモジュール`__getattr__`による遅延解決へ移行したため、import時点ではこのI/Oは走らない。実際に走るのは初回アクセス時、またはサーバー起動時の`prewarm_nas_paths()`である。
 * `fallback_path`を作成する際のフェイルセーフで例外が発生した場合、エラーログを出力しつつ元の`preferred_path`を返す仕様になっているため、後続の処理で書き込みエラー(`PermissionError`等)が誘発される可能性がある。
 * モジュールロード時に外部の`devices.json`を読み込む仕様であり、JSONの構文エラーが発生した場合は例外をキャッチして警告を出すが、設定は空のまま処理が続行される（Issue #488で`family_events.json`の読み込みは完全に削除された）。
 * メモリ使用率やストレージ等の警告通知に関連する定数（例：`MEMORY_ALERT_PERCENT`）が存在するが、このファイル単体では監視機構そのものは実装されていない。
