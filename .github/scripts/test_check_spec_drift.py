@@ -493,3 +493,67 @@ def test_doc_to_source_candidates_ignores_untracked_source_for_orphan_check(pseu
     assert Path("MY_HOME_SYSTEM/ai_logic.py") in candidates
     report = module.cmd_full()
     assert "MY_HOME_SYSTEM/ai_logic.md" in "\n".join(report.orphaned)
+
+
+# --- 廃止noticeの回帰テスト ---
+#
+# 規約(docs/specifications/README.md)では、ソースが削除された仕様書は中身を消さず
+# 冒頭に廃止noticeを追記して履歴として残す。しかし cmd_full の孤立判定は
+# noticeを一切見ていなかったため、規約どおり処理済みの仕様書が毎週の全体監査で
+# 永久に検知され続け、「対応済みなのに出続けるノイズ」になっていた
+# (実リポジトリの quest_tab.md が該当)。
+
+RETIRED_DOC_BODY = """> **⚠️ 廃止: このファイルは 2026-09-17 時点でソース (`MY_HOME_SYSTEM/ai_logic.py`) が削除されたため廃止されました。**
+>
+> 以下の解析内容は削除前のソースに対するものであり、履歴として残している。
+
+## 1. 解析メタ情報
+"""
+
+
+def test_retired_doc_is_not_reported_as_orphaned(pseudo_repo):
+    """廃止noticeを付けた仕様書は孤立として報告されない。"""
+    _write(
+        pseudo_repo,
+        "docs/specifications/MY_HOME_SYSTEM/ai_logic.md",
+        RETIRED_DOC_BODY,
+    )
+    _commit_all(pseudo_repo, "retire ai_logic.md", date="1700000100 +0000")
+
+    report = module.cmd_full()
+    orphaned_str = "\n".join(report.orphaned)
+    assert "MY_HOME_SYSTEM/ai_logic.md" not in orphaned_str
+    # notice を付けていない方は引き続き検知される(スキップが効きすぎていないこと)
+    assert "MY_HOME_SYSTEM/bounty_router.md" in orphaned_str
+
+
+def test_doc_merely_mentioning_the_word_is_still_reported_as_orphaned(pseudo_repo):
+    """本文中に「廃止」の語が出てくるだけの仕様書はスキップしない。
+
+    実リポジトリでは多数の仕様書が本文で「廃止」に言及している(例: 退役した
+    クエストの説明)。先頭行のnoticeだけを目印にすることで、これらを取りこぼさない。
+    """
+    _write(
+        pseudo_repo,
+        "docs/specifications/MY_HOME_SYSTEM/ai_logic.md",
+        "# ai_logic\n\n## 8. 保守上の注意点\n\n* この機能は廃止された旧APIに依存していた。\n",
+    )
+    _commit_all(pseudo_repo, "mention the word", date="1700000100 +0000")
+
+    report = module.cmd_full()
+    assert "MY_HOME_SYSTEM/ai_logic.md" in "\n".join(report.orphaned)
+
+
+def test_is_retired_doc_tolerates_leading_blank_lines(pseudo_repo):
+    """先頭に空行があってもnoticeとして認識する(判定は最初の非空行で行う)。"""
+    doc = _write(
+        pseudo_repo,
+        "docs/specifications/MY_HOME_SYSTEM/ai_logic.md",
+        "\n\n" + RETIRED_DOC_BODY,
+    )
+    assert module.is_retired_doc(doc) is True
+
+
+def test_is_retired_doc_returns_false_for_missing_file(tmp_path):
+    """読めないファイルでも例外を投げず False を返す。"""
+    assert module.is_retired_doc(tmp_path / "does_not_exist.md") is False
