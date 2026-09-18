@@ -132,6 +132,91 @@ class TestRequestSwitchbotApiRetry:
         assert result is None
         assert call_count["n"] == 1
 
+    # ここから下は #661 のリトライ共通化(core.utils.retry_with_backoff への寄せ)で
+    # 壊さないための特性テスト。既存3件では試行回数・待機秒数・ログ・
+    # ValidationError の扱いが固定されていなかった。
+
+    def test_exhaustion_makes_exactly_max_retries_attempts(self, monkeypatch):
+        """max_retries は「初回を含む総試行回数」。共通化で1回ずれやすい境界。"""
+        call_count = {"n": 0}
+
+        def _always_times_out(url, headers, timeout):
+            call_count["n"] += 1
+            raise requests.exceptions.Timeout("simulated timeout")
+
+        monkeypatch.setattr(switchbot_service.requests, "get", _always_times_out)
+        monkeypatch.setattr(switchbot_service.time, "sleep", lambda _s: None)
+
+        assert switchbot_service.request_switchbot_api("http://fake", {}, max_retries=4) is None
+        assert call_count["n"] == 4
+
+    def test_backoff_delays_are_1_2_4_with_no_sleep_after_last_attempt(self, monkeypatch):
+        """待機は 1s, 2s, 4s。最後の試行のあとは待たずに諦める(無駄な4秒を足さない)。"""
+        def _always_times_out(url, headers, timeout):
+            raise requests.exceptions.Timeout("simulated timeout")
+
+        slept = []
+        monkeypatch.setattr(switchbot_service.requests, "get", _always_times_out)
+        monkeypatch.setattr(switchbot_service.time, "sleep", lambda s: slept.append(s))
+
+        switchbot_service.request_switchbot_api("http://fake", {}, max_retries=4)
+
+        assert slept == [1, 2, 4]
+
+    def test_fatal_error_does_not_sleep_at_all(self, monkeypatch):
+        """401等はリトライしないので、待機も1回も入らないこと。"""
+        def _unauthorized(url, headers, timeout):
+            response = MagicMock()
+            response.raise_for_status.side_effect = requests.exceptions.HTTPError("401")
+            return response
+
+        slept = []
+        monkeypatch.setattr(switchbot_service.requests, "get", _unauthorized)
+        monkeypatch.setattr(switchbot_service.time, "sleep", lambda s: slept.append(s))
+
+        switchbot_service.request_switchbot_api("http://fake", {}, max_retries=4)
+
+        assert slept == []
+
+    def test_unexpected_payload_shape_propagates_to_caller(self, monkeypatch):
+        """APIが想定外の形を返した場合は Fail-Soft の None に混ぜず、そのまま送出する。
+
+        None にしてしまうと「通信できなかった」と区別がつかなくなる。
+        """
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"unexpected": "shape"}
+
+        monkeypatch.setattr(switchbot_service.requests, "get", lambda url, headers, timeout: response)
+        monkeypatch.setattr(switchbot_service.time, "sleep", lambda _s: None)
+
+        with pytest.raises(Exception) as excinfo:
+            switchbot_service.request_switchbot_api("http://fake", {}, max_retries=4)
+
+        assert not isinstance(excinfo.value, requests.exceptions.RequestException)
+
+    def test_logs_one_warning_per_failed_attempt_plus_a_final_fail_soft_line(self, monkeypatch):
+        """ログの本数は運用で「何回粘ったか」を読む手掛かりなので固定する。
+
+        core.logger の logger は propagate=False のため caplog では拾えない。
+        """
+        def _always_times_out(url, headers, timeout):
+            raise requests.exceptions.ConnectionError("simulated connection error")
+
+        warnings = []
+        monkeypatch.setattr(switchbot_service.requests, "get", _always_times_out)
+        monkeypatch.setattr(switchbot_service.time, "sleep", lambda _s: None)
+        monkeypatch.setattr(
+            switchbot_service.logger, "warning", lambda message, *a, **k: warnings.append(str(message))
+        )
+
+        switchbot_service.request_switchbot_api("http://fake", {}, max_retries=4)
+
+        assert len(warnings) == 5
+        assert "(Attempt 1/4)" in warnings[0]
+        assert "(Attempt 4/4)" in warnings[3]
+        assert "Fail-Soft" in warnings[4]
+
 
 class TestSendDeviceCommand:
     def test_missing_credentials_returns_none_without_http_call(self, monkeypatch):
