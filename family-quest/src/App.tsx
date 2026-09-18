@@ -40,6 +40,7 @@ import UserStatusCard from './features/family/components/UserStatusCard';
 import QuestList from './features/quest/components/QuestList';
 import ApprovalList from './features/quest/components/ApprovalList';
 import FamilyLog from './features/family/components/FamilyLog';
+import { QuestActivityProvider } from './features/quest/context/QuestActivityContext';
 
 function App() {
   const { play } = useSound();
@@ -467,6 +468,16 @@ function App() {
   if (isLoading) return <div className="p-10 text-center">Loading Family Quest...</div>;
 
   return (
+    // #659: 進行中のクエスト操作(完了通知・送信中キー・承認中id)は、以前
+    // App → FamilyDashboard → FamilyPanel → QuestList と素通しの props で
+    // 運んでいた。中継する2つは値を使わないので Context へ移した。
+    // App 直下で描画する QuestList / ApprovalList は1段なので props のまま渡す
+    // (表示専用コンポーネントの単体テストを Provider 無しで書ける状態を保つため)。
+    <QuestActivityProvider
+      completedSignal={completedSignal}
+      processingQuestKeys={processingQuestKeys}
+      busyHistoryIds={approvingHistoryIds}
+    >
     <div className="min-h-screen bg-gray-900 pb-20 font-sans text-gray-100">
       {!isOnline && (
         <div className="fixed top-0 inset-x-0 z-40 bg-red-800 text-white text-xs font-bold text-center py-1.5 flex items-center justify-center gap-2">
@@ -533,9 +544,6 @@ function App() {
             onApprove={handleApprove}
             onReject={handleReject}
             onApproveAll={handleApproveAll}
-            completedSignal={completedSignal}
-            processingQuestKeys={processingQuestKeys}
-            busyHistoryIds={approvingHistoryIds}
             isApprovingAll={isApprovingAll}
             onAvatarClick={(user) => setAvatarUser(user)}
           />
@@ -683,6 +691,7 @@ function App() {
       </ChunkErrorBoundary>
 
     </div>
+    </QuestActivityProvider>
   );
 }
 
