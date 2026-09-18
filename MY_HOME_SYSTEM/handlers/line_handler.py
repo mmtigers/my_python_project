@@ -329,7 +329,7 @@ def handle_message(event: MessageEvent):
     asyncio.run(handle_message_async(event))
 
 
-async def _reply_message_async(reply_token: str, messages: List[Any], user_id: Optional[str] = None):
+async def _reply_message_async(reply_token: str, messages: list[Any], user_id: str | None = None):
     """`reply_message`(LINE APIへの同期HTTP)をイベントループを塞がずに呼ぶラッパー。
 
     Issue #664: `_process_message_async` はサーバー本体のイベントループ上で await
@@ -444,7 +444,7 @@ if line_handler:
     line_handler.add(PostbackEvent)(handle_postback)
 
 
-async def dispatch_events_async(events: List[Any]) -> None:
+async def dispatch_events_async(events: list[Any]) -> None:
     """
     Issue #376: routers/webhook_router.py が署名検証・パース済みのイベント一覧を
     BackgroundTasks 経由で渡してくる、実処理のエントリポイント。
@@ -496,7 +496,7 @@ async def dispatch_events_async(events: List[Any]) -> None:
             logger.error(f"dispatch_events Error: {e}", exc_info=True)
 
 
-def dispatch_events(events: List[Any]) -> None:
+def dispatch_events(events: list[Any]) -> None:
     """`dispatch_events_async` の同期版の入口(後方互換)。
 
     実行中のイベントループを持たない文脈(既存テスト、将来の同期的な呼び出し元)から

@@ -18,7 +18,7 @@
 ## 2. ファイルの概要
 
 * LINE Bot API（v3）からのWebhookイベント（テキストメッセージ受信、ポストバック受信）を解析し、適切な処理（子供の体調記録、AI解析、line_logicへのポストバック委譲）へ振り分けるディスパッチャとしての責務を担う。実際のWebhook HTTPエンドポイント自体は本ファイルには存在せず、`routers/webhook_router.py` の `callback_line()` が担う。**（Issue #376で全面改修）** 以前は`callback_line()`がSDKの`WebhookHandler.handle(body, signature)`を呼び出し、署名検証・パース・ディスパッチをHTTPレスポンス送信前に一括完走させていたが、AI呼び出し等の遅延がreply token失効リスクに直結していたため、現在は`callback_line()`側で`line_handler.parser.parse()`により署名検証とパースのみを行って即座に応答し、本ファイルの`dispatch_events_async()`が実処理のエントリポイントとして`BackgroundTasks`経由で呼ばれる構成に変わった。**（Issue #664で変更）** そのエントリポイントは当初、同期関数`dispatch_events()`で、内側の`handle_message`が着信メッセージ1件ごとに`asyncio.run(_process_message_async(...))`で新しいイベントループを生成・破棄していた。現在はコルーチン`dispatch_events_async()`を`BackgroundTasks`へ渡すため、Starletteがスレッドプールではなくサーバー本体のイベントループ上で`await`し、メッセージ処理はサーバーと同一のループで実行される。同期版`dispatch_events()`/`handle_message()`は、SDK登録と実行中ループを持たない呼び出し元のための薄いラッパーとして残っている。`line_handler.add(...)`によるSDKへのハンドラー登録（`handle_message`/`handle_postback`）自体は後方互換のため維持しているが、実際の呼び出し経路は`dispatch_events()`内の`isinstance`分岐であり、SDKの自動ディスパッチ機構は使われていない。
-* 根拠: `line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)`, `line_handler.add(PostbackEvent)(handle_postback)` (行番号: 337-338 / 抜粋: "line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)")、`dispatch_events`定義 (行番号: 499-506 / 抜粋: "def dispatch_events(events: List[Any]) -> None:")
+* 根拠: `line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)`, `line_handler.add(PostbackEvent)(handle_postback)` (行番号: 337-338 / 抜粋: "line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)")、`dispatch_events`定義 (行番号: 499-506 / 抜粋: "def dispatch_events(events: list[Any]) -> None:")
 * **（#358で撤去）** 以前`_process_message_async`にあった、LINE経由のFamily Questコマンド（`msg_text`が「ステータス」「クエスト」に一致、または「承認」「却下」で始まる場合の`line_service.get_user_status_message`/`get_active_quests_message`/`process_approval_command`呼び出し）、および`handle_postback`にあった`approve:`/`reject:` postbackをコマンド文字列へ変換して`_process_message_async`へ渡す分岐は、LINEの`event.source.user_id`とFamily Questの`quest_users.user_id`のマッピングが存在せず本番では機能しないデッドコードだったため撤去された（オーナー判断、Issue #358）。クエストの確認・完了報告・承認は現在family-quest フロントエンドのみで行う。
 * 根拠: `_process_message_async`内の撤去コメント (行番号: 278-281 / 抜粋: "以前ここにあった LINE 経由の Family Quest コマンド")、`handle_postback`内の撤去コメント (行番号: 338-340 / 抜粋: "以前ここにあった approve:/reject: postback の処理")
 
@@ -338,10 +338,10 @@
 
 * **役割**: `routers/webhook_router.py`が署名検証・パース済みのイベント一覧を`BackgroundTasks`経由で渡してくる、実処理のエントリポイント。イベントごとに`_is_duplicate_event`で冪等化チェックを行い（重複ならスキップしてINFOログ）、`MessageEvent`+`TextMessageContent`なら`handle_message_async`を`await`し、`PostbackEvent`なら`asyncio.to_thread(handle_postback, event)`で別スレッドへ逃がす（`line_handler.add(...)`での登録内容と同じ組合せ）。イベント単位で`try/except`を掛けており、1件の処理で例外が起きても後続イベントの処理を止めない（`handle_message_async`/`handle_postback`自体も内部で例外を握り潰すが、このループでも二重に防御する）。複数イベントは従来どおり1件ずつ順に処理し、並行実行はしない。
 * **（Issue #664で変更）** コルーチンとして定義してあるため、`BackgroundTasks.add_task`へ渡すとStarletteが`run_in_threadpool`ではなく**サーバー本体のイベントループ上でawait**する（Starletteの`BackgroundTask`は関数がコルーチン関数かどうかを`is_async`フラグで見分ける）。Postback経路だけを`asyncio.to_thread`で隔離しているのは、委譲先の`handlers/line_logic.py`がDB保存を`sync_run()`（`asyncio.run`のラッパー）で同期的に待つ作りであり、実行中のイベントループ上で呼ぶと`RuntimeError: asyncio.run() cannot be called from a running event loop`となってPostback（体調ボタン・「みんな元気」一括操作・食事アンケート等）が丸ごと動かなくなるため。同期版`dispatch_events`は`asyncio.run(dispatch_events_async(events))`を呼ぶだけの薄いラッパーとして、実行中のイベントループを持たない呼び出し元のために残している。
-* 根拠: `async def dispatch_events_async(events: List[Any]) -> None:` (抜粋: "async def dispatch_events_async(events: List[Any]) -> None:")、同期ラッパー `def dispatch_events(events: List[Any]) -> None:` (抜粋: "def dispatch_events(events: List[Any]) -> None:")、Postbackの別スレッド化 (抜粋: "await asyncio.to_thread(handle_postback, event)")
+* 根拠: `async def dispatch_events_async(events: list[Any]) -> None:` (抜粋: "async def dispatch_events_async(events: list[Any]) -> None:")、同期ラッパー `def dispatch_events(events: list[Any]) -> None:` (抜粋: "def dispatch_events(events: list[Any]) -> None:")、Postbackの別スレッド化 (抜粋: "await asyncio.to_thread(handle_postback, event)")
 
 
-* **引数/リクエスト**: `events: List[Any]`（`line_handler.parser.parse()`が返すパース済みイベントのリスト）
+* **引数/リクエスト**: `events: list[Any]`（`line_handler.parser.parse()`が返すパース済みイベントのリスト）
 * 根拠: (行番号: 341)
 
 
