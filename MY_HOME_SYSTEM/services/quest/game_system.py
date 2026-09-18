@@ -23,6 +23,76 @@ from services.quest.approval_service import ApprovalService
 from services.quest.user_service import UserService
 
 
+def load_master_module():
+    """互換シム経由で `quest_data` モジュールの現在値を取得し、reload して返す。
+
+    quest_data は互換シム(services/quest_service.py)側でimportされ、テストが
+    `from services import quest_service as qs; monkeypatch.setattr(qs, "quest_data", fake)`
+    という形で差し替える(Issue #529等)。ここで `import quest_data` を直接
+    モジュールグローバルとして束縛すると、シム側への差し替えが同期処理の
+    実行結果に反映されなくなるため、呼び出しのたびにシム経由で現在値を読む。
+
+    Issue #664: 手動CLI(`sync_strict.py`)の安全ガードも「これから同期される
+    マスタ」を数える必要があるため、読み込み口をここに切り出して共有する。
+    """
+    from services import quest_service as _quest_service_shim
+
+    quest_data = _quest_service_shim.quest_data
+    if not quest_data:
+        logger.error("Quest data module not available for sync.")
+        raise ImportError("quest_data module missing")
+    importlib.reload(quest_data)
+    return quest_data
+
+
+def _apply_legacy_quest_defaults(q: Dict[str, Any]) -> Dict[str, Any]:
+    """strict(手動CLI)経路の後方互換: 旧 `sync_strict.py` と同じ既定値でキーを補う。
+
+    Issue #664 以前の `sync_strict.py` は Pydantic を通さず生の dict から直接
+    UPSERT していたため、`type`/`exp`/`gold`/`icon` 等が欠けていても既定値で
+    通っていた(`exp_gain`/`gold_gain`/`icon_key` というレガシーな別名も許容)。
+    統合にあたって検証は `MasterQuest` に一本化したが、**CLI の受理範囲は
+    変えない**ため、検証の前にここで旧実装と同じ既定値を埋める。
+    """
+    data = dict(q)
+    data.setdefault('type', 'daily')
+    data.setdefault('target', 'all')
+    data['exp'] = q.get('exp_gain', q.get('exp', 0))
+    data['gold'] = q.get('gold_gain', q.get('gold', 0))
+    data['icon'] = q.get('icon_key', q.get('icon', '📝'))
+    data.setdefault('chance', 1.0)
+    return data
+
+
+def _apply_legacy_reward_defaults(r: Dict[str, Any]) -> Dict[str, Any]:
+    """strict(手動CLI)経路の後方互換: 旧 `sync_strict.py` と同じ既定値でキーを補う。
+
+    `desc` を「未指定なら空文字」にするのも旧実装の挙動で、`MasterReward` の
+    既定値(None)とは異なる。ここで明示的に埋めて差を消す。
+    """
+    data = dict(r)
+    data.setdefault('category', 'small')
+    data['cost_gold'] = r.get('cost_gold', r.get('cost', 0))
+    data['icon_key'] = r.get('icon_key', r.get('icon', '🎁'))
+    data['target'] = r.get('target', 'all')
+    data['desc'] = r.get('desc', '')
+    return data
+
+
+def _count_rows_to_delete(cur, table: str, id_column: str, master_ids: List[Any]) -> int:
+    """quest_master/reward_master のうち、マスタに存在しないため削除対象になる行数を数える。"""
+    if master_ids:
+        placeholders = ','.join(['?'] * len(master_ids))
+        # 値はパラメータ化済み(f-string で組み立てているのは "?" の個数だけ)。
+        row = cur.execute(
+            f"SELECT COUNT(*) as c FROM {table} WHERE {id_column} NOT IN ({placeholders})",  # nosec B608
+            master_ids,
+        ).fetchone()
+    else:
+        row = cur.execute(f"SELECT COUNT(*) as c FROM {table}").fetchone()  # nosec B608
+    return row['c'] if row else 0
+
+
 class GameSystem:
     def __init__(self):
         self.quest_service = QuestService()
@@ -30,35 +100,52 @@ class GameSystem:
         self.user_service = UserService()
         self.shop_service = ShopService()
 
-    def sync_master_data(self) -> Dict[str, str]:
-        logger.info("🔄 Starting Master Data Sync...")
-        # quest_data は互換シム(services/quest_service.py)側でimportされ、テストが
-        # `from services import quest_service as qs; monkeypatch.setattr(qs, "quest_data", fake)`
-        # という形で差し替える(Issue #529等)。ここで `import quest_data` を直接
-        # モジュールグローバルとして束縛すると、シム側への差し替えが本メソッドの
-        # 実行結果に反映されなくなるため、呼び出しのたびにシム経由で現在値を読む。
-        from services import quest_service as _quest_service_shim
-        try:
-            if _quest_service_shim.quest_data:
-                quest_data = _quest_service_shim.quest_data
-                importlib.reload(quest_data)
-                valid_users = [MasterUser(**u) for u in quest_data.USERS]
-                valid_quests = []
-                for q in quest_data.QUESTS:
-                    q_data = q.copy()
-                    if 'start_time' not in q_data:
-                        q_data['start_time'] = None
-                    if 'end_time' not in q_data:
-                        q_data['end_time'] = None
-                    valid_quests.append(MasterQuest(**q_data))
+    def sync_master_data(self, strict: bool = False, dry_run: bool = False) -> Dict[str, str]:
+        """quest_data.py の内容で quest_users/quest_master/reward_master を同期する。
 
-                valid_rewards = [MasterReward(**r) for r in quest_data.REWARDS]
-            else:
-                logger.error("Quest data module not available for sync.")
-                raise ImportError("quest_data module missing")
+        Issue #664: 以前はこれと同じ「マスタ→DB同期」が手動CLIの `sync_strict.py` にも
+        別実装で存在し、`DELETE ... NOT IN` と UPSERT が二重に書かれていた
+        (列リストの食い違い事故が #100/#164/#165 と3度発生)。同期の実体をここへ
+        統合し、CLI 固有の差分は下記2つの引数として表現する。`sync_strict.py` には
+        引数解析と破壊的操作の安全ガード(空マスタの拒否・確認プロンプト)だけが残る。
+
+        Args:
+            strict: True で手動CLI(`sync_strict.py --yes`)と同じ方針になる。
+                - マスタのクエストが空のとき `quest_master` を**全削除**する
+                  (`strict=False` では #242 の安全弁として削除自体をスキップする)。
+                - `quest_users` は同期しない。CLI の対象は一貫して
+                  quest_master/reward_master の2テーブルだけで、ユーザー行は
+                  `POST /api/quest/seed`(= `strict=False`)側の責務。
+                - マスタ各エントリの欠損キーを旧 `sync_strict.py` と同じ既定値で
+                  補ってから検証する(`_apply_legacy_quest_defaults` 等)。
+            dry_run: True ならDBを一切変更せず、削除・更新される件数だけをログに出す
+                (`get_db_cursor(commit=False)` のため SELECT しか実行しない)。
+        """
+        logger.info("🔄 Starting Master Data Sync...")
+        try:
+            quest_data = load_master_module()
+            # strict(手動CLI)は quest_users を対象にしない。検証も走らせないことで、
+            # USERS 側の不備で CLI が止まる、という旧実装に無かった挙動を持ち込まない。
+            valid_users = [] if strict else [MasterUser(**u) for u in quest_data.USERS]
+            valid_quests = []
+            for q in quest_data.QUESTS:
+                q_data = _apply_legacy_quest_defaults(q) if strict else q.copy()
+                if 'start_time' not in q_data:
+                    q_data['start_time'] = None
+                if 'end_time' not in q_data:
+                    q_data['end_time'] = None
+                valid_quests.append(MasterQuest(**q_data))
+
+            valid_rewards = [
+                MasterReward(**(_apply_legacy_reward_defaults(r) if strict else r))
+                for r in quest_data.REWARDS
+            ]
         except Exception as e:
             logger.error(f"❌ Master Data Validation failed: {e}")
             raise HTTPException(status_code=500, detail=f"Master Data Error: {str(e)}")
+
+        if dry_run:
+            return self._report_dry_run(valid_quests, valid_rewards, strict=strict)
 
         with get_db_cursor(commit=True) as cur:
             # Issue #330: 以前ここにあった「SELECTを試して失敗したらALTER TABLE」式の
@@ -67,6 +154,7 @@ class GameSystem:
             # 唯一の定義元であり、unified_serverのlifespanとinit_db()の双方が起動時に
             # apply_pending_migrations() を適用するため、本メソッド到達時点で
             # これらのカラムは必ず存在する。
+            # strict のとき valid_users は空リスト(上記参照)なので、このループは回らない。
             for u in valid_users:
                 role_val = getattr(u, 'role', None)
                 cur.execute("""
@@ -85,11 +173,20 @@ class GameSystem:
                 # 第2引数でパラメータ化して渡している(bandit B608はこの安全なパターンを
                 # 文字列連結によるSQLインジェクションと区別できず誤検知する)。
                 cur.execute(f"DELETE FROM quest_master WHERE quest_id NOT IN ({ph})", active_q_ids)  # nosec B608
+                logger.info(f"Deleted obsolete quests: {cur.rowcount} rows")
+            elif strict:
+                # Issue #664: 手動CLI(sync_strict.py)は「quest_data.py を唯一の正として
+                # 完全同期する」ことが目的で、マスタが空なら全削除が正しい結果になる。
+                # 事故を防ぐ役割は削除のスキップではなく、CLI 側の安全ガード
+                # (--allow-empty-master が無ければ拒否 + 確認プロンプト)が担う。
+                cur.execute("DELETE FROM quest_master")
+                logger.info("Deleted ALL quests (Master is empty)")
             else:
                 # #242: quest_data.QUESTSが空(コーディングミス等)になった瞬間、
                 # 以前は無条件でDELETE FROM quest_masterを実行し全クエストマスタが
                 # 消えていた。reward_master側の「参照が残っている行は削除をスキップする」
                 # 安全弁と同様、意図しない全消去を防ぐため削除自体をスキップする。
+                # (このAPI経路には CLI のような確認プロンプトが無いため。)
                 logger.warning(
                     "⚠️ quest_data.QUESTSが空のため、quest_masterへの全削除操作を"
                     "スキップしました(意図しない全消去を防ぐための安全弁)。"
@@ -170,6 +267,34 @@ class GameSystem:
 
         logger.info("✅ Master data sync completed.")
         return {"status": "synced", "message": "Master data updated."}
+
+    def _report_dry_run(
+        self, valid_quests: List[Any], valid_rewards: List[Any], strict: bool
+    ) -> Dict[str, str]:
+        """DBを変更せず、削除・更新される件数だけをログに出す(Issue #664)。
+
+        `commit=False` で開くため、ブロックを抜ける際にコミットされず、
+        実行するのも `_count_rows_to_delete` のSELECTだけである。
+        """
+        master_quest_ids = [q.id for q in valid_quests]
+        master_reward_ids = [r.id for r in valid_rewards]
+        with get_db_cursor(commit=False) as cur:
+            logger.info("--- Syncing Quests (Strict Mode) ---" if strict else "--- Syncing Quests ---")
+            if master_quest_ids or strict:
+                stale_quests = _count_rows_to_delete(cur, "quest_master", "quest_id", master_quest_ids)
+            else:
+                # strict でないマスタ空は削除自体をスキップする(#242 の安全弁)ため 0 件。
+                stale_quests = 0
+            logger.info(f"[dry-run] Would delete obsolete quests: {stale_quests} rows")
+            logger.info(f"[dry-run] Would upsert {len(valid_quests)} quests.")
+
+            logger.info("--- Syncing Rewards ---")
+            stale_rewards = _count_rows_to_delete(cur, "reward_master", "reward_id", master_reward_ids)
+            logger.info(f"[dry-run] Would delete obsolete rewards: {stale_rewards} rows")
+            logger.info(f"[dry-run] Would upsert {len(valid_rewards)} rewards.")
+
+        logger.info("✅ Dry-run completed. No changes were made.")
+        return {"status": "dry-run", "message": "No changes were made."}
 
     def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:
         # sync_master_dataと同じ理由(互換シム経由でのquest_data差し替えを尊重するため)、
