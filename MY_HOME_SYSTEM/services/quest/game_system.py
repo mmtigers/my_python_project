@@ -269,8 +269,8 @@ class GameSystem:
         return {"status": "synced", "message": "Master data updated."}
 
     def _report_dry_run(
-        self, valid_quests: List[Any], valid_rewards: List[Any], strict: bool
-    ) -> Dict[str, str]:
+        self, valid_quests: list[Any], valid_rewards: list[Any], strict: bool
+    ) -> dict[str, str]:
         """DBを変更せず、削除・更新される件数だけをログに出す(Issue #664)。
 
         `commit=False` で開くため、ブロックを抜ける際にコミットされず、
@@ -296,7 +296,7 @@ class GameSystem:
         logger.info("✅ Dry-run completed. No changes were made.")
         return {"status": "dry-run", "message": "No changes were made."}
 
-    def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> dict[str, Any]:
         # sync_master_dataと同じ理由(互換シム経由でのquest_data差し替えを尊重するため)、
         # モジュールグローバルとしてimportせずシム経由で参照する。
         from services import quest_service as _quest_service_shim
@@ -350,7 +350,7 @@ class GameSystem:
             # 固定長・ゼロ埋め)で記録されるため、文字列としてのMAX()が時系列上の
             # 最新値と一致する(calculate_quest_boost個別呼び出し版のORDER BY DESC
             # LIMIT 1と同じ前提)。
-            last_completed_map: Dict[tuple, str] = {
+            last_completed_map: dict[tuple, str] = {
                 (row['user_id'], row['quest_id']): row['last_completed_at']
                 for row in cur.execute("""
                     SELECT user_id, quest_id, MAX(completed_at) AS last_completed_at
@@ -408,7 +408,7 @@ class GameSystem:
             # quest_id で1度だけ索引を作れば O(Q+H) になる。recent_completed は
             # completed_at の降順で取得済みで、defaultdict への追加もその順序を保つため、
             # 「ユーザーごとの最新履歴を先に見る」という下の判定はそのまま成り立つ。
-            completed_by_quest: Dict[Any, List[Dict[str, Any]]] = collections.defaultdict(list)
+            completed_by_quest: dict[Any, list[dict[str, Any]]] = collections.defaultdict(list)
             for c in recent_completed:
                 completed_by_quest[c['quest_id']].append(c)
 
@@ -456,7 +456,7 @@ class GameSystem:
             "pendingQuests": pending,
         }
 
-    def _fetch_recent_logs(self, cur) -> List[dict]:
+    def _fetch_recent_logs(self, cur) -> list[dict]:
         q_logs = cur.execute("""
             SELECT id, user_id, quest_title as title, 'quest' as type, completed_at as ts
             FROM quest_history WHERE status='approved' AND quest_id != 0 ORDER BY id DESC LIMIT 20
