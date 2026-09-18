@@ -47,6 +47,10 @@ FQ_EXTENSIONS = {".ts", ".tsx", ".js", ".jsx"}
 EXCLUDE_PARTS = {"tests", "__pycache__", "node_modules", "migrations", ".venv", "db_backup", "test"}
 EXCLUDE_SUFFIXES = {".d.ts", ".test.ts", ".test.tsx"}
 
+# ソース削除に伴う「廃止notice」の目印(docs/specifications/README.md の規約)。
+# 仕様書の先頭行がこれで始まっていれば、対応ソースが無いのが正しい状態とみなす。
+RETIRED_NOTICE_PREFIX = "> **⚠️ 廃止:"
+
 
 def run(cmd: list[str]) -> str:
     result = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
@@ -302,6 +306,29 @@ def git_last_commit_epoch(rel_path: Path) -> int | None:
     return int(out) if out else None
 
 
+def is_retired_doc(doc: Path) -> bool:
+    """ソース削除に伴う「廃止notice」が付いた仕様書か。
+
+    規約(docs/specifications/README.md)では、ソースが削除された仕様書は中身を消さず
+    冒頭に廃止noticeを追記して履歴として残す。この形で処理済みの仕様書まで孤立として
+    報告し続けると、毎週の全体監査に恒久的なノイズが残り「対応済みなのに検知される」
+    状態になるため、noticeを認識してスキップする。
+
+    誤検知を避けるため、本文中に「廃止」の語が出てくるだけの仕様書(多数ある)とは
+    区別し、**ファイル先頭の非空行が** RETIRED_NOTICE_PREFIX で始まる場合だけを
+    廃止済みとみなす。
+    """
+    try:
+        with doc.open(encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                return line.startswith(RETIRED_NOTICE_PREFIX)
+    except OSError:
+        return False
+    return False
+
+
 def cmd_full() -> Report:
     report = Report()
     # Issue #407: 走査は git 管理下のファイル(git ls-files)に限定する。
@@ -333,6 +360,10 @@ def cmd_full() -> Report:
             continue
         doc = REPO_ROOT / rel
         if rel.name in {"全体設計書.md", "README.md"}:
+            continue
+        # 規約どおり廃止noticeを付けて残してある仕様書は、対応ソースが無いのが
+        # 正しい状態なので孤立として報告しない(is_retired_doc のdocstring参照)。
+        if is_retired_doc(doc):
             continue
         candidates = doc_to_source_candidates(doc)
 
