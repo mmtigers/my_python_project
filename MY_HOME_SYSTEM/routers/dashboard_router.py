@@ -9,14 +9,10 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH` 配下で配信�
 `config.DASHBOARD_PROXY_ENABLED=false` のときは `unified_server.py` がこのルーターを
 include しないため、パス自体が存在しなくなる(404)。
 """
-import logging
-
 from fastapi import APIRouter, Request, WebSocket
 
 import config
 from services.dashboard_proxy_service import dashboard_proxy_service
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 

@@ -102,7 +102,16 @@
 
 
 * **（Issue #663で追加）** 「15. 週次レポート設定」セクションを新設し、`weekly_analyze_report.py`が電力量(kWh)から電気代を概算する単価`ELEC_PRICE_PER_KWH`(環境変数`ELEC_PRICE_PER_KWH`、`_get_int_env`経由、既定31)を定義する。以前は`weekly_analyze_report.py`に`DEFAULT_ELEC_PRICE_PER_KWH = 31`として直書きされており、コメント自身が「本来はconfig.pyまたは.envから読み込むべき値」と書いていた。電気料金は地域・契約で変わる個人環境値のため`.env`へ寄せる。
-* 根拠: [週次レポート設定セクション] (行番号: 646〜652 / 抜粋: "# 15. 週次レポート設定", "ELEC_PRICE_PER_KWH: int = _get_int_env(\"ELEC_PRICE_PER_KWH\", 31)")
+* 根拠: [週次レポート設定セクション] (行番号: 655〜661 / 抜粋: "# 15. 週次レポート設定", "ELEC_PRICE_PER_KWH: int = _get_int_env(\"ELEC_PRICE_PER_KWH\", 31)")
+
+
+* **（スマホ対応で追加）** 「16. ダッシュボード(Streamlit)公開設定」セクションを新設し、`unified_server.py`がStreamlitダッシュボードをリバースプロキシするための4定数を定義する。
+    * `DASHBOARD_PROXY_ENABLED`（環境変数 `DASHBOARD_PROXY_ENABLED`、既定 `true`。`"false"` 以外はすべて真）— `unified_server.py` が `routers/dashboard_router.py` をincludeするかどうかの分岐。
+    * `DASHBOARD_INTERNAL_URL`（環境変数 `DASHBOARD_INTERNAL_URL`、既定 `"http://127.0.0.1:8501"`。前後の空白を除去し末尾スラッシュを落とす）— 中継先。コメントに「localhost以外を指定する運用は想定していない」と記されている。
+    * `DASHBOARD_BASE_PATH`（環境変数 `DASHBOARD_BASE_PATH`、既定 `"dashboard"`）— 先頭に `/` を付け、前後のスラッシュを落として `"/dashboard"` 形式へ正規化する。Streamlit起動時の `--server.baseUrlPath` と一致していなければ静的アセットが404になる旨がコメントに記されている。
+    * `DASHBOARD_PROXY_TIMEOUT_SEC`（`_get_int_env` 経由、既定 `30`）— 中継のタイムアウト秒数。
+  セクション冒頭のコメントには、ダッシュボードが認証機構を持たず家族の健康記録・防犯ログの閲覧と `sudo systemctl restart` ボタンを備えるため 127.0.0.1 にのみバインドしていること、スマートフォンからの到達はこの中継経由に一本化すること、そして**このパスを Cloudflare Access のバイパス対象に設定してはならない**（`allowed_webhook_paths` とは逆で、バイパスすると無認証で外部公開される）ことが明記されている。
+* 根拠: [ダッシュボード公開設定セクション] (行番号: 666〜688 / 抜粋: "# 16. ダッシュボード(Streamlit)公開設定", "DASHBOARD_PROXY_ENABLED: bool = os.getenv(\"DASHBOARD_PROXY_ENABLED\", \"true\").strip().lower() != \"false\"")、バイパス禁止の注意書き (行番号: 677〜680 / 抜粋: "# 重要: このパスは `unified_server.py` の `allowed_webhook_paths` とは逆で、")
 
 
 * 「11. Alexaスキル設定」セクション(Issue #488でモジュールdocstring目次の番号が旧18番から11番へ振り直された)で、`routers/alexa_router.py`経由のリクエスト検証に使う`ALEXA_SKILL_ID`（Alexa Developer Consoleで発行される`"amzn1.ask.skill.xxxx"`形式のID）を定義する。設定されていれば`ask-sdk-core`がリクエストの`context.System.application.applicationId`との一致を検証し他人のスキルからのリクエストを拒否するが、未設定でも動作する（署名検証のみになる）後方互換設計であることがコメントに明記されている。

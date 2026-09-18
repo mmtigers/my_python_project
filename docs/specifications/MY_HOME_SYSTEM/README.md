@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全80件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全82件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -10,6 +10,8 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [system_router.md](./system_router.md) | 手動バックアップをトリガーするPOSTエンドポイントを提供するFastAPIルーター。 |
 | [webhook_router.md](./webhook_router.md) | 外部システム（LINE Bot・SwitchBot等）からのWebhookリクエストを受け取り、適切なハンドラ・サービスへルーティングする。 |
 | [camera_router.md](./camera_router.md) | カメラのライブ配信（HLS）・録画セグメントの一覧取得や配信APIを提供する（`camera_service.py`に処理を委譲）。 |
+| [dashboard_router.md](./dashboard_router.md) | Streamlitダッシュボードを`config.DASHBOARD_BASE_PATH`（既定`/dashboard`）配下で配信するルーター。中継処理は`dashboard_proxy_service.py`へ委譲する。 |
+| [dashboard_proxy_service.md](./dashboard_proxy_service.md) | localhost束縛のStreamlitダッシュボード(8501)へHTTPとWebSocketの双方を中継するリバースプロキシ。スマートフォンからの到達をCloudflare Access配下の8000番経由に一本化するための実装。 |
 
 ## B. ハードウェア・IoT制御モジュール
 
@@ -90,7 +92,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [config.md](./config.md) | システム全体の環境変数、定数、ディレクトリパスの定義と初期化を行う。 |
 | [daily_timelapse_job.md](./daily_timelapse_job.md) | カメラ録画から特定日時の動画チャンクを検索し、動き検知に基づくタイムラプス動画を生成してDiscordへ通知・アップロードする日次バッチ。 |
 | [discord.md](./discord.md) | Discord Webhook への POST を集約する低レベルユーティリティ。2000字上限の分割・429/5xx のリトライ・Webhook URL のマスクを担う(Issue #661)。 |
-| [dashboard.md](./dashboard.md) | Streamlit製ダッシュボードアプリケーションのエントリーポイント。センサー等の各種データやAIレポートをタブ形式で表示する。 |
+| [dashboard.md](./dashboard.md) | Streamlit製ダッシュボードアプリケーションのエントリーポイント。センサー等の各種データやAIレポートを5つのタブ（ホーム/おでかけ/見守り/くらし/システム）で表示する。 |
 | [database.md](./database.md) | SQLiteデータベースへの接続、クエリ実行、データの書き込みを管理するユーティリティ機能を提供する。 |
 | [init_unified_db.md](./init_unified_db.md) | SQLiteデータベースの初期化とスキーマ整合性検証を行うスクリプト。テーブル・インデックス作成、マイグレーション適用を行う。 |
 | [logger.md](./logger.md) | システム全体のログ出力設定を管轄するモジュール。コンソール出力、ファイル保存、エラー時のDiscord通知を行う。 |
@@ -103,13 +105,13 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [state_file.md](./state_file.md) | 監視スクリプトの状態ファイル(JSON / 1行テキスト)を flock + tmp + os.replace で原子的に読み書きする共通ヘルパー(Issue #661)。 |
 | [utils.md](./utils.md) | システム全体で共通して使用されるユーティリティ関数群（タイムゾーン処理、指数バックオフによるリトライ機能等）を提供する。 |
 | [migrations.md](./migrations.md) | `migrations/`配下の`*.sql`ファイルを順に適用し、適用済みバージョンを`schema_migrations`テーブルで管理する軽量マイグレーションランナー。 |
-| [dashboard_common.md](./dashboard_common.md) | `views/dashboard`配下の各タブから共通利用されるCSSスタイル定義とステータスカードHTML生成関数を提供するモジュール（同名の`common.py`Facadeとはファイル名衝突のため別名で管理）。 |
-| [quest_tab.md](./quest_tab.md) | Streamlitダッシュボードの「Family Quest」タブ。家族メンバーの経験値・ゴールドとランキング・達成ログを表示する。 |
-| [log_tab.md](./log_tab.md) | Streamlitダッシュボードの「ログ分析」「トレンド」「システム管理」の3タブを描画するモジュール。 |
+| [dashboard_common.md](./dashboard_common.md) | `views/dashboard`配下の各モジュールから共通利用されるCSS（スマホ幅のメディアクエリを含む）、ステータスカードのグリッド描画、`safe_section`を提供するモジュール（同名の`common.py`Facadeとはファイル名衝突のため別名で管理）。 |
+| [quest_tab.md](./quest_tab.md) | **廃止**: Streamlitダッシュボードの「Family Quest」タブ。同じ内容をスマホ最適化済みのPWA `family-quest`(`/quest`)が持つ二重管理だったため、スマホ対応の再設計でソースごと撤去された。仕様書は廃止noticeつきで履歴として残している。 |
+| [log_tab.md](./log_tab.md) | Streamlitダッシュボードのセンサーログ分析と、「🔧 システム」タブ配下（リソース状況・NAS状態・サーバーログ・メンテナンス操作）を描画するモジュール。 |
 | [misc_tab.md](./misc_tab.md) | Streamlitダッシュボードの「電車遅延」「防犯カメラ」「駐輪場」タブを描画するモジュール。 |
 | [health_tab.md](./health_tab.md) | Streamlitダッシュボードの「健康管理」タブ。子供の体調・排便・食事のデータフレームを表形式で表示する。 |
 | [sensor_tab.md](./sensor_tab.md) | Streamlitダッシュボードの「電力・環境」「気温詳細」「高砂実家」タブを描画するモジュール。 |
-| [summary.md](./summary.md) | Streamlitダッシュボードのトップ画面の9個のステータスカード（在宅状況・電気代・NAS死活等）を判定・描画するモジュール。 |
+| [summary.md](./summary.md) | Streamlitダッシュボード「🏠 ホーム」タブの9個のステータスカード（在宅状況・電気代・NAS死活等）を判定し、CSS Gridのグリッドとして描画するモジュール。 |
 
 ## 廃止済み仕様書一覧
 
