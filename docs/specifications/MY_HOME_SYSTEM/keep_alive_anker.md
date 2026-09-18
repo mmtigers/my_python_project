@@ -11,7 +11,7 @@
 ## 関連ドキュメント
 
 * [connect_speaker.md](./connect_speaker.md) - 接続断を検知した際に本スクリプトが呼び出す再接続スクリプト(`CONNECT_SCRIPT`)
-* [keep_alive_speaker.md](./keep_alive_speaker.md) - 同じログファイル(`bluetooth_monitor.log`)を共有する、別方式(mpg123による無音MP3再生)のキープアライブスクリプト
+* [keep_alive_speaker.md](./keep_alive_speaker.md) - **廃止済み**。同じログファイル(`bluetooth_monitor.log`)を共有していた別方式(mpg123による無音MP3再生)のキープアライブスクリプト。Issue #664 で本スクリプトへ一本化し、ソースごと削除された(仕様書は廃止noticeつきで履歴として残している)
 * `test_keep_alive_anker_sh.py`（Issue #249回帰テスト。`test_*.py`のため専用の仕様書は本リポジトリの命名規則上対応なし）— `log()`関数が呼び出しのたびに`date`で現在時刻を取得すること、トップレベルで1回だけ評価される`TIMESTAMP`変数が存在しないことを、ソースの静的解析（正規表現）で検証する。
 
 ## 2. ファイルの概要
@@ -166,7 +166,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `connect_speaker.sh` | 本スクリプトが切断検知時に実行する再接続処理の実装を確認するため。 | 根拠: `[CONNECT_SCRIPT]` (行番号: 11, 37 / 抜粋: "CONNECT_SCRIPT=\"/home/masahiro/develop/MY_HOME_SYSTEM/tools/connect_speaker.sh\"") |
-| 中 | `keep_alive_speaker.sh` | 同一ログファイルを使う類似目的のスクリプトとの役割分担(対象デバイスの違い)を確認するため。 | 根拠: `[LOGFILE]` (行番号: 8 / 抜粋: "LOGFILE=\"/home/masahiro/develop/MY_HOME_SYSTEM/logs/bluetooth_monitor.log\"") |
+| （Issue #664で解消） | `keep_alive_speaker.sh` | 同一ログファイルを使う類似目的のスクリプトとの役割分担を確認するため挙げていたが、両者を比較した結果「本スクリプトが機能的に包含しており、speaker側はNASマウント依存でログノイズも多い」と判断され、speaker側はソースごと削除された。`bluetooth_monitor.log` は現在このスクリプトと `connect_speaker.sh` のみが書き込む。 | 根拠: `[LOGFILE]` (行番号: 8 / 抜粋: "LOGFILE=\"$PROJECT_DIR/logs/bluetooth_monitor.log\"")（参考: `deploy/cron/README.md`、Issue #664） |
 | 低（Issue #585で`deploy/cron/crontab`へ5分毎のエントリを追加済み） | `deploy/cron/crontab` | 追加した5分毎の間隔が実機の対象デバイスのオートパワーオフ防止として妥当か、実機での動作確認が今後必要。 | 根拠: `[deploy/cron/crontabのkeep_alive_anker.shエントリ]` (`deploy/cron/crontab`、Issue #585) |
 
 ## 8. 保守上の注意点

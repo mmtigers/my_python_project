@@ -1,4 +1,4 @@
-> # ⚠️ 廃止: このファイルは 2026-09-17 時点でソース (`MY_HOME_SYSTEM/common.py`) が削除されました
+> **⚠️ 廃止: このファイルは 2026-09-17 時点でソース (`MY_HOME_SYSTEM/common.py`) が削除されたため廃止されました。**
 >
 > Issue #664 で、Deprecated Facade である `common.py` に依存していた全モジュール
 > (本番17ファイル + テスト34ファイル)を実体の直importへ移行し、`common.py` 自体を削除しました。
