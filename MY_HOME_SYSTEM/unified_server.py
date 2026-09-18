@@ -27,9 +27,13 @@ import config
 from core.logger import setup_logging
 from core.migrations import apply_pending_migrations
 from services import sensor_service, camera_service
+from services.dashboard_proxy_service import dashboard_proxy_service
 
 # Routers
 from routers import quest_router, webhook_router, system_router, camera_router, alexa_router, routine_router
+# ダッシュボード(Streamlit)の中継。config.DASHBOARD_PROXY_ENABLED=false のときは
+# include しないため、import だけしてルートは生やさない。
+from routers import dashboard_router
 
 # Handlers
 
@@ -327,6 +331,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error(f"Failed to stop ffmpeg processes: {e}")
 
     sensor_service.cancel_all_tasks()
+
+    # ダッシュボード中継用の httpx コネクションプールを閉じる
+    # (未クローズのまま落とすと "Unclosed client session" の警告が出る)。
+    try:
+        await dashboard_proxy_service.aclose()
+    except Exception as e:
+        logger.warning(f"ダッシュボード中継クライアントのクローズに失敗しました: {e}")
+
     logger.info("Bye!")
 
 app = FastAPI(
@@ -351,6 +363,46 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    """
+    Issue #665: 全レスポンスに最小限のセキュリティヘッダーを付与するミドルウェア。
+
+    付与するヘッダー:
+    - `X-Content-Type-Options: nosniff` — Content-Type を無視したMIMEスニッフィングを禁止する。
+      `/quest`・`/camera` 配下は family-quest のビルド成果物を、`/uploads` は
+      ユーザーがアップロードしたアバター画像をそのまま配信するため、拡張子と実体が
+      食い違うファイルをブラウザが実行可能なリソースとして解釈しないようにする。
+    - `X-Frame-Options` — 既定 `SAMEORIGIN`(`config.SECURITY_HEADER_X_FRAME_OPTIONS`)。
+      `DENY` を既定にすると、Echo Show 等からの同一オリジンiframe埋め込みまで
+      壊れうるため既定では同一オリジンを許す。空文字にすると付与しない。
+    - `Referrer-Policy: strict-origin-when-cross-origin` — 外部への遷移時にパスを送らない。
+
+    既に値が設定されているヘッダーは上書きしない。エッジ(Cloudflare)側で
+    同じヘッダーを付与している構成では `SECURITY_HEADERS_ENABLED=false` で
+    オリジン側の付与そのものを止められる(値が二重になるのを避けるため)。
+
+    CSP は family-quest が Vite ビルドのインラインスタイル等を含むため、
+    ここでは意図的に付与しない(付けるならフロント側の実測とセットで行う)。
+    """
+    response = await call_next(request)
+
+    if not config.SECURITY_HEADERS_ENABLED:
+        return response
+
+    headers: Dict[str, str] = {
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+    }
+    if config.SECURITY_HEADER_X_FRAME_OPTIONS:
+        headers["X-Frame-Options"] = config.SECURITY_HEADER_X_FRAME_OPTIONS
+
+    for name, value in headers.items():
+        if name not in response.headers:
+            response.headers[name] = value
+
+    return response
 
 @app.middleware("http")
 async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
@@ -452,6 +504,15 @@ app.include_router(system_router.router, prefix="/api/system", tags=["system"])
 app.include_router(camera_router.router, prefix="/api/cameras", tags=["cameras"])
 app.include_router(alexa_router.router, tags=["alexa"])
 app.include_router(routine_router.router, prefix="/api/routine", tags=["routine"])
+
+# ダッシュボード(Streamlit・8501番)の中継。
+# 8501番は認証を持たないため localhost 束縛のままにし、外部からの到達は
+# 既に Cloudflare Access で保護されている本サーバー経由に一本化する
+# (詳細は services/dashboard_proxy_service.py のモジュールdocstring)。
+# ★このパスを Cloudflare Access のバイパス対象に設定してはならない。
+if config.DASHBOARD_PROXY_ENABLED:
+    app.include_router(dashboard_router.router, tags=["dashboard"])
+    logger.info(f"📊 Dashboard Proxy: {config.DASHBOARD_BASE_PATH} -> {config.DASHBOARD_INTERNAL_URL}")
 
 # --- Static Files & SPA Serving ---
 

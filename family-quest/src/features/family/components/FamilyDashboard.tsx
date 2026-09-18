@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Sword, ShoppingBag, Package } from 'lucide-react';
-import { CompletedSignal, ID, User, Quest, QuestHistory, Reward } from '@/types';
+import { User, Quest, QuestHistory, Reward } from '@/types';
 import UserStatusCard from './UserStatusCard';
 import QuestList from '../../quest/components/QuestList';
 import ApprovalList from '../../quest/components/ApprovalList';
@@ -15,6 +15,7 @@ import RoutineFlow, { RoutineFreeTimeBanner } from '../../routine/components/Rou
 import { selectRoutineFlow } from '@/lib/routineDataSchema';
 import { useSound } from '@/hooks/useSound';
 import { useToast } from '@/context/useToast';
+import { useQuestActivity } from '../../quest/context/useQuestActivity';
 
 interface FamilyDashboardProps {
     users: User[];
@@ -27,14 +28,10 @@ interface FamilyDashboardProps {
     onApprove: (history: QuestHistory) => void;
     onReject: (history: QuestHistory) => void;
     onApproveAll: () => void;
-    // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの
-    // クールダウンを発火させるための通知(App側で管理)。#363: userId を含み、
-    // 各パネルの QuestItem は自分のユーザーの完了にのみ反応する。
-    completedSignal: CompletedSignal | null;
-    // #391: 完了/取消APIが送信中の (user_id, quest_id) キー集合。各パネルの QuestList へ透過的に渡す。
-    processingQuestKeys?: string[];
-    // #391(F-L8): 承認APIが送信中の履歴id集合と一括承認中フラグ。ApprovalList のボタン表示に使う。
-    busyHistoryIds?: ID[];
+    // #659: completedSignal / processingQuestKeys / busyHistoryIds は
+    // QuestActivityContext から読む。以前はここと FamilyPanelProps に素通しの
+    // props として並んでおり、中継する2つのコンポーネントは値を使わないのに
+    // 型と引数だけを持たされていた。
     isApprovingAll?: boolean;
     onAvatarClick: (user: User) => void;
 }
@@ -45,10 +42,11 @@ interface FamilyDashboardProps {
 // 独立画面を持たず、このメイン画面上部に常時統合表示する。
 const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
     users, quests, completedQuests, pendingQuests, rewards,
-    onQuestClick, onBuyReward, onApprove, onReject, onApproveAll, completedSignal,
-    processingQuestKeys, busyHistoryIds, isApprovingAll, onAvatarClick,
+    onQuestClick, onBuyReward, onApprove, onReject, onApproveAll,
+    isApprovingAll, onAvatarClick,
 }) => {
     const { iconFirstUserIds, userThemeColors } = useSettings();
+    const { busyHistoryIds } = useQuestActivity();
     // #412(品質): 以前はここで FAMILY_ORDER=['dad','mom','son','daughter'] という
     // ハードコードされた並び順に再ソートしていたが、サーバー側(quest_service.pyの
     // GameSystem.get_all_view_data)が既に quest_data.USERS の宣言順(同じ dad→mom→
@@ -104,8 +102,6 @@ const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
                         onInteract={() => setActiveUserId(user.user_id)}
                         onQuestClick={(q) => onQuestClick(user, q)}
                         onBuyReward={(r) => onBuyReward(user, r)}
-                        completedSignal={completedSignal}
-                        processingQuestKeys={processingQuestKeys}
                         onAvatarClick={() => onAvatarClick(user)}
                     />
                 ))}
@@ -127,16 +123,16 @@ interface FamilyPanelProps {
     onInteract: () => void;
     onQuestClick: (quest: Quest) => void;
     onBuyReward: (reward: Reward) => void;
-    completedSignal: CompletedSignal | null;
-    processingQuestKeys?: string[];
     onAvatarClick: () => void;
 }
 
 const FamilyPanel: React.FC<FamilyPanelProps> = ({
     user, quests, completedQuests, pendingQuests, rewards, iconFirst, isActive, themeColorKey, isIdle,
-    onInteract, onQuestClick, onBuyReward, completedSignal, processingQuestKeys, onAvatarClick,
+    onInteract, onQuestClick, onBuyReward, onAvatarClick,
 }) => {
     const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');
+    // #659: 表示に使うだけの横断的な状態は Context から直接読む(素通しの props を廃止)。
+    const { completedSignal, processingQuestKeys } = useQuestActivity();
     const { play } = useSound();
     const { showToast } = useToast();
 

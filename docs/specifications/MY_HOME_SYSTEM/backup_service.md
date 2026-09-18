@@ -11,8 +11,8 @@
 ## 関連ドキュメント
 
 - [config.md](./config.md) — `SQLITE_DB_PATH`、`BASE_DIR`、`NAS_PROJECT_ROOT`、`NAS_MOUNT_POINT`、`LINE_USER_ID`等の設定を提供する。
-- [common.md](./common.md) — `send_push`をFacade経由でインポートしている実体（`services.notification_service`の再エクスポート）。
-- [notification_service.md](./notification_service.md) — `common.send_push`の実装元。
+- [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
+- [notification_service.md](./notification_service.md) — `services.notification_service.send_push`の実装元。
 - [logger.md](./logger.md) — `setup_logging`の実装元。
 
 ## 2. ファイルの概要
@@ -33,9 +33,8 @@
 | `time` | 標準ライブラリ | 未使用 | `import time` (行番号: 5 / 抜粋: "import time") |
 | `Path` | `pathlib` | パス文字列の構築と操作 | `from pathlib import Path` (行番号: 6 / 抜粋: "from pathlib import Path") |
 | `Tuple` | `typing` | 関数の戻り値の型ヒント | `from typing import Tuple` (行番号: 7 / 抜粋: "from typing import Tuple") |
-| `setup_logging` | `common` | 未使用（直後に上書きされている） | `from common import setup_logging` (行番号: 8 / 抜粋: "from common import setup_l...") |
-| `setup_logging` | `core.logger` | ロガーの初期化。設計書に従い使用 | `from core.logger import setup_logging` (行番号: 10 / 抜粋: "from core.logger import se...") |
-| `send_push` | `common` | エラー時の通知送信 | `from common import send_push` (行番号: 11 / 抜粋: "from common import send_push") |
+| `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 10 / 抜粋: "from services.notification_service import send_push") |
+| `setup_logging` | `core.logger` | ロガーの初期化。設計書に従い使用 | `from core.logger import setup_logging` (行番号: 9 / 抜粋: "from core.logger import setup_logging") |
 | `config` | ローカルモジュール | 各種パスやIDなどの設定値の取得 | `import config` (行番号: 12 / 抜粋: "import config") |
 
 ### ブラックボックスとなる外部要素
@@ -48,7 +47,7 @@
 | `config.NAS_MOUNT_POINT` | 定義元が存在せず、NASマウントポイントの実体・値が不明 | `os.path.join(config.NAS_MO..."` (行番号: 34 / 抜粋: "os.path.join(config.NAS_MO...") |
 | `config.BACKUP_FILES` | 定義元が存在せず、DB以外にバックアップ対象へ追加するファイルパス一覧の実体・値が不明 | `getattr(config, "BACKUP_FI..."` (行番号: 84 / 抜粋: "for entry in getattr(confi...") |
 | `core.logger.setup_logging` | 実装が提供されておらず、ログの出力先・出力形式が不明 | `setup_logging("backup")` (行番号: 15 / 抜粋: "logger = setup_logging("ba...") |
-| `common.send_push` | 実装が提供されておらず、実際の通信方式や成否の扱いが不明 | `send_push(...)` (行番号: 80 / 抜粋: "send_push(") |
+| `services.notification_service.send_push` | 実装が提供されておらず、実際の通信方式や成否の扱いが不明 | `send_push(...)` (行番号: 80 / 抜粋: "send_push(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -202,7 +201,7 @@ graph TD
   _backup_config_files --> OS
 
   _notify_and_log_error --> logger
-  _notify_and_log_error --> send_push[外部: common.send_push]
+  _notify_and_log_error --> send_push[外部: services.notification_service.send_push]
   _notify_and_log_error --> config
 
   core.logger --> logger
@@ -219,7 +218,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `common` モジュールから `setup_logging` をインポートした後、直後に `core.logger` の `setup_logging` で上書きしており、未使用のインポートが存在する。
+* **（Issue #664 で解消）** 以前は Deprecated Facade である `common` から `setup_logging` をインポートした直後に `core.logger` の `setup_logging` で上書きしており、未使用のインポートが残っていた。`common.py` の廃止に伴い `core.logger` からの1本だけになっている。
 * `import time` が宣言されているが、コード内で一度も使用されていない。
 * Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`引数が不要になった。これに伴い`_notify_and_log_error`の`send_push`呼び出しからは、以前存在した`user_id=getattr(config, "LINE_USER_ID", None)`(target="discord"であるにも関わらずLINE宛先を渡していた不整合)が撤去されている。
 * NASディレクトリ作成失敗時のエラーハンドリング（54〜58行目）は、意図的に `_notify_and_log_error`（通知）を呼び出さずログ記録のみを行ってから例外を再送出している。これは、外側の `except Exception as e:`（71行目）でも同一エラーが捕捉されて通知が二重送信されるのを防ぐための設計であり、コード中にもその旨のコメントが付されている（過去に二重通知が発生していたための対策）。この一本化された経路を崩さないよう、将来的にこのブロックへ通知呼び出しを追加する際は二重送信に注意する必要がある。

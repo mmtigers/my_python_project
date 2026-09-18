@@ -94,8 +94,14 @@ class TestPersistedStateWriteIsAtomic:
     def test_reader_never_sees_truncated_file_during_write(self, isolated_state_file, monkeypatch):
         """open(..., "w") はロック取得より前にファイルを切り詰めるため、書き込み途中に
         読んだ側が空ファイル → JSONDecodeError → {} (全デバイス初期状態扱い)になっていた。
-        一時ファイル + os.replace で、読み手は常に旧か新の完全な内容を見ること。"""
+        一時ファイル + os.replace で、読み手は常に旧か新の完全な内容を見ること。
+
+        Issue #661: 実装は core/state_file.write_json_atomic へ移したため、
+        json.dump の差し替え先も同モジュールになる(この不変条件自体は変わらない)。"""
         import json
+
+        from core import state_file
+
         spm._save_persisted_states({"dev1": {"state": "on"}})
 
         observed = {}
@@ -107,7 +113,7 @@ class TestPersistedStateWriteIsAtomic:
                 observed["during_write"] = f.read()
             return real_dump(obj, fp, *a, **k)
 
-        monkeypatch.setattr(spm.json, "dump", dump_and_peek)
+        monkeypatch.setattr(state_file.json, "dump", dump_and_peek)
         spm._save_persisted_states({"dev1": {"state": "off"}})
 
         assert json.loads(observed["during_write"]) == {"dev1": {"state": "on"}}

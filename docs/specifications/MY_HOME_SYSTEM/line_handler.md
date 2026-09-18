@@ -63,7 +63,7 @@
 ### `_evict_oldest_profile_cache_entries` (関数、Issue #410で追加)
 
 * **役割**: `_profile_cache`が`_PROFILE_CACHE_MAX_SIZE`件を超えている場合、キャッシュ時刻（各エントリのタプルの2番目の要素、`cached_at`）が古い順にエントリを削除して上限内に収める。`_get_display_name`が新規エントリを書き込むたびに呼ばれる。
-* 根拠: `def _evict_oldest_profile_cache_entries() -> None:` (行番号: 113-123)
+* 根拠: `def _evict_oldest_profile_cache_entries() -> None:` (行番号: 118-129)
 
 
 * **引数/リクエスト**: なし
@@ -83,7 +83,7 @@
 
 ### `_is_authorized_line_user` (関数、Issue #620で追加)
 
-* **役割**: 送信元LINEユーザー(`user_id`)が`config.AUTHORIZED_LINE_USER_IDS`(認可済み家族のLINEユーザーIDのallowlist、カンマ区切り環境変数)に含まれるかを判定する。LINE公式アカウントは友だち追加すれば誰でもメッセージを送信できるため、体調・食事記録の書き込みとAI経由のDB検索をこのallowlistで制限する目的で`_process_message_async`の冒頭から呼ばれる。`config.SWITCHBOT_WEBHOOK_TOKEN`と同じく、allowlist自体が未設定(空リスト)の場合は後方互換として常に`True`を返す(検証なし)。
+* **役割**: 送信元LINEユーザー(`user_id`)が`config.AUTHORIZED_LINE_USER_IDS`(認可済み家族のLINEユーザーIDのallowlist、カンマ区切り環境変数)に含まれるかを判定する。LINE公式アカウントは友だち追加すれば誰でもメッセージを送信できるため、体調・食事記録の書き込みとAI経由のDB検索をこのallowlistで制限する目的で`_process_message_async`の冒頭から呼ばれる。allowlist自体が未設定(空リスト)の場合は後方互換として常に`True`を返す(検証なし)。**（Issue #648）** `config.SWITCHBOT_WEBHOOK_TOKEN`は未設定時に503で拒否するフェイルクローズへ変更されたため、両者の未設定時の挙動はもはや同じではない(こちらはフェイルオープンのまま)。
 * 根拠: `def _is_authorized_line_user(user_id: str) -> bool:` (行番号: 132-144)、後方互換の早期return (行番号: 142-143 / 抜粋: "if not config.AUTHORIZED_LINE_USER_IDS:\n        return True")
 
 
@@ -139,7 +139,7 @@
 ### `_is_redelivery` (関数、Issue #376で追加)
 
 * **役割**: LINE Webhookの再配信（`event.delivery_context.is_redelivery`）かどうかを返す。再配信を有効化していると応答が遅れた同一イベントが再送され、冪等性チェックの無い記録処理（体調・食事）が二重登録されるため、`handle_message`/`handle_postback`はこれが真のイベントをスキップする。SDKの値が厳密に`True`の場合のみ真とし（`is True`）、属性欠落や真偽値以外（テストの`MagicMock`等）は再配信扱いしない。
-* 根拠: `def _is_redelivery(event) -> bool:` (行番号: 56-65 / 抜粋: "return getattr(ctx, \"is_redelivery\", False) is True")
+* 根拠: `def _is_redelivery(event) -> bool:` (行番号: 61-70 / 抜粋: "return getattr(ctx, \"is_redelivery\", False) is True")
 
 
 * **引数/リクエスト**: `event`（SDKのイベントオブジェクト）
@@ -218,7 +218,7 @@
 ### `_detect_condition_keyword` (関数、Issue #375で追加)
 
 * **役割**: 与えられたテキストから定型キーワードで体調を判定する。否定表現（`_NEGATIVE_GENKI_PATTERNS`）を最初に評価して`CONDITION_NOT_GENKI`を返し、次に「元気」→「元気」、「風邪」→「風邪」、いずれも無ければ「不明」を返す。
-* 根拠: `def _detect_condition_keyword(text: str) -> str:` (行番号: 188-196)
+* 根拠: `def _detect_condition_keyword(text: str) -> str:` (行番号: 213-221)
 
 
 * **引数/リクエスト**: `text: str`
@@ -239,7 +239,7 @@
 ### `_extract_health_targets` (関数、Issue #375で追加)
 
 * **役割**: メッセージ中に登場する`config.FAMILY_SETTINGS["members"]`の全メンバーを出現位置順に列挙し、各メンバーについて「その名前の直後〜次の名前まで」の区間を`_detect_condition_keyword`で判定する。区間内にキーワードが無い（「不明」）場合はメッセージ全体の判定結果へフォールバックする（「体調 元気 智矢 涼花」のように名前より前にキーワードがある書き方に対応）。以前は最初に一致した1名だけを処理し、2名併記時は残りを無言で捨てていた。
-* 根拠: `def _extract_health_targets(msg_text: str) -> List[tuple]:` (行番号: 199-225)
+* 根拠: `def _extract_health_targets(msg_text: str) -> List[tuple]:` (行番号: 224-250)
 
 
 * **引数/リクエスト**: `msg_text: str`
@@ -315,7 +315,7 @@
 ### `_SEEN_EVENT_IDS` / `_evict_oldest_seen_event_ids` / `_is_duplicate_event` (Issue #376で追加)
 
 * **役割**: `webhookEventId`（line-bot-sdk 3.21.0でEvent基底クラスの必須フィールド、ULID形式）ベースの冪等化キャッシュ。LINEのWebhook配信は「少なくとも1回」到達を保証する仕様であり、`_is_redelivery`が検知する明示的な再配信以外にもネットワーク遅延等で同一イベントが複数回届く可能性があるため、直近処理済みのイベントIDを記録して二重処理（体調・食事等の記録の二重登録、AI呼び出しの二重実行）を防ぐ。単一プロセス・LAN限定の個人用サービスのため新規DBテーブルは設けず、`_profile_cache`と同様にプロセス内メモリ・サイズ上限(`_SEEN_EVENT_IDS_MAX_SIZE`=500)つきの辞書で管理する（プロセス再起動で消える点は許容）。`_evict_oldest_seen_event_ids`は上限超過時に検知時刻が古いものから削除する。`_is_duplicate_event`は未処理のIDなら記録した上で`False`を、直近処理済みのIDなら`True`を返す。`webhook_event_id`が取得できないイベント（テスト用モック等）は冪等化できないため誤って処理を止めないよう`False`を返す。`BackgroundTasks`はスレッドプール(`run_in_threadpool`)で実行されるため、`_seen_event_ids_lock`（`threading.Lock`）で確認と記録を保護する。
-* 根拠: `_SEEN_EVENT_IDS: Dict[str, float] = {}` (行番号: 76-78)、`def _evict_oldest_seen_event_ids() -> None:` (行番号: 83-90)、`def _is_duplicate_event(event) -> bool:` (行番号: 93-110)
+* 根拠: `_SEEN_EVENT_IDS: Dict[str, float] = {}` (行番号: 76-78)、`def _evict_oldest_seen_event_ids() -> None:` (行番号: 88-95)、`def _is_duplicate_event(event) -> bool:` (行番号: 98-115)
 
 
 * **引数/リクエスト**: `_is_duplicate_event(event)`: イベントオブジェクト
@@ -337,7 +337,7 @@
 ### `dispatch_events` (Issue #376で追加)
 
 * **役割**: `routers/webhook_router.py`が署名検証・パース済みのイベント一覧を`BackgroundTasks`経由で渡してくる、実処理のエントリポイント。イベントごとに`_is_duplicate_event`で冪等化チェックを行い（重複ならスキップしてINFOログ）、`MessageEvent`+`TextMessageContent`なら`handle_message`、`PostbackEvent`なら`handle_postback`へ振り分ける（`line_handler.add(...)`での登録内容と同じ組合せ）。イベント単位で`try/except`を掛けており、1件の処理で例外が起きても後続イベントの処理を止めない（`handle_message`/`handle_postback`自体も内部で例外を握り潰すが、このループでも二重に防御する）。
-* 根拠: `def dispatch_events(events: List[Any]) -> None:` (行番号: 341-375)
+* 根拠: `def dispatch_events(events: List[Any]) -> None:` (行番号: 400-434)
 
 
 * **引数/リクエスト**: `events: List[Any]`（`line_handler.parser.parse()`が返すパース済みイベントのリスト）

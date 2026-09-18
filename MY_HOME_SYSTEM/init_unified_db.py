@@ -6,10 +6,11 @@ import sqlite3
 import sys
 from typing import List, Dict
 import config
-import common
+from core.logger import setup_logging
+from core.database import get_db_cursor
 from core.migrations import apply_pending_migrations
 
-logger = common.setup_logging("init_db")
+logger = setup_logging("init_db")
 
 # current_schema.sql の既定の出力先(本ファイルと同じディレクトリ)
 CURRENT_SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "current_schema.sql")
@@ -86,7 +87,7 @@ def init_db() -> None:
     """
     logger.info(f"データベース初期化開始: {config.SQLITE_DB_PATH}")
 
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         # WALモード有効化
         try:
             cur.execute("PRAGMA journal_mode=WAL;")

@@ -23,7 +23,9 @@ class NasMonitor:
     """NASの状態監視、ディスク使用量の確認、および障害復旧時の自動切り戻しを行うクラス"""
     
     def __init__(self) -> None:
-        self.ip: str = getattr(config, "NAS_IP", "192.168.1.20")
+        # Issue #663: 既定値の重複(config.py と同じ IP をここにも書く)を排した。
+        # 未設定なら空文字で、check_ping() が疎通確認をスキップする。
+        self.ip: str = getattr(config, "NAS_IP", "")
         self.mount_point: str = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
         # NAS_PROJECT_ROOT は mount_point 配下のアプリ専用ディレクトリ(home_system)。
         # ASSETS_DIR 等はNAS未マウント時にフォールバックパスへ動的に切り替わるため、
@@ -76,7 +78,17 @@ class NasMonitor:
             logger.error("State save error")
 
     def check_ping(self) -> bool:
-        """NASへのPing疎通確認"""
+        """NASへのPing疎通確認。
+
+        Issue #663: NAS_IP が未設定の場合は ping せず True を返す。この戻り値は
+        run() で check_mount()/check_write_permission() を実行するかどうかの
+        ゲートになっているため、ここで False を返すと「アドレスを知らない」だけで
+        NAS障害と判定され、通知を飛ばしてローカルフォールバックへ退避してしまう。
+        マウント状態と書き込みテストが健全性判定の本体なので、そちらに委ねる。
+        """
+        if not self.ip:
+            logger.debug("NAS_IP が未設定のため ping 疎通確認をスキップします(マウント/書き込みで判定)。")
+            return True
         try:
             cmd = ["ping", "-c", "1", "-W", str(self.timeout), self.ip]
             # #651: -W は ping 自身の応答待ちしか縛らないため、ping プロセス自体が

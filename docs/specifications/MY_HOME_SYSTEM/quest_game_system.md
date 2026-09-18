@@ -12,14 +12,15 @@
 
 ## 関連ドキュメント
 
-* [quest_service.md](./quest_service.md) - `services/quest_service.py`（下位互換シム）。`from services.quest.game_system import (GameSystem, game_system, quest_service, shop_service, user_service)`として本ファイルのクラス・4つのモジュールレベルシングルトンを再エクスポートする。また本ファイルの`sync_master_data`/`get_all_view_data`が`quest_data`モジュールの現在値を読むために逆に依存する（後述）
+* [quest_service.md](./quest_service.md) - `services/quest_service.py`（下位互換シム）。`from services.quest.game_system import (GameSystem, approval_service, game_system, quest_service, shop_service, user_service)`として本ファイルのクラス・4つのモジュールレベルシングルトンを再エクスポートする。また本ファイルの`sync_master_data`/`get_all_view_data`が`quest_data`モジュールの現在値を読むために逆に依存する（後述）
 * [quest_locks.md](./quest_locks.md) - `JST`/`ROLE_CHILD`/`logger`の提供元
 * [quest_quest_service.md](./quest_quest_service.md) - `GameSystem.__init__`が`QuestService()`インスタンスを保持し、`filter_active_quests`/`_compute_boost_from_last_completed`/`is_within_reset_period`を呼び出す
 * [quest_shop_service.md](./quest_shop_service.md) - `GameSystem.__init__`が`ShopService()`インスタンスを保持する（本ファイル内で`self.shop_service`のメソッドは直接呼ばれないが、`shop_service = game_system.shop_service`としてモジュールレベルへ公開する）
 * [quest_user_service.md](./quest_user_service.md) - `GameSystem.__init__`が`UserService()`インスタンスを保持する
-* [common.md](./common.md) - `common.get_db_cursor`/`common.get_now_iso`を提供するモジュール
+* [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
 * [game_logic.md](./game_logic.md) - `game_logic.GameLogic.calculate_next_level_exp`/`calculate_max_hp`の実装
 * [quest.md](./quest.md) - `models.quest.MasterUser`/`MasterQuest`/`MasterReward`モデル定義
+* [quest_master_sync_sql.md](./quest_master_sync_sql.md) - `sync_master_data`が使うUPSERT文とパラメータ組み立ての一元管理（Issue #664。`sync_strict.py`と共有）
 * [quest_data.md](./quest_data.md) - `sync_master_data`が読み込むマスターデータ(`USERS`/`QUESTS`/`REWARDS`)の実体（下位互換シム`services/quest_service.py`の`quest_data`属性経由でアクセスされる）
 * [quest_router.md](./quest_router.md) - `sync_master_data`/`get_all_view_data`の呼び出し元と推測されるFastAPIルーター（下位互換シム経由でimportしている）
 
@@ -27,8 +28,8 @@
 
 * **（Issue #662 で最適化）** `get_all_view_data` の「表示対象クエスト × 直近30日の承認済み履歴」の二重ループを、`quest_id` をキーにした索引(`collections.defaultdict`)を1度作る形に変えた。計算量は O(Q×H) から O(Q+H) になる。履歴は `completed_at` の降順で取得しており、索引への追加もその順序を保つため、「ユーザーごとに最新の履歴を先に評価する」という既存の判定はそのまま成り立つ(挙動は変えていない)。
 
-マスターデータ(`quest_data.USERS`/`QUESTS`/`REWARDS`)とDBの同期(`sync_master_data`)、および画面表示用の集約データ生成(`get_all_view_data`)を担う`GameSystem`クラス1つを定義するファイル。`GameSystem.__init__`は`QuestService`/`UserService`/`ShopService`の3インスタンスを合成し(`InventoryService`は含まない)、ファイル末尾でこれら3サービスと`GameSystem`自身のシングルトンをモジュールレベルの変数(`game_system`/`quest_service`/`shop_service`/`user_service`)として公開する。`sync_master_data`/`get_all_view_data`はいずれも、`quest_data`モジュールをこのファイル自身ではモジュールグローバルとしてimportせず、実行のたびに下位互換シム(`services/quest_service.py`)を`from services import quest_service as _quest_service_shim`として動的にimportし、`_quest_service_shim.quest_data`を経由して現在値を読む設計になっている。これは、テストが`monkeypatch.setattr(services.quest_service, "quest_data", fake)`という形でシム側の属性を差し替える前提のためである。
-根拠: `class GameSystem:` (行番号: 17)、`def __init__(self):\n        self.quest_service = QuestService()\n        self.user_service = UserService()\n        self.shop_service = ShopService()` (行番号: 18〜21)
+マスターデータ(`quest_data.USERS`/`QUESTS`/`REWARDS`)とDBの同期(`sync_master_data`)、および画面表示用の集約データ生成(`get_all_view_data`)を担う`GameSystem`クラス1つを定義するファイル。`GameSystem.__init__`は`QuestService`/`ApprovalService`/`UserService`/`ShopService`の4インスタンスを合成し(`InventoryService`は含まない)、ファイル末尾でこれら4サービスと`GameSystem`自身のシングルトンをモジュールレベルの変数(`game_system`/`quest_service`/`approval_service`/`shop_service`/`user_service`)として公開する。**（Issue #662で追加）** `ApprovalService`/`approval_service`は、`QuestService`から承認・却下・取消を分離した際に加わった。`sync_master_data`/`get_all_view_data`はいずれも、`quest_data`モジュールをこのファイル自身ではモジュールグローバルとしてimportせず、実行のたびに下位互換シム(`services/quest_service.py`)を`from services import quest_service as _quest_service_shim`として動的にimportし、`_quest_service_shim.quest_data`を経由して現在値を読む設計になっている。これは、テストが`monkeypatch.setattr(services.quest_service, "quest_data", fake)`という形でシム側の属性を差し替える前提のためである。
+根拠: `class GameSystem:` (行番号: 26)、`def __init__(self):\n        self.quest_service = QuestService()\n        self.user_service = UserService()\n        self.shop_service = ShopService()` (行番号: 27〜31)
 根拠: `from services import quest_service as _quest_service_shim` (行番号: 30, 171)、コメント (行番号: 25〜29 / 抜粋: "quest_data は互換シム(services/quest_service.py)側でimportされ、テストが\n        # `from services import quest_service as qs; monkeypatch.setattr(qs, \"quest_data\", fake)`\n        # という形で差し替える(Issue #529等)。")
 根拠: `game_system = GameSystem()\nquest_service = game_system.quest_service\nshop_service = game_system.shop_service\nuser_service = game_system.user_service` (行番号: 341〜344)
 
@@ -42,7 +43,8 @@
 | `importlib` | 標準ライブラリ | `sync_master_data`が`quest_data`モジュールを再読み込みする(`importlib.reload`) | `import importlib` (行番号: 3) |
 | `typing` (`Any`, `Dict`, `List`, `Optional`) | 標準ライブラリ | 型ヒント | `from typing import Any, Dict, List, Optional` (行番号: 4) |
 | `fastapi.HTTPException` | 外部ライブラリ | マスターデータ検証失敗時のエラーレスポンス生成 | `from fastapi import HTTPException` (行番号: 6) |
-| `common` | 内部モジュール | DBカーソル取得、現在時刻(ISO)取得 | `import common` (行番号: 8) |
+| `core.utils.get_now_iso` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.utils import get_now_iso` (行番号: 9 / 抜粋: "from core.utils import get_now_iso") |
+| `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 10 / 抜粋: "from core.database import get_db_cursor") |
 | `game_logic` | 内部モジュール | `GameLogic.calculate_next_level_exp`/`calculate_max_hp`の呼び出し | `import game_logic` (行番号: 9) |
 | `models.quest` (`MasterQuest`, `MasterReward`, `MasterUser`) | 内部モジュール | マスターデータの型定義(Pydanticモデル)によるバリデーション | `from models.quest import MasterQuest, MasterReward, MasterUser` (行番号: 10) |
 | `services.quest.locks` (`JST`, `ROLE_CHILD`, `logger`) | 内部モジュール | JST定数・子供ロール定数・ロガーの共有基盤 | `from services.quest.locks import JST, ROLE_CHILD, logger` (行番号: 11) |
@@ -55,7 +57,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `common.get_db_cursor()` / `common.get_now_iso()` | トランザクションスコープや接続の詳細、生成されるISO文字列のフォーマットが本ファイルからは不明 | `with common.get_db_cursor(commit=True) as cur:` (行番号: 53) |
+| `core.database.get_db_cursor()` / `core.utils.get_now_iso()` | トランザクションスコープや接続の詳細、生成されるISO文字列のフォーマットが本ファイルからは不明 | `with core.database.get_db_cursor(commit=True) as cur:` (行番号: 53) |
 | `game_logic.GameLogic.calculate_next_level_exp` / `calculate_max_hp` | 計算式の詳細仕様が不明 | `game_logic.GameLogic.calculate_next_level_exp(u['level'])` (行番号: 190) |
 | `quest_data.USERS` / `.QUESTS` / `.REWARDS` の構造 | 定義ファイルの実体は本ファイルからは確認できず、辞書のキー構成は本ファイルの参照(`q_data['start_time']`等)からのみ推測可能 | `valid_users = [MasterUser(**u) for u in quest_data.USERS]` (行番号: 35) |
 | `models.quest.MasterUser` / `MasterQuest` / `MasterReward` | フィールドのバリデーションルールが本ファイルからは不明 | `MasterQuest(**q_data)` (行番号: 43) |
@@ -66,7 +68,7 @@
 ### `GameSystem.__init__`
 
 * **役割**: `QuestService`/`UserService`/`ShopService`の3インスタンスを生成し、それぞれ`self.quest_service`/`self.user_service`/`self.shop_service`へ格納する。`InventoryService`はここに含まれない。
-* 根拠: `def __init__(self):\n        self.quest_service = QuestService()\n        self.user_service = UserService()\n        self.shop_service = ShopService()` (行番号: 18〜21)
+* 根拠: `def __init__(self):\n        self.quest_service = QuestService()\n        self.user_service = UserService()\n        self.shop_service = ShopService()` (行番号: 27〜31)
 * **引数/リクエスト**: なし
 * 根拠: (行番号: 18)
 * **戻り値/レスポンス**: なし
@@ -76,8 +78,8 @@
 
 ### `GameSystem.sync_master_data`
 
-* **役割**: `quest_data`モジュール(下位互換シム経由で取得した現在値を`importlib.reload`)の`USERS`/`QUESTS`/`REWARDS`をそれぞれ`MasterUser`/`MasterQuest`/`MasterReward`でバリデーションし、DBへUPSERT/DELETEで反映する。ユーザーは`ON CONFLICT DO UPDATE`で`name`/`job_class`を更新し`role`は`COALESCE(excluded.role, quest_users.role)`で新しい値が`None`なら既存値を保持する。クエストは`active_q_ids`に含まれない行を`DELETE`してから全件を`ON CONFLICT DO UPDATE`でUPSERTするが、`quest_data.QUESTS`が空の場合はDELETE自体をスキップする安全弁を持つ。報酬は、マスタから削除された`reward_id`のうち`user_inventory`に参照が残っているものを削除対象から除外したうえで、残りを`DELETE`してから全件をUPSERTする。
-* 根拠: `def sync_master_data(self) -> Dict[str, str]:` (行番号: 23〜166)
+* **役割**: `quest_data`モジュール(下位互換シム経由で取得した現在値を`importlib.reload`)の`USERS`/`QUESTS`/`REWARDS`をそれぞれ`MasterUser`/`MasterQuest`/`MasterReward`でバリデーションし、DBへUPSERT/DELETEで反映する。ユーザーは`ON CONFLICT DO UPDATE`で`name`/`job_class`を更新し`role`は`COALESCE(excluded.role, quest_users.role)`で新しい値が`None`なら既存値を保持する。クエストは`active_q_ids`に含まれない行を`DELETE`してから全件を`ON CONFLICT DO UPDATE`でUPSERTするが、`quest_data.QUESTS`が空の場合はDELETE自体をスキップする安全弁を持つ。報酬は、マスタから削除された`reward_id`のうち`user_inventory`に参照が残っているものを削除対象から除外したうえで、残りを`DELETE`してから全件をUPSERTする。 **（Issue #664 で変更）** クエスト・報酬のUPSERT文と、それに渡す値のタプルの組み立ては`services/quest/master_sync_sql.py`（[quest_master_sync_sql.md](./quest_master_sync_sql.md)）へ一本化した。以前は同じ2テーブルへのUPSERTが本ファイルと`sync_strict.py`に別々に書かれており、列リストが食い違う事故が#100/#164/#165 と3度起きていた。「マスタに無い行をどう扱うか」という同期の方針（上記の安全弁・参照チェック）だけが本メソッドに残る。
+* 根拠: `def sync_master_data(self) -> Dict[str, str]:` (行番号: 33〜172)
 * 根拠: `ON CONFLICT(user_id) DO UPDATE SET\n                        name = excluded.name,\n                        job_class = excluded.job_class,\n                        role = COALESCE(excluded.role, quest_users.role)` (行番号: 65〜68)
 * 根拠: `if active_q_ids:\n                ph = ','.join(['?'] * len(active_q_ids))\n                cur.execute(f"DELETE FROM quest_master WHERE quest_id NOT IN ({ph})", active_q_ids)  # nosec B608\n            else:\n                logger.warning(\n                    "⚠️ quest_data.QUESTSが空のため、quest_masterへの全削除操作を"\n                    "スキップしました(意図しない全消去を防ぐための安全弁)。"\n                )` (行番号: 72〜86)
 * 根拠: `for stale_reward_id in stale_reward_ids:\n                if stale_reward_id in referenced_reward_ids:\n                    logger.warning(\n                        f"⚠️ reward_id={stale_reward_id} はマスタから削除されましたが、"\n                        "user_inventoryに参照が残っているため削除をスキップします。"\n                    )\n                    continue\n                cur.execute("DELETE FROM reward_master WHERE reward_id = ?", (stale_reward_id,))` (行番号: 143〜150)
@@ -93,7 +95,7 @@
 ### `GameSystem.get_all_view_data`
 
 * **役割**: `family-quest`フロントエンドのメイン画面向けに、ユーザー一覧・クエスト一覧・報酬一覧・完了済みクエスト・最近のログ・承認待ち一覧を1つの辞書にまとめて返す。`quest_users`の取得結果は、SQLiteのデフォルト順序(主キーのアルファベット順)ではなく`quest_data.USERS`の宣言順に並べ替える(`canonical_order`)。各クエストには`quest_service._compute_boost_from_last_completed`によるボーナス(`bonus_gold`/`bonus_exp`)を付与し、この際に必要な「対象ユーザー×クエストの直近の非rejected完了日時」を、クエストごとに個別SELECTするのではなく`GROUP BY user_id, quest_id`の1クエリでまとめて取得してN+1クエリを避ける(`last_completed_map`)。`target_user`が実在ユーザーでない(`'all'`/`'siblings'`等)場合は、閲覧中のユーザー(`viewer_user_id`)または兄妹の代表ユーザーをボーナス算出の代表として使う。過去1ヶ月の`quest_history`(`status='approved'`)から、`quest_service.is_within_reset_period`で現在の周期内と判定されたものだけを`completedQuests`として集約する(`infinite`型は全件、それ以外はユーザーごとに最新1件のみ評価)。
-* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 168〜318)
+* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 174〜332)
 * 根拠: `if _quest_service_shim.quest_data:\n                canonical_order = {u['user_id']: i for i, u in enumerate(_quest_service_shim.quest_data.USERS)}\n                users.sort(key=lambda u: canonical_order.get(u['user_id'], len(canonical_order)))` (行番号: 185〜187)
 * 根拠: `last_completed_map: Dict[tuple, str] = {\n                (row['user_id'], row['quest_id']): row['last_completed_at']\n                for row in cur.execute("""\n                    SELECT user_id, quest_id, MAX(completed_at) AS last_completed_at\n                    FROM quest_history\n                    WHERE status != 'rejected'\n                    GROUP BY user_id, quest_id\n                """)\n            }` (行番号: 222〜230)
 * 根拠: `if q['target_user'] == 'all' or not q['target_user']:\n                    boost_user_id = viewer_user_id\n                elif q['target_user'] == 'siblings' and sibling_child_ids:\n                    boost_user_id = sibling_child_ids[0]\n                else:\n                    boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 236〜241)
@@ -110,7 +112,7 @@
 ### `GameSystem._fetch_recent_logs`
 
 * **役割**: `quest_history`(`status='approved' AND quest_id != 0`、`id`降順、最大20件)と`reward_history`(`id`降順、最大20件)を取得しマージ、`ts`降順で先頭20件に切り詰めたうえで、`quest_users`から取得したユーザー名を付与し表示テキストと日付文字列を整形して返す。ユーザーが見つからない場合は`'誰か'`のプレースホルダを使う。
-* 根拠: `def _fetch_recent_logs(self, cur) -> List[dict]:` (行番号: 320〜338)
+* 根拠: `def _fetch_recent_logs(self, cur) -> List[dict]:` (行番号: 334〜352)
 * 根拠: `q_logs = cur.execute("""\n            SELECT id, user_id, quest_title as title, 'quest' as type, completed_at as ts\n            FROM quest_history WHERE status='approved' AND quest_id != 0 ORDER BY id DESC LIMIT 20\n        """).fetchall()` (行番号: 321〜324)
 * **引数/リクエスト**: `cur`（呼び出し元のトランザクション内で使うDBカーソル）
 * 根拠: (行番号: 320)
@@ -121,9 +123,9 @@
 * **エラーハンドリング**: なし
 * 根拠: (行番号: 320〜338)
 
-### `game_system` / `quest_service` / `shop_service` / `user_service` (モジュールレベル変数)
+### `game_system` / `quest_service` / `approval_service` / `shop_service` / `user_service` (モジュールレベル変数)
 
-* **役割**: `GameSystem`のシングルトンインスタンス`game_system`と、その内部に保持される`quest_service`/`shop_service`/`user_service`をモジュールレベルの変数として公開する。下位互換シム(`services/quest_service.py`)がこれらをそのまま再エクスポートし、`routers/quest_router.py`がシム経由でimportして使用する。
+* **役割**: `GameSystem`のシングルトンインスタンス`game_system`と、その内部に保持される`quest_service`/`approval_service`/`shop_service`/`user_service`をモジュールレベルの変数として公開する。下位互換シム(`services/quest_service.py`)がこれらをそのまま再エクスポートし、`routers/quest_router.py`がシム経由でimportして使用する。
 * 根拠: `game_system = GameSystem()\nquest_service = game_system.quest_service\nshop_service = game_system.shop_service\nuser_service = game_system.user_service` (行番号: 341〜344)
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルの変数代入。`GameSystem()`のインスタンス化自体は`__init__`の副作用を参照）
 * 根拠: (行番号: 341)
@@ -215,7 +217,7 @@ graph TD
 | --- | --- | --- |
 | DB各テーブルのスキーマ | `quest_users`/`quest_master`/`reward_master`/`quest_history`/`user_inventory`の各カラムの型・制約が本ファイルからは不明。 | DBのDDL、マイグレーション定義ファイル |
 | `quest_data.USERS`/`.QUESTS`/`.REWARDS`の実データ | 定義ファイルの実体は本ファイルからは確認できず、辞書のキー構成は本ファイルの参照からのみ推測可能。 | `quest_data.py`（[quest_data.md](./quest_data.md)） |
-| `common.get_now_iso`の形式 | ミリ秒・タイムゾーン情報の有無が本ファイルからは不明。 | `common.py` |
+| `core.utils.get_now_iso`の形式 | ミリ秒・タイムゾーン情報の有無が本ファイルからは不明。 | `common.py` |
 | `MasterUser`/`MasterQuest`/`MasterReward`のバリデーションルール詳細 | `role`フィールドが`Optional[str]`であること以外の制約は本ファイルからは不明。 | `models/quest.py`（[quest.md](./quest.md)） |
 
 ## 相互参照による補足情報
@@ -224,7 +226,7 @@ graph TD
 | --- | --- | --- |
 | DB各テーブルのスキーマ | スキーマの唯一の定義元である`MY_HOME_SYSTEM/migrations/`から生成された`MY_HOME_SYSTEM/current_schema.sql`を直接確認した。`quest_users(user_id TEXT PRIMARY KEY, name TEXT, job_class TEXT, level INTEGER DEFAULT 1, exp INTEGER DEFAULT 0, gold INTEGER DEFAULT 0, medal_count INTEGER DEFAULT 0, avatar TEXT DEFAULT '🙂', updated_at DATETIME, role TEXT)`、`quest_master(quest_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, description TEXT, quest_type TEXT DEFAULT 'daily', exp_gain INTEGER DEFAULT 10, gold_gain INTEGER DEFAULT 5, icon_key TEXT, day_of_week TEXT, target_user TEXT DEFAULT 'all', start_date TEXT, end_date TEXT, occurrence_chance REAL DEFAULT 1.0, start_time TEXT, end_time TEXT, days TEXT, pre_requisite_quest_id INTEGER DEFAULT NULL, reset_period TEXT DEFAULT 'daily')`、`reward_master(reward_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, cost_gold INTEGER, category TEXT, icon_key TEXT, desc TEXT, target TEXT DEFAULT 'all', description TEXT)`、`quest_history(...linked_history_id INTEGER DEFAULT NULL, medals_earned INTEGER DEFAULT 0)`、`user_inventory(... FOREIGN KEY(reward_id) REFERENCES reward_master(reward_id))`。重要な点として、**`quest_users`に`ORDER BY`の根拠となる列(表示順・作成順)が存在しない**ため、本ファイルが`quest_data.USERS`の宣言順で明示的に再ソートしている実装(176〜187行目のコメント)はDB側では代替できない。`reward_master`の`desc`/`description`併存も`sync_strict.py`による移行の名残であり、本ファイルが`r.pop('desc', None)`で`description`のみを正とする処理の背景がスキーマから裏付けられる。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql`（`MY_HOME_SYSTEM/migrations/`から`python init_unified_db.py --dump-schema`で生成。参考: [init_unified_db.md](./init_unified_db.md)） |
 | `quest_data.USERS`/`.QUESTS`/`.REWARDS`の実データ | `MY_HOME_SYSTEM/quest_data.py`を直接確認した。`USERS`(34〜55行目)は4件(`dad`/`mom`/`son`/`daughter`の順に宣言)で、各要素のキーは`user_id`/`name`/`job_class`/`level`/`exp`/`gold`/`avatar`/`role`/`info`。`role`は`'role_adult'`(dad・mom)と`'role_child'`(son・daughter)の2値のみで、本ファイルの`sibling_child_ids`抽出(`role == ROLE_CHILD`)がちょうど2件になる前提が裏付けられる。`QUESTS`(81〜220行目)の各要素は`id`/`title`/`type`/`target`/`category`/`difficulty`/`exp`/`gold`/`icon`/`desc`を基本キーとし、任意で`days`/`start_time`/`end_time`/`start_date`/`end_date`/`chance`/`pre_requisite_quest_id`/`reset_period`を持つ。`REWARDS`(221〜266行目)は`id`/`title`/`category`/`cost_gold`/`icon_key`/`desc`/`target`。`target`の実出現値は`'all'`/`'children'`/`'adults'`/`'dad'`/`'mom'`/`'son'`/`'daughter'`/`'siblings'`の8種類。なお`USERS`は`quest_users.local.json`(gitignore対象)が存在すれば年齢等の表示専用データで`user_id`単位に上書きされるが、`user_id`/`role`の構成自体は変わらない。 | 直接ソース確認: `MY_HOME_SYSTEM/quest_data.py:34-266`（参考: [quest_data.md](./quest_data.md)） |
-| `common.get_now_iso`の形式 | `MY_HOME_SYSTEM/common.py`16行目の`from core.utils import get_now_iso`による再エクスポートであり、実体は`MY_HOME_SYSTEM/core/utils.py`14〜15行目の`return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()`である。戻り値は**JSTのタイムゾーン情報付き(`+09:00`)・マイクロ秒6桁を含むISO 8601文字列**(例: `2026-09-16T07:30:00.123456+09:00`)。固定長・ゼロ埋めのため文字列比較・`MAX()`が時系列順と一致し、`_seconds_since_iso_timestamp`が`fromisoformat`でそのままパースできる。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:14-15`, `MY_HOME_SYSTEM/common.py:16`（参考: [utils.md](./utils.md)・[common.md](./common.md)） |
+| `core.utils.get_now_iso`の形式 | `MY_HOME_SYSTEM/common.py`16行目の`from core.utils import get_now_iso`による再エクスポートであり、実体は`MY_HOME_SYSTEM/core/utils.py`14〜15行目の`return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()`である。戻り値は**JSTのタイムゾーン情報付き(`+09:00`)・マイクロ秒6桁を含むISO 8601文字列**(例: `2026-09-16T07:30:00.123456+09:00`)。固定長・ゼロ埋めのため文字列比較・`MAX()`が時系列順と一致し、`_seconds_since_iso_timestamp`が`fromisoformat`でそのままパースできる。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:14-15`, `MY_HOME_SYSTEM/common.py:16`（参考: [utils.md](./utils.md)・[common.md](./common.md)） |
 | `MasterUser`/`MasterQuest`/`MasterReward`のバリデーションルール詳細 | `MY_HOME_SYSTEM/models/quest.py`(16〜70行目)を直接確認した。`MasterUser`: `user_id`/`name`/`job_class`は制約なしの`str`、`level: int = Field(default=1, ge=1)`、`exp: int = Field(default=0, ge=0)`、`gold: int = Field(default=50, ge=0)`(Issue #454で境界追加)、`avatar: str = '🙂'`、`role: Optional[str] = None`(**`'role_adult'`/`'role_child'`への`Literal`制約は無い**=タイポは検出されない)。`MasterQuest`: `id: int = Field(ge=1, le=_SQLITE_INT_MAX)`、`title: str = Field(min_length=1, max_length=200)`、`type: Literal['daily', 'special', 'infinite', 'limited', 'random']`(Issue #529で`limited`/`random`を追加)、`target: str = 'all'`(制約なし)、`exp`/`gold`は`ge=0`、`icon: str`必須、`chance: Optional[float] = Field(default=1.0, ge=0.0, le=1.0)`、`reset_period: Optional[Literal['daily','weekly','monthly']] = 'daily'`、`days`は`@field_validator`(53〜60行目)が`_DAY_OF_WEEK_RE`で`'0,3'`形式(0〜6のカンマ区切り)を検証し、空文字/`None`は`None`へ正規化する(Issue #409)。`MasterReward`: `id`(`ge=1, le=_SQLITE_INT_MAX`)、`title`(`min_length=1, max_length=200`)、`category: str`必須、`cost_gold: int = Field(ge=0)`、`icon_key: str`必須、`desc: Optional[str] = None`、`target: Optional[str] = "all"`(制約なし)。したがって`role`と`target`だけは**Pydantic層では一切検証されず**、本ファイルの`ROLE_CHILD`比較・`target`分岐がタイポに対する唯一の防衛線である。 | 直接ソース確認: `MY_HOME_SYSTEM/models/quest.py:16-70`（参考: [quest.md](./quest.md)） |
 
 ## 10. 自己検証結果

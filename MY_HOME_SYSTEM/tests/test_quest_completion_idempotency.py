@@ -31,14 +31,14 @@ from fastapi import HTTPException
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
-from services.quest_service import QuestService
+from core.database import get_db_cursor
+from services.quest_service import ApprovalService, QuestService
 
 JST = pytz.timezone("Asia/Tokyo")
 
 
 def _seed_quest(user_id: str = "dad", quest_id: int = 9001):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         # #370 (Q-M2): 完了処理の即時報酬/pending振り分けは role == ROLE_ADULT で
         # 判定するため(不明=子ども)、このファイルのスパムガード/周期リセットの
         # テストは即時報酬(success)を前提としており role_adult を明示する。
@@ -54,7 +54,7 @@ def _seed_quest(user_id: str = "dad", quest_id: int = 9001):
 
 def _set_last_completed_at(user_id: str, quest_id: int, seconds_ago: float) -> None:
     ts = (datetime.datetime.now(JST) - datetime.timedelta(seconds=seconds_ago)).isoformat()
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "UPDATE quest_history SET completed_at = ? WHERE user_id = ? AND quest_id = ?",
             (ts, user_id, quest_id),
@@ -101,7 +101,7 @@ class TestSpamGuardIsTimezoneSafe:
         合わせてスパムガードの間隔を10秒→60秒(INFINITE_QUEST_COOLDOWN_SECONDS)へ
         引き上げたため、境界値も60秒基準に更新。
         """
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 ("dad", "Test", "Warrior", 1, 0, 0, "role_adult"),
@@ -119,7 +119,7 @@ class TestSpamGuardIsTimezoneSafe:
 
     def test_infinite_retry_just_under_cooldown_is_rejected(self, isolated_db):
         """B2: infiniteクエストは60秒未満の再送信を429で拒否すること(10秒では通らない)。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES (?, ?, ?, ?, ?, ?)",
                 ("dad", "Test", "Warrior", 1, 0, 0),
@@ -159,7 +159,7 @@ class TestRepeatedCompletionAfterGuardWindow:
             quest_service.process_complete_quest("dad", 9001)
         assert exc_info.value.status_code == 400
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             user = cur.execute("SELECT gold FROM quest_users WHERE user_id = 'dad'").fetchone()
         assert user["gold"] == 5  # 二重加算されていない
 
@@ -178,7 +178,7 @@ class TestResetPeriodEnforcement:
         assert result["status"] == "success"
 
     def test_weekly_quest_rejected_within_same_week(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES (?, ?, ?, ?, ?, ?)",
                 ("dad", "Test", "Warrior", 1, 0, 0),
@@ -210,7 +210,7 @@ class TestResetPeriodEnforcement:
         スパムガード間隔を60秒に引き上げたため、境界値も60秒超(65秒)にして
         「周期リセット免除」と「スパムガード間隔」の2つの独立した挙動を混同しないようにする。
         """
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 ("dad", "Test", "Warrior", 1, 0, 0, "role_adult"),
@@ -245,7 +245,7 @@ class TestApprovalDoesNotOverwriteCompletedAt:
         )
 
     def test_daily_quest_completable_next_day_even_if_approved_late(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             self._seed_child_and_adult(cur)
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, reset_period, target_user) "
@@ -255,27 +255,29 @@ class TestApprovalDoesNotOverwriteCompletedAt:
 
         quest_service = QuestService()
 
+        approval_service = ApprovalService()
+
         # 前日の夜、子供が完了報告(pending)する
         report_result = quest_service.process_complete_quest("son", 9004)
         assert report_result["status"] == "pending"
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             history_id = cur.execute(
                 "SELECT id FROM quest_history WHERE user_id = 'son' AND quest_id = 9004"
             ).fetchone()["id"]
 
         # 報告時刻を「前日」にずらしておく
         _set_last_completed_at("son", 9004, seconds_ago=25 * 3600)
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             reported_at = cur.execute(
                 "SELECT completed_at FROM quest_history WHERE id = ?", (history_id,)
             ).fetchone()["completed_at"]
 
         # 親が翌朝に承認する
-        approve_result = quest_service.process_approve_quest("dad", history_id)
+        approve_result = approval_service.process_approve_quest("dad", history_id)
         assert approve_result["status"] == "success"
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             hist_after = cur.execute(
                 "SELECT completed_at FROM quest_history WHERE id = ?", (history_id,)
             ).fetchone()

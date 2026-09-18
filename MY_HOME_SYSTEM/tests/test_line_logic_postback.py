@@ -16,7 +16,7 @@ import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import config
 from handlers import line_logic
 
@@ -51,7 +51,7 @@ class TestAllGenki:
 
         line_logic.handle_postback(event, mock_line_api)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             rows = cur.execute(
                 f"SELECT child_name FROM {config.SQLITE_TABLE_CHILD} WHERE user_id='U1'"
             ).fetchall()
@@ -103,7 +103,7 @@ class TestAllGenki:
         texts = _texts_from_reply(mock_line_api)
         assert any("失敗" in t for t in texts)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             count = cur.execute(
                 f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD} WHERE user_id='U1'"
             ).fetchone()["c"]
@@ -114,7 +114,7 @@ class TestAllGenki:
         monkeypatch.setattr(db_module, "save_logs_batch_generic", real_batch_generic)
         line_logic.handle_postback(fake_postback_event("action=all_genki"), mock_line_api)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             rows = cur.execute(
                 f"SELECT child_name FROM {config.SQLITE_TABLE_CHILD} WHERE user_id='U1'"
             ).fetchall()
@@ -141,7 +141,7 @@ class TestChildCheck:
         line_logic.handle_postback(event, mock_line_api)
 
         assert "智矢" in _texts_from_reply(mock_line_api)[0]
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
         assert count == 0
 
@@ -150,7 +150,7 @@ class TestChildCheck:
 
         line_logic.handle_postback(event, mock_line_api)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 f"SELECT * FROM {config.SQLITE_TABLE_CHILD} WHERE child_name='智矢'"
             ).fetchone()
@@ -172,7 +172,7 @@ class TestChildCheck:
         texts = _texts_from_reply(mock_line_api)
         assert any("失敗" in t for t in texts)
         assert not any("記録しました" in t for t in texts)
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
         assert count == 0
 
@@ -184,7 +184,7 @@ class TestChildCheck:
         line_logic.handle_postback(event, mock_line_api)
 
         mock_line_api.reply_message.assert_not_called()
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
         assert count == 0
 
@@ -192,7 +192,7 @@ class TestChildCheck:
 class TestCheckStatus:
     def test_builds_summary_flex_from_existing_records(self, isolated_db, mock_line_api):
         today = line_logic.get_today_date_str()
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_CHILD} (child_name, condition, timestamp) VALUES (?, ?, ?)",
                 ("智矢", "😊 元気いっぱい", f"{today}T08:00:00"),
@@ -222,7 +222,7 @@ class TestFoodRecordDirect:
 
         line_logic.handle_postback(event, mock_line_api)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_FOOD}").fetchone()
         assert "麺類" in row["menu_category"]
         assert "ラーメン" in row["menu_category"]
@@ -232,7 +232,7 @@ class TestFoodRecordDirect:
 
         line_logic.handle_postback(event, mock_line_api)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_FOOD}").fetchone()
         assert "不明なメニュー" in row["menu_category"]
 
@@ -251,7 +251,7 @@ class TestFoodRecordDirect:
         texts = _texts_from_reply(mock_line_api)
         assert any("失敗" in t for t in texts)
         assert not any("記録しました" in t for t in texts)
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_FOOD}").fetchone()["c"]
         assert count == 0
 

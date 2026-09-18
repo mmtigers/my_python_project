@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 from models.quest import MasterQuest
 from services import quest_service as quest_service_module
 from services.quest_service import GameSystem, QuestService
@@ -67,7 +67,7 @@ class TestSyncMasterDataWithLimitedAndRandom:
         monkeypatch.setattr(quest_service_module, "quest_data", fake)
         result = GameSystem().sync_master_data()
         assert result["status"] == "synced"
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             rows = {r["quest_id"]: dict(r) for r in cur.execute("SELECT * FROM quest_master")}
         assert rows[1]["quest_type"] == "limited" and rows[1]["end_date"] == "2020-01-02"
         assert rows[2]["quest_type"] == "random" and rows[2]["occurrence_chance"] == 0.0

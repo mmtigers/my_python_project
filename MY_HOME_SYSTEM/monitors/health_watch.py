@@ -31,7 +31,6 @@ import difflib
 import fcntl
 import glob
 import hashlib
-import json
 import os
 import shutil
 import subprocess
@@ -41,6 +40,7 @@ from typing import List, Optional, Tuple
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
+from core import state_file
 from core.logger import setup_logging
 from services.notification_service import send_push
 from monitors.log_analyzer import LogAnalyzer
@@ -83,17 +83,23 @@ DIFF_LINES_LIMIT: int = 3
 
 
 def _read_marker() -> datetime.datetime:
-    """前回チェック完了時刻を読む。無ければ既定の遡り時間で補完する。"""
-    try:
-        with open(MARKER_FILE, "r", encoding="utf-8") as f:
-            return datetime.datetime.fromisoformat(f.read().strip())
-    except (OSError, ValueError):
-        return datetime.datetime.now() - datetime.timedelta(seconds=DEFAULT_LOOKBACK_SEC)
+    """前回チェック完了時刻を読む。無ければ既定の遡り時間で補完する。
+
+    Issue #661: 読み書きは core/state_file.py へ寄せた(書き込みは tmp + fsync +
+    os.replace の原子的差し替えになる)。ファイル自体が無い/壊れている場合に
+    既定の遡り時間へ倒す方針は従来どおり。
+    """
+    raw = state_file.read_text(MARKER_FILE)
+    if raw:
+        try:
+            return datetime.datetime.fromisoformat(raw)
+        except ValueError:
+            pass
+    return datetime.datetime.now() - datetime.timedelta(seconds=DEFAULT_LOOKBACK_SEC)
 
 
 def _write_marker(dt: datetime.datetime) -> None:
-    with open(MARKER_FILE, "w", encoding="utf-8") as f:
-        f.write(dt.isoformat())
+    state_file.write_text_atomic(MARKER_FILE, dt.isoformat())
 
 
 # Issue #651: 外部コマンドの待ち時間上限(秒)。systemd/journald が応答しない状況で無限待ちになると、
@@ -312,18 +318,21 @@ def _should_notify(anomaly_keys: List[str], now: datetime.datetime) -> bool:
     が経過するまで再通知しない。セットが変化したら即座に通知する。
     """
     fingerprint = hashlib.sha256("|".join(sorted(anomaly_keys)).encode()).hexdigest()
-    try:
-        with open(NOTIFY_STATE_FILE, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        if state.get("fingerprint") == fingerprint:
+    # Issue #661: 状態ファイルの読み書きは core/state_file.py に集約した。
+    # 壊れている/読めない場合に「通知する」側へ倒す方針は従来どおり
+    # (異常の通知を取りこぼすより、重複して通知する方が安全側)。
+    state = state_file.read_json(NOTIFY_STATE_FILE)
+    if isinstance(state, dict) and state.get("fingerprint") == fingerprint:
+        try:
             last = datetime.datetime.fromisoformat(state["last_notified"])
             if (now - last).total_seconds() < RENOTIFY_INTERVAL_SEC:
                 return False
-    except (OSError, ValueError, KeyError):
-        pass
+        except (KeyError, TypeError, ValueError):
+            pass
 
-    with open(NOTIFY_STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump({"fingerprint": fingerprint, "last_notified": now.isoformat()}, f)
+    state_file.write_json_atomic(
+        NOTIFY_STATE_FILE, {"fingerprint": fingerprint, "last_notified": now.isoformat()}
+    )
     return True
 
 

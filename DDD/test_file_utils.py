@@ -205,3 +205,47 @@ class TestRedactDiscordWebhookUrl:
         from file_utils import redact_discord_webhook_url
         assert redact_discord_webhook_url(ValueError("boom")) == "boom"
         assert redact_discord_webhook_url("nothing to hide") == "nothing to hide"
+
+
+class TestResolveNasMountPoint:
+    """Issue #663: DDDの各スクリプトが直書きしていた `/mnt/nas` を、
+    環境変数 `NAS_MOUNT_POINT`(MY_HOME_SYSTEM と共用の .env のキー)で
+    上書きできるようにしたことの回帰テスト。"""
+
+    def test_defaults_to_mnt_nas_when_env_is_unset(self, monkeypatch):
+        from pathlib import Path
+
+        from file_utils import resolve_nas_mount_point
+
+        monkeypatch.delenv("NAS_MOUNT_POINT", raising=False)
+        assert resolve_nas_mount_point() == Path("/mnt/nas")
+
+    def test_empty_env_falls_back_to_default(self, monkeypatch):
+        from pathlib import Path
+
+        from file_utils import resolve_nas_mount_point
+
+        monkeypatch.setenv("NAS_MOUNT_POINT", "   ")
+        assert resolve_nas_mount_point() == Path("/mnt/nas")
+
+    def test_env_override_is_honoured(self, monkeypatch):
+        from pathlib import Path
+
+        from file_utils import resolve_nas_mount_point
+
+        monkeypatch.setenv("NAS_MOUNT_POINT", "/srv/storage")
+        assert resolve_nas_mount_point() == Path("/srv/storage")
+
+    def test_nas_data_dir_is_built_from_the_mount_point(self, monkeypatch):
+        from file_utils import resolve_nas_data_dir
+
+        monkeypatch.setenv("NAS_MOUNT_POINT", "/srv/storage")
+        assert resolve_nas_data_dir("newface_monitor") == "/srv/storage/home_system/newface_monitor/data"
+
+    def test_nas_data_dir_default_matches_the_previous_hardcoded_paths(self, monkeypatch):
+        """既定値は、env 化する前にソースへ直書きされていたパスと一致すること。"""
+        from file_utils import resolve_nas_data_dir
+
+        monkeypatch.delenv("NAS_MOUNT_POINT", raising=False)
+        assert resolve_nas_data_dir("newface_monitor") == "/mnt/nas/home_system/newface_monitor/data"
+        assert resolve_nas_data_dir("youtube_extractor") == "/mnt/nas/home_system/youtube_extractor/data"

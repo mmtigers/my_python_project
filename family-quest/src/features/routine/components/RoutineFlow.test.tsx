@@ -87,7 +87,7 @@ describe('RoutineFlow', () => {
 const pmFlow: RoutineActiveFlow = {
     started: true,
     title: '帰ってから寝るまで',
-    checkpoint_time: '18:00',
+    checkpoint_time: '17:30',
     current_step_index: 5,
     in_free_time: false,
     is_complete: false,
@@ -158,7 +158,7 @@ describe('RoutineFreeTimeBanner', () => {
 const momPmFlow: RoutineActiveFlow = {
     started: true,
     title: '帰ってから寝るまで',
-    checkpoint_time: '18:00',
+    checkpoint_time: '17:30',
     current_step_index: 2,
     in_free_time: false,
     is_complete: false,
@@ -201,5 +201,34 @@ describe('RoutineFlow step rewards (adult flows)', () => {
 
         fireEvent.click(screen.getByRole('button', { name: '完了！' }));
         expect(onCompleteStep).toHaveBeenCalledWith('cook_dinner');
+    });
+
+    // 締切を過ぎて「まだだよ」になった一本道のステップは、後から終わらせれば
+    // 完了報告できる(サーバー側の追いつき完了)。
+    const catchUpFlow: RoutineActiveFlow = {
+        ...pmFlow,
+        current_step_index: 3,
+        steps: [
+            { key: 'handwash', label: '手洗い・うがい', icon_key: 'handwash', is_checkpoint: false, is_checklist: false, status: 'done', gold: 0, exp: 0 },
+            { key: 'homework', label: '宿題', icon_key: 'homework', is_checkpoint: false, is_checklist: false, status: 'remind', gold: 0, exp: 0 },
+            { key: 'free', label: '自由時間', icon_key: 'free', is_checkpoint: true, is_checklist: false, status: 'remind', gold: 0, exp: 0 },
+            { key: 'sleep', label: '就寝', icon_key: 'sleep', is_checkpoint: false, is_checklist: false, status: 'current', gold: 0, exp: 0 },
+        ],
+    };
+
+    it('offers a catch-up button on a reminded step and reports it with its key', () => {
+        const onCompleteStep = vi.fn();
+        render(<RoutineFlow flowKey="pm" flow={catchUpFlow} onCompleteStep={onCompleteStep} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'いまやった！' }));
+        expect(onCompleteStep).toHaveBeenCalledWith('homework');
+    });
+
+    it('does not offer a catch-up button on the checkpoint step itself', () => {
+        render(<RoutineFlow flowKey="pm" flow={catchUpFlow} onCompleteStep={vi.fn()} />);
+
+        // 「まだだよ」は宿題と自由時間の2つに付くが、ボタンは宿題の1つだけ。
+        expect(screen.getAllByText('まだだよ')).toHaveLength(2);
+        expect(screen.getAllByRole('button', { name: 'いまやった！' })).toHaveLength(1);
     });
 });

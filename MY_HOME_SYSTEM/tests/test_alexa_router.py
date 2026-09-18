@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 from core.alexa_verifier import AlexaVerificationError
 
 
@@ -42,7 +42,7 @@ def _launch_request_body(supports_apl: bool = True):
 
 
 def _seed_one_user():
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute("""
             INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, avatar, role)
             VALUES ('dad', 'パパ', 'warrior', 3, 40, 120, '🦸', 'role_adult')

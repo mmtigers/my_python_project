@@ -125,6 +125,9 @@
 ### `_is_new_history`
 
 * **役割**: `check_throttling_status`が検出したスロットリング履歴ビット（`history_issues`）のうち、現在のブートでまだ通知していない未通知ビットが含まれるかを判定する。`THROTTLE_STATE_FILE`に保存された「前回のブートID + 通知済みビット（16進数）」を読み込み、ブートIDが一致すれば通知済みビットとの差分を取る。未通知ビットが1つでもあれば状態ファイルを更新して`True`を返し、既に全ビット通知済みであれば`False`を返す。ブートIDが変わっていた場合や状態ファイルが存在しない・壊れている場合は`notified_bits`を`0`として扱う（＝全ビット未通知扱い）。
+* **（Issue #661 の注記）** 他の監視スクリプトの状態ファイルの読み書きは`core/state_file.py`(`read_text`/`write_text_atomic`等)へ集約したが、`_is_new_history`だけは意図的に独自実装のまま残している。`state_file`の読み書きはそれぞれ独立にロックを取る2つの操作であり、間に他プロセスが割り込みうる。ここで必要なのは「読んで、判定して、書く」までを1つのロック区間に収めるcompare-and-set（下の#449がまさにそれを入れた箇所）であり、機械的に置き換えると#449の競合(lost update)が再発する。
+* 根拠: [注記コメント] (行番号: 100-106 / 抜粋: "Issue #661: 他の監視スクリプトの状態ファイルは core/state_file.py に集約したが、")
+
 * **（Issue #449 で修正）** 以前は`THROTTLE_STATE_FILE.read_text()`と`.write_text()`をそれぞれ独立した`try/except`で個別に呼び出しており、このスクリプトが（通常は逐次実行される前提だが）複数プロセスで同時実行された場合、読み取りから書き込みまでの間に他プロセスが割り込むと状態が上書き競合（lost update）する可能性があった。現在は状態ファイルを`r+`モードで一度だけ開き、読み取りから書き込みまでの区間全体を`fcntl.flock`による排他ロック（`fcntl.LOCK_EX`）で1つの不可分な区間にし、`finally`節で確実にロックを解放する。戻り値・挙動自体（判定ロジック）は変更されておらず、プロセス境界をまたいだアトミック性のみが追加された。
 * 根拠: `_is_new_history` (行番号: 88〜130 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")、[flockによる排他区間] (行番号: 103〜125 / 抜粋: "THROTTLE_STATE_FILE.touch(exist_ok=True)\n        with open(THROTTLE_STATE_FILE, "r+", encoding="utf-8") as f:\n            fcntl.flock(f.fileno(), fcntl.LOCK_EX)\n            try:\n                ...\n            finally:\n                fcntl.flock(f.fileno(), fcntl.LOCK_UN)")
 
@@ -149,15 +152,15 @@
 ### `check_throttling_status`
 
 * **役割**: `vcgencmd get_throttled`コマンドを実行し、ハードウェアのスロットリング状況を確認する。現在異常が発生している場合はERRORレベルでログのみ記録し（後述の通り`send_push`直接呼び出しは行わない）、過去履歴のみの場合は`_is_new_history`で当該ブートにおいて未通知のビットがあるかを判定し、未通知であればWARNINGレベルでログを記録、既に通知済みであればDEBUGレベルでログを記録するのみに留める。
-* 根拠: `check_throttling_status` (行番号: 132〜178 / 抜粋: "def check_throttling_status():")
+* 根拠: `check_throttling_status` (行番号: 139〜185 / 抜粋: "def check_throttling_status():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_throttling_status():` (行番号: 132 / 抜粋: "def check_throttling_status():")
+* 根拠: `def check_throttling_status():` (行番号: 139 / 抜粋: "def check_throttling_status():")
 
 
 * **戻り値/レスポンス**: なし（定義なし）
-* 根拠: `def check_throttling_status():` (行番号: 132 / 抜粋: "def check_throttling_status():")
+* 根拠: `def check_throttling_status():` (行番号: 139 / 抜粋: "def check_throttling_status():")
 
 
 * **副作用**: OSコマンド（`vcgencmd`）の実行、`_is_new_history`経由での`THROTTLE_STATE_FILE`の読み書き、ログ出力のみ。**`send_push`の直接呼び出しは行わない**（コード中のコメント「修正点2」により、`core/logger.py`側の仕様で`logger.error`がDiscordへ自動転送されることを理由に、二重通知防止のため意図的に削除されている）。
@@ -172,11 +175,11 @@
 ### `check_health`
 
 * **役割**: サービスとプロセスのステータスを確認し、両方が正常であればロックファイルを解除し復旧通知を送信する。異常であれば、初回は停止通知を送信してロックファイルを作成し、その後は一定時間（6時間）ごとにリマインダー通知を送信する。
-* 根拠: `check_health` (行番号: 180〜221 / 抜粋: "def check_health() -> None:")
+* 根拠: `check_health` (行番号: 187〜228 / 抜粋: "def check_health() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_health() -> None:` (行番号: 180 / 抜粋: "def check_health() -> None:")
+* 根拠: `def check_health() -> None:` (行番号: 187 / 抜粋: "def check_health() -> None:")
 
 
 * **戻り値/レスポンス**: `None`

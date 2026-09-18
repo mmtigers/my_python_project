@@ -20,6 +20,7 @@ import FamilyDashboard from './features/family/components/FamilyDashboard';
 
 import { CompletedSignal, ID, Quest, QuestHistory, Reward, User } from '@/types';
 import { getQuestLockState, getQuestProcessingKey } from './features/quest/hooks/useQuestStatus';
+import { useBusyKeys } from './features/quest/hooks/useBusyKeys';
 import { isParentUser, getRepresentativeParent } from './lib/userRole';
 import { ActionResult, resolveErrorText } from './lib/actionResult';
 
@@ -39,6 +40,7 @@ import UserStatusCard from './features/family/components/UserStatusCard';
 import QuestList from './features/quest/components/QuestList';
 import ApprovalList from './features/quest/components/ApprovalList';
 import FamilyLog from './features/family/components/FamilyLog';
+import { QuestActivityProvider } from './features/quest/context/QuestActivityContext';
 
 function App() {
   const { play } = useSound();
@@ -65,22 +67,26 @@ function App() {
   // 実際は成功しているのに「承認に失敗しました」というエラーモーダルが出てしまっていた。
   // 承認は複数のクエストを並行して処理できる必要があるため、単一のbooleanではなく
   // 処理中の履歴idの集合で個別に多重送信を防ぐ。
-  const approvingHistoryIdsRef = useRef<Set<ID>>(new Set());
+  // #391(F-L8): 承認ボタンの isLoading 表示用に、判定用のrefと表示用のstateを
+  // 二重に持つ(#101 と同じパターン)。その二重化は useBusyKeys に切り出してある(#659)。
+  const {
+    ref: approvingHistoryIdsRef,
+    keys: approvingHistoryIds,
+    sync: syncApprovingHistoryIds,
+  } = useBusyKeys<ID>();
   const isApprovingAllRef = useRef(false);
-  // #391(F-L8): 承認ボタンの isLoading 表示用に approvingHistoryIdsRef を state にも写す。
-  // 判定は同期的なrefで行い、見た目だけ state に追従させる(#101 と同じ二重化パターン)。
-  const [approvingHistoryIds, setApprovingHistoryIds] = useState<ID[]>([]);
   const [isApprovingAll, setIsApprovingAll] = useState(false);
-  const syncApprovingHistoryIds = () => setApprovingHistoryIds([...approvingHistoryIdsRef.current]);
 
   // #391: クエスト完了/取消APIが送信中の (user_id, quest_id) の集合。以前は確認モーダルを
   // 閉じてから await runQuestAction していたため、応答が返るまでカードは未完了のまま
   // 再タップでき、2回目の確認モーダルが1回目の完了後も開いたまま残って「はい」を押すと
   // 400「本日は完了済み」/429 のエラーモーダルになっていた。
   // handleQuestClick で無視し、QuestItem にローディング表示を出すために state にも写す。
-  const processingQuestKeysRef = useRef<Set<string>>(new Set());
-  const [processingQuestKeys, setProcessingQuestKeys] = useState<string[]>([]);
-  const syncProcessingQuestKeys = () => setProcessingQuestKeys([...processingQuestKeysRef.current]);
+  const {
+    ref: processingQuestKeysRef,
+    keys: processingQuestKeys,
+    sync: syncProcessingQuestKeys,
+  } = useBusyKeys<string>();
 
   // #102: クエスト完了の効果音・無限クエストの連打防止クールダウンは、以前は
   // QuestList側でタップ即時(=確認モーダルを開く前)に発火していたため、確認モーダルで
@@ -462,6 +468,16 @@ function App() {
   if (isLoading) return <div className="p-10 text-center">Loading Family Quest...</div>;
 
   return (
+    // #659: 進行中のクエスト操作(完了通知・送信中キー・承認中id)は、以前
+    // App → FamilyDashboard → FamilyPanel → QuestList と素通しの props で
+    // 運んでいた。中継する2つは値を使わないので Context へ移した。
+    // App 直下で描画する QuestList / ApprovalList は1段なので props のまま渡す
+    // (表示専用コンポーネントの単体テストを Provider 無しで書ける状態を保つため)。
+    <QuestActivityProvider
+      completedSignal={completedSignal}
+      processingQuestKeys={processingQuestKeys}
+      busyHistoryIds={approvingHistoryIds}
+    >
     <div className="min-h-screen bg-gray-900 pb-20 font-sans text-gray-100">
       {!isOnline && (
         <div className="fixed top-0 inset-x-0 z-40 bg-red-800 text-white text-xs font-bold text-center py-1.5 flex items-center justify-center gap-2">
@@ -528,9 +544,6 @@ function App() {
             onApprove={handleApprove}
             onReject={handleReject}
             onApproveAll={handleApproveAll}
-            completedSignal={completedSignal}
-            processingQuestKeys={processingQuestKeys}
-            busyHistoryIds={approvingHistoryIds}
             isApprovingAll={isApprovingAll}
             onAvatarClick={(user) => setAvatarUser(user)}
           />
@@ -678,6 +691,7 @@ function App() {
       </ChunkErrorBoundary>
 
     </div>
+    </QuestActivityProvider>
   );
 }
 

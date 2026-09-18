@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Tuple
 # 設計書 (Source: 137) に従い core.logger を使用
 from core.logger import setup_logging  # 設計書に従い core.logger を使用 [cite: 137, 354]
-from common import send_push           # 通知用ユーティリティ
+from services.notification_service import send_push
 import config
 
 # ロガー設定

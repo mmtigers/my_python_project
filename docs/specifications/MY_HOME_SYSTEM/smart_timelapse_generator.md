@@ -96,7 +96,7 @@
 ### `EventRecord` (dataclass)
 
 * **役割**: `MotionRecord`をグルーピングして生成される「イベント」（一連の動きのまとまり）のデータ構造。開始・終了秒、スコア、検出物体数（人物・車両・動物・顔）などを保持する。`__post_init__`で`duration`（継続時間）を自動計算する。
-* 根拠: `@dataclass class EventRecord:` および `def __post_init__(self):` (行番号: 93-94 / 抜粋: "self.duration = (self.end_sec - self.start_sec) + 1")
+* 根拠: `@dataclass class EventRecord:` および `def __post_init__(self):` (行番号: 100-101 / 抜粋: "self.duration = (self.end_sec - self.start_sec) + 1")
 
 
 * **フィールド**: `event_id: str`, `start_sec: int`, `end_sec: int`, `max_area: float`, `score: float = 0.0`, `duration: int = 0`, `person_count: int = 0`, `vehicle_count: int = 0`, `animal_count: int = 0`, `face_detected: int = 0`

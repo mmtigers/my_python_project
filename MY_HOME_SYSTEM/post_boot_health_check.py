@@ -1,4 +1,3 @@
-import contextlib
 import os
 import sys
 import time
@@ -6,7 +5,6 @@ import socket
 import subprocess
 import shutil
 import requests
-import sqlite3
 from typing import List
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -18,14 +16,16 @@ sys.path.append(BASE_DIR)
 
 try:
     import config
-    import common
+    from core.logger import setup_logging
+    from services.notification_service import send_push
+    from core.database import get_ro_connection
     from services import switchbot_service
 except ImportError as e:
-    print(f"Error: Failed to import config or common modules. {e}", file=sys.stderr)
+    print(f"Error: Failed to import config or core/services modules. {e}", file=sys.stderr)
     sys.exit(1)
 
 # ロガー設定
-logger = common.setup_logging("health_check")
+logger = setup_logging("health_check")
 
 # ==========================================
 # ユーザー設定
@@ -181,9 +181,13 @@ class PostBootHealthCheck:
         try:
             # #411 S-L8: 以前はconn.close()を成功パスの末尾でしか呼んでおらず、
             # cursor.execute/fetchoneが例外を送出するとexcept節には到達するが
-            # 接続はcloseされずリークしていた。contextlib.closingでどの終了経路
-            # でも確実にcloseする。
-            with contextlib.closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)) as conn:
+            # 接続はcloseされずリークしていた。どの終了経路でも確実にcloseする。
+            # Issue #661: 生の sqlite3.connect を core/database.get_ro_connection へ寄せた
+            # (このスクリプトは config の相対パスを自前で絶対パスへ解決しているため
+            # db_path を明示する)。timeout も他の読み取り経路と同じ30秒になり、
+            # 起動直後のマイグレーション・バックアップと重なっても
+            # "database is locked" で即座に ERROR 判定にならない。
+            with get_ro_connection(db_path=db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("PRAGMA quick_check;")
                 result = cursor.fetchone()[0]
@@ -197,7 +201,8 @@ class PostBootHealthCheck:
 
     # --- 3. Services (Wait & Retry) ---
     def check_services(self):
-        frontend_url = getattr(config, "FRONTEND_URL", "http://localhost:8000/quest/")
+        # Issue #663: 既定値は config.py の1箇所だけに持つ。
+        frontend_url = getattr(config, "FRONTEND_URL", "http://127.0.0.1:8000/quest")
         
         targets = [
             {"name": "Backend Server", "type": "port", "val": 8000, "critical": True},
@@ -242,7 +247,8 @@ class PostBootHealthCheck:
     # --- 4. Peripherals ---
     def check_peripherals(self) -> None:
         """NASの書き込み権限を含む周辺機器のチェックを行う [cite: 438]"""
-        nas_ip = getattr(config, "NAS_IP", "192.168.1.20")
+        # Issue #663: 既定値は config.py の1箇所だけに持つ(未設定なら空文字)。
+        nas_ip = getattr(config, "NAS_IP", "")
         mount_point = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
         is_mounted = os.path.ismount(mount_point)
         
@@ -260,7 +266,7 @@ class PostBootHealthCheck:
                 nas_status, nas_msg = STATUS_ERR, "Permission Denied"
                 error_detail = f"NAS書き込み権限エラー: {e}"
                 logger.error(error_detail)
-                common.send_push(
+                send_push(
                     messages=[{"type": "text", "text": f"🚨 [System Alert] NAS権限エラー\n内容: {error_detail}"}],
                     target="discord",
                     channel="report"
@@ -410,7 +416,7 @@ class PostBootHealthCheck:
         
         logger.info(f"Report:\n{title}\n{body}")
         
-        common.send_push(
+        send_push(
             messages=[{"type": "text", "text": f"{title}\n\n{body}"}],
             target="discord",
             channel="report"

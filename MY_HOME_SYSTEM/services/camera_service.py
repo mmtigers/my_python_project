@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any
 # #661: WSDL 探索は core/onvif_utils.py に一本化(以前は本ファイルと camera_monitor/camera_service に同一実装が重複)
 from core.onvif_utils import find_wsdl_path
 from core.logger import setup_logging
-from core.utils import get_now_jst
+from core.utils import get_now_jst, RefCountedLockRegistry
 import config
 
 try:
@@ -57,23 +57,18 @@ _state_lock = threading.Lock()
 # #247: _active_vod_processesには対応する_prune_finished_vod_processes()が
 # あるが、以前はこの辞書には剪定処理が存在せず、cam_id×target_dateの組み合わせが
 # 増えるたびに(long-running環境で日々)無限に蓄積していた。threading.Lockオブジェクト
-# 自体は軽量なため実運用上のメモリ影響は小さいが、参照カウント(_RefCountedLock)を
-# 導入し、そのエントリを誰も使用していない(参照カウント0)場合にのみ辞書から削除する。
+# 自体は軽量なため実運用上のメモリ影響は小さいが、参照カウント方式を導入し、
+# そのエントリを誰も使用していない(参照カウント0)場合にのみ辞書から削除する。
 # 単純に「lock.locked()がFalseなら削除」する方式だと、取得元(_vod_generation_lock)が
 # 辞書からロックオブジェクトを取り出した直後・実際にwith文で獲得する直前の隙間で
 # 別スレッドが剪定してしまい、同一process_keyに対して2つの別々のLockオブジェクトが
 # 生成されて同時に「取得成功」してしまう(このロック機構が本来防ぐべき二重起動と
 # 全く同じ問題を再発させる)ため、参照カウントで安全性を担保している。
-class _RefCountedLock:
-    __slots__ = ("lock", "ref_count")
-
-    def __init__(self) -> None:
-        self.lock = threading.Lock()
-        self.ref_count = 0
-
-
-_vod_generation_locks: Dict[str, _RefCountedLock] = {}
-_vod_generation_locks_guard = threading.Lock()
+# Issue #661: このファイルにあった _RefCountedLock と、それを使う2つの
+# コンテキストマネージャは core.utils.RefCountedLockRegistry と同一の実装だった
+# (同レジストリの docstring 自身がこの実装を参照元として挙げている)。
+# 重複を解消し、レジストリ側に一本化する。挙動は変わらない。
+_vod_generation_locks = RefCountedLockRegistry()
 
 
 @contextlib.contextmanager
@@ -81,46 +76,21 @@ def _vod_generation_lock(process_key: str):
     """process_key単位で排他制御を行うコンテキストマネージャ。
     使用中(参照カウント>0)のエントリは剪定されず、使用を終えた
     (参照カウントが0に戻った)エントリのみ_vod_generation_locksから削除される。"""
-    with _vod_generation_locks_guard:
-        entry = _vod_generation_locks.get(process_key)
-        if entry is None:
-            entry = _RefCountedLock()
-            _vod_generation_locks[process_key] = entry
-        entry.ref_count += 1
-    try:
-        with entry.lock:
-            yield
-    finally:
-        with _vod_generation_locks_guard:
-            entry.ref_count -= 1
-            if entry.ref_count == 0 and _vod_generation_locks.get(process_key) is entry:
-                del _vod_generation_locks[process_key]
+    with _vod_generation_locks.acquire(process_key):
+        yield
 
 
 # #439: ライブHLS配信の起動も、同一cam_idへの同時リクエストで「実行中でない」の
 # チェックとffmpeg起動・登録までを不可分にする必要がある(_vod_generation_lockと同じ
 # check-then-act競合)。cam_id単位の参照カウント付きロックとして同じ仕組みを流用する。
-_live_stream_locks: Dict[str, _RefCountedLock] = {}
-_live_stream_locks_guard = threading.Lock()
+_live_stream_locks = RefCountedLockRegistry()
 
 
 @contextlib.contextmanager
 def _live_stream_lock(cam_id: str):
     """cam_id単位でライブHLS配信の起動を排他制御するコンテキストマネージャ。"""
-    with _live_stream_locks_guard:
-        entry = _live_stream_locks.get(cam_id)
-        if entry is None:
-            entry = _RefCountedLock()
-            _live_stream_locks[cam_id] = entry
-        entry.ref_count += 1
-    try:
-        with entry.lock:
-            yield
-    finally:
-        with _live_stream_locks_guard:
-            entry.ref_count -= 1
-            if entry.ref_count == 0 and _live_stream_locks.get(cam_id) is entry:
-                del _live_stream_locks[cam_id]
+    with _live_stream_locks.acquire(cam_id):
+        yield
 
 
 def stop_all_processes(timeout: float = 5.0) -> int:

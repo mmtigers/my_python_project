@@ -4,7 +4,7 @@ import time
 import json
 import logging
 import asyncio
-from typing import List
+from typing import List, Optional
 from contextlib import contextmanager
 import config
 
@@ -60,12 +60,20 @@ RO_CONNECT_TIMEOUT_SEC: float = 30.0
 
 
 @contextmanager
-def get_ro_connection(timeout: float = RO_CONNECT_TIMEOUT_SEC):
+def get_ro_connection(timeout: float = RO_CONNECT_TIMEOUT_SEC, db_path: Optional[str] = None):
     """読み取り専用(`mode=ro`)の接続を開き、必ず close する(#661)。
 
     `row_factory` は `sqlite3.Row` を設定済み。書き込みは SQLite 側が拒否する。
+
+    Args:
+        timeout: ロック待ちの上限秒数。
+        db_path: 接続先のDBファイル。省略時は `config.SQLITE_DB_PATH`。
+            `post_boot_health_check.py` のように、config の相対パスを自前で
+            絶対パスへ解決してから接続する呼び出し元のために用意している
+            (接続の開き方自体は1箇所に保つため、パスだけを差し替えられるようにした)。
     """
-    conn = sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True, timeout=timeout)
+    target = db_path if db_path is not None else config.SQLITE_DB_PATH
+    conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True, timeout=timeout)
     try:
         conn.row_factory = sqlite3.Row
         yield conn

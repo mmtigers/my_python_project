@@ -15,13 +15,14 @@ from fastapi import HTTPException
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.utils import get_now_iso
+from core.database import get_db_cursor
 from services import quest_service as qs_module
 from services.quest_service import ROLE_ADULT
 
 
 def _seed() -> int:
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) "
             "VALUES ('dad', 'Dad', 'Warrior', 1, 0, 0, ?)",
@@ -34,7 +35,7 @@ def _seed() -> int:
         cur.execute(
             "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) "
             "VALUES ('dad', 701, 'owned', ?)",
-            (common.get_now_iso(),),
+            (get_now_iso(),),
         )
         return cur.execute("SELECT id FROM user_inventory ORDER BY id DESC LIMIT 1").fetchone()["id"]
 
@@ -57,7 +58,7 @@ def test_use_item_rejects_when_already_consumed_between_select_and_update(isolat
     assert exc.value.status_code == 400
     assert len(pushes) == 1
 
-    with common.get_db_cursor() as cur:
+    with get_db_cursor() as cur:
         rows = cur.execute("SELECT COUNT(*) AS c FROM quest_history WHERE quest_id = 0").fetchone()["c"]
     assert rows == 1
 
@@ -94,6 +95,6 @@ def test_concurrent_use_item_consumes_exactly_once(isolated_db, monkeypatch):
     assert results.count("ok") == 1
     assert all(r == 400 for r in results if r != "ok")
     assert len(pushes) == 1
-    with common.get_db_cursor() as cur:
+    with get_db_cursor() as cur:
         assert cur.execute("SELECT COUNT(*) AS c FROM quest_history WHERE quest_id = 0").fetchone()["c"] == 1
         assert cur.execute("SELECT status FROM user_inventory WHERE id=?", (inv_id,)).fetchone()["status"] == "consumed"

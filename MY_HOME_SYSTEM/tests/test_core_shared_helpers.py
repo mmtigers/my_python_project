@@ -146,3 +146,119 @@ class TestGetRoConnection:
     def test_default_timeout_matches_get_db_cursor(self):
         """#661: 5s/10s/30s とばらついていた読み取りの timeout を 30 秒へ揃えた。"""
         assert RO_CONNECT_TIMEOUT_SEC == 30.0
+
+    def test_db_path_argument_overrides_config(self, tmp_path, monkeypatch):
+        """#661 残件: post_boot_health_check は config の相対パスを自前で絶対パスへ
+        解決してから接続するため、パスだけを差し替えられる必要がある。"""
+        db_path = tmp_path / "explicit.db"
+        with sqlite3.connect(db_path) as setup:
+            setup.execute("CREATE TABLE t (v TEXT)")
+            setup.execute("INSERT INTO t VALUES ('explicit')")
+            setup.commit()
+        monkeypatch.setattr(config, "SQLITE_DB_PATH", str(tmp_path / "never_used.db"))
+
+        with get_ro_connection(db_path=str(db_path)) as conn:
+            assert conn.execute("SELECT v FROM t").fetchone()["v"] == "explicit"
+
+
+class TestStateFileCallSitesAreMigrated:
+    """#661 残件: 7箇所あった状態ファイルの個別実装を core/state_file.py へ寄せた。
+
+    `monitors/server_watchdog.py` だけは compare-and-set(読み取り→判定→書き込みを
+    1つの flock 区間に収める)が必要なため、意図的に独自実装のまま残している。
+    """
+
+    def test_switchbot_power_monitor_round_trips_through_state_file(self, tmp_path, monkeypatch):
+        from monitors import switchbot_power_monitor as spm
+
+        monkeypatch.setattr(spm, "_STATE_FILE", str(tmp_path / "devices.json"))
+        spm._save_persisted_states({"dev1": {"power_state": "ON"}})
+        assert spm._load_persisted_states() == {"dev1": {"power_state": "ON"}}
+
+    def test_switchbot_power_monitor_falls_back_to_empty_dict_on_broken_file(self, tmp_path, monkeypatch):
+        from monitors import switchbot_power_monitor as spm
+
+        path = tmp_path / "devices.json"
+        path.write_text("{ broken", encoding="utf-8")
+        monkeypatch.setattr(spm, "_STATE_FILE", str(path))
+        assert spm._load_persisted_states() == {}
+
+    def test_health_watch_marker_round_trip(self, tmp_path, monkeypatch):
+        import datetime
+
+        import monitors.health_watch as health_watch
+
+        monkeypatch.setattr(health_watch, "MARKER_FILE", str(tmp_path / ".marker"))
+        now = datetime.datetime(2026, 9, 17, 3, 0, 0)
+        health_watch._write_marker(now)
+        assert health_watch._read_marker() == now
+
+    def test_health_watch_marker_falls_back_when_missing_or_broken(self, tmp_path, monkeypatch):
+        import monitors.health_watch as health_watch
+
+        missing = tmp_path / ".absent"
+        monkeypatch.setattr(health_watch, "MARKER_FILE", str(missing))
+        assert health_watch._read_marker() is not None  # 既定の遡り時間で補完される
+
+        broken = tmp_path / ".broken"
+        broken.write_text("not-a-timestamp", encoding="utf-8")
+        monkeypatch.setattr(health_watch, "MARKER_FILE", str(broken))
+        assert health_watch._read_marker() is not None
+
+    def test_health_watch_notify_state_suppresses_repeat_then_allows_change(self, tmp_path, monkeypatch):
+        import datetime
+
+        import monitors.health_watch as health_watch
+
+        monkeypatch.setattr(health_watch, "NOTIFY_STATE_FILE", str(tmp_path / ".notify"))
+        now = datetime.datetime(2026, 9, 17, 3, 0, 0)
+        assert health_watch._should_notify(["異常A"], now) is True
+        # 同じ異常セットは RENOTIFY_INTERVAL_SEC の間、再通知しない
+        assert health_watch._should_notify(["異常A"], now) is False
+        # セットが変われば即座に通知する
+        assert health_watch._should_notify(["異常A", "異常B"], now) is True
+
+    def test_health_watch_notify_state_notifies_when_file_is_broken(self, tmp_path, monkeypatch):
+        """壊れている場合は「通知する」側へ倒す(取りこぼしより重複の方が安全)。"""
+        import datetime
+
+        import monitors.health_watch as health_watch
+
+        path = tmp_path / ".notify"
+        path.write_text("{ broken", encoding="utf-8")
+        monkeypatch.setattr(health_watch, "NOTIFY_STATE_FILE", str(path))
+        assert health_watch._should_notify(["異常A"], datetime.datetime(2026, 9, 17, 3, 0, 0)) is True
+
+    def test_weekly_report_flag_round_trips_through_state_file(self, tmp_path, monkeypatch):
+        import weekly_analyze_report as report
+        from core import state_file as sf
+
+        path = str(tmp_path / "last_weekly_report.txt")
+        monkeypatch.setattr(report, "LAST_RUN_FILE", path)
+        assert sf.write_text_atomic(path, "2026-09-14") is True
+        assert sf.read_text(path) == "2026-09-14"
+
+
+class TestRefCountedLockRegistryConsolidation:
+    """#661 残件: camera_service の _RefCountedLock は core.utils の同名実装と
+    完全重複していたため、レジストリへ一本化した。"""
+
+    def test_camera_service_uses_the_shared_registry(self):
+        from core.utils import RefCountedLockRegistry
+        from services import camera_service
+
+        assert isinstance(camera_service._vod_generation_locks, RefCountedLockRegistry)
+        assert isinstance(camera_service._live_stream_locks, RefCountedLockRegistry)
+        assert not hasattr(camera_service, "_RefCountedLock")
+
+    def test_registry_supports_len_and_clear(self):
+        from core.utils import RefCountedLockRegistry
+
+        registry = RefCountedLockRegistry()
+        with registry.acquire("k"):
+            assert len(registry) == 1
+        assert len(registry) == 0
+
+        with registry.acquire("k"):
+            registry.clear()
+            assert len(registry) == 0

@@ -151,8 +151,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | Webhookのエンドポイント/ルーター定義ファイル | `SwitchBotWebhookBody` をリクエストボディとして受け取って処理する具体的なフローを把握するため。 | 根拠: `class SwitchBotWebhookBody` のドキュメント文字列 (行番号: 18 / 抜粋: '"""SwitchBot Webhookのエントリポイント"""') |
-| 高 | APIクライアント/外部通信ファイル | `GET /v1.1/devices/{id}/status` に対してリクエストを行い、`DeviceStatusResponse` を処理するコードを特定するため。 | 根拠: `class DeviceStatusResponse` のドキュメント文字列 (行番号: 25 / 抜粋: '"""API経由で取得したデバイス状態（GET /v1.1/') |
+| 高 | Webhookのエンドポイント/ルーター定義ファイル | `SwitchBotWebhookBody` をリクエストボディとして受け取って処理する具体的なフローを把握するため。 | 根拠: `class SwitchBotWebhookBody` のドキュメント文字列 (行番号: 28 / 抜粋: '"""SwitchBot Webhookのエントリポイント"""') |
+| 高 | APIクライアント/外部通信ファイル | `GET /v1.1/devices/{id}/status` に対してリクエストを行い、`DeviceStatusResponse` を処理するコードを特定するため。 | 根拠: `class DeviceStatusResponse` のドキュメント文字列 (行番号: 35 / 抜粋: '"""API経由で取得したデバイス状態（GET /v1.1/') |
 
 ## 8. 保守上の注意点
 

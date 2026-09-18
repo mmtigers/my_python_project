@@ -97,6 +97,13 @@ def _is_new_history(history_issues: int) -> bool:
     実行が重なった場合に読み取り→書き込みの間で他プロセスが割り込むと状態が
     上書き競合(lost update)しうる。状態ファイルへのflock(排他ロック)で
     読み取りから書き込みまでを1つの不可分な区間にする。
+
+    Issue #661: 他の監視スクリプトの状態ファイルは core/state_file.py に集約したが、
+    ここだけは意図的に独自実装のまま残している。state_file の read/write は
+    それぞれ独立にロックを取る2つの操作であり、間に他プロセスが割り込みうる。
+    ここで必要なのは「読んで、判定して、書く」までを1つのロック区間に収める
+    compare-and-set であり(上の#449がまさにそれを入れた箇所)、
+    read_text + write_text_atomic へ機械的に置き換えると#449の競合が再発する。
     """
     boot_id = _get_boot_id()
     notified_bits = 0

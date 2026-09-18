@@ -26,8 +26,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
-from services.quest_service import QuestService, ShopService, UserService
+from core.utils import get_now_iso
+from core.database import get_db_cursor
+from services.quest_service import ApprovalService, QuestService, ShopService, UserService
 
 N_QUESTS = 12
 GOLD_PER_QUEST = 10
@@ -35,7 +36,7 @@ EXP_PER_QUEST = 5
 
 
 def _seed_adult_with_individual_quests(n=N_QUESTS):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
             "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult')"
@@ -68,7 +69,7 @@ class TestConcurrentAdultCompletionOfDifferentQuests:
 
         assert all(r["status"] == "success" for r in results)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             dad = cur.execute("SELECT gold, exp FROM quest_users WHERE user_id = 'dad'").fetchone()
             approved_count = cur.execute(
                 "SELECT COUNT(*) c FROM quest_history WHERE user_id='dad' AND status='approved'"
@@ -89,7 +90,7 @@ class TestPurchaseVersusApproveCrossPathConcurrency:
         initial_gold = 1000
         reward_cost = 50
         n_pending = 8
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
@@ -106,14 +107,15 @@ class TestPurchaseVersusApproveCrossPathConcurrency:
                 cur.execute(
                     "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, "
                     "completed_at, status) VALUES ('son', ?, ?, ?, ?, ?, 'pending')",
-                    (6000 + i, f"Quest{i}", EXP_PER_QUEST, GOLD_PER_QUEST, common.get_now_iso()),
+                    (6000 + i, f"Quest{i}", EXP_PER_QUEST, GOLD_PER_QUEST, get_now_iso()),
                 )
                 history_ids.append(cur.lastrowid)
 
-        quest_service = QuestService()
+
+        approval_service = ApprovalService()
         shop_service = ShopService()
 
-        tasks = [lambda hid=hid: quest_service.process_approve_quest("dad", hid) for hid in history_ids]
+        tasks = [lambda hid=hid: approval_service.process_approve_quest("dad", hid) for hid in history_ids]
         tasks.append(lambda: shop_service.process_purchase_reward("son", 700))
 
         with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
@@ -125,7 +127,7 @@ class TestPurchaseVersusApproveCrossPathConcurrency:
         assert all(r["status"] == "success" for r in approve_results)
         assert purchase_result["status"] == "purchased"
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             son = cur.execute("SELECT gold FROM quest_users WHERE user_id = 'son'").fetchone()
             approved_count = cur.execute(
                 "SELECT COUNT(*) c FROM quest_history WHERE user_id='son' AND status='approved'"
@@ -153,7 +155,7 @@ class TestResetVersusApproveCrossPathConcurrency:
 
     def test_concurrent_reset_and_approvals_keep_gold_consistent_with_remaining_history(self, isolated_db):
         n_pending = 12
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, medal_count, role) VALUES "
                 "('dad', 'Dad', 'Warrior', 1, 0, 0, 0, 'role_adult'), "
@@ -164,14 +166,15 @@ class TestResetVersusApproveCrossPathConcurrency:
                 cur.execute(
                     "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, "
                     "completed_at, status) VALUES ('son', ?, ?, ?, ?, ?, 'pending')",
-                    (9000 + i, f"Quest{i}", EXP_PER_QUEST, GOLD_PER_QUEST, common.get_now_iso()),
+                    (9000 + i, f"Quest{i}", EXP_PER_QUEST, GOLD_PER_QUEST, get_now_iso()),
                 )
                 history_ids.append(cur.lastrowid)
 
-        quest_service = QuestService()
+
+        approval_service = ApprovalService()
         user_service = UserService()
 
-        tasks = [lambda hid=hid: ("approve", quest_service.process_approve_quest("dad", hid)) for hid in history_ids]
+        tasks = [lambda hid=hid: ("approve", approval_service.process_approve_quest("dad", hid)) for hid in history_ids]
         tasks.append(lambda: ("reset", user_service.reset_user_data("dad", "son")))
 
         with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
@@ -190,7 +193,7 @@ class TestResetVersusApproveCrossPathConcurrency:
         assert len(reset_results) == 1
         assert reset_results[0]["status"] == "reset"
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             son = cur.execute("SELECT gold FROM quest_users WHERE user_id='son'").fetchone()
             approved_gold_sum = cur.execute(
                 "SELECT COALESCE(SUM(gold_earned), 0) s FROM quest_history WHERE user_id='son' AND status='approved'"

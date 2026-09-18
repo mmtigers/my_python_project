@@ -6,7 +6,8 @@ from typing import Any, Dict, List, Optional
 import aiofiles
 from fastapi import HTTPException, UploadFile
 
-import common
+from core.utils import get_now_iso
+from core.database import get_db_cursor
 import config
 from services.quest.locks import ROLE_ADULT, _get_user_balance_lock, logger
 
@@ -42,7 +43,7 @@ def _validate_image_header(header: bytes) -> bool:
 
 class UserService:
     def get_family_chronicle(self) -> Dict[str, Any]:
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             users = cur.execute("SELECT level, gold FROM quest_users").fetchall()
             total_level = sum(u['level'] for u in users) if users else 0
             total_gold = sum(u['gold'] for u in users) if users else 0
@@ -112,7 +113,7 @@ class UserService:
             return self._reset_user_data_locked(admin_id, target_user_id)
 
     def _reset_user_data_locked(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             admin = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (admin_id,)).fetchone()
             if not admin or admin['role'] != ROLE_ADULT:
                 raise HTTPException(status_code=403, detail="リセット権限がありません")
@@ -145,7 +146,7 @@ class UserService:
         }
 
     def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
@@ -153,7 +154,7 @@ class UserService:
             old_avatar = user['avatar']
 
             cur.execute("UPDATE quest_users SET avatar = ?, updated_at = ? WHERE user_id = ?",
-                       (avatar_url, common.get_now_iso(), user_id))
+                       (avatar_url, get_now_iso(), user_id))
 
             # #372: 旧アバターのファイルを他のユーザーも参照している場合(同じ /uploads/ パスを
             # 指定された場合)、物理削除するとそのユーザーのアバターが404になる。
@@ -274,7 +275,7 @@ class UserService:
             return False
 
         avatar_value = f"/uploads/{filename}"
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             still_referenced = cur.execute(
                 "SELECT 1 FROM quest_users WHERE avatar = ? LIMIT 1", (avatar_value,)
             ).fetchone() is not None

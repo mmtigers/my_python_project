@@ -12,7 +12,7 @@ dashboard.py の Low項目(#410)の回帰テスト:
   ことを確認する。
 
 main() はStreamlitのUI呼び出し(st.sidebar, st.tabs等)を多数含む大きな関数の
-ため、st・各Viewモジュール・analysis_service・commonを広くモックして
+ため、st・各Viewモジュール・analysis_service・send_pushを広くモックして
 テストする。
 """
 import os
@@ -28,7 +28,12 @@ def _mock_st():
     mock = MagicMock()
     mock.sidebar.__enter__ = MagicMock(return_value=mock)
     mock.sidebar.__exit__ = MagicMock(return_value=False)
-    mock.tabs.return_value = [MagicMock() for _ in range(10)]
+    mock.tabs.return_value = [MagicMock() for _ in range(5)]
+    # main()先頭の操作列(_render_header_actions)が st.columns(2) を使うため、
+    # 指定された個数ぶんのカラムを返す(MagicMockのままだとアンパックできない)。
+    mock.columns.side_effect = lambda spec, **kwargs: [
+        MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))
+    ]
     mock.expander.return_value.__enter__ = MagicMock(return_value=MagicMock())
     mock.expander.return_value.__exit__ = MagicMock(return_value=False)
     return mock
@@ -37,7 +42,6 @@ def _mock_st():
 def _patch_view_modules():
     """main()内で呼ばれる各Viewモジュールの関数呼び出しをすべて無害化する"""
     return [
-        patch.object(dashboard.quest_tab, "render"),
         patch.object(dashboard.misc_tab, "render_traffic"),
         patch.object(dashboard.misc_tab, "render_photos"),
         patch.object(dashboard.sensor_tab, "render_electricity"),
@@ -45,7 +49,10 @@ def _patch_view_modules():
         patch.object(dashboard.health_tab, "render"),
         patch.object(dashboard.sensor_tab, "render_takasago"),
         patch.object(dashboard.log_tab, "render_logs"),
-        patch.object(dashboard.log_tab, "render_system"),
+        patch.object(dashboard.log_tab, "render_resources"),
+        patch.object(dashboard.log_tab, "render_nas_status"),
+        patch.object(dashboard.log_tab, "render_server_logs"),
+        patch.object(dashboard.log_tab, "render_maintenance"),
         patch.object(dashboard.misc_tab, "render_bicycle"),
         patch.object(dashboard.summary, "render_summary"),
     ]
@@ -103,7 +110,7 @@ class TestNoTracebackOnScreen:
         mock_st = _mock_st()
         with patch.object(dashboard, "st", mock_st), \
              patch.object(dashboard.analysis_service, "load_sensor_data", side_effect=RuntimeError("boom")), \
-             patch.object(dashboard, "common"), \
+             patch.object(dashboard, "send_push"), \
              patch.object(dashboard, "logger") as mock_logger:
             dashboard.main()
 

@@ -62,8 +62,9 @@ class RefCountedLockRegistry:
     無制限に蓄積していた。参照している呼び出しが居なくなった時点で
     エントリを辞書から削除することでこれを防ぐ。
 
-    services/camera_service.py の _RefCountedLock/_vod_generation_lock と
-    同じ考え方: ロック取得中(参照カウント>0)のエントリは絶対に削除しない。
+    Issue #661: services/camera_service.py に同じ実装(_RefCountedLock +
+    _vod_generation_lock/_live_stream_lock)が重複していたため、そちらも
+    このレジストリへ寄せた。ロック取得中(参照カウント>0)のエントリは絶対に削除しない。
     単純に「lock.locked()がFalseなら削除」する方式だと、辞書からロック
     オブジェクトを取り出した直後・実際にwith文で獲得する直前の隙間で
     別スレッドが剪定してしまい、同一キーに対して2つの別々のLockオブジェクトが
@@ -108,6 +109,19 @@ class RefCountedLockRegistry:
     def __contains__(self, key: Any) -> bool:
         with self._guard:
             return key in self._entries
+
+    def __len__(self) -> int:
+        with self._guard:
+            return len(self._entries)
+
+    def clear(self) -> None:
+        """全エントリを破棄する(テストの前後処理用)。
+
+        取得中のロックがあっても辞書からは消える点に注意。本番コードから
+        呼ぶことは想定していない(剪定は acquire の finally が行う)。
+        """
+        with self._guard:
+            self._entries.clear()
 
 def with_exponential_backoff(
     base_delay: int = 5, 
