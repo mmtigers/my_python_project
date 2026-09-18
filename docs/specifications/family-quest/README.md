@@ -1,6 +1,6 @@
 # family-quest 仕様書一覧
 
-タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された60件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
+タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された61件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
 
 対応するソースファイル自体が削除済みの仕様書は、末尾の「廃止済み仕様書一覧」に記録のみ残しています(Issue #402 で仕様書ファイル自体は削除済み。新規の実装・参照の対象ではありません)。
 
@@ -80,6 +80,7 @@
 | 仕様書 | 概要 |
 | --- | --- |
 | [useQuestStatus.md](./src/features/quest/hooks/useQuestStatus.md) | クエストの進行状態（完了・保留・ロック・無限クエストなど）を判定する純粋関数`getQuestLockState`と、それをラップして表示用タイトル・variantまで算出するカスタムフック`useQuestStatus`を提供する。 |
+| [useBusyKeys.md](./src/features/quest/hooks/useBusyKeys.md) | 「送信中のキー集合」を判定用のrefと表示用のstateの二重で持つカスタムフック。承認中の履歴idと、完了/取消が送信中の`(user_id, quest_id)`キーの2箇所で使う。 |
 
 ## src/features/shop/components
 
