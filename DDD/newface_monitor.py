@@ -116,6 +116,34 @@ except ImportError:
         logger.error(f"Storage warmup failed after {max_retries} attempts.")
         return False
 
+# Discord Webhook への POST は MY_HOME_SYSTEM の core/discord.py に集約されている(Issue #661)。
+# 上のブロックとは独立した try/except にしてあるのは、core.logger 等が import できる環境で
+# core.discord だけが欠けていたときに、ロガーまでフォールバックへ巻き込まないため。
+try:
+    from core.discord import post_webhook as post_discord_webhook
+except ImportError:
+    # 単体テスト用・DDD単体デプロイ時のフォールバック(MY_HOME_SYSTEM が無い環境)。
+    # core.discord.post_webhook のうち、本ファイルが使う引数だけを満たす最小実装。
+    def post_discord_webhook(  # type: ignore[misc]
+        url, content="", files=None, timeout=10, *,
+        embeds=None, username=None, session=None, raise_for_status=False,
+    ) -> bool:
+        if not url:
+            return False
+        payload = {}
+        if content or embeds is None:
+            payload["content"] = content
+        if embeds is not None:
+            payload["embeds"] = list(embeds)
+        if username:
+            payload["username"] = username
+        poster = session.post if session is not None else requests.post
+        response = poster(url, json=payload, timeout=timeout)
+        if raise_for_status:
+            response.raise_for_status()
+            return True
+        return getattr(response, "status_code", None) in (200, 204)
+
 # ==========================================
 # Logger Initialization
 # ==========================================
@@ -613,26 +641,32 @@ class DiscordNotifier:
                 # スキーム判定を通過した後にパーセントエンコードする。
                 thumbnail_url = self._to_well_formed_url(thumbnail_url)
 
-            payload = {
-                "username": "New Face Monitor",
-                "embeds": [
-                    {
-                        "title": self._truncate_for_embed(
-                            f"✨ 新人キャスト情報{site_prefix}: {cast.name}", self._EMBED_TITLE_MAX_LEN
-                        ),
-                        "description": "新しいキャストが追加されました！",
-                        "url": safe_detail_url,
-                        "color": 16738740,  # Pinkish
-                        "fields": fields,
-                        "thumbnail": {"url": thumbnail_url} if thumbnail_url else {}
-                    }
-                ]
-            }
+            embeds = [
+                {
+                    "title": self._truncate_for_embed(
+                        f"✨ 新人キャスト情報{site_prefix}: {cast.name}", self._EMBED_TITLE_MAX_LEN
+                    ),
+                    "description": "新しいキャストが追加されました！",
+                    "url": safe_detail_url,
+                    "color": 16738740,  # Pinkish
+                    "fields": fields,
+                    "thumbnail": {"url": thumbnail_url} if thumbnail_url else {}
+                }
+            ]
             try:
                 # レート制限回避のための待機（429時のバックオフはself.sessionのRetryに委譲）
                 time.sleep(1)
-                response = self.session.post(self.webhook_url, json=payload, timeout=10)
-                response.raise_for_status()
+                # Issue #661: POST 自体は core/discord.py に集約。raise_for_status=True で
+                # 従来どおり requests の例外として失敗を受け取り、下の 401/404 分岐
+                # (サーキットブレーカーの即時開放)をそのまま維持する。
+                post_discord_webhook(
+                    self.webhook_url,
+                    embeds=embeds,
+                    username="New Face Monitor",
+                    timeout=10,
+                    session=self.session,
+                    raise_for_status=True,
+                )
                 logger.info(f"Notification sent successfully for: {cast.name}")
                 self._circuit_breaker.record_success()
                 sent_count += 1
@@ -713,10 +747,18 @@ class DiscordNotifier:
         if len(content) > 1900:
             content = content[:1900] + "\n...(以下省略)"
 
-        payload = {"username": "New Face Monitor", "content": content}
         try:
-            response = self.session.post(self.webhook_url, json=payload, timeout=10)
-            response.raise_for_status()
+            # Issue #661: POST は core/discord.py へ集約。content は上で 1900 文字に
+            # 切り詰め済みのため、post_webhook 側の分割は働かず1通のまま送られる
+            # (「...(以下省略)」で1通に収める既存の文面をそのまま保つため)。
+            post_discord_webhook(
+                self.webhook_url,
+                content=content,
+                username="New Face Monitor",
+                timeout=10,
+                session=self.session,
+                raise_for_status=True,
+            )
             logger.info(f"Daily summary notification sent successfully for {date_str}.")
             self._circuit_breaker.record_success()
             return True
@@ -756,10 +798,16 @@ class DiscordNotifier:
             f"(本アラートは疎通が回復するまで1回だけ送信され、以降の失敗ログはWARNINGに降格されます)"
         )
 
-        payload = {"username": "New Face Monitor", "content": content}
         try:
-            response = self.session.post(self.webhook_url, json=payload, timeout=10)
-            response.raise_for_status()
+            # Issue #661: POST は core/discord.py へ集約(上記と同じ理由で raise_for_status=True)。
+            post_discord_webhook(
+                self.webhook_url,
+                content=content,
+                username="New Face Monitor",
+                timeout=10,
+                session=self.session,
+                raise_for_status=True,
+            )
             logger.info(f"Site failure alert sent successfully for site '{site.site_id}'.")
             self._circuit_breaker.record_success()
             return True

@@ -39,11 +39,11 @@
 | `os`, `sys`, `subprocess`, `csv`, `datetime`, `math`, `time`, `json`, `tempfile`, `traceback`, `shutil`, `re`, `pathlib`, `typing`, `dataclasses` | 標準ライブラリ | ファイル操作、プロセス実行、時間計算、データ構造定義など | インポート宣言 (行番号: 1-9, 12-14, 16-18 / 抜粋: "import os") |
 | `numpy` | 外部ライブラリ | OpenCVで処理する画像配列データの型変換と操作 | インポート宣言 (行番号: 10 / 抜粋: "import numpy as np") |
 | `cv2` | 外部ライブラリ | 動画フレームの背景差分検出、モルフォロジー変換、輪郭抽出 | インポート宣言 (行番号: 11 / 抜粋: "import cv2") |
-| `requests` | 外部ライブラリ | Discord Webhookへの動画ファイルおよびメッセージのPOST送信 | インポート宣言 (行番号: 15 / 抜粋: "import requests") |
+| `core.discord` | ローカルモジュール | Discord Webhookへの動画ファイルおよびメッセージのPOST送信(分割・リトライ・URLマスクを集約。Issue #661で直接の`requests`利用から移行) | インポート宣言 (行番号: 38 / 抜粋: "from core import discord as core_discord") |
 | `psutil` | 外部ライブラリ(任意) | システム全体のCPU使用率の取得とロギング | インポート宣言 (行番号: 21 / 抜粋: "import psutil") |
-| `config` | ローカルモジュール | 各種設定値（解像度、しきい値、Webhook URLなど）の読み込み | インポート宣言 (行番号: 31 / 抜粋: "import config") |
-| `core.logger` | ローカルモジュール | ロガーのセットアップ処理 | インポート宣言 (行番号: 32 / 抜粋: "from core.logger import setup_logging") |
-| `services.notification_service` | ローカルモジュール | プッシュ通知（LINE等）の送信 | インポート宣言 (行番号: 33 / 抜粋: "from services.notification_service import send_push") |
+| `config` | ローカルモジュール | 各種設定値（解像度、しきい値、Webhook URLなど）の読み込み | インポート宣言 (行番号: 37 / 抜粋: "import config") |
+| `core.logger` | ローカルモジュール | ロガーのセットアップ処理 | インポート宣言 (行番号: 39 / 抜粋: "from core.logger import setup_logging") |
+| `services.notification_service` | ローカルモジュール | プッシュ通知（LINE等）の送信 | インポート宣言 (行番号: 40 / 抜粋: "from services.notification_service import send_push") |
 
 ### ブラックボックスとなる外部要素
 
@@ -561,7 +561,7 @@
 
 ### `Uploader` クラス
 
-* **役割**: 生成された動画ファイルのサイズを判定し、制限（`MAX_FILE_SIZE_BYTES`）を超える場合はFFmpegを用いて動画を分割した後、Discord Webhookに対して動画ファイルと完了通知を送信する。分割ファイル(`*_part_*.mp4`)は送信専用の一時生成物であり、送信の成否に関わらず`finally`節で削除する(Issue #171: 以前はこの削除が無く、元動画とは別にローカルディスクへ重複して残り続けていた)。元動画(`summary.output_path`)自体はここでは削除せず、`nas_monitor`の保持期間ベースのリテンションクリーンアップに委ねる。
+* **役割**: 生成された動画ファイルのサイズを判定し、制限（`MAX_FILE_SIZE_BYTES`）を超える場合はFFmpegを用いて動画を分割した後、Discord Webhookに対して動画ファイルと完了通知を送信する。送信そのものは`core.discord.post_webhook`へ委譲する(Issue #661)。分割ファイル(`*_part_*.mp4`)は送信専用の一時生成物であり、送信の成否に関わらず`finally`節で削除する(Issue #171: 以前はこの削除が無く、元動画とは別にローカルディスクへ重複して残り続けていた)。元動画(`summary.output_path`)自体はここでは削除せず、`nas_monitor`の保持期間ベースのリテンションクリーンアップに委ねる。
 
 
 * 根拠: 分割ロジックと送信ロジック (行番号: 589 / 抜粋: "pc = math.ceil(summary.file_si...")
@@ -589,10 +589,27 @@
 * **副作用**: 動画の分割ファイル生成、外部API（Discord Webhook）へのHTTP POSTリクエスト送信、分割ファイルのローカル削除(`os.remove`、送信後に必ず実行)。
 
 
-* 根拠: `subprocess.run`, `requests.post` (行番号: 586-597, 604 / 抜粋: "requests.post(")、`os.remove(s_file)` (行番号: 616)
+* 根拠: `subprocess.run`, `core_discord.post_webhook` (行番号: 590-601, 608 / 抜粋: "core_discord.post_webhook(")、`os.remove(s_file)` (行番号: 620)
 
 
 
+
+#### `Uploader._send_to_discord`
+
+* **役割**: 動画ファイル1つを`core.discord.post_webhook`経由でDiscord Webhookへアップロードする。成功時は`Discord送信成功: {ファイル名}`をINFOで、失敗時は`Discord送信失敗: {ファイル名}`をERRORで記録する(ステータスコード・レスポンス本文は`core.discord`側がwarningで残す)。
+* **引数/リクエスト**: `webhook_url` (str), `message` (str), `file_path` (str)
+* **戻り値/レスポンス**: `None`
+* **副作用**: 添付付きのHTTP POST。`post_webhook`は429/5xxを限定回数リトライするため、レート制限時に同じ動画が再アップロードされうる(リトライ前のファイル位置の巻き戻しは`core.discord._rewind_files`が担う)。ここで独自のリトライを重ねてはならない。
+* **エラーハンドリング**: ファイルを開けない等、送信に入る前の失敗のみ`except Exception`で捕捉して`Discord送信中に例外発生`をERRORに残す(送信中の失敗は`post_webhook`がwarningにして`False`を返す)。
+* 根拠: `_send_to_discord` (行番号: 624 / 抜粋: "def _send_to_discord(self, webhook_url: str, message: str, file_path: str) -> None:")
+
+#### `Uploader._send_completion_notice`
+
+* **役割**: 全ファイル送信後に`✅ {count}ファイルの送信が完了しました。`をテキストとして送る。
+* **引数/リクエスト**: `webhook_url` (str), `count` (int)
+* **戻り値/レスポンス**: `None`
+* **エラーハンドリング**: `post_webhook`は例外を送出せず`False`を返す契約なので、戻り値を見て`⚠️ 完了通知の送信に失敗しました(処理自体は成功しています)`をWARNINGに残す。Issue #661以前は`except Exception: pass`で完全に黙殺しており、完了通知が届かない原因が一切残らなかった。通知は本処理ではないため、失敗しても処理は続行する。
+* 根拠: `_send_completion_notice` (行番号: 654 / 抜粋: "def _send_completion_notice(self, webhook_url: str, count: int):")
 
 * **エラーハンドリング**: 動画分割プロセスの失敗やWebhook送信時の例外をキャッチし、ログにエラーを出力する。分割ファイルの削除自体が失敗した場合(`OSError`)も個別に捕捉してログ出力するのみで処理を継続する。
 
@@ -616,7 +633,7 @@
 * **引数/リクエスト**: `input_video` (str)。
 
 
-* 根拠: 関数シグネチャ (行番号: 655 / 抜粋: "def run_smart_timelapse_job(in...")
+* 根拠: 関数シグネチャ (行番号: 668 / 抜粋: "def run_smart_timelapse_job(in...")
 
 
 
@@ -710,7 +727,7 @@ graph TD
     
     subgraph "外部バイナリ / ライブラリ"
         OpenCV(cv2)
-        Requests(requests)
+        CoreDiscord(core.discord)
         FFmpeg[ffmpeg]
         FFprobe[ffprobe]
     end
@@ -747,7 +764,7 @@ graph TD
     
     Uploader --> FFprobe
     Uploader --> FFmpeg
-    Uploader --> Requests
+    Uploader --> CoreDiscord
     Uploader --> Config
     
     Requests --> Discord

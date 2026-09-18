@@ -14,7 +14,6 @@ import cv2
 import traceback
 import shutil
 import re
-import requests
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass, asdict
@@ -36,6 +35,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 import config
+from core import discord as core_discord
 from core.logger import setup_logging
 from services.notification_service import send_push
 
@@ -622,32 +622,45 @@ class Uploader:
                         logger.warning(f"分割ファイルの削除に失敗しました: {s_file}: {cleanup_err}")
 
     def _send_to_discord(self, webhook_url: str, message: str, file_path: str) -> None:
-        """Discord Webhookにファイルを直接アップロードする"""
+        """Discord Webhookにファイルを直接アップロードする(送信本体は core.discord へ委譲)。
+
+        #661: 以前はここで直接 requests.post しており、分割・リトライ・URL マスクが
+        他の Discord 送信経路と揃っていなかった。core.discord.post_webhook は
+        429/5xx を限定回数リトライするため、レート制限時に動画を再アップロードしうる
+        (リトライ前にファイル位置を巻き戻すのは core.discord._rewind_files の責務)。
+        リトライ回数・待機秒数の上限は core.discord 側の定数に従うので、
+        ここで独自のリトライを重ねないこと。
+        """
+        file_name = os.path.basename(file_path)
         try:
             with open(file_path, "rb") as f:
-                file_name = os.path.basename(file_path)
-                response = requests.post(
+                sent = core_discord.post_webhook(
                     webhook_url,
-                    data={"content": message},
+                    content=message,
                     files={"file": (file_name, f, "video/mp4")},
-                    timeout=60
+                    timeout=60,
                 )
-            if response.status_code in [200, 204]:
-                logger.info(f"Discord送信成功: {file_name}")
-            else:
-                logger.error(f"Discord送信失敗: {response.status_code} - {response.text}")
         except Exception as e:
+            # ファイルを開けない等、送信に入る前の失敗(送信中の失敗は post_webhook 側で
+            # warning ログにされ False で返る)。
             logger.error(f"Discord送信中に例外発生: {e}")
+            return
+        if sent:
+            logger.info(f"Discord送信成功: {file_name}")
+        else:
+            # ステータスコード・レスポンス本文は core.discord 側が warning で残している。
+            logger.error(f"Discord送信失敗: {file_name}")
 
     def _send_completion_notice(self, webhook_url: str, count: int):
-        try:
-            requests.post(webhook_url, data={"content": f"✅ {count}ファイルの送信が完了しました。"}, timeout=10)
-        except Exception as e:
-            # #661: 以前は `except Exception: pass` で完全に黙殺しており、完了通知が
-            # 届かない原因(Webhook URL の失効・レート制限・ネットワーク断)が
-            # どこにも残らなかった。通知自体は本処理ではないので失敗しても続行するが、
-            # 記録は残す(URL のトークンは載せない)。
-            logger.warning(f"⚠️ 完了通知の送信に失敗しました(処理自体は成功しています): {type(e).__name__}")
+        # #661: 以前は `except Exception: pass` で完全に黙殺しており、完了通知が
+        # 届かない原因(Webhook URL の失効・レート制限・ネットワーク断)が
+        # どこにも残らなかった。通知自体は本処理ではないので失敗しても続行するが、
+        # 記録は残す(URL のトークンは載せない)。post_webhook は例外を送出せず
+        # False を返す契約なので、戻り値を見て同じ warning を出す。
+        if not core_discord.post_webhook(
+            webhook_url, content=f"✅ {count}ファイルの送信が完了しました。", timeout=10
+        ):
+            logger.warning("⚠️ 完了通知の送信に失敗しました(処理自体は成功しています)")
 
 # ==========================================
 # Main

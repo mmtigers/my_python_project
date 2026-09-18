@@ -107,6 +107,95 @@ class TestDiscordHelper:
         assert core_discord.post_webhook("https://discord.com/api/webhooks/1/t", "hello") is False
 
 
+class TestDiscordEmbedAndSessionSupport:
+    """#661: `smart_timelapse_generator`(添付) と `DDD/newface_monitor`(embed) を
+    `post_webhook` に寄せるために足した受け口の契約テスト。"""
+
+    URL = "https://discord.com/api/webhooks/1/t"
+
+    def test_embeds_payload_has_no_content_key(self, monkeypatch):
+        """embed だけを送る場合は `content` を入れない(newface_monitor の従来ボディと同一)。"""
+        post = MagicMock(return_value=MagicMock(status_code=204))
+        monkeypatch.setattr(core_discord.requests, "post", post)
+        embeds = [{"title": "新人", "fields": []}]
+
+        assert core_discord.post_webhook(self.URL, embeds=embeds, username="New Face Monitor") is True
+        assert post.call_args.kwargs["json"] == {"embeds": embeds, "username": "New Face Monitor"}
+
+    def test_text_only_payload_is_unchanged_without_embeds(self, monkeypatch):
+        """embed を渡さない従来の呼び出しは、空文字でも `content` キーを保ったまま。"""
+        post = MagicMock(return_value=MagicMock(status_code=204))
+        monkeypatch.setattr(core_discord.requests, "post", post)
+
+        assert core_discord.post_webhook(self.URL, "") is True
+        assert post.call_args.kwargs["json"] == {"content": ""}
+
+    def test_embeds_are_attached_to_first_chunk_only(self, monkeypatch):
+        post = MagicMock(return_value=MagicMock(status_code=204))
+        monkeypatch.setattr(core_discord.requests, "post", post)
+        embeds = [{"title": "t"}]
+        long_text = "\n".join(f"行{i}" for i in range(2000))
+
+        core_discord.post_webhook(self.URL, long_text, embeds=embeds)
+
+        payloads = [c.kwargs["json"] for c in post.call_args_list]
+        assert len(payloads) > 1
+        assert payloads[0]["embeds"] == embeds
+        assert all("embeds" not in p for p in payloads[1:])
+
+    def test_session_is_used_and_module_retry_is_not_stacked(self, monkeypatch):
+        """session を渡したときはそちらで POST し、こちら側のリトライは重ねない。"""
+        module_post = MagicMock()
+        monkeypatch.setattr(core_discord.requests, "post", module_post)
+        monkeypatch.setattr(core_discord, "_retry_sleep", lambda s: None)
+        session = MagicMock()
+        session.post.return_value = MagicMock(status_code=429, headers={}, text="rate limited")
+
+        assert core_discord.post_webhook(self.URL, "hello", session=session) is False
+        # 429 でも session 側の Retry アダプタに任せるため、こちらでは1回しか投げない
+        assert session.post.call_count == 1
+        module_post.assert_not_called()
+
+    def test_raise_for_status_propagates_http_error(self, monkeypatch):
+        """ステータスごとに分岐したい呼び出し元には、例外をそのまま渡す。"""
+        response = MagicMock()
+        response.raise_for_status.side_effect = core_discord.requests.HTTPError("401")
+        monkeypatch.setattr(core_discord.requests, "post", MagicMock(return_value=response))
+
+        with pytest.raises(core_discord.requests.HTTPError):
+            core_discord.post_webhook(self.URL, "hello", raise_for_status=True)
+
+    def test_raise_for_status_returns_true_when_not_raising(self, monkeypatch):
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        monkeypatch.setattr(core_discord.requests, "post", MagicMock(return_value=response))
+
+        assert core_discord.post_webhook(self.URL, "hello", raise_for_status=True) is True
+
+    def test_attached_file_is_rewound_before_retry(self, monkeypatch, tmp_path):
+        """429 のリトライで動画が「0バイトのまま成功」しないこと。
+
+        1回目の POST でファイルは EOF まで読まれているため、巻き戻さずに再送すると
+        空のボディがアップロードされ、Discord は 200/204 を返してしまう。
+        """
+        video = tmp_path / "clip.mp4"
+        video.write_bytes(b"0123456789")
+        sent_bodies = []
+
+        def fake_post(url, **kwargs):
+            sent_bodies.append(kwargs["files"]["file"][1].read())
+            return MagicMock(status_code=429, headers={"Retry-After": "0"}, text="rate limited")
+
+        monkeypatch.setattr(core_discord.requests, "post", fake_post)
+        monkeypatch.setattr(core_discord, "_retry_sleep", lambda s: None)
+
+        with open(video, "rb") as f:
+            core_discord.post_webhook(self.URL, "msg", files={"file": ("clip.mp4", f, "video/mp4")})
+
+        assert len(sent_bodies) == 1 + core_discord.RETRY_ATTEMPTS
+        assert all(body == b"0123456789" for body in sent_bodies)
+
+
 class TestOnvifUtils:
     def test_returns_directory_containing_devicemgmt_wsdl(self, tmp_path, monkeypatch):
         wsdl_dir = tmp_path / "onvif" / "wsdl"
