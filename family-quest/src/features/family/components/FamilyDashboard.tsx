@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Sword, ShoppingBag, Package } from 'lucide-react';
-import { CompletedSignal, ID, User, Quest, QuestHistory, Reward } from '@/types';
+import { User, Quest, QuestHistory, Reward } from '@/types';
 import UserStatusCard from './UserStatusCard';
 import QuestList from '../../quest/components/QuestList';
 import ApprovalList from '../../quest/components/ApprovalList';
@@ -10,6 +10,12 @@ import { useSettings } from '@/context/useSettings';
 import { THEME_BORDER_CLASSES, THEME_RING_CLASSES } from '@/context/settingsShared';
 import { getQuestLockState } from '../../quest/hooks/useQuestStatus';
 import { isQuestVisibleToUser } from '@/lib/questTargeting';
+import { useRoutineData } from '@/hooks/useRoutineData';
+import RoutineFlow, { RoutineFreeTimeBanner } from '../../routine/components/RoutineFlow';
+import { selectRoutineFlow } from '@/lib/routineDataSchema';
+import { useSound } from '@/hooks/useSound';
+import { useToast } from '@/context/useToast';
+import { useQuestActivity } from '../../quest/context/useQuestActivity';
 
 interface FamilyDashboardProps {
     users: User[];
@@ -22,14 +28,10 @@ interface FamilyDashboardProps {
     onApprove: (history: QuestHistory) => void;
     onReject: (history: QuestHistory) => void;
     onApproveAll: () => void;
-    // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの
-    // クールダウンを発火させるための通知(App側で管理)。#363: userId を含み、
-    // 各パネルの QuestItem は自分のユーザーの完了にのみ反応する。
-    completedSignal: CompletedSignal | null;
-    // #391: 完了/取消APIが送信中の (user_id, quest_id) キー集合。各パネルの QuestList へ透過的に渡す。
-    processingQuestKeys?: string[];
-    // #391(F-L8): 承認APIが送信中の履歴id集合と一括承認中フラグ。ApprovalList のボタン表示に使う。
-    busyHistoryIds?: ID[];
+    // #659: completedSignal / processingQuestKeys / busyHistoryIds は
+    // QuestActivityContext から読む。以前はここと FamilyPanelProps に素通しの
+    // props として並んでおり、中継する2つのコンポーネントは値を使わないのに
+    // 型と引数だけを持たされていた。
     isApprovingAll?: boolean;
     onAvatarClick: (user: User) => void;
 }
@@ -40,10 +42,11 @@ interface FamilyDashboardProps {
 // 独立画面を持たず、このメイン画面上部に常時統合表示する。
 const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
     users, quests, completedQuests, pendingQuests, rewards,
-    onQuestClick, onBuyReward, onApprove, onReject, onApproveAll, completedSignal,
-    processingQuestKeys, busyHistoryIds, isApprovingAll, onAvatarClick,
+    onQuestClick, onBuyReward, onApprove, onReject, onApproveAll,
+    isApprovingAll, onAvatarClick,
 }) => {
     const { iconFirstUserIds, userThemeColors } = useSettings();
+    const { busyHistoryIds } = useQuestActivity();
     // #412(品質): 以前はここで FAMILY_ORDER=['dad','mom','son','daughter'] という
     // ハードコードされた並び順に再ソートしていたが、サーバー側(quest_service.pyの
     // GameSystem.get_all_view_data)が既に quest_data.USERS の宣言順(同じ dad→mom→
@@ -99,8 +102,6 @@ const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
                         onInteract={() => setActiveUserId(user.user_id)}
                         onQuestClick={(q) => onQuestClick(user, q)}
                         onBuyReward={(r) => onBuyReward(user, r)}
-                        completedSignal={completedSignal}
-                        processingQuestKeys={processingQuestKeys}
                         onAvatarClick={() => onAvatarClick(user)}
                     />
                 ))}
@@ -122,16 +123,40 @@ interface FamilyPanelProps {
     onInteract: () => void;
     onQuestClick: (quest: Quest) => void;
     onBuyReward: (reward: Reward) => void;
-    completedSignal: CompletedSignal | null;
-    processingQuestKeys?: string[];
     onAvatarClick: () => void;
 }
 
 const FamilyPanel: React.FC<FamilyPanelProps> = ({
     user, quests, completedQuests, pendingQuests, rewards, iconFirst, isActive, themeColorKey, isIdle,
-    onInteract, onQuestClick, onBuyReward, completedSignal, processingQuestKeys, onAvatarClick,
+    onInteract, onQuestClick, onBuyReward, onAvatarClick,
 }) => {
     const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');
+    // #659: 表示に使うだけの横断的な状態は Context から直接読む(素通しの props を廃止)。
+    const { completedSignal, processingQuestKeys } = useQuestActivity();
+    const { play } = useSound();
+    const { showToast } = useToast();
+
+    // 「きょうのすごろく」: パネルごとに自分のペースで進む(全員同じフロー定義を
+    // 個別に進行する想定、CLAUDE.md参照)。誘導中はクエスト一覧より優先表示する。
+    // #(コードレビューで発覚): 完了報告失敗時のエラートースト表示(旧handleRoutineStepComplete)
+    // がApp.tsx側と一字一句重複していたため、useRoutineData自体のonErrorへ集約した。
+    const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(
+        user.user_id,
+        (info) => {
+            play('levelUp');
+            showToast({ title: 'LEVEL UP!', text: `${user.name}は Lv.${info.newLevel} になった！`, icon: '⚡' });
+        },
+        (detail) => {
+            showToast({ title: 'エラー', text: detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });
+            play('cancel');
+        },
+        // 大人用フローに寄せたステップ(ママの「夕食を作る」等)の即時報酬。
+        (reward) => {
+            play('clear');
+            showToast({ title: 'クリア！', text: `${user.name}は ${reward.gold} G を手に入れた！`, icon: '💰' });
+        }
+    );
+    const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);
 
     // ★バグ修正: 以前はテーマカラーを isActive(直前に操作したパネル)の時だけ適用していたため、
     // 設定画面で色を選んでも、操作するまでメイン画面(横画面)に何も反映されなかった。
@@ -185,18 +210,35 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
 
             {/* パネルごとに独立スクロール(要件5) */}
             <div className="p-2 overflow-y-auto max-h-[60vh]">
-                {tab === 'quest' && (
-                    <QuestList
-                        quests={quests}
-                        completedQuests={completedQuests}
-                        pendingQuests={pendingQuests}
-                        currentUser={user}
-                        onQuestClick={onQuestClick}
-                        completedSignal={completedSignal}
-                        processingQuestKeys={processingQuestKeys}
-                        panelMode
-                        iconFirst={iconFirst}
+                {tab === 'quest' && activeRoutineKey && routineFlows && (
+                    <RoutineFlow
+                        flowKey={activeRoutineKey}
+                        flow={routineFlows[activeRoutineKey]}
+                        onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}
+                        isCompleting={isCompletingRoutine}
+                        compact
                     />
+                )}
+
+                {tab === 'quest' && !activeRoutineKey && (
+                    <>
+                        {freeTimeRoutineKey && routineFlows && (
+                            <div className="mb-2">
+                                <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />
+                            </div>
+                        )}
+                        <QuestList
+                            quests={quests}
+                            completedQuests={completedQuests}
+                            pendingQuests={pendingQuests}
+                            currentUser={user}
+                            onQuestClick={onQuestClick}
+                            completedSignal={completedSignal}
+                            processingQuestKeys={processingQuestKeys}
+                            panelMode
+                            iconFirst={iconFirst}
+                        />
+                    </>
                 )}
                 {tab === 'shop' && (
                     <RewardShop

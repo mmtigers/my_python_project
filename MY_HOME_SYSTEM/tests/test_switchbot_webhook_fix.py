@@ -122,7 +122,7 @@ class TestFixAllWebhooksNotifiesOnDangerousState:
         monkeypatch.setattr(wf, "update_switchbot_webhook", lambda base_url: None)
         monkeypatch.setattr(wf, "update_line_webhook", lambda base_url: False)
         mock_send_push = MagicMock()
-        monkeypatch.setattr(wf.common, "send_push", mock_send_push)
+        monkeypatch.setattr(wf, "send_push", mock_send_push)
 
         wf.fix_all_webhooks()
 
@@ -137,7 +137,7 @@ class TestFixAllWebhooksNotifiesOnDangerousState:
         monkeypatch.setattr(wf, "update_switchbot_webhook", lambda base_url: True)
         monkeypatch.setattr(wf, "update_line_webhook", lambda base_url: False)
         mock_send_push = MagicMock()
-        monkeypatch.setattr(wf.common, "send_push", mock_send_push)
+        monkeypatch.setattr(wf, "send_push", mock_send_push)
 
         wf.fix_all_webhooks()
 
@@ -151,7 +151,7 @@ class TestFixAllWebhooksNotifiesOnDangerousState:
         monkeypatch.setattr(wf, "update_switchbot_webhook", lambda base_url: False)
         monkeypatch.setattr(wf, "update_line_webhook", lambda base_url: False)
         mock_send_push = MagicMock()
-        monkeypatch.setattr(wf.common, "send_push", mock_send_push)
+        monkeypatch.setattr(wf, "send_push", mock_send_push)
 
         wf.fix_all_webhooks()
 

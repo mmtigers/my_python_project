@@ -69,7 +69,7 @@ export const Modal: React.FC<ModalProps> = ({
                 {/* onCloseは必須propsなので常にヘッダーを表示、またはtitleがある時のみ表示など調整 */}
                 <div className="flex items-center justify-between p-4 border-b border-slate-700 bg-slate-900/50">
                     <h3 className="text-lg font-bold text-white flex-1">{title}</h3>
-                    <Button variant="ghost" size="icon" onClick={handleClose} disabled={preventClose} className="h-8 w-8 -mr-2">
+                    <Button variant="ghost" size="icon" onClick={handleClose} disabled={preventClose} aria-label="閉じる" className="h-8 w-8 -mr-2">
                         <X size={18} />
                     </Button>
                 </div>

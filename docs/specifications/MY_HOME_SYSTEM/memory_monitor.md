@@ -16,6 +16,8 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #661 で変更）** 最終通知時刻の状態ファイル(`config.MEMORY_ALERT_LAST_NOTIFY_FILE`)の読み書きは `core/state_file.py` の `read_text` / `write_text_atomic` に委譲する(tmp + fsync + `os.replace` による原子的な書き込み)。以前は素の `open()` で読み書きしており、書き込み途中のクラッシュで壊れた値が残ると、次回のクールダウン判定が例外側(=通知を優先)に倒れていた。読み取り失敗時に通知を優先する方針自体は変えていない。
+
 * システム全体のメモリ使用率、および特定の対象プロセス（MY_HOME_SYSTEM関連）のメモリ消費量を監視する。
 * メモリ使用率や消費量が閾値（設定ファイルまたはデフォルト値）を超えた場合、プロセス情報を収集して外部へプッシュ通知を送信する。
 * 頻回な通知を防ぐため、ファイルを用いたクールダウン機能を有する。
@@ -48,7 +50,7 @@
 ### `is_target_process`
 
 * **役割**: コマンドライン引数を文字列結合して評価し、"python" を含み、かつ特定の文字列 ("my_home_system", "unified_server.py", "monitors/") を含むプロセスであるかを判定する。
-* 根拠: `def is_target_process(cmdline: List[str]) -> bool:` (行番号: 19〜27 / 抜粋: `if "python" in cmd_str and...`)
+* 根拠: `def is_target_process(cmdline: List[str]) -> bool:` (行番号: 20〜28 / 抜粋: `if "python" in cmd_str and...`)
 
 
 * **引数/リクエスト**: `cmdline` (`List[str]`) プロセスの起動コマンドライン引数リスト。
@@ -71,11 +73,11 @@
 ### `check_cooldown`
 
 * **役割**: 前回通知を送信した時刻が記録されたファイルを読み込み、現在時刻との差が設定されたクールダウン秒数を超えているか判定する。
-* 根拠: `def check_cooldown() -> bool:` (行番号: 29〜49 / 抜粋: `if time.time() - last_time >...`)
+* 根拠: `def check_cooldown() -> bool:` (行番号: 30〜46 / 抜粋: `if time.time() - last_time >...`)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_cooldown() -> bool:` (行番号: 29)
+* 根拠: `def check_cooldown() -> bool:` (行番号: 30)
 
 
 * **戻り値/レスポンス**: `bool` 通知可能（クールダウン経過済み、またはファイル非存在・エラー時）なら `True`、待機中なら `False`。
@@ -94,11 +96,11 @@
 ### `record_notification`
 
 * **役割**: 現在のUNIXタイムスタンプを文字列として記録ファイルに書き込む。
-* 根拠: `def record_notification() -> None:` (行番号: 51〜59 / 抜粋: `f.write(str(time.time()))`)
+* 根拠: `def record_notification() -> None:` (行番号: 48〜52 / 抜粋: `f.write(str(time.time()))`)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def record_notification() -> None:` (行番号: 51)
+* 根拠: `def record_notification() -> None:` (行番号: 48)
 
 
 * **戻り値/レスポンス**: `None`
@@ -117,7 +119,7 @@
 ### `get_top_memory_processes`
 
 * **役割**: 実行中の全プロセスからメモリ（RSS）使用量を取得し、上位 `limit` 件を降順でソートしてフォーマットされた文字列として返す。
-* 根拠: `def get_top_memory_processes(limit: int = 5) -> str:` (行番号: 61〜91 / 抜粋: `process_list.sort(...)`, `top_procs = ...`)
+* 根拠: `def get_top_memory_processes(limit: int = 5) -> str:` (行番号: 54〜84 / 抜粋: `process_list.sort(...)`, `top_procs = ...`)
 
 
 * **引数/リクエスト**: `limit` (`int`) 取得する上位プロセスの数。デフォルト値は5。
@@ -140,11 +142,11 @@
 ### `main`
 
 * **役割**: システム全体のメモリ使用率チェックと、個別プロセスのメモリチェックを実行し、閾値を超過した場合はアラートメッセージを生成。アラートが存在し、かつクールダウン期間外であれば外部へ通知を送信し、通知時刻を記録する。
-* 根拠: `def main() -> None:` (行番号: 93〜155 / 抜粋: `if mem_percent >= sys_threshold:`, `if check_cooldown():... send_push(...)`)
+* 根拠: `def main() -> None:` (行番号: 86〜148 / 抜粋: `if mem_percent >= sys_threshold:`, `if check_cooldown():... send_push(...)`)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def main() -> None:` (行番号: 93)
+* 根拠: `def main() -> None:` (行番号: 86)
 
 
 * **戻り値/レスポンス**: `None`

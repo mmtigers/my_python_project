@@ -16,7 +16,7 @@ import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import config
 from handlers import line_logic
 
@@ -51,7 +51,7 @@ class TestAllGenki:
 
         line_logic.handle_postback(event, mock_line_api)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             rows = cur.execute(
                 f"SELECT child_name FROM {config.SQLITE_TABLE_CHILD} WHERE user_id='U1'"
             ).fetchall()
@@ -103,7 +103,7 @@ class TestAllGenki:
         texts = _texts_from_reply(mock_line_api)
         assert any("失敗" in t for t in texts)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             count = cur.execute(
                 f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD} WHERE user_id='U1'"
             ).fetchone()["c"]
@@ -114,7 +114,7 @@ class TestAllGenki:
         monkeypatch.setattr(db_module, "save_logs_batch_generic", real_batch_generic)
         line_logic.handle_postback(fake_postback_event("action=all_genki"), mock_line_api)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             rows = cur.execute(
                 f"SELECT child_name FROM {config.SQLITE_TABLE_CHILD} WHERE user_id='U1'"
             ).fetchall()
@@ -141,7 +141,7 @@ class TestChildCheck:
         line_logic.handle_postback(event, mock_line_api)
 
         assert "智矢" in _texts_from_reply(mock_line_api)[0]
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
         assert count == 0
 
@@ -150,7 +150,7 @@ class TestChildCheck:
 
         line_logic.handle_postback(event, mock_line_api)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 f"SELECT * FROM {config.SQLITE_TABLE_CHILD} WHERE child_name='智矢'"
             ).fetchone()
@@ -172,7 +172,7 @@ class TestChildCheck:
         texts = _texts_from_reply(mock_line_api)
         assert any("失敗" in t for t in texts)
         assert not any("記録しました" in t for t in texts)
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
         assert count == 0
 
@@ -184,7 +184,7 @@ class TestChildCheck:
         line_logic.handle_postback(event, mock_line_api)
 
         mock_line_api.reply_message.assert_not_called()
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
         assert count == 0
 
@@ -192,7 +192,7 @@ class TestChildCheck:
 class TestCheckStatus:
     def test_builds_summary_flex_from_existing_records(self, isolated_db, mock_line_api):
         today = line_logic.get_today_date_str()
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_CHILD} (child_name, condition, timestamp) VALUES (?, ?, ?)",
                 ("智矢", "😊 元気いっぱい", f"{today}T08:00:00"),
@@ -204,8 +204,10 @@ class TestCheckStatus:
         mock_line_api.reply_message.assert_called_once()
 
     def test_db_read_error_falls_back_to_error_text_in_summary(self, isolated_db, mock_line_api, monkeypatch):
+        # #661: 読み取り接続を core/database.get_ro_connection へ寄せたため、
+        # 差し替え先も line_logic が import したそのヘルパーにする。
         monkeypatch.setattr(
-            line_logic.sqlite3, "connect", MagicMock(side_effect=Exception("disk error"))
+            line_logic, "get_ro_connection", MagicMock(side_effect=Exception("disk error"))
         )
         event = fake_postback_event("action=check_status")
 
@@ -220,7 +222,7 @@ class TestFoodRecordDirect:
 
         line_logic.handle_postback(event, mock_line_api)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_FOOD}").fetchone()
         assert "麺類" in row["menu_category"]
         assert "ラーメン" in row["menu_category"]
@@ -230,7 +232,7 @@ class TestFoodRecordDirect:
 
         line_logic.handle_postback(event, mock_line_api)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_FOOD}").fetchone()
         assert "不明なメニュー" in row["menu_category"]
 
@@ -249,7 +251,7 @@ class TestFoodRecordDirect:
         texts = _texts_from_reply(mock_line_api)
         assert any("失敗" in t for t in texts)
         assert not any("記録しました" in t for t in texts)
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_FOOD}").fetchone()["c"]
         assert count == 0
 
@@ -332,3 +334,57 @@ class TestPydanticFallbackRemovalDoesNotCrash:
         line_logic.handle_postback(event, mock_line_api)
 
         mock_line_api.reply_message.assert_called_once()
+
+
+class TestPostbackDispatch:
+    """#662: handle_postback をアクション名 -> ハンドラの dict ディスパッチに分解した。"""
+
+    def test_every_supported_action_has_a_handler(self):
+        assert set(line_logic.POSTBACK_HANDLERS) == {
+            "all_genki",
+            "show_health_input",
+            "child_check",
+            "check_status",
+            "food_record_direct",
+            "food_manual",
+        }
+
+    def test_unknown_action_replies_and_does_not_dispatch(self, isolated_db, mock_line_api):
+        event = fake_postback_event("action=not_a_real_action")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        texts = _texts_from_reply(mock_line_api)
+        assert any("不明な操作" in t for t in texts)
+
+    def test_handler_failure_is_logged_with_the_action_name(self, isolated_db, mock_line_api, monkeypatch, caplog):
+        """どの分岐で落ちたかがログから分かること(以前は単一 try/except で判別できなかった)。"""
+        import logging
+
+        def boom(_ctx):
+            raise RuntimeError("handler exploded")
+
+        monkeypatch.setitem(line_logic.POSTBACK_HANDLERS, "check_status", boom)
+        line_logic.logger.propagate = True
+        try:
+            with caplog.at_level(logging.ERROR, logger=line_logic.logger.name):
+                line_logic.handle_postback(fake_postback_event("action=check_status"), mock_line_api)
+        finally:
+            line_logic.logger.propagate = False
+
+        assert "check_status" in caplog.text
+        assert "handler exploded" in caplog.text
+
+    def test_context_exposes_child_as_target_name(self):
+        event = fake_postback_event("action=child_check&child=智矢&status=genki")
+        pb = line_logic.LinePostbackData(action="child_check", child="智矢", status="genki")
+        ctx = line_logic.PostbackContext(
+            event=event,
+            line_bot_api=MagicMock(),
+            user_id="U1",
+            user_name="テスト",
+            reply_token="tok",
+            raw={"action": "child_check", "child": "智矢"},
+            pb=pb,
+        )
+        assert ctx.target_name == "智矢"

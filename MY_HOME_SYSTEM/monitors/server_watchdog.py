@@ -16,6 +16,8 @@ from services.notification_service import send_push
 
 # === 設定 ===
 WATCH_SERVICE_NAME: str = "home_system.service"
+# Issue #651: 外部コマンド(systemctl/pgrep/vcgencmd)の待ち時間上限(秒)。応答しない場合に監視ループを止めない
+SUBPROCESS_TIMEOUT_SEC: int = 30
 WATCH_PROCESS_NAME: str = "unified_server.py"
 REMINDER_INTERVAL_SEC: int = 6 * 3600  # 6時間
 
@@ -50,7 +52,7 @@ def get_service_status(service_name: str) -> str:
     try:
         res = subprocess.run(
             ["systemctl", "is-active", service_name], 
-            capture_output=True, text=True, check=False
+            capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC
         )
         return res.stdout.strip()
     except Exception:
@@ -71,7 +73,7 @@ def is_process_alive(process_keyword: str) -> bool:
     try:
         res = subprocess.run(
             ["pgrep", "-f", pattern],
-            capture_output=True, text=True, check=False
+            capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC
         )
         return res.returncode == 0
     except Exception:
@@ -95,6 +97,13 @@ def _is_new_history(history_issues: int) -> bool:
     実行が重なった場合に読み取り→書き込みの間で他プロセスが割り込むと状態が
     上書き競合(lost update)しうる。状態ファイルへのflock(排他ロック)で
     読み取りから書き込みまでを1つの不可分な区間にする。
+
+    Issue #661: 他の監視スクリプトの状態ファイルは core/state_file.py に集約したが、
+    ここだけは意図的に独自実装のまま残している。state_file の read/write は
+    それぞれ独立にロックを取る2つの操作であり、間に他プロセスが割り込みうる。
+    ここで必要なのは「読んで、判定して、書く」までを1つのロック区間に収める
+    compare-and-set であり(上の#449がまさにそれを入れた箇所)、
+    read_text + write_text_atomic へ機械的に置き換えると#449の競合が再発する。
     """
     boot_id = _get_boot_id()
     notified_bits = 0
@@ -133,7 +142,7 @@ def check_throttling_status():
     """
     try:
         # 【修正点1】 check=True を外し、コマンド自体の失敗でPythonをクラッシュさせない
-        result = subprocess.run(['vcgencmd', 'get_throttled'], capture_output=True, text=True)
+        result = subprocess.run(['vcgencmd', 'get_throttled'], capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_SEC)
         
         # コマンドが失敗した場合（OSビジー状態など）は安全にスキップ
         if result.returncode != 0:

@@ -9,9 +9,9 @@
 
 ## 関連ドキュメント
 
-- [common.md](./common.md) — `setup_logging`, `get_db_cursor`, `send_push`を再エクスポートするFacadeモジュール
-- [database.md](./database.md) — `common.get_db_cursor`の実体
-- [notification_service.md](./notification_service.md) — `common.send_push`の実体
+- [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
+- [database.md](./database.md) — `core.database.get_db_cursor`の実体
+- [notification_service.md](./notification_service.md) — `services.notification_service.send_push`の実体
 - [config.md](./config.md) — `SQLITE_TABLE_FOOD`, `LINE_USER_ID`等の設定値を提供
 - [scheduler_boot.md](./scheduler_boot.md) — 週次実行のスケジューラ候補(本ファイルのコメントで言及される「scheduler.pyが月曜に実行する」呼び出し元)
 
@@ -26,7 +26,9 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `config` | 外部モジュール | テーブル名やユーザーIDなどの設定値の取得 | 根拠: `import config` (行番号: 1 / 抜粋: "import config") |
-| `common` | 外部モジュール | ロガー設定、DBカーソル取得、プッシュ通知送信などの共通処理の呼び出し | 根拠: `import common` (行番号: 2 / 抜粋: "import common") |
+| `core.logger.setup_logging` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.logger import setup_logging` (行番号: 2 / 抜粋: "from core.logger import setup_logging") |
+| `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 3 / 抜粋: "from core.database import get_db_cursor") |
+| `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 4 / 抜粋: "from services.notification_service import send_push") |
 | `datetime` | 標準ライブラリ | 日付や時間の取得、計算 | 根拠: `import datetime` (行番号: 3 / 抜粋: "import datetime") |
 | `pytz` | 外部ライブラリ | タイムゾーン（"Asia/Tokyo"）の指定 | 根拠: `import pytz` (行番号: 4 / 抜粋: "import pytz") |
 | `sys` | 標準ライブラリ | コマンドライン引数（`sys.argv`）の取得 | 根拠: `import sys` (行番号: 5 / 抜粋: "import sys") |
@@ -37,9 +39,9 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config` 内の各種定数 | `SQLITE_TABLE_FOOD`, `SQLITE_TABLE_CAR`, `SQLITE_TABLE_CHILD`, `LINE_USER_ID`, `SQLITE_TABLE_POWER_USAGE`（未定義時のフォールバックあり）などの具体的な値や型が不明 | 根拠: `config.SQLITE_TABLE_FOOD` (行番号: 63 / 抜粋: "FROM {config.SQLITE_TABLE_FOOD") |
-| `common.setup_logging` | 戻り値の正確な型や内部でのログ設定の詳細が不明 | 根拠: `logger = common.setup_logging("weekly_report")` (行番号: 9 / 抜粋: "logger = common.setup_logging") |
-| `common.get_db_cursor` | 接続先DBの種類（SQLite等）や取得されるカーソルオブジェクトの振る舞い（辞書型アクセスが可能かどうか）が不明 | 根拠: `with common.get_db_cursor() as cursor:` (行番号: 49 / 抜粋: "with common.get_db_cursor() as") |
-| `common.send_push` | 引数 `target="discord"` の挙動、送信先の実態、戻り値が `True`/`False` になる条件が不明 | 根拠: `common.send_push([...], target="discord")` (行番号: 278 / 抜粋: "if common.send_push([{"type"...") |
+| `core.logger.setup_logging` | 戻り値の正確な型や内部でのログ設定の詳細が不明 | 根拠: `logger = core.logger.setup_logging("weekly_report")` (行番号: 9 / 抜粋: "logger = setup_logging") |
+| `core.database.get_db_cursor` | 接続先DBの種類（SQLite等）や取得されるカーソルオブジェクトの振る舞い（辞書型アクセスが可能かどうか）が不明 | 根拠: `with core.database.get_db_cursor() as cursor:` (行番号: 49 / 抜粋: "with get_db_cursor() as") |
+| `services.notification_service.send_push` | 引数 `target="discord"` の挙動、送信先の実態、戻り値が `True`/`False` になる条件が不明 | 根拠: `services.notification_service.send_push([...], target="discord")` (行番号: 278 / 抜粋: "if send_push([{"type"...") |
 | データベースのスキーマ | 各テーブルの正確なカラム定義やデータ型が不明 | 根拠: `SELECT menu_category FROM ...` (行番号: 62 / 抜粋: "SELECT menu_category") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -47,7 +49,7 @@
 ### `get_start_date`
 
 * **役割**: 指定された期間タイプ（週、月、年）に応じた集計開始日時（00:00:00）を計算して取得する。
-* 根拠: `get_start_date` 定義部 (行番号: 15〜38 / 抜粋: "def get_start_date(period_type")
+* 根拠: `get_start_date` 定義部 (行番号: 24〜47 / 抜粋: "def get_start_date(period_type")
 
 
 * **引数/リクエスト**: `period_type: str` - "week", "month", "year" のいずれか。
@@ -69,8 +71,8 @@
 
 ### `get_analysis_data`
 
-* **役割**: 指定された開始日時から現在までの食事、車利用、電気代、体調のデータをDBから集計する。**（Issue #170で修正）** 電気代算出(`sql_power`)は以前`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)を無差別に`AVG(wattage)`していたため、プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)のアイドル値がスマートメーターの平均消費電力を希釈していた。`services/analysis_service.py`の`load_sensor_data`と同じ分類基準(`device_name`に`"Remo"`を含む)でスマートメーターの行のみに絞るよう修正した。
-* 根拠: `get_analysis_data` 定義部 (行番号: 40〜141 / 抜粋: "def get_analysis_data(start_dt")、電気代クエリのデバイス絞り込み (行番号: 106〜110 / 抜粋: "WHERE timestamp >= ? AND device_name LIKE '%Remo%'")
+* **役割**: 指定された開始日時から現在までの食事、車利用、電気代、体調のデータをDBから集計する。**（Issue #170で修正）** 電気代算出(`sql_power`)は以前`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)を無差別に`AVG(wattage)`していたため、プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)のアイドル値がスマートメーターの平均消費電力を希釈していた。`services/analysis_service.py`の`load_sensor_data`と同じ分類基準(`device_name`に`"Remo"`を含む)でスマートメーターの行のみに絞るよう修正した。 **（Issue #663で修正）** 電気代の単価は、以前このファイルにモジュール定数`DEFAULT_ELEC_PRICE_PER_KWH = 31`として直書きされていた(コメント自身が「本来はconfig.pyまたは.envから読み込むべき値」と記述)。`config.py`のセクション15`ELEC_PRICE_PER_KWH`(環境変数`ELEC_PRICE_PER_KWH`、既定31)へ移し、`config.ELEC_PRICE_PER_KWH`を参照する形にした。既定値は従来と同じため計算結果は変わらない。
+* 根拠: `get_analysis_data` 定義部 (行番号: 49〜156 / 抜粋: "def get_analysis_data(start_dt")、電気代クエリのデバイス絞り込み (行番号: 106〜110 / 抜粋: "WHERE timestamp >= ? AND device_name LIKE '%Remo%'")
 
 
 * **引数/リクエスト**: `start_dt: datetime.datetime` - 集計開始日時。
@@ -81,7 +83,7 @@
 * 根拠: `get_analysis_data` 戻り値ヒント (行番号: 40 / 抜粋: "-> Optional[Dict[str, Any]]:")
 
 
-* **副作用**: `common.get_db_cursor()` を用いてDBに対して `SELECT` クエリを実行する。
+* **副作用**: `core.database.get_db_cursor()` を用いてDBに対して `SELECT` クエリを実行する。
 * 根拠: DBクエリ実行部 (行番号: 66 / 抜粋: "cursor.execute(sql_food, (star")
 
 
@@ -93,7 +95,7 @@
 ### `generate_text_section`
 
 * **役割**: 集計データからレポート用のテキストセクション（詳細モードまたは簡易モード）を生成する。
-* 根拠: `generate_text_section` 定義部 (行番号: 137〜169 / 抜粋: "def generate_text_section(peri")
+* 根拠: `generate_text_section` 定義部 (行番号: 158〜190 / 抜粋: "def generate_text_section(peri")
 
 
 * **引数/リクエスト**: `period_name: str`, `data: Dict[str, Any]`, `is_simple: bool = False`
@@ -116,7 +118,7 @@
 ### `is_month_end_report`
 
 * **役割**: 実行時点から7日後の月が現在の月と異なるかを判定し、月末レポート対象日であるかをチェックする。
-* 根拠: `is_month_end_report` 定義部 (行番号: 171〜179 / 抜粋: "def is_month_end_report() -> b")
+* 根拠: `is_month_end_report` 定義部 (行番号: 192〜200 / 抜粋: "def is_month_end_report() -> b")
 
 
 * **引数/リクエスト**: なし
@@ -139,7 +141,7 @@
 ### `run_report`
 
 * **役割**: 週間レポート生成のメイン処理。実行条件の判定、データ集計の呼び出し、メッセージの構築、外部へのプッシュ通知を行う。
-* 根拠: `run_report` 定義部 (行番号: 192〜287 / 抜粋: "def run_report() -> None:")
+* 根拠: `run_report` 定義部 (行番号: 202〜293 / 抜粋: "def run_report() -> None:")
 
 
 * **引数/リクエスト**: なし
@@ -153,9 +155,9 @@
 * **副作用**:
 * `sys.argv` の読み取り。
 * ロガーによる状態のログ出力（INFO, ERROR, DEBUG）。
-* `common.send_push` を呼び出し外部システムへ通知を送信。
-* 送信成功時、モジュール定数`LAST_RUN_FILE`(`config.FALLBACK_ROOT`配下)へ実行日(`YYYY-MM-DD`)を書き込む(Issue #234で追加。`--force`実行時は書き込まない)。
-* 根拠: 各種処理部 (行番号: 197, 217, 278 / 抜粋: "is_force = len(sys.argv) > 1 a", "logger.info("📊 週間レポート生成プロセ", "common.send_push([{"type": ")、実行済みフラグ書き込み (行番号: 278〜284 / 抜粋: "if not is_force: os.makedirs(...")
+* `services.notification_service.send_push` を呼び出し外部システムへ通知を送信。
+* 送信成功時、モジュール定数`LAST_RUN_FILE`(`config.FALLBACK_ROOT`配下)へ実行日(`YYYY-MM-DD`)を書き込む(Issue #234で追加。`--force`実行時は書き込まない)。**（Issue #661で修正）** このフラグファイルの読み書きは`core/state_file.py`の`read_text`/`write_text_atomic`へ委譲し、書き込みは一時ファイル + `fsync` + `os.replace`による原子的な差し替えになった(親ディレクトリの作成も`state_file`側が行うため、呼び出し側の`os.makedirs`は不要になっている)。読み取り失敗時は`None`が返り「未送信」として扱われる(重複送信より送信欠落の方が困るため)。
+* 根拠: 各種処理部 (行番号: 197, 217, 278 / 抜粋: "is_force = len(sys.argv) > 1 a", "logger.info("📊 週間レポート生成プロセ", "services.notification_service.send_push([{"type": ")、実行済みフラグ書き込み (行番号: 278〜284 / 抜粋: "if not is_force: os.makedirs(...")
 
 
 * **エラーハンドリング**: 日付計算失敗時（`start_week` 等が `None`）、および週間データ取得失敗時（`stats_week` が `None`）はエラーログを出力し、処理を中断（`return`）する。`--force`が指定されていない場合、`LAST_RUN_FILE`に本日日付が既に記録されていれば、月曜8時台であっても処理を中断する(Issue #234で追加。外部cronの多重起動による重複送信を防止)。
@@ -186,7 +188,7 @@ flowchart TD
     GetYearStats --> AppendYearMsg[今年のトータルテキストを追記]
     AppendYearMsg --> FinalizeMsg[フッター追記・メッセージ結合]
     CheckMonthEnd -- No --> FinalizeMsg
-    FinalizeMsg --> SendPush["外部: common.send_push()"]
+    FinalizeMsg --> SendPush["外部: services.notification_service.send_push()"]
     SendPush --> CheckSendResult{"送信成功か?"}
     CheckSendResult -- Yes --> LogSendSuccess[ログ: 送信完了]
     LogSendSuccess --> WriteFlag{"--forceでないか?(#234で追加)"}
@@ -205,10 +207,10 @@ graph TD
     run_report --> generate_text_section
     run_report --> is_month_end_report
     
-    get_analysis_data --> common.get_db_cursor
-    run_report --> common.send_push
+    get_analysis_data --> core.database.get_db_cursor
+    run_report --> services.notification_service.send_push
     
-    logger[logger: common.setup_logging]
+    logger[logger: core.logger.setup_logging]
     get_analysis_data --> logger
     run_report --> logger
     
@@ -217,10 +219,10 @@ graph TD
     run_report --> config
     
     db[(データベース)]
-    common.get_db_cursor --> db
+    core.database.get_db_cursor --> db
     
     discord_line((外部通知先: LINE/Discord))
-    common.send_push --> discord_line
+    services.notification_service.send_push --> discord_line
 
 ```
 
@@ -229,7 +231,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `config.py` | 使用されている各種テーブル名や定数値（`SQLITE_TABLE_POWER_USAGE` など）を特定するため。 | 根拠: `config.SQLITE_TABLE_FOOD` (行番号: 63 / 抜粋: "config.SQLITE_TABLE_FOOD") |
-| 高 | `common.py` | DB接続先やクエリ結果を扱うカーソルの仕様、およびプッシュ通知の実際の送信先・処理内容を把握するため。 | 根拠: `common.get_db_cursor`, `common.send_push` (行番号: 49, 278 / 抜粋: "common.get_db_cursor()", "common.send_push([{"type": ") |
+| 高 | `common.py` | DB接続先やクエリ結果を扱うカーソルの仕様、およびプッシュ通知の実際の送信先・処理内容を把握するため。 | 根拠: `core.database.get_db_cursor`, `services.notification_service.send_push` (行番号: 49, 278 / 抜粋: "get_db_cursor()", "services.notification_service.send_push([{"type": ") |
 | 中 | （データベーススキーマ定義ファイル） | `menu_category`、`action`、`wattage`、`condition` カラムのデータ型や格納形式、制約を確認するため。 | 根拠: DBクエリ実行部 (行番号: 62, 101 / 抜粋: "SELECT menu_category FROM", "SELECT AVG(wattage)") |
 
 ## 8. 保守上の注意点
@@ -237,7 +239,7 @@ graph TD
 * `get_analysis_data` 内の `elapsed_hours` の計算において、現在時刻(`now`)と開始日時(`start_dt`)の差分から経過時間を求めているが、データベース内に存在するデータの実際の記録範囲ではなく、現在時刻に基づく実行タイミング依存の計算となっている。
 * `get_analysis_data` の例外処理では `except Exception as e:` と広範な例外をキャッチしており、`None` を返す仕様になっている。一時的なDBエラーと致命的な構文エラーの区別がつかない。
 * `table_power = getattr(config, "SQLITE_TABLE_POWER_USAGE", "power_usage")` において、`config.py` に変数が存在しない場合のフォールバック値 `"power_usage"` がハードコードされている。
-* Issue #289で`common.send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`(LINE宛先)引数が不要になった。これに伴い`run_report`のプッシュ通知処理からは、以前存在した`config.LINE_USER_ID`と`target="discord"`の不一致な組み合わせ渡しが解消されている。
+* Issue #289で`services.notification_service.send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`(LINE宛先)引数が不要になった。これに伴い`run_report`のプッシュ通知処理からは、以前存在した`config.LINE_USER_ID`と`target="discord"`の不一致な組み合わせ渡しが解消されている。
 * Issue #234修正前は月曜8時台判定(`is_monday and is_morning`)のみに依存しており、実行済みを記録する永続フラグが存在しなかったため、外部cron(リポジトリ管理外)が同一時間枠内で本スクリプトを複数回起動すると重複送信され得た。`monitors/tv_lock_monitor.py`の`LAST_RUN_FILE`方式(日付文字列をテキストファイルへ記録)を踏襲し、`config.FALLBACK_ROOT`配下にフラグファイルを追加した。フラグは送信成功時のみ書き込まれる(送信失敗時に書き込むと再試行が永久にブロックされるため)。`--force`実行時はこのフラグチェック自体をバイパスし、かつフラグへの書き込みも行わない(手動テスト実行が本番の定時実行を妨げないようにするための挙動)。
 
 ## 9. 不明事項一覧
@@ -254,9 +256,9 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `config` モジュールの定数値 | `MY_HOME_SYSTEM/config.py`を直接確認した。本ファイルが参照する定数は以下の通り実値・型ともに確認できた: `SQLITE_TABLE_FOOD: str = "food_records"`(242行目), `SQLITE_TABLE_CAR: str = "car_records"`(244行目), `SQLITE_TABLE_CHILD: str = "child_health_records"`(245行目), `SQLITE_TABLE_POWER_USAGE: str = "power_usage"`(237行目、`保守上の注意点`で言及されている`getattr`フォールバック値`"power_usage"`と一致することを確認)、`LINE_USER_ID: Optional[str] = os.getenv("LINE_USER_ID")`(185行目、値は環境変数由来で未設定時は`None`)。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:185,237,242,244-245`（本ファイル内利用: `MY_HOME_SYSTEM/weekly_analyze_report.py:63,88,97,123,258`） |
-| `common` モジュールの実装詳細 | `MY_HOME_SYSTEM/common.py:22-27,31-37`で`common.get_db_cursor`/`common.send_push`がそれぞれ`core.database.get_db_cursor`/`services.notification_service.send_push`の再エクスポートであることを直接確認した上で、実装本体を直接確認した。`core.database.get_db_cursor`(`MY_HOME_SYSTEM/core/database.py:11-50`)は`@contextmanager`のDBカーソル(`sqlite3.Row`を`row_factory`に設定、17行目)を返すコンテキストマネージャで、`commit`引数が`True`の場合のみ`conn.commit()`し、`sqlite3.OperationalError`(locked)時は最大5回リトライ、それ以外の例外時は`conn.rollback()`後に再送出する。`row_factory=sqlite3.Row`のため、カーソルが返す行はキー名によるディクショナリ的アクセス(`row["column"]`)が可能である。`services.notification_service.send_push`(`MY_HOME_SYSTEM/services/notification_service.py:116-140`)は`target`引数(`"discord"`/`"line"`/`"both"`)に応じてDiscord Webhookおよび/またはLINE Messaging APIへ送信し、LINE送信失敗時はDiscordの`error`チャンネルへフォールバック通知する(戻り値`bool`)。本ファイル258行目は`target="discord"`を明示指定して呼び出しており、LINEへは送信されずDiscordのみへ送信される仕様であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:22-27,31-37`, `MY_HOME_SYSTEM/core/database.py:11-50`, `MY_HOME_SYSTEM/services/notification_service.py:116-140`（本ファイル内利用: `MY_HOME_SYSTEM/weekly_analyze_report.py:258`） |
+| `common` モジュールの実装詳細 | `MY_HOME_SYSTEM/common.py:22-27,31-37`で`core.database.get_db_cursor`/`services.notification_service.send_push`がそれぞれ`core.database.get_db_cursor`/`services.notification_service.send_push`の再エクスポートであることを直接確認した上で、実装本体を直接確認した。`core.database.get_db_cursor`(`MY_HOME_SYSTEM/core/database.py:11-50`)は`@contextmanager`のDBカーソル(`sqlite3.Row`を`row_factory`に設定、17行目)を返すコンテキストマネージャで、`commit`引数が`True`の場合のみ`conn.commit()`し、`sqlite3.OperationalError`(locked)時は最大5回リトライ、それ以外の例外時は`conn.rollback()`後に再送出する。`row_factory=sqlite3.Row`のため、カーソルが返す行はキー名によるディクショナリ的アクセス(`row["column"]`)が可能である。`services.notification_service.send_push`(`MY_HOME_SYSTEM/services/notification_service.py:116-140`)は`target`引数(`"discord"`/`"line"`/`"both"`)に応じてDiscord Webhookおよび/またはLINE Messaging APIへ送信し、LINE送信失敗時はDiscordの`error`チャンネルへフォールバック通知する(戻り値`bool`)。本ファイル258行目は`target="discord"`を明示指定して呼び出しており、LINEへは送信されずDiscordのみへ送信される仕様であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:22-27,31-37`, `MY_HOME_SYSTEM/core/database.py:11-50`, `MY_HOME_SYSTEM/services/notification_service.py:116-140`（本ファイル内利用: `MY_HOME_SYSTEM/weekly_analyze_report.py:258`） |
 | データベースのスキーマ定義 | `MY_HOME_SYSTEM/init_unified_db.py`を直接確認した。`food_records`(`config.SQLITE_TABLE_FOOD`)は193〜203行目の`CREATE TABLE IF NOT EXISTS`文で`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, meal_date TEXT, meal_time_category TEXT, menu_category TEXT, timestamp DATETIME`列を持つ(`menu_category`は`TEXT`型、`NOT NULL`等の追加制約はなし)。`car_records`(`config.SQLITE_TABLE_CAR`)は232〜240行目で`id INTEGER PRIMARY KEY AUTOINCREMENT, action TEXT, rule_name TEXT, timestamp DATETIME, score REAL`列を持つ(`action`は`TEXT`型、制約なし)。`power_usage`(`config.SQLITE_TABLE_POWER_USAGE`)は145〜153行目で`id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, device_name TEXT, wattage REAL, timestamp DATETIME NOT NULL`列を持つ(`wattage`は`REAL`型、制約なし)。`child_health_records`(`config.SQLITE_TABLE_CHILD`)は243〜251行目で`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, child_name TEXT, condition TEXT, timestamp DATETIME NOT NULL`列を持つ(`condition`は`TEXT`型、制約なし)。いずれのテーブルも`CHECK`制約や`UNIQUE`制約は定義されていないことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/init_unified_db.py:145-153,193-203,232-240,243-251` |
-| 実行スケジューラ（Cron等）の設定 | `MY_HOME_SYSTEM/scheduler_boot.py`(全ファイル)を直接確認した。29〜43行目の`TASKS: List[Task]`リストには`monitors/switchbot_power_monitor.py`, `monitors/nature_remo_monitor.py`, `monitors/server_watchdog.py`, `monitors/tv_lock_monitor.py`, `monitors/memory_monitor.py`, `monitors/nas_monitor.py`の6件のみが登録されており(いずれも秒単位のインターバル、最大でも3600秒)、`weekly_analyze_report.py`は`TASKS`リストに含まれていないことを確認した。リポジトリ全体を`weekly_analyze_report`という文字列で検索したが、`weekly_analyze_report.py`本体・そのテストファイル(`tests/test_weekly_analyze_report.py`)以外に本スクリプトを呼び出す箇所は見つからず、`old/cron_reporter.py`は`crontab -l`の出力内容をレポートする別用途のスクリプトであり本ファイルの起動元ではないことも確認した。cron定義ファイルやsystemdタイマー定義もリポジトリ内には見つからず、コード内コメント(29〜30行目)が前提とする「scheduler.pyが月曜に実行する」という記述は現在の`scheduler_boot.py`の実装とは一致しない(登録されていない)ことが判明した。実際の起動方法は依然としてリポジトリ内からは特定できない。 | 直接ソース確認: `MY_HOME_SYSTEM/scheduler_boot.py:29-43`（`MY_HOME_SYSTEM/old/cron_reporter.py`を参考として確認、関連なしと判断） |
+| 実行スケジューラ（Cron等）の設定 | **（Issue #528で解消。旧版の「cron定義ファイルはリポジトリ内に見つからず、実際の起動方法は特定できない」という結論は現在は誤り）** 実機の crontab が`deploy/cron/crontab`としてリポジトリ管理下に入り(`deploy/cron/README.md`が「実機(Raspberry Pi)の `masahiro` ユーザーの crontab を、故障時の復旧・変更履歴管理のためにこのリポジトリでも管理する」と明記)、その14行目に`30 8 * * 1 /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh weekly_analyze_report.py`＝**毎週月曜 08:30 に`run_task.sh`経由で起動**という定義が存在する。同ファイル11〜13行目のコメントは「`weekly_analyze_report.py`は『月曜の8時台』以外は no-op で、同日二重起動は `FALLBACK_ROOT/last_weekly_report.txt`の実行済みフラグ(#234)で抑止される」「Issue #528: 以前はこのリポジトリ外の cron でのみ起動されていて復旧手順から漏れていた」と、旧版の解析時点で特定できなかった理由まで含めて説明している。`scheduler_boot.py`の`TASKS`(30〜43行目)に本スクリプトが含まれていないのは変わらず、コード内コメントが前提とする「scheduler.pyが月曜に実行する」という記述は現在も実装と一致しない(起動元はcronである)。 | 直接ソース確認: `deploy/cron/crontab:11-14`, `deploy/cron/README.md:1-16`, `MY_HOME_SYSTEM/scheduler_boot.py:30-43`（参考: [run_task.md](./run_task.md)） |
 
 ## 10. 自己検証結果
 

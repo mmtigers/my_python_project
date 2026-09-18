@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { cameraSettingsResponseSchema } from '../../../lib/gameDataSchema';
 import { useQuery } from '@tanstack/react-query';
 import LiveView from './LiveView';
 import RecordView from './RecordView';
@@ -34,7 +35,9 @@ const CameraDashboard: React.FC = () => {
     } = useQuery<CameraConfig[]>({
         queryKey: ['cameraSettings'],
         queryFn: async () => {
-            const data = await apiClient.get<CameraConfig[]>('/api/cameras/settings');
+            // #659: 取得境界で形状を検証する(gameData / purchase / inventory と同じ方針)。
+            const raw = await apiClient.get<unknown>('/api/cameras/settings');
+            const data = cameraSettingsResponseSchema.parse(raw) as CameraConfig[];
             return [...data].sort((a, b) => a.order - b.order);
         },
     });

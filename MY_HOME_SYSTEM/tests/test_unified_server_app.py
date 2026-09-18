@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 import sys
 from unittest.mock import patch
 
+import pytest
 from starlette.testclient import TestClient
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -210,7 +211,16 @@ class TestIpRestrictionMiddlewareCurrentBehavior:
     「Webhookパスだけは常に通す」という前提が壊れていないかを検知するためのテスト。
     """
 
-    def test_webhook_paths_bypass_without_ip_parsing(self, api_client, monkeypatch):
+    @pytest.mark.parametrize(
+        "path",
+        ["/callback/line", "/webhook/switchbot", "/webhook/alexa"],
+    )
+    def test_webhook_paths_bypass_without_ip_parsing(self, api_client, monkeypatch, path):
+        """外部Webhookの3パスはいずれもクライアントIP解決を経ずに素通りすること。
+
+        /webhook/alexa は長らく allowed_webhook_paths から漏れており、docstringが
+        列挙する「外部からのWebhook受信が必要なパス」の意図と非対称だった。
+        """
         import ipaddress
 
         calls = []
@@ -221,9 +231,34 @@ class TestIpRestrictionMiddlewareCurrentBehavior:
             return original(value)
 
         monkeypatch.setattr(ipaddress, "ip_address", _spy)
-        # LINE Bot未設定環境では501になるが、ミドルウェアが素通りしていることの確認が目的
-        api_client.post("/callback/line", content=b"{}")
+        # 各エンドポイントは未設定/検証失敗で501や400を返すが、
+        # ミドルウェアが素通りしていることの確認が目的なのでステータスは問わない
+        api_client.post(path, content=b"{}")
         assert calls == []
+
+    def test_allowed_webhook_paths_matches_mounted_webhook_routes(self, api_client):
+        """実際にマウントされている外部Webhookのルートが、すべて例外パスに載っていること。
+
+        新しい外部Webhookを追加したときに allowed_webhook_paths への追記を忘れると、
+        (本ミドルウェアは遮断しないため)気づけないまま非対称が再発する。
+
+        パスの列挙に OpenAPI スキーマを使うのは、`app.routes` の構造が
+        FastAPI/Starlette のバージョンで変わるため(0.141.1 + starlette 1.6.0 では
+        include_router 済みのルートが `_IncludedRouter` 配下にネストされ、
+        トップレベルの要素は `.path` を持たない)。OpenAPI 側は公開APIで、
+        `prefix=` を解決した完全なパスが得られる。
+        なお `include_in_schema=False` のルートはここに現れないが、
+        外部Webhookをスキーマから隠す運用は現状していない。
+        """
+        schema_paths = set(unified_server.app.openapi()["paths"].keys())
+        mounted = {p for p in schema_paths if p.startswith(("/webhook/", "/callback/"))}
+        # 本ミドルウェアの例外リストと同じ集合をテスト側にも明示して突き合わせる
+        expected_exempt = {"/webhook/switchbot", "/callback/line", "/webhook/alexa"}
+        assert mounted == expected_exempt, (
+            "外部Webhookのルート構成が変わっている。unified_server.py の "
+            "allowed_webhook_paths と本テストの expected_exempt を同時に更新すること: "
+            f"マウント済み={sorted(mounted)} / 例外リスト={sorted(expected_exempt)}"
+        )
 
     def test_normal_path_is_currently_always_allowed(self, api_client):
         """スプーフィング可能なヘッダーを一切付けなくても現状は必ず通過する(既知の未解決リスク)"""
@@ -263,10 +298,15 @@ class TestIpRestrictionMiddlewareCurrentBehavior:
 
 
 class _FakeProcess:
-    def __init__(self):
+    def __init__(self, returncode=None):
         self.terminated = False
         self.killed = False
         self.pid = 12345
+        # poll() の戻り値。None = 生存中、int = 終了済み(exit code)
+        self.returncode = returncode
+
+    def poll(self):
+        return self.returncode
 
     def terminate(self):
         self.terminated = True
@@ -305,6 +345,122 @@ class TestLifespan:
         # シャットダウン後は起動したプロセスすべてに terminate が呼ばれていること
         for _args, proc in spawned:
             assert proc.terminated is True
+
+
+class TestChildProcessSupervisor:
+    """Issue #646: 監視子プロセス(camera_monitor / scheduler_boot)の死活監視と自動再起動。
+
+    以前は lifespan 起動時に Popen するだけで、その後の死活を見ていなかった
+    (scheduler が落ちると配下の監視タスクが静かに止まり、復旧は人手だった)。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_supervisor_state(self, monkeypatch):
+        monkeypatch.setattr(unified_server, "camera_process", None)
+        monkeypatch.setattr(unified_server, "scheduler_process", None)
+        monkeypatch.setattr(unified_server, "_child_restart_history", {})
+        monkeypatch.setattr(unified_server, "_child_restart_disabled", set())
+
+    def _install_fake_popen(self, monkeypatch):
+        spawned = []
+
+        def _fake_popen(args, **kwargs):
+            proc = _FakeProcess()
+            spawned.append((args, proc))
+            return proc
+
+        monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+        return spawned
+
+    def test_alive_children_are_left_untouched(self, monkeypatch):
+        spawned = self._install_fake_popen(monkeypatch)
+        alive_cam, alive_sched = _FakeProcess(), _FakeProcess()
+        monkeypatch.setattr(unified_server, "camera_process", alive_cam)
+        monkeypatch.setattr(unified_server, "scheduler_process", alive_sched)
+
+        assert unified_server.restart_dead_children(now=1000.0) == []
+        assert spawned == []
+        assert unified_server.camera_process is alive_cam
+        assert unified_server.scheduler_process is alive_sched
+
+    def test_dead_scheduler_is_restarted_and_camera_untouched(self, monkeypatch):
+        spawned = self._install_fake_popen(monkeypatch)
+        alive_cam, dead_sched = _FakeProcess(), _FakeProcess(returncode=1)
+        monkeypatch.setattr(unified_server, "camera_process", alive_cam)
+        monkeypatch.setattr(unified_server, "scheduler_process", dead_sched)
+
+        assert unified_server.restart_dead_children(now=1000.0) == ["scheduler"]
+        assert len(spawned) == 1
+        assert spawned[0][0][1].endswith("scheduler_boot.py")
+        assert unified_server.scheduler_process is spawned[0][1]
+        assert unified_server.camera_process is alive_cam
+
+    def test_never_started_child_is_not_spawned_by_supervisor(self, monkeypatch):
+        """起動時に Popen が失敗して None のままの子は、監視ループの対象外(起動失敗の
+        無限リトライにしない。起動失敗は lifespan の logger.error で既に通知済み)。"""
+        spawned = self._install_fake_popen(monkeypatch)
+        monkeypatch.setattr(unified_server, "camera_process", None)
+        monkeypatch.setattr(unified_server, "scheduler_process", _FakeProcess())
+        assert unified_server.restart_dead_children(now=1000.0) == []
+        assert spawned == []
+
+    def test_crash_loop_stops_restarting_after_hourly_limit_and_logs_critical(self, monkeypatch):
+        self._install_fake_popen(monkeypatch)
+        # core.logger のロガーは propagate=False で caplog に届かないため、ロガー自体を差し替える
+        fake_logger = MagicMock()
+        monkeypatch.setattr(unified_server, "logger", fake_logger)
+        limit = unified_server.CHILD_RESTART_MAX_PER_HOUR
+        monkeypatch.setattr(unified_server, "camera_process", _FakeProcess())
+
+        # 上限回数までは毎回再起動される(再起動直後にまた死ぬ、を繰り返す)
+        for i in range(limit):
+            monkeypatch.setattr(unified_server, "scheduler_process", _FakeProcess(returncode=137))
+            assert unified_server.restart_dead_children(now=1000.0 + i * 60) == ["scheduler"]
+        assert fake_logger.critical.call_count == 0
+
+        # 上限を超えた次の死亡では再起動せず、自動再起動を止めて CRITICAL を出す
+        dead_again = _FakeProcess(returncode=137)
+        monkeypatch.setattr(unified_server, "scheduler_process", dead_again)
+        assert unified_server.restart_dead_children(now=1000.0 + limit * 60) == []
+        assert unified_server.scheduler_process is dead_again
+        assert "scheduler" in unified_server._child_restart_disabled
+        assert fake_logger.critical.call_count == 1
+        assert "自動再起動を停止" in fake_logger.critical.call_args.args[0]
+
+        # 以降は死んでいても触らない(CRITICAL の連打もしない)
+        assert unified_server.restart_dead_children(now=1000.0 + limit * 60 + 30) == []
+        assert fake_logger.critical.call_count == 1
+
+    def test_restart_history_outside_one_hour_window_is_forgotten(self, monkeypatch):
+        self._install_fake_popen(monkeypatch)
+        limit = unified_server.CHILD_RESTART_MAX_PER_HOUR
+        monkeypatch.setattr(unified_server, "camera_process", _FakeProcess())
+        for i in range(limit):
+            monkeypatch.setattr(unified_server, "scheduler_process", _FakeProcess(returncode=1))
+            unified_server.restart_dead_children(now=1000.0 + i)
+
+        # 1時間以上あとの死亡は、古い履歴が窓から外れているので再起動される
+        monkeypatch.setattr(unified_server, "scheduler_process", _FakeProcess(returncode=1))
+        assert unified_server.restart_dead_children(now=1000.0 + limit + 3601.0) == ["scheduler"]
+        assert "scheduler" not in unified_server._child_restart_disabled
+
+    def test_lifespan_starts_supervisor_task_and_cancels_it_on_shutdown(self, isolated_db, monkeypatch):
+        self._install_fake_popen(monkeypatch)
+        monkeypatch.setattr(unified_server, "apply_pending_migrations", lambda conn: None)
+        created = []
+        real_create_task = unified_server.asyncio.create_task
+
+        def _spy_create_task(coro, *args, **kwargs):
+            task = real_create_task(coro, *args, **kwargs)
+            created.append(task)
+            return task
+
+        monkeypatch.setattr(unified_server.asyncio, "create_task", _spy_create_task)
+        with TestClient(unified_server.app) as client:
+            assert client.get("/health").status_code == 200
+            assert len(created) == 1
+            assert not created[0].done()
+        assert created[0].cancelled()
 
 
 class TestSecretRedactionFilter:
@@ -348,3 +504,39 @@ class TestSecretRedactionFilter:
         with TestClient(unified_server.app):
             filters = logging.getLogger("uvicorn.access").filters
             assert any(isinstance(f, unified_server.SecretRedactionFilter) for f in filters)
+
+
+class TestSecurityHeadersMiddleware:
+    """Issue #665: 最小限のセキュリティヘッダーが全レスポンスに付与されることの回帰テスト。"""
+
+    def test_headers_are_present_on_normal_response(self, api_client):
+        res = api_client.get("/health")
+        assert res.status_code == 200
+        assert res.headers["X-Content-Type-Options"] == "nosniff"
+        assert res.headers["X-Frame-Options"] == "SAMEORIGIN"
+        assert res.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+
+    def test_headers_are_present_on_error_response(self, api_client):
+        """404 等のエラー応答にも付与されること(ミドルウェアが例外経路を素通りしない)。"""
+        res = api_client.get("/api/definitely-not-a-real-route")
+        assert res.status_code == 404
+        assert res.headers["X-Content-Type-Options"] == "nosniff"
+
+    def test_disabled_flag_suppresses_all_headers(self, api_client, monkeypatch):
+        """エッジ側で同じヘッダーを付与している構成向けに、オリジン側の付与を止められること。"""
+        monkeypatch.setattr(config, "SECURITY_HEADERS_ENABLED", False)
+        res = api_client.get("/health")
+        assert "X-Content-Type-Options" not in res.headers
+        assert "X-Frame-Options" not in res.headers
+        assert "Referrer-Policy" not in res.headers
+
+    def test_empty_x_frame_options_skips_only_that_header(self, api_client, monkeypatch):
+        monkeypatch.setattr(config, "SECURITY_HEADER_X_FRAME_OPTIONS", "")
+        res = api_client.get("/health")
+        assert "X-Frame-Options" not in res.headers
+        assert res.headers["X-Content-Type-Options"] == "nosniff"
+
+    def test_x_frame_options_value_is_configurable(self, api_client, monkeypatch):
+        monkeypatch.setattr(config, "SECURITY_HEADER_X_FRAME_OPTIONS", "DENY")
+        res = api_client.get("/health")
+        assert res.headers["X-Frame-Options"] == "DENY"

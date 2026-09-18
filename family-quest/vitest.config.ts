@@ -15,7 +15,8 @@ export default mergeConfig(
       setupFiles: ['./src/test/setup.ts'],
       coverage: {
         provider: 'v8',
-        reporter: ['text', 'html', 'lcov'],
+        // json-summary は CI のカバレッジラチェット(.github/scripts/check_coverage_ratchet.py)が読む
+        reporter: ['text', 'html', 'lcov', 'json-summary'],
         // Issue #495: 計測対象は src/ の実装のみ。テスト・型定義・セットアップは
         // 除外する(バックエンドの .coveragerc と同じ「本当に実行不能なものだけ
         // 除外」方針)。閾値は現時点では設定しない(まず可視化に徹する)。

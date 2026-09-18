@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a1d2738` |
 
 ## 関連ドキュメント
 
@@ -76,7 +77,7 @@
 ### `_validate_cert_chain_url`
 
 * **役割**: `SignatureCertChainUrl`ヘッダの値がAmazon純正のURL形式（`https://s3.amazonaws.com/echo.api/...`、ポート443）であることを検証する内部ヘルパー関数。scheme・hostname（大文字小文字を無視）・pathプレフィックス・portの4項目をそれぞれ`CERT_CHAIN_URL_*`定数と比較する。**（Issue #173で修正）** pathプレフィックスの判定は、以前は生の`parsed.path`に対する`startswith`のみだったため、`https://s3.amazonaws.com/echo.api/../evil-bucket/cert.pem`のような`".."`を含むパスがこのチェックを素通りしていた(Amazon公式の検証手順は「URLパスを正規化した後に`/echo.api/`で始まること」を要求しており、この点で公式手順から乖離していた)。現在は`posixpath.normpath`で`parsed.path`を正規化してから`startswith`判定を行う。**（Issue #223で修正）** `urlparse`が返す`parsed.path`はパーセントデコードされない生文字列のため、`https://s3.amazonaws.com/echo.api/%2e%2e/evil-bucket/cert.pem`のようなパーセントエンコード済みの`".."`は`normpath`でも検知できず素通りしていた。一方、後段の`_fetch_leaf_certificate`が同じURL文字列を`requests.get()`に渡すと`requests`が送信前に`%2e%2e`を`".."`へデコードするため、検証結果と実際の取得先が食い違っていた。現在は`normpath`へ渡す前に`unquote`で一度パーセントデコードしてから判定する。
-* 根拠: (行番号: 59〜73 / 抜粋: "def _validate_cert_chain_url(url: str) -> None:\n    parsed = urlparse(url)")、正規化 (行番号: 69〜70 / 抜粋: "normalized_path = posixpath.normpath(unquote(parsed.path))\n    if not normalized_path.startswith(CERT_CHAIN_URL_PATH_PREFIX):")
+* 根拠: (行番号: 78〜102 / 抜粋: "def _validate_cert_chain_url(url: str) -> None:\n    parsed = urlparse(url)")、正規化 (行番号: 69〜70 / 抜粋: "normalized_path = posixpath.normpath(unquote(parsed.path))\n    if not normalized_path.startswith(CERT_CHAIN_URL_PATH_PREFIX):")
 * **（Issue #385 で追加）** クエリ文字列またはフラグメントを含むURLは `AlexaVerificationError` で拒否する。Amazonの証明書URLにクエリが付くことはなく、許すとキャッシュキーの無限増殖(`?x=1`, `?x=2`, …)と取得先の揺れの原因になるため。
 * 根拠: `if parsed.query or parsed.fragment:` (行番号: 93〜94)
 
@@ -100,7 +101,7 @@
 ### `_cert_cache_key`（Issue #385 で追加）
 
 * **役割**: 証明書URLから `scheme://host(小文字)/正規化パス` 形式のキャッシュキーを生成する。クエリ・フラグメントは含めない。
-* 根拠: `def _cert_cache_key(url: str) -> str:` (行番号: 63〜67)
+* 根拠: `def _cert_cache_key(url: str) -> str:` (行番号: 71〜75)
 * **引数/リクエスト**: `url: str`
 * 根拠: (行番号: 63)
 * **戻り値/レスポンス**: `str`
@@ -113,7 +114,7 @@
 ### `_fetch_leaf_certificate`
 
 * **役割**: `SignatureCertChainUrl`から証明書チェーンをHTTPS経由で取得し、先頭（リーフ）証明書を返す内部ヘルパー関数。`_cert_cache`にキャッシュ済みかつ有効期限内であればHTTP取得を省略してキャッシュを返す。取得成功時は`CERT_CACHE_TTL_SECONDS`（1時間）後を有効期限として`_cert_cache`へ書き込む。**（Issue #179で修正）** 以前は`requests.get`/`resp.raise_for_status()`が送出する`requests.exceptions.RequestException`（`Timeout`/`ConnectionError`/`HTTPError`等）がそのまま伝播し、呼び出し元ルーターの`except AlexaVerificationError`を素通りしていたが、これを`try/except`で捕捉し`AlexaVerificationError`へ変換するよう修正した。
-* 根拠: (行番号: 76〜100 / 抜粋: "def _fetch_leaf_certificate(cert_chain_url: str) -> x509.Certificate:\n    now = time.time()\n    cached = _cert_cache.get(cert_chain_url)\n    if cached and cached[1] > now:\n        return cached[0]")、例外変換の修正 (行番号: 88〜92 / 抜粋: "try:\n        resp = requests.get(cert_chain_url, timeout=5)\n        resp.raise_for_status()\n    except requests.exceptions.RequestException as exc:\n        raise AlexaVerificationError(f\"Failed to fetch certificate chain: {exc}\") from exc")
+* 根拠: (行番号: 115〜158 / 抜粋: "def _fetch_leaf_certificate(cert_chain_url: str) -> x509.Certificate:\n    now = time.time()\n    cached = _cert_cache.get(cert_chain_url)\n    if cached and cached[1] > now:\n        return cached[0]")、例外変換の修正 (行番号: 88〜92 / 抜粋: "try:\n        resp = requests.get(cert_chain_url, timeout=5)\n        resp.raise_for_status()\n    except requests.exceptions.RequestException as exc:\n        raise AlexaVerificationError(f\"Failed to fetch certificate chain: {exc}\") from exc")
 * **（Issue #385 で修正）** キャッシュキーはURL文字列そのものではなく `_cert_cache_key`（`scheme://host/正規化パス`、クエリ・フラグメントを含まない）を使う。エントリ数は `CERT_CACHE_MAX_ENTRIES`（8）で上限を設け、超過時は期限切れを捨てたうえで最も期限の近いものから破棄する。`x509.load_pem_x509_certificates` の `ValueError`（PEMとして解釈できない応答）は `AlexaVerificationError` に変換する（以前は router の except を素通りして500になっていた）。
 * 根拠: `cache_key = _cert_cache_key(cert_chain_url)` (行番号: 99)、`except ValueError as exc:` (行番号: 120〜121)、`while len(_cert_cache) >= CERT_CACHE_MAX_ENTRIES:` (行番号: 129〜131)
 
@@ -139,7 +140,7 @@
 * 根拠: (行番号: 175〜183, 63〜68, 105〜112, 122〜124 / 抜粋: "if not (SIGNATURE_MIN_BYTES <= len(signature) <= SIGNATURE_MAX_BYTES):", "raise AlexaVerificationError(\"Certificate chain fetch recently failed (negative cache)\")")
 
 * **役割**: `Signature`ヘッダと`SignatureCertChainUrl`ヘッダを使ってリクエストボディの署名を検証する公開関数。(1) 両ヘッダの非空チェック、(2) `_validate_cert_chain_url`によるURL形式検証、(3) `_fetch_leaf_certificate`によるリーフ証明書取得、(4) 証明書の有効期限チェック（`not_valid_before_utc <= now <= not_valid_after_utc`）、(5) SANに`echo-api.amazon.com`が含まれるかのチェック、(6) `Signature`ヘッダのbase64デコード、(7) リーフ証明書の公開鍵によるRSA署名検証（PKCS1v15パディング + SHA1ハッシュ、Amazon Alexaの署名アルゴリズム仕様で固定）、を順に行う。
-* 根拠: [関数定義とDocstring] (行番号: 103〜107 / 抜粋: "def verify_signature(raw_body: bytes, signature_b64: str, cert_chain_url: str) -> None:\n    \"\"\"SignatureヘッダとSignatureCertChainUrlヘッダを使ってリクエストボディを検証する。\n\n    検証失敗時は AlexaVerificationError を送出する。\n    \"\"\"")
+* 根拠: [関数定義とDocstring] (行番号: 161〜205 / 抜粋: "def verify_signature(raw_body: bytes, signature_b64: str, cert_chain_url: str) -> None:\n    \"\"\"SignatureヘッダとSignatureCertChainUrlヘッダを使ってリクエストボディを検証する。\n\n    検証失敗時は AlexaVerificationError を送出する。\n    \"\"\"")
 * **（Issue #385 で修正）** SAN拡張が無い証明書で送出される `x509.ExtensionNotFound` を `AlexaVerificationError` に変換する（以前は router で500になっていた）。
 * 根拠: `except x509.ExtensionNotFound as exc:` (行番号: 155〜156)
 
@@ -162,7 +163,7 @@
 ### `verify_timestamp`
 
 * **役割**: リクエストJSON内の`request.timestamp`が、リプレイ攻撃対策の許容範囲内（既定`TIMESTAMP_TOLERANCE_SECONDS`=150秒）であることを確認する公開関数。`request_timestamp`の末尾`"Z"`を`"+00:00"`に置換したうえで`datetime.fromisoformat`でパースし、現在時刻（UTC）との差の絶対値が許容範囲を超えていれば拒否する。**Issue #110の修正**により、パース成功後にタイムゾーン情報（`tzinfo`）の有無を確認するガードが追加された。`datetime.fromisoformat`はタイムゾーン情報のないISO文字列（例:`"2026-08-30T00:00:00"`）もパース成功として受理してしまう（`ValueError`にならない）が、Alexaの`request.timestamp`は仕様上常にタイムゾーン付きのため、これは仕様外の不正な形式として扱い`AlexaVerificationError`を送出する。このガードが無いと、後続の`now(tz付き) - ts(tz無し)`比較が`TypeError`を送出し、呼び出し元ルーターが`AlexaVerificationError`のみを捕捉する設計のため、本来返すべき400ではなく500が返っていた。
-* 根拠: [関数定義とDocstring] (行番号: 137〜138 / 抜粋: "def verify_timestamp(request_timestamp: str, tolerance_seconds: int = TIMESTAMP_TOLERANCE_SECONDS) -> None:\n    \"\"\"リクエストJSON内の request.timestamp がリプレイ攻撃対策の許容範囲内であることを確認する。\"\"\"")
+* 根拠: [関数定義とDocstring] (行番号: 208〜227 / 抜粋: "def verify_timestamp(request_timestamp: str, tolerance_seconds: int = TIMESTAMP_TOLERANCE_SECONDS) -> None:\n    \"\"\"リクエストJSON内の request.timestamp がリプレイ攻撃対策の許容範囲内であることを確認する。\"\"\"")
 * 根拠: [tzinfoガード(Issue #110)] (行番号: 144〜151 / 抜粋: "if ts.tzinfo is None:\n        # datetime.fromisoformat はタイムゾーン情報のないISO文字列(例: \"2026-08-30T00:00:00\")\n        # もパース成功として受理してしまう(ValueErrorにならない)。", "raise AlexaVerificationError(f\"Request timestamp missing timezone info: {request_timestamp!r}\")")
 
 
@@ -299,6 +300,13 @@ graph TD
 | --- | --- | --- |
 | 呼び出し元ルーターが`AlexaVerificationError`以外の例外をどう扱うか | Issue #179の修正により`_fetch_leaf_certificate`のHTTP取得失敗（`requests.exceptions.RequestException`）は`AlexaVerificationError`へ変換されるようになったが、`x509.load_pem_x509_certificates`が不正なPEMデータに対して送出しうる`ValueError`等、本ファイル内で`AlexaVerificationError`に変換されない例外経路が他にも残っており、呼び出し元がこれらをHTTPレスポンスへどう変換するかは本ファイルからは不明。 | `MY_HOME_SYSTEM/routers/alexa_router.py` |
 | `_cert_cache`のプロセス間共有の有無 | `unified_server.py`が複数プロセス/ワーカー構成で稼働する場合、`_cert_cache`はプロセスごとに独立するかどうかが本ファイルからは不明。 | `MY_HOME_SYSTEM/unified_server.py`、デプロイ構成（起動コマンド等） |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 呼び出し元ルーターが`AlexaVerificationError`以外の例外をどう扱うか | `MY_HOME_SYSTEM/routers/alexa_router.py`を直接確認した。`verify_signature`は`await asyncio.to_thread(verify_signature, raw_body, signature, cert_chain_url)`として呼ばれ、`except AlexaVerificationError`のみを捕捉して`HTTPException(400, "Signature verification failed")`に変換する。`verify_timestamp`も同様に`AlexaVerificationError`→400である。したがって**`x509.load_pem_x509_certificates`の`ValueError`など、本ファイル内で`AlexaVerificationError`に変換されない例外はルーターでも捕捉されず**、`MY_HOME_SYSTEM/unified_server.py`324〜331行目の`@app.exception_handler(Exception)`まで伝播し、`logger.error("🔥 Global Exception: ...", exc_info=True)`の上で`JSONResponse(status_code=500, content={"detail": "Internal Server Error"})`として返る。つまり**検証由来の失敗が400ではなく500になる経路が実在する**(Alexa側からは「スキルの不具合」として扱われ、リトライ挙動も400とは異なりうる)。なお`skill.serializer.deserialize`/`skill.invoke`だけは`except Exception`で包まれており、そこでの例外は明示的に500(`"Skill invocation failed"`)へ変換される。 | 直接ソース確認: `MY_HOME_SYSTEM/routers/alexa_router.py`（全体）, `MY_HOME_SYSTEM/unified_server.py:324-331`（参考: [alexa_router.md](./alexa_router.md)・[unified_server.md](./unified_server.md)） |
+| `_cert_cache`のプロセス間共有の有無 | `MY_HOME_SYSTEM/unified_server.py`431行目は`uvicorn.run(app, host="0.0.0.0", port=8000)`であり、**`workers`引数を指定していない=単一プロセス・単一イベントループ構成**である。起動経路も`MY_HOME_SYSTEM/start_all.sh`170行目の`nohup $PYTHON_EXEC unified_server.py ... &`が唯一で、gunicorn等のマルチワーカー起動やプロセスマネージャによる多重起動は行われていない(`start_all.sh`は`unified_server.py`を含むプロセス名リストで既存プロセスを停止してから1つだけ起動する)。したがって**`_cert_cache`はプロセス内に1つだけ存在し、実運用上「プロセスごとに独立する」問題は発生しない**。同じ前提は`routers/alexa_router.py`のコメント(#230)も「unified_serverはworkers指定なしの単一プロセス・単一イベントループ構成のため」と明記しており、`services/quest/locks.py`のプロセス内ロック群が有効に機能する前提とも共通である。将来マルチワーカー構成へ移行する場合は、証明書キャッシュのミス率がワーカー数倍になる(機能上は無害だが`requests.get`の回数が増える)点と、プロセス内ロックが効かなくなる点をセットで再検討する必要がある。 | 直接ソース確認: `MY_HOME_SYSTEM/unified_server.py:431`, `MY_HOME_SYSTEM/start_all.sh:42,170`, `MY_HOME_SYSTEM/routers/alexa_router.py`（#230コメント）（参考: [unified_server.md](./unified_server.md)・[start_all.md](./start_all.md)・[quest_locks.md](./quest_locks.md)） |
 
 ## 10. 自己検証結果
 

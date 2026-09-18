@@ -46,7 +46,7 @@
 ### `_parse_ping_latency_ms`
 
 * **役割**: `ping` コマンドの標準出力から実測RTT（`time=X ms` または `time<X ms`形式）を抽出する内部ヘルパー関数。**（Issue #190で追加）** `ping_host`が以前サブプロセスの起動〜終了までの壁時計時間をレイテンシとして記録しており、OSのプロセス生成オーバーヘッドが系統的に上乗せされ実RTTより大きい値になっていた問題への対応として、`ping`コマンド自身が報告する実測値を優先的に使うために追加された。
-* 根拠: `def _parse_ping_latency_ms(ping_stdout: str) -> Optional[float]:` (行番号: 40〜52 / 抜粋: "# Issue #190: pingコマンド自体が報告する実測RTT("64 bytes from ...: ... time=0.055 ms")")
+* 根拠: `def _parse_ping_latency_ms(ping_stdout: str) -> Optional[float]:` (行番号: 47〜52 / 抜粋: "# Issue #190: pingコマンド自体が報告する実測RTT("64 bytes from ...: ... time=0.055 ms")")
 
 
 * **引数/リクエスト**: `ping_stdout: str` (`ping`コマンドの標準出力デコード済み文字列)

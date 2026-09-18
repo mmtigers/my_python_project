@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a1d2738` |
 
 ## 関連ドキュメント
 
@@ -102,7 +103,7 @@ graph TD
 
 * **対象環境変数を追加する際は本ファイルも更新が必要**: `MY_HOME_SYSTEM/config.py`側に新しいDiscord/LINE等の通知系認証情報の環境変数が追加された場合、本ファイルの無害化対象リストにも同時に追加しない限り、その新しい環境変数はテスト実行中も実際の値のまま残り、同種の事故が再発しうる。
 * **pytestのcollection順序への暗黙の依存**: 本ファイルの防護は「pytestが同一ディレクトリのconftest.pyを他のテストファイルより先にimportする」というpytestの標準動作に依存している。`DDD/`配下でpytest以外の方法（例: `python newface_monitor.py`を直接実行、または個別スクリプトをテスト目的でimportする等）でモジュールをロードする場合、本ファイルは一切ロードされず無害化は効かない。
-* **`MY_HOME_SYSTEM/tests/conftest.py`との重複**: 同じ無害化ロジック（対象環境変数リストと空文字への上書き）が`MY_HOME_SYSTEM/tests/conftest.py`と本ファイルの2箇所に重複して存在する。将来的に共通ヘルパーへ切り出す余地があるが、`MY_HOME_SYSTEM`と`DDD`は独立したサブシステムというモノレポの設計方針（`CLAUDE.md`）を踏まえると、意図的な重複である可能性もある。
+* **`MY_HOME_SYSTEM/tests/conftest.py`との重複**: 同じ無害化ロジック（対象環境変数リストと空文字への上書き）が`MY_HOME_SYSTEM/tests/conftest.py`と本ファイルの2箇所に重複して存在する。将来的に共通ヘルパーへ切り出す余地があるが、`DDD`は`sys.path`経由で`MY_HOME_SYSTEM/core.*`等を直接importする実依存があるとはいえ（Issue #553）、テストの防護ロジックはパッケージをまたいで暗黙に依存させず各側で完結させる方が安全なため、意図的な重複である可能性もある。
 
 ## 9. 不明事項一覧
 
@@ -110,6 +111,12 @@ graph TD
 | --- | --- | --- |
 | `MY_HOME_SYSTEM/config.py`が`load_dotenv()`を`override=False`（デフォルト）で呼んでいるかどうかの直接確認 | 本ファイルのDocstringはこの前提を述べているが、`config.py`自体の実装は本ファイルの解析範囲外である。 | `MY_HOME_SYSTEM/config.py` |
 | 本ファイルが新設される前の`DDD/`のテスト実行における実際の被害範囲（過去に本物のWebhookが発火した事故の有無） | 本ファイルおよびIssue #103の記述からは「発生しうる経路が存在した」ことまでは分かるが、実際に本番環境で事故が発生したかどうかは本ファイルからは不明。 | 過去のインシデント記録（本リポジトリ内には見当たらない） |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `MY_HOME_SYSTEM/config.py`が`load_dotenv()`を`override=False`（デフォルト）で呼んでいるかどうかの直接確認 | `MY_HOME_SYSTEM/config.py`を直接確認した。29行目で`from dotenv import load_dotenv`、161行目で**引数なしの`load_dotenv()`**が呼ばれている。`python-dotenv`の`load_dotenv`は`override`の既定値が`False`であるため、**既に`os.environ`に存在する変数は`.env`の値で上書きされない**。したがって本ファイル(`DDD/conftest.py`)がimport時点＝`config`ロードより前にDiscord/LINEのWebhook・トークン系環境変数を空文字へ設定しておけば、その後に`config`が`load_dotenv()`を呼んでも実際の認証情報で上書きされることはなく、本ファイルのDocstringが述べる前提は**成立していることが裏付けられた**。逆に言えば、将来`config.py`側が`load_dotenv(override=True)`へ変更されるとこの防御は無言で破られるため、`config.py:161`は本ファイルの安全性が依存している箇所である。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:29,161`（参考: [config.md](./../MY_HOME_SYSTEM/config.md)） |
 
 ## 10. 自己検証結果
 

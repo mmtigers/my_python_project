@@ -26,10 +26,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict, replace
 from datetime import datetime
 from pathlib import Path
-from typing import List, Set, Dict, Optional, Tuple
+from typing import Callable, List, Set, Dict, Optional, Tuple
 from urllib.parse import urljoin, urlparse, parse_qs
 
-from file_utils import DiscordCircuitBreaker, redact_discord_webhook_url, resolve_my_home_system_root
+from file_utils import (
+    DiscordCircuitBreaker,
+    redact_discord_webhook_url,
+    resolve_my_home_system_root,
+    resolve_nas_data_dir,
+    resolve_nas_mount_point,
+)
 
 # プロジェクトルート（MY_HOME_SYSTEM）をパスに追加。
 # 品質: プロジェクトルート解決をfile_utils.resolve_my_home_system_rootへ集約
@@ -221,6 +227,25 @@ class SiteConfig:
 SITES_JSON_PATH: Path = CURRENT_DIR / 'sites.json'
 
 
+def _resolve_discord_webhook_url() -> Optional[str]:
+    """通知先のDiscord Webhook URLを環境変数から解決する。
+
+    #586: MY_HOME_SYSTEM/config.py は`DISCORD_WEBHOOK_NOTIFY`を優先し、未設定時
+    のみレガシーの`DISCORD_WEBHOOK_URL`にフォールバックする
+    (`DISCORD_WEBHOOK_NOTIFY or os.getenv("DISCORD_WEBHOOK_URL")`)。本ファイルは
+    独立してこの値を解決しており、以前は`DISCORD_WEBHOOK_URL`のみを参照していた
+    ため、実機で`DISCORD_WEBHOOK_NOTIFY`のみが設定されている場合(config.py側の
+    優先順位に合わせた運用)、本ファイルの通知だけが無設定として扱われ
+    「not configured」警告のみでDiscord通知が一切送信されなくなっていた。
+    config.pyと同じ優先順位に揃える。
+
+    MonitorConfigのクラス属性(モジュールimport時に1度だけ評価される)から
+    切り出した関数として定義することで、モジュール全体をimportlib.reloadせずに
+    単体テストできるようにしている。
+    """
+    return os.getenv('DISCORD_WEBHOOK_NOTIFY') or os.getenv('DISCORD_WEBHOOK_URL')
+
+
 def _load_sites(json_path: Path) -> List[SiteConfig]:
     """sites.json を読み込み、SiteConfigのリストとして返す。
 
@@ -287,9 +312,16 @@ class MonitorConfig:
 
     # File Paths
     BASE_DIR: Path = Path(__file__).resolve().parent
-    NAS_DIR_STR: str = '/mnt/nas/home_system/newface_monitor/data'  # 本環境のNASパスに適宜変更してください
-    LOCAL_DIR_STR: str = str(BASE_DIR / 'data')
-    MOUNT_POINT: str = '/mnt/nas'
+    # Issue #663: 以前は '/mnt/nas/...' の直書きで、コメントも「本環境のNASパスに適宜変更して
+    # ください」= 環境ごとにコードを編集する前提だった。環境変数 NAS_MOUNT_POINT(MY_HOME_SYSTEM と
+    # 共用の .env のキー)から組み立てる。未設定なら従来どおり /mnt/nas 配下。
+    NAS_DIR_STR: str = resolve_nas_data_dir('newface_monitor')
+    # #580: 以前はextract_youtube_urls.pyと同じ`BASE_DIR / 'data'`を共有していたため、
+    # NAS未マウント中に片方のスクリプトが書いたフォールバックデータを、NAS復旧後に
+    # もう片方のnas_utils.sync_fallback_to_nas呼び出しが誤って自分のNASディレクトリへ
+    # 移動してしまう経路があった。スクリプトごとにサブディレクトリを分離する。
+    LOCAL_DIR_STR: str = str(BASE_DIR / 'data' / 'newface_monitor')
+    MOUNT_POINT: str = str(resolve_nas_mount_point())
     
     # Network Settings
     USER_AGENT: str = (
@@ -302,7 +334,7 @@ class MonitorConfig:
     RETRY_BACKOFF: float = 1.0
 
     # Notification Settings
-    DISCORD_WEBHOOK_URL: Optional[str] = os.getenv('DISCORD_WEBHOOK_URL')
+    DISCORD_WEBHOOK_URL: Optional[str] = _resolve_discord_webhook_url()
     # Issue #451: 1時間毎のcron実行のうち、この時(hour)の実行でのみ日次サマリを
     # Discordへ送信する(_maybe_send_daily_summary参照)。以前は関数内に21という
     # リテラルが直書きされていた。
@@ -451,6 +483,22 @@ class DiscordNotifier:
         suffix = "…(省略)"
         return text[: max(max_len - len(suffix), 0)] + suffix
 
+    @staticmethod
+    def _to_well_formed_url(url: str) -> str:
+        """DiscordのembedのURL系フィールド向けに、URLをRFC準拠の形へパーセントエンコードする。
+
+        スクレイピング元サイトのHTML(imgのsrc属性・aのhref属性等)には、日本語の
+        ファイル名や全角スペースが未エンコードのまま残っていることがある
+        (例: ".../20260402130316-ニコ　加工済.jpg")。DiscordはembedのURL系フィールド
+        (embed.url、thumbnail.url等)に「well formed」なURLを要求しており、
+        こうした未エンコードの非ASCII文字をそのまま渡すとそのフィールドのみならず
+        embed全体が400 Bad Requestで拒否される(cast.name等の他フィールドは
+        正常でも通知自体が失われる)。requests.utils.requote_uri は既に
+        パーセントエンコード済みの部分は二重エンコードせず、それ以外の文字
+        (非ASCII・スペース等)のみを安全にエンコードするため、ここに用いる。
+        """
+        return requests.utils.requote_uri(url)
+
     def __init__(self, webhook_url: Optional[str]):
         """
         Args:
@@ -535,6 +583,10 @@ class DiscordNotifier:
                 unsent.extend(new_casts[index:])
                 break
 
+            # 送信するURL系フィールド(embed.url、Linkフィールド、thumbnail.url)は
+            # いずれもここで一度だけ整形し、以降は同じ値を使い回す。
+            safe_detail_url = self._to_well_formed_url(cast.detail_url)
+
             safe_name = self._truncate_for_embed(cast.name, self._EMBED_FIELD_VALUE_MAX_LEN)
             fields = [{"name": "Name", "value": safe_name, "inline": True}]
             if cast.age:
@@ -544,7 +596,7 @@ class DiscordNotifier:
             fields.append({
                 "name": "Link",
                 "value": self._truncate_for_embed(
-                    f"[詳細ページへ]({cast.detail_url})", self._EMBED_FIELD_VALUE_MAX_LEN
+                    f"[詳細ページへ]({safe_detail_url})", self._EMBED_FIELD_VALUE_MAX_LEN
                 ),
                 "inline": True,
             })
@@ -554,6 +606,12 @@ class DiscordNotifier:
             # 遅延読み込み(lazyload)画像のプレースホルダー(data:image/gif;base64,...等)を
             # 誤ってimage_urlとして拾ってしまうサイトがあるため、ここで弾く。
             thumbnail_url = cast.image_url if cast.image_url.startswith(('http://', 'https://')) else ""
+            if thumbnail_url:
+                # 日本語ファイル名・全角スペース等の未エンコード文字を含むURLは
+                # http(s)で始まっていてもDiscordに「well formed」と認められず
+                # 400で拒否されるため(_to_well_formed_urlのdocstring参照)、
+                # スキーム判定を通過した後にパーセントエンコードする。
+                thumbnail_url = self._to_well_formed_url(thumbnail_url)
 
             payload = {
                 "username": "New Face Monitor",
@@ -563,7 +621,7 @@ class DiscordNotifier:
                             f"✨ 新人キャスト情報{site_prefix}: {cast.name}", self._EMBED_TITLE_MAX_LEN
                         ),
                         "description": "新しいキャストが追加されました！",
-                        "url": cast.detail_url,
+                        "url": safe_detail_url,
                         "color": 16738740,  # Pinkish
                         "fields": fields,
                         "thumbnail": {"url": thumbnail_url} if thumbnail_url else {}
@@ -732,6 +790,20 @@ class KnownCastsUnavailableError(Exception):
     """
 
 
+class DataFileUnavailableError(Exception):
+    """load_daily_summary/load_site_failuresが、ファイルは存在するのにI/Oエラーで
+    読めなかったことを示す例外(#578)。KnownCastsUnavailableErrorと同じ位置づけ
+    (NAS/CIFSの瞬断等による一時的な読み込み失敗)だが、対象データが異なるため
+    別クラスにしている。
+
+    以前はOSErrorも他の内容起因の破損と同じ扱いで空の初期状態({})を返しており、
+    呼び出し元がその空状態のまま無条件でsave_*を呼ぶと、たまたま読み込みに
+    失敗しただけの既存データ(他サイトのsite_failures状態、累積中のdaily_summary
+    カウント等)が丸ごと上書きで消えていた。呼び出し元はこの例外を捕捉して
+    保存処理をスキップし、既存の永続化状態に触れないこと。
+    """
+
+
 class DataManager:
     """データの永続化と読み込みを担当するクラス。
 
@@ -764,6 +836,16 @@ class DataManager:
     # 圧迫し得た。この日数より古い隔離ファイルは巡回のたびに削除する。
     _QUARANTINE_RETENTION_DAYS = 30
 
+    # 2026-09-09 運用障害対応: save_known_castsの一時ファイル書き込み→読み戻し
+    # 検証(D-L8)が、NAS等の一時的な書き込み不良(例: nas_monitor.pyの日次
+    # 保持期間超過ファイル自動削除とのNAS I/O競合)により空ファイル/破損内容と
+    # なって失敗することがある。検証失敗時は即座に諦めて既存データを保持する
+    # (安全側の設計自体は正しい)が、単発の一過性事象でもその回の新規検知が
+    # 「既知」として保存されず次回再通知されてしまうため、書き込み→検証全体を
+    # 短い間隔で数回リトライしてから諦めるようにする。
+    _SAVE_VERIFY_MAX_ATTEMPTS = 3
+    _SAVE_VERIFY_RETRY_DELAY_SECONDS = 2.0
+
     def __init__(self, data_dir: Path):
         """
         Args:
@@ -777,9 +859,19 @@ class DataManager:
         # 集約管理)への読み込み→更新→書き込みが複数スレッドから同時に
         # 走りうるようになった。read-modify-writeの間に他スレッドの書き込みが
         # 割り込むと更新が失われるため、これらの共通ファイルを操作するメソッド
-        # 全体をこのロックで直列化する(サイト単位のknown_castsファイルは
-        # サイトごとに別ファイルのため対象外)。
-        self._shared_file_lock = threading.Lock()
+        # 全体をロックで直列化する(サイト単位のknown_castsファイルはサイト
+        # ごとに別ファイルのため対象外)。
+        #
+        # 2026-09-10: 以前はdaily_summary.json/site_failures.jsonの両方を
+        # 単一の_shared_file_lockで直列化していたが、_retry_transient_write
+        # (2026-09-09運用障害対応)の追加によりNAS I/O不良時は最大2回×2秒の
+        # sleepをロック保持したまま行うようになった。単一ロックだと例えば
+        # site_failures.json側のリトライがdaily_summary.json側の無関係な
+        # 更新まで巻き添えでブロックしてしまうため、ファイルごとに別ロックへ
+        # 分離する(同一ファイルへの同時読み書きが更新を失う問題は、
+        # ファイルごとのロックでも変わらず防止できる)。
+        self._daily_summary_lock = threading.Lock()
+        self._site_failures_lock = threading.Lock()
 
     def _data_file(self, site: SiteConfig) -> Path:
         """指定サイトの既知キャスト保存先JSONファイルのパスを返す。"""
@@ -887,11 +979,92 @@ class DataManager:
                     f"Recovered {len(casts)} casts from backup {backup_file} after cache corruption."
                 )
                 return casts
-            except DataManager._LOAD_ERRORS as e:
+            except OSError as e:
+                # #578: .bak自体はCIFS/autofsの瞬断で開けなかっただけの可能性があり、
+                # 中身は正しいかもしれない。空集合へフォールバックすると全キャストの
+                # 再通知・union保存による退店済みキャストの復活を招くため、本体の
+                # OSError(#365)と同様に当該サイトの処理をスキップさせる。
+                logger.error(
+                    f"I/O error while loading backup {backup_file}; "
+                    f"skipping site '{site.site_id}' for this run: {e}",
+                    exc_info=True,
+                )
+                raise KnownCastsUnavailableError(
+                    f"{site.site_id}: backup casts file is unreadable ({e})"
+                ) from e
+            except DataManager._CONTENT_ERRORS as e:
                 logger.error(f"Backup file {backup_file} is also unusable: {e}", exc_info=True)
 
         # データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）
         return set()
+
+    @staticmethod
+    def _retry_transient_write(tmp_path: Path, write_and_verify: Callable[[], None]) -> None:
+        """一時ファイルへの書き込み+検証処理を、NAS等の一時的な書き込み不良に
+        備えて最大`_SAVE_VERIFY_MAX_ATTEMPTS`回リトライする共通ヘルパー。
+
+        `save_known_casts`・`save_daily_summary`・`save_site_failures`はいずれも
+        「一時ファイルへ書き込み→読み戻して検証」という同じ形の処理を持ち、
+        この検証がNAS等の一過性の書き込み不良（例: nas_monitor.pyの日次保持期間
+        超過ファイル自動削除とのNAS I/O競合）で失敗することがある。3箇所に
+        同じリトライループを複製する代わりに、実際の書き込み+検証処理
+        (`write_and_verify`)だけを呼び出し元から受け取り、リトライ制御は
+        ここに集約する。
+
+        Args:
+            tmp_path (Path): 書き込み先の一時ファイルパス。失敗のたびに
+                best-effortで削除してから再試行する。
+            write_and_verify (Callable[[], None]): 一時ファイルへの書き込みと
+                読み戻し検証を行うコールバック。`tmp_path`への書き込みを
+                前提とする（呼び出し元が`tmp_path`をクロージャで束縛する）。
+
+        Raises:
+            OSError: 全リトライを使い切ってもファイルI/Oが失敗し続けた場合。
+            ValueError: 全リトライを使い切っても書き込んだ内容が正しく
+                読み戻せなかった場合(json.JSONDecodeErrorを含む)。
+            TypeError: 全リトライを使い切っても読み戻した内容の型が想定と
+                異なった場合。
+        """
+        last_error: Optional[Exception] = None
+        for attempt in range(1, DataManager._SAVE_VERIFY_MAX_ATTEMPTS + 1):
+            try:
+                write_and_verify()
+                return
+            except (OSError, ValueError, TypeError) as e:
+                last_error = e
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                if attempt < DataManager._SAVE_VERIFY_MAX_ATTEMPTS:
+                    logger.warning(
+                        f"Write verification failed for {tmp_path} "
+                        f"(attempt {attempt}/{DataManager._SAVE_VERIFY_MAX_ATTEMPTS}); "
+                        f"retrying after a transient storage issue: {e}"
+                    )
+                    time.sleep(DataManager._SAVE_VERIFY_RETRY_DELAY_SECONDS)
+        raise last_error
+
+    @staticmethod
+    def _write_and_verify_tmp(tmp_path: Path, data: list) -> None:
+        """一時ファイルへJSONを書き込み、直後に読み戻して内容を検証する。
+
+        Args:
+            tmp_path (Path): 書き込み先の一時ファイルパス。
+            data (list): JSONシリアライズ対象のリスト(CastMember.to_dict()の結果)。
+
+        Raises:
+            OSError: ファイルI/Oに失敗した場合。
+            ValueError: 書き込んだ内容が正しいJSONとして読み戻せなかった場合
+                (json.JSONDecodeErrorを含む)。
+            TypeError: 読み戻した内容からCastMemberを再構築できなかった場合。
+        """
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        # 書き込んだ内容が正しく読み戻せることを検証してから本番ファイルへ反映する。
+        # NAS等での書き込み中断による不可視の破損（バイト単位の欠損等）を
+        # ここで検知できれば、破損データへの置き換え自体を未然に防げる。
+        DataManager._read_casts_file(tmp_path)
 
     def save_known_casts(self, site: SiteConfig, casts: Set[CastMember]) -> None:
         """指定サイトのキャストデータをJSONファイルに保存する。
@@ -910,13 +1083,16 @@ class DataManager:
             # 書き込み中断時に既存データが破損/空になるのを防ぐ
             # (batch_download_discord.py の _purge_skipped_tasks と同じパターン)
             tmp_path = data_file.with_suffix(data_file.suffix + '.tmp')
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
 
-            # 書き込んだ内容が正しく読み戻せることを検証してから本番ファイルへ反映する。
-            # NAS等での書き込み中断による不可視の破損（バイト単位の欠損等）を
-            # ここで検知できれば、破損データへの置き換え自体を未然に防げる。
-            DataManager._read_casts_file(tmp_path)
+            # 2026-09-09 運用障害対応: 書き込み→読み戻し検証(D-L8)がNAS等の
+            # 一時的な書き込み不良で失敗することがあるため、_retry_transient_write
+            # で短い間隔で数回リトライする(nas_monitor.pyの日次保持期間超過ファイル
+            # 自動削除等、他プロセスとのNAS I/O競合による一過性の空振りを想定)。
+            # 全て失敗した場合のみ最後の例外が外側のexceptへ伝播し、既存データは
+            # 保持したまま今回の保存を諦める(安全側の挙動自体は変更しない)。
+            DataManager._retry_transient_write(
+                tmp_path, lambda: DataManager._write_and_verify_tmp(tmp_path, data)
+            )
 
             # 直前の正常データをバックアップとして残す。次回読み込み失敗時、
             # 空集合へのフォールバック（全キャスト再通知）を避けるために使う。
@@ -968,7 +1144,12 @@ class DataManager:
             Dict: {'counts': {site_id: count}, 'last_sent_date': 'YYYY-MM-DD'}
                 形式の集計状態。'counts'は直近の送信以降に累積した未送信件数
                 (#183参照。カレンダー日付ではなく「前回送信からの累積」で管理する)。
-                ファイルが存在しない・読み込みに失敗した場合は空辞書を返す。
+                ファイルが存在しない場合は空辞書を返す。
+
+        Raises:
+            DataFileUnavailableError: ファイルは存在するがI/Oエラー(OSError)で
+                読めなかった場合(#578)。呼び出し元は保存処理をスキップし、
+                既存の永続化状態(累積中のカウント等)を保持すること。
         """
         summary_file = self._daily_summary_file()
         if not summary_file.exists():
@@ -990,13 +1171,24 @@ class DataManager:
                 f"Malformed daily summary in {summary_file} (expected {{'counts': {{...}}}}, "
                 f"got {type(data).__name__}); treating as corrupted."
             )
-        except DataManager._LOAD_ERRORS as e:
+        except OSError as e:
+            # #578: CIFS/autofsの瞬断でopen()が失敗しただけの可能性があり、
+            # 中身は正しいかもしれない。load_known_casts(#365)と同様、隔離せず
+            # 例外を送出して呼び出し元に保存処理をスキップさせる(以前は
+            # _LOAD_ERRORS経由で空辞書を返しており、その空状態のままsave_*が
+            # 呼ばれると累積中のカウントが丸ごと消えていた)。
+            logger.error(
+                f"I/O error while loading daily summary from {summary_file}; "
+                f"skipping this run: {e}",
+                exc_info=True,
+            )
+            raise DataFileUnavailableError(f"daily summary file is unreadable ({e})") from e
+        except DataManager._CONTENT_ERRORS as e:
             # #174: load_known_castsと同じ「非UTF-8破損でUnicodeDecodeError
             # (IOErrorのサブクラスではなくValueErrorのサブクラス)が未捕捉のまま
             # 伝播する」バグが本メソッドにも残っていた。伝播すると
             # record_daily_new_casts経由でsave_known_castsまで到達できず、
             # 毎時同じキャストが「新規」として再通知され続ける無限反復を招く。
-            # _LOAD_ERRORSに統一して同じ破損パターンを確実に捕捉する。
             logger.error(f"Failed to load daily summary from {summary_file}: {e}", exc_info=True)
 
         # #462: load_known_castsと同じ復旧機構(隔離+バックアップ復旧)を適用する。
@@ -1021,7 +1213,12 @@ class DataManager:
                     logger.warning(f"Recovered daily summary from backup {backup_file} after cache corruption.")
                     return data
                 logger.error(f"Backup file {backup_file} is also malformed; starting from an empty summary.")
-            except DataManager._LOAD_ERRORS as e:
+            except OSError as e:
+                # #578: 本体と同じ理由で、.bakのOSErrorも空辞書へフォールバックせず
+                # スキップさせる。
+                logger.error(f"I/O error while loading backup {backup_file}; skipping this run: {e}", exc_info=True)
+                raise DataFileUnavailableError(f"backup daily summary file is unreadable ({e})") from e
+            except DataManager._CONTENT_ERRORS as e:
                 logger.error(f"Backup file {backup_file} is also unusable: {e}", exc_info=True)
 
         return {}
@@ -1040,6 +1237,30 @@ class DataManager:
             return False
         return True
 
+    @staticmethod
+    def _write_and_verify_json_tmp(tmp_path: Path, data: Dict) -> None:
+        """一時ファイルへJSON(Dict)を書き込み、直後に読み戻して検証する。
+
+        `_write_and_verify_tmp`のDict版。`save_daily_summary`/`save_site_failures`
+        はCastMemberへの再構築が不要な単純な辞書を保存するため、`_read_casts_file`
+        ではなく`json.load`のみで検証する。
+
+        Args:
+            tmp_path (Path): 書き込み先の一時ファイルパス。
+            data (Dict): JSONシリアライズ対象の辞書。
+
+        Raises:
+            OSError: ファイルI/Oに失敗した場合。
+            ValueError: 書き込んだ内容が正しいJSONとして読み戻せなかった場合
+                (json.JSONDecodeErrorを含む)。
+        """
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        # 書き込んだ内容が正しく読み戻せることを検証してから本番ファイルへ反映する
+        # (_write_and_verify_tmpと同じ理由。#462)。
+        with open(tmp_path, 'r', encoding='utf-8') as f:
+            json.load(f)
+
     def save_daily_summary(self, data: Dict) -> None:
         """日次サマリの集計状態をJSONファイルに保存する。
 
@@ -1053,12 +1274,11 @@ class DataManager:
 
             # アトミック書き込み: save_known_castsと同じパターン
             tmp_path = summary_file.with_suffix(summary_file.suffix + '.tmp')
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
 
-            # #462: 書き込んだ内容が正しく読み戻せることを検証する(save_known_castsと同じ)。
-            with open(tmp_path, 'r', encoding='utf-8') as f:
-                json.load(f)
+            # 2026-09-09 運用障害対応: save_known_castsと同じ理由でリトライする。
+            DataManager._retry_transient_write(
+                tmp_path, lambda: DataManager._write_and_verify_json_tmp(tmp_path, data)
+            )
 
             # 直前の正常データをバックアップとして残す。load_daily_summaryが破損時の
             # 復旧に使う(save_known_castsと同じtmp書き込み+replaceのアトミックパターン)。
@@ -1104,8 +1324,15 @@ class DataManager:
         if count <= 0:
             return
 
-        with self._shared_file_lock:
-            data = self.load_daily_summary()
+        with self._daily_summary_lock:
+            try:
+                data = self.load_daily_summary()
+            except DataFileUnavailableError as e:
+                # #578: 読み込めない状態のまま保存すると累積中の他サイト分の
+                # カウントを消してしまうため、今回のcount加算は諦めて既存の
+                # 永続化状態に触れない(詳細なERRORログはload_daily_summary側で出力済み)。
+                logger.warning(f"Skipping daily summary update for site '{site_id}': {e}")
+                return
             counts = data.setdefault('counts', {})
             counts[site_id] = counts.get(site_id, 0) + count
             self.save_daily_summary(data)
@@ -1117,14 +1344,38 @@ class DataManager:
         """
         return self.data_dir / 'site_failures.json'
 
+    @staticmethod
+    def _is_valid_site_failures(data: object) -> bool:
+        """site_failures.json の内容が最低限「site_idをキーとする辞書」という
+        形状かを判定する静的メソッド(load_daily_summaryの`_is_valid_daily_summary`
+        と同じ役割)。各エントリの値がdictかどうかの検証・フィルタは、一部の
+        サイトのみ不正でも他サイト分の記録を活かすため(#395)、本メソッドでは
+        全体を無効とせず呼び出し元(load_site_failures)側で個別に行う。"""
+        return isinstance(data, dict)
+
     def load_site_failures(self) -> Dict:
         """サイト別の連続巡回失敗状態を読み込む。
+
+        2026-09-09 運用障害対応: 以前は内容破損時に空辞書を返すのみで、
+        load_known_casts/load_daily_summaryが持つ「破損ファイルを`.corrupted-*`へ
+        隔離し`.bak`バックアップから復旧する」経路を持たなかった。このため
+        (1)同じ破損ファイルへの読み込み失敗が巡回のたびに繰り返され続け、
+        (2)save_site_failuresが書き込むようになった`.bak`(前項参照)が
+        一切読まれないままだった。load_daily_summaryと同じ隔離+バックアップ
+        復旧の仕組みを適用する。
 
         Returns:
             Dict: {site_id: {'count': int, 'alerted': bool}} 形式の状態。
                 'count'は現在継続中の連続失敗回数、'alerted'は閉鎖疑いアラートを
-                Discordへ送信済みかどうか。ファイルが存在しない・読み込みに
-                失敗した場合は空辞書を返す。
+                Discordへ送信済みかどうか。ファイルが存在しない場合、または
+                内容破損＋隔離＋`.bak`バックアップからの復旧も全て失敗した
+                場合は空辞書を返す。
+
+        Raises:
+            DataFileUnavailableError: ファイルは存在するがI/Oエラー(OSError)で
+                読めなかった場合(#578)。一次ファイル・`.bak`のいずれでも
+                発生しうる。呼び出し元は保存処理をスキップし、他サイト分を
+                含む既存の永続化状態を保持すること。
         """
         failures_file = self._site_failures_file()
         if not failures_file.exists():
@@ -1133,43 +1384,128 @@ class DataManager:
         try:
             with open(failures_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                # 破損等で辞書以外が保存されていた場合も安全に初期状態へ戻す
-                if not isinstance(data, dict):
-                    return {}
-                # #395: トップレベルだけでなく各エントリも辞書であることを検証する。
-                # {"site": 5} のような値が混入すると record_site_failure の
-                # entry.get で AttributeError となり、_run_monitor_locked の
-                # CRITICAL(Discord発報)が毎時繰り返されていた。不正なエントリは
-                # 初期状態(記録なし)として読み飛ばす。
-                invalid = [k for k, v in data.items() if not isinstance(v, dict)]
-                if invalid:
-                    logger.warning(
-                        f"Ignoring malformed site failure entries in {failures_file}: {invalid}"
-                    )
-                return {k: v for k, v in data.items() if isinstance(v, dict)}
-        except DataManager._LOAD_ERRORS as e:
-            # load_daily_summaryと同様、非UTF-8破損(UnicodeDecodeError)まで
-            # 含めて読み込み失敗として扱い、監視処理本体を止めない
+            if DataManager._is_valid_site_failures(data):
+                return DataManager._filter_valid_site_failure_entries(data, failures_file)
+            logger.error(
+                f"Malformed site failures in {failures_file} (expected a dict keyed by "
+                f"site_id, got {type(data).__name__}); treating as corrupted."
+            )
+        except OSError as e:
+            # #578: CIFS/autofsの瞬断でopen()が失敗しただけの可能性があり、
+            # 中身(他サイト分の count/alerted 状態を含む)は正しいかもしれない。
+            # 以前は他の内容起因の破損と同じ扱いで空辞書を返しており、呼び出し元
+            # (record_site_failure等)がその空状態のままsave_site_failuresを呼ぶと
+            # 79サイト分の状態が丸ごと消え、既にアラート済みのサイトが再アラート
+            # されていた。load_known_casts(#365)と同様、隔離せず例外を送出して
+            # 呼び出し元に保存処理をスキップさせる。
+            logger.error(
+                f"I/O error while loading site failures from {failures_file}; "
+                f"skipping this run: {e}",
+                exc_info=True,
+            )
+            raise DataFileUnavailableError(f"site failures file is unreadable ({e})") from e
+        except DataManager._CONTENT_ERRORS as e:
+            # #174/#365と同様、非UTF-8破損(UnicodeDecodeError)まで含めて
+            # 読み込み失敗として扱う。以前はここで直接空辞書を返していたが、
+            # 現在は下の隔離+バックアップ復旧へ進める(2026-09-09対応)。
             logger.error(f"Failed to load site failures from {failures_file}: {e}", exc_info=True)
-            return {}
+
+        # 2026-09-09 運用障害対応: load_known_casts/load_daily_summaryと同じ
+        # 復旧機構(隔離+バックアップ復旧)を適用する。
+        quarantine_path = failures_file.with_name(
+            f"{failures_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"
+        )
+        try:
+            failures_file.rename(quarantine_path)
+            logger.error(f"Quarantined corrupted site failures file: {failures_file} -> {quarantine_path}")
+        except OSError as e:
+            logger.error(f"Failed to quarantine corrupted site failures file {failures_file}: {e}", exc_info=True)
+
+        backup_file = failures_file.with_suffix(failures_file.suffix + '.bak')
+        if backup_file.exists():
+            try:
+                with open(backup_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if DataManager._is_valid_site_failures(data):
+                    logger.warning(f"Recovered site failures from backup {backup_file} after cache corruption.")
+                    return DataManager._filter_valid_site_failure_entries(data, backup_file)
+                logger.error(f"Backup file {backup_file} is also malformed; starting from an empty state.")
+            except OSError as e:
+                # #578: 本体と同じ理由で、.bakのOSErrorも空辞書へフォールバックせず
+                # スキップさせる。
+                logger.error(f"I/O error while loading backup {backup_file}; skipping this run: {e}", exc_info=True)
+                raise DataFileUnavailableError(f"backup site failures file is unreadable ({e})") from e
+            except DataManager._CONTENT_ERRORS as e:
+                logger.error(f"Backup file {backup_file} is also unusable: {e}", exc_info=True)
+
+        return {}
+
+    @staticmethod
+    def _filter_valid_site_failure_entries(data: Dict, source_file: Path) -> Dict:
+        """トップレベルは辞書だが個々のエントリの値がdictでない場合を弾く(#395)。
+
+        `{"site": 5}`のような値が混入すると`record_site_failure`の`entry.get`で
+        `AttributeError`となり、`_run_monitor_locked`のCRITICAL(Discord発報)が
+        毎時繰り返されていた。不正なエントリのみを読み飛ばし、他の正常な
+        エントリは活かす(load_daily_summaryの`_is_valid_daily_summary`のように
+        ファイル全体を無効とはしない)。
+
+        Args:
+            data (Dict): トップレベルが辞書であることを確認済みの読み込み結果。
+            source_file (Path): ログ出力用の読み込み元パス(一次ファイル/`.bak`)。
+
+        Returns:
+            Dict: 値がdictであるエントリのみを残した辞書。
+        """
+        invalid = [k for k, v in data.items() if not isinstance(v, dict)]
+        if invalid:
+            logger.warning(f"Ignoring malformed site failure entries in {source_file}: {invalid}")
+        return {k: v for k, v in data.items() if isinstance(v, dict)}
 
     def save_site_failures(self, data: Dict) -> None:
         """サイト別の連続巡回失敗状態をJSONファイルに保存する。
+
+        2026-09-09 運用障害対応: 以前は書き込んだ内容の読み戻し検証・`.bak`
+        バックアップ・失敗時の一時ファイル削除のいずれも持たず、`save_known_casts`/
+        `save_daily_summary`より無防備だった(例外捕捉も`IOError`のみで
+        `ValueError`/`TypeError`を捕捉しなかった)。他の2つと同じ安全策一式
+        (検証・バックアップ・tmp削除・NAS等の一過性書き込み不良へのリトライ)
+        を揃える。
 
         Args:
             data (Dict): 保存対象の状態。
         """
         failures_file = self._site_failures_file()
+        tmp_path: Optional[Path] = None
         try:
             failures_file.parent.mkdir(parents=True, exist_ok=True)
 
             # アトミック書き込み: save_known_castsと同じパターン
             tmp_path = failures_file.with_suffix(failures_file.suffix + '.tmp')
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            DataManager._retry_transient_write(
+                tmp_path, lambda: DataManager._write_and_verify_json_tmp(tmp_path, data)
+            )
+
+            # 直前の正常データをバックアップとして残す(save_known_casts/
+            # save_daily_summaryと同じtmp書き込み+replaceのアトミックパターン)。
+            if failures_file.exists():
+                backup_path = failures_file.with_suffix(failures_file.suffix + '.bak')
+                bak_tmp_path = backup_path.with_suffix(backup_path.suffix + '.tmp')
+                try:
+                    bak_tmp_path.write_bytes(failures_file.read_bytes())
+                    bak_tmp_path.replace(backup_path)
+                except OSError as e:
+                    logger.warning(f"Failed to update backup file {backup_path}: {e}")
+                    bak_tmp_path.unlink(missing_ok=True)
+
             tmp_path.replace(failures_file)
-        except IOError as e:
+        except (OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to save site failures: {e}", exc_info=True)
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def record_site_failure(self, site_id: str) -> Tuple[int, bool]:
         """サイトの巡回失敗を1回分記録し、更新後の連続失敗状態を返す。
@@ -1179,9 +1515,16 @@ class DataManager:
 
         Returns:
             Tuple[int, bool]: (更新後の連続失敗回数, アラート送信済みかどうか)。
+                永続化状態が読めなかった場合は保存をスキップし、今回は
+                「連続失敗0回・未アラート」として扱う(#578。他サイト分の
+                状態を巻き添えで消さないため)。
         """
-        with self._shared_file_lock:
-            data = self.load_site_failures()
+        with self._site_failures_lock:
+            try:
+                data = self.load_site_failures()
+            except DataFileUnavailableError as e:
+                logger.warning(f"Skipping site failure recording for '{site_id}': {e}")
+                return 0, False
             entry = data.setdefault(site_id, {'count': 0, 'alerted': False})
             entry['count'] = int(entry.get('count', 0)) + 1
             self.save_site_failures(data)
@@ -1193,8 +1536,14 @@ class DataManager:
         Args:
             site_id (str): アラートを送信したサイトのID。
         """
-        with self._shared_file_lock:
-            data = self.load_site_failures()
+        with self._site_failures_lock:
+            try:
+                data = self.load_site_failures()
+            except DataFileUnavailableError as e:
+                # #578: 読めない状態のまま保存すると他サイト分の状態を消してしまうため
+                # スキップする(次回実行時に閾値到達が続いていれば改めて送信判断される)。
+                logger.warning(f"Skipping alerted-flag update for '{site_id}': {e}")
+                return
             entry = data.setdefault(site_id, {'count': 0, 'alerted': False})
             entry['alerted'] = True
             self.save_site_failures(data)
@@ -1208,8 +1557,15 @@ class DataManager:
         Args:
             site_id (str): 疎通に成功したサイトのID。
         """
-        with self._shared_file_lock:
-            data = self.load_site_failures()
+        with self._site_failures_lock:
+            try:
+                data = self.load_site_failures()
+            except DataFileUnavailableError as e:
+                # #578: 読めない状態のまま保存すると他サイト分の状態を消してしまうため
+                # スキップする(誤ってcountがクリアされないまま残るだけで、次回巡回で
+                # 再度成功すれば改めて解消を試みられる)。
+                logger.warning(f"Skipping site failure clear for '{site_id}': {e}")
+                return
             if site_id not in data:
                 return
             del data[site_id]
@@ -1347,8 +1703,14 @@ class WebMonitor:
         """
         age = ""
         if name_elem:
-            age_match = AGE_PATTERN.search(name_elem.get_text(strip=True))
-            if age_match:
+            # Issue #589: 以前はAGE_PATTERN.search()で最初の一致のみを見ていたため、
+            # "No.(12) さくら(25歳)"のように年齢より前に(歳/才の無い)2桁の括弧数字
+            # (連番・部屋番号等)が出現すると、その数字がD-L12の妥当性範囲チェックで
+            # 却下された時点で検索を打ち切ってしまい、後続の本来の年齢
+            # ("(25歳)")を一切試さないまま年齢抽出自体が失敗していた。
+            # finditer()で全ての候補を出現順に走査し、妥当性チェックを通過する
+            # 最初の候補が見つかるまで後続の候補も試すよう修正した。
+            for age_match in AGE_PATTERN.finditer(name_elem.get_text(strip=True)):
                 bracket_num, bracket_suffix, plain_num = age_match.groups()
                 if bracket_num is not None:
                     # D-L12: 「歳」「才」が明示されている場合は無条件に信頼するが、
@@ -1360,8 +1722,10 @@ class WebMonitor:
                         <= MonitorConfig.AGE_PLAUSIBLE_MAX
                     ):
                         age = bracket_num
+                        break
                 else:
                     age = plain_num
+                    break
         return age
 
     @staticmethod
@@ -1841,7 +2205,13 @@ def _maybe_send_daily_summary(notifier: DiscordNotifier, data_manager: DataManag
         return
 
     today_str = now.strftime('%Y-%m-%d')
-    data = data_manager.load_daily_summary()
+    try:
+        data = data_manager.load_daily_summary()
+    except DataFileUnavailableError as e:
+        # #578: 読めない状態で送信判断をすると誤った空集計を送りかねないため、
+        # 今回はスキップして次回実行時に改めて試みる(累積中のカウントは保持される)。
+        logger.warning(f"Skipping daily summary send this run: {e}")
+        return
     if data.get('last_sent_date') == today_str:
         return
 
@@ -1939,7 +2309,8 @@ def _run_monitor_locked() -> None:
         # 自体はスレッドセーフ。DiscordNotifierのサーキットブレーカーと、
         # DataManagerが読み書きするサイト横断の共有ファイル
         # (daily_summary.json/site_failures.json)は、それぞれ内部でロックを
-        # 取るように変更済み(DiscordCircuitBreaker/DataManager._shared_file_lock)。
+        # 取るように変更済み(DiscordCircuitBreaker/DataManager._daily_summary_lock
+        # /DataManager._site_failures_lock)。
         # 1サイトの予期しない例外は、他サイトの処理を止めずfuture.result()の
         # except節でのみ捕捉する(逐次実装時と同じ隔離方針)。
         failed_count = 0

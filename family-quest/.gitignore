@@ -9,6 +9,9 @@ lerna-debug.log*
 
 node_modules
 dist
+# deploy.sh のアトミック差し替え用の一時ディレクトリ (Issue #650)
+dist.next
+dist.prev
 dist-ssr
 *.local
 *.tsbuildinfo

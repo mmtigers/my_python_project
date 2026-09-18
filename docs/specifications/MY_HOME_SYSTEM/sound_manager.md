@@ -45,7 +45,7 @@
 ### `play`
 
 * **役割**: 指定されたイベントキーに対応する音声ファイルを外部プレイヤーコマンドを用いて非同期で再生する。コンソール出力を抑止する。
-* 根拠: `def play` (行番号: 12-63 / 抜粋: "def play(event_key: str) -> N...")
+* 根拠: `def play` (行番号: 13-69 / 抜粋: "def play(event_key: str) -> N...")
 
 
 * **引数/リクエスト**: `event_key: str` (再生する音声イベントを示すキー)
@@ -56,7 +56,7 @@
 * 根拠: 戻り値の型ヒント (行番号: 12 / 抜粋: "-> None:")
 
 
-* **副作用**: 外部プロセスの起動による音声再生（`subprocess.Popen`）、システムログへの書き込み。
+* **副作用**: 外部プロセスの起動による音声再生（`subprocess.Popen`）と、その終了を回収するデーモンスレッド（`threading.Thread(target=proc.wait)`。Issue #654: 呼び出し元の uvicorn は SIGCHLD を処理しないため、wait しないと再生プロセスが `<defunct>` として蓄積していた）、システムログへの書き込み。
 * 根拠: `subprocess.Popen` (行番号: 53-57 / 抜粋: "subprocess.Popen( cmd, st...")
 
 
@@ -68,7 +68,7 @@
 ### `check_and_restore_sounds`
 
 * **役割**: 指定された音声ディレクトリが存在しない場合は作成し、`config.SOUND_MAP`に定義されている全音声ファイルが存在するか確認。欠損している場合はデフォルトのディレクトリからコピーして復旧する。
-* 根拠: `def check_and_restore_sounds` (行番号: 66-110 / 抜粋: "def check_and_restore_sounds()...")
+* 根拠: `def check_and_restore_sounds` (行番号: 72-116 / 抜粋: "def check_and_restore_sounds()...")
 
 
 * **引数/リクエスト**: なし

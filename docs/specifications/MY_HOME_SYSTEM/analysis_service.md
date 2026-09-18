@@ -54,7 +54,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_ro_db_connection() -> sqlite3.Connection:` (行番号: 32 / 抜粋: "def get_ro_db_connection()")
+* 根拠: `def get_ro_db_connection() -> sqlite3.Connection:` (行番号: 33 / 抜粋: "def get_ro_db_connection()")
 
 
 * **戻り値/レスポンス**: `sqlite3.Connection` (SQLiteの接続オブジェクト)
@@ -66,7 +66,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数内に `try-except` なし (行番号: 32〜39 / 抜粋: "def get_ro_db_connection()")
+* 根拠: 該当関数内に `try-except` なし (行番号: 33〜45 / 抜粋: "def get_ro_db_connection()")
 * **呼出し側での接続管理について（#411 S-L8で修正）**: この関数が返す接続を `with get_ro_db_connection() as conn:` の形で使っている呼出し元（`load_nas_status`・`load_bicycle_data`）は、sqlite3の`Connection.__exit__`がcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、接続がcloseされずリークしていた。この2箇所を`with contextlib.closing(get_ro_db_connection()) as conn:`に変更し、明示的にcloseするようにした。`load_data_from_db`・`load_weather_history`・`load_yearly_temperature_stats`は元々`try/finally`で`conn.close()`していたため対象外。**（Issue #507で削除）** 以前は同じパターンを使う3つ目の呼出し元として`load_ranking_dates`があったが、参照先の`app_rankings`テーブルへの書き込みコードが存在せず機能として死んでいたため、`load_ranking_data`とともに削除された。
 * 根拠: `with contextlib.closing(get_ro_db_connection()) as conn:` (`load_nas_status`: 行番号171、`load_bicycle_data`: 行番号403)
 
@@ -75,7 +75,7 @@
 ### `_vectorized_parse_timestamps_to_jst` (関数、Issue #456でベクトル化)
 
 * **役割**: タイムスタンプ文字列の列をJSTのtz-aware列へ一括変換する。**[修正済み・Issue #456]** 以前は`_parse_timestamp_to_jst`/`_parse_timestamp_to_jst_coerce`という2つのヘルパーを`.apply()`で1行ずつ呼び出しており、大量データで処理速度が劣化する非ベクトル化実装だった。列の末尾がtzオフセット(`+09:00`等)または`Z`かどうかを`_TZ_OFFSET_SUFFIX_PATTERN`の正規表現で判定し、naive/aware(オフセット付き)の2群に分割した上で、群ごとに`pd.to_datetime`を一括適用する。naive群は保存規約(`core.utils.get_now_iso`)に合わせて「元からJSTで記録されている」とみなして`tz_localize("Asia/Tokyo")`し、aware群はそのオフセットを尊重して`utc=True`でパースしてから`tz_convert("Asia/Tokyo")`する(M-1-4: この2系統を`pd.to_datetime`へ一括で(`utc=True`等)渡すとnaive値を誤ってUTCとみなしてしまい9時間ズレが再発するため、文字列表現の時点でマスク分割している)。両群とも`errors="coerce"`のため、不正な値は当該行のみ`pd.NaT`になる(L-L3 #410と同じ挙動を維持)。
-* 根拠: 関数Docstring・実装 (行番号: 43〜74 / 抜粋: "def _vectorized_parse_timestamps_to_jst(series: pd.Series) -> pd.Series:")
+* 根拠: 関数Docstring・実装 (行番号: 52〜80 / 抜粋: "def _vectorized_parse_timestamps_to_jst(series: pd.Series) -> pd.Series:")
 
 
 * **引数/リクエスト**: `series` (`pd.Series`): タイムスタンプ文字列の列
@@ -100,7 +100,7 @@
 
 
 * **引数/リクエスト**: `df` (`pd.DataFrame`): 処理対象のデータフレーム
-* 根拠: `df: pd.DataFrame` (行番号: 77 / 抜粋: "def process_dataframe(df: pd.DataFrame)")
+* 根拠: `df: pd.DataFrame` (行番号: 83 / 抜粋: "def process_dataframe(df: pd.DataFrame)")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (変換後のデータフレーム)
@@ -112,7 +112,7 @@
 
 
 * **エラーハンドリング**: **（Issue #410 L-L3で修正、#456でベクトル化）** 内部で呼び出す`_vectorized_parse_timestamps_to_jst`が不正な値を`pd.NaT`へ丸めるため、1行の不正なタイムスタンプで全行が失われることはない。
-* 根拠: 該当関数内に `try-except` なし、`_vectorized_parse_timestamps_to_jst`への委譲 (行番号: 77〜85 / 抜粋: "def process_dataframe(")
+* 根拠: 該当関数内に `try-except` なし、`_vectorized_parse_timestamps_to_jst`への委譲 (行番号: 83〜92 / 抜粋: "def process_dataframe(")
 
 
 
@@ -123,7 +123,7 @@
 
 
 * **引数/リクエスト**: `df` (`pd.DataFrame`): 処理対象のデータフレーム
-* 根拠: `df: pd.DataFrame` (行番号: 69 / 抜粋: "def apply_friendly_names(df: pd.DataFrame)")
+* 根拠: `df: pd.DataFrame` (行番号: 94 / 抜粋: "def apply_friendly_names(df: pd.DataFrame)")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (マッピング適用後のデータフレーム)
@@ -169,7 +169,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def load_nas_status() -> Optional[pd.Series]:` (行番号: 145 / 抜粋: "def load_nas_status()")
+* 根拠: `def load_nas_status() -> Optional[pd.Series]:` (行番号: 170 / 抜粋: "def load_nas_status()")
 
 
 * **戻り値/レスポンス**: `Optional[pd.Series]` (最新の1件。存在しない場合は `None`)
@@ -215,7 +215,7 @@
 
 
 * **引数/リクエスト**: `limit` (`int`, デフォルト `5000`): 取得件数の上限。
-* 根拠: `limit: int = 5000` (行番号: 167 / 抜粋: "def load_sensor_data(limit: int = 5000)")
+* 根拠: `limit: int = 5000` (行番号: 195 / 抜粋: "def load_sensor_data(limit: int = 5000)")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (統合されたセンサーデータのデータフレーム)
@@ -227,7 +227,7 @@
 
 
 * **エラーハンドリング**: 内部で呼び出される `load_data_from_db` に依存。
-* 根拠: 該当関数内に独自の `try-except` なし (行番号: 167 / 抜粋: "def load_sensor_data(")
+* 根拠: 該当関数内に独自の `try-except` なし (行番号: 195 / 抜粋: "def load_sensor_data(")
 
 
 
@@ -238,7 +238,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 238 / 抜粋: "def calculate_monthly_cost_cumulative()")
+* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 271 / 抜粋: "def calculate_monthly_cost_cumulative()")
 
 
 * **戻り値/レスポンス**: `int` (計算された電気代概算)
@@ -330,7 +330,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def load_ai_report() -> Optional[pd.Series]:` (行番号: 414 / 抜粋: "def load_ai_report()")
+* 根拠: `def load_ai_report() -> Optional[pd.Series]:` (行番号: 420 / 抜粋: "def load_ai_report()")
 
 
 * **戻り値/レスポンス**: `Optional[pd.Series]` (最新の1件。存在しない場合は `None`)
@@ -342,7 +342,7 @@
 
 
 * **エラーハンドリング**: 内部で呼び出される `load_data_from_db` に依存。
-* 根拠: 該当関数内に独自の `try-except` なし (行番号: 414 / 抜粋: "def load_ai_report()")
+* 根拠: 該当関数内に独自の `try-except` なし (行番号: 420 / 抜粋: "def load_ai_report()")
 
 
 * **（Issue #507で削除）**: 以前はこの直後に、アプリランキング（`app_rankings`）テーブルを参照する`load_ranking_dates`/`load_ranking_data`の2関数が存在した。しかし参照先の`app_rankings`テーブルへ書き込むコード（収集スクリプト）がリポジトリのどこにも存在せず、収集に使うはずの`google-play-scraper`もIssue #496で未使用パッケージとして既に削除済みであり、`migrations/`にもテーブル定義が無いため新規構築したDBでは永久に「データがありません」としか出ない死んだ機能だった。呼び出し元だった`views/dashboard/log_tab.py`の`render_trends`（「🌟 最近の流行・トレンド推移」タブ）ごとオーナー判断で削除された。
@@ -356,7 +356,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 405 / 抜粋: "def get_disk_usage()")
+* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 430 / 抜粋: "def get_disk_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (GB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -379,7 +379,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 419 / 抜粋: "def get_memory_usage()")
+* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 449 / 抜粋: "def get_memory_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (MB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -530,6 +530,7 @@ graph TD
 * 根拠: `calculate_monthly_cost_cumulative` (行番号: 246)、`load_weather_history` (行番号: 295)、`_parse_timestamp_to_jst_coerce`/`process_dataframe` (行番号: 56-69, 79)、`load_yearly_temperature_stats`のexcept (行番号: 346, 350)、現行の`analysis_service.py`に`load_ranking_data`が存在しないこと(削除の確認)
 * **[修正済み] Issue #491: load_sensor_dataのpandas FutureWarning**: `df_legacy`/`df_meter`/`df_power`の3フレームを`pd.concat`する際、フレームによって存在する列が異なり(一部の列は特定のフレームにしか無い)、欠損列を補うために発生する空/全NA列のdtypeが曖昧になることで「DataFrame concatenation with empty or all-NA entries is deprecated」というFutureWarningが発生していた。`reindex`だけでは新規に補われた列がfloat64のNaNとして残り曖昧さが解消しないため、列ごとの想定dtypeを`_SENSOR_COLUMN_DTYPES`辞書として明示し、`reindex`後に`astype(_SENSOR_COLUMN_DTYPES)`で型を強制してから`concat`するよう修正した。`pytest.ini`側で`services.*`パッケージ限定の`error::FutureWarning`をCIで検知するようにしたため(`MY_HOME_SYSTEM/pytest.ini`)、同種の警告が再発すればテスト失敗として検知される。
 * 根拠: `_SENSOR_COLUMN_DTYPES`定義・reindexループ・`pd.concat` (行番号: 233-253)
+* **（Issue #651 で変更）** `get_memory_usage`(`free -m`)と `get_system_logs`(`journalctl`、日付指定時は `-n 5000`)の `subprocess.run` に `timeout=SUBPROCESS_TIMEOUT_SEC`(30秒)を付与した。journald が応答しない場合に Streamlit ダッシュボードのリクエストを無限に固めないため(`subprocess.TimeoutExpired` は既存の `except Exception` で捕捉される)。
 
 ## 9. 不明事項一覧
 

@@ -11,6 +11,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 import config
+from core import state_file
 from core.logger import setup_logging
 from services.notification_service import send_push
 
@@ -31,32 +32,24 @@ def check_cooldown() -> bool:
     last_notify_file = getattr(config, "MEMORY_ALERT_LAST_NOTIFY_FILE", os.path.join(config.FALLBACK_ROOT, "last_memory_alert.txt"))
     cooldown_sec = getattr(config, "MEMORY_ALERT_COOLDOWN_SEC", 7200)
 
-    if not os.path.exists(last_notify_file):
+    # #661: 読み書きは core/state_file.py へ一本化した(読めない場合は None が返る)。
+    last_time_str = state_file.read_text(last_notify_file)
+    if not last_time_str:
         return True
 
     try:
-        with open(last_notify_file, "r") as f:
-            last_time_str = f.read().strip()
-            if not last_time_str:
-                return True
-            last_time = float(last_time_str)
-            if time.time() - last_time > cooldown_sec:
-                return True
-    except Exception as e:
+        last_time = float(last_time_str)
+    except ValueError as e:
         logger.warning(f"クールダウン確認中にエラー発生: {e}")
         return True # エラー時は通知を優先
-    
-    return False
+
+    return time.time() - last_time > cooldown_sec
 
 def record_notification() -> None:
     """現在の時刻を最終通知時刻として記録する"""
     last_notify_file = getattr(config, "MEMORY_ALERT_LAST_NOTIFY_FILE", os.path.join(config.FALLBACK_ROOT, "last_memory_alert.txt"))
-    try:
-        os.makedirs(os.path.dirname(last_notify_file), exist_ok=True)
-        with open(last_notify_file, "w") as f:
-            f.write(str(time.time()))
-    except Exception as e:
-        logger.error(f"通知時刻の記録に失敗しました: {e}")
+    if not state_file.write_text_atomic(last_notify_file, str(time.time())):
+        logger.error("通知時刻の記録に失敗しました")
 
 def get_top_memory_processes(limit: int = 5) -> str:
     """

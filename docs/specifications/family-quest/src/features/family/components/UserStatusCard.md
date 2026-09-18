@@ -18,6 +18,8 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #660 で変更）** アバター画像の `alt` を固定文字列 `"avatar"` から `"<ユーザー名> のアバター"` に変更した(誰のアバターかが読み上げで分かるようにするため)。
+
 ユーザー（冒険者）の名前・職業クラス・レベル・所持ゴールド・獲得メダル数を表示する、シンプルなステータスカードUIを描画するコンポーネント。アバター（アップロード画像パス、またはアイコン文字/絵文字のフォールバック）をクリックした際に、Propsで渡されたコールバック関数を発火させるインタラクションを提供する。
 
 * 根拠: コンポーネント定義とProps使用箇所 (行番号: 11, 34〜48 / 抜粋: "const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) => {", "<span className=\"text-base font-bold text-yellow-300 tracking-widest truncate\">{user.name}</span>")
@@ -151,6 +153,7 @@ graph TD
 | `CountUp` コンポーネントの仕様 | `family-quest/src/components/ui/CountUp.tsx`を直接確認した。Props(4〜9行目)は`value: number, className?: string, prefix?: string = "", suffix?: string = ""`。`useMotionValue(0)`(13行目)を初期値とし、`useSpring(motionValue, { stiffness: 50, damping: 15, mass: 1 })`(16〜20行目)でバネ物理アニメーションを構成、`useEffect`(23〜25行目)で`value`が変わるたびに`motionValue.set(value)`を実行してアニメーションを開始する。表示値は`useTransform`(28〜30行目)で`` `${prefix}${Math.round(current).toLocaleString()}${suffix}` ``へ変換され（小数点以下切り捨て、`toLocaleString()`でカンマ区切り）、`<motion.span className={className}>{displayValue}</motion.span>`(32行目)として描画される。 | 直接ソース確認: `family-quest/src/components/ui/CountUp.tsx:4-32` |
 | `onAvatarClick` の実行内容 | `family-quest/src/App.tsx`を直接確認した。161行目で`const [avatarUser, setAvatarUser] = useState<User \| null>(null);`を宣言し、416〜419行目で`<UserStatusCard user={currentUser} onAvatarClick={() => setAvatarUser(currentUser)} />`として、`onAvatarClick`に`avatarUser`ステートへ`currentUser`をセットする無引数の関数を渡している（`FamilyDashboard`へ渡す同種のコールバック、410行目`onAvatarClick={(user) => setAvatarUser(user)}`は引数の`user`をそのままセットする点が異なる）。`avatarUser`が真の場合(505〜514行目)、`<AvatarUploader user={avatarUser} onClose={() => setAvatarUser(null)} onUploadComplete={() => { refreshData(); showToast({ title: "変更完了", text: "アバターを変更しました！", icon: '🖼️' }); }} />`としてアバター変更モーダルを表示する。すなわち`onAvatarClick`の実行内容は「アバター変更モーダル(`AvatarUploader`)を、対象ユーザーを`currentUser`固定として開くこと」であると直接確認できた。 | 直接ソース確認: `family-quest/src/App.tsx:161, 410, 416-419, 505-514` |
 | `user.level` が未定義の場合の表示仕様 | `family-quest/src/types/index.ts`9〜21行目で`level: number`は必須プロパティ(`?`なし)として定義されており、型定義上は常に値が存在する前提であることを確認した。実際の呼び出し元`family-quest/src/App.tsx`416〜419行目では、`useGameData`フック(`family-quest/src/hooks/useGameData.ts`)経由で取得した`currentUser`（`GameDataResponse`の`users: User[]`由来、87〜92行目の`useQuery`で`/api/quest/data`から取得）がそのまま渡されており、フロントエンド側で`level`にフォールバック値を補う処理は`App.tsx`のこの呼び出し箇所には存在しない。バックエンドAPI(`/api/quest/data`)が返す`level`が常に数値であることを保証しているかどうかは、当該APIの実装（別ファイル）に依存するため本調査の範囲では確認できなかった。 | 直接ソース確認: `family-quest/src/types/index.ts:9-21`, `family-quest/src/App.tsx:416-419`, `family-quest/src/hooks/useGameData.ts:87-92` |
+| `isSameOriginAvatarPath`の判定ロジックの詳細 | `family-quest/src/lib/utils.ts`19〜23行目を直接確認した。実装は`return !!url && url.startsWith('/') && !/^\/[\\/]/.test(url);`で、型述語`url is string`を返す。判定は3段階: (1) `null`/`undefined`/空文字を除外、(2) `/`始まりの相対パスであること、(3) **2文字目が`/`または`\`でないこと**。(3)はM-9-5の修正で、単純な`startsWith('/')`だとプロトコル相対URL(`//evil.example/x`)が通ってしまい外部画像への差し替えを許すため。さらにIssue #540で`/\evil.example/x`も拒否するよう拡張された(ブラウザはhttp(s) URLのバックスラッシュをスラッシュへ正規化するため、これもプロトコル相対の外部URLになる)。型述語であることにより、本ファイルの`isSameOriginAvatarPath(user.avatar) ? <img src={user.avatar}> : ...`という三項演算子のtrue分岐で`user.avatar`が`string`に絞り込まれ、型エラーにならない。 | 直接ソース確認: `family-quest/src/lib/utils.ts:12-23`（参考: [utils.md](../../../lib/utils.md)） |
 
 ## 10. 自己検証結果
 

@@ -3,12 +3,29 @@
 # ==========================================
 # MY_HOME_SYSTEM 起動スクリプト (Systemd-Hybrid Fix)
 # ==========================================
+# 使い方:
+#   ./start_all.sh            Phase 0〜4 をすべて実行する(旧プロセス掃除 → 前処理 →
+#                             unified_server.py / ダッシュボードを nohup でバックグラウンド起動)。
+#                             手動運用・開発用の経路。
+#   ./start_all.sh --prepare  Phase 0〜3(前処理)だけを実行し、サーバー本体は起動しない。
+#                             deploy/systemd/home_system.service の ExecStartPre から呼ばれる経路で、
+#                             unified_server.py 本体は systemd が ExecStart でフォアグラウンド起動する
+#                             (Type=simple + Restart=on-failure。クラッシュ時に systemd が自動復旧する。
+#                             Issue #646: 以前は oneshot + nohup/disown でサーバーが systemd の管理外に
+#                             あり、落ちても通知のみで人手復旧だった)。
+#                             ダッシュボードは home_dashboard.service が別ユニットで管理するため、
+#                             この経路では起動も掃除もしない。
+PREPARE_ONLY=false
+if [ "${1:-}" = "--prepare" ]; then
+    PREPARE_ONLY=true
+fi
 
 # ★修正1: 親ディレクトリ(develop)も含めないと "No module named 'MY_HOME_SYSTEM'" エラーになる
 export PYTHONPATH="/home/masahiro/develop:/home/masahiro/develop/MY_HOME_SYSTEM"
 
-PROJECT_DIR="/home/masahiro/develop/MY_HOME_SYSTEM"
-QUEST_DIR="/home/masahiro/develop/family-quest"
+DEVELOP_ROOT="/home/masahiro/develop"
+PROJECT_DIR="$DEVELOP_ROOT/MY_HOME_SYSTEM"
+QUEST_DIR="$DEVELOP_ROOT/family-quest"
 cd "$PROJECT_DIR" || exit 1
 
 # Pythonパス
@@ -45,6 +62,20 @@ CLEANUP_TARGETS=(
   "python.*monitors/(switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor)\.py"
   "ffmpeg.*hls_streams"
 )
+
+if [ "$PREPARE_ONLY" = true ]; then
+  # systemd 経路(--prepare)では、ダッシュボード(streamlit)は home_dashboard.service が
+  # 別ユニットで管理している。ここで SIGTERM すると systemd 側が「予期しない停止」と扱うため
+  # 掃除対象から外す。unified_server.py・孤児化しうる子プロセス・ffmpeg は引き続き掃除する
+  # (旧来の nohup 起動が残っている場合の回収、および前世代の孤児の掃除)。
+  filtered_targets=()
+  for target in "${CLEANUP_TARGETS[@]}"; do
+    if [ "$target" != "streamlit run" ]; then
+      filtered_targets+=("$target")
+    fi
+  done
+  CLEANUP_TARGETS=("${filtered_targets[@]}")
+fi
 
 # まずは優しく停止 (SIGTERM)
 for target in "${CLEANUP_TARGETS[@]}"; do
@@ -125,12 +156,34 @@ if [ -f requirements.txt ]; then
   fi
 fi
 
+# --- Phase 1.6: git フックの登録 (core.hooksPath) ---
+# family-quest の post-merge フック(git pull 後の deploy.sh --if-stale 自動実行)は
+# 以前 .git/hooks/post-merge にローカル設置されていて git 管理外だったため、
+# リポジトリを clone し直すたびに手で再設置が必要だった。リポジトリ管理の
+# deploy/git-hooks/ を core.hooksPath として登録し(冪等)、再設置作業をなくす。
+# 注意: core.hooksPath を設定すると .git/hooks/ 配下のフックは実行されなくなる
+# (追加のフックは deploy/git-hooks/ に置いてコミットすること)。
+echo "--- Register git hooks (core.hooksPath) ---"
+HOOKS_DIR="$DEVELOP_ROOT/deploy/git-hooks"
+if [ -d "$HOOKS_DIR" ] && git -C "$DEVELOP_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
+  if [ "$(git -C "$DEVELOP_ROOT" config --get core.hooksPath)" != "$HOOKS_DIR" ]; then
+    if git -C "$DEVELOP_ROOT" config core.hooksPath "$HOOKS_DIR"; then
+      echo "✅ core.hooksPath = $HOOKS_DIR"
+    else
+      echo "⚠️ Failed to set core.hooksPath. post-merge hook may not run on git pull." >&2
+    fi
+  fi
+else
+  echo "⚠️ $HOOKS_DIR not found or $DEVELOP_ROOT is not a git repository. Skipping hook registration." >&2
+fi
+
 # --- Phase 2: family-quest フロントエンドの鮮度チェック ---
 # git pull 以外の経路(git reset --hard 等)でチェックアウトが更新されると
 # post-merge フックが発火せず、dist/ が旧世代のままサーバーだけ新コードで
 # 起動してAPIスキーマ不整合を起こすことがある(2026-09-01の障害)。
 # サーバー起動前に必ず冪等チェックを通し、ビルド漏れをここで回収する。
-# ビルド失敗でもサーバー起動は続行する(旧distを配信し続ける方がマシなため)。
+# ビルド失敗でもサーバー起動は続行する。deploy.sh はビルドを dist.next/ で行い成功時だけ
+# dist/ と入れ替える(Issue #650)ため、失敗時・ビルド中も旧 dist/ がそのまま配信され続ける。
 echo "--- Ensure family-quest dist is fresh ---"
 if ! bash "$QUEST_DIR/deploy.sh" --if-stale > logs/quest_deploy.log 2>&1; then
     echo "⚠️ family-quest build failed. Serving existing dist/. See logs/quest_deploy.log"
@@ -140,7 +193,14 @@ fi
 echo "--- Check & Fix Webhooks (Cloudflare Tunnel) ---"
 $PYTHON_EXEC switchbot_webhook_fix.py > logs/webhook_fix.log 2>&1
 
-# --- Phase 4: サーバー起動 (ここだけにする) ---
+if [ "$PREPARE_ONLY" = true ]; then
+  # systemd 経路: サーバー本体(unified_server.py)は home_system.service の ExecStart が、
+  # ダッシュボードは home_dashboard.service がそれぞれフォアグラウンドで起動する。
+  echo "✅ Preparation finished (--prepare). unified_server.py は systemd (ExecStart) が起動します。"
+  exit 0
+fi
+
+# --- Phase 4: サーバー起動 (手動運用・開発用の経路。実機の systemd 経路では上の --prepare で終了する) ---
 echo "--- Start Home System Server ---"
 # unified_server.py が内部で scheduler_boot.py を起動します
 # ★修正: '&'のみのバックグラウンド化はSSHログアウト時にシェルからSIGHUPが
@@ -150,8 +210,12 @@ disown
 echo "🚀 System started. Check logs/server_boot.log for details."
 
 # ★修正: ダッシュボードは認証なしのため、外部公開せずローカルホストのみに限定する
-# (必要な場合は信頼できるリバースプロキシ経由でアクセスすること)
-nohup $PYTHON_EXEC -m streamlit run dashboard.py --server.port 8501 --server.address 127.0.0.1 < /dev/null > logs/dashboard_boot.log 2>&1 &
+# スマートフォン等からの閲覧は unified_server.py(8000番)の ${DASHBOARD_BASE_PATH} 配下への
+# リバースプロキシ経由で行う(routers/dashboard_router.py)。Streamlit 側の
+# --server.baseUrlPath は config.DASHBOARD_BASE_PATH と一致している必要があり、
+# ずれると静的アセットのURLが合わず画面が真っ白になる。
+DASHBOARD_BASE_PATH="${DASHBOARD_BASE_PATH:-dashboard}"
+nohup $PYTHON_EXEC -m streamlit run dashboard.py --server.port 8501 --server.address 127.0.0.1 --server.baseUrlPath "${DASHBOARD_BASE_PATH#/}" < /dev/null > logs/dashboard_boot.log 2>&1 &
 disown
 echo "📊 Dashboard started."
 

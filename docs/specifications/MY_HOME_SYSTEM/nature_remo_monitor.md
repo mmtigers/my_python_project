@@ -96,7 +96,7 @@
 ### `process_location`
 
 * **役割**: 拠点とトークンを受け取り、別スレッドでAPI通信を実行。取得したデータからスマートメーターの電力値 (`EPC: 231`) とセンサーの温湿度を抽出し、外部サービスへ非同期で委譲する。**（Issue #235で修正）** 電力値のパースは以前`val_str.isdigit()`で数字文字列かどうかを判定していたが、`str.isdigit()`は符号付き文字列(例: `"-120"`)に対して`False`を返すPython仕様のため、太陽光発電等による逆潮流(売電)時の負の瞬時電力値が警告も無く無条件に破棄されていた。`float(val_str)`への直接パースを`try/except`で試み、失敗時のみ警告ログを出す方式に変更した。
-* 根拠: `[process_location]` (行番号: 78〜145 / 抜粋: "async def process_location(loc")、電力値パース処理 (行番号: 99〜111 / 抜粋: "try: power_val = float(val_str)")
+* 根拠: `[process_location]` (行番号: 78〜146 / 抜粋: "async def process_location(loc")、電力値パース処理 (行番号: 99〜111 / 抜粋: "try: power_val = float(val_str)")
 
 
 * **引数/リクエスト**: `location: str` (拠点名), `token: str` (APIトークン)
@@ -119,15 +119,15 @@
 ### `main`
 
 * **役割**: 伊丹と高砂の2つの拠点情報・トークンを定義し、トークンが存在する拠点についてのみ `process_location` を順次実行する。
-* 根拠: `[main]` (行番号: 142〜155 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 149〜162 / 抜粋: "async def main() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[main]` (行番号: 142 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 149 / 抜粋: "async def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[main]` (行番号: 142 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 149 / 抜粋: "async def main() -> None:")
 
 
 * **副作用**: `process_location` の呼び出し。
@@ -135,7 +135,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[main]` (行番号: 142〜155 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 149〜162 / 抜粋: "async def main() -> None:")
 
 
 
@@ -245,7 +245,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| 外部委譲されたデータの永続化処理 | `MY_HOME_SYSTEM/services/sensor_service.py`を直接確認した。`process_meter_data(device_id, device_name, temp, humidity)`(135〜147行目)は`save_log_async(config.SQLITE_TABLE_SWITCHBOT_LOGS, ["device_id", "device_name", "temperature", "humidity", "timestamp"], ...)`で温湿度データをDBへ保存するのみ（通知処理なし）。`process_power_data(device_id, device_name, wattage, notify_settings)`(149行目〜)は、まず`common.get_db_cursor()`で`config.SQLITE_TABLE_POWER_USAGE`テーブルから当該`device_id`の直近`wattage`を取得し(158〜177行目)、続いて`save_log_async`で現在値を保存(180〜184行目)した後、`notify_settings.get("threshold")`(188行目)を用いて前回値と現在値が閾値をまたいだかを判定し通知する設計であることを確認した（188行目以降のロジックまで確認）。 | 直接ソース確認: `MY_HOME_SYSTEM/services/sensor_service.py:135-189` |
+| 外部委譲されたデータの永続化処理 | `MY_HOME_SYSTEM/services/sensor_service.py`を直接確認した。`process_meter_data(device_id, device_name, temp, humidity)`(135〜147行目)は`save_log_async(config.SQLITE_TABLE_SWITCHBOT_LOGS, ["device_id", "device_name", "temperature", "humidity", "timestamp"], ...)`で温湿度データをDBへ保存するのみ（通知処理なし）。`process_power_data(device_id, device_name, wattage, notify_settings)`(149行目〜)は、まず`core.database.get_db_cursor()`で`config.SQLITE_TABLE_POWER_USAGE`テーブルから当該`device_id`の直近`wattage`を取得し(158〜177行目)、続いて`save_log_async`で現在値を保存(180〜184行目)した後、`notify_settings.get("threshold")`(188行目)を用いて前回値と現在値が閾値をまたいだかを判定し通知する設計であることを確認した（188行目以降のロジックまで確認）。 | 直接ソース確認: `MY_HOME_SYSTEM/services/sensor_service.py:135-189` |
 | ロギング機構の詳細 | `MY_HOME_SYSTEM/core/logger.py`の`setup_logging(name, webhook_url=None)`(46〜86行目)を直接確認した。(1) コンソール出力用の`logging.StreamHandler`(58〜60行目)、(2) `TimedRotatingFileHandler`による`logs/home_system.log`への日次ローテーションファイル出力（`when='midnight', interval=1, backupCount=7`、62〜74行目）、(3) `webhook_url`引数または`config.DISCORD_WEBHOOK_ERROR`が設定されていれば、ERRORレベル以上のログのみをDiscordへ転送する`DiscordErrorHandler`(9〜44行目、76〜84行目)、の3種のハンドラを登録する設計であることを確認した。本ファイル(`monitors/nature_remo_monitor.py`)は`setup_logging("nature_remo_monitor")`のように`webhook_url`を省略して呼び出しているため、Discord転送は`config.DISCORD_WEBHOOK_ERROR`が設定されている場合のみ有効になる。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:9-86` |
 | APIトークンの管理とスコープ（判明した範囲） | `MY_HOME_SYSTEM/config.py`180〜181行目を直接確認した。`NATURE_REMO_ACCESS_TOKEN: Optional[str] = os.getenv("NATURE_REMO_ACCESS_TOKEN")`、`NATURE_REMO_ACCESS_TOKEN_TAKASAGO: Optional[str] = os.getenv("NATURE_REMO_ACCESS_TOKEN_TAKASAGO")`と定義されており、いずれも環境変数から読み込む単純な文字列（未設定時は`None`）で、本ファイル147〜148行目で伊丹用・高砂用の2トークンとしてそれぞれ`process_location`に渡されていることを確認した。ただしトークン自体に付与されている権限スコープ（Nature Remo Cloud API側の設定）はリポジトリ内のどこにも記録がなく、これ以上は解消できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:180-181`（参考: `MY_HOME_SYSTEM/monitors/nature_remo_monitor.py:147-148`） |
 

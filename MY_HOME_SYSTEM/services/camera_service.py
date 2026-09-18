@@ -1,7 +1,6 @@
 import contextlib
 import json
 import os
-import sys
 import subprocess
 import threading
 import time
@@ -9,7 +8,10 @@ import urllib.parse
 import glob
 from datetime import datetime
 from typing import Optional, Dict, Any
+# #661: WSDL 探索は core/onvif_utils.py に一本化(以前は本ファイルと camera_monitor/camera_service に同一実装が重複)
+from core.onvif_utils import find_wsdl_path
 from core.logger import setup_logging
+from core.utils import get_now_jst, RefCountedLockRegistry
 import config
 
 try:
@@ -55,23 +57,18 @@ _state_lock = threading.Lock()
 # #247: _active_vod_processesには対応する_prune_finished_vod_processes()が
 # あるが、以前はこの辞書には剪定処理が存在せず、cam_id×target_dateの組み合わせが
 # 増えるたびに(long-running環境で日々)無限に蓄積していた。threading.Lockオブジェクト
-# 自体は軽量なため実運用上のメモリ影響は小さいが、参照カウント(_RefCountedLock)を
-# 導入し、そのエントリを誰も使用していない(参照カウント0)場合にのみ辞書から削除する。
+# 自体は軽量なため実運用上のメモリ影響は小さいが、参照カウント方式を導入し、
+# そのエントリを誰も使用していない(参照カウント0)場合にのみ辞書から削除する。
 # 単純に「lock.locked()がFalseなら削除」する方式だと、取得元(_vod_generation_lock)が
 # 辞書からロックオブジェクトを取り出した直後・実際にwith文で獲得する直前の隙間で
 # 別スレッドが剪定してしまい、同一process_keyに対して2つの別々のLockオブジェクトが
 # 生成されて同時に「取得成功」してしまう(このロック機構が本来防ぐべき二重起動と
 # 全く同じ問題を再発させる)ため、参照カウントで安全性を担保している。
-class _RefCountedLock:
-    __slots__ = ("lock", "ref_count")
-
-    def __init__(self) -> None:
-        self.lock = threading.Lock()
-        self.ref_count = 0
-
-
-_vod_generation_locks: Dict[str, _RefCountedLock] = {}
-_vod_generation_locks_guard = threading.Lock()
+# Issue #661: このファイルにあった _RefCountedLock と、それを使う2つの
+# コンテキストマネージャは core.utils.RefCountedLockRegistry と同一の実装だった
+# (同レジストリの docstring 自身がこの実装を参照元として挙げている)。
+# 重複を解消し、レジストリ側に一本化する。挙動は変わらない。
+_vod_generation_locks = RefCountedLockRegistry()
 
 
 @contextlib.contextmanager
@@ -79,46 +76,21 @@ def _vod_generation_lock(process_key: str):
     """process_key単位で排他制御を行うコンテキストマネージャ。
     使用中(参照カウント>0)のエントリは剪定されず、使用を終えた
     (参照カウントが0に戻った)エントリのみ_vod_generation_locksから削除される。"""
-    with _vod_generation_locks_guard:
-        entry = _vod_generation_locks.get(process_key)
-        if entry is None:
-            entry = _RefCountedLock()
-            _vod_generation_locks[process_key] = entry
-        entry.ref_count += 1
-    try:
-        with entry.lock:
-            yield
-    finally:
-        with _vod_generation_locks_guard:
-            entry.ref_count -= 1
-            if entry.ref_count == 0 and _vod_generation_locks.get(process_key) is entry:
-                del _vod_generation_locks[process_key]
+    with _vod_generation_locks.acquire(process_key):
+        yield
 
 
 # #439: ライブHLS配信の起動も、同一cam_idへの同時リクエストで「実行中でない」の
 # チェックとffmpeg起動・登録までを不可分にする必要がある(_vod_generation_lockと同じ
 # check-then-act競合)。cam_id単位の参照カウント付きロックとして同じ仕組みを流用する。
-_live_stream_locks: Dict[str, _RefCountedLock] = {}
-_live_stream_locks_guard = threading.Lock()
+_live_stream_locks = RefCountedLockRegistry()
 
 
 @contextlib.contextmanager
 def _live_stream_lock(cam_id: str):
     """cam_id単位でライブHLS配信の起動を排他制御するコンテキストマネージャ。"""
-    with _live_stream_locks_guard:
-        entry = _live_stream_locks.get(cam_id)
-        if entry is None:
-            entry = _RefCountedLock()
-            _live_stream_locks[cam_id] = entry
-        entry.ref_count += 1
-    try:
-        with entry.lock:
-            yield
-    finally:
-        with _live_stream_locks_guard:
-            entry.ref_count -= 1
-            if entry.ref_count == 0 and _live_stream_locks.get(cam_id) is entry:
-                del _live_stream_locks[cam_id]
+    with _live_stream_locks.acquire(cam_id):
+        yield
 
 
 def stop_all_processes(timeout: float = 5.0) -> int:
@@ -182,17 +154,6 @@ def init_output_dir(base_dir: str, camera_id: str) -> str:
     os.makedirs(cam_dir, exist_ok=True)
     return cam_dir
 
-def find_wsdl_path() -> Optional[str]:
-    """camera_monitor.pyと同等のWSDL動的探索ロジック"""
-    for path in sys.path:
-        if not os.path.exists(path):
-            continue
-        candidate_standard = os.path.join(path, 'onvif', 'wsdl')
-        candidate_direct = os.path.join(path, 'wsdl')
-        for candidate in [candidate_standard, candidate_direct]:
-            if os.path.exists(os.path.join(candidate, 'devicemgmt.wsdl')):
-                return candidate
-    return None
 
 def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:
     cam_id = cam_conf['id']
@@ -321,6 +282,18 @@ def get_record_start_offset(cam_conf: Dict[str, Any], target_date: str) -> int:
             return 0
 
 
+def _playlist_is_complete(path: str) -> bool:
+    """m3u8ファイルにffmpegの`-hls_playlist_type vod`が処理完走時のみ末尾へ
+    書き込む`#EXT-X-ENDLIST`タグが存在するかを確認する(#562)。
+    シャットダウン時のterminate等で生成途中のまま終わったプレイリストは
+    このタグを持たないため、過去日付キャッシュとして返してよいかの判定に使う。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return "#EXT-X-ENDLIST" in f.read()
+    except OSError:
+        return False
+
+
 def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:
     """
     指定された日付の録画ファイル群を結合し、シームレス再生用のVODプレイリストを生成する
@@ -379,8 +352,19 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
 
     # 2. キャッシュ: 過去日付（録画が確定済み）かつ既にプレイリストが生成済みであれば、再エンコードせずそれを返す
     #    当日分は録画ファイルが増え続けるため、キャッシュ対象から除外し毎回最新の状態で再生成する
-    today_str = datetime.now().strftime("%Y%m%d")
-    if target_date < today_str and os.path.exists(playlist_path):
+    #    #562: シャットダウン時のffmpeg terminate(Issue #360系)や、下記の生成待機タイムアウトに
+    #    より生成途中で終わったプレイリストが存在すると、以前は完全性を確認せずそのまま
+    #    「完成品」としてHLS_VOD_RETENTION_DAYS(既定3日)の間ずっと配信し続けてしまっていた。
+    #    ffmpegは`-hls_playlist_type vod`指定時、正常に完走した場合にのみ末尾へ
+    #    `#EXT-X-ENDLIST`タグを書き込むため、これの有無で完全性を確認してからキャッシュを返す。
+    #    不完全なら以降の生成処理へフォールスルーし、再生成する。
+    # Issue #592: target_dateはフロントエンド(ブラウザのローカル日付、実質JST)から
+    # 渡される「YYYYMMDD」形式の日付で、実世界のJSTカレンダー日を意図している。
+    # ホストOSのタイムゾーン設定に依存するnaiveなdatetime.now()で today_str を
+    # 求めると、ホストがJST以外の設定の場合、JSTの日付境界(UTCの日付境界と
+    # 9時間ずれる)をまたぐ時間帯で「当日」の判定を誤りうるため、明示的にJSTを使う。
+    today_str = get_now_jst().strftime("%Y%m%d")
+    if target_date < today_str and os.path.exists(playlist_path) and _playlist_is_complete(playlist_path):
         logger.debug(f"✅ [{cam_conf['name']}] {target_date} のプレイリストは生成済みのためキャッシュを返します。")
         return playlist_path
 
@@ -457,6 +441,14 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
         time.sleep(0.5)
     
     return playlist_path if os.path.exists(playlist_path) else None
+
+
+def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:
+    """config.CAMERAS(devices.jsonからロードされたカメラ定義一覧)からcamera_idに
+    一致する設定を返す。見つからない場合はNoneを返す(#551: camera_router側に
+    重複していた同一のlookup+404送出を、ルーターの`_require_camera`ヘルパーへ
+    一元化するために切り出した)。"""
+    return next((c for c in config.CAMERAS if c["id"] == camera_id), None)
 
 
 def set_camera_enabled(camera_id: str, enabled: bool) -> bool:

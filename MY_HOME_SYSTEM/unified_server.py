@@ -1,13 +1,15 @@
 # MY_HOME_SYSTEM/unified_server.py
 import os
 import sys
+import asyncio
 import datetime
 import subprocess
 import logging
 import ipaddress
 import re
+import time
 
-from typing import AsyncGenerator, Optional, Callable, Awaitable
+from typing import AsyncGenerator, Dict, List, Optional, Callable, Awaitable, Set
 
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
@@ -25,9 +27,13 @@ import config
 from core.logger import setup_logging
 from core.migrations import apply_pending_migrations
 from services import sensor_service, camera_service
+from services.dashboard_proxy_service import dashboard_proxy_service
 
 # Routers
-from routers import quest_router, webhook_router, system_router, camera_router, alexa_router
+from routers import quest_router, webhook_router, system_router, camera_router, alexa_router, routine_router
+# ダッシュボード(Streamlit)の中継。config.DASHBOARD_PROXY_ENABLED=false のときは
+# include しないため、import だけしてルートは生やさない。
+from routers import dashboard_router
 
 # Handlers
 
@@ -130,7 +136,106 @@ class SecretRedactionFilter(logging.Filter):
 
 # Global State
 scheduler_process: Optional[subprocess.Popen] = None
-camera_process = None
+camera_process: Optional[subprocess.Popen] = None
+
+# --- 監視子プロセス(camera_monitor / scheduler_boot)の死活監視と自動再起動 ---
+# Issue #646: 以前は lifespan 起動時に Popen するだけで、その後の死活を一切見ていなかった。
+# scheduler_boot.py が落ちると配下の6監視タスクが静かに止まり、気づくのは毎時 cron の
+# health_watch.py の通知後、復旧は人手だった。子プロセス名 -> 起動スクリプト(PROJECT_ROOT 相対)。
+CHILD_SCRIPTS: Dict[str, str] = {
+    "camera_monitor": "monitors/camera_monitor.py",
+    "scheduler": "scheduler_boot.py",
+}
+# 死活確認の間隔(秒)
+CHILD_MONITOR_INTERVAL_SEC: float = 30.0
+# 1時間あたりの自動再起動の上限。これを超えたら(クラッシュループとみなして)その子プロセスの
+# 自動再起動を止め、CRITICAL(Discord通知)を出して人の確認に委ねる。
+CHILD_RESTART_MAX_PER_HOUR: int = 5
+_CHILD_RESTART_WINDOW_SEC: float = 3600.0
+
+# 子プロセス名ごとの再起動時刻(time.monotonic())の履歴と、上限到達で再起動を止めた子プロセス名
+_child_restart_history: Dict[str, List[float]] = {}
+_child_restart_disabled: Set[str] = set()
+
+
+def _get_child_process(name: str) -> Optional[subprocess.Popen]:
+    return camera_process if name == "camera_monitor" else scheduler_process
+
+
+def _set_child_process(name: str, proc: Optional[subprocess.Popen]) -> None:
+    global camera_process, scheduler_process
+    if name == "camera_monitor":
+        camera_process = proc
+    else:
+        scheduler_process = proc
+
+
+def _spawn_child_process(name: str) -> Optional[subprocess.Popen]:
+    """監視子プロセスを起動する。起動失敗は logger.error にとどめ None を返す(#360 と同じ保護)。"""
+    script_path = os.path.join(PROJECT_ROOT, CHILD_SCRIPTS[name])
+    if not os.path.exists(script_path):
+        logger.warning(f"⚠️ {CHILD_SCRIPTS[name]} not found. Skipping {name} start.")
+        return None
+    try:
+        proc = subprocess.Popen([sys.executable, script_path])
+        logger.info(f"✅ {name} started (PID: {proc.pid})")
+        return proc
+    except Exception as e:
+        logger.error(f"Failed to start {name}: {e}")
+        return None
+
+
+def restart_dead_children(now: Optional[float] = None) -> List[str]:
+    """終了している監視子プロセスを再起動し、再起動した子プロセス名の一覧を返す。
+
+    テスト容易性のため同期関数にしている(定期実行は `_supervise_child_processes`)。
+    直近1時間の再起動回数が `CHILD_RESTART_MAX_PER_HOUR` に達した子プロセスは
+    クラッシュループとみなして自動再起動を止め、CRITICAL を1回だけ出す。
+    """
+    now = time.monotonic() if now is None else now
+    restarted: List[str] = []
+    for name in CHILD_SCRIPTS:
+        proc = _get_child_process(name)
+        if proc is None or name in _child_restart_disabled:
+            continue
+        returncode = proc.poll()
+        if returncode is None:
+            continue  # 生存中
+
+        history = [t for t in _child_restart_history.get(name, []) if now - t < _CHILD_RESTART_WINDOW_SEC]
+        if len(history) >= CHILD_RESTART_MAX_PER_HOUR:
+            _child_restart_disabled.add(name)
+            _child_restart_history[name] = history
+            logger.critical(
+                f"🚨 {name} が直近1時間に{CHILD_RESTART_MAX_PER_HOUR}回以上終了したため自動再起動を停止します"
+                f"(最終 exit code {returncode})。logs/ を確認し、原因を直してからサーバーを再起動してください。"
+            )
+            continue
+
+        logger.error(f"⚠️ {name} が予期せず終了しました(exit code {returncode})。再起動します。")
+        new_proc = _spawn_child_process(name)
+        if new_proc is None:
+            # 起動自体に失敗した場合も再起動試行として数え、無限に Popen を繰り返さない
+            history.append(now)
+            _child_restart_history[name] = history
+            continue
+        history.append(now)
+        _child_restart_history[name] = history
+        _set_child_process(name, new_proc)
+        restarted.append(name)
+    return restarted
+
+
+async def _supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC) -> None:
+    """lifespan 内で動かす死活監視ループ。シャットダウン時は cancel される。"""
+    while True:
+        await asyncio.sleep(interval_sec)
+        try:
+            restart_dead_children()
+        except Exception as e:
+            # 監視ループ自身は止めない
+            logger.error(f"Child process supervision failed: {e}")
+
 
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """アプリケーションのライフサイクル管理"""
@@ -143,7 +248,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("🚀 --- API Server Starting Up ---")
 
     if not config.SWITCHBOT_WEBHOOK_TOKEN:
-        logger.warning("⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — SwitchBot webhook signature verification is DISABLED. Set the env var to enable it.")
+        # Issue #648: 未設定時は /webhook/switchbot を 503 で拒否する(フェイルクローズ)。
+        # 移行用オプトインが立っている場合だけ従来どおり無検証で受け付ける。
+        if getattr(config, "ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK", False):
+            logger.warning("⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set and ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK=true — /webhook/switchbot accepts UNAUTHENTICATED requests. Set the token and remove the opt-in.")
+        else:
+            logger.warning("⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — /webhook/switchbot will reject all requests with 503. Set the env var (and add ?token=... to the SwitchBot webhook URL) to enable it.")
 
     # NAS依存パス(ASSETS_DIR等)のプリウォーム。Issue #330 PR-Bでconfigのimport時
     # NAS検証は遅延化されたため、サーバー起動時はここで明示的に解決しておく
@@ -173,33 +283,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
     app.state.migration_ok = migration_ok
 
-    global camera_process
-    global scheduler_process
+    supervisor_task: Optional[asyncio.Task] = None
     if migration_ok:
         # #360: camera_monitor の起動も scheduler と同様に保護する(以前は失敗すると
-        # lifespan の例外でサーバー全体が起動しなかった)。
-        try:
-            camera_script = os.path.join(PROJECT_ROOT, "monitors/camera_monitor.py")
-            camera_process = subprocess.Popen([sys.executable, camera_script])
-            logger.info(f"✅ Camera monitor started (PID: {camera_process.pid})")
-        except Exception as e:
-            logger.error(f"Failed to start camera monitor: {e}")
+        # lifespan の例外でサーバー全体が起動しなかった)。起動失敗は _spawn_child_process が
+        # logger.error にとどめ、一方の失敗がもう一方や lifespan 自体に影響しない。
+        for child_name in CHILD_SCRIPTS:
+            _set_child_process(child_name, _spawn_child_process(child_name))
 
-        # Schedulerの起動管理
-        try:
-            scheduler_script = os.path.join(PROJECT_ROOT, "scheduler_boot.py")
-            if os.path.exists(scheduler_script):
-                scheduler_process = subprocess.Popen([sys.executable, scheduler_script])
-                logger.info(f"✅ Scheduler started (PID: {scheduler_process.pid})")
-            else:
-                logger.warning("⚠️ scheduler_boot.py not found. Skipping scheduler start.")
-        except Exception as e:
-            logger.error(f"Failed to start scheduler: {e}")
+        # Issue #646: 起動後の死活監視。終了していれば再起動する(上限超過でクラッシュループ扱い)。
+        supervisor_task = asyncio.create_task(_supervise_child_processes())
 
     yield
 
     logger.info("🛑 --- API Server Shutting Down ---")
-    
+
+    # 子プロセスを止める前に監視ループを止める(止めた子を再起動しないように)
+    if supervisor_task is not None:
+        supervisor_task.cancel()
+        try:
+            await supervisor_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
     if scheduler_process:
         logger.info("Stopping scheduler...")
         scheduler_process.terminate()
@@ -225,6 +331,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error(f"Failed to stop ffmpeg processes: {e}")
 
     sensor_service.cancel_all_tasks()
+
+    # ダッシュボード中継用の httpx コネクションプールを閉じる
+    # (未クローズのまま落とすと "Unclosed client session" の警告が出る)。
+    try:
+        await dashboard_proxy_service.aclose()
+    except Exception as e:
+        logger.warning(f"ダッシュボード中継クライアントのクローズに失敗しました: {e}")
+
     logger.info("Bye!")
 
 app = FastAPI(
@@ -251,6 +365,46 @@ app.add_middleware(
 )
 
 @app.middleware("http")
+async def security_headers_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    """
+    Issue #665: 全レスポンスに最小限のセキュリティヘッダーを付与するミドルウェア。
+
+    付与するヘッダー:
+    - `X-Content-Type-Options: nosniff` — Content-Type を無視したMIMEスニッフィングを禁止する。
+      `/quest`・`/camera` 配下は family-quest のビルド成果物を、`/uploads` は
+      ユーザーがアップロードしたアバター画像をそのまま配信するため、拡張子と実体が
+      食い違うファイルをブラウザが実行可能なリソースとして解釈しないようにする。
+    - `X-Frame-Options` — 既定 `SAMEORIGIN`(`config.SECURITY_HEADER_X_FRAME_OPTIONS`)。
+      `DENY` を既定にすると、Echo Show 等からの同一オリジンiframe埋め込みまで
+      壊れうるため既定では同一オリジンを許す。空文字にすると付与しない。
+    - `Referrer-Policy: strict-origin-when-cross-origin` — 外部への遷移時にパスを送らない。
+
+    既に値が設定されているヘッダーは上書きしない。エッジ(Cloudflare)側で
+    同じヘッダーを付与している構成では `SECURITY_HEADERS_ENABLED=false` で
+    オリジン側の付与そのものを止められる(値が二重になるのを避けるため)。
+
+    CSP は family-quest が Vite ビルドのインラインスタイル等を含むため、
+    ここでは意図的に付与しない(付けるならフロント側の実測とセットで行う)。
+    """
+    response = await call_next(request)
+
+    if not config.SECURITY_HEADERS_ENABLED:
+        return response
+
+    headers: Dict[str, str] = {
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+    }
+    if config.SECURITY_HEADER_X_FRAME_OPTIONS:
+        headers["X-Frame-Options"] = config.SECURITY_HEADER_X_FRAME_OPTIONS
+
+    for name, value in headers.items():
+        if name not in response.headers:
+            response.headers[name] = value
+
+    return response
+
+@app.middleware("http")
 async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     """
     リクエスト元のIPアドレスを検証し、許可されたネットワークからのアクセスのみを後続へ渡すミドルウェア。
@@ -260,6 +414,15 @@ async def ip_restriction_middleware(request: Request, call_next: Callable[[Reque
     例外として、外部からのWebhook受信が必要な以下のパスは全IPからアクセスを許可する:
     - /webhook/switchbot
     - /callback/line
+    - /webhook/alexa
+
+    このリストは「オリジンが外部から到達可能でなければ機能しないパス」の一覧でもある。
+    本ミドルウェア自体は遮断を行わないため、リストに載せることの実際の効果は
+    「クライアントIPの解決と外部アクセスのINFOログ出力をスキップする」ことだけだが、
+    Cloudflare Access側でこれらのパスをバイパス対象に設定し忘れるとWebhookが
+    サーバーまで届かなくなる(Issue #517で /webhook/switchbot・/callback/line が
+    実際にブロックされていた)。エッジ側の設定を点検する際の参照元として、
+    外部Webhookのパスを追加したらここにも必ず追記すること。
 
     許可ネットワーク:
     - プライベートIP (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12)
@@ -274,7 +437,12 @@ async def ip_restriction_middleware(request: Request, call_next: Callable[[Reque
     """
     allowed_webhook_paths = {
         "/webhook/switchbot",
-        "/callback/line"
+        "/callback/line",
+        # Alexaカスタムスキル「ファミクエ」のエンドポイント(routers/alexa_router.py)。
+        # 上2つと同じく Alexa クラウドから外部到達する必要があるが、長らくこのリストから
+        # 漏れていた(docstringが列挙する「外部Webhook」の意図と非対称だった)。
+        # 署名・タイムスタンプ検証は core/alexa_verifier.py が別途行う。
+        "/webhook/alexa",
     }
 
     # 1. 例外パスの判定（Webhook関連は無条件で許可）
@@ -335,6 +503,16 @@ app.include_router(quest_router.router, prefix="/api/quest", tags=["quest"])
 app.include_router(system_router.router, prefix="/api/system", tags=["system"])
 app.include_router(camera_router.router, prefix="/api/cameras", tags=["cameras"])
 app.include_router(alexa_router.router, tags=["alexa"])
+app.include_router(routine_router.router, prefix="/api/routine", tags=["routine"])
+
+# ダッシュボード(Streamlit・8501番)の中継。
+# 8501番は認証を持たないため localhost 束縛のままにし、外部からの到達は
+# 既に Cloudflare Access で保護されている本サーバー経由に一本化する
+# (詳細は services/dashboard_proxy_service.py のモジュールdocstring)。
+# ★このパスを Cloudflare Access のバイパス対象に設定してはならない。
+if config.DASHBOARD_PROXY_ENABLED:
+    app.include_router(dashboard_router.router, tags=["dashboard"])
+    logger.info(f"📊 Dashboard Proxy: {config.DASHBOARD_BASE_PATH} -> {config.DASHBOARD_INTERNAL_URL}")
 
 # --- Static Files & SPA Serving ---
 

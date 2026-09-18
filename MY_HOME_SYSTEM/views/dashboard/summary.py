@@ -1,12 +1,11 @@
 # MY_HOME_SYSTEM/views/dashboard/summary.py
 import pandas as pd
-import streamlit as st
 from datetime import datetime, timedelta
 from typing import Tuple, Optional
 
 from services import train_service
 from services import analysis_service
-from .common import render_status_card_html
+from .common import StatusCard, render_status_grid
 
 # === Status Helpers ===
 
@@ -224,21 +223,22 @@ def render_summary(
     server_val, server_theme = get_server_status()
     nas_val, nas_theme = get_nas_status_simple(nas_data)
 
-    c1, c2, c3 = st.columns(3)
-    c1.markdown(render_status_card_html("👵 高砂 (実家)", taka_val, taka_theme), unsafe_allow_html=True)
-    c2.markdown(render_status_card_html("🏠 伊丹 (自宅)", itami_val, itami_theme), unsafe_allow_html=True)
-    c3.markdown(render_status_card_html("🚗 車 (伊丹)", car_val, car_theme), unsafe_allow_html=True)
-
-    c4, c5, c6 = st.columns(3)
-    c4.markdown(render_status_card_html("🍚 炊飯器", rice_val, rice_theme), unsafe_allow_html=True)
-    c5.markdown(render_status_card_html("💰 今月の電気代", elec_val, "theme-blue"), unsafe_allow_html=True)
+    # スマホ対応: 以前は st.columns(3) を3段重ねて9枚を並べていたが、
+    # Streamlitの列は画面幅が足りなくても横並びを維持するため、スマートフォンでは
+    # 1枚あたり約100pxまで潰れて値が読めなかった。列数の決定はCSS Grid側
+    # (`views/dashboard/common.py` の `.status-grid`)に委ね、スマホ2列・PC3〜5列に
+    # 自動で切り替わるようにする。
+    #
     # Issue #378: get_bicycle_status は前日比の色付け(<span>)等を意図的に組み立てて
-    # 返すため、render_status_card_html のエスケープをスキップする(value_is_html=True)。
-    c6.markdown(render_status_card_html("🚲 駐輪場待機", bicycle_val, bicycle_theme, value_is_html=True), unsafe_allow_html=True)
-
-    c7, c8, c9 = st.columns(3)
-    c7.markdown(render_status_card_html("🚃 JR運行情報", traffic_val, traffic_theme), unsafe_allow_html=True)
-    c8.markdown(render_status_card_html("🖥️ サーバー", server_val, server_theme), unsafe_allow_html=True)
-    c9.markdown(render_status_card_html("🗄️ NAS", nas_val, nas_theme), unsafe_allow_html=True)
-    
-    st.markdown("---")
+    # 返すため、HTMLエスケープをスキップする(value_is_html=True)。
+    render_status_grid([
+        StatusCard("👵 高砂 (実家)", taka_val, taka_theme),
+        StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme),
+        StatusCard("🚗 車 (伊丹)", car_val, car_theme),
+        StatusCard("🍚 炊飯器", rice_val, rice_theme),
+        StatusCard("💰 今月の電気代", elec_val, "theme-blue"),
+        StatusCard("🚲 駐輪場待機", bicycle_val, bicycle_theme, value_is_html=True),
+        StatusCard("🚃 JR運行情報", traffic_val, traffic_theme),
+        StatusCard("🖥️ サーバー", server_val, server_theme),
+        StatusCard("🗄️ NAS", nas_val, nas_theme),
+    ])

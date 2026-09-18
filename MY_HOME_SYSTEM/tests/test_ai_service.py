@@ -755,9 +755,9 @@ class TestRateLimiterLockIsThreadSafeAcrossEventLoops:
 
 def _seed_search_db_tables():
     """許可テーブル(food_records)と許可外テーブル(quest_users)に1行ずつ投入する"""
-    import common
+    from core.database import get_db_cursor
 
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             f"INSERT INTO {config.SQLITE_TABLE_FOOD} (user_id, user_name, meal_date, meal_time_category, menu_category, timestamp) "
             "VALUES ('U1', '太郎', '2026-09-04', 'Dinner', '夕食: カレー', '2026-09-04T19:00:00+09:00')"
@@ -844,13 +844,13 @@ class TestSearchDbAuthorizer:
         assert result.startswith("検索エラー:")
 
     def test_authorizer_denies_write_and_leaves_table_untouched(self, isolated_db):
-        import common
+        from core.database import get_db_cursor
 
         result = ai_service._execute_restricted_read_query(
             f"INSERT INTO {config.SQLITE_TABLE_FOOD} (menu_category, timestamp) VALUES ('x', 'y')"
         )
         assert result.startswith("検索エラー:")
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             count = cur.execute(f"SELECT COUNT(*) FROM {config.SQLITE_TABLE_FOOD}").fetchone()[0]
         assert count == 0
 
@@ -960,9 +960,9 @@ class TestToolRecordFunctionsReportSaveFailure:
     @pytest.mark.asyncio
     async def test_end_to_end_save_failure_reaches_ai_as_tool_result(self, isolated_db, ai_configured, monkeypatch):
         """analyze_text_and_execute 経由でも失敗が tool_result(function_response)に反映されること"""
-        import common
+        from core.database import get_db_cursor
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(f"DROP TABLE {config.SQLITE_TABLE_CHILD}")
         monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
         fc = make_function_call("record_child_health", {"child_name": "智矢", "condition": "元気"})

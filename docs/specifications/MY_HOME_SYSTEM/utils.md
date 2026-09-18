@@ -10,16 +10,23 @@
 
 ## 関連ドキュメント
 
-- [common.md](./common.md) — `get_now_iso`, `get_today_date_str`, `get_display_date`を`core.utils`から再エクスポートするFacadeモジュール
+- [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
 - [sensor_service.md](./sensor_service.md) — `core.utils.get_now_iso`の直接の利用元
-- `weather_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） — `common.get_now_iso`経由での利用元
+- `weather_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） — `core.utils.get_now_iso`経由での利用元
 - [config.md](./config.md) — 類似の指数バックオフ待機ロジック(`verify_and_initialize_storage`)を独自に実装している関連モジュール
 - [quest_service.md](./quest_service.md) — Issue #435で、キー単位のロック管理を`threading.Lock`辞書の場当たり実装から本ファイルの`RefCountedLockRegistry`利用へ置き換えた利用元
+- [line_service.md](./line_service.md) — Issue #583で追加された`get_meal_time_category_from_now`の利用元（`log_food_record`が`food_records.meal_time_category`の算出に使用）
+- [line_logic.md](./line_logic.md) — Issue #583で追加された`get_meal_time_category_from_now`の利用元（`handle_postback`の`food_record_direct`アクションが`food_records.meal_time_category`の算出に使用）
+- [tv_lock_monitor.md](./tv_lock_monitor.md) — Issue #592で追加された`get_now_jst`の利用元（深夜2時判定のJST基準化）
+- [nas_monitor.md](./nas_monitor.md) — Issue #592で追加された`get_now_jst`の利用元（8時判定のJST基準化）
+- [camera_service.md](./camera_service.md) — Issue #592で追加された`get_now_jst`の利用元（`generate_record_playlist`内部の当日判定のJST基準化）
+- [train_service.md](./train_service.md) — Issue #592で追加された`get_now_jst`の利用元（Yahoo!路線情報検索時刻のJST基準化）
 
 ## 2. ファイルの概要
 
 * システム全体で共通して使用されるユーティリティ関数群を提供する。
-* "Asia/Tokyo" タイムゾーンに基づいた現在日時の取得処理を提供する。
+* "Asia/Tokyo" タイムゾーンに基づいた現在日時の取得処理を提供する。`get_now_jst`（Issue #592で追加）は、"Asia/Tokyo"タイムゾーンの現在時刻をawareな`datetime.datetime`オブジェクトのまま返す点で、文字列を返す`get_now_iso`/`get_today_date_str`/`get_display_date`と異なる。
+* 現在時刻(JST)から食事記録の時間帯カテゴリ（"Breakfast"/"Lunch"/"Snack"/"Dinner"）を推定する`get_meal_time_category_from_now`（Issue #583で追加）を提供する。
 * ネットワーク障害やストレージの復帰遅延など、一時的な障害に対する指数関数的バックオフを用いたリトライ機能を提供する。
 * キー単位で`threading.Lock`を参照カウント付きで管理する`RefCountedLockRegistry`クラス（Issue #435で追加）を提供する。
 
@@ -55,11 +62,11 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: [get_now_iso] (行番号: 12 / 抜粋: "def get_now_iso() -> str:")
+* 根拠: [get_now_iso] (行番号: 14 / 抜粋: "def get_now_iso() -> str:")
 
 
 * **戻り値/レスポンス**: `str`。ISO 8601形式の日時文字列。
-* 根拠: [get_now_iso] (行番号: 12 / 抜粋: "def get_now_iso() -> str:")
+* 根拠: [get_now_iso] (行番号: 14 / 抜粋: "def get_now_iso() -> str:")
 
 
 * **副作用**: なし
@@ -78,11 +85,11 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: [get_today_date_str] (行番号: 15 / 抜粋: "def get_today_date_str() -> st...")
+* 根拠: [get_today_date_str] (行番号: 17 / 抜粋: "def get_today_date_str() -> st...")
 
 
 * **戻り値/レスポンス**: `str`。"YYYY-MM-DD" 形式の日付文字列。
-* 根拠: [get_today_date_str] (行番号: 15 / 抜粋: "def get_today_date_str() -> st...")
+* 根拠: [get_today_date_str] (行番号: 17 / 抜粋: "def get_today_date_str() -> st...")
 
 
 * **副作用**: なし
@@ -101,11 +108,11 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: [get_display_date] (行番号: 18 / 抜粋: "def get_display_date() -> str:")
+* 根拠: [get_display_date] (行番号: 20 / 抜粋: "def get_display_date() -> str:")
 
 
 * **戻り値/レスポンス**: `str`。"MM/DD" 形式の日付文字列。
-* 根拠: [get_display_date] (行番号: 18 / 抜粋: "def get_display_date() -> str:")
+* 根拠: [get_display_date] (行番号: 20 / 抜粋: "def get_display_date() -> str:")
 
 
 * **副作用**: なし
@@ -117,14 +124,60 @@
 
 
 
+### `get_now_jst`（Issue #592で追加）
+
+* **役割**: "Asia/Tokyo" タイムゾーンの現在日時をawareな`datetime.datetime`オブジェクトとして返す。docstringによれば、`monitors/tv_lock_monitor.py`の深夜2時判定・`monitors/nas_monitor.py`の8時判定・`services/train_service.py`の乗換案内API検索時刻のように「実際の現地時刻(JST)」を前提に組まれた判定・計算が、ホストOSのタイムゾーン設定に依存する`datetime.now()`（naive、ローカルタイムゾーン）を使っていたため、ホストがJST以外の設定だと意図した実時刻とずれて動作してしまう問題（Issue #382/#293と同じ不具合クラス）への対応として追加された。
+* 根拠: [get_now_jst関数定義とdocstring] (行番号: 23〜35 / 抜粋: "def get_now_jst() -> datetime.datetime:\n    \"\"\"現在時刻をJSTのaware datetimeで返す。\n\n    Issue #592の追加調査で判明した問題への対応: ...")
+
+
+* **引数/リクエスト**: なし
+* 根拠: [get_now_jst] (行番号: 23 / 抜粋: "def get_now_jst() -> datetime.datetime:")
+
+
+* **戻り値/レスポンス**: `datetime.datetime`。"Asia/Tokyo"タイムゾーンを明示的に付与したaware(タイムゾーン情報付き)の現在日時。`get_now_iso`等の既存関数（`str`を返す）と異なり、呼び出し元が`.hour`/`.strftime()`/`+ timedelta(...)`等の`datetime`演算をそのまま行える生の`datetime`オブジェクトを返す点が特徴。
+* 根拠: [get_now_jst] (行番号: 23, 35 / 抜粋: "def get_now_jst() -> datetime.datetime:\n...\n    return datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))")
+
+
+* **副作用**: なし
+* 根拠: [get_now_jst] (行番号: 35 / 抜粋: "return datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))")
+
+
+* **エラーハンドリング**: なし
+* 根拠: [get_now_jst] (行番号: 35 / 抜粋: "return datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))")
+
+
+
+### `get_meal_time_category_from_now`（Issue #583 で追加）
+
+* **役割**: "Asia/Tokyo" タイムゾーンの現在時刻の「時」だけを取り出し、食事記録の時間帯カテゴリ（`food_records.meal_time_category`列に保存する値）を4段階（"Breakfast"/"Lunch"/"Snack"/"Dinner"）のいずれかとして返す。4時台〜10時台は"Breakfast"、11時台〜14時台は"Lunch"、15時台〜17時台は"Snack"、それ以外（18時台〜翌3時台）は"Dinner"を返す。関数docstringによれば、`log_food_record`/`food_record_direct`のいずれもこの値を実際の記録時刻に関わらず常に固定文字列"Dinner"で保存していたバグ（Issue #583）の修正として追加され、呼び出し元が受け取る`category`引数（AIが渡す朝食/昼食/夕食等のラベル、または食事アンケートの麺類等の食品ジャンルラベル）は用途が呼び出し元ごとに異なり必ずしも時間帯を表さないため、記録時刻そのものから時間帯を判定する設計にしている（`category`自体は従来どおり`menu_category`列にのみ使われ、本関数の追加によって`category`の扱いは変化しない）。**（Issue #592の注記）** 本関数自体は元々`datetime.datetime.now(pytz.timezone("Asia/Tokyo"))`でJSTを明示していたため、Issue #592の追加調査でもタイムゾーン非依存であることが確認され、`get_now_jst`への置き換え対象にはなっていない。
+* 根拠: [get_meal_time_category_from_now関数定義とdocstring、および分岐] (行番号: 37〜54 / 抜粋: "def get_meal_time_category_from_now() -> str:\n    \"\"\"現在時刻(JST)から食事記録の時間帯カテゴリ...\n    hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour\n    if 4 <= hour < 11:\n        return \"Breakfast\"")
+
+
+* **引数/リクエスト**: なし
+* 根拠: [get_meal_time_category_from_now] (行番号: 37 / 抜粋: "def get_meal_time_category_from_now() -> str:")
+
+
+* **戻り値/レスポンス**: `str`。現在時刻(JST)の時に応じて`"Breakfast"`（4時〜10時台）、`"Lunch"`（11時〜14時台）、`"Snack"`（15時〜17時台）、`"Dinner"`（それ以外、18時〜翌3時台）のいずれか一つ。
+* 根拠: [get_meal_time_category_from_now] (行番号: 47〜54 / 抜粋: "hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour\n    if 4 <= hour < 11:\n        return \"Breakfast\"\n    if 11 <= hour < 15:\n        return \"Lunch\"\n    if 15 <= hour < 18:\n        return \"Snack\"\n    return \"Dinner\"")
+
+
+* **副作用**: なし（`datetime.datetime.now`によるシステム時計の参照のみで、状態の書き込みは行わない）
+* 根拠: [get_meal_time_category_from_now] (行番号: 47 / 抜粋: "hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour")
+
+
+* **エラーハンドリング**: なし
+* 根拠: [get_meal_time_category_from_now] (行番号: 47〜54 / 抜粋: "hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour")
+
+
+
 ### `RefCountedLockRegistry`（Issue #435 で追加）
 
-* **役割**: キー単位の`threading.Lock`を参照カウント付きで管理するレジストリクラス。`services/quest_service.py`の完了/残高/購入ロックが、キーの組み合わせ(ユーザーID×クエストID等)が増えるたびに`threading.Lock`エントリを無制限に蓄積していた3箇所の場当たり実装を置き換えるために追加された。参照しているエントリが居なくなった時点(参照カウントが0になった時点)で辞書からエントリを削除することでこれを防ぐ。クラスdocstringによれば、単純に「`lock.locked()`が`False`なら削除」する方式だと、辞書からロックオブジェクトを取り出した直後・実際に`with`文で獲得する直前の隙間で別スレッドが剪定してしまい、同一キーに対して2つの別々の`Lock`オブジェクトが生成され同時に「取得成功」してしまう(排他制御が本来防ぐべき事態の再発)ため、参照カウントで安全性を担保する設計になっている。
-* 根拠: [クラス定義とdocstring] (行番号: 24〜39 / 抜粋: "class RefCountedLockRegistry:\n    \"\"\"キー単位の threading.Lock を参照カウント付きで管理するレジストリ。...")
+* **役割**: キー単位の`threading.Lock`を参照カウント付きで管理するレジストリクラス。**（Issue #661）** `services/camera_service.py`にも同一の実装(`_RefCountedLock`と`_vod_generation_lock`/`_live_stream_lock`)が重複していたため、そちらの利用もこのレジストリへ寄せた(挙動は同一)。`services/quest_service.py`の完了/残高/購入ロックが、キーの組み合わせ(ユーザーID×クエストID等)が増えるたびに`threading.Lock`エントリを無制限に蓄積していた3箇所の場当たり実装を置き換えるために追加された。参照しているエントリが居なくなった時点(参照カウントが0になった時点)で辞書からエントリを削除することでこれを防ぐ。クラスdocstringによれば、単純に「`lock.locked()`が`False`なら削除」する方式だと、辞書からロックオブジェクトを取り出した直後・実際に`with`文で獲得する直前の隙間で別スレッドが剪定してしまい、同一キーに対して2つの別々の`Lock`オブジェクトが生成され同時に「取得成功」してしまう(排他制御が本来防ぐべき事態の再発)ため、参照カウントで安全性を担保する設計になっている。
+* 根拠: [クラス定義とdocstring] (行番号: 57〜110 / 抜粋: "class RefCountedLockRegistry:\n    \"\"\"キー単位の threading.Lock を参照カウント付きで管理するレジストリ。...")
 
 
 * **引数/リクエスト**: `__init__`は引数なし。内部に`_entries: Dict[Any, _Entry]`（キーごとの`lock`と`ref_count`を持つ内部クラス`_Entry`のインスタンス）と、`_entries`辞書自体への操作を保護する`_guard: threading.Lock`を保持する。
-* 根拠: [__init__] (行番号: 48〜50 / 抜粋: "def __init__(self) -> None:\n        self._entries: Dict[Any, \"RefCountedLockRegistry._Entry\"] = {}\n        self._guard = threading.Lock()")
+* 根拠: [__init__] (行番号: 82〜84 / 抜粋: "def __init__(self) -> None:\n        self._entries: Dict[Any, \"RefCountedLockRegistry._Entry\"] = {}\n        self._guard = threading.Lock()")
 
 
 * **戻り値/レスポンス**: 該当なし（クラス自体はコンストラクタで値を返さない。メソッドの戻り値は各メソッドの項を参照）
@@ -135,8 +188,8 @@
 * 根拠: [acquireコンテキストマネージャ] (行番号: 52〜67 / 抜粋: "with self._guard:\n            entry = self._entries.get(key)\n            if entry is None:\n                entry = self._Entry()\n                self._entries[key] = entry\n            entry.ref_count += 1\n        try:\n            with entry.lock:\n                yield\n        finally:\n            with self._guard:\n                entry.ref_count -= 1\n                if entry.ref_count == 0 and self._entries.get(key) is entry:\n                    del self._entries[key]")
 
 
-* **エラーハンドリング**: 明示的な例外捕捉はない。`acquire(key)`のブロック内で例外が発生しても、`finally`節により`ref_count`のデクリメントと(条件を満たす場合の)エントリ削除は必ず実行され、例外自体はそのまま呼び出し元へ伝播する。`keys()`は現在エントリが存在するキーの一覧を`_guard`保護下で返し(テスト・デバッグ用)、`__contains__(key)`も同様に`_guard`保護下で`key in self._entries`を返す。
-* 根拠: [keys, __contains__] (行番号: 70〜77 / 抜粋: "def keys(self):\n        \"\"\"現在エントリが存在するキー一覧(テスト・デバッグ用)。\"\"\"\n        with self._guard:\n            return list(self._entries.keys())\n\n    def __contains__(self, key: Any) -> bool:\n        with self._guard:\n            return key in self._entries")
+* **エラーハンドリング**: 明示的な例外捕捉はない。`acquire(key)`のブロック内で例外が発生しても、`finally`節により`ref_count`のデクリメントと(条件を満たす場合の)エントリ削除は必ず実行され、例外自体はそのまま呼び出し元へ伝播する。`keys()`は現在エントリが存在するキーの一覧を`_guard`保護下で返し(テスト・デバッグ用)、`__contains__(key)`も同様に`_guard`保護下で`key in self._entries`を返す。**（Issue #661 で追加）** `__len__()`は`_guard`保護下でエントリ数を返し、`clear()`は全エントリを破棄する(いずれもテスト・デバッグ用。`clear()`は取得中のロックがあっても辞書から消えるため本番コードからの呼び出しは想定していない)。
+* 根拠: [keys, __contains__] (行番号: 104〜107 / 抜粋: "def keys(self):\n        \"\"\"現在エントリが存在するキー一覧(テスト・デバッグ用)。\"\"\"\n        with self._guard:\n            return list(self._entries.keys())\n\n    def __contains__(self, key: Any) -> bool:\n        with self._guard:\n            return key in self._entries")
 
 
 
@@ -169,7 +222,7 @@
 ### `retry_with_backoff`
 
 * **役割**: 引数なしのcallable(`fn`)を実行し、指定した例外クラス群(`retryable_exceptions`)に該当する例外が発生した場合のみExponential Backoffで再試行する共通ユーティリティ。Issue #292で、`config.py`の`verify_and_initialize_storage`と`monitors/nas_monitor.py`の`check_write_permission`がそれぞれ個別に実装していたNAS I/O向けのExponential Backoffループを1箇所に集約するために追加された。リトライ対象の例外集合・リトライ回数・待機秒数という「ポリシー」自体は呼び出し元ごとに異なるため引数として渡せるようにしており、集約後も各呼び出し元の挙動(リトライ回数・待機秒数・リトライ対象例外)自体は変更していない。
-* 根拠: [retry_with_backoff] (行番号: 56〜64 / 抜粋: "def retry_with_backoff(\n    fn: Callable[[], Any],\n    *,\n    max_retries: int,\n    retryable_exceptions: Tuple[Type[BaseException], ...],\n    base_delay: float = 1.0,\n    max_delay: float = float(\"inf\"),\n    on_retry: Optional[Callable[[int, float, BaseException], None]] = None,\n) -> Any:")
+* 根拠: [retry_with_backoff] (行番号: 161〜214 / 抜粋: "def retry_with_backoff(\n    fn: Callable[[], Any],\n    *,\n    max_retries: int,\n    retryable_exceptions: Tuple[Type[BaseException], ...],\n    base_delay: float = 1.0,\n    max_delay: float = float(\"inf\"),\n    on_retry: Optional[Callable[[int, float, BaseException], None]] = None,\n) -> Any:")
 
 
 * **引数/リクエスト**:
@@ -294,6 +347,8 @@ graph TD
         get_now_iso["get_now_iso()"]
         get_today_date_str["get_today_date_str()"]
         get_display_date["get_display_date()"]
+        get_now_jst["get_now_jst() (Issue #592)"]
+        get_meal_time_category_from_now["get_meal_time_category_from_now() (Issue #583)"]
         RefCountedLockRegistry["RefCountedLockRegistry (Issue #435)"]
         with_exponential_backoff["with_exponential_backoff()"]
         wait_for_storage_warmup["wait_for_storage_warmup()"]
@@ -320,6 +375,10 @@ graph TD
     get_today_date_str --> pytz
     get_display_date --> datetime
     get_display_date --> pytz
+    get_meal_time_category_from_now --> datetime
+    get_meal_time_category_from_now --> pytz
+    get_now_jst --> datetime
+    get_now_jst --> pytz
 
     with_exponential_backoff --> functools
     with_exponential_backoff --> time
@@ -340,8 +399,9 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `utils.py` をインポートしている各モジュール（メインの処理ファイル） | これらの関数がシステム内のどこで、どのような目的・頻度で呼び出されているか特定するため。 | 根拠: [ファイル全体] (行番号: 1〜96 / 抜粋: 提供されたコードは汎用ユーティリティであり単独では動作しないため) |
 | 高 | データベースアクセスや外部API呼び出しを実装しているファイル | `with_exponential_backoff` デコレータがどの関数に適用され、どのような例外が発生しうるのかを把握するため。 | 根拠: [with_exponential_backoff] (行番号: 42 / 抜粋: "except Exception as e:") |
-| 中 | ファイルストレージ・NASへのアクセス処理を行うファイル | `wait_for_storage_warmup` 関数がどのパスに対して実行され、復帰遅延が発生しやすい環境がどこかを確認するため。 | 根拠: [wait_for_storage_warmup] (行番号: 56〜57 / 抜粋: "def wait_for_storage_warmup(ta...") |
+| 中 | ファイルストレージ・NASへのアクセス処理を行うファイル | `wait_for_storage_warmup` 関数がどのパスに対して実行され、復帰遅延が発生しやすい環境がどこかを確認するため。 | 根拠: [wait_for_storage_warmup] (行番号: 217〜257 / 抜粋: "def wait_for_storage_warmup(ta...") |
 | 高 | `services/quest_service.py` | Issue #435で`RefCountedLockRegistry`に置き換えられた3箇所の旧ロック辞書実装の詳細、および置き換え後の実際の利用箇所（キーの構成、`acquire`の呼び出し方）を確認するため。 | 根拠: [RefCountedLockRegistryクラスdocstring] (行番号: 27〜30 / 抜粋: "quest_service.py の完了/残高/購入ロックは、キーの組み合わせ\n(ユーザーID×クエストID等)が増えるたびに threading.Lock エントリが\n無制限に蓄積していた。") |
+| 中 | `services/ai_service.py` | Issue #583関連: `line_service.py`の`log_food_record`に渡す`category`引数（AIが判定する朝食/昼食/夕食等のラベル）がどこでどう生成されているかを確認し、`get_meal_time_category_from_now`が返す時間帯（記録時刻基準）とAI側の`category`ラベル（内容基準）がどの程度乖離しうるかを把握するため。 | 根拠: [get_meal_time_category_from_now docstring] (行番号: 26〜29 / 抜粋: "呼び出し元が受け取る\n\"category\"引数(AIが渡す朝食/昼食/夕食等、または食事アンケートの麺類等の\n食品ジャンル)は用途が呼び出し元ごとに異なり食事の時間帯を必ずしも表さないため") |
 
 ## 8. 保守上の注意点
 
@@ -350,6 +410,8 @@ graph TD
 * `wait_for_storage_warmup` では、`os.access` や `Path(target_path)` 自体が例外（権限エラー以外のOSレベルのエラーなど）を発生させた場合のハンドリングが実装されていない。
 * **（Issue #292で新規追加）`retry_with_backoff`**: `with_exponential_backoff`(無限リトライの`while True`デコレータ)や`wait_for_storage_warmup`(パス存在確認限定・呼び出し元なし)とは異なり、任意のcallableを有限回数リトライしつつ最後の例外を再送出する汎用ヘルパーとして追加された。既に`config.py::verify_and_initialize_storage`と`monitors/nas_monitor.py::check_write_permission`から実際に呼び出されている(下記相互参照参照)。
 * **（Issue #435で新規追加）`RefCountedLockRegistry`**: `services/quest_service.py`が保持していた「キーの組み合わせが増えるたびに`threading.Lock`エントリが辞書に無制限に蓄積し、二度と削除されない」3箇所の場当たり実装を置き換えるために追加された。`services/camera_service.py`の`_RefCountedLock`/`_vod_generation_lock`と同じ「参照カウント方式」を採用しており、クラスdocstringには「`lock.locked()`が`False`なら削除する単純な方式では、辞書からロックを取り出した直後から実際に獲得するまでの隙間で別スレッドが剪定してしまい、同一キーに対し2つの別々の`Lock`オブジェクトが生成されて同時に『取得成功』しうる(排他制御が本来防ぐべき事態の再発)」という設計上の注意が明記されている。`acquire(key)`はコンテキストマネージャとして提供され、`with`ブロックを抜けた後に参照カウントが0かつ辞書中のエントリが自分自身のままである場合にのみエントリを削除するため、他スレッドが同じキーで新しいエントリを既に作成済みの場合は誤って削除しない設計になっている。
+* **（Issue #583で新規追加）`get_meal_time_category_from_now`**: `services/line_service.py`の`log_food_record`と`handlers/line_logic.py`の`handle_postback`（`food_record_direct`アクション）の両方が、`food_records.meal_time_category`列に実際の記録時刻に関わらず常に固定文字列`"Dinner"`を保存していたバグの修正として追加された。両呼び出し元とも、以前この列に渡していた値をそのまま本関数の呼び出しに置き換えただけであり、`category`引数（呼び出し元ごとに意味が異なるラベルで、`menu_category`列にのみ使われる）の扱いには手を加えていない。本モジュール単体の`grep`調査時点では、この列を書き込み後に読み出している箇所（ダッシュボード集計・分析処理等）はリポジトリ内に見つからず、`meal_time_category`は書き込み専用（write-only）のカラムのままである可能性がある——この点は本ファイルの解析範囲外であり実際の利用有無は呼び出し元（line_service.md/line_logic.md）や集計系ドキュメント側で要確認。回帰テストは`MY_HOME_SYSTEM/tests/test_core_utils.py`の`TestGetMealTimeCategoryFromNow`クラス（`test_buckets_hour_into_expected_category`、時刻0/3/4/7/10/11/13/14/15/17/18/21/23時をパラメータ化して各時間帯境界を検証）で追加されている。
+* **（Issue #592で新規追加）`get_now_jst`**: Issue #592は元々`monitors/camera_monitor.py::check_camera_time`（#382）と`services/quest_service.py`のJST定数（#293）というホストOSのタイムゾーン設定に関する既存修正2件がタイムゾーン非依存かどうかを検証する調査だったが、その過程で別の3箇所（`monitors/tv_lock_monitor.py`の深夜2時判定、`monitors/nas_monitor.py`の8時判定、`services/camera_service.py::generate_record_playlist`内部の`_generate_record_playlist_locked`の当日判定、`services/train_service.py::get_route_info`の乗換案内API検索時刻）が、ホストOSのタイムゾーン設定に依存する素の`datetime.now()`（naive）を「実際のJST時刻」のつもりで使っていることが判明し、本関数はその4箇所の置き換え先として追加された（#382/#293自体は元からaware UTC/固定オフセットのdatetimeを使っておりタイムゾーン非依存だったため、この4箇所の修正はIssue #592の追加調査で見つかった別件の対応であり、#382/#293自体の再修正ではない）。呼び出し元の詳細は各ファイルのドキュメント（tv_lock_monitor.md, nas_monitor.md, camera_service.md, train_service.md）の該当箇所を参照。本関数自体は`test_core_utils.py`の`TestGetNowJst`クラス（`test_returns_aware_datetime_in_jst`・`test_converts_frozen_utc_instant_to_jst_correctly`・`test_result_is_always_nine_hours_ahead_of_utc`の3テスト。freezegunでUTCの固定時刻からJSTへの変換が常に+9時間になることを検証）で単体テストされており、加えて各呼び出し元側のテスト（`test_tv_lock_monitor.py`、`test_nas_monitor.py`、`test_review_2026_09_04_server_fixes.py`）でも`get_now_jst`をmonkeypatchする形で回帰確認されている。
 
 ## 9. 不明事項一覧
 
@@ -362,7 +424,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| 呼び出し元モジュールの特定 | リポジトリ全体を`core.utils`および関数名で検索し、実際の呼び出し箇所を直接確認した。`get_now_iso`: `MY_HOME_SYSTEM/common.py:16`で`core.utils`から再エクスポートされ、`MY_HOME_SYSTEM/services/sensor_service.py:9`が直接インポートして`145行目・183行目`でセンサーログのタイムスタンプに使用、`MY_HOME_SYSTEM/services/line_service.py:19`と`MY_HOME_SYSTEM/handlers/line_logic.py:31`も直接インポートしてそれぞれ`49行目`/`361行目`で使用、`MY_HOME_SYSTEM/old/weather_service.py:378`は`common.get_now_iso()`という形でFacade経由で使用している。`get_today_date_str`: `line_service.py:49,68`、`line_logic.py:154,361`が直接インポートして使用するほか、`MY_HOME_SYSTEM/old/shopping_monitor.py:276`、`MY_HOME_SYSTEM/old/collect_onvif_logs.py:45`、`MY_HOME_SYSTEM/old/send_ai_report.py:89`が`common.get_today_date_str()`の形でFacade経由で使用している。`get_display_date`は`common.py:16`で再エクスポートされているのみで、リポジトリ内を検索したが実際に呼び出している箇所は見つからなかった(未使用の可能性がある)。`with_exponential_backoff`は`MY_HOME_SYSTEM/monitors/old/car_presence_checker.py:19`が`core.utils`から直接インポートしている(本番コードでの実使用を確認できた唯一の例)ほか、`MY_HOME_SYSTEM/tests/test_core_utils_and_network.py:29,49,64`のテストコードで使用されている。`wait_for_storage_warmup`はリポジトリ全体を検索したが本番コードからの呼び出しは見つからず、`MY_HOME_SYSTEM/tests/test_core_utils_and_network.py:85,94,111`のテストコードでのみ使用が確認できた(`core/nas_utils.py`や`newface_monitor.py`は類似ロジックを独自に再実装しており、本関数自体は呼び出していない)。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:16`, `MY_HOME_SYSTEM/services/sensor_service.py:9,145,183`, `MY_HOME_SYSTEM/services/line_service.py:19,49,68`, `MY_HOME_SYSTEM/handlers/line_logic.py:31,154,361`, `MY_HOME_SYSTEM/old/weather_service.py:378`, `MY_HOME_SYSTEM/old/shopping_monitor.py:276`, `MY_HOME_SYSTEM/old/collect_onvif_logs.py:45`, `MY_HOME_SYSTEM/old/send_ai_report.py:89`, `MY_HOME_SYSTEM/monitors/old/car_presence_checker.py:19`, `MY_HOME_SYSTEM/tests/test_core_utils_and_network.py:29-111` |
+| 呼び出し元モジュールの特定 | **（旧版が挙げていた`MY_HOME_SYSTEM/old/`配下・`tests/test_core_utils_and_network.py`はいずれも削除済みのため、現行ツリーで取り直した）** リポジトリ全体を`core.utils`および関数名で検索し、実際の呼び出し箇所を直接確認した。`get_now_iso`: `MY_HOME_SYSTEM/common.py:16`で`core.utils`から再エクスポートされ、`services/sensor_service.py:9`が直接インポートして`222行目`/`260行目`でセンサーログのタイムスタンプに使用、`services/line_service.py:10`と`handlers/line_logic.py:27`も直接インポートしてそれぞれ`131行目`/`372行目`で使用、`services/routine_service.py`は`core.utils.get_now_iso()`(211・259・301行目)というFacade経由で使用する。`get_today_date_str`: `services/line_service.py:10,131`、`handlers/line_logic.py:27,131,372`が直接インポートして使用。`get_display_date`: **旧版は「未使用の可能性がある」としていたが誤りで**、`handlers/line_logic.py:27,324`が「JST基準・`"%m/%d"`形式」の表示日付として実際に使用している(同322〜323行目のコメントがOSタイムゾーン依存を避ける意図を明記)。`get_now_jst`: `services/camera_service.py:13,406`と`services/train_service.py:10,97`が使用(Issue #592)。`with_exponential_backoff`: **本番コードからの呼び出しは現存せず**、`MY_HOME_SYSTEM/tests/test_core_utils.py:32,52,67`のテストからのみ使用される(旧版が唯一の本番利用例として挙げていた`monitors/old/car_presence_checker.py`はディレクトリごと削除済み)。`wait_for_storage_warmup`: **旧版は「本番コードからの呼び出しは見つからず」としていたが現在は誤りで**、`DDD/newface_monitor.py`が`from core.utils import wait_for_storage_warmup`(53行目、`try/except ImportError`のフォールバック付き)でインポートし`2275行目`の`if not wait_for_storage_warmup(data_dir):`で実際に使用している(CLAUDE.md記載の「DDDが`core.*`へ持つ実依存」の1つ)。ほかに`MY_HOME_SYSTEM/tests/test_core_utils.py:216,225,242`でも使用。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:16`, `MY_HOME_SYSTEM/services/sensor_service.py:9,222,260`, `MY_HOME_SYSTEM/services/line_service.py:10,131`, `MY_HOME_SYSTEM/handlers/line_logic.py:27,131,322-324,372`, `MY_HOME_SYSTEM/services/routine_service.py:211,259,301`, `MY_HOME_SYSTEM/services/camera_service.py:13,406`, `MY_HOME_SYSTEM/services/train_service.py:10,97`, `MY_HOME_SYSTEM/tests/test_core_utils.py:32,52,67,216,225,242`, `DDD/newface_monitor.py:53,2275`（参考: [common.md](./common.md)・[newface_monitor.md](../DDD/newface_monitor.md)） |
 | 実行環境とパッケージのバージョン | `MY_HOME_SYSTEM/requirements.txt`を直接確認したところ、88行目に`pytz==2025.2`と明記されていた(他の依存パッケージも同ファイルにバージョン固定で列挙されている)。動作対象のPythonバージョン自体はこのファイルには記載がないが、`.github/workflows/test.yml`の25〜28行目(lintジョブ)・58行目・103行目でCI実行時のPythonバージョンとして`"3.11"`が指定されていることを直接確認した。ただし本番デプロイ環境で実際に使用されるPythonバージョンを規定するDockerfile等の設定ファイルはリポジトリ内に見つからず、その点は未解消のまま残る。 | 直接ソース確認: `MY_HOME_SYSTEM/requirements.txt:88`, `.github/workflows/test.yml:25-28,58,103` |
 
 ## 10. 自己検証結果

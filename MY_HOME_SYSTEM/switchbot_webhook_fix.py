@@ -15,7 +15,8 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(1, PARENT_DIR)
 
 try:
-    import common
+    from core.logger import setup_logging
+    from services.notification_service import send_push
     import config
     from services import switchbot_service as sb_tool
 except ImportError as e:
@@ -23,7 +24,7 @@ except ImportError as e:
     sys.exit(1)
 
 # ロガー設定
-logger = common.setup_logging("webhook_fix")
+logger = setup_logging("webhook_fix")
 
 _TOKEN_QUERY_RE = re.compile(r"((?:^|[?&])token=)[^&\s]*")
 
@@ -154,13 +155,13 @@ def fix_all_webhooks():
             "SwitchBotの旧Webhook設定を削除しましたが、新しいURLの登録に失敗しました。\n"
             f"SwitchBotイベント連携が停止している可能性があります。手動確認が必要です。\nURL: {base_url}"
         )
-        common.send_push([{"type": "text", "text": alert_body}], target="discord", channel="error")
+        send_push([{"type": "text", "text": alert_body}], target="discord", channel="error")
 
     # 実際に更新が走った時のみ通知を送信するよう最適化
     sb_updated = bool(sb_result)
     if sb_updated or line_updated:
         msg_body = f"✨ **Webhook設定修復完了** ✨\n新しいエンドポイントに更新されました:\n{base_url}"
-        common.send_push([{"type": "text", "text": msg_body}], target="discord", channel="report")
+        send_push([{"type": "text", "text": msg_body}], target="discord", channel="report")
 
 if __name__ == "__main__":
     fix_all_webhooks()

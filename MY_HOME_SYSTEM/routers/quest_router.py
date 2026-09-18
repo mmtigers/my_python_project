@@ -2,9 +2,7 @@
 from fastapi import APIRouter, HTTPException, File, UploadFile
 from typing import Dict, Any, Optional
 import os
-import uuid
 import sys
-import aiofiles
 
 import config
 from core import sound_manager
@@ -14,10 +12,11 @@ from core.logger import setup_logging
 from models.quest import (
     SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse,
     QuestAction, ApproveAction, HistoryAction, RewardAction,
-    UpdateUserAction, SoundTestRequest, UseItemAction
+    UpdateUserAction, SoundTestRequest, UseItemAction, ResetUserAction, ResetUserResponse
 )
 from services.quest_service import (
-    game_system, quest_service, shop_service, user_service, inventory_service
+    game_system, quest_service, approval_service, shop_service, user_service, inventory_service,
+    ImageTooLargeError, InvalidImageError,
 )
 
 # プロジェクトルート解決（念のため維持）
@@ -52,15 +51,15 @@ def complete_quest(action: QuestAction):
 
 @router.post("/approve", response_model=CompleteResponse)
 def approve_quest(action: ApproveAction):
-    return quest_service.process_approve_quest(action.approver_id, action.history_id)
+    return approval_service.process_approve_quest(action.approver_id, action.history_id)
 
 @router.post("/reject", response_model=CancelResponse)
 def reject_quest(action: ApproveAction):
-    return quest_service.process_reject_quest(action.approver_id, action.history_id, action.reason)
+    return approval_service.process_reject_quest(action.approver_id, action.history_id, action.reason)
 
 @router.post("/quest/cancel", response_model=CancelResponse)
 def cancel_quest(action: HistoryAction):
-    return quest_service.process_cancel_quest(action.user_id, action.history_id)
+    return approval_service.process_cancel_quest(action.user_id, action.history_id)
 
 @router.post("/reward/purchase", response_model=PurchaseResponse)
 def purchase_reward(action: RewardAction):
@@ -78,6 +77,13 @@ def seed_data_endpoint():
 def update_user_avatar(action: UpdateUserAction):
     return user_service.update_avatar(action.user_id, action.avatar_url)
 
+# Issue #547: reset_game.py が別プロセスから直接DBを書き換えていたユーザーリセットを
+# サーバーAPI経由に置き換える。権限チェック(admin_idがrole_adultか)はProcessApproveQuest等
+# と同様サービス層(UserService.reset_user_data)で行う。
+@router.post("/admin/reset_user", response_model=ResetUserResponse)
+def reset_user(action: ResetUserAction):
+    return user_service.reset_user_data(action.admin_id, action.target_user_id)
+
 # #442: AvatarUploader.tsxの2段階アップロード(画像アップロード→ユーザーへの紐付け)の
 # うち2段階目が失敗した際、1段階目でアップロード済みの画像をロールバック削除するための
 # エンドポイント。まだ紐付いていない自分自身のアップロード直後の画像のみが対象になる
@@ -89,72 +95,20 @@ def delete_uploaded_image(filename: str):
     deleted = user_service.delete_unlinked_avatar(filename)
     return {"status": "deleted" if deleted else "skipped"}
 
-# Image Upload Helper
-def validate_image_header(header: bytes) -> bool:
-    if header.startswith(b'\xff\xd8\xff'): return True
-    if header.startswith(b'\x89PNG\r\n\x1a\n'): return True
-    if header.startswith(b'GIF87a') or header.startswith(b'GIF89a'): return True
-    if header.startswith(b'RIFF') and header[8:12] == b'WEBP': return True
-    return False
-
 @router.post("/upload")
 async def upload_image(file: UploadFile = File(...)):
-    file_path = None
     try:
-        allowed_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
-        # Q-L6(#409): filename が無い multipart は以前 os.path.splitext(None) の TypeError → 500 だった
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="ファイル名がありません")
-        file_ext = os.path.splitext(file.filename)[1].lower()
-        if file_ext not in allowed_extensions:
-            raise HTTPException(status_code=400, detail="許可されていないファイル形式です(拡張子)")
-
-        header = await file.read(12)
-        if not validate_image_header(header):
-            logger.warning(f"Invalid file header detected. Ext: {file_ext}")
-            raise HTTPException(status_code=400, detail="ファイルの内容が画像として認識できません")
-        
-        await file.seek(0)
-        new_filename = f"{uuid.uuid4()}{file_ext}"
-        file_path = os.path.join(config.UPLOAD_DIR, new_filename)
-
-        # M-9-3: ファイルサイズ上限を設けず、チャンクを読めるだけ書き込み続けると
-        # 巨大アップロードでディスクを圧迫し得た。書き込みながら累計サイズを
-        # 追跡し、上限超過時は書きかけのファイルを削除して413を返す。
-        max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024
-        total_bytes = 0
-        too_large = False
-        async with aiofiles.open(file_path, "wb") as buffer:
-            while content := await file.read(1024 * 1024):
-                total_bytes += len(content)
-                if total_bytes > max_bytes:
-                    too_large = True
-                    break
-                await buffer.write(content)
-
-        if too_large:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            raise HTTPException(
-                status_code=413,
-                detail=f"ファイルサイズが上限({config.UPLOAD_MAX_FILE_SIZE_MB}MB)を超えています",
-            )
-
-        logger.info(f"Image Uploaded: {new_filename}")
-        return {"url": f"/uploads/{new_filename}"}
-
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"Upload failed: {e}")
-        # Q-L6(#409): 書き込み途中(ディスクフル等)の例外では書きかけファイルが残っていた
-        if file_path and os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except OSError:
-                pass
+        url = await user_service.save_avatar_image(file)
+        return {"url": url}
+    except InvalidImageError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ImageTooLargeError as e:
+        raise HTTPException(status_code=413, detail=str(e))
+    except Exception:
+        logger.exception("Upload failed")
         raise HTTPException(status_code=500, detail="画像の保存に失敗しました")
-    
+
+
 @router.post("/test_sound")
 def test_sound(req: SoundTestRequest):
     if req.sound_key not in config.SOUND_MAP:

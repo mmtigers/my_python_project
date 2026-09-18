@@ -66,6 +66,43 @@ def test_valid_http_image_url_is_kept_in_thumbnail():
     assert payload["embeds"][0]["thumbnail"] == {"url": image_url}
 
 
+def test_non_ascii_image_url_is_percent_encoded_in_thumbnail():
+    """2026-09-09運用ログ: 画像URLがhttp(s)で始まっていても、日本語ファイル名や
+    全角スペースが未エンコードのまま含まれると、Discordが「well formed」な
+    URLと認めず400 Bad Requestでembed全体を拒否していた
+    (例: '.../20260402130316-ニコ　加工済.jpg')。スキーム判定を通過した後に
+    パーセントエンコードして送信することを検証する。"""
+    image_url = "https://spa-chaton.com/photos/97/20260402130316-ニコ　加工済.jpg"
+    payload = _notify_and_capture_payload(_make_cast(image_url))
+    assert payload["embeds"][0]["thumbnail"] == {
+        "url": "https://spa-chaton.com/photos/97/20260402130316-%E3%83%8B%E3%82%B3%E3%80%80%E5%8A%A0%E5%B7%A5%E6%B8%88.jpg"
+    }
+
+
+def test_non_ascii_detail_url_is_percent_encoded_in_embed_url_and_link_field():
+    """detail_urlもembed.url/Linkフィールドとして送信されるため、同様に
+    未エンコードの非ASCII文字があればパーセントエンコードされることを検証する。"""
+    notifier = DiscordNotifier(webhook_url="https://discordapp.com/api/webhooks/test")
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    notifier.session.post = MagicMock(return_value=response)
+
+    cast = CastMember(
+        id="cast-2",
+        name="テストキャスト2",
+        detail_url="https://example.test/プロフィール/1",
+        image_url="",
+        age="",
+    )
+    notifier.notify([cast], site_name="テストサイト")
+
+    _, kwargs = notifier.session.post.call_args
+    payload = kwargs["json"]
+    expected_url = "https://example.test/%E3%83%97%E3%83%AD%E3%83%95%E3%82%A3%E3%83%BC%E3%83%AB/1"
+    assert payload["embeds"][0]["url"] == expected_url
+    assert expected_url in payload["embeds"][0]["fields"][-1]["value"]
+
+
 class TestEmbedFieldTruncation:
     """D-L6: Discord embedのtitle(256文字)/field.value(1024文字)上限を超える
     キャスト名等を送信すると、embed全体が400 Bad Requestで拒否されうる。

@@ -6,7 +6,10 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'coverage']),
+  // #650: deploy.sh は dist.next へビルドして rename で差し替え、直前の成果物を dist.prev に残す。
+  // eslint は .gitignore ではなく flat config のこの一覧を見るため、ここに足さないと
+  // 差し替え途中・失敗後(=まさに原因調査で lint を叩きたい場面)に minified JS を走査してしまう。
+  globalIgnores(['dist', 'dist.next', 'dist.prev', 'coverage']),
   {
     files: ['**/*.{js,jsx,ts,tsx}'],
     extends: [

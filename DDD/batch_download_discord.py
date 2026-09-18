@@ -43,6 +43,7 @@ from file_utils import sanitize_filename as _shared_sanitize_filename
 from file_utils import DiscordCircuitBreaker
 from file_utils import redact_discord_webhook_url
 from file_utils import resolve_my_home_system_root
+from file_utils import resolve_nas_mount_point
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -66,6 +67,23 @@ FORCE_MODE = "--force" in sys.argv
 CLEAR_COOLDOWN_MODE = "--clear-cooldown" in sys.argv
 
 CURRENT_DIR = Path(__file__).resolve().parent
+
+
+def _env_int(name: str, default: int) -> int:
+    """整数系の環境変数を読む。空文字・数値でない値は default にフォールバックする。
+
+    Issue #663: 以前は int(os.getenv(...)) を直書きしており、.env に "10GB" のような
+    誤った値を書くとモジュール import 時に ValueError で cron 起動が黙って落ちていた
+    (MY_HOME_SYSTEM/config.py の _get_int_env と同じ方針)。
+    """
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        logger.warning("環境変数 %s の値 %r は整数として解釈できないため既定値 %d を使います", name, raw, default)
+        return default
 # 品質: プロジェクトルート解決をfile_utils.resolve_my_home_system_rootへ集約。
 # notification_service が見つからない場合は下の except ImportError で無効化
 # されるだけなので、ここで解決に失敗しても他の環境で安全に動く。
@@ -135,12 +153,14 @@ class AppConfig:
 
     # 【追加】機能フラグ: 環境変数で制御可能にする (デフォルトはFalse=無効のまま維持)
     ENABLE_YOUTUBE_DL: bool = os.getenv("ENABLE_YOUTUBE_DL", "false").lower() == "true"
-    BASE_SAVE_DIR: Path = Path(os.getenv("VIDEO_SAVE_DIR", "/mnt/nas/ddd"))
+    BASE_SAVE_DIR: Path = Path(os.getenv("VIDEO_SAVE_DIR") or "/mnt/nas/ddd")  # 空文字は未設定扱い(#663)
     LIST_FILE_PATH: Path = CURRENT_DIR / "list.txt"
     LIST_DIR_PATH: Path = CURRENT_DIR / "list"
     HISTORY_FILE_PATH: Path = CURRENT_DIR / "history.txt"
     LOCK_FILE_PATH: Path = CURRENT_DIR / ".batch_download_discord.lock"
-    NAS_MOUNT_POINT: Path = Path("/mnt/nas")
+    # Issue #663: 以前は `Path("/mnt/nas")` の直書きで環境変数による変更ができなかった。
+    # `NAS_MOUNT_POINT`(MY_HOME_SYSTEM と共用の .env のキー)で上書きできる。未設定なら従来どおり /mnt/nas。
+    NAS_MOUNT_POINT: Path = field(default_factory=resolve_nas_mount_point)
     NAS_MARKER_FILE: str = ".mounted"
     # NASを経由せずローカルディスク(外付けHDD等)に直接保存する単独環境向け。
     # falseにするとverify_nas_mount()自体をスキップし、NAS未マウントでも起動できる。
@@ -157,16 +177,16 @@ class AppConfig:
     # 構成を含む）では、動画1本分(数GB)の書き込みでメモリを圧迫し、OOMや
     # SSH切断を引き起こしうる。そのためCURRENT_DIR（本スクリプトの設置先、
     # list.txt/history.txt等と同じ実ディスク上のディレクトリ）を既定値とする。
-    LOCAL_TMP_DIR: Path = Path(os.getenv("DDD_LOCAL_TMP_DIR", str(CURRENT_DIR / "tmp_fragments")))
+    LOCAL_TMP_DIR: Path = Path(os.getenv("DDD_LOCAL_TMP_DIR") or str(CURRENT_DIR / "tmp_fragments"))  # 空文字は未設定扱い(#663)
     # LOCAL_TMP_DIRの空き容量がこれを下回る場合、フラグメント書き込みで
     # ディスクを圧迫する前に安全側でダウンロードを中断する。
-    LOCAL_TMP_MIN_FREE_SPACE_GB: int = int(os.getenv("DDD_LOCAL_TMP_MIN_FREE_SPACE_GB", "10"))
+    LOCAL_TMP_MIN_FREE_SPACE_GB: int = _env_int("DDD_LOCAL_TMP_MIN_FREE_SPACE_GB", 10)
 
     # セグメント取得等のHTTPタイムアウト(秒)。単身赴任先PC等、自宅回線より
     # 低速な回線では既定の20秒だと大きめのHLSセグメントが間に合わずタイムアウト
     # →連続失敗でレート制限とみなされ処理中断、が起きうるため環境変数で調整可能にする
     # (未設定時は従来通り20秒=自宅ラズパイ側の挙動は変わらない)。
-    REQUEST_TIMEOUT: int = int(os.getenv("DDD_REQUEST_TIMEOUT", "20"))
+    REQUEST_TIMEOUT: int = _env_int("DDD_REQUEST_TIMEOUT", 20)
     MAX_RETRIES: int = 3
     # #397: HLSセグメント1個あたりの取得試行回数と、リトライ前の初回待機秒
     # (指数バックオフ: 1秒→2秒)。数千セグメント中1つの一時的なタイムアウトで
@@ -699,6 +719,21 @@ class UniversalYtDlpStrategy(DownloadStrategy):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(task.url, download=False)
+
+                # #566: yt-dlpの'noplaylist'は「動画とプレイリストの両方を指すURL
+                # (watch?v=X&list=Y)で動画側だけを選ぶ」オプションであり、動画IDを
+                # 含まない純粋なプレイリスト/チャンネルURLには効果がない
+                # (yt-dlp内部のInfoExtractor._yes_playlistがvideo_id不在時は
+                # noplaylistを一切参照せず常にプレイリスト全体を返す実装のため)。
+                # 'noplaylist'指定だけでは防げないこのケースを、抽出結果の_typeで
+                # 明示的に検知し、MAX_TASKS_PER_RUN等の1回あたりの上限governanceが
+                # 迂回されないようにする。
+                if info.get('_type') in ('playlist', 'multi_video'):
+                    logger.warning(
+                        f"⚠️ プレイリスト/チャンネルURLは対象外です(1動画のみ処理可能): {task.url}"
+                    )
+                    return False
+
                 filename = Path(ydl.prepare_filename(info)).with_suffix('.mp4')
 
                 if self._should_skip(filename): return True

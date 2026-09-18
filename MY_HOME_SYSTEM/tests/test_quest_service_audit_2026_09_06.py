@@ -20,14 +20,15 @@ from freezegun import freeze_time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import config
+from services import switchbot_service
 from services import quest_service as quest_service_module
-from services.quest_service import QuestService, UserService, GameSystem, JST
+from services.quest_service import ApprovalService, QuestService, UserService, GameSystem, JST
 
 
 def _seed_adult(gold=100):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
             "('dad', 'Dad', 'Warrior', 5, 0, ?, 'role_adult')", (gold,)
@@ -35,7 +36,7 @@ def _seed_adult(gold=100):
 
 
 def _seed_quest(quest_id, reset_period='daily', quest_type='daily', prereq=None, gold=10, exp=20):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, reset_period, pre_requisite_quest_id) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -58,7 +59,7 @@ class TestMonthlyResetPeriod:
         first = qs.process_complete_quest("dad", 201)
         assert first["status"] == "success"
         # スパムチェック(10秒)を越えた後でも、同じ月内なら周期チェックで拒否される
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             earlier = (datetime.datetime.now(JST) - datetime.timedelta(hours=3)).isoformat()
             cur.execute("UPDATE quest_history SET completed_at = ? WHERE user_id='dad' AND quest_id=201", (earlier,))
         with pytest.raises(HTTPException) as exc_info:
@@ -83,7 +84,7 @@ class TestPrerequisiteEnforcedServerSide:
         with pytest.raises(HTTPException) as exc_info:
             qs.process_complete_quest("dad", 2)
         assert exc_info.value.status_code == 403
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             assert cur.execute("SELECT gold FROM quest_users WHERE user_id='dad'").fetchone()["gold"] == 100
 
     def test_completing_after_prerequisite_approved_succeeds(self, isolated_db):
@@ -99,7 +100,7 @@ class TestPrerequisiteEnforcedServerSide:
         _seed_adult()
         _seed_quest(1)
         _seed_quest(2, prereq=1)
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
                 "VALUES ('dad', 1, 'Quest1', 20, 10, ?, 'pending')", (datetime.datetime.now(JST).isoformat(),)
@@ -112,7 +113,7 @@ class TestPrerequisiteEnforcedServerSide:
         _seed_adult()
         _seed_quest(1)
         _seed_quest(2, prereq=1)
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
                 "VALUES ('dad', 1, 'Quest1', 20, 10, ?, 'approved')",
@@ -125,7 +126,7 @@ class TestPrerequisiteEnforcedServerSide:
 
 class TestNullRewardColumnsDoNotCrash:
     def _seed_child_and_adult(self):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
@@ -135,25 +136,25 @@ class TestNullRewardColumnsDoNotCrash:
 
     def test_approve_history_with_null_rewards(self, isolated_db):
         self._seed_child_and_adult()
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
                 "VALUES ('son', 1, 'Q', NULL, NULL, ?, 'pending')", (datetime.datetime.now(JST).isoformat(),)
             )
             history_id = cur.lastrowid
-        result = QuestService().process_approve_quest("dad", history_id)
+        result = ApprovalService().process_approve_quest("dad", history_id)
         assert result["status"] == "success"
         assert result["earnedGold"] >= 0
 
     def test_cancel_approved_history_with_null_exp(self, isolated_db):
         self._seed_child_and_adult()
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
                 "VALUES ('son', 1, 'Q', NULL, 0, ?, 'approved')", (datetime.datetime.now(JST).isoformat(),)
             )
             history_id = cur.lastrowid
-        assert QuestService().process_cancel_quest("son", history_id)["status"] == "cancelled"
+        assert ApprovalService().process_cancel_quest("son", history_id)["status"] == "cancelled"
 
 
 class TestUseItemActionBounds:
@@ -171,7 +172,7 @@ class TestUseItemActionBounds:
 class TestItemUseRowsExcludedFromLogs:
     def test_item_use_rows_are_not_quest_achievements(self, isolated_db):
         _seed_adult()
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             now = datetime.datetime.now(JST).isoformat()
             cur.execute(
                 "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
@@ -191,7 +192,7 @@ class TestItemUseRowsExcludedFromLogs:
 
 class TestTvUnlockRunsAfterCommit:
     def test_trigger_tv_unlock_sees_committed_approval(self, isolated_db, monkeypatch):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
@@ -208,16 +209,16 @@ class TestTvUnlockRunsAfterCommit:
 
         observed = {}
 
-        def fake_trigger(self, quest_id):
+        def fake_trigger(context):
             # 別接続から見て承認がコミット済みであること(=コミット後に呼ばれていること)を確認する
-            with common.get_db_cursor() as cur:
+            with get_db_cursor() as cur:
                 row = cur.execute("SELECT status FROM quest_history WHERE id = ?", (history_id,)).fetchone()
             observed["status_at_trigger"] = row["status"]
-            observed["quest_id"] = quest_id
+            observed["context"] = context
 
-        monkeypatch.setattr(quest_service_module.QuestService, "_trigger_tv_unlock", fake_trigger)
-        QuestService().process_approve_quest("dad", history_id)
-        assert observed == {"status_at_trigger": "approved", "quest_id": 7}
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", fake_trigger)
+        ApprovalService().process_approve_quest("dad", history_id)
+        assert observed == {"status_at_trigger": "approved", "context": "quest_id=7"}
 
 
 class TestUseItemReleasesLockBeforePush:
@@ -226,7 +227,7 @@ class TestUseItemReleasesLockBeforePush:
     send_push まで行っていたため、LINE が遅いと同一ユーザーの次の use_item が待たされていた。"""
 
     def _seed_item(self):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) "
                 "VALUES ('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult')"
@@ -256,7 +257,7 @@ class TestUseItemReleasesLockBeforePush:
             observed["lock_free_during_push"] = acquired.wait(timeout=2.0)
             t.join(timeout=2.0)
             # コミット済み(別接続から消費済みが見える)であることも確認する
-            with common.get_db_cursor() as cur:
+            with get_db_cursor() as cur:
                 observed["status_at_push"] = cur.execute(
                     "SELECT status FROM user_inventory WHERE id = ?", (observed["inv_id"],)
                 ).fetchone()["status"]

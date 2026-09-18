@@ -12,7 +12,7 @@ from freezegun import freeze_time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import config
 import weekly_analyze_report as report
 
@@ -62,7 +62,7 @@ class TestGetAnalysisData:
     def test_aggregates_correctly_when_all_tables_present(self, isolated_db):
         start = datetime.datetime.now(JST) - datetime.timedelta(days=7)
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_FOOD} (menu_category, timestamp) VALUES "
                 "('自炊: カレー', datetime('now')), ('外食: マック', datetime('now')), "
@@ -98,7 +98,7 @@ class TestGetAnalysisDataElectricityCostExcludesPlugs:
     def test_plug_readings_do_not_affect_elec_bill(self, isolated_db):
         start = datetime.datetime.now(JST) - datetime.timedelta(days=7)
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
                 "('remo1', '伊丹_Nature Remo E Lite', 1000, datetime('now'))"
@@ -106,7 +106,7 @@ class TestGetAnalysisDataElectricityCostExcludesPlugs:
 
         meter_only = report.get_analysis_data(start)
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             # アイドル時の小さいwattage(1W)を持つプラグを大量に追加しても、
             # スマートメーター単独の場合と結果が変わらないべき
             for _ in range(5):
@@ -163,7 +163,7 @@ class TestRunReport:
     def test_skips_when_not_monday_morning_and_not_forced(self, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py"])
         mock_send = MagicMock()
-        monkeypatch.setattr(report.common, "send_push", mock_send)
+        monkeypatch.setattr(report, "send_push", mock_send)
 
         with freeze_time("2026-08-19 08:00:00", tz_offset=9):  # 水曜日
             report.run_report()
@@ -173,7 +173,7 @@ class TestRunReport:
     def test_runs_when_forced_even_if_not_monday(self, isolated_db, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py", "--force"])
         mock_send = MagicMock(return_value=True)
-        monkeypatch.setattr(report.common, "send_push", mock_send)
+        monkeypatch.setattr(report, "send_push", mock_send)
 
         with freeze_time("2026-08-19 08:00:00", tz_offset=9):
             report.run_report()
@@ -191,7 +191,7 @@ class TestRunReportDuplicateSendPrevention:
         monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py"])
         monkeypatch.setattr(report, "LAST_RUN_FILE", str(tmp_path / "last_weekly_report.txt"))
         mock_send = MagicMock(return_value=True)
-        monkeypatch.setattr(report.common, "send_push", mock_send)
+        monkeypatch.setattr(report, "send_push", mock_send)
 
         with freeze_time("2026-08-16 23:00:00"):  # JST 2026-08-17 08:00 (月曜)
             report.run_report()  # 1回目: 外部cronによる正規の起動
@@ -205,7 +205,7 @@ class TestRunReportDuplicateSendPrevention:
         monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py"])
         monkeypatch.setattr(report, "LAST_RUN_FILE", str(tmp_path / "last_weekly_report.txt"))
         mock_send = MagicMock(return_value=True)
-        monkeypatch.setattr(report.common, "send_push", mock_send)
+        monkeypatch.setattr(report, "send_push", mock_send)
 
         with freeze_time("2026-08-16 23:00:00"):  # 2026-08-17(月)
             report.run_report()
@@ -220,7 +220,7 @@ class TestRunReportDuplicateSendPrevention:
         monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py"])
         monkeypatch.setattr(report, "LAST_RUN_FILE", str(tmp_path / "last_weekly_report.txt"))
         mock_send = MagicMock(side_effect=[False, True])
-        monkeypatch.setattr(report.common, "send_push", mock_send)
+        monkeypatch.setattr(report, "send_push", mock_send)
 
         with freeze_time("2026-08-16 23:00:00"):
             report.run_report()  # 1回目: 送信失敗
@@ -234,7 +234,7 @@ class TestRunReportDuplicateSendPrevention:
         flag_file = tmp_path / "last_weekly_report.txt"
         monkeypatch.setattr(report, "LAST_RUN_FILE", str(flag_file))
         mock_send = MagicMock(return_value=True)
-        monkeypatch.setattr(report.common, "send_push", mock_send)
+        monkeypatch.setattr(report, "send_push", mock_send)
 
         with freeze_time("2026-08-19 08:00:00", tz_offset=9):  # 水曜日、--force
             monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py", "--force"])
@@ -243,3 +243,32 @@ class TestRunReportDuplicateSendPrevention:
 
         assert mock_send.call_count == 2, "--force は手動テスト用途のためフラグの影響を受けてはならない"
         assert not flag_file.exists(), "--force 実行時はフラグを記録してはならない(通常実行をブロックしないため)"
+
+
+class TestElecPricePerKwhComesFromConfig:
+    """Issue #663: 電気代の単価は weekly_analyze_report.py の直書き定数
+    (`DEFAULT_ELEC_PRICE_PER_KWH = 31`。コメント自身が「本来はconfig」と
+    書いていた)から config.py セクション15へ移し、.env で上書きできるようにした。"""
+
+    def test_module_constant_is_gone(self):
+        assert not hasattr(report, "DEFAULT_ELEC_PRICE_PER_KWH")
+
+    def test_default_matches_the_previous_hardcoded_value(self):
+        assert config.ELEC_PRICE_PER_KWH == 31
+
+    def test_bill_follows_the_config_value(self, isolated_db, monkeypatch):
+        start = datetime.datetime.now(JST) - datetime.timedelta(days=7)
+        with get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                "('remo1', '伊丹_Nature Remo E Lite', 1000, datetime('now'))"
+            )
+
+        monkeypatch.setattr(config, "ELEC_PRICE_PER_KWH", 31)
+        at_31 = report.get_analysis_data(start)
+        monkeypatch.setattr(config, "ELEC_PRICE_PER_KWH", 62)
+        at_62 = report.get_analysis_data(start)
+
+        assert at_31 is not None and at_62 is not None
+        assert at_31["elec_bill"] > 0
+        assert at_62["elec_bill"] == at_31["elec_bill"] * 2

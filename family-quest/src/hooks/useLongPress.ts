@@ -20,6 +20,13 @@ interface UseLongPressResult {
     // 付け替わった直後、指を離した瞬間の click が「完了確認モーダル」を開いてしまう
     // 競合を、呼び出し側の onClick ハンドラでガードするために使う。
     wasFiredRecently: () => boolean;
+    // #568: wasFiredRecently()がtrueを理由にclickを抑止した呼び出し側は、抑止し終えたら
+    // このフラグを消費(リセット)するために呼ぶこと。長押し発火後にcanCancelがfalseに
+    // 変わる(#389の取消→完了確認の切り替え)ケースでは、この要素にlongPressHandlersの
+    // onPointerDownがもう付け替えられない(canCancel時のみ付与される)ため、
+    // 次のpointerdownを待つだけではフラグが未来永劫リセットされず、以降の正当な
+    // タップまで恒久的に無視され続けてしまう。1回抑止に使ったら明示的に消費する。
+    clearFiredFlag: () => void;
     handlers: {
         onPointerDown: (e: React.PointerEvent) => void;
         onPointerUp: (e: React.PointerEvent) => void;
@@ -94,9 +101,23 @@ export function useLongPress({
     useEffect(() => clearTimers, [clearTimers]);
 
     const wasFiredRecently = useCallback((): boolean => {
+        // #568: 経過時間だけで判定すると、長押し発火(thresholdMs時点)後も
+        // clickSuppressMsを超えて指を押し続けてから離した場合に、直前の長押しで
+        // 発火したのと同一プレスであるにもかかわらずfalseを返してしまい、
+        // 離した瞬間のclickが抑止されなかった(#389の修正が不完全だった箇所)。
+        // firedRef.currentは次のpointerdownまでtrueであり続けるため、
+        // 「今まさに終わろうとしているこのプレスで長押しが発火したか」を
+        // 経過時間に関係なく正しく示す。時間窓の判定も、pointerdown前(＝別プレス)の
+        // 発火直後に残っているかもしれない古いclickを抑止するために引き続き併用する。
+        if (firedRef.current) return true;
         const firedAt = lastFiredAtRef.current;
         return firedAt !== null && Date.now() - firedAt < clickSuppressMs;
     }, [clickSuppressMs]);
+
+    const clearFiredFlag = useCallback(() => {
+        firedRef.current = false;
+        lastFiredAtRef.current = null;
+    }, []);
 
     const onPointerUp = useCallback((e: React.PointerEvent) => {
         e.stopPropagation();
@@ -115,6 +136,7 @@ export function useLongPress({
         pressProgress,
         isPressing,
         wasFiredRecently,
+        clearFiredFlag,
         handlers: { onPointerDown, onPointerUp, onPointerLeave, onPointerCancel },
     };
 }

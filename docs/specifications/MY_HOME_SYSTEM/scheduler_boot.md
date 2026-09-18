@@ -19,7 +19,7 @@
 
 * 指定された間隔（秒）で、プロジェクト内のPythonスクリプトを定期的にサブプロセスとして実行し管理する無限ループのスケジューラ。
 * `ThreadPoolExecutor` により各タスクを並列実行する。1タスクの長時間化が他のタスクの実行タイミングを丸ごと遅延させないための設計。
-* 根拠: `main` 関数内のループおよび `TASKS` 定義 (行番号: 94-126, 29-43 / 抜粋: "with ThreadPoolExecutor(...", "TASKS: List[Task] = [")
+* 根拠: `main` 関数内のループおよび `TASKS` 定義 (行番号: 199〜235, 30〜44 / 抜粋: "with ThreadPoolExecutor(...", "TASKS: List[Task] = [")
 
 
 
@@ -29,18 +29,18 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `time` | 標準ライブラリ | 現在時刻の取得、待機処理（スリープ） | `import time` (行番号: 2 / 抜粋: "import time") |
-| `subprocess` | 標準ライブラリ | 外部スクリプトのサブプロセス実行 | `import subprocess` (行番号: 3 / 抜粋: "import subprocess") |
-| `sys` | 標準ライブラリ | モジュール検索パスの追加、プロセス終了処理、Pythonインタープリタパス取得 | `import sys` (行番号: 4 / 抜粋: "import sys") |
-| `os` | 標準ライブラリ | パスの絶対パス解決・結合・存在確認、環境変数の取得 | `import os` (行番号: 5 / 抜粋: "import os") |
-| `ThreadPoolExecutor`, `Future` | 標準ライブラリ (`concurrent.futures`) | タスクの並列実行、実行中タスクの完了状態管理 | `from concurrent.futures import ThreadPoolExecutor, Future` (行番号: 6 / 抜粋: "from concurrent.futures import") |
-| `datetime` | 標準ライブラリ | 未使用（コード内に使用箇所なし） | `from datetime import datetime` (行番号: 7 / 抜粋: "from datetime import datetime") |
-| `List` | 標準ライブラリ | 型ヒント（リスト） | `from typing import List, ...` (行番号: 8 / 抜粋: "from typing import List, Dict,") |
-| `Dict` | 標準ライブラリ | 型ヒント（辞書、`in_flight`の型等） | `from typing import ... Dict, ...` (行番号: 8, 106 / 抜粋: "in_flight: Dict[str, Future] = {}") |
-| `Any` | 標準ライブラリ | 未使用（コード内に使用箇所なし） | `from typing import ... Any, ...` (行番号: 8 / 抜粋: "from typing import List, Dict,") |
-| `TypedDict` | 標準ライブラリ | 辞書型の構造定義 | `from typing import ... TypedDict` (行番号: 8 / 抜粋: "from typing import List, Dict,") |
-| `config` | ローカルモジュール | 未使用（コード内に使用箇所なし。インポートの副作用利用の可能性あり） | `import config` (行番号: 14 / 抜粋: "import config") |
-| `setup_logging` | ローカルモジュール | ロガーの初期化と取得 | `from core.logger import setup_logging` (行番号: 15 / 抜粋: "from core.logger import setup_log") |
+| `collections` | 標準ライブラリ | 実行履歴の保持(`deque`)等 | `import collections` (行番号: 2 / 抜粋: "import collections") |
+| `time` | 標準ライブラリ | 現在時刻の取得、待機処理（スリープ） | `import time` (行番号: 3 / 抜粋: "import time") |
+| `signal` | 標準ライブラリ | SIGTERM/SIGINT を捕捉してタスクを止めてから終了する | `import signal` (行番号: 4 / 抜粋: "import signal") |
+| `subprocess` | 標準ライブラリ | 外部スクリプトのサブプロセス実行 | `import subprocess` (行番号: 5 / 抜粋: "import subprocess") |
+| `sys` | 標準ライブラリ | モジュール検索パスの追加、プロセス終了処理、Pythonインタープリタパス取得 | `import sys` (行番号: 6 / 抜粋: "import sys") |
+| `os` | 標準ライブラリ | パスの絶対パス解決・結合・存在確認、環境変数の取得 | `import os` (行番号: 7 / 抜粋: "import os") |
+| `threading` | 標準ライブラリ | 停止フラグ(`Event`)・ロックによるスレッド間の同期 | `import threading` (行番号: 8 / 抜粋: "import threading") |
+| `ThreadPoolExecutor`, `Future` | 標準ライブラリ (`concurrent.futures`) | タスクの並列実行、実行中タスクの完了状態管理 | `from concurrent.futures import ThreadPoolExecutor, Future` (行番号: 9 / 抜粋: "from concurrent.futures import") |
+| `List` / `Dict` / `Optional` / `Set` / `TypedDict` | 標準ライブラリ (`typing`) | 型ヒント(`in_flight: Dict[str, Future]` 等) | `from typing import List, Dict, Optional, Set, TypedDict` (行番号: 10) |
+| `setup_logging` | ローカルモジュール | ロガーの初期化と取得 | `from core.logger import setup_logging` (行番号: 16 / 抜粋: "from core.logger import setup_log") |
+
+**(Issue #657 で訂正)** 以前この表には `from datetime import datetime`・`typing.Any`・`import config` が「未使用import」として載っていたが、現行の `scheduler_boot.py` にこれらの import は存在しない(§8 の注意喚起も削除済み)。代わりに実在する `collections`・`signal`・`threading` が欠けていた。
 
 ### ブラックボックスとなる外部要素
 
@@ -55,52 +55,54 @@
 ### `Task`
 
 * **役割**: 実行するスクリプトのパス、実行間隔、最終実行時刻、引数を保持するためのデータ構造を定義する。
-* 根拠: `class Task(TypedDict):` (行番号: 20-21 / 抜粋: "実行タスクのデータ構造定義。")
+* 根拠: `class Task(TypedDict):` (行番号: 21-26 / 抜粋: "実行タスクのデータ構造定義。")
 
 
 * **引数/リクエスト**: 該当なし（型定義のため）
-* 根拠: `class Task(TypedDict):` (行番号: 20 / 抜粋: "class Task(TypedDict):")
+* 根拠: `class Task(TypedDict):` (行番号: 21 / 抜粋: "class Task(TypedDict):")
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: `class Task(TypedDict):` (行番号: 20 / 抜粋: "class Task(TypedDict):")
+* 根拠: `class Task(TypedDict):` (行番号: 21 / 抜粋: "class Task(TypedDict):")
 
 
 * **副作用**: なし
-* 根拠: 内部での状態変更なし (行番号: 20 / 抜粋: "class Task(TypedDict):")
+* 根拠: 内部での状態変更なし (行番号: 21 / 抜粋: "class Task(TypedDict):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: エラー補足の記述なし (行番号: 20 / 抜粋: "class Task(TypedDict):")
+* 根拠: エラー補足の記述なし (行番号: 21 / 抜粋: "class Task(TypedDict):")
 
 
 
 ### `run_script`
 
 * **役割**: 指定されたスクリプトをサブプロセスとして実行し、実行結果をログに出力する。
-* 根拠: `def run_script` (行番号: 45, 47 / 抜粋: "指定されたスクリプトをサブプロセスとして実行")
+* 根拠: `def run_script(script_path: str, args: List[str]) -> bool:` (行番号: 98 / 抜粋: "def run_script(script_path: str, args: List[str]) -> bool:")、docstring (行番号: 100 / 抜粋: "指定されたスクリプトをサブプロセスとして実行する。")
 * **（Issue #360 / #361 で修正）** `subprocess.run` ではなく `subprocess.Popen` で起動して `_running_children[script_path]` に登録し、`proc.wait(timeout=3600)` で完了を待つ。これにより SIGTERM 受信時に `terminate_running_children()` から実行中の子プロセスを止められる。失敗時にログへ流す stderr は末尾 20 行に絞る（Discord 通知の 2000 字制限対策）。タイムアウト時は `proc.kill()` を試みる。`finally` で `_running_children` から自分のエントリを外す。
-* 根拠: `proc = subprocess.Popen(` (行番号: 136〜142)、`proc.wait(timeout=3600)` (行番号: 150)、`tail = "\n".join(stderr_tail)` (行番号: 160)
+* 根拠: `proc = subprocess.Popen(` (行番号: 145〜151)、`_running_children[script_path] = proc` (行番号: 152〜153)、`proc.wait(timeout=3600)` (行番号: 159)、`tail = "\n".join(stderr_tail)` (行番号: 178)、`_running_children.pop(script_path, None)` (行番号: 194〜197)
+* **（Issue #575で修正）** returncode が非0の場合の分岐を、単純な「失敗」扱いから二分岐に変更した。以前は returncode が 0 以外であれば理由を問わず一律で ERROR ログ（`core/logger.py` の `DiscordErrorHandler` 経由で Discord に通知される）を出していたため、`terminate_running_children()`（Issue #360）がシャットダウン・デプロイ時に `proc.terminate()` で実行中の監視スクリプトを止める（SIGTERM由来の負のreturncode、典型的には-15になる）たびに、「タスク失敗」という偽のDiscordアラートが飛んでいた。現在は returncode が非0のとき、まず `_children_lock` 配下で `script_path` が モジュールレベル集合 `_intentionally_terminated`（後述）に含まれるかを確認し、含まれていればその場で `discard` して消費したうえで INFO ログのみを出力し `False` を返す（Discord通知なし）。含まれていない場合（スクリプトが自発的に非0で終了した、真の失敗）は、従来どおり ERROR ログとstderr末尾の出力を行い `False` を返す。
+* 根拠: `else:` (行番号: 165)、`with _children_lock:`・`was_intentionally_terminated = script_path in _intentionally_terminated`・`_intentionally_terminated.discard(script_path)` (行番号: 169〜171)、`if was_intentionally_terminated:`・`logger.info(f"🛑 Task terminated intentionally [{script_path}] (Exit code: {proc.returncode})")`・`return False` (行番号: 172〜174)、`logger.error(f"⚠️ Task failed [{script_path}] (Exit code: {proc.returncode})")` (行番号: 175)
 * **（#411 S-L5で修正・PYTHONPATH）** 以前は `env["PYTHONPATH"] = PROJECT_ROOT` で既存の `PYTHONPATH`(`start_all.sh` 等が設定した値)を無条件に上書きしていた。呼出元の設定を残しつつ `PROJECT_ROOT` を優先させるため、既存値がある場合は `os.pathsep` 区切りで先頭に追記するよう変更した。
-* 根拠: `existing_pythonpath = env.get("PYTHONPATH")` (行番号: 112)、`env["PYTHONPATH"] = (...)` (行番号: 113〜115)
+* 根拠: `existing_pythonpath = env.get("PYTHONPATH")` (行番号: 121)、`env["PYTHONPATH"] = (...)` (行番号: 122〜124)
 * **（#411 S-L5で修正・stderr保持）** 以前は `proc.communicate(timeout=3600)` でstdout/stderrをタスク完了まで全量メモリに保持していた（最大1時間分の出力を保持しうる）。ログ用途は末尾20行のみで十分なため、stdoutは`subprocess.DEVNULL`に捨て、stderrは別スレッド(`_drain_stderr`)で1行ずつ読みながら固定長`collections.deque(maxlen=20)`にのみ保持するよう変更し、メモリ使用量が出力量に依存しないようにした。
-* 根拠: `stderr_tail: "collections.deque[str]" = collections.deque(maxlen=20)` (行番号: 118)、`def _drain_stderr(pipe) -> None:` (行番号: 121〜130)、`stdout=subprocess.DEVNULL` (行番号: 139)
+* 根拠: `stderr_tail: "collections.deque[str]" = collections.deque(maxlen=20)` (行番号: 127)、`def _drain_stderr(pipe) -> None:` (行番号: 130〜139)、`stdout=subprocess.DEVNULL` (行番号: 148)
 
 
 * **引数/リクエスト**: `script_path` (`str`): 実行するスクリプトの相対パス, `args` (`List[str]`): スクリプトに渡す引数
-* 根拠: 関数定義 (行番号: 45 / 抜粋: "script_path: str, args: List")
+* 根拠: 関数定義 (行番号: 98 / 抜粋: "def run_script(script_path: str, args: List[str]) -> bool:")
 
 
-* **戻り値/レスポンス**: `bool`: 実行成功（returncode 0）ならTrue、それ以外はFalse
-* 根拠: return文 (行番号: 54 / 抜粋: "bool: 実行成功(returncode 0)ならTrue")
+* **戻り値/レスポンス**: `bool`: 実行成功（returncode 0）ならTrue、それ以外（意図的terminate・真の失敗・タイムアウト・例外のいずれも）はFalse
+* 根拠: docstring (行番号: 107 / 抜粋: "bool: 実行成功(returncode 0)ならTrue")、`return True` (行番号: 164)、`return False` (行番号: 174, 180, 190, 193)
 
 
-* **副作用**: 外部プロセスの起動。標準出力および標準エラー出力のキャプチャとログ出力。
-* 根拠: `subprocess.run` (行番号: 70 / 抜粋: "result = subprocess.run(")
+* **副作用**: 外部プロセスの起動（`_running_children`への登録・完了後の削除含む）。標準出力の破棄・標準エラー出力の末尾保持とログ出力。**（Issue #575で追加）** モジュールレベル集合 `_intentionally_terminated` からの該当エントリの読み取り・消費（`discard`）。
+* 根拠: `proc = subprocess.Popen(` (行番号: 145〜151)、`_running_children[script_path] = proc` (行番号: 152〜153)、`_running_children.pop(script_path, None)` (行番号: 195〜197)、`was_intentionally_terminated = script_path in _intentionally_terminated`・`_intentionally_terminated.discard(script_path)` (行番号: 170〜171)
 
 
-* **エラーハンドリング**: `subprocess.TimeoutExpired`（タイムアウト時）および一般的な `Exception` をキャッチしてログ出力し、`False` を返す。また、サブプロセスの返り値が0以外の場合もエラーログを出力し `False` を返す。
-* 根拠: try-except ブロック (行番号: 87 / 抜粋: "except subprocess.TimeoutExpir")
+* **エラーハンドリング**: `subprocess.TimeoutExpired`（タイムアウト時、3600秒超過）はERRORログを出力し `proc.kill()` を試みて `False` を返す。一般的な `Exception` は `logger.exception` でログ出力し `False` を返す。サブプロセスの返り値が0以外の場合は、**（Issue #575で修正）** `_intentionally_terminated` に登録済みか（＝`terminate_running_children()` による意図的な停止か）で分岐し、登録済みならINFOログのみ（Discord通知なし）、未登録なら従来どおりERRORログ（→Discord通知）とstderr末尾の出力を行う。
+* 根拠: `except subprocess.TimeoutExpired:` (行番号: 182〜190)、`except Exception as e:` (行番号: 191〜193)、`else:` 以下の分岐 (行番号: 165〜180)
 
 
 
@@ -108,30 +110,32 @@
 ### `terminate_running_children` / `_handle_shutdown_signal` / `install_signal_handlers`（Issue #360 で追加）
 
 * **役割**: `_running_children`（実行中の子プロセスの `script_path → Popen`、`_children_lock` で保護）を走査し、生存中のものを `terminate()` → timeout 後 `kill()` して停止数を返す。`_handle_shutdown_signal` は SIGTERM/SIGINT で `_shutdown_event` を立てて `terminate_running_children()` を呼ぶ。`install_signal_handlers` は両シグナルにこのハンドラを登録する（メインスレッド以外からの呼び出し等で `ValueError`/`OSError` になる場合は無視）。以前は scheduler が SIGTERM で即死し、実行中の `nas_monitor.py` 等（最大3600s）が孤児として走り続けて再起動後の新世代と DB 書き込み・保持期間削除が競合していた。
-* 根拠: `_running_children: Dict[str, subprocess.Popen] = {}` (行番号: 48〜50)、`def terminate_running_children(timeout: float = 5.0) -> int:` (行番号: 53〜70)、`def _handle_shutdown_signal(signum, _frame) -> None:` (行番号: 73〜76)、`def install_signal_handlers() -> None:` (行番号: 79〜85)
+* 根拠: `_running_children: Dict[str, subprocess.Popen] = {}` (行番号: 48〜50)、`def terminate_running_children(timeout: float = 5.0) -> int:` (行番号: 59〜80)、`def _handle_shutdown_signal(signum, _frame) -> None:` (行番号: 83〜86)、`def install_signal_handlers() -> None:` (行番号: 89〜95)
+* **モジュールレベル集合 `_intentionally_terminated: Set[str]`（Issue #575で追加）**: `terminate_running_children()` が「今まさに意図的に停止させようとしているスクリプト」を記録するための集合。`_children_lock` で他の `_running_children` 操作と同じロックを共有して保護する。書き込み（`add`）は `terminate_running_children` が `proc.terminate()` を呼ぶ**直前**に行う。読み取り・消費（`in` チェック後に `discard`）は `run_script` が非0のreturncodeを受け取った直後に行い、含まれていれば「意図的な停止」としてINFOログのみを出す（後述）。`add` を「シグナル送信の前」に行っているのは、`run_script` 側の別スレッドで動く `proc.wait()` がこの `terminate()` を受けて即座に返り値付きで復帰し `run_script` が判定に入るタイミングとの間で、記録がまだ間に合っていないという競合を避けるため。
+* 根拠: `_intentionally_terminated: Set[str] = set()` およびコメント (行番号: 52〜56 / 抜粋: "#575: terminate_running_children が意図的に停止したスクリプトを記録する。")、`with _children_lock:`・`_intentionally_terminated.add(script)` (行番号: 69〜70、`proc.terminate()` 呼び出し (行番号: 71) の直前)、`from typing import ... Set, ...` (行番号: 10 / 抜粋: "from typing import List, Dict, Optional, Set, TypedDict")
 * **引数/リクエスト**: `timeout: float` / `(signum, _frame)` / なし
-* 根拠: (行番号: 53, 73, 79)
+* 根拠: (行番号: 59, 83, 89)
 * **戻り値/レスポンス**: `int`（停止数）/ なし / なし
-* 根拠: (行番号: 70)
-* **副作用**: 子プロセスの terminate/kill、`_shutdown_event` の set、シグナルハンドラ登録、ログ出力
-* 根拠: (行番号: 59〜69, 74〜76, 80〜85)
+* 根拠: `return stopped` (行番号: 80)
+* **副作用**: 子プロセスの terminate/kill、**（Issue #575で追加）** モジュールレベル集合 `_intentionally_terminated` への対象スクリプトの追加、`_shutdown_event` の set、シグナルハンドラ登録、ログ出力
+* 根拠: (行番号: 69〜77, 85〜86, 90〜95)
 * **エラーハンドリング**: 子プロセス停止失敗は WARNING ログのみ、`signal.signal` の失敗は無視
-* 根拠: (行番号: 67〜68, 83〜85)
+* 根拠: `except Exception as e:`・`logger.warning(...)` (行番号: 78〜79)、`except (ValueError, OSError):`・`pass` (行番号: 93〜95)
 
 ### `main`
 
 * **役割**: `ThreadPoolExecutor`（ワーカー数 = `TASKS`件数、最低1）を使って `TASKS` リストを巡回し、現在時刻と最終実行時刻の差が指定間隔（`interval`）以上、かつ当該スクリプトが実行中でないタスクに対して `run_script` を非同期（別スレッド）で投入する無限ループを実行する。実行中のタスクは `in_flight` 辞書（スクリプトパス→`Future`）で管理し、完了していないタスクは同一周期内で再投入しない（多重起動防止）。
-* 根拠: `def main() -> None:` (行番号: 94 / 抜粋: "メインループ。")
+* 根拠: `def main() -> None:` (行番号: 199 / 抜粋: "メインループ。")
 * **（Issue #360 で修正）** 冒頭で `install_signal_handlers()` を呼び、メインループは `while True` ではなく `while not _shutdown_event.is_set()`、スリープは `_shutdown_event.wait(10)`（シャットダウン要求で即抜ける）。ループを抜けた後に `terminate_running_children()` を呼ぶ。
 * 根拠: `install_signal_handlers()` (行番号: 167)、`while not _shutdown_event.is_set():` (行番号: 172)、`_shutdown_event.wait(10)` (行番号: 189)、`terminate_running_children()` (行番号: 191)
 
 
 * **引数/リクエスト**: なし
-* 根拠: 関数定義 (行番号: 94 / 抜粋: "def main() -> None:")
+* 根拠: 関数定義 (行番号: 199 / 抜粋: "def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 関数定義 (行番号: 94 / 抜粋: "def main() -> None:")
+* 根拠: 関数定義 (行番号: 199 / 抜粋: "def main() -> None:")
 
 
 * **副作用**: `ThreadPoolExecutor.submit` による `run_script` の並列実行。`TASKS` 内各タスクの `last_run` の更新。`in_flight` 辞書への `Future` の登録。1回のループ終了ごとの10秒間のスリープ。
@@ -139,14 +143,14 @@
 
 
 * **エラーハンドリング**: 関数内での明示的な例外キャッチはなし（各タスクの例外は `run_script` 内、または `Future` 内部で捕捉・保持される）。
-* 根拠: 関数内部の処理 (行番号: 94-126)
+* 根拠: 関数内部の処理 (行番号: 199〜235)
 
 
 
 ### `__main__` 実行ブロック
 
 * **役割**: `main` 関数を呼び出してスケジューラを起動し、停止命令や予期せぬエラー時にプロセスを終了させる。
-* 根拠: `if __name__ == "__main__":` (行番号: 128 / 抜粋: "if **name** == "**main**":")
+* 根拠: `if __name__ == "__main__":` (行番号: 237 / 抜粋: "if **name** == "**main**":")
 
 
 * **引数/リクエスト**: なし
@@ -191,8 +195,13 @@ flowchart TD
 
     subgraph "run_script (別スレッドで実行)"
         RSStart(("run_script開始")) --> CheckExist{"os.path.exists()"}
-        CheckExist -- True --> Subprocess["外部：subprocess.run()"]
+        CheckExist -- True --> Subprocess["外部：subprocess.Popen()で起動→<br>proc.wait(timeout=3600)で待機"]
         CheckExist -- False --> LogError("エラーログ出力")
+        Subprocess --> CheckReturnCode{"proc.returncode == 0?"}
+        CheckReturnCode -- True --> LogSuccess("DEBUGログ出力→True")
+        CheckReturnCode -- False --> CheckIntentional{"（#575）script_pathが<br>_intentionally_terminatedに<br>登録済みか?"}
+        CheckIntentional -- "True(意図的停止)" --> LogInfoTerminated["INFOログ出力<br>(Discord通知なし)→False"]
+        CheckIntentional -- "False(真の失敗)" --> LogTaskError["ERRORログ出力<br>(→Discord通知)→False"]
     end
 
     SubmitTask -.->|"executor.submitで別スレッド起動"| RSStart
@@ -215,17 +224,15 @@ graph TD
     Scheduler["scheduler_boot.py"]
     SysLib["標準ライブラリ: sys, os, time, subprocess"]
     ConcurrentLib["標準ライブラリ: concurrent.futures (ThreadPoolExecutor, Future)"]
-    TypingLib["標準ライブラリ: typing (未使用含む)"]
-    DateLib["標準ライブラリ: datetime (未使用)"]
-    Config["外部: config (ブラックボックス)"]
+    TypingLib["標準ライブラリ: typing"]
+    ThreadLib["標準ライブラリ: threading, signal, collections"]
     Logger["外部: core.logger (ブラックボックス)"]
     Scripts["外部: TASKSで定義されたスクリプト群 (ブラックボックス)"]
 
     Scheduler --> SysLib
     Scheduler --> ConcurrentLib
     Scheduler --> TypingLib
-    Scheduler --> DateLib
-    Scheduler --> Config
+    Scheduler --> ThreadLib
     Scheduler --> Logger
     Scheduler --> Scripts
 
@@ -253,8 +260,9 @@ graph TD
 * 根拠: `timeout=3600` のコメントおよび `TimeoutExpired` 時のログ (行番号: 75, 88)
 
 
-* **未使用のインポート**: `datetime`, `Any`（`Dict`は`in_flight`の型ヒントで使用）はインポートされているがコード内で使用されていない。また `config` も明示的な使用箇所がない。
 * **パス解決の依存**: 外部スクリプトの実行パスは `__file__` を基準とした `PROJECT_ROOT` に依存しているため、このファイル自身のディレクトリ階層を変更するとすべてのタスク実行が失敗する。
+* **[修正済み・Issue #575] シャットダウン時の意図的terminateが「タスク失敗」の偽Discordアラートを出していた**: Issue #360で`terminate_running_children()`によるシャットダウン時の子プロセス`terminate()`が追加されたが、当時は`run_script`側の対応が漏れており、`terminate()`を受けた子プロセスが負のreturncode（SIGTERM由来で典型的には-15）で終了すると、`run_script`はこれを区別なく「タスク失敗」と判定してERRORログ（`core/logger.py`の`DiscordErrorHandler`経由でDiscordへ通知）を出していた。監視スクリプトの実行間隔は最大3600秒（`nas_monitor.py`）あるため、通常の再起動・デプロイのたびに実行中タスクがあれば毎回この偽アラートが発生しうる状態だった。現在は`terminate_running_children`が`proc.terminate()`を呼ぶ直前にモジュールレベル集合`_intentionally_terminated`へ対象スクリプトを記録し、`run_script`は非0のreturncodeを受け取った際にまずこの集合を確認（該当すれば`discard`して消費）することで、「意図的な停止」はINFOログのみ（Discord通知なし）、「真の失敗」のみ従来どおりERRORログ（→Discord通知）に振り分けるようになった。
+* 根拠: `_intentionally_terminated: Set[str] = set()` (行番号: 52〜56)、`with _children_lock: _intentionally_terminated.add(script)` (行番号: 69〜70)、`was_intentionally_terminated = script_path in _intentionally_terminated` 以下の分岐 (行番号: 169〜175)
 
 ## 9. 不明事項一覧
 

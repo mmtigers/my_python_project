@@ -59,7 +59,10 @@ class TestDashboardTabIsolation:
         mock_st = MagicMock()
         mock_st.sidebar.__enter__ = MagicMock(return_value=mock_st)
         mock_st.sidebar.__exit__ = MagicMock(return_value=False)
-        mock_st.tabs.return_value = [MagicMock() for _ in range(10)]
+        mock_st.tabs.return_value = [MagicMock() for _ in range(5)]
+        mock_st.columns.side_effect = lambda spec, **kwargs: [
+            MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))
+        ]
         mock_st.expander.return_value.__enter__ = MagicMock(return_value=MagicMock())
         mock_st.expander.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -73,22 +76,25 @@ class TestDashboardTabIsolation:
             stack.enter_context(patch.object(dashboard.analysis_service, "load_nas_status", return_value=None))
             stack.enter_context(patch.object(dashboard.analysis_service, "load_ai_report", return_value=None))
             stack.enter_context(patch.object(dashboard.summary, "render_summary"))
-            stack.enter_context(patch.object(dashboard.quest_tab, "render", side_effect=RuntimeError("quest tab exploded")))
-            stack.enter_context(patch.object(dashboard.misc_tab, "render_traffic"))
+            stack.enter_context(patch.object(dashboard.misc_tab, "render_traffic", side_effect=RuntimeError("train tab exploded")))
             stack.enter_context(patch.object(dashboard.misc_tab, "render_photos"))
             mock_electricity = stack.enter_context(patch.object(dashboard.sensor_tab, "render_electricity"))
             stack.enter_context(patch.object(dashboard.sensor_tab, "render_temperature"))
             stack.enter_context(patch.object(dashboard.health_tab, "render"))
             stack.enter_context(patch.object(dashboard.sensor_tab, "render_takasago"))
             stack.enter_context(patch.object(dashboard.log_tab, "render_logs"))
-            stack.enter_context(patch.object(dashboard.log_tab, "render_system"))
+            stack.enter_context(patch.object(dashboard.log_tab, "render_resources"))
+            stack.enter_context(patch.object(dashboard.log_tab, "render_nas_status"))
+            stack.enter_context(patch.object(dashboard.log_tab, "render_server_logs"))
+            stack.enter_context(patch.object(dashboard.log_tab, "render_maintenance"))
             stack.enter_context(patch.object(dashboard.misc_tab, "render_bicycle"))
             stack.enter_context(patch.object(dashboard, "logger"))
             dashboard.main()
 
-        # クエストタブが例外を投げても、後続の電力・環境タブは描画が呼ばれること
+        # 「おでかけ」タブの電車遅延セクションが例外を投げても、
+        # 後続の「くらし」タブの電力・環境セクションは描画が呼ばれること
         mock_electricity.assert_called_once()
         # ダッシュボード全体のエラー画面(st.error)ではなく、
-        # クエストタブのみのプレースホルダとして扱われていること
+        # 失敗したセクションのみのプレースホルダとして扱われていること
         error_calls = [str(c.args[0]) for c in mock_st.error.call_args_list if c.args]
-        assert any("クエスト" in t for t in error_calls), error_calls
+        assert any("電車遅延" in t for t in error_calls), error_calls

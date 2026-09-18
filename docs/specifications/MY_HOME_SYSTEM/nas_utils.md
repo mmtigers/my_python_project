@@ -74,7 +74,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 
 
 * **引数/リクエスト**: `local_dir: Path` (ローカルのフォールバックパス), `nas_dir: Path` (NASのターゲットパス)
-* 根拠: `sync_fallback_to_nas`引数 (行番号: 47 / 抜粋: "def sync_fallback_to_nas(local_dir: Path, nas_dir: Path) -> None:")
+* 根拠: `sync_fallback_to_nas`引数 (行番号: 63 / 抜粋: "def sync_fallback_to_nas(local_dir: Path, nas_dir: Path) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -97,7 +97,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 
 
 * **引数/リクエスト**: `target_dir: Path` (アクセス確認対象のディレクトリ), `mount_point: str` (マウントポイント)
-* 根拠: `is_mounted_and_writable`引数 (行番号: 74 / 抜粋: "def is_mounted_and_writable(target_dir: Path, mount_point: str) -> bool:")
+* 根拠: `is_mounted_and_writable`引数 (行番号: 95 / 抜粋: "def is_mounted_and_writable(target_dir: Path, mount_point: str) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool` (マウントされており、かつアクセス権があればTrue、なければFalse)
@@ -120,7 +120,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 
 
 * **引数/リクエスト**: `nas_dir_str: str` (NASディレクトリパス), `fallback_dir_str: str` (フォールバックディレクトリパス), `mount_point: str` (デフォルト: "/mnt/nas")
-* 根拠: `get_managed_target_directory`引数 (行番号: 87 / 抜粋: "def get_managed_target_directory(nas_dir_str: str, fallback_dir_str: str, mount_point: str = "/mnt/nas") -> Path:")
+* 根拠: `get_managed_target_directory`引数 (行番号: 108 / 抜粋: "def get_managed_target_directory(nas_dir_str: str, fallback_dir_str: str, mount_point: str = "/mnt/nas") -> Path:")
 
 
 * **戻り値/レスポンス**: `Path` (最終的に利用可能なディレクトリパス。NASパスまたはフォールバックパス)

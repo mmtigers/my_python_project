@@ -8,7 +8,8 @@ Issue #458: newface_monitor.py が79サイトを単一プロセスで逐次処�
 なったため、それぞれのスレッドセーフティを検証する。
 
 - DataManagerが読み書きする全サイト共通ファイル(daily_summary.json/
-  site_failures.json)のread-modify-write(DataManager._shared_file_lock)
+  site_failures.json)のread-modify-write(DataManager._daily_summary_lock/
+  DataManager._site_failures_lock)
 - DiscordNotifierが保持するDiscordCircuitBreakerの状態(file_utils.py)
 - _run_monitor_locked自体が並列実行でも全サイトを漏れなく処理すること
 

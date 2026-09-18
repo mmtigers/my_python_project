@@ -89,6 +89,14 @@ class ApproveAction(BaseModel):
     # 任意項目なので既存クライアント(未送信)との後方互換は崩さない。
     reason: Optional[str] = Field(default=None, max_length=500)
 
+# Issue #547: reset_game.py が別プロセスから直接DBを書き換えていたリセット処理を
+# サーバーAPI経由に置き換えるための入力モデル。admin_idはApproveAction.approver_id等と
+# 同様、サービス層(UserService.reset_user_data)がquest_users.role='role_adult'かどうかを
+# 検証する。
+class ResetUserAction(BaseModel):
+    admin_id: str = Field(min_length=1, max_length=64)
+    target_user_id: str = Field(min_length=1, max_length=64)
+
 # #372: アップロード経由のアバターURLは routers/quest_router.py の upload_image が生成する
 # 「/uploads/<uuid4>.<拡張子>」の形のみを受け付ける。任意の /uploads/ パスを許すと、
 # 他ユーザーのアップロード画像を自分のアバターに指定 → 絵文字に戻す、という操作で
@@ -144,6 +152,11 @@ class CompleteResponse(BaseModel):
 
 class CancelResponse(BaseModel):
     status: str
+
+class ResetUserResponse(BaseModel):
+    status: str
+    deletedHistoryCount: int
+    deletedInventoryCount: int
 
 class PurchaseResponse(BaseModel):
     status: str

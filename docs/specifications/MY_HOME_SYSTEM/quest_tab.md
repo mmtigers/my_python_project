@@ -1,3 +1,13 @@
+> **⚠️ 廃止: このファイルは 2026-09-17 時点でソース (`MY_HOME_SYSTEM/views/dashboard/quest_tab.py`) が削除されたため廃止されました。**
+>
+> ダッシュボードのスマートフォン対応にあたり、クエストの状況表示（経験値ランキング・達成履歴）は
+> 同じ内容をスマホ最適化済みのPWA `family-quest`（`/quest`）が持っており二重管理だったため、
+> ダッシュボードからは撤去された。`dashboard.py` にはヘッダーの「⚔️ ファミクエを開く」
+> リンクボタン（`/quest` へのルート相対リンク）だけが残っている。
+>
+> 以下の解析内容は削除前のソースに対するものであり、履歴として残している。
+> 現在のダッシュボードのタブ構成は [dashboard.md](./dashboard.md) を参照。
+
 ## 1. 解析メタ情報
 
 | 項目 | 内容 |
@@ -47,11 +57,11 @@
 ### `render`
 
 * **役割**: Family Questタブ全体（メンバーごとの経験値メトリクス、経験値ランキングの棒グラフ、直近の達成履歴）を描画する。**（Issue #378で修正）** 達成履歴（`log['text']`。`quest_service._fetch_recent_logs`が組み立てる「ユーザー名 + quest_title/reward_title」）は`unsafe_allow_html=True`でそのまま`st.markdown`へ渡している。`quest_title`/`reward_title`は認証なしの`/api/quest`から自由に書き込める（`routers/quest_router.py`）ため、以前はエスケープ無しで格納型XSSになり得た。`html.escape(log['text'])`でエスケープしてから埋め込むよう修正した（`log['timestamp']`はDB由来のタイムスタンプでありエスケープ対象に含めていない）。
-* 根拠: `def render():` (行番号: 8〜69 / 抜粋: "def render():")、エスケープ処理 (行番号: 63〜64 / 抜粋: "safe_text = html.escape(log['text'])")
+* 根拠: `def render():` (行番号: 9〜70 / 抜粋: "def render():")、エスケープ処理 (行番号: 63〜64 / 抜粋: "safe_text = html.escape(log['text'])")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def render():` (行番号: 8 / 抜粋: "def render():")
+* 根拠: `def render():` (行番号: 9 / 抜粋: "def render():")
 
 
 * **戻り値/レスポンス**: なし（`users`が空の場合は早期`return`でStreamlit UIへの描画を中断する）
@@ -167,8 +177,8 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `game_system.get_all_view_data()`の正確な戻り値スキーマ | `MY_HOME_SYSTEM/services/quest_service.py`の`GameSystem.get_all_view_data(self)`(797〜891行目)を直接確認した。戻り値は887〜891行目で`return {"users": users, "quests": filtered_quests, "rewards": rewards, "completedQuests": completed, "logs": logs, "pendingQuests": pending}`という6キーの辞書であることを確認した。各値は、`users`が`quest_users`テーブルの全行に`nextLevelExp`/`maxHp`/`hp`を追加した辞書のリスト(799〜803行目)、`quests`が`quest_master`の全行を`filter_active_quests`でフィルタし`bonus_gold`/`bonus_exp`(共有クエストの場合`is_shared_completed_by`等も)を付加したリスト(805〜816行目, 870〜881行目)、`rewards`が`reward_master`の全行に`icon`/`cost`を付加したリスト(817〜820行目)、`completedQuests`が直近1ヶ月の`quest_history`から`is_within_reset_period`でリセット周期内のもののみを抽出したリスト(822〜883行目)、`pendingQuests`が`status='pending'`の`quest_history`全行(838〜840行目)、`logs`が`_fetch_recent_logs(cur)`(893〜911行目)の戻り値であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:797-891` |
-| `logs`要素の正しいキー名 | `MY_HOME_SYSTEM/services/quest_service.py`の`_fetch_recent_logs(self, cur)`(893〜911行目)を直接確認した。`quest_history`(status='approved')と`reward_history`をそれぞれ最大20件取得して`ts`(`completed_at`または`redeemed_at`のエイリアス)でソートした後、910行目の`formatted.append({"id": f"{l['type']}_{l['id']}", "text": text, "dateStr": date_str, "timestamp": ts_str})`により、各要素は`id`, `text`, `dateStr`, `timestamp`の4キーを持つ辞書として整形されることを確認した。すなわち`logs`要素の正しいキー名は`timestamp`であり、`MY_HOME_SYSTEM/views/dashboard/quest_tab.py`60行目の`log['timestamp']`という実際の参照が正しい仕様と一致することを直接確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:893-911`（参考: `MY_HOME_SYSTEM/views/dashboard/quest_tab.py:60`） |
+| `game_system.get_all_view_data()`の正確な戻り値スキーマ | **（Issue #550で`services/quest/game_system.py`へ移設）** `GameSystem.get_all_view_data(self, viewer_user_id=None)`(168〜318行目)を直接確認した。戻り値は314〜318行目で`return {"users": users, "quests": filtered_quests, "rewards": rewards, "completedQuests": completed, "logs": logs, "pendingQuests": pending}`という6キーの辞書であることを確認した。各値は、`users`が`quest_users`テーブルの全行に`nextLevelExp`/`maxHp`/`hp`を追加した辞書のリスト(174〜192行目。**`quest_data.USERS`の宣言順へ明示的に再ソートされる**(176〜187行目)点に注意)、`quests`が`quest_master`の全行を`filter_active_quests`でフィルタし`bonus_gold`/`bonus_exp`等を付加したリスト(194〜249行目)、`rewards`が`reward_master`の全行から`desc`キーを除去したリスト(251〜257行目。**（Issue #291で変更）** 以前付与していた`icon`/`cost`という`icon_key`/`cost_gold`の別名は廃止され、DBの実カラム名に一本化された)、`completedQuests`が直近1ヶ月の`quest_history`から`is_within_reset_period`でリセット周期内のもののみを抽出したリスト(264〜310行目)、`pendingQuests`が`status='pending'`の`quest_history`全行(271〜273行目)、`logs`が`_fetch_recent_logs(cur)`(320〜344行目)の戻り値であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest/game_system.py:168-318`（参考: [quest_game_system.md](./quest_game_system.md)） |
+| `logs`要素の正しいキー名 | **（Issue #550で`services/quest/game_system.py`へ移設）** `_fetch_recent_logs(self, cur)`(320〜344行目)を直接確認した。`quest_history`(status='approved')と`reward_history`をそれぞれ取得し、`ts`(`completed_at`または`redeemed_at`のエイリアス)降順にソートして先頭20件へ絞り込んだ後(329行目)、337行目の`formatted.append({"id": f"{log['type']}_{log['id']}", "text": text, "dateStr": date_str, "timestamp": ts_str})`により、各要素は`id`, `text`, `dateStr`, `timestamp`の4キーを持つ辞書として整形されることを確認した。すなわち`logs`要素の正しいキー名は`timestamp`であり、`MY_HOME_SYSTEM/views/dashboard/quest_tab.py`67行目の`log['timestamp']`という実際の参照が正しい仕様と一致することを直接確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest/game_system.py:320-344`（参考: `MY_HOME_SYSTEM/views/dashboard/quest_tab.py:67`・[quest_game_system.md](./quest_game_system.md)） |
 
 ## 10. 自己検証結果
 

@@ -17,9 +17,20 @@ import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import config
 from routers import webhook_router
 from services import sensor_service
 from models.switchbot import SwitchBotWebhookBody
+
+
+@pytest.fixture(autouse=True)
+def _allow_unauthenticated_webhook(monkeypatch):
+    """本ファイルはペイロード形式の契約を見るもので、認証は対象外。
+
+    #648 でトークン未設定時は 503 になったため、移行用オプトインを有効にして
+    トークン検証を素通りさせる(認証自体は test_webhook_router.py が検証する)。
+    """
+    monkeypatch.setattr(config, "ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK", True, raising=False)
 
 
 @pytest.fixture(autouse=True)

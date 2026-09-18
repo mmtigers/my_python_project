@@ -1,11 +1,17 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react';
+import { VIEW_SWIPE_THRESHOLD_PX } from './lib/uiConstants';
 import { motion } from 'framer-motion';
 import { WifiOff, AlertTriangle } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData, LevelUpInfo } from './hooks/useGameData';
+import { useRoutineData } from './hooks/useRoutineData';
+import RoutineFlow, { RoutineFreeTimeBanner } from './features/routine/components/RoutineFlow';
+import { selectRoutineFlow } from './lib/routineDataSchema';
 import { useSound } from './hooks/useSound';
 import { useLayoutMode } from './hooks/useLayoutMode';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
+import { useCurrentUser } from './hooks/useCurrentUser';
+import { useConfirmDialog } from './hooks/useConfirmDialog';
 import { useSettings } from './context/useSettings';
 import { useToast } from './context/useToast';
 import RewardShop from './features/shop/components/RewardShop';
@@ -14,54 +20,15 @@ import FamilyDashboard from './features/family/components/FamilyDashboard';
 
 import { CompletedSignal, ID, Quest, QuestHistory, Reward, User } from '@/types';
 import { getQuestLockState, getQuestProcessingKey } from './features/quest/hooks/useQuestStatus';
-
-// 保護者判定は quest_users.role ('role_adult'/'role_child') を唯一の判定基準とする。
-// ★注意: これはクライアント側のUI上の配慮（隠しボタンを子どもに見せないため）にすぎず、
-// セキュリティ境界ではない。バックエンドは現状どのuser_idでも自称できてしまうため、
-// 本当のアクセス制御はバックエンド側で別途実装される必要がある。
-const isParentUser = (user: User) => user.role === 'role_adult';
-
-// 承認・却下の記録名義に使う代表の親ユーザーを返す。誰が実際にボタンを押したかは
-// 区別せず「親」として固定で記録する(要件5)。
-const getRepresentativeParent = (allUsers: User[]): User => {
-  const adult = allUsers.find(u => u.role === 'role_adult');
-  return adult || allUsers[0] || INITIAL_USERS[0];
-};
-
-// 却下理由のプリセット。自由入力の手間を省き、あとで見返した時にも理由がわかるようにする。
-const REJECT_REASONS = ['写真が不明瞭', 'まだ終わっていない', '重複している', 'その他'];
-
-// #393: 選択中ユーザーをlocalStorageに永続化する。インデックスではなくuser_idを保存する
-// ことで、メンバーの並び順が変わったりメンバーが減っても、対応する人を正しく再選択でき
-// (見つからなければ0番目にフォールバックする)、以前のように保存していたindexが範囲外に
-// なって「接続エラー(guest)」カードが出る事故が起きない。
-const CURRENT_USER_STORAGE_KEY = 'familyQuest.currentUserId.v1';
-
-function loadSavedUserId(): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(CURRENT_USER_STORAGE_KEY);
-    // 形状検証: 空文字列や(将来の形式変更等による)非文字列相当の値は無視する
-    return typeof raw === 'string' && raw.length > 0 ? raw : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveCurrentUserId(userId: string): void {
-  try {
-    window.localStorage.setItem(CURRENT_USER_STORAGE_KEY, userId);
-  } catch {
-    // localStorageが使えない環境(プライベートモード等)では永続化を諦める
-  }
-}
+import { useBusyKeys } from './features/quest/hooks/useBusyKeys';
+import { isParentUser, getRepresentativeParent } from './lib/userRole';
+import { ActionResult, resolveErrorText } from './lib/actionResult';
 
 // UI Components
 import Header from './components/layout/Header';
 import BottomNav, { BottomNavTab } from './components/layout/BottomNav';
 import MessageModal from './components/ui/MessageModal';
-import { Button } from './components/ui/Button';
-import { Modal } from './components/ui/Modal';
+import { ConfirmModal } from './components/ui/ConfirmModal';
 import ChunkErrorBoundary from './components/ui/ChunkErrorBoundary';
 
 // 初期表示には不要なモーダル類は動的importで分離し、初回バンドルを軽くする
@@ -73,103 +40,7 @@ import UserStatusCard from './features/family/components/UserStatusCard';
 import QuestList from './features/quest/components/QuestList';
 import ApprovalList from './features/quest/components/ApprovalList';
 import FamilyLog from './features/family/components/FamilyLog';
-
-// ConfirmModal の target に渡りうる型。モードごとに実際に持っているプロパティが異なるため、
-// メッセージ生成はモードごとに個別にキャストして組み立てる（getMessage 内）。
-// ★実機検証で子どもの誤操作が多かったため、クエスト完了(クリア)には確認ダイアログを復活させた。
-// 取り消しは長押しでのみ発火する(QuestList側のuseLongPress)ため、引き続き確認なしのワンタップとする。
-type ConfirmTarget = Quest | QuestHistory | Reward;
-
-// useGameData.ts の completeQuest/cancelQuest/buyReward/rejectQuest
-// ラッパー関数群の戻り値をまとめて受け取るための型（各関数は success 以外のフィールドが少しずつ異なる）
-interface ActionResult {
-  success: boolean;
-  status?: string;
-  message?: string;
-  earnedMedals?: number;
-  leveledUp?: boolean;
-  newGold?: number;
-  reward?: Reward;
-  reason?: string;
-  detail?: string;
-}
-
-const ERROR_REASON_MESSAGES: { [key: string]: string } = {
-  gold: "お金が足りません！",
-  pending: "すでに申請中です",
-  permission: "権限がありません",
-  error: "エラーが発生しました",
-};
-
-// バックエンドが具体的なエラー内容(detail)を返している場合はそれを優先表示する
-const resolveErrorText = (res: ActionResult, fallback: string): string =>
-  res.detail || (res.reason && ERROR_REASON_MESSAGES[res.reason]) || fallback;
-
-const ConfirmModal = ({
-  mode, target, rejectReason, onSelectRejectReason, onConfirm, onCancel, isConfirming
-}: {
-  mode: 'complete' | 'purchase' | 'reject' | null,
-  target: ConfirmTarget | null,
-  rejectReason: string | null,
-  onSelectRejectReason: (reason: string) => void,
-  onConfirm: () => void,
-  onCancel: () => void,
-  isConfirming: boolean
-}) => {
-  if (!mode || !target) return null;
-
-  const getMessage = (): { title: string; text: string } => {
-    switch (mode) {
-      case 'complete': {
-        const t = target as Quest;
-        return { title: 'クエスト完了', text: `「${t.title}」を完了にしますか？` };
-      }
-      case 'purchase': {
-        const t = target as Reward;
-        // #291: masterData.js のフォールバック報酬も含め cost_gold に一本化したため、
-        // cost へのフォールバックは不要になった。
-        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold}G で買いますか？` };
-      }
-      case 'reject':
-        return { title: '却下確認', text: '本当に却下しますか？' };
-    }
-  };
-  const msg = getMessage();
-
-  return (
-    // #394: 応答待ち中(isConfirming)は背景タップ/ESC/×ボタンのいずれでも閉じられない
-    // ようにする(閉じてもリクエストは継続するため、「モーダルを残して再試行できる
-    // ようにする」という設計意図が崩れてしまう)。
-    <Modal isOpen={true} onClose={onCancel} title={msg.title} preventClose={isConfirming}>
-      <div className="p-4">
-        <p className="whitespace-pre-wrap text-center mb-4">{msg.text}</p>
-
-        {/* 角度⑫: 却下理由をプリセットからワンタップで選べるようにし、自由入力の手間を省く */}
-        {mode === 'reject' && (
-          <div className="flex flex-wrap gap-2 justify-center mb-6">
-            {REJECT_REASONS.map(r => (
-              <button
-                key={r}
-                onClick={() => onSelectRejectReason(r)}
-                className={`min-h-[36px] px-3 py-1.5 rounded-full text-xs font-bold border-2 transition-colors ${rejectReason === r
-                  ? 'bg-red-600 border-red-400 text-white'
-                  : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-slate-400'
-                  }`}
-              >
-                {r}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="flex gap-4 justify-center">
-          <Button variant="secondary" onClick={onCancel} disabled={isConfirming}>キャンセル</Button>
-          <Button variant="primary" onClick={onConfirm} isLoading={isConfirming}>はい</Button>
-        </div>
-      </div>
-    </Modal>
-  );
-};
+import { QuestActivityProvider } from './features/quest/context/QuestActivityContext';
 
 function App() {
   const { play } = useSound();
@@ -181,24 +52,13 @@ function App() {
   const [activeTab, setActiveTab] = useState<'quest' | 'shop' | 'inventory'>('quest');
   const [viewMode, setViewMode] = useState<'main' | 'familyLog'>('main');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
-  // #393: 起動時にlocalStorageへ保存されたuser_idを一度だけ解決するための保持先。
-  // 実データ(users)が届くまではINITIAL_USERSの1人(guest)しか無く解決しようがないため、
-  // 下のuseEffectで実データが揃うまで待つ。
-  const pendingSavedUserIdRef = useRef<string | null>(loadSavedUserId());
 
   // モーダル状態 (完了・購入・却下。取消は長押しでのみ発火するため確認を挟まない)
-  const [confirmMode, setConfirmMode] = useState<'complete' | 'purchase' | 'reject' | null>(null);
-  const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
-  // クエスト完了/購入を実行する当人。横画面の4人表示では「今アクティブなユーザー」が
-  // 存在しないため、どのパネルの操作かをここで明示的に持つ(承認/却下は別途「親」固定で扱う)。
-  const [confirmUser, setConfirmUser] = useState<User | null>(null);
-  const [rejectReason, setRejectReason] = useState<string | null>(null);
-  // #101: 確認モーダルの「はい」連打による二重実行(例: 購入の二重成立)を防ぐガード。
-  // レスポンス前の同期的な連打はstate更新の反映(再レンダー)を待たずに発生しうるため、
-  // 判定にはuseState単独ではなくrefを使い、ボタンの見た目のdisabled/ローディング表示には
-  // 対になるstateを使う。
-  const [isConfirming, setIsConfirming] = useState(false);
-  const isConfirmingRef = useRef(false);
+  const {
+    confirmMode, confirmTarget, confirmUser, rejectReason, setRejectReason,
+    isConfirming, setIsConfirming, isConfirmingRef,
+    openConfirm, closeConfirm,
+  } = useConfirmDialog();
 
   // #119: 承認待ちカードは「スワイプ承認」と「承認ボタン」が併存し、確認モーダルを
   // 挟まず即座にAPIを叩くため、#101のisConfirmingRefと同じ連打対策が無かった。
@@ -207,22 +67,26 @@ function App() {
   // 実際は成功しているのに「承認に失敗しました」というエラーモーダルが出てしまっていた。
   // 承認は複数のクエストを並行して処理できる必要があるため、単一のbooleanではなく
   // 処理中の履歴idの集合で個別に多重送信を防ぐ。
-  const approvingHistoryIdsRef = useRef<Set<ID>>(new Set());
+  // #391(F-L8): 承認ボタンの isLoading 表示用に、判定用のrefと表示用のstateを
+  // 二重に持つ(#101 と同じパターン)。その二重化は useBusyKeys に切り出してある(#659)。
+  const {
+    ref: approvingHistoryIdsRef,
+    keys: approvingHistoryIds,
+    sync: syncApprovingHistoryIds,
+  } = useBusyKeys<ID>();
   const isApprovingAllRef = useRef(false);
-  // #391(F-L8): 承認ボタンの isLoading 表示用に approvingHistoryIdsRef を state にも写す。
-  // 判定は同期的なrefで行い、見た目だけ state に追従させる(#101 と同じ二重化パターン)。
-  const [approvingHistoryIds, setApprovingHistoryIds] = useState<ID[]>([]);
   const [isApprovingAll, setIsApprovingAll] = useState(false);
-  const syncApprovingHistoryIds = () => setApprovingHistoryIds([...approvingHistoryIdsRef.current]);
 
   // #391: クエスト完了/取消APIが送信中の (user_id, quest_id) の集合。以前は確認モーダルを
   // 閉じてから await runQuestAction していたため、応答が返るまでカードは未完了のまま
   // 再タップでき、2回目の確認モーダルが1回目の完了後も開いたまま残って「はい」を押すと
   // 400「本日は完了済み」/429 のエラーモーダルになっていた。
   // handleQuestClick で無視し、QuestItem にローディング表示を出すために state にも写す。
-  const processingQuestKeysRef = useRef<Set<string>>(new Set());
-  const [processingQuestKeys, setProcessingQuestKeys] = useState<string[]>([]);
-  const syncProcessingQuestKeys = () => setProcessingQuestKeys([...processingQuestKeysRef.current]);
+  const {
+    ref: processingQuestKeysRef,
+    keys: processingQuestKeys,
+    sync: syncProcessingQuestKeys,
+  } = useBusyKeys<string>();
 
   // #102: クエスト完了の効果音・無限クエストの連打防止クールダウンは、以前は
   // QuestList側でタップ即時(=確認モーダルを開く前)に発火していたため、確認モーダルで
@@ -258,34 +122,30 @@ function App() {
 
   const currentUser = users[currentUserIdx] || INITIAL_USERS[0];
 
-  // #393: usersが実データに揃ったら、保存済みuser_idをfindIndexで一度だけ解決する。
-  // 見つからなければ(メンバー削除・初回起動等)0番目にフォールバックする。
-  // また、以後のcurrentUserIdxの変化(ユーザー切替)を都度localStorageへ保存する。
-  // users.length <= 1 の間はまだ INITIAL_USERS のフォールバック(guest 1人)の可能性があり、
-  // それを保存してしまうと起動のたびに実データ到着前の一瞬で正しい保存値を消してしまうため、
-  // 解決・保存のどちらもスキップする。
-  useEffect(() => {
-    if (users.length <= 1) return;
-
-    const savedUserId = pendingSavedUserIdRef.current;
-    if (savedUserId !== null) {
-      pendingSavedUserIdRef.current = null;
-      const idx = users.findIndex(u => u.user_id === savedUserId);
-      if (idx !== -1) {
-        setCurrentUserIdx(idx);
-        return; // 次のレンダーで本effectが再実行され、保存処理まで進む
-      }
+  // 「きょうのすごろく」: 平日朝/夕方の生活導線UI。誘導中(自由時間・未開始・完了後
+  // 以外)はクエスト選択画面より優先して表示し、迷わず1本道で進めるようにする。
+  // #(コードレビューで発覚): 完了報告失敗時のエラートースト表示(旧handleRoutineStepComplete)
+  // がFamilyDashboard.tsx側と一字一句重複していたため、useRoutineData自体のonErrorへ集約した。
+  // runQuestActionInner(通常クエスト)と同様にエラーをトーストで示す。
+  const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(
+    currentUser.user_id,
+    (info) => handleLevelUp({ user: currentUser.name, level: info.newLevel, job: currentUser.job_class || '無職' }),
+    (detail) => {
+      showToast({ title: 'エラー', text: detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });
+      play('cancel');
+    },
+    // 大人用フローに寄せたステップ(ママの「夕食を作る」等)の即時報酬は、
+    // 元のデイリークエストを完了したときと同じ手応えになるよう演出する。
+    (reward) => {
+      play('clear');
+      showToast({ title: 'クリア！', text: `${reward.gold} G と ${reward.exp} EXP を手に入れた！`, icon: '💰' });
     }
+  );
+  const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);
 
-    // メンバーが減った等でindexが範囲外になった場合は0番目にクランプする
-    if (currentUserIdx >= users.length) {
-      setCurrentUserIdx(0);
-      return;
-    }
-
-    const user = users[currentUserIdx];
-    if (user) saveCurrentUserId(user.user_id);
-  }, [users, currentUserIdx]);
+  // #393: usersが実データに揃ったら保存済みuser_idを解決し、以後のcurrentUserIdxの
+  // 変化(ユーザー切替)を都度localStorageへ保存する(#552でuseCurrentUserへ抽出)。
+  useCurrentUser(users, currentUserIdx, setCurrentUserIdx);
 
   // ★バグ修正(M-6-2): handleApproveAllのonRetryが承認失敗時点の古いpendingQuests
   // クロージャを掴んだままになり、再試行すると既に承認済みの項目まで再承認しようとして
@@ -381,9 +241,7 @@ function App() {
     // 見る前に無条件で完了モーダルを開いていたため、申請中の無限クエストは取り消せず、
     // 完了しようとしても「すでに申請中です」のエラーになる袋小路だった。
     if (isInfinite && !pendingEntry) {
-      setConfirmUser(user);
-      setConfirmTarget(q);
-      setConfirmMode('complete');
+      openConfirm('complete', q, user);
       return;
     }
 
@@ -399,16 +257,12 @@ function App() {
       runQuestAction(user, 'cancel', { ...historyEntry, quest_title: q.title || historyEntry.quest_title });
     } else {
       // 未実施なら確認ダイアログを挟んでから完了
-      setConfirmUser(user);
-      setConfirmTarget(q);
-      setConfirmMode('complete');
+      openConfirm('complete', q, user);
     }
   };
 
   const handleBuyReward = (user: User, r: Reward) => {
-    setConfirmUser(user);
-    setConfirmTarget(r);
-    setConfirmMode('purchase');
+    openConfirm('purchase', r, user);
     play('select');
   };
 
@@ -429,9 +283,7 @@ function App() {
         // 完了処理そのもの(メダル演出・エラー表示含む)はrunQuestActionに委ねる。
         // モーダルは先に閉じ、成功/失敗の通知はトースト/エラーモーダル側で行う。
         const target = confirmTarget as Quest;
-        setConfirmMode(null);
-        setConfirmTarget(null);
-        setConfirmUser(null);
+        closeConfirm();
         await runQuestAction(actingUser, 'complete', target);
         return;
       }
@@ -469,10 +321,7 @@ function App() {
         return;
       }
 
-      setConfirmMode(null);
-      setConfirmTarget(null);
-      setConfirmUser(null);
-      setRejectReason(null);
+      closeConfirm();
     } finally {
       isConfirmingRef.current = false;
       setIsConfirming(false);
@@ -592,10 +441,8 @@ function App() {
   };
 
   const handleReject = (history: QuestHistory) => {
-    setConfirmTarget(history);
-    setConfirmMode('reject');
-    setConfirmUser(null); // reject は getRepresentativeParent で親を確定するため不要
-    setRejectReason(null);
+    // reject は getRepresentativeParent で親を確定するため confirmUser は不要
+    openConfirm('reject', history);
     play('select');
   };
 
@@ -621,6 +468,16 @@ function App() {
   if (isLoading) return <div className="p-10 text-center">Loading Family Quest...</div>;
 
   return (
+    // #659: 進行中のクエスト操作(完了通知・送信中キー・承認中id)は、以前
+    // App → FamilyDashboard → FamilyPanel → QuestList と素通しの props で
+    // 運んでいた。中継する2つは値を使わないので Context へ移した。
+    // App 直下で描画する QuestList / ApprovalList は1段なので props のまま渡す
+    // (表示専用コンポーネントの単体テストを Provider 無しで書ける状態を保つため)。
+    <QuestActivityProvider
+      completedSignal={completedSignal}
+      processingQuestKeys={processingQuestKeys}
+      busyHistoryIds={approvingHistoryIds}
+    >
     <div className="min-h-screen bg-gray-900 pb-20 font-sans text-gray-100">
       {!isOnline && (
         <div className="fixed top-0 inset-x-0 z-40 bg-red-800 text-white text-xs font-bold text-center py-1.5 flex items-center justify-center gap-2">
@@ -687,9 +544,6 @@ function App() {
             onApprove={handleApprove}
             onReject={handleReject}
             onApproveAll={handleApproveAll}
-            completedSignal={completedSignal}
-            processingQuestKeys={processingQuestKeys}
-            busyHistoryIds={approvingHistoryIds}
             isApprovingAll={isApprovingAll}
             onAvatarClick={(user) => setAvatarUser(user)}
           />
@@ -702,8 +556,8 @@ function App() {
                 (タブ切替スワイプと同じ挙動に揃える)。 */}
             <motion.div
               onPanEnd={(_e, info) => {
-                if (info.offset.x < -60 && currentUserIdx < users.length - 1) handleUserChange(currentUserIdx + 1);
-                else if (info.offset.x > 60 && currentUserIdx > 0) handleUserChange(currentUserIdx - 1);
+                if (info.offset.x < -VIEW_SWIPE_THRESHOLD_PX && currentUserIdx < users.length - 1) handleUserChange(currentUserIdx + 1);
+                else if (info.offset.x > VIEW_SWIPE_THRESHOLD_PX && currentUserIdx > 0) handleUserChange(currentUserIdx - 1);
               }}
             >
               <UserStatusCard
@@ -730,21 +584,37 @@ function App() {
               onPanEnd={(_e, info) => {
                 const order: Array<'quest' | 'shop' | 'inventory'> = ['quest', 'shop', 'inventory'];
                 const idx = order.indexOf(activeTab);
-                if (info.offset.x < -60 && idx < order.length - 1) setActiveTab(order[idx + 1]);
-                else if (info.offset.x > 60 && idx > 0) setActiveTab(order[idx - 1]);
+                if (info.offset.x < -VIEW_SWIPE_THRESHOLD_PX && idx < order.length - 1) setActiveTab(order[idx + 1]);
+                else if (info.offset.x > VIEW_SWIPE_THRESHOLD_PX && idx > 0) setActiveTab(order[idx - 1]);
               }}
             >
-              {activeTab === 'quest' && (
-                <QuestList
-                  quests={quests}
-                  completedQuests={completedQuests}
-                  pendingQuests={pendingQuests}
-                  currentUser={currentUser}
-                  onQuestClick={(q) => handleQuestClick(currentUser, q)}
-                  completedSignal={completedSignal}
-                  processingQuestKeys={processingQuestKeys}
-                  iconFirst={iconFirstUserIds.includes(currentUser.user_id)}
+              {activeTab === 'quest' && activeRoutineKey && routineFlows && (
+                <RoutineFlow
+                  flowKey={activeRoutineKey}
+                  flow={routineFlows[activeRoutineKey]}
+                  onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}
+                  isCompleting={isCompletingRoutine}
                 />
+              )}
+
+              {activeTab === 'quest' && !activeRoutineKey && (
+                <>
+                  {freeTimeRoutineKey && routineFlows && (
+                    <div className="mb-3">
+                      <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />
+                    </div>
+                  )}
+                  <QuestList
+                    quests={quests}
+                    completedQuests={completedQuests}
+                    pendingQuests={pendingQuests}
+                    currentUser={currentUser}
+                    onQuestClick={(q) => handleQuestClick(currentUser, q)}
+                    completedSignal={completedSignal}
+                    processingQuestKeys={processingQuestKeys}
+                    iconFirst={iconFirstUserIds.includes(currentUser.user_id)}
+                  />
+                </>
               )}
 
               {activeTab === 'shop' && (
@@ -767,7 +637,7 @@ function App() {
         )}
 
         {viewMode === 'familyLog' && (
-          <FamilyLog chronicle={chronicle} users={users} />
+          <FamilyLog chronicle={chronicle} users={users} initialUserId={currentUser.user_id} />
         )}
 
       </div>
@@ -785,7 +655,7 @@ function App() {
         rejectReason={rejectReason}
         onSelectRejectReason={setRejectReason}
         onConfirm={executeConfirm}
-        onCancel={() => { setConfirmMode(null); setRejectReason(null); play('cancel'); }}
+        onCancel={() => { closeConfirm(); play('cancel'); }}
         isConfirming={isConfirming}
       />
 
@@ -821,6 +691,7 @@ function App() {
       </ChunkErrorBoundary>
 
     </div>
+    </QuestActivityProvider>
   );
 }
 

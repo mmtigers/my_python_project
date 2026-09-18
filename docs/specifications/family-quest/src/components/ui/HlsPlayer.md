@@ -16,6 +16,8 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #660 で変更）** import を `hls.js` から `hls.js/light` に変更した。字幕・代替音声・EME を使わないカメラ表示用途では light ビルドで足り、`CameraDashboard` チャンクが 533KB(> 500KB 警告)から 351KB へ縮む。使用している API(`isSupported` / `Events.ERROR`・`FRAG_LOADED`・`MANIFEST_PARSED` / `ErrorTypes` / `startLoad` / `recoverMediaError`)はいずれも light ビルドに含まれる。このバージョンの `hls.js/light` は型宣言を公開していないため、`src/types/hls-light.d.ts` でフル版の型を再エクスポートしている。テストのモック先も `hls.js/light` に揃える必要がある。
+
 * `hls.js` ライブラリを用いてHLS（HTTP Live Streaming）形式の映像ストリームを`<video>`要素に再生させる汎用UIコンポーネント。
 * `Hls.isSupported()`によりブラウザ対応状況を判定し、対応していれば`hls.js`でストリームを再生、非対応かつSafariのようにネイティブHLS再生に対応するブラウザではネイティブ再生機能にフォールバックする。
 * 再生開始位置の指定、自動再生、ミュート、コントロールバー表示可否、外部からの`<video>`要素参照取得、致命的エラー時のメディア回復・エラー表示をサポートする。

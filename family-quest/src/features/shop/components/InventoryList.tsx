@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { INVENTORY_POLL_INTERVAL_MS } from '../../../lib/uiConstants';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../../../lib/apiClient';
 import { Card } from '../../../components/ui/Card';
@@ -54,7 +55,7 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     const { data, isLoading, isError, error } = useQuery({
         queryKey: queryKey,
         queryFn: () => apiClient.fetchInventory(userId),
-        refetchInterval: 5000
+        refetchInterval: INVENTORY_POLL_INTERVAL_MS
     });
     const items = data?.items;
     const cooldownAnnouncement = data?.youtube_cooldown_announcement ?? null;

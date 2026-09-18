@@ -13,7 +13,16 @@ export default defineConfig({
     useCredentials: true,
     registerType: 'autoUpdate', // ユーザーへの通知なしに自動更新（シンプル構成）
     includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'vite.svg'],
+    workbox: {
+      // #660: 既定の globPatterns は js/css/html/ico/png/svg のみで、効果音の mp3
+      // (public/*.mp3、計6ファイル 約190KB)がプリキャッシュから漏れていた。
+      // オフライン・初回タップ時に音が鳴らない/遅れる原因になるため明示的に含める。
+      globPatterns: ['**/*.{js,css,html,ico,png,svg,mp3}'],
+    },
     manifest: {
+      // #660: 既定では manifest.lang が "en" になるが、UI もコンテンツも日本語のため ja とする
+      // (index.html の <html lang="ja"> とも揃う)。
+      lang: 'ja',
       name: 'Family Quest',
       short_name: 'Quest',
       description: '家族で楽しむタスク管理RPG',

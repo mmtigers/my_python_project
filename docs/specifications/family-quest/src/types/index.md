@@ -20,6 +20,8 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #657 で訂正）** `InventoryItem` の上のコメントが参照していた `models/quest.py` の `InventoryItem` は Issue #409 で削除済みのため、対応先を「バックエンドの `/api/quest/inventory` 応答そのもの」に改めた。型の形状自体は変えていない(#659 で `inventoryResponseSchema` による実行時検証も入った)。
+
 * アプリケーション全体で使用される共通のデータ構造（型定義、インターフェース）を定義し、提供する。
 * ユーザー、クエスト、クエスト履歴、報酬、インベントリ、クエスト完了結果のドメインモデルの型を網羅している。装備・ボス・ギルド依頼・ファミリーマイレージ関連の型（`Equipment`, `Boss`, `OwnedEquipment`, `BossEffect`, `FamilyMileage`, `Bounty`）は、それらの機能自体の廃止に伴い本ファイルには存在しない。承認待ちインベントリを表す型（`PendingInventory`）も、アイテム使用時の親承認フローの廃止（2026-08-29 コミット`9d5edec`、`family-quest/CLAUDE.md`の改訂メモに記載）に伴い本ファイルには存在しない。**（YouTubeごほうび券クールダウン機能で追加）** `GET /api/quest/inventory/{user_id}`のレスポンス全体を表す`InventoryResponse`型が追加された。**（猶予期間機能で追加）** クールダウンの猶予期間中(実際の制限開始前)に表示する予告情報を表す`YoutubeCooldownAnnouncement`型も追加され、`interface`/`type`の宣言は9件になった。
 * 根拠: [インターフェース一覧・PendingInventoryの不在] (行番号: 1〜130 / 抜粋: 全文を確認し、`interface`/`type`の宣言は`ID`, `User`, `Quest`, `QuestHistory`, `Reward`, `InventoryItem`, `YoutubeCooldownAnnouncement`, `InventoryResponse`, `QuestResult`の9件のみで`PendingInventory`は存在しないことを確認)

@@ -35,39 +35,25 @@ CREATE TABLE群は0000へ移設済みで、`init_db()` は本ディレクトリ�
 ## `../current_schema.sql` との関係 (Issue #411)
 
 `MY_HOME_SYSTEM/current_schema.sql` は、実行時にはどこからも参照・実行されない
-参考ドキュメントであり、「あるべき姿」の記述として位置づける（本番DBの実機ダンプ
-ではない）。上記のとおり**このディレクトリ(`migrations/`)がスキーマの唯一の
-定義元**であり、`current_schema.sql` はそれと矛盾したり実行時の挙動を決定したり
+参考ドキュメントである。上記のとおり**このディレクトリ(`migrations/`)がスキーマの
+唯一の定義元**であり、`current_schema.sql` はそれと矛盾したり実行時の挙動を決定したり
 しない。
 
-2026-09時点で判明している既知の差分（Issue #411調査時点。解消の予定は無い）:
+**`current_schema.sql` は生成物である**(2026-09 の自動化対応で位置づけを確定):
+`init_unified_db.py --dump-schema` が、本ディレクトリの全マイグレーションを空の
+`:memory:` DB へ適用し、`sqlite_master` の `CREATE` 文を作成順に書き出す。
+`tests/test_current_schema_sql.py` が「コミット済みの内容 == 再生成結果」の完全一致を
+検証するため、マイグレーションを追加・変更した PR では必ず再生成してコミットすること:
 
-- `current_schema.sql` には `0000_baseline_schema.sql` が持つ `CREATE INDEX` 文が
-  3つ含まれていない。
-- `current_schema.sql` には baseline に存在しない列(`device_records.battery_level`、
-  `food_records.date`/`menu`/`created_at`)が含まれている。
-- (Issue #543 で追記) `current_schema.sql` 側のみ `NOT NULL` が付いている列:
-  `device_records.device_name`/`device_id`/`device_type`、`ohayo_records.user_id`/`timestamp`、
-  `daily_records.user_id`/`date`/`category`/`value`/`timestamp`、`health_records.timestamp`、
-  `car_records.timestamp`。
-- (Issue #543 で追記) `DEFAULT` が異なる列: `party_state.max_hp`(baseline `100` / current
-  `1000`)、`party_state.week_start_date`(baseline なし / current `''`)。
+```bash
+cd MY_HOME_SYSTEM && python init_unified_db.py --dump-schema
+```
 
-これらの差分は `tests/test_current_schema_sql.py::test_migrated_schema_matches_current_schema_sql_except_known_diffs`
-が「既知の差分」の許容リストとして機械的に検証しており、ここに書かれていない差分が
-生じるとテストが失敗する(差分を増減させたら README とテストの両方を更新すること)。
-
-Issue #507: 以前はここに baseline に存在しないテーブル(`haircut_history`,
-`app_rankings`, `quest_tasks`, `quest_status`, `youtube_subscriptions`)も既知の差分
-として記載していたが、いずれもリポジトリ内のどこからも読み書きされていない死蔵
-テーブルだったため(`app_rankings` だけ `services/analysis_service.py` に読み手が
-あったが、収集・書き込み側が存在せず機能として死んでいた)、オーナー判断で
-ダッシュボードの対応UIごと削除し、`current_schema.sql` からもこれら5テーブルを
-削除した。
-
-`tests/test_current_schema_sql.py` が、`migrations/*.sql` の
-`ALTER TABLE ... ADD COLUMN` で追加される列が `current_schema.sql` の
-`CREATE TABLE` 文に含まれているか(一方向のみ)を機械的にチェックしているが、
-上記のような「`current_schema.sql` にしか無い」差分は検知しない。実際のDB
-スキーマを確認する必要がある場合は、必ず本ディレクトリ(`migrations/`)を正とし、
-`current_schema.sql` を参照する場合もこの位置づけを踏まえること。
+経緯: 以前は手書きの「あるべき姿」として維持され、`migrations/` 全適用のスキーマとの
+既知差分(`CREATE INDEX` の欠落、`device_records.battery_level`・`food_records.date/menu/
+created_at` などファイル側にしか無い列、`NOT NULL`・`DEFAULT` の相違。Issue #411/#543)を
+README とテストの許容リストで管理していた。生成物化に伴いこれらの差分は解消され
+(ファイル側にしか無かった列・制約は、`migrations/` に存在しない以上 実 DB にも存在しない
+ため削除した)、許容リストも撤去した。Issue #507 で削除した死蔵テーブル
+(`haircut_history`, `app_rankings`, `quest_tasks`, `quest_status`, `youtube_subscriptions`)
+も `migrations/` に無いため含まれない。

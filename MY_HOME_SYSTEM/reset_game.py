@@ -5,6 +5,8 @@ import sqlite3
 import traceback
 from datetime import datetime
 
+import requests
+
 import config
 
 # --- 設定 ---
@@ -15,6 +17,8 @@ import config
 # 操作する、SQLITE_DB_PATH環境変数での差し替え運用時に本番と異なるファイルを
 # リセットする、といったリスクがあったため、他のスクリプトと同じconfig.SQLITE_DB_PATH
 # を参照するよう統一する。
+# #547: リセット自体はAPI経由になったが、対象ユーザー一覧の表示(読み取りのみで
+# 承認処理との交錯の危険がない)は引き続きこのDBを直接読む。
 DB_PATH = config.SQLITE_DB_PATH  # DBファイルパス
 # Q-L8(#409): 以前は CWD 相対の "logs" だったため、実行場所によって別のディレクトリに
 # ログが作られていた。他スクリプトと同じく config.LOG_DIR を使う。
@@ -27,6 +31,29 @@ NAME_MAP = {
     "智矢": "son",
     "涼花": "daughter"
 }
+
+# Issue #547: 本スクリプトはunified_serverとは別プロセスで動くため、サービス層の
+# ユーザー単位ロック(_user_balance_locks)を稼働中のサーバーと共有できない。以前は
+# BEGIN IMMEDIATEでDB側の原子性のみを確保して直接quest_users/quest_history/
+# user_inventoryを書き換えていたが、承認処理(process_approve_quest等のSELECT→
+# Pythonで計算→絶対値SET)と交錯すると、承認側のUPDATEがリセット結果を上書きしうる
+# 欠陥が残っていた。リセット処理自体はサーバーのAPI(routers/quest_router.py の
+# POST /api/quest/admin/reset_user、services/quest/user_service.py の
+# UserService.reset_user_data。承認等と同じ_get_user_balance_lockの中で実行される)
+# を呼ぶ薄いクライアントに置き換え、サーバー側のロックに参加させることで解消する。
+# サーバー未起動時に直接DBを書き換えるフォールバックは持たない(このIssueの目的は
+# 稼働中サーバーとの交錯を防ぐことであり、フォールバックを残すと同じ欠陥のある
+# コードパスを温存することになるため。サーバーを起動してから実行することを促す)。
+# ベースURLはconfig.RESET_GAME_API_BASE_URL(環境変数RESET_GAME_API_BASE_URLで上書き可、
+# 未設定時はループバックアドレス)を参照する。
+RESET_USER_API_PATH = "/api/quest/admin/reset_user"
+RESET_API_TIMEOUT_SECONDS = 10
+
+# quest_users.roleの値。リセットAPI呼び出し時のadmin_id(role_adultであることが
+# サーバー側で必須)を自動選択するために使う。services/quest/locks.pyのROLE_ADULTと
+# 同じ文字列だが、本スクリプトはサービス層をimportしない独立した対話スクリプトの
+# ため、値をここに複製している。
+ROLE_ADULT = "role_adult"
 
 # --- ログ設定 ---
 log_file = os.path.join(LOG_DIR, f"reset_game_{datetime.now().strftime('%Y%m%d')}.log")
@@ -62,23 +89,26 @@ def get_db_connection():
 
 def fetch_users():
     """
-    DBからユーザー情報を取得し、表示用のリストを作成する
+    DBからユーザー情報を取得し、表示用のリストを作成する。
+
+    #547: role列も取得する。リセットAPI呼び出し時にadmin_id(role_adultの
+    ユーザー)を自動選択するために必要。
     """
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        cursor.execute("SELECT user_id, name FROM quest_users")
+
+        cursor.execute("SELECT user_id, name, role FROM quest_users")
         rows = cursor.fetchall()
-        
+
         users_info = []
         for row in rows:
             u_id = row['user_id']
             u_name = row['name']
             display_name = u_name if u_name else u_id
-            users_info.append({"id": u_id, "name": display_name})
-            
+            users_info.append({"id": u_id, "name": display_name, "role": row['role']})
+
         return users_info
 
     except Exception as e:
@@ -133,68 +163,76 @@ def select_user_interactive(users_info):
         
         print("無効な入力です。リストの番号を入力してください。")
 
-def reset_user_data(target_user):
+def _find_admin_user_id(users_info):
+    """role_adultの最初のユーザーIDを返す。見つからなければNoneを返す(#547)。"""
+    for u in users_info:
+        if u.get("role") == ROLE_ADULT:
+            return u["id"]
+    return None
+
+
+def reset_user_data(target_user, users_info, base_url=None):
     """
-    指定されたユーザーのゲームデータをリセットする
+    指定されたユーザーのゲームデータを、サーバーのリセットAPI経由でリセットする。
+
+    #547: admin_id(role_adultであることがサーバー側で必須)は、users_info
+    (fetch_usersの戻り値)からrole_adultの最初のユーザーを自動選択する。
+    本スクリプトは家庭内の管理者が端末に直接アクセスして実行する対話スクリプトの
+    ため、実行者を別途選択させる入力は追加しない。
     """
     user_id = target_user['db_id']
     user_label = target_user['label']
-    
-    logging.info(f"ユーザー '{user_label}' (ID: {user_id}) のリセット処理を開始します。")
-    
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
 
-        # Issue #544: 本スクリプトは unified_server とは別プロセスで動くため、サービス層の
-        # ユーザー単位ロック(_user_balance_locks)の外で実行される。せめてDB側では
-        # BEGIN IMMEDIATE で先に書き込みロックを取り、以下の UPDATE/DELETE を1トランザクションで
-        # 確定させる(承認処理の SELECT→絶対値 SET と交錯しても、途中状態が見えないようにする)。
-        cursor.execute("BEGIN IMMEDIATE")
+    if base_url is None:
+        # 呼び出し時点のconfig.RESET_GAME_API_BASE_URLを見る(defaultをdef時点で
+        # 束縛すると、テストでのmonkeypatch.setattr(config, ...)が反映されない)。
+        base_url = config.RESET_GAME_API_BASE_URL
 
-        # ★修正箇所: medal_count = 0 を追加
-        cursor.execute("""
-            UPDATE quest_users 
-            SET level = 1, exp = 0, gold = 0, medal_count = 0 
-            WHERE user_id = ?
-        """, (user_id,))
-        
-        if cursor.rowcount == 0:
-            conn.rollback()
-            logging.warning(f"ID '{user_id}' のデータが見つかりませんでした。")
-            print(f"⚠️ 注意: データが見つかりませんでした。")
-        else:
-            # Issue #544: 以前は quest_users のみゼロ化し、approved の quest_history と
-            # user_inventory を残していた。そのためリセット後も「本日完了済み」表示が続き、
-            # リセット前の履歴を取り消そうとすると #356 のガード(残高 < 付与額)で拒否されて
-            # 混乱していた。履歴とインベントリも同じトランザクションで削除する。
-            # reward_history(購入ログ)は残高に影響しない監査用の記録のため対象外。
-            cursor.execute("DELETE FROM quest_history WHERE user_id = ?", (user_id,))
-            deleted_history = cursor.rowcount
-            cursor.execute("DELETE FROM user_inventory WHERE user_id = ?", (user_id,))
-            deleted_inventory = cursor.rowcount
-            conn.commit()
-            logging.info(
-                f"DB更新成功: {user_label} のデータをリセットしました。"
-                f"(quest_history {deleted_history}件, user_inventory {deleted_inventory}件を削除)"
-            )
-            # メッセージにもメダルリセットを含める
-            print(
-                f"\n✅ {user_label} さんのデータをリセットしました "
-                f"(Level=1, Exp=0, Gold=0, Medal=0, クエスト履歴 {deleted_history}件削除, "
-                f"インベントリ {deleted_inventory}件削除)。"
-            )
-        
-    except Exception as e:
-        error_msg = f"リセット処理中にエラーが発生: {str(e)}"
-        logging.error(error_msg)
-        logging.error(traceback.format_exc())
-        print(f"\n❌ エラーが発生しました。ログを確認してください: {log_file}")
+    admin_id = _find_admin_user_id(users_info)
+    if not admin_id:
+        logging.error("role_adultのユーザーが見つからないため、リセットAPIを呼び出せません。")
+        print("\n❌ 管理者(role_adult)のユーザーが見つかりませんでした。")
         sys.exit(1)
-    finally:
-        if conn:
-            conn.close()
+
+    url = f"{base_url}{RESET_USER_API_PATH}"
+    logging.info(f"ユーザー '{user_label}' (ID: {user_id}) のリセットをAPI({url})経由で実行します。")
+
+    try:
+        resp = requests.post(
+            url,
+            json={"admin_id": admin_id, "target_user_id": user_id},
+            timeout=RESET_API_TIMEOUT_SECONDS,
+        )
+    except requests.exceptions.RequestException as e:
+        logging.error(f"リセットAPI呼び出しに失敗しました: {e}")
+        print(
+            "\n❌ サーバーに接続できませんでした。unified_serverが起動しているか確認してください。"
+            f"\n   詳細はログを確認してください: {log_file}"
+        )
+        sys.exit(1)
+
+    if resp.status_code == 404:
+        logging.warning(f"ID '{user_id}' のデータが見つかりませんでした。")
+        print("⚠️ 注意: データが見つかりませんでした。")
+        return
+
+    if not resp.ok:
+        logging.error(f"リセットAPIがエラーを返しました: status={resp.status_code}, body={resp.text}")
+        print(f"\n❌ エラーが発生しました({resp.status_code})。ログを確認してください: {log_file}")
+        sys.exit(1)
+
+    body = resp.json()
+    deleted_history = body.get("deletedHistoryCount", 0)
+    deleted_inventory = body.get("deletedInventoryCount", 0)
+    logging.info(
+        f"リセット成功: {user_label} のデータをリセットしました。"
+        f"(quest_history {deleted_history}件, user_inventory {deleted_inventory}件を削除)"
+    )
+    print(
+        f"\n✅ {user_label} さんのデータをリセットしました "
+        f"(Level=1, Exp=0, Gold=0, Medal=0, クエスト履歴 {deleted_history}件削除, "
+        f"インベントリ {deleted_inventory}件削除)。"
+    )
 
 def main():
     _setup_logging()
@@ -221,7 +259,7 @@ def main():
         print("キャンセルしました。")
         sys.exit(0)
 
-    reset_user_data(selected)
+    reset_user_data(selected, users_info)
 
 if __name__ == "__main__":
     main()

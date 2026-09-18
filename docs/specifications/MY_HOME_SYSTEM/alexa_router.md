@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a1d2738` |
 
 ## 関連ドキュメント
 
@@ -167,6 +168,13 @@ graph TD
 | --- | --- | --- |
 | `skill`オブジェクトの内部実装(ハンドラ一覧、`serializer`の詳細) | `handlers/alexa_handler.py`を直接解析していないため、`LaunchRequestHandler`以外にどのようなインテント/リクエストハンドラが登録されているか、`serializer.deserialize`/`serialize`が対応する型の範囲が不明。 | `handlers/alexa_handler.py` |
 | `unified_server.py`側のマウント設定 | 本ルーターがどのprefixで、どのミドルウェア例外パス設定と共にマウントされているかが不明。 | `unified_server.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `skill`オブジェクトの内部実装(ハンドラ一覧、`serializer`の詳細) | `MY_HOME_SYSTEM/handlers/alexa_handler.py`を直接確認した。`SkillBuilder`(`sb`)に登録されているリクエストハンドラは**`LaunchRequestHandler`(88行目)・`HelpIntentHandler`(137行目)・`CancelOrStopIntentHandler`(153行目)・`FallbackIntentHandler`(171行目)・`NavigateHomeIntentHandler`(187行目)・`SessionEndedRequestHandler`(201行目)の6つ**で、この順に`sb.add_request_handler(...)`される(229〜234行目)。加えて`CatchAllExceptionHandler`(209行目)が`sb.add_exception_handler(...)`で登録されており(235行目)、**ハンドラ内で発生した例外はスキル内で捕捉されて通常のAlexa応答に変換される**。したがって本ファイルの`except Exception`→500は、`skill.invoke`より手前(デシリアライズ失敗等)や`CatchAllExceptionHandler`自身の失敗といった例外的経路でのみ発動する。実質的な処理は`LaunchRequestHandler`のみが行い(`_build_family_datasource`→APL `RenderDocumentDirective`または読み上げフォールバック)、残りは定型応答である。`serializer`は`ask_sdk_core`の`SkillBuilder`が組み立てた既定のシリアライザで、本リポジトリ内に独自実装は存在しない(本ファイルが`obj_type="ask_sdk_model.request_envelope.RequestEnvelope"`を明示的に渡しているのはこのためである)。 | 直接ソース確認: `MY_HOME_SYSTEM/handlers/alexa_handler.py:88-235`（参考: [alexa_handler.md](./alexa_handler.md)） |
+| `unified_server.py`側のマウント設定 | `MY_HOME_SYSTEM/unified_server.py`を直接確認した。30行目で`from routers import quest_router, webhook_router, system_router, camera_router, alexa_router, routine_router`、337行目で`app.include_router(alexa_router.router, tags=["alexa"])`と登録されている。**`prefix`は指定されていない**ため、本ファイルの`@router.post("/webhook/alexa")`はそのまま`POST /webhook/alexa`として公開される(他のルーターが`prefix="/api/quest"`等を持つのと対照的)。ミドルウェアについては、`ip_restriction_middleware`(253行目〜)の無条件許可パス`allowed_webhook_paths`は`{"/webhook/switchbot", "/callback/line"}`の2つのみ(276〜278行目)で、**`/webhook/alexa`は含まれていない**。ただし同ミドルウェアは非プライベートIPをブロックせずINFOログを残して通過させる設計(Issue #321・2026-09-03決定)のため、Alexaクラウドからのリクエストが拒否されることはなく、アクセスログにAlexa由来のIPが記録されるという違いのみが生じる。例外ハンドラは`@app.exception_handler(Exception)`(324〜331行目)のみで、本ファイルが送出する`HTTPException(400/500)`はStarlette既定のハンドラがそのまま返す。 | 直接ソース確認: `MY_HOME_SYSTEM/unified_server.py:30, 253-281, 324-331, 337`（参考: [unified_server.md](./unified_server.md)） |
 
 ## 10. 自己検証結果
 

@@ -19,6 +19,7 @@ import os
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, BrokenExecutor
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -158,3 +159,56 @@ def test_sigterm_terminates_running_children(monkeypatch):
     assert stopped == 1
     assert proc.terminated is True
     assert "monitors/fake_long_task.py" not in scheduler_boot._running_children
+
+
+def test_intentional_terminate_logs_info_not_error(monkeypatch):
+    """#575回帰防止: terminate_running_children による意図的な停止は、
+    run_scriptがreturncode<0(SIGTERM由来の-15等)を「タスク失敗」としてERROR
+    (→Discord通知)にせず、INFOでログを残すこと。"""
+    started = threading.Event()
+    release = threading.Event()
+
+    class _BlockingPopen(_FakePopen):
+        def __init__(self):
+            super().__init__(returncode=None)
+            self.terminated = False
+
+        def wait(self, timeout=None):
+            started.set()
+            release.wait(timeout=5)
+            self.returncode = -15
+            return self.returncode
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+            release.set()
+
+    proc = _BlockingPopen()
+    real_exists = os.path.exists
+    monkeypatch.setattr(
+        scheduler_boot.os.path, "exists",
+        lambda path: True if "fake_long_task.py" in str(path) else real_exists(path),
+    )
+    monkeypatch.setattr(scheduler_boot.subprocess, "Popen", lambda *a, **kw: proc)
+
+    mock_logger = MagicMock()
+    monkeypatch.setattr(scheduler_boot, "logger", mock_logger)
+
+    result_holder = {}
+
+    def _run():
+        result_holder["result"] = scheduler_boot.run_script("monitors/fake_long_task.py", [])
+
+    t = threading.Thread(target=_run)
+    t.start()
+    assert started.wait(timeout=5)
+
+    scheduler_boot.terminate_running_children()
+    t.join(timeout=5)
+
+    assert result_holder["result"] is False
+    mock_logger.error.assert_not_called()
+    assert any("terminated intentionally" in call.args[0] for call in mock_logger.info.call_args_list)

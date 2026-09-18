@@ -8,7 +8,9 @@
 
 ## 0. 対応状況（2026-09-02追記・Issue #323）
 
-> **状態管理の方針**: 残件の状態管理の正は**GitHub Issue**に一本化する。本レポート（および他のレビューレポート）は「レビュー時点の歴史的記録+未解決項目のIssueへのポインタ」であり、以下の表はIssue #323時点のスナップショット。以後の最新状態は各Issueを参照すること。
+> **状態管理の方針**: 残件の状態管理の正は**GitHub Issue**に一本化する。本レポート（および他のレビューレポート）は「レビュー時点の歴史的記録+未解決項目のIssueへのポインタ」であり、以下の表はIssue #323時点のスナップショット（状態欄は2026-09-16棚卸しで更新済み）。
+
+> **⚠️ 追跡先Issueのクローズについて（2026-09-16棚卸し）**: 上記方針の「正はGitHub Issue」は、**そのIssueがオープンである間だけ**成立する。実際には本表が指すIssue(#318/#323/#327/#328/#355/#614等)はすべてクローズ済みであり、表の記述だけが当時のまま残って追跡不能になっていた。このため2026-09-16に各項目を現行コードと突き合わせて棚卸しし、表の状態欄を更新した。以後も同じことが起きうるため、**Issueがクローズされている項目は、Issueではなく本表の記述と実際のコードを正とすること**。
 
 High 12件+M-10-1のコード照合結果（2026-09-02、Issue #323の調査に基づく）:
 
@@ -17,7 +19,7 @@ High 12件+M-10-1のコード照合結果（2026-09-02、Issue #323の調査に�
 | H-1 | `get_db_cursor`のリトライ機構破綻 | ✅ 対応済み | `core/database.py`にロック時リトライ実装済み |
 | H-2 | 新規/再構築DBの承認フロー無効化・新規構築パス崩壊 | ✅ 対応済み | `migrations/0001`(roleカラム+`role_adult`補正)等で解消 |
 | H-3 | 承認・取消・アイテム経路のread-modify-writeレース | ✅ 対応済み | `services/quest_service.py`に`_completion_locks`/`_user_balance_locks`によるキー別排他を実装済み |
-| H-4 | SwitchBot Webhookの実ペイロード形式不一致の疑い | 🔲 **未解決** | 実機ログでの確認が必要 → **Issue #328**（`blocked:実機作業`） |
+| H-4 | SwitchBot Webhookの実ペイロード形式不一致の疑い | ✅ 対応済み（2026-09-06・Issue #328） | 実機で4種のデバイス(WoContact/WoPresence/WoMeterPlus/WoFan2)の実ペイロードを収集した結果、`models/switchbot.py`の`SwitchBotContext`が既に定義済みの全フィールドの範囲に収まり、未知フィールドは検出されなかった（追加の厳密化は不要と判断）。なお調査の過程で、Cloudflare Accessが`/webhook/switchbot`・`/callback/line`自体をブロックしておりWebhookがサーバーに届いていなかったことが判明し、別途Issue #517で対応済み。**残**: `DeviceStatusResponse.body: Dict[str, Any]`(`MY_HOME_SYSTEM/models/switchbot.py:39`)は、Webhookではなく`GET /v1.1/devices/{id}/status`のレスポンス用フィールドで、本Issueの調査では解消できない別件として現存する（Issue化されていない） |
 | H-5 | アイテム「承認待ち」フローの断絶 | ✅ 対応済み | — |
 | H-6 | AIツールのSQL許可テーブル検査のカンマ結合回避 | ✅ 対応済み | — |
 | H-7 | DB保存失敗の握りつぶし・虚偽の成功応答 | ✅ 対応済み | — |
@@ -28,7 +30,7 @@ High 12件+M-10-1のコード照合結果（2026-09-02、Issue #323の調査に�
 | H-12 | DDD `extract_youtube_urls.py`のCWD依存フォールバック | ✅ 対応済み | — |
 | M-10-1 | `test.yml`に`permissions:`ブロックが無い | ✅ 対応済み | `permissions: contents: read`を明示済み（`test.yml`冒頭） |
 
-- **「5. 品質向上ロードマップ」のPhase 3（スキーマ管理一本化・設定一本化・NASブロッキング分離等）は未着手** → **Issue #330**（`priority:medium`）で追跡。
+- **「5. 品質向上ロードマップ」のPhase 3**: 2026-09-16棚卸しの結果、**5項目すべてが完了または方針確定済み**であることを確認した（当時の「未着手」という記述は既に正しくない）。(1) スキーマ管理の`migrations/`一本化は**完了**（Issue #330。ただし`init_unified_db.py`は「廃止」ではなく、マイグレーション適用と検証のみを行う薄いラッパーとして残す形になった。空DBからの構築検証は`tests/test_migrations.py`・`tests/test_current_schema_sql.py`が担う）。(2) H-10 認証境界の実装は、Issue #321の案B（エッジのCloudflare Access委譲）採用により**実装しない方針で確定**。(3) 設定の一本化は**完了**（CORS許可オリジンは`config.CORS_ORIGINS`の1箇所のみ／`ENABLE_APPROVAL_FLOW`は撤去済み／config import時のNASブロッキングはPEP 562の`__getattr__`による遅延解決＋`prewarm_nas_paths()`で分離済み）。(4) タイムラプス/監視ジョブの排他制御は**完了**（`monitors/smart_timelapse_generator.py`の`timelapse_job_lock()`）。(5) フロントエンドのvitest導入は**完了**（CIの`frontend`ジョブで`npm test`を実行）。
 - Medium各グループ（M-1〜M-10）の個別項目は多くが個別修正済みだが、本表では網羅照合していない。未解決と判明したものは都度Issue化する方針（上記のとおりIssueが正）。
 
 ---

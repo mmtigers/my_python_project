@@ -84,7 +84,7 @@
 ### [軽微・未対応] `MY_HOME_SYSTEM/`・`DDD/`にトップレベルREADMEが無い
 `family-quest/README.md`は存在するが、より大規模な2つのPythonサブプロジェクトにはディレクトリ構成やDDDという略称の意味を説明するREADMEがない。追加を推奨するが、内容作成は本レビューのスコープ外とした。
 
-### [軽微・未対応] `docs/merge_mds.py`が`docs/`直下に混在
+### [軽微・対応済み] `docs/merge_mds.py`が`docs/`直下に混在(ファイルは削除済み)
 Markdownを1ファイルに結合する開発者個人用スクリプトと見られ、CIスクリプト（`.github/scripts/`配下）とは性質が異なる。移動先候補は`.github/scripts/`または新設の`scripts/`だが、用途が本人以外に不明なため削除も含めて所有者の判断が必要。
 
 ### [軽微・未対応] `family-quest`にテストディレクトリが存在しない

@@ -37,7 +37,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `migrations/*.sql`ファイルの内容 | 各マイグレーションファイル自体は本ファイルの解析範囲外であり、実際にどのようなDDL/DML(ALTER TABLE等)が実行されるかは提供されていないため。 | 根拠: `[sql読み込み・実行]` (行番号: 73〜78 / 抜粋: "with open(path, \"r\", encoding=\"utf-8\") as f:\n            sql = f.read()") |
-| `conn`(呼び出し元から渡される`sqlite3.Connection`) | 接続オブジェクトがどのDBファイルに対して開かれているか、どのようなisolation_level等の設定かは呼び出し元の実装に依存し、本ファイルからは不明であるため。 | 根拠: `[apply_pending_migrations引数]` (行番号: 53 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:") |
+| `conn`(呼び出し元から渡される`sqlite3.Connection`) | 接続オブジェクトがどのDBファイルに対して開かれているか、どのようなisolation_level等の設定かは呼び出し元の実装に依存し、本ファイルからは不明であるため。 | 根拠: `[apply_pending_migrations引数]` (行番号: 97 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -48,7 +48,7 @@
 
 
 * **引数/リクエスト**: `conn` (`sqlite3.Connection`。テーブル作成対象のDB接続)
-* 根拠: `[関数シグネチャ]` (行番号: 32 / 抜粋: "def _ensure_tracking_table(conn: sqlite3.Connection) -> None:")
+* 根拠: `[関数シグネチャ]` (行番号: 42 / 抜粋: "def _ensure_tracking_table(conn: sqlite3.Connection) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -60,7 +60,7 @@
 
 
 * **エラーハンドリング**: なし(例外捕捉は行われていない)
-* 根拠: `[関数本体]` (行番号: 32〜39 / 抜粋: "def _ensure_tracking_table(conn: sqlite3.Connection) -> None:")
+* 根拠: `[関数本体]` (行番号: 42〜49 / 抜粋: "def _ensure_tracking_table(conn: sqlite3.Connection) -> None:")
 
 
 ### `_applied_versions`
@@ -70,7 +70,7 @@
 
 
 * **引数/リクエスト**: `conn` (`sqlite3.Connection`。問い合わせ対象のDB接続)
-* 根拠: `[関数シグネチャ]` (行番号: 42 / 抜粋: "def _applied_versions(conn: sqlite3.Connection) -> Set[str]:")
+* 根拠: `[関数シグネチャ]` (行番号: 52 / 抜粋: "def _applied_versions(conn: sqlite3.Connection) -> Set[str]:")
 
 
 * **戻り値/レスポンス**: `Set[str]`(適用済みマイグレーションファイル名の集合)
@@ -78,11 +78,11 @@
 
 
 * **副作用**: なし(読み取り専用のクエリ実行)
-* 根拠: `[関数本体]` (行番号: 42〜44 / 抜粋: "def _applied_versions(conn: sqlite3.Connection) -> Set[str]:")
+* 根拠: `[関数本体]` (行番号: 52〜54 / 抜粋: "def _applied_versions(conn: sqlite3.Connection) -> Set[str]:")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[関数本体]` (行番号: 42〜44 / 抜粋: "def _applied_versions(conn: sqlite3.Connection) -> Set[str]:")
+* 根拠: `[関数本体]` (行番号: 52〜54 / 抜粋: "def _applied_versions(conn: sqlite3.Connection) -> Set[str]:")
 
 
 ### `_discover_migration_files`
@@ -92,7 +92,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[関数シグネチャ]` (行番号: 47 / 抜粋: "def _discover_migration_files() -> List[str]:")
+* 根拠: `[関数シグネチャ]` (行番号: 57 / 抜粋: "def _discover_migration_files() -> List[str]:")
 
 
 * **戻り値/レスポンス**: `List[str]`(ファイル名昇順の`.sql`ファイル名リスト、ディレクトリ不在時は`[]`)
@@ -100,7 +100,7 @@
 
 
 * **副作用**: なし(ファイルシステムの読み取りのみ)
-* 根拠: `[関数本体]` (行番号: 47〜50 / 抜粋: "def _discover_migration_files() -> List[str]:")
+* 根拠: `[関数本体]` (行番号: 57〜60 / 抜粋: "def _discover_migration_files() -> List[str]:")
 
 
 * **エラーハンドリング**: `MIGRATIONS_DIR`が存在しない場合は例外を発生させず空リストを返す。それ以外の例外(パーミッションエラー等)は捕捉されない。
@@ -110,12 +110,12 @@
 ### `_strip_line_comment`
 
 * **役割**: 1行から`--`以降の行コメントを除去する（**#411 品質で追加**）。シングルクォート文字列中に現れる`-`はコメント開始と誤認しないよう、単純な状態機械でクォート内かどうかを追跡する。
-* 根拠: `def _strip_line_comment(line: str) -> str:` (行番号: 53〜65)
+* 根拠: `def _strip_line_comment(line: str) -> str:` (行番号: 63〜75)
 
 ### `_split_statements`
 
 * **役割**: マイグレーションSQL文字列を`;`区切りでステートメント単位のリストに分割する（Issue #99で新設）。空白のみの要素は除外する。このリポジトリのマイグレーション規約(`migrations/README.md`)が「`ALTER TABLE ... ADD COLUMN`を先頭に、後続はシンプルな`UPDATE`」という単純な構成のみを前提としているため、文字列/BLOBリテラル内にセミコロンを含むような複雑な文は考慮しない。**（#411 品質で修正）** ただしこのリポジトリの規約(コメント・docstringは日本語で書く)ではALTER文の前に長い日本語の説明コメントを書くことが多く、そのプローズ文中に句点代わりのセミコロンが登場するとコメントを読み切る前に誤って分割されてしまう恐れがあった。`;`で分割する前に各行を`_strip_line_comment`で処理し、行コメント内のセミコロンが分割点にならないようにした。
-* 根拠: `def _split_statements(sql: str) -> List[str]:` (行番号: 68〜84 / 抜粋: "cleaned = \"\\n\".join(_strip_line_comment(line) for line in sql.splitlines())")
+* 根拠: `def _split_statements(sql: str) -> List[str]:` (行番号: 78〜94 / 抜粋: "cleaned = \"\\n\".join(_strip_line_comment(line) for line in sql.splitlines())")
 * **引数/リクエスト**: `sql: str`(マイグレーションファイルの全文)
 * 根拠: (行番号: 68)
 * **戻り値/レスポンス**: `List[str]`(前後の空白を除去したステートメント文字列のリスト。空要素は含まない)
@@ -128,11 +128,11 @@
 ### `apply_pending_migrations`
 
 * **役割**: 追跡テーブルの確保、適用済みバージョンの取得を行った上で、未適用の`.sql`ファイルをファイル名昇順で1件ずつ読み込み、`_split_statements`でステートメント単位に分割して1文ずつ`conn.execute`で実行し、成功時は`schema_migrations`に記録する（Issue #99: 以前は`conn.executescript(sql)`でスクリプト全体を一度に実行していたため、先頭の`ALTER TABLE`が「duplicate column」で失敗するとその時点でスクリプト全体の実行が中断され、後続のデータ移行文(`UPDATE`等)が1文も実行されないままマイグレーション全体が適用済み記録されてしまっていた)。ステートメントごとの`sqlite3.OperationalError`発生時は、モジュールレベルの`_ALREADY_APPLIED_ERROR_PATTERNS`(`"duplicate column"`, `"already exists"`)に該当する既知のエラー文言の場合のみ警告ログを出してそのステートメントをスキップし、後続の文の実行を継続する。ファイル全体としてそれ以外の`OperationalError`が発生した場合は`conn.rollback()`したうえでエラーログを出力し、バージョンを記録せずそのまま再送出して起動処理自体を失敗させる（M-2で導入された選別ロジック自体は維持したまま、Issue #99でステートメント単位の粒度に変更）。
-* 根拠: `[apply_pending_migrations]` (行番号: 87〜136 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:")
+* 根拠: `[apply_pending_migrations]` (行番号: 97〜146 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:")
 
 
 * **引数/リクエスト**: `conn` (`sqlite3.Connection`。マイグレーションを適用する対象のDB接続)
-* 根拠: `[関数シグネチャ]` (行番号: 66 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:")
+* 根拠: `[関数シグネチャ]` (行番号: 97 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -216,7 +216,7 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `migrations/0001_add_quest_users_role.sql`ほか`migrations/`配下の各`.sql`ファイル | 実際に適用されるDDL/DML内容を確認し、`apply_pending_migrations`が処理する対象の実体を把握するため。 | 根拠: `[sql読み込み]` (行番号: 91〜93 / 抜粋: "path = os.path.join(MIGRATIONS_DIR, filename)\n        with open(path, \"r\", encoding=\"utf-8\") as f:") |
 | 高 | `unified_server.py` | `apply_pending_migrations`の実際の呼び出しタイミング(起動シーケンス上の位置)と渡される`conn`の生成元を確認するため。 | 根拠: `[モジュールdocstring, MIGRATIONS_DIR]` (行番号: 1〜15 / 抜粋: "本モジュールは migrations/ 配下の *.sql ファイルをファイル名の昇順で適用し") |
-| 中 | `services/quest_service.py` | モジュールdocstringで言及されている、従来の場当たり的なスキーマ変更処理(`sync_master_data()`)との後方互換関係を確認するため。 | 根拠: `[モジュールdocstring]` (行番号: 5〜8, 12〜15 / 抜粋: "既存の quest_service.py 側の実行時チェックは、init_db() を経由しない\n既存の本番運用パス") |
+| 中 | `services/quest_service.py` | モジュールdocstringで言及されている、従来の場当たり的なスキーマ変更処理(`sync_master_data()`)との関係を確認するため(Issue #330 で完全退役済み)。 | 根拠: `[モジュールdocstring]` (行番号: 5〜8, 12〜15 / 抜粋: "quest_service.py 側にあった上記の実行時チェックは Issue #330 で完全に退役済み") |
 
 ## 8. 保守上の注意点
 
@@ -224,8 +224,8 @@ graph TD
 * **[修正済み] 文言判定の部分一致による誤検知の恐れ（Issue #440）**: 以前は`_ALREADY_APPLIED_ERROR_PATTERNS = ("duplicate column", "already exists")`という文字列タプルへの`str(e).lower()`の部分一致(`in`演算子)で判定していたため、無関係なエラーメッセージにたまたま`"already exists"`等の文字列が含まれる場合に誤って「適用済み」とみなされる恐れがあった。現在は`re.compile(r"^duplicate column name: \S")`、`re.compile(r"^table \S+ already exists$")`、`re.compile(r"^index \S+ already exists$")`という、SQLiteが実際に返す既知のエラー文言の形に先頭(`^`)・末尾(`$`)までアンカーした正規表現のタプルに置き換えられ、`pattern.search(message)`で判定するようになったため、この誤検知の余地は解消された。 根拠: `[_ALREADY_APPLIED_ERROR_PATTERNS定義]` (行番号: 35〜39)、`[内側except: ステートメント単位の判定]` (行番号: 131〜134 / 抜粋: "if not any(pattern.search(message) for pattern in _ALREADY_APPLIED_ERROR_PATTERNS):\n                        raise")
 * **`OperationalError`以外の例外は未捕捉**: マイグレーションSQL実行時に`sqlite3.IntegrityError`など`OperationalError`以外の例外が発生した場合は、内側・外側いずれの`try`でも捕捉されず、そのまま呼び出し元(`unified_server.py`等の起動処理)に伝播し、起動処理自体を止める可能性がある。 根拠: `[except節がOperationalErrorのみ(内側/外側とも)]` (行番号: 100, 112 / 抜粋: "except sqlite3.OperationalError as e:")
 * **旧来のスキーマ変更経路は完全退役済み（#411 品質でdocstringの記述を訂正）**: `quest_service.py`側にあった「SELECTを試して失敗したらALTER TABLE」式の実行時チェックは、以前このモジュールのdocstringで「後方互換のためあえて残している」と説明されていたが、実際にはIssue #330で既に完全に退役済み(`quest_service.sync_master_data`のコメント参照)であり、モジュールdocstringが実態と乖離した記述のまま残っていた。migrations/(0000ベースライン+0001以降)がスキーマの唯一の定義元であることをdocstringに明記するよう訂正した。 根拠: `[モジュールdocstring]` (行番号: 10〜15)、`MY_HOME_SYSTEM/services/quest_service.py`の`sync_master_data`内コメント(「Issue #330: 以前ここにあった...レガシー実行時マイグレーション...は完全退役した」)
-* **ファイル名の辞書式ソートに依存**: マイグレーションの適用順序は`sorted()`によるファイル名の辞書式ソートに完全依存しており(行番号50)、ファイル名の命名規則(`0001_`, `0002_`等の連番プレフィックス)が崩れると適用順序が意図と異なる可能性がある。 根拠: `[sorted]` (行番号: 50 / 抜粋: "return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(\".sql\"))")
-* **`_split_statements`は文字列/BLOBリテラル内のセミコロンを考慮しない単純な`;`分割**: `migrations/README.md`が定める「ALTER TABLE ADD COLUMNを先頭に、後続はシンプルなUPDATE」という規約の範囲では問題ないが、将来的に文字列リテラル中に`;`を含むデータ移行文(例: `UPDATE ... SET description = '...; ...'`)を書くと、意図しない位置で文が分割され構文エラーになる可能性がある。SQLパーサを使わない素朴な実装であることに留意が必要。 根拠: `[_split_statements]` (行番号: 53〜63 / 抜粋: "return [s.strip() for s in sql.split(\";\") if s.strip()]")
+* **ファイル名の辞書式ソートに依存**: マイグレーションの適用順序は`sorted()`によるファイル名の辞書式ソートに完全依存しており(行番号60)、ファイル名の命名規則(`0001_`, `0002_`等の連番プレフィックス)が崩れると適用順序が意図と異なる可能性がある。 根拠: `[sorted]` (行番号: 60 / 抜粋: "return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(\".sql\"))")
+* **`_split_statements`は文字列/BLOBリテラル内のセミコロンを考慮しない単純な`;`分割**: `migrations/README.md`が定める「ALTER TABLE ADD COLUMNを先頭に、後続はシンプルなUPDATE」という規約の範囲では問題ないが、将来的に文字列リテラル中に`;`を含むデータ移行文(例: `UPDATE ... SET description = '...; ...'`)を書くと、意図しない位置で文が分割され構文エラーになる可能性がある。SQLパーサを使わない素朴な実装であることに留意が必要。**(#411 品質でロバスト化、Issue #657 で追記)** 分割前に `_strip_line_comment` で各行の `--` 以降を取り除くため、日本語コメント中の句点代わりのセミコロンで文が割れることは無くなっている(このリポジトリはコメント・docstringを日本語で書く規約のため、ALTER 文の前に長い説明コメントが付きやすい)。 根拠: `[_split_statements]` (行番号: 78〜95)、`[_strip_line_comment]` (行番号: 63)
 
 ## 9. 不明事項一覧
 
@@ -239,9 +239,9 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| 各マイグレーションファイルの実際のSQL内容 | `MY_HOME_SYSTEM/migrations/`配下の全5ファイルを直接確認した。`0001_add_quest_users_role.sql`は`quest_users`に`role TEXT`列を追加し、`user_id`が`dad`/`mom`なら`'role_adult'`、`daughter`/`son`/`child`なら`'role_child'`を設定する。`0002_add_quest_master_reset_period.sql`は`quest_master`に`reset_period TEXT DEFAULT 'weekly_monday'`列を追加する。`0003_add_reward_master_description.sql`は`reward_master`に`description TEXT`列を追加する。`0004_add_coop_quest_link.sql`は`quest_history`に`linked_history_id INTEGER DEFAULT NULL`列を追加し、コメントによれば兄妹連携クエスト(`target_user='siblings'`)の2行を相互連結するためのものである。`0005_fix_quest_master_reset_period_default.sql`は、コメントによれば0002で追加した`reset_period`の初期値`'weekly_monday'`が`is_within_reset_period()`未対応値でありクエスト完了判定が常に`False`になるバグを引き起こしていたため、既存の`NULL`または`'weekly_monday'`の行を`'daily'`へ補正する`UPDATE`文である。 | 直接ソース確認: `MY_HOME_SYSTEM/migrations/0001_add_quest_users_role.sql`, `0002_add_quest_master_reset_period.sql`, `0003_add_reward_master_description.sql`, `0004_add_coop_quest_link.sql`, `0005_fix_quest_master_reset_period_default.sql`（全文） |
-| `apply_pending_migrations`の実際の呼び出しタイミング・渡される`conn`の生成方法 | `MY_HOME_SYSTEM/unified_server.py`と`MY_HOME_SYSTEM/init_unified_db.py`を直接確認した。`unified_server.py`は29行目で`from core.migrations import apply_pending_migrations`をインポートし、FastAPIの`lifespan(app)`(90行目〜)内、起動時ログ出力の直後・カメラプロセス起動処理より前に、`migration_conn = sqlite3.connect(config.SQLITE_DB_PATH)`(102行目)で新規接続を生成して`apply_pending_migrations(migration_conn)`(105行目)を呼び出し、`finally`節で確実に`migration_conn.close()`する(106〜107行目)。呼び出し全体は`try`/`except Exception as e:`(101, 108〜109行目)で囲まれ、失敗してもログ出力のみで起動処理を継続する。`init_unified_db.py`側は560行目で`apply_pending_migrations(cur.connection)`と、既存の`with`ブロックで開かれた接続(`cur.connection`)をそのまま渡している。`migrations/README.md`にもこの2箇所（`init_unified_db.init_db()`と`unified_server.py`起動時）が実行タイミングとして明記されていることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/unified_server.py:29, 101-109`, `MY_HOME_SYSTEM/init_unified_db.py:558-560`（参考: `MY_HOME_SYSTEM/migrations/README.md`） |
-| `quest_service.py`側の実行時チェックとの具体的な整合性(競合の有無) | `MY_HOME_SYSTEM/services/quest_service.py`の`sync_master_data`メソッド(688行目〜)を直接確認した。同メソッドは`SELECT role FROM quest_users LIMIT 1`を試み例外発生時のみ`ALTER TABLE quest_users ADD COLUMN role TEXT`等を実行する実行時チェックを3箇所持つ: (1) 710〜717行目の`role`列追加(`migrations/0001`と同一のUPDATE条件)、(2) 719〜724行目の`reset_period`列追加(`migrations/0002`と同一のデフォルト値`'weekly_monday'`)、(3) 770〜773行目の`description`列追加(`migrations/0003`と同一)。列が既に存在する場合は`SELECT`が例外を出さず`ALTER TABLE`はスキップされるため、`apply_pending_migrations`が先に列を追加済みであれば`quest_service.py`側のチェックは単に無害な`SELECT`一発で終わり、`OperationalError`は発生しない。逆に`apply_pending_migrations`が未実行またはDBがマイグレーション未適用の状態で`sync_master_data`が先に呼ばれた場合は、`quest_service.py`側が先に列を追加してしまうため、後から`apply_pending_migrations`が同じ`ALTER TABLE`を実行すると`sqlite3.OperationalError`(duplicate column name: ...)が発生するが、本ファイル(`core/migrations.py`)131〜134行目の設計通り、このエラー文言は`_ALREADY_APPLIED_ERROR_PATTERNS`の`re.compile(r"^duplicate column name: \S")`に`search()`でマッチするため、そのステートメントに限り「既に適用済み」とみなされ警告ログのみで次の文へ処理が継続される(M-2で導入された選別ロジック自体は、Issue #99でステートメント単位の粒度に変わり、Issue #440で判定が正規表現アンカー方式に変わった後も、この`duplicate column`ケースを許容する既知パターンという扱いは変わっていない)。したがって両者は列追加に関しては非破壊的に共存できる設計であることを確認した。ただし0004・0005に対応する実行時チェックは`sync_master_data`には存在しない（`linked_history_id`・`reset_period`のデフォルト値修正は正式マイグレーション経由でのみ適用される）ことも確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:688-786`, `MY_HOME_SYSTEM/core/migrations.py:100-107` |
+| 各マイグレーションファイルの実際のSQL内容 | **（当時は5ファイル。2026-09-16時点では12ファイルへ増えている）** `MY_HOME_SYSTEM/migrations/`配下のSQLを直接確認した。現在の全12ファイルは`0000_baseline_schema.sql`(全テーブルのベースライン、Issue #330)・`0001_add_quest_users_role.sql`・`0002_add_quest_master_reset_period.sql`・`0003_add_reward_master_description.sql`・`0004_add_coop_quest_link.sql`・`0005_fix_quest_master_reset_period_default.sql`・`0006_add_device_records_nas_usage_percent.sql`・`0007_add_weather_history_location_columns.sql`・`0008_fix_quest_master_reset_period_column_default.sql`・`0009_add_quest_history_medals_earned.sql`・`0010_add_routine_progress.sql`・`0011_add_routine_step_events.sql`。以下は当時確認した5件の内容: `0001_add_quest_users_role.sql`は`quest_users`に`role TEXT`列を追加し、`user_id`が`dad`/`mom`なら`'role_adult'`、`daughter`/`son`/`child`なら`'role_child'`を設定する。`0002_add_quest_master_reset_period.sql`は`quest_master`に`reset_period TEXT DEFAULT 'weekly_monday'`列を追加する。`0003_add_reward_master_description.sql`は`reward_master`に`description TEXT`列を追加する。`0004_add_coop_quest_link.sql`は`quest_history`に`linked_history_id INTEGER DEFAULT NULL`列を追加し、コメントによれば兄妹連携クエスト(`target_user='siblings'`)の2行を相互連結するためのものである。`0005_fix_quest_master_reset_period_default.sql`は、コメントによれば0002で追加した`reset_period`の初期値`'weekly_monday'`が`is_within_reset_period()`未対応値でありクエスト完了判定が常に`False`になるバグを引き起こしていたため、既存の`NULL`または`'weekly_monday'`の行を`'daily'`へ補正する`UPDATE`文である。 | 直接ソース確認: `MY_HOME_SYSTEM/migrations/0001_add_quest_users_role.sql`, `0002_add_quest_master_reset_period.sql`, `0003_add_reward_master_description.sql`, `0004_add_coop_quest_link.sql`, `0005_fix_quest_master_reset_period_default.sql`（全文） |
+| `apply_pending_migrations`の実際の呼び出しタイミング・渡される`conn`の生成方法 | `MY_HOME_SYSTEM/unified_server.py`と`MY_HOME_SYSTEM/init_unified_db.py`を直接確認した。`unified_server.py`は26行目で`from core.migrations import apply_pending_migrations`をインポートし、FastAPIの`lifespan(app)`内、監視子プロセス起動より前に`migration_conn = sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)`(163行目)で新規接続を生成して`apply_pending_migrations(migration_conn)`(165行目)を呼び出し、`finally`節で確実に`migration_conn.close()`する(166〜167行目)。**（Issue #383で挙動変更）** 以前は`timeout`未指定(既定5秒)かつ失敗を`logger.error`で握りつぶして子プロセスを起動しサービスを継続していた(スキーマ未適用のまま全APIが500になる)が、現在は`timeout=30.0`へ延長したうえで、失敗時は`migration_ok = False`として`logger.critical`(Discord通知)を出し、**監視子プロセスを起動しない**(159〜162行目のコメントに経緯が明記)。`init_unified_db.py`側は103行目で`apply_pending_migrations(cur.connection)`と、既存の`with`ブロックで開かれた接続(`cur.connection`)をそのまま渡している(同ファイルは Issue #330 以降スキーマ定義を持たない薄いラッパー)。`migrations/README.md`にもこの2箇所（`init_unified_db.init_db()`と`unified_server.py`起動時）が実行タイミングとして明記されていることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/unified_server.py:26, 158-172`, `MY_HOME_SYSTEM/init_unified_db.py:77-116`（参考: `MY_HOME_SYSTEM/migrations/README.md`） |
+| `quest_service.py`側の実行時チェックとの具体的な整合性(競合の有無) | **（Issue #330で解消済み。以前ここに書かれていた競合シナリオは現存しない）** かつて`services/quest_service.py`の`GameSystem.sync_master_data`が持っていた「`SELECT role FROM quest_users LIMIT 1`を試み、例外が出たときだけ`ALTER TABLE ... ADD COLUMN`する」式のレガシー実行時マイグレーション3箇所(`role`/`reset_period`/`description`)は、**完全に退役している**。現在の実体は`MY_HOME_SYSTEM/services/quest/game_system.py`の`sync_master_data`(23〜166行目)で、53〜58行目のコメントが「Issue #330: 以前ここにあった『SELECTを試して失敗したらALTER TABLE』式のレガシー実行時マイグレーション(role/reset_periodのカラム追加)は完全退役した。スキーマは migrations/ 配下(0000ベースライン+0001以降)が唯一の定義元であり、unified_serverのlifespanとinit_db()の双方が起動時に apply_pending_migrations() を適用するため、本メソッド到達時点でこれらのカラムは必ず存在する」と明記している(リポジトリ全体を`ALTER TABLE`で検索しても`services/`配下に該当箇所は無い)。したがって「`sync_master_data`が先に列を追加してしまい、後から`apply_pending_migrations`が同じ`ALTER TABLE`で`duplicate column name`を起こす」という競合経路そのものが消滅した。ただし本ファイル(`core/migrations.py`)側の`_ALREADY_APPLIED_ERROR_PATTERNS`(35〜38行目、`re.compile(r"^duplicate column name: \S")`等)によるステートメント単位の許容ロジック(133行目で`search()`判定)は引き続き有効で、**マイグレーションが既に列を持つDBへ再実行されても安全**という設計要件(CLAUDE.md・`migrations/README.md`)を支えている。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest/game_system.py:23-58`, `MY_HOME_SYSTEM/core/migrations.py:32-38, 128-140`（参考: [quest_game_system.md](./quest_game_system.md)・[init_unified_db.md](./init_unified_db.md)） |
 
 ## 10. 自己検証結果
 

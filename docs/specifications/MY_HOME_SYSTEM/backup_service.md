@@ -11,13 +11,13 @@
 ## 関連ドキュメント
 
 - [config.md](./config.md) — `SQLITE_DB_PATH`、`BASE_DIR`、`NAS_PROJECT_ROOT`、`NAS_MOUNT_POINT`、`LINE_USER_ID`等の設定を提供する。
-- [common.md](./common.md) — `send_push`をFacade経由でインポートしている実体（`services.notification_service`の再エクスポート）。
-- [notification_service.md](./notification_service.md) — `common.send_push`の実装元。
+- [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
+- [notification_service.md](./notification_service.md) — `services.notification_service.send_push`の実装元。
 - [logger.md](./logger.md) — `setup_logging`の実装元。
 
 ## 2. ファイルの概要
 
-* データベースのバックアップを実行し、NASへ転送する。あわせて `config.BACKUP_FILES` に列挙されたDB以外の設定ファイル（`config.py`/`.env`/`devices.json`等）もNASへコピーする。
+* データベースのバックアップを実行し、NASへ転送する。あわせて `config.BACKUP_FILES` に列挙されたDB以外の設定ファイル（`config.py`/`devices.json`。Issue #649 で `.env` はシークレットの平文コピーを避けるため除外した）もNASへコピーする。復元手順は `docs/runbooks/db_restore.md`。
 * NASへの転送失敗（権限エラー・接続断等）時は、管理者の介入が必要な恒久的障害（ERROR）として扱い、即時通知を行う責務を持つ。
 
 ## 3. 外部依存関係
@@ -33,9 +33,8 @@
 | `time` | 標準ライブラリ | 未使用 | `import time` (行番号: 5 / 抜粋: "import time") |
 | `Path` | `pathlib` | パス文字列の構築と操作 | `from pathlib import Path` (行番号: 6 / 抜粋: "from pathlib import Path") |
 | `Tuple` | `typing` | 関数の戻り値の型ヒント | `from typing import Tuple` (行番号: 7 / 抜粋: "from typing import Tuple") |
-| `setup_logging` | `common` | 未使用（直後に上書きされている） | `from common import setup_logging` (行番号: 8 / 抜粋: "from common import setup_l...") |
-| `setup_logging` | `core.logger` | ロガーの初期化。設計書に従い使用 | `from core.logger import setup_logging` (行番号: 10 / 抜粋: "from core.logger import se...") |
-| `send_push` | `common` | エラー時の通知送信 | `from common import send_push` (行番号: 11 / 抜粋: "from common import send_push") |
+| `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 10 / 抜粋: "from services.notification_service import send_push") |
+| `setup_logging` | `core.logger` | ロガーの初期化。設計書に従い使用 | `from core.logger import setup_logging` (行番号: 9 / 抜粋: "from core.logger import setup_logging") |
 | `config` | ローカルモジュール | 各種パスやIDなどの設定値の取得 | `import config` (行番号: 12 / 抜粋: "import config") |
 
 ### ブラックボックスとなる外部要素
@@ -48,7 +47,7 @@
 | `config.NAS_MOUNT_POINT` | 定義元が存在せず、NASマウントポイントの実体・値が不明 | `os.path.join(config.NAS_MO..."` (行番号: 34 / 抜粋: "os.path.join(config.NAS_MO...") |
 | `config.BACKUP_FILES` | 定義元が存在せず、DB以外にバックアップ対象へ追加するファイルパス一覧の実体・値が不明 | `getattr(config, "BACKUP_FI..."` (行番号: 84 / 抜粋: "for entry in getattr(confi...") |
 | `core.logger.setup_logging` | 実装が提供されておらず、ログの出力先・出力形式が不明 | `setup_logging("backup")` (行番号: 15 / 抜粋: "logger = setup_logging("ba...") |
-| `common.send_push` | 実装が提供されておらず、実際の通信方式や成否の扱いが不明 | `send_push(...)` (行番号: 80 / 抜粋: "send_push(") |
+| `services.notification_service.send_push` | 実装が提供されておらず、実際の通信方式や成否の扱いが不明 | `send_push(...)` (行番号: 80 / 抜粋: "send_push(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -62,13 +61,13 @@
 ### `perform_backup`
 
 * **役割**: データベースのバックアップを実行し、NASへ転送する。転送成功後は `_backup_config_files` を呼び出し、`config.BACKUP_FILES` に列挙されたDB以外の設定ファイルもあわせてNASへコピーする。NASへの転送失敗時は管理者の介入が必要な恒久的障害として扱い、即時通知を行う。
-* 根拠: `def perform_backup() -> Tuple[bool, str, float]:` (行番号: 17〜76 / 抜粋: "def perform_backup() -> Tu...")
+* 根拠: `def perform_backup() -> Tuple[bool, str, float]:` (行番号: 16〜90 / 抜粋: "def perform_backup() -> Tu...")
 * **（#411 S-L8で修正）** 元・先の接続は以前 `with sqlite3.connect(...) as conn:` で開いていたが、sqlite3の`Connection.__exit__`はcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、定期実行されるバックアップ処理のたびに接続がcloseされずリークしていた。`contextlib.closing`で両接続を明示的にcloseするよう変更した。
 * 根拠: `with contextlib.closing(sqlite3.connect(src_db_path)) as src_conn, \` (行番号: 46〜48)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def perform_backup():` (行番号: 17 / 抜粋: "def perform_backup() -> Tu...")
+* 根拠: `def perform_backup():` (行番号: 16 / 抜粋: "def perform_backup() -> Tu...")
 
 
 * **戻り値/レスポンス**: `Tuple[bool, str, float]`。成功時は `(True, "バックアップ完了", バックアップサイズMB)`、失敗時は `(False, エラーメッセージ, 0.0)` を返す。
@@ -90,15 +89,15 @@
 ### `_backup_config_files`
 
 * **役割**: `config.BACKUP_FILES` に列挙された設定ファイル(DB以外)をNASへコピーする。`src_db_path` と一致するエントリ（DB本体、既にPhase 1/2でバックアップ済み）はスキップする。個々のファイルのコピー失敗（ファイル不存在・`OSError`）はログに残すのみで、`perform_backup` 全体の成否には影響させない。
-* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str) -> None:` (行番号: 78〜97 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str) -> None:` (行番号: 92〜111 / 抜粋: "def _backup_config_files(n...")
 
 
 * **引数/リクエスト**: `nas_backup_dir: Path` (コピー先のNASバックアップディレクトリ), `timestamp: str` (ファイル名に付与するタイムスタンプ文字列), `src_db_path: str` (スキップ対象となるDBパス、`perform_backup`の`config.SQLITE_DB_PATH`)
-* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)` (行番号: 78 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)` (行番号: 92 / 抜粋: "def _backup_config_files(n...")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 78 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `-> None:` (行番号: 92 / 抜粋: "def _backup_config_files(n...")
 
 
 * **副作用**: `config.BACKUP_FILES` の各エントリについて、相対パスは `config.BASE_DIR` を基準に解決したうえで存在確認し、存在すれば `nas_backup_dir` へ `<ファイル名(拡張子除く)>_<timestamp><拡張子>` という名前で `shutil.copy2` によりコピーする。存在確認・コピー結果をログ出力する。
@@ -113,15 +112,15 @@
 ### `_notify_and_log_error`
 
 * **役割**: ERRORレベルの記録と管理者への即時通知を行う。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 99〜107 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 113〜120 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **引数/リクエスト**: `message: str` (エラー内容を示すメッセージ文字列)
-* 根拠: `def _notify_and_log_error(message: str)` (行番号: 99 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str)` (行番号: 113 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 99 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `-> None:` (行番号: 113 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **副作用**: ロガーへのエラー書き込み、外部API呼び出し（`send_push`）。
@@ -129,7 +128,7 @@
 
 
 * **エラーハンドリング**: なし（内部で例外捕捉は行われていない）。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 99〜107 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 113〜120 / 抜粋: "def _notify_and_log_error(...)")
 
 
 
@@ -202,7 +201,7 @@ graph TD
   _backup_config_files --> OS
 
   _notify_and_log_error --> logger
-  _notify_and_log_error --> send_push[外部: common.send_push]
+  _notify_and_log_error --> send_push[外部: services.notification_service.send_push]
   _notify_and_log_error --> config
 
   core.logger --> logger
@@ -219,10 +218,11 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `common` モジュールから `setup_logging` をインポートした後、直後に `core.logger` の `setup_logging` で上書きしており、未使用のインポートが存在する。
+* **（Issue #664 で解消）** 以前は Deprecated Facade である `common` から `setup_logging` をインポートした直後に `core.logger` の `setup_logging` で上書きしており、未使用のインポートが残っていた。`common.py` の廃止に伴い `core.logger` からの1本だけになっている。
 * `import time` が宣言されているが、コード内で一度も使用されていない。
 * Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`引数が不要になった。これに伴い`_notify_and_log_error`の`send_push`呼び出しからは、以前存在した`user_id=getattr(config, "LINE_USER_ID", None)`(target="discord"であるにも関わらずLINE宛先を渡していた不整合)が撤去されている。
 * NASディレクトリ作成失敗時のエラーハンドリング（54〜58行目）は、意図的に `_notify_and_log_error`（通知）を呼び出さずログ記録のみを行ってから例外を再送出している。これは、外側の `except Exception as e:`（71行目）でも同一エラーが捕捉されて通知が二重送信されるのを防ぐための設計であり、コード中にもその旨のコメントが付されている（過去に二重通知が発生していたための対策）。この一本化された経路を崩さないよう、将来的にこのブロックへ通知呼び出しを追加する際は二重送信に注意する必要がある。
+* **（Issue #649 で変更）** `config.BACKUP_FILES` から `.env` を除外した。以前は全シークレット(SwitchBot/LINE/Discord/Gemini)を NAS の `db_backups/` へ平文でコピーしており、NAS 共有の閲覧権限がそのままシークレットの閲覧権限になっていた。`.env` はリポジトリ外(パスワードマネージャ等)で別管理し、復元手順は `docs/runbooks/db_restore.md` にまとめた(`tests/test_backup_service.py::test_env_file_is_not_in_default_backup_files` が既定値への復活を防ぐ)。
 * Issue #113で修正: 従来 `config.BACKUP_FILES`（`config.py`/`.env`/`devices.json`を列挙）はどのコードからも参照されず、`perform_backup` はDBファイル単体しかNASへ転送していなかった（CLAUDE.mdの説明と実装が食い違う死に設定になっていた）。`_backup_config_files` を新設し、`perform_backup` の転送成功後にこれを呼び出すことで、`config.BACKUP_FILES` に列挙されたファイルが実際にバックアップされるようにした。相対パスのエントリは `config.BASE_DIR` を基準に解決するため、`config.BACKUP_FILES` に新しいファイルを追加する場合は `config.BASE_DIR`（`MY_HOME_SYSTEM/`）からの相対パス、または絶対パスで指定する必要がある。
 * `_backup_config_files` が書き込む先の `nas_backup_dir`（`NAS_PROJECT_ROOT/db_backups`、すなわち `config.DB_BACKUPS_DIR`）は `monitors/nas_monitor.py` の `run_retention_cleanup` によるリテンション削除の対象でもある。以前はこの削除処理が拡張子 `.db` のみを対象としていたため、`_backup_config_files` が生成する設定ファイルのコピー（`.py`/`.json`拡張子、および`.env`はコピー時に拡張子なしのファイル名になる）は一切削除されず無限に蓄積していた（Issue #191、詳細は `docs/specifications/MY_HOME_SYSTEM/nas_monitor.md` の `run_retention_cleanup` を参照）。`nas_monitor.py` 側で `DB_BACKUPS_DIR` 全体を拡張子を問わず削除対象とするよう修正済みのため、`config.BACKUP_FILES` に新しい拡張子のファイルを追加しても、削除対象からは自動的に漏れない。
 * **(Issue #248バグ修正の背景)** `perform_backup`の外側`except Exception`ブロックは、以前はローカルの一時ファイル(`temp_path`)のみを削除しており、`shutil.copy2`によるNAS転送がディスク逼迫・切断等で途中失敗した場合、または転送後の整合性確認（サイズ比較）に失敗した場合に、NAS側へ書きかけ・破損した状態で残った不完全なファイル(`nas_final_path`)がそのまま放置されていた。データ損失は伴わない（正常なバックアップは別途成功時にのみ作成される）が、破損したゴミファイルがNAS上に無期限に蓄積するリスクがあった。現在は`temp_path`と同様に`nas_final_path`の存在確認・削除も行うが、この削除自体の失敗（NAS切断等）が発生した場合は、ログにのみ記録し元のエラー内容（戻り値の`msg`）を上書きしないようにしている。新たに同様の「ローカル/リモート両方に副産物を残しうる」処理を追加する際は、失敗時のクリーンアップ対象がローカル側だけになっていないか確認すること。

@@ -105,7 +105,8 @@ export interface Reward {
     target?: string;
 }
 
-// インベントリアイテム (models/quest.py の InventoryItem に対応)
+// インベントリアイテム (バックエンドの /api/quest/inventory 応答に対応。#409 で models/quest.py の
+// InventoryItem は削除されたため、型の対応先はルーター/サービスの応答そのもの)
 // #390: desc はサーバー側 Optional[str] のため null を許容する。
 export interface InventoryItem {
     id: number;

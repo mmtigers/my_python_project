@@ -1,0 +1,15 @@
+# MY_HOME_SYSTEM/requirements-dev.in — テスト・Lint・セキュリティスキャン専用の直接依存。
+# requirements-dev.txt はこのファイルから pip-compile で生成する(手で編集しない。Issue #647)。
+# 実行時側と同じパッケージは requirements.txt の版に揃える(-c)。
+-c requirements.txt
+
+pytest
+pytest-asyncio
+pytest-cov
+# FastAPI の TestClient が実行時に要求する(tests/conftest.py の api_client フィクスチャ)
+httpx
+freezegun
+hypothesis
+ruff
+bandit
+pip-audit
