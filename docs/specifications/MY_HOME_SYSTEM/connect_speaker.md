@@ -25,84 +25,84 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `$ENV_FILE` (.env) | 環境変数読み込み | DiscordのWebhook通知先URLを取得するため | 環境変数読み込みブロック (行番号: 16〜21 / 抜粋: `# shellcheck source=/dev/null` / `source "$ENV_FILE"`) |
+| `$ENV_FILE` (.env) | 環境変数読み込み | DiscordのWebhook通知先URLを取得するため | 環境変数読み込みブロック (行番号: 15〜20 / 抜粋: `# shellcheck source=/dev/null` / `source "$ENV_FILE"`) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `.env` の内容 | スクリプト外で定義されており、具体的なURL・`SPEAKER_BLUETOOTH_MAC` の値が不明なため（gitignore 対象。Issue #663 で MAC アドレスもここから読むようになった） | 変数定義と読み込み (行番号: 7, 17 / 抜粋: `ENV_FILE="$PROJECT_DIR/.env"`) |
-| Discord API (Webhook) | 外部のAPIであり、リクエスト成功後の詳細な振る舞いやAPI仕様（レートリミット等）が不明なため | `send_discord`関数 (行番号: 44〜47 / 抜粋: `curl -H "Content-Type: applic...`) |
-| 各種Linuxコマンド | `bluetoothctl`, `pactl`, `rfkill`, `systemctl`等は外部コマンドであり、内部の実装やOS環境による挙動の違いは判断不可なため | `run_diagnostics`関数等 (行番号: 56, 62, 68 / 抜粋: `bluetoothctl info "$MAC"`) |
+| `.env` の内容 | スクリプト外で定義されており、具体的なURL・`SPEAKER_BLUETOOTH_MAC` の値が不明なため（gitignore 対象。Issue #663 で MAC アドレスもここから読むようになった） | 変数定義と読み込み (行番号: 7, 18 / 抜粋: `ENV_FILE="$PROJECT_DIR/.env"`) |
+| Discord API (Webhook) | 外部のAPIであり、リクエスト成功後の詳細な振る舞いやAPI仕様（レートリミット等）が不明なため | `send_discord`関数 (行番号: 54〜57 / 抜粋: `curl -H "Content-Type: applic...`) |
+| 各種Linuxコマンド | `bluetoothctl`, `pactl`, `rfkill`, `systemctl`等は外部コマンドであり、内部の実装やOS環境による挙動の違いは判断不可なため | `run_diagnostics`関数等 (行番号: 72, 98, 137 / 抜粋: `bluetoothctl info "$MAC"`) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `log_message`
 
 * **役割**: 実行時のタイムスタンプを付与して、指定されたメッセージをログファイルに出力する
-* 根拠: `log_message` (行番号: 28〜30 / 抜粋: `echo "$(date '+%Y-%m-%d...`)
+* 根拠: `log_message` (行番号: 38〜40 / 抜粋: `echo "$(date '+%Y-%m-%d...`)
 
 
 * **引数/リクエスト**: 文字列（ログに出力するメッセージ内容）
-* 根拠: 関数内の引数参照 (行番号: 29〜29 / 抜粋: `... - $1" >> "$LOGFILE"`)
+* 根拠: 関数内の引数参照 (行番号: 39〜39 / 抜粋: `... - $1" >> "$LOGFILE"`)
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `log_message`関数定義 (行番号: 28〜30 / 抜粋: `log_message() { ... }`)
+* 根拠: `log_message`関数定義 (行番号: 38〜40 / 抜粋: `log_message() { ... }`)
 
 
 * **副作用**: ファイル (`$LOGFILE`) への追記書き込み
-* 根拠: リダイレクト処理 (行番号: 29〜29 / 抜粋: `>> "$LOGFILE"`)
+* 根拠: リダイレクト処理 (行番号: 39〜39 / 抜粋: `>> "$LOGFILE"`)
 
 
 * **エラーハンドリング**: なし
-* 根拠: `log_message`関数定義 (行番号: 28〜30 / 抜粋: `log_message() { ... }`)
+* 根拠: `log_message`関数定義 (行番号: 38〜40 / 抜粋: `log_message() { ... }`)
 
 
 
 ### `send_discord`
 
 * **役割**: メッセージを簡易JSONエスケープし、`$WEBHOOK_URL`が設定されている場合にDiscordへHTTP POSTリクエストを送信する
-* 根拠: `send_discord` (行番号: 32〜49 / 抜粋: `curl -H "Content-Type: applic...`)
+* 根拠: `send_discord` (行番号: 42〜59 / 抜粋: `curl -H "Content-Type: applic...`)
 
 
 * **引数/リクエスト**: 文字列（Discordへ送信する通知メッセージ）
-* 根拠: 関数内の変数代入 (行番号: 33〜33 / 抜粋: `local message="$1"`)
+* 根拠: 関数内の変数代入 (行番号: 43〜43 / 抜粋: `local message="$1"`)
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `send_discord`関数定義 (行番号: 32〜49 / 抜粋: `send_discord() { ... }`)
+* 根拠: `send_discord`関数定義 (行番号: 42〜59 / 抜粋: `send_discord() { ... }`)
 
 
 * **副作用**: 外部API（Discord Webhook）への通信、Python3によるサブプロセスの実行
-* 根拠: コマンド実行 (行番号: 37〜47 / 抜粋: `escaped_message=$(python3 -c...`)
+* 根拠: コマンド実行 (行番号: 47〜57 / 抜粋: `escaped_message=$(python3 -c...`)
 
 
 * **エラーハンドリング**: `$WEBHOOK_URL`が空の場合は送信をスキップする。また、`curl`実行時の標準出力と標準エラー出力を破棄し、エラーでスクリプトが停止しないようにしている。
-* 根拠: 条件分岐・リダイレクト (行番号: 35, 47 / 抜粋: `if [ -n "$WEBHOOK_URL" ]; then`, `>/dev/null 2>&1`)
+* 根拠: 条件分岐・リダイレクト (行番号: 45, 57 / 抜粋: `if [ -n "$WEBHOOK_URL" ]; then`, `>/dev/null 2>&1`)
 
 
 
 ### `run_diagnostics`
 
 * **役割**: システムのBluetoothサービス状態、RFKill状態、デバイス情報、カーネルログ、PulseAudioシンクおよびプロセス情報を取得し、ログファイルへ追記する
-* 根拠: `run_diagnostics` (行番号: 52〜74 / 抜粋: `systemctl status bluetooth ...`)
+* 根拠: `run_diagnostics` (行番号: 62〜84 / 抜粋: `systemctl status bluetooth ...`)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `run_diagnostics`関数定義 (行番号: 52〜74 / 抜粋: `run_diagnostics() { ... }`)
+* 根拠: `run_diagnostics`関数定義 (行番号: 62〜84 / 抜粋: `run_diagnostics() { ... }`)
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `run_diagnostics`関数定義 (行番号: 52〜74 / 抜粋: `run_diagnostics() { ... }`)
+* 根拠: `run_diagnostics`関数定義 (行番号: 62〜84 / 抜粋: `run_diagnostics() { ... }`)
 
 
 * **副作用**: 各種システムコマンド（`systemctl`, `rfkill`, `bluetoothctl`, `dmesg`, `pactl`, `pgrep`）の実行、およびログファイルへの一括書き込み
-* 根拠: ブロックリダイレクト (行番号: 54〜72 / 抜粋: `} >> "$LOGFILE" 2>&1`)
+* 根拠: ブロックリダイレクト (行番号: 64〜82 / 抜粋: `} >> "$LOGFILE" 2>&1`)
 
 
 * **エラーハンドリング**: ブロック全体の標準エラー出力を標準出力に統合してファイルに書き込むことで、各コマンドの実行エラー情報もログに残るようにしている。
-* 根拠: ブロックリダイレクト (行番号: 72〜72 / 抜粋: `} >> "$LOGFILE" 2>&1`)
+* 根拠: ブロックリダイレクト (行番号: 82〜82 / 抜粋: `} >> "$LOGFILE" 2>&1`)
 
 
 
@@ -192,13 +192,13 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `.env` | Discord Webhookへの通知先URLなど、システム動作の成否に直結する重要な環境変数の実態を確認するため。 | 環境変数読み込み処理 (行番号: 8, 16〜21 / 抜粋: `ENV_FILE="$PROJECT_DIR/.env"`) |
+| 高 | `.env` | Discord Webhookへの通知先URLなど、システム動作の成否に直結する重要な環境変数の実態を確認するため。 | 環境変数読み込み処理 (行番号: 7, 15〜20 / 抜粋: `ENV_FILE="$PROJECT_DIR/.env"`) |
 | 中 | `crontab` 設定、または `systemd` のサービス/タイマーファイル | 本スクリプト内に無限ループ等の常駐処理が存在しないため、どのようなトリガー（定期実行、システム起動時など）で本スクリプトが起動されているか全容を把握するため。 | 実行タイミングを制御する記述がファイル内に存在しないため (行番号取得不可 / 抜粋: 該当なし) |
 
 ## 8. 保守上の注意点
 
 * **（Issue #532 で変更）shellcheck ブロッキング化に伴う整理**: CI の `lint` ジョブで `shellcheck -x` が本ファイルを対象にブロッキング実行されるようになった。`.env` の `source` 行の直前に `# shellcheck source=/dev/null`(SC1090 の抑止。`.env` は実行環境にのみ存在し静的解析では追えないため)を置き、どこからも参照されていなかった `CURRENT_STATUS` 変数(SC2034)の代入 3 箇所(初期値 `"UNKNOWN"`、接続時 `"OK"`、切断時 `"NG"`)を削除した。状態判定は従来どおり `$STATUS_FILE` に書き込む `LAST_STATUS` の値だけで行っており、挙動の変更はない。以降本ファイルを編集する際は、ローカルでも `shellcheck -x MY_HOME_SYSTEM/tools/connect_speaker.sh` が 0 件であることを確認すること。
-* 根拠: `# shellcheck source=/dev/null` (行番号: 18)、`LAST_STATUS=$(cat "$STATUS_FILE")` (行番号: 86)、`if bluetoothctl info "$MAC" | grep -q "Connected: yes"; then` (行番号: 89)
+* 根拠: `# shellcheck source=/dev/null` (行番号: 17)、`LAST_STATUS=$(cat "$STATUS_FILE")` (行番号: 95)、`if bluetoothctl info "$MAC" | grep -q "Connected: yes"; then` (行番号: 98)
 
 * `/tmp/speaker_connection_status` ファイルを利用して前回の状態を保持しているため、OSの再起動を行うとファイルが消失し、初回実行時は必ず `UNKNOWN` 状態から評価が開始される仕様となっている。
 * 通知メッセージのエスケープ処理に `python3` のワンライナーを使用しているため、実行環境に Python3 がインストールされていない場合、構文エラーが発生し通知内容が破損・未送信になる可能性がある。
