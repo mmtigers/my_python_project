@@ -18,6 +18,11 @@
 fastapi
 uvicorn
 pydantic
+# ダッシュボード(Streamlit)を unified_server 経由で配信するリバースプロキシで直接 import する
+# (services/dashboard_proxy_service.py): HTTP中継に httpx、WebSocket中継に websockets。
+# どちらも従来は fastapi/uvicorn の推移的依存として入っていただけだった。
+httpx
+websockets
 # FastAPI の UploadFile / Form が実行時に要求する(routers/quest_router.py の upload_image)
 python-multipart
 aiofiles

@@ -11,7 +11,10 @@ User=masahiro
 WorkingDirectory=/home/masahiro/develop/MY_HOME_SYSTEM
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=PYTHONPATH=/home/masahiro/develop:/home/masahiro/develop/MY_HOME_SYSTEM
-ExecStart=/home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python3 -m streamlit run dashboard.py --server.port 8501 --server.address 127.0.0.1 --server.headless true
+# --server.baseUrlPath は config.DASHBOARD_BASE_PATH(既定 /dashboard)と一致させること。
+# unified_server.py(8000番)がこのパス配下へリバースプロキシし、スマートフォンからは
+# Cloudflare Access の保護下にある 8000番経由でのみ到達できるようにしている。
+ExecStart=/home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python3 -m streamlit run dashboard.py --server.port 8501 --server.address 127.0.0.1 --server.headless true --server.baseUrlPath dashboard
 Restart=on-failure
 RestartSec=10
 

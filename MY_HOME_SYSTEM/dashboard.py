@@ -14,7 +14,6 @@ from services import analysis_service
 from views.dashboard import (
     common as view_common,
     summary,
-    quest_tab,
     sensor_tab,
     health_tab,
     misc_tab,
@@ -36,17 +35,80 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-def main():
-    # --- サイドバー設定 ---
-    with st.sidebar:
-        st.header("設定")
-        if st.button("🔄 データを更新"):
+# family-quest(PWA)への導線。`unified_server.py` が `/quest` にSPAをマウントしている。
+QUEST_APP_PATH = "/quest"
+
+
+def _render_header_actions() -> None:
+    """画面最上部の操作列(更新 / ファミクエへの導線)。
+
+    スマホ対応: 以前「データを更新」ボタンはサイドバーにしか無かったが、
+    `initial_sidebar_state="collapsed"` のためスマートフォンでは
+    ハンバーガーメニューを開かないと押せず、最も使う操作が最も遠かった。
+    メイン画面の先頭に常設する。
+    """
+    col_refresh, col_quest = st.columns(2)
+    with col_refresh:
+        if st.button("🔄 データを更新", width="stretch"):
             st.cache_data.clear()
             st.rerun()
-        
+    with col_quest:
+        # クエストの詳細はスマホ最適化済みのPWA(family-quest)側が正で、
+        # ダッシュボードに同じ内容を二重に持たない(下記「タブ構成」のコメント参照)。
+        #
+        # ルート相対のリンクにしているのは、このダッシュボードが
+        # unified_server.py(8000番)の config.DASHBOARD_BASE_PATH 配下に中継されて
+        # 配信されるため。閲覧しているオリジン(LANのIP:8000でも Cloudflare 経由の
+        # 公開ドメインでも)の /quest に解決され、config.FRONTEND_URL のような
+        # 固定URLを埋めるとLAN外から開いたときに繋がらない。
+        st.link_button("⚔️ ファミクエを開く", QUEST_APP_PATH, width="stretch")
+
+
+def _render_ai_report() -> None:
+    """セバスチャン(AIレポート)の最新報告を折りたたみで表示する。"""
+    report = analysis_service.load_ai_report()
+    if report is None:
+        return
+
+    # タイムゾーン処理は Service/Pandas で行われている前提だが念のため変換
+    ts = report["timestamp"]
+    if isinstance(ts, str):
+        tz_jst = pytz.timezone("Asia/Tokyo")
+        if "T" in ts:
+            report_time = datetime.fromisoformat(ts).astimezone(tz_jst)
+        else:
+            # L-L2 (#410): 以前はこの分岐で常にdatetime.now()(現在時刻)に
+            # フォールバックしており、レポートの実際の生成時刻に関わらず
+            # 「たった今」の報告であるかのように表示されていた。
+            # 保存規約(core.utils.get_now_iso)導入前の旧フォーマット
+            # ("YYYY-MM-DD HH:MM:SS")として明示的にパースし、JSTとして
+            # localizeする。
+            report_time = tz_jst.localize(datetime.strptime(ts, "%Y-%m-%d %H:%M:%S"))
+    else:
+        report_time = ts
+
+    time_str = report_time.strftime("%H:%M")
+    hour = report_time.hour
+    icon = "☀️" if 5 <= hour < 11 else ("🕛" if 11 <= hour < 17 else "🌙")
+
+    with st.expander(f"{icon} セバスチャンからの報告 ({time_str}) - タップして読む", expanded=False):
+        st.markdown(report["message"].replace("\n", "  \n"))
+
+
+def main():
+    # --- サイドバー設定 ---
+    # スマホではサイドバーが畳まれているため、ここには「PCで細かく見るとき用」の
+    # 補助操作だけを置き、主要な操作はメイン画面側(_render_header_actions)に出す。
+    with st.sidebar:
+        st.header("設定")
+        st.caption(
+            "主要な操作(データ更新)はメイン画面の先頭にあります。"
+            "スマートフォンからは 8000番の /dashboard 経由でアクセスしてください。"
+        )
+
         # 共通CSSの適用
         st.markdown(view_common.CUSTOM_CSS, unsafe_allow_html=True)
-        
+
         now = datetime.now(pytz.timezone("Asia/Tokyo"))
         logger.info(f"Dashboard Rendering... ({now.strftime('%H:%M:%S')})")
 
@@ -54,6 +116,8 @@ def main():
         # メイン画面にもCSS適用
         st.markdown(view_common.CUSTOM_CSS, unsafe_allow_html=True)
         now = datetime.now(pytz.timezone("Asia/Tokyo"))
+
+        _render_header_actions()
 
         # --- データ読み込み (Service層へ委譲) ---
         df_sensor = analysis_service.load_sensor_data(limit=10000)
@@ -67,95 +131,82 @@ def main():
         nas_data = analysis_service.load_nas_status()
 
         # --- AIレポート表示 ---
-        report = analysis_service.load_ai_report()
-        if report is not None:
-            # タイムゾーン処理は Service/Pandas で行われている前提だが念のため変換
-            ts = report["timestamp"]
-            if isinstance(ts, str):
-                tz_jst = pytz.timezone("Asia/Tokyo")
-                if "T" in ts:
-                    report_time = datetime.fromisoformat(ts).astimezone(tz_jst)
-                else:
-                    # L-L2 (#410): 以前はこの分岐で常にdatetime.now()(現在時刻)に
-                    # フォールバックしており、レポートの実際の生成時刻に関わらず
-                    # 「たった今」の報告であるかのように表示されていた。
-                    # 保存規約(core.utils.get_now_iso)導入前の旧フォーマット
-                    # ("YYYY-MM-DD HH:MM:SS")として明示的にパースし、JSTとして
-                    # localizeする。
-                    report_time = tz_jst.localize(datetime.strptime(ts, "%Y-%m-%d %H:%M:%S"))
-            else:
-                report_time = ts
-            
-            time_str = report_time.strftime("%H:%M")
-            hour = report_time.hour
-            icon = "☀️" if 5 <= hour < 11 else ("🕛" if 11 <= hour < 17 else "🌙")
-            
-            with st.expander(f"{icon} セバスチャンからの報告 ({time_str}) - タップして読む", expanded=False):
-                st.markdown(report["message"].replace("\n", "  \n"))
+        with view_common.safe_section("AIレポート"):
+            _render_ai_report()
 
-        # --- サマリー (トップ) 表示 ---
-        with view_common.safe_section("サマリー"):
-            summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)
-
-        # --- タブ切り替え ---
+        # --- タブ構成 ---
+        # スマホ対応の再設計: 以前はサマリー9枚を常時最上部に出したうえでタブが10個
+        # (クエスト/電車遅延/防犯カメラ/電力・環境/気温詳細/健康管理/高砂実家/
+        #  ログ分析/システム管理/駐輪場)あり、スマートフォンでは
+        #   - どのタブを開いてもサマリーを越えるスクロールが必要
+        #   - タブ列が画面幅の数倍になり、目的のタブを探せない
+        # という状態だった。用途で5つに束ね直し、サマリーも「ホーム」タブに入れる。
+        #
+        # クエストタブ(EXPランキング等)は、同じ内容をスマホ最適化済みのPWA
+        # (family-quest, /quest)が持っており二重管理だったため、ダッシュボードからは
+        # 撤去して導線(ヘッダーのリンクボタン)だけ残した。
+        #
         # Issue #507: 「📊 トレンド」タブ(app_rankingsテーブル参照)は、書き込み側の
         # 収集コードが存在せず(収集用のgoogle-play-scraperもIssue #496で未使用
         # パッケージとして削除済み)、migrations/にもテーブル定義が無いため新規構築
         # したDBでは永久に「データがありません」としか出ない死んだ機能だった。
         # オーナー判断によりUIごと削除した。
-        tabs = st.tabs([
-            "⚔️ クエスト",
-            "🚃 電車遅延",
-            "📸 防犯カメラ",
-            "💡 電力・環境",
-            "🌡️ 気温詳細",
-            "🏥 健康管理",
-            "👵 高砂実家",
-            "📝 ログ分析",
-            "🔧 システム管理",
-            "🚲 駐輪場",
+        tab_home, tab_out, tab_watch, tab_life, tab_sys = st.tabs([
+            "🏠 ホーム",
+            "🚃 おでかけ",
+            "👀 見守り",
+            "💡 くらし",
+            "🔧 システム",
         ])
-
-        (
-            tab_quest, tab_train, tab_photo, tab_elec, tab_temp,
-            tab_health, tab_taka, tab_log, tab_sys, tab_bicycle
-        ) = tabs
 
         # --- 各タブのレンダリング (View層へ委譲) ---
         # Issue #438: 以前はmain()全体を1つのtry/exceptで囲んでおり、いずれか1つの
         # タブの描画で例外が起きるとダッシュボード全体がエラー画面になり、無関係な
-        # 他のタブまで巻き込んでいた。タブ単位でview_common.safe_sectionを使い
-        # 例外を隔離し、失敗したタブだけがエラー表示になるようにする。
-        with tab_quest:
-            with view_common.safe_section("クエスト"):
-                quest_tab.render()
-        with tab_train:
+        # 他のタブまで巻き込んでいた。セクション単位でview_common.safe_sectionを使い
+        # 例外を隔離し、失敗したセクションだけがエラー表示になるようにする。
+        with tab_home:
+            with view_common.safe_section("サマリー"):
+                summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)
+
+        with tab_out:
             with view_common.safe_section("電車遅延"):
                 misc_tab.render_traffic()
-        with tab_photo:
+            with st.expander("🚲 駐輪場の待機数", expanded=False):
+                with view_common.safe_section("駐輪場"):
+                    misc_tab.render_bicycle(df_bicycle)
+
+        with tab_watch:
             with view_common.safe_section("防犯カメラ"):
                 misc_tab.render_photos(df_security_log)
-        with tab_elec:
+            with st.expander("👵 高砂実家のセンサーログ", expanded=False):
+                with view_common.safe_section("高砂実家"):
+                    sensor_tab.render_takasago(df_sensor)
+            with st.expander("🏥 健康管理の記録", expanded=False):
+                with view_common.safe_section("健康管理"):
+                    health_tab.render(df_child, df_poop, df_food)
+
+        with tab_life:
             with view_common.safe_section("電力・環境"):
                 sensor_tab.render_electricity(df_sensor, now)
-        with tab_temp:
-            with view_common.safe_section("気温詳細"):
-                sensor_tab.render_temperature(df_sensor, now)
-        with tab_health:
-            with view_common.safe_section("健康管理"):
-                health_tab.render(df_child, df_poop, df_food)
-        with tab_taka:
-            with view_common.safe_section("高砂実家"):
-                sensor_tab.render_takasago(df_sensor)
-        with tab_log:
-            with view_common.safe_section("ログ分析"):
-                log_tab.render_logs(df_sensor)
+            with st.expander("🌡️ 気温・湿度の詳細", expanded=False):
+                with view_common.safe_section("気温詳細"):
+                    sensor_tab.render_temperature(df_sensor, now)
+
         with tab_sys:
-            with view_common.safe_section("システム管理"):
-                log_tab.render_system()
-        with tab_bicycle:
-            with view_common.safe_section("駐輪場"):
-                misc_tab.render_bicycle(df_bicycle)
+            with view_common.safe_section("リソース状況"):
+                log_tab.render_resources()
+            st.markdown("---")
+            with view_common.safe_section("NAS状態"):
+                log_tab.render_nas_status()
+            with st.expander("📜 サーバーログ", expanded=False):
+                with view_common.safe_section("サーバーログ"):
+                    log_tab.render_server_logs()
+            with st.expander("📝 センサーログ分析", expanded=False):
+                with view_common.safe_section("ログ分析"):
+                    log_tab.render_logs(df_sensor)
+            with st.expander("🛠️ メンテナンス操作 (再起動・バックアップ)", expanded=False):
+                with view_common.safe_section("メンテナンス操作"):
+                    log_tab.render_maintenance()
 
     except Exception as e:
         err_msg = f"📉 Dashboard Error: {e}"

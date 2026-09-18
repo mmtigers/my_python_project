@@ -18,6 +18,7 @@
     13. NASパスの遅延解決 (Issue #330 PR-B)
     14. Family Quest: YouTubeごほうび券クールダウン設定
     15. 週次レポート設定
+    16. ダッシュボード(Streamlit)公開設定
 """
 import os
 import time
@@ -670,3 +671,28 @@ except Exception as e:
 # 「本来はconfig.pyまたは.envから読み込むべき値」と書いていた。電気料金は地域・
 # 契約で変わる個人環境値のため、.env で上書きできるようにする。
 ELEC_PRICE_PER_KWH: int = _get_int_env("ELEC_PRICE_PER_KWH", 31)
+
+
+# ==========================================
+# 16. ダッシュボード(Streamlit)公開設定
+# ==========================================
+# Streamlitダッシュボード(dashboard.py)は認証機構を持たず、家族の健康記録・防犯ログの
+# 閲覧と `sudo systemctl restart` ボタンを備えるため、`home_dashboard.service`/
+# `start_all.sh` では 127.0.0.1 にのみバインドしている
+# (`docs/reports/CODE_REVIEW_REPORT_ALL.md` の Critical 指摘)。
+# そのままではスマートフォンから到達できないため、`unified_server.py` が
+# DASHBOARD_BASE_PATH 配下でリバースプロキシし、外部からのアクセス制御は
+# 他のパスと同じくエッジのCloudflare Accessに委譲する(Issue #321・2026-09-03決定)。
+#
+# 重要: このパスは `unified_server.py` の `allowed_webhook_paths` とは逆で、
+# **Cloudflare Access側でバイパス設定をしてはいけない**(バイパスすると無認証で
+# ダッシュボードが外部公開される)。詳細は
+# `docs/runbooks/cloudflare_access_connectivity_check.md` を参照。
+DASHBOARD_PROXY_ENABLED: bool = os.getenv("DASHBOARD_PROXY_ENABLED", "true").strip().lower() != "false"
+# プロキシ先(Streamlitの待ち受け先)。localhost以外を指定する運用は想定していない。
+DASHBOARD_INTERNAL_URL: str = os.getenv("DASHBOARD_INTERNAL_URL", "http://127.0.0.1:8501").strip().rstrip("/")
+# 公開パス。Streamlit側の `--server.baseUrlPath` と一致していなければ静的アセットが404になる。
+# 先頭のスラッシュを保証し、末尾のスラッシュは落とす("/dashboard" 形式に正規化)。
+DASHBOARD_BASE_PATH: str = "/" + os.getenv("DASHBOARD_BASE_PATH", "dashboard").strip().strip("/")
+# プロキシのタイムアウト(秒)。Streamlitは初回レンダリングで数秒かかることがある。
+DASHBOARD_PROXY_TIMEOUT_SEC: int = _get_int_env("DASHBOARD_PROXY_TIMEOUT_SEC", 30)
