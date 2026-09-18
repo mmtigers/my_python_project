@@ -172,6 +172,21 @@ class TestDiscordEmbedAndSessionSupport:
 
         assert core_discord.post_webhook(self.URL, "hello", raise_for_status=True) is True
 
+    def test_files_and_embeds_together_raise_instead_of_silently_dropping_embed(self, monkeypatch):
+        """PR #695レビュー指摘: files送信はmultipartになり、embedを載せる口が無い。
+
+        以前は `files` と `embeds` を同時に渡すと、`_send_chunks` の files分岐が
+        `{"content": chunk}` だけを組み立て、embed が無言で消えていた
+        (post_webhookは例外を投げずbool を返す契約のため気づきにくい)。
+        呼び出し元の設定ミスとして即座に検知できるようにする。
+        """
+        post = MagicMock()
+        monkeypatch.setattr(core_discord.requests, "post", post)
+
+        with pytest.raises(ValueError, match="files.*embeds"):
+            core_discord.post_webhook(self.URL, files={"file": ("a.txt", b"x")}, embeds=[{"title": "t"}])
+        post.assert_not_called()
+
     def test_attached_file_is_rewound_before_retry(self, monkeypatch, tmp_path):
         """429 のリトライで動画が「0バイトのまま成功」しないこと。
 
