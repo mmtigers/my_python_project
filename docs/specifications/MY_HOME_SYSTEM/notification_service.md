@@ -116,7 +116,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 ### `_split_discord_content` / `_post_discord_with_retry`（Issue #361 で追加）
 
 * **役割**: `_split_discord_content(text, limit=1900)` は text を limit 字以下のチャンクに分割する（できるだけ改行位置で切る。空文字は1チャンク）。`_post_discord_with_retry(url, **kwargs)` は `requests.post` を呼び、429/5xx なら `Retry-After` 等に従って `_retry_sleep`（既定 `time.sleep`、テストで差し替え可能）で待機したうえで限定回数リトライし、最後のレスポンスを返す。
-* 根拠: `def _split_discord_content(text: str, limit: int = DISCORD_CONTENT_CHUNK_SIZE) -> List[str]:` (行番号: 86〜100)、`def _post_discord_with_retry(url: str, **kwargs):` (行番号: 103〜121)
+* 根拠: `def _split_discord_content(text: str, limit: int = DISCORD_CONTENT_CHUNK_SIZE) -> List[str]:` (行番号: 87〜89)、`def _post_discord_with_retry(url: str, **kwargs):` (行番号: 92〜101)
 * **引数/リクエスト**: `text: str, limit: int` / `url: str, **kwargs`（`requests.post` に渡す）
 * 根拠: (行番号: 86, 103)
 * **戻り値/レスポンス**: `List[str]` / `requests.Response`

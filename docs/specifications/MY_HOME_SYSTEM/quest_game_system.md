@@ -29,7 +29,7 @@
 * **（Issue #662 で最適化）** `get_all_view_data` の「表示対象クエスト × 直近30日の承認済み履歴」の二重ループを、`quest_id` をキーにした索引(`collections.defaultdict`)を1度作る形に変えた。計算量は O(Q×H) から O(Q+H) になる。履歴は `completed_at` の降順で取得しており、索引への追加もその順序を保つため、「ユーザーごとに最新の履歴を先に評価する」という既存の判定はそのまま成り立つ(挙動は変えていない)。
 
 マスターデータ(`quest_data.USERS`/`QUESTS`/`REWARDS`)とDBの同期(`sync_master_data`)、および画面表示用の集約データ生成(`get_all_view_data`)を担う`GameSystem`クラス1つを定義するファイル。`GameSystem.__init__`は`QuestService`/`ApprovalService`/`UserService`/`ShopService`の4インスタンスを合成し(`InventoryService`は含まない)、ファイル末尾でこれら4サービスと`GameSystem`自身のシングルトンをモジュールレベルの変数(`game_system`/`quest_service`/`approval_service`/`shop_service`/`user_service`)として公開する。**（Issue #662で追加）** `ApprovalService`/`approval_service`は、`QuestService`から承認・却下・取消を分離した際に加わった。`sync_master_data`/`get_all_view_data`はいずれも、`quest_data`モジュールをこのファイル自身ではモジュールグローバルとしてimportせず、実行のたびに下位互換シム(`services/quest_service.py`)を`from services import quest_service as _quest_service_shim`として動的にimportし、`_quest_service_shim.quest_data`を経由して現在値を読む設計になっている。これは、テストが`monkeypatch.setattr(services.quest_service, "quest_data", fake)`という形でシム側の属性を差し替える前提のためである。
-根拠: `class GameSystem:` (行番号: 17)、`def __init__(self):\n        self.quest_service = QuestService()\n        self.user_service = UserService()\n        self.shop_service = ShopService()` (行番号: 18〜21)
+根拠: `class GameSystem:` (行番号: 26)、`def __init__(self):\n        self.quest_service = QuestService()\n        self.user_service = UserService()\n        self.shop_service = ShopService()` (行番号: 27〜31)
 根拠: `from services import quest_service as _quest_service_shim` (行番号: 30, 171)、コメント (行番号: 25〜29 / 抜粋: "quest_data は互換シム(services/quest_service.py)側でimportされ、テストが\n        # `from services import quest_service as qs; monkeypatch.setattr(qs, \"quest_data\", fake)`\n        # という形で差し替える(Issue #529等)。")
 根拠: `game_system = GameSystem()\nquest_service = game_system.quest_service\nshop_service = game_system.shop_service\nuser_service = game_system.user_service` (行番号: 341〜344)
 
@@ -68,7 +68,7 @@
 ### `GameSystem.__init__`
 
 * **役割**: `QuestService`/`UserService`/`ShopService`の3インスタンスを生成し、それぞれ`self.quest_service`/`self.user_service`/`self.shop_service`へ格納する。`InventoryService`はここに含まれない。
-* 根拠: `def __init__(self):\n        self.quest_service = QuestService()\n        self.user_service = UserService()\n        self.shop_service = ShopService()` (行番号: 18〜21)
+* 根拠: `def __init__(self):\n        self.quest_service = QuestService()\n        self.user_service = UserService()\n        self.shop_service = ShopService()` (行番号: 27〜31)
 * **引数/リクエスト**: なし
 * 根拠: (行番号: 18)
 * **戻り値/レスポンス**: なし
@@ -79,7 +79,7 @@
 ### `GameSystem.sync_master_data`
 
 * **役割**: `quest_data`モジュール(下位互換シム経由で取得した現在値を`importlib.reload`)の`USERS`/`QUESTS`/`REWARDS`をそれぞれ`MasterUser`/`MasterQuest`/`MasterReward`でバリデーションし、DBへUPSERT/DELETEで反映する。ユーザーは`ON CONFLICT DO UPDATE`で`name`/`job_class`を更新し`role`は`COALESCE(excluded.role, quest_users.role)`で新しい値が`None`なら既存値を保持する。クエストは`active_q_ids`に含まれない行を`DELETE`してから全件を`ON CONFLICT DO UPDATE`でUPSERTするが、`quest_data.QUESTS`が空の場合はDELETE自体をスキップする安全弁を持つ。報酬は、マスタから削除された`reward_id`のうち`user_inventory`に参照が残っているものを削除対象から除外したうえで、残りを`DELETE`してから全件をUPSERTする。 **（Issue #664 で変更）** クエスト・報酬のUPSERT文と、それに渡す値のタプルの組み立ては`services/quest/master_sync_sql.py`（[quest_master_sync_sql.md](./quest_master_sync_sql.md)）へ一本化した。以前は同じ2テーブルへのUPSERTが本ファイルと`sync_strict.py`に別々に書かれており、列リストが食い違う事故が#100/#164/#165 と3度起きていた。「マスタに無い行をどう扱うか」という同期の方針（上記の安全弁・参照チェック）だけが本メソッドに残る。
-* 根拠: `def sync_master_data(self) -> Dict[str, str]:` (行番号: 23〜166)
+* 根拠: `def sync_master_data(self) -> Dict[str, str]:` (行番号: 33〜172)
 * 根拠: `ON CONFLICT(user_id) DO UPDATE SET\n                        name = excluded.name,\n                        job_class = excluded.job_class,\n                        role = COALESCE(excluded.role, quest_users.role)` (行番号: 65〜68)
 * 根拠: `if active_q_ids:\n                ph = ','.join(['?'] * len(active_q_ids))\n                cur.execute(f"DELETE FROM quest_master WHERE quest_id NOT IN ({ph})", active_q_ids)  # nosec B608\n            else:\n                logger.warning(\n                    "⚠️ quest_data.QUESTSが空のため、quest_masterへの全削除操作を"\n                    "スキップしました(意図しない全消去を防ぐための安全弁)。"\n                )` (行番号: 72〜86)
 * 根拠: `for stale_reward_id in stale_reward_ids:\n                if stale_reward_id in referenced_reward_ids:\n                    logger.warning(\n                        f"⚠️ reward_id={stale_reward_id} はマスタから削除されましたが、"\n                        "user_inventoryに参照が残っているため削除をスキップします。"\n                    )\n                    continue\n                cur.execute("DELETE FROM reward_master WHERE reward_id = ?", (stale_reward_id,))` (行番号: 143〜150)
@@ -95,7 +95,7 @@
 ### `GameSystem.get_all_view_data`
 
 * **役割**: `family-quest`フロントエンドのメイン画面向けに、ユーザー一覧・クエスト一覧・報酬一覧・完了済みクエスト・最近のログ・承認待ち一覧を1つの辞書にまとめて返す。`quest_users`の取得結果は、SQLiteのデフォルト順序(主キーのアルファベット順)ではなく`quest_data.USERS`の宣言順に並べ替える(`canonical_order`)。各クエストには`quest_service._compute_boost_from_last_completed`によるボーナス(`bonus_gold`/`bonus_exp`)を付与し、この際に必要な「対象ユーザー×クエストの直近の非rejected完了日時」を、クエストごとに個別SELECTするのではなく`GROUP BY user_id, quest_id`の1クエリでまとめて取得してN+1クエリを避ける(`last_completed_map`)。`target_user`が実在ユーザーでない(`'all'`/`'siblings'`等)場合は、閲覧中のユーザー(`viewer_user_id`)または兄妹の代表ユーザーをボーナス算出の代表として使う。過去1ヶ月の`quest_history`(`status='approved'`)から、`quest_service.is_within_reset_period`で現在の周期内と判定されたものだけを`completedQuests`として集約する(`infinite`型は全件、それ以外はユーザーごとに最新1件のみ評価)。
-* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 168〜318)
+* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 174〜332)
 * 根拠: `if _quest_service_shim.quest_data:\n                canonical_order = {u['user_id']: i for i, u in enumerate(_quest_service_shim.quest_data.USERS)}\n                users.sort(key=lambda u: canonical_order.get(u['user_id'], len(canonical_order)))` (行番号: 185〜187)
 * 根拠: `last_completed_map: Dict[tuple, str] = {\n                (row['user_id'], row['quest_id']): row['last_completed_at']\n                for row in cur.execute("""\n                    SELECT user_id, quest_id, MAX(completed_at) AS last_completed_at\n                    FROM quest_history\n                    WHERE status != 'rejected'\n                    GROUP BY user_id, quest_id\n                """)\n            }` (行番号: 222〜230)
 * 根拠: `if q['target_user'] == 'all' or not q['target_user']:\n                    boost_user_id = viewer_user_id\n                elif q['target_user'] == 'siblings' and sibling_child_ids:\n                    boost_user_id = sibling_child_ids[0]\n                else:\n                    boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 236〜241)
@@ -112,7 +112,7 @@
 ### `GameSystem._fetch_recent_logs`
 
 * **役割**: `quest_history`(`status='approved' AND quest_id != 0`、`id`降順、最大20件)と`reward_history`(`id`降順、最大20件)を取得しマージ、`ts`降順で先頭20件に切り詰めたうえで、`quest_users`から取得したユーザー名を付与し表示テキストと日付文字列を整形して返す。ユーザーが見つからない場合は`'誰か'`のプレースホルダを使う。
-* 根拠: `def _fetch_recent_logs(self, cur) -> List[dict]:` (行番号: 320〜338)
+* 根拠: `def _fetch_recent_logs(self, cur) -> List[dict]:` (行番号: 334〜352)
 * 根拠: `q_logs = cur.execute("""\n            SELECT id, user_id, quest_title as title, 'quest' as type, completed_at as ts\n            FROM quest_history WHERE status='approved' AND quest_id != 0 ORDER BY id DESC LIMIT 20\n        """).fetchall()` (行番号: 321〜324)
 * **引数/リクエスト**: `cur`（呼び出し元のトランザクション内で使うDBカーソル）
 * 根拠: (行番号: 320)

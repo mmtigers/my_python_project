@@ -19,9 +19,9 @@
 ## 2. ファイルの概要
 
 マスターデータ(`quest_data.QUESTS`/`REWARDS`)とデータベースのマスターテーブル(`quest_master`/`reward_master`)を完全に同期する、コマンドライン実行用のスクリプト。マスターデータに存在しない行はDBから物理削除(DELETE)し、マスターデータの内容は`INSERT ... ON CONFLICT DO UPDATE`でUpsertする「厳密な同期」を行う。この削除は破壊的操作であり、`quest_data.py`のID変更ミス一発で本番マスタが全件消えるリスクがあるため(M-9-6)、`main`から呼ばれる`run_sync`は実行前に`confirm_or_abort`で安全ガード(マスタデータが空の場合の拒否)と対話的な確認プロンプトを挟む。`--dry-run`フラグでDBを一切変更せず削除・更新件数のみを表示するモードもある。
-* 根拠: `def sync_quests(cur, dry_run: bool = False):` (行番号: 22〜23 / 抜粋: "クエスト定義の完全同期 (不要なデータは削除)")
-* 根拠: `class SyncAborted(Exception):` (行番号: 176〜177 / 抜粋: "M-9-6: ユーザーがマスタ同期の確認プロンプトで拒否した、または安全ガードで拒否された場合。")
-* 根拠: `def confirm_or_abort(...)` docstring (行番号: 185〜192 / 抜粋: "sync_strict.py はマスタに無い行を無確認でDELETEする(マスタが空なら全削除)。")
+* 根拠: `def sync_quests(cur, dry_run: bool = False):` (行番号: 29〜101 / 抜粋: "クエスト定義の完全同期 (不要なデータは削除)")
+* 根拠: `class SyncAborted(Exception):` (行番号: 199〜200 / 抜粋: "M-9-6: ユーザーがマスタ同期の確認プロンプトで拒否した、または安全ガードで拒否された場合。")
+* 根拠: `def confirm_or_abort(...)` docstring (行番号: 203〜232 / 抜粋: "sync_strict.py はマスタに無い行を無確認でDELETEする(マスタが空なら全削除)。")
 
 `quest_master`へのUpsertでは、`reset_period`列を含む全カラムを明示的に指定する(Issue #100)。以前は`reset_period`列がINSERT対象に含まれていなかったため、新規行や既存行の再Upsert時にDB列のデフォルト値(`current_schema.sql`/`migrations/0002`に由来する`'weekly_monday'`。SQLiteの`ALTER TABLE`では変更不能なため列を再作成しない限り残り続ける)がそのまま入ってしまい、`is_within_reset_period()`が扱えない値のため周期内多重完了ガードが機能しない・クリアしても未クリア表示になる不具合(`migrations/0005`で一度データ補正済みのもの)が再発する経路になっていた。
 * 根拠: `reset_period_val = q.get('reset_period', 'daily')` および `INSERT INTO quest_master (...)` (行番号: 64〜97 / 抜粋: "#100: reset_period 列を明示的にINSERTしないと")
@@ -59,7 +59,7 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 ### `_count_rows_to_delete`
 
 * **役割**: `dry_run`時に、マスタに存在しないため削除対象になる行数を実際には削除せずカウントする。`master_ids`が空の場合はテーブルの全件数を返す。
-* 根拠: `def _count_rows_to_delete(cur, table: str, id_column: str, master_ids: list) -> int:` (行番号: 10〜19)
+* 根拠: `def _count_rows_to_delete(cur, table: str, id_column: str, master_ids: list) -> int:` (行番号: 17〜26)
 * **引数/リクエスト**: `cur`, `table: str`(対象テーブル名), `id_column: str`(ID列名), `master_ids: list`(マスタ側に存在するIDのリスト)
 * 根拠: (行番号: 10)
 * **戻り値/レスポンス**: `int`(削除対象になる行数)
@@ -74,7 +74,7 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 ### `sync_quests`
 
 * **役割**: `quest_data.QUESTS`を元に`quest_master`テーブルを完全同期する。`dry_run=True`の場合は`_count_rows_to_delete`で削除見込み件数と登録予定件数をログ出力するのみで、DBへは一切書き込まない。通常実行時は、マスタに存在しないIDの行を`DELETE`(`master_ids`が空なら全件`DELETE`)したうえで、`QUESTS`の各要素を`quest_id`をキーに`INSERT ... ON CONFLICT DO UPDATE`でUpsertする。Issue #164により、Upsert対象列は`quest_id`/`title`/`quest_type`/`target_user`/`exp_gain`/`gold_gain`/`icon_key`/`day_of_week`/`description`/`reset_period`/`start_time`/`end_time`/`start_date`/`end_date`/`occurrence_chance`/`pre_requisite_quest_id`の全16列(`services/quest_service.py`の`sync_master_data()`と同じ列構成)になった。
-* 根拠: `def sync_quests(cur, dry_run: bool = False):` (行番号: 22〜116)
+* 根拠: `def sync_quests(cur, dry_run: bool = False):` (行番号: 29〜101)
 * **引数/リクエスト**: `cur`(DBカーソル), `dry_run: bool = False`
 * 根拠: (行番号: 22)
 * **戻り値/レスポンス**: なし(`return`文は`dry_run`時の早期`return`のみ)
@@ -87,7 +87,7 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 ### `sync_rewards`
 
 * **役割**: `quest_data.REWARDS`を元に`reward_master`テーブルを完全同期する。`sync_quests`と同様の`dry_run`分岐・削除・Upsertの構造を持つ。Issue #165の修正により、削除は無条件の一括`DELETE`ではなく、まず削除候補行(`master_ids`に存在しないID)を`SELECT`で抽出したうえで1行ずつループし、`user_inventory`に参照が残る(所持実績のある)報酬は`DELETE`をスキップして警告ログを出す方式に変更された(`services/quest_service.py`の`sync_master_data()`のM-1-2対策と同じ方式)。Upsert対象列にも`description`が追加され、レガシー列`desc`と同じ値を書き込むようになった。
-* 根拠: `def sync_rewards(cur, dry_run: bool = False):` (行番号: 118〜196)
+* 根拠: `def sync_rewards(cur, dry_run: bool = False):` (行番号: 103〜169)
 * **引数/リクエスト**: `cur`(DBカーソル), `dry_run: bool = False`
 * 根拠: (行番号: 118)
 * **戻り値/レスポンス**: なし
@@ -100,7 +100,7 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 ### `build_arg_parser`
 
 * **役割**: CLI引数パーサを構築する。`--dry-run`(DB変更なしで件数のみ表示)、`-y`/`--yes`(確認プロンプトをスキップ)、`--allow-empty-master`(マスタが空でも実行を許可)の3フラグを定義する。
-* 根拠: `def build_arg_parser() -> argparse.ArgumentParser:` (行番号: 149〜173)
+* 根拠: `def build_arg_parser() -> argparse.ArgumentParser:` (行番号: 172〜196)
 * **引数/リクエスト**: なし
 * 根拠: (行番号: 149)
 * **戻り値/レスポンス**: `argparse.ArgumentParser`
@@ -113,7 +113,7 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 ### `SyncAborted` (例外クラス)
 
 * **役割**: ユーザーが確認プロンプトで拒否した、または安全ガード(空マスタ)により実行を中止すべき場合に送出される専用例外(M-9-6)。
-* 根拠: `class SyncAborted(Exception):` (行番号: 176〜177 / 抜粋: "M-9-6: ユーザーがマスタ同期の確認プロンプトで拒否した")
+* 根拠: `class SyncAborted(Exception):` (行番号: 199〜200 / 抜粋: "M-9-6: ユーザーがマスタ同期の確認プロンプトで拒否した")
 * **引数/リクエスト**: `Exception`を継承するのみで独自属性なし
 * 根拠: (行番号: 176〜177)
 * **戻り値/レスポンス**: 該当なし(例外クラス)
@@ -124,7 +124,7 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 ### `confirm_or_abort`
 
 * **役割**: 破壊的なDELETEを伴う同期を実行してよいか判定する安全ガード(M-9-6)。`master_quest_ids`または`master_reward_ids`が空で`allow_empty_master=False`の場合はエラーログを出して即座に`SyncAborted`を送出する。`assume_yes=True`ならここで終了(プロンプト表示なし)。それ以外は`input_func`で対話的に確認し、`y`/`yes`(大小文字・前後空白は無視)以外の回答なら`SyncAborted`を送出する。
-* 根拠: `def confirm_or_abort(master_quest_ids: list, master_reward_ids: list, allow_empty_master: bool, assume_yes: bool, input_func=input) -> None:` (行番号: 180〜209)
+* 根拠: `def confirm_or_abort(master_quest_ids: list, master_reward_ids: list, allow_empty_master: bool, assume_yes: bool, input_func=input) -> None:` (行番号: 203〜232)
 * **引数/リクエスト**: `master_quest_ids: list`, `master_reward_ids: list`, `allow_empty_master: bool`, `assume_yes: bool`, `input_func=input`(テスト用の差し替え可能な入力関数)
 * 根拠: (行番号: 180〜184)
 * **戻り値/レスポンス**: `None`(中止すべき場合は`SyncAborted`を送出して戻らない)
@@ -137,7 +137,7 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 ### `run_sync`
 
 * **役割**: 同期処理全体のエントリポイント。開始ログを出力し、`dry_run=False`の場合のみ`confirm_or_abort`で安全ガード・確認プロンプトを通過させたうえで、単一のDBカーソル(`core.database.get_db_cursor(commit=not dry_run)`)を使って`sync_quests`と`sync_rewards`を順に実行する。
-* 根拠: `def run_sync(dry_run: bool = False, assume_yes: bool = False, allow_empty_master: bool = False, input_func=input) -> None:` (行番号: 212〜228)
+* 根拠: `def run_sync(dry_run: bool = False, assume_yes: bool = False, allow_empty_master: bool = False, input_func=input) -> None:` (行番号: 235〜251)
 * **引数/リクエスト**: `dry_run: bool = False`, `assume_yes: bool = False`, `allow_empty_master: bool = False`, `input_func=input`
 * 根拠: (行番号: 212)
 * **戻り値/レスポンス**: なし
@@ -150,7 +150,7 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 ### `main`
 
 * **役割**: CLIエントリポイント。`build_arg_parser`でパースした引数を`run_sync`に渡して実行する。`SyncAborted`(安全ガード/確認プロンプト拒否)は静かに`sys.exit(1)`、それ以外の`Exception`はエラーログとスタックトレースを出力してから`sys.exit(1)`する。
-* 根拠: `def main(argv=None):` (行番号: 231〜245)
+* 根拠: `def main(argv=None):` (行番号: 254〜268)
 * **引数/リクエスト**: `argv=None`(`argparse.parse_args`にそのまま渡され、`None`ならプロセスの`sys.argv`が使われる)
 * 根拠: (行番号: 231〜232)
 * **戻り値/レスポンス**: なし(異常時は`sys.exit(1)`でプロセス終了)

@@ -55,7 +55,7 @@
 ### `Task`
 
 * **役割**: 実行するスクリプトのパス、実行間隔、最終実行時刻、引数を保持するためのデータ構造を定義する。
-* 根拠: `class Task(TypedDict):` (行番号: 20-21 / 抜粋: "実行タスクのデータ構造定義。")
+* 根拠: `class Task(TypedDict):` (行番号: 21-26 / 抜粋: "実行タスクのデータ構造定義。")
 
 
 * **引数/リクエスト**: 該当なし（型定義のため）
@@ -125,7 +125,7 @@
 ### `main`
 
 * **役割**: `ThreadPoolExecutor`（ワーカー数 = `TASKS`件数、最低1）を使って `TASKS` リストを巡回し、現在時刻と最終実行時刻の差が指定間隔（`interval`）以上、かつ当該スクリプトが実行中でないタスクに対して `run_script` を非同期（別スレッド）で投入する無限ループを実行する。実行中のタスクは `in_flight` 辞書（スクリプトパス→`Future`）で管理し、完了していないタスクは同一周期内で再投入しない（多重起動防止）。
-* 根拠: `def main() -> None:` (行番号: 94 / 抜粋: "メインループ。")
+* 根拠: `def main() -> None:` (行番号: 199 / 抜粋: "メインループ。")
 * **（Issue #360 で修正）** 冒頭で `install_signal_handlers()` を呼び、メインループは `while True` ではなく `while not _shutdown_event.is_set()`、スリープは `_shutdown_event.wait(10)`（シャットダウン要求で即抜ける）。ループを抜けた後に `terminate_running_children()` を呼ぶ。
 * 根拠: `install_signal_handlers()` (行番号: 167)、`while not _shutdown_event.is_set():` (行番号: 172)、`_shutdown_event.wait(10)` (行番号: 189)、`terminate_running_children()` (行番号: 191)
 
