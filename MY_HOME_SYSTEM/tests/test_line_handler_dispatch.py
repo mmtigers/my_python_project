@@ -894,13 +894,14 @@ class TestDispatchEvents:
         })
 
     def test_message_event_is_routed_to_handle_message(self, monkeypatch):
-        mock_handle_message = MagicMock()
-        monkeypatch.setattr(line_handler, "handle_message", mock_handle_message)
+        # #664: ディスパッチ先は同期の handle_message ではなく handle_message_async。
+        mock_handle_message = AsyncMock()
+        monkeypatch.setattr(line_handler, "handle_message_async", mock_handle_message)
         event = self._message_event()
 
         line_handler.dispatch_events([event])
 
-        mock_handle_message.assert_called_once_with(event)
+        mock_handle_message.assert_awaited_once_with(event)
 
     def test_postback_event_is_routed_to_handle_postback(self, monkeypatch):
         mock_handle_postback = MagicMock()
@@ -913,9 +914,9 @@ class TestDispatchEvents:
 
     def test_unknown_event_type_is_ignored(self, monkeypatch):
         """MessageEvent/PostbackEvent以外(follow等)は元のWebhookHandlerと同様に無視される"""
-        mock_handle_message = MagicMock()
+        mock_handle_message = AsyncMock()
         mock_handle_postback = MagicMock()
-        monkeypatch.setattr(line_handler, "handle_message", mock_handle_message)
+        monkeypatch.setattr(line_handler, "handle_message_async", mock_handle_message)
         monkeypatch.setattr(line_handler, "handle_postback", mock_handle_postback)
         other_event = MagicMock()  # MessageEvent/PostbackEventいずれのspecでもない
 
@@ -925,25 +926,177 @@ class TestDispatchEvents:
         mock_handle_postback.assert_not_called()
 
     def test_duplicate_webhook_event_id_is_skipped(self, monkeypatch):
-        mock_handle_message = MagicMock()
-        monkeypatch.setattr(line_handler, "handle_message", mock_handle_message)
+        mock_handle_message = AsyncMock()
+        monkeypatch.setattr(line_handler, "handle_message_async", mock_handle_message)
         event1 = self._message_event(event_id="dup", text="ステータス")
         event2 = self._message_event(event_id="dup", text="ステータス")
 
         line_handler.dispatch_events([event1, event2])
 
-        mock_handle_message.assert_called_once_with(event1)
+        mock_handle_message.assert_awaited_once_with(event1)
 
     def test_exception_in_one_event_does_not_block_the_rest(self, monkeypatch):
         """dispatch_events自身のループレベルでもイベント単位の例外隔離を二重に保証する"""
-        mock_handle_message = MagicMock(side_effect=[RuntimeError("boom"), None])
-        monkeypatch.setattr(line_handler, "handle_message", mock_handle_message)
+        mock_handle_message = AsyncMock(side_effect=[RuntimeError("boom"), None])
+        monkeypatch.setattr(line_handler, "handle_message_async", mock_handle_message)
         event1 = self._message_event(event_id="e1")
         event2 = self._message_event(event_id="e2")
 
         line_handler.dispatch_events([event1, event2])  # 例外が外に漏れないこと
 
-        assert mock_handle_message.call_count == 2
+        assert mock_handle_message.await_count == 2
 
     def test_empty_events_list_is_a_noop(self):
         line_handler.dispatch_events([])  # 例外が出ないこと
+
+
+# ==========================================
+# Issue #664: メッセージごとの asyncio.run 廃止 / 同一イベントループでの実行
+# ==========================================
+import inspect as _inspect
+import threading as _threading
+
+
+class TestDispatchRunsOnTheServerEventLoop:
+    """Issue #664 の回帰テスト。
+
+    以前は `webhook_router` が同期関数 `dispatch_events` を BackgroundTasks へ渡し、
+    その内側の `handle_message` が着信メッセージ1件ごとに
+    `asyncio.run(_process_message_async(...))` で**新しいイベントループを生成しては
+    破棄**していた。`services/ai_service` の Gemini クライアント(`client.aio.chats`)の
+    ようにモジュールレベルで1度だけ生成される非同期クライアントは、内部の接続プールを
+    生成時のループに紐づけるため、毎回別のループから使われる構成は本質的に不安定だった
+    (`ai_service.SimpleRateLimiter` が `asyncio.Lock` ではなく `threading.Lock` を
+    使っているのも、同じ「メッセージごとに別ループ」が理由である旨がコメントに残っている)。
+
+    現在は `dispatch_events_async` がコルーチンで、Starlette がサーバー本体の
+    イベントループ上で await する。ここではその契約を固定する。
+    """
+
+    def setup_method(self):
+        line_handler._SEEN_EVENT_IDS.clear()
+
+    def teardown_method(self):
+        line_handler._SEEN_EVENT_IDS.clear()
+
+    def _message_event(self, event_id="evt-loop", text="ステータス", user_id="U1"):
+        return MessageEvent.from_dict({
+            "type": "message",
+            "mode": "active",
+            "timestamp": 1700000000000,
+            "source": {"type": "user", "userId": user_id},
+            "webhookEventId": event_id,
+            "deliveryContext": {"isRedelivery": False},
+            "replyToken": "tok",
+            "message": {"id": "m1", "type": "text", "text": text, "quoteToken": "q"},
+        })
+
+    def _postback_event(self, event_id="evt-pb-loop", data="show_health_input", user_id="U1"):
+        return PostbackEvent.from_dict({
+            "type": "postback",
+            "mode": "active",
+            "timestamp": 1700000000000,
+            "source": {"type": "user", "userId": user_id},
+            "webhookEventId": event_id,
+            "deliveryContext": {"isRedelivery": False},
+            "replyToken": "tok",
+            "postback": {"data": data},
+        })
+
+    def test_dispatch_entrypoint_for_the_router_is_a_coroutine_function(self):
+        """BackgroundTasks にコルーチン関数を渡すと、Starlette はスレッドプールでは
+        なくイベントループ上で await する。同期関数に戻すと #664 の修正が無効化される。"""
+        assert _inspect.iscoroutinefunction(line_handler.dispatch_events_async)
+        assert _inspect.iscoroutinefunction(line_handler.handle_message_async)
+
+    @pytest.mark.asyncio
+    async def test_message_path_runs_without_creating_a_new_event_loop(self, monkeypatch):
+        """実行中のイベントループ上から await しても RuntimeError にならず、
+        `_process_message_async` がその**同じ**ループ上で実行されること。
+
+        以前の実装(`asyncio.run`)をこの文脈で呼ぶと
+        `RuntimeError: asyncio.run() cannot be called from a running event loop`
+        になるため、このテストは退行を確実に捕まえる。
+        """
+        outer_loop = _asyncio.get_running_loop()
+        seen = {}
+
+        async def fake_process(user_id, user_name, msg_text, reply_token):
+            seen["loop"] = _asyncio.get_running_loop()
+
+        monkeypatch.setattr(line_handler, "_process_message_async", fake_process)
+        monkeypatch.setattr(line_handler, "_get_display_name", MagicMock(return_value="パパ"))
+
+        await line_handler.dispatch_events_async([self._message_event()])
+
+        assert seen["loop"] is outer_loop
+
+    @pytest.mark.asyncio
+    async def test_postback_path_is_offloaded_to_a_thread_without_a_running_loop(self, monkeypatch):
+        """Postback の委譲先 `handlers/line_logic.py` は DB 保存を `sync_run()`
+        (= `asyncio.run`)で待つ作りのため、実行中のイベントループ上で呼ぶと
+        RuntimeError になる。`dispatch_events_async` は Postback だけを別スレッドへ
+        逃がしており、そのスレッドには実行中のループが無いことを固定する。"""
+        observed = {}
+
+        def fake_handle_postback(event):
+            observed["thread"] = _threading.current_thread().name
+            try:
+                _asyncio.get_running_loop()
+                observed["has_running_loop"] = True
+            except RuntimeError:
+                observed["has_running_loop"] = False
+
+        monkeypatch.setattr(line_handler, "handle_postback", fake_handle_postback)
+
+        await line_handler.dispatch_events_async([self._postback_event()])
+
+        assert observed["has_running_loop"] is False, (
+            "Postback をイベントループ上で直接実行すると line_logic.sync_run() が壊れる"
+        )
+        assert observed["thread"] != _threading.current_thread().name
+
+    @pytest.mark.asyncio
+    async def test_blocking_line_api_calls_do_not_run_on_the_event_loop(self, monkeypatch):
+        """`_get_display_name`(Profile API)と `reply_message`(reply/push API)は
+        最大で接続5秒+読み取り15秒ブロックする同期HTTPなので、イベントループ上で
+        直接呼ばないこと(サーバー全体が止まる)。"""
+        loop_thread = _threading.current_thread().name
+        threads = {}
+
+        def fake_display_name(user_id):
+            threads["display_name"] = _threading.current_thread().name
+            return "パパ"
+
+        def fake_reply(reply_token, messages, user_id=None):
+            threads["reply"] = _threading.current_thread().name
+
+        monkeypatch.setattr(line_handler, "_get_display_name", fake_display_name)
+        monkeypatch.setattr(line_handler, "reply_message", fake_reply)
+        monkeypatch.setattr(
+            line_handler.ai_service, "analyze_text_and_execute", AsyncMock(return_value="OK")
+        )
+
+        await line_handler.dispatch_events_async([self._message_event(text="こんにちは")])
+
+        assert threads["display_name"] != loop_thread
+        assert threads["reply"] != loop_thread
+
+    @pytest.mark.asyncio
+    async def test_events_are_processed_serially_in_order(self, monkeypatch):
+        """複数イベントは従来どおり1件ずつ順に処理する(並行実行にはしない)。
+        体調記録等の順序・冪等化の前提を変えないため。"""
+        order = []
+
+        async def fake_handle(event):
+            order.append(event.message.text)
+            await _asyncio.sleep(0)
+
+        monkeypatch.setattr(line_handler, "handle_message_async", fake_handle)
+
+        await line_handler.dispatch_events_async([
+            self._message_event(event_id="s1", text="1件目"),
+            self._message_event(event_id="s2", text="2件目"),
+        ])
+
+        assert order == ["1件目", "2件目"]
