@@ -3,7 +3,6 @@
 # ==========================================
 # 設定
 # ==========================================
-MAC="F4:4E:FC:B6:65:D4"
 PROJECT_DIR="/home/masahiro/develop/MY_HOME_SYSTEM"
 ENV_FILE="$PROJECT_DIR/.env"
 LOGFILE="$PROJECT_DIR/logs/bluetooth_monitor.log"
@@ -21,6 +20,16 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 WEBHOOK_URL="${DISCORD_WEBHOOK_ERROR:-$DISCORD_WEBHOOK_NOTIFY}"
+
+# Issue #663: 以前は実機のMACアドレスをこのスクリプトに直書きしていた。
+# config.py 側(SPEAKER_BLUETOOTH_MAC)と同じキーで .env から受け取る。
+# 未設定ならスピーカー運用をしていない環境とみなし、何もせず正常終了する
+# (config.ENABLE_BLUETOOTH=False のときと同じ扱い)。
+MAC="${SPEAKER_BLUETOOTH_MAC:-}"
+if [ -z "$MAC" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - [INFO] SPEAKER_BLUETOOTH_MAC is not set. Skipping." >> "$LOGFILE"
+    exit 0
+fi
 
 # ==========================================
 # ヘルパー関数

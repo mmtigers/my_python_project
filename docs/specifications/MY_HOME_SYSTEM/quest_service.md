@@ -13,7 +13,9 @@
 ## 関連ドキュメント
 
 * [quest_locks.md](./quest_locks.md) - `services/quest/locks.py`。本ファイルが再エクスポートする定数群(`JST`/`ROLE_ADULT`/`ROLE_CHILD`/`SPAM_CHECK_INTERVAL_SECONDS`/`INFINITE_QUEST_COOLDOWN_SECONDS`/`YOUTUBE_REWARD_COOLDOWN_SECONDS`)とロック関数群(`_get_completion_lock`/`_get_user_balance_lock`/`_get_purchase_lock`/`_get_item_use_lock`/`_acquire_user_balance_locks`)、`logger`の実体
-* [quest_quest_service.md](./quest_quest_service.md) - `services/quest/quest_service.py`。本ファイルが再エクスポートする`QuestService`クラスの実体（クエスト完了・承認・却下・取消のドメインロジック）
+* [quest_quest_service.md](./quest_quest_service.md) - `services/quest/quest_service.py`。本ファイルが再エクスポートする`QuestService`クラスの実体（クエスト完了のドメインロジック）
+* [quest_approval_service.md](./quest_approval_service.md) - `services/quest/approval_service.py`。**（Issue #662で追加）** 本ファイルが再エクスポートする`ApprovalService`クラスと`approval_service`シングルトンの実体（承認・却下・取消のドメインロジック）
+* [quest_rewards.md](./quest_rewards.md) - `services/quest/rewards.py`。**（Issue #662で追加）** 本ファイルが再エクスポートする`apply_quest_rewards`関数の実体（承認系と完了系が共有する報酬付与）
 * [quest_user_service.md](./quest_user_service.md) - `services/quest/user_service.py`。本ファイルが再エクスポートする`UserService`クラスの実体（家族統計・アバター管理）、および**（Issue #551で追加）** `save_avatar_image`が送出する2つのドメイン例外`InvalidImageError`/`ImageTooLargeError`の実体
 * [quest_shop_service.md](./quest_shop_service.md) - `services/quest/shop_service.py`。本ファイルが再エクスポートする`ShopService`クラスの実体（報酬購入）
 * [quest_inventory_service.md](./quest_inventory_service.md) - `services/quest/inventory_service.py`。本ファイルが再エクスポートする`InventoryService`クラス・`inventory_service`シングルトンの実体（アイテム使用）
@@ -65,7 +67,7 @@ Issue #550で`services/quest_service.py`（旧1572行・5クラス）が`service
 
 ### `__all__` (モジュールレベル変数)
 
-* **役割**: 本ファイルがimportした全シンボル（外部モジュール5つ、`services.quest.locks`由来の定数・ロック関数18個、`UserService`/`InvalidImageError`/`ImageTooLargeError`/`QuestService`/`ShopService`/`InventoryService`/`inventory_service`/`GameSystem`/`game_system`/`quest_service`/`shop_service`/`user_service`、`quest_data`）の名前を列挙し、`from services.quest_service import *`や静的解析ツール(ruffのF401)に対して「これらは意図的な再エクスポートであり未使用ではない」ことを明示する。**（Issue #551で追加）** `InvalidImageError`/`ImageTooLargeError`の2件が新たに加わった。
+* **役割**: 本ファイルがimportした全シンボル（外部モジュール5つ、`services.quest.locks`由来の定数・ロック関数18個、`UserService`/`InvalidImageError`/`ImageTooLargeError`/`QuestService`/`ApprovalService`/`apply_quest_rewards`/`ShopService`/`InventoryService`/`inventory_service`/`GameSystem`/`game_system`/`quest_service`/`approval_service`/`shop_service`/`user_service`、`quest_data`）の名前を列挙し、`from services.quest_service import *`や静的解析ツール(ruffのF401)に対して「これらは意図的な再エクスポートであり未使用ではない」ことを明示する。**（Issue #551で追加）** `InvalidImageError`/`ImageTooLargeError`の2件が新たに加わった。
 * 根拠: `__all__ = [\n    "importlib",\n    ...\n    "quest_data",\n]` (行番号: 64〜103)、コメント (行番号: 60〜63 / 抜粋: "本ファイルはimportパス互換のための再エクスポート層であり、ここで束縛する名前は\n# すべて外部(ルーター・テスト)からの ... 利用が前提のため、\n# ruffのF401(unused-import)を抑制する。")、追加分 (行番号: 91〜92 / 抜粋: "\"InvalidImageError\",\n    \"ImageTooLargeError\",")
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルのリストリテラル）
 * 根拠: (行番号: 64〜103)
@@ -155,7 +157,7 @@ graph TD
 
 | 優先度 | ファイル名 | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `services/quest/quest_service.py`（[quest_quest_service.md](./quest_quest_service.md)） | クエスト完了・承認・却下・取消の実際のドメインロジックはここにある。本ファイルはこれを再エクスポートするのみ。 | `from services.quest.quest_service import QuestService` (行番号: 49) |
+| 高 | `services/quest/quest_service.py`（[quest_quest_service.md](./quest_quest_service.md)） | クエスト完了の実際のドメインロジックはここにある。承認・却下・取消は[quest_approval_service.md](./quest_approval_service.md)へ分離済み(Issue #662)。本ファイルはこれらを再エクスポートするのみ。 | `from services.quest.quest_service import QuestService` (行番号: 49) |
 | 高 | `services/quest/game_system.py`（[quest_game_system.md](./quest_game_system.md)） | マスタ同期・画面集約データ生成のロジックに加え、本ファイルの`quest_data`属性への逆依存という設計上の要点を理解するため。 | `from services.quest.game_system import (...)` (行番号: 52〜58) |
 | 高 | `quest_data.py`（[quest_data.md](./quest_data.md)） | `sync_master_data`で読み込まれる`USERS`/`QUESTS`/`REWARDS`の実データの型・値を確認するため。 | `import quest_data` (行番号: 118) |
 | 中 | `services/quest/locks.py`（[quest_locks.md](./quest_locks.md)） | 本ファイルが再エクスポートする定数・ロック関数18個の実体と、レースコンディション対策の全体像を理解するため。 | `from services.quest.locks import (...)` (行番号: 27〜47) |

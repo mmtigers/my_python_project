@@ -16,7 +16,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.database import get_db_cursor
-from services.quest_service import GameSystem, QuestService
+from services.quest_service import ApprovalService, GameSystem, QuestService
 
 # quest_data.py に実在する target='son' の日次クエスト(TV_UNLOCK対象外)
 SON_QUEST_ID = 1009
@@ -61,6 +61,8 @@ class TestFreshDbApprovalFlowE2E:
 
         quest_service = QuestService()
 
+        approval_service = ApprovalService()
+
         # 子供が完了報告 → roleがrole_childとして認識され、即時報酬ではなくpendingになること
         complete_result = quest_service.process_complete_quest("son", SON_QUEST_ID)
         assert complete_result["status"] == "pending"
@@ -80,7 +82,7 @@ class TestFreshDbApprovalFlowE2E:
             ).fetchone()["gold"]
 
         # 親が承認 → roleがrole_adultとして認識され、403にならず報酬が確定すること
-        approve_result = quest_service.process_approve_quest("dad", hist["id"])
+        approve_result = approval_service.process_approve_quest("dad", hist["id"])
         assert approve_result["status"] == "success"
 
         with get_db_cursor() as cur:

@@ -20,7 +20,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.utils import get_now_iso
 from core.database import get_db_cursor
-from services.quest_service import QuestService
+from services.quest_service import ApprovalService
 
 N_PENDING = 12
 GOLD_PER_QUEST = 10
@@ -48,11 +48,11 @@ def _seed_adult_and_child_with_pending_history(n=N_PENDING):
 class TestConcurrentApprove:
     def test_concurrent_approvals_do_not_lose_gold_updates(self, isolated_db):
         history_ids = _seed_adult_and_child_with_pending_history()
-        quest_service = QuestService()
+        approval_service = ApprovalService()
 
         with ThreadPoolExecutor(max_workers=N_PENDING) as pool:
             results = list(pool.map(
-                lambda hid: quest_service.process_approve_quest("dad", hid), history_ids
+                lambda hid: approval_service.process_approve_quest("dad", hid), history_ids
             ))
 
         assert all(r["status"] == "success" for r in results)
@@ -85,11 +85,12 @@ class TestConcurrentCancel:
                 )
                 history_ids.append(cur.lastrowid)
 
-        quest_service = QuestService()
+
+        approval_service = ApprovalService()
 
         with ThreadPoolExecutor(max_workers=N_PENDING) as pool:
             results = list(pool.map(
-                lambda hid: quest_service.process_cancel_quest("son", hid), history_ids
+                lambda hid: approval_service.process_cancel_quest("son", hid), history_ids
             ))
 
         assert all(r["status"] == "cancelled" for r in results)

@@ -32,7 +32,7 @@ from fastapi import HTTPException
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.database import get_db_cursor
-from services.quest_service import QuestService
+from services.quest_service import ApprovalService, QuestService
 
 JST = pytz.timezone("Asia/Tokyo")
 
@@ -255,6 +255,8 @@ class TestApprovalDoesNotOverwriteCompletedAt:
 
         quest_service = QuestService()
 
+        approval_service = ApprovalService()
+
         # 前日の夜、子供が完了報告(pending)する
         report_result = quest_service.process_complete_quest("son", 9004)
         assert report_result["status"] == "pending"
@@ -272,7 +274,7 @@ class TestApprovalDoesNotOverwriteCompletedAt:
             ).fetchone()["completed_at"]
 
         # 親が翌朝に承認する
-        approve_result = quest_service.process_approve_quest("dad", history_id)
+        approve_result = approval_service.process_approve_quest("dad", history_id)
         assert approve_result["status"] == "success"
 
         with get_db_cursor() as cur:

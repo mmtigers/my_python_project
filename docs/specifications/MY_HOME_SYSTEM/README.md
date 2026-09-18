@@ -60,7 +60,9 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [quest_service.md](./quest_service.md) | Issue #550で下記6ファイルへ分割された後に残った、既存importパス互換のための再エクスポート層(シム)。 |
 | [quest_locks.md](./quest_locks.md) | クエスト完了・承認・購入・アイテム使用のプロセス内排他ロックと、YouTubeごほうび券クールダウン判定・JST/ロール等の共有定数。 |
 | [quest_user_service.md](./quest_user_service.md) | 家族統計(レベル・ゴールド合計、達成クエスト数)の集計とアバター画像の更新・孤立ファイル削除。 |
-| [quest_quest_service.md](./quest_quest_service.md) | クエストの完了・承認・却下・取消のドメインロジックと、兄妹連携クエスト・TV解錠・連続達成ボーナス計算。 |
+| [quest_quest_service.md](./quest_quest_service.md) | クエストの完了のドメインロジックと、兄妹連携クエスト・TV解錠・連続達成ボーナス計算。承認・却下・取消は quest_approval_service.md へ分離済み(Issue #662)。 |
+| [quest_approval_service.md](./quest_approval_service.md) | クエストの承認・却下・取消のドメインロジックと、残高ロックによる並行実行時の lost update 防止。 |
+| [quest_rewards.md](./quest_rewards.md) | クエスト報酬(gold/exp/medal)の付与。承認系と完了系が共有する唯一の実装。 |
 | [quest_shop_service.md](./quest_shop_service.md) | 報酬購入時のゴールド減算・在庫付与をアトミックに行う。 |
 | [quest_inventory_service.md](./quest_inventory_service.md) | 所持アイテムの一覧取得と、YouTubeごほうび券のクールダウンを考慮したアイテム使用処理。 |
 | [quest_game_system.md](./quest_game_system.md) | quest_data(マスターデータ)とDBの同期、およびFamily Questフロントエンド向け画面集約データの生成。 |
