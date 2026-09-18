@@ -20,6 +20,7 @@ import FamilyDashboard from './features/family/components/FamilyDashboard';
 
 import { CompletedSignal, ID, Quest, QuestHistory, Reward, User } from '@/types';
 import { getQuestLockState, getQuestProcessingKey } from './features/quest/hooks/useQuestStatus';
+import { useBusyKeys } from './features/quest/hooks/useBusyKeys';
 import { isParentUser, getRepresentativeParent } from './lib/userRole';
 import { ActionResult, resolveErrorText } from './lib/actionResult';
 
@@ -65,22 +66,26 @@ function App() {
   // 実際は成功しているのに「承認に失敗しました」というエラーモーダルが出てしまっていた。
   // 承認は複数のクエストを並行して処理できる必要があるため、単一のbooleanではなく
   // 処理中の履歴idの集合で個別に多重送信を防ぐ。
-  const approvingHistoryIdsRef = useRef<Set<ID>>(new Set());
+  // #391(F-L8): 承認ボタンの isLoading 表示用に、判定用のrefと表示用のstateを
+  // 二重に持つ(#101 と同じパターン)。その二重化は useBusyKeys に切り出してある(#659)。
+  const {
+    ref: approvingHistoryIdsRef,
+    keys: approvingHistoryIds,
+    sync: syncApprovingHistoryIds,
+  } = useBusyKeys<ID>();
   const isApprovingAllRef = useRef(false);
-  // #391(F-L8): 承認ボタンの isLoading 表示用に approvingHistoryIdsRef を state にも写す。
-  // 判定は同期的なrefで行い、見た目だけ state に追従させる(#101 と同じ二重化パターン)。
-  const [approvingHistoryIds, setApprovingHistoryIds] = useState<ID[]>([]);
   const [isApprovingAll, setIsApprovingAll] = useState(false);
-  const syncApprovingHistoryIds = () => setApprovingHistoryIds([...approvingHistoryIdsRef.current]);
 
   // #391: クエスト完了/取消APIが送信中の (user_id, quest_id) の集合。以前は確認モーダルを
   // 閉じてから await runQuestAction していたため、応答が返るまでカードは未完了のまま
   // 再タップでき、2回目の確認モーダルが1回目の完了後も開いたまま残って「はい」を押すと
   // 400「本日は完了済み」/429 のエラーモーダルになっていた。
   // handleQuestClick で無視し、QuestItem にローディング表示を出すために state にも写す。
-  const processingQuestKeysRef = useRef<Set<string>>(new Set());
-  const [processingQuestKeys, setProcessingQuestKeys] = useState<string[]>([]);
-  const syncProcessingQuestKeys = () => setProcessingQuestKeys([...processingQuestKeysRef.current]);
+  const {
+    ref: processingQuestKeysRef,
+    keys: processingQuestKeys,
+    sync: syncProcessingQuestKeys,
+  } = useBusyKeys<string>();
 
   // #102: クエスト完了の効果音・無限クエストの連打防止クールダウンは、以前は
   // QuestList側でタップ即時(=確認モーダルを開く前)に発火していたため、確認モーダルで
