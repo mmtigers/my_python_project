@@ -110,3 +110,52 @@ git ls-remote --heads origin | awk '{sub("refs/heads/", "", $2); print $2}' > /t
 上記1・2はGitHub UI上ですぐ確認できる(Settingsページの表示、および次回PRマージ時に
 headブランチが自動削除されるか)。3(棚卸し)が完了したら、Issue #509・#481のクローズを
 検討する。
+
+実際の確認結果は後述の「5. 確認記録 (2026-09-18)」を参照。
+
+## 5. 確認記録 (2026-09-18)
+
+本手順書の1〜3は**すべて実施済み**であることを確認した。Issue #509・#481 はいずれも
+2026-09-06 にクローズ済み(#481 はサブIssue 21/21 完了)。
+
+### 1. branch protection (F-1)
+
+`master` の branch protection 設定画面のスクリーンショットと、上記1の表を突き合わせた結果、
+**全項目が期待値どおり**だった。
+
+| 設定項目 | 期待値 | 実際 |
+| --- | --- | --- |
+| Branch name pattern | `master` | `master` (Applies to 1 branch) |
+| Require status checks to pass before merging | 有効 | 有効 |
+| └ 対象チェック | `Lint` / `Test + Coverage` / `Security Scan` / `Frontend Build (family-quest)` | 同4つ。過不足なし |
+| Require branches to be up to date before merging | 無効 | 無効 |
+| Require pull request reviews before merging | 無効 | 「Require a pull request before merging」自体が無効 |
+| Include administrators | 無効 | 「Do not allow bypassing the above settings」無効 |
+| Allow force pushes | 無効 | 無効 |
+| Allow deletions | 無効 | 無効 |
+
+上記1の**注意**のとおり、`Claude PR review` と `Check spec/source drift` は required に
+含まれていないことも確認した。
+
+設定が保存済み(画面表示だけでなく実際に適用されている)ことは、`list_branches` API が
+`master` に対して `protected: true` を返すことで裏付けた — Issue #509 起票時点では
+184本すべてが `protected: false` だった。
+
+**補足**: `Require a pull request before merging` が無効なため `master` への直接pushは
+経路として残るが、`Require status checks to pass` が有効な場合は直接pushにも
+チェック成功が要求される。したがって Issue #509 が問題視していた「CIが赤いまま
+master に入る」経路は塞がっている。緊急時の逃げ道を残す方針とも整合するため、
+この状態を是とする。
+
+### 2・2.5. Automatically delete head branches / Allow auto-merge (F-2前段)
+
+`Settings` → `General` → `Pull Requests` のスクリーンショットで、
+`Allow auto-merge`・`Automatically delete head branches` とも**有効**であることを確認した。
+これにより `.github/workflows/dependabot-auto-merge.yml` の前提2条件(required checks +
+Allow auto-merge)が揃っている。
+
+### 3. ブランチ棚卸し (F-2本体)
+
+完了済み。`git ls-remote --heads origin` は **5本**を返す(`master` + 進行中の `claude/*` 4本)。
+Issue #509 起票時点の184本から削減されており、上記3で「削除して問題なし」とした163本、
+および「個別確認が必要な4本」もすべて解消されている。
