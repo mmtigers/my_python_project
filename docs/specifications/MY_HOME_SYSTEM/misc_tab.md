@@ -17,7 +17,7 @@
 ## 2. ファイルの概要
 
 * Streamlitダッシュボードの「電車遅延」「防犯カメラ」「駐輪場」タブを描画するモジュール。公開関数`render_traffic`, `render_photos`, `render_bicycle`と、内部ヘルパー関数`_render_route_search`で構成される。
-* 根拠: `def render_traffic():`, `def render_photos(df_security_log: pd.DataFrame):`, `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 20, 91, 117 / 抜粋: "def render_traffic():")
+* 根拠: `def render_traffic():`, `def render_photos(df_security_log: pd.DataFrame):`, `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 20, 98, 124 / 抜粋: "def render_traffic():")
 * `render_traffic`は、JR宝塚線・神戸線の運行状況を`train_service.get_jr_traffic_status()`から取得し、遅延中(赤)・情報取得不可(グレー)・平常運転(緑)の3状態に応じて背景色を変えたHTMLカードで表示する。取得不可を平常運転と同じ緑色で表示しないための区別であり、さらに現在時刻に応じて出勤ルート（4〜11時台）または帰宅ルート（それ以外）の経路検索結果を表示する。**（B4で修正）** カード内に埋め込む運行状況の`status`/`detail`文字列は`html.escape()`を通してから埋め込むようになった。
 * 根拠: `jr_status = train_service.get_jr_traffic_status()` (行番号: 17 / 抜粋: "jr_status = train_service.get_jr_traffic_status()"), `elif line.get("is_unavailable"):` (行番号: 25 / 抜粋: "elif line.get(\"is_unavailable\"):"), `if COMMUTE_ROUTE_START_HOUR <= current_hour < COMMUTE_ROUTE_END_HOUR:` (行番号: 51 / 抜粋: "if COMMUTE_ROUTE_START_HOUR <= current_hour < COMMUTE_ROUTE_END_HOUR:")（Issue #451でリテラル`4`/`12`からモジュールレベル定数へ変更、値は不変）、エスケープ (行番号: 34〜35 / 抜粋: "{html.escape(line['status'])}", "{html.escape(line['detail'])}")
 * `_render_route_search`は、指定された出発駅・到着駅間のルート情報を`train_service.get_route_info`から取得し、乗換ステップをアイコン（⬇️/🔄）に応じたHTMLに整形して表示する。**（B4で修正）** 乗換ステップの各文字列、および`departure`/`arrival`/`duration`/`cost`/`transfer`の各フィールドは、いずれも`html.escape()`を通してからHTMLに埋め込まれるようになった。

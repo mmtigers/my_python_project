@@ -147,7 +147,7 @@
 ### `flush_pending_discord_notifications` / `_truncate_discord_content`（Issue #361 で追加）
 
 * **役割**: `flush_pending_discord_notifications(timeout=5.0)` は送信中の Discord 通知スレッドを最大 timeout 秒まで `join` する。モジュール読み込み時に `atexit.register` されており、cron 起動の短命プロセス（DDD の `newface_monitor.py` 等）で終了間際の ERROR 通知がデーモンスレッドごと殺されて届かなかった問題（D-M2）を防ぐ。`_truncate_discord_content(content, limit=1900)` は上限超過時に「…(切り詰め)」マーカー付きで切り詰める。
-* 根拠: `def flush_pending_discord_notifications(timeout: float = DISCORD_ATEXIT_FLUSH_SECONDS) -> None:` (行番号: 39〜48)、`atexit.register(flush_pending_discord_notifications)` (行番号: 51)、`def _truncate_discord_content(content: str, limit: int = DISCORD_CONTENT_LIMIT) -> str:` (行番号: 54〜58)
+* 根拠: `def flush_pending_discord_notifications(timeout: float = DISCORD_ATEXIT_FLUSH_SECONDS) -> None:` (行番号: 51〜60)、`atexit.register(flush_pending_discord_notifications)` (行番号: 51)、`def _truncate_discord_content(content: str, limit: int = DISCORD_CONTENT_LIMIT) -> str:` (行番号: 74〜78)
 * **引数/リクエスト**: `timeout: float` / `content: str, limit: int`
 * 根拠: (行番号: 39, 54)
 * **戻り値/レスポンス**: なし / `str`

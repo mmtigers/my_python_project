@@ -122,7 +122,7 @@
 ### `split_text_into_line_messages` (関数、Issue #377で追加、Issue #588でUTF-16基準に修正)
 
 * **役割**: 長文を LINE の5000字制限に収まる`TextMessage`へ変換する。テキストが`LINE_TEXT_MAX_CHARS`字(**Issue #588**: LINE基準のUTF-16コードユニット単位。以前はPythonの`len(str)`によるコードポイント単位だった)以下ならそのまま単一の`TextMessage`を返す（`handlers.line_handler.reply_message`は単一オブジェクト・リストのどちらも受け付けるため、短文の場合の呼び出し元の挙動は変わらない）。超過する場合のみ`_split_by_line_char_count`でLINE基準の`LINE_TEXT_MAX_CHARS`字ごとに分割した`TextMessage`のリストを返し、`LINE_MAX_MESSAGES_PER_REPLY`件を超えるときは末尾を`_take_line_chars`で切り詰めて「(文字数上限のため以下省略)」の注記を付ける（全文を無制限に送り続けることはしない）。`handlers/line_handler.py`のAI応答返信でも使われる。
-* 根拠: `def split_text_into_line_messages(text: str) -> Union[TextMessage, List[TextMessage]]:` (行番号: 76-99)
+* 根拠: `def split_text_into_line_messages(text: str) -> Union[TextMessage, List[TextMessage]]:` (行番号: 75-98)
 
 
 * **引数/リクエスト**: `text: str`

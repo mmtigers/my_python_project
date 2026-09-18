@@ -110,12 +110,12 @@
 ### `_strip_line_comment`
 
 * **役割**: 1行から`--`以降の行コメントを除去する（**#411 品質で追加**）。シングルクォート文字列中に現れる`-`はコメント開始と誤認しないよう、単純な状態機械でクォート内かどうかを追跡する。
-* 根拠: `def _strip_line_comment(line: str) -> str:` (行番号: 53〜65)
+* 根拠: `def _strip_line_comment(line: str) -> str:` (行番号: 63〜75)
 
 ### `_split_statements`
 
 * **役割**: マイグレーションSQL文字列を`;`区切りでステートメント単位のリストに分割する（Issue #99で新設）。空白のみの要素は除外する。このリポジトリのマイグレーション規約(`migrations/README.md`)が「`ALTER TABLE ... ADD COLUMN`を先頭に、後続はシンプルな`UPDATE`」という単純な構成のみを前提としているため、文字列/BLOBリテラル内にセミコロンを含むような複雑な文は考慮しない。**（#411 品質で修正）** ただしこのリポジトリの規約(コメント・docstringは日本語で書く)ではALTER文の前に長い日本語の説明コメントを書くことが多く、そのプローズ文中に句点代わりのセミコロンが登場するとコメントを読み切る前に誤って分割されてしまう恐れがあった。`;`で分割する前に各行を`_strip_line_comment`で処理し、行コメント内のセミコロンが分割点にならないようにした。
-* 根拠: `def _split_statements(sql: str) -> List[str]:` (行番号: 68〜84 / 抜粋: "cleaned = \"\\n\".join(_strip_line_comment(line) for line in sql.splitlines())")
+* 根拠: `def _split_statements(sql: str) -> List[str]:` (行番号: 78〜94 / 抜粋: "cleaned = \"\\n\".join(_strip_line_comment(line) for line in sql.splitlines())")
 * **引数/リクエスト**: `sql: str`(マイグレーションファイルの全文)
 * 根拠: (行番号: 68)
 * **戻り値/レスポンス**: `List[str]`(前後の空白を除去したステートメント文字列のリスト。空要素は含まない)

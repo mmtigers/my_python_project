@@ -21,7 +21,7 @@
 本ファイルは、SQLiteデータベースの初期化とスキーマの整合性検証を行うスクリプトです。**Issue #330（スキーマ管理のmigrations/一本化）以降、本ファイルはスキーマ定義（CREATE TABLE群）を一切持たない薄いラッパー**であり、WALモードの有効化と `apply_pending_migrations()` によるマイグレーション適用（空DBでは `migrations/0000_baseline_schema.sql` が全テーブル・インデックスを作成し、0001以降がカラム追加・データ移行を積み上げる）、および主要テーブルのカラムが期待どおりかの `PRAGMA table_info` による自動検証のみを行います。以前ここにあった各種テーブル群（Core Tables、Legacy Tables、Game & Quest System等）の `CREATE TABLE IF NOT EXISTS` 文と高頻度書き込みテーブル（`power_usage`, `switchbot_meter_logs`, `device_records`）へのインデックス作成は `migrations/0000_baseline_schema.sql` へ移設されました。
 * 根拠: `init_db`のdocstring (行番号: 78-86 / 抜粋: "Issue #330 (スキーマ管理のmigrations/一本化) 以降、本関数はスキーマ定義を\n    一切持たない薄いラッパーである。")
 * 加えて、`migrations/` 配下の全マイグレーションを空の `:memory:` DB へ適用した結果のスキーマを SQL 文字列として返す `dump_schema_sql`、それを `current_schema.sql`(既定パス `CURRENT_SCHEMA_PATH`)へ書き出す `write_current_schema`、および `--dump-schema` オプションで両者を呼び分ける CLI エントリ `main` を持つ。`current_schema.sql` はこの関数の生成物であり、手書きの参考ドキュメントではない。
-* 根拠: `CURRENT_SCHEMA_PATH`/`CURRENT_SCHEMA_HEADER` (行番号: 15-30)、`def dump_schema_sql() -> str:` (行番号: 118-132)、`def write_current_schema(...)` (行番号: 135-140)、`def main(argv=None) -> int:` (行番号: 143-157)
+* 根拠: `CURRENT_SCHEMA_PATH`/`CURRENT_SCHEMA_HEADER` (行番号: 15-30)、`def dump_schema_sql() -> str:` (行番号: 119-133)、`def write_current_schema(...)` (行番号: 136-141)、`def main(argv=None) -> int:` (行番号: 144-158)
 
 ## 3. 外部依存関係
 
@@ -61,7 +61,7 @@
 ### `validate_schema_integrity`
 
 * **役割**: `expected_schemas` 辞書に定義された主要テーブルについて、`PRAGMA table_info` を実行してカラム情報を取得し、期待される必須カラムが存在するかどうかを検証し、結果をログ出力する。
-* 根拠: `def validate_schema_integrity(conn: sqlite3.Connection) -> None:` (行番号: 32-75 / 抜粋: "設計書(3.1)に基づくスキーマ整合性の自動検証を行う。")
+* 根拠: `def validate_schema_integrity(conn: sqlite3.Connection) -> None:` (行番号: 33-76 / 抜粋: "設計書(3.1)に基づくスキーマ整合性の自動検証を行う。")
 
 
 * **引数/リクエスト**: `conn` (`sqlite3.Connection`): SQLiteデータベースへの接続オブジェクト。
@@ -84,7 +84,7 @@
 ### `init_db`
 
 * **役割**: ロギング開始後、`core.database.get_db_cursor` でカーソルを取得し、WALモードを有効化（`PRAGMA journal_mode=WAL`の結果行を`cur.fetchall()`で読み切る。未消費のまま後続処理がcommitすると "cannot commit transaction - SQL statements in progress" になるため）。続いて `apply_pending_migrations(cur.connection)` でバージョン管理されたマイグレーション（0000ベースライン含む）を適用し、最後に `sqlite3.connect` を用いて `validate_schema_integrity` を呼び出す。**Issue #330以降、CREATE TABLE / CREATE INDEX文は本関数に存在しない**（`migrations/0000_baseline_schema.sql`へ移設済み）。
-* 根拠: `def init_db() -> None:` (行番号: 77-115 / 抜粋: "本関数はスキーマ定義を\n    一切持たない薄いラッパーである。")、`cur.fetchall()` (行番号: 92-96 / 抜粋: "cur.execute(\"PRAGMA journal_mode=WAL;\")")、`apply_pending_migrations(cur.connection)` (行番号: 103 / 抜粋: "apply_pending_migrations(cur.connection)")
+* 根拠: `def init_db() -> None:` (行番号: 78-116 / 抜粋: "本関数はスキーマ定義を\n    一切持たない薄いラッパーである。")、`cur.fetchall()` (行番号: 92-96 / 抜粋: "cur.execute(\"PRAGMA journal_mode=WAL;\")")、`apply_pending_migrations(cur.connection)` (行番号: 103 / 抜粋: "apply_pending_migrations(cur.connection)")
 
 
 * **引数/リクエスト**: なし
@@ -112,7 +112,7 @@
 ### `dump_schema_sql`
 
 * **役割**: 空の `:memory:` DB へ `apply_pending_migrations` で `migrations/` の全マイグレーションを適用し、`sqlite_master` の `sql` 列を持つエントリ(テーブル・インデックス)を作成順(`rowid` 順)に `;` 区切りで連結した SQL 文字列を、`CURRENT_SCHEMA_HEADER`(生成物である旨・再生成コマンド・検証テストを記したコメント)を先頭に付けて返す。`current_schema.sql` の生成元。
-* 根拠: `def dump_schema_sql() -> str:` (行番号: 118-132 / 抜粋: "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY rowid")
+* 根拠: `def dump_schema_sql() -> str:` (行番号: 119-133 / 抜粋: "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY rowid")
 
 
 * **引数/リクエスト**: なし
@@ -135,7 +135,7 @@
 ### `write_current_schema`
 
 * **役割**: `dump_schema_sql()` の結果を `path`(既定 `CURRENT_SCHEMA_PATH` = 本ファイルと同じディレクトリの `current_schema.sql`)へ UTF-8 で書き出し、書き出した内容を返す。
-* 根拠: `def write_current_schema(path: str = CURRENT_SCHEMA_PATH) -> str:` (行番号: 135-140 / 抜粋: "f.write(content)")
+* 根拠: `def write_current_schema(path: str = CURRENT_SCHEMA_PATH) -> str:` (行番号: 136-141 / 抜粋: "f.write(content)")
 
 
 * **引数/リクエスト**: `path: str`(既定 `CURRENT_SCHEMA_PATH`)
@@ -158,7 +158,7 @@
 ### `main` / `__main__` ブロック
 
 * **役割**: `argparse` で `--dump-schema [PATH]` を受け付け、指定時は `write_current_schema(PATH)`(引数なしの `--dump-schema` は `CURRENT_SCHEMA_PATH`)を実行して書き出し先を表示し、未指定時は従来どおり `init_db()` を実行する。戻り値は終了コード(常に 0)で、`__main__` では `sys.exit(main())` として呼ばれる。
-* 根拠: `def main(argv=None) -> int:` (行番号: 143-157 / 抜粋: '"--dump-schema", nargs="?", const=CURRENT_SCHEMA_PATH, metavar="PATH",')、`sys.exit(main())` (行番号: 160-161)
+* 根拠: `def main(argv=None) -> int:` (行番号: 144-158 / 抜粋: '"--dump-schema", nargs="?", const=CURRENT_SCHEMA_PATH, metavar="PATH",')、`sys.exit(main())` (行番号: 160-161)
 
 
 * **引数/リクエスト**: `argv`(省略時は `sys.argv`)

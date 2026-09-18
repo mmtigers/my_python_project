@@ -71,7 +71,7 @@
 ### `get_db_cursor`
 
 * **役割**: リトライ機能（最大5回、DB接続の確立時のみ、"locked"エラー時に1秒間隔で再試行）を備えたデータベース接続を提供するコンテキストマネージャ。WALモードおよび外部キー制約(`PRAGMA foreign_keys=ON`)を有効化し、接続確立後は `with` 文本体に対して必ず1回だけカーソルを `yield` する（H-1で書き直し。従来は`for`ループの中で`yield`しており、with本体実行中にDBロック等の例外が発生すると`raise e`後に再度ループ・`yield`しようとして`RuntimeError("generator didn't stop after throw()")`に、接続リトライが尽きた場合も`RuntimeError("generator didn't yield")`に化けて、呼び出し元(`save_log_generic`等)が想定しない例外で処理ごと落ちる不具合があった）。
-* 根拠: `def get_db_cursor(commit: bool = False):` (行番号: 20-53 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ。yieldは必ず1回だけ行う)")
+* 根拠: `def get_db_cursor(commit: bool = False):` (行番号: 21-53 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ。yieldは必ず1回だけ行う)")
 
 
 * **引数/リクエスト**: `commit` (bool, デフォルト `False`): コンテキスト終了時にコミットを実行するかどうか。
@@ -142,14 +142,14 @@
 ### `save_log_generic`
 
 * **役割**: 指定されたテーブル、カラム、値を用いてINSERTクエリを動的に構築し、`get_db_cursor`経由でデータを保存する。H-1の`get_db_cursor`書き直しに伴い、返るカーソルが常に有効になったため、以前存在した`if cur:`チェックは削除された。`get_db_cursor`自体が送出する例外（接続確立失敗・with本体内のDBエラー等）も含めて関数全体を`try/except`で捕捉する構成に整理されている。**（B3で追加）** SQL文への文字列展開前に`table`/`columns_list`を`_SQL_IDENTIFIER_RE`でホワイトリスト検証し、いずれかがSQLite識別子として不正な場合はINSERT自体を実行せず、エラーログを出力して早期`return False`する。
-* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 77-91 / 抜粋: "汎用データ保存関数")、識別子検証 (行番号: 79-81 / 抜粋: "if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):\n        logger.error(f\"データ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
+* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 102-116 / 抜粋: "汎用データ保存関数")、識別子検証 (行番号: 79-81 / 抜粋: "if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):\n        logger.error(f\"データ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
 
 
 * **引数/リクエスト**:
 * `table` (str): 保存対象のテーブル名。
 * `columns_list` (List[str]): 保存対象のカラム名のリスト。
 * `values_list` (tuple): 保存する値のタプル。
-* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 77 / 抜粋: "table: str, columns_list: List[str]")
+* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 102 / 抜粋: "table: str, columns_list: List[str]")
 
 
 * **戻り値/レスポンス**: `bool`: 保存成功時は `True`、`table`/`columns_list`の識別子検証失敗時、または保存失敗時は `False`。
@@ -169,11 +169,11 @@
 ### `save_log_async`
 
 * **役割**: `save_log_generic` を非同期で実行するためのラッパー関数。
-* 根拠: `async def save_log_async(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 93-96 / 抜粋: "save_log_generic の非同期ラッパー")
+* 根拠: `async def save_log_async(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 118-121 / 抜粋: "save_log_generic の非同期ラッパー")
 
 
 * **引数/リクエスト**: `table` (str), `columns_list` (List[str]), `values_list` (tuple) （`save_log_generic` と同等）
-* 根拠: `async def save_log_async(...)` (行番号: 93 / 抜粋: "table: str, columns_list: List[str]")
+* 根拠: `async def save_log_async(...)` (行番号: 118 / 抜粋: "table: str, columns_list: List[str]")
 
 
 * **戻り値/レスポンス**: `bool`: `save_log_generic` の実行結果（識別子検証失敗時の`False`を含む）。

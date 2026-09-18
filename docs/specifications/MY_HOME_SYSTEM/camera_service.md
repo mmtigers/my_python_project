@@ -303,7 +303,7 @@
 ### `stop_all_processes`（Issue #360 で追加）
 
 * **役割**: `_active_processes`（ライブ配信）と `_active_vod_processes`（VOD生成）に登録された ffmpeg 子プロセスをすべて `terminate()` → timeout 後 `kill()` し、両レジストリを空にして停止数を返す。`unified_server.py` の lifespan 終了処理から呼ばれる。以前は終了処理が scheduler/camera_monitor しか止めておらず、ffmpeg が孤児化して再起動後の新 ffmpeg と同じ HLS パスへ二重書き込みし再生が破損していた。**（Issue #439で修正）** レジストリの走査対象スナップショット取得(`list(registry.items())`)と、停止後のキー削除(`registry.pop`)は、それぞれ`_state_lock`で保護される。実際の`terminate()`/`kill()`呼び出し自体は`_state_lock`の外側で行われる（プロセス終了待ち`proc.wait(timeout=timeout)`という遅い処理をロック保持中に行わないため）。
-* 根拠: `def stop_all_processes(timeout: float = 5.0) -> int:` (行番号: 124〜150)、[スナップショット取得] (行番号: 132〜134 / 抜粋: "for registry in (_active_processes, _active_vod_processes):\n        with _state_lock:\n            items = list(registry.items())")、[削除] (行番号: 146〜147 / 抜粋: "with _state_lock:\n                registry.pop(key, None)")
+* 根拠: `def stop_all_processes(timeout: float = 5.0) -> int:` (行番号: 96〜122)、[スナップショット取得] (行番号: 132〜134 / 抜粋: "for registry in (_active_processes, _active_vod_processes):\n        with _state_lock:\n            items = list(registry.items())")、[削除] (行番号: 146〜147 / 抜粋: "with _state_lock:\n                registry.pop(key, None)")
 * **引数/リクエスト**: `timeout: float`（既定 5.0）
 * 根拠: (行番号: 124)
 * **戻り値/レスポンス**: `int`（停止したプロセス数）

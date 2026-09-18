@@ -66,7 +66,7 @@
 
 
 * **引数/リクエスト**: `limit: int` (デフォルト: `REQUESTS_PER_MINUTE_LIMIT`)
-* 根拠: `def __init__(self, limit: int = REQUESTS_PER_MINUTE_LIMIT):` (行番号: 57 / 抜粋: "def **init**(self, limit: int")
+* 根拠: `def __init__(self, limit: int = REQUESTS_PER_MINUTE_LIMIT):` (行番号: 66 / 抜粋: "def **init**(self, limit: int")
 
 
 * **戻り値/レスポンス**: オブジェクトインスタンス
@@ -177,7 +177,7 @@
 ### `_strip_sql_comments` (関数、B3で追加)
 
 * **役割**: `_SQL_COMMENT_RE`を使い、渡されたSQL文字列中のブロックコメント・行コメントをすべて半角スペース1文字に置換して返す。`tool_search_db`がSELECT判定・`_extract_referenced_tables`によるテーブル抽出の前段でこれを呼び出し、以降の判定・実行はすべてコメント除去後のSQLに対して行う。
-* 根拠: `def _strip_sql_comments(sql: str) -> str:\n    return _SQL_COMMENT_RE.sub(" ", sql)` (行番号: 180〜181)
+* 根拠: `def _strip_sql_comments(sql: str) -> str:\n    return _SQL_COMMENT_RE.sub(" ", sql)` (行番号: 203〜204)
 
 
 * **引数/リクエスト**: `sql: str`
@@ -233,7 +233,7 @@
 ### `_search_db_authorizer` (関数、Issue #357で追加)
 
 * **役割**: AIツール`search_db`専用のSQLite認可コールバック（`sqlite3.Connection.set_authorizer`に渡す）。SQLiteは文の準備時に、読み取るテーブル/列ごとに`SQLITE_READ`、使用する関数ごとに`SQLITE_FUNCTION`等をこのコールバックへ問い合わせ、`SQLITE_DENY`が返ると文全体をエラーにする。これにより、引用符の有無・スキーマ修飾・サブクエリ・UNION・テーブル値関数（`json_each`/`pragma_table_info`等。これらは関数名がテーブル名として`SQLITE_READ`に渡る）を問わず、SQLiteエンジン自身が「`ALLOWED_SEARCH_TABLES`以外は読めない」ことを強制する構造的な防御となる。
-* 根拠: `def _search_db_authorizer(action: int, arg1, arg2, db_name, trigger_or_view) -> int:` (行番号: 239)
+* 根拠: `def _search_db_authorizer(action: int, arg1, arg2, db_name, trigger_or_view) -> int:` (行番号: 262)
 
 
 * **引数/リクエスト**: `action: int`（SQLiteの認可アクションコード）, `arg1`（`SQLITE_READ`時はテーブル名）, `arg2`（`SQLITE_READ`時は列名、`SQLITE_FUNCTION`時は関数名）, `db_name`, `trigger_or_view`（sqlite3の`set_authorizer`コールバック規約に従う5引数）
@@ -254,7 +254,7 @@
 ### `_execute_restricted_read_query` (関数、Issue #357で追加)
 
 * **役割**: `core.database.get_db_cursor()`で取得した接続に`_search_db_authorizer`を設定してからSQLを実行する、AIツール`search_db`専用の読み取り関数。`core.database.execute_read_query`と同じ戻り値の契約（0件: `"該当するデータはありませんでした。"` / 正常: JSON文字列 / 失敗: `"検索エラー: ..."`で例外は送出しない）を維持し、`tool_search_db`側の既存のエラー判定（Issue #180）をそのまま使えるようにしている。`execute_read_query`自体は他の呼び出し元と共有されるため変更せず、認可コールバックはこのAI経路にのみ適用する。
-* 根拠: `def _execute_restricted_read_query(query: str, params: tuple = ()) -> str:` (行番号: 268)、`cursor.connection.set_authorizer(_search_db_authorizer)` (行番号: 282)
+* 根拠: `def _execute_restricted_read_query(query: str, params: tuple = ()) -> str:` (行番号: 291)、`cursor.connection.set_authorizer(_search_db_authorizer)` (行番号: 282)
 
 
 * **引数/リクエスト**: `query: str`, `params: tuple = ()`
@@ -357,7 +357,7 @@
 ### `_extract_function_calls` (関数、Issue #374で追加)
 
 * **役割**: 応答の`parts`をすべて走査し、`function_call`を持つパートの`function_call`をリストで返す（L-L4対応。以前は`response.parts[0]`のみを検査していたため、テキスト+`function_call`の複数パート応答でツール呼び出しが無視され雑談扱いになっていた）。
-* 根拠: `def _extract_function_calls(response) -> List[Any]:` (行番号: 474〜486)
+* 根拠: `def _extract_function_calls(response) -> List[Any]:` (行番号: 491〜503)
 
 
 * **引数/リクエスト**: `response`（Gemini応答オブジェクト。`parts`属性を持つ）
@@ -378,7 +378,7 @@
 ### `_response_text_or_none` (関数、Issue #374で追加)
 
 * **役割**: `response.text`を安全に取り出す。旧SDK(`google-generativeai`)の`response.text`は`function_call`パートしか無い応答や空応答で`ValueError`を送出した。**（Issue #520で確認）** `google-genai`では同じ状況で`None`が返るようになったが、SDKの版差で再び送出する側に戻っても壊れないよう`try/except`は残している（空文字も`None`）。
-* 根拠: `def _response_text_or_none(response) -> Optional[str]:` (行番号: 489〜498)
+* 根拠: `def _response_text_or_none(response) -> Optional[str]:` (行番号: 506〜517)
 
 
 * **引数/リクエスト**: `response`
@@ -399,7 +399,7 @@
 ### `_dispatch_tool` (関数、Issue #374で追加)
 
 * **役割**: `function_call`の名前に応じて`tool_record_child_health`/`tool_record_food`/`tool_search_db`を実行し結果文字列を返す。未知の名前は`"エラー: 未知のツールが呼び出されました。"`を返す（以前`analyze_text_and_execute`内にインラインで書かれていた分岐を切り出したもの）。
-* 根拠: `async def _dispatch_tool(...)` (行番号: 501〜509)
+* 根拠: `async def _dispatch_tool(...)` (行番号: 520〜528)
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `fname: str`, `fargs: Dict[str, Any]`
@@ -420,7 +420,7 @@
 ### `_tool_results_fallback` (関数、Issue #374で追加)
 
 * **役割**: ツールは実行済みだが最終応答を生成できなかった場合に、蓄積した`tool_results`を改行連結し末尾に`(注記)`を添えた文字列を返す。
-* 根拠: `def _tool_results_fallback(tool_results: List[str], note: str) -> str:` (行番号: 512〜514)
+* 根拠: `def _tool_results_fallback(tool_results: List[str], note: str) -> str:` (行番号: 531〜533)
 
 
 * **引数/リクエスト**: `tool_results: List[str]`, `note: str`
