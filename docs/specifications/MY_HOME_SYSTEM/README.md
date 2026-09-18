@@ -29,7 +29,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [switchbot_power_monitor.md](./switchbot_power_monitor.md) | 監視対象のSwitchBotデバイスから電力・温湿度・電源状態を定期取得し、後続の処理サービスへ連携するデバイス監視スクリプト。 |
 | [sensor_service.md](./sensor_service.md) | センサーおよび電力計からのデータ受信（Webhook・ポーリング）を処理し、重複排除・状態管理・ログ保存・通知送信を行う。 |
 | [keep_alive_anker.md](./keep_alive_anker.md) | Anker SoundCore Bluetoothスピーカーがオートパワーオフでスリープしないよう、可聴域外の無音波(15Hz)を定期再生してキープアライブするシェルスクリプト。 |
-| [keep_alive_speaker.md](./keep_alive_speaker.md) | 無音MP3ファイルを定期再生し、Bluetoothスピーカー等のオーディオ経路を維持する「ハートビート」送信用シェルスクリプト。 |
+| [keep_alive_speaker.md](./keep_alive_speaker.md) | **廃止**: 無音MP3ファイルを定期再生し、Bluetoothスピーカー等のオーディオ経路を維持する「ハートビート」送信用シェルスクリプト。Issue #664 で [keep_alive_anker.md](./keep_alive_anker.md) へ一本化し、ソースごと削除された(接続確認・自動再接続を持たず、音源がNASマウント依存だったため)。仕様書は廃止noticeつきで履歴として残している。 |
 
 ## C. 外部サービス・通知連携
 
