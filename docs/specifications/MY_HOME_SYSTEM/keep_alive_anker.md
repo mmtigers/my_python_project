@@ -166,7 +166,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `connect_speaker.sh` | 本スクリプトが切断検知時に実行する再接続処理の実装を確認するため。 | 根拠: `[CONNECT_SCRIPT]` (行番号: 11, 37 / 抜粋: "CONNECT_SCRIPT=\"/home/masahiro/develop/MY_HOME_SYSTEM/tools/connect_speaker.sh\"") |
-| （Issue #664で解消） | `keep_alive_speaker.sh` | 同一ログファイルを使う類似目的のスクリプトとの役割分担を確認するため挙げていたが、両者を比較した結果「本スクリプトが機能的に包含しており、speaker側はNASマウント依存でログノイズも多い」と判断され、speaker側はソースごと削除された。`bluetooth_monitor.log` は現在このスクリプトと `connect_speaker.sh` のみが書き込む。 | 根拠: `[LOGFILE]` (行番号: 8 / 抜粋: "LOGFILE=\"$PROJECT_DIR/logs/bluetooth_monitor.log\"")（参考: `deploy/cron/README.md`、Issue #664） |
+| （Issue #664で解消） | `keep_alive_speaker.sh` | 同一ログファイルを使う類似目的のスクリプトとの役割分担を確認するため挙げていたが、両者を比較した結果「本スクリプトが機能的に包含しており、speaker側はNASマウント依存でログノイズも多い」と判断され、speaker側はソースごと削除された。`bluetooth_monitor.log` は現在このスクリプトと `connect_speaker.sh` のみが書き込む。 | 根拠: `[LOGFILE]` (行番号: 9 / 抜粋: "LOGFILE=\"$PROJECT_DIR/logs/bluetooth_monitor.log\"")（参考: `deploy/cron/README.md`、Issue #664） |
 | 低（Issue #585で`deploy/cron/crontab`へ5分毎のエントリを追加済み） | `deploy/cron/crontab` | 追加した5分毎の間隔が実機の対象デバイスのオートパワーオフ防止として妥当か、実機での動作確認が今後必要。 | 根拠: `[deploy/cron/crontabのkeep_alive_anker.shエントリ]` (`deploy/cron/crontab`、Issue #585) |
 
 ## 8. 保守上の注意点
