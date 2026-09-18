@@ -22,7 +22,7 @@
 ## 2. ファイルの概要
 
 報酬購入の実処理を担う`ShopService`クラス1つを定義するファイル。`process_purchase_reward`は`user_id`単位の`_get_user_balance_lock`と`(user_id, reward_id)`単位の`_get_purchase_lock`を常にこの順(balance lock→purchase lock)で取得したうえで実処理(`_process_purchase_reward_locked`)に委譲する。実処理は、直近10秒以内の同一購入を拒否するスパムチェック、`reward['target']`によるターゲットユーザー判定、`WHERE gold >= ?`条件付きの単一UPDATEによるアトミックな残高減算、`reward_history`/`user_inventory`への挿入を1つのDBトランザクション内で行う。
-根拠: `class ShopService:` (行番号: 16)、`def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 17〜35)
+根拠: `class ShopService:` (行番号: 17)、`def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 18〜36)
 
 ## 3. 外部依存関係
 
@@ -48,7 +48,7 @@
 ### `ShopService.process_purchase_reward`
 
 * **役割**: `user_id`単位の`_get_user_balance_lock`と`(user_id, reward_id)`単位の`_get_purchase_lock`を、常にこの順(balance lock→purchase lock)でネストして取得したうえで、実処理を`_process_purchase_reward_locked`に委譲する薄いラッパー。purchase lockは「直近の購入履歴を読む→履歴を書く」スパムチェックのTOCTOUを防ぐためのもので、残高減算自体はアトミックなUPDATEで別途保護されている。balance lockを追加取得するのは、承認/取消(`QuestService`)が行う「SELECT→Pythonで計算→絶対値でSET」という更新と、購入のアトミック減算とが競合して減算が上書きされ消失する経路を防ぐため。
-* 根拠: `def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 17〜35)
+* 根拠: `def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 18〜36)
 * 根拠: `with _get_user_balance_lock(user_id):\n            with _get_purchase_lock((user_id, reward_id)):\n                return self._process_purchase_reward_locked(user_id, reward_id)` (行番号: 33〜35)
 * **引数/リクエスト**: `user_id: str`, `reward_id: int`
 * 根拠: (行番号: 17)
@@ -62,7 +62,7 @@
 ### `ShopService._process_purchase_reward_locked`
 
 * **役割**: 報酬購入の実処理。`reward_master`/`quest_users`の存在確認後、直近の購入履歴(`reward_history`)から経過秒数を`_seconds_since_iso_timestamp`で算出し10秒未満なら429エラーとするスパムチェックを行う。`reward['target']`が`'all'`以外の場合、ユーザーのroleと`target`(`'children'`/`'adults'`/特定`user_id`)を照合し不一致なら403エラー。`UPDATE quest_users SET gold = gold - ? ... WHERE user_id = ? AND gold >= ?`という単一のアトミックUPDATEで残高チェックと減算を同時に行い、`rowcount == 0`なら残高不足として400エラー。成功後、`reward_history`へ購入履歴を、`user_inventory`へ`'owned'`ステータスの所持アイテムを挿入する。
-* 根拠: `def _process_purchase_reward_locked(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 37〜101)
+* 根拠: `def _process_purchase_reward_locked(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 38〜102)
 * 根拠: `if last_purchase and last_purchase['redeemed_at']:\n                elapsed = _seconds_since_iso_timestamp(last_purchase['redeemed_at'])\n                if elapsed is not None and elapsed < 10:\n                    raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")` (行番号: 58〜61)
 * 根拠: `target = reward['target'] or 'all'\n            if target != 'all':\n                is_adult = user['role'] == ROLE_ADULT\n                allowed = (\n                    (target == 'children' and not is_adult) or\n                    (target == 'adults' and is_adult) or\n                    (target == user_id)\n                )\n                if not allowed:\n                    raise HTTPException(status_code=403, detail="This reward is not available for you")` (行番号: 63〜72)
 * 根拠: `cur.execute(\n                "UPDATE quest_users SET gold = gold - ?, updated_at = ? WHERE user_id = ? AND gold >= ?",\n                (reward['cost_gold'], core.utils.get_now_iso(), user_id, reward['cost_gold'])\n            )\n            if cur.rowcount == 0:\n                raise HTTPException(status_code=400, detail="Not enough gold")` (行番号: 77〜82)

@@ -274,7 +274,7 @@
 ### 関数 `cleanup_old_files`
 
 * **役割**: 指定ディレクトリ配下を再帰的に走査し、保持日数（`retention_days`）を超えたファイルを削除し、削除件数と解放容量(GB)を返す。`extensions`が`None`の場合は拡張子で絞り込まず、ディレクトリ内の全ファイルを削除対象にする(Issue #191で追加。単一種類の成果物専用であることが保証されているディレクトリ向け)。
-* 根拠: `def cleanup_old_files(self, directory: str, retention_days: int, extensions: Optional[Tuple[str, ...]]) -> Dict[str, Any]:` とdocstring (行番号: 225〜233 / 抜粋: "extensions が None の場合は拡張子で絞り込まず")
+* 根拠: `def cleanup_old_files(self, directory: str, retention_days: int, extensions: Optional[Tuple[str, ...]]) -> Dict[str, Any]:` とdocstring (行番号: 268〜300 / 抜粋: "extensions が None の場合は拡張子で絞り込まず")
 
 
 * **引数/リクエスト**: `directory` (`str`), `retention_days` (`int`), `extensions` (`Optional[Tuple[str, ...]]`。`None`可)

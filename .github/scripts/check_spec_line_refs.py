@@ -59,6 +59,12 @@ _BLOCK_RE = re.compile(
 _ITEM_RE = re.compile(r"\d+(?:[〜~-]\d+)?")
 _SNIPPET_HEAD_RE = re.compile(r'抜粋: "(?:async )?(?:def|class) (\w+)')
 _HEADING_RE = re.compile(r"^### `?([A-Za-z_][\w.]*)")
+# 書式B(`def foo(...)` (行番号: 28))の抜粋。行番号ブロックの**手前**にある
+# バッククォート引用を拾う(Issue #679)。
+_BACKTICK_SNIPPET_RE = re.compile(r"`([^`]+)`")
+_DEF_SNIPPET_RE = re.compile(r'"(?:async )?(?:def|class) \w+')
+# 「別ファイルの行番号」を明示している引用の目印(Issue #679)
+_OTHER_SOURCE_RE = re.compile(r"[\w/]+\.(?:py|sh)$")
 
 
 class Finding(NamedTuple):
@@ -156,11 +162,51 @@ def _source_index(suffixes: Tuple[str, ...] = (".py",)) -> Dict[str, List[Path]]
 
 
 def _split_snippets(rest: str) -> List[str]:
-    """`抜粋: "a", "b"` の抜粋部分をスニペット単位に分割する。"""
+    """`抜粋: "a", "b"` の抜粋部分をスニペット単位に分割する(書式A)。"""
     match = re.search(r'抜粋: (".*)$', rest)
     if not match:
         return []
     return re.split(r'(?<="), ?(?=")', match.group(1))
+
+
+def _backtick_snippets(before: str) -> List[str]:
+    """行番号ブロックの手前にあるバッククォート引用を順に返す(書式B、Issue #679)。
+
+    このリポジトリの仕様書には根拠の書き方が2通りある:
+
+        書式A: `(行番号: 28 / 抜粋: "def foo(")`      … 抜粋が行番号の**後ろ**
+        書式B: ``` `def foo(...)` (行番号: 28) ```   … 抜粋が行番号の**前**
+
+    以前は書式Aしか解析しておらず、書式Bの `def`/`class` 引用がゲートを
+    無言で素通りしていた。`before` は呼び出し側で「直前の行番号ブロックの終わり
+    から、このブロックの始まりまで」に限定して渡すこと。1行に複数の根拠が並ぶ
+    場合(`根拠: X (行番号: 1)、Y (行番号: 2)`)に、手前のブロックの抜粋を
+    このブロックのものと取り違えないための前提である。
+
+    戻り値は書式Aの `_split_snippets` と同じ「先頭が `"` の文字列」に揃えてあり、
+    呼び出し側の記号抽出をそのまま使える。
+
+    2つの除外がある。どちらも「このブロックのものではない抜粋」を拾わないため:
+
+    - 窓に `抜粋:` を含む場合は空を返す。書式Aの抜粋がバッククォートで書かれている
+      ことがあり(`抜粋: ``def foo``)、その抜粋が**次の**ブロックの窓に入るため。
+    - 最後のバッククォートとブロックの間に `)` がある場合も空を返す。手前の
+      括弧つき根拠が閉じており、このブロックとは別の引用だと分かるため。
+
+    加えて、窓の中で**別の `.py` を明示している**引用も空を返す
+    (例: ``切り出し先 `def trigger_tv_unlock(...)` (`services/switchbot_service.py`側、行番号: 94〜125)``)。
+    この行番号は仕様書に対応するソースではなく、そちらのファイルの行を指すため、
+    本チェッカーでは検証できない(検証したことにする方が有害)。
+    """
+    if "抜粋:" in before:
+        return []
+    matches = list(_BACKTICK_SNIPPET_RE.finditer(before))
+    if not matches or ")" in before[matches[-1].end():]:
+        return []
+    snippets = [m.group(1) for m in matches]
+    if any(_OTHER_SOURCE_RE.search(s) for s in snippets):
+        return []
+    return ['"%s' % s for s in snippets]
 
 
 def _resolve(symbol: str, klass: Optional[str], qualified: Dict, flat: Dict) -> Optional[Tuple[int, int]]:
@@ -232,17 +278,30 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
             for b_i, block in enumerate(blocks):
                 stop = blocks[b_i + 1].start() if b_i + 1 < len(blocks) else len(line)
                 rest = line[block.end():stop]
+                # 書式B(Issue #679)の抜粋はブロックの手前にある。直前のブロックの
+                # 終わりまでに窓を限ることで、1行に複数の根拠が並ぶときに
+                # 前の根拠の抜粋を拾ってしまうのを防ぐ。
+                start_of_window = blocks[b_i - 1].end() if b_i else 0
+                before = line[start_of_window:block.start()]
                 snippets = _split_snippets(rest)
+                back_snippets = _backtick_snippets(before)
                 items = _ITEM_RE.findall(block.group(1))
                 # スニペット数と行番号要素数が揃っているときだけ位置対応で検証する
                 pairs: Iterable[Tuple[int, str]]
                 if len(snippets) == len(items) and len(items) > 1:
                     pairs = list(enumerate(snippets))
+                elif len(back_snippets) == len(items) and len(items) > 1:
+                    pairs = list(enumerate(back_snippets))
                 else:
                     head = _SNIPPET_HEAD_RE.search(rest)
-                    if not head:
-                        continue
-                    pairs = [(0, '"def %s(' % head.group(1))]
+                    if head:
+                        pairs = [(0, '"def %s(' % head.group(1))]
+                    else:
+                        # 書式B: このブロックに最も近い def/class の抜粋を使う
+                        defs = [s for s in back_snippets if _DEF_SNIPPET_RE.match(s)]
+                        if not defs:
+                            continue
+                        pairs = [(0, defs[-1])]
 
                 new_items = list(items)
                 touched = False

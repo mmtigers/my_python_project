@@ -110,7 +110,7 @@
 ### `resolve_target_bluetooth_mac`
 
 * **役割**: `config.ENABLE_BLUETOOTH` が真の場合に限り `config.SPEAKER_BLUETOOTH_MAC` を返すモジュールレベル関数（Issue #665: `SPEAKER_BLUETOOTH_MAC`の既定値が空文字になったため、空文字も`None`に正規化してBTチェックをスキップさせる）。BT運用が無効な環境（`bluetooth.service`停止時など）でSpeakerチェックがBT WARNを出し続けないよう、無効時は `None` を返してサウンドカード確認へのフォールバックを促す。戻り値は直後にモジュールレベル変数 `TARGET_BLUETOOTH_MAC` へ代入される。
-* 根拠: `def resolve_target_bluetooth_mac():` 〜 `return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)` (行番号: 32〜40 / 抜粋: "if not getattr(config, "ENABLE_BLUETOOTH", False):\n        return None\n    return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)")
+* 根拠: `def resolve_target_bluetooth_mac():` 〜 `return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)` (行番号: 33〜43 / 抜粋: "if not getattr(config, "ENABLE_BLUETOOTH", False):\n        return None\n    return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)")
 
 
 * **引数/リクエスト**: なし

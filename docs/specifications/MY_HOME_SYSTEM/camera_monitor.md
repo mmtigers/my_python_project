@@ -87,7 +87,7 @@
 ### `is_camera_enabled` / `_read_enabled_flags_from_devices_json`（Issue #652 で追加）
 
 * **役割**: `devices.json` の `enabled` フラグを**監視ループの実行中に読み直す**ためのヘルパー。`services/camera_service.set_camera_enabled` は `devices.json` を書き換えたうえで**サーバープロセス内の** `config.CAMERAS` しか更新せず、`camera_monitor` は `unified_server.py` から別プロセスとして起動され起動時の `config.CAMERAS` を保持し続けるため、以前はUIでカメラを無効化してもサーバー再起動までONVIF購読・スナップショット・通知が継続していた（設定画面の表示と実挙動の食い違い）。`is_camera_enabled(cam_conf)` は `devices.json` の `st_mtime_ns` が前回確認時から変わっている場合のみ再読込し、`stat` 自体も `ENABLED_RECHECK_INTERVAL_SEC`(5秒)に1回へ抑える（キャッシュは `_enabled_cache` と `_enabled_cache_lock` でスレッド間共有）。`devices.json` が存在しない・JSONとして壊れている・該当 `id` が無い場合は、起動時の `cam_conf["enabled"]`（既定 `True`）へフォールバックする。SIGHUP方式ではなくポーリング方式を採ったのは、子プロセスの再起動・シグナルハンドラの追加を伴わず、監視スレッドごとの判定だけで完結するため。
-* 根拠: `def is_camera_enabled(cam_conf: Dict[str, Any]) -> bool:` (行番号: 112〜142 / 抜粋: "\"\"\"該当カメラが現在有効かを devices.json の最新値で返す(#652)。")、`def _read_enabled_flags_from_devices_json() -> Optional[Dict[str, bool]]:` (行番号: 97〜109 / 抜粋: "devices.json を読み {camera_id: enabled} を返す。読めない・壊れている場合は None。")
+* 根拠: `def is_camera_enabled(cam_conf: Dict[str, Any]) -> bool:` (行番号: 116〜146 / 抜粋: "\"\"\"該当カメラが現在有効かを devices.json の最新値で返す(#652)。")、`def _read_enabled_flags_from_devices_json() -> Optional[Dict[str, bool]]:` (行番号: 97〜109 / 抜粋: "devices.json を読み {camera_id: enabled} を返す。読めない・壊れている場合は None。")
 
 
 * **引数/リクエスト**: `is_camera_enabled` は `cam_conf: Dict[str, Any]`（`id` と `enabled` を参照）。`_read_enabled_flags_from_devices_json` は引数なし。
@@ -110,7 +110,7 @@
 ### `_add_pullpoint` / `_discard_pullpoint`（Issue #439 で追加）
 
 * **役割**: `active_pullpoints`リストへの安全な追加・削除を担うヘルパー関数。`_add_pullpoint`は`_pullpoints_lock`保護下で`append`する。`_discard_pullpoint`は同様の保護下で`remove`を試み、既に別スレッドにより削除済みで`ValueError`が送出された場合はそれを無視する。以前の呼び出し元は`if x in active_pullpoints: active_pullpoints.remove(x)`という「存在確認してから削除」パターンを各所に直接書いていたが、この2ステップの間に別スレッドが同じ要素を削除すると`list.remove()`が`ValueError`を送出しうり(`finally`節内で発生すると後始末処理が中断する)、この2関数への集約でその競合を解消した。
-* 根拠: `def _add_pullpoint(pullpoint: Any) -> None:` (行番号: 80〜82 / 抜粋: "with _pullpoints_lock:\n        active_pullpoints.append(pullpoint)")、`def _discard_pullpoint(pullpoint: Any) -> None:` (行番号: 85〜91 / 抜粋: "\"\"\"active_pullpointsから安全に削除する(既に削除済みでも例外を出さない)。\"\"\"\n    with _pullpoints_lock:\n        try:\n            active_pullpoints.remove(pullpoint)\n        except ValueError:\n            pass")
+* 根拠: `def _add_pullpoint(pullpoint: Any) -> None:` (行番号: 157〜159 / 抜粋: "with _pullpoints_lock:\n        active_pullpoints.append(pullpoint)")、`def _discard_pullpoint(pullpoint: Any) -> None:` (行番号: 85〜91 / 抜粋: "\"\"\"active_pullpointsから安全に削除する(既に削除済みでも例外を出さない)。\"\"\"\n    with _pullpoints_lock:\n        try:\n            active_pullpoints.remove(pullpoint)\n        except ValueError:\n            pass")
 
 
 * **引数/リクエスト**: `pullpoint: Any`（いずれも共通）

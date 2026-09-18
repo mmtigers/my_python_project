@@ -237,7 +237,7 @@
 ### `UpdateUserAction`
 
 * **役割**: Request Modelsとしてユーザー情報更新のアクションリクエストを定義する。**（Issue #372で追加）** `avatar_url`に`field_validator`を持ち、`routers/quest_router.py`の`upload_image`が生成する`/uploads/<uuid4>.<jpg|jpeg|png|gif|webp>`形式（`_UPLOADED_AVATAR_RE`）か、パス区切り(`/`, `\\`)・HTML特殊文字(`<`, `>`, `"`, `'`)を含まず先頭が`.`でない16文字以下の短い文字列（絵文字アバター、`_EMOJI_AVATAR_MAX_LEN`）のみを受け付ける。それ以外は`ValueError`を送出し、FastAPIにより422となる。任意の`/uploads/`パスを許すと、他ユーザーのアップロード画像を自分のアバターに指定してから絵文字に戻す操作で、そのファイルが孤立扱いになり削除される経路が残るため。
-* 根拠: クラス名と継承元 (行番号: 111 / 抜粋: "class UpdateUserAction(BaseModel):")、`_UPLOADED_AVATAR_RE = re.compile(` (行番号: 75〜77)、`def _validate_avatar_url(cls, value: str) -> str:` (行番号: 86〜98)
+* 根拠: クラス名と継承元 (行番号: 111 / 抜粋: "class UpdateUserAction(BaseModel):")、`_UPLOADED_AVATAR_RE = re.compile(` (行番号: 75〜77)、`def _validate_avatar_url(cls, value: str) -> str:` (行番号: 117〜127)
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str, `Field(min_length=1, max_length=64)`), `avatar_url` (str、上記バリデータ付き)。**（2026-09-06 品質監査で修正）** 以前 `user_id` は境界なしの `str` だったが、他のリクエストモデルと同じ `min_length=1, max_length=64` の制約が付与された。

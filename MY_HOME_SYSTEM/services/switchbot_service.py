@@ -12,6 +12,7 @@ import config
 # (以前ここにあった `from common import retry_api_call` のコメントは、common.py ごと廃止された。Issue #664)
 
 from core.logger import setup_logging   # 修正: core.loggerを使用
+from core.utils import retry_with_backoff
 from models.switchbot import DeviceStatusResponse
 from services import notification_service
 
@@ -34,31 +35,51 @@ DEVICE_NAME_FETCH_RETRY_SEC: float = 600.0
 _device_cache_lock = threading.Lock()
 
 def request_switchbot_api(url: str, headers: Dict[str, str], max_retries: int = 4) -> Optional[Dict[str, Any]]:
-    """SwitchBot APIへのリクエスト（Exponential Backoff リトライ付き）"""
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, headers=headers, timeout=10.0)
-            response.raise_for_status()
-            
-            raw_data = response.json()
-            validated = DeviceStatusResponse(**raw_data)
-            return validated.model_dump()
-            
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            # ERRORではなくWARNINGとし、Tracebackは出さない
-            logger.warning(f"⚠️ SwitchBot API connection issue (Attempt {attempt + 1}/{max_retries}): {e}")
-            
-        except requests.exceptions.RequestException as e:
-            # 認証エラー(401)などの致命的なものはERRORとして扱う
-            logger.error(f"❌ SwitchBot API fatal error: {e}")
-            break
-            
-        # Exponential Backoff の適用
-        if attempt < max_retries - 1:
-            backoff_time = 2 ** attempt  # 1s, 2s, 4s...
-            logger.debug(f"Retrying in {backoff_time} seconds...")
-            time.sleep(backoff_time)
-            
+    """SwitchBot APIへのリクエスト（Exponential Backoff リトライ付き）。
+
+    #661: バックオフのループ自体は `core.utils.retry_with_backoff` に寄せた
+    (以前はここに独自ループがあった)。GETは冪等なので再送して安全である。
+    コマンド送信の `post_switchbot_api` は「消灯を2回送る」等の二重実行が
+    副作用として現れうるため、統合の対象外として単発のままにしてある。
+
+    リトライ対象は接続断・タイムアウトだけで、401等の恒久的なエラーは
+    再送しても無駄なので即座に諦める。いずれの失敗も例外を投げずに None を
+    返し(Fail-Soft)、システム全体を止めない。ただしAPIの応答が想定外の形
+    だった場合(Pydanticの検証エラー)は None に混ぜず呼び出し元へ送出する
+    — 「通信できなかった」と区別がつかなくなるため。
+    """
+    # 最終試行ぶんの警告は on_retry が呼ばれないため、試行回数を自前で数えて
+    # 例外ハンドラ側から同じ書式で出す(「何回粘ったか」をログから読むため)。
+    attempts = {"n": 0}
+
+    def _fetch() -> Dict[str, Any]:
+        attempts["n"] += 1
+        response = requests.get(url, headers=headers, timeout=10.0)
+        response.raise_for_status()
+        return DeviceStatusResponse(**response.json()).model_dump()
+
+    def _warn_connection_issue(error: BaseException) -> None:
+        # ERRORではなくWARNINGとし、Tracebackは出さない
+        logger.warning(f"⚠️ SwitchBot API connection issue (Attempt {attempts['n']}/{max_retries}): {error}")
+
+    def _on_retry(_attempt: int, delay: float, error: BaseException) -> None:
+        _warn_connection_issue(error)
+        logger.debug(f"Retrying in {delay} seconds...")
+
+    try:
+        return retry_with_backoff(
+            _fetch,
+            max_retries=max_retries - 1,  # max_retries は初回を含む総試行回数
+            retryable_exceptions=(requests.exceptions.Timeout, requests.exceptions.ConnectionError),
+            base_delay=1.0,
+            on_retry=_on_retry,
+        )
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+        _warn_connection_issue(e)
+    except requests.exceptions.RequestException as e:
+        # 認証エラー(401)などの致命的なものはERRORとして扱う
+        logger.error(f"❌ SwitchBot API fatal error: {e}")
+
     # Fail-Soft: 最終的に失敗した場合は None を返し、システムを止めない
     logger.warning("⚠️ SwitchBot API completely failed after retries. Operating in Fail-Soft mode.")
     return None

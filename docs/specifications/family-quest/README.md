@@ -1,6 +1,6 @@
 # family-quest 仕様書一覧
 
-タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された60件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
+タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された64件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
 
 対応するソースファイル自体が削除済みの仕様書は、末尾の「廃止済み仕様書一覧」に記録のみ残しています(Issue #402 で仕様書ファイル自体は削除済み。新規の実装・参照の対象ではありません)。
 
@@ -68,6 +68,14 @@
 | [FamilyLog.md](./src/features/family/components/FamilyLog.md) | ユーザーごとの列（カラム）に分けて、日付ごとにグループ化したタイムライン形式の冒険記録を表示する。以前あった家族の総力（パーティランク・総レベル等）の集計表示は廃止済み。 |
 | [UserStatusCard.md](./src/features/family/components/UserStatusCard.md) | 選択中ユーザーの名前・職業クラス・レベル・所持ゴールド・獲得メダル数を表示するステータスカード。HP・EXP表示は廃止済み（Issue #327）。 |
 
+## src/features/quest/context
+
+| 仕様書 | 概要 |
+| --- | --- |
+| [QuestActivityContext.md](./src/features/quest/context/QuestActivityContext.md) | 進行中のクエスト操作（完了通知・送信中キー・承認中id）を配る`QuestActivityProvider`コンポーネント。`App.tsx`が唯一の使用者。 |
+| [questActivityShared.md](./src/features/quest/context/questActivityShared.md) | `QuestActivityContext.tsx`/`useQuestActivity.ts`から参照される型・React Contextオブジェクト・Provider未設置時の既定値`QUEST_ACTIVITY_IDLE`を集約するモジュール。 |
+| [useQuestActivity.md](./src/features/quest/context/useQuestActivity.md) | `QuestActivityContext`から値を取得するカスタムフック。`useSettings`/`useToast`と異なり、Provider外で呼ばれても例外を投げず「何も進行中でない」既定値を返す。 |
+
 ## src/features/quest/components
 
 | 仕様書 | 概要 |
@@ -80,6 +88,7 @@
 | 仕様書 | 概要 |
 | --- | --- |
 | [useQuestStatus.md](./src/features/quest/hooks/useQuestStatus.md) | クエストの進行状態（完了・保留・ロック・無限クエストなど）を判定する純粋関数`getQuestLockState`と、それをラップして表示用タイトル・variantまで算出するカスタムフック`useQuestStatus`を提供する。 |
+| [useBusyKeys.md](./src/features/quest/hooks/useBusyKeys.md) | 「送信中のキー集合」を判定用のrefと表示用のstateの二重で持つカスタムフック。承認中の履歴idと、完了/取消が送信中の`(user_id, quest_id)`キーの2箇所で使う。 |
 
 ## src/features/shop/components
 

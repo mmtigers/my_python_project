@@ -101,7 +101,7 @@
 ### `_cert_cache_key`（Issue #385 で追加）
 
 * **役割**: 証明書URLから `scheme://host(小文字)/正規化パス` 形式のキャッシュキーを生成する。クエリ・フラグメントは含めない。
-* 根拠: `def _cert_cache_key(url: str) -> str:` (行番号: 63〜67)
+* 根拠: `def _cert_cache_key(url: str) -> str:` (行番号: 71〜75)
 * **引数/リクエスト**: `url: str`
 * 根拠: (行番号: 63)
 * **戻り値/レスポンス**: `str`

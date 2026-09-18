@@ -24,7 +24,7 @@
 ## 2. ファイルの概要
 
 購入済みアイテム(`user_inventory`)の一覧取得(`get_user_inventory`)と使用確定(`use_item`/`_use_item_locked`)を担う`InventoryService`クラス1つを定義するファイル。アイテム使用は`'pending'`状態での申請と`ROLE_ADULT`による承認を経る2段階フローではなく、所有者・所有状態(`'owned'`)確認後に即座に消費を確定する単一ステップの処理である。YouTube系ごほうび券(`config.YOUTUBE_REWARD_IDS`)については、連続視聴による目の負担を防ぐため15分のクールダウンを課す機構を持ち、`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`を迎えるまでは実際には拒否せず予告バナー用の情報を返すのみに留める。ファイル末尾で`InventoryService`のシングルトンインスタンス`inventory_service`を生成しており、コメントによれば「Family Quest内で唯一`GameSystem`(quest/user/shop_service)の合成に含まれないシングルトン」である。
-根拠: `class InventoryService:` (行番号: 20)、`def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 64〜81)、`def _use_item_locked(self, user_id: str, inventory_id: int) -> Tuple[Dict[str, str], str]:` (行番号: 83〜141)、コメント (行番号: 144〜145 / 抜粋: "アイテム使用は承認フローを介さず即時確定する、Family Quest内で唯一\n# GameSystem(quest/user/shop_service)の合成に含まれないシングルトン。")
+根拠: `class InventoryService:` (行番号: 21)、`def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 65〜82)、`def _use_item_locked(self, user_id: str, inventory_id: int) -> Tuple[Dict[str, str], str]:` (行番号: 84〜142)、コメント (行番号: 144〜145 / 抜粋: "アイテム使用は承認フローを介さず即時確定する、Family Quest内で唯一\n# GameSystem(quest/user/shop_service)の合成に含まれないシングルトン。")
 
 ## 3. 外部依存関係
 
@@ -58,7 +58,7 @@
 ### `InventoryService.get_user_inventory`
 
 * **役割**: `user_id`の`status = 'owned'`な`user_inventory`行を`reward_master`とJOINして取得し、`purchased_at`降順で返す。各アイテムに`is_youtube_reward`(`reward_id`が`config.YOUTUBE_REWARD_IDS`に含まれるか)を付与する。`_is_youtube_cooldown_enforced()`が`True`(施行日以降)であれば`_get_youtube_cooldown_remaining_seconds`で実際の残り秒数を算出し、`False`(施行日前)であれば`0`とし、代わりに`youtube_cooldown_announcement`(施行開始日`starts_on`と残り日数`days_remaining`)を組み立てて予告バナー用の情報として返す。
-* 根拠: `def get_user_inventory(self, user_id: str) -> Dict[str, Any]:` (行番号: 21〜62)
+* 根拠: `def get_user_inventory(self, user_id: str) -> Dict[str, Any]:` (行番号: 22〜63)
 * 根拠: `item['is_youtube_reward'] = item['reward_id'] in config.YOUTUBE_REWARD_IDS` (行番号: 37)
 * 根拠: `cooldown_enforced = _is_youtube_cooldown_enforced()\n            youtube_cooldown_remaining_seconds = (\n                _get_youtube_cooldown_remaining_seconds(cur, user_id) if cooldown_enforced else 0\n            )` (行番号: 40〜43)
 * 根拠: `if not cooldown_enforced and config.YOUTUBE_REWARD_IDS:\n                days_remaining = (\n                    config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM - datetime.datetime.now(JST).date()\n                ).days\n                youtube_cooldown_announcement = {\n                    "starts_on": config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM.isoformat(),\n                    "days_remaining": max(0, days_remaining),\n                }` (行番号: 49〜56)
@@ -74,7 +74,7 @@
 ### `InventoryService.use_item`
 
 * **役割**: `_get_item_use_lock(user_id)`を取得したうえでDB更新部分を`_use_item_locked`に委譲する。ロックの保持範囲はDB更新(コミット)までに限定し、外部副作用(LINE送信・効果音)はロック解放後に実行する。これは、以前`_use_item_locked`の末尾で同期のLINE push(最大15秒)まで実行していたため、LINEが遅い/タイムアウトした場合に同一ユーザーの次の`use_item`がその往復の間直列化されていた問題への対策である。
-* 根拠: `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 64〜81)
+* 根拠: `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 65〜82)
 * 根拠: `with _get_item_use_lock(user_id):\n            result, msg = self._use_item_locked(user_id, inventory_id)\n\n        notification_service.send_push(\n            user_id=config.LINE_USER_ID,\n            messages=[{"type": "text", "text": msg}]\n        )\n        sound_manager.play("quest_clear")\n\n        return result` (行番号: 69〜81)
 * **引数/リクエスト**: `user_id: str`, `inventory_id: int`
 * 根拠: (行番号: 64)
@@ -88,7 +88,7 @@
 ### `InventoryService._use_item_locked`
 
 * **役割**: アイテムを使用し即座に消費を確定する(親の承認は不要)。`user_inventory`と`reward_master`・`quest_users`をJOINして対象アイテムを取得し、所有者一致・`status == 'owned'`を確認する。対象がYouTube系ごほうび券かつクールダウンが施行済みであれば、`_get_youtube_cooldown_remaining_seconds`で残り秒数を確認し、正の値であれば429エラー(残り分数をメッセージに含める)を送出する。`UPDATE ... SET status = 'consumed' ... WHERE id = ? AND status = 'owned'`という条件付きUPDATEで消費を確定し、`rowcount == 0`(先行リクエストが既に消費済み)なら400エラーとすることで、連打による二重使用を防ぐ。成功後、`quest_history`に`quest_id=0`・`status='approved'`のアイテム使用ログを挿入する。戻り値は`(APIレスポンス, 通知メッセージ)`のタプルで、通知の送信自体は呼び出し元(`use_item`)がロック解放後に行う。
-* 根拠: `def _use_item_locked(self, user_id: str, inventory_id: int) -> Tuple[Dict[str, str], str]:` (行番号: 83〜141)
+* 根拠: `def _use_item_locked(self, user_id: str, inventory_id: int) -> Tuple[Dict[str, str], str]:` (行番号: 84〜142)
 * 根拠: `if item['reward_id'] in config.YOUTUBE_REWARD_IDS and _is_youtube_cooldown_enforced():\n                cooldown_remaining = _get_youtube_cooldown_remaining_seconds(cur, user_id)\n                if cooldown_remaining > 0:\n                    remaining_minutes = math.ceil(cooldown_remaining / 60)\n                    raise HTTPException(\n                        429,\n                        f"YouTubeのごほうび券は、目を休めるためあと{remaining_minutes}分ほど使えません",\n                    )` (行番号: 110〜117)
 * 根拠: `cur.execute("""\n                UPDATE user_inventory\n                SET status = 'consumed', used_at = ?\n                WHERE id = ? AND status = 'owned'\n            """, (now_iso, inventory_id))\n            if cur.rowcount == 0:\n                raise HTTPException(400, "Cannot use this item")` (行番号: 125〜131)
 * 根拠: `cur.execute("""\n                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)\n                VALUES (?, 0, ?, 0, 0, ?, 'approved')\n            """, (item['user_id'], log_title, now_iso))` (行番号: 134〜137)
