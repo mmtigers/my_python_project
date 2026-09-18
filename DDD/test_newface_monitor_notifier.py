@@ -103,6 +103,41 @@ def test_non_ascii_detail_url_is_percent_encoded_in_embed_url_and_link_field():
     assert expected_url in payload["embeds"][0]["fields"][-1]["value"]
 
 
+class TestSendsThroughCoreDiscord:
+    """Issue #661: Discord への POST は MY_HOME_SYSTEM の core/discord.py に集約する。
+
+    生の `self.session.post(...)` に戻ると、分割・リトライ・URL マスクの実装が
+    また経路ごとにばらけるため、委譲していること自体を固定する。
+    """
+
+    def test_notifier_uses_core_discord_post_webhook_when_available(self):
+        try:
+            from core.discord import post_webhook
+        except ImportError:  # DDD単体デプロイ環境ではフォールバックが使われる
+            import pytest
+            pytest.skip("MY_HOME_SYSTEM が無い環境ではフォールバック実装が使われる")
+        assert module.post_discord_webhook is post_webhook
+
+    def test_daily_summary_payload_keeps_username_and_content(self):
+        notifier = DiscordNotifier(webhook_url="https://discordapp.com/api/webhooks/test")
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        notifier.session.post = MagicMock(return_value=response)
+
+        notifier.notify_daily_summary({"site_a": 2}, {"site_a": "サイトA"}, "2026-08-30")
+
+        _, kwargs = notifier.session.post.call_args
+        assert kwargs["json"]["username"] == "New Face Monitor"
+        assert "本日の新人検知サマリ (2026-08-30)" in kwargs["json"]["content"]
+        assert kwargs["timeout"] == 10
+
+    def test_cast_notification_payload_has_no_content_key(self):
+        """embed のみを送る従来のボディ形状(content キーを持たない)を保つこと。"""
+        payload = _notify_and_capture_payload(_make_cast("https://example.test/i.jpg"))
+        assert "content" not in payload
+        assert payload["username"] == "New Face Monitor"
+
+
 class TestEmbedFieldTruncation:
     """D-L6: Discord embedのtitle(256文字)/field.value(1024文字)上限を超える
     キャスト名等を送信すると、embed全体が400 Bad Requestで拒否されうる。
