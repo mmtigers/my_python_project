@@ -894,6 +894,27 @@ class DataManager:
     _SAVE_VERIFY_MAX_ATTEMPTS = 3
     _SAVE_VERIFY_RETRY_DELAY_SECONDS = 2.0
 
+    # 2026-09-19 運用障害の根本原因対応: 上記の「一過性の書き込み不良」の正体は
+    # NAS側ではなく、CIFSクライアントのinode取り違えだった。NAS(//192.168.1.20/share、
+    # serverinoでマウント)は新規作成ファイルのinode番号(SMBのUniqueId)を作成時刻
+    # 由来で払い出すため、#458でスレッド並列化されたサイト巡回が別々のファイル
+    # (known_casts_A.json.tmpとknown_casts_B.json.tmp等)をほぼ同時に作成すると、
+    # 同じinode番号が割り当てられることがある。Linuxのcifsクライアントは同じ
+    # inode番号のファイルを1つのinode(=ページキャッシュ・ファイルサイズ)として扱う
+    # ため、直後の読み戻しが「空(Expecting value: line 1 column 1)」「別サイトの
+    # ファイルの中身(Extra data)」を返す。検証をすり抜けた場合は、次回の読み込みが
+    # 別サイトのキャスト一覧を返し、それがunionでそのまま保存される(実機データの
+    # 79ファイル中33ファイルに他サイトのキャストが混入していたのを確認済み。
+    # .corrupted-*に隔離されたファイルもNAS上の実体は正常なJSONだった)。
+    # 実機NASでの再現実験では、8スレッド並列の作成で約2割の読み戻しが不一致に
+    # なり、一時ファイル名の一意化やfsyncでは改善せず、作成を直列化すると
+    # 0件になった。そのため、NAS上へのファイル作成を伴う書き込み→検証→
+    # バックアップ→置き換えの区間を、プロセス内の全DataManager・全ファイルで
+    # 共通のこのロックで直列化する(同一ファイルの更新を守る
+    # _daily_summary_lock/_site_failures_lockとは目的が異なるため別ロック。
+    # 取得順は常に「ファイル別ロック→本ロック」で、逆順に取る箇所は無い)。
+    _nas_file_create_lock = threading.Lock()
+
     def __init__(self, data_dir: Path):
         """
         Args:
@@ -1076,14 +1097,21 @@ class DataManager:
         last_error: Optional[Exception] = None
         for attempt in range(1, DataManager._SAVE_VERIFY_MAX_ATTEMPTS + 1):
             try:
-                write_and_verify()
-                return
+                # 2026-09-19: NAS上での同時ファイル作成によるinode取り違えを防ぐため、
+                # 書き込み+検証は直列化する(_nas_file_create_lockのコメント参照)。
+                # リトライ待機(sleep)はロック外で行い、他スレッドを巻き込まない。
+                with DataManager._nas_file_create_lock:
+                    try:
+                        write_and_verify()
+                        return
+                    except (OSError, ValueError, TypeError):
+                        try:
+                            tmp_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        raise
             except (OSError, ValueError, TypeError) as e:
                 last_error = e
-                try:
-                    tmp_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
                 if attempt < DataManager._SAVE_VERIFY_MAX_ATTEMPTS:
                     logger.warning(
                         f"Write verification failed for {tmp_path} "
@@ -1092,6 +1120,74 @@ class DataManager:
                     )
                     time.sleep(DataManager._SAVE_VERIFY_RETRY_DELAY_SECONDS)
         raise last_error
+
+    @staticmethod
+    def _backup_and_replace(tmp_path: Path, target_file: Path) -> None:
+        """検証済みの一時ファイルで本番ファイルを置き換える。既存の本番ファイルが
+        あれば、置き換え前にその内容を`.bak`としてアトミックに保存する。
+
+        `save_known_casts`・`save_daily_summary`・`save_site_failures`で同じ処理を
+        3回複製していたものを集約した(2026-09-19)。コピー元(target_file)は最後の
+        replaceまで保持したままにすることで、万一この途中でプロセスが中断しても
+        本番ファイルは無傷のまま残る。
+
+        D-L7: 以前はbackup_path.write_bytes(...)で直接上書きしていたため、書き込み中に
+        プロセスが中断すると.bak自体が破損・欠損した状態で残ってしまいうった
+        (load_known_castsが復旧に使う最後の砦であるにも関わらず非アトミックだった)。
+        そのため.bakもtmp書き込み+replaceのアトミックパターンで更新する。
+
+        2026-09-19: `.bak.tmp`の作成もNAS上の新規ファイル作成であり、他スレッドの
+        作成と同時に走るとinode番号を取り違えうるため、`_nas_file_create_lock`で
+        直列化する(同ロックのコメント参照)。
+
+        Args:
+            tmp_path (Path): 書き込み・検証済みの一時ファイル。
+            target_file (Path): 置き換え先の本番ファイル。
+
+        Raises:
+            OSError: 本番ファイルへのreplaceに失敗した場合(.bakの更新失敗は
+                警告ログのみで続行する)。
+        """
+        with DataManager._nas_file_create_lock:
+            if target_file.exists():
+                backup_path = target_file.with_suffix(target_file.suffix + '.bak')
+                bak_tmp_path = backup_path.with_suffix(backup_path.suffix + '.tmp')
+                try:
+                    bak_tmp_path.write_bytes(target_file.read_bytes())
+                    bak_tmp_path.replace(backup_path)
+                except OSError as e:
+                    logger.warning(f"Failed to update backup file {backup_path}: {e}")
+                    # 中断された.bak用一時ファイルを残さない(best-effort)。
+                    bak_tmp_path.unlink(missing_ok=True)
+
+            tmp_path.replace(target_file)
+
+    @staticmethod
+    def _write_bytes_and_compare(tmp_path: Path, payload: bytes) -> None:
+        """一時ファイルへ`payload`を書き込み、読み戻したバイト列が完全一致するか検証する。
+
+        2026-09-19: 以前の検証は「JSONとしてパースできるか」だけだったため、CIFSの
+        inode取り違え(_nas_file_create_lockのコメント参照)で**別サイトのファイルの
+        中身**が読み戻された場合、それ自体が正しいJSONなので検証をすり抜けていた
+        (実機NASでの再現実験でも、不一致の一部は長さまで一致する別ファイルの内容
+        だった)。書いたバイト列そのものとの比較で確実に検知する。
+
+        Args:
+            tmp_path (Path): 書き込み先の一時ファイルパス。
+            payload (bytes): 書き込むバイト列。
+
+        Raises:
+            OSError: ファイルI/Oに失敗した場合。
+            ValueError: 読み戻した内容が書き込んだ内容と一致しなかった場合。
+        """
+        with open(tmp_path, 'wb') as f:
+            f.write(payload)
+        with open(tmp_path, 'rb') as f:
+            read_back = f.read()
+        if read_back != payload:
+            raise ValueError(
+                f"read-back mismatch: wrote {len(payload)} bytes, read {len(read_back)} bytes"
+            )
 
     @staticmethod
     def _write_and_verify_tmp(tmp_path: Path, data: list) -> None:
@@ -1103,12 +1199,13 @@ class DataManager:
 
         Raises:
             OSError: ファイルI/Oに失敗した場合。
-            ValueError: 書き込んだ内容が正しいJSONとして読み戻せなかった場合
-                (json.JSONDecodeErrorを含む)。
+            ValueError: 書き込んだ内容がそのまま、または正しいJSONとして読み戻せな
+                かった場合(json.JSONDecodeErrorを含む)。
             TypeError: 読み戻した内容からCastMemberを再構築できなかった場合。
         """
-        with open(tmp_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        DataManager._write_bytes_and_compare(
+            tmp_path, json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
+        )
         # 書き込んだ内容が正しく読み戻せることを検証してから本番ファイルへ反映する。
         # NAS等での書き込み中断による不可視の破損（バイト単位の欠損等）を
         # ここで検知できれば、破損データへの置き換え自体を未然に防げる。
@@ -1142,27 +1239,10 @@ class DataManager:
                 tmp_path, lambda: DataManager._write_and_verify_tmp(tmp_path, data)
             )
 
-            # 直前の正常データをバックアップとして残す。次回読み込み失敗時、
-            # 空集合へのフォールバック（全キャスト再通知）を避けるために使う。
-            # コピー元(data_file)は最後のreplaceまで保持したままにすることで、
-            # 万一この途中でプロセスが中断しても本番ファイルは無傷のまま残る。
-            if data_file.exists():
-                backup_path = data_file.with_suffix(data_file.suffix + '.bak')
-                # D-L7: 以前はbackup_path.write_bytes(...)で直接上書きしていたため、
-                # 書き込み中にプロセスが中断すると.bak自体が破損・欠損した状態で
-                # 残ってしまいうった(load_known_castsが復旧に使う最後の砦であるにも
-                # 関わらず非アトミックだった)。他の永続化と同じtmp書き込み+replaceの
-                # アトミックパターンに揃える。
-                bak_tmp_path = backup_path.with_suffix(backup_path.suffix + '.tmp')
-                try:
-                    bak_tmp_path.write_bytes(data_file.read_bytes())
-                    bak_tmp_path.replace(backup_path)
-                except OSError as e:
-                    logger.warning(f"Failed to update backup file {backup_path}: {e}")
-                    # 中断された.bak用一時ファイルを残さない(best-effort)。
-                    bak_tmp_path.unlink(missing_ok=True)
-
-            tmp_path.replace(data_file)
+            # 直前の正常データを.bakとして残してから本番ファイルへ置き換える
+            # (次回読み込み失敗時、空集合へのフォールバック=全キャスト再通知を
+            # 避けるために使う。詳細は_backup_and_replace)。
+            DataManager._backup_and_replace(tmp_path, data_file)
 
             logger.debug(f"Saved {len(casts)} casts to {data_file}")
         except (OSError, ValueError, TypeError) as e:
@@ -1302,8 +1382,9 @@ class DataManager:
             ValueError: 書き込んだ内容が正しいJSONとして読み戻せなかった場合
                 (json.JSONDecodeErrorを含む)。
         """
-        with open(tmp_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        DataManager._write_bytes_and_compare(
+            tmp_path, json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
+        )
         # 書き込んだ内容が正しく読み戻せることを検証してから本番ファイルへ反映する
         # (_write_and_verify_tmpと同じ理由。#462)。
         with open(tmp_path, 'r', encoding='utf-8') as f:
@@ -1328,19 +1409,8 @@ class DataManager:
                 tmp_path, lambda: DataManager._write_and_verify_json_tmp(tmp_path, data)
             )
 
-            # 直前の正常データをバックアップとして残す。load_daily_summaryが破損時の
-            # 復旧に使う(save_known_castsと同じtmp書き込み+replaceのアトミックパターン)。
-            if summary_file.exists():
-                backup_path = summary_file.with_suffix(summary_file.suffix + '.bak')
-                bak_tmp_path = backup_path.with_suffix(backup_path.suffix + '.tmp')
-                try:
-                    bak_tmp_path.write_bytes(summary_file.read_bytes())
-                    bak_tmp_path.replace(backup_path)
-                except OSError as e:
-                    logger.warning(f"Failed to update backup file {backup_path}: {e}")
-                    bak_tmp_path.unlink(missing_ok=True)
-
-            tmp_path.replace(summary_file)
+            # 直前の正常データを.bakとして残してから置き換える(save_known_castsと同じ)。
+            DataManager._backup_and_replace(tmp_path, summary_file)
         except (OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to save daily summary: {e}", exc_info=True)
             if tmp_path is not None:
@@ -1534,19 +1604,8 @@ class DataManager:
                 tmp_path, lambda: DataManager._write_and_verify_json_tmp(tmp_path, data)
             )
 
-            # 直前の正常データをバックアップとして残す(save_known_casts/
-            # save_daily_summaryと同じtmp書き込み+replaceのアトミックパターン)。
-            if failures_file.exists():
-                backup_path = failures_file.with_suffix(failures_file.suffix + '.bak')
-                bak_tmp_path = backup_path.with_suffix(backup_path.suffix + '.tmp')
-                try:
-                    bak_tmp_path.write_bytes(failures_file.read_bytes())
-                    bak_tmp_path.replace(backup_path)
-                except OSError as e:
-                    logger.warning(f"Failed to update backup file {backup_path}: {e}")
-                    bak_tmp_path.unlink(missing_ok=True)
-
-            tmp_path.replace(failures_file)
+            # 直前の正常データを.bakとして残してから置き換える(save_known_castsと同じ)。
+            DataManager._backup_and_replace(tmp_path, failures_file)
         except (OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to save site failures: {e}", exc_info=True)
             if tmp_path is not None:
