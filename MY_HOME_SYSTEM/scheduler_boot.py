@@ -196,6 +196,25 @@ def run_script(script_path: str, args: List[str]) -> bool:
             if _running_children.get(script_path) is proc:
                 _running_children.pop(script_path, None)
 
+def _is_task_due(task: Task, now: float) -> bool:
+    """タスクを今このタイミングで実行すべきか判定する(Issue #749 / AUDIT-020)。
+
+    `now` は `time.monotonic()` 基準。単調増加するため時刻の巻き戻りは起きないが、
+    `TASKS` の `last_run` 初期値 `0` は壁時計基準では「1970年 = 必ず実行」を
+    意味していたのに対し、monotonic 基準では「プロセス起動時刻より前の値」に
+    すぎず、起動直後(uptime < interval)には初回実行が interval 秒遅れてしまう。
+    `monotonic()` が 0 を返すことは実質ありえないため、`0` を「未実行」の
+    番兵として明示的に扱い、従来どおり初回は即実行する。
+
+    ループ本体から切り出してあるのは、無限ループの main() を回さずに
+    この判定だけを単体テストできるようにするため。
+    """
+    last_run = task["last_run"]
+    if last_run == 0:
+        return True
+    return now - last_run >= task["interval"]
+
+
 def main() -> None:
     """
     メインループ。
@@ -213,7 +232,16 @@ def main() -> None:
 
     with ThreadPoolExecutor(max_workers=max(len(TASKS), 1), thread_name_prefix="scheduler") as executor:
         while not _shutdown_event.is_set():
-            now: float = time.time()
+            # Issue #749 (AUDIT-020): 以前は time.time()(壁時計)を基準にしていた。
+            # Raspberry Pi は RTC を持たず、起動直後のシステム時刻は「最後に
+            # シャットダウンした時刻」か1970年で、NTP 同期の瞬間に大きくジャンプする。
+            # 後方へのジャンプでは now - last_run が負になり、interval(300〜3600秒)を
+            # 超えるまで6つの監視タスク(電力・環境ロギング・server_watchdog・TVロック・
+            # メモリ・NAS)がすべて沈黙していた。しかも health_watch は「タスクが
+            # 実行されていない」ことを見ないため、その沈黙自体が検知されない。
+            # unified_server.restart_dead_children や core.logger の flush と同じく、
+            # 壁時計の変動に影響されない time.monotonic() を使う。
+            now: float = time.monotonic()
 
             for task in TASKS:
                 script = task["script"]
@@ -224,7 +252,7 @@ def main() -> None:
                     continue
 
                 # 実行タイミングの判定
-                if now - task["last_run"] >= task["interval"]:
+                if _is_task_due(task, now):
                     task["last_run"] = now
                     in_flight[script] = executor.submit(run_script, script, task["args"])
 

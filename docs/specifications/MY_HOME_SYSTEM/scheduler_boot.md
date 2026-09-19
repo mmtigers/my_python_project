@@ -122,24 +122,39 @@
 * **エラーハンドリング**: 子プロセス停止失敗は WARNING ログのみ、`signal.signal` の失敗は無視
 * 根拠: `except Exception as e:`・`logger.warning(...)` (行番号: 78〜79)、`except (ValueError, OSError):`・`pass` (行番号: 93〜95)
 
+### `_is_task_due`（Issue #749 / AUDIT-020 で追加）
+
+* **役割**: タスクを今このタイミングで実行すべきかを判定する純関数。`last_run` が `0`（未実行の番兵）なら常に `True`、それ以外は `now - last_run >= interval` を返す。無限ループの `main()` を回さずに判定だけを単体テストできるよう、ループ本体から切り出してある。
+* 根拠: `def _is_task_due(task: Task, now: float) -> bool:` (行番号: 199〜215 / 抜粋: "def _is_task_due(task: Task, now: float) -> bool:")
+* **引数/リクエスト**: `task: Task`（`interval` と `last_run` を読む）, `now: float`（`time.monotonic()` 基準の現在値）
+* 根拠: 関数定義 (行番号: 199)
+* **戻り値/レスポンス**: `bool`
+* 根拠: 関数定義 (行番号: 199)
+* **副作用**: なし（`task` を変更しない。`last_run` の更新は呼び出し側が行う）
+* 根拠: 関数本体 (行番号: 212〜215 / 抜粋: "return now - last_run >= task[\"interval\"]")
+* **エラーハンドリング**: なし
+* 根拠: 関数本体 (行番号: 199〜215)
+
+> **`last_run == 0` を特別扱いする理由**: 壁時計（`time.time()`）基準では `0` は「1970年」を意味し、初回は必ず即実行されていた。`time.monotonic()` 基準では `0` は「プロセス起動時刻より前の値」にすぎず、起動直後（uptime < interval）には初回実行が interval 秒遅れてしまう。`monotonic()` が `0` を返すことは実質ありえないため、`0` を「未実行」の番兵として扱い従来の挙動を保つ。
+
 ### `main`
 
-* **役割**: `ThreadPoolExecutor`（ワーカー数 = `TASKS`件数、最低1）を使って `TASKS` リストを巡回し、現在時刻と最終実行時刻の差が指定間隔（`interval`）以上、かつ当該スクリプトが実行中でないタスクに対して `run_script` を非同期（別スレッド）で投入する無限ループを実行する。実行中のタスクは `in_flight` 辞書（スクリプトパス→`Future`）で管理し、完了していないタスクは同一周期内で再投入しない（多重起動防止）。
-* 根拠: `def main() -> None:` (行番号: 199 / 抜粋: "メインループ。")
+* **役割**: `ThreadPoolExecutor`（ワーカー数 = `TASKS`件数、最低1）を使って `TASKS` リストを巡回し、`_is_task_due()` が `True`（= 最終実行からの経過が `interval` 以上、または未実行）で、かつ当該スクリプトが実行中でないタスクに対して `run_script` を非同期（別スレッド）で投入する無限ループを実行する。**（Issue #749 / AUDIT-020 で変更）** 時刻の基準は `time.time()`（壁時計）ではなく `time.monotonic()`。Raspberry Pi は RTC を持たず、起動直後のシステム時刻は「最後にシャットダウンした時刻」か1970年で、NTP 同期の瞬間に大きくジャンプする。**後方へのジャンプでは `now - last_run` が負になり、`interval`（300〜3600秒）を超えるまで6つの監視タスク（電力・環境ロギング・`server_watchdog`・TVロック・メモリ・NAS）がすべて沈黙していた。**しかも `health_watch` は「タスクが実行されていない」ことを見ないため、その沈黙自体が検知されない。`unified_server.restart_dead_children` や `core.logger.flush_pending_discord_notifications` と同じく単調時計を使う。実行中のタスクは `in_flight` 辞書（スクリプトパス→`Future`）で管理し、完了していないタスクは同一周期内で再投入しない（多重起動防止）。
+* 根拠: `def main() -> None:` (行番号: 218 / 抜粋: "メインループ。")
 * **（Issue #360 で修正）** 冒頭で `install_signal_handlers()` を呼び、メインループは `while True` ではなく `while not _shutdown_event.is_set()`、スリープは `_shutdown_event.wait(10)`（シャットダウン要求で即抜ける）。ループを抜けた後に `terminate_running_children()` を呼ぶ。
 * 根拠: `install_signal_handlers()` (行番号: 167)、`while not _shutdown_event.is_set():` (行番号: 172)、`_shutdown_event.wait(10)` (行番号: 189)、`terminate_running_children()` (行番号: 191)
 
 
 * **引数/リクエスト**: なし
-* 根拠: 関数定義 (行番号: 199 / 抜粋: "def main() -> None:")
+* 根拠: 関数定義 (行番号: 218 / 抜粋: "def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 関数定義 (行番号: 199 / 抜粋: "def main() -> None:")
+* 根拠: 関数定義 (行番号: 218 / 抜粋: "def main() -> None:")
 
 
 * **副作用**: `ThreadPoolExecutor.submit` による `run_script` の並列実行。`TASKS` 内各タスクの `last_run` の更新。`in_flight` 辞書への `Future` の登録。1回のループ終了ごとの10秒間のスリープ。
-* 根拠: `in_flight[script] = executor.submit(run_script, script, task["args"])`, `task["last_run"] = now`, `time.sleep(10)` (行番号: 106, 108, 122-123, 126)
+* 根拠: [ループ本体] (行番号: 240〜262 / 抜粋: "now: float = time.monotonic()", "if _is_task_due(task, now):", 'task["last_run"] = now')
 
 
 * **エラーハンドリング**: 関数内での明示的な例外キャッチはなし（各タスクの例外は `run_script` 内、または `Future` 内部で捕捉・保持される）。
@@ -183,7 +198,7 @@ flowchart TD
     
     IterateTasks -- "タスクあり" --> CheckRunning{"in_flight[script]が<br>実行中(未完了)か?"}
     CheckRunning -- True --> IterateTasks
-    CheckRunning -- False --> CheckTime{"now - last_run >= interval"}
+    CheckRunning -- False --> CheckTime{"_is_task_due(task, now)<br/>now は time.monotonic() 基準<br/>(Issue #749)"}
     CheckTime -- True --> UpdateLastRun("last_runをnowに更新")
     UpdateLastRun --> SubmitTask["外部：executor.submit(run_script)<br>(別スレッドで非同期実行)"]
     SubmitTask --> RegisterFuture("in_flight[script]にFutureを登録")
