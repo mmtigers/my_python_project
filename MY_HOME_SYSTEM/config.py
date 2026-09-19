@@ -463,6 +463,12 @@ RECORDING_RETENTION_DAYS: int = _get_int_env("RECORDING_RETENTION_DAYS", 30)
 HLS_VOD_RETENTION_DAYS: int = _get_int_env("HLS_VOD_RETENTION_DAYS", 3)
 # DBバックアップの保持日数
 DB_BACKUP_RETENTION_DAYS: int = _get_int_env("DB_BACKUP_RETENTION_DAYS", 30)
+# 2026-09-19: DBバックアップのオフサイト複製先(rclone のリモートパス。例: "gdrive:お家開発/db_backup_latest")。
+# 以前はバックアップが NAS の db_backups/ にしか無く、NAS が故障すると DB 本体とバックアップを
+# 同時に失う構成だった。設定すると backup_service が NAS への転送成功後に、その世代を
+# "<リモート>/home_system_latest.db" として上書きコピーする(クラウド側は常に最新1世代のみ)。
+# 空(既定)なら何もしない。devices.json 等の設定ファイルは接続情報を含みうるため送らない。
+DB_BACKUP_OFFSITE_REMOTE: str = os.getenv("DB_BACKUP_OFFSITE_REMOTE", "").strip()
 DB_BACKUPS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "db_backups")
 
 # ==========================================
