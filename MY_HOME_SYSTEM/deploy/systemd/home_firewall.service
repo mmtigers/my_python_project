@@ -1,0 +1,20 @@
+[Unit]
+Description=MY_HOME_SYSTEM: restrict app port 8000 to loopback / LAN / Tailscale
+# 2026-09-19: ラズパイ本体にファイアウォールが無く、Cloudflare Access 委譲の前提
+# (オリジンへの直接到達が限定されていること)がルーター設定だけに依存していたため、
+# unified_server.py の 8000番への接続元を限定する。詳細は scripts/firewall_apply.sh。
+# 直結サブネットは実行時に検出するので、ネットワーク確立後に実行する
+# (検出できない場合はスクリプトが制限を掛けずに終了する = fail-open)。
+Wants=network-online.target
+After=network-online.target
+Before=home_system.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/home/masahiro/develop/MY_HOME_SYSTEM/scripts/firewall_apply.sh
+# systemctl stop で制限を外す(切り戻し手段)
+ExecStop=/home/masahiro/develop/MY_HOME_SYSTEM/scripts/firewall_apply.sh --remove
+
+[Install]
+WantedBy=multi-user.target
