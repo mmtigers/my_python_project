@@ -28,6 +28,14 @@ class Task(TypedDict):
 # === 設定: 定期実行するスクリプトと間隔(秒) ===
 # 基本設計書およびこれまでのリファクタリング内容に基づき構成
 TASKS: List[Task] = [
+    # 頻度: 最高 (60秒) — Issue #738 (AUDIT-008): デイリールーティンの締切
+    # (チェックポイント時刻)超過による強制遷移。以前は GET /api/routine/today が
+    # ポーリングのたびに行っていた書き込みをここへ移した。締切は routine_data.py の
+    # checkpoint_time で決まり、クライアントのアクセス有無とは無関係に適用されるべき
+    # 性質のもののため、画面を誰も開いていなくても走るこの経路が正となる。
+    # 実処理はサーバー側(unified_server プロセス内)で、本スクリプトはAPIを叩くだけ。
+    {"script": "monitors/routine_deadline_job.py",    "interval": 60,   "last_run": 0, "args": []},
+
     # 頻度: 高 (5分〜10分)
     {"script": "monitors/switchbot_power_monitor.py", "interval": 300,  "last_run": 0, "args": []},
     {"script": "monitors/nature_remo_monitor.py",     "interval": 300,  "last_run": 0, "args": []},

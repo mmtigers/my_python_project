@@ -59,7 +59,7 @@ CLEANUP_TARGETS=(
   "camera_monitor.py"
   "scheduler_boot.py"
   "streamlit run"
-  "python.*monitors/(switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor)\.py"
+  "python.*monitors/(switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor|routine_deadline_job)\.py"
   "ffmpeg.*hls_streams"
 )
 
