@@ -167,7 +167,7 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `connect_speaker.sh` | 本スクリプトが切断検知時に実行する再接続処理の実装を確認するため。 | 根拠: `[CONNECT_SCRIPT]` (行番号: 10, 57 / 抜粋: "CONNECT_SCRIPT=\"$PROJECT_DIR/tools/connect_speaker.sh\"") |
 | （Issue #664で解消） | `keep_alive_speaker.sh` | 同一ログファイルを使う類似目的のスクリプトとの役割分担を確認するため挙げていたが、両者を比較した結果「本スクリプトが機能的に包含しており、speaker側はNASマウント依存でログノイズも多い」と判断され、speaker側はソースごと削除された。`bluetooth_monitor.log` は現在このスクリプトと `connect_speaker.sh` のみが書き込む。 | 根拠: `[LOGFILE]` (行番号: 9 / 抜粋: "LOGFILE=\"$PROJECT_DIR/logs/bluetooth_monitor.log\"")（参考: `deploy/cron/README.md`、Issue #664） |
-| 低（Issue #585で`deploy/cron/crontab`へ5分毎のエントリを追加済み） | `deploy/cron/crontab` | 追加した5分毎の間隔が実機の対象デバイスのオートパワーオフ防止として妥当か、実機での動作確認が今後必要。 | 根拠: `[deploy/cron/crontabのkeep_alive_anker.shエントリ]` (`deploy/cron/crontab`、Issue #585) |
+| （2026-09-19で解消）| `deploy/cron/crontab` | Issue #585 で追加した5分毎のエントリは、2026-09-19 の実機棚卸しで**削除した**。`config.ENABLE_BLUETOOTH` が既定 `False`・実機 `.env` の `SPEAKER_BLUETOOTH_MAC` も未設定で、5分毎の実行が一度も鳴動せず no-op で正常終了し続けていた(=BTスピーカー運用自体が休止中)ことを確認し、「休止で確定」と判断したため。現在このスクリプトに定期実行の契機は無い。再開手順とエントリの雛形は `deploy/cron/crontab` の該当コメントにある。 | 根拠: `deploy/cron/crontab` の「Bluetoothスピーカー(Anker SoundCore 2)のキープアライブ — 2026-09-19 判断: 登録しない」コメント、`deploy/cron/README.md`、`.github/scripts/test_crontab_keep_alive.py` |
 
 ## 8. 保守上の注意点
 
@@ -185,11 +185,13 @@ graph TD
 
 ## 9. 不明事項一覧
 
-**（Issue #585で判明・部分解消）** 実行契機が本当にどこにも存在しないことを確認したうえで、`deploy/cron/crontab`に5分毎(`*/5 * * * *`)のエントリを追加した(本ファイル単体では推測不可だったため`deploy/cron/crontab`側の追加で対応)。ただしこの間隔は「一般的なBluetoothスピーカーのオートパワーオフ時間より十分短い」という一般論に基づく暫定値で、対象デバイスの実際のオートオフ時間や実機での動作確認はできていない(下表に残す)。
+**（Issue #585で判明 → 2026-09-19に決着）** 実行契機が本当にどこにも存在しないことを確認したうえで、Issue #585 では `deploy/cron/crontab` に5分毎(`*/5 * * * *`)のエントリを追加した。
+
+その後 2026-09-19 の実機棚卸しで、`config.ENABLE_BLUETOOTH` が既定 `False`・実機 `.env` の `SPEAKER_BLUETOOTH_MAC` も未設定であり、この5分毎の実行が**一度も鳴動せず no-op で正常終了し続けていた**(=BTスピーカー運用そのものが休止中だった)ことが判明した。ユーザー判断で「休止で確定」とし、cron エントリを削除した。したがって**現在このスクリプトには定期実行の契機が無く、それは意図された状態である**(#585 が問題視した「実行契機が皆無」とは異なり、運用休止という判断に基づく)。運用を再開するときの手順は `deploy/cron/crontab` のコメントおよび `deploy/cron/README.md` にあり、`ENABLE_BLUETOOTH` と cron 登録の対応関係は `.github/scripts/test_crontab_keep_alive.py` がCIで検査する。
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| 本スクリプトの定期実行間隔(5分毎)が対象デバイスのオートパワーオフ防止として十分か | `deploy/cron/crontab`に5分毎のエントリを追加した(Issue #585)が、対象Bluetoothスピーカーの実際のオートオフ時間は本リポジトリからは確認できないため、間隔の妥当性は未検証。 | 実機での動作確認(鳴動頻度・オートオフの再発有無) |
+| 本スクリプトの定期実行間隔(5分毎)が対象デバイスのオートパワーオフ防止として十分か（**BT運用休止中のため現在は棚上げ**） | Issue #585 で5分毎のエントリを追加したが、対象Bluetoothスピーカーの実際のオートオフ時間は本リポジトリからは確認できず、間隔の妥当性は未検証のまま。2026-09-19 にBT運用を「休止で確定」としcronエントリを削除したため、この検証は運用再開時まで保留する。 | 実機での動作確認(鳴動頻度・オートオフの再発有無)。ただし運用再開が前提 |
 | `connect_speaker.sh`の再接続ロジックの詳細 | 呼び出し箇所のみが存在し、実装内容は本ファイルに含まれていないため。 | `connect_speaker.sh` |
 | `logs/`ディレクトリの作成主体 | 本ファイルにはディレクトリ作成処理がなく、他のセットアップ処理で作成されている可能性があるため。 | プロジェクトのセットアップ/デプロイ関連スクリプト |
 

@@ -107,8 +107,17 @@ def _is_skipped_source(path: Path) -> bool:
     name = path.stem
     if name == "__init__" or name.startswith("test_") or "tests" in path.parts:
         return True
-    # .venv / node_modules / 隠しディレクトリ配下は対象外
-    return any(part.startswith(".") or part in ("node_modules", "migrations") for part in path.parts)
+    # .venv / node_modules / 隠しディレクトリ配下は対象外。
+    # 判定は REPO_ROOT からの相対パスで行う: 絶対パスのまま見ると、リポジトリ自体が
+    # ドット始まりのディレクトリ配下にある場合(このリポジトリの Claude Code セッションは
+    # `.claude/worktrees/<名前>/` に git worktree を作る)に全ソースが「隠しディレクトリ配下」
+    # と誤判定され、走査対象が 0 件になってゲートが常に「引用を1件も検証できていない」で
+    # 落ちていた(CI は non-dotted なパスへ checkout するため露見しなかった)。
+    try:
+        parts = path.relative_to(REPO_ROOT).parts
+    except ValueError:
+        parts = path.parts
+    return any(part.startswith(".") or part in ("node_modules", "migrations") for part in parts)
 
 
 def _iter_sources(suffixes: Tuple[str, ...] = (".py",)) -> Iterable[Path]:
