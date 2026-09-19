@@ -65,12 +65,19 @@ def _send_discord_webhook(messages: List[Any], image_data: Optional[bytes] = Non
 
             # ステータスコードが成功(200, 204)以外の場合、エラー内容をログに出力して原因を特定する
             if res.status_code not in [200, 204]:
-                logger.error(f"Discord API エラー: {res.status_code} - {res.text}")
+                # Issue #742: 通知システム自身の失敗。ここから再び Discord へ送ろうと
+                # しないよう明示的に opt-out する(以前は「Discord」という語を含むことを
+                # 根拠に抑制していたが、それだと無関係な実障害まで巻き添えになっていた)。
+                logger.error(
+                    f"Discord API エラー: {res.status_code} - {res.text}",
+                    extra={"skip_discord": True},
+                )
                 return False
 
         return True
     except Exception as e:
-        logger.error(f"Discord送信失敗: {e}")
+        # Issue #742: 上と同じ理由で opt-out する(通知システム自身の失敗)。
+        logger.error(f"Discord送信失敗: {e}", extra={"skip_discord": True})
         return False
 
 
@@ -202,7 +209,12 @@ def send_push(
 
             if not _send_line_push(resolved_user_id, line_msgs):
                 # LINE失敗時はDiscordのエラーチャンネルに通知
-                logger.error("LINE送信失敗。Discordへフォールバック通知を行います。")
+                # Issue #742: 直後に _send_discord_webhook で同じ内容を明示的に送るため、
+                # ハンドラ経由の通知は opt-out して二重通知を避ける。
+                logger.error(
+                    "LINE送信失敗。Discordへフォールバック通知を行います。",
+                    extra={"skip_discord": True},
+                )
                 fallback = [{"type": "text", "text": "⚠️ LINE送信失敗: (詳細ログ確認)"}]
                 _send_discord_webhook(fallback, None, 'error')
                 success = False

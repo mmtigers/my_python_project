@@ -417,6 +417,12 @@ def test_migration_failure_skips_monitor_subprocesses(isolated_db, monkeypatch):
     monkeypatch.setattr(unified_server, "apply_pending_migrations", _boom)
     monkeypatch.setattr(unified_server.camera_service, "stop_all_processes", lambda: 0)
     with TestClient(unified_server.app) as client:
-        assert client.get("/health").status_code == 200
+        # Issue #735 (AUDIT-005): 以前はここで 200 を期待していた(サーバーは起動し続ける、
+        # という #383 の挙動の確認)。サーバーが起動し続けること自体は変わらないが、
+        # 「プロセスは生きているが全APIが500」を外形監視から見分けられるよう
+        # /health は readiness を返すようになったため 503 が正となる。
+        res = client.get("/health")
+        assert res.status_code == 503
+        assert res.json()["reason"] == "migration_failed"
         assert unified_server.app.state.migration_ok is False
     assert spawned == [], "マイグレーション失敗時に監視子プロセスが起動されている"

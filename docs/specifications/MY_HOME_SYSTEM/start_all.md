@@ -20,7 +20,7 @@
 
 ## 2. ファイルの概要
 
-* システム全体において、`MY_HOME_SYSTEM`のクリーンアップ、初期設定、および関連するプロセス群の起動を統括するスクリプト。環境変数の設定、`CLEANUP_TARGETS`配列に列挙された既存プロセス群への段階的な終了処理（優しい停止→最大5秒待機→対象ごとの強制終了フォールバック）、NASのマウント確認（自動マウントのトリガーとExponential Backoffによるリトライ）、Python依存関係の鮮度チェック（`requirements.txt`のSHA256ハッシュ比較による冪等`pip install`、Issue #483）、gitフックの登録（リポジトリ管理の`deploy/git-hooks/`を`core.hooksPath`として冪等に設定）、family-questフロントエンドの鮮度チェック（`deploy.sh --if-stale`による冪等リビルド）、Webhookの修正スクリプト実行、そしてコアサーバーとダッシュボードのバックグラウンド起動を担っている。引数`--prepare`を付けると前処理(Phase 0〜3)だけを実行してサーバー本体は起動しない(Issue #646。実機の`deploy/systemd/home_system.service`は`ExecStartPre`でこのモードを呼び、`unified_server.py`本体は`Type=simple`+`Restart=on-failure`の`ExecStart`としてsystemdがフォアグラウンド起動する。ダッシュボードは`home_dashboard.service`が別ユニットで起動する)。
+* システム全体において、`MY_HOME_SYSTEM`のクリーンアップ、初期設定、および関連するプロセス群の起動を統括するスクリプト。環境変数の設定、`CLEANUP_TARGETS`配列に列挙された既存プロセス群への段階的な終了処理（優しい停止→最大5秒待機→対象ごとの強制終了フォールバック）、NASのマウント確認（自動マウントのトリガーとExponential Backoffによるリトライ）、Python依存関係の鮮度チェック（`requirements.txt`と`DDD/requirements.txt`を連結したSHA256ハッシュ比較による冪等`pip install`、Issue #483 / #736）、gitフックの登録（リポジトリ管理の`deploy/git-hooks/`を`core.hooksPath`として冪等に設定）、family-questフロントエンドの鮮度チェック（`deploy.sh --if-stale`による冪等リビルド）、Webhookの修正スクリプト実行、そしてコアサーバーとダッシュボードのバックグラウンド起動を担っている。引数`--prepare`を付けると前処理(Phase 0〜3)だけを実行してサーバー本体は起動しない(Issue #646。実機の`deploy/systemd/home_system.service`は`ExecStartPre`でこのモードを呼び、`unified_server.py`本体は`Type=simple`+`Restart=on-failure`の`ExecStart`としてsystemdがフォアグラウンド起動する。ダッシュボードは`home_dashboard.service`が別ユニットで起動する)。
 * 根拠: スクリプト全体 (行番号: 4〜151 / 抜粋: "MY_HOME_SYSTEM 起動スクリプト")
 
 ## 3. 外部依存関係
@@ -124,24 +124,24 @@
 
 ### [要素名4：Phase 1.5: Python依存関係の鮮度チェック]
 
-* **役割**: `requirements.txt`のSHA256ハッシュを算出し、`.venv/.requirements-sha256`に記録済みのハッシュと比較する。一致しなければ`requirements.txt`が変更されたと判断し、`$PYTHON_EXEC -m pip install -r requirements.txt`を実行して`.venv`を追従させ、成功時のみ新しいハッシュを記録する。family-questの`deploy.sh --if-stale`と同じ冪等チェックの思想をバックエンドの依存関係にも適用したもの（Issue #483: `requirements.txt`変更後に`.venv`が追従しないと`ImportError`で起動失敗しうる問題への対応）。
-* 根拠: Phase 1.5ブロック (行番号: 101〜120 / 抜粋: "# --- Phase 1.5: Python依存関係の鮮度チェック ---")
+* **役割**: `REQ_FILES`配列（`requirements.txt` と `$DEVELOP_ROOT/DDD/requirements.txt`）のうち実在するものを連結したSHA256ハッシュを算出し、`.venv/.requirements-sha256`に記録済みのハッシュと比較する。一致しなければ依存定義が変更されたと判断し、各ファイルについて`$PYTHON_EXEC -m pip install -r "$req"`を順に実行して`.venv`を追従させ、**すべて成功した場合のみ**新しいハッシュを記録する。family-questの`deploy.sh --if-stale`と同じ冪等チェックの思想をバックエンドの依存関係にも適用したもの（Issue #483: `requirements.txt`変更後に`.venv`が追従しないと`ImportError`で起動失敗しうる問題への対応）。**（Issue #736 / AUDIT-006 で対象拡張）** `deploy/cron/crontab`はDDDのスクリプトも`MY_HOME_SYSTEM/.venv`のpythonで実行する（`run_task.sh`が`"${PROJECT_ROOT}/.venv/bin/python3"`を使い、`newface_monitor.py`の行は`.../MY_HOME_SYSTEM/.venv/bin/python`を明示している）のに、以前はMY_HOME_SYSTEM側の`requirements.txt`しか見ていなかった。そのためDDD固有の実行時依存（`yt-dlp` / `curl_cffi`）は「過去に手で`pip install`した」痕跡としてしか`.venv`に存在せず、`.venv`を作り直す・新しいホストへ移ると無音で失敗する状態だった。単一venvを共有しているという実態をこの配列で明示している。
+* 根拠: Phase 1.5ブロック (行番号: 138〜183 / 抜粋: "# --- Phase 1.5: Python依存関係の鮮度チェック ---")、[対象ファイル定義] (行番号: 156 / 抜粋: "REQ_FILES=(\"requirements.txt\" \"$DEVELOP_ROOT/DDD/requirements.txt\")")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数受け取り処理なし (行番号: 101-120)
+* 根拠: 引数受け取り処理なし (行番号: 138-183)
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: 戻り値返却なし (行番号: 101-120)
+* 根拠: 戻り値返却なし (行番号: 138-183)
 
 
-* **副作用**: `requirements.txt`変更時の`pip install`実行（`.venv`へのパッケージインストール）。その標準出力・標準エラー出力の`logs/pip_install.log`への書き込み。成功時は`.venv/.requirements-sha256`への書き込み。
-* 根拠: 実行・リダイレクト処理 (行番号: 108 / 抜粋: ""$PYTHON_EXEC" -m pip install -r requirements.txt > logs/pip_install.log 2>&1")
+* **副作用**: 依存定義変更時の`pip install`実行（`.venv`へのパッケージインストール。対象ファイルごとに1回ずつ）。`logs/pip_install.log`の切り詰めと、各実行の標準出力・標準エラー出力の同ファイルへの追記（ファイルごとに`=== pip install -r <path> ===`の見出しを書く）。全ファイル成功時のみ`.venv/.requirements-sha256`への書き込み。
+* 根拠: 実行・リダイレクト処理 (行番号: 167, 170〜171 / 抜粋: '"$PYTHON_EXEC" -m pip install -r "$req" >> logs/pip_install.log 2>&1')
 
 
-* **エラーハンドリング**: `pip install`が失敗しても警告を表示するのみでスクリプトは続行する（既存の`.venv`のまま起動を続ける方がサーバー未起動よりマシという設計判断で、Phase 2のfamily-quest鮮度チェックと同じ方針）。失敗時はハッシュファイルを更新しないため、次回起動時にも再度`pip install`が試みられる。
-* 根拠: if-else分岐 (行番号: 109〜114 / 抜粋: "echo "⚠️ pip install failed. Starting with existing .venv...."")
+* **エラーハンドリング**: `pip install`が失敗しても警告を表示するのみでスクリプトは続行する（既存の`.venv`のまま起動を続ける方がサーバー未起動よりマシという設計判断で、Phase 2のfamily-quest鮮度チェックと同じ方針）。1ファイルでも失敗すれば`install_ok=false`となりハッシュファイルを更新しないため、次回起動時にも再度`pip install`が試みられる（片方だけ成功した状態を「追従済み」として記録すると、欠けた依存が永続してしまうため）。
+* 根拠: if-else分岐 (行番号: 172〜181 / 抜粋: 'echo "⚠️ pip install failed. Starting with existing .venv. See logs/pip_install.log" >&2')
 
 
 
@@ -279,9 +279,9 @@ flowchart TD
     WaitLoop -- "5秒経過でも残存" --> PkillHard["残存する対象ごとにpkill -9で強制終了"]
     PkillHard --> CheckNAS[NASマウントポイント確認]
     CheckNAS --> MountLoop{最大5回・自動マウントトリガー+Exponential Backoffでリトライ}
-    MountLoop --> ReqHashCheck{requirements.txtのSHA256が.venv/.requirements-sha256と一致するか?}
+    MountLoop --> ReqHashCheck{"requirements.txt + DDD/requirements.txt の連結SHA256が<br/>.venv/.requirements-sha256と一致するか?"}
     ReqHashCheck -- 一致 --> HooksCheck
-    ReqHashCheck -- 不一致 --> PipInstall["pip install -r requirements.txt (成功時のみハッシュ更新)"]
+    ReqHashCheck -- 不一致 --> PipInstall["各 requirements について pip install<br/>(全て成功したときのみハッシュ更新)"]
     PipInstall -- "成功/失敗いずれでも続行" --> HooksCheck{core.hooksPath が deploy/git-hooks を指しているか?}
     HooksCheck -- 一致 --> QuestDeploy
     HooksCheck -- "不一致/未設定" --> SetHooks["git config core.hooksPath deploy/git-hooks (失敗しても警告のみ)"]
@@ -351,7 +351,7 @@ graph TD
 * **[修正済み] プロセスの起動監視漏れ (Issue #646)**: 以前は`unified_server.py`および`dashboard.py`を`nohup`でバックグラウンド起動するだけで、即座にクラッシュしていないかの死活監視・エラー検知のロジックが存在しなかった。現在、実機経路では`deploy/systemd/home_system.service`(`Type=simple`+`Restart=on-failure`)が`unified_server.py`を、`home_dashboard.service`が`dashboard.py`をそれぞれフォアグラウンドで管理し、本スクリプトは`--prepare`で前処理のみ行う。引数なしの手動経路では従来どおり死活監視は無い。
 * **[修正済み] pkill対象名の実体不一致**: 以前は`CLEANUP_TARGETS`に相当する停止対象が`scheduler.py`という実在しないプロセス名で個別に`pkill`されており、実体`scheduler_boot.py`にマッチしないため再起動のたびに旧schedulerプロセスが生き残り、`unified_server.py`起動時に新しいschedulerプロセスと重複起動する不具合があった。存在しない`bluetooth_monitor.py`への`pkill`も無害だが無意味であった。現在は実ファイル名を用いた`CLEANUP_TARGETS`配列に置き換えられ、この2点は解消されている。
 * **[修正済み] NASマウント確認が待たずに次フェーズへ進んでいた**: 以前のPhase 1は`mountpoint -q`を1回チェックするのみで、未マウントでも警告を表示するだけで即座にPhase 3(Webhook修正)・Phase 4(サーバー起動)へ進んでいた。起動直後はautofsのアイドルアンマウント後の自動マウント完了まで数秒かかることがあり、これは`config.py`の`verify_and_initialize_storage`（Exponential Backoffで自己修復）が扱う遅延と同種の事象であるにもかかわらず、本スクリプト側にはリトライが一切なかった。現在はパスアクセスによる自動マウントのトリガーと、最大5回・Exponential Backoff（1s/2s/4s/8s/16s）のリトライへ変更されている（74〜99行目）。ただしリトライを尽くしても未マウントの場合は依然として警告のみで後続フェーズへ進む点（アプリ側のバックオフ・フォールバックに委ねる設計）は変わらない。
-* **[修正済み] requirements.txt変更時に.venvが追従しない問題(Issue #483)**: 以前は本スクリプトにPython依存関係を更新する経路が一切なく、`requirements.txt`を変更するPRをマージして実機で`git pull`しても`.venv`は古いままだった。新規パッケージをimportするコードが含まれていれば`unified_server.py`が`ImportError`で起動失敗し、2026-09-01のfamily-quest dist不整合障害と同型の穴がバックエンド側に残っていた。現在はPhase 1.5で`requirements.txt`のSHA256ハッシュを`.venv/.requirements-sha256`と比較し、不一致なら`pip install -r requirements.txt`を実行してハッシュを更新するようになっている（101〜120行目）。`requirements.txt`変更後の初回起動はpipインストール分だけ遅くなる点、およびネットワーク断時は`pip install`が失敗し既存の`.venv`のまま起動を続行する点に留意。
+* **[修正済み] requirements.txt変更時に.venvが追従しない問題(Issue #483)**: 以前は本スクリプトにPython依存関係を更新する経路が一切なく、`requirements.txt`を変更するPRをマージして実機で`git pull`しても`.venv`は古いままだった。新規パッケージをimportするコードが含まれていれば`unified_server.py`が`ImportError`で起動失敗し、2026-09-01のfamily-quest dist不整合障害と同型の穴がバックエンド側に残っていた。現在はPhase 1.5で`requirements.txt`と`DDD/requirements.txt`を連結したSHA256ハッシュを`.venv/.requirements-sha256`と比較し、不一致なら各ファイルについて`pip install`を実行してハッシュを更新するようになっている（138〜183行目）。**（Issue #736 / AUDIT-006）** DDD側を対象に含めたのは、cronがDDDのスクリプトも`MY_HOME_SYSTEM/.venv`のpythonで実行しているのに`yt-dlp`/`curl_cffi`がどのインストール経路にも含まれておらず、`.venv`を作り直すとDDDのバッチが無音で失敗する状態だったため。**副作用としてPhase 1.5の所要時間が延びる**（`yt-dlp`は更新頻度が高い）ので、`home_system.service`の`TimeoutStartSec`（Issue #731で900秒を明示）と併せて見ること。`requirements.txt`変更後の初回起動はpipインストール分だけ遅くなる点、およびネットワーク断時は`pip install`が失敗し既存の`.venv`のまま起動を続行する点に留意。
 
 * **（2026-09-06 品質監査で修正）** `CLEANUP_TARGETS` の監視スクリプト用パターンを `"python.*monitors/[a-z_]*\.py"` から `scheduler_boot.py` の `TASKS` が起動する6本(`switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor`)に限定した。以前のパターンは systemd の `network_logger.service` や cron 起動の `health_watch.py`/`daily_timelapse_job.py`(ffmpeg を伴い長時間走る)/`log_analyzer.py` まで巻き添えで SIGTERM していた。`TASKS` を変更したらここも更新すること(`tests/test_start_all_sh.py` が両者の整合を検証する)。
 * 根拠: (行番号: 38〜45 / 抜粋: "\"python.*monitors/(switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor)\\.py\"")
@@ -375,7 +375,7 @@ graph TD
 | `unified_server.py`の仕様 | `unified_server.md`の解析によれば、FastAPI製のAPIサーバーであり、`lifespan`内で`monitors/camera_monitor.py`と`scheduler_boot.py`をサブプロセスとして起動し、終了時にはそれらを停止させる構成になっているとされる。以前は`camera_monitor.py`の起動が`try-except`で保護されておらず起動失敗時にアプリ全体が起動できない可能性が`unified_server.md`の保守上の注意点として挙げられていたが、Issue #360で両子プロセスの起動が共通の`_spawn_child_process`内で保護され、Issue #646で30秒ごとの死活監視・自動再起動(`restart_dead_children`)も加わった。 | unified_server.md, scheduler_boot.md |
 | `dashboard.py`の仕様 | `dashboard.md`の解析によれば、Streamlit製のダッシュボードアプリであり、`services.analysis_service`からセンサー・子供・食事等のデータを読み込み、各タブを`views.dashboard`配下の各ビューモジュールに委譲してレンダリングするとされる。**（スマホ対応で更新）** タブは5個(ホーム/おでかけ/見守り/くらし/システム)に再編され、スマートフォンからは`unified_server.py`(8000番)の`/dashboard`配下への中継経由で閲覧する。 | dashboard.md, dashboard_router.md, dashboard_proxy_service.md |
 | 未起動スクリプトの用途 | `unified_server.md`の解析によれば、`camera_monitor.py`は`start_all.sh`自体ではなく`unified_server.py`の`lifespan`によってサブプロセスとして起動されることが判明した(`start_all.sh`側の`pkill`対象と`unified_server.py`側の起動元が一致)。以前は`bluetooth_monitor.py`と`scheduler.py`(`scheduler_boot.py`とは別名で実在しないプロセス名)についても対応する起動元の記述が見つからず不明であったが、修正コミット(`fix(H-9)`)により`start_all.sh`の`CLEANUP_TARGETS`から存在しない`bluetooth_monitor.py`は削除され、`scheduler.py`は本ファイル85行目のコメント("unified_server.py が内部で scheduler_boot.py を起動します")および`unified_server.md`の解析結果と一致する実名`scheduler_boot.py`に修正されたため、この2点の不明点は解消された。 | unified_server.md |
-| `deploy.sh --if-stale`の冪等判定の詳細 | `family-quest/deploy.sh`を直接確認した。判定材料は**`git rev-parse HEAD:family-quest` で得られる「family-questディレクトリのツリーハッシュ」**で、ビルド成功時に`dist/.built-tree`へ記録される(59行目〜)。`--if-stale`(33〜41行目)は`current_tree_hash()`の値と`dist/.built-tree`の内容を比較し、**(1) 現在のハッシュが取得できる (2) 記録済みハッシュが存在する (3) 両者が一致する (4) `dist/index.html`が実在する** の4条件がすべて成立したときだけ`exit 0`でビルドをスキップする。どれか1つでも欠ければ再ビルドに倒れる(`current_tree_hash()`はgitが使えない等で取得失敗した場合に空文字を返し、26行目のコメントどおり「常にビルド」へフォールバックする)。ツリーハッシュを使うため、`git pull`だけでなく`git reset --hard`やファイルの直接編集でもソースが変われば必ず再ビルドされる。`dist/.built-tree`を更新できなかった場合は警告を出したうえで記録をスキップし、以後`--if-stale`は常にビルドすることになる(64行目)。ビルド本体は`npm ci`(CIの`frontend`ジョブと同じ。Issue #489: `npm install`だとlockfileを書き換えて実機のgitツリーがdirtyになり次回のpullが失敗する)を用いる。 | 直接ソース確認: `family-quest/deploy.sh:9-14,26-41,59-64` |
+| `deploy.sh --if-stale`の冪等判定の詳細 | `family-quest/deploy.sh`を直接確認した。判定材料は**`git rev-parse HEAD:family-quest` で得られる「family-questディレクトリのツリーハッシュ」**で、ビルド成功時に`dist/.built-tree`へ記録される(59行目〜)。`--if-stale`(33〜41行目)は`current_tree_hash()`の値と`dist/.built-tree`の内容を比較し、**(1) 現在のハッシュが取得できる (2) 記録済みハッシュが存在する (3) 両者が一致する (4) `dist/index.html`が実在する** の4条件がすべて成立したときだけ`exit 0`でビルドをスキップする。どれか1つでも欠ければ再ビルドに倒れる(`current_tree_hash()`はgitが使えない等で取得失敗した場合に空文字を返し、26行目のコメントどおり「常にビルド」へフォールバックする)。ツリーハッシュを使うため、`git pull`だけでなく`git reset --hard`やファイルの直接編集でもソースが変われば必ず再ビルドされる。`dist/.built-tree`を更新できなかった場合は警告を出したうえで記録をスキップし、以後`--if-stale`は常にビルドすることになる(64行目)。ビルド本体は`npm ci`(CIの`frontend`ジョブと同じ。Issue #489: `npm install`だとlockfileを書き換えて実機のgitツリーがdirtyになり次回のpullが失敗する)を用いる。**（Issue #757 / AUDIT-028 で変更）** ただし`npm ci`は毎回実行されるのではなく、`package-lock.json`のSHA256を`node_modules/.package-lock-sha256`と比較し、**変化があったとき(または`node_modules`が存在しないとき)だけ**実行する。`npm ci`は仕様上`node_modules`を削除してから入れ直すため、ネットワークが無いときに実行すると`node_modules`を失ったままビルド不能になり、ネットワークが回復するまで新しいフロントを一切デプロイできなくなる(旧`dist/`はアトミック差し替えで無傷なので配信自体は継続する)。lockfileが変わったときだけ`npm ci`する以上、Issue #489 の「lockfileを厳密に守る」意図は損なわれない。副次的に、TS/TSX だけを変えた大多数のケースで`ExecStartPre`の所要時間が大幅に縮む(Issue #731 の`TimeoutStartSec`の見積もりに影響する)。 | 直接ソース確認: `family-quest/deploy.sh:9-14,26-41,59-64` |
 
 ## 10. 自己検証結果
 

@@ -90,6 +90,45 @@ jobs:
         working-directory: .
         run: python -m pytest .github/scripts/ -q
 
+      - name: requirements lock is in sync with requirements.in (blocking)
+        # Issue #744 (AUDIT-015): CLAUDE.md は「依存の追加・変更は requirements.in /
+        # requirements-dev.in を編集し pip-compile で lock を再生成する(手で編集しない。
+        # Issue #647)」と規定しているのに、それを担保するゲートが1つも無かった。
+        # (1) .in だけ編集して pip-compile を忘れる → 実機は古い lock で入れるため
+        #     追加した依存が入らない(Issue #736 と同じ失敗モード)
+        # (2) requirements.txt を手で編集する → 次の pip-compile で黙って消える
+        # のどちらも CI が緑のまま通っていた。current_schema.sql / .env.example と同じ
+        # 「生成物の整合検証」を lock にも適用する。
+        #
+        # 構造的な検査(.in の直接依存が lock に pin されているか)は
+        # .github/scripts/test_requirements_lock_sync.py が既に行っている(ネットワーク不要、
+        # ローカルでも実行できる)。ここでは実際に pip-compile を走らせて
+        # 依存の中身(パッケージのpinと「# via」注記)に差分が無いことまで確認する。
+        # pip-compile は既存の pin を維持するため、新しいリリースが出ただけで差分が
+        # 生じることはない。
+        #
+        # ヘッダーの先頭6行(「# by the following command: / #    pip-compile ...」)は
+        # 比較から除外する。ここに記録される --no-index の有無は、実行環境の pip
+        # バージョンによって pip-compile 自身が変えることがあり(観測: pip 24.0 では
+        # 付かず、pip 26.2.1 では付く。要求した引数は両者で同一)、依存の同期状態とは
+        # 無関係にジョブを赤くする。この6行の形式は pip-tools の Writer.write_header()
+        # が固定で出力するもの。
+        run: |
+          pip install pip-tools
+          status=0
+          for pair in "requirements.in:requirements.txt" "requirements-dev.in:requirements-dev.txt"; do
+            src="${pair%%:*}"; lock="${pair##*:}"
+            cp "$lock" "${RUNNER_TEMP}/${lock}.orig"
+            pip-compile --quiet --strip-extras --no-emit-index-url --output-file "$lock" "$src"
+            if ! diff -u <(tail -n +7 "${RUNNER_TEMP}/${lock}.orig") <(tail -n +7 "$lock"); then
+              echo "::error file=MY_HOME_SYSTEM/${lock}::${lock} が ${src} と同期していません。pip-compile で再生成してコミットしてください。"
+              status=1
+            fi
+            # 後続ステップが元の lock を見るよう復元する
+            cp "${RUNNER_TEMP}/${lock}.orig" "$lock"
+          done
+          exit "$status"
+
       - name: Pyright (correctness gate - blocking)
         # Issue #487: 以前は services/quest_service.py:45 の到達不能な相対import
         # (削除済み)でmypyが1行目で解析を停止し、型チェッカがコードベースを

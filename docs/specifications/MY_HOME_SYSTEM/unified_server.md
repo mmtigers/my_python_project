@@ -315,30 +315,32 @@
 
 ### `health_check` (エンドポイント: `GET /health`)
 
-* **役割**: ヘルスチェック用に正常稼働を示すJSONを返す。
-* 根拠: `async def health_check():` (行番号: 590-591 / 抜粋: "async def health_check():")
+* **役割**: **（Issue #735 / AUDIT-005 で変更）** liveness ではなく **readiness** を返す。`lifespan`がスキーマ適用に失敗すると`app.state.migration_ok`が`False`になり、監視子プロセスを起動しないまま「プロセスは生存しているが全APIがスキーマ未適用のDBに当たって500」という状態になる。以前は無条件に`{"status": "healthy"}`を返していたため、systemd(`Type=simple`)も`server_watchdog`(`systemctl` + `pgrep`)も`health_watch`(`check_service_active`)もこの状態を「正常」と報告していた。現在は`migration_ok`が`False`のとき`503`を返し、外形監視から見分けられるようにしている。
+* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 590 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
 
 
-* **引数/リクエスト**: なし
-* 根拠: `async def health_check():` (行番号: 590 / 抜粋: "async def health_check():")
+* **引数/リクエスト**: `request: Request`（`app.state`を参照するために受け取る。リクエストボディ・クエリは読まない）
+* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 590 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
 
 
-* **戻り値/レスポンス**: `dict` (statusキーを含む)
-* 根拠: `return {"status": "healthy"}` (行番号: 413 / 抜粋: "return {"status": "healthy"}")
+* **戻り値/レスポンス**: `JSONResponse`。`migration_ok`が`False`なら`503` + `{"status": "unhealthy", "reason": "migration_failed"}`、それ以外は`200` + `{"status": "healthy"}`。`app.state.migration_ok`が存在しない場合（`lifespan`を通らないテスト経路等）は`getattr`の既定値`True`により`200`。
+* 根拠: [条件分岐と戻り値] (行番号: 602〜609 / 抜粋: 'migration_ok = getattr(request.app.state, "migration_ok", True)')
 
 
-* **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 590-591 / 抜粋: "async def health_check():")
+* **副作用**: なし（`app.state`の読み取りのみ。DBへは接続しない）
+* 根拠: [該当関数内処理] (行番号: 602〜609 / 抜粋: 'return JSONResponse(status_code=200, content={"status": "healthy"})')
 
 
-* **エラーハンドリング**: なし
-* 根拠: 該当関数内処理 (行番号: 590-591 / 抜粋: "async def health_check():")
+* **エラーハンドリング**: なし（`getattr`の既定値で`app.state`未設定を吸収する）
+* 根拠: [該当関数内処理] (行番号: 602 / 抜粋: 'migration_ok = getattr(request.app.state, "migration_ok", True)')
+
+> **注記**: `/health`がDBに触れないのは意図的で、DBまで到達する経路の確認は`monitors/health_watch.py`の`check_api_responsive`（チェック2）が`/api/quest/data`を別に叩くことで担保している（[health_watch.md](./health_watch.md) 参照）。
 
 
 ### `_run_uvicorn_server`（Issue #229で追加）
 
 * **役割**: 本番起動経路（`python unified_server.py`実行時の`if __name__ == "__main__":`）のエントリポイント。`uvicorn.run(app, host="0.0.0.0", port=8000)`を呼び出す。**（Issue #229で修正）** 以前はこの箇所で`uvicorn.config.LOGGING_CONFIG`を書き換え、`"uvicorn.access"`ロガー自体のレベルを`WARNING`に固定していた。uvicornのアクセスログは常に`logger.info()`（レベル20）で出力されるため、ロガーのレベルチェックの時点でログレコードが作られず、`lifespan()`内で登録される`SilencePolicyFilter`（GETの200/304ポーリングのみを選別して抑制し、POST・エラーは残す設計）が一度も呼び出されなかった。結果、POST等の状態変更リクエストやエラーレスポンスを含め、アクセスログが本番起動経路で一切残らない状態になっていた。現在はデフォルトの`log_config`（`uvicorn.access`はINFO）をそのまま使い、レコード生成自体は妨げず`SilencePolicyFilter`に選別を委ねる。本関数への切り出しは、以前は`if __name__ == "__main__":`直下にインラインで書かれ`import`されない限り実行されずテストが困難だった処理を、単体テストで`uvicorn.run`をモックして検証できるようにするため（このロジック自体はIssue #229の修正の一部）。
-* 根拠: [関数定義とコメント] (行番号: 593-608 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
+* 根拠: [関数定義とコメント] (行番号: 609-624 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
 
 
 * **引数/リクエスト**: なし

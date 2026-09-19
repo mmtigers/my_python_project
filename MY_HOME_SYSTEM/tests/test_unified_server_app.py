@@ -176,6 +176,48 @@ def test_health_endpoint(api_client):
     assert res.json() == {"status": "healthy"}
 
 
+class TestHealthEndpointReadiness:
+    """Issue #735 (AUDIT-005): /health は readiness を返す。
+
+    lifespan のマイグレーションが失敗すると migration_ok=False になり、監視子プロセスを
+    起動せず全APIがスキーマ未適用のDBに当たる。プロセスは生き続けるため systemd も
+    systemctl ベースの監視も「正常」と報告してしまうので、外形から見分けられるようにする。
+    """
+
+    def test_returns_503_when_migration_failed(self, api_client):
+        original = getattr(unified_server.app.state, "migration_ok", None)
+        unified_server.app.state.migration_ok = False
+        try:
+            res = api_client.get("/health")
+        finally:
+            if original is None:
+                del unified_server.app.state.migration_ok
+            else:
+                unified_server.app.state.migration_ok = original
+        assert res.status_code == 503
+        assert res.json() == {"status": "unhealthy", "reason": "migration_failed"}
+
+    def test_returns_200_when_migration_ok(self, api_client):
+        original = getattr(unified_server.app.state, "migration_ok", None)
+        unified_server.app.state.migration_ok = True
+        try:
+            res = api_client.get("/health")
+        finally:
+            if original is None:
+                del unified_server.app.state.migration_ok
+            else:
+                unified_server.app.state.migration_ok = original
+        assert res.status_code == 200
+        assert res.json() == {"status": "healthy"}
+
+    def test_defaults_to_healthy_when_state_is_absent(self, api_client):
+        """lifespan を通らない経路(テスト・直接 ASGI 呼び出し)では従来どおり 200。"""
+        if hasattr(unified_server.app.state, "migration_ok"):
+            del unified_server.app.state.migration_ok
+        res = api_client.get("/health")
+        assert res.status_code == 200
+
+
 class TestGlobalExceptionHandler:
     def test_unhandled_exception_does_not_leak_details_to_client(self, isolated_db, monkeypatch):
         """

@@ -464,7 +464,7 @@
 
 
 
-* **エラーハンドリング**: `ffmpeg`のプロセス起動失敗、読み取り時の例外、非ゼロ終了時のエラー出力をスローする。終了時はプロセスを安全にkillする。
+* **エラーハンドリング**: `ffmpeg`のプロセス起動失敗、読み取り時の例外、非ゼロ終了時のエラー出力をスローする。終了時はプロセスを安全にkillする。**（Issue #761 / AUDIT-032 で追加）** `Popen`の直後に`assert process.stdout is not None and process.stderr is not None`を置いている。`stdout=subprocess.PIPE` / `stderr=subprocess.PIPE`を指定しているため`None`にはならないが、以降の`process.stdout.read` / `process.stderr.read`（stderr は別スレッドの`_drain_stderr`でドレインする。読まないとパイプバッファ満杯で`ffmpeg`がブロックしデッドロックするため）の前提を実行可能な形で表明する。
 
 
 * 根拠: `except Exception as e:` および `finally:` (行番号: 303-305, 306-317 / 抜粋: "raise subprocess.CalledProcess...")
@@ -486,7 +486,7 @@
 * **引数/リクエスト**: `build`メソッド: `motion_records` (List[MotionRecord]), `work_dir` (str)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 390 / 抜粋: "def build(self, motion_records...")
+* 根拠: メソッドシグネチャ (行番号: 397 / 抜粋: "def build(self, motion_records...")
 
 
 
@@ -529,7 +529,7 @@
 * **引数/リクエスト**: `build`メソッド: `input_path` (str), `events` (List[EventRecord]), `output_path` (str), `temp_dir` (str), `video_start_dt` (datetime.datetime)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 463 / 抜粋: "def build(self, input_path: st...")
+* 根拠: メソッドシグネチャ (行番号: 470 / 抜粋: "def build(self, input_path: st...")
 
 
 
@@ -573,7 +573,7 @@
 * **引数/リクエスト**: `split_and_send`メソッド: `summary` (SummaryInfo), `base_filename` (str)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 570 / 抜粋: "def split_and_send(self, summa...")
+* 根拠: メソッドシグネチャ (行番号: 577 / 抜粋: "def split_and_send(self, summa...")
 
 
 
@@ -601,7 +601,7 @@
 * **戻り値/レスポンス**: `None`
 * **副作用**: 添付付きのHTTP POST。`post_webhook`は429/5xxを限定回数リトライするため、レート制限時に同じ動画が再アップロードされうる(リトライ前のファイル位置の巻き戻しは`core.discord._rewind_files`が担う)。ここで独自のリトライを重ねてはならない。
 * **エラーハンドリング**: ファイルを開けない等、送信に入る前の失敗のみ`except Exception`で捕捉して`Discord送信中に例外発生`をERRORに残す(送信中の失敗は`post_webhook`がwarningにして`False`を返す)。
-* 根拠: `_send_to_discord` (行番号: 624 / 抜粋: "def _send_to_discord(self, webhook_url: str, message: str, file_path: str) -> None:")
+* 根拠: `_send_to_discord` (行番号: 631 / 抜粋: "def _send_to_discord(self, webhook_url: str, message: str, file_path: str) -> None:")
 
 #### `Uploader._send_completion_notice`
 
@@ -609,7 +609,7 @@
 * **引数/リクエスト**: `webhook_url` (str), `count` (int)
 * **戻り値/レスポンス**: `None`
 * **エラーハンドリング**: `post_webhook`は例外を送出せず`False`を返す契約なので、戻り値を見て`⚠️ 完了通知の送信に失敗しました(処理自体は成功しています)`をWARNINGに残す。Issue #661以前は`except Exception: pass`で完全に黙殺しており、完了通知が届かない原因が一切残らなかった。通知は本処理ではないため、失敗しても処理は続行する。
-* 根拠: `_send_completion_notice` (行番号: 654 / 抜粋: "def _send_completion_notice(self, webhook_url: str, count: int):")
+* 根拠: `_send_completion_notice` (行番号: 661 / 抜粋: "def _send_completion_notice(self, webhook_url: str, count: int):")
 
 * **エラーハンドリング**: 動画分割プロセスの失敗やWebhook送信時の例外をキャッチし、ログにエラーを出力する。分割ファイルの削除自体が失敗した場合(`OSError`)も個別に捕捉してログ出力するのみで処理を継続する。
 
@@ -633,7 +633,7 @@
 * **引数/リクエスト**: `input_video` (str)。
 
 
-* 根拠: 関数シグネチャ (行番号: 668 / 抜粋: "def run_smart_timelapse_job(in...")
+* 根拠: 関数シグネチャ (行番号: 675 / 抜粋: "def run_smart_timelapse_job(in...")
 
 
 

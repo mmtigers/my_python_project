@@ -212,3 +212,49 @@ def test_intentional_terminate_logs_info_not_error(monkeypatch):
     assert result_holder["result"] is False
     mock_logger.error.assert_not_called()
     assert any("terminated intentionally" in call.args[0] for call in mock_logger.info.call_args_list)
+
+
+class TestTaskDueDecisionUsesMonotonicClock:
+    """Issue #749 (AUDIT-020): 実行判定が壁時計の巻き戻りに影響されないこと。
+
+    以前はループが time.time() 基準で、Raspberry Pi(RTC なし)の NTP 同期で
+    時刻が後方へジャンプすると now - last_run が負になり、interval(300〜3600秒)を
+    超えるまで6つの監視タスクがすべて沈黙していた。しかも health_watch は
+    「タスクが実行されていない」ことを見ないため沈黙自体が検知されない。
+    """
+
+    def _task(self, interval=300, last_run=0):
+        return {"script": "monitors/dummy.py", "interval": interval, "last_run": last_run, "args": []}
+
+    def test_main_loop_reads_the_monotonic_clock(self):
+        """ループ本体が time.monotonic() を読むこと(time.time() へ戻さない)。"""
+        import inspect
+
+        source = inspect.getsource(scheduler_boot.main)
+        # コメント本文にも "time.time()" という語が出るため、代入文そのものを見る
+        assert "now: float = time.monotonic()" in source
+        assert "now: float = time.time()" not in source
+
+    def test_never_run_task_runs_immediately(self):
+        """last_run の初期値 0 は「未実行」の番兵。monotonic 基準では
+        「起動時刻より前の値」にすぎないため、明示的に扱わないと起動直後
+        (uptime < interval)の初回実行が interval 秒遅れる。"""
+        assert scheduler_boot._is_task_due(self._task(), now=10.0) is True
+
+    def test_task_is_not_due_before_the_interval_elapses(self):
+        assert scheduler_boot._is_task_due(self._task(interval=300, last_run=1000.0), now=1100.0) is False
+
+    def test_task_is_due_once_the_interval_elapses(self):
+        assert scheduler_boot._is_task_due(self._task(interval=300, last_run=1000.0), now=1300.0) is True
+
+    def test_monotonic_clock_is_unaffected_by_a_wall_clock_rollback(self, monkeypatch):
+        """壁時計が1日巻き戻っても、monotonic は進み続けるため判定は変わらない。"""
+        real_monotonic_values = iter([1000.0, 1300.0])
+        monkeypatch.setattr(
+            scheduler_boot.time, "time", lambda: 0.0  # 壁時計が1970年へ巻き戻った状況
+        )
+        monkeypatch.setattr(
+            scheduler_boot.time, "monotonic", lambda: next(real_monotonic_values)
+        )
+        task = self._task(interval=300, last_run=scheduler_boot.time.monotonic())
+        assert scheduler_boot._is_task_due(task, now=scheduler_boot.time.monotonic()) is True

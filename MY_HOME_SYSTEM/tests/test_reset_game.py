@@ -16,6 +16,9 @@ Issue #547: リセット処理自体は、reset_game.pyがunified_serverとは�
 (read-modify-write)と交錯するとリセット結果が上書きされうる欠陥があった。
 直接DBを書き換える実装(旧reset_user_data、BEGIN IMMEDIATE使用)を、サーバーの
 リセットAPI(POST /api/quest/admin/reset_user)を呼ぶ薄いクライアントに置き換えた。
+この置き換えでBEGIN IMMEDIATEも一緒に撤去されており、現在リポジトリ内の実行コードに
+BEGIN IMMEDIATEは存在しない(Issue #755 / AUDIT-026。並行制御の正はプロセス内の
+threading.Lockのみ)。
 以下のテストはrequests.postをmonkeypatchし、reset_game.py側の呼び出し内容・
 レスポンス種別ごとの挙動(成功・404・接続失敗・管理者不在)を検証する。
 API自体(サーバー側の権限チェック・DB更新の原子性)の回帰テストは
