@@ -668,7 +668,7 @@ class RoutineService:
         # もう一度チェックでき、was_all_done は「今回の DB 状態」から計算されるため
         # **TV 解錠が二度発火する**。approval_service._process_approve_quest_locked
         # (および #544 の inventory_service)と同じパターンへ揃える。
-        tv_unlock_reason: Optional[str] = None
+        tv_unlock_reason: str | None = None
         with _get_user_balance_lock(user_id):
             with get_db_cursor(commit=True) as cur:
                 # フローの内容はユーザー(子ども/パパ/ママ)によって異なるため、

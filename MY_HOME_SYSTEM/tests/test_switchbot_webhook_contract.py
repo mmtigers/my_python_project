@@ -272,11 +272,13 @@ class TestPersistenceFailureIsNotSwallowed:
         from fastapi import HTTPException
 
         body = SwitchBotWebhookBody(**OFFICIAL_CONTACT_SENSOR_PAYLOAD)
-        with patch("routers.webhook_router.save_log_async", new=AsyncMock(return_value=False)), \
-             patch.object(webhook_router.sensor_service, "process_sensor_data", new=AsyncMock(return_value=None)) as proc, \
-             patch.object(webhook_router.sb_tool, "get_device_name_by_id", return_value="玄関ドア"):
-            with pytest.raises(HTTPException) as exc:
-                await webhook_router.switchbot_webhook(body, token=None)
+        with (
+            patch("routers.webhook_router.save_log_async", new=AsyncMock(return_value=False)),
+            patch.object(webhook_router.sensor_service, "process_sensor_data", new=AsyncMock(return_value=None)) as proc,
+            patch.object(webhook_router.sb_tool, "get_device_name_by_id", return_value="玄関ドア"),
+            pytest.raises(HTTPException) as exc,
+        ):
+            await webhook_router.switchbot_webhook(body, token=None)
 
         assert exc.value.status_code == 503
         # 一次データが残らない以上、通知処理まで進めてはいけない

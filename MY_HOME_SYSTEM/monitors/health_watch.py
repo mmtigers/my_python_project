@@ -385,7 +385,7 @@ def _check_host_files_drift() -> List[str]:
     return findings
 
 
-def check_deploy_config_drift() -> Optional[str]:
+def check_deploy_config_drift() -> str | None:
     """実機構成(crontab / systemd / logrotate)がリポジトリの deploy/ 配下と一致しているか。
 
     各READMEは「実機の設定を変更した場合は、このファイルにも反映してコミットすること」
