@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全84件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全85件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -67,6 +67,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [quest_inventory_service.md](./quest_inventory_service.md) | 所持アイテムの一覧取得と、YouTubeごほうび券のクールダウンを考慮したアイテム使用処理。 |
 | [quest_game_system.md](./quest_game_system.md) | quest_data(マスターデータ)とDBの同期、およびFamily Questフロントエンド向け画面集約データの生成。 |
 | [quest_master_sync_sql.md](./quest_master_sync_sql.md) | quest_master/reward_masterへのUPSERT文とパラメータ組み立ての一元管理(Issue #664)。GameSystem.sync_master_dataが使う。 |
+| [quest_master_sync_marker.md](./quest_master_sync_marker.md) | quest_data.py/routine_data.pyの内容ダイジェストをマーカーに記録し、差分があるときだけマスタ同期を走らせる冪等判定(Issue #700)。sync_strict.py --if-staleが使う。 |
 | [game_logic.md](./game_logic.md) | レベルアップ必要経験値・最大HP・ドロップ報酬計算といったゲームルールロジック。旧版に記載のあった「ボス討伐状況の更新」はボス機能の廃止（`d1599d6`）に伴い該当ロジックが削除されている。 |
 | [quest.md](./quest.md) | クエストシステムのドメイン/リクエスト/レスポンス/インベントリモデルを定義するPydanticモデル群。 |
 | [quest_data.md](./quest_data.md) | Family Questのマスターデータ（ユーザー情報、クエスト定義、報酬定義）を定義する純粋なデータ定義モジュール。 |

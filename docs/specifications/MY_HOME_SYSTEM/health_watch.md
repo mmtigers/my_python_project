@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `0e15b41` (+同一PR内のチェック7追加変更) |
+| 解析基準コミット | `0e15b41` (+同一PR内のチェック7追加変更、+ Issue #700 のチェック8追加) |
 
 ## 関連ドキュメント
 
@@ -15,11 +15,16 @@
 * [notification_service.md](./notification_service.md) - `send_push`の実体
 * [log_analyzer.md](./log_analyzer.md) - ログ走査に流用する`LogAnalyzer`クラスの実体
 * [server_watchdog.md](./server_watchdog.md) - 同種のサービス監視（ただし`home_system.service`と同一プロセスツリー内で稼働）との棲み分けはdocstring参照
+* [quest_data.md](./quest_data.md) - **（Issue #700 で追加）** チェック8が比較するマスタ定義（`QUESTS`）の定義元
+* [database.md](./database.md) - **（Issue #700 で追加）** チェック8が使う読み取り専用接続`get_ro_connection`の実体
+* [sync_strict.md](./sync_strict.md) - **（Issue #700 で追加）** 乖離の「修正」側。検知(本ファイル)と同期(`sync_strict.py --if-stale`)は責務を分けている
+* [quest_master_sync_marker.md](./quest_master_sync_marker.md) - **（Issue #700 で追加）** 同期側の冪等判定。本ファイルはマーカーを見ずDBとコードを直接比較する
 * 運用設計: `docs/runbooks/raspi_claude_log_monitoring.md`（層1としての位置づけ・cron登録・死活監視との組み合わせ）
 
 ## 2. ファイルの概要
 
-ラズパイの一次ヘルスチェックを行うcron想定のスクリプト。`home_system.service`の稼働状態、journalctlのエラーログ、アプリログのERROR行、ディスク/メモリ使用率、NASマウント、実機構成(crontab/systemd/logrotate)とリポジトリ`deploy/`配下の一致(チェック7・構成ドリフト検知)の7項目を決定論的にチェックし、異常があればDiscordのerrorチャンネルへ要約を通知する。前回チェック時刻をマーカーファイルで管理してログ走査の重複を防ぎ、同一の異常セットが継続する間は再通知を6時間抑制する。自動復旧(systemctl restart等)は行わない。**Issue #339(層2)**: `config.HEALTH_WATCH_INVESTIGATE_HOOK`にスクリプトパスが設定されている場合のみ、通知と同じ抑制の内側で自動調査フック(`scripts/claude_investigate.sh`)を`_fire_investigate_hook()`によりfire-and-forget起動する。未設定(既定)なら従来どおり検知・通知のみ。
+ラズパイの一次ヘルスチェックを行うcron想定のスクリプト。`home_system.service`の稼働状態、journalctlのエラーログ、アプリログのERROR行、ディスク/メモリ使用率、NASマウント、実機構成(crontab/systemd/logrotate)とリポジトリ`deploy/`配下の一致(チェック7・構成ドリフト検知)、`quest_data.QUESTS`と実機DBの`quest_master`の一致(チェック8・マスタデータのドリフト検知)の8項目を決定論的にチェックし、異常があればDiscordのerrorチャンネルへ要約を通知する。前回チェック時刻をマーカーファイルで管理してログ走査の重複を防ぎ、同一の異常セットが継続する間は再通知を6時間抑制する。自動復旧(systemctl restart等)は行わない。**Issue #339(層2)**: `config.HEALTH_WATCH_INVESTIGATE_HOOK`にスクリプトパスが設定されている場合のみ、通知と同じ抑制の内側で自動調査フック(`scripts/claude_investigate.sh`)を`_fire_investigate_hook()`によりfire-and-forget起動する。未設定(既定)なら従来どおり検知・通知のみ。**Issue #700(チェック8)**: `quest_data.py`から退役させたクエストが実機の`quest_master`に残り続け、移設先(「きょうのすごろく」のステップ報酬)と二重報酬になっていた事故を受け、コードとDBの乖離を検知する項目を追加した。**検知のみで自動修正はしない**（同期の実行は`sync_strict.py --if-stale`の責務）。
+* 根拠: モジュールdocstring (行番号: 19〜20 / 抜粋: "8. `quest_data.QUESTS` と実機DBの `quest_master` が一致しているか")
 * 根拠: モジュールdocstring (行番号: 9-18, 23-26 / 抜粋: "7. 実機構成(crontab / systemdユニット / logrotate設定)がリポジトリの deploy/ 配下と\n     一致しているか(構成ドリフト検知。", "層2(Issue #339): config.HEALTH_WATCH_INVESTIGATE_HOOK にスクリプトパスが\n設定されている場合のみ、通知と同じ抑制の内側で自動調査フック")
 
 ## 3. 外部依存関係
@@ -35,6 +40,7 @@
 | `core.state_file`（Issue #661 で `json` の直接importを置き換え） | ローカルモジュール | マーカーファイル・再通知抑制状態ファイルの原子的な読み書き(`read_text`/`write_text_atomic`/`read_json`/`write_json_atomic`) | 根拠: [インポート宣言] (行番号: 43 / 抜粋: "from core import state_file") |
 | `os` | 標準 | パス操作・マウント確認 | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "import os") |
 | `shutil` | 標準 | ディスク使用量取得 | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "import shutil") |
+| `sqlite3` | 標準 | **（Issue #700 で追加）** チェック8でDB/テーブル不在・一時的なロックを`OperationalError`として識別する | 根拠: [インポート宣言] (行番号: 38 / 抜粋: "import sqlite3") |
 | `subprocess` | 標準 | `systemctl`/`journalctl`/`free`の実行 | 根拠: [インポート宣言] (行番号: 27 / 抜粋: "import subprocess") |
 | `sys` | 標準 | パス追加・終了コード返却 | 根拠: [インポート宣言] (行番号: 28 / 抜粋: "import sys") |
 | `typing` | 標準 | 型ヒント(`List`, `Optional`, `Tuple`) | 根拠: [インポート宣言] (行番号: 38 / 抜粋: "from typing import List, Optional, Tuple") |
@@ -42,6 +48,8 @@
 | `core.logger` | 自作 | ロガーのセットアップ | 根拠: [インポート宣言] (行番号: 34 / 抜粋: "from core.logger import setup_logging") |
 | `services.notification_service` | 自作 | 異常通知の送信 | 根拠: [インポート宣言] (行番号: 35 / 抜粋: "from services.notification_service import send_push") |
 | `monitors.log_analyzer` | 自作 | ログ走査ロジックの流用 | 根拠: [インポート宣言] (行番号: 36 / 抜粋: "from monitors.log_analyzer import LogAnalyzer") |
+| `quest_data` | 自作 | **（Issue #700 で追加）** チェック8の比較元`QUESTS` | 根拠: [インポート宣言] (行番号: 46 / 抜粋: "import quest_data") |
+| `core.database.get_ro_connection` | 自作 | **（Issue #700 で追加）** チェック8の読み取り専用DB接続 | 根拠: [インポート宣言] (行番号: 48 / 抜粋: "from core.database import get_ro_connection") |
 
 なお、インポートに先立ち親ディレクトリを`sys.path`へ追加している（根拠: [パス操作] (行番号: 31 / 抜粋: "sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))")）。
 
@@ -54,14 +62,16 @@
 | `send_push` | 送信処理の内部実装・エラー挙動が不明。 | 根拠: [関数呼び出し] (行番号: 225 / 抜粋: 'send_push([{"type": "text", "text": msg}], target="discord", channel="error")') |
 | `LogAnalyzer` | 走査キーワード・タイムスタンプ解析の実装詳細は別ファイル。 | 根拠: [クラス利用] (行番号: 109〜118 / 抜粋: "analyzer = LogAnalyzer(days_back=0)") |
 | 外部コマンド `systemctl`/`journalctl`/`free`/`crontab` | OS側コマンドの出力仕様に依存。 | 根拠: [外部コマンド実行] (行番号: 100〜103, 112〜119, 184, 243 / 抜粋: 'subprocess.run(["systemctl", "is-active", ...])', 'subprocess.run(["crontab", "-l"], ...)') |
+| `quest_data.QUESTS` の内容 | **（Issue #700 で追加）** マスタ定義の実体は別ファイルで、ローカルオーバーレイの有無でも変わりうる。本ファイルは`id`の集合だけを参照する | 根拠: [集合生成] (行番号: 358 / 抜粋: 'master_ids = {q["id"] for q in quest_data.QUESTS}') |
+| `core.database.get_ro_connection` | **（Issue #700 で追加）** 接続先(`config.SQLITE_DB_PATH`)・タイムアウトの詳細は`core/database.py`側 | 根拠: [DB読み取り] (行番号: 359〜361 / 抜粋: "with get_ro_connection() as conn:") |
 | 実機側ファイル `/etc/systemd/system/*.service`・`/etc/logrotate.d/*` | 実機に導入済みの構成ファイル。存在・内容は実行環境に依存。 | 根拠: [定数定義] (行番号: 74〜77 / 抜粋: '(os.path.join(HOME_SYSTEM_DIR, "deploy", "systemd"), "*.service", "/etc/systemd/system")') |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### モジュール定数群
 
-* **役割**: 監視対象サービス名(`WATCH_SERVICE_NAME`)、ディスク/メモリ閾値(90.0%)、マーカーファイルパス(`LOG_DIR/.claude_watch_marker`)、再通知抑制状態ファイルパス(`LOG_DIR/.claude_watch_notify_state`)、再通知間隔(6時間)、初回実行時の遡り時間(1時間)、通知抜粋の最大文字数(400)を定義する。加えてチェック7(構成ドリフト検知)用に、リポジトリルート(`REPO_ROOT`、本ファイルの2階層上)、リポジトリ管理のcrontab(`TRACKED_CRONTAB` = `deploy/cron/crontab`)、(リポジトリ側ディレクトリ, globパターン, 実機側導入先)の組(`TRACKED_CONFIG_DIRS`: `MY_HOME_SYSTEM/deploy/systemd/*.service`→`/etc/systemd/system`、`MY_HOME_SYSTEM/deploy/logrotate/*`→`/etc/logrotate.d`)、比較除外ファイル名(`CONFIG_IGNORE_BASENAMES` = `README.md`)、通知に載せる差分行の上限(`DIFF_LINES_LIMIT` = 3)を定義する。
-* 根拠: [変数宣言] (行番号: 49〜62, 64〜81 / 抜粋: 'WATCH_SERVICE_NAME: str = "home_system.service"', 'TRACKED_CRONTAB: str = os.path.join(REPO_ROOT, "deploy", "cron", "crontab")' ほか)
+* **役割**: 監視対象サービス名(`WATCH_SERVICE_NAME`)、ディスク/メモリ閾値(90.0%)、マーカーファイルパス(`LOG_DIR/.claude_watch_marker`)、再通知抑制状態ファイルパス(`LOG_DIR/.claude_watch_notify_state`)、再通知間隔(6時間)、初回実行時の遡り時間(1時間)、通知抜粋の最大文字数(400)を定義する。加えてチェック7(構成ドリフト検知)用に、リポジトリルート(`REPO_ROOT`、本ファイルの2階層上)、リポジトリ管理のcrontab(`TRACKED_CRONTAB` = `deploy/cron/crontab`)、(リポジトリ側ディレクトリ, globパターン, 実機側導入先)の組(`TRACKED_CONFIG_DIRS`: `MY_HOME_SYSTEM/deploy/systemd/*.service`→`/etc/systemd/system`、`MY_HOME_SYSTEM/deploy/logrotate/*`→`/etc/logrotate.d`)、比較除外ファイル名(`CONFIG_IGNORE_BASENAMES` = `README.md`)、通知に載せる差分行の上限(`DIFF_LINES_LIMIT` = 3)を定義する。**（Issue #700 で追加）** さらにチェック8用に、通知へ載せる`quest_id`の最大件数(`QUEST_ID_LIST_LIMIT` = 8)を定義する。
+* 根拠: [変数宣言] (行番号: 49〜62, 64〜81, 91 / 抜粋: 'WATCH_SERVICE_NAME: str = "home_system.service"', 'TRACKED_CRONTAB: str = os.path.join(REPO_ROOT, "deploy", "cron", "crontab")', 'QUEST_ID_LIST_LIMIT: int = 8' ほか)
 
 
 * **引数/リクエスト**: 該当なし
@@ -84,11 +94,11 @@
 ### `_read_marker`
 
 * **役割**: マーカーファイルから前回チェック完了時刻(ISO8601)を読み取る。**（Issue #661で修正）** ファイルの読み取り自体は`core/state_file.py`の`read_text`へ委譲し、返ってきた文字列を`datetime.fromisoformat`でパースする形に整理した。
-* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 85 / 抜粋: "def _read_marker() -> datetime.datetime:")
+* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 94 / 抜粋: "def _read_marker() -> datetime.datetime:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 85 / 抜粋: "def _read_marker() -> datetime.datetime:")
+* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 94 / 抜粋: "def _read_marker() -> datetime.datetime:")
 
 
 * **戻り値/レスポンス**: `datetime.datetime`。ファイルが無い/空/ISO8601としてパースできない場合は現在時刻から`DEFAULT_LOOKBACK_SEC`(3600秒)遡った時刻。
@@ -107,15 +117,15 @@
 ### `_write_marker`
 
 * **役割**: チェック開始時刻をISO8601文字列でマーカーファイルへ書き込む。**（Issue #661で修正）** 書き込みは`core/state_file.py`の`write_text_atomic`へ委譲し、一時ファイル + `fsync` + `os.replace`による原子的な差し替えになった（途中で電源断・クラッシュしても不完全な内容が残らない）。
-* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 101 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 110 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `dt: datetime.datetime`
-* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 101 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 110 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 101 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 110 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **副作用**: マーカーファイルの原子的な差し替え（`state_file.write_text_atomic`経由）。
@@ -130,7 +140,7 @@
 ### `check_service_active`
 
 * **役割**: `systemctl is-active`で`home_system.service`の稼働状態を確認する。
-* 根拠: [関数定義] (行番号: 112〜121 / 抜粋: "def check_service_active() -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 121〜130 / 抜粋: "def check_service_active() -> Optional[str]:")
 
 
 * **引数/リクエスト**: なし
@@ -153,7 +163,7 @@
 ### `check_journal_errors`
 
 * **役割**: `journalctl -u home_system.service -p err..emerg`で前回マーカー以降のエラーログ行を確認する。
-* 根拠: [関数定義] (行番号: 124〜141 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 133〜150 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`--since`に"%Y-%m-%d %H:%M:%S"形式で渡す）
@@ -179,7 +189,7 @@
 * 根拠: (行番号: 120〜126 / 抜粋: "if os.path.basename(filepath) in (\"health_watch.log\", \"claude_investigate.log\"):\n            continue")
 
 * **役割**: `config.LOG_DIR`配下の`*.log`から前回マーカー以降のエラー行を検出する。キーワード・除外パターン・タイムスタンプ解析は`LogAnalyzer`を流用し、週次の`log_analyzer.py`と判定基準を揃える。エラー(errors > 0)のみを異常とみなし、WARNINGは対象外。
-* 根拠: [関数定義] (行番号: 144〜184 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 153〜193 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`analyzer.start_date`へ直接代入し「前回マーカー以降」のみを走査対象にする）
@@ -383,6 +393,52 @@
 
 
 
+### `_format_quest_ids` (**Issue #700で追加**)
+
+* **役割**: `quest_id`の一覧を通知用の文字列に整形する。先頭`QUEST_ID_LIST_LIMIT`(8)件までをカンマ区切りで並べ、それを超える分は`" ほかN件"`に畳む。
+* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 323〜328)
+
+
+* **引数/リクエスト**: `quest_ids: list[int]`
+* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 323)
+
+
+* **戻り値/レスポンス**: `str`
+* 根拠: [戻り値] (行番号: 328 / 抜粋: "return shown")
+
+
+* **副作用**: なし(純粋関数)
+* 根拠: [関数本体] (行番号: 325〜328)
+
+
+* **エラーハンドリング**: なし
+* 根拠: [関数本体] (行番号: 325〜328)
+
+
+
+### `check_quest_master_drift` (**チェック8: マスタデータのドリフト検知、Issue #700で追加**)
+
+* **役割**: `quest_data.QUESTS`の`id`集合と、DBの`quest_master.quest_id`集合を比較し、(1)DBにだけある＝退役済みなのに残っているクエスト、(2)コードにだけある＝DBに未登録のクエスト、の双方を異常メッセージとして返す。どちらも無ければ`None`。メッセージ末尾には`sync_strict.py --dry-run`で影響を確認してから同期する旨の指針を付ける。`quest_data.QUESTS`が空の場合は「全件が退役済み」という誤報を避け、マスタ定義の読み込み失敗の可能性として別メッセージを返す。docstringには、**検知のみで自動修正はしない**（同期は`sync_strict.py --if-stale`の責務であり、毎時cronのヘルスチェックから破壊的操作を走らせない）こと、および比較対象を`quest_master`の`quest_id`集合に絞る理由（`reward_master`は`user_inventory`から参照が残る報酬を削除しない正しい挙動があり恒久的な誤検知になる、`routine_data.py`は対応するマスタテーブルを持たない）が明記されている。
+* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 331〜389)
+
+
+* **引数/リクエスト**: なし
+* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 331)
+
+
+* **戻り値/レスポンス**: `str | None`(異常メッセージ、正常なら`None`)
+* 根拠: [戻り値] (行番号: 374、385〜389 / 抜粋: "return None")
+
+
+* **副作用**: DBの読み取りのみ(`get_ro_connection`による`mode=ro`接続で、SQLite側が書き込みを拒否する)。
+* 根拠: [DB読み取り] (行番号: 359〜361 / 抜粋: "with get_ro_connection() as conn:")
+
+
+* **エラーハンドリング**: `sqlite3.OperationalError`(DBファイル・テーブルの不在、一時的なロック)は警告ログのみでスキップし`None`を返す — 毎時cronで走るため、DB不在の環境で恒久的に失敗し続けるのを避ける方針がdocstringに明記されている。それ以外の例外は`run_checks`側で内部エラーとして捕捉される。
+* 根拠: [例外処理] (行番号: 362〜364 / 抜粋: "except sqlite3.OperationalError as e:")
+
+
+
 ### `_should_notify`
 
 * **役割**: 異常セット(チェック名の組)のSHA-256フィンガープリントを前回通知時と比較し、同一セットが`RENOTIFY_INTERVAL_SEC`(6時間)内に再検知された場合は通知を抑制する。通知する場合は状態ファイルを更新する。
@@ -409,7 +465,7 @@
 ### `_fire_investigate_hook` (**Issue #339で追加**)
 
 * **役割**: 層2(自動調査)フックの発火。`config.HEALTH_WATCH_INVESTIGATE_HOOK`が未設定なら即return(既定・完全no-op)。設定済みならパスの存在と実行権限を確認し、異常サマリ(検知時刻+各異常の箇条書き)を標準入力で渡してフックスクリプトをfire-and-forgetのサブプロセスとして起動する(完了を待たない。毎時cronの層1を長時間ブロックしないため)。`run_checks`内の`_should_notify`通過後にのみ呼ばれるため、同一異常セット継続中の再発火は通知と同じ6時間間隔に収まる。
-* 根拠: [関数定義] (行番号: 339〜378 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
+* 根拠: [関数定義] (行番号: 417〜456 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `anomalies: List[str]`（各チェックの異常メッセージ）、`now: datetime.datetime`（検知時刻）
@@ -431,8 +487,8 @@
 
 ### `run_checks`
 
-* **役割**: 7つのチェック関数(`service`/`journal`/`app_logs`/`disk`/`memory`/`nas`/`deploy_config`)を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知し、通知抑制を通過した場合は層2フック(`_fire_investigate_hook`)も発火し、マーカーを更新してプロセスの終了コードを返すエントリーポイント。
-* 根拠: [関数定義] (行番号: 381〜437 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 370〜378 / 抜粋: '("deploy_config", check_deploy_config_drift),')、[フック発火] (行番号: 275〜276 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
+* **役割**: 8つのチェック関数(`service`/`journal`/`app_logs`/`disk`/`memory`/`nas`/`deploy_config`/`quest_master`)を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知し、通知抑制を通過した場合は層2フック(`_fire_investigate_hook`)も発火し、マーカーを更新してプロセスの終了コードを返すエントリーポイント。
+* 根拠: [関数定義] (行番号: 459〜516 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 465〜474 / 抜粋: '("deploy_config", check_deploy_config_drift),', '("quest_master", check_quest_master_drift),')、[フック発火] (行番号: 275〜276 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
 
 
 * **引数/リクエスト**: なし
@@ -480,7 +536,7 @@
 ```mermaid
 flowchart TD
     Start([Start: run_checks]) --> ReadMarker["_read_marker で前回時刻を取得<br/>(無ければ1時間前)"]
-    ReadMarker --> Loop["7チェックを順に実行<br/>service / journal / app_logs / disk / memory / nas / deploy_config"]
+    ReadMarker --> Loop["8チェックを順に実行<br/>service / journal / app_logs / disk / memory / nas / deploy_config / quest_master"]
     Loop --> CheckErr{"チェックが例外?"}
     CheckErr -- Yes --> LogInternal["logger.error + internal_errorsに追加<br/>残りのチェックは続行"]
     CheckErr -- No --> HasResult{"異常メッセージあり?"}
@@ -520,6 +576,8 @@ graph TD
         check_memory_usage
         check_nas_mount
         check_deploy_config_drift
+        check_quest_master_drift
+        _format_quest_ids
         _check_crontab_drift
         _check_host_files_drift
         _config_diff_summary
@@ -540,6 +598,9 @@ graph TD
         crontab["crontab -l (外部コマンド)"]
         deploy_repo["deploy/cron/crontab<br/>MY_HOME_SYSTEM/deploy/systemd/*.service<br/>MY_HOME_SYSTEM/deploy/logrotate/*"]
         deploy_host["/etc/systemd/system/*.service<br/>/etc/logrotate.d/*"]
+        quest_data["quest_data.py (QUESTS)"]
+        get_ro_connection["core.database.get_ro_connection"]
+        quest_master[("quest_master (SQLite, 読み取り専用)")]
     end
 
     run_checks --> check_service_active
@@ -549,6 +610,11 @@ graph TD
     run_checks --> check_memory_usage
     run_checks --> check_nas_mount
     run_checks --> check_deploy_config_drift
+    run_checks --> check_quest_master_drift
+    check_quest_master_drift --> quest_data
+    check_quest_master_drift --> get_ro_connection
+    get_ro_connection --> quest_master
+    check_quest_master_drift --> _format_quest_ids
     check_deploy_config_drift --> _check_crontab_drift
     check_deploy_config_drift --> _check_host_files_drift
     _check_crontab_drift --> crontab
@@ -580,6 +646,7 @@ graph TD
 | 高 | `monitors/log_analyzer.py` | 流用している`LogAnalyzer`のキーワード・除外パターン・タイムスタンプ解析仕様が本スクリプトの検知精度を決めるため。 | 根拠: `LogAnalyzer`のインポートと流用 (行番号: 36, 109〜118) |
 | 中 | `services/notification_service.py` | 異常通知の実際の送信経路（Discord errorチャンネル）を確認するため。 | 根拠: `send_push`の呼び出し (行番号: 225) |
 | 中 | `monitors/server_watchdog.py` | 同種のサービス監視との棲み分け（プロセスツリーの違い）を確認するため。 | 根拠: モジュールdocstringの記述 (行番号: 5〜7) |
+| 中 | `sync_strict.py` | **（Issue #700 で追加）** チェック8が検知した乖離を解消する側。`--if-stale`がデプロイ経路から自動実行される。 | 根拠: メッセージ内の案内 (行番号: 388 / 抜粋: "→ MY_HOME_SYSTEM で `python sync_strict.py --dry-run` で影響を確認のうえ同期してください") |
 
 ## 8. 保守上の注意点
 
@@ -591,6 +658,9 @@ graph TD
 * **チェック7(構成ドリフト検知)の導入先パスはハードコード**: `TRACKED_CONFIG_DIRS`の実機側ディレクトリ(`/etc/systemd/system`、`/etc/logrotate.d`)は各READMEの導入手順と一致させる前提であり、導入先を変えたら両方を更新すること。比較はコメント・空行を除いた内容のみで、ファイルの権限・所有者や`systemctl enable`状態は見ない。差分は同一異常セットの継続として6時間ごとに再通知され続けるため、意図的に実機だけ変えた場合も`deploy/`へ反映すること（根拠: 行番号: 64〜81, 278〜297）。
 * **層2フック（Issue #339）は`.env`の`HEALTH_WATCH_INVESTIGATE_HOOK`が未設定なら完全no-op**であり、実機のClaude Code CLI・ghセットアップとフラグ確認（runbookの有効化手順）が済むまで設定しないこと。フックの実体は`scripts/claude_investigate.sh`（[scripts_claude_investigate.md](./scripts_claude_investigate.md)）で、多重起動防止（flock）・タイムアウト・許可ツール制限はスクリプト側が持つ（根拠: 行番号: 190〜230）。
 * **（Issue #651 で変更）** 外部コマンド(`systemctl is-active` / `journalctl` / `free -m` / `crontab -l`)の `subprocess.run` に `timeout=SUBPROCESS_TIMEOUT_SEC`(30秒)を付与した。あわせてエントリポイントを `main()` にまとめ、`LOCK_FILE`(`<BASE_DIR>/.health_watch.lock`)の `fcntl.flock(LOCK_EX | LOCK_NB)` で多重起動を防ぐ(取れなければ「前回がまだ実行中」として warning のみで 0 終了)。以前は systemd/journald が応答しない状況で無限待ちになり、毎時 cron の次回起動と重なって二重に通知・マーカー更新する余地があった。`tests/test_health_watch.py::TestHealthWatchMainLock` が固定する。
+* **（Issue #700 で追加）チェック8は検知専用**。乖離を見つけても`sync_master_data()`は呼ばない（毎時cronから`DELETE ... NOT IN`を含む破壊的操作を走らせないため）。同期はデプロイ経路(`deploy/git-hooks/post-merge`・`start_all.sh` Phase 2.5)から`sync_strict.py --if-stale`が行う。**この検知が鳴り続ける場合は、同期側が動いていない（マーカーが進んでいるのにDBが古い等）ことを疑うこと。**
+* **（Issue #700 で追加）チェック8の比較対象は`quest_master`だけ**。`reward_master`は`user_inventory`から参照が残る報酬の削除を意図的にスキップするため、マスタから消えた報酬行が正常に残りうる（差分として報告すると恒久的な誤検知になる）。`routine_data.py`は対応するマスタテーブルを持たないため比較できない。
+* **（Issue #700 で追加）** チェック8はDBファイル・テーブルが無い環境や一時的なロックでは`sqlite3.OperationalError`を警告ログにとどめてスキップする（異常として毎時通知しない）。回帰テストは`tests/test_health_watch.py::TestQuestMasterDrift`。
 
 ## 9. 不明事項一覧
 

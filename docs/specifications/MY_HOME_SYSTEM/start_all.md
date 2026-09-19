@@ -6,7 +6,7 @@
 | 言語 | Bash (Shell Script) ※指定フォーマット外ですが実態に合わせて記載 |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `5111d08` (+同一PR内の Issue #646 `--prepare` モード追加) |
+| 解析基準コミット | `5111d08` (+同一PR内の Issue #646 `--prepare` モード追加、+ Issue #700 の Phase 2.5 追加) |
 
 ## 関連ドキュメント
 
@@ -15,6 +15,8 @@
 - [dashboard_router.md](./dashboard_router.md) / [dashboard_proxy_service.md](./dashboard_proxy_service.md) — **（スマホ対応で追加）** 本スクリプトが`--server.baseUrlPath`付きで起動したStreamlitを、8000番側で中継する側。ベースパスは`config.DASHBOARD_BASE_PATH`と一致している必要がある
 - [switchbot_webhook_fix.md](./switchbot_webhook_fix.md) — 呼び出し先(フォアグラウンド実行)
 - [scheduler_boot.md](./scheduler_boot.md) — 間接的な起動対象。`unified_server.py`のライフサイクル内でサブプロセスとして起動される
+- [sync_strict.md](./sync_strict.md) — **（Issue #700 で追加）** Phase 2.5 が呼ぶ`sync_strict.py --if-stale`(クエストマスタの冪等同期)
+- [quest_master_sync_marker.md](./quest_master_sync_marker.md) — **（Issue #700 で追加）** Phase 2.5 の鮮度判定の実体
 
 ## 2. ファイルの概要
 
@@ -38,6 +40,7 @@
 | `dashboard.py` | スクリプト内で実行されているが、実装内容が不明なため | `dashboard.py` (行番号: 111 / 抜粋: "run dashboard.py") |
 | `/mnt/nas` | マウント状況の確認先となっているが、システム上の具体的なNAS構成が不明なため | `MOUNT_POINT` (行番号: 70 / 抜粋: "MOUNT_POINT="/mnt/nas"") |
 | `family-quest/deploy.sh` | Phase 2で`--if-stale`引数付きで実行されるが、冪等判定・ビルドの実装内容は本ファイル外のため | `bash "$QUEST_DIR/deploy.sh" --if-stale` (行番号: 103 / 抜粋: "bash "$QUEST_DIR/deploy.sh" --if-stale") |
+| `sync_strict.py` | **（Issue #700 で追加）** Phase 2.5で`--if-stale`付きで実行されるが、鮮度判定・同期の実装内容は本ファイル外のため | `$PYTHON_EXEC sync_strict.py --if-stale` (行番号: 203 / 抜粋: "$PYTHON_EXEC sync_strict.py --if-stale > logs/quest_master_sync.log 2>&1") |
 | 停止対象の各スクリプト群 | `camera_monitor.py`, `scheduler_boot.py`など`CLEANUP_TARGETS`配列に列挙されたプロセス停止対象の実装内容が不明なため | `CLEANUP_TARGETS`配列定義 (行番号: 31〜36 / 抜粋: "CLEANUP_TARGETS=(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -188,6 +191,29 @@
 
 
 
+### [要素名5.5：Phase 2.5: クエストマスタの鮮度チェック（Issue #700で追加）]
+
+* **役割**: サーバー起動前に`sync_strict.py --if-stale`を実行し、`quest_data.py`/`routine_data.py`に差分があるときだけ`quest_master`/`reward_master`をDBへ同期させる。コメントに、マスタ同期が`POST /api/quest/sync_master`か`sync_strict.py`を手で叩いたときにしか走らず実機DBが古いまま残っていたこと(2026-09-19に退役済みクエスト6件が残り、移設先のすごろくステップ報酬と二重取得になっていた障害)、`post-merge`フックからも同じコマンドを呼ぶが`git reset --hard`等の経路の回収としてサーバー起動前にも必ず通すこと(family-questのdist鮮度チェックと同じ思想)、`--if-stale`のため破壊的操作が毎起動では走らないことが明記されている。
+* 根拠: Phase 2.5ブロック (行番号: 192〜205 / 抜粋: "# --- Phase 2.5: クエストマスタ(quest_master/reward_master)の鮮度チェック ---")
+
+
+* **引数/リクエスト**: なし
+* 根拠: 引数受け取り処理なし (行番号: 192〜205)
+
+
+* **戻り値/レスポンス**: なし
+* 根拠: 戻り値返却なし (行番号: 192〜205)
+
+
+* **副作用**: `$PYTHON_EXEC sync_strict.py --if-stale`の実行（差分がある場合のみDBの`quest_master`/`reward_master`が更新される）。その標準出力・標準エラー出力の`logs/quest_master_sync.log`への書き込み。標準出力へのログ表示。
+* 根拠: 実行・リダイレクト処理 (行番号: 203 / 抜粋: "$PYTHON_EXEC sync_strict.py --if-stale > logs/quest_master_sync.log 2>&1")
+
+
+* **エラーハンドリング**: 同期が失敗しても警告を表示するのみでスクリプトは続行する（旧マスタで動かす方が起動失敗よりマシという、Phase 1.5/2と同じ設計判断がコメントに明記されている）。
+* 根拠: if分岐と設計コメント (行番号: 199〜205 / 抜粋: "# (旧マスタで動かす方が停止よりマシ。Phase 1.5/2 と同じ判断)")
+
+
+
 ### [要素名6：Phase 3 & 4: 初期化およびサーバー起動]
 
 * **役割**: Webhook修正スクリプト(`switchbot_webhook_fix.py`)を実行し、その後`unified_server.py`と`dashboard.py`(Streamlit)をバックグラウンドで起動する。各プロセスの標準出力・標準エラー出力は`logs/`ディレクトリ内のログファイルにリダイレクトする。`--prepare`モードではPhase 3の直後に`exit 0`で終了し、Phase 4(サーバー起動)は実行しない。
@@ -260,7 +286,8 @@ flowchart TD
     HooksCheck -- 一致 --> QuestDeploy
     HooksCheck -- "不一致/未設定" --> SetHooks["git config core.hooksPath deploy/git-hooks (失敗しても警告のみ)"]
     SetHooks --> QuestDeploy["外部：family-quest/deploy.sh --if-stale (dist鮮度チェック・必要ならリビルド)"]
-    QuestDeploy -- "成功/失敗いずれでも続行" --> WebhookFix["外部：switchbot_webhook_fix.py()"]
+    QuestDeploy -- "成功/失敗いずれでも続行" --> MasterSync["外部：sync_strict.py --if-stale (クエストマスタ鮮度チェック・差分があれば同期)"]
+    MasterSync -- "成功/失敗いずれでも続行" --> WebhookFix["外部：switchbot_webhook_fix.py()"]
     WebhookFix --> ServerBoot["外部：unified_server.py() バックグラウンド起動"]
     ServerBoot --> DashboardBoot["外部：dashboard.py() バックグラウンド起動"]
     DashboardBoot --> End([End])
@@ -274,6 +301,7 @@ graph TD
     start_all["start_all.sh"]
     PYTHONPATH["環境変数: PYTHONPATH"]
     QuestDeploy["family-quest/deploy.sh"]
+    MasterSync["sync_strict.py --if-stale"]
     GitHooks["deploy/git-hooks/ (core.hooksPath)"]
     WebhookFix["switchbot_webhook_fix.py"]
     Server["unified_server.py"]
@@ -289,6 +317,8 @@ graph TD
     start_all -->|"git config core.hooksPath (冪等)"| GitHooks
     GitHooks -->|"post-merge フックから実行 (--if-stale)"| QuestDeploy
     start_all -->|"フォアグラウンド実行 (--if-stale)"| QuestDeploy
+    start_all -->|"フォアグラウンド実行 (--if-stale)"| MasterSync
+    GitHooks -->|"post-merge フックから実行 (--if-stale)"| MasterSync
     start_all -->|フォアグラウンド実行| WebhookFix
     start_all -->|バックグラウンド実行| Server
     start_all -->|バックグラウンド実行| Dashboard
@@ -325,6 +355,7 @@ graph TD
 
 * **（2026-09-06 品質監査で修正）** `CLEANUP_TARGETS` の監視スクリプト用パターンを `"python.*monitors/[a-z_]*\.py"` から `scheduler_boot.py` の `TASKS` が起動する6本(`switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor`)に限定した。以前のパターンは systemd の `network_logger.service` や cron 起動の `health_watch.py`/`daily_timelapse_job.py`(ffmpeg を伴い長時間走る)/`log_analyzer.py` まで巻き添えで SIGTERM していた。`TASKS` を変更したらここも更新すること(`tests/test_start_all_sh.py` が両者の整合を検証する)。
 * 根拠: (行番号: 38〜45 / 抜粋: "\"python.*monitors/(switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor)\\.py\"")
+* **（Issue #700）Phase 2.5 も失敗を握りつぶす設計**: `sync_strict.py --if-stale`が失敗しても警告表示のみで後続フェーズへ進むため、マスタ同期が壊れている場合は旧マスタのまま配信され続ける。検知は`logs/quest_master_sync.log`の確認と、`monitors/health_watch.py`のチェック8(コードとDBの乖離をDiscordへ通知)に依存する。鮮度判定は`quest_data.py`/`routine_data.py`の**内容ハッシュ**と`logs/.quest_master_sync_marker`の比較であり、Phase 2(gitツリーハッシュ)とは判定方法が異なる(未コミットのローカル変更も検知する)。
 
 ## 9. 不明事項一覧
 

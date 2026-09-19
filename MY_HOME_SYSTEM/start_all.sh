@@ -189,6 +189,21 @@ if ! bash "$QUEST_DIR/deploy.sh" --if-stale > logs/quest_deploy.log 2>&1; then
     echo "⚠️ family-quest build failed. Serving existing dist/. See logs/quest_deploy.log"
 fi
 
+# --- Phase 2.5: クエストマスタ(quest_master/reward_master)の鮮度チェック ---
+# quest_data.py を編集したPRをマージしても、マスタ同期は POST /api/quest/sync_master か
+# sync_strict.py を手で叩いたときにしか走らないため、実機DBが古いまま残る
+# (2026-09-19: 退役済みクエスト6件がDBに残り、移設先のすごろくステップ報酬と
+#  二重取得になっていた障害。Issue #700)。post-merge フックからも同じコマンドを
+# 呼ぶが、git pull 以外の経路(git reset --hard 等)で更新された場合の回収として
+# サーバー起動前にも必ず通す(family-quest の dist 鮮度チェックと同じ思想)。
+# --if-stale は quest_data.py / routine_data.py に差分があるときだけ同期するため、
+# DELETE を含む破壊的操作が毎起動で走ることはない。失敗してもサーバー起動は続行する
+# (旧マスタで動かす方が停止よりマシ。Phase 1.5/2 と同じ判断)。
+echo "--- Ensure quest master data is in sync ---"
+if ! $PYTHON_EXEC sync_strict.py --if-stale > logs/quest_master_sync.log 2>&1; then
+    echo "⚠️ quest master sync failed. Continuing with existing master data. See logs/quest_master_sync.log"
+fi
+
 # --- Phase 3: 初期化 & Webhook修正 ---
 echo "--- Check & Fix Webhooks (Cloudflare Tunnel) ---"
 $PYTHON_EXEC switchbot_webhook_fix.py > logs/webhook_fix.log 2>&1
