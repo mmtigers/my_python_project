@@ -20,6 +20,7 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
      反映してコミットすること」を人手に頼らず機械的に検知する)
   9. `quest_data.QUESTS` と実機DBの `quest_master` が一致しているか
      (マスタデータのドリフト検知。Issue #700)
+  10. カメラごとの常時録画(NVR)が止まっていないか(最新の録画ファイルが古すぎないか)
 
 異常があれば notification_service 経由でDiscordのerrorチャンネルへ要約を通知する。
 自動復旧(systemctl restart等)は行わない(ランブックのガードレール参照)。
@@ -41,6 +42,7 @@ import sqlite3
 import subprocess
 import sys
 from typing import List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -51,6 +53,7 @@ import quest_data
 from core import state_file
 from core.database import get_ro_connection
 from core.logger import setup_logging
+from core.utils import get_now_jst
 from services.notification_service import send_push
 from monitors.log_analyzer import LogAnalyzer
 
@@ -71,7 +74,7 @@ DEFAULT_LOOKBACK_SEC: int = 3600
 # 通知に載せるログ抜粋の最大文字数
 SNIPPET_LIMIT: int = 400
 
-# === 実機構成のドリフト検知 (チェック7) ===
+# === 実機構成のドリフト検知 (チェック8) ===
 # リポジトリで管理している実機構成と、実機に実際に導入されている内容の対応。
 # 導入先パスは各READMEの導入手順(deploy/cron/README.md、
 # MY_HOME_SYSTEM/deploy/systemd/README.md、同 logrotate/README.md)と一致させること。
@@ -90,9 +93,19 @@ CONFIG_IGNORE_BASENAMES: Tuple[str, ...] = ("README.md",)
 # 通知に載せる差分行(+/-)の最大本数(ファイルごと)
 DIFF_LINES_LIMIT: int = 3
 
-# === マスタデータのドリフト検知 (チェック8) ===
+# === マスタデータのドリフト検知 (チェック9) ===
 # 通知に載せる quest_id の最大件数(これを超えた分は「ほかN件」に畳む)
 QUEST_ID_LIST_LIMIT: int = 8
+
+# === 常時録画の停止検知 (チェック10) ===
+# 録画は nvr-*.service の ffmpeg が 600 秒ごとに "{YYYYMMDD}_{HHMMSS}.mp4" を新規作成する。
+# 最新ファイル名の時刻がこれより古ければ「新しいセグメントが作られていない=録画停止」とみなす
+# (分割間隔 10 分 + 再接続の待ち + 毎時実行の余裕)。
+# 更新時刻(mtime)ではなくファイル名の時刻を使うのは、この NAS(CIFS)では書き込み中の
+# ファイルの mtime が作成時刻のまま進まず、成長中かどうかの判定に使えないため。
+RECORDING_STALE_SEC: int = 30 * 60
+# 録画ファイル名(ffmpeg -strftime のローカル時刻)の解釈に使うタイムゾーン
+JST = ZoneInfo("Asia/Tokyo")
 
 
 def _read_marker() -> datetime.datetime:
@@ -308,6 +321,52 @@ def check_api_responsive() -> Optional[str]:
             # 本文はそのまま通知に載るため、長すぎる HTML 等を切り詰める
             body = (res.text or "").strip().replace("\n", " ")[:200]
             return f"GET {path} が {res.status_code} を返しました: {body}"
+    return None
+
+
+def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:
+    """録画フォルダの最新セグメントの開始時刻(ファイル名から、JST)を返す。無ければNone。
+
+    CIFS 越しに保持期間(30日)分を毎回列挙しないよう、当日と前日(日付の変わり目用)に絞る。
+    ファイル名は ffmpeg の -strftime によるローカル時刻(実機のTZはAsia/Tokyo)。
+    """
+    names: list[str] = []
+    for day in (now, now - datetime.timedelta(days=1)):
+        pattern = os.path.join(folder, f"{day.strftime('%Y%m%d')}_*.mp4")
+        names.extend(os.path.basename(p) for p in glob.glob(pattern))
+    for name in sorted(names, reverse=True):
+        try:
+            return datetime.datetime.strptime(name[:15], "%Y%m%d_%H%M%S").replace(tzinfo=JST)
+        except ValueError:
+            continue
+    return None
+
+
+def check_recording_stalled() -> str | None:
+    """カメラごとの常時録画(NVR)が止まっていないかを確認する。
+
+    録画の ffmpeg は systemd が落ちるたびに再起動するが、カメラに繋がらない間の
+    再試行ループや、応答の無いまま固まった状態は、systemd からは区別できず
+    これまで誰にも通知されなかった(2026-08〜09 に parking で計12日ほど発生)。
+    NAS 未マウント時はチェック7が報告するためここでは判定しない。
+    """
+    if not os.path.ismount(config.NAS_MOUNT_POINT):
+        return None
+    now = get_now_jst()
+    stalled: list[str] = []
+    for cam in config.CAMERAS:
+        if not cam.get("enabled", True):
+            continue
+        folder_name = cam.get("nas_folder") or cam["name"]
+        latest = _latest_recording_time(os.path.join(config.NVR_RECORD_DIR, folder_name), now)
+        label = f"{cam['name']}({folder_name})"
+        if latest is None:
+            stalled.append(f"{label}: 今日・昨日の録画ファイルがありません")
+        elif (now - latest).total_seconds() > RECORDING_STALE_SEC:
+            minutes = int((now - latest).total_seconds() // 60)
+            stalled.append(f"{label}: 最新の録画が {latest.strftime('%m/%d %H:%M')} 開始({minutes}分前)")
+    if stalled:
+        return "常時録画が止まっている可能性があります:\n" + "\n".join(stalled)
     return None
 
 
@@ -561,6 +620,7 @@ def run_checks() -> int:
         ("disk", check_disk_usage),
         ("memory", check_memory_usage),
         ("nas", check_nas_mount),
+        ("recording", check_recording_stalled),
         ("deploy_config", check_deploy_config_drift),
         ("quest_master", check_quest_master_drift),
     ]
