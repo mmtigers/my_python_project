@@ -12,12 +12,14 @@
 
 * [scheduler_boot.md](./scheduler_boot.md) - 同システム内の別のタスク実行機構(`ThreadPoolExecutor`による常駐プロセス型スケジューラ)。`run_task.sh`が外部スケジューラ(cron等)から都度起動される薄いラッパーであるのに対し、こちらは`unified_server.py`のライフサイクルでサブプロセス起動される常駐型であり、対照的な位置づけ
 * [start_all.md](./start_all.md) - システム起動時に各種Pythonスクリプトを直接起動するスクリプト。`run_task.sh`とは別の起動経路
+* [notify_task_failure.md](./notify_task_failure.md) - **（Issue #751 で追加）** 失敗時に呼び出す通知CLIの実体
 * `cron_reporter.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） - `crontab -l`の設定内容を解析してLINE/Discordへ報告するツール。`run_task.sh`が実際にどのスクリプトに対しどのcron設定で呼ばれているかを推測する手がかりになりうるが、対応する仕様書が存在しないため`run_task.sh`固有の記述の有無は確認できなかった
 
 ## 2. ファイルの概要
 
 * 指定されたPythonスクリプトを、所定のディレクトリ（`PROJECT_ROOT`）および仮想環境下で実行する。
 * 実行時の環境変数 `PYTHONPATH` を設定し、スクリプトの実行開始・終了（成否）のタイムスタンプと標準出力・標準エラー出力をログファイルに記録する。
+* **（Issue #751 / AUDIT-022 で追加）** 終了コードが `0` 以外なら `tools/notify_task_failure.py` を起動して Discord へ通知する。以前は失敗を exit code とログファイルに書くだけで、`deploy/cron/crontab` に `MAILTO=` も無く全エントリの出力がログへリダイレクトされているため cron のメール通知も機能せず、**自前で通知しないタスクの失敗は完全に無音**だった。`logger.error` を出して終了する Python スクリプトは `core.logger.DiscordErrorHandler` 経由で救われているが、**Python が起動する前に失敗する場合**（`ImportError`・`.venv` の破損・ファイル不在）はそれにも乗らない（Issue #736 の依存欠落がまさにこれ）。
 
 ## 3. 外部依存関係
 
@@ -33,6 +35,7 @@
 | --- | --- | --- |
 | 第一引数で指定されるスクリプト (`SCRIPT_NAME`) | 実行時に外部から動的に渡される引数であり、スクリプト内部の実装が本ファイルからは読み取れないため | [引数取得] (行番号: 19 / 抜粋: `SCRIPT_NAME=$1`) |
 | 仮想環境のPythonバイナリ (`VENV_PYTHON`) | 外部バイナリであり、本ファイル内に実装がないため | [パス定義] (行番号: 10 / 抜粋: `VENV_PYTHON="${PROJECT_ROOT}...`) |
+| `tools/notify_task_failure.py` | **（Issue #751 で追加）** 別ファイルの実装であり、通知先・抑制の挙動は本ファイルからは読み取れない（[notify_task_failure.md](./notify_task_failure.md) 参照） | [失敗時の呼び出し] (行番号: 55〜56 / 抜粋: `"${VENV_PYTHON}" "${PROJECT_ROOT}/tools/notify_task_failure.py"`) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -84,7 +87,11 @@
 
 
 * スクリプト実行後、終了コードが `0` 以外の場合、ログファイルに `ERROR: Exit Code` のメッセージを追記する。
-* 根拠: [終了コード判定] (行番号: 36〜39 / 抜粋: `if [ ${EXIT_CODE} -ne 0 ]; then`)
+* 根拠: [終了コード判定] (行番号: 40〜57 / 抜粋: `if [ ${EXIT_CODE} -ne 0 ]; then`)
+
+
+* **（Issue #751 / AUDIT-022 で追加）** 同じ分岐で `tools/notify_task_failure.py` を `VENV_PYTHON` で起動し、スクリプト名・終了コード・ログファイルパスを渡して Discord へ通知する。通知自体が `VENV_PYTHON` に依存するため `.venv` が完全に壊れていれば通知も失敗するが、`|| true` で握って**本体の終了コードは保つ**（通知は「最後の砦」であって本処理ではない）。通知側の標準出力・標準エラーは `LOG_FILE` ではなく `${LOG_DIR}/run_task.log` へ出す — `LOG_FILE` は通知側が引数として**読む**ファイルであり、同じファイルへ書くと読み書きが交錯する（`shellcheck` の SC2094 もこれを指摘する）。
+* 根拠: [通知の起動] (行番号: 52〜56 / 抜粋: `"${VENV_PYTHON}" "${PROJECT_ROOT}/tools/notify_task_failure.py" \`)
 
 
 
@@ -106,7 +113,8 @@ flowchart TD
     ExecScript --> CaptureExitCode[終了コード取得: EXIT_CODE]
     CaptureExitCode --> CheckExitCode{EXIT_CODE != 0 ?}
     CheckExitCode -- Yes --> LogError[ログ: ERROR および コード記録]
-    LogError --> ExitFinal([End: Exit EXIT_CODE])
+    LogError --> Notify["外部: tools/notify_task_failure.py 起動<br/>(失敗しても || true で握る。Issue #751)"]
+    Notify --> ExitFinal([End: Exit EXIT_CODE])
     CheckExitCode -- No --> LogSuccess[ログ: Success 記録]
     LogSuccess --> ExitFinal
 
@@ -132,6 +140,10 @@ graph TD
     WrapperScript -- 追記/リダイレクト --> LogFile
     TargetScript -- 標準出力/標準エラー出力 --> LogFile
 
+    Notifier["外部: tools/notify_task_failure.py<br/>(Issue #751)"]
+    WrapperScript -- 失敗時に起動 --> Notifier
+    Notifier -- 末尾を読む --> LogFile
+
 ```
 
 ## 7. 次のステップ（リバースエンジニアリングの提案）
@@ -146,6 +158,8 @@ graph TD
 * `LOG_DIR` (`/home/masahiro/develop/MY_HOME_SYSTEM/logs`) ディレクトリが存在しない場合、ログファイルへのリダイレクト (`>>`) でエラーが発生する可能性があります（事前の `mkdir` 等のディレクトリ存在確認が実装されていません）。
 * `PROJECT_ROOT` および `DEVELOP_ROOT` にハードコードされた絶対パス (`/home/masahiro/develop/...`) が使用されており、実行環境（ユーザー名など）が変わると動作しません。
 * 第一引数 (`$1`) に対して、パスや拡張子の検証が行われていないため、任意のコマンドや意図しないファイルが実行される可能性があります。
+
+* **（Issue #751 / AUDIT-022）** `run_task.sh` を**経由していない** cron エントリ（`monitors/daily_timelapse_job.py` × 2・`DDD/newface_monitor.py`・`tools/keep_alive_*.sh`）は、この失敗通知の恩恵を受けません。これらを `run_task.sh` 経由へ統一するのが本来の姿ですが、`daily_timelapse_job.py` は引数付き、`newface_monitor.py` は `cd DDD` と `mkdir -p DDD/logs` を要するため、`run_task.sh` 側に作業ディレクトリ指定を足すか DDD 用ラッパーが必要になります（未対応）。
 
 * **（2026-09-06 品質監査で修正）** `PYTHONPATH` の組み立てを `"${DEVELOP_ROOT}:${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"` に変更した。cron では `PYTHONPATH` が未設定のため、以前の `...:${PYTHONPATH}` は末尾に空要素(=カレントディレクトリ)を暗黙の import ルートとして加えていた。
 * 根拠: (行番号: 31 / 抜粋: "export PYTHONPATH=\"${DEVELOP_ROOT}:${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}\"")
