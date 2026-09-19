@@ -33,14 +33,26 @@ crontab -l
 Pythonプロセス自体が一切起動しないため、該当エントリには`mkdir -p`を
 リダイレクトより前に明示的に含めること(Issue #587)。
 
-## Bluetoothスピーカーのキープアライブ
+## Bluetoothスピーカーのキープアライブ — 登録していない(2026-09-19 判断)
 
-`tools/keep_alive_anker.sh`(Issue #585)は5分毎(`*/5`)の実行として登録している。
-これはBluetoothスピーカーの一般的なオートパワーオフ時間(10〜20分程度)より
-十分短い間隔という一般論に基づく暫定値であり、実機の対象デバイスの
-実際のオートオフ時間を確認できていない。鳴動が多すぎる/オートオフを
-防ぎきれていない等の実態が分かった場合は、この間隔(cron式の`*/5`部分)を
-実態に合わせて調整すること。
+`tools/keep_alive_anker.sh`(Issue #585)は #585/#664 で5分毎(`*/5`)の実行として
+登録していたが、**2026-09-19 の実機棚卸しで登録を外した**。
+
+理由: `config.ENABLE_BLUETOOTH` は既定 `False`、実機 `.env` の
+`SPEAKER_BLUETOOTH_MAC` も未設定で、5分毎の実行が一度も鳴動せず no-op で
+正常終了し続けていた(=BTスピーカー運用そのものが休止中だった)。
+ユーザー判断で「休止で確定」とし、空振りの定期実行をやめた。
+
+スクリプト(`tools/keep_alive_anker.sh` / `tools/connect_speaker.sh`)は削除していない。
+`config.py` の `ENABLE_BLUETOOTH` のコメントが再有効化手順として
+「`tools/connect_speaker.sh` の定期実行の整備」を挙げており、休止解除に必要な資産だからである。
+運用を再開する手順とエントリの雛形は `deploy/cron/crontab` の該当コメントにある。
+`.github/scripts/test_crontab_keep_alive.py` が「`ENABLE_BLUETOOTH` の値と cron 登録の有無が
+一致すること」を検査するため、フラグだけ `True` にして登録を忘れる/その逆はCIで落ちる。
+
+再開する際の間隔(`*/5`)は、Bluetoothスピーカーの一般的なオートパワーオフ時間
+(10〜20分程度)より十分短い間隔という一般論に基づく暫定値で、実機の対象デバイスの
+実際のオートオフ時間は未確認のままである。実態が分かった場合は合わせて調整すること。
 
 ### `keep_alive_speaker.sh` を廃止して `keep_alive_anker.sh` へ一本化した理由 (Issue #664)
 

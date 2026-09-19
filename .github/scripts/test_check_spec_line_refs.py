@@ -346,3 +346,24 @@ def test_report_counts_non_definition_citations(fake_repo):
     # 9行目は一致(farewell の return は10行目なので ±1 の窓に入る)、1行目は不一致。
     assert total_bad == 1
     assert per_spec["MY_HOME_SYSTEM/sample.md"] == (1, 2)
+
+
+def test_is_skipped_source_judges_paths_relative_to_repo_root(tmp_path, monkeypatch):
+    """リポジトリ自体がドット始まりのディレクトリ配下にあっても走査対象が消えないこと。
+
+    このリポジトリの Claude Code セッションは `.claude/worktrees/<名前>/` に git worktree を
+    作って作業する。`_is_skipped_source` が絶対パスの全要素を見ていた頃は、その配下の
+    ソースすべてが「隠しディレクトリ配下」と誤判定されて走査対象が 0 件になり、
+    `test_repository_line_references_are_accurate` が「引用を1件も検証できていない」で
+    常に落ちていた(CI は non-dotted なパスへ checkout するため露見しなかった)。
+    """
+    repo_root = tmp_path / ".worktrees" / "wt"
+    source = repo_root / "MY_HOME_SYSTEM" / "config.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("", encoding="utf-8")
+    monkeypatch.setattr(checker, "REPO_ROOT", repo_root)
+
+    assert checker._is_skipped_source(source) is False
+    # リポジトリ内のドット始まりディレクトリ(.venv 等)は従来どおり対象外
+    assert checker._is_skipped_source(repo_root / ".venv" / "lib" / "mod.py") is True
+    assert checker._is_skipped_source(repo_root / "MY_HOME_SYSTEM" / "tests" / "test_x.py") is True

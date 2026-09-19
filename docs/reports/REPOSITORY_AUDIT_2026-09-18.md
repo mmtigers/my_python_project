@@ -82,15 +82,18 @@ NAS 上のファイル（録画・スナップショット・HLS・DBバック�
 
 ### 1.5 最優先で確認すべき事項（コードから判断できないもの）
 
-| # | 確認事項 | なぜ重要か |
-| --- | --- | --- |
-| 1 | 実機 `.env` に `ALEXA_SKILL_ID` が設定されているか | 未設定だと第三者の Alexa スキルから家族の名前・レベル・ゴールドが読める（AUDIT-010） |
-| 2 | 実機 `.env` に `SWITCHBOT_WEBHOOK_TOKEN` が設定されているか（Issue #318） | 未設定なら現在 `/webhook/switchbot` は 503。SwitchBot 連携が丸ごと死んでいる可能性 |
-| 3 | 実機 `.venv` に `yt-dlp` / `curl_cffi` が入っているか | どのインストール手順にも含まれていない（AUDIT-006）。無ければ DDD バッチは毎日無音で失敗 |
-| 4 | `home_system.db` の現在のサイズと各テーブルの行数 | AUDIT-003/004 の緊急度がこの数値で決まる |
-| 5 | `journalctl -u home_system` に起動タイムアウト（`start operation timed out`）の記録があるか | AUDIT-001 が既に発現しているかの判定 |
-| 6 | `systemctl show home_system.service -p StartLimitIntervalUSec` と `systemd-analyze verify` の出力 | AUDIT-002 の実害確認（`5min` が返れば実害なし／`10s` なら歯止めが効いていない） |
-| 7 | DB バックアップからの復元を実際に通したことがあるか | リストア手順書はあるがリハーサル記録が無い（AUDIT-024） |
+> **2026-09-19 に実機で確認済み（結果は「実機確認の結果」列）。** 1〜6 は解消または判断済み、
+> 7 のみ未実施。詳細は各 AUDIT の節、および同日の実機構成ドリフト解消（PR #699）を参照。
+
+| # | 確認事項 | なぜ重要か | 実機確認の結果（2026-09-19） |
+| --- | --- | --- | --- |
+| 1 | 実機 `.env` に `ALEXA_SKILL_ID` が設定されているか | 未設定だと第三者の Alexa スキルから家族の名前・レベル・ゴールドが読める（AUDIT-010） | **未設定＝露出は発現**。判断は「現状維持」（AUDIT-010 の判断記録を参照） |
+| 2 | 実機 `.env` に `SWITCHBOT_WEBHOOK_TOKEN` が設定されているか（Issue #318） | 未設定なら現在 `/webhook/switchbot` は 503。SwitchBot 連携が丸ごと死んでいる可能性 | **設定済み**。外部 IP から `POST /webhook/switchbot` が 200 で継続着信中 |
+| 3 | 実機 `.venv` に `yt-dlp` / `curl_cffi` が入っているか | どのインストール手順にも含まれていない（AUDIT-006）。無ければ DDD バッチは毎日無音で失敗 | **両方導入済み**（`yt-dlp 2026.8.19` / `curl_cffi 0.16.1`）。ただし requirements に無い残骸（旧 Gemini SDK・pdfplumber 系）も見つかり、AUDIT-006 の再現性の問題自体は残る（残骸は削除済み） |
+| 4 | `home_system.db` の現在のサイズと各テーブルの行数 | AUDIT-003/004 の緊急度がこの数値で決まる | **149MB**。`switchbot_meter_logs` 331,997 / `device_records` 328,391 / `power_usage` 314,589 行。増加は約 +0.8MB/日 で、当面の緊急性は低い |
+| 5 | `journalctl -u home_system` に起動タイムアウト（`start operation timed out`）の記録があるか | AUDIT-001 が既に発現しているかの判定 | **記録なし**（確認時点の実機ユニットは Issue #646 以前の `Type=oneshot` 版のままで、AUDIT-001 の前提条件自体が成立していなかった） |
+| 6 | `systemctl show home_system.service -p StartLimitIntervalUSec` と `systemd-analyze verify` の出力 | AUDIT-002 の実害確認（`5min` が返れば実害なし／`10s` なら歯止めが効いていない） | **実害あり**。systemd 257 で `Unknown key 'StartLimitIntervalSec' in section [Service], ignoring.` を確認 → PR #699 で `[Unit]` へ移動し、現在は `StartLimitIntervalUSec=5min` |
+| 7 | DB バックアップからの復元を実際に通したことがあるか | リストア手順書はあるがリハーサル記録が無い（AUDIT-024） | **未実施**。バックアップ自体は毎日 04:00 に NAS へ出力されている（最新 9/19 04:00・155MB、68ファイル/3.3GB） |
 
 ---
 
@@ -1240,6 +1243,27 @@ async def alexa_webhook(request: Request):
 Alexa スキルが即座に動かなくなる。したがって**移行用オプトインは必須**であり、
 `.env` への設定と同時にリリースするか、オプトインを既定 `true` で入れて
 設定完了後に `false` へ倒す段階的移行を勧める。
+
+**判断記録（2026-09-19 / 実機棚卸し）— 現状維持**
+
+本監査が「コードからは判断できない・要確認」としていた発生条件を実機で確認した結果、
+**`ALEXA_SKILL_ID` は未設定で、露出は発現している**（起動時に
+`⚠️ ALEXA_SKILL_ID is not set — skill ID verification is DISABLED` がログに出る）。
+
+そのうえで**現状維持（フェイルクローズ化を行わない）**と判断した。根拠:
+
+- 影響は情報漏洩（家族の名前・レベル・ゴールド・承認待ち件数の読み上げ）に限定され、
+  状態変更インテントが存在しない（上記「緩和要因」）
+- 外部アクセス制御をエッジの Cloudflare Access に委譲し、アプリ層では行わないという
+  既存の設計判断（Issue #321・2026-09-03決定）と整合する
+- 攻撃には公開 URL の知得が必要で、家族4人・LAN 内を信頼境界とする本システムの
+  リスク許容度の範囲内と判断した
+
+この判断を覆す条件（再検討のトリガー）:
+
+- `/webhook/alexa` に**状態を変更するインテント**を追加するとき（クエスト完了・TV 解錠等）。
+  その時点でフェイルクローズ化を先に入れること
+- 読み上げ内容に上記以外の個人情報（住所・予定・在宅状況等）を追加するとき
 
 ---
 

@@ -42,17 +42,27 @@
 # (cronはシェルのリダイレクトエラーを検知できず無言で失敗する)。mkdir -pを追加する。
 0 * * * * cd /home/masahiro/develop/DDD && mkdir -p /home/masahiro/develop/DDD/logs && /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python newface_monitor.py >> /home/masahiro/develop/DDD/logs/newface_monitor.log 2>&1
 
-# Bluetoothスピーカー(Anker SoundCore 2)のキープアライブ (Issue #585 / #664)
-# tools/keep_alive_anker.sh自身が「cron実行時でもPipeWireソケットを見つけられる
-# ように」という前提のコメントを持つ(=cron起動を前提に書かれている)にも関わらず、
-# 本ファイル・MY_HOME_SYSTEM/deploy/systemd/のいずれにも実行契機が無く、実質的に
-# 一度も実行されていなかった可能性がある。オーディオアンプの無音自動オフを防ぐ
-# という目的上、一般的なBluetoothスピーカーのオートパワーオフ時間(10〜20分程度)
-# より十分短い間隔として5分毎に設定する(実機の実際のオートオフ時間に応じて
-# 調整の余地あり)。
+# Bluetoothスピーカー(Anker SoundCore 2)のキープアライブ — 2026-09-19 判断: 登録しない
 #
-# Issue #664: 以前は同じ目的の別方式(mpg123で無音MP3を再生する
-# tools/keep_alive_speaker.sh)を`2-59/5`で並走させていたが、キープアライブは
-# 本エントリ1本へ一本化し、speaker側はスクリプトごと削除した(判断理由は
-# deploy/cron/README.md を参照)。ここに2本目を戻さないこと。
-*/5 * * * * /home/masahiro/develop/MY_HOME_SYSTEM/tools/keep_alive_anker.sh
+# 経緯: #585 で「スクリプトがあるのに実行契機が皆無」の解消として
+# tools/keep_alive_anker.sh を5分毎に登録し、#664 で keep_alive_speaker.sh を
+# 廃止して本スクリプトへ一本化した。しかし 2026-09-19 の実機棚卸しで、
+# config.ENABLE_BLUETOOTH が既定 False・実機 .env の SPEAKER_BLUETOOTH_MAC も
+# 未設定であり、5分毎の実行が一度も鳴動せず no-op で正常終了し続けている
+# (=BTスピーカー運用そのものが休止中)ことを確認した。ユーザー判断で
+# 「休止で確定」とし、このエントリを外す。
+#
+# スクリプト(tools/keep_alive_anker.sh / tools/connect_speaker.sh)は削除しない。
+# config.py の ENABLE_BLUETOOTH のコメントが再有効化手順として
+# 「tools/connect_speaker.sh の定期実行の整備」を挙げており、休止の解除に必要な
+# 資産だからである。運用を再開するときは以下を同時に行うこと:
+#
+#   1. .env に SPEAKER_BLUETOOTH_MAC を設定する
+#   2. config.py の ENABLE_BLUETOOTH を True にする
+#      (post_boot_health_check の Speaker チェックがBT確認に切り替わる)
+#   3. OS 側で `sudo systemctl enable --now bluetooth`、実機に `sox` を導入する
+#   4. 下記のエントリを復活させる(間隔は実機のオートパワーオフ時間に合わせる)
+#      */5 * * * * /home/masahiro/develop/MY_HOME_SYSTEM/tools/keep_alive_anker.sh
+#
+# .github/scripts/test_crontab_keep_alive.py が「ENABLE_BLUETOOTH=False の間は
+# このエントリを登録しない」という対応関係を検査する。
