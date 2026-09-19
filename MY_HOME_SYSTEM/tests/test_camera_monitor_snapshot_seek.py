@@ -127,3 +127,30 @@ def test_failure_warning_includes_ffmpeg_reason(nvr):
     assert messages, "失敗時の警告が出ていない"
     assert "rc=69" in messages[0]
     assert "partial file" in messages[0], "stderr の最終行(原因)がログに載っていない"
+
+
+def test_successful_first_attempt_lists_nvr_files_only_once(nvr):
+    """#707 レビュー: 正常系で CIFS 越しの glob を2回走らせない(#411 S-L10 の方針)。"""
+    import glob as glob_module
+
+    nvr["make"]("120000", "115000")
+
+    def fake_run(cmd, stdout=None, stderr=None, timeout=None, check=None):
+        with open(cmd[-1], "wb") as f:
+            f.write(b"jpeg")
+
+    with patch("subprocess.run", side_effect=fake_run), \
+         patch("glob.glob", wraps=glob_module.glob) as spy:
+        assert camera_monitor.capture_snapshot_from_nvr(nvr["conf"]) == b"jpeg"
+
+    # 12:05 固定なので検索パターンは当日分の1つだけ(0時台なら前日分も加わる)
+    assert spy.call_count == 1
+
+
+def test_no_recordings_returns_none_without_running_ffmpeg(nvr):
+    with patch("subprocess.run") as run, \
+         patch.object(camera_monitor.logger, "warning") as warning:
+        assert camera_monitor.capture_snapshot_from_nvr(nvr["conf"]) is None
+
+    run.assert_not_called()
+    assert any("No NVR video files found" in c.args[0] for c in warning.call_args_list)
