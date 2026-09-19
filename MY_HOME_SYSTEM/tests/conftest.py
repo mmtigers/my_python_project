@@ -70,3 +70,116 @@ def api_client(isolated_db):
     import unified_server
 
     return TestClient(unified_server.app)
+
+
+class FakeChildProcess:
+    """`lifespan` が起動する監視子プロセス(camera_monitor / scheduler)の代役。
+
+    `subprocess.Popen` を直接モックすると「どの子プロセスとして起動されたか」が
+    分からないため、`_spawn_child_process` を差し替えて名前付きの偽プロセスを返す。
+    シャットダウン時に `terminate`/`wait`/`kill` のどれが呼ばれたかを記録する。
+    """
+
+    def __init__(self, name: str, pid: int = 99999) -> None:
+        self.name = name
+        self.pid = pid
+        self.terminated = False
+        self.killed = False
+        self.waited = False
+        self._returncode = None
+
+    def poll(self):
+        return self._returncode
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def wait(self, timeout=None):
+        self.waited = True
+        return 0
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+@pytest.fixture
+def lifespan_client_factory(isolated_db, monkeypatch):
+    """`lifespan` を実行する TestClient を作るファクトリ。
+
+    `api_client` の docstring が指示する「subprocess.Popen 等を個別に monkeypatch
+    した上で `with TestClient(app):` を使う」パターンを、実際に使える形で提供する
+    (Issue #756 / AUDIT-027)。以前はこの指示が docstring にあるだけで、実際に
+    そのパターンで書かれたテストが少なく、lifespan(マイグレーション適用・NAS
+    プリウォーム・監視子プロセス起動・死活監視・シャットダウン)という最も危険な
+    経路がほぼ未検証だった。
+
+    シャットダウン側の検証(子プロセスの terminate、camera_service.stop_all_processes()
+    等)は `with` を抜けた**後**に assert する必要があるため、フィクスチャ側で
+    `with` を張ってしまう `api_client_with_lifespan` ではなくこちらを使う。
+    マイグレーション失敗時の挙動も、`with` に入る前に差し替える必要があるため
+    `migration_error` 引数で注入する。
+
+    使い方::
+
+        with lifespan_client_factory() as (client, spawned):
+            assert client.get("/health").status_code == 200
+        assert all(p.terminated for p in spawned)
+    """
+    import contextlib as _contextlib
+
+    import unified_server
+    from starlette.testclient import TestClient
+
+    # 子プロセスのグローバル(camera_process / scheduler_process)と再起動履歴は
+    # モジュールレベルの可変状態なので、テストごとに初期化して復元する。
+    monkeypatch.setattr(unified_server, "camera_process", None)
+    monkeypatch.setattr(unified_server, "scheduler_process", None)
+    monkeypatch.setattr(unified_server, "_child_restart_history", {})
+    monkeypatch.setattr(unified_server, "_child_restart_disabled", set())
+    # 30秒間隔の監視ループを即座に回す。`_supervise_child_processes` の既定引数は
+    # def 時に束縛されるため、定数の差し替えだけでは 30 秒のままになる。実体を
+    # 包んで差し替え、差し替え後の定数を明示的に渡す。
+    monkeypatch.setattr(unified_server, "CHILD_MONITOR_INTERVAL_SEC", 0.01)
+    _real_supervise = unified_server._supervise_child_processes
+
+    async def _fast_supervise(interval_sec: float = 0.01) -> None:
+        await _real_supervise(unified_server.CHILD_MONITOR_INTERVAL_SEC)
+
+    monkeypatch.setattr(unified_server, "_supervise_child_processes", _fast_supervise)
+
+    @_contextlib.contextmanager
+    def _factory(migration_error: "Exception | None" = None):
+        spawned = []
+
+        def _fake_spawn(name: str):
+            proc = FakeChildProcess(name)
+            spawned.append(proc)
+            return proc
+
+        monkeypatch.setattr(unified_server, "_spawn_child_process", _fake_spawn)
+
+        if migration_error is None:
+            monkeypatch.setattr(unified_server, "apply_pending_migrations", lambda conn: None)
+        else:
+            def _boom(conn):
+                raise migration_error
+
+            monkeypatch.setattr(unified_server, "apply_pending_migrations", _boom)
+
+        with TestClient(unified_server.app) as client:
+            yield client, spawned
+
+    return _factory
+
+
+@pytest.fixture
+def api_client_with_lifespan(lifespan_client_factory):
+    """`lifespan` を実行済みの TestClient と、起動された偽子プロセスの一覧。
+
+    `lifespan_client_factory()` を既定の引数(マイグレーション成功)で開いたもの。
+    起動側だけを検証するテスト向けの薄いラッパーで、シャットダウン側を検証したい
+    場合や、マイグレーション失敗を注入したい場合は `lifespan_client_factory` を
+    直接使うこと。
+    """
+    with lifespan_client_factory() as ctx:
+        yield ctx
