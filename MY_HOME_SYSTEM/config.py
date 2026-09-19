@@ -556,6 +556,16 @@ ALEXA_SKILL_ID: Optional[str] = os.getenv("ALEXA_SKILL_ID")
 #  docs/runbooks/raspi_claude_log_monitoring.md の層2セクション参照)
 HEALTH_WATCH_INVESTIGATE_HOOK: Optional[str] = os.getenv("HEALTH_WATCH_INVESTIGATE_HOOK")
 
+# Issue #735 (AUDIT-005): health_watch.py の HTTP プローブ(チェック9)が叩く
+# unified_server のベースURL。health_watch はサーバーと同じホストの cron で動くため
+# 既定はループバックとする(FRONTEND_URL は LAN 内の他端末からのアクセスを想定した
+# ホスト指定に .env で上書きされうるため流用しない。RESET_GAME_API_BASE_URL と同じ考え方)。
+HEALTH_WATCH_PROBE_BASE_URL: str = os.getenv("HEALTH_WATCH_PROBE_BASE_URL", "http://127.0.0.1:8000")
+# プローブのタイムアウト秒。/health は DB を触らない即応エンドポイント、
+# /api/quest/data は DB まで到達する経路のため別々に持つ。
+HEALTH_WATCH_PROBE_TIMEOUT_SEC: int = _get_int_env("HEALTH_WATCH_PROBE_TIMEOUT_SEC", 10)
+HEALTH_WATCH_PROBE_DB_TIMEOUT_SEC: int = _get_int_env("HEALTH_WATCH_PROBE_DB_TIMEOUT_SEC", 20)
+
 # ==========================================
 # 13. NASパスの遅延解決 (Issue #330 PR-B)
 # ==========================================
