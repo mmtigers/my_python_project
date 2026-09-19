@@ -334,6 +334,45 @@ def test_skipped_specs_are_reported_not_silently_dropped(fake_repo):
     assert [p.name for p, _ in skipped] == ["ghost.md"]
 
 
+def test_retired_specs_are_not_reported_as_skipped(fake_repo):
+    """Issue #722: 規約どおり廃止noticeを付けた仕様書は警告しないこと。
+
+    ソースが削除された仕様書は、中身を消さず冒頭に廃止noticeを追記して履歴として
+    残す規約(docs/specifications/README.md)。この形で**処理済み**の仕様書に対して
+    「対応ソースが見つからない」と警告し続けるのは、#687 で check_spec_drift.py
+    について解消したのと同じ種類の恒久的なノイズになる。
+    """
+    spec = fake_repo / "docs" / "specifications" / "MY_HOME_SYSTEM" / "retired.md"
+    spec.write_text(
+        "> **⚠️ 廃止: このファイルは 2026-09-20 時点でソース "
+        "(`MY_HOME_SYSTEM/retired.py`) が削除されたため廃止されました。**\n"
+        "\n"
+        '* 根拠: 定義 (行番号: 1 / 抜粋: "def gone():")\n',
+        encoding="utf-8",
+    )
+    # 廃止noticeが無ければ従来どおり警告対象になることも同時に確かめる(対照)
+    plain = fake_repo / "docs" / "specifications" / "MY_HOME_SYSTEM" / "ghost.md"
+    plain.write_text('* 根拠: 定義 (行番号: 1 / 抜粋: "def gone():")\n', encoding="utf-8")
+
+    skipped = []
+    checker.scan(fix=False, skipped=skipped)
+    assert [p.name for p, _ in skipped] == ["ghost.md"]
+
+
+def test_retirement_judgement_is_shared_with_check_spec_drift():
+    """判定を複製せず check_spec_drift.py のものを共有していること。
+
+    2箇所に複製すると RETIRED_NOTICE_PREFIX の書式変更時に片方だけ直す事故が起きる
+    (docs/specifications/README.md にもその旨が明記されている)。
+    """
+    # check_spec_line_refs 自身が読み込み時に .github/scripts を sys.path へ足すため、
+    # ここでは素の import で同じモジュールオブジェクトが得られる。
+    import check_spec_drift
+
+    assert checker.is_retired_doc is check_spec_drift.is_retired_doc
+    assert checker.is_retired_doc.__module__ == "check_spec_drift"
+
+
 def test_report_counts_non_definition_citations(fake_repo):
     """--report は def/class 以外の引用を「抜粋の先頭行が引用行±1にあるか」で粗く数えること。"""
     _write_spec(
