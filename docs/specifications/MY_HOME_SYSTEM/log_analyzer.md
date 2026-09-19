@@ -70,15 +70,15 @@
 ### `__init__`
 
 * **役割**: インスタンス変数の初期化、基準日時の算出、外部設定の取り込みを行う。
-* 根拠: `__init__` (行番号: 39-47 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
+* 根拠: `__init__` (行番号: 54-62 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
 
 
 * **引数/リクエスト**: `days_back: int = 7` (さかのぼる日数)
-* 根拠: `__init__` (行番号: 39 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
+* 根拠: `__init__` (行番号: 54 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `__init__` (行番号: 39 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
+* 根拠: `__init__` (行番号: 54 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
 
 
 * **副作用**: `self.days_back`, `self.log_dir`, `self.report_data`, `self.now`, `self.start_date`, `self.start_date_str` の状態を変更する。
@@ -86,22 +86,22 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `__init__` (行番号: 39-47 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
+* 根拠: `__init__` (行番号: 54-62 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
 
 
 
 ### `_is_recent_file`
 
 * **役割**: 指定されたファイルの更新日時が基準日時（`self.start_date`）以降であるかを判定する。
-* 根拠: `_is_recent_file` (行番号: 49-60 / 抜粋: "def _is_recent_file(self, filepath: str) -> bool:")
+* 根拠: `_is_recent_file` (行番号: 64-75 / 抜粋: "def _is_recent_file(self, filepath: str) -> bool:")
 
 
 * **引数/リクエスト**: `filepath: str` (チェック対象のファイルパス)
-* 根拠: `_is_recent_file` (行番号: 49 / 抜粋: "def _is_recent_file(self, filepath: str) -> bool:")
+* 根拠: `_is_recent_file` (行番号: 64 / 抜粋: "def _is_recent_file(self, filepath: str) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool` (新しい場合はTrue、存在しない・古い・エラーの場合はFalse)
-* 根拠: `_is_recent_file` (行番号: 49 / 抜粋: "def _is_recent_file(self, filepath: str) -> bool:")
+* 根拠: `_is_recent_file` (行番号: 64 / 抜粋: "def _is_recent_file(self, filepath: str) -> bool:")
 
 
 * **副作用**: ファイルシステムへのアクセス（存在確認、更新日時取得）。
@@ -119,11 +119,11 @@
 * 根拠: (行番号: 88〜89 / 抜粋: "if dt > self.now + datetime.timedelta(days=1):\n                    dt = dt.replace(year=self.now.year - 1)")
 
 * **役割**: ログの行頭文字列からタイムスタンプを抽出し、`datetime`オブジェクトに変換する。
-* 根拠: `_parse_timestamp` (行番号: 62-95 / 抜粋: "def _parse_timestamp(self, line: str) -> Optional[datetime.datetime]:")
+* 根拠: `_parse_timestamp` (行番号: 77-110 / 抜粋: "def _parse_timestamp(self, line: str) -> Optional[datetime.datetime]:")
 
 
 * **引数/リクエスト**: `line: str` (ログの1行)
-* 根拠: `_parse_timestamp` (行番号: 62 / 抜粋: "def _parse_timestamp(self, line: str) -> Optional[datetime.datetime]:")
+* 根拠: `_parse_timestamp` (行番号: 77 / 抜粋: "def _parse_timestamp(self, line: str) -> Optional[datetime.datetime]:")
 
 
 * **戻り値/レスポンス**: `Optional[datetime.datetime]` (解析成功時は日時オブジェクト、失敗時はNone)
@@ -141,18 +141,20 @@
 
 ### `_analyze_file`
 
-* **役割**: ファイルを1行ずつ読み込み、無視パターンを除外した上でタイムスタンプを評価し、エラーまたは警告キーワードが含まれる行をカウント・集計する。
-* 根拠: `_analyze_file` (行番号: 97-145 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
+* **役割**: ファイルを1行ずつ読み込み、無視パターンを除外した上でタイムスタンプを評価し、各行の重大度を `_classify_line` で判定してエラー/警告をカウント・集計する。
+* **（2026-09-19 修正）重大度の判定をログレベル基準にした**: 以前は全行を `ERROR_KEYWORDS` / `WARN_KEYWORDS` の部分一致（大文字小文字無視）だけで判定していたため、`[WARNING] ... Unknown error: ... NewConnectionError(...)` のように本文に "error"・"Exception" を含む**警告行がエラーとして数えられていた**。実機の2日分のログでは「エラー」728件のうち711件（97.7%）がこの誤検知で、`health_watch.py` の `check_app_logs`（本クラスを流用）が常時「異常」を返し、同一異常の再通知抑制によって本物の異常が埋もれる原因になっていた。現在はログレベルの表記を持つ行（`core/logger` の書式 `YYYY-MM-DD HH:MM:SS [LEVEL] name: msg`、および logging の既定書式 `LEVEL:name:msg`）はレベルで判定し（`ERROR`/`CRITICAL`→エラー、`WARNING`→警告、`INFO`/`DEBUG`→数えない）、キーワードの部分一致はレベル表記の無い行（トレースバック継続行・syslog・uvicorn のアクセスログ等）のフォールバックとしてだけ使う。レベル基準に変えた後の同じ2日分では、エラーは17件（newface の JSON 破損と隔離、カメラが送る不正な日付を zeep が解釈できないエラー等の本物のエラーのみ）になった。
+* 根拠: `LEVEL_PATTERNS` / `ERROR_LEVELS`（クラス属性）、`_classify_line`（回帰テスト: `tests/test_log_analyzer_level_classification.py`）
+* 根拠: `_analyze_file` (行番号: 135-182 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
 * **（Issue #381 で修正）** タイムスタンプの無い行（トレースバック継続行）は、直前にパースできたタイムスタンプ `last_dt` を引き継いで `start_date` フィルタを適用する。以前はこれらの行が必ずカウントされ、1回トレースバックが出るとその日 logrotate されるまで毎時「異常」が立ち続けていた。
 * 根拠: `last_dt = None` (行番号: 111)、`effective_dt = dt if dt is not None else last_dt` (行番号: 120〜122)
 
 
 * **引数/リクエスト**: `filepath: str` (解析対象のファイルパス)
-* 根拠: `_analyze_file` (行番号: 97 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
+* 根拠: `_analyze_file` (行番号: 135 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `_analyze_file` (行番号: 97 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
+* 根拠: `_analyze_file` (行番号: 135 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
 
 
 * **副作用**: `self.report_data` の更新、ファイル読み込み、`logger` を用いたログ出力。
@@ -167,15 +169,15 @@
 ### `run_analysis`
 
 * **役割**: 対象となる全てのログファイルを取得し、直近の更新があるファイルに対して解析処理を順次実行した後、レポート送信処理を呼び出す。
-* 根拠: `run_analysis` (行番号: 147-165 / 抜粋: "def run_analysis(self) -> None:")
+* 根拠: `run_analysis` (行番号: 184-202 / 抜粋: "def run_analysis(self) -> None:")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
-* 根拠: `run_analysis` (行番号: 147 / 抜粋: "def run_analysis(self) -> None:")
+* 根拠: `run_analysis` (行番号: 184 / 抜粋: "def run_analysis(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `run_analysis` (行番号: 147 / 抜粋: "def run_analysis(self) -> None:")
+* 根拠: `run_analysis` (行番号: 184 / 抜粋: "def run_analysis(self) -> None:")
 
 
 * **副作用**: 外部ファイル一覧の取得、`logger` を用いたログ出力。
@@ -190,15 +192,15 @@
 ### `_send_report`
 
 * **役割**: 集計結果(`self.report_data`)をもとにMarkdown形式のレポートメッセージを組み立て、外部通知モジュールを呼び出す。
-* 根拠: `_send_report` (行番号: 167-202 / 抜粋: "def _send_report(self) -> None:")
+* 根拠: `_send_report` (行番号: 204-239 / 抜粋: "def _send_report(self) -> None:")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
-* 根拠: `_send_report` (行番号: 167 / 抜粋: "def _send_report(self) -> None:")
+* 根拠: `_send_report` (行番号: 204 / 抜粋: "def _send_report(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `_send_report` (行番号: 167 / 抜粋: "def _send_report(self) -> None:")
+* 根拠: `_send_report` (行番号: 204 / 抜粋: "def _send_report(self) -> None:")
 
 
 * **副作用**: `services.notification_service.send_push` による外部システムへの通信。
@@ -206,7 +208,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `_send_report`内部処理 (行番号: 167-202 / 抜粋: "def _send_report(self) -> None:")
+* 根拠: `_send_report`内部処理 (行番号: 204-239 / 抜粋: "def _send_report(self) -> None:")
 
 
 
@@ -241,12 +243,11 @@ flowchart TD
         
         ParseTS --> CheckDate{"日時が基準日以降?"}
         CheckDate -->|"No"| LineLoop
-        CheckDate -->|"Yes"| CheckErr{"エラーキーワード含む?"}
+        CheckDate -->|"Yes"| Classify["_classify_line<br>(レベル表記があればレベルで、<br>無ければキーワードで判定)"]
         
-        CheckErr -->|"Yes"| CountErr["エラー数インクリメント<br>最新エラースニペット保存"] --> LineLoop
-        CheckErr -->|"No"| CheckWarn{"警告キーワード含む?"}
-        CheckWarn -->|"Yes"| CountWarn["警告数インクリメント"] --> LineLoop
-        CheckWarn -->|"No"| LineLoop
+        Classify -->|"error"| CountErr["エラー数インクリメント<br>最新エラースニペット保存"] --> LineLoop
+        Classify -->|"warning"| CountWarn["警告数インクリメント"] --> LineLoop
+        Classify -->|"None"| LineLoop
         
         LineLoop -->|"完了"| HasCount{"カウント>0?"}
         HasCount -->|"Yes"| SaveData["report_dataに保存"] --> Log3["logger: 結果出力"] --> A_End

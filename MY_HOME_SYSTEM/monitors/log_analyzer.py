@@ -18,6 +18,21 @@ class LogAnalyzer:
     # 監視対象のキーワード
     ERROR_KEYWORDS: List[str] = ["ERROR", "CRITICAL", "Traceback", "Exception", "Failed password"]
     WARN_KEYWORDS: List[str] = ["WARNING"]
+
+    # ログレベルが明示された行の判定(2026-09-19)。以前は全行を上記キーワードの部分一致だけで
+    # 判定していたため、`[WARNING] ... Unknown error: ... NewConnectionError(...)` のように
+    # 本文に "error"/"Exception" を含む警告行がエラーとして数えられていた。実機の2日分の
+    # ログでは「エラー」728件のうち711件(97.7%)がこの誤検知で、health_watch の app_logs が
+    # 常時「異常」になり、同一異常の再通知抑制で本物の異常が埋もれる原因になっていた。
+    # レベル表記を持つ行はレベルで判定し、キーワード判定はレベル表記の無い行
+    # (トレースバック継続行・syslog・uvicorn 等)のフォールバックとしてだけ使う。
+    #   1. core/logger の書式: '2026-09-19 10:05:02 [WARNING] camera: ...'
+    #   2. logging の既定書式(ライブラリが basicConfig のまま出す行): 'ERROR:zeep.xsd...:...'
+    LEVEL_PATTERNS: tuple[re.Pattern[str], ...] = (
+        re.compile(r'^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\s\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]'),
+        re.compile(r'^(DEBUG|INFO|WARNING|ERROR|CRITICAL):'),
+    )
+    ERROR_LEVELS: tuple[str, ...] = ("ERROR", "CRITICAL")
     
     # ノイズ対策: 無視するキーワード
     IGNORE_PATTERNS: List[str] = [
@@ -94,6 +109,29 @@ class LogAnalyzer:
                 
         return None
 
+    def _classify_line(self, line: str) -> str | None:
+        """1行の重大度を "error" / "warning" / None で返す。
+
+        ログレベルの表記がある行はレベルで判定する(本文の語句には依存しない)。
+        表記が無い行だけ、従来どおり ERROR_KEYWORDS / WARN_KEYWORDS の部分一致で判定する。
+        """
+        for pattern in self.LEVEL_PATTERNS:
+            match = pattern.match(line)
+            if match:
+                level = match.group(1)
+                if level in self.ERROR_LEVELS:
+                    return "error"
+                if level == "WARNING":
+                    return "warning"
+                return None
+
+        line_upper = line.upper()
+        if any(k.upper() in line_upper for k in self.ERROR_KEYWORDS):
+            return "error"
+        if any(k.upper() in line_upper for k in self.WARN_KEYWORDS):
+            return "warning"
+        return None
+
     def _analyze_file(self, filepath: str) -> None:
         """1つのログファイルを解析"""
         filename = os.path.basename(filepath)
@@ -125,12 +163,11 @@ class LogAnalyzer:
                     if effective_dt and effective_dt < self.start_date:
                         continue
                     
-                    line_upper = line.upper()
-                    
-                    if any(k.upper() in line_upper for k in self.ERROR_KEYWORDS):
+                    severity = self._classify_line(line)
+                    if severity == "error":
                         error_count += 1
                         last_error_snippet = line.strip()[:120] # 少し長めに
-                    elif any(k.upper() in line_upper for k in self.WARN_KEYWORDS):
+                    elif severity == "warning":
                         warn_count += 1
 
             if error_count > 0 or warn_count > 0:
