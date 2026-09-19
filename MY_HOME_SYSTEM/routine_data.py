@@ -132,7 +132,11 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
             # 明日の準備は晩ごはん〜歯磨きと同じく順不同でチェックできる。繰越ルール
             # (金曜/土曜に完了していれば以降の土日は不要)は移設後もそのまま維持する。
             {'key': 'tomorrow_prep', 'label': '明日の準備', 'icon_key': 'tomorrow_prep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': True},
-            {'key': 'sleep', 'label': '就寝', 'icon_key': 'sleep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+            # 退役した旧クエスト id=1105「【夜】就寝ミッション」(exp50/gold70、対象は家族全員)の
+            # 報酬をここへ移設した(quest_data.py参照)。就寝は寝る準備チェックリストを
+            # 全項目終えないと着手できないため、元クエストの「お風呂・トイレ・歯磨き・
+            # お片付け完了。全部できたらクリア！」と同じ条件になる。
+            {'key': 'sleep', 'label': '就寝', 'icon_key': 'sleep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False, 'gold': 70, 'exp': 50},
         ],
     },
 }
@@ -202,7 +206,9 @@ def _build_adult_flows(pm_path_steps: List[RoutineStep]) -> dict[str, RoutineFlo
                 *pm_path_steps,
                 {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '17:30', 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
                 *_ADULT_PM_CHECKLIST,
-                {'key': 'sleep', 'label': '就寝', 'icon_key': 'sleep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+                # 子ども用フローと同じく、退役した id=1105「【夜】就寝ミッション」の報酬を
+                # ここへ移設している(元クエストは target='all' で大人も対象だった)。
+                {'key': 'sleep', 'label': '就寝', 'icon_key': 'sleep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False, 'gold': 70, 'exp': 50},
             ],
         },
     }
