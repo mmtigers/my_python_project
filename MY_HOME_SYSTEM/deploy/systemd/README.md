@@ -104,3 +104,34 @@ sudo systemctl enable network_logger.service
 自体が実機に存在せず、journalにも起動履歴が一切残っていないことを確認した。実質的に
 使われていない(または一度もデプロイされなかった)ユニットと判断し、リポジトリからは
 削除した。
+
+## home_firewall.service
+
+`unified_server.py` の 8000番への接続元を loopback・直結サブネット・Tailscale に限定する
+iptables ルールを、起動時(ネットワーク確立後・`home_system.service` より前)に適用する
+oneshot ユニット(2026-09-19 新設)。実体は `scripts/firewall_apply.sh` で、設計の経緯・
+許可範囲・fail-open の挙動は同スクリプト冒頭と
+`docs/specifications/MY_HOME_SYSTEM/scripts_firewall_apply.md` を参照。
+**8000番以外(SSH・Samba 等)には触れない。**
+
+導入手順(実機側):
+
+```bash
+sudo cp deploy/systemd/home_firewall.service /etc/systemd/system/home_firewall.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now home_firewall.service
+sudo iptables -S HOME_APP_8000                 # 許可3種 → LOG → DROP の順に並んでいること
+sudo iptables -C INPUT -p tcp --dport 8000 -j HOME_APP_8000 && echo "入口あり"
+```
+
+確認: LAN の端末からファミクエが開けること、外部 Webhook(SwitchBot 等)が引き続き 200 で
+届いていること(`journalctl -u home_system.service | grep webhook`)。想定外の遮断は
+`journalctl -k | grep "HOME_APP_8000 DROP"` に残る(毎分5件まで)。
+
+切り戻し:
+
+```bash
+sudo systemctl stop home_firewall.service      # ExecStop が --remove を呼び、ルールを外す
+sudo systemctl disable home_firewall.service   # 再起動後も適用しない場合
+```
+
