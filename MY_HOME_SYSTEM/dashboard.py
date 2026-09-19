@@ -64,37 +64,6 @@ def _render_header_actions() -> None:
         st.link_button("⚔️ ファミクエを開く", QUEST_APP_PATH, width="stretch")
 
 
-def _render_ai_report() -> None:
-    """セバスチャン(AIレポート)の最新報告を折りたたみで表示する。"""
-    report = analysis_service.load_ai_report()
-    if report is None:
-        return
-
-    # タイムゾーン処理は Service/Pandas で行われている前提だが念のため変換
-    ts = report["timestamp"]
-    if isinstance(ts, str):
-        tz_jst = pytz.timezone("Asia/Tokyo")
-        if "T" in ts:
-            report_time = datetime.fromisoformat(ts).astimezone(tz_jst)
-        else:
-            # L-L2 (#410): 以前はこの分岐で常にdatetime.now()(現在時刻)に
-            # フォールバックしており、レポートの実際の生成時刻に関わらず
-            # 「たった今」の報告であるかのように表示されていた。
-            # 保存規約(core.utils.get_now_iso)導入前の旧フォーマット
-            # ("YYYY-MM-DD HH:MM:SS")として明示的にパースし、JSTとして
-            # localizeする。
-            report_time = tz_jst.localize(datetime.strptime(ts, "%Y-%m-%d %H:%M:%S"))
-    else:
-        report_time = ts
-
-    time_str = report_time.strftime("%H:%M")
-    hour = report_time.hour
-    icon = "☀️" if 5 <= hour < 11 else ("🕛" if 11 <= hour < 17 else "🌙")
-
-    with st.expander(f"{icon} セバスチャンからの報告 ({time_str}) - タップして読む", expanded=False):
-        st.markdown(report["message"].replace("\n", "  \n"))
-
-
 def main():
     # --- サイドバー設定 ---
     # スマホではサイドバーが畳まれているため、ここには「PCで細かく見るとき用」の
@@ -130,9 +99,10 @@ def main():
         df_bicycle = analysis_service.load_bicycle_data(limit=3000)
         nas_data = analysis_service.load_nas_status()
 
-        # --- AIレポート表示 ---
-        with view_common.safe_section("AIレポート"):
-            _render_ai_report()
+        # Issue #701 (2026-09-19): 以前はここで「セバスチャンからの報告」
+        # (ai_report_records の最新1件)を表示していたが、書込側が 2026-07-16 以降
+        # 停止しており2か月前の内容を出し続けていたため、オーナー判断で機能ごと退役した。
+        # テーブル自体は履歴として残している(マイグレーションでの削除はしない)。
 
         # --- タブ構成 ---
         # スマホ対応の再設計: 以前はサマリー9枚を常時最上部に出したうえでタブが10個

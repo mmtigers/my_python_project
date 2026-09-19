@@ -9,7 +9,7 @@
 
 ## 関連ドキュメント
 
-* [analysis_service.md](./analysis_service.md) - `services.analysis_service`の実体。`load_sensor_data`, `load_generic_data`, `load_bicycle_data`, `load_nas_status`, `load_ai_report`, `apply_friendly_names`等を提供。同ドキュメントでも本ファイル(`dashboard.py`)を主要な呼び出し元として明記している
+* [analysis_service.md](./analysis_service.md) - `services.analysis_service`の実体。`load_sensor_data`, `load_generic_data`, `load_bicycle_data`, `load_nas_status`, `apply_friendly_names`等を提供（旧`load_ai_report`はIssue #701で削除）。同ドキュメントでも本ファイル(`dashboard.py`)を主要な呼び出し元として明記している
 * [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
 * [config.md](./config.md) - `SQLITE_TABLE_CHILD`等のテーブル名定数、`LINE_USER_ID`を提供
 * [start_all.md](./start_all.md) - 呼び出し元。`start_all.sh`が`streamlit run dashboard.py`をバックグラウンドで起動する（**スマホ対応で変更**: `--server.baseUrlPath` を付けて起動するようになった）
@@ -19,7 +19,7 @@
 ## 2. ファイルの概要
 
 * Streamlit製ダッシュボードアプリケーションのエントリーポイント。ページ設定・ロガー設定などアプリ全体の初期化を行う。
-* `services.analysis_service` からセンサー・子供・排泄・食事・車・防犯ログ・駐輪場・NASステータス等のデータを読み込み、AIレポート（`load_ai_report`）を取得して展開表示する。
+* `services.analysis_service` からセンサー・子供・排泄・食事・車・防犯ログ・駐輪場・NASステータス等のデータを読み込み、5つのタブに展開表示する。**（Issue #701・2026-09-19で退役）** 以前はAIレポート（「セバスチャンからの報告」、`ai_report_records`の最新1件）も表示していたが、機能ごと削除した。
 * **（スマホ対応で再設計）** 画面は5つのタブ（🏠 ホーム、🚃 おでかけ、👀 見守り、💡 くらし、🔧 システム）で構成され、レンダリングは `views.dashboard` 配下のビューモジュールに委譲する。サマリー（`views.dashboard.summary`）は常時最上部ではなく「ホーム」タブの中に入っている。
 * **（スマホ対応で変更）** 以前は10個のタブ（クエスト、電車遅延、防犯カメラ、電力・環境、気温詳細、健康管理、高砂実家、ログ分析、システム管理、駐輪場）を持ち、そのすべての上にサマリー9枚を常時表示していた。ソース中のコメントには、この構成ではスマートフォンで「どのタブを開いてもサマリーを越えるスクロールが必要」「タブ列が画面幅の数倍になり、目的のタブを探せない」状態だったため用途で5つに束ね直した、と記されている。クエストタブは同じ内容をスマホ最適化済みのPWA `family-quest`（`/quest`）が持つ二重管理だったため撤去され、ヘッダーのリンクボタンだけが残っている。
 * **（Issue #507で削除）** 以前は「トレンド」タブも存在したが、参照先の`app_rankings`テーブルへの書き込みコードが存在せず機能として死んでいたため、UIごと削除された。
@@ -53,9 +53,9 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `services.analysis_service` の各関数 | `load_sensor_data`, `load_generic_data`, `load_bicycle_data`, `load_nas_status`, `load_ai_report`, `apply_friendly_names` の実装（DBアクセス方法やデータ整形ロジック）が本ファイルからは不明。 | `analysis_service.load_sensor_data(limit=10000)` (行番号: 123 / 抜粋: "df_sensor = analysis_service.load_sensor_data(limit=10000)") |
+| `services.analysis_service` の各関数 | `load_sensor_data`, `load_generic_data`, `load_bicycle_data`, `load_nas_status`, `apply_friendly_names` の実装（DBアクセス方法やデータ整形ロジック）が本ファイルからは不明。 | `analysis_service.load_sensor_data(limit=10000)` (行番号: 92 / 抜粋: "df_sensor = analysis_service.load_sensor_data(limit=10000)") |
 | `config` の各設定値 | `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_DEFECATION`, `SQLITE_TABLE_FOOD`, `SQLITE_TABLE_CAR` の実際の値がどこでどう定義されているか不明。 | `config.SQLITE_TABLE_CHILD` (行番号: 124 / 抜粋: "df_child = analysis_service.load_generic_data(config.SQLITE_TABLE_CHILD)") |
-| `services.notification_service.send_push` | エラー通知の送信方式・成否時の挙動（例外送出の有無など）が不明。 | `services.notification_service.send_push(` (行番号: 216 / 抜粋: "send_push(") |
+| `services.notification_service.send_push` | エラー通知の送信方式・成否時の挙動（例外送出の有無など）が不明。 | `services.notification_service.send_push(` (行番号: 186 / 抜粋: "send_push(") |
 | `view_common.CUSTOM_CSS` | CSSの具体的な内容・スタイル定義が不明。 | `view_common.CUSTOM_CSS` (行番号: 110 / 抜粋: "st.markdown(view_common.CUSTOM_CSS, unsafe_allow_html=True)") |
 | `view_common.safe_section` | 例外を隔離する仕組み（何を表示し、どこへログを出すか）が本ファイルからは不明。 | `view_common.safe_section("サマリー")` (行番号: 168 / 抜粋: "with view_common.safe_section(\"サマリー\"):") |
 | `summary.render_summary` | サマリー部の描画ロジック・使用データ項目の詳細が不明。 | `summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)` (行番号: 169 / 抜粋: "summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)") |
@@ -163,41 +163,25 @@
 
 
 
-### `_render_ai_report`
+### （Issue #701で削除）`_render_ai_report`
 
-* **役割**: `analysis_service.load_ai_report()` で取得した最新のAIレポート（「セバスチャンからの報告」）を折りたたみ（`st.expander`、`expanded=False`）で表示する。レポートが `None` なら何も描画せず即 `return` する。`timestamp` が文字列の場合、`"T"` を含めば `datetime.fromisoformat` でJSTへ変換し、含まなければ旧フォーマット `"%Y-%m-%d %H:%M:%S"` として `strptime` + `localize` する。時刻から `5<=hour<11` は `☀️`、`11<=hour<17` は `🕛`、それ以外は `🌙` のアイコンを選び、`HH:MM` と併せてexpanderのラベルにする。本文は改行を `"  \n"` に置換して `st.markdown` で表示する。**（Issue #410 L-L2で修正）** 旧フォーマットのタイムスタンプを以前は `datetime.now()` にフォールバックしており、実際の生成時刻に関わらず「たった今」の報告であるかのように表示されていた。
-* 根拠: `def _render_ai_report() -> None:` (行番号: 67〜95 / 抜粋: "def _render_ai_report() -> None:")、旧フォーマットのパース (行番号: 86 / 抜粋: "report_time = tz_jst.localize(datetime.strptime(ts, \"%Y-%m-%d %H:%M:%S\"))")
-
-
-* **引数/リクエスト**: なし
-* 根拠: (行番号: 67 / 抜粋: "def _render_ai_report() -> None:")
-
-
-* **戻り値/レスポンス**: `None`
-* 根拠: (行番号: 67, 71 / 抜粋: "        return")
-
-
-* **副作用**: `analysis_service.load_ai_report()` の呼び出しと、expander・markdownの描画。
-* 根拠: (行番号: 69, 94〜95 / 抜粋: "report = analysis_service.load_ai_report()")
-
-
-* **エラーハンドリング**: なし（**スマホ対応で変更**: 呼び出し元の `main()` が `view_common.safe_section("AIレポート")` で囲み、レポートの表示失敗が他のセクションを巻き込まないようにしている）
-* 根拠: (行番号: 67〜95 / 抜粋: "def _render_ai_report() -> None:")、呼び出し側の保護 (行番号: 134〜135 / 抜粋: "with view_common.safe_section(\"AIレポート\"):")
+* **退役（2026-09-19、Issue #701）**: 以前は`_render_header_actions`と`main`の間に、`analysis_service.load_ai_report()`で取得した`ai_report_records`の最新1件（「セバスチャンからの報告」）を折りたたみ表示する`_render_ai_report()`が存在した（`main()`から`safe_section("AIレポート")`で保護して呼ばれていた）。しかしこのテーブルへの書込は2026-07-16を最後に止まっており（実機DBの最新行が`2026-07-16T19:01`）、2か月前の内容が現在の報告として出続けていた。Issue #584では「リポジトリ管理外の外部プロセスが書き込む前提」と結論していたが、その外部プロセスも動いていないことが実機で確認されたため、オーナー判断で機能ごと退役した。あわせて読み出し側の`analysis_service.load_ai_report()`と`config.SQLITE_TABLE_AI_REPORT`も削除した。`ai_report_records`テーブル自体は履歴として残しており、削除マイグレーションは追加していない。
+* 根拠: `main()`内の退役コメント (行番号: 102 / 抜粋: "# Issue #701 (2026-09-19): 以前はここで「セバスチャンからの報告」")、回帰テスト`tests/test_dashboard_low_items.py`の`TestAiReportRetired`
 
 
 
 ### `main`
 
-* **役割**: サイドバー設定、ヘッダー操作列の描画、各種データの読み込み、AIレポート表示、5個のタブの生成とレンダリングを行うアプリ本体の処理。例外発生時はログ記録・Discord通知・エラー画面表示を行う。**（スマホ対応で変更）** サイドバーからは「データを更新」ボタンが `_render_header_actions` へ移り、代わりに主要操作の場所とスマートフォンからのアクセス経路（8000番の `/dashboard` 経由）を案内する `st.caption` が置かれている。AIレポートの時刻処理は `_render_ai_report` へ抽出された。**（Issue #410 L-L5で修正）** 例外発生時に画面表示していた`traceback.format_exc()`を`logger.error`によるログ出力のみに変更し、内部のファイルパス・設定値がLAN内の閲覧者に露出しないようにした。
-* 根拠: `def main():` (行番号: 98〜229 / 抜粋: "def main():")、サイドバーの案内文 (行番号: 104〜107 / 抜粋: "\"主要な操作(データ更新)はメイン画面の先頭にあります。\"")、トレースバックのログのみ化 (行番号: 229 / 抜粋: "logger.error(traceback.format_exc())")
+* **役割**: サイドバー設定、ヘッダー操作列の描画、各種データの読み込み、5個のタブの生成とレンダリングを行うアプリ本体の処理。例外発生時はログ記録・Discord通知・エラー画面表示を行う。**（スマホ対応で変更）** サイドバーからは「データを更新」ボタンが `_render_header_actions` へ移り、代わりに主要操作の場所とスマートフォンからのアクセス経路（8000番の `/dashboard` 経由）を案内する `st.caption` が置かれている。（AIレポート表示はIssue #701で退役し、`main()`からも削除された。）**（Issue #410 L-L5で修正）** 例外発生時に画面表示していた`traceback.format_exc()`を`logger.error`によるログ出力のみに変更し、内部のファイルパス・設定値がLAN内の閲覧者に露出しないようにした。
+* 根拠: `def main():` (行番号: 67〜199 / 抜粋: "def main():")、サイドバーの案内文 (行番号: 73〜76 / 抜粋: "\"主要な操作(データ更新)はメイン画面の先頭にあります。\"")、トレースバックのログのみ化 (行番号: 199 / 抜粋: "logger.error(traceback.format_exc())")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def main():` (行番号: 98 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 67 / 抜粋: "def main():")
 
 
 * **戻り値/レスポンス**: なし（Streamlit UIへの描画が主目的）
-* 根拠: `def main():` (行番号: 98 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 67 / 抜粋: "def main():")
 
 
 * **タブ構成（スマホ対応で再設計）**:
@@ -210,25 +194,24 @@
 | 💡 くらし | `sensor_tab.render_electricity` / ▸`sensor_tab.render_temperature` | 電力・環境 / 気温詳細 |
 | 🔧 システム | `log_tab.render_resources` / `log_tab.render_nas_status` / ▸`log_tab.render_server_logs` / ▸`log_tab.render_logs` / ▸`log_tab.render_maintenance` | リソース状況 / NAS状態 / サーバーログ / ログ分析 / メンテナンス操作 |
 
-* 根拠: `st.tabs([...])` (行番号: 154〜160 / 抜粋: "tab_home, tab_out, tab_watch, tab_life, tab_sys = st.tabs([")、各タブの中身 (行番号: 167〜209 / 抜粋: "with tab_home:")
+* 根拠: `st.tabs([...])` (行番号: 124〜130 / 抜粋: "tab_home, tab_out, tab_watch, tab_life, tab_sys = st.tabs([")、各タブの中身 (行番号: 137〜179 / 抜粋: "with tab_home:")
 
 
 * **副作用**:
     * サイドバーに設定見出し・案内文（`st.caption`）・CSS適用・現在時刻ログを出力する。
     * メイン画面にCSSを適用し、`_render_header_actions()` でヘッダーの操作列を描画する。
     * `analysis_service` 経由での複数のデータ読み込み（センサー、子供、排泄、食事、車、防犯ログ、駐輪場、NASステータス）。
-    * `_render_ai_report()` によるAIレポートの折りたたみ表示。
     * 5タブ分のUIレンダリング（各ビューモジュールへ処理委譲）。
     * 例外発生時、エラーログ出力・Discordへのエラー通知（`services.notification_service.send_push`）・画面への汎用エラーメッセージ表示。**（Issue #410 L-L5で修正）** トレースバックは画面表示せず、ログ（`logger.error`）にのみ出力する。
-* 根拠: `_render_header_actions()` (行番号: 120 / 抜粋: "_render_header_actions()"), `analysis_service.load_sensor_data(limit=10000)` (行番号: 123 / 抜粋: "df_sensor = analysis_service.load_sensor_data(limit=10000)"), `services.notification_service.send_push(` (行番号: 216 / 抜粋: "send_push(")
+* 根拠: `_render_header_actions()` (行番号: 89 / 抜粋: "_render_header_actions()"), `analysis_service.load_sensor_data(limit=10000)` (行番号: 123 / 抜粋: "df_sensor = analysis_service.load_sensor_data(limit=10000)"), `services.notification_service.send_push(` (行番号: 186 / 抜粋: "send_push(")
 
 
 * **エラーハンドリング**:
-    * データ読み込み（`analysis_service.load_*()`・AIレポート取得・パース）を`try...except Exception as e:`で捕捉する。この範囲の失敗は全タブが依存する前提データが揃わないことを意味するため、ダッシュボード全体をエラー画面にする。
-    * **[修正済み・Issue #438]** 以前はこの`try`ブロックがサマリー表示・全タブのレンダリングまで含んでおり、いずれか1タブの描画例外でもダッシュボード全体がエラー画面になっていた。現在は各描画呼び出しを、[dashboard_common.md](./dashboard_common.md)の`safe_section`コンテキストマネージャで個別に囲み、1つのセクションの例外が他のセクションの描画を止めないようにした（詳細は8節参照）。**（スマホ対応で変更）** 保護の単位は「タブ」ではなく「セクション」になり、1つのタブの中の複数セクション（例: 🔧 システムの5セクション）もそれぞれ独立して保護される。AIレポートの表示も`safe_section("AIレポート")`で囲まれるようになった。
+    * データ読み込み（`analysis_service.load_*()`）を`try...except Exception as e:`で捕捉する。この範囲の失敗は全タブが依存する前提データが揃わないことを意味するため、ダッシュボード全体をエラー画面にする。
+    * **[修正済み・Issue #438]** 以前はこの`try`ブロックがサマリー表示・全タブのレンダリングまで含んでおり、いずれか1タブの描画例外でもダッシュボード全体がエラー画面になっていた。現在は各描画呼び出しを、[dashboard_common.md](./dashboard_common.md)の`safe_section`コンテキストマネージャで個別に囲み、1つのセクションの例外が他のセクションの描画を止めないようにした（詳細は8節参照）。**（スマホ対応で変更）** 保護の単位は「タブ」ではなく「セクション」になり、1つのタブの中の複数セクション（例: 🔧 システムの5セクション）もそれぞれ独立して保護される。（AIレポートの表示とその`safe_section("AIレポート")`はIssue #701で削除された。）
     * 上記の外側`except Exception as e:`で捕捉した場合、エラーメッセージをログ出力（`logger.error`）した上で、`services.notification_service.send_push`によるDiscord通知を試みる。**[修正済み・Issue #438]** この通知処理自体の失敗は、以前は`except Exception: pass`で握りつぶしていたが、現在は`except Exception as notify_err: logger.warning(...)`でログに記録するよう変更した。
     * 最後に `st.error(...)` でユーザー向けの汎用エラーメッセージを表示する。**（Issue #410 L-L5で修正）** 以前は続けて`st.code(traceback.format_exc())`でトレースバックを画面に出力していたが、内部のファイルパス・設定値の露出防止のため`logger.error(traceback.format_exc())`によるログ出力のみに変更した。
-* 根拠: 外側`except Exception as e:` (行番号: 211〜229 / 抜粋: "except Exception as e:")、通知失敗のログ化 (行番号: 221〜224 / 抜粋: "except Exception as notify_err:")、トレースバックのログのみ化 (行番号: 229 / 抜粋: "logger.error(traceback.format_exc())")、`safe_section`によるセクション単位保護 (行番号: 134〜209 / 抜粋: "with view_common.safe_section(")
+* 根拠: 外側`except Exception as e:` (行番号: 181〜199 / 抜粋: "except Exception as e:")、通知失敗のログ化 (行番号: 191〜194 / 抜粋: "except Exception as notify_err:")、トレースバックのログのみ化 (行番号: 199 / 抜粋: "logger.error(traceback.format_exc())")、`safe_section`によるセクション単位保護 (行番号: 138〜179 / 抜粋: "with view_common.safe_section(")
 
 
 
@@ -244,8 +227,7 @@ flowchart TD
     TryStart --> Css["メイン画面にCSS適用"]
     Css --> Header["_render_header_actions(): 更新ボタン / ファミクエへのリンク"]
     Header --> LoadData["外部: analysis_service.load_*() でデータ読み込み"]
-    LoadData --> Report["safe_section('AIレポート')で保護: _render_ai_report()"]
-    Report --> CreateTabs["st.tabs() で5タブ生成<br/>ホーム / おでかけ / 見守り / くらし / システム"]
+    LoadData --> CreateTabs["st.tabs() で5タブ生成<br/>ホーム / おでかけ / 見守り / くらし / システム"]
     CreateTabs --> RenderTabs["各セクションをsafe_section()で個別に保護し、<br/>viewモジュールのrender系関数へ委譲<br/>(副次的な内容は st.expander に畳む)"]
     RenderTabs --> End(["End: 正常終了(1セクションの例外は他に波及しない)"])
 
@@ -269,7 +251,6 @@ graph TD
         logger["logger (Global)"]
         questPath["QUEST_APP_PATH"]
         header["_render_header_actions()"]
-        aiReport["_render_ai_report()"]
         main["main()"]
     end
 
@@ -326,8 +307,8 @@ graph TD
 
 * **ロガー設定方式の不統一**: 本ファイルは `logging.basicConfig()` と `logging.getLogger(__name__)` を直接使用してロガーを構築しているが、`switchbot_service.py` や `backup_service.py` 等の他サービスは `core.logger.setup_logging` を利用している。両方の初期化方式が同一プロセス内で混在すると、ハンドラの重複登録やログフォーマットの不一致が発生する可能性がある。
 * **[修正済み・Issue #438] 二重の広範な例外キャッチとタブ横断の巻き込み**: 以前は`main()`全体（データ読み込み〜全タブのレンダリング）を1つの`except Exception as e:`で捕捉しており、いずれか1つのタブの描画で例外が起きるとダッシュボード全体がエラー画面になり、無関係な他のタブまで巻き込んでいた。その中のDiscord通知処理も`except Exception: pass`で握りつぶしており、通知失敗の原因が完全に不可視化されていた。現在は各タブの描画（`with tab_x: ...`のブロック内）と`summary.render_summary`の呼び出しを、[dashboard_common.md](./dashboard_common.md)の`safe_section`コンテキストマネージャでそれぞれ個別に囲み、1タブの例外が他タブに波及しないようにした。`main()`直下の`try/except`は初期データ読み込み(全タブが依存するため、失敗時は全体をエラー画面にする判断は維持)専用として残り、その中のDiscord通知失敗は`pass`ではなく`logger.warning`で記録するよう変更した。
-* **`report["timestamp"]` の型分岐**: `_render_ai_report`（75〜88行目）で `ts` が文字列かつ `"T"` を含む場合は `datetime.fromisoformat`、含まない場合は旧フォーマット `"%Y-%m-%d %H:%M:%S"` として `strptime` + `localize` でパースする。**（Issue #410 L-L2で修正済み）** 以前は後者が `datetime.now()` へのフォールバックになっており、表示時刻がレポート自体のタイムスタンプと食い違っていた。
-* **サイドバーとメイン画面での重複処理**: `view_common.CUSTOM_CSS` の `st.markdown` 呼び出し（110行目・117行目）および `datetime.now(pytz.timezone("Asia/Tokyo"))` の取得（112行目・118行目）がサイドバーブロックとメインのtryブロックでそれぞれ重複して実行されている。
+* **（Issue #701で削除）AIレポート表示の退役**: 以前ここに記載していた`_render_ai_report`の`report["timestamp"]`新旧フォーマット分岐（Issue #410 L-L2）は、AIレポート機能ごと削除されたため該当コードが存在しない。`ai_report_records`テーブルは履歴として残っているが、ダッシュボードからは参照しない。表示を復活させる場合は、書込側（生成スクリプト）の復活と鮮度ガード（最新行が古いときの扱い）をセットで検討すること。
+* **サイドバーとメイン画面での重複処理**: `view_common.CUSTOM_CSS` の `st.markdown` 呼び出し（79行目・86行目）および `datetime.now(pytz.timezone("Asia/Tokyo"))` の取得（81行目・87行目）がサイドバーブロックとメインのtryブロックでそれぞれ重複して実行されている。
 * **更新ボタン押下時の`st.rerun()`**: `_render_header_actions` は `st.cache_data.clear()` 直後に `st.rerun()` を呼んでおり、キャッシュ全クリア＋全データ再読み込みとなるため、データ量によっては応答が遅くなる可能性がある。
 * **（スマホ対応）タブ構成を変えるときは `safe_section` の名前も合わせること**: 各セクションの例外時に画面へ出る文言は `safe_section` に渡した名前そのものであり（`views/dashboard/common.py`）、タブ名とは独立している。
 * **（スマホ対応）レイアウトの実体はCSS側にある**: スマホ幅での列の縦積み・タブの横スクロール・ステータスカードの列数はすべて `view_common.CUSTOM_CSS` のメディアクエリとCSS Gridで決まる。本ファイルの `st.columns` / `st.tabs` の呼び出しだけを見ても、スマートフォンでの見え方は分からない。
@@ -350,7 +331,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `analysis_service` の各読み込み関数の仕様 | `MY_HOME_SYSTEM/services/analysis_service.py`を直接確認した。`get_ro_db_connection()`(32〜39行目)は`sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True, timeout=10.0)`で読み取り専用接続を返し、これを内部で用いる`load_generic_data(table_name, limit=500)`(150行目)は`SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT {limit}`を実行、`load_sensor_data(limit=5000)`(155行目)は`device_records`・SwitchBotメーターログ・電力使用量の複数テーブルを統合して`pd.DataFrame`を返す、`load_nas_status()`(133行目)/`load_ai_report()`(343行目)はそれぞれ最新1件を`Optional[pd.Series]`で返す設計であることを確認した。ファイル全体を`cache_data`および`import streamlit`で検索したが該当箇所はなく、`st.cache_data`によるキャッシュは実装されていないことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/analysis_service.py:32-39, 133-170, 343-347` |
+| `analysis_service` の各読み込み関数の仕様 | `MY_HOME_SYSTEM/services/analysis_service.py`を直接確認した。`get_ro_db_connection()`(32〜39行目)は`sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True, timeout=10.0)`で読み取り専用接続を返し、これを内部で用いる`load_generic_data(table_name, limit=500)`(150行目)は`SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT {limit}`を実行、`load_sensor_data(limit=5000)`(155行目)は`device_records`・SwitchBotメーターログ・電力使用量の複数テーブルを統合して`pd.DataFrame`を返す、`load_nas_status()`(170行目)は最新1件を`Optional[pd.Series]`で返す設計であることを確認した（同じく最新1件を返していた`load_ai_report()`はIssue #701で削除済み）。ファイル全体を`cache_data`および`import streamlit`で検索したが該当箇所はなく、`st.cache_data`によるキャッシュは実装されていないことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/analysis_service.py:32-39, 170-195` |
 | 各タブビューモジュールの実装詳細 | `MY_HOME_SYSTEM/views/dashboard/`配下の各ファイルを直接確認した。`summary.py`は`get_takasago_status(df_sensor, now)`(13行目)、`get_itami_status(df_sensor, now)`(36行目)、`get_traffic_status()`(86行目)、`get_server_status()`(97行目)、`get_nas_status_simple(nas_data)`(103行目)等のステータス取得関数群、`quest_tab.py`は引数なしの`render()`(8行目)、`sensor_tab.py`は`render_electricity(df_sensor, now)`(9行目)/`render_temperature(df_sensor, now)`(56行目)/`render_takasago(df_sensor)`(106行目)、`health_tab.py`は`render(df_child, df_poop, df_food)`(5行目)、`misc_tab.py`は`render_traffic()`(14行目)/`render_photos(df_security_log)`(84行目)/`render_bicycle(df_bicycle)`(110行目)、`log_tab.py`は`render_logs(df_sensor)`(8行目)/`render_system()`(20行目)を持つことを確認した。**（Issue #507で削除）** `log_tab.py`にはかつて`render_trends()`(旧22行目、`app_rankings`テーブル参照)も存在したが、書き込み側の収集コードが無く機能として死んでいたため、対応する「トレンド」タブの登録ごと削除された。 | 直接ソース確認: `MY_HOME_SYSTEM/views/dashboard/summary.py:13-103`, `MY_HOME_SYSTEM/views/dashboard/quest_tab.py:8`, `MY_HOME_SYSTEM/views/dashboard/sensor_tab.py:9-106`, `MY_HOME_SYSTEM/views/dashboard/health_tab.py:5`, `MY_HOME_SYSTEM/views/dashboard/misc_tab.py:14-110`, `MY_HOME_SYSTEM/views/dashboard/log_tab.py:8-87` |
 | `config` の設定値の実体 | `MY_HOME_SYSTEM/config.py`を直接確認した。`SQLITE_TABLE_CHILD`(245行目)は`"child_health_records"`という文字列定数、`LINE_USER_ID`(185行目)は`os.getenv("LINE_USER_ID")`で環境変数由来（既定値なし、未設定時は`None`）であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:185, 245` |
 | `services.notification_service.send_push` の仕様 | `MY_HOME_SYSTEM/common.py:31-37`が`services.notification_service`から`send_push`を再インポートしているFacadeであることを直接確認した上で、`MY_HOME_SYSTEM/services/notification_service.py:116-163`の実装を直接確認した。Issue #289で`send_push(messages, *, target="both", channel="notify", user_id=None, image_data=None, filename="snapshot.jpg")`に再設計されており、`target`が`"both"`または`"discord"`を含む場合に`_send_discord_webhook`、`"both"`または`"line"`を含む場合に`user_id`(省略時は`config.LINE_USER_ID`にフォールバック)を用いて`_send_line_push`をそれぞれ呼び出す統合プッシュ通知関数であることを確認した。本ファイル(`dashboard.py`)は`target="discord"`のみで呼び出すため`user_id`は渡していない。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:31-37`, `MY_HOME_SYSTEM/services/notification_service.py:116-163`, `MY_HOME_SYSTEM/dashboard.py:165-169` |

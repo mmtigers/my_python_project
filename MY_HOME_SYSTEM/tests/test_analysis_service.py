@@ -271,20 +271,6 @@ class TestLoadBicycleData:
         assert len(result) == 1
 
 
-class TestLoadAiReport:
-    def test_returns_none_when_no_report(self, isolated_db):
-        assert analysis_service.load_ai_report() is None
-
-    def test_returns_latest_report(self, isolated_db):
-        with get_db_cursor(commit=True) as cur:
-            cur.execute(
-                f"INSERT INTO {config.SQLITE_TABLE_AI_REPORT} (message, timestamp) "
-                "VALUES ('週次レポート', '2026-01-01T00:00:00')"
-            )
-        row = analysis_service.load_ai_report()
-        assert row["message"] == "週次レポート"
-
-
 class TestWeatherFunctionsFailSoftOnSchemaMismatch:
     """
     Issue #114で修正済み: 以前はweather_historyテーブルの実カラムと
