@@ -1587,3 +1587,62 @@ class TestBedtimeMissionMovedToSleepStep:
         gold, exp, _level = _user_balance('dad')
         assert gold == 0
         assert exp == 0
+
+
+class TestTvUnlockFiresOnlyAfterCommit:
+    """Issue #737 (AUDIT-007): 不可逆な副作用をコミット後に起動する。
+
+    trigger_tv_unlock は daemon スレッドを起動する fire-and-forget であり、呼んだ
+    瞬間に取り消せない。以前は get_db_cursor(commit=True) の with ブロック内で
+    呼んでいたため、その後のコミットが失敗(database is locked のリトライ超過・
+    ディスクフル)してロールバックされても TV だけが点きうる状態だった。
+    さらにチェックリスト経路では was_all_done が「今回の DB 状態」から計算される
+    ため、ロールバック後にもう一度チェックすると **TV 解錠が二度発火する**。
+    approval_service._process_approve_quest_locked と同じパターンへ揃えてある。
+    """
+
+    def test_tv_unlock_is_not_fired_when_the_transaction_fails(self, isolated_db, monkeypatch):
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(user_id='son', role='role_child')
+
+        for key in ('meal', 'clothes', 'wash', 'teeth'):
+            routine_service.complete_step('son', 'am', key, now=_at(6, 0))
+        mock_trigger.assert_not_called()
+
+        # 全項目達成の直後(= TV 解錠の判定後)に走る保存処理を失敗させる
+        def _boom(*args, **kwargs):
+            raise RuntimeError("database is locked")
+
+        monkeypatch.setattr(routine_service, "_save_progress", _boom)
+        with pytest.raises(RuntimeError):
+            routine_service.complete_step('son', 'am', 'toilet', now=_at(6, 0))
+
+        assert mock_trigger.call_count == 0, "コミットされていないのに TV が点いている"
+
+    def test_tv_unlock_is_fired_once_the_transaction_succeeds(self, isolated_db, monkeypatch):
+        """失敗後に再試行すれば、正常系では従来どおり1回だけ発火すること。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(user_id='son', role='role_child')
+
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            routine_service.complete_step('son', 'am', key, now=_at(6, 0))
+
+        mock_trigger.assert_called_once()
+        assert "朝の準備チェックリスト全項目達成" in mock_trigger.call_args[0][0]
+
+    def test_internal_flag_does_not_leak_into_the_response(self, isolated_db, monkeypatch):
+        """このリクエスト限りのフラグがAPIレスポンスへ漏れないこと。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", MagicMock())
+        _seed_user(user_id='son', role='role_child')
+
+        result = None
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            result = routine_service.complete_step('son', 'am', key, now=_at(6, 0))
+
+        assert result is not None
+        assert "_tv_unlock_reason" not in json.dumps(result, ensure_ascii=False, default=str)

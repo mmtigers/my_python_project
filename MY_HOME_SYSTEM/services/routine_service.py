@@ -435,7 +435,9 @@ class RoutineService:
             f"Routine Catch-up Cleared: User={user_id}, Flow={flow_key}, Step={step['key']}"
         )
         if flow_key == 'pm' and user_id == TV_UNLOCK_TARGET_USER_ID and config.TV_PLUG_DEVICE_ID:
-            switchbot_service.trigger_tv_unlock("夕方の一本道を締切後に完了(追いつき)")
+            # Issue #737 (AUDIT-007): ここでは発火せず理由を控えるだけにする。
+            # 呼び出し元 complete_step がコミット後に trigger_tv_unlock を呼ぶ。
+            progress['_tv_unlock_reason'] = "夕方の一本道を締切後に完了(追いつき)"
 
     def _apply_forced_transition(
         self, cur, user_id: str, flow_key: str, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime
@@ -567,7 +569,10 @@ class RoutineService:
             and user_id == TV_UNLOCK_TARGET_USER_ID
             and config.TV_PLUG_DEVICE_ID
         ):
-            switchbot_service.trigger_tv_unlock("朝の準備チェックリスト全項目達成")
+            # Issue #737 (AUDIT-007): ここでは発火せず理由を控えるだけにする。
+            # とくにこの経路は発火のあとに _save_progress / _apply_forced_transition が
+            # 続くため、「TV だけ点いてチェックリストはロールバック」が起きやすかった。
+            progress['_tv_unlock_reason'] = "朝の準備チェックリスト全項目達成"
         if all_done:
             progress['current_step_index'] = end
             if end < len(flow['steps']):
@@ -655,6 +660,15 @@ class RoutineService:
     def complete_step(
         self, user_id: str, flow_key: str, step_key: str, now: Optional[datetime.datetime] = None
     ) -> Dict[str, Any]:
+        # Issue #737 (AUDIT-007): TV解錠(SwitchBot API 経由の fire-and-forget な物理的
+        # 副作用)はトランザクションのコミット後に起動する。以前は with ブロック内
+        # (コミット前)で直接呼んでいたため、コミットが失敗(database is locked のリトライ
+        # 超過・ディスクフル等)してロールバックされても TV だけが点きうる状態だった。
+        # とくにチェックリスト経路では、ロールバック後に UI が未達成を表示して
+        # もう一度チェックでき、was_all_done は「今回の DB 状態」から計算されるため
+        # **TV 解錠が二度発火する**。approval_service._process_approve_quest_locked
+        # (および #544 の inventory_service)と同じパターンへ揃える。
+        tv_unlock_reason: Optional[str] = None
         with _get_user_balance_lock(user_id):
             with get_db_cursor(commit=True) as cur:
                 # フローの内容はユーザー(子ども/パパ/ママ)によって異なるため、
@@ -725,7 +739,8 @@ class RoutineService:
                             and user_id == TV_UNLOCK_TARGET_USER_ID
                             and config.TV_PLUG_DEVICE_ID
                         ):
-                            switchbot_service.trigger_tv_unlock("夕方の自由時間開始(宿題・明日の準備完了)")
+                            # Issue #737 (AUDIT-007): コミット後に発火する(下記参照)
+                            progress['_tv_unlock_reason'] = "夕方の自由時間開始(宿題・明日の準備完了)"
                 self._save_progress(cur, progress, 'user', now.isoformat())
 
                 # 直後にチェックポイントへ到達し、かつ既に締切時刻を過ぎている場合
@@ -733,7 +748,15 @@ class RoutineService:
                 # 通過処理まで済ませ、フロントが追加のポーリングを待たずに済むようにする。
                 progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)
 
-                return self._serialize_flow(flow, progress, now)
+                result = self._serialize_flow(flow, progress, now)
+                # このリクエスト限りのフラグ(granted_gold / leveled_up と同じ慣習)。
+                # 取り出したら消して、progress が再利用されても持ち越さないようにする。
+                tv_unlock_reason = progress.pop('_tv_unlock_reason', None)
+
+        # ここはコミット済み・ロック解放済み。ここで初めて不可逆な副作用を起こす。
+        if tv_unlock_reason:
+            switchbot_service.trigger_tv_unlock(tv_unlock_reason)
+        return result
 
 
 routine_service = RoutineService()
