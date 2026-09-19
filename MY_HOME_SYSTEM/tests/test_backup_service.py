@@ -201,3 +201,89 @@ class TestPartialNasFileCleanupOnFailure:
 
         assert success is False
         assert "Simulated NAS disk full mid-copy" in msg
+
+
+class TestOffsiteCopy:
+    """2026-09-19: NAS への転送成功後、最新1世代をオフサイト(rclone)へ複製する。
+
+    以前はバックアップが NAS にしか無く、NAS 故障時に DB 本体とバックアップを同時に失う
+    構成だった。オフサイト複製の失敗は NAS バックアップの成否に影響させない。
+    """
+
+    def _fake_rclone(self, monkeypatch, *, fail=None):
+        calls = []
+        monkeypatch.setattr(backup_service.shutil, "which", lambda name: "/usr/bin/rclone")
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            if fail == "error":
+                raise backup_service.subprocess.CalledProcessError(1, cmd, stderr="Failed to copy: quota\n")
+            if fail == "timeout":
+                raise backup_service.subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+            return backup_service.subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(backup_service.subprocess, "run", fake_run)
+        return calls
+
+    def test_disabled_by_default(self, monkeypatch):
+        monkeypatch.setattr(config, "DB_BACKUP_OFFSITE_REMOTE", "", raising=False)
+        calls = self._fake_rclone(monkeypatch)
+
+        success, _msg, _size = backup_service.perform_backup()
+
+        assert success is True
+        assert calls == []
+
+    def test_copies_the_new_nas_backup_as_latest(self, monkeypatch):
+        monkeypatch.setattr(config, "DB_BACKUP_OFFSITE_REMOTE", "gdrive:backup/", raising=False)
+        calls = self._fake_rclone(monkeypatch)
+
+        success, _msg, _size = backup_service.perform_backup()
+
+        assert success is True
+        assert len(calls) == 1
+        cmd, kwargs = calls[0]
+        nas_backup_dir = os.path.join(config.NAS_PROJECT_ROOT, "db_backups")
+        (backup_name,) = os.listdir(nas_backup_dir)
+        assert cmd[:2] == ["/usr/bin/rclone", "copyto"]
+        assert cmd[2] == os.path.join(nas_backup_dir, backup_name)
+        assert cmd[3] == "gdrive:backup/home_system_latest.db"  # 末尾の / は二重にしない
+        assert kwargs["timeout"] == backup_service.OFFSITE_TIMEOUT_SEC
+
+    @pytest.mark.parametrize("fail", ["error", "timeout"])
+    def test_offsite_failure_does_not_fail_the_nas_backup(self, monkeypatch, fail):
+        monkeypatch.setattr(config, "DB_BACKUP_OFFSITE_REMOTE", "gdrive:backup", raising=False)
+        self._fake_rclone(monkeypatch, fail=fail)
+        errors = []
+        monkeypatch.setattr(backup_service.logger, "error", lambda msg: errors.append(msg))
+
+        success, _msg, _size = backup_service.perform_backup()
+
+        assert success is True
+        assert any("オフサイト複製" in m for m in errors)
+
+    def test_not_attempted_when_nas_backup_fails(self, monkeypatch):
+        monkeypatch.setattr(config, "DB_BACKUP_OFFSITE_REMOTE", "gdrive:backup", raising=False)
+        calls = self._fake_rclone(monkeypatch)
+        original_makedirs = os.makedirs
+
+        def _fail_nas(path, exist_ok=False):
+            if "db_backups" in str(path):
+                raise PermissionError("Simulated NAS mount failure")
+            return original_makedirs(path, exist_ok=exist_ok)
+
+        monkeypatch.setattr(backup_service.os, "makedirs", _fail_nas)
+
+        success, _msg, _size = backup_service.perform_backup()
+
+        assert success is False
+        assert calls == []
+
+    def test_missing_rclone_is_logged(self, monkeypatch):
+        monkeypatch.setattr(config, "DB_BACKUP_OFFSITE_REMOTE", "gdrive:backup", raising=False)
+        monkeypatch.setattr(backup_service.shutil, "which", lambda name: None)
+        errors = []
+        monkeypatch.setattr(backup_service.logger, "error", lambda msg: errors.append(msg))
+
+        assert backup_service._copy_latest_offsite(backup_service.Path("/nas/x.db")) is False
+        assert any("rclone" in m for m in errors)

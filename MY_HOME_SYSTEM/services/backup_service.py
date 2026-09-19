@@ -3,6 +3,7 @@ import sqlite3
 import os
 import datetime
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Tuple
 # 設計書 (Source: 137) に従い core.logger を使用
@@ -67,6 +68,7 @@ def perform_backup() -> Tuple[bool, str, float]:
             os.remove(temp_path)
             logger.info(f"✅ Backup successfully transferred to NAS: {nas_final_path}")
             _backup_config_files(nas_backup_dir, timestamp, src_db_path)
+            _copy_latest_offsite(nas_final_path)
             return True, "バックアップ完了", local_size_mb
         else:
             raise OSError("NAS転送後の整合性確認に失敗しました。")
@@ -109,6 +111,45 @@ def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)
             logger.info(f"✅ 設定ファイルをバックアップしました: {src_path} -> {dest_path}")
         except OSError as e:
             logger.error(f"❌ 設定ファイルのバックアップ失敗 ({src_path}): {e}")
+
+# オフサイト複製(rclone)の上限時間。155MB 前後の DB を家庭用回線で送る想定で余裕を取る。
+OFFSITE_TIMEOUT_SEC: int = 1800
+OFFSITE_FILENAME: str = "home_system_latest.db"
+
+
+def _copy_latest_offsite(nas_backup_path: Path) -> bool:
+    """NAS へ転送済みのバックアップを、オフサイト(rclone のリモート)へ最新1世代として複製する。
+
+    2026-09-19: 以前はバックアップが NAS にしか無く、NAS 故障時に DB 本体と
+    バックアップを同時に失う構成だった。config.DB_BACKUP_OFFSITE_REMOTE が空なら何もしない。
+    リモート側は常に "home_system_latest.db" の1ファイルだけを上書きする(世代管理は NAS 側)。
+
+    失敗しても NAS へのバックアップ自体は成功しているため、perform_backup の戻り値には
+    影響させない。ERROR ログを残し、health_watch(app_logs)の検知に任せる。
+    """
+    remote = getattr(config, "DB_BACKUP_OFFSITE_REMOTE", "")
+    if not remote:
+        return False
+    rclone = shutil.which("rclone")
+    if not rclone:
+        logger.error("❌ オフサイト複製に失敗: rclone コマンドが見つかりません")
+        return False
+    dest = f"{remote.rstrip('/')}/{OFFSITE_FILENAME}"
+    try:
+        subprocess.run(  # nosec B603 - 引数はリスト渡しで、値は設定値とバックアップの実パスのみ
+            [rclone, "copyto", str(nas_backup_path), dest, "--retries", "3"],
+            check=True, capture_output=True, text=True, timeout=OFFSITE_TIMEOUT_SEC,
+        )
+    except subprocess.TimeoutExpired:
+        logger.error(f"❌ オフサイト複製がタイムアウトしました({OFFSITE_TIMEOUT_SEC}秒): {dest}")
+        return False
+    except subprocess.CalledProcessError as e:
+        detail = (e.stderr or "").strip().splitlines()
+        logger.error(f"❌ オフサイト複製に失敗 (rc={e.returncode}): {detail[-1] if detail else 'no stderr'}")
+        return False
+    logger.info(f"✅ 最新のバックアップをオフサイトへ複製しました: {dest}")
+    return True
+
 
 def _notify_and_log_error(message: str) -> None:
     """ERRORレベルの記録と管理者への即時通知を行う [cite: 361, 387]"""

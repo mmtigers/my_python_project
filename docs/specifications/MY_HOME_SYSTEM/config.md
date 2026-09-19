@@ -66,7 +66,7 @@
 * 根拠: [家族設定のローカルオーバーライド読み込み] (行番号: 430〜439 / 抜粋: `_family_local_path = os.path.join(os.path.dirname`)
 
 
-* NVR録画・DBバックアップの保持日数（`RECORDING_RETENTION_DAYS`, `DB_BACKUP_RETENTION_DAYS`）、メモリ監視閾値（`MEMORY_ALERT_PERCENT`等）、TVロック機能に関連するクエストID（`TV_UNLOCK_QUEST_IDS`）、Alexaスキル検証用ID（`ALEXA_SKILL_ID`）、ラズパイ監視のフックスクリプトパス（`HEALTH_WATCH_INVESTIGATE_HOOK`）など、他の監視・運用系モジュールが参照する多数の設定値・閾値定数も本ファイルに定義されている。（Issue #488で、同種の未実装機能だった小児科予約監視の`CLINIC_MONITOR_URL`等はこのグループから削除された）
+* NVR録画・DBバックアップの保持日数（`RECORDING_RETENTION_DAYS`, `DB_BACKUP_RETENTION_DAYS`）、DBバックアップのオフサイト複製先（`DB_BACKUP_OFFSITE_REMOTE`。rclone のリモートパス。空なら無効。2026-09-19 追加、`backup_service._copy_latest_offsite` が参照）、メモリ監視閾値（`MEMORY_ALERT_PERCENT`等）、TVロック機能に関連するクエストID（`TV_UNLOCK_QUEST_IDS`）、Alexaスキル検証用ID（`ALEXA_SKILL_ID`）、ラズパイ監視のフックスクリプトパス（`HEALTH_WATCH_INVESTIGATE_HOOK`）など、他の監視・運用系モジュールが参照する多数の設定値・閾値定数も本ファイルに定義されている。（Issue #488で、同種の未実装機能だった小児科予約監視の`CLINIC_MONITOR_URL`等はこのグループから削除された）
 * 根拠: [保持期間設定セクション] (行番号: 389 / 抜粋: `RECORDING_RETENTION_DAYS: int = _get_int_env(`)
 
 
@@ -175,7 +175,7 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 * **役割**: 検証I/Oを伴うパス定数の遅延解決(PEP 562)。`_resolve_assets_dir()` が `ensure_safe_path_with_backoff` で `ASSETS_DIR` を検証・解決し、`_ASSETS_SUBDIRS_TO_CREATE` の各サブディレクトリを作る。モジュールの `__getattr__(name)` は `ASSETS_DIR` と `_ASSETS_DERIVED_PATHS` の派生パス(`UPLOAD_DIR`・`SOUND_DIR` 等)を初回アクセス時にだけ解決し、結果を `globals()` に書き込むため以降は通常の属性解決になる(=キャッシュ。テストは `monkeypatch.setattr`/`delattr` で上書き・再解決できる)。**（Issue #664）** `__getattr__` は `LOG_DIR` も扱い、`ensure_safe_path_with_backoff(_PREFERRED_LOG_DIR, "logs")` で解決する。`prewarm_nas_paths()` は `unified_server.py` の `lifespan` から呼ばれ、遅延化前と同じく起動時点で `ASSETS_DIR`・`LOG_DIR`・派生パスの検証・フォールバック判定を済ませる。
 * **戻り値/レスポンス**: `_resolve_assets_dir` / `__getattr__` は `str`、`prewarm_nas_paths` は `None`。未知の属性名では `__getattr__` が `AttributeError` を送出する。
 * **副作用**: NAS 上のディレクトリ作成、`globals()` への書き込み、失敗時の warning ログ(例外は送出せずローカルへフォールバック)。
-* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 582)、`def __getattr__(name: str) -> str:` (行番号: 596)、`def prewarm_nas_paths() -> None:` (行番号: 623)
+* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 588)、`def __getattr__(name: str) -> str:` (行番号: 602)、`def prewarm_nas_paths() -> None:` (行番号: 629)
 
 ### `verify_and_initialize_storage`
 
