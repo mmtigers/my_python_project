@@ -365,12 +365,16 @@ class RoutineService:
     def _grant_step_reward(self, cur, user_id: str, progress: Dict[str, Any], step: RoutineStep) -> None:
         """ステップ個別の即時報酬(routine_data.RoutineStepのgold/exp)をその場で付与する。
 
-        大人用フローで、生活動線そのものだったデイリークエスト(例: ママの「夕食を
-        作る」)をquest_data.QUESTSから「すごろく」へ寄せた分の報酬。チェックポイント
-        通過ボーナス(_apply_forced_transition)とは別枠で、順番どおり完了報告した
-        「その1回」でのみ加算される(以降そのステップは'done'のままで、シーケンシャルな
-        進行は後戻りしないため二重付与は起きない)。子ども用フローのステップは
-        gold/expを持たないので何もしない。
+        生活動線そのものだったデイリークエスト(例: ママの「夕食を作る」、家族全員が
+        対象だった「就寝ミッション」)をquest_data.QUESTSから「すごろく」へ寄せた分の
+        報酬。チェックポイント通過ボーナス(_apply_forced_transition)とは別枠で、
+        順番どおり完了報告した「その1回」でのみ加算される(以降そのステップは'done'の
+        ままで、シーケンシャルな進行は後戻りしないため二重付与は起きない)。
+
+        （就寝ミッションの移設で訂正）以前は「子ども用フローのステップはgold/expを
+        持たないので何もしない」と書いていたが、id=1105の移設で子ども用フローの
+        `sleep`「就寝」にもgold/expが付いたため、対象は大人用フローに限らない。
+        報酬を持たないステップに対して何もしない点は変わらない(冒頭の早期return)。
         """
         gold, exp = get_step_reward(step)
         if not gold and not exp:

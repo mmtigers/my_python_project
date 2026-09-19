@@ -1353,6 +1353,8 @@ class TestRetiredQuestsAreGone:
         assert 1006 not in ids  # 幼稚園の連絡帳記入 → 現在行っていないため廃止
         assert 12 not in ids    # キッチンリセット(パパ) → DAD_ROUTINE_FLOWS の土日ステップへ
         assert 13 not in ids    # リビングリセット(パパ) → 同上
+        assert 1100 not in ids  # 【朝】毎朝ミッション → amの朝の準備チェックリストへ統合
+        assert 1105 not in ids  # 【夜】就寝ミッション → pmの「就寝」ステップへ報酬ごと移設
 
     def test_quests_not_moved_to_routine_remain(self):
         """パパの会社勤務は「お仕事」ステップと併存する(ステップ側が報酬を持たない)。"""
@@ -1537,3 +1539,51 @@ class TestCatchUpAfterDeadline:
         state = routine_service.complete_step('mom', 'pm', 'cook_dinner', now=_at(18, 30))
         assert state['granted_gold'] == 150
         assert state['granted_exp'] == 150
+
+
+class TestBedtimeMissionMovedToSleepStep:
+    """退役した id=1105「【夜】就寝ミッション」(exp50/gold70)の報酬を「就寝」ステップへ
+    移設したこと(要件: 同じことをクエストとすごろくで二重に報告させない)。
+
+    寝る準備チェックリストはチェックポイント通過後にあり、チェックしても通過ボーナスは
+    一切増えない。クエストを消すだけだと夜の生活動線が完全に無報酬になってしまうため、
+    id=21/12/13 と同じ「クエストを退役させ報酬をステップへ寄せる」方式で移している。
+    """
+
+    def _reach_sleep(self, user_id):
+        """寝る準備を全項目終えて「就寝」が'current'になるところまで進める。"""
+        routine_service.get_today_state(user_id, now=_at(17, 31))  # 締切通過で寝る準備が活性化
+        for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
+            routine_service.complete_step(user_id, 'pm', key, now=_at(18, 0))
+
+    def test_child_sleep_step_grants_the_retired_quest_reward(self, isolated_db):
+        _seed_user(gold=0, exp=0)
+        # 子ども用フローは明日の準備も寝る準備チェックリストの一員。
+        routine_service.get_today_state('daughter', now=_at(17, 31))
+        for key in ('dinner', 'bath', 'nightclothes', 'nightteeth', 'tomorrow_prep'):
+            routine_service.complete_step('daughter', 'pm', key, now=_at(18, 0))
+
+        state = routine_service.complete_step('daughter', 'pm', 'sleep', now=_at(21, 0))
+        assert state['granted_gold'] == 70
+        assert state['granted_exp'] == 50
+
+    def test_adult_sleep_step_grants_it_too(self, isolated_db):
+        """元クエストは target='all' だったので大人も対象。"""
+        _seed_user(user_id='dad', role='role_adult', gold=0, exp=0)
+        self._reach_sleep('dad')
+
+        state = routine_service.complete_step('dad', 'pm', 'sleep', now=_at(21, 0))
+        assert state['granted_gold'] == 70
+        assert state['granted_exp'] == 50
+
+    def test_night_checklist_itself_grants_nothing(self, isolated_db):
+        """報酬は「就寝」に集約する(チェックリスト各項目には付けない)。
+
+        元クエストが「全部できたらクリア！」だったのと同じ条件を、就寝が寝る準備を
+        全項目終えないと着手できないという既存の仕組みで表現している。
+        """
+        _seed_user(user_id='dad', role='role_adult', gold=0, exp=0)
+        self._reach_sleep('dad')
+        gold, exp, _level = _user_balance('dad')
+        assert gold == 0
+        assert exp == 0
