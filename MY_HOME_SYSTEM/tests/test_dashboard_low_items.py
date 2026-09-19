@@ -61,12 +61,15 @@ def _run_main():
 
     mock_st = _mock_st()
     patches = _patch_view_modules()
+    # Issue #741: main() のデータ読み込みは view_common のキャッシュ付き
+    # ラッパー経由になった。素の analysis_service を差し替えると
+    # @st.cache_data がテスト間で結果を持ち越すため、ラッパー自体を差し替える。
     with patch.object(dashboard, "st", mock_st), \
-         patch.object(dashboard.analysis_service, "load_sensor_data", return_value=pd.DataFrame()), \
-         patch.object(dashboard.analysis_service, "load_generic_data", return_value=pd.DataFrame()), \
+         patch.object(dashboard.view_common, "load_sensor_data_cached", return_value=pd.DataFrame()), \
+         patch.object(dashboard.view_common, "load_generic_data_cached", return_value=pd.DataFrame()), \
+         patch.object(dashboard.view_common, "load_bicycle_data_cached", return_value=pd.DataFrame()), \
+         patch.object(dashboard.view_common, "load_nas_status_cached", return_value=None), \
          patch.object(dashboard.analysis_service, "apply_friendly_names", return_value=pd.DataFrame()), \
-         patch.object(dashboard.analysis_service, "load_bicycle_data", return_value=pd.DataFrame()), \
-         patch.object(dashboard.analysis_service, "load_nas_status", return_value=None), \
          patch.object(dashboard, "logger") as mock_logger:
         for p in patches:
             p.start()
@@ -105,7 +108,7 @@ class TestNoTracebackOnScreen:
         ログにのみ出力すること。"""
         mock_st = _mock_st()
         with patch.object(dashboard, "st", mock_st), \
-             patch.object(dashboard.analysis_service, "load_sensor_data", side_effect=RuntimeError("boom")), \
+             patch.object(dashboard.view_common, "load_sensor_data_cached", side_effect=RuntimeError("boom")), \
              patch.object(dashboard, "send_push"), \
              patch.object(dashboard, "logger") as mock_logger:
             dashboard.main()

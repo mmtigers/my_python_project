@@ -9,7 +9,7 @@
 
 ## 関連ドキュメント
 
-* [analysis_service.md](./analysis_service.md) - `services.analysis_service`の実体。`load_sensor_data`, `load_generic_data`, `load_bicycle_data`, `load_nas_status`, `apply_friendly_names`等を提供（旧`load_ai_report`はIssue #701で削除）。同ドキュメントでも本ファイル(`dashboard.py`)を主要な呼び出し元として明記している
+* [analysis_service.md](./analysis_service.md) - `services.analysis_service`の実体。`load_sensor_data`, `load_generic_data`, `load_bicycle_data`, `load_nas_status`, `apply_friendly_names`等を提供（旧`load_ai_report`はIssue #701で削除）。**（Issue #741で変更）** 本ファイルが直接呼ぶのは `apply_friendly_names` だけになり、DB読み取りの4関数は [dashboard_common.md](./dashboard_common.md) のキャッシュ付きラッパー経由になった
 * [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
 * [config.md](./config.md) - `SQLITE_TABLE_CHILD`等のテーブル名定数、`LINE_USER_ID`を提供
 * [start_all.md](./start_all.md) - 呼び出し元。`start_all.sh`が`streamlit run dashboard.py`をバックグラウンドで起動する（**スマホ対応で変更**: `--server.baseUrlPath` を付けて起動するようになった）
@@ -53,8 +53,9 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `services.analysis_service` の各関数 | `load_sensor_data`, `load_generic_data`, `load_bicycle_data`, `load_nas_status`, `apply_friendly_names` の実装（DBアクセス方法やデータ整形ロジック）が本ファイルからは不明。 | `analysis_service.load_sensor_data(limit=10000)` (行番号: 92 / 抜粋: "df_sensor = analysis_service.load_sensor_data(limit=10000)") |
-| `config` の各設定値 | `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_DEFECATION`, `SQLITE_TABLE_FOOD`, `SQLITE_TABLE_CAR` の実際の値がどこでどう定義されているか不明。 | `config.SQLITE_TABLE_CHILD` (行番号: 124 / 抜粋: "df_child = analysis_service.load_generic_data(config.SQLITE_TABLE_CHILD)") |
+| `services.analysis_service` の各関数 | `apply_friendly_names` の実装（データ整形ロジック）が本ファイルからは不明。**（Issue #741で変更）** DB読み取りの4関数（`load_sensor_data`, `load_generic_data`, `load_bicycle_data`, `load_nas_status`）は本ファイルから直接は呼ばれなくなり、`view_common` のキャッシュ付きラッパー経由になった。 | `df_security_log = analysis_service.apply_friendly_names(df_security_log)` |
+| `views.dashboard.common` のキャッシュ付きローダ | `load_sensor_data_cached` 等が `@st.cache_data(ttl=60)` で包まれていること、TTL とクリアの契機は `view_common` 側にある。 | `df_sensor = view_common.load_sensor_data_cached(limit=10000)` |
+| `config` の各設定値 | `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_DEFECATION`, `SQLITE_TABLE_FOOD`, `SQLITE_TABLE_CAR` の実際の値がどこでどう定義されているか不明。 | `df_child = view_common.load_generic_data_cached(config.SQLITE_TABLE_CHILD)` |
 | `services.notification_service.send_push` | エラー通知の送信方式・成否時の挙動（例外送出の有無など）が不明。 | `services.notification_service.send_push(` (行番号: 186 / 抜粋: "send_push(") |
 | `view_common.CUSTOM_CSS` | CSSの具体的な内容・スタイル定義が不明。 | `view_common.CUSTOM_CSS` (行番号: 110 / 抜粋: "st.markdown(view_common.CUSTOM_CSS, unsafe_allow_html=True)") |
 | `view_common.safe_section` | 例外を隔離する仕組み（何を表示し、どこへログを出すか）が本ファイルからは不明。 | `view_common.safe_section("サマリー")` (行番号: 168 / 抜粋: "with view_common.safe_section(\"サマリー\"):") |
@@ -138,7 +139,7 @@
 
 ### `_render_header_actions`
 
-* **役割**: 画面最上部の操作列を描画する。`st.columns(2)` の左に「🔄 データを更新」ボタン（押下で `st.cache_data.clear()` と `st.rerun()`）、右に「⚔️ ファミクエを開く」リンクボタン（`QUEST_APP_PATH`）を、いずれも `width="stretch"` で配置する。docstringには、以前「データを更新」がサイドバーにしか無く、`initial_sidebar_state="collapsed"` のためスマートフォンではハンバーガーメニューを開かないと押せず最も使う操作が最も遠かったため、メイン画面の先頭に常設する旨が記されている。
+* **役割**: 画面最上部の操作列を描画する。`st.columns(2)` の左に「🔄 データを更新」ボタン（押下で `st.cache_data.clear()` と `st.rerun()`。**（Issue #741で変更）** 以前はリポジトリ全体に `@st.cache_data` が1つも存在せず、この `clear()` は何も消していなかった。`view_common` のキャッシュ付きローダを使うようになり、TTL(60秒)を待たずに捨てる操作として機能するようになった）、右に「⚔️ ファミクエを開く」リンクボタン（`QUEST_APP_PATH`）を、いずれも `width="stretch"` で配置する。docstringには、以前「データを更新」がサイドバーにしか無く、`initial_sidebar_state="collapsed"` のためスマートフォンではハンバーガーメニューを開かないと押せず最も使う操作が最も遠かったため、メイン画面の先頭に常設する旨が記されている。
 * 根拠: `def _render_header_actions() -> None:` (行番号: 42〜64 / 抜粋: "def _render_header_actions() -> None:")
 
 
@@ -173,15 +174,15 @@
 ### `main`
 
 * **役割**: サイドバー設定、ヘッダー操作列の描画、各種データの読み込み、5個のタブの生成とレンダリングを行うアプリ本体の処理。例外発生時はログ記録・Discord通知・エラー画面表示を行う。**（スマホ対応で変更）** サイドバーからは「データを更新」ボタンが `_render_header_actions` へ移り、代わりに主要操作の場所とスマートフォンからのアクセス経路（8000番の `/dashboard` 経由）を案内する `st.caption` が置かれている。（AIレポート表示はIssue #701で退役し、`main()`からも削除された。）**（Issue #410 L-L5で修正）** 例外発生時に画面表示していた`traceback.format_exc()`を`logger.error`によるログ出力のみに変更し、内部のファイルパス・設定値がLAN内の閲覧者に露出しないようにした。
-* 根拠: `def main():` (行番号: 67〜199 / 抜粋: "def main():")、サイドバーの案内文 (行番号: 73〜76 / 抜粋: "\"主要な操作(データ更新)はメイン画面の先頭にあります。\"")、トレースバックのログのみ化 (行番号: 199 / 抜粋: "logger.error(traceback.format_exc())")
+* 根拠: `def main():` (行番号: 71〜210 / 抜粋: "def main():")、サイドバーの案内文 (行番号: 73〜76 / 抜粋: "\"主要な操作(データ更新)はメイン画面の先頭にあります。\"")、トレースバックのログのみ化 (行番号: 199 / 抜粋: "logger.error(traceback.format_exc())")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def main():` (行番号: 67 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 71 / 抜粋: "def main():")
 
 
 * **戻り値/レスポンス**: なし（Streamlit UIへの描画が主目的）
-* 根拠: `def main():` (行番号: 67 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 71 / 抜粋: "def main():")
 
 
 * **タブ構成（スマホ対応で再設計）**:
@@ -203,7 +204,7 @@
     * `analysis_service` 経由での複数のデータ読み込み（センサー、子供、排泄、食事、車、防犯ログ、駐輪場、NASステータス）。
     * 5タブ分のUIレンダリング（各ビューモジュールへ処理委譲）。
     * 例外発生時、エラーログ出力・Discordへのエラー通知（`services.notification_service.send_push`）・画面への汎用エラーメッセージ表示。**（Issue #410 L-L5で修正）** トレースバックは画面表示せず、ログ（`logger.error`）にのみ出力する。
-* 根拠: `_render_header_actions()` (行番号: 89 / 抜粋: "_render_header_actions()"), `analysis_service.load_sensor_data(limit=10000)` (行番号: 123 / 抜粋: "df_sensor = analysis_service.load_sensor_data(limit=10000)"), `services.notification_service.send_push(` (行番号: 186 / 抜粋: "send_push(")
+* 根拠: `_render_header_actions()`, `df_sensor = view_common.load_sensor_data_cached(limit=10000)`, `services.notification_service.send_push(`
 
 
 * **エラーハンドリング**:
@@ -300,7 +301,7 @@ graph TD
 | 高 | `views/dashboard/summary.py`, `sensor_tab.py`, `health_tab.py`, `misc_tab.py`, `log_tab.py` | 実際の画面描画ロジックが全てこれらのモジュールに委譲されており、UIの詳細仕様（表示項目・グラフ・操作性）を理解するために必要。 | `from views.dashboard import (...)` (行番号: 14〜21 / 抜粋: "from views.dashboard import (") |
 | 高 | `views/dashboard/common.py` | スマホ幅のレイアウト（列の縦積み・タブの横スクロール・ステータスカードのグリッド）がすべて`CUSTOM_CSS`側にあるため、見た目の仕様は本ファイルからは追えない。 | `st.markdown(view_common.CUSTOM_CSS, ...)` (行番号: 110, 117 / 抜粋: "st.markdown(view_common.CUSTOM_CSS, unsafe_allow_html=True)") |
 | 中 | `routers/dashboard_router.py`, `services/dashboard_proxy_service.py` | スマートフォンからの到達経路（8000番の`/dashboard`配下への中継）を把握するため。`QUEST_APP_PATH`をルート相対にしている理由もここに依存する。 | ルート相対リンクの理由を述べたコメント (行番号: 58〜63 / 抜粋: "unified_server.py(8000番)の config.DASHBOARD_BASE_PATH 配下に中継されて") |
-| 中 | `config.py` | `SQLITE_TABLE_CHILD` 等のテーブル名定数や `LINE_USER_ID` の実値を把握し、DB構造や通知先を確認するため。 | `config.SQLITE_TABLE_CHILD` (行番号: 60 / 抜粋: "df_child = analysis_service.load_generic_data(config.SQLITE_TABLE_CHILD)") |
+| 中 | `config.py` | `SQLITE_TABLE_CHILD` 等のテーブル名定数や `LINE_USER_ID` の実値を把握し、DB構造や通知先を確認するため。 | `df_child = view_common.load_generic_data_cached(config.SQLITE_TABLE_CHILD)` |
 | 中 | `common.py` | `send_push` の実装（Discord通知の具体的な送信方式・エラー処理）を確認するため。 | `services.notification_service.send_push(` (行番号: 148 / 抜粋: "send_push(") |
 
 ## 8. 保守上の注意点
@@ -309,7 +310,8 @@ graph TD
 * **[修正済み・Issue #438] 二重の広範な例外キャッチとタブ横断の巻き込み**: 以前は`main()`全体（データ読み込み〜全タブのレンダリング）を1つの`except Exception as e:`で捕捉しており、いずれか1つのタブの描画で例外が起きるとダッシュボード全体がエラー画面になり、無関係な他のタブまで巻き込んでいた。その中のDiscord通知処理も`except Exception: pass`で握りつぶしており、通知失敗の原因が完全に不可視化されていた。現在は各タブの描画（`with tab_x: ...`のブロック内）と`summary.render_summary`の呼び出しを、[dashboard_common.md](./dashboard_common.md)の`safe_section`コンテキストマネージャでそれぞれ個別に囲み、1タブの例外が他タブに波及しないようにした。`main()`直下の`try/except`は初期データ読み込み(全タブが依存するため、失敗時は全体をエラー画面にする判断は維持)専用として残り、その中のDiscord通知失敗は`pass`ではなく`logger.warning`で記録するよう変更した。
 * **（Issue #701で削除）AIレポート表示の退役**: 以前ここに記載していた`_render_ai_report`の`report["timestamp"]`新旧フォーマット分岐（Issue #410 L-L2）は、AIレポート機能ごと削除されたため該当コードが存在しない。`ai_report_records`テーブルは履歴として残っているが、ダッシュボードからは参照しない。表示を復活させる場合は、書込側（生成スクリプト）の復活と鮮度ガード（最新行が古いときの扱い）をセットで検討すること。
 * **サイドバーとメイン画面での重複処理**: `view_common.CUSTOM_CSS` の `st.markdown` 呼び出し（79行目・86行目）および `datetime.now(pytz.timezone("Asia/Tokyo"))` の取得（81行目・87行目）がサイドバーブロックとメインのtryブロックでそれぞれ重複して実行されている。
-* **更新ボタン押下時の`st.rerun()`**: `_render_header_actions` は `st.cache_data.clear()` 直後に `st.rerun()` を呼んでおり、キャッシュ全クリア＋全データ再読み込みとなるため、データ量によっては応答が遅くなる可能性がある。
+* **更新ボタン押下時の`st.rerun()`**: `_render_header_actions` は `st.cache_data.clear()` 直後に `st.rerun()` を呼んでおり、キャッシュ全クリア＋全データ再読み込みとなるため、データ量によっては応答が遅くなる可能性がある。**（Issue #741）** これは意図した挙動になった（以前はキャッシュが無かったため、押しても押さなくても毎回全読み込みだった）。
+* **[Issue #741] データ読み込みは `view_common` のキャッシュ付きラッパー経由にすること**: Streamlit はウィジェット操作・タブ切替・ページ読み込みのたびに `main()` を含むスクリプト全体を再実行する。`analysis_service` を直接呼ぶ行を足すと、その読み取りだけが毎回 SQLite に行き、`unified_server` 側の書き込みとの競合（"database is locked"）の確率も上げる。`tests/test_dashboard_cache.py` の `test_main_does_not_call_analysis_service_loaders_directly` が退行を検知する。
 * **（スマホ対応）タブ構成を変えるときは `safe_section` の名前も合わせること**: 各セクションの例外時に画面へ出る文言は `safe_section` に渡した名前そのものであり（`views/dashboard/common.py`）、タブ名とは独立している。
 * **（スマホ対応）レイアウトの実体はCSS側にある**: スマホ幅での列の縦積み・タブの横スクロール・ステータスカードの列数はすべて `view_common.CUSTOM_CSS` のメディアクエリとCSS Gridで決まる。本ファイルの `st.columns` / `st.tabs` の呼び出しだけを見ても、スマートフォンでの見え方は分からない。
 * **（スマホ対応）`/quest` へのリンクはルート相対**: `QUEST_APP_PATH` は `"/quest"` であり、8501番へ直接アクセスした場合（中継を経由しない場合）は解決先が存在しない。通常の到達経路は8000番の `/dashboard` 配下である。
@@ -319,7 +321,7 @@ graph TD
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| `analysis_service` の各読み込み関数の仕様 | DBアクセス方法、返却される `DataFrame` のスキーマ、キャッシュ有無（`st.cache_data` との関係）が本ファイルからは不明。 | `services/analysis_service.py` |
+| `analysis_service` の各読み込み関数の仕様 | DBアクセス方法、返却される `DataFrame` のスキーマが本ファイルからは不明。**（Issue #741で変更）** キャッシュの有無は `views/dashboard/common.py` 側で決まるようになった。 | `services/analysis_service.py`, `views/dashboard/common.py` |
 | 各ビューモジュールの実装詳細 | `summary`, `sensor_tab`, `health_tab`, `misc_tab`, `log_tab` の描画内容・引数の使い方が不明。 | `views/dashboard/summary.py` ほか各ビューファイル |
 | `config` の設定値の実体 | `SQLITE_TABLE_CHILD` 等のテーブル名の具体的な値が不明。 | `config.py` |
 | `view_common.safe_section` の挙動 | 例外時に何を表示し、どこへログを出すかが本ファイルからは不明。 | `views/dashboard/common.py` |

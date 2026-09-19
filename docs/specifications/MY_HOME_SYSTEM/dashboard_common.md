@@ -21,15 +21,18 @@
 ## 2. ファイルの概要
 
 * `views/dashboard`パッケージ内の各タブ・サマリー描画モジュールから共通利用される、CSSスタイル定義とステータスカードHTML生成関数を提供するモジュール。
-* 根拠: `CUSTOM_CSS = """` と `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 18, 143 / 抜粋: "CUSTOM_CSS = \"\"\"")
+* 根拠: `CUSTOM_CSS = """` と `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 18, 190 / 抜粋: "CUSTOM_CSS = \"\"\"")
 * `CUSTOM_CSS`は、フォント指定、ステータスカードのグリッド（`.status-grid`）とカード（`.status-card`）、5種類のテーマ配色クラス（`.theme-green`, `.theme-yellow`, `.theme-red`, `.theme-blue`, `.theme-gray`）、経路検索カード（`.route-card`, `.route-path`等）、Streamlit標準要素のスタイル上書き（`.streamlit-expanderHeader`）、タップターゲットの最小高さ、およびスマートフォン幅（`max-width: 640px`）のメディアクエリを含む、f-string の文字列定数として定義されたCSSブロックである。
 * 根拠: `.status-grid {` (行番号: 27 / 抜粋: "    .status-grid {"), `.status-card {` (行番号: 33 / 抜粋: "    .status-card {"), `@media (max-width: {MOBILE_BREAKPOINT_PX}px) {` (行番号: 84 / 抜粋: "    @media (max-width: {MOBILE_BREAKPOINT_PX}px) {{")
 * **（スマホ対応で追加）** メディアクエリは、(1) `.block-container` の左右パディング縮小、(2) `st.columns`（`[data-testid="stHorizontalBlock"]` / `[data-testid="stColumn"]`）を `flex: 1 1 100%` で縦積みにする、(3) タブ列（`[data-baseweb="tab-list"]`）の横スクロール許可とスクロールバー非表示、(4) 見出し（`h1`〜`h3`）の縮小、(5) `section[data-testid="stMain"]` の横方向はみ出し抑止、を行う。CSS冒頭のコメントに、これらはStreamlitが出力するDOMの属性セレクタに依存しており、Streamlitのバージョンが上がって`data-testid`が変わった場合は単に効かなくなるだけで画面は壊れない（レイアウトがStreamlit既定に戻る）旨が記されている。
 * 根拠: メディアクエリ本体 (行番号: 84〜124 / 抜粋: "        [data-testid=\"stHorizontalBlock\"] > [data-testid=\"stColumn\"],")、DOM依存についてのコメント (行番号: 15〜17 / 抜粋: "# Streamlitが出力するDOMの属性セレクタに依存するCSS。")
+* **（Issue #741で追加）** `analysis_service` のデータ読み込み関数を `@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC)` で包んだラッパー4本（`load_sensor_data_cached` / `load_generic_data_cached` / `load_bicycle_data_cached` / `load_nas_status_cached`）を提供する。`analysis_service` は `unified_server.py` からもインポートされるため、Streamlit 依存をそちらへ持ち込まずキャッシュを View 層に閉じ込める配置になっている。
+* 根拠: `def load_sensor_data_cached(limit: int) -> pd.DataFrame:` (行番号: 155)
+
 * **（スマホ対応で追加）** `StatusCard`（`NamedTuple`）と `render_status_grid` を提供する。ステータスカードの列数の決定は`st.columns`ではなくCSS Grid（`.status-grid` の `repeat(auto-fit, minmax(150px, 1fr))`）に委ねられ、スマホでは2列・PCでは3〜5列に自動で切り替わる。
-* 根拠: `class StatusCard(NamedTuple):` (行番号: 131 / 抜粋: "class StatusCard(NamedTuple):"), `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 166 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
+* 根拠: `class StatusCard(NamedTuple):` (行番号: 178 / 抜粋: "class StatusCard(NamedTuple):"), `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 213 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
 * `render_status_card_html`は、タイトル・値・テーマ名に加えてキーワード専用引数 `value_is_html`(既定 `False`)を受け取り、`status-card {theme}`クラスを持つ`div`要素のHTML文字列を組み立てて返す純粋関数である。`value_is_html=True` のときは値をエスケープせずそのまま埋め込む。**(Issue #655 で訂正: 本仕様書は `check_spec_line_refs.py` の索引の死角により長らく未検証で、3引数だった頃のシグネチャと行番号が残っていた。)**
-* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:\n    """ステータスカードのHTMLを生成"""\n    return f"""\n    <div class="status-card {theme}">` (行番号: 143〜163 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")
+* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:\n    """ステータスカードのHTMLを生成"""\n    return f"""\n    <div class="status-card {theme}">` (行番号: 190〜210 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")
 
 ## 3. 外部依存関係
 
@@ -40,12 +43,19 @@
 | `html` | 標準ライブラリ | **（Issue #378で追加。旧版の記述を訂正）** `render_status_card_html`が`title`/`value`をHTMLエスケープするために使用（`html.escape`）。以前このテーブルは本ファイルが`streamlit`をインポートしていると記載していたが、実際には（Issue #378時点・それ以前も含め）本ファイルは`streamlit`を一切インポートしておらず誤りだった（`CUSTOM_CSS`の適用や`render_status_card_html`の呼び出しは呼び出し元で行われる） | `import html` (行番号: 2 / 抜粋: "import html") |
 | `logging`, `traceback` | 標準ライブラリ | **（Issue #438で追加）** `safe_section`が例外発生時にエラー内容とtracebackをログへ記録するために使用。 | `import logging`, `import traceback` (行番号: 3-4) |
 | `contextlib.contextmanager` | 標準ライブラリ | `safe_section`をコンテキストマネージャとして実装するために使用。 | `from contextlib import contextmanager` (行番号: 5) |
-| `typing.Iterable`, `typing.NamedTuple` | 標準ライブラリ | **（スマホ対応で追加）** `render_status_grid`の引数型と`StatusCard`の定義に使用。 | `from typing import Iterable, NamedTuple` (行番号: 6) |
-| `streamlit` | サードパーティ | **（Issue #438で追加。上記の「streamlit未インポート」という記述は本Issue以降は当てはまらなくなった）** `safe_section`が例外捕捉時に`st.error`でプレースホルダを画面表示するために使用。**（スマホ対応で追加）** `render_status_grid`も`st.markdown`でグリッドを描画するために使用する。`CUSTOM_CSS`の適用は引き続き呼び出し元（`dashboard.py`）が行う。 | `import streamlit as st` (行番号: 8) |
+| `typing.Iterable`, `typing.NamedTuple` | 標準ライブラリ | **（スマホ対応で追加）** `render_status_grid`の引数型と`StatusCard`の定義に使用。**（Issue #741で変更）** `Optional` は使わず `pd.Series \| None` 表記にしているため、ここには追加されていない。 | `from typing import Iterable, NamedTuple` (行番号: 6) |
+| `pandas` | サードパーティ | **（Issue #741で追加）** キャッシュ付きローダの戻り値型注釈（`pd.DataFrame` / `pd.Series \| None`）に使用。 | `import pandas as pd` (行番号: 8) |
+| `services.analysis_service` | 自作モジュール | **（Issue #741で追加）** キャッシュ付きローダが委譲先として呼ぶデータ読み込み層。 | `from services import analysis_service` (行番号: 10) |
+| `streamlit` | サードパーティ | **（Issue #438で追加。上記の「streamlit未インポート」という記述は本Issue以降は当てはまらなくなった）** `safe_section`が例外捕捉時に`st.error`でプレースホルダを画面表示するために使用。**（スマホ対応で追加）** `render_status_grid`も`st.markdown`でグリッドを描画するために使用する。**（Issue #741で追加）** `st.cache_data` デコレータもここから取得する。`CUSTOM_CSS`の適用は引き続き呼び出し元（`dashboard.py`）が行う。 | `import streamlit as st` (行番号: 9) |
 
 ### ブラックボックスとなる外部要素
 
-該当なし（本ファイルは標準ライブラリ`html`（Issue #378で追加）以外に外部モジュール・外部関数への依存を持たず、文字列定数の定義と純粋なHTML生成関数のみで構成される）。
+**（Issue #741で変更。「該当なし」だった旧記述を訂正）** 以下の2つが本ファイルの外側にある。
+
+| 要素 | 種類 | 本ファイルから分かること | 根拠 |
+| --- | --- | --- | --- |
+| `st.cache_data` | Streamlitのキャッシュ機構 | `ttl` 秒だけ戻り値を保持し、同じ引数の呼び出しでは関数本体を実行しない。`show_spinner=False` を指定している。キャッシュの破棄は呼び出し元（`dashboard.py` の「🔄 データを更新」ボタン）の `st.cache_data.clear()` が行う。内部のキー計算・保存方式は本ファイルからは判断できない（9章参照） | `@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)` (行番号: 154, 160, 166, 172) |
+| `analysis_service.load_sensor_data` / `load_generic_data` / `load_bicycle_data` / `load_nas_status` | 自作のデータ読み込み層 | 引数をそのまま委譲して戻り値をそのまま返す。実際のSQL・取得行数は `analysis_service` 側にある | `return analysis_service.load_sensor_data(limit=limit)` (行番号: 157) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -118,10 +128,95 @@
 
 
 
+### `DASHBOARD_CACHE_TTL_SEC` (モジュールレベル定数、Issue #741で追加)
+
+* **役割**: キャッシュ付きローダ4本に与える TTL（秒）。値は `60`。コメントに、センサーの書き込み間隔（5〜10分）より十分短いので表示の鮮度は実質劣化せず、「🔄 データを更新」ボタンが TTL を待たずに捨てる手段としてようやく意味を持つ旨が記されている。
+* 根拠: `DASHBOARD_CACHE_TTL_SEC = 60` (行番号: 151 / 抜粋: "DASHBOARD_CACHE_TTL_SEC = 60")
+
+* **引数/リクエスト**: なし
+* 根拠: `DASHBOARD_CACHE_TTL_SEC = 60` (行番号: 151)
+
+* **戻り値/レスポンス**: なし（グローバル定数（型: `int`）への代入）
+* 根拠: `DASHBOARD_CACHE_TTL_SEC = 60` (行番号: 151)
+
+* **副作用**: なし
+* 根拠: `DASHBOARD_CACHE_TTL_SEC = 60` (行番号: 151)
+
+* **エラーハンドリング**: なし
+* 根拠: `DASHBOARD_CACHE_TTL_SEC = 60` (行番号: 151)
+
+### `load_sensor_data_cached` (Issue #741で追加)
+
+* **役割**: `analysis_service.load_sensor_data` のキャッシュ付きラッパー。`dashboard.py` の `main()` が `limit=10000` で呼ぶ。
+* 根拠: `def load_sensor_data_cached(limit: int) -> pd.DataFrame:` (行番号: 155 / 抜粋: "def load_sensor_data_cached(")
+
+* **引数/リクエスト**: `limit` (型: `int`。既定値なし)
+* 根拠: `def load_sensor_data_cached(limit: int) -> pd.DataFrame:` (行番号: 155)
+
+* **戻り値/レスポンス**: `pd.DataFrame`（`analysis_service.load_sensor_data(limit=limit)` の戻り値をそのまま返す）
+* 根拠: `return analysis_service.load_sensor_data(limit=limit)` (行番号: 157)
+
+* **副作用**: `st.cache_data` のキャッシュへの書き込み。キャッシュヒット時は関数本体（＝DBアクセス）が実行されない。
+* 根拠: `@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)` (行番号: 154)
+
+* **エラーハンドリング**: なし（`analysis_service` 側の例外はそのまま呼び出し元へ伝播し、`dashboard.py` 側の `safe_section` / `main()` の `try` が受ける）
+* 根拠: `return analysis_service.load_sensor_data(limit=limit)` (行番号: 157)
+
+### `load_generic_data_cached` (Issue #741で追加)
+
+* **役割**: `analysis_service.load_generic_data` のキャッシュ付きラッパー。`dashboard.py` が子供・排便・食事・車・`security_logs` の5テーブルに対して呼ぶ。
+* 根拠: `def load_generic_data_cached(table_name: str, limit: int = 500) -> pd.DataFrame:` (行番号: 161 / 抜粋: "def load_generic_data_cached(")
+
+* **引数/リクエスト**: `table_name` (型: `str`)、`limit` (型: `int`。既定 `500`)
+* 根拠: `def load_generic_data_cached(table_name: str, limit: int = 500) -> pd.DataFrame:` (行番号: 161)
+
+* **戻り値/レスポンス**: `pd.DataFrame`
+* 根拠: `return analysis_service.load_generic_data(table_name, limit=limit)` (行番号: 163)
+
+* **副作用**: `st.cache_data` のキャッシュへの書き込み（キーは `table_name` と `limit` の組）。
+* 根拠: `@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)` (行番号: 160)
+
+* **エラーハンドリング**: なし
+* 根拠: `return analysis_service.load_generic_data(table_name, limit=limit)` (行番号: 163)
+
+### `load_bicycle_data_cached` (Issue #741で追加)
+
+* **役割**: `analysis_service.load_bicycle_data` のキャッシュ付きラッパー。`dashboard.py` が `limit=3000` で呼ぶ。
+* 根拠: `def load_bicycle_data_cached(limit: int) -> pd.DataFrame:` (行番号: 167 / 抜粋: "def load_bicycle_data_cached(")
+
+* **引数/リクエスト**: `limit` (型: `int`。既定値なし)
+* 根拠: `def load_bicycle_data_cached(limit: int) -> pd.DataFrame:` (行番号: 167)
+
+* **戻り値/レスポンス**: `pd.DataFrame`
+* 根拠: `return analysis_service.load_bicycle_data(limit=limit)` (行番号: 169)
+
+* **副作用**: `st.cache_data` のキャッシュへの書き込み。
+* 根拠: `@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)` (行番号: 166)
+
+* **エラーハンドリング**: なし
+* 根拠: `return analysis_service.load_bicycle_data(limit=limit)` (行番号: 169)
+
+### `load_nas_status_cached` (Issue #741で追加)
+
+* **役割**: `analysis_service.load_nas_status` のキャッシュ付きラッパー。引数を取らない。
+* 根拠: `def load_nas_status_cached() -> pd.Series | None:` (行番号: 173 / 抜粋: "def load_nas_status_cached(")
+
+* **引数/リクエスト**: なし
+* 根拠: `def load_nas_status_cached() -> pd.Series | None:` (行番号: 173)
+
+* **戻り値/レスポンス**: `pd.Series | None`（NAS状態の最新1行。データが無い場合は `None`）
+* 根拠: `return analysis_service.load_nas_status()` (行番号: 175)
+
+* **副作用**: `st.cache_data` のキャッシュへの書き込み。
+* 根拠: `@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)` (行番号: 172)
+
+* **エラーハンドリング**: なし
+* 根拠: `return analysis_service.load_nas_status()` (行番号: 175)
+
 ### `class StatusCard` (NamedTuple、スマホ対応で追加)
 
 * **役割**: サマリーに並べる1枚のステータスカードを表す`NamedTuple`。フィールドは `title: str` / `value: str` / `theme: str` / `value_is_html: bool = False`。docstringに、`value_is_html`は意図的なHTML断片（色付けの`<span>`・改行の`<br>`等）を含める呼び出し元だけTrueにする旨が記されている。
-* 根拠: `class StatusCard(NamedTuple):` (行番号: 131〜141 / 抜粋: "class StatusCard(NamedTuple):")
+* 根拠: `class StatusCard(NamedTuple):` (行番号: 178〜187 / 抜粋: "class StatusCard(NamedTuple):")
 
 
 * **引数/リクエスト**: `title`, `value`, `theme`, `value_is_html`（既定 `False`）
@@ -129,22 +224,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし（型定義）
-* 根拠: (行番号: 131 / 抜粋: "class StatusCard(NamedTuple):")
+* 根拠: (行番号: 178 / 抜粋: "class StatusCard(NamedTuple):")
 
 
 * **副作用**: なし
-* 根拠: (行番号: 131〜141 / 抜粋: "class StatusCard(NamedTuple):")
+* 根拠: (行番号: 178〜187 / 抜粋: "class StatusCard(NamedTuple):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 131〜141 / 抜粋: "class StatusCard(NamedTuple):")
+* 根拠: (行番号: 178〜187 / 抜粋: "class StatusCard(NamedTuple):")
 
 
 
 ### `render_status_card_html`
 
 * **役割**: タイトル・値・テーマ名を受け取り、`CUSTOM_CSS`で定義された`.status-card`クラスおよびテーマクラス（`{theme}`）を適用したステータスカードのHTML文字列を生成して返す。**（Issue #378で修正）** `title`・`value`は`unsafe_allow_html=True`経由でそのまま描画される呼び出し元(`views/dashboard/summary.py`)が多く、以前はスクレイピング/DB由来の文字列（クエストタイトル等）をそのまま埋め込むと格納型XSSになり得た。`title`は常に`html.escape`する。`value`も既定でエスケープするが、`views/dashboard/summary.py`の`get_bicycle_status`のように前日比の色付け（`<span>`等）を意図的に組み立てて渡す呼び出し元向けに、キーワード専用引数`value_is_html`（既定`False`）で`value`のエスケープをスキップできる（`title`は`value_is_html`の影響を受けず常にエスケープされる）。
-* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 143 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")、エスケープ処理 (行番号: 157 / 抜粋: "safe_title = html.escape(title)")
+* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 190 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")、エスケープ処理 (行番号: 157 / 抜粋: "safe_title = html.escape(title)")
 
 
 * **引数/リクエスト**: `title` (型: `str`。カードの見出し文字列。常にエスケープされる)、`value` (型: `str`。カードに表示する値。`value_is_html=True`時のみHTMLタグを含む文字列を許容)、`theme` (型: `str`。`CUSTOM_CSS`で定義されたテーマクラス名。例: `"theme-green"`)、`value_is_html` (型: `bool`。キーワード専用、既定`False`。Issue #378で追加)
@@ -167,15 +262,15 @@
 ### `render_status_grid` (スマホ対応で追加)
 
 * **役割**: `StatusCard` の並びを `render_status_card_html` で1枚ずつHTML化し、`<div class="status-grid">` で囲んで1回の `st.markdown(..., unsafe_allow_html=True)` で描画する。docstringに、以前は `st.columns(3)` を3段重ねて9枚を並べていたが、Streamlitの列は画面幅が足りなくても横並びを維持するためスマートフォンでは1枚あたり約100pxまで潰れて値が読めなかったこと、列数の決定をCSS（`.status-grid`のauto-fit）に委ねることでスマホ2列・PC3〜5列に自動で切り替わることが記されている。
-* 根拠: `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 166〜178 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
+* 根拠: `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 213〜225 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
 
 
 * **引数/リクエスト**: `cards` (型: `Iterable[StatusCard]`)
-* 根拠: 関数シグネチャ (行番号: 166 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
+* 根拠: 関数シグネチャ (行番号: 213 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 関数シグネチャ (行番号: 166 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
+* 根拠: 関数シグネチャ (行番号: 213 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
 
 
 * **副作用**: `st.markdown` による画面描画（`unsafe_allow_html=True`）。
@@ -190,7 +285,7 @@
 ### `safe_section` (コンテキストマネージャ、Issue #438で追加)
 
 * **役割**: ダッシュボードの1セクション(タブ・サマリー等)の描画を`with`ブロックとして囲み、内部で発生した例外を捕捉してそのセクションのプレースホルダ表示に閉じ込める。以前は`dashboard.py`の`main()`全体を1つの`try/except`で囲んでおり、いずれか1つのタブの描画で例外が起きるとダッシュボード全体がエラー画面になり、無関係な他のタブの表示まで巻き込んでいた。本関数の導入により、`dashboard.py`はセクション単位で例外を隔離するようになった（**スマホ対応で変更**: 保護の単位は「タブ」ではなく、1つのタブ内の各セクション。`quest_tab.py`はスマホ対応で撤去された）。L-L5 (#410)と同じ方針で、`traceback`等の内部詳細(ファイルパス・設定値等)は画面に出さずログにのみ残す。
-* 根拠: 関数Docstring・実装 (行番号: 182〜201 / 抜粋: "def safe_section(section_name: str):")
+* 根拠: 関数Docstring・実装 (行番号: 229〜248 / 抜粋: "def safe_section(section_name: str):")
 
 
 * **引数/リクエスト**: `section_name` (型: `str`。エラーメッセージに含めるセクション名。例: `"クエスト"`)
@@ -218,9 +313,21 @@ flowchart TD
         M1["開始"] --> M2["html/logging/traceback/contextlib/typing/streamlitをインポート"]
         M2 --> M2b["MOBILE_BREAKPOINT_PX(640)を定義"]
         M2b --> M3["CUSTOM_CSS(f-string)を定義<br/>メディアクエリに640pxを埋め込む"]
-        M3 --> M3b["StatusCard(NamedTuple)を定義"]
+        M3 --> M3c["DASHBOARD_CACHE_TTL_SEC(60)を定義<br/>Issue #741"]
+        M3c --> M3d["load_*_cached 4本を @st.cache_data で登録<br/>Issue #741"]
+        M3d --> M3b["StatusCard(NamedTuple)を定義"]
         M3b --> M4["render_status_card_html / render_status_grid / safe_section を定義"]
         M4 --> M5["終了"]
+    end
+
+    subgraph Cached_Loader_Flow["load_*_cached() 処理フロー(Issue #741で追加)"]
+        C1["開始: dashboard.py の main() から呼ばれる"] --> C2{"同じ引数のキャッシュが<br/>TTL(60秒)内に存在するか"}
+        C2 -- "あり" --> C3["関数本体を実行せず保持値を返す<br/>(SQLiteへ行かない)"]
+        C2 -- "なし" --> C4["analysis_service の対応関数へ委譲"]
+        C4 --> C5["戻り値をキャッシュへ保存"]
+        C5 --> C3
+        C3 --> C6["終了"]
+        C7["「🔄 データを更新」ボタン<br/>(dashboard.py)"] -.->|"st.cache_data.clear()"| C2
     end
 
     subgraph render_status_grid_Flow["render_status_grid() 処理フロー(スマホ対応で追加)"]
@@ -254,12 +361,19 @@ graph TD
 
     subgraph Third_Party
         StreamlitModule["streamlit(Issue #438で追加)"]
+        PandasModule["pandas(Issue #741で追加)"]
+    end
+
+    subgraph Own_Modules
+        AnalysisService["services/analysis_service.py(Issue #741で追加)"]
     end
 
     DashboardCommonPy -->|"html.escape(title/value)"| HtmlModule
-    DashboardCommonPy -->|"st.error / st.markdown"| StreamlitModule
+    DashboardCommonPy -->|"st.error / st.markdown / st.cache_data"| StreamlitModule
+    DashboardCommonPy -->|"戻り値の型注釈"| PandasModule
+    DashboardCommonPy -->|"load_sensor_data / load_generic_data / load_bicycle_data / load_nas_status"| AnalysisService
 
-    Dashboard["dashboard.py"] -->|view_commonとしてimport, CUSTOM_CSSとsafe_sectionを参照| DashboardCommonPy
+    Dashboard["dashboard.py"] -->|view_commonとしてimport, CUSTOM_CSS/safe_section/load_*_cachedを参照| DashboardCommonPy
     Summary["summary.py"] -->|.commonとしてimport, StatusCard/render_status_gridを呼び出し| DashboardCommonPy
     MiscTab["misc_tab.py"] -.->|.commonとしてimport (未使用)| DashboardCommonPy
 ```
@@ -273,6 +387,10 @@ graph TD
 
 ## 8. 保守上の注意点
 
+* **[Issue #741] キャッシュは View 層に閉じ込めること**: `analysis_service` は `unified_server.py` からもインポートされるため、`@st.cache_data` を `analysis_service` 側へ移すとサーバープロセスが Streamlit に依存してしまう。キャッシュ付きラッパーは本ファイルに置き、`analysis_service` 本体は素のままにしておくこと（`tests/test_dashboard_cache.py` の `test_analysis_service_does_not_depend_on_streamlit` が固定している）。
+* **[Issue #741] キャッシュはプロセス内でグローバルに残る**: `@st.cache_data` のキーは関数の引数だけで決まるため、テストで `analysis_service` の関数を差し替えてもキャッシュは無効化されない。`views/dashboard/common.py` のローダを実行するテストは、前後で `st.cache_data.clear()` を呼ぶこと（`tests/test_dashboard_cache.py` の autouse フィクスチャ参照）。差し替える側のテストは、素の `analysis_service` ではなく `view_common.load_*_cached` を差し替えるほうが安全。
+* **[Issue #741] TTL を延ばすときの判断材料**: `DASHBOARD_CACHE_TTL_SEC` はセンサーの書き込み間隔より十分短い 60 秒にしてある。延ばすとダッシュボードが「今の状態」を見る用途で古い値を出す。逆に 0 にするとキャッシュが無効化され、`st.cache_data.clear()` を呼ぶ「🔄 データを更新」ボタンが再び無意味になる。
+
 * **[修正済み] Issue #378 render_status_card_htmlの格納型XSS**: `title`/`value`は呼び出し元（`views/dashboard/summary.py`）が`unsafe_allow_html=True`でそのままStreamlitに渡すため、以前はエスケープ無しでf-stringに埋め込んでいた。`title`にDB/スクレイピング由来の文字列が渡ると格納型XSSになり得る構造だった（値そのものは本ファイル外から渡されるため、本ファイル単体では実際に危険な値が渡っているかは判断できない）。`html.escape`で`title`を常に、`value`も既定でエスケープするよう修正し、`get_bicycle_status`のように意図的にHTML断片を組み立てる呼び出し元向けにキーワード専用引数`value_is_html`（既定`False`）でエスケープをスキップできるようにした。
 * 根拠: `import html` (行番号: 2)、`html.escape` の呼び出し (行番号: 63〜64)、`value_is_html`引数 (行番号: 50)
 
@@ -282,7 +400,7 @@ graph TD
 
 
 * **`theme`引数のバリデーション欠如**: `render_status_card_html`は`theme`引数がCSS上定義済みのクラス名（`theme-green`等）であることを検証しない。呼び出し元がタイプミス等で未定義のテーマ名を渡した場合、CSSが適用されずスタイル崩れが発生するが、実行時エラーにはならず気づきにくい。
-* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` （バリデーション処理なし） (行番号: 143 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")
+* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` （バリデーション処理なし） (行番号: 190 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")
 
 
 * **CSSがPython文字列としてハードコード**: スタイル定義がすべて`CUSTOM_CSS`という1つの長い文字列としてPythonコード内にハードコードされており、`.css`ファイルとして分離されていない。デザイン変更のたびにPythonコードの編集が必要となる。
@@ -308,6 +426,8 @@ graph TD
 | `CUSTOM_CSS`が実際に`st.markdown`へ渡される具体的な箇所・頻度 | 本ファイル自体は文字列を定義するのみで、適用処理は呼び出し元にあるため。 | `dashboard.py` |
 | メディアクエリが依拠する`data-testid`の実際の値 | Streamlitが出力するDOMは外部ライブラリの実装詳細であり、本ファイルからは検証できない。 | Streamlit本体（外部ライブラリ） |
 | `render_status_card_html`に渡される`theme`引数の完全な値一覧（本ファイルの`CUSTOM_CSS`で定義される5種以外が渡されていないか） | 呼び出し元の全箇所を横断的に確認する必要があるため。 | `summary.py`, `misc_tab.py` および`views/dashboard`配下の他ファイル |
+| **（Issue #741）** `st.cache_data` のキー計算方法・キャッシュの保存先・上限サイズ | Streamlit の実装詳細であり、本ファイルからは判断できない。`ttl` と `show_spinner` を渡していること以外は分からない。 | Streamlit本体（外部ライブラリ） |
+| **（Issue #741）** キャッシュ導入によって実際に削減された読み取り行数・応答時間 | 本ファイルには読み取り行数の情報が無く（`limit` は呼び出し元が渡す）、実測は実機のダッシュボードでしか取れない。 | `dashboard.py`、実機での計測 |
 
 ## 相互参照による補足情報
 
