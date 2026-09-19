@@ -128,7 +128,12 @@ def main() -> None:
     # 3. 異常検知時の通知処理 (Notification Guard)
     if alert_messages:
         if check_cooldown():
-            logger.error("メモリ異常を検知しました。Discordへエラー通知を送信します。")
+            # Issue #742: 直後に send_push で専用の通知を送るため、ハンドラ経由の
+            # 通知は opt-out して二重通知を避ける。
+            logger.error(
+                "メモリ異常を検知しました。Discordへエラー通知を送信します。",
+                extra={"skip_discord": True},
+            )
             messages_to_send = [{"type": "text", "text": "🚨 **メモリリーク/リソース枯渇の兆候**\n" + "\n".join(alert_messages)}]
             
             # 運用介入が必要なエラーとして送信
