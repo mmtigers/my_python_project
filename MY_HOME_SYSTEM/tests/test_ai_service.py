@@ -15,6 +15,7 @@ _call_gemini_api_with_retry自体を直接差し替えることで、analyze_tex
 の分岐ロジックをgoogle.generativeaiの内部構造から切り離してテストする。
 """
 import asyncio
+import json
 import os
 import queue
 import sys
@@ -1165,3 +1166,97 @@ class TestResponseHelpers:
 
     def test_response_text_or_none_returns_text(self):
         assert ai_service._response_text_or_none(make_response(text="ok")) == "ok"
+
+
+class TestRestrictedQueryResourceLimits:
+    """Issue #750 (AUDIT-021): AI 生成 SQL の実行時間・取得行数の上限。
+
+    認可コールバック(#357)は「何を読めるか」を制限するが「どれだけ重い処理をして
+    よいか」は制限しない。SQLITE_RECURSIVE は明示的に許可されており、許可テーブル
+    (device_records / power_usage 等、保持期間削除が無く単調増加する。#733)の
+    クロス結合だけでも行数の二乗になる。この実行は asyncio.to_thread の既定
+    エグゼキュータ(LINE Webhook・Alexa・SwitchBot Webhook・同期ルートが共有する)で
+    走るため、数本占有されるとシステム全体が詰まる。
+    sqlite3.connect(timeout=) はロック待ちの上限で、実行時間には効かない。
+    """
+
+    def test_cross_join_of_allowed_tables_is_interrupted(self, isolated_db, monkeypatch):
+        """許可テーブル同士のクロス結合が中断され、既存のエラー経路へ落ちること。
+
+        認可コールバックは「許可テーブルを読むこと」自体は当然許すため、これを
+        止められるのは progress handler だけである。
+        """
+        from core.database import get_db_cursor
+
+        monkeypatch.setattr(ai_service, "_AI_SQL_TIMEOUT_SEC", 0.2)
+        with get_db_cursor(commit=True) as cur:
+            for i in range(300):
+                cur.execute(
+                    f"INSERT INTO {config.SQLITE_TABLE_FOOD} "
+                    "(user_id, user_name, meal_date, meal_time_category, menu_category, timestamp) "
+                    "VALUES ('U1', '太郎', '2026-09-04', 'Dinner', ?, '2026-09-04T19:00:00+09:00')",
+                    (f"menu-{i}",),
+                )
+
+        # 300^3 = 2,700万行ぶんの走査。上限が無ければワーカーを長時間占有する。
+        table = config.SQLITE_TABLE_FOOD
+        result = ai_service._execute_restricted_read_query(
+            f"SELECT count(*) AS c FROM {table} a, {table} b, {table} c"
+        )
+
+        assert result.startswith("検索エラー:"), result
+        assert "interrupted" in result
+
+    def test_recursive_cte_over_an_unknown_name_is_denied_by_the_authorizer(self, isolated_db):
+        """再帰CTEは実際には認可コールバック側で止まること(実測で確認した事実の記録)。
+
+        Issue #750 は「SQLITE_RECURSIVE を明示的に許可しているため無限再帰CTEが
+        生成されうる」と述べているが、CTE 名に対する SQLITE_READ が
+        ALLOWED_SEARCH_TABLES の検査に掛かるため、実際には "not authorized" で
+        準備時に弾かれる。progress handler が本当に効いてくるのは上の
+        「許可テーブルのクロス結合」のようなケースである。
+        """
+        result = ai_service._execute_restricted_read_query(
+            "WITH RECURSIVE forever(n) AS ("
+            "  SELECT 1 UNION ALL SELECT n + 1 FROM forever"
+            ") SELECT count(*) FROM forever"
+        )
+        assert result.startswith("検索エラー:"), result
+        assert "not authorized" in result
+
+    def test_normal_query_is_not_affected(self, isolated_db):
+        """通常のクエリは従来どおり結果を返すこと。"""
+        _seed_search_db_tables()
+        result = ai_service._execute_restricted_read_query(
+            f"SELECT menu_category FROM {config.SQLITE_TABLE_FOOD}"
+        )
+        assert "カレー" in result
+
+    def test_result_rows_are_capped(self, isolated_db, monkeypatch):
+        """取得行数に上限があること(fetchall で全行をメモリへ読まない)。
+
+        最終的に tool_search_db 側が result[:2000] で切るが、切るのが「取得後」
+        だったため巨大な結果セットの生成コストは払っていた。
+        """
+        from core.database import get_db_cursor
+
+        monkeypatch.setattr(ai_service, "_AI_SQL_MAX_ROWS", 3)
+        with get_db_cursor(commit=True) as cur:
+            for i in range(10):
+                cur.execute(
+                    f"INSERT INTO {config.SQLITE_TABLE_FOOD} "
+                    "(user_id, user_name, meal_date, meal_time_category, menu_category, timestamp) "
+                    "VALUES ('U1', '太郎', '2026-09-04', 'Dinner', ?, '2026-09-04T19:00:00+09:00')",
+                    (f"menu-{i}",),
+                )
+
+        result = ai_service._execute_restricted_read_query(
+            f"SELECT menu_category FROM {config.SQLITE_TABLE_FOOD}"
+        )
+        assert len(json.loads(result)) == 3
+
+    def test_limits_are_declared_as_module_constants(self):
+        """値を直書きせず定数で持つこと(運用で調整できるようにするため)。"""
+        assert ai_service._AI_SQL_TIMEOUT_SEC > 0
+        assert ai_service._AI_SQL_PROGRESS_INSTRUCTIONS > 0
+        assert ai_service._AI_SQL_MAX_ROWS > 0
