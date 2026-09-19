@@ -328,3 +328,55 @@ class TestStartAllShQuestMasterSyncFreshnessCheck:
             content = f.read()
         assert '.venv/bin/python3' in content
         assert 'python_exec="python3"' in content
+
+
+class TestFamilyQuestDeployShNpmCiFreshnessCheck:
+    """Issue #757 (AUDIT-028): deploy.sh が毎回 npm ci するのをやめる。
+
+    npm ci は仕様上 node_modules を**削除してから**入れ直すため、ネットワークが
+    無いときに実行すると「node_modules を失ったままビルド不能」になる。旧 dist/ は
+    アトミック差し替え(#650)で無傷なので配信は継続するが、ネットワークが回復する
+    まで新しいフロントを一切デプロイできない。package-lock.json のハッシュが
+    変わっていなければ npm ci をスキップする(#489 の「lockfile を厳密に守る」意図は
+    lockfile 変更時に npm ci する限り損なわれない)。
+    """
+
+    DEPLOY_SH = os.path.join(os.path.dirname(__file__), "..", "..", "family-quest", "deploy.sh")
+
+    def _read(self) -> str:
+        with open(self.DEPLOY_SH, "r", encoding="utf-8") as f:
+            return f.read()
+
+    def test_npm_ci_is_guarded_by_a_lockfile_hash_check(self):
+        script = self._read()
+        m = re.search(r'LOCK_HASH_FILE="([^"]+)"', script)
+        assert m, "LOCK_HASH_FILE の定義が見つかりません"
+        assert m.group(1).startswith("node_modules/"), (
+            "ハッシュファイルは node_modules 内に置くこと"
+            "(npm ci が node_modules ごと消すため、整合が自動的に保たれる。"
+            "gitignore 済みでもある)"
+        )
+        assert '[[ ! -d node_modules || "$current_lock" != "$recorded_lock" ]]' in script
+
+    def test_npm_ci_still_uses_the_lockfile_strictly(self):
+        """#489 の意図(npm install へ戻さない)が維持されていること。"""
+        script = self._read()
+        assert "npm ci --no-audit --no-fund" in script
+        # コメント中の「npm installだと〜」という経緯の記述は除いて、実行行だけを見る
+        code_lines = [ln for ln in script.splitlines() if not ln.lstrip().startswith("#")]
+        assert not any("npm install" in ln for ln in code_lines), (
+            "npm install へ戻すと package.json の範囲指定を再解決して lockfile を"
+            "書き換えてしまう(Issue #489)"
+        )
+
+    def test_hash_is_recorded_only_after_a_successful_npm_ci(self):
+        """npm ci は node_modules を作り直すため、ハッシュ記録はその後でなければ消える。"""
+        script = self._read()
+        ci_idx = script.index("npm ci --no-audit --no-fund")
+        record_idx = script.index('echo "$current_lock" > "$LOCK_HASH_FILE"')
+        assert ci_idx < record_idx
+
+    def test_skip_path_reports_what_it_did(self):
+        """スキップしたことがログから分かること(ビルド漏れの誤診断を避ける)。"""
+        script = self._read()
+        assert "npm ci をスキップします" in script

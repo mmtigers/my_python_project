@@ -80,12 +80,31 @@ else
     exit 1
 fi
 
-echo "[deploy] family-quest: npm ci..."
 # Issue #489: CI(test.ymlのfrontendジョブ)と同じnpm ciを使い、package-lock.jsonを
 # 厳密に守る。npm installだとpackage.jsonの範囲指定(^18.3.1等)を再解決して
 # lockfileを書き換えてしまい、(1) CIが緑でも実機は別バージョンでビルドされうる、
 # (2) 実機のgitツリーがdirtyになり次回のgit pullが失敗する、という2つの問題を招く。
-npm ci --no-audit --no-fund
+#
+# Issue #757 (AUDIT-028): ただし npm ci は仕様上 node_modules を**削除してから**
+# lockfile に従って入れ直すため、ネットワークが無いときに実行すると
+# 「node_modules を失ったままビルド不能」になる。旧 dist/ は下のアトミック差し替え
+# (Issue #650)で無傷なので配信自体は継続するが、ネットワークが回復するまで
+# 新しいフロントを一切デプロイできない(新しい Pi への移行・障害中の緊急修正で困る)。
+# package-lock.json のハッシュを node_modules 内に記録しておき、変わっていなければ
+# npm ci を丸ごとスキップする(start_all.sh Phase 1.5 の requirements 鮮度チェックと
+# 同じ方式)。lockfile が変わったときだけ npm ci するので #489 の意図は損なわれない。
+# 副次的に、TS/TSX だけを変えた大多数のケースで起動時間が大幅に縮む(Issue #731)。
+LOCK_HASH_FILE="node_modules/.package-lock-sha256"
+current_lock="$(sha256sum package-lock.json | cut -d' ' -f1)"
+recorded_lock="$(cat "$LOCK_HASH_FILE" 2>/dev/null || true)"
+if [[ ! -d node_modules || "$current_lock" != "$recorded_lock" ]]; then
+    echo "[deploy] family-quest: npm ci..."
+    npm ci --no-audit --no-fund
+    # npm ci は node_modules を作り直すのでハッシュは成功後に書く
+    echo "$current_lock" > "$LOCK_HASH_FILE"
+else
+    echo "[deploy] family-quest: node_modules は package-lock.json と整合。npm ci をスキップします。"
+fi
 
 echo "[deploy] family-quest: build (-> $NEXT_DIR/)..."
 rm -rf "$NEXT_DIR"
