@@ -323,26 +323,10 @@
 
 
 
-### `load_ai_report`
+### （Issue #701で削除）`load_ai_report`
 
-* **役割**: データベースから最新のAIレポートを1件取得する。
-* 根拠: `load_ai_report` (行番号: 416 / 抜粋: "ORDER BY id DESC LIMIT 1")
-
-
-* **引数/リクエスト**: なし
-* 根拠: `def load_ai_report() -> Optional[pd.Series]:` (行番号: 420 / 抜粋: "def load_ai_report()")
-
-
-* **戻り値/レスポンス**: `Optional[pd.Series]` (最新の1件。存在しない場合は `None`)
-* 根拠: `-> Optional[pd.Series]:` (行番号: 414 / 抜粋: "-> Optional[pd.Series]:")
-
-
-* **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db(query)` (行番号: 417 / 抜粋: "df = load_data_from_db(query)")
-
-
-* **エラーハンドリング**: 内部で呼び出される `load_data_from_db` に依存。
-* 根拠: 該当関数内に独自の `try-except` なし (行番号: 420 / 抜粋: "def load_ai_report()")
+* **退役（2026-09-19、Issue #701）**: 以前は`load_bicycle_data`の直後に、`ai_report_records`（旧`config.SQLITE_TABLE_AI_REPORT`）から`ORDER BY id DESC LIMIT 1`で最新1件を`Optional[pd.Series]`として返す`load_ai_report()`が存在し、`dashboard.py`の`_render_ai_report()`（「セバスチャンからの報告」）が唯一の呼び出し元だった。テーブルへの書込が2026-07-16で止まっており古い内容を表示し続けていたため、表示側・`config`の定数とあわせてオーナー判断で機能ごと削除した。`ai_report_records`テーブル自体は履歴として残している（削除マイグレーションは追加していない）。
+* 根拠: 現行の`analysis_service.py`に`load_ai_report`という文字列が存在しないこと（削除の確認）、回帰テスト`tests/test_dashboard_low_items.py`の`TestAiReportRetired`
 
 
 * **（Issue #507で削除）**: 以前はこの直後に、アプリランキング（`app_rankings`）テーブルを参照する`load_ranking_dates`/`load_ranking_data`の2関数が存在した。しかし参照先の`app_rankings`テーブルへ書き込むコード（収集スクリプト）がリポジトリのどこにも存在せず、収集に使うはずの`google-play-scraper`もIssue #496で未使用パッケージとして既に削除済みであり、`migrations/`にもテーブル定義が無いため新規構築したDBでは永久に「データがありません」としか出ない死んだ機能だった。呼び出し元だった`views/dashboard/log_tab.py`の`render_trends`（「🌟 最近の流行・トレンド推移」タブ）ごとオーナー判断で削除された。
@@ -356,7 +340,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 430 / 抜粋: "def get_disk_usage()")
+* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 424 / 抜粋: "def get_disk_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (GB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -379,7 +363,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 449 / 抜粋: "def get_memory_usage()")
+* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 443 / 抜粋: "def get_memory_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (MB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -471,7 +455,6 @@ graph TD
         LoadWea["load_weather_history()"]
         LoadYearly["load_yearly_temperature_stats()"]
         LoadBike["load_bicycle_data()"]
-        LoadAI["load_ai_report()"]
     end
 
     subgraph System Stats & Utils

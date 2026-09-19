@@ -2,11 +2,9 @@
 """
 dashboard.py の Low項目(#410)の回帰テスト:
 
-- L-L2: AIレポートのtimestampが"T"を含まない旧フォーマット
-  ("YYYY-MM-DD HH:MM:SS")の場合、以前は常に現在時刻(datetime.now())に
-  フォールバックしており、レポートの実際の生成時刻に関わらず「たった今」の
-  報告であるかのように表示されていた。実際のタイムスタンプをJSTとしてパース
-  するようになったことを確認する。
+- (旧 L-L2: AIレポートのtimestamp旧フォーマットのパース。Issue #701 で
+  AIレポート(セバスチャン)機能ごと退役したため、該当テストは
+  「表示されないこと」の回帰テストに置き換えた。)
 - L-L5: 例外発生時に traceback.format_exc() を st.code() で画面表示していたが、
   内部のファイルパス・設定値が露出するため、ログにのみ出力するよう変更した
   ことを確認する。
@@ -58,7 +56,7 @@ def _patch_view_modules():
     ]
 
 
-def _run_main_with_report(report):
+def _run_main():
     import pandas as pd
 
     mock_st = _mock_st()
@@ -69,7 +67,6 @@ def _run_main_with_report(report):
          patch.object(dashboard.analysis_service, "apply_friendly_names", return_value=pd.DataFrame()), \
          patch.object(dashboard.analysis_service, "load_bicycle_data", return_value=pd.DataFrame()), \
          patch.object(dashboard.analysis_service, "load_nas_status", return_value=None), \
-         patch.object(dashboard.analysis_service, "load_ai_report", return_value=report), \
          patch.object(dashboard, "logger") as mock_logger:
         for p in patches:
             p.start()
@@ -81,26 +78,25 @@ def _run_main_with_report(report):
     return mock_st, mock_logger
 
 
-class TestAiReportTimestampFallbackTimezone:
-    def test_legacy_timestamp_without_t_is_parsed_not_replaced_with_now(self):
-        """L-L2 (#410): 'T'を含まない旧フォーマットのtimestampが、現在時刻ではなく
-        実際の値からパースされること(深夜0時台のレポートなら🌙アイコンになるはず)。"""
-        report = {"timestamp": "2020-01-01 02:00:00", "message": "テスト報告"}
+class TestAiReportRetired:
+    """Issue #701 (2026-09-19): AIレポート(セバスチャン)は書込側が2026-07-16以降
+    停止しており、2か月前の内容を「最新の報告」として出し続けていたため、
+    オーナー判断で機能ごと退役した。表示・読み出し・テーブル名定数が
+    復活していないことを確認する(テーブル ai_report_records 自体は履歴として残す)。"""
 
-        mock_st, _ = _run_main_with_report(report)
+    def test_dashboard_does_not_render_ai_report(self):
+        mock_st, _ = _run_main()
 
-        # expanderのラベルに実際の時刻(02:00)が使われ、現在時刻ではないこと
-        expander_calls = [str(c.args[0]) for c in mock_st.expander.call_args_list if c.args]
-        assert any("02:00" in label for label in expander_calls), expander_calls
+        labels = [str(c.args[0]) for c in mock_st.expander.call_args_list if c.args]
+        assert not any("セバスチャン" in label for label in labels), labels
+        assert not hasattr(dashboard, "_render_ai_report")
 
-    def test_iso_timestamp_with_t_still_parses_correctly(self):
-        """既存動作(T区切りのISO形式)が壊れていないこと"""
-        report = {"timestamp": "2026-01-01T15:30:00+09:00", "message": "テスト報告"}
+    def test_reader_and_config_constant_are_removed(self):
+        import config
+        from services import analysis_service
 
-        mock_st, _ = _run_main_with_report(report)
-
-        expander_calls = [str(c.args[0]) for c in mock_st.expander.call_args_list if c.args]
-        assert any("15:30" in label for label in expander_calls), expander_calls
+        assert not hasattr(analysis_service, "load_ai_report")
+        assert not hasattr(config, "SQLITE_TABLE_AI_REPORT")
 
 
 class TestNoTracebackOnScreen:

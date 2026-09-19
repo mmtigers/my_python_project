@@ -74,7 +74,6 @@ class TestDashboardTabIsolation:
             stack.enter_context(patch.object(dashboard.analysis_service, "apply_friendly_names", return_value=pd.DataFrame()))
             stack.enter_context(patch.object(dashboard.analysis_service, "load_bicycle_data", return_value=pd.DataFrame()))
             stack.enter_context(patch.object(dashboard.analysis_service, "load_nas_status", return_value=None))
-            stack.enter_context(patch.object(dashboard.analysis_service, "load_ai_report", return_value=None))
             stack.enter_context(patch.object(dashboard.summary, "render_summary"))
             stack.enter_context(patch.object(dashboard.misc_tab, "render_traffic", side_effect=RuntimeError("train tab exploded")))
             stack.enter_context(patch.object(dashboard.misc_tab, "render_photos"))

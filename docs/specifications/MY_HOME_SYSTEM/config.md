@@ -175,7 +175,7 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 * **役割**: 検証I/Oを伴うパス定数の遅延解決(PEP 562)。`_resolve_assets_dir()` が `ensure_safe_path_with_backoff` で `ASSETS_DIR` を検証・解決し、`_ASSETS_SUBDIRS_TO_CREATE` の各サブディレクトリを作る。モジュールの `__getattr__(name)` は `ASSETS_DIR` と `_ASSETS_DERIVED_PATHS` の派生パス(`UPLOAD_DIR`・`SOUND_DIR` 等)を初回アクセス時にだけ解決し、結果を `globals()` に書き込むため以降は通常の属性解決になる(=キャッシュ。テストは `monkeypatch.setattr`/`delattr` で上書き・再解決できる)。**（Issue #664）** `__getattr__` は `LOG_DIR` も扱い、`ensure_safe_path_with_backoff(_PREFERRED_LOG_DIR, "logs")` で解決する。`prewarm_nas_paths()` は `unified_server.py` の `lifespan` から呼ばれ、遅延化前と同じく起動時点で `ASSETS_DIR`・`LOG_DIR`・派生パスの検証・フォールバック判定を済ませる。
 * **戻り値/レスポンス**: `_resolve_assets_dir` / `__getattr__` は `str`、`prewarm_nas_paths` は `None`。未知の属性名では `__getattr__` が `AttributeError` を送出する。
 * **副作用**: NAS 上のディレクトリ作成、`globals()` への書き込み、失敗時の warning ログ(例外は送出せずローカルへフォールバック)。
-* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 588)、`def __getattr__(name: str) -> str:` (行番号: 602)、`def prewarm_nas_paths() -> None:` (行番号: 629)
+* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 581)、`def __getattr__(name: str) -> str:` (行番号: 595)、`def prewarm_nas_paths() -> None:` (行番号: 622)
 
 ### `verify_and_initialize_storage`
 
@@ -423,8 +423,8 @@ flowchart TD
 * `NAS_WRITE_CHECK_RETRIES`(321行目)は本ファイル内では未使用で、`monitors/nas_monitor.py`の`NasMonitor.__init__`が`getattr(config, "NAS_WRITE_CHECK_RETRIES", 3)`で参照する消費専用の設定値である。本ファイル単体を見ても実際の再試行ロジック(Exponential Backoff)は確認できない点に注意。
 * **Issue #488での大規模クリーンアップ**: リポジトリ全体をgrepし`config.py`以外から一切参照されていないことを確認できた53個のモジュールレベル定数を削除した。内訳は、未実装の給与PDF機能(`GMAIL_USER`・`SALARY_PDF_PASSWORDS`等)、SUUMO/土地価格監視(`SUUMO_SEARCH_URL`等)、小児科予約監視(`CLINIC_MONITOR_URL`等)、Google Photos連携(`GOOGLE_PHOTOS_TOKEN`等。当時のドキュメントが参照していた`tools/google_photos_service.py`は本リポジトリに実体がなく、参照する箇所も存在しなかった)、ショッピング・美容院予約監視(`SHOPPING_TARGETS`等)、子供健康チェック機能(`CHILDREN_NAMES`等)といった未実装機能の設定値、Issue #485で削除済みのタイムラプス関連スクリプト(`monitors/timelapse_runner.py`/`monitors/timelapse_generator.py`)の残置設定(`TIMELAPSE_CAMERAS`・`TIMELAPSE_SCHEDULES`・`TMP_VIDEO_DIR`等)、およびカメラ設定の旧方式(`CAMERA_IP`等、`CAMERAS`リストに統合済み)などである。これに伴いモジュールdocstringの目次を21セクションから14セクションへ振り直した(削除されたのは旧5.給与、6.ショッピング・美容院予約監視、7.土地価格監視、8.Google Photos連携、9.不動産情報REINFOLIB、14.外部サイト監視SUUMO、15.小児科予約監視の各セクション)。一方で`ALLOW_ALL_ORIGINS`(345行目)は`config.py`以外からの直接参照がなく一見未使用に見えるが、346〜347行目で`CORS_ORIGINS`を`["*"]`に上書きするimport時の副作用を通じて間接的にCORS設定全体を制御しているため、今回のレビューで意図的に削除対象から除外された。今後の同種クリーンアップでもこの点(環境変数経由の間接的な副作用)には注意すること。
 * 根拠: [ALLOW_ALL_ORIGINSによるCORS_ORIGINS上書き] (行番号: 345〜347 / 抜粋: `ALLOW_ALL_ORIGINS: bool = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "true"\nif ALLOW_ALL_ORIGINS:\n    CORS_ORIGINS = ["*"]`), [モジュール目次(14セクション)] (行番号: 5〜19)
-* **（Issue #584で判明）`SQLITE_TABLE_AI_REPORT`はリポジトリ内に書込コードが無い**: `ai_report_records`(ダッシュボードの「セバスチャンからの報告」欄が`analysis_service.load_ai_report`経由で表示)へのINSERT/UPDATE経路はリポジトリ全体・git履歴を通じて一度も存在しない。一方`dashboard.py`にはこのテーブルの`timestamp`列を新形式(ISO8601)・旧形式(`"YYYY-MM-DD HH:MM:SS"`のnaive文字列、Issue #410 L-L2で言及)の両方でパースする分岐があり、過去に実データが書き込まれていたことを示唆する。リポジトリ管理外の外部プロセス(実機での手動運用、または別リポジトリのスクリプト)がこのテーブルへ書き込む前提の設計と判断し、その旨をコメントとして明記した。本リポジトリ側に書込コードを追加する対応は不要。
-* 根拠: `SQLITE_TABLE_AI_REPORT`定義とコメント (行番号: 275〜282)、[dashboard.pyの新旧タイムスタンプ分岐] (`MY_HOME_SYSTEM/dashboard.py`、Issue #410 L-L2のコメント参照)
+* **（Issue #701・2026-09-19で削除）`SQLITE_TABLE_AI_REPORT`**: 以前は`SQLITE_TABLE_AI_REPORT = "ai_report_records"`と、Issue #584で付けた「このテーブルへの書込はリポジトリ管理外の外部プロセスが行う前提で、本リポジトリ側に書込コードは不要」というコメントがあった。しかし実機DBの最新行は`2026-07-16T19:01`で止まっており、その外部プロセスも動いていないことが確認された（Issue #584の前提が実機で成立していなかった）。ダッシュボードのAIレポート（「セバスチャンからの報告」、`dashboard.py`の`_render_ai_report`・`analysis_service.load_ai_report`）ごとオーナー判断で退役し、この定数とコメントも削除した。Issue #584の結論はこれにより置き換えられた。現在は同じ位置に退役の経緯を示す短いコメントのみが残る。`ai_report_records`テーブル自体は履歴として残しており（`migrations/0000_baseline_schema.sql`の定義も変更なし）、削除マイグレーションは追加していない。
+* 根拠: 退役コメント (行番号: 313 / 抜粋: "# Issue #701 (2026-09-19): 旧 SQLITE_TABLE_AI_REPORT")
 
 ## 9. 不明事項一覧
 

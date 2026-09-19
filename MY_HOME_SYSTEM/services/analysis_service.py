@@ -417,12 +417,6 @@ def load_bicycle_data(limit: int = 2000) -> pd.DataFrame:
         logger.error(f"Bicycle Data Load Error: {e}")
         return pd.DataFrame()
 
-def load_ai_report() -> Optional[pd.Series]:
-    """最新のAIレポートを取得"""
-    query = f"SELECT * FROM {config.SQLITE_TABLE_AI_REPORT} ORDER BY id DESC LIMIT 1"
-    df = load_data_from_db(query)
-    return df.iloc[0] if not df.empty else None
-
 # ==========================================
 # System Stats & Utils
 # ==========================================
