@@ -59,9 +59,14 @@ Raspberry Pi 1台の上で常駐稼働する個人用の統合プラットフォ
 `TimeoutStartSec` を設定していない（systemd 既定 90 秒）。フロントエンドを変更した直後の起動、
 または `.venv` 再作成時の起動は Raspberry Pi 上で確実に 90 秒を超え、systemd が起動中の
 ユニットを kill する。歯止めであるべき `StartLimitIntervalSec`/`StartLimitBurst` は
-`[Service]` セクションに置かれており（正しくは `[Unit]`）、意図した「5分に5回」は成立しない。
-結果として `RestartSec=10` の再起動ループに入り、毎回 `npm ci` をやり直す。
+`[Service]` セクションに置かれている（v229/v230 以降の正は `[Unit]`）ため、
+**意図した「5分に5回」が成立していない可能性が高い** — そうであれば
+`RestartSec=10` の再起動ループに入り、毎回 `npm ci` をやり直す。
 検知は毎時 cron の `health_watch.py` のみで、最大1時間の空白がある。
+
+なお「歯止めが効いていない」の部分はコードだけでは確定できない（実機の systemd が
+後方互換で解釈する可能性が残る）。確定方法は AUDIT-002 の「実機での検証方法」に記載した。
+ただし `TimeoutStartSec` の欠落（AUDIT-001）は歯止めの有無に関わらず成立する。
 
 ### 1.4 最大の技術的負債
 
@@ -84,7 +89,7 @@ NAS 上のファイル（録画・スナップショット・HLS・DBバック�
 | 3 | 実機 `.venv` に `yt-dlp` / `curl_cffi` が入っているか | どのインストール手順にも含まれていない（AUDIT-006）。無ければ DDD バッチは毎日無音で失敗 |
 | 4 | `home_system.db` の現在のサイズと各テーブルの行数 | AUDIT-003/004 の緊急度がこの数値で決まる |
 | 5 | `journalctl -u home_system` に起動タイムアウト（`start operation timed out`）の記録があるか | AUDIT-001 が既に発現しているかの判定 |
-| 6 | `systemd-analyze verify` の出力 | AUDIT-002（`StartLimit*` の誤配置）の実害確認 |
+| 6 | `systemctl show home_system.service -p StartLimitIntervalUSec` と `systemd-analyze verify` の出力 | AUDIT-002 の実害確認（`5min` が返れば実害なし／`10s` なら歯止めが効いていない） |
 | 7 | DB バックアップからの復元を実際に通したことがあるか | リストア手順書はあるがリハーサル記録が無い（AUDIT-024） |
 
 ---
@@ -192,7 +197,7 @@ graph TB
 | ID | Category | Issue | Sev | Pri | 難易度 | 主なファイル |
 | --- | --- | --- | --- | --- | --- | --- |
 | AUDIT-001 | Infrastructure | `home_system.service` に `TimeoutStartSec` が無く、重い `ExecStartPre` が systemd 既定90秒で kill されて再起動ループになりうる | HIGH | P0 | S | `deploy/systemd/home_system.service:20` |
-| AUDIT-002 | Infrastructure | `StartLimitIntervalSec`/`StartLimitBurst` が `[Service]` にあり（正しくは `[Unit]`）、クラッシュループの歯止めが効かない | HIGH | P0 | S | `deploy/systemd/home_system.service:30-31` |
+| AUDIT-002 | Infrastructure | `StartLimitIntervalSec`/`StartLimitBurst` が `[Service]` にある（v229/v230 以降の正は `[Unit]`）。クラッシュループの歯止めが効いていない可能性が高い（**実害は実機の systemd 依存・要確認**） | HIGH | P0 | S | `deploy/systemd/home_system.service:30-31` |
 | AUDIT-003 | Database | SQLite の行レベル保持期間削除・アーカイブ・VACUUM がリポジトリ内に存在しない | HIGH | P1 | M | `monitors/nas_monitor.py:302` / `config.py:458-465` |
 | AUDIT-004 | Performance | `quest_history` にインデックスが1つも無く、10秒ポーリングの `GET /api/quest/data` が毎回3回フルスキャン | HIGH | P1 | S | `services/quest/game_system.py:356,398,403` |
 | AUDIT-005 | Operations | 機能的ヘルスチェックが存在しない。`/health` は `migration_ok` を見ず常に healthy | HIGH | P1 | S | `unified_server.py:284,590` / `monitors/server_watchdog.py:187` |
@@ -241,7 +246,10 @@ graph TB
 
 **根拠**
 
-- `MY_HOME_SYSTEM/deploy/systemd/home_system.service:20`（`ExecStartPre`）・`:26-36`（`TimeoutStartSec` が存在しない。設定されているのは `TimeoutStopSec=30` だけ）
+- `MY_HOME_SYSTEM/deploy/systemd/home_system.service:20`（`ExecStartPre`）
+- 同ファイル全体を `grep -n "TimeoutStartSec" MY_HOME_SYSTEM/deploy/systemd/home_system.service` で
+  確認したが**ヒット0件**（「設定が無い」ことは行番号では示せないため、grep の結果で示す）。
+  タイムアウト系で設定されているのは `:36` の `TimeoutStopSec=30` のみ
 - `MY_HOME_SYSTEM/start_all.sh` Phase 1（NAS マウント待ち、Exponential Backoff で最大 1+2+4+8+16 = 31 秒）
 - `MY_HOME_SYSTEM/start_all.sh` Phase 1.5（`requirements.txt` のハッシュが変われば `pip install -r requirements.txt` を実行。117パッケージ）
 - `MY_HOME_SYSTEM/start_all.sh` Phase 2（`family-quest/deploy.sh --if-stale`）
@@ -299,38 +307,72 @@ TimeoutStartSec=900
 
 ---
 
-### AUDIT-002 — `StartLimit*` が誤ったセクションにある
+### AUDIT-002 — `StartLimit*` が `[Service]` セクションに置かれている
 
 - **カテゴリ**: Infrastructure / Availability
 - **重要度**: HIGH ／ **優先度**: P0 ／ **難易度**: S
+- **確度**: 配置そのものは事実として確認済み。**実害の有無は実機の systemd バージョンに依存するため要確認**（下記「実機での検証方法」）。ただし修正は2行の移動でリスクが無いため、実害の確定を待たずに対応して差し支えない
 
 **問題**
 `StartLimitIntervalSec=300` / `StartLimitBurst=5` が `[Service]` セクションに書かれている。
-これらは systemd v229 以降 `[Unit]` セクションの設定である。
+これらは systemd v229/v230 以降 `[Unit]` セクションの設定である。
 
-**根拠**
-- `MY_HOME_SYSTEM/deploy/systemd/home_system.service:30-31`（`[Service]` セクション内）
+**根拠（リポジトリ内で確認できる事実）**
+- `MY_HOME_SYSTEM/deploy/systemd/home_system.service:30-31` — 両設定が `[Service]` セクション内にある
 - 同 `:28-29` のコメントは「短時間にクラッシュを繰り返す場合の歯止め(5 分間に 5 回まで。超えたら failed で停止し、
-  health_watch.py(毎時 cron)のチェック1で検知される)」と、この設定が効いている前提で書かれている
+  health_watch.py(毎時 cron)のチェック1で検知される)」と、**この設定が効いている前提**で書かれている
+- リポジトリ内に `systemd-analyze verify` を実行する仕組みが無く（`.github/workflows/test.yml` は
+  shellcheck・ruff・pyright を持つが systemd ユニットの検証は無い）、この配置は**誰にも検証されていない**
 
-**なぜ問題なのか**
-systemd が `[Service]` 内で後方互換として受け付けるのは**旧名**の `StartLimitInterval=` /
-`StartLimitBurst=` であり、新名の `StartLimitIntervalSec=` は `[Service]` の互換リストに含まれない。
-その場合 systemd は「Unknown key name」として警告を出して**無視**し、
-`DefaultStartLimitIntervalSec`（既定 10 秒）/ `DefaultStartLimitBurst`（既定 5）が適用される。
+**なぜ問題になりうるのか（systemd 側の仕様。断定できる部分と実機確認が必要な部分を分ける）**
+systemd はこれらの設定を v229/v230 で `[Service]` から `[Unit]` へ移した。
+このとき `[Service]` 側に残された後方互換は**旧名**（`StartLimitInterval=` /
+`StartLimitBurst=` / `StartLimitAction=` 等）に対するもので、
+**新名の `StartLimitIntervalSec=` は `[Unit]` でのみ有効**とされている
+（`[Service]` に書くと `Unknown key name 'StartLimitIntervalSec' in section 'Service', ignoring` の
+警告が出て無視される、という報告が systemd-devel のメーリングリストや複数の
+プロジェクトの Issue にある）。
 
-`RestartSec=10` と組み合わせると、再起動は必ず 10 秒以上間隔が空くため
-**「10 秒間に 5 回」には原理的に到達せず、実質的にレート制限が無い＝無限再起動ループになる。**
-仮に互換で受け付けられていたとしても deprecated であり、`systemd-analyze verify` は警告を出す。
+このファイルは**新名**を使っているため、`StartLimitIntervalSec=300` は無視され
+`DefaultStartLimitIntervalSec`（既定 10 秒）が適用される、というのが最も可能性の高い挙動である。
+一方 `StartLimitBurst` は名前が変わっていないため互換で解釈されうる。
+その組み合わせは実質「10 秒間に 5 回」となり、`RestartSec=10` によって
+再起動間隔が必ず 10 秒以上空くため**原理的に到達せず、レート制限が事実上無い
+＝無限再起動ループになる**。
+
+**ただし本監査はコードのみを見ており、実機の systemd がどう解釈するかは確認していない。**
+上記は仕様と報告に基づく推定であり、実機のバージョンによっては互換で解釈され
+実害が無い可能性も残る。仮に実害が無くても deprecated な配置であり、
+`[Unit]` へ移すこと自体が正しい修正であるため、**実害の確定を待たずに対応して構わない。**
+重要度を HIGH としているのは、AUDIT-001 と同時に発現したときに
+「無限再起動ループ」へ直結しうることと、修正コストが2行の移動で済むことの両面からである。
+
+**実機での検証方法（どちらかで確定する）**
+```bash
+# 1) ユニットの静的検証（deprecated/不明キーの警告が出る）
+systemd-analyze verify /etc/systemd/system/home_system.service
+
+# 2) 起動時のログに無視された旨の警告が出ていないか
+journalctl -b | grep -i "Unknown key name.*StartLimit"
+
+# 3) systemd が実際に解釈した値を直接確認する（最も確実）
+systemctl show home_system.service -p StartLimitIntervalUSec -p StartLimitBurst
+```
+3つ目で `StartLimitIntervalUSec=5min` が返れば解釈されている（実害なし・deprecated のみ）。
+`10s`（`DefaultStartLimitIntervalSec` の既定）が返れば無視されている（実害あり）。
 
 **発生条件**
 `home_system.service` が繰り返し異常終了する任意の状況。とくに AUDIT-001 と同時に発現する。
+実害が出るのは上記検証の3つ目が `10s` を返す場合に限る。
 
 **影響**
-- **運用影響**: 意図された「5回失敗したら failed で止まり、`health_watch` が検知する」動作にならず、
-  リソースを食いながら無限に再試行し続ける。`health_watch` のチェック1は
-  「active か」を見るため、`activating` を繰り返している状態では検知が不安定になりうる
-- **開発影響**: コメントが実際の挙動と乖離しており、次にこのファイルを読む人を誤導する
+- **運用影響（実害が確定した場合）**: 意図された「5回失敗したら failed で止まり、
+  `health_watch` が検知する」動作にならず、リソースを食いながら無限に再試行し続ける。
+  `health_watch` のチェック1は「active か」を見るため、`activating` を繰り返している
+  状態では検知が不安定になりうる
+- **開発影響（実害の有無に関わらず）**: コメントが「5分間に5回まで」と断定しているが、
+  それが実際に成立しているかを**誰も検証していない**。次にこのファイルを読む人は
+  歯止めが効いていると信じる。加えて deprecated な配置のままである
 
 **推奨対策**
 
@@ -1454,7 +1496,7 @@ UNIQUE 制約を検討する。
 
 | 不足しているテスト | 防げていないバグ | 関連 |
 | --- | --- | --- |
-| systemd ユニットの静的検証（`systemd-analyze verify`） | **AUDIT-002 がまさにこれ。** `StartLimit*` の誤配置は 1 コマンドで検出できるが、CI に無いため気づかれていない | AUDIT-002 |
+| systemd ユニットの静的検証（`systemd-analyze verify`） | **AUDIT-002 がまさにこれ。** `StartLimit*` の配置の妥当性は 1 コマンドで検証できるが、CI に無いため誰も検証しておらず、本監査でも実害を確定できなかった | AUDIT-002 |
 | 起動所要時間の上限テスト / `ExecStartPre` の各フェーズのタイムアウト検証 | AUDIT-001。「起動が 90 秒を超える」ことを検知する手段が無い | AUDIT-001 |
 | `/health` が異常時に非 200 を返すテスト | AUDIT-005。`app.state.migration_ok` を読む箇所が無いことに誰も気づいていない | AUDIT-005 |
 | ホットパスのテーブルに索引があることの検証 | AUDIT-004。`test_db_indexes.py` は 3 テーブルに限定され、`quest_history` を含まない。**既存テストの限定が盲点を作った直接の原因** | AUDIT-004 |
@@ -1987,8 +2029,11 @@ FK 宣言は `user_inventory.reward_id` の1つだけ。その結果、
 アプリケーションコードには ruff・pyright・bandit・1,400 テスト・79% カバレッジ・
 `.env.example` / crontab / スキーマ / CI 設定値の整合テストまである。
 一方で systemd ユニットには静的検証が1つも無く、その結果として
-**2行の設定ミス（`StartLimit*` の誤配置）と1行の設定漏れ（`TimeoutStartSec`）が、
+**1行の設定漏れ（`TimeoutStartSec`）と、2行の配置（`StartLimit*` が `[Service]` にある）が、
 このリポジトリで最も可用性リスクの高い問題**になっている。
+後者の実害は実機の systemd バージョン依存で本監査では確定できなかったが、
+**「確定できない」こと自体が問題である** — `systemd-analyze verify` を CI に1ステップ
+足すだけで、このクラスの疑義はそもそも発生しない。
 `.venv` の中身はどのファイルからも再現できず、DDD のバッチは
 「手で入れた記憶」に依存して動いている。
 

@@ -2678,7 +2678,7 @@ docstring が説明するとおり `oscrypto` の OpenSSL 3.x 問題があるた
 ```mermaid
 graph LR
     A001["AUDIT-001<br/>起動タイムアウト"]
-    A002["AUDIT-002<br/>StartLimit誤配置"]
+    A002["AUDIT-002<br/>StartLimit の配置"]
     A006["AUDIT-006<br/>DDD依存欠落"]
     A028["AUDIT-028<br/>npm ci 毎回"]
     A016["AUDIT-016<br/>onvif-zeep"]
