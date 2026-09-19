@@ -315,7 +315,7 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
     # #411 S-L10: 以前は "**/*.mp4" で全期間(NVRの保存期間分、数十日)を毎回CIFS越しに
     # 再帰globしていたため動体検知のたびに高コストなI/Oが発生していた。録画ファイル名は
     # camera_service.py と同じ "{YYYYMMDD}_*.mp4" 形式なので、当日分だけに絞って検索する。
-    def _list_mp4_files() -> List[str]:
+    def _list_mp4_files() -> list[str]:
         # 新しい順。Issue #703: リトライの間に録画ファイルが切り替わりうるため試行ごとに取り直す。
         return sorted(
             (f for pattern in _nvr_search_patterns(nas_folder, dt_class.now()) for f in glob.glob(pattern)),

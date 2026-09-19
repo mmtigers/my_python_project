@@ -5,17 +5,28 @@
 当たって失敗し(実機計測: 庭カメラ 0/20、駐車場カメラ 4/20)、動体検知の約3割で
 通知画像が落ちていた。-3 秒なら両カメラとも 20/20 で成功する。
 """
-import datetime
 import os
 import subprocess
 import sys
 from unittest.mock import patch
 
 import pytest
+from freezegun import freeze_time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from monitors import camera_monitor
+
+# 録画ファイル名は当日の日付プレフィックスで検索される(_nvr_search_patterns)ため、
+# 実時刻に依存しないよう固定する(Issue #658)。0時台は前日分も検索対象になるので避ける。
+FROZEN_NOW = "2026-09-19 12:05:00"
+TODAY = "20260919"
+
+
+@pytest.fixture(autouse=True)
+def _frozen_clock():
+    with freeze_time(FROZEN_NOW):
+        yield
 
 
 @pytest.fixture
@@ -29,13 +40,11 @@ def nvr(tmp_path, monkeypatch):
     fake_tmpdir.mkdir()
     monkeypatch.setattr(camera_monitor.tempfile, "gettempdir", lambda: str(fake_tmpdir))
 
-    today = datetime.datetime.now().strftime("%Y%m%d")
-
     def make(*names):
         # 先頭ほど新しい mtime にする(書き込み中の最新セグメント → 完成済みの1つ前 …)
         paths = []
         for i, name in enumerate(names):
-            path = folder / f"{today}_{name}.mp4"
+            path = folder / f"{TODAY}_{name}.mp4"
             path.write_bytes(b"fake")
             mtime = 1_000_000 - i * 600
             os.utime(path, (mtime, mtime))
