@@ -10,7 +10,7 @@ CIの `unittest discover` にも収集されずに放置されていた。
 import asyncio
 import os
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -179,6 +179,20 @@ class TestProcessMeterData:
         assert row["temperature"] == 25.5
         assert row["humidity"] == 48.0
 
+    async def test_save_failure_is_logged_as_error_not_debug_success(self, isolated_db):
+        """Issue #740 (AUDIT-011): save_log_async は Fail-Soft で False を返すため、
+        戻り値を破棄すると「保存されていないのに saved と DEBUG に出る」状態になる。
+        ポーリング経路のため処理は止めないが、どのデバイスの分が欠けたかを
+        特定できるよう ERROR で記録すること。"""
+        fake_logger = MagicMock()
+        with patch.object(sensor_service, "save_log_async", new=AsyncMock(return_value=False)), \
+             patch.object(sensor_service, "logger", fake_logger):
+            await sensor_service.process_meter_data("dev1", "リビング温湿度計", 25.5, 48.0)
+
+        assert fake_logger.error.called
+        assert "リビング温湿度計" in fake_logger.error.call_args[0][0]
+        fake_logger.debug.assert_not_called()
+
 
 @pytest.mark.asyncio
 class TestProcessPowerData:
@@ -226,6 +240,20 @@ class TestProcessPowerData:
         mock_send.assert_called_once()
         msg = mock_send.call_args.kwargs["messages"][0]["text"]
         assert "使用終了" in msg
+
+    async def test_save_failure_still_evaluates_the_threshold_notification(self, isolated_db):
+        """Issue #740 (AUDIT-011): 保存の成否は閾値判定(prev_wattage と引数 wattage)に
+        影響しない。DB の一時的なロックで「電気の付けっぱなし通知」まで落とすほうが
+        実害が大きいため、保存失敗は ERROR に記録しつつ通知判定は続ける。"""
+        fake_logger = MagicMock()
+        with patch.object(sensor_service, "save_log_async", new=AsyncMock(return_value=False)), \
+             patch.object(sensor_service, "logger", fake_logger), \
+             patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
+            await sensor_service.process_power_data("dev1", "エアコン", 500, {"power_threshold_watts": 100})
+
+        mock_send.assert_called_once()
+        assert fake_logger.error.called
+        assert "エアコン" in fake_logger.error.call_args[0][0]
 
     async def test_staying_below_threshold_does_not_notify(self, isolated_db):
         with get_db_cursor(commit=True) as cur:

@@ -256,3 +256,46 @@ class TestContactSensorEndToEndNotification:
         mock_send_push.assert_called_once()
         sent_msg = mock_send_push.call_args.kwargs["messages"][0]["text"]
         assert "開きました" in sent_msg
+
+
+class TestPersistenceFailureIsNotSwallowed:
+    """Issue #740 (AUDIT-011): DB書き込み失敗時に 200 を返さないこと。
+
+    save_log_async は Fail-Soft で False を返す。以前は戻り値を破棄して無条件に
+    200 {"status": "success"} を返していたため、SwitchBot は「配信成功」と判断して
+    再送せず、ドアの開閉・人感センサーの検知が恒久的に失われていた。
+    これは #373 で LINE 経路にだけ適用された修正の未展開分(RC-3)。
+    """
+
+    @pytest.mark.asyncio
+    async def test_device_records_failure_returns_503_for_retry(self):
+        from fastapi import HTTPException
+
+        body = SwitchBotWebhookBody(**OFFICIAL_CONTACT_SENSOR_PAYLOAD)
+        with patch("routers.webhook_router.save_log_async", new=AsyncMock(return_value=False)), \
+             patch.object(webhook_router.sensor_service, "process_sensor_data", new=AsyncMock(return_value=None)) as proc, \
+             patch.object(webhook_router.sb_tool, "get_device_name_by_id", return_value="玄関ドア"):
+            with pytest.raises(HTTPException) as exc:
+                await webhook_router.switchbot_webhook(body, token=None)
+
+        assert exc.value.status_code == 503
+        # 一次データが残らない以上、通知処理まで進めてはいけない
+        # (「通知は飛んだが記録が無い」状態を作らない)
+        proc.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_daily_logs_failure_does_not_block_the_notification_path(self):
+        """daily_logs は device_records の派生の補助記録。ここで 503 を返すと
+        保存済みの device_records ごと再送させることになるため、続行する。"""
+        body = SwitchBotWebhookBody(**OFFICIAL_CONTACT_SENSOR_PAYLOAD)
+
+        async def _fake_save(table, *args, **kwargs):
+            return table != config.SQLITE_TABLE_DAILY_LOGS
+
+        with patch("routers.webhook_router.save_log_async", new=AsyncMock(side_effect=_fake_save)), \
+             patch.object(webhook_router.sensor_service, "process_sensor_data", new=AsyncMock(return_value=None)) as proc, \
+             patch.object(webhook_router.sb_tool, "get_device_name_by_id", return_value="玄関ドア"):
+            result = await webhook_router.switchbot_webhook(body, token=None)
+
+        assert result["status"] == "success"
+        proc.assert_awaited_once()

@@ -172,18 +172,44 @@ async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):
     location = device_conf.get("location", "未登録") if device_conf else "場所不明"
 
     # 1. ログ保存 (互換性維持)
-    await save_log_async("device_records", 
+    # Issue #740 (AUDIT-011): save_log_async は Fail-Soft で False を返す(DBロックの
+    # リトライ超過・ディスクフル・スキーマ不整合)。以前は戻り値を破棄して無条件に
+    # 200 {"status": "success"} を返していたため、SwitchBot は「配信成功」と判断して
+    # 再送せず、ドアの開閉・人感センサーの検知が恒久的に失われていた(防犯通知の原資
+    # でもあるデータ)。これは #373 で LINE 経路にだけ適用された「戻り値を見る」修正の
+    # 未展開分にあたる。503 を返して再送に委ねる。
+    # 再送による二重記録は上の is_duplicate_webhook(インメモリ重複排除)が防ぐ。
+    save_ok = await save_log_async("device_records",
         ["timestamp", "device_name", "device_id", "device_type", "contact_state", "brightness_state"],
         (get_now_iso(), name, mac, "Webhook", state, ctx.brightness or "")
     )
-    
+    if not save_ok:
+        logger.error(
+            f"SwitchBot Webhook のイベント保存に失敗しました (device={name}, mac={mac}, state={state})。"
+            "503 を返して SwitchBot の再送に委ねます。"
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Failed to persist the sensor event; please retry",
+        )
+
     # 2. 新テーブル(daily_logs)への保存
+    # こちらは device_records の派生である補助的な記録(人が読む日次ログ)であり、
+    # 失われても一次データは device_records に残る。ここで 503 を返すと保存済みの
+    # device_records ごと再送させることになり、重複排除の窓を超えた再送では
+    # 二重記録になりうるため、**失敗してもエラーログにとどめて通知処理を続行する**
+    # (Issue #740: この判断は明示的なものであり、書き忘れではない)。
     if state in ["detected", "open", "timeoutnotclose"]:
         detail_msg = f"{name}: {state}"
-        await save_log_async(config.SQLITE_TABLE_DAILY_LOGS,
+        daily_ok = await save_log_async(config.SQLITE_TABLE_DAILY_LOGS,
             ["category", "detail", "timestamp"],
             ("Sensor", detail_msg, get_now_iso())
         )
+        if not daily_ok:
+            logger.error(
+                f"daily_logs への記録に失敗しました (device={name}, state={state})。"
+                "device_records は保存済みのため処理は続行します。"
+            )
 
     # 3. センサーロジック (Service呼び出し)
     # device_type(61行目で context.deviceType/トップレベルから解決済み)を渡す。
