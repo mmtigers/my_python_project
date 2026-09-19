@@ -1,6 +1,7 @@
 # MY_HOME_SYSTEM/monitors/camera_monitor.py
 import os
 import sys
+import logging
 import asyncio
 import json
 import time
@@ -45,6 +46,30 @@ from services.notification_service import send_push
 
 # === ログ・定数設定 ===
 logger = setup_logging("camera")
+
+
+class _UnexpandedOnvifDateFilter(logging.Filter):
+    """カメラが書式の展開されていない日付を送ってきたときの zeep のエラーだけを抑止する。
+
+    2026-09-19 の実機で、ONVIF 応答の日時項目に '2026-%m-07' や '%Y-09-18' のような
+    strftime の書式指定子が残ったままの値が届くことを確認した(カメラ側ファームウェアの
+    不具合)。zeep はこれを解釈できず `Error during xml -> python translation` を
+    トレースバック付きの ERROR で出したうえで、その項目を None にして処理を続ける
+    (zeep/xsd/types/simple.py の parse_xmlelement)。監視の動作には影響しないが、
+    health_watch が journal の標準エラーも見るようになった(check_journal_errors)ことで
+    1日数回の誤報になるため、発生源で落とす。値に '%' を含まない日付の解釈エラーは
+    別の原因でありうるので、従来どおり ERROR のまま出す。
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exc = record.exc_info[1] if record.exc_info else None
+        if isinstance(exc, ValueError) and "ISO 8601" in str(exc) and "%" in str(exc):
+            logger.debug(f"🔕 ONVIF応答の日付が書式未展開のため無視しました: {exc}")
+            return False
+        return True
+
+
+logging.getLogger("zeep.xsd.types.simple").addFilter(_UnexpandedOnvifDateFilter())
 
 # Issue #497 (C-4): os.path.join自体が失敗した場合、ASSETS_DIRがtry節内でしか
 # 束縛されず、except節でのログ出力(52行目)がNameErrorに化けてしまい、原因が

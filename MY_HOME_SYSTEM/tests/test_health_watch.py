@@ -504,3 +504,71 @@ class TestQuestMasterDrift:
         assert sent, "異常が通知されていない"
         assert "quest_master が一致しません" in sent[0][0][0]["text"]
         assert (sent[0][1], sent[0][2]) == ("discord", "error")
+
+
+class TestJournalStdioErrors:
+    """2026-09-19: サービスの標準出力/標準エラー経由のエラーを journal から検知する。
+
+    home_system.service を Type=simple(Issue #646)へ移行した後、未捕捉例外の
+    トレースバックや basicConfig のままのライブラリログは journal にしか残らなくなった。
+    journald はこれらを priority info で記録するため、従来の `-p err..emerg` では
+    一切拾えていなかった(実機で `ERROR:zeep...` と `Traceback` が info で残っていた)。
+    """
+
+    SINCE = datetime.datetime.fromisoformat("2026-09-19T14:00:00")
+
+    def _fake_journal(self, monkeypatch, *, err_priority="", stdio=""):
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            out = err_priority if "-p" in cmd else stdio
+            return health_watch.subprocess.CompletedProcess(cmd, returncode=0, stdout=out, stderr="")
+
+        monkeypatch.setattr(health_watch.subprocess, "run", fake_run)
+        return calls
+
+    def test_traceback_and_library_error_on_stderr_are_detected(self, monkeypatch):
+        self._fake_journal(monkeypatch, stdio=(
+            "INFO:     127.0.0.1:0 - \"GET /health HTTP/1.1\" 200 OK\n"
+            "ERROR:zeep.xsd.types.simple:Error during xml -> python translation\n"
+            "Traceback (most recent call last):\n"
+            "  File \"/x/camera_monitor.py\", line 10, in <module>\n"
+            "RuntimeError: boom\n"
+        ))
+        result = health_watch.check_journal_errors(self.SINCE)
+        assert result is not None
+        assert "標準出力/標準エラー" in result
+        assert "RuntimeError: boom" in result
+
+    def test_core_logger_lines_are_left_to_check_app_logs(self, monkeypatch):
+        # core.logger の書式の行は logs/*.log にも出るため、journal 側では数えない(二重計上防止)
+        self._fake_journal(monkeypatch, stdio=(
+            "2026-09-19 14:10:00 [ERROR] newface_monitor: Failed to load data\n"
+            "2026-09-19 14:10:01 [WARNING] camera: PullMessages failed: Unknown error\n"
+        ))
+        assert health_watch.check_journal_errors(self.SINCE) is None
+
+    def test_warnings_and_access_logs_are_not_errors(self, monkeypatch):
+        self._fake_journal(monkeypatch, stdio=(
+            "INFO:     127.0.0.1:0 - \"GET /api/quest/data HTTP/1.1\" 200 OK\n"
+            "WARNING:  Invalid HTTP request received.\n"
+            "/x/site-packages/y.py:1: DeprecationWarning: something\n"
+        ))
+        assert health_watch.check_journal_errors(self.SINCE) is None
+
+    def test_systemd_err_priority_is_still_reported(self, monkeypatch):
+        self._fake_journal(monkeypatch, err_priority=(
+            "Sep 19 14:05:00 raspberrypi systemd[1]: home_system.service: Main process exited, "
+            "code=exited, status=1/FAILURE\n"
+        ))
+        result = health_watch.check_journal_errors(self.SINCE)
+        assert result is not None and "err 以上" in result
+
+    def test_both_queries_use_the_same_since_and_timeout(self, monkeypatch):
+        calls = self._fake_journal(monkeypatch)
+        assert health_watch.check_journal_errors(self.SINCE) is None
+        assert len(calls) == 2
+        for cmd in calls:
+            assert cmd[cmd.index("--since") + 1] == "2026-09-19 14:00:00"
+            assert cmd[cmd.index("-u") + 1] == health_watch.WATCH_SERVICE_NAME
