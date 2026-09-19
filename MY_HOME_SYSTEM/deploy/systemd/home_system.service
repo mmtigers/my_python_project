@@ -3,6 +3,19 @@ Description=My Home System Server
 After=network.target
 RequiresMountsFor=/mnt/nas
 
+# クラッシュループの歯止め(5 分間に 5 回まで。超えたら failed で停止し、health_watch.py
+# (毎時 cron)のチェック1「home_system.service が active か」で検知される)。
+# StartLimitIntervalSec= / StartLimitBurst= は systemd v229/v230 以降 [Unit] セクションの
+# ディレクティブで、[Service] に書くと新名の StartLimitIntervalSec= は解釈されない
+# (実機 systemd 257 で `systemd-analyze verify` が
+#  「Unknown key 'StartLimitIntervalSec' in section [Service], ignoring」を出すことを確認済み)。
+# その状態では既定の DefaultStartLimitIntervalSec(10 秒)が適用され、コメントに書いた
+# 「5 分間に 5 回まで」は成立していなかった(REPOSITORY_AUDIT_2026-09-18.md の AUDIT-002)。
+StartLimitIntervalSec=300
+StartLimitBurst=5
+# 上限超過時は再起動を諦めて failed のまま停止する(既定値の明示)。
+StartLimitAction=none
+
 [Service]
 # Issue #646: 以前は Type=oneshot + RemainAfterExit=yes で start_all.sh が unified_server.py を
 # nohup/disown でバックグラウンド起動しており、サーバーが systemd の管理外にあった。
@@ -23,12 +36,9 @@ ExecStartPre=/home/masahiro/develop/MY_HOME_SYSTEM/start_all.sh --prepare
 ExecStart=/home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python3 unified_server.py
 
 # 異常終了(非0 exit / シグナル死)時のみ 10 秒後に再起動する。systemctl stop では再起動しない。
+# 繰り返しクラッシュした場合の歯止め(StartLimit*)は [Unit] セクション側にある。
 Restart=on-failure
 RestartSec=10
-# 短時間にクラッシュを繰り返す場合の歯止め(5 分間に 5 回まで。超えたら failed で停止し、
-# health_watch.py(毎時 cron)のチェック1「home_system.service が active か」で検知される)
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 # 停止時は SIGTERM をメインプロセスに送り、lifespan の終了処理(子プロセス terminate → 5 秒待ち →
 # kill、ffmpeg 停止)を待つ。残った子は TimeoutStopSec 後に SIGKILL される。

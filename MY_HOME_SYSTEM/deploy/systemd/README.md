@@ -43,6 +43,15 @@ Webhook再登録(Phase 0〜3)を行う。`unified_server.py` は内部で `sched
 > Claude 自動調査側のガードレールであり、systemd 自身の `Restart=` による復旧はその対象ではない。
 > `health_watch.py`(毎時cron、本サービスから独立)による検知・通知は引き続き行う。
 
+> **AUDIT-002(2026-09-19 実機で確定)**: クラッシュループの歯止め
+> `StartLimitIntervalSec=300` / `StartLimitBurst=5` は当初 `[Service]` セクションに
+> 置いていたが、これらは systemd v229/v230 以降 `[Unit]` セクションのディレクティブで、
+> 新名の `StartLimitIntervalSec=` は `[Service]` では解釈されない。実機(systemd 257)の
+> `systemd-analyze verify deploy/systemd/home_system.service` が
+> `Unknown key 'StartLimitIntervalSec' in section [Service], ignoring.` を出すことを確認し、
+> `[Unit]` へ移動した。誤配置は `systemd-analyze verify` でも終了コード 0 になる(=CIのゲートに
+> できない)ため、セクション配置の回帰テストを `.github/scripts/test_systemd_units.py` に置いている。
+
 導入手順(実機側):
 
 ```bash
