@@ -19,19 +19,24 @@ from monitors.log_analyzer import LogAnalyzer
 @pytest.fixture
 def analyzer():
     a = LogAnalyzer(days_back=7)
-    a.now = datetime.datetime(2026, 9, 19, 12, 0, 0)
-    a.start_date = datetime.datetime(2026, 9, 18, 0, 0, 0)
+    # LogAnalyzer はログ行の naive なタイムスタンプと比較するため naive のまま与える
+    a.now = datetime.datetime.fromisoformat("2026-09-19T12:00:00")
+    a.start_date = datetime.datetime.fromisoformat("2026-09-18T00:00:00")
     return a
 
 
 @pytest.mark.parametrize("line", [
     # 実機で誤ってエラー扱いされていた警告行(ONVIF再接続。本文に "error" / "NewConnectionError")
-    "2026-09-19 12:16:22 [WARNING] camera: ⚠️ [庭カメラ] PullMessages failed 3 times in a row: "
-    "Unknown error: HTTPConnectionPool(host='192.168.1.51', port=1025): Max retries exceeded "
-    "(Caused by NewConnectionError(\"...[Errno 111] Connection refused\")). Breaking loop to reconnect.",
+    (
+        "2026-09-19 12:16:22 [WARNING] camera: ⚠️ [庭カメラ] PullMessages failed 3 times in a row: "
+        "Unknown error: HTTPConnectionPool(host='192.168.1.51', port=1025): Max retries exceeded "
+        "(Caused by NewConnectionError(\"...[Errno 111] Connection refused\")). Breaking loop to reconnect."
+    ),
     # ffmpeg の stderr を載せた警告行(本文に "Error splitting ...")
-    "2026-09-19 12:18:15 [WARNING] camera: ⚠️ [庭カメラ] FFmpeg extraction failed (rc=69, src=x.mp4, "
-    "sseof=-3): [h264] Error splitting the input into NAL units. (Attempt 1/3)",
+    (
+        "2026-09-19 12:18:15 [WARNING] camera: ⚠️ [庭カメラ] FFmpeg extraction failed (rc=69, src=x.mp4, "
+        "sseof=-3): [h264] Error splitting the input into NAL units. (Attempt 1/3)"
+    ),
     # 本文に "Exception" を含む警告行
     "2026-09-19 12:00:00 [WARNING] scheduler: task raised Exception, will retry next cycle",
 ])
