@@ -74,6 +74,19 @@ FORCE_RECONNECT_INTERVAL_SEC: int = 540
 PULL_FAILURE_RECONNECT_THRESHOLD: int = 3
 RENEW_DURATION: str = "PT600S"
 
+# Issue #703: NVR録画からスナップショットを切り出すときの試行計画。
+# (新しい順に並べた当日の録画ファイルの何番目を使うか, ファイル末尾から何秒手前にシークするか)
+# 録画は fragmented MP4(moof/mdat の繰り返し)で、CIFS 越しに見えるファイル末尾は
+# 常に最後の mdat の途中で切れている(ファイルサイズが 256KiB 単位で伸び、ffmpeg は
+# "partial file" / "Invalid NAL unit size" で失敗する)。以前は末尾1秒前(-sseof -1)を
+# 読んでいたため、不完全な末尾フラグメントに当たると失敗し、動体検知の約3割で画像が
+# 落ちていた。2026-09-19 の実機計測(書き込み中のファイルに連続20回):
+#   庭カメラ   -sseof -1: 0/20  -3: 20/20  -5: 20/20
+#   駐車場カメラ -sseof -1: 4/20  -3: 20/20  -5: 20/20
+# 最終試行は、書き込みが完了している1つ前のセグメントを使う(録画ファイルの切り替え直後で
+# 最新ファイルにまだ完成フラグメントが無い場合の保険。直前10分の末尾=検知の直前の映像)。
+NVR_SNAPSHOT_ATTEMPTS: tuple = ((0, 3), (0, 6), (1, 3))
+
 # クールダウンの秒数を設定 (config.py から読み込み。未定義時は60秒)
 MOTION_COOLDOWN_SEC: int = getattr(config, 'MOTION_COOLDOWN_SEC', 60)
 
@@ -302,36 +315,44 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
     # #411 S-L10: 以前は "**/*.mp4" で全期間(NVRの保存期間分、数十日)を毎回CIFS越しに
     # 再帰globしていたため動体検知のたびに高コストなI/Oが発生していた。録画ファイル名は
     # camera_service.py と同じ "{YYYYMMDD}_*.mp4" 形式なので、当日分だけに絞って検索する。
-    mp4_files = sorted(
-        (f for pattern in _nvr_search_patterns(nas_folder, dt_class.now()) for f in glob.glob(pattern)),
-        key=os.path.getmtime, reverse=True,
-    )
-    
-    if not mp4_files:
+    def _list_mp4_files() -> list[str]:
+        # 新しい順。Issue #703: リトライの間に録画ファイルが切り替わりうるため試行ごとに取り直す。
+        return sorted(
+            (f for pattern in _nvr_search_patterns(nas_folder, dt_class.now()) for f in glob.glob(pattern)),
+            key=os.path.getmtime, reverse=True,
+        )
+
+    if not _list_mp4_files():
         logger.warning(f"⚠️ [{cam_conf['name']}] No NVR video files found in {nas_folder}.")
         return None
 
-    latest_mp4 = mp4_files[0]
     # C-L7: 実行環境のTMPDIR等に追従させるため /tmp 直書きではなく tempfile.gettempdir() 経由で解決する
     output_tmp = os.path.join(tempfile.gettempdir(), f"snapshot_{cam_conf['name']}_{uuid.uuid4().hex}.jpg")
     
-    # 設計書「エラーハンドリングと自動復旧」準拠: NVRのバッファフラッシュ遅延を考慮したリトライ
-    max_retries = 3
+    # 設計書「エラーハンドリングと自動復旧」準拠のリトライ。試行ごとの対象ファイルと
+    # シーク位置は NVR_SNAPSHOT_ATTEMPTS を参照(Issue #703)。
+    max_retries = len(NVR_SNAPSHOT_ATTEMPTS)
     try:
-        for attempt in range(1, max_retries + 1):
+        for attempt, (file_index, seconds_before_eof) in enumerate(NVR_SNAPSHOT_ATTEMPTS, start=1):
+            mp4_files = _list_mp4_files()
+            if not mp4_files:
+                logger.warning(f"⚠️ [{cam_conf['name']}] No NVR video files found in {nas_folder}.")
+                return None
+            # 1つ前のセグメントが無い(当日最初の録画ファイル等)ときは最新ファイルで代用する
+            src = mp4_files[file_index] if file_index < len(mp4_files) else mp4_files[0]
             try:
-                # 最新の動画の「最後から1秒前」のフレームを抽出（動体検知直後の映像）
-                # 実際には target_time と最新mp4のタイムスタンプを比較して -ss のシーク時間を計算するのが理想的です
+                # 録画ファイル末尾の数秒手前のフレームを抽出（動体検知直後の映像）。
+                # 末尾の不完全なフラグメントを避けるため末尾ちょうどは読まない(Issue #703)。
                 cmd = [
                     "ffmpeg", "-y",
-                    "-sseof", "-1", # ファイル末尾から1秒前
-                    "-i", latest_mp4,
+                    "-sseof", f"-{seconds_before_eof}",
+                    "-i", src,
                     "-vframes", "1",
                     "-q:v", "2",    # 高画質
                     output_tmp
                 ]
 
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=True)
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10, check=True)
 
                 if os.path.exists(output_tmp):
                     with open(output_tmp, "rb") as f:
@@ -341,7 +362,15 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
             except subprocess.TimeoutExpired:
                 logger.warning(f"⏳ [{cam_conf['name']}] FFmpeg timeout on NVR file (Attempt {attempt}/{max_retries})")
             except subprocess.CalledProcessError as e:
-                logger.warning(f"⚠️ [{cam_conf['name']}] FFmpeg extraction failed: {e} (Attempt {attempt}/{max_retries})")
+                # Issue #703: 以前は stderr を捨てていたため "exit status 69" しか分からず、
+                # 原因(末尾フラグメントが不完全)の特定に実機での再現が必要だった。
+                stderr_lines = (e.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+                detail = stderr_lines[-1] if stderr_lines else "no stderr"
+                logger.warning(
+                    f"⚠️ [{cam_conf['name']}] FFmpeg extraction failed "
+                    f"(rc={e.returncode}, src={os.path.basename(src)}, sseof=-{seconds_before_eof}): "
+                    f"{detail} (Attempt {attempt}/{max_retries})"
+                )
             except Exception as e:
                 logger.error(f"❌ [{cam_conf['name']}] Unexpected error in NVR extraction: {e}")
                 break
