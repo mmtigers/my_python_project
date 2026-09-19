@@ -577,7 +577,7 @@ class TestJournalStdioErrors:
 class TestCheckRecordingStalled:
     """常時録画の停止検知(チェック9)。録画ファイル名の時刻で判定する。"""
 
-    NOW = "2026-09-19 21:00:00"
+    NOW = "2026-09-19 21:00:00+09:00"
 
     def _setup(self, tmp_path, monkeypatch, cameras):
         monkeypatch.setattr(config, "NVR_RECORD_DIR", str(tmp_path))
@@ -627,7 +627,7 @@ class TestCheckRecordingStalled:
         from freezegun import freeze_time
         self._setup(tmp_path, monkeypatch, [{"name": "玄関", "nas_folder": "entrance"}])
         self._touch(tmp_path, "entrance", "20260919_235500.mp4")
-        with freeze_time("2026-09-20 00:05:00"):
+        with freeze_time("2026-09-20 00:05:00+09:00"):
             assert health_watch.check_recording_stalled() is None
 
     def test_falls_back_to_name_and_skips_disabled_camera(self, tmp_path, monkeypatch):

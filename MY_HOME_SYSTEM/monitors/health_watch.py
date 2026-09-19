@@ -40,6 +40,7 @@ import sqlite3
 import subprocess
 import sys
 from typing import List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -48,6 +49,7 @@ import quest_data
 from core import state_file
 from core.database import get_ro_connection
 from core.logger import setup_logging
+from core.utils import get_now_jst
 from services.notification_service import send_push
 from monitors.log_analyzer import LogAnalyzer
 
@@ -98,6 +100,8 @@ QUEST_ID_LIST_LIMIT: int = 8
 # 更新時刻(mtime)ではなくファイル名の時刻を使うのは、この NAS(CIFS)では書き込み中の
 # ファイルの mtime が作成時刻のまま進まず、成長中かどうかの判定に使えないため。
 RECORDING_STALE_SEC: int = 30 * 60
+# 録画ファイル名(ffmpeg -strftime のローカル時刻)の解釈に使うタイムゾーン
+JST = ZoneInfo("Asia/Tokyo")
 
 
 def _read_marker() -> datetime.datetime:
@@ -283,24 +287,25 @@ def check_nas_mount() -> Optional[str]:
     return None
 
 
-def _latest_recording_time(folder: str, now: datetime.datetime) -> Optional[datetime.datetime]:
-    """録画フォルダの最新セグメントの開始時刻(ファイル名から)を返す。無ければNone。
+def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:
+    """録画フォルダの最新セグメントの開始時刻(ファイル名から、JST)を返す。無ければNone。
 
     CIFS 越しに保持期間(30日)分を毎回列挙しないよう、当日と前日(日付の変わり目用)に絞る。
+    ファイル名は ffmpeg の -strftime によるローカル時刻(実機のTZはAsia/Tokyo)。
     """
-    names: List[str] = []
+    names: list[str] = []
     for day in (now, now - datetime.timedelta(days=1)):
         pattern = os.path.join(folder, f"{day.strftime('%Y%m%d')}_*.mp4")
         names.extend(os.path.basename(p) for p in glob.glob(pattern))
     for name in sorted(names, reverse=True):
         try:
-            return datetime.datetime.strptime(name[:15], "%Y%m%d_%H%M%S")
+            return datetime.datetime.strptime(name[:15], "%Y%m%d_%H%M%S").replace(tzinfo=JST)
         except ValueError:
             continue
     return None
 
 
-def check_recording_stalled() -> Optional[str]:
+def check_recording_stalled() -> str | None:
     """カメラごとの常時録画(NVR)が止まっていないかを確認する。
 
     録画の ffmpeg は systemd が落ちるたびに再起動するが、カメラに繋がらない間の
@@ -310,8 +315,8 @@ def check_recording_stalled() -> Optional[str]:
     """
     if not os.path.ismount(config.NAS_MOUNT_POINT):
         return None
-    now = datetime.datetime.now()
-    stalled: List[str] = []
+    now = get_now_jst()
+    stalled: list[str] = []
     for cam in config.CAMERAS:
         if not cam.get("enabled", True):
             continue
