@@ -48,6 +48,9 @@ MY_HOME_SYSTEM/db_backup/
 # MY_HOME_SYSTEM: runtime lock files (created by monitors at runtime, not source)
 MY_HOME_SYSTEM/watchdog_alert_sent.lock
 MY_HOME_SYSTEM/watchdog_throttle_history.state
+# 毎時cronの monitors/health_watch.py が多重起動防止に使う flock の対象ファイル。
+# 2026-09-19 の実機棚卸しで、実機に未追跡ファイルとして残り続けていたのを確認した。
+MY_HOME_SYSTEM/.health_watch.lock
 # MY_HOME_SYSTEM: timelapse runtime working dir (frames/lock, not source)
 MY_HOME_SYSTEM/work/
 
@@ -88,6 +91,11 @@ DDD/*プロンプト*.md
 DDD/.batch_download_discord.lock
 DDD/.newface_monitor.lock
 DDD/.bot_detection_cooldown
+# yt-dlp の cookie ファイル(`YOUTUBE_COOKIES_FILE` で参照。batch_download_discord.py:135)。
+# ログイン済みセッションのCookieそのものであり、`.env` と同じ扱いでコミットしてはならない。
+# 2026-09-19 の実機棚卸しで、実機に未追跡・未除外のまま置かれていたのを確認して追加した。
+DDD/bot_cookies.txt
+DDD/*cookies*.txt
 # DDD: ダウンロード対象リスト・履歴・監視データ(known_casts_*.json 等)
 DDD/list/
 DDD/list.txt

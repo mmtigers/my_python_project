@@ -85,6 +85,34 @@ journalctl -u home_system.service -n 50 --no-pager    # Migration failed / CRITI
 `PRAGMA integrity_check` と `SELECT COUNT(*) FROM quest_history` 等でデータが読めることを確認する。
 演習で気づいた落とし穴はこのファイルに追記する。
 
+### 実施記録
+
+| 実施日 | 範囲 | 結果 |
+| --- | --- | --- |
+| 2026-09-19 | 手順1・4・5の**データ検証部分**のみ(サービス停止・本番ファイル差し替えは行わない非破壊版) | 合格。落とし穴なし |
+
+2026-09-19 の演習内容（`REPOSITORY_AUDIT_2026-09-18.md` 1.5節の確認事項7、AUDIT-024）:
+
+```bash
+# 最新世代を作業用ディレクトリへ復元(本番 home_system.db には触らない)
+cp /mnt/nas/home_system/db_backups/home_system_20260919_040002.db /tmp/<work>/restored.db
+```
+
+| 検証 | 結果 |
+| --- | --- |
+| `PRAGMA integrity_check` | `ok`(155MB / 1.7秒でNASからコピー完了) |
+| 3点セット(db / `config_*.py` / `devices_*.json`)の揃い | 直近5世代すべて揃っている |
+| `schema_migrations` | 11件(最新 `0010_add_routine_step_events` の1つ前)。**バックアップ取得時点(04:00)ではまだ `0011`/`0012` が未適用** |
+| 未適用マイグレーションの自動適用 | 復元したファイルに対して `init_unified_db.init_db()` を実行 → `0011`・`0012` が適用され、テーブル数が43→44、`routine_step_events` テーブルと `routine_progress.skipped_keys` 列が生成された。`Schema Integrity Validation Passed` |
+| 同じ復元DBへの再実行(冪等性) | 2回目は差分なしで正常終了 |
+| 主要テーブルの行数 | 復元(04:00時点) ≤ 本番(現在) の関係が全テーブルで成立。`quest_history` 3390/3399、`switchbot_meter_logs` 331,627/332,182 等 |
+| 復元DBの最新データ時刻 | `switchbot_meter_logs` が 03:59:05 で、04:00 のバックアップ取得時刻と整合 |
+
+**注意点(演習で分かったこと)**:
+
+- 復元直後の `quest_master` は、退役クエストを含む**バックアップ取得時点のマスタ**である（この日の演習では復元側56件・本番51件で、差分は同日のマスタ同期で削除した退役6件だった）。本番へ復元したあとは、`quest_data.py` の内容に合わせて `curl -X POST http://127.0.0.1:8000/api/quest/sync_master` を実行すること（Issue #700）。
+- 上記の非破壊版では**手順2(サービス停止)・3(現物退避)・5(起動と検証)は実行していない**。実際の障害時に初めて通す部分が残っているため、次回は家族の利用が少ない時間帯にサービス停止を含めた通し演習を行うこと。
+
 ## 関連
 
 - `MY_HOME_SYSTEM/services/backup_service.py`、[backup_service.md](../specifications/MY_HOME_SYSTEM/backup_service.md)
