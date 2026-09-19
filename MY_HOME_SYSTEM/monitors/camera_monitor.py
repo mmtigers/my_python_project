@@ -322,9 +322,9 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
             key=os.path.getmtime, reverse=True,
         )
 
-    if not _list_mp4_files():
-        logger.warning(f"⚠️ [{cam_conf['name']}] No NVR video files found in {nas_folder}.")
-        return None
+    # 録画ファイルが無い場合の判定は各試行の中で行う(#707 レビュー: 以前はここでも一覧を
+    # 取得しており、正常系でも初回に CIFS 越しの glob が2回走っていた。#411 S-L10 が
+    # 問題にした「動体検知のたびの高コストなI/O」を増やさないため1回にまとめる)。
 
     # C-L7: 実行環境のTMPDIR等に追従させるため /tmp 直書きではなく tempfile.gettempdir() 経由で解決する
     output_tmp = os.path.join(tempfile.gettempdir(), f"snapshot_{cam_conf['name']}_{uuid.uuid4().hex}.jpg")
