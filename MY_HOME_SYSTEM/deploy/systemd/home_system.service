@@ -35,6 +35,15 @@ ExecStartPre=/home/masahiro/develop/MY_HOME_SYSTEM/start_all.sh --prepare
 # 死活監視・再起動も行う(unified_server.py の restart_dead_children)。
 ExecStart=/home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python3 unified_server.py
 
+# start ジョブ全体(ExecStartPre の完走 → ExecStart の fork)に許す時間。未指定だと
+# DefaultTimeoutStartSec(通常 90 秒)が適用されるが、ExecStartPre の start_all.sh --prepare は
+# NAS マウント待ち(Exponential Backoff で最大 31 秒)・requirements.txt 変更時の pip install
+# (117 パッケージ)・family-quest の再ビルド(npm ci + tsc -b && vite build)を含み、
+# ラズパイでは数分かかる。90 秒で SIGTERM → Restart=on-failure で再試行、というループに
+# 陥るため明示的に延ばす(REPOSITORY_AUDIT_2026-09-18.md の AUDIT-001)。
+# 本当にハングした場合はここで打ち切られ、StartLimit*([Unit])の歯止めが働く。
+TimeoutStartSec=900
+
 # 異常終了(非0 exit / シグナル死)時のみ 10 秒後に再起動する。systemctl stop では再起動しない。
 # 繰り返しクラッシュした場合の歯止め(StartLimit*)は [Unit] セクション側にある。
 Restart=on-failure
