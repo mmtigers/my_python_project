@@ -33,6 +33,16 @@ Environment=PYTHONPATH=/home/masahiro/develop:/home/masahiro/develop/MY_HOME_SYS
 ExecStartPre=/home/masahiro/develop/MY_HOME_SYSTEM/start_all.sh --prepare
 # サーバー本体。unified_server.py が内部で scheduler_boot.py / monitors/camera_monitor.py を起動し、
 # 死活監視・再起動も行う(unified_server.py の restart_dead_children)。
+#
+# Issue #760 (AUDIT-031): 必ず単一プロセスで起動すること(uvicorn の --workers を
+# 増やさない、gunicorn -w N に置き換えない)。quest_users(gold/exp/level/medal_count)の
+# read-modify-write は services/quest/locks.py の threading.Lock だけで直列化しており、
+# DB レベルの排他(BEGIN IMMEDIATE 等)は使っていない(#544 で入り #547 で撤去済み)。
+# プロセスを増やすとロックが共有されず、**エラーを出さないまま**ゴールドが消える/増える
+# (ロストアップデート)。性能上の必要が出た場合は、先に quest_users の更新を
+# DB レベルで原子的な形(条件付き UPDATE / 楽観ロック)へ移すこと。
+# この不変条件は .github/scripts/test_systemd_units.py と
+# MY_HOME_SYSTEM/tests/test_single_process_invariant.py が固定している。
 ExecStart=/home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python3 unified_server.py
 
 # start ジョブ全体(ExecStartPre の完走 → ExecStart の fork)に許す時間。未指定だと
