@@ -14,13 +14,15 @@
 - [database.md](./database.md) — `save_log_generic`の実装元（`core/database.py`）。
 - [notification_service.md](./notification_service.md) — `send_push`の実装元。
 - `camera_digest_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） — 本ファイルが生成するスナップショット画像の消費先。
-- [camera_service.md](./camera_service.md) — 同様のONVIF/WSDL動的探索ロジック（`find_wsdl_path`）を持つ姉妹モジュール（ライブ配信・録画用）。
+- [camera_service.md](./camera_service.md) — 同様のONVIF/WSDL動的探索ロジック（`find_wsdl_path`）を持つ姉妹モジュール（ライブ配信・録画用）。Issue #703 以降は、本ファイルの `capture_snapshot_from_rtsp` が RTSP URL の解決（`get_rtsp_url`）とログ用URLマスク（`_mask_rtsp_url_for_log`）をこのモジュールから直接importして再利用している。
 - `collect_onvif_logs.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） — 同様にONVIFイベント（PullPointSubscription）を収集する別スクリプト。
 
 ## 2. ファイルの概要
 
 このファイルは、ONVIFプロトコルを用いてネットワークカメラ（防犯カメラ）に接続し、動体検知イベントを監視するシステムの一部である。
-カメラからのイベント（PullPointサブスクリプション）を定期的に取得し、動体が検知された際には外部データベースへログを記録し、NVR（ネットワークビデオレコーダー）上の動画ファイルからFFmpegを用いてスナップショット画像を切り出して保存する責務を持つ。また、ネットワーク断やセッション切れに対する自動再接続・リソース解放機能を備えている。
+カメラからのイベント（PullPointサブスクリプション）を定期的に取得し、動体が検知された際には外部データベースへログを記録し、FFmpegを用いてスナップショット画像を切り出して保存する責務を持つ。また、ネットワーク断やセッション切れに対する自動再接続・リソース解放機能を備えている。
+
+スナップショットの取得方式は Issue #703 で変更され、第一手が「カメラのRTSPストリームへ直接接続して1フレームを抽出する」（`capture_snapshot_from_rtsp`）、それが失敗した場合のフォールバックが従来の「NAS上のNVR録画セグメントからの切り出し」（`capture_snapshot_from_nvr`）になっている。
 
 ## 3. 外部依存関係
 
@@ -48,6 +50,7 @@
 | `config` | ローカルモジュール | 設定値（カメラ情報、パス、定数）の取得 | 根拠: `import config` (行番号: 38 / 抜粋: "import config") |
 | `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化 | 根拠: `from core.logger import...` (行番号: 39 / 抜粋: "from core.logger import setup") |
 | `core.database.save_log_generic` | ローカルモジュール | 動体検知時のデータベース保存 | 根拠: `from core.database import...` (行番号: 40 / 抜粋: "from core.database import save_") |
+| `services.camera_service.get_rtsp_url`, `services.camera_service._mask_rtsp_url_for_log`（Issue #703で追加） | ローカルモジュール | `capture_snapshot_from_rtsp`のRTSP URL解決（`devices.json`の`rtsp_url`、無ければONVIF `GetStreamUri`から認証情報込みで組み立て・プロセス内キャッシュ）と、ログ出力時の認証情報マスク | 根拠: `from services.camera_service import get_rtsp_url, _mask_rtsp_url_for_log` (行番号: 48 / 抜粋: "from services.camera_service import") |
 | `services.notification_service.send_push` | ローカルモジュール | 障害時の管理者へのプッシュ通知送信 | 根拠: `from services.notification_service...` (行番号: 41 / 抜粋: "from services.notification") |
 
 ### ブラックボックスとなる外部要素
@@ -87,7 +90,7 @@
 ### `is_camera_enabled` / `_read_enabled_flags_from_devices_json`（Issue #652 で追加）
 
 * **役割**: `devices.json` の `enabled` フラグを**監視ループの実行中に読み直す**ためのヘルパー。`services/camera_service.set_camera_enabled` は `devices.json` を書き換えたうえで**サーバープロセス内の** `config.CAMERAS` しか更新せず、`camera_monitor` は `unified_server.py` から別プロセスとして起動され起動時の `config.CAMERAS` を保持し続けるため、以前はUIでカメラを無効化してもサーバー再起動までONVIF購読・スナップショット・通知が継続していた（設定画面の表示と実挙動の食い違い）。`is_camera_enabled(cam_conf)` は `devices.json` の `st_mtime_ns` が前回確認時から変わっている場合のみ再読込し、`stat` 自体も `ENABLED_RECHECK_INTERVAL_SEC`(5秒)に1回へ抑える（キャッシュは `_enabled_cache` と `_enabled_cache_lock` でスレッド間共有）。`devices.json` が存在しない・JSONとして壊れている・該当 `id` が無い場合は、起動時の `cam_conf["enabled"]`（既定 `True`）へフォールバックする。SIGHUP方式ではなくポーリング方式を採ったのは、子プロセスの再起動・シグナルハンドラの追加を伴わず、監視スレッドごとの判定だけで完結するため。
-* 根拠: `def is_camera_enabled(cam_conf: Dict[str, Any]) -> bool:` (行番号: 116〜146 / 抜粋: "\"\"\"該当カメラが現在有効かを devices.json の最新値で返す(#652)。")、`def _read_enabled_flags_from_devices_json() -> Optional[Dict[str, bool]]:` (行番号: 97〜109 / 抜粋: "devices.json を読み {camera_id: enabled} を返す。読めない・壊れている場合は None。")
+* 根拠: `def is_camera_enabled(cam_conf: Dict[str, Any]) -> bool:` (行番号: 135〜165 / 抜粋: "\"\"\"該当カメラが現在有効かを devices.json の最新値で返す(#652)。")、`def _read_enabled_flags_from_devices_json() -> Optional[Dict[str, bool]]:` (行番号: 97〜109 / 抜粋: "devices.json を読み {camera_id: enabled} を返す。読めない・壊れている場合は None。")
 
 
 * **引数/リクエスト**: `is_camera_enabled` は `cam_conf: Dict[str, Any]`（`id` と `enabled` を参照）。`_read_enabled_flags_from_devices_json` は引数なし。
@@ -110,7 +113,7 @@
 ### `_add_pullpoint` / `_discard_pullpoint`（Issue #439 で追加）
 
 * **役割**: `active_pullpoints`リストへの安全な追加・削除を担うヘルパー関数。`_add_pullpoint`は`_pullpoints_lock`保護下で`append`する。`_discard_pullpoint`は同様の保護下で`remove`を試み、既に別スレッドにより削除済みで`ValueError`が送出された場合はそれを無視する。以前の呼び出し元は`if x in active_pullpoints: active_pullpoints.remove(x)`という「存在確認してから削除」パターンを各所に直接書いていたが、この2ステップの間に別スレッドが同じ要素を削除すると`list.remove()`が`ValueError`を送出しうり(`finally`節内で発生すると後始末処理が中断する)、この2関数への集約でその競合を解消した。
-* 根拠: `def _add_pullpoint(pullpoint: Any) -> None:` (行番号: 157〜159 / 抜粋: "with _pullpoints_lock:\n        active_pullpoints.append(pullpoint)")、`def _discard_pullpoint(pullpoint: Any) -> None:` (行番号: 85〜91 / 抜粋: "\"\"\"active_pullpointsから安全に削除する(既に削除済みでも例外を出さない)。\"\"\"\n    with _pullpoints_lock:\n        try:\n            active_pullpoints.remove(pullpoint)\n        except ValueError:\n            pass")
+* 根拠: `def _add_pullpoint(pullpoint: Any) -> None:` (行番号: 176〜178 / 抜粋: "with _pullpoints_lock:\n        active_pullpoints.append(pullpoint)")、`def _discard_pullpoint(pullpoint: Any) -> None:` (行番号: 85〜91 / 抜粋: "\"\"\"active_pullpointsから安全に削除する(既に削除済みでも例外を出さない)。\"\"\"\n    with _pullpoints_lock:\n        try:\n            active_pullpoints.remove(pullpoint)\n        except ValueError:\n            pass")
 
 
 * **引数/リクエスト**: `pullpoint: Any`（いずれも共通）
@@ -134,11 +137,11 @@
 
 * **役割**: SIGINTやSIGTERMなどのプロセス終了シグナルを受信した際に、アクティブなPullPointサブスクリプションを解除して安全に終了する。
 * **（Issue #439 で修正）** `active_pullpoints`の走査は以前`for svc in list(active_pullpoints):`と直接コピーしていたが、`monitor_single_camera`（他スレッド）が同時にリストを変更しうるため、`_pullpoints_lock`保護下でスナップショット(`pullpoints_snapshot`)を取得してからロックを解放し、そのスナップショットを走査するよう変更された。
-* 根拠: `cleanup_handler` (行番号: 171〜187 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")、[ロック保護下のスナップショット取得] (行番号: 99〜100 / 抜粋: "with _pullpoints_lock:\n        pullpoints_snapshot = list(active_pullpoints)")
+* 根拠: `cleanup_handler` (行番号: 190〜206 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")、[ロック保護下のスナップショット取得] (行番号: 99〜100 / 抜粋: "with _pullpoints_lock:\n        pullpoints_snapshot = list(active_pullpoints)")
 
 
 * **引数/リクエスト**: `signum: int` (シグナル番号), `frame: Any` (実行フレーム)
-* 根拠: `cleanup_handler` (行番号: 171 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")
+* 根拠: `cleanup_handler` (行番号: 190 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -157,11 +160,11 @@
 ### `is_host_reachable`
 
 * **役割**: OSのpingコマンドを実行し、指定されたIPアドレスの到達性を確認する。
-* 根拠: `is_host_reachable` (行番号: 192〜208 / 抜粋: "def is_host_reachable(ip:")
+* 根拠: `is_host_reachable` (行番号: 211〜227 / 抜粋: "def is_host_reachable(ip:")
 
 
 * **引数/リクエスト**: `ip: str` (対象のIPアドレス)
-* 根拠: `is_host_reachable` (行番号: 192 / 抜粋: "def is_host_reachable(ip: str)")
+* 根拠: `is_host_reachable` (行番号: 211 / 抜粋: "def is_host_reachable(ip: str)")
 
 
 * **戻り値/レスポンス**: `bool` (到達可能ならTrue)
@@ -186,7 +189,7 @@
 ### `perform_emergency_diagnosis`
 
 * **役割**: 指定されたIPの特定ポート（80, 2020）へのTCP接続テストを行い、ポートの状態（Open/Closed）をログに出力する。
-* 根拠: `perform_emergency_diagnosis` (行番号: 213〜229 / 抜粋: "def perform_emergency_diagnosis")
+* 根拠: `perform_emergency_diagnosis` (行番号: 232〜248 / 抜粋: "def perform_emergency_diagnosis")
 
 
 * **引数/リクエスト**: `ip: str` (対象のIPアドレス)
@@ -209,7 +212,7 @@
 ### `check_camera_time`
 
 * **役割**: カメラのシステム時刻(UTC)を取得し、稼働サーバーの現在時刻(JST想定)との差分が5分(300秒)以上あるかチェックして警告を出す。
-* 根拠: `check_camera_time` (行番号: 231〜262 / 抜粋: "def check_camera_time(devicemgmt")
+* 根拠: `check_camera_time` (行番号: 250〜281 / 抜粋: "def check_camera_time(devicemgmt")
 * **（Issue #382 で修正）** カメラのUTC時刻を `tzinfo=timezone.utc` の aware datetime として組み立て、`dt_class.now(timezone.utc)` と比較する。以前は +9h した naive 値をホストローカル時刻と比較する JST 前提だったため、ホストの TZ が UTC 等の環境では差が常に 9h となり全カメラが永久に「時刻ズレ」で接続不能になっていた。
 * 根拠: `cam_time_utc = dt_class(...)` (行番号: 148〜150)、`now_utc = dt_class.now(timezone.utc)` (行番号: 151)
 
@@ -231,13 +234,64 @@
 
 
 
+### `capture_snapshot_from_rtsp`（Issue #703 で新設）
+
+* **役割**: カメラのRTSPストリームへ直接接続し、FFmpegで1フレームだけを抽出してJPEGのバイト列を返す。動体検知時のスナップショット取得の第一手であり、NAS上のNVR録画ファイルの状態に一切依存しない。
+* 根拠: `capture_snapshot_from_rtsp` (行番号: 320〜416 / 抜粋: "def capture_snapshot_from_rtsp(")
+
+* **導入の背景**: 従来の `capture_snapshot_from_nvr` は当日分の録画セグメントを mtime 降順に並べて先頭を選んでいたが、NVRが書き込み中のセグメントは mtime が更新され続けるため必ず先頭に来る。未完成の moov atom に対して `-sseof -1`（末尾から1秒前）のシークができず、FFmpegが終了コード 69/183 で失敗していた。実機では動体検知316件中94件（約30%）が失敗し、その WARNING を `log_analyzer` のキーワード判定がエラーとして数えるため `health_watch` が常時「異常」状態になり、他の異常通知が再通知抑制で埋もれる実害が出ていた。
+* 根拠: `logger.warning` によるリトライ失敗ログ (行番号: 394〜399 / 抜粋: "RTSPからのフレーム抽出に失敗しました")
+
+* **引数/リクエスト**: `cam_conf: dict`（カメラ設定。`get_rtsp_url` が `id`/`ip`/`port`/`user`/`pass`/`rtsp_url` を参照する）
+* 根拠: `capture_snapshot_from_rtsp` (行番号: 320 / 抜粋: "(cam_conf: dict)")
+
+* **戻り値/レスポンス**: `bytes | None`（JPEGのバイト列、または失敗時は `None`）
+* 根拠: `capture_snapshot_from_rtsp` (行番号: 320 / 抜粋: "-> \"bytes | None\":")
+
+* **副作用**: `services.camera_service.get_rtsp_url` によるONVIF通信（キャッシュ未ヒット時のみ）、カメラへのRTSP接続、外部コマンド（`ffmpeg`）の実行、`tempfile.gettempdir()` 配下への一時ファイル作成と削除。
+* 根拠: `subprocess.run(cmd` (行番号: 370 / 抜粋: "subprocess.run(")
+
+* **FFmpegの起動オプション**: `-hide_banner -loglevel error`（認証情報込みのRTSP URLが起動バナー経由で出力されるのを防ぐ。`camera_service.start_hls_stream` と同じ理由）、`-rtsp_transport tcp`（UDPのパケットロスで壊れたフレームになるのを避ける）、`-frames:v 1`、`-q:v 2`、`-an`（音声ストリームを持つカメラで `image2` muxer が失敗するのを防ぐ）、`-f image2`。NVR方式に固有の `-sseof` は使わない。
+* 根拠: `cmd = [...]` (行番号: 354〜367 / 抜粋: "\"-rtsp_transport\", \"tcp\",")
+
+* **タイムアウト・リトライ**: 1回あたり `RTSP_SNAPSHOT_TIMEOUT_SEC`（15秒）、最大 `RTSP_SNAPSHOT_MAX_RETRIES`（2回）で、リトライが残っている場合のみ `time.sleep(2 ** attempt)` のExponential Backoffを挟む。失敗確定までの最悪時間（約32秒）が従来のNVR方式（10秒×3＋バックオフ6秒＝約36秒）を超えないよう、NVR方式より長いタイムアウトのぶんリトライ回数を減らしてある。
+* 根拠: `RTSP_SNAPSHOT_TIMEOUT_SEC` (行番号: 89)、`RTSP_SNAPSHOT_MAX_RETRIES` (行番号: 93)、`if attempt < RTSP_SNAPSHOT_MAX_RETRIES:` (行番号: 404)
+
+* **エラーハンドリング**: Fail-Soft 契約を維持しており、いかなる経路でも例外を送出せず `None` を返す。`get_rtsp_url` の例外（ONVIF到達不能等）はWARNINGでログしてから `None`、`subprocess.TimeoutExpired` / `subprocess.CalledProcessError` はリトライ対象、それ以外の例外はERRORでログしてループを打ち切る。ffmpegが終了コード0でも0バイトのファイルを残すことがあるため、`os.path.getsize(output_tmp) > 0` も成功条件に含める。リトライループ全体を `try`/`finally` で包み、どの終了経路でも一時ファイルを削除する。
+* 根拠: `except subprocess.TimeoutExpired` (行番号: 387)、`os.path.getsize(output_tmp) > 0` (行番号: 379)、`finally:` (行番号: 408)
+
+* **ログへの認証情報の非出力**: `subprocess.TimeoutExpired` / `CalledProcessError` の `str()` にはコマンド列（＝認証情報入りのRTSP URL）が含まれるため、例外オブジェクトをそのままログに出さず、`_mask_rtsp_url_for_log` でマスクしたURLと終了コードのみを出力する。`tests/test_camera_monitor_rtsp_snapshot.py` がこの挙動を固定している。
+* 根拠: `masked_url = _mask_rtsp_url_for_log(rtsp_url)` (行番号: 347)
+
+
+### `_select_latest_completed_segment`（Issue #703 で新設）
+
+* **役割**: mtime降順に並んだNVR録画セグメントのリストから、書き込みが完了しているとみなせる最新のものを返す。直近 `NVR_INPROGRESS_MTIME_MARGIN_SEC`（30秒）以内に更新されたファイルは「NVRが書き込み中」とみなして除外する。完成済みのセグメントが1つも無ければ `None` を返す。
+* 根拠: `_select_latest_completed_segment` (行番号: 297〜318 / 抜粋: "def _select_latest_completed_segment(")
+
+* **引数/リクエスト**: `mp4_files: list`（mtime降順のパスのリスト）, `now_ts: float | None = None`（基準時刻。省略時は `time.time()`）
+* 根拠: `_select_latest_completed_segment` (行番号: 297 / 抜粋: "(mp4_files: list, now_ts:")
+
+* **戻り値/レスポンス**: `str | None`（選ばれたパス、または該当なしの `None`）
+* 根拠: `_select_latest_completed_segment` (行番号: 297 / 抜粋: "-> \"str | None\":")
+
+* **副作用**: なし（`os.path.getmtime` による読み取りのみ）。
+* 根拠: `os.path.getmtime(path)` (行番号: 312)
+
+* **エラーハンドリング**: glob直後にローテーション等で消えたファイルの `OSError` は `continue` で読み飛ばす。
+* 根拠: `except OSError:` (行番号: 314)
+
+
 ### `capture_snapshot_from_nvr`
+
+* **（Issue #703 で変更）** 本関数は `capture_snapshot_from_rtsp` が失敗したときのフォールバック経路になった。また、対象セグメントの選択が `mp4_files[0]`（最新mtime＝NVRが書き込み中のファイル）から `_select_latest_completed_segment(mp4_files)` に変わり、書き込み完了済みのセグメントだけを対象にする。完成済みセグメントが無い場合は、失敗が確実な `ffmpeg` を起動せずWARNINGを出して `None` を返す。トレードオフとして、このフォールバック経路で得られるフレームは動体検知時刻から最大でセグメント長（実機は10分）ぶん古くなりうる。
+* 根拠: `latest_mp4 = _select_latest_completed_segment(mp4_files)` (行番号: 460)、`書き込み完了済みのNVRセグメントが見つかりません` (行番号: 463)
 
 * **（Issue #537 で修正）** 録画チャンクの検索パターンを新設の `_nvr_search_patterns(nas_folder, now)` で組み立てる。当日プレフィックス(`YYYYMMDD_*.mp4`)に加え、`now.hour == 0` のときは前日プレフィックスも検索する(0時台は最新チャンクが前日 23:5x 開始のファイルであるため、以前は "No NVR video files found" で画像が保存されなかった)。また、NAS 側ディレクトリ作成失敗時のフォールバック先を `BASE_DIR/temp_assets/snapshots` から `config.FALLBACK_ROOT/assets/snapshots` に変更した(`nas_monitor` の保持期間削除・同期の対象パスに揃える)。
 * 根拠: [パターン関数] (行番号: 208〜219 / 抜粋: "if now.hour == 0:\n        yesterday = now - timedelta(days=1)")、[呼び出し] (行番号: 250)、[フォールバック先] (行番号: 59)
 
 * **役割**: NAS上に保存されている最新の動画ファイル(.mp4)を検索し、FFmpegを用いてファイル末尾から1秒前のフレームを切り出してJPEG画像のバイト列を返す。
-* 根拠: `capture_snapshot_from_nvr` (行番号: 278〜364 / 抜粋: "def capture_snapshot_from_nvr(")
+* 根拠: `capture_snapshot_from_nvr` (行番号: 417〜516 / 抜粋: "def capture_snapshot_from_nvr(")
 * **（Issue #405 で修正）** NVR ディレクトリは `config.NVR_RECORD_DIR` を直接参照する（以前の `getattr(config, ..., os.getenv("NVR_RECORD_DIR", ...))` は config が常に定義するため到達不能なフォールバックで、`.env.example` 整合テストの死角だった）。
 * 根拠: `nvr_base_dir = config.NVR_RECORD_DIR` (行番号: 186)
 * **[修正済み] #414 C-L7: スナップショット一時ファイルパスを`tempfile.gettempdir()`経由で解決**: `output_tmp`は以前`f"/tmp/snapshot_{cam_conf['name']}_{uuid.uuid4().hex}.jpg"`と`/tmp`を直書きしていたが、`os.path.join(tempfile.gettempdir(), f"snapshot_{...}.jpg")`に変更した。実行環境のOS標準一時ディレクトリ（Linuxでは通常`/tmp`のまま、`TMPDIR`環境変数があればそちらに追従）に解決される。テスト側(`tests/test_camera_monitor_low_priority.py`)が並列実行時に実`/tmp`をglobして他プロセスの残骸と衝突する偽陽性を避けられるよう、`tempfile.gettempdir`をmonkeypatchして隔離できるようにするための変更。
@@ -271,8 +325,9 @@
 
 ### `save_image_from_stream`
 
-* **役割**: `capture_snapshot_from_nvr` を呼び出してスナップショットを取得し、指定されたディレクトリ(`ASSETS_DIR`)にファイルとして保存する。
-* 根拠: `save_image_from_stream` (行番号: 367〜393 / 抜粋: "def save_image_from_stream(")
+* **役割**: スナップショットを取得し、指定されたディレクトリ(`ASSETS_DIR`)にファイルとして保存する。**（Issue #703 で変更）** 取得はまず `capture_snapshot_from_rtsp`（RTSPからの直接取得）を試し、`None` が返った場合にのみINFOログを残して `capture_snapshot_from_nvr`（NVR録画からの切り出し）へフォールバックする。両方が失敗した場合も例外は送出せず、WARNINGを出して `None` を返す（Fail-Soft契約は不変）。
+* 根拠: `save_image_from_stream` (行番号: 519〜552 / 抜粋: "def save_image_from_stream(")
+* 根拠: `image_data = capture_snapshot_from_rtsp(cam_conf)` (行番号: 528)、`image_data = capture_snapshot_from_nvr(cam_conf)` (行番号: 534)
 
 
 * **引数/リクエスト**: `cam_name: str` (カメラ名), `event_type: str = "motion"` (イベント種別)
@@ -295,7 +350,7 @@
 ### `force_close_session`
 
 * **役割**: さまざまなパターンのオブジェクト（ONVIFService, ONVIFCamera, zeep_client等）からHTTPセッションを探し出して強制的にクローズし、ファイル記述子を解放する。
-* 根拠: `force_close_session` (行番号: 395〜418 / 抜粋: "def force_close_session(")
+* 根拠: `force_close_session` (行番号: 554〜577 / 抜粋: "def force_close_session(")
 
 
 * **引数/リクエスト**: `service_obj: Any` (対象オブジェクト)
@@ -318,7 +373,7 @@
 ### `process_camera_event`
 
 * **役割**: ONVIFイベントメッセージをパースし、動体検知イベントであるかを判定。クールダウン判定後、DB保存とスナップショット保存を実行する。
-* 根拠: `process_camera_event` (行番号: 420〜489 / 抜粋: "def process_camera_event(")
+* 根拠: `process_camera_event` (行番号: 579〜648 / 抜粋: "def process_camera_event(")
 
 
 * **引数/リクエスト**: `msg: Any` (ONVIFイベントメッセージ), `cam_conf: Dict[str, Any]` (カメラ設定)
@@ -353,33 +408,33 @@
 | `_suspend_after_fatal_error` | 致命的障害の待機・通知・緊急診断 |
 | `monitor_single_camera` | 外側ループの制御のみ |
 
-* 根拠: `_ReconnectBackoff` (行番号: 492 / 抜粋: "class _ReconnectBackoff:")、`_CameraSession` (行番号: 529 / 抜粋: "class _CameraSession:")、`monitor_single_camera` (行番号: 785 / 抜粋: "def monitor_single_camera(")
+* 根拠: `_ReconnectBackoff` (行番号: 651 / 抜粋: "class _ReconnectBackoff:")、`_CameraSession` (行番号: 688 / 抜粋: "class _CameraSession:")、`monitor_single_camera` (行番号: 944 / 抜粋: "def monitor_single_camera(")
 
 * **役割**: 単一のカメラに対する死活監視、ONVIF接続、イベント購読（PullPoint）ループ、例外時（ネットワーク断等）のExponential Backoffリトライ、セッション更新などを制御するメインループ。ポートは設定ファイル指定の1つのみを使用し、ローテーションは行わない。
 * **（Issue #652 で追加）** 外側ループの先頭で `is_camera_enabled(cam_conf)` を確認し、`devices.json` 上で無効化されていればONVIF接続にも到達性チェックにも進まず `DISABLED_POLL_INTERVAL_SEC`(30秒)ごとに再確認して待機する（無効化・再有効化の遷移時のみINFOログを1回出す）。`_pull_events_until_reconnect` でも `SESSION_LIFETIME` 判定の直後に同じ確認を行い、監視中に無効化された場合は `return` して `finally` の `Unsubscribe`・セッションクローズを通り、外側の待機へ移る。
-* 根拠: `monitor_single_camera` (行番号: 785 / 抜粋: "def monitor_single_camera(")
+* 根拠: `monitor_single_camera` (行番号: 944 / 抜粋: "def monitor_single_camera(")
 
 * **（2026-09-06 品質監査で修正）** 玄関カメラ以外(駐車場・庭)の `PullMessages` 失敗時の扱いを変更した。以前は例外を DEBUG ログに落として `events = None` で継続するだけだったため、カメラ再起動等でサブスクリプションが消えると `SESSION_LIFETIME`(3600秒)が経過するまで最長1時間、動体検知が止まったまま(警告も出ない)だった。`_pull_events_until_reconnect` の冒頭に `consecutive_pull_failures = 0` を置き、`PullMessages` 成功時に 0 へ戻し、失敗が `PULL_FAILURE_RECONNECT_THRESHOLD`(3)回連続したら WARNING を出して `return` し、外側の再接続処理へ移行する(玄関カメラは従来どおり1回目で `return`)。
-* 根拠: `_pull_events_until_reconnect` (行番号: 639 / 抜粋: "def _pull_events_until_reconnect(")
+* 根拠: `_pull_events_until_reconnect` (行番号: 798 / 抜粋: "def _pull_events_until_reconnect(")
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]` (対象カメラ設定)
 * **戻り値/レスポンス**: `None` (無限ループ)
 
 * **副作用**: ONVIF APIコール、例外発生時のプッシュ通知送信(`send_push`)、グローバル変数 `active_pullpoints` への参照追加/削除。
 * **（Issue #439 で修正）** `active_pullpoints`への追加は`_add_pullpoint(pullpoint)`、削除は`_discard_pullpoint(...)`という排他制御されたヘルパー関数経由に統一された。以前は接続成功時に`active_pullpoints.append(pullpoint)`を直接呼び、例外処理時とリソース解放時にはそれぞれ「存在確認してから削除」パターンを直接書いていた。分割後は、追加が `_connect_and_subscribe`、削除が `_suspend_after_fatal_error` と `_CameraSession.release` にある。
-* 根拠: `_connect_and_subscribe` (行番号: 568 / 抜粋: "def _connect_and_subscribe(")、`_suspend_after_fatal_error` (行番号: 732 / 抜粋: "def _suspend_after_fatal_error(")
+* 根拠: `_connect_and_subscribe` (行番号: 727 / 抜粋: "def _connect_and_subscribe(")、`_suspend_after_fatal_error` (行番号: 891 / 抜粋: "def _suspend_after_fatal_error(")
 
 * **エラーハンドリング**: 一時的障害（`RemoteDisconnected`等）と、致命的障害（その他例外）を分けて処理。連続エラー回数に基づくExponential Backoff（最大3600秒）、特定条件（5回・12の倍数回失敗時）での管理者への通知を行う。`_CameraSession.release()` は `ONVIFService` の構築前後どちらで失敗しても呼べるようになっており、構築に失敗した場合は直前に作った生のサブスクリプションを `Unsubscribe` する（カメラ側に購読を残さないため）。
-* 根拠: `_suspend_after_transient_error` (行番号: 717 / 抜粋: "def _suspend_after_transient_error(")、`_suspend_after_fatal_error` (行番号: 732 / 抜粋: "def _suspend_after_fatal_error(")
+* 根拠: `_suspend_after_transient_error` (行番号: 876 / 抜粋: "def _suspend_after_transient_error(")、`_suspend_after_fatal_error` (行番号: 891 / 抜粋: "def _suspend_after_fatal_error(")
 
 ### `main`
 
 * **役割**: 登録された全てのカメラ設定（`config.CAMERAS`）に対して、`ThreadPoolExecutor` を用いて並行で `monitor_single_camera` を実行する。
-* 根拠: `main` (行番号: 848〜858 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 1007〜1017 / 抜粋: "async def main() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `main` (行番号: 848 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 1007 / 抜粋: "async def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -438,8 +493,12 @@ flowchart TD
     CooldownCheck -- Yes --> UpdateTimestamp["last_motion_detected更新 → _motion_lock解放"]
     UpdateTimestamp --> SaveDB["外部: save_log_generic()"]
     SaveDB --> TriggerSnap["save_image_from_stream()"]
-    TriggerSnap --> FFmpeg["外部: ffmpeg (NASから画像抽出)"]
-    FFmpeg --> SaveFile["画像ファイル保存"]
+    TriggerSnap --> RtspSnap["capture_snapshot_from_rtsp()<br/>外部: ffmpeg (RTSPから1フレーム抽出)"]
+    RtspSnap -- 成功 --> SaveFile["画像ファイル保存"]
+    RtspSnap -- 失敗(None) --> NvrSnap["capture_snapshot_from_nvr()<br/>外部: ffmpeg (書き込み完了済みNVRセグメントから抽出)"]
+    NvrSnap -- 成功 --> SaveFile
+    NvrSnap -- 失敗(None) --> SnapGiveUp["WARNINGログのみ (Fail-Soft)"]
+    SnapGiveUp --> CleanupMsg
     SaveFile --> CleanupMsg
     
     PullCall -- 例外発生(通信エラー等) --> HandleError{"エラーハンドリング"}
@@ -460,7 +519,8 @@ graph TD
         Main["main()"]
         Monitor["monitor_single_camera()"]
         Process["process_camera_event()"]
-        Snapshot["capture_snapshot_from_nvr()"]
+        Snapshot["capture_snapshot_from_nvr()<br/>(フォールバック)"]
+        RtspSnapshot["capture_snapshot_from_rtsp()<br/>(第一手・Issue #703)"]
         SaveImg["save_image_from_stream()"]
         GlobalVars["last_motion_detected<br/>active_pullpoints"]
         Locks["_motion_lock / _pullpoints_lock<br/>(Issue #439)"]
@@ -469,6 +529,7 @@ graph TD
         Main --> Monitor
         Monitor --> Process
         Process --> SaveImg
+        SaveImg --> RtspSnapshot
         SaveImg --> Snapshot
         Monitor --> GlobalVars
         Process --> GlobalVars
@@ -483,6 +544,7 @@ graph TD
         Logger["core.logger"]
         DBLog["core.database.save_log_generic"]
         Notify["services.notification_service.send_push"]
+        CamSvc["services.camera_service<br/>get_rtsp_url / _mask_rtsp_url_for_log<br/>(Issue #703)"]
     end
 
     subgraph "外部ライブラリ / プロトコル"
@@ -494,6 +556,7 @@ graph TD
         NVR_NAS["NVR / NAS ストレージ"]
         OS_Cmd["OSコマンド (ping, ffmpeg)"]
         FileSystem["ローカルファイルシステム (ASSETS_DIR)"]
+        CameraRtsp["カメラ本体のRTSPストリーム"]
     end
 
     Main --> Config
@@ -506,6 +569,9 @@ graph TD
     Snapshot --> OS_Cmd
     Monitor --> OS_Cmd
     Snapshot --> NVR_NAS
+    RtspSnapshot --> CamSvc
+    RtspSnapshot --> OS_Cmd
+    RtspSnapshot --> CameraRtsp
     SaveImg --> FileSystem
 
 ```
@@ -524,6 +590,9 @@ graph TD
 * **ハードコードされた識別子**: `"玄関カメラ"` という特定の名前を用いた条件分岐が記述されており、設定ファイル(`config.py`)上の名前変更に弱く、カメラ増設・名称変更時にこのロジックが意図せず無効化される。
 * **強制終了の影響**: シグナルハンドラ `cleanup_handler` にて `os._exit(0)` を呼び出している。これにより実行中の他のスレッドやリソースのクリーンアップ処理が即座に強制中断される。
 * **外部コマンド依存**: `ping` や `ffmpeg` といったOS環境に依存するコマンドを `subprocess.run` で実行している。対象環境へのコマンドインストールパスが通っていない場合は実行時エラーとなる。
+* **[修正済み] 書き込み中NVRセグメントの参照によるスナップショット失敗（Issue #703）**: `capture_snapshot_from_nvr` は当日分の `*.mp4` を mtime 降順で並べて先頭を選んでいたが、NVRが書き込み中のセグメントは mtime が更新され続けるため必ず先頭に来て、未完成の moov atom に対する `-sseof -1` のシークが失敗していた（実機で動体検知の約30%、`ffmpeg` 終了コード 69/183）。しかも対象ファイルはリトライループの外で1回だけ決めていたため、バックオフ（2秒・4秒）を挟んでも同じ未完成ファイルを再試行するだけで、セグメント完成までの最大10分は埋まらなかった。現在は (1) 第一手をRTSPからの直接取得（`capture_snapshot_from_rtsp`）に変更し、(2) フォールバックのNVR経路でも `_select_latest_completed_segment` で書き込み中セグメントを除外することで解消している。
+* **カメラへの追加接続が発生する（Issue #703）**: RTSP直接取得は動体検知のたびにカメラ本体へ新規のRTSPセッションを1本張る。ライブHLS配信（`camera_service.start_hls_stream`）はユーザーがカメラ画面を開いたときだけ起動するオンデマンド方式で、常時接続のストリームは本リポジトリ内には存在しないが、NVR機器側の常時録画セッションと合わせて同時接続数の上限に注意すること。`monitors/camera_monitor.py` は `unified_server.py` とは別プロセスで動くため、`camera_service` 側の `_rtsp_cache` やffmpegプロセス管理辞書は共有されず、ライブ配信のプロセス管理と干渉することはない。
+* **RTSP URLの認証情報をログに出さない（Issue #703）**: `subprocess.TimeoutExpired` / `CalledProcessError` の `str()` にはコマンド列（＝認証情報入りRTSP URL）が含まれる。`capture_snapshot_from_rtsp` ではこれらの例外オブジェクトをそのままログに出さず、`_mask_rtsp_url_for_log` でマスクしたURLと終了コードのみを出力している。ffmpeg側も `-hide_banner -loglevel error` で起動バナーを抑止している。同種のffmpeg呼び出しを追加する場合も同じ作法に従うこと。
 * **[修正済み] ASSETS_DIRの到達不能変数リスク（Issue #497 C-4）**: 以前は`ASSETS_DIR = os.path.join(config.ASSETS_DIR, "snapshots")`が`try`節内の1行目にあり、`os.path.join`自体が失敗した場合、`except`節のログ出力(`ASSETS_DIR`を参照)で`ASSETS_DIR`が未束縛のまま参照される可能性があった(静的解析でも検知)。現在は`_nas_assets_dir = os.path.join(config.ASSETS_DIR, "snapshots")`を`try`節の外で先に計算し、`try`節内では`ASSETS_DIR: str = _nas_assets_dir`という代入のみを行うことで、`except`節では常に束縛済みの`_nas_assets_dir`をログに使うよう修正されている。
 
 ## 9. 不明事項一覧

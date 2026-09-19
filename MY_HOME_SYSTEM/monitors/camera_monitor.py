@@ -41,6 +41,11 @@ import config
 from core.onvif_utils import find_wsdl_path
 from core.logger import setup_logging
 from core.database import save_log_generic
+# Issue #703: RTSP URL の解決(ONVIF GetStreamUri + 認証情報の埋め込み + キャッシュ)と
+# ログ用のURLマスクは services/camera_service.py の既存実装を再利用する。camera_monitor は
+# unified_server とは別プロセスで動くため、camera_service のモジュール状態(_rtsp_cache や
+# ライブHLS配信の ffmpeg プロセス管理辞書)を共有することはなく、配信側には干渉しない。
+from services.camera_service import get_rtsp_url, _mask_rtsp_url_for_log
 from services.notification_service import send_push
 
 # === ログ・定数設定 ===
@@ -76,6 +81,20 @@ RENEW_DURATION: str = "PT600S"
 
 # クールダウンの秒数を設定 (config.py から読み込み。未定義時は60秒)
 MOTION_COOLDOWN_SEC: int = getattr(config, 'MOTION_COOLDOWN_SEC', 60)
+
+# --- Issue #703: 動体検知スナップショットのパラメータ ---
+# RTSP への接続〜1フレーム取得にかける ffmpeg 1回あたりの上限秒数。
+# RTSP の接続確立(TCP + DESCRIBE/SETUP/PLAY)とキーフレーム待ちで数秒かかるため、
+# NVR ファイル切り出し時の 10 秒より長めに取る。
+RTSP_SNAPSHOT_TIMEOUT_SEC: int = 15
+# RTSP 取得のリトライ回数。動体検知の同期パス上で待たせることになるため、
+# 失敗確定までの最悪時間が従来(NVR切り出し: 10秒×3 + バックオフ6秒 = 約36秒)を
+# 超えないよう 2 回に抑える(15秒×2 + バックオフ2秒 = 約32秒)。
+RTSP_SNAPSHOT_MAX_RETRIES: int = 2
+# NVR 録画セグメントを「まだ書き込み中」とみなす mtime の猶予(秒)。
+# NVR が書き込み中のファイルは mtime が更新され続けるため常に最新として選ばれるが、
+# moov atom が未完成で `-sseof` のシークができず ffmpeg が失敗する(Issue #703)。
+NVR_INPROGRESS_MTIME_MARGIN_SEC: int = 30
 
 # 各カメラの最終検知時刻を保持する辞書
 last_motion_detected: Dict[str, float] = {}
@@ -275,10 +294,135 @@ def _nvr_search_patterns(nas_folder: str, now: dt_class) -> list:
     return patterns
 
 
+def _select_latest_completed_segment(mp4_files: list, now_ts: "float | None" = None) -> "str | None":
+    """mtime 降順に並んだ NVR 録画セグメントから、書き込みが完了しているとみなせる最新のものを返す。
+
+    Issue #703: NVR が現在書き込んでいるセグメントは mtime が更新され続けるため必ず先頭に
+    来るが、moov atom が未完成のため `-sseof`(末尾からのシーク)ができず ffmpeg が
+    終了コード 69/183 で失敗する。実機では動体検知 316 件中 94 件(約30%)がこれで失敗し、
+    その WARNING が health_watch を常時「異常」状態にしていた。
+    直近 NVR_INPROGRESS_MTIME_MARGIN_SEC 秒以内に更新されたファイルは書き込み中とみなして除外する。
+
+    完成済みのセグメントが1つも無ければ None(呼び出し元は Fail-Soft で諦める)。
+    """
+    if now_ts is None:
+        now_ts = time.time()
+    for path in mp4_files:
+        try:
+            if now_ts - os.path.getmtime(path) >= NVR_INPROGRESS_MTIME_MARGIN_SEC:
+                return path
+        except OSError:
+            # ローテーション等で glob 直後に消えたファイルはスキップする
+            continue
+    return None
+
+
+def capture_snapshot_from_rtsp(cam_conf: dict) -> "bytes | None":
+    """カメラの RTSP ストリームへ直接接続し、ffmpeg で1フレームだけ抽出する。
+
+    Issue #703: 従来の `capture_snapshot_from_nvr()` は NAS 上の NVR 録画セグメントのうち
+    mtime が最新のものを選んでいたが、それは常に「NVR が書き込み中の未完成セグメント」で
+    あり、シークに失敗して約3割のスナップショットが落ちていた。動体検知の瞬間の映像を
+    残すという本来の目的にも合うため、検知時点で RTSP から直接1フレームを取得する。
+
+    RTSP URL の解決は services/camera_service.py の `get_rtsp_url()` を再利用する
+    (devices.json 由来の `rtsp_url` があればそれを、無ければ ONVIF GetStreamUri から
+    組み立て、プロセス内にキャッシュする)。
+
+    Fail-Soft 契約: 失敗しても例外は送出せず、ログを残して None を返す。
+    """
+    cam_name = cam_conf.get("name") or cam_conf.get("id") or "unknown"
+
+    try:
+        rtsp_url = get_rtsp_url(cam_conf)
+    except Exception as e:  # noqa: BLE001 - ONVIF/zeep は多様な例外を投げるため Fail-Soft で握る
+        # get_rtsp_url は ONVIF 失敗時に例外を送出する。監視ループは止めない。
+        logger.warning(f"⚠️ [{cam_name}] RTSP URLの取得に失敗しました: {e}")
+        return None
+
+    if not rtsp_url:
+        logger.warning(f"⚠️ [{cam_name}] RTSP URLが空のためスナップショットを取得できません。")
+        return None
+
+    masked_url = _mask_rtsp_url_for_log(rtsp_url)
+    # C-L7 と同様、実行環境の TMPDIR に追従させるため tempfile.gettempdir() 経由で解決する
+    output_tmp = os.path.join(tempfile.gettempdir(), f"snapshot_{cam_name}_{uuid.uuid4().hex}.jpg")
+
+    try:
+        for attempt in range(1, RTSP_SNAPSHOT_MAX_RETRIES + 1):
+            try:
+                cmd = [
+                    "ffmpeg", "-y",
+                    # -hide_banner/-loglevel error: 認証情報込みの RTSP URL が ffmpeg 自身の
+                    # 起動バナー("Input #0, rtsp, from 'rtsp://user:pass@...'")経由で
+                    # 出力されるのを防ぐ(camera_service.start_hls_stream と同じ理由)。
+                    "-hide_banner", "-loglevel", "error",
+                    # UDP はラズパイ〜カメラ間のパケットロスで壊れたフレームになりやすいため TCP 固定
+                    "-rtsp_transport", "tcp",
+                    "-i", rtsp_url,
+                    "-frames:v", "1",
+                    "-q:v", "2",    # 高画質
+                    "-an",          # 音声ストリームを持つカメラで image2 muxer が失敗するのを防ぐ
+                    "-f", "image2",
+                    output_tmp,
+                ]
+
+                subprocess.run(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=RTSP_SNAPSHOT_TIMEOUT_SEC,
+                    check=True,
+                )
+
+                # ffmpeg は 0 終了でも 0 バイトのファイルを残すことがあるためサイズも確認する
+                if os.path.exists(output_tmp) and os.path.getsize(output_tmp) > 0:
+                    with open(output_tmp, "rb") as f:
+                        return f.read()
+                logger.warning(
+                    f"⚠️ [{cam_name}] RTSPから1フレーム抽出できませんでした "
+                    f"(Attempt {attempt}/{RTSP_SNAPSHOT_MAX_RETRIES})"
+                )
+
+            except subprocess.TimeoutExpired:
+                # 例外の str() には cmd(=認証情報入り RTSP URL)が含まれるため、そのまま出さない
+                logger.warning(
+                    f"⏳ [{cam_name}] RTSP取得がタイムアウトしました "
+                    f"({RTSP_SNAPSHOT_TIMEOUT_SEC}s, {masked_url}) "
+                    f"(Attempt {attempt}/{RTSP_SNAPSHOT_MAX_RETRIES})"
+                )
+            except subprocess.CalledProcessError as e:
+                logger.warning(
+                    f"⚠️ [{cam_name}] RTSPからのフレーム抽出に失敗しました "
+                    f"(exit={e.returncode}, {masked_url}) "
+                    f"(Attempt {attempt}/{RTSP_SNAPSHOT_MAX_RETRIES})"
+                )
+            except Exception as e:  # noqa: BLE001 - Fail-Soft 契約(既存の NVR 経路と同じ作法)
+                logger.error(f"❌ [{cam_name}] RTSP取得で予期せぬエラー: {e}")
+                break
+
+            if attempt < RTSP_SNAPSHOT_MAX_RETRIES:
+                time.sleep(2 ** attempt)  # Exponential Backoff
+
+        return None
+    finally:
+        # タイムアウト・異常終了で ffmpeg が部分書き込みしたファイルを残さない
+        try:
+            if os.path.exists(output_tmp):
+                os.remove(output_tmp)
+        except OSError:
+            pass
+
+
 def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> Optional[bytes]:
     """
     NAS(NVR)に常時録画されている最新の動画ファイル(.mp4)から、
     FFmpegを使用して該当時刻のフレームを切り出す（カメラ本体のRTSP負荷ゼロ）
+
+    Issue #703 以降、これは `capture_snapshot_from_rtsp()` が失敗したときのフォールバック経路。
+    最新 mtime のセグメントは NVR が書き込み中で `-sseof` のシークに失敗するため、
+    `_select_latest_completed_segment()` で書き込み完了済みのセグメントだけを対象にする
+    (そのぶん動体検知時刻から最大でセグメント長ぶん古いフレームになる)。
     """
     import subprocess
     import glob
@@ -311,7 +455,15 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
         logger.warning(f"⚠️ [{cam_conf['name']}] No NVR video files found in {nas_folder}.")
         return None
 
-    latest_mp4 = mp4_files[0]
+    # Issue #703: mp4_files[0](=最新 mtime)は NVR が書き込み中のセグメントであることが
+    # ほとんどで、未完成の moov atom に対する -sseof のシークが失敗していた。
+    latest_mp4 = _select_latest_completed_segment(mp4_files)
+    if latest_mp4 is None:
+        logger.warning(
+            f"⚠️ [{cam_conf['name']}] 書き込み完了済みのNVRセグメントが見つかりません "
+            f"(直近{NVR_INPROGRESS_MTIME_MARGIN_SEC}秒以内に更新されたファイルのみ): {nas_folder}"
+        )
+        return None
     # C-L7: 実行環境のTMPDIR等に追従させるため /tmp 直書きではなく tempfile.gettempdir() 経由で解決する
     output_tmp = os.path.join(tempfile.gettempdir(), f"snapshot_{cam_conf['name']}_{uuid.uuid4().hex}.jpg")
     
@@ -369,10 +521,17 @@ def save_image_from_stream(cam_name: str, event_type: str = "motion") -> Optiona
     if not cam_conf:
         return None
 
-    logger.debug(f"📸 [{cam_name}] 映像フレームの取得を開始します (方式: NVR切り出し)")
-    
-    # ここを cv2 から nvr に変更
-    image_data = capture_snapshot_from_nvr(cam_conf)
+    logger.debug(f"📸 [{cam_name}] 映像フレームの取得を開始します (方式: RTSP直接取得)")
+
+    # Issue #703: 動体検知の瞬間の映像をカメラの RTSP から直接取る(第一手)。
+    # NVR 録画ファイルの書き込み状態に依存しないため、従来の約3割の失敗が無くなる。
+    image_data = capture_snapshot_from_rtsp(cam_conf)
+
+    if not image_data:
+        # カメラへ一時的に到達できない場合の保険として、従来の NVR 切り出しを試す
+        # (NVR の録画プロセスは別経路のため、片方だけ失敗していることがある)。
+        logger.info(f"ℹ️ [{cam_name}] RTSP直接取得に失敗したため、NVR録画からの切り出しにフォールバックします。")
+        image_data = capture_snapshot_from_nvr(cam_conf)
 
     if not image_data:
         # 取得に失敗した場合でも、システム自体を落とさず（Fail-Soft）Noneを返してスキップする

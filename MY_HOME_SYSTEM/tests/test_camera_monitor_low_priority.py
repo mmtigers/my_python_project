@@ -13,6 +13,7 @@ import inspect
 import os
 import subprocess
 import sys
+import time
 import uuid
 from unittest.mock import patch
 
@@ -42,7 +43,13 @@ class TestCaptureSnapshotCleansUpOnFailure:
         # #411 S-L10 で当日分("{YYYYMMDD}_*.mp4")に検索を絞ったため、録画ファイル名も
         # 実際のNVR命名規則に合わせる。
         today_str = datetime.datetime.now().strftime("%Y%m%d")
-        (nas_folder / f"{today_str}_000000.mp4").write_bytes(b"fake video")
+        segment = nas_folder / f"{today_str}_000000.mp4"
+        segment.write_bytes(b"fake video")
+        # Issue #703: 直近 NVR_INPROGRESS_MTIME_MARGIN_SEC 秒以内に更新されたファイルは
+        # 「NVRが書き込み中」とみなして除外されるようになったため、ffmpegまで到達させるには
+        # 書き込み完了済み相当の古い mtime にしておく必要がある。
+        old_mtime = time.time() - camera_monitor.NVR_INPROGRESS_MTIME_MARGIN_SEC - 60
+        os.utime(segment, (old_mtime, old_mtime))
 
         cam_conf = {"name": cam_name, "nas_folder": cam_name}
         monkeypatch.setattr(camera_monitor.config, "NVR_RECORD_DIR", str(tmp_path), raising=False)
