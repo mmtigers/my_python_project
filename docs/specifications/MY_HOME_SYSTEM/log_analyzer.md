@@ -139,6 +139,29 @@
 
 
 
+### `_classify_line`
+
+* **役割**: ログ1行の重大度を `"error"` / `"warning"` / `None` で返す（2026-09-19 新設、PR #708）。ログレベルの表記を持つ行は、本文の語句ではなくレベルで判定する。表記が無い行だけ、従来の `ERROR_KEYWORDS` / `WARN_KEYWORDS` の部分一致（大文字小文字無視）で判定する。
+* 根拠: `_classify_line` (行番号: 112-134 / 抜粋: "def _classify_line(self, line: str) -> str | None:")
+
+
+* **判定規則**:
+
+| 行の書式 | 例 | 判定 |
+| --- | --- | --- |
+| `core/logger` の書式（`LEVEL_PATTERNS[0]`） | `2026-09-19 10:05:02 [WARNING] camera: ...` | `ERROR`/`CRITICAL`→`"error"`、`WARNING`→`"warning"`、`INFO`/`DEBUG`→`None` |
+| logging の既定書式（`LEVEL_PATTERNS[1]`。ライブラリが basicConfig のまま出す行） | `ERROR:zeep.xsd.types.simple:...` | 同上 |
+| レベル表記なし（トレースバック継続行・syslog・uvicorn 等） | `Traceback (most recent call last):` | キーワードの部分一致（従来どおり） |
+
+* 根拠: `LEVEL_PATTERNS`（クラス属性）、`ERROR_LEVELS`（クラス属性）
+
+
+* **引数/リクエスト**: `line: str`（ログの1行）
+* **戻り値/レスポンス**: `str | None`
+* **副作用**: なし
+* **利用箇所**: `_analyze_file`（本クラス）、`health_watch._journal_stdio_errors`（journal に残るサービスの標準出力/標準エラーの判定。`core.logger` の書式の行は `LEVEL_PATTERNS[0]` で見分けて除外する）
+
+
 ### `_analyze_file`
 
 * **役割**: ファイルを1行ずつ読み込み、無視パターンを除外した上でタイムスタンプを評価し、各行の重大度を `_classify_line` で判定してエラー/警告をカウント・集計する。
@@ -265,6 +288,7 @@ graph TD
         run_analysis --> _analyze_file
         run_analysis --> _send_report
         _analyze_file --> _parse_timestamp
+        _analyze_file --> _classify_line
     end
 
     subgraph External_Modules
