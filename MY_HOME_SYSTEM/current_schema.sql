@@ -386,3 +386,13 @@ CREATE TABLE routine_step_events (
 );
 CREATE INDEX idx_routine_step_events_user_date
     ON routine_step_events(user_id, progress_date);
+CREATE INDEX idx_quest_history_user_quest_completed
+    ON quest_history (user_id, quest_id, completed_at DESC, status);
+CREATE INDEX idx_quest_history_status_completed
+    ON quest_history (status, completed_at DESC);
+CREATE INDEX idx_user_inventory_user_status
+    ON user_inventory (user_id, status);
+CREATE INDEX idx_user_inventory_user_reward_used
+    ON user_inventory (user_id, reward_id, used_at DESC);
+CREATE INDEX idx_reward_history_user_reward_redeemed
+    ON reward_history (user_id, reward_id, redeemed_at DESC);
