@@ -103,8 +103,16 @@ jobs:
         # 構造的な検査(.in の直接依存が lock に pin されているか)は
         # .github/scripts/test_requirements_lock_sync.py が既に行っている(ネットワーク不要、
         # ローカルでも実行できる)。ここでは実際に pip-compile を走らせて
-        # バイトレベルの差分が無いことまで確認する。pip-compile は既存の pin を維持する
-        # ため、新しいリリースが出ただけで差分が生じることはない。
+        # 依存の中身(パッケージのpinと「# via」注記)に差分が無いことまで確認する。
+        # pip-compile は既存の pin を維持するため、新しいリリースが出ただけで差分が
+        # 生じることはない。
+        #
+        # ヘッダーの先頭6行(「# by the following command: / #    pip-compile ...」)は
+        # 比較から除外する。ここに記録される --no-index の有無は、実行環境の pip
+        # バージョンによって pip-compile 自身が変えることがあり(観測: pip 24.0 では
+        # 付かず、pip 26.2.1 では付く。要求した引数は両者で同一)、依存の同期状態とは
+        # 無関係にジョブを赤くする。この6行の形式は pip-tools の Writer.write_header()
+        # が固定で出力するもの。
         run: |
           pip install pip-tools
           status=0
@@ -112,7 +120,7 @@ jobs:
             src="${pair%%:*}"; lock="${pair##*:}"
             cp "$lock" "${RUNNER_TEMP}/${lock}.orig"
             pip-compile --quiet --strip-extras --no-emit-index-url --output-file "$lock" "$src"
-            if ! diff -u "${RUNNER_TEMP}/${lock}.orig" "$lock"; then
+            if ! diff -u <(tail -n +7 "${RUNNER_TEMP}/${lock}.orig") <(tail -n +7 "$lock"); then
               echo "::error file=MY_HOME_SYSTEM/${lock}::${lock} が ${src} と同期していません。pip-compile で再生成してコミットしてください。"
               status=1
             fi
