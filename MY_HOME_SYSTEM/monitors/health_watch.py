@@ -536,6 +536,10 @@ def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None
                 stderr=subprocess.STDOUT,
                 start_new_session=True,  # 層1(本プロセス)終了後もフックを生かす
             )
+        # Issue #761 (AUDIT-032): stdin=subprocess.PIPE を指定しているため None に
+        # ならない。Popen の引数を変えたときに「'write' is not a known attribute of
+        # 'None'」で落ちるより、ここで意図を表明しておく。
+        assert proc.stdin is not None, "Popen に stdin=subprocess.PIPE を指定している"
         proc.stdin.write(summary.encode("utf-8"))
         proc.stdin.close()
         logger.info(f"調査フックを起動しました (pid={proc.pid}): {hook}")

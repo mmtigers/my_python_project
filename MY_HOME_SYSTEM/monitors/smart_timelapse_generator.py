@@ -299,6 +299,13 @@ class MotionDetector:
             logger.error(f"ffmpegプロセスの起動に失敗しました: {e}")
             raise
         
+        # Issue #761 (AUDIT-032): Popen に stdout/stderr とも subprocess.PIPE を
+        # 指定しているため None にならない。以降の process.stdout.read /
+        # process.stderr.read の前提をここで表明する。
+        assert process.stdout is not None and process.stderr is not None, (
+            "Popen に stdout=PIPE / stderr=PIPE を指定している"
+        )
+
         records: List[MotionRecord] = []
         current_sec = 0
         frame_size = WIDTH * HEIGHT

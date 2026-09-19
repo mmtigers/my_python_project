@@ -81,8 +81,17 @@ def _build_family_datasource() -> Dict[str, Any]:
 
 
 def _supports_apl(handler_input: HandlerInput) -> bool:
-    supported = handler_input.request_envelope.context.system.device.supported_interfaces
-    return supported.alexa_presentation_apl is not None
+    # Issue #761 (AUDIT-032): context / system / device は Alexa SDK の型上いずれも
+    # Optional で、画面を持たないデバイスや一部のリクエスト種別では途中が None に
+    # なりうる。APL 非対応として扱えば良いだけの判定なので、途切れたら False を返す
+    # (以前は AttributeError になり LaunchRequest 全体が失敗しえた)。
+    context = getattr(handler_input.request_envelope, "context", None)
+    system = getattr(context, "system", None) if context is not None else None
+    device = getattr(system, "device", None) if system is not None else None
+    supported = getattr(device, "supported_interfaces", None) if device is not None else None
+    if supported is None:
+        return False
+    return getattr(supported, "alexa_presentation_apl", None) is not None
 
 
 class LaunchRequestHandler(AbstractRequestHandler):

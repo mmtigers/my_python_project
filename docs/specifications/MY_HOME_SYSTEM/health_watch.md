@@ -505,7 +505,8 @@
 
 
 * **副作用**: `subprocess.Popen`によるフックスクリプトの起動（`start_new_session=True`でdetachし、層1プロセス終了後も生存させる）、フックの標準出力/標準エラーの`logs/claude_investigate.log`への追記リダイレクト（`check_app_logs` は `claude_investigate.log` をファイル名で除外するため自己発火しない。**（2026-09-06 品質監査で修正）** 以前は除外が未実装だった）、標準入力への異常サマリ書き込みとclose、ロガーへの記録。
-* 根拠: [Popen呼び出し] (行番号: 214〜227 / 抜粋: "proc = subprocess.Popen(\n                [hook],\n                stdin=subprocess.PIPE,", "start_new_session=True")
+* 根拠: [Popen呼び出し] (行番号: 532〜543 / 抜粋: "proc = subprocess.Popen(\n                [hook],\n                stdin=subprocess.PIPE,", "start_new_session=True")
+* **（Issue #761 / AUDIT-032 で追加）** 標準入力へ書き込む直前に`assert proc.stdin is not None`を置いている。`Popen`に`stdin=subprocess.PIPE`を指定しているため`None`にはならないが、`Popen`の引数を変えたときに「`'write' is not a known attribute of 'None'`」で落ちるより、その前提を実行可能な形で表明しておく。
 
 
 * **エラーハンドリング**: フックパスが存在しない/実行権限がない場合はエラーログのみで起動しない。起動時の例外（`Popen`失敗等）も捕捉してエラーログのみとし、層1本体（検知・通知・マーカー更新）を巻き込まない。
@@ -516,7 +517,7 @@
 ### `run_checks`
 
 * **役割**: 9つのチェック関数(`service`/**`api`（Issue #735 で追加）**/`journal`/`app_logs`/`disk`/`memory`/`nas`/`deploy_config`/`quest_master`)を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知し、通知抑制を通過した場合は層2フック(`_fire_investigate_hook`)も発火し、マーカーを更新してプロセスの終了コードを返すエントリーポイント。
-* 根拠: [関数定義] (行番号: 546〜604 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 552〜562 / 抜粋: '("api", check_api_responsive),', '("quest_master", check_quest_master_drift),')、[フック発火] (行番号: 275〜276 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
+* 根拠: [関数定義] (行番号: 550〜608 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 552〜562 / 抜粋: '("api", check_api_responsive),', '("quest_master", check_quest_master_drift),')、[フック発火] (行番号: 275〜276 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
 
 
 * **引数/リクエスト**: なし

@@ -151,7 +151,17 @@ class RoutineService:
         if not step['checklist']:
             statuses[step['key']] = 'current'
             return
-        start, end = get_checklist_range(flow)
+        # Issue #761 (AUDIT-032): step['checklist'] が True なら get_checklist_range は
+        # 必ず範囲を返す、という不変条件は routine_data.py のフロー定義に依存している。
+        # routine_data.py は家族の生活動線を記述するデータで変更頻度が高く、この不変条件は
+        # 最も変わりやすいファイルに依存している。破れたときに「None is not iterable」の
+        # TypeError で 500 になるより、どのフローの定義が壊れているかを名指しして止める。
+        checklist_range = get_checklist_range(flow)
+        assert checklist_range is not None, (
+            f"flow={flow.get('title')!r} は checklist ステップを持つのに "
+            "get_checklist_range が None を返した(routine_data.py のフロー定義を確認)"
+        )
+        start, end = checklist_range
         for i in range(start, end):
             key = flow['steps'][i]['key']
             if statuses.get(key) != 'done':
@@ -450,7 +460,17 @@ class RoutineService:
             return progress
 
         checkpoint_step = flow['steps'][checkpoint_idx]
-        hour, minute = map(int, get_effective_checkpoint_time(checkpoint_step, now).split(':'))
+        # Issue #761 (AUDIT-032): get_checkpoint_index が返したインデックスのステップは
+        # checkpoint_time を持つため get_effective_checkpoint_time は None にならない
+        # (weekend_checkpoint_time が無ければ checkpoint_time にフォールバックする)。
+        # routine_data.py 側の定義変更で破れうるため assert で明示する。
+        checkpoint_time = get_effective_checkpoint_time(checkpoint_step, now)
+        assert checkpoint_time is not None, (
+            f"flow={flow.get('title')!r} step={checkpoint_step.get('key')!r} は "
+            "get_checkpoint_index に選ばれたのに checkpoint_time を持たない"
+            "(routine_data.py のフロー定義を確認)"
+        )
+        hour, minute = map(int, checkpoint_time.split(':'))
         deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if now < deadline:
             return progress
@@ -517,7 +537,15 @@ class RoutineService:
         TV操作の対象は智矢のクリアに限定する(要件確認済み)。pmの寝る準備チェックリストは
         対象外。
         """
-        start, end = get_checklist_range(flow)  # target_step['checklist']がTrueなので必ず存在する
+        # Issue #761 (AUDIT-032): target_step['checklist'] が True なら必ず存在する、という
+        # 不変条件を assert で実行可能にする(コメントだけでは routine_data.py の定義変更で
+        # 黙って破れる)。詳細は _mark_current_steps 側の同じ assert のコメントを参照。
+        checklist_range = get_checklist_range(flow)
+        assert checklist_range is not None, (
+            f"flow={flow.get('title')!r} は checklist ステップを持つのに "
+            "get_checklist_range が None を返した(routine_data.py のフロー定義を確認)"
+        )
+        start, end = checklist_range
         if progress['current_step_index'] > end:
             raise HTTPException(status_code=400, detail="すでに次のステップに進んでいるため変更できません")
 

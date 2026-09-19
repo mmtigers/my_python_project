@@ -42,6 +42,12 @@ def get_db_cursor(commit: bool = False):
             logger.error(f"❌ DB接続エラー: {e}")
             raise
 
+    # Issue #761 (AUDIT-032): 上のループは必ず break か raise で抜けるため conn は
+    # None になり得ないが、pyright はその制御フローを追えず 4件(cursor/commit/
+    # rollback/close)を reportOptionalMemberAccess として挙げる。不変条件を
+    # 実行可能な形で明示して、誤検知の解消と可読性を兼ねる。
+    assert conn is not None, "接続ループは break か raise で抜けるため到達しない"
+
     try:
         yield conn.cursor()
         if commit:
