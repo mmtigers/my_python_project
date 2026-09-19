@@ -663,3 +663,193 @@ class TestStrictFlagPreservesLegacySyncStrictBehaviour:
 
         with get_db_cursor() as cur:
             assert cur.execute("SELECT COUNT(*) as c FROM quest_master").fetchone()["c"] == 1
+
+
+class TestRunSyncIfStale:
+    """Issue #700: デプロイ経路から無人で呼ばれる冪等モード(`--if-stale`)。
+
+    quest_data.py の編集がDBへ反映されず、退役済みクエストが quest_master に残って
+    二重報酬になっていた事故への恒久対策。**差分があるときだけ**同期することで、
+    DELETE を含む破壊的操作の自動実行頻度を「マスタ定義を編集したデプロイの回数」に
+    抑えているため、その冪等判定とマーカー更新の条件をここで固定する。
+    """
+
+    @staticmethod
+    def _write_sources(base_dir, quest_body="QUESTS = []", routine_body="FLOWS = []"):
+        (base_dir / "quest_data.py").write_text(quest_body, encoding="utf-8")
+        (base_dir / "routine_data.py").write_text(routine_body, encoding="utf-8")
+        return str(base_dir)
+
+    def test_skips_sync_entirely_when_marker_matches(self, tmp_path, monkeypatch):
+        """差分が無ければ sync_master_data を一切呼ばない(DBにも触れない)こと。"""
+        base_dir = self._write_sources(tmp_path)
+        marker = str(tmp_path / "marker")
+        from services.quest import master_sync_marker
+
+        digest = master_sync_marker.compute_master_digest(base_dir)
+        master_sync_marker.write_recorded_digest(digest, marker_path=marker)
+
+        calls = []
+        monkeypatch.setattr(
+            sync_strict.game_system, "sync_master_data",
+            lambda **kwargs: calls.append(kwargs),
+        )
+
+        assert sync_strict.run_sync_if_stale(base_dir=base_dir, marker_path=marker) == 0
+        assert calls == [], "差分が無いのに同期(破壊的操作)を実行してはいけない"
+
+    def test_syncs_and_records_marker_when_sources_changed(self, isolated_db, tmp_path, monkeypatch):
+        """差分があれば同期し、成功後にマーカーを現在のダイジェストへ進めること。"""
+        base_dir = self._write_sources(tmp_path)
+        marker = str(tmp_path / "marker")
+        _seed_quest_master_row(quest_id=9999, title="退役済みクエスト")
+        _patch_master(
+            monkeypatch,
+            quests=[{"id": 1, "title": "現役", "type": "daily", "target": "all",
+                     "exp": 1, "gold": 1, "icon": "📝"}],
+            rewards=[{"id": 1, "title": "報酬", "category": "small", "cost_gold": 1, "icon_key": "🎁"}],
+        )
+
+        assert sync_strict.run_sync_if_stale(base_dir=base_dir, marker_path=marker) == 0
+
+        with get_db_cursor() as cur:
+            assert cur.execute(
+                "SELECT COUNT(*) as c FROM quest_master WHERE quest_id = 9999"
+            ).fetchone()["c"] == 0, "退役済みクエストがDBから削除されること"
+
+        from services.quest import master_sync_marker
+        assert master_sync_marker.read_recorded_digest(marker) == \
+            master_sync_marker.compute_master_digest(base_dir)
+
+        # 2回目は差分が無いのでスキップされる(冪等)。
+        calls = []
+        monkeypatch.setattr(
+            sync_strict.game_system, "sync_master_data",
+            lambda **kwargs: calls.append(kwargs),
+        )
+        assert sync_strict.run_sync_if_stale(base_dir=base_dir, marker_path=marker) == 0
+        assert calls == []
+
+    def test_uses_non_strict_mode_and_never_prompts(self, tmp_path, monkeypatch):
+        """無人実行では確認プロンプトを出せないため、マスタが空でも quest_master を
+        全削除する strict=True ではなく、#242 の安全弁が効く strict=False を使うこと。"""
+        base_dir = self._write_sources(tmp_path)
+        marker = str(tmp_path / "marker")
+        _patch_master(
+            monkeypatch,
+            quests=[{"id": 1, "title": "現役", "type": "daily", "target": "all",
+                     "exp": 1, "gold": 1, "icon": "📝"}],
+            rewards=[{"id": 1, "title": "報酬", "category": "small", "cost_gold": 1, "icon_key": "🎁"}],
+        )
+        monkeypatch.setattr("init_unified_db.init_db", lambda: None)
+
+        calls = []
+        monkeypatch.setattr(
+            sync_strict.game_system, "sync_master_data",
+            lambda **kwargs: calls.append(kwargs),
+        )
+
+        def input_must_not_be_called(prompt):  # pragma: no cover - 呼ばれたら失敗させる
+            raise AssertionError("無人実行で確認プロンプトを出してはいけない")
+
+        monkeypatch.setattr("builtins.input", input_must_not_be_called)
+
+        assert sync_strict.run_sync_if_stale(base_dir=base_dir, marker_path=marker) == 0
+        assert calls == [{"strict": False, "dry_run": False}]
+
+    def test_empty_master_aborts_without_recording_marker(self, tmp_path, monkeypatch):
+        """quest_data.py のimportミス等でマスタが空なら、同期せず・マーカーも進めないこと
+        (進めてしまうと、次回以降のデプロイで永久に同期されなくなる)。"""
+        base_dir = self._write_sources(tmp_path)
+        marker = str(tmp_path / "marker")
+        _patch_master(monkeypatch)  # QUESTS/REWARDS とも空
+        monkeypatch.setattr("init_unified_db.init_db", lambda: None)
+
+        calls = []
+        monkeypatch.setattr(
+            sync_strict.game_system, "sync_master_data",
+            lambda **kwargs: calls.append(kwargs),
+        )
+
+        assert sync_strict.run_sync_if_stale(base_dir=base_dir, marker_path=marker) == 1
+        assert calls == []
+        from services.quest import master_sync_marker
+        assert master_sync_marker.read_recorded_digest(marker) is None
+
+    def test_sync_failure_does_not_record_marker(self, tmp_path, monkeypatch):
+        """同期が例外で失敗した場合もマーカーを進めず、次回の実行で再試行されること。"""
+        base_dir = self._write_sources(tmp_path)
+        marker = str(tmp_path / "marker")
+        _patch_master(
+            monkeypatch,
+            quests=[{"id": 1, "title": "現役", "type": "daily", "target": "all",
+                     "exp": 1, "gold": 1, "icon": "📝"}],
+            rewards=[{"id": 1, "title": "報酬", "category": "small", "cost_gold": 1, "icon_key": "🎁"}],
+        )
+        monkeypatch.setattr("init_unified_db.init_db", lambda: None)
+
+        def boom(**kwargs):
+            raise RuntimeError("database is locked")
+
+        monkeypatch.setattr(sync_strict.game_system, "sync_master_data", boom)
+
+        assert sync_strict.run_sync_if_stale(base_dir=base_dir, marker_path=marker) == 1
+        from services.quest import master_sync_marker
+        assert master_sync_marker.read_recorded_digest(marker) is None
+
+    def test_unreadable_sources_skip_sync(self, tmp_path, monkeypatch):
+        """マスタ定義ソースを読めない(判定不能)ときは同期しないこと。"""
+        marker = str(tmp_path / "marker")
+        calls = []
+        monkeypatch.setattr(
+            sync_strict.game_system, "sync_master_data",
+            lambda **kwargs: calls.append(kwargs),
+        )
+
+        assert sync_strict.run_sync_if_stale(base_dir=str(tmp_path), marker_path=marker) == 1
+        assert calls == []
+
+    def test_dry_run_reports_without_recording_marker(self, isolated_db, tmp_path, monkeypatch):
+        """--if-stale --dry-run はDBもマーカーも変更しないこと。"""
+        base_dir = self._write_sources(tmp_path)
+        marker = str(tmp_path / "marker")
+        _seed_quest_master_row(quest_id=9999)
+        _patch_master(
+            monkeypatch,
+            quests=[{"id": 1, "title": "現役", "type": "daily", "target": "all",
+                     "exp": 1, "gold": 1, "icon": "📝"}],
+            rewards=[{"id": 1, "title": "報酬", "category": "small", "cost_gold": 1, "icon_key": "🎁"}],
+        )
+
+        assert sync_strict.run_sync_if_stale(
+            dry_run=True, base_dir=base_dir, marker_path=marker
+        ) == 0
+
+        with get_db_cursor() as cur:
+            assert cur.execute(
+                "SELECT COUNT(*) as c FROM quest_master WHERE quest_id = 9999"
+            ).fetchone()["c"] == 1
+        from services.quest import master_sync_marker
+        assert master_sync_marker.read_recorded_digest(marker) is None
+
+
+class TestCliArguments:
+    def test_if_stale_flag_is_parsed(self):
+        args = sync_strict.build_arg_parser().parse_args(["--if-stale"])
+        assert args.if_stale is True
+        assert sync_strict.build_arg_parser().parse_args([]).if_stale is False
+
+    def test_main_dispatches_if_stale_to_the_idempotent_path(self, monkeypatch):
+        """`--if-stale` は従来の run_sync(strict=True・確認プロンプト付き)へ
+        流れず、冪等モードへ分岐すること。"""
+        calls = []
+        monkeypatch.setattr(sync_strict, "run_sync_if_stale", lambda **kw: calls.append(kw) or 0)
+        monkeypatch.setattr(
+            sync_strict, "run_sync",
+            lambda **kw: (_ for _ in ()).throw(AssertionError("run_sync が直接呼ばれた")),
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            sync_strict.main(["--if-stale"])
+        assert exc.value.code == 0
+        assert calls == [{"dry_run": False}]

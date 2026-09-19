@@ -16,6 +16,8 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
   7. 実機構成(crontab / systemdユニット / logrotate設定)がリポジトリの deploy/ 配下と
      一致しているか(構成ドリフト検知。各READMEの「実機を変更したらこのファイルにも
      反映してコミットすること」を人手に頼らず機械的に検知する)
+  8. `quest_data.QUESTS` と実機DBの `quest_master` が一致しているか
+     (マスタデータのドリフト検知。Issue #700)
 
 異常があれば notification_service 経由でDiscordのerrorチャンネルへ要約を通知する。
 自動復旧(systemctl restart等)は行わない(ランブックのガードレール参照)。
@@ -33,6 +35,7 @@ import glob
 import hashlib
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 from typing import List, Optional, Tuple
@@ -40,7 +43,9 @@ from typing import List, Optional, Tuple
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
+import quest_data
 from core import state_file
+from core.database import get_ro_connection
 from core.logger import setup_logging
 from services.notification_service import send_push
 from monitors.log_analyzer import LogAnalyzer
@@ -80,6 +85,10 @@ TRACKED_CONFIG_DIRS: List[Tuple[str, str, str]] = [
 CONFIG_IGNORE_BASENAMES: Tuple[str, ...] = ("README.md",)
 # 通知に載せる差分行(+/-)の最大本数(ファイルごと)
 DIFF_LINES_LIMIT: int = 3
+
+# === マスタデータのドリフト検知 (チェック8) ===
+# 通知に載せる quest_id の最大件数(これを超えた分は「ほかN件」に畳む)
+QUEST_ID_LIST_LIMIT: int = 8
 
 
 def _read_marker() -> datetime.datetime:
@@ -311,6 +320,75 @@ def check_deploy_config_drift() -> Optional[str]:
     return None
 
 
+def _format_quest_ids(quest_ids: list[int]) -> str:
+    """quest_id の一覧を通知用に整形する(多すぎる場合は件数に畳む)。"""
+    shown = ", ".join(str(q) for q in quest_ids[:QUEST_ID_LIST_LIMIT])
+    if len(quest_ids) > QUEST_ID_LIST_LIMIT:
+        shown += f" ほか{len(quest_ids) - QUEST_ID_LIST_LIMIT}件"
+    return shown
+
+
+def check_quest_master_drift() -> str | None:
+    """`quest_data.QUESTS` と実機DBの `quest_master` の乖離を検知する(Issue #700)。
+
+    `GameSystem.sync_master_data()` はどのデプロイ経路からも自動実行されず、
+    `POST /api/quest/sync_master` か `sync_strict.py` を叩いたときにしか走らない
+    設計だった。そのため「`quest_data.py` を編集するPR」をマージして実機に
+    `git pull` してもDBは古いままになり、2026-09-19の棚卸しで退役済みクエスト
+    6件が `quest_master` に残って二重報酬になっていたことが判明した
+    (同時に、コードにある `id=1023` が実機に未登録という逆方向の乖離もあった)。
+
+    **このチェックは検知のみで自動修正はしない**。同期の実行は
+    `sync_strict.py --if-stale`(デプロイ経路から自動実行)の責務であり、
+    毎時cronのヘルスチェックから破壊的操作を走らせない。
+
+    比較対象を `quest_master` の quest_id 集合だけに絞っているのは:
+
+    - `reward_master` は「`user_inventory` から参照が残っている報酬はマスタから
+      消えても削除をスキップする」という正しい挙動があり、退役後も残る行が
+      恒常的に存在しうる。差分として報告すると恒久的な誤検知になる。
+    - `routine_data.py` は対応するマスタテーブルを持たない定数のため比較対象外。
+
+    DBは読み取り専用接続(`core.database.get_ro_connection`)で開く。DBファイルや
+    テーブルがまだ無い環境(初回セットアップ中など)、および一時的なロックでは
+    「異常」ではなく「今回は判定できない」として警告ログのみを残しスキップする
+    — 毎時cronで走るため、DB不在の環境で恒久的に失敗し続けるのは避ける
+    (サービス停止そのものはチェック1・3が検知する)。
+    """
+    master_ids = {q["id"] for q in quest_data.QUESTS}
+    try:
+        with get_ro_connection() as conn:
+            db_ids = {row["quest_id"] for row in conn.execute("SELECT quest_id FROM quest_master")}
+    except sqlite3.OperationalError as e:
+        logger.warning(f"⚠️ quest_master を読めないためマスタ同期チェックをスキップします: {e}")
+        return None
+
+    if not master_ids:
+        # quest_data.py のimportミス等。全件が「DBに残っている」と報告されると
+        # ノイズになるうえ、この状態自体が同期してはいけない状態である。
+        return "quest_data.QUESTS が空です(マスタ定義の読み込み失敗の可能性)。同期は実行しないでください"
+
+    stale_ids = sorted(db_ids - master_ids)
+    missing_ids = sorted(master_ids - db_ids)
+    if not stale_ids and not missing_ids:
+        return None
+
+    findings: list[str] = []
+    if stale_ids:
+        findings.append(
+            f"退役済みだがDBに残っているクエスト {len(stale_ids)}件: {_format_quest_ids(stale_ids)}"
+        )
+    if missing_ids:
+        findings.append(
+            f"コードにあるがDBに未登録のクエスト {len(missing_ids)}件: {_format_quest_ids(missing_ids)}"
+        )
+    return (
+        "quest_master が quest_data.py と一致しません(退役クエストの二重報酬の原因):\n"
+        + "\n".join(f"  - {f}" for f in findings)
+        + "\n  → MY_HOME_SYSTEM で `python sync_strict.py --dry-run` で影響を確認のうえ同期してください"
+    )
+
+
 def _should_notify(anomaly_keys: List[str], now: datetime.datetime) -> bool:
     """同一の異常セットが継続している間の再通知を抑制する。
 
@@ -392,6 +470,7 @@ def run_checks() -> int:
         ("memory", check_memory_usage),
         ("nas", check_nas_mount),
         ("deploy_config", check_deploy_config_drift),
+        ("quest_master", check_quest_master_drift),
     ]
 
     anomalies: List[str] = []

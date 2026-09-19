@@ -374,3 +374,133 @@ class TestHealthWatchMainLock:
             pass  # 出力の解析はこのテストの対象外
         assert seen, "subprocess.run が呼ばれていない"
         assert all(timeout == health_watch.SUBPROCESS_TIMEOUT_SEC for _, timeout in seen), seen
+
+
+class TestQuestMasterDrift:
+    """Issue #700 チェック8: quest_data.QUESTS と実機DBの quest_master の乖離検知。
+
+    2026-09-19の棚卸しで、退役済みクエスト6件が quest_master に残って移設先の
+    すごろくステップ報酬と二重取得になっていた(かつコードにある id=1023 は
+    DB未登録で遊べていなかった)。**検知のみで自動修正はしない**ことも含めて固定する。
+    """
+
+    @staticmethod
+    def _patch_master_quests(monkeypatch, ids):
+        fake = type("FakeQuestData", (), {"QUESTS": [{"id": i} for i in ids]})
+        monkeypatch.setattr(health_watch, "quest_data", fake)
+
+    @staticmethod
+    def _seed_quest_master(quest_ids):
+        from core.database import get_db_cursor
+
+        with get_db_cursor(commit=True) as cur:
+            for quest_id in quest_ids:
+                cur.execute(
+                    "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (quest_id, f"クエスト{quest_id}", "daily", 10, 5),
+                )
+
+    def test_returns_none_when_master_and_db_match(self, isolated_db, monkeypatch):
+        self._patch_master_quests(monkeypatch, [1, 2, 3])
+        self._seed_quest_master([1, 2, 3])
+        assert health_watch.check_quest_master_drift() is None
+
+    def test_reports_retired_quests_left_in_db(self, isolated_db, monkeypatch):
+        self._patch_master_quests(monkeypatch, [1])
+        self._seed_quest_master([1, 1100, 1105])
+
+        result = health_watch.check_quest_master_drift()
+        assert result is not None
+        assert "2件" in result
+        assert "1100" in result and "1105" in result
+
+    def test_reports_quests_missing_from_db(self, isolated_db, monkeypatch):
+        self._patch_master_quests(monkeypatch, [1, 1023])
+        self._seed_quest_master([1])
+
+        result = health_watch.check_quest_master_drift()
+        assert result is not None
+        assert "1023" in result
+        assert "未登録" in result
+
+    def test_reports_both_directions_at_once(self, isolated_db, monkeypatch):
+        self._patch_master_quests(monkeypatch, [1, 1023])
+        self._seed_quest_master([1, 1100])
+
+        result = health_watch.check_quest_master_drift()
+        assert result is not None
+        assert "1100" in result and "1023" in result
+
+    def test_empty_master_is_reported_without_listing_every_id(self, isolated_db, monkeypatch):
+        """quest_data.py の読み込み失敗を「全件が退役済み」と誤報しないこと。"""
+        self._patch_master_quests(monkeypatch, [])
+        self._seed_quest_master([1, 2, 3])
+
+        result = health_watch.check_quest_master_drift()
+        assert result is not None
+        assert "quest_data.QUESTS が空" in result
+
+    def test_long_id_lists_are_truncated(self, isolated_db, monkeypatch):
+        stale = list(range(100, 100 + health_watch.QUEST_ID_LIST_LIMIT + 3))
+        self._patch_master_quests(monkeypatch, [1])
+        self._seed_quest_master([1] + stale)
+
+        result = health_watch.check_quest_master_drift()
+        assert result is not None
+        assert "ほか3件" in result
+
+    def test_check_does_not_modify_the_database(self, isolated_db, monkeypatch):
+        """検知のみ = 同期(DELETE/UPSERT)は行わないこと。書き込みはDB側(mode=ro)も拒否する。"""
+        from core.database import get_db_cursor
+
+        self._patch_master_quests(monkeypatch, [1])
+        self._seed_quest_master([1, 9999])
+
+        health_watch.check_quest_master_drift()
+
+        with get_db_cursor() as cur:
+            rows = {r["quest_id"] for r in cur.execute("SELECT quest_id FROM quest_master")}
+        assert rows == {1, 9999}
+
+    def test_missing_table_is_skipped_not_reported_as_anomaly(self, tmp_path, monkeypatch):
+        """DB/テーブルがまだ無い環境では、毎時の異常通知にせずスキップすること。"""
+        self._patch_master_quests(monkeypatch, [1])
+        empty_db = tmp_path / "empty.db"
+        empty_db.touch()
+        monkeypatch.setattr(config, "SQLITE_DB_PATH", str(empty_db))
+
+        assert health_watch.check_quest_master_drift() is None
+
+    def test_drift_is_registered_as_a_health_check(self, monkeypatch, tmp_path):
+        """run_checks のチェック一覧に組み込まれ、既存の通知経路へ載ること。"""
+        for name in (
+            "check_service_active", "check_disk_usage", "check_memory_usage",
+            "check_nas_mount", "check_deploy_config_drift",
+        ):
+            monkeypatch.setattr(health_watch, name, lambda: None)
+        monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)
+        monkeypatch.setattr(health_watch, "check_app_logs", lambda since: None)
+        monkeypatch.setattr(
+            health_watch, "check_quest_master_drift", lambda: "quest_master が一致しません"
+        )
+        monkeypatch.setattr(
+            health_watch, "_read_marker",
+            lambda: datetime.datetime.fromisoformat("2026-09-19T09:00:00"),
+        )
+        monkeypatch.setattr(health_watch, "_write_marker", lambda dt: None)
+        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now: True)
+        monkeypatch.setattr(health_watch, "_fire_investigate_hook", lambda anomalies, now: None)
+
+        sent = []
+
+        def fake_send_push(messages, target=None, channel=None):
+            sent.append((messages, target, channel))
+            return True
+
+        monkeypatch.setattr(health_watch, "send_push", fake_send_push)
+
+        assert health_watch.run_checks() == 0
+        assert sent, "異常が通知されていない"
+        assert "quest_master が一致しません" in sent[0][0][0]["text"]
+        assert (sent[0][1], sent[0][2]) == ("discord", "error")

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # ==========================================
-# post-merge フック: git pull 後に family-quest の配信用ビルド dist/ を最新化する
+# post-merge フック: git pull 後に
+#   (1) family-quest の配信用ビルド dist/ を最新化する
+#   (2) クエストマスタ(quest_master/reward_master)をDBへ同期する
 # ==========================================
 # 以前は実機の .git/hooks/post-merge にローカル設置されていて git 管理外だったため、
 # リポジトリを clone し直すたびに手で再設置が必要だった。このディレクトリ
@@ -20,17 +22,41 @@
 # 終了コードは pull の結果に影響しない。start_all.sh の Phase 2 が次回起動時に再試行する)。
 # deploy.sh は dist.next/ にビルドして成功時だけ dist/ と入れ替える(Issue #650)ため、
 # ビルド中・失敗時も旧 dist/ がそのまま配信され続ける。
+# クエストマスタの同期 (Issue #700):
+# sync_strict.py --if-stale は quest_data.py / routine_data.py のダイジェストを
+# logs/.quest_master_sync_marker と比較し、差分があるときだけ同期する冪等モード。
+# 差分が無ければDBに接続すらしないため、マスタ定義に無関係な pull ではコストも
+# 破壊的操作も発生しない。同期失敗は警告のみ(post-merge の終了コードは pull の
+# 結果に影響しない。start_all.sh の Phase 2.5 が次回のサーバー起動時に再試行する)。
 set -u
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 deploy_sh="$repo_root/family-quest/deploy.sh"
+home_system_dir="$repo_root/MY_HOME_SYSTEM"
 
-if [ -z "$repo_root" ] || [ ! -f "$deploy_sh" ]; then
-    echo "[post-merge] family-quest/deploy.sh が見つかりません (repo_root='${repo_root}')。スキップします。" >&2
+if [ -z "$repo_root" ]; then
+    echo "[post-merge] リポジトリルートを特定できません。スキップします。" >&2
     exit 0
 fi
 
-if ! bash "$deploy_sh" --if-stale; then
+if [ ! -f "$deploy_sh" ]; then
+    echo "[post-merge] family-quest/deploy.sh が見つかりません (repo_root='${repo_root}')。スキップします。" >&2
+elif ! bash "$deploy_sh" --if-stale; then
     echo "[post-merge] ⚠️ family-quest のビルドに失敗しました。旧 dist/ が配信され続けます。" >&2
+fi
+
+if [ ! -f "$home_system_dir/sync_strict.py" ]; then
+    echo "[post-merge] MY_HOME_SYSTEM/sync_strict.py が見つかりません。マスタ同期をスキップします。" >&2
+    exit 0
+fi
+
+if [ -x "$home_system_dir/.venv/bin/python3" ]; then
+    python_exec="$home_system_dir/.venv/bin/python3"
+else
+    python_exec="python3"
+fi
+
+if ! (cd "$home_system_dir" && "$python_exec" sync_strict.py --if-stale); then
+    echo "[post-merge] ⚠️ クエストマスタの同期に失敗しました。次回のサーバー起動時に再試行されます。" >&2
 fi
 exit 0

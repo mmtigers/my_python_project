@@ -243,3 +243,53 @@ class TestStartAllShPrepareMode:
         assert "streamlit run dashboard.py" in unit
         assert "--server.address 127.0.0.1" in unit
         assert "Restart=on-failure" in unit
+
+
+class TestStartAllShQuestMasterSyncFreshnessCheck:
+    """Issue #700: quest_data.py の編集がDBへ反映されず、退役済みクエストが
+    quest_master に残って二重報酬になっていた事故への恒久対策。サーバー起動前に
+    `sync_strict.py --if-stale`(差分があるときだけ同期する冪等モード)を通し、
+    git pull 以外の経路で更新された場合の同期漏れをここで回収する。"""
+
+    REPO_ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
+
+    def _sync_phase(self) -> str:
+        script = _read_script()
+        start = script.index("Ensure quest master data is in sync")
+        end = script.index("Phase 3")
+        return script[start:end]
+
+    def test_sync_runs_after_frontend_build_and_before_webhook_phase(self):
+        script = _read_script()
+        assert (
+            script.index("Ensure family-quest dist is fresh")
+            < script.index("Ensure quest master data is in sync")
+            < script.index("switchbot_webhook_fix.py")
+        )
+
+    def test_sync_uses_the_idempotent_if_stale_mode(self):
+        """毎起動で DELETE を含む破壊的同期が走らないよう、必ず --if-stale で呼ぶこと。"""
+        phase = self._sync_phase()
+        assert "sync_strict.py --if-stale" in phase
+        assert "$PYTHON_EXEC sync_strict.py" in phase
+
+    def test_sync_failure_does_not_abort_startup(self):
+        phase = self._sync_phase()
+        assert "exit" not in phase, "マスタ同期の失敗でサーバー起動を止めてはいけない"
+        assert "quest master sync failed" in phase
+
+    def test_post_merge_hook_also_runs_the_master_sync(self):
+        """git pull 経路(post-merge)でも同じ冪等コマンドを呼ぶこと。"""
+        hook = os.path.join(self.REPO_ROOT, "deploy", "git-hooks", "post-merge")
+        with open(hook, "r", encoding="utf-8") as f:
+            content = f.read()
+        assert "sync_strict.py --if-stale" in content
+        assert "exit 1" not in content, "フックの失敗で git pull を失敗させてはいけない"
+
+    def test_post_merge_hook_prefers_the_project_venv_python(self):
+        """実機の依存は .venv にしか入っていないため、あればそれを使うこと。"""
+        hook = os.path.join(self.REPO_ROOT, "deploy", "git-hooks", "post-merge")
+        with open(hook, "r", encoding="utf-8") as f:
+            content = f.read()
+        assert '.venv/bin/python3' in content
+        assert 'python_exec="python3"' in content
