@@ -572,3 +572,104 @@ class TestJournalStdioErrors:
         for cmd in calls:
             assert cmd[cmd.index("--since") + 1] == "2026-09-19 14:00:00"
             assert cmd[cmd.index("-u") + 1] == health_watch.WATCH_SERVICE_NAME
+
+
+class TestCheckRecordingStalled:
+    """常時録画の停止検知(チェック9)。録画ファイル名の時刻で判定する。"""
+
+    NOW = "2026-09-19 21:00:00"
+
+    def _setup(self, tmp_path, monkeypatch, cameras):
+        monkeypatch.setattr(config, "NVR_RECORD_DIR", str(tmp_path))
+        monkeypatch.setattr(config, "CAMERAS", cameras)
+        monkeypatch.setattr(health_watch.os.path, "ismount", lambda path: True)
+        for cam in cameras:
+            (tmp_path / (cam.get("nas_folder") or cam["name"])).mkdir()
+
+    def _touch(self, tmp_path, folder, name):
+        (tmp_path / folder / name).write_bytes(b"")
+
+    def test_recent_segments_are_healthy(self, tmp_path, monkeypatch):
+        from freezegun import freeze_time
+        self._setup(tmp_path, monkeypatch, [
+            {"name": "玄関", "nas_folder": "entrance"},
+            {"name": "庭", "nas_folder": "garden"},
+        ])
+        self._touch(tmp_path, "entrance", "20260919_205104.mp4")
+        self._touch(tmp_path, "garden", "20260919_204330.mp4")
+        with freeze_time(self.NOW):
+            assert health_watch.check_recording_stalled() is None
+
+    def test_reports_camera_whose_latest_segment_is_old(self, tmp_path, monkeypatch):
+        from freezegun import freeze_time
+        self._setup(tmp_path, monkeypatch, [
+            {"name": "玄関", "nas_folder": "entrance"},
+            {"name": "庭", "nas_folder": "garden"},
+        ])
+        self._touch(tmp_path, "entrance", "20260919_205104.mp4")
+        self._touch(tmp_path, "garden", "20260919_180000.mp4")
+        self._touch(tmp_path, "garden", "20260919_174000.mp4")
+        with freeze_time(self.NOW):
+            result = health_watch.check_recording_stalled()
+        assert result is not None
+        assert "庭(garden)" in result and "09/19 18:00" in result and "180分前" in result
+        assert "玄関" not in result
+
+    def test_reports_camera_without_any_recent_file(self, tmp_path, monkeypatch):
+        from freezegun import freeze_time
+        self._setup(tmp_path, monkeypatch, [{"name": "駐車場", "nas_folder": "parking"}])
+        self._touch(tmp_path, "parking", "20260915_120000.mp4")
+        with freeze_time(self.NOW):
+            result = health_watch.check_recording_stalled()
+        assert result is not None and "駐車場(parking)" in result and "ありません" in result
+
+    def test_previous_day_file_counts_just_after_midnight(self, tmp_path, monkeypatch):
+        from freezegun import freeze_time
+        self._setup(tmp_path, monkeypatch, [{"name": "玄関", "nas_folder": "entrance"}])
+        self._touch(tmp_path, "entrance", "20260919_235500.mp4")
+        with freeze_time("2026-09-20 00:05:00"):
+            assert health_watch.check_recording_stalled() is None
+
+    def test_falls_back_to_name_and_skips_disabled_camera(self, tmp_path, monkeypatch):
+        from freezegun import freeze_time
+        self._setup(tmp_path, monkeypatch, [
+            {"name": "entrance"},
+            {"name": "retired", "enabled": False},
+        ])
+        self._touch(tmp_path, "entrance", "20260919_205104.mp4")
+        with freeze_time(self.NOW):
+            assert health_watch.check_recording_stalled() is None
+
+    def test_skipped_when_nas_not_mounted(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch, [{"name": "玄関", "nas_folder": "entrance"}])
+        monkeypatch.setattr(health_watch.os.path, "ismount", lambda path: False)
+        assert health_watch.check_recording_stalled() is None
+
+    def test_registered_as_a_health_check(self, monkeypatch):
+        """run_checks のチェック一覧に 'recording' として組み込まれていること。"""
+        for name in (
+            "check_service_active", "check_disk_usage", "check_memory_usage",
+            "check_nas_mount", "check_deploy_config_drift", "check_quest_master_drift",
+        ):
+            monkeypatch.setattr(health_watch, name, lambda: None)
+        monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)
+        monkeypatch.setattr(health_watch, "check_app_logs", lambda since: None)
+        monkeypatch.setattr(health_watch, "check_recording_stalled", lambda: "常時録画が止まっている可能性があります")
+        monkeypatch.setattr(
+            health_watch, "_read_marker",
+            lambda: datetime.datetime.fromisoformat("2026-09-19T09:00:00"),
+        )
+        monkeypatch.setattr(health_watch, "_write_marker", lambda dt: None)
+        keys_seen = []
+        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now: keys_seen.extend(keys) or True)
+        monkeypatch.setattr(health_watch, "_fire_investigate_hook", lambda anomalies, now: None)
+        sent = []
+        monkeypatch.setattr(
+            health_watch, "send_push",
+            lambda messages, target=None, channel=None: sent.append(messages) or True,
+        )
+
+        health_watch.run_checks()
+
+        assert keys_seen == ["recording"]
+        assert "常時録画が止まっている" in sent[0][0]["text"]
