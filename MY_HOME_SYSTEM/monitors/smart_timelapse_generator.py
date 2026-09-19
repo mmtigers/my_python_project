@@ -317,10 +317,17 @@ class MotionDetector:
         # 並行してドレインしておく。
         stderr_chunks: List[bytes] = []
 
+        # Issue #743 (AUDIT-014): 上の assert による絞り込み(None でないこと)は
+        # ネストした関数の中までは伝播しない(クロージャが捕捉するのは process であり、
+        # 呼び出されるまでに process.stderr が差し替わる可能性を型チェッカは排除できない)。
+        # ローカル変数へ束縛し直すことで、reportOptionalMemberAccess を実害のある
+        # 箇所だけに絞る。
+        stderr_pipe = process.stderr
+
         def _drain_stderr() -> None:
             try:
                 while True:
-                    chunk = process.stderr.read(4096)
+                    chunk = stderr_pipe.read(4096)
                     if not chunk:
                         break
                     stderr_chunks.append(chunk)

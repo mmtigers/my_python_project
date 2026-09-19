@@ -8,5 +8,9 @@
   "reportUnboundVariable": "error",
   "reportUnusedCoroutine": "error",
   "reportSelfClsParameterName": "warning",
-  "reportUnhashable": "error"
+  "reportUnhashable": "error",
+  "reportOptionalMemberAccess": "error",
+  "reportOptionalSubscript": "error",
+  "reportOptionalIterable": "error",
+  "reportOptionalOperand": "error"
 }
