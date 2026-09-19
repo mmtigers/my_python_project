@@ -412,7 +412,19 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
     """
     action = ""
     try:
-        user_id = event.source.user_id
+        # Issue #743 (AUDIT-014): event.source は LINE の一部イベント種別で None に
+        # なりうる(#761 で line_handler 側に入れたガードと同じ理由)。唯一の本番の
+        # 呼び出し元である line_handler.handle_postback が user_id is None を先に
+        # スキップするため現状ここには到達しないが、委譲先でも同じ前提を表明しておく
+        # (呼び出し元が増えたときに気づけるようにするため)。
+        source = getattr(event, "source", None)
+        user_id = getattr(source, "user_id", None) if source is not None else None
+        if user_id is None:
+            logger.warning(
+                "⚠️ event.source.user_id が取得できないためPostback処理をスキップします"
+                "(グループでのプロフィール未共有等の可能性)"
+            )
+            return
         reply_token = event.reply_token
         user_name = get_user_name(event, line_bot_api)
 

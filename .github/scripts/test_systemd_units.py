@@ -155,3 +155,32 @@ def test_home_system_service_has_a_start_timeout_for_its_heavy_execstartpre():
     timeouts = [value for _lineno, key, value in service if key == "TimeoutStartSec"]
     assert timeouts, "TimeoutStartSec が無いと DefaultTimeoutStartSec(90秒)で kill される"
     assert int(timeouts[0]) >= 600, "ExecStartPre の実測(数分)に対して余裕が足りない"
+
+
+def test_home_system_service_starts_a_single_process():
+    """Issue #760 (AUDIT-031): ExecStart がワーカーを増やしていないこと。
+
+    `quest_users`(gold / exp / level / medal_count)の read-modify-write は
+    `services/quest/locks.py` の `threading.Lock` だけで直列化されており、
+    DB レベルの排他(`BEGIN IMMEDIATE` 等)は使っていない。プロセスを増やすと
+    ロックが共有されず、**エラー無しで**ロストアップデートが起きる。
+
+    Python 側(`uvicorn.run` に `workers` を渡さない・`gunicorn` を依存にしない)は
+    `MY_HOME_SYSTEM/tests/test_single_process_invariant.py` が検査する。
+    """
+    entries = _entries(SYSTEMD_DIR / "home_system.service")
+    service = entries.get("Service", [])
+
+    execstarts = [value for _lineno, key, value in service if key == "ExecStart"]
+    assert execstarts, "ExecStart が無い"
+
+    for value in execstarts:
+        lowered = value.lower()
+        assert "--workers" not in lowered and "-w " not in lowered, (
+            f"ExecStart がワーカー数を指定している: {value!r}。"
+            "単一プロセス前提(本テストの docstring を参照)を崩す変更のため、"
+            "先に quest_users の更新を DB レベルで原子的な形へ移すこと"
+        )
+        assert "gunicorn" not in lowered, (
+            f"ExecStart が gunicorn を使っている: {value!r}。単一プロセス前提を崩す"
+        )
