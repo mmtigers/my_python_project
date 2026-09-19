@@ -151,7 +151,17 @@ class RoutineService:
         if not step['checklist']:
             statuses[step['key']] = 'current'
             return
-        start, end = get_checklist_range(flow)
+        # Issue #761 (AUDIT-032): step['checklist'] が True なら get_checklist_range は
+        # 必ず範囲を返す、という不変条件は routine_data.py のフロー定義に依存している。
+        # routine_data.py は家族の生活動線を記述するデータで変更頻度が高く、この不変条件は
+        # 最も変わりやすいファイルに依存している。破れたときに「None is not iterable」の
+        # TypeError で 500 になるより、どのフローの定義が壊れているかを名指しして止める。
+        checklist_range = get_checklist_range(flow)
+        assert checklist_range is not None, (
+            f"flow={flow.get('title')!r} は checklist ステップを持つのに "
+            "get_checklist_range が None を返した(routine_data.py のフロー定義を確認)"
+        )
+        start, end = checklist_range
         for i in range(start, end):
             key = flow['steps'][i]['key']
             if statuses.get(key) != 'done':
@@ -425,7 +435,9 @@ class RoutineService:
             f"Routine Catch-up Cleared: User={user_id}, Flow={flow_key}, Step={step['key']}"
         )
         if flow_key == 'pm' and user_id == TV_UNLOCK_TARGET_USER_ID and config.TV_PLUG_DEVICE_ID:
-            switchbot_service.trigger_tv_unlock("夕方の一本道を締切後に完了(追いつき)")
+            # Issue #737 (AUDIT-007): ここでは発火せず理由を控えるだけにする。
+            # 呼び出し元 complete_step がコミット後に trigger_tv_unlock を呼ぶ。
+            progress['_tv_unlock_reason'] = "夕方の一本道を締切後に完了(追いつき)"
 
     def _apply_forced_transition(
         self, cur, user_id: str, flow_key: str, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime
@@ -450,7 +462,17 @@ class RoutineService:
             return progress
 
         checkpoint_step = flow['steps'][checkpoint_idx]
-        hour, minute = map(int, get_effective_checkpoint_time(checkpoint_step, now).split(':'))
+        # Issue #761 (AUDIT-032): get_checkpoint_index が返したインデックスのステップは
+        # checkpoint_time を持つため get_effective_checkpoint_time は None にならない
+        # (weekend_checkpoint_time が無ければ checkpoint_time にフォールバックする)。
+        # routine_data.py 側の定義変更で破れうるため assert で明示する。
+        checkpoint_time = get_effective_checkpoint_time(checkpoint_step, now)
+        assert checkpoint_time is not None, (
+            f"flow={flow.get('title')!r} step={checkpoint_step.get('key')!r} は "
+            "get_checkpoint_index に選ばれたのに checkpoint_time を持たない"
+            "(routine_data.py のフロー定義を確認)"
+        )
+        hour, minute = map(int, checkpoint_time.split(':'))
         deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if now < deadline:
             return progress
@@ -517,7 +539,15 @@ class RoutineService:
         TV操作の対象は智矢のクリアに限定する(要件確認済み)。pmの寝る準備チェックリストは
         対象外。
         """
-        start, end = get_checklist_range(flow)  # target_step['checklist']がTrueなので必ず存在する
+        # Issue #761 (AUDIT-032): target_step['checklist'] が True なら必ず存在する、という
+        # 不変条件を assert で実行可能にする(コメントだけでは routine_data.py の定義変更で
+        # 黙って破れる)。詳細は _mark_current_steps 側の同じ assert のコメントを参照。
+        checklist_range = get_checklist_range(flow)
+        assert checklist_range is not None, (
+            f"flow={flow.get('title')!r} は checklist ステップを持つのに "
+            "get_checklist_range が None を返した(routine_data.py のフロー定義を確認)"
+        )
+        start, end = checklist_range
         if progress['current_step_index'] > end:
             raise HTTPException(status_code=400, detail="すでに次のステップに進んでいるため変更できません")
 
@@ -539,7 +569,10 @@ class RoutineService:
             and user_id == TV_UNLOCK_TARGET_USER_ID
             and config.TV_PLUG_DEVICE_ID
         ):
-            switchbot_service.trigger_tv_unlock("朝の準備チェックリスト全項目達成")
+            # Issue #737 (AUDIT-007): ここでは発火せず理由を控えるだけにする。
+            # とくにこの経路は発火のあとに _save_progress / _apply_forced_transition が
+            # 続くため、「TV だけ点いてチェックリストはロールバック」が起きやすかった。
+            progress['_tv_unlock_reason'] = "朝の準備チェックリスト全項目達成"
         if all_done:
             progress['current_step_index'] = end
             if end < len(flow['steps']):
@@ -627,6 +660,15 @@ class RoutineService:
     def complete_step(
         self, user_id: str, flow_key: str, step_key: str, now: Optional[datetime.datetime] = None
     ) -> Dict[str, Any]:
+        # Issue #737 (AUDIT-007): TV解錠(SwitchBot API 経由の fire-and-forget な物理的
+        # 副作用)はトランザクションのコミット後に起動する。以前は with ブロック内
+        # (コミット前)で直接呼んでいたため、コミットが失敗(database is locked のリトライ
+        # 超過・ディスクフル等)してロールバックされても TV だけが点きうる状態だった。
+        # とくにチェックリスト経路では、ロールバック後に UI が未達成を表示して
+        # もう一度チェックでき、was_all_done は「今回の DB 状態」から計算されるため
+        # **TV 解錠が二度発火する**。approval_service._process_approve_quest_locked
+        # (および #544 の inventory_service)と同じパターンへ揃える。
+        tv_unlock_reason: str | None = None
         with _get_user_balance_lock(user_id):
             with get_db_cursor(commit=True) as cur:
                 # フローの内容はユーザー(子ども/パパ/ママ)によって異なるため、
@@ -697,7 +739,8 @@ class RoutineService:
                             and user_id == TV_UNLOCK_TARGET_USER_ID
                             and config.TV_PLUG_DEVICE_ID
                         ):
-                            switchbot_service.trigger_tv_unlock("夕方の自由時間開始(宿題・明日の準備完了)")
+                            # Issue #737 (AUDIT-007): コミット後に発火する(下記参照)
+                            progress['_tv_unlock_reason'] = "夕方の自由時間開始(宿題・明日の準備完了)"
                 self._save_progress(cur, progress, 'user', now.isoformat())
 
                 # 直後にチェックポイントへ到達し、かつ既に締切時刻を過ぎている場合
@@ -705,7 +748,15 @@ class RoutineService:
                 # 通過処理まで済ませ、フロントが追加のポーリングを待たずに済むようにする。
                 progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)
 
-                return self._serialize_flow(flow, progress, now)
+                result = self._serialize_flow(flow, progress, now)
+                # このリクエスト限りのフラグ(granted_gold / leveled_up と同じ慣習)。
+                # 取り出したら消して、progress が再利用されても持ち越さないようにする。
+                tv_unlock_reason = progress.pop('_tv_unlock_reason', None)
+
+        # ここはコミット済み・ロック解放済み。ここで初めて不可逆な副作用を起こす。
+        if tv_unlock_reason:
+            switchbot_service.trigger_tv_unlock(tv_unlock_reason)
+        return result
 
 
 routine_service = RoutineService()

@@ -22,12 +22,17 @@ def _make_minimal_schema(conn: sqlite3.Connection) -> None:
     ため、ここで作った既存テーブルはそのまま維持され(=旧スキーマDBの再現が保たれ)、
     ここに無いテーブルはベースラインが補完する。device_records の timestamp は
     ベースラインのインデックス(idx_device_records_device_ts)が参照するため、
-    実際の旧DBと同様に最初から持たせておく。"""
+    実際の旧DBと同様に最初から持たせておく。quest_history の completed_at / status も
+    同じ理由で持たせる(0013_add_quest_history_indexes.sql が参照する。実際の旧DBでは
+    ベースライン以前から NOT NULL 列として存在している)。"""
     conn.executescript("""
         CREATE TABLE quest_users (user_id TEXT PRIMARY KEY, name TEXT);
         CREATE TABLE quest_master (quest_id INTEGER PRIMARY KEY, title TEXT);
         CREATE TABLE reward_master (reward_id INTEGER PRIMARY KEY, title TEXT);
-        CREATE TABLE quest_history (id INTEGER PRIMARY KEY, user_id TEXT, quest_id INTEGER);
+        CREATE TABLE quest_history (
+            id INTEGER PRIMARY KEY, user_id TEXT, quest_id INTEGER,
+            status TEXT DEFAULT 'approved', completed_at DATETIME
+        );
         CREATE TABLE device_records (id INTEGER PRIMARY KEY, device_id TEXT, timestamp DATETIME);
         CREATE TABLE weather_history (id INTEGER PRIMARY KEY, date TEXT UNIQUE, min_temp REAL, max_temp REAL, weather_desc TEXT, recorded_at TEXT);
     """)

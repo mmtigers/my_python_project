@@ -140,14 +140,41 @@ fi
 # 起動に失敗する。family-quest の deploy.sh --if-stale と同じ冪等チェックを
 # バックエンドにも適用する。ビルド失敗でもサーバー起動は続行する
 # (旧依存で動かす方が停止よりマシ。deploy.sh と同じ判断)。
+#
+# Issue #736 (AUDIT-006): 対象は MY_HOME_SYSTEM/requirements.txt だけでなく
+# DDD/requirements.txt も含める。deploy/cron/crontab は DDD のスクリプトも
+# MY_HOME_SYSTEM/.venv の python で実行している(run_task.sh は
+# "${PROJECT_ROOT}/.venv/bin/python3" を使い、newface_monitor.py の行は
+# .../MY_HOME_SYSTEM/.venv/bin/python を明示している)のに、この鮮度チェックは
+# MY_HOME_SYSTEM 側しか見ていなかった。そのため yt-dlp / curl_cffi は
+# 「過去に誰かが手で pip install した」痕跡としてしか .venv に存在せず、
+# .venv を作り直す・新しいホストへ移る と DDD のバッチが無音で失敗する状態だった
+# (失敗は run_task.sh のログに残るだけで通知されない。Issue #751 も参照)。
+# 単一 venv を共有しているという実態をここで明示する。
 echo "--- Check Python dependencies freshness ---"
 REQ_HASH_FILE=".venv/.requirements-sha256"
-if [ -f requirements.txt ]; then
-  current_req="$(sha256sum requirements.txt | cut -d' ' -f1)"
+REQ_FILES=("requirements.txt" "$DEVELOP_ROOT/DDD/requirements.txt")
+existing_reqs=()
+for req in "${REQ_FILES[@]}"; do
+  [ -f "$req" ] && existing_reqs+=("$req")
+done
+if [ ${#existing_reqs[@]} -gt 0 ]; then
+  # 複数ファイルを連結した内容のハッシュ。どれか1つでも変われば再インストールする。
+  current_req="$(cat "${existing_reqs[@]}" | sha256sum | cut -d' ' -f1)"
   recorded_req="$(cat "$REQ_HASH_FILE" 2>/dev/null || true)"
   if [ "$current_req" != "$recorded_req" ]; then
-    echo "--- requirements.txt changed: updating .venv ---"
-    if "$PYTHON_EXEC" -m pip install -r requirements.txt > logs/pip_install.log 2>&1; then
+    echo "--- requirements changed: updating .venv ---"
+    : > logs/pip_install.log
+    install_ok=true
+    for req in "${existing_reqs[@]}"; do
+      echo "=== pip install -r $req ===" >> logs/pip_install.log
+      if ! "$PYTHON_EXEC" -m pip install -r "$req" >> logs/pip_install.log 2>&1; then
+        install_ok=false
+      fi
+    done
+    if [ "$install_ok" = true ]; then
+      # 全ファイルの install が成功したときだけハッシュを記録する
+      # (片方だけ成功した状態を「追従済み」にすると、次回以降リトライされない)。
       echo "$current_req" > "$REQ_HASH_FILE"
       echo "✅ Dependencies updated."
     else

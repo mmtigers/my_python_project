@@ -8,17 +8,19 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
 
 チェック内容(いずれも決定論的でLLMは使わない):
   1. home_system.service が active か
-  2. journalctl (home_system.service) に前回マーカー以降の err..emerg 出力があるか
-  3. logs/*.log に前回マーカー以降の ERROR/CRITICAL 行があるか
-  4. ルートディスク使用率が閾値超過していないか
-  5. メモリ使用率が閾値超過していないか
-  6. NASがマウントされているか
-  7. 実機構成(crontab / systemdユニット / logrotate設定)がリポジトリの deploy/ 配下と
+  2. unified_server が HTTP に応答し、DBまで到達する経路も 200 を返すか
+     (Issue #735: 「プロセスは生きているが全APIが500」を検知する唯一の経路)
+  3. journalctl (home_system.service) に前回マーカー以降の err..emerg 出力があるか
+  4. logs/*.log に前回マーカー以降の ERROR/CRITICAL 行があるか
+  5. ルートディスク使用率が閾値超過していないか
+  6. メモリ使用率が閾値超過していないか
+  7. NASがマウントされているか
+  8. 実機構成(crontab / systemdユニット / logrotate設定)がリポジトリの deploy/ 配下と
      一致しているか(構成ドリフト検知。各READMEの「実機を変更したらこのファイルにも
      反映してコミットすること」を人手に頼らず機械的に検知する)
-  8. `quest_data.QUESTS` と実機DBの `quest_master` が一致しているか
+  9. `quest_data.QUESTS` と実機DBの `quest_master` が一致しているか
      (マスタデータのドリフト検知。Issue #700)
-  9. カメラごとの常時録画(NVR)が止まっていないか(最新の録画ファイルが古すぎないか)
+  10. カメラごとの常時録画(NVR)が止まっていないか(最新の録画ファイルが古すぎないか)
 
 異常があれば notification_service 経由でDiscordのerrorチャンネルへ要約を通知する。
 自動復旧(systemctl restart等)は行わない(ランブックのガードレール参照)。
@@ -41,6 +43,8 @@ import subprocess
 import sys
 from typing import List, Optional, Tuple
 from zoneinfo import ZoneInfo
+
+import requests
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -70,7 +74,7 @@ DEFAULT_LOOKBACK_SEC: int = 3600
 # 通知に載せるログ抜粋の最大文字数
 SNIPPET_LIMIT: int = 400
 
-# === 実機構成のドリフト検知 (チェック7) ===
+# === 実機構成のドリフト検知 (チェック8) ===
 # リポジトリで管理している実機構成と、実機に実際に導入されている内容の対応。
 # 導入先パスは各READMEの導入手順(deploy/cron/README.md、
 # MY_HOME_SYSTEM/deploy/systemd/README.md、同 logrotate/README.md)と一致させること。
@@ -89,11 +93,11 @@ CONFIG_IGNORE_BASENAMES: Tuple[str, ...] = ("README.md",)
 # 通知に載せる差分行(+/-)の最大本数(ファイルごと)
 DIFF_LINES_LIMIT: int = 3
 
-# === マスタデータのドリフト検知 (チェック8) ===
+# === マスタデータのドリフト検知 (チェック9) ===
 # 通知に載せる quest_id の最大件数(これを超えた分は「ほかN件」に畳む)
 QUEST_ID_LIST_LIMIT: int = 8
 
-# === 常時録画の停止検知 (チェック9) ===
+# === 常時録画の停止検知 (チェック10) ===
 # 録画は nvr-*.service の ffmpeg が 600 秒ごとに "{YYYYMMDD}_{HHMMSS}.mp4" を新規作成する。
 # 最新ファイル名の時刻がこれより古ければ「新しいセグメントが作られていない=録画停止」とみなす
 # (分割間隔 10 分 + 再接続の待ち + 毎時実行の余裕)。
@@ -287,6 +291,39 @@ def check_nas_mount() -> Optional[str]:
     return None
 
 
+def check_api_responsive() -> Optional[str]:
+    """unified_server に実際に HTTP を投げ、「機能している」ことを確認する。
+
+    Issue #735 (AUDIT-005): check_service_active(systemctl is-active)も
+    server_watchdog(systemctl + pgrep)も「プロセスが生きているか」しか見ていない。
+    マイグレーション失敗(unified_server.py の lifespan が意図的にこの状態を作る)・
+    DBファイルの破損や権限異常・SQLite の恒久ロック・イベントループの停止は、いずれも
+    「プロセスは生存しているが全APIが500」という状態になり、どの監視も緑を報告していた。
+
+    health_watch は cron 駆動でサーバーのプロセスツリーから完全に独立した唯一の監視
+    であるため、ここに HTTP プローブを置くのが最も到達範囲が広い。
+
+    2本叩く:
+      - GET /health       … readiness。migration 失敗時は 503 を返す(同 Issue で対応)
+      - GET /api/quest/data … DB まで到達する経路(/health は DB を触らないため)
+    """
+    base = config.HEALTH_WATCH_PROBE_BASE_URL.rstrip("/")
+    probes = (
+        ("/health", config.HEALTH_WATCH_PROBE_TIMEOUT_SEC),
+        ("/api/quest/data", config.HEALTH_WATCH_PROBE_DB_TIMEOUT_SEC),
+    )
+    for path, timeout in probes:
+        try:
+            res = requests.get(f"{base}{path}", timeout=timeout)
+        except requests.exceptions.RequestException as e:
+            return f"GET {path} へのHTTPプローブが失敗しました: {type(e).__name__}: {e}"
+        if res.status_code != 200:
+            # 本文はそのまま通知に載るため、長すぎる HTML 等を切り詰める
+            body = (res.text or "").strip().replace("\n", " ")[:200]
+            return f"GET {path} が {res.status_code} を返しました: {body}"
+    return None
+
+
 def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:
     """録画フォルダの最新セグメントの開始時刻(ファイル名から、JST)を返す。無ければNone。
 
@@ -311,7 +348,7 @@ def check_recording_stalled() -> str | None:
     録画の ffmpeg は systemd が落ちるたびに再起動するが、カメラに繋がらない間の
     再試行ループや、応答の無いまま固まった状態は、systemd からは区別できず
     これまで誰にも通知されなかった(2026-08〜09 に parking で計12日ほど発生)。
-    NAS 未マウント時はチェック6が報告するためここでは判定しない。
+    NAS 未マウント時はチェック7が報告するためここでは判定しない。
     """
     if not os.path.ismount(config.NAS_MOUNT_POINT):
         return None
@@ -407,7 +444,7 @@ def _check_host_files_drift() -> List[str]:
     return findings
 
 
-def check_deploy_config_drift() -> Optional[str]:
+def check_deploy_config_drift() -> str | None:
     """実機構成(crontab / systemd / logrotate)がリポジトリの deploy/ 配下と一致しているか。
 
     各READMEは「実機の設定を変更した場合は、このファイルにも反映してコミットすること」
@@ -558,6 +595,10 @@ def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None
                 stderr=subprocess.STDOUT,
                 start_new_session=True,  # 層1(本プロセス)終了後もフックを生かす
             )
+        # Issue #761 (AUDIT-032): stdin=subprocess.PIPE を指定しているため None に
+        # ならない。Popen の引数を変えたときに「'write' is not a known attribute of
+        # 'None'」で落ちるより、ここで意図を表明しておく。
+        assert proc.stdin is not None, "Popen に stdin=subprocess.PIPE を指定している"
         proc.stdin.write(summary.encode("utf-8"))
         proc.stdin.close()
         logger.info(f"調査フックを起動しました (pid={proc.pid}): {hook}")
@@ -573,6 +614,7 @@ def run_checks() -> int:
 
     checks = [
         ("service", check_service_active),
+        ("api", check_api_responsive),
         ("journal", lambda: check_journal_errors(since)),
         ("app_logs", lambda: check_app_logs(since)),
         ("disk", check_disk_usage),

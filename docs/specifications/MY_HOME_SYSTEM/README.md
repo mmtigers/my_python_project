@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全86件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全87件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -85,6 +85,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [post_boot_health_check.md](./post_boot_health_check.md) | システム起動直後にハードウェア・ネットワーク・DB・周辺機器・各種サービスの健全性を一括チェックするスクリプト。 |
 | [scripts_firewall_apply.md](./scripts_firewall_apply.md) | アプリポート(8000)への接続元を loopback・直結サブネット・Tailscale に限定する iptables ルールを適用する(2026-09-19 新設。`home_firewall.service` から起動時に実行)。 |
 | [switchbot_webhook_fix.md](./switchbot_webhook_fix.md) | 環境変数のベースURLを用いて、SwitchBotおよびLINE BotのWebhookエンドポイントを自動的に更新・修復する。 |
+| [notify_task_failure.md](./notify_task_failure.md) | `run_task.sh` 経由の cron タスクが失敗したことを Discord へ通知する CLI(2026-09-20 新設、Issue #751)。タスクごとのクールダウン状態ファイルで通知の洪水を防ぐ。 |
 
 ## G. その他
 

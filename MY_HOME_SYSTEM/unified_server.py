@@ -587,8 +587,24 @@ async def root():
     }
 
 @app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
+async def health_check(request: Request) -> JSONResponse:
+    """liveness ではなく readiness を返すヘルスチェック。
+
+    Issue #735 (AUDIT-005): 以前は無条件に {"status": "healthy"} を返していた。
+    lifespan のマイグレーションが失敗すると migration_ok=False になり、監視子プロセスを
+    起動せず全APIがスキーマ未適用のDBに当たって500を返す状態になるが、プロセス自体は
+    生き続けるため systemd(Type=simple)・server_watchdog(systemctl + pgrep)・
+    health_watch(check_service_active)のいずれも「正常」と報告していた。
+    起動時のCRITICAL通知1通だけが唯一のシグナルで、Webhook障害時には失われる。
+    「プロセスは生きているが機能していない」を外形から見分けられるよう 503 を返す。
+    """
+    migration_ok = getattr(request.app.state, "migration_ok", True)
+    if not migration_ok:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "reason": "migration_failed"},
+        )
+    return JSONResponse(status_code=200, content={"status": "healthy"})
 
 def _run_uvicorn_server() -> None:
     """本番起動経路のエントリポイント(`python unified_server.py`)。

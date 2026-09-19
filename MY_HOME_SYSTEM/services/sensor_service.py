@@ -216,11 +216,19 @@ async def process_meter_data(device_id: str, device_name: str, temp: float, humi
     Silence Policy:
     - DEBUG: 温湿度のアナログ値保存は定常処理のため、ログノイズ防止として DEBUG に限定。
     """
-    await save_log_async(
+    # Issue #740 (AUDIT-011): save_log_async は Fail-Soft で False を返すため、
+    # 戻り値を破棄すると「保存されていないのに DEBUG で saved と出る」状態になる。
+    # ここはポーリング経路(scheduler 駆動)で再送の概念が無く、次回ポーリングで
+    # 新しい値が取れるため処理は止めない。どのデバイスの分が欠けたかを特定できる
+    # よう ERROR で記録する(save_log_generic 側のログにはデバイス名が入らない)。
+    save_ok = await save_log_async(
         config.SQLITE_TABLE_SWITCHBOT_LOGS,
         ["device_id", "device_name", "temperature", "humidity", "timestamp"],
         (device_id, device_name, temp, humidity, get_now_iso())
     )
+    if not save_ok:
+        logger.error(f"🌡️ 温湿度データの保存に失敗しました: {device_name} (id={device_id})")
+        return
     logger.debug(f"🌡️ [Analog] Meter data saved: {device_name} (Temp: {temp}℃, Hum: {humidity}%)")
 
 async def process_power_data(device_id: str, device_name: str, wattage: float, notify_settings: Dict[str, Any]) -> None:
@@ -254,12 +262,20 @@ async def process_power_data(device_id: str, device_name: str, wattage: float, n
         logger.debug(f"Prev power fetch skipped for {device_name}: {e}")
 
     # 2. データを保存
-    await save_log_async(
+    # Issue #740 (AUDIT-011): process_meter_data と同じ理由で戻り値を確認する。
+    # ただしこちらは保存後に「閾値をまたいだか」の通知判定が続く。判定に使うのは
+    # 上で取得済みの prev_wattage と引数の wattage であり保存結果に依存しないため、
+    # 保存が失敗しても通知判定までは続ける(電気の付けっぱなし通知が、DB の一時的な
+    # ロックで落ちるほうが実害が大きい)。
+    save_ok = await save_log_async(
         config.SQLITE_TABLE_POWER_USAGE,
         ["device_id", "device_name", "wattage", "timestamp"],
         (device_id, device_name, wattage, get_now_iso())
     )
-    logger.debug(f"⚡ [Analog] Power data saved: {device_name} ({wattage}W)")
+    if not save_ok:
+        logger.error(f"⚡ 電力データの保存に失敗しました: {device_name} (id={device_id}, {wattage}W)")
+    else:
+        logger.debug(f"⚡ [Analog] Power data saved: {device_name} ({wattage}W)")
     
     # 3. 通知判定 (閾値クロス検知)
     threshold: Optional[float] = notify_settings.get("power_threshold_watts")

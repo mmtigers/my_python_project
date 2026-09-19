@@ -141,9 +141,44 @@ class TestStartAllShPythonDependencyFreshnessCheck:
             "副作用を出さないこと"
         )
 
-    def test_pip_install_uses_python_exec_and_targets_requirements_txt(self):
+    def test_pip_install_uses_python_exec(self):
         script = _read_script()
-        assert '"$PYTHON_EXEC" -m pip install -r requirements.txt' in script
+        assert '"$PYTHON_EXEC" -m pip install -r "$req"' in script
+
+    def test_freshness_check_covers_ddd_requirements_too(self):
+        """Issue #736 (AUDIT-006): deploy/cron/crontab は DDD のスクリプトも
+        MY_HOME_SYSTEM/.venv の python で実行するため、DDD/requirements.txt も
+        この単一 venv へ入れること。以前は MY_HOME_SYSTEM 側だけを見ており、
+        yt-dlp / curl_cffi は「誰かが手で入れた」痕跡としてしか .venv に存在せず、
+        venv を作り直すと DDD のバッチが無音で失敗する状態だった。"""
+        script = _read_script()
+        m = re.search(r"REQ_FILES=\(([^)]*)\)", script)
+        assert m, "REQ_FILES の定義が見つかりません"
+        req_files = m.group(1)
+        assert '"requirements.txt"' in req_files
+        assert '"$DEVELOP_ROOT/DDD/requirements.txt"' in req_files
+
+    def test_ddd_runtime_deps_are_declared_in_ddd_requirements(self):
+        """鮮度チェックの対象ファイル側に、MY_HOME_SYSTEM 側に無い DDD の実行時依存が
+        宣言されていること(この2つが揃って初めて venv の再現性が成立する)。"""
+        ddd_req = os.path.join(os.path.dirname(__file__), "..", "..", "DDD", "requirements.txt")
+        with open(ddd_req, "r", encoding="utf-8") as f:
+            content = f.read()
+        assert "yt-dlp" in content
+        assert "curl_cffi" in content
+
+    def test_hash_is_recorded_only_when_every_requirements_file_installs(self):
+        """片方だけ成功した状態を「追従済み」として記録しないこと
+        (記録してしまうと次回以降リトライされず、欠けた依存が永続する)。"""
+        script = _read_script()
+        section_start = script.index("Check Python dependencies freshness")
+        section_end = script.index("Ensure family-quest dist is fresh")
+        section = script[section_start:section_end]
+        assert "install_ok=false" in section
+        assert 'if [ "$install_ok" = true ]; then' in section
+        hash_write_idx = section.index('echo "$current_req" > "$REQ_HASH_FILE"')
+        guard_idx = section.index('if [ "$install_ok" = true ]; then')
+        assert guard_idx < hash_write_idx, "ハッシュ記録がガードの外にある"
 
     def test_pip_install_failure_does_not_abort_startup(self):
         """pip install失敗時は警告を出すのみで、スクリプトの実行(サーバー起動)を
@@ -293,3 +328,55 @@ class TestStartAllShQuestMasterSyncFreshnessCheck:
             content = f.read()
         assert '.venv/bin/python3' in content
         assert 'python_exec="python3"' in content
+
+
+class TestFamilyQuestDeployShNpmCiFreshnessCheck:
+    """Issue #757 (AUDIT-028): deploy.sh が毎回 npm ci するのをやめる。
+
+    npm ci は仕様上 node_modules を**削除してから**入れ直すため、ネットワークが
+    無いときに実行すると「node_modules を失ったままビルド不能」になる。旧 dist/ は
+    アトミック差し替え(#650)で無傷なので配信は継続するが、ネットワークが回復する
+    まで新しいフロントを一切デプロイできない。package-lock.json のハッシュが
+    変わっていなければ npm ci をスキップする(#489 の「lockfile を厳密に守る」意図は
+    lockfile 変更時に npm ci する限り損なわれない)。
+    """
+
+    DEPLOY_SH = os.path.join(os.path.dirname(__file__), "..", "..", "family-quest", "deploy.sh")
+
+    def _read(self) -> str:
+        with open(self.DEPLOY_SH, "r", encoding="utf-8") as f:
+            return f.read()
+
+    def test_npm_ci_is_guarded_by_a_lockfile_hash_check(self):
+        script = self._read()
+        m = re.search(r'LOCK_HASH_FILE="([^"]+)"', script)
+        assert m, "LOCK_HASH_FILE の定義が見つかりません"
+        assert m.group(1).startswith("node_modules/"), (
+            "ハッシュファイルは node_modules 内に置くこと"
+            "(npm ci が node_modules ごと消すため、整合が自動的に保たれる。"
+            "gitignore 済みでもある)"
+        )
+        assert '[[ ! -d node_modules || "$current_lock" != "$recorded_lock" ]]' in script
+
+    def test_npm_ci_still_uses_the_lockfile_strictly(self):
+        """#489 の意図(npm install へ戻さない)が維持されていること。"""
+        script = self._read()
+        assert "npm ci --no-audit --no-fund" in script
+        # コメント中の「npm installだと〜」という経緯の記述は除いて、実行行だけを見る
+        code_lines = [ln for ln in script.splitlines() if not ln.lstrip().startswith("#")]
+        assert not any("npm install" in ln for ln in code_lines), (
+            "npm install へ戻すと package.json の範囲指定を再解決して lockfile を"
+            "書き換えてしまう(Issue #489)"
+        )
+
+    def test_hash_is_recorded_only_after_a_successful_npm_ci(self):
+        """npm ci は node_modules を作り直すため、ハッシュ記録はその後でなければ消える。"""
+        script = self._read()
+        ci_idx = script.index("npm ci --no-audit --no-fund")
+        record_idx = script.index('echo "$current_lock" > "$LOCK_HASH_FILE"')
+        assert ci_idx < record_idx
+
+    def test_skip_path_reports_what_it_did(self):
+        """スキップしたことがログから分かること(ビルド漏れの誤診断を避ける)。"""
+        script = self._read()
+        assert "npm ci をスキップします" in script

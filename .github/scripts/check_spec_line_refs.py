@@ -48,6 +48,14 @@ import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple
 
+# Issue #722: 「廃止notice」の判定は check_spec_drift.py が持つものを**共有する**。
+# 同じ判定を2箇所に複製すると RETIRED_NOTICE_PREFIX の書式を変えたときに片方だけ
+# 直す事故が起きる(docs/specifications/README.md にも「この目印は
+# check_spec_drift.py の RETIRED_NOTICE_PREFIX と対になっています。書式を変えるときは
+# 両方直してください」と明記されている)。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from check_spec_drift import is_retired_doc
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SPEC_ROOT = REPO_ROOT / "docs" / "specifications"
 SOURCE_ROOTS = ("MY_HOME_SYSTEM", "DDD")
@@ -261,6 +269,11 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
         candidates = index.get(spec.stem)
         if not candidates or len(candidates) != 1:
             if skipped is not None and _spec_expects_python_source(spec):
+                # Issue #722: 規約どおり廃止noticeを付けて処理済みの仕様書は、
+                # 対応ソースが無いのが**正しい状態**なので警告しない
+                # (#687 で check_spec_drift.py 側は既に同じ扱いにしてある)。
+                if not candidates and is_retired_doc(spec):
+                    continue
                 reason = "対応ソースが見つからない" if not candidates else (
                     "同名ソースが%d件あり一意に決められない" % len(candidates)
                 )

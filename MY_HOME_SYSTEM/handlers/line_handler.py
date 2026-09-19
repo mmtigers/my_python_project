@@ -280,7 +280,11 @@ async def handle_message_async(event: MessageEvent):
             logger.warning(f"⚠️ Skipping redelivered LINE event (webhook_event_id={getattr(event, 'webhook_event_id', None)})")
             return
 
-        user_id = event.source.user_id
+        # Issue #761 (AUDIT-032): event.source 自体も LINE の一部イベント種別では None に
+        # なりうる。下の user_id is None ガードは source が存在する前提で書かれていたため、
+        # source が無いと AttributeError でここまで到達しなかった。同じ扱い(スキップ)へ倒す。
+        source = getattr(event, "source", None)
+        user_id = getattr(source, "user_id", None) if source is not None else None
         # L-L6 (#410): グループでの発言時、プロフィール未共有等の理由でLINEの仕様上
         # user_idがNoneになりうる。_get_display_name(None)はget_profile(None)の例外を
         # 握り潰し"Unknown"を返すだけなので、以前はこの状態に気づかないまま処理が続行し、
@@ -401,7 +405,9 @@ def handle_postback(event: PostbackEvent):
             logger.warning(f"⚠️ Skipping redelivered LINE postback (webhook_event_id={getattr(event, 'webhook_event_id', None)})")
             return
 
-        user_id = event.source.user_id
+        # Issue #761 (AUDIT-032): handle_message 側と同じ理由で event.source の None も扱う。
+        source = getattr(event, "source", None)
+        user_id = getattr(source, "user_id", None) if source is not None else None
         # #572 (L-L6 #410 の修正漏れ): handle_message には既にこのガードがあるが、
         # 同じくグループでの操作時にuser_idがNoneになりうるPostback経路(体調ボタン・
         # 全員元気・食事アンケート等、line_logic.handle_postbackへの委譲)には無かった。

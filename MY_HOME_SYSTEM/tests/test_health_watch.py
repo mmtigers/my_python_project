@@ -130,7 +130,7 @@ class TestRunChecksHookGating:
             health_watch, "check_service_active",
             (lambda: "home_system.service が active ではありません") if anomaly else (lambda: None),
         )
-        for name in ("check_disk_usage", "check_memory_usage", "check_nas_mount", "check_deploy_config_drift"):
+        for name in ("check_api_responsive", "check_disk_usage", "check_memory_usage", "check_nas_mount", "check_deploy_config_drift"):
             monkeypatch.setattr(health_watch, name, lambda: None)
         monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)
         monkeypatch.setattr(health_watch, "check_app_logs", lambda since: None)
@@ -186,7 +186,7 @@ class TestCheckAppLogsIgnoresInvestigationHookOutput:
 
 
 class TestCheckDeployConfigDrift:
-    """check_deploy_config_drift(チェック7: 実機構成ドリフト検知)のテスト。
+    """check_deploy_config_drift(チェック8: 実機構成ドリフト検知)のテスト。
 
     crontab -l / 実機側ファイル(/etc/...)は tmp_path 上の疑似ファイルと
     subprocess.run のモックで代替し、コメント・空行の無視、差分・未導入・未登録の
@@ -316,7 +316,7 @@ class TestCheckDeployConfigDrift:
         monkeypatch.setattr(config, "LOG_DIR", str(tmp_path))
         monkeypatch.setattr(health_watch, "MARKER_FILE", str(tmp_path / "marker"))
         monkeypatch.setattr(health_watch, "NOTIFY_STATE_FILE", str(tmp_path / "state"))
-        for name in ("check_service_active", "check_disk_usage", "check_memory_usage", "check_nas_mount"):
+        for name in ("check_service_active", "check_api_responsive", "check_disk_usage", "check_memory_usage", "check_nas_mount"):
             monkeypatch.setattr(health_watch, name, lambda: None)
         monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)
         monkeypatch.setattr(health_watch, "check_app_logs", lambda since: None)
@@ -377,7 +377,7 @@ class TestHealthWatchMainLock:
 
 
 class TestQuestMasterDrift:
-    """Issue #700 チェック8: quest_data.QUESTS と実機DBの quest_master の乖離検知。
+    """Issue #700 チェック9: quest_data.QUESTS と実機DBの quest_master の乖離検知。
 
     2026-09-19の棚卸しで、退役済みクエスト6件が quest_master に残って移設先の
     すごろくステップ報酬と二重取得になっていた(かつコードにある id=1023 は
@@ -475,7 +475,7 @@ class TestQuestMasterDrift:
     def test_drift_is_registered_as_a_health_check(self, monkeypatch, tmp_path):
         """run_checks のチェック一覧に組み込まれ、既存の通知経路へ載ること。"""
         for name in (
-            "check_service_active", "check_disk_usage", "check_memory_usage",
+            "check_service_active", "check_api_responsive", "check_disk_usage", "check_memory_usage",
             "check_nas_mount", "check_deploy_config_drift",
         ):
             monkeypatch.setattr(health_watch, name, lambda: None)
@@ -574,8 +574,96 @@ class TestJournalStdioErrors:
             assert cmd[cmd.index("-u") + 1] == health_watch.WATCH_SERVICE_NAME
 
 
+class TestCheckApiResponsive:
+    """Issue #735 (AUDIT-005): チェック2(HTTPプローブ)。
+
+    systemctl / pgrep ベースの監視では見分けられない「プロセスは生きているが
+    全APIが500」を検知するため、health_watch から実際にHTTPを投げる。
+    """
+
+    def _responses(self, monkeypatch, handler):
+        monkeypatch.setattr(config, "HEALTH_WATCH_PROBE_BASE_URL", "http://127.0.0.1:8000", raising=False)
+        monkeypatch.setattr(config, "HEALTH_WATCH_PROBE_TIMEOUT_SEC", 1, raising=False)
+        monkeypatch.setattr(config, "HEALTH_WATCH_PROBE_DB_TIMEOUT_SEC", 1, raising=False)
+        monkeypatch.setattr(health_watch.requests, "get", handler)
+
+    def test_returns_none_when_both_probes_return_200(self, monkeypatch):
+        called = []
+
+        def fake_get(url, timeout=None):
+            called.append((url, timeout))
+            return MagicMock(status_code=200, text="{}")
+
+        self._responses(monkeypatch, fake_get)
+        assert health_watch.check_api_responsive() is None
+        assert [url for url, _ in called] == [
+            "http://127.0.0.1:8000/health",
+            "http://127.0.0.1:8000/api/quest/data",
+        ]
+
+    def test_detects_503_readiness_from_health(self, monkeypatch):
+        """マイグレーション失敗時に /health が返す 503 を異常として拾うこと。"""
+        def fake_get(url, timeout=None):
+            return MagicMock(status_code=503, text='{"status": "unhealthy", "reason": "migration_failed"}')
+
+        self._responses(monkeypatch, fake_get)
+        result = health_watch.check_api_responsive()
+        assert result is not None
+        assert "/health" in result and "503" in result and "migration_failed" in result
+
+    def test_detects_db_path_failure_even_when_health_is_ok(self, monkeypatch):
+        """/health は DB を触らないため、DB まで到達する経路も別に確認すること。"""
+        def fake_get(url, timeout=None):
+            if url.endswith("/health"):
+                return MagicMock(status_code=200, text="{}")
+            return MagicMock(status_code=500, text="Internal Server Error")
+
+        self._responses(monkeypatch, fake_get)
+        result = health_watch.check_api_responsive()
+        assert result is not None
+        assert "/api/quest/data" in result and "500" in result
+
+    def test_connection_error_is_reported_not_raised(self, monkeypatch):
+        """接続不能(サーバー停止・ポート未 listen)は例外ではなく異常文字列で返すこと
+        (例外にすると run_checks が internal_errors 扱いにして通知本文へ載らない)。"""
+        def fake_get(url, timeout=None):
+            raise health_watch.requests.exceptions.ConnectionError("refused")
+
+        self._responses(monkeypatch, fake_get)
+        result = health_watch.check_api_responsive()
+        assert result is not None
+        assert "ConnectionError" in result
+
+    def test_registered_in_run_checks(self, monkeypatch, tmp_path):
+        """run_checks のチェック一覧に組み込まれ、既存の通知経路へ載ること。"""
+        for name in (
+            "check_service_active", "check_disk_usage", "check_memory_usage",
+            "check_nas_mount", "check_deploy_config_drift", "check_quest_master_drift",
+            "check_recording_stalled",
+        ):
+            monkeypatch.setattr(health_watch, name, lambda: None)
+        monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)
+        monkeypatch.setattr(health_watch, "check_app_logs", lambda since: None)
+        monkeypatch.setattr(
+            health_watch, "check_api_responsive", lambda: "GET /health が 503 を返しました"
+        )
+        monkeypatch.setattr(health_watch, "MARKER_FILE", str(tmp_path / "marker"))
+        monkeypatch.setattr(health_watch, "NOTIFY_STATE_FILE", str(tmp_path / "state"))
+        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now: True)
+        monkeypatch.setattr(health_watch, "_fire_investigate_hook", lambda anomalies, now: None)
+
+        sent = []
+        monkeypatch.setattr(
+            health_watch, "send_push", lambda messages, **kw: sent.append(messages) or True
+        )
+
+        assert health_watch.run_checks() == 0
+        assert sent, "異常が通知されていない"
+        assert "GET /health が 503 を返しました" in sent[0][0]["text"]
+
+
 class TestCheckRecordingStalled:
-    """常時録画の停止検知(チェック9)。録画ファイル名の時刻で判定する。"""
+    """常時録画の停止検知(チェック10)。録画ファイル名の時刻で判定する。"""
 
     NOW = "2026-09-19 21:00:00+09:00"
 
@@ -650,6 +738,7 @@ class TestCheckRecordingStalled:
         for name in (
             "check_service_active", "check_disk_usage", "check_memory_usage",
             "check_nas_mount", "check_deploy_config_drift", "check_quest_master_drift",
+            "check_api_responsive",
         ):
             monkeypatch.setattr(health_watch, name, lambda: None)
         monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)

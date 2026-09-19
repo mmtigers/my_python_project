@@ -35,7 +35,9 @@ NAME_MAP = {
 # Issue #547: 本スクリプトはunified_serverとは別プロセスで動くため、サービス層の
 # ユーザー単位ロック(_user_balance_locks)を稼働中のサーバーと共有できない。以前は
 # BEGIN IMMEDIATEでDB側の原子性のみを確保して直接quest_users/quest_history/
-# user_inventoryを書き換えていたが、承認処理(process_approve_quest等のSELECT→
+# user_inventoryを書き換えていた(Issue #755 / AUDIT-026: このBEGIN IMMEDIATEは
+# 本Issueの対応で撤去済みであり、現在リポジトリ内の実行コードには存在しない)が、
+# 承認処理(process_approve_quest等のSELECT→
 # Pythonで計算→絶対値SET)と交錯すると、承認側のUPDATEがリセット結果を上書きしうる
 # 欠陥が残っていた。リセット処理自体はサーバーのAPI(routers/quest_router.py の
 # POST /api/quest/admin/reset_user、services/quest/user_service.py の

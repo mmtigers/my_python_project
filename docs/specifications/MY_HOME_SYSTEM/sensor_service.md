@@ -182,11 +182,11 @@
 
 
 * **副作用**: `save_log_async` を介した外部DBへの書き込み。
-* 根拠: `[process_meter_data]` (行番号: 142 / 抜粋: "await save_log_async(")
+* 根拠: `[process_meter_data]` (行番号: 224 / 抜粋: "save_ok = await save_log_async(")
 
 
-* **エラーハンドリング**: なし
-* 根拠: `[process_meter_data]` (行番号: 212 / 抜粋: "def process_meter_data(device_")
+* **エラーハンドリング**: **（Issue #740 / AUDIT-011 で追加）** `save_log_async` は Fail-Soft で `False` を返すため戻り値を `save_ok` で受け、`False` なら「どのデバイスの分が欠けたか」を含む `logger.error` を出して **早期 return** する（保存されていないのに DEBUG に `Meter data saved` と出る状態を作らない）。ポーリング経路（scheduler 駆動）で再送の概念が無く、次回ポーリングで新しい値が取れるため、例外にはせず処理を止めるだけにしている。
+* 根拠: `[process_meter_data]` (行番号: 229〜231 / 抜粋: "if not save_ok:")
 
 
 
@@ -197,7 +197,7 @@
 
 
 * **引数/リクエスト**: `device_id: str`, `device_name: str`, `wattage: float`, `notify_settings: Dict[str, Any]`
-* 根拠: `[process_power_data]` (行番号: 226 / 抜粋: "def process_power_data(device_")
+* 根拠: `[process_power_data]` (行番号: 234 / 抜粋: "def process_power_data(device_")
 
 
 * **戻り値/レスポンス**: `None`
@@ -205,11 +205,11 @@
 
 
 * **副作用**: `core.database.get_db_cursor` による外部DBからの読み取り、`save_log_async` による外部DBへの書き込み、`send_push` による外部API呼び出し。
-* 根拠: `[process_power_data]` (行番号: 180 / 抜粋: "await save_log_async(")
+* 根拠: `[process_power_data]` (行番号: 270 / 抜粋: "save_ok = await save_log_async(")
 
 
-* **エラーハンドリング**: DBからの前回値取得時に発生する全ての `Exception` をキャッチし、ログに記録した上で前回値を `0.0` として処理を続行する。
-* 根拠: `[process_power_data]` (行番号: 176 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: DBからの前回値取得時に発生する全ての `Exception` をキャッチし、ログに記録した上で前回値を `0.0` として処理を続行する。**（Issue #740 / AUDIT-011 で追加）** 保存側も `save_log_async` の戻り値を `save_ok` で受け、`False` ならデバイス名・ワット数を含む `logger.error` を出す。ただし `process_meter_data` と異なり **early return はせず、閾値クロスの通知判定まで進む**（判定に使うのは取得済みの `prev_wattage` と引数の `wattage` だけで保存結果に依存せず、DB の一時的なロックで「電気の付けっぱなし通知」まで落とすほうが実害が大きいため）。
+* 根拠: `[process_power_data]` (行番号: 275〜278 / 抜粋: "if not save_ok:")
 
 
 

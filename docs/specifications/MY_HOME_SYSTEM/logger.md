@@ -18,7 +18,7 @@
 ## 2. ファイルの概要
 
 システム全体のログ出力設定を管轄するモジュール。コンソールへの標準出力、ログファイル(`home_system.log`)への書き込み、およびエラー発生時（ERRORレベル以上のログ）にスタックトレースを含めてDiscordのWebhookへ自動通知する機能を提供する。ログファイルのローテーション自体は本ファイルでは行わず、`WatchedFileHandler`（書き込み専用）を用いて外部の`logrotate`にローテーション処理を一元化する設計になっている（`home_system.log`が`unified_server`・`monitors`・cronスクリプト等の複数プロセスから同時に開かれるため、各プロセスが独自にファイルをrenameする方式のハンドラではローテーションが壊れることを避けるための設計、191〜195行目のコメント参照）。Discord通知（`DiscordErrorHandler.emit`）は、Webhook送信中に呼び出し元のスレッドをブロックしないよう、バックグラウンドスレッド上で行われる。`setup_logging`とは別に、同名の呼び出しパターン(`from core.logger import get_logger`)を期待する呼び出し元向けの単純なエイリアス関数`get_logger`も提供する。**（2026-09-06 品質監査で修正）** `setup_logging`は同名ロガーの再セットアップ時に既存ハンドラを`removeHandler`したうえで`close()`するようになり（以前は`handlers.clear()`のみでファイルディスクリプタがリークしていた）、`_send_webhook`の失敗ログはWebhook URLのトークン部分を`_redact_webhook_url`でマスクし、`exc_info`を付けずに例外種別とマスク済みメッセージのみを出力するようになった。
-* 根拠: `[get_logger]` (行番号: 216〜218 / 抜粋: "def get_logger(name: str) -> logging.Logger:")、`[setup_loggingのハンドラclose]` (行番号: 169〜174 / 抜粋: "for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()")、`[_redact_webhook_url]` (行番号: 69〜71 / 抜粋: "def _redact_webhook_url(text: str) -> str:")
+* 根拠: `[get_logger]` (行番号: 311〜313 / 抜粋: "def get_logger(name: str) -> logging.Logger:")、`[setup_loggingのハンドラclose]` (行番号: 169〜174 / 抜粋: "for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()")、`[_redact_webhook_url]` (行番号: 137〜139 / 抜粋: "def _redact_webhook_url(text: str) -> str:")
 
 ## 3. 外部依存関係
 
@@ -49,15 +49,15 @@
 ### `DiscordErrorHandler`
 
 * **役割**: エラーログをDiscordに通知するカスタムハンドラ。`logging.Handler`を継承し、指定されたWebhook URLの保持を担う。`__init__`時に`webhook_url`を明示的に渡された場合はそれを、渡されなければ`emit()`実行時に`config.DISCORD_WEBHOOK_ERROR`をフォールバックとして使用する（コード内コメント「初期化時にWebhook URLを受け取れるようにする」「指定されたURLがあれば使い、なければデフォルト設定を使う」参照）。
-* 根拠: `[DiscordErrorHandler]` (行番号: 82〜158 / 抜粋: "class DiscordErrorHandler(logging.Handler):\n    \"\"\"エラーログをDiscordに通知するハンドラ (スタックトレース対応版)\"\"\"\n    # ★追加: 初期化時にWebhook URLを受け取れるようにする\n    def __init__(self, webhook_url=None):")
+* 根拠: `[DiscordErrorHandler]` (行番号: 150〜253 / 抜粋: "class DiscordErrorHandler(logging.Handler):\n    \"\"\"エラーログをDiscordに通知するハンドラ (スタックトレース対応版)\"\"\"\n    # ★追加: 初期化時にWebhook URLを受け取れるようにする\n    def __init__(self, webhook_url=None):")
 
 
 * **引数/リクエスト**: `webhook_url` (型: 明示なし/デフォルト `None`。Discordの通知先URL)
-* 根拠: `[__init__]` (行番号: 85 / 抜粋: "def __init__(self, webhook_url=None):")
+* 根拠: `[__init__]` (行番号: 153 / 抜粋: "def __init__(self, webhook_url=None):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `[__init__]` (行番号: 85〜87 / 抜粋: "def __init__(self, webhook_url=None):\n        super().__init__()\n        self.webhook_url = webhook_url")
+* 根拠: `[__init__]` (行番号: 153〜155 / 抜粋: "def __init__(self, webhook_url=None):\n        super().__init__()\n        self.webhook_url = webhook_url")
 
 
 * **副作用**: なし
@@ -65,20 +65,22 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[__init__]` (行番号: 85〜87 / 抜粋: "def __init__(self, webhook_url=None):")
+* 根拠: `[__init__]` (行番号: 153〜155 / 抜粋: "def __init__(self, webhook_url=None):")
 
 
 
 ### `DiscordErrorHandler.emit`
 
-* **役割**: ロガーから渡されたレコードがERRORレベル以上かつメッセージに"Discord"が含まれない場合、スタックトレース（最大1000文字）を付与したペイロードを組み立て、`_send_webhook`をバックグラウンドスレッドで起動してDiscordへ非同期に送信する。`record.msg`は例外オブジェクト等の非文字列が渡される場合もあるため、`str()`化してから`"Discord"`の包含チェックを行う（コード内コメント「record.msg は例外オブジェクト等の非文字列が渡される場合もあるため...」参照）。
-* 根拠: `[emit]` (行番号: 90〜140 / 抜粋: "def emit(self, record):\n        # M-5-5(Low): record.msg は例外オブジェクト等の非文字列が渡される場合もあるため、\n        # str化してから比較する(\"Discord\" not in record.msg は非文字列だとTypeErrorになりうる)。\n        if record.levelno >= logging.ERROR and \"Discord\" not in str(record.msg):")
+* **役割**: ロガーから渡されたレコードがERRORレベル以上で、かつ`record.skip_discord`（`logger.error(..., extra={"skip_discord": True})` で付けるフラグ）が立っていない場合に、スタックトレース（最大1000文字）を付与したペイロードを組み立て、`_send_webhook`をバックグラウンドスレッドで起動してDiscordへ非同期に送信する。
+* **（Issue #742 / AUDIT-013 で変更）** 以前は `"Discord" not in str(record.msg)` を条件にしていた。要件は「通知システム自身の失敗を通知しようとしない（無限ループ防止）」であるのに、それを**メッセージ内容の推測**で実装していたため対象が広すぎ、`monitors/smart_timelapse_generator.py` の「Discord Webhook URLが設定されていないため動画を送信できません」「Discord送信失敗: {file_name}」のような**実障害まで無音**になっていた。さらに `record.msg` はフォーマット**前**の文字列のため、`logger.error("... %s", arg)` 形式では引数側の「Discord」が判定されず、**抑制の挙動がログの書き方に依存して変わる**という不整合もあった。現在は明示フラグによる opt-out で、フラグを付けているのは `services/notification_service.py` の `_send_discord_webhook`（2箇所＝通知システム自身の失敗）、同ファイルのLINEフォールバック通知、`monitors/memory_monitor.py`（直後に `send_push` で専用通知を送るため二重通知を避ける）のみ。
+* 根拠: `[emit]` (行番号: 158〜172 / 抜粋: "def emit(self, record):")、[opt-out 判定] (行番号: 172 / 抜粋: 'if record.levelno >= logging.ERROR and not getattr(record, "skip_discord", False):")
 * **（Issue #361 で修正）** (1) スタックトレースは `record.exc_info` がある場合のみ付ける（以前は exc_info の無い ERROR でも `format_stack()` を常に付け、本文が約900字を超えると Discord の2000字制限で 400 になり通知が無言で消えていた）。(2) 本文は `DISCORD_CONTENT_LIMIT`（1900）−200 字で切り詰め、トレースは残り容量の範囲で末尾を付け、最終的な content は `_truncate_discord_content` で 1900 字以内に収める。(3) 送信スレッドは `_register_sender` で追跡し、生存数が `DISCORD_MAX_INFLIGHT_SENDERS`（16）以上なら送信をスキップする。
-* 根拠: `if record.exc_info:` (行番号: 87〜88)、`body_limit = DISCORD_CONTENT_LIMIT - 200` (行番号: 92〜94)、`if _inflight_count() >= DISCORD_MAX_INFLIGHT_SENDERS:` (行番号: 110〜111)、`_register_sender(sender)` (行番号: 115)
+* **（Issue #759 / AUDIT-030 で追加）** Webhook URL の解決後・本文の組み立て前に `_claim_notification_slot(_dedup_key(record), time.monotonic())` で重複排除を行い、同一内容が `DISCORD_DEDUP_WINDOW_SEC`（600秒）以内に再度来た場合は送信しない。抑制していた件数は次にウィンドウを跨いで送る通知の本文末尾に「（同じエラーが直近10分で N 件抑制されました）」として添える。`DISCORD_MAX_INFLIGHT_SENDERS` は「同時実行数」の制限であって**レートの制限ではなく**、各送信が高速に完了すれば1分間に数百通送れてしまうため、この重複排除が実質的な唯一のレート制御になっている。判定を URL 解決の**後**に行うのは、Webhook 未設定で送らなかった分を「送信済み」として記録しないため。
+* 根拠: `if record.exc_info:` (行番号: 192〜193)、`body_limit = DISCORD_CONTENT_LIMIT - 200` (行番号: 197〜199)、[重複排除の判定] (行番号: 182〜186 / 抜粋: "should_send, suppressed_count = _claim_notification_slot(")、[抑制件数の付記] (行番号: 207〜212 / 抜粋: "if suppressed_count > 0:")、`if _inflight_count() >= DISCORD_MAX_INFLIGHT_SENDERS:` (行番号: 228〜229)
 
 
 * **引数/リクエスト**: `record` (型: 明示なし、暗黙的に`logging.LogRecord`。判定およびフォーマット対象のログレコード)
-* 根拠: `[emit]` (行番号: 90 / 抜粋: "def emit(self, record):")
+* 根拠: `[emit]` (行番号: 158 / 抜粋: "def emit(self, record):")
 
 
 * **戻り値/レスポンス**: なし (URLが存在しない場合は早期 `return`)
@@ -127,11 +129,11 @@
 
 
 * **引数/リクエスト**: `url` (型: 明示なし。送信先のDiscord Webhook URL)、`payload` (型: 明示なし、`emit`が組み立てた`dict`。送信するJSONペイロード)
-* 根拠: `[引数定義]` (行番号: 143 / 抜粋: "def _send_webhook(url, payload):")
+* 根拠: `[引数定義]` (行番号: 238 / 抜粋: "def _send_webhook(url, payload):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `[メソッド本体]` (行番号: 143〜158 / 抜粋: "def _send_webhook(url, payload):\n        try:\n            requests.post(url, json=payload, timeout=5)")
+* 根拠: `[メソッド本体]` (行番号: 238〜253 / 抜粋: "def _send_webhook(url, payload):\n        try:\n            requests.post(url, json=payload, timeout=5)")
 
 
 * **副作用**: `requests.post`によるDiscord Webhookへの外部API通信（タイムアウト5秒）。失敗時は`_webhook_failure_logger`への警告ログ出力（**（2026-09-06 品質監査で修正）** URLはトークン部分をマスク済み、スタックトレースは含まない）。
@@ -147,7 +149,7 @@
 ### `flush_pending_discord_notifications` / `_truncate_discord_content`（Issue #361 で追加）
 
 * **役割**: `flush_pending_discord_notifications(timeout=5.0)` は送信中の Discord 通知スレッドを最大 timeout 秒まで `join` する。モジュール読み込み時に `atexit.register` されており、cron 起動の短命プロセス（DDD の `newface_monitor.py` 等）で終了間際の ERROR 通知がデーモンスレッドごと殺されて届かなかった問題（D-M2）を防ぐ。`_truncate_discord_content(content, limit=1900)` は上限超過時に「…(切り詰め)」マーカー付きで切り詰める。
-* 根拠: `def flush_pending_discord_notifications(timeout: float = DISCORD_ATEXIT_FLUSH_SECONDS) -> None:` (行番号: 51〜60)、`atexit.register(flush_pending_discord_notifications)` (行番号: 51)、`def _truncate_discord_content(content: str, limit: int = DISCORD_CONTENT_LIMIT) -> str:` (行番号: 74〜78)
+* 根拠: `def flush_pending_discord_notifications(timeout: float = DISCORD_ATEXIT_FLUSH_SECONDS) -> None:` (行番号: 119〜128)、`atexit.register(flush_pending_discord_notifications)` (行番号: 51)、`def _truncate_discord_content(content: str, limit: int = DISCORD_CONTENT_LIMIT) -> str:` (行番号: 142〜146)
 * **引数/リクエスト**: `timeout: float` / `content: str, limit: int`
 * 根拠: (行番号: 39, 54)
 * **戻り値/レスポンス**: なし / `str`
@@ -157,12 +159,28 @@
 * **エラーハンドリング**: なし
 * 根拠: (行番号: 39〜58)
 
+### `_dedup_key` / `_claim_notification_slot` / `reset_discord_dedup_state`（Issue #759 / AUDIT-030 で追加）
+
+* **役割**: `logger.error` → Discord の汎用経路に、同一内容のクールダウン（重複排除）を入れる。`_dedup_key(record)` は `f"{record.name}:{record.levelno}:{record.msg}"` を返す（フォーマット**前**の `record.msg` を使うのは「同じログ行から出たエラー」を1つとみなすため。`logger.error("... %s", arg)` 形式なら引数が違っても同じキーになり、f-string 形式なら値が変わるたび別キーになる）。`_claim_notification_slot(content_key, now)` は `(送ってよいか, 直前のウィンドウで抑制した件数)` を返す。`reset_discord_dedup_state()` はテスト専用で状態を消す。
+* 根拠: `def _dedup_key(record: logging.LogRecord) -> str:` (行番号: 68〜77)、`def _claim_notification_slot(content_key: str, now: float) -> "tuple[bool, int]":` (行番号: 79〜111)、`def reset_discord_dedup_state() -> None:` (行番号: 113〜116)
+* **引数/リクエスト**: `record: logging.LogRecord` / `content_key: str, now: float` / なし
+* 根拠: (行番号: 68, 79, 113)
+* **戻り値/レスポンス**: `str` / `tuple[bool, int]` / なし
+* 根拠: (行番号: 68, 79, 113)
+* **副作用**: モジュールグローバル `_recent_notifications`（`content_key -> (直近の送信時刻, 抑制件数)`）の更新。`_dedup_lock` で排他する。エントリ数は `DISCORD_DEDUP_MAX_ENTRIES`（256）で頭打ちにし、超えたら最も古いものから捨てる。
+* 根拠: [状態更新] (行番号: 95〜110 / 抜粋: "_recent_notifications[content_key] = (now, 0)")
+* **エラーハンドリング**: なし
+* 根拠: (行番号: 79〜111)
+
+> **実装上の注意**: 判定（キーの参照）を古いエントリの掃除より**先**に行っている。順序を逆にすると、ウィンドウを過ぎたエントリが掃除で消えてしまい「溜まった抑制件数を次の通知で報告する」経路に一度も到達しない（抑制件数が常に0になる）。掃除の対象も「抑制件数を持たない（`n == 0`）古いエントリ」に限っており、件数を抱えたままのエントリは再発時に報告できるよう残す。
+> * 根拠: [判定と掃除の順序に関するコメント] (行番号: 85〜87 / 抜粋: "# 判定は掃除より先に行う。順序を逆にすると、ウィンドウを過ぎたエントリが")
+
 ### `_WEBHOOK_URL_RE` / `_redact_webhook_url`（2026-09-06 品質監査で追加）
 
 * **役割**: `_WEBHOOK_URL_RE`はDiscord Webhook URLの`/api/webhooks/<数字ID>/<トークン>`部分にマッチするコンパイル済み正規表現。`_redact_webhook_url(text)`は引数を`str()`化したうえで、トークン部分を`<redacted>`に置換（ID部分は残す）した文字列を返す。`_send_webhook`の失敗ログでURLおよび例外メッセージをマスクするために使う。
 * 根拠: `[定義]` (行番号: 67〜72 / 抜粋: "_WEBHOOK_URL_RE = re.compile(r\"(/api/webhooks/\\d+)/[A-Za-z0-9_\\-]+\")\n\n\ndef _redact_webhook_url(text: str) -> str:\n    \"\"\"Discord Webhook URL のトークン部分をマスクする(ログ出力用)。\"\"\"\n    return _WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))")
 * **引数/リクエスト**: `text: str`（`str()`化されるため例外オブジェクト等の非文字列も渡せる）
-* 根拠: `[シグネチャとstr化]` (行番号: 69, 72 / 抜粋: "def _redact_webhook_url(text: str) -> str:", "str(text)")
+* 根拠: `[シグネチャとstr化]` (行番号: 137, 72 / 抜粋: "def _redact_webhook_url(text: str) -> str:", "str(text)")
 * **戻り値/レスポンス**: `str`（マスク済み文字列。パターンに一致しなければ入力の`str()`化結果がそのまま返る）
 * 根拠: `[return]` (行番号: 72 / 抜粋: "return _WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))")
 * **副作用**: なし
@@ -175,7 +193,7 @@
 ### `setup_logging`
 
 * **役割**: 指定された名前でロガーを初期化し、既存のハンドラを外した後、コンソール出力、ファイル出力、Discord通知の3種のハンドラを登録して返す。ロガーの`propagate`を`False`に設定し、rootロガーへの伝播を行わない。
-* 根拠: `[setup_logging]` (行番号: 160〜213 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:\n    \"\"\"ロガーのセットアップ\"\"\"\n    logger = logging.getLogger(name)\n    logger.propagate = False")
+* 根拠: `[setup_logging]` (行番号: 255〜308 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:\n    \"\"\"ロガーのセットアップ\"\"\"\n    logger = logging.getLogger(name)\n    logger.propagate = False")
 * **（2026-09-06 品質監査で修正）** 同名ロガーの再セットアップ時は、`list(logger.handlers)`のコピーを走査して各ハンドラを`logger.removeHandler()`で外したうえで`close()`する（`close()`の例外は`except Exception: pass`で無視）。以前は`if logger.handlers: logger.handlers.clear()`のみだったため、`WatchedFileHandler`が開いていた`home_system.log`のファイルディスクリプタが閉じられずに残り、関数内で`get_logger()`を呼ぶ経路（コメントによれば`DDD/newface_monitor.py`の`storage_warmup`等）では呼び出しのたびにfdがリークしていた（pytestの`ResourceWarning`でも検出）。
 * 根拠: `[既存ハンドラのremove+close]` (行番号: 164〜174 / 抜粋: "# 同名ロガーの再セットアップ時は、既存ハンドラを close() してから外す。\n    # 以前は handlers.clear() だけだったため、WatchedFileHandler が開いていた\n    # home_system.log のファイルディスクリプタが閉じられずに残り、\n    ...\n    for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()\n        except Exception:\n            pass")
 * **（Issue #384 で修正）** ファイル出力先は `config.LOG_DIR`（書き込み失敗時のフォールバック解決済み）を使う。以前は `config.BASE_DIR/logs` 固定だったため、`LOG_DIR` が `temp_fallback/logs` に落ちた場合に `health_watch`/`log_analyzer` が読む場所と実際の出力先が食い違っていた。
@@ -185,7 +203,7 @@
 
 
 * **引数/リクエスト**: `name` (型: `str`。取得するロガーの名前)、`webhook_url` (型: `str`、デフォルト `None`。Discord通知先URL)
-* 根拠: `[setup_logging]` (行番号: 160 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
+* 根拠: `[setup_logging]` (行番号: 255 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
 
 
 * **戻り値/レスポンス**: `logging.Logger` (セットアップが完了したロガーインスタンス)
@@ -197,18 +215,18 @@
 
 
 * **エラーハンドリング**: 既存ハンドラの`close()`で発生した`Exception`のみ`pass`で無視する（**（2026-09-06 品質監査で修正）**）。それ以外に明示的な例外捕捉はない。
-* 根拠: `[close()の例外無視]` (行番号: 171〜174 / 抜粋: "try:\n            existing_handler.close()\n        except Exception:\n            pass")、`[setup_logging関数全体]` (行番号: 160〜213 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
+* 根拠: `[close()の例外無視]` (行番号: 171〜174 / 抜粋: "try:\n            existing_handler.close()\n        except Exception:\n            pass")、`[setup_logging関数全体]` (行番号: 255〜308 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
 
 
 
 ### `get_logger`
 
 * **役割**: `setup_logging()`のエイリアス。`from core.logger import get_logger`という形で本関数を参照する呼び出し元向けに、`webhook_url`を渡さず`setup_logging(name)`をそのまま呼び出して結果を返す。
-* 根拠: `[get_logger]` (行番号: 216〜218 / 抜粋: "def get_logger(name: str) -> logging.Logger:\n    \"\"\"setup_logging() のエイリアス。`from core.logger import get_logger` で参照される呼び出し元向け。\"\"\"\n    return setup_logging(name)")
+* 根拠: `[get_logger]` (行番号: 311〜313 / 抜粋: "def get_logger(name: str) -> logging.Logger:\n    \"\"\"setup_logging() のエイリアス。`from core.logger import get_logger` で参照される呼び出し元向け。\"\"\"\n    return setup_logging(name)")
 
 
 * **引数/リクエスト**: `name` (型: `str`。取得するロガーの名前。`setup_logging`と異なり`webhook_url`引数は受け取らない)
-* 根拠: `[関数シグネチャ]` (行番号: 216 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
+* 根拠: `[関数シグネチャ]` (行番号: 311 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
 
 
 * **戻り値/レスポンス**: `logging.Logger` (`setup_logging(name)`の戻り値をそのまま返却)
@@ -220,7 +238,7 @@
 
 
 * **エラーハンドリング**: なし（`setup_logging`のエラーハンドリングに依存。`setup_logging`自体も明示的な例外捕捉を持たない）
-* 根拠: `[get_logger関数全体]` (行番号: 216〜218 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
+* 根拠: `[get_logger関数全体]` (行番号: 311〜313 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
 
 
 
@@ -245,12 +263,14 @@ flowchart TD
     end
 
     subgraph emit_Flow["DiscordErrorHandler.emit() 処理フロー"]
-        E1["開始: ログイベント検知"] --> E2{"レベルがERROR以上 かつ<br>str(msg)に'Discord'を含まないか"}
+        E1["開始: ログイベント検知"] --> E2{"レベルがERROR以上 かつ<br>record.skip_discord が立っていないか<br>(Issue #742)"}
         E2 -- Yes --> E3["Webhook URL取得"]
         E2 -- No --> E13["終了 (無視)"]
         E3 --> E4{"URLが存在するか"}
-        E4 -- Yes --> E5["ログのフォーマット"]
+        E4 -- Yes --> E4b{"_claim_notification_slot<br>同一内容が10分以内に送られていないか<br>(Issue #759)"}
         E4 -- No --> E13
+        E4b -- No --> E13
+        E4b -- Yes --> E5["ログのフォーマット"]
         E5 --> E6{"record.exc_info が存在するか"}
         E6 -- Yes --> E7["例外情報からスタックトレース生成"]
         E6 -- No --> E8{"レベルがERROR以上か"}
@@ -259,7 +279,11 @@ flowchart TD
         E7 --> E11["送信ペイロード作成(最大1000文字のトレース付加)"]
         E9 --> E11
         E10 --> E11
-        E11 --> E14["外部：threading.Threadでバックグラウンド起動<br>(daemon=True)"]
+        E11 --> E11b{"抑制件数 > 0 か"}
+        E11b -- Yes --> E11c["本文末尾に<br>「同じエラーが直近10分で N 件抑制されました」を付記"]
+        E11b -- No --> E14
+        E11c --> E14
+        E14["外部：threading.Threadでバックグラウンド起動<br>(daemon=True)"]
         E14 --> E13
 
         subgraph send_webhook_Flow["_send_webhook() (バックグラウンドスレッド)"]
@@ -336,7 +360,8 @@ graph TD
 * **[修正済み] 再セットアップ時のファイルディスクリプタリーク（2026-09-06 品質監査で修正）**: `setup_logging`は以前、同名ロガーの既存ハンドラを`logger.handlers.clear()`で外すだけで`close()`していなかったため、`WatchedFileHandler`が開いていた`home_system.log`のfdが呼び出しのたびにリークしていた（`get_logger()`を関数内で繰り返し呼ぶ経路で顕在化）。現在は`removeHandler()`後に`close()`する（169〜174行目）。なお`_webhook_failure_logger`は`setup_logging`の対象外（別名ロガー）なので、このremove+closeの影響を受けない。
 * **マスク対象はDiscord Webhook URL形式のみ**: `_WEBHOOK_URL_RE`は`/api/webhooks/<数字>/<英数字・_・->`のパターンだけを対象とするため、それ以外の形式のURLやクエリ文字列中の秘密情報はマスクされない（67行目）。
 * **バックグラウンドスレッドでの送信**: `emit`は`_send_webhook`を`daemon=True`のバックグラウンドスレッドで起動して即座に返る設計のため、`emit()`が例外なく完了しても、実際のWebhook送信自体が成功したかどうかは呼び出し元からは分からない（`_send_webhook`内の例外は`_webhook_failure_logger`への警告ログ出力に置き換わった(Issue #436)が、`emit`呼び出し元への伝播はしない点は変わらない）。
-* **無限ループ防止のハードコード**: メッセージ（`str()`化後）に `"Discord"` という文字列が含まれるとDiscord通知から除外される仕様となっている (`"Discord" not in str(record.msg)`)。他の無関係なログ（例: "Discordアカウントの連携が完了しました"）であってもERRORレベルの場合は通知されない可能性がある。
+* **無限ループ防止の仕組み（Issue #742 で入れ替え済み）**: かつてはメッセージ（`str()`化後）に `"Discord"` という文字列が含まれると通知から除外される実装で、無関係な実障害（タイムラプス動画の配信失敗など）まで無音になっていた。現在は `extra={"skip_discord": True}` を付けたレコードだけを除外する。**新しく「通知システム自身の失敗」を記録するログを書くときは、このフラグを明示的に付けること**（付け忘れても `_send_webhook` の失敗は `propagate=False` の `_webhook_failure_logger` へ逃がされるため無限ループにはならないが、同じ内容が Discord に出続ける）。
+* **通知の重複排除はプロセスローカル（Issue #759）**: `_recent_notifications` はモジュールグローバルの辞書であり、`unified_server` / `scheduler_boot` / `camera_monitor` / 各 cron プロセスはそれぞれ独立した状態を持つ。したがって「同じエラーが複数プロセスから同時に出る」場合はプロセス数分の通知が出る。テストからは `reset_discord_dedup_state()` で消せる（本番経路からは呼ばない）。
 * **固定された設定値**: ログファイル名が `"home_system.log"`、タイムアウト値が `timeout=5` とコード内にハードコードされており、呼び出し元から変更できない。
 * **後方互換性(getattr)**: `target_url`の取得時、`config`から`DISCORD_WEBHOOK_ERROR`を取得する際に `getattr(config, "DISCORD_WEBHOOK_ERROR", None)` を使用している箇所(92行目)と、`config.DISCORD_WEBHOOK_ERROR` と直接参照している箇所(24行目)が混在している。前者は属性がない場合に`None`となるが、後者は`AttributeError`でクラッシュする可能性がある（ただし後者は`DiscordErrorHandler`内で後から実行されるため、URLがない場合は設定されない前提かもしれないが、ロジック上の不整合がある）。
 

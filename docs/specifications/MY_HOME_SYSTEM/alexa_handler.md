@@ -113,10 +113,10 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 
 * **役割**: リクエスト元デバイスがAPL(画面表示)に対応しているかどうかを判定する。
 * **引数/リクエスト**: `handler_input: HandlerInput`
-* **戻り値/レスポンス**: `bool`(`handler_input.request_envelope.context.system.device.supported_interfaces.alexa_presentation_apl`が`None`でなければ`True`)
+* **戻り値/レスポンス**: `bool`(`request_envelope.context.system.device.supported_interfaces.alexa_presentation_apl`が`None`でなければ`True`)
 * **副作用**: なし
-* **エラーハンドリング**: なし(`supported_interfaces`や`device`が想定外の構造だった場合の例外処理は存在しない)。
-* 根拠: [関数定義] (行番号: 83-85 / 抜粋: "def _supports_apl(handler_input: HandlerInput) -> bool:\n    supported = handler_input.request_envelope.context.system.device.supported_interfaces\n    return supported.alexa_presentation_apl is not None")
+* **エラーハンドリング**: **（Issue #761 / AUDIT-032 で変更）** 以前は`context.system.device.supported_interfaces`を直接ドットで辿っており、Alexa SDK の型上いずれも`Optional`であるこの経路が途中で`None`になると`AttributeError`になり、呼び出し元の`LaunchRequestHandler.handle`ごと失敗しえた。現在は`getattr`で段階的に辿り、途中が`None`なら「APL 非対応」として`False`を返す（画面を持たないデバイスや一部のリクエスト種別では実際に途切れうるが、この関数の判定としては`False`で正しい）。
+* 根拠: [関数定義] (行番号: 83〜94 / 抜粋: "def _supports_apl(handler_input: HandlerInput) -> bool:")、[段階的な getattr] (行番号: 90〜96 / 抜粋: 'context = getattr(handler_input.request_envelope, "context", None)')
 
 ### `LaunchRequestHandler`
 
@@ -129,7 +129,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `can_handle`は`bool`(`is_request_type("LaunchRequest")(handler_input)`の結果)。`handle`は`Response`。
 * **副作用**: `_build_family_datasource()`経由での`game_system.get_all_view_data()`呼び出し、失敗時の`logger.exception`呼び出し、APL対応時は`_load_apl_document()`(初回のみファイル読み込み)。
 * **エラーハンドリング**: `_build_family_datasource()`が例外を送出した場合、`logger.exception`でスタックトレース付きログを出力し、「ファミリークエストのデータ取得に失敗しました。少し時間をおいて試してください。」と読み上げてセッションを終了(`set_should_end_session(True)`)する。それ以外の正常系では`set_should_end_session(False)`でセッションを継続する。
-* 根拠: [クラス定義とcan_handle] (行番号: 88-134 / 抜粋: "class LaunchRequestHandler(AbstractRequestHandler):\n\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_request_type(\"LaunchRequest\")(handler_input)")、[handle定義とtry/except] (行番号: 94-106 / 抜粋: "try:\n            family_data = _build_family_datasource()\n        except Exception:\n            logger.exception(\"Failed to build family quest datasource for LaunchRequest\")")、[承認待ち件数の読み上げ追加] (行番号: 108-111 / 抜粋: 'if pending_total:\n            speech += f"承認待ちのクエストが{pending_total}件あります。"')、[APL分岐] (行番号: 113-131 / 抜粋: "if _supports_apl(handler_input):\n            response_builder.add_directive(\n                RenderDocumentDirective(\n                    token=\"familyQuestMainScreen\",\n                    document=_load_apl_document(),\n                    datasources={\"payload\": {\"familyData\": family_data}},\n                )\n            )\n        else:")
+* 根拠: [クラス定義とcan_handle] (行番号: 97-143 / 抜粋: "class LaunchRequestHandler(AbstractRequestHandler):\n\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_request_type(\"LaunchRequest\")(handler_input)")、[handle定義とtry/except] (行番号: 94-106 / 抜粋: "try:\n            family_data = _build_family_datasource()\n        except Exception:\n            logger.exception(\"Failed to build family quest datasource for LaunchRequest\")")、[承認待ち件数の読み上げ追加] (行番号: 108-111 / 抜粋: 'if pending_total:\n            speech += f"承認待ちのクエストが{pending_total}件あります。"')、[APL分岐] (行番号: 113-131 / 抜粋: "if _supports_apl(handler_input):\n            response_builder.add_directive(\n                RenderDocumentDirective(\n                    token=\"familyQuestMainScreen\",\n                    document=_load_apl_document(),\n                    datasources={\"payload\": {\"familyData\": family_data}},\n                )\n            )\n        else:")
 
 ### `HelpIntentHandler`
 
@@ -174,7 +174,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `can_handle`は`is_request_type("SessionEndedRequest")(handler_input)`の結果。`handle`は`handler_input.response_builder.response`。
 * **副作用**: なし
 * **エラーハンドリング**: なし
-* 根拠: [クラス定義] (行番号: 201-206 / 抜粋: "class SessionEndedRequestHandler(AbstractRequestHandler):\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_request_type(\"SessionEndedRequest\")(handler_input)\n\n    def handle(self, handler_input: HandlerInput) -> Response:\n        return handler_input.response_builder.response")
+* 根拠: [クラス定義] (行番号: 210-215 / 抜粋: "class SessionEndedRequestHandler(AbstractRequestHandler):\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_request_type(\"SessionEndedRequest\")(handler_input)\n\n    def handle(self, handler_input: HandlerInput) -> Response:\n        return handler_input.response_builder.response")
 
 ### `CatchAllExceptionHandler`
 
@@ -183,7 +183,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `can_handle`は常に`True`。`handle`は`Response`。
 * **副作用**: `logger.error`によるスタックトレース付きエラーログ出力(`exc_info=exception`)。
 * **エラーハンドリング**: 「すみません、うまく処理できませんでした。」と読み上げてセッションを終了(`set_should_end_session(True)`)する。
-* 根拠: [クラス定義] (行番号: 209-220 / 抜粋: "class CatchAllExceptionHandler(AbstractExceptionHandler):\n    def can_handle(self, handler_input: HandlerInput, exception: Exception) -> bool:\n        return True\n\n    def handle(self, handler_input: HandlerInput, exception: Exception) -> Response:\n        logger.error(f\"Alexa skill unhandled error: {exception}\", exc_info=exception)")
+* 根拠: [クラス定義] (行番号: 218-229 / 抜粋: "class CatchAllExceptionHandler(AbstractExceptionHandler):\n    def can_handle(self, handler_input: HandlerInput, exception: Exception) -> bool:\n        return True\n\n    def handle(self, handler_input: HandlerInput, exception: Exception) -> Response:\n        logger.error(f\"Alexa skill unhandled error: {exception}\", exc_info=exception)")
 
 ### `sb` / `skill`(モジュール末尾のビルダー初期化)
 

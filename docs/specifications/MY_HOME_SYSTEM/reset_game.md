@@ -20,7 +20,7 @@
 
 * コマンドラインから対話的に実行する、Family QuestのSQLite DB（`home_system.db`）上のユーザーゲームデータ（レベル・経験値・ゴールド・メダル数）をリセットするスクリプト。
 * DBから取得したユーザー一覧を日本語名（`NAME_MAP`）に基づいて表示し、番号入力によりリセット対象ユーザーを選択させる（この一覧取得は読み取りのみのため、引き続きDBを直接読む）。
-* **（Issue #547で変更）** リセット実行前に `y/n` の最終確認を行い、確認が取れた場合、対象ユーザーの `level`, `exp`, `gold`, `medal_count` の初期化と`quest_history`/`user_inventory`の削除は、本ファイルが直接DBを書き換えるのではなく、サーバーのAPI（`POST /api/quest/admin/reset_user`）をHTTP経由で呼び出すことで行う。呼び出し時の`admin_id`（`role_adult`であることがサーバー側で必須）は、取得済みのユーザー一覧から`role_adult`のユーザーを自動選択し、実行者に別途入力させることはしない。以前は本ファイルが`unified_server`とは別プロセスであることを理由にDB側の`BEGIN IMMEDIATE`のみで原子性を確保していたが、稼働中サーバーの承認処理（`quest_service.py`の`process_approve_quest`等、SELECT→Pythonで計算→絶対値SET）と交錯するとリセット結果が上書きされうる欠陥が残っていたため、サービス層の`_get_user_balance_lock`に参加できるサーバーAPI呼び出しに置き換えた。
+* **（Issue #547で変更）** リセット実行前に `y/n` の最終確認を行い、確認が取れた場合、対象ユーザーの `level`, `exp`, `gold`, `medal_count` の初期化と`quest_history`/`user_inventory`の削除は、本ファイルが直接DBを書き換えるのではなく、サーバーのAPI（`POST /api/quest/admin/reset_user`）をHTTP経由で呼び出すことで行う。呼び出し時の`admin_id`（`role_adult`であることがサーバー側で必須）は、取得済みのユーザー一覧から`role_adult`のユーザーを自動選択し、実行者に別途入力させることはしない。以前は本ファイルが`unified_server`とは別プロセスであることを理由にDB側の`BEGIN IMMEDIATE`のみで原子性を確保していたが、稼働中サーバーの承認処理（`quest_service.py`の`process_approve_quest`等、SELECT→Pythonで計算→絶対値SET）と交錯するとリセット結果が上書きされうる欠陥が残っていたため、サービス層の`_get_user_balance_lock`に参加できるサーバーAPI呼び出しに置き換えた。**（Issue #755 / AUDIT-026 で明記）** この置き換えで`BEGIN IMMEDIATE`も一緒に撤去されており、**現在リポジトリ内の実行コードに`BEGIN IMMEDIATE`は存在しない**（`core/database.py`の接続も`isolation_level`未指定＝暗黙のdeferred BEGIN）。したがって`quest_users`への read-modify-write の排他は`unified_server`プロセス内の`threading.Lock`だけで成立しており、**`unified_server`以外のプロセスから`quest_users`を直接書き換えてはならない**（lost updateになる。別プロセスからの更新は本ファイルと同じくHTTP API を経由すること）。不変条件は`tests/test_balance_lock_cross_path_concurrency.py::TestConcurrencyControlDocumentationMatchesCode`が固定している。
 * **（Issue #547で追加）** サーバーが起動していない・到達できない場合に直接DBを書き換えるフォールバックは持たない。接続失敗時はエラーメッセージを表示して`sys.exit(1)`する。
 * 実行結果は日付別のログファイル（`logs/reset_game_YYYYMMDD.log`）と標準出力の両方に出力される。
 
@@ -53,7 +53,7 @@
 * **役割**: DBファイルパス（`DB_PATH`）、ログディレクトリ（`LOG_DIR`）、日本語名とDB内`user_id`のマッピング（`NAME_MAP`）、**（Issue #547で追加）** リセットAPIのパス・タイムアウト（`RESET_USER_API_PATH`, `RESET_API_TIMEOUT_SECONDS`）と`quest_users.role`の判定値（`ROLE_ADULT = "role_adult"`）を定義し、日付別のログファイルを作成、`logging.basicConfig` によりファイル出力とコンソール出力の両方を行うよう設定する。**（Issue #186で修正）** 以前は`DB_PATH`がCWD相対のハードコード文字列`"home_system.db"`であり、他のDBアクセス経路（`config.SQLITE_DB_PATH` = `BASE_DIR/home_system.db`、環境変数`SQLITE_DB_PATH`で上書き可）と食い違っていた。`MY_HOME_SYSTEM/`以外のCWDから実行するとファイル不在で終了する、あるいは同名ファイルが存在すれば別のDBを誤って操作する、`SQLITE_DB_PATH`環境変数での差し替え運用時に本番と異なるファイルをリセットする、といったリスクがあったため、`config`モジュールをインポートし`DB_PATH = config.SQLITE_DB_PATH`から導出するよう統一した。
 * 根拠: `DB_PATH = config.SQLITE_DB_PATH` (行番号: 22 / 抜粋: "DB_PATH = config.SQLITE_DB_PATH  # DBファイルパス")、Issue #186修正のimportとコメント (行番号: 10, 13〜19 / 抜粋: "import config", "# #186: 以前はCWD相対の"home_system.db"に直接sqlite3.connectしており、他のDB")
 * **（Issue #409 Q-L8 で修正）** `LOG_DIR` は CWD 相対の `"logs"` ではなく `config.LOG_DIR` を使い、`logging.basicConfig` は import 時ではなく `main()` から呼ぶ `_setup_logging()` に移動した。
-* 根拠: `LOG_DIR = config.LOG_DIR` (行番号: 25)、`def _setup_logging() -> None:` (行番号: 62〜73)
+* 根拠: `LOG_DIR = config.LOG_DIR` (行番号: 25)、`def _setup_logging() -> None:` (行番号: 64〜75)
 * **（Issue #547で追加）** `RESET_USER_API_PATH`/`RESET_API_TIMEOUT_SECONDS`/`ROLE_ADULT`は、リセット処理をサーバーAPI呼び出しに置き換えた際に追加された。`ROLE_ADULT`は`services/quest/locks.py`の`ROLE_ADULT`と同じ文字列値だが、本ファイルはサービス層をimportしない独立スクリプトのためこの値をここに複製している、という趣旨のコメントが付されている。
 * 根拠: `RESET_USER_API_PATH = "/api/quest/admin/reset_user"` 〜 `ROLE_ADULT = "role_adult"` (行番号: 35〜56 / 抜粋: "Issue #547: 本スクリプトはunified_serverとは別プロセスで動くため、サービス層の")
 
@@ -78,11 +78,11 @@
 ### `get_db_connection`
 
 * **役割**: SQLite DBファイルの存在を確認し、存在すれば `sqlite3.Row` をロウファクトリとするコネクションを返す。存在しない場合はプロセスを終了する。
-* 根拠: `def get_db_connection():` (行番号: 75〜88 / 抜粋: "def get_db_connection():\n    """データベース接続を取得する"""")
+* 根拠: `def get_db_connection():` (行番号: 77〜90 / 抜粋: "def get_db_connection():\n    """データベース接続を取得する"""")
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 75 / 抜粋: "def get_db_connection():")
+* 根拠: (行番号: 77 / 抜粋: "def get_db_connection():")
 
 
 * **戻り値/レスポンス**: `sqlite3.Connection`（`row_factory` を `sqlite3.Row` に設定済み）。DBファイル不在時は関数内で `sys.exit(1)` するため戻り値は返らない。
@@ -101,11 +101,11 @@
 ### `fetch_users`
 
 * **役割**: `quest_users` テーブルから `user_id`・`name`・`role` を取得し、表示用の辞書（`id`, `name`, `role`）のリストを構築する。**（Issue #547で修正）** 以前は`user_id`と`name`のみを取得していたが、リセットAPI呼び出し時に`admin_id`（`role_adult`のユーザー）を自動選択するため`role`列も取得するようになった。
-* 根拠: `def fetch_users():` (行番号: 90〜120 / 抜粋: "def fetch_users():\n    """\n    DBからユーザー情報を取得し、表示用のリストを作成する。")、role列の追加根拠 (行番号: 102, 110 / 抜粋: "cursor.execute("SELECT user_id, name, role FROM quest_users")", "users_info.append({"id": u_id, "name": display_name, "role": row['role']})")
+* 根拠: `def fetch_users():` (行番号: 92〜122 / 抜粋: "def fetch_users():\n    """\n    DBからユーザー情報を取得し、表示用のリストを作成する。")、role列の追加根拠 (行番号: 102, 110 / 抜粋: "cursor.execute("SELECT user_id, name, role FROM quest_users")", "users_info.append({"id": u_id, "name": display_name, "role": row['role']})")
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 90 / 抜粋: "def fetch_users():")
+* 根拠: (行番号: 92 / 抜粋: "def fetch_users():")
 
 
 * **戻り値/レスポンス**: `list[dict]`（各要素は `{"id": ..., "name": ..., "role": ...}`）。取得失敗時は空リスト `[]` を返す。
@@ -124,11 +124,11 @@
 ### `select_user_interactive`
 
 * **役割**: 取得済みユーザー一覧を `NAME_MAP` の日本語名を優先しつつ表示し、番号入力によりリセット対象を1件選択させる対話的関数。
-* 根拠: `def select_user_interactive(users_info):` (行番号: 122〜164 / 抜粋: "def select_user_interactive(users_info):\n    """\n    ユーザーにリストを表示し、選択させる\n    """")
+* 根拠: `def select_user_interactive(users_info):` (行番号: 124〜166 / 抜粋: "def select_user_interactive(users_info):\n    """\n    ユーザーにリストを表示し、選択させる\n    """")
 
 
 * **引数/リクエスト**: `users_info: list[dict]`（`fetch_users` の戻り値）
-* 根拠: (行番号: 122 / 抜粋: "def select_user_interactive(users_info):")
+* 根拠: (行番号: 124 / 抜粋: "def select_user_interactive(users_info):")
 
 
 * **戻り値/レスポンス**: `dict`（`{"label": ..., "db_id": ...}`）または `None`（候補が0件の場合）。`q` 入力時は関数内で `sys.exit(0)` するため戻り値は返らない。
@@ -147,11 +147,11 @@
 ### `_find_admin_user_id`
 
 * **役割**: **（Issue #547で追加）** `users_info`（`fetch_users` の戻り値）から`role`が`ROLE_ADULT`（`"role_adult"`）である最初のユーザーの`id`を返す。リセットAPI呼び出し時の`admin_id`を、実行者に別途入力させず自動選択するためのヘルパー。
-* 根拠: `def _find_admin_user_id(users_info):` (行番号: 166〜171 / 抜粋: "role_adultの最初のユーザーIDを返す。見つからなければNoneを返す(#547)。")
+* 根拠: `def _find_admin_user_id(users_info):` (行番号: 168〜173 / 抜粋: "role_adultの最初のユーザーIDを返す。見つからなければNoneを返す(#547)。")
 
 
 * **引数/リクエスト**: `users_info: list[dict]`（各要素が`role`キーを持つ。`fetch_users`の戻り値）
-* 根拠: (行番号: 166 / 抜粋: "def _find_admin_user_id(users_info):")
+* 根拠: (行番号: 168 / 抜粋: "def _find_admin_user_id(users_info):")
 
 
 * **戻り値/レスポンス**: `str`（`role_adult`の最初のユーザーの`id`）または`None`（該当ユーザーが1件もない場合）。
@@ -170,11 +170,11 @@
 ### `reset_user_data`
 
 * **役割**: **（Issue #547で全面的に書き換え）** 指定されたユーザーのゲームデータリセットを、本ファイルが直接DBを書き換えるのではなく、サーバーのリセットAPI（`POST {base_url}/api/quest/admin/reset_user`）へのHTTP POSTとして実行する。`base_url`省略時は呼び出し時点の`config.RESET_GAME_API_BASE_URL`を参照する（`def`時点でデフォルト引数として束縛すると、テストでの`config`書き換えが反映されないため、関数内で`None`判定してから読む設計になっている）。`admin_id`は`_find_admin_user_id(users_info)`で自動選択する。以前（Issue #544時点）はここで`BEGIN IMMEDIATE`を使い直接`quest_users`/`quest_history`/`user_inventory`を書き換えていたが、`unified_server`とは別プロセスで動くためサービス層のユーザー単位ロックを共有できず、稼働中サーバーの承認処理（read-modify-writeの絶対値`SET gold=?`）と交錯するとリセット結果が上書きされうる欠陥があった。この欠陥を解消するため、サービス層の`_get_user_balance_lock`に参加できるサーバーAPI呼び出しに置き換えた。
-* 根拠: `def reset_user_data(target_user, users_info, base_url=None):` (行番号: 174〜235 / 抜粋: "指定されたユーザーのゲームデータを、サーバーのリセットAPI経由でリセットする。")、`resp = requests.post(\n            url,\n            json={"admin_id": admin_id, "target_user_id": user_id},\n            timeout=RESET_API_TIMEOUT_SECONDS,\n        )` (行番号: 201〜205)
+* 根拠: `def reset_user_data(target_user, users_info, base_url=None):` (行番号: 176〜237 / 抜粋: "指定されたユーザーのゲームデータを、サーバーのリセットAPI経由でリセットする。")、`resp = requests.post(\n            url,\n            json={"admin_id": admin_id, "target_user_id": user_id},\n            timeout=RESET_API_TIMEOUT_SECONDS,\n        )` (行番号: 201〜205)
 
 
 * **引数/リクエスト**: `target_user: dict`（`{"label": ..., "db_id": ...}`。`select_user_interactive` の戻り値）、`users_info: list[dict]`（`admin_id`自動選択用。`fetch_users`の戻り値）、`base_url: Optional[str]`（省略時は`config.RESET_GAME_API_BASE_URL`）
-* 根拠: (行番号: 174 / 抜粋: "def reset_user_data(target_user, users_info, base_url=None):"), `base_url = config.RESET_GAME_API_BASE_URL` (行番号: 189)
+* 根拠: (行番号: 176 / 抜粋: "def reset_user_data(target_user, users_info, base_url=None):"), `base_url = config.RESET_GAME_API_BASE_URL` (行番号: 189)
 
 
 * **戻り値/レスポンス**: なし（明示的な`return`は404応答時の早期`return`のみ。正常系・エラー系いずれも戻り値では結果を伝えない）
@@ -193,15 +193,15 @@
 ### `main`
 
 * **役割**: `fetch_users` → `select_user_interactive` → 確認プロンプト → `reset_user_data` の一連の対話フローを制御するエントリーポイント。**（Issue #547で変更）** `reset_user_data`の呼び出しに`users_info`（`admin_id`自動選択用）を追加で渡すようになった。
-* 根拠: `def main():` (行番号: 237〜262 / 抜粋: "def main():")、`reset_user_data(selected, users_info)` (行番号: 262)
+* 根拠: `def main():` (行番号: 239〜264 / 抜粋: "def main():")、`reset_user_data(selected, users_info)` (行番号: 262)
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 237 / 抜粋: "def main():")
+* 根拠: (行番号: 239 / 抜粋: "def main():")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 237〜262 / 抜粋: "def main():")
+* 根拠: (行番号: 239〜264 / 抜粋: "def main():")
 
 
 * **副作用**: ログ出力（起動・キャンセル）、`fetch_users`/`select_user_interactive`/`reset_user_data` の呼び出し、確認プロンプトの表示（Issue #544: 履歴・インベントリも全削除する旨を明示する文言に変更）、ユーザー未取得時・未選択時・確認拒否時の `sys.exit`。

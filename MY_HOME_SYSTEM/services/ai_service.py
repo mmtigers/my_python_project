@@ -258,6 +258,26 @@ _DENIED_SQL_FUNCTIONS = frozenset({
     "load_extension", "readfile", "writefile", "edit", "fsdir", "zipfile",
 })
 
+# Issue #750 (AUDIT-021): AI(Gemini)が生成したSQLの実行時間上限(秒)。
+# 認可コールバックは「何を読めるか」は制限するが「どれだけ重い処理をしてよいか」は
+# 制限しない。許可テーブル(device_records / power_usage / switchbot_meter_logs 等、
+# 保持期間削除が無く単調増加する。Issue #733)のクロス結合だけで行数は二乗・三乗になる。
+# (なお Issue が挙げていた「SQLITE_RECURSIVE を許可しているため無限再帰CTEが通る」は
+#  実測では成立しない。CTE 名に対する SQLITE_READ が ALLOWED_SEARCH_TABLES の検査に
+#  掛かり "not authorized" で準備時に弾かれる。回帰テストで記録してある。)
+# この実行は asyncio.to_thread の既定エグゼキュータ(LINE Webhook・Alexa・
+# SwitchBot Webhook・同期ルートハンドラが共有する。Pi 4 ならワーカー8本)で走るため、
+# 数本占有されるとシステム全体が詰まる。
+# **sqlite3.connect(timeout=) はロック待ちの上限であり、クエリの実行時間には効かない。**
+# SQLite の progress handler は N 命令ごとに呼ばれ、非0を返すと実行中の文を中断して
+# OperationalError("interrupted") を送出する。
+_AI_SQL_TIMEOUT_SEC: float = 5.0
+_AI_SQL_PROGRESS_INSTRUCTIONS: int = 10_000
+# 取得する行数の上限。最終的に tool_search_db 側が result[:2000] で切るため、
+# それ以上の行を fetchall() でメモリへ読む意味がない(Pi のメモリでは OOM Killer の
+# 対象になりうる)。切るのが「取得後」だったことが問題だった。
+_AI_SQL_MAX_ROWS: int = 500
+
 
 def _search_db_authorizer(action: int, arg1, arg2, db_name, trigger_or_view) -> int:
     """
@@ -299,12 +319,32 @@ def _execute_restricted_read_query(query: str, params: tuple = ()) -> str:
     既存のエラー判定(#180)をそのまま使えるようにしている。
     `execute_read_query` 自体は他の呼び出し元と共有されるため変更せず、
     認可コールバックはこのAI経路にのみ適用する。
+
+    Issue #750 (AUDIT-021): 認可コールバックに加えて **実行時間の上限**
+    (`set_progress_handler`、既定5秒)と **取得行数の上限**
+    (`fetchmany(_AI_SQL_MAX_ROWS)`)も設ける。認可は「何を読めるか」を制限するが
+    「どれだけ重い処理をしてよいか」は制限しないため、クロス結合や再帰CTEで
+    共有スレッドプールを占有できてしまう状態だった(影響はDoSに限定され、
+    データの改変やテーブル外へのアクセスは認可コールバックが構造的に防ぐ)。
     """
+    # Issue #750 (AUDIT-021): 実行時間の上限。deadline は文の準備前に決める。
+    deadline = time.monotonic() + _AI_SQL_TIMEOUT_SEC
+
+    def _abort_if_too_slow() -> int:
+        # 非0を返すと SQLite は実行中の文を中断し、
+        # sqlite3.OperationalError("interrupted") を送出する。
+        # 送出された例外は下の except で "検索エラー: interrupted" になり、
+        # tool_search_db 側の既存のエラー判定(#180)がそのまま効く。
+        return 1 if time.monotonic() > deadline else 0
+
     try:
         with get_db_cursor() as cursor:
             cursor.connection.set_authorizer(_search_db_authorizer)
+            cursor.connection.set_progress_handler(
+                _abort_if_too_slow, _AI_SQL_PROGRESS_INSTRUCTIONS
+            )
             cursor.execute(query, params)
-            rows = cursor.fetchall()
+            rows = cursor.fetchmany(_AI_SQL_MAX_ROWS)
 
         if not rows:
             return "該当するデータはありませんでした。"

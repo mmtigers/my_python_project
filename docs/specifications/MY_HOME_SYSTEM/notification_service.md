@@ -107,8 +107,8 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 * 根拠: [外部通信] (行番号: 58〜59, 61 / 抜粋: "files = {'file': (filename, image_data)}", "res = requests.post(url, files=files...")
 
 
-* **エラーハンドリング**: HTTPステータスコードが200/204以外の場合、レスポンス内容を含めたエラーログを出力してFalseを返す。リクエスト時に例外が発生した場合も、エラーログを出力してFalseを返す。URLが設定されていない場合は早期リターンでFalseを返す。
-* 根拠: [ステータスコード判定] (行番号: 64〜66 / 抜粋: "logger.error(f"Discord API エラー: {res.status_code} - {res.text}")")、[例外処理] (行番号: 69〜71 / 抜粋: "except Exception as e: ... return False")
+* **エラーハンドリング**: HTTPステータスコードが200/204以外の場合、レスポンス内容を含めたエラーログを出力してFalseを返す。リクエスト時に例外が発生した場合も、エラーログを出力してFalseを返す。URLが設定されていない場合は早期リターンでFalseを返す。**（Issue #742 / AUDIT-013 で変更）** これら2つの `logger.error` には `extra={"skip_discord": True}` を付けている。通知システム自身の失敗をここから再び Discord へ送ろうとしないための opt-out で、以前は `core/logger.py` 側が「メッセージに Discord という語が含まれるか」で推測的に抑制していた（その推測が広すぎ、無関係な実障害まで無音にしていた）。**この関数にエラーログを足すときも同じフラグを付けること。**
+* 根拠: [ステータスコード判定] (行番号: 67〜74 / 抜粋: 'logger.error(\n                    f"Discord API エラー: {res.status_code} - {res.text}",\n                    extra={"skip_discord": True},\n                )')、[例外処理] (行番号: 77〜80 / 抜粋: 'logger.error(f"Discord送信失敗: {e}", extra={"skip_discord": True})')
 
 
 
@@ -116,7 +116,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 ### `_split_discord_content` / `_post_discord_with_retry`（Issue #361 で追加）
 
 * **役割**: `_split_discord_content(text, limit=1900)` は text を limit 字以下のチャンクに分割する（できるだけ改行位置で切る。空文字は1チャンク）。`_post_discord_with_retry(url, **kwargs)` は `requests.post` を呼び、429/5xx なら `Retry-After` 等に従って `_retry_sleep`（既定 `time.sleep`、テストで差し替え可能）で待機したうえで限定回数リトライし、最後のレスポンスを返す。
-* 根拠: `def _split_discord_content(text: str, limit: int = DISCORD_CONTENT_CHUNK_SIZE) -> List[str]:` (行番号: 87〜89)、`def _post_discord_with_retry(url: str, **kwargs):` (行番号: 92〜101)
+* 根拠: `def _split_discord_content(text: str, limit: int = DISCORD_CONTENT_CHUNK_SIZE) -> List[str]:` (行番号: 94〜96)、`def _post_discord_with_retry(url: str, **kwargs):` (行番号: 99〜108)
 * **引数/リクエスト**: `text: str, limit: int` / `url: str, **kwargs`（`requests.post` に渡す）
 * 根拠: (行番号: 86, 103)
 * **戻り値/レスポンス**: `List[str]` / `requests.Response`
@@ -132,11 +132,11 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 * 根拠: (行番号: 174 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
 
 * **役割**: LINE Messaging API (v3) を利用し、指定ユーザーIDに対してプッシュメッセージを送信する。辞書型で渡されたメッセージをv3用オブジェクト(`TextMessage`等)に変換する互換性維持処理を含む。
-* 根拠: [関数定義] (行番号: 104〜161 / 抜粋: "def _send_line_push(user_id: str...")
+* 根拠: [関数定義] (行番号: 111〜168 / 抜粋: "def _send_line_push(user_id: str...")
 
 
 * **引数/リクエスト**: `user_id: str`, `messages: List[Any]`
-* 根拠: [関数定義] (行番号: 104 / 抜粋: "def _send_line_push(user_id: str...")
+* 根拠: [関数定義] (行番号: 111 / 抜粋: "def _send_line_push(user_id: str...")
 
 
 * **戻り値/レスポンス**: `bool` (送信成功時にTrue)
@@ -155,11 +155,11 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 ### `send_push`
 
 * **役割**: 指定されたターゲット(discord, line, both)に応じてメッセージを各プラットフォームへ統合送信する。LINEに画像は送信せず注記を付与し、LINEの送信に失敗した場合はDiscordのerrorチャンネルへフォールバック通知を行う。`filename`はDiscord送信時にそのまま`_send_discord_webhook`へ引き継がれる。Issue #289で、LINE宛先(`user_id`)の解決をこの関数に一元化するようシグネチャを再設計した: `messages`のみが位置引数として渡せ、それ以外はすべてキーワード専用(`*`以降)。`user_id`は target に "line"/"both" を含む場合のみ使われ、省略時は`config.LINE_USER_ID`にフォールバックする。`target="discord"`のみの呼び出しでは`user_id`は一切不要になった。
-* 根拠: [関数定義] (行番号: 163〜210 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
+* 根拠: [関数定義] (行番号: 170〜222 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
 
 
 * **引数/リクエスト**: `messages: List[Any]`（唯一の位置引数）、以降キーワード専用で `target: str = "both"`, `channel: str = "notify"`, `user_id: Optional[str] = None`, `image_data: Optional[bytes] = None`, `filename: str = "snapshot.jpg"`
-* 根拠: [関数定義] (行番号: 163〜210 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
+* 根拠: [関数定義] (行番号: 170〜222 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`
@@ -208,7 +208,7 @@ flowchart TD
     ImageDataCheck -- No --> LineSend
     
     LineSend --> LineSuccessCheck{"Success?"}
-    LineSuccessCheck -- No --> LineLogError["logger.error('LINE送信失敗')"]
+    LineSuccessCheck -- No --> LineLogError["logger.error('LINE送信失敗', extra=skip_discord)<br/>※直後に明示的なDiscordフォールバックを送るため<br/>ハンドラ経由の通知はopt-out(Issue #742)"]
     LineLogError --> FallbackSend["外部：_send_discord_webhook(channel='error')"]
     FallbackSend --> SetSuccessFalse["success = False"]
     SetSuccessFalse --> End

@@ -121,10 +121,10 @@
 
 
 * **副作用**:
-* `device_records` へのログ保存 (`save_log_async`)。
-* 特定のステータスの場合、`config.SQLITE_TABLE_DAILY_LOGS` へのログ保存 (`save_log_async`)。
+* `device_records` へのログ保存 (`save_log_async`)。**（Issue #740 / AUDIT-011 で変更）** 戻り値を `save_ok` で受け、`False`（`save_log_async` は Fail-Soft で `False` を返す）なら `logger.error` のうえ **HTTP 503 を送出**し、以降の `daily_logs` 保存・`process_sensor_data` には進まない。以前は戻り値を破棄して無条件に 200 `{"status": "success"}` を返していたため、SwitchBot は「配信成功」と判断して再送せず、ドアの開閉・人感センサーの検知が恒久的に失われていた（これは #373 で LINE 経路にだけ適用された「戻り値を見る」修正の未展開分）。再送による二重記録は上流の `is_duplicate_webhook`（インメモリ重複排除）が防ぐ。
+* 特定のステータスの場合、`config.SQLITE_TABLE_DAILY_LOGS` へのログ保存 (`save_log_async`)。**こちらは失敗しても 503 にせず、`logger.error` にとどめて処理を続行する**（`device_records` の派生である補助的な記録で、一次データは `device_records` に残る。ここで 503 を返すと保存済みの `device_records` ごと再送させることになり、重複排除の窓を超えた再送で二重記録になりうるため。Issue #740: この判断は明示的なもので書き忘れではない旨がコメントに明記されている）。
 * `sensor_service.process_sensor_data` の実行による副作用（第4引数には61行目で解決済みの`device_type`を渡す。#94修正）。
-* 根拠: 関数内の処理呼び出し (行番号: 100, 108, 117 / 抜粋: `await save_log_async(...)`)
+* 根拠: [device_records 保存と 503] (行番号: 182〜194 / 抜粋: 'save_ok = await save_log_async("device_records",')、[daily_logs 保存と続行] (行番号: 204〜212 / 抜粋: "daily_ok = await save_log_async(config.SQLITE_TABLE_DAILY_LOGS,")
 
 
 * **エラーハンドリング**:
@@ -164,8 +164,10 @@ flowchart TD
     CheckDuplicate -->|"Yes"| ReturnIgnored2["Return status: ignored<br>reason: duplicate_event"]
     CheckDuplicate -->|"No"| ResolveDeviceInfo["デバイス名、場所を解決<br>外部: sb_tool, config"]
     ResolveDeviceInfo --> SaveLog1["外部: save_log_async<br>device_recordsへ保存"]
+    SaveLog1 --> SaveOk{"保存に成功したか?<br>(Issue #740)"}
+    SaveOk -->|"No"| Return503["HTTPException 503<br>SwitchBotの再送に委ねる"]
     SaveLog1 --> CheckState{"ステータスが<br>detected/open/timeoutnotcloseか?"}
-    CheckState -->|"Yes"| SaveLog2["外部: save_log_async<br>daily_logsへ保存"]
+    CheckState -->|"Yes"| SaveLog2["外部: save_log_async<br>daily_logsへ保存<br>(失敗してもログのみで続行)"]
     CheckState -->|"No"| CallSensorService["外部: process_sensor_data()"]
     SaveLog2 --> CallSensorService
     CallSensorService --> ReturnSuccess["Return status: success"]
@@ -268,8 +270,8 @@ graph TD
 * 根拠: `save_log_async` の引数 (行番号: 102)
 
 
-* `switchbot_webhook` 内での明示的な例外処理（`try-except`）が存在しないため、`save_log_async` 等で例外が発生した場合、デフォルトのエラーレスポンスとなる。
-* 根拠: 関数全体の構造 (行番号: 45〜116)
+* `switchbot_webhook` 内での明示的な例外処理（`try-except`）が存在しないため、`save_log_async` 等で例外が発生した場合、デフォルトのエラーレスポンスとなる。ただし `save_log_async` は例外を投げず Fail-Soft で `False` を返すため、`device_records` の保存失敗は **例外ではなく戻り値** として扱われ、HTTP 503 に変換される（Issue #740）。
+* 根拠: [device_records 保存失敗時の 503] (行番号: 186〜194 / 抜粋: "if not save_ok:")
 
 
 

@@ -195,6 +195,8 @@ flowchart TD
     
     CooldownCheck -- Yes --> LogError[ログ: メモリ異常検知]
     LogError --> ExternalNotify["外部：send_push()（ブラックボックス）"]
+    %% Issue #742: 直前の logger.error には extra={"skip_discord": True} を付け、
+    %% ハンドラ経由のDiscord通知と send_push による専用通知の二重送信を避ける
     ExternalNotify --> NotifySuccess{送信成功?}
     NotifySuccess -- Yes --> RecordTime[record_notification]
     NotifySuccess -- No --> End

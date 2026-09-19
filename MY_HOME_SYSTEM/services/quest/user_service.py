@@ -108,6 +108,17 @@ class UserService:
         このメソッドをサービス層に置き、quest_users/quest_history/user_inventoryを
         書き換える他の全経路(完了・承認・取消・購入)と同じ_get_user_balance_lockの
         中で実行することで、reset_game.py側もこのAPIを呼ぶ限り直列化される。
+
+        並行制御の現状(Issue #755 / AUDIT-026 で明記): **BEGIN IMMEDIATE は
+        リポジトリ内の実行コードに現存しない**。#544 で reset_game.py 側に
+        置いたものは #547 でリセットをAPI経由へ移した際に撤去済みで、
+        core/database.py の接続も isolation_level 未指定(暗黙の deferred BEGIN)
+        である。したがって quest_users(gold/exp/level/medal_count)への
+        read-modify-write の排他は、**このプロセス内の threading.Lock
+        (services/quest/locks.py の _get_user_balance_lock)だけ**で成立している。
+        unified_server 以外のプロセス(cron スクリプト・スケジューラのタスク等)から
+        quest_users を直接書き換えると lost update が起きる。別プロセスから更新が
+        必要な場合は reset_game.py と同じく HTTP API を経由すること。
         """
         with _get_user_balance_lock(target_user_id):
             return self._reset_user_data_locked(admin_id, target_user_id)
