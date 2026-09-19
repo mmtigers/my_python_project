@@ -200,3 +200,85 @@ class TestResetVersusApproveCrossPathConcurrency:
             ).fetchone()["s"]
 
         assert son["gold"] == approved_gold_sum
+
+
+class TestConcurrencyControlDocumentationMatchesCode:
+    """Issue #755 (AUDIT-026): 並行制御の「正」がコメントと一致していることを固定する。
+
+    このリポジトリではコメントが一次設計文書として機能しているため、コメントの誤りが
+    そのまま設計理解の誤りになる。複数のコメントが `BEGIN IMMEDIATE` による DB 側の
+    原子性保証を現存する防御として読めてしまう状態だったが、それは #544 で入り
+    #547 でリセットを API 経由へ移した際に撤去済みで、**実行コードには存在しない**。
+
+    誤解したまま「プロセス間の競合は DB が守っている」と考えると、別プロセス
+    (cron スクリプト・スケジューラのタスク)から quest_users を直接書き換える
+    コードが書かれ、lost update が起きる。実際の排他はこのプロセス内の
+    threading.Lock (services/quest/locks.py の _get_user_balance_lock) だけである。
+    """
+
+    REPO_BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+    def _python_sources(self):
+        """本番の実行コードだけを列挙する(tests/ は対象外)。
+
+        tests/ を含めると、この不変条件を検証する本テスト自身が持つ
+        "BEGIN IMMEDIATE" という文字列リテラルに引っかかる。
+        """
+        skip_dirs = {".venv", "__pycache__", "node_modules", ".git", "tests"}
+        for root, dirs, files in os.walk(self.REPO_BACKEND_DIR):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            for name in files:
+                if name.endswith(".py"):
+                    yield os.path.join(root, name)
+
+    def test_begin_immediate_is_not_used_in_executable_code(self):
+        """`BEGIN IMMEDIATE` が実行コードに復活していないこと。
+
+        復活させる場合は user_service.reset_user_data / reset_game.py /
+        本テストのコメントを同時に更新すること(コメントだけが取り残される、
+        というのが本 Issue で起きた事象そのもののため)。
+        """
+        import ast
+
+        offenders = []
+        for path in self._python_sources():
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+            if "BEGIN IMMEDIATE" not in text:
+                continue
+            tree = ast.parse(text, filename=path)
+            # docstring(経緯の記録)は対象外にするため、先に docstring のノードを集める
+            docstrings = set()
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                    body = getattr(node, "body", None)
+                    if (
+                        body
+                        and isinstance(body[0], ast.Expr)
+                        and isinstance(body[0].value, ast.Constant)
+                        and isinstance(body[0].value.value, str)
+                    ):
+                        docstrings.add(id(body[0].value))
+            # コメントは ast に現れないため、残る文字列リテラルだけを見れば十分
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                    continue
+                if id(node) in docstrings:
+                    continue
+                if "BEGIN IMMEDIATE" in node.value:
+                    rel = os.path.relpath(path, self.REPO_BACKEND_DIR)
+                    offenders.append(f"{rel}:{node.lineno}")
+        assert not offenders, (
+            "BEGIN IMMEDIATE が実行コードに現れました。並行制御の正を説明している"
+            "コメント(user_service.reset_user_data / reset_game.py / 本テスト)も"
+            "同時に更新してください:\n" + "\n".join(offenders)
+        )
+
+    def test_get_db_cursor_does_not_set_isolation_level(self):
+        """接続が isolation_level 未指定(暗黙の deferred BEGIN)のままであること。"""
+        import inspect
+
+        from core import database
+
+        source = inspect.getsource(database.get_db_cursor)
+        assert "isolation_level" not in source
