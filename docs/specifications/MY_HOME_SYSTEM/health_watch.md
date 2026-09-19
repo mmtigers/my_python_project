@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `0e15b41` (+同一PR内のチェック7追加変更、+ Issue #700 のチェック8追加) |
+| 解析基準コミット | `0e15b41` (+同一PR内のチェック7追加変更、+ Issue #700 のチェック8追加、+ 常時録画停止検知のチェック9追加) |
 
 ## 関連ドキュメント
 
@@ -23,7 +23,7 @@
 
 ## 2. ファイルの概要
 
-ラズパイの一次ヘルスチェックを行うcron想定のスクリプト。`home_system.service`の稼働状態、journalctlのエラーログ、アプリログのERROR行、ディスク/メモリ使用率、NASマウント、実機構成(crontab/systemd/logrotate)とリポジトリ`deploy/`配下の一致(チェック7・構成ドリフト検知)、`quest_data.QUESTS`と実機DBの`quest_master`の一致(チェック8・マスタデータのドリフト検知)の8項目を決定論的にチェックし、異常があればDiscordのerrorチャンネルへ要約を通知する。前回チェック時刻をマーカーファイルで管理してログ走査の重複を防ぎ、同一の異常セットが継続する間は再通知を6時間抑制する。自動復旧(systemctl restart等)は行わない。**Issue #339(層2)**: `config.HEALTH_WATCH_INVESTIGATE_HOOK`にスクリプトパスが設定されている場合のみ、通知と同じ抑制の内側で自動調査フック(`scripts/claude_investigate.sh`)を`_fire_investigate_hook()`によりfire-and-forget起動する。未設定(既定)なら従来どおり検知・通知のみ。**Issue #700(チェック8)**: `quest_data.py`から退役させたクエストが実機の`quest_master`に残り続け、移設先(「きょうのすごろく」のステップ報酬)と二重報酬になっていた事故を受け、コードとDBの乖離を検知する項目を追加した。**検知のみで自動修正はしない**（同期の実行は`sync_strict.py --if-stale`の責務）。
+ラズパイの一次ヘルスチェックを行うcron想定のスクリプト。`home_system.service`の稼働状態、journalctlのエラーログ、アプリログのERROR行、ディスク/メモリ使用率、NASマウント、実機構成(crontab/systemd/logrotate)とリポジトリ`deploy/`配下の一致(チェック7・構成ドリフト検知)、`quest_data.QUESTS`と実機DBの`quest_master`の一致(チェック8・マスタデータのドリフト検知)、カメラごとの常時録画(NVR)が止まっていないか(チェック9)の9項目を決定論的にチェックし、異常があればDiscordのerrorチャンネルへ要約を通知する。前回チェック時刻をマーカーファイルで管理してログ走査の重複を防ぎ、同一の異常セットが継続する間は再通知を6時間抑制する。自動復旧(systemctl restart等)は行わない。**Issue #339(層2)**: `config.HEALTH_WATCH_INVESTIGATE_HOOK`にスクリプトパスが設定されている場合のみ、通知と同じ抑制の内側で自動調査フック(`scripts/claude_investigate.sh`)を`_fire_investigate_hook()`によりfire-and-forget起動する。未設定(既定)なら従来どおり検知・通知のみ。**Issue #700(チェック8)**: `quest_data.py`から退役させたクエストが実機の`quest_master`に残り続け、移設先(「きょうのすごろく」のステップ報酬)と二重報酬になっていた事故を受け、コードとDBの乖離を検知する項目を追加した。**検知のみで自動修正はしない**（同期の実行は`sync_strict.py --if-stale`の責務）。
 * 根拠: モジュールdocstring (行番号: 19〜20 / 抜粋: "8. `quest_data.QUESTS` と実機DBの `quest_master` が一致しているか")
 * 根拠: モジュールdocstring (行番号: 9-18, 23-26 / 抜粋: "7. 実機構成(crontab / systemdユニット / logrotate設定)がリポジトリの deploy/ 配下と\n     一致しているか(構成ドリフト検知。", "層2(Issue #339): config.HEALTH_WATCH_INVESTIGATE_HOOK にスクリプトパスが\n設定されている場合のみ、通知と同じ抑制の内側で自動調査フック")
 
@@ -70,8 +70,8 @@
 
 ### モジュール定数群
 
-* **役割**: 監視対象サービス名(`WATCH_SERVICE_NAME`)、ディスク/メモリ閾値(90.0%)、マーカーファイルパス(`LOG_DIR/.claude_watch_marker`)、再通知抑制状態ファイルパス(`LOG_DIR/.claude_watch_notify_state`)、再通知間隔(6時間)、初回実行時の遡り時間(1時間)、通知抜粋の最大文字数(400)を定義する。加えてチェック7(構成ドリフト検知)用に、リポジトリルート(`REPO_ROOT`、本ファイルの2階層上)、リポジトリ管理のcrontab(`TRACKED_CRONTAB` = `deploy/cron/crontab`)、(リポジトリ側ディレクトリ, globパターン, 実機側導入先)の組(`TRACKED_CONFIG_DIRS`: `MY_HOME_SYSTEM/deploy/systemd/*.service`→`/etc/systemd/system`、`MY_HOME_SYSTEM/deploy/logrotate/*`→`/etc/logrotate.d`)、比較除外ファイル名(`CONFIG_IGNORE_BASENAMES` = `README.md`)、通知に載せる差分行の上限(`DIFF_LINES_LIMIT` = 3)を定義する。**（Issue #700 で追加）** さらにチェック8用に、通知へ載せる`quest_id`の最大件数(`QUEST_ID_LIST_LIMIT` = 8)を定義する。
-* 根拠: [変数宣言] (行番号: 49〜62, 64〜81, 91 / 抜粋: 'WATCH_SERVICE_NAME: str = "home_system.service"', 'TRACKED_CRONTAB: str = os.path.join(REPO_ROOT, "deploy", "cron", "crontab")', 'QUEST_ID_LIST_LIMIT: int = 8' ほか)
+* **役割**: 監視対象サービス名(`WATCH_SERVICE_NAME`)、ディスク/メモリ閾値(90.0%)、マーカーファイルパス(`LOG_DIR/.claude_watch_marker`)、再通知抑制状態ファイルパス(`LOG_DIR/.claude_watch_notify_state`)、再通知間隔(6時間)、初回実行時の遡り時間(1時間)、通知抜粋の最大文字数(400)を定義する。加えてチェック7(構成ドリフト検知)用に、リポジトリルート(`REPO_ROOT`、本ファイルの2階層上)、リポジトリ管理のcrontab(`TRACKED_CRONTAB` = `deploy/cron/crontab`)、(リポジトリ側ディレクトリ, globパターン, 実機側導入先)の組(`TRACKED_CONFIG_DIRS`: `MY_HOME_SYSTEM/deploy/systemd/*.service`→`/etc/systemd/system`、`MY_HOME_SYSTEM/deploy/logrotate/*`→`/etc/logrotate.d`)、比較除外ファイル名(`CONFIG_IGNORE_BASENAMES` = `README.md`)、通知に載せる差分行の上限(`DIFF_LINES_LIMIT` = 3)を定義する。**（Issue #700 で追加）** さらにチェック8用に、通知へ載せる`quest_id`の最大件数(`QUEST_ID_LIST_LIMIT` = 8)を定義する。**（チェック9で追加）** 最新の録画セグメント開始時刻をどれだけ古いと「録画停止」とみなすかの閾値(`RECORDING_STALE_SEC` = 30分)を定義する。
+* 根拠: [変数宣言] (行番号: 49〜62, 64〜81, 91 / 抜粋: 'WATCH_SERVICE_NAME: str = "home_system.service"', 'TRACKED_CRONTAB: str = os.path.join(REPO_ROOT, "deploy", "cron", "crontab")', 'QUEST_ID_LIST_LIMIT: int = 8', 'RECORDING_STALE_SEC: int = 30 * 60' ほか)
 
 
 * **引数/リクエスト**: 該当なし
@@ -94,11 +94,11 @@
 ### `_read_marker`
 
 * **役割**: マーカーファイルから前回チェック完了時刻(ISO8601)を読み取る。**（Issue #661で修正）** ファイルの読み取り自体は`core/state_file.py`の`read_text`へ委譲し、返ってきた文字列を`datetime.fromisoformat`でパースする形に整理した。
-* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 94 / 抜粋: "def _read_marker() -> datetime.datetime:")
+* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 107 / 抜粋: "def _read_marker() -> datetime.datetime:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 94 / 抜粋: "def _read_marker() -> datetime.datetime:")
+* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 107 / 抜粋: "def _read_marker() -> datetime.datetime:")
 
 
 * **戻り値/レスポンス**: `datetime.datetime`。ファイルが無い/空/ISO8601としてパースできない場合は現在時刻から`DEFAULT_LOOKBACK_SEC`(3600秒)遡った時刻。
@@ -117,15 +117,15 @@
 ### `_write_marker`
 
 * **役割**: チェック開始時刻をISO8601文字列でマーカーファイルへ書き込む。**（Issue #661で修正）** 書き込みは`core/state_file.py`の`write_text_atomic`へ委譲し、一時ファイル + `fsync` + `os.replace`による原子的な差し替えになった（途中で電源断・クラッシュしても不完全な内容が残らない）。
-* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 110 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 123 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `dt: datetime.datetime`
-* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 110 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 123 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 110 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 123 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **副作用**: マーカーファイルの原子的な差し替え（`state_file.write_text_atomic`経由）。
@@ -140,7 +140,7 @@
 ### `check_service_active`
 
 * **役割**: `systemctl is-active`で`home_system.service`の稼働状態を確認する。
-* 根拠: [関数定義] (行番号: 121〜130 / 抜粋: "def check_service_active() -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 134〜143 / 抜粋: "def check_service_active() -> Optional[str]:")
 
 
 * **引数/リクエスト**: なし
@@ -165,7 +165,7 @@
 * **役割**: `journalctl -u home_system.service` で前回マーカー以降のエラーを確認する。見るのは (1) systemd 自身が `err..emerg` で記録したもの(ユニットの異常終了等)と、(2) サービスの標準出力・標準エラー経由の行のうちエラーと判定されるもの(`_journal_stdio_errors`)の2種類。
 * **（2026-09-19 修正）標準出力・標準エラー経由のエラーを見るようにした**: journald はサービスの標準出力・標準エラーの行を priority **info** で記録するため、従来の `-p err..emerg` だけでは一切拾えていなかった。`home_system.service` を `Type=simple`(Issue #646)へ移行して以降、未捕捉例外のトレースバックや basicConfig のままのライブラリログ(`ERROR:zeep...` 等)は journal にしか残らない(以前は `start_all.sh` が `logs/server_boot.log` へリダイレクトしており、`check_app_logs` のキーワード判定で拾えていた。移行後 `server_boot.log` は更新されない)。実機の journal で、移行後に `Traceback` と `ERROR:zeep...` が info で8行残っていたのに、修正前の本チェックは0行だったことを確認している。`_journal_stdio_errors` は `journalctl -o cat -n 2000` の各行を `LogAnalyzer._classify_line` で判定し、`core.logger` の書式(`YYYY-MM-DD HH:MM:SS [LEVEL] ...`)の行は `logs/*.log` 側で `check_app_logs` が見るため二重計上しないよう除外する。`LogAnalyzer.IGNORE_PATTERNS` も適用する。
 * 根拠: [関数定義] `def _journal_stdio_errors(since_str: str) -> list[str]:`、[core.logger 書式の除外] `core_logger_line = LogAnalyzer.LEVEL_PATTERNS[0]`(回帰テスト: `tests/test_health_watch.py` の `TestJournalStdioErrors`)
-* 根拠: [関数定義] (行番号: 133〜150 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 146〜188 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`--since`に"%Y-%m-%d %H:%M:%S"形式で渡す）
@@ -191,7 +191,7 @@
 * 根拠: (行番号: 120〜126 / 抜粋: "if os.path.basename(filepath) in (\"health_watch.log\", \"claude_investigate.log\"):\n            continue")
 
 * **役割**: `config.LOG_DIR`配下の`*.log`から前回マーカー以降のエラー行を検出する。キーワード・除外パターン・タイムスタンプ解析は`LogAnalyzer`を流用し、週次の`log_analyzer.py`と判定基準を揃える。エラー(errors > 0)のみを異常とみなし、WARNINGは対象外。
-* 根拠: [関数定義] (行番号: 203〜243 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 216〜256 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`analyzer.start_date`へ直接代入し「前回マーカー以降」のみを走査対象にする）
@@ -277,6 +277,52 @@
 
 * **エラーハンドリング**: 関数内には無し（例外は`run_checks`側で捕捉される）。
 * 根拠: [関数定義] (行番号: 156〜160)
+
+
+
+### `_latest_recording_time` (**チェック9で追加**)
+
+* **役割**: 録画フォルダ内の当日・前日分の`{YYYYMMDD}_*.mp4`を列挙し、ファイル名の新しい順に先頭15文字を`%Y%m%d_%H%M%S`として解釈できた最初のものの時刻(最新セグメントの開始時刻)を返す。CIFS越しに保持期間分を毎回列挙しないよう当日と前日(日付の変わり目用)に絞る。
+* 根拠: `def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:` (行番号: 290)
+
+
+* **引数/リクエスト**: `folder`(録画フォルダの絶対パス)、`now`(基準時刻。当日・前日の日付算出に使う)
+* 根拠: `def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:` (行番号: 290)
+
+
+* **戻り値/レスポンス**: `datetime.datetime | None`(JSTのaware datetime。`JST = ZoneInfo("Asia/Tokyo")`を付与)。該当ファイルが無い、または全ファイル名が解釈できなければ`None`。
+* 根拠: [戻り値] (抜粋: "return datetime.datetime.strptime(name[:15], \"%Y%m%d_%H%M%S\").replace(tzinfo=JST)", "return None")
+
+
+* **副作用**: なし（`glob.glob`による読み取りのみ）
+* 根拠: [処理] (抜粋: "names.extend(os.path.basename(p) for p in glob.glob(pattern))")
+
+
+* **エラーハンドリング**: 形式外のファイル名は`ValueError`を捕捉して次の候補へ進む。
+* 根拠: [例外処理] (抜粋: "except ValueError:\n            continue")
+
+
+
+### `check_recording_stalled` (**チェック9: 常時録画の停止検知で追加**)
+
+* **役割**: `config.CAMERAS`の有効なカメラごとに、`config.NVR_RECORD_DIR`配下の録画フォルダ(`nas_folder`、無ければ`name`)の最新セグメント開始時刻を`_latest_recording_time`で求め、当日・前日のファイルが無いか、`RECORDING_STALE_SEC`(30分)より古ければ異常として列挙する。録画自体は`nvr-*.service`(systemd)のffmpegが600秒ごとに新しいファイルを作る前提で、カメラに繋がらない間の再試行ループや無応答のまま固まった状態を「新しいセグメントが作られていない」ことで検知する。更新時刻(mtime)ではなくファイル名の時刻を使うのは、このNAS(CIFS)では書き込み中のファイルのmtimeが作成時刻のまま進まないため。
+* 根拠: `def check_recording_stalled() -> str | None:` (行番号: 308)
+
+
+* **引数/リクエスト**: なし
+* 根拠: `def check_recording_stalled() -> str | None:` (行番号: 308)
+
+
+* **戻り値/レスポンス**: `str | None`。基準時刻は`core.utils.get_now_jst()`(実行環境のTZに依存しない)。停止の疑いがあるカメラがあれば`"常時録画が止まっている可能性があります:"`に続けてカメラごとの1行(`{name}({folder}): 最新の録画が MM/DD HH:MM 開始(N分前)`、またはファイル無し)を並べたメッセージ、無ければ`None`。
+* 根拠: [戻り値] (抜粋: "return \"常時録画が止まっている可能性があります:\\n\" + \"\\n\".join(stalled)")
+
+
+* **副作用**: なし（NASの読み取りのみ）
+* 根拠: [処理] (抜粋: "latest = _latest_recording_time(os.path.join(config.NVR_RECORD_DIR, folder_name), now)")
+
+
+* **エラーハンドリング**: NAS未マウント時はチェック6が報告するため判定せず`None`を返す。`enabled`が偽のカメラは対象外。その他の例外は`run_checks`側で捕捉される。
+* 根拠: [条件分岐] (抜粋: "if not os.path.ismount(config.NAS_MOUNT_POINT):\n        return None", "if not cam.get(\"enabled\", True):\n            continue")
 
 
 
@@ -398,11 +444,11 @@
 ### `_format_quest_ids` (**Issue #700で追加**)
 
 * **役割**: `quest_id`の一覧を通知用の文字列に整形する。先頭`QUEST_ID_LIST_LIMIT`(8)件までをカンマ区切りで並べ、それを超える分は`" ほかN件"`に畳む。
-* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 373〜378)
+* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 432〜437)
 
 
 * **引数/リクエスト**: `quest_ids: list[int]`
-* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 373)
+* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 432)
 
 
 * **戻り値/レスポンス**: `str`
@@ -421,11 +467,11 @@
 ### `check_quest_master_drift` (**チェック8: マスタデータのドリフト検知、Issue #700で追加**)
 
 * **役割**: `quest_data.QUESTS`の`id`集合と、DBの`quest_master.quest_id`集合を比較し、(1)DBにだけある＝退役済みなのに残っているクエスト、(2)コードにだけある＝DBに未登録のクエスト、の双方を異常メッセージとして返す。どちらも無ければ`None`。メッセージ末尾には`sync_strict.py --dry-run`で影響を確認してから同期する旨の指針を付ける。`quest_data.QUESTS`が空の場合は「全件が退役済み」という誤報を避け、マスタ定義の読み込み失敗の可能性として別メッセージを返す。docstringには、**検知のみで自動修正はしない**（同期は`sync_strict.py --if-stale`の責務であり、毎時cronのヘルスチェックから破壊的操作を走らせない）こと、および比較対象を`quest_master`の`quest_id`集合に絞る理由（`reward_master`は`user_inventory`から参照が残る報酬を削除しない正しい挙動があり恒久的な誤検知になる、`routine_data.py`は対応するマスタテーブルを持たない）が明記されている。
-* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 381〜439)
+* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 440〜498)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 381)
+* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 440)
 
 
 * **戻り値/レスポンス**: `str | None`(異常メッセージ、正常なら`None`)
@@ -467,7 +513,7 @@
 ### `_fire_investigate_hook` (**Issue #339で追加**)
 
 * **役割**: 層2(自動調査)フックの発火。`config.HEALTH_WATCH_INVESTIGATE_HOOK`が未設定なら即return(既定・完全no-op)。設定済みならパスの存在と実行権限を確認し、異常サマリ(検知時刻+各異常の箇条書き)を標準入力で渡してフックスクリプトをfire-and-forgetのサブプロセスとして起動する(完了を待たない。毎時cronの層1を長時間ブロックしないため)。`run_checks`内の`_should_notify`通過後にのみ呼ばれるため、同一異常セット継続中の再発火は通知と同じ6時間間隔に収まる。
-* 根拠: [関数定義] (行番号: 467〜506 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
+* 根拠: [関数定義] (行番号: 526〜565 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `anomalies: List[str]`（各チェックの異常メッセージ）、`now: datetime.datetime`（検知時刻）
@@ -490,7 +536,7 @@
 ### `run_checks`
 
 * **役割**: 8つのチェック関数(`service`/`journal`/`app_logs`/`disk`/`memory`/`nas`/`deploy_config`/`quest_master`)を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知し、通知抑制を通過した場合は層2フック(`_fire_investigate_hook`)も発火し、マーカーを更新してプロセスの終了コードを返すエントリーポイント。
-* 根拠: [関数定義] (行番号: 509〜566 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 465〜474 / 抜粋: '("deploy_config", check_deploy_config_drift),', '("quest_master", check_quest_master_drift),')、[フック発火] (行番号: 275〜276 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
+* 根拠: [関数定義] (行番号: 568〜626 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 465〜474 / 抜粋: '("deploy_config", check_deploy_config_drift),', '("quest_master", check_quest_master_drift),', '("recording", check_recording_stalled),')、[フック発火] (行番号: 275〜276 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
 
 
 * **引数/リクエスト**: なし
@@ -538,7 +584,7 @@
 ```mermaid
 flowchart TD
     Start([Start: run_checks]) --> ReadMarker["_read_marker で前回時刻を取得<br/>(無ければ1時間前)"]
-    ReadMarker --> Loop["8チェックを順に実行<br/>service / journal / app_logs / disk / memory / nas / deploy_config / quest_master"]
+    ReadMarker --> Loop["9チェックを順に実行<br/>service / journal / app_logs / disk / memory / nas / recording / deploy_config / quest_master"]
     Loop --> CheckErr{"チェックが例外?"}
     CheckErr -- Yes --> LogInternal["logger.error + internal_errorsに追加<br/>残りのチェックは続行"]
     CheckErr -- No --> HasResult{"異常メッセージあり?"}
@@ -577,6 +623,8 @@ graph TD
         check_disk_usage
         check_memory_usage
         check_nas_mount
+        check_recording_stalled
+        _latest_recording_time
         check_deploy_config_drift
         check_quest_master_drift
         _format_quest_ids
@@ -611,6 +659,9 @@ graph TD
     run_checks --> check_disk_usage
     run_checks --> check_memory_usage
     run_checks --> check_nas_mount
+    run_checks --> check_recording_stalled
+    check_recording_stalled --> _latest_recording_time
+    check_recording_stalled --> config
     run_checks --> check_deploy_config_drift
     run_checks --> check_quest_master_drift
     check_quest_master_drift --> quest_data
@@ -663,6 +714,8 @@ graph TD
 * **（Issue #700 で追加）チェック8は検知専用**。乖離を見つけても`sync_master_data()`は呼ばない（毎時cronから`DELETE ... NOT IN`を含む破壊的操作を走らせないため）。同期はデプロイ経路(`deploy/git-hooks/post-merge`・`start_all.sh` Phase 2.5)から`sync_strict.py --if-stale`が行う。**この検知が鳴り続ける場合は、同期側が動いていない（マーカーが進んでいるのにDBが古い等）ことを疑うこと。**
 * **（Issue #700 で追加）チェック8の比較対象は`quest_master`だけ**。`reward_master`は`user_inventory`から参照が残る報酬の削除を意図的にスキップするため、マスタから消えた報酬行が正常に残りうる（差分として報告すると恒久的な誤検知になる）。`routine_data.py`は対応するマスタテーブルを持たないため比較できない。
 * **（Issue #700 で追加）** チェック8はDBファイル・テーブルが無い環境や一時的なロックでは`sqlite3.OperationalError`を警告ログにとどめてスキップする（異常として毎時通知しない）。回帰テストは`tests/test_health_watch.py::TestQuestMasterDrift`。
+
+* **（チェック9で追加）チェック9は録画を止めた原因までは特定しない**。カメラ側の停止・ネットワーク断・`nvr-*.service`のffmpegの固まり・NASの書き込み失敗のいずれでも「新しいセグメントが作られていない」として同じ形で報告される。録画ユニット(`/etc/systemd/system/nvr-*.service`)はリポジトリ管理外で、`segment_time`(600秒)を変えた場合は`RECORDING_STALE_SEC`も見直すこと。短時間だけ接続できては切れる再起動ループ(細切れファイルが量産される状態)は最新ファイルが新しいため検知しない。回帰テストは`tests/test_health_watch.py::TestCheckRecordingStalled`。
 
 ## 9. 不明事項一覧
 
