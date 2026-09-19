@@ -131,11 +131,27 @@ def check_service_active() -> Optional[str]:
 
 
 def check_journal_errors(since: datetime.datetime) -> Optional[str]:
-    """journalctlで前回マーカー以降の err..emerg ログを確認する。"""
+    """journalctlで前回マーカー以降のエラーを確認する。
+
+    次の2種類を見る:
+
+    1. systemd 自身が err..emerg で記録したもの(ユニットの異常終了等)。
+    2. サービスの標準出力・標準エラー経由の行。journald はこれらを priority info で
+       記録するため 1. の `-p err..emerg` では一切拾えない。2026-09-19 に
+       home_system.service を Type=simple(Issue #646)へ移行した後、未捕捉例外の
+       トレースバックや basicConfig のままのライブラリログ(`ERROR:zeep...` 等)は
+       journal にしか残らなくなった(以前は start_all.sh が logs/server_boot.log へ
+       リダイレクトしており、check_app_logs のキーワード判定で拾えていた)。
+       ここで内容を見て判定しないと、子プロセス(camera_monitor/scheduler_boot)の
+       クラッシュ直前のトレースバック等を層1が検知できない。
+       core.logger の書式の行は logs/*.log にも出ていて check_app_logs が判定するので
+       二重計上しないよう除外し、それ以外を LogAnalyzer と同じ基準で判定する。
+    """
+    since_str = since.strftime("%Y-%m-%d %H:%M:%S")
     res = subprocess.run(
         [
             "journalctl", "-u", WATCH_SERVICE_NAME, "--no-pager",
-            "--since", since.strftime("%Y-%m-%d %H:%M:%S"),
+            "--since", since_str,
             "-p", "err..emerg", "-n", "100",
         ],
         capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC,
@@ -144,10 +160,44 @@ def check_journal_errors(since: datetime.datetime) -> Optional[str]:
         ln for ln in res.stdout.strip().splitlines()
         if ln and not ln.startswith("--")  # "-- No entries --" 等の区切り行を除外
     ]
+
+    stdio_errors = _journal_stdio_errors(since_str)
+
+    parts = []
     if lines:
         snippet = "\n".join(lines[-3:])[:SNIPPET_LIMIT]
-        return f"journalctl に err 以上のログが {len(lines)} 行あります:\n{snippet}"
-    return None
+        parts.append(f"journalctl に err 以上のログが {len(lines)} 行あります:\n{snippet}")
+    if stdio_errors:
+        snippet = "\n".join(stdio_errors[-3:])[:SNIPPET_LIMIT]
+        parts.append(
+            f"サービスの標準出力/標準エラー(journal)にエラー行が {len(stdio_errors)} 行あります:\n{snippet}"
+        )
+    return "\n".join(parts) if parts else None
+
+
+def _journal_stdio_errors(since_str: str) -> list[str]:
+    """journal に残ったサービスの標準出力/標準エラーのうち、エラーと判定される行を返す。"""
+    res = subprocess.run(
+        [
+            "journalctl", "-u", WATCH_SERVICE_NAME, "--no-pager",
+            "--since", since_str, "-o", "cat", "-n", "2000",
+        ],
+        capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC,
+    )
+    analyzer = LogAnalyzer(days_back=0)
+    core_logger_line = LogAnalyzer.LEVEL_PATTERNS[0]
+    errors = []
+    for ln in res.stdout.splitlines():
+        if not ln.strip() or ln.startswith("--"):
+            continue
+        # core.logger の書式の行は logs/*.log 側で check_app_logs が見る(二重計上しない)
+        if core_logger_line.match(ln):
+            continue
+        if any(ignore in ln for ignore in analyzer.IGNORE_PATTERNS):
+            continue
+        if analyzer._classify_line(ln) == "error":
+            errors.append(ln.strip())
+    return errors
 
 
 def check_app_logs(since: datetime.datetime) -> Optional[str]:
