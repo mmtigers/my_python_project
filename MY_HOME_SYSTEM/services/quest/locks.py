@@ -12,6 +12,7 @@ from typing import Optional, Tuple
 import config
 from core.logger import setup_logging
 from core.utils import RefCountedLockRegistry
+from fastapi import HTTPException
 
 # ロガー設定。分割後もログの出所が分かるよう、旧ファイルと同じロガー名を維持する
 # (services/quest/ 配下の各モジュールはこのloggerをimportして使い回し、
@@ -32,6 +33,26 @@ JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 # quest_users.role の値 (親権限判定はこの2値のみを唯一の判定基準とする)
 ROLE_ADULT = 'role_adult'
 ROLE_CHILD = 'role_child'
+
+
+def _require_adult(cur, admin_id: str, detail: str = "権限がありません") -> None:
+    """admin_id が親(ROLE_ADULT)であることを検証し、そうでなければ403を送出する。
+
+    Issue #739 (AUDIT-009): 同じ「破壊的な管理操作」でありながら
+    `POST /api/quest/admin/reset_user` だけが role チェックを持ち、
+    `POST /api/quest/sync_master` と `POST /api/quest/seed`
+    (いずれも quest_master/reward_master の DELETE を伴う)は
+    認可チェックを一切持たないという非対称があった。判定は
+    UserService._reset_user_data_locked にインラインで書かれていて
+    共有できなかったため、ここへ切り出して両経路から呼ぶ。
+
+    LAN内を信頼境界とする方針(#321/#614)は変えない。ここで担保するのは
+    「親(role_adult)/子(role_child)」というアプリ固有の権限モデルの一貫性であり、
+    リクエストボディの user_id を信頼している点は従来どおりである。
+    """
+    row = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (admin_id,)).fetchone()
+    if not row or row['role'] != ROLE_ADULT:
+        raise HTTPException(status_code=403, detail=detail)
 
 # _process_complete_quest_locked のスパムチェック間隔(秒)。infiniteクエストのみ
 # フロントエンド(family-quest QuestList.tsx)のクールダウン表示(60秒)と揃える(B2)。

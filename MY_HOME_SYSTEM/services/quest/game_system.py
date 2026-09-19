@@ -10,7 +10,7 @@ from core.utils import get_now_iso
 from core.database import get_db_cursor
 import game_logic
 from models.quest import MasterQuest, MasterReward, MasterUser
-from services.quest.locks import JST, ROLE_CHILD, logger
+from services.quest.locks import JST, ROLE_CHILD, _require_adult, logger
 from services.quest.master_sync_sql import (
     QUEST_UPSERT_SQL,
     REWARD_UPSERT_SQL,
@@ -99,6 +99,23 @@ class GameSystem:
         self.approval_service = ApprovalService()
         self.user_service = UserService()
         self.shop_service = ShopService()
+
+    def sync_master_data_as_admin(self, admin_id: str) -> dict:
+        """HTTP経由のマスタ同期(`POST /api/quest/sync_master` / `POST /api/quest/seed`)の入口。
+
+        Issue #739 (AUDIT-009): この2エンドポイントは `DELETE FROM quest_master
+        WHERE quest_id NOT IN (...)` を含む破壊的な管理操作でありながら認可チェックを
+        持たず、`POST /api/quest/admin/reset_user`(role_adult を要求。#547)との間で
+        認可モデルが不整合だった。`reset_user` と同じ `admin_id` + role_adult の
+        判定(`locks._require_adult`)をここで行う。
+
+        手動CLI(`sync_strict.py`)はサーバーとは別プロセスのローカル実行であり、
+        HTTPを経由せず `sync_master_data(strict=True)` を直接呼ぶため、この認可の
+        対象外のまま従来どおり動作する(起動時・post-merge の `--if-stale` を含む)。
+        """
+        with get_db_cursor() as cur:
+            _require_adult(cur, admin_id, "マスタ同期の権限がありません")
+        return self.sync_master_data()
 
     def sync_master_data(self, strict: bool = False, dry_run: bool = False) -> Dict[str, str]:
         """quest_data.py の内容で quest_users/quest_master/reward_master を同期する。

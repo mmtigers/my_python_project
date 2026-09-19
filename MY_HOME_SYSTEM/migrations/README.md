@@ -15,6 +15,37 @@ CREATE TABLE群は0000へ移設済みで、`init_db()` は本ディレクトリ�
 (旧init_dbスキーマのスナップショット `tests/fixtures/legacy_init_db_schema.json`
 との突き合わせ込みで)検証しています。
 
+## 退役済みテーブル・重複列 (Issue #746 / AUDIT-017)
+
+ベースライン(`0000_baseline_schema.sql`)には、**2026年8月のリファクタリング
+(ボス戦・装備・ギルド・マイレージ・週間ランキングの削除)で使われなくなったテーブルが
+そのまま残っている**。以下はいずれも**実行コードから一切参照されていない死蔵テーブルであり、
+新しいコードから読み書きしてはならない**。DROP していないのは、不可逆な操作であり
+実機での行数確認・バックアップ確認(および `users`/`quests` については
+`quest_users`/`quest_master` への移行完了確認)が前提になるためで、**意図的に残している**。
+
+| 退役済みテーブル | 備考 |
+| --- | --- |
+| `users` | **`quest_users` の旧版。現行は `quest_users`** |
+| `quests` | **`quest_master` の旧版。現行は `quest_master`** |
+| `party_state` | ボス戦 |
+| `equipment_master` / `user_equipments` | 装備 |
+| `family_mileage` / `family_mileage_history` | マイレージ |
+| `bounties` | 賞金クエスト |
+| `suumo_records` | 物件情報収集 |
+
+同じく使われていない重複列が2組ある。
+
+| 列 | 実際に使う列 |
+| --- | --- |
+| `quest_master.days` | `quest_master.day_of_week` (`services/quest/quest_service.py` のコメント参照) |
+| `reward_master.desc` | `reward_master.description` (`services/quest/game_system.py` が `desc` を落として返す) |
+
+**`users`/`quests` と `days`/`desc` は現行のものと名前が紛らわしく、誤って書き込んでも
+SQLite はエラーにしない**(データがサイレントに行方不明になる)。この一覧と
+「コードから参照されていないこと」は `tests/test_retired_tables_unused.py` が固定しており、
+DROP する際はそのテストとこの節も同時に更新すること。
+
 ## 新しいマイグレーションの追加方法
 
 1. `NNNN_short_description.sql` の形式でファイルを追加する（`NNNN` は既存の最大値+1のゼロ埋め4桁連番。`0000` はベースライン専用の予約番号で、以後使わない）。

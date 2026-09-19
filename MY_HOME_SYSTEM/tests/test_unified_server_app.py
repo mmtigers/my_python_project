@@ -233,12 +233,16 @@ class TestGlobalExceptionHandler:
         def _boom():
             raise RuntimeError(secret_detail)
 
+        # #739 で sync_master は admin_id + role_adult の認可を通すようになったため、
+        # 差し替え先も認可込みの入口(sync_master_data_as_admin)にする。
         monkeypatch.setattr(
-            unified_server.quest_router.game_system, "sync_master_data", lambda: _boom()
+            unified_server.quest_router.game_system,
+            "sync_master_data_as_admin",
+            lambda admin_id: _boom(),
         )
 
         client = TestClient(unified_server.app, raise_server_exceptions=False)
-        res = client.post("/api/quest/sync_master")
+        res = client.post("/api/quest/sync_master", json={"admin_id": "dad"})
 
         assert res.status_code == 500
         assert res.json() == {"detail": "Internal Server Error"}

@@ -97,6 +97,13 @@ class ResetUserAction(BaseModel):
     admin_id: str = Field(min_length=1, max_length=64)
     target_user_id: str = Field(min_length=1, max_length=64)
 
+# Issue #739 (AUDIT-009): POST /api/quest/sync_master と POST /api/quest/seed は
+# quest_master/reward_master の DELETE を伴う破壊的な管理操作でありながら、
+# ResetUserAction と違って認可チェックを持っていなかった。同じ admin_id +
+# role_adult の判定(GameSystem.sync_master_data_as_admin)を通すための入力モデル。
+class SyncMasterAction(BaseModel):
+    admin_id: str = Field(min_length=1, max_length=64)
+
 # #372: アップロード経由のアバターURLは routers/quest_router.py の upload_image が生成する
 # 「/uploads/<uuid4>.<拡張子>」の形のみを受け付ける。任意の /uploads/ パスを許すと、
 # 他ユーザーのアップロード画像を自分のアバターに指定 → 絵文字に戻す、という操作で

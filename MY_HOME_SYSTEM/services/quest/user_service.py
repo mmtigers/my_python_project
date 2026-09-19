@@ -9,7 +9,7 @@ from fastapi import HTTPException, UploadFile
 from core.utils import get_now_iso
 from core.database import get_db_cursor
 import config
-from services.quest.locks import ROLE_ADULT, _get_user_balance_lock, logger
+from services.quest.locks import _get_user_balance_lock, _require_adult, logger
 
 # Issue #551: routers/quest_router.py の upload_image に直書きされていた
 # 画像保存ロジック(拡張子/マジックバイト検証・サイズ上限付き保存)をこちらへ移した。
@@ -125,9 +125,8 @@ class UserService:
 
     def _reset_user_data_locked(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:
         with get_db_cursor(commit=True) as cur:
-            admin = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (admin_id,)).fetchone()
-            if not admin or admin['role'] != ROLE_ADULT:
-                raise HTTPException(status_code=403, detail="リセット権限がありません")
+            # Issue #739: 同じ判定を sync_master/seed 側でも使うため locks.py へ切り出した。
+            _require_adult(cur, admin_id, "リセット権限がありません")
 
             target = cur.execute("SELECT user_id FROM quest_users WHERE user_id = ?", (target_user_id,)).fetchone()
             if not target:

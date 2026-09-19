@@ -12,7 +12,8 @@ from core.logger import setup_logging
 from models.quest import (
     SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse,
     QuestAction, ApproveAction, HistoryAction, RewardAction,
-    UpdateUserAction, SoundTestRequest, UseItemAction, ResetUserAction, ResetUserResponse
+    UpdateUserAction, SoundTestRequest, UseItemAction, ResetUserAction, ResetUserResponse,
+    SyncMasterAction
 )
 from services.quest_service import (
     game_system, quest_service, approval_service, shop_service, user_service, inventory_service,
@@ -29,9 +30,12 @@ logger = setup_logging("quest_router")
 # API Endpoints (Controller)
 # ==========================================
 
+# Issue #739 (AUDIT-009): sync_master / seed はどちらもマスタの DELETE を伴う
+# 破壊的な管理操作なので、admin/reset_user と同じ admin_id + role_adult の
+# 認可を要求する(判定はサービス層の GameSystem.sync_master_data_as_admin)。
 @router.post("/sync_master", response_model=SyncResponse)
-def sync_master_data():
-    return game_system.sync_master_data()
+def sync_master_data(action: SyncMasterAction):
+    return game_system.sync_master_data_as_admin(action.admin_id)
 
 @router.get("/data")
 def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:
@@ -69,9 +73,10 @@ def purchase_reward(action: RewardAction):
 def get_family_chronicle():
     return user_service.get_family_chronicle()
 
+# /sync_master と実装は同一(どちらも GameSystem.sync_master_data)。#739 の認可も揃える。
 @router.post("/seed", response_model=SyncResponse)
-def seed_data_endpoint():
-    return game_system.sync_master_data()
+def seed_data_endpoint(action: SyncMasterAction):
+    return game_system.sync_master_data_as_admin(action.admin_id)
 
 @router.post("/user/update")
 def update_user_avatar(action: UpdateUserAction):

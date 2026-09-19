@@ -40,8 +40,10 @@ def seeded_client(isolated_db, api_client):
 
 
 class TestSyncMasterAndSeed:
+    # Issue #739 (AUDIT-009): sync_master / seed は quest_master の DELETE を伴う
+    # 破壊的な管理操作のため、admin/reset_user と同じ admin_id + role_adult を要求する。
     def test_sync_master_populates_real_quest_data(self, seeded_client):
-        res = seeded_client.post("/api/quest/sync_master")
+        res = seeded_client.post("/api/quest/sync_master", json={"admin_id": "dad"})
         assert res.status_code == 200
         assert res.json()["status"] == "synced"
 
@@ -53,9 +55,20 @@ class TestSyncMasterAndSeed:
         assert quest_count > 0
 
     def test_seed_endpoint_is_an_alias_for_sync_master(self, seeded_client):
-        res = seeded_client.post("/api/quest/seed")
+        res = seeded_client.post("/api/quest/seed", json={"admin_id": "dad"})
         assert res.status_code == 200
         assert res.json()["status"] == "synced"
+
+    @pytest.mark.parametrize("path", ["/api/quest/sync_master", "/api/quest/seed"])
+    def test_rejects_child_with_403(self, seeded_client, path):
+        res = seeded_client.post(path, json={"admin_id": "daughter"})
+        assert res.status_code == 403
+
+    @pytest.mark.parametrize("path", ["/api/quest/sync_master", "/api/quest/seed"])
+    def test_rejects_missing_admin_id_with_422(self, seeded_client, path):
+        """admin_id 無しの素の POST(古いブックマーク・curl)は Pydantic の検証で弾かれる。"""
+        res = seeded_client.post(path, json={})
+        assert res.status_code == 422
 
 
 class TestGetAllData:
