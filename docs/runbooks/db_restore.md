@@ -28,6 +28,34 @@
 オフサイトへ上書き複製される(`services/backup_service.py` の `_copy_latest_offsite`)。
 NAS が故障して `db_backups/` ごと失われた場合は、ここから取得して下記4の「復元」に進む。
 
+### 前提: rclone の `gdrive` に自分用の OAuth クライアント ID を設定しておくこと
+
+**2026-09-19 時点で実機のオフサイト複製は一時無効**(`.env` の `DB_BACKUP_OFFSITE_REMOTE` を
+コメントアウト済み)。実機の rclone(v1.60.1)の `gdrive` リモートは `client_id` を持たず、
+rclone に組み込みの**全ユーザー共用の OAuth クライアント**(`project_number:202264815644`)で
+Google Drive API を呼んでいる。この共用枠の毎分上限に当たり
+(`403: Quota exceeded for quota metric 'Queries' ... rateLimitExceeded`)、155MB の DB は
+データ本体を送り終えても最後の確定処理が完了しなかった(既定の 8MB 分割でも 64MB 分割でも
+同じ。20MB 程度の小さなファイルは通る)。毎晩 03:00 の `docs/` の rclone 同期も同じ共用枠を使う。
+
+次の手順で自分用のクライアント ID を作り、rclone を再認証してから `.env` の
+`DB_BACKUP_OFFSITE_REMOTE` のコメントを外す(参考: rclone 公式ドキュメント
+"Making your own client_id")。
+
+1. Google Cloud Console でプロジェクトを作成し、「Google Drive API」を有効化する
+2. 「OAuth 同意画面」を外部(External)で作成し、自分のアカウントをテストユーザーに追加する。
+   テスト状態のままだと更新トークンが7日で失効するため、作成後に「アプリを公開」して
+   本番状態にする(個人利用なら審査は不要。認証時に「未確認のアプリ」の警告が出るが続行できる)
+3. 「認証情報」→「OAuth クライアント ID」を種類「デスクトップアプリ」で作成し、
+   クライアント ID とシークレットを控える(**リポジトリには書かない**)
+4. ブラウザのある PC で `rclone authorize "drive" "<クライアントID>" "<シークレット>"` を実行し、
+   表示されたトークン(JSON)を控える
+5. ラズパイで `rclone config` → `gdrive` を編集し、`client_id` / `client_secret` を設定したうえで、
+   手順4のトークンを貼り付けて再認証する
+6. 疎通確認: `rclone copyto <NAS上の最新バックアップ> gdrive:お家開発/db_backup_latest/home_system_latest.db -v`
+   が数分以内に `Copied` で終わること
+7. `.env` の `DB_BACKUP_OFFSITE_REMOTE` のコメントを外す(翌朝 04:00 のバックアップから有効)
+
 ```bash
 rclone copyto "gdrive:お家開発/db_backup_latest/home_system_latest.db" /tmp/home_system_latest.db
 sqlite3 /tmp/home_system_latest.db "PRAGMA integrity_check;"   # ok と出ること
