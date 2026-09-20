@@ -728,6 +728,12 @@ class TestSyncMasterData:
         monkeypatch.setattr(quest_service_module.importlib, "reload", lambda module: None)
 
         with get_db_cursor(commit=True) as cur:
+            # Issue #747 ステップ3: user_inventory.user_id に quest_users への
+            # 外部キーが付いたため、所有者を先に作る(本番では必ず存在する)。
+            cur.execute(
+                "INSERT OR IGNORE INTO quest_users (user_id, name, level, exp, gold) "
+                "VALUES ('dad', 'Dad', 1, 0, 0)"
+            )
             cur.execute(
                 "INSERT INTO reward_master (reward_id, title, cost_gold) VALUES (999, 'Owned Reward', 100)"
             )

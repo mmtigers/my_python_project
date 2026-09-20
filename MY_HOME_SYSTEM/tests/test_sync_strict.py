@@ -64,6 +64,12 @@ def _seed_reward_master_row(reward_id: int = 8888, title: str = "Stale Reward"):
 
 def _seed_user_inventory_row(reward_id: int, user_id: str = "dad", status: str = "owned"):
     with get_db_cursor(commit=True) as cur:
+        # Issue #747 ステップ3: user_inventory.user_id に quest_users への外部キーが
+        # 付いたため、所有者を先に作る(本番では必ず存在するユーザー)。
+        cur.execute(
+            "INSERT OR IGNORE INTO quest_users (user_id, name, level, exp, gold) VALUES (?, ?, 1, 0, 0)",
+            (user_id, user_id),
+        )
         cur.execute(
             "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) VALUES (?, ?, ?, ?)",
             (user_id, reward_id, status, get_now_iso()),

@@ -53,6 +53,30 @@ DROP は不可逆でデータの破棄になるため、**意図的に残して�
 > 状態だった。同種の「定義から外す」変更を行う際は、既存DBへの DROP マイグレーションも
 > セットで用意すること。
 
+> DROP したテーブルは `init_unified_db.validate_schema_integrity` の `expected_schemas`
+> からも外すこと。残したままだと起動のたびに「Missing Table」の警告が出る。
+
+## 外部キーの方針 (Issue #747 / AUDIT-018)
+
+`core/database.py` は常に `PRAGMA foreign_keys=ON` を設定している。`0018_add_user_foreign_keys.sql`
+で「子テーブル → `quest_users`」の6関係に外部キーを張った（`ON DELETE` は既定の NO ACTION）。
+
+| 張っている | 備考 |
+| --- | --- |
+| `quest_history.user_id` / `reward_history.user_id` / `user_inventory.user_id` / `routine_progress.user_id` / `routine_step_events.user_id` / `quest_cancellation_audit.user_id` → `quest_users.user_id` | ユーザー行が通常運用で消えることはない（`admin/reset_user` も残高をゼロ化するだけで行は消さない）。消えたとすれば異常なので、静かに孤児を作らずその場で失敗させる |
+| `user_inventory.reward_id` → `reward_master.reward_id` | 従来からある唯一のFK。`sync_master_data` は所持者がいる報酬の削除を `IntegrityError` で検知してスキップする |
+
+**意図的に張っていない関係**（いずれも「参照先が消えても子を残す」ことが設計意図であり、FK と矛盾する）:
+
+| 関係 | 理由 |
+| --- | --- |
+| `quest_history.quest_id` → `quest_master` | `sync_master_data` が退役クエストをマスタから消しても、`quest_title` を非正規化保持して履歴を残す設計。RESTRICT では退役が永久にできなくなり、CASCADE では家族の記録が消える |
+| `reward_history.reward_id` → `reward_master` | 同上 |
+| `quest_cancellation_audit.history_id` → `quest_history` | 監査行は**削除された履歴の控えそのもの**。`approval_service` は監査行を書いてから履歴を DELETE するため、FK を張ると取消フローがその場で壊れる |
+| `quest_history.linked_history_id` → `quest_history`（自己参照） | 兄妹連携の履歴は**相互に**指し合う。取消は主履歴 → 相方の順に削除するため、RESTRICT では最初の DELETE が相方からの参照で失敗する |
+
+この「張らない」判断は `monitors/health_watch.py` のチェック11 の2層構成（`_ORPHAN_CHECKS_STRICT` は通知、`_ORPHAN_CHECKS_EXPECTED` は記録のみ）と対応している。
+
 同じく使われていない重複列が2組ある。
 
 | 列 | 実際に使う列 |
