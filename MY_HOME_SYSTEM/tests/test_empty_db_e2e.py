@@ -31,6 +31,15 @@ FIXTURE_PATH = os.path.join(
     os.path.dirname(__file__), "fixtures", "legacy_init_db_schema.json"
 )
 
+# 旧init_db()のスナップショットには含まれるが、**意図的に**退役させたテーブル。
+# このテストが守りたいのは「ベースライン移設時の写経ミス・取りこぼし」の検知であり、
+# 意図した削除まで落とさないよう、ここに列挙して包含チェックから除外する。
+# 削除の経緯は migrations/README.md の「退役済みテーブル・重複列」節を正とする。
+INTENTIONALLY_DROPPED_TABLES = {
+    "users",    # quest_users の旧版。実機 0 行を確認し #746 / 0016 で削除
+    "quests",   # quest_master の旧版。同上
+}
+
 
 class TestMigrationsOnlySchemaEquivalence:
     """migrations/ のみで構築したスキーマが、旧init_db()構築スキーマを包含すること。"""
@@ -53,6 +62,8 @@ class TestMigrationsOnlySchemaEquivalence:
         try:
             missing = []
             for table, columns in expected["tables"].items():
+                if table in INTENTIONALLY_DROPPED_TABLES:
+                    continue
                 actual_cols = {
                     row[1] for row in conn.execute(f"PRAGMA table_info({table})")
                 }

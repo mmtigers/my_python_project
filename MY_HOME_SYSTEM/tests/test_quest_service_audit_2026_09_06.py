@@ -6,12 +6,15 @@
   多重報酬が可能だった
 - pre_requisite_quest_id がフロントエンドのロック表示のみで、API直叩きで素通りできた
 - quest_history.gold_earned/exp_earned が NULL の行を承認/取消すると TypeError → 500
+  （Issue #747 ステップ2 / migrations 0017 で列を `NOT NULL DEFAULT 0` にしたため、
+  現在は「NULL の行をそもそも作れない」ことを固定するテストに置き換えている）
 - UseItemAction だけ Q-L4 の整数上限が漏れていて inventory_id=2**64 で 500
 - 「アイテム使用」行(quest_id=0)が年代記/最近のログにクエスト達成として混入していた
 - TV解錠の副作用がトランザクションのコミット前に起動されていた
 """
 import datetime
 import os
+import sqlite3
 import sys
 
 import pytest
@@ -134,27 +137,59 @@ class TestNullRewardColumnsDoNotCrash:
             )
             cur.execute("INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES (1, 'Q', 'daily', 10, 5)")
 
-    def test_approve_history_with_null_rewards(self, isolated_db):
+    def test_null_rewards_are_rejected_by_the_schema(self, isolated_db):
+        """**（Issue #747 ステップ2 / migrations 0017 で変化）** NULL 報酬はDBが弾く。
+
+        以前は `exp_earned`/`gold_earned` が NULL 許容で、サービス外から挿入された
+        NULL の行を承認すると `user['gold'] + None` の TypeError → 500 になっていた。
+        アプリ側の `or 0` 防御に頼る代わりに列を `NOT NULL DEFAULT 0` にしたため、
+        **そもそも NULL の行を作れない**のが現在の仕様である。
+        """
+        self._seed_child_and_adult()
+        with pytest.raises(sqlite3.IntegrityError, match="NOT NULL"), get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
+                "VALUES ('son', 1, 'Q', NULL, NULL, ?, 'pending')", (datetime.datetime.now(JST).isoformat(),)
+            )
+
+    def test_approve_history_with_zero_rewards(self, isolated_db):
+        """報酬0の行(NULL 列の移行先)を承認しても落ちないこと。"""
         self._seed_child_and_adult()
         with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
-                "VALUES ('son', 1, 'Q', NULL, NULL, ?, 'pending')", (datetime.datetime.now(JST).isoformat(),)
+                "VALUES ('son', 1, 'Q', 0, 0, ?, 'pending')", (datetime.datetime.now(JST).isoformat(),)
             )
             history_id = cur.lastrowid
         result = ApprovalService().process_approve_quest("dad", history_id)
         assert result["status"] == "success"
         assert result["earnedGold"] >= 0
 
-    def test_cancel_approved_history_with_null_exp(self, isolated_db):
+    def test_cancel_approved_history_with_zero_exp(self, isolated_db):
         self._seed_child_and_adult()
         with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
-                "VALUES ('son', 1, 'Q', NULL, 0, ?, 'approved')", (datetime.datetime.now(JST).isoformat(),)
+                "VALUES ('son', 1, 'Q', 0, 0, ?, 'approved')", (datetime.datetime.now(JST).isoformat(),)
             )
             history_id = cur.lastrowid
         assert ApprovalService().process_cancel_quest("son", history_id)["status"] == "cancelled"
+
+    def test_omitted_reward_columns_default_to_zero(self, isolated_db):
+        """列を省略した INSERT は DEFAULT 0 で入る(NOT NULL 化で書けなくならないこと)。"""
+        self._seed_child_and_adult()
+        with get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_history (user_id, quest_id, quest_title, completed_at, status) "
+                "VALUES ('son', 1, 'Q', ?, 'pending')", (datetime.datetime.now(JST).isoformat(),)
+            )
+            history_id = cur.lastrowid
+        with get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT exp_earned, gold_earned, medals_earned FROM quest_history WHERE id = ?",
+                (history_id,),
+            ).fetchone()
+        assert (row["exp_earned"], row["gold_earned"], row["medals_earned"]) == (0, 0, 0)
 
 
 class TestUseItemActionBounds:

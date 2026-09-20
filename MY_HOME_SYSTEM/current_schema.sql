@@ -13,42 +13,7 @@ CREATE TABLE schema_migrations (
             version TEXT PRIMARY KEY,
             applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT UNIQUE, 
-    name TEXT,
-    level INTEGER DEFAULT 1,
-    xp INTEGER DEFAULT 0,
-    gold INTEGER DEFAULT 0,
-    status TEXT DEFAULT '在宅', 
-    job_class TEXT,
-    medal_count INTEGER DEFAULT 0,
-    avatar TEXT,
-    updated_at DATETIME
-);
 CREATE TABLE sqlite_sequence(name,seq);
-CREATE TABLE quests (
-    quest_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    description TEXT,
-    xp_reward INTEGER DEFAULT 10,
-    gold_reward INTEGER DEFAULT 5,
-    difficulty INTEGER DEFAULT 1,
-    quest_type TEXT DEFAULT 'daily',
-    icon_key TEXT,
-    start_date TEXT,
-    end_date TEXT
-);
-CREATE TABLE quest_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT,
-    quest_id INTEGER,
-    quest_title TEXT,
-    status TEXT DEFAULT 'approved', 
-    completed_at DATETIME NOT NULL,
-    exp_earned INTEGER,
-    gold_earned INTEGER
-, linked_history_id INTEGER DEFAULT NULL, medals_earned INTEGER DEFAULT 0);
 CREATE TABLE daily_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT,
@@ -386,10 +351,6 @@ CREATE TABLE routine_step_events (
 );
 CREATE INDEX idx_routine_step_events_user_date
     ON routine_step_events(user_id, progress_date);
-CREATE INDEX idx_quest_history_user_quest_completed
-    ON quest_history (user_id, quest_id, completed_at DESC, status);
-CREATE INDEX idx_quest_history_status_completed
-    ON quest_history (status, completed_at DESC);
 CREATE INDEX idx_user_inventory_user_status
     ON user_inventory (user_id, status);
 CREATE INDEX idx_user_inventory_user_reward_used
@@ -438,3 +399,19 @@ CREATE INDEX idx_quest_cancellation_audit_history
     ON quest_cancellation_audit (history_id);
 CREATE INDEX idx_quest_cancellation_audit_user_time
     ON quest_cancellation_audit (user_id, cancelled_at DESC);
+CREATE TABLE "quest_history" (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT,
+    quest_id INTEGER,
+    quest_title TEXT,
+    status TEXT DEFAULT 'approved',
+    completed_at DATETIME NOT NULL,
+    exp_earned INTEGER NOT NULL DEFAULT 0,
+    gold_earned INTEGER NOT NULL DEFAULT 0,
+    medals_earned INTEGER NOT NULL DEFAULT 0,
+    linked_history_id INTEGER DEFAULT NULL
+);
+CREATE INDEX idx_quest_history_user_quest_completed
+    ON quest_history (user_id, quest_id, completed_at DESC, status);
+CREATE INDEX idx_quest_history_status_completed
+    ON quest_history (status, completed_at DESC);

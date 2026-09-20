@@ -17,32 +17,13 @@
 -- ==========================================
 -- 1. New Core Tables (Design Doc v1.0.0)
 -- ==========================================
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT UNIQUE, -- LINE ID等
-    name TEXT,
-    level INTEGER DEFAULT 1,
-    xp INTEGER DEFAULT 0,
-    gold INTEGER DEFAULT 0,
-    status TEXT DEFAULT '在宅', -- 在宅 or 外出
-    job_class TEXT,
-    medal_count INTEGER DEFAULT 0,
-    avatar TEXT,
-    updated_at DATETIME
-);
-
-CREATE TABLE IF NOT EXISTS quests (
-    quest_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    description TEXT,
-    xp_reward INTEGER DEFAULT 10,
-    gold_reward INTEGER DEFAULT 5,
-    difficulty INTEGER DEFAULT 1,
-    quest_type TEXT DEFAULT 'daily',
-    icon_key TEXT,
-    start_date TEXT,
-    end_date TEXT
-);
+-- Issue #746: ここにあった `users` / `quests` は、現行の `quest_users` / `quest_master`
+-- の旧版(2026年8月のリファクタリング以前の残骸)で、実行コードから一切参照されていない
+-- 死蔵テーブルだった。名前が紛らわしく、`INSERT INTO users (...)` と書いても SQLite は
+-- エラーにしないため、データがサイレントに行方不明になるリスクがあった。
+-- 実機で 0 行であることを確認のうえ、既存DB向けの DROP は
+-- `0016_drop_retired_users_and_quests_tables.sql` で行い、**新規DBでそもそも作らない**
+-- ようベースラインからも定義を外した(ベースラインを再適用しても復活しない)。
 
 CREATE TABLE IF NOT EXISTS quest_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

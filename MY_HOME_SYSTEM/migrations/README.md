@@ -20,19 +20,38 @@ CREATE TABLE群は0000へ移設済みで、`init_db()` は本ディレクトリ�
 ベースライン(`0000_baseline_schema.sql`)には、**2026年8月のリファクタリング
 (ボス戦・装備・ギルド・マイレージ・週間ランキングの削除)で使われなくなったテーブルが
 そのまま残っている**。以下はいずれも**実行コードから一切参照されていない死蔵テーブルであり、
-新しいコードから読み書きしてはならない**。DROP していないのは、不可逆な操作であり
-実機での行数確認・バックアップ確認(および `users`/`quests` については
-`quest_users`/`quest_master` への移行完了確認)が前提になるためで、**意図的に残している**。
+新しいコードから読み書きしてはならない**。
 
-| 退役済みテーブル | 備考 |
+### 残しているもの(実機で行を持つため)
+
+DROP は不可逆でデータの破棄になるため、**意図的に残している**。行数は 2026-09-20 の実機実測。
+
+| 退役済みテーブル | 行数 | 備考 |
+| --- | ---: | --- |
+| `party_state` | 1 | ボス戦 |
+| `equipment_master` / `user_equipments` | 16 / 12 | 装備 |
+| `family_mileage` / `family_mileage_history` | 1 / 5 | マイレージ |
+| `bounties` | 9 | 賞金クエスト |
+| `suumo_records` | 56 | 物件情報収集 |
+| `haircut_history` | 1 | Issue #507 でスキーマ定義から外したが実機に残存 |
+| `app_rankings` | 211 | 同上(ダッシュボードの「📊 トレンド」タブの書き込み側が退役済み) |
+
+### DROP 済み(`0016_drop_retired_users_and_quests_tables.sql`)
+
+実機で **0 行**であることを確認したうえで落とした。
+
+| テーブル | 経緯 |
 | --- | --- |
-| `users` | **`quest_users` の旧版。現行は `quest_users`** |
-| `quests` | **`quest_master` の旧版。現行は `quest_master`** |
-| `party_state` | ボス戦 |
-| `equipment_master` / `user_equipments` | 装備 |
-| `family_mileage` / `family_mileage_history` | マイレージ |
-| `bounties` | 賞金クエスト |
-| `suumo_records` | 物件情報収集 |
+| `users` | `quest_users` の旧版。名前が紛らわしく誤書き込みのリスクが最も高かった(#746) |
+| `quests` | `quest_master` の旧版。同上(#746) |
+| `quest_tasks` | #507 の死蔵テーブル。`REFERENCES quest_users(id)` と宣言されているが `quest_users` の主キーは `user_id TEXT` で **`id` 列は存在しない**。このため INSERT が必ず `foreign key mismatch` になるうえ、**`PRAGMA foreign_key_check` が DB 全体で実行不能**になっており、Issue #747(FK 追加)の前提を潰していた |
+| `quest_status` | #507 の死蔵テーブル |
+| `youtube_subscriptions` | #507 の死蔵テーブル |
+
+> Issue #507 はこれらをリポジトリのスキーマ定義から外したが、**既存DBから落とす経路が
+> 無かった**ため実機には残り続けていた。リポジトリ上に存在しない以上、誰も気づけない
+> 状態だった。同種の「定義から外す」変更を行う際は、既存DBへの DROP マイグレーションも
+> セットで用意すること。
 
 同じく使われていない重複列が2組ある。
 
@@ -41,7 +60,7 @@ CREATE TABLE群は0000へ移設済みで、`init_db()` は本ディレクトリ�
 | `quest_master.days` | `quest_master.day_of_week` (`services/quest/quest_service.py` のコメント参照) |
 | `reward_master.desc` | `reward_master.description` (`services/quest/game_system.py` が `desc` を落として返す) |
 
-**`users`/`quests` と `days`/`desc` は現行のものと名前が紛らわしく、誤って書き込んでも
+**`days`/`desc` は現行のものと名前が紛らわしく、誤って書き込んでも
 SQLite はエラーにしない**(データがサイレントに行方不明になる)。この一覧と
 「コードから参照されていないこと」は `tests/test_retired_tables_unused.py` が固定しており、
 DROP する際はそのテストとこの節も同時に更新すること。

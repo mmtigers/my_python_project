@@ -8,11 +8,19 @@
 サイレントに行方不明になる**。重複列(`quest_master.days` / `reward_master.desc`)も
 同じリスクを持つ(更新すべき `day_of_week` / `description` の代わりに書いても SQL は成功する)。
 
-DROP は不可逆で、実機の行数確認・バックアップ確認が前提になるため本テストの範囲外
-(Issue #746 の「推奨修正」)。ここでは次の2点だけを固定する。
+**（2026-09-20 更新）** 実機で全件の行数を確認した結果、`users` / `quests` は
+いずれも 0 行だったため `migrations/0016` で DROP した。同時に、Issue #507 が
+リポジトリのスキーマ定義からは外したものの既存DBから落とす経路が無く実機に残っていた
+死蔵テーブルのうち 0 行のもの(`quest_tasks` / `quest_status` / `youtube_subscriptions`)も
+落とした。`quest_tasks` は `REFERENCES quest_users(id)` という壊れた宣言を持ち、
+`PRAGMA foreign_key_check` を DB 全体で実行不能にしていた(Issue #747 の前提を潰していた)。
 
-1. 退役済みテーブル・重複列が**スキーマには存在し続ける**こと(勝手に消えていない)。
-2. それらが**実行コードからは一切参照されない**こと(誤用の CI ゲート)。
+行を持つテーブルは DROP がデータの破棄になるため引き続き残す。ここでは次の4点を固定する。
+
+1. 行を持つ退役済みテーブル・重複列が**スキーマには存在し続ける**こと(勝手に消えていない)。
+2. DROP 済みのテーブルが**スキーマに存在しない**こと(0016 が効いている)。
+3. `PRAGMA foreign_key_check` が DB 全体で実行できること。
+4. 退役・DROP 済みの双方が**実行コードからは一切参照されない**こと(誤用の CI ゲート)。
 
 退役の一覧と方針は `migrations/README.md` の「退役済みテーブル・重複列」節を正とする。
 """
@@ -31,16 +39,26 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MY_HOME_SYSTEM = REPO_ROOT / "MY_HOME_SYSTEM"
 
 # 退役済み(スキーマに残るがコードからは使われない)テーブル。
+# 実機で行を持つため DROP を見送ったもの(行数は 2026-09-20 の実測)。
 RETIRED_TABLES = [
-    "users",                    # quest_users の旧版
-    "quests",                   # quest_master の旧版
-    "party_state",              # ボス戦
-    "equipment_master",         # 装備
-    "user_equipments",          # 装備
-    "family_mileage",           # マイレージ
-    "family_mileage_history",   # マイレージ
-    "bounties",                 # 賞金クエスト
-    "suumo_records",            # 物件情報収集
+    "party_state",              # ボス戦 (1行)
+    "equipment_master",         # 装備 (16行)
+    "user_equipments",          # 装備 (12行)
+    "family_mileage",           # マイレージ (1行)
+    "family_mileage_history",   # マイレージ (5行)
+    "bounties",                 # 賞金クエスト (9行)
+    "suumo_records",            # 物件情報収集 (56行)
+]
+
+# 実機で 0 行であることを確認して DROP したテーブル(migrations/0016)。
+# コードから参照されないことの検査は RETIRED_TABLES と同じく続ける
+# (消えた後に誰かが再び `INSERT INTO users (...)` と書くのを止めるため)。
+DROPPED_TABLES = [
+    "users",                    # quest_users の旧版 (#746)
+    "quests",                   # quest_master の旧版 (#746)
+    "quest_tasks",              # #507 の死蔵テーブル。壊れたFKで foreign_key_check を塞いでいた
+    "quest_status",             # #507 の死蔵テーブル
+    "youtube_subscriptions",    # #507 の死蔵テーブル
 ]
 
 # 退役済みの重複列: (テーブル, 使われていない列, 実際に使われている列)
@@ -92,7 +110,38 @@ def test_retired_column_and_its_replacement_exist(isolated_db, table, retired, c
     assert current in columns, f"{table}.{current} が存在しません({table}.{retired} の移行先)。"
 
 
-@pytest.mark.parametrize("table", RETIRED_TABLES)
+@pytest.mark.parametrize("table", DROPPED_TABLES)
+def test_dropped_table_is_absent_from_schema(isolated_db, table):
+    """migrations/0016 で DROP したテーブルが、マイグレーション全適用後に存在しないこと。
+
+    ベースライン(0000)は `users` / `quests` を CREATE するため、0016 が
+    実際に効いていないとここで検知できる。`quest_tasks` 等の #507 の死蔵テーブルは
+    そもそもベースラインに無いので、新規DBでは最初から存在しない。
+    """
+    with get_db_cursor() as cur:
+        row = cur.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+        ).fetchone()
+    assert row is None, (
+        f"{table} がスキーマに存在します。migrations/0016 が適用されていないか、"
+        "どこかで再作成されています。"
+    )
+
+
+def test_foreign_key_check_runs(isolated_db):
+    """`PRAGMA foreign_key_check` が DB 全体で実行できること (#747 の前提)。
+
+    `quest_tasks` は `REFERENCES quest_users(id)` と宣言されていたが quest_users に
+    `id` 列は無く(主キーは `user_id TEXT`)、この1テーブルのせいで
+    `PRAGMA foreign_key_check` が DB 全体で `foreign key mismatch` を送出し、
+    参照整合性の検査そのものができなかった。0016 の DROP で解消したことを固定する。
+    """
+    with get_db_cursor() as cur:
+        violations = cur.execute("PRAGMA foreign_key_check").fetchall()
+    assert not violations, f"参照整合性の違反があります: {violations}"
+
+
+@pytest.mark.parametrize("table", RETIRED_TABLES + DROPPED_TABLES)
 def test_retired_table_is_not_referenced_by_code(table):
     """退役済みテーブルを実行コードの SQL が参照していないこと。
 
