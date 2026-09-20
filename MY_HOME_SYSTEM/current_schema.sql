@@ -410,3 +410,31 @@ CREATE INDEX idx_security_logs_ts
     ON security_logs (timestamp);
 CREATE INDEX idx_routine_step_events_occurred
     ON routine_step_events (occurred_at);
+CREATE TABLE quest_cancellation_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    
+    history_id INTEGER NOT NULL,
+    
+    user_id TEXT,
+    
+    
+    cancelled_by TEXT NOT NULL,
+    
+    quest_id INTEGER,
+    quest_title TEXT,
+    status_before TEXT,
+    completed_at DATETIME,
+    exp_earned INTEGER,
+    gold_earned INTEGER,
+    medals_earned INTEGER,
+    linked_history_id INTEGER,
+    
+    cascaded INTEGER NOT NULL DEFAULT 0,
+    
+    rewards_reverted INTEGER NOT NULL DEFAULT 0,
+    cancelled_at DATETIME NOT NULL
+);
+CREATE INDEX idx_quest_cancellation_audit_history
+    ON quest_cancellation_audit (history_id);
+CREATE INDEX idx_quest_cancellation_audit_user_time
+    ON quest_cancellation_audit (user_id, cancelled_at DESC);

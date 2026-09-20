@@ -35,6 +35,9 @@ SQLite は行を `DELETE` してもファイルが縮まない(解放された�
 - `weather_history` — `UNIQUE(date, location)` で1日1行/地点しか増えないため、
   そもそも蓄積の問題になっていない。
 - `land_price_records` / `suumo_records` — 更新頻度が低く、蓄積の問題になっていない。
+- `quest_cancellation_audit` — クエスト取消の監査証跡(#762)。物理削除される
+  `quest_history` の行を保全するためのテーブルなので、ここを期限で消すと
+  「取消で消えた記録」そのものが失われる。取消は稀な操作で行数も増えない。
 
 いずれも `build_report()` には現れるので、実測を見て後から登録できる。
 """
