@@ -559,19 +559,19 @@
 ### `check_repo_behind_upstream` (**チェック12: 実機チェックアウトの遅れ検知、Issue #783で追加**)
 
 * **役割**: `git fetch` した上で `HEAD..<upstream>` のコミット数を数え、1以上なら「実機のコードがマージ済みの内容より古い」として異常メッセージを返す。2026-09-20 に実機が `origin/master` より5コミット遅れ、マージ済みの録画停止検知(#716)が動かずマイグレーション `0013` も未適用のまま放置されていたことへの対応。既存のどの仕組みもこれを見ていなかった（`deploy.sh --if-stale` は「HEAD に対する `dist` の鮮度」しか見ずHEAD自体が古いと最新と判定する、チェック8は crontab/systemd/logrotate が対象でコードの世代は見ない、`start_all.sh --prepare` は `.venv`/`dist` の鮮度のみ）。**検知のみで自動 pull はしない**（実機の `git pull` は post-merge フックからフロントの再ビルドとマスタ同期を走らせ、反映には `home_system.service` の再起動も要るため、無人で実行してよい操作ではない）。
-* 根拠: `def check_repo_behind_upstream() -> Optional[str]:` (行番号: 659)
+* 根拠: `def check_repo_behind_upstream() -> str | None:` (行番号: 659)
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_repo_behind_upstream() -> Optional[str]:` (行番号: 659)
+* 根拠: `def check_repo_behind_upstream() -> str | None:` (行番号: 659)
 
-* **戻り値/レスポンス**: `Optional[str]`（遅れていれば「N コミット遅れています」＋直近コミット（`DIFF_LINES_LIMIT` 件まで、超過分は「ほかN件」に畳む）＋復旧手順を含むメッセージ、最新または判定不能なら `None`）
-* 根拠: `def check_repo_behind_upstream() -> Optional[str]:` (行番号: 659)
+* **戻り値/レスポンス**: `str | None`（遅れていれば「N コミット遅れています」＋直近コミット（`DIFF_LINES_LIMIT` 件まで、超過分は「ほかN件」に畳む）＋復旧手順を含むメッセージ、最新または判定不能なら `None`）
+* 根拠: `def check_repo_behind_upstream() -> str | None:` (行番号: 659)
 
 * **副作用**: `git fetch` によるネットワークアクセスと、リモート追跡ブランチの更新。ワーキングツリー・HEAD は変更しない。
 * 根拠: [fetchの実行] (行番号: 678 / 抜粋: 'fetched = _git("fetch", "--quiet", timeout=GIT_FETCH_TIMEOUT_SEC)')
 
 * **エラーハンドリング**: upstream 未設定（detached HEAD 等）、`git fetch` の失敗（ネットワーク不通）、`fetch` のタイムアウト（`subprocess.TimeoutExpired`）、`rev-list` の失敗、コミット数が整数として解釈できない場合は、いずれも「異常」ではなく警告ログのみ残して `None` を返す。毎時cronで走るため、外へ出られない環境で恒久的に鳴り続けるのを避ける（`check_quest_master_drift` と同じ方針）。
-* 根拠: `def check_repo_behind_upstream() -> Optional[str]:` (行番号: 659)
+* 根拠: `def check_repo_behind_upstream() -> str | None:` (行番号: 659)
 
 ### `_should_notify`
 

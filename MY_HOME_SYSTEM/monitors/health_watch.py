@@ -656,7 +656,7 @@ def _git(*args: str, timeout: int = SUBPROCESS_TIMEOUT_SEC) -> subprocess.Comple
     )
 
 
-def check_repo_behind_upstream() -> Optional[str]:
+def check_repo_behind_upstream() -> str | None:
     """実機のチェックアウトが upstream より遅れていないかを確認する (Issue #783)。
 
     **検知のみで自動 pull はしない。** 実機の `git pull` は post-merge フックから
