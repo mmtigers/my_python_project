@@ -146,12 +146,11 @@ class TestNullRewardColumnsDoNotCrash:
         **そもそも NULL の行を作れない**のが現在の仕様である。
         """
         self._seed_child_and_adult()
-        with pytest.raises(sqlite3.IntegrityError, match="NOT NULL"):
-            with get_db_cursor(commit=True) as cur:
-                cur.execute(
-                    "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
-                    "VALUES ('son', 1, 'Q', NULL, NULL, ?, 'pending')", (datetime.datetime.now(JST).isoformat(),)
-                )
+        with pytest.raises(sqlite3.IntegrityError, match="NOT NULL"), get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
+                "VALUES ('son', 1, 'Q', NULL, NULL, ?, 'pending')", (datetime.datetime.now(JST).isoformat(),)
+            )
 
     def test_approve_history_with_zero_rewards(self, isolated_db):
         """報酬0の行(NULL 列の移行先)を承認しても落ちないこと。"""
