@@ -202,12 +202,21 @@ def render_status_card_html(title: str, value: str, theme: str, *, value_is_html
     """
     safe_title = html.escape(title)
     safe_value = value if value_is_html else html.escape(value)
-    return f"""
-    <div class="status-card {theme}">
-        <div class="status-title">{safe_title}</div>
-        <div class="status-value">{safe_value}</div>
-    </div>
-    """
+    # 改行・インデントを入れずに1行で返すこと。`st.markdown` は本文に
+    # `textwrap.dedent()` をかけてからMarkdownとして解釈するが、`render_status_grid`
+    # が組み立てる文字列は先頭行(`<div class="status-grid">`)がインデント0のため
+    # 共通インデントが0になり、dedentが何も削らない。結果、カードのHTMLに
+    # 「空白だけの行」と「4スペース字下げ」が残り、
+    #   - 空白だけの行がHTMLブロックを終端する
+    #   - 続く4スペース字下げの行がMarkdownのインデントコードブロックになる
+    # ため、2枚目以降のカードが `<div class="status-card...` という生のタグ文字列
+    # としてスマホ画面に出ていた(横幅も溢れる)。整形用の空白を一切持たせない。
+    return (
+        f'<div class="status-card {theme}">'
+        f'<div class="status-title">{safe_title}</div>'
+        f'<div class="status-value">{safe_value}</div>'
+        '</div>'
+    )
 
 
 def render_status_grid(cards: Iterable[StatusCard]) -> None:

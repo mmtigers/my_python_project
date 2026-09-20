@@ -345,3 +345,52 @@ class TestRenderStatusGridIntegration:
         assert html_out.count("status-card") == 2
         assert html_out.startswith('<div class="status-grid">')
         assert mock_st.markdown.call_args[1]["unsafe_allow_html"] is True
+
+    def test_grid_html_survives_streamlit_markdown_preprocessing(self):
+        """カードのHTMLが「Markdownのインデントコードブロック」として
+        生のタグ文字列で表示されてしまう回帰の防止。
+
+        `st.markdown` は本文に `textwrap.dedent()` を掛けてからMarkdownとして
+        解釈する(`streamlit.string_util.clean_text`)。グリッドの先頭行
+        `<div class="status-grid">` はインデント0なので共通インデントが0になり、
+        dedentは何も削らない。以前の `render_status_card_html` は整形用の改行と
+        4スペース字下げを含む複数行を返していたため、
+
+          - カードとカードの間に「空白だけの行」ができてHTMLブロックが終端され
+          - 続く4スペース字下げの行がインデントコードブロックと解釈され
+
+        2枚目以降のカードがスマホ画面に `<div class="status-c...` という
+        生のタグ文字列として並んでいた(横幅も溢れた)。整形用の空白を
+        一切持たないことをここで固定する。
+        """
+        import textwrap
+
+        from views.dashboard import common as view_common
+
+        mock_st = MagicMock()
+        cards = [
+            view_common.StatusCard("👵 高砂 (実家)", "🟢 元気 (1h以内)", "theme-green"),
+            view_common.StatusCard("🏠 伊丹 (自宅)", "🟢 活動中 (今)", "theme-green"),
+            view_common.StatusCard("🚲 駐輪場待機", "第1A: <b>0</b>台<br>第3A: <b>1</b>台",
+                                   "theme-yellow", value_is_html=True),
+        ]
+        with patch.object(view_common, "st", mock_st):
+            view_common.render_status_grid(cards)
+
+        html_out = mock_st.markdown.call_args[0][0]
+        # Streamlit が実際に行う前処理を再現する
+        rendered = textwrap.dedent(html_out).strip()
+
+        assert "\n" not in rendered, (
+            "グリッドのHTMLに改行が含まれている。空白行やインデント行ができると "
+            f"Markdownがコードブロックとして解釈する: {rendered!r}"
+        )
+        assert rendered.count('class="status-card') == 3
+
+    def test_single_card_html_has_no_formatting_whitespace(self):
+        from views.dashboard import common as view_common
+
+        card_html = view_common.render_status_card_html("タイトル", "値", "theme-green")
+        assert "\n" not in card_html
+        assert card_html.startswith('<div class="status-card theme-green">')
+        assert card_html.endswith("</div>")
