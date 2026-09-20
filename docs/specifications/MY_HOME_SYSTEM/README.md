@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全92件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全93件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -110,6 +110,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [run_task.md](./run_task.md) | 指定されたPythonスクリプトを所定のディレクトリ・仮想環境下で実行し、実行結果をログファイルに記録する。 |
 | [scheduler_boot.md](./scheduler_boot.md) | 指定間隔でプロジェクト内のPythonスクリプトを定期的にサブプロセスとして実行・管理する無限ループのスケジューラ。 |
 | [routine_deadline_job.md](./routine_deadline_job.md) | デイリールーティンの締切(チェックポイント時刻)超過処理を60秒間隔で起動する、スケジューラの定期タスク。DBは触らず `POST /api/routine/deadlines/process` を叩くだけのHTTPクライアント(Issue #738 / AUDIT-008)。 |
+| [security_posture.md](./security_posture.md) | 未設定のせいで保護が黙って無効になっている設定(フェイルオープン)だけを1か所で列挙する判定モジュール。意図的に未設定の設定は対象にしない。結果は post_boot_health_check が起動レポート(Discord)に載せる(Issue #799)。 |
 | [smart_timelapse_generator.md](./smart_timelapse_generator.md) | OpenCVの背景差分で動画中の動きのある領域を検出し、FFmpegで該当部分を結合したタイムラプス動画を生成、Discordへアップロードする。 |
 | [start_all.md](./start_all.md) | MY_HOME_SYSTEMのクリーンアップ、初期設定、および関連プロセス群の起動を統括するスクリプト。 |
 | [state_file.md](./state_file.md) | 監視スクリプトの状態ファイル(JSON / 1行テキスト)を flock + tmp + os.replace で原子的に読み書きする共通ヘルパー(Issue #661)。 |
