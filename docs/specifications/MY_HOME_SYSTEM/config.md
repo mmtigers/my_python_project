@@ -66,7 +66,7 @@
 * 根拠: [家族設定のローカルオーバーライド読み込み] (行番号: 430〜439 / 抜粋: `_family_local_path = os.path.join(os.path.dirname`)
 
 
-* NVR録画・DBバックアップの保持日数（`RECORDING_RETENTION_DAYS`, `DB_BACKUP_RETENTION_DAYS`）、DBバックアップのオフサイト複製先（`DB_BACKUP_OFFSITE_REMOTE`。rclone のリモートパス。空なら無効。2026-09-19 追加、`backup_service._copy_latest_offsite` が参照）、メモリ監視閾値（`MEMORY_ALERT_PERCENT`等）、TVロック機能に関連するクエストID（`TV_UNLOCK_QUEST_IDS`）、Alexaスキル検証用ID（`ALEXA_SKILL_ID`）、ラズパイ監視のフックスクリプトパス（`HEALTH_WATCH_INVESTIGATE_HOOK`）など、他の監視・運用系モジュールが参照する多数の設定値・閾値定数も本ファイルに定義されている。（Issue #488で、同種の未実装機能だった小児科予約監視の`CLINIC_MONITOR_URL`等はこのグループから削除された）
+* NVR録画・DBバックアップの保持日数（`RECORDING_RETENTION_DAYS`, `DB_BACKUP_RETENTION_DAYS`）、DBバックアップのオフサイト複製先（`DB_BACKUP_OFFSITE_REMOTE`。rclone のリモートパス。空なら無効。2026-09-19 追加、`backup_service._copy_latest_offsite` が参照）、メモリ監視閾値（`MEMORY_ALERT_PERCENT`等）、TVロック機能に関連するクエストID（`TV_UNLOCK_QUEST_IDS`）、Alexaスキル検証用ID（`ALEXA_SKILL_ID`）、ラズパイ監視のフックスクリプトパス（`HEALTH_WATCH_INVESTIGATE_HOOK`）、**SQLite の行の保持期間（`DB_ROW_RETENTION_ENABLED` / `DB_ROW_RETENTION_SENSOR_DAYS` / `DB_ROW_RETENTION_EVENT_DAYS` / `DB_ROW_RETENTION_MAX_ROWS_PER_RUN` / `DB_ROW_RETENTION_BATCH_SIZE` / `DB_ROW_RETENTION_REQUIRE_BACKUP_WITHIN_HOURS`。Issue #733 で追加。`services/db_retention_service.py` が参照し、`DB_ROW_RETENTION_ENABLED` の既定は `false`＝ドライランで1行も削除しない）**など、他の監視・運用系モジュールが参照する多数の設定値・閾値定数も本ファイルに定義されている。なお第7章の他の設定がすべて「ファイル」の保持期間であるのに対し、`DB_ROW_RETENTION_*` だけが「SQLite の行」を対象にしている（`DB_BACKUP_RETENTION_DAYS` は名前に反して DB バックアップ**ファイル**の保持日数であり、行の保持期間ではない）。（Issue #488で、同種の未実装機能だった小児科予約監視の`CLINIC_MONITOR_URL`等はこのグループから削除された）
 * 根拠: [保持期間設定セクション] (行番号: 389 / 抜粋: `RECORDING_RETENTION_DAYS: int = _get_int_env(`)
 
 
@@ -77,6 +77,9 @@
 
 * `reset_game.py`が管理者向けリセットAPI(`POST /api/quest/admin/reset_user`)を呼び出す際のサーバーのベースURL(`RESET_GAME_API_BASE_URL`、既定値`"http://127.0.0.1:8000"`)を定義する(Issue #547)。`reset_game.py`は`unified_server`と同じホストで実行される対話スクリプトという前提のため既定値はループバックアドレスとしており、LAN内の他端末からのアクセスを想定したホストIP指定である`FRONTEND_URL`とは用途が異なるためこの用途には流用しない、という趣旨のコメントが付されている。
 * 根拠: [RESET_GAME_API_BASE_URL定義とコメント] (行番号: 357〜361 / 抜粋: "# Issue #547: reset_game.py が管理者向けリセットAPI(POST /api/quest/admin/reset_user)を\n# 呼び出す際のサーバーのベースURL。reset_game.pyはunified_serverと同じホストで実行される\n# 前提の対話スクリプトのため、既定値はループバックアドレスとする(FRONTEND_URLはLAN内の\n# 他端末からのアクセスを想定したホストのIP指定のため、この用途には流用しない)。\nRESET_GAME_API_BASE_URL: str = os.getenv(\"RESET_GAME_API_BASE_URL\", \"http://127.0.0.1:8000\")")
+
+* **（Issue #738 / AUDIT-008 で追加）** 同じ箇所に、`monitors/routine_deadline_job.py`(スケジューラの定期タスク)がルーティンの締切処理API(`POST /api/routine/deadlines/process`)を呼ぶ際の`ROUTINE_DEADLINE_API_BASE_URL`(既定`"http://127.0.0.1:8000"`)と`ROUTINE_DEADLINE_API_TIMEOUT_SEC`(既定30秒)が加わった。既定がループバックなのは`RESET_GAME_API_BASE_URL`・`HEALTH_WATCH_PROBE_BASE_URL`と同じ理由(スケジューラはunified_serverと同じホストで動く)で、コメントにもその旨が明記されている。
+* 根拠: [ROUTINE_DEADLINE_API_BASE_URL定義とコメント] (行番号: 413〜420 / 抜粋: "# Issue #738 (AUDIT-008): monitors/routine_deadline_job.py(スケジューラの定期タスク)が\nROUTINE_DEADLINE_API_BASE_URL: str = os.getenv(\"ROUTINE_DEADLINE_API_BASE_URL\", \"http://127.0.0.1:8000\")\nROUTINE_DEADLINE_API_TIMEOUT_SEC: int = _get_int_env(\"ROUTINE_DEADLINE_API_TIMEOUT_SEC\", 30)")
 
 
 * クエスト機能のファイルアップロード(`/api/quest/upload`)におけるアップロード可能な最大ファイルサイズ(MB単位、環境変数で上書き可、既定5MB)を定義する。M15/Issue #325対応で、フロントエンド(`family-quest/src/components/ui/AvatarUploader.tsx`の`MAX_AVATAR_SIZE_BYTES`)の5MBと揃えられた(以前は既定10MBでフロントと不一致だった)。
@@ -161,7 +164,7 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 | 定数 | 値 | 用途 |
 | --- | --- | --- |
 | `SQLITE_TABLE_BICYCLE` | `"bicycle_parking_records"` | 駐輪場記録テーブル名 |
-| `BACKUP_FILES` | `[SQLITE_DB_PATH, "config.py", "devices.json"]` | `services/backup_service.py` が NAS へ退避する対象。**Issue #649 で `.env` を除外**(NAS 共有の閲覧権限がそのままシークレットの閲覧権限になるため) |
+| `BACKUP_FILES` | `[SQLITE_DB_PATH, "config.py", "devices.json", "family_members.local.json", "quest_users.local.json"]` | `services/backup_service.py` が NAS へ退避する対象。**Issue #649 で `.env` を除外**(NAS 共有の閲覧権限がそのままシークレットの閲覧権限になるため)。**Issue #753 で gitignore 対象のローカルオーバーレイ2件を追加**(対象外のままだと復元時に失われるため。`_backup_config_files` が `os.path.exists` で確認してスキップするので、置いていない環境でも安全) |
 | `DEFAULT_SOUND_SOURCE` | `{BASE_DIR}/defaults/sounds` | 効果音の配布元(NAS 側 `SOUND_DIR` へ同期する元) |
 | `NAS_CHECK_TIMEOUT` | `5` | NAS 疎通確認のタイムアウト秒 |
 | `NVR_RECORD_DIR` | `{NAS_MOUNT_POINT}/home_system/nvr_recordings` | NVR 録画の保存先(`camera_monitor` のスナップショット抽出元) |
@@ -170,14 +173,14 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 | `SOUND_PLAYER_ARGS` | `["-o", "pulse"]` | `core/sound_manager.py` が再生コマンドへ渡す追加引数 |
 | `MEMORY_ALERT_LAST_NOTIFY_FILE` | `{FALLBACK_ROOT}/last_memory_alert.txt` | `memory_monitor` の通知クールダウン用状態ファイル |
 
-* 根拠: `SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"` (行番号: 311)、`BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", "devices.json"]` (行番号: 317)、`DEFAULT_SOUND_SOURCE: str = os.path.join(BASE_DIR, "defaults", "sounds")` (行番号: 320)、`NAS_CHECK_TIMEOUT: int = 5` (行番号: 354)、`NVR_RECORD_DIR` (行番号: 409)、`TIMELAPSE_FONT_FILE` (行番号: 431)、`DB_BACKUPS_DIR` (行番号: 443)、`SOUND_PLAYER_ARGS` (行番号: 451)、`MEMORY_ALERT_LAST_NOTIFY_FILE` (行番号: 500)
+* 根拠: `SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"` (行番号: 311)、`BACKUP_FILES: List[str] = [` (行番号: 327)、`DEFAULT_SOUND_SOURCE: str = os.path.join(BASE_DIR, "defaults", "sounds")` (行番号: 320)、`NAS_CHECK_TIMEOUT: int = 5` (行番号: 354)、`NVR_RECORD_DIR` (行番号: 409)、`TIMELAPSE_FONT_FILE` (行番号: 431)、`DB_BACKUPS_DIR` (行番号: 443)、`SOUND_PLAYER_ARGS` (行番号: 451)、`MEMORY_ALERT_LAST_NOTIFY_FILE` (行番号: 500)
 
 ### `_resolve_assets_dir` / `__getattr__` / `prewarm_nas_paths`（Issue #330 の遅延解決、#657 で追記）
 
 * **役割**: 検証I/Oを伴うパス定数の遅延解決(PEP 562)。`_resolve_assets_dir()` が `ensure_safe_path_with_backoff` で `ASSETS_DIR` を検証・解決し、`_ASSETS_SUBDIRS_TO_CREATE` の各サブディレクトリを作る。モジュールの `__getattr__(name)` は `ASSETS_DIR` と `_ASSETS_DERIVED_PATHS` の派生パス(`UPLOAD_DIR`・`SOUND_DIR` 等)を初回アクセス時にだけ解決し、結果を `globals()` に書き込むため以降は通常の属性解決になる(=キャッシュ。テストは `monkeypatch.setattr`/`delattr` で上書き・再解決できる)。**（Issue #664）** `__getattr__` は `LOG_DIR` も扱い、`ensure_safe_path_with_backoff(_PREFERRED_LOG_DIR, "logs")` で解決する。`prewarm_nas_paths()` は `unified_server.py` の `lifespan` から呼ばれ、遅延化前と同じく起動時点で `ASSETS_DIR`・`LOG_DIR`・派生パスの検証・フォールバック判定を済ませる。
 * **戻り値/レスポンス**: `_resolve_assets_dir` / `__getattr__` は `str`、`prewarm_nas_paths` は `None`。未知の属性名では `__getattr__` が `AttributeError` を送出する。
 * **副作用**: NAS 上のディレクトリ作成、`globals()` への書き込み、失敗時の warning ログ(例外は送出せずローカルへフォールバック)。
-* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 591)、`def __getattr__(name: str) -> str:` (行番号: 605)、`def prewarm_nas_paths() -> None:` (行番号: 632)
+* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 642)、`def __getattr__(name: str) -> str:` (行番号: 656)、`def prewarm_nas_paths() -> None:` (行番号: 683)
 
 ### `verify_and_initialize_storage`
 
@@ -210,6 +213,7 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 * `WEBHOOK_BASE_URL: Optional[str]`（行番号: 227）: `switchbot_webhook_fix.py` が Webhook URL を再登録する際の公開ベースURL。以前はスクリプト側で `os.environ.get()` を直接読んでおり `.env.example` 整合テストの死角だった（Issue #405）。
 * `HLS_VOD_RETENTION_DAYS: int`（既定 3、行番号: 391）: 録画VODのHLSセグメントキャッシュ（`BASE_DIR/data/hls_streams/vod`）の保持日数。`monitors/nas_monitor.py` の `run_retention_cleanup` が参照する（Issue #359）。
 * `RESET_GAME_API_BASE_URL: str`（既定`"http://127.0.0.1:8000"`、行番号: 361）: `reset_game.py`が管理者向けリセットAPI(`POST /api/quest/admin/reset_user`)を呼び出す際のサーバーのベースURL。`reset_game.py`は`unified_server`と同じホストで実行される対話スクリプトという前提のため既定値はループバックアドレスとしている(LAN内の他端末からのアクセスを想定した`FRONTEND_URL`とは用途が異なるため流用しない)（Issue #547）。
+* `ROUTINE_DEADLINE_API_BASE_URL: str`（既定`"http://127.0.0.1:8000"`）/ `ROUTINE_DEADLINE_API_TIMEOUT_SEC: int`（既定30）: `monitors/routine_deadline_job.py`がルーティンの締切処理API(`POST /api/routine/deadlines/process`)を呼ぶ際のベースURLとタイムアウト秒。スケジューラは`unified_server`と同じホストで動くため既定はループバック（Issue #738 / AUDIT-008）。
 
 ### `_get_int_env`
 

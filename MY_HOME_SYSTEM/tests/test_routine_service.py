@@ -13,6 +13,7 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+from freezegun import freeze_time
 
 from core.database import get_db_cursor
 import config
@@ -35,6 +36,24 @@ def _seed_user(user_id='daughter', gold=0, exp=0, level=1, role='role_child'):
 
 def _at(hour, minute):
     return MONDAY.replace(hour=hour, minute=minute)
+
+
+def _state_after_deadlines(user_id, now):
+    """締切処理(スケジューラ相当)を走らせてから、当日の状態を読み取る。
+
+    Issue #738 (AUDIT-008)より前は `GET /api/routine/today`(= get_today_state)自身が
+    当日行のINSERTと締切超過の強制遷移・ボーナス付与を行っていたため、テストも
+    「締切時刻を過ぎた now で get_today_state を呼ぶ」ことで状態を進めていた。
+    現在その書き込みは `process_deadlines`(スケジューラが
+    `monitors/routine_deadline_job.py` 経由で60秒ごとに呼ぶ)へ移り、
+    get_today_state は純粋な読み取りになっている。
+
+    「締切が来た後の状態」を確かめる既存テストの意図はそのままに、
+    書き込みの担い手だけを差し替えるためのヘルパー。process_deadlines は冪等なので、
+    既に遷移済みの時刻で呼んでも二重付与は起きない。
+    """
+    routine_service.process_deadlines(now=now)
+    return routine_service.get_today_state(user_id, now=now)
 
 
 def _friday_at(hour, minute):
@@ -168,7 +187,7 @@ class TestStepCompletion:
         _seed_user()
         for key in ('handwash', 'snack', 'homework'):
             routine_service.complete_step('daughter', 'pm', key, now=_at(14, 0))
-        routine_service.get_today_state('daughter', now=_at(18, 1))  # チェックポイント通過
+        _state_after_deadlines('daughter', now=_at(18, 1))  # チェックポイント通過
         for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
             routine_service.complete_step('daughter', 'pm', key, now=_at(18, 5))
         # 現在地は非チェックリストの'sleep'。既に完了済みの非チェックリストステップ
@@ -194,7 +213,7 @@ class TestStepCompletion:
         _seed_user(gold=0, exp=0)
         for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
-        routine_service.get_today_state('daughter', now=_at(7, 51))  # チェックポイント強制通過
+        _state_after_deadlines('daughter', now=_at(7, 51))  # チェックポイント強制通過
         with pytest.raises(HTTPException) as exc_info:
             routine_service.complete_step('daughter', 'am', 'toilet', now=_at(7, 52))
         assert exc_info.value.status_code == 400
@@ -357,7 +376,7 @@ class TestEveningFreeTimeTvUnlock:
         routine_service.complete_step('son', 'pm', 'handwash', now=_at(14, 0))
         routine_service.complete_step('son', 'pm', 'snack', now=_at(14, 0))
         # 宿題・明日の準備は完了させないまま締切(18:00)を過ぎる
-        state = routine_service.get_today_state('son', now=_at(18, 1))
+        state = _state_after_deadlines('son', now=_at(18, 1))
         pm = state['flows']['pm']
         assert pm['in_free_time'] is False
         mock_trigger.assert_not_called()
@@ -374,7 +393,7 @@ class TestEveningFreeTimeTvUnlock:
             routine_service.complete_step('son', 'pm', key, now=_at(14, 0))
         assert mock_trigger.call_count == 1  # 'homework'完了で自由時間開始トリガーが発火
 
-        routine_service.get_today_state('son', now=_at(18, 1))  # チェックポイント通過
+        _state_after_deadlines('son', now=_at(18, 1))  # チェックポイント通過
         for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
             routine_service.complete_step('son', 'pm', key, now=_at(18, 5))
 
@@ -388,7 +407,7 @@ class TestCheckpointBonus:
             routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
 
         # 7:50を過ぎてから状態取得すると、チェックポイントを強制的に通過する
-        state = routine_service.get_today_state('daughter', now=_at(7, 51))
+        state = _state_after_deadlines('daughter', now=_at(7, 51))
         am = state['flows']['am']
         assert am['bonus_gold'] == 150
         assert am['bonus_exp'] == 30
@@ -402,32 +421,57 @@ class TestCheckpointBonus:
             row = cur.execute("SELECT gold, exp FROM quest_users WHERE user_id='daughter'").fetchone()
         assert row['gold'] == 150
         assert row['exp'] == 30
-        # コードレビューで発覚: 以前はleveled_up/new_levelがレスポンスに含まれず、
-        # レベルアップしてもフロントがLEVEL UPトーストを出す手段が無かった。
-        # new_levelは(quest_service._apply_quest_rewardsと同様)レベルアップの有無に
-        # 関わらず常に付与後の実際のレベルを返す。フロントはleveled_upの方でゲートする。
+        # Issue #738 (AUDIT-008)で変更: ボーナスを付与したのはスケジューラ側
+        # (process_deadlines)であり、GET は読み取り専用になったため、「その1回の
+        # レスポンスでだけ立つ」性質のフラグ(leveled_up / new_level)は GET には
+        # 載らなくなった(常に False / None)。DBの付与結果は上で検証済み。
         assert am['leveled_up'] is False
-        assert am['new_level'] == 1
+        assert am['new_level'] is None
 
-    def test_checkpoint_bonus_level_up_is_reported_in_response(self, isolated_db):
-        """チェックポイント通過ボーナスでレベルアップした場合、その1回のレスポンスに
-        leveled_up/new_levelが載ること(#コードレビューで発覚した欠落の回帰防止)。
+    def test_checkpoint_bonus_level_up_is_applied_even_without_any_client_access(self, isolated_db):
+        """チェックポイント通過ボーナスでのレベルアップがDBに反映されること。
+
         Lv1→2の必要経験値は100(game_logic.calculate_next_level_exp)なので、
         既存exp=80 + 満額ボーナスexp=30 = 110 でレベルアップする。
+
+        Issue #738 (AUDIT-008): 付与の担い手が GET のポーリングから
+        スケジューラ(process_deadlines)へ移ったため、誰も画面を開いていなくても
+        締切時刻に付与されること自体がここでの関心事になる。
         """
         _seed_user(gold=0, exp=80)
         for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
 
-        state = routine_service.get_today_state('daughter', now=_at(7, 51))
-        am = state['flows']['am']
-        assert am['leveled_up'] is True
-        assert am['new_level'] == 2
+        # 状態取得(GET)を一切行わず、スケジューラ相当の処理だけを走らせる
+        routine_service.process_deadlines(now=_at(7, 51))
 
         with get_db_cursor() as cur:
             row = cur.execute("SELECT level, exp FROM quest_users WHERE user_id='daughter'").fetchone()
         assert row['level'] == 2
         assert row['exp'] == 10
+
+    def test_checkpoint_bonus_level_up_is_reported_when_a_completion_triggers_it(self, isolated_db):
+        """チェックポイント通過ボーナスでレベルアップした場合、それが**ユーザー操作の
+        応答として起きた**なら従来どおり leveled_up/new_level が載ること
+        (#コードレビューで発覚した欠落の回帰防止)。
+
+        Issue #738 (AUDIT-008)以降、GET は読み取り専用のためこのフラグを運べない。
+        残る配信経路は complete_step の応答で、締切を過ぎてから一本道を完了報告した
+        (= complete_step 内の _apply_forced_transition が通過処理を行う)ケースがそれ。
+        pmの按分は3ステップ中2つで round(30 * 2/3) = 20、既存exp=80と合わせて100。
+        """
+        _seed_user(gold=0, exp=80)
+        routine_service.complete_step('daughter', 'pm', 'handwash', now=_at(14, 0))
+        routine_service.complete_step('daughter', 'pm', 'snack', now=_at(14, 5))
+
+        state = routine_service.complete_step('daughter', 'pm', 'homework', now=_at(17, 31))
+        assert state['leveled_up'] is True
+        assert state['new_level'] == 2
+
+        with get_db_cursor() as cur:
+            row = cur.execute("SELECT level, exp FROM quest_users WHERE user_id='daughter'").fetchone()
+        assert row['level'] == 2
+        assert row['exp'] == 0
 
     def test_partial_completion_prorates_bonus_and_marks_remind(self, isolated_db):
         _seed_user(gold=0, exp=0)
@@ -435,7 +479,7 @@ class TestCheckpointBonus:
         routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 0))
         routine_service.complete_step('daughter', 'am', 'meal', now=_at(6, 5))
 
-        state = routine_service.get_today_state('daughter', now=_at(7, 51))
+        state = _state_after_deadlines('daughter', now=_at(7, 51))
         am = state['flows']['am']
         assert am['bonus_gold'] == 60  # round(150 * 2/5)
         assert am['bonus_exp'] == 12  # round(30 * 2/5)
@@ -470,7 +514,7 @@ class TestCheckpointBonus:
         assert state['preview_bonus_gold'] == 60  # round(150 * 2/5)
 
         # チェックポイント通過後は最終的なbonus_goldと一致する(値が飛ばない)。
-        state = routine_service.get_today_state('daughter', now=_at(7, 51))
+        state = _state_after_deadlines('daughter', now=_at(7, 51))
         am = state['flows']['am']
         assert am['preview_bonus_gold'] == am['bonus_gold'] == 60
 
@@ -480,9 +524,9 @@ class TestCheckpointBonus:
         for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
 
-        routine_service.get_today_state('daughter', now=_at(7, 51))
-        routine_service.get_today_state('daughter', now=_at(8, 30))
-        routine_service.get_today_state('daughter', now=_at(9, 0))
+        _state_after_deadlines('daughter', now=_at(7, 51))
+        _state_after_deadlines('daughter', now=_at(8, 30))
+        _state_after_deadlines('daughter', now=_at(9, 0))
 
         with get_db_cursor() as cur:
             row = cur.execute("SELECT gold, exp FROM quest_users WHERE user_id='daughter'").fetchone()
@@ -494,7 +538,7 @@ class TestCheckpointBonus:
         _seed_user(gold=0, exp=0)
         routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 0))
         # チェックリストが1/5しか終わっていないまま7:50を過ぎる
-        state = routine_service.get_today_state('daughter', now=_at(8, 0))
+        state = _state_after_deadlines('daughter', now=_at(8, 0))
         am = state['flows']['am']
         assert am['current_step_index'] == 6
         assert am['is_complete'] is True
@@ -528,7 +572,7 @@ class TestWeekendCheckpointOverride:
         _seed_user(gold=0, exp=0)
         for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
-        state = routine_service.get_today_state('daughter', now=_saturday_at(9, 31))
+        state = _state_after_deadlines('daughter', now=_saturday_at(9, 31))
         am = state['flows']['am']
         assert am['in_free_time'] is False
         assert am['bonus_gold'] == 150
@@ -620,7 +664,7 @@ class TestWeekendPmSkipAndCarryover:
         _seed_user(gold=0, exp=0)
         routine_service.complete_step('daughter', 'pm', 'handwash', now=_friday_at(14, 0))
         routine_service.complete_step('daughter', 'pm', 'snack', now=_friday_at(14, 5))
-        routine_service.get_today_state('daughter', now=_friday_at(18, 1))  # 強制通過
+        _state_after_deadlines('daughter', now=_friday_at(18, 1))  # 強制通過
 
         sat_state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
         pm_sat = sat_state['flows']['pm']
@@ -645,7 +689,7 @@ class TestWeekendPmSkipAndCarryover:
         # 土曜はhandwash・homework・tomorrow_prepともスキップ済みなので、当日やるべき
         # ステップはsnackだけ。それを完了させれば満額ボーナス(1/1)。
         routine_service.complete_step('daughter', 'pm', 'snack', now=_saturday_at(14, 0))
-        state = routine_service.get_today_state('daughter', now=_saturday_at(18, 1))
+        state = _state_after_deadlines('daughter', now=_saturday_at(18, 1))
         pm_sat = state['flows']['pm']
         assert pm_sat['bonus_gold'] == 150
         assert pm_sat['bonus_exp'] == 30
@@ -660,7 +704,7 @@ class TestWeekendPmSkipAndCarryover:
         for key in ('handwash', 'snack', 'homework'):
             routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
 
-        state = routine_service.get_today_state('daughter', now=_saturday_at(18, 1))
+        state = _state_after_deadlines('daughter', now=_saturday_at(18, 1))
         pm_sat = state['flows']['pm']
         assert pm_sat['bonus_gold'] == 0
         assert pm_sat['bonus_exp'] == 0
@@ -719,7 +763,7 @@ class TestPmEveningSplit:
     def test_night_checklist_activates_all_at_once_after_checkpoint(self, isolated_db):
         _seed_user(gold=0, exp=0)
         self._finish_pre_checkpoint_steps(now=_at(14, 0))
-        state = routine_service.get_today_state('daughter', now=_at(18, 1))
+        state = _state_after_deadlines('daughter', now=_at(18, 1))
         pm = state['flows']['pm']
         statuses = {s['key']: s['status'] for s in pm['steps']}
         assert all(
@@ -734,7 +778,7 @@ class TestPmEveningSplit:
     def test_completing_night_checklist_in_any_order(self, isolated_db):
         _seed_user()
         self._finish_pre_checkpoint_steps(now=_at(14, 0))
-        routine_service.get_today_state('daughter', now=_at(18, 1))  # チェックポイント通過
+        _state_after_deadlines('daughter', now=_at(18, 1))  # チェックポイント通過
 
         state = routine_service.complete_step('daughter', 'pm', 'nightteeth', now=_at(18, 5))
         statuses = {s['key']: s['status'] for s in state['steps']}
@@ -745,7 +789,7 @@ class TestPmEveningSplit:
     def test_all_night_checklist_done_advances_to_sleep(self, isolated_db):
         _seed_user()
         self._finish_pre_checkpoint_steps(now=_at(14, 0))
-        routine_service.get_today_state('daughter', now=_at(18, 1))
+        _state_after_deadlines('daughter', now=_at(18, 1))
         state = None
         for key in ('dinner', 'bath', 'nightclothes', 'nightteeth', 'tomorrow_prep'):
             state = routine_service.complete_step('daughter', 'pm', key, now=_at(18, 5))
@@ -756,7 +800,7 @@ class TestPmEveningSplit:
     def test_unchecking_after_all_night_items_done_reverts_to_checklist_phase(self, isolated_db):
         _seed_user()
         self._finish_pre_checkpoint_steps(now=_at(14, 0))
-        routine_service.get_today_state('daughter', now=_at(18, 1))
+        _state_after_deadlines('daughter', now=_at(18, 1))
         for key in ('dinner', 'bath', 'nightclothes', 'nightteeth', 'tomorrow_prep'):
             routine_service.complete_step('daughter', 'pm', key, now=_at(18, 5))
 
@@ -769,7 +813,7 @@ class TestPmEveningSplit:
         from fastapi import HTTPException
         _seed_user()
         self._finish_pre_checkpoint_steps(now=_at(14, 0))
-        routine_service.get_today_state('daughter', now=_at(18, 1))
+        _state_after_deadlines('daughter', now=_at(18, 1))
         with pytest.raises(HTTPException) as exc_info:
             routine_service.complete_step('daughter', 'pm', 'sleep', now=_at(18, 5))
         assert exc_info.value.status_code == 409
@@ -780,7 +824,7 @@ class TestPmEveningSplit:
         from fastapi import HTTPException
         _seed_user()
         self._finish_pre_checkpoint_steps(now=_at(14, 0))
-        routine_service.get_today_state('daughter', now=_at(18, 1))
+        _state_after_deadlines('daughter', now=_at(18, 1))
         for key in ('dinner', 'bath', 'nightclothes', 'nightteeth', 'tomorrow_prep'):
             routine_service.complete_step('daughter', 'pm', key, now=_at(18, 5))
         routine_service.complete_step('daughter', 'pm', 'sleep', now=_at(18, 10))
@@ -798,7 +842,7 @@ class TestPmEveningSplit:
         _seed_user()
         for key in ('handwash', 'snack', 'homework'):
             routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
-        routine_service.get_today_state('daughter', now=_friday_at(18, 1))
+        _state_after_deadlines('daughter', now=_friday_at(18, 1))
         routine_service.complete_step('daughter', 'pm', 'tomorrow_prep', now=_friday_at(18, 5))
 
         sat_state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
@@ -818,16 +862,252 @@ class TestPmEveningSplit:
         routine_service.complete_step('daughter', 'pm', 'handwash', now=_at(14, 0))
         routine_service.complete_step('daughter', 'pm', 'snack', now=_at(14, 5))
 
-        state = routine_service.get_today_state('daughter', now=_at(18, 1))
+        state = _state_after_deadlines('daughter', now=_at(18, 1))
         pm = state['flows']['pm']
         assert pm['bonus_gold'] == round(150 * (2 / 3))
         assert pm['bonus_exp'] == round(30 * (2 / 3))
+
+
+def _progress_rows(user_id=None):
+    sql = "SELECT * FROM routine_progress"
+    params: tuple = ()
+    if user_id:
+        sql += " WHERE user_id=?"
+        params = (user_id,)
+    with get_db_cursor() as cur:
+        return [dict(row) for row in cur.execute(sql, params)]
+
+
+class TestGetTodayStateIsSideEffectFree:
+    """Issue #738 (AUDIT-008): `GET /api/routine/today` は書き込みを一切行わないこと。
+
+    このエンドポイントは全端末が15秒間隔でポーリングする。以前は
+    `_get_or_create_progress`(当日行のINSERT)と `_apply_forced_transition`
+    (ステップ書き換え・ゴールド/経験値の付与)をこの中で行っていたため、
+    プリフェッチやReact Queryのリトライがそのまま報酬付与のトリガーになっていた。
+    書き込みは `process_deadlines`(スケジューラ)と `complete_step`(ユーザー操作)だけが行う。
+    """
+
+    def test_get_does_not_create_the_progress_row(self, isolated_db):
+        _seed_user()
+        state = routine_service.get_today_state('daughter', now=_at(6, 0))
+
+        # 表示上はフローが開始している(行が無くても初期状態を組み立てて返す)
+        assert state['flows']['am']['started'] is True
+        assert state['flows']['am']['steps'][0]['status'] == 'current'
+        # しかしDBには何も書かれていない
+        assert _progress_rows() == []
+        assert _step_events() == []
+
+    def test_get_after_the_deadline_does_not_grant_anything(self, isolated_db):
+        """締切を過ぎた時刻でポーリングされても、GETだけではゴールドが動かないこと。"""
+        _seed_user(gold=0, exp=0)
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+        gold_before, exp_before, _level = _user_balance('daughter')
+
+        for _ in range(5):
+            routine_service.get_today_state('daughter', now=_at(7, 51))
+
+        assert _user_balance('daughter')[:2] == (gold_before, exp_before)
+        with get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT bonus_gold, current_step_index FROM routine_progress "
+                "WHERE user_id='daughter' AND flow_key='am'"
+            ).fetchone()
+        assert row['bonus_gold'] == 0
+        assert row['current_step_index'] == 5  # 'free'(チェックポイント)のまま
+
+    def test_get_does_not_update_the_progress_row(self, isolated_db):
+        """既存行がある場合も updated_at ごと一切変更されないこと。"""
+        _seed_user()
+        routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 0))
+        before = _progress_rows('daughter')
+
+        routine_service.get_today_state('daughter', now=_at(7, 51))
+
+        assert _progress_rows('daughter') == before
+
+    def test_state_reflects_the_deadline_once_the_scheduler_has_run(self, isolated_db):
+        """GETが遅れて追従すること(スケジューラ実行後は従来どおりの状態が見える)。"""
+        _seed_user(gold=0, exp=0)
+        routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 0))
+
+        before = routine_service.get_today_state('daughter', now=_at(7, 51))['flows']['am']
+        assert before['bonus_gold'] == 0
+        assert before['is_complete'] is False
+
+        routine_service.process_deadlines(now=_at(7, 51))
+
+        after = routine_service.get_today_state('daughter', now=_at(7, 51))['flows']['am']
+        assert after['bonus_gold'] == round(150 * (1 / 5))
+        assert after['is_complete'] is True
+
+
+class TestProcessDeadlines:
+    """Issue #738 (AUDIT-008): 締切処理をスケジューラ側へ移したことのテスト。"""
+
+    def test_applies_the_deadline_without_any_client_access(self, isolated_db):
+        """誰も画面を開いていなくても締切処理が走ること(以前の不整合の解消)。"""
+        _seed_user(gold=0, exp=0)
+        result = routine_service.process_deadlines(now=_at(7, 51))
+
+        assert result['date'] == '2024-01-01'
+        assert result['processed_users'] == 1
+        assert result['failed_users'] == 0
+        # 1つも終えていないので按分は0だが、状態は'remind'へ確定する
+        state = routine_service.get_today_state('daughter', now=_at(7, 51))['flows']['am']
+        statuses = {s['key']: s['status'] for s in state['steps']}
+        assert statuses['meal'] == 'remind'
+        assert state['is_complete'] is True
+        assert _user_balance('daughter')[0] == 0
+
+    def test_creates_the_progress_row_when_the_flow_has_started(self, isolated_db):
+        """締切前でも、フローが始まっていれば当日行の作成はスケジューラが行う。"""
+        _seed_user()
+        routine_service.process_deadlines(now=_at(6, 0))
+
+        rows = _progress_rows('daughter')
+        assert [r['flow_key'] for r in rows] == ['am']
+
+    def test_does_nothing_before_the_flow_starts(self, isolated_db):
+        _seed_user()
+        result = routine_service.process_deadlines(now=_at(4, 59))
+        assert result['transitions'] == 0
+        assert _progress_rows() == []
+
+    def test_is_idempotent(self, isolated_db):
+        """何度走っても報酬は1回だけ(15秒ポーリングの代わりに60秒間隔で走るため重要)。"""
+        _seed_user(gold=0, exp=0)
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+
+        first = routine_service.process_deadlines(now=_at(7, 51))
+        second = routine_service.process_deadlines(now=_at(7, 52))
+        third = routine_service.process_deadlines(now=_at(8, 30))
+
+        assert first['transitions'] == 1
+        assert second['transitions'] == 0
+        assert third['transitions'] == 0
+        assert _user_balance('daughter')[:2] == (150, 30)
+
+    def test_processes_every_user(self, isolated_db):
+        _seed_user(user_id='daughter', role='role_child', gold=0, exp=0)
+        _seed_user(user_id='son', role='role_child', gold=0, exp=0)
+        _seed_user(user_id='mom', role='role_adult', gold=0, exp=0)
+
+        result = routine_service.process_deadlines(now=_at(7, 51))
+        assert result['processed_users'] == 3
+        assert {r['user_id'] for r in _progress_rows()} == {'daughter', 'son', 'mom'}
+
+    def test_one_user_failure_does_not_stop_the_others(self, isolated_db, monkeypatch):
+        """1ユーザーの失敗でスケジューラのタスク全体を落とさないこと。"""
+        _seed_user(user_id='daughter', role='role_child')
+        _seed_user(user_id='son', role='role_child')
+
+        original = routine_service._process_user_deadlines
+
+        def _flaky(user_id, role, date_str, now):
+            if user_id == 'daughter':
+                raise RuntimeError("database is locked")
+            return original(user_id, role, date_str, now)
+
+        monkeypatch.setattr(routine_service, '_process_user_deadlines', _flaky)
+
+        result = routine_service.process_deadlines(now=_at(7, 51))
+        assert result['failed_users'] == 1
+        assert result['processed_users'] == 1
+        assert {r['user_id'] for r in _progress_rows()} == {'son'}
+
+    def test_does_not_open_a_write_transaction_when_there_is_nothing_to_do(self, isolated_db, monkeypatch):
+        """変化が無い実行では書き込みトランザクションも残高ロックも取らないこと。
+
+        60秒ごとに走るため、状態が変わらない大多数の実行で `commit=True` の接続を
+        開かないことが SD カードの寿命に直結する(Issue #738 の指摘3)。
+        """
+        _seed_user()
+        routine_service.process_deadlines(now=_at(6, 0))  # 当日行をここで作る
+
+        import services.routine_service as routine_module
+
+        commits: list = []
+        original_cursor = routine_module.get_db_cursor
+
+        def _spy(commit: bool = False):
+            commits.append(commit)
+            return original_cursor(commit=commit)
+
+        monkeypatch.setattr(routine_module, 'get_db_cursor', _spy)
+        routine_service.process_deadlines(now=_at(6, 1))
+
+        assert commits and not any(commits), f"書き込みトランザクションが開かれた: {commits}"
+
+
+class TestProcessDeadlinesJstBoundary:
+    """`now` 未指定時の基準時刻が JST であること(Issue #658 の規約に従い freezegun で固定)。
+
+    締切(07:50 / 17:30)も進捗の日付(progress_date)も JST の壁時計で決まるため、
+    ホストOSのTZやUTC基準で判定すると「日付が変わる瞬間」に別の日の行を触る。
+    """
+
+    @freeze_time("2026-09-20 22:51:00")  # = JST 2026-09-21(月) 07:51
+    def test_uses_jst_for_the_deadline_and_the_progress_date(self, isolated_db):
+        _seed_user(gold=0, exp=0)
+        result = routine_service.process_deadlines()
+
+        assert result['date'] == '2026-09-21'
+        rows = _progress_rows('daughter')
+        assert [r['progress_date'] for r in rows] == ['2026-09-21']
+        # JST 07:51 は平日amの締切(07:50)超過なので強制遷移が適用されている
+        assert result['transitions'] == 1
+
+    @freeze_time("2026-09-20 22:49:00")  # = JST 2026-09-21(月) 07:49
+    def test_does_not_transition_one_minute_before_the_jst_deadline(self, isolated_db):
+        _seed_user(gold=0, exp=0)
+        result = routine_service.process_deadlines()
+        assert result['date'] == '2026-09-21'
+        assert result['transitions'] == 0
+
+    @freeze_time("2026-09-20 14:59:59")  # = JST 2026-09-20(日) 23:59:59
+    def test_just_before_jst_midnight_targets_the_previous_day(self, isolated_db):
+        _seed_user(gold=0, exp=0)
+        routine_service.process_deadlines()
+        assert {r['progress_date'] for r in _progress_rows('daughter')} == {'2026-09-20'}
+
+    @freeze_time("2026-09-20 15:00:01")  # = JST 2026-09-21(月) 00:00:01
+    def test_just_after_jst_midnight_starts_a_new_day(self, isolated_db):
+        """JSTの0時直後はどのフローも未開始(am 05:00 / pm 14:00)なので行を作らない。"""
+        _seed_user(gold=0, exp=0)
+        result = routine_service.process_deadlines()
+        assert result['date'] == '2026-09-21'
+        assert _progress_rows('daughter') == []
 
 
 class TestRouterHttp:
     def test_get_today_unknown_user_returns_404(self, api_client):
         res = api_client.get("/api/routine/today", params={"user_id": "nobody"})
         assert res.status_code == 404
+
+    def test_process_deadlines_endpoint_returns_a_summary(self, api_client):
+        """スケジューラのタスク(monitors/routine_deadline_job.py)が叩くエンドポイント。"""
+        _seed_user()
+        res = api_client.post("/api/routine/deadlines/process")
+        assert res.status_code == 200
+        body = res.json()
+        assert body['processed_users'] == 1
+        assert body['failed_users'] == 0
+        assert 'date' in body and 'transitions' in body
+
+    def test_process_deadlines_endpoint_ignores_a_client_supplied_now(self, api_client):
+        """締切判定の基準時刻をクライアントから指定できないこと。
+
+        指定できるとチェックポイント通過(＝ボーナス確定)を任意の時刻で強制できてしまう。
+        """
+        _seed_user()
+        res = api_client.post("/api/routine/deadlines/process", json={"now": "2024-01-01T23:59:00+09:00"})
+        assert res.status_code == 200
+        # 実時刻基準で処理されるため、2024-01-01 の行は作られない
+        assert [r for r in _progress_rows('daughter') if r['progress_date'] == '2024-01-01'] == []
 
     def test_complete_invalid_flow_key_returns_422(self, api_client):
         res = api_client.post(
@@ -912,7 +1192,7 @@ class TestStepEventRecording:
         routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 0))
         routine_service.complete_step('daughter', 'am', 'meal', now=_at(6, 5))
 
-        routine_service.get_today_state('daughter', now=_at(7, 51))
+        _state_after_deadlines('daughter', now=_at(7, 51))
 
         forced = _step_events(flow_key='am', source='forced_transition')
         # 締切までに一本道(ここでは朝の準備チェックリスト)を終えていないため、
@@ -933,11 +1213,11 @@ class TestStepEventRecording:
         ポーリングのたびにイベントが増えないこと。"""
         _seed_user()
         routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 0))
-        routine_service.get_today_state('daughter', now=_at(7, 51))
+        _state_after_deadlines('daughter', now=_at(7, 51))
         before = len(_step_events(flow_key='am'))
 
-        routine_service.get_today_state('daughter', now=_at(7, 52))
-        routine_service.get_today_state('daughter', now=_at(8, 30))
+        _state_after_deadlines('daughter', now=_at(7, 52))
+        _state_after_deadlines('daughter', now=_at(8, 30))
 
         assert len(_step_events(flow_key='am')) == before
 
@@ -977,7 +1257,7 @@ class TestStepEventRecording:
         source='carryover_skip' として区別する(集計が0時ちょうどの達成として
         誤って所要時間に混ぜないため)。"""
         _seed_user()
-        routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
+        _state_after_deadlines('daughter', now=_saturday_at(14, 0))
 
         skips = _step_events(flow_key='pm', source='carryover_skip')
         assert len(skips) == 1
@@ -994,7 +1274,7 @@ class TestStepEventRecording:
         for key in ('handwash', 'snack', 'homework'):
             routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
 
-        routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
+        _state_after_deadlines('daughter', now=_saturday_at(14, 0))
 
         saturday_skips = {
             e['step_key'] for e in _step_events(flow_key='pm', source='carryover_skip')
@@ -1203,7 +1483,7 @@ class TestStepRewards:
         (チェックポイント通過ボーナスの按分だけが入る)。"""
         _seed_user(user_id='mom', role='role_adult', gold=0, exp=0)
         routine_service.complete_step('mom', 'pm', 'handwash', now=_at(14, 0))
-        state = routine_service.get_today_state('mom', now=_at(18, 1))['flows']['pm']
+        state = _state_after_deadlines('mom', now=_at(18, 1))['flows']['pm']
         statuses = {s['key']: s['status'] for s in state['steps']}
         assert statuses['cook_dinner'] == 'remind'
         # 3ステップ中1つだけ完了 → 満額150Goldの1/3。夕食づくりの150Goldは入らない。
@@ -1249,7 +1529,7 @@ class TestDadWeekdayWeekendSplit:
         """平日は「お仕事」1つを終えれば按分対象が全て'done'になり満額ボーナス。"""
         _seed_user(user_id='dad', role='role_adult', gold=0, exp=0)
         routine_service.complete_step('dad', 'pm', 'work', now=_at(14, 0))
-        routine_service.get_today_state('dad', now=_at(17, 31))  # チェックポイント通過
+        _state_after_deadlines('dad', now=_at(17, 31))  # チェックポイント通過
         gold, _exp, _level = _user_balance('dad')
         assert gold == 150  # 満額(ステップ個別報酬は平日のステップには無い)
 
@@ -1263,7 +1543,7 @@ class TestDadWeekdayWeekendSplit:
         スキップ分を分母からも除くようにして(migrations/0012)、両方とも解消した。
         """
         _seed_user(user_id='dad', role='role_adult', gold=0, exp=0)
-        routine_service.get_today_state('dad', now=_saturday_at(17, 31))
+        _state_after_deadlines('dad', now=_saturday_at(17, 31))
         gold, _exp, _level = _user_balance('dad')
         assert gold == 0
 
@@ -1279,7 +1559,7 @@ class TestDadWeekdayWeekendSplit:
         state = routine_service.complete_step('dad', 'pm', 'living_reset', now=_saturday_at(15, 1))
         assert state['granted_gold'] == 50
 
-        routine_service.get_today_state('dad', now=_saturday_at(17, 31))  # チェックポイント通過
+        _state_after_deadlines('dad', now=_saturday_at(17, 31))  # チェックポイント通過
         gold, _exp, _level = _user_balance('dad')
         assert gold == 50 + 50 + 150  # ステップ個別報酬2件 + 満額ボーナス
 
@@ -1326,7 +1606,7 @@ class TestPmCheckpointIsSeventeenThirty:
         明日の準備は寝る準備チェックリストへ移したので、締切では'current'になる。
         """
         _seed_user(user_id='son', role='role_child')
-        state = routine_service.get_today_state('son', now=_at(17, 31))['flows']['pm']
+        state = _state_after_deadlines('son', now=_at(17, 31))['flows']['pm']
         statuses = {x['key']: x['status'] for x in state['steps']}
         assert statuses['homework'] == 'remind'
         assert statuses['tomorrow_prep'] == 'current'
@@ -1369,7 +1649,7 @@ class TestSkippedKeysPersistence:
     def test_skipped_keys_are_persisted_on_the_progress_row(self, isolated_db):
         """行の作成時にスキップ判定が確定値として保存される。"""
         _seed_user(gold=0, exp=0)
-        routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
+        _state_after_deadlines('daughter', now=_saturday_at(14, 0))
         with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT skipped_keys FROM routine_progress "
@@ -1381,7 +1661,7 @@ class TestSkippedKeysPersistence:
     def test_weekday_progress_has_no_skipped_keys(self, isolated_db):
         """平日の子ども用フローはスキップ無しなので空配列で始まる。"""
         _seed_user(gold=0, exp=0)
-        routine_service.get_today_state('daughter', now=_friday_at(14, 0))
+        _state_after_deadlines('daughter', now=_friday_at(14, 0))
         with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT skipped_keys FROM routine_progress "
@@ -1423,7 +1703,7 @@ class TestCatchUpAfterDeadline:
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
         _seed_user(user_id='son', role='role_child', gold=0, exp=0)
 
-        state = routine_service.get_today_state('son', now=_at(17, 31))['flows']['pm']
+        state = _state_after_deadlines('son', now=_at(17, 31))['flows']['pm']
         statuses = {x['key']: x['status'] for x in state['steps']}
         assert statuses['free'] == 'remind'
         assert state['in_free_time'] is False
@@ -1438,7 +1718,7 @@ class TestCatchUpAfterDeadline:
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
         _seed_user(user_id='son', role='role_child', gold=0, exp=0)
 
-        routine_service.get_today_state('son', now=_at(17, 31))  # 締切通過
+        _state_after_deadlines('son', now=_at(17, 31))  # 締切通過
         routine_service.complete_step('son', 'pm', 'handwash', now=_at(18, 0))
         routine_service.complete_step('son', 'pm', 'snack', now=_at(18, 5))
         mock_trigger.assert_not_called()  # 宿題が残っているうちは解錠しない
@@ -1453,7 +1733,7 @@ class TestCatchUpAfterDeadline:
         """追いつき完了でもボーナスは締切時点の按分のまま(締切の意味を残すため)。"""
         _seed_user(gold=0, exp=0)
         routine_service.complete_step('daughter', 'pm', 'handwash', now=_at(14, 0))
-        routine_service.get_today_state('daughter', now=_at(17, 31))  # 1/3で確定
+        _state_after_deadlines('daughter', now=_at(17, 31))  # 1/3で確定
         fixed_gold, _exp, _level = _user_balance('daughter')
         assert fixed_gold == round(150 * (1 / 3))
 
@@ -1465,7 +1745,7 @@ class TestCatchUpAfterDeadline:
     def test_catch_up_is_possible_even_after_the_flow_is_finished(self, isolated_db):
         """就寝まで終えた後でも、残った「まだだよ」は完了報告できる。"""
         _seed_user(gold=0, exp=0)
-        routine_service.get_today_state('daughter', now=_at(17, 31))
+        _state_after_deadlines('daughter', now=_at(17, 31))
         for key in ('dinner', 'bath', 'nightclothes', 'nightteeth', 'tomorrow_prep'):
             routine_service.complete_step('daughter', 'pm', key, now=_at(18, 0))
         routine_service.complete_step('daughter', 'pm', 'sleep', now=_at(20, 0))
@@ -1478,7 +1758,7 @@ class TestCatchUpAfterDeadline:
     def test_catch_up_does_not_move_the_current_step(self, isolated_db):
         """追いつき完了は進行(current_step_index)を巻き戻さない。"""
         _seed_user(gold=0, exp=0)
-        before = routine_service.get_today_state('daughter', now=_at(17, 31))['flows']['pm']
+        before = _state_after_deadlines('daughter', now=_at(17, 31))['flows']['pm']
         assert before['current_step_index'] == 4  # 'dinner'
 
         state = routine_service.complete_step('daughter', 'pm', 'handwash', now=_at(18, 0))
@@ -1488,7 +1768,7 @@ class TestCatchUpAfterDeadline:
         """朝の準備(チェックリスト)は締切後の追いつき対象外(登校時刻は動かせないため)。"""
         from fastapi import HTTPException
         _seed_user()
-        routine_service.get_today_state('daughter', now=_at(7, 51))
+        _state_after_deadlines('daughter', now=_at(7, 51))
         with pytest.raises(HTTPException) as exc_info:
             routine_service.complete_step('daughter', 'am', 'clothes', now=_at(8, 0))
         assert exc_info.value.status_code == 400
@@ -1503,14 +1783,14 @@ class TestCatchUpAfterDeadline:
         """
         from fastapi import HTTPException
         _seed_user(gold=0, exp=0)
-        state = routine_service.get_today_state('daughter', now=_at(17, 31))['flows']['pm']
+        state = _state_after_deadlines('daughter', now=_at(17, 31))['flows']['pm']
         assert {x['key']: x['status'] for x in state['steps']}['free'] == 'remind'
 
         with pytest.raises(HTTPException) as exc_info:
             routine_service.complete_step('daughter', 'pm', 'free', now=_at(18, 0))
         assert exc_info.value.status_code in (400, 409)
 
-        after = routine_service.get_today_state('daughter', now=_at(18, 1))['flows']['pm']
+        after = _state_after_deadlines('daughter', now=_at(18, 1))['flows']['pm']
         assert {x['key']: x['status'] for x in after['steps']}['free'] == 'remind'
 
     def test_checkpoint_stays_completable_only_through_the_path(self, isolated_db, monkeypatch):
@@ -1519,7 +1799,7 @@ class TestCatchUpAfterDeadline:
         mock_trigger = MagicMock()
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
         _seed_user(user_id='son', role='role_child', gold=0, exp=0)
-        routine_service.get_today_state('son', now=_at(17, 31))
+        _state_after_deadlines('son', now=_at(17, 31))
 
         from fastapi import HTTPException
         with pytest.raises(HTTPException):
@@ -1533,7 +1813,7 @@ class TestCatchUpAfterDeadline:
     def test_adult_step_reward_is_granted_on_catch_up(self, isolated_db):
         """ママが夕食を締切後に作っても、ステップ個別報酬は入る。"""
         _seed_user(user_id='mom', role='role_adult', gold=0, exp=0)
-        routine_service.get_today_state('mom', now=_at(17, 31))
+        _state_after_deadlines('mom', now=_at(17, 31))
         routine_service.complete_step('mom', 'pm', 'handwash', now=_at(18, 0))
         routine_service.complete_step('mom', 'pm', 'snack', now=_at(18, 5))
         state = routine_service.complete_step('mom', 'pm', 'cook_dinner', now=_at(18, 30))
@@ -1552,14 +1832,14 @@ class TestBedtimeMissionMovedToSleepStep:
 
     def _reach_sleep(self, user_id):
         """寝る準備を全項目終えて「就寝」が'current'になるところまで進める。"""
-        routine_service.get_today_state(user_id, now=_at(17, 31))  # 締切通過で寝る準備が活性化
+        _state_after_deadlines(user_id, now=_at(17, 31))  # 締切通過で寝る準備が活性化
         for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
             routine_service.complete_step(user_id, 'pm', key, now=_at(18, 0))
 
     def test_child_sleep_step_grants_the_retired_quest_reward(self, isolated_db):
         _seed_user(gold=0, exp=0)
         # 子ども用フローは明日の準備も寝る準備チェックリストの一員。
-        routine_service.get_today_state('daughter', now=_at(17, 31))
+        _state_after_deadlines('daughter', now=_at(17, 31))
         for key in ('dinner', 'bath', 'nightclothes', 'nightteeth', 'tomorrow_prep'):
             routine_service.complete_step('daughter', 'pm', key, now=_at(18, 0))
 

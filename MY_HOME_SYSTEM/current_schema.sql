@@ -396,3 +396,17 @@ CREATE INDEX idx_user_inventory_user_reward_used
     ON user_inventory (user_id, reward_id, used_at DESC);
 CREATE INDEX idx_reward_history_user_reward_redeemed
     ON reward_history (user_id, reward_id, redeemed_at DESC);
+CREATE INDEX idx_device_records_ts
+    ON device_records (timestamp);
+CREATE INDEX idx_power_usage_ts
+    ON power_usage (timestamp);
+CREATE INDEX idx_switchbot_meter_logs_ts
+    ON switchbot_meter_logs (timestamp);
+CREATE INDEX idx_nas_records_ts
+    ON nas_records (timestamp);
+CREATE INDEX idx_bicycle_parking_records_ts
+    ON bicycle_parking_records (timestamp);
+CREATE INDEX idx_security_logs_ts
+    ON security_logs (timestamp);
+CREATE INDEX idx_routine_step_events_occurred
+    ON routine_step_events (occurred_at);

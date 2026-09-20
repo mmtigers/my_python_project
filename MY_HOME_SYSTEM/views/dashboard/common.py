@@ -5,7 +5,9 @@ import traceback
 from contextlib import contextmanager
 from typing import Iterable, NamedTuple
 
+import pandas as pd
 import streamlit as st
+from services import analysis_service
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +128,51 @@ CUSTOM_CSS = f"""
     }}
 </style>
 """
+
+
+# === データ読み込みのキャッシュ (Issue #741) ===
+# `dashboard.py` の「🔄 データを更新」ボタンは以前から `st.cache_data.clear()` を
+# 呼んでいたが、リポジトリ全体に `@st.cache_data` / `@st.cache_resource` が
+# 1つも存在せず、実際には何も消していなかった(=キャッシュが効いていると
+# 認識して書かれたコードだけが残っていた)。
+#
+# Streamlit はウィジェット操作・タブ切替・ページ読み込みのたびにスクリプト
+# 全体を再実行するため、この状態では「タブを1回切り替える」たびに
+# SQLite から約33,000行(センサー最大30,000 + 駐輪場3,000 + 各種500)を
+# 読み直していた。長い読み取りは `unified_server` 側の書き込みと競合して
+# "database is locked" の確率も上げる(`analysis_service` 冒頭のコメント参照)。
+#
+# `analysis_service` は `unified_server.py` からも import されるため、
+# Streamlit 依存をそちらへ持ち込んではいけない。キャッシュはこのView層に閉じ込める。
+#
+# TTL はセンサーの書き込み間隔(5〜10分)より十分短いので表示の鮮度は実質
+# 劣化せず、「🔄 データを更新」ボタンが TTL を待たずに捨てる手段として
+# ようやく意味を持つようになる。
+DASHBOARD_CACHE_TTL_SEC = 60
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def load_sensor_data_cached(limit: int) -> pd.DataFrame:
+    """`analysis_service.load_sensor_data` のキャッシュ付きラッパー。"""
+    return analysis_service.load_sensor_data(limit=limit)
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def load_generic_data_cached(table_name: str, limit: int = 500) -> pd.DataFrame:
+    """`analysis_service.load_generic_data` のキャッシュ付きラッパー。"""
+    return analysis_service.load_generic_data(table_name, limit=limit)
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def load_bicycle_data_cached(limit: int) -> pd.DataFrame:
+    """`analysis_service.load_bicycle_data` のキャッシュ付きラッパー。"""
+    return analysis_service.load_bicycle_data(limit=limit)
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def load_nas_status_cached() -> pd.Series | None:
+    """`analysis_service.load_nas_status` のキャッシュ付きラッパー。"""
+    return analysis_service.load_nas_status()
 
 
 class StatusCard(NamedTuple):

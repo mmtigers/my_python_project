@@ -14,11 +14,13 @@
 - [logger.md](./logger.md) — `core.logger.setup_logging`(ロガー初期化)を提供
 - [config.md](./config.md) — `config`モジュール(設定値)を提供
 - [unified_server.md](./unified_server.md) — 呼び出し元。FastAPIアプリの`lifespan`起動時に本スクリプトをサブプロセスとして起動する
+- [routine_deadline_job.md](./routine_deadline_job.md) — **（Issue #738 / AUDIT-008 で追加）** `TASKS`に60秒間隔で登録された、ルーティン締切処理のHTTPクライアント
 
 ## 2. ファイルの概要
 
 * 指定された間隔（秒）で、プロジェクト内のPythonスクリプトを定期的にサブプロセスとして実行し管理する無限ループのスケジューラ。
 * `ThreadPoolExecutor` により各タスクを並列実行する。1タスクの長時間化が他のタスクの実行タイミングを丸ごと遅延させないための設計。
+* **（Issue #738 / AUDIT-008 で追加）** `TASKS`の先頭に`monitors/routine_deadline_job.py`(interval 60秒)が加わった。デイリールーティンの締切(チェックポイント時刻)超過処理を、フロントエンドの15秒ポーリング(`GET /api/routine/today`)からこのスケジューラへ移したもの。同スクリプト自体はDBを触らず`POST /api/routine/deadlines/process`を叩くだけのHTTPクライアントで、実処理は`unified_server`のプロセス内で動く(スケジューラは別プロセスのため`quest_users`を直接書けない — CLAUDE.md「並行制御は単一プロセス前提」)。
 * 根拠: `main` 関数内のループおよび `TASKS` 定義 (行番号: 199〜235, 30〜44 / 抜粋: "with ThreadPoolExecutor(...", "TASKS: List[Task] = [")
 
 
@@ -78,7 +80,7 @@
 ### `run_script`
 
 * **役割**: 指定されたスクリプトをサブプロセスとして実行し、実行結果をログに出力する。
-* 根拠: `def run_script(script_path: str, args: List[str]) -> bool:` (行番号: 98 / 抜粋: "def run_script(script_path: str, args: List[str]) -> bool:")、docstring (行番号: 100 / 抜粋: "指定されたスクリプトをサブプロセスとして実行する。")
+* 根拠: `def run_script(script_path: str, args: List[str]) -> bool:` (行番号: 106 / 抜粋: "def run_script(script_path: str, args: List[str]) -> bool:")、docstring (行番号: 100 / 抜粋: "指定されたスクリプトをサブプロセスとして実行する。")
 * **（Issue #360 / #361 で修正）** `subprocess.run` ではなく `subprocess.Popen` で起動して `_running_children[script_path]` に登録し、`proc.wait(timeout=3600)` で完了を待つ。これにより SIGTERM 受信時に `terminate_running_children()` から実行中の子プロセスを止められる。失敗時にログへ流す stderr は末尾 20 行に絞る（Discord 通知の 2000 字制限対策）。タイムアウト時は `proc.kill()` を試みる。`finally` で `_running_children` から自分のエントリを外す。
 * 根拠: `proc = subprocess.Popen(` (行番号: 145〜151)、`_running_children[script_path] = proc` (行番号: 152〜153)、`proc.wait(timeout=3600)` (行番号: 159)、`tail = "\n".join(stderr_tail)` (行番号: 178)、`_running_children.pop(script_path, None)` (行番号: 194〜197)
 * **（Issue #575で修正）** returncode が非0の場合の分岐を、単純な「失敗」扱いから二分岐に変更した。以前は returncode が 0 以外であれば理由を問わず一律で ERROR ログ（`core/logger.py` の `DiscordErrorHandler` 経由で Discord に通知される）を出していたため、`terminate_running_children()`（Issue #360）がシャットダウン・デプロイ時に `proc.terminate()` で実行中の監視スクリプトを止める（SIGTERM由来の負のreturncode、典型的には-15になる）たびに、「タスク失敗」という偽のDiscordアラートが飛んでいた。現在は returncode が非0のとき、まず `_children_lock` 配下で `script_path` が モジュールレベル集合 `_intentionally_terminated`（後述）に含まれるかを確認し、含まれていればその場で `discard` して消費したうえで INFO ログのみを出力し `False` を返す（Discord通知なし）。含まれていない場合（スクリプトが自発的に非0で終了した、真の失敗）は、従来どおり ERROR ログとstderr末尾の出力を行い `False` を返す。
@@ -86,11 +88,11 @@
 * **（#411 S-L5で修正・PYTHONPATH）** 以前は `env["PYTHONPATH"] = PROJECT_ROOT` で既存の `PYTHONPATH`(`start_all.sh` 等が設定した値)を無条件に上書きしていた。呼出元の設定を残しつつ `PROJECT_ROOT` を優先させるため、既存値がある場合は `os.pathsep` 区切りで先頭に追記するよう変更した。
 * 根拠: `existing_pythonpath = env.get("PYTHONPATH")` (行番号: 121)、`env["PYTHONPATH"] = (...)` (行番号: 122〜124)
 * **（#411 S-L5で修正・stderr保持）** 以前は `proc.communicate(timeout=3600)` でstdout/stderrをタスク完了まで全量メモリに保持していた（最大1時間分の出力を保持しうる）。ログ用途は末尾20行のみで十分なため、stdoutは`subprocess.DEVNULL`に捨て、stderrは別スレッド(`_drain_stderr`)で1行ずつ読みながら固定長`collections.deque(maxlen=20)`にのみ保持するよう変更し、メモリ使用量が出力量に依存しないようにした。
-* 根拠: `stderr_tail: "collections.deque[str]" = collections.deque(maxlen=20)` (行番号: 127)、`def _drain_stderr(pipe) -> None:` (行番号: 130〜139)、`stdout=subprocess.DEVNULL` (行番号: 148)
+* 根拠: `stderr_tail: "collections.deque[str]" = collections.deque(maxlen=20)` (行番号: 127)、`def _drain_stderr(pipe) -> None:` (行番号: 138〜147)、`stdout=subprocess.DEVNULL` (行番号: 148)
 
 
 * **引数/リクエスト**: `script_path` (`str`): 実行するスクリプトの相対パス, `args` (`List[str]`): スクリプトに渡す引数
-* 根拠: 関数定義 (行番号: 98 / 抜粋: "def run_script(script_path: str, args: List[str]) -> bool:")
+* 根拠: 関数定義 (行番号: 106 / 抜粋: "def run_script(script_path: str, args: List[str]) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`: 実行成功（returncode 0）ならTrue、それ以外（意図的terminate・真の失敗・タイムアウト・例外のいずれも）はFalse
@@ -110,7 +112,7 @@
 ### `terminate_running_children` / `_handle_shutdown_signal` / `install_signal_handlers`（Issue #360 で追加）
 
 * **役割**: `_running_children`（実行中の子プロセスの `script_path → Popen`、`_children_lock` で保護）を走査し、生存中のものを `terminate()` → timeout 後 `kill()` して停止数を返す。`_handle_shutdown_signal` は SIGTERM/SIGINT で `_shutdown_event` を立てて `terminate_running_children()` を呼ぶ。`install_signal_handlers` は両シグナルにこのハンドラを登録する（メインスレッド以外からの呼び出し等で `ValueError`/`OSError` になる場合は無視）。以前は scheduler が SIGTERM で即死し、実行中の `nas_monitor.py` 等（最大3600s）が孤児として走り続けて再起動後の新世代と DB 書き込み・保持期間削除が競合していた。
-* 根拠: `_running_children: Dict[str, subprocess.Popen] = {}` (行番号: 48〜50)、`def terminate_running_children(timeout: float = 5.0) -> int:` (行番号: 59〜80)、`def _handle_shutdown_signal(signum, _frame) -> None:` (行番号: 83〜86)、`def install_signal_handlers() -> None:` (行番号: 89〜95)
+* 根拠: `_running_children: Dict[str, subprocess.Popen] = {}` (行番号: 48〜50)、`def terminate_running_children(timeout: float = 5.0) -> int:` (行番号: 67〜88)、`def _handle_shutdown_signal(signum, _frame) -> None:` (行番号: 91〜94)、`def install_signal_handlers() -> None:` (行番号: 97〜103)
 * **モジュールレベル集合 `_intentionally_terminated: Set[str]`（Issue #575で追加）**: `terminate_running_children()` が「今まさに意図的に停止させようとしているスクリプト」を記録するための集合。`_children_lock` で他の `_running_children` 操作と同じロックを共有して保護する。書き込み（`add`）は `terminate_running_children` が `proc.terminate()` を呼ぶ**直前**に行う。読み取り・消費（`in` チェック後に `discard`）は `run_script` が非0のreturncodeを受け取った直後に行い、含まれていれば「意図的な停止」としてINFOログのみを出す（後述）。`add` を「シグナル送信の前」に行っているのは、`run_script` 側の別スレッドで動く `proc.wait()` がこの `terminate()` を受けて即座に返り値付きで復帰し `run_script` が判定に入るタイミングとの間で、記録がまだ間に合っていないという競合を避けるため。
 * 根拠: `_intentionally_terminated: Set[str] = set()` およびコメント (行番号: 52〜56 / 抜粋: "#575: terminate_running_children が意図的に停止したスクリプトを記録する。")、`with _children_lock:`・`_intentionally_terminated.add(script)` (行番号: 69〜70、`proc.terminate()` 呼び出し (行番号: 71) の直前)、`from typing import ... Set, ...` (行番号: 10 / 抜粋: "from typing import List, Dict, Optional, Set, TypedDict")
 * **引数/リクエスト**: `timeout: float` / `(signum, _frame)` / なし
@@ -125,7 +127,7 @@
 ### `_is_task_due`（Issue #749 / AUDIT-020 で追加）
 
 * **役割**: タスクを今このタイミングで実行すべきかを判定する純関数。`last_run` が `0`（未実行の番兵）なら常に `True`、それ以外は `now - last_run >= interval` を返す。無限ループの `main()` を回さずに判定だけを単体テストできるよう、ループ本体から切り出してある。
-* 根拠: `def _is_task_due(task: Task, now: float) -> bool:` (行番号: 199〜215 / 抜粋: "def _is_task_due(task: Task, now: float) -> bool:")
+* 根拠: `def _is_task_due(task: Task, now: float) -> bool:` (行番号: 207〜223 / 抜粋: "def _is_task_due(task: Task, now: float) -> bool:")
 * **引数/リクエスト**: `task: Task`（`interval` と `last_run` を読む）, `now: float`（`time.monotonic()` 基準の現在値）
 * 根拠: 関数定義 (行番号: 199)
 * **戻り値/レスポンス**: `bool`
@@ -140,17 +142,17 @@
 ### `main`
 
 * **役割**: `ThreadPoolExecutor`（ワーカー数 = `TASKS`件数、最低1）を使って `TASKS` リストを巡回し、`_is_task_due()` が `True`（= 最終実行からの経過が `interval` 以上、または未実行）で、かつ当該スクリプトが実行中でないタスクに対して `run_script` を非同期（別スレッド）で投入する無限ループを実行する。**（Issue #749 / AUDIT-020 で変更）** 時刻の基準は `time.time()`（壁時計）ではなく `time.monotonic()`。Raspberry Pi は RTC を持たず、起動直後のシステム時刻は「最後にシャットダウンした時刻」か1970年で、NTP 同期の瞬間に大きくジャンプする。**後方へのジャンプでは `now - last_run` が負になり、`interval`（300〜3600秒）を超えるまで6つの監視タスク（電力・環境ロギング・`server_watchdog`・TVロック・メモリ・NAS）がすべて沈黙していた。**しかも `health_watch` は「タスクが実行されていない」ことを見ないため、その沈黙自体が検知されない。`unified_server.restart_dead_children` や `core.logger.flush_pending_discord_notifications` と同じく単調時計を使う。実行中のタスクは `in_flight` 辞書（スクリプトパス→`Future`）で管理し、完了していないタスクは同一周期内で再投入しない（多重起動防止）。
-* 根拠: `def main() -> None:` (行番号: 218 / 抜粋: "メインループ。")
+* 根拠: `def main() -> None:` (行番号: 226 / 抜粋: "メインループ。")
 * **（Issue #360 で修正）** 冒頭で `install_signal_handlers()` を呼び、メインループは `while True` ではなく `while not _shutdown_event.is_set()`、スリープは `_shutdown_event.wait(10)`（シャットダウン要求で即抜ける）。ループを抜けた後に `terminate_running_children()` を呼ぶ。
 * 根拠: `install_signal_handlers()` (行番号: 167)、`while not _shutdown_event.is_set():` (行番号: 172)、`_shutdown_event.wait(10)` (行番号: 189)、`terminate_running_children()` (行番号: 191)
 
 
 * **引数/リクエスト**: なし
-* 根拠: 関数定義 (行番号: 218 / 抜粋: "def main() -> None:")
+* 根拠: 関数定義 (行番号: 226 / 抜粋: "def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 関数定義 (行番号: 218 / 抜粋: "def main() -> None:")
+* 根拠: 関数定義 (行番号: 226 / 抜粋: "def main() -> None:")
 
 
 * **副作用**: `ThreadPoolExecutor.submit` による `run_script` の並列実行。`TASKS` 内各タスクの `last_run` の更新。`in_flight` 辞書への `Future` の登録。1回のループ終了ごとの10秒間のスリープ。
@@ -293,7 +295,7 @@ graph TD
 | --- | --- | --- |
 | `config` モジュールの役割 | `scheduler_boot.py`14行目で`import config`されているのみで、モジュール内での`config.`という属性アクセスは存在しない(検索で1件もヒットしない)ことを確認した。ただし`config.py`自体を直接確認したところ、モジュールロード時(import時)に副作用を伴う設計であることが判明した：`load_dotenv()`の呼び出し(139行目)、NAS等ディレクトリの検証・作成を行う`verify_and_initialize_storage`関数の実行、`devices.json`/`family_events.json`の読み込み・パース(283行目, 302行目)、ログ・アセット等の必須ディレクトリの自動作成ループ(516行目、`os.makedirs(d, exist_ok=True)`)が該当する。したがって`scheduler_boot.py`にとっての`import config`は、直接の属性参照はなくとも、これらモジュールロード時の環境初期化処理（ディレクトリ検証・作成、設定ファイル読み込み）を一括して発生させるための副作用目的のインポートであると判断できる。 | 直接ソース確認: `MY_HOME_SYSTEM/scheduler_boot.py:14`, `MY_HOME_SYSTEM/config.py:139, 283, 302, 516`（config.py自体の全体像は`config.md`参照） |
 | ログの出力仕様 | `core/logger.py`46〜86行目の`setup_logging`を直接確認した。コンソール出力(`StreamHandler`)、ファイル出力(`WatchedFileHandler`。ローテーションは `deploy/logrotate/home_system` の logrotate に一元化。**（2026-09-06 品質監査で修正）** 以前は`TimedRotatingFileHandler`・`backupCount=7`と記述していたが現行 `core/logger.py` 行番号 196 は `WatchedFileHandler`)、ERRORレベル以上をDiscord Webhookへ送信する`DiscordErrorHandler`の3種のハンドラを登録する。ログ保存先は`os.path.join(config.BASE_DIR, "logs")`(63行目)で、`config.BASE_DIR`は`config.py`212行目で`os.path.dirname(os.path.abspath(__file__))`（`MY_HOME_SYSTEM/`ディレクトリ）と定義されているため、実際のログファイルパスは`MY_HOME_SYSTEM/logs/home_system.log`になる。Discord送信先は`webhook_url`引数指定時はそれを優先し、未指定時は`config.DISCORD_WEBHOOK_ERROR`(config.py194行目、環境変数`DISCORD_WEBHOOK_ERROR`から取得)を使用する(78行目)。`scheduler_boot.py`18行目の`setup_logging("scheduler")`は`webhook_url`引数を渡していないため、`config.DISCORD_WEBHOOK_ERROR`が使われる。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:46-86`, `MY_HOME_SYSTEM/config.py:194, 212`, `MY_HOME_SYSTEM/scheduler_boot.py:18` |
-| 各監視スクリプトの詳細仕様 | `scheduler_boot.py`29〜43行目の`TASKS`リストを直接確認した。実際に定期実行登録されているのは`monitors/switchbot_power_monitor.py`(300秒間隔), `monitors/nature_remo_monitor.py`(300秒), `monitors/server_watchdog.py`(600秒), `monitors/tv_lock_monitor.py`(300秒。以前はコメントが実値(300秒=5分)と乖離した「30分」という頻度区分表記だったが、#411 品質でコメントを実値に合わせて訂正済み), `monitors/memory_monitor.py`(600秒), `monitors/nas_monitor.py`(3600秒)の6本で、いずれも`args: []`（追加引数なし）である。以前はコメントアウトされた`monitors/timelapse_runner.py`の行も存在したが、実行経路が存在しない到達不能コードだったため`timelapse_runner.py`/`timelapse_generator.py`ともに削除され(Issue #485)、このコメント行自体も削除されている。旧不明事項に挙げられていた`weekly_analyze_report.py`は`TASKS`リストおよび`scheduler_boot.py`全文検索のいずれにも登場せず、本ファイルの定期実行対象には含まれていないことを確認した（別の起動経路を持つと推測されるが、その経路自体は本ファイルの解析範囲外）。各スクリプトの冒頭import文からは、`switchbot_power_monitor.py`が`services.switchbot_service`/`services.sensor_service`を、`server_watchdog.py`と`tv_lock_monitor.py`が`services.notification_service`/`services.switchbot_service`をそれぞれ利用する構成であることが確認できるが、各スクリプト内部の詳細な処理ロジックはそれぞれの専用仕様書の解析範囲である。 | 直接ソース確認: `MY_HOME_SYSTEM/scheduler_boot.py:29-43`, `MY_HOME_SYSTEM/monitors/switchbot_power_monitor.py:1-15`, `MY_HOME_SYSTEM/monitors/server_watchdog.py:1-14`, `MY_HOME_SYSTEM/monitors/tv_lock_monitor.py:1-14` |
+| 各監視スクリプトの詳細仕様 | **（Issue #738 / AUDIT-008 で更新: `monitors/routine_deadline_job.py`(60秒間隔、`args: []`)が先頭に加わり計7本になった。同スクリプトは`requests`でサーバーのAPIを叩くだけで、DB・サービス層をimportしない）** `scheduler_boot.py`の`TASKS`リストを直接確認した。従来から定期実行登録されているのは`monitors/switchbot_power_monitor.py`(300秒間隔), `monitors/nature_remo_monitor.py`(300秒), `monitors/server_watchdog.py`(600秒), `monitors/tv_lock_monitor.py`(300秒。以前はコメントが実値(300秒=5分)と乖離した「30分」という頻度区分表記だったが、#411 品質でコメントを実値に合わせて訂正済み), `monitors/memory_monitor.py`(600秒), `monitors/nas_monitor.py`(3600秒)の6本で、いずれも`args: []`（追加引数なし）である。以前はコメントアウトされた`monitors/timelapse_runner.py`の行も存在したが、実行経路が存在しない到達不能コードだったため`timelapse_runner.py`/`timelapse_generator.py`ともに削除され(Issue #485)、このコメント行自体も削除されている。旧不明事項に挙げられていた`weekly_analyze_report.py`は`TASKS`リストおよび`scheduler_boot.py`全文検索のいずれにも登場せず、本ファイルの定期実行対象には含まれていないことを確認した（別の起動経路を持つと推測されるが、その経路自体は本ファイルの解析範囲外）。各スクリプトの冒頭import文からは、`switchbot_power_monitor.py`が`services.switchbot_service`/`services.sensor_service`を、`server_watchdog.py`と`tv_lock_monitor.py`が`services.notification_service`/`services.switchbot_service`をそれぞれ利用する構成であることが確認できるが、各スクリプト内部の詳細な処理ロジックはそれぞれの専用仕様書の解析範囲である。 | 直接ソース確認: `MY_HOME_SYSTEM/scheduler_boot.py:29-43`, `MY_HOME_SYSTEM/monitors/switchbot_power_monitor.py:1-15`, `MY_HOME_SYSTEM/monitors/server_watchdog.py:1-14`, `MY_HOME_SYSTEM/monitors/tv_lock_monitor.py:1-14` |
 
 ## 10. 自己検証結果
 

@@ -96,6 +96,63 @@ sudo systemctl enable network_logger.service
 本ディレクトリの `*.service` と `/etc/systemd/system/` 側の同名ファイルをコメント・空行を除いて比較し、
 差分・未導入があれば Discord の error チャンネルへ通知する(自動で書き戻しはしない)。
 
+## nvr-entrance.service / nvr-garden.service / nvr-parking.service
+
+カメラ3台の常時録画。`ffmpeg` が RTSP を `-c copy`(無劣化・CPU負荷最小)で受け、
+NAS(`/mnt/nas/home_system/nvr_recordings/<カメラ>/`)へ **10分ごとの MP4** を直接書く。
+録画が止まっていないかは `monitors/health_watch.py` のチェック10が、この
+`{YYYYMMDD}_{HHMMSS}.mp4` という命名の最新ファイル時刻を見て検知する(Issue #716)。
+
+> **Issue #773**: 以前この3本は**リポジトリ外**(`/etc/systemd/system/` に直接手書き)で管理され、
+> **RTSP の認証情報が `ExecStart` に平文**で書かれたファイルが **644** で置かれていた。
+> 差分・履歴・レビューの対象外だったため3本の間で設定がばらつき、`-timeout` が garden だけ
+> 欠落していた(Issue #772。録画が無音で止まりうる状態だった)。本ディレクトリへ取り込み、
+> 認証情報は `/etc/nvr/<カメラ>.env`(600・root所有)へ切り出した。
+
+### 認証情報ファイル(実機のみ・リポジトリには置かない)
+
+カメラごとに1ファイル。中身は RTSP の URL 1行だけ:
+
+```
+NVR_RTSP_URL=rtsp://<ユーザー>:<パスワード>@<カメラのIP>:554/<ストリームのパス>
+```
+
+作成手順(実機側):
+
+```bash
+sudo install -d -m 700 -o root -g root /etc/nvr
+sudo install -m 600 -o root -g root /dev/null /etc/nvr/entrance.env
+sudo tee /etc/nvr/entrance.env >/dev/null <<'EOF'
+NVR_RTSP_URL=rtsp://...
+EOF
+# garden / parking も同様
+sudo chmod 600 /etc/nvr/*.env
+```
+
+> URL は移行前のユニット(`/etc/systemd/system/nvr-*.service.bak.*`)の `-i` 引数に入っている。
+> 値に `$` が含まれる場合、systemd の EnvironmentFile では `$$` とエスケープする必要がある。
+
+### 導入手順(実機側)
+
+```bash
+sudo cp deploy/systemd/nvr-entrance.service /etc/systemd/system/nvr-entrance.service
+sudo cp deploy/systemd/nvr-garden.service   /etc/systemd/system/nvr-garden.service
+sudo cp deploy/systemd/nvr-parking.service  /etc/systemd/system/nvr-parking.service
+sudo chmod 644 /etc/systemd/system/nvr-*.service   # 認証情報は含まれないので 644 でよい
+sudo systemctl daemon-reload
+sudo systemctl restart nvr-entrance nvr-garden nvr-parking
+```
+
+確認(カメラごとに、restart 後の時刻で新しいセグメントが作られること):
+
+```bash
+systemctl is-active nvr-entrance nvr-garden nvr-parking
+for c in entrance garden parking; do ls -t /mnt/nas/home_system/nvr_recordings/$c | head -1; done
+journalctl -u nvr-garden --since "-5 min"    # ffmpeg のエラーが出ていないこと
+```
+
+切り戻し: 移行前のユニットは `/etc/systemd/system/nvr-*.service.bak.*` に残してある。
+
 ## (削除済み) pi-monitor.service
 
 以前は「Raspberry Pi本体の汎用モニタリングサービス」としてユニットファイルのみを

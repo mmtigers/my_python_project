@@ -13,7 +13,7 @@ from models.quest import (
     SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse,
     QuestAction, ApproveAction, HistoryAction, RewardAction,
     UpdateUserAction, SoundTestRequest, UseItemAction, ResetUserAction, ResetUserResponse,
-    SyncMasterAction
+    SyncMasterAction, GameDataResponse
 )
 from services.quest_service import (
     game_system, quest_service, approval_service, shop_service, user_service, inventory_service,
@@ -37,7 +37,12 @@ logger = setup_logging("quest_router")
 def sync_master_data(action: SyncMasterAction):
     return game_system.sync_master_data_as_admin(action.admin_id)
 
-@router.get("/data")
+# Issue #752 (AUDIT-023): 唯一 response_model の無いエンドポイントだったため、
+# OpenAPI にレスポンス形状が出ておらず、フロントエンド(手書き Zod / TS interface)
+# との乖離を検知する手段がサーバー側に一切無かった。GameDataResponse は
+# get_all_view_data が現在返している形をそのまま写したもので、返却フィールドは
+# 1つも減らしていない(詳細は models/quest.py の View Models セクション)。
+@router.get("/data", response_model=GameDataResponse)
 def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:
     try:
         return game_system.get_all_view_data(viewer_user_id)

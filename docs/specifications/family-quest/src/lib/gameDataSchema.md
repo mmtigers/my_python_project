@@ -16,6 +16,9 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #752 / AUDIT-023 で追加）** 冒頭コメントに、バックエンド側の契約（`MY_HOME_SYSTEM/models/quest.py` の `GameDataResponse` 配下の View モデル）と、それを本ファイルと突き合わせる回帰テスト（`MY_HOME_SYSTEM/tests/test_quest_api_type_contract.py`）についての追記が入った。同テストは**本ファイルを直接テキストとして読み**、(1) ここで宣言したフィールドをバックエンドが宣言し続けていること、(2)「バックエンドにはあるがここに無い」フィールドが同テストの許可リスト `_BACKEND_ONLY_FIELDS` と完全に一致すること、の2点をCIで検証する。これにより、`.strict()` を使わない設計の穴（バックエンドの新フィールド追加が無音で無視される。#470）はバックエンド側のテストで検知されるようになった。本ファイルのスキーマにフィールドを足す/削る場合は同テストも更新する必要がある。スキーマ定義そのもの（各 `z.object`）はこの変更で一切変わっていない。
+* 根拠: 冒頭コメント (行番号: 16〜28 / 抜粋: "// #752(AUDIT-023): 上記の「新フィールドが無音で無視される」穴を塞ぐため、\n// バックエンド側に GET /api/quest/data の response_model\n// (MY_HOME_SYSTEM/models/quest.py の GameDataResponse 配下の View モデル)を\n// 追加し、MY_HOME_SYSTEM/tests/test_quest_api_type_contract.py が\n// **本ファイルを直接読んで** 次の2点をCIで検証するようにした。")
+
 * **（Issue #659 で追加）** `chronicleResponseSchema` / `inventoryResponseSchema` / `cameraSettingsResponseSchema` を追加した。冒頭に掲げた「幽霊フィールドを取得境界で即検知する」方針が `gameData` / `purchase` / `routine` の3つにしか適用されておらず、`chronicle`・`inventory`・`cameraSettings` が漏れていたため。`.strict()` を使わない方針は従来どおりで、未知フィールドは無視される。
 
 `GameSystem.get_all_view_data`（`/api/quest/data`）のレスポンスに限り、`useGameData.ts`の取得境界でZodによるランタイム検証を行うためのスキーマ定義ファイル。バックエンド(MY_HOME_SYSTEM)のAPIレスポンス形状とフロントエンドの型定義(`src/types/index.ts`)が乖離していても、OpenAPI→TS生成パイプラインが存在しないためビルド時には検知できず、フィールド名二重化のような不整合の温床になっていたこと（Issue #291）を受けて追加された。バックエンドが実際に返しているフィールド名と型をここに明示し、ここに定義されていないフィールドをコンポーネント側で参照した場合、TypeScript上は型チェックを通過しても実行時には常に`undefined`になる「幽霊フィールド」であることが`.parse()`失敗によってすぐ分かるようにするのが目的。`users`/`quests`/`rewards`/`completedQuests`/`pendingQuests`の5つの配列フィールドからなる`gameDataResponseSchema`を提供する。**（#412 API契約で修正）** 以前は`logs`(`adventureLogSchema`)も検証対象に含めていたが、`gameData.logs`(`AdventureLog`型)はどのコンポーネントからも参照されておらず、`useGameData.ts`側の対応する型・フィールドごと削除されたため、本ファイルでも検証対象から外した。**（Issue #444で追加）** `gameDataResponseSchema`はもはや本ファイルの唯一のエクスポートではなく、`models/quest.py`の`PurchaseResponse`（`status`/`newGold`）に対応する`purchaseResponseSchema`も新たにエクスポートされている。`useGameData.ts`の`buyRewardMutation`がこれを使い、購入APIのレスポンスもランタイム検証するようになった（以前は`useGameData.ts`側で`as unknown as PurchaseResponse`と無検証キャストしていた）。
@@ -29,7 +32,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `z` | 外部ライブラリ(`zod`) | スキーマオブジェクト・各フィールドのバリデータ定義に使用 | 根拠: [インポート宣言] (行番号: 15 / 抜粋: "import { z } from 'zod';") |
+| `z` | 外部ライブラリ(`zod`) | スキーマオブジェクト・各フィールドのバリデータ定義に使用 | 根拠: [インポート宣言] (行番号: 29 / 抜粋: "import { z } from 'zod';")（Issue #752 の冒頭コメント追記により行番号が 15 → 29 へ移動） |
 
 ### ブラックボックスとなる外部要素
 
@@ -190,7 +193,9 @@ graph TD
 * **NULL可カラムは`.nullable().optional()`にする**: SQLiteの`quest_users`/`quest_history`はほとんどのカラムがNULL可であり、`SELECT *`の結果がそのまま届く。`.optional()`だけでは「キーが無い」ことしか許容せず`null`は拒否されるため、新しいカラムをスキーマに追加する際はDBのNULL制約を`migrations/`で確認し、NULL可なら`.nullable().optional()`にすること。
 * 根拠: (行番号: 17〜20, 66〜68)
 
-* **`.strict()`を意図的に使わない設計**: `gameDataResponseSchema`および各サブスキーマは`.strict()`を付与しておらず、バックエンドがスキーマに定義されていない新しいフィールドを追加しても`.parse()`は失敗しない（未知フィールドは黙って無視される）。これは将来のバックエンド変更でこのフロントエンドのビルドが壊れないようにするための意図的なトレードオフだが、裏を返すと「バックエンドが新フィールドを追加したのにこのスキーマ側の更新を忘れた」場合も検知されない（＝この検証層はバックエンドの追加変更を検知する目的では機能しない）。
+* **`.strict()`を意図的に使わない設計**: `gameDataResponseSchema`および各サブスキーマは`.strict()`を付与しておらず、バックエンドがスキーマに定義されていない新しいフィールドを追加しても`.parse()`は失敗しない（未知フィールドは黙って無視される）。これは将来のバックエンド変更でこのフロントエンドのビルドが壊れないようにするための意図的なトレードオフだが、裏を返すと「バックエンドが新フィールドを追加したのにこのスキーマ側の更新を忘れた」場合も検知されない（＝この検証層はバックエンドの追加変更を検知する目的では機能しない）。**（Issue #752 で緩和）** この「無音で無視される」点は実行時挙動としては変わらないが、検知だけはバックエンド側の`tests/test_quest_api_type_contract.py`が担うようになった（本ファイルをパースし、バックエンドの View モデルとの差分が許可リストと一致しない場合にCIを落とす）。
+* **本ファイルはバックエンドのテストから機械的に読まれる（Issue #752）**: `MY_HOME_SYSTEM/tests/test_quest_api_type_contract.py`の`_parse_zod_object_keys()`が、`const <名前>Schema = z.object({ ... })` という**記述の形**に依存してトップレベルのキー名を抽出する。スキーマの書き方を大きく変える（定義を別ファイルへ分割する、`z.object`以外の組み立て方に変える等）場合は、同テストのパーサも合わせて更新すること。
+* 根拠: (行番号: 16〜28 / 抜粋: "// そのため、ここのスキーマにフィールドを足す/削る変更をしたときは、\n// バックエンドの同テストも合わせて更新すること(パーサは\n// `const xxxSchema = z.object({ ... })` のトップレベルのキー名だけを見る)。")
 * 根拠: (行番号: 12〜14 / 抜粋: "// 既知でないフィールドは(zodのデフォルト挙動により)無視して構わない。将来\n// バックエンドが新しいフィールドを追加した場合にparseが失敗しないよう、\n// 意図的に .strict() は使わない。")
 * **[修正済み] `userSchema`が`nextLevelExp`を検証対象に含んでいなかった問題（Issue #470）**: `MY_HOME_SYSTEM/services/quest_service.py`の`GameSystem.get_all_view_data`は、`users`の各要素に`u['nextLevelExp'] = game_logic.GameLogic.calculate_next_level_exp(u['level'])`という形で`nextLevelExp`フィールドを以前から常に付与していたが、`userSchema`にはこのフィールドの定義が無く、`.strict()`を使わない設計のため`.parse()`自体は成功しつつも、パース後のオブジェクトからはこのフィールドが無音でstripされていた（バックエンドが実際に返しているフィールドがランタイム検証をすり抜けて消費側に届かない、この設計の既知の穴の一例）。現在は`userSchema`に`nextLevelExp: z.number().optional()`が追加され、`.parse()`後もこのフィールドが保持されるようになった（`types/index.ts`の`User.nextLevelExp?: number`とも対になる変更）。
 * 根拠: (行番号: 17〜37 / 抜粋: "// #470: get_all_view_dataが実際に付与しているフィールドだが、.strict()を\n    // 使わないためこれまでスキーマに含まれておらず、parse後は無音で消えていた\n    // (バックエンドの新フィールド追加を検知できないこの設計の既知の穴の一例)。\n    nextLevelExp: z.number().optional(),")、`MY_HOME_SYSTEM/services/quest_service.py`側の`nextLevelExp`付与箇所（直接ソース確認、行番号は`quest_service.md`の相互参照情報を参照）

@@ -12,6 +12,19 @@
 // 既知でないフィールドは(zodのデフォルト挙動により)無視して構わない。将来
 // バックエンドが新しいフィールドを追加した場合にparseが失敗しないよう、
 // 意図的に .strict() は使わない。
+//
+// #752(AUDIT-023): 上記の「新フィールドが無音で無視される」穴を塞ぐため、
+// バックエンド側に GET /api/quest/data の response_model
+// (MY_HOME_SYSTEM/models/quest.py の GameDataResponse 配下の View モデル)を
+// 追加し、MY_HOME_SYSTEM/tests/test_quest_api_type_contract.py が
+// **本ファイルを直接読んで** 次の2点をCIで検証するようにした。
+//   1. ここで宣言したフィールドをバックエンドが宣言し続けていること
+//   2. 「バックエンドにはあるがここに無い」フィールドが、同テストの
+//      _BACKEND_ONLY_FIELDS の許可リストと完全に一致すること
+// そのため、ここのスキーマにフィールドを足す/削る変更をしたときは、
+// バックエンドの同テストも合わせて更新すること(パーサは
+// `const xxxSchema = z.object({ ... })` のトップレベルのキー名だけを見る)。
+// なお OpenAPI→TS の生成パイプラインは依然として存在しない(#752 の推奨修正)。
 import { z } from 'zod';
 
 // #390: quest_users の avatar / job_class / role は NULL 可のカラム

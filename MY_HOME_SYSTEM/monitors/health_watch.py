@@ -21,6 +21,7 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
   9. `quest_data.QUESTS` と実機DBの `quest_master` が一致しているか
      (マスタデータのドリフト検知。Issue #700)
   10. カメラごとの常時録画(NVR)が止まっていないか(最新の録画ファイルが古すぎないか)
+  11. 参照整合性が破れていないか(親が存在しない子行=孤児行。Issue #747)
 
 異常があれば notification_service 経由でDiscordのerrorチャンネルへ要約を通知する。
 自動復旧(systemctl restart等)は行わない(ランブックのガードレール参照)。
@@ -535,6 +536,106 @@ def check_quest_master_drift() -> str | None:
     )
 
 
+# Issue #747 (AUDIT-018): 参照整合性の検査対象。
+#
+# `PRAGMA foreign_keys=ON` を設定しているのに外部キー宣言は1つ
+# (`user_inventory.reward_id`)しかなく、「本来DBが防げる不整合」への防御が
+# サービス層の個別の None チェックとして散在している(根本原因 RC-5)。
+# FK を足すには SQLite ではテーブル再作成が必要で、その前に「今どれだけ
+# 孤児行があるか」を知る必要がある。まず測る。
+#
+# 2層に分けているのは、**一方が通常運用の設計どおりの結果**だから:
+#
+# - `_ORPHAN_CHECKS_STRICT`: 親は `quest_users`。`DELETE FROM quest_users` は
+#   実行コードのどこにも存在せず(`reset_user_data` はリセットで削除しない)、
+#   ここの孤児は手動SQL・将来のスクリプトの事故しかありえない → **異常として通知**。
+# - `_ORPHAN_CHECKS_EXPECTED`: 親は `quest_master` / `reward_master`。
+#   `sync_master_data` の `DELETE ... WHERE quest_id NOT IN (...)` は
+#   クエストを退役させると **設計どおりマスタ行を消し、履歴行は残す**
+#   (#700 で退役6件を実際に消している)。これを毎時「異常」として報告すると
+#   恒久的な誤検知になる → **件数をログに残すだけで通知しない**。
+#   `check_quest_master_drift` が `reward_master` を比較対象から外したのと同じ判断。
+#
+# `quest_id = 0` はアイテム使用ログ(`inventory_service`)でマスタを参照しない
+# 疑似IDのため、孤児判定から除外する。
+_ORPHAN_CHECKS_STRICT: tuple[tuple[str, str], ...] = (
+    ("quest_history.user_id", """
+        SELECT COUNT(*) FROM quest_history h
+        LEFT JOIN quest_users u ON h.user_id = u.user_id WHERE u.user_id IS NULL"""),
+    ("reward_history.user_id", """
+        SELECT COUNT(*) FROM reward_history r
+        LEFT JOIN quest_users u ON r.user_id = u.user_id WHERE u.user_id IS NULL"""),
+    ("user_inventory.user_id", """
+        SELECT COUNT(*) FROM user_inventory i
+        LEFT JOIN quest_users u ON i.user_id = u.user_id WHERE u.user_id IS NULL"""),
+    ("routine_progress.user_id", """
+        SELECT COUNT(*) FROM routine_progress p
+        LEFT JOIN quest_users u ON p.user_id = u.user_id WHERE u.user_id IS NULL"""),
+    ("routine_step_events.user_id", """
+        SELECT COUNT(*) FROM routine_step_events e
+        LEFT JOIN quest_users u ON e.user_id = u.user_id WHERE u.user_id IS NULL"""),
+    # 自己参照。取消時に張られるリンクで、参照先が消えていれば整合性の破れ。
+    ("quest_history.linked_history_id", """
+        SELECT COUNT(*) FROM quest_history h
+        LEFT JOIN quest_history p ON h.linked_history_id = p.id
+        WHERE h.linked_history_id IS NOT NULL AND p.id IS NULL"""),
+)
+
+_ORPHAN_CHECKS_EXPECTED: tuple[tuple[str, str], ...] = (
+    ("quest_history.quest_id", """
+        SELECT COUNT(*) FROM quest_history h
+        LEFT JOIN quest_master q ON h.quest_id = q.quest_id
+        WHERE q.quest_id IS NULL AND h.quest_id != 0"""),
+    ("reward_history.reward_id", """
+        SELECT COUNT(*) FROM reward_history r
+        LEFT JOIN reward_master m ON r.reward_id = m.reward_id WHERE m.reward_id IS NULL"""),
+)
+
+
+def check_orphaned_rows() -> str | None:
+    """親が存在しない子行(孤児行)を検知する (Issue #747 / AUDIT-018)。
+
+    **検知のみで自動修正はしない。** 孤児行の削除は不可逆で、どちらを消すべきか
+    (子行か、親を復活させるか)は中身を見ないと決められない。
+
+    DBは読み取り専用接続で開き、DBやテーブルが無い環境・一時的なロックでは
+    「異常」ではなく「今回は判定できない」として警告ログのみ残しスキップする
+    (`check_quest_master_drift` と同じ方針。毎時cronで走るため、DB不在の環境で
+    恒久的に失敗し続けるのは避ける)。
+    """
+    strict_findings: list[str] = []
+    expected_counts: list[str] = []
+    try:
+        with get_ro_connection() as conn:
+            for label, sql in _ORPHAN_CHECKS_STRICT:
+                count = conn.execute(sql).fetchone()[0]
+                if count:
+                    strict_findings.append(f"{label}: {count}行")
+            for label, sql in _ORPHAN_CHECKS_EXPECTED:
+                count = conn.execute(sql).fetchone()[0]
+                expected_counts.append(f"{label}={count}")
+    except sqlite3.OperationalError as e:
+        logger.warning(f"⚠️ DBを読めないため参照整合性チェックをスキップします: {e}")
+        return None
+
+    # 通知しない側も、FK を張れるか(=ステップ3に進めるか)の判断材料として
+    # ログには必ず残す。運用者は logs/ を追えば推移が分かる。
+    if expected_counts:
+        logger.info(
+            "参照整合性(マスタ退役により想定内): " + " / ".join(expected_counts)
+            + " ※ sync_master_data がマスタ行を消しても履歴は残る設計のため通知しません"
+        )
+
+    if not strict_findings:
+        return None
+    return (
+        "参照整合性が破れています(quest_users に存在しないユーザーを参照する行があります):\n"
+        + "\n".join(f"  - {f}" for f in strict_findings)
+        + "\n  → 通常運用で quest_users の行が消えることはありません。"
+        "手動SQL等で親が消えた可能性があります(自動修正はしていません)"
+    )
+
+
 def _should_notify(anomaly_keys: List[str], now: datetime.datetime) -> bool:
     """同一の異常セットが継続している間の再通知を抑制する。
 
@@ -623,6 +724,7 @@ def run_checks() -> int:
         ("recording", check_recording_stalled),
         ("deploy_config", check_deploy_config_drift),
         ("quest_master", check_quest_master_drift),
+        ("orphaned_rows", check_orphaned_rows),
     ]
 
     anomalies: List[str] = []

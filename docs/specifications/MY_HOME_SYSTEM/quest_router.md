@@ -22,8 +22,8 @@
 * ゲームデータ同期、クエストの完了・承認・却下・キャンセル、報酬の購入、画像アップロード、音声テスト、インベントリ管理などの各エンドポイントを提供する。
 * **（Issue #551で修正）** ビジネスロジックの大部分を外部サービス（`services.quest_service`など）に委譲する薄いルーターである。以前は画像アップロード(`upload_image`)のファイル検証・保存ロジック（拡張子/マジックバイト検証を行うモジュール関数`validate_image_header`、ストリーミング書き込み、サイズ上限チェックと失敗時のクリーンアップ）が本ファイル内に直接実装されていたが、これらはすべて`services/quest/user_service.py`の`UserService.save_avatar_image`へ移設された。現在の`upload_image`は`await user_service.save_avatar_image(file)`を呼び出し、送出されうる`InvalidImageError`（→HTTP 400）・`ImageTooLargeError`（→HTTP 413）・その他の`Exception`（→HTTP 500）を捕捉してHTTPステータスへ変換するだけの委譲コードになっている。
 * 根拠: [関数定義] (行番号: 98-109 / 抜粋: "@router.post(\"/upload\")\nasync def upload_image(file: UploadFile = File(...)):\n    try:\n        url = await user_service.save_avatar_image(file)\n        return {\"url\": url}\n    except InvalidImageError as e:\n        raise HTTPException(status_code=400, detail=str(e))\n    except ImageTooLargeError as e:\n        raise HTTPException(status_code=413, detail=str(e))\n    except Exception:\n        logger.exception(\"Upload failed\")\n        raise HTTPException(status_code=500, detail=\"画像の保存に失敗しました\")")
-* `get_all_data`はクエリパラメータ`viewer_user_id`（任意、`Optional[str]`）を受け取り、`game_system.get_all_view_data()`へそのまま透過して渡す。
-* 根拠: 関数定義 (行番号: 41 / 抜粋: "def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:"), 引数の透過 (行番号: 39 / 抜粋: "return game_system.get_all_view_data(viewer_user_id)")
+* `get_all_data`はクエリパラメータ`viewer_user_id`（任意、`Optional[str]`）を受け取り、`game_system.get_all_view_data()`へそのまま透過して渡す。**（Issue #752で追加）** 本エンドポイントにも`response_model=GameDataResponse`が付き、本ファイルのすべてのエンドポイントがOpenAPIにレスポンス形状を持つようになった。
+* 根拠: 関数定義 (行番号: 43 / 抜粋: "def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:"), 引数の透過 (行番号: 45 / 抜粋: "return game_system.get_all_view_data(viewer_user_id)"), `response_model`指定 (行番号: 42 / 抜粋: "@router.get(\"/data\", response_model=GameDataResponse)")
 * 装備品の購入・変更、ボスのステータス直接更新（DBへのSQL実行）、ファミリーマイレージの取得・更新、週間分析データ取得の各エンドポイントは、ボス戦闘・装備・ファミリーマイレージ・週間ランキング機能の廃止に伴い削除されている。これに伴い、本ファイルが直接DBアクセスを行う`common`モジュールへの依存も無くなっている。
 * アイテム使用の承認待ちフローに関連していた`consume_item`(旧`POST /inventory/consume`)、`cancel_item_usage`(旧`POST /inventory/cancel`)、`get_admin_pending_inventory`(旧`GET /inventory/admin/pending`)の各エンドポイントは削除されている（コミット`9d5edec`、アイテム使用時の親承認フロー廃止）。これに伴い、インポートしていた`ConsumeItemAction`モデルも削除されている。現在の`use_item`(`POST /inventory/use`)エンドポイント自体のコードは変更されていない。
 * **（Issue #547で追加）** `reset_user`(`POST /admin/reset_user`)は、従来`reset_game.py`が別プロセスから直接DBを書き換えていたユーザーリセット処理を、サーバーAPI経由に置き換えるためのエンドポイント。`admin_id`が`role_adult`かどうかの権限チェックを含む実処理はすべて`services.quest_service.UserService.reset_user_data`に委譲する。
@@ -47,7 +47,7 @@
 | `config` | モジュール | 音声マップ設定(`SOUND_MAP`)の取得 | インポート (行番号: 7 / 抜粋: "import config") |
 | `core.sound_manager` | モジュール | 音声の再生処理 | インポート (行番号: 8 / 抜粋: "from core import sound_manager") |
 | `core.logger.setup_logging` | 関数 | ロガーのセットアップ | インポート (行番号: 9 / 抜粋: "from core.logger import setup_logging") |
-| `models.quest.*` (`SyncResponse`, `CompleteResponse`, `CancelResponse`, `PurchaseResponse`, `UseItemResponse`, `QuestAction`, `ApproveAction`, `HistoryAction`, `RewardAction`, `UpdateUserAction`, `SoundTestRequest`, `UseItemAction`, `ResetUserAction`, `ResetUserResponse`) | Pydanticモデル | リクエスト/レスポンスの型定義。**（Issue #547で追加）** `ResetUserAction`/`ResetUserResponse`は`reset_user`(`POST /admin/reset_user`)のリクエスト/レスポンス型 | インポート (行番号: 12-16 / 抜粋: "from models.quest import (\n    SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse,\n    QuestAction, ApproveAction, HistoryAction, RewardAction,\n    UpdateUserAction, SoundTestRequest, UseItemAction, ResetUserAction, ResetUserResponse\n)") |
+| `models.quest.*` (`SyncResponse`, `CompleteResponse`, `CancelResponse`, `PurchaseResponse`, `UseItemResponse`, `QuestAction`, `ApproveAction`, `HistoryAction`, `RewardAction`, `UpdateUserAction`, `SoundTestRequest`, `UseItemAction`, `ResetUserAction`, `ResetUserResponse`, `GameDataResponse`) | Pydanticモデル | リクエスト/レスポンスの型定義。**（Issue #547で追加）** `ResetUserAction`/`ResetUserResponse`は`reset_user`(`POST /admin/reset_user`)のリクエスト/レスポンス型。**（Issue #752で追加）** `GameDataResponse`は`get_all_data`(`GET /data`)の`response_model` | インポート (行番号: 12-17 / 抜粋: "from models.quest import (\n    SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse,\n    QuestAction, ApproveAction, HistoryAction, RewardAction,\n    UpdateUserAction, SoundTestRequest, UseItemAction, ResetUserAction, ResetUserResponse\n)") |
 | `services.quest_service.*` (`game_system`, `quest_service`, `shop_service`, `user_service`, `inventory_service`, `ImageTooLargeError`, `InvalidImageError`) | サービスモジュール/例外クラス | 各ビジネスロジックの実行、および**（Issue #551で追加）** `upload_image`のエラーハンドリングで捕捉する2種のドメイン例外 | インポート (行番号: 17-20 / 抜粋: "from services.quest_service import (\n    game_system, quest_service, shop_service, user_service, inventory_service,\n    ImageTooLargeError, InvalidImageError,\n)") |
 
 ### ブラックボックスとなる外部要素
@@ -88,25 +88,27 @@
 ### `get_all_data`
 
 * **役割**: ビュー描画に必要な全データを取得するエンドポイント。クエリパラメータ`viewer_user_id`（任意）を受け取り、そのまま`game_system.get_all_view_data()`に渡す。
-* 根拠: ルーティング定義 (行番号: 36-46 / 抜粋: "@router.get("/data")")
+* 根拠: ルーティング定義 (行番号: 42-52 / 抜粋: "@router.get("/data", response_model=GameDataResponse)")
 * **（Issue #409 で修正）** `HTTPException` は再送出し、それ以外は `logger.exception` でスタックトレース付きで記録してから 500 を返す。
-* 根拠: `except HTTPException: raise` (行番号: 40-42)、`logger.exception("Data Fetch Error")` (行番号: 45)
+* 根拠: `except HTTPException: raise` (行番号: 46-48)、`logger.exception("Data Fetch Error")` (行番号: 51)
+* **（Issue #752 / AUDIT-023 で修正）** 本ファイル内で唯一 `response_model` を持たないエンドポイントだったため、OpenAPI にレスポンス形状が出ておらず、フロントエンド（手書き Zod / TS interface）との乖離をサーバー側で検知する手段が無かった。`models/quest.py` の `GameDataResponse` を `response_model` に指定した。`GameDataResponse` は `get_all_view_data` が現在返している形をそのまま写したもので、**返却フィールドは1つも減っていない**（`response_model` は宣言外のキーを落とすため、宣言漏れがあると当該フィールドがAPIから無音で消える。これは `tests/test_quest_api_type_contract.py` が検知する）。なお Alexa 経路（`handlers/alexa_handler.py`）は `game_system.get_all_view_data()` をサービス層で直接呼ぶため、この `response_model` の影響を受けない。
+* 根拠: ルーティング定義 (行番号: 42 / 抜粋: "@router.get("/data", response_model=GameDataResponse)")、追加コメント (行番号: 37-41 / 抜粋: "# Issue #752 (AUDIT-023): 唯一 response_model の無いエンドポイントだったため、")
 
 
 * **引数/リクエスト**: `viewer_user_id: Optional[str] = None`（クエリパラメータ、省略可能）
-* 根拠: 関数定義 (行番号: 41 / 抜粋: "def get_all_data(viewer_user_id: Optional[str] = None) -> Dict")
+* 根拠: 関数定義 (行番号: 43 / 抜粋: "def get_all_data(viewer_user_id: Optional[str] = None) -> Dict")
 
 
-* **戻り値/レスポンス**: `Dict[str, Any]`（`game_system.get_all_view_data(viewer_user_id)` の戻り値）
-* 根拠: 型アノテーション (行番号: 37 / 抜粋: "-> Dict[str, Any]:"), メソッド呼び出し (行番号: 39 / 抜粋: "return game_system.get_all_view_data(viewer_user_id)")
+* **戻り値/レスポンス**: `GameDataResponse`（関数自身の戻り値は `game_system.get_all_view_data(viewer_user_id)` が返す `Dict[str, Any]` のままで、FastAPI が `response_model` として検証・シリアライズする）
+* 根拠: `response_model` 指定 (行番号: 42 / 抜粋: "@router.get("/data", response_model=GameDataResponse)")、型アノテーション (行番号: 43 / 抜粋: "-> Dict[str, Any]:"), メソッド呼び出し (行番号: 45 / 抜粋: "return game_system.get_all_view_data(viewer_user_id)")
 
 
 * **副作用**: 不明（外部関数 `game_system.get_all_view_data(viewer_user_id)` に依存。`viewer_user_id`が内部でどう使われるかは本ファイルからは不明）
 * 根拠: メソッド呼び出し (行番号: 39 / 抜粋: "return game_system.get_all_view_data(viewer_user_id)")
 
 
-* **エラーハンドリング**: `HTTPException`はそのまま再送出する。それ以外の`Exception`は`logger.exception`でスタックトレース付きログを出力後、HTTP 500エラーを送出する。
-* 根拠: 例外処理 (行番号: 40-46 / 抜粋: "except HTTPException:\n        # #409: 以前は HTTPException まで 500 に潰していた\n        raise\n    except Exception:\n        # #409: logger.error(f\"{e}\") ではスタックトレースが失われ原因調査ができなかった\n        logger.exception(\"Data Fetch Error\")\n        raise HTTPException(status_code=500, detail=\"Failed to fetch data\")")
+* **エラーハンドリング**: `HTTPException`はそのまま再送出する。それ以外の`Exception`は`logger.exception`でスタックトレース付きログを出力後、HTTP 500エラーを送出する。（Issue #752 以降は、これに加えてレスポンスが `GameDataResponse` に適合しない場合に FastAPI 自身がレスポンス検証エラーを送出しうる。）
+* 根拠: 例外処理 (行番号: 46-52 / 抜粋: "except HTTPException:\n        # #409: 以前は HTTPException まで 500 に潰していた\n        raise\n    except Exception:\n        # #409: logger.error(f\"{e}\") ではスタックトレースが失われ原因調査ができなかった\n        logger.exception(\"Data Fetch Error\")\n        raise HTTPException(status_code=500, detail=\"Failed to fetch data\")")
 
 
 
@@ -129,7 +131,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 53-54 / 抜粋: "def complete_quest")
+* 根拠: 該当関数 (行番号: 55-56 / 抜粋: "def complete_quest")
 
 
 
@@ -152,7 +154,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 57-58 / 抜粋: "def approve_quest")
+* 根拠: 該当関数 (行番号: 59-60 / 抜粋: "def approve_quest")
 
 
 
@@ -175,7 +177,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 61-62 / 抜粋: "def reject_quest")
+* 根拠: 該当関数 (行番号: 63-64 / 抜粋: "def reject_quest")
 
 
 
@@ -198,7 +200,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 65-66 / 抜粋: "def cancel_quest")
+* 根拠: 該当関数 (行番号: 67-68 / 抜粋: "def cancel_quest")
 
 
 
@@ -221,7 +223,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 69-70 / 抜粋: "def purchase_reward")
+* 根拠: 該当関数 (行番号: 71-72 / 抜粋: "def purchase_reward")
 
 
 
@@ -232,7 +234,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: 関数定義 (行番号: 73 / 抜粋: "def get_family_chronicle():")
+* 根拠: 関数定義 (行番号: 75 / 抜粋: "def get_family_chronicle():")
 
 
 * **戻り値/レスポンス**: 不明（外部関数の戻り値）
@@ -244,7 +246,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 73-74 / 抜粋: "def get_family_chronicle():")
+* 根拠: 該当関数 (行番号: 75-76 / 抜粋: "def get_family_chronicle():")
 
 
 
@@ -290,7 +292,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 82-83 / 抜粋: "def update_user_avatar")
+* 根拠: 該当関数 (行番号: 83-84 / 抜粋: "def update_user_avatar")
 
 
 
@@ -301,7 +303,7 @@
 
 
 * **引数/リクエスト**: `ResetUserAction` (フィールドとして `admin_id`, `target_user_id` を持つ)
-* 根拠: 引数定義 (行番号: 89 / 抜粋: "def reset_user(action: ResetUserAction):")
+* 根拠: 引数定義 (行番号: 90 / 抜粋: "def reset_user(action: ResetUserAction):")
 
 
 * **戻り値/レスポンス**: `ResetUserResponse`
@@ -336,7 +338,7 @@
 
 
 * **エラーハンドリング**: なし（`user_service.delete_unlinked_avatar`が`bool`を返す設計のため、本エンドポイント自体は例外を送出しない。存在しないファイル・パス不正・他ユーザー参照中等はいずれも`False`＝`"skipped"`として扱われる）
-* 根拠: [該当関数] (行番号: 99-101 / 抜粋: "def delete_uploaded_image(filename: str):\n    deleted = user_service.delete_unlinked_avatar(filename)\n    return {"status": "deleted" if deleted else "skipped"}")
+* 根拠: [該当関数] (行番号: 100-102 / 抜粋: "def delete_uploaded_image(filename: str):\n    deleted = user_service.delete_unlinked_avatar(filename)\n    return {"status": "deleted" if deleted else "skipped"}")
 
 
 
@@ -347,7 +349,7 @@
 
 
 * **引数/リクエスト**: `file: UploadFile`（`UploadFile`型、FastAPIの`File(...)`によりフォームデータとして受信）
-* 根拠: 引数定義 (行番号: 104 / 抜粋: "async def upload_image(file: UploadFile = File(...)):")
+* 根拠: 引数定義 (行番号: 105 / 抜粋: "async def upload_image(file: UploadFile = File(...)):")
 
 
 * **戻り値/レスポンス**: `{"url": url}`（`url`は`user_service.save_avatar_image(file)`の戻り値。アップロードされた画像の保存先を指す相対URL、例: `/uploads/xxxx.png`）
@@ -393,7 +395,7 @@
 
 
 * **引数/リクエスト**: `user_id` (`str` 型, パスパラメータ)
-* 根拠: 引数定義 (行番号: 126 / 抜粋: "def get_inventory(user_id: str):")
+* 根拠: 引数定義 (行番号: 127 / 抜粋: "def get_inventory(user_id: str):")
 
 
 * **戻り値/レスポンス**: 不明（外部関数の戻り値）
@@ -405,7 +407,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 126-127 / 抜粋: "def get_inventory")
+* 根拠: 該当関数 (行番号: 127-128 / 抜粋: "def get_inventory")
 
 
 
@@ -428,7 +430,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 130-131 / 抜粋: "def use_item")
+* 根拠: 該当関数 (行番号: 131-132 / 抜粋: "def use_item")
 
 
 
@@ -511,11 +513,11 @@ graph TD
 * **（Issue #547で追加）** `reset_user`(`POST /admin/reset_user`)は、本ファイルが持つ現行の唯一の`/admin/*`エンドポイントである（旧`admin_update_boss`(`POST /admin/boss/update`)は既に削除済み。§8の別項参照）。他の大半のエンドポイントと同様、本ファイル自身には認証・セッション機構は無く、リクエストボディの`admin_id`が実際に管理者（`role_adult`）であることの検証は`user_service.reset_user_data`側に完全に委譲されている（本ファイルからは検証の有無・実装は確認できない）。
 * 根拠: [ルーティング定義] (行番号: 83-85 / 抜粋: "@router.post(\"/admin/reset_user\", response_model=ResetUserResponse)\ndef reset_user(action: ResetUserAction):\n    return user_service.reset_user_data(action.admin_id, action.target_user_id)")
 * **（Issue #551で修正）** `upload_image`は、拡張子・マジックバイト検証・チャンク書き込み・サイズ上限チェック等の実装を`services/quest/user_service.py`の`UserService.save_avatar_image`へ全面的に移設した。本ファイル側に残るのは`await user_service.save_avatar_image(file)`の呼び出しと、`InvalidImageError`→400、`ImageTooLargeError`→413、その他の`Exception`→500（`logger.exception`でスタックトレース付きログ出力後）という例外ハンドリングのみである。以前あったモジュール関数`validate_image_header`（マジックバイト判定）も、この移設に伴い本ファイルからは完全に削除されている。実際のファイルI/O・検証ロジックの詳細は[quest_user_service.md](./quest_user_service.md)を参照。
-* 根拠: [関数定義] (行番号: 104-114 / 抜粋: "async def upload_image(file: UploadFile = File(...)):\n    try:\n        url = await user_service.save_avatar_image(file)")
+* 根拠: [関数定義] (行番号: 105-115 / 抜粋: "async def upload_image(file: UploadFile = File(...)):\n    try:\n        url = await user_service.save_avatar_image(file)")
 * かつて存在した `purchase_equipment` (`POST /equip/purchase`), `change_equipment` (`POST /equip/change`), `admin_update_boss` (`POST /admin/boss/update`), `get_family_mileage` (`GET /family-mileage`), `update_family_mileage` (`PUT /family-mileage`), `get_weekly_analytics` (`GET /analytics/weekly`) の各エンドポイントは、ボス戦闘・装備・ファミリーマイレージ・週間ランキング機能の廃止に伴い削除されている。特に `admin_update_boss` は本ファイル内で `core.database.get_db_cursor` を用いて `party_state` テーブルへ直接SQLを実行する唯一の箇所だったため、これに伴い `common` モジュールへのインポートも削除されている。
 * かつて存在した `consume_item` (`POST /inventory/consume`), `cancel_item_usage` (`POST /inventory/cancel`), `get_admin_pending_inventory` (`GET /inventory/admin/pending`) の各エンドポイントは、アイテム使用時の親承認フロー廃止（コミット`9d5edec`）に伴い削除されている。これに伴い、インポートしていた `ConsumeItemAction` モデルも削除されている。`use_item` (`POST /inventory/use`) 自体のルーティング・実装コードは変更されていない。
 * `get_all_data` は `viewer_user_id`（`Optional[str]`、クエリパラメータ、既定`None`）を新たに受け取り、`game_system.get_all_view_data()` へそのまま渡すようになっている。本ファイルからは、この値が閲覧者スコープの絞り込み以外にどう使われるかは不明。
-* 根拠: 関数定義 (行番号: 41 / 抜粋: "def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:")
+* 根拠: 関数定義 (行番号: 43 / 抜粋: "def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:")
 
 ## 9. 不明事項一覧
 

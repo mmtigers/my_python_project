@@ -62,22 +62,22 @@
 ### クラス `NasMonitor`
 
 * **役割**: NASの状態監視、ディスク使用量確認、障害復旧時の自動切り戻し処理、および保持期間超過ファイルの自動削除をまとめたクラス。
-* 根拠: `class NasMonitor:` (行番号: 22〜468 / 抜粋: "class NasMonitor:")
+* 根拠: `class NasMonitor:` (行番号: 24〜511 / 抜粋: "class NasMonitor:")
 
 
 
 ### 関数 `__init__`
 
 * **役割**: クラス内の設定値（IP、パス、タイムアウト時間、書き込みチェックのリトライ回数、ステータス保存ファイルなど）を`config`等から初期化する。
-* 根拠: `def __init__(self) -> None:` (行番号: 25〜45 / 抜粋: "def __init__(self) -> None:")
+* 根拠: `def __init__(self) -> None:` (行番号: 27〜49 / 抜粋: "def __init__(self) -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def __init__(self) -> None:` (行番号: 25 / 抜粋: "def __init__(self) -> None:")
+* 根拠: `def __init__(self) -> None:` (行番号: 27 / 抜粋: "def __init__(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `def __init__(self) -> None:` (行番号: 25 / 抜粋: "def __init__(self) -> None:")
+* 根拠: `def __init__(self) -> None:` (行番号: 27 / 抜粋: "def __init__(self) -> None:")
 
 
 * **副作用**: クラスのインスタンス変数の定義。`self.write_check_retries`は`config.NAS_WRITE_CHECK_RETRIES`（未設定時デフォルト3）から`check_write_permission`のリトライ回数として初期化される。
@@ -85,18 +85,18 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内の処理全体 (行番号: 25〜45 / 抜粋: "def __init__(self) -> None:")
+* 根拠: 関数内の処理全体 (行番号: 27〜49 / 抜粋: "def __init__(self) -> None:")
 
 
 
 ### 関数 `_load_state`
 
 * **役割**: 前回の監視状態（正常/異常）をJSONファイルから読み込む。存在しない場合は正常として扱う。
-* 根拠: `def _load_state(self) -> Dict[str, bool]:` (行番号: 49〜67 / 抜粋: "def _load_state(self) -> Di...")
+* 根拠: `def _load_state(self) -> Dict[str, bool]:` (行番号: 51〜69 / 抜粋: "def _load_state(self) -> Di...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def _load_state(self) -> Dict[str, bool]:` (行番号: 49 / 抜粋: "def _load_state(self) -> Di...")
+* 根拠: `def _load_state(self) -> Dict[str, bool]:` (行番号: 51 / 抜粋: "def _load_state(self) -> Di...")
 
 
 * **戻り値/レスポンス**: `Dict[str, bool]`（状態辞書）
@@ -114,7 +114,7 @@
 ### 関数 `_save_state`
 
 * **役割**: 現在の監視状態をJSONファイルとして保存する。
-* 根拠: `def _save_state(self, state: Dict[str, bool]) -> None:` (行番号: 69〜78 / 抜粋: "def _save_state(self, state...")
+* 根拠: `def _save_state(self, state: Dict[str, bool]) -> None:` (行番号: 71〜80 / 抜粋: "def _save_state(self, state...")
 
 
 * **引数/リクエスト**: `state`: `Dict[str, bool]`
@@ -136,11 +136,11 @@
 ### 関数 `check_ping`
 
 * **役割**: `ping`コマンドを実行し、NASへのネットワーク疎通を確認する。
-* 根拠: `def check_ping(self) -> bool:` (行番号: 80〜108 / 抜粋: "def check_ping(self) -> boo...")
+* 根拠: `def check_ping(self) -> bool:` (行番号: 82〜110 / 抜粋: "def check_ping(self) -> boo...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_ping(self) -> bool:` (行番号: 80 / 抜粋: "def check_ping(self) -> boo...")
+* 根拠: `def check_ping(self) -> bool:` (行番号: 82 / 抜粋: "def check_ping(self) -> boo...")
 
 
 * **戻り値/レスポンス**: `bool`（成功時True）
@@ -159,11 +159,11 @@
 ### 関数 `check_mount`
 
 * **役割**: マウントポイントがシステム上に存在し、かつ正しくマウントされているか判定する。
-* 根拠: `def check_mount(self) -> bool:` (行番号: 110〜114 / 抜粋: "def check_mount(self) -> bo...")
+* 根拠: `def check_mount(self) -> bool:` (行番号: 112〜116 / 抜粋: "def check_mount(self) -> bo...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_mount(self) -> bool:` (行番号: 110 / 抜粋: "def check_mount(self) -> bo...")
+* 根拠: `def check_mount(self) -> bool:` (行番号: 112 / 抜粋: "def check_mount(self) -> bo...")
 
 
 * **戻り値/レスポンス**: `bool`（マウントされていればTrue）
@@ -171,22 +171,22 @@
 
 
 * **副作用**: なし
-* 根拠: 関数内の処理全体 (行番号: 110〜114 / 抜粋: "def check_mount(self) -> bo...")
+* 根拠: 関数内の処理全体 (行番号: 112〜116 / 抜粋: "def check_mount(self) -> bo...")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内の処理全体 (行番号: 110〜114 / 抜粋: "def check_mount(self) -> bo...")
+* 根拠: 関数内の処理全体 (行番号: 112〜116 / 抜粋: "def check_mount(self) -> bo...")
 
 
 
 ### 関数 `check_write_permission`
 
 * **役割**: NASのマウント先(`self.mount_point`直下の`.write_test.<pid>.<ns>`、試行ごとに一意なファイル名)に対し、別プロセス(`sys.executable -c`)でopen/write/close/removeを実行して書き込み権限を確認する。CIFSマウントのストールで本体プロセスが巻き込まれてハングしないよう、サブプロセスをタイムアウト付きで待ち受ける。タイムアウト発生時は最大`self.write_check_retries`回(総試行回数)までExponential Backoff（`2 ** attempt`秒、0-indexed、上限なし）で再試行する。**Issue #292**で、リトライループの機構自体を共通ユーティリティ`core.utils.retry_with_backoff`(`config.py`の`verify_and_initialize_storage`と共用)に委譲するようリファクタリングされたが、`write_check_retries`が「総試行回数」を意味する既存の属性名との整合を保つため、`retry_with_backoff`へは`max_retries=self.write_check_retries - 1`(初回を含まない追加リトライ回数)を渡している。リトライ対象は`subprocess.TimeoutExpired`のみで、`CalledProcessError`/`OSError`は従来どおりリトライしない(挙動そのものは変更していない純粋なリファクタリング)。
-* 根拠: `def check_write_permission(self) -> bool:` (行番号: 125〜195 / 抜粋: "def check_write_permission(self) -> bool:")、`retry_with_backoff(...)`呼び出し (行番号: 142〜148 / 抜粋: "retry_with_backoff(\n                _attempt,\n                max_retries=self.write_check_retries - 1,\n                retryable_exceptions=(subprocess.TimeoutExpired,),")
+* 根拠: `def check_write_permission(self) -> bool:` (行番号: 127〜197 / 抜粋: "def check_write_permission(self) -> bool:")、`retry_with_backoff(...)`呼び出し (行番号: 142〜148 / 抜粋: "retry_with_backoff(\n                _attempt,\n                max_retries=self.write_check_retries - 1,\n                retryable_exceptions=(subprocess.TimeoutExpired,),")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_write_permission(self) -> bool:` (行番号: 125 / 抜粋: "def check_write_permission(self) -> bool:")
+* 根拠: `def check_write_permission(self) -> bool:` (行番号: 127 / 抜粋: "def check_write_permission(self) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（書き込み・削除成功時True。全リトライを使い切ってタイムアウトした場合、または`CalledProcessError`/`OSError`発生時はFalse）
@@ -205,11 +205,11 @@
 ### 関数 `sync_fallback_data`
 
 * **役割**: フォールバックディレクトリ(`self.fallback_dir`)配下の`assets`サブディレクトリのみを対象に、`rsync`コマンドを利用してNAS側の`self.nas_project_root`配下`assets`(=`NAS_PROJECT_ROOT/assets`。通常のNAS疎通時に`config.ASSETS_DIR`が指すパスと同一)へ同期・移動し、空ディレクトリを削除の上、復旧通知を送信する。`fallback_dir`直下には`last_memory_alert.txt`(`memory_monitor.py`)・`last_tv_lock.txt`(`tv_lock_monitor.py`)など、本来ローカル専用でNASに属さない他モニターの状態ファイルも同居しているため、同期対象を`assets`サブディレクトリに明示的に限定し、これらを巻き込んで移動・削除しないようにしている。
-* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 197〜238 / 抜粋: "def sync_fallback_data(self...")、`fallback_assets_dir = os.path.join(self.fallback_dir, "assets")` (行番号: 165)、`nas_assets_dir = os.path.join(self.nas_project_root, "assets")` (行番号: 170)
+* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 199〜240 / 抜粋: "def sync_fallback_data(self...")、`fallback_assets_dir = os.path.join(self.fallback_dir, "assets")` (行番号: 165)、`nas_assets_dir = os.path.join(self.nas_project_root, "assets")` (行番号: 170)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 197 / 抜粋: "def sync_fallback_data(self...")
+* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 199 / 抜粋: "def sync_fallback_data(self...")
 
 
 * **戻り値/レスポンス**: `None`
@@ -228,7 +228,7 @@
 ### 関数 `_cleanup_empty_dirs`
 
 * **役割**: 指定されたディレクトリ配下の空ディレクトリを再帰的に削除する。
-* 根拠: `def _cleanup_empty_dirs(self, path: str) -> None:` (行番号: 240〜252 / 抜粋: "def _cleanup_empty_dirs(sel...")
+* 根拠: `def _cleanup_empty_dirs(self, path: str) -> None:` (行番号: 242〜254 / 抜粋: "def _cleanup_empty_dirs(sel...")
 
 
 * **引数/リクエスト**: `path`: `str`
@@ -251,11 +251,11 @@
 ### 関数 `get_disk_usage`
 
 * **役割**: マウントポイントのディスク容量（全体、使用量、空き容量をGB単位）と使用率を計算する。
-* 根拠: `def get_disk_usage(self) -> Optional[Dict[str, float]]:` (行番号: 254〜266 / 抜粋: "def get_disk_usage(self) ->...")
+* 根拠: `def get_disk_usage(self) -> Optional[Dict[str, float]]:` (行番号: 256〜268 / 抜粋: "def get_disk_usage(self) ->...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_disk_usage(self) -> Optional[Dict[str, float]]:` (行番号: 254 / 抜粋: "def get_disk_usage(self) ->...")
+* 根拠: `def get_disk_usage(self) -> Optional[Dict[str, float]]:` (行番号: 256 / 抜粋: "def get_disk_usage(self) ->...")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]`（容量情報を含む辞書、失敗時はNone）
@@ -263,7 +263,7 @@
 
 
 * **副作用**: なし
-* 根拠: 関数内の処理全体 (行番号: 254〜266 / 抜粋: "def get_disk_usage(self) ->...")
+* 根拠: 関数内の処理全体 (行番号: 256〜268 / 抜粋: "def get_disk_usage(self) ->...")
 
 
 * **エラーハンドリング**: `Exception`を捕捉し、エラーログ出力後`None`を返す。
@@ -274,11 +274,11 @@
 ### 関数 `cleanup_old_files`
 
 * **役割**: 指定ディレクトリ配下を再帰的に走査し、保持日数（`retention_days`）を超えたファイルを削除し、削除件数と解放容量(GB)を返す。`extensions`が`None`の場合は拡張子で絞り込まず、ディレクトリ内の全ファイルを削除対象にする(Issue #191で追加。単一種類の成果物専用であることが保証されているディレクトリ向け)。
-* 根拠: `def cleanup_old_files(self, directory: str, retention_days: int, extensions: Optional[Tuple[str, ...]]) -> Dict[str, Any]:` とdocstring (行番号: 268〜300 / 抜粋: "extensions が None の場合は拡張子で絞り込まず")
+* 根拠: `def cleanup_old_files(self, directory: str, retention_days: int, extensions: Optional[Tuple[str, ...]]) -> Dict[str, Any]:` とdocstring (行番号: 270〜302 / 抜粋: "extensions が None の場合は拡張子で絞り込まず")
 
 
 * **引数/リクエスト**: `directory` (`str`), `retention_days` (`int`), `extensions` (`Optional[Tuple[str, ...]]`。`None`可)
-* 根拠: 定義部 (行番号: 268〜300 / 抜粋: "def cleanup_old_files(")
+* 根拠: 定義部 (行番号: 270〜302 / 抜粋: "def cleanup_old_files(")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`（`{"deleted_count": int, "freed_gb": float}`。`directory`が未指定またはディレクトリでない場合は空の集計値を返す）
@@ -300,7 +300,9 @@
 * 根拠: (行番号: 284〜286 / 抜粋: "(\"スナップショット(ローカル退避)\",\n             os.path.join(getattr(config, \"FALLBACK_ROOT\", \"\"), \"assets\", \"snapshots\"),")
 
 * **役割**: NVR録画・カメラスナップショット・タイムラプス動画・DBバックアップの4種類のディレクトリそれぞれについて、設定された保持日数を超えたファイルを`cleanup_old_files`経由で削除し、1件以上削除があった場合はまとめて通知を送信する。タイムラプス動画の削除対象パスは以前`config.ASSETS_DIR/timelapse`(NAS側)を指しており、実際の生成先(`monitors/smart_timelapse_generator.py`の`setup_directories`)であるローカルの`config.BASE_DIR/assets/timelapse`と食い違っていたため、誰も書かないNAS側ディレクトリを掃除し、誰も掃除しないローカルディレクトリにファイルが無限蓄積していた(Issue #171)。生成先と同じローカルパスに修正済み。DBバックアップ対象は以前拡張子`.db`のみに限定していたが、`DB_BACKUPS_DIR`は`services/backup_service.py`のDBダンプ(`.db`)と`_backup_config_files`によるDB以外の設定ファイルコピー(`config.py`/`.env`/`devices.json`。拡張子は`.py`/なし/`.json`)の両方の出力専用ディレクトリであるため、`.db`限定では設定ファイルのバックアップコピーが一切削除されず無限蓄積していた(Issue #191)。`DB_BACKUPS_DIR`はバックアップ専用ディレクトリであることを踏まえ、`extensions=None`(拡張子で絞り込まず全ファイル対象)に修正した。
-* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 302〜360 / 抜粋: "def run_retention_cleanup(sel...")
+
+  **Issue #733 (AUDIT-003)**: ここまでの削除対象はすべて「ファイル」で、SQLite の「行」を消す経路はリポジトリ内に1つも存在しなかった。同じ1日1回のタイミングで `_run_db_row_retention` を呼び、`services/db_retention_service.py` による行の保持期間削除も行う。既定(`config.DB_ROW_RETENTION_ENABLED=false`)はドライランで、削除予定件数を数えて通知に載せるだけで1行も消さない。
+* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 304〜368 / 抜粋: "def run_retention_cleanup(sel...")
 * **（Issue #359 で追加）** 削除対象に「録画VODキャッシュ」（`BASE_DIR/data/hls_streams/vod`、拡張子 `.ts`/`.m3u8`/`.txt`、保持日数 `config.HLS_VOD_RETENTION_DAYS`＝既定3日）を追加。`services/camera_service.py` の `generate_record_playlist` が生成するセグメントは1日分で数GB規模だが、以前はどこにも削除経路が無くローカル(SDカード)に無制限に蓄積していた。
 * 根拠: `("録画VODキャッシュ", os.path.join(getattr(config, "BASE_DIR", ""), "data", "hls_streams", "vod"), getattr(config, "HLS_VOD_RETENTION_DAYS", 3), (".ts", ".m3u8", ".txt"))` (行番号: 298〜300)
 * 根拠: `("タイムラプス動画", os.path.join(getattr(config, "BASE_DIR", ""), "assets", "timelapse"), ...)` (行番号: 266〜273)
@@ -308,14 +310,14 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 302 / 抜粋: "def run_retention_cleanup(sel...")
+* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 304 / 抜粋: "def run_retention_cleanup(sel...")
 
 
 * **戻り値/レスポンス**: `None`
 * 根拠: `-> None:` (行番号: 259 / 抜粋: "-> None:")
 
 
-* **副作用**: `cleanup_old_files`経由のファイル削除、および削除件数が1件以上あった場合の外部APIへのプッシュ通知送信。
+* **副作用**: `cleanup_old_files`経由のファイル削除、`_run_db_row_retention` 経由の**SQLite の行の削除（`config.DB_ROW_RETENTION_ENABLED=true` のときのみ。既定はドライラン）**、および削除件数が1件以上あった場合の外部APIへのプッシュ通知送信。
 * 根拠: `result = self.cleanup_old_files(...)` (行番号: 290), `send_push(...)` (行番号: 299〜303)
 
 
@@ -324,15 +326,32 @@
 
 
 
+### 関数 `_run_db_row_retention` (Issue #733 で追加)
+
+* **役割**: `services/db_retention_service.run_db_retention()` を呼び、通知に載せる行を `format_summary_lines()` で組み立てて返す。`run_retention_cleanup` の末尾から呼ばれ、ファイル削除の集計行と同じ箇条書きに連結される。
+* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 370 / 抜粋: "def _run_db_row_retention(")
+
+* **引数/リクエスト**: なし
+* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 370)
+
+* **戻り値/レスポンス**: `list[str]`（通知に追記する行。ドライランで削除予定が0件なら空リスト＝通知に何も足さない）
+* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 370)
+
+* **副作用**: `config.DB_ROW_RETENTION_ENABLED` が `True` かつ直近のバックアップが確認できた場合のみ、SQLite の行を削除する（不可逆）。既定は `False` で1行も削除しない。
+* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 370)
+
+* **エラーハンドリング**: `sqlite3.Error` と `OSError` を捕捉して `logger.error` を出し空リストを返す。捕捉をこの2種に絞っているのは、この経路で現実に起きるのが「DB のロック・破損」と「バックアップ先(NAS)が見えない」だからで、それ以外の例外はバグとして呼び出し元へ伝播させる。DB 側の失敗でファイル削除の集計通知まで道連れにしないための構造。
+* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 370)
+
 ### 関数 `save_to_db`
 
 * **役割**: NASの監視結果（Ping、マウント状態）とディスク使用率をデータベースに保存する。`config.SQLITE_TABLE_SENSOR`(=`device_records`)への書き込みに加えて、`config.SQLITE_TABLE_NAS`(=`nas_records`)へも書き込む(Issue #168)。以前は`device_records`にしか書き込んでおらず、ダッシュボードのNASステータスカード(`views/dashboard/summary.py`の`get_nas_status_simple`)・NAS状態パネル(`views/dashboard/log_tab.py`)が読む`analysis_service.load_nas_status`は`nas_records`テーブルを対象にしているため、これらの表示が常に「データなし」のままだった。`nas_records`側のスキーマ(`status_ping`/`status_mount`列は文字列`'OK'`/`'NG'`)に合わせ、bool引数`ping_ok`/`mount_ok`をそれぞれ`"OK"`/`"NG"`の文字列へ変換して書き込む。`usage`が`None`(NAS到達不能時)の場合、`total_gb`/`used_gb`/`free_gb`列には`None`を書き込む(`percent`列は`device_records`向けと同じく`usage`が`None`のとき`0`を使う既存のロジックをそのまま流用する)。
-* 根拠: `def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:` (行番号: 362〜399 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: `def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:` (行番号: 387〜424 / 抜粋: "def save_to_db(self, ping_...")
 * 根拠: `save_log_generic(\n            getattr(config, "SQLITE_TABLE_NAS", "nas_records"),\n            ["timestamp", "device_name", "ip_address", "status_ping", "status_mount",\n             "total_gb", "used_gb", "free_gb", "percent"],\n            (\n                get_now_iso(),\n                self.device_name,\n                self.ip,\n                "OK" if ping_ok else "NG",\n                "OK" if mount_ok else "NG",\n                usage['total_gb'] if usage else None,\n                usage['used_gb'] if usage else None,\n                usage['free_gb'] if usage else None,\n                percent\n            )\n        )` (行番号: 306〜321)
 
 
 * **引数/リクエスト**: `ping_ok: bool`, `mount_ok: bool`, `usage: Optional[Dict[str, float]]`
-* 根拠: 定義部 (行番号: 362 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: 定義部 (行番号: 387 / 抜粋: "def save_to_db(self, ping_...")
 
 
 * **戻り値/レスポンス**: `None`
@@ -344,7 +363,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内の処理全体 (行番号: 362〜399 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: 関数内の処理全体 (行番号: 387〜424 / 抜粋: "def save_to_db(self, ping_...")
 
 
 
@@ -356,13 +375,13 @@
 * 根拠: `now = get_now_jst()` (行番号: 415〜417 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()")
 
 * **役割**: Ping、マウント、書き込み権限の確認を順に実行し、状態変化（正常⇔異常）の判定と保存、DBへの記録を必ず行う。異常継続中はここで処理を終了し、正常時はさらに保持期間超過ファイルの自動削除（レポート時刻のみ）と、状況（容量不足・定時）に応じた通知を統括する。
-* 根拠: `def run(self) -> None:` (行番号: 401〜486 / 抜粋: "def run(self) -> None:")
+* 根拠: `def run(self) -> None:` (行番号: 426〜511 / 抜粋: "def run(self) -> None:")
 * **（Issue #388 で修正）** 保持期間クリーンアップの「1日1回」判定を `now.hour == 8` から「`now.hour >= 8` かつ状態ファイルの `last_cleanup_date` が今日でない」に変更し、実行後に `last_cleanup_date` を保存する。scheduler の実行間隔は毎回 3600〜3610s と少しずつ後ろにずれるため、7:59 台の次が 9:00 台になる日は 8 時台の実行が無く、その日の削除がまるごとスキップされていた。あわせて健全性遷移時の `_save_state` は `previous_state` を丸ごと保存し、`last_cleanup_date` を消さないようにした。
 * 根拠: `today_str = now.strftime("%Y-%m-%d")` (行番号: 417〜418)、`previous_state["is_healthy"] = False` (行番号: 383〜389)、`previous_state["is_healthy"] = True` (行番号: 392〜397)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def run(self) -> None:` (行番号: 401 / 抜粋: "def run(self) -> None:")
+* 根拠: `def run(self) -> None:` (行番号: 426 / 抜粋: "def run(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`

@@ -229,22 +229,64 @@ class RoutineService:
         ]
         self._insert_step_events(cur, progress, changes, source, occurred_at)
 
-    def _get_or_create_progress(
-        self, cur, user_id: str, flow_key: str, flow: RoutineFlow, date_str: str, now: datetime.datetime
-    ) -> Dict[str, Any]:
-        row = cur.execute(
+    def _fetch_progress_row(self, cur, user_id: str, flow_key: str, date_str: str):
+        return cur.execute(
             "SELECT * FROM routine_progress WHERE user_id=? AND flow_key=? AND progress_date=?",
             (user_id, flow_key, date_str),
         ).fetchone()
-        if row:
-            return self._row_to_progress(row)
 
+    def _build_initial_progress(
+        self, cur, user_id: str, flow_key: str, flow: RoutineFlow, date_str: str, now: datetime.datetime
+    ) -> dict[str, Any]:
+        """当日行がまだ無いときの初期状態を、**DBに書かずに**組み立てる。
+
+        戻り値は `_row_to_progress` と同じ形(ただし `id` は None)。書き込み経路
+        (`_get_or_create_progress`)はこれをそのままINSERTし、読み取り専用経路
+        (`get_today_state`。Issue #738 / AUDIT-008)は永続化せず表示だけに使う。
+        """
         skip_keys = self._resolve_skip_keys(cur, user_id, flow_key, flow, now)
         statuses, current_index = self._empty_statuses(flow, skip_keys)
         # スキップの結果、初期状態から既にチェックポイントに到達している場合
         # (現状は起こらないが、将来handwash以外もweekend_skip化された場合に備える)、
         # complete_stepと同じくin_free_timeも合わせて立てる。
         in_free_time = current_index < len(flow['steps']) and bool(flow['steps'][current_index]['checkpoint_time'])
+        return {
+            'id': None,
+            'user_id': user_id,
+            'flow_key': flow_key,
+            'progress_date': date_str,
+            'current_step_index': current_index,
+            'in_free_time': in_free_time,
+            'steps_status': statuses,
+            'bonus_gold': 0,
+            'bonus_exp': 0,
+            'skipped_keys': set(skip_keys),
+            '_saved_steps_status': {},
+        }
+
+    def _read_progress(
+        self, cur, user_id: str, flow_key: str, flow: RoutineFlow, date_str: str, now: datetime.datetime
+    ) -> dict[str, Any]:
+        """当日の進捗を読み取り専用で返す(行が無ければ初期状態を組み立てるだけ)。
+
+        Issue #738 (AUDIT-008): `GET /api/routine/today` は15秒ポーリングで叩かれる
+        ため、行のINSERTを伴う `_get_or_create_progress` を使わない。行の作成は
+        スケジューラ経由の `process_deadlines`、またはユーザー操作(`complete_step`)が行う。
+        """
+        row = self._fetch_progress_row(cur, user_id, flow_key, date_str)
+        if row:
+            return self._row_to_progress(row)
+        return self._build_initial_progress(cur, user_id, flow_key, flow, date_str, now)
+
+    def _get_or_create_progress(
+        self, cur, user_id: str, flow_key: str, flow: RoutineFlow, date_str: str, now: datetime.datetime
+    ) -> Dict[str, Any]:
+        row = self._fetch_progress_row(cur, user_id, flow_key, date_str)
+        if row:
+            return self._row_to_progress(row)
+
+        initial = self._build_initial_progress(cur, user_id, flow_key, flow, date_str, now)
+        skip_keys = initial['skipped_keys']
 
         now_iso = get_now_iso()
         cur.execute("""
@@ -253,8 +295,8 @@ class RoutineService:
                  steps_status, skipped_keys, bonus_gold, bonus_exp, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
         """, (
-            user_id, flow_key, date_str, current_index, int(in_free_time),
-            json.dumps(statuses, ensure_ascii=False),
+            user_id, flow_key, date_str, initial['current_step_index'], int(initial['in_free_time']),
+            json.dumps(initial['steps_status'], ensure_ascii=False),
             # 当日やらずにdone扱いで始まった分を行に固定して残す(migrations/0012)。
             # 判定はこの行の作成時に一度だけ行われるため、以降は再計算しない。
             json.dumps(sorted(skip_keys), ensure_ascii=False),
@@ -439,27 +481,18 @@ class RoutineService:
             # 呼び出し元 complete_step がコミット後に trigger_tv_unlock を呼ぶ。
             progress['_tv_unlock_reason'] = "夕方の一本道を締切後に完了(追いつき)"
 
-    def _apply_forced_transition(
-        self, cur, user_id: str, flow_key: str, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime
-    ) -> Dict[str, Any]:
-        """チェックポイント(自由時間の終了予定時刻)を過ぎていれば、未完了ステップを
-        「まだだよ」に変え、チェックポイントより前のステップの達成率に応じたボーナスを
-        付与したうえでチェックポイントの次のステップへ進める。
+    def _is_forced_transition_due(
+        self, flow: RoutineFlow, progress: dict[str, Any], now: datetime.datetime
+    ) -> bool:
+        """このフローに「締切超過による強制遷移」を今すぐ適用すべきかを、**読み取りだけで**判定する。
 
-        current_step_indexがチェックポイントを既に通過していれば何もしない(冪等)ため、
-        GET(状態取得)・POST(ステップ完了)のどちらからも安全に呼べる。
-
-        （自由時間の時間固定をやめる変更で修正）締切を過ぎた時点でチェックポイント
-        ステップ(自由時間)を無条件に'done'にはしない。締切までに一本道を終えていなければ
-        'remind'(まだだよ)のままにし、TV解錠も行わない — 「宿題を飛ばしても時間が来れば
-        自由時間が始まる」状態を無くすため(要件)。寝る準備チェックリストの活性化だけは
-        締切で従来どおり行う(晩ごはん・お風呂は宿題の進捗と無関係に進むため)。
-        'remind'になった一本道のステップは締切後も完了報告でき(complete_step)、
-        全部終えた時点で自由時間が'done'になりTVが解錠される。
+        `_apply_forced_transition` の冒頭のガードをそのまま切り出したもの。Issue #738
+        (AUDIT-008)でスケジューラ側(`process_deadlines`)が「書き込みが必要なユーザーだけ」
+        を選ぶのに使うため、判定を1箇所に集約して両者がずれないようにしている。
         """
         checkpoint_idx = get_checkpoint_index(flow)
         if checkpoint_idx is None or progress['current_step_index'] > checkpoint_idx:
-            return progress
+            return False
 
         checkpoint_step = flow['steps'][checkpoint_idx]
         # Issue #761 (AUDIT-032): get_checkpoint_index が返したインデックスのステップは
@@ -474,8 +507,35 @@ class RoutineService:
         )
         hour, minute = map(int, checkpoint_time.split(':'))
         deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if now < deadline:
+        return now >= deadline
+
+    def _apply_forced_transition(
+        self, cur, user_id: str, flow_key: str, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime
+    ) -> Dict[str, Any]:
+        """チェックポイント(自由時間の終了予定時刻)を過ぎていれば、未完了ステップを
+        「まだだよ」に変え、チェックポイントより前のステップの達成率に応じたボーナスを
+        付与したうえでチェックポイントの次のステップへ進める。
+
+        current_step_indexがチェックポイントを既に通過していれば何もしない(冪等)ため、
+        スケジューラの定期実行(`process_deadlines`)・POST(ステップ完了)のどちらからも
+        安全に呼べる。Issue #738 (AUDIT-008)以降、**GET(状態取得)からは呼ばれない**
+        （書き込みを伴うため。`get_today_state` のdocstring参照）。
+
+        （自由時間の時間固定をやめる変更で修正）締切を過ぎた時点でチェックポイント
+        ステップ(自由時間)を無条件に'done'にはしない。締切までに一本道を終えていなければ
+        'remind'(まだだよ)のままにし、TV解錠も行わない — 「宿題を飛ばしても時間が来れば
+        自由時間が始まる」状態を無くすため(要件)。寝る準備チェックリストの活性化だけは
+        締切で従来どおり行う(晩ごはん・お風呂は宿題の進捗と無関係に進むため)。
+        'remind'になった一本道のステップは締切後も完了報告でき(complete_step)、
+        全部終えた時点で自由時間が'done'になりTVが解錠される。
+        """
+        if not self._is_forced_transition_due(flow, progress, now):
             return progress
+
+        # _is_forced_transition_due が True を返した時点でチェックポイントは必ず存在する。
+        checkpoint_idx = get_checkpoint_index(flow)
+        assert checkpoint_idx is not None
+        checkpoint_step = flow['steps'][checkpoint_idx]
 
         ratio = self._eligible_done_ratio(flow, progress)
         eligible_keys = [s['key'] for s in flow['steps'][:checkpoint_idx]]
@@ -640,22 +700,135 @@ class RoutineService:
         }
 
     def get_today_state(self, user_id: str, now: Optional[datetime.datetime] = None) -> Dict[str, Any]:
+        """当日の状態を**読み取り専用で**返す(Issue #738 / AUDIT-008)。
+
+        このエンドポイント(`GET /api/routine/today`)は全端末が15秒間隔でポーリングする。
+        以前はこの中で `_get_or_create_progress`(当日行のINSERT)と
+        `_apply_forced_transition`(締切超過時のステップ書き換え・ボーナス付与)を
+        行っていたため、
+
+        - `GET` が安全(safe)でなくなる(プリフェッチ・React Query のリトライ・
+          `refetchOnWindowFocus` がそのまま報酬付与のトリガーになる)
+        - 端末の台数×4回/分だけ `_get_user_balance_lock` を取り合い、その間
+          同じユーザーのクエスト完了・承認・購入がブロックされる
+        - 状態が変わらない大多数のポーリングでも書き込みトランザクションを開き、
+          SDカードへのfsyncが走る
+        - 締切超過の強制遷移が「誰かが画面を開いていること」に依存する
+
+        という問題があった。現在、締切超過の処理は `process_deadlines`
+        (スケジューラが `monitors/routine_deadline_job.py` 経由で60秒ごとに呼ぶ)が
+        担う。ここではロックも書き込みトランザクションも取らず、当日行がまだ
+        無ければ初期状態を組み立てて返すだけ(永続化しない)。
+
+        結果として、締切通過の反映はスケジューラの実行間隔(最大60秒)だけ遅れうる。
+        ユーザーがステップを完了報告した時点では `complete_step` が同じ
+        `_apply_forced_transition` を通すため、操作に対する応答は従来どおり即時。
+        """
+        now = now or datetime.datetime.now(JST)
+        date_str = self._today_str(now)
+        flows_out: Dict[str, Any] = {}
+        with get_db_cursor() as cur:  # commit=False(読み取り専用)
+            flows = self._flow_set_for(cur, user_id)
+            for flow_key, flow in flows.items():
+                if not self._is_flow_started_today(flow, now):
+                    flows_out[flow_key] = {"started": False, "title": flow['title']}
+                    continue
+                progress = self._read_progress(cur, user_id, flow_key, flow, date_str, now)
+                flows_out[flow_key] = self._serialize_flow(flow, progress, now)
+
+        return {"date": date_str, "flows": flows_out}
+
+    def _has_pending_deadline_work(
+        self, cur, user_id: str, flows: dict[str, RoutineFlow], date_str: str, now: datetime.datetime
+    ) -> bool:
+        """このユーザーについて、書き込みを伴う締切処理が必要かを読み取りだけで判定する。
+
+        「当日行がまだ無い」か「締切を過ぎているのに強制遷移が未適用」のどちらかが
+        あれば True。大多数の実行はここで False になり、残高ロックも書き込み
+        トランザクションも取らずに済む(Issue #738 の「書き込みの無駄」への対応)。
+        """
+        for flow_key, flow in flows.items():
+            if not self._is_flow_started_today(flow, now):
+                continue
+            row = self._fetch_progress_row(cur, user_id, flow_key, date_str)
+            if row is None:
+                return True
+            if self._is_forced_transition_due(flow, self._row_to_progress(row), now):
+                return True
+        return False
+
+    def _process_user_deadlines(
+        self, user_id: str, role: str | None, date_str: str, now: datetime.datetime
+    ) -> int:
+        """1ユーザー分の締切処理を行い、強制遷移を適用したフロー数を返す。"""
+        flows = get_flow_set(user_id, role)
+
+        with get_db_cursor() as cur:  # まず読み取りだけで必要性を判定する
+            if not self._has_pending_deadline_work(cur, user_id, flows, date_str, now):
+                return 0
+
+        applied = 0
+        # 書き込みが要ると分かったときだけ、クエスト完了・承認・購入と同じ
+        # ユーザー残高ロックを取る(_grant_bonus が quest_users を read-modify-write するため)。
         with _get_user_balance_lock(user_id):
             with get_db_cursor(commit=True) as cur:
-                flows = self._flow_set_for(cur, user_id)
-
-                now = now or datetime.datetime.now(JST)
-                date_str = self._today_str(now)
-                flows_out: Dict[str, Any] = {}
                 for flow_key, flow in flows.items():
                     if not self._is_flow_started_today(flow, now):
-                        flows_out[flow_key] = {"started": False, "title": flow['title']}
                         continue
                     progress = self._get_or_create_progress(cur, user_id, flow_key, flow, date_str, now)
+                    before_index = progress['current_step_index']
                     progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)
-                    flows_out[flow_key] = self._serialize_flow(flow, progress, now)
+                    if progress['current_step_index'] != before_index:
+                        applied += 1
+        return applied
 
-                return {"date": date_str, "flows": flows_out}
+    def process_deadlines(self, now: datetime.datetime | None = None) -> dict[str, Any]:
+        """全ユーザーの締切超過(チェックポイント通過)を適用する(Issue #738 / AUDIT-008)。
+
+        `scheduler_boot.TASKS` に登録した `monitors/routine_deadline_job.py` が
+        60秒ごとに `POST /api/routine/deadlines/process` を叩き、**unified_server の
+        プロセス内で**この関数が動く。スケジューラは別プロセスのため、
+        `quest_users` を直接書き換えず必ずHTTP API を経由すること
+        (CLAUDE.md「並行制御は単一プロセス前提」/ `reset_game.py` と同じ方針)。
+
+        `now` はテスト用の注入専用で、APIからは渡せない(クライアントが締切判定の
+        基準時刻を操作できてしまうため)。
+
+        1ユーザーの失敗が他のユーザーの処理を巻き込まないよう、例外はユーザー単位で
+        捕捉してログに残し、処理を続行する(スケジューラのタスク自体は落とさない)。
+        """
+        now = now or datetime.datetime.now(JST)
+        date_str = self._today_str(now)
+
+        with get_db_cursor() as cur:
+            users = [
+                (row['user_id'], row['role'])
+                for row in cur.execute("SELECT user_id, role FROM quest_users").fetchall()
+            ]
+
+        processed = 0
+        failed = 0
+        transitions = 0
+        for user_id, role in users:
+            try:
+                transitions += self._process_user_deadlines(user_id, role, date_str, now)
+                processed += 1
+            except Exception:  # noqa: BLE001 — 無人実行なので、失敗理由に関わらず
+                # 他のユーザーの締切処理まで巻き込まない(sync_strict.py と同じ方針)。
+                failed += 1
+                logger.exception(f"Routine Deadline: user={user_id} の締切処理に失敗しました")
+
+        if transitions or failed:
+            logger.info(
+                f"Routine Deadline Processed: Date={date_str}, Users={processed}, "
+                f"Transitions={transitions}, Failed={failed}"
+            )
+        return {
+            "date": date_str,
+            "processed_users": processed,
+            "failed_users": failed,
+            "transitions": transitions,
+        }
 
     def complete_step(
         self, user_id: str, flow_key: str, step_key: str, now: Optional[datetime.datetime] = None

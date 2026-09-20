@@ -77,6 +77,7 @@
 * **役割**: 停止対象プロセス名の配列`CLEANUP_TARGETS`(`unified_server.py`, `camera_monitor.py`, `scheduler_boot.py`, `streamlit run`)を定義し、各対象へ`pkill`でSIGTERMを送って優しく停止させる。以前は`scheduler.py`という実在しないプロセス名を対象にしており実体の`scheduler_boot.py`にマッチしないため旧schedulerプロセスが再起動のたびに生き残っていた点と、存在しない`bluetooth_monitor.py`を対象にしていた点を修正し、実ファイル名の配列に置き換えている。
 * 根拠: クリーンアップ処理ブロックおよび修正コメント (行番号: 44〜64 / 抜粋: "CLEANUP_TARGETS=(")
 * **（Issue #360 で修正）** `CLEANUP_TARGETS` に scheduler が起動する監視スクリプト6本に限定した正規表現（`python.*monitors/(switchbot_power_monitor|...|nas_monitor)\.py`）と `ffmpeg.*hls_streams`（ライブ配信/VOD 生成の ffmpeg）を追加。旧世代が孤児化して残ると、新世代と同じ HLS パスへ二重書き込みしたり古い設定で DB 書き込み・保持期間削除を続けたりするため。
+* **（Issue #738 / AUDIT-008 で更新）** 同正規表現に`routine_deadline_job`が加わり、対象は scheduler が起動する監視スクリプト7本になった（`scheduler_boot.TASKS`にルーティンの締切処理タスクを60秒間隔で追加したため）。`tests/test_start_all_sh.py`の`TestStartAllShCleanupTargets`が、このパターンが`TASKS`の全スクリプトに一致し、かつ cron/systemd で独立に動くスクリプト（`health_watch`等）には一致しないことを検査する。
 * 根拠: `CLEANUP_TARGETS=(` (行番号: 57〜64)
 * **（Issue #646 で追加）** `--prepare`モード(`PREPARE_ONLY=true`)では、ダッシュボード(`streamlit run`)を`CLEANUP_TARGETS`から除外する。ダッシュボードは`home_dashboard.service`が別ユニットで管理しており、ここでSIGTERMするとsystemd側が予期しない停止と扱うため。`unified_server.py`・子プロセス・ffmpegは引き続き掃除する(旧来の`nohup`起動が残っている場合の回収、および前世代の孤児の掃除)。
 * 根拠: `if [ "$PREPARE_ONLY" = true ]; then` 〜 `CLEANUP_TARGETS=("${filtered_targets[@]}")` (行番号: 66〜78 / 抜粋: "if [ "$target" != "streamlit run" ]; then")

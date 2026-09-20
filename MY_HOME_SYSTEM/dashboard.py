@@ -50,6 +50,10 @@ def _render_header_actions() -> None:
     col_refresh, col_quest = st.columns(2)
     with col_refresh:
         if st.button("🔄 データを更新", width="stretch"):
+            # Issue #741: 以前はこの `clear()` の時点で `@st.cache_data` が
+            # 1つも存在せず、実際には何も消していなかった(押しても押さなくても
+            # 毎回DBを読み直していた)。`view_common` のキャッシュ付きローダを
+            # 使うようになり、TTL(60秒)を待たずに捨てる操作として機能する。
             st.cache_data.clear()
             st.rerun()
     with col_quest:
@@ -89,15 +93,22 @@ def main():
         _render_header_actions()
 
         # --- データ読み込み (Service層へ委譲) ---
-        df_sensor = analysis_service.load_sensor_data(limit=10000)
-        df_child = analysis_service.load_generic_data(config.SQLITE_TABLE_CHILD)
-        df_poop = analysis_service.load_generic_data(config.SQLITE_TABLE_DEFECATION)
-        df_food = analysis_service.load_generic_data(config.SQLITE_TABLE_FOOD)
-        df_car = analysis_service.load_generic_data(config.SQLITE_TABLE_CAR)
-        df_security_log = analysis_service.load_generic_data("security_logs", limit=100)
+        # Issue #741: Streamlit はウィジェット操作・タブ切替・ページ読み込みの
+        # たびにスクリプト全体を再実行するため、ここは「タブを1回切り替える」
+        # たびに走る。素の analysis_service を直接呼ぶと毎回 約33,000行を
+        # SQLite から読み直し、unified_server 側の書き込みとも競合していた。
+        # View層のキャッシュ付きラッパー(TTL 60秒)を経由する。
+        df_sensor = view_common.load_sensor_data_cached(limit=10000)
+        df_child = view_common.load_generic_data_cached(config.SQLITE_TABLE_CHILD)
+        df_poop = view_common.load_generic_data_cached(config.SQLITE_TABLE_DEFECATION)
+        df_food = view_common.load_generic_data_cached(config.SQLITE_TABLE_FOOD)
+        df_car = view_common.load_generic_data_cached(config.SQLITE_TABLE_CAR)
+        df_security_log = view_common.load_generic_data_cached("security_logs", limit=100)
+        # 表示名の付与は100行に対する純粋なCPU処理なのでキャッシュに含めない
+        # (キャッシュ対象を「DBの読み取り」だけに閉じておく)。
         df_security_log = analysis_service.apply_friendly_names(df_security_log)
-        df_bicycle = analysis_service.load_bicycle_data(limit=3000)
-        nas_data = analysis_service.load_nas_status()
+        df_bicycle = view_common.load_bicycle_data_cached(limit=3000)
+        nas_data = view_common.load_nas_status_cached()
 
         # Issue #701 (2026-09-19): 以前はここで「セバスチャンからの報告」
         # (ai_report_records の最新1件)を表示していたが、書込側が 2026-07-16 以降

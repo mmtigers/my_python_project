@@ -126,3 +126,189 @@ class TestAttemptRemountTimeout:
         monkeypatch.setattr(nas_utils.subprocess, "run", _fake_run)
 
         assert nas_utils.attempt_remount("/mnt/nas") is False
+
+
+# ---------------------------------------------------------------------------
+# Issue #758 (AUDIT-029): NAS のマウント判定・フォールバック・同期の各分岐。
+#
+# NAS は録画・HLS・バックアップの中心で、専用の障害調査レポート
+# (docs/reports/MY_HOME_SYSTEM/NAS_TIMEOUT_INVESTIGATION_2026-08-24.md)まで
+# 存在する既知の障害領域である。さらに DDD の3スクリプトがこのモジュールを
+# 実依存で import している(#553)。subprocess.run / os.path.ismount を
+# monkeypatch し、実際の NAS には一切触れずに分岐を通す。
+# ---------------------------------------------------------------------------
+import pytest
+
+sys.path.insert(0, str(MY_HOME_SYSTEM_DIR))
+from core import nas_utils
+
+
+@pytest.fixture
+def quiet_notifications(monkeypatch):
+    """NAS 復旧失敗時の send_push を記録に差し替える(本物の通知を飛ばさない)。"""
+    sent = []
+    monkeypatch.setattr(nas_utils, "send_push", lambda messages, **kwargs: sent.append((messages, kwargs)))
+    return sent
+
+
+class TestAttemptRemount:
+    def test_returns_true_on_successful_mount(self, monkeypatch):
+        monkeypatch.setattr(
+            nas_utils.subprocess, "run",
+            lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),
+        )
+        assert nas_utils.attempt_remount("/mnt/nas") is True
+
+    def test_returns_false_on_non_zero_exit(self, monkeypatch):
+        monkeypatch.setattr(
+            nas_utils.subprocess, "run",
+            lambda cmd, **kw: subprocess.CompletedProcess(cmd, 32, stdout="", stderr="mount: permission denied\n"),
+        )
+        assert nas_utils.attempt_remount("/mnt/nas") is False
+
+    def test_unexpected_exception_is_treated_as_failure(self, monkeypatch):
+        def _boom(cmd, **kwargs):
+            raise OSError("sudo not found")
+
+        monkeypatch.setattr(nas_utils.subprocess, "run", _boom)
+        assert nas_utils.attempt_remount("/mnt/nas") is False
+
+
+class TestIsMountedAndWritable:
+    def test_false_when_mount_point_is_not_a_mount(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(nas_utils.os.path, "ismount", lambda p: False)
+        assert nas_utils.is_mounted_and_writable(tmp_path / "target", "/mnt/nas") is False
+
+    def test_true_when_mounted_and_target_is_writable(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(nas_utils.os.path, "ismount", lambda p: True)
+        target = tmp_path / "nas" / "assets"
+        assert nas_utils.is_mounted_and_writable(target, "/mnt/nas") is True
+        assert target.is_dir(), "初回起動時にターゲットディレクトリが作成されること"
+
+    def test_false_when_target_cannot_be_created(self, tmp_path, monkeypatch):
+        """mkdir が OSError(NAS が読み取り専用等)なら書き込み可能とみなさない。"""
+        monkeypatch.setattr(nas_utils.os.path, "ismount", lambda p: True)
+
+        def _boom(*args, **kwargs):
+            raise OSError("read-only file system")
+
+        monkeypatch.setattr(nas_utils.Path, "mkdir", _boom)
+        assert nas_utils.is_mounted_and_writable(tmp_path / "target", "/mnt/nas") is False
+
+    def test_false_when_target_is_not_writable(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(nas_utils.os.path, "ismount", lambda p: True)
+        monkeypatch.setattr(nas_utils.os, "access", lambda p, mode: False)
+        assert nas_utils.is_mounted_and_writable(tmp_path / "target", "/mnt/nas") is False
+
+
+class TestSyncFallbackToNas:
+    def test_noop_when_fallback_is_missing_or_empty(self, tmp_path):
+        nas_dir = tmp_path / "nas"
+        nas_dir.mkdir()
+        nas_utils.sync_fallback_to_nas(tmp_path / "does-not-exist", nas_dir)
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        nas_utils.sync_fallback_to_nas(empty, nas_dir)
+        assert list(nas_dir.iterdir()) == []
+
+    def test_files_and_directories_are_moved_to_nas(self, tmp_path):
+        local = tmp_path / "fallback"
+        (local / "sub").mkdir(parents=True)
+        (local / "a.txt").write_text("a", encoding="utf-8")
+        (local / "sub" / "b.txt").write_text("b", encoding="utf-8")
+        nas_dir = tmp_path / "nas"
+        nas_dir.mkdir()
+
+        nas_utils.sync_fallback_to_nas(local, nas_dir)
+
+        assert (nas_dir / "a.txt").read_text(encoding="utf-8") == "a"
+        assert (nas_dir / "sub" / "b.txt").read_text(encoding="utf-8") == "b"
+        # SSOT を NAS に戻すため、ローカル側は空になる
+        assert list(local.iterdir()) == []
+
+    def test_existing_nas_data_is_overwritten_by_the_newer_local_copy(self, tmp_path):
+        """フォールバック中に書かれたローカルのほうが新しい前提の、意図した上書き。"""
+        local = tmp_path / "fallback"
+        local.mkdir()
+        (local / "a.txt").write_text("new", encoding="utf-8")
+        nas_dir = tmp_path / "nas"
+        nas_dir.mkdir()
+        (nas_dir / "a.txt").write_text("old", encoding="utf-8")
+
+        nas_utils.sync_fallback_to_nas(local, nas_dir)
+
+        assert (nas_dir / "a.txt").read_text(encoding="utf-8") == "new"
+
+    def test_copy_failure_is_logged_and_does_not_raise(self, tmp_path, monkeypatch):
+        local = tmp_path / "fallback"
+        local.mkdir()
+        (local / "a.txt").write_text("a", encoding="utf-8")
+        nas_dir = tmp_path / "nas"
+        nas_dir.mkdir()
+
+        def _boom(src, dst):
+            raise OSError("NAS disconnected mid-copy")
+
+        monkeypatch.setattr(nas_utils.shutil, "copy2", _boom)
+
+        nas_utils.sync_fallback_to_nas(local, nas_dir)  # 例外が漏れないこと
+
+        # コピーに失敗したローカルのデータは消えていない(unlink まで到達しない)
+        assert (local / "a.txt").exists()
+
+
+class TestGetManagedTargetDirectory:
+    def test_returns_nas_dir_and_syncs_when_mounted(self, tmp_path, monkeypatch, quiet_notifications):
+        nas_dir = tmp_path / "nas" / "assets"
+        nas_dir.mkdir(parents=True)
+        fallback = tmp_path / "fallback"
+        fallback.mkdir()
+        (fallback / "pending.txt").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(nas_utils, "is_mounted_and_writable", lambda t, m: True)
+
+        result = nas_utils.get_managed_target_directory(str(nas_dir), str(fallback))
+
+        assert result == nas_dir
+        assert (nas_dir / "pending.txt").exists(), "復旧時に溜まったフォールバックを同期すること"
+        assert quiet_notifications == []
+
+    def test_remount_success_returns_nas_dir(self, tmp_path, monkeypatch, quiet_notifications):
+        nas_dir = tmp_path / "nas" / "assets"
+        nas_dir.mkdir(parents=True)
+        fallback = tmp_path / "fallback"
+        states = iter([False, True])
+        monkeypatch.setattr(nas_utils, "is_mounted_and_writable", lambda t, m: next(states))
+        monkeypatch.setattr(nas_utils, "attempt_remount", lambda m: True)
+
+        result = nas_utils.get_managed_target_directory(str(nas_dir), str(fallback))
+
+        assert result == nas_dir
+        assert quiet_notifications == []
+
+    def test_remount_succeeds_but_still_unwritable_falls_back(self, tmp_path, monkeypatch, quiet_notifications):
+        """mount コマンドは成功しても、書き込み確認が通らなければフォールバックする。"""
+        nas_dir = tmp_path / "nas" / "assets"
+        fallback = tmp_path / "fallback"
+        monkeypatch.setattr(nas_utils, "is_mounted_and_writable", lambda t, m: False)
+        monkeypatch.setattr(nas_utils, "attempt_remount", lambda m: True)
+
+        result = nas_utils.get_managed_target_directory(str(nas_dir), str(fallback))
+
+        assert result == fallback
+        assert fallback.is_dir()
+        assert len(quiet_notifications) == 1
+
+    def test_unrecoverable_failure_notifies_and_falls_back(self, tmp_path, monkeypatch, quiet_notifications):
+        nas_dir = tmp_path / "nas" / "assets"
+        fallback = tmp_path / "fallback" / "assets"
+        monkeypatch.setattr(nas_utils, "is_mounted_and_writable", lambda t, m: False)
+        monkeypatch.setattr(nas_utils, "attempt_remount", lambda m: False)
+
+        result = nas_utils.get_managed_target_directory(str(nas_dir), str(fallback))
+
+        assert result == fallback
+        assert fallback.is_dir(), "Fail-Soft: フォールバック先は必ず作成される"
+        # Issue #289: LINE 宛先(user_id)は不要で、discord/error へ1回だけ通知する
+        messages, kwargs = quiet_notifications[0]
+        assert kwargs == {"target": "discord", "channel": "error"}
+        assert str(nas_dir) in messages[0]["text"]

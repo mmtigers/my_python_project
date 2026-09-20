@@ -179,3 +179,119 @@ class UseItemAction(BaseModel):
     # sqlite3 の OverflowError → 500 になっていた(/quest/cancel 等は 422)。
     user_id: str = Field(min_length=1, max_length=64)
     inventory_id: int = Field(ge=1, le=_SQLITE_INT_MAX)
+
+
+# ==========================================
+# View Models (GET /api/quest/data のレスポンス契約) — Issue #752 (AUDIT-023)
+# ==========================================
+# GameSystem.get_all_view_data() は dict[str, Any] を返しており、ルーター側も
+# response_model を持っていなかったため、このエンドポイントだけ OpenAPI に
+# レスポンス形状が一切出ていなかった。フロントエンド側の型は
+# family-quest/src/lib/gameDataSchema.ts の手書き Zod と
+# src/types/index.ts の TS interface に二重管理されており、乖離しても
+# 実行時にしか分からない(#470 の nextLevelExp、#530 の is_shared_* 等、
+# 実際に乖離が発生した記録が gameDataSchema.ts に列挙されている)。
+#
+# ここでは「生成パイプラインを入れる前に、まずサーバー側の契約を明示する」
+# 最小修正として、get_all_view_data が現在返している形をそのまま Pydantic に
+# 写す。**意図的に現在の返却値を1フィールドも落とさない**方針であり、
+# フロントエンドが既に使っていない hp/maxHp(#327)や logs(#412)も含める
+# (response_model は宣言外のキーを落とすため、落とすと挙動変更になる)。
+# 宣言漏れ・新カラムの取りこぼしは tests/test_quest_api_type_contract.py が
+# SQLite のテーブル定義および gameDataSchema.ts と突き合わせて検出する。
+
+
+class ViewUser(BaseModel):
+    """quest_users の1行 + GameSystem.get_all_view_data が付与する算出フィールド。"""
+    user_id: str
+    name: str | None = None
+    job_class: str | None = None
+    level: int = 1
+    exp: int = 0
+    gold: int = 0
+    medal_count: int | None = 0
+    avatar: str | None = None
+    updated_at: str | None = None
+    role: str | None = None
+    # game_logic.GameLogic による算出値(DBカラムではない)。
+    # #470: nextLevelExp は以前からサーバーが返していたがフロント側の Zod に
+    # 含まれておらず、parse 後に無音で消えていた。
+    nextLevelExp: int
+    # #327: HP 表示 UI は廃止済みでフロントは未使用だが、サーバーは送出し続けて
+    # いるため契約としてはここに残す(落とすと実挙動が変わるため)。
+    maxHp: int
+    hp: int
+
+
+class ViewQuest(BaseModel):
+    """quest_master の1行 + filter_active_quests / ボーナス計算が付与するフィールド。"""
+    quest_id: int
+    title: str
+    description: str | None = None
+    quest_type: str | None = None
+    exp_gain: int | None = None
+    gold_gain: int | None = None
+    icon_key: str | None = None
+    day_of_week: str | None = None
+    target_user: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    occurrence_chance: float | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    # #474: quest_master.days は TEXT カラムだが、filter_active_quests が
+    # day_of_week から組み立てた list[int] | None で上書きしてから返す。
+    days: list[int] | None = None
+    pre_requisite_quest_id: int | None = None
+    reset_period: str | None = None
+    # get_all_view_data が閲覧ユーザーの履歴から算出する連続達成ボーナス。
+    bonus_gold: int = 0
+    bonus_exp: int = 0
+
+
+class ViewReward(BaseModel):
+    """reward_master の1行。#291 によりレガシー列 desc は除いて返す。"""
+    reward_id: int
+    title: str
+    description: str | None = None
+    category: str | None = None
+    cost_gold: int | None = None
+    icon_key: str | None = None
+    target: str | None = None
+
+
+class ViewQuestHistory(BaseModel):
+    """quest_history の1行(completedQuests / pendingQuests の要素)。"""
+    id: int
+    user_id: str | None = None
+    quest_id: int | None = None
+    quest_title: str | None = None
+    # サーバーが生成するのは 'pending' | 'approved' | 'rejected' の3値だが、
+    # 想定外の値を 500 に変えないよう Literal ではなく str で受ける
+    # (値の列挙はフロント側 gameDataSchema.ts の z.enum が持つ)。
+    status: str
+    completed_at: str | None = None
+    exp_earned: int | None = None
+    gold_earned: int | None = None
+    linked_history_id: int | None = None
+    medals_earned: int | None = None
+
+
+class ViewAdventureLog(BaseModel):
+    """GameSystem._fetch_recent_logs が組み立てる冒険ログの1件。"""
+    id: str
+    text: str
+    dateStr: str
+    timestamp: str
+
+
+class GameDataResponse(BaseModel):
+    """GET /api/quest/data のレスポンス全体。"""
+    users: list[ViewUser]
+    quests: list[ViewQuest]
+    rewards: list[ViewReward]
+    completedQuests: list[ViewQuestHistory]
+    # #412: フロントエンドはどのコンポーネントからも参照していないが、
+    # サーバーは返し続けているため契約としては残す。
+    logs: list[ViewAdventureLog]
+    pendingQuests: list[ViewQuestHistory]
