@@ -17,7 +17,7 @@
 
 ## 2. ファイルの概要
 
-* データベースのバックアップを実行し、NASへ転送する。あわせて `config.BACKUP_FILES` に列挙されたDB以外の設定ファイル（`config.py`/`devices.json`。Issue #649 で `.env` はシークレットの平文コピーを避けるため除外した）もNASへコピーする。復元手順は `docs/runbooks/db_restore.md`。
+* データベースのバックアップを実行し、**`PRAGMA integrity_check` で検証してから**NASへ転送する（Issue #753）。あわせて `config.BACKUP_FILES` に列挙されたDB以外の設定ファイル（`config.py`/`devices.json`/`family_members.local.json`/`quest_users.local.json`。Issue #649 で `.env` はシークレットの平文コピーを避けるため除外した）もNASへコピーする。復元手順は `docs/runbooks/db_restore.md`。
 * NASへの転送失敗（権限エラー・接続断等）時は、管理者の介入が必要な恒久的障害（ERROR）として扱い、即時通知を行う責務を持つ。
 
 ## 3. 外部依存関係
@@ -28,6 +28,7 @@
 | --- | --- | --- | --- |
 | `sqlite3` | 標準ライブラリ | DB接続およびバックアップ機能の利用 | `import sqlite3` (行番号: 1 / 抜粋: "import sqlite3") |
 | `os` | 標準ライブラリ | パス結合、ディレクトリ作成、ファイルサイズ取得、ファイル削除 | `import os` (行番号: 2 / 抜粋: "import os") |
+| `sys` | 標準ライブラリ | **（Issue #753 で追加）** `if __name__ == "__main__":` から `sys.exit` で終了コードを返すため | `import sys` (行番号: 4 / 抜粋: "import sys") |
 | `datetime` | 標準ライブラリ | バックアップファイル名用のタイムスタンプ生成 | `import datetime` (行番号: 3 / 抜粋: "import datetime") |
 | `shutil` | 標準ライブラリ | ファイルのNASへのコピー | `import shutil` (行番号: 4 / 抜粋: "import shutil") |
 | `time` | 標準ライブラリ | 未使用 | `import time` (行番号: 5 / 抜粋: "import time") |
@@ -61,13 +62,15 @@
 ### `perform_backup`
 
 * **役割**: データベースのバックアップを実行し、NASへ転送する。転送成功後は `_backup_config_files` を呼び出し、`config.BACKUP_FILES` に列挙されたDB以外の設定ファイルもあわせてNASへコピーする。NASへの転送失敗時は管理者の介入が必要な恒久的障害として扱い、即時通知を行う。
-* 根拠: `def perform_backup() -> Tuple[bool, str, float]:` (行番号: 17〜92 / 抜粋: "def perform_backup() -> Tu...")
+* 根拠: `def perform_backup() -> Tuple[bool, str, float]:` (行番号: 18〜104 / 抜粋: "def perform_backup() -> Tu...")
 * **（#411 S-L8で修正）** 元・先の接続は以前 `with sqlite3.connect(...) as conn:` で開いていたが、sqlite3の`Connection.__exit__`はcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、定期実行されるバックアップ処理のたびに接続がcloseされずリークしていた。`contextlib.closing`で両接続を明示的にcloseするよう変更した。
 * 根拠: `with contextlib.closing(sqlite3.connect(src_db_path)) as src_conn, \` (行番号: 46〜48)
+* **（Issue #753 / AUDIT-024 で追加）** Phase 1 の直後、**NASへ転送する前**にバックアップファイルへ改めて接続し、`PRAGMA integrity_check` を実行する。結果が `"ok"` 以外（および `fetchone()` が偽値を返した場合）は `OSError` を送出して外側の `except` に落とし、失敗として扱う。`Connection.backup()` は正常完了すれば一貫したコピーになるが、**コピー元が既に破損していれば破損したままコピーされる**うえ、Phase 2 の転送確認はサイズ比較だけで内容を見ていないため、破損に気づかないまま `DB_BACKUP_RETENTION_DAYS`（既定30日）で健全な世代が消えうる。
+* 根拠: `result = verify_conn.execute("PRAGMA integrity_check").fetchone()` (行番号: 59 / 抜粋: "result = verify_conn.execu...")、`raise OSError(f"バックアップの整合性検証に失敗しました: {result}")` (行番号: 61)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def perform_backup():` (行番号: 17 / 抜粋: "def perform_backup() -> Tu...")
+* 根拠: `def perform_backup():` (行番号: 18 / 抜粋: "def perform_backup() -> Tu...")
 
 
 * **戻り値/レスポンス**: `Tuple[bool, str, float]`。成功時は `(True, "バックアップ完了", バックアップサイズMB)`、失敗時は `(False, エラーメッセージ, 0.0)` を返す。
@@ -89,15 +92,15 @@
 ### `_backup_config_files`
 
 * **役割**: `config.BACKUP_FILES` に列挙された設定ファイル(DB以外)をNASへコピーする。`src_db_path` と一致するエントリ（DB本体、既にPhase 1/2でバックアップ済み）はスキップする。個々のファイルのコピー失敗（ファイル不存在・`OSError`）はログに残すのみで、`perform_backup` 全体の成否には影響させない。
-* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str) -> None:` (行番号: 94〜113 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str) -> None:` (行番号: 106〜125 / 抜粋: "def _backup_config_files(n...")
 
 
 * **引数/リクエスト**: `nas_backup_dir: Path` (コピー先のNASバックアップディレクトリ), `timestamp: str` (ファイル名に付与するタイムスタンプ文字列), `src_db_path: str` (スキップ対象となるDBパス、`perform_backup`の`config.SQLITE_DB_PATH`)
-* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)` (行番号: 94 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)` (行番号: 106 / 抜粋: "def _backup_config_files(n...")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 94 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `-> None:` (行番号: 106 / 抜粋: "def _backup_config_files(n...")
 
 
 * **副作用**: `config.BACKUP_FILES` の各エントリについて、相対パスは `config.BASE_DIR` を基準に解決したうえで存在確認し、存在すれば `nas_backup_dir` へ `<ファイル名(拡張子除く)>_<timestamp><拡張子>` という名前で `shutil.copy2` によりコピーする。存在確認・コピー結果をログ出力する。
@@ -112,25 +115,30 @@
 ### `_copy_latest_offsite`
 
 * **役割**（2026-09-19 新設）: NAS へ転送済みのバックアップを、rclone のリモート（`config.DB_BACKUP_OFFSITE_REMOTE`）へ**最新1世代**として複製する。リモート側は常に `home_system_latest.db` の1ファイルだけを上書きする（世代管理は NAS 側の `db_backups/` と `DB_BACKUP_RETENTION_DAYS`）。以前はバックアップが NAS にしか無く、NAS が故障すると DB 本体とバックアップを同時に失う構成だった。
-* 根拠: `_copy_latest_offsite` (行番号: 120-151 / 抜粋: "def _copy_latest_offsite(nas_backup_path: Path) -> bool:")
+* 根拠: `_copy_latest_offsite` (行番号: 132-163 / 抜粋: "def _copy_latest_offsite(nas_backup_path: Path) -> bool:")
 * **呼び出し条件**: `perform_backup` の NAS 転送と整合性確認が成功し、`_backup_config_files` を終えた後にだけ呼ばれる。NAS 転送に失敗した場合は呼ばれない。
 * **無効化**: `DB_BACKUP_OFFSITE_REMOTE` が空（既定）なら何もせず `False` を返す。
 * **送るもの**: DB のみ。`devices.json` 等の設定ファイルはカメラの接続情報を含みうるため送らない。
 * **エラーハンドリング**: rclone が見つからない・非0終了・タイムアウト（`OFFSITE_TIMEOUT_SEC` = 1800秒）のいずれも ERROR ログを残して `False` を返すだけで、`perform_backup` の戻り値（NAS バックアップの成否）には影響させない。ERROR ログは `health_watch.py` の `check_app_logs` が検知する。
 * **外部コマンド**: `rclone copyto <NASのバックアップ> <リモート>/home_system_latest.db --retries 3`（引数はリスト渡し）。
 
+### `if __name__ == "__main__":` ブロック
+
+* **役割**（Issue #753 / AUDIT-024 で変更）: `perform_backup()` を実行し、**その成功フラグを終了コードへ反映する**（成功なら 0、失敗なら 1）。以前は戻り値を捨てていたため、バックアップが失敗してもプロセスは常に exit 0 で終わり、cron/systemd の側からは成功と区別できなかった（Discord 通知は出るため実害は小さいが、通知経路が落ちていると完全に見えなくなる）。
+* 根拠: `sys.exit(0 if perform_backup()[0] else 1)` (行番号: 179 / 抜粋: "sys.exit(0 if perform_back...")
+
 ### `_notify_and_log_error`
 
 * **役割**: ERRORレベルの記録と管理者への即時通知を行う。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 154〜161 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 166〜173 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **引数/リクエスト**: `message: str` (エラー内容を示すメッセージ文字列)
-* 根拠: `def _notify_and_log_error(message: str)` (行番号: 154 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str)` (行番号: 166 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 154 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `-> None:` (行番号: 166 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **副作用**: ロガーへのエラー書き込み、外部API呼び出し（`send_push`）。
@@ -138,7 +146,7 @@
 
 
 * **エラーハンドリング**: なし（内部で例外捕捉は行われていない）。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 154〜161 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 166〜173 / 抜粋: "def _notify_and_log_error(...)")
 
 
 
@@ -151,7 +159,9 @@ flowchart TD
 
   TryStart --> Phase1[Phase 1: ローカルバックアップ]
   Phase1 --> SQLiteBackup[外部: sqlite3.backup]
-  SQLiteBackup --> CheckNASDir{NASバックアップ\nディレクトリ存在確認}
+  SQLiteBackup --> Verify{"PRAGMA integrity_check\n(Issue #753)"}
+  Verify -- "ok 以外" --> RaiseIntegrity[raise OSError]
+  Verify -- ok --> CheckNASDir{NASバックアップ\nディレクトリ存在確認}
 
   CheckNASDir -- 存在しない --> TryCreateDir[ディレクトリ作成]
   TryCreateDir -- 成功 --> CopyNAS
@@ -170,6 +180,7 @@ flowchart TD
 
   RaiseDirErr -. "例外捕捉" .-> GlobalCatch
   RaiseOSError -. "例外捕捉" .-> GlobalCatch
+  RaiseIntegrity -. "例外捕捉" .-> GlobalCatch
   Phase1 -. "例外捕捉" .-> GlobalCatch
   SQLiteBackup -. "例外捕捉" .-> GlobalCatch
 
@@ -232,6 +243,8 @@ graph TD
 * `import time` が宣言されているが、コード内で一度も使用されていない。
 * Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`引数が不要になった。これに伴い`_notify_and_log_error`の`send_push`呼び出しからは、以前存在した`user_id=getattr(config, "LINE_USER_ID", None)`(target="discord"であるにも関わらずLINE宛先を渡していた不整合)が撤去されている。
 * NASディレクトリ作成失敗時のエラーハンドリング（54〜58行目）は、意図的に `_notify_and_log_error`（通知）を呼び出さずログ記録のみを行ってから例外を再送出している。これは、外側の `except Exception as e:`（71行目）でも同一エラーが捕捉されて通知が二重送信されるのを防ぐための設計であり、コード中にもその旨のコメントが付されている（過去に二重通知が発生していたための対策）。この一本化された経路を崩さないよう、将来的にこのブロックへ通知呼び出しを追加する際は二重送信に注意する必要がある。
+* **（Issue #753 / AUDIT-024 で追加）** 整合性検証は `PRAGMA integrity_check` で DB 全体を読むため時間がかかる（数百MBなら数秒〜数十秒）。毎日04:00の実行なので許容しているが、`monitors/nas_monitor.py` の保持期間削除（1日1回）と重なると `database is locked` を招きうるため、実行時刻を動かす際は順序を確認すること。なお検証は**NASへ置く前**に走るため、破損を検知した場合はNASへ1バイトも転送されない（`tests/test_backup_service.py::TestBackupIntegrityVerification` が順序を固定している）。
+* **（Issue #753 / AUDIT-024 で追加）** `config.BACKUP_FILES` に `family_members.local.json` / `quest_users.local.json`（gitignore 対象のローカルオーバーレイ）を追加した。以前は対象外で、復元時にこれらが失われていた。`_backup_config_files` が `os.path.exists` で存在確認してスキップするため、これらを置いていない環境でもバックアップは成功する。
 * **（Issue #649 で変更）** `config.BACKUP_FILES` から `.env` を除外した。以前は全シークレット(SwitchBot/LINE/Discord/Gemini)を NAS の `db_backups/` へ平文でコピーしており、NAS 共有の閲覧権限がそのままシークレットの閲覧権限になっていた。`.env` はリポジトリ外(パスワードマネージャ等)で別管理し、復元手順は `docs/runbooks/db_restore.md` にまとめた(`tests/test_backup_service.py::test_env_file_is_not_in_default_backup_files` が既定値への復活を防ぐ)。
 * Issue #113で修正: 従来 `config.BACKUP_FILES`（`config.py`/`.env`/`devices.json`を列挙）はどのコードからも参照されず、`perform_backup` はDBファイル単体しかNASへ転送していなかった（CLAUDE.mdの説明と実装が食い違う死に設定になっていた）。`_backup_config_files` を新設し、`perform_backup` の転送成功後にこれを呼び出すことで、`config.BACKUP_FILES` に列挙されたファイルが実際にバックアップされるようにした。相対パスのエントリは `config.BASE_DIR` を基準に解決するため、`config.BACKUP_FILES` に新しいファイルを追加する場合は `config.BASE_DIR`（`MY_HOME_SYSTEM/`）からの相対パス、または絶対パスで指定する必要がある。
 * `_backup_config_files` が書き込む先の `nas_backup_dir`（`NAS_PROJECT_ROOT/db_backups`、すなわち `config.DB_BACKUPS_DIR`）は `monitors/nas_monitor.py` の `run_retention_cleanup` によるリテンション削除の対象でもある。以前はこの削除処理が拡張子 `.db` のみを対象としていたため、`_backup_config_files` が生成する設定ファイルのコピー（`.py`/`.json`拡張子、および`.env`はコピー時に拡張子なしのファイル名になる）は一切削除されず無限に蓄積していた（Issue #191、詳細は `docs/specifications/MY_HOME_SYSTEM/nas_monitor.md` の `run_retention_cleanup` を参照）。`nas_monitor.py` 側で `DB_BACKUPS_DIR` 全体を拡張子を問わず削除対象とするよう修正済みのため、`config.BACKUP_FILES` に新しい拡張子のファイルを追加しても、削除対象からは自動的に漏れない。

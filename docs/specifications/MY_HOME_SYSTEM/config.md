@@ -161,7 +161,7 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 | 定数 | 値 | 用途 |
 | --- | --- | --- |
 | `SQLITE_TABLE_BICYCLE` | `"bicycle_parking_records"` | 駐輪場記録テーブル名 |
-| `BACKUP_FILES` | `[SQLITE_DB_PATH, "config.py", "devices.json"]` | `services/backup_service.py` が NAS へ退避する対象。**Issue #649 で `.env` を除外**(NAS 共有の閲覧権限がそのままシークレットの閲覧権限になるため) |
+| `BACKUP_FILES` | `[SQLITE_DB_PATH, "config.py", "devices.json", "family_members.local.json", "quest_users.local.json"]` | `services/backup_service.py` が NAS へ退避する対象。**Issue #649 で `.env` を除外**(NAS 共有の閲覧権限がそのままシークレットの閲覧権限になるため)。**Issue #753 で gitignore 対象のローカルオーバーレイ2件を追加**(対象外のままだと復元時に失われるため。`_backup_config_files` が `os.path.exists` で確認してスキップするので、置いていない環境でも安全) |
 | `DEFAULT_SOUND_SOURCE` | `{BASE_DIR}/defaults/sounds` | 効果音の配布元(NAS 側 `SOUND_DIR` へ同期する元) |
 | `NAS_CHECK_TIMEOUT` | `5` | NAS 疎通確認のタイムアウト秒 |
 | `NVR_RECORD_DIR` | `{NAS_MOUNT_POINT}/home_system/nvr_recordings` | NVR 録画の保存先(`camera_monitor` のスナップショット抽出元) |
@@ -170,7 +170,7 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 | `SOUND_PLAYER_ARGS` | `["-o", "pulse"]` | `core/sound_manager.py` が再生コマンドへ渡す追加引数 |
 | `MEMORY_ALERT_LAST_NOTIFY_FILE` | `{FALLBACK_ROOT}/last_memory_alert.txt` | `memory_monitor` の通知クールダウン用状態ファイル |
 
-* 根拠: `SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"` (行番号: 311)、`BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", "devices.json"]` (行番号: 317)、`DEFAULT_SOUND_SOURCE: str = os.path.join(BASE_DIR, "defaults", "sounds")` (行番号: 320)、`NAS_CHECK_TIMEOUT: int = 5` (行番号: 354)、`NVR_RECORD_DIR` (行番号: 409)、`TIMELAPSE_FONT_FILE` (行番号: 431)、`DB_BACKUPS_DIR` (行番号: 443)、`SOUND_PLAYER_ARGS` (行番号: 451)、`MEMORY_ALERT_LAST_NOTIFY_FILE` (行番号: 500)
+* 根拠: `SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"` (行番号: 311)、`BACKUP_FILES: List[str] = [` (行番号: 327)、`DEFAULT_SOUND_SOURCE: str = os.path.join(BASE_DIR, "defaults", "sounds")` (行番号: 320)、`NAS_CHECK_TIMEOUT: int = 5` (行番号: 354)、`NVR_RECORD_DIR` (行番号: 409)、`TIMELAPSE_FONT_FILE` (行番号: 431)、`DB_BACKUPS_DIR` (行番号: 443)、`SOUND_PLAYER_ARGS` (行番号: 451)、`MEMORY_ALERT_LAST_NOTIFY_FILE` (行番号: 500)
 
 ### `_resolve_assets_dir` / `__getattr__` / `prewarm_nas_paths`（Issue #330 の遅延解決、#657 で追記）
 

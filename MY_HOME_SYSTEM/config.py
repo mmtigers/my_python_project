@@ -320,7 +320,17 @@ SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"
 # NAS の db_backups/ へ平文でコピーすることになり、NAS 共有の閲覧権限がそのままシークレットの
 # 閲覧権限になっていた。.env はリポジトリ外の秘匿情報として別管理(パスワードマネージャ等)とし、
 # バックアップ対象から外す。復元手順は docs/runbooks/db_restore.md を参照。
-BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", "devices.json"]
+# Issue #753 (AUDIT-024): family_members.local.json / quest_users.local.json は
+# gitignore 対象のローカルオーバーレイで、対象外のままだと復元時に失われていた。
+# いずれも存在しない環境がありうるが、_backup_config_files が os.path.exists で
+# 確認してスキップするため安全に列挙できる。
+BACKUP_FILES: List[str] = [
+    SQLITE_DB_PATH,
+    "config.py",
+    "devices.json",
+    "family_members.local.json",
+    "quest_users.local.json",
+]
 
 # デフォルトアセット
 DEFAULT_SOUND_SOURCE: str = os.path.join(BASE_DIR, "defaults", "sounds")

@@ -119,3 +119,114 @@ class TestPersistedStateWriteIsAtomic:
         assert json.loads(observed["during_write"]) == {"dev1": {"state": "on"}}
         assert spm._load_persisted_states() == {"dev1": {"state": "off"}}
         assert not [p for p in os.listdir(os.path.dirname(isolated_state_file)) if ".tmp." in p]
+
+
+# ---------------------------------------------------------------------------
+# Issue #758 (AUDIT-029): fetch_device_status_sync の API レスポンス耐性と、
+# log_device_state_change の Silence Policy 分岐。
+#
+# 5分ごとに常駐的に回る収集スクリプトで、API が想定外の形を返したときに
+# 例外で落ちる/無警告で欠損するとデータが静かに途切れる。
+# ---------------------------------------------------------------------------
+from unittest.mock import MagicMock
+
+
+def _patch_status(monkeypatch, payload):
+    monkeypatch.setattr(spm.sb_tool, "get_device_status", lambda device_id: payload)
+
+
+class TestFetchDeviceStatusSync:
+    def test_returns_none_when_api_returns_nothing(self, monkeypatch):
+        _patch_status(monkeypatch, None)
+        assert spm.fetch_device_status_sync("dev1", "Plug") is None
+
+    def test_returns_none_on_api_error_status_code(self, monkeypatch):
+        _patch_status(monkeypatch, {"statusCode": 190, "message": "device offline"})
+        assert spm.fetch_device_status_sync("dev1", "Plug") is None
+
+    def test_extracts_watt_as_power(self, monkeypatch):
+        _patch_status(monkeypatch, {"statusCode": 100, "body": {"watt": 123.5}})
+        assert spm.fetch_device_status_sync("dev1", "Plug") == {"power": 123.5}
+
+    def test_falls_back_to_weight_then_power_for_the_analog_value(self, monkeypatch):
+        """watt が無いモデルでは weight / power の順に拾う。"""
+        _patch_status(monkeypatch, {"statusCode": 100, "body": {"weight": "42"}})
+        assert spm.fetch_device_status_sync("dev1", "Plug")["power"] == 42.0
+
+    def test_non_numeric_analog_value_is_skipped_without_raising(self, monkeypatch):
+        """API が "--" 等を返しても例外にせず、その項目だけ落とす。"""
+        _patch_status(monkeypatch, {"statusCode": 100, "body": {"watt": "--", "weight": None}})
+        assert spm.fetch_device_status_sync("dev1", "Plug") == {}
+
+    def test_negative_analog_value_is_ignored(self, monkeypatch):
+        _patch_status(monkeypatch, {"statusCode": 100, "body": {"watt": -5}})
+        assert spm.fetch_device_status_sync("dev1", "Plug") == {}
+
+    def test_temperature_and_humidity_are_extracted(self, monkeypatch):
+        _patch_status(
+            monkeypatch, {"statusCode": 100, "body": {"temperature": "24.5", "humidity": "60"}}
+        )
+        assert spm.fetch_device_status_sync("dev1", "Meter") == {
+            "temperature": 24.5, "humidity": 60.0
+        }
+
+    def test_unparsable_temperature_drops_both_values(self, monkeypatch):
+        _patch_status(
+            monkeypatch, {"statusCode": 100, "body": {"temperature": "n/a", "humidity": 60}}
+        )
+        assert spm.fetch_device_status_sync("dev1", "Meter") == {}
+
+    def test_missing_humidity_defaults_to_zero(self, monkeypatch):
+        _patch_status(monkeypatch, {"statusCode": 100, "body": {"temperature": 20}})
+        assert spm.fetch_device_status_sync("dev1", "Meter") == {
+            "temperature": 20.0, "humidity": 0.0
+        }
+
+    def test_string_power_is_read_as_a_digital_state(self, monkeypatch):
+        """'power' が数値ではなく "on"/"off" の文字列で返るモデルへの対応。"""
+        _patch_status(monkeypatch, {"statusCode": 100, "body": {"power": "on"}})
+        assert spm.fetch_device_status_sync("dev1", "Plug") == {"power_state": "ON"}
+
+    def test_power_state_field_is_normalised_to_upper_case(self, monkeypatch):
+        _patch_status(monkeypatch, {"statusCode": 100, "body": {"powerState": "off"}})
+        assert spm.fetch_device_status_sync("dev1", "Strip") == {"power_state": "OFF"}
+
+    def test_body_missing_entirely_is_tolerated(self, monkeypatch):
+        _patch_status(monkeypatch, {"statusCode": 100})
+        assert spm.fetch_device_status_sync("dev1", "Plug") == {}
+
+    def test_exception_from_the_api_client_returns_none(self, monkeypatch):
+        def _boom(device_id):
+            raise RuntimeError("connection reset by peer")
+
+        monkeypatch.setattr(spm.sb_tool, "get_device_status", _boom)
+        assert spm.fetch_device_status_sync("dev1", "Plug") is None
+
+
+class TestLogDeviceStateChange:
+    """Silence Policy 6.1: デジタルな状態変化だけを INFO、アナログの微変動は DEBUG。"""
+
+    @pytest.fixture
+    def fake_logger(self, monkeypatch):
+        logger = MagicMock()
+        monkeypatch.setattr(spm, "logger", logger)
+        return logger
+
+    def test_unchanged_state_is_debug(self, fake_logger):
+        spm.log_device_state_change("plug", "d1", {"power": 1.0}, {"power": 1.0})
+        fake_logger.info.assert_not_called()
+        fake_logger.debug.assert_called_once()
+
+    def test_initial_state_is_debug_not_info(self, fake_logger):
+        """起動直後のログフラッドを防ぐため、初回取得は INFO に上げない。"""
+        spm.log_device_state_change("plug", "d1", None, {"power_state": "ON"})
+        fake_logger.info.assert_not_called()
+
+    def test_digital_change_is_info(self, fake_logger):
+        spm.log_device_state_change("plug", "d1", {"power_state": "ON"}, {"power_state": "OFF"})
+        fake_logger.info.assert_called_once()
+
+    def test_analog_only_change_is_debug(self, fake_logger):
+        spm.log_device_state_change("meter", "d1", {"temperature": 24.8}, {"temperature": 24.9})
+        fake_logger.info.assert_not_called()
+        fake_logger.debug.assert_called_once()

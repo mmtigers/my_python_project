@@ -1,6 +1,7 @@
 import contextlib
 import sqlite3
 import os
+import sys
 import datetime
 import shutil
 import subprocess
@@ -47,9 +48,20 @@ def perform_backup() -> Tuple[bool, str, float]:
         with contextlib.closing(sqlite3.connect(src_db_path)) as src_conn, \
              contextlib.closing(sqlite3.connect(str(temp_path))) as dst_conn:
             src_conn.backup(dst_conn, pages=-1)
-        
+
+        # Issue #753 (AUDIT-024): backup() API は正常完了すれば一貫したコピーになるが、
+        # コピー元が既に破損していれば破損したままコピーされる。NAS転送後の検証
+        # (Phase 2のサイズ比較)も内容は見ていないため、破損に気づかないまま
+        # DB_BACKUP_RETENTION_DAYS(既定30日)で健全な世代が消えうる。
+        # PRAGMA integrity_check はDB全体を読むため時間がかかる(数百MBで数秒〜数十秒)が、
+        # 1日1回04:00の実行なので許容する。
+        with contextlib.closing(sqlite3.connect(str(temp_path))) as verify_conn:
+            result = verify_conn.execute("PRAGMA integrity_check").fetchone()
+            if not result or result[0] != "ok":
+                raise OSError(f"バックアップの整合性検証に失敗しました: {result}")
+
         local_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
-        logger.info(f"✅ Local backup created: {local_size_mb:.2f} MB")
+        logger.info(f"✅ Local backup created & verified: {local_size_mb:.2f} MB")
 
         # Phase 2: Transfer to NAS
         if not nas_backup_dir.exists():
@@ -161,4 +173,7 @@ def _notify_and_log_error(message: str) -> None:
     )
 
 if __name__ == "__main__":
-    perform_backup()
+    # Issue #753 (AUDIT-024): 以前は戻り値を捨てていたため、バックアップが失敗しても
+    # プロセスは exit 0 で終わっていた(通知はあるが、cron/systemd からは成功に見える)。
+    # 終了コードで失敗が分かるようにする。
+    sys.exit(0 if perform_backup()[0] else 1)
