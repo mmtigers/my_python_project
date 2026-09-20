@@ -102,22 +102,23 @@ NAS 共有は 664 で見えるため、平文の認証情報を置けば「バ�
 ### `perform_backup`
 
 * **役割**: ホスト設定を収集して1世代分を書き出し、最後に `prune` を呼ぶ
-* 根拠: [定義] (行番号: 326 / 抜粋: "def perform_backup(")
+* 根拠: [定義] (行番号: 331 / 抜粋: "def perform_backup(")
 * **`dry_run=True`** なら `plan()` の結果だけを返し、1バイトも書かない
-* **テキストとして読めないファイル**（バイナリ等）は、値を確認できないのでコピーせず台帳のみに落とす（素通しで NAS へ置くより安全側に倒す）
+* **テキストとして読めないファイル**（バイナリ・非 UTF-8）は、値を確認できない＝ redact も効かせられないので、コピーせず台帳のみに落とす（素通しで NAS へ置くより安全側に倒す）。台帳には sha256 が残るので、復元時に「元のファイルと同一か」は照合できる
+* **読み込みに `errors="replace"` を使わないこと。** 不正な UTF-8 バイト列を例外にせず `U+FFFD` へ静かに置換するため、上記の `UnicodeError` 分岐が**デッドコード**になる。初回実装がこれを踏み、Shift-JIS のコメントが混ざった `fstab` のようなファイルが**警告なく壊れた内容で** `status="copied"` として保存されていた（しかも台帳の `sha256` は `plan()` が元のバイト列から計算するため保存内容と一致せず、**復元時にバックアップが化けていることに気づけない**）。`read_bytes().decode("utf-8")` で strict に読む。`tests/test_host_config_backup_service.py` の `TestNonUtf8FilesAreNotSilentlyCorrupted` が固定している
 * **副作用**: 出力先ディレクトリの作成（0o700）、`files/` へのファイル書き出し（0o600）、`MANIFEST.json` / `README.txt` の書き出し、`prune` による古い世代の削除
 
 ### `prune`
 
 * **役割**: 保持期間（`HOST_CONFIG_BACKUP_RETENTION_DAYS`、既定 90 日）を超えた世代ディレクトリを削除する
-* 根拠: [定義] (行番号: 388 / 抜粋: "def prune(base: Path, retention_days: int | None = None,")
+* 根拠: [定義] (行番号: 403 / 抜粋: "def prune(base: Path, retention_days: int | None = None,")
 * **名前が `%Y%m%d_%H%M%S` として解釈できないディレクトリには触らない**（人が置いたものを消さないため）
 * 保持日数が 0 以下なら何もしない
 
 ### `format_summary_lines`
 
 * **役割**: CLI / ログ向けの人が読む要約
-* 根拠: [定義] (行番号: 428 / 抜粋: "def format_summary_lines(outcome: BackupOutcome) -> list[str]:")
+* 根拠: [定義] (行番号: 443 / 抜粋: "def format_summary_lines(outcome: BackupOutcome) -> list[str]:")
 * 出力先のパーミッションが 0o700 でなければ警告行を足す
 
 ## 5. 保守上の注意点
