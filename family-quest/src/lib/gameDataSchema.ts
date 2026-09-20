@@ -152,12 +152,18 @@ const inventoryItemSchema = z.object({
     used_at: z.string().nullable().optional(),
     category: z.string().nullable().optional(),
     is_youtube_reward: z.boolean(),
+    // YouTube系でない券ではサーバーがnullを返す。
+    youtube_duration_minutes: z.number().nullable().optional(),
 });
 
 export const inventoryResponseSchema = z.object({
     items: z.array(inventoryItemSchema),
     youtube_cooldown_remaining_seconds: z.number(),
     youtube_cooldown_announcement: youtubeCooldownAnnouncementSchema.nullable(),
+    // 1日の合計視聴分数の上限。上限なし設定(0以下)のときはnull。
+    youtube_daily_limit_minutes: z.number().nullable(),
+    youtube_daily_used_minutes: z.number(),
+    youtube_daily_limit_announcement: youtubeCooldownAnnouncementSchema.nullable(),
 });
 
 // GET /api/cameras/settings のレスポンス(camera_router.py の CameraSettingsResponse)。

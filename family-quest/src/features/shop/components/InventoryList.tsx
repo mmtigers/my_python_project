@@ -59,6 +59,16 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     });
     const items = data?.items;
     const cooldownAnnouncement = data?.youtube_cooldown_announcement ?? null;
+    const dailyLimitAnnouncement = data?.youtube_daily_limit_announcement ?? null;
+
+    // 1日の合計視聴分数の上限。上限なし設定のときはサーバーがnullを返す。
+    const dailyLimitMinutes = data?.youtube_daily_limit_minutes ?? null;
+    const dailyUsedMinutes = data?.youtube_daily_used_minutes ?? 0;
+    const dailyRemainingMinutes =
+        dailyLimitMinutes === null ? null : Math.max(0, dailyLimitMinutes - dailyUsedMinutes);
+    // 予告バナー用の情報は「まだ施行されていない間だけ」サーバーから返る(施行後はnull)。
+    // 猶予期間中は残り分数の表示だけ行い、使用のブロックはしない。
+    const isDailyLimitEnforced = dailyLimitAnnouncement === null;
 
     // YouTube系ごほうび券の連続使用防止クールダウン(15分)の残り秒数。
     // サーバー値(5秒間隔のポーリングで再同期)を起点に、表示だけ1秒間隔でローカルに
@@ -126,14 +136,50 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
         </div>
     );
 
-    // YouTubeごほうび券クールダウンの猶予期間中(実際の制限開始前)の予告バナー。
+    // YouTubeの視聴制限の猶予期間中(実際の制限開始前)の予告バナー。
     // いきなり制限がかかると子どもが困惑するため、施行日を迎えるまで表示しておく。
-    const announcementBanner = cooldownAnnouncement && (
-        <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 text-xs">
-            <span className="text-base leading-none flex-shrink-0">📢</span>
+    // クールダウンと日次上限は施行日が別管理なので、それぞれ独立に出す。
+    const announcementBanner = (cooldownAnnouncement || dailyLimitAnnouncement) && (
+        <div className="flex flex-col gap-2">
+            {cooldownAnnouncement && (
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 text-xs">
+                    <span className="text-base leading-none flex-shrink-0">📢</span>
+                    <p>
+                        <span className="font-bold">{formatAnnouncementDate(cooldownAnnouncement.starts_on)}から</span>、
+                        YouTubeのごほうび券は見おわってから15分間、次の1枚が使えなくなります(目を休めるため)。
+                    </p>
+                </div>
+            )}
+            {dailyLimitAnnouncement && dailyLimitMinutes !== null && (
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 text-xs">
+                    <span className="text-base leading-none flex-shrink-0">📢</span>
+                    <p>
+                        <span className="font-bold">{formatAnnouncementDate(dailyLimitAnnouncement.starts_on)}から</span>、
+                        YouTubeのごほうび券は1日ぜんぶで{dailyLimitMinutes}分までになります(目を休めるため)。
+                    </p>
+                </div>
+            )}
+        </div>
+    );
+
+    // 「きょうはあと何分見られるか」の表示。施行前でも出して慣れてもらう。
+    const dailyBudgetBanner = dailyRemainingMinutes !== null && dailyLimitMinutes !== null && (
+        <div
+            className={`flex items-center gap-2 p-2 rounded-xl border text-xs ${
+                dailyRemainingMinutes > 0
+                    ? 'bg-sky-50 border-sky-200 text-sky-800'
+                    : 'bg-slate-100 border-slate-300 text-slate-600'
+            }`}
+        >
+            <span className="text-base leading-none flex-shrink-0">📺</span>
             <p>
-                <span className="font-bold">{formatAnnouncementDate(cooldownAnnouncement.starts_on)}から</span>、
-                YouTubeのごほうび券は使うと15分間、次の1枚が使えなくなります(目を休めるため)。
+                きょうのYouTube:{' '}
+                {dailyRemainingMinutes > 0 ? (
+                    <span className="font-bold">あと{dailyRemainingMinutes}分</span>
+                ) : (
+                    <span className="font-bold">きょうはおしまい</span>
+                )}
+                <span className="opacity-70">({dailyUsedMinutes}/{dailyLimitMinutes}分)</span>
             </p>
         </div>
     );
@@ -142,6 +188,7 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
         return (
             <div className="flex flex-col gap-3">
                 {announcementBanner}
+                {dailyBudgetBanner}
                 <div className="text-center p-8 bg-white/50 rounded-xl border-2 border-dashed border-slate-300">
                     <div className="text-6xl mb-4 opacity-50">🎒</div>
                     <h3 className="text-lg font-bold text-slate-600 mb-2">まだなにも持っていません</h3>
@@ -166,18 +213,37 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
             {announcementBanner && (
                 <div className="col-span-full">{announcementBanner}</div>
             )}
+            {dailyBudgetBanner && (
+                <div className="col-span-full">{dailyBudgetBanner}</div>
+            )}
             {items.map((item: InventoryItem) => {
-                // 目の負担を防ぐため、YouTube系ごほうび券は前回使用から15分は使えない。
-                const isCoolingDown = item.is_youtube_reward && youtubeCooldownSeconds > 0;
+                // 目の負担を防ぐための2つの制限。バックエンド(InventoryService._use_item_locked)と
+                // 同じ優先順位で、まず「今日の残り分数に収まるか」、次にクールダウンを見る。
+                // タップしてから429で断られるより、最初から使えないと分かるほうが子どもには親切。
+                const durationMinutes = item.youtube_duration_minutes ?? 0;
+                const exceedsDailyLimit =
+                    item.is_youtube_reward &&
+                    isDailyLimitEnforced &&
+                    dailyRemainingMinutes !== null &&
+                    durationMinutes > dailyRemainingMinutes;
+                const isCoolingDown =
+                    !exceedsDailyLimit && item.is_youtube_reward && youtubeCooldownSeconds > 0;
+                const isLocked = exceedsDailyLimit || isCoolingDown;
+
+                const lockedReason = exceedsDailyLimit
+                    ? (dailyRemainingMinutes === 0
+                        ? 'きょうのYouTubeはおしまい。また明日つかおうね'
+                        : `きょうはあと${dailyRemainingMinutes}分。この券は使えません`)
+                    : `目を休めよう。あと${formatCooldown(youtubeCooldownSeconds)}で使えます`;
 
                 return (
                     <Card
                         key={item.id}
                         // ★バグ修正: 「つかう」ボタンを廃止し、カード自体をタップしたら
                         // つかう確認モーダルを開くようにする(1行のコンパクト表示にするため)
-                        onClick={() => { if (!isCoolingDown) setItemToUse(item); }}
+                        onClick={() => { if (!isLocked) setItemToUse(item); }}
                         className={`flex items-center gap-2 p-2 transition-all border-slate-200 shadow-sm ${
-                            isCoolingDown
+                            isLocked
                                 ? 'bg-slate-100 opacity-70 cursor-not-allowed'
                                 : 'bg-white hover:shadow-md active:scale-[0.98] cursor-pointer'
                         }`}
@@ -190,13 +256,11 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
                                 {item.title}
                             </h3>
                             <p className="text-[10px] text-slate-500 truncate">
-                                {isCoolingDown
-                                    ? `目を休めよう。あと${formatCooldown(youtubeCooldownSeconds)}で使えます`
-                                    : (item.desc || '説明はありません')}
+                                {isLocked ? lockedReason : (item.desc || '説明はありません')}
                             </p>
                         </div>
 
-                        {isCoolingDown ? (
+                        {isLocked ? (
                             <Lock size={18} className="text-slate-400 flex-shrink-0" />
                         ) : (
                             <PackageOpen size={18} className="text-blue-500 flex-shrink-0" />

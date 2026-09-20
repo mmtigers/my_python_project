@@ -118,13 +118,17 @@ export interface InventoryItem {
     purchased_at: string;
     used_at?: string | null;
     category?: string;
-    // YouTube連続使用防止クールダウン(15分)の対象かどうか。判定はバックエンド
+    // YouTubeの視聴制限(クールダウン・日次上限)の対象かどうか。判定はバックエンド
     // (config.YOUTUBE_REWARD_IDS)側に一本化し、フロントではこのフラグのみ見る。
     is_youtube_reward: boolean;
+    // この券1枚で視聴できる分数。YouTube系でない券ではnull。
+    // 「今日の残り分数に収まらない券」をタップ前に使えない表示にするために使う。
+    youtube_duration_minutes?: number | null;
 }
 
-// YouTubeごほうび券クールダウンの猶予期間中(実際の制限開始前)に表示する予告情報。
-// 施行済み、またはクールダウン対象のごほうび券が無い場合はnull。
+// YouTubeの視聴制限の猶予期間中(実際の制限開始前)に表示する予告情報。
+// 施行済み、または対象のごほうび券が無い場合はnull。クールダウンと日次上限で
+// それぞれ別の施行日を持つため、同じ形の値が2つ返る。
 export interface YoutubeCooldownAnnouncement {
     starts_on: string; // ISO日付(YYYY-MM-DD)
     days_remaining: number;
@@ -137,6 +141,12 @@ export interface InventoryResponse {
     items: InventoryItem[];
     youtube_cooldown_remaining_seconds: number;
     youtube_cooldown_announcement: YoutubeCooldownAnnouncement | null;
+    // 1日に使えるYouTube系ごほうび券の合計分数の上限。上限なし設定のときはnull。
+    // 施行前でも「今日はあと何分」を表示して慣れてもらうため、猶予期間中も返る。
+    youtube_daily_limit_minutes: number | null;
+    // JSTの今日すでに使った合計分数。
+    youtube_daily_used_minutes: number;
+    youtube_daily_limit_announcement: YoutubeCooldownAnnouncement | null;
 }
 
 // #102/#363: クエスト完了APIが実際に成功した時点で App → QuestList/QuestItem へ
