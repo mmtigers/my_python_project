@@ -109,20 +109,24 @@ class TestStrictOrphansAreReported:
         assert "自動修正はしていません" in result
 
     @pytest.mark.parametrize("table,sql", [
-        ("reward_history.user_id",
-         "INSERT INTO reward_history (user_id, reward_id, cost_gold, redeemed_at) "
-         f"VALUES ('ghost', 10, 5, '{TS}')"),
-        ("user_inventory.user_id",
-         "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) "
-         f"VALUES ('ghost', 10, 'owned', '{TS}')"),
-        ("routine_progress.user_id",
-         "INSERT INTO routine_progress "
-         "(user_id, flow_key, progress_date, current_step_index, created_at, updated_at) "
-         f"VALUES ('ghost', 'morning', '2026-09-19', 0, '{TS}', '{TS}')"),
-        ("routine_step_events.user_id",
-         "INSERT INTO routine_step_events "
-         "(user_id, flow_key, progress_date, step_key, to_status, source, occurred_at) "
-         f"VALUES ('ghost', 'morning', '2026-09-19', 'wake', 'done', 'test', '{TS}')"),
+        ("reward_history.user_id", (
+            "INSERT INTO reward_history (user_id, reward_id, cost_gold, redeemed_at) "
+            f"VALUES ('ghost', 10, 5, '{TS}')"
+        )),
+        ("user_inventory.user_id", (
+            "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) "
+            f"VALUES ('ghost', 10, 'owned', '{TS}')"
+        )),
+        ("routine_progress.user_id", (
+            "INSERT INTO routine_progress "
+            "(user_id, flow_key, progress_date, current_step_index, created_at, updated_at) "
+            f"VALUES ('ghost', 'morning', '2026-09-19', 0, '{TS}', '{TS}')"
+        )),
+        ("routine_step_events.user_id", (
+            "INSERT INTO routine_step_events "
+            "(user_id, flow_key, progress_date, step_key, to_status, source, occurred_at) "
+            f"VALUES ('ghost', 'morning', '2026-09-19', 'wake', 'done', 'test', '{TS}')"
+        )),
     ])
     def test_each_user_relation_is_checked(self, clean_db, table, sql):
         with get_db_cursor(commit=True) as cur:
