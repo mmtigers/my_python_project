@@ -180,14 +180,8 @@ jobs:
             DDD/requirements.txt
 
       - name: Install dependencies
-        # Issue #745 (AUDIT-016): onvif-zeep(0.2.12、wheel 無し)は新しい setuptools の
-        # install_lib で AttributeError: install_layout となりソースビルドに失敗し、
-        # その1件で requirements.txt 全体のインストールが中断する。ビルドが通る
-        # setuptools を本体より先に固定する。start_all.sh の Phase 1.5 にも同じ
-        # 制約を入れてあり、実機とCIで同じ条件下でインストールされるようにする。
         run: |
           python -m pip install --upgrade pip
-          pip install "setuptools<81" wheel
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 

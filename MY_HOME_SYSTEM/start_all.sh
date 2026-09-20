@@ -166,16 +166,6 @@ if [ ${#existing_reqs[@]} -gt 0 ]; then
     echo "--- requirements changed: updating .venv ---"
     : > logs/pip_install.log
     install_ok=true
-    # Issue #745 (AUDIT-016): onvif-zeep(0.2.12、2018年が最終リリース、wheel 無し)は
-    # 新しい setuptools の install_lib で AttributeError: install_layout となり
-    # ソースビルドに失敗する。pip install は1件の失敗で中断するため、この1依存で
-    # requirements.txt 全体(280パッケージ)の更新が丸ごと止まる。ビルドが通る
-    # setuptools を本体のインストールより先に固定しておく。CI(.github/workflows/test.yml)
-    # でも同じ制約を入れ、実機とCIで同じ条件でインストールされるようにする(#403 と同じ考え方)。
-    echo "=== pip install setuptools<81 wheel (onvif-zeep build guard) ===" >> logs/pip_install.log
-    if ! "$PYTHON_EXEC" -m pip install "setuptools<81" wheel >> logs/pip_install.log 2>&1; then
-      install_ok=false
-    fi
     for req in "${existing_reqs[@]}"; do
       echo "=== pip install -r $req ===" >> logs/pip_install.log
       if ! "$PYTHON_EXEC" -m pip install -r "$req" >> logs/pip_install.log 2>&1; then

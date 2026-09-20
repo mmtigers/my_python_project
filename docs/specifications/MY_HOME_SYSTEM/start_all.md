@@ -125,8 +125,7 @@
 ### [要素名4：Phase 1.5: Python依存関係の鮮度チェック]
 
 * **役割**: `REQ_FILES`配列（`requirements.txt` と `$DEVELOP_ROOT/DDD/requirements.txt`）のうち実在するものを連結したSHA256ハッシュを算出し、`.venv/.requirements-sha256`に記録済みのハッシュと比較する。一致しなければ依存定義が変更されたと判断し、各ファイルについて`$PYTHON_EXEC -m pip install -r "$req"`を順に実行して`.venv`を追従させ、**すべて成功した場合のみ**新しいハッシュを記録する。family-questの`deploy.sh --if-stale`と同じ冪等チェックの思想をバックエンドの依存関係にも適用したもの（Issue #483: `requirements.txt`変更後に`.venv`が追従しないと`ImportError`で起動失敗しうる問題への対応）。**（Issue #736 / AUDIT-006 で対象拡張）** `deploy/cron/crontab`はDDDのスクリプトも`MY_HOME_SYSTEM/.venv`のpythonで実行する（`run_task.sh`が`"${PROJECT_ROOT}/.venv/bin/python3"`を使い、`newface_monitor.py`の行は`.../MY_HOME_SYSTEM/.venv/bin/python`を明示している）のに、以前はMY_HOME_SYSTEM側の`requirements.txt`しか見ていなかった。そのためDDD固有の実行時依存（`yt-dlp` / `curl_cffi`）は「過去に手で`pip install`した」痕跡としてしか`.venv`に存在せず、`.venv`を作り直す・新しいホストへ移ると無音で失敗する状態だった。単一venvを共有しているという実態をこの配列で明示している。
-**（Issue #745 / AUDIT-016 で追加）** 各`requirements.txt`のインストールに先立って`"$PYTHON_EXEC" -m pip install "setuptools<81" wheel`を実行する。`onvif-zeep==0.2.12`（2018年が最終リリース、wheelを提供しない）は新しい`setuptools`の`install_lib`で`AttributeError: install_layout`となりソースビルドに失敗し、`pip install`はその1件で中断するため、**1依存の失敗で`requirements.txt`全体（280パッケージ）の更新が丸ごと止まる**単一障害点になっていた。ビルドが通る`setuptools`を先に固定することでこれを避ける。CI（`.github/workflows/test.yml`の`test`ジョブ）にも同じ固定を入れてあり、実機とCIが同じ制約下でインストールされる（`.python-version`を共有する#403と同じ考え方）。この固定自体が失敗した場合も`install_ok=false`となり、ハッシュは更新されない。
-* 根拠: Phase 1.5ブロック (行番号: 138〜193 / 抜粋: "# --- Phase 1.5: Python依存関係の鮮度チェック ---")、[対象ファイル定義] (行番号: 156 / 抜粋: "REQ_FILES=(\"requirements.txt\" \"$DEVELOP_ROOT/DDD/requirements.txt\")")、[setuptools固定] (行番号: 176 / 抜粋: '"$PYTHON_EXEC" -m pip install "setuptools<81" wheel')
+* 根拠: Phase 1.5ブロック (行番号: 138〜185 / 抜粋: "# --- Phase 1.5: Python依存関係の鮮度チェック ---")、[対象ファイル定義] (行番号: 156 / 抜粋: "REQ_FILES=(\"requirements.txt\" \"$DEVELOP_ROOT/DDD/requirements.txt\")")
 
 
 * **引数/リクエスト**: なし
@@ -137,7 +136,7 @@
 * 根拠: 戻り値返却なし (行番号: 138-183)
 
 
-* **副作用**: 依存定義変更時の`pip install`実行（`.venv`へのパッケージインストール。まず`setuptools<81`と`wheel`を1回、続いて対象ファイルごとに1回ずつ）。`logs/pip_install.log`の切り詰めと、各実行の標準出力・標準エラー出力の同ファイルへの追記（ファイルごとに`=== pip install -r <path> ===`の見出しを書く）。全ファイル成功時のみ`.venv/.requirements-sha256`への書き込み。
+* **副作用**: 依存定義変更時の`pip install`実行（`.venv`へのパッケージインストール。対象ファイルごとに1回ずつ）。`logs/pip_install.log`の切り詰めと、各実行の標準出力・標準エラー出力の同ファイルへの追記（ファイルごとに`=== pip install -r <path> ===`の見出しを書く）。全ファイル成功時のみ`.venv/.requirements-sha256`への書き込み。
 * 根拠: 実行・リダイレクト処理 (行番号: 176, 180〜181 / 抜粋: '"$PYTHON_EXEC" -m pip install -r "$req" >> logs/pip_install.log 2>&1')
 
 
