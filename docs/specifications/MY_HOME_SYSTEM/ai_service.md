@@ -38,7 +38,7 @@
 | `google.genai` | 外部ライブラリ | Gemini APIのクライアント生成およびチャットセッション作成 | `from google import genai` (行番号: 11 / 抜粋: "from google import genai") |
 | `google.genai.errors` | 外部ライブラリ | Gemini API呼び出し時の例外ハンドリング（`APIError`とそのHTTPステータス） | `from google.genai import errors as genai_errors` (行番号: 12 / 抜粋: "from google.genai import errors as genai_errors") |
 | `google.genai.types` | 外部ライブラリ | `GenerateContentConfig`・`AutomaticFunctionCallingConfig`・`Part.from_function_response` の構築 | `from google.genai import types as genai_types` (行番号: 13 / 抜粋: "from google.genai import types as genai_types") |
-| `retry_if_exception` | 外部ライブラリ | クォータ超過(429)判定関数によるリトライ条件指定 | `from tenacity import (... retry_if_exception,)` (行番号: 21 / 抜粋: "retry_if_exception,") |
+| `retry_if_exception` | 外部ライブラリ | **（Issue #804で変更）** 一時的失敗(`_is_transient_error`)判定関数によるリトライ条件指定。以前はクォータ超過(429)のみを条件にしていた | `from tenacity import (... retry_if_exception,)` (行番号: 21 / 抜粋: "retry_if_exception,") |
 | `tenacity` | 外部ライブラリ | API呼び出し失敗時のリトライ制御 | `from tenacity import (...)` (抜粋: "from tenacity import (") |
 | `config` | 内部モジュール | APIキー、DBテーブル名、家族設定などの定数参照 | `import config` (抜粋: "import config") |
 | `core.database.get_db_cursor`・`core.database.execute_read_query` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor, execute_read_query` (行番号: 24 / 抜粋: "from core.database import get_db_cursor, execute_read_query") |
@@ -335,8 +335,8 @@
 
 ### `_call_gemini_api_with_retry` (関数)
 
-* **役割**: Gemini APIへのリクエストを送信し、クォータ超過（HTTP 429）発生時に指数バックオフによるリトライを行う。**（Issue #520で変更）** `google-genai` の `AsyncChat.send_message` はネイティブに非同期のため、旧SDKの同期メソッドを包んでいた `asyncio.to_thread` は不要になった。
-* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号: 514〜527 / 抜粋: "async def _call_gemini_api_with_retry")
+* **役割**: Gemini APIへのリクエストを送信し、**（Issue #804で変更）** 一時的な失敗（HTTP 429 / 503）発生時に指数バックオフによるリトライを行う。以前はクォータ超過（429）のみが対象で、**503 UNAVAILABLE は1回も再試行されなかった**。**（Issue #520で変更）** `google-genai` の `AsyncChat.send_message` はネイティブに非同期のため、旧SDKの同期メソッドを包んでいた `asyncio.to_thread` は不要になった。
+* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号: 545〜558 / 抜粋: "async def _call_gemini_api_with_retry")
 
 
 * **引数/リクエスト**: `chat_session`, `prompt: str`
@@ -352,7 +352,11 @@
 
 
 * **エラーハンドリング**: `tenacity` ライブラリによる自動リトライ（最大3回）。最終的に失敗した場合は例外を再スロー（`reraise=True`）。
-* 根拠: `@retry(retry=retry_if_exception(_is_quota_error), ...)` (行番号: 465 / 抜粋: "retry=retry_if_exception(_is_quota_error),")。**（Issue #520で変更）** 旧SDKは `ResourceExhausted` という専用の例外型で判別できたが、`google-genai` はHTTPステータスを持つ `APIError` に一本化されているため、型ではなくコードで判定する `_is_quota_error` を条件に使う (行番号: 496 / 抜粋: "def _is_quota_error(exc: BaseException) -> bool:")
+* 根拠: `@retry(retry=retry_if_exception(_is_transient_error), ...)`。**（Issue #520で変更）** 旧SDKは `ResourceExhausted` という専用の例外型で判別できたが、`google-genai` はHTTPステータスを持つ `APIError` に一本化されているため、型ではなくコードで判定する。**（Issue #804で変更）** 判定関数を `_is_quota_error` から `_is_transient_error` へ差し替えた
+* 根拠: `def _is_transient_error(exc: BaseException) -> bool:` (行番号: 525)
+* 根拠: `def _is_quota_error(exc: BaseException) -> bool:` (行番号: 496)
+* **（Issue #804）判定を2つに分けた理由**: 以前は `_is_quota_error` が「再試行すべきか」と「どの文面を返すか」の**2つの判断を兼ねていた**ため、再試行の対象を広げると文面まで変わってしまい 503 を足せなかった。現在は `_is_transient_error`（再試行の可否。429 / 503）と `_is_quota_error`（文面の判定。429 のみ）に分離してある
+* **再試行しないもの**: 400（不正なリクエスト）や 404（モデルの提供終了。Issue #801）は何度送っても同じ結果になるため対象外。**500 / 502 / 504 も意図的に含めていない** — 一般には再試行対象とされることが多いが、このリポジトリは以前から 500 を「リトライしても回復しないAPIエラー」として扱っており（`tests/test_ai_service.py` の `_fatal_api_error` が 500 を使い再試行しないことを固定している）、その判断を覆す根拠が無いため。実際に踏んで「待てば直る」と確認できたものだけを足す方針。再試行すると `handlers/line_handler.py` の `AI_REPLY_TIMEOUT_SEC`（20秒）を無駄に消費し、ユーザーにはタイムアウトの文面が出る
 
 
 
@@ -364,7 +368,7 @@
 ### `_extract_function_calls` (関数、Issue #374で追加)
 
 * **役割**: 応答の`parts`をすべて走査し、`function_call`を持つパートの`function_call`をリストで返す（L-L4対応。以前は`response.parts[0]`のみを検査していたため、テキスト+`function_call`の複数パート応答でツール呼び出しが無視され雑談扱いになっていた）。
-* 根拠: `def _extract_function_calls(response) -> List[Any]:` (行番号: 534〜546)
+* 根拠: `def _extract_function_calls(response) -> List[Any]:` (行番号: 565〜577)
 
 
 * **引数/リクエスト**: `response`（Gemini応答オブジェクト。`parts`属性を持つ）
@@ -385,7 +389,7 @@
 ### `_response_text_or_none` (関数、Issue #374で追加)
 
 * **役割**: `response.text`を安全に取り出す。旧SDK(`google-generativeai`)の`response.text`は`function_call`パートしか無い応答や空応答で`ValueError`を送出した。**（Issue #520で確認）** `google-genai`では同じ状況で`None`が返るようになったが、SDKの版差で再び送出する側に戻っても壊れないよう`try/except`は残している（空文字も`None`）。
-* 根拠: `def _response_text_or_none(response) -> Optional[str]:` (行番号: 549〜560)
+* 根拠: `def _response_text_or_none(response) -> Optional[str]:` (行番号: 580〜591)
 
 
 * **引数/リクエスト**: `response`
@@ -406,7 +410,7 @@
 ### `_dispatch_tool` (関数、Issue #374で追加)
 
 * **役割**: `function_call`の名前に応じて`tool_record_child_health`/`tool_record_food`/`tool_search_db`を実行し結果文字列を返す。未知の名前は`"エラー: 未知のツールが呼び出されました。"`を返す（以前`analyze_text_and_execute`内にインラインで書かれていた分岐を切り出したもの）。
-* 根拠: `async def _dispatch_tool(...)` (行番号: 563〜571)
+* 根拠: `async def _dispatch_tool(...)` (行番号: 594〜602)
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `fname: str`, `fargs: Dict[str, Any]`
@@ -427,7 +431,7 @@
 ### `_tool_results_fallback` (関数、Issue #374で追加)
 
 * **役割**: ツールは実行済みだが最終応答を生成できなかった場合に、蓄積した`tool_results`を改行連結し末尾に`(注記)`を添えた文字列を返す。
-* 根拠: `def _tool_results_fallback(tool_results: List[str], note: str) -> str:` (行番号: 574〜576)
+* 根拠: `def _tool_results_fallback(tool_results: List[str], note: str) -> str:` (行番号: 605〜607)
 
 
 * **引数/リクエスト**: `tool_results: List[str]`, `note: str`
@@ -448,7 +452,7 @@
 ### `analyze_text_and_execute` (関数)
 
 * **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。**（Issue #374で修正）** 1回目の応答取得後は`MAX_TOOL_ROUNDS`回を上限とするループになった: 各ラウンドで`_extract_function_calls`により全パートから`function_call`を収集し、無ければ`_response_text_or_none`でテキストを返す（テキストも無い場合、ツール実行済みなら`_tool_results_fallback`、未実行なら空応答エラー）。あれば全件を`_dispatch_tool`で実行し、`function_response`をまとめて1回で送信して次の応答を得る。以前は1回のツール実行後に`final_res.text`を無条件に読んでいたため、「智矢が熱、涼花も熱」のように2件目の`function_call`が返ると`response.text`が`ValueError`を送出→汎用`except`→「処理中にエラー」となり、1件目は保存済みなのにユーザーが失敗と誤解して再送→重複登録（#232と同種）という経路が残っていた。ループ上限到達時も`_tool_results_fallback`で実行結果を返す。**（Issue #232で修正）** 1回目のGemini呼び出しはクォータ超過とそれ以外のAPIエラーをそれぞれ専用メッセージで処理するのに対し、ツール実行後の2回目呼び出しは以前クォータ超過用のフォールバックしか持たず、それ以外のAPIエラーは関数末尾の汎用`except Exception`（「処理中にエラーが発生しました」）まで伝播していた。この時点で`tool_record_child_health`/`tool_record_food`は既にDB書き込みを完了しているため、ユーザーには保存が失敗したかのように見え、冪等性チェックの無い記録処理への重複登録を誘発しうる不具合があった。2回目呼び出しにも同等のハンドラを追加し、クォータ超過と同様に`tool_result`（実行結果）へ注記を添えて返すようにした。**（Issue #520で変更）** `google-genai`は例外型を`APIError`に一本化したため、両方の呼び出し点とも`except genai_errors.APIError`で受けたうえで`_is_quota_error(e)`によりクォータ超過かどうかを分岐する形になった。
-* 根拠: `async def analyze_text_and_execute` (行番号: 579 / 抜粋: "async def analyze_text_and_execute")、ループ (行番号: 582〜639 / 抜粋: "for _round in range(MAX_TOOL_ROUNDS):")
+* 根拠: `async def analyze_text_and_execute` (行番号: 610 / 抜粋: "async def analyze_text_and_execute")、ループ (行番号: 582〜639 / 抜粋: "for _round in range(MAX_TOOL_ROUNDS):")
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `text: str`
