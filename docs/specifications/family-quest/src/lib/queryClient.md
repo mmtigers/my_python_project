@@ -15,7 +15,7 @@
 ## 2. ファイルの概要
 
 * `@tanstack/react-query` ライブラリの `QueryClient` を初期化し、システム全体で適用されるデータフェッチングのデフォルト動作（再試行回数、キャッシュ期限、ウィンドウフォーカス時の動作）を定義したインスタンスをエクスポートする。
-* 根拠: [queryClient] (行番号: 3〜11 / 抜粋: "export const queryClient = new")
+* 根拠: [queryClient] (行番号: 3〜19 / 抜粋: "export const queryClient = new")
 
 
 
@@ -31,14 +31,14 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| 該当なし | ファイル単体で設定オブジェクトの生成として完結しているため。 | 根拠: [ファイル全体] (行番号: 1〜11 / 抜粋: "import { QueryClient } ...") |
+| 該当なし | ファイル単体で設定オブジェクトの生成として完結しているため。 | 根拠: [ファイル全体] (行番号: 1〜19 / 抜粋: "import { QueryClient } ...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `queryClient`
 
-* **役割**: アプリケーション全体で利用するデフォルトオプション（失敗時のリトライ1回、キャッシュの鮮度判定時間60秒、画面フォーカス時の自動再取得無効化）を適用した`QueryClient`インスタンスを保持・提供する。
-* 根拠: [queryClient定義全体] (行番号: 3〜11 / 抜粋: "export const queryClient = new")
+* **役割**: アプリケーション全体で利用するデフォルトオプション（失敗時のリトライ1回、キャッシュの鮮度判定時間60秒、画面フォーカス復帰時の自動再取得**有効**）を適用した`QueryClient`インスタンスを保持・提供する。**（Issue #803で変更）** 以前は `refetchOnWindowFocus: false` だった。
+* 根拠: [queryClient定義全体] (行番号: 3〜19 / 抜粋: "export const queryClient = new")
 
 
 * **引数/リクエスト**: 該当なし（定数定義のため）
@@ -50,11 +50,11 @@
 
 
 * **副作用**: なし
-* 根拠: [ファイル全体] (行番号: 1〜11 / 抜粋: "export const queryClient = new")
+* 根拠: [ファイル全体] (行番号: 1〜19 / 抜粋: "export const queryClient = new")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [ファイル全体] (行番号: 1〜11 / 抜粋: "export const queryClient = new")
+* 根拠: [ファイル全体] (行番号: 1〜19 / 抜粋: "export const queryClient = new")
 
 
 
@@ -65,7 +65,7 @@ flowchart TD
     Start([Start]) --> InitConfig{"デフォルト設定の定義"}
     InitConfig --> SetRetry["retry: 1 (再試行1回)"]
     InitConfig --> SetStaleTime["staleTime: 60000 (60秒)"]
-    InitConfig --> SetRefetch["refetchOnWindowFocus: false"]
+    InitConfig --> SetRefetch["refetchOnWindowFocus: true (#803)"]
     SetRetry & SetStaleTime & SetRefetch --> CreateInstance["外部：QueryClient() のインスタンス化"]
     CreateInstance --> Export["queryClientとしてエクスポート"]
     Export --> End([End])
@@ -103,8 +103,8 @@ graph TD
 * 根拠: [staleTime設定] (行番号: 7〜7 / 抜粋: "staleTime: 1000 * 60,")
 
 
-* `refetchOnWindowFocus: false` により、ユーザーが別のタブやウィンドウから戻ってきた際の自動データ更新が無効化されている。
-* 根拠: [refetchOnWindowFocus設定] (行番号: 8〜8 / 抜粋: "refetchOnWindowFocus: false,")
+* **（Issue #803で変更）** `refetchOnWindowFocus: true`（React Queryの既定値）により、ユーザーが別のタブやウィンドウから戻ってきた際に自動でデータが再取得される。以前は `false` で無効化されていたが、無効化した理由はコミット（React Query移行時の `8ec87bf2`）にもコメントにも記録が無かった。モバイルのバックグラウンドタブは各クエリの `refetchInterval` のタイマーごと凍結されるため、`false` のままでは「タブを離れる→タイマー停止→タブに戻っても再取得しない」という経路が残り、復帰直後に古いデータが表示され続ける（実機で1時間半前の残高が表示された）。再取得は `staleTime` を過ぎたクエリに限られるため、タブの往復が多くてもリクエストは増えすぎない。回帰テストは `src/lib/queryClient.test.ts`。
+* 根拠: [refetchOnWindowFocus設定] (行番号: 8〜16 / 抜粋: "refetchOnWindowFocus: true,")
 
 
 * `retry: 1` により、デフォルトではAPI通信等のクエリ失敗時に1回だけ自動再試行される。

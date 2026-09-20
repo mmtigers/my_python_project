@@ -125,11 +125,14 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
             return chronicleResponseSchema.parse(raw) as ChronicleResponse;
         },
         staleTime: 1000 * 60 * 5,
-        // queryClient は refetchOnWindowFocus:false で、この useQuery は App に常駐して
-        // アンマウントされないため、staleTime だけでは再取得の契機が無い(このデバイス
-        // 自身の mutation が invalidate したときだけ更新される)。横画面キオスク(Echo Show)
-        // のように他デバイスで完了・承認された記録が反映されなかったため、gameData と
-        // 同様に定期ポーリングで追従させる(年代記は変化頻度が低いので 60 秒)。
+        // この useQuery は App に常駐してアンマウントされないため、staleTime だけでは
+        // 再取得の契機が無い(このデバイス自身の mutation が invalidate したときだけ
+        // 更新される)。横画面キオスク(Echo Show)のように他デバイスで完了・承認された
+        // 記録が反映されなかったため、gameData と同様に定期ポーリングで追従させる
+        // (年代記は変化頻度が低いので 60 秒)。
+        // #803 で queryClient の refetchOnWindowFocus を既定(true)へ戻したが、常に前面に
+        // 出したままのキオスクではフォーカス復帰そのものが起きないため、このポーリングは
+        // 引き続き必要。
         refetchInterval: 1000 * 60,
     });
 
