@@ -215,7 +215,7 @@ graph TB
 | AUDIT-013 | Operations | Discord 通知が `"Discord" not in record.msg` の部分文字列で抑制され、実障害ログが無音になる | MEDIUM | P2 | S | `core/logger.py:98` |
 | AUDIT-014 | Code Quality | pyright が `typeCheckingMode: "off"`。basic で 121 エラー（Optional アクセス16件含む） | MEDIUM | P2 | M | `pyrightconfig.json:6` |
 | AUDIT-015 | CI/CD | `requirements.in` → `requirements.txt` の同期を検証するゲートが無い | MEDIUM | P2 | S | `.github/workflows/test.yml` |
-| AUDIT-016 | Dependencies | `onvif-zeep==0.2.12`（2018年最終リリース・wheel無し）が新しい setuptools でビルド失敗する | MEDIUM | P2 | M | `requirements.txt:131` |
+| ~~AUDIT-016~~ | Dependencies | ~~`onvif-zeep==0.2.12`（2018年最終リリース・wheel無し）が新しい setuptools でビルド失敗する~~ **（2026-09-20 訂正: 因果が再現せず。原因は監査環境の pip/インタプリタ不整合。Issue #745 はクローズ。詳細編の AUDIT-016 節の訂正ブロック参照）** | ~~MEDIUM~~ | — | — | `requirements.txt:131` |
 | AUDIT-017 | Database | 削除済み機能の残骸テーブル9個・重複列2組がベースラインスキーマに残存 | MEDIUM | P2 | M | `migrations/0000_baseline_schema.sql` |
 | AUDIT-018 | Database | 参照整合性がほぼ無い（FK は1つだけ）。サービス層の大量の防御的 None 分岐の根本原因 | MEDIUM | P2 | L | `current_schema.sql` |
 | AUDIT-019 | Documentation | 仕様書の行番号引用のうちゲート対象は 22% のみ。非ゲート部分は 52% が不一致（実際の陳腐化を確認） | MEDIUM | P2 | M | `.github/scripts/check_spec_line_refs.py` |
@@ -233,7 +233,7 @@ graph TB
 | AUDIT-031 | Architecture | 整合性保証が単一プロセス前提（`threading.Lock`）で、デプロイ制約として強制されていない | LOW | P3 | L | `core/utils.py:57` / `unified_server.py:608` |
 | AUDIT-032 | Bug/Logic | `Optional` 戻り値をコメントの不変条件だけに依拠して unpack（pyright basic で2件検出） | LOW | P3 | S | `services/routine_service.py:154,516` |
 | AUDIT-033 | Security | Alexa 署名検証がリーフ証明書のみでルートまでの完全なチェーン検証を行わない | INFO | P3 | M | `core/alexa_verifier.py:24-26` |
-| AUDIT-034 | Product | `_revert_and_delete_history` が承認済み履歴を DELETE し、年代記から記録が消える | INFO | P3 | M | `services/quest/approval_service.py:282` |
+| AUDIT-034 | Product | `_revert_and_delete_history` が承認済み履歴を DELETE し、年代記から記録が消える | INFO | P3 | M | `services/quest/approval_service.py:282` — **2026-09-20 対応済み**（PR #789 で `quest_cancellation_audit` に削除行を保全。年代記に取消済みを出さない方針が確定したため論理削除への切替は不採用。Issue #762 クローズ） |
 
 ---
 
@@ -1790,7 +1790,7 @@ UNIQUE 制約を検討する。
 | **cron 失敗の通知** | **必要** | DDD バッチ・週次レポート・タイムラプスの失敗が無音（AUDIT-022） |
 | **`requirements.in` 同期の CI ゲート** | **必要** | CLAUDE.md が義務付ける運用に機械的な担保が無い（AUDIT-015） |
 | **systemd ユニットの静的検証（CI）** | **必要** | AUDIT-002 は 1 コマンドで検出できる。shellcheck を入れた判断と同じ論理 |
-| **OpenAPI → TS 型生成** | **必要** | 契約が手書きで二重管理。`gameDataSchema.ts` のコメント自身が幽霊フィールドの実例を列挙（AUDIT-023） |
+| **OpenAPI → TS 型生成** | ~~**必要**~~ → **不採用**（2026-09-20） | 契約が手書きで二重管理。`gameDataSchema.ts` のコメント自身が幽霊フィールドの実例を列挙（AUDIT-023）。**ただし「乖離を検知できない」という穴自体は PR #777 が `response_model` と `tests/test_quest_api_type_contract.py`（Pydantic ↔ SQLite 列 ↔ Zod の突き合わせ）で塞いだため、生成パイプラインは入れない。Issue #752 はクローズ** |
 | **バックアップの整合性検証と復元リハーサル** | **必要** | `PRAGMA integrity_check` が無く、復元を通した記録も無い（AUDIT-024） |
 | **AI 生成 SQL の文タイムアウト** | **必要** | `WITH RECURSIVE` を許可しているので無限再帰が可能（AUDIT-021） |
 | **rate limiting（API 全般）** | **不要** | LAN 内・家族4人・単一プロセス。外部到達する3つの Webhook はいずれも署名/トークン検証があり、`/webhook/alexa` の増幅（第5.4節）は AUDIT-010 の修正で塞がる |
@@ -2010,7 +2010,7 @@ FK 宣言は `user_inventory.reward_id` の1つだけ。その結果、
 | 19 | 孤児行の実数を調査するチェックを `health_watch.py` に追加（FK 追加の前提調査） | RC-5 / AUDIT-018 | M |
 | 20 | `quest_history.gold_earned`/`exp_earned` に `DEFAULT 0 NOT NULL` を付与し、対応する防御コードを削除 | AUDIT-018 | M |
 | 21 | pyright を段階的に厳しくする。`reportOptionalMemberAccess` / `reportOptionalSubscript` / `reportOptionalIterable` を error にし、121件のうち真のバグ（`routine_service.py:154,449,516` 等）を修正 | AUDIT-014 | M |
-| 22 | OpenAPI → TS 型生成を CI に追加し、`gameDataSchema.ts` との差分をゲートする | AUDIT-023 | M |
+| ~~22~~ | ~~OpenAPI → TS 型生成を CI に追加し、`gameDataSchema.ts` との差分をゲートする~~ **（2026-09-20 不採用: 生成パイプラインは入れない。検知の穴は PR #777 の `response_model` + `tests/test_quest_api_type_contract.py` で塞がった。Issue #752 はクローズ）** | AUDIT-023 | — |
 | 23 | `check_spec_line_refs.py` の成功メッセージに保証範囲（22%）を含め、非ゲート部分の陳腐化を段階的に解消（`--fix` の適用範囲を拡張できないか検討） | AUDIT-019 / RC-4 | M |
 | 24 | バックアップに `PRAGMA integrity_check` を追加。復元リハーサルを1回実施し `db_restore.md` に記録を残す | AUDIT-024 | M |
 | 25 | `GET /api/routine/today` の締切処理を `scheduler_boot` へ移し、GET を読み取り専用にする | AUDIT-008 | M |
@@ -2150,7 +2150,7 @@ systemd ユニット・`.venv`・データのライフサイクルに対して�
 | 危険なパターン | `grep -rn "shell=True\|os.system\|eval(\|exec(\|pickle.load\|yaml.load"` | **全リポジトリ 0件** |
 | HTTP タイムアウト | 全 `requests`/`curl_cffi` 呼び出しを目視確認 | **タイムアウト未指定は 0件** |
 | 追跡下の機微ファイル | `git ls-files \| grep -iE "\.env$\|\.db$\|secret\|credential\|\.pem$\|\.key$\|local\.json$"` | **0件** |
-| 依存インストール | `pip install -r requirements.txt` | **`onvif-zeep==0.2.12` のビルドに失敗**（setuptools の `install_layout` AttributeError） → AUDIT-016 |
+| 依存インストール | `pip install -r requirements.txt` | `onvif-zeep==0.2.12` のビルドに失敗（setuptools の `install_layout` AttributeError） → AUDIT-016。**2026-09-20 訂正: この失敗は監査環境の pip とインタプリタの不整合によるもので、setuptools のバージョンとは無関係。4条件すべてでビルドは成功する** |
 
 ## 付録B: コードから判断できなかった事項（推測せず「不明」とする）
 
