@@ -23,7 +23,7 @@
 * **（Issue #657 で訂正）** `InventoryItem` の上のコメントが参照していた `models/quest.py` の `InventoryItem` は Issue #409 で削除済みのため、対応先を「バックエンドの `/api/quest/inventory` 応答そのもの」に改めた。型の形状自体は変えていない(#659 で `inventoryResponseSchema` による実行時検証も入った)。
 
 * アプリケーション全体で使用される共通のデータ構造（型定義、インターフェース）を定義し、提供する。
-* ユーザー、クエスト、クエスト履歴、報酬、インベントリ、クエスト完了結果のドメインモデルの型を網羅している。装備・ボス・ギルド依頼・ファミリーマイレージ関連の型（`Equipment`, `Boss`, `OwnedEquipment`, `BossEffect`, `FamilyMileage`, `Bounty`）は、それらの機能自体の廃止に伴い本ファイルには存在しない。承認待ちインベントリを表す型（`PendingInventory`）も、アイテム使用時の親承認フローの廃止（2026-08-29 コミット`9d5edec`、`family-quest/CLAUDE.md`の改訂メモに記載）に伴い本ファイルには存在しない。**（YouTubeごほうび券クールダウン機能で追加）** `GET /api/quest/inventory/{user_id}`のレスポンス全体を表す`InventoryResponse`型が追加された。**（猶予期間機能で追加）** クールダウンの猶予期間中(実際の制限開始前)に表示する予告情報を表す`YoutubeCooldownAnnouncement`型も追加され、`interface`/`type`の宣言は9件になった。**（日次上限機能で追加）** `InventoryResponse`にYouTube系ごほうび券の1日の合計視聴分数に関する3フィールド(`youtube_daily_limit_minutes`/`youtube_daily_used_minutes`/`youtube_daily_limit_announcement`)が、`InventoryItem`に券1枚あたりの視聴分数`youtube_duration_minutes`が追加された(宣言の件数自体は9件のまま)。
+* ユーザー、クエスト、クエスト履歴、報酬、インベントリ、クエスト完了結果のドメインモデルの型を網羅している。装備・ボス・ギルド依頼・ファミリーマイレージ関連の型（`Equipment`, `Boss`, `OwnedEquipment`, `BossEffect`, `FamilyMileage`, `Bounty`）は、それらの機能自体の廃止に伴い本ファイルには存在しない。承認待ちインベントリを表す型（`PendingInventory`）も、アイテム使用時の親承認フローの廃止（2026-08-29 コミット`9d5edec`、`family-quest/CLAUDE.md`の改訂メモに記載）に伴い本ファイルには存在しない。**（YouTubeごほうび券クールダウン機能で追加）** `GET /api/quest/inventory/{user_id}`のレスポンス全体を表す`InventoryResponse`型が追加された。**（猶予期間機能で追加）** クールダウンの猶予期間中(実際の制限開始前)に表示する予告情報を表す`YoutubeCooldownAnnouncement`型も追加され、`interface`/`type`の宣言は9件になった。**（日次上限機能で追加）** `InventoryResponse`にYouTube系ごほうび券の1日の合計視聴分数に関する3フィールド(`youtube_daily_limit_minutes`/`youtube_daily_used_minutes`/`youtube_daily_limit_announcement`)が、`InventoryItem`に券1枚あたりの視聴分数`youtube_duration_minutes`が追加された。**（プリントによる延長機能で追加）** さらに`YoutubeExtension`型と`InventoryResponse.youtube_extension`が追加され、`interface`/`type`の宣言は10件になった。
 * 根拠: [インターフェース一覧・PendingInventoryの不在] (行番号: 1〜130 / 抜粋: 全文を確認し、`interface`/`type`の宣言は`ID`, `User`, `Quest`, `QuestHistory`, `Reward`, `InventoryItem`, `YoutubeCooldownAnnouncement`, `InventoryResponse`, `QuestResult`の9件のみで`PendingInventory`は存在しないことを確認)
 * 根拠: [全体] (行番号: 3 / 抜粋: "// 共通の型定義")
 
@@ -133,10 +133,15 @@
 * **副作用**: なし
 * **エラーハンドリング**: なし
 
+### `YoutubeExtension` (プリントによる延長機能で追加)
+
+* **役割**: 日次上限を「使い切った後に追加でプリントをやると延ばせる」仕組みの状態を表すデータ構造の定義。`minutes_per_quest`(プリント1枚で何分延びるか)、`granted_count`(今日すでに延長された回数)、`max_per_day`(1日に延長できる上限回数)、`can_extend_now`(いまプリントを1枚やれば延長される状態か)を持つ。判定はすべてバックエンド(`services/quest/locks.py`)側にあり、`InventoryList.tsx`は`can_extend_now`を見て案内を出し分けるだけでよい。延長機能が無効な設定のときは`InventoryResponse.youtube_extension`が`null`になる。
+* 根拠: [該当要素] (行番号: 139〜148 / 抜粋: "export interface YoutubeExtension {", "    minutes_per_quest: number;", "    granted_count: number;", "    max_per_day: number;", "    can_extend_now: boolean;")
+
 ### `InventoryResponse` (YouTubeごほうび券クールダウン機能で追加)
 
-* **役割**: `GET /api/quest/inventory/{user_id}`のレスポンス全体のデータ構造の定義。以前は`InventoryItem[]`という配列を直接返していたが、YouTube系ごほうび券のクールダウン残り秒数(`youtube_cooldown_remaining_seconds`)を併せて返す必要が生じたため、`{items, youtube_cooldown_remaining_seconds}`という辞書形状に変更された。`items`は従来どおり`InventoryItem[]`。**（猶予期間機能で追加）** クールダウンの猶予期間中に表示する予告情報`youtube_cooldown_announcement: YoutubeCooldownAnnouncement | null`も追加された。**（日次上限機能で追加）** 1日の合計視聴分数に関する3フィールドが追加された: `youtube_daily_limit_minutes: number | null`(上限分数。上限なし設定のときは`null`。コメントによれば施行前でも「今日はあと何分」を表示して慣れてもらうため猶予期間中も返る)、`youtube_daily_used_minutes: number`(JSTの今日すでに使った合計分数)、`youtube_daily_limit_announcement: YoutubeCooldownAnnouncement | null`(日次上限の予告情報)。
-* 根拠: [該当要素] (行番号: 140〜150 / 抜粋: "export interface InventoryResponse {\n    items: InventoryItem[];\n    youtube_cooldown_remaining_seconds: number;\n    youtube_cooldown_announcement: YoutubeCooldownAnnouncement | null;", "    youtube_daily_limit_minutes: number | null;", "    youtube_daily_used_minutes: number;", "    youtube_daily_limit_announcement: YoutubeCooldownAnnouncement | null;\n}")
+* **役割**: `GET /api/quest/inventory/{user_id}`のレスポンス全体のデータ構造の定義。以前は`InventoryItem[]`という配列を直接返していたが、YouTube系ごほうび券のクールダウン残り秒数(`youtube_cooldown_remaining_seconds`)を併せて返す必要が生じたため、`{items, youtube_cooldown_remaining_seconds}`という辞書形状に変更された。`items`は従来どおり`InventoryItem[]`。**（猶予期間機能で追加）** クールダウンの猶予期間中に表示する予告情報`youtube_cooldown_announcement: YoutubeCooldownAnnouncement | null`も追加された。**（日次上限機能で追加）** 1日の合計視聴分数に関する3フィールドが追加された: `youtube_daily_limit_minutes: number | null`(上限分数。上限なし設定のときは`null`。コメントによれば施行前でも「今日はあと何分」を表示して慣れてもらうため猶予期間中も返る)、`youtube_daily_used_minutes: number`(JSTの今日すでに使った合計分数)、`youtube_daily_limit_announcement: YoutubeCooldownAnnouncement | null`(日次上限の予告情報)。**（プリントによる延長機能で追加）** `youtube_extension: YoutubeExtension | null`(プリントで上限を延ばす仕組みの状態。無効なときは`null`)。なお`youtube_daily_limit_minutes`はサーバー側で延長を反映した**実効上限**であり、設定値そのものではない。
+* 根拠: [該当要素] (行番号: 153〜165 / 抜粋: "export interface InventoryResponse {\n    items: InventoryItem[];\n    youtube_cooldown_remaining_seconds: number;\n    youtube_cooldown_announcement: YoutubeCooldownAnnouncement | null;", "    youtube_daily_limit_minutes: number | null;", "    youtube_daily_used_minutes: number;", "    youtube_daily_limit_announcement: YoutubeCooldownAnnouncement | null;", "    youtube_extension: YoutubeExtension | null;\n}")
 
 
 * **引数/リクエスト**: 該当なし

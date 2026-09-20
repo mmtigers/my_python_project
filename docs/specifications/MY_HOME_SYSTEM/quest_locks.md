@@ -16,10 +16,10 @@
 * [quest_user_service.md](./quest_user_service.md) - `logger`のみを本ファイルからimportする（ロック関数は使用しない）
 * [quest_quest_service.md](./quest_quest_service.md) - `JST`/`ROLE_ADULT`/`ROLE_CHILD`/`SPAM_CHECK_INTERVAL_SECONDS`/`INFINITE_QUEST_COOLDOWN_SECONDS`/`_acquire_user_balance_locks`/`_get_completion_lock`/`_get_user_balance_lock`/`_seconds_since_iso_timestamp`/`logger`を本ファイルからimportする、最大の利用元
 * [quest_shop_service.md](./quest_shop_service.md) - `ROLE_ADULT`/`_get_purchase_lock`/`_get_user_balance_lock`/`_seconds_since_iso_timestamp`/`logger`を本ファイルからimportする
-* [quest_inventory_service.md](./quest_inventory_service.md) - `JST`/`_get_item_use_lock`/`_get_youtube_cooldown_remaining_seconds`/`_is_youtube_cooldown_enforced`/`_is_youtube_daily_limit_enforced`/`get_youtube_daily_limit_minutes`/`get_youtube_reward_duration_minutes`/`get_youtube_used_minutes_today`を本ファイルからimportする
+* [quest_inventory_service.md](./quest_inventory_service.md) - `JST`/`_get_item_use_lock`/`_get_youtube_cooldown_remaining_seconds`/`_is_youtube_cooldown_enforced`/`_is_youtube_daily_limit_enforced`/`can_extend_youtube_limit_now`/`get_youtube_daily_limit_minutes`/`get_youtube_daily_limit_with_extensions`/`get_youtube_reward_duration_minutes`/`get_youtube_used_minutes_today`を本ファイルからimportする
 * [quest_game_system.md](./quest_game_system.md) - `JST`/`ROLE_CHILD`/`logger`を本ファイルからimportする
 * [utils.md](./utils.md) - `core.utils.RefCountedLockRegistry`（本ファイルの4つのロックレジストリの実体）の仕様書
-* [config.md](./config.md) - `config.YOUTUBE_REWARD_IDS`/`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`/`config.YOUTUBE_REWARD_DURATION_MINUTES`/`config.YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY`/`config.YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY`/`config.YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`の提供元
+* [config.md](./config.md) - `config.YOUTUBE_REWARD_IDS`/`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`/`config.YOUTUBE_REWARD_DURATION_MINUTES`/`config.YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY`/`config.YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY`/`config.YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`/`config.YOUTUBE_EXTENSION_QUEST_IDS`/`config.YOUTUBE_EXTENSION_MINUTES_PER_QUEST`/`config.YOUTUBE_EXTENSION_MAX_PER_DAY`の提供元
 * [logger.md](./logger.md) - `core.logger.setup_logging`の実体
 
 ## 2. ファイルの概要
@@ -38,7 +38,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 | `contextlib.ExitStack` | 標準ライブラリ | `_acquire_user_balance_locks`が複数ユーザー分のロックをまとめて取得・解放するために使用 | `from contextlib import ExitStack` (行番号: 9) |
 | `typing` (`Optional`, `Tuple`) | 標準ライブラリ | 型ヒント（`_seconds_since_iso_timestamp`の戻り値型、`_get_completion_lock`/`_get_purchase_lock`が受け取るキー型） | `from typing import Optional, Tuple` (行番号: 10) |
 | `fastapi.HTTPException` | サードパーティ | **（Issue #739で追加）** `_require_adult`が認可NG時に403を送出する | `from fastapi import HTTPException` (行番号: 15) |
-| `config` | 内部モジュール | `YOUTUBE_REWARD_IDS`/`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`/`YOUTUBE_REWARD_DURATION_MINUTES`/`YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY`/`YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY`/`YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`の参照 | `import config` (行番号: 12) |
+| `config` | 内部モジュール | `YOUTUBE_REWARD_IDS`/`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`/`YOUTUBE_REWARD_DURATION_MINUTES`/`YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY`/`YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY`/`YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`/`YOUTUBE_EXTENSION_QUEST_IDS`/`YOUTUBE_EXTENSION_MINUTES_PER_QUEST`/`YOUTUBE_EXTENSION_MAX_PER_DAY`の参照 | `import config` (行番号: 12) |
 | `core.logger.setup_logging` | 内部モジュール | ロガー初期化 | `from core.logger import setup_logging` (行番号: 13) |
 | `core.utils.RefCountedLockRegistry` | 内部モジュール | 4つのロックレジストリ(`_completion_locks`/`_user_balance_locks`/`_purchase_locks`/`_item_use_locks`)の実体クラス | `from core.utils import RefCountedLockRegistry` (行番号: 14) |
 
@@ -157,23 +157,88 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 * **エラーハンドリング**: 明示的な例外処理は無い（`config`の値は`int`である前提）
 * 根拠: (行番号: 172〜178)
 
+### `_get_today_jst_prefix`
+
+* **役割**: JSTの今日の日付を`"YYYY-MM-DD"`形式で返す。`user_inventory.used_at`・`quest_history.completed_at`の「今日ぶん」をISO文字列の先頭一致で絞り込むために使う。docstringは、SQLiteの`date(...)`を使わない理由を「これらはJSTオフセット付きISO文字列で、SQLiteの日付関数はUTCへ変換してしまうため、JSTの朝9時より前の記録が『前日』に数えられてしまう」と説明している。
+* 根拠: `def _get_today_jst_prefix() -> str:` (行番号: 181〜190)
+* **引数/リクエスト**: なし
+* 根拠: (行番号: 181)
+* **戻り値/レスポンス**: `str`（`"YYYY-MM-DD"`）
+* 根拠: `return datetime.datetime.now(JST).strftime("%Y-%m-%d")` (行番号: 190)
+* **副作用**: なし
+* 根拠: (行番号: 190)
+* **エラーハンドリング**: なし
+* 根拠: (行番号: 190)
+
+### `_get_youtube_usages_today`
+
+* **役割**: JSTの今日のうちに`status = 'consumed'`となったYouTube系ごほうび券を、`(used_at, 視聴分数)`のタプルのリストとして`used_at`の昇順で返す。`config.YOUTUBE_REWARD_IDS`が空なら空リストを返す。`get_youtube_used_minutes_today`(合計)と`get_youtube_daily_limit_with_extensions`(時系列の再生)の両方がこの1つの問い合わせを共有する。
+* 根拠: `def _get_youtube_usages_today(cur, user_id: str) -> list:` (行番号: 193〜210)
+* **引数/リクエスト**: `cur`（呼び出し元のトランザクション内で実行されるDBカーソル）, `user_id: str`
+* 根拠: (行番号: 193)
+* **戻り値/レスポンス**: `list`（`(used_at: str, minutes: int)`のリスト。古い順）
+* 根拠: `return [(row['used_at'], get_youtube_reward_duration_minutes(row['reward_id'])) for row in rows]` (行番号: 210)
+* **副作用**: `user_inventory`への読み取りクエリ1回（引数`cur`をそのまま使うため呼び出し元のトランザクション内で実行される）
+* 根拠: (行番号: 203〜208)
+* **エラーハンドリング**: `config.YOUTUBE_REWARD_IDS`が空の場合は早期に空リストを返す
+* 根拠: (行番号: 198〜199)
+
 ### `get_youtube_used_minutes_today`
 
-* **役割**: `cur`と`user_id`を受け取り、JSTの今日のうちに`status = 'consumed'`となったYouTube系ごほうび券の視聴分数の合計を、`get_youtube_reward_duration_minutes`で各行を換算して返す。`config.YOUTUBE_REWARD_IDS`が空なら`0`を返す。日付の切り出しにSQLiteの`date(used_at)`ではなく`used_at LIKE 'YYYY-MM-DD%'`という文字列の先頭一致を使っており、docstringはその理由を「`used_at`は`core.utils.get_now_iso()`が保存するJSTオフセット付きISO文字列で、SQLiteの日付関数はこれをUTCへ変換してしまうため、JSTの朝9時より前に使った券が『前日』に数えられてしまう」と説明している。
-* 根拠: `def get_youtube_used_minutes_today(cur, user_id: str) -> int:` (行番号: 181〜203)、`AND used_at LIKE ?` (行番号: 200)
+* **役割**: `_get_youtube_usages_today`の結果の視聴分数を合計し、JSTの今日すでに使用した合計分数を返す。
+* 根拠: `def get_youtube_used_minutes_today(cur, user_id: str) -> int:` (行番号: 213〜215)
 * **引数/リクエスト**: `cur`（呼び出し元のトランザクション内で実行されるDBカーソル）, `user_id: str`
-* 根拠: (行番号: 181)
+* 根拠: (行番号: 213)
 * **戻り値/レスポンス**: `int`（今日すでに使用した合計分数。対象IDが未設定なら`0`）
-* 根拠: `return sum(get_youtube_reward_duration_minutes(row['reward_id']) for row in rows)` (行番号: 203)
-* **副作用**: `user_inventory`への読み取りクエリ1回（引数`cur`をそのまま使うため呼び出し元のトランザクション内で実行される。自身ではコミットしない）
-* 根拠: (行番号: 196〜201)
-* **エラーハンドリング**: `config.YOUTUBE_REWARD_IDS`が空の場合は早期に`0`を返す。それ以外の明示的な例外処理は無い
-* 根拠: (行番号: 191〜192)
+* 根拠: `return sum(minutes for _used_at, minutes in _get_youtube_usages_today(cur, user_id))` (行番号: 215)
+* **副作用**: `_get_youtube_usages_today`経由の読み取りクエリ1回
+* 根拠: (行番号: 215)
+* **エラーハンドリング**: なし（空リストなら合計は`0`）
+* 根拠: (行番号: 215)
+
+### `_get_extension_quest_completions_today`
+
+* **役割**: JSTの今日のうちに完了し、かつ`status = 'approved'`(親に承認済み)となった延長対象クエスト(`config.YOUTUBE_EXTENSION_QUEST_IDS` = プリント等)の`completed_at`を昇順で返す。docstringは`'approved'`に限定する理由を「やっていないプリントを『やった』と報告するだけで視聴時間を延ばせてしまわないようにするため」、並べ替えに承認時刻ではなく`completed_at`を使う理由を「『上限に達した後にやったか』はこちらで判定するのが自然なため」と説明している。対象クエストが未設定なら空リストを返す。
+* 根拠: `def _get_extension_quest_completions_today(cur, user_id: str) -> list:` (行番号: 218〜240)
+* **引数/リクエスト**: `cur`（呼び出し元のトランザクション内で実行されるDBカーソル）, `user_id: str`
+* 根拠: (行番号: 218)
+* **戻り値/レスポンス**: `list`（`completed_at: str`のリスト。古い順）
+* 根拠: `return [row['completed_at'] for row in rows]` (行番号: 240)
+* **副作用**: `quest_history`への読み取りクエリ1回（引数`cur`をそのまま使うため呼び出し元のトランザクション内で実行される）
+* 根拠: (行番号: 232〜238)
+* **エラーハンドリング**: `config.YOUTUBE_EXTENSION_QUEST_IDS`が空の場合は早期に空リストを返す
+* 根拠: (行番号: 228〜229)
+
+### `get_youtube_daily_limit_with_extensions`
+
+* **役割**: その日の**実効上限**(分)と、プリントによって延長された回数を`(effective_limit, granted)`のタプルで返す。「上限に達した**後に**やったプリントだけが延長になる」という規則を、今日の出来事(券の使用とプリントの完了)を時系列に並べて再生することで実装する。各イベントを走査し、券の使用なら使用分数を加算、プリントなら**その時点で**`used_minutes >= effective_limit`かつ延長回数が`config.YOUTUBE_EXTENSION_MAX_PER_DAY`未満のときだけ`config.YOUTUBE_EXTENSION_MINUTES_PER_QUEST`を上限に加える。docstringはこの設計の理由を「朝の日課としてやったプリントで上限が最初から伸びているのでは『もっと見たいからもう1枚やる』という交換にならないため」と説明している。同時刻に券の使用とプリントが並んだ場合は券の使用を先に処理する(並べ替えの第2キーが`0=使用 / 1=プリント`)。延長分数・回数上限が`0`以下、または対象クエストが未設定なら`(base_limit_minutes, 0)`をそのまま返す。
+* 根拠: `def get_youtube_daily_limit_with_extensions(cur, user_id: str, base_limit_minutes: int) -> tuple[int, int]:` (行番号: 243〜278)
+* **引数/リクエスト**: `cur`（呼び出し元のトランザクション内で実行されるDBカーソル）, `user_id: str`, `base_limit_minutes: int`（`get_youtube_daily_limit_minutes`が返す延長前の上限）
+* 根拠: (行番号: 243)
+* **戻り値/レスポンス**: `tuple[int, int]`（実効上限の分数、延長が与えられた回数）
+* 根拠: `return effective_limit, granted` (行番号: 278)
+* **副作用**: `_get_youtube_usages_today`・`_get_extension_quest_completions_today`経由の読み取りクエリ2回
+* 根拠: (行番号: 267〜268)
+* **エラーハンドリング**: 延長機能が無効な設定(分数・回数が`0`以下、対象クエスト未設定)のときは早期に`(base_limit_minutes, 0)`を返す
+* 根拠: (行番号: 260〜262)
+
+### `can_extend_youtube_limit_now`
+
+* **役割**: 「今プリントを1枚やれば上限が延びる」状態かどうかを返す。`get_youtube_daily_limit_with_extensions`のループ内の条件と同じ式(`used_minutes >= effective_limit and granted < config.YOUTUBE_EXTENSION_MAX_PER_DAY`)を共有しており、family-quest側が「プリントを1枚やると+30分」と案内するかどうか、および`InventoryService._use_item_locked`が拒否メッセージを「また明日つかおうね」と「プリントを1枚やると〜分ふえるよ」のどちらにするかの判定に使う。
+* 根拠: `def can_extend_youtube_limit_now(used_minutes: int, effective_limit: int, granted: int) -> bool:` (行番号: 281〜290)
+* **引数/リクエスト**: `used_minutes: int`, `effective_limit: int`, `granted: int`
+* 根拠: (行番号: 281)
+* **戻り値/レスポンス**: `bool`
+* 根拠: `return used_minutes >= effective_limit and granted < config.YOUTUBE_EXTENSION_MAX_PER_DAY` (行番号: 290)
+* **副作用**: なし（DBアクセスなし）
+* 根拠: (行番号: 288〜290)
+* **エラーハンドリング**: 延長機能が無効な設定のときは`False`を返す
+* 根拠: (行番号: 288〜289)
 
 ### `_is_youtube_cooldown_enforced`
 
 * **役割**: YouTube系ごほうび券のクールダウンを実際に強制する日(`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`、JST基準の`date`)を、現在のJST日付が迎えているかどうかを返す。この関数が`False`を返す間(施行日より前)は、`InventoryService._use_item_locked`が使用を拒否せず、`InventoryService.get_user_inventory`が予告用の`youtube_cooldown_announcement`を返す設計になっている（利用側は`quest_inventory_service.md`参照）。
-* 根拠: `def _is_youtube_cooldown_enforced() -> bool:\n    return datetime.datetime.now(JST).date() >= config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM` (行番号: 206〜212)
+* 根拠: `def _is_youtube_cooldown_enforced() -> bool:\n    return datetime.datetime.now(JST).date() >= config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM` (行番号: 293〜299)
 * **引数/リクエスト**: なし
 * 根拠: (行番号: 206)
 * **戻り値/レスポンス**: `bool`
@@ -186,7 +251,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_is_youtube_daily_limit_enforced`
 
 * **役割**: YouTube系ごほうび券の1日の合計分数上限を実際に強制する日(`config.YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`、JST基準の`date`)を、現在のJST日付が迎えているかどうかを返す。docstringは、クールダウン(`_is_youtube_cooldown_enforced`)とは別の施行日を持つ理由を「両者は導入時期が異なり、既に施行済みのクールダウンの猶予期間を新しい上限の導入で巻き戻してしまわないよう、判定軸を分けている」と説明している。この関数が`False`を返す間は、`InventoryService._use_item_locked`が日次上限による拒否をせず、`InventoryService.get_user_inventory`が予告用の`youtube_daily_limit_announcement`を返す（利用側は`quest_inventory_service.md`参照）。
-* 根拠: `def _is_youtube_daily_limit_enforced() -> bool:\n    return datetime.datetime.now(JST).date() >= config.YOUTUBE_DAILY_LIMIT_ENFORCE_FROM` (行番号: 215〜224)
+* 根拠: `def _is_youtube_daily_limit_enforced() -> bool:\n    return datetime.datetime.now(JST).date() >= config.YOUTUBE_DAILY_LIMIT_ENFORCE_FROM` (行番号: 302〜311)
 * **引数/リクエスト**: なし
 * 根拠: (行番号: 215)
 * **戻り値/レスポンス**: `bool`
@@ -199,7 +264,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_completion_locks` (モジュールレベル変数) と `_get_completion_lock`
 
 * **役割**: `_completion_locks`は`RefCountedLockRegistry`のインスタンスで、`Tuple[str, int]`(`user_id`, `quest_id`の組、または兄妹連携クエスト用の共通キー`('__coop__', quest_id)`)をキーとしてプロセス内ロックを提供する。`QuestService.process_complete_quest`が「直近履歴を読む→報酬を書く」処理を直列化し、同時リクエストによる二重加算を防ぐために使う。`_get_completion_lock(key)`は`_completion_locks.acquire(key)`が返すコンテキストマネージャをそのまま返す薄いラッパー。
-* 根拠: `_completion_locks = RefCountedLockRegistry()` (行番号: 121)、`def _get_completion_lock(key: Tuple[str, int]):\n    return _completion_locks.acquire(key)` (行番号: 241〜242)、コメント (行番号: 110〜120)
+* 根拠: `_completion_locks = RefCountedLockRegistry()` (行番号: 121)、`def _get_completion_lock(key: Tuple[str, int]):\n    return _completion_locks.acquire(key)` (行番号: 328〜329)、コメント (行番号: 110〜120)
 * **引数/リクエスト**: `_get_completion_lock`: `key: Tuple[str, int]`
 * 根拠: (行番号: 124)
 * **戻り値/レスポンス**: `_get_completion_lock`: コンテキストマネージャ(`RefCountedLockRegistry.acquire`が返すもの)
@@ -212,7 +277,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_user_balance_locks` (モジュールレベル変数) と `_get_user_balance_lock`
 
 * **役割**: `_user_balance_locks`は`RefCountedLockRegistry`のインスタンスで、`user_id`をキーとしてプロセス内ロックを提供する。`quest_users`(gold/exp/level)をread-modify-writeで更新する全経路(完了・承認・却下・取消・購入)を対象ユーザー単位で直列化し、経路間のlost updateを防ぐ目的で使われる（利用箇所の詳細は`quest_quest_service.md`/`quest_shop_service.md`参照）。`_get_user_balance_lock(user_id)`は`_user_balance_locks.acquire(user_id)`をそのまま返す。
-* 根拠: `_user_balance_locks = RefCountedLockRegistry()` (行番号: 139)、`def _get_user_balance_lock(user_id: str):\n    return _user_balance_locks.acquire(user_id)` (行番号: 259〜260)、コメント (行番号: 128〜138)
+* 根拠: `_user_balance_locks = RefCountedLockRegistry()` (行番号: 139)、`def _get_user_balance_lock(user_id: str):\n    return _user_balance_locks.acquire(user_id)` (行番号: 346〜347)、コメント (行番号: 128〜138)
 * **引数/リクエスト**: `user_id: str`
 * 根拠: (行番号: 142)
 * **戻り値/レスポンス**: コンテキストマネージャ
@@ -225,7 +290,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_acquire_user_balance_locks`
 
 * **役割**: 複数の`user_id`に対する`_get_user_balance_lock`のロックをまとめて取得し、`ExitStack`として返す。兄妹連携クエストの承認・却下・取消は報告者だけでなく連結された相方の`quest_users`もカスケード更新するため、関係する全ユーザーのロックをまとめて取得する必要がある。複数ユーザーを同時にロックする際は常に`user_id`の昇順(`sorted(set(user_ids))`)で取得することで、対向のカスケード処理同士が互いのロックを取り合うデッドロックを防ぐ。
-* 根拠: `def _acquire_user_balance_locks(user_ids):` (行番号: 263〜274)、`for uid in sorted(set(user_ids)):\n        stack.enter_context(_get_user_balance_lock(uid))` (行番号: 155〜156)
+* 根拠: `def _acquire_user_balance_locks(user_ids):` (行番号: 350〜361)、`for uid in sorted(set(user_ids)):\n        stack.enter_context(_get_user_balance_lock(uid))` (行番号: 155〜156)
 * **引数/リクエスト**: `user_ids`（`str`のイテラブル）
 * 根拠: (行番号: 146)
 * **戻り値/レスポンス**: `ExitStack`（`with`文で使うコンテキストマネージャ。ブロック終了時に取得した全ロックを解放する）
@@ -238,7 +303,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_purchase_locks` (モジュールレベル変数) と `_get_purchase_lock`
 
 * **役割**: `_purchase_locks`は`RefCountedLockRegistry`のインスタンスで、`Tuple[str, int]`(`user_id`, `reward_id`の組)をキーとしてプロセス内ロックを提供する。`ShopService.process_purchase_reward`が「直近の購入履歴を読む→履歴を書く」というスパムチェックのTOCTOUを防ぐために使う（残高減算自体はDBレベルのアトミックUPDATEで別途保護される）。`_get_purchase_lock(key)`は`_purchase_locks.acquire(key)`をそのまま返す。
-* 根拠: `_purchase_locks = RefCountedLockRegistry()` (行番号: 173)、`def _get_purchase_lock(key: Tuple[str, int]):\n    return _purchase_locks.acquire(key)` (行番号: 293〜294)、コメント (行番号: 160〜172)
+* 根拠: `_purchase_locks = RefCountedLockRegistry()` (行番号: 173)、`def _get_purchase_lock(key: Tuple[str, int]):\n    return _purchase_locks.acquire(key)` (行番号: 380〜381)、コメント (行番号: 160〜172)
 * **引数/リクエスト**: `key: Tuple[str, int]`
 * 根拠: (行番号: 176)
 * **戻り値/レスポンス**: コンテキストマネージャ
@@ -251,7 +316,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_item_use_locks` (モジュールレベル変数) と `_get_item_use_lock`
 
 * **役割**: `_item_use_locks`は`RefCountedLockRegistry`のインスタンスで、`user_id`をキーとしてプロセス内ロックを提供する。`InventoryService.use_item`が「YouTube系ごほうび券の直近`used_at`を読む→クールダウン判定→`consumed`へ更新」というTOCTOUを防ぐために使う。他の3レジストリと同じ`RefCountedLockRegistry`パターンで実装されている。
-* 根拠: `_item_use_locks = RefCountedLockRegistry()` (行番号: 190)、`def _get_item_use_lock(user_id: str):\n    return _item_use_locks.acquire(user_id)` (行番号: 310〜311)、コメント (行番号: 180〜189)
+* 根拠: `_item_use_locks = RefCountedLockRegistry()` (行番号: 190)、`def _get_item_use_lock(user_id: str):\n    return _item_use_locks.acquire(user_id)` (行番号: 397〜398)、コメント (行番号: 180〜189)
 * **引数/リクエスト**: `user_id: str`
 * 根拠: (行番号: 193)
 * **戻り値/レスポンス**: コンテキストマネージャ
@@ -290,6 +355,23 @@ flowchart TD
         U6 --> U7["合計を返す"]
     end
 
+    subgraph WithExtensions["get_youtube_daily_limit_with_extensions()"]
+        E1["開始: cur, user_id, base_limit"] --> E2{"延長設定が有効?<br/>(分数・回数>0 かつ 対象クエストあり)"}
+        E2 -- No --> E3["(base_limit, 0)を返す"]
+        E2 -- Yes --> E4["今日の券使用と承認済みプリント完了を取得"]
+        E4 --> E5["(タイムスタンプ, 0=使用/1=プリント)で昇順ソート"]
+        E5 --> E6["先頭から順に走査"]
+        E6 --> E7{"イベント種別は?"}
+        E7 -- 券の使用 --> E8["used_minutes += 分数"]
+        E7 -- プリント --> E9{"used_minutes >= effective_limit<br/>かつ granted < MAX_PER_DAY?"}
+        E9 -- Yes --> E10["effective_limit += MINUTES_PER_QUEST / granted += 1"]
+        E9 -- No --> E11["何もしない(上限到達前 or 回数上限)"]
+        E8 --> E6
+        E10 --> E6
+        E11 --> E6
+        E6 --> E12["(effective_limit, granted)を返す"]
+    end
+
     subgraph AcquireBalanceLocks["_acquire_user_balance_locks()"]
         A1["開始: user_ids"] --> A2["ExitStackを生成"]
         A2 --> A3["user_idsをsorted(set(...))で昇順ユニーク化"]
@@ -319,7 +401,7 @@ graph TD
     Locks --> DatetimeMod
     Locks --> MathMod
     Locks --> ExitStackMod
-    Locks -->|"YOUTUBE_REWARD_IDS / DURATION_MINUTES / DAILY_LIMIT_* 等"| ConfigMod
+    Locks -->|"YOUTUBE_REWARD_IDS / DURATION_MINUTES / DAILY_LIMIT_* / EXTENSION_* 等"| ConfigMod
     Locks -->|"logger初期化"| SetupLogging
     Locks -->|"4レジストリのインスタンス化"| RefCountedLockRegistryClass
 
@@ -345,11 +427,15 @@ graph TD
 * **プロセス内ロック限定**: 全ロックは`threading.Lock`ベース(`RefCountedLockRegistry`の内部実装)のみを対象としており、複数プロセス/複数ワーカーで稼働する構成では別プロセスからの同時リクエストまでは防げない。
 * 根拠: `RefCountedLockRegistry`のimport元コメント (行番号: 14)、`utils.md`参照
 * **YouTubeの視聴制限は「長さ」「施行日」が制限ごとに独立している**: クールダウンは長さ(`YOUTUBE_REWARD_BREAK_SECONDS` + 券の視聴分数)と施行日(`_is_youtube_cooldown_enforced`)、日次上限は長さ(`get_youtube_daily_limit_minutes`)と施行日(`_is_youtube_daily_limit_enforced`)をそれぞれ別に持つ。呼び出し元(`InventoryService`)がこれらを組み合わせて「施行前は予告のみ・施行後は拒否」という挙動を実現しており、本ファイル単体では各組の対応関係は暗黙的である。
-* 根拠: `YOUTUBE_REWARD_BREAK_SECONDS = 15 * 60` (行番号: 85)、`def _is_youtube_cooldown_enforced() -> bool:` (行番号: 206〜212)、`def _is_youtube_daily_limit_enforced() -> bool:` (行番号: 215〜224)
+* 根拠: `YOUTUBE_REWARD_BREAK_SECONDS = 15 * 60` (行番号: 85)、`def _is_youtube_cooldown_enforced() -> bool:` (行番号: 293〜299)、`def _is_youtube_daily_limit_enforced() -> bool:` (行番号: 302〜311)
 * **`get_youtube_reward_duration_minutes`の対応表漏れは静かに0分として扱われる**: `config.YOUTUBE_REWARD_DURATION_MINUTES`に無い`reward_id`は例外ではなく`0`分になるため、`config.YOUTUBE_REWARD_IDS`に新しい券を追加して対応表への追記を忘れると、その券はクールダウンが休憩ぶん(15分)だけになり、日次上限の集計にも加算されない。券を増やすときは2つの設定を必ずセットで更新すること。
 * 根拠: `return config.YOUTUBE_REWARD_DURATION_MINUTES.get(reward_id, 0)` (行番号: 121)、docstring (行番号: 114〜120)
-* **`get_youtube_used_minutes_today`でSQLiteの`date()`を使ってはならない**: `used_at`はJSTオフセット付きISO文字列のため、`date(used_at)`はUTCへ変換した日付を返し、JSTの朝9時より前の使用が前日に数えられてしまう。現在は`used_at LIKE 'YYYY-MM-DD%'`の先頭一致で判定している。
-* 根拠: docstring (行番号: 183〜189)、`AND used_at LIKE ?` (行番号: 200)
+* **今日ぶんの絞り込みでSQLiteの`date()`を使ってはならない**: `used_at`/`completed_at`はJSTオフセット付きISO文字列のため、`date(...)`はUTCへ変換した日付を返し、JSTの朝9時より前の記録が前日に数えられてしまう。現在は`_get_today_jst_prefix()`による`LIKE 'YYYY-MM-DD%'`の先頭一致で判定している。
+* 根拠: `def _get_today_jst_prefix() -> str:` (行番号: 181〜190)、`AND used_at LIKE ?` (行番号: 206)、`AND completed_at LIKE ?` (行番号: 236)
+* **延長の判定は「その時点で上限を使い切っていたか」であり、単なる枚数ではない**: `get_youtube_daily_limit_with_extensions`は今日の出来事を時系列に再生し、プリントの時点で`used_minutes >= effective_limit`だった場合にだけ延長を与える。したがって「上限に達した直後にプリントを3枚まとめてやる」と延長は1回しか付かない(2枚目・3枚目の時点では延長後の上限に達していないため)。これは仕様であり、回数上限(`YOUTUBE_EXTENSION_MAX_PER_DAY`)とは別の歯止めとして効いている。
+* 根拠: `def get_youtube_daily_limit_with_extensions(cur, user_id: str, base_limit_minutes: int) -> tuple[int, int]:` (行番号: 243〜278)、docstring (行番号: 244〜255)
+* **上限と券の長さは同じ刻み(既定では10分)で揃えること**: 延長が始まる条件は「残り0分」(`used_minutes >= effective_limit`)である。上限を券の長さで割り切れない値(例: 45分)にすると、どの券にも満たない端数(例: 残り5分)が残って券は使えず、かつ残り0分ではないので延長も始まらない、という手詰まりが起こりうる。
+* 根拠: `return used_minutes >= effective_limit and granted < config.YOUTUBE_EXTENSION_MAX_PER_DAY` (行番号: 290)
 * **`_get_youtube_cooldown_remaining_seconds`のSQLはf-string組み立て**: IN句のプレースホルダ個数のみを動的に組み立てており、値そのものはパラメータ化されているため実際のSQLインジェクションリスクは無いが、`# nosec B608`によりbanditの静的解析は無効化されている。将来この関数を改変する際は、プレースホルダ数と`config.YOUTUBE_REWARD_IDS`の要素数が一致する前提を崩さないよう注意が必要。
 * 根拠: `placeholders = ",".join("?" for _ in config.YOUTUBE_REWARD_IDS)` (行番号: 80)、`# nosec B608` (行番号: 88)
 
@@ -358,14 +444,14 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `RefCountedLockRegistry`の参照カウント管理の具体的なアルゴリズム | 本ファイルは`acquire()`を呼び出すのみで、内部実装（辞書からの削除タイミング、`_guard`ロックの役割等）は`core/utils.py`側にある | `core/utils.py` |
-| `config`のYouTube視聴制限系定数(`YOUTUBE_REWARD_IDS`/`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`/`YOUTUBE_REWARD_DURATION_MINUTES`/`YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY`/`YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY`/`YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`)の実際の値 | `config.py`側の定義・`.env`依存の実値は本ファイルからは確認できない | `config.py` |
+| `config`のYouTube視聴制限系定数(`YOUTUBE_REWARD_IDS`/`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`/`YOUTUBE_REWARD_DURATION_MINUTES`/`YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY`/`YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY`/`YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`/`YOUTUBE_EXTENSION_QUEST_IDS`/`YOUTUBE_EXTENSION_MINUTES_PER_QUEST`/`YOUTUBE_EXTENSION_MAX_PER_DAY`)の実際の値 | `config.py`側の定義・`.env`依存の実値は本ファイルからは確認できない | `config.py` |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `RefCountedLockRegistry`の参照カウント管理の具体的なアルゴリズム | `MY_HOME_SYSTEM/core/utils.py`を直接確認した。`RefCountedLockRegistry`(57〜101行目)は内部クラス`_Entry`(`__slots__ = ("lock", "ref_count")`、74〜79行目)で`threading.Lock`と参照カウントを保持し、`self._entries: Dict[Any, _Entry]`と単一の`self._guard = threading.Lock()`(81〜83行目)を持つ。`acquire(key)`は`@contextlib.contextmanager`(85行目)で、(1)`_guard`下でキーのエントリを取得または新規作成し`ref_count += 1`(88〜93行目)、(2)`with entry.lock:`でキー単位の排他を張って`yield`(94〜96行目)、(3)`finally`で再び`_guard`下に入り`ref_count -= 1`し、`ref_count == 0`かつ`self._entries.get(key) is entry`のときだけ辞書から削除する(97〜101行目)、という3段構成である。この`is`比較により、削除判定中に別スレッドが同じキーで新しいエントリを作っていた場合は削除しない。クラスdocstringは、単純な`lock.locked()`ベースの剪定では「辞書からロックを取り出した直後・`with`で獲得する直前」の隙間で別スレッドが剪定し、同一キーに対して2つのLockが同時に取得成功しうる（Issue #435）ため参照カウント方式を採った、と明記している。つまり本ファイルの4レジストリは「使用中のエントリは絶対に削除されない」ことが保証され、キー(ユーザーID×クエストID等)が増え続けてもエントリは蓄積しない。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:57-101`（参考: [utils.md](./utils.md)） |
-| `config`のYouTube視聴制限系定数の実際の値 | `MY_HOME_SYSTEM/config.py`を直接確認した。`YOUTUBE_REWARD_IDS`は環境変数のカンマ区切り文字列を既定値`"10,11,12"`として読み込み(735行目)、`List[int]`へパースする(736〜740行目)。`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`は既定値`"2026-09-12"`を`date.fromisoformat`で変換した値(750〜755行目)、`YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`は既定値`"2026-09-27"`の同形(805〜810行目)で、いずれもパース失敗時は`date(2000, 1, 1)`へフォールバックする=即時強制になる。`YOUTUBE_REWARD_DURATION_MINUTES`は`"reward_id:分数"`のカンマ区切り(既定`"10:10,11:30,12:60"`)を`dict[int, int]`へパースする(771〜786行目)。`YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY`/`_HOLIDAY`は`_get_int_env`による既定60分/90分(792〜793行目)。したがって本ファイルの`_is_youtube_cooldown_enforced()`は2026-09-12(JST)以降、`_is_youtube_daily_limit_enforced()`は2026-09-27(JST)以降`True`を返し、IN句は既定で`(10, 11, 12)`の3件、`get_youtube_reward_duration_minutes`は既定で10/30/60分を返す。`.env`による上書きは可能だが、リポジトリ内の既定値だけで本ファイルの分岐は決定できる。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:735-810`（参考: [config.md](./config.md)） |
+| `config`のYouTube視聴制限系定数の実際の値 | `MY_HOME_SYSTEM/config.py`を直接確認した。`YOUTUBE_REWARD_IDS`は環境変数のカンマ区切り文字列を既定値`"10,11,12"`として読み込み(735行目)、`List[int]`へパースする(736〜740行目)。`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`は既定値`"2026-09-12"`を`date.fromisoformat`で変換した値(750〜755行目)、`YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`は既定値`"2026-09-27"`の同形(805〜810行目)で、いずれもパース失敗時は`date(2000, 1, 1)`へフォールバックする=即時強制になる。`YOUTUBE_REWARD_DURATION_MINUTES`は`"reward_id:分数"`のカンマ区切り(既定`"10:10,11:30,12:60"`)を`dict[int, int]`へパースする(771〜786行目)。`YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY`/`_HOLIDAY`は`_get_int_env`による既定60分/90分(792〜793行目)。延長系は`YOUTUBE_EXTENSION_QUEST_IDS`が既定`"31,307"`(quest_data.pyのプリント)、`YOUTUBE_EXTENSION_MINUTES_PER_QUEST`が既定30分、`YOUTUBE_EXTENSION_MAX_PER_DAY`が既定2回(812〜834行目)。したがって本ファイルの`_is_youtube_cooldown_enforced()`は2026-09-12(JST)以降、`_is_youtube_daily_limit_enforced()`は2026-09-27(JST)以降`True`を返し、IN句は既定で`(10, 11, 12)`の3件、`get_youtube_reward_duration_minutes`は既定で10/30/60分を返す。`.env`による上書きは可能だが、リポジトリ内の既定値だけで本ファイルの分岐は決定できる。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:735-834`（参考: [config.md](./config.md)） |
 
 ## 10. 自己検証結果
 
