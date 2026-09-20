@@ -474,6 +474,39 @@ DB_BACKUP_RETENTION_DAYS: int = _get_int_env("DB_BACKUP_RETENTION_DAYS", 30)
 DB_BACKUP_OFFSITE_REMOTE: str = os.getenv("DB_BACKUP_OFFSITE_REMOTE", "").strip()
 DB_BACKUPS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "db_backups")
 
+# --- SQLite の「行」の保持期間 (Issue #733 / AUDIT-003) ---
+# 上の設定はすべて「ファイル」の保持期間で、SQLite の行を削除する設定・コードは
+# これまでリポジトリ内に1つも存在しなかった。「無限蓄積」はファイルについては
+# #190/#171/#359/#191/#537 と5件も起票・解決されてきた一方、DB の行は1件も無く、
+# これが監査の根本原因 RC-2(データのライフサイクルがファイルの観点でしか設計されて
+# いない)の直接の証拠になっている。
+# なお DB_BACKUP_RETENTION_DAYS は名前に反して「DB バックアップ*ファイル*」の保持日数で、
+# 行の保持期間ではない(この紛らわしさ自体が盲点を強化していたと監査は指摘している)。
+#
+# 既定は False = **ドライラン**。行削除は不可逆なので、既定で消えることは無い。
+# 実機で `python tools/db_retention.py --report` を流し、何がどれだけ消えるかを
+# 確認してから .env で有効化する運用を想定している。
+DB_ROW_RETENTION_ENABLED: bool = (
+    os.getenv("DB_ROW_RETENTION_ENABLED", "false").strip().lower() == "true"
+)
+# センサーの生ログ(device_records / power_usage / switchbot_meter_logs 等)の保持日数。
+# 5分間隔で書かれるテーブルがあり、デバイス5台なら年間約50万行/テーブルになる。
+DB_ROW_RETENTION_SENSOR_DAYS: int = _get_int_env("DB_ROW_RETENTION_SENSOR_DAYS", 400)
+# ルーティンのステップ遷移イベントの保持日数。センサー生ログと分けているのは、
+# 消える範囲を1つのつまみで巻き込まないようにするため。
+DB_ROW_RETENTION_EVENT_DAYS: int = _get_int_env("DB_ROW_RETENTION_EVENT_DAYS", 400)
+# 1回の実行で削除する行数の上限。SQLite の DELETE は書き込みロックを取るため、
+# 1晩で一気に消さず複数日に分けて削る(初回の積み残しが大きいときの保険)。
+DB_ROW_RETENTION_MAX_ROWS_PER_RUN: int = _get_int_env("DB_ROW_RETENTION_MAX_ROWS_PER_RUN", 50000)
+# 1トランザクションあたりの削除行数。小さくするほどロック保持時間が短くなる。
+DB_ROW_RETENTION_BATCH_SIZE: int = _get_int_env("DB_ROW_RETENTION_BATCH_SIZE", 2000)
+# 直近このH時間以内に成功したDBバックアップが無ければ削除しない(不可逆な操作の前提条件)。
+# バックアップは cron で毎日04:00、行削除は nas_monitor が8時以降に1日1回なので、
+# 正常系では常に4〜5時間前のバックアップが存在する。既定26時間はその余裕分。
+DB_ROW_RETENTION_REQUIRE_BACKUP_WITHIN_HOURS: int = _get_int_env(
+    "DB_ROW_RETENTION_REQUIRE_BACKUP_WITHIN_HOURS", 26
+)
+
 # ==========================================
 # 8. Sound & Family設定
 # ==========================================
