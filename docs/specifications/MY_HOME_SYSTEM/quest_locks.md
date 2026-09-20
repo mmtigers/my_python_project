@@ -147,10 +147,10 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `get_youtube_daily_limit_minutes`
 
 * **役割**: その日に使えるYouTube系ごほうび券の合計分数の上限を返す。`today`(省略時は`datetime.datetime.now(JST).date()`)の曜日を見て、土日(`weekday() >= 5`)なら`config.YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY`、それ以外は`config.YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY`を採用し、値が`0`以下なら「上限なし」として`None`を返す。docstringは祝日を平日として扱う理由を「祝日判定には外部の暦データ(jpholiday等)が必要で、個人用システムに依存を増やす割に合わないと判断した」と記している。
-* 根拠: `def get_youtube_daily_limit_minutes(today: Optional[datetime.date] = None) -> Optional[int]:` (行番号: 160〜178)
-* **引数/リクエスト**: `today: Optional[datetime.date] = None`（省略時はJSTの現在日付）
+* 根拠: `def get_youtube_daily_limit_minutes(today: datetime.date | None = None) -> int | None:` (行番号: 160〜178)
+* **引数/リクエスト**: `today: datetime.date | None = None`（省略時はJSTの現在日付）
 * 根拠: (行番号: 160, 169〜170)
-* **戻り値/レスポンス**: `Optional[int]`（上限分数。`0`以下の設定時は`None`＝上限なし）
+* **戻り値/レスポンス**: `int | None`（上限分数。`0`以下の設定時は`None`＝上限なし）
 * 根拠: `return limit if limit > 0 else None` (行番号: 178)
 * **副作用**: なし（DBアクセスなし）
 * 根拠: (行番号: 169〜178)
@@ -365,7 +365,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `RefCountedLockRegistry`の参照カウント管理の具体的なアルゴリズム | `MY_HOME_SYSTEM/core/utils.py`を直接確認した。`RefCountedLockRegistry`(57〜101行目)は内部クラス`_Entry`(`__slots__ = ("lock", "ref_count")`、74〜79行目)で`threading.Lock`と参照カウントを保持し、`self._entries: Dict[Any, _Entry]`と単一の`self._guard = threading.Lock()`(81〜83行目)を持つ。`acquire(key)`は`@contextlib.contextmanager`(85行目)で、(1)`_guard`下でキーのエントリを取得または新規作成し`ref_count += 1`(88〜93行目)、(2)`with entry.lock:`でキー単位の排他を張って`yield`(94〜96行目)、(3)`finally`で再び`_guard`下に入り`ref_count -= 1`し、`ref_count == 0`かつ`self._entries.get(key) is entry`のときだけ辞書から削除する(97〜101行目)、という3段構成である。この`is`比較により、削除判定中に別スレッドが同じキーで新しいエントリを作っていた場合は削除しない。クラスdocstringは、単純な`lock.locked()`ベースの剪定では「辞書からロックを取り出した直後・`with`で獲得する直前」の隙間で別スレッドが剪定し、同一キーに対して2つのLockが同時に取得成功しうる（Issue #435）ため参照カウント方式を採った、と明記している。つまり本ファイルの4レジストリは「使用中のエントリは絶対に削除されない」ことが保証され、キー(ユーザーID×クエストID等)が増え続けてもエントリは蓄積しない。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:57-101`（参考: [utils.md](./utils.md)） |
-| `config`のYouTube視聴制限系定数の実際の値 | `MY_HOME_SYSTEM/config.py`を直接確認した。`YOUTUBE_REWARD_IDS`は環境変数のカンマ区切り文字列を既定値`"10,11,12"`として読み込み(735行目)、`List[int]`へパースする(736〜740行目)。`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`は既定値`"2026-09-12"`を`date.fromisoformat`で変換した値(750〜755行目)、`YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`は既定値`"2026-09-27"`の同形(801〜806行目)で、いずれもパース失敗時は`date(2000, 1, 1)`へフォールバックする=即時強制になる。`YOUTUBE_REWARD_DURATION_MINUTES`は`"reward_id:分数"`のカンマ区切り(既定`"10:10,11:30,12:60"`)を`Dict[int, int]`へパースする(771〜786行目)。`YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY`/`_HOLIDAY`は`_get_int_env`による既定60分/90分(792〜793行目)。したがって本ファイルの`_is_youtube_cooldown_enforced()`は2026-09-12(JST)以降、`_is_youtube_daily_limit_enforced()`は2026-09-27(JST)以降`True`を返し、IN句は既定で`(10, 11, 12)`の3件、`get_youtube_reward_duration_minutes`は既定で10/30/60分を返す。`.env`による上書きは可能だが、リポジトリ内の既定値だけで本ファイルの分岐は決定できる。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:735-806`（参考: [config.md](./config.md)） |
+| `config`のYouTube視聴制限系定数の実際の値 | `MY_HOME_SYSTEM/config.py`を直接確認した。`YOUTUBE_REWARD_IDS`は環境変数のカンマ区切り文字列を既定値`"10,11,12"`として読み込み(735行目)、`List[int]`へパースする(736〜740行目)。`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`は既定値`"2026-09-12"`を`date.fromisoformat`で変換した値(750〜755行目)、`YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`は既定値`"2026-09-27"`の同形(805〜810行目)で、いずれもパース失敗時は`date(2000, 1, 1)`へフォールバックする=即時強制になる。`YOUTUBE_REWARD_DURATION_MINUTES`は`"reward_id:分数"`のカンマ区切り(既定`"10:10,11:30,12:60"`)を`dict[int, int]`へパースする(771〜786行目)。`YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY`/`_HOLIDAY`は`_get_int_env`による既定60分/90分(792〜793行目)。したがって本ファイルの`_is_youtube_cooldown_enforced()`は2026-09-12(JST)以降、`_is_youtube_daily_limit_enforced()`は2026-09-27(JST)以降`True`を返し、IN句は既定で`(10, 11, 12)`の3件、`get_youtube_reward_duration_minutes`は既定で10/30/60分を返す。`.env`による上書きは可能だが、リポジトリ内の既定値だけで本ファイルの分岐は決定できる。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:735-810`（参考: [config.md](./config.md)） |
 
 ## 10. 自己検証結果
 

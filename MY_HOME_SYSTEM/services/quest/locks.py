@@ -157,7 +157,7 @@ def _get_youtube_cooldown_remaining_seconds(cur, user_id: str) -> int:
     return max(0, math.ceil(remaining))
 
 
-def get_youtube_daily_limit_minutes(today: Optional[datetime.date] = None) -> Optional[int]:
+def get_youtube_daily_limit_minutes(today: datetime.date | None = None) -> int | None:
     """
     その日に使えるYouTube系ごほうび券の合計分数の上限を返す。上限なしの設定
     (0以下)の場合は None を返す。

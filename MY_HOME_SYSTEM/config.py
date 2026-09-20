@@ -769,7 +769,7 @@ except Exception as e:
 # ここに無いreward_idは長さ0分として扱う(クールダウンは休憩ぶんのみ、日次上限の
 # 集計には加算されない)。YOUTUBE_REWARD_IDS に券を足したらこちらも併せて更新すること。
 _youtube_reward_durations_str: str = os.getenv("YOUTUBE_REWARD_DURATION_MINUTES", "10:10,11:30,12:60")
-YOUTUBE_REWARD_DURATION_MINUTES: Dict[int, int] = {}
+YOUTUBE_REWARD_DURATION_MINUTES: dict[int, int] = {}
 if _youtube_reward_durations_str:
     for _pair in _youtube_reward_durations_str.split(","):
         _pair = _pair.strip()
@@ -798,10 +798,14 @@ YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY: int = _get_int_env("YOUTUBE_DAILY_LIMIT_MIN
 # (services/quest/locks.py の _is_youtube_daily_limit_enforced が判定)。
 # 既定値はこの機能を追加した日(2026-09-20)の1週間後。実際にリリースする日程に
 # 合わせて調整すること。パース失敗時は安全側(=即時強制)にフォールバックする。
+# 捕捉するのは ValueError だけ: _date.fromisoformat が不正な日付文字列に対して
+# 送出するのはこれであり、それ以外の例外(実装の誤り)まで握り潰さないため。
+# すぐ上の YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM が Exception を捕捉しているのは
+# 先に書かれたコードの名残で、意図的な差ではない。
 _youtube_daily_limit_enforce_from_str: str = os.getenv("YOUTUBE_DAILY_LIMIT_ENFORCE_FROM", "2026-09-27")
 try:
     YOUTUBE_DAILY_LIMIT_ENFORCE_FROM: _date = _date.fromisoformat(_youtube_daily_limit_enforce_from_str)
-except Exception as e:
+except ValueError as e:
     logger.warning(f"⚠️ YOUTUBE_DAILY_LIMIT_ENFORCE_FROM parse error: {e}. 即時強制にフォールバックします。")
     YOUTUBE_DAILY_LIMIT_ENFORCE_FROM = _date(2000, 1, 1)
 

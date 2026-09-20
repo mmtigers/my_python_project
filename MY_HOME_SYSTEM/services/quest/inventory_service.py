@@ -22,7 +22,7 @@ from services.quest.locks import (
 )
 
 
-def _build_announcement(starts_on) -> Dict[str, Any]:
+def _build_announcement(starts_on) -> dict[str, Any]:
     """施行日の予告バナー(family-quest側)に渡す情報を組み立てる。
 
     クールダウンと日次上限で同じ形(starts_on / days_remaining)を返すため共通化する。
