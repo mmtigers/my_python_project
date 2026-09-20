@@ -49,7 +49,21 @@ def _require_adult(cur, admin_id: str, detail: str = "権限がありません")
     LAN内を信頼境界とする方針(#321/#614)は変えない。ここで担保するのは
     「親(role_adult)/子(role_child)」というアプリ固有の権限モデルの一貫性であり、
     リクエストボディの user_id を信頼している点は従来どおりである。
+
+    Issue #788: `quest_users` が空のときだけは認可を通す。この表は
+    `migrations/0000_baseline_schema.sql` で**空のテーブルとして作られる**だけで、
+    行を作るのは seed/sync 自身であるため、まっさらなDBでは「seedするには親が必要、
+    親を作るにはseedが必要」という循環になり、どの admin_id でも403になっていた
+    (開発環境の初回起動・SDカード故障からの再構築で詰まる)。
+    空のDBには守るべきデータも壊すものも無いので、フェイルクローズの趣旨とも矛盾しない。
     """
+    # 先に「誰も登録されていない初期状態か」を見る(存在判定なので LIMIT 1 で十分)。
+    if cur.execute("SELECT 1 FROM quest_users LIMIT 1").fetchone() is None:
+        logger.warning(
+            "⚠️ quest_users が空のため認可チェックをスキップします"
+            f"(初回ブートストラップ。admin_id={admin_id})"
+        )
+        return
     row = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (admin_id,)).fetchone()
     if not row or row['role'] != ROLE_ADULT:
         raise HTTPException(status_code=403, detail=detail)

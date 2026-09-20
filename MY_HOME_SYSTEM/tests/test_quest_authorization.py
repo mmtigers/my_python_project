@@ -137,6 +137,34 @@ class TestMasterSyncAuthorization:
         m.assert_called_once_with()
         assert result["status"] == "success"
 
+    def test_sync_master_allowed_when_quest_users_is_empty(self):
+        """quest_users が空のときだけは認可を通す (Issue #788)。
+
+        `quest_users` はベースラインマイグレーションで空のテーブルとして作られ、
+        行を作るのは seed/sync 自身。認可を無条件に要求すると、まっさらなDBでは
+        「seedするには親が必要、親を作るにはseedが必要」の循環で詰む。
+        """
+        with get_db_cursor(commit=True) as cur:
+            cur.execute("DELETE FROM quest_users")
+
+        with patch.object(game_system, "sync_master_data", return_value={"status": "success", "message": "ok"}) as m:
+            result = game_system.sync_master_data_as_admin("anyone")
+        m.assert_called_once_with()
+        assert result["status"] == "success"
+
+    def test_sync_master_is_rejected_again_once_users_exist(self):
+        """1人でも登録されたら例外扱いは終わり、通常の403判定に戻ること。"""
+        with get_db_cursor(commit=True) as cur:
+            cur.execute("DELETE FROM quest_users")
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("daughter", "Daughter", "Novice", 1, 0, 0, "role_child"),
+            )
+
+        with pytest.raises(HTTPException) as exc_info:
+            game_system.sync_master_data_as_admin("daughter")
+        assert exc_info.value.status_code == 403
+
     def test_sync_master_rejects_child_before_touching_master_tables(self):
         """403 のときはマスタ行が1行も消えていないこと(破壊が先行しない)。"""
         with get_db_cursor() as cur:
