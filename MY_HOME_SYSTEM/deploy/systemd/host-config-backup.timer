@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily host (/etc) configuration backup (Issue #774)
+
+[Timer]
+# 04:00 の DB バックアップ(deploy/cron/crontab の backup_service.py)と重ならないよう
+# 10分ずらす。生成物は1世代 68KB 程度で、保持は 90日(config.HOST_CONFIG_BACKUP_RETENTION_DAYS)。
+OnCalendar=*-*-* 04:10:00
+# Pi が停止していて発火を逃した場合、次回起動時に取り返す。これが無いと
+# 「電源を落としていた日は黙ってバックアップされない」経路が残る。
+Persistent=true
+# 同時刻に集中しないよう最大5分ゆらす。
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

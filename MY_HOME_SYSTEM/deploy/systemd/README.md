@@ -206,3 +206,48 @@ sudo systemctl stop home_firewall.service      # ExecStop が --remove を呼び
 sudo systemctl disable home_firewall.service   # 再起動後も適用しない場合
 ```
 
+
+## host-config-backup.timer / host-config-backup.service / host-config-backup-failure.service
+
+ホスト側(`/etc`)の運用設定を NAS へバックアップする `tools/backup_host_config.py` を
+**毎日 04:10 に実行する**(Issue #774)。04:00 の DB バックアップ
+(`deploy/cron/crontab` の `backup_service.py`)と重ならないよう10分ずらしている。
+
+`deploy/cron/crontab` ではなく timer を使う理由は、本 CLI が `/etc/smbcredentials` や
+`/etc/nvr/*.env`(いずれも 600・root 所有)の**メタデータ**を読むために root を必要とし、
+`deploy/cron/crontab` が一般ユーザー(`masahiro`)用だからである。
+
+導入手順(実機側):
+
+```bash
+sudo cp deploy/systemd/host-config-backup.service \
+        deploy/systemd/host-config-backup-failure.service \
+        deploy/systemd/host-config-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now host-config-backup.timer
+
+# 確認
+systemctl list-timers host-config-backup.timer
+sudo systemctl start host-config-backup.service   # 手動で1回流して確認する
+journalctl -u host-config-backup.service -n 50
+```
+
+`enable` するのは **timer だけ**でよい(`host-config-backup.service` は timer から起動される)。
+
+### 3ユニットに分けている理由
+
+- **`host-config-backup.service`** — 本体。`Type=oneshot` で root。`Requires=mnt-nas.mount` で
+  NAS 未マウント時に走らないようにしている(未マウントのまま走ると SD カード上の空の
+  `/mnt/nas` へ書き、しかも「成功」してしまう)。
+- **`host-config-backup-failure.service`** — `OnFailure=` から起動される失敗通知。
+  **`User=masahiro` で動かすのが要点。** `tools/notify_task_failure.py` は `core.logger` 経由で
+  `logs/run_task.log` に記録するため、root で走らせるとこのログが root 所有で作られ、
+  以後 `run_task.sh`(masahiro)からの失敗通知が書き込めなくなり、**失敗通知そのものが
+  無音で壊れる**。本体を `run_task.sh` 経由にしていないのも同じ理由。
+- **`host-config-backup.timer`** — スケジュール。`Persistent=true` で、Pi が停止していて
+  発火を逃した場合は次回起動時に取り返す(これが無いと「電源を落としていた日は黙って
+  バックアップされない」経路が残る)。
+
+`.github/scripts/test_systemd_units.py` が、timer に発火条件があること・起動対象の
+`.service` が実在すること・`WantedBy=timers.target` があること・oneshot に `Restart=` を
+書いていないことを CI で検査する。

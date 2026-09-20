@@ -1,0 +1,31 @@
+[Unit]
+Description=Host (/etc) configuration backup (Issue #774)
+# 出力先が NAS (config.HOST_CONFIG_BACKUPS_DIR = <NAS>/host_config_backups) のため、
+# 未マウントのまま走らせるとSDカード上の空の /mnt/nas へ書き、しかも「成功」して
+# しまう。nvr-*.service と同じく Requires= で強く依存させる。
+After=network.target mnt-nas.mount
+Requires=mnt-nas.mount
+# 失敗を無音にしない。ツールは読めないファイルが1つでもあると exit 1 で落ちるが、
+# timer 経由の失敗は journal に残るだけで誰も見ない。既存の失敗通知経路
+# (tools/notify_task_failure.py。Issue #751)へ masahiro 権限で流す。
+OnFailure=host-config-backup-failure.service
+
+[Service]
+Type=oneshot
+# root で動かす。/etc/smbcredentials と /etc/nvr/*.env はいずれも 600・root 所有で、
+# masahiro では読めず「失敗 4 件」として台帳に穴が空く(ツールは読めないファイルが
+# あると exit 1 で落ちる。黙って飛ばすと復元時に「そんなファイルは無かった」と
+# 誤解するため、これは意図した挙動)。User= を書かない = root。
+WorkingDirectory=/home/masahiro/develop/MY_HOME_SYSTEM
+ExecStart=/home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python tools/backup_host_config.py
+
+# run_task.sh は経由しない。あれは失敗時に notify_task_failure.py を同じプロセス権限で
+# 呼び、core.logger が logs/run_task.log を作る。**root が先に作ると root:root 644 になり**、
+# 以後 masahiro の cron タスクが失敗しても追記できず、失敗通知そのものが無音で壊れる
+# (logs/ は 755・masahiro 所有で、現時点で run_task.log は未作成)。
+# 失敗通知は OnFailure= から masahiro 権限の別ユニットで行う。
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

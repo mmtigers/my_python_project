@@ -184,3 +184,92 @@ def test_home_system_service_starts_a_single_process():
         assert "gunicorn" not in lowered, (
             f"ExecStart が gunicorn を使っている: {value!r}。単一プロセス前提を崩す"
         )
+
+
+# --- timer ユニット (Issue #774) ---------------------------------------------
+# 従来この検査は `*.service` だけを見ており、`*.timer` は1つも無かったため対象外だった。
+# timer は「書いたつもりで発火しない」失敗が **完全に無音** になる(サービスが動かない
+# だけで、誰もエラーを出さない)という点で、このリポジトリが繰り返し踏んできた
+# 失敗モードそのものなので、最低限の形だけ固定する。
+
+# [Timer] セクション専用のディレクティブ([Unit]/[Service] に書いても無視される)。
+TIMER_ONLY_KEYS = (
+    "OnCalendar", "OnBootSec", "OnUnitActiveSec", "Persistent",
+    "RandomizedDelaySec", "AccuracySec", "Unit",
+)
+
+
+def _timer_files() -> list[Path]:
+    return sorted(SYSTEMD_DIR.glob("*.timer"))
+
+
+def test_every_timer_has_a_schedule_and_a_target_service():
+    """timer に発火条件があり、対応する .service が実在すること。
+
+    `Unit=` を省いた場合、systemd は**同名の .service** を起動する。その .service が
+    無ければ timer は発火しても何も起きず、しかもエラーにならない。
+    """
+    for timer in _timer_files():
+        sections = _sections(timer)
+        timer_keys = sections.get("Timer", [])
+        assert timer_keys, f"{timer.name}: [Timer] セクションが無い"
+
+        schedule = {"OnCalendar", "OnBootSec", "OnUnitActiveSec", "OnActiveSec", "OnStartupSec"}
+        assert schedule & set(timer_keys), (
+            f"{timer.name}: 発火条件(OnCalendar 等)が無い。timer は登録できるが永久に発火しない"
+        )
+
+        entries = _entries(timer)
+        explicit = [v for _l, k, v in entries.get("Timer", []) if k == "Unit"]
+        target = explicit[0] if explicit else f"{timer.stem}.service"
+        assert (SYSTEMD_DIR / target).exists(), (
+            f"{timer.name}: 起動対象 {target} がこのディレクトリに無い"
+        )
+
+
+def test_timer_is_installed_into_timers_target():
+    """`WantedBy=timers.target` が無いと `systemctl enable` しても常駐しない。"""
+    for timer in _timer_files():
+        install = _sections(timer).get("Install", [])
+        assert "WantedBy" in install, f"{timer.name}: [Install] WantedBy= が無い"
+        entries = _entries(timer)
+        wanted = [v for _l, k, v in entries.get("Install", []) if k == "WantedBy"]
+        assert any("timers.target" in v for v in wanted), (
+            f"{timer.name}: WantedBy が timers.target ではない: {wanted}"
+        )
+
+
+def test_timer_only_keys_are_not_in_other_sections():
+    """OnCalendar 等を [Unit] や [Service] に書いていないこと(無言で無視される)。"""
+    misplaced = []
+    for timer in _timer_files():
+        for section, items in _entries(timer).items():
+            if section == "Timer":
+                continue
+            for lineno, key, _value in items:
+                if key in TIMER_ONLY_KEYS:
+                    misplaced.append(f"{timer.name}:{lineno} [{section}] {key}")
+    assert not misplaced, "[Timer] 専用キーが別セクションにある: " + ", ".join(misplaced)
+
+
+def test_oneshot_services_started_by_a_timer_do_not_declare_restart():
+    """timer が起動する oneshot に Restart= を書かないこと。
+
+    oneshot + Restart=always は起動の度に再実行を繰り返す。timer 側で間隔を
+    決めているので、サービス側の再起動指定と二重になる。
+    """
+    targets = set()
+    for timer in _timer_files():
+        entries = _entries(timer)
+        explicit = [v for _l, k, v in entries.get("Timer", []) if k == "Unit"]
+        targets.add(explicit[0] if explicit else f"{timer.stem}.service")
+
+    for name in sorted(targets):
+        unit = SYSTEMD_DIR / name
+        if not unit.exists():
+            continue
+        service = _entries(unit).get("Service", [])
+        types = [v for _l, k, v in service if k == "Type"]
+        if types and types[0] == "oneshot":
+            restarts = [v for _l, k, v in service if k == "Restart"]
+            assert not restarts, f"{name}: oneshot なのに Restart={restarts} がある"
