@@ -131,10 +131,21 @@
 * 根拠: (行番号: 19〜21)
 * **エラーハンドリング**: なし
 
+### `GameSystem.sync_master_data_as_admin`（Issue #739 / AUDIT-009 で追加）
+
+* **役割**: HTTP経由のマスタ同期（`POST /api/quest/sync_master` / `POST /api/quest/seed`）の入口。`admin_id`が親(`role_adult`)であることを`services/quest/locks.py`の`_require_adult`で検証したうえで、引数なしの`sync_master_data()`へ委譲する。この2エンドポイントは`DELETE FROM quest_master WHERE quest_id NOT IN (...)`を含む破壊的な管理操作でありながら認可チェックを持たず、`role_adult`を要求する`POST /api/quest/admin/reset_user`（#547）との間で認可モデルが不整合だった。手動CLI`sync_strict.py`はサーバーとは別プロセスのローカル実行でHTTPを経由せず`sync_master_data(strict=True)`を直接呼ぶため、この認可の対象外のまま従来どおり動作する（起動時・post-mergeの`--if-stale`を含む）。
+* 根拠: `def sync_master_data_as_admin(self, admin_id: str) -> Dict[str, str]:` (行番号: 103〜118)
+
+
+* **引数/リクエスト**: `admin_id` (str) — ルーターが`SyncMasterAction`として受け取った値
+* **戻り値/レスポンス**: `Dict[str, str]`（`sync_master_data()`の戻り値をそのまま返す）
+* **副作用**: 認可通過後は`sync_master_data()`と同じ（`quest_users`/`quest_master`/`reward_master`のUPSERT・DELETE）
+* **エラーハンドリング**: `admin_id`が`quest_users`に存在しない、または`role`が`role_adult`でない場合、`_require_adult`が`HTTPException(status_code=403, detail="マスタ同期の権限がありません")`を送出する（同期は一切実行されない）。
+
 ### `GameSystem.sync_master_data`
 
 * **役割**: `quest_data`モジュール(`load_master_module()`が下位互換シム経由で取得し`importlib.reload`した現在値)の`USERS`/`QUESTS`/`REWARDS`をそれぞれ`MasterUser`/`MasterQuest`/`MasterReward`でバリデーションし、DBへUPSERT/DELETEで反映する。ユーザーは`ON CONFLICT DO UPDATE`で`name`/`job_class`を更新し`role`は`COALESCE(excluded.role, quest_users.role)`で新しい値が`None`なら既存値を保持する。クエストは`active_q_ids`に含まれない行を`DELETE`してから全件を`ON CONFLICT DO UPDATE`でUPSERTする。報酬は、マスタから削除された`reward_id`のうち`user_inventory`に参照が残っているものを削除対象から除外したうえで、残りを`DELETE`してから全件をUPSERTする。UPSERT文と値タプルの組み立ては`services/quest/master_sync_sql.py`（[quest_master_sync_sql.md](./quest_master_sync_sql.md)）に一元化されている（Issue #664）。
-* 根拠: `def sync_master_data(self, strict: bool = False, dry_run: bool = False) -> Dict[str, str]:` (行番号: 103〜269)
+* 根拠: `def sync_master_data(self, strict: bool = False, dry_run: bool = False) -> Dict[str, str]:` (行番号: 120〜286)
 
 **（Issue #664 改善案2 で変更）** 手動実行CLI`sync_strict.py`にあったもう1つの「マスタ→DB同期」の実装が本メソッドへ統合され、**マスタ同期の実装はリポジトリ内でここ1箇所だけになった**。統合前は両者に`DELETE ... NOT IN ({placeholders})`とUPSERTのループが別々に書かれており、列リストが食い違う事故が#100（`reset_period`欠落）・#164（時間帯/期間/出現率/前提クエスト欠落）・#165（`description`欠落）と3度起きていた。CLI固有の差分は`strict`/`dry_run`の2引数で表現され、`sync_strict.py`には引数解析と破壊的操作の安全ガードだけが残る。
 * 根拠: docstring (行番号: 104〜126 / 抜粋: "Issue #664: 以前はこれと同じ「マスタ→DB同期」が手動CLIの `sync_strict.py` にも")
@@ -161,7 +172,7 @@
 ### `GameSystem._report_dry_run`
 
 * **役割**: **（Issue #664 で追加）** `dry_run=True`のときにDBを変更せず、削除・更新される件数だけをログに出す。`get_db_cursor(commit=False)`を開き、`_count_rows_to_delete`のSELECTのみを実行する。クエスト側の削除見込み件数は`strict`の方針に従い、`strict=False`かつマスタが空の場合は(削除自体をスキップするため)0件として報告する。
-* 根拠: `def _report_dry_run(` (行番号: 271〜297)
+* 根拠: `def _report_dry_run(` (行番号: 288〜314)
 * **引数/リクエスト**: `valid_quests: List[Any]`, `valid_rewards: List[Any]`, `strict: bool`
 * 根拠: (行番号: 271〜273)
 * **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "dry-run", "message": "No changes were made."}`）
@@ -174,7 +185,7 @@
 ### `GameSystem.get_all_view_data`
 
 * **役割**: `family-quest`フロントエンドのメイン画面向けに、ユーザー一覧・クエスト一覧・報酬一覧・完了済みクエスト・最近のログ・承認待ち一覧を1つの辞書にまとめて返す。`quest_users`の取得結果は、SQLiteのデフォルト順序(主キーのアルファベット順)ではなく`quest_data.USERS`の宣言順に並べ替える(`canonical_order`)。各クエストには`quest_service._compute_boost_from_last_completed`によるボーナス(`bonus_gold`/`bonus_exp`)を付与し、この際に必要な「対象ユーザー×クエストの直近の非rejected完了日時」を、クエストごとに個別SELECTするのではなく`GROUP BY user_id, quest_id`の1クエリでまとめて取得してN+1クエリを避ける(`last_completed_map`)。`target_user`が実在ユーザーでない(`'all'`/`'siblings'`等)場合は、閲覧中のユーザー(`viewer_user_id`)または兄妹の代表ユーザーをボーナス算出の代表として使う。過去1ヶ月の`quest_history`(`status='approved'`)から、`quest_service.is_within_reset_period`で現在の周期内と判定されたものだけを`completedQuests`として集約する(`infinite`型は全件、それ以外はユーザーごとに最新1件のみ評価)。
-* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 299〜457)
+* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 316〜474)
 * 根拠: `if _quest_service_shim.quest_data:\n                canonical_order = {u['user_id']: i for i, u in enumerate(_quest_service_shim.quest_data.USERS)}\n                users.sort(key=lambda u: canonical_order.get(u['user_id'], len(canonical_order)))` (行番号: 313〜315)
 * 根拠: `last_completed_map: Dict[tuple, str] = {\n                (row['user_id'], row['quest_id']): row['last_completed_at']\n                for row in cur.execute("""\n                    SELECT user_id, quest_id, MAX(completed_at) AS last_completed_at\n                    FROM quest_history\n                    WHERE status != 'rejected'\n                    GROUP BY user_id, quest_id\n                """)\n            }` (行番号: 222〜230)
 * 根拠: `if q['target_user'] == 'all' or not q['target_user']:\n                    boost_user_id = viewer_user_id\n                elif q['target_user'] == 'siblings' and sibling_child_ids:\n                    boost_user_id = sibling_child_ids[0]\n                else:\n                    boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 236〜241)
@@ -191,7 +202,7 @@
 ### `GameSystem._fetch_recent_logs`
 
 * **役割**: `quest_history`(`status='approved' AND quest_id != 0`、`id`降順、最大20件)と`reward_history`(`id`降順、最大20件)を取得しマージ、`ts`降順で先頭20件に切り詰めたうえで、`quest_users`から取得したユーザー名を付与し表示テキストと日付文字列を整形して返す。ユーザーが見つからない場合は`'誰か'`のプレースホルダを使う。
-* 根拠: `def _fetch_recent_logs(self, cur) -> List[dict]:` (行番号: 459〜477)
+* 根拠: `def _fetch_recent_logs(self, cur) -> List[dict]:` (行番号: 476〜494)
 * 根拠: `q_logs = cur.execute("""\n            SELECT id, user_id, quest_title as title, 'quest' as type, completed_at as ts\n            FROM quest_history WHERE status='approved' AND quest_id != 0 ORDER BY id DESC LIMIT 20\n        """).fetchall()` (行番号: 321〜324)
 * **引数/リクエスト**: `cur`（呼び出し元のトランザクション内で使うDBカーソル）
 * 根拠: (行番号: 320)

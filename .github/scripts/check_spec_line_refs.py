@@ -487,11 +487,33 @@ def main(argv: Optional[List[str]] = None) -> int:
     for spec, reason in skipped:
         print("⚠️ 検証をスキップ: %s (%s)" % (spec.relative_to(REPO_ROOT), reason))
 
+    # Issue #748 (AUDIT-019): 以前の出力は「✅ N件すべて一致」としか言わず、
+    # それを見た人は「仕様書の行番号引用はすべて正しい」と読んでしまっていた。
+    # 実際にゲートしているのは `def`/`class` で始まる抜粋の引用だけ(全引用の2割強)で、
+    # 残り(式・文の抜粋、`.sh`、TypeScript)は --report で件数を見るだけの非ゲートであり、
+    # その半数以上が実ソースと一致していない。保証範囲を、結果と同じ場所に必ず出す
+    # (制限自体は docs/specifications/README.md にも記載しているが、緑の結果を見る場所とは別だった)。
+    # ここで数えるのは出力用の内訳だけで、ゲートの判定(findings / 終了コード)には一切影響しない。
+    _, ungated_bad, ungated_total = report_non_definition_citations()
+    total_citations = checked + ungated_total
+    gated_pct = (checked * 100 // total_citations) if total_citations else 0
+    scope_lines = [
+        "   ゲート対象は def/class で始まる抜粋の引用だけで、全 %d件中 %d件(%d%%)。"
+        % (total_citations, checked, gated_pct),
+        "   残り %d件(式・文の抜粋・.sh・TypeScript)は非ゲートで、うち %d件は引用行±1に抜粋が見つかりません"
+        % (ungated_total, ungated_bad),
+        "   (--report で内訳。抜粋の表記ゆれによる偽陽性を含む)。保証範囲: docs/specifications/README.md",
+    ]
+
     if not findings:
-        print("✅ 行番号引用チェック: %d件すべて実ソースの定義位置と一致しています。" % checked)
+        print("✅ 行番号引用チェック: ゲート対象 %d件はすべて実ソースの定義位置と一致しています。" % checked)
+        for line in scope_lines:
+            print(line)
         return 0
 
-    print("❌ 行番号引用チェック: %d件中 %d件が実ソースと一致しません。" % (checked, len(findings)))
+    print("❌ 行番号引用チェック: ゲート対象 %d件中 %d件が実ソースと一致しません。" % (checked, len(findings)))
+    for line in scope_lines:
+        print(line)
     print()
     for finding in findings:
         print("  - " + finding.describe())

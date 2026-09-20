@@ -126,7 +126,7 @@
 ### [要素名4：Phase 1.5: Python依存関係の鮮度チェック]
 
 * **役割**: `REQ_FILES`配列（`requirements.txt` と `$DEVELOP_ROOT/DDD/requirements.txt`）のうち実在するものを連結したSHA256ハッシュを算出し、`.venv/.requirements-sha256`に記録済みのハッシュと比較する。一致しなければ依存定義が変更されたと判断し、各ファイルについて`$PYTHON_EXEC -m pip install -r "$req"`を順に実行して`.venv`を追従させ、**すべて成功した場合のみ**新しいハッシュを記録する。family-questの`deploy.sh --if-stale`と同じ冪等チェックの思想をバックエンドの依存関係にも適用したもの（Issue #483: `requirements.txt`変更後に`.venv`が追従しないと`ImportError`で起動失敗しうる問題への対応）。**（Issue #736 / AUDIT-006 で対象拡張）** `deploy/cron/crontab`はDDDのスクリプトも`MY_HOME_SYSTEM/.venv`のpythonで実行する（`run_task.sh`が`"${PROJECT_ROOT}/.venv/bin/python3"`を使い、`newface_monitor.py`の行は`.../MY_HOME_SYSTEM/.venv/bin/python`を明示している）のに、以前はMY_HOME_SYSTEM側の`requirements.txt`しか見ていなかった。そのためDDD固有の実行時依存（`yt-dlp` / `curl_cffi`）は「過去に手で`pip install`した」痕跡としてしか`.venv`に存在せず、`.venv`を作り直す・新しいホストへ移ると無音で失敗する状態だった。単一venvを共有しているという実態をこの配列で明示している。
-* 根拠: Phase 1.5ブロック (行番号: 138〜183 / 抜粋: "# --- Phase 1.5: Python依存関係の鮮度チェック ---")、[対象ファイル定義] (行番号: 156 / 抜粋: "REQ_FILES=(\"requirements.txt\" \"$DEVELOP_ROOT/DDD/requirements.txt\")")
+* 根拠: Phase 1.5ブロック (行番号: 138〜185 / 抜粋: "# --- Phase 1.5: Python依存関係の鮮度チェック ---")、[対象ファイル定義] (行番号: 156 / 抜粋: "REQ_FILES=(\"requirements.txt\" \"$DEVELOP_ROOT/DDD/requirements.txt\")")
 
 
 * **引数/リクエスト**: なし
@@ -138,11 +138,11 @@
 
 
 * **副作用**: 依存定義変更時の`pip install`実行（`.venv`へのパッケージインストール。対象ファイルごとに1回ずつ）。`logs/pip_install.log`の切り詰めと、各実行の標準出力・標準エラー出力の同ファイルへの追記（ファイルごとに`=== pip install -r <path> ===`の見出しを書く）。全ファイル成功時のみ`.venv/.requirements-sha256`への書き込み。
-* 根拠: 実行・リダイレクト処理 (行番号: 167, 170〜171 / 抜粋: '"$PYTHON_EXEC" -m pip install -r "$req" >> logs/pip_install.log 2>&1')
+* 根拠: 実行・リダイレクト処理 (行番号: 176, 180〜181 / 抜粋: '"$PYTHON_EXEC" -m pip install -r "$req" >> logs/pip_install.log 2>&1')
 
 
 * **エラーハンドリング**: `pip install`が失敗しても警告を表示するのみでスクリプトは続行する（既存の`.venv`のまま起動を続ける方がサーバー未起動よりマシという設計判断で、Phase 2のfamily-quest鮮度チェックと同じ方針）。1ファイルでも失敗すれば`install_ok=false`となりハッシュファイルを更新しないため、次回起動時にも再度`pip install`が試みられる（片方だけ成功した状態を「追従済み」として記録すると、欠けた依存が永続してしまうため）。
-* 根拠: if-else分岐 (行番号: 172〜181 / 抜粋: 'echo "⚠️ pip install failed. Starting with existing .venv. See logs/pip_install.log" >&2')
+* 根拠: if-else分岐 (行番号: 185〜192 / 抜粋: 'echo "⚠️ pip install failed. Starting with existing .venv. See logs/pip_install.log" >&2')
 
 
 
@@ -352,7 +352,7 @@ graph TD
 * **[修正済み] プロセスの起動監視漏れ (Issue #646)**: 以前は`unified_server.py`および`dashboard.py`を`nohup`でバックグラウンド起動するだけで、即座にクラッシュしていないかの死活監視・エラー検知のロジックが存在しなかった。現在、実機経路では`deploy/systemd/home_system.service`(`Type=simple`+`Restart=on-failure`)が`unified_server.py`を、`home_dashboard.service`が`dashboard.py`をそれぞれフォアグラウンドで管理し、本スクリプトは`--prepare`で前処理のみ行う。引数なしの手動経路では従来どおり死活監視は無い。
 * **[修正済み] pkill対象名の実体不一致**: 以前は`CLEANUP_TARGETS`に相当する停止対象が`scheduler.py`という実在しないプロセス名で個別に`pkill`されており、実体`scheduler_boot.py`にマッチしないため再起動のたびに旧schedulerプロセスが生き残り、`unified_server.py`起動時に新しいschedulerプロセスと重複起動する不具合があった。存在しない`bluetooth_monitor.py`への`pkill`も無害だが無意味であった。現在は実ファイル名を用いた`CLEANUP_TARGETS`配列に置き換えられ、この2点は解消されている。
 * **[修正済み] NASマウント確認が待たずに次フェーズへ進んでいた**: 以前のPhase 1は`mountpoint -q`を1回チェックするのみで、未マウントでも警告を表示するだけで即座にPhase 3(Webhook修正)・Phase 4(サーバー起動)へ進んでいた。起動直後はautofsのアイドルアンマウント後の自動マウント完了まで数秒かかることがあり、これは`config.py`の`verify_and_initialize_storage`（Exponential Backoffで自己修復）が扱う遅延と同種の事象であるにもかかわらず、本スクリプト側にはリトライが一切なかった。現在はパスアクセスによる自動マウントのトリガーと、最大5回・Exponential Backoff（1s/2s/4s/8s/16s）のリトライへ変更されている（74〜99行目）。ただしリトライを尽くしても未マウントの場合は依然として警告のみで後続フェーズへ進む点（アプリ側のバックオフ・フォールバックに委ねる設計）は変わらない。
-* **[修正済み] requirements.txt変更時に.venvが追従しない問題(Issue #483)**: 以前は本スクリプトにPython依存関係を更新する経路が一切なく、`requirements.txt`を変更するPRをマージして実機で`git pull`しても`.venv`は古いままだった。新規パッケージをimportするコードが含まれていれば`unified_server.py`が`ImportError`で起動失敗し、2026-09-01のfamily-quest dist不整合障害と同型の穴がバックエンド側に残っていた。現在はPhase 1.5で`requirements.txt`と`DDD/requirements.txt`を連結したSHA256ハッシュを`.venv/.requirements-sha256`と比較し、不一致なら各ファイルについて`pip install`を実行してハッシュを更新するようになっている（138〜183行目）。**（Issue #736 / AUDIT-006）** DDD側を対象に含めたのは、cronがDDDのスクリプトも`MY_HOME_SYSTEM/.venv`のpythonで実行しているのに`yt-dlp`/`curl_cffi`がどのインストール経路にも含まれておらず、`.venv`を作り直すとDDDのバッチが無音で失敗する状態だったため。**副作用としてPhase 1.5の所要時間が延びる**（`yt-dlp`は更新頻度が高い）ので、`home_system.service`の`TimeoutStartSec`（Issue #731で900秒を明示）と併せて見ること。`requirements.txt`変更後の初回起動はpipインストール分だけ遅くなる点、およびネットワーク断時は`pip install`が失敗し既存の`.venv`のまま起動を続行する点に留意。
+* **[修正済み] requirements.txt変更時に.venvが追従しない問題(Issue #483)**: 以前は本スクリプトにPython依存関係を更新する経路が一切なく、`requirements.txt`を変更するPRをマージして実機で`git pull`しても`.venv`は古いままだった。新規パッケージをimportするコードが含まれていれば`unified_server.py`が`ImportError`で起動失敗し、2026-09-01のfamily-quest dist不整合障害と同型の穴がバックエンド側に残っていた。現在はPhase 1.5で`requirements.txt`と`DDD/requirements.txt`を連結したSHA256ハッシュを`.venv/.requirements-sha256`と比較し、不一致なら各ファイルについて`pip install`を実行してハッシュを更新するようになっている（138〜193行目）。**（Issue #736 / AUDIT-006）** DDD側を対象に含めたのは、cronがDDDのスクリプトも`MY_HOME_SYSTEM/.venv`のpythonで実行しているのに`yt-dlp`/`curl_cffi`がどのインストール経路にも含まれておらず、`.venv`を作り直すとDDDのバッチが無音で失敗する状態だったため。**副作用としてPhase 1.5の所要時間が延びる**（`yt-dlp`は更新頻度が高い）ので、`home_system.service`の`TimeoutStartSec`（Issue #731で900秒を明示）と併せて見ること。`requirements.txt`変更後の初回起動はpipインストール分だけ遅くなる点、およびネットワーク断時は`pip install`が失敗し既存の`.venv`のまま起動を続行する点に留意。
 
 * **（2026-09-06 品質監査で修正）** `CLEANUP_TARGETS` の監視スクリプト用パターンを `"python.*monitors/[a-z_]*\.py"` から `scheduler_boot.py` の `TASKS` が起動する6本(`switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor`)に限定した。以前のパターンは systemd の `network_logger.service` や cron 起動の `health_watch.py`/`daily_timelapse_job.py`(ffmpeg を伴い長時間走る)/`log_analyzer.py` まで巻き添えで SIGTERM していた。`TASKS` を変更したらここも更新すること(`tests/test_start_all_sh.py` が両者の整合を検証する)。
 * 根拠: (行番号: 38〜45 / 抜粋: "\"python.*monitors/(switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor)\\.py\"")

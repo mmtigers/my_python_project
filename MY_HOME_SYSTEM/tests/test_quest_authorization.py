@@ -8,6 +8,7 @@ quest_users.role が 'role_adult' でない場合は 403 を返す実装にな�
 import os
 import sys
 from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
@@ -17,7 +18,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import config
 from core.database import get_db_cursor
 import init_unified_db
-from services.quest_service import ApprovalService, QuestService
+from services.quest_service import ApprovalService, QuestService, game_system
 
 
 class TestApprovalAuthorization:
@@ -75,3 +76,75 @@ class TestApprovalAuthorization:
         with get_db_cursor() as cur:
             hist = cur.execute("SELECT status FROM quest_history WHERE id = ?", (self.history_id,)).fetchone()
         assert hist["status"] == "approved"
+
+
+class TestMasterSyncAuthorization:
+    """Issue #739 (AUDIT-009): マスタ同期(sync_master / seed)の認可。
+
+    `POST /api/quest/sync_master` と `POST /api/quest/seed` は
+    `DELETE FROM quest_master WHERE quest_id NOT IN (...)` を伴う破壊的な管理操作
+    なのに認可チェックを持たず、role_adult を要求する `admin/reset_user`(#547)と
+    非対称だった。このテストファイルに sync_master が入っていなかったこと自体が
+    漏れの原因なので、ここへ追加する。
+
+    同期の中身(quest_data の読み込み)は tests/test_sync_strict.py の担当で、
+    ここでは「誰が呼べるか」だけを固定する。DBの用意は上のクラスと同じ
+    (このファイル内の既存パターンに合わせた setup_method 方式)。
+    """
+
+    def setup_method(self):
+        self.test_db_file = "test_quest_sync_auth_home_system.db"
+        self.original_db_path = config.SQLITE_DB_PATH
+        config.SQLITE_DB_PATH = self.test_db_file
+        init_unified_db.init_db()
+
+        with get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("dad", "Dad", "Warrior", 1, 0, 0, "role_adult"),
+            )
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("daughter", "Daughter", "Novice", 1, 0, 0, "role_child"),
+            )
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES (?, ?, ?, ?, ?)",
+                (401, "お手伝い", "daily", 10, 5),
+            )
+
+    def teardown_method(self):
+        config.SQLITE_DB_PATH = self.original_db_path
+        if os.path.exists(self.test_db_file):
+            try:
+                os.remove(self.test_db_file)
+            except PermissionError:
+                pass
+
+    def test_sync_master_by_child_is_rejected(self):
+        with pytest.raises(HTTPException) as exc_info:
+            game_system.sync_master_data_as_admin("daughter")
+        assert exc_info.value.status_code == 403
+
+    def test_sync_master_by_unknown_user_is_rejected(self):
+        with pytest.raises(HTTPException) as exc_info:
+            game_system.sync_master_data_as_admin("no_such_user")
+        assert exc_info.value.status_code == 403
+
+    def test_sync_master_by_parent_is_allowed(self):
+        """親なら認可を通過し、同期本体(sync_master_data)が呼ばれること。"""
+        with patch.object(game_system, "sync_master_data", return_value={"status": "success", "message": "ok"}) as m:
+            result = game_system.sync_master_data_as_admin("dad")
+        m.assert_called_once_with()
+        assert result["status"] == "success"
+
+    def test_sync_master_rejects_child_before_touching_master_tables(self):
+        """403 のときはマスタ行が1行も消えていないこと(破壊が先行しない)。"""
+        with get_db_cursor() as cur:
+            before = cur.execute("SELECT COUNT(*) AS c FROM quest_master").fetchone()["c"]
+
+        with pytest.raises(HTTPException):
+            game_system.sync_master_data_as_admin("daughter")
+
+        with get_db_cursor() as cur:
+            after = cur.execute("SELECT COUNT(*) AS c FROM quest_master").fetchone()["c"]
+        assert before == after

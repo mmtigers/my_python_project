@@ -37,6 +37,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 | `math` | 標準ライブラリ | `_get_youtube_cooldown_remaining_seconds`が残り秒数を切り上げる(`math.ceil`) | `import math` (行番号: 8) |
 | `contextlib.ExitStack` | 標準ライブラリ | `_acquire_user_balance_locks`が複数ユーザー分のロックをまとめて取得・解放するために使用 | `from contextlib import ExitStack` (行番号: 9) |
 | `typing` (`Optional`, `Tuple`) | 標準ライブラリ | 型ヒント（`_seconds_since_iso_timestamp`の戻り値型、`_get_completion_lock`/`_get_purchase_lock`が受け取るキー型） | `from typing import Optional, Tuple` (行番号: 10) |
+| `fastapi.HTTPException` | サードパーティ | **（Issue #739で追加）** `_require_adult`が認可NG時に403を送出する | `from fastapi import HTTPException` (行番号: 15) |
 | `config` | 内部モジュール | `YOUTUBE_REWARD_IDS`/`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`の参照 | `import config` (行番号: 12) |
 | `core.logger.setup_logging` | 内部モジュール | ロガー初期化 | `from core.logger import setup_logging` (行番号: 13) |
 | `core.utils.RefCountedLockRegistry` | 内部モジュール | 4つのロックレジストリ(`_completion_locks`/`_user_balance_locks`/`_purchase_locks`/`_item_use_locks`)の実体クラス | `from core.utils import RefCountedLockRegistry` (行番号: 14) |
@@ -46,7 +47,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config.YOUTUBE_REWARD_IDS` / `config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`の実際の値 | `config.py`側の定義・実値が本ファイルからは不明 | `if not config.YOUTUBE_REWARD_IDS:` (行番号: 77)、`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM` (行番号: 107) |
-| `setup_logging`の内部実装 | ハンドラ構成・出力先・フォーマットが本ファイルからは不明 | `logger = setup_logging("quest_service")` (行番号: 19) |
+| `setup_logging`の内部実装 | ハンドラ構成・出力先・フォーマットが本ファイルからは不明 | `logger = setup_logging("quest_service")` (行番号: 21) |
 | `RefCountedLockRegistry`の内部実装 | 参照カウントの具体的な増減タイミング・スレッド安全性の詳細は`core/utils.py`側の実装に依存し本ファイルからは確認できない | `_completion_locks = RefCountedLockRegistry()` (行番号: 121) 等4箇所 |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -54,7 +55,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `logger` (モジュールレベル変数)
 
 * **役割**: `"quest_service"`という名前でロガーを初期化する。分割後の`services/quest/`配下の各モジュールが同じロガー名を使い回すことで、ハンドラの二重登録を避けつつログの出所を分割前と同じ名前に保つ。
-* 根拠: `logger = setup_logging("quest_service")` (行番号: 19)、コメント (行番号: 16〜18 / 抜粋: "分割後もログの出所が分かるよう、旧ファイルと同じロガー名を維持する")
+* 根拠: `logger = setup_logging("quest_service")` (行番号: 21)、コメント (行番号: 16〜18 / 抜粋: "分割後もログの出所が分かるよう、旧ファイルと同じロガー名を維持する")
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルの変数代入）
 * 根拠: (行番号: 19)
 
@@ -67,8 +68,26 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `ROLE_ADULT` / `ROLE_CHILD` (モジュールレベル定数)
 
 * **役割**: `quest_users.role`カラムに格納される値のうち、親権限(`role_adult`)と子供権限(`role_child`)を表す文字列定数。
-* 根拠: `ROLE_ADULT = 'role_adult'` / `ROLE_CHILD = 'role_child'` (行番号: 33〜34)、コメント (行番号: 32 / 抜粋: "quest_users.role の値 (親権限判定はこの2値のみを唯一の判定基準とする)")
+* 根拠: `ROLE_ADULT = 'role_adult'` / `ROLE_CHILD = 'role_child'` (行番号: 35〜36)、コメント (行番号: 34 / 抜粋: "quest_users.role の値 (親権限判定はこの2値のみを唯一の判定基準とする)")
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし
+
+### `_require_adult`（Issue #739 / AUDIT-009 で追加）
+
+* **役割**: 渡されたカーソルで`quest_users.role`を引き、`admin_id`が親(`ROLE_ADULT`)でなければ403を送出する共通の認可ヘルパー。従来この判定は`UserService._reset_user_data_locked`にインラインで書かれており共有されていなかったため、「破壊的な管理操作のうち`admin/reset_user`だけが`role_adult`を要求し、`sync_master`/`seed`は無認可」という非対称が生じていた。切り出しにより、`UserService._reset_user_data_locked`と`GameSystem.sync_master_data_as_admin`の双方が同じ判定を使う。LAN内を信頼境界とする方針（#321/#614）自体は変えておらず、ここで担保するのはアプリ固有の親／子の権限モデルの一貫性のみである。
+* 根拠: `def _require_adult(cur, admin_id: str, detail: str = "権限がありません") -> None:` (行番号: 38)
+
+
+* **引数/リクエスト**: `cur`（`get_db_cursor`のカーソル）、`admin_id` (str)、`detail` (str, 既定値 `"権限がありません"`、403のレスポンス文言)
+* 根拠: `def _require_adult(cur, admin_id: str, detail: str = "権限がありません") -> None:` (行番号: 38)
+
+
+* **戻り値/レスポンス**: `None`（通過時は何も返さない）
+
+
+* **副作用**: なし（`quest_users`のSELECTのみ）
+
+
+* **エラーハンドリング**: `admin_id`の行が存在しない、または`role`が`ROLE_ADULT`でない場合に`HTTPException(status_code=403, detail=detail)`を送出する。
 
 ### `SPAM_CHECK_INTERVAL_SECONDS` / `INFINITE_QUEST_COOLDOWN_SECONDS` (モジュールレベル定数)
 
@@ -85,7 +104,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_seconds_since_iso_timestamp`
 
 * **役割**: `core.utils.get_now_iso()`で保存されたISOタイムスタンプ文字列から、現在までの経過秒数(実時間)を返す。`tzinfo`が無い古いデータは保存規約(`core.utils.get_now_iso`)に合わせてJSTとみなし、`tzinfo`を保持したまま`datetime.datetime.now(last_time.tzinfo)`と比較することで、サーバーのOSタイムゾーンに依存せず常に「実時間で何秒経過したか」を正しく判定する。
-* 根拠: `def _seconds_since_iso_timestamp(timestamp_str: Optional[str]) -> Optional[float]:` (行番号: 46〜68)
+* 根拠: `def _seconds_since_iso_timestamp(timestamp_str: Optional[str]) -> Optional[float]:` (行番号: 67〜89)
 * **引数/リクエスト**: `timestamp_str: Optional[str]`
 * 根拠: (行番号: 46)
 * **戻り値/レスポンス**: `Optional[float]`（経過秒数。空文字/`None`/パース失敗時は`None`）
@@ -98,7 +117,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_get_youtube_cooldown_remaining_seconds`
 
 * **役割**: `cur`(呼び出し元のトランザクション内で使うDBカーソル)と`user_id`を受け取り、`user_inventory`から対象`user_id`・`config.YOUTUBE_REWARD_IDS`に含まれる`reward_id`群・`status = 'consumed'`のうち直近の`used_at`を1件取得し、`_seconds_since_iso_timestamp`で経過秒数を算出したうえで`YOUTUBE_REWARD_COOLDOWN_SECONDS`との差分を残り秒数として返す。クールダウン対象IDが未設定、または一度も使用していない場合は`0`を返す。SQLはIN句のプレースホルダ個数のみをf-stringで組み立て、値自体はパラメータ化して渡している(bandit B608の誤検知を`# nosec B608`で抑制)。
-* 根拠: `def _get_youtube_cooldown_remaining_seconds(cur, user_id: str) -> int:` (行番号: 71〜98)、`row = cur.execute(f"""... WHERE user_id = ? AND status = 'consumed' AND reward_id IN ({placeholders})...""", (user_id, *config.YOUTUBE_REWARD_IDS)).fetchone()  # nosec B608` (行番号: 84〜88)
+* 根拠: `def _get_youtube_cooldown_remaining_seconds(cur, user_id: str) -> int:` (行番号: 92〜119)、`row = cur.execute(f"""... WHERE user_id = ? AND status = 'consumed' AND reward_id IN ({placeholders})...""", (user_id, *config.YOUTUBE_REWARD_IDS)).fetchone()  # nosec B608` (行番号: 84〜88)
 * **引数/リクエスト**: `cur`（呼び出し元のトランザクション内で実行されるDBカーソル）, `user_id: str`
 * 根拠: (行番号: 71)
 * **戻り値/レスポンス**: `int`（クールダウン残り秒数、`math.ceil`で切り上げ。対象外・未使用時は`0`）
@@ -111,7 +130,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_is_youtube_cooldown_enforced`
 
 * **役割**: YouTube系ごほうび券のクールダウンを実際に強制する日(`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`、JST基準の`date`)を、現在のJST日付が迎えているかどうかを返す。この関数が`False`を返す間(施行日より前)は、`InventoryService._use_item_locked`が使用を拒否せず、`InventoryService.get_user_inventory`が予告用の`youtube_cooldown_announcement`を返す設計になっている（利用側は`quest_inventory_service.md`参照）。
-* 根拠: `def _is_youtube_cooldown_enforced() -> bool:\n    return datetime.datetime.now(JST).date() >= config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM` (行番号: 101〜107)
+* 根拠: `def _is_youtube_cooldown_enforced() -> bool:\n    return datetime.datetime.now(JST).date() >= config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM` (行番号: 122〜128)
 * **引数/リクエスト**: なし
 * 根拠: (行番号: 101)
 * **戻り値/レスポンス**: `bool`
@@ -124,7 +143,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_completion_locks` (モジュールレベル変数) と `_get_completion_lock`
 
 * **役割**: `_completion_locks`は`RefCountedLockRegistry`のインスタンスで、`Tuple[str, int]`(`user_id`, `quest_id`の組、または兄妹連携クエスト用の共通キー`('__coop__', quest_id)`)をキーとしてプロセス内ロックを提供する。`QuestService.process_complete_quest`が「直近履歴を読む→報酬を書く」処理を直列化し、同時リクエストによる二重加算を防ぐために使う。`_get_completion_lock(key)`は`_completion_locks.acquire(key)`が返すコンテキストマネージャをそのまま返す薄いラッパー。
-* 根拠: `_completion_locks = RefCountedLockRegistry()` (行番号: 121)、`def _get_completion_lock(key: Tuple[str, int]):\n    return _completion_locks.acquire(key)` (行番号: 124〜125)、コメント (行番号: 110〜120)
+* 根拠: `_completion_locks = RefCountedLockRegistry()` (行番号: 121)、`def _get_completion_lock(key: Tuple[str, int]):\n    return _completion_locks.acquire(key)` (行番号: 145〜146)、コメント (行番号: 110〜120)
 * **引数/リクエスト**: `_get_completion_lock`: `key: Tuple[str, int]`
 * 根拠: (行番号: 124)
 * **戻り値/レスポンス**: `_get_completion_lock`: コンテキストマネージャ(`RefCountedLockRegistry.acquire`が返すもの)
@@ -137,7 +156,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_user_balance_locks` (モジュールレベル変数) と `_get_user_balance_lock`
 
 * **役割**: `_user_balance_locks`は`RefCountedLockRegistry`のインスタンスで、`user_id`をキーとしてプロセス内ロックを提供する。`quest_users`(gold/exp/level)をread-modify-writeで更新する全経路(完了・承認・却下・取消・購入)を対象ユーザー単位で直列化し、経路間のlost updateを防ぐ目的で使われる（利用箇所の詳細は`quest_quest_service.md`/`quest_shop_service.md`参照）。`_get_user_balance_lock(user_id)`は`_user_balance_locks.acquire(user_id)`をそのまま返す。
-* 根拠: `_user_balance_locks = RefCountedLockRegistry()` (行番号: 139)、`def _get_user_balance_lock(user_id: str):\n    return _user_balance_locks.acquire(user_id)` (行番号: 142〜143)、コメント (行番号: 128〜138)
+* 根拠: `_user_balance_locks = RefCountedLockRegistry()` (行番号: 139)、`def _get_user_balance_lock(user_id: str):\n    return _user_balance_locks.acquire(user_id)` (行番号: 163〜164)、コメント (行番号: 128〜138)
 * **引数/リクエスト**: `user_id: str`
 * 根拠: (行番号: 142)
 * **戻り値/レスポンス**: コンテキストマネージャ
@@ -150,7 +169,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_acquire_user_balance_locks`
 
 * **役割**: 複数の`user_id`に対する`_get_user_balance_lock`のロックをまとめて取得し、`ExitStack`として返す。兄妹連携クエストの承認・却下・取消は報告者だけでなく連結された相方の`quest_users`もカスケード更新するため、関係する全ユーザーのロックをまとめて取得する必要がある。複数ユーザーを同時にロックする際は常に`user_id`の昇順(`sorted(set(user_ids))`)で取得することで、対向のカスケード処理同士が互いのロックを取り合うデッドロックを防ぐ。
-* 根拠: `def _acquire_user_balance_locks(user_ids):` (行番号: 146〜157)、`for uid in sorted(set(user_ids)):\n        stack.enter_context(_get_user_balance_lock(uid))` (行番号: 155〜156)
+* 根拠: `def _acquire_user_balance_locks(user_ids):` (行番号: 167〜178)、`for uid in sorted(set(user_ids)):\n        stack.enter_context(_get_user_balance_lock(uid))` (行番号: 155〜156)
 * **引数/リクエスト**: `user_ids`（`str`のイテラブル）
 * 根拠: (行番号: 146)
 * **戻り値/レスポンス**: `ExitStack`（`with`文で使うコンテキストマネージャ。ブロック終了時に取得した全ロックを解放する）
@@ -163,7 +182,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_purchase_locks` (モジュールレベル変数) と `_get_purchase_lock`
 
 * **役割**: `_purchase_locks`は`RefCountedLockRegistry`のインスタンスで、`Tuple[str, int]`(`user_id`, `reward_id`の組)をキーとしてプロセス内ロックを提供する。`ShopService.process_purchase_reward`が「直近の購入履歴を読む→履歴を書く」というスパムチェックのTOCTOUを防ぐために使う（残高減算自体はDBレベルのアトミックUPDATEで別途保護される）。`_get_purchase_lock(key)`は`_purchase_locks.acquire(key)`をそのまま返す。
-* 根拠: `_purchase_locks = RefCountedLockRegistry()` (行番号: 173)、`def _get_purchase_lock(key: Tuple[str, int]):\n    return _purchase_locks.acquire(key)` (行番号: 176〜177)、コメント (行番号: 160〜172)
+* 根拠: `_purchase_locks = RefCountedLockRegistry()` (行番号: 173)、`def _get_purchase_lock(key: Tuple[str, int]):\n    return _purchase_locks.acquire(key)` (行番号: 197〜198)、コメント (行番号: 160〜172)
 * **引数/リクエスト**: `key: Tuple[str, int]`
 * 根拠: (行番号: 176)
 * **戻り値/レスポンス**: コンテキストマネージャ
@@ -176,7 +195,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `_item_use_locks` (モジュールレベル変数) と `_get_item_use_lock`
 
 * **役割**: `_item_use_locks`は`RefCountedLockRegistry`のインスタンスで、`user_id`をキーとしてプロセス内ロックを提供する。`InventoryService.use_item`が「YouTube系ごほうび券の直近`used_at`を読む→クールダウン判定→`consumed`へ更新」というTOCTOUを防ぐために使う。他の3レジストリと同じ`RefCountedLockRegistry`パターンで実装されている。
-* 根拠: `_item_use_locks = RefCountedLockRegistry()` (行番号: 190)、`def _get_item_use_lock(user_id: str):\n    return _item_use_locks.acquire(user_id)` (行番号: 193〜194)、コメント (行番号: 180〜189)
+* 根拠: `_item_use_locks = RefCountedLockRegistry()` (行番号: 190)、`def _get_item_use_lock(user_id: str):\n    return _item_use_locks.acquire(user_id)` (行番号: 214〜215)、コメント (行番号: 180〜189)
 * **引数/リクエスト**: `user_id: str`
 * 根拠: (行番号: 193)
 * **戻り値/レスポンス**: コンテキストマネージャ
@@ -249,7 +268,7 @@ graph TD
 
 | 優先度 | ファイル名 | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `core/utils.py`（[utils.md](./utils.md)） | 本ファイルの4つのロックレジストリの実体である`RefCountedLockRegistry`の参照カウント管理・スレッド安全性の詳細を確認するため。 | `from core.utils import RefCountedLockRegistry` (行番号: 14) |
+| 高 | `core/utils.py`（[utils.md](./utils.md)） | 本ファイルの4つのロックレジストリの実体である`RefCountedLockRegistry`の参照カウント管理・スレッド安全性の詳細を確認するため。 | `from core.utils import RefCountedLockRegistry` (行番号: 16) |
 | 高 | `services/quest/quest_service.py`（[quest_quest_service.md](./quest_quest_service.md)） | 本ファイルの定数・ロックの最大の利用元であり、実際のロック取得順序(balance lock→completion lock)を確認するため。 | `_get_completion_lock`/`_get_user_balance_lock`の定義 (行番号: 121〜143) |
 | 中 | `config.py`（[config.md](./config.md)） | `YOUTUBE_REWARD_IDS`/`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`の実際の値・型を確認するため。 | `config.YOUTUBE_REWARD_IDS` (行番号: 77, 80, 88) |
 
@@ -260,7 +279,7 @@ graph TD
 * **プロセス内ロック限定**: 全ロックは`threading.Lock`ベース(`RefCountedLockRegistry`の内部実装)のみを対象としており、複数プロセス/複数ワーカーで稼働する構成では別プロセスからの同時リクエストまでは防げない。
 * 根拠: `RefCountedLockRegistry`のimport元コメント (行番号: 14)、`utils.md`参照
 * **`YOUTUBE_REWARD_COOLDOWN_SECONDS`と`_is_youtube_cooldown_enforced`は独立した2つの判定軸**: 前者はクールダウンの長さ(15分)、後者はクールダウンをいつから実際に強制するか(施行日)を扱う。呼び出し元(`InventoryService`)がこの2つを組み合わせて「施行前は予告のみ・施行後は拒否」という挙動を実現しており、本ファイル単体では両者の関係は暗黙的である。
-* 根拠: `YOUTUBE_REWARD_COOLDOWN_SECONDS = 15 * 60` (行番号: 43)、`def _is_youtube_cooldown_enforced() -> bool:` (行番号: 101〜107)
+* 根拠: `YOUTUBE_REWARD_COOLDOWN_SECONDS = 15 * 60` (行番号: 43)、`def _is_youtube_cooldown_enforced() -> bool:` (行番号: 122〜128)
 * **`_get_youtube_cooldown_remaining_seconds`のSQLはf-string組み立て**: IN句のプレースホルダ個数のみを動的に組み立てており、値そのものはパラメータ化されているため実際のSQLインジェクションリスクは無いが、`# nosec B608`によりbanditの静的解析は無効化されている。将来この関数を改変する際は、プレースホルダ数と`config.YOUTUBE_REWARD_IDS`の要素数が一致する前提を崩さないよう注意が必要。
 * 根拠: `placeholders = ",".join("?" for _ in config.YOUTUBE_REWARD_IDS)` (行番号: 80)、`# nosec B608` (行番号: 88)
 
