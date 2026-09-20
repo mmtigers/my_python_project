@@ -481,78 +481,78 @@
 #### `ViewUser`
 
 * **役割**: `users` 配列の1要素。`quest_users` テーブルの全列（`user_id`/`name`/`job_class`/`level`/`exp`/`gold`/`medal_count`/`avatar`/`updated_at`/`role`）に加え、`get_all_view_data` が `game_logic.GameLogic` で算出して付与する `nextLevelExp`/`maxHp`/`hp` を持つ。
-* 根拠: クラス定義 (行番号: 197 / 抜粋: "class ViewUser(BaseModel):")、算出フィールドのコメント (行番号: 209〜215)
+* 根拠: クラス定義 (行番号: 204 / 抜粋: "class ViewUser(BaseModel):")、算出フィールドのコメント (行番号: 209〜215)
 * **引数/リクエスト (フィールド)**: `user_id` (str), `name`/`job_class`/`avatar`/`updated_at`/`role` (str | None), `level`/`exp`/`gold` (int, 既定値あり), `medal_count` (int | None), `nextLevelExp`/`maxHp`/`hp` (int)
 * 根拠: フィールド定義 (行番号: 199〜216)
 * **戻り値/レスポンス**: 該当なし（`GameDataResponse.users` の要素型として使われる）
-* 根拠: データモデル定義のため (行番号: 197 / 抜粋: "class ViewUser(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 204 / 抜粋: "class ViewUser(BaseModel):")
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 197〜216 / 抜粋: "class ViewUser(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 204〜223 / 抜粋: "class ViewUser(BaseModel):")
 * **エラーハンドリング**: 明示的な例外処理は無いが、`response_model` としての検証で必須フィールド（`user_id`/`nextLevelExp`/`maxHp`/`hp`）が欠ける・型が合わない場合は FastAPI がレスポンス検証エラー（500）を送出する。
 * 根拠: フィールド定義 (行番号: 199〜216)
 
 #### `ViewQuest`
 
 * **役割**: `quests` 配列の1要素。`quest_master` の全列に加え、`QuestService.filter_active_quests` が `day_of_week` から組み立てて同名の TEXT 列を上書きする `days` (`list[int] | None`、#474) と、`get_all_view_data` が閲覧ユーザーの履歴から算出する `bonus_gold`/`bonus_exp` を持つ。
-* 根拠: クラス定義 (行番号: 219 / 抜粋: "class ViewQuest(BaseModel):")、`days` のコメント (行番号: 234〜236)
+* 根拠: クラス定義 (行番号: 226 / 抜粋: "class ViewQuest(BaseModel):")、`days` のコメント (行番号: 234〜236)
 * **引数/リクエスト (フィールド)**: `quest_id` (int), `title` (str), `description`/`quest_type`/`icon_key`/`day_of_week`/`target_user`/`start_date`/`end_date`/`start_time`/`end_time`/`reset_period` (str | None), `exp_gain`/`gold_gain`/`pre_requisite_quest_id` (int | None), `occurrence_chance` (float | None), `days` (list[int] | None), `bonus_gold`/`bonus_exp` (int, 既定値 0)
 * 根拠: フィールド定義 (行番号: 221〜241)
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 219 / 抜粋: "class ViewQuest(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 226 / 抜粋: "class ViewQuest(BaseModel):")
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 219〜241 / 抜粋: "class ViewQuest(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 226〜249 / 抜粋: "class ViewQuest(BaseModel):")
 * **エラーハンドリング**: なし（必須は `quest_id`/`title` のみ）
 * 根拠: フィールド定義 (行番号: 221〜222)
 
 #### `ViewReward`
 
 * **役割**: `rewards` 配列の1要素。`reward_master` の列のうち、`get_all_view_data` が `r.pop('desc', None)` で除去するレガシー列 `desc`（#291）を除いた7フィールドを持つ。
-* 根拠: クラス定義 (行番号: 245 / 抜粋: "class ViewReward(BaseModel):")
+* 根拠: クラス定義 (行番号: 252 / 抜粋: "class ViewReward(BaseModel):")
 * **引数/リクエスト (フィールド)**: `reward_id` (int), `title` (str), `description`/`category`/`icon_key`/`target` (str | None), `cost_gold` (int | None)
 * 根拠: フィールド定義 (行番号: 247〜253)
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 245 / 抜粋: "class ViewReward(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 252 / 抜粋: "class ViewReward(BaseModel):")
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 245〜253 / 抜粋: "class ViewReward(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 252〜260 / 抜粋: "class ViewReward(BaseModel):")
 * **エラーハンドリング**: なし
 * 根拠: フィールド定義 (行番号: 247〜253)
 
 #### `ViewQuestHistory`
 
 * **役割**: `completedQuests` / `pendingQuests` 配列の1要素（`quest_history` テーブルの1行）。`status` はサーバーが `'pending'`/`'approved'`/`'rejected'` の3値しか生成しないが、想定外の値でレスポンスを500にしないよう `Literal` ではなく `str` で受ける（値の列挙はフロントエンドの `gameDataSchema.ts` の `z.enum` が持つ）。
-* 根拠: クラス定義 (行番号: 256 / 抜粋: "class ViewQuestHistory(BaseModel):")、`status` のコメント (行番号: 261〜263)
+* 根拠: クラス定義 (行番号: 263 / 抜粋: "class ViewQuestHistory(BaseModel):")、`status` のコメント (行番号: 261〜263)
 * **引数/リクエスト (フィールド)**: `id` (int), `status` (str), `user_id`/`quest_title`/`completed_at` (str | None), `quest_id`/`exp_earned`/`gold_earned`/`linked_history_id`/`medals_earned` (int | None)
 * 根拠: フィールド定義 (行番号: 258〜270)
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 256 / 抜粋: "class ViewQuestHistory(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 263 / 抜粋: "class ViewQuestHistory(BaseModel):")
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 256〜270 / 抜粋: "class ViewQuestHistory(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 263〜277 / 抜粋: "class ViewQuestHistory(BaseModel):")
 * **エラーハンドリング**: なし
 * 根拠: フィールド定義 (行番号: 258〜270)
 
 #### `ViewAdventureLog`
 
 * **役割**: `logs` 配列の1要素。`GameSystem._fetch_recent_logs` が組み立てる `id`/`text`/`dateStr`/`timestamp` の4フィールドを持つ（`id` は `"<type>_<id>"` 形式の文字列）。
-* 根拠: クラス定義 (行番号: 273 / 抜粋: "class ViewAdventureLog(BaseModel):")
+* 根拠: クラス定義 (行番号: 280 / 抜粋: "class ViewAdventureLog(BaseModel):")
 * **引数/リクエスト (フィールド)**: `id`/`text`/`dateStr`/`timestamp` (いずれも str、すべて必須)
 * 根拠: フィールド定義 (行番号: 275〜278)
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 273 / 抜粋: "class ViewAdventureLog(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 280 / 抜粋: "class ViewAdventureLog(BaseModel):")
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 273〜278 / 抜粋: "class ViewAdventureLog(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 280〜285 / 抜粋: "class ViewAdventureLog(BaseModel):")
 * **エラーハンドリング**: なし
 * 根拠: フィールド定義 (行番号: 275〜278)
 
 #### `GameDataResponse`
 
 * **役割**: `GET /api/quest/data` のレスポンス全体。`users`/`quests`/`rewards`/`completedQuests`/`logs`/`pendingQuests` の6配列を持つ。`logs` はフロントエンドのどのコンポーネントからも参照されていない（#412）が、サーバーは返し続けているため契約としては残している。
-* 根拠: クラス定義 (行番号: 281 / 抜粋: "class GameDataResponse(BaseModel):")、`logs` のコメント (行番号: 286〜287)
+* 根拠: クラス定義 (行番号: 288 / 抜粋: "class GameDataResponse(BaseModel):")、`logs` のコメント (行番号: 286〜287)
 * **引数/リクエスト (フィールド)**: `users` (list[ViewUser]), `quests` (list[ViewQuest]), `rewards` (list[ViewReward]), `completedQuests`/`pendingQuests` (list[ViewQuestHistory]), `logs` (list[ViewAdventureLog])
 * 根拠: フィールド定義 (行番号: 283〜289)
 * **戻り値/レスポンス**: `routers/quest_router.py` の `get_all_data` の `response_model` として使われ、OpenAPI 上の `GET /api/quest/data` のレスポンススキーマになる。
 * 根拠: `routers/quest_router.py` (行番号: 42 / 抜粋: "@router.get(\"/data\", response_model=GameDataResponse)")
 * **副作用**: なし（ただし `response_model` として使われることで、FastAPI がレスポンスを検証・再シリアライズする）
-* 根拠: 処理ロジックを含まないため (行番号: 281〜289 / 抜粋: "class GameDataResponse(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 288〜297 / 抜粋: "class GameDataResponse(BaseModel):")
 * **エラーハンドリング**: なし
 * 根拠: フィールド定義 (行番号: 283〜289)
 
