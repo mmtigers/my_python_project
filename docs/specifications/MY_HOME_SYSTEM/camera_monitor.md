@@ -87,7 +87,7 @@
 ### `is_camera_enabled` / `_read_enabled_flags_from_devices_json`（Issue #652 で追加）
 
 * **役割**: `devices.json` の `enabled` フラグを**監視ループの実行中に読み直す**ためのヘルパー。`services/camera_service.set_camera_enabled` は `devices.json` を書き換えたうえで**サーバープロセス内の** `config.CAMERAS` しか更新せず、`camera_monitor` は `unified_server.py` から別プロセスとして起動され起動時の `config.CAMERAS` を保持し続けるため、以前はUIでカメラを無効化してもサーバー再起動までONVIF購読・スナップショット・通知が継続していた（設定画面の表示と実挙動の食い違い）。`is_camera_enabled(cam_conf)` は `devices.json` の `st_mtime_ns` が前回確認時から変わっている場合のみ再読込し、`stat` 自体も `ENABLED_RECHECK_INTERVAL_SEC`(5秒)に1回へ抑える（キャッシュは `_enabled_cache` と `_enabled_cache_lock` でスレッド間共有）。`devices.json` が存在しない・JSONとして壊れている・該当 `id` が無い場合は、起動時の `cam_conf["enabled"]`（既定 `True`）へフォールバックする。SIGHUP方式ではなくポーリング方式を採ったのは、子プロセスの再起動・シグナルハンドラの追加を伴わず、監視スレッドごとの判定だけで完結するため。
-* 根拠: `def is_camera_enabled(cam_conf: Dict[str, Any]) -> bool:` (行番号: 154〜184 / 抜粋: "\"\"\"該当カメラが現在有効かを devices.json の最新値で返す(#652)。")、`def _read_enabled_flags_from_devices_json() -> Optional[Dict[str, bool]]:` (行番号: 97〜109 / 抜粋: "devices.json を読み {camera_id: enabled} を返す。読めない・壊れている場合は None。")
+* 根拠: `def is_camera_enabled(cam_conf: Dict[str, Any]) -> bool:` (行番号: 159〜189 / 抜粋: "\"\"\"該当カメラが現在有効かを devices.json の最新値で返す(#652)。")、`def _read_enabled_flags_from_devices_json() -> Optional[Dict[str, bool]]:` (行番号: 97〜109 / 抜粋: "devices.json を読み {camera_id: enabled} を返す。読めない・壊れている場合は None。")
 
 
 * **引数/リクエスト**: `is_camera_enabled` は `cam_conf: Dict[str, Any]`（`id` と `enabled` を参照）。`_read_enabled_flags_from_devices_json` は引数なし。
@@ -110,7 +110,7 @@
 ### `_add_pullpoint` / `_discard_pullpoint`（Issue #439 で追加）
 
 * **役割**: `active_pullpoints`リストへの安全な追加・削除を担うヘルパー関数。`_add_pullpoint`は`_pullpoints_lock`保護下で`append`する。`_discard_pullpoint`は同様の保護下で`remove`を試み、既に別スレッドにより削除済みで`ValueError`が送出された場合はそれを無視する。以前の呼び出し元は`if x in active_pullpoints: active_pullpoints.remove(x)`という「存在確認してから削除」パターンを各所に直接書いていたが、この2ステップの間に別スレッドが同じ要素を削除すると`list.remove()`が`ValueError`を送出しうり(`finally`節内で発生すると後始末処理が中断する)、この2関数への集約でその競合を解消した。
-* 根拠: `def _add_pullpoint(pullpoint: Any) -> None:` (行番号: 195〜197 / 抜粋: "with _pullpoints_lock:\n        active_pullpoints.append(pullpoint)")、`def _discard_pullpoint(pullpoint: Any) -> None:` (行番号: 85〜91 / 抜粋: "\"\"\"active_pullpointsから安全に削除する(既に削除済みでも例外を出さない)。\"\"\"\n    with _pullpoints_lock:\n        try:\n            active_pullpoints.remove(pullpoint)\n        except ValueError:\n            pass")
+* 根拠: `def _add_pullpoint(pullpoint: Any) -> None:` (行番号: 200〜202 / 抜粋: "with _pullpoints_lock:\n        active_pullpoints.append(pullpoint)")、`def _discard_pullpoint(pullpoint: Any) -> None:` (行番号: 85〜91 / 抜粋: "\"\"\"active_pullpointsから安全に削除する(既に削除済みでも例外を出さない)。\"\"\"\n    with _pullpoints_lock:\n        try:\n            active_pullpoints.remove(pullpoint)\n        except ValueError:\n            pass")
 
 
 * **引数/リクエスト**: `pullpoint: Any`（いずれも共通）
@@ -134,11 +134,11 @@
 
 * **役割**: SIGINTやSIGTERMなどのプロセス終了シグナルを受信した際に、アクティブなPullPointサブスクリプションを解除して安全に終了する。
 * **（Issue #439 で修正）** `active_pullpoints`の走査は以前`for svc in list(active_pullpoints):`と直接コピーしていたが、`monitor_single_camera`（他スレッド）が同時にリストを変更しうるため、`_pullpoints_lock`保護下でスナップショット(`pullpoints_snapshot`)を取得してからロックを解放し、そのスナップショットを走査するよう変更された。
-* 根拠: `cleanup_handler` (行番号: 209〜225 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")、[ロック保護下のスナップショット取得] (行番号: 99〜100 / 抜粋: "with _pullpoints_lock:\n        pullpoints_snapshot = list(active_pullpoints)")
+* 根拠: `cleanup_handler` (行番号: 214〜230 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")、[ロック保護下のスナップショット取得] (行番号: 99〜100 / 抜粋: "with _pullpoints_lock:\n        pullpoints_snapshot = list(active_pullpoints)")
 
 
 * **引数/リクエスト**: `signum: int` (シグナル番号), `frame: Any` (実行フレーム)
-* 根拠: `cleanup_handler` (行番号: 209 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")
+* 根拠: `cleanup_handler` (行番号: 214 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -157,11 +157,11 @@
 ### `is_host_reachable`
 
 * **役割**: OSのpingコマンドを実行し、指定されたIPアドレスの到達性を確認する。
-* 根拠: `is_host_reachable` (行番号: 230〜246 / 抜粋: "def is_host_reachable(ip:")
+* 根拠: `is_host_reachable` (行番号: 235〜251 / 抜粋: "def is_host_reachable(ip:")
 
 
 * **引数/リクエスト**: `ip: str` (対象のIPアドレス)
-* 根拠: `is_host_reachable` (行番号: 230 / 抜粋: "def is_host_reachable(ip: str)")
+* 根拠: `is_host_reachable` (行番号: 235 / 抜粋: "def is_host_reachable(ip: str)")
 
 
 * **戻り値/レスポンス**: `bool` (到達可能ならTrue)
@@ -186,7 +186,7 @@
 ### `perform_emergency_diagnosis`
 
 * **役割**: 指定されたIPの特定ポート（80, 2020）へのTCP接続テストを行い、ポートの状態（Open/Closed）をログに出力する。
-* 根拠: `perform_emergency_diagnosis` (行番号: 251〜267 / 抜粋: "def perform_emergency_diagnosis")
+* 根拠: `perform_emergency_diagnosis` (行番号: 256〜272 / 抜粋: "def perform_emergency_diagnosis")
 
 
 * **引数/リクエスト**: `ip: str` (対象のIPアドレス)
@@ -209,7 +209,7 @@
 ### `check_camera_time`
 
 * **役割**: カメラのシステム時刻(UTC)を取得し、稼働サーバーの現在時刻(JST想定)との差分が5分(300秒)以上あるかチェックして警告を出す。
-* 根拠: `check_camera_time` (行番号: 269〜300 / 抜粋: "def check_camera_time(devicemgmt")
+* 根拠: `check_camera_time` (行番号: 274〜305 / 抜粋: "def check_camera_time(devicemgmt")
 * **（Issue #382 で修正）** カメラのUTC時刻を `tzinfo=timezone.utc` の aware datetime として組み立て、`dt_class.now(timezone.utc)` と比較する。以前は +9h した naive 値をホストローカル時刻と比較する JST 前提だったため、ホストの TZ が UTC 等の環境では差が常に 9h となり全カメラが永久に「時刻ズレ」で接続不能になっていた。
 * 根拠: `cam_time_utc = dt_class(...)` (行番号: 148〜150)、`now_utc = dt_class.now(timezone.utc)` (行番号: 151)
 
@@ -245,7 +245,7 @@
 * **役割**: NAS上に保存されている最新の動画ファイル(.mp4)を検索し、FFmpegを用いてファイル末尾の数秒手前(既定3秒)のフレームを切り出してJPEG画像のバイト列を返す。
 * **（Issue #703 で修正）スナップショット取得が動体検知の約3割で失敗していた**: 以前は最新ファイルの末尾1秒前(`-sseof -1`)を読んでいた。NVR の録画は fragmented MP4(`moof`/`mdat` の繰り返し)で、CIFS 越しに見えるファイル末尾は常に最後の `mdat` の途中で切れている(ファイルサイズが 256KiB 単位で伸びる)ため、末尾1秒前へのシークが不完全な末尾フラグメントに当たると ffmpeg が `partial file` / `Invalid NAL unit size` で失敗していた(終了コード 69 / 183)。失敗はセグメント開始直後に偏っておらず(初回失敗74件中57件が開始から120秒以上経過後)、「書き込み中だから未完成」ではなく「末尾の数秒が常に未完成」が原因である。2026-09-19 の実機計測(書き込み中のファイルへ連続20回)で、庭カメラは `-sseof -1` が 0/20・`-3` が 20/20、駐車場カメラは `-1` が 4/20・`-3` が 20/20 だった。これを受けて試行計画をモジュール定数 `NVR_SNAPSHOT_ATTEMPTS = ((0, 3), (0, 6), (1, 3))`((新しい順の何番目のファイルか, 末尾から何秒手前か))に切り出し、1回目は最新ファイルの3秒手前、2回目は6秒手前、3回目は書き込みが完了している1つ前のセグメントの3秒手前を読む(1つ前が無い当日最初のファイルでは最新ファイルで代用)。対象ファイルの一覧はリトライのたびに取り直す(試行の間に録画ファイルが切り替わりうるため)。録画ファイルが1つも無い場合の判定(`No NVR video files found` を警告して `None` を返す)も各試行の中で行い、ループ前には一覧を取得しない(#707 のレビュー指摘: 以前はループ前にも取得していて、正常系でも初回に CIFS 越しの glob が2回走っていた)。あわせて、以前は `stderr=subprocess.DEVNULL` で捨てていた ffmpeg の出力を `PIPE` で受け、失敗時の警告に終了コード・対象ファイル・シーク位置・stderr の最終行を載せるようにした(以前のログは `exit status 69` しか分からず、原因の特定に実機での再現が必要だった)。
 * 根拠: [試行計画] `NVR_SNAPSHOT_ATTEMPTS: tuple = ((0, 3), (0, 6), (1, 3))`、[ループ] `for attempt, (file_index, seconds_before_eof) in enumerate(NVR_SNAPSHOT_ATTEMPTS, start=1):`、[シーク] `"-sseof", f"-{seconds_before_eof}",`、[失敗ログ] `f"(rc={e.returncode}, src={os.path.basename(src)}, sseof=-{seconds_before_eof}): "`(回帰テスト: `tests/test_camera_monitor_snapshot_seek.py`)
-* 根拠: `capture_snapshot_from_nvr` (行番号: 316〜418 / 抜粋: "def capture_snapshot_from_nvr(")
+* 根拠: `capture_snapshot_from_nvr` (行番号: 321〜423 / 抜粋: "def capture_snapshot_from_nvr(")
 * **（Issue #405 で修正）** NVR ディレクトリは `config.NVR_RECORD_DIR` を直接参照する（以前の `getattr(config, ..., os.getenv("NVR_RECORD_DIR", ...))` は config が常に定義するため到達不能なフォールバックで、`.env.example` 整合テストの死角だった）。
 * 根拠: `nvr_base_dir = config.NVR_RECORD_DIR` (行番号: 186)
 * **[修正済み] #414 C-L7: スナップショット一時ファイルパスを`tempfile.gettempdir()`経由で解決**: `output_tmp`は以前`f"/tmp/snapshot_{cam_conf['name']}_{uuid.uuid4().hex}.jpg"`と`/tmp`を直書きしていたが、`os.path.join(tempfile.gettempdir(), f"snapshot_{...}.jpg")`に変更した。実行環境のOS標準一時ディレクトリ（Linuxでは通常`/tmp`のまま、`TMPDIR`環境変数があればそちらに追従）に解決される。テスト側(`tests/test_camera_monitor_low_priority.py`)が並列実行時に実`/tmp`をglobして他プロセスの残骸と衝突する偽陽性を避けられるよう、`tempfile.gettempdir`をmonkeypatchして隔離できるようにするための変更。
@@ -280,7 +280,7 @@
 ### `save_image_from_stream`
 
 * **役割**: `capture_snapshot_from_nvr` を呼び出してスナップショットを取得し、指定されたディレクトリ(`ASSETS_DIR`)にファイルとして保存する。
-* 根拠: `save_image_from_stream` (行番号: 421〜447 / 抜粋: "def save_image_from_stream(")
+* 根拠: `save_image_from_stream` (行番号: 426〜452 / 抜粋: "def save_image_from_stream(")
 
 
 * **引数/リクエスト**: `cam_name: str` (カメラ名), `event_type: str = "motion"` (イベント種別)
@@ -303,7 +303,7 @@
 ### `force_close_session`
 
 * **役割**: さまざまなパターンのオブジェクト（ONVIFService, ONVIFCamera, zeep_client等）からHTTPセッションを探し出して強制的にクローズし、ファイル記述子を解放する。
-* 根拠: `force_close_session` (行番号: 449〜472 / 抜粋: "def force_close_session(")
+* 根拠: `force_close_session` (行番号: 454〜477 / 抜粋: "def force_close_session(")
 
 
 * **引数/リクエスト**: `service_obj: Any` (対象オブジェクト)
@@ -326,7 +326,7 @@
 ### `process_camera_event`
 
 * **役割**: ONVIFイベントメッセージをパースし、動体検知イベントであるかを判定。クールダウン判定後、DB保存とスナップショット保存を実行する。
-* 根拠: `process_camera_event` (行番号: 474〜543 / 抜粋: "def process_camera_event(")
+* 根拠: `process_camera_event` (行番号: 479〜548 / 抜粋: "def process_camera_event(")
 
 
 * **引数/リクエスト**: `msg: Any` (ONVIFイベントメッセージ), `cam_conf: Dict[str, Any]` (カメラ設定)
@@ -361,33 +361,36 @@
 | `_suspend_after_fatal_error` | 致命的障害の待機・通知・緊急診断 |
 | `monitor_single_camera` | 外側ループの制御のみ |
 
-* 根拠: `_ReconnectBackoff` (行番号: 546 / 抜粋: "class _ReconnectBackoff:")、`_CameraSession` (行番号: 583 / 抜粋: "class _CameraSession:")、`monitor_single_camera` (行番号: 839 / 抜粋: "def monitor_single_camera(")
+* 根拠: `_ReconnectBackoff` (行番号: 551 / 抜粋: "class _ReconnectBackoff:")、`_CameraSession` (行番号: 588 / 抜粋: "class _CameraSession:")、`monitor_single_camera` (行番号: 843 / 抜粋: "def monitor_single_camera(")
 
 * **役割**: 単一のカメラに対する死活監視、ONVIF接続、イベント購読（PullPoint）ループ、例外時（ネットワーク断等）のExponential Backoffリトライ、セッション更新などを制御するメインループ。ポートは設定ファイル指定の1つのみを使用し、ローテーションは行わない。
 * **（Issue #652 で追加）** 外側ループの先頭で `is_camera_enabled(cam_conf)` を確認し、`devices.json` 上で無効化されていればONVIF接続にも到達性チェックにも進まず `DISABLED_POLL_INTERVAL_SEC`(30秒)ごとに再確認して待機する（無効化・再有効化の遷移時のみINFOログを1回出す）。`_pull_events_until_reconnect` でも `SESSION_LIFETIME` 判定の直後に同じ確認を行い、監視中に無効化された場合は `return` して `finally` の `Unsubscribe`・セッションクローズを通り、外側の待機へ移る。
-* 根拠: `monitor_single_camera` (行番号: 839 / 抜粋: "def monitor_single_camera(")
+* 根拠: `monitor_single_camera` (行番号: 843 / 抜粋: "def monitor_single_camera(")
+
+* **（Issue #766 で修正）** 購読期限が切れる前に自発的に張り直す処理(`FORCE_RECONNECT_INTERVAL_SEC` = 540秒)を、玄関カメラ専用の分岐から**全カメラ共通**へ変更した。`CreatePullPointSubscription()` が返す既定の `TerminationTime` は10分で、先回りの無い庭・駐車場(VIGI)は10分ごとに期限切れ → `PullMessages` が3回連続失敗 → WARNING を出して張り直す、を繰り返していた(1台あたり毎時6回。実機ログの失敗間隔 10分17秒〜10分24秒がこの10分と一致する)。期限切れから再購読までの数秒はイベントを取りこぼすため、1台あたり1日約144回その窓が開いていた。なお `RENEW_DURATION` は定義のみで `Renew` を呼ぶ箇所は無く、購読の延長ではなく張り直しで対応している。
+* 根拠: [変数宣言] (行番号: 102 / 抜粋: "FORCE_RECONNECT_INTERVAL_SEC: int = 540")、[再接続判定] (行番号: 732 / 抜粋: "if current_time - last_subscribe_time > FORCE_RECONNECT_INTERVAL_SEC:")
 
 * **（2026-09-06 品質監査で修正）** 玄関カメラ以外(駐車場・庭)の `PullMessages` 失敗時の扱いを変更した。以前は例外を DEBUG ログに落として `events = None` で継続するだけだったため、カメラ再起動等でサブスクリプションが消えると `SESSION_LIFETIME`(3600秒)が経過するまで最長1時間、動体検知が止まったまま(警告も出ない)だった。`_pull_events_until_reconnect` の冒頭に `consecutive_pull_failures = 0` を置き、`PullMessages` 成功時に 0 へ戻し、失敗が `PULL_FAILURE_RECONNECT_THRESHOLD`(3)回連続したら WARNING を出して `return` し、外側の再接続処理へ移行する(玄関カメラは従来どおり1回目で `return`)。
-* 根拠: `_pull_events_until_reconnect` (行番号: 693 / 抜粋: "def _pull_events_until_reconnect(")
+* 根拠: `_pull_events_until_reconnect` (行番号: 698 / 抜粋: "def _pull_events_until_reconnect(")
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]` (対象カメラ設定)
 * **戻り値/レスポンス**: `None` (無限ループ)
 
 * **副作用**: ONVIF APIコール、例外発生時のプッシュ通知送信(`send_push`)、グローバル変数 `active_pullpoints` への参照追加/削除。
 * **（Issue #439 で修正）** `active_pullpoints`への追加は`_add_pullpoint(pullpoint)`、削除は`_discard_pullpoint(...)`という排他制御されたヘルパー関数経由に統一された。以前は接続成功時に`active_pullpoints.append(pullpoint)`を直接呼び、例外処理時とリソース解放時にはそれぞれ「存在確認してから削除」パターンを直接書いていた。分割後は、追加が `_connect_and_subscribe`、削除が `_suspend_after_fatal_error` と `_CameraSession.release` にある。
-* 根拠: `_connect_and_subscribe` (行番号: 622 / 抜粋: "def _connect_and_subscribe(")、`_suspend_after_fatal_error` (行番号: 786 / 抜粋: "def _suspend_after_fatal_error(")
+* 根拠: `_connect_and_subscribe` (行番号: 627 / 抜粋: "def _connect_and_subscribe(")、`_suspend_after_fatal_error` (行番号: 790 / 抜粋: "def _suspend_after_fatal_error(")
 
 * **エラーハンドリング**: 一時的障害（`RemoteDisconnected`等）と、致命的障害（その他例外）を分けて処理。連続エラー回数に基づくExponential Backoff（最大3600秒）、特定条件（5回・12の倍数回失敗時）での管理者への通知を行う。`_CameraSession.release()` は `ONVIFService` の構築前後どちらで失敗しても呼べるようになっており、構築に失敗した場合は直前に作った生のサブスクリプションを `Unsubscribe` する（カメラ側に購読を残さないため）。
-* 根拠: `_suspend_after_transient_error` (行番号: 771 / 抜粋: "def _suspend_after_transient_error(")、`_suspend_after_fatal_error` (行番号: 786 / 抜粋: "def _suspend_after_fatal_error(")
+* 根拠: `_suspend_after_transient_error` (行番号: 775 / 抜粋: "def _suspend_after_transient_error(")、`_suspend_after_fatal_error` (行番号: 790 / 抜粋: "def _suspend_after_fatal_error(")
 
 ### `main`
 
 * **役割**: 登録された全てのカメラ設定（`config.CAMERAS`）に対して、`ThreadPoolExecutor` を用いて並行で `monitor_single_camera` を実行する。
-* 根拠: `main` (行番号: 902〜912 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 906〜916 / 抜粋: "async def main() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `main` (行番号: 902 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 906 / 抜粋: "async def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -529,7 +532,7 @@ graph TD
 ## 8. 保守上の注意点
 
 * **[修正済み] スレッド間の状態共有リスク（Issue #439）**: 複数スレッド（`ThreadPoolExecutor`）からグローバル変数 `last_motion_detected` や `active_pullpoints` への参照・更新が行われている。以前はスレッドセーフなロック機構が存在せず、タイミングにより競合状態（Race Condition。特に`active_pullpoints`の「存在確認してから削除」パターンでは`list.remove()`が`ValueError`を送出しうり、`finally`節内で発生すると後始末処理自体が中断しうる不具合の恐れがあった）が発生する可能性があった。`_motion_lock`（クールダウン判定の読んでから書くまでを保護）と`_pullpoints_lock`（`active_pullpoints`への追加・削除・走査を保護する`_add_pullpoint`/`_discard_pullpoint`/`cleanup_handler`のスナップショット取得を通じて保護）という2つの`threading.Lock`が導入され、この競合状態は解消された。
-* **ハードコードされた識別子**: `"玄関カメラ"` という特定の名前を用いた条件分岐が記述されており、設定ファイル(`config.py`)上の名前変更に弱く、カメラ増設・名称変更時にこのロジックが意図せず無効化される。
+* **ハードコードされた識別子**: `"玄関カメラ"` という特定の名前を用いた条件分岐が記述されており、設定ファイル(`config.py`)上の名前変更に弱く、カメラ増設・名称変更時にこのロジックが意図せず無効化される。**（Issue #766 で一部解消）** このうち「購読期限切れ前の自発的な再購読」は全カメラ共通になったため名前依存が外れた。残るのは `PullMessages` 失敗時の扱い(玄関は1回目、他は3回連続で再接続)と、生イベントペイロードのdebugログ出力の2箇所。増設したカメラは後者の分岐に入らないため、既定では「3回連続で再接続」側の挙動になる。
 * **強制終了の影響**: シグナルハンドラ `cleanup_handler` にて `os._exit(0)` を呼び出している。これにより実行中の他のスレッドやリソースのクリーンアップ処理が即座に強制中断される。
 * **外部コマンド依存**: `ping` や `ffmpeg` といったOS環境に依存するコマンドを `subprocess.run` で実行している。対象環境へのコマンドインストールパスが通っていない場合は実行時エラーとなる。
 * **[修正済み] ASSETS_DIRの到達不能変数リスク（Issue #497 C-4）**: 以前は`ASSETS_DIR = os.path.join(config.ASSETS_DIR, "snapshots")`が`try`節内の1行目にあり、`os.path.join`自体が失敗した場合、`except`節のログ出力(`ASSETS_DIR`を参照)で`ASSETS_DIR`が未束縛のまま参照される可能性があった(静的解析でも検知)。現在は`_nas_assets_dir = os.path.join(config.ASSETS_DIR, "snapshots")`を`try`節の外で先に計算し、`try`節内では`ASSETS_DIR: str = _nas_assets_dir`という代入のみを行うことで、`except`節では常に束縛済みの`_nas_assets_dir`をログに使うよう修正されている。

@@ -49,6 +49,18 @@ FPS_ANALYZE = getattr(config, 'TIMELAPSE_FPS_ANALYZE', 1)
 WIDTH = getattr(config, 'TIMELAPSE_WIDTH', 320)
 HEIGHT = getattr(config, 'TIMELAPSE_HEIGHT', 180)
 
+# Issue #782: ffmpeg が使うスレッド数の上限。
+# 解析は `-vf fps=1` でも入力の全フレームをデコードするため重く、無制限だと Pi 5 の
+# 4コアをほぼ使い切る(実測: 1プロセスで約245% CPU、load average 4.66)。
+# 玄関カメラだけが H.264(51GB/日、他2台は H.265 各5GB)で突出して重い。
+# その結果 CPU 温度がソフト温度上限(80°C)に達してスロットリングし、
+# server_watchdog が ERROR を出す → health_watch が異常検知 → 自動調査フックが
+# 起動する、という連鎖が1日2回(crontab の 9:15 / 15:15)起きていた。
+# `nice -n 15` と `ionice` は既に付けているが、これは優先度を下げるだけで、
+# 他に走るものが無ければ全コアを使い切るので発熱は止まらない。
+# 実行時間は延びるが、日次のバッチで即時性の要求は無いため上限を設ける。
+FFMPEG_THREADS = getattr(config, 'TIMELAPSE_FFMPEG_THREADS', 2)
+
 # OpenCV解析パラメータ
 BG_HISTORY = getattr(config, 'TIMELAPSE_BG_HISTORY', 120)
 BG_VAR_THRESH = getattr(config, 'TIMELAPSE_BG_VAR_THRESH', 16)
@@ -286,7 +298,10 @@ class MotionDetector:
         
         cmd = [
             'nice', '-n', '15',
-            'ffmpeg', '-v', 'error', '-nostdin', '-i', input_path,
+            'ffmpeg', '-v', 'error', '-nostdin',
+            # Issue #782: デコードのスレッド数を絞って CPU の使い切りを防ぐ
+            '-threads', str(FFMPEG_THREADS),
+            '-i', input_path,
             '-vf', f'fps={FPS_ANALYZE},scale={WIDTH}:{HEIGHT}',
             '-f', 'image2pipe', '-pix_fmt', 'gray', '-vcodec', 'rawvideo', '-'
         ]
@@ -528,7 +543,8 @@ class VideoBuilder:
             # --- 軽量化のためのチューニング設定を追加 ---
             # 解像度を幅854に縮小、フレームレートを15fpsに落として劇的にサイズ削減
             vf += ",scale=854:-2,fps=15"
-            cmd = ['nice', '-n', '15', 'ffmpeg', '-v', 'error', '-nostdin', '-y', '-ss', str(ev.start_sec), '-to', str(ev.end_sec), '-i', input_path, '-vf', vf, '-an', '-c:v', 'libx264', '-preset', 'superfast', '-crf', '32', clip_path]
+            # Issue #782: 再エンコードも解析と同じくスレッド数を絞る(発熱源は同じ)
+            cmd = ['nice', '-n', '15', 'ffmpeg', '-v', 'error', '-nostdin', '-y', '-threads', str(FFMPEG_THREADS), '-ss', str(ev.start_sec), '-to', str(ev.end_sec), '-i', input_path, '-vf', vf, '-an', '-c:v', 'libx264', '-preset', 'superfast', '-crf', '32', clip_path]
         
         if shutil.which('ionice'): cmd = ['ionice', '-c', '2', '-n', '7'] + cmd
         return cmd

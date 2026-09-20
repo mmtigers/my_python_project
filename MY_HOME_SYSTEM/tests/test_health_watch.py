@@ -10,6 +10,7 @@ fire-and-forget起動の内容(引数・標準入力・detach)のみを検証す
 import datetime
 import os
 import stat
+import subprocess
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -738,7 +739,7 @@ class TestCheckRecordingStalled:
         for name in (
             "check_service_active", "check_disk_usage", "check_memory_usage",
             "check_nas_mount", "check_deploy_config_drift", "check_quest_master_drift",
-            "check_api_responsive",
+            "check_api_responsive", "check_orphaned_rows", "check_repo_behind_upstream",
         ):
             monkeypatch.setattr(health_watch, name, lambda: None)
         monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)
@@ -762,3 +763,116 @@ class TestCheckRecordingStalled:
 
         assert keys_seen == ["recording"]
         assert "常時録画が止まっている" in sent[0][0]["text"]
+
+
+class TestCheckRepoBehindUpstream:
+    """チェック12: 実機のチェックアウトが upstream より遅れていないか (Issue #783)。
+
+    実際に git を叩くとネットワーク・リポジトリ状態に依存するため、
+    `_git` ヘルパを差し替えて各サブコマンドの応答を組み立てる。
+    """
+
+    @staticmethod
+    def _fake_git(responses):
+        """サブコマンド名 -> CompletedProcess を返す _git の代用を作る。"""
+        def _run(*args, timeout=None):
+            key = args[0]
+            result = responses[key]
+            if isinstance(result, Exception):
+                raise result
+            return result
+        return _run
+
+    @staticmethod
+    def _ok(stdout=""):
+        return subprocess.CompletedProcess(args=["git"], returncode=0, stdout=stdout, stderr="")
+
+    @staticmethod
+    def _ng(stderr="error"):
+        return subprocess.CompletedProcess(args=["git"], returncode=1, stdout="", stderr=stderr)
+
+    def test_reports_when_behind(self, monkeypatch):
+        """遅れているときは件数・コミット・復旧手順を含むメッセージを返す。"""
+        monkeypatch.setattr(health_watch, "_git", self._fake_git({
+            "rev-parse": self._ok("origin/master\n"),
+            "fetch": self._ok(),
+            "rev-list": self._ok("5\n"),
+            "log": self._ok("aaaaaaa 修正A\nbbbbbbb 修正B\nccccccc 修正C\n"),
+        }))
+        msg = health_watch.check_repo_behind_upstream()
+        assert msg is not None
+        assert "origin/master より 5 コミット遅れています" in msg
+        assert "修正A" in msg
+        # 表示上限(DIFF_LINES_LIMIT)を超えた分は畳んで件数だけ示す
+        assert "ほか2件" in msg
+        assert "systemctl restart home_system.service" in msg
+
+    def test_returns_none_when_up_to_date(self, monkeypatch):
+        monkeypatch.setattr(health_watch, "_git", self._fake_git({
+            "rev-parse": self._ok("origin/master\n"),
+            "fetch": self._ok(),
+            "rev-list": self._ok("0\n"),
+        }))
+        assert health_watch.check_repo_behind_upstream() is None
+
+    def test_skipped_when_no_upstream(self, monkeypatch):
+        """upstream 未設定(detached HEAD 等)では異常にしない。"""
+        monkeypatch.setattr(health_watch, "_git", self._fake_git({"rev-parse": self._ng()}))
+        assert health_watch.check_repo_behind_upstream() is None
+
+    def test_skipped_when_fetch_fails(self, monkeypatch):
+        """ネットワーク不通では異常にしない(毎時cronで鳴り続けるのを避ける)。"""
+        monkeypatch.setattr(health_watch, "_git", self._fake_git({
+            "rev-parse": self._ok("origin/master\n"),
+            "fetch": self._ng("Could not resolve host: github.com"),
+        }))
+        assert health_watch.check_repo_behind_upstream() is None
+
+    def test_skipped_when_fetch_times_out(self, monkeypatch):
+        """fetch のタイムアウトは例外を投げずスキップする。"""
+        monkeypatch.setattr(health_watch, "_git", self._fake_git({
+            "rev-parse": self._ok("origin/master\n"),
+            "fetch": subprocess.TimeoutExpired(cmd="git fetch", timeout=20),
+        }))
+        assert health_watch.check_repo_behind_upstream() is None
+
+    def test_skipped_when_count_is_not_a_number(self, monkeypatch):
+        monkeypatch.setattr(health_watch, "_git", self._fake_git({
+            "rev-parse": self._ok("origin/master\n"),
+            "fetch": self._ok(),
+            "rev-list": self._ok("not-a-number\n"),
+        }))
+        assert health_watch.check_repo_behind_upstream() is None
+
+    def test_registered_as_a_health_check(self, monkeypatch):
+        """run_checks のチェック一覧に 'repo_behind' として組み込まれていること。"""
+        for name in (
+            "check_service_active", "check_disk_usage", "check_memory_usage",
+            "check_nas_mount", "check_deploy_config_drift", "check_quest_master_drift",
+            "check_api_responsive", "check_recording_stalled", "check_orphaned_rows",
+        ):
+            monkeypatch.setattr(health_watch, name, lambda: None)
+        monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)
+        monkeypatch.setattr(health_watch, "check_app_logs", lambda since: None)
+        monkeypatch.setattr(
+            health_watch, "check_repo_behind_upstream",
+            lambda: "実機のコードが origin/master より 5 コミット遅れています",
+        )
+        monkeypatch.setattr(
+            health_watch, "_read_marker",
+            lambda: datetime.datetime.fromisoformat("2026-09-20T09:00:00"),
+        )
+        monkeypatch.setattr(health_watch, "_write_marker", lambda dt: None)
+        keys_seen = []
+        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now: keys_seen.extend(keys) or True)
+        monkeypatch.setattr(health_watch, "_fire_investigate_hook", lambda anomalies, now: None)
+        sent = []
+        monkeypatch.setattr(
+            health_watch, "send_push",
+            lambda messages, target=None, channel=None: sent.append(messages) or True,
+        )
+
+        health_watch.run_checks()
+
+        assert keys_seen == ["repo_behind"]
+        assert "コミット遅れています" in sent[0][0]["text"]

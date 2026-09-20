@@ -447,6 +447,9 @@ NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordin
 #  getattr(config, "TIMELAPSE_...", デフォルト値) で参照する。以前はここに対応する
 #  定数が定義されておらず、常にハードコードされたデフォルト値へフォールバックしていた)
 TIMELAPSE_FPS_ANALYZE: int = 1
+# Issue #782: 解析デコード・再エンコードで ffmpeg が使うスレッド数の上限。
+# 無制限だと Pi 5 の4コアを使い切り、ソフト温度上限(80°C)に達してスロットリングする。
+TIMELAPSE_FFMPEG_THREADS: int = 2
 TIMELAPSE_WIDTH: int = 320
 TIMELAPSE_HEIGHT: int = 180
 TIMELAPSE_BG_HISTORY: int = 120

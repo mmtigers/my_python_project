@@ -22,6 +22,8 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
      (マスタデータのドリフト検知。Issue #700)
   10. カメラごとの常時録画(NVR)が止まっていないか(最新の録画ファイルが古すぎないか)
   11. 参照整合性が破れていないか(親が存在しない子行=孤児行。Issue #747)
+  12. 実機のチェックアウトが upstream(origin/master)より遅れていないか
+      (マージ済みの修正が実機で動いていない状態の検知。Issue #783)
 
 異常があれば notification_service 経由でDiscordのerrorチャンネルへ要約を通知する。
 自動復旧(systemctl restart等)は行わない(ランブックのガードレール参照)。
@@ -107,6 +109,16 @@ QUEST_ID_LIST_LIMIT: int = 8
 RECORDING_STALE_SEC: int = 30 * 60
 # 録画ファイル名(ffmpeg -strftime のローカル時刻)の解釈に使うタイムゾーン
 JST = ZoneInfo("Asia/Tokyo")
+
+# === 実機チェックアウトの遅れ検知 (チェック12) ===
+# Issue #783: 2026-09-20 に実機が origin/master より5コミット遅れており、マージ済みの
+# 録画停止検知(#716)が動かず、マイグレーション 0013 も未適用のまま放置されていた。
+# 既存の仕組みはどれもこれを見ていない:
+#   - deploy.sh --if-stale は「HEAD に対する dist の鮮度」しか見ない(HEAD 自体が古ければ最新と判定)
+#   - チェック8(構成ドリフト)は crontab/systemd/logrotate が対象でコードの世代は見ない
+#   - start_all.sh --prepare は .venv / dist の鮮度のみ
+# fetch はネットワークに出るため、他の外部コマンドより短い上限を別に持つ。
+GIT_FETCH_TIMEOUT_SEC: int = 20
 
 
 def _read_marker() -> datetime.datetime:
@@ -636,6 +648,69 @@ def check_orphaned_rows() -> str | None:
     )
 
 
+def _git(*args: str, timeout: int = SUBPROCESS_TIMEOUT_SEC) -> subprocess.CompletedProcess:
+    """リポジトリルートに対して git を実行する(チェック12用の小さなヘルパ)。"""
+    return subprocess.run(
+        ["git", "-C", REPO_ROOT, *args],
+        capture_output=True, text=True, check=False, timeout=timeout,
+    )
+
+
+def check_repo_behind_upstream() -> str | None:
+    """実機のチェックアウトが upstream より遅れていないかを確認する (Issue #783)。
+
+    **検知のみで自動 pull はしない。** 実機の `git pull` は post-merge フックから
+    フロントの再ビルドとマスタ同期を走らせ、反映には `home_system.service` の
+    再起動も要るため、無人で実行してよい操作ではない(ランブックの
+    「自動 systemctl restart は行わない」と同じ思想)。
+
+    ネットワーク不通・upstream 未設定・git が無い等では「異常」ではなく
+    「今回は判定できない」としてスキップする。毎時cronで走るため、外へ出られない
+    環境で恒久的に鳴り続けるのを避ける(`check_quest_master_drift` と同じ方針)。
+    """
+    upstream = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    if upstream.returncode != 0 or not upstream.stdout.strip():
+        logger.warning("⚠️ upstream が設定されていないためチェックアウトの鮮度チェックをスキップします")
+        return None
+    ref = upstream.stdout.strip()
+
+    try:
+        fetched = _git("fetch", "--quiet", timeout=GIT_FETCH_TIMEOUT_SEC)
+    except subprocess.TimeoutExpired:
+        logger.warning("⚠️ git fetch がタイムアウトしたためチェックアウトの鮮度チェックをスキップします")
+        return None
+    if fetched.returncode != 0:
+        logger.warning(
+            "⚠️ git fetch に失敗したためチェックアウトの鮮度チェックをスキップします: "
+            f"{fetched.stderr.strip()[:200]}"
+        )
+        return None
+
+    counted = _git("rev-list", "--count", f"HEAD..{ref}")
+    if counted.returncode != 0:
+        logger.warning(f"⚠️ コミット数を数えられませんでした: {counted.stderr.strip()[:200]}")
+        return None
+    try:
+        behind = int(counted.stdout.strip())
+    except ValueError:
+        logger.warning(f"⚠️ コミット数の解釈に失敗しました: {counted.stdout.strip()[:100]}")
+        return None
+    if behind <= 0:
+        return None
+
+    subjects = _git("log", "--oneline", "--no-decorate", f"-{DIFF_LINES_LIMIT}", f"HEAD..{ref}")
+    lines = [f"  - {line}" for line in subjects.stdout.strip().splitlines()]
+    if behind > len(lines):
+        lines.append(f"  - ほか{behind - len(lines)}件")
+    return (
+        f"実機のコードが {ref} より {behind} コミット遅れています"
+        "(マージ済みの修正が実機で動いていない可能性があります):\n"
+        + "\n".join(lines)
+        + "\n  → `git pull --ff-only` 後に `sudo systemctl restart home_system.service`"
+        "(マイグレーションは起動時に適用されます)"
+    )
+
+
 def _should_notify(anomaly_keys: List[str], now: datetime.datetime) -> bool:
     """同一の異常セットが継続している間の再通知を抑制する。
 
@@ -725,6 +800,7 @@ def run_checks() -> int:
         ("deploy_config", check_deploy_config_drift),
         ("quest_master", check_quest_master_drift),
         ("orphaned_rows", check_orphaned_rows),
+        ("repo_behind", check_repo_behind_upstream),
     ]
 
     anomalies: List[str] = []

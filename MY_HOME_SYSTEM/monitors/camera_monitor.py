@@ -93,7 +93,12 @@ except (PermissionError, OSError) as e:
 BINDING_NAME: str = '{http://www.onvif.org/ver10/events/wsdl}PullPointSubscriptionBinding'
 PRIORITY_MAP: Dict[str, int] = {"intrusion": 100, "person": 80, "vehicle": 50, "motion": 10}
 SESSION_LIFETIME: int = 3600
-# 玄関カメラ専用: 10分の購読期限が切れる前に自発的に張り直す間隔(秒)
+# 10分の購読期限が切れる前に自発的に張り直す間隔(秒)。
+# Issue #766: 以前は玄関カメラ専用の分岐だった。庭・駐車場(VIGI)はこの先回りが無いため、
+# 10分ごとに期限切れ → PullMessages が3回連続失敗 → WARNING を出して張り直す、を
+# 1台あたり毎時6回繰り返していた(実機ログの失敗間隔は 10:17〜10:24 と、
+# CreatePullPointSubscription の既定 TerminationTime(10分)に一致)。
+# 期限切れから再購読までの数秒はイベントを取りこぼすため、全カメラに適用する。
 FORCE_RECONNECT_INTERVAL_SEC: int = 540
 # PullMessages がこの回数連続で失敗したら、SESSION_LIFETIME を待たずに再接続する
 PULL_FAILURE_RECONNECT_THRESHOLD: int = 3
@@ -695,16 +700,16 @@ def _pull_events_until_reconnect(cam_conf: Dict[str, Any], pullpoint: Any) -> No
     購読済みのセッションでイベントを受け続ける。再接続すべき状況になったら return する。
 
     return する条件は4つ: セッション寿命(SESSION_LIFETIME)の到達、devices.json での
-    無効化、玄関カメラの自発的再接続タイマー、PullMessages の失敗。
+    無効化、購読期限切れ前の自発的再接続タイマー、PullMessages の失敗。
     """
     cam_name: str = cam_conf['name']
     session_start_time: float = time.time()
 
-    # --- 玄関カメラ専用の再接続（Subscribeし直し）タイマー ---
+    # --- 再接続（Subscribeし直し）タイマー ---
     # 10分の有効期限が切れる前に、自発的にセッションを切り替える
     last_subscribe_time: float = time.time()
 
-    # PullMessages の連続失敗回数(玄関以外のカメラ用)。カメラの再起動等で
+    # PullMessages の連続失敗回数。カメラの再起動等で
     # サブスクリプションが消えた場合、以前は SESSION_LIFETIME(3600秒)が経過する
     # まで毎 0.5 秒 debug ログを出しながら events=None で回り続け、最長1時間
     # 動体検知が止まっていた。閾値に達したらループを抜けて再接続する。
@@ -723,11 +728,10 @@ def _pull_events_until_reconnect(cam_conf: Dict[str, Any], pullpoint: Any) -> No
             logger.info(f"⏸️ [{cam_name}] enabled=false に変更されたため購読を解除します。")
             return
 
-        # --- 玄関カメラ専用の自発的再接続ロジック ---
-        if cam_name == "玄関カメラ":
-            if current_time - last_subscribe_time > FORCE_RECONNECT_INTERVAL_SEC:
-                logger.info(f"🔄 [{cam_name}] 9 minutes passed. Reconnecting to avoid silent timeout...")
-                return  # 安全に再接続（外側のループへ）
+        # --- 購読期限切れの前に張り直す(全カメラ。Issue #766) ---
+        if current_time - last_subscribe_time > FORCE_RECONNECT_INTERVAL_SEC:
+            logger.info(f"🔄 [{cam_name}] 9 minutes passed. Reconnecting to avoid silent timeout...")
+            return  # 安全に再接続（外側のループへ）
         # -----------------------------------------------------------
 
         try:

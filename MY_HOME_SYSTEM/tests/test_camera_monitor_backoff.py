@@ -468,6 +468,25 @@ class TestInnerMonitorLoop:
         assert calls == [3, 3, 3]
         assert service.pull_calls == 3
 
+    def test_force_reconnect_applies_to_every_camera(self, monkeypatch):
+        """購読期限切れ前の自発的な張り直しが、玄関以外のカメラでも働くこと (Issue #766)。
+
+        以前は `if cam_name == "玄関カメラ"` の分岐で、庭・駐車場(VIGI)には
+        適用されていなかった。そのため10分で購読期限が切れ、PullMessages の
+        3回連続失敗を経てから再購読する = 毎時6回の WARNING とイベント取りこぼし
+        が発生していた。間隔を負値にして「常に期限が近い」状態を作り、
+        PullMessages を1度も呼ばずに抜けることで先回りを確認する。
+        """
+        service = _FakePullpointService()
+        _connect_successfully(monkeypatch, service)
+        monkeypatch.setattr(camera_monitor, "FORCE_RECONNECT_INTERVAL_SEC", -1)
+        garden = dict(CAM_CONF, name="庭カメラ")
+
+        calls = _run(monkeypatch, stop_after=3, cam_conf=garden)
+
+        assert calls == [3, 3, 3]
+        assert service.pull_calls == 0
+
     def test_session_lifetime_triggers_graceful_refresh(self, monkeypatch):
         """セッション寿命に達したら PullMessages せずに抜け直す。"""
         service = _FakePullpointService()
