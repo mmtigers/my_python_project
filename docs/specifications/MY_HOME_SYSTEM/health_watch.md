@@ -97,11 +97,11 @@
 ### `_read_marker`
 
 * **役割**: マーカーファイルから前回チェック完了時刻(ISO8601)を読み取る。**（Issue #661で修正）** ファイルの読み取り自体は`core/state_file.py`の`read_text`へ委譲し、返ってきた文字列を`datetime.fromisoformat`でパースする形に整理した。
-* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 111 / 抜粋: "def _read_marker() -> datetime.datetime:")
+* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 112 / 抜粋: "def _read_marker() -> datetime.datetime:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 111 / 抜粋: "def _read_marker() -> datetime.datetime:")
+* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 112 / 抜粋: "def _read_marker() -> datetime.datetime:")
 
 
 * **戻り値/レスポンス**: `datetime.datetime`。ファイルが無い/空/ISO8601としてパースできない場合は現在時刻から`DEFAULT_LOOKBACK_SEC`(3600秒)遡った時刻。
@@ -120,15 +120,15 @@
 ### `_write_marker`
 
 * **役割**: チェック開始時刻をISO8601文字列でマーカーファイルへ書き込む。**（Issue #661で修正）** 書き込みは`core/state_file.py`の`write_text_atomic`へ委譲し、一時ファイル + `fsync` + `os.replace`による原子的な差し替えになった（途中で電源断・クラッシュしても不完全な内容が残らない）。
-* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 127 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 128 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `dt: datetime.datetime`
-* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 127 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 128 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 127 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 128 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **副作用**: マーカーファイルの原子的な差し替え（`state_file.write_text_atomic`経由）。
@@ -143,7 +143,7 @@
 ### `check_service_active`
 
 * **役割**: `systemctl is-active`で`home_system.service`の稼働状態を確認する。
-* 根拠: [関数定義] (行番号: 138〜147 / 抜粋: "def check_service_active() -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 139〜148 / 抜粋: "def check_service_active() -> Optional[str]:")
 
 
 * **引数/リクエスト**: なし
@@ -166,11 +166,11 @@
 ### `check_api_responsive` (**チェック2: HTTPプローブ、Issue #735 / AUDIT-005 で追加**)
 
 * **役割**: `unified_server`に実際にHTTPリクエストを送り、「プロセスは生きているが機能していない」状態を検知する。`GET /health`（readiness。マイグレーション失敗時は503を返す）と`GET /api/quest/data`（DBまで到達する経路。`/health`はDBを触らないため別に確認する）の2本を順に叩き、いずれかが200以外なら異常とする。
-* 根拠: [関数定義] (行番号: 294〜324 / 抜粋: "def check_api_responsive() -> Optional[str]:")、[プローブ定義] (行番号: 301〜304 / 抜粋: '("/health", config.HEALTH_WATCH_PROBE_TIMEOUT_SEC),')
+* 根拠: [関数定義] (行番号: 295〜325 / 抜粋: "def check_api_responsive() -> Optional[str]:")、[プローブ定義] (行番号: 301〜304 / 抜粋: '("/health", config.HEALTH_WATCH_PROBE_TIMEOUT_SEC),')
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 294 / 抜粋: "def check_api_responsive() -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 295 / 抜粋: "def check_api_responsive() -> Optional[str]:")
 
 
 * **戻り値/レスポンス**: `Optional[str]`。2本とも200なら`None`。200以外なら「どのパスが何を返したか」＋レスポンス本文の先頭200文字（改行を空白に置換）を含む異常メッセージ。接続不能・タイムアウト等の`requests.exceptions.RequestException`は例外を送出せず、例外クラス名を含む異常メッセージとして返す。
@@ -191,7 +191,7 @@
 * **役割**: `journalctl -u home_system.service` で前回マーカー以降のエラーを確認する。見るのは (1) systemd 自身が `err..emerg` で記録したもの(ユニットの異常終了等)と、(2) サービスの標準出力・標準エラー経由の行のうちエラーと判定されるもの(`_journal_stdio_errors`)の2種類。
 * **（2026-09-19 修正）標準出力・標準エラー経由のエラーを見るようにした**: journald はサービスの標準出力・標準エラーの行を priority **info** で記録するため、従来の `-p err..emerg` だけでは一切拾えていなかった。`home_system.service` を `Type=simple`(Issue #646)へ移行して以降、未捕捉例外のトレースバックや basicConfig のままのライブラリログ(`ERROR:zeep...` 等)は journal にしか残らない(以前は `start_all.sh` が `logs/server_boot.log` へリダイレクトしており、`check_app_logs` のキーワード判定で拾えていた。移行後 `server_boot.log` は更新されない)。実機の journal で、移行後に `Traceback` と `ERROR:zeep...` が info で8行残っていたのに、修正前の本チェックは0行だったことを確認している。`_journal_stdio_errors` は `journalctl -o cat -n 2000` の各行を `LogAnalyzer._classify_line` で判定し、`core.logger` の書式(`YYYY-MM-DD HH:MM:SS [LEVEL] ...`)の行は `logs/*.log` 側で `check_app_logs` が見るため二重計上しないよう除外する。`LogAnalyzer.IGNORE_PATTERNS` も適用する。
 * 根拠: [関数定義] `def _journal_stdio_errors(since_str: str) -> list[str]:`、[core.logger 書式の除外] `core_logger_line = LogAnalyzer.LEVEL_PATTERNS[0]`(回帰テスト: `tests/test_health_watch.py` の `TestJournalStdioErrors`)
-* 根拠: [関数定義] (行番号: 150〜192 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 151〜193 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`--since`に"%Y-%m-%d %H:%M:%S"形式で渡す）
@@ -217,7 +217,7 @@
 * 根拠: (行番号: 120〜126 / 抜粋: "if os.path.basename(filepath) in (\"health_watch.log\", \"claude_investigate.log\"):\n            continue")
 
 * **役割**: `config.LOG_DIR`配下の`*.log`から前回マーカー以降のエラー行を検出する。キーワード・除外パターン・タイムスタンプ解析は`LogAnalyzer`を流用し、週次の`log_analyzer.py`と判定基準を揃える。エラー(errors > 0)のみを異常とみなし、WARNINGは対象外。
-* 根拠: [関数定義] (行番号: 220〜260 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 221〜261 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`analyzer.start_date`へ直接代入し「前回マーカー以降」のみを走査対象にする）
@@ -309,11 +309,11 @@
 ### `_latest_recording_time` (**チェック10で追加**)
 
 * **役割**: 録画フォルダ内の当日・前日分の`{YYYYMMDD}_*.mp4`を列挙し、ファイル名の新しい順に先頭15文字を`%Y%m%d_%H%M%S`として解釈できた最初のものの時刻(最新セグメントの開始時刻)を返す。CIFS越しに保持期間分を毎回列挙しないよう当日と前日(日付の変わり目用)に絞る。
-* 根拠: `def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:` (行番号: 327)
+* 根拠: `def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:` (行番号: 328)
 
 
 * **引数/リクエスト**: `folder`(録画フォルダの絶対パス)、`now`(基準時刻。当日・前日の日付算出に使う)
-* 根拠: `def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:` (行番号: 327)
+* 根拠: `def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:` (行番号: 328)
 
 
 * **戻り値/レスポンス**: `datetime.datetime | None`(JSTのaware datetime。`JST = ZoneInfo("Asia/Tokyo")`を付与)。該当ファイルが無い、または全ファイル名が解釈できなければ`None`。
@@ -332,11 +332,11 @@
 ### `check_recording_stalled` (**チェック10: 常時録画の停止検知で追加**)
 
 * **役割**: `config.CAMERAS`の有効なカメラごとに、`config.NVR_RECORD_DIR`配下の録画フォルダ(`nas_folder`、無ければ`name`)の最新セグメント開始時刻を`_latest_recording_time`で求め、当日・前日のファイルが無いか、`RECORDING_STALE_SEC`(30分)より古ければ異常として列挙する。録画自体は`nvr-*.service`(systemd)のffmpegが600秒ごとに新しいファイルを作る前提で、カメラに繋がらない間の再試行ループや無応答のまま固まった状態を「新しいセグメントが作られていない」ことで検知する。更新時刻(mtime)ではなくファイル名の時刻を使うのは、このNAS(CIFS)では書き込み中のファイルのmtimeが作成時刻のまま進まないため。
-* 根拠: `def check_recording_stalled() -> str | None:` (行番号: 345)
+* 根拠: `def check_recording_stalled() -> str | None:` (行番号: 346)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_recording_stalled() -> str | None:` (行番号: 345)
+* 根拠: `def check_recording_stalled() -> str | None:` (行番号: 346)
 
 
 * **戻り値/レスポンス**: `str | None`。基準時刻は`core.utils.get_now_jst()`(実行環境のTZに依存しない)。停止の疑いがあるカメラがあれば`"常時録画が止まっている可能性があります:"`に続けてカメラごとの1行(`{name}({folder}): 最新の録画が MM/DD HH:MM 開始(N分前)`、またはファイル無し)を並べたメッセージ、無ければ`None`。
@@ -470,11 +470,11 @@
 ### `_format_quest_ids` (**Issue #700で追加**)
 
 * **役割**: `quest_id`の一覧を通知用の文字列に整形する。先頭`QUEST_ID_LIST_LIMIT`(8)件までをカンマ区切りで並べ、それを超える分は`" ほかN件"`に畳む。
-* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 469〜474)
+* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 470〜475)
 
 
 * **引数/リクエスト**: `quest_ids: list[int]`
-* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 469)
+* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 470)
 
 
 * **戻り値/レスポンス**: `str`
@@ -493,11 +493,11 @@
 ### `check_quest_master_drift` (**チェック9: マスタデータのドリフト検知、Issue #700で追加**)
 
 * **役割**: `quest_data.QUESTS`の`id`集合と、DBの`quest_master.quest_id`集合を比較し、(1)DBにだけある＝退役済みなのに残っているクエスト、(2)コードにだけある＝DBに未登録のクエスト、の双方を異常メッセージとして返す。どちらも無ければ`None`。メッセージ末尾には`sync_strict.py --dry-run`で影響を確認してから同期する旨の指針を付ける。`quest_data.QUESTS`が空の場合は「全件が退役済み」という誤報を避け、マスタ定義の読み込み失敗の可能性として別メッセージを返す。docstringには、**検知のみで自動修正はしない**（同期は`sync_strict.py --if-stale`の責務であり、毎時cronのヘルスチェックから破壊的操作を走らせない）こと、および比較対象を`quest_master`の`quest_id`集合に絞る理由（`reward_master`は`user_inventory`から参照が残る報酬を削除しない正しい挙動があり恒久的な誤検知になる、`routine_data.py`は対応するマスタテーブルを持たない）が明記されている。
-* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 477〜535)
+* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 478〜536)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 477)
+* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 478)
 
 
 * **戻り値/レスポンス**: `str | None`(異常メッセージ、正常なら`None`)
@@ -512,6 +512,32 @@
 * 根拠: [例外処理] (行番号: 362〜364 / 抜粋: "except sqlite3.OperationalError as e:")
 
 
+
+### `_ORPHAN_CHECKS_STRICT` / `_ORPHAN_CHECKS_EXPECTED` (**モジュール定数、Issue #747で追加**)
+
+* **役割**: 参照整合性を検査する `(ラベル, SQL)` の組。**2層に分かれているのが本質**で、一方は「起きてはならない不整合」、もう一方は「通常運用の設計どおりに生じる不整合」である。前者だけを通知する。
+  * `_ORPHAN_CHECKS_STRICT`（6件）: 親が `quest_users`（`quest_history.user_id` / `reward_history.user_id` / `user_inventory.user_id` / `routine_progress.user_id` / `routine_step_events.user_id`）と自己参照の `quest_history.linked_history_id`。実行コードに `DELETE FROM quest_users` が存在しないため、ここの孤児は手動SQL・将来のスクリプトの事故しかありえない。
+  * `_ORPHAN_CHECKS_EXPECTED`（2件）: 親が `quest_master` / `reward_master`（`quest_history.quest_id` / `reward_history.reward_id`）。`GameSystem.sync_master_data` の `DELETE ... WHERE quest_id NOT IN (...)` はクエストを退役させると**設計どおりマスタ行を消して履歴行を残す**（#700 で退役6件を実際に削除している）ため、孤児は想定内。毎時cronで「異常」として報告すると恒久的な誤検知になる。`check_quest_master_drift` が `reward_master` を比較対象から外したのと同じ判断。
+* 根拠: `_ORPHAN_CHECKS_STRICT: tuple[tuple[str, str], ...] = (` (行番号: 537 / 抜粋: "_ORPHAN_CHECKS_STRICT: tuple[tuple[str, str], ...] = (")
+
+`quest_id = 0` は `inventory_service` のアイテム使用ログでマスタを参照しない疑似IDのため、`_ORPHAN_CHECKS_EXPECTED` の SQL が `h.quest_id != 0` で除外している。
+
+### `check_orphaned_rows` (**チェック11: 参照整合性の検知、Issue #747で追加**)
+
+* **役割**: `_ORPHAN_CHECKS_STRICT` に1件でも孤児があれば異常メッセージを返し、無ければ `None`。`_ORPHAN_CHECKS_EXPECTED` の件数は**通知せず `logger.info` に残すだけ**にする（FK を張れるか＝Issue #747 のステップ3へ進めるかの判断材料になるため、通知しないが記録は必ず残す）。`PRAGMA foreign_keys=ON` を設定しているのに外部キー宣言が `user_inventory.reward_id` の1つしかなく、「本来DBが防げる不整合」への防御がサービス層の個別の None チェックとして散在している（監査の根本原因 RC-5）。SQLite で FK を追加するにはテーブル再作成が必要なため、まず孤児の実数を測るのが本チェックの役割である。**検知のみで自動修正はしない**（孤児行の削除は不可逆で、子行を消すべきか親を復活させるべきかは中身を見ないと決められない）。
+* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 595 / 抜粋: "def check_orphaned_rows(")
+
+* **引数/リクエスト**: なし
+* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 595)
+
+* **戻り値/レスポンス**: `str | None`（`_ORPHAN_CHECKS_STRICT` に孤児があれば異常メッセージ、無ければ `None`）
+* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 595)
+
+* **副作用**: DBの読み取りのみ（`get_ro_connection` による `mode=ro` 接続）。加えて `_ORPHAN_CHECKS_EXPECTED` の件数を `logger.info` へ出力する。
+* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 595)
+
+* **エラーハンドリング**: `sqlite3.OperationalError`（DBファイル・テーブルの不在、一時的なロック）は警告ログのみでスキップし `None` を返す（`check_quest_master_drift` と同じ方針。毎時cronで走るため、DB不在の環境で恒久的に失敗し続けるのを避ける）。それ以外の例外は `run_checks` 側で内部エラーとして捕捉される。
+* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 595)
 
 ### `_should_notify`
 
@@ -539,7 +565,7 @@
 ### `_fire_investigate_hook` (**Issue #339で追加**)
 
 * **役割**: 層2(自動調査)フックの発火。`config.HEALTH_WATCH_INVESTIGATE_HOOK`が未設定なら即return(既定・完全no-op)。設定済みならパスの存在と実行権限を確認し、異常サマリ(検知時刻+各異常の箇条書き)を標準入力で渡してフックスクリプトをfire-and-forgetのサブプロセスとして起動する(完了を待たない。毎時cronの層1を長時間ブロックしないため)。`run_checks`内の`_should_notify`通過後にのみ呼ばれるため、同一異常セット継続中の再発火は通知と同じ6時間間隔に収まる。
-* 根拠: [関数定義] (行番号: 563〜606 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
+* 根拠: [関数定義] (行番号: 664〜707 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `anomalies: List[str]`（各チェックの異常メッセージ）、`now: datetime.datetime`（検知時刻）
@@ -563,7 +589,7 @@
 ### `run_checks`
 
 * **役割**: 10個のチェック関数(`service`/`api`（Issue #735で追加）/`journal`/`app_logs`/`disk`/`memory`/`nas`/`recording`（常時録画停止検知で追加）/`deploy_config`/`quest_master`)を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知し、通知抑制を通過した場合は層2フック(`_fire_investigate_hook`)も発火し、マーカーを更新してプロセスの終了コードを返すエントリーポイント。
-* 根拠: [関数定義] (行番号: 609〜668 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 615〜626 / 抜粋: '("api", check_api_responsive),', '("recording", check_recording_stalled),', '("quest_master", check_quest_master_drift),')、[フック発火] (行番号: 656〜657 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
+* 根拠: [関数定義] (行番号: 710〜770 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 615〜626 / 抜粋: '("api", check_api_responsive),', '("recording", check_recording_stalled),', '("quest_master", check_quest_master_drift),')、[フック発火] (行番号: 656〜657 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
 
 
 * **引数/リクエスト**: なし
@@ -698,6 +724,9 @@ graph TD
     check_recording_stalled --> config
     run_checks --> check_deploy_config_drift
     run_checks --> check_quest_master_drift
+    run_checks --> check_orphaned_rows
+    check_orphaned_rows --> get_ro_connection
+    check_orphaned_rows --> _ORPHAN_CHECKS
     check_quest_master_drift --> quest_data
     check_quest_master_drift --> get_ro_connection
     get_ro_connection --> quest_master
