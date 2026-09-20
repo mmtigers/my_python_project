@@ -19,6 +19,7 @@ try:
     from core.logger import setup_logging
     from services.notification_service import send_push
     from core.database import get_ro_connection
+    from core.security_posture import check_security_posture
     from services import switchbot_service
 except ImportError as e:
     print(f"Error: Failed to import config or core/services modules. {e}", file=sys.stderr)
@@ -376,6 +377,38 @@ class PostBootHealthCheck:
         else:
             self.results.append(CheckResult("Logs", STATUS_OK, "Clean (Last 10min)"))
 
+    def check_security_posture(self):
+        """未設定のせいで保護が黙って無効になっている設定を報告する (Issue #799)。
+
+        個別の警告は `handlers/alexa_handler.py` や `unified_server.py` に以前から
+        あったが、**ログにしか出ない**ため数か月気づかれなかった(#319 は起票から
+        未対応のまま、#799 は2026-09-20に発見)。起動レポートは Discord に届く
+        唯一の定期的な出力なので、ここに1行載せて「いま何が無効か」を可視化する。
+
+        判定は `core/security_posture.py` に集約してある(意図的に未設定の設定を
+        対象にしない理由も、そちらのモジュール docstring を参照)。
+        """
+        try:
+            findings = check_security_posture(config)
+        except Exception as e:
+            # posture の判定自体で起動レポートを落とさない(他のチェック結果は届けたい)。
+            # logger.exception がトレースバックを含めるため、メッセージに例外オブジェクトは入れない。
+            logger.exception("security posture check failed")
+            self.results.append(CheckResult("Security", STATUS_WARN, f"判定に失敗: {e}"))
+            return
+
+        if not findings:
+            self.results.append(CheckResult("Security", STATUS_OK, "保護が無効な設定なし"))
+            return
+
+        # 文面には設定名と Issue 番号だけを出す。値そのもの(トークン等)は載せない。
+        details = "\n".join(f"> `{f.key}` ({f.ref}): {f.protection}" for f in findings)
+        self.results.append(CheckResult(
+            "Security",
+            STATUS_WARN,
+            f"{len(findings)}件の保護が無効\n{details}",
+        ))
+
     # --- Execution ---
     def run(self):
         logger.info("Starting checks...")
@@ -385,6 +418,7 @@ class PostBootHealthCheck:
         self.check_peripherals()
         self.check_services()
         self.check_recent_logs()
+        self.check_security_posture()
         self._send_report()
 
     def _send_report(self):

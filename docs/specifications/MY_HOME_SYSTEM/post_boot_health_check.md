@@ -10,6 +10,8 @@
 
 ## 関連ドキュメント
 
+* [security_posture.md](./security_posture.md) - **（Issue #799 で追加）** `check_security_posture` が呼ぶ判定の実装元。何を報告し何を報告しないかの線引きはそちらを参照
+
 * [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
 * [logger.md](./logger.md) - `setup_logging`の実体。コンソール出力・日次ローテーションファイル出力・ERRORレベルのDiscord通知(`DiscordErrorHandler`)を提供
 * [notification_service.md](./notification_service.md) - `services.notification_service.send_push`の実体。Discord/LINEへの統合通知処理
@@ -110,11 +112,11 @@
 ### `resolve_target_bluetooth_mac`
 
 * **役割**: `config.ENABLE_BLUETOOTH` が真の場合に限り `config.SPEAKER_BLUETOOTH_MAC` を返すモジュールレベル関数（Issue #665: `SPEAKER_BLUETOOTH_MAC`の既定値が空文字になったため、空文字も`None`に正規化してBTチェックをスキップさせる）。BT運用が無効な環境（`bluetooth.service`停止時など）でSpeakerチェックがBT WARNを出し続けないよう、無効時は `None` を返してサウンドカード確認へのフォールバックを促す。戻り値は直後にモジュールレベル変数 `TARGET_BLUETOOTH_MAC` へ代入される。
-* 根拠: `def resolve_target_bluetooth_mac():` 〜 `return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)` (行番号: 33〜43 / 抜粋: "if not getattr(config, "ENABLE_BLUETOOTH", False):\n        return None\n    return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)")
+* 根拠: `def resolve_target_bluetooth_mac():` 〜 `return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)` (行番号: 34〜44 / 抜粋: "if not getattr(config, "ENABLE_BLUETOOTH", False):\n        return None\n    return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)")
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 33 / 抜粋: "def resolve_target_bluetooth_mac():")
+* 根拠: (行番号: 34 / 抜粋: "def resolve_target_bluetooth_mac():")
 
 
 * **戻り値/レスポンス**: `str | None`（`config.ENABLE_BLUETOOTH`が真かつ`config.SPEAKER_BLUETOOTH_MAC`が非空ならその値、そうでなければ`None`）
@@ -133,7 +135,7 @@
 ### `CheckResult`
 
 * **役割**: 1件のヘルスチェック結果（項目名・ステータス・メッセージ）を保持するデータクラス。
-* 根拠: `@dataclass\nclass CheckResult:` (行番号: 54〜57 / 抜粋: "class CheckResult:\n    name: str\n    status: str\n    message: str")
+* 根拠: `@dataclass\nclass CheckResult:` (行番号: 55〜58 / 抜粋: "class CheckResult:\n    name: str\n    status: str\n    message: str")
 
 
 * **引数/リクエスト**: `name: str`, `status: str`, `message: str`
@@ -145,49 +147,49 @@
 
 
 * **副作用**: なし
-* 根拠: (行番号: 54〜57 / 抜粋: "class CheckResult:")
+* 根拠: (行番号: 55〜58 / 抜粋: "class CheckResult:")
 
 
 * **エラーハンドリング**: なし（型ヒントのみで実行時バリデーションはなし）
-* 根拠: (行番号: 54〜57 / 抜粋: "class CheckResult:")
+* 根拠: (行番号: 55〜58 / 抜粋: "class CheckResult:")
 
 
 
 ### `PostBootHealthCheck` (クラス概要)
 
 * **役割**: システム起動直後の健全性チェックをまとめて実行するメインクラス。リソース・ネットワーク・DB・サービス・周辺機器・ログの各チェックメソッドと、結果集約・通知送信メソッドを持つ。
-* 根拠: `class PostBootHealthCheck:` (行番号: 59〜421 / 抜粋: "class PostBootHealthCheck:")
+* 根拠: `class PostBootHealthCheck:` (行番号: 60〜456 / 抜粋: "class PostBootHealthCheck:")
 
 
 * **引数/リクエスト**: なし（コンストラクタは引数なし）
-* 根拠: `def __init__(self):` (行番号: 60 / 抜粋: "def __init__(self):")
+* 根拠: `def __init__(self):` (行番号: 61 / 抜粋: "def __init__(self):")
 
 
 * **戻り値/レスポンス**: 該当なし（クラス定義）
-* 根拠: (行番号: 59 / 抜粋: "class PostBootHealthCheck:")
+* 根拠: (行番号: 60 / 抜粋: "class PostBootHealthCheck:")
 
 
 * **副作用**: 該当なし（クラス定義自体には副作用なし。各メソッド参照）
-* 根拠: (行番号: 59 / 抜粋: "class PostBootHealthCheck:")
+* 根拠: (行番号: 60 / 抜粋: "class PostBootHealthCheck:")
 
 
 * **エラーハンドリング**: 該当なし（各メソッド参照）
-* 根拠: (行番号: 59 / 抜粋: "class PostBootHealthCheck:")
+* 根拠: (行番号: 60 / 抜粋: "class PostBootHealthCheck:")
 
 
 
 ### `PostBootHealthCheck.__init__`
 
 * **役割**: リトライ回数・間隔、結果リスト、ログファイルパスを初期化する。
-* 根拠: `def __init__(self):` (行番号: 60〜66 / 抜粋: "def __init__(self):\n        self.max_retries = 12       \n        self.retry_interval = 10    \n        self.results: List[CheckResult] = []")
+* 根拠: `def __init__(self):` (行番号: 61〜67 / 抜粋: "def __init__(self):\n        self.max_retries = 12       \n        self.retry_interval = 10    \n        self.results: List[CheckResult] = []")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 60 / 抜粋: "def __init__(self):")
+* 根拠: (行番号: 61 / 抜粋: "def __init__(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 60 / 抜粋: "def __init__(self):")
+* 根拠: (行番号: 61 / 抜粋: "def __init__(self):")
 
 
 * **副作用**: `self.max_retries=12`, `self.retry_interval=10`, `self.results=[]`, `self.log_file_path` の各インスタンス属性を設定する。
@@ -202,11 +204,11 @@
 ### `PostBootHealthCheck._check_port`
 
 * **役割**: 指定ホスト・ポートへのTCP接続を試み、疎通可否を判定する。
-* 根拠: `def _check_port(self, host: str, port: int, timeout=3) -> bool:` (行番号: 69〜74 / 抜粋: "def _check_port(self, host: str, port: int, timeout=3) -> bool:")
+* 根拠: `def _check_port(self, host: str, port: int, timeout=3) -> bool:` (行番号: 70〜75 / 抜粋: "def _check_port(self, host: str, port: int, timeout=3) -> bool:")
 
 
 * **引数/リクエスト**: `host: str`, `port: int`, `timeout=3`
-* 根拠: (行番号: 69 / 抜粋: "def _check_port(self, host: str, port: int, timeout=3) -> bool:")
+* 根拠: (行番号: 70 / 抜粋: "def _check_port(self, host: str, port: int, timeout=3) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（接続成功時 `True`、失敗時 `False`）
@@ -225,11 +227,11 @@
 ### `PostBootHealthCheck._check_http`
 
 * **役割**: 指定URLへ`headers`付きでHTTP GETリクエストを送信し、ステータスコードが200〜399の範囲かを判定する。`headers`は省略可能（省略時は`None`のまま`requests.get`に渡される）。
-* 根拠: `def _check_http(self, url: str, timeout=5, headers=None) -> bool:` (行番号: 76〜81 / 抜粋: "def _check_http(self, url: str, timeout=5, headers=None) -> bool:")
+* 根拠: `def _check_http(self, url: str, timeout=5, headers=None) -> bool:` (行番号: 77〜82 / 抜粋: "def _check_http(self, url: str, timeout=5, headers=None) -> bool:")
 
 
 * **引数/リクエスト**: `url: str`, `timeout=5`, `headers=None`
-* 根拠: (行番号: 76 / 抜粋: "def _check_http(self, url: str, timeout=5, headers=None) -> bool:")
+* 根拠: (行番号: 77 / 抜粋: "def _check_http(self, url: str, timeout=5, headers=None) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`
@@ -248,11 +250,11 @@
 ### `PostBootHealthCheck._get_uptime`
 
 * **役割**: `/proc/uptime` を読み取り、システム稼働時間を「秒」「分」「時間+分」の形式で文字列化する。
-* 根拠: `def _get_uptime(self) -> str:` (行番号: 83〜94 / 抜粋: "def _get_uptime(self) -> str:")
+* 根拠: `def _get_uptime(self) -> str:` (行番号: 84〜95 / 抜粋: "def _get_uptime(self) -> str:")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 83 / 抜粋: "def _get_uptime(self) -> str:")
+* 根拠: (行番号: 84 / 抜粋: "def _get_uptime(self) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（例: `"5秒"`, `"3分"`, `"1時間20分"`。失敗時は `"不明"`）
@@ -271,11 +273,11 @@
 ### `PostBootHealthCheck.check_system_resources`
 
 * **役割**: CPU温度（`vcgencmd measure_temp`）とディスク使用率（`shutil.disk_usage`）を取得し、3段階の閾値（温度: 75°C未満OK/75〜85°C未満WARN/85°C以上ERR、ディスク使用率: 90%以下OK/90〜95%WARN/95%超ERR）に基づきステータスを判定して結果に追加する。いずれかがERRなら全体もERR、いずれかがWARN(かつERRなし)ならWARNとする。
-* 根拠: `def check_system_resources(self):` (行番号: 97〜137 / 抜粋: "def check_system_resources(self):")
+* 根拠: `def check_system_resources(self):` (行番号: 98〜138 / 抜粋: "def check_system_resources(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 97 / 抜粋: "def check_system_resources(self):")
+* 根拠: (行番号: 98 / 抜粋: "def check_system_resources(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ `CheckResult` を追加）
@@ -294,11 +296,11 @@
 ### `PostBootHealthCheck.check_network_and_apis`
 
 * **役割**: `8.8.8.8` へのping疎通確認を行い、失敗時はネットワークエラーとして即座に結果を追加し処理を打ち切る。成功時はSwitchBot（`switchbot_service.create_switchbot_auth_headers()`による認証ヘッダー付き）とNatureRemo（`Authorization: Bearer`ヘッダー付き。**#411 品質で修正**: `config.NATURE_REMO_ACCESS_TOKEN`が未設定の場合、以前は`f"Bearer {config.NATURE_REMO_ACCESS_TOKEN}"`がそのまま`"Bearer None"`という実在しないトークンとして送信され、「未設定」ではなく「API NG」として誤報告していた。未設定時はNatureRemoのチェック自体を`api_targets`に含めずスキップする）のAPIへ、ステータスコード検証込みの`_check_http`で疎通確認し結果を追加する。
-* 根拠: `def check_network_and_apis(self):` (行番号: 139〜169 / 抜粋: "def check_network_and_apis(self):")、NatureRemoのスキップ判定 (行番号: 153〜158 / 抜粋: "if config.NATURE_REMO_ACCESS_TOKEN:")
+* 根拠: `def check_network_and_apis(self):` (行番号: 140〜170 / 抜粋: "def check_network_and_apis(self):")、NatureRemoのスキップ判定 (行番号: 153〜158 / 抜粋: "if config.NATURE_REMO_ACCESS_TOKEN:")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 139 / 抜粋: "def check_network_and_apis(self):")
+* 根拠: (行番号: 140 / 抜粋: "def check_network_and_apis(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ追加。ping失敗時は途中で `return` して以降のAPIチェックを行わない）
@@ -317,13 +319,13 @@
 ### `PostBootHealthCheck.check_database`
 
 * **役割**: SQLite DBファイルの存在確認と `PRAGMA quick_check` による整合性チェックを行う。
-* 根拠: `def check_database(self):` (行番号: 172〜200 / 抜粋: "def check_database(self):")
+* 根拠: `def check_database(self):` (行番号: 173〜201 / 抜粋: "def check_database(self):")
 * **（#411 S-L8で修正）** 以前は `conn.close()` を成功パス（`quick_check`実行後）の末尾でしか呼んでおらず、`cursor.execute`/`fetchone`が例外を送出した場合は`except Exception`節へは到達するが接続はcloseされずリークしていた。どの終了経路でも確実にcloseするよう変更した。**（Issue #661で修正）** 生の `sqlite3.connect(f"file:{db_path}?mode=ro", ...)` を `core/database.py` の `get_ro_connection(db_path=db_path)` へ寄せた（このスクリプトは `config.SQLITE_DB_PATH` が相対パスの場合に自前で `BASE_DIR` 基準の絶対パスへ解決してから接続するため、`db_path` を明示する）。あわせて接続の `timeout` が他の読み取り経路と同じ30秒(`RO_CONNECT_TIMEOUT_SEC`)になり、起動直後のマイグレーションやバックアップと重なっても即座に `"database is locked"` で ERROR 判定にならない。
 * 根拠: `with get_ro_connection(db_path=db_path) as conn:` (行番号: 187 / 抜粋: "with get_ro_connection(db_path=db_path) as conn:")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 172 / 抜粋: "def check_database(self):")
+* 根拠: (行番号: 173 / 抜粋: "def check_database(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ追加。ファイル不在時は途中で `return`）
@@ -342,11 +344,11 @@
 ### `PostBootHealthCheck.check_services`
 
 * **役割**: バックエンドサーバー、Family Quest（フロントエンド）、ダッシュボードの3対象について、`ThreadPoolExecutor`（`max_workers=len(targets)`、対象数と同じ3ワーカー）で対象ごとに独立したスレッドへ`_wait_for_service`を並列実行させ、各サービスの起動待ち・判定を並行して行う。以前は3対象を直列にリトライしており、全滅時は最悪ケースで（対象数）×（1対象あたりの最大待ち時間）＝最大6分間notifyがブロックされていたが、並列化により最悪時間を単一対象のリトライ時間（最大2分）程度まで縮めている。
-* 根拠: `def check_services(self):` (行番号: 203〜219 / 抜粋: "def check_services(self):"), `with ThreadPoolExecutor(max_workers=len(targets)) as executor:\n            self.results.extend(executor.map(self._wait_for_service, targets))` (行番号: 200〜201 / 抜粋: "with ThreadPoolExecutor(max_workers=len(targets)) as executor:")
+* 根拠: `def check_services(self):` (行番号: 204〜221 / 抜粋: "def check_services(self):"), `with ThreadPoolExecutor(max_workers=len(targets)) as executor:\n            self.results.extend(executor.map(self._wait_for_service, targets))` (行番号: 200〜201 / 抜粋: "with ThreadPoolExecutor(max_workers=len(targets)) as executor:")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 203 / 抜粋: "def check_services(self):")
+* 根拠: (行番号: 204 / 抜粋: "def check_services(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ、`executor.map`が返す各サービスの `CheckResult` を対象の元の順序のまま追加）
@@ -358,14 +360,14 @@
 
 
 * **エラーハンドリング**: 明示的な例外捕捉はなし（`_wait_for_service`側にも例外捕捉はなく、`_check_port`/`_check_http`が内部で例外を吸収して`bool`を返す設計に依存している）。
-* 根拠: (行番号: 203〜219 / 抜粋: "def check_services(self):")
+* 根拠: (行番号: 204〜221 / 抜粋: "def check_services(self):")
 
 
 
 ### `PostBootHealthCheck._wait_for_service`
 
 * **役割**: 1つのサービス対象（`target`辞書）について、`type`（`"port"`または`"http"`）に応じて`_check_port`/`_check_http`で疎通確認し、成功するまで最大`max_retries`回・`retry_interval`秒間隔でリトライしたうえで判定結果の`CheckResult`を返す。`check_services`から`ThreadPoolExecutor`経由で対象ごとに並列に呼び出されることを前提とした、旧`check_services`本体のリトライループを1対象分に切り出したメソッド。`critical=True`の対象（Backend Server, Family Quest, Dashboard の3件すべて）が全リトライ失敗した場合は`STATUS_ERR`とする（`critical=False`の対象は現状存在しないため`STATUS_WARN`に倒れる分岐は到達しない）。
-* 根拠: `def _wait_for_service(self, target: dict) -> CheckResult:` (行番号: 222〜245 / 抜粋: "def _wait_for_service(self, target: dict) -> CheckResult:")
+* 根拠: `def _wait_for_service(self, target: dict) -> CheckResult:` (行番号: 223〜246 / 抜粋: "def _wait_for_service(self, target: dict) -> CheckResult:")
 
 
 * **引数/リクエスト**: `target: dict`（`"name"`, `"type"`, `"val"`, `"critical"`の各キーを持つ、`check_services`内で定義される対象定義。`Dashboard`は`{"name": "Dashboard", "type": "port", "val": 8501, "critical": True}`）
@@ -388,11 +390,11 @@
 ### `PostBootHealthCheck.check_peripherals`
 
 * **役割**: NASのマウント状況と書き込み権限、防犯カメラ群のポート疎通、スピーカー（サウンドカードまたはBluetooth接続）の状態をチェックする。NAS書き込み権限エラー時は即座にDiscord通知を送信する。カメラは `config.CAMERAS` が空（`devices.json` 読み込み失敗等）の場合 `STATUS_WARN "No Config"` とする。スピーカーは `TARGET_BLUETOOTH_MAC`（モジュールレベルで `resolve_target_bluetooth_mac()` により、`config.ENABLE_BLUETOOTH` が真の場合のみ `config.SPEAKER_BLUETOOTH_MAC` から取得され、それ以外は `None` となりサウンドカード確認にフォールバックする）が設定されていれば、`stdin=subprocess.DEVNULL`・`timeout=15`を指定した `bluetoothctl info` による実際のBluetooth接続確認を行う。
-* 根拠: `def check_peripherals(self) -> None:` (行番号: 248〜332 / 抜粋: "def check_peripherals(self) -> None:")
+* 根拠: `def check_peripherals(self) -> None:` (行番号: 249〜333 / 抜粋: "def check_peripherals(self) -> None:")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 248 / 抜粋: "def check_peripherals(self) -> None:")
+* 根拠: (行番号: 249 / 抜粋: "def check_peripherals(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`（`self.results` へNAS・カメラ・スピーカーの各 `CheckResult` を追加）
@@ -412,11 +414,11 @@
 ### `PostBootHealthCheck.check_recent_logs`
 
 * **役割**: ログファイルの末尾200行を取得し、直近10分以内に出力された `ERROR` または `CRITICAL` を含む行のみを抽出して結果を判定する。`tail` サブプロセス実行自体が失敗した場合は、ログを読めていない旨を `STATUS_WARN` として明示し、以降の行走査には進まない（旧実装では例外を捕捉してログ出力するのみで `error_lines` が空のまま `STATUS_OK "Clean"` に落ちていたが、修正済み）。
-* 根拠: `def check_recent_logs(self):` (行番号: 335〜377 / 抜粋: "def check_recent_logs(self):")
+* 根拠: `def check_recent_logs(self):` (行番号: 336〜378 / 抜粋: "def check_recent_logs(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 335 / 抜粋: "def check_recent_logs(self):")
+* 根拠: (行番号: 336 / 抜粋: "def check_recent_logs(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ `CheckResult` を追加。ログファイル未存在時・`tail` 失敗時はいずれも途中で `return`）
@@ -432,41 +434,52 @@
 
 
 
+### `PostBootHealthCheck.check_security_posture`
+
+* **役割**: **（Issue #799 で追加）** 未設定のせいで保護が黙って無効になっている設定を `core/security_posture.py` に問い合わせ、`CheckResult("Security", ...)` として結果に追加する。問題が無ければ `STATUS_OK`（「保護が無効な設定なし」）、1件以上あれば `STATUS_WARN` と、設定名・Issue 番号・無効になっている保護を並べた明細を追加する。
+* 根拠: `def check_security_posture(self):` (行番号: 380)
+* **なぜ起動レポートに載せるか**: docstring によれば、個別の警告は `handlers/alexa_handler.py` や `unified_server.py` に以前から存在したが **ログにしか出ない**ため数か月気づかれなかった（#319 は起票から未対応のまま、#799 は 2026-09-20 に発見）。起動レポートは Discord に届く唯一の定期的な出力であるため、ここに1行載せて可視化する。
+* **引数/リクエスト**: `self` のみ
+* **戻り値/レスポンス**: なし（`self.results` に追加する）
+* **副作用**: `self.results` への `CheckResult` 追加。判定失敗時は `logger.error`
+* **エラーハンドリング**: `check_security_posture(config)` 全体を `try/except Exception` で囲み、判定自体が失敗しても**起動レポートを落とさない**（他のチェック結果は届けたいため）。失敗時は `logger.error(..., exc_info=True)` を出したうえで `STATUS_WARN` の「判定に失敗」を結果に追加して `return` する
+* **設定値を通知に載せない**: 明細に出すのは `f.key` / `f.ref` / `f.protection` のみで、設定の値（トークン等）は含めない。起動レポートは Discord に送られるため
+
 ### `PostBootHealthCheck.run`
 
-* **役割**: 各チェックメソッド（ネットワーク・システムリソース・DB・周辺機器・サービス・ログ）を順に実行し、最後にレポート送信を行う。
-* 根拠: `def run(self):` (行番号: 380〜388 / 抜粋: "def run(self):")
+* **役割**: 各チェックメソッド（ネットワーク・システムリソース・DB・周辺機器・サービス・ログ・**（Issue #799 で追加）**セキュリティ設定）を順に実行し、最後にレポート送信を行う。
+* 根拠: `def run(self):` (行番号: 413)
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 380 / 抜粋: "def run(self):")
+* 根拠: (行番号: 413 / 抜粋: "def run(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 380〜388 / 抜粋: "def run(self):")
+* 根拠: (行番号: 413〜422 / 抜粋: "def run(self):")
 
 
-* **副作用**: `logger.info` によるログ出力、各チェックメソッドの実行、`self._send_report()` の呼び出し。
-* 根拠: `self.check_network_and_apis()` 〜 `self._send_report()` (行番号: 363〜369 / 抜粋: "self._send_report()")
+* **副作用**: `logger.info` によるログ出力、各チェックメソッドの実行、`self._send_report()` の呼び出し。**（Issue #799 で追加）** `self.check_security_posture()` が `self.check_recent_logs()` と `self._send_report()` の間に入る。
+* 根拠: `self.check_network_and_apis()` 〜 `self._send_report()` (行番号: 413〜421 / 抜粋: "self.check_security_posture()")
 
 
 * **エラーハンドリング**: なし（各チェックメソッド内部で個別に処理される前提）
-* 根拠: (行番号: 380〜388 / 抜粋: "def run(self):")
+* 根拠: (行番号: 413〜422 / 抜粋: "def run(self):")
 
 
 
 ### `PostBootHealthCheck._send_report`
 
 * **役割**: `self.results` の内容からステータスアイコン付きのレポート文字列を組み立て、ログ出力とDiscord通知を行う。
-* 根拠: `def _send_report(self):` (行番号: 390〜423 / 抜粋: "def _send_report(self):")
+* 根拠: `def _send_report(self):` (行番号: 424〜457 / 抜粋: "def _send_report(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 390 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 424 / 抜粋: "def _send_report(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 390〜423 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 424〜457 / 抜粋: "def _send_report(self):")
 
 
 * **副作用**: `self._get_uptime()` の呼び出し、`logger.info` によるレポート全文のログ出力、`services.notification_service.send_push` によるDiscord通知送信。
@@ -474,7 +487,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 390〜423 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 424〜457 / 抜粋: "def _send_report(self):")
 
 
 
