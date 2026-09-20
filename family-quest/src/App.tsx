@@ -594,6 +594,7 @@ function App() {
                   flow={routineFlows[activeRoutineKey]}
                   onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}
                   isCompleting={isCompletingRoutine}
+                  isAdult={isParentUser(currentUser)}
                 />
               )}
 

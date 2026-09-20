@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Sword, ShoppingBag, Package } from 'lucide-react';
 import { User, Quest, QuestHistory, Reward } from '@/types';
+import { isParentUser } from '@/lib/userRole';
 import UserStatusCard from './UserStatusCard';
 import QuestList from '../../quest/components/QuestList';
 import ApprovalList from '../../quest/components/ApprovalList';
@@ -217,6 +218,7 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
                         onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}
                         isCompleting={isCompletingRoutine}
                         compact
+                        isAdult={isParentUser(user)}
                     />
                 )}
 
