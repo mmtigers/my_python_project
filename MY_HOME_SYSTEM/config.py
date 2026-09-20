@@ -421,6 +421,14 @@ if ALLOW_ALL_ORIGINS:
 # 他端末からのアクセスを想定したホストのIP指定のため、この用途には流用しない)。
 RESET_GAME_API_BASE_URL: str = os.getenv("RESET_GAME_API_BASE_URL", "http://127.0.0.1:8000")
 
+# Issue #738 (AUDIT-008): monitors/routine_deadline_job.py(スケジューラの定期タスク)が
+# ルーティンの締切処理API(POST /api/routine/deadlines/process)を呼ぶ際のベースURL。
+# スケジューラはunified_serverと同じホストで動くため既定値はループバック
+# (RESET_GAME_API_BASE_URL・HEALTH_WATCH_PROBE_BASE_URLと同じ考え方)。
+ROUTINE_DEADLINE_API_BASE_URL: str = os.getenv("ROUTINE_DEADLINE_API_BASE_URL", "http://127.0.0.1:8000")
+# 締切処理APIのタイムアウト秒。家族4人分のループを1リクエストで処理する。
+ROUTINE_DEADLINE_API_TIMEOUT_SEC: int = _get_int_env("ROUTINE_DEADLINE_API_TIMEOUT_SEC", 30)
+
 UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
 # M-9-3: /api/quest/upload にファイルサイズ上限が無く、巨大アップロードで
 # ディスクを圧迫し得た。アバター画像用途を想定した上限とする。

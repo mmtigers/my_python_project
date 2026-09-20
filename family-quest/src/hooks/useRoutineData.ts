@@ -4,9 +4,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { routineActiveFlowSchema, routineTodayResponseSchema, RoutineTodayResponse } from '../lib/routineDataSchema';
 
-// チェックポイント(自由時間の終了)はサーバー側で時刻ベースに強制通過させる遅延評価
-// (services/routine_service.py の _apply_forced_transition)のため、フロントは
-// 短い間隔でポーリングして「時刻になった瞬間」の反映をそう待たせずに拾う。
+// チェックポイント(自由時間の終了)はサーバー側で時刻ベースに強制通過する
+// (services/routine_service.py の _apply_forced_transition)。Issue #738 (AUDIT-008)
+// 以降、その処理はスケジューラの定期タスク(monitors/routine_deadline_job.py、60秒間隔)が
+// 行い、GET /api/routine/today は純粋な読み取りになった(ポーリング自体が報酬付与の
+// トリガーになる状態を無くすため)。フロントは引き続き短い間隔でポーリングして、
+// サーバー側で確定した状態を拾う。
 const POLL_INTERVAL_MS = 1000 * 15;
 
 // レベルアップ通知(useGameData.tsのonLevelUpと同じ形): チェックポイント通過に
@@ -41,7 +44,12 @@ export const useRoutineData = (
     // コードレビューで発覚: チェックポイント通過ボーナスのレベルアップは、本人が
     // ステップを完了した「その場」(completeStepMutationのonSuccess)だけでなく、
     // 何も操作せず自由時間中に締切時刻を過ぎた場合はポーリング(GET /today)側の
-    // _apply_forced_transitionで受動的に起こる。useQueryにはonSuccessが無い(v5)ため、
+    // _apply_forced_transitionで受動的に起こっていた。
+    // Issue #738 (AUDIT-008): その付与はスケジューラ側へ移ったため、GET の応答が
+    // leveled_up=true を返すことは現在は無い(「その1回だけ立つ」フラグは、書き込みを
+    // 行ったリクエストの応答でしか運べない)。操作に対する応答(completeStep)側の
+    // 経路は従来どおり動く。この監視は将来サーバーが再び通知経路を持ったときに
+    // そのまま効くよう残してある。useQueryにはonSuccessが無い(v5)ため、
     // dataの変化をここで監視してonLevelUpを発火する。leveled_upはサーバー側で
     // 通過した「その1回のレスポンス」でのみtrueになる(以後は冪等ガードでfalseに戻る)が、
     // React Queryのキャッシュ再利用(構造共有・再マウント)で同じtrueを2度受け取っても
