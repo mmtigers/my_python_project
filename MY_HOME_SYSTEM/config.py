@@ -272,6 +272,19 @@ DISCORD_WEBHOOK_URL: Optional[str] = DISCORD_WEBHOOK_NOTIFY or os.getenv("DISCOR
 
 # Gemini
 GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
+# Issue #801: 以前は services/ai_service.py に 'gemini-2.0-flash' が直書きされており、
+# Google 側の提供終了(2026-09-20 に 404 NOT_FOUND を確認)で **LINE Bot の対話機能が
+# 丸ごと停止**した。復旧に PR とデプロイが必要な状態だったため、.env で差し替えられる
+# ようにする(次に提供終了したときは .env と再起動だけで戻せる)。
+#
+# 既定の `gemini-flash-latest` は「常に最新の安定版」を指すエイリアスで、
+# 個別バージョンのように提供終了しない。引き換えに、指し先が変わると応答の
+# 振る舞いが予告なく変わりうるが、**全停止より軽い**という判断(要件確認済み)。
+# 固定したい場合は .env で `GEMINI_MODEL=gemini-3.8-flash` のように明示する。
+#
+# 設定したモデルが実在するかは post_boot_health_check の check_ai_model が
+# 起動時に検査し、起動レポート(Discord)に載せる。
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip() or "gemini-flash-latest"
 
 # ==========================================
 # 3. システム・パス設定
