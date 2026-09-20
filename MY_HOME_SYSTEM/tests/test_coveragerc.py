@@ -15,6 +15,12 @@ Issue #367: 旧テストはワイルドカード(*)付きエントリを検査�
 また omit は「本当に実行不能なもの(Streamlit UI)」だけに絞る方針になった
 ため、専用テストが存在するモジュールが再び omit されないよう、許可リスト
 との一致も検証する。
+
+Issue #754: その残り分だった `views/dashboard/*` を omit から外した。
+各 render 関数は `st` を差し替えれば Streamlit を起動せずに検証でき
+(tests/test_dashboard_*.py)、除外したままではこの領域だけカバレッジの
+ラチェットが効かなかった。import しただけで `st.set_page_config()` が走る
+`dashboard.py` のみが「実行不能」に当てはまるため残している。
 """
 import configparser
 import glob
@@ -22,15 +28,15 @@ import os
 
 MY_HOME_SYSTEM_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Issue #367 で確定した omit の許可リスト。ここに無いエントリを追加すると
-# テストが落ちる(=「テスト済みモジュールを omit で隠す」退行の防止)。
+# Issue #367 で確定し、Issue #754 で `views/dashboard/*` を外した omit の
+# 許可リスト。ここに無いエントリを追加するとテストが落ちる
+# (=「テスト済みモジュールを omit で隠す」退行の防止)。
 # 追加が本当に必要な場合(単体テストで実行不能なUI等)は、このリストと
 # .coveragerc の両方を同じPRで更新すること。
 ALLOWED_OMIT_ENTRIES = {
     "tests/*",
     "*/__init__.py",
     "dashboard.py",
-    "views/dashboard/*",
 }
 
 

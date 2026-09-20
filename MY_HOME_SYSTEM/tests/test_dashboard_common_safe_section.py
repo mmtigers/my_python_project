@@ -69,11 +69,12 @@ class TestDashboardTabIsolation:
         with ExitStack() as stack:
             stack.enter_context(patch.object(dashboard, "st", mock_st))
             stack.enter_context(patch.object(view_common, "st", mock_st))
-            stack.enter_context(patch.object(dashboard.analysis_service, "load_sensor_data", return_value=pd.DataFrame()))
-            stack.enter_context(patch.object(dashboard.analysis_service, "load_generic_data", return_value=pd.DataFrame()))
+            # Issue #741: 読み込みは view_common のキャッシュ付きラッパー経由
+            stack.enter_context(patch.object(view_common, "load_sensor_data_cached", return_value=pd.DataFrame()))
+            stack.enter_context(patch.object(view_common, "load_generic_data_cached", return_value=pd.DataFrame()))
+            stack.enter_context(patch.object(view_common, "load_bicycle_data_cached", return_value=pd.DataFrame()))
+            stack.enter_context(patch.object(view_common, "load_nas_status_cached", return_value=None))
             stack.enter_context(patch.object(dashboard.analysis_service, "apply_friendly_names", return_value=pd.DataFrame()))
-            stack.enter_context(patch.object(dashboard.analysis_service, "load_bicycle_data", return_value=pd.DataFrame()))
-            stack.enter_context(patch.object(dashboard.analysis_service, "load_nas_status", return_value=None))
             stack.enter_context(patch.object(dashboard.summary, "render_summary"))
             stack.enter_context(patch.object(dashboard.misc_tab, "render_traffic", side_effect=RuntimeError("train tab exploded")))
             stack.enter_context(patch.object(dashboard.misc_tab, "render_photos"))

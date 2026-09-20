@@ -1,6 +1,7 @@
 import errno
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -14,6 +15,7 @@ from core import state_file
 from core.logger import setup_logging
 from core.database import save_log_generic
 from core.utils import get_now_iso, retry_with_backoff, get_now_jst
+from services import db_retention_service
 from services.notification_service import send_push
 
 # ロガー設定
@@ -353,11 +355,34 @@ class NasMonitor:
                 )
                 summary_lines.append(f"- {label}: {result['deleted_count']}件 / {result['freed_gb']}GB")
 
+        # Issue #733 (AUDIT-003): ここまでの削除対象はすべて「ファイル」で、
+        # SQLite の「行」を消す経路はリポジトリ内に1つも無かった。同じ1日1回の
+        # タイミングで行の保持期間削除も行う。既定(DB_ROW_RETENTION_ENABLED=false)は
+        # ドライランで、削除予定件数を数えて報告するだけで1行も消さない。
+        summary_lines.extend(self._run_db_row_retention())
+
         if summary_lines:
             send_push(
                 [{"type": "text", "text": "🗑️ **古いファイルの自動削除**\n" + "\n".join(summary_lines)}],
                 target="discord", channel="report"
             )
+
+    def _run_db_row_retention(self) -> list[str]:
+        """SQLite の行の保持期間削除を実行し、通知に載せる行を返す (Issue #733)。
+
+        DB 側の失敗を捕まえているのは、ファイル削除の集計結果(この時点で削除は
+        既に済んでいる)の通知まで道連れにしないため。捕捉を sqlite3.Error と OSError に
+        絞っているのは、この経路で現実に起きるのが「DB のロック・破損」と
+        「バックアップ先(NAS)が見えない」の2種だからで、それ以外の例外は
+        バグとして呼び出し元へ伝播させる(握り潰すと気づけない)。
+        失敗は logger.error 経由で Discord の error チャンネルへ流れる。
+        """
+        try:
+            outcome = db_retention_service.run_db_retention()
+            return db_retention_service.format_summary_lines(outcome)
+        except (sqlite3.Error, OSError) as e:
+            logger.error(f"❌ DBの行の保持期間削除に失敗しました: {e}")
+            return []
 
     def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:
         """状態をDBに保存"""
