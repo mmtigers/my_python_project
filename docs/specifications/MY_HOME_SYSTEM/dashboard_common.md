@@ -30,9 +30,9 @@
 * 根拠: `def load_sensor_data_cached(limit: int) -> pd.DataFrame:` (行番号: 155)
 
 * **（スマホ対応で追加）** `StatusCard`（`NamedTuple`）と `render_status_grid` を提供する。ステータスカードの列数の決定は`st.columns`ではなくCSS Grid（`.status-grid` の `repeat(auto-fit, minmax(150px, 1fr))`）に委ねられ、スマホでは2列・PCでは3〜5列に自動で切り替わる。
-* 根拠: `class StatusCard(NamedTuple):` (行番号: 178 / 抜粋: "class StatusCard(NamedTuple):"), `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 213 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
-* `render_status_card_html`は、タイトル・値・テーマ名に加えてキーワード専用引数 `value_is_html`(既定 `False`)を受け取り、`status-card {theme}`クラスを持つ`div`要素のHTML文字列を組み立てて返す純粋関数である。`value_is_html=True` のときは値をエスケープせずそのまま埋め込む。**(Issue #655 で訂正: 本仕様書は `check_spec_line_refs.py` の索引の死角により長らく未検証で、3引数だった頃のシグネチャと行番号が残っていた。)**
-* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:\n    """ステータスカードのHTMLを生成"""\n    return f"""\n    <div class="status-card {theme}">` (行番号: 190〜210 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")
+* 根拠: `class StatusCard(NamedTuple):` (行番号: 178 / 抜粋: "class StatusCard(NamedTuple):"), `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 222 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
+* `render_status_card_html`は、タイトル・値・テーマ名に加えてキーワード専用引数 `value_is_html`(既定 `False`)を受け取り、`status-card {theme}`クラスを持つ`div`要素のHTML文字列を組み立てて返す純粋関数である。`value_is_html=True` のときは値をエスケープせずそのまま埋め込む。**(Issue #655 で訂正: 本仕様書は `check_spec_line_refs.py` の索引の死角により長らく未検証で、3引数だった頃のシグネチャと行番号が残っていた。)** **(スマホ表示崩れの修正で変更)** 戻り値は改行・インデントを一切含まない1行のHTML文字列である（理由は下記「既知の問題」を参照）。
+* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 190 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")
 
 ## 3. 外部依存関係
 
@@ -246,8 +246,8 @@
 * 根拠: 関数シグネチャ (行番号: 143)
 
 
-* **戻り値/レスポンス**: `str` (`<div class="status-card {theme}">`内に、エスケープ後の`title`/`value`を埋め込んだHTML文字列)
-* 根拠: `return f"""\n    <div class="status-card {theme}">\n        <div class="status-title">{safe_title}</div>\n        <div class="status-value">{safe_value}</div>\n    </div>\n    """` (行番号: 159〜164 / 抜粋: "return f\"\"\"")
+* **戻り値/レスポンス**: `str` (`<div class="status-card {theme}">`内に、エスケープ後の`title`/`value`を埋め込んだHTML文字列)。**（スマホ表示崩れの修正で変更）** 以前は整形用の改行と4スペース字下げを含む複数行の三重引用符f-stringを返していたが、現在は改行もインデントも持たない1行の文字列を返す。この空白の有無が `render_status_grid` の描画結果を左右する（下記「既知の問題」参照）。
+* 根拠: `return (\n        f'<div class="status-card {theme}">'\n        f'<div class="status-title">{safe_title}</div>'\n        f'<div class="status-value">{safe_value}</div>'\n        f'</div>'\n    )` (行番号: 215〜220 / 抜粋: "        f'<div class=\"status-card {theme}\">'")
 
 
 * **副作用**: なし（文字列を生成して返すのみの純粋関数。画面描画・外部I/Oは行わない）
@@ -262,15 +262,15 @@
 ### `render_status_grid` (スマホ対応で追加)
 
 * **役割**: `StatusCard` の並びを `render_status_card_html` で1枚ずつHTML化し、`<div class="status-grid">` で囲んで1回の `st.markdown(..., unsafe_allow_html=True)` で描画する。docstringに、以前は `st.columns(3)` を3段重ねて9枚を並べていたが、Streamlitの列は画面幅が足りなくても横並びを維持するためスマートフォンでは1枚あたり約100pxまで潰れて値が読めなかったこと、列数の決定をCSS（`.status-grid`のauto-fit）に委ねることでスマホ2列・PC3〜5列に自動で切り替わることが記されている。
-* 根拠: `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 213〜225 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
+* 根拠: `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 222〜234 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
 
 
 * **引数/リクエスト**: `cards` (型: `Iterable[StatusCard]`)
-* 根拠: 関数シグネチャ (行番号: 213 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
+* 根拠: 関数シグネチャ (行番号: 222 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 関数シグネチャ (行番号: 213 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
+* 根拠: 関数シグネチャ (行番号: 222 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
 
 
 * **副作用**: `st.markdown` による画面描画（`unsafe_allow_html=True`）。
@@ -285,7 +285,7 @@
 ### `safe_section` (コンテキストマネージャ、Issue #438で追加)
 
 * **役割**: ダッシュボードの1セクション(タブ・サマリー等)の描画を`with`ブロックとして囲み、内部で発生した例外を捕捉してそのセクションのプレースホルダ表示に閉じ込める。以前は`dashboard.py`の`main()`全体を1つの`try/except`で囲んでおり、いずれか1つのタブの描画で例外が起きるとダッシュボード全体がエラー画面になり、無関係な他のタブの表示まで巻き込んでいた。本関数の導入により、`dashboard.py`はセクション単位で例外を隔離するようになった（**スマホ対応で変更**: 保護の単位は「タブ」ではなく、1つのタブ内の各セクション。`quest_tab.py`はスマホ対応で撤去された）。L-L5 (#410)と同じ方針で、`traceback`等の内部詳細(ファイルパス・設定値等)は画面に出さずログにのみ残す。
-* 根拠: 関数Docstring・実装 (行番号: 229〜248 / 抜粋: "def safe_section(section_name: str):")
+* 根拠: 関数Docstring・実装 (行番号: 238〜257 / 抜粋: "def safe_section(section_name: str):")
 
 
 * **引数/リクエスト**: `section_name` (型: `str`。エラーメッセージに含めるセクション名。例: `"クエスト"`)
@@ -390,6 +390,9 @@ graph TD
 * **[Issue #741] キャッシュは View 層に閉じ込めること**: `analysis_service` は `unified_server.py` からもインポートされるため、`@st.cache_data` を `analysis_service` 側へ移すとサーバープロセスが Streamlit に依存してしまう。キャッシュ付きラッパーは本ファイルに置き、`analysis_service` 本体は素のままにしておくこと（`tests/test_dashboard_cache.py` の `test_analysis_service_does_not_depend_on_streamlit` が固定している）。
 * **[Issue #741] キャッシュはプロセス内でグローバルに残る**: `@st.cache_data` のキーは関数の引数だけで決まるため、テストで `analysis_service` の関数を差し替えてもキャッシュは無効化されない。`views/dashboard/common.py` のローダを実行するテストは、前後で `st.cache_data.clear()` を呼ぶこと（`tests/test_dashboard_cache.py` の autouse フィクスチャ参照）。差し替える側のテストは、素の `analysis_service` ではなく `view_common.load_*_cached` を差し替えるほうが安全。
 * **[Issue #741] TTL を延ばすときの判断材料**: `DASHBOARD_CACHE_TTL_SEC` はセンサーの書き込み間隔より十分短い 60 秒にしてある。延ばすとダッシュボードが「今の状態」を見る用途で古い値を出す。逆に 0 にするとキャッシュが無効化され、`st.cache_data.clear()` を呼ぶ「🔄 データを更新」ボタンが再び無意味になる。
+
+* **[修正済み] カードのHTMLがMarkdownのインデントコードブロックとして生表示される**: `st.markdown` は本文に `textwrap.dedent()` を掛けてからMarkdownとして解釈する（`streamlit.string_util.clean_text`）。`render_status_grid` が組み立てる文字列は先頭行 `<div class="status-grid">` がインデント0のため共通インデントが0になり、dedentは何も削らない。以前の `render_status_card_html` は整形用の改行と4スペース字下げを含む複数行を返していたため、カードとカードの間に「空白だけの行」ができてHTMLブロックが終端され、続く4スペース字下げの行がインデントコードブロックと解釈されていた。結果、1枚目のカードだけが正しく描画され、2枚目以降は `<div class="status-card...` という生のタグ文字列としてスマートフォン画面に並び（長い行が横幅も溢れさせ）、サマリーが読めない状態になっていた。`render_status_card_html` が整形用の空白を一切持たない1行を返すようにして解消した（`tests/test_dashboard_summary_status.py` の `TestRenderStatusGridIntegration` が、Streamlitの前処理を再現したうえで改行が残っていないことを固定している）。
+* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 190)、`def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 222)
 
 * **[修正済み] Issue #378 render_status_card_htmlの格納型XSS**: `title`/`value`は呼び出し元（`views/dashboard/summary.py`）が`unsafe_allow_html=True`でそのままStreamlitに渡すため、以前はエスケープ無しでf-stringに埋め込んでいた。`title`にDB/スクレイピング由来の文字列が渡ると格納型XSSになり得る構造だった（値そのものは本ファイル外から渡されるため、本ファイル単体では実際に危険な値が渡っているかは判断できない）。`html.escape`で`title`を常に、`value`も既定でエスケープするよう修正し、`get_bicycle_status`のように意図的にHTML断片を組み立てる呼び出し元向けにキーワード専用引数`value_is_html`（既定`False`）でエスケープをスキップできるようにした。
 * 根拠: `import html` (行番号: 2)、`html.escape` の呼び出し (行番号: 63〜64)、`value_is_html`引数 (行番号: 50)
