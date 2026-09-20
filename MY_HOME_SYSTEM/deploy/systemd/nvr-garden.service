@@ -1,0 +1,54 @@
+[Unit]
+Description=NVR Recording Service for Garden Camera
+# ネットワークとNASマウント完了を待つ(NASが未マウントのまま起動すると、
+# ローカルのSDカードへ録画を書き続けてしまうため Requires= で強く依存させる)
+After=network.target mnt-nas.mount
+Requires=mnt-nas.mount
+
+[Service]
+User=masahiro
+Group=masahiro
+Restart=always
+# 異常終了時の再起動待機時間
+RestartSec=10s
+
+# ログ出力設定 (journalctlで見れるように)
+StandardOutput=journal
+StandardError=journal
+
+# Issue #773: RTSPのURLはユーザー名・パスワードを含むため、ユニット本文には書かず
+# 実機の /etc/nvr/garden.env (600・root所有・gitignore対象外=リポジトリには存在しない)
+# から NVR_RTSP_URL として読み込む。以前は ExecStart に平文で書かれたユニットが
+# 644 で置かれており、リポジトリ管理もされていなかった。
+EnvironmentFile=/etc/nvr/garden.env
+
+# --- FFmpeg Command ---
+# -timeout 20000000: 20秒間データが来なければ諦めて終了する(Restart=always で再接続)。
+#   これが無いと、カメラがTCP接続を保ったままデータを送らなくなった場合に ffmpeg が
+#   無限に待ち、プロセスは生きているので systemd も再起動せず録画だけが静かに止まる
+#   (Issue #772 で garden のみ欠落していたのを実機で修正済み)。
+# -rtsp_transport tcp: 安定性重視
+# -c copy: 無劣化コピー (CPU負荷最小)
+# -tag:v hvc1: H.265 を一般的なプレイヤーが再生できるタグで格納する
+# -f segment / -segment_time 600: 10分ごとにファイル分割
+# -segment_format_options ...: 【重要】電源断時のファイル破損防止フラグ
+# -strftime 1: ファイル名に日時を使用(monitors/health_watch.py のチェック10が、
+#   この命名規則の最新ファイル時刻を見て録画停止を検知する)
+ExecStart=/usr/bin/ffmpeg \
+    -hide_banner -loglevel error \
+    -timeout 20000000 \
+    -rtsp_transport tcp -y \
+    -i "${NVR_RTSP_URL}" \
+    -c copy \
+    -c:a aac \
+    -tag:v hvc1 \
+    -f segment \
+    -segment_time 600 \
+    -segment_format_options movflags=+faststart+frag_keyframe+empty_moov \
+    -segment_format mp4 \
+    -reset_timestamps 1 \
+    -strftime 1 \
+    "/mnt/nas/home_system/nvr_recordings/garden/%%Y%%m%%d_%%H%%M%%S.mp4"
+
+[Install]
+WantedBy=multi-user.target
