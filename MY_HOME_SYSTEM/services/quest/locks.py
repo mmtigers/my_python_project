@@ -178,29 +178,116 @@ def get_youtube_daily_limit_minutes(today: datetime.date | None = None) -> int |
     return limit if limit > 0 else None
 
 
-def get_youtube_used_minutes_today(cur, user_id: str) -> int:
-    """
-    JSTの今日のうちに使用済みのYouTube系ごほうび券の、視聴分数の合計を返す。
+def _get_today_jst_prefix() -> str:
+    """JSTの今日の日付を "YYYY-MM-DD" で返す(ISO文字列の先頭一致に使う)。
 
-    日付の切り出しにSQLiteの date(used_at) を使わないのは意図的である:
-    used_at は core.utils.get_now_iso() が保存するJSTオフセット付きISO文字列
-    ("2026-09-20T08:00:00+09:00")で、SQLiteの日付関数はこれをUTCへ変換して
-    しまうため、JSTの朝9時より前に使った券が「前日」に数えられてしまう。
+    日付の切り出しにSQLiteの date(...) を使わないのは意図的である:
+    used_at / completed_at は core.utils.get_now_iso() が保存するJSTオフセット付き
+    ISO文字列("2026-09-20T08:00:00+09:00")で、SQLiteの日付関数はこれをUTCへ変換して
+    しまうため、JSTの朝9時より前の記録が「前日」に数えられてしまう。
     文字列の先頭一致(JSTの日付そのもの)で判定する。
     """
-    if not config.YOUTUBE_REWARD_IDS:
-        return 0
+    return datetime.datetime.now(JST).strftime("%Y-%m-%d")
 
-    today_prefix = datetime.datetime.now(JST).strftime("%Y-%m-%d")
+
+def _get_youtube_usages_today(cur, user_id: str) -> list:
+    """
+    JSTの今日のうちに使用済みのYouTube系ごほうび券を、(used_at, 視聴分数)の
+    リストで古い順に返す。
+    """
+    if not config.YOUTUBE_REWARD_IDS:
+        return []
+
     placeholders = ",".join("?" for _ in config.YOUTUBE_REWARD_IDS)
     # プレースホルダ個数のみf-stringで組み立て、値はパラメータ化している(B608誤検知)。
     rows = cur.execute(f"""
-        SELECT reward_id FROM user_inventory
+        SELECT used_at, reward_id FROM user_inventory
         WHERE user_id = ? AND status = 'consumed' AND reward_id IN ({placeholders})
           AND used_at LIKE ?
-    """, (user_id, *config.YOUTUBE_REWARD_IDS, f"{today_prefix}%")).fetchall()  # nosec B608
+        ORDER BY used_at
+    """, (user_id, *config.YOUTUBE_REWARD_IDS, f"{_get_today_jst_prefix()}%")).fetchall()  # nosec B608
 
-    return sum(get_youtube_reward_duration_minutes(row['reward_id']) for row in rows)
+    return [(row['used_at'], get_youtube_reward_duration_minutes(row['reward_id'])) for row in rows]
+
+
+def get_youtube_used_minutes_today(cur, user_id: str) -> int:
+    """JSTの今日のうちに使用済みのYouTube系ごほうび券の、視聴分数の合計を返す。"""
+    return sum(minutes for _used_at, minutes in _get_youtube_usages_today(cur, user_id))
+
+
+def _get_extension_quest_completions_today(cur, user_id: str) -> list:
+    """
+    JSTの今日のうちに完了し、かつ**親に承認された**延長対象クエスト
+    (config.YOUTUBE_EXTENSION_QUEST_IDS = プリント等)の completed_at を古い順に返す。
+
+    `status = 'approved'` に限定しているのは、やっていないプリントを「やった」と
+    報告するだけで視聴時間を延ばせてしまわないようにするため(承認前の 'pending' は
+    数えない)。並べ替えに使うのは承認時刻ではなく completed_at(子どもが実際に
+    やった時刻)で、「上限に達した後にやったか」はこちらで判定するのが自然なため。
+    """
+    if not config.YOUTUBE_EXTENSION_QUEST_IDS:
+        return []
+
+    placeholders = ",".join("?" for _ in config.YOUTUBE_EXTENSION_QUEST_IDS)
+    # プレースホルダ個数のみf-stringで組み立て、値はパラメータ化している(B608誤検知)。
+    rows = cur.execute(f"""
+        SELECT completed_at FROM quest_history
+        WHERE user_id = ? AND status = 'approved' AND quest_id IN ({placeholders})
+          AND completed_at LIKE ?
+        ORDER BY completed_at
+    """, (user_id, *config.YOUTUBE_EXTENSION_QUEST_IDS, f"{_get_today_jst_prefix()}%")).fetchall()  # nosec B608
+
+    return [row['completed_at'] for row in rows]
+
+
+def get_youtube_daily_limit_with_extensions(cur, user_id: str, base_limit_minutes: int) -> tuple[int, int]:
+    """
+    その日の実効上限(分)と、プリントによって延長された回数を返す。
+
+    「上限に達した**後に**やったプリントだけが延長になる」という規則を実装する。
+    朝の日課としてやったプリントで上限が最初から伸びているのでは「もっと見たいから
+    もう1枚やる」という交換にならないため、今日の出来事(券の使用とプリントの完了)を
+    時系列に並べ、プリントの時点で既に上限を使い切っていた場合だけ延長を与える。
+
+    同じ時刻に券の使用とプリントが並んだ場合は券の使用を先に処理する(その使用で
+    上限に達したなら、同時刻のプリントは「達した後」として扱う)。
+
+    延長の回数は config.YOUTUBE_EXTENSION_MAX_PER_DAY までに制限する。
+    """
+    minutes_per_quest = config.YOUTUBE_EXTENSION_MINUTES_PER_QUEST
+    max_per_day = config.YOUTUBE_EXTENSION_MAX_PER_DAY
+    if minutes_per_quest <= 0 or max_per_day <= 0 or not config.YOUTUBE_EXTENSION_QUEST_IDS:
+        return base_limit_minutes, 0
+
+    # (タイムスタンプ, 種別) で並べ替える。種別は 0=券の使用 / 1=プリント完了 で、
+    # 同時刻なら使用を先に処理するための第2キーとして効かせる。
+    events = [(used_at, 0, minutes) for used_at, minutes in _get_youtube_usages_today(cur, user_id)]
+    events += [(completed_at, 1, 0) for completed_at in _get_extension_quest_completions_today(cur, user_id)]
+    events.sort(key=lambda e: (e[0], e[1]))
+
+    effective_limit = base_limit_minutes
+    used_minutes = 0
+    granted = 0
+    for _timestamp, kind, minutes in events:
+        if kind == 0:
+            used_minutes += minutes
+        elif used_minutes >= effective_limit and granted < max_per_day:
+            effective_limit += minutes_per_quest
+            granted += 1
+
+    return effective_limit, granted
+
+
+def can_extend_youtube_limit_now(used_minutes: int, effective_limit: int, granted: int) -> bool:
+    """
+    「今プリントを1枚やれば上限が延びる」状態かどうかを返す。
+
+    family-quest側が「プリントを1枚やると+30分」と案内するかどうかの判定に使い、
+    get_youtube_daily_limit_with_extensions のループ内の条件と同じ式を共有する。
+    """
+    if config.YOUTUBE_EXTENSION_MINUTES_PER_QUEST <= 0 or not config.YOUTUBE_EXTENSION_QUEST_IDS:
+        return False
+    return used_minutes >= effective_limit and granted < config.YOUTUBE_EXTENSION_MAX_PER_DAY
 
 
 def _is_youtube_cooldown_enforced() -> bool:

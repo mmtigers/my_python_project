@@ -156,6 +156,14 @@ const inventoryItemSchema = z.object({
     youtube_duration_minutes: z.number().nullable().optional(),
 });
 
+// プリントによる日次上限の延長状態(InventoryService.get_user_inventory の youtube_extension)。
+const youtubeExtensionSchema = z.object({
+    minutes_per_quest: z.number(),
+    granted_count: z.number(),
+    max_per_day: z.number(),
+    can_extend_now: z.boolean(),
+});
+
 export const inventoryResponseSchema = z.object({
     items: z.array(inventoryItemSchema),
     youtube_cooldown_remaining_seconds: z.number(),
@@ -164,6 +172,8 @@ export const inventoryResponseSchema = z.object({
     youtube_daily_limit_minutes: z.number().nullable(),
     youtube_daily_used_minutes: z.number(),
     youtube_daily_limit_announcement: youtubeCooldownAnnouncementSchema.nullable(),
+    // 延長機能が無効のときはnull。
+    youtube_extension: youtubeExtensionSchema.nullable(),
 });
 
 // GET /api/cameras/settings のレスポンス(camera_router.py の CameraSettingsResponse)。

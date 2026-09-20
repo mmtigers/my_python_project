@@ -53,6 +53,12 @@ function inventoryResponse(overrides: Partial<InventoryResponse> = {}): Inventor
         youtube_daily_limit_minutes: 60,
         youtube_daily_used_minutes: 0,
         youtube_daily_limit_announcement: null,
+        youtube_extension: {
+            minutes_per_quest: 30,
+            granted_count: 0,
+            max_per_day: 2,
+            can_extend_now: false,
+        },
         ...overrides,
     };
 }
@@ -198,5 +204,90 @@ describe('InventoryList YouTube視聴制限', () => {
 
         await waitFor(() => expect(screen.getByText('Youtube (30:00)')).toBeInTheDocument());
         expect(screen.queryByText(/きょうのYouTube:/)).not.toBeInTheDocument();
+    });
+});
+
+describe('InventoryList プリントによる上限の延長', () => {
+    afterEach(() => {
+        cleanup();
+        vi.resetAllMocks();
+    });
+
+    it('延長できる状態なら、残り分数の表示でプリントを案内する', async () => {
+        vi.mocked(apiClient.fetchInventory).mockResolvedValue(
+            inventoryResponse({
+                youtube_daily_used_minutes: 60,
+                youtube_extension: {
+                    minutes_per_quest: 30,
+                    granted_count: 0,
+                    max_per_day: 2,
+                    can_extend_now: true,
+                },
+            }),
+        );
+
+        renderWithClient(<InventoryList userId="son" />);
+
+        await waitFor(() =>
+            expect(screen.getByText('プリントを1枚やると、あと30分ふえるよ📝')).toBeInTheDocument(),
+        );
+    });
+
+    it('延長できる状態なら、使えない券の理由もプリントの案内にする', async () => {
+        vi.mocked(apiClient.fetchInventory).mockResolvedValue(
+            inventoryResponse({
+                youtube_daily_used_minutes: 60,
+                youtube_extension: {
+                    minutes_per_quest: 30,
+                    granted_count: 0,
+                    max_per_day: 2,
+                    can_extend_now: true,
+                },
+            }),
+        );
+
+        renderWithClient(<InventoryList userId="son" />);
+
+        await waitFor(() =>
+            expect(
+                screen.getByText('きょうのぶんはおしまい。プリントを1枚やると30分ふえるよ'),
+            ).toBeInTheDocument(),
+        );
+        expect(screen.queryByText(/また明日つかおうね/)).not.toBeInTheDocument();
+    });
+
+    it('延長を使い切っていれば「また明日」に戻る', async () => {
+        vi.mocked(apiClient.fetchInventory).mockResolvedValue(
+            inventoryResponse({
+                youtube_daily_limit_minutes: 120,
+                youtube_daily_used_minutes: 120,
+                youtube_extension: {
+                    minutes_per_quest: 30,
+                    granted_count: 2,
+                    max_per_day: 2,
+                    can_extend_now: false,
+                },
+            }),
+        );
+
+        renderWithClient(<InventoryList userId="son" />);
+
+        await waitFor(() =>
+            expect(screen.getByText('きょうのYouTubeはおしまい。また明日つかおうね')).toBeInTheDocument(),
+        );
+        expect(screen.queryByText(/プリントを1枚やると/)).not.toBeInTheDocument();
+    });
+
+    it('延長機能が無効(null)でも表示が壊れない', async () => {
+        vi.mocked(apiClient.fetchInventory).mockResolvedValue(
+            inventoryResponse({ youtube_daily_used_minutes: 60, youtube_extension: null }),
+        );
+
+        renderWithClient(<InventoryList userId="son" />);
+
+        await waitFor(() =>
+            expect(screen.getByText('きょうのYouTubeはおしまい。また明日つかおうね')).toBeInTheDocument(),
+        );
+        expect(screen.queryByText(/プリント/)).not.toBeInTheDocument();
     });
 });

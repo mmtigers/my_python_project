@@ -16,7 +16,9 @@ from services.quest.locks import (
     _get_youtube_cooldown_remaining_seconds,
     _is_youtube_cooldown_enforced,
     _is_youtube_daily_limit_enforced,
+    can_extend_youtube_limit_now,
     get_youtube_daily_limit_minutes,
+    get_youtube_daily_limit_with_extensions,
     get_youtube_reward_duration_minutes,
     get_youtube_used_minutes_today,
 )
@@ -82,11 +84,25 @@ class InventoryService:
             youtube_daily_limit_minutes = (
                 get_youtube_daily_limit_minutes() if config.YOUTUBE_REWARD_IDS else None
             )
-            youtube_daily_used_minutes = (
-                get_youtube_used_minutes_today(cur, user_id)
-                if youtube_daily_limit_minutes is not None
-                else 0
-            )
+            youtube_daily_used_minutes = 0
+            youtube_extension = None
+            if youtube_daily_limit_minutes is not None:
+                youtube_daily_used_minutes = get_youtube_used_minutes_today(cur, user_id)
+                # 上限を使い切った後にやった(承認済みの)プリントぶんを上乗せした実効上限に
+                # 差し替える。フロントは延長後の値をそのまま「きょうの上限」として表示する。
+                youtube_daily_limit_minutes, granted = get_youtube_daily_limit_with_extensions(
+                    cur, user_id, youtube_daily_limit_minutes
+                )
+                if config.YOUTUBE_EXTENSION_QUEST_IDS and config.YOUTUBE_EXTENSION_MINUTES_PER_QUEST > 0:
+                    youtube_extension = {
+                        "minutes_per_quest": config.YOUTUBE_EXTENSION_MINUTES_PER_QUEST,
+                        "granted_count": granted,
+                        "max_per_day": config.YOUTUBE_EXTENSION_MAX_PER_DAY,
+                        # 「今プリントを1枚やれば延びる」状態か(family-questの案内用)
+                        "can_extend_now": can_extend_youtube_limit_now(
+                            youtube_daily_used_minutes, youtube_daily_limit_minutes, granted
+                        ),
+                    }
 
             youtube_daily_limit_announcement = None
             if (
@@ -104,6 +120,7 @@ class InventoryService:
             "youtube_daily_limit_minutes": youtube_daily_limit_minutes,
             "youtube_daily_used_minutes": youtube_daily_used_minutes,
             "youtube_daily_limit_announcement": youtube_daily_limit_announcement,
+            "youtube_extension": youtube_extension,
         }
 
     def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:
@@ -159,14 +176,22 @@ class InventoryService:
                     daily_limit = get_youtube_daily_limit_minutes()
                     if daily_limit is not None:
                         used_minutes = get_youtube_used_minutes_today(cur, user_id)
+                        # 使い切った後にやった(承認済みの)プリントぶんを上乗せした実効上限
+                        daily_limit, granted = get_youtube_daily_limit_with_extensions(
+                            cur, user_id, daily_limit
+                        )
                         this_ticket_minutes = get_youtube_reward_duration_minutes(item['reward_id'])
                         if used_minutes + this_ticket_minutes > daily_limit:
                             remaining_today = max(0, daily_limit - used_minutes)
                             if remaining_today <= 0:
-                                detail = (
-                                    f"今日のYouTubeは{daily_limit}分までです。"
-                                    "また明日つかおうね"
-                                )
+                                detail = f"今日のYouTubeは{daily_limit}分までです。"
+                                # まだ延長できるなら、諦めさせるのではなく次の行動を示す
+                                if can_extend_youtube_limit_now(used_minutes, daily_limit, granted):
+                                    detail += (
+                                        f"プリントを1枚やると{config.YOUTUBE_EXTENSION_MINUTES_PER_QUEST}分ふえるよ"
+                                    )
+                                else:
+                                    detail += "また明日つかおうね"
                             else:
                                 detail = (
                                     f"今日のYouTubeはあと{remaining_today}分だけなので、"

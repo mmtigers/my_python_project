@@ -809,6 +809,33 @@ except ValueError as e:
     logger.warning(f"⚠️ YOUTUBE_DAILY_LIMIT_ENFORCE_FROM parse error: {e}. 即時強制にフォールバックします。")
     YOUTUBE_DAILY_LIMIT_ENFORCE_FROM = _date(2000, 1, 1)
 
+# 日次上限を「使い切ったあとに、追加でプリントをやれば延長できる」ようにするための設定。
+# 上限で一律に打ち切るのではなく、もっと見たいなら勉強を1枚足す、という交換にする。
+#
+# YOUTUBE_EXTENSION_QUEST_IDS は延長の対象になるクエスト(quest_master.quest_id)。
+# 既定値は quest_data.py の「プリント」(31/智矢)と「なぞり書きプリント」(307/娘)で、
+# どちらも type='infinite'(1日に何度でも報告できる)である。空文字にすると延長機能を
+# 無効化できる。
+_youtube_extension_quest_ids_str: str = os.getenv("YOUTUBE_EXTENSION_QUEST_IDS", "31,307")
+YOUTUBE_EXTENSION_QUEST_IDS: list[int] = []
+if _youtube_extension_quest_ids_str:
+    try:
+        YOUTUBE_EXTENSION_QUEST_IDS = [
+            int(q.strip()) for q in _youtube_extension_quest_ids_str.split(",") if q.strip().isdigit()
+        ]
+    # isdigit() で絞ってから int() しているため実際には送出されないが、
+    # 設定のパース失敗で config 全体のロードを落とさないための保険。
+    # 他の同種ブロックが Exception を捕捉しているのは先に書かれたコードの名残で、
+    # ここでは int() が送出しうる ValueError に絞る。
+    except ValueError as e:
+        logger.warning(f"⚠️ YOUTUBE_EXTENSION_QUEST_IDS parse error: {e}")
+
+# プリント1枚あたり何分ぶん上限を延ばすか、および1日に何回まで延長できるか。
+# 回数に上限を設けるのは、プリントを大量に出せば無制限に見られる状態にしないため。
+# どちらも0以下にすると延長機能は無効になる。
+YOUTUBE_EXTENSION_MINUTES_PER_QUEST: int = _get_int_env("YOUTUBE_EXTENSION_MINUTES_PER_QUEST", 30)
+YOUTUBE_EXTENSION_MAX_PER_DAY: int = _get_int_env("YOUTUBE_EXTENSION_MAX_PER_DAY", 2)
+
 # ==========================================
 # 15. 週次レポート設定
 # ==========================================

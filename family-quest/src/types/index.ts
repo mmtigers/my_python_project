@@ -134,6 +134,19 @@ export interface YoutubeCooldownAnnouncement {
     days_remaining: number;
 }
 
+// 日次上限を「使い切った後に追加でプリントをやると延ばせる」仕組みの状態。
+// 延長機能が無効(対象クエスト未設定など)のときはnull。
+export interface YoutubeExtension {
+    // プリント1枚で何分延びるか
+    minutes_per_quest: number;
+    // 今日すでに延長された回数
+    granted_count: number;
+    // 1日に延長できる上限回数
+    max_per_day: number;
+    // いまプリントを1枚やれば延長される状態か(上限を使い切っていて回数も残っている)
+    can_extend_now: boolean;
+}
+
 // GET /api/quest/inventory/{user_id} のレスポンス。
 // #(YouTubeクールダウン): 単純な配列から、YouTube系ごほうび券の残りクールダウン
 // 秒数を併せて返すオブジェクトに変更した。
@@ -147,6 +160,8 @@ export interface InventoryResponse {
     // JSTの今日すでに使った合計分数。
     youtube_daily_used_minutes: number;
     youtube_daily_limit_announcement: YoutubeCooldownAnnouncement | null;
+    // プリントによる上限延長の状態。無効なときはnull。
+    youtube_extension: YoutubeExtension | null;
 }
 
 // #102/#363: クエスト完了APIが実際に成功した時点で App → QuestList/QuestItem へ

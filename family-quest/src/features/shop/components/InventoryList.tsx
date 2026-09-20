@@ -70,6 +70,12 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     // 猶予期間中は残り分数の表示だけ行い、使用のブロックはしない。
     const isDailyLimitEnforced = dailyLimitAnnouncement === null;
 
+    // 使い切った後に「追加で」プリントを1枚やると上限が延びる仕組みの状態。
+    // 判定(いつ・何回まで延びるか)は全てサーバー側に持たせ、ここでは案内の
+    // 出し分けにだけ使う。延長機能が無効のときはnull。
+    const extension = data?.youtube_extension ?? null;
+    const canExtendNow = extension?.can_extend_now ?? false;
+
     // YouTube系ごほうび券の連続使用防止クールダウン(15分)の残り秒数。
     // サーバー値(5秒間隔のポーリングで再同期)を起点に、表示だけ1秒間隔でローカルに
     // カウントダウンする(QuestList.tsxのCooldownRingと同様の考え方)。
@@ -180,6 +186,14 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
                     <span className="font-bold">きょうはおしまい</span>
                 )}
                 <span className="opacity-70">({dailyUsedMinutes}/{dailyLimitMinutes}分)</span>
+                {canExtendNow && extension && (
+                    <>
+                        <br />
+                        <span className="font-bold">
+                            プリントを1枚やると、あと{extension.minutes_per_quest}分ふえるよ📝
+                        </span>
+                    </>
+                )}
             </p>
         </div>
     );
@@ -230,9 +244,14 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
                     !exceedsDailyLimit && item.is_youtube_reward && youtubeCooldownSeconds > 0;
                 const isLocked = exceedsDailyLimit || isCoolingDown;
 
+                // 文言の優先順位はバックエンド(_use_item_locked)の判定順と揃える。
+                // 使い切っていても延長が残っているときは、諦めさせるのではなく次の行動を示す。
+                const outOfMinutesReason = canExtendNow && extension
+                    ? `きょうのぶんはおしまい。プリントを1枚やると${extension.minutes_per_quest}分ふえるよ`
+                    : 'きょうのYouTubeはおしまい。また明日つかおうね';
                 const lockedReason = exceedsDailyLimit
                     ? (dailyRemainingMinutes === 0
-                        ? 'きょうのYouTubeはおしまい。また明日つかおうね'
+                        ? outOfMinutesReason
                         : `きょうはあと${dailyRemainingMinutes}分。この券は使えません`)
                     : `目を休めよう。あと${formatCooldown(youtubeCooldownSeconds)}で使えます`;
 
