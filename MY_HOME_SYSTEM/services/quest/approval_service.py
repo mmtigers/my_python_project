@@ -230,7 +230,7 @@ class ApprovalService:
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
 
-            self._revert_and_delete_history(cur, hist, user)
+            self._revert_and_delete_history(cur, hist, user, cancelled_by=user_id)
 
             # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード取り消し ---
             linked_id = hist['linked_history_id']
@@ -239,21 +239,77 @@ class ApprovalService:
                 if linked_hist:
                     linked_user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (linked_hist['user_id'],)).fetchone()
                     if linked_user:
-                        self._revert_and_delete_history(cur, linked_hist, linked_user)
+                        self._revert_and_delete_history(
+                            cur, linked_hist, linked_user, cancelled_by=user_id, cascaded=True
+                        )
                         logger.info(f"Coop Partner Cancelled: HistoryID={linked_id}")
 
             logger.info(f"Quest Cancelled: User={user_id}, HistoryID={history_id}")
         return {"status": "cancelled"}
 
-    def _revert_and_delete_history(self, cur, hist, user) -> None:
+    def _record_cancellation_audit(
+        self, cur, hist, cancelled_by: str, *, cascaded: bool, rewards_reverted: bool
+    ) -> None:
+        """削除する `quest_history` 行の内容を `quest_cancellation_audit` へ写す(#762)。
+
+        取消は行を物理削除するため、これを残さないと「誰がいつ何を取り消したか」が
+        ログファイル以外のどこにも残らず、家族の年代記の原資が復元不能に消える。
+        Issue #733 の保持期間削除を有効化した後は「取消で消えた」と「保持期間で
+        消えた」の区別もつかなくなる。
+
+        **`quest_history` の意味論は変えない。** 取消済みを年代記に表示するか・
+        論理削除に切り替えるかは仕様判断として #762 で未決であり、本メソッドは
+        その判断を後から実データに基づいて行えるようにするためだけのものである。
+        追記専用で、削除処理の本体(残高ロールバック)より前に呼ぶ。
+        """
+        # sqlite3.Row の `in` はキーではなく値を走査するため、`.keys()` に対して
+        # 判定する必要がある(ここで一度束縛して SIM118 を避ける)。
+        hist_keys = hist.keys()
+        cur.execute(
+            "INSERT INTO quest_cancellation_audit ("
+            "history_id, user_id, cancelled_by, quest_id, quest_title, status_before, "
+            "completed_at, exp_earned, gold_earned, medals_earned, linked_history_id, "
+            "cascaded, rewards_reverted, cancelled_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                hist['id'],
+                hist['user_id'],
+                cancelled_by,
+                hist['quest_id'],
+                hist['quest_title'] if 'quest_title' in hist_keys else None,
+                hist['status'],
+                hist['completed_at'],
+                hist['exp_earned'],
+                hist['gold_earned'],
+                # Q-L3(#409) と同様に、medals_earned を持たない古い行も許容する
+                hist['medals_earned'] if 'medals_earned' in hist_keys else None,
+                hist['linked_history_id'],
+                1 if cascaded else 0,
+                1 if rewards_reverted else 0,
+                get_now_iso(),
+            ),
+        )
+
+    def _revert_and_delete_history(
+        self, cur, hist, user, cancelled_by: str | None = None, cascaded: bool = False
+    ) -> None:
         """
         quest_history 1行を取り消す。approved であれば付与済みの経験値・ゴールドを
         ロールバックしてから削除する。pending / rejected は報酬がまだ付与されて
         いないため、残高には触れず単純に削除する(#97: 以前は status == 'pending'
         以外を一律「付与済み」とみなしてロールバックしていたため、rejected 履歴を
         cancel すると、もらっていない経験値・ゴールドが残高から減算されていた)。
+
+        いずれの経路でも、削除する行の内容を `quest_cancellation_audit` へ写して
+        から削除する(#762)。`cancelled_by` を省略した場合は履歴の所有者
+        (`hist['user_id']`)を取消要求者として記録する。
         """
+        actor = cancelled_by if cancelled_by is not None else hist['user_id']
         if hist['status'] != 'approved':
+            # 残高には触れないため rewards_reverted=False
+            self._record_cancellation_audit(
+                cur, hist, actor, cascaded=cascaded, rewards_reverted=False
+            )
             cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))
             return
 
@@ -277,6 +333,13 @@ class ApprovalService:
         # Q-L3(#409): メダルも戻す(履歴に記録が無い古い行は 0 扱い)
         medals_earned = (hist['medals_earned'] if 'medals_earned' in hist.keys() else 0) or 0
 
+        # 残高ロールバックと削除は、取消が拒否されうる上記のチェックを全て通過した
+        # 後に行う。監査行もここまで来てから書く(同一トランザクションなので、
+        # 後続が失敗すればロールバックされ「取り消していないのに監査行だけ残る」
+        # ことはない)。
+        self._record_cancellation_audit(
+            cur, hist, actor, cascaded=cascaded, rewards_reverted=True
+        )
         cur.execute("UPDATE quest_users SET level=?, exp=?, gold=?, medal_count = MAX(0, medal_count - ?), updated_at=? WHERE user_id=?",
                     (new_level, new_exp, new_gold, medals_earned, get_now_iso(), user['user_id']))
         cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))

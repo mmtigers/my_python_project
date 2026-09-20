@@ -137,7 +137,7 @@
 
 ### `ApprovalService._process_cancel_quest_locked`
 
-* **役割**: 対象履歴が本人のものであることを確認したうえで、`_revert_and_delete_history`で報酬をロールバックしつつ`quest_history`行を削除する。連結された相方の履歴があれば、同一トランザクション内で相方側も`_revert_and_delete_history`でカスケード取り消しする。
+* **役割**: 対象履歴が本人のものであることを確認したうえで、`_revert_and_delete_history`で報酬をロールバックしつつ`quest_history`行を削除する。連結された相方の履歴があれば、同一トランザクション内で相方側も`_revert_and_delete_history`でカスケード取り消しする（相方側には`cancelled_by=user_id`・`cascaded=True`を渡すため、監査証跡には「所有者とは別人が取り消した」ことが残る）。
 * 根拠: [定義] (行番号: 221〜246 / 抜粋: "def _process_cancel_quest_locked(self, user_id: str, history_id: int) -> Dict[str, str]:")
 * 根拠: `if hist['user_id'] != user_id:\n                raise HTTPException(status_code=403, detail="User mismatch")` (行番号: 226〜227)
 * 根拠: `linked_id = hist['linked_history_id']\n            if linked_id is not None:\n                linked_hist = cur.execute(...).fetchone()\n                if linked_hist:\n                    linked_user = cur.execute(...).fetchone()\n                    if linked_user:\n                        self._revert_and_delete_history(cur, linked_hist, linked_user)` (行番号: 236〜242)
@@ -150,17 +150,27 @@
 * **エラーハンドリング**: 履歴なし`HTTPException(404)`、`user_id`不一致`HTTPException(403)`、ユーザー不在`HTTPException(404)`
 * 根拠: (行番号: 588〜589,590〜591,593〜595)
 
+### `ApprovalService._record_cancellation_audit`
+
+* **役割**: 削除する`quest_history`1行の内容を`quest_cancellation_audit`へ写す（Issue #762 / AUDIT-034 のステップ1）。取消は行を物理削除するため、これを残さないと「誰がいつ何を取り消したか」がログファイル以外のどこにも残らず、家族の年代記（`user_service._fetch_full_adventure_logs`）の原資が復元不能に消える。Issue #733 の保持期間削除を有効化した後は「取消で消えた」と「保持期間で消えた」の区別もつかなくなる。追記専用。
+* 根拠: [定義] (行番号: 250〜289 / 抜粋: "def _record_cancellation_audit(")
+* **引数/リクエスト**: `cur`, `hist`, `cancelled_by: str`, キーワード専用の`cascaded: bool`・`rewards_reverted: bool`
+* **戻り値/レスポンス**: なし（`-> None`）
+* **副作用**: `quest_cancellation_audit`へのINSERT
+* **エラーハンドリング**: なし（呼び出し元の`get_db_cursor(commit=True)`と同一トランザクションで実行されるため、後続が失敗すれば監査行も巻き戻る＝「取り消していないのに監査行だけ残る」ことはない）
+* **呼び出し位置の制約**: `approved`経路では、取消が拒否されうるチェック（残高 < 付与額なら`HTTPException(400)`）を**すべて通過した後**に呼ぶ。チェックより前に呼んでも同一トランザクションなので巻き戻るが、意図を明示するために順序を保つ。
+
 ### `ApprovalService._revert_and_delete_history`
 
-* **役割**: `quest_history`1行を取り消す。`approved`であれば付与済みの経験値・ゴールドをロールバックしてから削除する。`pending`/`rejected`は報酬がまだ付与されていないため、残高には触れず単純に削除する。付与済みゴールドを既に消費している(現在の残高 < 付与額)場合は取り消し自体を拒否し、キャンセルが常に「付与の完全な巻き戻し」になることを保証する。
-* 根拠: [定義] (行番号: 248〜282 / 抜粋: "def _revert_and_delete_history(self, cur, hist, user) -> None:")
+* **役割**: `quest_history`1行を取り消す。`approved`であれば付与済みの経験値・ゴールドをロールバックしてから削除する。`pending`/`rejected`は報酬がまだ付与されていないため、残高には触れず単純に削除する。付与済みゴールドを既に消費している(現在の残高 < 付与額)場合は取り消し自体を拒否し、キャンセルが常に「付与の完全な巻き戻し」になることを保証する。いずれの経路でも、削除する行の内容を`_record_cancellation_audit`で`quest_cancellation_audit`へ写してから削除する（Issue #762）。
+* 根拠: [定義] (行番号: 293〜345 / 抜粋: "def _revert_and_delete_history(self, cur, hist, user) -> None:")
 * 根拠: `if hist['status'] != 'approved':\n            cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))\n            return` (行番号: 256〜258)
 * 根拠: `gold_earned = hist['gold_earned'] or 0\n        current_gold = user['gold'] or 0\n        if current_gold < gold_earned:\n            raise HTTPException(\n                status_code=400,\n                detail="獲得したゴールドを既に使用しているため、このクエストは取り消せません",\n            )` (行番号: 265〜271)
-* **引数/リクエスト**: `cur`, `hist`, `user`
+* **引数/リクエスト**: `cur`, `hist`, `user`, `cancelled_by: Optional[str] = None`（省略時は`hist['user_id']`を取消要求者とみなす）, `cascaded: bool = False`
 * 根拠: (行番号: 612)
 * **戻り値/レスポンス**: なし（`-> None`）
 * 根拠: (行番号: 612)
-* **副作用**: DB更新/削除（`quest_users`のlevel/exp/gold/medal_countをUPDATE、`quest_history`行をDELETE）
+* **副作用**: DB追記/更新/削除（`quest_cancellation_audit`へINSERT、`quest_users`のlevel/exp/gold/medal_countをUPDATE、`quest_history`行をDELETE）
 * 根拠: (行番号: 644〜646)
 * **エラーハンドリング**: 付与済みゴールドを既に消費している場合`HTTPException(400)`
 * 根拠: (行番号: 631〜635)
@@ -168,4 +178,6 @@
 ## 5. 保守上の注意点
 
 * **`_apply_quest_rewards` は薄いラッパーとして残してある。** 実体は `services/quest/rewards.py` の `apply_quest_rewards` だが、テストが `monkeypatch.setattr(service, "_apply_quest_rewards", ...)` で遅延や失敗を差し込む seam をこのメソッドが提供している（`tests/test_quest_service_edge_cases.py` の承認/却下の競合テストがこの経路に依存する）。実体を直接呼ぶように変えると、そのテストは**パッチが空振りしたまま通ってしまう**ので注意すること。
+* **`quest_cancellation_audit` は追記専用の監査ログであり、`quest_history` の意味論は変えていない。** 取消済みを家族の年代記に表示するか・`status='cancelled'` の論理削除へ切り替えるかは仕様判断として **Issue #762 で未決**である（決めるには「取り消した記録を年代記に出すか」「`status != 'rejected'` を条件にしているスパムチェック・周期リセット・連続達成ボーナスで `cancelled` をどう扱うか」の判断が必要）。本テーブルはその判断を後から実データに基づいて下せるようにするためのものなので、**保持期間削除（`services/db_retention_service.py`）の対象に足さないこと**（`tests/test_quest_cancellation_audit.py` が固定している）。
+* なお `user_service.reset_user_data` の `DELETE FROM quest_history WHERE user_id = ?` は「取消」ではなくリセット（#547）であり、本監査証跡の対象外である。
 * ロックの取得順序は `services/quest/locks.py` の規約に従う。残高ロックは `routine_service` とも共有しているため、ここでの取得順序を変えるとデッドロックを招きうる。
