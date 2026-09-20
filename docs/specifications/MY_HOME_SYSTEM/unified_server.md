@@ -224,11 +224,11 @@
 ### `global_exception_handler`
 
 * **役割**: アプリケーション全体で発生した未捕捉の例外をキャッチし、ログにスタックトレース付きで記録した上でステータスコード500の定型エラーレスポンスを返す。
-* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 493-498 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
+* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 497-502 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
 
 
 * **引数/リクエスト**: `request: Request`, `exc: Exception`
-* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 493 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
+* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 497 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
 
 
 * **戻り値/レスポンス**: `JSONResponse` (HTTP 500, `{"detail": "Internal Server Error"}`のみ)。例外の詳細文字列(`str(exc)`)はレスポンスボディに含めず、ログにのみ出力する。
@@ -247,11 +247,11 @@
 ### `serve_quest_spa` (エンドポイント: `GET /quest/{full_path:path}`, `GET /camera/{full_path:path}`)
 
 * **役割**: SPA(Single Page Application)向けのリクエストハンドラ。`/quest/*`と`/camera/*`の両方に同一ハンドラが登録されている。指定されたパスのファイルが存在する場合はそれを返し、存在しない場合はフォールバックとして`index.html`を返す。
-* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 547-562 / 抜粋: "async def serve_quest_spa(full_path: str):")、`@app.get("/quest/{full_path:path}")` / `@app.get("/camera/{full_path:path}")` (行番号: 367-368)
+* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 551-566 / 抜粋: "async def serve_quest_spa(full_path: str):")、`@app.get("/quest/{full_path:path}")` / `@app.get("/camera/{full_path:path}")` (行番号: 367-368)
 
 
 * **引数/リクエスト**: `full_path: str`
-* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 547 / 抜粋: "async def serve_quest_spa(full_path: str):")
+* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 551 / 抜粋: "async def serve_quest_spa(full_path: str):")
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
@@ -259,7 +259,7 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 547-562 / 抜粋: "async def serve_quest_spa(full_path: str):")
+* 根拠: 該当関数内処理 (行番号: 551-566 / 抜粋: "async def serve_quest_spa(full_path: str):")
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
@@ -270,11 +270,11 @@
 ### `serve_quest_root` (エンドポイント: `GET /quest`, `GET /quest/`, `GET /camera`, `GET /camera/`)
 
 * **役割**: SPAルートパスへのアクセスに対し`index.html`を返す。`/quest`系と`/camera`系の計4パスに同一ハンドラが登録されている。
-* 根拠: `async def serve_quest_root():` (行番号: 570-574 / 抜粋: "async def serve_quest_root():")、`@app.get("/quest")` 等4つのデコレータ (行番号: 388-391)
+* 根拠: `async def serve_quest_root():` (行番号: 574-578 / 抜粋: "async def serve_quest_root():")、`@app.get("/quest")` 等4つのデコレータ (行番号: 388-391)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def serve_quest_root():` (行番号: 570 / 抜粋: "async def serve_quest_root():")
+* 根拠: `async def serve_quest_root():` (行番号: 574 / 抜粋: "async def serve_quest_root():")
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
@@ -282,7 +282,7 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 570-574 / 抜粋: "async def serve_quest_root():")
+* 根拠: 該当関数内処理 (行番号: 574-578 / 抜粋: "async def serve_quest_root():")
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
@@ -293,11 +293,11 @@
 ### `root` (エンドポイント: `GET /`)
 
 * **役割**: 稼働状態、システム名、現在時刻を返すルートAPI。
-* 根拠: `async def root():` (行番号: 582-587 / 抜粋: "async def root():")
+* 根拠: `async def root():` (行番号: 586-591 / 抜粋: "async def root():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def root():` (行番号: 582 / 抜粋: "async def root():")
+* 根拠: `async def root():` (行番号: 586 / 抜粋: "async def root():")
 
 
 * **戻り値/レスポンス**: `dict` (status, system, timeキーを含む)
@@ -305,22 +305,22 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 582-587 / 抜粋: "async def root():")
+* 根拠: 該当関数内処理 (行番号: 586-591 / 抜粋: "async def root():")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数内処理 (行番号: 582-587 / 抜粋: "async def root():")
+* 根拠: 該当関数内処理 (行番号: 586-591 / 抜粋: "async def root():")
 
 
 
 ### `health_check` (エンドポイント: `GET /health`)
 
 * **役割**: **（Issue #735 / AUDIT-005 で変更）** liveness ではなく **readiness** を返す。`lifespan`がスキーマ適用に失敗すると`app.state.migration_ok`が`False`になり、監視子プロセスを起動しないまま「プロセスは生存しているが全APIがスキーマ未適用のDBに当たって500」という状態になる。以前は無条件に`{"status": "healthy"}`を返していたため、systemd(`Type=simple`)も`server_watchdog`(`systemctl` + `pgrep`)も`health_watch`(`check_service_active`)もこの状態を「正常」と報告していた。現在は`migration_ok`が`False`のとき`503`を返し、外形監視から見分けられるようにしている。
-* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 590 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
+* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 594 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
 
 
 * **引数/リクエスト**: `request: Request`（`app.state`を参照するために受け取る。リクエストボディ・クエリは読まない）
-* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 590 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
+* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 594 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
 
 
 * **戻り値/レスポンス**: `JSONResponse`。`migration_ok`が`False`なら`503` + `{"status": "unhealthy", "reason": "migration_failed"}`、それ以外は`200` + `{"status": "healthy"}`。`app.state.migration_ok`が存在しない場合（`lifespan`を通らないテスト経路等）は`getattr`の既定値`True`により`200`。
@@ -340,7 +340,7 @@
 ### `_run_uvicorn_server`（Issue #229で追加）
 
 * **役割**: 本番起動経路（`python unified_server.py`実行時の`if __name__ == "__main__":`）のエントリポイント。`uvicorn.run(app, host="0.0.0.0", port=8000)`を呼び出す。**（Issue #229で修正）** 以前はこの箇所で`uvicorn.config.LOGGING_CONFIG`を書き換え、`"uvicorn.access"`ロガー自体のレベルを`WARNING`に固定していた。uvicornのアクセスログは常に`logger.info()`（レベル20）で出力されるため、ロガーのレベルチェックの時点でログレコードが作られず、`lifespan()`内で登録される`SilencePolicyFilter`（GETの200/304ポーリングのみを選別して抑制し、POST・エラーは残す設計）が一度も呼び出されなかった。結果、POST等の状態変更リクエストやエラーレスポンスを含め、アクセスログが本番起動経路で一切残らない状態になっていた。現在はデフォルトの`log_config`（`uvicorn.access`はINFO）をそのまま使い、レコード生成自体は妨げず`SilencePolicyFilter`に選別を委ねる。本関数への切り出しは、以前は`if __name__ == "__main__":`直下にインラインで書かれ`import`されない限り実行されずテストが困難だった処理を、単体テストで`uvicorn.run`をモックして検証できるようにするため（このロジック自体はIssue #229の修正の一部）。
-* 根拠: [関数定義とコメント] (行番号: 609-624 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
+* 根拠: [関数定義とコメント] (行番号: 613-628 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
 
 
 * **引数/リクエスト**: なし
@@ -462,7 +462,7 @@ graph TD
 * シャットダウン時、スケジューラープロセス・カメラ監視プロセスの双方とも終了待ち（`wait`）が5秒でタイムアウトし、強制キル（`kill`）される同一パターンの処理となっている（行番号: 302-306, 311-315）。
 * **（Issue #360 で修正・本項目は現行ソースとの不一致を解消）** 過去の解析では、カメラ監視サブプロセス（`camera_process = subprocess.Popen(...)`）の起動はスケジューラー起動処理とは異なり `try-except` で囲まれておらず、起動失敗時に `lifespan` 全体が例外停止しうると記載していたが、現行ソースでは両子プロセスの起動が共通の `_spawn_child_process` 内の `try/except Exception` で保護されている（行番号: 169-181）。どちらか一方の起動に失敗しても `logger.error` を出力するのみで、もう一方や `lifespan` 自体の実行には影響しない。
 * `config.QUEST_DIST_DIR` が未定義またはパスに存在しない場合、システムは例外終了せず警告ログのみを出力する（null安全性/フォールバック）。
-* Webhook受信の例外パス（`/webhook/switchbot`, `/callback/line`, `/webhook/alexa`）は`allowed_webhook_paths`にハードコードで定義されている。`/webhook/alexa`は長らくこのリストから漏れており、docstringが列挙する「外部からのWebhook受信が必要なパス」の意図と非対称だった（後述の追加で解消）。本ミドルウェアは遮断を行わないため、このリストに載せることの実際の効果は「クライアントIPの解決と外部アクセスのINFOログ出力をスキップする」ことだけだが、**リスト自体が「オリジンが外部から到達可能でなければ機能しないパス」の一覧**としてCloudflare Access側のバイパス設定の参照元になる（Issue #517では`/webhook/switchbot`・`/callback/line`がエッジでブロックされWebhookがサーバーまで届いていなかった）。新しい外部Webhookを追加した際にリストへの追記を忘れると同じ非対称が再発するため、`tests/test_unified_server_app.py`の`test_allowed_webhook_paths_matches_mounted_webhook_routes`がマウント済みの`/webhook/`・`/callback/`ルート集合と例外リストの一致を検証する。
+* Webhook受信の例外パス（`/webhook/switchbot`, `/callback/line`, `/webhook/alexa`）は`allowed_webhook_paths`にハードコードで定義されている。`/webhook/alexa`は長らくこのリストから漏れており、docstringが列挙する「外部からのWebhook受信が必要なパス」の意図と非対称だった（後述の追加で解消）。本ミドルウェアは遮断を行わないため、このリストに載せることの実際の効果は「クライアントIPの解決と外部アクセスのINFOログ出力をスキップする」ことだけだが、**リスト自体が「オリジンが外部から到達可能でなければ機能しないパス」の一覧**としてCloudflare Access側のバイパス設定の参照元になる（Issue #517では`/webhook/switchbot`・`/callback/line`がエッジでブロックされWebhookがサーバーまで届いていなかった）。新しい外部Webhookを追加した際にリストへの追記を忘れると同じ非対称が再発するため、`tests/test_unified_server_app.py`の`test_allowed_webhook_paths_matches_mounted_webhook_routes`がマウント済みの`/webhook/`・`/callback/`ルート集合と例外リストの一致を検証する。**（Issue #725で追記）** ただしこのリストへの追記とエッジ側のバイパス設定は連動せず、**このリストに載っていてもCloudflare Access側で設定されていなければWebhookはオリジンに届かない**（2026-09-20の実機点検では、リストには載っている`/webhook/alexa`だけがエッジでバイパスされておらず、未認証アクセスがAccessのログイン画面に302でリダイレクトされていた）。この非対称はコードからは検出できないため、docstringは点検手順として`docs/runbooks/cloudflare_access_connectivity_check.md`の手順5（未認証で各パスを叩き、405が返ることを確認する）を参照するよう案内している。
 * **本番起動経路が`uvicorn.access`ロガーのレベルを固定し`SilencePolicyFilter`を無効化していた（Issue #229で修正）**: `_run_uvicorn_server`（本番起動経路、`if __name__ == "__main__":`から呼ばれる）は以前、`uvicorn.config.LOGGING_CONFIG`を書き換えて`"uvicorn.access"`ロガー自体のレベルを`WARNING`に固定していた。uvicornのアクセスログは常に`logger.info()`（レベル20）で出力されるため、ロガーのレベルチェックの時点でログレコード自体が作られず、`lifespan()`が登録する`SilencePolicyFilter`（GETの200/304ポーリングのみを選別して抑制し、POST・エラーは残す設計）が一度も呼び出されない状態になっていた。既存の単体テスト（`SilencePolicyFilter.filter()`を直接呼び出すもの）はこの「ロガーのレベルチェックでレコードが作られない」経路を検知できない設計だったため、この不具合はテストがグリーンのまま本番のみで発生していた。現在は本番起動経路がデフォルトの`log_config`（`uvicorn.access`はINFO）をそのまま使うよう修正されている。
 
 ## 9. 不明事項一覧

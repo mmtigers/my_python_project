@@ -76,9 +76,44 @@ https://<公開ドメイン>/dashboard
 `.env` に設定して `home_system.service` を再起動すれば中継のルート自体が消える
 (その間スマートフォンからは閲覧できなくなる)。
 
+## 5. `allowed_webhook_paths` の各パスが実際にバイパスされていることを確認する(Issue #725)
+
+手順4とは**逆方向**の点検である。`unified_server.py` の `allowed_webhook_paths` は
+「エッジでバイパス設定が必要なパス」の一覧だが、**リストに載っていることと、
+Cloudflare Access 側で実際にバイパス設定されていることは別**であり、コードからは
+検証できない。2026-09-20 の点検では `/webhook/alexa` だけが設定漏れになっていた。
+
+自宅ネットワーク外の端末、または Pi 上から**未認証のまま**公開ドメインを叩く
+(Access の判定はエッジで行われるため、Pi から叩いても同じ結果になる):
+
+```bash
+DOMAIN=<公開ドメイン>
+for p in /webhook/switchbot /callback/line /webhook/alexa; do
+  printf '%-24s %s\n' "$p" "$(curl -s -o /dev/null -w '%{http_code}' "https://${DOMAIN}${p}")"
+done
+```
+
+**期待する結果**: すべて **405**。これらのパスは POST のみ定義されているため、
+405 は「リクエストがオリジンの FastAPI まで到達し、GET が拒否された」ことの証拠になる。
+
+**問題のある結果**: **302**(`location:` が `*.cloudflareaccess.com/cdn-cgi/access/login/...`)
+の場合、そのパスはエッジで止められており、バイパス設定が漏れている。
+Zero Trust → Access → Applications → 該当アプリのポリシーに、既存のパスと同じ形で
+Bypass(Everyone)を追加すること。
+
+この漏れは**気づきにくい**。対向サービス側(SwitchBot / LINE / Alexa)には
+「エンドポイントが応答しない」としか現れず、原因がエッジ設定だと分かりにくいため、
+**外部Webhookを新規に追加した直後は必ずこの手順を実行する**こと
+(`allowed_webhook_paths` への追記だけでは疎通しない)。
+
+対象パスが増減した場合は上記の `for` ループの一覧も更新する。アプリ側の正は
+`unified_server.py` の `allowed_webhook_paths` で、マウント済みルートとの一致は
+`tests/test_unified_server_app.py` が検証している。
+
 ## 参照
 
 - Issue #321(エッジ委譲を正式設計として確定した決定)
 - Issue #615(本runbook作成の経緯)
+- Issue #517 / Issue #725(バイパス設定漏れでWebhookがオリジンまで届かなかった実例。手順5の経緯)
 - `docs/reports/CODE_REVIEW_REPORT_ALL.md` Critical#2/#8
 - `MY_HOME_SYSTEM/unified_server.py` の `ip_restriction_middleware`
