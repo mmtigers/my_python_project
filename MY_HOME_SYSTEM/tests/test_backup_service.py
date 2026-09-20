@@ -8,6 +8,7 @@ services/backup_service.py の perform_backup のテスト。
 """
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -287,3 +288,166 @@ class TestOffsiteCopy:
 
         assert backup_service._copy_latest_offsite(backup_service.Path("/nas/x.db")) is False
         assert any("rclone" in m for m in errors)
+
+
+class _VerifyConnStub:
+    """整合性検証(PRAGMA integrity_check)用の接続だけを差し替えるスタブ。
+
+    `perform_backup` は一時ファイルに対して2回 `sqlite3.connect` する
+    (1回目 = backup() のコピー先、2回目 = 検証)。コピー先は実物の
+    `sqlite3.Connection` でなければ `src_conn.backup()` が TypeError になるため、
+    2回目だけをこのスタブに差し替える。
+    """
+
+    def __init__(self, conn, on_execute, integrity_result=None):
+        self._conn = conn
+        self._on_execute = on_execute
+        self._integrity_result = integrity_result
+
+    def execute(self, sql, *args):
+        if "integrity_check" in sql:
+            self._on_execute()
+            if self._integrity_result is not None:
+                return _StubCursor(self._integrity_result)
+        return self._conn.execute(sql, *args)
+
+    def close(self):
+        self._conn.close()
+
+
+class _StubCursor:
+    def __init__(self, row):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
+
+def _patch_verify_connection(monkeypatch, on_execute, integrity_result=None):
+    real_connect = backup_service.sqlite3.connect
+    temp_connects = {"n": 0}
+
+    def _connect(path, *args, **kwargs):
+        conn = real_connect(path, *args, **kwargs)
+        if "temp_backups" in str(path):
+            temp_connects["n"] += 1
+            if temp_connects["n"] == 2:
+                return _VerifyConnStub(conn, on_execute, integrity_result)
+        return conn
+
+    monkeypatch.setattr(backup_service.sqlite3, "connect", _connect)
+
+
+class TestBackupIntegrityVerification:
+    """Issue #753 (AUDIT-024): バックアップ後・NAS転送前の PRAGMA integrity_check。
+
+    sqlite3.Connection.backup() は正常完了すれば一貫したコピーを作るが、
+    コピー元が既に破損していれば破損したままコピーされる。NAS転送後の検証は
+    サイズ比較だけで内容を見ていないため、破損に気づかないまま
+    DB_BACKUP_RETENTION_DAYS(既定30日)で健全な世代が消えうる。
+    """
+
+    def test_integrity_check_runs_before_the_nas_transfer(self, monkeypatch):
+        """検証は Phase 1 の直後(NAS へ置く前)に走ること。"""
+        order = []
+        _patch_verify_connection(monkeypatch, lambda: order.append("verify"))
+        real_copy2 = backup_service.shutil.copy2
+        monkeypatch.setattr(
+            backup_service.shutil, "copy2",
+            lambda src, dst, *a, **k: order.append("transfer") or real_copy2(src, dst, *a, **k),
+        )
+
+        success, _msg, _size = backup_service.perform_backup()
+
+        assert success is True
+        assert order == ["verify", "transfer"]
+
+    def test_corrupt_backup_fails_and_is_not_left_on_the_nas(self, monkeypatch):
+        """integrity_check が "ok" 以外を返したら失敗扱いにし、
+        破損したコピーを NAS の世代として残さないこと。"""
+        notified = []
+        monkeypatch.setattr(
+            backup_service, "send_push", lambda **kwargs: notified.append(kwargs) or True
+        )
+        copied = []
+        monkeypatch.setattr(
+            backup_service.shutil, "copy2", lambda src, dst, *a, **k: copied.append(dst)
+        )
+        _patch_verify_connection(
+            monkeypatch, lambda: None,
+            integrity_result=("*** in database main ***\nPage 3 is never used",),
+        )
+
+        success, msg, size_mb = backup_service.perform_backup()
+
+        assert success is False
+        assert size_mb == 0.0
+        assert "整合性検証に失敗" in msg
+        assert copied == [], "破損を検知したら NAS へ転送しないこと"
+        # ローカルの一時ファイルも残さない
+        assert os.listdir(os.path.join(config.BASE_DIR, "temp_backups")) == []
+        assert len(notified) == 1
+
+    def test_empty_integrity_result_is_also_treated_as_failure(self, monkeypatch):
+        """fetchone() が None を返す異常時も「ok」とみなさない。"""
+        monkeypatch.setattr(backup_service, "send_push", lambda **kwargs: True)
+        monkeypatch.setattr(backup_service.shutil, "copy2", lambda src, dst, *a, **k: None)
+        _patch_verify_connection(monkeypatch, lambda: None, integrity_result=())
+
+        success, msg, _size = backup_service.perform_backup()
+
+        assert success is False
+        assert "整合性検証に失敗" in msg
+
+
+class TestLocalOverlaysAreBackedUp:
+    """Issue #753 (AUDIT-024): gitignore 対象のローカルオーバーレイが対象外のままだと
+    復元時に失われる。存在しない環境でもバックアップ自体は成功する。"""
+
+    def test_local_overlays_are_listed_in_backup_files(self):
+        assert "family_members.local.json" in config.BACKUP_FILES
+        assert "quest_users.local.json" in config.BACKUP_FILES
+
+    def test_existing_local_overlays_are_copied_to_the_nas(self, monkeypatch):
+        for name in ("family_members.local.json", "quest_users.local.json"):
+            with open(os.path.join(config.BASE_DIR, name), "w", encoding="utf-8") as f:
+                f.write("{}")
+
+        success, _msg, _size = backup_service.perform_backup()
+
+        assert success is True
+        backups = os.listdir(os.path.join(config.NAS_PROJECT_ROOT, "db_backups"))
+        assert any(n.startswith("family_members.local_") and n.endswith(".json") for n in backups)
+        assert any(n.startswith("quest_users.local_") and n.endswith(".json") for n in backups)
+
+    def test_missing_local_overlays_do_not_fail_the_backup(self):
+        """既定の BACKUP_FILES のまま、ローカルオーバーレイが1つも無い環境でも成功する。"""
+        success, _msg, _size = backup_service.perform_backup()
+
+        assert success is True
+        backups = os.listdir(os.path.join(config.NAS_PROJECT_ROOT, "db_backups"))
+        assert len(backups) == 1
+
+
+class TestMainExitCode:
+    """Issue #753 (AUDIT-024): 以前は perform_backup() の戻り値を捨てていたため、
+    失敗しても exit 0 で終わり cron/systemd からは成功に見えていた。"""
+
+    def test_exit_code_reflects_the_result(self, monkeypatch):
+        captured = []
+        monkeypatch.setattr(backup_service.sys, "exit", lambda code: captured.append(code))
+
+        # `if __name__ == "__main__":` のブロックと同じ式を評価する
+        for success, expected in ((True, 0), (False, 1)):
+            monkeypatch.setattr(
+                backup_service, "perform_backup", lambda _s=success: (_s, "msg", 1.0)
+            )
+            backup_service.sys.exit(0 if backup_service.perform_backup()[0] else 1)
+            assert captured[-1] == expected
+
+    def test_source_uses_sys_exit_with_the_success_flag(self):
+        """`python -m services.backup_service` の終了コードが結果を反映する形で
+        あることを、ソース上でも固定する(`if __name__` ブロックは
+        .coveragerc の exclude_lines によりカバレッジ対象外のため)。"""
+        source = Path(backup_service.__file__).read_text(encoding="utf-8")
+        assert "sys.exit(0 if perform_backup()[0] else 1)" in source

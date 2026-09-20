@@ -250,3 +250,380 @@ class TestTargetBluetoothMac:
             config.SPEAKER_BLUETOOTH_MAC if config.ENABLE_BLUETOOTH else None
         )
         assert health_check_module.TARGET_BLUETOOTH_MAC == expected
+
+
+# ---------------------------------------------------------------------------
+# Issue #758 (AUDIT-029): 各チェックの正常・異常経路。
+#
+# 「起動後の健全性確認そのもの」が52%しかカバーされておらず、チェックが誤判定
+# しても気づけない状態だった。ユーティリティ(ポート/HTTP/uptime)・DB整合性・
+# 周辺機器(NAS/カメラ/スピーカー)・ログ解析・レポート送信の各分岐を埋める。
+# ---------------------------------------------------------------------------
+import pytest
+from freezegun import freeze_time
+
+
+class TestUtilityHelpers:
+    def test_check_port_true_when_connection_succeeds(self, monkeypatch):
+        class _Sock:
+            def __enter__(self): return self
+            def __exit__(self, *exc): return False
+
+        monkeypatch.setattr(health_check_module.socket, "create_connection", lambda addr, timeout=3: _Sock())
+        assert PostBootHealthCheck()._check_port("localhost", 8000) is True
+
+    @pytest.mark.parametrize("exc", [TimeoutError(), ConnectionRefusedError(), OSError()])
+    def test_check_port_false_on_connection_errors(self, monkeypatch, exc):
+        def _boom(addr, timeout=3):
+            raise exc
+
+        monkeypatch.setattr(health_check_module.socket, "create_connection", _boom)
+        assert PostBootHealthCheck()._check_port("localhost", 8000) is False
+
+    def test_check_http_false_on_server_error_status(self, monkeypatch):
+        res = MagicMock()
+        res.status_code = 500
+        monkeypatch.setattr(health_check_module.requests, "get", lambda *a, **k: res)
+        assert PostBootHealthCheck()._check_http("http://x") is False
+
+    def test_check_http_false_when_request_raises(self, monkeypatch):
+        def _boom(*args, **kwargs):
+            raise RuntimeError("connection reset")
+
+        monkeypatch.setattr(health_check_module.requests, "get", _boom)
+        assert PostBootHealthCheck()._check_http("http://x") is False
+
+    @pytest.mark.parametrize(
+        "uptime_seconds,expected",
+        [("45.0 0.0", "45秒"), ("300.0 0.0", "5分"), ("7380.0 0.0", "2時間3分")],
+    )
+    def test_get_uptime_formats(self, monkeypatch, tmp_path, uptime_seconds, expected):
+        proc_uptime = tmp_path / "uptime"
+        proc_uptime.write_text(uptime_seconds, encoding="utf-8")
+        real_open = open
+        monkeypatch.setattr(
+            "builtins.open",
+            lambda path, *a, **k: real_open(proc_uptime if path == "/proc/uptime" else path, *a, **k),
+        )
+        assert PostBootHealthCheck()._get_uptime() == expected
+
+    def test_get_uptime_unknown_when_proc_is_unreadable(self, monkeypatch):
+        def _boom(*args, **kwargs):
+            raise OSError("no /proc")
+
+        monkeypatch.setattr("builtins.open", _boom)
+        assert PostBootHealthCheck()._get_uptime() == "不明"
+
+
+class TestCheckNetworkOffline:
+    def test_ping_failure_short_circuits_to_err(self, monkeypatch):
+        def _boom(*args, **kwargs):
+            raise subprocess.CalledProcessError(1, "ping")
+
+        monkeypatch.setattr(health_check_module.subprocess, "check_call", _boom)
+        called = []
+        monkeypatch.setattr(health_check_module.requests, "get", lambda *a, **k: called.append(1))
+
+        checker = PostBootHealthCheck()
+        checker.check_network_and_apis()
+
+        assert checker.results[-1].status == STATUS_ERR
+        assert checker.results[-1].message == "Offline (Ping NG)"
+        assert called == [], "Ping NG の時点で API チェックまで進まないこと"
+
+
+class TestCheckDatabase:
+    def test_missing_db_file_is_err(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(config, "SQLITE_DB_PATH", str(tmp_path / "missing.db"))
+        checker = PostBootHealthCheck()
+        checker.check_database()
+        assert checker.results[-1].status == STATUS_ERR
+        assert checker.results[-1].message == "File Not Found"
+
+    def test_healthy_db_is_ok(self, isolated_db):
+        checker = PostBootHealthCheck()
+        checker.check_database()
+        assert checker.results[-1].status == STATUS_OK
+        assert checker.results[-1].message == "Integrity OK"
+
+    def test_quick_check_reporting_corruption_is_err(self, isolated_db, monkeypatch):
+        class _Cursor:
+            def execute(self, sql): return self
+            def fetchone(self): return ("*** in database main ***",)
+
+        class _Conn:
+            def __enter__(self): return self
+            def __exit__(self, *exc): return False
+            def cursor(self): return _Cursor()
+
+        monkeypatch.setattr(health_check_module, "get_ro_connection", lambda db_path=None: _Conn())
+        checker = PostBootHealthCheck()
+        checker.check_database()
+        assert checker.results[-1].status == STATUS_ERR
+        assert "Corrupt" in checker.results[-1].message
+
+    def test_connection_error_is_err_not_silently_ok(self, isolated_db, monkeypatch):
+        def _boom(db_path=None):
+            raise RuntimeError("database is locked")
+
+        monkeypatch.setattr(health_check_module, "get_ro_connection", _boom)
+        checker = PostBootHealthCheck()
+        checker.check_database()
+        assert checker.results[-1].status == STATUS_ERR
+        assert "database is locked" in checker.results[-1].message
+
+
+class TestCheckPeripheralsNas:
+    @pytest.fixture(autouse=True)
+    def _no_notifications(self, monkeypatch):
+        self.sent = []
+        monkeypatch.setattr(
+            health_check_module, "send_push",
+            lambda messages, target=None, channel=None: self.sent.append(messages[0]["text"]),
+        )
+        monkeypatch.setattr(config, "CAMERAS", [])
+        monkeypatch.setattr(
+            health_check_module.subprocess, "check_output", lambda *a, **k: b"card 0: bcm2835\n"
+        )
+
+    def test_unmounted_nas_is_err(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(config, "NAS_MOUNT_POINT", str(tmp_path / "nas"))
+        monkeypatch.setattr(health_check_module.os.path, "ismount", lambda p: False)
+
+        checker = PostBootHealthCheck()
+        checker.check_peripherals()
+
+        nas = next(r for r in checker.results if r.name == "NAS")
+        assert (nas.status, nas.message) == (STATUS_ERR, "Disconnected")
+        assert self.sent == []
+
+    def test_mounted_and_writable_is_ok_and_cleans_up_the_probe_file(self, monkeypatch, tmp_path):
+        mount = tmp_path / "nas"
+        mount.mkdir()
+        monkeypatch.setattr(config, "NAS_MOUNT_POINT", str(mount))
+        monkeypatch.setattr(config, "NAS_IP", "192.168.0.10", raising=False)
+        monkeypatch.setattr(health_check_module.os.path, "ismount", lambda p: True)
+
+        checker = PostBootHealthCheck()
+        checker.check_peripherals()
+
+        nas = next(r for r in checker.results if r.name == "NAS")
+        assert nas.status == STATUS_OK
+        assert "192.168.0.10" in nas.message
+        assert list(mount.iterdir()) == [], "書き込みテスト用ファイルが残っていない"
+
+    def test_permission_denied_is_err_and_notifies(self, monkeypatch, tmp_path):
+        mount = tmp_path / "nas"
+        mount.mkdir()
+        monkeypatch.setattr(config, "NAS_MOUNT_POINT", str(mount))
+        monkeypatch.setattr(health_check_module.os.path, "ismount", lambda p: True)
+
+        real_open = open
+
+        def _deny(path, *args, **kwargs):
+            if str(path).endswith(".health_check_rw"):
+                raise PermissionError("read-only")
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.open", _deny)
+
+        checker = PostBootHealthCheck()
+        checker.check_peripherals()
+
+        nas = next(r for r in checker.results if r.name == "NAS")
+        assert (nas.status, nas.message) == (STATUS_ERR, "Permission Denied")
+        assert len(self.sent) == 1
+        assert "NAS権限エラー" in self.sent[0]
+
+
+class TestCheckPeripheralsCamerasAndSpeaker:
+    @pytest.fixture(autouse=True)
+    def _base(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(config, "NAS_MOUNT_POINT", str(tmp_path / "nas"))
+        monkeypatch.setattr(health_check_module.os.path, "ismount", lambda p: False)
+        monkeypatch.setattr(health_check_module, "send_push", lambda **kwargs: None)
+
+    def _cameras(self, monkeypatch, reachable: dict):
+        monkeypatch.setattr(config, "CAMERAS", [{"ip": ip} for ip in reachable])
+        checker = PostBootHealthCheck()
+        monkeypatch.setattr(
+            checker, "_check_port", lambda host, port, timeout=2: reachable.get(host, False)
+        )
+        return checker
+
+    def test_all_cameras_online_is_ok(self, monkeypatch):
+        checker = self._cameras(monkeypatch, {"10.0.0.1": True, "10.0.0.2": True})
+        with patch.object(health_check_module.subprocess, "check_output", return_value=b"card 0\n"):
+            checker.check_peripherals()
+        cam = next(r for r in checker.results if r.name == "Cameras")
+        assert (cam.status, cam.message) == (STATUS_OK, "2/2 Online")
+
+    def test_partially_reachable_cameras_is_warn(self, monkeypatch):
+        checker = self._cameras(monkeypatch, {"10.0.0.1": True, "10.0.0.2": False})
+        with patch.object(health_check_module.subprocess, "check_output", return_value=b"card 0\n"):
+            checker.check_peripherals()
+        cam = next(r for r in checker.results if r.name == "Cameras")
+        assert (cam.status, cam.message) == (STATUS_WARN, "1/2 Online")
+
+    def test_all_cameras_offline_is_err(self, monkeypatch):
+        checker = self._cameras(monkeypatch, {"10.0.0.1": False})
+        with patch.object(health_check_module.subprocess, "check_output", return_value=b"card 0\n"):
+            checker.check_peripherals()
+        cam = next(r for r in checker.results if r.name == "Cameras")
+        assert (cam.status, cam.message) == (STATUS_ERR, "0/1 Online")
+
+    def test_speaker_falls_back_to_sound_card_when_bt_disabled(self, monkeypatch):
+        monkeypatch.setattr(health_check_module, "TARGET_BLUETOOTH_MAC", None)
+        checker = self._cameras(monkeypatch, {})
+        with patch.object(health_check_module.subprocess, "check_output", return_value=b"card 0: bcm2835\n"):
+            checker.check_peripherals()
+        spk = next(r for r in checker.results if r.name == "Speaker")
+        assert (spk.status, spk.message) == (STATUS_OK, "Sound Card OK")
+
+    def test_speaker_warns_when_no_sound_card_and_no_bt(self, monkeypatch):
+        monkeypatch.setattr(health_check_module, "TARGET_BLUETOOTH_MAC", None)
+        checker = self._cameras(monkeypatch, {})
+        with patch.object(health_check_module.subprocess, "check_output", side_effect=Exception("no aplay")):
+            checker.check_peripherals()
+        spk = next(r for r in checker.results if r.name == "Speaker")
+        assert (spk.status, spk.message) == (STATUS_WARN, "No Device")
+
+    def test_speaker_connected_over_bluetooth(self, monkeypatch):
+        monkeypatch.setattr(health_check_module, "TARGET_BLUETOOTH_MAC", "AA:BB:CC:DD:EE:FF")
+        checker = self._cameras(monkeypatch, {})
+        with patch.object(
+            health_check_module.subprocess, "check_output",
+            side_effect=[b"card 0\n", b"Connected: yes\n"],
+        ):
+            checker.check_peripherals()
+        spk = next(r for r in checker.results if r.name == "Speaker")
+        assert (spk.status, spk.message) == (STATUS_OK, "Connected (BT)")
+
+    def test_speaker_disconnected_over_bluetooth_is_warn(self, monkeypatch):
+        monkeypatch.setattr(health_check_module, "TARGET_BLUETOOTH_MAC", "AA:BB:CC:DD:EE:FF")
+        checker = self._cameras(monkeypatch, {})
+        with patch.object(
+            health_check_module.subprocess, "check_output",
+            side_effect=[b"card 0\n", b"Connected: no\n"],
+        ):
+            checker.check_peripherals()
+        spk = next(r for r in checker.results if r.name == "Speaker")
+        assert (spk.status, spk.message) == (STATUS_WARN, "Disconnected (BT)")
+
+    def test_bluetoothctl_timeout_is_bt_error(self, monkeypatch):
+        """bluetoothctl は Bluetooth デーモン不調時に応答を返さないことがあるため、
+        timeout 超過は WARN(BT Error)として扱う。"""
+        monkeypatch.setattr(health_check_module, "TARGET_BLUETOOTH_MAC", "AA:BB:CC:DD:EE:FF")
+        checker = self._cameras(monkeypatch, {})
+        with patch.object(
+            health_check_module.subprocess, "check_output",
+            side_effect=[b"card 0\n", subprocess.TimeoutExpired(cmd="bluetoothctl", timeout=15)],
+        ):
+            checker.check_peripherals()
+        spk = next(r for r in checker.results if r.name == "Speaker")
+        assert (spk.status, spk.message) == (STATUS_WARN, "BT Error")
+
+
+class TestCheckRecentLogsFiltering:
+    def test_missing_log_file_is_warn(self, tmp_path):
+        checker = PostBootHealthCheck()
+        checker.log_file_path = str(tmp_path / "nope.log")
+        checker.check_recent_logs()
+        assert (checker.results[-1].status, checker.results[-1].message) == (STATUS_WARN, "No log file yet")
+
+    @freeze_time("2026-09-19 12:00:00")
+    def test_recent_errors_are_counted_and_the_last_two_are_shown(self, tmp_path, monkeypatch):
+        log_file = tmp_path / "home_system.log"
+        log_file.write_text("dummy", encoding="utf-8")
+        lines = "\n".join(
+            f"2026-09-19 11:55:00 [ERROR] failure number {i}" for i in range(3)
+        )
+        monkeypatch.setattr(
+            health_check_module.subprocess, "check_output", lambda *a, **k: lines.encode()
+        )
+
+        checker = PostBootHealthCheck()
+        checker.log_file_path = str(log_file)
+        checker.check_recent_logs()
+
+        result = checker.results[-1]
+        assert result.status == STATUS_WARN
+        assert "3 Errors in last 10min" in result.message
+        assert "failure number 2" in result.message
+        assert "failure number 0" not in result.message
+
+    @freeze_time("2026-09-19 12:00:00")
+    def test_errors_older_than_ten_minutes_are_ignored(self, tmp_path, monkeypatch):
+        log_file = tmp_path / "home_system.log"
+        log_file.write_text("dummy", encoding="utf-8")
+        monkeypatch.setattr(
+            health_check_module.subprocess, "check_output",
+            lambda *a, **k: b"2026-09-19 11:30:00 [ERROR] stale failure",
+        )
+
+        checker = PostBootHealthCheck()
+        checker.log_file_path = str(log_file)
+        checker.check_recent_logs()
+
+        assert checker.results[-1].status == STATUS_OK
+
+    def test_lines_without_a_parsable_timestamp_are_skipped(self, tmp_path, monkeypatch):
+        """ノイズ低減のため、日付をパースできない ERROR 行は数えない。"""
+        log_file = tmp_path / "home_system.log"
+        log_file.write_text("dummy", encoding="utf-8")
+        monkeypatch.setattr(
+            health_check_module.subprocess, "check_output",
+            lambda *a, **k: b"Traceback ERROR without timestamp",
+        )
+
+        checker = PostBootHealthCheck()
+        checker.log_file_path = str(log_file)
+        checker.check_recent_logs()
+
+        assert checker.results[-1].status == STATUS_OK
+
+
+class TestSendReport:
+    def _report(self, monkeypatch, statuses):
+        sent = []
+        monkeypatch.setattr(
+            health_check_module, "send_push",
+            lambda messages, target=None, channel=None: sent.append(messages[0]["text"]),
+        )
+        checker = PostBootHealthCheck()
+        monkeypatch.setattr(checker, "_get_uptime", lambda: "1時間0分")
+        checker.results = [
+            health_check_module.CheckResult(f"check{i}", status, "msg") for i, status in enumerate(statuses)
+        ]
+        checker._send_report()
+        return sent[0]
+
+    def test_all_ok_is_green(self, monkeypatch):
+        assert self._report(monkeypatch, [STATUS_OK, STATUS_OK]).startswith("🟢")
+
+    def test_any_warn_is_yellow(self, monkeypatch):
+        assert self._report(monkeypatch, [STATUS_OK, STATUS_WARN]).startswith("🟡")
+
+    def test_any_err_is_red_even_with_warns(self, monkeypatch):
+        body = self._report(monkeypatch, [STATUS_WARN, STATUS_ERR])
+        assert body.startswith("🔴")
+        assert "🔴 **check1**: msg" in body
+
+
+class TestRun:
+    def test_run_executes_every_check_and_sends_one_report(self, monkeypatch):
+        """run() が全チェックを呼び、最後にレポートを1回だけ送ること。"""
+        checker = PostBootHealthCheck()
+        called = []
+        for name in (
+            "check_network_and_apis", "check_system_resources", "check_database",
+            "check_peripherals", "check_services", "check_recent_logs", "_send_report",
+        ):
+            monkeypatch.setattr(checker, name, lambda _n=name: called.append(_n))
+
+        checker.run()
+
+        assert called == [
+            "check_network_and_apis", "check_system_resources", "check_database",
+            "check_peripherals", "check_services", "check_recent_logs", "_send_report",
+        ]
