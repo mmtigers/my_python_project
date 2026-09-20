@@ -69,6 +69,20 @@ interface RoutineFlowProps {
     onCompleteStep: (stepKey: string) => void;
     isCompleting?: boolean;
     compact?: boolean;
+    /** Issue #718: 大人(role_adult)には「まだだよ」を出さない。
+     *
+     * 「まだだよ」は締切までに終わらなかったステップを咎めずに示す療育目的の表示で、
+     * 対象は子ども。大人のフローでは締切(17:30)に間に合うことが実質なく
+     * (パパは20時まで勤務、ママの「夕食を作る」は元クエストが16:00〜20:00)、
+     * 毎平日かならずオレンジの警告が並ぶだけで意味を持たない。
+     *
+     * **表示だけを抑える。** サーバー側の状態は 'remind' のままにする必要がある:
+     * 追いつき完了(#672)の可否は、フロント側がこのボタンを出す条件と
+     * サーバー側 `routine_service.complete_step` の `is_catch_up` 判定の
+     * **両方が status === 'remind' を見ている**ため、状態を変えると
+     * 「帰宅後に『いまやった！』を押す」経路ごと壊れ、ママの「夕食を作る」の
+     * 個別報酬(150G/150EXP)も受け取れなくなる。 */
+    isAdult?: boolean;
 }
 
 // 自由時間中は別画面(既存のクエスト選択UI)に任せ、ここでは現在地バナーだけを表示する。
@@ -88,7 +102,7 @@ export const RoutineFreeTimeBanner: React.FC<{ flowKey: 'am' | 'pm'; flow: Routi
     );
 };
 
-const RoutineFlow: React.FC<RoutineFlowProps> = ({ flowKey, flow, onCompleteStep, isCompleting, compact }) => {
+const RoutineFlow: React.FC<RoutineFlowProps> = ({ flowKey, flow, onCompleteStep, isCompleting, compact, isAdult }) => {
     if (!flow.started) return null;
     const theme = THEME[flowKey];
 
@@ -139,6 +153,7 @@ const RoutineFlow: React.FC<RoutineFlowProps> = ({ flowKey, flow, onCompleteStep
                         onToggleStep={onCompleteStep}
                         isCompleting={!!isCompleting}
                         compact={!!compact}
+                        isAdult={!!isAdult}
                     />
                 );
             }
@@ -154,6 +169,7 @@ const RoutineFlow: React.FC<RoutineFlowProps> = ({ flowKey, flow, onCompleteStep
                 onComplete={() => onCompleteStep(step.key)}
                 isCompleting={!!isCompleting}
                 compact={!!compact}
+                isAdult={!!isAdult}
             />
         );
         return acc;
@@ -176,7 +192,8 @@ const RoutineChecklistBlock: React.FC<{
     onToggleStep: (stepKey: string) => void;
     isCompleting: boolean;
     compact: boolean;
-}> = ({ flowKey, steps, previewBonusGold, fullBonusGold, onToggleStep, isCompleting, compact }) => {
+    isAdult: boolean;
+}> = ({ flowKey, steps, previewBonusGold, fullBonusGold, onToggleStep, isCompleting, compact, isAdult }) => {
     const theme = THEME[flowKey];
     return (
         <div className={`rounded-2xl border p-4 mb-4 ${theme.spotlight}`}>
@@ -197,6 +214,7 @@ const RoutineChecklistBlock: React.FC<{
                         onToggle={() => onToggleStep(step.key)}
                         isCompleting={isCompleting}
                         compact={compact}
+                        isAdult={isAdult}
                     />
                 ))}
             </div>
@@ -210,11 +228,13 @@ const RoutineChecklistItem: React.FC<{
     onToggle: () => void;
     isCompleting: boolean;
     compact: boolean;
-}> = ({ flowKey, step, onToggle, isCompleting, compact }) => {
+    isAdult: boolean;
+}> = ({ flowKey, step, onToggle, isCompleting, compact, isAdult }) => {
     const theme = THEME[flowKey];
     const Icon = ICONS[step.icon_key] || Star;
     const checked = step.status === 'done';
-    const remind = step.status === 'remind';
+    // Issue #718: 状態は 'remind' のまま扱い、**大人には見せない**だけにする。
+    const remind = step.status === 'remind' && !isAdult;
     const iconSize = compact ? 14 : 18;
 
     let boxClass = 'border-gray-500 text-gray-400';
@@ -264,22 +284,27 @@ const RoutineStepRow: React.FC<{
     onComplete: () => void;
     isCompleting: boolean;
     compact: boolean;
-}> = ({ flowKey, step, checkpointTime, isLast, onComplete, isCompleting, compact }) => {
+    isAdult: boolean;
+}> = ({ flowKey, step, checkpointTime, isLast, onComplete, isCompleting, compact, isAdult }) => {
     const theme = THEME[flowKey];
     const Icon = ICONS[step.icon_key] || Star;
+    // Issue #718: 追いつき完了の可否は status === 'remind' のまま(catchUp)。
+    // 咎める見た目(オレンジ・ベル・「まだだよ」)だけを大人では出さない(showRemind)。
+    const catchUp = step.status === 'remind';
+    const showRemind = catchUp && !isAdult;
     const nodeSize = compact ? 'w-8 h-8' : (step.status === 'current' ? 'w-14 h-14' : 'w-11 h-11');
     const iconSize = compact ? 14 : (step.status === 'current' ? 24 : 18);
 
     let nodeClass = 'border-gray-600 bg-gray-800 text-gray-500';
     if (step.status === 'done') nodeClass = theme.nodeDone;
     if (step.status === 'current') nodeClass = `${theme.node} ${!compact ? 'animate-pulse' : ''}`;
-    if (step.status === 'remind') nodeClass = 'bg-orange-900/40 border-orange-500 text-orange-300';
+    if (showRemind) nodeClass = 'bg-orange-900/40 border-orange-500 text-orange-300';
 
     return (
         <div className="flex gap-3">
             <div className="flex flex-col items-center flex-none" style={{ width: compact ? 32 : 44 }}>
                 <div className={`rounded-full border-2 flex items-center justify-center flex-none transition-all ${nodeClass} ${nodeSize}`}>
-                    {step.status === 'done' ? <Check size={iconSize} /> : step.status === 'remind' ? <Bell size={iconSize} /> : <Icon size={iconSize} />}
+                    {step.status === 'done' ? <Check size={iconSize} /> : showRemind ? <Bell size={iconSize} /> : <Icon size={iconSize} />}
                 </div>
                 {step.is_checkpoint ? (
                     // チェックポイントの時刻表示は「次のステップへの接続線」ではなく
@@ -315,18 +340,22 @@ const RoutineStepRow: React.FC<{
                     </div>
                 ) : (
                     <div className={`flex items-center gap-1.5 h-full ${compact ? 'text-xs' : 'text-sm'} ${step.status === 'locked' ? 'text-gray-500' : 'text-gray-300'}`}>
-                        {step.status === 'remind' && <span className="rounded-full bg-orange-900/40 text-orange-300 text-[10px] font-bold px-2 py-0.5 flex-none">まだだよ</span>}
+                        {showRemind && <span className="rounded-full bg-orange-900/40 text-orange-300 text-[10px] font-bold px-2 py-0.5 flex-none">まだだよ</span>}
                         <span className="min-w-0">{step.label}</span>
                         <RoutineStepRewardChip flowKey={flowKey} step={step} />
                         {/* 締切を過ぎて「まだだよ」になった一本道のステップは、後から
                             終わらせれば完了報告できる(サーバー側の追いつき完了)。
                             チェックポイント(自由時間)自体はタップ対象ではないので出さない。 */}
-                        {step.status === 'remind' && !step.is_checkpoint && (
+                        {catchUp && !step.is_checkpoint && (
                             <button
                                 type="button"
                                 onClick={onComplete}
                                 disabled={isCompleting}
-                                className="ml-auto flex-none rounded-full border border-orange-500 bg-orange-900/40 px-3 py-1 text-[11px] font-bold text-orange-200 disabled:opacity-50"
+                                className={`ml-auto flex-none rounded-full border px-3 py-1 text-[11px] font-bold disabled:opacity-50 ${
+                                    showRemind
+                                        ? 'border-orange-500 bg-orange-900/40 text-orange-200'
+                                        : 'border-gray-500 bg-gray-800/60 text-gray-200'
+                                }`}
                             >
                                 いまやった！
                             </button>

@@ -231,4 +231,31 @@ describe('RoutineFlow step rewards (adult flows)', () => {
         expect(screen.getAllByText('まだだよ')).toHaveLength(2);
         expect(screen.getAllByRole('button', { name: 'いまやった！' })).toHaveLength(1);
     });
+
+    // Issue #718: 大人(role_adult)には「まだだよ」を出さない。
+    // 大人のフローは締切(17:30)に間に合うことが実質なく(パパは20時まで勤務)、
+    // 毎平日かならずオレンジの警告が並ぶだけになるため。
+    it('hides the "まだだよ" reminder for an adult', () => {
+        render(<RoutineFlow flowKey="pm" flow={catchUpFlow} onCompleteStep={vi.fn()} isAdult />);
+        expect(screen.queryByText('まだだよ')).not.toBeInTheDocument();
+    });
+
+    it('still offers the catch-up button to an adult', () => {
+        // ★これが本 Issue で最も壊しやすい点。サーバー側 complete_step の
+        // is_catch_up 判定も status === 'remind' を見ているため、状態そのものを
+        // 変えて「まだだよ」を消すと、帰宅後に「いまやった！」を押す経路ごと壊れ、
+        // ママの「夕食を作る」の個別報酬(150G/150EXP)も受け取れなくなる。
+        // 表示だけを抑える実装であることをここで固定する。
+        const onCompleteStep = vi.fn();
+        render(<RoutineFlow flowKey="pm" flow={catchUpFlow} onCompleteStep={onCompleteStep} isAdult />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'いまやった！' }));
+        expect(onCompleteStep).toHaveBeenCalledWith('homework');
+    });
+
+    it('still shows the "まだだよ" reminder for a child (default)', () => {
+        // isAdult を省略したときに子ども向けの挙動が既定であること(退行防止)。
+        render(<RoutineFlow flowKey="pm" flow={catchUpFlow} onCompleteStep={vi.fn()} />);
+        expect(screen.getAllByText('まだだよ')).toHaveLength(2);
+    });
 });

@@ -13,7 +13,8 @@
 * [main.md](main.md) - 本コンポーネントをルートとしてマウントする呼び出し元（想定）
 * [src/hooks/useGameData.md](src/hooks/useGameData.md) - ユーザー/クエスト/報酬データの取得・更新関数（`completeQuest`等）を提供するカスタムフック
 * [src/hooks/useRoutineData.md](src/hooks/useRoutineData.md) - **（すごろく機能で新規追加）** 「きょうのすごろく」の当日フロー状態取得・ステップ完了報告を提供するカスタムフック。`currentUser.user_id`で呼び出す
-* [src/features/routine/components/RoutineFlow.md](src/features/routine/components/RoutineFlow.md) - **（すごろく機能で新規追加）** すごろくUI本体。デフォルトエクスポート`RoutineFlow`（誘導中の全ステップ表示）と名前付きエクスポート`RoutineFreeTimeBanner`（自由時間中バナー）の両方を縦画面の`quest`タブ内で使用
+* [src/features/routine/components/RoutineFlow.md](src/features/routine/components/RoutineFlow.md) - **（すごろく機能で新規追加）** すごろくUI本体。デフォルトエクスポート`RoutineFlow`（誘導中の全ステップ表示）と名前付きエクスポート`RoutineFreeTimeBanner`（自由時間中バナー）の両方を縦画面の`quest`タブ内で使用。**（Issue #718 で追加）** `RoutineFlow`へ`isAdult={isParentUser(currentUser)}`を渡し、大人(`role_adult`)には療育目的の「まだだよ」表示を出さないよう制御する（表示のみの制御で、追いつき完了の可否は変えない）
+  * 根拠: (行番号: 597 / 抜粋: "isAdult={isParentUser(currentUser)}")
 * [src/lib/routineDataSchema.md](src/lib/routineDataSchema.md) - **（すごろく機能で新規追加、コードレビューでApp.tsx側の重複ロジックをselectRoutineFlowへ集約）** `selectRoutineFlow`（誘導中/自由時間中のフローキーをam優先で判定するヘルパー）と`RoutineFlowState`等の型の実装元
 * [src/hooks/useLayoutMode.md](src/hooks/useLayoutMode.md) - `landscape`/`portrait`のレイアウトモード判定フック
 * [src/hooks/useSound.md](src/hooks/useSound.md) - 効果音再生フック

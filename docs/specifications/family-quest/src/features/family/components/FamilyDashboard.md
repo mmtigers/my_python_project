@@ -20,7 +20,10 @@
 * [../../quest/context/questActivityShared.md](../../quest/context/questActivityShared.md) - **（Issue #659で新規追加）** 上記フックが返す`QuestActivityValue`型とProvider未設置時の既定値`QUEST_ACTIVITY_IDLE`の定義元
 * [../../../types/index.md](../../../types/index.md) - `User`/`Quest`/`QuestHistory`/`Reward`型の定義元
 * [../../../hooks/useRoutineData.md](../../../hooks/useRoutineData.md) - **（すごろく機能で新規追加）** `FamilyPanel`が`user.user_id`ごとに個別に呼び出す、「きょうのすごろく」の当日フロー状態取得・ステップ完了報告フック
-* [../../routine/components/RoutineFlow.md](../../routine/components/RoutineFlow.md) - **（すごろく機能で新規追加）** `FamilyPanel`の`quest`タブが`compact`付きで表示するすごろくUI本体（デフォルトエクスポート`RoutineFlow`と名前付きエクスポート`RoutineFreeTimeBanner`の両方）
+* [../../routine/components/RoutineFlow.md](../../routine/components/RoutineFlow.md) - **（すごろく機能で新規追加）** `FamilyPanel`の`quest`タブが`compact`付きで表示するすごろくUI本体（デフォルトエクスポート`RoutineFlow`と名前付きエクスポート`RoutineFreeTimeBanner`の両方）。**（Issue #718 で追加）** `RoutineFlow`へ`isAdult={isParentUser(user)}`を渡す。横画面はパネルごとに別ユーザーを描画するため、判定対象は`App.tsx`側の`currentUser`ではなく`FamilyPanel`が受け取る`user`になる
+  * 根拠: (行番号: 221 / 抜粋: "isAdult={isParentUser(user)}")
+* [../../../lib/userRole.md](../../../lib/userRole.md) - **（Issue #718 で新規追加）** `isParentUser`（`user.role === 'role_adult'`）の実装元。本ファイルは`isAdult` prop の算出にこれを使う
+  * 根拠: [インポート宣言] (行番号: 4 / 抜粋: "import { isParentUser } from '@/lib/userRole';")
 * [../../../lib/routineDataSchema.md](../../../lib/routineDataSchema.md) - **（すごろく機能で新規追加、コードレビューでApp.tsx側との重複をselectRoutineFlowへ集約）** `selectRoutineFlow`（誘導中/自由時間中のフローキーをam優先で判定するヘルパー）の実装元
 * [../../../../App.md](../../../../App.md) - 呼び出し元（横画面レイアウト時のメイン表示コンポーネントとして使用）。縦画面側でも同様の`useRoutineData`+`RoutineFlow`/`RoutineFreeTimeBanner`パターンを採る
 
