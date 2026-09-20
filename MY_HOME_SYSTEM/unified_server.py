@@ -423,6 +423,10 @@ async def ip_restriction_middleware(request: Request, call_next: Callable[[Reque
     サーバーまで届かなくなる(Issue #517で /webhook/switchbot・/callback/line が
     実際にブロックされていた)。エッジ側の設定を点検する際の参照元として、
     外部Webhookのパスを追加したらここにも必ず追記すること。
+    ただし**ここに追記してもエッジ側が自動で追従するわけではない**(2026-09-20の
+    点検では /webhook/alexa だけがバイパス漏れのままだった。Issue #725)。
+    実際にバイパスされているかの確認手順は
+    `docs/runbooks/cloudflare_access_connectivity_check.md` の手順5を参照。
 
     許可ネットワーク:
     - プライベートIP (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12)
