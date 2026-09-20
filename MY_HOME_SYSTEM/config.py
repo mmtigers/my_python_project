@@ -16,7 +16,7 @@
     11. Alexaスキル設定
     12. ラズパイ監視(health_watch)設定
     13. NASパスの遅延解決 (Issue #330 PR-B)
-    14. Family Quest: YouTubeごほうび券クールダウン設定
+    14. Family Quest: YouTubeごほうび券の視聴制限設定
     15. 週次レポート設定
     16. ダッシュボード(Streamlit)公開設定
 """
@@ -724,7 +724,8 @@ def prewarm_nas_paths() -> None:
     logger.info("✅ NAS依存パスのプリウォーム完了")
 
 # ==========================================
-# 14. Family Quest: YouTubeごほうび券クールダウン設定
+# 14. Family Quest: YouTubeごほうび券の視聴制限設定
+#     (連続使用を防ぐクールダウンと、1日の合計視聴分数の上限)
 # ==========================================
 # 連続視聴による目の負担を防ぐため、YouTube系のごほうび券(user_inventory経由で
 # 使用するreward_master.reward_id)を1枚使用してから次の1枚を使用できるまでの
@@ -752,6 +753,88 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM parse error: {e}. 即時強制にフォールバックします。")
     YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM = _date(2000, 1, 1)
+
+# 各YouTube系ごほうび券が「何分ぶん視聴できる券か」の対応表。
+# "reward_id:分数" をカンマ区切りで並べた形式(例: "10:10,11:30,12:60")。
+# 既定値はquest_data.pyのYouTube報酬(10:00/30:00/60:00)に対応する。
+#
+# この表は2つの用途を持つ:
+#   1. クールダウンの起点補正。クールダウンは券を「使った瞬間」(used_at)からの
+#      経過で計算されるため、視聴時間より短いクールダウンだと長い券ほど休憩が
+#      実質ゼロになる(30分券・60分券は見終わった時点で既にクールダウンが明けて
+#      いた)。券の長さ + YOUTUBE_REWARD_BREAK_SECONDS を待ち時間にすることで、
+#      どの券でも「見終わってから休憩」が成立する。
+#   2. 1日の合計視聴分数(YOUTUBE_DAILY_LIMIT_MINUTES_*)の集計。
+#
+# ここに無いreward_idは長さ0分として扱う(クールダウンは休憩ぶんのみ、日次上限の
+# 集計には加算されない)。YOUTUBE_REWARD_IDS に券を足したらこちらも併せて更新すること。
+_youtube_reward_durations_str: str = os.getenv("YOUTUBE_REWARD_DURATION_MINUTES", "10:10,11:30,12:60")
+YOUTUBE_REWARD_DURATION_MINUTES: dict[int, int] = {}
+if _youtube_reward_durations_str:
+    for _pair in _youtube_reward_durations_str.split(","):
+        _pair = _pair.strip()
+        if not _pair:
+            continue
+        _reward_id_str, _, _minutes_str = _pair.partition(":")
+        _reward_id_str, _minutes_str = _reward_id_str.strip(), _minutes_str.strip()
+        if _reward_id_str.isdigit() and _minutes_str.isdigit():
+            YOUTUBE_REWARD_DURATION_MINUTES[int(_reward_id_str)] = int(_minutes_str)
+        else:
+            logger.warning(
+                f"⚠️ YOUTUBE_REWARD_DURATION_MINUTES の要素 '{_pair}' は "
+                "'reward_id:分数' として解釈できません。この要素は無視します。"
+            )
+
+# 1日に使えるYouTube系ごほうび券の合計分数の上限(JSTの日付が変わるとリセット)。
+# クールダウン(間隔)だけでは「合計何分見たか」は縛れず、ゴールドが続く限り
+# 15分おきに何枚でも使えてしまうため、総量はこちらで制限する。
+# 平日と休日(土日)で別々に設定できる。0以下を設定すると「上限なし」になる。
+YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY: int = _get_int_env("YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY", 60)
+YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY: int = _get_int_env("YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY", 90)
+
+# 日次上限の実際の適用開始日(YYYY-MM-DD、JST基準)。クールダウンと同じく、
+# いきなり制限がかかると子どもが困惑するため、この日を迎えるまでは使用を拒否せず
+# family-quest側に予告バナーを表示するだけに留める
+# (services/quest/locks.py の _is_youtube_daily_limit_enforced が判定)。
+# 既定値はこの機能を追加した日(2026-09-20)の1週間後。実際にリリースする日程に
+# 合わせて調整すること。パース失敗時は安全側(=即時強制)にフォールバックする。
+# 捕捉するのは ValueError だけ: _date.fromisoformat が不正な日付文字列に対して
+# 送出するのはこれであり、それ以外の例外(実装の誤り)まで握り潰さないため。
+# すぐ上の YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM が Exception を捕捉しているのは
+# 先に書かれたコードの名残で、意図的な差ではない。
+_youtube_daily_limit_enforce_from_str: str = os.getenv("YOUTUBE_DAILY_LIMIT_ENFORCE_FROM", "2026-09-27")
+try:
+    YOUTUBE_DAILY_LIMIT_ENFORCE_FROM: _date = _date.fromisoformat(_youtube_daily_limit_enforce_from_str)
+except ValueError as e:
+    logger.warning(f"⚠️ YOUTUBE_DAILY_LIMIT_ENFORCE_FROM parse error: {e}. 即時強制にフォールバックします。")
+    YOUTUBE_DAILY_LIMIT_ENFORCE_FROM = _date(2000, 1, 1)
+
+# 日次上限を「使い切ったあとに、追加でプリントをやれば延長できる」ようにするための設定。
+# 上限で一律に打ち切るのではなく、もっと見たいなら勉強を1枚足す、という交換にする。
+#
+# YOUTUBE_EXTENSION_QUEST_IDS は延長の対象になるクエスト(quest_master.quest_id)。
+# 既定値は quest_data.py の「プリント」(31/智矢)と「なぞり書きプリント」(307/娘)で、
+# どちらも type='infinite'(1日に何度でも報告できる)である。空文字にすると延長機能を
+# 無効化できる。
+_youtube_extension_quest_ids_str: str = os.getenv("YOUTUBE_EXTENSION_QUEST_IDS", "31,307")
+YOUTUBE_EXTENSION_QUEST_IDS: list[int] = []
+if _youtube_extension_quest_ids_str:
+    try:
+        YOUTUBE_EXTENSION_QUEST_IDS = [
+            int(q.strip()) for q in _youtube_extension_quest_ids_str.split(",") if q.strip().isdigit()
+        ]
+    # isdigit() で絞ってから int() しているため実際には送出されないが、
+    # 設定のパース失敗で config 全体のロードを落とさないための保険。
+    # 他の同種ブロックが Exception を捕捉しているのは先に書かれたコードの名残で、
+    # ここでは int() が送出しうる ValueError に絞る。
+    except ValueError as e:
+        logger.warning(f"⚠️ YOUTUBE_EXTENSION_QUEST_IDS parse error: {e}")
+
+# プリント1枚あたり何分ぶん上限を延ばすか、および1日に何回まで延長できるか。
+# 回数に上限を設けるのは、プリントを大量に出せば無制限に見られる状態にしないため。
+# どちらも0以下にすると延長機能は無効になる。
+YOUTUBE_EXTENSION_MINUTES_PER_QUEST: int = _get_int_env("YOUTUBE_EXTENSION_MINUTES_PER_QUEST", 30)
+YOUTUBE_EXTENSION_MAX_PER_DAY: int = _get_int_env("YOUTUBE_EXTENSION_MAX_PER_DAY", 2)
 
 # ==========================================
 # 15. 週次レポート設定

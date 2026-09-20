@@ -20,6 +20,7 @@
 * 根拠: 冒頭コメント (行番号: 16〜28 / 抜粋: "// #752(AUDIT-023): 上記の「新フィールドが無音で無視される」穴を塞ぐため、\n// バックエンド側に GET /api/quest/data の response_model\n// (MY_HOME_SYSTEM/models/quest.py の GameDataResponse 配下の View モデル)を\n// 追加し、MY_HOME_SYSTEM/tests/test_quest_api_type_contract.py が\n// **本ファイルを直接読んで** 次の2点をCIで検証するようにした。")
 
 * **（Issue #659 で追加）** `chronicleResponseSchema` / `inventoryResponseSchema` / `cameraSettingsResponseSchema` を追加した。冒頭に掲げた「幽霊フィールドを取得境界で即検知する」方針が `gameData` / `purchase` / `routine` の3つにしか適用されておらず、`chronicle`・`inventory`・`cameraSettings` が漏れていたため。`.strict()` を使わない方針は従来どおりで、未知フィールドは無視される。
+* **（YouTube日次上限機能で変更）** `inventoryItemSchema` に `youtube_duration_minutes`(券1枚あたりの視聴分数。YouTube系でない券はサーバーが`null`を返す)を、`inventoryResponseSchema` に1日の合計視聴分数に関する3フィールド(`youtube_daily_limit_minutes`/`youtube_daily_used_minutes`/`youtube_daily_limit_announcement`)を追加した。**（プリントによる延長機能で追加）** さらに `youtubeExtensionSchema`(`minutes_per_quest`/`granted_count`/`max_per_day`/`can_extend_now`)と、それを `.nullable()` で参照する `youtube_extension` を追加した。
 
 `GameSystem.get_all_view_data`（`/api/quest/data`）のレスポンスに限り、`useGameData.ts`の取得境界でZodによるランタイム検証を行うためのスキーマ定義ファイル。バックエンド(MY_HOME_SYSTEM)のAPIレスポンス形状とフロントエンドの型定義(`src/types/index.ts`)が乖離していても、OpenAPI→TS生成パイプラインが存在しないためビルド時には検知できず、フィールド名二重化のような不整合の温床になっていたこと（Issue #291）を受けて追加された。バックエンドが実際に返しているフィールド名と型をここに明示し、ここに定義されていないフィールドをコンポーネント側で参照した場合、TypeScript上は型チェックを通過しても実行時には常に`undefined`になる「幽霊フィールド」であることが`.parse()`失敗によってすぐ分かるようにするのが目的。`users`/`quests`/`rewards`/`completedQuests`/`pendingQuests`の5つの配列フィールドからなる`gameDataResponseSchema`を提供する。**（#412 API契約で修正）** 以前は`logs`(`adventureLogSchema`)も検証対象に含めていたが、`gameData.logs`(`AdventureLog`型)はどのコンポーネントからも参照されておらず、`useGameData.ts`側の対応する型・フィールドごと削除されたため、本ファイルでも検証対象から外した。**（Issue #444で追加）** `gameDataResponseSchema`はもはや本ファイルの唯一のエクスポートではなく、`models/quest.py`の`PurchaseResponse`（`status`/`newGold`）に対応する`purchaseResponseSchema`も新たにエクスポートされている。`useGameData.ts`の`buyRewardMutation`がこれを使い、購入APIのレスポンスもランタイム検証するようになった（以前は`useGameData.ts`側で`as unknown as PurchaseResponse`と無検証キャストしていた）。
 * 根拠: ファイル冒頭コメント (行番号: 1〜14 / 抜粋: "// #291: バックエンド(MY_HOME_SYSTEM)のAPIレスポンス形状とフロントエンドの型定義\n// (src/types/index.ts)が乖離していても、OpenAPI→TS生成パイプラインが無いため\n// ビルド時には検知できなかった(フィールド名二重化のような不整合の温床になっていた)。\n// GameSystem.get_all_view_data (/api/quest/data) のレスポンスに限り、useGameData.ts\n// の取得境界でZodによるランタイム検証を行い、バックエンドが実際に返している\n// フィールド名と型をここに明示する。ここに無いフィールドをコンポーネント側で\n// 参照しても、たとえTypeScript上は通っても実行時には常にundefinedになる\n// (\"幽霊フィールド\")ことがすぐ分かるようにするのが目的。")
@@ -103,6 +104,17 @@
 * 根拠: [定数定義] (行番号: 96〜103 / 抜粋: "// #444: models/quest.py の PurchaseResponse に対応。以前はbuyRewardMutationの\n// 戻り値を `as unknown as PurchaseResponse` で無検証キャストしており、gameDataと\n// 異なりこの検証層を経由していなかった(バックエンドのレスポンス形状が変わっても\n// 実行時まで気づけない盲点)。\nexport const purchaseResponseSchema = z.object({\n    status: z.string(),\n    newGold: z.number(),\n});")
 
 * **引数/リクエスト**: 該当なし（スキーマオブジェクト自体はデータを受け取らない。実際の検証は呼び出し元`useGameData.ts`の`buyRewardMutation`の`mutationFn`が`purchaseResponseSchema.parse(raw)`として呼び出す）
+* **戻り値/レスポンス**: 該当なし
+* **副作用**: なし
+* **エラーハンドリング**: 該当なし（`.parse()`失敗時の`ZodError`送出は`zod`ライブラリ側の挙動）
+
+### `inventoryResponseSchema` (export定数、Issue #659で追加)
+
+* **役割**: `GET /api/quest/inventory/{user_id}`（`MY_HOME_SYSTEM`の`InventoryService.get_user_inventory`の戻り値）に対応するZodスキーマ。`items: z.array(inventoryItemSchema)`に加え、YouTubeの視聴制限に関する5フィールドを持つ: `youtube_cooldown_remaining_seconds: z.number()`、`youtube_cooldown_announcement`(`youtubeCooldownAnnouncementSchema.nullable()`)、`youtube_daily_limit_minutes: z.number().nullable()`（上限なし設定のとき`null`）、`youtube_daily_used_minutes: z.number()`、`youtube_daily_limit_announcement`(同`.nullable()`)、`youtube_extension`(`youtubeExtensionSchema.nullable()`。プリントによる上限延長の状態で、無効な設定のときは`null`)。予告情報のスキーマ`youtubeCooldownAnnouncementSchema`(`starts_on: z.string()`, `days_remaining: z.number()`)はクールダウンと日次上限の2フィールドで共用される。各アイテムは`is_youtube_reward: z.boolean()`と`youtube_duration_minutes: z.number().nullable().optional()`を持つ。
+* 根拠: [定数定義] (行番号: 167〜177 / 抜粋: "export const inventoryResponseSchema = z.object({\n    items: z.array(inventoryItemSchema),\n    youtube_cooldown_remaining_seconds: z.number(),\n    youtube_cooldown_announcement: youtubeCooldownAnnouncementSchema.nullable(),", "    youtube_daily_limit_minutes: z.number().nullable(),", "    youtube_daily_used_minutes: z.number(),", "    youtube_daily_limit_announcement: youtubeCooldownAnnouncementSchema.nullable(),", "    youtube_extension: youtubeExtensionSchema.nullable(),\n});")
+* 根拠: [サブスキーマ定義] (行番号: 139〜165 / 抜粋: "const youtubeCooldownAnnouncementSchema = z.object({", "const inventoryItemSchema = z.object({", "    youtube_duration_minutes: z.number().nullable().optional(),", "const youtubeExtensionSchema = z.object({", "    can_extend_now: z.boolean(),")
+
+* **引数/リクエスト**: 該当なし（スキーマオブジェクト自体はデータを受け取らない）
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: なし
 * **エラーハンドリング**: 該当なし（`.parse()`失敗時の`ZodError`送出は`zod`ライブラリ側の挙動）
