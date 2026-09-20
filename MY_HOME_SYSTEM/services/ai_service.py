@@ -500,12 +500,43 @@ def _is_quota_error(exc: BaseException) -> bool:
     Issue #520: 旧SDKでは google.api_core の ResourceExhausted という専用の例外型で
     判別できたが、google-genai はHTTPステータスを持つ APIError に一本化されている。
     型ではなくコードで判定する。
+
+    Issue #804: この関数は**文面の判定にだけ**使う。再試行すべきかの判定は
+    `_is_transient_error` が持つ。以前は1つの関数が両方を兼ねており、
+    「再試行の対象を広げると文面まで変わってしまう」ため 503 を足せなかった。
     """
     return isinstance(exc, genai_errors.APIError) and getattr(exc, "code", None) == 429
 
 
+# 一時的で、待てば直る見込みのある HTTP ステータス (Issue #804)。
+#
+# 503 は Google 自身が "Spikes in demand are usually temporary. Please try again later."
+# と案内する種類の失敗で、2026-09-20 15:58 に実機で踏んだ。以前は 429 だけを
+# 再試行していたため 503 は1回も再試行されず、その1通が失われていた。
+#
+# **500 / 502 / 504 は意図的に含めない。** 一般には再試行対象とされることが多いが、
+# このリポジトリは以前から 500 を「リトライしても回復しないAPIエラー」として扱っており
+# (tests/test_ai_service.py の _fatal_api_error が 500 を使い、再試行しないことを
+# 固定している)、その判断を覆すだけの根拠を今回は持っていない。実際に踏んで
+# 「待てば直る」ことを確認できたものだけを足す方針とする。
+_TRANSIENT_STATUS_CODES = frozenset({429, 503})
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """再試行する価値がある一時的な失敗かどうか。
+
+    400(不正なリクエスト)や404(モデルの提供終了。Issue #801)は**何度送っても
+    同じ結果**なので対象にしない。再試行すると `AI_REPLY_TIMEOUT_SEC`(20秒)を
+    無駄に食い潰し、ユーザーにはタイムアウトの文面が出る。
+    """
+    return (
+        isinstance(exc, genai_errors.APIError)
+        and getattr(exc, "code", None) in _TRANSIENT_STATUS_CODES
+    )
+
+
 @retry(
-    retry=retry_if_exception(_is_quota_error),
+    retry=retry_if_exception(_is_transient_error),
     wait=wait_exponential_jitter(initial=2, max=10),
     stop=stop_after_attempt(MAX_RETRIES),
     before_sleep=_log_retry_attempt,
@@ -637,6 +668,12 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
         except genai_errors.APIError as e:
             if _is_quota_error(e):
                 logger.warning("⚠️ Gemini Quota Exhausted after max retries.")
+                return FALLBACK_MESSAGE
+            if _is_transient_error(e):
+                # Issue #804: 429 以外の一時的失敗(503 等)。再試行し尽くしても駄目だった
+                # ケースなので、「予期せぬエラー」ではなく**再送すれば直る**ことを伝える。
+                # ここを汎用の文面にすると、家族には「壊れている」としか見えない。
+                logger.warning(f"⚠️ Gemini temporarily unavailable after max retries: {e}")
                 return FALLBACK_MESSAGE
             logger.error(f"❌ Gemini API Fatal Error: {e}")
             return "申し訳ございません。AIサービスで予期せぬエラーが発生しました。"
