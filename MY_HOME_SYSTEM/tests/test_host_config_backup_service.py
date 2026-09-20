@@ -149,6 +149,17 @@ class TestRedactSecrets:
         ("username=nasuser", 0),
         ("noserverino,vers=3.0", 0),
         ("Description=NVR entrance", 0),
+        # コマンドラインフラグの空白区切り(実機の cloudflared がこの形)
+        ("--token eyJhIjoiWFla", 1),
+        ("--password hunter2", 1),
+        ("--api-key abc123", 1),
+        ("--token=eyJhIjoiWFla", 1),
+        # パスを指すフラグは落とさない(`credentials=` と同じ理由)
+        ("--password-file /etc/secret.txt", 0),
+        ("--credentials-file /root/.cloudflared/abc.json", 0),
+        # 散文は落とさない(空白区切りをフラグ形式に限っているため)
+        ("# token is required", 0),
+        ("Description=token service", 0),
     ])
     def test_hit_counts(self, line, expected_hits):
         _, count = svc.redact_secrets(line)
@@ -170,6 +181,28 @@ class TestRedactSecrets:
         assert "noserverino" in out
         assert "vers=3.0" in out
         assert "username=u" in out
+
+    def test_cli_flag_with_space_separator_is_redacted(self):
+        """実機の `/etc/systemd/system/cloudflared.service` は、トンネルトークンを
+        `--token eyJ...` と**空白区切り**で直書きしている。区切りを `[:=]` だけに
+        すると1件も落とせず、トークンが平文のまま NAS(CIFS の `file_mode=0664`)へ
+        コピーされる。2026-09-20 に実機で踏んだため回帰テストを置く。"""
+        out, count = svc.redact_secrets(
+            "ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token eyJhIjoiWFla\n"
+        )
+        assert count == 1
+        assert "eyJhIjoiWFla" not in out
+        # 復元に必要な残りのコマンドラインは消さないこと
+        assert "/usr/bin/cloudflared" in out
+        assert "--no-autoupdate" in out
+        assert "tunnel run" in out
+
+    def test_flag_form_does_not_span_lines(self):
+        """値の無いフラグが次の行の先頭語を巻き込まないこと。巻き込むと
+        復元時に読めない台帳になる。"""
+        out, count = svc.redact_secrets("ExecStart=/usr/bin/x --token\nRestart=on-failure\n")
+        assert count == 0
+        assert "Restart=on-failure" in out
 
 
 class TestManifest:

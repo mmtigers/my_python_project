@@ -127,9 +127,29 @@ HOST_CONFIG_TARGETS: tuple[HostConfigTarget, ...] = (
 # カンマ区切りのマウントオプションを丸ごと飲み込み、**復元に必要な
 # `noserverino` まで消してしまう**(2026-09-19 に追記された、まさにこの Issue が
 # 保全対象として挙げているオプション)。
+#
+# 区切りは `:` / `=` だけでなく、**コマンドラインフラグの空白区切り**
+# (`--token <値>`)も対象にする。実機の `/etc/systemd/system/cloudflared.service` は
+# トンネルトークンを `ExecStart=... tunnel run --token eyJ...` と**空白区切り**で
+# 直書きしており、`[:=]` だけを見る正規表現では1件も落とせなかった
+# (2026-09-20 に実機で確認。落とした件数 0 のまま NAS へコピーされる状態だった)。
+# NAS は `/etc/fstab` の CIFS オプションが `file_mode=0664` なので、
+# 素通しはトンネルトークンを誰でも読める場所に置くことになる。
+#
+# 空白区切りを許すのは `--token` のような**フラグ形式に限る**。`token: ...` 形式まで
+# 空白区切りを許すと `# token is required` のような散文の次の語まで落としてしまい、
+# 復元時に読めない台帳になる。区切りは `[ \t]+` とし改行をまたがせない
+# (値の無いフラグが次行の先頭語を巻き込むのを防ぐ)。
+# `--password-file /etc/x` のような**パスを指すフラグは対象外**のままにする
+# (`--password` の直後が `-file` で空白ではないため一致しない)。これは
+# `credentials=` を意図的に残しているのと同じ理由。
+_SECRET_NAMES = r"pass|passwd|password|passphrase|secret|token|api[_-]?key"
 _SECRET_KEY_RE = re.compile(
-    r"(?i)\b(pass|passwd|password|passphrase|secret|token|api[_-]?key)\b"
-    r"\s*[:=]\s*(?P<value>[^\s,;'\"]+)"
+    r"(?i)(?:"
+    rf"\b(?:{_SECRET_NAMES})\b\s*[:=]\s*"
+    r"|"
+    rf"--(?:{_SECRET_NAMES})[ \t]+"
+    r")(?P<value>[^\s,;'\"]+)"
 )
 _REDACTED = "***REDACTED-BY-host_config_backup***"
 

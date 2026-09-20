@@ -40,6 +40,8 @@ NAS 共有は 664 で見えるため、平文の認証情報を置けば「バ�
 
 実機の中身は環境によって違う（例: `/etc/fstab` に CIFS の `password=` を直書きしている構成もありうる）。コードからは実機の中身を確認できないため、**コピーする全ファイルに `redact_secrets()` を通す。**
 
+実際に 2026-09-20 の実機確認で、**宣言上「秘密でない」`/etc/systemd/system/cloudflared.service` がトンネルトークンを平文で含んでいる**ことが分かった。実機の cloudflared は設定ファイルを持たないトークン方式（`/etc/cloudflared/` は存在せず、`HOST_CONFIG_TARGETS` が `secret=True` で宣言している `/etc/cloudflared/*.json` も不在）で、**唯一のローカル秘密が systemd ユニットに埋まっている**構成だった。宣言だけに頼らず全ファイルを redact に通す方針が、この構成を救っている。
+
 ## 3. 外部依存関係
 
 ### インポート一覧
@@ -79,26 +81,28 @@ NAS 共有は 664 で見えるため、平文の認証情報を置けば「バ�
 ### `redact_secrets`
 
 * **役割**: `password=...` 等の**値だけ**を落とした本文と、落とした件数を返す
-* 根拠: [定義] (行番号: 137 / 抜粋: "def redact_secrets(text: str) -> tuple[str, int]:")
+* 根拠: [定義] (行番号: 157 / 抜粋: "def redact_secrets(text: str) -> tuple[str, int]:")
 * **値の終端**: `,` / 空白 / 引用符 / `;` で止める。`\S+` にすると `credentials=/etc/samba/smbcredentials,noserverino,vers=3.0` のようなカンマ区切りのマウントオプションを丸ごと飲み込み、**復元に必要な `noserverino` まで消してしまう**（実装時に実際に踏んだため `tests/test_host_config_backup_service.py` に回帰テストがある）
-* **意図的に対象外にしているキー**: `username=`（それ自体は秘密ではない。ユーザー名とパスワードが揃って秘密になる `smbcredentials` は `secret=True` 側で扱う）と `credentials=` / `credentials-file:`（実際には**秘密ファイルへのパス**が入るため、落とすと復元先が分からなくなる）
+* **区切り**: `:` / `=` に加えて、**コマンドラインフラグの空白区切り**（`--token <値>`）も対象にする。実機の `/etc/systemd/system/cloudflared.service` はトンネルトークンを `ExecStart=... tunnel run --token eyJ...` と**空白区切り**で直書きしており、`[:=]` だけを見る実装では**落とした件数が 0 のまま NAS へコピーされる**状態だった（2026-09-20 に実機で確認。NAS は `/etc/fstab` の CIFS オプションが `file_mode=0664` のため、素通しはトンネルトークンを誰でも読める場所に置くことになる）
+* **空白区切りをフラグ形式に限る理由**: `token: ...` 形式まで空白区切りを許すと `# token is required` のような散文の次の語まで落とし、復元時に読めない台帳になる。区切りは `[ \t]+` として改行をまたがせない（値の無いフラグが次行の先頭語を巻き込むのを防ぐ）
+* **意図的に対象外にしているキー**: `username=`（それ自体は秘密ではない。ユーザー名とパスワードが揃って秘密になる `smbcredentials` は `secret=True` 側で扱う）と `credentials=` / `credentials-file:`（実際には**秘密ファイルへのパス**が入るため、落とすと復元先が分からなくなる）。フラグ形式でも `--password-file /etc/x` のような**パスを指すフラグは対象外**（`--password` の直後が空白ではないため一致しない）
 
 ### `FileRecord`
 
 * **役割**: 台帳の1行。`path` は**復元先の絶対パス**、`source` は実際に読んだパス（通常は同じで、その場合は台帳に出さない）
-* 根拠: [定義] (行番号: 150 / 抜粋: "class FileRecord:")
+* 根拠: [定義] (行番号: 170 / 抜粋: "class FileRecord:")
 * **なぜ分けるか**: 実装当初は実際に読んだパスをそのまま記録しており、「どこへ戻すのか」が台帳から分からなくなっていた
 
 ### `plan`
 
 * **役割**: 何をどう扱うかを決めるだけの読み取り専用フェーズ。1バイトも書かない
-* 根拠: [定義] (行番号: 237 / 抜粋: "def plan(root: str = \"/\") -> list[FileRecord]:")
+* 根拠: [定義] (行番号: 257 / 抜粋: "def plan(root: str = \"/\") -> list[FileRecord]:")
 * **読めなかったファイル**は黙って飛ばさず `status="error"` として記録する（黙って飛ばすと、復元時に「そんなファイルがあったこと自体」を知る手段が無くなる）
 
 ### `perform_backup`
 
 * **役割**: ホスト設定を収集して1世代分を書き出し、最後に `prune` を呼ぶ
-* 根拠: [定義] (行番号: 306 / 抜粋: "def perform_backup(")
+* 根拠: [定義] (行番号: 326 / 抜粋: "def perform_backup(")
 * **`dry_run=True`** なら `plan()` の結果だけを返し、1バイトも書かない
 * **テキストとして読めないファイル**（バイナリ等）は、値を確認できないのでコピーせず台帳のみに落とす（素通しで NAS へ置くより安全側に倒す）
 * **副作用**: 出力先ディレクトリの作成（0o700）、`files/` へのファイル書き出し（0o600）、`MANIFEST.json` / `README.txt` の書き出し、`prune` による古い世代の削除
@@ -106,14 +110,14 @@ NAS 共有は 664 で見えるため、平文の認証情報を置けば「バ�
 ### `prune`
 
 * **役割**: 保持期間（`HOST_CONFIG_BACKUP_RETENTION_DAYS`、既定 90 日）を超えた世代ディレクトリを削除する
-* 根拠: [定義] (行番号: 368 / 抜粋: "def prune(base: Path, retention_days: int | None = None,")
+* 根拠: [定義] (行番号: 388 / 抜粋: "def prune(base: Path, retention_days: int | None = None,")
 * **名前が `%Y%m%d_%H%M%S` として解釈できないディレクトリには触らない**（人が置いたものを消さないため）
 * 保持日数が 0 以下なら何もしない
 
 ### `format_summary_lines`
 
 * **役割**: CLI / ログ向けの人が読む要約
-* 根拠: [定義] (行番号: 408 / 抜粋: "def format_summary_lines(outcome: BackupOutcome) -> list[str]:")
+* 根拠: [定義] (行番号: 428 / 抜粋: "def format_summary_lines(outcome: BackupOutcome) -> list[str]:")
 * 出力先のパーミッションが 0o700 でなければ警告行を足す
 
 ## 5. 保守上の注意点
