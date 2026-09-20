@@ -46,6 +46,13 @@ def retention_db(isolated_db, monkeypatch):
     monkeypatch.setattr(config, "DB_ROW_RETENTION_ENABLED", False, raising=False)
 
     with get_db_cursor(commit=True) as cur:
+        # Issue #747 ステップ3: routine_step_events.user_id / quest_history.user_id に
+        # quest_users への外部キーが付いたため、参照先のユーザーを先に作る
+        # (本番では必ず存在するユーザーであり、テストの前提を実態へ寄せたもの)。
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) "
+            "VALUES ('u1', 'U1', 'Novice', 1, 0, 0, 'role_child')"
+        )
         for old_new in (_ts(500), _ts(10)):
             cur.execute(
                 "INSERT INTO device_records (timestamp, device_name) VALUES (?, ?)",

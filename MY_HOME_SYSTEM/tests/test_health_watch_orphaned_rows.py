@@ -37,6 +37,27 @@ def _insert_user(cur, user_id="u1"):
     )
 
 
+def _insert_orphan(cur, sql, params=()):
+    """外部キーを一時的に無効化して孤児行を作る (Issue #747 ステップ3 以降)。
+
+    `migrations/0018` で `*.user_id -> quest_users` に外部キーが付いたため、
+    通常経路ではもう孤児行を作れない(それがステップ3の目的)。しかし
+    `check_orphaned_rows` が守る対象は**外部キーを迂回して壊れたDB**である:
+    手動SQL、`PRAGMA foreign_keys=OFF` で開いた別ツール、FK 導入前に作られて
+    残っている行など。ここではその状況を再現するために FK を一時的に外す。
+
+    `PRAGMA foreign_keys` はトランザクション内では変更できないため、
+    いったんコミットしてから切り替える。
+    """
+    cur.connection.commit()
+    cur.execute("PRAGMA foreign_keys=OFF")
+    try:
+        cur.execute(sql, params)
+        cur.connection.commit()
+    finally:
+        cur.execute("PRAGMA foreign_keys=ON")
+
+
 @pytest.fixture
 def clean_db(isolated_db):
     """孤児が1件も無い状態の DB。"""
@@ -97,7 +118,8 @@ class TestStrictOrphansAreReported:
 
     def test_quest_history_with_missing_user_is_reported(self, clean_db):
         with get_db_cursor(commit=True) as cur:
-            cur.execute(
+            _insert_orphan(
+                cur,
                 "INSERT INTO quest_history (user_id, quest_id, completed_at, status) "
                 "VALUES (?, ?, ?, ?)",
                 ("消えたユーザー", 1, TS, "approved"),
@@ -130,7 +152,7 @@ class TestStrictOrphansAreReported:
     ])
     def test_each_user_relation_is_checked(self, clean_db, table, sql):
         with get_db_cursor(commit=True) as cur:
-            cur.execute(sql)
+            _insert_orphan(cur, sql)
         result = health_watch.check_orphaned_rows()
         assert result is not None, table
         assert f"{table}: 1行" in result, result
@@ -149,11 +171,13 @@ class TestStrictOrphansAreReported:
 
     def test_multiple_relations_are_all_listed(self, clean_db):
         with get_db_cursor(commit=True) as cur:
-            cur.execute(
+            _insert_orphan(
+                cur,
                 "INSERT INTO quest_history (user_id, quest_id, completed_at, status) "
                 "VALUES ('ghost', 1, ?, 'approved')", (TS,),
             )
-            cur.execute(
+            _insert_orphan(
+                cur,
                 "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) "
                 "VALUES ('ghost', 10, 'owned', ?)", (TS,),
             )

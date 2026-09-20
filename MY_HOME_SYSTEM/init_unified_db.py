@@ -38,8 +38,9 @@ def validate_schema_integrity(conn: sqlite3.Connection) -> None:
     # 検証対象のテーブル定義 (テーブル名: [必須カラムリスト])
     expected_schemas: Dict[str, List[str]] = {
         # New Core Tables
-        "users": ["name", "level", "xp", "gold", "status"],
-        "quests": ["title", "description", "xp_reward", "gold_reward", "difficulty"],
+        # Issue #746: ここにあった "users" / "quests" は、現行の quest_users /
+        # quest_master の旧版で、migrations/0016 で DROP 済み。残したままだと
+        # 起動のたびに「Missing Table」の警告が出る(検証リストの更新漏れ)。
         config.SQLITE_TABLE_DAILY_LOGS: ["category", "detail", "timestamp"],
         config.SQLITE_TABLE_SWITCHBOT_LOGS: ["device_id", "temperature", "humidity", "timestamp"],
         config.SQLITE_TABLE_POWER_USAGE: ["wattage", "timestamp"],

@@ -205,14 +205,6 @@ CREATE TABLE reward_master (
     desc TEXT,
     target TEXT DEFAULT 'all'
 , description TEXT);
-CREATE TABLE reward_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT,
-    reward_id INTEGER,
-    reward_title TEXT,
-    cost_gold INTEGER,
-    redeemed_at DATETIME NOT NULL
-);
 CREATE TABLE equipment_master (
     equipment_id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -239,15 +231,6 @@ CREATE TABLE party_state (
     total_damage INTEGER DEFAULT 0,
     charge_gauge INTEGER DEFAULT 0,
     updated_at TEXT
-);
-CREATE TABLE user_inventory (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT,
-    reward_id INTEGER,
-    status TEXT DEFAULT 'owned',
-    purchased_at DATETIME NOT NULL,
-    used_at DATETIME,
-    FOREIGN KEY(reward_id) REFERENCES reward_master(reward_id)
 );
 CREATE TABLE family_mileage (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -312,51 +295,6 @@ CREATE TABLE "quest_master" (
         pre_requisite_quest_id INTEGER DEFAULT NULL,
         reset_period TEXT DEFAULT 'daily'
 );
-CREATE TABLE routine_progress (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    flow_key TEXT NOT NULL,
-    progress_date TEXT NOT NULL, 
-    current_step_index INTEGER NOT NULL DEFAULT 0,
-    in_free_time INTEGER NOT NULL DEFAULT 0,
-    
-    
-    
-    steps_status TEXT NOT NULL DEFAULT '{}',
-    bonus_gold INTEGER NOT NULL DEFAULT 0,
-    bonus_exp INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL, skipped_keys TEXT NOT NULL DEFAULT '[]',
-    UNIQUE(user_id, flow_key, progress_date)
-);
-CREATE INDEX idx_routine_progress_user_date
-    ON routine_progress(user_id, progress_date);
-CREATE TABLE routine_step_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    flow_key TEXT NOT NULL,          
-    progress_date TEXT NOT NULL,     
-    step_key TEXT NOT NULL,          
-    
-    from_status TEXT,
-    to_status TEXT NOT NULL,         
-    
-    
-    
-    
-    
-    
-    source TEXT NOT NULL,
-    occurred_at TEXT NOT NULL        
-);
-CREATE INDEX idx_routine_step_events_user_date
-    ON routine_step_events(user_id, progress_date);
-CREATE INDEX idx_user_inventory_user_status
-    ON user_inventory (user_id, status);
-CREATE INDEX idx_user_inventory_user_reward_used
-    ON user_inventory (user_id, reward_id, used_at DESC);
-CREATE INDEX idx_reward_history_user_reward_redeemed
-    ON reward_history (user_id, reward_id, redeemed_at DESC);
 CREATE INDEX idx_device_records_ts
     ON device_records (timestamp);
 CREATE INDEX idx_power_usage_ts
@@ -369,36 +307,6 @@ CREATE INDEX idx_bicycle_parking_records_ts
     ON bicycle_parking_records (timestamp);
 CREATE INDEX idx_security_logs_ts
     ON security_logs (timestamp);
-CREATE INDEX idx_routine_step_events_occurred
-    ON routine_step_events (occurred_at);
-CREATE TABLE quest_cancellation_audit (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    
-    history_id INTEGER NOT NULL,
-    
-    user_id TEXT,
-    
-    
-    cancelled_by TEXT NOT NULL,
-    
-    quest_id INTEGER,
-    quest_title TEXT,
-    status_before TEXT,
-    completed_at DATETIME,
-    exp_earned INTEGER,
-    gold_earned INTEGER,
-    medals_earned INTEGER,
-    linked_history_id INTEGER,
-    
-    cascaded INTEGER NOT NULL DEFAULT 0,
-    
-    rewards_reverted INTEGER NOT NULL DEFAULT 0,
-    cancelled_at DATETIME NOT NULL
-);
-CREATE INDEX idx_quest_cancellation_audit_history
-    ON quest_cancellation_audit (history_id);
-CREATE INDEX idx_quest_cancellation_audit_user_time
-    ON quest_cancellation_audit (user_id, cancelled_at DESC);
 CREATE TABLE "quest_history" (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT,
@@ -409,9 +317,91 @@ CREATE TABLE "quest_history" (
     exp_earned INTEGER NOT NULL DEFAULT 0,
     gold_earned INTEGER NOT NULL DEFAULT 0,
     medals_earned INTEGER NOT NULL DEFAULT 0,
-    linked_history_id INTEGER DEFAULT NULL
+    linked_history_id INTEGER DEFAULT NULL,
+    FOREIGN KEY (user_id) REFERENCES quest_users(user_id)
 );
 CREATE INDEX idx_quest_history_user_quest_completed
     ON quest_history (user_id, quest_id, completed_at DESC, status);
 CREATE INDEX idx_quest_history_status_completed
     ON quest_history (status, completed_at DESC);
+CREATE TABLE "reward_history" (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT,
+    reward_id INTEGER,
+    reward_title TEXT,
+    cost_gold INTEGER,
+    redeemed_at DATETIME NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES quest_users(user_id)
+);
+CREATE INDEX idx_reward_history_user_reward_redeemed
+    ON reward_history (user_id, reward_id, redeemed_at DESC);
+CREATE TABLE "user_inventory" (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT,
+    reward_id INTEGER,
+    status TEXT DEFAULT 'owned',
+    purchased_at DATETIME NOT NULL,
+    used_at DATETIME,
+    FOREIGN KEY (user_id) REFERENCES quest_users(user_id),
+    FOREIGN KEY (reward_id) REFERENCES reward_master(reward_id)
+);
+CREATE INDEX idx_user_inventory_user_status
+    ON user_inventory (user_id, status);
+CREATE INDEX idx_user_inventory_user_reward_used
+    ON user_inventory (user_id, reward_id, used_at DESC);
+CREATE TABLE "routine_progress" (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    flow_key TEXT NOT NULL,
+    progress_date TEXT NOT NULL,
+    current_step_index INTEGER NOT NULL DEFAULT 0,
+    in_free_time INTEGER NOT NULL DEFAULT 0,
+    steps_status TEXT NOT NULL DEFAULT '{}',
+    bonus_gold INTEGER NOT NULL DEFAULT 0,
+    bonus_exp INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    skipped_keys TEXT NOT NULL DEFAULT '[]',
+    UNIQUE(user_id, flow_key, progress_date),
+    FOREIGN KEY (user_id) REFERENCES quest_users(user_id)
+);
+CREATE INDEX idx_routine_progress_user_date
+    ON routine_progress(user_id, progress_date);
+CREATE TABLE "routine_step_events" (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    flow_key TEXT NOT NULL,
+    progress_date TEXT NOT NULL,
+    step_key TEXT NOT NULL,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    source TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES quest_users(user_id)
+);
+CREATE INDEX idx_routine_step_events_user_date
+    ON routine_step_events(user_id, progress_date);
+CREATE INDEX idx_routine_step_events_occurred
+    ON routine_step_events(occurred_at);
+CREATE TABLE "quest_cancellation_audit" (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    history_id INTEGER NOT NULL,
+    user_id TEXT,
+    cancelled_by TEXT NOT NULL,
+    quest_id INTEGER,
+    quest_title TEXT,
+    status_before TEXT,
+    completed_at DATETIME,
+    exp_earned INTEGER,
+    gold_earned INTEGER,
+    medals_earned INTEGER,
+    linked_history_id INTEGER,
+    cascaded INTEGER NOT NULL DEFAULT 0,
+    rewards_reverted INTEGER NOT NULL DEFAULT 0,
+    cancelled_at DATETIME NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES quest_users(user_id)
+);
+CREATE INDEX idx_quest_cancellation_audit_history
+    ON quest_cancellation_audit (history_id);
+CREATE INDEX idx_quest_cancellation_audit_user_time
+    ON quest_cancellation_audit (user_id, cancelled_at DESC);
