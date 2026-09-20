@@ -38,8 +38,11 @@ logger = setup_logging("ai_service")
 # 旧SDKのモジュールレベル genai.configure() は廃止され、Clientインスタンスを持つ。
 if config.GEMINI_API_KEY:
     client = genai.Client(api_key=config.GEMINI_API_KEY)
-    # Gemini 1.5 Flash / 2.0 Flash を推奨
-    MODEL_NAME = 'gemini-2.0-flash'
+    # Issue #801: 以前はここに 'gemini-2.0-flash' を直書きしていたが、Google 側の
+    # 提供終了(2026-09-20 に 404 NOT_FOUND を確認)で LINE Bot の対話機能が丸ごと
+    # 停止した。復旧に PR とデプロイが要る状態だったため、.env で差し替えられる
+    # `config.GEMINI_MODEL` を正とする(既定は gemini-flash-latest)。
+    MODEL_NAME = config.GEMINI_MODEL
 else:
     logger.warning("⚠️ GEMINI_API_KEYが設定されていません。AI機能は無効です。")
     client = None

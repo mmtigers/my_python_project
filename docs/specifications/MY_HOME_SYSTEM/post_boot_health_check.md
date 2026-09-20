@@ -10,6 +10,8 @@
 
 ## 関連ドキュメント
 
+* [ai_service.md](./ai_service.md) - **（Issue #801 で追加）** `check_ai_model` が検査する `config.GEMINI_MODEL` の利用側。モデル名を直書きから設定へ移した経緯はそちらを参照
+
 * [security_posture.md](./security_posture.md) - **（Issue #799 で追加）** `check_security_posture` が呼ぶ判定の実装元。何を報告し何を報告しないかの線引きはそちらを参照
 
 * [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
@@ -434,10 +436,23 @@
 
 
 
+### `PostBootHealthCheck.check_ai_model`
+
+* **役割**: **（Issue #801 で追加）** `config.GEMINI_MODEL` に設定されたモデルが実在し `generateContent` に使えるかを、Gemini のモデル一覧 API で確認して `CheckResult("AI Model", ...)` を追加する。利用可なら `STATUS_OK`、**利用不可なら `STATUS_ERR`** と復旧方法（`.env` の `GEMINI_MODEL` 変更）および代替候補を添える。
+* 根拠: `def check_ai_model(self):` (行番号: 380)
+* **なぜ起動時に検査するか**: docstring によれば、`services/ai_service.py` に直書きされていた `gemini-2.0-flash` が提供終了になり LINE Bot の対話機能が丸ごと停止していたが、ログ保持範囲（2026-09-09 以降）で Bot への受信が1通だけで **エラーが発生する機会自体が無かった**ため誰も気づかなかった。push 通知は Gemini を使わないので正常に届き続け、外からは Bot が生きているように見えていた。そこで「誰かが使ったとき」ではなく「起動したとき」に検査する
+* **引数/リクエスト**: `self` のみ
+* **戻り値/レスポンス**: なし（`self.results` に追加する）
+* **副作用**: Gemini のモデル一覧 API への `requests.get`（モデル一覧の取得のみで推論トークンは消費しない）と `self.results` への追加
+* **API キーの渡し方**: `params={"key": api_key}` で渡し、URL に埋め込まない（例外メッセージやログに載りうるため）
+* **未設定時**: `GEMINI_API_KEY` または `GEMINI_MODEL` が未設定なら API を叩かず `STATUS_OK`（「未設定のためスキップ」）。`check_network_and_apis` が NatureRemo 未設定時にチェックをスキップするのと同じ扱いで、未設定は障害ではない
+* **エラーハンドリング**: HTTP が 200 以外なら `STATUS_WARN`（「モデル一覧の取得に失敗 (HTTP n)」）。通信失敗（`requests.RequestException` = `OSError` の系列）と応答が JSON でない場合（`JSONDecodeError` = `ValueError` の系列）は `STATUS_WARN`（「確認できず」）。いずれも**起動レポート全体を落とさない**よう WARN に倒す。疎通・認証の失敗とモデルの提供終了は別問題なので、メッセージで区別する
+* **代替候補に preview を含めない**: 提示するのは名前に `flash` を含み `preview` を含まないモデルの先頭3件
+
 ### `PostBootHealthCheck.check_security_posture`
 
 * **役割**: **（Issue #799 で追加）** 未設定のせいで保護が黙って無効になっている設定を `core/security_posture.py` に問い合わせ、`CheckResult("Security", ...)` として結果に追加する。問題が無ければ `STATUS_OK`（「保護が無効な設定なし」）、1件以上あれば `STATUS_WARN` と、設定名・Issue 番号・無効になっている保護を並べた明細を追加する。
-* 根拠: `def check_security_posture(self):` (行番号: 380)
+* 根拠: `def check_security_posture(self):` (行番号: 439)
 * **なぜ起動レポートに載せるか**: docstring によれば、個別の警告は `handlers/alexa_handler.py` や `unified_server.py` に以前から存在したが **ログにしか出ない**ため数か月気づかれなかった（#319 は起票から未対応のまま、#799 は 2026-09-20 に発見）。起動レポートは Discord に届く唯一の定期的な出力であるため、ここに1行載せて可視化する。
 * **引数/リクエスト**: `self` のみ
 * **戻り値/レスポンス**: なし（`self.results` に追加する）
@@ -447,39 +462,39 @@
 
 ### `PostBootHealthCheck.run`
 
-* **役割**: 各チェックメソッド（ネットワーク・システムリソース・DB・周辺機器・サービス・ログ・**（Issue #799 で追加）**セキュリティ設定）を順に実行し、最後にレポート送信を行う。
-* 根拠: `def run(self):` (行番号: 413)
+* **役割**: 各チェックメソッド（ネットワーク・システムリソース・DB・周辺機器・サービス・ログ・**（Issue #799 で追加）**セキュリティ設定・**（Issue #801 で追加）**AI モデル）を順に実行し、最後にレポート送信を行う。
+* 根拠: `def run(self):` (行番号: 472)
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 413 / 抜粋: "def run(self):")
+* 根拠: (行番号: 472 / 抜粋: "def run(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 413〜422 / 抜粋: "def run(self):")
+* 根拠: (行番号: 472〜482 / 抜粋: "def run(self):")
 
 
-* **副作用**: `logger.info` によるログ出力、各チェックメソッドの実行、`self._send_report()` の呼び出し。**（Issue #799 で追加）** `self.check_security_posture()` が `self.check_recent_logs()` と `self._send_report()` の間に入る。
+* **副作用**: `logger.info` によるログ出力、各チェックメソッドの実行、`self._send_report()` の呼び出し。**（Issue #799 で追加）** `self.check_security_posture()` が `self.check_recent_logs()` と `self._send_report()` の間に入る。**（Issue #801 で追加）** その直後に `self.check_ai_model()` が入る。
 * 根拠: `self.check_network_and_apis()` 〜 `self._send_report()` (行番号: 413〜421 / 抜粋: "self.check_security_posture()")
 
 
 * **エラーハンドリング**: なし（各チェックメソッド内部で個別に処理される前提）
-* 根拠: (行番号: 413〜422 / 抜粋: "def run(self):")
+* 根拠: (行番号: 472〜482 / 抜粋: "def run(self):")
 
 
 
 ### `PostBootHealthCheck._send_report`
 
 * **役割**: `self.results` の内容からステータスアイコン付きのレポート文字列を組み立て、ログ出力とDiscord通知を行う。
-* 根拠: `def _send_report(self):` (行番号: 424〜457 / 抜粋: "def _send_report(self):")
+* 根拠: `def _send_report(self):` (行番号: 484〜517 / 抜粋: "def _send_report(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 424 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 484 / 抜粋: "def _send_report(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 424〜457 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 484〜517 / 抜粋: "def _send_report(self):")
 
 
 * **副作用**: `self._get_uptime()` の呼び出し、`logger.info` によるレポート全文のログ出力、`services.notification_service.send_push` によるDiscord通知送信。
@@ -487,7 +502,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 424〜457 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 484〜517 / 抜粋: "def _send_report(self):")
 
 
 

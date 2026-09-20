@@ -377,6 +377,65 @@ class PostBootHealthCheck:
         else:
             self.results.append(CheckResult("Logs", STATUS_OK, "Clean (Last 10min)"))
 
+    def check_ai_model(self):
+        """設定された Gemini モデルが実在し、generateContent に使えるかを検査する (Issue #801)。
+
+        `services/ai_service.py` に直書きされていた `gemini-2.0-flash` が Google 側で
+        提供終了になり、**LINE Bot の対話機能が丸ごと停止**していた。それでも誰も
+        気づかなかったのは、ログ保持範囲(2026-09-09 以降)で Bot への受信が1通だけで、
+        **エラーが発生する機会自体が無かった**ため(push 通知は Gemini を使わないので
+        正常に届き続け、外からは Bot が生きているように見えていた)。
+
+        そこで「誰かが使ったとき」ではなく「起動したとき」に検査する。モデル一覧の
+        取得だけなので推論トークンは消費しない。
+
+        API キー未設定時はチェックをスキップする(`check_network_and_apis` が
+        NatureRemo 未設定時にそうしているのと同じ扱い。未設定は障害ではない)。
+        """
+        api_key = getattr(config, "GEMINI_API_KEY", None)
+        model = getattr(config, "GEMINI_MODEL", None)
+        if not api_key or not model:
+            self.results.append(CheckResult("AI Model", STATUS_OK, "未設定のためスキップ"))
+            return
+
+        try:
+            res = requests.get(
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                params={"key": api_key},
+                timeout=10,
+            )
+            if res.status_code != 200:
+                # 疎通・認証の失敗はモデルの提供終了とは別問題なので区別して出す。
+                self.results.append(CheckResult(
+                    "AI Model", STATUS_WARN, f"モデル一覧の取得に失敗 (HTTP {res.status_code})"))
+                return
+            payload = res.json()
+        except (OSError, ValueError) as e:
+            # 通信失敗は requests.RequestException(= IOError = OSError の系列)、
+            # 応答が JSON でない場合は JSONDecodeError(= ValueError の系列)で来る。
+            # 起動レポート全体を落とさないよう WARN に倒す(他のチェック結果は届けたい)。
+            self.results.append(CheckResult("AI Model", STATUS_WARN, f"確認できず: {e}"))
+            return
+
+        usable = {
+            m.get("name", "").removeprefix("models/")
+            for m in payload.get("models", [])
+            if "generateContent" in (m.get("supportedGenerationMethods") or [])
+        }
+        if model in usable:
+            self.results.append(CheckResult("AI Model", STATUS_OK, f"{model} 利用可"))
+            return
+
+        # 提供終了・改名・タイプミスのいずれでもここに来る。代替候補を添えて、
+        # .env の GEMINI_MODEL を差し替えるだけで復旧できることを示す。
+        alts = sorted(m for m in usable if "flash" in m and "preview" not in m)[:3]
+        hint = f" 利用可能な例: {', '.join(alts)}" if alts else ""
+        self.results.append(CheckResult(
+            "AI Model", STATUS_ERR,
+            f"`{model}` は利用不可。LINE Bot の AI 返答が停止します。"
+            f".env の GEMINI_MODEL を変更してください。{hint}",
+        ))
+
     def check_security_posture(self):
         """未設定のせいで保護が黙って無効になっている設定を報告する (Issue #799)。
 
@@ -419,6 +478,7 @@ class PostBootHealthCheck:
         self.check_services()
         self.check_recent_logs()
         self.check_security_posture()
+        self.check_ai_model()
         self._send_report()
 
     def _send_report(self):
