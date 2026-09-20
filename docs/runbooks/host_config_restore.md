@@ -36,6 +36,21 @@ sudo .venv/bin/python tools/backup_host_config.py --dry-run
 sudo .venv/bin/python tools/backup_host_config.py
 ```
 
+### 定期実行（Issue #774）
+
+毎日 04:10 に systemd timer で自動実行される。`deploy/cron/crontab`（一般ユーザー用）では
+なく timer を使うのは、本 CLI が root を必要とするため。導入手順は
+`MY_HOME_SYSTEM/deploy/systemd/README.md` の「host-config-backup.timer」を参照。
+
+```bash
+systemctl list-timers host-config-backup.timer   # 次回発火とその前回の実行
+journalctl -u host-config-backup.service -n 50   # 直近の実行ログ
+```
+
+失敗すると `OnFailure=` で `host-config-backup-failure.service` が起動し、
+`tools/notify_task_failure.py`（Issue #751 の通知経路）から Discord へ通知される。
+**無音では落ちない**が、通知にはタスクごとに1時間のクールダウンがある。
+
 `/etc/nvr/*.env`（600・root）や `smbcredentials` の**メタデータ**を読むために root が必要。
 root でなくても動くが、読めなかったものは台帳に `error` として残り、CLI は
 **exit 1** を返す（黙って飛ばすと、復元時に「そんなファイルがあったこと自体」を
@@ -140,9 +155,11 @@ Cloudflare のダッシュボードでトンネルを再発行するか、保管
   #753（バックアップの暗号化）と合わせて設計する
 - **復元リハーサル**: 実際に復元してみる手順は #753 の課題として残っている。
   本 runbook は手順を書いただけで、通しで検証はしていない
-- **自動実行**: 本 CLI は cron / systemd に登録していない。登録する場合は
-  root で動かす必要があるため、`deploy/cron/crontab` ではなく root の crontab か
-  systemd timer を使うこと（`deploy/cron/crontab` は一般ユーザー用）
+- **出力先のパーミッション**: ツールは出力ディレクトリを 0700 で作ろうとするが、
+  NAS は `/etc/fstab` の CIFS オプションが `dir_mode=0775` 固定のため効かない
+  （実行時に警告が出て、`MANIFEST.json` の `dir_mode_effective` にも残る）。
+  生成物に平文の秘密は入らない設計なので直ちに漏洩ではないが、台帳には秘密ファイルの
+  パス・所有者・sha256 が載るため、設計意図とは乖離している
 
 ## 関連
 

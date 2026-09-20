@@ -1,0 +1,16 @@
+[Unit]
+Description=Notify failure of host configuration backup (Issue #774)
+
+[Service]
+Type=oneshot
+# **masahiro で動かす**のが要点。tools/notify_task_failure.py は core.logger 経由で
+# logs/run_task.log に記録するため、root で走らせるとこのログが root 所有で作られ、
+# 以後 masahiro の cron タスク(run_task.sh)からの失敗通知が書き込めなくなる。
+User=masahiro
+Group=masahiro
+WorkingDirectory=/home/masahiro/develop/MY_HOME_SYSTEM
+# 第3引数(ログファイル)は省略可。systemd 側のログは journal にあり、
+# タスクごとのクールダウン(1時間)は notify_task_failure.py が状態ファイルで持つ。
+ExecStart=/home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python tools/notify_task_failure.py tools/backup_host_config.py 1
+StandardOutput=journal
+StandardError=journal
