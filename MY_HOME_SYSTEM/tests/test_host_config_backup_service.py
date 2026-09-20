@@ -9,6 +9,7 @@
 
 実機の `/etc` は読めないため、`root=` で擬似ルートを差し替えて検証する。
 """
+import hashlib
 import json
 import os
 import sys
@@ -203,6 +204,65 @@ class TestRedactSecrets:
         out, count = svc.redact_secrets("ExecStart=/usr/bin/x --token\nRestart=on-failure\n")
         assert count == 0
         assert "Restart=on-failure" in out
+
+
+class TestNonUtf8FilesAreNotSilentlyCorrupted:
+    """非 UTF-8 のホスト設定が、壊れた内容で保存されないこと。
+
+    初回実装は `read_text(encoding="utf-8", errors="replace")` を使っており、
+    不正な UTF-8 バイト列を例外にせず U+FFFD へ静かに置換していた。そのため
+    「テキストとして読めないファイルはコピーせず台帳のみに落とす」という
+    `UnicodeError` 分岐が**デッドコード**になり、Shift-JIS のコメントが混ざった
+    `fstab` のようなファイルが**警告なく壊れた内容で** `status="copied"` として
+    保存されていた。しかも台帳の `sha256` は `plan()` が元のバイト列から計算する
+    ため保存内容と一致せず、**復元時にバックアップが化けていることに気づけない**。
+    """
+
+    @pytest.fixture
+    def shift_jis_host(self, tmp_path):
+        etc = tmp_path / "host" / "etc"
+        etc.mkdir(parents=True)
+        raw = b"//nas/x /mnt/x cifs noserverino 0 0 # " + "メモ".encode("shift_jis") + b"\n"
+        (etc / "fstab").write_bytes(raw)
+        return tmp_path / "host", raw
+
+    @pytest.fixture
+    def fstab_only(self, monkeypatch):
+        monkeypatch.setattr(svc, "HOST_CONFIG_TARGETS", (
+            svc.HostConfigTarget("/etc/fstab", "マウント定義"),
+        ))
+
+    def test_non_utf8_file_is_not_copied(self, tmp_path, shift_jis_host, fstab_only):
+        host, _ = shift_jis_host
+        outcome, _ = _run(tmp_path, host)
+
+        record = outcome.records[0]
+        assert record.status == "manifest_only"
+        assert "テキストとして読めなかったため" in record.detail
+        assert not Path(outcome.dest, "files", "etc", "fstab").exists()
+
+    def test_no_replacement_characters_are_written(self, tmp_path, shift_jis_host, fstab_only):
+        """U+FFFD に置換された内容が保存されないこと。"""
+        host, _ = shift_jis_host
+        outcome, _ = _run(tmp_path, host)
+
+        for root, _dirs, files in os.walk(outcome.dest):
+            for name in files:
+                assert b"\xef\xbf\xbd" not in Path(root, name).read_bytes(), name
+
+    def test_manifest_sha256_still_describes_the_original(
+        self, tmp_path, shift_jis_host, fstab_only
+    ):
+        """コピーしないぶん、台帳の sha256 で「元のファイルと同一か」を照合できること。"""
+        host, raw = shift_jis_host
+        outcome, _ = _run(tmp_path, host)
+        assert outcome.records[0].sha256 == hashlib.sha256(raw).hexdigest()
+
+    def test_utf8_file_is_still_copied(self, tmp_path, fake_host, fstab_only):
+        """正常な UTF-8 は従来どおりコピーされること(修正で過剰に落としていない)。"""
+        outcome, _ = _run(tmp_path, fake_host)
+        assert outcome.records[0].status == "copied"
+        assert Path(outcome.dest, "files", "etc", "fstab").is_file()
 
 
 class TestManifest:

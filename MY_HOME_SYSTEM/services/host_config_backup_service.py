@@ -315,6 +315,11 @@ _README = """このディレクトリは MY_HOME_SYSTEM のホスト設定バッ
   中身は redact_secrets() を通してあるため、password=/token= 等の値は
   ***REDACTED-BY-host_config_backup*** に置き換わっていることがあります
   (置換した件数は MANIFEST.json の redactions を見てください)。
+  **redactions が 0 でないファイルは元のファイルと同一ではありません。**
+  そのまま上書きせず、落ちた値を入れ直してください。MANIFEST.json の sha256 は
+  元のファイルのものなので、files/ のコピーとは一致しません(復元後の照合用です)。
+  非 UTF-8 のファイルは中身を確認できないためコピーせず、status=manifest_only
+  として台帳にのみ載ります。
 - MANIFEST.json … 全対象の台帳。**コピーしていない秘密ファイルもここに載ります**
   (パス・所有者・パーミッション・サイズ・sha256 のみ。値は記録していません)。
 
@@ -357,10 +362,20 @@ def perform_backup(now: datetime.datetime | None = None, dry_run: bool = False,
         out_path = dest / "files" / record.path.lstrip("/")
         try:
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            raw = Path(record.source or record.path).read_text(encoding="utf-8", errors="replace")
+            # **`errors="replace"` を使わないこと。** 不正な UTF-8 バイト列を
+            # 例外にせず U+FFFD へ静かに置換するため、下の UnicodeError 分岐が
+            # デッドコードになり、非 UTF-8 の /etc ファイル(Shift-JIS のコメントが
+            # 混ざった fstab 等)が**警告なく壊れた内容で** status="copied" として
+            # 保存される。しかも台帳の sha256 は plan() が元のバイト列から
+            # 計算しているため、保存された内容と一致しなくなり、復元時に
+            # 「バックアップが化けていること」に気づけない。strict に読んで
+            # 下の分岐へ落とす。
+            raw = Path(record.source or record.path).read_bytes().decode("utf-8")
         except (OSError, UnicodeError) as e:
-            # テキストとして読めないもの(バイナリ等)は、値を確認できないので
-            # コピーせず台帳のみに落とす。素通しでNASへ置くより安全側に倒す。
+            # テキストとして読めないもの(バイナリ・非 UTF-8)は、値を確認できない
+            # ので redact も効かせられない。コピーせず台帳のみに落とす
+            # (素通しでNASへ置くより安全側に倒す)。台帳には sha256 が残るので、
+            # 復元時に「元のファイルと同一か」は照合できる。
             record.status = "manifest_only"
             record.detail = f"テキストとして読めなかったためコピーしない: {e}"
             continue
