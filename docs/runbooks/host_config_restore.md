@@ -1,0 +1,153 @@
+# ホスト設定（`/etc` 側）のバックアップと復元
+
+Issue #774。SDカードが飛んだとき、DB とアプリは `docs/runbooks/db_restore.md` で戻せるが、
+**常時録画・外部公開・NAS マウントはホスト側（`/etc`）の設定**に依存しており、
+そこは日次バックアップ（`services/backup_service.py` / `config.BACKUP_FILES`）の対象外だった。
+本 runbook はその保全と復元を扱う。
+
+## 前提: 秘密はバックアップに入っていない
+
+**秘密を含むファイルは中身をコピーしない。** 台帳（`MANIFEST.json`）にパス・所有者・
+パーミッション・サイズ・sha256 だけを記録する。
+
+これは既存の2つの判断に揃えたものである。
+
+| 判断 | 内容 |
+| --- | --- |
+| #649 | `.env` を意図的にバックアップ対象から外した（NAS 上に 664 で残った旧コピーの掃除も含む） |
+| #773 | RTSP 認証情報を `/etc/nvr/*.env`（600・root）へ切り出し、リポジトリには含めず手順だけを残した |
+
+NAS 共有は 664 で見えるため、平文の認証情報を置くと**バックアップを増やしたことで
+秘密の露出面が増える**。台帳があれば「どのパスに・どの所有者とパーミッションで・
+どんな内容（sha256）のファイルが必要か」は復元時に分かるので、**値はパスワード
+マネージャから入れ直す**という運用が成立する。
+
+秘密の値そのものの保管場所（パスワードマネージャ等）は、このリポジトリの管理外である。
+
+## バックアップ
+
+実機の `MY_HOME_SYSTEM/` で:
+
+```bash
+# 何を拾うか・どれが秘密扱いかの確認（1バイトも書かない）
+sudo .venv/bin/python tools/backup_host_config.py --dry-run
+
+# 1世代を書き出す
+sudo .venv/bin/python tools/backup_host_config.py
+```
+
+`/etc/nvr/*.env`（600・root）や `smbcredentials` の**メタデータ**を読むために root が必要。
+root でなくても動くが、読めなかったものは台帳に `error` として残り、CLI は
+**exit 1** を返す（黙って飛ばすと、復元時に「そんなファイルがあったこと自体」を
+知る手段が無くなるため）。
+
+### ⚠️ 初回は `--dry-run` の「不在」を必ず確認すること
+
+`services/host_config_backup_service.py` の `HOST_CONFIG_TARGETS` は、**cloudflared や
+`smbcredentials` の置き場所について候補パスを複数宣言している**（ディストリ・導入方法で
+変わり、コードからは実機の配置を確認できない）。初回は `--dry-run` を流し、
+
+- 「不在（候補パス）」に出たものが**本当に存在しないのか**（＝候補から削ってよい）
+- 実在するのに拾えていないパスが**無いか**（＝候補に足す）
+
+を確認し、実態に合わせて `HOST_CONFIG_TARGETS` を直すこと。
+
+### 出力
+
+`<NAS>/home_system/host_config_backups/<YYYYmmdd_HHMMSS>/`
+
+| 中身 | 説明 |
+| --- | --- |
+| `files/<復元先のパス>` | 秘密を含まないファイルのコピー。階層は**復元先の絶対パス**で再現される |
+| `MANIFEST.json` | 全対象の台帳。コピーしていない秘密ファイルも、不在だった候補パスも載る |
+| `README.txt` | この世代が何で、復元手順がどこにあるか |
+
+`files/` に入るファイルも `redact_secrets()` を通すため、`password=` / `token=` 等の
+**値**は `***REDACTED-BY-host_config_backup***` に置き換わることがある
+（置換件数は台帳の `redactions`）。`username=` と `credentials=`（＝秘密ファイルへの
+**パス**）は復元に必要なので意図的に残す。
+
+保持世代は `HOST_CONFIG_BACKUP_RETENTION_DAYS`（既定 90 日）。名前が
+`%Y%m%d_%H%M%S` として解釈できないディレクトリには触らない（人が置いたものを消さないため）。
+
+## 復元
+
+### 1. 台帳を読む
+
+```bash
+cd <NAS>/home_system/host_config_backups/<最新の世代>
+python3 -m json.tool MANIFEST.json | less
+```
+
+`files` 配列の各エントリの `status` が復元方法を決める。
+
+| `status` | 意味 | 復元方法 |
+| --- | --- | --- |
+| `copied` | 中身がある | `files/` からコピーし、台帳の `mode` / `owner` / `group` を復元 |
+| `manifest_only` | **秘密なので中身は無い** | 値をパスワードマネージャから入れ直し、`sha256` で照合 |
+| `missing` | この世代の時点で存在しなかった | 対応不要（候補パスの1つ） |
+| `error` | 読めなかった | 台帳の `detail` を見る。root で取れていない可能性 |
+
+### 2. リポジトリに正があるものは、リポジトリから入れる
+
+systemd ユニットは `MY_HOME_SYSTEM/deploy/systemd/` が正である（#773）。
+バックアップ側のコピーは**実機と repo のドリフト検出**のために取っているだけなので、
+復元は repo から行うこと。手順は `MY_HOME_SYSTEM/deploy/systemd/README.md`。
+
+```bash
+# 台帳の sha256 と repo のファイルを突き合わせ、実機だけで変更されていたものを洗い出す
+sha256sum MY_HOME_SYSTEM/deploy/systemd/*.service
+```
+
+一致しないものがあれば、**実機側だけで直した変更が repo に取り込まれていない**
+ということなので、repo から入れる前に差分を確認する。
+
+### 3. 秘密ファイルを入れ直す
+
+`manifest_only` のものは値が無い。`/etc/nvr/*.env` の入れ方は
+`MY_HOME_SYSTEM/deploy/systemd/README.md` の nvr 節にある（`%` のエスケープの注意も含む）。
+入れ終わったら台帳の `sha256` と照合する。
+
+```bash
+sha256sum /etc/nvr/entrance.env   # MANIFEST.json の sha256 と一致するか
+sudo chmod 600 /etc/nvr/*.env
+sudo chown root:root /etc/nvr/*.env
+```
+
+一致しない場合、**入れた値が当時と違う**（改行・末尾空白の混入を含む）。
+
+### 4. NAS マウントと samba
+
+`files/etc/fstab` は redact されている可能性があるため、そのまま上書きしない。
+CIFS 行のオプション（`noserverino` 等）を参照しつつ、認証情報は
+`smbcredentials` を入れ直して `credentials=` で参照させる。
+
+```bash
+sudo mount -a
+mountpoint -q /mnt/nas && echo "OK"
+```
+
+### 5. 外部公開（cloudflared）
+
+トンネル資格情報（`*.json`）は `manifest_only` なので入っていない。
+Cloudflare のダッシュボードでトンネルを再発行するか、保管してある資格情報を戻す。
+`/dashboard` 等のバイパス設定の点検は `docs/runbooks/cloudflare_access_connectivity_check.md`。
+
+## 未対応として残していること
+
+- **暗号化**: 秘密を暗号化して保全する方式（鍵の置き場所を決める必要がある）は採っていない。
+  現状は「秘密は保全しない・台帳だけ残す」方針。鍵管理を決められるなら、
+  #753（バックアップの暗号化）と合わせて設計する
+- **復元リハーサル**: 実際に復元してみる手順は #753 の課題として残っている。
+  本 runbook は手順を書いただけで、通しで検証はしていない
+- **自動実行**: 本 CLI は cron / systemd に登録していない。登録する場合は
+  root で動かす必要があるため、`deploy/cron/crontab` ではなく root の crontab か
+  systemd timer を使うこと（`deploy/cron/crontab` は一般ユーザー用）
+
+## 関連
+
+- `docs/runbooks/db_restore.md` — DB 本体の復元
+- `MY_HOME_SYSTEM/deploy/systemd/README.md` — systemd ユニットの導入手順・`/etc/nvr` の作り方
+- #753 — バックアップの暗号化・復元リハーサル（本件と設計が重複する）
+- #649 — `.env` をバックアップ対象から外した判断
+- #773 — RTSP 認証情報を `/etc/nvr` へ切り出した判断

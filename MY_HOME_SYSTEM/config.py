@@ -485,6 +485,20 @@ DB_BACKUP_RETENTION_DAYS: int = _get_int_env("DB_BACKUP_RETENTION_DAYS", 30)
 DB_BACKUP_OFFSITE_REMOTE: str = os.getenv("DB_BACKUP_OFFSITE_REMOTE", "").strip()
 DB_BACKUPS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "db_backups")
 
+# --- ホスト側(/etc)運用設定のバックアップ (Issue #774) ---
+# 上記のバックアップ対象(BACKUP_FILES)はすべてリポジトリ配下のファイルで、
+# **ホスト側の運用設定が丸ごと対象外**だった。SDカードが飛ぶと DB とアプリは
+# 戻せても、常時録画(nvr-*.service)・外部公開(cloudflared)・NASマウント
+# (smbcredentials / fstab の CIFS 設定)は手作業で組み直しになる。
+#
+# 認証情報の扱いは #649(`.env` をバックアップ対象から意図的に外した)と
+# #773(RTSP認証情報を `/etc/nvr/*.env` 600 に切り出し、リポジトリには含めない)の
+# 判断に揃える: **秘密を含むファイルは中身をコピーせず、復元に必要な
+# メタデータ(パス・所有者・パーミッション・sha256)だけを台帳に記録する。**
+# NAS 共有は 664 で見えるため、平文の認証情報を置かないのが前提。
+HOST_CONFIG_BACKUPS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "host_config_backups")
+HOST_CONFIG_BACKUP_RETENTION_DAYS: int = _get_int_env("HOST_CONFIG_BACKUP_RETENTION_DAYS", 90)
+
 # --- SQLite の「行」の保持期間 (Issue #733 / AUDIT-003) ---
 # 上の設定はすべて「ファイル」の保持期間で、SQLite の行を削除する設定・コードは
 # これまでリポジトリ内に1つも存在しなかった。「無限蓄積」はファイルについては

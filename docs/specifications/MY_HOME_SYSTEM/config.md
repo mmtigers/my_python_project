@@ -171,6 +171,8 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 | `TIMELAPSE_FONT_FILE` | `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc` | タイムラプスの焼き込み文字フォント |
 | `TIMELAPSE_FFMPEG_THREADS` | `2` | **（Issue #782 で追加）** `monitors/smart_timelapse_generator.py` が解析デコード・再エンコードで `ffmpeg` に渡す `-threads` の上限。上限が無いと Pi 5 の4コアを使い切り、CPU温度がソフト温度上限(80°C)に達してスロットリングする（`nice`/`ionice` は優先度を下げるだけで、他に走るものが無ければ全コアを使う） |
 | `DB_BACKUPS_DIR` | `{NAS_PROJECT_ROOT}/db_backups` | DBバックアップの出力先 |
+| `HOST_CONFIG_BACKUPS_DIR` | `{NAS_PROJECT_ROOT}/host_config_backups` | ホスト側(`/etc`)運用設定バックアップの出力先（Issue #774） |
+| `HOST_CONFIG_BACKUP_RETENTION_DAYS` | `90` | 同バックアップの世代保持日数（Issue #774） |
 | `SOUND_PLAYER_ARGS` | `["-o", "pulse"]` | `core/sound_manager.py` が再生コマンドへ渡す追加引数 |
 | `MEMORY_ALERT_LAST_NOTIFY_FILE` | `{FALLBACK_ROOT}/last_memory_alert.txt` | `memory_monitor` の通知クールダウン用状態ファイル |
 
@@ -181,7 +183,7 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 * **役割**: 検証I/Oを伴うパス定数の遅延解決(PEP 562)。`_resolve_assets_dir()` が `ensure_safe_path_with_backoff` で `ASSETS_DIR` を検証・解決し、`_ASSETS_SUBDIRS_TO_CREATE` の各サブディレクトリを作る。モジュールの `__getattr__(name)` は `ASSETS_DIR` と `_ASSETS_DERIVED_PATHS` の派生パス(`UPLOAD_DIR`・`SOUND_DIR` 等)を初回アクセス時にだけ解決し、結果を `globals()` に書き込むため以降は通常の属性解決になる(=キャッシュ。テストは `monkeypatch.setattr`/`delattr` で上書き・再解決できる)。**（Issue #664）** `__getattr__` は `LOG_DIR` も扱い、`ensure_safe_path_with_backoff(_PREFERRED_LOG_DIR, "logs")` で解決する。`prewarm_nas_paths()` は `unified_server.py` の `lifespan` から呼ばれ、遅延化前と同じく起動時点で `ASSETS_DIR`・`LOG_DIR`・派生パスの検証・フォールバック判定を済ませる。
 * **戻り値/レスポンス**: `_resolve_assets_dir` / `__getattr__` は `str`、`prewarm_nas_paths` は `None`。未知の属性名では `__getattr__` が `AttributeError` を送出する。
 * **副作用**: NAS 上のディレクトリ作成、`globals()` への書き込み、失敗時の warning ログ(例外は送出せずローカルへフォールバック)。
-* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 645)、`def __getattr__(name: str) -> str:` (行番号: 659)、`def prewarm_nas_paths() -> None:` (行番号: 686)
+* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 659)、`def __getattr__(name: str) -> str:` (行番号: 673)、`def prewarm_nas_paths() -> None:` (行番号: 700)
 
 ### `verify_and_initialize_storage`
 
