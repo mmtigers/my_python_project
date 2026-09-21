@@ -214,16 +214,26 @@ jobs:
         # カバレッジのラチェット比較元。master の直近成功 run(本ワークフロー)の ID を REST API で
         # 引く。無ければ空のまま次のステップがスキップされ、固定閾値(--cov-fail-under)だけが
         # ゲートになる。
+        #
+        # `status=success&per_page=1` は**直近の run を返さない**。PR #839 の run で
+        # 実際に選ばれた比較元は 2026-09-10 の run 34475282120 で、同日 05:25 の master
+        # run 35564515567(conclusion: success)ではなかった。その結果、比較元の実測が
+        # backend 74.76% / frontend 47.22% と、当時の master の実測(86.00% / 78.64%)から
+        # 11〜31pt も低い値になっており、ラチェットは「master 比 0.5pt の低下を検知する」
+        # という役目をほとんど果たしていなかった(固定閾値だけが実質のゲートだった)。
+        # 並び順が正しいことを確認できている `status=completed` で引き、success の絞り込みは
+        # jq 側で行う。取得できた比較元は created_at ごとログに出して、再発を見えるようにする。
         if: github.event_name == 'pull_request'
         id: baseline_run
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=master&status=success&per_page=1" \
-                     --jq '.workflow_runs[0].id // empty')"
+          baseline="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=master&status=completed&per_page=20" \
+                     --jq '[.workflow_runs[] | select(.conclusion == "success")][0] // empty | "\(.id) \(.created_at)"')"
+          run_id="${baseline%% *}"
           echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
-          echo "baseline run: ${run_id:-(none)}"
+          echo "baseline run: ${baseline:-(none)}"
 
       - name: Download master coverage baseline
         # 別 run の成果物取得は run-id + github-token を指定した actions/download-artifact で行う
@@ -448,16 +458,19 @@ jobs:
 
       - name: Find latest successful master run (frontend coverage baseline)
         # バックエンドと同じラチェット比較。vitest の json-summary(coverage-summary.json)を使う。
+        # 比較元の引き方も test ジョブと同じ(`status=success&per_page=1` が直近を返さない件は
+        # そちらのコメントを参照)。
         if: github.event_name == 'pull_request'
         id: baseline_run
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=master&status=success&per_page=1" \
-                     --jq '.workflow_runs[0].id // empty')"
+          baseline="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=master&status=completed&per_page=20" \
+                     --jq '[.workflow_runs[] | select(.conclusion == "success")][0] // empty | "\(.id) \(.created_at)"')"
+          run_id="${baseline%% *}"
           echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
-          echo "baseline run: ${run_id:-(none)}"
+          echo "baseline run: ${baseline:-(none)}"
 
       - name: Download master frontend coverage baseline
         if: github.event_name == 'pull_request' && steps.baseline_run.outputs.run_id != ''
