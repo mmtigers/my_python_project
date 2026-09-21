@@ -54,7 +54,7 @@
 ### `update_switchbot_webhook`
 
 * **（2026-09-06 品質監査で修正）** 「設定確認」「古い設定を削除」の2つの INFO ログは `_mask_token(url)` でクエリの `token=` の値を `***` にマスクして出力する(以前は共有シークレット `SWITCHBOT_WEBHOOK_TOKEN` が `home_system.log` に平文で残っていた)。
-* 根拠: (行番号: 53, 70 / 抜粋: "logger.info(f\"🔧 [SwitchBot] 設定確認: {_mask_token(target_url)}\")", "logger.info(f\"   🗑️ 古い設定を削除: {_mask_token(old_url)}\")")
+* 根拠: (行番号: 54, 71 / 抜粋: "logger.info(f\"🔧 [SwitchBot] 設定確認: {_mask_token(target_url)}\")", "logger.info(f\"   🗑️ 古い設定を削除: {_mask_token(old_url)}\")")
 
 ### `_mask_token` **（2026-09-06 品質監査で修正）**
 

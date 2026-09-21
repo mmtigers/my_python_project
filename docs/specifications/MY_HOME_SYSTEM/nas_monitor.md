@@ -33,7 +33,7 @@
 | `errno`（Issue #450で追加） | 標準ライブラリ | `_cleanup_empty_dirs`で`os.rmdir`失敗時の`OSError.errno`が`errno.ENOTEMPTY`(ディレクトリが空でない、想定内)かどうかを判定するため | 根拠: `import errno` (行番号: 1 / 抜粋: "import errno") |
 | `os` | 標準ライブラリ | ファイルパス操作、存在確認、削除など | 根拠: `import os` (行番号: 2 / 抜粋: "import os") |
 | `json` | 標準ライブラリ | 状態を記録したJSONファイルの読み書き | 根拠: `import json` (行番号: 3 / 抜粋: "import json") |
-| `shutil` | 標準ライブラリ | ディスク使用量の取得 | 根拠: `import shutil` (行番号: 4 / 抜粋: "import shutil") |
+| `shutil` | 標準ライブラリ | ディスク使用量の取得 | 根拠: `import shutil` (行番号: 3 / 抜粋: "import shutil") |
 | `subprocess` | 標準ライブラリ | pingおよびrsyncコマンドの実行 | 根拠: `import subprocess` (行番号: 5 / 抜粋: "import subprocess") |
 | `sys` | 標準ライブラリ | モジュール検索パスへの親ディレクトリ追加 | 根拠: `import sys` (行番号: 6 / 抜粋: "import sys") |
 | `time` | 標準ライブラリ | 保持期間の基準時刻（カットオフ）の計算 | 根拠: `import time` (行番号: 7 / 抜粋: "import time") |
@@ -41,8 +41,8 @@
 | `config` | 自作モジュール | NASのIP、マウント先、LINE ID、保持期間などの設定値取得 | 根拠: `import config` (行番号: 13 / 抜粋: "import config") |
 | `setup_logging` | 自作モジュール | ロガーの初期化と取得 | 根拠: `setup_logging` (行番号: 14 / 抜粋: "from core.logger import setup...") |
 | `save_log_generic` | 自作モジュール | データベースへのログ保存 | 根拠: `save_log_generic` (行番号: 15 / 抜粋: "from core.database import sav...") |
-| `get_now_iso`, `retry_with_backoff`（Issue #292） | 自作モジュール | 現在時刻のISOフォーマット取得、NAS I/O向けExponential Backoffリトライ | 根拠: `get_now_iso`, `retry_with_backoff` (行番号: 16 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst") |
-| `get_now_jst`（Issue #592で追加） | 自作モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「8時以降」判定はJSTの8時を意図していたため、ホストがJST以外の設定だと意図しない実時刻で判定されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_iso, retry_with_backoff, get_now_jst` (行番号: 16 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst")、`now = get_now_jst()` (行番号: 415〜417 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()") |
+| `get_now_iso`, `retry_with_backoff`（Issue #292） | 自作モジュール | 現在時刻のISOフォーマット取得、NAS I/O向けExponential Backoffリトライ | 根拠: `get_now_iso`, `retry_with_backoff` (行番号: 17 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst") |
+| `get_now_jst`（Issue #592で追加） | 自作モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「8時以降」判定はJSTの8時を意図していたため、ホストがJST以外の設定だと意図しない実時刻で判定されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_iso, retry_with_backoff, get_now_jst` (行番号: 17 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst")、`now = get_now_jst()` (行番号: 415〜417 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()") |
 | `send_push` | 自作モジュール | プッシュ通知の送信 | 根拠: `send_push` (行番号: 17 / 抜粋: "from services.notification...") |
 
 ### ブラックボックスとなる外部要素
@@ -81,7 +81,7 @@
 
 
 * **副作用**: クラスのインスタンス変数の定義。`self.write_check_retries`は`config.NAS_WRITE_CHECK_RETRIES`（未設定時デフォルト3）から`check_write_permission`のリトライ回数として初期化される。
-* 根拠: `self.ip: str = getattr(config, "NAS_IP", "")` (行番号: 26〜30 / 抜粋: "self.ip: str = getattr(co...")、`self.write_check_retries: int = getattr(config, "NAS_WRITE_CHECK_RETRIES", 3)` (行番号: 30 / 抜粋: "self.write_check_retries: int = getattr(config, \"NAS_WRITE_CHECK_RETRIES\", 3)")
+* 根拠: `self.ip: str = getattr(config, "NAS_IP", "")` (行番号: 26〜30 / 抜粋: "self.ip: str = getattr(co...")、`self.write_check_retries: int = getattr(config, "NAS_WRITE_CHECK_RETRIES", 3)` (行番号: 40 / 抜粋: "self.write_check_retries: int = getattr(config, \"NAS_WRITE_CHECK_RETRIES\", 3)")
 
 
 * **エラーハンドリング**: なし
@@ -144,7 +144,7 @@
 
 
 * **戻り値/レスポンス**: `bool`（成功時True）
-* 根拠: `return res.returncode == 0` (行番号: 60 / 抜粋: "return res.returncode == 0")
+* 根拠: `return res.returncode == 0` (行番号: 104 / 抜粋: "return res.returncode == 0")
 
 
 * **副作用**: 外部プロセス(`ping`コマンド)の実行。
@@ -232,7 +232,7 @@
 
 
 * **引数/リクエスト**: `path`: `str`
-* 根拠: `path: str` (行番号: 211 / 抜粋: "path: str")
+* 根拠: `path: str` (行番号: 242 / 抜粋: "path: str")
 
 
 * **戻り値/レスポンス**: `None`
@@ -240,7 +240,7 @@
 
 
 * **副作用**: ディレクトリの削除（ファイルシステム操作）。失敗時（`ENOTEMPTY`以外）は`logger.warning`によるログ出力。
-* 根拠: `os.rmdir(dir_path)` (行番号: 217 / 抜粋: "os.rmdir(dir_path)")
+* 根拠: `os.rmdir(dir_path)` (行番号: 248 / 抜粋: "os.rmdir(dir_path)")
 
 
 * **エラーハンドリング**: **（Issue #450 で修正）** 以前は`OSError`を捕捉し`pass`することで、空でないディレクトリの削除失敗（想定内のENOTEMPTY）だけでなく、権限エラー等それ以外のOSErrorも種別を問わず一律で握りつぶしていた。現在は捕捉した`OSError`の`e.errno`を調べ、`errno.ENOTEMPTY`(ディレクトリが空でない、想定内のケース)のみ無視し、それ以外は`logger.warning(f"空ディレクトリの削除に失敗しました: {dir_path}: {e}")`でログに残す。

@@ -32,8 +32,8 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `os` | 標準ライブラリ | プロジェクトルートのパス解決 | 根拠: [インポート宣言] (行番号: 21 / 抜粋: "import os") |
-| `sys` | 標準ライブラリ | `sys.path`へのプロジェクトルート追加、`sys.exit`による終了コードの返却 | 根拠: [インポート宣言] (行番号: 21 / 抜粋: "import sys")、[終了] (行番号: 84 / 抜粋: "sys.exit(main())") |
+| `os` | 標準ライブラリ | プロジェクトルートのパス解決 | 根拠: [インポート宣言] (行番号: 18 / 抜粋: "import os") |
+| `sys` | 標準ライブラリ | `sys.path`へのプロジェクトルート追加、`sys.exit`による終了コードの返却 | 根拠: [インポート宣言] (行番号: 19 / 抜粋: "import sys")、[終了] (行番号: 84 / 抜粋: "sys.exit(main())") |
 | `requests` | 外部パッケージ | 締切処理APIへのPOST | 根拠: [インポート宣言] (行番号: 21 / 抜粋: "import requests")、[呼び出し] (行番号: 48 / 抜粋: "res = requests.post(url, timeout=config.ROUTINE_DEADLINE_API_TIMEOUT_SEC)") |
 | `config` | ローカルモジュール | `ROUTINE_DEADLINE_API_BASE_URL`・`ROUTINE_DEADLINE_API_TIMEOUT_SEC`の参照 | 根拠: [インポート宣言] (行番号: 28 / 抜粋: "import config")、[参照] (行番号: 46, 48) |
 | `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化 | 根拠: [インポート宣言] (行番号: 29 / 抜粋: "from core.logger import setup_logging") |

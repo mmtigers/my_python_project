@@ -45,7 +45,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config`モジュール | `BASE_DIR`や`LINE_USER_ID`の具体的な値、およびその他の設定内容が現在のファイルからは判断不可 | 根拠: `config` (行番号: 12 / 抜粋: "import config") |
+| `config`モジュール | `BASE_DIR`や`LINE_USER_ID`の具体的な値、およびその他の設定内容が現在のファイルからは判断不可 | 根拠: `config` (行番号: 13 / 抜粋: "import config") |
 | `core.logger` | ロギングの出力先（コンソール、ファイル等）、フォーマットなどの具体的な振る舞いが判断不可 | 根拠: `setup_logging("watchdog")` (行番号: 24 / 抜粋: "logger = setup_logging("watc...") |
 | `services.notification_service` | `send_push`関数の通信先の仕様、リトライ制御の有無、フォーマット変換などの実装詳細が判断不可 | 根拠: `send_push(config.LINE_US...` (行番号: 14 / 抜粋: "from services.notification_...") |
 
@@ -114,7 +114,7 @@
 
 
 * **副作用**: `/proc/sys/kernel/random/boot_id`の読み取り（ファイルI/O）。
-* 根拠: `Path("/proc/sys/kernel/random/boot_id").read_text().strip()` (行番号: 82 / 抜粋: "return Path("/proc/sys/kernel/random/boot_id").read_text().strip()")
+* 根拠: `Path("/proc/sys/kernel/random/boot_id").read_text().strip()` (行番号: 96 / 抜粋: "return Path("/proc/sys/kernel/random/boot_id").read_text().strip()")
 
 
 * **エラーハンドリング**: 読み取りに失敗した場合は例外を握りつぶし、固定文字列`"unknown"`を返す。

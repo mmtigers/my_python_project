@@ -54,10 +54,10 @@ NAS 共有は 664 で見えるため、平文の認証情報を置けば「バ�
 | `grp` / `pwd` | 標準 | uid/gid を名前へ解決 | 根拠: [インポート宣言] (行番号: 57,62 / 抜粋: "import grp") |
 | `hashlib` | 標準 | sha256 の算出 | 根拠: [インポート宣言] (行番号: 58 / 抜粋: "import hashlib") |
 | `json` | 標準 | 台帳の書き出し | 根拠: [インポート宣言] (行番号: 59 / 抜粋: "import json") |
-| `re` | 標準 | redact 対象の判定 | 根拠: [インポート宣言] (行番号: 63 / 抜粋: "import re") |
-| `shutil` | 標準 | 古い世代の削除 | 根拠: [インポート宣言] (行番号: 64 / 抜粋: "import shutil") |
-| `config` | 自作 | 出力先・保持日数 | 根拠: [インポート宣言] (行番号: 69 / 抜粋: "import config") |
-| `core.logger.setup_logging` | 自作 | ロガー取得（`DiscordErrorHandler` が付く） | 根拠: [インポート宣言] (行番号: 70 / 抜粋: "from core.logger import setup_logging") |
+| `re` | 標準 | redact 対象の判定 | 根拠: [インポート宣言] (行番号: 62 / 抜粋: "import re") |
+| `shutil` | 標準 | 古い世代の削除 | 根拠: [インポート宣言] (行番号: 63 / 抜粋: "import shutil") |
+| `config` | 自作 | 出力先・保持日数 | 根拠: [インポート宣言] (行番号: 68 / 抜粋: "import config") |
+| `core.logger.setup_logging` | 自作 | ロガー取得（`DiscordErrorHandler` が付く） | 根拠: [インポート宣言] (行番号: 69 / 抜粋: "from core.logger import setup_logging") |
 
 ### ブラックボックスとなる外部要素
 

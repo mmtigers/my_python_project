@@ -34,14 +34,14 @@
 | `os` | 標準ライブラリ | パス結合（`os.path.join`）およびディレクトリ作成（`os.makedirs`） | 根拠: `[import os]` (行番号: 6 / 抜粋: "import os") |
 | `re` | 標準ライブラリ | **（2026-09-06 品質監査で追加）** Discord Webhook URLのトークン部分をマスクする正規表現`_WEBHOOK_URL_RE`のコンパイル | 根拠: `[import re]` (行番号: 7 / 抜粋: "import re")、`[_WEBHOOK_URL_RE]` (行番号: 67 / 抜粋: "_WEBHOOK_URL_RE = re.compile(r\"(/api/webhooks/\\d+)/[A-Za-z0-9_\\-]+\")") |
 | `requests` | 外部ライブラリ | DiscordのWebhook URLに対するHTTP POSTリクエストの送信 | 根拠: `[import requests]` (行番号: 8 / 抜粋: "import requests") |
-| `WatchedFileHandler` | 標準ライブラリ | ログファイルへの書き込み専用ハンドラ。ファイルのローテーション自体は行わず、外部の`logrotate`によるリネームを検知して出力先を追従する | 根拠: `[WatchedFileHandler]` (行番号: 9 / 抜粋: "from logging.handlers import WatchedFileHandler") |
-| `config` | 内部モジュール（推測） | ログ保存先ディレクトリやWebhook URLなどのシステム設定値の提供 | 根拠: `[import config]` (行番号: 10 / 抜粋: "import config") |
+| `WatchedFileHandler` | 標準ライブラリ | ログファイルへの書き込み専用ハンドラ。ファイルのローテーション自体は行わず、外部の`logrotate`によるリネームを検知して出力先を追従する | 根拠: `[WatchedFileHandler]` (行番号: 7 / 抜粋: "from logging.handlers import WatchedFileHandler") |
+| `config` | 内部モジュール（推測） | ログ保存先ディレクトリやWebhook URLなどのシステム設定値の提供 | 根拠: `[import config]` (行番号: 8 / 抜粋: "import config") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.DISCORD_WEBHOOK_ERROR` | `config`モジュールの実装が提供されておらず、Webhook送信先の実際のURL文字列が不明であるため。 | 根拠: `[config.DISCORD_WEBHOOK_ERROR]` (行番号: 24 / 抜粋: "url = self.webhook_url or config.DISCORD_WEBHOOK_ERROR") |
+| `config.DISCORD_WEBHOOK_ERROR` | `config`モジュールの実装が提供されておらず、Webhook送信先の実際のURL文字列が不明であるため。 | 根拠: `[config.DISCORD_WEBHOOK_ERROR]` (行番号: 175 / 抜粋: "url = self.webhook_url or config.DISCORD_WEBHOOK_ERROR") |
 | `config.BASE_DIR` | `config`モジュールの実装が提供されておらず、ログディレクトリが作成されるベースとなるルートパスが不明であるため。 | 根拠: `[config.BASE_DIR]` (行番号: 78 / 抜粋: "log_dir = os.path.join(config.BASE_DIR, \"logs\")") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -61,7 +61,7 @@
 
 
 * **副作用**: なし
-* 根拠: `[__init__]` (行番号: 15 / 抜粋: "self.webhook_url = webhook_url")
+* 根拠: `[__init__]` (行番号: 155 / 抜粋: "self.webhook_url = webhook_url")
 
 
 * **エラーハンドリング**: なし
@@ -188,7 +188,7 @@
 * **エラーハンドリング**: なし
 * 根拠: 同上
 * **呼び出し元**: `DiscordErrorHandler._send_webhook`（`url`と例外`e`の両方に適用）
-* 根拠: `[呼び出し]` (行番号: 156 / 抜粋: "_redact_webhook_url(url), type(e).__name__, _redact_webhook_url(e),")
+* 根拠: `[呼び出し]` (行番号: 252 / 抜粋: "_redact_webhook_url(url), type(e).__name__, _redact_webhook_url(e),")
 
 ### `setup_logging`
 
@@ -230,11 +230,11 @@
 
 
 * **戻り値/レスポンス**: `logging.Logger` (`setup_logging(name)`の戻り値をそのまま返却)
-* 根拠: `[return]` (行番号: 215 / 抜粋: "return setup_logging(name)")
+* 根拠: `[return]` (行番号: 313 / 抜粋: "return setup_logging(name)")
 
 
 * **副作用**: `setup_logging(name)`の呼び出しに伴う副作用（ハンドラの登録、ログディレクトリの作成等）と同一。
-* 根拠: `[return setup_logging(name)]` (行番号: 215 / 抜粋: "return setup_logging(name)")
+* 根拠: `[return setup_logging(name)]` (行番号: 313 / 抜粋: "return setup_logging(name)")
 
 
 * **エラーハンドリング**: なし（`setup_logging`のエラーハンドリングに依存。`setup_logging`自体も明示的な例外捕捉を持たない）

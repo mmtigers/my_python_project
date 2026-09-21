@@ -27,7 +27,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `BaseModel` | クラス | データモデル定義の親クラスとして使用 | `from pydantic import BaseModel` (行番号: 2 / 抜粋: "from pydantic import BaseModel") |
+| `BaseModel` | クラス | データモデル定義の親クラスとして使用 | `from pydantic import BaseModel` (行番号: 4 / 抜粋: "from pydantic import BaseModel") |
 | `Optional` | 型ヒント | 任意（null許容）フィールドの型定義に使用 | `from typing import Optional` (行番号: 3 / 抜粋: "from typing import Optional") |
 
 ### ブラックボックスとなる外部要素
@@ -278,7 +278,7 @@
 
 
 * **エラーハンドリング**: `avatar_url`が許容形式でない場合、バリデータが`ValueError`を送出する（FastAPIでは422 Unprocessable Entity）
-* 根拠: (行番号: 98 / 抜粋: "raise ValueError(\"avatar_url は /uploads/<uuid>.<ext> 形式か短い絵文字文字列のみ指定できます\")")
+* 根拠: (行番号: 134 / 抜粋: "raise ValueError(\"avatar_url は /uploads/<uuid>.<ext> 形式か短い絵文字文字列のみ指定できます\")")
 
 
 
@@ -289,7 +289,7 @@
 
 
 * **引数/リクエスト (フィールド)**: `sound_key` (str)
-* 根拠: フィールド定義 (行番号: 71 / 抜粋: "sound_key: str")
+* 根拠: フィールド定義 (行番号: 137 / 抜粋: "sound_key: str")
 
 
 * **戻り値/レスポンス**: 該当なし

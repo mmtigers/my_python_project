@@ -101,7 +101,7 @@
 * **副作用**: `logger.error`/`logger.info`によるログ出力、`input_func`の呼び出し(標準入力からの読み取りが既定)
 * 根拠: (行番号: 75〜79, 85〜87, 90)
 * **エラーハンドリング**: 空マスタガードまたはユーザー拒否の場合に`SyncAborted`を送出する。それ以外の例外は捕捉しない
-* 根拠: (行番号: 80 / 抜粋: "raise SyncAborted(\"empty master data without --allow-empty-master\")"), (行番号: 90 / 抜粋: "raise SyncAborted(\"user declined confirmation prompt\")")
+* 根拠: (行番号: 98 / 抜粋: "raise SyncAborted(\"empty master data without --allow-empty-master\")"), (行番号: 108 / 抜粋: "raise SyncAborted(\"user declined confirmation prompt\")")
 
 ### `run_sync`
 

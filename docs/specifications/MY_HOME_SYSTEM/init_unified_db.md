@@ -38,23 +38,23 @@
 | `config` | カスタムモジュール | データベースのパスやテーブル名の定数を取得 | 根拠: `import config` (行番号: 8 / 抜粋: "import config") |
 | `core.logger.setup_logging` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.logger import setup_logging` (行番号: 9 / 抜粋: "from core.logger import setup_logging") |
 | `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 10 / 抜粋: "from core.database import get_db_cursor") |
-| `core.migrations.apply_pending_migrations` | カスタムモジュール | `migrations/`配下のバージョン管理されたマイグレーションSQLの適用（0000ベースライン含む）。`init_db` と `dump_schema_sql` の両方から呼ばれる | 根拠: `from core.migrations import apply_pending_migrations` (行番号: 10 / 抜粋: "from core.migrations import apply_pending_migrations") |
+| `core.migrations.apply_pending_migrations` | カスタムモジュール | `migrations/`配下のバージョン管理されたマイグレーションSQLの適用（0000ベースライン含む）。`init_db` と `dump_schema_sql` の両方から呼ばれる | 根拠: `from core.migrations import apply_pending_migrations` (行番号: 11 / 抜粋: "from core.migrations import apply_pending_migrations") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.SQLITE_TABLE_*` 等の定数群 | 具体的なテーブル名の文字列値が本ファイル内では定義されていないため不明 | 根拠: `config.SQLITE_TABLE_DAILY_LOGS` (行番号: 43 / 抜粋: "config.SQLITE_TABLE_DAILY_LOGS: [\"category\", \"detail\", \"timestamp\"],") |
+| `config.SQLITE_TABLE_*` 等の定数群 | 具体的なテーブル名の文字列値が本ファイル内では定義されていないため不明 | 根拠: `config.SQLITE_TABLE_DAILY_LOGS` (行番号: 44 / 抜粋: "config.SQLITE_TABLE_DAILY_LOGS: [\"category\", \"detail\", \"timestamp\"],") |
 | `config.SQLITE_DB_PATH` | データベースファイルの保存先パスが不明 | 根拠: `config.SQLITE_DB_PATH` (行番号: 65, 85 / 抜粋: "with sqlite3.connect(config.SQLITE_DB_PATH) as conn:") |
-| `core.logger.setup_logging` | 引数 `"init_db"` を渡した際の具体的なログフォーマットや出力先が不明 | 根拠: `core.logger.setup_logging` (行番号: 8 / 抜粋: "logger = setup_logging("init_db")") |
-| `core.database.get_db_cursor` | 引数 `commit=True` を渡した際のDB接続確立プロセスやトランザクション管理処理の実装が不明 | 根拠: `core.database.get_db_cursor` (行番号: 67 / 抜粋: "with get_db_cursor(commit=True) as cur:") |
+| `core.logger.setup_logging` | 引数 `"init_db"` を渡した際の具体的なログフォーマットや出力先が不明 | 根拠: `core.logger.setup_logging` (行番号: 13 / 抜粋: "logger = setup_logging("init_db")") |
+| `core.database.get_db_cursor` | 引数 `commit=True` を渡した際のDB接続確立プロセスやトランザクション管理処理の実装が不明 | 根拠: `core.database.get_db_cursor` (行番号: 91 / 抜粋: "with get_db_cursor(commit=True) as cur:") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `logger`
 
 * **役割**: `init_db` という名前でセットアップされたロガーのインスタンスを保持する。
-* 根拠: `logger = core.logger.setup_logging("init_db")` (行番号: 12 / 抜粋: "logger = setup_logging(\"init_db\")")
+* 根拠: `logger = core.logger.setup_logging("init_db")` (行番号: 13 / 抜粋: "logger = setup_logging(\"init_db\")")
 
 
 
@@ -86,7 +86,7 @@
 ### `init_db`
 
 * **役割**: ロギング開始後、`core.database.get_db_cursor` でカーソルを取得し、WALモードを有効化（`PRAGMA journal_mode=WAL`の結果行を`cur.fetchall()`で読み切る。未消費のまま後続処理がcommitすると "cannot commit transaction - SQL statements in progress" になるため）。続いて `apply_pending_migrations(cur.connection)` でバージョン管理されたマイグレーション（0000ベースライン含む）を適用し、最後に `sqlite3.connect` を用いて `validate_schema_integrity` を呼び出す。**Issue #330以降、CREATE TABLE / CREATE INDEX文は本関数に存在しない**（`migrations/0000_baseline_schema.sql`へ移設済み）。
-* 根拠: `def init_db() -> None:` (行番号: 79-117 / 抜粋: "本関数はスキーマ定義を\n    一切持たない薄いラッパーである。")、`cur.fetchall()` (行番号: 92-96 / 抜粋: "cur.execute(\"PRAGMA journal_mode=WAL;\")")、`apply_pending_migrations(cur.connection)` (行番号: 103 / 抜粋: "apply_pending_migrations(cur.connection)")
+* 根拠: `def init_db() -> None:` (行番号: 79-117 / 抜粋: "本関数はスキーマ定義を\n    一切持たない薄いラッパーである。")、`cur.fetchall()` (行番号: 92-96 / 抜粋: "cur.execute(\"PRAGMA journal_mode=WAL;\")")、`apply_pending_migrations(cur.connection)` (行番号: 105 / 抜粋: "apply_pending_migrations(cur.connection)")
 
 
 * **引数/リクエスト**: なし
@@ -98,7 +98,7 @@
 
 
 * **副作用**: 設定変更（`PRAGMA journal_mode=WAL;`、行番号: 92）、`core.migrations.apply_pending_migrations`によるマイグレーションSQLの適用（空DBでは0000ベースラインによる全テーブル・インデックス作成、`schema_migrations`テーブルへの記録を含む、行番号: 103）、および標準出力を伴うログ記録（行番号: 87, 115）。
-* 根拠: `cur.execute` によるSQL実行 (行番号: 92 / 抜粋: "cur.execute(\"PRAGMA journal_mode=WAL;\")")、マイグレーション適用 (行番号: 100-103 / 抜粋: "apply_pending_migrations(cur.connection)")
+* 根拠: `cur.execute` によるSQL実行 (行番号: 94 / 抜粋: "cur.execute(\"PRAGMA journal_mode=WAL;\")")、マイグレーション適用 (行番号: 100-103 / 抜粋: "apply_pending_migrations(cur.connection)")
 
 
 * **エラーハンドリング**:

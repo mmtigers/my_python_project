@@ -50,15 +50,15 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `os` | 標準ライブラリ | 環境変数取得(`os.getenv`)、パス操作(`os.path.basename`) | 根拠: [import文] (行番号: 14 / 抜粋: "import os") |
-| `json` | 標準ライブラリ | キャストデータ・日次サマリのJSONシリアライズ/デシリアライズ | 根拠: [import文] (行番号: 15 / 抜粋: "import json") |
+| `os` | 標準ライブラリ | 環境変数取得(`os.getenv`)、パス操作(`os.path.basename`) | 根拠: [import文] (行番号: 15 / 抜粋: "import os") |
+| `json` | 標準ライブラリ | キャストデータ・日次サマリのJSONシリアライズ/デシリアライズ | 根拠: [import文] (行番号: 16 / 抜粋: "import json") |
 | `re` | 標準ライブラリ | 年齢抽出(`AGE_PATTERN`)、背景画像URL抽出用の正規表現処理 | 根拠: [import文] (行番号: 16 / 抜粋: "import re") |
 | `time` | 標準ライブラリ | Discord通知間のレート制限待機、スクレイピング前のBot検知回避待機、フォールバック実装のリトライ間隔 | 根拠: [import文] (行番号: 17 / 抜粋: "import time") |
-| `random` | 標準ライブラリ | スクレイピング前のランダムな待機時間生成 | 根拠: [import文] (行番号: 18 / 抜粋: "import random") |
-| `sys` | 標準ライブラリ | `sys.path`へのプロジェクトルート追加 | 根拠: [import文] (行番号: 19 / 抜粋: "import sys") |
+| `random` | 標準ライブラリ | スクレイピング前のランダムな待機時間生成 | 根拠: [import文] (行番号: 19 / 抜粋: "import random") |
+| `sys` | 標準ライブラリ | `sys.path`へのプロジェクトルート追加 | 根拠: [import文] (行番号: 20 / 抜粋: "import sys") |
 | `logging` | 標準ライブラリ | フォールバック時のロガー基本設定・生成 | 根拠: [import文] (行番号: 20 / 抜粋: "import logging") |
-| `hashlib` | 標準ライブラリ | ID未取得時のフォールバックIDを生成するためのフィンガープリント(sha1)算出 | 根拠: [import文] (行番号: 21 / 抜粋: "import hashlib") |
-| `fcntl` | 標準ライブラリ | 多重起動防止ロックファイルへの排他ロック(`flock`)取得・解放 | 根拠: [import文] (行番号: 22 / 抜粋: "import fcntl") |
+| `hashlib` | 標準ライブラリ | ID未取得時のフォールバックIDを生成するためのフィンガープリント(sha1)算出 | 根拠: [import文] (行番号: 22 / 抜粋: "import hashlib") |
+| `fcntl` | 標準ライブラリ | 多重起動防止ロックファイルへの排他ロック(`flock`)取得・解放 | 根拠: [import文] (行番号: 23 / 抜粋: "import fcntl") |
 | `dataclasses.dataclass`, `asdict`, `replace` | 標準ライブラリ | `SiteConfig`/`CastMember`データクラスの定義、辞書変換。`replace` は **Issue #538** で追加され、`_merge_known_casts` が `missed_runs` だけを差し替えた `CastMember` を作るために使う | 根拠: [import文] (行番号: 26 / 抜粋: "from dataclasses import dataclass, asdict, replace") |
 | `datetime.datetime` | 標準ライブラリ | 現在時刻の取得（日次サマリの日付判定、21時台判定） | 根拠: [import文] (行番号: 27 / 抜粋: "from datetime import datetime") |
 | `pathlib.Path` | 標準ライブラリ | ファイル・ディレクトリパスの操作全般 | 根拠: [import文] (行番号: 28 / 抜粋: "from pathlib import Path") |
@@ -67,14 +67,14 @@
 | `file_utils.DiscordCircuitBreaker` | 内部モジュール(DDD配下) | `DiscordNotifier`が保持するDiscord Webhook連続送信失敗検知用サーキットブレーカー | 根拠: [import文] (行番号: 32 / 抜粋: "from file_utils import DiscordCircuitBreaker, redact_discord_webhook_url, resolve_my_home_system_root") |
 | `file_utils.redact_discord_webhook_url` | 内部モジュール(DDD配下) | **（品質で追加、本監査で表を補完）** Discord Webhook送信失敗時のエラーログから、例外メッセージに含まれるWebhook URL(トークン込み)をマスクする。`DiscordNotifier.notify_casts`/`notify_daily_summary`/`notify_site_failure_alert`のエラーログ出力箇所で使用 | 根拠: [import文] (行番号: 32 / 抜粋: "from file_utils import DiscordCircuitBreaker, redact_discord_webhook_url, resolve_my_home_system_root") |
 | `file_utils.resolve_my_home_system_root` | 内部モジュール(DDD配下) | **（品質で追加）** `PROJECT_ROOT`(MY_HOME_SYSTEM)の解決。以前は`CURRENT_DIR.parent / "MY_HOME_SYSTEM"`という固定の兄弟ディレクトリ前提のみの単純な方式を個別に実装していたが、`batch_download_discord.py`と共通化した(`MY_HOME_SYSTEM_ROOT`環境変数優先、無ければ`services`ディレクトリの上位探索にフォールバック) | 根拠: [import文とPROJECT_ROOT解決] (行番号: 39〜46 / 抜粋: "PROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR)") |
-| `requests` | サードパーティ | HTTPセッションの生成・GETリクエスト送信、Discord Webhookへの POST送信 | 根拠: [import文] (行番号: 43 / 抜粋: "import requests") |
-| `requests.adapters.HTTPAdapter` | サードパーティ | セッションへのリトライ用アダプタのマウント | 根拠: [import文] (行番号: 44 / 抜粋: "from requests.adapters import HTTPAdapter") |
-| `urllib3.util.retry.Retry` | サードパーティ | HTTPリクエストのリトライポリシー定義（Discord向けは429の`Retry-After`尊重を含む） | 根拠: [import文] (行番号: 45 / 抜粋: "from urllib3.util.retry import Retry") |
-| `bs4.BeautifulSoup`, `NavigableString` | サードパーティ | 取得したHTMLのパース・要素抽出、テキストノード判定（`name_first_text_only`処理） | 根拠: [import文] (行番号: 46 / 抜粋: "from bs4 import BeautifulSoup, NavigableString") |
-| `core.logger.get_logger` | 内部モジュール（オプショナル、try節） | ロガーインスタンスの取得。インポート失敗時はファイル内フォールバック実装を使用 | 根拠: [import文] (行番号: 51 / 抜粋: "from core.logger import get_logger") |
-| `core.nas_utils.get_managed_target_directory` | 内部モジュール（オプショナル、try節） | NAS/ローカルのデータ保存ディレクトリの解決・管理。インポート失敗時はファイル内フォールバック実装を使用 | 根拠: [import文] (行番号: 52 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
+| `requests` | サードパーティ | HTTPセッションの生成・GETリクエスト送信、Discord Webhookへの POST送信 | 根拠: [import文] (行番号: 49 / 抜粋: "import requests") |
+| `requests.adapters.HTTPAdapter` | サードパーティ | セッションへのリトライ用アダプタのマウント | 根拠: [import文] (行番号: 50 / 抜粋: "from requests.adapters import HTTPAdapter") |
+| `urllib3.util.retry.Retry` | サードパーティ | HTTPリクエストのリトライポリシー定義（Discord向けは429の`Retry-After`尊重を含む） | 根拠: [import文] (行番号: 51 / 抜粋: "from urllib3.util.retry import Retry") |
+| `bs4.BeautifulSoup`, `NavigableString` | サードパーティ | 取得したHTMLのパース・要素抽出、テキストノード判定（`name_first_text_only`処理） | 根拠: [import文] (行番号: 52 / 抜粋: "from bs4 import BeautifulSoup, NavigableString") |
+| `core.logger.get_logger` | 内部モジュール（オプショナル、try節） | ロガーインスタンスの取得。インポート失敗時はファイル内フォールバック実装を使用 | 根拠: [import文] (行番号: 57 / 抜粋: "from core.logger import get_logger") |
+| `core.nas_utils.get_managed_target_directory` | 内部モジュール（オプショナル、try節） | NAS/ローカルのデータ保存ディレクトリの解決・管理。インポート失敗時はファイル内フォールバック実装を使用 | 根拠: [import文] (行番号: 58 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
 | `core.discord.post_webhook` (`post_discord_webhook`として別名) | 内部モジュール（オプショナル、独立したtry節） | **（Issue #661で追加）** Discord Webhookへの1回のPOST（分割・リトライ・URLマスクの集約先）。インポート失敗時はファイル内フォールバック実装を使用 | 根拠: [import文] (行番号: 123 / 抜粋: "from core.discord import post_webhook as post_discord_webhook") |
-| `core.utils.wait_for_storage_warmup` | 内部モジュール（オプショナル、try節） | ストレージ（NAS等）が書き込み可能になるまでの待機処理。インポート失敗時はファイル内フォールバック実装を使用 | 根拠: [import文] (行番号: 53 / 抜粋: "from core.utils import wait_for_storage_warmup") |
+| `core.utils.wait_for_storage_warmup` | 内部モジュール（オプショナル、try節） | ストレージ（NAS等）が書き込み可能になるまでの待機処理。インポート失敗時はファイル内フォールバック実装を使用 | 根拠: [import文] (行番号: 59 / 抜粋: "from core.utils import wait_for_storage_warmup") |
 
 ### ブラックボックスとなる外部要素
 
@@ -83,7 +83,7 @@
 | `core.logger.get_logger` | インポート成功時に実際に使用される実装（フォーマット、出力先、ログレベル等）の詳細が本ファイルからは不明。フォールバック実装（`logging.getLogger`ベース）のみがこのファイルから確認できる。 | 根拠: [import文とフォールバック定義] (行番号: 51〜62 / 抜粋: "from core.logger import get_logger") |
 | `core.nas_utils.get_managed_target_directory` | インポート成功時の実際の実装（NASマウント確認・自動修復ロジックの詳細）が不明。フォールバック実装は`fallback_dir_str`引数をそのまま返すのみ。 | 根拠: [import文とフォールバック定義] (行番号: 52〜72 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
 | `core.utils.wait_for_storage_warmup` | インポート成功時の実際の実装が不明。フォールバック実装（Exponential Backoffでのテストファイル書き込み確認）のみがこのファイルから確認できる。 | 根拠: [import文とフォールバック定義] (行番号: 53〜111 / 抜粋: "from core.utils import wait_for_storage_warmup") |
-| `MonitorConfig.SITES`に登録された79件の対象Webサイト | 各サイトのHTML構造（CSSセレクタが依拠する実際のマークアップ）は本ファイルのコードからは分からず、外部Webサイトの実物に依存する。 | 根拠: [MonitorConfig.SITESの初期化] (行番号: 305 / 抜粋: "SITES: List[SiteConfig] = _load_sites(SITES_JSON_PATH)") |
+| `MonitorConfig.SITES`に登録された79件の対象Webサイト | 各サイトのHTML構造（CSSセレクタが依拠する実際のマークアップ）は本ファイルのコードからは分からず、外部Webサイトの実物に依存する。 | 根拠: [MonitorConfig.SITESの初期化] (行番号: 339 / 抜粋: "SITES: List[SiteConfig] = _load_sites(SITES_JSON_PATH)") |
 | Discord Webhook API | Webhookエンドポイントの認証・レート制限・レスポンス仕様の詳細は本ファイルのコードからは分からず、Discord側の実装に依存する。 | 根拠: [Webhook POST送信] (行番号: 662, 754, 803 / 抜粋: "post_discord_webhook(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -99,7 +99,7 @@
 
 
 * **戻り値/レスポンス**: `logging.Logger`
-* 根拠: [戻り値ヒント] (行番号: 61 / 抜粋: "-> logging.Logger: ")
+* 根拠: [戻り値ヒント] (行番号: 67 / 抜粋: "-> logging.Logger: ")
 
 
 * **副作用**: なし（`logging.getLogger`は既存ロガーの取得または新規作成）
@@ -223,7 +223,7 @@
 * **戻り値**: `Optional[str]`。`DISCORD_WEBHOOK_NOTIFY`が設定されていればその値、未設定なら`DISCORD_WEBHOOK_URL`の値、いずれも未設定なら`None`。
 * **副作用**: なし（環境変数の読み取りのみ）
 * **エラーハンドリング**: なし
-* 根拠: [解決式] (行番号: 240 / 抜粋: "return os.getenv('DISCORD_WEBHOOK_NOTIFY') or os.getenv('DISCORD_WEBHOOK_URL')")
+* 根拠: [解決式] (行番号: 274 / 抜粋: "return os.getenv('DISCORD_WEBHOOK_NOTIFY') or os.getenv('DISCORD_WEBHOOK_URL')")
 
 
 * **`MASS_DETECTION_WARNING_THRESHOLD: int = 20`について**: `_check_site`が既知キャスト存在下での大量新規検知（known_castsデータ喪失等による誤検知の疑い）を警告ログとして検出する際の閾値。通常運用時の新規検知は数件〜十数件程度であることを踏まえた目安値。
@@ -347,7 +347,7 @@
 
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: `Dict[str, str]`（`asdict(self)`の結果）
-* 根拠: [戻り値] (行番号: 451 / 抜粋: "return asdict(self)")
+* 根拠: [戻り値] (行番号: 488 / 抜粋: "return asdict(self)")
 
 
 * **副作用**: なし
@@ -470,7 +470,7 @@
 ### `DiscordNotifier.notify_daily_summary`
 
 * **（2026-09-06 品質監査で修正）** 送信失敗の ERROR ログは `exc_info` 無しで `{type(e).__name__}: {redact_discord_webhook_url(e)}` を出力する(`notify` と同じ理由)。
-* 根拠: (行番号: 689 / 抜粋: "logger.error(f\"Failed to send daily summary notification: {type(e).__name__}: {redact_discord_webhook_url(e)}\")")
+* 根拠: (行番号: 766 / 抜粋: "logger.error(f\"Failed to send daily summary notification: {type(e).__name__}: {redact_discord_webhook_url(e)}\")")
 
 * **役割**: その日に新規検知したサイト別件数を、個別キャスト通知(embed形式)とは異なるテキスト形式(content)で1件だけDiscordへ通知する。**（Issue #226で修正）** 以前は戻り値が常に`None`で送信成否を呼び出し元へ伝える手段が無く、呼び出し元`_maybe_send_daily_summary`は送信の成否を確認せず無条件に集計をクリアしていたため、Webhook未設定時やDiscordへの送信失敗時にも集計が失われ、同日中の再送もできなくなっていた。送信成否を`bool`で返すよう修正し、呼び出し元が成功時のみ集計をクリアできるようにした。**（本PRで追加）** `self._circuit_breaker`が開いている場合は送信自体を試みずスキップして`False`を返す。
 * 根拠: [メソッド定義とDocstring] (行番号: 706〜768 / 抜粋: "def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> bool:\n        """その日に新規検知したサイト別件数を、テキスト形式でDiscordに通知する。")
@@ -528,7 +528,7 @@
 
 
 * **戻り値/レスポンス**: `__init__`: `None`。`_data_file`: `Path`
-* 根拠: [戻り値] (行番号: 823 / 抜粋: "return self.data_dir / site.get_data_filename()")
+* 根拠: [戻り値] (行番号: 947 / 抜粋: "return self.data_dir / site.get_data_filename()")
 
 
 * **副作用**: なし（`self.data_dir`の保持とパス連結のみ。ディレクトリ作成・NASアクセスは行わない）
@@ -578,7 +578,7 @@
 
 
 * **戻り値/レスポンス**: `int`（削除できたファイル数。`self.data_dir`のファイル一覧取得自体に失敗した場合は`0`）
-* 根拠: [戻り値ヒントとDocstring・各return] (行番号: 832〜833, 841, 853 / 抜粋: "Returns:\n            int: 削除できたファイル数。", "return 0", "return deleted")
+* 根拠: [戻り値ヒントとDocstring・各return] (行番号: 832〜833, 841, 977 / 抜粋: "Returns:\n            int: 削除できたファイル数。", "return 0", "return deleted")
 
 
 * **副作用**: `self.data_dir.glob("*.corrupted-*")`によるディレクトリ走査、条件（`is_file()`かつ`mtime`が閾値より古い）に合致する各ファイルの削除(`path.unlink()`)、1件以上削除した場合は削除件数を含む情報ログ出力。
@@ -608,7 +608,7 @@
 
 
 * **エラーハンドリング**: なし。Docstringに明記の通り、パース失敗時（JSON構文エラー・非UTF-8データ・想定外のフィールド欠落等）は例外を握りつぶさずそのまま呼び出し元へ送出する設計であり、呼び出し元(`load_known_casts`/`save_known_casts`)側が`DataManager._LOAD_ERRORS`等で捕捉してハンドリングする。
-* 根拠: [Docstring] (行番号: 859 / 抜粋: "パース失敗時は例外をそのまま送出する（呼び出し側でハンドリングする前提）。")
+* 根拠: [Docstring] (行番号: 983 / 抜粋: "パース失敗時は例外をそのまま送出する（呼び出し側でハンドリングする前提）。")
 
 
 ### `DataManager.load_known_casts`
@@ -707,7 +707,7 @@
 
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: `Path`
-* 根拠: [戻り値] (行番号: 1012 / 抜粋: "return self.data_dir / 'daily_summary.json'")
+* 根拠: [戻り値] (行番号: 1266 / 抜粋: "return self.data_dir / 'daily_summary.json'")
 
 
 * **副作用**: なし
@@ -823,7 +823,7 @@
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: `self.session`への`_create_robust_session()`結果の代入。
-* 根拠: [属性代入] (行番号: 1350 / 抜粋: "self.session = self._create_robust_session()")
+* 根拠: [属性代入] (行番号: 1697 / 抜粋: "self.session = self._create_robust_session()")
 
 
 * **エラーハンドリング**: なし
@@ -915,7 +915,7 @@
 ### `WebMonitor._parse_html`（D-L12で変更、品質でヘルパーメソッドへ分割）
 
 * **役割**: `BeautifulSoup`オブジェクトから、`selector_container`でキャストのコンテナ要素を抽出し、各コンテナについて`_extract_raw_name`/`_extract_cast_age`/`_extract_cast_link_and_id`/`_extract_cast_image_url`（いずれも品質で追加）を順に呼び出して`CastMember`を構築する。**（品質で変更）** 以前は名前・年齢・リンク/ID・画像の4種の抽出ロジックが170行超の単一`for`ループ本体に直接書かれ、深くネストした条件分岐で読みにくかったため、ループ制御（`skip_unnamed_casts`時の`continue`とログ出力）のみを本メソッドに残し、各フィールドの純粋な抽出処理を上記4つの静的ヘルパーメソッドへ分離した。抽出ロジック自体（ID抽出の複数段フォールバック等）は分離前と完全に同一である。ただし年齢抽出（`_extract_cast_age`）のみ、分離後に**Issue #589**で`.search()`から`.finditer()`ベースへ実装が変更されている（D-L12の妥当性チェック自体の範囲・判定基準は変更なし。詳細は前項参照）。
-* 根拠: [メソッド定義とDocstring] (行番号: 1949〜2013 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:\n        """HTMLスープからキャスト情報を抽出する。")、[ヘルパー呼び出し] (行番号: 1624, 1647〜1649 / 抜粋: "name, name_elem = self._extract_raw_name(div, site)", "age = self._extract_cast_age(name_elem)\n                detail_url, cast_id = self._extract_cast_link_and_id(div, site, name)\n                image_url = self._extract_cast_image_url(div, site)")
+* 根拠: [メソッド定義とDocstring] (行番号: 1949〜2013 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:\n        """HTMLスープからキャスト情報を抽出する。")、[ヘルパー呼び出し] (行番号: 1971, 1647〜1649 / 抜粋: "name, name_elem = self._extract_raw_name(div, site)", "age = self._extract_cast_age(name_elem)\n                detail_url, cast_id = self._extract_cast_link_and_id(div, site, name)\n                image_url = self._extract_cast_image_url(div, site)")
 
 
 * **引数/リクエスト**: `soup: BeautifulSoup`（解析対象のHTML）, `site: SiteConfig`（対象サイトの設定。セレクタ・ベースURLに使用）
@@ -981,7 +981,7 @@
 
 
 * **エラーハンドリング**: なし（本関数自体に例外処理はない。アラート送信失敗時の再試行は`_send_pending_site_failure_alerts`側で「`alerted`を立てない」ことにより実現され、本関数は次回も閾値以上・未アラートとして送信要求を返し続ける）。
-* 根拠: [return] (行番号: 1748 / 抜粋: "return count if (threshold_reached and not alerted) else None")
+* 根拠: [return] (行番号: 2095 / 抜粋: "return count if (threshold_reached and not alerted) else None")
 
 
 ### `_send_pending_site_failure_alerts`（Issue #395で追加）
@@ -1017,7 +1017,7 @@
 
 
 * **戻り値/レスポンス**: `Tuple[Set[CastMember], int]`（保存すべきキャスト集合, 剪定した件数）
-* 根拠: (行番号: 1823 / 抜粋: "return merged, pruned")
+* 根拠: (行番号: 2170 / 抜粋: "return merged, pruned")
 
 
 * **副作用**: なし（入力の集合・要素は変更せず、`replace` で新しい `CastMember` を生成する）
@@ -1370,9 +1370,9 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `core/nas_utils.py` | `get_managed_target_directory`の実際の実装（NASマウント確認・自動修復ロジック）が、フォールバック実装（`fallback_dir_str`をそのまま返すのみ）とどう異なるかを確認する必要があるため。 | 根拠: [import文] (行番号: 52 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
-| 中 | `core/utils.py` | `wait_for_storage_warmup`の実際の実装が、フォールバック実装（Exponential Backoffでのテストファイル書き込み確認）と同等かどうかを確認するため。 | 根拠: [import文] (行番号: 53 / 抜粋: "from core.utils import wait_for_storage_warmup") |
-| 中 | `core/logger.py` | `get_logger`の実際の実装（出力フォーマット、ログレベル、出力先）を確認するため。 | 根拠: [import文] (行番号: 51 / 抜粋: "from core.logger import get_logger") |
+| 高 | `core/nas_utils.py` | `get_managed_target_directory`の実際の実装（NASマウント確認・自動修復ロジック）が、フォールバック実装（`fallback_dir_str`をそのまま返すのみ）とどう異なるかを確認する必要があるため。 | 根拠: [import文] (行番号: 58 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
+| 中 | `core/utils.py` | `wait_for_storage_warmup`の実際の実装が、フォールバック実装（Exponential Backoffでのテストファイル書き込み確認）と同等かどうかを確認するため。 | 根拠: [import文] (行番号: 59 / 抜粋: "from core.utils import wait_for_storage_warmup") |
+| 中 | `core/logger.py` | `get_logger`の実際の実装（出力フォーマット、ログレベル、出力先）を確認するため。 | 根拠: [import文] (行番号: 57 / 抜粋: "from core.logger import get_logger") |
 | 低 | `MonitorConfig.SITES`に登録された各対象Webサイトの実際のHTML構造 | `selector_container`等のCSSセレクタが正しく機能する前提となる実際のマークアップ構造を確認するため（コード外の外部サイト、79件）。 | 根拠: [SiteConfig各エントリのセレクタ定義] (行番号: 211〜214等 / 抜粋: "selector_container='ul.gallist li',") |
 
 ## 8. 保守上の注意点

@@ -64,7 +64,7 @@
 | `os` | 標準ライブラリ | ファイルパスの絶対パス取得やディレクトリ名の取得 | `import os` (行番号: 9 / 抜粋: "import os") |
 | `setup_logging` | 外部関数 | グローバルロガーの初期化 | `from core.logger import setup...` (行番号: 15 / 抜粋: "from core.logger import setup") |
 | `DiscordErrorHandler` | 外部クラス等 | 本ファイル内では使用されていない（外部提供用） | `from core.logger import setup...` (行番号: 15 / 抜粋: "from core.logger import setup") |
-| `get_now_iso`, `get_today_date_str`, `get_display_date` | 外部関数等 | 本ファイル内では使用されていない（外部提供用） | `from core.utils import get_no...` (行番号: 16 / 抜粋: "from core.utils import get_no") |
+| `get_now_iso`, `get_today_date_str`, `get_display_date` | 外部関数等 | 本ファイル内では使用されていない（外部提供用） | `from core.utils import get_no...` (行番号: 12 / 抜粋: "from core.utils import get_no") |
 | `get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async` | 外部関数等 | 本ファイル内では使用されていない（外部提供用） | `from core.database import (` (行番号: 22〜27 / 抜粋: "from core.database import (") |
 | `send_push`, `send_reply`, `get_line_message_quota`, `_send_discord_webhook`, `_send_line_push` | 外部関数等 | 本ファイル内では使用されていない（外部提供用） | `from services.notification_se...` (行番号: 31〜37 / 抜粋: "from services.notification_se") |
 

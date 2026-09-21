@@ -29,8 +29,8 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 | `requests` | 外部 | HTTPリクエスト送信 | 根拠: [インポート宣言] (行番号: 4 / 抜粋: "import requests") |
 | `typing` | 標準 | 型ヒントの提供 | 根拠: [インポート宣言] (行番号: 5 / 抜粋: "from typing import List...") |
 | `linebot.v3.messaging` | 外部 | LINE API v3のクライアント | 根拠: [インポート宣言] (行番号: 7〜16 / 抜粋: "from linebot.v3.messaging...")。**（Issue #未採番で修正）** `send_reply`削除に伴い、以前インポートしていた`ReplyMessageRequest`は未使用となったためインポート自体を削除済み。 |
-| `config` | 外部 | 設定値（トークンやURL）の取得 | 根拠: [インポート宣言] (行番号: 20 / 抜粋: "import config") |
-| `core.logger` | 外部 | ロガーのセットアップ | 根拠: [インポート宣言] (行番号: 21 / 抜粋: "from core.logger import setup_logging") |
+| `config` | 外部 | 設定値（トークンやURL）の取得 | 根拠: [インポート宣言] (行番号: 17 / 抜粋: "import config") |
+| `core.logger` | 外部 | ロガーのセットアップ | 根拠: [インポート宣言] (行番号: 19 / 抜粋: "from core.logger import setup_logging") |
 
 ### ブラックボックスとなる外部要素
 
@@ -100,7 +100,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 
 * **戻り値/レスポンス**: `bool` (HTTPステータスコードが200または204の場合にTrue、それ以外はFalse)
-* 根拠: [戻り値] (行番号: 64, 66, 68 / 抜粋: "if res.status_code not in [200, 204]:", "return False", "return True")
+* 根拠: [戻り値] (行番号: 67, 66, 68 / 抜粋: "if res.status_code not in [200, 204]:", "return False", "return True")
 
 
 * **副作用**: 外部のDiscord Webhook URLへのHTTP POSTリクエストの実行（画像添付時は`files`パラメータで`filename`を指定してアップロード、タイムアウト60秒。テキストのみの場合はJSON送信、タイムアウト10秒）。
@@ -129,7 +129,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 ### `_send_line_push`
 
 * **（2026-09-06 品質監査で修正）** `line_bot_api.push_message(PushMessageRequest(...), _request_timeout=config.LINE_API_REQUEST_TIMEOUT)` として接続/読み取りタイムアウト(既定 `(5.0, 15.0)` 秒)を渡す。line-bot-sdk v3 は未指定だと無期限ブロックになるため。
-* 根拠: (行番号: 174 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
+* 根拠: (行番号: 162 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
 
 * **役割**: LINE Messaging API (v3) を利用し、指定ユーザーIDに対してプッシュメッセージを送信する。辞書型で渡されたメッセージをv3用オブジェクト(`TextMessage`等)に変換する互換性維持処理を含む。
 * 根拠: [関数定義] (行番号: 111〜168 / 抜粋: "def _send_line_push(user_id: str...")
@@ -163,7 +163,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値] (行番号: 163 / 抜粋: "return success")
+* 根拠: [戻り値] (行番号: 222 / 抜粋: "return success")
 
 
 * **副作用**: `_send_discord_webhook`（通常送信時および失敗時のフォールバック送信の計2箇所）および `_send_line_push` の呼び出し。

@@ -29,8 +29,8 @@
 | `re` | 標準ライブラリ | ログ行のタイムスタンプ解析（正規表現） | `import re` (行番号: 3 / 抜粋: "import re") |
 | `datetime` | 標準ライブラリ | 現在日時の取得、日付計算、文字列と日付の相互変換 | `import datetime` (行番号: 4 / 抜粋: "import datetime") |
 | `logging` | 標準ライブラリ | インポートのみ（直接的な利用箇所はファイル内に見当たらない） | `import logging` (行番号: 5 / 抜粋: "import logging") |
-| `typing` | 標準ライブラリ | 型ヒント（List, Dict, Any, Optional。いずれもクラス変数・メソッドの型注釈で使用されている） | `from typing import List, Dict, Any, Optional` (行番号: 6 / 抜粋: "from typing import List, Dict, Any, Optional") |
-| `config` | 自作モジュール | ログディレクトリパス、通知先IDの取得 | `import config` (行番号: 9 / 抜粋: "import config") |
+| `typing` | 標準ライブラリ | 型ヒント（List, Dict, Any, Optional。いずれもクラス変数・メソッドの型注釈で使用されている） | `from typing import List, Dict, Any, Optional` (行番号: 5 / 抜粋: "from typing import List, Dict, Any, Optional") |
+| `config` | 自作モジュール | ログディレクトリパス、通知先IDの取得 | `import config` (行番号: 8 / 抜粋: "import config") |
 | `core.logger.setup_logging` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.logger import setup_logging` (行番号: 9 / 抜粋: "from core.logger import setup_logging") |
 | `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 10 / 抜粋: "from services.notification_service import send_push") |
 
@@ -38,7 +38,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.LOG_DIR` | 外部ファイルで定義されており、具体的なパスや型が提供されていないため。 | `self.log_dir = config.LOG_DIR` (行番号: 41 / 抜粋: "self.log_dir = config.LOG_DIR") |
+| `config.LOG_DIR` | 外部ファイルで定義されており、具体的なパスや型が提供されていないため。 | `self.log_dir = config.LOG_DIR` (行番号: 56 / 抜粋: "self.log_dir = config.LOG_DIR") |
 | `core.logger.setup_logging` | 外部ファイルで定義されており、内部処理や戻り値の型仕様が不明なため。 | `logger = core.logger.setup_logging(...` (行番号: 13 / 抜粋: "logger = setup_logging("log_analyzer")") |
 | `services.notification_service.send_push` | 外部ファイルで定義されており、引数の詳細仕様やエラー挙動が不明なため。 | `services.notification_service.send_push([...` (行番号: 164, 190 / 抜粋: "send_push([{"type": "text", "text": msg}], target="discord", channel="report")") |
 
@@ -204,7 +204,7 @@
 
 
 * **副作用**: 外部ファイル一覧の取得、`logger` を用いたログ出力。
-* 根拠: `glob.glob`呼び出しなど (行番号: 140 / 抜粋: "target_files = glob.glob(os.path.join(self.log_dir, \"*.log\"))")
+* 根拠: `glob.glob`呼び出しなど (行番号: 189 / 抜粋: "target_files = glob.glob(os.path.join(self.log_dir, \"*.log\"))")
 
 
 * **エラーハンドリング**: なし（個別のファイル解析エラーは`_analyze_file`内でハンドリングされる）

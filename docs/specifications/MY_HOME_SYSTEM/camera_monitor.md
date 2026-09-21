@@ -29,42 +29,42 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `os`, `sys`, `time`, `socket`, `subprocess`, `uuid`, `platform` | 標準ライブラリ | システム操作、プロセス実行、パス解決、通信等 | 根拠: `import os` など (行番号: 2〜14 / 抜粋: "import os") |
-| `tempfile` | 標準ライブラリ | `capture_snapshot_from_nvr`のスナップショット一時ファイルパスをOS標準の一時ディレクトリ配下に解決するために使用（#414 C-L7で追加。以前は`/tmp/`を直書きしていた） | 根拠: `import tempfile` (行番号: 8 / 抜粋: "import tempfile") |
-| `threading`（Issue #439で追加） | 標準ライブラリ | `last_motion_detected`辞書の読んでから書くまでを保護する`_motion_lock`、`active_pullpoints`リストへのappend/removeを保護する`_pullpoints_lock`という2つの`threading.Lock`の生成 | 根拠: `import threading` (行番号: 9 / 抜粋: "import threading") |
-| `asyncio` | 標準ライブラリ | 非同期イベントループの実行 | 根拠: `import asyncio` (行番号: 4 / 抜粋: "import asyncio") |
-| `logging` | 標準ライブラリ | ログ出力（直接使用せず外部モジュール経由用） | 根拠: `import logging` (行番号: 7 / 抜粋: "import logging") |
-| `traceback` | 標準ライブラリ | 例外発生時のスタックトレース取得（`process_camera_event`のエラーログに使用） | 根拠: `import traceback` (行番号: 9 / 抜粋: "import traceback") |
-| `signal` | 標準ライブラリ | SIGINT/SIGTERM受信時のクリーンアップハンドラ登録 | 根拠: `import signal` (行番号: 10 / 抜粋: "import signal") |
+| `tempfile` | 標準ライブラリ | `capture_snapshot_from_nvr`のスナップショット一時ファイルパスをOS標準の一時ディレクトリ配下に解決するために使用（#414 C-L7で追加。以前は`/tmp/`を直書きしていた） | 根拠: `import tempfile` (行番号: 10 / 抜粋: "import tempfile") |
+| `threading`（Issue #439で追加） | 標準ライブラリ | `last_motion_detected`辞書の読んでから書くまでを保護する`_motion_lock`、`active_pullpoints`リストへのappend/removeを保護する`_pullpoints_lock`という2つの`threading.Lock`の生成 | 根拠: `import threading` (行番号: 11 / 抜粋: "import threading") |
+| `asyncio` | 標準ライブラリ | 非同期イベントループの実行 | 根拠: `import asyncio` (行番号: 5 / 抜粋: "import asyncio") |
+| `logging` | 標準ライブラリ | ログ出力（直接使用せず外部モジュール経由用） | 根拠: `import logging` (行番号: 4 / 抜粋: "import logging") |
+| `traceback` | 標準ライブラリ | 例外発生時のスタックトレース取得（`process_camera_event`のエラーログに使用） | 根拠: `import traceback` (行番号: 12 / 抜粋: "import traceback") |
+| `signal` | 標準ライブラリ | SIGINT/SIGTERM受信時のクリーンアップハンドラ登録 | 根拠: `import signal` (行番号: 13 / 抜粋: "import signal") |
 | `requests` | 外部ライブラリ | インポートされているが、`requests.auth.HTTPDigestAuth`経由での間接的な利用が主（本体の直接呼び出しはなし） | 根拠: `import requests` (行番号: 12 / 抜粋: "import requests") |
-| `datetime` (dt_class, timedelta) | 標準ライブラリ | 時刻取得、時間差計算、タイムゾーン処理 | 根拠: `from datetime import datetime ...` (行番号: 15 / 抜粋: "from datetime import datetime") |
-| `typing` | 標準ライブラリ | 型アノテーション | 根拠: `from typing import Optional...` (行番号: 16 / 抜粋: "from typing import Optional") |
-| `concurrent.futures.ThreadPoolExecutor` | 標準ライブラリ | 複数カメラ監視プロセスの並行実行 | 根拠: `from concurrent.futures...` (行番号: 17 / 抜粋: "from concurrent.futures import") |
-| `http.client.RemoteDisconnected` | 標準ライブラリ | `monitor_single_camera`の一時的ネットワーク障害の判定に使用する例外クラス | 根拠: `from http.client import RemoteDisconnected` (行番号: 18 / 抜粋: "from http.client import RemoteDisconnected") |
-| `urllib3.exceptions.ProtocolError` | 外部ライブラリ | 同上、一時的ネットワーク障害の判定に使用する例外クラス | 根拠: `from urllib3.exceptions import ProtocolError` (行番号: 19 / 抜粋: "from urllib3.exceptions import ProtocolError") |
-| `requests.auth.HTTPDigestAuth` | 外部ライブラリ | ONVIFサービスのDigest認証 | 根拠: `from requests.auth import...` (行番号: 20 / 抜粋: "from requests.auth import") |
-| `onvif` (ONVIFCamera, ONVIFService, ONVIFError) | 外部ライブラリ | ONVIFカメラとの通信およびイベント購読 | 根拠: `from onvif import ONVIFCamera...` (行番号: 24 / 抜粋: "from onvif import ONVIFCamera") |
-| `zeep.exceptions` | 外部ライブラリ | SOAP通信時の例外捕捉 | 根拠: `import zeep.exceptions` (行番号: 26 / 抜粋: "import zeep.exceptions") |
-| `lxml.etree` | 外部ライブラリ | ONVIFから返却されるXMLのパース | 根拠: `from lxml import etree` (行番号: 27 / 抜粋: "from lxml import etree") |
-| `config` | ローカルモジュール | 設定値（カメラ情報、パス、定数）の取得 | 根拠: `import config` (行番号: 38 / 抜粋: "import config") |
-| `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化 | 根拠: `from core.logger import...` (行番号: 39 / 抜粋: "from core.logger import setup") |
-| `core.database.save_log_generic` | ローカルモジュール | 動体検知時のデータベース保存 | 根拠: `from core.database import...` (行番号: 40 / 抜粋: "from core.database import save_") |
-| `services.notification_service.send_push` | ローカルモジュール | 障害時の管理者へのプッシュ通知送信 | 根拠: `from services.notification_service...` (行番号: 41 / 抜粋: "from services.notification") |
+| `datetime` (dt_class, timedelta) | 標準ライブラリ | 時刻取得、時間差計算、タイムゾーン処理 | 根拠: `from datetime import datetime ...` (行番号: 17 / 抜粋: "from datetime import datetime") |
+| `typing` | 標準ライブラリ | 型アノテーション | 根拠: `from typing import Optional...` (行番号: 18 / 抜粋: "from typing import Optional") |
+| `concurrent.futures.ThreadPoolExecutor` | 標準ライブラリ | 複数カメラ監視プロセスの並行実行 | 根拠: `from concurrent.futures...` (行番号: 19 / 抜粋: "from concurrent.futures import") |
+| `http.client.RemoteDisconnected` | 標準ライブラリ | `monitor_single_camera`の一時的ネットワーク障害の判定に使用する例外クラス | 根拠: `from http.client import RemoteDisconnected` (行番号: 20 / 抜粋: "from http.client import RemoteDisconnected") |
+| `urllib3.exceptions.ProtocolError` | 外部ライブラリ | 同上、一時的ネットワーク障害の判定に使用する例外クラス | 根拠: `from urllib3.exceptions import ProtocolError` (行番号: 21 / 抜粋: "from urllib3.exceptions import ProtocolError") |
+| `requests.auth.HTTPDigestAuth` | 外部ライブラリ | ONVIFサービスのDigest認証 | 根拠: `from requests.auth import...` (行番号: 22 / 抜粋: "from requests.auth import") |
+| `onvif` (ONVIFCamera, ONVIFService, ONVIFError) | 外部ライブラリ | ONVIFカメラとの通信およびイベント購読 | 根拠: `from onvif import ONVIFCamera...` (行番号: 26 / 抜粋: "from onvif import ONVIFCamera") |
+| `zeep.exceptions` | 外部ライブラリ | SOAP通信時の例外捕捉 | 根拠: `import zeep.exceptions` (行番号: 28 / 抜粋: "import zeep.exceptions") |
+| `lxml.etree` | 外部ライブラリ | ONVIFから返却されるXMLのパース | 根拠: `from lxml import etree` (行番号: 29 / 抜粋: "from lxml import etree") |
+| `config` | ローカルモジュール | 設定値（カメラ情報、パス、定数）の取得 | 根拠: `import config` (行番号: 40 / 抜粋: "import config") |
+| `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化 | 根拠: `from core.logger import...` (行番号: 43 / 抜粋: "from core.logger import setup") |
+| `core.database.save_log_generic` | ローカルモジュール | 動体検知時のデータベース保存 | 根拠: `from core.database import...` (行番号: 44 / 抜粋: "from core.database import save_") |
+| `services.notification_service.send_push` | ローカルモジュール | 障害時の管理者へのプッシュ通知送信 | 根拠: `from services.notification_service...` (行番号: 45 / 抜粋: "from services.notification") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` モジュールの詳細 | `CAMERAS`, `ASSETS_DIR`, `MOTION_COOLDOWN_SEC`, `LINE_USER_ID`, `NVR_RECORD_DIR` 等の構造や定義値が本ファイルに存在しないため。 | 根拠: `config.CAMERAS` (行番号: 636 / 抜粋: "for cam in config.CAMERAS") |
-| `save_log_generic` の実装・スキーマ | 関数の内部ロジック、および保存先DBの種類・テーブルスキーマが不明なため。 | 根拠: `save_log_generic("device_records"...` (行番号: 365 / 抜粋: "save_log_generic("device_records") |
-| `send_push` の実装 | プッシュ通知の送信手段（LINE等）や実際の処理内容が不明なため。 | 根拠: `send_push([{"type": "text"...` (行番号: 564 / 抜粋: "send_push(") |
-| NVR（NAS）のディレクトリ構造 | 外部ストレージ上の動画ファイルの配置ルールが環境依存であるため。 | 根拠: `cam_conf.get("nas_folder")` (行番号: 187 / 抜粋: "nas_folder_name = cam_conf.get(") |
+| `config` モジュールの詳細 | `CAMERAS`, `ASSETS_DIR`, `MOTION_COOLDOWN_SEC`, `LINE_USER_ID`, `NVR_RECORD_DIR` 等の構造や定義値が本ファイルに存在しないため。 | 根拠: `config.CAMERAS` (行番号: 916 / 抜粋: "for cam in config.CAMERAS") |
+| `save_log_generic` の実装・スキーマ | 関数の内部ロジック、および保存先DBの種類・テーブルスキーマが不明なため。 | 根拠: `save_log_generic("device_records"...` (行番号: 540 / 抜粋: "save_log_generic("device_records") |
+| `send_push` の実装 | プッシュ通知の送信手段（LINE等）や実際の処理内容が不明なため。 | 根拠: `send_push([{"type": "text"...` (行番号: 815 / 抜粋: "send_push(") |
+| NVR（NAS）のディレクトリ構造 | 外部ストレージ上の動画ファイルの配置ルールが環境依存であるため。 | 根拠: `cam_conf.get("nas_folder")` (行番号: 337 / 抜粋: "nas_folder_name = cam_conf.get(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `_motion_lock` / `_pullpoints_lock`（Issue #439 で追加）
 
 * **役割**: グローバル変数`last_motion_detected`（クールダウン判定の「読んでから書く」区間）と`active_pullpoints`（PullPointの追加・削除・走査）を、カメラごとの監視スレッド間で排他制御するための2つの`threading.Lock`。個々のdict/list操作自体はGILにより原子的だが、複数操作にまたがる区間はそれだけでは保護されないため、明示的なロックで囲む設計になっている。
-* 根拠: `_motion_lock = threading.Lock()` (行番号: 70 / 抜粋: "# #439: last_motion_detected はカメラごとの監視スレッドから並行して読み書きされる。\n# 個々のdict操作自体はGILにより原子的だが、クールダウン判定の「読んでから書く」までを\n# 不可分にするためにこのLockで保護する。\n_motion_lock = threading.Lock()")、`_pullpoints_lock = threading.Lock()` (行番号: 77 / 抜粋: "# #439: active_pullpoints はカメラごとの監視スレッドから並行してappend/removeされる。\n...\n_pullpoints_lock = threading.Lock()")
+* 根拠: `_motion_lock = threading.Lock()` (行番号: 125 / 抜粋: "# #439: last_motion_detected はカメラごとの監視スレッドから並行して読み書きされる。\n# 個々のdict操作自体はGILにより原子的だが、クールダウン判定の「読んでから書く」までを\n# 不可分にするためにこのLockで保護する。\n_motion_lock = threading.Lock()")、`_pullpoints_lock = threading.Lock()` (行番号: 193 / 抜粋: "# #439: active_pullpoints はカメラごとの監視スレッドから並行してappend/removeされる。\n...\n_pullpoints_lock = threading.Lock()")
 
 
 * **引数/リクエスト**: 該当なし
@@ -146,7 +146,7 @@
 
 
 * **副作用**: `_pullpoints_lock`保護下での`active_pullpoints`のスナップショット取得、ONVIFのUnsubscribeリクエスト送信、プロセス終了(`os._exit(0)`)。
-* 根拠: `os._exit` (行番号: 110 / 抜粋: "os._exit(0)")、[スナップショット取得] (行番号: 99〜100)
+* 根拠: `os._exit` (行番号: 230 / 抜粋: "os._exit(0)")、[スナップショット取得] (行番号: 99〜100)
 
 
 * **エラーハンドリング**: Unsubscribe時の例外(`Exception`)は無視(`pass`)される。
@@ -169,7 +169,7 @@
 
 
 * **副作用**: 外部コマンド（ping）の実行。
-* 根拠: `subprocess.run` (行番号: 96 / 抜粋: "subprocess.run(cmd,")
+* 根拠: `subprocess.run` (行番号: 385 / 抜粋: "subprocess.run(cmd,")
 
 
 * **エラーハンドリング**: 実行時のあらゆる例外（タイムアウト含む）を包括的な `except Exception` で捕捉してFalseを返す。
@@ -190,15 +190,15 @@
 
 
 * **引数/リクエスト**: `ip: str` (対象のIPアドレス)
-* 根拠: `perform_emergency_diagnosis` (行番号: 121 / 抜粋: "(ip: str) -> Dict[int, bool]:")
+* 根拠: `perform_emergency_diagnosis` (行番号: 256 / 抜粋: "(ip: str) -> Dict[int, bool]:")
 
 
 * **戻り値/レスポンス**: `Dict[int, bool]` (ポート番号と接続可否の辞書)
-* 根拠: `perform_emergency_diagnosis` (行番号: 121 / 抜粋: "-> Dict[int, bool]:")
+* 根拠: `perform_emergency_diagnosis` (行番号: 256 / 抜粋: "-> Dict[int, bool]:")
 
 
 * **副作用**: TCPソケットの作成と接続試行。
-* 根拠: `sock.connect_ex` (行番号: 129 / 抜粋: "res = sock.connect_ex((ip,")
+* 根拠: `sock.connect_ex` (行番号: 264 / 抜粋: "res = sock.connect_ex((ip,")
 
 
 * **エラーハンドリング**: 接続エラー時は例外をキャッチし、エラー文字列をログ用メッセージに追記する。
@@ -215,7 +215,7 @@
 
 
 * **引数/リクエスト**: `devicemgmt: Any` (ONVIFデバイス管理サービス), `cam_name: str` (カメラ名)
-* 根拠: `check_camera_time` (行番号: 139 / 抜粋: "(devicemgmt: Any, cam_name: str)")
+* 根拠: `check_camera_time` (行番号: 274 / 抜粋: "(devicemgmt: Any, cam_name: str)")
 
 
 * **戻り値/レスポンス**: `bool` (時刻ズレが5分以内の場合、またはチェック失敗時はFail-SoftのためTrue、ズレが大きい場合はFalse)
@@ -223,7 +223,7 @@
 
 
 * **副作用**: `devicemgmt.GetSystemDateAndTime()` によるカメラへのAPIリクエスト。
-* 根拠: `devicemgmt.GetSystemDateAndTime()` (行番号: 142 / 抜粋: "sys_dt = devicemgmt.GetSystemDa")
+* 根拠: `devicemgmt.GetSystemDateAndTime()` (行番号: 277 / 抜粋: "sys_dt = devicemgmt.GetSystemDa")
 
 
 * **エラーハンドリング**: XML/Dateパースエラーなどの例外が発生した場合はエラーログを出力し、True（Fail-Soft）を返す。
@@ -249,19 +249,19 @@
 * **（Issue #405 で修正）** NVR ディレクトリは `config.NVR_RECORD_DIR` を直接参照する（以前の `getattr(config, ..., os.getenv("NVR_RECORD_DIR", ...))` は config が常に定義するため到達不能なフォールバックで、`.env.example` 整合テストの死角だった）。
 * 根拠: `nvr_base_dir = config.NVR_RECORD_DIR` (行番号: 186)
 * **[修正済み] #414 C-L7: スナップショット一時ファイルパスを`tempfile.gettempdir()`経由で解決**: `output_tmp`は以前`f"/tmp/snapshot_{cam_conf['name']}_{uuid.uuid4().hex}.jpg"`と`/tmp`を直書きしていたが、`os.path.join(tempfile.gettempdir(), f"snapshot_{...}.jpg")`に変更した。実行環境のOS標準一時ディレクトリ（Linuxでは通常`/tmp`のまま、`TMPDIR`環境変数があればそちらに追従）に解決される。テスト側(`tests/test_camera_monitor_low_priority.py`)が並列実行時に実`/tmp`をglobして他プロセスの残骸と衝突する偽陽性を避けられるよう、`tempfile.gettempdir`をmonkeypatchして隔離できるようにするための変更。
-* 根拠: `output_tmp = os.path.join(tempfile.gettempdir(), ...)` (行番号: 205 / 抜粋: "output_tmp = os.path.join(tempfile.gettempdir()")
+* 根拠: `output_tmp = os.path.join(tempfile.gettempdir(), ...)` (行番号: 360 / 抜粋: "output_tmp = os.path.join(tempfile.gettempdir()")
 
 
 * **引数/リクエスト**: `cam_conf: dict` (カメラ設定), `target_time: dt_class = None` (対象時刻・現在未使用)
-* 根拠: `capture_snapshot_from_nvr` (行番号: 171 / 抜粋: "(cam_conf: dict, target_time: dt")
+* 根拠: `capture_snapshot_from_nvr` (行番号: 321 / 抜粋: "(cam_conf: dict, target_time: dt")
 
 
 * **戻り値/レスポンス**: `Optional[bytes]` (画像バイト列、または失敗時はNone)
-* 根拠: `capture_snapshot_from_nvr` (行番号: 171 / 抜粋: "-> Optional[bytes]:")
+* 根拠: `capture_snapshot_from_nvr` (行番号: 321 / 抜粋: "-> Optional[bytes]:")
 
 
 * **副作用**: NASフォルダの走査(`glob.glob`)、一時ファイルの作成(`uuid`使用、`tempfile.gettempdir()`配下)と削除、外部コマンド(`ffmpeg`)の実行。
-* 根拠: `subprocess.run(cmd` (行番号: 223 / 抜粋: "subprocess.run(cmd,")
+* 根拠: `subprocess.run(cmd` (行番号: 385 / 抜粋: "subprocess.run(cmd,")
 
 
 * **（#411 S-L10で修正）** 最新mp4ファイルの検索は以前 `os.path.join(nas_folder, "**", "*.mp4")` を `recursive=True` で走査しており、動体検知のたびにNVRの保存期間全体（数十日分）をCIFS越しにglobしていた。`camera_service.py` の録画ファイル命名規則（`{YYYYMMDD}_*.mp4`）に合わせ、当日分の日付プレフィックスに絞った非再帰globに変更した。
@@ -269,7 +269,7 @@
 
 
 * **エラーハンドリング**: FFmpegのタイムアウトや実行エラー(`CalledProcessError`, `Exception`)をキャッチし、`NVR_SNAPSHOT_ATTEMPTS` の要素数(既定3回)まで Exponential Backoff によるリトライを行う(各試行の対象ファイルとシーク位置は上記 Issue #703 の項を参照)。加えて、リトライループ全体を外側の`try`/`finally`で包み、成功・タイムアウト・リトライ失敗・予期しない例外のいずれの終了経路でも`output_tmp`に残った一時ファイルを`os.remove`で確実に削除する（削除自体が失敗した場合の`OSError`は無視する）。以前は成功時のみ`os.remove`が呼ばれておりタイムアウト等の異常終了時は一時ディレクトリに`snapshot_*.jpg`の残骸が蓄積し続けていたが、この`finally`ブロックにより解消されている。
-* 根拠: `except subprocess.TimeoutExpired` (行番号: 233 / 抜粋: "except subprocess.TimeoutExpired:")、`finally` (行番号: 248 / 抜粋: "finally:")、`os.remove(output_tmp)` (行番号: 254 / 抜粋: "os.remove(output_tmp)")、`except OSError` (行番号: 255 / 抜粋: "except OSError:")
+* 根拠: `except subprocess.TimeoutExpired` (行番号: 392 / 抜粋: "except subprocess.TimeoutExpired:")、`finally` (行番号: 248 / 抜粋: "finally:")、`os.remove(output_tmp)` (行番号: 421 / 抜粋: "os.remove(output_tmp)")、`except OSError` (行番号: 255 / 抜粋: "except OSError:")
 
 
 * **（#411 S-L10で修正）** リトライ間のExponential Backoff (`time.sleep(2 ** attempt)`) は以前、最終試行(3回目)の失敗後にも実行されており、結果が確定した(呼出元を待たせるだけの)状態のまま最大8秒の無駄な待機が発生していた。次のリトライが残っている場合のみsleepするよう変更した。
@@ -284,15 +284,15 @@
 
 
 * **引数/リクエスト**: `cam_name: str` (カメラ名), `event_type: str = "motion"` (イベント種別)
-* 根拠: `save_image_from_stream` (行番号: 250 / 抜粋: "(cam_name: str, event_type:")
+* 根拠: `save_image_from_stream` (行番号: 426 / 抜粋: "(cam_name: str, event_type:")
 
 
 * **戻り値/レスポンス**: `Optional[str]` (保存されたファイルのパス、失敗時はNone)
-* 根拠: `save_image_from_stream` (行番号: 250 / 抜粋: "-> Optional[str]:")
+* 根拠: `save_image_from_stream` (行番号: 426 / 抜粋: "-> Optional[str]:")
 
 
 * **副作用**: ファイルシステムへの画像ファイル書き込み。
-* 根拠: `f.write(image_data)` (行番号: 272 / 抜粋: "f.write(image_data)")
+* 根拠: `f.write(image_data)` (行番号: 448 / 抜粋: "f.write(image_data)")
 
 
 * **エラーハンドリング**: ファイル保存時の例外をキャッチし、ログ出力してNoneを返す。
@@ -307,7 +307,7 @@
 
 
 * **引数/リクエスト**: `service_obj: Any` (対象オブジェクト)
-* 根拠: `force_close_session` (行番号: 278 / 抜粋: "(service_obj: Any) -> None:")
+* 根拠: `force_close_session` (行番号: 454 / 抜粋: "(service_obj: Any) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -330,7 +330,7 @@
 
 
 * **引数/リクエスト**: `msg: Any` (ONVIFイベントメッセージ), `cam_conf: Dict[str, Any]` (カメラ設定)
-* 根拠: `process_camera_event` (行番号: 303 / 抜粋: "(msg: Any, cam_conf: Dict")
+* 根拠: `process_camera_event` (行番号: 479 / 抜粋: "(msg: Any, cam_conf: Dict")
 
 
 * **戻り値/レスポンス**: `None`
@@ -339,7 +339,7 @@
 
 * **副作用**: DB保存(`save_log_generic`)、画像取得・保存(`save_image_from_stream`)、グローバル変数 `last_motion_detected` の更新。
 * **（Issue #439 で修正）** クールダウン判定(`last_motion_detected.get(cam_id, 0.0)`の読み取りと、クールダウン未経過でない場合の`last_motion_detected[cam_id] = current_time`への書き込み)は、以前はロックなしで行われていた（カメラごとの監視スレッドが並行して同じ辞書にアクセスしうる）。この「読んでから書く」区間全体を`_motion_lock`で囲むよう修正された。
-* 根拠: `save_log_generic` (行番号: 365 / 抜粋: "save_log_generic("device_record")、[クールダウン判定のロック保護] (行番号: 383〜390 / 抜粋: "current_time: float = time.time()\n        with _motion_lock:\n            last_detected_time: float = last_motion_detected.get(cam_id, 0.0)\n            if current_time - last_detected_time < MOTION_COOLDOWN_SEC:\n                logger.debug(...)\n                return\n            last_motion_detected[cam_id] = current_time")
+* 根拠: `save_log_generic` (行番号: 540 / 抜粋: "save_log_generic("device_record")、[クールダウン判定のロック保護] (行番号: 383〜390 / 抜粋: "current_time: float = time.time()\n        with _motion_lock:\n            last_detected_time: float = last_motion_detected.get(cam_id, 0.0)\n            if current_time - last_detected_time < MOTION_COOLDOWN_SEC:\n                logger.debug(...)\n                return\n            last_motion_detected[cam_id] = current_time")
 
 
 * **エラーハンドリング**: パースエラー等の例外をキャッチして警告ログを出力し、`finally` ブロックで `del msg` を実行しリソースを解放する。
@@ -398,11 +398,11 @@
 
 
 * **副作用**: 複数スレッドの起動。
-* 根拠: `ThreadPoolExecutor` (行番号: 635 / 抜粋: "with ThreadPoolExecutor")
+* 根拠: `ThreadPoolExecutor` (行番号: 915 / 抜粋: "with ThreadPoolExecutor")
 
 
 * **エラーハンドリング**: WSDLが見つからない場合はエラーログを出力して終了。
-* 根拠: `if not WSDL_DIR:` (行番号: 627 / 抜粋: "if not WSDL_DIR: return logger")
+* 根拠: `if not WSDL_DIR:` (行番号: 907 / 抜粋: "if not WSDL_DIR: return logger")
 
 
 * **（#411 S-L3で修正）** `config.CAMERAS` が空（`devices.json` 未配置等）の場合、以前は `ThreadPoolExecutor(max_workers=len(config.CAMERAS))` が `max_workers=0` となり `ValueError` を送出してプロセスが即座に落ちていた。カメラが1台も無い場合は警告ログを出して何もせず正常終了し、カメラが存在する場合も `max_workers` を `max(1, ...)` で下限保護する。
@@ -525,9 +525,9 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | `CAMERAS`（IP、ポート、認証情報等）、`MOTION_COOLDOWN_SEC`、`NVR_RECORD_DIR`等の重要な環境変数が定義されており、監視対象や動作閾値の全容を把握するため。 | 根拠: `config.CAMERAS` (行番号: 622 / 抜粋: "config.CAMERAS"), `config.MOTION_COOLDOWN_SEC` (行番号: 63 / 抜粋: "getattr(config, 'MOTION_COOLD") |
-| 中 | `core/database.py` | `save_log_generic` 関数の引数（`columns`, `values`）は判明しているが、実際にどのデータベース（SQLite/MySQL等）にどのようなスキーマで書き込まれるか確認するため。 | 根拠: `save_log_generic("device_records"` (行番号: 365 / 抜粋: "save_log_generic("device_record") |
-| 中 | `services/notification_service.py` | 障害発生時のアラート仕様（送信先プラットフォームが引数の `discord` か `LINE_USER_ID` かなど）の動作を特定するため。 | 根拠: `send_push` (行番号: 564 / 抜粋: "send_push(") |
+| 高 | `config.py` | `CAMERAS`（IP、ポート、認証情報等）、`MOTION_COOLDOWN_SEC`、`NVR_RECORD_DIR`等の重要な環境変数が定義されており、監視対象や動作閾値の全容を把握するため。 | 根拠: `config.CAMERAS` (行番号: 622 / 抜粋: "config.CAMERAS"), `config.MOTION_COOLDOWN_SEC` (行番号: 121 / 抜粋: "getattr(config, 'MOTION_COOLD") |
+| 中 | `core/database.py` | `save_log_generic` 関数の引数（`columns`, `values`）は判明しているが、実際にどのデータベース（SQLite/MySQL等）にどのようなスキーマで書き込まれるか確認するため。 | 根拠: `save_log_generic("device_records"` (行番号: 540 / 抜粋: "save_log_generic("device_record") |
+| 中 | `services/notification_service.py` | 障害発生時のアラート仕様（送信先プラットフォームが引数の `discord` か `LINE_USER_ID` かなど）の動作を特定するため。 | 根拠: `send_push` (行番号: 815 / 抜粋: "send_push(") |
 
 ## 8. 保守上の注意点
 

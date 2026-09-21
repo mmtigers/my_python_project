@@ -79,7 +79,7 @@
 
 
 * **戻り値/レスポンス**: `sqlite3.Cursor` (yieldにより返却)
-* 根拠: `yield conn.cursor()` (行番号: 46 / 抜粋: "yield conn.cursor()")
+* 根拠: `yield conn.cursor()` (行番号: 52 / 抜粋: "yield conn.cursor()")
 
 
 * **副作用**: DB接続の確立、`PRAGMA journal_mode=WAL;` および `PRAGMA foreign_keys=ON;` の実行、指定時のコミット、with本体で例外発生時のロールバック、`finally`での必ずの接続クローズ。
@@ -98,7 +98,7 @@
 
 
 * **引数/リクエスト**: `timeout` (float, 既定 `RO_CONNECT_TIMEOUT_SEC` = 30.0): ロック待ちの上限秒数。`db_path` (Optional[str], 既定 `None`): 接続先DBファイル。`None`なら`config.SQLITE_DB_PATH`。
-* 根拠: `target = db_path if db_path is not None else config.SQLITE_DB_PATH` (行番号: 75 / 抜粋: "target = db_path if db_path is not None else config.SQLITE_DB_PATH")
+* 根拠: `target = db_path if db_path is not None else config.SQLITE_DB_PATH` (行番号: 81 / 抜粋: "target = db_path if db_path is not None else config.SQLITE_DB_PATH")
 
 
 * **戻り値/レスポンス**: `sqlite3.Connection`（`with`ブロックへ`yield`される）。
@@ -116,7 +116,7 @@
 ### `execute_read_query`
 
 * **役割**: 読み取り専用モード (`?mode=ro`) で指定されたSELECTクエリを実行し、結果をJSON形式の文字列で返す。データが存在しない場合は専用のメッセージを返す。**（Issue #178で修正）** 以前は`conn.close()`が正常経路にしか無かったため、`cursor.execute()`が例外を送出する（不正なSQL等）たびに接続がクローズされずGC任せで残り、長期稼働プロセスでのfd/接続リークを招いていた。**（Issue #661で修正）** 接続の確立とクローズは`get_ro_connection()`へ委譲する形に整理され、この関数内で`sqlite3.connect`を直接呼ぶことはなくなった。あわせて`timeout`が既定の5秒から30秒になっている。
-* 根拠: `def execute_read_query(query: str, params: tuple = ()) -> str:` (行番号: 90 / 抜粋: "def execute_read_query(query: str, params: tuple = ()) -> str:")、`with get_ro_connection() as conn:` (行番号: 92 / 抜粋: "with get_ro_connection() as conn:")
+* 根拠: `def execute_read_query(query: str, params: tuple = ()) -> str:` (行番号: 90 / 抜粋: "def execute_read_query(query: str, params: tuple = ()) -> str:")、`with get_ro_connection() as conn:` (行番号: 98 / 抜粋: "with get_ro_connection() as conn:")
 
 
 * **引数/リクエスト**:
@@ -126,12 +126,12 @@
 
 
 * **戻り値/レスポンス**: `str`: JSON形式の検索結果文字列、該当データなしメッセージ、またはエラーメッセージ。
-* 根拠: `if not rows: return "該当するデータはありませんでした。"` (行番号: 97 / 抜粋: "return "該当するデータはありませんでした。"")
-* 根拠: `return json.dumps(...)` (行番号: 98 / 抜粋: "return json.dumps([dict(r) for r in rows]")
+* 根拠: `if not rows: return "該当するデータはありませんでした。"` (行番号: 103 / 抜粋: "return "該当するデータはありませんでした。"")
+* 根拠: `return json.dumps(...)` (行番号: 104 / 抜粋: "return json.dumps([dict(r) for r in rows]")
 
 
 * **副作用**: データベースからのデータ読み取り。接続の後始末は`get_ro_connection`の`finally`が担うため、正常終了・例外終了のいずれの経路でも必ずクローズされる。
-* 根拠: `cursor.execute(query, params)` (行番号: 94 / 抜粋: "cursor.execute(query, params)")
+* 根拠: `cursor.execute(query, params)` (行番号: 100 / 抜粋: "cursor.execute(query, params)")
 
 
 * **エラーハンドリング**: 例外 (`Exception`) をキャッチし、例外を送出せずにエラーメッセージの文字列として返す。
@@ -158,7 +158,7 @@
 
 
 * **副作用**: DBへのINSERT実行（データ書き込み）。ただし識別子検証に失敗した場合はDBアクセス自体を行わない。
-* 根拠: `cur.execute(sql, values_list)` (行番号: 87 / 抜粋: "cur.execute(sql, values_list)")
+* 根拠: `cur.execute(sql, values_list)` (行番号: 118 / 抜粋: "cur.execute(sql, values_list)")
 
 
 * **エラーハンドリング**: まず`table`/`columns_list`を`_SQL_IDENTIFIER_RE`で検証し、不正な場合はDBアクセス前にエラーログを出力して`False`を返す（B3）。検証を通過した後は`get_db_cursor`のwith文全体を囲む`try/except Exception`で、接続エラー・SQL実行エラー・`get_db_cursor`が再送出する例外のいずれもキャッチし、ロガーにエラーを出力して `False` を返す。
@@ -182,7 +182,7 @@
 
 
 * **副作用**: 非同期スレッドプールでの `save_log_generic` の実行。
-* 根拠: `loop.run_in_executor(None, save_log_generic, ...)` (行番号: 96 / 抜粋: "loop.run_in_executor(None, save_log_generic")
+* 根拠: `loop.run_in_executor(None, save_log_generic, ...)` (行番号: 127 / 抜粋: "loop.run_in_executor(None, save_log_generic")
 
 
 * **エラーハンドリング**: なし（内部で呼び出す `save_log_generic` のエラーハンドリングに依存）。
@@ -229,11 +229,11 @@
 
 
 * **戻り値/レスポンス**: `bool`: `save_logs_batch_generic` の実行結果。
-* 根拠: (行番号: 129 / 抜粋: "return await loop.run_in_executor(None, save_logs_batch_generic, table, columns_list, values_list)")
+* 根拠: (行番号: 160 / 抜粋: "return await loop.run_in_executor(None, save_logs_batch_generic, table, columns_list, values_list)")
 
 
 * **副作用**: 非同期スレッドプールでの `save_logs_batch_generic` の実行。
-* 根拠: (行番号: 129 / 抜粋: "loop.run_in_executor(None, save_logs_batch_generic")
+* 根拠: (行番号: 160 / 抜粋: "loop.run_in_executor(None, save_logs_batch_generic")
 
 
 * **エラーハンドリング**: なし（内部で呼び出す `save_logs_batch_generic` のエラーハンドリングに依存）。

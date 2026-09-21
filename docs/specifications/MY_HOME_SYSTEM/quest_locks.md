@@ -68,7 +68,7 @@ Issue #550で`services/quest_service.py`（1572行・5クラス）が`services/q
 ### `ROLE_ADULT` / `ROLE_CHILD` (モジュールレベル定数)
 
 * **役割**: `quest_users.role`カラムに格納される値のうち、親権限(`role_adult`)と子供権限(`role_child`)を表す文字列定数。
-* 根拠: `ROLE_ADULT = 'role_adult'` / `ROLE_CHILD = 'role_child'` (行番号: 35〜36)、コメント (行番号: 34 / 抜粋: "quest_users.role の値 (親権限判定はこの2値のみを唯一の判定基準とする)")
+* 根拠: `ROLE_ADULT = 'role_adult'` / `ROLE_CHILD = 'role_child'` (行番号: 35〜36)、コメント (行番号: 33 / 抜粋: "quest_users.role の値 (親権限判定はこの2値のみを唯一の判定基準とする)")
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし
 
 ### `_require_adult`（Issue #739 / AUDIT-009 で追加）

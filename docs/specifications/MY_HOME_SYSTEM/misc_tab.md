@@ -20,11 +20,11 @@
 * Streamlitダッシュボードの「電車遅延」「防犯カメラ」「駐輪場」タブを描画するモジュール。公開関数`render_traffic`, `render_photos`, `render_bicycle`と、内部ヘルパー関数`_render_route_search`で構成される。
 * 根拠: `def render_traffic():`, `def render_photos(df_security_log: pd.DataFrame):`, `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 20, 98, 131 / 抜粋: "def render_traffic():")
 * `render_traffic`は、JR宝塚線・神戸線の運行状況を`view_common.load_jr_traffic_status_cached()`（**スマホ対応で変更**: 以前は`train_service.get_jr_traffic_status()`を直接呼んでいた。同じ1回の描画でホームタブのサマリーからも呼ばれるため、素で呼ぶとHTTP取得が2回走っていた）から取得し、遅延中(赤)・情報取得不可(グレー)・平常運転(緑)の3状態に応じて背景色を変えたHTMLカードで表示する。取得不可を平常運転と同じ緑色で表示しないための区別であり、さらに現在時刻に応じて出勤ルート（4〜11時台）または帰宅ルート（それ以外）の経路検索結果を表示する。**（B4で修正）** カード内に埋め込む運行状況の`status`/`detail`文字列は`html.escape()`を通してから埋め込むようになった。
-* 根拠: `jr_status = train_service.get_jr_traffic_status()` (行番号: 17 / 抜粋: "jr_status = train_service.get_jr_traffic_status()"), `elif line.get("is_unavailable"):` (行番号: 25 / 抜粋: "elif line.get(\"is_unavailable\"):"), `if COMMUTE_ROUTE_START_HOUR <= current_hour < COMMUTE_ROUTE_END_HOUR:` (行番号: 51 / 抜粋: "if COMMUTE_ROUTE_START_HOUR <= current_hour < COMMUTE_ROUTE_END_HOUR:")（Issue #451でリテラル`4`/`12`からモジュールレベル定数へ変更、値は不変）、エスケープ (行番号: 34〜35 / 抜粋: "{html.escape(line['status'])}", "{html.escape(line['detail'])}")
+* 根拠: `jr_status = train_service.get_jr_traffic_status()` (行番号: 17 / 抜粋: "jr_status = train_service.get_jr_traffic_status()"), `elif line.get("is_unavailable"):` (行番号: 32 / 抜粋: "elif line.get(\"is_unavailable\"):"), `if COMMUTE_ROUTE_START_HOUR <= current_hour < COMMUTE_ROUTE_END_HOUR:` (行番号: 53 / 抜粋: "if COMMUTE_ROUTE_START_HOUR <= current_hour < COMMUTE_ROUTE_END_HOUR:")（Issue #451でリテラル`4`/`12`からモジュールレベル定数へ変更、値は不変）、エスケープ (行番号: 34〜35 / 抜粋: "{html.escape(line['status'])}", "{html.escape(line['detail'])}")
 * `_render_route_search`は、指定された出発駅・到着駅間のルート情報を`view_common.load_route_info_cached`（**スマホ対応で変更**: 以前は`train_service.get_route_info`を直接呼んでいた）から取得し、乗換ステップをアイコン（⬇️/🔄）に応じたHTMLに整形して表示する。**（B4で修正）** 乗換ステップの各文字列、および`departure`/`arrival`/`duration`/`cost`/`transfer`の各フィールドは、いずれも`html.escape()`を通してからHTMLに埋め込まれるようになった。
 * 根拠: `data = view_common.load_route_info_cached(from_st, to_st)` (行番号: 64 / 抜粋: "data = view_common.load_route_info_cached(from_st, to_st)")、エスケープ (行番号: 63, 72, 74, 77〜78, 81 / 抜粋: "d_esc = html.escape(d)", "{html.escape(data['departure'])}")
 * `render_photos`は、`config.ASSETS_DIR`配下の`snapshots`ディレクトリからJPEG画像を新しい順に取得しギャラリー表示（直近4枚+展開エリアで過去分）した上、渡された`df_security_log`（防犯ログ）を表形式で表示する。
-* 根拠: `img_dir = os.path.join(config.ASSETS_DIR, "snapshots")` (行番号: 93 / 抜粋: "img_dir = os.path.join(config.ASSETS_DIR, \"snapshots\")")
+* 根拠: `img_dir = os.path.join(config.ASSETS_DIR, "snapshots")` (行番号: 100 / 抜粋: "img_dir = os.path.join(config.ASSETS_DIR, \"snapshots\")")
 * `render_bicycle`は、渡された`df_bicycle`（駐輪場データ）を特定3エリアに絞り込み、待機数の時系列推移を折れ線グラフで表示した上、各エリアの最新状況を表形式で表示する。
 * 根拠: `target_areas = [...]` および `fig = px.line(df_target, ...)` (行番号: 123〜127, 134 / 抜粋: "target_areas = [")
 
@@ -52,14 +52,14 @@
 | --- | --- | --- |
 | `view_common.load_jr_traffic_status_cached()` | `services.train_service`の実装が提供されておらず、返却される辞書のキー（`宝塚線`, `神戸線`以下の`is_delay`, `is_unavailable`, `status`, `detail`）の取得元（スクレイピング/API等）が不明。 | `jr_status = train_service.get_jr_traffic_status()` (行番号: 22 / 抜粋: "jr_status = view_common.load_jr_traffic_status_cached()") |
 | `view_common.load_route_info_cached()` | ルート検索データの取得元・`summary`, `details`, `departure`, `arrival`, `duration`, `cost`, `transfer`, `url`各フィールドの生成ロジックが不明。 | `data = view_common.load_route_info_cached(from_st, to_st)` (行番号: 64 / 抜粋: "data = view_common.load_route_info_cached(from_st, to_st)") |
-| `config.ASSETS_DIR` | `config`モジュールの実装が提供されておらず、画像アセットのベースディレクトリの実際のパスが不明。 | `img_dir = os.path.join(config.ASSETS_DIR, "snapshots")` (行番号: 93 / 抜粋: "img_dir = os.path.join(config.ASSETS_DIR, \"snapshots\")") |
+| `config.ASSETS_DIR` | `config`モジュールの実装が提供されておらず、画像アセットのベースディレクトリの実際のパスが不明。 | `img_dir = os.path.join(config.ASSETS_DIR, "snapshots")` (行番号: 100 / 抜粋: "img_dir = os.path.join(config.ASSETS_DIR, \"snapshots\")") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `render_traffic`
 
 * **役割**: JR宝塚線・神戸線の運行状況を、遅延中(赤)・情報取得不可(グレー)・平常運転(緑)の3状態に応じた背景色のカードで表示し、さらに現在時刻に応じた通勤/帰宅ルートの検索結果を表示する。**（B4で修正）** カードに埋め込む`line['status']`/`line['detail']`（JR運行情報APIのスクレイピング結果由来）は`html.escape()`を通してから埋め込む。
-* 根拠: `def render_traffic():` (行番号: 20〜59 / 抜粋: "def render_traffic():"), `elif line.get("is_unavailable"):` (行番号: 25 / 抜粋: "elif line.get(\"is_unavailable\"):")、エスケープ (行番号: 34〜35 / 抜粋: "<h2 style=\"margin:5px 0; color:{status_color};\">{html.escape(line['status'])}</h2>\n                <p style=\"margin:0;\">{html.escape(line['detail'])}</p>")
+* 根拠: `def render_traffic():` (行番号: 20〜59 / 抜粋: "def render_traffic():"), `elif line.get("is_unavailable"):` (行番号: 32 / 抜粋: "elif line.get(\"is_unavailable\"):")、エスケープ (行番号: 34〜35 / 抜粋: "<h2 style=\"margin:5px 0; color:{status_color};\">{html.escape(line['status'])}</h2>\n                <p style=\"margin:0;\">{html.escape(line['detail'])}</p>")
 
 
 * **引数/リクエスト**: なし
@@ -117,7 +117,7 @@
 
 
 * **副作用**: `glob.glob`によるローカルファイルシステムの走査（画像一覧取得）。`st.columns`, `st.image`, `st.info`、`view_common.lazy_section`、`view_common.render_table`によるUI描画。**（スマホ対応で変更）** 「📂 過去の写真」は`st.expander`から`lazy_section`（`st.toggle`ベース）になった — `st.expander`は折りたたまれていても中身を実行するため、閉じたままでも過去16枚の画像読み込みが毎回走っていた。直近4枚と過去分はそれぞれ`st.container(key="camera_gallery"/"camera_gallery_past")`で囲み、スマホ幅でも2列で並ぶようCSS側から拾えるようにしている。
-* 根拠: `images = sorted(glob.glob(os.path.join(img_dir, "*.jpg")), reverse=True)` (行番号: 94 / 抜粋: "images = sorted(glob.glob(os.path.join(img_dir, \"*.jpg\")), reverse=True)")
+* 根拠: `images = sorted(glob.glob(os.path.join(img_dir, "*.jpg")), reverse=True)` (行番号: 101 / 抜粋: "images = sorted(glob.glob(os.path.join(img_dir, \"*.jpg\")), reverse=True)")
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない。画像・ログが空の場合は`st.info`でメッセージ表示するのみ）
@@ -250,7 +250,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `services/train_service.py` | `get_jr_traffic_status`, `get_route_info`が返す辞書の正確なスキーマとデータ取得方法（外部APIかスクレイピングか）を把握するため。 | `data = view_common.load_route_info_cached(from_st, to_st)` (行番号: 64 / 抜粋: "data = view_common.load_route_info_cached(from_st, to_st)") |
-| 中 | `config.py` | `ASSETS_DIR`の実際のパスを把握し、スナップショット画像の保存構造を確認するため。 | `img_dir = os.path.join(config.ASSETS_DIR, "snapshots")` (行番号: 93 / 抜粋: "img_dir = os.path.join(config.ASSETS_DIR, \"snapshots\")") |
+| 中 | `config.py` | `ASSETS_DIR`の実際のパスを把握し、スナップショット画像の保存構造を確認するため。 | `img_dir = os.path.join(config.ASSETS_DIR, "snapshots")` (行番号: 100 / 抜粋: "img_dir = os.path.join(config.ASSETS_DIR, \"snapshots\")") |
 | 低 | `views/dashboard/common.py` | インポートされているが未使用の`render_status_card_html`が本来使われる予定だったか、削除漏れかを確認するため。 | `from .common import render_status_card_html` (行番号: 13 / 抜粋: "from .common import render_status_card_html") |
 
 ## 8. 保守上の注意点

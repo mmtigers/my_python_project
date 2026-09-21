@@ -29,20 +29,20 @@
 | `core.logger.setup_logging` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.logger import setup_logging` (行番号: 2 / 抜粋: "from core.logger import setup_logging") |
 | `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 3 / 抜粋: "from core.database import get_db_cursor") |
 | `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 4 / 抜粋: "from services.notification_service import send_push") |
-| `datetime` | 標準ライブラリ | 日付や時間の取得、計算 | 根拠: `import datetime` (行番号: 3 / 抜粋: "import datetime") |
-| `pytz` | 外部ライブラリ | タイムゾーン（"Asia/Tokyo"）の指定 | 根拠: `import pytz` (行番号: 4 / 抜粋: "import pytz") |
-| `sys` | 標準ライブラリ | コマンドライン引数（`sys.argv`）の取得 | 根拠: `import sys` (行番号: 5 / 抜粋: "import sys") |
-| `typing` | 標準ライブラリ | 型ヒント（`Dict`, `Optional`, `Any`）の指定 | 根拠: `from typing import Dict, Optional, Any` (行番号: 6 / 抜粋: "from typing import Dict, Option") |
+| `datetime` | 標準ライブラリ | 日付や時間の取得、計算 | 根拠: `import datetime` (行番号: 6 / 抜粋: "import datetime") |
+| `pytz` | 外部ライブラリ | タイムゾーン（"Asia/Tokyo"）の指定 | 根拠: `import pytz` (行番号: 8 / 抜粋: "import pytz") |
+| `sys` | 標準ライブラリ | コマンドライン引数（`sys.argv`）の取得 | 根拠: `import sys` (行番号: 9 / 抜粋: "import sys") |
+| `typing` | 標準ライブラリ | 型ヒント（`Dict`, `Optional`, `Any`）の指定 | 根拠: `from typing import Dict, Optional, Any` (行番号: 10 / 抜粋: "from typing import Dict, Option") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` 内の各種定数 | `SQLITE_TABLE_FOOD`, `SQLITE_TABLE_CAR`, `SQLITE_TABLE_CHILD`, `LINE_USER_ID`, `SQLITE_TABLE_POWER_USAGE`（未定義時のフォールバックあり）などの具体的な値や型が不明 | 根拠: `config.SQLITE_TABLE_FOOD` (行番号: 63 / 抜粋: "FROM {config.SQLITE_TABLE_FOOD") |
-| `core.logger.setup_logging` | 戻り値の正確な型や内部でのログ設定の詳細が不明 | 根拠: `logger = core.logger.setup_logging("weekly_report")` (行番号: 9 / 抜粋: "logger = setup_logging") |
-| `core.database.get_db_cursor` | 接続先DBの種類（SQLite等）や取得されるカーソルオブジェクトの振る舞い（辞書型アクセスが可能かどうか）が不明 | 根拠: `with core.database.get_db_cursor() as cursor:` (行番号: 49 / 抜粋: "with get_db_cursor() as") |
+| `config` 内の各種定数 | `SQLITE_TABLE_FOOD`, `SQLITE_TABLE_CAR`, `SQLITE_TABLE_CHILD`, `LINE_USER_ID`, `SQLITE_TABLE_POWER_USAGE`（未定義時のフォールバックあり）などの具体的な値や型が不明 | 根拠: `config.SQLITE_TABLE_FOOD` (行番号: 78 / 抜粋: "FROM {config.SQLITE_TABLE_FOOD") |
+| `core.logger.setup_logging` | 戻り値の正確な型や内部でのログ設定の詳細が不明 | 根拠: `logger = core.logger.setup_logging("weekly_report")` (行番号: 13 / 抜粋: "logger = setup_logging") |
+| `core.database.get_db_cursor` | 接続先DBの種類（SQLite等）や取得されるカーソルオブジェクトの振る舞い（辞書型アクセスが可能かどうか）が不明 | 根拠: `with core.database.get_db_cursor() as cursor:` (行番号: 58 / 抜粋: "with get_db_cursor() as") |
 | `services.notification_service.send_push` | 引数 `target="discord"` の挙動、送信先の実態、戻り値が `True`/`False` になる条件が不明 | 根拠: `services.notification_service.send_push([...], target="discord")` (行番号: 278 / 抜粋: "if send_push([{"type"...") |
-| データベースのスキーマ | 各テーブルの正確なカラム定義やデータ型が不明 | 根拠: `SELECT menu_category FROM ...` (行番号: 62 / 抜粋: "SELECT menu_category") |
+| データベースのスキーマ | 各テーブルの正確なカラム定義やデータ型が不明 | 根拠: `SELECT menu_category FROM ...` (行番号: 77 / 抜粋: "SELECT menu_category") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -53,11 +53,11 @@
 
 
 * **引数/リクエスト**: `period_type: str` - "week", "month", "year" のいずれか。
-* 根拠: `get_start_date` 引数部 (行番号: 15 / 抜粋: "period_type: str")
+* 根拠: `get_start_date` 引数部 (行番号: 24 / 抜粋: "period_type: str")
 
 
 * **戻り値/レスポンス**: `Optional[datetime.datetime]` - 計算された開始日時。無効なタイプの場合は `None`。
-* 根拠: `get_start_date` 戻り値ヒント (行番号: 15 / 抜粋: "-> Optional[datetime.datetime]")
+* 根拠: `get_start_date` 戻り値ヒント (行番号: 24 / 抜粋: "-> Optional[datetime.datetime]")
 
 
 * **副作用**: なし
@@ -76,19 +76,19 @@
 
 
 * **引数/リクエスト**: `start_dt: datetime.datetime` - 集計開始日時。
-* 根拠: `get_analysis_data` 引数部 (行番号: 40 / 抜粋: "start_dt: datetime.datetime")
+* 根拠: `get_analysis_data` 引数部 (行番号: 49 / 抜粋: "start_dt: datetime.datetime")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` - 集計結果の辞書。DB接続失敗時や例外発生時は `None`。
-* 根拠: `get_analysis_data` 戻り値ヒント (行番号: 40 / 抜粋: "-> Optional[Dict[str, Any]]:")
+* 根拠: `get_analysis_data` 戻り値ヒント (行番号: 49 / 抜粋: "-> Optional[Dict[str, Any]]:")
 
 
 * **副作用**: `core.database.get_db_cursor()` を用いてDBに対して `SELECT` クエリを実行する。
-* 根拠: DBクエリ実行部 (行番号: 66 / 抜粋: "cursor.execute(sql_food, (star")
+* 根拠: DBクエリ実行部 (行番号: 81 / 抜粋: "cursor.execute(sql_food, (star")
 
 
 * **エラーハンドリング**: 例外発生時はキャッチして `logger.error` でログ出力し、`None` を返す。
-* 根拠: `except Exception as e:` ブロック (行番号: 138 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` ブロック (行番号: 153 / 抜粋: "except Exception as e:")
 
 
 
@@ -99,7 +99,7 @@
 
 
 * **引数/リクエスト**: `period_name: str`, `data: Dict[str, Any]`, `is_simple: bool = False`
-* 根拠: `generate_text_section` 引数部 (行番号: 137 / 抜粋: "period_name: str, data: Dict[s")
+* 根拠: `generate_text_section` 引数部 (行番号: 158 / 抜粋: "period_name: str, data: Dict[s")
 
 
 * **戻り値/レスポンス**: `str` - 整形されたテキスト文字列。
@@ -107,7 +107,7 @@
 
 
 * **副作用**: なし
-* 根拠: 関数内部の処理 (行番号: 151 / 抜粋: "total = data["total_meals"]")
+* 根拠: 関数内部の処理 (行番号: 172 / 抜粋: "total = data["total_meals"]")
 
 
 * **エラーハンドリング**: `data` が空（Falsy）の場合は即座に空文字 `""` を返す。
@@ -126,15 +126,15 @@
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: `is_month_end_report` 戻り値ヒント (行番号: 171 / 抜粋: "-> bool:")
+* 根拠: `is_month_end_report` 戻り値ヒント (行番号: 192 / 抜粋: "-> bool:")
 
 
 * **副作用**: なし
-* 根拠: 関数内部の処理 (行番号: 179 / 抜粋: "return now.month != next_week.")
+* 根拠: 関数内部の処理 (行番号: 200 / 抜粋: "return now.month != next_week.")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内部の処理 (行番号: 179 / 抜粋: "return now.month != next_week.")
+* 根拠: 関数内部の処理 (行番号: 200 / 抜粋: "return now.month != next_week.")
 
 
 
@@ -149,7 +149,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `run_report` 戻り値ヒント (行番号: 192 / 抜粋: "-> None:")
+* 根拠: `run_report` 戻り値ヒント (行番号: 202 / 抜粋: "-> None:")
 
 
 * **副作用**:
@@ -157,11 +157,11 @@
 * ロガーによる状態のログ出力（INFO, ERROR, DEBUG）。
 * `services.notification_service.send_push` を呼び出し外部システムへ通知を送信。
 * 送信成功時、モジュール定数`LAST_RUN_FILE`(`config.FALLBACK_ROOT`配下)へ実行日(`YYYY-MM-DD`)を書き込む(Issue #234で追加。`--force`実行時は書き込まない)。**（Issue #661で修正）** このフラグファイルの読み書きは`core/state_file.py`の`read_text`/`write_text_atomic`へ委譲し、書き込みは一時ファイル + `fsync` + `os.replace`による原子的な差し替えになった(親ディレクトリの作成も`state_file`側が行うため、呼び出し側の`os.makedirs`は不要になっている)。読み取り失敗時は`None`が返り「未送信」として扱われる(重複送信より送信欠落の方が困るため)。
-* 根拠: 各種処理部 (行番号: 197, 217, 278 / 抜粋: "is_force = len(sys.argv) > 1 a", "logger.info("📊 週間レポート生成プロセ", "services.notification_service.send_push([{"type": ")、実行済みフラグ書き込み (行番号: 278〜284 / 抜粋: "if not is_force: os.makedirs(...")
+* 根拠: 各種処理部 (行番号: 207, 226, 278 / 抜粋: "is_force = len(sys.argv) > 1 a", "logger.info("📊 週間レポート生成プロセ", "services.notification_service.send_push([{"type": ")、実行済みフラグ書き込み (行番号: 278〜284 / 抜粋: "if not is_force: os.makedirs(...")
 
 
 * **エラーハンドリング**: 日付計算失敗時（`start_week` 等が `None`）、および週間データ取得失敗時（`stats_week` が `None`）はエラーログを出力し、処理を中断（`return`）する。`--force`が指定されていない場合、`LAST_RUN_FILE`に本日日付が既に記録されていれば、月曜8時台であっても処理を中断する(Issue #234で追加。外部cronの多重起動による重複送信を防止)。
-* 根拠: エラーチェック部 (行番号: 226, 233 / 抜粋: "if not start_week or not start", "if not stats_week:")、実行済みフラグチェック (行番号: 209〜215 / 抜粋: "if not is_force and os.path.ex...")
+* 根拠: エラーチェック部 (行番号: 235, 242 / 抜粋: "if not start_week or not start", "if not stats_week:")、実行済みフラグチェック (行番号: 209〜215 / 抜粋: "if not is_force and os.path.ex...")
 
 
 
@@ -231,8 +231,8 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `config.py` | 使用されている各種テーブル名や定数値（`SQLITE_TABLE_POWER_USAGE` など）を特定するため。 | 根拠: `config.SQLITE_TABLE_FOOD` (行番号: 63 / 抜粋: "config.SQLITE_TABLE_FOOD") |
-| 高 | `common.py` | DB接続先やクエリ結果を扱うカーソルの仕様、およびプッシュ通知の実際の送信先・処理内容を把握するため。 | 根拠: `core.database.get_db_cursor`, `services.notification_service.send_push` (行番号: 49, 278 / 抜粋: "get_db_cursor()", "services.notification_service.send_push([{"type": ") |
-| 中 | （データベーススキーマ定義ファイル） | `menu_category`、`action`、`wattage`、`condition` カラムのデータ型や格納形式、制約を確認するため。 | 根拠: DBクエリ実行部 (行番号: 62, 101 / 抜粋: "SELECT menu_category FROM", "SELECT AVG(wattage)") |
+| 高 | `common.py` | DB接続先やクエリ結果を扱うカーソルの仕様、およびプッシュ通知の実際の送信先・処理内容を把握するため。 | 根拠: `core.database.get_db_cursor`, `services.notification_service.send_push` (行番号: 58, 278 / 抜粋: "get_db_cursor()", "services.notification_service.send_push([{"type": ") |
+| 中 | （データベーススキーマ定義ファイル） | `menu_category`、`action`、`wattage`、`condition` カラムのデータ型や格納形式、制約を確認するため。 | 根拠: DBクエリ実行部 (行番号: 62, 122 / 抜粋: "SELECT menu_category FROM", "SELECT AVG(wattage)") |
 
 ## 8. 保守上の注意点
 

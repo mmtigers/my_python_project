@@ -15,11 +15,11 @@
 ## 2. ファイルの概要
 
 * FastAPIのルーターオブジェクトを生成し、手動バックアップをトリガーするためのPOSTエンドポイントを提供する。
-* 根拠: `router = APIRouter()` (行番号: 7 / 抜粋: "router = APIRouter()") および `manual_backup` (行番号: 9-10 / 抜粋: "@router.post("/backup")")
+* 根拠: `router = APIRouter()` (行番号: 10 / 抜粋: "router = APIRouter()") および `manual_backup` (行番号: 9-10 / 抜粋: "@router.post("/backup")")
 
 
 * 実際のバックアップ処理は外部モジュールである `services.backup_service` に委譲している。
-* 根拠: `backup_service.perform_backup()` (行番号: 12 / 抜粋: "success, msg, size = backup_s")
+* 根拠: `backup_service.perform_backup()` (行番号: 21 / 抜粋: "success, msg, size = backup_s")
 
 
 
@@ -39,14 +39,14 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `backup_service.perform_backup` | 実装内容が含まれていないため。内部でのシステムに対する副作用（DB操作、ファイル出力など）および、処理にかかる時間やエラー発生の挙動が不明。 | 根拠: [backup_service.perform_backup] (行番号: 12 / 抜粋: "success, msg, size = backup_s") |
+| `backup_service.perform_backup` | 実装内容が含まれていないため。内部でのシステムに対する副作用（DB操作、ファイル出力など）および、処理にかかる時間やエラー発生の挙動が不明。 | 根拠: [backup_service.perform_backup] (行番号: 21 / 抜粋: "success, msg, size = backup_s") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `router`
 
 * **役割**: FastAPIのルーターインスタンス。
-* 根拠: [router] (行番号: 7 / 抜粋: "router = APIRouter()")
+* 根拠: [router] (行番号: 10 / 抜粋: "router = APIRouter()")
 
 
 
@@ -61,7 +61,7 @@
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` 型。成功時は `status`, `message`, `size_mb` を含む辞書を返す。失敗時は`HTTPException(500)`で、`detail`は固定文言「バックアップに失敗しました。サーバーログを確認してください。」（Issue #408: 以前は`perform_backup`の生の失敗メッセージ＝NASパス等の内部情報を含みうる例外文字列をそのまま返していた。生メッセージは`logger.error`でログにのみ残す）。
-* 根拠: [戻り値の型ヒントとreturn文] (行番号: 13, 22-27 / 抜粋: "return {"status": "success", ")
+* 根拠: [戻り値の型ヒントとreturn文] (行番号: 27, 22-27 / 抜粋: "return {"status": "success", ")
 
 
 * **副作用**: 外部関数 `backup_service.perform_backup()` を呼び出す（具体的な副作用は不明（`services.backup_service`ファイルに依存のため要確認））。失敗時は`logger.error`でログ出力。
@@ -114,7 +114,7 @@ graph TD
 ## 8. 保守上の注意点
 
 * `backup_service.perform_backup()` は非同期関数 (`await`) ではなく同期関数として呼び出されている。
-* 根拠: [関数呼び出し] (行番号: 12 / 抜粋: "success, msg, size = backup_s")
+* 根拠: [関数呼び出し] (行番号: 21 / 抜粋: "success, msg, size = backup_s")
 
 
 * `backup_service.perform_backup()` 内で例外（Exception）が発生した場合、このエンドポイント内ではキャッチ処理（try-except）が行われていない。

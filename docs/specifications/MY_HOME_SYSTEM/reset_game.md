@@ -43,7 +43,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `home_system.db` (SQLite DB) | `quest_users` テーブルのスキーマ（`user_id`, `name`, `role` 以外のカラムの有無等）が本ファイルからは不明。 | `cursor.execute("SELECT user_id, name, role FROM quest_users")` (行番号: 102 / 抜粋: "cursor.execute("SELECT user_id, name, role FROM quest_users")") |
+| `home_system.db` (SQLite DB) | `quest_users` テーブルのスキーマ（`user_id`, `name`, `role` 以外のカラムの有無等）が本ファイルからは不明。 | `cursor.execute("SELECT user_id, name, role FROM quest_users")` (行番号: 104 / 抜粋: "cursor.execute("SELECT user_id, name, role FROM quest_users")") |
 | リセットAPI (`POST {base_url}/api/quest/admin/reset_user`) | サーバー側の実処理（権限チェックの詳細・DB更新の原子性・レスポンス形状の正確な定義）は本ファイルからは呼び出し側の期待値（ステータスコード200/404/その他、JSONボディの`deletedHistoryCount`/`deletedInventoryCount`）としてしか分からない。 | `resp = requests.post(\n            url,\n            json={"admin_id": admin_id, "target_user_id": user_id},\n            timeout=RESET_API_TIMEOUT_SECONDS,\n        )` (行番号: 201〜205) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -67,7 +67,7 @@
 
 
 * **副作用**: `logs` ディレクトリの作成（既存の場合はスキップ）、日付別ログファイルパスの生成、ルートロガーへのファイルハンドラ・ストリームハンドラの登録。
-* 根拠: `os.makedirs(LOG_DIR, exist_ok=True)` (行番号: 65 / 抜粋: "os.makedirs(LOG_DIR, exist_ok=True)"), `handlers=[\n            logging.FileHandler(log_file, encoding='utf-8'),\n            logging.StreamHandler(sys.stdout)\n        ]` (行番号: 69〜72 / 抜粋: "logging.FileHandler(log_file, encoding='utf-8'),")
+* 根拠: `os.makedirs(LOG_DIR, exist_ok=True)` (行番号: 67 / 抜粋: "os.makedirs(LOG_DIR, exist_ok=True)"), `handlers=[\n            logging.FileHandler(log_file, encoding='utf-8'),\n            logging.StreamHandler(sys.stdout)\n        ]` (行番号: 69〜72 / 抜粋: "logging.FileHandler(log_file, encoding='utf-8'),")
 
 
 * **エラーハンドリング**: なし
@@ -86,11 +86,11 @@
 
 
 * **戻り値/レスポンス**: `sqlite3.Connection`（`row_factory` を `sqlite3.Row` に設定済み）。DBファイル不在時は関数内で `sys.exit(1)` するため戻り値は返らない。
-* 根拠: `return conn` (行番号: 85 / 抜粋: "return conn")
+* 根拠: `return conn` (行番号: 87 / 抜粋: "return conn")
 
 
 * **副作用**: SQLite DBへの接続確立、DBファイル不在時のエラーログ出力・標準出力・プロセス終了。
-* 根拠: `conn = sqlite3.connect(DB_PATH)` (行番号: 83 / 抜粋: "conn = sqlite3.connect(DB_PATH)")
+* 根拠: `conn = sqlite3.connect(DB_PATH)` (行番号: 85 / 抜粋: "conn = sqlite3.connect(DB_PATH)")
 
 
 * **エラーハンドリング**: DBファイルが存在しない場合、エラーログと標準出力にメッセージを出力後 `sys.exit(1)` する。接続処理中の任意の `Exception` はエラーログに記録した上で再送出（`raise`）する。
@@ -101,7 +101,7 @@
 ### `fetch_users`
 
 * **役割**: `quest_users` テーブルから `user_id`・`name`・`role` を取得し、表示用の辞書（`id`, `name`, `role`）のリストを構築する。**（Issue #547で修正）** 以前は`user_id`と`name`のみを取得していたが、リセットAPI呼び出し時に`admin_id`（`role_adult`のユーザー）を自動選択するため`role`列も取得するようになった。
-* 根拠: `def fetch_users():` (行番号: 92〜122 / 抜粋: "def fetch_users():\n    """\n    DBからユーザー情報を取得し、表示用のリストを作成する。")、role列の追加根拠 (行番号: 102, 110 / 抜粋: "cursor.execute("SELECT user_id, name, role FROM quest_users")", "users_info.append({"id": u_id, "name": display_name, "role": row['role']})")
+* 根拠: `def fetch_users():` (行番号: 92〜122 / 抜粋: "def fetch_users():\n    """\n    DBからユーザー情報を取得し、表示用のリストを作成する。")、role列の追加根拠 (行番号: 104, 112 / 抜粋: "cursor.execute("SELECT user_id, name, role FROM quest_users")", "users_info.append({"id": u_id, "name": display_name, "role": row['role']})")
 
 
 * **引数/リクエスト**: なし
@@ -109,11 +109,11 @@
 
 
 * **戻り値/レスポンス**: `list[dict]`（各要素は `{"id": ..., "name": ..., "role": ...}`）。取得失敗時は空リスト `[]` を返す。
-* 根拠: `return users_info` (行番号: 112 / 抜粋: "return users_info"), `return []` (行番号: 117 / 抜粋: "return []")
+* 根拠: `return users_info` (行番号: 114 / 抜粋: "return users_info"), `return []` (行番号: 119 / 抜粋: "return []")
 
 
 * **副作用**: DB接続の確立とクエリ実行、失敗時のエラーログ・デバッグログ出力、`finally` ブロックでのDB接続クローズ。
-* 根拠: `cursor.execute("SELECT user_id, name, role FROM quest_users")` (行番号: 102 / 抜粋: "cursor.execute("SELECT user_id, name, role FROM quest_users")")
+* 根拠: `cursor.execute("SELECT user_id, name, role FROM quest_users")` (行番号: 104 / 抜粋: "cursor.execute("SELECT user_id, name, role FROM quest_users")")
 
 
 * **エラーハンドリング**: 任意の `Exception` を捕捉し、エラーログ（`logging.error`）とデバッグログ（`logging.debug` によるトレースバック）を出力した上で空リストを返す。`finally` 節で接続が確立していれば必ずクローズする。
@@ -132,15 +132,15 @@
 
 
 * **戻り値/レスポンス**: `dict`（`{"label": ..., "db_id": ...}`）または `None`（候補が0件の場合）。`q` 入力時は関数内で `sys.exit(0)` するため戻り値は返らない。
-* 根拠: `return display_candidates[idx]` (行番号: 162 / 抜粋: "return display_candidates[idx]"), `return None` (行番号: 145 / 抜粋: "return None")
+* 根拠: `return display_candidates[idx]` (行番号: 164 / 抜粋: "return display_candidates[idx]"), `return None` (行番号: 145 / 抜粋: "return None")
 
 
 * **副作用**: 標準出力への選択肢一覧表示、`input()` によるユーザー入力の待受、`q` 入力時の即時プロセス終了。
-* 根拠: `choice = input("番号を入力してください: ").strip()` (行番号: 153 / 抜粋: "choice = input("番号を入力してください: ").strip()")
+* 根拠: `choice = input("番号を入力してください: ").strip()` (行番号: 155 / 抜粋: "choice = input("番号を入力してください: ").strip()")
 
 
 * **エラーハンドリング**: 表示候補が0件の場合はメッセージを出力し `None` を返す。入力が `q`（大文字小文字問わず）の場合はキャンセルメッセージを出力し `sys.exit(0)`。数字以外または範囲外の入力に対しては無限ループで再入力を促す（明示的な例外捕捉はなし）。
-* 根拠: `if not display_candidates:` (行番号: 143〜145 / 抜粋: "return None"), `while True:` (行番号: 152 / 抜粋: "while True:")
+* 根拠: `if not display_candidates:` (行番号: 143〜145 / 抜粋: "return None"), `while True:` (行番号: 154 / 抜粋: "while True:")
 
 
 

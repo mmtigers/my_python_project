@@ -28,8 +28,8 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 | `shutil` | 標準ライブラリ | ファイルやディレクトリのコピー・削除 | `import shutil` (行番号: 2 / 抜粋: "import shutil") |
 | `subprocess` | 標準ライブラリ | OSコマンド(`mount`)の実行 | `import subprocess` (行番号: 3 / 抜粋: "import subprocess") |
 | `pathlib.Path` | 標準ライブラリ | パス操作 | `from pathlib import Path` (行番号: 4 / 抜粋: "from pathlib import Path") |
-| `config` | 外部モジュール | `LINE_USER_ID` の取得など。**Issue #111の修正**により、`import config`自体が失敗した場合のフォールバックとして`config = None`が明示的に定義されるようになった（以前はこのフォールバック節が`get_logger`/`send_push`のみを定義し`config`を定義していなかったため、`import config`が失敗すると`config`という名前自体が未束縛のままモジュールロードが完了し、`get_managed_target_directory`のNAS復旧失敗経路で`NameError`が送出されていた）。 | `import config` (行番号: 7 / 抜粋: "import config"), `config = None` (行番号: 19 / 抜粋: "config = None") |
-| `core.logger.get_logger` | 外部関数 | ロガーの取得 | `from core.logger import get_logger` (行番号: 8 / 抜粋: "from core.logger import get_logger") |
+| `config` | 外部モジュール | `LINE_USER_ID` の取得など。**Issue #111の修正**により、`import config`自体が失敗した場合のフォールバックとして`config = None`が明示的に定義されるようになった（以前はこのフォールバック節が`get_logger`/`send_push`のみを定義し`config`を定義していなかったため、`import config`が失敗すると`config`という名前自体が未束縛のままモジュールロードが完了し、`get_managed_target_directory`のNAS復旧失敗経路で`NameError`が送出されていた）。 | `import config` (行番号: 7 / 抜粋: "import config"), `config = None` (行番号: 22 / 抜粋: "config = None") |
+| `core.logger.get_logger` | 外部関数 | ロガーの取得 | `from core.logger import get_logger` (行番号: 11 / 抜粋: "from core.logger import get_logger") |
 | `services.notification_service.send_push` | 外部関数 | エラー時のプッシュ通知送信 | `from services.notification_service import send_push` (行番号: 9 / 抜粋: "from services.notification_service import...") |
 
 ### ブラックボックスとなる外部要素
@@ -37,7 +37,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config` | 実装が提供されていないため、どのような変数が定義されているか不明（`LINE_USER_ID` 以外） | `import config` (行番号: 7 / 抜粋: "import config") |
-| `get_logger` | 内部実装やログの出力先、フォーマットが不明（`core.logger` に依存のため要確認） | `from core.logger import get_logger` (行番号: 8 / 抜粋: "from core.logger import get_logger") |
+| `get_logger` | 内部実装やログの出力先、フォーマットが不明（`core.logger` に依存のため要確認） | `from core.logger import get_logger` (行番号: 11 / 抜粋: "from core.logger import get_logger") |
 | `send_push` | 通知の具体的な送信処理、対応プラットフォームなどの実装が不明（`services.notification_service` に依存のため要確認） | `from services.notification_service import send_push` (行番号: 9 / 抜粋: "from services.notification_service import...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -78,11 +78,11 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `sync_fallback_to_nas`戻り値 (行番号: 47, 55 / 抜粋: "-> None:", "return")
+* 根拠: `sync_fallback_to_nas`戻り値 (行番号: 63, 55 / 抜粋: "-> None:", "return")
 
 
 * **副作用**: NASディレクトリへのファイル・ディレクトリ書き込み、ローカルディレクトリ内のデータ削除(`unlink`, `rmtree`)、ログの出力
-* 根拠: `sync_fallback_to_nas`内処理 (行番号: 65, 68 / 抜粋: "item.unlink()", "shutil.rmtree(item)")
+* 根拠: `sync_fallback_to_nas`内処理 (行番号: 86, 89 / 抜粋: "item.unlink()", "shutil.rmtree(item)")
 
 
 * **エラーハンドリング**: `Exception`をキャッチし、エラーログ(`exc_info=True`)を出力する。
@@ -105,7 +105,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 
 
 * **副作用**: ターゲットディレクトリが存在しない場合、親ディレクトリを含めて作成(`mkdir`)する。
-* 根拠: `is_mounted_and_writable`内処理 (行番号: 82 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)")
+* 根拠: `is_mounted_and_writable`内処理 (行番号: 103 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)")
 
 
 * **エラーハンドリング**: ディレクトリ作成やアクセス確認時の`OSError`をキャッチし、Falseを返す。

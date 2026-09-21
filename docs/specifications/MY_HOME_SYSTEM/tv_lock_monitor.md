@@ -29,7 +29,7 @@
 | `os` | 標準ライブラリ | パス操作、ファイル存在確認、ディレクトリ作成 | 根拠: `os.path.dirname`, `os.path.exists` など (行番号: 3, 6, 18, 35, 48 / 抜粋: "import os") |
 | `config` | 外部モジュール | デバイスIDやルートディレクトリの取得 | 根拠: `config.TV_PLUG_DEVICE_ID` 等 (行番号: 10, 18, 21 / 抜粋: "import config") |
 | `core.logger` | 外部モジュール | ロガーの初期化処理 | 根拠: `setup_logging` (行番号: 11, 15 / 抜粋: "from core.logger import setup_logging") |
-| `core.utils.get_now_jst`（Issue #592で追加） | 外部モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で標準ライブラリの`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「深夜2時」判定はJSTの深夜2時を意図していたため、ホストがJST以外の設定だと意図しない実時刻に実行されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_jst` (行番号: 12 / 抜粋: "from core.utils import get_now_jst")、`now = get_now_jst()` (行番号: 25-28 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う...\n    now = get_now_jst()") |
+| `core.utils.get_now_jst`（Issue #592で追加） | 外部モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で標準ライブラリの`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「深夜2時」判定はJSTの深夜2時を意図していたため、ホストがJST以外の設定だと意図しない実時刻に実行されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_jst` (行番号: 13 / 抜粋: "from core.utils import get_now_jst")、`now = get_now_jst()` (行番号: 25-28 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う...\n    now = get_now_jst()") |
 | `services.switchbot_service` | 外部モジュール | 外部デバイス（SwitchBot）へのコマンド送信 | 根拠: `send_device_command` (行番号: 13, 43 / 抜粋: "from services import switchbot_service") |
 
 ### ブラックボックスとなる外部要素
@@ -59,7 +59,7 @@
 
 * **副作用**:
 * 外部APIまたはデバイスに対するオフコマンド（"turnOff"）送信
-* 根拠: `send_device_command`呼び出し (行番号: 43 / 抜粋: "switchbot_service.send_device_command")
+* 根拠: `send_device_command`呼び出し (行番号: 42 / 抜粋: "switchbot_service.send_device_command")
 
 
 * ローカルファイルシステム上のディレクトリ作成、およびファイル（`last_tv_lock.txt`）への日付文字列書き込み

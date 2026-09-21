@@ -38,11 +38,11 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.NATURE_REMO_ACCESS_TOKEN` | 環境変数または定数の実値が別ファイルに定義されているため不明。 | `[main]` (行番号: 147 / 抜粋: "("伊丹", config.NATURE_REMO_ACCE") |
-| `config.NATURE_REMO_ACCESS_TOKEN_TAKASAGO` | 環境変数または定数の実値が別ファイルに定義されているため不明。 | `[main]` (行番号: 148 / 抜粋: "("高砂", config.NATURE_REMO_ACCE") |
+| `config.NATURE_REMO_ACCESS_TOKEN` | 環境変数または定数の実値が別ファイルに定義されているため不明。 | `[main]` (行番号: 154 / 抜粋: "("伊丹", config.NATURE_REMO_ACCE") |
+| `config.NATURE_REMO_ACCESS_TOKEN_TAKASAGO` | 環境変数または定数の実値が別ファイルに定義されているため不明。 | `[main]` (行番号: 155 / 抜粋: "("高砂", config.NATURE_REMO_ACCE") |
 | `core.logger.setup_logging` | ログの出力先（標準出力、ファイルなど）およびフォーマットの実装が不明。 | `[トップレベル]` (行番号: 18 / 抜粋: "logger = setup_logging("nature") |
-| `sensor_service.process_power_data` | 電力データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 113 / 抜粋: "await sensor_service.process_p") |
-| `sensor_service.process_meter_data` | 温湿度データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 135 / 抜粋: "await sensor_service.process_m") |
+| `sensor_service.process_power_data` | 電力データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 120 / 抜粋: "await sensor_service.process_p") |
+| `sensor_service.process_meter_data` | 温湿度データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 142 / 抜粋: "await sensor_service.process_m") |
 | `Nature Remo API` | `api.nature.global` の正確なレスポンススキーマの全容（コード上でアクセスしているキー以外）が不明。 | `[fetch_data_sync]` (行番号: 59 / 抜粋: "url_app = "[https://api.nature](https://www.google.com/search?q=https://api.nature).") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -131,7 +131,7 @@
 
 
 * **副作用**: `process_location` の呼び出し。
-* 根拠: `[main]` (行番号: 153 / 抜粋: "await process_location(loc, to")
+* 根拠: `[main]` (行番号: 160 / 抜粋: "await process_location(loc, to")
 
 
 * **エラーハンドリング**: なし
@@ -146,7 +146,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[__main__]` (行番号: 157 / 抜粋: "if __name__ == "__main__":")
+* 根拠: `[__main__]` (行番号: 164 / 抜粋: "if __name__ == "__main__":")
 
 
 * **戻り値/レスポンス**: なし
@@ -154,7 +154,7 @@
 
 
 * **副作用**: 非同期イベントループの開始。
-* 根拠: `[__main__]` (行番号: 159 / 抜粋: "asyncio.run(main())")
+* 根拠: `[__main__]` (行番号: 166 / 抜粋: "asyncio.run(main())")
 
 
 * **エラーハンドリング**: `KeyboardInterrupt` をキャッチして INFO ログを出力。その他の予期せぬ例外 (`Exception`) をキャッチし、CRITICAL ログを出力する。

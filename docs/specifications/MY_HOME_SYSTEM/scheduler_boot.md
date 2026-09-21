@@ -49,8 +49,8 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config` | モジュールがインポートされているが、本ファイル内での使用箇所や実装内容が提供されていないため | `import config` (行番号: 14 / 抜粋: "import config") |
-| `setup_logging` | 実装内容が外部ファイル(`core.logger`)にあるため、ログの出力先やフォーマット仕様が不明 | `from core.logger import setup_logging` (行番号: 15 / 抜粋: "from core.logger import setup_log") |
-| `TASKS` に定義されている各スクリプト | サブプロセスとして呼び出される対象ファイル（`monitors/*.py`など）の実装が提供されていないため | `TASKS: List[Task] = [...]` (行番号: 29 / 抜粋: "{"script": "monitors/switchbot") |
+| `setup_logging` | 実装内容が外部ファイル(`core.logger`)にあるため、ログの出力先やフォーマット仕様が不明 | `from core.logger import setup_logging` (行番号: 16 / 抜粋: "from core.logger import setup_log") |
+| `TASKS` に定義されている各スクリプト | サブプロセスとして呼び出される対象ファイル（`monitors/*.py`など）の実装が提供されていないため | `TASKS: List[Task] = [...]` (行番号: 40 / 抜粋: "{"script": "monitors/switchbot") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -80,7 +80,7 @@
 ### `run_script`
 
 * **役割**: 指定されたスクリプトをサブプロセスとして実行し、実行結果をログに出力する。
-* 根拠: `def run_script(script_path: str, args: List[str]) -> bool:` (行番号: 106 / 抜粋: "def run_script(script_path: str, args: List[str]) -> bool:")、docstring (行番号: 100 / 抜粋: "指定されたスクリプトをサブプロセスとして実行する。")
+* 根拠: `def run_script(script_path: str, args: List[str]) -> bool:` (行番号: 106 / 抜粋: "def run_script(script_path: str, args: List[str]) -> bool:")、docstring (行番号: 108 / 抜粋: "指定されたスクリプトをサブプロセスとして実行する。")
 * **（Issue #360 / #361 で修正）** `subprocess.run` ではなく `subprocess.Popen` で起動して `_running_children[script_path]` に登録し、`proc.wait(timeout=3600)` で完了を待つ。これにより SIGTERM 受信時に `terminate_running_children()` から実行中の子プロセスを止められる。失敗時にログへ流す stderr は末尾 20 行に絞る（Discord 通知の 2000 字制限対策）。タイムアウト時は `proc.kill()` を試みる。`finally` で `_running_children` から自分のエントリを外す。
 * 根拠: `proc = subprocess.Popen(` (行番号: 145〜151)、`_running_children[script_path] = proc` (行番号: 152〜153)、`proc.wait(timeout=3600)` (行番号: 159)、`tail = "\n".join(stderr_tail)` (行番号: 178)、`_running_children.pop(script_path, None)` (行番号: 194〜197)
 * **（Issue #575で修正）** returncode が非0の場合の分岐を、単純な「失敗」扱いから二分岐に変更した。以前は returncode が 0 以外であれば理由を問わず一律で ERROR ログ（`core/logger.py` の `DiscordErrorHandler` 経由で Discord に通知される）を出していたため、`terminate_running_children()`（Issue #360）がシャットダウン・デプロイ時に `proc.terminate()` で実行中の監視スクリプトを止める（SIGTERM由来の負のreturncode、典型的には-15になる）たびに、「タスク失敗」という偽のDiscordアラートが飛んでいた。現在は returncode が非0のとき、まず `_children_lock` 配下で `script_path` が モジュールレベル集合 `_intentionally_terminated`（後述）に含まれるかを確認し、含まれていればその場で `discard` して消費したうえで INFO ログのみを出力し `False` を返す（Discord通知なし）。含まれていない場合（スクリプトが自発的に非0で終了した、真の失敗）は、従来どおり ERROR ログとstderr末尾の出力を行い `False` を返す。
@@ -96,7 +96,7 @@
 
 
 * **戻り値/レスポンス**: `bool`: 実行成功（returncode 0）ならTrue、それ以外（意図的terminate・真の失敗・タイムアウト・例外のいずれも）はFalse
-* 根拠: docstring (行番号: 107 / 抜粋: "bool: 実行成功(returncode 0)ならTrue")、`return True` (行番号: 164)、`return False` (行番号: 174, 180, 190, 193)
+* 根拠: docstring (行番号: 115 / 抜粋: "bool: 実行成功(returncode 0)ならTrue")、`return True` (行番号: 164)、`return False` (行番号: 174, 180, 190, 193)
 
 
 * **副作用**: 外部プロセスの起動（`_running_children`への登録・完了後の削除含む）。標準出力の破棄・標準エラー出力の末尾保持とログ出力。**（Issue #575で追加）** モジュールレベル集合 `_intentionally_terminated` からの該当エントリの読み取り・消費（`discard`）。
@@ -179,7 +179,7 @@
 
 
 * **副作用**: `sys.exit(1)` によるプロセスの終了。
-* 根拠: `sys.exit(1)` (行番号: 135 / 抜粋: "sys.exit(1)")
+* 根拠: `sys.exit(1)` (行番号: 280 / 抜粋: "sys.exit(1)")
 
 
 * **エラーハンドリング**: `KeyboardInterrupt` をキャッチして停止ログを出力し正常終了する。それ以外の `Exception` をキャッチしてクリティカルログを出力し、`sys.exit(1)` で異常終了させる。

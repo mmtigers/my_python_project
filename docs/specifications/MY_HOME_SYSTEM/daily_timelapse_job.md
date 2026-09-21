@@ -40,10 +40,10 @@
 | `argparse` | 標準ライブラリ | コマンドライン引数の解析 | `import argparse` (行番号: 9 / 抜粋: "import argparse") |
 | `re` | 標準ライブラリ | ファイル名からの時刻文字列の正規表現抽出 | `import re` (行番号: 10 / 抜粋: "import re") |
 | `Path` | 標準ライブラリ | （インポートされているが未使用） | `from pathlib import Path` (行番号: 11 / 抜粋: "from pathlib import Path") |
-| `asdict` | 標準ライブラリ | データクラスの辞書化（JSON保存時） | `from dataclasses import asdict` (行番号: 12 / 抜粋: "from dataclasses import asdict") |
-| `config` | 内部モジュール | LINEのユーザーID取得など設定情報の参照 | `import config` (行番号: 19 / 抜粋: "import config") |
-| `setup_logging` | 内部モジュール | ロガーの初期化 | `from core.logger import setup_logging` (行番号: 20 / 抜粋: "from core.logger import setup_logging") |
-| `send_push` | 内部モジュール | Discordへの通知メッセージ送信 | `from services.notification_service import send_push` (行番号: 21 / 抜粋: "from services.notification_service import send_push") |
+| `asdict` | 標準ライブラリ | データクラスの辞書化（JSON保存時） | `from dataclasses import asdict` (行番号: 11 / 抜粋: "from dataclasses import asdict") |
+| `config` | 内部モジュール | LINEのユーザーID取得など設定情報の参照 | `import config` (行番号: 18 / 抜粋: "import config") |
+| `setup_logging` | 内部モジュール | ロガーの初期化 | `from core.logger import setup_logging` (行番号: 19 / 抜粋: "from core.logger import setup_logging") |
+| `send_push` | 内部モジュール | Discordへの通知メッセージ送信 | `from services.notification_service import send_push` (行番号: 20 / 抜粋: "from services.notification_service import send_push") |
 | `monitors.smart_timelapse_generator` の各要素 | 内部モジュール | 動き検知、イベント構築、クリップ生成、結合、Discordへのアップロードなどコア処理の実行 | `from monitors.smart_timelapse_generator import ...` (行番号: 24〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
 
 ### ブラックボックスとなる外部要素
@@ -157,7 +157,7 @@
 * サマリー情報のJSONファイル (`.done`) のディスクへの保存
 
 
-* 根拠: [ファイルI/OおよびAPI呼び出し処理] (行番号: 188 / 抜粋: "os.rename(src_csv, dst_csv)")、[クリップ抽出全滅時の分岐] (行番号: 210〜232 / 抜粋: "if global_event_idx > 0:")
+* 根拠: [ファイルI/OおよびAPI呼び出し処理] (行番号: 200 / 抜粋: "os.rename(src_csv, dst_csv)")、[クリップ抽出全滅時の分岐] (行番号: 210〜232 / 抜粋: "if global_event_idx > 0:")
 
 
 
@@ -175,7 +175,7 @@
 * 処理全体を `try...except Exception as e:` で囲み、予期せぬエラーが発生した場合はスタックトレースをログ出力し、Discordへエラー通知を送信する。
 
 
-* 根拠: [try-exceptブロックおよび早期リターン処理] (行番号: 241 / 抜粋: "except Exception as e:")、[既存ファイル削除失敗時のログ出力(#450)] (行番号: 157〜164)
+* 根拠: [try-exceptブロックおよび早期リターン処理] (行番号: 266 / 抜粋: "except Exception as e:")、[既存ファイル削除失敗時のログ出力(#450)] (行番号: 157〜164)
 
 
 
@@ -268,8 +268,8 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `monitors/smart_timelapse_generator.py` | コアロジックとなる動き検知、クリップ切り出し、結合などのアルゴリズムや、隠蔽メソッド（`_build_clip`等）の正確な副作用と戻り値を把握するため。 | `from monitors.smart_timelapse_generator import ...` (行番号: 24〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
-| 中 | `services/notification_service.py` | エラー時や処理完了時に呼ばれる `send_push` の引数（`target="discord"`等）がどのように処理され、実際にどのようなメッセージが飛ぶのかを確認するため。 | `from services.notification_service import send_push` (行番号: 21 / 抜粋: "from services.notification_service import send_push") |
-| 低 | `config.py` | `LINE_USER_ID` 以外にシステム全体の動作に影響を与える環境変数や設定値が存在するか確認するため。 | `import config` (行番号: 19 / 抜粋: "import config") |
+| 中 | `services/notification_service.py` | エラー時や処理完了時に呼ばれる `send_push` の引数（`target="discord"`等）がどのように処理され、実際にどのようなメッセージが飛ぶのかを確認するため。 | `from services.notification_service import send_push` (行番号: 20 / 抜粋: "from services.notification_service import send_push") |
+| 低 | `config.py` | `LINE_USER_ID` 以外にシステム全体の動作に影響を与える環境変数や設定値が存在するか確認するため。 | `import config` (行番号: 18 / 抜粋: "import config") |
 
 ## 8. 保守上の注意点
 
@@ -286,7 +286,7 @@ graph TD
 * チャンクファイルの長さを最大15分と仮定し、ハードコードされた固定値(`datetime.timedelta(minutes=15)`)を使用して時間帯フィルタリングの終了時刻を算出しているため、カメラ側の設定変更により録画時間が15分を超えた場合にフィルタリング漏れが発生する可能性がある。
 
 
-* 根拠: [フィルタリング処理] (行番号: 113 / 抜粋: "file_end_dt = file_start_dt + datetime.timedelta(minutes=15)")
+* 根拠: [フィルタリング処理] (行番号: 117 / 抜粋: "file_end_dt = file_start_dt + datetime.timedelta(minutes=15)")
 
 
 

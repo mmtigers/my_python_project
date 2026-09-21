@@ -18,9 +18,9 @@
 * Streamlitダッシュボードの「電力・環境」「気温詳細」「高砂実家」タブを描画するモジュール。3つの公開関数`render_electricity`, `render_temperature`, `render_takasago`で構成される。
 * 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):`, `def render_temperature(df_sensor: pd.DataFrame, now: datetime):`, `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 16, 67, 119 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
 * `render_electricity`は、渡された`df_sensor`から「Nature Remo E Lite」デバイスの消費電力を今日・昨日で重ねた折れ線グラフ、および「Plug」を含むデバイスタイプの本日の個別家電電力を表示する。
-* 根拠: `df_sensor["device_type"] == DEVICE_TYPE_NATURE_REMO_E_LITE` (行番号: 30 / 抜粋: "(df_sensor[\"device_type\"] == DEVICE_TYPE_NATURE_REMO_E_LITE) &"), `df_sensor["device_type"].str.contains(DEVICE_TYPE_KEYWORD_PLUG, na=False)` (行番号: 54 / 抜粋: "(df_sensor[\"device_type\"].str.contains(DEVICE_TYPE_KEYWORD_PLUG, na=False)) &")（Issue #451でリテラル文字列からモジュールレベル定数へ変更、値は不変）
+* 根拠: `df_sensor["device_type"] == DEVICE_TYPE_NATURE_REMO_E_LITE` (行番号: 30 / 抜粋: "(df_sensor[\"device_type\"] == DEVICE_TYPE_NATURE_REMO_E_LITE) &"), `df_sensor["device_type"].str.contains(DEVICE_TYPE_KEYWORD_PLUG, na=False)` (行番号: 56 / 抜粋: "(df_sensor[\"device_type\"].str.contains(DEVICE_TYPE_KEYWORD_PLUG, na=False)) &")（Issue #451でリテラル文字列からモジュールレベル定数へ変更、値は不変）
 * `render_temperature`は、「Meter」を含むデバイスタイプの本日の室温・湿度推移を折れ線グラフで表示し、加えて`view_common.load_yearly_temperature_stats_cached`（**スマホ対応で変更**: 以前は`analysis_service.load_yearly_temperature_stats`を直接呼んでいた。折りたたまれたセクションの中でも毎回この年間集計SQLが走っていた）から取得した年間の室内外最高/最低気温推移を表示する。
-* 根拠: `df_sensor["device_type"].str.contains(DEVICE_TYPE_KEYWORD_METER, na=False)` (行番号: 74 / 抜粋: "(df_sensor[\"device_type\"].str.contains(DEVICE_TYPE_KEYWORD_METER, na=False)) &"), `df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)` (行番号: 100 / 抜粋: "df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)")
+* 根拠: `df_sensor["device_type"].str.contains(DEVICE_TYPE_KEYWORD_METER, na=False)` (行番号: 77 / 抜粋: "(df_sensor[\"device_type\"].str.contains(DEVICE_TYPE_KEYWORD_METER, na=False)) &"), `df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)` (行番号: 102 / 抜粋: "df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)")
 * `render_takasago`は、`df_sensor`のうち`location`が「高砂」であるレコードを最大50件、開閉・接触状態とともに表形式表示する。
 * 根拠: `df_sensor[df_sensor["location"] == "高砂"][["timestamp", "friendly_name", "contact_state"]].head(50)` (行番号: 111 / 抜粋: "df_sensor[df_sensor[\"location\"] == \"高砂\"][[\"timestamp\", \"friendly_name\", \"contact_state\"]].head(50)")
 
@@ -41,7 +41,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `view_common.load_yearly_temperature_stats_cached(now.year)` | `services.analysis_service`の実装が提供されておらず、年間気温統計データの取得元・生成ロジック（`out_max`, `out_min`, `in_max`, `in_min`, `date`列以外の内容含む）が不明。 | `df_yearly = analysis_service.load_yearly_temperature_stats(now.year)` (行番号: 100 / 抜粋: "df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)") |
+| `view_common.load_yearly_temperature_stats_cached(now.year)` | `services.analysis_service`の実装が提供されておらず、年間気温統計データの取得元・生成ロジック（`out_max`, `out_min`, `in_max`, `in_min`, `date`列以外の内容含む）が不明。 | `df_yearly = analysis_service.load_yearly_temperature_stats(now.year)` (行番号: 102 / 抜粋: "df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -83,7 +83,7 @@
 
 
 * **副作用**: `view_common.load_yearly_temperature_stats_cached(now.year)`経由のデータ取得（TTL 60秒のキャッシュ越し）。`st.columns`, `st.subheader`, `st.markdown`, `st.info`、`view_common.render_chart`によるUI描画。
-* 根拠: `df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)` (行番号: 100 / 抜粋: "df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)")
+* 根拠: `df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)` (行番号: 102 / 抜粋: "df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)")
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない。年間データが空の場合は`st.info`表示のみ）
@@ -102,11 +102,11 @@
 
 
 * **戻り値/レスポンス**: なし（`df_sensor`が空の場合は何も描画しない）
-* 根拠: `if not df_sensor.empty:` (行番号: 108 / 抜粋: "if not df_sensor.empty:")
+* 根拠: `if not df_sensor.empty:` (行番号: 121 / 抜粋: "if not df_sensor.empty:")
 
 
 * **副作用**: `st.subheader`、`view_common.render_table`（内部で`st.dataframe`）によるStreamlit画面への描画。**（スマホ対応で変更）** 列は「時刻 / センサー / 状態」の表示名に絞り、時刻は「09/21 03:04 (3分前)」の相対表記併記にする（見守り用途では「どれくらい前か」を一目で知りたいため）。
-* 根拠: `view_common.render_table(` (行番号: 118 / 抜粋: "view_common.render_table("), `relative_time=True,` (行番号: 121 / 抜粋: "relative_time=True,")
+* 根拠: `view_common.render_table(` (行番号: 123 / 抜粋: "view_common.render_table("), `relative_time=True,` (行番号: 126 / 抜粋: "relative_time=True,")
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
@@ -191,7 +191,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `services/analysis_service.py` | `load_yearly_temperature_stats`が返す年間気温統計データの正確な生成ロジック・スキーマを把握するため。 | `df_yearly = analysis_service.load_yearly_temperature_stats(now.year)` (行番号: 100 / 抜粋: "df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)") |
+| 高 | `services/analysis_service.py` | `load_yearly_temperature_stats`が返す年間気温統計データの正確な生成ロジック・スキーマを把握するため。 | `df_yearly = analysis_service.load_yearly_temperature_stats(now.year)` (行番号: 102 / 抜粋: "df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)") |
 | 中 | `dashboard.py` | 各関数に渡される`df_sensor`, `now`引数の生成元・スキーマ（`device_type`の実際の値一覧等）を確認するため（既に`dashboard.md`で一部解析済み）。 | `def render_electricity(df_sensor: pd.DataFrame, now: datetime):` (行番号: 16 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):") |
 
 ## 8. 保守上の注意点
@@ -201,7 +201,7 @@ graph TD
 
 
 * **`render_temperature`のみ列存在チェックあり**: `render_temperature`は`"device_type" not in df_sensor.columns`を明示的にチェックしているが、`render_electricity`・`render_takasago`は同様のチェックを行わずに`df_sensor["device_type"]`や`df_sensor["location"]`へ直接アクセスしており、列が存在しない`DataFrame`が渡された場合に`KeyError`となる可能性がある（3関数間でのチェック方針が不統一）。
-* 根拠: `if df_sensor.empty or "device_type" not in df_sensor.columns:` (行番号: 66 / 抜粋: "if df_sensor.empty or \"device_type\" not in df_sensor.columns:"), `df_sensor[df_sensor["location"] == "高砂"]` （列存在チェックなし） (行番号: 119 / 抜粋: "df_sensor[df_sensor[\"location\"] == \"高砂\"]")
+* 根拠: `if df_sensor.empty or "device_type" not in df_sensor.columns:` (行番号: 66 / 抜粋: "if df_sensor.empty or \"device_type\" not in df_sensor.columns:"), `df_sensor[df_sensor["location"] == "高砂"]` （列存在チェックなし） (行番号: 124 / 抜粋: "df_sensor[df_sensor[\"location\"] == \"高砂\"]")
 
 
 * **エラーハンドリングの欠如**: 3関数のいずれにも`try/except`による例外捕捉がなく、年間気温統計の取得が例外を送出した場合、タブ全体の描画が中断する可能性がある（`dashboard.py`側の`safe_section`がセクション単位で隔離する）。

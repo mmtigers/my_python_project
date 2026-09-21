@@ -26,17 +26,17 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `sqlite3` | 標準ライブラリ | DB接続およびバックアップ機能の利用 | `import sqlite3` (行番号: 1 / 抜粋: "import sqlite3") |
-| `os` | 標準ライブラリ | パス結合、ディレクトリ作成、ファイルサイズ取得、ファイル削除 | `import os` (行番号: 2 / 抜粋: "import os") |
-| `sys` | 標準ライブラリ | **（Issue #753 で追加）** `if __name__ == "__main__":` から `sys.exit` で終了コードを返すため | `import sys` (行番号: 4 / 抜粋: "import sys") |
-| `datetime` | 標準ライブラリ | バックアップファイル名用のタイムスタンプ生成 | `import datetime` (行番号: 3 / 抜粋: "import datetime") |
-| `shutil` | 標準ライブラリ | ファイルのNASへのコピー | `import shutil` (行番号: 4 / 抜粋: "import shutil") |
+| `sqlite3` | 標準ライブラリ | DB接続およびバックアップ機能の利用 | `import sqlite3` (行番号: 3 / 抜粋: "import sqlite3") |
+| `os` | 標準ライブラリ | パス結合、ディレクトリ作成、ファイルサイズ取得、ファイル削除 | `import os` (行番号: 4 / 抜粋: "import os") |
+| `sys` | 標準ライブラリ | **（Issue #753 で追加）** `if __name__ == "__main__":` から `sys.exit` で終了コードを返すため | `import sys` (行番号: 5 / 抜粋: "import sys") |
+| `datetime` | 標準ライブラリ | バックアップファイル名用のタイムスタンプ生成 | `import datetime` (行番号: 6 / 抜粋: "import datetime") |
+| `shutil` | 標準ライブラリ | ファイルのNASへのコピー | `import shutil` (行番号: 7 / 抜粋: "import shutil") |
 | `time` | 標準ライブラリ | 未使用 | `import time` (行番号: 5 / 抜粋: "import time") |
-| `Path` | `pathlib` | パス文字列の構築と操作 | `from pathlib import Path` (行番号: 6 / 抜粋: "from pathlib import Path") |
-| `Tuple` | `typing` | 関数の戻り値の型ヒント | `from typing import Tuple` (行番号: 7 / 抜粋: "from typing import Tuple") |
-| `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 10 / 抜粋: "from services.notification_service import send_push") |
-| `setup_logging` | `core.logger` | ロガーの初期化。設計書に従い使用 | `from core.logger import setup_logging` (行番号: 9 / 抜粋: "from core.logger import setup_logging") |
-| `config` | ローカルモジュール | 各種パスやIDなどの設定値の取得 | `import config` (行番号: 12 / 抜粋: "import config") |
+| `Path` | `pathlib` | パス文字列の構築と操作 | `from pathlib import Path` (行番号: 9 / 抜粋: "from pathlib import Path") |
+| `Tuple` | `typing` | 関数の戻り値の型ヒント | `from typing import Tuple` (行番号: 10 / 抜粋: "from typing import Tuple") |
+| `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 13 / 抜粋: "from services.notification_service import send_push") |
+| `setup_logging` | `core.logger` | ロガーの初期化。設計書に従い使用 | `from core.logger import setup_logging` (行番号: 12 / 抜粋: "from core.logger import setup_logging") |
+| `config` | ローカルモジュール | 各種パスやIDなどの設定値の取得 | `import config` (行番号: 14 / 抜粋: "import config") |
 
 ### ブラックボックスとなる外部要素
 
@@ -48,14 +48,14 @@
 | `config.NAS_MOUNT_POINT` | 定義元が存在せず、NASマウントポイントの実体・値が不明 | `os.path.join(config.NAS_MO..."` (行番号: 34 / 抜粋: "os.path.join(config.NAS_MO...") |
 | `config.BACKUP_FILES` | 定義元が存在せず、DB以外にバックアップ対象へ追加するファイルパス一覧の実体・値が不明 | `getattr(config, "BACKUP_FI..."` (行番号: 84 / 抜粋: "for entry in getattr(confi...") |
 | `core.logger.setup_logging` | 実装が提供されておらず、ログの出力先・出力形式が不明 | `setup_logging("backup")` (行番号: 15 / 抜粋: "logger = setup_logging("ba...") |
-| `services.notification_service.send_push` | 実装が提供されておらず、実際の通信方式や成否の扱いが不明 | `send_push(...)` (行番号: 80 / 抜粋: "send_push(") |
+| `services.notification_service.send_push` | 実装が提供されておらず、実際の通信方式や成否の扱いが不明 | `send_push(...)` (行番号: 225 / 抜粋: "send_push(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `logger`
 
 * **役割**: `setup_logging` によって生成されたロガーインスタンスを保持する。
-* 根拠: `logger = setup_logging("backup")` (行番号: 15 / 抜粋: "logger = setup_logging("backup")")
+* 根拠: `logger = setup_logging("backup")` (行番号: 17 / 抜粋: "logger = setup_logging("backup")")
 
 
 
@@ -244,7 +244,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | データベースの正確なパス、一時ディレクトリの場所、NASの接続先、LINEユーザーIDなど、実行に必須となる環境依存の定数値を把握するため。 | `import config` (行番号: 12 / 抜粋: "import config") |
+| 高 | `config.py` | データベースの正確なパス、一時ディレクトリの場所、NASの接続先、LINEユーザーIDなど、実行に必須となる環境依存の定数値を把握するため。 | `import config` (行番号: 14 / 抜粋: "import config") |
 | 中 | `common.py` | `send_push` 関数が実際にどのサービス（LINEかDiscordか等）へどのように通知を送信しているか、またエラー時の挙動を確認するため。 | `from common import send_push` (行番号: 11 / 抜粋: "from common import send_push") |
 | 低 | `core/logger.py` | ログがどこ（標準出力、ファイル、外部監視システムなど）に、どのようなフォーマットで出力されているかを特定するため。 | `from core.logger import setup_logging` (行番号: 10 / 抜粋: "from core.logger import se...") |
 

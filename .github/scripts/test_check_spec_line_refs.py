@@ -154,9 +154,46 @@ def test_skips_when_same_name_cannot_be_disambiguated(fake_repo):
     assert findings == []
 
 
-def test_ignores_snippets_that_are_not_definitions(fake_repo):
-    """定義以外の抜粋(式・文)は位置を機械判定できないため対象外であること。"""
+def test_verifies_unique_literal_snippet(fake_repo):
+    """定義以外の抜粋でも、ソース内で一意な単一行の引用は検証されること(AUDIT-019)。"""
     _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 999 / 抜粋: "return \\"bye \\" + name")\n')
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert len(findings) == 1
+    assert findings[0].actual == 10
+    assert "抜粋の位置" in findings[0].reason
+
+
+def test_fix_rewrites_unique_literal_snippet(fake_repo):
+    """一意な式・文の引用は --fix で実際の行へ追従すること。"""
+    path = _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 999 / 抜粋: "return \\"bye \\" + name")\n')
+    checker.scan(fix=True)
+    assert "行番号: 10" in path.read_text(encoding="utf-8")
+    findings, _ = checker.scan(fix=False)
+    assert findings == []
+
+
+def test_ignores_ambiguous_literal_snippet(fake_repo):
+    """抜粋がソース内の複数行に一致する場合は、どれを指すか決められないので対象外。"""
+    # `return "` は greet(6行目)と farewell(10行目)の両方に現れる。
+    _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 999 / 抜粋: "return \\"")\n')
+    findings, checked = checker.scan(fix=False)
+    assert checked == 0
+    assert findings == []
+
+
+def test_ignores_range_citation_with_literal_snippet(fake_repo):
+    """範囲引用に式・文の抜粋が付いたものは対象外(抜粋は範囲の先頭とは限らない)。"""
+    _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 998〜999 / 抜粋: "return \\"bye \\" + name")\n')
+    findings, checked = checker.scan(fix=False)
+    assert checked == 0
+    assert findings == []
+
+
+def test_ignores_short_literal_snippet(fake_repo):
+    """8文字未満の短い抜粋は偶然の一致が多いため対象外。"""
+    # `Greeter` はソース内で一意だが7文字しかない。
+    _write_spec(fake_repo, '* 根拠: クラス名 (行番号: 999 / 抜粋: "Greeter")\n')
     findings, checked = checker.scan(fix=False)
     assert checked == 0
     assert findings == []
@@ -373,18 +410,36 @@ def test_retirement_judgement_is_shared_with_check_spec_drift():
     assert checker.is_retired_doc.__module__ == "check_spec_drift"
 
 
-def test_report_counts_non_definition_citations(fake_repo):
-    """--report は def/class 以外の引用を「抜粋の先頭行が引用行±1にあるか」で粗く数えること。"""
+def test_report_counts_ungated_citations(fake_repo):
+    """--report はゲートに入らない引用を「抜粋の先頭行が引用行±1にあるか」で粗く数えること。
+
+    `return "` は greet と farewell の2箇所に現れるため一意に決まらず、scan() の
+    ゲート対象にならない。こうした引用だけがレポートの対象になる。
+    """
     _write_spec(
         fake_repo,
-        '* 根拠: 実装 (行番号: 9 / 抜粋: "return \\"bye \\" + name")\n'
-        '* 根拠: 実装 (行番号: 1 / 抜粋: "return \\"bye \\" + name")\n',
+        '* 根拠: 実装 (行番号: 9 / 抜粋: "return \\"")\n'
+        '* 根拠: 実装 (行番号: 1 / 抜粋: "return \\"")\n',
     )
     per_spec, total_bad, total_checked = checker.report_non_definition_citations()
     assert total_checked == 2
     # 9行目は一致(farewell の return は10行目なので ±1 の窓に入る)、1行目は不一致。
     assert total_bad == 1
     assert per_spec["MY_HOME_SYSTEM/sample.md"] == (1, 2)
+
+
+def test_report_excludes_citations_that_scan_now_gates(fake_repo):
+    """scan() が厳密に検証するようになった引用を、非ゲートとして二重に数えないこと。
+
+    ここを広く除外すると「ゲートにも非ゲートの集計にも現れない引用」が生まれ、
+    main() が出す保証範囲の表示が実態より良く見えてしまう。
+    """
+    _write_spec(fake_repo, '* 根拠: 実装 (行番号: 10 / 抜粋: "return \\"bye \\" + name")\n')
+    _, _, total_checked = checker.report_non_definition_citations()
+    assert total_checked == 0
+    # 一方で scan() 側では数えられている。
+    _, checked = checker.scan(fix=False)
+    assert checked == 1
 
 
 def test_is_skipped_source_judges_paths_relative_to_repo_root(tmp_path, monkeypatch):

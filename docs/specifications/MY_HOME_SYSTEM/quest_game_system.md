@@ -176,7 +176,7 @@
 * **引数/リクエスト**: `valid_quests: List[Any]`, `valid_rewards: List[Any]`, `strict: bool`
 * 根拠: (行番号: 271〜273)
 * **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "dry-run", "message": "No changes were made."}`）
-* 根拠: (行番号: 297 / 抜粋: "return {\"status\": \"dry-run\", \"message\": \"No changes were made.\"}")
+* 根拠: (行番号: 314 / 抜粋: "return {\"status\": \"dry-run\", \"message\": \"No changes were made.\"}")
 * **副作用**: `get_db_cursor(commit=False)`によるDB参照(`SELECT COUNT(*)`)とログ出力のみ。コミットしないためDBへの変更は残らない
 * 根拠: (行番号: 281〜295)
 * **エラーハンドリング**: なし(`get_db_cursor`の挙動に依存)

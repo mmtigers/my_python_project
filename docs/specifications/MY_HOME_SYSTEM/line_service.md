@@ -24,9 +24,9 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `asyncio` | 標準ライブラリ | 非同期処理の実行 | `import asyncio` (行番号: 2 / 抜粋: "import asyncio") |
-| `typing` | 標準ライブラリ | 型ヒントの提供。`Union`（元々使用）に加え`List`もIssue #377で`split_text_into_line_messages`の型ヒントに使用され始めた | `from typing import List, Union` (行番号: 3 / 抜粋: "from typing import List, Union") |
-| `linebot.v3.messaging` | 外部ライブラリ | LINEメッセージモデルの構築。使用されているのは`TextMessage`のみ | `from linebot.v3.messaging import TextMessage` (行番号: 6 / 抜粋: "from linebot.v3.messaging import TextMessage") |
-| `config` | 外部モジュール | 設定値や定数の取得 | `import config` (行番号: 8 / 抜粋: "import config") |
+| `typing` | 標準ライブラリ | 型ヒントの提供。`Union`（元々使用）に加え`List`もIssue #377で`split_text_into_line_messages`の型ヒントに使用され始めた | `from typing import List, Union` (行番号: 2 / 抜粋: "from typing import List, Union") |
+| `linebot.v3.messaging` | 外部ライブラリ | LINEメッセージモデルの構築。使用されているのは`TextMessage`のみ | `from linebot.v3.messaging import TextMessage` (行番号: 5 / 抜粋: "from linebot.v3.messaging import TextMessage") |
+| `config` | 外部モジュール | 設定値や定数の取得 | `import config` (行番号: 7 / 抜粋: "import config") |
 | `core.logger` | 外部モジュール | ロガーの設定 | `from core.logger import...` (行番号: 9 / 抜粋: "from core.logger import setup...") |
 | `core.utils` | 外部モジュール | 時刻や日付文字列の取得。`get_meal_time_category_from_now`（Issue #583で追加）は`log_food_record`が`food_records.meal_time_category`の算出に使用する | `from core.utils import get_now_iso, get_today_date_str, get_meal_time_category_from_now` (行番号: 10) |
 | `core.database` | 外部モジュール | 非同期でのログ保存 | `from core.database import...` (行番号: 11 / 抜粋: "from core.database import sav...") |
