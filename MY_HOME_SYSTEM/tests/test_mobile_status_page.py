@@ -430,3 +430,113 @@ class TestDarkMode:
         assert "style='color:" not in value
         assert "diff-" in value
         assert ".diff-up" in home_status_service.STATUS_CARD_CSS
+
+
+class TestPartialRefresh:
+    """C: 自動更新でページ全体を読み込み直さない。
+
+    以前は `<meta http-equiv="refresh">` で60秒ごとに全体を再読み込みしており、
+    画面が白く瞬き、スクロール位置も先頭へ戻っていた。
+    """
+
+    def _get(self, path):
+        patches = _stub_loaders()
+        for p in patches:
+            p.start()
+        try:
+            with _client() as client:
+                return client.get(path)
+        finally:
+            for p in patches:
+                p.stop()
+
+    def test_the_cards_can_be_fetched_on_their_own(self):
+        res = self._get(f"{config.DASHBOARD_BASE_PATH}/m/status")
+
+        assert res.status_code == 200
+        assert res.text.count('class="status-card') == 9
+        assert res.text.startswith(f'<div id="{home_status_service.STATUS_SECTION_ID}">')
+        # 断片なので、ページ全体の要素は含まない
+        assert "<html" not in res.text
+        assert "<style" not in res.text
+
+    def test_the_fragment_replaces_itself(self):
+        """差し替え後も同じidが残らないと、2回目以降の更新先を見失う。"""
+        res = self._get(f"{config.DASHBOARD_BASE_PATH}/m/status")
+
+        assert res.text.count(f'id="{home_status_service.STATUS_SECTION_ID}"') == 1
+
+    def test_the_fragment_carries_the_fetch_time_and_the_alert_line(self):
+        """時刻と要約も一緒に差し替わらないと、値だけ新しく見出しが古くなる。"""
+        res = self._get(f"{config.DASHBOARD_BASE_PATH}/m/status")
+
+        assert "時点" in res.text
+        assert "alerts" in res.text
+
+    def test_the_fragment_is_routed_before_the_streamlit_proxy(self):
+        """総当たりの中継ルートより後ろに置くと、Streamlit へ流れて404になる。"""
+        res = self._get(f"{config.DASHBOARD_BASE_PATH}/m/status")
+
+        assert res.status_code == 200, "中継側が拾っている可能性がある"
+
+    def test_the_page_only_falls_back_to_a_full_reload_without_js(self):
+        res = self._get(f"{config.DASHBOARD_BASE_PATH}/m")
+
+        # meta refresh は noscript の中だけ(JS環境で二重に更新されない)
+        assert "<noscript><meta http-equiv=\"refresh\"" in res.text
+        assert res.text.count('http-equiv="refresh"') == 1
+        assert f'"{config.DASHBOARD_BASE_PATH}/m/status"' in res.text
+
+    def test_the_old_full_page_reload_is_still_available(self):
+        """`status_path` を渡さない呼び出し方(JSを使わない経路)を壊さない。"""
+        page = home_status_service.render_mobile_status_page_html(
+            [], NOW,
+            manifest_path="/m.webmanifest", icon_path="/i.png",
+            dashboard_path="/dashboard/", quest_path="/quest",
+        )
+
+        assert "<noscript>" not in page
+        assert f'http-equiv="refresh" content="{home_status_service.MOBILE_PAGE_REFRESH_SEC}"' in page
+        assert "<script>" not in page
+
+    def test_the_script_sends_credentials(self):
+        """Cloudflare Access の内側にあるため、Cookie を送らないと弾かれる。"""
+        page = home_status_service.render_mobile_status_page_html(
+            [], NOW,
+            manifest_path="/m.webmanifest", icon_path="/i.png",
+            dashboard_path="/dashboard/", quest_path="/quest",
+            status_path="/dashboard/m/status",
+        )
+
+        assert 'credentials: "same-origin"' in page
+
+    def test_a_failed_update_keeps_the_last_values(self):
+        """圏外・サーバー再起動の最中に画面が空になると、かえって困る。"""
+        page = home_status_service.render_mobile_status_page_html(
+            [], NOW,
+            manifest_path="/m.webmanifest", icon_path="/i.png",
+            dashboard_path="/dashboard/", quest_path="/quest",
+            status_path="/dashboard/m/status",
+        )
+
+        assert 'classList.add("stale")' in page
+        assert "#status.stale" in page
+
+    def test_repeated_fragment_requests_do_not_scrape_again(self):
+        """断片の取得経路もページ本体と同じTTLキャッシュを通ること。"""
+        patches = _stub_loaders()
+        for p in patches:
+            p.start()
+        try:
+            with patch.object(
+                home_status_service.train_service, "get_jr_traffic_status",
+                return_value={"宝塚線": {}, "神戸線": {}},
+            ) as scrape, _client() as client:
+                client.get(f"{config.DASHBOARD_BASE_PATH}/m")
+                client.get(f"{config.DASHBOARD_BASE_PATH}/m/status")
+                client.get(f"{config.DASHBOARD_BASE_PATH}/m/status")
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert scrape.call_count == 1

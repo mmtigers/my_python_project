@@ -9,11 +9,12 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH` 配下で配信�
 `config.DASHBOARD_PROXY_ENABLED=false` のときは `unified_server.py` がこのルーターを
 include しないため、パス自体が存在しなくなる(404)。
 
-ベースパス配下には、中継のほかに次の2つも置く(いずれも中継先のStreamlitは
+ベースパス配下には、中継のほかに次のものも置く(いずれも中継先のStreamlitは
 持っていないため、このアプリが直接返す):
 
 - スマートフォンのホーム画面に追加するためのマニフェストとアイコン
 - 軽量ページ `{DASHBOARD_BASE_PATH}/m`(Streamlitを介さない読み取り専用のサマリー)
+- その自動更新用に、カードのブロックだけを返す `{DASHBOARD_BASE_PATH}/m/status`
 """
 import json
 
@@ -31,6 +32,8 @@ from services.dashboard_proxy_service import (
 
 # 軽量ページ(Streamlitを介さない読み取り専用のサマリー)のパス。
 _MOBILE_PATH = f"{config.DASHBOARD_BASE_PATH}/m"
+# 軽量ページが自動更新で差し替える、カードのブロックだけを返すパス。
+_MOBILE_STATUS_PATH = f"{_MOBILE_PATH}/status"
 # ファミクエ(PWA)への導線。`unified_server.py` が `/quest` にSPAをマウントしている。
 _QUEST_APP_PATH = "/quest"
 
@@ -96,6 +99,28 @@ def mobile_status_page() -> HTMLResponse:
             icon_path=f"{_BASE_PATH}/icon-180.png",
             dashboard_path=f"{_BASE_PATH}/",
             quest_path=_QUEST_APP_PATH,
+            status_path=_MOBILE_STATUS_PATH,
+        )
+    )
+
+
+@router.get(_MOBILE_STATUS_PATH, include_in_schema=False)
+def mobile_status_section() -> HTMLResponse:
+    """カードのブロックだけを返す(軽量ページの自動更新用)。
+
+    以前の自動更新は `<meta http-equiv="refresh">` による全ページ再読み込みで、
+    60秒ごとに画面が白く瞬き、スクロール位置も先頭へ戻っていた。この断片だけを
+    差し替えることで、見ている位置を保ったまま値が新しくなる。
+
+    取得は `collect_status_cards`(TTL60秒のメモ付き)なので、ページ全体を返す
+    経路と同じ材料を共有し、DB・スクレイピングの回数は増えない。
+    """
+    cards, fetched_at = home_status_service.collect_status_cards()
+    return HTMLResponse(
+        home_status_service.render_status_section_html(
+            cards,
+            fetched_at,
+            dashboard_path=f"{_BASE_PATH}/",
         )
     )
 

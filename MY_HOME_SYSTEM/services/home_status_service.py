@@ -17,6 +17,7 @@
     ここを参照することで、「片方だけ直して食い違う」状態を防ぐ。
 """
 import html
+import json
 import logging
 import threading
 import time
@@ -632,6 +633,66 @@ _MOBILE_PAGE_BASE_CSS = """
 #     Light に固定している場合、共有CSSへ `prefers-color-scheme` を入れると
 #     「周りは白いのにカードだけ黒い」状態になる。夜にスマホで見るのは軽量ページ
 #     なので、ここだけをダークに対応させ、本体は Streamlit のテーマに任せる。
+# 差し替えが失敗したことが分かるようにするCSS(下記スクリプトが付け外しする)。
+_MOBILE_PAGE_STALE_CSS = """
+    #status.stale { opacity: 0.55; }
+    #status.stale::after {
+        content: "⚠️ 更新できていません(表示は最後に取得できた内容です)";
+        display: block;
+        margin-top: 8px;
+        font-size: 0.8rem;
+        color: #b71c1c;
+    }
+"""
+
+# 自動更新。ページ全体を読み込み直さず、カードのブロックだけを差し替える。
+#
+# 以前は `<meta http-equiv="refresh">` による全ページ再読み込みだった。60秒ごとに
+# 画面が白く瞬き、スクロール位置も先頭へ戻るため、下のカードを見ている最中に
+# 読めなくなることがあった。JS が動く環境ではこちらを使い、動かない環境のために
+# `<noscript>` の中に従来の meta refresh を残す(どちらか一方だけが働く)。
+#
+# `__STATUS_URL__` と `__REFRESH_MS__` は `render_mobile_status_page_html` が
+# 差し込む(URLは `json.dumps` を通すのでJS文字列として安全)。
+_MOBILE_PAGE_REFRESH_JS = """
+(function () {
+    var url = __STATUS_URL__;
+    var intervalMs = __REFRESH_MS__;
+    var inFlight = false;
+
+    function apply(html) {
+        var section = document.getElementById("status");
+        if (!section) { return; }
+        section.outerHTML = html;
+    }
+
+    function update() {
+        if (inFlight || document.hidden) { return; }
+        inFlight = true;
+        // Cloudflare Access の内側にあるため Cookie を送る必要がある。
+        fetch(url, { credentials: "same-origin", cache: "no-store" })
+            .then(function (res) {
+                if (!res.ok) { throw new Error("status " + res.status); }
+                return res.text();
+            })
+            .then(function (html) { apply(html); })
+            .catch(function () {
+                // 取れなかったときは古い表示を消さずに残し、古いことだけを示す
+                // (圏外・サーバー再起動の最中に画面が空になると、かえって困る)。
+                var section = document.getElementById("status");
+                if (section) { section.classList.add("stale"); }
+            })
+            .then(function () { inFlight = false; });
+    }
+
+    setInterval(update, intervalMs);
+    // 画面を消している間は更新しないぶん、戻ってきたら即座に取り直す。
+    document.addEventListener("visibilitychange", function () {
+        if (!document.hidden) { update(); }
+    });
+})();
+"""
+
 _MOBILE_PAGE_DARK_CSS = """
     @media (prefers-color-scheme: dark) {
         body { background: #121212; color: #e8e8e8; }
@@ -649,6 +710,7 @@ _MOBILE_PAGE_DARK_CSS = """
         .diff-flat { color: #bdbdbd; }
         .diff-none { color: #9e9e9e; }
         nav a { background: #16304a; color: #90caf9; border-color: #24507a; }
+        #status.stale::after { color: #ef9a9a; }
     }
 """
 
@@ -686,19 +748,39 @@ def render_mobile_status_page_html(
     icon_path: str,
     dashboard_path: str,
     quest_path: str,
+    status_path: str | None = None,
     refresh_sec: int = MOBILE_PAGE_REFRESH_SEC,
 ) -> str:
     """軽量ページのHTML全体を組み立てる。
 
     パス類を引数で受けるのは、このモジュールを配信層(ルーター・中継)から
     独立させておくため(テストもここだけで完結する)。
+
+    `status_path` はカードのブロックだけを返すURL。渡すと自動更新が
+    「そこだけ差し替える」方式になり、渡さないと従来どおりページ全体を
+    読み込み直す。
     """
+    if status_path is None:
+        # JS を使わない場合は従来どおり全体を再読み込みする。
+        refresh_head = f'<meta http-equiv="refresh" content="{int(refresh_sec)}">'
+        refresh_script = ""
+    else:
+        # JS が動かない環境だけが meta refresh を見る(二重に更新されない)。
+        refresh_head = f'<noscript><meta http-equiv="refresh" content="{int(refresh_sec)}"></noscript>'
+        refresh_script = (
+            "<script>"
+            + _MOBILE_PAGE_REFRESH_JS
+            .replace("__STATUS_URL__", json.dumps(status_path))
+            .replace("__REFRESH_MS__", str(int(refresh_sec) * 1000))
+            + "</script>"
+        )
+
     return (
         "<!DOCTYPE html>"
         '<html lang="ja"><head>'
         '<meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f'<meta http-equiv="refresh" content="{int(refresh_sec)}">'
+        f"{refresh_head}"
         f"<title>{html.escape(MOBILE_PAGE_TITLE)}</title>"
         # マニフェストの取得は既定で認証情報を送らない。このパスは Cloudflare Access の
         # 内側にあるため `use-credentials` が要る(`dashboard_proxy_service` と同じ理由)。
@@ -707,7 +789,8 @@ def render_mobile_status_page_html(
         '<meta name="apple-mobile-web-app-capable" content="yes">'
         '<meta name="mobile-web-app-capable" content="yes">'
         '<meta name="theme-color" content="#0d47a1">'
-        f"<style>{_MOBILE_PAGE_BASE_CSS}{STATUS_CARD_CSS}{_MOBILE_PAGE_DARK_CSS}</style>"
+        f"<style>{_MOBILE_PAGE_BASE_CSS}{STATUS_CARD_CSS}"
+        f"{_MOBILE_PAGE_STALE_CSS}{_MOBILE_PAGE_DARK_CSS}</style>"
         "</head><body>"
         f"<h1>{html.escape(MOBILE_PAGE_TITLE)}</h1>"
         f"{render_status_section_html(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec)}"
@@ -715,5 +798,6 @@ def render_mobile_status_page_html(
         f'<a href="{html.escape(dashboard_path)}">📊 詳しく見る</a>'
         f'<a href="{html.escape(quest_path)}">⚔️ ファミクエ</a>'
         "</nav>"
+        f"{refresh_script}"
         "</body></html>"
     )
