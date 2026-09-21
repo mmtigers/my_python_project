@@ -20,7 +20,7 @@
 ラズパイ監視の層2(Issue #339)。層1(`monitors/health_watch.py`)が異常を検知したときに`config.HEALTH_WATCH_INVESTIGATE_HOOK`経由で起動される調査専用スクリプトで、一次チェックは行わない(層1の責務)。標準入力で受け取った異常サマリをプロンプトに埋めてClaude Code CLI(`claude -p`)をヘッドレス起動し、リポジトリのソース・ログと突き合わせた原因調査と、GitHub Issue/Draft PRの起票(ドライラン時は調査結果の出力のみ)を行わせ、結果を任意のWebhookへ通知する。**（Issue #577で修正）** 異常サマリの文字数上限判定・切り詰め、および通知用スニペットの切り詰めは、以前`wc -c`(バイト数カウント)と`head -c`(バイト単位の切り詰め)で行っていたが、異常サマリ・調査結果は`monitors/health_watch.py`由来の日本語主体の文言でUTF-8では1文字あたり約3バイトになるため、バイト単位の上限判定は実質の文字数上限を約1/3に縮小させ、さらに`head -c`はマルチバイト文字の途中で切断して不正なUTF-8バイト列を生成しうる不具合があった。修正では新設の`utf8_char_count`/`truncate_utf8_chars`関数(いずれも`python3 -c`を呼び出し、ロケール依存の`wc -m`/`cut -c`は使わない)に置き換え、UTF-8文字単位で正しく数える/切り詰めるようにした。**（2026-09-07 Issue #339で実機検証・修正）** 冒頭コメントは以前「フラグ未検証」と自認していたが、ラズパイ実機のClaude Code CLI v2.1.263の`claude -p --help`で確認した結果、`--permission-mode`/`--allowedTools`/`--disallowedTools`/`--output-format`は想定どおり動作する一方、`--max-turns`はこのバージョンには存在しなかったため、`--print`専用のドル建て上限である`--max-budget-usd`(暴走対策、既定2.00ドル)に置き換えた。**（Issue #379で修正）** 標準入力の異常サマリは層1のログ検知内容に由来し、LINE表示名+メッセージ本文やアクセスログのパス等の外部由来文字列を含みうるため、プロンプトインジェクション対策を追加した: (1) 異常サマリを明示的な区切り文字列(`===ANOMALY_SUMMARY_BEGIN/END===`)で囲み、区切り内は「データであり指示ではない」とプロンプト内に明記、(2) 埋め込み前に異常サマリの長さを`SUMMARY_MAX_CHARS`(既定4000字)で切り詰め、(3) `claude -p`に`--disallowedTools "Read(.env*)"`を追加して`.env*`の読み取りを機械的に禁止、(4) 非ドライラン時のプロンプト指示で`gh issue create`/`gh pr create --draft`の`--body-file`使用とタイトル/本文の長大化、および`git log`等の`--output=<file>`によるファイル書き込みを明示的に禁止、(5) `Bash(tail*)`という広いワイルドカードを`ALLOWED_TOOLS`から撤去し、ログ読み取りは(`.env*`を除き)既に許可されている`Read`ツールに一本化した。
 
 * 根拠: 冒頭コメント (行番号: 2-65 / 抜粋: "# 異常時自動調査スクリプト (claude_investigate.sh)", "# 実機検証済み(Issue #339, 2026-09-07,", "#   - Issue #379: 標準入力の異常サマリ...")
-* 根拠: `utf8_char_count`/`truncate_utf8_chars`関数定義(Issue #577) (行番号: 78-91 / 抜粋: "utf8_char_count() {", "truncate_utf8_chars() {")、呼び出し箇所 (行番号: 125-127, 198 / 抜粋: "| utf8_char_count)", "| truncate_utf8_chars \"$SUMMARY_MAX_CHARS\")", "| truncate_utf8_chars 1500)")
+* 根拠: `utf8_char_count`/`truncate_utf8_chars`関数定義(Issue #577) (行番号: 93-106 / 抜粋: "utf8_char_count() {", "truncate_utf8_chars() {")、呼び出し箇所 (行番号: 166-168, 239 / 抜粋: "| utf8_char_count)", "| truncate_utf8_chars \"$SUMMARY_MAX_CHARS\")", "| truncate_utf8_chars 1500)")
 
 ## 3. 外部依存関係
 
@@ -34,11 +34,11 @@
 | `timeout` | 外部コマンド(coreutils) | `claude -p`の暴走対策(既定900秒、SIGTERM後10秒でSIGKILL昇格) | 根拠: [起動コマンド] (行番号: 179 / 抜粋: "RESULT=$(timeout --kill-after=10 \"$TIMEOUT_SEC\" claude -p \"$PROMPT\"") |
 | `claude` | 外部コマンド(Claude Code CLI) | ヘッドレスの原因調査本体 | 根拠: [起動コマンド] (行番号: 179-184 / 抜粋: "claude -p \"$PROMPT\"") |
 | `jq` | 外部コマンド | `--output-format json`の`.result`抽出、および通知ペイロードのJSON組み立て | 根拠: [結果抽出/ペイロード] (行番号: 247, 262 / 抜粋: "jq -r '.result // .'", "PAYLOAD=$(jq -n --arg content") |
-| `curl` | 外部コマンド | `WATCHDOG_NOTIFY_WEBHOOK_URL`への調査結果POST | 根拠: [通知] (行番号: 201-204 / 抜粋: "curl -fsS -X POST \"$WATCHDOG_NOTIFY_WEBHOOK_URL\"") |
-| `python3` | 外部コマンド(Issue #577で追加) | `utf8_char_count`/`truncate_utf8_chars`関数内から`python3 -c`でUTF-8文字単位の文字数カウント・切り詰めを実行する。ロケールに依存する`wc -m`/`cut -c`は使わず、旧`wc -c`/`head -c`のバイト単位カウント・切り詰めを置き換えた | 根拠: [関数定義] (行番号: 84-91 / 抜粋: "python3 -c 'import sys; print(len(sys.stdin.read()))'", "python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:int(sys.argv[1])])' \"$1\"") |
-| `CLAUDE_INVESTIGATE_PROJECT_DIR` | 環境変数 | リポジトリパスの上書き(既定`/home/masahiro/develop`。Issue #380: 以前の既定`/home/masahiro/develop/my_python_project`は`tools/connect_speaker.sh`等・全systemdユニット・`start_all.sh`が使う実機パス`/home/masahiro/develop/MY_HOME_SYSTEM`と食い違っており、`cd`失敗+`set -e`で層2調査が無言で一度も動かない不具合があったため、他ファイルと同じ規約に修正された。あわせて`HOME_SYSTEM_DIR`の存在チェックを追加し、パス不一致時は明示的にエラーメッセージを出して`exit 1`するようになった) | 根拠: [変数定義] (行番号: 69, 95-99 / 抜粋: "PROJECT_DIR=\"${CLAUDE_INVESTIGATE_PROJECT_DIR:-/home/masahiro/develop}\"") |
-| `CLAUDE_INVESTIGATE_TIMEOUT_SEC` / `CLAUDE_INVESTIGATE_MAX_BUDGET_USD` | 環境変数 | タイムアウト秒(既定900)・`--max-budget-usd`値(既定2.00ドル)の上書き。**（2026-09-07 Issue #339で変更）** 実機確認の結果`--max-turns`はCLIに存在しなかったため、コスト上限による暴走対策に置き換えた | 根拠: [変数定義] (行番号: 72-73 / 抜粋: "MAX_BUDGET_USD=\"${CLAUDE_INVESTIGATE_MAX_BUDGET_USD:-2.00}\"") |
-| `CLAUDE_INVESTIGATE_DRY_RUN` | 環境変数 | `1`でドライラン(gh起票を許可ツールから外し、調査・提案のみ)。既定値は`0`(ドライランではない)で、Issue #379でも変更していない | 根拠: [分岐] (行番号: 74, 134-139 / 抜粋: "if [ \"$DRY_RUN\" = \"1\" ]; then") |
+| `curl` | 外部コマンド | `WATCHDOG_NOTIFY_WEBHOOK_URL`への調査結果POST | 根拠: [通知] (行番号: 264-267 / 抜粋: "curl -fsS -X POST \"$WATCHDOG_NOTIFY_WEBHOOK_URL\"") |
+| `python3` | 外部コマンド(Issue #577で追加) | `utf8_char_count`/`truncate_utf8_chars`関数内から`python3 -c`でUTF-8文字単位の文字数カウント・切り詰めを実行する。ロケールに依存する`wc -m`/`cut -c`は使わず、旧`wc -c`/`head -c`のバイト単位カウント・切り詰めを置き換えた | 根拠: [関数定義] (行番号: 94-101 / 抜粋: "python3 -c 'import sys; print(len(sys.stdin.read()))'", "python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:int(sys.argv[1])])' \"$1\"") |
+| `CLAUDE_INVESTIGATE_PROJECT_DIR` | 環境変数 | リポジトリパスの上書き(既定`/home/masahiro/develop`。Issue #380: 以前の既定`/home/masahiro/develop/my_python_project`は`tools/connect_speaker.sh`等・全systemdユニット・`start_all.sh`が使う実機パス`/home/masahiro/develop/MY_HOME_SYSTEM`と食い違っており、`cd`失敗+`set -e`で層2調査が無言で一度も動かない不具合があったため、他ファイルと同じ規約に修正された。あわせて`HOME_SYSTEM_DIR`の存在チェックを追加し、パス不一致時は明示的にエラーメッセージを出して`exit 1`するようになった) | 根拠: [変数定義] (行番号: 75, 101-105 / 抜粋: "PROJECT_DIR=\"${CLAUDE_INVESTIGATE_PROJECT_DIR:-/home/masahiro/develop}\"") |
+| `CLAUDE_INVESTIGATE_TIMEOUT_SEC` / `CLAUDE_INVESTIGATE_MAX_BUDGET_USD` | 環境変数 | タイムアウト秒(既定900)・`--max-budget-usd`値(既定2.00ドル)の上書き。**（2026-09-07 Issue #339で変更）** 実機確認の結果`--max-turns`はCLIに存在しなかったため、コスト上限による暴走対策に置き換えた | 根拠: [変数定義] (行番号: 79-80 / 抜粋: "MAX_BUDGET_USD=\"${CLAUDE_INVESTIGATE_MAX_BUDGET_USD:-2.00}\"") |
+| `CLAUDE_INVESTIGATE_DRY_RUN` | 環境変数 | `1`でドライラン(gh起票を許可ツールから外し、調査・提案のみ)。既定値は`0`(ドライランではない)で、Issue #379でも変更していない | 根拠: [分岐] (行番号: 181, 241-246 / 抜粋: "if [ \"$DRY_RUN\" = \"1\" ]; then") |
 | `CLAUDE_INVESTIGATE_SUMMARY_MAX_CHARS` | 環境変数(Issue #379で追加) | プロンプトへ埋め込む異常サマリの文字数上限(既定4000)。**（Issue #577で修正）** 超過判定・切り詰めは`utf8_char_count`/`truncate_utf8_chars`関数(`python3 -c`によるUTF-8文字単位。旧`wc -c`/`head -c`のバイト単位判定・切り詰めから変更)経由で行い、超過分は切り詰めて注記を付ける | 根拠: [変数定義] (行番号: 82 / 抜粋: "SUMMARY_MAX_CHARS=\"${CLAUDE_INVESTIGATE_SUMMARY_MAX_CHARS:-4000}\"")、[切り詰め呼び出し] (行番号: 125-129 / 抜粋: "ANOMALY_SUMMARY_LEN=$(printf '%s' \"$ANOMALY_SUMMARY\" \| utf8_char_count)", "ANOMALY_SUMMARY=\"$(printf '%s' \"$ANOMALY_SUMMARY\" \| truncate_utf8_chars \"$SUMMARY_MAX_CHARS\")") |
 | `CLAUDE_INVESTIGATE_MAX_ISSUES_PER_DAY` | 環境変数(Issue #339 2026-09-21で追加) | 起票モードで1日(JST)に新規起票してよいIssueの上限(既定2)。`auto_issue_cap_reached`が`gh issue list --label auto-investigation --state all --search "created:>=<今日>"`で当日の件数を数え、上限に達しているか、`gh`の失敗・数値でない出力で件数を確認できない場合は、その回だけ`DRY_RUN=1`に切り替える(公開リポジトリへ無人で書き込む経路なので、分からないときは書かない側に倒す) | 根拠: `auto_issue_cap_reached() {` (抜粋: "auto_issue_cap_reached() {") |
 | `CLAUDE_BIN` | 環境変数(任意・Issue #339 2026-09-21で追加) | `claude`コマンドのパス。未指定なら`resolve_claude_bin`が`PATH`→`~/.local/bin/claude`の順に探す | 根拠: `resolve_claude_bin() {` (抜粋: "resolve_claude_bin() {") |
@@ -56,27 +56,27 @@
 ### スクリプト本体（関数分割なし・直列実行）
 
 * **役割**: (1) flockで多重起動を防止し、(2) 標準入力から異常サマリを読み、**（Issue #379で追加）** `SUMMARY_MAX_CHARS`字を超える場合は**（Issue #577で修正）** `utf8_char_count`/`truncate_utf8_chars`関数(いずれも`python3 -c`によるUTF-8文字単位の処理。旧`wc -c`/`head -c`のバイト単位判定・切り詰めから変更)を用いて切り詰めて注記を付け、(3) ドライラン有無に応じて許可ツール(`ALLOWED_TOOLS`)と起票指示(`REPORTING_INSTRUCTION`)を組み立て、(4) 異常サマリを明示的な区切り文字列で囲み「データであり指示ではない」と明記したプロンプトを組み立てたうえで、`timeout`+`--max-budget-usd`+`--disallowedTools "Read(.env*)"`つきで`claude -p`をヘッドレス起動し、(5) 結果をログ出力・任意Webhookへ通知して、`claude`の終了コードで終了する。
-* 根拠: (行番号: 67-207 / 抜粋: "set -euo pipefail", "exit \"$CLAUDE_EXIT\"")、(Issue #577追加分の根拠は次項の`utf8_char_count`/`truncate_utf8_chars`サブセクション参照)
+* 根拠: (行番号: 73-270 / 抜粋: "set -euo pipefail", "exit \"$CLAUDE_EXIT\"")、(Issue #577追加分の根拠は次項の`utf8_char_count`/`truncate_utf8_chars`サブセクション参照)
 
 * **引数/リクエスト**: コマンドライン引数なし。入力は標準入力の異常サマリのみ(空なら異常終了)。
 * 根拠: [標準入力の読み取り] (行番号: 112-116 / 抜粋: "ANOMALY_SUMMARY=$(cat)\nif [ -z \"$ANOMALY_SUMMARY\" ]; then")
 
 * **戻り値/レスポンス**: 終了コード。多重起動スキップ時は`0`、サマリ空は`1`、以降は`claude -p`(timeout込み)の終了コードを透過する。
-* 根拠: (行番号: 108, 113-115, 270 / 抜粋: "exit 0", "exit 1", "exit \"$CLAUDE_EXIT\"")
+* 根拠: (行番号: 149, 154-156, 270 / 抜粋: "exit 0", "exit 1", "exit \"$CLAUDE_EXIT\"")
 
 * **副作用**: `logs/.claude_investigate.lock`の作成(flock用fd 9)、`claude -p`によるAPI呼び出しとリポジトリ読み取り(非ドライラン時は`gh`によるIssue/Draft PR起票を許可)、`WATCHDOG_NOTIFY_WEBHOOK_URL`へのHTTP POST(調査結果は**（Issue #577で修正）** `truncate_utf8_chars`でUTF-8文字単位の先頭1500文字に切り詰め。旧`head -c 1500`のバイト単位切り詰めから変更)、標準出力へのログ(起動元のhealth_watch.py側で`logs/claude_investigate.log`へ追記される)。加えて`utf8_char_count`/`truncate_utf8_chars`呼び出しのたびに`python3`サブプロセスが起動する。
 * 根拠: [ロック/起動/通知] (行番号: 146, 179-184, 261 / 抜粋: "exec 9>\"$LOCK_FILE\"", "claude -p \"$PROMPT\"", "SNIPPET=$(printf '%s' \"$RESULT\" | truncate_utf8_chars 1500)")
 
 * **エラーハンドリング**: `set -euo pipefail`を基本としつつ、`claude -p`の呼び出しは`set +e`で囲んで終了コードを捕捉し、失敗時は`RESULT`にエラー説明を組み立てて通知に載せる。`curl`失敗は`|| echo ... >&2`で握りつぶし通知失敗として記録のみ。
-* 根拠: (行番号: 178-185, 204 / 抜粋: "set +e", "CLAUDE_EXIT=$?", "|| echo \"[$(date)] 通知送信に失敗しました\" >&2")
+* 根拠: (行番号: 238-245, 264 / 抜粋: "set +e", "CLAUDE_EXIT=$?", "|| echo \"[$(date)] 通知送信に失敗しました\" >&2")
 
 ### `utf8_char_count` / `truncate_utf8_chars`（Issue #577で追加）
 
 * **役割**: 異常サマリ・調査結果を含む文字列をUTF-8文字単位で正しく数える/切り詰めるための2つのヘルパー関数。`utf8_char_count`は標準入力の文字列の文字数(バイト数ではない)を数えて標準出力へ出力する。`truncate_utf8_chars`は第1引数で指定された最大文字数まで、標準入力の文字列をマルチバイト文字の境界を壊さずに切り詰めて標準出力へ出力する。いずれも内部で`python3 -c`を呼び出す実装であり、`monitors/health_watch.py`由来の日本語主体の異常サマリ・調査結果に対して、旧`wc -c`/`head -c`のようなバイト単位の処理(UTF-8で1文字あたり約3バイトのため実質の文字数上限が約1/3に縮み、マルチバイト文字の途中で切断され不正なUTF-8バイト列を生成しうる)を避けるために新設された。あえてロケール依存の`wc -m`/`cut -c`を使わなかったのは、シェルのロケールがUTF-8でない場合にバイト単位の挙動へ黙って退行しうるためで、ラズパイのcron/systemd実行環境ではロケールがUTF-8である保証がないことを理由として明記している。
-* 根拠: [関数定義] (行番号: 84-91 / 抜粋: "utf8_char_count() {\n  python3 -c 'import sys; print(len(sys.stdin.read()))'\n}", "truncate_utf8_chars() {")、[導入意図コメント] (行番号: 78-83 / 抜粋: "# Issue #577: 異常サマリ・調査結果は日本語主体(health_watch.py等の文言)で", "# 1文字あたり約3バイトのため、wc -c/head -c によるバイト単位の判定・切り詰めだと")
+* 根拠: [関数定義] (行番号: 84-91 / 抜粋: "utf8_char_count() {\n  python3 -c 'import sys; print(len(sys.stdin.read()))'\n}", "truncate_utf8_chars() {")、[導入意図コメント] (行番号: 87-92 / 抜粋: "# Issue #577: 異常サマリ・調査結果は日本語主体(health_watch.py等の文言)で", "# 1文字あたり約3バイトのため、wc -c/head -c によるバイト単位の判定・切り詰めだと")
 
 * **引数/リクエスト**: `utf8_char_count`は引数なし、標準入力に文字数を数えたい文字列を渡す。`truncate_utf8_chars`は第1引数`$1`に切り詰め後の最大文字数(整数)を取り、標準入力に切り詰め対象の文字列を渡す。
-* 根拠: [関数定義] (行番号: 84-86, 88-91 / 抜粋: "utf8_char_count() {", "truncate_utf8_chars() {\n  # $1: 最大文字数。")
+* 根拠: [関数定義] (行番号: 93-95, 97-100 / 抜粋: "utf8_char_count() {", "truncate_utf8_chars() {\n  # $1: 最大文字数。")
 
 * **戻り値/レスポンス（標準出力）**: `utf8_char_count`は文字数を表す整数を標準出力へ出力する(`len(sys.stdin.read())`)。`truncate_utf8_chars`は入力文字列の先頭から`$1`文字目までを標準出力へ出力する(`sys.stdout.write`のため`print`と異なり末尾に改行を追加しない)。
 * 根拠: (行番号: 94, 99 / 抜粋: "python3 -c 'import sys; print(len(sys.stdin.read()))'", "python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:int(sys.argv[1])])' \"$1\"")
@@ -85,7 +85,7 @@
 * 根拠: (行番号: 85, 90 / 抜粋: "python3 -c '...'")
 
 * **エラーハンドリング**: 関数内で明示的なエラーハンドリングは行っていない。`truncate_utf8_chars`の`$1`が数値に変換できない場合は`int(sys.argv[1])`が例外を送出し`python3`が非ゼロ終了コードで終了する(呼び出し元は`set -euo pipefail`下にあるため、この経路に入るとスクリプト全体が即時終了しうる)。ただし実際の呼び出し箇所(125-129行目, 198行目)では`$1`に`SUMMARY_MAX_CHARS`(数値の環境変数、既定4000)またはリテラル`1500`しか渡していないため、通常運用でこの経路には到達しない。
-* 根拠: [truncate_utf8_chars本体] (行番号: 88-91 / 抜粋: "int(sys.argv[1])")、[呼び出し箇所] (行番号: 168, 261 / 抜粋: "truncate_utf8_chars \"$SUMMARY_MAX_CHARS\")", "truncate_utf8_chars 1500)")
+* 根拠: [truncate_utf8_chars本体] (行番号: 99-102 / 抜粋: "int(sys.argv[1])")、[呼び出し箇所] (行番号: 168, 261 / 抜粋: "truncate_utf8_chars \"$SUMMARY_MAX_CHARS\")", "truncate_utf8_chars 1500)")
 
 ### ガードレール（`ALLOWED_TOOLS` / プロンプト内指示 / `--disallowedTools`）
 
