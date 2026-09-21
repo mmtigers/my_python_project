@@ -9,6 +9,7 @@
 from datetime import datetime
 
 import pandas as pd
+import streamlit as st
 from services import home_status_service
 
 from . import common as view_common
@@ -35,6 +36,16 @@ def render_summary(
         memory=view_common.get_memory_usage_cached(),
         monthly_cost=view_common.get_monthly_cost_cached(),
     )
+
+    # いま気にすべきものを先頭に1行で出す。9枚の並び自体は動かさない
+    # (どの位置に何があるかで覚えている画面で順番が入れ替わると読み違えるため)。
+    # 拾う条件は軽量ページと同じ `home_status_service.summarize_alerts` に任せる
+    # ので、ここに判定は持たない。
+    alerts = home_status_service.summarize_alerts(cards)
+    if alerts:
+        st.warning("⚠️ 気になること: " + "、".join(card.title for card in alerts))
+    else:
+        st.success("✅ 気になることはありません")
 
     # スマホ対応: 以前は st.columns(3) を3段重ねて9枚を並べていたが、
     # Streamlitの列は画面幅が足りなくても横並びを維持するため、スマートフォンでは

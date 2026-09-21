@@ -325,3 +325,108 @@ class TestCardsLinkToTheirDetail:
 
         assert "home_status_service.DASHBOARD_TABS" in source
         assert '("home", ' not in source, "dashboard.py にタブ定義が再び書かれている"
+
+
+class TestAlertSummary:
+    """B: 赤・黄のカードだけを名前で拾って先頭に出す。
+
+    9枚の並びは固定のまま。JR運行情報は7枚目にあり、運休が出ていても
+    画面をスクロールしないと気づけなかった。
+    """
+
+    def test_red_comes_before_yellow(self):
+        cards = [
+            home_status_service.StatusCard("平常", "v", "theme-green"),
+            home_status_service.StatusCard("注意", "v", "theme-yellow"),
+            home_status_service.StatusCard("異常", "v", "theme-red"),
+            home_status_service.StatusCard("不明", "v", "theme-gray"),
+        ]
+
+        assert [c.title for c in home_status_service.summarize_alerts(cards)] == ["異常", "注意"]
+
+    def test_the_grid_order_is_not_changed(self):
+        """並べ替えではなく要約で解決する(位置で覚えている画面を動かさない)。"""
+        cards = [
+            home_status_service.StatusCard("1番目", "v", "theme-green"),
+            home_status_service.StatusCard("2番目", "v", "theme-red"),
+        ]
+
+        grid = home_status_service.render_status_grid_html(cards)
+
+        assert grid.index("1番目") < grid.index("2番目")
+
+    def test_the_line_is_shown_even_when_nothing_is_wrong(self):
+        """毎分の更新で行が出たり消えたりすると、下の内容が上下に跳ねる。"""
+        ok = home_status_service.render_alerts_html(
+            [home_status_service.StatusCard("平常", "v", "theme-green")]
+        )
+
+        assert "気になることはありません" in ok
+        assert "alerts" in ok
+
+    def test_alerts_link_to_the_detail_tab(self):
+        cards = [home_status_service.StatusCard("🚃 JR運行情報", "⛔ 運休発生", "theme-red", tab="out")]
+
+        html_out = home_status_service.render_alerts_html(cards, dashboard_path="/dashboard/")
+
+        assert 'href="/dashboard/?tab=out"' in html_out
+        assert "JR運行情報" in html_out
+
+    def test_alert_titles_are_escaped(self):
+        cards = [home_status_service.StatusCard("<script>x</script>", "v", "theme-red", tab="out")]
+
+        html_out = home_status_service.render_alerts_html(cards, dashboard_path="/dashboard/")
+
+        assert "<script>" not in html_out
+        assert "&lt;script&gt;" in html_out
+
+    def test_the_streamlit_page_uses_the_same_rule(self):
+        """拾う条件を View 側に書き直すと、2つの画面で「気になること」が食い違う。"""
+        with open(os.path.join(_VIEWS_DIR, "summary.py"), encoding="utf-8") as f:
+            source = f.read()
+
+        assert "home_status_service.summarize_alerts" in source
+
+
+class TestDarkMode:
+    """B: 夜にスマホで見ると白背景が眩しい。軽量ページだけダークに対応する。"""
+
+    def _page(self):
+        return home_status_service.render_mobile_status_page_html(
+            [], NOW,
+            manifest_path="/m.webmanifest", icon_path="/i.png",
+            dashboard_path="/dashboard/", quest_path="/quest",
+        )
+
+    def test_the_light_page_follows_the_device_setting(self):
+        page = self._page()
+
+        assert "prefers-color-scheme: dark" in page
+        assert "color-scheme: light dark" in page
+
+    def test_the_streamlit_page_keeps_its_own_theme(self):
+        """本体は Streamlit のテーマ(Light固定もできる)に任せる。
+
+        共有CSSへ入れると、本体を Light に固定している端末で
+        「周りは白いのにカードだけ黒い」状態になる。
+        """
+        from views.dashboard import common as view_common
+
+        assert "prefers-color-scheme" not in home_status_service.STATUS_CARD_CSS
+        assert "prefers-color-scheme" not in view_common.CUSTOM_CSS
+
+    def test_the_bicycle_diff_colours_can_be_themed(self):
+        """値のHTMLに `style='color:...'` を直接埋めるとダーク側で差し替えられない。"""
+        df = pd.DataFrame(
+            {
+                "area_name": ["JR伊丹駅前(第1)自転車駐車場 (A)"],
+                "waiting_count": [3],
+                "timestamp": [pd.Timestamp("2026-09-19T12:00:00+09:00")],
+            }
+        )
+
+        value, _ = home_status_service.get_bicycle_status(df)
+
+        assert "style='color:" not in value
+        assert "diff-" in value
+        assert ".diff-up" in home_status_service.STATUS_CARD_CSS

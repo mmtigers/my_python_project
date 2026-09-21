@@ -91,6 +91,14 @@ STATUS_CARD_CSS = """
     .theme-red { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
     .theme-blue { background-color: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
     .theme-gray { background-color: #f5f5f5; color: #757575; border: 1px solid #e0e0e0; }
+
+    /* 駐輪場カードの前日比。以前は `style='color:#...'` を値のHTMLに直接
+       埋めていたが、それだとダークモードで色を差し替えられない(軽量ページの
+       ダーク対応は下記 `_MOBILE_PAGE_DARK_CSS`)。クラスにして色はCSS側に置く。 */
+    .diff-up { color: #d32f2f; }
+    .diff-down { color: #388e3c; }
+    .diff-flat { color: #757575; }
+    .diff-none { color: #999; }
 """
 
 
@@ -190,6 +198,33 @@ def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:
     if card.tab is None:
         return None
     return f"{dashboard_path}?tab={card.tab}"
+
+
+# 「気になること」として拾うテーマ。赤(異常)を先に、黄(注意)を後に並べる。
+ALERT_THEMES: tuple[str, ...] = ("theme-red", "theme-yellow")
+
+
+def summarize_alerts(cards) -> list[StatusCard]:
+    """いま気にすべきカードだけを、赤 → 黄 の順で返す。
+
+    9枚の並び自体は動かさない。「左上が高砂」と位置で覚えている画面で順番が
+    入れ替わると、かえって読み違えるため(並べ替えではなく要約で解決する)。
+    """
+    return [card for theme in ALERT_THEMES for card in cards if card.theme == theme]
+
+
+def render_alerts_html(cards, *, dashboard_path: str | None = None) -> str:
+    """要約行のHTML。気になることが無いときも同じ高さの行を出す(画面が跳ねない)。"""
+    alerts = summarize_alerts(cards)
+    if not alerts:
+        return '<p class="alerts alerts-ok">✅ 気になることはありません</p>'
+
+    items = []
+    for card in alerts:
+        label = html.escape(card.title)
+        href = None if dashboard_path is None else card_detail_href(card, dashboard_path)
+        items.append(label if href is None else f'<a href="{html.escape(href)}">{label}</a>')
+    return f'<p class="alerts alerts-warn">⚠️ 気になること: {"、".join(items)}</p>'
 
 
 def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:
@@ -400,13 +435,13 @@ def get_bicycle_status(df_bicycle: pd.DataFrame) -> tuple[str, str]:
                 past_val = int(df_near.loc[nearest_idx]["waiting_count"])
                 diff = current_val - past_val
                 if diff > 0:
-                    diff_str = f" <span style='color:#d32f2f;'>(🔺{diff})</span>"
+                    diff_str = f" <span class='diff-up'>(🔺{diff})</span>"
                 elif diff < 0:
-                    diff_str = f" <span style='color:#388e3c;'>(🔻{abs(diff)})</span>"
+                    diff_str = f" <span class='diff-down'>(🔻{abs(diff)})</span>"
                 else:
-                    diff_str = " <span style='color:#757575;'>(➡️0)</span>"
+                    diff_str = " <span class='diff-flat'>(➡️0)</span>"
             else:
-                diff_str = " <span style='color:#999;'>(--)</span>"
+                diff_str = " <span class='diff-none'>(--)</span>"
 
             details.append(f"{short_name}: <b>{current_val}</b>台{diff_str}")
             total_wait += current_val
@@ -544,7 +579,9 @@ MOBILE_PAGE_TITLE = "おうちの様子"
 MOBILE_PAGE_REFRESH_SEC = STATUS_CACHE_TTL_SEC
 
 _MOBILE_PAGE_BASE_CSS = """
-    :root { color-scheme: light; }
+    /* 端末がダークモードなら下の @media 側の配色になることをブラウザに伝える
+       (スクロールバー等、こちらで指定しない部分もダーク側に揃う)。 */
+    :root { color-scheme: light dark; }
     body {
         margin: 0;
         padding: 12px 12px 32px;
@@ -554,6 +591,21 @@ _MOBILE_PAGE_BASE_CSS = """
     }
     h1 { font-size: 1.25rem; margin: 0 0 2px; }
     .meta { font-size: 0.8rem; color: #666; margin: 0 0 12px; }
+
+    /* 「気になること」の要約行。9枚の並びは固定のままにして、赤・黄のカードだけを
+       名前で拾って先頭に出す(JR運行情報は7枚目にあり、異常でも埋もれていた)。
+       異常が無いときも同じ位置に1行出すので、更新のたびに下の内容が跳ねない。 */
+    .alerts {
+        margin: 0 0 10px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        font-size: 0.85rem;
+        line-height: 1.5;
+    }
+    .alerts-warn { background: #fff3e0; color: #e65100; border: 1px solid #ffe0b2; }
+    .alerts-ok { background: #f1f8e9; color: #558b2f; border: 1px solid #dcedc8; }
+    .alerts a { color: inherit; font-weight: bold; }
+
     nav { display: flex; gap: 8px; margin-top: 16px; }
     nav a {
         flex: 1 1 0;
@@ -571,6 +623,59 @@ _MOBILE_PAGE_BASE_CSS = """
         font-size: 0.9rem;
     }
 """
+
+# 軽量ページだけのダークモード。
+#
+# なぜ Streamlit 側(共有の STATUS_CARD_CSS)に入れないか:
+#     カードのCSSはダッシュボード本体と共有しているが、本体には Streamlit 自身の
+#     テーマ(ハンバーガーメニューで Light を選べる)がある。OSがダークでも本体を
+#     Light に固定している場合、共有CSSへ `prefers-color-scheme` を入れると
+#     「周りは白いのにカードだけ黒い」状態になる。夜にスマホで見るのは軽量ページ
+#     なので、ここだけをダークに対応させ、本体は Streamlit のテーマに任せる。
+_MOBILE_PAGE_DARK_CSS = """
+    @media (prefers-color-scheme: dark) {
+        body { background: #121212; color: #e8e8e8; }
+        .meta { color: #9e9e9e; }
+        .status-title { color: #cfcfcf; }
+        .alerts-warn { background: #3a2a14; color: #ffb74d; border-color: #5c4322; }
+        .alerts-ok { background: #1e2a17; color: #aed581; border-color: #33482a; }
+        .theme-green { background-color: #1b3a24; color: #a5d6a7; border-color: #2e5c39; }
+        .theme-yellow { background-color: #3a3420; color: #ffe082; border-color: #5c5227; }
+        .theme-red { background-color: #3d1f22; color: #ef9a9a; border-color: #6b2f35; }
+        .theme-blue { background-color: #16304a; color: #90caf9; border-color: #24507a; }
+        .theme-gray { background-color: #262626; color: #bdbdbd; border-color: #3a3a3a; }
+        .diff-up { color: #ef9a9a; }
+        .diff-down { color: #a5d6a7; }
+        .diff-flat { color: #bdbdbd; }
+        .diff-none { color: #9e9e9e; }
+        nav a { background: #16304a; color: #90caf9; border-color: #24507a; }
+    }
+"""
+
+
+# 自動更新で差し替える範囲を囲む要素のid。
+STATUS_SECTION_ID = "status"
+
+
+def render_status_section_html(
+    cards,
+    fetched_at: datetime,
+    *,
+    dashboard_path: str | None = None,
+    refresh_sec: int = MOBILE_PAGE_REFRESH_SEC,
+) -> str:
+    """取得時刻・要約行・カードのグリッドをまとめた1ブロック。
+
+    自動更新でここだけを差し替えられるよう、`id` を付けて切り出してある。
+    """
+    return (
+        f'<div id="{STATUS_SECTION_ID}">'
+        f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
+        f"・{int(refresh_sec)}秒ごとに自動更新</p>"
+        f"{render_alerts_html(cards, dashboard_path=dashboard_path)}"
+        f"{render_status_grid_html(cards, dashboard_path=dashboard_path)}"
+        "</div>"
+    )
 
 
 def render_mobile_status_page_html(
@@ -602,12 +707,10 @@ def render_mobile_status_page_html(
         '<meta name="apple-mobile-web-app-capable" content="yes">'
         '<meta name="mobile-web-app-capable" content="yes">'
         '<meta name="theme-color" content="#0d47a1">'
-        f"<style>{_MOBILE_PAGE_BASE_CSS}{STATUS_CARD_CSS}</style>"
+        f"<style>{_MOBILE_PAGE_BASE_CSS}{STATUS_CARD_CSS}{_MOBILE_PAGE_DARK_CSS}</style>"
         "</head><body>"
         f"<h1>{html.escape(MOBILE_PAGE_TITLE)}</h1>"
-        f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
-        f"・{int(refresh_sec)}秒ごとに自動更新</p>"
-        f"{render_status_grid_html(cards, dashboard_path=dashboard_path)}"
+        f"{render_status_section_html(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec)}"
         "<nav>"
         f'<a href="{html.escape(dashboard_path)}">📊 詳しく見る</a>'
         f'<a href="{html.escape(quest_path)}">⚔️ ファミクエ</a>'
