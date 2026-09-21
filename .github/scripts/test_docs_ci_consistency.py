@@ -11,6 +11,14 @@ runbook はそれを転記している。転記は人手のため、閾値を引
 YAML として読み、各ステップの working-directory(ステップ > ジョブ defaults >
 ワークフロー defaults の順で解決)ごとに閾値を集める。
 
+ドキュメント側も同様に、記載を**どのサブシステムのものか**まで見て突き合わせる。
+PR #839 で複数サブシステム対応にした直後は「ドキュメント中の値が、いずれかの
+サブシステムの閾値の集合に含まれるか」という緩い判定になっており、たとえば
+DDD のつもりで MY_HOME_SYSTEM の値(82)を書いても検知できなかった
+(同PRのレビューで指摘された)。ここでは各記載の**直前に現れるサブシステム名**で
+帰属先を決め、その値と厳密に比較する。帰属先を決められない記載は
+「どのサブシステムの話か読み手にも分からない」ことを意味するので失敗させる。
+
 失敗したときは、エラーメッセージが示す test.yml の値へドキュメント側を書き換えること
 (閾値を変える PR では、その更新も同じ PR に含める)。
 
@@ -33,6 +41,9 @@ DOC_GLOBS = [
 ]
 
 _COV_RE = re.compile(r"--cov-fail-under[=\s](\d+)")
+# 記載の帰属先を決めるためのサブシステム名。ドキュメント中でその記載より前に
+# 最後に現れたものを、その記載が指すサブシステムとみなす。
+_SUBSYSTEM_RE = re.compile(r"MY_HOME_SYSTEM|DDD")
 
 
 def _normalize_workdir(value: str) -> str:
@@ -88,30 +99,56 @@ def test_workflow_defines_thresholds_for_both_python_subsystems():
     )
 
 
+def _documented_thresholds():
+    """ドキュメント中の記載を (パス, 行番号, 帰属サブシステム, 値) で列挙する。
+
+    帰属は「その記載より前に最後に現れたサブシステム名」で決める。素朴だが、
+    このリポジトリの書き方(`### MY_HOME_SYSTEM (バックエンド)` の見出し配下の
+    コマンド例、`` `DDD` のpytestも…床 `--cov-fail-under=74` `` のような文)では
+    すべて正しく解決できる。解決できない(サブシステム名が一度も出てこない)場合は
+    None を返し、呼び出し側が失敗させる。
+    """
+    for path in _doc_files():
+        text = path.read_text(encoding="utf-8")
+        for match in _COV_RE.finditer(text):
+            names = _SUBSYSTEM_RE.findall(text[: match.start()])
+            line_no = text.count("\n", 0, match.start()) + 1
+            yield path, line_no, (names[-1] if names else None), int(match.group(1))
+
+
 def test_documented_coverage_threshold_matches_workflow():
     expected = _workflow_thresholds()
-    known = set(expected.values())
     mismatches = []
-    for path in _doc_files():
-        for value in _COV_RE.findall(path.read_text(encoding="utf-8")):
-            if int(value) not in known:
-                mismatches.append(f"{path.relative_to(REPO_ROOT)}: --cov-fail-under={value}")
+    for path, line_no, subsystem, value in _documented_thresholds():
+        where = f"{path.relative_to(REPO_ROOT)}:{line_no}"
+        if subsystem is None:
+            mismatches.append(
+                f"{where}: --cov-fail-under={value} がどのサブシステムの値か判別できません"
+            )
+        elif subsystem not in expected:
+            mismatches.append(
+                f"{where}: --cov-fail-under={value} の帰属先 {subsystem} が test.yml にありません"
+            )
+        elif expected[subsystem] != value:
+            mismatches.append(
+                f"{where}: {subsystem} の閾値は {expected[subsystem]} ですが "
+                f"--cov-fail-under={value} と書かれています"
+            )
     assert not mismatches, (
-        f"test.yml のカバレッジ閾値は {expected} ですが、ドキュメント側の記載がずれています: "
-        f"{mismatches} — 該当箇所を対応するサブシステムの値に書き換えてください。"
+        f"test.yml のカバレッジ閾値は {expected} です。ドキュメント側の記載がずれています:\n"
+        + "\n".join("  - " + m for m in mismatches)
+        + "\n該当箇所を書き換えるか、どのサブシステムの値かが直前で分かるようにしてください。"
     )
 
 
 def test_every_workflow_threshold_is_documented():
-    """CI 側に閾値を足したらドキュメントにも転記されること。"""
+    """CI 側に閾値を足したらドキュメントにも転記されること(サブシステム単位で)。"""
     expected = _workflow_thresholds()
-    documented = set()
-    for path in _doc_files():
-        documented.update(int(v) for v in _COV_RE.findall(path.read_text(encoding="utf-8")))
-    missing = {d: v for d, v in expected.items() if v not in documented}
+    documented = {subsystem for _, _, subsystem, _ in _documented_thresholds()}
+    missing = {d: v for d, v in expected.items() if d not in documented}
     assert not missing, (
         f"test.yml にあるのにドキュメントへ転記されていない閾値があります: {missing} — "
-        f"{DOC_GLOBS} のいずれかに記載してください。"
+        f"{DOC_GLOBS} のいずれかに、直前でサブシステム名が分かる形で記載してください。"
     )
 
 
