@@ -87,5 +87,5 @@ index=95               # 問題の run は 96 番目に位置しており、先�
 ときはスキップされる。上記のように比較元が誤っている可能性もある。
 **したがって床はラチェットの単なる冗長化ではなく、最後の砦である。**
 実測が伸びたら Issue #494 / #536 と同じ運用で床も段階的に引き上げること
-（現在: MY_HOME_SYSTEM 82 / DDD 74 / family-quest は `vitest.config.ts` の
+（現在: MY_HOME_SYSTEM 84 / DDD 74 / family-quest は `vitest.config.ts` の
 `coverage.thresholds`）。

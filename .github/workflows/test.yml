@@ -198,6 +198,9 @@ jobs:
         # 整理だったが、ラチェットは `pull_request` でしか走らず、比較元の成果物
         # (保持14日)が取れないときはスキップされる。その場合に効くのは床だけなので、
         # 床も実測に追従させる必要がある。実測より約4pt下の 82 へ引き上げた。
+        # 同日、監査 AUDIT-029 の残件(sound_manager / network_logger / train_service /
+        # daily_timelapse_job / smart_timelapse_generator)にテストを足して実測が
+        # 88.33%(2,237 passed)になったため、同じ運用で 84 へ引き上げた。
         env:
           # CI環境用の環境変数。SQLITE_DB_PATHはconfig.py側で読み込まれるよう修正済み。
           SQLITE_DB_PATH: ":memory:"
@@ -209,7 +212,7 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-report=html \
-            --cov-fail-under=82
+            --cov-fail-under=84
 
       - name: Find latest successful master run (coverage baseline)
         # カバレッジのラチェット比較元。master の直近成功 run(本ワークフロー)を探す。
