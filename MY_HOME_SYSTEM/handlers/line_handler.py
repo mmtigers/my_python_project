@@ -16,7 +16,15 @@ from linebot.v3.messaging import (
     PushMessageRequest,
     TextMessage
 )
-from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent
+from linebot.v3.webhooks import (
+    AudioMessageContent,
+    FileMessageContent,
+    ImageMessageContent,
+    MessageEvent,
+    PostbackEvent,
+    TextMessageContent,
+    VideoMessageContent,
+)
 
 import config
 from core.logger import setup_logging
@@ -450,6 +458,27 @@ if line_handler:
     line_handler.add(PostbackEvent)(handle_postback)
 
 
+# Issue #836: 写真・動画・音声・ファイルは処理できないが、以前は分岐が無く黙って捨てていたため、
+# 送った側から「届いたのか」「無視されたのか」が分からなかった(オーナー判断: 未対応と返す)。
+# スタンプ・位置情報は会話の相づちとして送られることが多く、毎回返信すると煩わしいので
+# 返信せずログにだけ残す。
+_UNSUPPORTED_MEDIA_CONTENT = (ImageMessageContent, VideoMessageContent, AudioMessageContent, FileMessageContent)
+UNSUPPORTED_MEDIA_REPLY = "📷 写真・動画・音声・ファイルには対応していません。記録や質問は文字で送ってください。"
+
+
+async def handle_non_text_message_async(event: MessageEvent) -> None:
+    """テキスト以外のメッセージを受け取ったことをログに残し、写真等なら未対応と返す。"""
+    user_id = getattr(event.source, "user_id", None)
+    message_type = getattr(event.message, "type", type(event.message).__name__)
+    logger.info(f"📩 Recv non-text message (type={message_type}, user_id={user_id})")
+    if not isinstance(event.message, _UNSUPPORTED_MEDIA_CONTENT):
+        return
+    # Issue #620 と同じく、未認可ユーザーには返信しない(Bot の存在や挙動を教えないため)。
+    if not user_id or not _is_authorized_line_user(user_id):
+        return
+    await _reply_message_async(event.reply_token, [TextMessage(text=UNSUPPORTED_MEDIA_REPLY)], user_id=user_id)
+
+
 async def dispatch_events_async(events: list[Any]) -> None:
     """
     Issue #376: routers/webhook_router.py が署名検証・パース済みのイベント一覧を
@@ -464,6 +493,8 @@ async def dispatch_events_async(events: list[Any]) -> None:
     イベント種別ごとの振り分けは `line_handler.add(...)` で登録している内容
     (MessageEvent+TextMessageContent は handle_message、PostbackEvent は handle_postback)
     と同じにしてあり、それ以外のイベント種別は元の WebhookHandler と同様に無視する。
+    Issue #836: テキスト以外の MessageEvent(写真・スタンプ等)は handle_non_text_message_async
+    へ渡し、ログに残したうえで写真・動画・音声・ファイルには未対応と返す。
 
     webhookEventId ベースの冪等化チェックをここで一括して行う(handle_message/
     handle_postback 個別ではなく1箇所に集約することで、対象イベント種別が増えても
@@ -490,6 +521,8 @@ async def dispatch_events_async(events: list[Any]) -> None:
 
             if isinstance(event, MessageEvent) and isinstance(event.message, TextMessageContent):
                 await handle_message_async(event)
+            elif isinstance(event, MessageEvent):
+                await handle_non_text_message_async(event)
             elif isinstance(event, PostbackEvent):
                 # Postback 経路だけは別スレッドのまま残す。委譲先の
                 # `handlers/line_logic.py` は DB 保存を `sync_run()`(= `asyncio.run`)で

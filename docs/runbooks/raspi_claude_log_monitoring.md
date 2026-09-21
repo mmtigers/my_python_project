@@ -105,6 +105,16 @@
 3. 異常サマリを手で流して単体検証: `echo "テスト異常" | MY_HOME_SYSTEM/scripts/claude_investigate.sh`
 4. 1〜2週間ドライランで観察し、問題なければ `CLAUDE_INVESTIGATE_DRY_RUN` を外してgh起票を有効化する。
 
+**2026-09-21 の状況(Issue #339)**: ドライランを 9/20 から始めていたが、同日 `home_system` を systemd 管理へ移して以降、
+`claude` が `PATH` に無く毎回 `exit=127` で失敗しており、実際に調査できたのは 9/20 09:24 の1回だけだった
+(`scripts/claude_investigate.sh` の `resolve_claude_bin` で修正)。そのうえでオーナー判断により起票モードを有効化した
+(`CLAUDE_INVESTIGATE_DRY_RUN=0`)。**このリポジトリは一般公開**のため、起票モードには次の歯止めを入れてある:
+1日の起票数の上限(`CLAUDE_INVESTIGATE_MAX_ISSUES_PER_DAY`、既定2。確認できなければその回はドライラン)、
+起票前の重複確認と同じ原因ならコメントで追記、改修不要な一時的状態では起票しない、個人情報(LINE本文・人名・
+IP・ホスト名・URL・認証情報)を書かない、`auto-investigation` ラベルを付ける。後半4つはプロンプトの指示で、
+個人情報が載らないことの機械的な保証は無い。自動起票された Issue は `auto-investigation` ラベルで絞り込んで
+定期的に目を通し、個人情報が載っていたら Issue を削除(`gh issue delete`)すること。
+
 ガードレール:
 
 - コード修正の自動適用・自動デプロイは行わない（GitHub IssueまたはDraft PRとして提案するのみ）。`claude -p` の `--allowedTools` を読み取り系 + `gh issue create`/`gh pr create --draft` のみに機械的に制限する。
