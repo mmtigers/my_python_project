@@ -35,6 +35,9 @@ def render_summary(
         jr_status=view_common.load_jr_traffic_status_cached(),
         memory=view_common.get_memory_usage_cached(),
         monthly_cost=view_common.get_monthly_cost_cached(),
+        # 補足表示(値の下の小さい行)にだけ使う材料。取れなくてもカードは出る。
+        last_month_cost=view_common.get_last_month_cost_cached(),
+        disk=view_common.get_disk_usage_cached(),
     )
 
     # いま気にすべきものを先頭に1行で出す。9枚の並び自体は動かさない

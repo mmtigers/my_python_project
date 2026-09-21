@@ -337,6 +337,16 @@ def get_monthly_cost_cached() -> int:
 
 
 @st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def get_last_month_cost_cached() -> int:
+    """`analysis_service.calculate_last_month_cost_same_point` のキャッシュ付きラッパー。
+
+    今月ぶんと同じ形のSQLをもう1本走らせるため、素で呼ぶとホームタブを開くたびに
+    集計が2回になる。
+    """
+    return analysis_service.calculate_last_month_cost_same_point()
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
 def get_system_logs_cached(lines: int = 50, priority=None, target_date=None) -> str:
     """`analysis_service.get_system_logs`(journalctl)のキャッシュ付きラッパー。
 

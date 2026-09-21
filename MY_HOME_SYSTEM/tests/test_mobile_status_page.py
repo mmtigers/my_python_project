@@ -54,6 +54,8 @@ def _stub_loaders(**overrides):
         "load_nas_status": None,
         "get_memory_usage": {"percent": 42.0},
         "calculate_monthly_cost_cumulative": 1234,
+        "calculate_last_month_cost_same_point": 1000,
+        "get_disk_usage": {"percent": 55.0},
     }
     defaults.update(overrides)
     patches = [
@@ -540,3 +542,133 @@ class TestPartialRefresh:
                 p.stop()
 
         assert scrape.call_count == 1
+
+
+class TestSupportingValues:
+    """D: 「いまの値」だけでは判断できないカードに、比べる相手を添える。
+
+    前日比を持っていたのは駐輪場カードだけで、「⚡ 12,345 円」が高いのか安いのか、
+    「🍚 炊いてない」が今日だけなのかが分からなかった。
+    """
+
+    def test_the_card_shows_the_supporting_line(self):
+        card = home_status_service.StatusCard("💰 今月の電気代", "⚡ 1,234 円", "theme-blue",
+                                              sub="先月同日 1,000円 (+234)")
+
+        card_html = home_status_service.render_status_card_html(
+            card.title, card.value, card.theme, sub=card.sub
+        )
+
+        assert 'class="status-sub"' in card_html
+        assert "先月同日 1,000円 (+234)" in card_html
+
+    def test_a_card_without_one_stays_as_it_was(self):
+        card_html = home_status_service.render_status_card_html("t", "v", "theme-gray")
+
+        assert "status-sub" not in card_html
+
+    def test_the_supporting_line_is_escaped(self):
+        """DB・スクレイピング由来の文字列が混ざりうる経路と同じ扱いにする。"""
+        card_html = home_status_service.render_status_card_html(
+            "t", "v", "theme-gray", sub="<script>alert(1)</script>"
+        )
+
+        assert "<script>" not in card_html
+        assert "&lt;script&gt;" in card_html
+
+    def test_the_time_is_written_the_way_a_person_reads_it(self):
+        now = datetime.fromisoformat("2026-09-19T12:00:00+09:00")
+        fmt = home_status_service._format_moment
+
+        assert fmt(pd.Timestamp("2026-09-19T09:40:00+09:00"), now) == "09:40"
+        assert fmt(pd.Timestamp("2026-09-18T18:40:00+09:00"), now) == "昨日 18:40"
+        assert fmt(pd.Timestamp("2026-09-15T18:40:00+09:00"), now) == "9/15 18:40"
+        assert fmt(None, now) is None
+
+    def test_the_colour_and_the_time_cannot_disagree(self):
+        """判定と補足表示が同じ行を見ていること(別々に絞ると食い違う)。"""
+        df = pd.DataFrame({
+            "location": ["高砂", "高砂"],
+            "contact_state": ["open", "closed"],
+            "timestamp": [
+                pd.Timestamp("2026-09-19T11:30:00+09:00"),
+                pd.Timestamp("2026-09-19T11:55:00+09:00"),
+            ],
+        })
+        now = datetime.fromisoformat("2026-09-19T12:00:00+09:00")
+
+        value, theme = home_status_service.get_takasago_status(df, now)
+        sub = home_status_service.describe_takasago(df, now)
+
+        # 判定は "open" の行(11:30)を見ているので、補足も同じ行でなければならない
+        # ("closed" の 11:55 を拾うと、色は緑なのに時刻だけ新しいという食い違いになる)
+        assert theme == "theme-green" and "元気" in value
+        assert sub == "最終検知 11:30"
+
+    def test_the_rice_cooker_says_when_it_last_ran(self):
+        df = pd.DataFrame({
+            "device_name": ["炊飯器", "炊飯器"],
+            "power_watts": [700.0, 3.0],
+            "timestamp": [
+                pd.Timestamp("2026-09-18T18:40:00+09:00"),
+                pd.Timestamp("2026-09-19T08:00:00+09:00"),
+            ],
+        })
+        now = datetime.fromisoformat("2026-09-19T12:00:00+09:00")
+
+        value, _ = home_status_service.get_rice_status(df, now)
+
+        assert value == "🍚 炊いてない", "今日の判定は変わらない"
+        assert home_status_service.describe_rice(df, now) == "前回 昨日 18:40"
+
+    def test_the_car_says_when_it_left(self):
+        df = pd.DataFrame({
+            "action": ["LEAVE"],
+            "timestamp": [pd.Timestamp("2026-09-19T08:15:00+09:00")],
+        })
+        now = datetime.fromisoformat("2026-09-19T12:00:00+09:00")
+
+        assert home_status_service.describe_car(df, now) == "08:15 に出発"
+
+    def test_the_train_card_names_the_affected_line(self):
+        """「⚠️ 遅延あり」だけでは、どちらの路線かが分からない。"""
+        jr = {"宝塚線": {"is_delay": True}, "神戸線": {}}
+
+        assert home_status_service.describe_traffic(jr) == "宝塚線"
+        assert home_status_service.describe_traffic({"宝塚線": {}, "神戸線": {}}) is None
+
+    def test_the_cost_card_compares_with_last_month(self):
+        assert home_status_service.describe_cost(12345, 11000) == "先月同日 11,000円 (+1,345)"
+        assert home_status_service.describe_cost(9000, 11000) == "先月同日 11,000円 (-2,000)"
+
+    def test_the_cost_card_says_nothing_without_a_comparison(self):
+        """初月・取得失敗のときに「先月同日 0円」と出すと、使っていないように見える。"""
+        assert home_status_service.describe_cost(12345, 0) is None
+        assert home_status_service.describe_cost(12345, None) is None
+
+    def test_missing_material_only_drops_the_supporting_line(self):
+        """補足の材料が取れなくても、カードの値と色は変わらないこと。"""
+        empty = pd.DataFrame()
+        cards = home_status_service.build_status_cards(
+            datetime.fromisoformat("2026-09-19T12:00:00+09:00"),
+            empty, empty, empty, None,
+            {"宝塚線": {}, "神戸線": {}}, {"percent": 42.0}, 1234,
+        )
+
+        assert len(cards) == 9
+        assert all(card.sub is None for card in cards)
+
+    def test_the_light_page_shows_them_too(self):
+        patches = _stub_loaders()
+        for p in patches:
+            p.start()
+        try:
+            with _client() as client:
+                page = client.get(f"{config.DASHBOARD_BASE_PATH}/m").text
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert 'class="status-sub"' in page
+        assert "先月同日 1,000円" in page
+        assert "ディスク 55%" in page

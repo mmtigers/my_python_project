@@ -87,6 +87,11 @@ STATUS_CARD_CSS = """
         font-size: 1.1rem; font-weight: bold; line-height: 1.25; white-space: normal;
         word-break: break-word;
     }
+    /* 値の下の補足(前回値・前日比・最終検知時刻)。主役は値なので小さく薄く置く。 */
+    .status-sub {
+        font-size: 0.7rem; font-weight: normal; line-height: 1.3; margin-top: 4px;
+        opacity: 0.75; white-space: normal; word-break: break-word;
+    }
     .theme-green { background-color: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
     .theme-yellow { background-color: #fffde7; color: #f9a825; border: 1px solid #fff9c4; }
     .theme-red { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
@@ -137,12 +142,16 @@ class StatusCard(NamedTuple):
     含める呼び出し元だけ True にする。詳細は `render_status_card_html` を参照。
     `tab`: このカードの詳細が載っているタブのキー(`DASHBOARD_TABS`)。軽量ページは
     これを使ってカード自体を `?tab=...` へのリンクにする。
+    `sub`: 値の下に小さく出す補足(前回値・前日比・最終検知時刻など)。「いまの値」
+    だけでは高いのか低いのか判断できないカードに、比べる相手を添えるためのもの。
+    常にHTMLエスケープされる(`value` と違い、HTML断片は渡せない)。
     """
     title: str
     value: str
     theme: str
     value_is_html: bool = False
     tab: str | None = None
+    sub: str | None = None
 
 
 def render_status_card_html(
@@ -152,6 +161,7 @@ def render_status_card_html(
     *,
     value_is_html: bool = False,
     href: str | None = None,
+    sub: str | None = None,
 ) -> str:
     """
     ステータスカードのHTMLを生成。
@@ -181,10 +191,12 @@ def render_status_card_html(
     else:
         open_tag = f'<a class="status-card {theme}" href="{html.escape(href)}">'
         close_tag = "</a>"
+    sub_html = "" if not sub else f'<div class="status-sub">{html.escape(sub)}</div>'
     return (
         f"{open_tag}"
         f'<div class="status-title">{safe_title}</div>'
         f'<div class="status-value">{safe_value}</div>'
+        f"{sub_html}"
         f"{close_tag}"
     )
 
@@ -241,6 +253,7 @@ def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:
             card.theme,
             value_is_html=card.value_is_html,
             href=None if dashboard_path is None else card_detail_href(card, dashboard_path),
+            sub=card.sub,
         )
         for card in cards
     )
@@ -251,15 +264,24 @@ def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:
 # いずれも副作用を持たない純粋関数。入力(DataFrame・取得済みの値)は呼び出し側が渡す
 # (Streamlit 側はキャッシュ付きローダから、サーバー側は下記の collect_status_cards から)。
 
+def _takasago_activity(df_sensor: pd.DataFrame) -> pd.DataFrame:
+    """高砂(実家)で「動きがあった」とみなす行。
+
+    判定(`get_takasago_status`)と補足表示(`describe_takasago`)の両方がここを使う。
+    どちらかが別の条件で拾うと、カードの色と「最終検知」の時刻が食い違う。
+    """
+    if df_sensor.empty or "location" not in df_sensor.columns or "contact_state" not in df_sensor.columns:
+        return df_sensor.iloc[0:0]
+    return df_sensor[
+        (df_sensor["location"] == "高砂") & (df_sensor["contact_state"].isin(["open", "detected"]))
+    ]
+
+
 def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
     val = "⚪ データなし"
     theme = "theme-gray"
-    if df_sensor.empty or "location" not in df_sensor.columns or "contact_state" not in df_sensor.columns:
-        return val, theme
 
-    df_taka = df_sensor[
-        (df_sensor["location"] == "高砂") & (df_sensor["contact_state"].isin(["open", "detected"]))
-    ]
+    df_taka = _takasago_activity(df_sensor)
     if not df_taka.empty:
         last_active = df_taka.iloc[0]["timestamp"]
         diff_min = (now - last_active).total_seconds() / 60
@@ -275,13 +297,14 @@ def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, st
     return val, theme
 
 
-def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
-    """伊丹（自宅）のステータス判定（修正版）"""
-    val = "⚪ データなし"
-    theme = "theme-gray"
+def _itami_motion(df_sensor: pd.DataFrame) -> pd.DataFrame:
+    """伊丹(自宅)の人感センサー由来の検知行(新しい順)。
+
+    高砂側と同じ理由で、判定と補足表示が同じ抽出を共有する。
+    """
     required_cols = ["location", "device_type", "movement_state", "contact_state"]
     if df_sensor.empty or not all(col in df_sensor.columns for col in required_cols):
-        return val, theme
+        return df_sensor.iloc[0:0]
 
     # 1. デバイスタイプの判定: 'Motion' を含むか、または 'Webhook' (SwitchBot) である
     is_motion_device = (
@@ -296,11 +319,29 @@ def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
         (df_sensor["contact_state"] == "detected")
     )
 
-    df_motion = df_sensor[
+    return df_sensor[
         (df_sensor["location"] == "伊丹") &
         is_motion_device &
         is_detected
     ].sort_values("timestamp", ascending=False)
+
+
+def _itami_contact(df_sensor: pd.DataFrame) -> pd.DataFrame:
+    """伊丹(自宅)の開閉センサーが開いた行(新しい順)。人感センサーが無いときの代替。"""
+    required_cols = ["location", "contact_state"]
+    if df_sensor.empty or not all(col in df_sensor.columns for col in required_cols):
+        return df_sensor.iloc[0:0]
+    return df_sensor[
+        (df_sensor["location"] == "伊丹") & (df_sensor["contact_state"] == "open")
+    ].sort_values("timestamp", ascending=False)
+
+
+def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
+    """伊丹（自宅）のステータス判定（修正版）"""
+    val = "⚪ データなし"
+    theme = "theme-gray"
+
+    df_motion = _itami_motion(df_sensor)
 
     if not df_motion.empty:
         diff_m = (now - df_motion.iloc[0]["timestamp"]).total_seconds() / 60
@@ -315,9 +356,7 @@ def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
             theme = "theme-yellow"
     else:
         # 開閉センサーのロジック
-        df_contact = df_sensor[
-            (df_sensor["location"] == "伊丹") & (df_sensor["contact_state"] == "open")
-        ].sort_values("timestamp", ascending=False)
+        df_contact = _itami_contact(df_sensor)
         if not df_contact.empty:
             diff_c = (now - df_contact.iloc[0]["timestamp"]).total_seconds() / 60
             if diff_c < 60:
@@ -372,27 +411,33 @@ def get_car_status(df_car: pd.DataFrame) -> tuple[str, str]:
     return "🏠 在宅", "theme-green"
 
 
+# 炊飯器が「稼働していた」とみなす消費電力(W)。
+RICE_COOKER_ON_WATTS = 500
+
+
+def _rice_cooking_rows(df_sensor: pd.DataFrame) -> pd.DataFrame:
+    """炊飯器が稼働していた記録(日付で絞らない)。
+
+    判定(`get_rice_status`, 今日ぶん)と補足表示(`describe_rice`, 前回いつ)が
+    同じ条件を共有する。
+    """
+    if "device_name" not in df_sensor.columns or "power_watts" not in df_sensor.columns:
+        return df_sensor.iloc[0:0]
+    return df_sensor[
+        (df_sensor["device_name"].astype(str).str.contains("炊飯器")) &
+        (df_sensor["power_watts"] >= RICE_COOKER_ON_WATTS)
+    ]
+
+
 def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
     val = "🍚 炊いてない"
     theme = "theme-red"
-    # カラム存在チェック
-    if "device_name" not in df_sensor.columns or "power_watts" not in df_sensor.columns:
-        return val, theme
 
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    # 炊飯器の電力データを検索
-    df_rice = df_sensor[
-        (df_sensor["device_name"].astype(str).str.contains("炊飯器")) &
-        (df_sensor["timestamp"] >= today_start)
-    ]
-
-    if not df_rice.empty:
-        max_watts = df_rice["power_watts"].max()
-        # 500W以上で稼働していれば「ご飯あり」とみなす
-        if max_watts is not None and max_watts >= 500:
-            val = "🍚 ご飯あり"
-            theme = "theme-green"
+    df_rice = _rice_cooking_rows(df_sensor)
+    if not df_rice.empty and not df_rice[df_rice["timestamp"] >= today_start].empty:
+        val = "🍚 ご飯あり"
+        theme = "theme-green"
     return val, theme
 
 
@@ -461,6 +506,95 @@ def get_bicycle_status(df_bicycle: pd.DataFrame) -> tuple[str, str]:
     return val, theme
 
 
+# === 補足表示(カードの値の下に小さく出す) ===
+# 「いまの値」だけでは高いのか低いのか・普段どおりなのかが判断できないカードに、
+# 比べる相手(前回いつ・先月の同じ時点・最終検知時刻)を添える。
+# 判定に使う行の抽出は上の `_*_activity` / `_*_rows` を共有するので、カードの色と
+# ここに出す時刻が食い違うことはない。
+
+
+def _format_moment(moment, now: datetime) -> str | None:
+    """`09:40` / `昨日 18:40` / `9/18 18:40` のいずれかにする。"""
+    if moment is None or pd.isna(moment):
+        return None
+    moment = pd.Timestamp(moment)
+    day_diff = (now.date() - moment.date()).days
+    if day_diff == 0:
+        return moment.strftime("%H:%M")
+    if day_diff == 1:
+        return moment.strftime("昨日 %H:%M")
+    return f"{moment.month}/{moment.day} {moment.strftime('%H:%M')}"
+
+
+def _latest_timestamp(df: pd.DataFrame):
+    """新しい順に並んでいる前提の DataFrame から先頭の時刻を取る。"""
+    if df.empty or "timestamp" not in df.columns:
+        return None
+    return df.iloc[0]["timestamp"]
+
+
+def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:
+    at = _format_moment(_latest_timestamp(_takasago_activity(df_sensor)), now)
+    return None if at is None else f"最終検知 {at}"
+
+
+def describe_itami(df_sensor: pd.DataFrame, now: datetime) -> str | None:
+    # 判定と同じ優先順位(人感センサーがあればそれ、無ければ開閉センサー)。
+    df = _itami_motion(df_sensor)
+    if df.empty:
+        df = _itami_contact(df_sensor)
+    at = _format_moment(_latest_timestamp(df), now)
+    return None if at is None else f"最終検知 {at}"
+
+
+def describe_car(df_car: pd.DataFrame, now: datetime) -> str | None:
+    at = _format_moment(_latest_timestamp(df_car), now)
+    if at is None or "action" not in df_car.columns:
+        return None
+    return f"{at} に出発" if df_car.iloc[0]["action"] == "LEAVE" else f"{at} に帰宅"
+
+
+def describe_rice(df_sensor: pd.DataFrame, now: datetime) -> str | None:
+    at = _format_moment(_latest_timestamp(_rice_cooking_rows(df_sensor)), now)
+    return None if at is None else f"前回 {at}"
+
+
+def describe_traffic(jr_status: dict[str, dict[str, Any]]) -> str | None:
+    """乱れている路線の名前。どれが止まっているかはカードの値からは分からない。"""
+    affected = [
+        name for name, line in jr_status.items()
+        if line.get("is_suspended") or line.get("is_delay")
+    ]
+    return "・".join(affected) if affected else None
+
+
+def describe_cost(monthly_cost: int, last_month_cost: int | None) -> str | None:
+    """先月の同じ時点と比べる。比較対象が無い(初月・取得失敗)ときは出さない。"""
+    if not last_month_cost:
+        return None
+    diff = monthly_cost - last_month_cost
+    sign = "+" if diff > 0 else ""
+    return f"先月同日 {last_month_cost:,}円 ({sign}{diff:,})"
+
+
+def describe_server(disk: dict[str, float] | None) -> str | None:
+    if not disk or "percent" not in disk:
+        return None
+    return f"ディスク {int(disk['percent'])}%"
+
+
+def describe_nas(nas_data: pd.Series | None) -> str | None:
+    if nas_data is None:
+        return None
+    try:
+        free_gb = nas_data["free_gb"]
+    except KeyError:
+        return None
+    if free_gb is None or pd.isna(free_gb):
+        return None
+    return f"空き {int(free_gb):,}GB"
+
+
 def build_status_cards(
     now: datetime,
     df_sensor: pd.DataFrame,
@@ -470,8 +604,14 @@ def build_status_cards(
     jr_status: dict[str, dict[str, Any]],
     memory: dict[str, float] | None,
     monthly_cost: int,
+    last_month_cost: int | None = None,
+    disk: dict[str, float] | None = None,
 ) -> list[StatusCard]:
-    """渡された材料から、並べる順にカードを組み立てる(取得は行わない)。"""
+    """渡された材料から、並べる順にカードを組み立てる(取得は行わない)。
+
+    `last_month_cost`・`disk` は補足表示(`sub`)にだけ使う。渡さなければ補足が
+    出ないだけで、カードの値と色は変わらない。
+    """
     taka_val, taka_theme = get_takasago_status(df_sensor, now)
     itami_val, itami_theme = get_itami_status(df_sensor, now)
     car_val, car_theme = get_car_status(df_car)
@@ -486,15 +626,24 @@ def build_status_cards(
     # `tab` は「このカードの詳細が載っているタブ」。軽量ページはこれを使って
     # カード自体をリンクにする(異常に気づいてから詳細を開くまでを1タップにする)。
     return [
-        StatusCard("👵 高砂 (実家)", taka_val, taka_theme, tab="watch"),
-        StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme, tab="watch"),
-        StatusCard("🚗 車 (伊丹)", car_val, car_theme, tab="watch"),
-        StatusCard("🍚 炊飯器", rice_val, rice_theme, tab="life"),
-        StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue", tab="life"),
+        StatusCard("👵 高砂 (実家)", taka_val, taka_theme, tab="watch",
+                   sub=describe_takasago(df_sensor, now)),
+        StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme, tab="watch",
+                   sub=describe_itami(df_sensor, now)),
+        StatusCard("🚗 車 (伊丹)", car_val, car_theme, tab="watch",
+                   sub=describe_car(df_car, now)),
+        StatusCard("🍚 炊飯器", rice_val, rice_theme, tab="life",
+                   sub=describe_rice(df_sensor, now)),
+        StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue", tab="life",
+                   sub=describe_cost(monthly_cost, last_month_cost)),
+        # 駐輪場は値そのものが前日比を含むので補足は付けない。
         StatusCard("🚲 駐輪場待機", bicycle_val, bicycle_theme, value_is_html=True, tab="out"),
-        StatusCard("🚃 JR運行情報", traffic_val, traffic_theme, tab="out"),
-        StatusCard("🖥️ サーバー", server_val, server_theme, tab="sys"),
-        StatusCard("🗄️ NAS", nas_val, nas_theme, tab="sys"),
+        StatusCard("🚃 JR運行情報", traffic_val, traffic_theme, tab="out",
+                   sub=describe_traffic(jr_status)),
+        StatusCard("🖥️ サーバー", server_val, server_theme, tab="sys",
+                   sub=describe_server(disk)),
+        StatusCard("🗄️ NAS", nas_val, nas_theme, tab="sys",
+                   sub=describe_nas(nas_data)),
     ]
 
 
@@ -552,6 +701,8 @@ def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard],
     jr_status = _cached("jr", train_service.get_jr_traffic_status)
     memory = _cached("memory", analysis_service.get_memory_usage)
     monthly_cost = _cached("cost", analysis_service.calculate_monthly_cost_cumulative)
+    last_month_cost = _cached("cost_last_month", analysis_service.calculate_last_month_cost_same_point)
+    disk = _cached("disk", analysis_service.get_disk_usage)
 
     cards = build_status_cards(
         now,
@@ -562,6 +713,8 @@ def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard],
         jr_status or {"宝塚線": {"is_unavailable": True}, "神戸線": {"is_unavailable": True}},
         memory,
         monthly_cost or 0,
+        last_month_cost=last_month_cost,
+        disk=disk,
     )
     return cards, now
 
