@@ -138,7 +138,7 @@ graph TD
 
 
 * 外部から渡される`className`は、内部で定義されたクラス群の末尾に結合されるため、スタイル（Tailwind CSSのクラス等）の競合や上書きが発生する可能性がある。
-* 根拠: `classNameプロパティ` (行番号: 46 / 抜粋: "className={`${baseStyle} ${variantStyle} ${interactiveStyle} ${className}`}")
+* 根拠: `classNameプロパティ` (行番号: 66 / 抜粋: "className={`${baseStyle} ${variantStyle} ${interactiveStyle} ${className}`}")
 
 
 

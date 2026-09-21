@@ -23,7 +23,7 @@
 ユーザー（冒険者）の名前・職業クラス・レベル・所持ゴールド・獲得メダル数を表示する、シンプルなステータスカードUIを描画するコンポーネント。アバター（アップロード画像パス、またはアイコン文字/絵文字のフォールバック）をクリックした際に、Propsで渡されたコールバック関数を発火させるインタラクションを提供する。
 
 * 根拠: コンポーネント定義とProps使用箇所 (行番号: 11, 34〜48 / 抜粋: "const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) => {", "<span className=\"text-base font-bold text-yellow-300 tracking-widest truncate\">{user.name}</span>")
-* 根拠: アバタークリックのイベントハンドラ (行番号: 19 / 抜粋: "onClick={() => onAvatarClick(user)}")
+* 根拠: アバタークリックのイベントハンドラ (行番号: 22 / 抜粋: "onClick={() => onAvatarClick(user)}")
 
 ## 3. 外部依存関係
 
@@ -62,7 +62,7 @@
 
 * **役割**: 渡された`user`情報（アバター、名前、職業クラス、レベル、ゴールド、メダル数）をもとにステータスカードUIをレンダリングする。**（Issue #412 F-L5で修正）** アバター部分は以前`onClick`付きの`div`で、キーボード操作（Tab移動・Enter/Space押下）ではアバター変更モーダルを開けなかった。`<button type="button">`（`aria-label={`${user.name}のアバターを変更`}`）に変更し、標準のキーボード操作対応を得た。アバター画像は`isSameOriginAvatarPath(user.avatar)`が真（自サーバーの相対パス）の場合に`<img>`で表示し、そうでない場合は`user.avatar`（絵文字等）、デフォルト`'🙂'`の順にフォールバックする（**Issue #390**: 以前その間にあった`user.icon`はバックエンドが送出しない幽霊フィールドで常に`undefined`だったため参照を削除）。**バグ修正**: 以前は`user.avatar && user.avatar.startsWith('/')`で自ドメイン判定していたが、プロトコル相対URL（`"//evil.example/x"`）も`startsWith('/')`がtrueになり素通りしてしまう問題があったため、`"//"`始まりを明示的に除外する共通ヘルパー`isSameOriginAvatarPath`（`../../../lib/utils`）に置き換えられた。
 * 根拠: (行番号: 11〜55 / 抜粋: "const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) => {")
-* 根拠: アバター判定のバグ修正コメント (行番号: 22〜24 / 抜粋: "{/* ★バグ修正: user.avatar はアップロード画像のパス('/uploads/...')の場合と、\n                        未設定時の絵文字デフォルト値の場合がある。パス以外を<img src>に渡すと\n                        壊れた画像アイコンになるため、Header.tsxと同様にパス形式かどうかを判定する */}")
+* 根拠: アバター判定のバグ修正コメント (行番号: 26〜28 / 抜粋: "{/* ★バグ修正: user.avatar はアップロード画像のパス('/uploads/...')の場合と、\n                        未設定時の絵文字デフォルト値の場合がある。パス以外を<img src>に渡すと\n                        壊れた画像アイコンになるため、Header.tsxと同様にパス形式かどうかを判定する */}")
 * 根拠: フォールバック表示 (行番号: 25〜29 / 抜粋: "{isSameOriginAvatarPath(user.avatar) ? (\n                        <img src={user.avatar} alt=\"avatar\" className=\"w-full h-full object-cover\" />\n                    ) : (\n                        user.avatar || '🙂'\n                    )}")
 
 
@@ -75,7 +75,7 @@
 
 
 * **副作用**: なし（純粋な描画処理。ただしクリック時の `onAvatarClick(user)` の発火により親コンポーネント側で副作用が生じる可能性あり）
-* 根拠: (行番号: 19 / 抜粋: "onClick={() => onAvatarClick(user)}")
+* 根拠: (行番号: 22 / 抜粋: "onClick={() => onAvatarClick(user)}")
 
 
 * **エラーハンドリング**: `user` オブジェクトが未定義（falsy）の場合、描画処理を行わず `null` を返却して早期リターン（クラッシュ回避）。
@@ -127,11 +127,11 @@ graph TD
 
 
 * **フォールバック処理**: `user.gold`, `user.medal_count` が存在しない（falsyな）場合、`0` にフォールバックされる仕様となっている。
-* 根拠: (行番号: 43, 47 / 抜粋: "<CountUp value={user.gold || 0} suffix=\" G\" />", "<CountUp value={user.medal_count || 0} suffix=\" 枚\" />")
+* 根拠: (行番号: 47, 51 / 抜粋: "<CountUp value={user.gold || 0} suffix=\" G\" />", "<CountUp value={user.medal_count || 0} suffix=\" 枚\" />")
 
 
 * **プロパティの欠損による表示不備リスク**: `user.job_class` が無い（`null`含む）場合は `'冒険者'` にフォールバックするが、`user.avatar` が未定義/`null`の場合はハードコードされた絵文字 `'🙂'` が表示される。`user.level` にはフォールバックがなく、`undefined`の場合は`"Lv.undefined"`のような表示になり得る。
-* 根拠: (行番号: 28, 36 / 抜粋: "user.avatar || '🙂'", "{user.job_class || '冒険者'} Lv.{user.level}")
+* 根拠: (行番号: 32, 40 / 抜粋: "user.avatar || '🙂'", "{user.job_class || '冒険者'} Lv.{user.level}")
 
 
 

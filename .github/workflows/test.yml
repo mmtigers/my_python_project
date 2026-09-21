@@ -157,6 +157,7 @@ jobs:
             MY_HOME_SYSTEM/*.sh \
             MY_HOME_SYSTEM/tools/*.sh \
             MY_HOME_SYSTEM/scripts/*.sh \
+            .github/scripts/*.sh \
             family-quest/deploy.sh \
             deploy/git-hooks/post-merge
 
@@ -197,6 +198,9 @@ jobs:
         # 整理だったが、ラチェットは `pull_request` でしか走らず、比較元の成果物
         # (保持14日)が取れないときはスキップされる。その場合に効くのは床だけなので、
         # 床も実測に追従させる必要がある。実測より約4pt下の 82 へ引き上げた。
+        # 同日、監査 AUDIT-029 の残件(sound_manager / network_logger / train_service /
+        # daily_timelapse_job / smart_timelapse_generator)にテストを足して実測が
+        # 88.33%(2,237 passed)になったため、同じ運用で 84 へ引き上げた。
         env:
           # CI環境用の環境変数。SQLITE_DB_PATHはconfig.py側で読み込まれるよう修正済み。
           SQLITE_DB_PATH: ":memory:"
@@ -208,32 +212,25 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-report=html \
-            --cov-fail-under=82
+            --cov-fail-under=84
 
       - name: Find latest successful master run (coverage baseline)
-        # カバレッジのラチェット比較元。master の直近成功 run(本ワークフロー)の ID を REST API で
-        # 引く。無ければ空のまま次のステップがスキップされ、固定閾値(--cov-fail-under)だけが
-        # ゲートになる。
+        # カバレッジのラチェット比較元。master の直近成功 run(本ワークフロー)を探す。
+        # 無ければ run_id が空のまま次のステップがスキップされ、固定閾値
+        # (--cov-fail-under)だけがゲートになる。
         #
-        # `status=success&per_page=1` は**直近の run を返さない**。PR #839 の run で
-        # 実際に選ばれた比較元は 2026-09-10 の run 34475282120 で、同日 05:25 の master
-        # run 35564515567(conclusion: success)ではなかった。その結果、比較元の実測が
-        # backend 74.76% / frontend 47.22% と、当時の master の実測(86.00% / 78.64%)から
-        # 11〜31pt も低い値になっており、ラチェットは「master 比 0.5pt の低下を検知する」
-        # という役目をほとんど果たしていなかった(固定閾値だけが実質のゲートだった)。
-        # 並び順が正しいことを確認できている `status=completed` で引き、success の絞り込みは
-        # jq 側で行う。取得できた比較元は created_at ごとログに出して、再発を見えるようにする。
+        # 処理の実体と、2026-09-21 に「11日前の run を比較元に選ぶ」事故が起きた経緯は
+        # .github/scripts/find_coverage_baseline.sh のコメントと
+        # docs/runbooks/ci_coverage_ratchet.md にある。frontend ジョブと同じ数行を
+        # コピーしていたため両方が同じように壊れていたので、スクリプトへ切り出して
+        # shellcheck と pytest(.github/scripts/test_find_coverage_baseline.py)の
+        # 対象に入れてある。
         if: github.event_name == 'pull_request'
         id: baseline_run
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          baseline="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=master&status=completed&per_page=20" \
-                     --jq '[.workflow_runs[] | select(.conclusion == "success")][0] // empty | "\(.id) \(.created_at)"')"
-          run_id="${baseline%% *}"
-          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
-          echo "baseline run: ${baseline:-(none)}"
+        run: ../.github/scripts/find_coverage_baseline.sh
 
       - name: Download master coverage baseline
         # 別 run の成果物取得は run-id + github-token を指定した actions/download-artifact で行う
@@ -457,20 +454,14 @@ jobs:
         run: npm run test:coverage
 
       - name: Find latest successful master run (frontend coverage baseline)
-        # バックエンドと同じラチェット比較。vitest の json-summary(coverage-summary.json)を使う。
-        # 比較元の引き方も test ジョブと同じ(`status=success&per_page=1` が直近を返さない件は
-        # そちらのコメントを参照)。
+        # backend と同一の処理(比較元の探し方はサブシステムに依らない)。
+        # vitest 側は json-summary(coverage-summary.json)を比較に使う。
         if: github.event_name == 'pull_request'
         id: baseline_run
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          baseline="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=master&status=completed&per_page=20" \
-                     --jq '[.workflow_runs[] | select(.conclusion == "success")][0] // empty | "\(.id) \(.created_at)"')"
-          run_id="${baseline%% *}"
-          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
-          echo "baseline run: ${baseline:-(none)}"
+        run: ../.github/scripts/find_coverage_baseline.sh
 
       - name: Download master frontend coverage baseline
         if: github.event_name == 'pull_request' && steps.baseline_run.outputs.run_id != ''

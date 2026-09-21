@@ -63,7 +63,7 @@
 | `ToastProvider` | 内部実装が提供されていないため、どのようなトースト通知機構を提供するか不明（`./context/ToastContext`ファイルに依存のため要確認）。 | 根拠: `ToastProvider` (行番号: 9 / 抜粋: "import { ToastProvider } from './context/ToastContext'") |
 | `document` API | `root`というIDを持つ要素がDOM上に存在するかどうかはHTML側の実装に依存するため不明。 | 根拠: `document.getElementById` (行番号: 69 / 抜粋: "const rootElement = document.getElementById('root');") |
 | `window.location` API | 実行時のURLパスに依存するため、どのタイミングで`/camera`パスになるか（ルーティング全体の設計）は本ファイルからは不明。 | 根拠: `window.location.pathname` (行番号: 59〜60, 76 / 抜粋: "if (isOutsideServiceWorkerScope(window.location.pathname)) {\n  const checkForUpdate = createUpdateChecker(window.location.pathname, {", "const isCameraView = isCameraRoute(window.location.pathname);") |
-| `navigator.serviceWorker` / `virtual:pwa-register` | ブラウザのService Worker APIおよび`vite-plugin-pwa`がビルド時に生成する仮想モジュール。生成されるSWの中身(`skipWaiting`/`clientsClaim`/`cleanupOutdatedCaches`)は`vite.config.ts`の`VitePWA`設定に依存し本ファイルからは不明。 | 根拠: (行番号: 3, 27〜54 / 抜粋: "if ('serviceWorker' in navigator) {", "registerSW({\n  immediate: true,") |
+| `navigator.serviceWorker` / `virtual:pwa-register` | ブラウザのService Worker APIおよび`vite-plugin-pwa`がビルド時に生成する仮想モジュール。生成されるSWの中身(`skipWaiting`/`clientsClaim`/`cleanupOutdatedCaches`)は`vite.config.ts`の`VitePWA`設定に依存し本ファイルからは不明。 | 根拠: (行番号: 29, 27〜54 / 抜粋: "if ('serviceWorker' in navigator) {", "registerSW({\n  immediate: true,") |
 | `window.fetch` | **（Issue #591で追加）** ブラウザ標準API。本ファイルは`deps.fetch`として`window.fetch.bind(window)`を渡すのみで、実際にどのタイミング・条件で呼ばれるか（no-cache再取得のロジック本体）は`./lib/outOfScopeReload`の`createUpdateChecker`側にあり本ファイルからは不明。 | 根拠: (行番号: 61 / 抜粋: "fetch: window.fetch.bind(window),") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）

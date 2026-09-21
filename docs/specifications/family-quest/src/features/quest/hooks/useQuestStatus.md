@@ -65,7 +65,7 @@
 
 * **役割**: クエストと現在のユーザー、完了・保留履歴から、そのクエストが「ロック中」「完了済み」「保留中」「無限クエストか」を判定する純粋関数。React Hooksに依存しないため、`useQuestStatus`内部だけでなく`QuestList.tsx`のソート処理などフックが使えない文脈からも呼び出せる。**（#291で修正）** クエスト識別子`qId`は以前`quest.quest_id || quest.id`というフォールバックだったが、`quest.id`が幽霊フィールド（APIから一度も送られてこない）と判明したため`quest.quest_id`のみの参照に単純化された。無限クエスト判定`isInfinite`も同様に、`quest.type === 'infinite'`という幽霊フィールドへの参照が削除され、`quest.quest_type === 'infinite' || !!quest._isInfinite`のみで判定する。
 * 根拠: [関数定義] (行番号: 31〜83 / 抜粋: "export function getQuestLockState(")
-* 根拠: `qId`/`isInfinite`の算出 (行番号: 37, 40 / 抜粋: "const qId = quest.quest_id;", "const isInfinite = quest.quest_type === 'infinite' || !!quest._isInfinite;")
+* 根拠: `qId`/`isInfinite`の算出 (行番号: 44, 47 / 抜粋: "const qId = quest.quest_id;", "const isInfinite = quest.quest_type === 'infinite' || !!quest._isInfinite;")
 
 
 * **引数/リクエスト**: `quest: Quest, currentUser: User, completedQuests: QuestHistory[], pendingQuests: QuestHistory[]`
@@ -198,16 +198,16 @@ graph TD
 | 高 | `@/types` の定義ファイル | 本ファイルが参照する `quest_id` / `quest_type` / `_isInfinite` を含む `Quest` 型の正確なスキーマを把握するため（`id`/`type`はIssue #291で幽霊フィールドと判明し型定義から削除済み）。 | 根拠: (行番号: 37, 40 / 抜粋: "const qId = quest.quest_id;") |
 | 高 | `../components/QuestList.tsx` | `getQuestLockState`をソート比較関数から直接呼び出しており、`useQuestStatus`との呼び出し方の違いや、両者の間で判定結果に齟齬がないかを確認するため。 | 根拠: [共通化コメント] (行番号: 11〜13 / 抜粋: "// 以前は useQuestStatus (このファイル)・QuestList.tsx のソート比較関数・App.tsx の") |
 | 中 | `App.tsx` | コメントによれば、クリックハンドラでも同様のロック/完了/申請中判定ロジックが使われていた（または使われている）とされるため、現在の実装との整合性を確認するため。 | 根拠: [共通化コメント] (行番号: 12〜13 / 抜粋: "クリックハンドラの3箇所にほぼ同じロジックが重複して実装されていた。") |
-| 中 | 本Hook/関数を呼び出している親コンポーネントまたは状態管理ファイル | `completedQuests` に「今日」の承認済みデータのみが渡される前提となっているため、その絞り込みが正しく実行されているか確認する必要がある。 | 根拠: (行番号: 46 / 抜粋: "// completedQuests には「今日」の承認済みデータのみが入っている前提 (GameSystem仕様)") |
+| 中 | 本Hook/関数を呼び出している親コンポーネントまたは状態管理ファイル | `completedQuests` に「今日」の承認済みデータのみが渡される前提となっているため、その絞り込みが正しく実行されているか確認する必要がある。 | 根拠: (行番号: 54 / 抜粋: "// completedQuests には「今日」の承認済みデータのみが入っている前提 (GameSystem仕様)") |
 
 ## 8. 保守上の注意点
 
 * **型・APIレスポンスのフォールバックは解消済み（Issue #291）**: 以前は`quest.quest_id || quest.id`、および`quest.type === 'infinite' || quest.quest_type === 'infinite' || !!quest._isInfinite`といったフォールバック処理が存在したが、`quest.id`/`quest.type`はバックエンドAPIから一度も送られてこない幽霊フィールドであったと判明し、`Quest`型定義自体から削除された。現在は`qId = quest.quest_id`、`isInfinite = quest.quest_type === 'infinite' || !!quest._isInfinite`という単純な参照になっている。
-* 根拠: (行番号: 37, 40 / 抜粋: "const qId = quest.quest_id;", "const isInfinite = quest.quest_type === 'infinite' || !!quest._isInfinite;")
+* 根拠: (行番号: 44, 47 / 抜粋: "const qId = quest.quest_id;", "const isInfinite = quest.quest_type === 'infinite' || !!quest._isInfinite;")
 * **qId算出順序の食い違いは解消済み（Issue #291）**: コメントによれば、共通化直後の3実装では`qId`の算出順序に食い違いがあった（`useQuestStatus`は`quest.quest_id || quest.id`、`QuestList.tsx`/`App.tsx`は`quest.id || quest.quest_id`）。`quest.id`自体が幽霊フィールドと判明したことで、この順序の食い違いという問題自体が意味を失い、全箇所が単に`quest.quest_id`のみを参照する形に統一されて解消した。
 * 根拠: [コメント] (行番号: 16〜19 / 抜粋: "// #291: 元の3実装には qId の算出順序に食い違いがあった")
 * **外部からの入力前提**: 前提クエストの判定ロジックは「`completedQuests` に『今日』の承認済みデータのみが入っている」というコメント上の仕様に強く依存している。呼び出し元で履歴データの絞り込み条件が変わると、意図せずロック状態が解除・維持されるバグに繋がる。
-* 根拠: [コメント] (行番号: 46 / 抜粋: "// completedQuests には「今日」の承認済みデータのみが入っている前提 (GameSystem仕様)")
+* 根拠: [コメント] (行番号: 54 / 抜粋: "// completedQuests には「今日」の承認済みデータのみが入っている前提 (GameSystem仕様)")
 * `getQuestLockState`が共通化された結果、この関数のロジックを変更すると`useQuestStatus`を使う画面と`QuestList.tsx`のソート処理の両方に影響する。片方だけを見て変更すると、もう片方で意図しない挙動差が生まれる可能性がある。
 
 ## 9. 不明事項一覧

@@ -77,7 +77,7 @@
 ### `_load_persisted_states`
 
 * **役割**: `_STATE_FILE`の内容をJSONとして読み込み、辞書として返す。前回プロセス実行時の状態を復元するために`main`から呼び出される。**（Issue #449で追加）** 読み込み中は`flock`による共有ロック(`LOCK_SH`)を取得し、他プロセスによる書き込みとの競合を防ぐ。本スクリプトは通常`scheduler_boot.py`により逐次（単一プロセスずつ）実行される前提だが、手動実行等でこの前提が崩れた場合への備え。**（Issue #661で修正）** `open` + `flock` + `json.load` の実装本体は`core/state_file.py`の`read_json`へ移した（このモジュールの実装が同ファイルの参照実装になっている）。本関数は`state_file.read_json(_STATE_FILE, default={})`を呼び、返り値が`dict`でなければ`{}`へ倒す薄いラッパーになっている。壊れている・読めない場合に`{}`（全デバイス初期状態扱い）へフォールバックする方針は従来どおり。
-* 根拠: `def _load_persisted_states() -> Dict[str, Dict[str, Any]]:` (行番号: 36 / 抜粋: "def _load_persisted_states() -> Dict[str, Dict[str, Any]]:")、[state_fileへの委譲] (行番号: 44-45 / 抜粋: "states = state_file.read_json(_STATE_FILE, default={})\n    return states if isinstance(states, dict) else {}")
+* 根拠: `def _load_persisted_states() -> Dict[str, Dict[str, Any]]:` (行番号: 36 / 抜粋: "def _load_persisted_states() -> Dict[str, Dict[str, Any]]:")、[state_fileへの委譲] (行番号: 43-44 / 抜粋: "states = state_file.read_json(_STATE_FILE, default={})\n    return states if isinstance(states, dict) else {}")
 
 
 * **引数/リクエスト**: なし

@@ -78,7 +78,7 @@
 ### `logger` (モジュールレベル変数)
 
 * **役割**: `logging.basicConfig` によりログ出力形式・レベルを設定した上で、モジュール専用のロガーインスタンスを生成する。
-* 根拠: `logging.basicConfig(...)` および `logger = logging.getLogger(__name__)` (行番号: 26〜29 / 抜粋: "logging.basicConfig(\n    level=logging.INFO, format=\"%(asctime)s - %(levelname)s - %(message)s\"\n)\nlogger = logging.getLogger(__name__)")
+* 根拠: `logging.basicConfig(...)` および `logger = logging.getLogger(__name__)` (行番号: 27〜30 / 抜粋: "logging.basicConfig(\n    level=logging.INFO, format=\"%(asctime)s - %(levelname)s - %(message)s\"\n)\nlogger = logging.getLogger(__name__)")
 
 
 * **引数/リクエスト**: なし（モジュールレベルで即時実行）

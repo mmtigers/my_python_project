@@ -11,6 +11,7 @@ monitors/network_logger.py の回帰テスト(Issue #190)。
    init_csv()が「ファイルが存在するが空」のケースでもヘッダーを再作成する
    よう修正した。
 """
+import asyncio
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock
@@ -134,3 +135,183 @@ class TestInitCsvSurvivesLogrotateCopytruncate:
         assert csv_path.exists()
         content = csv_path.read_text(encoding="utf-8")
         assert content.strip().split(",") == network_logger.CSV_HEADERS
+
+
+# ---------------------------------------------------------------------------
+# ping / TCP / カメラ監視の本体。
+#
+# network_logger は `Restart=always` の常駐サービスで、結果は CSV に落ちるだけ。
+# 判定を取り違えても誰も気づかないまま「カメラは正常」と記録され続けるため、
+# 状態の出し分けを固定しておく(監査 AUDIT-029)。
+# ---------------------------------------------------------------------------
+def _fake_ping_process(returncode, stdout=b""):
+    proc = MagicMock()
+    proc.returncode = returncode
+    proc.communicate = AsyncMock(return_value=(stdout, b""))
+    return proc
+
+
+class TestPingHost:
+    async def test_uses_rtt_reported_by_ping(self, monkeypatch):
+        """#190: 壁時計ではなく ping 自身の time=X ms を使う。"""
+        stdout = b"64 bytes from 192.168.1.10: icmp_seq=1 ttl=64 time=3.21 ms\n"
+        monkeypatch.setattr(
+            network_logger.asyncio,
+            "create_subprocess_exec",
+            AsyncMock(return_value=_fake_ping_process(0, stdout)),
+        )
+
+        result = await network_logger.ping_host("192.168.1.10")
+
+        assert result["status"] == "OK"
+        assert result["latency"] == 3.21
+        assert result["error"] == ""
+
+    async def test_falls_back_to_wall_clock_when_rtt_is_unparsable(self, monkeypatch):
+        monkeypatch.setattr(
+            network_logger.asyncio,
+            "create_subprocess_exec",
+            AsyncMock(return_value=_fake_ping_process(0, "pong (形式が変わった)".encode())),
+        )
+
+        result = await network_logger.ping_host("192.168.1.10")
+
+        assert result["status"] == "OK"
+        # 壁時計へのフォールバック。値は環境依存なので「正の数であること」だけ見る。
+        assert result["latency"] > 0
+
+    async def test_non_zero_exit_is_unreachable(self, monkeypatch):
+        monkeypatch.setattr(
+            network_logger.asyncio,
+            "create_subprocess_exec",
+            AsyncMock(return_value=_fake_ping_process(1)),
+        )
+
+        result = await network_logger.ping_host("192.168.1.99")
+
+        assert result == {"status": "NG", "latency": 0.0, "error": "Unreachable"}
+
+    async def test_subprocess_failure_is_reported_as_error(self, monkeypatch):
+        monkeypatch.setattr(
+            network_logger.asyncio,
+            "create_subprocess_exec",
+            AsyncMock(side_effect=OSError("ping not found")),
+        )
+
+        result = await network_logger.ping_host("192.168.1.10")
+
+        assert result["status"] == "ERROR"
+        assert "ping not found" in result["error"]
+
+
+class TestCheckTcpPort:
+    async def test_open_port_returns_latency(self, monkeypatch):
+        writer = MagicMock()
+        writer.wait_closed = AsyncMock()
+        monkeypatch.setattr(
+            network_logger.asyncio, "open_connection", AsyncMock(return_value=(MagicMock(), writer))
+        )
+
+        result = await network_logger.check_tcp_port("192.168.1.10", 554)
+
+        assert result["status"] == "OPEN"
+        assert result["latency"] >= 0
+        # 接続は必ず閉じる(常駐プロセスなので FD が溜まると最終的に開けなくなる)
+        writer.close.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "error, expected",
+        [
+            (asyncio.TimeoutError(), "TIMEOUT"),
+            (ConnectionRefusedError(), "REFUSED"),
+            (OSError("no route to host"), "ERROR"),
+        ],
+    )
+    async def test_failure_modes_are_distinguished(self, monkeypatch, error, expected):
+        """TIMEOUT と REFUSED は原因が違うので、CSV 上でも区別できる必要がある。"""
+        monkeypatch.setattr(
+            network_logger.asyncio, "open_connection", AsyncMock(side_effect=error)
+        )
+
+        result = await network_logger.check_tcp_port("192.168.1.10", 554)
+
+        assert result == {"status": expected, "latency": 0.0}
+
+
+class TestMonitorCamera:
+    async def test_skips_config_without_ip(self):
+        assert await network_logger.monitor_camera({"name": "壊れた設定"}) is None
+
+    async def test_healthy_camera_has_no_error_detail(self, monkeypatch):
+        monkeypatch.setattr(
+            network_logger, "ping_host", AsyncMock(return_value={"status": "OK", "latency": 2.0, "error": ""})
+        )
+        monkeypatch.setattr(
+            network_logger, "check_tcp_port", AsyncMock(return_value={"status": "OPEN", "latency": 1.5})
+        )
+
+        row = await network_logger.monitor_camera({"name": "玄関", "ip": "192.168.1.10"})
+
+        assert row["Camera_Name"] == "玄関"
+        assert row["Ping_Status"] == "OK"
+        assert row["Port_RTSP_Status"] == "OPEN"
+        assert row["Error_Detail"] == ""
+
+    async def test_retries_ping_then_skips_rtsp_when_unreachable(self, monkeypatch):
+        ping = AsyncMock(return_value={"status": "NG", "latency": 0.0, "error": "Unreachable"})
+        tcp = AsyncMock()
+        monkeypatch.setattr(network_logger, "ping_host", ping)
+        monkeypatch.setattr(network_logger, "check_tcp_port", tcp)
+        monkeypatch.setattr(network_logger.asyncio, "sleep", AsyncMock())
+
+        row = await network_logger.monitor_camera({"name": "庭", "ip": "192.168.1.11"})
+
+        assert ping.await_count == network_logger.PING_RETRY_COUNT
+        # ping が通らない相手に RTSP を試しても意味がないので呼ばない
+        tcp.assert_not_awaited()
+        assert "Ping:Unreachable" in row["Error_Detail"]
+        assert "RTSP:Skipped" in row["Error_Detail"]
+
+    async def test_stops_retrying_once_ping_succeeds(self, monkeypatch):
+        ping = AsyncMock(
+            side_effect=[
+                {"status": "NG", "latency": 0.0, "error": "Unreachable"},
+                {"status": "OK", "latency": 4.0, "error": ""},
+            ]
+        )
+        monkeypatch.setattr(network_logger, "ping_host", ping)
+        monkeypatch.setattr(
+            network_logger, "check_tcp_port", AsyncMock(return_value={"status": "OPEN", "latency": 1.0})
+        )
+        monkeypatch.setattr(network_logger.asyncio, "sleep", AsyncMock())
+
+        row = await network_logger.monitor_camera({"name": "駐車場", "ip": "192.168.1.12"})
+
+        assert ping.await_count == 2
+        assert row["Error_Detail"] == ""
+
+    async def test_reachable_but_rtsp_closed_is_recorded(self, monkeypatch):
+        """録画が止まる典型パターン(機器は生きているが RTSP だけ落ちている)。"""
+        monkeypatch.setattr(
+            network_logger, "ping_host", AsyncMock(return_value={"status": "OK", "latency": 2.0, "error": ""})
+        )
+        monkeypatch.setattr(
+            network_logger, "check_tcp_port", AsyncMock(return_value={"status": "REFUSED", "latency": 0.0})
+        )
+
+        row = await network_logger.monitor_camera({"name": "玄関", "ip": "192.168.1.10"})
+
+        assert row["Ping_Status"] == "OK"
+        assert row["Error_Detail"] == "RTSP:REFUSED"
+
+    async def test_falls_back_to_unknown_camera_name(self, monkeypatch):
+        monkeypatch.setattr(
+            network_logger, "ping_host", AsyncMock(return_value={"status": "OK", "latency": 1.0, "error": ""})
+        )
+        monkeypatch.setattr(
+            network_logger, "check_tcp_port", AsyncMock(return_value={"status": "OPEN", "latency": 1.0})
+        )
+
+        row = await network_logger.monitor_camera({"ip": "192.168.1.13"})
+
+        assert row["Camera_Name"] == "Unknown_Camera"

@@ -339,7 +339,7 @@
 
 * **副作用**: DB保存(`save_log_generic`)、画像取得・保存(`save_image_from_stream`)、グローバル変数 `last_motion_detected` の更新。
 * **（Issue #439 で修正）** クールダウン判定(`last_motion_detected.get(cam_id, 0.0)`の読み取りと、クールダウン未経過でない場合の`last_motion_detected[cam_id] = current_time`への書き込み)は、以前はロックなしで行われていた（カメラごとの監視スレッドが並行して同じ辞書にアクセスしうる）。この「読んでから書く」区間全体を`_motion_lock`で囲むよう修正された。
-* 根拠: `save_log_generic` (行番号: 540 / 抜粋: "save_log_generic("device_record")、[クールダウン判定のロック保護] (行番号: 383〜390 / 抜粋: "current_time: float = time.time()\n        with _motion_lock:\n            last_detected_time: float = last_motion_detected.get(cam_id, 0.0)\n            if current_time - last_detected_time < MOTION_COOLDOWN_SEC:\n                logger.debug(...)\n                return\n            last_motion_detected[cam_id] = current_time")
+* 根拠: `save_log_generic` (行番号: 540 / 抜粋: "save_log_generic("device_record")、[クールダウン判定のロック保護] (行番号: 523〜530 / 抜粋: "current_time: float = time.time()\n        with _motion_lock:\n            last_detected_time: float = last_motion_detected.get(cam_id, 0.0)\n            if current_time - last_detected_time < MOTION_COOLDOWN_SEC:\n                logger.debug(...)\n                return\n            last_motion_detected[cam_id] = current_time")
 
 
 * **エラーハンドリング**: パースエラー等の例外をキャッチして警告ログを出力し、`finally` ブロックで `del msg` を実行しリソースを解放する。

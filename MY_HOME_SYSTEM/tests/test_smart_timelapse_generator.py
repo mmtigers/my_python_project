@@ -7,6 +7,7 @@ VideoBuilder._build_concat の `except Exception: return False` が
 サーバーログから追跡できなかった不具合。
 """
 import datetime
+import json
 import os
 import subprocess
 import sys
@@ -14,6 +15,9 @@ import textwrap
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
+from freezegun import freeze_time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -314,3 +318,208 @@ class TestSplitAndSendCleansUpPartFiles:
 
         for p in part_files:
             assert not p.exists(), f"送信失敗時も分割ファイルは削除されるべき: {p}"
+
+
+# ---------------------------------------------------------------------------
+# ffmpeg 周りのユーティリティ。
+#
+# この経路は NAS 上の動画を相手に毎晩 cron で動き、失敗しても「動きはありません
+# でした」と同じ見た目になる。とくにエスケープと開始時刻の推定は、壊れても
+# 例外にならず“それらしい”出力が出てしまうため、値を固定しておく。
+# ---------------------------------------------------------------------------
+
+
+class TestFfmpegEscaping:
+    """ffmpeg のフィルタ文字列に入る値のエスケープ。
+
+    エスケープ漏れはフィルタグラフの構文エラーになり、その晩のタイムラプスが
+    丸ごと失われる。日本語ファイル名やコロンを含む時刻表示で踏みやすい。
+    """
+
+    def test_filename_single_quote_is_escaped(self):
+        assert stg.escape_ffmpeg_filename("it's.mp4") == "it'\\''s.mp4"
+
+    def test_filename_without_quote_is_unchanged(self):
+        assert stg.escape_ffmpeg_filename("/mnt/nas/20260830_060000.mp4") == "/mnt/nas/20260830_060000.mp4"
+
+    def test_drawtext_escapes_backslash_quote_and_colon(self):
+        # drawtext はコロンをオプション区切りとして解釈するため必ず潰す
+        assert stg.escape_drawtext("06:30") == "06\\:30"
+        assert stg.escape_drawtext("a'b") == "a'\\''b"
+        # バックスラッシュを先に二重化してから他を処理する順序に依存する
+        assert stg.escape_drawtext("C:\\tmp") == "C\\:\\\\tmp"
+
+
+class TestCheckRoi:
+    def test_accepts_roi_inside_the_frame(self, monkeypatch):
+        monkeypatch.setattr(stg, "ROI_X", 0)
+        monkeypatch.setattr(stg, "ROI_Y", 0)
+        monkeypatch.setattr(stg, "ROI_W", 100)
+        monkeypatch.setattr(stg, "ROI_H", 100)
+        stg.check_roi(1920, 1080)  # 例外が出ないこと
+
+    @pytest.mark.parametrize(
+        "roi, reason",
+        [
+            ((0, 0, 0, 100), "幅が0"),
+            ((0, 0, 100, 0), "高さが0"),
+            ((5000, 0, 100, 100), "始点が画面外"),
+            ((1900, 0, 100, 100), "右端がはみ出す"),
+            ((0, 1000, 100, 200), "下端がはみ出す"),
+        ],
+    )
+    def test_rejects_invalid_roi(self, monkeypatch, roi, reason):
+        x, y, w, h = roi
+        monkeypatch.setattr(stg, "ROI_X", x)
+        monkeypatch.setattr(stg, "ROI_Y", y)
+        monkeypatch.setattr(stg, "ROI_W", w)
+        monkeypatch.setattr(stg, "ROI_H", h)
+        with pytest.raises(ValueError):
+            stg.check_roi(1920, 1080)
+
+
+class TestGetVideoInfo:
+    def _result(self, returncode=0, stdout="{}", stderr=""):
+        res = MagicMock()
+        res.returncode = returncode
+        res.stdout = stdout
+        res.stderr = stderr
+        return res
+
+    def test_parses_ffprobe_json(self, monkeypatch):
+        payload = {"format": {"duration": "600.0"}}
+        monkeypatch.setattr(
+            stg.subprocess, "run", lambda *a, **k: self._result(stdout=json.dumps(payload))
+        )
+        assert stg.get_video_info("/tmp/a.mp4") == payload
+
+    def test_non_zero_exit_returns_empty(self, monkeypatch):
+        monkeypatch.setattr(
+            stg.subprocess, "run", lambda *a, **k: self._result(returncode=1, stderr="broken")
+        )
+        assert stg.get_video_info("/tmp/a.mp4") == {}
+
+    def test_empty_output_returns_empty(self, monkeypatch):
+        monkeypatch.setattr(stg.subprocess, "run", lambda *a, **k: self._result(stdout="   "))
+        assert stg.get_video_info("/tmp/a.mp4") == {}
+
+    def test_retries_on_timeout_then_gives_up(self, monkeypatch):
+        """NAS の負荷で ffprobe がタイムアウトすることがあるので数回粘る。"""
+        attempts = []
+
+        def always_timeout(*a, **k):
+            attempts.append(1)
+            raise subprocess.TimeoutExpired(cmd="ffprobe", timeout=120)
+
+        monkeypatch.setattr(stg.subprocess, "run", always_timeout)
+        monkeypatch.setattr(stg.time, "sleep", lambda *_: None)
+
+        assert stg.get_video_info("/tmp/a.mp4", retries=3) == {}
+        assert len(attempts) == 3
+
+    def test_succeeds_on_a_later_attempt(self, monkeypatch):
+        payload = {"format": {"duration": "1.0"}}
+        calls = {"n": 0}
+
+        def flaky(*a, **k):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise subprocess.TimeoutExpired(cmd="ffprobe", timeout=120)
+            return self._result(stdout=json.dumps(payload))
+
+        monkeypatch.setattr(stg.subprocess, "run", flaky)
+        monkeypatch.setattr(stg.time, "sleep", lambda *_: None)
+
+        assert stg.get_video_info("/tmp/a.mp4", retries=3) == payload
+
+
+class TestGetVideoStartDt:
+    """開始時刻の推定。
+
+    ここが外れるとタイムラプスに焼き込む時刻表示と、イベントの発生時刻が
+    まるごとずれる。メタデータ → ファイル名 → 当日0時 の順で倒す。
+    """
+
+    def test_prefers_creation_time_metadata(self):
+        info = {"format": {"tags": {"creation_time": "2026-08-30T21:00:00.000000Z"}}}
+        dt = stg.get_video_start_dt("/mnt/nas/whatever.mp4", info)
+        # ローカルタイムへ変換したうえで naive に落とす
+        assert dt.tzinfo is None
+        assert isinstance(dt, datetime.datetime)
+
+    def test_falls_back_to_yyyymmdd_hhmmss_in_filename(self):
+        dt = stg.get_video_start_dt("/mnt/nas/20260830_061530.mp4", {})
+        assert dt == datetime.datetime.fromisoformat("2026-08-30T06:15:30")
+
+    def test_falls_back_to_date_in_filename(self):
+        dt = stg.get_video_start_dt("/mnt/nas/2026-08-30_summary.mp4", {})
+        assert dt == datetime.datetime.fromisoformat("2026-08-30T00:00:00")
+
+    @freeze_time("2026-08-30 12:00:00")
+    def test_falls_back_to_today_midnight(self):
+        # Issue #658: 実時刻に任せず固定する(日付をまたいだ瞬間に結果が変わるため)
+        dt = stg.get_video_start_dt("/mnt/nas/no_timestamp.mp4", {})
+        assert dt == datetime.datetime.fromisoformat("2026-08-30T00:00:00")
+
+    def test_broken_metadata_falls_through_to_filename(self):
+        info = {"format": {"tags": {"creation_time": "まったく日付ではない"}}}
+        dt = stg.get_video_start_dt("/mnt/nas/20260830_061530.mp4", info)
+        assert dt == datetime.datetime.fromisoformat("2026-08-30T06:15:30")
+
+    @freeze_time("2026-08-30 12:00:00")
+    def test_impossible_date_in_filename_falls_through(self):
+        # 13月32日のような値は datetime が受け付けないので次の手段へ倒す
+        dt = stg.get_video_start_dt("/mnt/nas/20261332_996060.mp4", {})
+        assert dt == datetime.datetime.fromisoformat("2026-08-30T00:00:00")
+
+
+class TestSetupDirectories:
+    def test_creates_directories_and_clears_the_work_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(stg.config, "BASE_DIR", str(tmp_path), raising=False)
+        work_dir = tmp_path / "work" / "timelapse"
+        work_dir.mkdir(parents=True)
+        (work_dir / "leftover.mp4").write_bytes(b"x")
+        (work_dir / "subdir").mkdir()
+        (work_dir / "subdir" / "inner.txt").write_text("x", encoding="utf-8")
+
+        work, output, records = stg.setup_directories()
+
+        # 前回の中断で残った中間ファイルは毎回消す(NAS を食い潰さないため)
+        assert os.listdir(work) == []
+        assert os.path.isdir(output)
+        assert os.path.isdir(records)
+
+
+class TestDependencyChecks:
+    def test_reports_missing_command(self, monkeypatch):
+        monkeypatch.setattr(stg.shutil, "which", lambda cmd: None if cmd == "ffprobe" else "/usr/bin/" + cmd)
+        assert stg.check_dependencies() is False
+
+    def test_all_present(self, monkeypatch):
+        monkeypatch.setattr(stg.shutil, "which", lambda cmd: "/usr/bin/" + cmd)
+        assert stg.check_dependencies() is True
+
+    def test_ffmpeg_version_returns_first_line(self, monkeypatch):
+        res = MagicMock()
+        res.stdout = "ffmpeg version 6.1.1\nbuilt with gcc\n"
+        monkeypatch.setattr(stg.subprocess, "run", lambda *a, **k: res)
+        assert stg.get_ffmpeg_version() == "ffmpeg version 6.1.1"
+
+    def test_ffmpeg_version_unknown_when_command_fails(self, monkeypatch):
+        monkeypatch.setattr(stg.subprocess, "run", MagicMock(side_effect=OSError("no ffmpeg")))
+        assert stg.get_ffmpeg_version() == "Unknown"
+
+    def test_detects_drawtext_localtime_support(self, monkeypatch):
+        res = MagicMock()
+        res.stdout = "  localtime  expand the text ..."
+        monkeypatch.setattr(stg.subprocess, "run", lambda *a, **k: res)
+        assert stg.check_drawtext_localtime_support() is True
+
+    def test_drawtext_localtime_unsupported_when_command_fails(self, monkeypatch):
+        monkeypatch.setattr(stg.subprocess, "run", MagicMock(side_effect=OSError("no ffmpeg")))
+        assert stg.check_drawtext_localtime_support() is False
+
+
+def test_sec_to_time_formats_as_hms():
+    assert stg.sec_to_time(0) == "0:00:00"
+    assert stg.sec_to_time(3661) == "1:01:01"

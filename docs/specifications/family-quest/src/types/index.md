@@ -78,8 +78,8 @@
 * **（Issue #390で修正）** `difficulty?: number`はバックエンドが送出しない幽霊フィールドだったため削除。`description`はNULL可カラムのため`string | null`を許容する。**（Issue #412 F-L10で追加）** `_isFallback?: boolean`は`_isInfinite`と同じ位置づけのフロントエンド拡張フラグで、`masterData.js`の`MASTER_QUESTS`（サーバー接続エラー時の案内専用の疑似クエスト、完了APIを持たない）であることを示す。バックエンドは送出しない。根拠: 49行目 `_isFallback?: boolean;`
 * **（Issue #474で修正）** `days`プロパティは以前`number[] | string | null`だったが、実際のAPIレスポンス(バックエンドの`services/quest_service.py`の`get_all_view_data`)はDBカラム`day_of_week`(カンマ区切り文字列)を常に`number[] | null`へ変換してから送出しており、文字列のまま`days`が返ってくる経路は存在しないと判明したため、`number[] | null`に絞った(`string`分岐に対応する実際の入力が存在しなかった)。
 * 根拠: [該当要素] (行番号: 43〜74 / 抜粋: "// #390: difficulty はバックエンドが送出しない幽霊フィールドだったため削除。\nexport interface Quest {")
-* 根拠: [days型の絞り込み(Issue #474)] (行番号: 60〜66 / 抜粋: "// Issue #474: バックエンド(services/quest_service.py の get_all_view_data)は\n// day_of_week カラム(カンマ区切り文字列)を常に number[] | null へ変換してから\n// 送出しており、実際のAPIレスポンスで days が生の文字列になることはない\n// (文字列形式はサーバー内部の MasterQuest.days でのみ使われ、フロントへは渡らない)。\n// 以前この型は number[] | string | null だったが、対応する実際の入力が\n// 存在しない string 分岐だったため削除した。\n    days?: number[] | null;")
-* 根拠: [フィールド名統一のコメント] (行番号: 29〜34 / 抜粋: "// ★フィールド名の統一(Issue #291): 以前はDBの実カラム名(quest_id/exp_gain/\n// gold_gain/icon_key/quest_type/target_user)に加え、バックエンドが一部のみ\n// 付与していた別名(id/exp/gold/icon/type/target)も型として許容しており、\n// どちらが実際に送られてくるか不明瞭だった(id/exp/gold/descは実際には\n// 一度もAPIから送られてこない幽霊フィールドだった)。サーバー側の実カラム名に\n// 一本化し、フロントの参照側もフォールバック連鎖を廃止した。")
+* 根拠: [days型の絞り込み(Issue #474)] (行番号: 62〜68 / 抜粋: "// Issue #474: バックエンド(services/quest_service.py の get_all_view_data)は\n// day_of_week カラム(カンマ区切り文字列)を常に number[] | null へ変換してから\n// 送出しており、実際のAPIレスポンスで days が生の文字列になることはない\n// (文字列形式はサーバー内部の MasterQuest.days でのみ使われ、フロントへは渡らない)。\n// 以前この型は number[] | string | null だったが、対応する実際の入力が\n// 存在しない string 分岐だったため削除した。\n    days?: number[] | null;")
+* 根拠: [フィールド名統一のコメント] (行番号: 37〜42 / 抜粋: "// ★フィールド名の統一(Issue #291): 以前はDBの実カラム名(quest_id/exp_gain/\n// gold_gain/icon_key/quest_type/target_user)に加え、バックエンドが一部のみ\n// 付与していた別名(id/exp/gold/icon/type/target)も型として許容しており、\n// どちらが実際に送られてくるか不明瞭だった(id/exp/gold/descは実際には\n// 一度もAPIから送られてこない幽霊フィールドだった)。サーバー側の実カラム名に\n// 一本化し、フロントの参照側もフォールバック連鎖を廃止した。")
 
 
 * **引数/リクエスト**: 該当なし
@@ -202,7 +202,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | これらをインポートしているコンポーネント・API群 | 定義された各型がどのように初期化され、操作されているかの実態を把握するため。 | [全体] 型定義のみであり、利用側が存在しないと機能しないため |
-| 中 | APIクライアントの実装ファイル | `QuestResult`などがAPIレスポンス用と明記されており、通信周りの処理を追う必要があるため。 | [QuestResult] (行番号: 102 / 抜粋: "// ★追加: クエスト完了結果 (APIレスポンス用)") |
+| 中 | APIクライアントの実装ファイル | `QuestResult`などがAPIレスポンス用と明記されており、通信周りの処理を追う必要があるため。 | [QuestResult] (行番号: 179 / 抜粋: "// ★追加: クエスト完了結果 (APIレスポンス用)") |
 
 ## 8. 保守上の注意点
 

@@ -68,7 +68,7 @@ Issue #550で`services/quest_service.py`（旧1572行・5クラス）が`service
 ### `__all__` (モジュールレベル変数)
 
 * **役割**: 本ファイルがimportした全シンボル（外部モジュール5つ、`services.quest.locks`由来の定数・ロック関数18個、`UserService`/`InvalidImageError`/`ImageTooLargeError`/`QuestService`/`ApprovalService`/`apply_quest_rewards`/`ShopService`/`InventoryService`/`inventory_service`/`GameSystem`/`game_system`/`quest_service`/`approval_service`/`shop_service`/`user_service`、`quest_data`）の名前を列挙し、`from services.quest_service import *`や静的解析ツール(ruffのF401)に対して「これらは意図的な再エクスポートであり未使用ではない」ことを明示する。**（Issue #551で追加）** `InvalidImageError`/`ImageTooLargeError`の2件が新たに加わった。
-* 根拠: `__all__ = [\n    "importlib",\n    ...\n    "quest_data",\n]` (行番号: 64〜103)、コメント (行番号: 60〜63 / 抜粋: "本ファイルはimportパス互換のための再エクスポート層であり、ここで束縛する名前は\n# すべて外部(ルーター・テスト)からの ... 利用が前提のため、\n# ruffのF401(unused-import)を抑制する。")、追加分 (行番号: 91〜92 / 抜粋: "\"InvalidImageError\",\n    \"ImageTooLargeError\",")
+* 根拠: `__all__ = [\n    "importlib",\n    ...\n    "quest_data",\n]` (行番号: 64〜103)、コメント (行番号: 69〜72 / 抜粋: "本ファイルはimportパス互換のための再エクスポート層であり、ここで束縛する名前は\n# すべて外部(ルーター・テスト)からの ... 利用が前提のため、\n# ruffのF401(unused-import)を抑制する。")、追加分 (行番号: 91〜92 / 抜粋: "\"InvalidImageError\",\n    \"ImageTooLargeError\",")
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルのリストリテラル）
 * 根拠: (行番号: 64〜103)
 
@@ -88,7 +88,7 @@ Issue #550で`services/quest_service.py`（旧1572行・5クラス）が`service
 ### `services/quest/game_system.py`との相互依存について
 
 * **役割（本ファイルが担う側の責務）**: 本ファイルの`quest_data`属性は、`services/quest/game_system.py`の`sync_master_data`/`get_all_view_data`が`from services import quest_service as _quest_service_shim`という形で動的にimportし、`_quest_service_shim.quest_data`として毎回読みに来る対象である。`GameSystem`側が`import quest_data`でモジュールグローバルとして直接束縛せず、都度本シムモジュールを経由するのは、テストが`monkeypatch.setattr(services.quest_service, "quest_data", fake)`という形で本ファイルの属性を差し替える前提を尊重するためである。詳細は[quest_game_system.md](./quest_game_system.md)を参照。
-* 根拠: コメント (行番号: 111〜116 / 抜粋: "Issue #550: GameSystem.sync_master_data/get_all_view_data は分割後\n# services/quest/game_system.py に移ったが、`quest_data` の実体はこの互換シム側に\n# 残す。テストが `monkeypatch.setattr(services.quest_service, \"quest_data\", fake)`\n# の形でこのモジュールの属性を差し替えるため、game_system.py 側は\n# `import quest_data` でモジュールグローバルとして束縛せず、都度このシムモジュールを\n# 経由して現在値を読みに行く")
+* 根拠: コメント (行番号: 129〜134 / 抜粋: "Issue #550: GameSystem.sync_master_data/get_all_view_data は分割後\n# services/quest/game_system.py に移ったが、`quest_data` の実体はこの互換シム側に\n# 残す。テストが `monkeypatch.setattr(services.quest_service, \"quest_data\", fake)`\n# の形でこのモジュールの属性を差し替えるため、game_system.py 側は\n# `import quest_data` でモジュールグローバルとして束縛せず、都度このシムモジュールを\n# 経由して現在値を読みに行く")
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（本ファイル側にコードとしての実体は無く、コメントによる設計意図の記述のみ）
 
 ## 5. 処理フロー図

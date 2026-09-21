@@ -21,7 +21,7 @@
 * FastAPIを使用したクエスト管理システム（MY_HOME_SYSTEM）のルーティング定義（コントローラー）ファイル。
 * ゲームデータ同期、クエストの完了・承認・却下・キャンセル、報酬の購入、画像アップロード、音声テスト、インベントリ管理などの各エンドポイントを提供する。
 * **（Issue #551で修正）** ビジネスロジックの大部分を外部サービス（`services.quest_service`など）に委譲する薄いルーターである。以前は画像アップロード(`upload_image`)のファイル検証・保存ロジック（拡張子/マジックバイト検証を行うモジュール関数`validate_image_header`、ストリーミング書き込み、サイズ上限チェックと失敗時のクリーンアップ）が本ファイル内に直接実装されていたが、これらはすべて`services/quest/user_service.py`の`UserService.save_avatar_image`へ移設された。現在の`upload_image`は`await user_service.save_avatar_image(file)`を呼び出し、送出されうる`InvalidImageError`（→HTTP 400）・`ImageTooLargeError`（→HTTP 413）・その他の`Exception`（→HTTP 500）を捕捉してHTTPステータスへ変換するだけの委譲コードになっている。
-* 根拠: [関数定義] (行番号: 98-109 / 抜粋: "@router.post(\"/upload\")\nasync def upload_image(file: UploadFile = File(...)):\n    try:\n        url = await user_service.save_avatar_image(file)\n        return {\"url\": url}\n    except InvalidImageError as e:\n        raise HTTPException(status_code=400, detail=str(e))\n    except ImageTooLargeError as e:\n        raise HTTPException(status_code=413, detail=str(e))\n    except Exception:\n        logger.exception(\"Upload failed\")\n        raise HTTPException(status_code=500, detail=\"画像の保存に失敗しました\")")
+* 根拠: [関数定義] (行番号: 108-119 / 抜粋: "@router.post(\"/upload\")\nasync def upload_image(file: UploadFile = File(...)):\n    try:\n        url = await user_service.save_avatar_image(file)\n        return {\"url\": url}\n    except InvalidImageError as e:\n        raise HTTPException(status_code=400, detail=str(e))\n    except ImageTooLargeError as e:\n        raise HTTPException(status_code=413, detail=str(e))\n    except Exception:\n        logger.exception(\"Upload failed\")\n        raise HTTPException(status_code=500, detail=\"画像の保存に失敗しました\")")
 * `get_all_data`はクエリパラメータ`viewer_user_id`（任意、`Optional[str]`）を受け取り、`game_system.get_all_view_data()`へそのまま透過して渡す。**（Issue #752で追加）** 本エンドポイントにも`response_model=GameDataResponse`が付き、本ファイルのすべてのエンドポイントがOpenAPIにレスポンス形状を持つようになった。
 * 根拠: 関数定義 (行番号: 46 / 抜粋: "def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:"), 引数の透過 (行番号: 48 / 抜粋: "return game_system.get_all_view_data(viewer_user_id)"), `response_model`指定 (行番号: 45 / 抜粋: "@router.get(\"/data\", response_model=GameDataResponse)")
 * 装備品の購入・変更、ボスのステータス直接更新（DBへのSQL実行）、ファミリーマイレージの取得・更新、週間分析データ取得の各エンドポイントは、ボス戦闘・装備・ファミリーマイレージ・週間ランキング機能の廃止に伴い削除されている。これに伴い、本ファイルが直接DBアクセスを行う`common`モジュールへの依存も無くなっている。
@@ -108,7 +108,7 @@
 
 
 * **エラーハンドリング**: `HTTPException`はそのまま再送出する。それ以外の`Exception`は`logger.exception`でスタックトレース付きログを出力後、HTTP 500エラーを送出する。（Issue #752 以降は、これに加えてレスポンスが `GameDataResponse` に適合しない場合に FastAPI 自身がレスポンス検証エラーを送出しうる。）
-* 根拠: 例外処理 (行番号: 46-52 / 抜粋: "except HTTPException:\n        # #409: 以前は HTTPException まで 500 に潰していた\n        raise\n    except Exception:\n        # #409: logger.error(f\"{e}\") ではスタックトレースが失われ原因調査ができなかった\n        logger.exception(\"Data Fetch Error\")\n        raise HTTPException(status_code=500, detail=\"Failed to fetch data\")")
+* 根拠: 例外処理 (行番号: 49-55 / 抜粋: "except HTTPException:\n        # #409: 以前は HTTPException まで 500 に潰していた\n        raise\n    except Exception:\n        # #409: logger.error(f\"{e}\") ではスタックトレースが失われ原因調査ができなかった\n        logger.exception(\"Data Fetch Error\")\n        raise HTTPException(status_code=500, detail=\"Failed to fetch data\")")
 
 
 
@@ -299,7 +299,7 @@
 ### `reset_user`（Issue #547で追加）
 
 * **役割**: 管理者ユーザー（`role_adult`）が指定した対象ユーザーのゲームデータをリセットするための管理者用エンドポイント。直前のコメントによれば、従来`reset_game.py`が別プロセスから直接DBを書き換えていたユーザーリセット処理を、サーバーAPI経由に置き換えるために追加された。権限チェック（`admin_id`が`role_adult`か）を含む実処理はすべて`user_service.reset_user_data`に委譲されており、本ファイル自体は検証ロジックを持たない。
-* 根拠: [ルーティング定義とコメント] (行番号: 80-85 / 抜粋: "# Issue #547: reset_game.py が別プロセスから直接DBを書き換えていたユーザーリセットを\n# サーバーAPI経由に置き換える。権限チェック(admin_idがrole_adultか)はProcessApproveQuest等\n# と同様サービス層(UserService.reset_user_data)で行う。\n@router.post(\"/admin/reset_user\", response_model=ResetUserResponse)\ndef reset_user(action: ResetUserAction):\n    return user_service.reset_user_data(action.admin_id, action.target_user_id)")
+* 根拠: [ルーティング定義とコメント] (行番号: 90-95 / 抜粋: "# Issue #547: reset_game.py が別プロセスから直接DBを書き換えていたユーザーリセットを\n# サーバーAPI経由に置き換える。権限チェック(admin_idがrole_adultか)はProcessApproveQuest等\n# と同様サービス層(UserService.reset_user_data)で行う。\n@router.post(\"/admin/reset_user\", response_model=ResetUserResponse)\ndef reset_user(action: ResetUserAction):\n    return user_service.reset_user_data(action.admin_id, action.target_user_id)")
 
 
 * **引数/リクエスト**: `ResetUserAction` (フィールドとして `admin_id`, `target_user_id` を持つ)
@@ -315,7 +315,7 @@
 
 
 * **エラーハンドリング**: なし（本ファイル自体は例外を送出しない。権限チェック失敗時等のHTTPステータスは`user_service.reset_user_data`側の実装に依存する。詳細は[quest_user_service.md](./quest_user_service.md)参照）
-* 根拠: 該当関数 (行番号: 83-85 / 抜粋: "@router.post(\"/admin/reset_user\", response_model=ResetUserResponse)\ndef reset_user(action: ResetUserAction):\n    return user_service.reset_user_data(action.admin_id, action.target_user_id)")
+* 根拠: 該当関数 (行番号: 93-95 / 抜粋: "@router.post(\"/admin/reset_user\", response_model=ResetUserResponse)\ndef reset_user(action: ResetUserAction):\n    return user_service.reset_user_data(action.admin_id, action.target_user_id)")
 
 
 
@@ -326,7 +326,7 @@
 
 
 * **引数/リクエスト**: `filename: str`（パスパラメータ、削除対象のアップロード済みファイル名）
-* 根拠: [引数定義] (行番号: 93-94 / 抜粋: "@router.delete("/upload/{filename}")\ndef delete_uploaded_image(filename: str):")
+* 根拠: [引数定義] (行番号: 103-104 / 抜粋: "@router.delete("/upload/{filename}")\ndef delete_uploaded_image(filename: str):")
 
 
 * **戻り値/レスポンス**: `{"status": "deleted"}`（実際に削除できた場合）または `{"status": "skipped"}`（削除しなかった/できなかった場合）。いずれもHTTPステータスは200固定で、失敗を示すエラーレスポンスにはしない。
@@ -345,7 +345,7 @@
 ### `upload_image`（Issue #551で全面改修）
 
 * **役割**: 画像ファイルをアップロードするエンドポイント。以前は拡張子/マジックバイト検証・チャンク単位のストリーミング書き込み・サイズ上限チェックといったファイルI/Oと検証ロジックすべてを本ファイル内に直接実装していたが、Issue #551でこれらは`services/quest/user_service.py`の`UserService.save_avatar_image`へ全面的に移設された。現在は`await user_service.save_avatar_image(file)`を呼び出し、その戻り値（保存先URL）をそのまま返すだけの薄い委譲コードであり、送出されうる2種のドメイン例外をHTTPステータスへ変換する責務のみを持つ。実際のファイル検証・保存ロジックの詳細は[quest_user_service.md](./quest_user_service.md)を参照。
-* 根拠: [関数定義] (行番号: 98-109 / 抜粋: "@router.post(\"/upload\")\nasync def upload_image(file: UploadFile = File(...)):\n    try:\n        url = await user_service.save_avatar_image(file)\n        return {\"url\": url}\n    except InvalidImageError as e:\n        raise HTTPException(status_code=400, detail=str(e))\n    except ImageTooLargeError as e:\n        raise HTTPException(status_code=413, detail=str(e))\n    except Exception:\n        logger.exception(\"Upload failed\")\n        raise HTTPException(status_code=500, detail=\"画像の保存に失敗しました\")")
+* 根拠: [関数定義] (行番号: 108-119 / 抜粋: "@router.post(\"/upload\")\nasync def upload_image(file: UploadFile = File(...)):\n    try:\n        url = await user_service.save_avatar_image(file)\n        return {\"url\": url}\n    except InvalidImageError as e:\n        raise HTTPException(status_code=400, detail=str(e))\n    except ImageTooLargeError as e:\n        raise HTTPException(status_code=413, detail=str(e))\n    except Exception:\n        logger.exception(\"Upload failed\")\n        raise HTTPException(status_code=500, detail=\"画像の保存に失敗しました\")")
 
 
 * **引数/リクエスト**: `file: UploadFile`（`UploadFile`型、FastAPIの`File(...)`によりフォームデータとして受信）
@@ -353,7 +353,7 @@
 
 
 * **戻り値/レスポンス**: `{"url": url}`（`url`は`user_service.save_avatar_image(file)`の戻り値。アップロードされた画像の保存先を指す相対URL、例: `/uploads/xxxx.png`）
-* 根拠: [戻り値] (行番号: 101-102 / 抜粋: "url = await user_service.save_avatar_image(file)\n        return {\"url\": url}")
+* 根拠: [戻り値] (行番号: 111-112 / 抜粋: "url = await user_service.save_avatar_image(file)\n        return {\"url\": url}")
 
 
 * **副作用**: `await user_service.save_avatar_image(file)`の呼び出し（実際のファイル書き込みは`UserService`側で行われ、本ファイルからは不明。詳細は[quest_user_service.md](./quest_user_service.md)参照）、例外捕捉時の`logger.exception`によるログ出力（`Exception`分岐のみ）。
@@ -361,7 +361,7 @@
 
 
 * **エラーハンドリング**: `InvalidImageError`を捕捉しHTTP 400（`detail=str(e)`）、`ImageTooLargeError`を捕捉しHTTP 413（`detail=str(e)`）、それ以外の`Exception`を捕捉し`logger.exception`でスタックトレース付きログを出力したうえでHTTP 500（`detail="画像の保存に失敗しました"`）を送出する。
-* 根拠: [例外処理] (行番号: 103-109 / 抜粋: "except InvalidImageError as e:\n        raise HTTPException(status_code=400, detail=str(e))\n    except ImageTooLargeError as e:\n        raise HTTPException(status_code=413, detail=str(e))\n    except Exception:\n        logger.exception(\"Upload failed\")\n        raise HTTPException(status_code=500, detail=\"画像の保存に失敗しました\")")
+* 根拠: [例外処理] (行番号: 113-119 / 抜粋: "except InvalidImageError as e:\n        raise HTTPException(status_code=400, detail=str(e))\n    except ImageTooLargeError as e:\n        raise HTTPException(status_code=413, detail=str(e))\n    except Exception:\n        logger.exception(\"Upload failed\")\n        raise HTTPException(status_code=500, detail=\"画像の保存に失敗しました\")")
 
 
 
@@ -511,7 +511,7 @@ graph TD
 
 * `get_all_data` において広範な `Exception` でエラーをキャッチしており、捕捉した例外をそのままHTTP 500エラーとして送出している。
 * **（Issue #547で追加）** `reset_user`(`POST /admin/reset_user`)は、本ファイルが持つ現行の唯一の`/admin/*`エンドポイントである（旧`admin_update_boss`(`POST /admin/boss/update`)は既に削除済み。§8の別項参照）。他の大半のエンドポイントと同様、本ファイル自身には認証・セッション機構は無く、リクエストボディの`admin_id`が実際に管理者（`role_adult`）であることの検証は`user_service.reset_user_data`側に完全に委譲されている（本ファイルからは検証の有無・実装は確認できない）。
-* 根拠: [ルーティング定義] (行番号: 83-85 / 抜粋: "@router.post(\"/admin/reset_user\", response_model=ResetUserResponse)\ndef reset_user(action: ResetUserAction):\n    return user_service.reset_user_data(action.admin_id, action.target_user_id)")
+* 根拠: [ルーティング定義] (行番号: 93-95 / 抜粋: "@router.post(\"/admin/reset_user\", response_model=ResetUserResponse)\ndef reset_user(action: ResetUserAction):\n    return user_service.reset_user_data(action.admin_id, action.target_user_id)")
 * **（Issue #551で修正）** `upload_image`は、拡張子・マジックバイト検証・チャンク書き込み・サイズ上限チェック等の実装を`services/quest/user_service.py`の`UserService.save_avatar_image`へ全面的に移設した。本ファイル側に残るのは`await user_service.save_avatar_image(file)`の呼び出しと、`InvalidImageError`→400、`ImageTooLargeError`→413、その他の`Exception`→500（`logger.exception`でスタックトレース付きログ出力後）という例外ハンドリングのみである。以前あったモジュール関数`validate_image_header`（マジックバイト判定）も、この移設に伴い本ファイルからは完全に削除されている。実際のファイルI/O・検証ロジックの詳細は[quest_user_service.md](./quest_user_service.md)を参照。
 * 根拠: [関数定義] (行番号: 109-119 / 抜粋: "async def upload_image(file: UploadFile = File(...)):\n    try:\n        url = await user_service.save_avatar_image(file)")
 * かつて存在した `purchase_equipment` (`POST /equip/purchase`), `change_equipment` (`POST /equip/change`), `admin_update_boss` (`POST /admin/boss/update`), `get_family_mileage` (`GET /family-mileage`), `update_family_mileage` (`PUT /family-mileage`), `get_weekly_analytics` (`GET /analytics/weekly`) の各エンドポイントは、ボス戦闘・装備・ファミリーマイレージ・週間ランキング機能の廃止に伴い削除されている。特に `admin_update_boss` は本ファイル内で `core.database.get_db_cursor` を用いて `party_state` テーブルへ直接SQLを実行する唯一の箇所だったため、これに伴い `common` モジュールへのインポートも削除されている。

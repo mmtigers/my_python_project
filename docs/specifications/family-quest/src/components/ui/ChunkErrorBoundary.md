@@ -32,7 +32,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `window.sessionStorage` | ブラウザ実行環境のAPI。プライベートモード等で例外を投げうるため`try/catch`で防御している | 根拠: (行番号: 50〜66 / 抜粋: "const raw = window.sessionStorage.getItem(AUTO_RELOAD_GUARD_KEY);") |
-| `window.location.reload` | ブラウザAPI。テストから差し替えられるよう`reload`propで上書き可能 | 根拠: (行番号: 68 / 抜粋: "const defaultReload = () => window.location.reload();") |
+| `window.location.reload` | ブラウザAPI。テストから差し替えられるよう`reload`propで上書き可能 | 根拠: (行番号: 66 / 抜粋: "const defaultReload = () => window.location.reload();") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 

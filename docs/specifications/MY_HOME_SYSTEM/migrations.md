@@ -96,7 +96,7 @@
 
 
 * **戻り値/レスポンス**: `List[str]`(ファイル名昇順の`.sql`ファイル名リスト、ディレクトリ不在時は`[]`)
-* 根拠: `[戻り値]` (行番号: 48〜50 / 抜粋: "if not os.path.isdir(MIGRATIONS_DIR):\n        return []\n    return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(\".sql\"))")
+* 根拠: `[戻り値]` (行番号: 58〜60 / 抜粋: "if not os.path.isdir(MIGRATIONS_DIR):\n        return []\n    return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(\".sql\"))")
 
 
 * **副作用**: なし(ファイルシステムの読み取りのみ)
@@ -104,7 +104,7 @@
 
 
 * **エラーハンドリング**: `MIGRATIONS_DIR`が存在しない場合は例外を発生させず空リストを返す。それ以外の例外(パーミッションエラー等)は捕捉されない。
-* 根拠: `[os.path.isdir分岐]` (行番号: 48〜49 / 抜粋: "if not os.path.isdir(MIGRATIONS_DIR):\n        return []")
+* 根拠: `[os.path.isdir分岐]` (行番号: 58〜59 / 抜粋: "if not os.path.isdir(MIGRATIONS_DIR):\n        return []")
 
 
 ### `_strip_line_comment`

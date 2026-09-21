@@ -20,8 +20,15 @@ Issue #550 の分割後は存在しない行範囲を指すものまで残って
 実ソースの位置と一致するかを見る。確定できる引用は次の2種類。
 
 1. 抜粋が `def X(` / `class X` で始まる引用（＝その定義の開始行を指すことが確実）
-2. 抜粋が定義で始まらない引用（式・文）のうち、**単一行の引用** かつ
-   **抜粋の先頭行がソース内でちょうど1行にだけ現れる**もの（AUDIT-019）
+2. 抜粋が定義で始まらない引用（式・文）のうち、位置が一意に決まるもの（AUDIT-019）
+   - **単一行の引用** かつ **抜粋の先頭行がソース内でちょうど1行にだけ現れる**
+   - **範囲引用** かつ **抜粋が複数行** かつ **先頭行・末尾行がともに1行にだけ現れ**、
+     **抜粋の行数が引用範囲の幅と一致する**
+     （この場合は範囲の開始も終端も抜粋の文字列だけで決まる。範囲の方が広い場合は
+     抜粋がその中の見本にすぎず、抜粋の位置へ範囲を狭めると著者が示した範囲を失う）
+
+1 は Python のみ（`ast` が要る）。2 は文字列の照合だけなので `MY_HOME_SYSTEM`/`DDD` の
+`.py`・`.sh` と、`family-quest` の TypeScript すべてが対象。
 
 2 は当初「位置を機械的に特定できない」として一律に対象外にしていたが、
 `import datetime` のようにソース内で一意なリテラルであれば、定義と同じ確実さで
@@ -31,9 +38,10 @@ Issue #550 の分割後は存在しない行範囲を指すものまで残って
 次のものは引き続き対象外（誤検知を出さない側に倒す）。
 
 - 抜粋がソース内に見つからない／2箇所以上に現れる引用（どの行を指すか決められない）
-- 範囲引用（`行番号: 137〜237`）に式・文の抜粋が付いたもの。抜粋は範囲の先頭とは
+- 範囲引用（`行番号: 137〜237`）に**単一行**の抜粋が付いたもの。抜粋は範囲の先頭とは
   限らない（モジュールdocstringの1行目、クラス本体の途中の1行など）ため、先頭行の
-  ズレに合わせて終端もずらすと引用の幅そのものが壊れる
+  ズレに合わせて終端もずらすと引用の幅そのものが壊れる。抜粋が複数行なら両端が
+  決まるので、そちらは対象に含める
 - 8文字未満の短い抜粋（`return` 等。偶然の一致が多い）
 - 同名の定義が複数あり、直前の `### `クラス名.メソッド名`` 見出しでも一意化できないもの
 - `行番号: A, B / 抜粋: "s1", "s2"` のように要素数が一致する並列引用は、位置対応で
@@ -97,13 +105,20 @@ class Finding(NamedTuple):
     cited: str
     actual: Optional[int]
     reason: str
+    # 範囲引用の終端。単一行の引用では None(表示を開始行だけに絞るため)。
+    actual_end: Optional[int] = None
 
     def describe(self) -> str:
         where = "%s:%d" % (self.spec.relative_to(REPO_ROOT), self.line_no)
         if self.actual is None:
             return "%s  `%s` — %s (引用: 行番号: %s)" % (where, self.symbol, self.reason, self.cited)
-        return "%s  `%s` — 引用は %s 行目だが実際は %d 行目 (%s)" % (
-            where, self.symbol, self.cited, self.actual, self.reason,
+        actual = (
+            "%d〜%d" % (self.actual, self.actual_end)
+            if self.actual_end is not None
+            else "%d" % self.actual
+        )
+        return "%s  `%s` — 引用は %s 行目だが実際は %s 行目 (%s)" % (
+            where, self.symbol, self.cited, actual, self.reason,
         )
 
 
@@ -271,6 +286,104 @@ def _literal_head(snippet: str) -> Optional[str]:
     return head or None
 
 
+def _snippet_last_line(snippet: str) -> Optional[str]:
+    """複数行の抜粋から末尾1行を取り出す(単一行の抜粋なら None)。
+
+    範囲引用(`行番号: 44〜87`)の**終端**を確定するために使う。抜粋が複数行なら
+    「先頭行=範囲の開始」「末尾行=範囲の終端」と読めるので、両方が一意であれば
+    範囲全体が抜粋の文字列だけで決まる。
+    """
+    body = snippet.strip()
+    if body.startswith('"'):
+        body = body[1:]
+    close = body.rfind('"')
+    if close != -1:
+        body = body[:close]
+    parts = _split_snippet_lines(body)
+    if len(parts) < 2:
+        return None
+    return parts[-1] or None
+
+
+def _literal_target(
+    snippet: str, cited: str, src_lines: List[str]
+) -> Optional[Tuple[int, Optional[int]]]:
+    """式・文の抜粋の引用について、機械的に確定できる実位置を返す。
+
+    返り値は `(開始行, 終端行 or None)`。確定できなければ None(＝非ゲート)。
+    **ゲートの判定と `--report` の除外は必ずこの関数を共有すること** — 条件が
+    2箇所に分かれると「ゲートにも非ゲートの集計にも現れない引用」が生まれ、
+    出力する保証範囲が実態より良く見えてしまう。
+
+    確定できるのは次の2つだけ。
+
+    1. 単一行の引用 かつ 抜粋の先頭行がソース内で一意
+    2. 範囲引用 かつ 抜粋が複数行 かつ 先頭行・末尾行がともにソース内で一意で、
+       末尾行が先頭行以降にあり、**抜粋の行数が引用範囲の幅と一致する**
+       （範囲の方が広ければ、抜粋はその中の見本にすぎないので対象外）
+
+    範囲引用に**単一行の抜粋**が付いたものは対象外。抜粋は範囲の先頭とは限らず
+    (モジュールdocstringの1行目、クラス本体の途中の1行など)、先頭行のズレに
+    合わせて終端もずらすと引用の幅そのものが壊れるため。
+    """
+    head = _literal_head(snippet)
+    if head is None:
+        return None
+    if not re.search(r"[〜~-]", cited):
+        start = _unique_literal_line(head, src_lines)
+        return None if start is None else (start, None)
+
+    tail = _snippet_last_line(snippet)
+    if tail is None or len(tail) < _MIN_LITERAL_HEAD:
+        return None
+    start = _unique_literal_line(head, src_lines)
+    end = _unique_literal_line(tail, src_lines)
+    if start is None or end is None or end < start:
+        return None
+    # 抜粋が引用範囲を**ちょうど覆っている**ときだけ対象にする。
+    # 範囲の方が広い場合、抜粋はその中の一部を示す見本にすぎず(例: 9行の
+    # docstring を指す引用に2行だけ抜粋を載せている)、抜粋の位置へ範囲を
+    # 狭めると著者が示した範囲の情報が失われる。行数が一致していれば
+    # 「その範囲＝この抜粋」と読めるので、ずれた分だけ安全に追従できる。
+    cited_bounds = [int(v) for v in re.findall(r"\d+", cited)]
+    if len(cited_bounds) != 2:
+        return None
+    if (cited_bounds[1] - cited_bounds[0]) != (end - start):
+        return None
+    return (start, end)
+
+
+def _definition_pairs(rest, before, snippets, back_snippets, items):
+    """根拠ブロックの def/class 引用を (位置, 抜粋) で返し、その位置集合も返す。
+
+    戻り値は `(pairs, def_claimed)`。`def_claimed` は「その位置の行番号は def/class の
+    定義位置を指しており、式・文の抜粋として解釈してはいけない」位置の集合。
+
+    書式B(``` `def foo(...)` (行番号: 28 / 抜粋: "x = 1") ```)では、行番号は def の
+    位置を指していて、後ろの `抜粋:` はその定義の**中身の一例**にすぎない。これを
+    独立した式・文の引用として扱うと、AUDIT-019 の照合がその行番号を抜粋の位置へ
+    書き換えてしまい、引用が壊れる(実際に `migrations.md` の `_split_statements` で
+    `78〜94` が `93〜93` に書き換わる事故を作り込んだ)。
+    """
+    if len(snippets) == len(items) and len(items) > 1:
+        # 書式Aの並列引用。各位置の抜粋がそのまま行番号に対応するので、
+        # def でない位置は式・文の引用として扱ってよい。
+        return list(enumerate(snippets)), set()
+    if len(back_snippets) == len(items) and len(items) > 1:
+        pairs = list(enumerate(back_snippets))
+        return pairs, {pos for pos, _ in pairs}
+    head = _SNIPPET_HEAD_RE.search(rest)
+    if head:
+        # 書式A: `抜粋: "def X("`。位置0の抜粋そのものが def なので、
+        # 式・文としては解釈されない(_literal_head が None を返す)。
+        return [(0, '"def %s(' % head.group(1))], set()
+    # 書式B: このブロックに最も近い def/class の抜粋を使う
+    defs = [s for s in back_snippets if _DEF_SNIPPET_RE.match(s)]
+    if not defs:
+        return [], set()
+    return [(0, defs[-1])], {0}
+
+
 def _resolve(symbol: str, klass: Optional[str], qualified: Dict, flat: Dict) -> Optional[Tuple[int, int]]:
     candidates = flat.get(symbol)
     if not candidates:
@@ -323,11 +436,21 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
                     "同名ソースが%d件あり一意に決められない" % len(candidates)
                 )
                 skipped.append((spec, reason))
-            continue
-        source_text = candidates[0].read_text(encoding="utf-8")
-        qualified, flat = _definitions(source_text)
-        if qualified is None:
-            continue
+            # `.py` として一意に決まらなくても、`.sh` / TypeScript のソースに対応する
+            # 仕様書なら「式・文の抜粋」の照合は同じようにできる(一意なリテラルの
+            # 照合に言語は関係ない)。def/class の検証だけを諦めて走査を続ける。
+            source = _report_source_for_spec(spec)
+            if source is None or source.suffix == ".py":
+                continue
+            source_text = source.read_text(encoding="utf-8")
+            qualified, flat = {}, {}
+            is_python = False
+        else:
+            source_text = candidates[0].read_text(encoding="utf-8")
+            qualified, flat = _definitions(source_text)
+            if qualified is None:
+                continue
+            is_python = True
         src_lines = source_text.splitlines()
 
         lines = spec.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -355,26 +478,19 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
                 snippets = _split_snippets(rest)
                 back_snippets = _backtick_snippets(before)
                 items = _ITEM_RE.findall(block.group(1))
-                # スニペット数と行番号要素数が揃っているときだけ位置対応で検証する
-                pairs: Iterable[Tuple[int, str]]
-                if len(snippets) == len(items) and len(items) > 1:
-                    pairs = list(enumerate(snippets))
-                elif len(back_snippets) == len(items) and len(items) > 1:
-                    pairs = list(enumerate(back_snippets))
-                else:
-                    head = _SNIPPET_HEAD_RE.search(rest)
-                    if head:
-                        pairs = [(0, '"def %s(' % head.group(1))]
-                    else:
-                        # 書式B: このブロックに最も近い def/class の抜粋を使う
-                        defs = [s for s in back_snippets if _DEF_SNIPPET_RE.match(s)]
-                        # def/class の抜粋が無くても、この下の「式・文の抜粋」の
-                        # 照合は続ける(以前はここで block ごと捨てていた)。
-                        pairs = [(0, defs[-1])] if defs else []
+                # どの位置が def/class の引用かの判定は _definition_pairs に集約する
+                # (式・文の照合と二重に解釈しないため)。
+                pairs, def_claimed = _definition_pairs(
+                    rest, before, snippets, back_snippets, items
+                )
 
                 new_items = list(items)
                 touched = False
-                for pos, snippet in pairs:
+                # def/class の位置解決は ast が要るので Python のときだけ。
+                # TypeScript の `class X` の抜粋も _DEF_SNIPPET_RE には一致するが、
+                # 解決手段が無いので「定義が存在しない」と誤報しないよう対象から外す
+                # (行番号がその定義を指しているという事実は def_claimed で使う)。
+                for pos, snippet in (pairs if is_python else []):
                     sym = re.match(r'"(?:async )?(?:def|class) (\w+)', snippet)
                     if not sym:
                         continue
@@ -402,33 +518,37 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
 
                 # Issue #655 / AUDIT-019: def/class 以外の抜粋(全引用の約8割)は
                 # 「位置を機械的に特定できない」という理由でゲートにも --fix にも
-                # 入っていなかった。しかし抜粋の先頭行がソース内で**一意**なら、
-                # 定義と同じ確実さで位置が決まる。一意に決まるものだけを対象にし、
-                # 0件(抜粋自体が古い)や2件以上(どちらか決められない)は従来どおり
-                # 対象外にする(誤った行へ追従させる方が有害なため)。
+                # 入っていなかった。しかし抜粋がソース内で**一意**なら、定義と同じ
+                # 確実さで位置が決まる。判定は _literal_target に集約してあり、
+                # 「単一行の引用 かつ 先頭行が一意」と「範囲引用 かつ 抜粋が複数行で
+                # 先頭行・末尾行がともに一意」の2つだけを対象にする。0件(抜粋自体が
+                # 古い)や2件以上(どちらか決められない)、範囲引用に単一行の抜粋が
+                # 付いたものは従来どおり対象外(誤った行へ追従させる方が有害なため)。
                 if len(snippets) == len(items):
                     for pos, snippet in enumerate(snippets):
-                        head = _literal_head(snippet)
-                        if head is None:
-                            continue
-                        actual = _unique_literal_line(head, src_lines)
-                        if actual is None:
+                        if pos in def_claimed:
                             continue
                         cited = items[pos]
-                        if re.search(r"[〜~-]", cited):
-                            # 範囲引用(`137〜237`)は対象外。式・文の抜粋は範囲の
-                            # **先頭**とは限らず(モジュールdocstringの `"""` の次の行、
-                            # クラス本体の途中の1行など)、先頭行が動いた分だけ終端も
-                            # ずらすと引用の幅そのものが壊れる。単一行の引用だけなら
-                            # 「その抜粋はこの行にある」と一対一に読めるので安全に直せる。
+                        target = _literal_target(snippet, cited, src_lines)
+                        if target is None:
                             continue
+                        start_line, end_line = target
                         checked += 1
-                        if int(cited) == actual:
-                            continue
+                        bounds = [int(v) for v in re.findall(r"\d+", cited)]
+                        sep = re.search(r"[〜~-]", cited)
+                        if end_line is None:
+                            if bounds[0] == start_line:
+                                continue
+                            replacement = str(start_line)
+                        else:
+                            if (bounds[0], bounds[1]) == (start_line, end_line):
+                                continue
+                            replacement = "%d%s%d" % (start_line, sep.group(0), end_line)
                         findings.append(Finding(
-                            spec, idx + 1, head, cited, actual, "抜粋の位置がずれている",
+                            spec, idx + 1, _literal_head(snippet) or "", cited,
+                            start_line, "抜粋の位置がずれている", end_line,
                         ))
-                        new_items[pos] = str(actual)
+                        new_items[pos] = replacement
                         touched = True
 
                 if touched and fix:
@@ -477,6 +597,18 @@ def _report_source_for_spec(spec: Path) -> Optional[Path]:
     return None
 
 
+# 抜粋の中の行区切り。仕様書では実際の改行を `\n`(バックスラッシュ1つ)で書き、
+# ソースコードの中に文字として現れる `\n` は `\\n`(バックスラッシュ2つ)で書く。
+# 後者を行区切りと誤認すると、1行の抜粋が複数行に見えてしまう
+# (例: `cleaned = \"\\n\".join(...)` が2行の抜粋と判定され、範囲引用を壊した)。
+_SNIPPET_NEWLINE_RE = re.compile(r"(?<!\\)\\n")
+
+
+def _split_snippet_lines(body: str) -> List[str]:
+    """抜粋の本文を行のリストへ分割し、各行のエスケープを戻して strip する。"""
+    return [part.replace('\\"', '"').strip() for part in _SNIPPET_NEWLINE_RE.split(body)]
+
+
 def _snippet_first_line(snippet: str) -> str:
     """引用の抜粋から、照合に使う先頭1行を取り出す。"""
     body = snippet.strip()
@@ -486,8 +618,7 @@ def _snippet_first_line(snippet: str) -> str:
     close = body.rfind('"')
     if close != -1:
         body = body[:close]
-    body = body.split("\\n")[0]
-    return body.replace('\\"', '"').strip()
+    return _split_snippet_lines(body)[0]
 
 
 def report_non_definition_citations() -> Tuple[Dict[str, Tuple[int, int]], int, int]:
@@ -515,18 +646,25 @@ def report_non_definition_citations() -> Tuple[Dict[str, Tuple[int, int]], int, 
         src_lines = source.read_text(encoding="utf-8").splitlines()
         # scan() が実際に走査する仕様書(対応する .py が一意に決まるもの)だけ、
         # 一意な抜粋がゲート済みとして除外できる。
-        gated = len(scanned.get(spec.stem) or []) == 1 and source.suffix == ".py"
+        gated = source.suffix == ".py" or len(scanned.get(spec.stem) or []) != 1
         bad = checked = 0
         for line in spec.read_text(encoding="utf-8").splitlines():
-            for b_i, block in enumerate(_BLOCK_RE.finditer(line)):
-                blocks = list(_BLOCK_RE.finditer(line))
+            blocks = list(_BLOCK_RE.finditer(line))
+            for b_i, block in enumerate(blocks):
                 stop = blocks[b_i + 1].start() if b_i + 1 < len(blocks) else len(line)
                 rest = line[block.end():stop]
+                before = line[blocks[b_i - 1].end() if b_i else 0:block.start()]
                 snippets = _split_snippets(rest)
+                back_snippets = _backtick_snippets(before)
                 items = _ITEM_RE.findall(block.group(1))
                 if not snippets or len(snippets) != len(items):
                     continue
+                _, def_claimed = _definition_pairs(
+                    rest, before, snippets, back_snippets, items
+                )
                 for pos, snippet in enumerate(snippets):
+                    if pos in def_claimed:
+                        continue  # 行番号は def/class の位置を指す(scan() が検証済み)
                     if re.match(r'"(?:async )?(?:def|class) \w+', snippet.strip()):
                         continue  # scan() が厳密に検証済み
                     head = _snippet_first_line(snippet)
@@ -535,11 +673,7 @@ def report_non_definition_citations() -> Tuple[Dict[str, Tuple[int, int]], int, 
                     # scan() が厳密に検証するのは「単一行の引用 かつ 抜粋がソース内で
                     # 一意」のものだけ。ここの除外条件はそれと完全に一致させる
                     # (広く除外すると、ゲートにも非ゲートの集計にも現れない引用が生まれる)。
-                    if (
-                        gated
-                        and not re.search(r"[〜~-]", items[pos])
-                        and _unique_literal_line(head, src_lines) is not None
-                    ):
+                    if gated and _literal_target(snippet, items[pos], src_lines) is not None:
                         continue
                     cited = int(_ITEM_RE.findall(items[pos])[0].split("〜")[0].split("~")[0].split("-")[0])
                     checked += 1
@@ -566,8 +700,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.report:
         per_spec, total_bad, total_checked = report_non_definition_citations()
         print("ℹ️ ゲートに入らない引用の粗い照合: %d件中 %d件が引用行±1に見つかりません。" % (total_checked, total_bad))
-        print("   (範囲引用・抜粋が一意でないもの・.sh・TypeScript が対象。ゲートではなく、")
-        print("    抜粋の表記ゆれによる偽陽性を含む。)")
+        print("   (範囲引用に単一行の抜粋が付いたもの・抜粋が一意でない/ソースに見つからないものが対象。")
+        print("    ゲートではなく、抜粋の表記ゆれによる偽陽性を含む。)")
         print()
         worst = sorted(per_spec.items(), key=lambda kv: kv[1][0], reverse=True)
         for name, (bad, checked_count) in worst[:20]:
@@ -594,10 +728,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     total_citations = checked + ungated_total
     gated_pct = (checked * 100 // total_citations) if total_citations else 0
     scope_lines = [
-        "   ゲート対象は def/class の抜粋の引用と、単一行かつ抜粋がソース内で一意な"
-        "式・文の引用で、全 %d件中 %d件(%d%%)。" % (total_citations, checked, gated_pct),
-        "   残り %d件(範囲引用・抜粋が一意でないもの・.sh・TypeScript)は非ゲートで、"
-        "うち %d件は引用行±1に抜粋が見つかりません" % (ungated_total, ungated_bad),
+        "   ゲート対象は def/class の抜粋の引用と、抜粋がソース内で一意な式・文の引用"
+        "(単一行の引用、および抜粋が複数行で両端とも一意な範囲引用)で、"
+        "全 %d件中 %d件(%d%%)。" % (total_citations, checked, gated_pct),
+        "   残り %d件(範囲引用に単一行の抜粋が付いたもの・抜粋が一意でない/見つからないもの)は"
+        "非ゲートで、うち %d件は引用行±1に抜粋が見つかりません" % (ungated_total, ungated_bad),
         "   (--report で内訳。抜粋の表記ゆれによる偽陽性を含む)。保証範囲: docs/specifications/README.md",
     ]
 

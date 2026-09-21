@@ -199,6 +199,168 @@ def test_ignores_short_literal_snippet(fake_repo):
     assert findings == []
 
 
+@pytest.fixture()
+def fake_repo_other_languages(tmp_path, monkeypatch):
+    """`.sh` と TypeScript のソース + 対応する仕様書を持つ疑似リポジトリ。
+
+    AUDIT-019 の式・文の照合は文字列の一致だけで成立するので、`ast` が使えない
+    これらの言語でも同じ規則が使える。以前は Python の仕様書しか走査していなかった。
+    """
+    (tmp_path / "MY_HOME_SYSTEM").mkdir()
+    (tmp_path / "DDD").mkdir()
+    (tmp_path / "docs" / "specifications" / "MY_HOME_SYSTEM").mkdir(parents=True)
+    (tmp_path / "docs" / "specifications" / "family-quest" / "src" / "lib").mkdir(parents=True)
+
+    (tmp_path / "MY_HOME_SYSTEM" / "sample_script.sh").write_text(
+        textwrap.dedent(
+            """\
+            #!/bin/bash
+            set -euo pipefail
+
+            NAS_MOUNT_POINT="/mnt/nas"
+            echo "starting"
+            """
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "family-quest" / "src" / "lib").mkdir(parents=True)
+    (tmp_path / "family-quest" / "src" / "lib" / "sample.ts").write_text(
+        textwrap.dedent(
+            """\
+            import { z } from 'zod';
+
+            export const RETRY_LIMIT = 3;
+
+            export function buildUrl(id: string) {
+              return `/api/cameras/${id}`;
+            }
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(checker, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(checker, "SPEC_ROOT", tmp_path / "docs" / "specifications")
+    return tmp_path
+
+
+def test_verifies_shell_script_citation(fake_repo_other_languages):
+    """`.sh` の仕様書でも式・文の引用を検証すること。"""
+    path = (
+        fake_repo_other_languages
+        / "docs" / "specifications" / "MY_HOME_SYSTEM" / "sample_script.md"
+    )
+    path.write_text(
+        '* 根拠: マウント先 (行番号: 99 / 抜粋: "NAS_MOUNT_POINT=\"/mnt/nas\"")\n',
+        encoding="utf-8",
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert findings[0].actual == 4
+
+
+def test_verifies_typescript_citation(fake_repo_other_languages):
+    """TypeScript の仕様書でも式・文の引用を検証すること。"""
+    path = (
+        fake_repo_other_languages
+        / "docs" / "specifications" / "family-quest" / "src" / "lib" / "sample.md"
+    )
+    path.write_text(
+        '* 根拠: 上限 (行番号: 99 / 抜粋: "export const RETRY_LIMIT = 3;")\n',
+        encoding="utf-8",
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert findings[0].actual == 3
+
+
+def test_fix_rewrites_typescript_citation(fake_repo_other_languages):
+    path = (
+        fake_repo_other_languages
+        / "docs" / "specifications" / "family-quest" / "src" / "lib" / "sample.md"
+    )
+    path.write_text(
+        '* 根拠: 上限 (行番号: 99 / 抜粋: "export const RETRY_LIMIT = 3;")\n',
+        encoding="utf-8",
+    )
+    checker.scan(fix=True)
+    assert "行番号: 3" in path.read_text(encoding="utf-8")
+    findings, _ = checker.scan(fix=False)
+    assert findings == []
+
+
+def test_verifies_multiline_range_citation(fake_repo):
+    """抜粋が複数行の範囲引用は、両端が一意なら開始も終端も確定できること(AUDIT-019)。
+
+    サンプルソースでは `return "hello " + name` が6行目、`return "bye " + name` が
+    10行目で、どちらもソース内で一意。したがって 6〜10 に確定できる。
+    """
+    _write_spec(
+        fake_repo,
+        r'* 根拠: 実装 (行番号: 900〜904 / 抜粋: "return \"hello \" + name\nreturn \"bye \" + name")'
+        + "\n",
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert len(findings) == 1
+    assert (findings[0].actual, findings[0].actual_end) == (6, 10)
+
+
+def test_fix_rewrites_multiline_range_citation(fake_repo):
+    path = _write_spec(
+        fake_repo,
+        r'* 根拠: 実装 (行番号: 900〜904 / 抜粋: "return \"hello \" + name\nreturn \"bye \" + name")'
+        + "\n",
+    )
+    checker.scan(fix=True)
+    assert "行番号: 6〜10" in path.read_text(encoding="utf-8")
+    findings, _ = checker.scan(fix=False)
+    assert findings == []
+
+
+def test_ignores_multiline_range_wider_than_its_snippet(fake_repo):
+    """引用範囲の方が抜粋より広ければ対象外(抜粋は範囲内の見本にすぎない)。
+
+    抜粋は6行目と10行目の2行だが、引用は 900〜910(11行)を指している。ここで
+    6〜10 へ書き換えると、著者が示した範囲の情報が失われる。
+    """
+    _write_spec(
+        fake_repo,
+        r'* 根拠: 実装 (行番号: 900〜910 / 抜粋: "return \"hello \" + name\nreturn \"bye \" + name")'
+        + "\n",
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 0
+    assert findings == []
+
+
+def test_ignores_multiline_range_when_the_end_is_not_unique(fake_repo):
+    """末尾行が一意でなければ終端を決められないので対象外。
+
+    `return "` は greet(6行目)と farewell(10行目)の両方に現れる。
+    """
+    _write_spec(
+        fake_repo,
+        r'* 根拠: 実装 (行番号: 900〜901 / 抜粋: "return \"hello \" + name\nreturn \"")'
+        + "\n",
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 0
+    assert findings == []
+
+
+def test_ignores_range_citation_whose_end_precedes_its_start(fake_repo):
+    """末尾行が先頭行より前に来る抜粋は、対応が取れていないので対象外。"""
+    _write_spec(
+        fake_repo,
+        r'* 根拠: 逆順 (行番号: 900〜904 / 抜粋: "return \"bye \" + name\nreturn \"hello \" + name")'
+        + "\n",
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 0
+    assert findings == []
+
+
 def test_handles_parallel_citations_elementwise(fake_repo):
     """`行番号: A, B / 抜粋: "s1", "s2"` は位置対応でそれぞれ検証・修正されること。"""
     path = _write_spec(

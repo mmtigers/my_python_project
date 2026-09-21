@@ -623,7 +623,7 @@
 ### `run_checks`
 
 * **役割**: 10個のチェック関数(`service`/`api`（Issue #735で追加）/`journal`/`app_logs`/`disk`/`memory`/`nas`/`recording`（常時録画停止検知で追加）/`deploy_config`/`quest_master`)を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知し、通知抑制を通過した場合は層2フック(`_fire_investigate_hook`)も発火し、マーカーを更新してプロセスの終了コードを返すエントリーポイント。
-* 根拠: [関数定義] (行番号: 785〜846 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 615〜626 / 抜粋: '("api", check_api_responsive),', '("recording", check_recording_stalled),', '("quest_master", check_quest_master_drift),')、[フック発火] (行番号: 656〜657 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
+* 根拠: [関数定義] (行番号: 785〜846 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 615〜626 / 抜粋: '("api", check_api_responsive),', '("recording", check_recording_stalled),', '("quest_master", check_quest_master_drift),')、[フック発火] (行番号: 834〜835 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
 
 
 * **引数/リクエスト**: なし
