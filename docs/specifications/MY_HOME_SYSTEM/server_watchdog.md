@@ -58,7 +58,7 @@
 
 
 * **引数/リクエスト**: `service_name: str`
-* 根拠: `service_name: str` (行番号: 45 / 抜粋: "def get_service_status(service...")
+* 根拠: `service_name: str` (行番号: 57 / 抜粋: "def get_service_status(service...")
 
 
 * **戻り値/レスポンス**: `str`
@@ -83,7 +83,7 @@
 
 
 * **引数/リクエスト**: `process_keyword: str`
-* 根拠: `process_keyword: str` (行番号: 61 / 抜粋: "def is_process_alive(process_k...")
+* 根拠: `process_keyword: str` (行番号: 73 / 抜粋: "def is_process_alive(process_k...")
 
 
 * **戻り値/レスポンス**: `bool`
@@ -102,11 +102,11 @@
 ### `_get_boot_id`
 
 * **役割**: `/proc/sys/kernel/random/boot_id`を読み取り、現在のブートを一意に識別する文字列を返す。`_is_new_history`がスロットリング履歴の通知済み状態をブート単位で判定するために使用する。
-* 根拠: `_get_boot_id` (行番号: 82〜86 / 抜粋: "def _get_boot_id() -> str:")
+* 根拠: `_get_boot_id` (行番号: 94〜98 / 抜粋: "def _get_boot_id() -> str:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def _get_boot_id() -> str:` (行番号: 82 / 抜粋: "def _get_boot_id() -> str:")
+* 根拠: `def _get_boot_id() -> str:` (行番号: 94 / 抜粋: "def _get_boot_id() -> str:")
 
 
 * **戻り値/レスポンス**: `str`
@@ -129,11 +129,11 @@
 * 根拠: [注記コメント] (行番号: 100-106 / 抜粋: "Issue #661: 他の監視スクリプトの状態ファイルは core/state_file.py に集約したが、")
 
 * **（Issue #449 で修正）** 以前は`THROTTLE_STATE_FILE.read_text()`と`.write_text()`をそれぞれ独立した`try/except`で個別に呼び出しており、このスクリプトが（通常は逐次実行される前提だが）複数プロセスで同時実行された場合、読み取りから書き込みまでの間に他プロセスが割り込むと状態が上書き競合（lost update）する可能性があった。現在は状態ファイルを`r+`モードで一度だけ開き、読み取りから書き込みまでの区間全体を`fcntl.flock`による排他ロック（`fcntl.LOCK_EX`）で1つの不可分な区間にし、`finally`節で確実にロックを解放する。戻り値・挙動自体（判定ロジック）は変更されておらず、プロセス境界をまたいだアトミック性のみが追加された。
-* 根拠: `_is_new_history` (行番号: 88〜130 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")、[flockによる排他区間] (行番号: 103〜125 / 抜粋: "THROTTLE_STATE_FILE.touch(exist_ok=True)\n        with open(THROTTLE_STATE_FILE, "r+", encoding="utf-8") as f:\n            fcntl.flock(f.fileno(), fcntl.LOCK_EX)\n            try:\n                ...\n            finally:\n                fcntl.flock(f.fileno(), fcntl.LOCK_UN)")
+* 根拠: `_is_new_history` (行番号: 100〜149 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")、[flockによる排他区間] (行番号: 103〜125 / 抜粋: "THROTTLE_STATE_FILE.touch(exist_ok=True)\n        with open(THROTTLE_STATE_FILE, "r+", encoding="utf-8") as f:\n            fcntl.flock(f.fileno(), fcntl.LOCK_EX)\n            try:\n                ...\n            finally:\n                fcntl.flock(f.fileno(), fcntl.LOCK_UN)")
 
 
 * **引数/リクエスト**: `history_issues: int`
-* 根拠: `def _is_new_history(history_issues: int) -> bool:` (行番号: 88 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")
+* 根拠: `def _is_new_history(history_issues: int) -> bool:` (行番号: 100 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`
@@ -152,15 +152,15 @@
 ### `check_throttling_status`
 
 * **役割**: `vcgencmd get_throttled`コマンドを実行し、ハードウェアのスロットリング状況を確認する。現在異常が発生している場合はERRORレベルでログのみ記録し（後述の通り`send_push`直接呼び出しは行わない）、過去履歴のみの場合は`_is_new_history`で当該ブートにおいて未通知のビットがあるかを判定し、未通知であればWARNINGレベルでログを記録、既に通知済みであればDEBUGレベルでログを記録するのみに留める。
-* 根拠: `check_throttling_status` (行番号: 139〜185 / 抜粋: "def check_throttling_status():")
+* 根拠: `check_throttling_status` (行番号: 186〜232 / 抜粋: "def check_throttling_status():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_throttling_status():` (行番号: 139 / 抜粋: "def check_throttling_status():")
+* 根拠: `def check_throttling_status():` (行番号: 186 / 抜粋: "def check_throttling_status():")
 
 
 * **戻り値/レスポンス**: なし（定義なし）
-* 根拠: `def check_throttling_status():` (行番号: 139 / 抜粋: "def check_throttling_status():")
+* 根拠: `def check_throttling_status():` (行番号: 186 / 抜粋: "def check_throttling_status():")
 
 
 * **副作用**: OSコマンド（`vcgencmd`）の実行、`_is_new_history`経由での`THROTTLE_STATE_FILE`の読み書き、ログ出力のみ。**`send_push`の直接呼び出しは行わない**（コード中のコメント「修正点2」により、`core/logger.py`側の仕様で`logger.error`がDiscordへ自動転送されることを理由に、二重通知防止のため意図的に削除されている）。
@@ -175,11 +175,11 @@
 ### `check_health`
 
 * **役割**: サービスとプロセスのステータスを確認し、両方が正常であればロックファイルを解除し復旧通知を送信する。異常であれば、初回は停止通知を送信してロックファイルを作成し、その後は一定時間（6時間）ごとにリマインダー通知を送信する。
-* 根拠: `check_health` (行番号: 187〜228 / 抜粋: "def check_health() -> None:")
+* 根拠: `check_health` (行番号: 266〜307 / 抜粋: "def check_health() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_health() -> None:` (行番号: 187 / 抜粋: "def check_health() -> None:")
+* 根拠: `def check_health() -> None:` (行番号: 266 / 抜粋: "def check_health() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -327,6 +327,11 @@ flowchart TD
 
 ## 8. 保守上の注意点
 
+* **（vcgencmd の代替監視と CPU 温度監視を追加）vcgencmd の失敗を黙って握りつぶさない**: 以前は `check_throttling_status` で `vcgencmd` が非ゼロ終了・不在のとき `logger.debug` を出すだけだった。2026-09 の OS 更新で userland だけが新しくなり `vcgencmd` が失敗し続けた際、スロットリング・電圧低下の監視が**誰にも知られず止まっていた**（既存テストもこの「何も出さない」挙動を固定していた）。現在は `_check_throttling_without_vcgencmd` へ回し、(1) カーネルの `rpi_volt` hwmon（`/sys/class/hwmon/*/in0_lcrit_alarm`）から**現在の**電圧低下を読んで検知すれば毎回 ERROR、(2) 過去履歴が見えなくなっていることを**ブート毎に1回** ERROR で知らせる（boot_id を `watchdog_vcgencmd_unavailable.state` に記録）。2026-09-21 時点の実機ではカーネル更新後に `vcgencmd` は正常に戻っているが、次の OS 更新で同じずれが起きても黙らない
+* 根拠: `def _check_throttling_without_vcgencmd(reason: str) -> None:` (行番号: 162)、`def _read_undervoltage_alarm() -> bool | None:` (行番号: 151)
+* **（同上）CPU 温度の常時監視**: 以前は起動時の `post_boot_health_check` が1回測るだけだった。`check_cpu_temperature` が watchdog の起動のたび（`scheduler_boot.py` から600秒ごと）にカーネルの thermal_zone（`/sys/class/thermal/thermal_zone0/temp`、ミリ度）を読み、`CPU_TEMP_ALERT_C`（80°C。Pi 5 は 85°C でファームウェアが周波数を絞り始めるため、その手前）以上なら ERROR（= Discord）で知らせる。高温が続く間は `CPU_TEMP_REALERT_SEC`（6時間）おきに再通知し、最後に通知した時刻を `watchdog_cpu_temp_alert.state` に記録する。`vcgencmd` には依存しない
+* 根拠: `def check_cpu_temperature(now: float | None = None) -> None:` (行番号: 243)、`def read_cpu_temp_c() -> float | None:` (行番号: 235)
+* **状態ファイルはルートの `.gitignore` に個別に列挙**（既存の `watchdog_throttle_history.state` と同じ方式）。テスト（`test_server_watchdog_hardware.py`・`test_server_watchdog_is_process_alive.py`）は `VCGENCMD_UNAVAILABLE_STATE_FILE`・`HWMON_DIR` を一時ディレクトリへ向ける。向けないとテストのたびに実機の `MY_HOME_SYSTEM/` 直下へ状態ファイルを書き、本物の `/sys/class/hwmon` を読む
 * `get_service_status`, `is_process_alive`, `check_throttling_status`関数はOSコマンド(`systemctl`, `pgrep`, `vcgencmd`)に直接依存しているため、実行環境（Raspberry Piなど）以外のOSや環境ではエラーとなるか正しく動作しません。
 * `check_health`関数内ではファイルシステムを利用してロック制御(`watchdog_alert_sent.lock`)を行っています。`config.BASE_DIR` に指定されたディレクトリへの書き込み・削除権限がない場合、例外が発生します。
 * `check_throttling_status`内で`FileNotFoundError`以外のエラー（権限エラー等）が発生した場合、例外はキャッチされてログ出力のみが行われ、システムは停止せずに後続のプロセス監視（`check_health`）へ進みます。

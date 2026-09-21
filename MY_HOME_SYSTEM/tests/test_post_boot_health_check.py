@@ -139,14 +139,12 @@ class TestCheckPeripheralsCameras:
 
 
 class TestCheckSystemResources:
-    def test_high_temp_is_err_not_warn(self, monkeypatch):
+    def test_high_temp_is_err_not_warn(self, monkeypatch, tmp_path):
         """危険域(85℃以上)の温度でもWARNどまりだったが、ERRに昇格させる"""
         checker = PostBootHealthCheck()
-        with patch.object(
-            health_check_module.subprocess,
-            "check_output",
-            return_value=b"temp=87.0'C\n",
-        ):
+        temp_file = tmp_path / "temp"
+        temp_file.write_text("87000\n")
+        with patch.object(health_check_module, "CPU_TEMP_FILE", str(temp_file)):
             with patch.object(health_check_module.shutil, "disk_usage", return_value=(100, 10, 90)):
                 checker.check_system_resources()
 
@@ -155,14 +153,12 @@ class TestCheckSystemResources:
         assert result.status == STATUS_ERR
         assert "87.0" in result.message
 
-    def test_high_disk_usage_is_err_not_warn(self, monkeypatch):
+    def test_high_disk_usage_is_err_not_warn(self, monkeypatch, tmp_path):
         """危険域(95%超)のディスク使用率でもWARNどまりだったが、ERRに昇格させる"""
         checker = PostBootHealthCheck()
-        with patch.object(
-            health_check_module.subprocess,
-            "check_output",
-            return_value=b"temp=50.0'C\n",
-        ):
+        temp_file = tmp_path / "temp"
+        temp_file.write_text("50000\n")
+        with patch.object(health_check_module, "CPU_TEMP_FILE", str(temp_file)):
             with patch.object(health_check_module.shutil, "disk_usage", return_value=(100, 96, 4)):
                 checker.check_system_resources()
 
@@ -170,18 +166,27 @@ class TestCheckSystemResources:
         assert result.status == STATUS_ERR
         assert "96.0" in result.message
 
-    def test_normal_temp_and_disk_is_ok(self, monkeypatch):
+    def test_normal_temp_and_disk_is_ok(self, monkeypatch, tmp_path):
         checker = PostBootHealthCheck()
-        with patch.object(
-            health_check_module.subprocess,
-            "check_output",
-            return_value=b"temp=50.0'C\n",
-        ):
+        temp_file = tmp_path / "temp"
+        temp_file.write_text("50000\n")
+        with patch.object(health_check_module, "CPU_TEMP_FILE", str(temp_file)):
             with patch.object(health_check_module.shutil, "disk_usage", return_value=(100, 10, 90)):
                 checker.check_system_resources()
 
         result = checker.results[-1]
         assert result.status == STATUS_OK
+
+    def test_unreadable_temp_is_warn_unknown(self, tmp_path):
+        """温度が読めない環境では WARN の Unknown に倒す(チェック全体は止めない)"""
+        checker = PostBootHealthCheck()
+        with patch.object(health_check_module, "CPU_TEMP_FILE", str(tmp_path / "missing")):
+            with patch.object(health_check_module.shutil, "disk_usage", return_value=(100, 10, 90)):
+                checker.check_system_resources()
+
+        result = checker.results[-1]
+        assert result.status == STATUS_WARN
+        assert "Unknown" in result.message
 
 
 class TestCheckServicesParallelism:
@@ -216,10 +221,10 @@ class TestCheckServicesDashboard:
         checker.max_retries = 1
         checker.retry_interval = 0
 
-        with patch.object(health_check_module.time, "sleep"):
-            with patch.object(checker, "_check_port", return_value=False):
-                with patch.object(checker, "_check_http", return_value=False):
-                    checker.check_services()
+        with patch.object(health_check_module.time, "sleep"), \
+                patch.object(checker, "_check_port", return_value=False), \
+                patch.object(checker, "_check_http", return_value=False):
+            checker.check_services()
 
         dashboard_result = next(r for r in checker.results if r.name == "Dashboard")
         assert dashboard_result.status == STATUS_ERR

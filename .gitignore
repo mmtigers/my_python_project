@@ -48,6 +48,8 @@ MY_HOME_SYSTEM/db_backup/
 # MY_HOME_SYSTEM: runtime lock files (created by monitors at runtime, not source)
 MY_HOME_SYSTEM/watchdog_alert_sent.lock
 MY_HOME_SYSTEM/watchdog_throttle_history.state
+MY_HOME_SYSTEM/watchdog_vcgencmd_unavailable.state
+MY_HOME_SYSTEM/watchdog_cpu_temp_alert.state
 # 毎時cronの monitors/health_watch.py が多重起動防止に使う flock の対象ファイル。
 # 2026-09-19 の実機棚卸しで、実機に未追跡ファイルとして残り続けていたのを確認した。
 MY_HOME_SYSTEM/.health_watch.lock
