@@ -17,6 +17,7 @@
     ここを参照することで、「片方だけ直して食い違う」状態を防ぐ。
 """
 import html
+import json
 import logging
 import threading
 import time
@@ -67,6 +68,17 @@ STATUS_CARD_CSS = """
         justify-content: center;
         align-items: center;
     }
+    /* 軽量ページではカード自体が詳細タブへのリンク(<a>)になる。
+       ブラウザ既定の下線・リンク色が付くと、テーマ色(theme-green 等)で表している
+       「状態」が読み取りにくくなるため打ち消す。見た目は <div> のときと同じ。 */
+    a.status-card {
+        text-decoration: none;
+        -webkit-tap-highlight-color: rgba(0,0,0,0.08);
+    }
+    a.status-card:active {
+        /* 押したことが分かるように少しだけ沈ませる(タップの手応え) */
+        transform: scale(0.98);
+    }
     .status-title {
         font-size: 0.8rem; color: #555; margin-bottom: 5px; font-weight: bold; opacity: 0.8;
     }
@@ -74,12 +86,52 @@ STATUS_CARD_CSS = """
         font-size: 1.1rem; font-weight: bold; line-height: 1.25; white-space: normal;
         word-break: break-word;
     }
+    /* 値の下の補足(前回値・前日比・最終検知時刻)。主役は値なので小さく薄く置く。 */
+    .status-sub {
+        font-size: 0.7rem; font-weight: normal; line-height: 1.3; margin-top: 4px;
+        opacity: 0.75; white-space: normal; word-break: break-word;
+    }
     .theme-green { background-color: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
     .theme-yellow { background-color: #fffde7; color: #f9a825; border: 1px solid #fff9c4; }
     .theme-red { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
     .theme-blue { background-color: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
     .theme-gray { background-color: #f5f5f5; color: #757575; border: 1px solid #e0e0e0; }
+
+    /* 駐輪場カードの前日比。以前は `style='color:#...'` を値のHTMLに直接
+       埋めていたが、それだとダークモードで色を差し替えられない(軽量ページの
+       ダーク対応は下記 `_MOBILE_PAGE_DARK_CSS`)。クラスにして色はCSS側に置く。 */
+    .diff-up { color: #d32f2f; }
+    .diff-down { color: #388e3c; }
+    .diff-flat { color: #757575; }
+    .diff-none { color: #999; }
 """
+
+
+# === ダッシュボードのタブ定義 ===
+# ここに置いてある理由:
+#     各カードは「どのタブに詳細があるか」(`StatusCard.tab`)を持つ。軽量ページは
+#     その情報からカードを `?tab=...` のリンクにするので、タブのキーを知る必要が
+#     ある。定義が `dashboard.py` 側にあると軽量ページ(Streamlit を持たない
+#     `unified_server` 側)からは読めないため、Streamlit を import しないここに置き、
+#     `dashboard.py` はこれを読み込んで使う。
+#
+# スマホ対応の再設計: 以前はサマリー9枚を常時最上部に出したうえでタブが10個
+# (クエスト/電車遅延/防犯カメラ/電力・環境/気温詳細/健康管理/高砂実家/
+#  ログ分析/システム管理/駐輪場)あり、スマートフォンでは
+#   - どのタブを開いてもサマリーを越えるスクロールが必要
+#   - タブ列が画面幅の数倍になり、目的のタブを探せない
+# という状態だった。用途で5つに束ね直し、サマリーも「ホーム」タブに入れてある。
+#
+# キーは `?tab=` のクエリパラメータに入る値でもある
+# (`dashboard.py` の `_render_tab_selector`)。
+DASHBOARD_TABS: tuple[tuple[str, str], ...] = (
+    ("home", "🏠 ホーム"),
+    ("out", "🚃 おでかけ"),
+    ("watch", "👀 見守り"),
+    ("life", "💡 くらし"),
+    ("sys", "🔧 システム"),
+)
+DASHBOARD_TAB_KEYS: tuple[str, ...] = tuple(key for key, _ in DASHBOARD_TABS)
 
 
 class StatusCard(NamedTuple):
@@ -87,14 +139,29 @@ class StatusCard(NamedTuple):
 
     `value_is_html`: `value` に意図的なHTML断片(色付けの`<span>`・改行の`<br>`等)を
     含める呼び出し元だけ True にする。詳細は `render_status_card_html` を参照。
+    `tab`: このカードの詳細が載っているタブのキー(`DASHBOARD_TABS`)。軽量ページは
+    これを使ってカード自体を `?tab=...` へのリンクにする。
+    `sub`: 値の下に小さく出す補足(前回値・前日比・最終検知時刻など)。「いまの値」
+    だけでは高いのか低いのか判断できないカードに、比べる相手を添えるためのもの。
+    常にHTMLエスケープされる(`value` と違い、HTML断片は渡せない)。
     """
     title: str
     value: str
     theme: str
     value_is_html: bool = False
+    tab: str | None = None
+    sub: str | None = None
 
 
-def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:
+def render_status_card_html(
+    title: str,
+    value: str,
+    theme: str,
+    *,
+    value_is_html: bool = False,
+    href: str | None = None,
+    sub: str | None = None,
+) -> str:
     """
     ステータスカードのHTMLを生成。
 
@@ -105,6 +172,11 @@ def render_status_card_html(title: str, value: str, theme: str, *, value_is_html
     (`<span>`/`<br>`等)を組み立てて渡す呼び出し元は、`value_is_html=True`を
     指定してエスケープをスキップできる(その場合、`value`の構築元に外部/DB由来の
     生文字列を含めないこと)。
+
+    `href` を渡すとカード全体がリンク(`<a>`)になる。軽量ページ専用で、Streamlit 側は
+    渡さない — Streamlit ではリンクを踏むとページ全体が再読み込みになり
+    (セッションが作り直され数秒かかる)、同じ移動を `dashboard.py` の
+    「詳しく見る」ボタン(再実行だけで切り替わる)が既に担っているため。
     """
     safe_title = html.escape(title)
     safe_value = value if value_is_html else html.escape(value)
@@ -112,18 +184,76 @@ def render_status_card_html(title: str, value: str, theme: str, *, value_is_html
     # `textwrap.dedent()` をかけてからMarkdownとして解釈するため、整形用の空白が
     # 残っていると「空白だけの行がHTMLブロックを終端し、続く字下げがコードブロックに
     # なる」ことで、2枚目以降のカードが生のタグ文字列として画面に出る(#807)。
+    if href is None:
+        open_tag = f'<div class="status-card {theme}">'
+        close_tag = "</div>"
+    else:
+        open_tag = f'<a class="status-card {theme}" href="{html.escape(href)}">'
+        close_tag = "</a>"
+    sub_html = "" if not sub else f'<div class="status-sub">{html.escape(sub)}</div>'
     return (
-        f'<div class="status-card {theme}">'
+        f"{open_tag}"
         f'<div class="status-title">{safe_title}</div>'
         f'<div class="status-value">{safe_value}</div>'
-        '</div>'
+        f"{sub_html}"
+        f"{close_tag}"
     )
 
 
-def render_status_grid_html(cards) -> str:
-    """カードを自動折り返しのグリッド1ブロックにまとめたHTMLを返す。"""
+def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:
+    """カードの詳細が載っているタブへのURLを返す(タブが無いカードは None)。
+
+    `dashboard_path` は閲覧中のオリジンからのルート相対パス(例: `/dashboard/`)。
+    固定URLを埋めると、LAN内のIP・Cloudflare 経由の公開ドメインのどちらか一方でしか
+    繋がらなくなる。
+    """
+    if card.tab is None:
+        return None
+    return f"{dashboard_path}?tab={card.tab}"
+
+
+# 「気になること」として拾うテーマ。赤(異常)を先に、黄(注意)を後に並べる。
+ALERT_THEMES: tuple[str, ...] = ("theme-red", "theme-yellow")
+
+
+def summarize_alerts(cards) -> list[StatusCard]:
+    """いま気にすべきカードだけを、赤 → 黄 の順で返す。
+
+    9枚の並び自体は動かさない。「左上が高砂」と位置で覚えている画面で順番が
+    入れ替わると、かえって読み違えるため(並べ替えではなく要約で解決する)。
+    """
+    return [card for theme in ALERT_THEMES for card in cards if card.theme == theme]
+
+
+def render_alerts_html(cards, *, dashboard_path: str | None = None) -> str:
+    """要約行のHTML。気になることが無いときも同じ高さの行を出す(画面が跳ねない)。"""
+    alerts = summarize_alerts(cards)
+    if not alerts:
+        return '<p class="alerts alerts-ok">✅ 気になることはありません</p>'
+
+    items = []
+    for card in alerts:
+        label = html.escape(card.title)
+        href = None if dashboard_path is None else card_detail_href(card, dashboard_path)
+        items.append(label if href is None else f'<a href="{html.escape(href)}">{label}</a>')
+    return f'<p class="alerts alerts-warn">⚠️ 気になること: {"、".join(items)}</p>'
+
+
+def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:
+    """カードを自動折り返しのグリッド1ブロックにまとめたHTMLを返す。
+
+    `dashboard_path` を渡すと、詳細タブを持つカードがそのタブへのリンクになる
+    (軽量ページ専用。理由は `render_status_card_html` の docstring を参照)。
+    """
     cards_html = "".join(
-        render_status_card_html(card.title, card.value, card.theme, value_is_html=card.value_is_html)
+        render_status_card_html(
+            card.title,
+            card.value,
+            card.theme,
+            value_is_html=card.value_is_html,
+            href=None if dashboard_path is None else card_detail_href(card, dashboard_path),
+            sub=card.sub,
+        )
         for card in cards
     )
     return f'<div class="status-grid">{cards_html}</div>'
@@ -133,15 +263,24 @@ def render_status_grid_html(cards) -> str:
 # いずれも副作用を持たない純粋関数。入力(DataFrame・取得済みの値)は呼び出し側が渡す
 # (Streamlit 側はキャッシュ付きローダから、サーバー側は下記の collect_status_cards から)。
 
+def _takasago_activity(df_sensor: pd.DataFrame) -> pd.DataFrame:
+    """高砂(実家)で「動きがあった」とみなす行。
+
+    判定(`get_takasago_status`)と補足表示(`describe_takasago`)の両方がここを使う。
+    どちらかが別の条件で拾うと、カードの色と「最終検知」の時刻が食い違う。
+    """
+    if df_sensor.empty or "location" not in df_sensor.columns or "contact_state" not in df_sensor.columns:
+        return df_sensor.iloc[0:0]
+    return df_sensor[
+        (df_sensor["location"] == "高砂") & (df_sensor["contact_state"].isin(["open", "detected"]))
+    ]
+
+
 def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
     val = "⚪ データなし"
     theme = "theme-gray"
-    if df_sensor.empty or "location" not in df_sensor.columns or "contact_state" not in df_sensor.columns:
-        return val, theme
 
-    df_taka = df_sensor[
-        (df_sensor["location"] == "高砂") & (df_sensor["contact_state"].isin(["open", "detected"]))
-    ]
+    df_taka = _takasago_activity(df_sensor)
     if not df_taka.empty:
         last_active = df_taka.iloc[0]["timestamp"]
         diff_min = (now - last_active).total_seconds() / 60
@@ -157,13 +296,14 @@ def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, st
     return val, theme
 
 
-def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
-    """伊丹（自宅）のステータス判定（修正版）"""
-    val = "⚪ データなし"
-    theme = "theme-gray"
+def _itami_motion(df_sensor: pd.DataFrame) -> pd.DataFrame:
+    """伊丹(自宅)の人感センサー由来の検知行(新しい順)。
+
+    高砂側と同じ理由で、判定と補足表示が同じ抽出を共有する。
+    """
     required_cols = ["location", "device_type", "movement_state", "contact_state"]
     if df_sensor.empty or not all(col in df_sensor.columns for col in required_cols):
-        return val, theme
+        return df_sensor.iloc[0:0]
 
     # 1. デバイスタイプの判定: 'Motion' を含むか、または 'Webhook' (SwitchBot) である
     is_motion_device = (
@@ -178,11 +318,29 @@ def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
         (df_sensor["contact_state"] == "detected")
     )
 
-    df_motion = df_sensor[
+    return df_sensor[
         (df_sensor["location"] == "伊丹") &
         is_motion_device &
         is_detected
     ].sort_values("timestamp", ascending=False)
+
+
+def _itami_contact(df_sensor: pd.DataFrame) -> pd.DataFrame:
+    """伊丹(自宅)の開閉センサーが開いた行(新しい順)。人感センサーが無いときの代替。"""
+    required_cols = ["location", "contact_state"]
+    if df_sensor.empty or not all(col in df_sensor.columns for col in required_cols):
+        return df_sensor.iloc[0:0]
+    return df_sensor[
+        (df_sensor["location"] == "伊丹") & (df_sensor["contact_state"] == "open")
+    ].sort_values("timestamp", ascending=False)
+
+
+def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
+    """伊丹（自宅）のステータス判定（修正版）"""
+    val = "⚪ データなし"
+    theme = "theme-gray"
+
+    df_motion = _itami_motion(df_sensor)
 
     if not df_motion.empty:
         diff_m = (now - df_motion.iloc[0]["timestamp"]).total_seconds() / 60
@@ -197,9 +355,7 @@ def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
             theme = "theme-yellow"
     else:
         # 開閉センサーのロジック
-        df_contact = df_sensor[
-            (df_sensor["location"] == "伊丹") & (df_sensor["contact_state"] == "open")
-        ].sort_values("timestamp", ascending=False)
+        df_contact = _itami_contact(df_sensor)
         if not df_contact.empty:
             diff_c = (now - df_contact.iloc[0]["timestamp"]).total_seconds() / 60
             if diff_c < 60:
@@ -254,27 +410,33 @@ def get_car_status(df_car: pd.DataFrame) -> tuple[str, str]:
     return "🏠 在宅", "theme-green"
 
 
+# 炊飯器が「稼働していた」とみなす消費電力(W)。
+RICE_COOKER_ON_WATTS = 500
+
+
+def _rice_cooking_rows(df_sensor: pd.DataFrame) -> pd.DataFrame:
+    """炊飯器が稼働していた記録(日付で絞らない)。
+
+    判定(`get_rice_status`, 今日ぶん)と補足表示(`describe_rice`, 前回いつ)が
+    同じ条件を共有する。
+    """
+    if "device_name" not in df_sensor.columns or "power_watts" not in df_sensor.columns:
+        return df_sensor.iloc[0:0]
+    return df_sensor[
+        (df_sensor["device_name"].astype(str).str.contains("炊飯器")) &
+        (df_sensor["power_watts"] >= RICE_COOKER_ON_WATTS)
+    ]
+
+
 def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
     val = "🍚 炊いてない"
     theme = "theme-red"
-    # カラム存在チェック
-    if "device_name" not in df_sensor.columns or "power_watts" not in df_sensor.columns:
-        return val, theme
 
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    # 炊飯器の電力データを検索
-    df_rice = df_sensor[
-        (df_sensor["device_name"].astype(str).str.contains("炊飯器")) &
-        (df_sensor["timestamp"] >= today_start)
-    ]
-
-    if not df_rice.empty:
-        max_watts = df_rice["power_watts"].max()
-        # 500W以上で稼働していれば「ご飯あり」とみなす
-        if max_watts is not None and max_watts >= 500:
-            val = "🍚 ご飯あり"
-            theme = "theme-green"
+    df_rice = _rice_cooking_rows(df_sensor)
+    if not df_rice.empty and not df_rice[df_rice["timestamp"] >= today_start].empty:
+        val = "🍚 ご飯あり"
+        theme = "theme-green"
     return val, theme
 
 
@@ -318,13 +480,13 @@ def get_bicycle_status(df_bicycle: pd.DataFrame) -> tuple[str, str]:
                 past_val = int(df_near.loc[nearest_idx]["waiting_count"])
                 diff = current_val - past_val
                 if diff > 0:
-                    diff_str = f" <span style='color:#d32f2f;'>(🔺{diff})</span>"
+                    diff_str = f" <span class='diff-up'>(🔺{diff})</span>"
                 elif diff < 0:
-                    diff_str = f" <span style='color:#388e3c;'>(🔻{abs(diff)})</span>"
+                    diff_str = f" <span class='diff-down'>(🔻{abs(diff)})</span>"
                 else:
-                    diff_str = " <span style='color:#757575;'>(➡️0)</span>"
+                    diff_str = " <span class='diff-flat'>(➡️0)</span>"
             else:
-                diff_str = " <span style='color:#999;'>(--)</span>"
+                diff_str = " <span class='diff-none'>(--)</span>"
 
             details.append(f"{short_name}: <b>{current_val}</b>台{diff_str}")
             total_wait += current_val
@@ -343,6 +505,95 @@ def get_bicycle_status(df_bicycle: pd.DataFrame) -> tuple[str, str]:
     return val, theme
 
 
+# === 補足表示(カードの値の下に小さく出す) ===
+# 「いまの値」だけでは高いのか低いのか・普段どおりなのかが判断できないカードに、
+# 比べる相手(前回いつ・先月の同じ時点・最終検知時刻)を添える。
+# 判定に使う行の抽出は上の `_*_activity` / `_*_rows` を共有するので、カードの色と
+# ここに出す時刻が食い違うことはない。
+
+
+def _format_moment(moment, now: datetime) -> str | None:
+    """`09:40` / `昨日 18:40` / `9/18 18:40` のいずれかにする。"""
+    if moment is None or pd.isna(moment):
+        return None
+    moment = pd.Timestamp(moment)
+    day_diff = (now.date() - moment.date()).days
+    if day_diff == 0:
+        return moment.strftime("%H:%M")
+    if day_diff == 1:
+        return moment.strftime("昨日 %H:%M")
+    return f"{moment.month}/{moment.day} {moment.strftime('%H:%M')}"
+
+
+def _latest_timestamp(df: pd.DataFrame):
+    """新しい順に並んでいる前提の DataFrame から先頭の時刻を取る。"""
+    if df.empty or "timestamp" not in df.columns:
+        return None
+    return df.iloc[0]["timestamp"]
+
+
+def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:
+    at = _format_moment(_latest_timestamp(_takasago_activity(df_sensor)), now)
+    return None if at is None else f"最終検知 {at}"
+
+
+def describe_itami(df_sensor: pd.DataFrame, now: datetime) -> str | None:
+    # 判定と同じ優先順位(人感センサーがあればそれ、無ければ開閉センサー)。
+    df = _itami_motion(df_sensor)
+    if df.empty:
+        df = _itami_contact(df_sensor)
+    at = _format_moment(_latest_timestamp(df), now)
+    return None if at is None else f"最終検知 {at}"
+
+
+def describe_car(df_car: pd.DataFrame, now: datetime) -> str | None:
+    at = _format_moment(_latest_timestamp(df_car), now)
+    if at is None or "action" not in df_car.columns:
+        return None
+    return f"{at} に出発" if df_car.iloc[0]["action"] == "LEAVE" else f"{at} に帰宅"
+
+
+def describe_rice(df_sensor: pd.DataFrame, now: datetime) -> str | None:
+    at = _format_moment(_latest_timestamp(_rice_cooking_rows(df_sensor)), now)
+    return None if at is None else f"前回 {at}"
+
+
+def describe_traffic(jr_status: dict[str, dict[str, Any]]) -> str | None:
+    """乱れている路線の名前。どれが止まっているかはカードの値からは分からない。"""
+    affected = [
+        name for name, line in jr_status.items()
+        if line.get("is_suspended") or line.get("is_delay")
+    ]
+    return "・".join(affected) if affected else None
+
+
+def describe_cost(monthly_cost: int, last_month_cost: int | None) -> str | None:
+    """先月の同じ時点と比べる。比較対象が無い(初月・取得失敗)ときは出さない。"""
+    if not last_month_cost:
+        return None
+    diff = monthly_cost - last_month_cost
+    sign = "+" if diff > 0 else ""
+    return f"先月同日 {last_month_cost:,}円 ({sign}{diff:,})"
+
+
+def describe_server(disk: dict[str, float] | None) -> str | None:
+    if not disk or "percent" not in disk:
+        return None
+    return f"ディスク {int(disk['percent'])}%"
+
+
+def describe_nas(nas_data: pd.Series | None) -> str | None:
+    if nas_data is None:
+        return None
+    try:
+        free_gb = nas_data["free_gb"]
+    except KeyError:
+        return None
+    if free_gb is None or pd.isna(free_gb):
+        return None
+    return f"空き {int(free_gb):,}GB"
+
+
 def build_status_cards(
     now: datetime,
     df_sensor: pd.DataFrame,
@@ -352,8 +603,14 @@ def build_status_cards(
     jr_status: dict[str, dict[str, Any]],
     memory: dict[str, float] | None,
     monthly_cost: int,
+    last_month_cost: int | None = None,
+    disk: dict[str, float] | None = None,
 ) -> list[StatusCard]:
-    """渡された材料から、並べる順にカードを組み立てる(取得は行わない)。"""
+    """渡された材料から、並べる順にカードを組み立てる(取得は行わない)。
+
+    `last_month_cost`・`disk` は補足表示(`sub`)にだけ使う。渡さなければ補足が
+    出ないだけで、カードの値と色は変わらない。
+    """
     taka_val, taka_theme = get_takasago_status(df_sensor, now)
     itami_val, itami_theme = get_itami_status(df_sensor, now)
     car_val, car_theme = get_car_status(df_car)
@@ -365,16 +622,27 @@ def build_status_cards(
 
     # Issue #378: get_bicycle_status は前日比の色付け(<span>)等を意図的に組み立てて
     # 返すため、HTMLエスケープをスキップする(value_is_html=True)。
+    # `tab` は「このカードの詳細が載っているタブ」。軽量ページはこれを使って
+    # カード自体をリンクにする(異常に気づいてから詳細を開くまでを1タップにする)。
     return [
-        StatusCard("👵 高砂 (実家)", taka_val, taka_theme),
-        StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme),
-        StatusCard("🚗 車 (伊丹)", car_val, car_theme),
-        StatusCard("🍚 炊飯器", rice_val, rice_theme),
-        StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue"),
-        StatusCard("🚲 駐輪場待機", bicycle_val, bicycle_theme, value_is_html=True),
-        StatusCard("🚃 JR運行情報", traffic_val, traffic_theme),
-        StatusCard("🖥️ サーバー", server_val, server_theme),
-        StatusCard("🗄️ NAS", nas_val, nas_theme),
+        StatusCard("👵 高砂 (実家)", taka_val, taka_theme, tab="watch",
+                   sub=describe_takasago(df_sensor, now)),
+        StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme, tab="watch",
+                   sub=describe_itami(df_sensor, now)),
+        StatusCard("🚗 車 (伊丹)", car_val, car_theme, tab="watch",
+                   sub=describe_car(df_car, now)),
+        StatusCard("🍚 炊飯器", rice_val, rice_theme, tab="life",
+                   sub=describe_rice(df_sensor, now)),
+        StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue", tab="life",
+                   sub=describe_cost(monthly_cost, last_month_cost)),
+        # 駐輪場は値そのものが前日比を含むので補足は付けない。
+        StatusCard("🚲 駐輪場待機", bicycle_val, bicycle_theme, value_is_html=True, tab="out"),
+        StatusCard("🚃 JR運行情報", traffic_val, traffic_theme, tab="out",
+                   sub=describe_traffic(jr_status)),
+        StatusCard("🖥️ サーバー", server_val, server_theme, tab="sys",
+                   sub=describe_server(disk)),
+        StatusCard("🗄️ NAS", nas_val, nas_theme, tab="sys",
+                   sub=describe_nas(nas_data)),
     ]
 
 
@@ -432,6 +700,8 @@ def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard],
     jr_status = _cached("jr", train_service.get_jr_traffic_status)
     memory = _cached("memory", analysis_service.get_memory_usage)
     monthly_cost = _cached("cost", analysis_service.calculate_monthly_cost_cumulative)
+    last_month_cost = _cached("cost_last_month", analysis_service.calculate_last_month_cost_same_point)
+    disk = _cached("disk", analysis_service.get_disk_usage)
 
     cards = build_status_cards(
         now,
@@ -442,6 +712,8 @@ def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard],
         jr_status or {"宝塚線": {"is_unavailable": True}, "神戸線": {"is_unavailable": True}},
         memory,
         monthly_cost or 0,
+        last_month_cost=last_month_cost,
+        disk=disk,
     )
     return cards, now
 
@@ -460,7 +732,9 @@ MOBILE_PAGE_TITLE = "おうちの様子"
 MOBILE_PAGE_REFRESH_SEC = STATUS_CACHE_TTL_SEC
 
 _MOBILE_PAGE_BASE_CSS = """
-    :root { color-scheme: light; }
+    /* 端末がダークモードなら下の @media 側の配色になることをブラウザに伝える
+       (スクロールバー等、こちらで指定しない部分もダーク側に揃う)。 */
+    :root { color-scheme: light dark; }
     body {
         margin: 0;
         padding: 12px 12px 32px;
@@ -470,6 +744,21 @@ _MOBILE_PAGE_BASE_CSS = """
     }
     h1 { font-size: 1.25rem; margin: 0 0 2px; }
     .meta { font-size: 0.8rem; color: #666; margin: 0 0 12px; }
+
+    /* 「気になること」の要約行。9枚の並びは固定のままにして、赤・黄のカードだけを
+       名前で拾って先頭に出す(JR運行情報は7枚目にあり、異常でも埋もれていた)。
+       異常が無いときも同じ位置に1行出すので、更新のたびに下の内容が跳ねない。 */
+    .alerts {
+        margin: 0 0 10px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        font-size: 0.85rem;
+        line-height: 1.5;
+    }
+    .alerts-warn { background: #fff3e0; color: #e65100; border: 1px solid #ffe0b2; }
+    .alerts-ok { background: #f1f8e9; color: #558b2f; border: 1px solid #dcedc8; }
+    .alerts a { color: inherit; font-weight: bold; }
+
     nav { display: flex; gap: 8px; margin-top: 16px; }
     nav a {
         flex: 1 1 0;
@@ -488,6 +777,120 @@ _MOBILE_PAGE_BASE_CSS = """
     }
 """
 
+# 軽量ページだけのダークモード。
+#
+# なぜ Streamlit 側(共有の STATUS_CARD_CSS)に入れないか:
+#     カードのCSSはダッシュボード本体と共有しているが、本体には Streamlit 自身の
+#     テーマ(ハンバーガーメニューで Light を選べる)がある。OSがダークでも本体を
+#     Light に固定している場合、共有CSSへ `prefers-color-scheme` を入れると
+#     「周りは白いのにカードだけ黒い」状態になる。夜にスマホで見るのは軽量ページ
+#     なので、ここだけをダークに対応させ、本体は Streamlit のテーマに任せる。
+# 差し替えが失敗したことが分かるようにするCSS(下記スクリプトが付け外しする)。
+_MOBILE_PAGE_STALE_CSS = """
+    #status.stale { opacity: 0.55; }
+    #status.stale::after {
+        content: "⚠️ 更新できていません(表示は最後に取得できた内容です)";
+        display: block;
+        margin-top: 8px;
+        font-size: 0.8rem;
+        color: #b71c1c;
+    }
+"""
+
+# 自動更新。ページ全体を読み込み直さず、カードのブロックだけを差し替える。
+#
+# 以前は `<meta http-equiv="refresh">` による全ページ再読み込みだった。60秒ごとに
+# 画面が白く瞬き、スクロール位置も先頭へ戻るため、下のカードを見ている最中に
+# 読めなくなることがあった。JS が動く環境ではこちらを使い、動かない環境のために
+# `<noscript>` の中に従来の meta refresh を残す(どちらか一方だけが働く)。
+#
+# `__STATUS_URL__` と `__REFRESH_MS__` は `render_mobile_status_page_html` が
+# 差し込む(URLは `json.dumps` を通すのでJS文字列として安全)。
+_MOBILE_PAGE_REFRESH_JS = """
+(function () {
+    var url = __STATUS_URL__;
+    var intervalMs = __REFRESH_MS__;
+    var inFlight = false;
+
+    function apply(html) {
+        var section = document.getElementById("status");
+        if (!section) { return; }
+        section.outerHTML = html;
+    }
+
+    function update() {
+        if (inFlight || document.hidden) { return; }
+        inFlight = true;
+        // Cloudflare Access の内側にあるため Cookie を送る必要がある。
+        fetch(url, { credentials: "same-origin", cache: "no-store" })
+            .then(function (res) {
+                if (!res.ok) { throw new Error("status " + res.status); }
+                return res.text();
+            })
+            .then(function (html) { apply(html); })
+            .catch(function () {
+                // 取れなかったときは古い表示を消さずに残し、古いことだけを示す
+                // (圏外・サーバー再起動の最中に画面が空になると、かえって困る)。
+                var section = document.getElementById("status");
+                if (section) { section.classList.add("stale"); }
+            })
+            .then(function () { inFlight = false; });
+    }
+
+    setInterval(update, intervalMs);
+    // 画面を消している間は更新しないぶん、戻ってきたら即座に取り直す。
+    document.addEventListener("visibilitychange", function () {
+        if (!document.hidden) { update(); }
+    });
+})();
+"""
+
+_MOBILE_PAGE_DARK_CSS = """
+    @media (prefers-color-scheme: dark) {
+        body { background: #121212; color: #e8e8e8; }
+        .meta { color: #9e9e9e; }
+        .status-title { color: #cfcfcf; }
+        .alerts-warn { background: #3a2a14; color: #ffb74d; border-color: #5c4322; }
+        .alerts-ok { background: #1e2a17; color: #aed581; border-color: #33482a; }
+        .theme-green { background-color: #1b3a24; color: #a5d6a7; border-color: #2e5c39; }
+        .theme-yellow { background-color: #3a3420; color: #ffe082; border-color: #5c5227; }
+        .theme-red { background-color: #3d1f22; color: #ef9a9a; border-color: #6b2f35; }
+        .theme-blue { background-color: #16304a; color: #90caf9; border-color: #24507a; }
+        .theme-gray { background-color: #262626; color: #bdbdbd; border-color: #3a3a3a; }
+        .diff-up { color: #ef9a9a; }
+        .diff-down { color: #a5d6a7; }
+        .diff-flat { color: #bdbdbd; }
+        .diff-none { color: #9e9e9e; }
+        nav a { background: #16304a; color: #90caf9; border-color: #24507a; }
+        #status.stale::after { color: #ef9a9a; }
+    }
+"""
+
+
+# 自動更新で差し替える範囲を囲む要素のid。
+STATUS_SECTION_ID = "status"
+
+
+def render_status_section_html(
+    cards,
+    fetched_at: datetime,
+    *,
+    dashboard_path: str | None = None,
+    refresh_sec: int = MOBILE_PAGE_REFRESH_SEC,
+) -> str:
+    """取得時刻・要約行・カードのグリッドをまとめた1ブロック。
+
+    自動更新でここだけを差し替えられるよう、`id` を付けて切り出してある。
+    """
+    return (
+        f'<div id="{STATUS_SECTION_ID}">'
+        f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
+        f"・{int(refresh_sec)}秒ごとに自動更新</p>"
+        f"{render_alerts_html(cards, dashboard_path=dashboard_path)}"
+        f"{render_status_grid_html(cards, dashboard_path=dashboard_path)}"
+        "</div>"
+    )
+
 
 def render_mobile_status_page_html(
     cards,
@@ -497,19 +900,39 @@ def render_mobile_status_page_html(
     icon_path: str,
     dashboard_path: str,
     quest_path: str,
+    status_path: str | None = None,
     refresh_sec: int = MOBILE_PAGE_REFRESH_SEC,
 ) -> str:
     """軽量ページのHTML全体を組み立てる。
 
     パス類を引数で受けるのは、このモジュールを配信層(ルーター・中継)から
     独立させておくため(テストもここだけで完結する)。
+
+    `status_path` はカードのブロックだけを返すURL。渡すと自動更新が
+    「そこだけ差し替える」方式になり、渡さないと従来どおりページ全体を
+    読み込み直す。
     """
+    if status_path is None:
+        # JS を使わない場合は従来どおり全体を再読み込みする。
+        refresh_head = f'<meta http-equiv="refresh" content="{int(refresh_sec)}">'
+        refresh_script = ""
+    else:
+        # JS が動かない環境だけが meta refresh を見る(二重に更新されない)。
+        refresh_head = f'<noscript><meta http-equiv="refresh" content="{int(refresh_sec)}"></noscript>'
+        refresh_script = (
+            "<script>"
+            + _MOBILE_PAGE_REFRESH_JS
+            .replace("__STATUS_URL__", json.dumps(status_path))
+            .replace("__REFRESH_MS__", str(int(refresh_sec) * 1000))
+            + "</script>"
+        )
+
     return (
         "<!DOCTYPE html>"
         '<html lang="ja"><head>'
         '<meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f'<meta http-equiv="refresh" content="{int(refresh_sec)}">'
+        f"{refresh_head}"
         f"<title>{html.escape(MOBILE_PAGE_TITLE)}</title>"
         # マニフェストの取得は既定で認証情報を送らない。このパスは Cloudflare Access の
         # 内側にあるため `use-credentials` が要る(`dashboard_proxy_service` と同じ理由)。
@@ -518,15 +941,15 @@ def render_mobile_status_page_html(
         '<meta name="apple-mobile-web-app-capable" content="yes">'
         '<meta name="mobile-web-app-capable" content="yes">'
         '<meta name="theme-color" content="#0d47a1">'
-        f"<style>{_MOBILE_PAGE_BASE_CSS}{STATUS_CARD_CSS}</style>"
+        f"<style>{_MOBILE_PAGE_BASE_CSS}{STATUS_CARD_CSS}"
+        f"{_MOBILE_PAGE_STALE_CSS}{_MOBILE_PAGE_DARK_CSS}</style>"
         "</head><body>"
         f"<h1>{html.escape(MOBILE_PAGE_TITLE)}</h1>"
-        f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
-        f"・{int(refresh_sec)}秒ごとに自動更新</p>"
-        f"{render_status_grid_html(cards)}"
+        f"{render_status_section_html(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec)}"
         "<nav>"
         f'<a href="{html.escape(dashboard_path)}">📊 詳しく見る</a>'
         f'<a href="{html.escape(quest_path)}">⚔️ ファミクエ</a>'
         "</nav>"
+        f"{refresh_script}"
         "</body></html>"
     )

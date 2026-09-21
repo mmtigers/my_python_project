@@ -124,8 +124,13 @@ def artifact_dir(tmp_path_factory) -> Path:
 
 
 @pytest.fixture(scope="module")
-def mobile_page(dashboard_url, artifact_dir):
-    """390x844 のモバイルビューポートでダッシュボードを開いたページ。"""
+def browser():
+    """このモジュール全体で1つだけ開くブラウザ。
+
+    `sync_playwright()` は自前のイベントループを持つため、1プロセスで入れ子に
+    開くと「Playwright Sync API inside the asyncio loop」で失敗する。
+    Streamlit 側と軽量ページ側でフィクスチャを分けず、ここに集約する。
+    """
     playwright_api = pytest.importorskip(
         "playwright.sync_api", reason="playwright が入っていない環境ではスキップする"
     )
@@ -134,22 +139,28 @@ def mobile_page(dashboard_url, artifact_dir):
     executable_path = os.getenv("PLAYWRIGHT_CHROMIUM_PATH") or None
 
     with playwright_api.sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=executable_path)
-        context = browser.new_context(
-            viewport=MOBILE_VIEWPORT,
-            device_scale_factor=3,
-            is_mobile=True,
-            has_touch=True,
-        )
-        page = context.new_page()
-        page.goto(dashboard_url, wait_until="networkidle", timeout=60_000)
-        # 初回描画(JR運行情報の取得を含む)が終わるまで待つ
-        page.wait_for_selector('[data-testid="stAppViewContainer"]', timeout=60_000)
-        page.wait_for_timeout(2_000)
-        yield page
-        page.screenshot(path=str(artifact_dir / "home.png"), full_page=True)
-        context.close()
-        browser.close()
+        instance = p.chromium.launch(executable_path=executable_path)
+        yield instance
+        instance.close()
+
+
+@pytest.fixture(scope="module")
+def mobile_page(browser, dashboard_url, artifact_dir):
+    """390x844 のモバイルビューポートでダッシュボードを開いたページ。"""
+    context = browser.new_context(
+        viewport=MOBILE_VIEWPORT,
+        device_scale_factor=3,
+        is_mobile=True,
+        has_touch=True,
+    )
+    page = context.new_page()
+    page.goto(dashboard_url, wait_until="networkidle", timeout=60_000)
+    # 初回描画(JR運行情報の取得を含む)が終わるまで待つ
+    page.wait_for_selector('[data-testid="stAppViewContainer"]', timeout=60_000)
+    page.wait_for_timeout(2_000)
+    yield page
+    page.screenshot(path=str(artifact_dir / "home.png"), full_page=True)
+    context.close()
 
 
 class TestMobileLayout:
@@ -261,3 +272,178 @@ class TestHomeScreenInstall:
         head_html = mobile_page.evaluate("() => document.head.outerHTML")
         assert "</head>" in head_html + "</head>"
         assert mobile_page.locator("head title").count() > 0
+
+
+# === 軽量ページ(`{DASHBOARD_BASE_PATH}/m`)===
+# こちらは Streamlit ではなく FastAPI(`routers/dashboard_router.py`)が直接返す。
+# 上の Streamlit 用フィクスチャとは別に、ルーターだけを載せたサーバーを起動する
+# (`unified_server` そのものを起動すると、カメラ監視・スケジューラの子プロセスまで
+#  立ち上がってしまうため)。
+
+_LIGHT_PAGE_SERVER = """
+import uvicorn
+from fastapi import FastAPI
+from routers import dashboard_router
+
+app = FastAPI()
+app.include_router(dashboard_router.router)
+uvicorn.run(app, host="127.0.0.1", port={port}, log_level="warning")
+"""
+
+
+def _wait_until_light_page_ready(base_url: str, path: str, process: subprocess.Popen) -> None:
+    import urllib.request
+
+    deadline = time.time() + STARTUP_TIMEOUT_SEC
+    last_error: Exception | None = None
+    while time.time() < deadline:
+        if process.poll() is not None:
+            raise AssertionError(f"軽量ページのサーバーが起動直後に終了した (exit={process.returncode})")
+        try:
+            with urllib.request.urlopen(f"{base_url}{path}", timeout=5) as res:
+                if res.status == 200:
+                    return
+        except Exception as e:  # noqa: BLE001 (起動途中は接続拒否になる)
+            last_error = e
+        time.sleep(0.5)
+    raise AssertionError(f"軽量ページが {STARTUP_TIMEOUT_SEC} 秒以内に応答しなかった: {last_error}")
+
+
+@pytest.fixture(scope="module")
+def light_page_url(tmp_path_factory):
+    """空のDB(スキーマのみ)に対して軽量ページのサーバーを起動し、ページのURLを返す。
+
+    データが無くてもカード9枚は「データなし」として出る。JR運行情報の取得は
+    ネットワークが無ければ失敗するが、`_cached` が握って「情報取得不可」になるだけで
+    ページは返る(そのフェイルソフトも含めて実ブラウザで確認できる)。
+    """
+    import config
+
+    db_path = tmp_path_factory.mktemp("e2e_light") / "home_system.db"
+    env = {
+        **os.environ,
+        "SQLITE_DB_PATH": str(db_path),
+        "NAS_MOUNT_POINT": str(tmp_path_factory.mktemp("nas_light")),
+        "NOTIFICATION_TARGET": "none",
+        "PYTHONPATH": str(REPO_SUBSYSTEM_ROOT),
+    }
+    subprocess.run(
+        [sys.executable, "-c", "import init_unified_db; init_unified_db.init_db()"],
+        cwd=REPO_SUBSYSTEM_ROOT, env=env, check=True, capture_output=True,
+    )
+
+    port = _free_port()
+    process = subprocess.Popen(
+        [sys.executable, "-c", _LIGHT_PAGE_SERVER.format(port=port)],
+        cwd=REPO_SUBSYSTEM_ROOT, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    base_url = f"http://127.0.0.1:{port}"
+    mobile_path = f"{config.DASHBOARD_BASE_PATH}/m"
+    try:
+        _wait_until_light_page_ready(base_url, mobile_path, process)
+        yield f"{base_url}{mobile_path}"
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+
+def _open_light_page(browser, url: str, artifact_dir: Path, *, color_scheme: str):
+    context = browser.new_context(
+        viewport=MOBILE_VIEWPORT,
+        device_scale_factor=3,
+        is_mobile=True,
+        has_touch=True,
+        color_scheme=color_scheme,
+    )
+    page = context.new_page()
+    page.goto(url, wait_until="networkidle", timeout=60_000)
+    page.wait_for_selector("#status", timeout=30_000)
+    return context, page
+
+
+@pytest.fixture(scope="module")
+def light_page(browser, light_page_url, artifact_dir):
+    context, page = _open_light_page(browser, light_page_url, artifact_dir, color_scheme="light")
+    yield page
+    page.screenshot(path=str(artifact_dir / "light_page.png"), full_page=True)
+    context.close()
+
+
+class TestLightPageLayout:
+    def test_the_page_does_not_scroll_sideways(self, light_page):
+        overflow = light_page.evaluate(
+            "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        assert overflow <= 1, f"横方向に {overflow}px はみ出している"
+
+    def test_every_card_is_a_link_to_its_detail(self, light_page):
+        """A: 異常に気づいてから詳細を開くまでを1タップにする。"""
+        cards = light_page.locator("a.status-card")
+
+        assert cards.count() == 9
+        for i in range(cards.count()):
+            href = cards.nth(i).get_attribute("href")
+            assert href and "?tab=" in href, f"{i}枚目にリンク先が無い: {href!r}"
+
+    def test_cards_are_large_enough_to_tap(self, light_page):
+        """カード自体がタップ先になったので、44pxを下回らないこと。"""
+        cards = light_page.locator("a.status-card")
+        for i in range(cards.count()):
+            box = cards.nth(i).bounding_box()
+            assert box is not None and box["height"] >= 44, f"{i}枚目が小さすぎる: {box}"
+
+    def test_cards_are_laid_out_in_two_columns(self, light_page):
+        """390px幅で1列だと9枚ぶんスクロールが要る。"""
+        tops = light_page.eval_on_selector_all(
+            "a.status-card", "els => els.map(el => Math.round(el.getBoundingClientRect().top))"
+        )
+        assert len(set(tops)) < len(tops), f"すべて別の段に並んでいる(1列になっている): {tops}"
+
+    def test_the_alert_line_is_always_there(self, light_page):
+        """B: 更新のたびに行が出たり消えたりすると、下の内容が上下に跳ねる。"""
+        assert light_page.locator("p.alerts").count() == 1
+
+    def test_the_cards_are_html_not_raw_tags(self, light_page):
+        """#807 と同じ失敗(生のタグ文字列が画面に出る)をしていないこと。"""
+        body_text = light_page.inner_text("body")
+        assert "<div" not in body_text and "status-card" not in body_text
+
+
+class TestLightPageRefresh:
+    def test_updating_does_not_reload_the_whole_page(self, light_page):
+        """C: 全ページ再読み込みだとスクロール位置が先頭へ戻り、画面が白く瞬く。"""
+        light_page.evaluate("() => { window.__e2e_marker = 'kept'; }")
+
+        # 自動更新は60秒間隔なので、同じ経路(可視状態に戻ったときの即時更新)を
+        # 手で発火させて待つ。
+        light_page.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+        light_page.wait_for_timeout(1_500)
+
+        assert light_page.evaluate("() => window.__e2e_marker") == "kept", (
+            "ページ全体が読み込み直されている(JS側の状態が消えた)"
+        )
+        assert light_page.locator("#status").count() == 1, "差し替え後に差し替え先を見失っている"
+        assert light_page.locator("a.status-card").count() == 9
+        assert "stale" not in (light_page.get_attribute("#status", "class") or ""), (
+            "更新に失敗している"
+        )
+
+
+class TestLightPageDarkMode:
+    def test_the_page_follows_the_device_dark_setting(self, browser, light_page_url, artifact_dir):
+        """B: 夜にスマホで見ると白背景が眩しい。"""
+        context, page = _open_light_page(browser, light_page_url, artifact_dir, color_scheme="dark")
+        try:
+            background = page.evaluate(
+                "() => getComputedStyle(document.body).backgroundColor"
+            )
+            channels = [int(v) for v in background.replace("rgb(", "").replace(")", "").split(",")[:3]]
+            page.screenshot(path=str(artifact_dir / "light_page_dark.png"), full_page=True)
+        finally:
+            context.close()
+
+        assert max(channels) < 80, f"ダークモードでも背景が明るいまま: {background}"

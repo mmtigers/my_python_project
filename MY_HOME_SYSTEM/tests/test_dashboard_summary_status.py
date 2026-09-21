@@ -254,7 +254,9 @@ class TestGetBicycleStatus:
             {"timestamp": NOW - timedelta(days=1), "area_name": self.AREA_1A, "waiting_count": 2},
         ])
         val, _ = home_status_service.get_bicycle_status(df)
-        assert "🔺3" in val and "#d32f2f" in val
+        # 色そのものはCSS側(`.diff-up`)。値のHTMLに色を直接埋めるとダークモードで
+        # 差し替えられないため、クラスで「増加」を示していることを固定する。
+        assert "🔺3" in val and "diff-up" in val
 
     def test_decrease_against_yesterday_is_marked_green(self):
         df = self._df([
@@ -262,7 +264,7 @@ class TestGetBicycleStatus:
             {"timestamp": NOW - timedelta(days=1), "area_name": self.AREA_1A, "waiting_count": 5},
         ])
         val, _ = home_status_service.get_bicycle_status(df)
-        assert "🔻3" in val and "#388e3c" in val
+        assert "🔻3" in val and "diff-down" in val
 
     def test_no_change_against_yesterday(self):
         df = self._df([

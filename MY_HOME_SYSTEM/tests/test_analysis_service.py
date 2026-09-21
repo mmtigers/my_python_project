@@ -437,3 +437,70 @@ class TestLoadWeatherHistoryUsesJst:
         assert str(captured["tz"]) == "Asia/Tokyo"
 
 
+
+
+def _insert_meter_rows(rows):
+    """スマートメーター(Nature Remo)の記録を入れる。rows は (wattage, "YYYY-mm-ddTHH:MM:SS")。"""
+    # 値はプレースホルダで渡す(テストでも文字列連結でSQLを組み立てない)。
+    insert_sql = (
+        "INSERT INTO "
+        + config.SQLITE_TABLE_POWER_USAGE
+        + " (device_id, device_name, wattage, timestamp) VALUES (?, ?, ?, ?)"
+    )
+    with get_db_cursor(commit=True) as cur:
+        for wattage, ts in rows:
+            cur.execute(insert_sql, ("remo1", "伊丹_Nature Remo E Lite", wattage, ts))
+
+
+@freeze_time("2026-09-15 03:00:00")  # JST 2026-09-15 12:00
+class TestCalculateLastMonthCostSamePoint:
+    """「今月いくら」だけでは高いのか安いのか判断できないため、比較対象を出す。"""
+
+    def test_returns_zero_when_no_power_data(self, isolated_db):
+        assert analysis_service.calculate_last_month_cost_same_point() == 0
+
+    def test_counts_only_up_to_the_same_point_of_last_month(self, isolated_db):
+        _insert_meter_rows([
+            # 先月(8月)の同じ時点(8/15 12:00)より前 -> 数える: 1000W × 1h = 1.0kWh
+            (1000, "2026-08-02T00:00:01"),
+            (1000, "2026-08-02T01:00:01"),
+            # 先月の同じ時点より後 -> 数えない
+            (1000, "2026-08-20T00:00:00"),
+            (1000, "2026-08-20T01:00:00"),
+            # 今月 -> 数えない
+            (1000, "2026-09-02T00:00:00"),
+            (1000, "2026-09-02T01:00:00"),
+        ])
+
+        assert analysis_service.calculate_last_month_cost_same_point() == int(
+            1.0 * analysis_service.ELECTRICITY_YEN_PER_KWH
+        )
+
+    def test_this_month_is_unchanged_by_the_new_upper_bound(self, isolated_db):
+        """今月ぶんの集計(既存の表示)が、上限の追加で変わらないこと。"""
+        _insert_meter_rows([
+            (1000, "2026-09-02T00:00:01"),
+            (1000, "2026-09-02T01:00:01"),
+        ])
+
+        assert analysis_service.calculate_monthly_cost_cumulative() == int(
+            1.0 * analysis_service.ELECTRICITY_YEN_PER_KWH
+        )
+
+
+@freeze_time("2026-03-31 03:00:00")  # JST 2026-03-31 12:00 (先月の2月に31日は無い)
+class TestCalculateLastMonthCostAtMonthEnd:
+    def test_a_day_that_does_not_exist_last_month_is_rounded_down(self, isolated_db):
+        """3/31 の比較対象は 2/31 ではなく、先月の末日(2/28)の同時刻にする。"""
+        _insert_meter_rows([
+            # 2/28 12:00 より前 -> 数える
+            (1000, "2026-02-28T10:00:00"),
+            (1000, "2026-02-28T11:00:00"),
+            # 2/28 12:00 より後 -> 数えない
+            (1000, "2026-02-28T13:00:00"),
+            (1000, "2026-02-28T14:00:00"),
+        ])
+
+        assert analysis_service.calculate_last_month_cost_same_point() == int(
+            1.0 * analysis_service.ELECTRICITY_YEN_PER_KWH
+        )

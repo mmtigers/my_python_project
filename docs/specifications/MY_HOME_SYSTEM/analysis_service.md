@@ -43,7 +43,7 @@
 | `config` | ファイル内に定義がないため、`SQLITE_DB_PATH`や`MONITOR_DEVICES`などの具体的な値や構造が不明。 | `config.SQLITE_DB_PATH` (行番号: 44 / 抜粋: "config.SQLITE_DB_PATH") |
 | `core.logger.setup_logging` | ファイル内に実装がないため、ログの出力先やフォーマットが不明。 | `setup_logging("analysis_service")` (行番号: 18 / 抜粋: "setup_logging("analysis_service")") |
 | データベースの各種テーブル | スキーマ定義が提供されていないため、カラムの型や制約、インデックスの有無が不明。 | `SELECT * FROM {table_name}` (行番号: 155, 164, 349 / 抜粋: "SELECT * FROM {table_name}") |
-| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 467 / 抜粋: "home_system.service") |
+| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 500 / 抜粋: "home_system.service") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -233,12 +233,12 @@
 
 ### `calculate_monthly_cost_cumulative`
 
-* **役割**: 当月の電力使用量データから、今月の電気代概算（kwh * 31）を算出する。新テーブルが空なら旧テーブルへフォールバックする。**（Issue #170で修正）** `power_usage`テーブルにはスマートメーター(全体消費)と各プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)が同居しているため、新テーブル側のSELECTに`device_name LIKE '%Remo%'`条件を追加し(`load_sensor_data`の`"Remo"`部分一致による分類基準と同一)、スマートメーターの行のみを対象にするよう修正した(以前は全デバイスを無差別に合算しておりプラグ分が二重計上されていた)。また、`time_diff`(経過時間)の算出を`device_id`ごとにグループ化してから`diff()`を取るよう変更した(以前は時系列でソートしただけの全行に対しdiff()を取っており、複数拠点のスマートメーター等、直前行が別デバイスの場合に誤った時間幅が使われていた)。**（Issue #410 L-L2で修正）** `start_of_month`を組み立てる`.replace(...)`に`microsecond=0`を追加した。以前は`now`の微秒がそのまま`start_of_month.isoformat()`（例: `"...T00:00:00.123456+09:00"`）に残っており、DB側が本番の保存規約(`core.utils.get_now_iso`)通り微秒無しでちょうど月初0時に記録されている場合、SQLiteの文字列比較(`timestamp >= '{start_of_month}'`)では`"+09:00"`より`"."`の方が文字コード上大きいため、その行が範囲外と判定され集計から漏れていた。
+* **役割**: 当月の電力使用量データから、今月の電気代概算（kwh × `ELECTRICITY_YEN_PER_KWH`=31）を算出する。**（補足表示の追加で変更）** 集計本体は期間を引数に取る `_calculate_cost_between(start, end)` へ切り出され、本関数は「月初（`_start_of_month`）から今まで」を渡す薄いラッパーになった。新テーブルが空なら旧テーブルへフォールバックする挙動は変わらない。**（Issue #170で修正）** `power_usage`テーブルにはスマートメーター(全体消費)と各プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)が同居しているため、新テーブル側のSELECTに`device_name LIKE '%Remo%'`条件を追加し(`load_sensor_data`の`"Remo"`部分一致による分類基準と同一)、スマートメーターの行のみを対象にするよう修正した(以前は全デバイスを無差別に合算しておりプラグ分が二重計上されていた)。また、`time_diff`(経過時間)の算出を`device_id`ごとにグループ化してから`diff()`を取るよう変更した(以前は時系列でソートしただけの全行に対しdiff()を取っており、複数拠点のスマートメーター等、直前行が別デバイスの場合に誤った時間幅が使われていた)。**（Issue #410 L-L2で修正）** `start_of_month`を組み立てる`.replace(...)`に`microsecond=0`を追加した。以前は`now`の微秒がそのまま`start_of_month.isoformat()`（例: `"...T00:00:00.123456+09:00"`）に残っており、DB側が本番の保存規約(`core.utils.get_now_iso`)通り微秒無しでちょうど月初0時に記録されている場合、SQLiteの文字列比較(`timestamp >= '{start_of_month}'`)では`"+09:00"`より`"."`の方が文字コード上大きいため、その行が範囲外と判定され集計から漏れていた。
 * 根拠: `calculate_monthly_cost_cumulative` (行番号: 238〜285 / 抜粋: "return int(df[\"kwh\"].sum() * 31)")、`microsecond=0` (行番号: 279 / 抜粋: "start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()")、デバイス絞り込み (行番号: 248〜257 / 抜粋: "WHERE timestamp >= '{start_of_month}' AND device_name LIKE '%Remo%'")、device_idごとのグループ化 (行番号: 274〜278 / 抜粋: "df.groupby(\"device_id\", dropna=False)[\"timestamp\"].diff()")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 271 / 抜粋: "def calculate_monthly_cost_cumulative()")
+* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 275 / 抜粋: "def calculate_monthly_cost_cumulative()")
 
 
 * **戻り値/レスポンス**: `int` (計算された電気代概算)
@@ -249,19 +249,54 @@
 * 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 260 / 抜粋: "df = load_data_from_db(query)")
 
 
-* **エラーハンドリング**: 例外発生時はエラーログを出力し `0` を返す。
+* **エラーハンドリング**: 例外発生時はエラーログを出力し `0` を返す（`_calculate_cost_between` 側）。
 * 根拠: `except Exception as e:` (行番号: 287〜289 / 抜粋: "return 0")
 
+
+### `calculate_last_month_cost_same_point`
+
+* **役割**: 先月の月初から「今と同じ日・同じ時刻」までの電気代概算を、今月ぶんと同じ方法（`_calculate_cost_between`）で算出する。ダッシュボードのカードが「今月いくら使ったか」だけを出していて高いのか安いのか判断できなかったため、比較対象として出す。先月に同じ日が無い場合（3/31 → 2/31）は先月の末日に丸める。
+* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 281 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
+
+* **引数/リクエスト**: なし
+* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 281 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
+
+* **戻り値/レスポンス**: `int`（先月の同じ時点までの電気代概算）
+* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 295 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
+
+* **副作用**: データベースの読み取り操作（`_calculate_cost_between` 経由）。
+* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 295 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
+
+* **エラーハンドリング**: `_calculate_cost_between` 側で例外を捕捉し `0` を返す。日付の丸めは `min(now.day, end_of_last_month.day)` で行うため、`ValueError: day is out of range` にはならない。
+* 根拠: `day = min(now.day, end_of_last_month.day)` (行番号: 291 / 抜粋: "day = min(now.day, end_of_last_month.day)")
+
+
+### `_start_of_month` / `_calculate_cost_between` / `ELECTRICITY_YEN_PER_KWH`
+
+* **役割**: `_start_of_month` は渡した時刻の月初（`microsecond=0`）を返す。`_calculate_cost_between` は期間内のスマートメーターの記録から電気代を概算する共通処理で、`WHERE timestamp >= '{start}' AND timestamp <= '{end}'` で期間を絞る（上限は先月ぶんの集計のために足されたもので、今月ぶんは「今」が上限なので結果は変わらない）。`ELECTRICITY_YEN_PER_KWH` は単価（31円/kWh）。
+* 根拠: `def _calculate_cost_between(start: datetime, end: datetime) -> int:` (行番号: 306 / 抜粋: "def _calculate_cost_between(start: datetime, end: datetime) -> int:"), `ELECTRICITY_YEN_PER_KWH = 31` (行番号: 272 / 抜粋: "ELECTRICITY_YEN_PER_KWH = 31")
+
+* **引数/リクエスト**: `_start_of_month(moment: datetime)`, `_calculate_cost_between(start: datetime, end: datetime)`
+* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 298 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
+
+* **戻り値/レスポンス**: `_start_of_month` は `datetime`、`_calculate_cost_between` は `int`
+* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 298 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
+
+* **副作用**: `_calculate_cost_between` はデータベースの読み取り操作。
+* 根拠: `df = load_data_from_db(query)` (行番号: 328 / 抜粋: "df = load_data_from_db(query)")
+
+* **エラーハンドリング**: `_calculate_cost_between` は例外発生時にエラーログを出力し `0` を返す。
+* 根拠: `except Exception as e:` (行番号: 354 / 抜粋: "logger.error(f\"Cost Calc Error: {e}\")")
 
 
 ### `load_weather_history`
 
 * **役割**: 指定された日数分、指定された場所（デフォルトは伊丹）の天気履歴を取得する。**（Issue #410 L-L2で修正）** 遡り開始日(`start_date`)の算出に使う「現在時刻」を、以前のnaive`datetime.now()`（サーバーのローカルタイムゾーンに依存し、`get_today_date_str()`等が前提とするJSTと日付境界がズレうる）から、JST明示の`datetime.now(pytz.timezone("Asia/Tokyo"))`へ変更した。
-* 根拠: `load_weather_history` (行番号: 291〜308 / 抜粋: "FROM weather_history")、JST明示化 (行番号: 328 / 抜粋: "start_date = (datetime.now(pytz.timezone(\"Asia/Tokyo\")) - timedelta(days=days)).strftime(\"%Y-%m-%d\")")
+* 根拠: `load_weather_history` (行番号: 291〜308 / 抜粋: "FROM weather_history")、JST明示化 (行番号: 361 / 抜粋: "start_date = (datetime.now(pytz.timezone(\"Asia/Tokyo\")) - timedelta(days=days)).strftime(\"%Y-%m-%d\")")
 
 
 * **引数/リクエスト**: `days` (`int`, デフォルト `40`): 遡る日数。`location` (`str`, デフォルト `"伊丹"`): 取得対象の場所。
-* 根拠: `days: int = 40, location: str = "伊丹"` (行番号: 324 / 抜粋: "days: int = 40, location: str = "伊丹"")
+* 根拠: `days: int = 40, location: str = "伊丹"` (行番号: 357 / 抜粋: "days: int = 40, location: str = "伊丹"")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (天気履歴のデータフレーム)
@@ -280,11 +315,11 @@
 ### `load_yearly_temperature_stats`
 
 * **役割**: 指定年の天気履歴（外気温）と室内センサーログ（室温）の日次最小・最大統計を取得し、マージして返す。
-* 根拠: `load_yearly_temperature_stats` (行番号: 396 / 抜粋: "df_merged = pd.merge(df_weather, df_sensor, on="date"")
+* 根拠: `load_yearly_temperature_stats` (行番号: 429 / 抜粋: "df_merged = pd.merge(df_weather, df_sensor, on="date"")
 
 
 * **引数/リクエスト**: `year` (`int`): 対象年。`location` (`str`, デフォルト `"伊丹"`): 対象場所。
-* 根拠: `year: int, location: str = "伊丹"` (行番号: 344 / 抜粋: "year: int, location: str = "伊丹"")
+* 根拠: `year: int, location: str = "伊丹"` (行番号: 377 / 抜粋: "year: int, location: str = "伊丹"")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (マージされた統計データのデータフレーム)
@@ -292,7 +327,7 @@
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `pd.read_sql_query` (行番号: 356 / 抜粋: "df_weather = pd.read_sql_query(q_weather, conn)")
+* 根拠: `pd.read_sql_query` (行番号: 389 / 抜粋: "df_weather = pd.read_sql_query(q_weather, conn)")
 
 
 * **エラーハンドリング**: 各クエリ実行ごとに `try-except` で回避処理。全体の例外発生時はエラーログを出力し空のデータフレームを返す。`finally`で接続を閉じる。**（保守性 #410で修正）** 個別クエリの回避処理は以前bareの`except:`だったが、`except Exception:`へ変更した（`KeyboardInterrupt`/`SystemExit`等の`BaseException`まで握り潰さないようにする一般的なプラクティスに合わせた。挙動そのものは変わらない）。
@@ -307,7 +342,7 @@
 
 
 * **引数/リクエスト**: `limit` (`int`, デフォルト `2000`): 取得件数の上限。
-* 根拠: `limit: int = 2000` (行番号: 405 / 抜粋: "limit: int = 2000")
+* 根拠: `limit: int = 2000` (行番号: 438 / 抜粋: "limit: int = 2000")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (駐輪場データのデータフレーム)
@@ -336,11 +371,11 @@
 ### `get_disk_usage`
 
 * **役割**: ルートディレクトリ（`/`）のディスク使用量（全体、使用済、空き、使用率）を取得する。
-* 根拠: `get_disk_usage` (行番号: 427 / 抜粋: "total, used, free = shutil.disk_usage("/")")
+* 根拠: `get_disk_usage` (行番号: 460 / 抜粋: "total, used, free = shutil.disk_usage("/")")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 424 / 抜粋: "def get_disk_usage()")
+* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 457 / 抜粋: "def get_disk_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (GB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -348,7 +383,7 @@
 
 
 * **副作用**: OSファイルシステムのディスク容量読み取り。
-* 根拠: `shutil.disk_usage("/")` (行番号: 427 / 抜粋: "shutil.disk_usage("/")")
+* 根拠: `shutil.disk_usage("/")` (行番号: 460 / 抜粋: "shutil.disk_usage("/")")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `None` を返す。
@@ -363,7 +398,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 443 / 抜粋: "def get_memory_usage()")
+* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 476 / 抜粋: "def get_memory_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (MB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -386,7 +421,7 @@
 
 
 * **引数/リクエスト**: `lines` (`int`, デフォルト `50`): 行数。`priority` (`Optional[str]`): ログの優先度。`target_date` (`Optional[date]`): 対象日付。
-* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 464 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
+* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 497 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
 
 
 * **戻り値/レスポンス**: `str` (取得したログの文字列。失敗時はエラーメッセージの文字列)
@@ -394,11 +429,11 @@
 
 
 * **副作用**: OSコマンド（`journalctl`）の実行。
-* 根拠: `subprocess.run` (行番号: 477 / 抜粋: "subprocess.run(cmd")
+* 根拠: `subprocess.run` (行番号: 510 / 抜粋: "subprocess.run(cmd")
 
 
 * **エラーハンドリング**: 例外発生時はエラーメッセージを文字列として返す。
-* 根拠: `except Exception as e:` (行番号: 480 / 抜粋: "return f"ログ取得エラー: {e}"")
+* 根拠: `except Exception as e:` (行番号: 513 / 抜粋: "return f"ログ取得エラー: {e}"")
 
 
 
@@ -504,7 +539,7 @@ graph TD
 ## 8. 保守上の注意点
 
 * **[修正済み] Issue #456: process_dataframeの非ベクトル化タイムスタンプ変換**: 以前は`timestamp`カラムの各値へ`_parse_timestamp_to_jst`を`.apply()`で1件ずつ適用する実装であり、ベクトル化された`pd.to_datetime`に比べて大量データでは処理速度が低下する懸念があった。現在は`_vectorized_parse_timestamps_to_jst`がnaive/aware2群への分割とその群単位の`pd.to_datetime`一括適用でベクトル化している。なお、naive値を常にJST（`core.utils.get_now_iso`の保存規約）とみなして`tz_localize`する前提は変更していないため、万一この規約に反してUTC等の別タイムゾーンでnaiveなタイムスタンプが書き込まれるテーブル・経路が将来的に生まれた場合、9時間のズレが再発する点は同様に残る（M-1-4でUTC一律解釈からJST一律解釈に変更されたことに伴う前提）。
-* `calculate_monthly_cost_cumulative` では、直近データ間の差分（`time_diff`）が1.0時間以内のものだけを抽出し、その総和に一律で `31` を掛けて月額概算を算出しているため、月の実際の稼働日数や欠損データの有無によって計算結果がブレる可能性がある。
+* `_calculate_cost_between`（`calculate_monthly_cost_cumulative` と `calculate_last_month_cost_same_point` の共通処理）では、直近データ間の差分（`time_diff`）が1.0時間以内のものだけを抽出し、その総和に一律で `ELECTRICITY_YEN_PER_KWH`（31円/kWh）を掛けて概算を算出しているため、月の実際の稼働日数や欠損データの有無によって計算結果がブレる可能性がある。先月との比較も同じ方法で算出しているため、両者のブレ方は揃う（片方だけが別の方法で計算されることはない）。
 * **（Issue #170で解消）デバイス混在によるtime_diffの誤算出**: 以前は`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)の行を無差別にSELECTし、`device_id`でグループ化せず時系列のまま`diff()`を取っていたため、(1)プラグの消費電力がスマートメーターの計測値へ二重計上され、(2)複数拠点のスマートメーター等が交互に記録された場合に直前行が別デバイスとなり誤った時間幅が使われる、という2つの系統的な計算誤差があった。現在はSQL側で`device_name LIKE '%Remo%'`によりスマートメーターの行のみに絞り、`time_diff`の算出も`device_id`ごとにグループ化してから行う。`weekly_analyze_report.get_analysis_data`の電気代算出(`SELECT AVG(wattage)`)にも同様の問題があり、同じ`device_name LIKE '%Remo%'`条件で修正済み。
 * `get_memory_usage` は `subprocess.run(["free", "-m"])` の出力を文字列分割でパースしているため、OSのディストリビューションやバージョン変更により `free` コマンドの出力形式が変わると `IndexError` 等が発生するリスクがある。
 * `get_system_logs` で `subprocess.run` に引数を渡す際、`target_date` などが外部から未検証のまま渡されると意図しないコマンド引数として解釈される可能性がある。

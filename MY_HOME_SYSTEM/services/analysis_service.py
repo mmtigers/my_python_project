@@ -268,15 +268,46 @@ def load_sensor_data(limit: int = 5000) -> pd.DataFrame:
 
     return apply_friendly_names(df_merged).head(limit)
 
+# 電気代の単価(円/kWh)。概算なので固定値。
+ELECTRICITY_YEN_PER_KWH = 31
+
+
 def calculate_monthly_cost_cumulative() -> int:
-    """今月の電気代概算"""
+    """今月の電気代概算(月初から今まで)。"""
+    now = datetime.now(pytz.timezone("Asia/Tokyo"))
+    return _calculate_cost_between(_start_of_month(now), now)
+
+
+def calculate_last_month_cost_same_point() -> int:
+    """先月の同じ時点までの電気代概算。
+
+    「今月いくら使ったか」だけでは高いのか安いのか判断できないため、比較対象として
+    先月の月初〜「今と同じ日・同じ時刻」までを同じ方法で集計する。
+
+    先月に同じ日が無い場合(3/31 → 2/31)は先月の末日に丸める。
+    """
+    now = datetime.now(pytz.timezone("Asia/Tokyo"))
+    end_of_last_month = _start_of_month(now) - timedelta(seconds=1)
+    day = min(now.day, end_of_last_month.day)
+    same_point = end_of_last_month.replace(
+        day=day, hour=now.hour, minute=now.minute, second=now.second, microsecond=0
+    )
+    return _calculate_cost_between(_start_of_month(same_point), same_point)
+
+
+def _start_of_month(moment: datetime) -> datetime:
+    # L-L2 (#410): microsecond=0 を指定しないと isoformat() に微秒がそのまま残り
+    # (例 "...T00:00:00.123456+09:00")、月初ちょうど0時(微秒無し)のDBレコードが
+    # 文字列比較で「月初未満」と判定され集計から漏れる
+    # (SQLiteの文字列比較では"+09:00"より"."の方が大きい)。
+    return moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _calculate_cost_between(start: datetime, end: datetime) -> int:
+    """期間内のスマートメーターの記録から電気代を概算する。"""
     try:
-        now = datetime.now(pytz.timezone("Asia/Tokyo"))
-        # L-L2 (#410): microsecond=0 を指定しないと start_of_month の isoformat() に
-        # nowの微秒がそのまま残り(例 "...T00:00:00.123456+09:00")、月初ちょうど0時
-        # (微秒無し)のDBレコードが文字列比較で「start_of_month未満」と判定され
-        # 集計から漏れる(SQLiteの文字列比較では"+09:00"より"."の方が大きい)。
-        start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        start_of_month = start.isoformat()
+        end_iso = end.isoformat()
 
         # 1. 新テーブル (power_usage) から取得
         # #170: power_usageにはスマートメーター(全体消費)と各プラグ(個別家電)が
@@ -287,7 +318,8 @@ def calculate_monthly_cost_cumulative() -> int:
         query = f"""
             SELECT device_id, timestamp, wattage as power_watts
             FROM {config.SQLITE_TABLE_POWER_USAGE}
-            WHERE timestamp >= '{start_of_month}' AND device_name LIKE '%Remo%'
+            WHERE timestamp >= '{start_of_month}' AND timestamp <= '{end_iso}'
+              AND device_name LIKE '%Remo%'
             ORDER BY timestamp ASC
         """
         df = load_data_from_db(query)
@@ -296,7 +328,8 @@ def calculate_monthly_cost_cumulative() -> int:
         if df.empty:
             query_old = f"""
                 SELECT device_id, timestamp, power_watts FROM device_records
-                WHERE device_type = 'Nature Remo E Lite' AND timestamp >= '{start_of_month}'
+                WHERE device_type = 'Nature Remo E Lite'
+                  AND timestamp >= '{start_of_month}' AND timestamp <= '{end_iso}'
                 ORDER BY timestamp ASC
             """
             df = load_data_from_db(query_old)
@@ -316,7 +349,7 @@ def calculate_monthly_cost_cumulative() -> int:
         df = df[df["time_diff"] <= 1.0]
 
         df["kwh"] = (df["power_watts"] / 1000) * df["time_diff"]
-        return int(df["kwh"].sum() * 31)
+        return int(df["kwh"].sum() * ELECTRICITY_YEN_PER_KWH)
     except Exception as e:
         logger.error(f"Cost Calc Error: {e}")
         return 0
