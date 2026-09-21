@@ -18,21 +18,21 @@
 ## 2. ファイルの概要
 
 * 「家のいまの状況」を表すステータスカード9枚について、**判定ロジック・カードのHTML組み立て・カードのCSS**を1箇所に集めたモジュール。
-* 根拠: `def build_status_cards(` (行番号: 598 / 抜粋: "def build_status_cards(")
+* 根拠: `def build_status_cards(` (行番号: 597 / 抜粋: "def build_status_cards(")
 * **Streamlit を import しない**。そのため `unified_server.py`（FastAPI）側からも使える。判定は以前 Streamlit の View 層（`views/dashboard/summary.py`）にあり、サーバー側から使えなかったため、軽量ページを作ると同じ判定を2つ書くことになっていた。
 * 根拠: `from services import analysis_service, train_service` (行番号: 32 / 抜粋: "from services import analysis_service, train_service")
 * 判定関数（`get_takasago_status` 等8つ）はいずれも副作用を持たない純粋関数で、DataFrameや取得済みの値を受け取って `(表示文字列, テーマ名)` を返す。取得は呼び出し側の責務にしてある（Streamlit側はキャッシュ付きローダから、サーバー側は `collect_status_cards` から）。
-* 根拠: `def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 280 / 抜粋: "def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:")
+* 根拠: `def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 279 / 抜粋: "def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:")
 * サーバー側用に、DB読み取りとスクレイピングをまとめて行う `collect_status_cards` と、TTL 60秒の自前キャッシュ（`unified_server` には `st.cache_data` が無いため）を持つ。
-* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 688 / 抜粋: "def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:")
+* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 687 / 抜粋: "def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:")
 * 軽量ページのHTML全体（`<head>`・カードのグリッド・下部の導線リンク）を組み立てる `render_mobile_status_page_html` を持つ。配信層（ルーター）から独立させるため、リンク先のパス類は引数で受け取る。
-* 根拠: `def render_mobile_status_page_html(` (行番号: 896 / 抜粋: "def render_mobile_status_page_html(")
+* 根拠: `def render_mobile_status_page_html(` (行番号: 895 / 抜粋: "def render_mobile_status_page_html(")
 * ダッシュボードのタブ定義（キーとラベル）も持つ（`DASHBOARD_TABS`）。軽量ページが各カードを「詳細が載っているタブ」へのリンクにするためにキーを必要とし、Streamlit を import する `dashboard.py` 側にあるとサーバー側から読めないため。
-* 根拠: `DASHBOARD_TABS: tuple[tuple[str, str], ...] = (` (行番号: 128 / 抜粋: "DASHBOARD_TABS: tuple[tuple[str, str], ...] = (")
+* 根拠: `DASHBOARD_TABS: tuple[tuple[str, str], ...] = (` (行番号: 127 / 抜粋: "DASHBOARD_TABS: tuple[tuple[str, str], ...] = (")
 * 赤・黄のカードだけを拾う要約（`summarize_alerts`）を持つ。軽量ページと Streamlit 側の両方がこれを呼ぶため、「気になること」の条件が2画面で食い違わない。
-* 根拠: `def summarize_alerts(cards) -> list[StatusCard]:` (行番号: 220 / 抜粋: "def summarize_alerts(cards) -> list[StatusCard]:")
+* 根拠: `def summarize_alerts(cards) -> list[StatusCard]:` (行番号: 219 / 抜粋: "def summarize_alerts(cards) -> list[StatusCard]:")
 * 値の下に小さく出す補足（前回値・前日比・最終検知時刻）を組み立てる `describe_*` 群を持つ。判定に使う行の抽出（`_takasago_activity` / `_itami_motion` / `_itami_contact` / `_rice_cooking_rows`）を判定側と共有するため、カードの色と補足の時刻が食い違わない。
-* 根拠: `def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 536 / 抜粋: "def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:")
+* 根拠: `def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 535 / 抜粋: "def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:")
 
 ## 3. 外部依存関係
 
@@ -103,109 +103,109 @@
 ### `StatusCard` (NamedTuple)
 
 * **役割**: 1枚のカードを表す。`title`, `value`, `theme`, `value_is_html`（既定 `False`）, `tab`（既定 `None`）, `sub`（既定 `None`）を持つ。`value_is_html` は、色付けの `<span>` や改行の `<br>` を意図的に含める呼び出し元だけが `True` にする。`tab` はそのカードの詳細が載っているタブのキー（`DASHBOARD_TABS`）で、軽量ページがカード自体を `?tab=...` へのリンクにするために使う。`sub` は値の下に小さく出す補足（前回値・前日比・最終検知時刻）で、`value` と違い常にHTMLエスケープされる。
-* 根拠: `class StatusCard(NamedTuple):` (行番号: 138 / 抜粋: "class StatusCard(NamedTuple):")
+* 根拠: `class StatusCard(NamedTuple):` (行番号: 137 / 抜粋: "class StatusCard(NamedTuple):")
 
 * **引数/リクエスト**: `title` (str), `value` (str), `theme` (str), `value_is_html` (bool, 既定 False), `tab` (str | None, 既定 None), `sub` (str | None, 既定 None)
-* 根拠: `class StatusCard(NamedTuple):` (行番号: 138〜154 / 抜粋: "class StatusCard(NamedTuple):")
+* 根拠: `class StatusCard(NamedTuple):` (行番号: 137〜153 / 抜粋: "class StatusCard(NamedTuple):")
 
 * **戻り値/レスポンス**: 該当なし（データ型）
-* 根拠: `class StatusCard(NamedTuple):` (行番号: 138 / 抜粋: "class StatusCard(NamedTuple):")
+* 根拠: `class StatusCard(NamedTuple):` (行番号: 137 / 抜粋: "class StatusCard(NamedTuple):")
 
 * **副作用**: なし
-* 根拠: `class StatusCard(NamedTuple):` (行番号: 138 / 抜粋: "class StatusCard(NamedTuple):")
+* 根拠: `class StatusCard(NamedTuple):` (行番号: 137 / 抜粋: "class StatusCard(NamedTuple):")
 
 * **エラーハンドリング**: なし
-* 根拠: `class StatusCard(NamedTuple):` (行番号: 138 / 抜粋: "class StatusCard(NamedTuple):")
+* 根拠: `class StatusCard(NamedTuple):` (行番号: 137 / 抜粋: "class StatusCard(NamedTuple):")
 
 
 ### `render_status_card_html`
 
 * **役割**: カード1枚のHTML文字列を返す。`title` は常にHTMLエスケープし、`value` も既定でエスケープする（Issue #378: スクレイピング由来・DB由来の文字列がそのまま埋め込まれると格納型XSSになりうる）。`value_is_html=True` のときだけ `value` のエスケープをスキップする。`href` を渡すと外枠が `<div>` ではなく `<a>` になり、カード全体がリンクになる（軽量ページ専用。Streamlit 側はリンクを踏むとページ全体が再読み込みになるため渡さない）。`sub` を渡すと値の下に `.status-sub` の行を足す（常にエスケープする）。
-* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 157〜201 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")
+* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 156〜200 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")
 
 * **引数/リクエスト**: `title` (str), `value` (str), `theme` (str), キーワード専用 `value_is_html` (bool, 既定 False), `href` (str | None, 既定 None), `sub` (str | None, 既定 None)
-* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 157 / 抜粋: "def render_status_card_html(...)")
+* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 156 / 抜粋: "def render_status_card_html(...)")
 
 * **戻り値/レスポンス**: 改行・インデントを一切含まない1行のHTML文字列。Streamlit の `st.markdown` は本文に `textwrap.dedent()` をかけてからMarkdownとして解釈するため、整形用の空白が残っていると2枚目以降のカードが生のタグ文字列として画面に出る（#807）。
 * 根拠: `return (` (行番号: 116〜121 / 抜粋: "f'<div class=\"status-card {theme}\">'")
 
 * **副作用**: なし（文字列を返すのみ）
-* 根拠: `safe_title = html.escape(title)` (行番号: 182 / 抜粋: "safe_title = html.escape(title)")
+* 根拠: `safe_title = html.escape(title)` (行番号: 181 / 抜粋: "safe_title = html.escape(title)")
 
 * **エラーハンドリング**: なし
-* 根拠: `safe_value = value if value_is_html else html.escape(value)` (行番号: 183 / 抜粋: "safe_value = value if value_is_html else html.escape(value)")
+* 根拠: `safe_value = value if value_is_html else html.escape(value)` (行番号: 182 / 抜粋: "safe_value = value if value_is_html else html.escape(value)")
 
 
 ### `render_status_grid_html`
 
 * **役割**: 複数のカードを `.status-grid` の1ブロックにまとめたHTMLを返す。`dashboard_path` を渡すと、`tab` を持つカードがそのタブへのリンクになる。
-* 根拠: `def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:` (行番号: 243〜260 / 抜粋: "def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:")
+* 根拠: `def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:` (行番号: 242〜259 / 抜粋: "def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:")
 
 * **引数/リクエスト**: `cards` (`StatusCard` のイテラブル), キーワード専用 `dashboard_path` (str | None, 既定 None)
-* 根拠: `def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:` (行番号: 243 / 抜粋: "def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:")
+* 根拠: `def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:` (行番号: 242 / 抜粋: "def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:")
 
 * **戻り値/レスポンス**: `<div class="status-grid">…</div>` の文字列
-* 根拠: `return f'<div class="status-grid">{cards_html}</div>'` (行番号: 260 / 抜粋: "return f'<div class=\"status-grid\">{cards_html}</div>'")
+* 根拠: `return f'<div class="status-grid">{cards_html}</div>'` (行番号: 259 / 抜粋: "return f'<div class=\"status-grid\">{cards_html}</div>'")
 
 * **副作用**: なし
-* 根拠: `cards_html = "".join(` (行番号: 249 / 抜粋: "cards_html = \"\".join(")
+* 根拠: `cards_html = "".join(` (行番号: 248 / 抜粋: "cards_html = \"\".join(")
 
 * **エラーハンドリング**: なし
-* 根拠: `def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:` (行番号: 243 / 抜粋: "def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:")
+* 根拠: `def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:` (行番号: 242 / 抜粋: "def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:")
 
 
 ### `DASHBOARD_TABS` / `DASHBOARD_TAB_KEYS` (モジュールレベル定数)
 
 * **役割**: ダッシュボードのタブ定義（`("home", "🏠 ホーム")` 等5つ）と、そのキーのタプル。キーは `?tab=` のクエリパラメータに入る値でもある。`dashboard.py` はこれを読み込んで自身の `TABS` にする。
-* 根拠: `DASHBOARD_TABS: tuple[tuple[str, str], ...] = (` (行番号: 128 / 抜粋: "DASHBOARD_TABS: tuple[tuple[str, str], ...] = (")
+* 根拠: `DASHBOARD_TABS: tuple[tuple[str, str], ...] = (` (行番号: 127 / 抜粋: "DASHBOARD_TABS: tuple[tuple[str, str], ...] = (")
 
 * **引数/リクエスト**: なし（定数）
-* 根拠: `DASHBOARD_TAB_KEYS: tuple[str, ...] = tuple(key for key, _ in DASHBOARD_TABS)` (行番号: 135 / 抜粋: "DASHBOARD_TAB_KEYS: tuple[str, ...] = tuple(key for key, _ in DASHBOARD_TABS)")
+* 根拠: `DASHBOARD_TAB_KEYS: tuple[str, ...] = tuple(key for key, _ in DASHBOARD_TABS)` (行番号: 134 / 抜粋: "DASHBOARD_TAB_KEYS: tuple[str, ...] = tuple(key for key, _ in DASHBOARD_TABS)")
 
 * **戻り値/レスポンス**: なし（定数）
-* 根拠: `DASHBOARD_TAB_KEYS: tuple[str, ...] = tuple(key for key, _ in DASHBOARD_TABS)` (行番号: 135 / 抜粋: "DASHBOARD_TAB_KEYS: tuple[str, ...] = tuple(key for key, _ in DASHBOARD_TABS)")
+* 根拠: `DASHBOARD_TAB_KEYS: tuple[str, ...] = tuple(key for key, _ in DASHBOARD_TABS)` (行番号: 134 / 抜粋: "DASHBOARD_TAB_KEYS: tuple[str, ...] = tuple(key for key, _ in DASHBOARD_TABS)")
 
 * **副作用**: なし
-* 根拠: `DASHBOARD_TABS: tuple[tuple[str, str], ...] = (` (行番号: 128 / 抜粋: "DASHBOARD_TABS: tuple[tuple[str, str], ...] = (")
+* 根拠: `DASHBOARD_TABS: tuple[tuple[str, str], ...] = (` (行番号: 127 / 抜粋: "DASHBOARD_TABS: tuple[tuple[str, str], ...] = (")
 
 * **エラーハンドリング**: なし
-* 根拠: `DASHBOARD_TABS: tuple[tuple[str, str], ...] = (` (行番号: 128 / 抜粋: "DASHBOARD_TABS: tuple[tuple[str, str], ...] = (")
+* 根拠: `DASHBOARD_TABS: tuple[tuple[str, str], ...] = (` (行番号: 127 / 抜粋: "DASHBOARD_TABS: tuple[tuple[str, str], ...] = (")
 
 
 ### `card_detail_href`
 
 * **役割**: カードの詳細が載っているタブへのURL（`{dashboard_path}?tab={tab}`）を返す。`tab` を持たないカードは `None`。`dashboard_path` は閲覧中のオリジンからのルート相対パスで、固定URLを埋めるとLAN内のIPと公開ドメインのどちらか一方でしか繋がらなくなる。
-* 根拠: `def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:` (行番号: 204 / 抜粋: "def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:")
+* 根拠: `def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:` (行番号: 203 / 抜粋: "def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:")
 
 * **引数/リクエスト**: `card` (`StatusCard`), `dashboard_path` (str)
-* 根拠: `def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:` (行番号: 204 / 抜粋: "def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:")
+* 根拠: `def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:` (行番号: 203 / 抜粋: "def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:")
 
 * **戻り値/レスポンス**: URL文字列、または `None`
-* 根拠: `return f"{dashboard_path}?tab={card.tab}"` (行番号: 213 / 抜粋: "return f\"{dashboard_path}?tab={card.tab}\"")
+* 根拠: `return f"{dashboard_path}?tab={card.tab}"` (行番号: 212 / 抜粋: "return f\"{dashboard_path}?tab={card.tab}\"")
 
 * **副作用**: なし
-* 根拠: `def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:` (行番号: 204 / 抜粋: "def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:")
+* 根拠: `def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:` (行番号: 203 / 抜粋: "def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:")
 
 * **エラーハンドリング**: なし
-* 根拠: `if card.tab is None:` (行番号: 211 / 抜粋: "if card.tab is None:")
+* 根拠: `if card.tab is None:` (行番号: 210 / 抜粋: "if card.tab is None:")
 
 
 ### `ALERT_THEMES` / `summarize_alerts` / `render_alerts_html`
 
 * **役割**: 「いま気にすべきカード」を赤（`theme-red`）→ 黄（`theme-yellow`）の順に拾い、要約行のHTMLにする。9枚の並び自体は動かさない（どの位置に何があるかで覚えている画面で順番が入れ替わると読み違えるため、並べ替えではなく要約で解決する）。気になることが無いときも同じ位置に1行出す。
-* 根拠: `def summarize_alerts(cards) -> list[StatusCard]:` (行番号: 220 / 抜粋: "def summarize_alerts(cards) -> list[StatusCard]:")
+* 根拠: `def summarize_alerts(cards) -> list[StatusCard]:` (行番号: 219 / 抜粋: "def summarize_alerts(cards) -> list[StatusCard]:")
 
 * **引数/リクエスト**: `summarize_alerts(cards)`、`render_alerts_html(cards, *, dashboard_path=None)`
-* 根拠: `def render_alerts_html(cards, *, dashboard_path: str | None = None) -> str:` (行番号: 229 / 抜粋: "def render_alerts_html(cards, *, dashboard_path: str | None = None) -> str:")
+* 根拠: `def render_alerts_html(cards, *, dashboard_path: str | None = None) -> str:` (行番号: 228 / 抜粋: "def render_alerts_html(cards, *, dashboard_path: str | None = None) -> str:")
 
 * **戻り値/レスポンス**: `summarize_alerts` は `StatusCard` のリスト。`render_alerts_html` は `<p class="alerts alerts-warn">…</p>` または `<p class="alerts alerts-ok">✅ 気になることはありません</p>`
 * 根拠: `return '<p class="alerts alerts-ok">✅ 気になることはありません</p>'` (行番号: 164 / 抜粋: "alerts-ok")
 
 * **副作用**: なし
-* 根拠: `ALERT_THEMES: tuple[str, ...] = ("theme-red", "theme-yellow")` (行番号: 217 / 抜粋: "ALERT_THEMES: tuple[str, ...] = (\"theme-red\", \"theme-yellow\")")
+* 根拠: `ALERT_THEMES: tuple[str, ...] = ("theme-red", "theme-yellow")` (行番号: 216 / 抜粋: "ALERT_THEMES: tuple[str, ...] = (\"theme-red\", \"theme-yellow\")")
 
 * **エラーハンドリング**: なし。要約行に出すタイトルは `html.escape` を通す。
-* 根拠: `label = html.escape(card.title)` (行番号: 237 / 抜粋: "label = html.escape(card.title)")
+* 根拠: `label = html.escape(card.title)` (行番号: 236 / 抜粋: "label = html.escape(card.title)")
 
 
 ### 判定関数（`get_takasago_status` / `get_itami_status` / `get_traffic_status` / `get_server_status` / `get_nas_status_simple` / `get_car_status` / `get_rice_status` / `get_bicycle_status`）
@@ -220,73 +220,73 @@
   * `get_rice_status`: 今日の炊飯器（`device_name` に「炊飯器」を含み `power_watts` が `RICE_COOKER_ON_WATTS`=500W以上）の記録があれば緑「ご飯あり」、無ければ赤「炊いてない」。
   * `get_bicycle_status`: 対象3エリアの最新待機数と前日同時刻（±2時間で最も近い行）との差を並べ、合計0=緑、10未満=黄、以上=赤。増減は `.diff-up` / `.diff-down` / `.diff-flat` / `.diff-none` のクラスで示す（色をCSS側に置くことで、軽量ページのダークモードで差し替えられる）。
 * 判定に使う行の抽出は、補足表示（`describe_*`）と共有する private 関数（`_takasago_activity` / `_itami_motion` / `_itami_contact` / `_rice_cooking_rows`）に切り出してある。別々に絞ると「カードの色は緑なのに最終検知の時刻だけ新しい」といった食い違いが起きるため。
-* 根拠: `def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 280 / 抜粋: "def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:"), `def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 339 / 抜粋: "def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:"), `def get_traffic_status(jr_status: dict[str, dict[str, Any]]) -> tuple[str, str]:` (行番号: 368 / 抜粋: "def get_traffic_status(jr_status: dict[str, dict[str, Any]]) -> tuple[str, str]:"), `def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:` (行番号: 390 / 抜粋: "def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:"), `def get_nas_status_simple(nas_data: pd.Series | None) -> tuple[str, str]:` (行番号: 396 / 抜粋: "def get_nas_status_simple(nas_data: pd.Series | None) -> tuple[str, str]:"), `def get_car_status(df_car: pd.DataFrame) -> tuple[str, str]:` (行番号: 408 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> tuple[str, str]:"), `def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 432 / 抜粋: "def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:"), `def get_bicycle_status(df_bicycle: pd.DataFrame) -> tuple[str, str]:` (行番号: 444 / 抜粋: "def get_bicycle_status(df_bicycle: pd.DataFrame) -> tuple[str, str]:")
+* 根拠: `def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 279 / 抜粋: "def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:"), `def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 338 / 抜粋: "def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:"), `def get_traffic_status(jr_status: dict[str, dict[str, Any]]) -> tuple[str, str]:` (行番号: 367 / 抜粋: "def get_traffic_status(jr_status: dict[str, dict[str, Any]]) -> tuple[str, str]:"), `def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:` (行番号: 389 / 抜粋: "def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:"), `def get_nas_status_simple(nas_data: pd.Series | None) -> tuple[str, str]:` (行番号: 395 / 抜粋: "def get_nas_status_simple(nas_data: pd.Series | None) -> tuple[str, str]:"), `def get_car_status(df_car: pd.DataFrame) -> tuple[str, str]:` (行番号: 407 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> tuple[str, str]:"), `def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 431 / 抜粋: "def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:"), `def get_bicycle_status(df_bicycle: pd.DataFrame) -> tuple[str, str]:` (行番号: 443 / 抜粋: "def get_bicycle_status(df_bicycle: pd.DataFrame) -> tuple[str, str]:")
 
 * **引数/リクエスト**: DataFrame（センサー・車・駐輪場）、`now`（`datetime`）、取得済みの辞書（JR運行情報・メモリ使用率）、`pd.Series | None`（NAS）
-* 根拠: `def get_traffic_status(jr_status: dict[str, dict[str, Any]]) -> tuple[str, str]:` (行番号: 368 / 抜粋: "def get_traffic_status(jr_status: dict[str, dict[str, Any]]) -> tuple[str, str]:")
+* 根拠: `def get_traffic_status(jr_status: dict[str, dict[str, Any]]) -> tuple[str, str]:` (行番号: 367 / 抜粋: "def get_traffic_status(jr_status: dict[str, dict[str, Any]]) -> tuple[str, str]:")
 
 * **戻り値/レスポンス**: `(表示文字列, テーマ名)` のタプル。テーマ名は `theme-green` / `theme-yellow` / `theme-red` / `theme-blue` / `theme-gray` のいずれか。
 * 根拠: `return "⚪ データなし", "theme-gray"` (行番号: 240〜241 / 抜粋: "return \"⚪ データなし\", \"theme-gray\"")
 
 * **副作用**: なし（いずれもデータ取得を行わない）
-* 根拠: `def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:` (行番号: 390 / 抜粋: "def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:")
+* 根拠: `def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:` (行番号: 389 / 抜粋: "def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:")
 
 * **エラーハンドリング**: 列の欠落・空DataFrameは早期returnで「データなし」を返す。JR運行情報はキー欠落でも例外にならないよう `.get()` に統一されている（Issue #438）。NASは `KeyError` を捕捉して「データ異常」を返す。
-* 根拠: `if df_sensor.empty or "location" not in df_sensor.columns or "contact_state" not in df_sensor.columns:` (行番号: 273 / 抜粋: "if df_sensor.empty or \"location\" not in df_sensor.columns"), `except KeyError:` (行番号: 247 / 抜粋: "except KeyError:")
+* 根拠: `if df_sensor.empty or "location" not in df_sensor.columns or "contact_state" not in df_sensor.columns:` (行番号: 272 / 抜粋: "if df_sensor.empty or \"location\" not in df_sensor.columns"), `except KeyError:` (行番号: 247 / 抜粋: "except KeyError:")
 
 
 ### `build_status_cards`
 
 * **役割**: 渡された材料から、画面に並べる順で9枚の `StatusCard` を組み立てる（取得は行わない）。駐輪場カードだけが `value_is_html=True`（前日比の `<span>` と改行 `<br>` を含むため。Issue #378）。各カードには詳細が載っているタブ（`tab`）と、値の下に出す補足（`sub`、`describe_*` の戻り値）を併せて持たせる。駐輪場だけは値そのものが前日比を含むため `sub` を付けない。
-* 根拠: `def build_status_cards(` (行番号: 598〜647 / 抜粋: "def build_status_cards(")
+* 根拠: `def build_status_cards(` (行番号: 597〜646 / 抜粋: "def build_status_cards(")
 
 * **引数/リクエスト**: `now`, `df_sensor`, `df_car`, `df_bicycle`, `nas_data`, `jr_status`, `memory`, `monthly_cost`、および補足表示にだけ使う省略可能な `last_month_cost` (int | None, 既定 None), `disk` (dict | None, 既定 None)。後者2つを渡さなくても補足が出ないだけで、カードの値と色は変わらない。
-* 根拠: `def build_status_cards(` (行番号: 598〜647 / 抜粋: "def build_status_cards(")
+* 根拠: `def build_status_cards(` (行番号: 597〜646 / 抜粋: "def build_status_cards(")
 
 * **戻り値/レスポンス**: `list[StatusCard]`（9枚）
 * 根拠: `StatusCard("🗄️ NAS", nas_val, nas_theme),` (行番号: 373〜383 / 抜粋: "StatusCard(\"👵 高砂 (実家)\", taka_val, taka_theme),")
 
 * **副作用**: なし
-* 根拠: `def build_status_cards(` (行番号: 598 / 抜粋: "def build_status_cards(")
+* 根拠: `def build_status_cards(` (行番号: 597 / 抜粋: "def build_status_cards(")
 
 * **エラーハンドリング**: なし（各判定関数側で処理される）
-* 根拠: `taka_val, taka_theme = get_takasago_status(df_sensor, now)` (行番号: 615 / 抜粋: "taka_val, taka_theme = get_takasago_status(df_sensor, now)")
+* 根拠: `taka_val, taka_theme = get_takasago_status(df_sensor, now)` (行番号: 614 / 抜粋: "taka_val, taka_theme = get_takasago_status(df_sensor, now)")
 
 
 ### `_cached` / `clear_status_cache`
 
 * **役割**: `unified_server` には `st.cache_data` が無いため、同じTTL（60秒）の小さなメモを自前で持つ。`_cached(key, loader)` はTTL内なら前回値を返し、`loader` が例外を送出した場合は例外を伝播させず `None` を返す（1枚のカードの取得失敗でページ全体を落とさない）。**失敗はキャッシュしない**ため、次の要求で再試行される。`clear_status_cache()` はTTLを待たずに捨てる。
-* 根拠: `def _cached(key: str, loader: Callable[[], Any]) -> Any:` (行番号: 659〜679 / 抜粋: "def _cached(key: str, loader: Callable[[], Any]) -> Any:"), `def clear_status_cache() -> None:` (行番号: 682 / 抜粋: "def clear_status_cache() -> None:")
+* 根拠: `def _cached(key: str, loader: Callable[[], Any]) -> Any:` (行番号: 658〜678 / 抜粋: "def _cached(key: str, loader: Callable[[], Any]) -> Any:"), `def clear_status_cache() -> None:` (行番号: 681 / 抜粋: "def clear_status_cache() -> None:")
 
 * **引数/リクエスト**: `key` (str), `loader` (引数なしの呼び出し可能オブジェクト)
-* 根拠: `def _cached(key: str, loader: Callable[[], Any]) -> Any:` (行番号: 659 / 抜粋: "def _cached(key: str, loader: Callable[[], Any]) -> Any:")
+* 根拠: `def _cached(key: str, loader: Callable[[], Any]) -> Any:` (行番号: 658 / 抜粋: "def _cached(key: str, loader: Callable[[], Any]) -> Any:")
 
 * **戻り値/レスポンス**: `loader` の戻り値、または取得失敗時は `None`
 * 根拠: `return None` (行番号: 406 / 抜粋: "return None")
 
 * **副作用**: モジュールレベルの `_cache` 辞書の更新（`threading.Lock` で保護）。読み取りのみで、DBへの書き込みは行わない（CLAUDE.md「単一プロセス前提」の並行制御には触れない）。
-* 根拠: `_cache[key] = (time.monotonic(), value)` (行番号: 678 / 抜粋: "_cache[key] = (time.monotonic(), value)")
+* 根拠: `_cache[key] = (time.monotonic(), value)` (行番号: 677 / 抜粋: "_cache[key] = (time.monotonic(), value)")
 
 * **エラーハンドリング**: `except Exception` で捕捉し、警告ログを出して `None` を返す（`# noqa: BLE001` 付きで意図を明示）。
-* 根拠: `except Exception as e:  # noqa: BLE001 (1枚のカードの取得失敗でページ全体を落とさない)` (行番号: 673 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:  # noqa: BLE001 (1枚のカードの取得失敗でページ全体を落とさない)` (行番号: 672 / 抜粋: "except Exception as e:")
 
 
 ### `collect_status_cards`
 
 * **役割**: DB読み取り（センサー・車・駐輪場・NAS）とスクレイピング（JR運行情報）、`psutil`相当のメモリ使用率、今月の電気代をすべて `_cached` 経由で集め、`build_status_cards` に渡して `(カード一覧, 取得時刻)` を返す。取得に失敗した材料は空DataFrame・`None`・`0`・「取得不可」扱いのJR辞書で補う。
-* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 688〜719 / 抜粋: "def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:")
+* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 687〜718 / 抜粋: "def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:")
 
 * **引数/リクエスト**: `now` (`datetime | None`。省略時は `core.utils.get_now_jst()`)
-* 根拠: `now = now or get_now_jst()` (行番号: 694 / 抜粋: "now = now or get_now_jst()")
+* 根拠: `now = now or get_now_jst()` (行番号: 693 / 抜粋: "now = now or get_now_jst()")
 
 * **戻り値/レスポンス**: `(list[StatusCard], datetime)`
-* 根拠: `return cards, now` (行番号: 719 / 抜粋: "return cards, now")
+* 根拠: `return cards, now` (行番号: 718 / 抜粋: "return cards, now")
 
 * **副作用**: DBの読み取り、HTTPスクレイピング、キャッシュの更新。書き込みは行わない。
 * 根拠: `df_sensor = _cached("sensor", lambda: analysis_service.load_sensor_data(limit=MOBILE_SENSOR_ROW_LIMIT))` (行番号: 429 / 抜粋: "df_sensor = _cached(\"sensor\", ...)")
 
 * **エラーハンドリング**: 個々の取得失敗は `_cached` が `None` に丸める。JR運行情報が取れなかった場合は両路線 `is_unavailable=True` の辞書を渡し、カードは「情報取得不可」になる（「平常運転」と偽らない）。
-* 根拠: `jr_status or {"宝塚線": {"is_unavailable": True}, "神戸線": {"is_unavailable": True}},` (行番号: 713 / 抜粋: "jr_status or {\"宝塚線\": {\"is_unavailable\": True}")
+* 根拠: `jr_status or {"宝塚線": {"is_unavailable": True}, "神戸線": {"is_unavailable": True}},` (行番号: 712 / 抜粋: "jr_status or {\"宝塚線\": {\"is_unavailable\": True}")
 
 
 ### 補足表示（`describe_takasago` / `describe_itami` / `describe_car` / `describe_rice` / `describe_traffic` / `describe_cost` / `describe_server` / `describe_nas`）
@@ -299,19 +299,19 @@
   * `describe_cost`: `先月同日 11,000円 (+1,345)`。比較対象が無い（初月・取得失敗で0）ときは `None`。
   * `describe_server`: `ディスク 55%`。`describe_nas`: `空き 1,234GB`。
   * 時刻の書式は `_format_moment` が決める（今日は `09:40`、前日は `昨日 18:40`、それ以前は `9/15 18:40`）。
-* 根拠: `def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 536 / 抜粋: "def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:"), `def _format_moment(moment, now: datetime) -> str | None:` (行番号: 516 / 抜粋: "def _format_moment(moment, now: datetime) -> str | None:")
+* 根拠: `def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 535 / 抜粋: "def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:"), `def _format_moment(moment, now: datetime) -> str | None:` (行番号: 515 / 抜粋: "def _format_moment(moment, now: datetime) -> str | None:")
 
 * **引数/リクエスト**: 判定関数と同じ材料（DataFrame・取得済みの辞書・`now`）
-* 根拠: `def describe_cost(monthly_cost: int, last_month_cost: int | None) -> str | None:` (行番号: 571 / 抜粋: "def describe_cost(monthly_cost: int, last_month_cost: int | None) -> str | None:")
+* 根拠: `def describe_cost(monthly_cost: int, last_month_cost: int | None) -> str | None:` (行番号: 570 / 抜粋: "def describe_cost(monthly_cost: int, last_month_cost: int | None) -> str | None:")
 
 * **戻り値/レスポンス**: 補足の文字列、または材料が無いときは `None`（`None` なら `.status-sub` 自体が出ない）
 * 根拠: `return None if at is None else f"最終検知 {at}"` (行番号: 402 / 抜粋: "return None if at is None else f\"最終検知 {at}\"")
 
 * **副作用**: なし（いずれもデータ取得を行わない）
-* 根拠: `def describe_rice(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 557 / 抜粋: "def describe_rice(df_sensor: pd.DataFrame, now: datetime) -> str | None:")
+* 根拠: `def describe_rice(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 556 / 抜粋: "def describe_rice(df_sensor: pd.DataFrame, now: datetime) -> str | None:")
 
 * **エラーハンドリング**: 空DataFrame・列の欠落・`NaT`・`KeyError` はいずれも `None` を返す。
-* 根拠: `def _latest_timestamp(df: pd.DataFrame):` (行番号: 529 / 抜粋: "def _latest_timestamp(df: pd.DataFrame):")
+* 根拠: `def _latest_timestamp(df: pd.DataFrame):` (行番号: 528 / 抜粋: "def _latest_timestamp(df: pd.DataFrame):")
 
 
 ### `MOBILE_PAGE_TITLE` / `MOBILE_PAGE_REFRESH_SEC` / `_MOBILE_PAGE_BASE_CSS` (モジュールレベル定数)
@@ -320,7 +320,7 @@
   * `_MOBILE_PAGE_DARK_CSS`: `prefers-color-scheme: dark` の配色。**軽量ページだけ**に適用する（ダッシュボード本体には Streamlit 自身のテーマがあり、本体を Light に固定している端末で共有CSSに入れると「周りは白いのにカードだけ黒い」状態になるため）。
   * `_MOBILE_PAGE_STALE_CSS`: 自動更新に失敗したことを示す `#status.stale` の見た目。
   * `_MOBILE_PAGE_REFRESH_JS`: カードのブロックだけを差し替える自動更新スクリプト。`__STATUS_URL__` / `__REFRESH_MS__` を `render_mobile_status_page_html` が差し込む。
-* 根拠: `MOBILE_PAGE_TITLE = "おうちの様子"` (行番号: 730 / 抜粋: "MOBILE_PAGE_TITLE = \"おうちの様子\""), `MOBILE_PAGE_REFRESH_SEC = STATUS_CACHE_TTL_SEC` (行番号: 733 / 抜粋: "MOBILE_PAGE_REFRESH_SEC = STATUS_CACHE_TTL_SEC")
+* 根拠: `MOBILE_PAGE_TITLE = "おうちの様子"` (行番号: 729 / 抜粋: "MOBILE_PAGE_TITLE = \"おうちの様子\""), `MOBILE_PAGE_REFRESH_SEC = STATUS_CACHE_TTL_SEC` (行番号: 732 / 抜粋: "MOBILE_PAGE_REFRESH_SEC = STATUS_CACHE_TTL_SEC")
 
 * **引数/リクエスト**: なし（定数）
 * 根拠: (行番号: 457〜460 / 抜粋: "MOBILE_PAGE_TITLE = \"おうちの様子\"")
@@ -329,47 +329,47 @@
 * 根拠: (行番号: 457〜460 / 抜粋: "MOBILE_PAGE_REFRESH_SEC = STATUS_CACHE_TTL_SEC")
 
 * **副作用**: なし
-* 根拠: (行番号: 735 / 抜粋: "_MOBILE_PAGE_BASE_CSS = \"\"\"")
+* 根拠: (行番号: 734 / 抜粋: "_MOBILE_PAGE_BASE_CSS = \"\"\"")
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 735 / 抜粋: "_MOBILE_PAGE_BASE_CSS = \"\"\"")
+* 根拠: (行番号: 734 / 抜粋: "_MOBILE_PAGE_BASE_CSS = \"\"\"")
 
 
 ### `STATUS_SECTION_ID` / `render_status_section_html`
 
 * **役割**: 取得時刻（`.meta`）・要約行（`.alerts`）・カードのグリッドを、`id="status"` を付けた1ブロックにまとめて返す。自動更新でここだけを差し替えるため切り出してある（時刻と要約も一緒に差し替わるので「値だけ新しく見出しが古い」が起きない）。`routers/dashboard_router.py` がこの関数の結果だけを返す経路（`{DASHBOARD_BASE_PATH}/m/status`）を持つ。
-* 根拠: `def render_status_section_html(` (行番号: 875 / 抜粋: "def render_status_section_html(")
+* 根拠: `def render_status_section_html(` (行番号: 874 / 抜粋: "def render_status_section_html(")
 
 * **引数/リクエスト**: `cards`, `fetched_at` (`datetime`)、キーワード専用 `dashboard_path` (str | None, 既定 None), `refresh_sec` (int, 既定 `MOBILE_PAGE_REFRESH_SEC`)
-* 根拠: `def render_status_section_html(` (行番号: 875〜893 / 抜粋: "dashboard_path: str | None = None,")
+* 根拠: `def render_status_section_html(` (行番号: 874〜892 / 抜粋: "dashboard_path: str | None = None,")
 
 * **戻り値/レスポンス**: `<div id="status">…</div>` の文字列（ページ全体ではない断片）
-* 根拠: `f'<div id="{STATUS_SECTION_ID}">'` (行番号: 887 / 抜粋: "f'<div id=\"{STATUS_SECTION_ID}\">'")
+* 根拠: `f'<div id="{STATUS_SECTION_ID}">'` (行番号: 886 / 抜粋: "f'<div id=\"{STATUS_SECTION_ID}\">'")
 
 * **副作用**: なし（文字列を返すのみ）
-* 根拠: `STATUS_SECTION_ID = "status"` (行番号: 872 / 抜粋: "STATUS_SECTION_ID = \"status\"")
+* 根拠: `STATUS_SECTION_ID = "status"` (行番号: 871 / 抜粋: "STATUS_SECTION_ID = \"status\"")
 
 * **エラーハンドリング**: なし
-* 根拠: `STATUS_SECTION_ID = "status"` (行番号: 872 / 抜粋: "STATUS_SECTION_ID = \"status\"")
+* 根拠: `STATUS_SECTION_ID = "status"` (行番号: 871 / 抜粋: "STATUS_SECTION_ID = \"status\"")
 
 
 ### `render_mobile_status_page_html`
 
 * **役割**: 軽量ページのHTML全体を組み立てる。マニフェスト・`apple-touch-icon`・`apple-mobile-web-app-capable` によるホーム画面追加、`render_status_section_html` のブロック、下部の導線（詳しく見る / ファミクエ）を含む。パス類を引数で受けるのは、このモジュールを配信層（ルーター・中継）から独立させておくため。
   自動更新の方式は `status_path` の有無で決まる。渡したときは `<noscript>` の中にだけ `<meta http-equiv="refresh">` を置き、JSが動く環境では `_MOBILE_PAGE_REFRESH_JS` が `#status` だけを差し替える（どちらか一方だけが働く）。渡さないときは従来どおり `<meta http-equiv="refresh">` でページ全体を読み込み直す。
-* 根拠: `def render_mobile_status_page_html(` (行番号: 896〜956 / 抜粋: "def render_mobile_status_page_html(")
+* 根拠: `def render_mobile_status_page_html(` (行番号: 895〜955 / 抜粋: "def render_mobile_status_page_html(")
 
 * **引数/リクエスト**: `cards`, `fetched_at` (`datetime`)、キーワード専用の `manifest_path`, `icon_path`, `dashboard_path`, `quest_path`, `status_path`（str | None, 既定 None）, `refresh_sec`（既定 `MOBILE_PAGE_REFRESH_SEC`）
 * 根拠: `refresh_sec: int = MOBILE_PAGE_REFRESH_SEC,` (行番号: 493〜500 / 抜粋: "manifest_path: str,")
 
 * **戻り値/レスポンス**: HTML文字列（`<!DOCTYPE html>` から `</html>` まで）
-* 根拠: `return (` (行番号: 932 / 抜粋: "\"<!DOCTYPE html>\"")
+* 根拠: `return (` (行番号: 931 / 抜粋: "\"<!DOCTYPE html>\"")
 
 * **副作用**: なし（文字列を返すのみ）
 * 根拠: `f"{render_status_section_html(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec)}"` (行番号: 526 / 抜粋: "render_status_section_html")
 
 * **エラーハンドリング**: なし。埋め込むパス類とタイトルは `html.escape` を通す。
-* 根拠: `f'<link rel="manifest" href="{html.escape(manifest_path)}" crossorigin="use-credentials">'` (行番号: 940 / 抜粋: "html.escape(manifest_path)")
+* 根拠: `f'<link rel="manifest" href="{html.escape(manifest_path)}" crossorigin="use-credentials">'` (行番号: 939 / 抜粋: "html.escape(manifest_path)")
 
 
 ## 5. 処理フロー図
@@ -430,7 +430,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `routers/dashboard_router.py` | 軽量ページの配信（パス・マニフェスト・同期エンドポイントにしている理由）を把握するため。 | `def render_mobile_status_page_html(` (行番号: 896 / 抜粋: "def render_mobile_status_page_html(") |
+| 高 | `routers/dashboard_router.py` | 軽量ページの配信（パス・マニフェスト・同期エンドポイントにしている理由）を把握するため。 | `def render_mobile_status_page_html(` (行番号: 895 / 抜粋: "def render_mobile_status_page_html(") |
 | 中 | `services/analysis_service.py` | 各ローダが返すDataFrameの列と失敗時の挙動を把握するため。 | `df_car = _cached("car", lambda: analysis_service.load_generic_data(config.SQLITE_TABLE_CAR))` (行番号: 430 / 抜粋: "df_car = _cached(\"car\", ...)") |
 | 中 | `views/dashboard/common.py` | Streamlit側がこのモジュールの何を再エクスポートしているかを把握するため。 | `STATUS_CARD_CSS = """` (行番号: 48 / 抜粋: "STATUS_CARD_CSS = \"\"\"") |
 
@@ -440,25 +440,25 @@ graph TD
 * 根拠: `from services import analysis_service, train_service` (行番号: 32 / 抜粋: "from services import analysis_service, train_service")
 
 * **判定を呼び出し側（View）へ戻さないこと**: 戻すと軽量ページと本体で同じカードの内容が食い違い、片方だけ直した状態が生まれる。
-* 根拠: `def build_status_cards(` (行番号: 598 / 抜粋: "def build_status_cards(")
+* 根拠: `def build_status_cards(` (行番号: 597 / 抜粋: "def build_status_cards(")
 
 * **取得失敗をキャッシュしないこと**: `_cached` は失敗時に `None` を返すだけでキャッシュに入れない。入れてしまうと、復旧してもTTLの60秒間は壊れた表示のままになる。
-* 根拠: `except Exception as e:  # noqa: BLE001 (1枚のカードの取得失敗でページ全体を落とさない)` (行番号: 673 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:  # noqa: BLE001 (1枚のカードの取得失敗でページ全体を落とさない)` (行番号: 672 / 抜粋: "except Exception as e:")
 
 * **`value_is_html=True` を渡す呼び出し元は、値の構築元に外部/DB由来の生文字列を含めないこと**: エスケープをスキップするため、格納型XSSの経路になりうる（Issue #378）。現状これを使うのは駐輪場カードだけで、値は数値と自前のHTML断片からのみ組み立てられている。`sub` にはこの抜け道が無く、常にエスケープされる。
-* 根拠: `StatusCard("🚲 駐輪場待機", bicycle_val, bicycle_theme, value_is_html=True, tab="out"),` (行番号: 640 / 抜粋: "StatusCard(\"🚲 駐輪場待機\", bicycle_val, bicycle_theme, value_is_html=True, tab=\"out\"),")
+* 根拠: `StatusCard("🚲 駐輪場待機", bicycle_val, bicycle_theme, value_is_html=True, tab="out"),` (行番号: 639 / 抜粋: "StatusCard(\"🚲 駐輪場待機\", bicycle_val, bicycle_theme, value_is_html=True, tab=\"out\"),")
 
 * **判定と補足表示で同じ行の抽出を使うこと**: `describe_*` が判定（`get_*_status`）と別の条件で行を絞ると、「カードの色は緑なのに最終検知の時刻だけ新しい」という食い違いが起きる。抽出は `_takasago_activity` / `_itami_motion` / `_itami_contact` / `_rice_cooking_rows` に集約してあるので、新しい補足を足すときもここを使うこと。
-* 根拠: `def _takasago_activity(df_sensor: pd.DataFrame) -> pd.DataFrame:` (行番号: 267 / 抜粋: "def _takasago_activity(df_sensor: pd.DataFrame) -> pd.DataFrame:")
+* 根拠: `def _takasago_activity(df_sensor: pd.DataFrame) -> pd.DataFrame:` (行番号: 266 / 抜粋: "def _takasago_activity(df_sensor: pd.DataFrame) -> pd.DataFrame:")
 
 * **カードをリンクにするのは軽量ページだけにすること**: `render_status_grid_html` に `dashboard_path` を渡すと `<a>` になる。Streamlit 側で渡すとリンクを踏んだときにページ全体が再読み込みになり（セッションが作り直され数秒かかる）、同じ移動を `dashboard.py` の「詳しく見る」ボタンが再実行だけで担っている利点が失われる。
-* 根拠: `def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:` (行番号: 204 / 抜粋: "def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:")
+* 根拠: `def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:` (行番号: 203 / 抜粋: "def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:")
 
 * **`prefers-color-scheme` を共有の `STATUS_CARD_CSS` に入れないこと**: ダッシュボード本体には Streamlit 自身のテーマ（Light固定もできる）があるため、共有CSSに入れると本体を Light にしている端末で「周りは白いのにカードだけ黒い」状態になる。ダークの配色は軽量ページ専用の `_MOBILE_PAGE_DARK_CSS` に置く。
-* 根拠: `_MOBILE_PAGE_DARK_CSS = """` (行番号: 849 / 抜粋: "_MOBILE_PAGE_DARK_CSS = \"\"\"")
+* 根拠: `_MOBILE_PAGE_DARK_CSS = """` (行番号: 848 / 抜粋: "_MOBILE_PAGE_DARK_CSS = \"\"\"")
 
 * **9枚の並びを「異常が上」に並べ替えないこと**: どの位置に何があるかで覚えている画面で順番が入れ替わると、かえって読み違える。気になることは `summarize_alerts` の要約行で先頭に出す方式にしてある。
-* 根拠: `def summarize_alerts(cards) -> list[StatusCard]:` (行番号: 220 / 抜粋: "def summarize_alerts(cards) -> list[StatusCard]:")
+* 根拠: `def summarize_alerts(cards) -> list[StatusCard]:` (行番号: 219 / 抜粋: "def summarize_alerts(cards) -> list[StatusCard]:")
 
 ## 9. 不明事項一覧
 
