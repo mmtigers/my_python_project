@@ -427,9 +427,16 @@ class DashboardProxyService:
             await upstream.close()
             try:
                 await client_ws.close()
-            except RuntimeError:
-                # 既にブラウザ側から切断済みの場合、Starletteは送信を拒否して
-                # RuntimeErrorを送出する。中継の終了処理としては正常。
+            except (RuntimeError, WebSocketDisconnect):
+                # 既にブラウザ側から切断済みの場合、Starletteは送信を拒否する。
+                # 例外の型は状況で変わり、送信拒否は RuntimeError、切断済みの
+                # 通知は WebSocketDisconnect になる。中継の終了処理としては
+                # どちらも正常で、握りつぶしてよい。
+                #
+                # WebSocketDisconnect を拾い漏らすと、タブを閉じる・スマホで
+                # 別アプリへ切り替える・復帰時に自動再読込する(上記の
+                # MOBILE_RELOAD_AFTER_HIDDEN_SEC)たびにサーバーログへ
+                # トレースバックが出る。
                 pass
 
     async def _pump_until_either_side_closes(self, client_ws: WebSocket, upstream) -> None:

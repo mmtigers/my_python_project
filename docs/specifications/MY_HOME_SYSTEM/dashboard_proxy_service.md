@@ -390,20 +390,20 @@
 * **副作用**: 中継先へのWebSocket接続の確立・切断、ブラウザ側接続の `accept` / `close`。
 * 根拠: [呼び出し] (行番号: 224, 242, 245, 247 / 抜粋: "upstream = await websockets.connect(")
 
-* **エラーハンドリング**: 接続時の例外はすべて捕捉し、URLと例外内容を `logger.warning` に記録したうえで `accept` せずに `close(code=1011)` する（コメント: accept前に閉じることでブラウザ側には接続失敗として伝わる）。転送後の `finally` では中継先を閉じ、ブラウザ側の `close()` が `RuntimeError`（既に切断済み）を出した場合は正常終了として握りつぶす。
-* 根拠: [try/except] (行番号: 235〜239, 244〜251 / 抜粋: "except RuntimeError:")
+* **エラーハンドリング**: 接続時の例外はすべて捕捉し、URLと例外内容を `logger.warning` に記録したうえで `accept` せずに `close(code=1011)` する（コメント: accept前に閉じることでブラウザ側には接続失敗として伝わる）。転送後の `finally` では中継先を閉じ、ブラウザ側の `close()` が `RuntimeError` または `WebSocketDisconnect`（いずれも既に切断済み）を出した場合は正常終了として握りつぶす。**（スマホ対応で追加）** 以前は `RuntimeError` しか捕捉しておらず、`WebSocketDisconnect` のケースでサーバーログにトレースバックが出ていた。スマートフォンでは「タブを閉じる」「別アプリへ切り替える」「復帰時に自動再読込する」たびに切断が起きるため、そのたびに出ることになる（実機相当の疎通確認で再現し、`tests/test_dashboard_proxy.py` の `TestWebSocketShutdownIsQuiet` で固定した）。
+* 根拠: [try/except] (行番号: 417〜421, 427〜438 / 抜粋: "except (RuntimeError, WebSocketDisconnect):")
 
 
 ### `DashboardProxyService._pump_until_either_side_closes`
 
 * **役割**: `_client_to_upstream` と `_upstream_to_client` をタスクとして起動し、`asyncio.wait(..., return_when=asyncio.FIRST_COMPLETED)` でどちらかの完了を待つ。`finally` で両タスクを `cancel()` し、`asyncio.gather(..., return_exceptions=True)` で回収する。
-* 根拠: [メソッド定義] (行番号: 435〜446 / 抜粋: "async def _pump_until_either_side_closes(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 442〜453 / 抜粋: "async def _pump_until_either_side_closes(self, client_ws: WebSocket, upstream) -> None:")
 
 * **引数/リクエスト**: `client_ws: WebSocket`、`upstream`（型注釈なし。`websockets.connect` の戻り値）
-* 根拠: [メソッド定義] (行番号: 435 / 抜粋: "async def _pump_until_either_side_closes(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 442 / 抜粋: "async def _pump_until_either_side_closes(self, client_ws: WebSocket, upstream) -> None:")
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [メソッド定義] (行番号: 435 / 抜粋: "async def _pump_until_either_side_closes(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 442 / 抜粋: "async def _pump_until_either_side_closes(self, client_ws: WebSocket, upstream) -> None:")
 
 * **副作用**: 2つのasyncioタスクの生成とキャンセル。
 * 根拠: [呼び出し] (行番号: 255〜258, 262〜264 / 抜粋: "asyncio.create_task(self._client_to_upstream(client_ws, upstream)),")
@@ -415,10 +415,10 @@
 ### `DashboardProxyService._client_to_upstream`
 
 * **役割**: ブラウザ→中継先方向の転送。`client_ws.receive()` を繰り返し、`type` が `"websocket.disconnect"` なら終了、`text` があればそれを、なければ `bytes` を中継先へ `send` する。
-* 根拠: [メソッド定義] (行番号: 448〜462 / 抜粋: "async def _client_to_upstream(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 455〜469 / 抜粋: "async def _client_to_upstream(self, client_ws: WebSocket, upstream) -> None:")
 
 * **引数/リクエスト**: `client_ws: WebSocket`、`upstream`
-* 根拠: [メソッド定義] (行番号: 448 / 抜粋: "async def _client_to_upstream(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 455 / 抜粋: "async def _client_to_upstream(self, client_ws: WebSocket, upstream) -> None:")
 
 * **戻り値/レスポンス**: `None`
 * 根拠: [return文] (行番号: 271, 280 / 抜粋: "return")
@@ -433,10 +433,10 @@
 ### `DashboardProxyService._upstream_to_client`
 
 * **役割**: 中継先→ブラウザ方向の転送。`async for` で受け取ったメッセージが `str` なら `send_text`、それ以外は `send_bytes` でブラウザへ送る。
-* 根拠: [メソッド定義] (行番号: 464〜472 / 抜粋: "async def _upstream_to_client(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 471〜479 / 抜粋: "async def _upstream_to_client(self, client_ws: WebSocket, upstream) -> None:")
 
 * **引数/リクエスト**: `client_ws: WebSocket`、`upstream`
-* 根拠: [メソッド定義] (行番号: 464 / 抜粋: "async def _upstream_to_client(self, client_ws: WebSocket, upstream) -> None:")
+* 根拠: [メソッド定義] (行番号: 471 / 抜粋: "async def _upstream_to_client(self, client_ws: WebSocket, upstream) -> None:")
 
 * **戻り値/レスポンス**: `None`
 * 根拠: [return文] (行番号: 290 / 抜粋: "return")
@@ -497,7 +497,7 @@ flowchart TD
     CloseOnly --> End([End])
     Connect -- Yes --> Accept["client_ws.accept(subprotocol=upstream.subprotocol)"]
     Accept --> Pump["_pump_until_either_side_closes()"]
-    Pump --> Finally["upstream.close() → client_ws.close()<br/>RuntimeError は握りつぶす"]
+    Pump --> Finally["upstream.close() → client_ws.close()<br/>RuntimeError / WebSocketDisconnect は握りつぶす"]
     Finally --> End
 ```
 

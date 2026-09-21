@@ -27,6 +27,7 @@ import pytest
 import websockets
 from fastapi import FastAPI
 from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -276,6 +277,49 @@ class TestResponsePassthrough:
         assert "BaseHTTP" not in res.headers.get("server", "")
         assert len(res.headers.get_list("date")) <= 1
         assert len(res.headers.get_list("server")) <= 1
+
+
+class TestWebSocketShutdownIsQuiet:
+    """切断時の後始末で例外を漏らさないこと。
+
+    スマートフォンでは「タブを閉じる」「別アプリへ切り替える」「復帰時に
+    自動再読込する」たびに切断が起きる。ここで例外を拾い漏らすと、そのたびに
+    サーバーログへトレースバックが出る(実機相当の疎通確認で再現した)。
+    """
+
+    def _service_with_closed_client(self, close_exception):
+        from unittest.mock import AsyncMock, MagicMock
+
+        service = DashboardProxyService()
+        client_ws = MagicMock()
+        client_ws.accept = AsyncMock()
+        client_ws.close = AsyncMock(side_effect=close_exception)
+        client_ws.headers.items.return_value = []
+        client_ws.client = None
+        client_ws.url.scheme = "ws"
+        client_ws.scope = {"query_string": b"", "subprotocols": []}
+        return service, client_ws
+
+    @pytest.mark.parametrize("close_exception", [
+        RuntimeError("Cannot call 'send' once a close message has been sent."),
+        WebSocketDisconnect(code=1006),
+    ])
+    def test_close_failures_after_disconnect_are_swallowed(self, close_exception, monkeypatch):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        service, client_ws = self._service_with_closed_client(close_exception)
+        upstream = AsyncMock()
+        upstream.subprotocol = None
+
+        async def _run():
+            with patch.object(websockets, "connect", AsyncMock(return_value=upstream)), \
+                 patch.object(service, "_pump_until_either_side_closes", AsyncMock()):
+                await service.forward_websocket(client_ws, f"{config.DASHBOARD_BASE_PATH}/_stcore/stream")
+
+        # 例外が送出されなければ成功(送出されるとそのままサーバーログに出る)
+        asyncio.run(_run())
+        upstream.close.assert_awaited()
 
 
 class TestMobileHomeScreenAssets:
