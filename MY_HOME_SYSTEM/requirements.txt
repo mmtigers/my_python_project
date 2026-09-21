@@ -186,7 +186,7 @@ python-multipart==0.0.32
     # via
     #   -r requirements.in
     #   streamlit
-pytz==2025.2
+pytz==2026.3.post1
     # via
     #   -r requirements.in
     #   pandas
