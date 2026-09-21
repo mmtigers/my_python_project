@@ -11,6 +11,7 @@ monitors/network_logger.py の回帰テスト(Issue #190)。
    init_csv()が「ファイルが存在するが空」のケースでもヘッダーを再作成する
    よう修正した。
 """
+import asyncio
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock
@@ -143,14 +144,6 @@ class TestInitCsvSurvivesLogrotateCopytruncate:
 # 判定を取り違えても誰も気づかないまま「カメラは正常」と記録され続けるため、
 # 状態の出し分けを固定しておく(監査 AUDIT-029)。
 # ---------------------------------------------------------------------------
-import asyncio  # noqa: E402
-from unittest.mock import AsyncMock, MagicMock  # noqa: E402
-
-import pytest  # noqa: E402
-
-from monitors import network_logger  # noqa: E402
-
-
 def _fake_ping_process(returncode, stdout=b""):
     proc = MagicMock()
     proc.returncode = returncode
@@ -178,7 +171,7 @@ class TestPingHost:
         monkeypatch.setattr(
             network_logger.asyncio,
             "create_subprocess_exec",
-            AsyncMock(return_value=_fake_ping_process(0, "pong (形式が変わった)".encode("utf-8"))),
+            AsyncMock(return_value=_fake_ping_process(0, "pong (形式が変わった)".encode())),
         )
 
         result = await network_logger.ping_host("192.168.1.10")

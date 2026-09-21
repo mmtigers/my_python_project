@@ -7,6 +7,7 @@ VideoBuilder._build_concat の `except Exception: return False` が
 サーバーログから追跡できなかった不具合。
 """
 import datetime
+import json
 import os
 import subprocess
 import sys
@@ -14,6 +15,9 @@ import textwrap
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
+from freezegun import freeze_time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -323,9 +327,6 @@ class TestSplitAndSendCleansUpPartFiles:
 # でした」と同じ見た目になる。とくにエスケープと開始時刻の推定は、壊れても
 # 例外にならず“それらしい”出力が出てしまうため、値を固定しておく。
 # ---------------------------------------------------------------------------
-import json  # noqa: E402
-
-import pytest  # noqa: E402
 
 
 class TestFfmpegEscaping:
@@ -448,26 +449,28 @@ class TestGetVideoStartDt:
 
     def test_falls_back_to_yyyymmdd_hhmmss_in_filename(self):
         dt = stg.get_video_start_dt("/mnt/nas/20260830_061530.mp4", {})
-        assert dt == datetime.datetime(2026, 8, 30, 6, 15, 30)
+        assert dt == datetime.datetime.fromisoformat("2026-08-30T06:15:30")
 
     def test_falls_back_to_date_in_filename(self):
         dt = stg.get_video_start_dt("/mnt/nas/2026-08-30_summary.mp4", {})
-        assert dt == datetime.datetime(2026, 8, 30, 0, 0, 0)
+        assert dt == datetime.datetime.fromisoformat("2026-08-30T00:00:00")
 
+    @freeze_time("2026-08-30 12:00:00")
     def test_falls_back_to_today_midnight(self):
+        # Issue #658: 実時刻に任せず固定する(日付をまたいだ瞬間に結果が変わるため)
         dt = stg.get_video_start_dt("/mnt/nas/no_timestamp.mp4", {})
-        assert dt.date() == datetime.date.today()
-        assert (dt.hour, dt.minute, dt.second) == (0, 0, 0)
+        assert dt == datetime.datetime.fromisoformat("2026-08-30T00:00:00")
 
     def test_broken_metadata_falls_through_to_filename(self):
         info = {"format": {"tags": {"creation_time": "まったく日付ではない"}}}
         dt = stg.get_video_start_dt("/mnt/nas/20260830_061530.mp4", info)
-        assert dt == datetime.datetime(2026, 8, 30, 6, 15, 30)
+        assert dt == datetime.datetime.fromisoformat("2026-08-30T06:15:30")
 
+    @freeze_time("2026-08-30 12:00:00")
     def test_impossible_date_in_filename_falls_through(self):
         # 13月32日のような値は datetime が受け付けないので次の手段へ倒す
         dt = stg.get_video_start_dt("/mnt/nas/20261332_996060.mp4", {})
-        assert dt.date() == datetime.date.today()
+        assert dt == datetime.datetime.fromisoformat("2026-08-30T00:00:00")
 
 
 class TestSetupDirectories:
