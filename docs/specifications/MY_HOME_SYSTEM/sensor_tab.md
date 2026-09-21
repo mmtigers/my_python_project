@@ -9,17 +9,18 @@
 
 ## 関連ドキュメント
 
-* [analysis_service.md](./analysis_service.md) - `services.analysis_service`の実体。`load_yearly_temperature_stats`を提供
+* [analysis_service.md](./analysis_service.md) - `services.analysis_service`の実体。`load_yearly_temperature_stats`を提供。**（スマホ対応で変更）** 本ファイルは直接呼ばず、[dashboard_common.md](./dashboard_common.md)のキャッシュ付きラッパー`load_yearly_temperature_stats_cached`経由で呼ぶ
+* [dashboard_common.md](./dashboard_common.md) - **（スマホ対応で追加）** キャッシュ付きラッパー、グラフ描画(`render_chart`)・表描画(`render_table`)・グラフの間引き(`downsample_for_chart`)を提供する共通モジュール
 * [dashboard.md](./dashboard.md) - 呼び出し元。`views.dashboard.sensor_tab`をインポートし、電力・気温詳細・高砂実家の3タブとして`render_electricity`, `render_temperature`, `render_takasago`を呼び出す
 
 ## 2. ファイルの概要
 
 * Streamlitダッシュボードの「電力・環境」「気温詳細」「高砂実家」タブを描画するモジュール。3つの公開関数`render_electricity`, `render_temperature`, `render_takasago`で構成される。
-* 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):`, `def render_temperature(df_sensor: pd.DataFrame, now: datetime):`, `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 16, 64, 114 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
+* 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):`, `def render_temperature(df_sensor: pd.DataFrame, now: datetime):`, `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 16, 67, 119 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
 * `render_electricity`は、渡された`df_sensor`から「Nature Remo E Lite」デバイスの消費電力を今日・昨日で重ねた折れ線グラフ、および「Plug」を含むデバイスタイプの本日の個別家電電力を表示する。
 * 根拠: `df_sensor["device_type"] == DEVICE_TYPE_NATURE_REMO_E_LITE` (行番号: 30 / 抜粋: "(df_sensor[\"device_type\"] == DEVICE_TYPE_NATURE_REMO_E_LITE) &"), `df_sensor["device_type"].str.contains(DEVICE_TYPE_KEYWORD_PLUG, na=False)` (行番号: 54 / 抜粋: "(df_sensor[\"device_type\"].str.contains(DEVICE_TYPE_KEYWORD_PLUG, na=False)) &")（Issue #451でリテラル文字列からモジュールレベル定数へ変更、値は不変）
-* `render_temperature`は、「Meter」を含むデバイスタイプの本日の室温・湿度推移を折れ線グラフで表示し、加えて`analysis_service.load_yearly_temperature_stats`から取得した年間の室内外最高/最低気温推移を表示する。
-* 根拠: `df_sensor["device_type"].str.contains(DEVICE_TYPE_KEYWORD_METER, na=False)` (行番号: 74 / 抜粋: "(df_sensor[\"device_type\"].str.contains(DEVICE_TYPE_KEYWORD_METER, na=False)) &"), `df_yearly = analysis_service.load_yearly_temperature_stats(now.year)` (行番号: 97 / 抜粋: "df_yearly = analysis_service.load_yearly_temperature_stats(now.year)")
+* `render_temperature`は、「Meter」を含むデバイスタイプの本日の室温・湿度推移を折れ線グラフで表示し、加えて`view_common.load_yearly_temperature_stats_cached`（**スマホ対応で変更**: 以前は`analysis_service.load_yearly_temperature_stats`を直接呼んでいた。折りたたまれたセクションの中でも毎回この年間集計SQLが走っていた）から取得した年間の室内外最高/最低気温推移を表示する。
+* 根拠: `df_sensor["device_type"].str.contains(DEVICE_TYPE_KEYWORD_METER, na=False)` (行番号: 74 / 抜粋: "(df_sensor[\"device_type\"].str.contains(DEVICE_TYPE_KEYWORD_METER, na=False)) &"), `df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)` (行番号: 100 / 抜粋: "df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)")
 * `render_takasago`は、`df_sensor`のうち`location`が「高砂」であるレコードを最大50件、開閉・接触状態とともに表形式表示する。
 * 根拠: `df_sensor[df_sensor["location"] == "高砂"][["timestamp", "friendly_name", "contact_state"]].head(50)` (行番号: 111 / 抜粋: "df_sensor[df_sensor[\"location\"] == \"高砂\"][[\"timestamp\", \"friendly_name\", \"contact_state\"]].head(50)")
 
@@ -34,13 +35,13 @@
 | `plotly.express` | 外部ライブラリ | 個別家電・室温・湿度の折れ線グラフ生成 | `import plotly.express as px` (行番号: 4 / 抜粋: "import plotly.express as px") |
 | `plotly.graph_objects` | 外部ライブラリ | 消費電力（今日vs昨日）・年間気温推移のグラフ生成（複数トレースの手動構築） | `import plotly.graph_objects as go` (行番号: 5 / 抜粋: "import plotly.graph_objects as go") |
 | `datetime`, `timedelta` | 標準ライブラリ | `datetime`は`render_electricity`/`render_temperature`の`now`引数型注釈、`timedelta`は日付範囲計算に使用 | `from datetime import datetime, timedelta` (行番号: 6 / 抜粋: "from datetime import datetime, timedelta") |
-| `analysis_service` | 内部モジュール | 年間気温統計データの取得 | `from services import analysis_service` (行番号: 7 / 抜粋: "from services import analysis_service") |
+| `views.dashboard.common` (`view_common`) | 内部モジュール | **（スマホ対応で変更）** 年間気温統計の**キャッシュ付き**取得、グラフ描画(`render_chart`)、表描画(`render_table`)、グラフの間引き(`downsample_for_chart`) | `from . import common as view_common` (行番号: 7 / 抜粋: "from . import common as view_common") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `analysis_service.load_yearly_temperature_stats(now.year)` | `services.analysis_service`の実装が提供されておらず、年間気温統計データの取得元・生成ロジック（`out_max`, `out_min`, `in_max`, `in_min`, `date`列以外の内容含む）が不明。 | `df_yearly = analysis_service.load_yearly_temperature_stats(now.year)` (行番号: 89 / 抜粋: "df_yearly = analysis_service.load_yearly_temperature_stats(now.year)") |
+| `view_common.load_yearly_temperature_stats_cached(now.year)` | `services.analysis_service`の実装が提供されておらず、年間気温統計データの取得元・生成ロジック（`out_max`, `out_min`, `in_max`, `in_min`, `date`列以外の内容含む）が不明。 | `df_yearly = analysis_service.load_yearly_temperature_stats(now.year)` (行番号: 100 / 抜粋: "df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -58,8 +59,8 @@
 * 根拠: `if df_sensor.empty:\n        st.info("データがありません")\n        return` (行番号: 18〜20 / 抜粋: "if df_sensor.empty:")
 
 
-* **副作用**: `st.columns`, `st.subheader`, `st.plotly_chart`, `st.info`によるStreamlit画面への描画。外部データ取得は行わず、渡された`df_sensor`の日時フィルタ・グラフ生成のみを行う。
-* 根拠: `st.plotly_chart(fig, width="stretch")` (行番号: 39 / 抜粋: "st.plotly_chart(fig, width=\"stretch\")")
+* **副作用**: `st.columns`, `st.subheader`, `st.info`、`view_common.render_chart`（内部で`st.plotly_chart`。モードバー非表示・ドラッグ無効・高さ280px）によるStreamlit画面への描画。外部データ取得は行わず、渡された`df_sensor`の日時フィルタ・間引き・グラフ生成のみを行う。**（スマホ対応で追加）** グラフに渡す点は`view_common.downsample_for_chart`で系列あたり500点までに間引く。
+* 根拠: `view_common.render_chart(fig)` (行番号: 51 / 抜粋: "view_common.render_chart(fig)"), `df_today = view_common.downsample_for_chart(df_today)` (行番号: 45 / 抜粋: "df_today = view_common.downsample_for_chart(df_today)")
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
@@ -69,20 +70,20 @@
 
 ### `render_temperature`
 
-* **役割**: 本日の室温・湿度推移（「Meter」を含むデバイスタイプ）を2カラムで表示し、加えて年間の室内外気温統計（`analysis_service`経由）を折れ線グラフで表示する。
-* 根拠: `def render_temperature(df_sensor: pd.DataFrame, now: datetime):` (行番号: 64〜112 / 抜粋: "def render_temperature(df_sensor: pd.DataFrame, now: datetime):")
+* **役割**: 本日の室温・湿度推移（「Meter」を含むデバイスタイプ）を2カラムで表示し、加えて年間の室内外気温統計（`view_common`のキャッシュ付きラッパー経由）を折れ線グラフで表示する。
+* 根拠: `def render_temperature(df_sensor: pd.DataFrame, now: datetime):` (行番号: 67〜117 / 抜粋: "def render_temperature(df_sensor: pd.DataFrame, now: datetime):")
 
 
 * **引数/リクエスト**: `df_sensor` (型: `pd.DataFrame`。`device_type`, `timestamp`, `temperature_celsius`, `humidity_percent`, `friendly_name`列を含むセンサーデータ)、`now` (型: `datetime`。基準時刻・年間データ取得の対象年)
-* 根拠: `def render_temperature(df_sensor: pd.DataFrame, now: datetime):` (行番号: 64 / 抜粋: "def render_temperature(df_sensor: pd.DataFrame, now: datetime):")
+* 根拠: `def render_temperature(df_sensor: pd.DataFrame, now: datetime):` (行番号: 67 / 抜粋: "def render_temperature(df_sensor: pd.DataFrame, now: datetime):")
 
 
 * **戻り値/レスポンス**: なし（`df_sensor`が空、または`device_type`列が存在しない場合は`st.info`表示後に早期`return`）
 * 根拠: `if df_sensor.empty or "device_type" not in df_sensor.columns:\n        st.info("データがありません")\n        return` (行番号: 66〜68 / 抜粋: "if df_sensor.empty or \"device_type\" not in df_sensor.columns:")
 
 
-* **副作用**: `analysis_service.load_yearly_temperature_stats(now.year)`経由の外部データ取得。`st.columns`, `st.subheader`, `st.plotly_chart`, `st.markdown`, `st.info`によるUI描画。
-* 根拠: `df_yearly = analysis_service.load_yearly_temperature_stats(now.year)` (行番号: 89 / 抜粋: "df_yearly = analysis_service.load_yearly_temperature_stats(now.year)")
+* **副作用**: `view_common.load_yearly_temperature_stats_cached(now.year)`経由のデータ取得（TTL 60秒のキャッシュ越し）。`st.columns`, `st.subheader`, `st.markdown`, `st.info`、`view_common.render_chart`によるUI描画。
+* 根拠: `df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)` (行番号: 100 / 抜粋: "df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)")
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない。年間データが空の場合は`st.info`表示のみ）
@@ -93,23 +94,23 @@
 ### `render_takasago`
 
 * **役割**: `df_sensor`のうち`location`が「高砂」（実家）であるレコードを最大50件、時刻・デバイス名・接触状態とともに表形式表示する。
-* 根拠: `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 114〜121 / 抜粋: "def render_takasago(df_sensor: pd.DataFrame):")
+* 根拠: `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 119〜127 / 抜粋: "def render_takasago(df_sensor: pd.DataFrame):")
 
 
 * **引数/リクエスト**: `df_sensor` (型: `pd.DataFrame`。`location`, `timestamp`, `friendly_name`, `contact_state`列を含むセンサーデータ)
-* 根拠: `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 114 / 抜粋: "def render_takasago(df_sensor: pd.DataFrame):")
+* 根拠: `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 119 / 抜粋: "def render_takasago(df_sensor: pd.DataFrame):")
 
 
 * **戻り値/レスポンス**: なし（`df_sensor`が空の場合は何も描画しない）
 * 根拠: `if not df_sensor.empty:` (行番号: 108 / 抜粋: "if not df_sensor.empty:")
 
 
-* **副作用**: `st.subheader`, `st.dataframe`によるStreamlit画面への描画。
-* 根拠: `st.dataframe(\n            df_sensor[df_sensor["location"] == "高砂"][...]head(50),\n            width="stretch",\n        )` (行番号: 110〜113 / 抜粋: "st.dataframe(")
+* **副作用**: `st.subheader`、`view_common.render_table`（内部で`st.dataframe`）によるStreamlit画面への描画。**（スマホ対応で変更）** 列は「時刻 / センサー / 状態」の表示名に絞り、時刻は「09/21 03:04 (3分前)」の相対表記併記にする（見守り用途では「どれくらい前か」を一目で知りたいため）。
+* 根拠: `view_common.render_table(` (行番号: 118 / 抜粋: "view_common.render_table("), `relative_time=True,` (行番号: 121 / 抜粋: "relative_time=True,")
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `def render_takasago(df_sensor: pd.DataFrame):` 全体 (行番号: 114〜121 / 抜粋: "def render_takasago(df_sensor: pd.DataFrame):")
+* 根拠: `def render_takasago(df_sensor: pd.DataFrame):` 全体 (行番号: 119〜127 / 抜粋: "def render_takasago(df_sensor: pd.DataFrame):")
 
 
 
@@ -139,7 +140,7 @@ flowchart TD
         RT2 -- Yes --> RT3["info表示 + return"]
         RT2 -- No --> RT4["Meterデータを本日分抽出"]
         RT4 --> RT5["col1: 室温グラフ / col2: 湿度グラフ"]
-        RT5 --> RT6["外部: analysis_service.load_yearly_temperature_stats(now.year)"]
+        RT5 --> RT6["外部: view_common.load_yearly_temperature_stats_cached(now.year)"]
         RT6 --> RT7{"df_yearlyが空でないか"}
         RT7 -- Yes --> RT8["各列(out_max等)の有無を確認しgo.Figureへトレース追加"]
         RT7 -- No --> RT9["info表示"]
@@ -173,7 +174,7 @@ graph TD
     end
 
     subgraph Project_Internal
-        AnalysisService["services.analysis_service"]
+        AnalysisService["services.analysis_service (view_common のキャッシュ経由)"]
     end
 
     SensorTabPy --> Streamlit
@@ -190,7 +191,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `services/analysis_service.py` | `load_yearly_temperature_stats`が返す年間気温統計データの正確な生成ロジック・スキーマを把握するため。 | `df_yearly = analysis_service.load_yearly_temperature_stats(now.year)` (行番号: 89 / 抜粋: "df_yearly = analysis_service.load_yearly_temperature_stats(now.year)") |
+| 高 | `services/analysis_service.py` | `load_yearly_temperature_stats`が返す年間気温統計データの正確な生成ロジック・スキーマを把握するため。 | `df_yearly = analysis_service.load_yearly_temperature_stats(now.year)` (行番号: 100 / 抜粋: "df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)") |
 | 中 | `dashboard.py` | 各関数に渡される`df_sensor`, `now`引数の生成元・スキーマ（`device_type`の実際の値一覧等）を確認するため（既に`dashboard.md`で一部解析済み）。 | `def render_electricity(df_sensor: pd.DataFrame, now: datetime):` (行番号: 16 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):") |
 
 ## 8. 保守上の注意点
@@ -203,8 +204,9 @@ graph TD
 * 根拠: `if df_sensor.empty or "device_type" not in df_sensor.columns:` (行番号: 66 / 抜粋: "if df_sensor.empty or \"device_type\" not in df_sensor.columns:"), `df_sensor[df_sensor["location"] == "高砂"]` （列存在チェックなし） (行番号: 119 / 抜粋: "df_sensor[df_sensor[\"location\"] == \"高砂\"]")
 
 
-* **エラーハンドリングの欠如**: 3関数のいずれにも`try/except`による例外捕捉がなく、`analysis_service.load_yearly_temperature_stats`が例外を送出した場合、タブ全体の描画が中断する可能性がある。
-* 根拠: `def render_temperature(df_sensor: pd.DataFrame, now: datetime):` 全体 (行番号: 64〜112 / 抜粋: "def render_temperature(df_sensor: pd.DataFrame, now: datetime):")
+* **エラーハンドリングの欠如**: 3関数のいずれにも`try/except`による例外捕捉がなく、年間気温統計の取得が例外を送出した場合、タブ全体の描画が中断する可能性がある（`dashboard.py`側の`safe_section`がセクション単位で隔離する）。
+* **グラフの間引きはスパイクを落としうる**: `downsample_for_chart`は等間隔の間引き（平均リサンプルではない）なので、点の間に挟まった瞬間的なスパイクはグラフから消えうる。しきい値判定（炊飯器の500W等）はグラフ用ではなく生データ側で行うこと。
+* 根拠: `def render_temperature(df_sensor: pd.DataFrame, now: datetime):` 全体 (行番号: 67〜117 / 抜粋: "def render_temperature(df_sensor: pd.DataFrame, now: datetime):")
 
 
 ## 9. 不明事項一覧

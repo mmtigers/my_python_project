@@ -7,22 +7,24 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+> **（スマホ対応で大幅に変更）** 本ファイルが持っていた各カードの判定ロジック（実家の動き・在宅・炊飯器・駐輪場・電車・サーバー・NAS）とカードHTMLの組み立ては、`services/home_status_service.py` へ移動した。Streamlit を介さない軽量ページ `/dashboard/m` が同じカードを出すためで、判定を2箇所に持たないようにしたもの。以前の判定ロジックの解析内容は [home_status_service.md](./home_status_service.md) を参照。
+
 ## 関連ドキュメント
 
-* [train_service.md](./train_service.md) - `services.train_service`の実体。`get_jr_traffic_status`を提供
-* [analysis_service.md](./analysis_service.md) - `services.analysis_service`の実体。`get_memory_usage`, `calculate_monthly_cost_cumulative`を提供
-* [dashboard_common.md](./dashboard_common.md) - `views.dashboard.common`の実体（相対インポート`.common`）。**（スマホ対応で変更）** `StatusCard`（NamedTuple）と`render_status_grid`を提供する（以前は`render_status_card_html`を直接使っていた）
-* [dashboard.md](./dashboard.md) - 呼び出し元。**（スマホ対応で変更）** `views.dashboard.summary`をインポートし、「🏠 ホーム」タブの中で`summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)`を呼び出す（以前は全タブの上に常時表示されていた）
+* [home_status_service.md](./home_status_service.md) - **（スマホ対応で追加）** カードの判定ロジック・HTML組み立て・CSSの実体。本ファイルと `routers/dashboard_router.py`（軽量ページ）の両方がここを呼ぶ
+* [dashboard.md](./dashboard.md) - 呼び出し元。「🏠 ホーム」タブで `summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)` を呼ぶ
+* [dashboard_common.md](./dashboard_common.md) - キャッシュ付きローダ（`load_jr_traffic_status_cached` / `get_memory_usage_cached` / `get_monthly_cost_cached`）とグリッド描画（`render_status_grid`）の提供元
 
 ## 2. ファイルの概要
 
-* Streamlitダッシュボードのトップ画面に表示される「サマリー」部分（9個のステータスカード）を描画するモジュール。各ステータスの判定ロジック（8個の`get_*_status`ヘルパー関数）と、それらをカードとして並べる`render_summary`関数で構成される。
-* 根拠: `# === Status Helpers ===` と `# === Render Function ===` の2セクション構成 (行番号: 11, 201 / 抜粋: "# === Status Helpers ===")
-* 高砂（実家）・伊丹（自宅）の在宅/活動状況、車の外出状況、炊飯器の稼働状況、今月の電気代、駐輪場の待機数、JR運行情報、サーバーのメモリ使用率、NASの死活状態の9項目をそれぞれ判定し、3列×3行のカードレイアウトで表示する。
-* **（スマホ対応で変更）** 9枚のカードは `st.columns(3)` を3段重ねるのをやめ、`render_status_grid` に `StatusCard` のリストを渡して一括描画する。列数の決定はCSS Grid（`views/dashboard/common.py` の `.status-grid` の `auto-fit`）に委ねられ、スマホ2列・PC3〜5列に自動で切り替わる。コメントに、以前の3列固定ではスマートフォンで1枚あたり約100pxまで潰れて値が読めなかった旨が記されている。
-* 根拠: `render_status_grid([...])` (行番号: 234〜244 / 抜粋: "render_status_grid([")、変更理由のコメント (行番号: 227〜233 / 抜粋: "    # スマホ対応: 以前は st.columns(3) を3段重ねて9枚を並べていたが、")
-* 各ステータス判定関数は、渡された`DataFrame`が空または必要な列を欠く場合に「データなし」等のデフォルト値を返すガード節を持つ。
-* 根拠: `if df_sensor.empty or "location" not in df_sensor.columns or "contact_state" not in df_sensor.columns:\n        return val, theme` (行番号: 16〜17 / 抜粋: "if df_sensor.empty or \"location\" not in df_sensor.columns")
+* Streamlitダッシュボードの「🏠 ホーム」タブで、ステータスカード9枚を描画する唯一の関数 `render_summary` のみで構成される。
+* 根拠: `def render_summary(` (行番号: 18 / 抜粋: "def render_summary(")
+* 本ファイル自身はカードの内容を判定しない。判定は `home_status_service.build_status_cards` に委譲し、そこへ渡す材料（センサー・車・駐輪場・NASのDataFrameは引数、JR運行情報・メモリ使用率・今月の電気代は `view_common` のキャッシュ付きローダ）を集める役割だけを持つ。
+* 根拠: `cards = home_status_service.build_status_cards(` (行番号: 26 / 抜粋: "cards = home_status_service.build_status_cards(")
+* JR運行情報・メモリ使用率・今月の電気代を素のサービスではなくキャッシュ付きラッパー経由で取るのは、いずれも1回の描画の中で他のタブからも呼ばれうる重い処理（HTTPスクレイピング・集計SQL）であり、素で呼ぶと同じ描画で取り直しになるため。
+* 根拠: `jr_status=view_common.load_jr_traffic_status_cached(),` (行番号: 34 / 抜粋: "jr_status=view_common.load_jr_traffic_status_cached(),")
+* 描画は `view_common.render_status_grid` に渡すだけで、列数の決定はCSS Grid側（`.status-grid` の auto-fit）にある。以前は `st.columns(3)` を3段重ねており、Streamlitの列は画面幅が足りなくても横並びを維持するため、スマートフォンでは1枚あたり約100pxまで潰れて値が読めなかった。
+* 根拠: `view_common.render_status_grid(cards)` (行番号: 44 / 抜粋: "view_common.render_status_grid(cards)")
 
 ## 3. 外部依存関係
 
@@ -30,349 +32,97 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `pandas` | 外部ライブラリ | 各関数の引数型注釈（`pd.DataFrame`, `pd.Series`）およびフィルタ・型変換処理 | `import pandas as pd` (行番号: 2 / 抜粋: "import pandas as pd") |
-| `datetime`, `timedelta` | 標準ライブラリ | 経過時間の計算（`now`との差分）、前日比較のための日時オフセット計算 | `from datetime import datetime, timedelta` (行番号: 4 / 抜粋: "from datetime import datetime, timedelta") |
-| `Tuple`, `Optional`, `Dict` | 標準ライブラリ(`typing`) | `Tuple`, `Optional`は各関数の戻り値・引数型注釈に使用。`Dict`はインポートされているが本ファイル内では使用されていない | `from typing import Tuple, Optional, Dict` (行番号: 5 / 抜粋: "from typing import Tuple, Optional, Dict") |
-| `train_service` | 内部モジュール | JR運行状況の取得 (`get_jr_traffic_status`) | `from services import train_service` (行番号: 7 / 抜粋: "from services import train_service") |
-| `analysis_service` | 内部モジュール | サーバーメモリ使用率・月次電気代累計の取得 | `from services import analysis_service` (行番号: 8 / 抜粋: "from services import analysis_service") |
-| `StatusCard`, `render_status_grid` | 内部モジュール | **（スマホ対応で変更）** `views.dashboard.common`（相対インポート`.common`）から提供される、ステータスカードの値オブジェクトとグリッド描画関数 | `from .common import StatusCard, render_status_grid` (行番号: 8 / 抜粋: "from .common import StatusCard, render_status_grid") |
+| `datetime.datetime` | 標準ライブラリ | `render_summary` の引数 `now` の型注釈 | `from datetime import datetime` (行番号: 9 / 抜粋: "from datetime import datetime") |
+| `pandas` | 外部ライブラリ | 引数の型注釈（`pd.DataFrame` / `pd.Series`） | `import pandas as pd` (行番号: 11 / 抜粋: "import pandas as pd") |
+| `services.home_status_service` | 内部モジュール | カードの組み立て（`build_status_cards`） | `from services import home_status_service` (行番号: 12 / 抜粋: "from services import home_status_service") |
+| `views.dashboard.common` (`view_common`) | 内部モジュール | キャッシュ付きローダとグリッド描画 | `from . import common as view_common` (行番号: 14 / 抜粋: "from . import common as view_common") |
 
-**（スマホ対応で削除）** `import streamlit as st` は、カード描画が `render_status_grid`（`views/dashboard/common.py` 側）に移り本ファイルで `st` を使わなくなったため削除された。
+**（スマホ対応で削除）** `services.analysis_service` と `services.train_service` の直接インポート、および `.common` からの `StatusCard` / `render_status_grid` の名前インポートは、判定ロジックの移動とキャッシュ経由化に伴い不要になった。
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `train_service.get_jr_traffic_status()` | `services.train_service`の実装が提供されておらず、返却される辞書のキー（`宝塚線`, `神戸線`以下の`is_suspended`, `is_delay`, `is_unavailable`）の取得元が不明。 | `jr_status = train_service.get_jr_traffic_status()` (行番号: 87 / 抜粋: "jr_status = train_service.get_jr_traffic_status()") |
-| `analysis_service.get_memory_usage()` | `services.analysis_service`の実装が提供されておらず、メモリ使用率の取得元・実装が不明。 | `mem = analysis_service.get_memory_usage()` (行番号: 101 / 抜粋: "mem = analysis_service.get_memory_usage()") |
-| `analysis_service.calculate_monthly_cost_cumulative()` | 月次電気代累計の計算ロジック（単価・対象データ範囲等）が不明。 | `cost = analysis_service.calculate_monthly_cost_cumulative()` (行番号: 218 / 抜粋: "cost = analysis_service.calculate_monthly_cost_cumulative()") |
-| `render_status_grid()` / `StatusCard` | `views.dashboard.common`の実装が本ファイルには含まれておらず、生成されるHTML構造・列数の決まり方（本ファイル視点では）は不明。 | `StatusCard("👵 高砂 (実家)", taka_val, taka_theme)` (行番号: 235 / 抜粋: "StatusCard(\"👵 高砂 (実家)\", taka_val, taka_theme),") |
+| `home_status_service.build_status_cards` | 各カードの判定内容・並び順の実装は [home_status_service.md](./home_status_service.md) 側にある。 | `cards = home_status_service.build_status_cards(` |
+| `view_common.load_jr_traffic_status_cached` / `get_memory_usage_cached` / `get_monthly_cost_cached` | キャッシュのTTL・クリアの契機は [dashboard_common.md](./dashboard_common.md) 側にある。 | `memory=view_common.get_memory_usage_cached(),` |
+| `view_common.render_status_grid` | グリッドのHTML・CSSの適用は [dashboard_common.md](./dashboard_common.md) と [home_status_service.md](./home_status_service.md) 側にある。 | `view_common.render_status_grid(cards)` |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
-### `get_takasago_status`
-
-* **役割**: 高砂（実家）の`location`に紐づくセンサーで、`contact_state`が`open`または`detected`の最新レコードの経過時間から、実家の活動状況（元気/静か/動きなし）を判定する。
-* 根拠: `def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:` (行番号: 12〜33 / 抜粋: "def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
-
-
-* **引数/リクエスト**: `df_sensor` (型: `pd.DataFrame`。`location`, `contact_state`, `timestamp`列を含む) 、`now` (型: `datetime`。基準時刻)
-* 根拠: `def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:` (行番号: 12 / 抜粋: "def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
-
-
-* **戻り値/レスポンス**: `Tuple[str, str]` (ステータス表示文字列, テーマ名文字列。60分未満: `theme-green`、180分未満: `theme-yellow`、それ以上: `theme-red`、データなし: `theme-gray`)
-* 根拠: `if diff_min < 60:\n            val = "🟢 元気 (1h以内)"\n            theme = "theme-green"` (行番号: 25〜27 / 抜粋: "if diff_min < 60:")
-
-
-* **副作用**: なし（純粋な判定関数。UI描画・外部I/Oは行わない）
-* 根拠: 関数本体全体 (行番号: 12〜33 / 抜粋: "def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
-
-
-* **エラーハンドリング**: なし（`df_sensor.empty`または必要列の欠如を明示的にチェックする早期`return`のみで、例外捕捉は行われていない）
-* 根拠: `if df_sensor.empty or "location" not in df_sensor.columns or "contact_state" not in df_sensor.columns:\n        return val, theme` (行番号: 16〜17 / 抜粋: "if df_sensor.empty or \"location\" not in df_sensor.columns")
-
-
-
-### `get_itami_status`
-
-* **役割**: 伊丹（自宅）に関し、動作検知デバイス（`Motion`を含むまたは`Webhook`）による検知、次いで開閉センサー（`contact_state == "open"`）の順で最新の活動時刻を判定し、活動状況（活動中/静か）を判定する。
-* 根拠: `def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:` (行番号: 35〜83 / 抜粋: "def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:"), `"""伊丹（自宅）のステータス判定（修正版）"""` (行番号: 37 / 抜粋: "\"\"\"伊丹（自宅）のステータス判定（修正版）\"\"\"")
-
-
-* **引数/リクエスト**: `df_sensor` (型: `pd.DataFrame`。`location`, `device_type`, `movement_state`, `contact_state`, `timestamp`列を含む)、`now` (型: `datetime`。基準時刻)
-* 根拠: `def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:` (行番号: 35 / 抜粋: "def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
-
-
-* **戻り値/レスポンス**: `Tuple[str, str]` (動作検知が10分未満: `"🟢 活動中 (今)"`/`theme-green`、60分未満: 分前表示/`theme-green`、それ以上: 時間前表示/`theme-yellow`。動作検知なしの場合、開閉センサーが60分未満で`open`なら`"🟢 活動中"`/`theme-green`、それ以外は初期値`"⚪ データなし"`/`theme-gray`のまま)
-* 根拠: `if diff_m < 10:\n            val = "🟢 活動中 (今)"` (行番号: 65〜66 / 抜粋: "if diff_m < 10:"), `if diff_c < 60:\n                val = f"🟢 活動中 ({int(diff_c)}分前)"` (行番号: 81〜82 / 抜粋: "if diff_c < 60:")
-
-
-* **副作用**: なし（純粋な判定関数）
-* 根拠: 関数本体全体 (行番号: 35〜83 / 抜粋: "def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
-
-
-* **エラーハンドリング**: なし（`required_cols`（`location`, `device_type`, `movement_state`, `contact_state`）の存在チェックによる早期`return`のみ）
-* 根拠: `required_cols = ["location", "device_type", "movement_state", "contact_state"]\n    if df_sensor.empty or not all(col in df_sensor.columns for col in required_cols):\n        return val, theme` (行番号: 40〜42 / 抜粋: "required_cols = [\"location\", \"device_type\", \"movement_state\", \"contact_state\"]")
-
-
-
-### `get_traffic_status`
-
-* **役割**: JR宝塚線・神戸線の運行状況（`train_service.get_jr_traffic_status()`）から、運休・遅延・情報取得不可・平常運転の4段階でステータスを判定する。情報取得不可を平常運転と偽らず区別するための分岐。
-* 根拠: `def get_traffic_status() -> Tuple[str, str]:` (行番号: 85〜100 / 抜粋: "def get_traffic_status() -> Tuple[str, str]:"), `elif line_g.get("is_unavailable") or line_a.get("is_unavailable"):` (行番号: 97 / 抜粋: "elif line_g.get(\"is_unavailable\") or line_a.get(\"is_unavailable\"):")
-
-
-* **引数/リクエスト**: なし
-* 根拠: `def get_traffic_status() -> Tuple[str, str]:` (行番号: 85 / 抜粋: "def get_traffic_status() -> Tuple[str, str]:")
-
-
-* **戻り値/レスポンス**: `Tuple[str, str]` (いずれかの路線が運休中: `"⛔ 運休発生"`/`theme-red`、遅延あり: `"⚠️ 遅延あり"`/`theme-yellow`、いずれかの路線が取得不可(`is_unavailable`): `"⚪ 情報取得不可"`/`theme-gray`、それ以外: `"🟢 平常運転"`/`theme-green`)
-* 根拠: `if line_g.get("is_suspended") or line_a.get("is_suspended"):\n        return "⛔ 運休発生", "theme-red"` (行番号: 93〜94 / 抜粋: "if line_g.get(\"is_suspended\") or line_a.get(\"is_suspended\"):"), `elif line_g.get("is_unavailable") or line_a.get("is_unavailable"):\n        return "⚪ 情報取得不可", "theme-gray"` (行番号: 97〜99 / 抜粋: "return \"⚪ 情報取得不可\", \"theme-gray\"")
-
-
-* **副作用**: `train_service.get_jr_traffic_status()`経由の外部データ取得。
-* 根拠: `jr_status = train_service.get_jr_traffic_status()` (行番号: 87 / 抜粋: "jr_status = train_service.get_jr_traffic_status()")
-
-
-* **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）。**[修正済み・Issue #438]** 以前は`line_g.get("is_suspended")`等が`get`によるキー欠如への耐性がある一方、`line_g["is_delay"]`だけ直接インデックス参照で`KeyError`となりうるという方針の不統一があったが、`is_delay`も`.get()`に統一し、キー欠落時も例外にならないようにした。
-* 根拠: `elif line_g.get("is_delay") or line_a.get("is_delay"):` (行番号: 95 / 抜粋: "elif line_g.get(\"is_delay\") or line_a.get(\"is_delay\"):")
-
-
-
-### `get_server_status`
-
-* **役割**: `analysis_service.get_memory_usage()`から取得したメモリ使用率をパーセンテージ表示し、80%未満か以上かでテーマ色を切り替える。
-* 根拠: `def get_server_status() -> Tuple[str, str]:` (行番号: 102〜106 / 抜粋: "def get_server_status() -> Tuple[str, str]:")
-
-
-* **引数/リクエスト**: なし
-* 根拠: `def get_server_status() -> Tuple[str, str]:` (行番号: 102 / 抜粋: "def get_server_status() -> Tuple[str, str]:")
-
-
-* **戻り値/レスポンス**: `Tuple[str, str]` (`mem`が真値の場合: `"💻 RAM: {割合}%"`/`theme-green`（80%未満）または`theme-red`（80%以上）。それ以外: `"⚪ 取得失敗"`/`theme-gray`)
-* 根拠: `return f"💻 RAM: {int(mem['percent'])}%", "theme-green" if mem["percent"] < 80 else "theme-red"` (行番号: 103 / 抜粋: "return f\"💻 RAM: {int(mem['percent'])}%\", \"theme-green\" if mem[\"percent\"] < 80 else \"theme-red\"")
-
-
-* **副作用**: `analysis_service.get_memory_usage()`経由の外部データ取得。
-* 根拠: `mem = analysis_service.get_memory_usage()` (行番号: 101 / 抜粋: "mem = analysis_service.get_memory_usage()")
-
-
-* **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `def get_server_status() -> Tuple[str, str]:` 全体 (行番号: 102〜106 / 抜粋: "def get_server_status() -> Tuple[str, str]:")
-
-
-
-### `get_nas_status_simple`
-
-* **役割**: 渡された`nas_data`（`Optional[pd.Series]`）の`status_ping`フィールドから、NASの稼働状態（稼働中/応答なし）を判定する。
-* 根拠: `def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:` (行番号: 108〜116 / 抜粋: "def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:")
-
-
-* **引数/リクエスト**: `nas_data` (型: `Optional[pd.Series]`。`status_ping`フィールドを含むことを期待するNASステータスデータ)
-* 根拠: `def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:` (行番号: 108 / 抜粋: "def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:")
-
-
-* **戻り値/レスポンス**: `Tuple[str, str]` (`nas_data`が`None`: `"⚪ データなし"`/`theme-gray`。`status_ping == "OK"`: `"🗄️ NAS: 稼働中"`/`theme-green`。それ以外: `"⚠️ NAS: 応答なし"`/`theme-red`。`KeyError`発生時: `"⚠️ NAS: データ異常"`/`theme-yellow`)
-* 根拠: `if nas_data["status_ping"] == "OK":\n            return "🗄️ NAS: 稼働中", "theme-green"` (行番号: 109〜110 / 抜粋: "if nas_data[\"status_ping\"] == \"OK\":")
-
-
-* **副作用**: なし（純粋な判定関数）
-* 根拠: 関数本体全体 (行番号: 108〜116 / 抜粋: "def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:")
-
-
-* **エラーハンドリング**: `nas_data["status_ping"]`アクセス時の`KeyError`を`try...except KeyError:`で捕捉し、`"⚠️ NAS: データ異常"`を返す。
-* 根拠: `try:\n        if nas_data["status_ping"] == "OK":\n            ...\n    except KeyError:\n        return "⚠️ NAS: データ異常", "theme-yellow"` (行番号: 108〜114 / 抜粋: "except KeyError:")
-
-
-
-### `get_car_status`
-
-* **役割**: 渡された`df_car`（車の入出庫ログ）の最新レコードの`action`が`"LEAVE"`であれば外出中、それ以外は在宅と判定する。
-* 根拠: `def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:` (行番号: 118〜121 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:")
-
-
-* **引数/リクエスト**: `df_car` (型: `pd.DataFrame`。`action`列を含む車の状態ログ。先頭行が最新であることを前提とする)
-* 根拠: `def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:` (行番号: 118 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:")
-
-
-* **戻り値/レスポンス**: `Tuple[str, str]` (`df_car`が空でなくかつ先頭行の`action`が`"LEAVE"`: `"🚗 外出中"`/`theme-yellow`。それ以外: `"🏠 在宅"`/`theme-green`)
-* 根拠: `if not df_car.empty and df_car.iloc[0]["action"] == "LEAVE":\n        return "🚗 外出中", "theme-yellow"\n    return "🏠 在宅", "theme-green"` (行番号: 117〜119 / 抜粋: "if not df_car.empty and df_car.iloc[0][\"action\"] == \"LEAVE\":")
-
-
-* **副作用**: なし（純粋な判定関数）
-* 根拠: 関数本体全体 (行番号: 118〜121 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:")
-
-
-* **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:` 全体 (行番号: 118〜121 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:")
-
-
-
-### `get_rice_status`
-
-* **役割**: `device_name`に「炊飯器」を含み、本日分の`power_watts`が500W以上のレコードがあれば「ご飯あり」と判定する。
-* 根拠: `def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:` (行番号: 124〜145 / 抜粋: "def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
-
-
-* **引数/リクエスト**: `df_sensor` (型: `pd.DataFrame`。`device_name`, `power_watts`, `timestamp`列を含む)、`now` (型: `datetime`。基準時刻)
-* 根拠: `def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:` (行番号: 124 / 抜粋: "def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
-
-
-* **戻り値/レスポンス**: `Tuple[str, str]` (本日の最大電力が500W以上: `"🍚 ご飯あり"`/`theme-green`。それ以外（初期値）: `"🍚 炊いてない"`/`theme-red`)
-* 根拠: `if max_watts is not None and max_watts >= 500:\n            val = "🍚 ご飯あり"\n            theme = "theme-green"` (行番号: 140〜142 / 抜粋: "if max_watts is not None and max_watts >= 500:")
-
-
-* **副作用**: なし（純粋な判定関数）
-* 根拠: 関数本体全体 (行番号: 124〜145 / 抜粋: "def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
-
-
-* **エラーハンドリング**: なし（`device_name`, `power_watts`列の存在チェックによる早期`return`のみ）
-* 根拠: `if "device_name" not in df_sensor.columns or "power_watts" not in df_sensor.columns:\n        return val, theme` (行番号: 126〜127 / 抜粋: "if \"device_name\" not in df_sensor.columns or \"power_watts\" not in df_sensor.columns:")
-
-
-
-### `get_bicycle_status`
-
-* **役割**: 3つの対象駐輪場エリアの最新待機台数を集計し、前日同時刻帯（±2時間）との差分を矢印記号付きHTMLとして整形、合計待機数に応じたテーマを判定する。
-* 根拠: `def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:` (行番号: 147〜201 / 抜粋: "def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:")
-
-
-* **引数/リクエスト**: `df_bicycle` (型: `pd.DataFrame`。`area_name`, `timestamp`, `waiting_count`列を含む駐輪場データ)
-* 根拠: `def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:` (行番号: 147 / 抜粋: "def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:")
-
-
-* **戻り値/レスポンス**: `Tuple[str, str]` (`df_bicycle`が空、または対象エリアにデータなし: `"⚪ データなし"`/`theme-gray`。データありの場合: 各エリアの現在値・前日比を含むHTML文字列、合計待機数が0: `theme-green`、10未満: `theme-yellow`、それ以上: `theme-red`)
-* 根拠: `theme = "theme-green" if total_wait == 0 else ("theme-yellow" if total_wait < 10 else "theme-red")\n    return val, theme` (行番号: 198〜199 / 抜粋: "theme = \"theme-green\" if total_wait == 0 else (\"theme-yellow\" if total_wait < 10 else \"theme-red\")")
-
-
-* **副作用**: `df_bicycle`の`timestamp`列が`datetime64`型でない場合に`.copy()`とタイムゾーン変換(`tz_convert("Asia/Tokyo")`)を行う（渡された引数自体は変更せず、コピー上で操作する）。
-* 根拠: `if not pd.api.types.is_datetime64_any_dtype(df_bicycle["timestamp"]):\n        df_bicycle = df_bicycle.copy()\n        df_bicycle["timestamp"] = pd.to_datetime(df_bicycle["timestamp"]).dt.tz_convert("Asia/Tokyo")` (行番号: 155〜157 / 抜粋: "if not pd.api.types.is_datetime64_any_dtype(df_bicycle[\"timestamp\"]):")
-
-
-* **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:` 全体 (行番号: 147〜201 / 抜粋: "def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:")
-
-
-
 ### `render_summary`
 
-* **役割**: 上記8個の`get_*_status`関数（およびグローバル関数`analysis_service.calculate_monthly_cost_cumulative`）を呼び出してステータス値・テーマを収集し、9個の`StatusCard`のリストとして`render_status_grid`へ渡して描画する。**（スマホ対応で変更）** 以前は`render_status_card_html`でHTML化したものを`st.columns(3)`×3段に配置していたが、Streamlitの列は画面幅が足りなくても横並びを維持するため、列数の決定をCSS Gridへ移した。末尾にあった`st.markdown("---")`の区切り線も、サマリーがタブの中に入ったため削除された。**（Issue #378で修正）** `render_status_card_html`は`title`/`value`を既定でHTMLエスケープするため、`get_bicycle_status`が意図的に組み立てる`<span>`断片（前日比の色付け）を含む`bicycle_val`のみ`value_is_html=True`を指定してエスケープをスキップしている。他8件のカードは変更なし（値そのものがハードコード文字列/数値のみで構成されており、通常時と結果は変わらない）。
-* 根拠: `def render_summary(...):` および `"""トップ画面サマリー描画"""` (行番号: 205〜212 / 抜粋: "\"\"\"トップ画面サマリー描画\"\"\"")、`value_is_html=True`の使用箇所 (行番号: 240 / 抜粋: "StatusCard(\"🚲 駐輪場待機\", bicycle_val, bicycle_theme, value_is_html=True),")
+* **役割**: ホームタブのステータスカード9枚を描画する。材料を集めて `home_status_service.build_status_cards` に渡し、結果を `view_common.render_status_grid` で描く。
+* 根拠: `def render_summary(` (行番号: 18〜44 / 抜粋: "def render_summary(")
 
 
-* **引数/リクエスト**: `now` (型: `datetime`。基準時刻)、`df_sensor` (型: `pd.DataFrame`。センサーデータ)、`df_car` (型: `pd.DataFrame`。車データ)、`df_bicycle` (型: `pd.DataFrame`。駐輪場データ)、`nas_data` (型: `Optional[pd.Series]`。NASステータス)
-* 根拠: `def render_summary(\n    now: datetime,\n    df_sensor: pd.DataFrame,\n    df_car: pd.DataFrame,\n    df_bicycle: pd.DataFrame,\n    nas_data: Optional[pd.Series],\n):` (行番号: 205〜244 / 抜粋: "def render_summary(")
+* **引数/リクエスト**: `now` (型: `datetime`。JSTのaware datetime)、`df_sensor` (型: `pd.DataFrame`)、`df_car` (型: `pd.DataFrame`)、`df_bicycle` (型: `pd.DataFrame`)、`nas_data` (型: `pd.Series | None`)
+* 根拠: `nas_data: pd.Series | None,` (行番号: 19〜23 / 抜粋: "nas_data: pd.Series | None,")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `def render_summary(...):` (行番号: 205 / 抜粋: "def render_summary(")
+* 根拠: `view_common.render_status_grid(cards)` (行番号: 44 / 抜粋: "view_common.render_status_grid(cards)")
 
 
-* **副作用**:
-    * 各`get_*_status`関数呼び出し、および`analysis_service.calculate_monthly_cost_cumulative()`, `train_service.get_jr_traffic_status()`, `analysis_service.get_memory_usage()`経由の外部データ取得（間接的に、内部で呼び出す関数を通じて）。
-    * **（スマホ対応で変更）** `render_status_grid`への1回の委譲（内部で`st.markdown(..., unsafe_allow_html=True)`が1回実行される）。以前はここで`st.columns(3)`を3回、`markdown`を9回呼び、末尾に`st.markdown("---")`の区切り線を描画していた。
-* 根拠: `render_status_grid([...])` (行番号: 234〜244 / 抜粋: "render_status_grid(["), `cost = analysis_service.calculate_monthly_cost_cumulative()` (行番号: 218 / 抜粋: "cost = analysis_service.calculate_monthly_cost_cumulative()")
+* **副作用**: `view_common` のキャッシュ付きローダ経由でのデータ取得（JR運行情報のHTTPスクレイピング・メモリ使用率・今月の電気代の集計SQL。いずれもTTL 60秒のキャッシュ越し）と、`view_common.render_status_grid` 経由のStreamlit画面への描画。
+* 根拠: `monthly_cost=view_common.get_monthly_cost_cached(),` (行番号: 36 / 抜粋: "monthly_cost=view_common.get_monthly_cost_cached(),")
 
 
-* **エラーハンドリング**: なし（明示的な例外捕捉は行われていない。内部で呼び出す`get_*_status`関数のいずれかが例外を送出した場合、`render_summary`もそのまま呼び出し元に伝播させる）
-* 根拠: `def render_summary(...):` 全体 (行番号: 205〜244 / 抜粋: "def render_summary(")
-
+* **エラーハンドリング**: なし（`try/except` は存在しない）。取得・判定で例外が送出された場合は呼び出し元へ伝播し、`dashboard.py` 側の `view_common.safe_section("サマリー")` がセクション単位で隔離する（Issue #438）。
+* 根拠: `cards = home_status_service.build_status_cards(` (行番号: 26 / 抜粋: "cards = home_status_service.build_status_cards(")
 
 
 ## 5. 処理フロー図
 
 ```mermaid
 flowchart TD
-    Start(["Start: render_summary(now, df_sensor, df_car, df_bicycle, nas_data)"]) --> S1["get_takasago_status(df_sensor, now)"]
-    S1 --> S2["get_itami_status(df_sensor, now)"]
-    S2 --> S3["get_car_status(df_car)"]
-    S3 --> S4["get_rice_status(df_sensor, now)"]
-    S4 --> S5["外部: analysis_service.calculate_monthly_cost_cumulative()"]
-    S5 --> S6["get_bicycle_status(df_bicycle)"]
-    S6 --> S7["get_traffic_status() (内部で train_service.get_jr_traffic_status())"]
-    S7 --> S8["get_server_status() (内部で analysis_service.get_memory_usage())"]
-    S8 --> S9["get_nas_status_simple(nas_data)"]
-    S9 --> Row1["1行目: 高砂・伊丹・車のカード生成/描画"]
-    Row1 --> Row2["2行目: 炊飯器・電気代・駐輪場のカード生成/描画"]
-    Row2 --> Row3["3行目: JR運行情報・サーバー・NASのカード生成/描画"]
-    Row3 --> Divider["区切り線描画"]
-    Divider --> End(["End"])
-
-    subgraph get_itami_status_Flow["get_itami_status() 内部ロジック"]
-        I1["列存在チェック"] --> I2{"動作検知デバイスの最新検知があるか"}
-        I2 -- Yes --> I3["経過時間に応じ活動中/静かを判定"]
-        I2 -- No --> I4{"開閉センサーのopen検知があるか"}
-        I4 -- Yes --> I5["60分未満なら活動中と判定"]
-        I4 -- No --> I6["データなしのまま"]
-    end
-
-    subgraph get_bicycle_status_Flow["get_bicycle_status() 内部ロジック"]
-        B1["対象3エリアをループ"] --> B2{"最新データが存在するか"}
-        B2 -- Yes --> B3["前日同時刻帯(±2h)の近似値と比較し差分HTML生成"]
-        B2 -- No --> B4["'-'表示"]
-        B3 --> B5["合計待機数からテーマ判定"]
-        B4 --> B5
-    end
+    Start(["Start: render_summary(now, df_sensor, df_car, df_bicycle, nas_data)"]) --> Jr["view_common.load_jr_traffic_status_cached()"]
+    Jr --> Mem["view_common.get_memory_usage_cached()"]
+    Mem --> Cost["view_common.get_monthly_cost_cached()"]
+    Cost --> Build["home_status_service.build_status_cards(...) で9枚を組み立て"]
+    Build --> Grid["view_common.render_status_grid(cards)"]
+    Grid --> End(["End"])
 ```
 
 ## 6. 依存関係図
 
 ```mermaid
 graph TD
-    SummaryPy["summary.py"]
+    SummaryPy["views/dashboard/summary.py"]
+    ViewCommon["views/dashboard/common.py"]
+    HomeStatus["services/home_status_service.py"]
+    DashboardPy["dashboard.py"]
+    MobilePage["routers/dashboard_router.py (/dashboard/m)"]
 
-    subgraph External_Libraries
-        Pandas["pandas"]
-    end
-
-    subgraph Python_Standard_Libraries
-        DatetimeTimedelta["datetime.datetime / datetime.timedelta"]
-        Typing["typing (Tuple, Optional, Dict)"]
-    end
-
-    subgraph Project_Internal
-        TrainService["services.train_service"]
-        AnalysisService["services.analysis_service"]
-        DashboardCommon["views.dashboard.common (相対import .common)<br/>StatusCard / render_status_grid"]
-    end
-
-    SummaryPy --> Pandas
-    SummaryPy --> DatetimeTimedelta
-    SummaryPy --> Typing
-    SummaryPy --> TrainService
-    SummaryPy --> AnalysisService
-    SummaryPy --> DashboardCommon
-
-    Dashboard["dashboard.py"] -->|render_summary呼び出し| SummaryPy
+    DashboardPy -->|render_summary| SummaryPy
+    SummaryPy -->|build_status_cards| HomeStatus
+    SummaryPy -->|キャッシュ付きローダ / render_status_grid| ViewCommon
+    ViewCommon -->|StatusCard / CSS の再エクスポート| HomeStatus
+    MobilePage -->|collect_status_cards| HomeStatus
 ```
 
 ## 7. 次のステップ（リバースエンジニアリングの提案）
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `services/analysis_service.py` | `get_memory_usage`, `calculate_monthly_cost_cumulative`の正確な計算ロジック・取得元を把握するため。 | `cost = analysis_service.calculate_monthly_cost_cumulative()` (行番号: 218 / 抜粋: "cost = analysis_service.calculate_monthly_cost_cumulative()") |
-| 高 | `services/train_service.py` | `get_jr_traffic_status()`が返す`is_suspended`, `is_delay`, `is_unavailable`の判定ロジックとデータ取得元を把握するため。 | `jr_status = train_service.get_jr_traffic_status()` (行番号: 87 / 抜粋: "jr_status = train_service.get_jr_traffic_status()") |
-| 中 | `views/dashboard/common.py` | `render_status_grid`が生成するHTML構造・CSSクラス（`.status-grid` / `theme-*`）との対応関係と、スマホ幅で何列になるかを確認するため。 | `StatusCard("👵 高砂 (実家)", taka_val, taka_theme)` (行番号: 235 / 抜粋: "StatusCard(\"👵 高砂 (実家)\", taka_val, taka_theme),") |
+| 高 | `services/home_status_service.py` | 各カードの判定内容そのものがこちらに移ったため。 | `cards = home_status_service.build_status_cards(` (行番号: 26 / 抜粋: "cards = home_status_service.build_status_cards(") |
+| 中 | `views/dashboard/common.py` | キャッシュのTTL・グリッド描画の実装を把握するため。 | `view_common.render_status_grid(cards)` (行番号: 44 / 抜粋: "view_common.render_status_grid(cards)") |
 
 ## 8. 保守上の注意点
 
-* **未使用インポート**: `typing.Dict`がインポートされているが、本ファイル内では使用されていない。
-* 根拠: `from typing import Tuple, Optional, Dict` (行番号: 5 / 抜粋: "from typing import Tuple, Optional, Dict")
+* **判定ロジックを本ファイルへ書き戻さないこと**: 書き戻すと、軽量ページ `/dashboard/m` と本体で同じカードの内容が食い違い、片方だけ直した状態が生まれる。`tests/test_mobile_status_page.py` の `TestOneSourceOfTruth` が、本ファイルに判定（`theme-green` 等の文字列）が戻っていないことを検査する。
+* 根拠: `cards = home_status_service.build_status_cards(` (行番号: 26 / 抜粋: "cards = home_status_service.build_status_cards(")
 
 
-* **キー欠如への耐性が関数間で不統一**: `get_traffic_status`は`line_g.get("is_suspended")`/`line_g.get("is_unavailable")`（`.get`で安全にアクセス）と`line_g["is_delay"]`（直接インデックス、`KeyError`のリスクあり）が混在している。同様に、多くの関数（`get_car_status`, `get_rice_status`等）は列存在チェックを持つが、チェック方法・粒度が関数ごとに異なる。
-* 根拠: `if line_g.get("is_suspended") or line_a.get("is_suspended"):` (行番号: 90 / 抜粋: "if line_g.get(\"is_suspended\") or line_a.get(\"is_suspended\"):"), `elif line_g["is_delay"] or line_a["is_delay"]:` (行番号: 92 / 抜粋: "elif line_g[\"is_delay\"] or line_a[\"is_delay\"]:")
-
-
-* **HTMLインジェクションの潜在リスク（Issue #378で部分対応）**: `get_bicycle_status`が生成する`details`のHTML文字列（`<span style=...>`）は依然としてエスケープなしで組み立てられている（`short_name`は関数内のハードコード辞書、`current_val`/`diff`は`int()`変換済みの数値のみが埋め込まれるため、現状のデータフローでは`area_name`等の外部文字列が直接混入する経路は無い）。Issue #378では`views/dashboard/common.py`の`render_status_card_html`側に`title`/`value`の既定エスケープを追加したが、`render_summary`は`bicycle_val`を`value_is_html=True`で渡しており、この経路自体は引き続きエスケープをスキップする。将来`get_bicycle_status`の`details`構築に外部/DB由来の生文字列を追加する場合は、`render_status_card_html`側の保護に頼らず呼び出し側で個別にエスケープする必要がある。
-* 根拠: `diff_str = f" <span style='color:#d32f2f;'>(🔺{diff})</span>"` (行番号: 185 / 抜粋: "diff_str = f\" <span style='color:#d32f2f;'>(🔺{diff})</span>\"")、`value_is_html=True` (行番号: 240)
-
-
-* **マジックナンバーのハードコード**: 活動判定の閾値（10分、60分、180分）、炊飯器の稼働判定電力（500W）、駐輪場待機数のテーマ切り替え閾値（0, 10）が各関数内に直接埋め込まれている。
-* 根拠: `if diff_min < 60:` (行番号: 25 / 抜粋: "if diff_min < 60:"), `if max_watts is not None and max_watts >= 500:` (行番号: 140 / 抜粋: "if max_watts is not None and max_watts >= 500:")
-
-
-* **`get_nas_status_simple`以外は例外処理を持たない**: 9個の関数のうち`get_nas_status_simple`のみ`try...except KeyError:`を持つが、他8関数（特に直接インデックス参照を行う`get_traffic_status`, `get_car_status`）は例外に対して無防備であり、`render_summary`全体の描画が中断するリスクがある。呼び出し元の`dashboard.py`が`safe_section("サマリー")`で囲むため、失敗しても他のタブ・セクションには波及しない。
-* **（スマホ対応）カードの並び順がそのまま画面の並びになる**: `render_status_grid`に渡すリストの順序が表示順で、列数はCSS側（`.status-grid`のauto-fit）が画面幅から決める。「PCで3列に見える前提」で行ごとの意味づけ（1行目は場所、2行目は生活…）を持たせると、スマホの2列表示では崩れる。
-* 根拠: `render_status_grid([...])` (行番号: 234〜244 / 抜粋: "render_status_grid([")
-* 根拠: `except KeyError:\n        return "⚠️ NAS: データ異常", "theme-yellow"` (行番号: 113〜114 / 抜粋: "except KeyError:")
+* **キャッシュ付きラッパーを素のサービス呼び出しへ戻さないこと**: 画面の見た目は変わらないが、1回の描画でJR運行情報のスクレイピング（timeout 5秒）などが余分に走る。気づけるのは実機のスマートフォンだけになる。`tests/test_dashboard_cache.py` の `TestViewsDoNotBypassTheCache` が固定している。
+* 根拠: `jr_status=view_common.load_jr_traffic_status_cached(),` (行番号: 34 / 抜粋: "jr_status=view_common.load_jr_traffic_status_cached(),")
 
 
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| `train_service.get_jr_traffic_status`, `analysis_service.get_memory_usage`, `calculate_monthly_cost_cumulative`の実装 | 各サービスモジュールの実装が提供されていないため。 | `services/train_service.py`, `services/analysis_service.py` |
-| `render_status_card_html`が生成するHTML/CSS構造の詳細 | 本ファイル単体では、呼び出し先の`views.dashboard.common`の実装内容が確認できないため（`dashboard_common.md`側で別途解析）。 | `views/dashboard/common.py` |
-| `df_sensor`, `df_car`, `df_bicycle`, `nas_data`の生成元・正確なスキーマ | 呼び出し元（`dashboard.py`）でどのように構築されるかが本ファイルからは不明。 | `dashboard.py`, `services/analysis_service.py` |
-
-## 相互参照による補足情報
-
-| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
-| --- | --- | --- |
-| `train_service.get_jr_traffic_status`, `analysis_service.get_memory_usage`, `calculate_monthly_cost_cumulative`の実装 | `MY_HOME_SYSTEM/services/train_service.py`の`get_jr_traffic_status()`(22-70行目)を直接確認した。まず結果辞書を両路線とも`{"status": "⚪ 情報取得不可", "detail": "運行情報を確認できませんでした", "is_delay": False, "is_suspended": False, "is_unavailable": True}`で初期化する(33-36行目。取得不可を「🟢 平常運転」と偽らないためのフェイルセーフ)。JR西日本の運行情報JSON(`JR_WEST_JSON_URL`)を`requests.get(timeout=5)`で取得し(39行目)、`status_code == 200`であれば各路線を一旦`{"status": "🟢 平常運転", "is_unavailable": False, ...}`にリセットした上で(44-45行目)、`data["lines"]`のうち`"G"`(宝塚線)・`"A"`(神戸線)のみを対象に(50-53行目)、情報があれば`status`に`"🔴 "`を付与し`is_delay=True`、`"見合"`または`"運休"`を含む場合は`is_suspended=True`に更新する(55-63行目)。例外発生時は`except Exception`(65-66行目)で捕捉するが、リセット処理を経ていないため結果辞書は初期値の「情報取得不可」/`is_unavailable=True`のまま返る(67-68行目のコメントの通り「平常運転」と偽らない設計)。次に`MY_HOME_SYSTEM/services/analysis_service.py`の`get_memory_usage()`(415-434行目)を直接確認した。`subprocess.run(["free", "-m"], capture_output=True, text=True)`(418行目)の出力2行目をパースし`total_mb, used_mb, available_mb, percent`を返す辞書を生成する(419-431行目)。失敗時は`None`を返す(432-434行目)。さらに同ファイルの`calculate_monthly_cost_cumulative() -> int`(213-248行目)を直接確認した。今月初日以降のデータを`config.SQLITE_TABLE_POWER_USAGE`から取得し(219-226行目)、空であれば旧`device_records`テーブル(`device_type = 'Nature Remo E Lite'`条件、230-235行目)にフォールバックする。タイムスタンプの差分(`time_diff`、1時間以下のみ採用、240-242行目)と電力(W)から`kwh`を計算し(244行目)、`int(df["kwh"].sum() * 31)`という「日数に関わらず一律31倍する」計算式で月間概算コスト(円換算相当の数値)を返すことを確認した(245行目)。 | 直接ソース確認: `MY_HOME_SYSTEM/services/train_service.py:22-70`, `MY_HOME_SYSTEM/services/analysis_service.py:213-248, 415-434` |
-| `render_status_card_html`が生成するHTML/CSS構造の詳細 | `MY_HOME_SYSTEM/views/dashboard/common.py`を直接確認した。`render_status_card_html(title: str, value: str, theme: str) -> str`(50-57行目)は`<div class="status-card {theme}"><div class="status-title">{title}</div><div class="status-value">{value}</div></div>`というHTML文字列を返す。対応するCSSは同ファイル冒頭の`CUSTOM_CSS`変数(4-48行目)に定義されており、`.status-card`(10-20行目、`padding`・`border-radius`・`box-shadow`・flexレイアウト等)、`.status-title`(21-23行目)、`.status-value`(24-26行目)に加え、`theme`引数の値に対応する`.theme-green`/`.theme-yellow`/`.theme-red`/`.theme-blue`/`.theme-gray`(27-31行目、それぞれ背景色・文字色・枠線色を定義)というCSSクラスが実在することを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/views/dashboard/common.py:4-57` |
-| `df_sensor`, `df_car`, `df_bicycle`, `nas_data`の生成元・正確なスキーマ | `MY_HOME_SYSTEM/dashboard.py`59-67行目を直接確認した。`df_sensor = analysis_service.load_sensor_data(limit=10000)`(59行目)、`df_car = analysis_service.load_generic_data(config.SQLITE_TABLE_CAR)`(63行目)、`df_bicycle = analysis_service.load_bicycle_data(limit=3000)`(66行目)、`nas_data = analysis_service.load_nas_status()`(67行目)という呼び出しを確認した。`MY_HOME_SYSTEM/services/analysis_service.py`の実体も直接確認した。`load_sensor_data`(155-209行目)は`device_records`/`config.SQLITE_TABLE_SWITCHBOT_LOGS`/`config.SQLITE_TABLE_POWER_USAGE`の3テーブルを統合する。`load_generic_data(table_name, limit=500)`(150-153行目)は`SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT {limit}`という汎用クエリで、`df_car`のカラム構成は`config.SQLITE_TABLE_CAR`テーブルの実カラムにそのまま依存する。`load_bicycle_data(limit=2000)`(328-341行目)は`config.SQLITE_TABLE_BICYCLE`(既定`"bicycle_parking_records"`)に対して同様の`SELECT *`を実行する。`load_nas_status()`(133-148行目)は`config.SQLITE_TABLE_NAS`(既定`"nas_records"`)の最新1件を`pd.Series`として返す(テーブル不在時は`None`)。さらに`MY_HOME_SYSTEM/init_unified_db.py`の`CREATE TABLE`定義を直接確認したところ、`config.SQLITE_TABLE_CAR`(233-240行目)は`id, action TEXT, rule_name TEXT, timestamp DATETIME, score REAL`、`config.SQLITE_TABLE_BICYCLE`(329-336行目)は`id, area_name TEXT, status_text TEXT, waiting_count INTEGER, timestamp DATETIME NOT NULL`、`config.SQLITE_TABLE_NAS`(357-369行目)は`id, timestamp DATETIME NOT NULL, device_name TEXT, ip_address TEXT, status_ping TEXT, status_mount TEXT, total_gb INTEGER, used_gb INTEGER, free_gb INTEGER, percent REAL`という具体的なカラム構成であることが判明した。 | 直接ソース確認: `MY_HOME_SYSTEM/dashboard.py:59-67`, `MY_HOME_SYSTEM/services/analysis_service.py:133-148, 150-153, 155-209, 328-341`, `MY_HOME_SYSTEM/init_unified_db.py:233-240, 329-336, 357-369` |
+| 各カードの判定内容・しきい値 | 本ファイルからは `build_status_cards` の呼び出ししか見えないため。 | `services/home_status_service.py` |
+| キャッシュのTTLとクリアの契機 | `view_common` 側にあるため。 | `views/dashboard/common.py` |
 
 ## 10. 自己検証結果
 

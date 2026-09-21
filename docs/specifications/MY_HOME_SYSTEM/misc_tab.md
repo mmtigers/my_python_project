@@ -9,7 +9,8 @@
 
 ## 関連ドキュメント
 
-* [train_service.md](./train_service.md) - `services.train_service`の実体。`get_jr_traffic_status`, `get_route_info`を提供
+* [train_service.md](./train_service.md) - `services.train_service`の実体。`get_jr_traffic_status`, `get_route_info`を提供。**（スマホ対応で変更）** 本ファイルは直接呼ばず、[dashboard_common.md](./dashboard_common.md)のキャッシュ付きラッパー（`load_jr_traffic_status_cached` / `load_route_info_cached`）経由で呼ぶようになった
+* [dashboard_common.md](./dashboard_common.md) - **（スマホ対応で追加）** 外部取得のキャッシュ付きラッパー、グラフ描画（`render_chart`）・表描画（`render_table`）・折りたたみ（`lazy_section`）・グラフの間引き（`downsample_for_chart`）を提供する共通モジュール
 * [config.md](./config.md) - `config.ASSETS_DIR`を提供
 * [dashboard_common.md](./dashboard_common.md) - `views.dashboard.common`の実体（相対インポート`.common`）。`render_status_card_html`を提供するが本ファイル内では未使用
 * [dashboard.md](./dashboard.md) - 呼び出し元。`views.dashboard.misc_tab`をインポートし、電車遅延・防犯カメラ・駐輪場の3タブとして`render_traffic`, `render_photos`, `render_bicycle`を呼び出す
@@ -17,11 +18,11 @@
 ## 2. ファイルの概要
 
 * Streamlitダッシュボードの「電車遅延」「防犯カメラ」「駐輪場」タブを描画するモジュール。公開関数`render_traffic`, `render_photos`, `render_bicycle`と、内部ヘルパー関数`_render_route_search`で構成される。
-* 根拠: `def render_traffic():`, `def render_photos(df_security_log: pd.DataFrame):`, `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 20, 98, 124 / 抜粋: "def render_traffic():")
-* `render_traffic`は、JR宝塚線・神戸線の運行状況を`train_service.get_jr_traffic_status()`から取得し、遅延中(赤)・情報取得不可(グレー)・平常運転(緑)の3状態に応じて背景色を変えたHTMLカードで表示する。取得不可を平常運転と同じ緑色で表示しないための区別であり、さらに現在時刻に応じて出勤ルート（4〜11時台）または帰宅ルート（それ以外）の経路検索結果を表示する。**（B4で修正）** カード内に埋め込む運行状況の`status`/`detail`文字列は`html.escape()`を通してから埋め込むようになった。
+* 根拠: `def render_traffic():`, `def render_photos(df_security_log: pd.DataFrame):`, `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 20, 98, 131 / 抜粋: "def render_traffic():")
+* `render_traffic`は、JR宝塚線・神戸線の運行状況を`view_common.load_jr_traffic_status_cached()`（**スマホ対応で変更**: 以前は`train_service.get_jr_traffic_status()`を直接呼んでいた。同じ1回の描画でホームタブのサマリーからも呼ばれるため、素で呼ぶとHTTP取得が2回走っていた）から取得し、遅延中(赤)・情報取得不可(グレー)・平常運転(緑)の3状態に応じて背景色を変えたHTMLカードで表示する。取得不可を平常運転と同じ緑色で表示しないための区別であり、さらに現在時刻に応じて出勤ルート（4〜11時台）または帰宅ルート（それ以外）の経路検索結果を表示する。**（B4で修正）** カード内に埋め込む運行状況の`status`/`detail`文字列は`html.escape()`を通してから埋め込むようになった。
 * 根拠: `jr_status = train_service.get_jr_traffic_status()` (行番号: 17 / 抜粋: "jr_status = train_service.get_jr_traffic_status()"), `elif line.get("is_unavailable"):` (行番号: 25 / 抜粋: "elif line.get(\"is_unavailable\"):"), `if COMMUTE_ROUTE_START_HOUR <= current_hour < COMMUTE_ROUTE_END_HOUR:` (行番号: 51 / 抜粋: "if COMMUTE_ROUTE_START_HOUR <= current_hour < COMMUTE_ROUTE_END_HOUR:")（Issue #451でリテラル`4`/`12`からモジュールレベル定数へ変更、値は不変）、エスケープ (行番号: 34〜35 / 抜粋: "{html.escape(line['status'])}", "{html.escape(line['detail'])}")
-* `_render_route_search`は、指定された出発駅・到着駅間のルート情報を`train_service.get_route_info`から取得し、乗換ステップをアイコン（⬇️/🔄）に応じたHTMLに整形して表示する。**（B4で修正）** 乗換ステップの各文字列、および`departure`/`arrival`/`duration`/`cost`/`transfer`の各フィールドは、いずれも`html.escape()`を通してからHTMLに埋め込まれるようになった。
-* 根拠: `data = train_service.get_route_info(from_st, to_st)` (行番号: 57 / 抜粋: "data = train_service.get_route_info(from_st, to_st)")、エスケープ (行番号: 63, 72, 74, 77〜78, 81 / 抜粋: "d_esc = html.escape(d)", "{html.escape(data['departure'])}")
+* `_render_route_search`は、指定された出発駅・到着駅間のルート情報を`view_common.load_route_info_cached`（**スマホ対応で変更**: 以前は`train_service.get_route_info`を直接呼んでいた）から取得し、乗換ステップをアイコン（⬇️/🔄）に応じたHTMLに整形して表示する。**（B4で修正）** 乗換ステップの各文字列、および`departure`/`arrival`/`duration`/`cost`/`transfer`の各フィールドは、いずれも`html.escape()`を通してからHTMLに埋め込まれるようになった。
+* 根拠: `data = view_common.load_route_info_cached(from_st, to_st)` (行番号: 64 / 抜粋: "data = view_common.load_route_info_cached(from_st, to_st)")、エスケープ (行番号: 63, 72, 74, 77〜78, 81 / 抜粋: "d_esc = html.escape(d)", "{html.escape(data['departure'])}")
 * `render_photos`は、`config.ASSETS_DIR`配下の`snapshots`ディレクトリからJPEG画像を新しい順に取得しギャラリー表示（直近4枚+展開エリアで過去分）した上、渡された`df_security_log`（防犯ログ）を表形式で表示する。
 * 根拠: `img_dir = os.path.join(config.ASSETS_DIR, "snapshots")` (行番号: 93 / 抜粋: "img_dir = os.path.join(config.ASSETS_DIR, \"snapshots\")")
 * `render_bicycle`は、渡された`df_bicycle`（駐輪場データ）を特定3エリアに絞り込み、待機数の時系列推移を折れ線グラフで表示した上、各エリアの最新状況を表形式で表示する。
@@ -42,15 +43,15 @@
 | `datetime`, `timedelta` | 標準ライブラリ | 現在時刻取得、出発時刻の20分後計算 | `from datetime import datetime, timedelta` (行番号: 8 / 抜粋: "from datetime import datetime, timedelta") |
 | `pytz` | 外部ライブラリ | タイムゾーン（Asia/Tokyo）の処理 | `import pytz` (行番号: 9 / 抜粋: "import pytz") |
 | `config` | 内部モジュール | 画像保存先ディレクトリ(`config.ASSETS_DIR`)の取得 | `import config` (行番号: 11 / 抜粋: "import config") |
-| `train_service` | 内部モジュール | JR運行状況・経路検索データの取得 | `from services import train_service` (行番号: 12 / 抜粋: "from services import train_service") |
+| `views.dashboard.common` (`view_common`) | 内部モジュール | **（スマホ対応で変更）** JR運行状況・経路検索の**キャッシュ付き**取得、グラフ描画(`render_chart`)、表描画(`render_table`)、折りたたみ(`lazy_section`)、グラフの間引き(`downsample_for_chart`) | `from . import common as view_common` (行番号: 12 / 抜粋: "from . import common as view_common") |
 | `render_status_card_html` | 内部モジュール | `views.dashboard.common`（相対インポート`.common`）からインポートされているが、本ファイル内では使用されていない | `from .common import render_status_card_html` (行番号: 13 / 抜粋: "from .common import render_status_card_html") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `train_service.get_jr_traffic_status()` | `services.train_service`の実装が提供されておらず、返却される辞書のキー（`宝塚線`, `神戸線`以下の`is_delay`, `is_unavailable`, `status`, `detail`）の取得元（スクレイピング/API等）が不明。 | `jr_status = train_service.get_jr_traffic_status()` (行番号: 17 / 抜粋: "jr_status = train_service.get_jr_traffic_status()") |
-| `train_service.get_route_info()` | ルート検索データの取得元・`summary`, `details`, `departure`, `arrival`, `duration`, `cost`, `transfer`, `url`各フィールドの生成ロジックが不明。 | `data = train_service.get_route_info(from_st, to_st)` (行番号: 57 / 抜粋: "data = train_service.get_route_info(from_st, to_st)") |
+| `view_common.load_jr_traffic_status_cached()` | `services.train_service`の実装が提供されておらず、返却される辞書のキー（`宝塚線`, `神戸線`以下の`is_delay`, `is_unavailable`, `status`, `detail`）の取得元（スクレイピング/API等）が不明。 | `jr_status = train_service.get_jr_traffic_status()` (行番号: 22 / 抜粋: "jr_status = view_common.load_jr_traffic_status_cached()") |
+| `view_common.load_route_info_cached()` | ルート検索データの取得元・`summary`, `details`, `departure`, `arrival`, `duration`, `cost`, `transfer`, `url`各フィールドの生成ロジックが不明。 | `data = view_common.load_route_info_cached(from_st, to_st)` (行番号: 64 / 抜粋: "data = view_common.load_route_info_cached(from_st, to_st)") |
 | `config.ASSETS_DIR` | `config`モジュールの実装が提供されておらず、画像アセットのベースディレクトリの実際のパスが不明。 | `img_dir = os.path.join(config.ASSETS_DIR, "snapshots")` (行番号: 93 / 抜粋: "img_dir = os.path.join(config.ASSETS_DIR, \"snapshots\")") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -69,7 +70,7 @@
 * 根拠: `def render_traffic():` (行番号: 20 / 抜粋: "def render_traffic():")
 
 
-* **副作用**: `train_service.get_jr_traffic_status()`経由の外部データ取得。`st.subheader`, `st.columns`, `st.markdown`(HTML埋め込み), `st.caption`によるUI描画。内部で`_render_route_search`を呼び出す。
+* **副作用**: `view_common.load_jr_traffic_status_cached()`経由の外部データ取得（TTL 60秒のキャッシュ越し）。`st.subheader`, `st.columns`, `st.markdown`(HTML埋め込み), `st.caption`によるUI描画。内部で`_render_route_search`を呼び出す。
 * 根拠: `st.markdown(f"""\n            <div style="background-color:{bg_color}; ...` (行番号: 31〜37 / 抜粋: "st.markdown(f\"\"\"")
 
 
@@ -92,8 +93,8 @@
 * 根拠: `def _render_route_search(col, from_st: str, to_st: str, label_icon: str):` (行番号: 61 / 抜粋: "def _render_route_search(col, from_st: str, to_st: str, label_icon: str):")
 
 
-* **副作用**: `train_service.get_route_info()`経由の外部データ取得。`st.markdown`(HTML埋め込み)、`st.link_button`、`st.warning`によるUI描画。
-* 根拠: `data = train_service.get_route_info(from_st, to_st)` (行番号: 57 / 抜粋: "data = train_service.get_route_info(from_st, to_st)")
+* **副作用**: `view_common.load_route_info_cached()`経由の外部データ取得（TTL 60秒のキャッシュ越し）。`st.markdown`(HTML埋め込み)、`st.link_button`、`st.warning`によるUI描画。
+* 根拠: `data = view_common.load_route_info_cached(from_st, to_st)` (行番号: 64 / 抜粋: "data = view_common.load_route_info_cached(from_st, to_st)")
 
 
 * **エラーハンドリング**: `data["summary"]`が`"取得成功"`以外の場合に`st.warning`を表示する分岐のみで、明示的な例外捕捉(`try/except`)は行われていない。
@@ -107,7 +108,7 @@
 * 根拠: `def render_photos(df_security_log: pd.DataFrame):` (行番号: 98〜122 / 抜粋: "def render_photos(df_security_log: pd.DataFrame):")
 
 
-* **引数/リクエスト**: `df_security_log` (型: `pd.DataFrame`。`timestamp`, `friendly_name`列を必須とし、`classification`, `image_path`列を任意で含む防犯ログデータ)
+* **引数/リクエスト**: `df_security_log` (型: `pd.DataFrame`。`timestamp`, `friendly_name`, `classification`列のうち実在するものが表に出る。**（スマホ対応で変更）** `image_path`（NAS上のフルパス）は表から落とした — 画面幅を大きく超えて横スクロールしないと検知時刻すら読めなかったため。画像は上のギャラリーで見る)
 * 根拠: `def render_photos(df_security_log: pd.DataFrame):` (行番号: 98 / 抜粋: "def render_photos(df_security_log: pd.DataFrame):")
 
 
@@ -115,7 +116,7 @@
 * 根拠: `def render_photos(df_security_log: pd.DataFrame):` (行番号: 98 / 抜粋: "def render_photos(df_security_log: pd.DataFrame):")
 
 
-* **副作用**: `glob.glob`によるローカルファイルシステムの走査（画像一覧取得）。`st.columns`, `st.image`, `st.expander`, `st.dataframe`, `st.info`によるUI描画。
+* **副作用**: `glob.glob`によるローカルファイルシステムの走査（画像一覧取得）。`st.columns`, `st.image`, `st.info`、`view_common.lazy_section`、`view_common.render_table`によるUI描画。**（スマホ対応で変更）** 「📂 過去の写真」は`st.expander`から`lazy_section`（`st.toggle`ベース）になった — `st.expander`は折りたたまれていても中身を実行するため、閉じたままでも過去16枚の画像読み込みが毎回走っていた。直近4枚と過去分はそれぞれ`st.container(key="camera_gallery"/"camera_gallery_past")`で囲み、スマホ幅でも2列で並ぶようCSS側から拾えるようにしている。
 * 根拠: `images = sorted(glob.glob(os.path.join(img_dir, "*.jpg")), reverse=True)` (行番号: 94 / 抜粋: "images = sorted(glob.glob(os.path.join(img_dir, \"*.jpg\")), reverse=True)")
 
 
@@ -127,23 +128,23 @@
 ### `render_bicycle`
 
 * **役割**: 渡された`df_bicycle`を特定の3駐輪場エリアに絞り込み、待機台数の時系列推移を折れ線グラフ表示し、直近の状況を表形式でも表示する。
-* 根拠: `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 124〜147 / 抜粋: "def render_bicycle(df_bicycle: pd.DataFrame):")
+* 根拠: `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 131〜160 / 抜粋: "def render_bicycle(df_bicycle: pd.DataFrame):")
 
 
 * **引数/リクエスト**: `df_bicycle` (型: `pd.DataFrame`。`area_name`, `timestamp`, `waiting_count`, `status_text`列を含む駐輪場データ)
-* 根拠: `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 124 / 抜粋: "def render_bicycle(df_bicycle: pd.DataFrame):")
+* 根拠: `def render_bicycle(df_bicycle: pd.DataFrame):` (行番号: 131 / 抜粋: "def render_bicycle(df_bicycle: pd.DataFrame):")
 
 
 * **戻り値/レスポンス**: なし（`df_bicycle`が空、または対象エリアに一致するデータが無い場合はメッセージ表示後に早期`return`）
 * 根拠: `if df_bicycle.empty:\n        st.info("駐輪場データがまだありません。")\n        return` (行番号: 119〜121 / 抜粋: "if df_bicycle.empty:"), `if df_target.empty:\n        st.warning("指定されたエリアのデータが見つかりません。")\n        return` (行番号: 130〜132 / 抜粋: "if df_target.empty:")
 
 
-* **副作用**: `st.title`, `st.info`, `st.warning`, `st.plotly_chart`, `st.subheader`, `st.dataframe`によるUI描画。
-* 根拠: `st.plotly_chart(fig, width="stretch")` (行番号: 136 / 抜粋: "st.plotly_chart(fig, width=\"stretch\")")
+* **副作用**: `st.title`, `st.info`, `st.warning`, `st.subheader`、`view_common.render_chart`（内部で`st.plotly_chart`）、`view_common.render_table`によるUI描画。**（スマホ対応で変更）** グラフに渡す前に`view_common.downsample_for_chart(df_target, series_col="area_name")`で系列あたり500点までに間引く（plotlyに渡した点はそのままWebSocketの転送量になる。3系列×1,000点前後あった）。「最新の状況」の表は間引き前のデータから作る。
+* 根拠: `view_common.render_chart(fig)` (行番号: 150 / 抜粋: "view_common.render_chart(fig)"), `df_chart = view_common.downsample_for_chart(df_target, series_col="area_name")` (行番号: 143 / 抜粋: "df_chart = view_common.downsample_for_chart(...)")
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `def render_bicycle(df_bicycle: pd.DataFrame):` 全体 (行番号: 124〜147 / 抜粋: "def render_bicycle(df_bicycle: pd.DataFrame):")
+* 根拠: `def render_bicycle(df_bicycle: pd.DataFrame):` 全体 (行番号: 131〜160 / 抜粋: "def render_bicycle(df_bicycle: pd.DataFrame):")
 
 
 
@@ -152,7 +153,7 @@
 ```mermaid
 flowchart TD
     subgraph render_traffic_Flow["render_traffic() 処理フロー"]
-        RTf1["開始"] --> RTf2["外部: train_service.get_jr_traffic_status()"]
+        RTf1["開始"] --> RTf2["外部: view_common.load_jr_traffic_status_cached()"]
         RTf2 --> RTf3["宝塚線・神戸線カードをHTML表示"]
         RTf3 --> RTf4["現在時刻(JST)取得"]
         RTf4 --> RTf5{"現在時刻の判定"}
@@ -165,7 +166,7 @@ flowchart TD
     end
 
     subgraph route_search_Flow["_render_route_search() 処理フロー"]
-        RS1["開始"] --> RS2["外部: train_service.get_route_info()"]
+        RS1["開始"] --> RS2["外部: view_common.load_route_info_cached()"]
         RS2 --> RS3{"summaryが取得成功か"}
         RS3 -- No --> RS4["st.warning表示"]
         RS3 -- Yes --> RS5["乗換ステップをHTML整形"]
@@ -225,7 +226,7 @@ graph TD
 
     subgraph Project_Internal
         Config["config"]
-        TrainService["services.train_service"]
+        TrainService["services.train_service (view_common のキャッシュ経由)"]
         DashboardCommon["views.dashboard.common (相対import .common)"]
     end
 
@@ -248,7 +249,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `services/train_service.py` | `get_jr_traffic_status`, `get_route_info`が返す辞書の正確なスキーマとデータ取得方法（外部APIかスクレイピングか）を把握するため。 | `data = train_service.get_route_info(from_st, to_st)` (行番号: 57 / 抜粋: "data = train_service.get_route_info(from_st, to_st)") |
+| 高 | `services/train_service.py` | `get_jr_traffic_status`, `get_route_info`が返す辞書の正確なスキーマとデータ取得方法（外部APIかスクレイピングか）を把握するため。 | `data = view_common.load_route_info_cached(from_st, to_st)` (行番号: 64 / 抜粋: "data = view_common.load_route_info_cached(from_st, to_st)") |
 | 中 | `config.py` | `ASSETS_DIR`の実際のパスを把握し、スナップショット画像の保存構造を確認するため。 | `img_dir = os.path.join(config.ASSETS_DIR, "snapshots")` (行番号: 93 / 抜粋: "img_dir = os.path.join(config.ASSETS_DIR, \"snapshots\")") |
 | 低 | `views/dashboard/common.py` | インポートされているが未使用の`render_status_card_html`が本来使われる予定だったか、削除漏れかを確認するため。 | `from .common import render_status_card_html` (行番号: 13 / 抜粋: "from .common import render_status_card_html") |
 
@@ -266,7 +267,7 @@ graph TD
 * 根拠: 定数定義 (行番号: 16〜18 / 抜粋: "COMMUTE_ROUTE_START_HOUR = 4"), `if COMMUTE_ROUTE_START_HOUR <= current_hour < COMMUTE_ROUTE_END_HOUR:` (行番号: 51)
 
 
-* **エラーハンドリングの欠如**: 本ファイル内のいずれの関数にも`try/except`による例外捕捉がなく（`_render_route_search`内の`summary`チェックのみで代替）、`train_service`や画像ファイルアクセスで例外が送出された場合はタブ全体の描画が中断する可能性がある。
+* **エラーハンドリングの欠如**: 本ファイル内のいずれの関数にも`try/except`による例外捕捉がなく（`_render_route_search`内の`summary`チェックのみで代替）、`train_service`や画像ファイルアクセスで例外が送出された場合はタブ全体の描画が中断する可能性がある（`dashboard.py`側の`safe_section`がセクション単位で隔離する）。
 * 根拠: `def render_traffic():` 以降の全関数定義 (行番号: 20〜59 / 抜粋: "def render_traffic():")
 
 

@@ -20,6 +20,7 @@ SQLite から約33,000行を読み直していた。
 """
 import os
 import sys
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -46,12 +47,14 @@ def _mock_st():
     mock = MagicMock()
     mock.sidebar.__enter__ = MagicMock(return_value=mock)
     mock.sidebar.__exit__ = MagicMock(return_value=False)
-    mock.tabs.return_value = [MagicMock() for _ in range(5)]
     mock.columns.side_effect = lambda spec, **kwargs: [
         MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))
     ]
-    mock.expander.return_value.__enter__ = MagicMock(return_value=MagicMock())
-    mock.expander.return_value.__exit__ = MagicMock(return_value=False)
+    # 選択中のタブだけを描画するようになったため(tests/test_dashboard_lazy_tabs.py)、
+    # 既定はホームタブ・折りたたみセクションは閉じた状態とする。
+    mock.segmented_control.return_value = "home"
+    mock.toggle.return_value = False
+    mock.query_params = {}
     return mock
 
 
@@ -76,10 +79,11 @@ def _patch_view_modules():
 class TestMainReadsThroughTheCache:
     """再実行のたびに素の analysis_service を叩く状態へ戻っていないこと。"""
 
-    def test_main_does_not_call_analysis_service_loaders_directly(self):
+    def test_home_tab_reads_through_the_cache_only(self):
         mock_st = _mock_st()
         patches = _patch_view_modules()
         with patch.object(dashboard, "st", mock_st), \
+             patch.object(dashboard.view_common, "st", mock_st), \
              patch.object(dashboard.view_common, "load_sensor_data_cached", return_value=pd.DataFrame()) as cached_sensor, \
              patch.object(dashboard.view_common, "load_generic_data_cached", return_value=pd.DataFrame()) as cached_generic, \
              patch.object(dashboard.view_common, "load_bicycle_data_cached", return_value=pd.DataFrame()) as cached_bicycle, \
@@ -101,11 +105,35 @@ class TestMainReadsThroughTheCache:
         cached_sensor.assert_called_once_with(limit=10000)
         cached_bicycle.assert_called_once_with(limit=3000)
         cached_nas.assert_called_once_with()
-        # 子供・排便・食事・車・防犯ログの5テーブル
-        assert cached_generic.call_count == 5
+        # ホームタブが使うのは車のテーブルだけ。以前は5タブ分(子供・排便・食事・
+        # 車・防犯ログ)を main() の先頭でまとめて読んでいたが、選択中のタブしか
+        # 描画しなくなったため、そのタブが使わないテーブルは読まない。
+        cached_generic.assert_called_once_with(dashboard.config.SQLITE_TABLE_CAR)
 
         for raw in (raw_sensor, raw_generic, raw_bicycle, raw_nas):
             raw.assert_not_called()
+
+    def test_watch_tab_reads_only_the_security_log_when_sections_are_closed(self):
+        """閉じたセクション(高砂・健康管理)のぶんまで読みに行かないこと。"""
+        mock_st = _mock_st()
+        mock_st.segmented_control.return_value = "watch"
+        patches = _patch_view_modules()
+        with patch.object(dashboard, "st", mock_st), \
+             patch.object(dashboard.view_common, "st", mock_st), \
+             patch.object(dashboard.view_common, "load_sensor_data_cached", return_value=pd.DataFrame()) as cached_sensor, \
+             patch.object(dashboard.view_common, "load_generic_data_cached", return_value=pd.DataFrame()) as cached_generic, \
+             patch.object(dashboard.analysis_service, "apply_friendly_names", return_value=pd.DataFrame()), \
+             patch.object(dashboard, "logger"):
+            for p in patches:
+                p.start()
+            try:
+                dashboard.main()
+            finally:
+                for p in patches:
+                    p.stop()
+
+        cached_generic.assert_called_once_with("security_logs", limit=100)
+        cached_sensor.assert_not_called()
 
     def test_refresh_button_clears_the_cache_and_reruns(self):
         """「🔄 データを更新」が TTL を待たずに捨てる操作として機能すること。"""
@@ -191,6 +219,111 @@ class TestCachedLoadersActuallyCache:
         assert second.loc[0, "power_watts"] == 100
 
 
+class TestExternalIoIsCachedToo:
+    """DB以外の重い読み取り(HTTPスクレイピング・journalctl・年間集計SQL)も
+    同じTTLで共有されること。
+
+    DBの読み取りだけをキャッシュしていた頃は、1回の描画で
+    JR運行情報のスクレイピングがサマリーと「おでかけ」タブから2回走り、
+    `journalctl` はたたまれた expander のために毎回起動していた。
+    """
+
+    def test_traffic_is_scraped_once_even_when_two_views_need_it(self):
+        from views.dashboard import misc_tab
+
+        fake_status = {
+            "宝塚線": {"status": "平常運転", "detail": "", "is_delay": False},
+            "神戸線": {"status": "平常運転", "detail": "", "is_delay": False},
+        }
+        mock_st = MagicMock()
+        mock_st.columns.side_effect = lambda spec, **kwargs: [
+            MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))
+        ]
+        with patch.object(view_common.train_service, "get_jr_traffic_status",
+                          return_value=fake_status) as mock_scrape, \
+             patch.object(view_common, "load_route_info_cached", return_value={"summary": "取得失敗"}), \
+             patch.object(misc_tab, "st", mock_st):
+            view_common.load_jr_traffic_status_cached()  # ホームタブのサマリーカード
+            misc_tab.render_traffic()                    # おでかけタブ
+
+        mock_scrape.assert_called_once()
+
+    def test_system_logs_are_cached_and_the_refresh_button_clears_them(self):
+        from views.dashboard import log_tab
+
+        with patch.object(view_common.analysis_service, "get_system_logs",
+                          return_value="log body") as mock_logs:
+            view_common.get_system_logs_cached(lines=50)
+            view_common.get_system_logs_cached(lines=50)
+            assert mock_logs.call_count == 1
+
+            view_common.get_system_logs_cached.clear()
+            view_common.get_system_logs_cached(lines=50)
+            assert mock_logs.call_count == 2
+
+        # 「🔄 ログを更新」はキャッシュを捨ててから再実行すること
+        # (捨てないと押しても同じ内容が返る)
+        mock_st = MagicMock()
+        mock_st.columns.side_effect = lambda spec, **kwargs: [
+            MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))
+        ]
+        mock_st.button.return_value = True
+        mock_st.radio.return_value = "直近のログを表示"
+        mock_st.selectbox.return_value = "全て"
+        with patch.object(log_tab, "st", mock_st), \
+             patch.object(log_tab, "view_common") as mock_common:
+            log_tab.render_server_logs()
+
+        mock_common.get_system_logs_cached.clear.assert_called_once()
+        mock_st.rerun.assert_called_once()
+
+    def test_yearly_temperature_and_resources_are_cached(self):
+        with patch.object(view_common.analysis_service, "load_yearly_temperature_stats",
+                          return_value=pd.DataFrame()) as mock_yearly, \
+             patch.object(view_common.analysis_service, "get_memory_usage",
+                          return_value={"percent": 10}) as mock_mem, \
+             patch.object(view_common.analysis_service, "get_disk_usage",
+                          return_value={"percent": 20}) as mock_disk:
+            for _ in range(2):
+                view_common.load_yearly_temperature_stats_cached(2026)
+                view_common.get_memory_usage_cached()
+                view_common.get_disk_usage_cached()
+
+        mock_yearly.assert_called_once_with(2026)
+        mock_mem.assert_called_once()
+        mock_disk.assert_called_once()
+
+
+class TestViewsDoNotBypassTheCache:
+    """View が素のサービスを直接呼ぶ形に戻っていないこと。
+
+    戻しても画面は同じに見えるが、スマホでの初回表示にHTTP 2本と
+    サブプロセス1本が毎回上乗せされる(気づけるのは実機だけ)。
+    """
+
+    FORBIDDEN: ClassVar[dict] = {
+        "summary.py": ["train_service.get_jr_traffic_status", "analysis_service.get_memory_usage"],
+        "misc_tab.py": ["train_service.get_jr_traffic_status", "train_service.get_route_info"],
+        "sensor_tab.py": ["analysis_service.load_yearly_temperature_stats"],
+        "log_tab.py": [
+            "analysis_service.get_system_logs",
+            "analysis_service.get_disk_usage",
+            "analysis_service.get_memory_usage",
+            "analysis_service.load_nas_status",
+        ],
+    }
+
+    def test_view_modules_call_the_cached_wrappers(self):
+        views_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "views", "dashboard"
+        )
+        for filename, forbidden_calls in self.FORBIDDEN.items():
+            with open(os.path.join(views_dir, filename), encoding="utf-8") as f:
+                source = f.read()
+            for call in forbidden_calls:
+                assert f"{call}(" not in source, f"{filename} が {call}() を直接呼んでいる"
+
+
 class TestCacheLayering:
     def test_ttl_is_shorter_than_the_sensor_write_interval(self):
         """センサーの書き込み間隔(5分=300秒)より十分短いこと。
@@ -208,3 +341,55 @@ class TestCacheLayering:
         source = inspect.getsource(analysis_service)
         assert "import streamlit" not in source
         assert "st.cache_data" not in source
+
+
+class TestChartDownsampling:
+    """グラフに渡す点数を間引くこと(A-3)。
+
+    plotly に渡した点はそのまま WebSocket のペイロードとしてスマートフォンへ
+    転送される。駐輪場の推移は3系列 × 1,000点前後あり、折れ線の形しか読まない。
+    """
+
+    def _series(self, n, name="A", start="2026-09-01"):
+        return pd.DataFrame({
+            "timestamp": pd.date_range(start, periods=n, freq="1min"),
+            "waiting_count": range(n),
+            "area_name": [name] * n,
+        })
+
+    def test_small_series_is_returned_untouched(self):
+        df = self._series(10)
+        assert view_common.downsample_for_chart(df, max_points=100) is df
+
+    def test_large_series_is_thinned_to_the_limit(self):
+        df = self._series(5000)
+        out = view_common.downsample_for_chart(df, max_points=100)
+        assert len(out) <= 101  # 末尾1点を足すぶんの余裕
+
+    def test_the_latest_point_is_always_kept(self):
+        """右端が欠けると「止まっている」ように見えるため。"""
+        df = self._series(1001)
+        out = view_common.downsample_for_chart(df, max_points=100)
+        assert out["timestamp"].max() == df["timestamp"].max()
+        assert out["waiting_count"].iloc[-1] == df["waiting_count"].iloc[-1]
+
+    def test_each_series_is_thinned_independently(self):
+        df = pd.concat([self._series(1000, "第1A"), self._series(10, "第3E")])
+        out = view_common.downsample_for_chart(df, series_col="area_name", max_points=50)
+
+        # 少ない系列は間引かれず、多い系列だけが間引かれる
+        assert (out["area_name"] == "第3E").sum() == 10
+        assert (out["area_name"] == "第1A").sum() <= 51
+
+    def test_columns_and_dtypes_survive(self):
+        """色分けに使う文字列列を落とさないこと(平均リサンプルにしない理由)。"""
+        df = self._series(2000)
+        out = view_common.downsample_for_chart(df, max_points=50)
+        assert list(out.columns) == list(df.columns)
+        assert out["area_name"].iloc[0] == "A"
+
+    def test_empty_and_missing_column_are_passed_through(self):
+        empty = pd.DataFrame()
+        assert view_common.downsample_for_chart(empty) is empty
+        no_ts = pd.DataFrame({"value": [1, 2, 3]})
+        assert view_common.downsample_for_chart(no_ts) is no_ts

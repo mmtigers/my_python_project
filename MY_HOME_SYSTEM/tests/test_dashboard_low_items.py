@@ -9,7 +9,7 @@ dashboard.py の Low項目(#410)の回帰テスト:
   内部のファイルパス・設定値が露出するため、ログにのみ出力するよう変更した
   ことを確認する。
 
-main() はStreamlitのUI呼び出し(st.sidebar, st.tabs等)を多数含む大きな関数の
+main() はStreamlitのUI呼び出し(st.sidebar, タブ選択等)を多数含む大きな関数の
 ため、st・各Viewモジュール・analysis_service・send_pushを広くモックして
 テストする。
 """
@@ -26,14 +26,16 @@ def _mock_st():
     mock = MagicMock()
     mock.sidebar.__enter__ = MagicMock(return_value=mock)
     mock.sidebar.__exit__ = MagicMock(return_value=False)
-    mock.tabs.return_value = [MagicMock() for _ in range(5)]
     # main()先頭の操作列(_render_header_actions)が st.columns(2) を使うため、
     # 指定された個数ぶんのカラムを返す(MagicMockのままだとアンパックできない)。
     mock.columns.side_effect = lambda spec, **kwargs: [
         MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))
     ]
-    mock.expander.return_value.__enter__ = MagicMock(return_value=MagicMock())
-    mock.expander.return_value.__exit__ = MagicMock(return_value=False)
+    # 選択中のタブだけを描画するようになったため(tests/test_dashboard_lazy_tabs.py)、
+    # 既定はホームタブ・折りたたみセクションは閉じた状態とする。
+    mock.segmented_control.return_value = "home"
+    mock.toggle.return_value = False
+    mock.query_params = {}
     return mock
 
 
@@ -106,9 +108,11 @@ class TestNoTracebackOnScreen:
     def test_exception_is_logged_but_not_shown_via_st_code(self):
         """L-L5 (#410): 例外発生時にtracebackを画面表示(st.code)しないこと。
         ログにのみ出力すること。"""
+        # セクション単位の例外は safe_section が隔離する(#438)ため、ここでは
+        # その外側 — main() 全体の最後の砦 — が traceback を画面に出さないことを見る。
         mock_st = _mock_st()
         with patch.object(dashboard, "st", mock_st), \
-             patch.object(dashboard.view_common, "load_sensor_data_cached", side_effect=RuntimeError("boom")), \
+             patch.object(dashboard, "_render_header_actions", side_effect=RuntimeError("boom")), \
              patch.object(dashboard, "send_push"), \
              patch.object(dashboard, "logger") as mock_logger:
             dashboard.main()

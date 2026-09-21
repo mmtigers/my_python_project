@@ -6,7 +6,8 @@ import subprocess
 # #651: systemctl 等の外部コマンドが応答しない場合にダッシュボードを固めないための上限(秒)。
 SUBPROCESS_TIMEOUT_SEC: int = 30
 from datetime import date
-from services import analysis_service
+
+from . import common as view_common
 
 def render_logs(df_sensor: pd.DataFrame):
     """センサーログ分析(場所での絞り込み + 一覧)"""
@@ -16,24 +17,28 @@ def render_logs(df_sensor: pd.DataFrame):
 
     locs = df_sensor["location"].unique()
     sel = st.multiselect("場所", locs, default=locs)
-    st.dataframe(
-        df_sensor[df_sensor["location"].isin(sel)][
-            ["timestamp", "friendly_name", "location", "contact_state", "power_watts"]
-        ].head(200),
-        width="stretch",
+    view_common.render_table(
+        df_sensor[df_sensor["location"].isin(sel)].head(200),
+        {
+            "timestamp": "時刻",
+            "friendly_name": "センサー",
+            "location": "場所",
+            "contact_state": "状態",
+            "power_watts": "W",
+        },
     )
 
 
 def render_resources():
     """ディスク・メモリの使用率"""
     st.markdown("##### 💻 リソース状況")
-    disk = analysis_service.get_disk_usage()
+    disk = view_common.get_disk_usage_cached()
     if disk:
         st.write(f"**💾 ディスク使用率: {disk['percent']:.1f}%**")
         st.progress(int(disk["percent"]))
 
     st.write("")
-    mem = analysis_service.get_memory_usage()
+    mem = view_common.get_memory_usage_cached()
     if mem:
         st.write(f"**🧠 メモリ使用率: {mem['percent']:.1f}%**")
         st.progress(int(mem["percent"]))
@@ -42,7 +47,9 @@ def render_resources():
 def render_nas_status():
     """NASのPing/マウント状態"""
     st.markdown("##### 🗄️ NAS 状態")
-    nas_data = analysis_service.load_nas_status()
+    # サマリー(ホームタブ)と同じキャッシュを使う。ここだけ素で呼んでいたため、
+    # 「🔧 システム」タブを開くたびにNASの状態を別途読み直していた。
+    nas_data = view_common.load_nas_status_cached()
     if nas_data is None:
         st.info("データなし")
         return
@@ -73,9 +80,13 @@ def render_server_logs():
         sel = st.selectbox("ログレベル", list(level_opts.keys()))
         priority = level_opts[sel]
 
-    if st.button("🔄 ログを更新"): st.rerun()
+    if st.button("🔄 ログを更新"):
+        # journalctl の結果もキャッシュ(TTL 60秒)しているため、再実行するだけでは
+        # 取り直しにならない。このボタンだけが明示的に捨てる手段になる。
+        view_common.get_system_logs_cached.clear()
+        st.rerun()
 
-    logs = analysis_service.get_system_logs(lines=lines_val, priority=priority, target_date=target_date)
+    logs = view_common.get_system_logs_cached(lines=lines_val, priority=priority, target_date=target_date)
     if not logs: st.info("ログなし")
     else: st.code(logs, language="text")
 

@@ -49,22 +49,27 @@ class TestSafeSection:
             # ここに到達すれば例外が正しく吸収されている
 
 
-class TestDashboardTabIsolation:
-    """1つのタブの描画失敗が他のタブの描画を止めないことの回帰テスト(#438)。"""
+class TestDashboardSectionIsolation:
+    """1つのセクションの描画失敗が同じタブの他セクションを止めないことの回帰テスト(#438)。
 
-    def test_one_tab_raising_does_not_prevent_other_tabs_from_rendering(self):
+    タブは `st.tabs` をやめて「選択中のタブだけ描画」になった
+    (tests/test_dashboard_lazy_tabs.py)ため、巻き添えの範囲は
+    「同じタブ内の後続セクション」になった。隔離の必要性は変わらない。
+    """
+
+    def test_one_section_raising_does_not_prevent_the_next_one(self):
         import dashboard
         import pandas as pd
 
         mock_st = MagicMock()
         mock_st.sidebar.__enter__ = MagicMock(return_value=mock_st)
         mock_st.sidebar.__exit__ = MagicMock(return_value=False)
-        mock_st.tabs.return_value = [MagicMock() for _ in range(5)]
         mock_st.columns.side_effect = lambda spec, **kwargs: [
             MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))
         ]
-        mock_st.expander.return_value.__enter__ = MagicMock(return_value=MagicMock())
-        mock_st.expander.return_value.__exit__ = MagicMock(return_value=False)
+        mock_st.segmented_control.return_value = "sys"
+        mock_st.toggle.return_value = False
+        mock_st.query_params = {}
 
         with ExitStack() as stack:
             stack.enter_context(patch.object(dashboard, "st", mock_st))
@@ -74,27 +79,16 @@ class TestDashboardTabIsolation:
             stack.enter_context(patch.object(view_common, "load_generic_data_cached", return_value=pd.DataFrame()))
             stack.enter_context(patch.object(view_common, "load_bicycle_data_cached", return_value=pd.DataFrame()))
             stack.enter_context(patch.object(view_common, "load_nas_status_cached", return_value=None))
-            stack.enter_context(patch.object(dashboard.analysis_service, "apply_friendly_names", return_value=pd.DataFrame()))
-            stack.enter_context(patch.object(dashboard.summary, "render_summary"))
-            stack.enter_context(patch.object(dashboard.misc_tab, "render_traffic", side_effect=RuntimeError("train tab exploded")))
-            stack.enter_context(patch.object(dashboard.misc_tab, "render_photos"))
-            mock_electricity = stack.enter_context(patch.object(dashboard.sensor_tab, "render_electricity"))
-            stack.enter_context(patch.object(dashboard.sensor_tab, "render_temperature"))
-            stack.enter_context(patch.object(dashboard.health_tab, "render"))
-            stack.enter_context(patch.object(dashboard.sensor_tab, "render_takasago"))
-            stack.enter_context(patch.object(dashboard.log_tab, "render_logs"))
-            stack.enter_context(patch.object(dashboard.log_tab, "render_resources"))
-            stack.enter_context(patch.object(dashboard.log_tab, "render_nas_status"))
-            stack.enter_context(patch.object(dashboard.log_tab, "render_server_logs"))
-            stack.enter_context(patch.object(dashboard.log_tab, "render_maintenance"))
-            stack.enter_context(patch.object(dashboard.misc_tab, "render_bicycle"))
+            stack.enter_context(patch.object(dashboard.log_tab, "render_resources",
+                                             side_effect=RuntimeError("resources exploded")))
+            mock_nas = stack.enter_context(patch.object(dashboard.log_tab, "render_nas_status"))
             stack.enter_context(patch.object(dashboard, "logger"))
             dashboard.main()
 
-        # 「おでかけ」タブの電車遅延セクションが例外を投げても、
-        # 後続の「くらし」タブの電力・環境セクションは描画が呼ばれること
-        mock_electricity.assert_called_once()
+        # 「リソース状況」が例外を投げても、後続の「NAS状態」は描画が呼ばれること
+        mock_nas.assert_called_once()
         # ダッシュボード全体のエラー画面(st.error)ではなく、
         # 失敗したセクションのみのプレースホルダとして扱われていること
         error_calls = [str(c.args[0]) for c in mock_st.error.call_args_list if c.args]
-        assert any("電車遅延" in t for t in error_calls), error_calls
+        assert any("リソース状況" in t for t in error_calls), error_calls
+

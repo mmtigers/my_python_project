@@ -16,6 +16,8 @@
 
 ## 2. ファイルの概要
 
+> **（スマホ対応で追加）** ベースパス配下には、中継のほかに「スマートフォンのホーム画面に追加するためのマニフェスト・アイコン」と「Streamlitを介さない軽量ページ `{DASHBOARD_BASE_PATH}/m`」も置く。いずれも中継先のStreamlitは持っていないため、このアプリ自身が返す。**これらは中継の総当たりルート（`{path:path}`）より前に定義する必要がある**（FastAPIは定義順に照合するため、後ろに置くとStreamlitへ中継されて404になる）。
+
 Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashboard`）配下で配信するためのFastAPIルーター。スマートフォンからダッシュボードを見られるようにするための入口であり、実際の中継処理は `services/dashboard_proxy_service.py` に委譲する（CLAUDE.mdの「ルーターは薄く」の方針）。HTTP用に2本（ベースパスそのもの、ベースパス配下のワイルドカード）、WebSocket用に1本のルートを定義する。
 
 `config.DASHBOARD_PROXY_ENABLED=false` のときは `unified_server.py` がこのルーターをincludeしないため、パス自体が存在しなくなる（404）旨がモジュールdocstringに記されている。
@@ -93,13 +95,103 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 * 根拠: [定数宣言] (行番号: 23 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
 
 
+### `_MOBILE_PATH` / `_QUEST_APP_PATH` (モジュールレベル定数、スマホ対応で追加)
+
+* **役割**: 軽量ページのパス（`{DASHBOARD_BASE_PATH}/m`）と、軽量ページ下部から張るファミクエ（`/quest`）への導線。
+* 根拠: `_MOBILE_PATH = f"{config.DASHBOARD_BASE_PATH}/m"` (行番号: 33 / 抜粋: "_MOBILE_PATH = f\"{config.DASHBOARD_BASE_PATH}/m\""), `_QUEST_APP_PATH = "/quest"` (行番号: 35 / 抜粋: "_QUEST_APP_PATH = \"/quest\"")
+
+* **引数/リクエスト**: なし（定数）
+* 根拠: (行番号: 33〜35 / 抜粋: "_MOBILE_PATH = f\"{config.DASHBOARD_BASE_PATH}/m\"")
+
+* **戻り値/レスポンス**: なし（定数）
+* 根拠: (行番号: 33〜35 / 抜粋: "_QUEST_APP_PATH = \"/quest\"")
+
+* **副作用**: なし
+* 根拠: (行番号: 33〜35 / 抜粋: "_MOBILE_PATH = f\"{config.DASHBOARD_BASE_PATH}/m\"")
+
+* **エラーハンドリング**: なし
+* 根拠: (行番号: 33〜35 / 抜粋: "_MOBILE_PATH = f\"{config.DASHBOARD_BASE_PATH}/m\"")
+
+
+### `dashboard_manifest`（GET `{_BASE_PATH}/app.webmanifest`、スマホ対応で追加）
+
+* **役割**: ダッシュボード本体をホーム画面に追加したときアドレスバー無し（standalone）で開くためのWebアプリマニフェストを返す。内容の組み立ては `services/dashboard_proxy_service.py` の `build_dashboard_manifest` が行う。
+* 根拠: `def dashboard_manifest() -> Response:` (行番号: 53〜59 / 抜粋: "def dashboard_manifest() -> Response:")
+
+* **引数/リクエスト**: なし
+* 根拠: `def dashboard_manifest() -> Response:` (行番号: 53 / 抜粋: "def dashboard_manifest() -> Response:")
+
+* **戻り値/レスポンス**: `application/manifest+json` の `Response`（JSONは `ensure_ascii=False` で日本語をそのまま出す）
+* 根拠: `media_type="application/manifest+json",` (行番号: 56〜58 / 抜粋: "media_type=\"application/manifest+json\",")
+
+* **副作用**: なし（中継しない）
+* 根拠: `content=json.dumps(build_dashboard_manifest(), ensure_ascii=False),` (行番号: 57 / 抜粋: "content=json.dumps(build_dashboard_manifest(), ensure_ascii=False),")
+
+* **エラーハンドリング**: なし
+* 根拠: `def dashboard_manifest() -> Response:` (行番号: 53 / 抜粋: "def dashboard_manifest() -> Response:")
+
+
+### `dashboard_icon`（GET `{_BASE_PATH}/icon-{size}.png`、スマホ対応で追加）
+
+* **役割**: ホーム画面アイコンのPNGを返す。マニフェストの `icons` と `apple-touch-icon` から参照される。生成は `render_dashboard_icon_png`（図形だけで描画、サイズごとにキャッシュ）が行う。
+* 根拠: `def dashboard_icon(size: int) -> Response:` (行番号: 62〜74 / 抜粋: "def dashboard_icon(size: int) -> Response:")
+
+* **引数/リクエスト**: パスパラメータ `size` (int)
+* 根拠: `@router.get(f"{_BASE_PATH}/icon-{{size}}.png", include_in_schema=False)` (行番号: 61 / 抜粋: "@router.get(f\"{_BASE_PATH}/icon-{{size}}.png\", include_in_schema=False)")
+
+* **戻り値/レスポンス**: `image/png` の `Response`。`Cache-Control: public, max-age=86400` を付ける（内容はコードから決まり実質変わらないため）。
+* 根拠: `headers={"Cache-Control": "public, max-age=86400"},` (行番号: 73 / 抜粋: "headers={\"Cache-Control\": \"public, max-age=86400\"},")
+
+* **副作用**: 初回のみPNGを描画する（以降は関数側のキャッシュ）。
+* 根拠: `content=render_dashboard_icon_png(size),` (行番号: 71 / 抜粋: "content=render_dashboard_icon_png(size),")
+
+* **エラーハンドリング**: `DASHBOARD_ICON_SIZES` に無いサイズは404（中継にフォールバックさせない）。
+* 根拠: `raise HTTPException(status_code=404, detail="unknown icon size")` (行番号: 68 / 抜粋: "raise HTTPException(status_code=404, detail=\"unknown icon size\")")
+
+
+### `mobile_status_page`（GET `{_MOBILE_PATH}`、スマホ対応で追加）
+
+* **役割**: Streamlitを介さない読み取り専用のサマリーページを返す。スマートフォンで見るのはステータスカードの9枚、という用途に対して、Streamlitの初期化・WebSocket接続・Reactの読み込みを省く。ダッシュボード本体はグラフ・ログ・メンテナンス操作を持つ「詳しく見る側」として残し、このページからリンクする。
+* 根拠: `def mobile_status_page() -> HTMLResponse:` (行番号: 78〜100 / 抜粋: "def mobile_status_page() -> HTMLResponse:")
+
+* **引数/リクエスト**: なし
+* 根拠: `@router.get(_MOBILE_PATH, include_in_schema=False)` (行番号: 77 / 抜粋: "@router.get(_MOBILE_PATH, include_in_schema=False)")
+
+* **戻り値/レスポンス**: `HTMLResponse`（`home_status_service.render_mobile_status_page_html` の出力）
+* 根拠: `return HTMLResponse(` (行番号: 92 / 抜粋: "return HTMLResponse(")
+
+* **副作用**: `home_status_service.collect_status_cards()` 経由のDB読み取り・HTTPスクレイピング（いずれもTTL 60秒のキャッシュ越し）。**`async def` にしていない**のは、中で同期のDB読み取りとスクレイピングを行うため。`def` にしておくと Starlette がスレッドプールで実行し、イベントループ（IoT制御・Webhook受信）を止めない。
+* 根拠: `cards, fetched_at = home_status_service.collect_status_cards()` (行番号: 91 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")
+
+* **エラーハンドリング**: 個々の取得失敗は `home_status_service` 側で `None` に丸められ、ページ全体は返る。
+* 根拠: `cards, fetched_at = home_status_service.collect_status_cards()` (行番号: 91 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")
+
+
+### `mobile_status_manifest`（GET `{_MOBILE_PATH}/app.webmanifest`、スマホ対応で追加）
+
+* **役割**: 軽量ページ専用のマニフェスト。ダッシュボード本体のマニフェストと `name` / `start_url` / `scope` だけが異なる。軽量ページから追加すれば軽量ページが、本体から追加すれば本体が開く（追加した画面と違うものが開くと戸惑うため、1つにまとめていない）。
+* 根拠: `def mobile_status_manifest() -> Response:` (行番号: 104〜119 / 抜粋: "def mobile_status_manifest() -> Response:")
+
+* **引数/リクエスト**: なし
+* 根拠: `@router.get(f"{_MOBILE_PATH}/app.webmanifest", include_in_schema=False)` (行番号: 103 / 抜粋: "@router.get(f\"{_MOBILE_PATH}/app.webmanifest\", include_in_schema=False)")
+
+* **戻り値/レスポンス**: `application/manifest+json` の `Response`
+* 根拠: `media_type="application/manifest+json",` (行番号: 116〜118 / 抜粋: "media_type=\"application/manifest+json\",")
+
+* **副作用**: なし
+* 根拠: `manifest["start_url"] = _MOBILE_PATH` (行番号: 113 / 抜粋: "manifest[\"start_url\"] = _MOBILE_PATH")
+
+* **エラーハンドリング**: なし
+* 根拠: `def mobile_status_manifest() -> Response:` (行番号: 104 / 抜粋: "def mobile_status_manifest() -> Response:")
+
+
 ### `proxy_dashboard_root`（`_BASE_PATH`、`_PROXIED_METHODS`、`include_in_schema=False`）
 
 * **役割**: ベースパスそのもの（例: `/dashboard`）へのアクセスを中継する。docstringに「Streamlitは末尾スラッシュ付きへリダイレクトを返すが、中継先も同じベースパスで動いているため `Location` はそのままブラウザに返して問題ない」と記されている。
 * 根拠: [デコレータ/関数定義] (行番号: 26〜37 / 抜粋: "@router.api_route(_BASE_PATH, methods=_PROXIED_METHODS, include_in_schema=False)")
 
 * **引数/リクエスト**: `request: Request`
-* 根拠: [関数定義] (行番号: 27 / 抜粋: "async def proxy_dashboard_root(request: Request):")
+* 根拠: [関数定義] (行番号: 123 / 抜粋: "async def proxy_dashboard_root(request: Request):")
 
 * **戻り値/レスポンス**: `dashboard_proxy_service.forward_http(request, _BASE_PATH)` の戻り値をそのまま返す
 * 根拠: [return文] (行番号: 33 / 抜粋: "return await dashboard_proxy_service.forward_http(request, _BASE_PATH)")
@@ -108,7 +200,7 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 * 根拠: [関数呼び出し] (行番号: 33 / 抜粋: "await dashboard_proxy_service.forward_http(request, _BASE_PATH)")
 
 * **エラーハンドリング**: 本関数には `try`/`except` は無く、中継失敗時の扱いは `forward_http` 側に委ねられている。
-* 根拠: [関数定義] (行番号: 27〜33 / 抜粋: "async def proxy_dashboard_root(request: Request):")
+* 根拠: [関数定義] (行番号: 123〜129 / 抜粋: "async def proxy_dashboard_root(request: Request):")
 
 
 ### `proxy_dashboard`（`{_BASE_PATH}/{path:path}`、`_PROXIED_METHODS`、`include_in_schema=False`）
@@ -117,7 +209,7 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 * 根拠: [デコレータ/関数定義] (行番号: 36〜39 / 抜粋: '@router.api_route(f"{_BASE_PATH}/{{path:path}}", methods=_PROXIED_METHODS, include_in_schema=False)')
 
 * **引数/リクエスト**: `request: Request`、パスパラメータ `path: str`
-* 根拠: [関数定義] (行番号: 37 / 抜粋: "async def proxy_dashboard(request: Request, path: str):")
+* 根拠: [関数定義] (行番号: 133 / 抜粋: "async def proxy_dashboard(request: Request, path: str):")
 
 * **戻り値/レスポンス**: `forward_http(request, f"{_BASE_PATH}/{path}")` の戻り値（ベースパスを付け直して渡す）
 * 根拠: [return文] (行番号: 39 / 抜粋: 'return await dashboard_proxy_service.forward_http(request, f"{_BASE_PATH}/{path}")')
@@ -126,7 +218,7 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 * 根拠: [関数呼び出し] (行番号: 39 / 抜粋: 'await dashboard_proxy_service.forward_http(request, f"{_BASE_PATH}/{path}")')
 
 * **エラーハンドリング**: 本関数には `try`/`except` は無い。
-* 根拠: [関数定義] (行番号: 37〜39 / 抜粋: "async def proxy_dashboard(request: Request, path: str):")
+* 根拠: [関数定義] (行番号: 133〜135 / 抜粋: "async def proxy_dashboard(request: Request, path: str):")
 
 
 ### `proxy_dashboard_websocket`（WebSocket `{_BASE_PATH}/{path:path}`）
@@ -135,7 +227,7 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 * 根拠: [デコレータ/関数定義] (行番号: 42〜49 / 抜粋: '@router.websocket(f"{_BASE_PATH}/{{path:path}}")')
 
 * **引数/リクエスト**: `websocket: WebSocket`、パスパラメータ `path: str`
-* 根拠: [関数定義] (行番号: 43 / 抜粋: "async def proxy_dashboard_websocket(websocket: WebSocket, path: str):")
+* 根拠: [関数定義] (行番号: 139 / 抜粋: "async def proxy_dashboard_websocket(websocket: WebSocket, path: str):")
 
 * **戻り値/レスポンス**: `None`（`forward_websocket` を `await` するのみ）
 * 根拠: [関数呼び出し] (行番号: 49 / 抜粋: 'await dashboard_proxy_service.forward_websocket(websocket, f"{_BASE_PATH}/{path}")')
@@ -144,7 +236,7 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 * 根拠: [関数呼び出し] (行番号: 49 / 抜粋: 'await dashboard_proxy_service.forward_websocket(websocket, f"{_BASE_PATH}/{path}")')
 
 * **エラーハンドリング**: 本関数には `try`/`except` は無く、接続失敗時のクローズは `forward_websocket` 側が行う。
-* 根拠: [関数定義] (行番号: 43〜49 / 抜粋: "async def proxy_dashboard_websocket(websocket: WebSocket, path: str):")
+* 根拠: [関数定義] (行番号: 139〜145 / 抜粋: "async def proxy_dashboard_websocket(websocket: WebSocket, path: str):")
 
 
 ## 5. 処理フロー図
@@ -208,6 +300,10 @@ graph TD
 | 中 | `config.py` | `DASHBOARD_BASE_PATH` の既定値と正規化（先頭スラッシュの扱い）を確認するため。 | 根拠: `_BASE_PATH = config.DASHBOARD_BASE_PATH` (行番号: 23) |
 
 ## 8. 保守上の注意点
+
+* **（スマホ対応で追加）ルートの定義順に依存する**: `app.webmanifest` / `icon-{size}.png` / `m` / `m/app.webmanifest` は、中継の総当たりルート（`{_BASE_PATH}/{path:path}`）より**前**に定義されていなければならない。後ろに移すと、これらのパスもStreamlitへ中継されて404になる（`tests/test_dashboard_proxy.py` の `TestMobileHomeScreenAssets` が、中継先が居ない状態でも200で返ることを検査して固定している）。
+* 根拠: `@router.get(f"{_BASE_PATH}/app.webmanifest", include_in_schema=False)` (行番号: 52 / 抜粋: "@router.get(f\"{_BASE_PATH}/app.webmanifest\", include_in_schema=False)")
+
 
 * **`_BASE_PATH` はimport時に1回だけ評価される。** ルートのパス文字列そのものになるため、テスト等で実行時に `config.DASHBOARD_BASE_PATH` を差し替えても、既に登録済みのルートのパスは変わらない。
 * **3本のルートはすべて `include_in_schema=False`** であり、OpenAPIスキーマに現れない。`tests/test_unified_server_app.py` の外部Webhook整合テストはOpenAPIスキーマ上のパス一覧を使っているため、ここでワイルドカードをスキーマに出すとその検査を濁すことになる。

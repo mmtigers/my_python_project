@@ -21,9 +21,16 @@
 * Streamlit製ダッシュボードアプリケーションのエントリーポイント。ページ設定・ロガー設定などアプリ全体の初期化を行う。
 * `services.analysis_service` からセンサー・子供・排泄・食事・車・防犯ログ・駐輪場・NASステータス等のデータを読み込み、5つのタブに展開表示する。**（Issue #701・2026-09-19で退役）** 以前はAIレポート（「セバスチャンからの報告」、`ai_report_records`の最新1件）も表示していたが、機能ごと削除した。
 * **（スマホ対応で再設計）** 画面は5つのタブ（🏠 ホーム、🚃 おでかけ、👀 見守り、💡 くらし、🔧 システム）で構成され、レンダリングは `views.dashboard` 配下のビューモジュールに委譲する。サマリー（`views.dashboard.summary`）は常時最上部ではなく「ホーム」タブの中に入っている。
+* **（タブの遅延評価で変更）** タブは `st.tabs` ではなく `st.segmented_control`（`TAB_SELECTOR_STATE_KEY` をキーに選択状態を保持）で描き、**選択中のタブの描画関数だけ**を呼ぶ（`TAB_RENDERERS`）。`st.tabs` は選択されていないタブの中身もすべて実行するため、「🏠 ホーム」を開いただけの1回の描画で、JR運行情報のスクレイピング・Yahoo!路線情報のスクレイピング・`journalctl` の起動・年間気温の集計SQL・plotlyのグラフ6枚ぶんの生成まで毎回走っていた（タブを10個から5個に束ね直した再設計は「探しやすさ」を直したが、実行される処理量は減っていなかった）。折りたたみも同じ理由で `st.expander` から `view_common.lazy_section`（`st.toggle` ベース）へ置き換えられている。
+* 根拠: `def _render_tab_selector() -> str:` (行番号: 159 / 抜粋: "def _render_tab_selector() -> str:"), `TAB_RENDERERS: Dict[str, Callable[[datetime], None]] = {` (行番号: 281 / 抜粋: "TAB_RENDERERS: Dict[str, Callable[[datetime], None]] = {")
+* **（タブの遅延評価で変更）** データの読み込みも各タブの描画関数の中で行う。以前は `main()` の先頭で5タブ分（センサー・子供・排泄・食事・車・防犯ログ・駐輪場・NAS）をまとめて読んでいたが、選択中のタブしか描画しないため、そのタブが使わないテーブルを読む必要がなくなった（例: ホームタブが読む `load_generic_data_cached` は車のテーブルだけ）。
+* 根拠: `def _render_home_tab(now: datetime) -> None:` (行番号: 197 / 抜粋: "def _render_home_tab(now: datetime) -> None:")
+* **（タブの遅延評価で追加）** 選択中のタブは `?tab=` のクエリパラメータに保存される。「🔄 データを更新」（`st.rerun`）や再接続でホームタブに戻らず、`/dashboard?tab=watch` のようなURLをスマートフォンのホーム画面に置ける。
+* 根拠: `TAB_QUERY_PARAM = "tab"` (行番号: 88 / 抜粋: "TAB_QUERY_PARAM = \"tab\"")
 * **（スマホ対応で変更）** 以前は10個のタブ（クエスト、電車遅延、防犯カメラ、電力・環境、気温詳細、健康管理、高砂実家、ログ分析、システム管理、駐輪場）を持ち、そのすべての上にサマリー9枚を常時表示していた。ソース中のコメントには、この構成ではスマートフォンで「どのタブを開いてもサマリーを越えるスクロールが必要」「タブ列が画面幅の数倍になり、目的のタブを探せない」状態だったため用途で5つに束ね直した、と記されている。クエストタブは同じ内容をスマホ最適化済みのPWA `family-quest`（`/quest`）が持つ二重管理だったため撤去され、ヘッダーのリンクボタンだけが残っている。
 * **（Issue #507で削除）** 以前は「トレンド」タブも存在したが、参照先の`app_rankings`テーブルへの書き込みコードが存在せず機能として死んでいたため、UIごと削除された。
-* **（スマホ対応で追加）** 画面最上部に操作列（`_render_header_actions`）を常設する。「🔄 データを更新」は以前サイドバーにしか無く、`initial_sidebar_state="collapsed"` のためスマートフォンではハンバーガーメニューを開かないと押せなかった。
+* **（スマホ対応で追加）** 画面最上部に操作列（`_render_header_actions`）を常設する。「🔄 データを更新」は以前サイドバーにしか無く、`initial_sidebar_state="collapsed"` のためスマートフォンではハンバーガーメニューを開かないと押せなかった。**（スマホ対応で追加）** 操作列の下に、いま表示しているデータの取得時刻（`view_common.cache_generation_started_at`）と相対表記、および軽量ページ `{DASHBOARD_BASE_PATH}/m` への導線を `st.caption` で出す。表示は最大60秒キャッシュされるため、描画時刻をそのまま「最終更新」と書くと嘘になる。
+* 根拠: `fetched_at = view_common.cache_generation_started_at()` (行番号: 133 / 抜粋: "fetched_at = view_common.cache_generation_started_at()"), `MOBILE_PAGE_PATH = f"{config.DASHBOARD_BASE_PATH}/m"` (行番号: 45 / 抜粋: "MOBILE_PAGE_PATH = f\"{config.DASHBOARD_BASE_PATH}/m\"")
 * アプリ実行中に例外が発生した場合、エラーログを出力しDiscordへ通知を試み、画面上に汎用エラーメッセージを表示するフェイルセーフ処理を持つ（**Issue #410 L-L5で修正**: トレースバックは以前画面にも表示していたが、内部情報の露出防止のためログのみに変更した）。
 
 ## 3. 外部依存関係
@@ -140,17 +147,17 @@
 ### `_render_header_actions`
 
 * **役割**: 画面最上部の操作列を描画する。**（スマホのヘッダー改善で変更）** 全体を `st.container(key="header_actions")` で囲み、その中の `st.columns(2)` の左に「🔄 データを更新」ボタン（押下で `st.cache_data.clear()` と `st.rerun()`。**（Issue #741で変更）** 以前はリポジトリ全体に `@st.cache_data` が1つも存在せず、この `clear()` は何も消していなかった。`view_common` のキャッシュ付きローダを使うようになり、TTL(60秒)を待たずに捨てる操作として機能するようになった）、右に「⚔️ ファミクエを開く」リンクボタン（`QUEST_APP_PATH`）を、いずれも `width="stretch"` で配置する。docstringには、以前「データを更新」がサイドバーにしか無く、`initial_sidebar_state="collapsed"` のためスマートフォンではハンバーガーメニューを開かないと押せず最も使う操作が最も遠かったため、メイン画面の先頭に常設する旨が記されている。
-* 根拠: `def _render_header_actions() -> None:` (行番号: 42)
+* 根拠: `def _render_header_actions() -> None:` (行番号: 95)
 * **`key` 付き container で囲う理由**: `views/dashboard/common.py` のモバイルCSSは**すべての** `[data-testid="stHorizontalBlock"]` の列を `flex: 1 1 100%` で縦積みにする。グラフ・表には必要な指定だが、短いボタン2つには過剰で、スマホではヘッダーが2段になりタブと本文を画面外へ押し下げていた（2026-09-21 に実機で確認）。`key` を渡した container は `.st-key-header_actions` クラスを持つため、CSS 側でこの行だけ横並びに戻せる
 * **この対応の弱点**: `key` の文字列と CSS のセレクタが一致していることに依存する。どちらかをリネームしても Python は通り Streamlit も警告を出さず、**スマホのレイアウトだけが静かに元へ戻る**。`tests/test_dashboard_mobile_header.py` が両者の一致を検査する
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 42 / 抜粋: "def _render_header_actions() -> None:")
+* 根拠: (行番号: 95 / 抜粋: "def _render_header_actions() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: (行番号: 42 / 抜粋: "def _render_header_actions() -> None:")
+* 根拠: (行番号: 95 / 抜粋: "def _render_header_actions() -> None:")
 
 
 * **副作用**: 2カラムのボタン描画。更新ボタン押下時は `st.cache_data.clear()`（キャッシュ全クリア）と `st.rerun()`（再実行）。
@@ -158,7 +165,7 @@
 
 
 * **エラーハンドリング**: なし（呼び出し元 `main()` の `try` の内側で呼ばれる）
-* 根拠: (行番号: 42〜64 / 抜粋: "def _render_header_actions() -> None:")
+* 根拠: (行番号: 95〜138 / 抜粋: "def _render_header_actions() -> None:")
 
 
 * **補足（リンクがルート相対である理由）**: ソースのコメントに、このダッシュボードは `unified_server.py`(8000番)の `config.DASHBOARD_BASE_PATH` 配下に中継されて配信されるため、閲覧しているオリジン（LANのIP:8000でもCloudflare経由の公開ドメインでも）の `/quest` に解決されるルート相対リンクにしている、`config.FRONTEND_URL` のような固定URLを埋めるとLAN外から開いたときに繋がらない、と記されている。
@@ -175,21 +182,21 @@
 
 ### `main`
 
-* **役割**: サイドバー設定、ヘッダー操作列の描画、各種データの読み込み、5個のタブの生成とレンダリングを行うアプリ本体の処理。例外発生時はログ記録・Discord通知・エラー画面表示を行う。**（スマホ対応で変更）** サイドバーからは「データを更新」ボタンが `_render_header_actions` へ移り、代わりに主要操作の場所とスマートフォンからのアクセス経路（8000番の `/dashboard` 経由）を案内する `st.caption` が置かれている。（AIレポート表示はIssue #701で退役し、`main()`からも削除された。）**（Issue #410 L-L5で修正）** 例外発生時に画面表示していた`traceback.format_exc()`を`logger.error`によるログ出力のみに変更し、内部のファイルパス・設定値がLAN内の閲覧者に露出しないようにした。
-* 根拠: `def main():` (行番号: 77〜216 / 抜粋: "def main():")、サイドバーの案内文 (行番号: 73〜76 / 抜粋: "\"主要な操作(データ更新)はメイン画面の先頭にあります。\"")、トレースバックのログのみ化 (行番号: 199 / 抜粋: "logger.error(traceback.format_exc())")
+* **役割**: サイドバー設定、ヘッダー操作列の描画、タブ選択UIの描画、**選択中のタブ1つだけ**のレンダリングを行うアプリ本体の処理（**タブの遅延評価で変更**: 以前は5タブ分のデータ読み込みと5タブ分のレンダリングを毎回行っていた）。例外発生時はログ記録・Discord通知・エラー画面表示を行う。**（スマホ対応で変更）** サイドバーからは「データを更新」ボタンが `_render_header_actions` へ移り、代わりに主要操作の場所とスマートフォンからのアクセス経路（8000番の `/dashboard` 経由）を案内する `st.caption` が置かれている。（AIレポート表示はIssue #701で退役し、`main()`からも削除された。）**（Issue #410 L-L5で修正）** 例外発生時に画面表示していた`traceback.format_exc()`を`logger.error`によるログ出力のみに変更し、内部のファイルパス・設定値がLAN内の閲覧者に露出しないようにした。
+* 根拠: `def main():` (行番号: 300〜359 / 抜粋: "def main():")、サイドバーの案内文 (行番号: 73〜76 / 抜粋: "\"主要な操作(データ更新)はメイン画面の先頭にあります。\"")、トレースバックのログのみ化 (行番号: 199 / 抜粋: "logger.error(traceback.format_exc())")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def main():` (行番号: 77 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 300 / 抜粋: "def main():")
 
 
 * **戻り値/レスポンス**: なし（Streamlit UIへの描画が主目的）
-* 根拠: `def main():` (行番号: 77 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 300 / 抜粋: "def main():")
 
 
 * **タブ構成（スマホ対応で再設計）**:
 
-| タブ | 中身（`expanded=False` の `st.expander` に畳まれるものは「▸」付き） | `safe_section` のセクション名 |
+| タブ | 中身（既定で閉じた `view_common.lazy_section` に畳まれるものは「▸」付き。**開いたときだけ中身が実行される**） | `safe_section` のセクション名 |
 | --- | --- | --- |
 | 🏠 ホーム | `summary.render_summary` | サマリー |
 | 🚃 おでかけ | `misc_tab.render_traffic` / ▸`misc_tab.render_bicycle` | 電車遅延 / 駐輪場 |
@@ -197,20 +204,21 @@
 | 💡 くらし | `sensor_tab.render_electricity` / ▸`sensor_tab.render_temperature` | 電力・環境 / 気温詳細 |
 | 🔧 システム | `log_tab.render_resources` / `log_tab.render_nas_status` / ▸`log_tab.render_server_logs` / ▸`log_tab.render_logs` / ▸`log_tab.render_maintenance` | リソース状況 / NAS状態 / サーバーログ / ログ分析 / メンテナンス操作 |
 
-* 根拠: `st.tabs([...])` (行番号: 124〜130 / 抜粋: "tab_home, tab_out, tab_watch, tab_life, tab_sys = st.tabs([")、各タブの中身 (行番号: 137〜179 / 抜粋: "with tab_home:")
+* 根拠: `TABS: Tuple[Tuple[str, str], ...] = (` (行番号: 68 / 抜粋: "TABS: Tuple[Tuple[str, str], ...] = (")、各タブの描画関数 (行番号: 197〜223 / 抜粋: "def _render_home_tab(now: datetime) -> None:")、`TAB_RENDERERS: Dict[str, Callable[[datetime], None]] = {` (行番号: 281 / 抜粋: "TAB_RENDERERS: Dict[str, Callable[[datetime], None]] = {")
 
 
 * **副作用**:
     * サイドバーに設定見出し・案内文（`st.caption`）・CSS適用・現在時刻ログを出力する。
     * メイン画面にCSSを適用し、`_render_header_actions()` でヘッダーの操作列を描画する。
-    * `analysis_service` 経由での複数のデータ読み込み（センサー、子供、排泄、食事、車、防犯ログ、駐輪場、NASステータス）。
-    * 5タブ分のUIレンダリング（各ビューモジュールへ処理委譲）。
+    * **（タブの遅延評価で変更）** 選択中のタブが必要とするぶんだけの、`view_common` のキャッシュ付きローダ経由でのデータ読み込み。
+    * **（タブの遅延評価で変更）** 選択中のタブ1つぶんのUIレンダリング（各ビューモジュールへ処理委譲）。折りたたみセクションは開いているときだけ実行される。
+    * 選択中のタブを `st.query_params` に書き戻す。
     * 例外発生時、エラーログ出力・Discordへのエラー通知（`services.notification_service.send_push`）・画面への汎用エラーメッセージ表示。**（Issue #410 L-L5で修正）** トレースバックは画面表示せず、ログ（`logger.error`）にのみ出力する。
 * 根拠: `_render_header_actions()`, `df_sensor = view_common.load_sensor_data_cached(limit=10000)`, `services.notification_service.send_push(`
 
 
 * **エラーハンドリング**:
-    * データ読み込み（`analysis_service.load_*()`）を`try...except Exception as e:`で捕捉する。この範囲の失敗は全タブが依存する前提データが揃わないことを意味するため、ダッシュボード全体をエラー画面にする。
+    * ヘッダー操作列・タブ選択・タブ描画の呼び出し全体を`try...except Exception as e:`で捕捉する。**（タブの遅延評価で変更）** データ読み込みは各タブの描画関数の中（=`safe_section` の内側）へ移ったため、この外側の`except`に到達するのは、タブ選択そのものやヘッダーの描画が失敗した場合など、セクション単位では隔離できない失敗に限られる。
     * **[修正済み・Issue #438]** 以前はこの`try`ブロックがサマリー表示・全タブのレンダリングまで含んでおり、いずれか1タブの描画例外でもダッシュボード全体がエラー画面になっていた。現在は各描画呼び出しを、[dashboard_common.md](./dashboard_common.md)の`safe_section`コンテキストマネージャで個別に囲み、1つのセクションの例外が他のセクションの描画を止めないようにした（詳細は8節参照）。**（スマホ対応で変更）** 保護の単位は「タブ」ではなく「セクション」になり、1つのタブの中の複数セクション（例: 🔧 システムの5セクション）もそれぞれ独立して保護される。（AIレポートの表示とその`safe_section("AIレポート")`はIssue #701で削除された。）
     * 上記の外側`except Exception as e:`で捕捉した場合、エラーメッセージをログ出力（`logger.error`）した上で、`services.notification_service.send_push`によるDiscord通知を試みる。**[修正済み・Issue #438]** この通知処理自体の失敗は、以前は`except Exception: pass`で握りつぶしていたが、現在は`except Exception as notify_err: logger.warning(...)`でログに記録するよう変更した。
     * 最後に `st.error(...)` でユーザー向けの汎用エラーメッセージを表示する。**（Issue #410 L-L5で修正）** 以前は続けて`st.code(traceback.format_exc())`でトレースバックを画面に出力していたが、内部のファイルパス・設定値の露出防止のため`logger.error(traceback.format_exc())`によるログ出力のみに変更した。
@@ -220,7 +228,7 @@
 
 ## 5. 処理フロー図
 
-`main()` 関数における、データ読み込みからタブ描画、例外発生時のフォールバックまでの流れを示します。
+`main()` 関数における、タブ選択から描画、例外発生時のフォールバックまでの流れを示します。
 
 ```mermaid
 flowchart TD
@@ -229,13 +237,13 @@ flowchart TD
 
     TryStart --> Css["メイン画面にCSS適用"]
     Css --> Header["_render_header_actions(): 更新ボタン / ファミクエへのリンク"]
-    Header --> LoadData["外部: analysis_service.load_*() でデータ読み込み"]
-    LoadData --> CreateTabs["st.tabs() で5タブ生成<br/>ホーム / おでかけ / 見守り / くらし / システム"]
-    CreateTabs --> RenderTabs["各セクションをsafe_section()で個別に保護し、<br/>viewモジュールのrender系関数へ委譲<br/>(副次的な内容は st.expander に畳む)"]
+    Header --> Caption["データ取得時刻・軽量ページへの導線(st.caption)"]
+    Caption --> Selector["_render_tab_selector(): segmented_control<br/>?tab= から初期値を決め、選択を書き戻す"]
+    Selector --> RenderTabs["TAB_RENDERERS[active_tab](now):<br/>選択中のタブだけを描画<br/>(データ読み込みもこの中。折りたたみは開いたときだけ実行)"]
     RenderTabs --> End(["End: 正常終了(1セクションの例外は他に波及しない)"])
 
-    TryStart -. データ読み込みで例外発生 .-> Catch(["except Exception as e"])
-    LoadData -. 例外発生 .-> Catch
+    TryStart -. ヘッダー・タブ選択で例外発生 .-> Catch(["except Exception as e"])
+    Selector -. 例外発生 .-> Catch
 
     Catch --> LogErr["logger.error(err_msg)"]
     LogErr --> TryNotify(["Tryブロック: Discord通知"])

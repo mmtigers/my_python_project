@@ -17,6 +17,7 @@ import pandas as pd
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from views.dashboard import common as view_common
 from views.dashboard import sensor_tab
 
 # JST 固定。naive な datetime() を localize するより、オフセット付きの
@@ -36,6 +37,20 @@ def _mock_st():
         MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))
     ]
     return mock
+
+
+def _patch_st(mock_st):
+    """`sensor_tab` と、そこから呼ばれる `view_common` の st をまとめて差し替える。
+
+    グラフ・表の描画は `view_common.render_chart` / `render_table` 経由に
+    なった(モードバー無効化・列絞りを1箇所に寄せたため)。
+    """
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    stack.enter_context(patch.object(sensor_tab, "st", mock_st))
+    stack.enter_context(patch.object(view_common, "st", mock_st))
+    return stack
 
 
 def _sensor_df(rows):
@@ -62,7 +77,7 @@ def _warning_texts(mock_st):
 class TestRenderElectricity:
     def test_empty_dataframe_shows_info_and_returns_early(self):
         mock_st = _mock_st()
-        with patch.object(sensor_tab, "st", mock_st):
+        with _patch_st(mock_st):
             sensor_tab.render_electricity(pd.DataFrame(), NOW)
 
         mock_st.info.assert_called_once()
@@ -74,7 +89,7 @@ class TestRenderElectricity:
                  power_watts=420, timestamp=NOW - timedelta(hours=1)),
         ])
         mock_st = _mock_st()
-        with patch.object(sensor_tab, "st", mock_st):
+        with _patch_st(mock_st):
             sensor_tab.render_electricity(df, NOW)
 
         assert mock_st.plotly_chart.call_count >= 1
@@ -86,7 +101,7 @@ class TestRenderElectricity:
                  power_watts=300, timestamp=NOW - timedelta(days=1)),
         ])
         mock_st = _mock_st()
-        with patch.object(sensor_tab, "st", mock_st):
+        with _patch_st(mock_st):
             sensor_tab.render_electricity(df, NOW)
 
         fig = mock_st.plotly_chart.call_args_list[0].args[0]
@@ -98,7 +113,7 @@ class TestRenderElectricity:
         気づけるよう、情報表示ではなく警告を出すこと。"""
         df = _sensor_df([_row(device_type="Plug A", power_watts=10)])
         mock_st = _mock_st()
-        with patch.object(sensor_tab, "st", mock_st):
+        with _patch_st(mock_st):
             sensor_tab.render_electricity(df, NOW)
 
         assert any(sensor_tab.DEVICE_TYPE_NATURE_REMO_E_LITE in t for t in _warning_texts(mock_st))
@@ -106,7 +121,7 @@ class TestRenderElectricity:
     def test_plug_data_is_plotted_and_absence_warns(self):
         df_with = _sensor_df([_row(device_type="Smart Plug", power_watts=60)])
         mock_st = _mock_st()
-        with patch.object(sensor_tab, "st", mock_st):
+        with _patch_st(mock_st):
             sensor_tab.render_electricity(df_with, NOW)
         assert "プラグデータなし" not in _warning_texts(mock_st)
 
@@ -119,24 +134,24 @@ class TestRenderElectricity:
 
 class TestRenderTemperature:
     def _patch_yearly(self, df):
-        return patch.object(sensor_tab.analysis_service, "load_yearly_temperature_stats", return_value=df)
+        return patch.object(sensor_tab.view_common, "load_yearly_temperature_stats_cached", return_value=df)
 
     def test_empty_dataframe_shows_info_and_returns_early(self):
         mock_st = _mock_st()
-        with patch.object(sensor_tab, "st", mock_st):
+        with _patch_st(mock_st):
             sensor_tab.render_temperature(pd.DataFrame(), NOW)
         mock_st.info.assert_called_once()
 
     def test_dataframe_without_device_type_column_returns_early(self):
         mock_st = _mock_st()
-        with patch.object(sensor_tab, "st", mock_st):
+        with _patch_st(mock_st):
             sensor_tab.render_temperature(pd.DataFrame([{"timestamp": NOW}]), NOW)
         mock_st.info.assert_called_once()
 
     def test_meter_data_draws_temperature_and_humidity_charts(self):
         df = _sensor_df([_row(device_type="WoIOSensor Meter", timestamp=NOW - timedelta(hours=2))])
         mock_st = _mock_st()
-        with patch.object(sensor_tab, "st", mock_st), self._patch_yearly(pd.DataFrame()):
+        with _patch_st(mock_st), self._patch_yearly(pd.DataFrame()):
             sensor_tab.render_temperature(df, NOW)
 
         # 室温・湿度の2枚(年間データは空なので描画されない)
@@ -146,7 +161,7 @@ class TestRenderTemperature:
     def test_missing_meter_data_warns_for_both_temperature_and_humidity(self):
         df = _sensor_df([_row(device_type="Plug", timestamp=NOW)])
         mock_st = _mock_st()
-        with patch.object(sensor_tab, "st", mock_st), self._patch_yearly(pd.DataFrame()):
+        with _patch_st(mock_st), self._patch_yearly(pd.DataFrame()):
             sensor_tab.render_temperature(df, NOW)
 
         warnings = _warning_texts(mock_st)
@@ -162,7 +177,7 @@ class TestRenderTemperature:
             "in_min": [18.0, 17.5],
         })
         mock_st = _mock_st()
-        with patch.object(sensor_tab, "st", mock_st), self._patch_yearly(yearly):
+        with _patch_st(mock_st), self._patch_yearly(yearly):
             sensor_tab.render_temperature(df, NOW)
 
         yearly_fig = mock_st.plotly_chart.call_args_list[-1].args[0]
@@ -173,7 +188,7 @@ class TestRenderTemperature:
 class TestRenderTakasago:
     def test_empty_dataframe_renders_nothing(self):
         mock_st = _mock_st()
-        with patch.object(sensor_tab, "st", mock_st):
+        with _patch_st(mock_st):
             sensor_tab.render_takasago(pd.DataFrame())
         mock_st.dataframe.assert_not_called()
 
@@ -183,10 +198,12 @@ class TestRenderTakasago:
             _row(location="伊丹", friendly_name="リビング", contact_state="open"),
         ])
         mock_st = _mock_st()
-        with patch.object(sensor_tab, "st", mock_st):
+        with _patch_st(mock_st):
             sensor_tab.render_takasago(df)
 
         shown = mock_st.dataframe.call_args.args[0]
         assert len(shown) == 1
-        assert list(shown.columns) == ["timestamp", "friendly_name", "contact_state"]
-        assert shown.iloc[0]["friendly_name"] == "玄関"
+        # 列は表示名へ。時刻は「09/21 03:04 (3分前)」の短縮表記になる
+        # (ISO文字列はスマホの表で1列を丸ごと食うため)。
+        assert list(shown.columns) == ["時刻", "センサー", "状態"]
+        assert shown.iloc[0]["センサー"] == "玄関"

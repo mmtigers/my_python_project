@@ -22,6 +22,7 @@ import pandas as pd
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from views.dashboard import common as view_common
 from views.dashboard import log_tab
 
 
@@ -38,10 +39,20 @@ def _mock_st(**overrides):
     return mock
 
 
+def _patch_st(mock_st):
+    """`log_tab` と、そこから呼ばれる `view_common` の st をまとめて差し替える。"""
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    stack.enter_context(patch.object(log_tab, "st", mock_st))
+    stack.enter_context(patch.object(view_common, "st", mock_st))
+    return stack
+
+
 class TestRenderLogs:
     def test_empty_dataframe_shows_info_and_returns_early(self):
         mock_st = _mock_st()
-        with patch.object(log_tab, "st", mock_st):
+        with _patch_st(mock_st):
             log_tab.render_logs(pd.DataFrame())
         mock_st.info.assert_called_once()
         mock_st.dataframe.assert_not_called()
@@ -55,11 +66,11 @@ class TestRenderLogs:
         ])
         mock_st = _mock_st()
         mock_st.multiselect.return_value = ["伊丹"]
-        with patch.object(log_tab, "st", mock_st):
+        with _patch_st(mock_st):
             log_tab.render_logs(df)
 
         shown = mock_st.dataframe.call_args.args[0]
-        assert list(shown["location"]) == ["伊丹"]
+        assert list(shown["場所"]) == ["伊丹"]
 
     def test_all_locations_are_selected_by_default(self):
         df = pd.DataFrame([
@@ -69,7 +80,7 @@ class TestRenderLogs:
              "contact_state": "", "power_watts": 30},
         ])
         mock_st = _mock_st()
-        with patch.object(log_tab, "st", mock_st):
+        with _patch_st(mock_st):
             log_tab.render_logs(df)
 
         assert sorted(mock_st.multiselect.call_args.kwargs["default"]) == ["伊丹", "高砂"]
@@ -78,18 +89,18 @@ class TestRenderLogs:
 class TestRenderResources:
     def test_disk_and_memory_are_rendered_as_progress_bars(self):
         mock_st = _mock_st()
-        with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "get_disk_usage", return_value={"percent": 61.4}), \
-             patch.object(log_tab.analysis_service, "get_memory_usage", return_value={"percent": 38.9}):
+        with _patch_st(mock_st), \
+             patch.object(log_tab.view_common, "get_disk_usage_cached", return_value={"percent": 61.4}), \
+             patch.object(log_tab.view_common, "get_memory_usage_cached", return_value={"percent": 38.9}):
             log_tab.render_resources()
 
         assert [c.args[0] for c in mock_st.progress.call_args_list] == [61, 38]
 
     def test_unavailable_metrics_are_skipped_without_raising(self):
         mock_st = _mock_st()
-        with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "get_disk_usage", return_value=None), \
-             patch.object(log_tab.analysis_service, "get_memory_usage", return_value=None):
+        with _patch_st(mock_st), \
+             patch.object(log_tab.view_common, "get_disk_usage_cached", return_value=None), \
+             patch.object(log_tab.view_common, "get_memory_usage_cached", return_value=None):
             log_tab.render_resources()
 
         mock_st.progress.assert_not_called()
@@ -98,8 +109,8 @@ class TestRenderResources:
 class TestRenderNasStatus:
     def test_missing_data_shows_info_and_returns_early(self):
         mock_st = _mock_st()
-        with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "load_nas_status", return_value=None):
+        with _patch_st(mock_st), \
+             patch.object(log_tab.view_common, "load_nas_status_cached", return_value=None):
             log_tab.render_nas_status()
 
         mock_st.info.assert_called_once()
@@ -108,8 +119,8 @@ class TestRenderNasStatus:
     def test_ok_status_is_shown_with_check_marks(self):
         nas = pd.Series({"status_ping": "OK", "status_mount": "OK", "timestamp": "2026-09-19 12:00"})
         mock_st = _mock_st()
-        with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "load_nas_status", return_value=nas):
+        with _patch_st(mock_st), \
+             patch.object(log_tab.view_common, "load_nas_status_cached", return_value=nas):
             log_tab.render_nas_status()
 
         values = [c.args[1] for c in mock_st.metric.call_args_list]
@@ -120,8 +131,8 @@ class TestRenderNasStatus:
     def test_ng_status_is_shown_with_cross_marks(self):
         nas = pd.Series({"status_ping": "NG", "status_mount": "NG", "timestamp": "2026-09-19 12:00"})
         mock_st = _mock_st()
-        with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "load_nas_status", return_value=nas):
+        with _patch_st(mock_st), \
+             patch.object(log_tab.view_common, "load_nas_status_cached", return_value=nas):
             log_tab.render_nas_status()
 
         values = [c.args[1] for c in mock_st.metric.call_args_list]
@@ -134,8 +145,8 @@ class TestRenderServerLogs:
         mock_st = _mock_st()
         mock_st.radio.return_value = "直近のログを表示"
         mock_st.selectbox.side_effect = [200, "全て"]
-        with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "get_system_logs", return_value="log body") as mock_logs:
+        with _patch_st(mock_st), \
+             patch.object(log_tab.view_common, "get_system_logs_cached", return_value="log body") as mock_logs:
             log_tab.render_server_logs()
 
         assert mock_logs.call_args.kwargs == {"lines": 200, "priority": None, "target_date": None}
@@ -147,8 +158,8 @@ class TestRenderServerLogs:
         mock_st.radio.return_value = "日付を指定して検索"
         mock_st.date_input.return_value = target
         mock_st.selectbox.return_value = "エラー"
-        with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "get_system_logs", return_value="log body") as mock_logs:
+        with _patch_st(mock_st), \
+             patch.object(log_tab.view_common, "get_system_logs_cached", return_value="log body") as mock_logs:
             log_tab.render_server_logs()
 
         assert mock_logs.call_args.kwargs["target_date"] == target
@@ -158,8 +169,8 @@ class TestRenderServerLogs:
         mock_st = _mock_st()
         mock_st.radio.return_value = "直近のログを表示"
         mock_st.selectbox.side_effect = [50, "警告"]
-        with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "get_system_logs", return_value=""):
+        with _patch_st(mock_st), \
+             patch.object(log_tab.view_common, "get_system_logs_cached", return_value=""):
             log_tab.render_server_logs()
 
         mock_st.info.assert_called_once()
@@ -175,7 +186,7 @@ class TestRenderMaintenance:
         # チェックが外れていてもボタン自体は押せる状態にして、
         # 「ボタンの描画すらされない」ことを確かめる。
         mock_st.button.return_value = True
-        with patch.object(log_tab, "st", mock_st), \
+        with _patch_st(mock_st), \
              patch.object(log_tab.subprocess, "run") as mock_run, \
              patch("services.backup_service.perform_backup", return_value=(True, "ok", 1.0)):
             log_tab.render_maintenance()
@@ -188,7 +199,7 @@ class TestRenderMaintenance:
         mock_st = _mock_st()
         mock_st.checkbox.return_value = True
         mock_st.button.side_effect = lambda label, **kwargs: "システム再起動" in label
-        with patch.object(log_tab, "st", mock_st), \
+        with _patch_st(mock_st), \
              patch.object(log_tab.subprocess, "run") as mock_run, \
              patch("services.backup_service.perform_backup", return_value=(True, "ok", 1.0)):
             log_tab.render_maintenance()
@@ -203,7 +214,7 @@ class TestRenderMaintenance:
         mock_st = _mock_st()
         mock_st.checkbox.return_value = True
         mock_st.button.side_effect = lambda label, **kwargs: "システム再起動" in label
-        with patch.object(log_tab, "st", mock_st), \
+        with _patch_st(mock_st), \
              patch.object(log_tab.subprocess, "run") as mock_run, \
              patch("services.backup_service.perform_backup", return_value=(True, "ok", 1.0)):
             log_tab.render_maintenance()
@@ -215,7 +226,7 @@ class TestRenderMaintenance:
         mock_st = _mock_st()
         mock_st.checkbox.return_value = True
         mock_st.button.side_effect = lambda label, **kwargs: "システム再起動" in label
-        with patch.object(log_tab, "st", mock_st), \
+        with _patch_st(mock_st), \
              patch.object(log_tab.subprocess, "run",
                           side_effect=subprocess.TimeoutExpired(cmd="systemctl", timeout=30)), \
              patch("services.backup_service.perform_backup", return_value=(True, "ok", 1.0)):
@@ -228,7 +239,7 @@ class TestRenderMaintenance:
         mock_st = _mock_st()
         mock_st.checkbox.return_value = True
         mock_st.button.side_effect = lambda label, **kwargs: "システム再起動" in label
-        with patch.object(log_tab, "st", mock_st), \
+        with _patch_st(mock_st), \
              patch.object(log_tab.subprocess, "run",
                           side_effect=subprocess.CalledProcessError(1, "systemctl")), \
              patch("services.backup_service.perform_backup", return_value=(True, "ok", 1.0)):
@@ -240,7 +251,7 @@ class TestRenderMaintenance:
         mock_st = _mock_st()
         mock_st.checkbox.return_value = False
         mock_st.button.side_effect = lambda label, **kwargs: "バックアップ" in label
-        with patch.object(log_tab, "st", mock_st), \
+        with _patch_st(mock_st), \
              patch("services.backup_service.perform_backup", return_value=(True, "done", 12.34)):
             log_tab.render_maintenance()
 
@@ -251,7 +262,7 @@ class TestRenderMaintenance:
         mock_st = _mock_st()
         mock_st.checkbox.return_value = False
         mock_st.button.side_effect = lambda label, **kwargs: "バックアップ" in label
-        with patch.object(log_tab, "st", mock_st), \
+        with _patch_st(mock_st), \
              patch("services.backup_service.perform_backup", return_value=(False, "NASが見つかりません", 0.0)):
             log_tab.render_maintenance()
 

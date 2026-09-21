@@ -36,7 +36,7 @@ def test_render_traffic_escapes_scraped_status_and_detail():
 
     mock_st = _mock_st()
     with patch.object(misc_tab, "st", mock_st), \
-         patch.object(misc_tab.train_service, "get_jr_traffic_status", return_value=fake_status), \
+         patch.object(misc_tab.view_common, "load_jr_traffic_status_cached", return_value=fake_status), \
          patch.object(misc_tab, "_render_route_search"):
         misc_tab.render_traffic()
 
@@ -59,7 +59,7 @@ def test_render_route_search_escapes_scraped_fields():
 
     mock_st = _mock_st()
     with patch.object(misc_tab, "st", mock_st), \
-         patch.object(misc_tab.train_service, "get_route_info", return_value=fake_route):
+         patch.object(misc_tab.view_common, "load_route_info_cached", return_value=fake_route):
         misc_tab._render_route_search(MagicMock(), "A", "B", "icon")
 
     html = _rendered_html(mock_st.markdown)

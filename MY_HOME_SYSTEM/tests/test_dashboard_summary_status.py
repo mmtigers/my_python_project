@@ -1,6 +1,10 @@
 # MY_HOME_SYSTEM/tests/test_dashboard_summary_status.py
 """
-views/dashboard/summary.py のステータス判定ヘルパーの回帰テスト(Issue #754)。
+ステータスカードの判定ヘルパーの回帰テスト(Issue #754)。
+
+判定ロジックは `views/dashboard/summary.py` から
+`services/home_status_service.py` へ移した。Streamlit を介さない軽量ページ
+(`/dashboard/m`)が同じカードを出すため、判定を2箇所に持たないようにしたもの。
 
 `.coveragerc` の omit から `views/dashboard/*` を外すにあたって追加した。
 これらは「DataFrame を受け取って (表示文字列, テーマ名) を返す」純粋関数で、
@@ -17,6 +21,7 @@ import pandas as pd
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from services import home_status_service
 from views.dashboard import summary
 
 # JST 固定。naive な datetime() を localize するより、オフセット付きの
@@ -49,167 +54,161 @@ def _row(**kwargs):
 
 class TestGetTakasagoStatus:
     def test_empty_dataframe_returns_no_data(self):
-        assert summary.get_takasago_status(pd.DataFrame(), NOW) == ("⚪ データなし", "theme-gray")
+        assert home_status_service.get_takasago_status(pd.DataFrame(), NOW) == ("⚪ データなし", "theme-gray")
 
     def test_missing_columns_returns_no_data(self):
         df = pd.DataFrame([{"timestamp": NOW}])
-        assert summary.get_takasago_status(df, NOW) == ("⚪ データなし", "theme-gray")
+        assert home_status_service.get_takasago_status(df, NOW) == ("⚪ データなし", "theme-gray")
 
     def test_no_takasago_rows_returns_no_data(self):
         df = _sensor_df([_row(location="伊丹", contact_state="open")])
-        assert summary.get_takasago_status(df, NOW) == ("⚪ データなし", "theme-gray")
+        assert home_status_service.get_takasago_status(df, NOW) == ("⚪ データなし", "theme-gray")
 
     def test_activity_within_one_hour_is_green(self):
         df = _sensor_df([_row(location="高砂", contact_state="detected",
                               timestamp=NOW - timedelta(minutes=30))])
-        val, theme = summary.get_takasago_status(df, NOW)
+        val, theme = home_status_service.get_takasago_status(df, NOW)
         assert val == "🟢 元気 (1h以内)"
         assert theme == "theme-green"
 
     def test_activity_within_three_hours_is_yellow(self):
         df = _sensor_df([_row(location="高砂", contact_state="open",
                               timestamp=NOW - timedelta(hours=2))])
-        val, theme = summary.get_takasago_status(df, NOW)
+        val, theme = home_status_service.get_takasago_status(df, NOW)
         assert val == "🟡 静か (3h以内)"
         assert theme == "theme-yellow"
 
     def test_no_activity_for_hours_is_red_with_hour_count(self):
         df = _sensor_df([_row(location="高砂", contact_state="open",
                               timestamp=NOW - timedelta(hours=5))])
-        val, theme = summary.get_takasago_status(df, NOW)
+        val, theme = home_status_service.get_takasago_status(df, NOW)
         assert val == "🔴 5時間 動きなし"
         assert theme == "theme-red"
 
 
 class TestGetItamiStatus:
     def test_empty_dataframe_returns_no_data(self):
-        assert summary.get_itami_status(pd.DataFrame(), NOW) == ("⚪ データなし", "theme-gray")
+        assert home_status_service.get_itami_status(pd.DataFrame(), NOW) == ("⚪ データなし", "theme-gray")
 
     def test_missing_required_columns_returns_no_data(self):
         df = pd.DataFrame([{"timestamp": NOW, "location": "伊丹"}])
-        assert summary.get_itami_status(df, NOW) == ("⚪ データなし", "theme-gray")
+        assert home_status_service.get_itami_status(df, NOW) == ("⚪ データなし", "theme-gray")
 
     def test_motion_within_ten_minutes_is_active_now(self):
         df = _sensor_df([_row(device_type="Motion Sensor", movement_state="detected",
                               timestamp=NOW - timedelta(minutes=3))])
-        assert summary.get_itami_status(df, NOW) == ("🟢 活動中 (今)", "theme-green")
+        assert home_status_service.get_itami_status(df, NOW) == ("🟢 活動中 (今)", "theme-green")
 
     def test_webhook_device_with_contact_detected_is_also_treated_as_motion(self):
         """webhook_router が movement ではなく contact_state に 'detected' を
         保存してしまう既知の挙動への対応が生きていること。"""
         df = _sensor_df([_row(device_type="Webhook", contact_state="detected",
                               timestamp=NOW - timedelta(minutes=30))])
-        val, theme = summary.get_itami_status(df, NOW)
+        val, theme = home_status_service.get_itami_status(df, NOW)
         assert val == "🟢 活動中 (30分前)"
         assert theme == "theme-green"
 
     def test_motion_over_one_hour_ago_is_quiet(self):
         df = _sensor_df([_row(device_type="Motion Sensor", movement_state="detected",
                               timestamp=NOW - timedelta(hours=3))])
-        assert summary.get_itami_status(df, NOW) == ("🟡 静か (3h前)", "theme-yellow")
+        assert home_status_service.get_itami_status(df, NOW) == ("🟡 静か (3h前)", "theme-yellow")
 
     def test_falls_back_to_contact_sensor_when_no_motion(self):
         df = _sensor_df([_row(device_type="Contact Sensor", contact_state="open",
                               timestamp=NOW - timedelta(minutes=20))])
-        assert summary.get_itami_status(df, NOW) == ("🟢 活動中 (20分前)", "theme-green")
+        assert home_status_service.get_itami_status(df, NOW) == ("🟢 活動中 (20分前)", "theme-green")
 
     def test_stale_contact_sensor_stays_no_data(self):
         df = _sensor_df([_row(device_type="Contact Sensor", contact_state="open",
                               timestamp=NOW - timedelta(hours=5))])
-        assert summary.get_itami_status(df, NOW) == ("⚪ データなし", "theme-gray")
+        assert home_status_service.get_itami_status(df, NOW) == ("⚪ データなし", "theme-gray")
 
 
 class TestGetTrafficStatus:
-    def _patch(self, status):
-        return patch.object(summary.train_service, "get_jr_traffic_status", return_value=status)
+    """取得(スクレイピング)は呼び出し側の責務になり、判定だけを受け持つ。"""
 
     def test_suspended_takes_priority(self):
-        with self._patch({"宝塚線": {"is_suspended": True, "is_delay": True}, "神戸線": {}}):
-            assert summary.get_traffic_status() == ("⛔ 運休発生", "theme-red")
+        status = {"宝塚線": {"is_suspended": True, "is_delay": True}, "神戸線": {}}
+        assert home_status_service.get_traffic_status(status) == ("⛔ 運休発生", "theme-red")
 
     def test_delay_is_yellow(self):
-        with self._patch({"宝塚線": {}, "神戸線": {"is_delay": True}}):
-            assert summary.get_traffic_status() == ("⚠️ 遅延あり", "theme-yellow")
+        status = {"宝塚線": {}, "神戸線": {"is_delay": True}}
+        assert home_status_service.get_traffic_status(status) == ("⚠️ 遅延あり", "theme-yellow")
 
     def test_unavailable_is_not_reported_as_normal(self):
         """取得不可を「平常運転」と偽らないこと(遅延見逃し防止)。"""
-        with self._patch({"宝塚線": {"is_unavailable": True}, "神戸線": {}}):
-            assert summary.get_traffic_status() == ("⚪ 情報取得不可", "theme-gray")
+        status = {"宝塚線": {"is_unavailable": True}, "神戸線": {}}
+        assert home_status_service.get_traffic_status(status) == ("⚪ 情報取得不可", "theme-gray")
 
     def test_normal_operation(self):
-        with self._patch({"宝塚線": {}, "神戸線": {}}):
-            assert summary.get_traffic_status() == ("🟢 平常運転", "theme-green")
+        assert home_status_service.get_traffic_status({"宝塚線": {}, "神戸線": {}}) == ("🟢 平常運転", "theme-green")
 
     def test_missing_keys_do_not_raise(self):
         """Issue #438: is_delay だけ直接インデックスアクセスだったため、キーが
         欠けた応答で KeyError になっていた。.get() へ統一されていること。"""
-        with self._patch({"宝塚線": {}, "神戸線": {}}):
-            summary.get_traffic_status()
+        home_status_service.get_traffic_status({"宝塚線": {}, "神戸線": {}})
 
 
 class TestGetServerStatus:
     def test_low_memory_is_green(self):
-        with patch.object(summary.analysis_service, "get_memory_usage", return_value={"percent": 42.7}):
-            assert summary.get_server_status() == ("💻 RAM: 42%", "theme-green")
+        assert home_status_service.get_server_status({"percent": 42.7}) == ("💻 RAM: 42%", "theme-green")
 
     def test_high_memory_is_red(self):
-        with patch.object(summary.analysis_service, "get_memory_usage", return_value={"percent": 91.0}):
-            assert summary.get_server_status() == ("💻 RAM: 91%", "theme-red")
+        assert home_status_service.get_server_status({"percent": 91.0}) == ("💻 RAM: 91%", "theme-red")
 
     def test_unavailable_memory_is_gray(self):
-        with patch.object(summary.analysis_service, "get_memory_usage", return_value=None):
-            assert summary.get_server_status() == ("⚪ 取得失敗", "theme-gray")
+        assert home_status_service.get_server_status(None) == ("⚪ 取得失敗", "theme-gray")
 
 
 class TestGetNasStatusSimple:
     def test_none_is_no_data(self):
-        assert summary.get_nas_status_simple(None) == ("⚪ データなし", "theme-gray")
+        assert home_status_service.get_nas_status_simple(None) == ("⚪ データなし", "theme-gray")
 
     def test_ping_ok_is_green(self):
-        assert summary.get_nas_status_simple(pd.Series({"status_ping": "OK"})) == ("🗄️ NAS: 稼働中", "theme-green")
+        assert home_status_service.get_nas_status_simple(pd.Series({"status_ping": "OK"})) == ("🗄️ NAS: 稼働中", "theme-green")
 
     def test_ping_ng_is_red(self):
-        assert summary.get_nas_status_simple(pd.Series({"status_ping": "NG"})) == ("⚠️ NAS: 応答なし", "theme-red")
+        assert home_status_service.get_nas_status_simple(pd.Series({"status_ping": "NG"})) == ("⚠️ NAS: 応答なし", "theme-red")
 
     def test_missing_key_is_reported_as_broken_data(self):
-        assert summary.get_nas_status_simple(pd.Series({"other": 1})) == ("⚠️ NAS: データ異常", "theme-yellow")
+        assert home_status_service.get_nas_status_simple(pd.Series({"other": 1})) == ("⚠️ NAS: データ異常", "theme-yellow")
 
 
 class TestGetCarStatus:
     def test_leave_means_out(self):
         df = pd.DataFrame([{"action": "LEAVE"}])
-        assert summary.get_car_status(df) == ("🚗 外出中", "theme-yellow")
+        assert home_status_service.get_car_status(df) == ("🚗 外出中", "theme-yellow")
 
     def test_arrive_means_home(self):
         df = pd.DataFrame([{"action": "ARRIVE"}])
-        assert summary.get_car_status(df) == ("🏠 在宅", "theme-green")
+        assert home_status_service.get_car_status(df) == ("🏠 在宅", "theme-green")
 
     def test_empty_defaults_to_home(self):
-        assert summary.get_car_status(pd.DataFrame()) == ("🏠 在宅", "theme-green")
+        assert home_status_service.get_car_status(pd.DataFrame()) == ("🏠 在宅", "theme-green")
 
 
 class TestGetRiceStatus:
     def test_missing_columns_returns_not_cooked(self):
-        assert summary.get_rice_status(pd.DataFrame(), NOW) == ("🍚 炊いてない", "theme-red")
+        assert home_status_service.get_rice_status(pd.DataFrame(), NOW) == ("🍚 炊いてない", "theme-red")
 
     def test_no_rice_cooker_rows_returns_not_cooked(self):
         df = _sensor_df([_row(device_name="エアコン", power_watts=800)])
-        assert summary.get_rice_status(df, NOW) == ("🍚 炊いてない", "theme-red")
+        assert home_status_service.get_rice_status(df, NOW) == ("🍚 炊いてない", "theme-red")
 
     def test_high_wattage_today_means_rice_available(self):
         df = _sensor_df([_row(device_name="炊飯器", power_watts=700,
                               timestamp=NOW - timedelta(hours=2))])
-        assert summary.get_rice_status(df, NOW) == ("🍚 ご飯あり", "theme-green")
+        assert home_status_service.get_rice_status(df, NOW) == ("🍚 ご飯あり", "theme-green")
 
     def test_standby_wattage_does_not_count(self):
         df = _sensor_df([_row(device_name="炊飯器", power_watts=3,
                               timestamp=NOW - timedelta(hours=2))])
-        assert summary.get_rice_status(df, NOW) == ("🍚 炊いてない", "theme-red")
+        assert home_status_service.get_rice_status(df, NOW) == ("🍚 炊いてない", "theme-red")
 
     def test_yesterdays_cooking_does_not_count(self):
         df = _sensor_df([_row(device_name="炊飯器", power_watts=700,
                               timestamp=NOW - timedelta(days=1))])
-        assert summary.get_rice_status(df, NOW) == ("🍚 炊いてない", "theme-red")
+        assert home_status_service.get_rice_status(df, NOW) == ("🍚 炊いてない", "theme-red")
 
 
 class TestGetBicycleStatus:
@@ -222,15 +221,15 @@ class TestGetBicycleStatus:
         return df
 
     def test_empty_is_no_data(self):
-        assert summary.get_bicycle_status(pd.DataFrame()) == ("⚪ データなし", "theme-gray")
+        assert home_status_service.get_bicycle_status(pd.DataFrame()) == ("⚪ データなし", "theme-gray")
 
     def test_no_target_area_is_no_data(self):
         df = self._df([{"timestamp": NOW, "area_name": "対象外の駐輪場", "waiting_count": 5}])
-        assert summary.get_bicycle_status(df) == ("⚪ データなし", "theme-gray")
+        assert home_status_service.get_bicycle_status(df) == ("⚪ データなし", "theme-gray")
 
     def test_zero_waiting_is_green(self):
         df = self._df([{"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 0}])
-        val, theme = summary.get_bicycle_status(df)
+        val, theme = home_status_service.get_bicycle_status(df)
         assert theme == "theme-green"
         assert "第1A: <b>0</b>台" in val
         # 対象エリアのうちデータが無いものは "-" で埋める
@@ -241,12 +240,12 @@ class TestGetBicycleStatus:
             {"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 7},
             {"timestamp": NOW, "area_name": self.AREA_3A, "waiting_count": 6},
         ])
-        _, theme = summary.get_bicycle_status(df)
+        _, theme = home_status_service.get_bicycle_status(df)
         assert theme == "theme-red"
 
     def test_moderate_waiting_is_yellow(self):
         df = self._df([{"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 4}])
-        _, theme = summary.get_bicycle_status(df)
+        _, theme = home_status_service.get_bicycle_status(df)
         assert theme == "theme-yellow"
 
     def test_increase_against_yesterday_is_marked_red(self):
@@ -254,7 +253,7 @@ class TestGetBicycleStatus:
             {"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 5},
             {"timestamp": NOW - timedelta(days=1), "area_name": self.AREA_1A, "waiting_count": 2},
         ])
-        val, _ = summary.get_bicycle_status(df)
+        val, _ = home_status_service.get_bicycle_status(df)
         assert "🔺3" in val and "#d32f2f" in val
 
     def test_decrease_against_yesterday_is_marked_green(self):
@@ -262,7 +261,7 @@ class TestGetBicycleStatus:
             {"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 2},
             {"timestamp": NOW - timedelta(days=1), "area_name": self.AREA_1A, "waiting_count": 5},
         ])
-        val, _ = summary.get_bicycle_status(df)
+        val, _ = home_status_service.get_bicycle_status(df)
         assert "🔻3" in val and "#388e3c" in val
 
     def test_no_change_against_yesterday(self):
@@ -270,12 +269,12 @@ class TestGetBicycleStatus:
             {"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 3},
             {"timestamp": NOW - timedelta(days=1), "area_name": self.AREA_1A, "waiting_count": 3},
         ])
-        val, _ = summary.get_bicycle_status(df)
+        val, _ = home_status_service.get_bicycle_status(df)
         assert "➡️0" in val
 
     def test_no_comparable_yesterday_data_shows_placeholder(self):
         df = self._df([{"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 3}])
-        val, _ = summary.get_bicycle_status(df)
+        val, _ = home_status_service.get_bicycle_status(df)
         assert "(--)" in val
 
     def test_string_timestamps_are_converted_without_mutating_the_caller_dataframe(self):
@@ -284,7 +283,7 @@ class TestGetBicycleStatus:
         df = pd.DataFrame([
             {"timestamp": "2026-09-19T12:00:00+09:00", "area_name": self.AREA_1A, "waiting_count": 1},
         ])
-        val, _ = summary.get_bicycle_status(df)
+        val, _ = home_status_service.get_bicycle_status(df)
         assert "第1A: <b>1</b>台" in val
         assert df["timestamp"].dtype == object
 
@@ -295,10 +294,10 @@ class TestRenderSummary:
         df_car = pd.DataFrame([{"action": "ARRIVE"}])
         df_bicycle = pd.DataFrame()
 
-        with patch.object(summary, "render_status_grid") as mock_grid, \
-             patch.object(summary.analysis_service, "calculate_monthly_cost_cumulative", return_value=4321), \
-             patch.object(summary.analysis_service, "get_memory_usage", return_value={"percent": 50}), \
-             patch.object(summary.train_service, "get_jr_traffic_status",
+        with patch.object(summary.view_common, "render_status_grid") as mock_grid, \
+             patch.object(summary.view_common, "get_monthly_cost_cached", return_value=4321), \
+             patch.object(summary.view_common, "get_memory_usage_cached", return_value={"percent": 50}), \
+             patch.object(summary.view_common, "load_jr_traffic_status_cached",
                           return_value={"宝塚線": {}, "神戸線": {}}):
             summary.render_summary(NOW, df_sensor, df_car, df_bicycle, None)
 
@@ -316,9 +315,9 @@ class TestRenderSummary:
     def test_section_failure_propagates_to_caller_for_safe_section_to_catch(self):
         """render_summary 自身は例外を握りつぶさず、dashboard.py 側の
         safe_section(#438)が隔離する設計であること。"""
-        with patch.object(summary.analysis_service, "calculate_monthly_cost_cumulative",
+        with patch.object(summary.view_common, "get_monthly_cost_cached",
                           side_effect=RuntimeError("boom")), \
-             patch.object(summary, "render_status_grid") as mock_grid:
+             patch.object(summary.view_common, "render_status_grid") as mock_grid:
             try:
                 summary.render_summary(NOW, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), None)
             except RuntimeError:
