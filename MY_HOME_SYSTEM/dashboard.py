@@ -10,7 +10,7 @@ import streamlit as st
 # 自作モジュール
 from services.notification_service import send_push
 import config
-from services import analysis_service
+from services import analysis_service, home_status_service
 
 # Viewコンポーネント
 from views.dashboard import (
@@ -46,12 +46,10 @@ QUEST_APP_PATH = "/quest"
 MOBILE_PAGE_PATH = f"{config.DASHBOARD_BASE_PATH}/m"
 
 # === タブ定義 ===
-# スマホ対応の再設計: 以前はサマリー9枚を常時最上部に出したうえでタブが10個
-# (クエスト/電車遅延/防犯カメラ/電力・環境/気温詳細/健康管理/高砂実家/
-#  ログ分析/システム管理/駐輪場)あり、スマートフォンでは
-#   - どのタブを開いてもサマリーを越えるスクロールが必要
-#   - タブ列が画面幅の数倍になり、目的のタブを探せない
-# という状態だった。用途で5つに束ね直し、サマリーも「ホーム」タブに入れる。
+# 定義の実体は `services/home_status_service.py` にある(Streamlit を import しない
+# モジュール)。軽量ページ `/dashboard/m` が、各ステータスカードを「詳細があるタブ」
+# へのリンク(`?tab=...`)にするためにタブのキーを必要とし、そちらからは
+# このファイル(Streamlit 依存)を読めないため。束ね直した経緯も同モジュール参照。
 #
 # クエストタブ(EXPランキング等)は、同じ内容をスマホ最適化済みのPWA
 # (family-quest, /quest)が持っており二重管理だったため、ダッシュボードからは
@@ -62,15 +60,7 @@ MOBILE_PAGE_PATH = f"{config.DASHBOARD_BASE_PATH}/m"
 # パッケージとして削除済み)、migrations/にもテーブル定義が無いため新規構築
 # したDBでは永久に「データがありません」としか出ない死んだ機能だった。
 # オーナー判断によりUIごと削除した。
-#
-# キーは `?tab=` のクエリパラメータに入る値でもある(下記 `_render_tab_selector`)。
-TABS: tuple[tuple[str, str], ...] = (
-    ("home", "🏠 ホーム"),
-    ("out", "🚃 おでかけ"),
-    ("watch", "👀 見守り"),
-    ("life", "💡 くらし"),
-    ("sys", "🔧 システム"),
-)
+TABS: tuple[tuple[str, str], ...] = home_status_service.DASHBOARD_TABS
 TAB_LABELS: dict[str, str] = dict(TABS)
 TAB_KEYS: tuple[str, ...] = tuple(TAB_LABELS)
 DEFAULT_TAB_KEY = TAB_KEYS[0]

@@ -239,3 +239,89 @@ class TestMobilePageHtmlSafety:
         )
 
         assert "min-height: 44px" in page
+
+
+class TestCardsLinkToTheirDetail:
+    """A: 異常に気づいてから詳細を開くまでを1タップにする。
+
+    以前の軽量ページはカード9枚を出して行き止まりで、詳細を見るには
+    「📊 詳しく見る」からダッシュボード本体を開き、そこからタブを探し直す
+    必要があった。カード自体を該当タブ(`?tab=...`)へのリンクにする。
+    """
+
+    def _page(self, **overrides):
+        patches = _stub_loaders(**overrides)
+        for p in patches:
+            p.start()
+        try:
+            with _client() as client:
+                return client.get(f"{config.DASHBOARD_BASE_PATH}/m").text
+        finally:
+            for p in patches:
+                p.stop()
+
+    def test_every_card_links_to_a_tab_that_exists(self):
+        import re
+
+        page = self._page()
+
+        hrefs = re.findall(r'<a class="status-card [^"]*" href="([^"]+)"', page)
+        assert len(hrefs) == 9, "9枚すべてがリンクになっていること"
+        for href in hrefs:
+            assert href.startswith(f"{config.DASHBOARD_BASE_PATH}/?tab=")
+            tab_key = href.rsplit("=", 1)[1]
+            assert tab_key in home_status_service.DASHBOARD_TAB_KEYS, f"存在しないタブ: {tab_key}"
+
+    def test_cards_point_at_the_tab_that_actually_shows_them(self):
+        """リンク先が「そのカードの詳細が載っているタブ」であること。"""
+        cards, _ = self._collect()
+        by_title = {card.title: card.tab for card in cards}
+
+        assert by_title["👵 高砂 (実家)"] == "watch"
+        assert by_title["🚃 JR運行情報"] == "out"
+        assert by_title["💰 今月の電気代"] == "life"
+        assert by_title["🗄️ NAS"] == "sys"
+
+    def _collect(self):
+        patches = _stub_loaders()
+        for p in patches:
+            p.start()
+        try:
+            return home_status_service.collect_status_cards(NOW)
+        finally:
+            for p in patches:
+                p.stop()
+
+    def test_the_streamlit_grid_keeps_plain_cards(self):
+        """Streamlit 側はリンクにしない。
+
+        Streamlit でリンクを踏むとページ全体が再読み込みになり(セッションが
+        作り直され数秒かかる)、同じ移動を「詳しく見る」ボタン(再実行だけで
+        切り替わる)が既に担っているため。
+        """
+        cards, _ = self._collect()
+
+        grid = home_status_service.render_status_grid_html(cards)
+
+        assert "<a class=\"status-card" not in grid
+        assert grid.count('<div class="status-card') == 9
+
+    def test_the_link_is_relative_to_the_viewing_origin(self):
+        """固定URLを埋めるとLAN内のIPと公開ドメインのどちらかで繋がらなくなる。"""
+        card = home_status_service.StatusCard("t", "v", "theme-gray", tab="watch")
+
+        assert home_status_service.card_detail_href(card, "/dashboard/") == "/dashboard/?tab=watch"
+        assert home_status_service.card_detail_href(
+            home_status_service.StatusCard("t", "v", "theme-gray"), "/dashboard/"
+        ) is None
+
+    def test_tab_keys_have_a_single_definition(self):
+        """`dashboard.py` 側にタブのキーを書き戻すと、リンク先とタブがずれる。"""
+        dashboard_py = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dashboard.py"
+        )
+        with open(dashboard_py, encoding="utf-8") as f:
+            source = f.read()
+
+        assert "home_status_service.DASHBOARD_TABS" in source
+        assert '("home", ' not in source, "dashboard.py にタブ定義が再び書かれている"

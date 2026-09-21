@@ -67,6 +67,18 @@ STATUS_CARD_CSS = """
         justify-content: center;
         align-items: center;
     }
+    /* 軽量ページではカード自体が詳細タブへのリンク(<a>)になる。
+       ブラウザ既定の下線・リンク色が付くと、テーマ色(theme-green 等)で表している
+       「状態」が読み取りにくくなるため打ち消す。見た目は <div> のときと同じ。 */
+    a.status-card {
+        text-decoration: none;
+        color: inherit;
+        -webkit-tap-highlight-color: rgba(0,0,0,0.08);
+    }
+    a.status-card:active {
+        /* 押したことが分かるように少しだけ沈ませる(タップの手応え) */
+        transform: scale(0.98);
+    }
     .status-title {
         font-size: 0.8rem; color: #555; margin-bottom: 5px; font-weight: bold; opacity: 0.8;
     }
@@ -82,19 +94,56 @@ STATUS_CARD_CSS = """
 """
 
 
+# === ダッシュボードのタブ定義 ===
+# ここに置いてある理由:
+#     各カードは「どのタブに詳細があるか」(`StatusCard.tab`)を持つ。軽量ページは
+#     その情報からカードを `?tab=...` のリンクにするので、タブのキーを知る必要が
+#     ある。定義が `dashboard.py` 側にあると軽量ページ(Streamlit を持たない
+#     `unified_server` 側)からは読めないため、Streamlit を import しないここに置き、
+#     `dashboard.py` はこれを読み込んで使う。
+#
+# スマホ対応の再設計: 以前はサマリー9枚を常時最上部に出したうえでタブが10個
+# (クエスト/電車遅延/防犯カメラ/電力・環境/気温詳細/健康管理/高砂実家/
+#  ログ分析/システム管理/駐輪場)あり、スマートフォンでは
+#   - どのタブを開いてもサマリーを越えるスクロールが必要
+#   - タブ列が画面幅の数倍になり、目的のタブを探せない
+# という状態だった。用途で5つに束ね直し、サマリーも「ホーム」タブに入れてある。
+#
+# キーは `?tab=` のクエリパラメータに入る値でもある
+# (`dashboard.py` の `_render_tab_selector`)。
+DASHBOARD_TABS: tuple[tuple[str, str], ...] = (
+    ("home", "🏠 ホーム"),
+    ("out", "🚃 おでかけ"),
+    ("watch", "👀 見守り"),
+    ("life", "💡 くらし"),
+    ("sys", "🔧 システム"),
+)
+DASHBOARD_TAB_KEYS: tuple[str, ...] = tuple(key for key, _ in DASHBOARD_TABS)
+
+
 class StatusCard(NamedTuple):
     """サマリーに並べる1枚のステータスカード。
 
     `value_is_html`: `value` に意図的なHTML断片(色付けの`<span>`・改行の`<br>`等)を
     含める呼び出し元だけ True にする。詳細は `render_status_card_html` を参照。
+    `tab`: このカードの詳細が載っているタブのキー(`DASHBOARD_TABS`)。軽量ページは
+    これを使ってカード自体を `?tab=...` へのリンクにする。
     """
     title: str
     value: str
     theme: str
     value_is_html: bool = False
+    tab: str | None = None
 
 
-def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:
+def render_status_card_html(
+    title: str,
+    value: str,
+    theme: str,
+    *,
+    value_is_html: bool = False,
+    href: str | None = None,
+) -> str:
     """
     ステータスカードのHTMLを生成。
 
@@ -105,6 +154,11 @@ def render_status_card_html(title: str, value: str, theme: str, *, value_is_html
     (`<span>`/`<br>`等)を組み立てて渡す呼び出し元は、`value_is_html=True`を
     指定してエスケープをスキップできる(その場合、`value`の構築元に外部/DB由来の
     生文字列を含めないこと)。
+
+    `href` を渡すとカード全体がリンク(`<a>`)になる。軽量ページ専用で、Streamlit 側は
+    渡さない — Streamlit ではリンクを踏むとページ全体が再読み込みになり
+    (セッションが作り直され数秒かかる)、同じ移動を `dashboard.py` の
+    「詳しく見る」ボタン(再実行だけで切り替わる)が既に担っているため。
     """
     safe_title = html.escape(title)
     safe_value = value if value_is_html else html.escape(value)
@@ -112,18 +166,46 @@ def render_status_card_html(title: str, value: str, theme: str, *, value_is_html
     # `textwrap.dedent()` をかけてからMarkdownとして解釈するため、整形用の空白が
     # 残っていると「空白だけの行がHTMLブロックを終端し、続く字下げがコードブロックに
     # なる」ことで、2枚目以降のカードが生のタグ文字列として画面に出る(#807)。
+    if href is None:
+        open_tag = f'<div class="status-card {theme}">'
+        close_tag = "</div>"
+    else:
+        open_tag = f'<a class="status-card {theme}" href="{html.escape(href)}">'
+        close_tag = "</a>"
     return (
-        f'<div class="status-card {theme}">'
+        f"{open_tag}"
         f'<div class="status-title">{safe_title}</div>'
         f'<div class="status-value">{safe_value}</div>'
-        '</div>'
+        f"{close_tag}"
     )
 
 
-def render_status_grid_html(cards) -> str:
-    """カードを自動折り返しのグリッド1ブロックにまとめたHTMLを返す。"""
+def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:
+    """カードの詳細が載っているタブへのURLを返す(タブが無いカードは None)。
+
+    `dashboard_path` は閲覧中のオリジンからのルート相対パス(例: `/dashboard/`)。
+    固定URLを埋めると、LAN内のIP・Cloudflare 経由の公開ドメインのどちらか一方でしか
+    繋がらなくなる。
+    """
+    if card.tab is None:
+        return None
+    return f"{dashboard_path}?tab={card.tab}"
+
+
+def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:
+    """カードを自動折り返しのグリッド1ブロックにまとめたHTMLを返す。
+
+    `dashboard_path` を渡すと、詳細タブを持つカードがそのタブへのリンクになる
+    (軽量ページ専用。理由は `render_status_card_html` の docstring を参照)。
+    """
     cards_html = "".join(
-        render_status_card_html(card.title, card.value, card.theme, value_is_html=card.value_is_html)
+        render_status_card_html(
+            card.title,
+            card.value,
+            card.theme,
+            value_is_html=card.value_is_html,
+            href=None if dashboard_path is None else card_detail_href(card, dashboard_path),
+        )
         for card in cards
     )
     return f'<div class="status-grid">{cards_html}</div>'
@@ -365,16 +447,18 @@ def build_status_cards(
 
     # Issue #378: get_bicycle_status は前日比の色付け(<span>)等を意図的に組み立てて
     # 返すため、HTMLエスケープをスキップする(value_is_html=True)。
+    # `tab` は「このカードの詳細が載っているタブ」。軽量ページはこれを使って
+    # カード自体をリンクにする(異常に気づいてから詳細を開くまでを1タップにする)。
     return [
-        StatusCard("👵 高砂 (実家)", taka_val, taka_theme),
-        StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme),
-        StatusCard("🚗 車 (伊丹)", car_val, car_theme),
-        StatusCard("🍚 炊飯器", rice_val, rice_theme),
-        StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue"),
-        StatusCard("🚲 駐輪場待機", bicycle_val, bicycle_theme, value_is_html=True),
-        StatusCard("🚃 JR運行情報", traffic_val, traffic_theme),
-        StatusCard("🖥️ サーバー", server_val, server_theme),
-        StatusCard("🗄️ NAS", nas_val, nas_theme),
+        StatusCard("👵 高砂 (実家)", taka_val, taka_theme, tab="watch"),
+        StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme, tab="watch"),
+        StatusCard("🚗 車 (伊丹)", car_val, car_theme, tab="watch"),
+        StatusCard("🍚 炊飯器", rice_val, rice_theme, tab="life"),
+        StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue", tab="life"),
+        StatusCard("🚲 駐輪場待機", bicycle_val, bicycle_theme, value_is_html=True, tab="out"),
+        StatusCard("🚃 JR運行情報", traffic_val, traffic_theme, tab="out"),
+        StatusCard("🖥️ サーバー", server_val, server_theme, tab="sys"),
+        StatusCard("🗄️ NAS", nas_val, nas_theme, tab="sys"),
     ]
 
 
@@ -523,7 +607,7 @@ def render_mobile_status_page_html(
         f"<h1>{html.escape(MOBILE_PAGE_TITLE)}</h1>"
         f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
         f"・{int(refresh_sec)}秒ごとに自動更新</p>"
-        f"{render_status_grid_html(cards)}"
+        f"{render_status_grid_html(cards, dashboard_path=dashboard_path)}"
         "<nav>"
         f'<a href="{html.escape(dashboard_path)}">📊 詳しく見る</a>'
         f'<a href="{html.escape(quest_path)}">⚔️ ファミクエ</a>'
