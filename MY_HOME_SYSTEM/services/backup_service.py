@@ -1,4 +1,5 @@
 import contextlib
+import re
 import sqlite3
 import os
 import sys
@@ -103,11 +104,57 @@ def perform_backup() -> Tuple[bool, str, float]:
                 logger.error(f"❌ NAS側の不完全なバックアップファイルの削除に失敗: {cleanup_err}")
         return False, str(e), 0.0
 
+# === 設定ファイルのバックアップ時の伏せ字処理 (Issue #829) ===
+# `devices.json` はカメラの `user` / `pass` を平文で持ち、`rtsp_url` にも
+# `rtsp://<user>:<pass>@...` の形で認証情報を埋め込んでいる。以前はこれを毎晩そのまま
+# NAS(CIFS の file_mode=0664)へコピーしており、2026-09-21 時点で `devices_*.json` 22件
+# すべてにカメラのパスワードが入っていた。
+#
+# ホスト設定バックアップ(#774, services/host_config_backup_service.py)と同じく
+# 「秘密の値は保全せず、構造だけを残す」方針にする。ユーザー名は残す(それ自体は秘密ではなく、
+# 復元時にどのアカウントを使えばよいかが分かる)。
+REDACTED_MARK = "***REDACTED-BY-backup_service***"
+
+# JSON の文字列値のうち、キー名が認証情報を表すもの。値だけを置き換える。
+# JSON として読み直さず正規表現で置き換えるのは、元ファイルが壊れていても(=読めなくても)
+# 秘密を素通しでコピーしないため。書式(インデント・キー順)も保たれる。
+_JSON_SECRET_FIELD_RE = re.compile(
+    r'("(?:pass|passwd|password|passphrase|secret|token|api[_-]?key)"\s*:\s*")'
+    r'((?:[^"\\]|\\.)+)'
+    r'(")',
+    re.IGNORECASE,
+)
+# URL に埋め込まれたパスワード(scheme://user:<ここ>@host)。ユーザー名は残す。
+_URL_PASSWORD_RE = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*://[^:/@\s\"']+:)([^@\s\"'/]+)(@)")
+
+
+def redact_backup_text(text: str, *, is_json: bool) -> tuple[str, int]:
+    """バックアップ用に認証情報の値を伏せ字にした本文と、置き換えた件数を返す。
+
+    URL に埋め込まれたパスワードはどのファイルでも落とす。JSON のキー名に基づく置き換えは
+    `.json` だけに適用する(Python ソース等に同じ見た目の文字列があっても意味が違うため)。
+    """
+    count = 0
+
+    def _sub(m: re.Match) -> str:
+        nonlocal count
+        count += 1
+        return f"{m.group(1)}{REDACTED_MARK}{m.group(3)}"
+
+    text = _URL_PASSWORD_RE.sub(_sub, text)
+    if is_json:
+        text = _JSON_SECRET_FIELD_RE.sub(_sub, text)
+    return text, count
+
+
 def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str) -> None:
     """config.BACKUP_FILES に列挙された設定ファイル(DB以外)をNASへコピーする。
 
     DBエントリ(src_db_path)は上のPhase 1/2で既にバックアップ済みのためスキップする。
     個々のファイルのコピー失敗はDBバックアップ自体の成否には影響させず、ログのみ残す。
+
+    Issue #829: 認証情報の値は `redact_backup_text` で伏せ字にしてから書き出す。
+    テキストとして読めないファイルは、秘密を素通しにしないよう**コピーしない**。
     """
     for entry in getattr(config, "BACKUP_FILES", []):
         if entry == src_db_path:
@@ -119,8 +166,17 @@ def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)
         src_path_obj = Path(src_path)
         dest_path = nas_backup_dir / f"{src_path_obj.stem}_{timestamp}{src_path_obj.suffix}"
         try:
-            shutil.copy2(src_path, dest_path)
-            logger.info(f"✅ 設定ファイルをバックアップしました: {src_path} -> {dest_path}")
+            try:
+                text = src_path_obj.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                # 認証情報の有無を確かめられないものは、平文で NAS に置かない側へ倒す。
+                logger.error(f"❌ テキストとして読めないためバックアップしません (秘密を検査できない): {src_path}")
+                continue
+            redacted, count = redact_backup_text(text, is_json=src_path_obj.suffix == ".json")
+            dest_path.write_text(redacted, encoding="utf-8")
+            shutil.copystat(src_path, dest_path)
+            suffix = f" (認証情報 {count} 箇所を伏せ字化)" if count else ""
+            logger.info(f"✅ 設定ファイルをバックアップしました: {src_path} -> {dest_path}{suffix}")
         except OSError as e:
             logger.error(f"❌ 設定ファイルのバックアップ失敗 ({src_path}): {e}")
 
