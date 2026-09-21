@@ -27,13 +27,13 @@ export default mergeConfig(
         // 走らず、比較元の成果物(保持14日)が取れないときはスキップされる。つまり
         // フロントエンドだけ「何のゲートも効かない状態」が起こりうるため、
         // バックエンド(--cov-fail-under)・DDD と同じく固定の床を設ける。
-        // 値は 2026-09-21 の実測(lines 78.64 / statements 75.65 / branches 63.73 /
-        // functions 64.70)の約3pt下。実測が伸びたら段階的に引き上げること。
+        // 値は 2026-09-21 の実測(lines 83.42 / statements 80.53 / branches 70.46 /
+        // functions 72.05)の約3pt下。実測が伸びたら段階的に引き上げること。
         thresholds: {
-          lines: 75,
-          statements: 72,
-          branches: 60,
-          functions: 61,
+          lines: 80,
+          statements: 77,
+          branches: 67,
+          functions: 69,
         },
       },
     },
