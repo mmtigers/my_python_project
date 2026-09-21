@@ -137,7 +137,7 @@ packaging==26.3
     #   altair
     #   plotly
     #   streamlit
-pandas==2.3.3
+pandas==3.0.6
     # via
     #   -r requirements.in
     #   streamlit
@@ -145,7 +145,7 @@ pillow==12.3.0
     # via streamlit
 platformdirs==4.5.0
     # via zeep
-plotly==6.5.0
+plotly==7.1.0
     # via -r requirements.in
 propcache==0.4.1
     # via
@@ -187,9 +187,7 @@ python-multipart==0.0.32
     #   -r requirements.in
     #   streamlit
 pytz==2026.3.post1
-    # via
-    #   -r requirements.in
-    #   pandas
+    # via -r requirements.in
 referencing==0.37.0
     # via
     #   jsonschema
@@ -254,8 +252,6 @@ typing-inspection==0.4.2
     # via
     #   fastapi
     #   pydantic
-tzdata==2025.2
-    # via pandas
 urllib3==2.8.0
     # via
     #   -r requirements.in
