@@ -16,6 +16,7 @@ from google.genai import types as genai_types
 from tenacity import (
     retry,
     stop_after_attempt,
+    stop_before_delay,
     wait_exponential_jitter,
     retry_if_exception,
 )
@@ -50,6 +51,21 @@ else:
 
 # 定数設定
 MAX_RETRIES = 3
+# 再試行全体に使ってよい時間(秒)。Issue #827。
+#
+# #804 で 503 を再試行するようにしたが、所要時間に上限が無く、handlers/line_handler.py の
+# AI_REPLY_TIMEOUT_SEC(20秒)を超えてタイムアウトした(2026-09-21 12:05、実機。503 の応答自体に
+# 3秒・約8秒かかり、待機と合わせて3回目に届く前に20秒に達した)。外側で打ち切られると
+# FALLBACK_MESSAGE ではなくタイムアウトの文面が返り、**記録は保存されていないのに
+# 「反映されているか確認して」と案内してしまう**。
+#
+# `stop_before_delay` は「次の待機を挟むと予算を超える」時点で再試行をやめる。ただし最後に
+# 許可した試行そのものは予算を越えて走りうる(1回の応答に最大8秒程度を実測)ため、
+# 予算 + 1回の最悪応答時間 < AI_REPLY_TIMEOUT_SEC を満たす値にする(9 + 8 = 17 < 20)。
+# この不等式は tests/test_ai_transient_retry.py が固定している。
+RETRY_TIME_BUDGET_SEC = 9
+# 1回の API 応答にかかる時間の実測上の最悪値(秒)。上の予算の根拠としてだけ使う。
+OBSERVED_WORST_CALL_SEC = 8
 REQUESTS_PER_MINUTE_LIMIT = 10  # 必要に応じて調整
 FALLBACK_MESSAGE = "申し訳ございません。現在AIサービスが混雑しており応答できません。少し時間を置いて再度お試しください。"
 # Issue #374: 1メッセージで連鎖的にツール呼び出しが返る場合(「智矢が熱、涼花も熱」等)に
@@ -537,8 +553,9 @@ def _is_transient_error(exc: BaseException) -> bool:
 
 @retry(
     retry=retry_if_exception(_is_transient_error),
-    wait=wait_exponential_jitter(initial=2, max=10),
-    stop=stop_after_attempt(MAX_RETRIES),
+    # Issue #827: 待機を短くし(以前は initial=2, max=10)、回数だけでなく経過時間でも止める。
+    wait=wait_exponential_jitter(initial=1, max=4),
+    stop=(stop_after_attempt(MAX_RETRIES) | stop_before_delay(RETRY_TIME_BUDGET_SEC)),
     before_sleep=_log_retry_attempt,
     reraise=True  # 最終的な失敗は呼び出し元でハンドリングするためraiseする
 )
