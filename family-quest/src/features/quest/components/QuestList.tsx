@@ -84,13 +84,13 @@ const QuestItem: React.FC<{
     useEffect(() => {
         if (!isInfinite || !completedSignal) return;
         if (completedSignal.id !== questId || completedSignal.userId !== currentUserId) {
-        // react-hooks 7 の set-state-in-effect は「effect 内で同期的に setState すると再描画が
-        // 連鎖する」ことを咎めるが、ここはサーバーから届いた完了通知(completedSignal)と
-        // 壁時計の経過時間にクールダウン表示を合わせる処理で、effect(= 外部との同期)が本来の
-        // 置き場所である。推奨される「描画中に算出する」形へ移すと今度は描画中に Date.now() を
-        // 呼ぶことになり purity ルールに触れる。加えてこのクールダウンは #363 や上記(a)(b)で
-        // 挙動を何度も直してきた子ども向けの処理なので、書き換えによる退行を避け、挙動は
-        // 変えずにこの行だけルールを外す(再描画は1回増えるだけで、表示の正しさには影響しない)。
+            // react-hooks 7 の set-state-in-effect は「effect 内で同期的に setState すると再描画が
+            // 連鎖する」ことを咎めるが、ここはサーバーから届いた完了通知(completedSignal)と
+            // 壁時計の経過時間にクールダウン表示を合わせる処理で、effect(= 外部との同期)が本来の
+            // 置き場所である。推奨される「描画中に算出する」形へ移すと今度は描画中に Date.now() を
+            // 呼ぶことになり purity ルールに触れる。加えてこのクールダウンは #363 や上記(a)(b)で
+            // 挙動を何度も直してきた子ども向けの処理なので、書き換えによる退行を避け、挙動は
+            // 変えずにこの行だけルールを外す(再描画は1回増えるだけで、表示の正しさには影響しない)。
             // eslint-disable-next-line react-hooks/set-state-in-effect -- 上記の理由で意図的
             setIsCooldown(false);
             return;
