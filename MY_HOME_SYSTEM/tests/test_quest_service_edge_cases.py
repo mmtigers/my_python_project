@@ -256,11 +256,17 @@ class TestProcessRejectQuestConcurrentWithApprove:
         # 利用し、確実に「承認が先にロックを取得して完走し終えてから却下が
         # 動き出す」という、Issueが報告した不整合が起きうる順序を再現する。
         original_apply_rewards = approval_service._apply_quest_rewards
+        # Issue #837: 以前は承認スレッドを start() した後に固定の sleep(0.05) で
+        # 「先にロックを取ったはず」と見込んで却下を始めていたが、実機が他の処理で
+        # 重いと承認側が 50ms 以内にロックへ到達できず、却下が先に走って落ちていた。
+        # 承認側がロックの内側に入ったことを合図にしてから却下を始める。
+        approve_holds_lock = threading.Event()
 
         def _slow_apply_rewards(cur, user, quest, now_iso, history_id=None, override_rewards=None):
             result = original_apply_rewards(
                 cur, user, quest, now_iso, history_id=history_id, override_rewards=override_rewards
             )
+            approve_holds_lock.set()
             time.sleep(0.2)
             return result
 
@@ -284,7 +290,7 @@ class TestProcessRejectQuestConcurrentWithApprove:
         t_approve = threading.Thread(target=_approve)
         t_reject = threading.Thread(target=_reject)
         t_approve.start()
-        time.sleep(0.05)  # 承認が先にロックを取得できるよう、わずかに先行させる
+        assert approve_holds_lock.wait(timeout=5), "承認がロックの内側まで進まなかった"
         t_reject.start()
         t_approve.join(timeout=5)
         t_reject.join(timeout=5)
