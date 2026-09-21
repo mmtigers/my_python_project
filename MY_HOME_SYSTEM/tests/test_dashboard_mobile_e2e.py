@@ -68,7 +68,7 @@ def _wait_until_healthy(port: int, process: subprocess.Popen) -> None:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/_stcore/health", timeout=2) as res:
                 if res.status == 200:
                     return
-        except Exception as e:  # 起動途中は接続拒否になる
+        except Exception as e:  # noqa: BLE001 (起動途中は接続拒否になる)
             last_error = e
         time.sleep(0.5)
     raise AssertionError(f"Streamlit が {STARTUP_TIMEOUT_SEC} 秒以内に起動しなかった: {last_error}")

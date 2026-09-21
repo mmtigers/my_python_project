@@ -9,21 +9,30 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH` 配下で配信�
 `config.DASHBOARD_PROXY_ENABLED=false` のときは `unified_server.py` がこのルーターを
 include しないため、パス自体が存在しなくなる(404)。
 
-ベースパス配下には、中継のほかに「スマートフォンのホーム画面に追加する」ための
-マニフェストとアイコンも置く(中継先のStreamlitは持っていないため)。
+ベースパス配下には、中継のほかに次の2つも置く(いずれも中継先のStreamlitは
+持っていないため、このアプリが直接返す):
+
+- スマートフォンのホーム画面に追加するためのマニフェストとアイコン
+- 軽量ページ `{DASHBOARD_BASE_PATH}/m`(Streamlitを介さない読み取り専用のサマリー)
 """
 import json
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 
 import config
+from services import home_status_service
 from services.dashboard_proxy_service import (
     DASHBOARD_ICON_SIZES,
     build_dashboard_manifest,
     dashboard_proxy_service,
     render_dashboard_icon_png,
 )
+
+# 軽量ページ(Streamlitを介さない読み取り専用のサマリー)のパス。
+_MOBILE_PATH = f"{config.DASHBOARD_BASE_PATH}/m"
+# ファミクエ(PWA)への導線。`unified_server.py` が `/quest` にSPAをマウントしている。
+_QUEST_APP_PATH = "/quest"
 
 router = APIRouter()
 
@@ -59,6 +68,54 @@ def dashboard_icon(size: int) -> Response:
         media_type="image/png",
         # 内容はコードから決まり、実質変わらない。実機の再取得を減らす。
         headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+# --- 軽量ページ ---
+
+
+@router.get(_MOBILE_PATH, include_in_schema=False)
+def mobile_status_page() -> HTMLResponse:
+    """Streamlitを介さない読み取り専用のサマリーページ。
+
+    スマートフォンで見るのは結局ステータスカードの9枚、という用途に対して、
+    Streamlit の初期化・WebSocket接続・Reactの読み込みを丸ごと省く。
+    ダッシュボード本体(Streamlit)はグラフ・ログ・メンテナンス操作を持つ
+    「詳しく見る側」として残し、このページからリンクする。
+
+    `async def` にしないのは、中でDBの読み取りとHTTPスクレイピング(同期)を
+    行うため。`def` にしておくと Starlette がスレッドプールで実行し、
+    イベントループ(=IoT制御・Webhook受信)を止めない。
+    """
+    cards, fetched_at = home_status_service.collect_status_cards()
+    return HTMLResponse(
+        home_status_service.render_mobile_status_page_html(
+            cards,
+            fetched_at,
+            manifest_path=f"{_MOBILE_PATH}/app.webmanifest",
+            icon_path=f"{_BASE_PATH}/icon-180.png",
+            dashboard_path=f"{_BASE_PATH}/",
+            quest_path=_QUEST_APP_PATH,
+        )
+    )
+
+
+@router.get(f"{_MOBILE_PATH}/app.webmanifest", include_in_schema=False)
+def mobile_status_manifest() -> Response:
+    """軽量ページ専用のマニフェスト。
+
+    ダッシュボード本体とは `start_url` だけを変えてある。軽量ページから
+    ホーム画面に追加すれば軽量ページが、本体から追加すれば本体が開く
+    (追加した画面と違うものが開くと戸惑うため、1つにまとめない)。
+    """
+    manifest = build_dashboard_manifest()
+    manifest["name"] = home_status_service.MOBILE_PAGE_TITLE
+    manifest["short_name"] = home_status_service.MOBILE_PAGE_TITLE
+    manifest["start_url"] = _MOBILE_PATH
+    manifest["scope"] = _MOBILE_PATH
+    return Response(
+        content=json.dumps(manifest, ensure_ascii=False),
+        media_type="application/manifest+json",
     )
 
 

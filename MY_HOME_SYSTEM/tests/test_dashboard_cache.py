@@ -228,7 +228,7 @@ class TestExternalIoIsCachedToo:
     """
 
     def test_traffic_is_scraped_once_even_when_two_views_need_it(self):
-        from views.dashboard import misc_tab, summary
+        from views.dashboard import misc_tab
 
         fake_status = {
             "宝塚線": {"status": "平常運転", "detail": "", "is_delay": False},
@@ -242,8 +242,8 @@ class TestExternalIoIsCachedToo:
                           return_value=fake_status) as mock_scrape, \
              patch.object(view_common, "load_route_info_cached", return_value={"summary": "取得失敗"}), \
              patch.object(misc_tab, "st", mock_st):
-            summary.get_traffic_status()   # ホームタブのサマリーカード
-            misc_tab.render_traffic()      # おでかけタブ
+            view_common.load_jr_traffic_status_cached()  # ホームタブのサマリーカード
+            misc_tab.render_traffic()                    # おでかけタブ
 
         mock_scrape.assert_called_once()
 

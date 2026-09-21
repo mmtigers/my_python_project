@@ -1,17 +1,16 @@
 # MY_HOME_SYSTEM/views/dashboard/common.py
-import html
 import logging
 import math
 import traceback
+from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Iterable, NamedTuple
 
 import pandas as pd
 import pytz
 import streamlit as st
 from core.utils import get_now_jst
-from services import analysis_service, train_service
+from services import analysis_service, home_status_service, train_service
 
 logger = logging.getLogger(__name__)
 
@@ -27,40 +26,7 @@ CUSTOM_CSS = f"""
         font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
     }}
 
-    /* --- ステータスカード --- */
-    /* スマホでは横3枚固定だと1枚あたりが潰れて値が読めなくなるため、
-       st.columns ではなく CSS Grid で「入るだけ並べて自動で折り返す」方式にする
-       (auto-fit + minmax: スマホ幅では2列、タブレット〜PCでは3〜5列になる)。 */
-    .status-grid {{
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 8px;
-        margin-bottom: 8px;
-    }}
-    .status-card {{
-        padding: 10px 6px;
-        border-radius: 12px;
-        text-align: center;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        /* 固定heightだと値が2〜3行になるカード(駐輪場など)で文字が溢れるため min-height にする */
-        min-height: 92px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-    }}
-    .status-title {{
-        font-size: 0.8rem; color: #555; margin-bottom: 5px; font-weight: bold; opacity: 0.8;
-    }}
-    .status-value {{
-        font-size: 1.1rem; font-weight: bold; line-height: 1.25; white-space: normal;
-        word-break: break-word;
-    }}
-    .theme-green {{ background-color: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }}
-    .theme-yellow {{ background-color: #fffde7; color: #f9a825; border: 1px solid #fff9c4; }}
-    .theme-red {{ background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }}
-    .theme-blue {{ background-color: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }}
-    .theme-gray {{ background-color: #f5f5f5; color: #757575; border: 1px solid #e0e0e0; }}
+{home_status_service.STATUS_CARD_CSS}
 
     /* --- 電車ルートカード --- */
     .route-card {{
@@ -362,6 +328,15 @@ def get_memory_usage_cached() -> dict | None:
 
 
 @st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def get_monthly_cost_cached() -> int:
+    """`analysis_service.calculate_monthly_cost_cumulative` のキャッシュ付きラッパー。
+
+    今月ぶんの電力ログを集計するSQLで、ホームタブを開くたびに走っていた。
+    """
+    return analysis_service.calculate_monthly_cost_cumulative()
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
 def get_system_logs_cached(lines: int = 50, priority=None, target_date=None) -> str:
     """`analysis_service.get_system_logs`(journalctl)のキャッシュ付きラッパー。
 
@@ -547,48 +522,11 @@ def render_table(
     st.dataframe(view, width="stretch", hide_index=True, height=height)
 
 
-class StatusCard(NamedTuple):
-    """サマリーに並べる1枚のステータスカード。
-
-    `value_is_html`: `value` に意図的なHTML断片(色付けの`<span>`・改行の`<br>`等)を
-    含める呼び出し元だけ True にする。詳細は `render_status_card_html` を参照。
-    """
-    title: str
-    value: str
-    theme: str
-    value_is_html: bool = False
-
-
-def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:
-    """
-    ステータスカードのHTMLを生成。
-
-    Issue #378: `title`/`value`はunsafe_allow_html=True経由でそのまま描画されるため、
-    以前はスクレイピング由来・DB由来の文字列(quest_title/reward_title等)を
-    そのまま埋め込むと格納型XSSになりえた。`title`は常にHTMLエスケープする。
-    `value`も既定でエスケープするが、`views/dashboard/summary.py`の
-    `get_bicycle_status`のように前日比の色付け等で意図的にHTML断片
-    (`<span>`/`<br>`等)を組み立てて渡す呼び出し元は、`value_is_html=True`を
-    指定してエスケープをスキップできる(その場合、`value`の構築元に外部/DB由来の
-    生文字列を含めないこと)。
-    """
-    safe_title = html.escape(title)
-    safe_value = value if value_is_html else html.escape(value)
-    # 改行・インデントを入れずに1行で返すこと。`st.markdown` は本文に
-    # `textwrap.dedent()` をかけてからMarkdownとして解釈するが、`render_status_grid`
-    # が組み立てる文字列は先頭行(`<div class="status-grid">`)がインデント0のため
-    # 共通インデントが0になり、dedentが何も削らない。結果、カードのHTMLに
-    # 「空白だけの行」と「4スペース字下げ」が残り、
-    #   - 空白だけの行がHTMLブロックを終端する
-    #   - 続く4スペース字下げの行がMarkdownのインデントコードブロックになる
-    # ため、2枚目以降のカードが `<div class="status-card...` という生のタグ文字列
-    # としてスマホ画面に出ていた(横幅も溢れる)。整形用の空白を一切持たせない。
-    return (
-        f'<div class="status-card {theme}">'
-        f'<div class="status-title">{safe_title}</div>'
-        f'<div class="status-value">{safe_value}</div>'
-        '</div>'
-    )
+# カードの型とHTML組み立ては `services/home_status_service.py` が持つ
+# (Streamlit を介さない軽量ページ `/dashboard/m` と同じものを使うため)。
+# View 側から従来の名前で参照できるよう再エクスポートする。
+StatusCard = home_status_service.StatusCard
+render_status_card_html = home_status_service.render_status_card_html
 
 
 def render_status_grid(cards: Iterable[StatusCard]) -> None:
@@ -599,11 +537,7 @@ def render_status_grid(cards: Iterable[StatusCard]) -> None:
     値が読めなかった。列数をCSS(`.status-grid`のauto-fit)側に委ねることで、
     スマホでは2列・PCでは3〜5列に自動で切り替わる。
     """
-    cards_html = "".join(
-        render_status_card_html(card.title, card.value, card.theme, value_is_html=card.value_is_html)
-        for card in cards
-    )
-    st.markdown(f'<div class="status-grid">{cards_html}</div>', unsafe_allow_html=True)
+    st.markdown(home_status_service.render_status_grid_html(cards), unsafe_allow_html=True)
 
 
 def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:

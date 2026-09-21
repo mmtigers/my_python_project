@@ -40,6 +40,11 @@ st.set_page_config(
 # family-quest(PWA)への導線。`unified_server.py` が `/quest` にSPAをマウントしている。
 QUEST_APP_PATH = "/quest"
 
+# 軽量ページ(Streamlitを介さない読み取り専用のサマリー)への導線。
+# `routers/dashboard_router.py` が 8000番側で直接返すため、8501番を直接見ている
+# ときは存在しない。スマートフォンからの経路は常に 8000番の中継越しになる。
+MOBILE_PAGE_PATH = f"{config.DASHBOARD_BASE_PATH}/m"
+
 # === タブ定義 ===
 # スマホ対応の再設計: 以前はサマリー9枚を常時最上部に出したうえでタブが10個
 # (クエスト/電車遅延/防犯カメラ/電力・環境/気温詳細/健康管理/高砂実家/
@@ -128,7 +133,8 @@ def _render_header_actions() -> None:
     st.caption(
         f"データ取得 {fetched_at.strftime('%H:%M:%S')} "
         f"({view_common.format_relative_time(fetched_at)}) "
-        f"・最大{view_common.DASHBOARD_CACHE_TTL_SEC}秒キャッシュ"
+        f"・最大{view_common.DASHBOARD_CACHE_TTL_SEC}秒キャッシュ "
+        f"・[⚡ かんたん表示]({MOBILE_PAGE_PATH})"
     )
 
 
