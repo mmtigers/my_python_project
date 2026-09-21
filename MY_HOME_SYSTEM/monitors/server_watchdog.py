@@ -11,6 +11,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
+from core import state_file
 from core.logger import setup_logging
 from services.notification_service import send_push
 
@@ -24,6 +25,17 @@ REMINDER_INTERVAL_SEC: int = 6 * 3600  # 6時間
 LOCK_FILE: Path = Path(config.BASE_DIR) / "watchdog_alert_sent.lock"
 # スロットリング履歴の通知済み状態 ("<boot_id> <hex値>" を1行保存)
 THROTTLE_STATE_FILE: Path = Path(config.BASE_DIR) / "watchdog_throttle_history.state"
+# vcgencmd が使えないことをブート毎1回だけ通知した記録 (boot_id を1行保存)
+VCGENCMD_UNAVAILABLE_STATE_FILE: Path = Path(config.BASE_DIR) / "watchdog_vcgencmd_unavailable.state"
+# CPU温度。vcgencmd に依存しないようカーネルの thermal_zone を直接読む(単位はミリ度)
+THERMAL_ZONE_TEMP_FILE: Path = Path("/sys/class/thermal/thermal_zone0/temp")
+# Pi 5 は 85°C でファームウェアが周波数を絞り始める。その手前で知らせる
+CPU_TEMP_ALERT_C: float = 80.0
+# 高温が続く間の再通知間隔と、その記録 (最後に通知した UNIX 時刻を1行保存)
+CPU_TEMP_REALERT_SEC: int = 6 * 3600
+CPU_TEMP_ALERT_STATE_FILE: Path = Path(config.BASE_DIR) / "watchdog_cpu_temp_alert.state"
+# カーネルの rpi_volt hwmon が出す「現在電圧低下中」フラグ(vcgencmd が使えない時の代替)
+HWMON_DIR: Path = Path("/sys/class/hwmon")
 logger = setup_logging("watchdog")
 
 # === メッセージ (主婦向け) ===
@@ -136,6 +148,41 @@ def _is_new_history(history_issues: int) -> bool:
         logger.debug(f"Failed to access throttle state file: {e}")
         return history_issues != 0
 
+def _read_undervoltage_alarm() -> bool | None:
+    """カーネルの rpi_volt hwmon から「現在電圧低下中」かを読む。読めなければ None。"""
+    try:
+        for hw in HWMON_DIR.iterdir():
+            if (hw / "name").read_text().strip() == "rpi_volt":
+                return (hw / "in0_lcrit_alarm").read_text().strip() == "1"
+    except OSError:
+        return None
+    return None
+
+
+def _check_throttling_without_vcgencmd(reason: str) -> None:
+    """vcgencmd が使えない時の代替チェック。
+
+    2026-09 に OS 更新で userland だけが新しくなり、vcgencmd が新カーネル側のデバイス
+    (/dev/vcio_gencmd)を要求して失敗し続けた。以前はこれを DEBUG ログで握りつぶして
+    いたため、スロットリング・電圧低下の監視が誰にも知られず止まっていた。
+    現在の電圧低下だけは hwmon から読めるのでそちらで判定し、過去履歴が見えなく
+    なっていることはブート毎に1回 ERROR で知らせる。
+    """
+    alarm = _read_undervoltage_alarm()
+    if alarm:
+        logger.error("⚠️ System Alert: Under-voltage detected (hwmon rpi_volt in0_lcrit_alarm=1)")
+
+    boot_id = _get_boot_id()
+    if state_file.read_text(str(VCGENCMD_UNAVAILABLE_STATE_FILE)) == boot_id:
+        return
+    fallback = "電圧低下は hwmon で監視を継続" if alarm is not None else "電圧低下も読み取れません"
+    logger.error(
+        f"vcgencmd が使えないため、スロットリング履歴の監視ができません({reason})。{fallback}。"
+        "カーネルとファームウェア/userland の版ずれ(OS 更新後の再起動漏れ等)を確認してください"
+    )
+    state_file.write_text_atomic(str(VCGENCMD_UNAVAILABLE_STATE_FILE), boot_id)
+
+
 def check_throttling_status():
     """
     Raspberry Piのハードウェア健全性（スロットリングや電圧低下）を確認する。
@@ -143,10 +190,10 @@ def check_throttling_status():
     try:
         # 【修正点1】 check=True を外し、コマンド自体の失敗でPythonをクラッシュさせない
         result = subprocess.run(['vcgencmd', 'get_throttled'], capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_SEC)
-        
-        # コマンドが失敗した場合（OSビジー状態など）は安全にスキップ
+
+        # コマンドが失敗した場合は監視が止まったことを知らせ、hwmon で代替判定する
         if result.returncode != 0:
-            logger.debug(f"vcgencmd returned non-zero exit status: {result.returncode}")
+            _check_throttling_without_vcgencmd(f"終了コード {result.returncode}")
             return
 
         if 'throttled=' in result.stdout:
@@ -179,10 +226,42 @@ def check_throttling_status():
                     logger.debug(f"Throttling history already reported this boot: {hex(val)}")
                 
     except FileNotFoundError:
-        logger.debug("vcgencmd not found, skipping throttling check.")
+        _check_throttling_without_vcgencmd("コマンドが見つかりません")
     except Exception as e:
         # 万が一の予期せぬエラーも、無限ループを防ぐためにWARNINGに落とす
         logger.warning(f"Throttling Check failed (Non-critical): {e}")
+
+
+def read_cpu_temp_c() -> float | None:
+    """CPU温度(°C)をカーネルの thermal_zone から読む。読めなければ None。"""
+    try:
+        return int(THERMAL_ZONE_TEMP_FILE.read_text().strip()) / 1000.0
+    except (OSError, ValueError):
+        return None
+
+
+def check_cpu_temperature(now: float | None = None) -> None:
+    """CPU温度が閾値以上なら ERROR(=Discord)で知らせる。高温が続く間は6時間おきに再通知。
+
+    以前は起動時の post_boot_health_check が1回測るだけで、常時の温度監視が無かった。
+    """
+    temp = read_cpu_temp_c()
+    if temp is None:
+        logger.warning(f"CPU温度を読み取れません: {THERMAL_ZONE_TEMP_FILE}")
+        return
+    if temp < CPU_TEMP_ALERT_C:
+        return
+    now = time.time() if now is None else now
+    last = state_file.read_text(str(CPU_TEMP_ALERT_STATE_FILE))
+    try:
+        if last and now - float(last) < CPU_TEMP_REALERT_SEC:
+            logger.warning(f"CPU temperature still high: {temp:.1f}°C (re-alert suppressed)")
+            return
+    except ValueError:
+        pass
+    logger.error(f"⚠️ System Alert: CPU temperature {temp:.1f}°C (閾値 {CPU_TEMP_ALERT_C:.0f}°C)")
+    state_file.write_text_atomic(str(CPU_TEMP_ALERT_STATE_FILE), str(now))
+
 
 def check_health() -> None:
     """
@@ -230,5 +309,6 @@ def check_health() -> None:
 if __name__ == "__main__":
     # ハードウェアの健全性確認（スロットリング監視）
     check_throttling_status()
+    check_cpu_temperature()
     # ソフトウェアの健全性確認（プロセス死活監視）
     check_health()

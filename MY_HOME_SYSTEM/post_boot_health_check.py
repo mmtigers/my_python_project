@@ -51,6 +51,9 @@ STATUS_OK = "OK"
 STATUS_WARN = "WARN"
 STATUS_ERR = "ERR"
 
+# CPU温度の読み取り元(カーネルの thermal_zone。単位はミリ度)
+CPU_TEMP_FILE = "/sys/class/thermal/thermal_zone0/temp"
+
 @dataclass
 class CheckResult:
     name: str
@@ -98,8 +101,10 @@ class PostBootHealthCheck:
     def check_system_resources(self):
         # 温度
         try:
-            res = subprocess.check_output(["vcgencmd", "measure_temp"], timeout=10).decode("utf-8")
-            temp = float(res.replace("temp=", "").replace("'C\n", ""))
+            # vcgencmd はカーネルと userland の版ずれで使えなくなることがある(2026-09 の OS 更新後に
+            # "Unknown" 表示になった)ため、カーネルの thermal_zone を直接読む
+            with open(CPU_TEMP_FILE, encoding="utf-8") as f:
+                temp = int(f.read().strip()) / 1000.0
             if temp >= 85:
                 temp_status = STATUS_ERR
             elif temp >= 75:

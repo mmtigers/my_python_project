@@ -254,6 +254,13 @@ class TestCheckThrottlingStatus:
     def _state_file(self, tmp_path, monkeypatch):
         monkeypatch.setattr(server_watchdog, "THROTTLE_STATE_FILE", tmp_path / "throttle.state")
         monkeypatch.setattr(server_watchdog, "_get_boot_id", lambda: "boot-ccc")
+        # vcgencmd が失敗したときの代替経路(ブート毎1回の通知の記録・hwmon の読み取り)も
+        # 一時ディレクトリへ向ける。向けないと、テストのたびに実機の MY_HOME_SYSTEM/ 直下へ
+        # 状態ファイルを書き、本物の /sys/class/hwmon を読んでしまう。
+        monkeypatch.setattr(server_watchdog, "VCGENCMD_UNAVAILABLE_STATE_FILE", tmp_path / "vcgencmd.state")
+        empty_hwmon = tmp_path / "hwmon"
+        empty_hwmon.mkdir()
+        monkeypatch.setattr(server_watchdog, "HWMON_DIR", empty_hwmon)
 
     def _run_with_vcgencmd(self, monkeypatch, *, stdout: str, returncode: int = 0):
         monkeypatch.setattr(
@@ -283,9 +290,17 @@ class TestCheckThrottlingStatus:
         assert any(r[0] == "warning" for r in first)
         assert not any(r[0] == "warning" for r in second)
 
-    def test_non_zero_exit_status_is_skipped_safely(self, monkeypatch):
+    def test_non_zero_exit_status_is_reported_instead_of_silently_skipped(self, monkeypatch):
+        """vcgencmd が失敗したら、監視が止まっていることを ERROR で知らせる。
+
+        以前はこのテストが「error も warning も出さないこと」を固定していた。つまり
+        **監視が黙って止まること自体**を検査していた。2026-09 の OS 更新で userland だけが
+        新しくなり vcgencmd が失敗し続けた際、スロットリング・電圧低下の監視が誰にも
+        知られず止まっていた。ブート毎1回の通知の詳細は test_server_watchdog_hardware.py。
+        """
         records = self._run_with_vcgencmd(monkeypatch, stdout="", returncode=1)
-        assert [r for r in records if r[0] in ("error", "warning")] == []
+        errors = [r for r in records if r[0] == "error"]
+        assert len(errors) == 1
 
     def test_missing_vcgencmd_does_not_crash(self, monkeypatch):
         def _missing(cmd, **kwargs):
