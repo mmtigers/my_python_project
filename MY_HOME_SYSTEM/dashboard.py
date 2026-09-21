@@ -1,8 +1,8 @@
 # MY_HOME_SYSTEM/dashboard.py
 import logging
 import traceback
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable, Dict, Tuple
 
 import pytz
 import streamlit as st
@@ -64,15 +64,15 @@ MOBILE_PAGE_PATH = f"{config.DASHBOARD_BASE_PATH}/m"
 # オーナー判断によりUIごと削除した。
 #
 # キーは `?tab=` のクエリパラメータに入る値でもある(下記 `_render_tab_selector`)。
-TABS: Tuple[Tuple[str, str], ...] = (
+TABS: tuple[tuple[str, str], ...] = (
     ("home", "🏠 ホーム"),
     ("out", "🚃 おでかけ"),
     ("watch", "👀 見守り"),
     ("life", "💡 くらし"),
     ("sys", "🔧 システム"),
 )
-TAB_LABELS: Dict[str, str] = dict(TABS)
-TAB_KEYS: Tuple[str, ...] = tuple(TAB_LABELS)
+TAB_LABELS: dict[str, str] = dict(TABS)
+TAB_KEYS: tuple[str, ...] = tuple(TAB_LABELS)
 DEFAULT_TAB_KEY = TAB_KEYS[0]
 
 # タブ選択ウィジェットの `key`。`_jump_to_tab` が session_state 経由で
@@ -288,7 +288,7 @@ def _render_sys_tab(now: datetime) -> None:
 
 
 # タブキー -> 描画関数。`_render_tab_selector` が返したキーのものだけを呼ぶ。
-TAB_RENDERERS: Dict[str, Callable[[datetime], None]] = {
+TAB_RENDERERS: dict[str, Callable[[datetime], None]] = {
     "home": _render_home_tab,
     "out": _render_out_tab,
     "watch": _render_watch_tab,

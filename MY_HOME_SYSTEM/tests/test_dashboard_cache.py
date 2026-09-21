@@ -20,6 +20,7 @@ SQLite から約33,000行を読み直していた。
 """
 import os
 import sys
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -300,7 +301,7 @@ class TestViewsDoNotBypassTheCache:
     サブプロセス1本が毎回上乗せされる(気づけるのは実機だけ)。
     """
 
-    FORBIDDEN = {
+    FORBIDDEN: ClassVar[dict] = {
         "summary.py": ["train_service.get_jr_traffic_status", "analysis_service.get_memory_usage"],
         "misc_tab.py": ["train_service.get_jr_traffic_status", "train_service.get_route_info"],
         "sensor_tab.py": ["analysis_service.load_yearly_temperature_stats"],
