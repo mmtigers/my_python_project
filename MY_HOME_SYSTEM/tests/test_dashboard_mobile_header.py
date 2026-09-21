@@ -137,3 +137,27 @@ class TestExistingMobileRulesSurvive:
         block = _mobile_media_block()
         assert '[data-baseweb="tab-list"]' in block
         assert "overflow-x: auto" in block
+
+
+class TestContentStartsBelowTheFixedHeader:
+    """ページを開いた時点で、先頭の行が固定ヘッダーの下に隠れないこと(#822)。
+
+    以前はモバイル幅の `.block-container` の `padding-top` が 1.2rem(約19px)で、
+    約 3.75rem(60px)ある Streamlit の固定ヘッダーより小さく、開いた直後から
+    「データを更新」「ファミクエを開く」の上半分が隠れていた。ヘッダーを不透明に
+    しただけでは「透けて見える」が「隠れて見えない」に変わるだけだった。
+    """
+
+    # Streamlit のヘッダー高さ(版によって 2.875rem〜3.75rem)。大きい方を下限にする。
+    STREAMLIT_HEADER_REM = 3.75
+
+    def test_mobile_top_padding_clears_the_header(self):
+        block = _mobile_media_block()
+        rule = block[block.index(".block-container"):]
+        rule = rule[: rule.index("}")]
+        m = re.search(r"padding-top:\s*([0-9.]+)rem", rule)
+        assert m, "モバイル幅の .block-container に rem 指定の padding-top が無い"
+        assert float(m.group(1)) >= self.STREAMLIT_HEADER_REM, (
+            f"padding-top {m.group(1)}rem は固定ヘッダー({self.STREAMLIT_HEADER_REM}rem)より小さく、"
+            "開いた時点で先頭の行がヘッダーの下に隠れる"
+        )

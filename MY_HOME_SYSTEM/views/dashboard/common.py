@@ -84,9 +84,16 @@ CUSTOM_CSS = f"""
 
     /* --- スマートフォン幅 --- */
     @media (max-width: {MOBILE_BREAKPOINT_PX}px) {{
-        /* 左右の既定パディングが広く、グラフ・表の実効幅が削られるため詰める */
+        /* 左右の既定パディングが広く、グラフ・表の実効幅が削られるため詰める。
+           上だけは詰めすぎない: Streamlit 既定のヘッダー(「»」「⋮」の行)は position:fixed で
+           約 3.75rem(60px)あり、本文はその**下に潜り込む**。以前ここを 1.2rem(約19px)に
+           していたため、ページを開いた時点で先頭の行(更新/ファミクエのボタン)の上半分が
+           ヘッダーに隠れていた(2026-09-21 に実機のスマホで確認。#822)。
+           PC 幅の既定(6rem)まで戻すと縦方向を無駄にするので、ヘッダー高さ+少しにする。
+           ヘッダー高さは Streamlit の版で 2.875rem〜3.75rem と変わってきたため、大きい方を
+           基準に余裕を持たせている。 */
         .block-container {{
-            padding-top: 1.2rem;
+            padding-top: 4.5rem;
             padding-bottom: 3rem;
             padding-left: 0.8rem;
             padding-right: 0.8rem;
