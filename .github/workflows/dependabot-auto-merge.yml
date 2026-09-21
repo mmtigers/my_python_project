@@ -48,7 +48,7 @@ jobs:
         id: metadata
         # 他のアクションと同様にコミットSHAへピン留めする(Issue #399)。Dependabot の
         # github-actions エコシステム設定により、更新は週次 PR で自動起票される。
-        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2.5.0
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
