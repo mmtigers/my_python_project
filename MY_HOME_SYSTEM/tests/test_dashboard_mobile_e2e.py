@@ -35,6 +35,13 @@ import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from services import home_status_service
+
+# 画面に出るタブの個数は `DASHBOARD_TABS`(ソースの定義)から取る。ここに数字を
+# 直書きすると、タブを増減させたときにこのファイルだけ取り残される(既定で
+# スキップされるため、手元の `pytest tests/` では気づけない)。
+EXPECTED_TAB_COUNT = len(home_status_service.DASHBOARD_TABS)
+
 pytestmark = pytest.mark.skipif(
     os.getenv("DASHBOARD_E2E") != "1",
     reason="実ブラウザと Streamlit の起動を伴うため、DASHBOARD_E2E=1 のときだけ実行する",
@@ -223,9 +230,9 @@ class TestMobileLayout:
 
     def test_every_tab_is_visible_without_scrolling_sideways(self, mobile_page):
         """目的のタブを探せないのは、10タブ構成で一番困っていた点。
-        5つが画面内に収まっていること。"""
+        すべてのタブが画面内に収まっていること。"""
         chips = mobile_page.locator('[data-testid="stButtonGroup"] button')
-        assert chips.count() == 5
+        assert chips.count() == EXPECTED_TAB_COUNT
 
         viewport_width = MOBILE_VIEWPORT["width"]
         for index in range(chips.count()):
@@ -381,10 +388,17 @@ class TestLightPageLayout:
         assert overflow <= 1, f"横方向に {overflow}px はみ出している"
 
     def test_every_card_is_a_link_to_its_detail(self, light_page):
-        """A: 異常に気づいてから詳細を開くまでを1タップにする。"""
-        cards = light_page.locator("a.status-card")
+        """A: 異常に気づいてから詳細を開くまでを1タップにする。
 
-        assert cards.count() == 9
+        枚数を直書きせず「描かれたカードの枚数」と突き合わせる。詳細タブを持たない
+        カード(`tab=None`)は `<div>` のまま描かれるので、1枚でもリンクでなければ
+        ここで差が出る。
+        """
+        cards = light_page.locator("a.status-card")
+        rendered = light_page.locator(".status-card")
+
+        assert rendered.count() > 0, "カードが1枚も描かれていない"
+        assert cards.count() == rendered.count(), "リンクになっていないカードがある"
         for i in range(cards.count()):
             href = cards.nth(i).get_attribute("href")
             assert href and "?tab=" in href, f"{i}枚目にリンク先が無い: {href!r}"
@@ -417,6 +431,8 @@ class TestLightPageRefresh:
     def test_updating_does_not_reload_the_whole_page(self, light_page):
         """C: 全ページ再読み込みだとスクロール位置が先頭へ戻り、画面が白く瞬く。"""
         light_page.evaluate("() => { window.__e2e_marker = 'kept'; }")
+        before = light_page.locator("a.status-card").count()
+        assert before > 0, "カードが1枚も描かれていない"
 
         # 自動更新は60秒間隔なので、同じ経路(可視状態に戻ったときの即時更新)を
         # 手で発火させて待つ。
@@ -427,7 +443,9 @@ class TestLightPageRefresh:
             "ページ全体が読み込み直されている(JS側の状態が消えた)"
         )
         assert light_page.locator("#status").count() == 1, "差し替え後に差し替え先を見失っている"
-        assert light_page.locator("a.status-card").count() == 9
+        assert light_page.locator("a.status-card").count() == before, (
+            "差し替え後にカードが増減している"
+        )
         assert "stale" not in (light_page.get_attribute("#status", "class") or ""), (
             "更新に失敗している"
         )
