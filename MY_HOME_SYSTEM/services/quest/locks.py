@@ -10,6 +10,7 @@ from contextlib import ExitStack
 from typing import Optional, Tuple
 
 import config
+from core.jp_holidays import is_offday
 from core.logger import setup_logging
 from core.utils import RefCountedLockRegistry
 from fastapi import HTTPException
@@ -162,17 +163,20 @@ def get_youtube_daily_limit_minutes(today: datetime.date | None = None) -> int |
     その日に使えるYouTube系ごほうび券の合計分数の上限を返す。上限なしの設定
     (0以下)の場合は None を返す。
 
-    平日(月〜金)と休日(土日)で別々の上限を持つ。祝日は「平日」として扱う:
-    祝日判定には外部の暦データ(jpholiday等)が必要で、個人用システムに依存を
-    増やす割に合わないと判断した。祝日に緩めたい日は親が都度判断する運用でよい。
+    平日(学校・会社がある日)と休日で別々の上限を持つ。休日には土日だけでなく
+    国民の祝日・振替休日と config.EXTRA_HOLIDAY_DATES の「家の休み」も含む
+    (`core.jp_holidays.is_offday`)。
+
+    以前はここで祝日を「平日」として扱っていた(外部の暦データ(jpholiday等)への
+    依存を避けるため)が、祝日にファミクエ全体が平日の挙動になるのが実運用で
+    問題になったため、依存を増やさずローカル計算する core/jp_holidays.py を
+    追加してこの判断を撤回した。
     """
     if today is None:
         today = datetime.datetime.now(JST).date()
-    # weekday(): 月=0 ... 土=5, 日=6
-    is_holiday = today.weekday() >= 5
     limit = (
         config.YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY
-        if is_holiday
+        if is_offday(today)
         else config.YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY
     )
     return limit if limit > 0 else None

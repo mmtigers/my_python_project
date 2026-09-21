@@ -13,11 +13,12 @@ from fastapi import HTTPException
 
 from core.utils import get_now_iso
 from core.database import get_db_cursor
+from core.jp_holidays import is_offday
 import config
 import game_logic
 from core import sound_manager
 from routine_data import (
-    FULL_BONUS_EXP, FULL_BONUS_GOLD, WEEKEND_DAYS, RoutineFlow, RoutineStep,
+    FULL_BONUS_EXP, FULL_BONUS_GOLD, RoutineFlow, RoutineStep,
     get_checklist_range, get_checkpoint_index, get_effective_checkpoint_time,
     get_flow_set, get_step_reward, is_weekday_skip,
 )
@@ -30,6 +31,10 @@ TV_UNLOCK_TARGET_USER_ID = 'son'
 
 
 class RoutineService:
+    # weekend_carryover の遡り上限(日)。通常の3〜5連休を賄いつつ、
+    # 長期休暇(EXTRA_HOLIDAY_DATES)で無限に繰越されるのを防ぐ。
+    _CARRYOVER_MAX_LOOKBACK_DAYS = 7
+
     def _get_user_row(self, cur, user_id: str):
         """quest_users の行(role含む)を返す。存在しなければ404。
 
@@ -61,18 +66,26 @@ class RoutineService:
     def _carryover_lookback_dates(self, now: datetime.datetime) -> List[str]:
         """weekend_carryoverステップについて、完了済みか確認すべき過去日付を返す。
 
-        土曜は金曜のみ、日曜は金曜・土曜の両方を遡る(要件: 金曜終わっていれば
-        土日とも不要、土曜終わっていれば日曜だけ不要)。平日は遡らない。
+        今日が休日のとき、連休の初日側へ遡り「連休直前の平日」までを対象にする
+        (要件: 金曜終わっていれば土日とも不要、土曜終わっていれば日曜だけ不要)。
+        土曜なら[金]、日曜なら[土, 金]となり従来の挙動と一致し、月曜が祝日の
+        3連休なら[日, 土, 金]、祝日が金曜なら[木]のように連休の長さに追従する。
+        平日(学校がある日)は遡らない。
+
+        遡りは最大 `_CARRYOVER_MAX_LOOKBACK_DAYS` 日で打ち切る。年末年始のように
+        EXTRA_HOLIDAY_DATES で長い休みを設定した場合に、宿題が延々と「繰越で不要」に
+        なり続けないための歯止め。
         """
-        weekday = now.weekday()
-        if weekday == 5:  # 土曜
-            return [self._today_str(now - datetime.timedelta(days=1))]
-        if weekday == 6:  # 日曜
-            return [
-                self._today_str(now - datetime.timedelta(days=1)),
-                self._today_str(now - datetime.timedelta(days=2)),
-            ]
-        return []
+        if not is_offday(now):
+            return []
+        dates: List[str] = []
+        for delta in range(1, self._CARRYOVER_MAX_LOOKBACK_DAYS + 1):
+            day = now - datetime.timedelta(days=delta)
+            dates.append(self._today_str(day))
+            # 連休直前の平日(学校がある日)まで含めたら打ち切る。
+            if not is_offday(day):
+                break
+        return dates
 
     def _was_done_on_any_date(self, cur, user_id: str, flow_key: str, key: str, dates: List[str]) -> bool:
         if not dates:
@@ -88,13 +101,14 @@ class RoutineService:
     def _resolve_skip_keys(self, cur, user_id: str, flow_key: str, flow: RoutineFlow, now: datetime.datetime) -> Set[str]:
         """今日スキップ(達成済み扱い)すべきステップのkey集合を返す。
 
-        土日に適用されるものが2種類 — weekend_skip(例: 土日はhandwash不要)と
-        weekend_carryover(例: 宿題は金曜/土曜に完了していれば以降不要) — 、
+        休日(土日・国民の祝日・家の休み。`core.jp_holidays.is_offday`)に適用される
+        ものが2種類 — weekend_skip(例: 休日はhandwash不要)と weekend_carryover
+        (例: 宿題は連休直前の平日/連休中に完了していれば以降不要) — 、
         平日に適用されるものが1種類 — weekday_skip(例: パパのキッチン/リビング
-        リセットは土日だけ出す) — ある。
+        リセットは休日だけ出す) — ある。
         """
         skip_keys: Set[str] = set()
-        if now.weekday() not in WEEKEND_DAYS:
+        if not is_offday(now):
             for step in flow['steps']:
                 if is_weekday_skip(step):
                     skip_keys.add(step['key'])

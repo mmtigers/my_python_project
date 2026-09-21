@@ -335,7 +335,9 @@ class TestDailyLimit:
     """
 
     # 平日(月)のJST午前10時。曜日で上限が変わるため、日付は固定する(#658)。
-    WEEKDAY_NOON_UTC = "2026-09-21T01:00:00"   # JST 2026-09-21(月) 10:00
+    # 祝日も休日の上限が適用される(core/jp_holidays.py)ようになったため、
+    # 平日側は祝日でない月曜(2026-09-21は敬老の日なので2026-09-28)を使う。
+    WEEKDAY_NOON_UTC = "2026-09-28T01:00:00"   # JST 2026-09-28(月) 10:00
     HOLIDAY_NOON_UTC = "2026-09-19T01:00:00"   # JST 2026-09-19(土) 10:00
 
     def _used_today(self, user_id: str, reward_id: int, minutes_ago: int) -> None:
@@ -410,16 +412,16 @@ class TestDailyLimit:
     def test_yesterdays_usage_does_not_count(self, isolated_db):
         _seed()
         service = qs_module.InventoryService()
-        # 前日(JST 2026-09-20)に上限いっぱい使っていても、今日は最初から60分使える
-        yesterday = "2026-09-20T20:00:00+09:00"
+        # 前日(JST 2026-09-27)に上限いっぱい使っていても、今日は最初から60分使える
+        yesterday = "2026-09-27T20:00:00+09:00"
         _grant_item("son", 702, used_at=yesterday, status='consumed')
         _grant_item("son", 702, used_at=yesterday, status='consumed')
         thirty_min_ticket = _grant_item("son", 702)
 
         assert service.use_item("son", thirty_min_ticket)["status"] == "consumed"
 
-    # JST 2026-09-21(月) 08:30。UTCへ直すと前日(2026-09-20)になる時刻。
-    @freeze_time("2026-09-20T23:30:00")
+    # JST 2026-09-28(月) 08:30。UTCへ直すと前日(2026-09-27)になる時刻。
+    @freeze_time("2026-09-27T23:30:00")
     def test_morning_usage_is_counted_on_the_jst_date(self, isolated_db):
         """
         used_at はJSTオフセット付きISO文字列で保存されるため、SQLiteの date() で
@@ -429,7 +431,7 @@ class TestDailyLimit:
         _seed()
         service = qs_module.InventoryService()
         used_id = _grant_item("son", 702)
-        service.use_item("son", used_id)  # JSTでは 2026-09-21 08:30 の使用
+        service.use_item("son", used_id)  # JSTでは 2026-09-28 08:30 の使用
 
         result = service.get_user_inventory("son")
         assert result["youtube_daily_used_minutes"] == 30
@@ -536,7 +538,8 @@ class TestDailyLimitExtensionByQuest:
     意味がないため、**親に承認された(status='approved')** ものだけを数える。
     """
 
-    WEEKDAY_NOON_UTC = "2026-09-21T01:00:00"   # JST 2026-09-21(月) 10:00
+    # 上のTestDailyLimitと同じ理由で、祝日でない月曜を使う。
+    WEEKDAY_NOON_UTC = "2026-09-28T01:00:00"   # JST 2026-09-28(月) 10:00
 
     def _use_up_the_limit(self, user_id: str = "son") -> None:
         """30分券 × 2 = 60分(平日の上限ちょうど)を使った状態にする。"""

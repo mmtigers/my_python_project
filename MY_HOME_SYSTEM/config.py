@@ -19,6 +19,7 @@
     14. Family Quest: YouTubeごほうび券の視聴制限設定
     15. 週次レポート設定
     16. ダッシュボード(Streamlit)公開設定
+    17. 祝日・休日判定設定
 """
 import os
 import time
@@ -869,3 +870,30 @@ DASHBOARD_INTERNAL_URL: str = os.getenv("DASHBOARD_INTERNAL_URL", "http://127.0.
 DASHBOARD_BASE_PATH: str = "/" + os.getenv("DASHBOARD_BASE_PATH", "dashboard").strip().strip("/")
 # プロキシのタイムアウト(秒)。Streamlitは初回レンダリングで数秒かかることがある。
 DASHBOARD_PROXY_TIMEOUT_SEC: int = _get_int_env("DASHBOARD_PROXY_TIMEOUT_SEC", 30)
+
+
+# ==========================================
+# 17. 祝日・休日判定設定
+# ==========================================
+# 「国民の祝日」そのものは core/jp_holidays.py がローカル計算で判定する(外部の
+# 暦ライブラリは入れない)。ここで設定するのは、祝日ではないが家庭の運用上は
+# 休日として扱いたい日(年末年始・お盆・学校の振替休業日・家族旅行など)である。
+#
+# YYYY-MM-DD をカンマ区切りで列挙する(例: "2026-12-29,2026-12-30,2026-12-31")。
+# ここに入れた日は、すごろく(ルーティン)・デイリークエストの曜日判定・
+# YouTubeごほうび券の日次上限のすべてで土日や祝日と同じ扱いになる。
+# 解釈できない要素は警告ログを出して無視する(設定ミスでconfig全体を落とさない)。
+_extra_holiday_dates_str: str = os.getenv("EXTRA_HOLIDAY_DATES", "")
+_extra_holiday_dates: set = set()
+for _raw_date in _extra_holiday_dates_str.split(","):
+    _raw_date = _raw_date.strip()
+    if not _raw_date:
+        continue
+    try:
+        _extra_holiday_dates.add(_date.fromisoformat(_raw_date))
+    except ValueError:
+        logger.warning(
+            f"⚠️ EXTRA_HOLIDAY_DATES の要素 '{_raw_date}' は YYYY-MM-DD として "
+            "解釈できません。この要素は無視します。"
+        )
+EXTRA_HOLIDAY_DATES: frozenset = frozenset(_extra_holiday_dates)
