@@ -213,7 +213,7 @@
 
 
 * **戻り値/レスポンス**: `List[str]` — 休日なら「前日から連休直前の平日まで」を新しい順に並べたリスト(土曜なら1件、日曜なら2件、祝日を含む3連休の最終日なら3件)、平日なら空リスト
-* 根拠: [戻り値] (行番号: 79-89 / 抜粋: "        if not is_offday(now):\n            return []\n        dates: List[str] = []\n        for delta in range(1, self._CARRYOVER_MAX_LOOKBACK_DAYS + 1):\n            day = now - datetime.timedelta(days=delta)\n            dates.append(self._today_str(day))\n            # 連休直前の平日(学校がある日)まで含めたら打ち切る。\n            if not is_offday(day):\n                break\n        return dates")
+* 根拠: [戻り値] (行番号: 79-89 / 抜粋: "        if not is_offday(now):\n            return []\n        dates: list[str] = []\n        for delta in range(1, self._CARRYOVER_MAX_LOOKBACK_DAYS + 1):\n            day = now - datetime.timedelta(days=delta)\n            dates.append(self._today_str(day))\n            # 連休直前の平日(学校がある日)まで含めたら打ち切る。\n            if not is_offday(day):\n                break\n        return dates")
 
 
 * **副作用**: なし

@@ -78,7 +78,7 @@ class RoutineService:
         """
         if not is_offday(now):
             return []
-        dates: List[str] = []
+        dates: list[str] = []
         for delta in range(1, self._CARRYOVER_MAX_LOOKBACK_DAYS + 1):
             day = now - datetime.timedelta(days=delta)
             dates.append(self._today_str(day))

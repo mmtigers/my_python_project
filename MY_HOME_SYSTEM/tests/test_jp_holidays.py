@@ -10,9 +10,8 @@ tests/test_routine_holiday.py を参照。
 """
 import datetime
 
-import pytest
-
 import config
+import pytest
 import routine_data
 from core.jp_holidays import (
     EXTRA_HOLIDAY_NAME,

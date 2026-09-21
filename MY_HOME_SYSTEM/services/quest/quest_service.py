@@ -28,7 +28,7 @@ from services.quest.user_service import UserService
 WEEKDAY_ONLY_DAYS = frozenset({0, 1, 2, 3, 4})
 
 
-def matches_day_of_week(today_date: datetime.date, days_list: List[int]) -> bool:
+def matches_day_of_week(today_date: datetime.date, days_list: list[int]) -> bool:
     """quest_master.day_of_week の曜日指定が今日に合致するかを返す。
 
     祝日(国民の祝日・振替休日・config.EXTRA_HOLIDAY_DATES の「家の休み」)は

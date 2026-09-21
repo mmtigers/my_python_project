@@ -33,7 +33,6 @@
 """
 import datetime
 import functools
-from typing import Dict, Optional, Union
 
 import config
 
@@ -51,7 +50,7 @@ CITIZENS_HOLIDAY_NAME = "国民の休日"
 # 家庭の運用上は休日にしたい日)に付ける表示名。
 EXTRA_HOLIDAY_NAME = "家の休み"
 
-DateLike = Union[datetime.date, datetime.datetime]
+DateLike = datetime.date | datetime.datetime
 
 
 def _as_date(value: DateLike) -> datetime.date:
@@ -82,7 +81,7 @@ def _equinox_day(year: int, base: float) -> int:
     return int(base + 0.242194 * (year - 1980) - int((year - 1980) / 4))
 
 
-def _statutory_holidays(year: int) -> Dict[datetime.date, str]:
+def _statutory_holidays(year: int) -> dict[datetime.date, str]:
     """振替休日・国民の休日を除いた、その年の祝日そのものを返す。"""
     return {
         datetime.date(year, 1, 1): "元日",
@@ -105,7 +104,7 @@ def _statutory_holidays(year: int) -> Dict[datetime.date, str]:
 
 
 @functools.lru_cache(maxsize=8)
-def _holidays_for_year(year: int) -> Dict[datetime.date, str]:
+def _holidays_for_year(year: int) -> dict[datetime.date, str]:
     """その年の {date: 祝日名}(振替休日・国民の休日を含む)。
 
     lru_cacheで年単位にキャッシュする(1日の判定ごとに16日ぶんの日付計算を
@@ -113,7 +112,7 @@ def _holidays_for_year(year: int) -> Dict[datetime.date, str]:
     `get_national_holidays` 側でコピーする。
     """
     statutory = _statutory_holidays(year)
-    holidays: Dict[datetime.date, str] = dict(statutory)
+    holidays: dict[datetime.date, str] = dict(statutory)
 
     # 振替休日: 祝日が日曜と重なったら、その後で最も近い「祝日でない日」が休日になる
     # (2007年改正後の規則。5/3が日曜なら5/4・5/5を飛ばして5/6が振替休日)。
@@ -138,7 +137,7 @@ def _holidays_for_year(year: int) -> Dict[datetime.date, str]:
     return holidays
 
 
-def get_national_holidays(year: int) -> Dict[datetime.date, str]:
+def get_national_holidays(year: int) -> dict[datetime.date, str]:
     """その年の国民の祝日を {date: 祝日名} で返す(呼び出し側が変更してよいコピー)。"""
     return dict(_holidays_for_year(year))
 
@@ -154,7 +153,7 @@ def _extra_holiday_dates() -> frozenset:
     return getattr(config, "EXTRA_HOLIDAY_DATES", frozenset())
 
 
-def get_holiday_name(value: DateLike) -> Optional[str]:
+def get_holiday_name(value: DateLike) -> str | None:
     """祝日名(家の休みなら"家の休み")を返す。祝日でも家の休みでもなければNone。"""
     target = _as_date(value)
     if target in _extra_holiday_dates():
@@ -174,7 +173,7 @@ def is_offday(value: DateLike) -> bool:
     return get_holiday_name(target) is not None
 
 
-def get_offday_reason(value: DateLike) -> Optional[str]:
+def get_offday_reason(value: DateLike) -> str | None:
     """休日である理由の表示名("土曜"/"日曜"/"敬老の日"/"家の休み")。平日ならNone。
 
     祝日が土日と重なっている場合は祝日名を優先する(表示・ログ用)。

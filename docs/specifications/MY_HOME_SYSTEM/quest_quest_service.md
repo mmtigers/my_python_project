@@ -202,9 +202,9 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `WEEKDAY_ONLY_DAYS` / `matches_day_of_week`（祝日対応で新規追加）
 
 * **役割**: `WEEKDAY_ONLY_DAYS`は「平日のみ」を表す曜日指定(月〜金すべて、`frozenset({0, 1, 2, 3, 4})`)。`matches_day_of_week(today_date, days_list)`は`quest_master.day_of_week`の曜日指定が今日に合致するかを返すモジュール関数で、祝日(国民の祝日・振替休日・`config.EXTRA_HOLIDAY_DATES`の「家の休み」)を土日と同じ「休日」として扱う。docstringが判定を3つに分けて明記している: (1) 今日の曜日が指定に含まれていれば合致する（祝日でも「ゴミ捨て(月・木)」のような特定曜日の用事は通常どおり出す。自治体のゴミ収集は祝日も通常どおりのことが多い、という運用判断）、(2) ただし「月〜金すべて」の指定だけは例外で休日には出さない（「会社勤務(通常)」「小学校に行く」のような学校/勤務がある日そのものを表すクエスト）、(3) 曜日は一致しないが土日(5と6の両方)を含む指定のクエストは休日なら出す（日曜だけ等の片方のみの指定は、その曜日に実際に予定が紐づくため広げない）。
-* 根拠: `WEEKDAY_ONLY_DAYS = frozenset({0, 1, 2, 3, 4})` (行番号: 28)、`def matches_day_of_week(today_date: datetime.date, days_list: List[int]) -> bool:` (行番号: 31)、[判定本体] (行番号: 49〜53 / 抜粋: "    days = set(days_list)\n    if today_date.weekday() in days:\n        return not (days == WEEKDAY_ONLY_DAYS and is_offday(today_date))\n    return WEEKEND_DAYS <= days and is_offday(today_date)")
-* **引数/リクエスト**: `today_date: datetime.date`, `days_list: List[int]`（`day_of_week`をカンマ区切りで`int`化したもの）
-* 根拠: `def matches_day_of_week(today_date: datetime.date, days_list: List[int]) -> bool:` (行番号: 31)
+* 根拠: `WEEKDAY_ONLY_DAYS = frozenset({0, 1, 2, 3, 4})` (行番号: 28)、`def matches_day_of_week(today_date: datetime.date, days_list: list[int]) -> bool:` (行番号: 31)、[判定本体] (行番号: 49〜53 / 抜粋: "    days = set(days_list)\n    if today_date.weekday() in days:\n        return not (days == WEEKDAY_ONLY_DAYS and is_offday(today_date))\n    return WEEKEND_DAYS <= days and is_offday(today_date)")
+* **引数/リクエスト**: `today_date: datetime.date`, `days_list: list[int]`（`day_of_week`をカンマ区切りで`int`化したもの）
+* 根拠: `def matches_day_of_week(today_date: datetime.date, days_list: list[int]) -> bool:` (行番号: 31)
 * **戻り値/レスポンス**: `bool`
 * 根拠: [戻り値] (行番号: 51, 53 / 抜粋: "        return not (days == WEEKDAY_ONLY_DAYS and is_offday(today_date))")
 * **副作用**: なし

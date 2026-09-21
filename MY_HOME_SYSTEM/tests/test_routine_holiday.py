@@ -12,9 +12,8 @@
 """
 import datetime
 
-import pytest
-
 import config
+import pytest
 from core.database import get_db_cursor
 from services.routine_service import routine_service
 
