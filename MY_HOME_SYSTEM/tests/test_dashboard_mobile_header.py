@@ -33,6 +33,21 @@ def _dashboard_source() -> str:
         return f.read()
 
 
+def _keyed_container_sources() -> str:
+    """`st.container(key=...)` が書かれうるファイルをすべて連結して返す。
+
+    当初は `dashboard.py` だけだったが、スマホ向けのレイアウト例外
+    (写真ギャラリーを2列にする等)は View 側にも置くようになった。
+    """
+    sources = [_dashboard_source()]
+    views_dir = os.path.join(os.path.dirname(_DASHBOARD_PY), "views", "dashboard")
+    for name in sorted(os.listdir(views_dir)):
+        if name.endswith(".py"):
+            with open(os.path.join(views_dir, name), encoding="utf-8") as f:
+                sources.append(f.read())
+    return "\n".join(sources)
+
+
 def _mobile_media_block() -> str:
     """モバイル幅のメディアクエリの中身だけを取り出す。
 
@@ -74,12 +89,13 @@ class TestHeaderActionsKeyMatchesCss:
 
     def test_the_two_strings_are_the_same(self):
         """片方だけリネームされていないこと(この不一致は無言で効かなくなる)。"""
-        src = _dashboard_source()
+        src = _keyed_container_sources()
         keys_in_py = set(re.findall(r'st\.container\(\s*key\s*=\s*["\']([^"\']+)["\']', src))
         keys_in_css = set(re.findall(r'\.st-key-([A-Za-z0-9_-]+)', view_common.CUSTOM_CSS))
         assert keys_in_css, "CSS に .st-key-* のセレクタが無い"
         assert keys_in_css <= keys_in_py, (
-            f"CSS が参照する key {sorted(keys_in_css - keys_in_py)} が dashboard.py に存在しない"
+            f"CSS が参照する key {sorted(keys_in_css - keys_in_py)} が "
+            "dashboard.py / views/dashboard/ に存在しない"
         )
 
 

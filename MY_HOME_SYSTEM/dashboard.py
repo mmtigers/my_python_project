@@ -121,6 +121,16 @@ def _render_header_actions() -> None:
             # 固定URLを埋めるとLAN外から開いたときに繋がらない。
             st.link_button("⚔️ ファミクエを開く", QUEST_APP_PATH, width="stretch")
 
+    # スマホでは「いま見ている数字がいつのものか」が分からないと判断に使えない。
+    # 表示は最大60秒キャッシュされるため、描画時刻ではなくキャッシュ世代の
+    # 取得時刻を出す(`view_common.cache_generation_started_at` のdocstring参照)。
+    fetched_at = view_common.cache_generation_started_at()
+    st.caption(
+        f"データ取得 {fetched_at.strftime('%H:%M:%S')} "
+        f"({view_common.format_relative_time(fetched_at)}) "
+        f"・最大{view_common.DASHBOARD_CACHE_TTL_SEC}秒キャッシュ"
+    )
+
 
 def _requested_tab() -> str:
     """URLの `?tab=` から表示すべきタブを決める(未指定・不正値はホーム)。"""

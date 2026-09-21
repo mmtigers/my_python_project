@@ -4,10 +4,13 @@ import logging
 import math
 import traceback
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Iterable, NamedTuple
 
 import pandas as pd
+import pytz
 import streamlit as st
+from core.utils import get_now_jst
 from services import analysis_service, train_service
 
 logger = logging.getLogger(__name__)
@@ -143,6 +146,21 @@ CUSTOM_CSS = f"""
             white-space: nowrap;
             padding-left: 0.55rem;
             padding-right: 0.55rem;
+        }}
+
+        /* 防犯カメラのギャラリーも2列で折り返す。4枚が全幅で縦に積まれると、
+           下の防犯ログに届くまで数画面ぶんスクロールすることになる。 */
+        .st-key-camera_gallery [data-testid="stHorizontalBlock"],
+        .st-key-camera_gallery_past [data-testid="stHorizontalBlock"] {{
+            flex-wrap: wrap;
+        }}
+        .st-key-camera_gallery [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+        .st-key-camera_gallery [data-testid="stHorizontalBlock"] > [data-testid="column"],
+        .st-key-camera_gallery_past [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+        .st-key-camera_gallery_past [data-testid="stHorizontalBlock"] > [data-testid="column"] {{
+            flex: 1 1 45% !important;
+            min-width: 45% !important;
+            width: auto !important;
         }}
 
         /* サマリー直下の「詳しく見る」導線。ヘッダー操作列と同じ理由で
@@ -368,6 +386,129 @@ def downsample_for_chart(
         thinned.append(picked)
 
     return pd.concat(thinned).sort_values(timestamp_col)
+
+
+# === スマホ向けのグラフ設定 ===
+# plotly の既定はPCのマウス操作前提で、スマホでは次の3点が実害になる。
+#   - モードバー(ズーム・保存等のアイコン列)が 390px 幅ではグラフ本体を圧迫し、
+#     しかも指では押しにくい
+#   - グラフ上のドラッグが既定でズーム操作になるため、ページをスクロールしようと
+#     してグラフに触れると縦スクロールが奪われ、画面から抜け出せなくなる
+#   - 既定の高さ(450px)はスマホだとグラフ1枚で画面が埋まる
+PLOTLY_MOBILE_CONFIG = {
+    "displayModeBar": False,
+    "displaylogo": False,
+    "scrollZoom": False,
+}
+CHART_HEIGHT_PX = 280
+
+
+def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:
+    """plotlyのグラフをスマホ向けの設定で描画する共通ヘルパー。
+
+    `dragmode=False` でグラフ上のドラッグ(既定ではズーム)を無効にしている。
+    PCでもズームできなくなるが、このダッシュボードのグラフは「形と水準を見る」
+    用途で、拡大が要るときは元データ側(表・ログ)を見るほうが早い。
+    """
+    fig.update_layout(
+        height=height,
+        dragmode=False,
+        margin={"l": 8, "r": 8, "t": 40, "b": 8},
+    )
+    st.plotly_chart(fig, width="stretch", config=PLOTLY_MOBILE_CONFIG)
+
+
+# === 時刻の表示 ===
+_JST = pytz.timezone("Asia/Tokyo")
+
+
+def format_short_timestamp(value) -> str:
+    """「09/21 03:04」形式にする。読めない値は空文字を返す。
+
+    DBから来る `2026-09-21 03:04:12+09:00` のようなISO文字列は、それだけで
+    スマホの表の1列を食い、しかも読み取りづらい。
+    """
+    ts = pd.to_datetime(value, errors="coerce")
+    if pd.isna(ts):
+        return ""
+    return ts.strftime("%m/%d %H:%M")
+
+
+def format_relative_time(value, now: datetime | None = None) -> str:
+    """「3分前」のような相対表記にする。
+
+    スマホでは「いつのデータか」を一目で判断したい場面が多い(見守り・防犯ログ)。
+    1週間より古いもの・未来の時刻は、相対表記にしても分かりにくいので短縮表記で返す。
+    """
+    ts = pd.to_datetime(value, errors="coerce")
+    if pd.isna(ts):
+        return ""
+
+    now = now or get_now_jst()
+    if ts.tzinfo is None:
+        # DB由来の naive な時刻は JST として扱う(`core.utils` のJST固定方針と同じ)
+        ts = ts.tz_localize(_JST)
+
+    seconds = (now - ts).total_seconds()
+    if seconds < 0 or seconds >= 7 * 86400:
+        return format_short_timestamp(ts)
+    if seconds < 60:
+        return "たった今"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}分前"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)}時間前"
+    return f"{int(seconds // 86400)}日前"
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def cache_generation_started_at() -> datetime:
+    """いま表示しているキャッシュ世代が作られた時刻を返す。
+
+    各ローダと同じTTLで期限切れになるため、「画面に出ているデータがいつのものか」の
+    目安として使える(厳密には各ローダの初回呼び出し時刻との間にTTL未満のずれが出る)。
+    キャッシュが効いている以上、表示時刻をそのまま「最終更新」と書くと嘘になるため、
+    この値をヘッダーに出す。
+    """
+    return get_now_jst()
+
+
+def render_table(
+    df: pd.DataFrame,
+    columns: dict,
+    *,
+    time_cols: Iterable[str] = ("timestamp",),
+    relative_time: bool = False,
+    height: int | None = None,
+) -> None:
+    """スマホ幅でも読める表を描画する共通ヘルパー。
+
+    `st.dataframe` は画面幅を超えると横スクロールの箱になり、スマホでは
+    縦スクロールの途中で指を横に振らないと端の列が読めない。そのため、
+      - 列は `columns`(元の列名 -> 表示名)で挙げたものだけに絞る
+      - 時刻列は「09/21 03:04」に短縮する。`relative_time=True` を渡すと
+        「09/21 03:04 (3分前)」になる(見守り・防犯ログのように「どれくらい前か」を
+        一目で知りたい表向け)
+      - 行番号(index)は情報量が無いので隠す
+    """
+    available = {src: label for src, label in columns.items() if src in df.columns}
+    if df.empty or not available:
+        st.info("表示できるデータがありません")
+        return
+
+    view = df[list(available)].copy()
+    now = get_now_jst() if relative_time else None
+    for col in time_cols:
+        if col not in view.columns:
+            continue
+        if relative_time:
+            view[col] = view[col].map(
+                lambda v: f"{format_short_timestamp(v)} ({format_relative_time(v, now)})".strip()
+            )
+        else:
+            view[col] = view[col].map(format_short_timestamp)
+    view = view.rename(columns=available)
+    st.dataframe(view, width="stretch", hide_index=True, height=height)
 
 
 class StatusCard(NamedTuple):

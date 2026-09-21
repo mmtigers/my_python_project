@@ -45,7 +45,7 @@ def render_electricity(df_sensor: pd.DataFrame, now: datetime):
                 df_today = view_common.downsample_for_chart(df_today)
                 fig.add_trace(go.Scatter(x=df_today["timestamp"], y=df_today["power_watts"], mode="lines", name="今日", line=dict(color="#3366cc", width=3)))
             fig.update_layout(xaxis_range=[today_start, today_end], xaxis_title="時間", yaxis_title="電力(W)", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            st.plotly_chart(fig, width="stretch")
+            view_common.render_chart(fig)
         else:
             # Issue #453: device_type名の変更等で恒常的に0件になっても気づけるよう警告表示にする
             st.warning(f"{DEVICE_TYPE_NATURE_REMO_E_LITE}のデータがありません")
@@ -60,7 +60,7 @@ def render_electricity(df_sensor: pd.DataFrame, now: datetime):
             fig_app = px.line(view_common.downsample_for_chart(df_app, series_col="friendly_name"),
                               x="timestamp", y="power_watts", color="friendly_name", title="プラグ計測値")
             fig_app.update_xaxes(range=[today_start, today_end])
-            st.plotly_chart(fig_app, width="stretch")
+            view_common.render_chart(fig_app)
         else:
             st.warning("プラグデータなし")
 
@@ -84,7 +84,7 @@ def render_temperature(df_sensor: pd.DataFrame, now: datetime):
             fig_t = px.line(view_common.downsample_for_chart(df_temp, series_col="friendly_name"),
                             x="timestamp", y="temperature_celsius", color="friendly_name", title="室温 (℃)")
             fig_t.update_xaxes(range=[today_start, today_end])
-            st.plotly_chart(fig_t, width="stretch")
+            view_common.render_chart(fig_t)
         else:
             st.warning("今日の室温データなし")
 
@@ -93,7 +93,7 @@ def render_temperature(df_sensor: pd.DataFrame, now: datetime):
             fig_h = px.line(view_common.downsample_for_chart(df_temp, series_col="friendly_name"),
                             x="timestamp", y="humidity_percent", color="friendly_name", title="湿度 (%)")
             fig_h.update_xaxes(range=[today_start, today_end])
-            st.plotly_chart(fig_h, width="stretch")
+            view_common.render_chart(fig_h)
         else:
             st.warning("今日の湿度データなし")
 
@@ -112,7 +112,7 @@ def render_temperature(df_sensor: pd.DataFrame, now: datetime):
         if "in_min" in df_yearly.columns:
             fig.add_trace(go.Scatter(x=df_yearly["date"], y=df_yearly["in_min"], mode="lines", name="最低室温(内)", line=dict(color="#00bcd4", width=2, dash="dot")))
         fig.update_layout(xaxis_title="日付", yaxis_title="温度(℃)", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), hovermode="x unified")
-        st.plotly_chart(fig, width="stretch")
+        view_common.render_chart(fig)
     else:
         st.info("年間データがまだありません。")
 
@@ -120,7 +120,8 @@ def render_takasago(df_sensor: pd.DataFrame):
     """高砂実家タブ"""
     if not df_sensor.empty:
         st.subheader("👵 実家ログ")
-        st.dataframe(
-            df_sensor[df_sensor["location"] == "高砂"][["timestamp", "friendly_name", "contact_state"]].head(50),
-            width="stretch",
+        view_common.render_table(
+            df_sensor[df_sensor["location"] == "高砂"].head(50),
+            {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"},
+            relative_time=True,
         )

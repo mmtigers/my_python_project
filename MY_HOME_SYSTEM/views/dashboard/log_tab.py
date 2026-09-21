@@ -17,11 +17,15 @@ def render_logs(df_sensor: pd.DataFrame):
 
     locs = df_sensor["location"].unique()
     sel = st.multiselect("場所", locs, default=locs)
-    st.dataframe(
-        df_sensor[df_sensor["location"].isin(sel)][
-            ["timestamp", "friendly_name", "location", "contact_state", "power_watts"]
-        ].head(200),
-        width="stretch",
+    view_common.render_table(
+        df_sensor[df_sensor["location"].isin(sel)].head(200),
+        {
+            "timestamp": "時刻",
+            "friendly_name": "センサー",
+            "location": "場所",
+            "contact_state": "状態",
+            "power_watts": "W",
+        },
     )
 
 

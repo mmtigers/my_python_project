@@ -100,24 +100,31 @@ def render_photos(df_security_log: pd.DataFrame):
     img_dir = os.path.join(config.ASSETS_DIR, "snapshots")
     images = sorted(glob.glob(os.path.join(img_dir, "*.jpg")), reverse=True)
     if images:
-        cols_img = st.columns(4)
-        for i, p in enumerate(images[:4]):
-            cols_img[i].image(p, caption=os.path.basename(p), width="stretch")
-        with st.expander("📂 過去の写真"):
-            cols_past = st.columns(4)
-            for i, p in enumerate(images[4:20]):
-                cols_past[i % 4].image(p, caption=os.path.basename(p), width="stretch")
+        # スマホ対応: モバイルCSSは st.columns を一律で縦積みにするため、
+        # ここだけは2枚ずつ横に並べる(`.st-key-camera_gallery`)。
+        # 4枚が全幅で縦に積まれると、この下の防犯ログまで数画面ぶんスクロールが要る。
+        with st.container(key="camera_gallery"):
+            cols_img = st.columns(4)
+            for i, path in enumerate(images[:4]):
+                cols_img[i].image(path, caption=os.path.basename(path), width="stretch")
+        if view_common.lazy_section("📂 過去の写真", key="past_photos"):
+            with st.container(key="camera_gallery_past"):
+                cols_past = st.columns(4)
+                for i, path in enumerate(images[4:20]):
+                    cols_past[i % 4].image(path, caption=os.path.basename(path), width="stretch")
     else:
         st.info("写真なし")
 
     st.subheader("🛡️ 防犯ログ (検知分類)")
     if not df_security_log.empty:
-        cols = ["timestamp", "friendly_name"]
-        if "classification" in df_security_log.columns: cols.append("classification")
-        if "image_path" in df_security_log.columns: cols.append("image_path")
-        df_disp = df_security_log[cols].copy()
-        df_disp.columns = [c.replace("timestamp", "検知時刻").replace("friendly_name", "デバイス").replace("classification", "検知種別").replace("image_path", "画像") for c in df_disp.columns]
-        st.dataframe(df_disp, width="stretch")
+        # スマホ対応: 以前は image_path(NAS上のフルパス)も列に入れており、
+        # 画面幅を大きく超えて横スクロールしないと検知時刻すら読めなかった。
+        # 画像そのものは上のギャラリーで見られるので、表からは落とす。
+        view_common.render_table(
+            df_security_log,
+            {"timestamp": "検知時刻", "friendly_name": "デバイス", "classification": "検知種別"},
+            relative_time=True,
+        )
     else:
         st.info("不審な検知はありません")
 
@@ -143,8 +150,11 @@ def render_bicycle(df_bicycle: pd.DataFrame):
     df_chart = view_common.downsample_for_chart(df_target, series_col="area_name")
     fig = px.line(df_chart, x="timestamp", y="waiting_count", color="area_name", title="待機人数の変化", markers=True, symbol="area_name")
     fig.update_layout(xaxis_title="日時", yaxis_title="待機数 (人/台)", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-    st.plotly_chart(fig, width="stretch")
+    view_common.render_chart(fig)
 
     st.subheader("📊 最新の状況")
     latest_df = df_target.sort_values("timestamp", ascending=False).drop_duplicates("area_name")
-    st.dataframe(latest_df[["timestamp", "area_name", "waiting_count", "status_text"]].sort_values("area_name"), width="stretch")
+    view_common.render_table(
+        latest_df.sort_values("area_name"),
+        {"area_name": "駐輪場", "waiting_count": "待機", "status_text": "状態", "timestamp": "時刻"},
+    )
