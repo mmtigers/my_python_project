@@ -19,9 +19,22 @@ export default mergeConfig(
         reporter: ['text', 'html', 'lcov', 'json-summary'],
         // Issue #495: 計測対象は src/ の実装のみ。テスト・型定義・セットアップは
         // 除外する(バックエンドの .coveragerc と同じ「本当に実行不能なものだけ
-        // 除外」方針)。閾値は現時点では設定しない(まず可視化に徹する)。
+        // 除外」方針)。
         include: ['src/**/*.{ts,tsx}'],
         exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**', 'src/**/*.d.ts'],
+        // Issue #495 では「まず可視化に徹する」として閾値を置かなかった。その後
+        // master 比 0.5pt のラチェットが入ったが、ラチェットは `pull_request` でしか
+        // 走らず、比較元の成果物(保持14日)が取れないときはスキップされる。つまり
+        // フロントエンドだけ「何のゲートも効かない状態」が起こりうるため、
+        // バックエンド(--cov-fail-under)・DDD と同じく固定の床を設ける。
+        // 値は 2026-09-21 の実測(lines 78.64 / statements 75.65 / branches 63.73 /
+        // functions 64.70)の約3pt下。実測が伸びたら段階的に引き上げること。
+        thresholds: {
+          lines: 75,
+          statements: 72,
+          branches: 60,
+          functions: 61,
+        },
       },
     },
   })

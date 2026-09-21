@@ -191,6 +191,12 @@ jobs:
         # 7,233 stmts / miss 2,176)に対して約6ptの余裕があり退行を見逃していたため、
         # 実測より約3pt下の67へ引き上げた。Issue #536: PR #526 後の実測 73.10% に
         # 合わせて 70 へ再度引き上げた。段階的に引き上げること。
+        #
+        # 2026-09-21: 実測が 86%(9,971 stmts / miss 1,396 / 2,168 passed)まで伸び、
+        # 床 70 との差が 16pt に開いていた。ラチェット導入で手動引き上げは不要という
+        # 整理だったが、ラチェットは `pull_request` でしか走らず、比較元の成果物
+        # (保持14日)が取れないときはスキップされる。その場合に効くのは床だけなので、
+        # 床も実測に追従させる必要がある。実測より約4pt下の 82 へ引き上げた。
         env:
           # CI環境用の環境変数。SQLITE_DB_PATHはconfig.py側で読み込まれるよう修正済み。
           SQLITE_DB_PATH: ":memory:"
@@ -202,7 +208,7 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-report=html \
-            --cov-fail-under=70
+            --cov-fail-under=82
 
       - name: Find latest successful master run (coverage baseline)
         # カバレッジのラチェット比較元。master の直近成功 run(本ワークフロー)の ID を REST API で
@@ -249,15 +255,50 @@ jobs:
         working-directory: ./DDD
         run: pip install -r requirements.txt
 
-      - name: Run DDD tests
+      - name: Run DDD tests with coverage
         # Issue #493: DDDは全体の約3分半かかるという前提でPR差分ベースの条件付き
         # スキップ(約37行のbashとpathspec維持)を行っていたが、実測は15秒程度
         # (CI全体でも約2分)であり、そもそも短縮の必要性が薄かった。この機構は
         # Issue #368で「pathspec の維持漏れによりDDDテストが黙ってスキップされる」
         # という失敗モードを既に一度起こしており、リスクがコストに見合わないため
         # 撤去し、常に実行する。
+        #
+        # `DDD/.coveragerc`(Issue #665)は「テストと conftest を除外してソースだけの
+        # カバレッジを見る」ために作られていたが、CI から `--cov` が渡されておらず
+        # 一度も計測されていなかった。MY_HOME_SYSTEM / family-quest の双方が床または
+        # ラチェットで守られている一方、DDD だけがカバレッジのゲートを一切持たない
+        # 状態だったため配線する。スイート自体は約20秒で終わり追加コストはほぼ無い。
+        # 床 74 は実測(2026-09-21: 77%)の約3pt下。MY_HOME_SYSTEM と同じく
+        # 「実測より約3pt下へ段階的に引き上げる」(Issue #494/#536)に倣う。
         working-directory: ./DDD
-        run: python -m pytest -v
+        run: |
+          python -m pytest -v \
+            --cov=. \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=74
+
+      - name: Download master DDD coverage baseline
+        # 比較元の run ID は上の `baseline_run` ステップ(同一ジョブ)の出力を再利用する。
+        # 成果物の保持期限(14日)切れ等で取れなくても失敗にはしない(比較スキップ)。
+        if: github.event_name == 'pull_request' && steps.baseline_run.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ddd-coverage-report
+          run-id: ${{ steps.baseline_run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: DDD/coverage-baseline
+
+      - name: DDD coverage ratchet vs master (blocking, PR only)
+        # backend / frontend と同じ 0.5pt ラチェット。固定閾値(床)は上の
+        # `--cov-fail-under=74` が担い、こちらは master 比の退行だけを見る。
+        if: github.event_name == 'pull_request'
+        working-directory: ./DDD
+        run: |
+          baseline="$(find coverage-baseline -name coverage.xml -print -quit 2>/dev/null || true)"
+          python3 ../.github/scripts/check_coverage_ratchet.py --label ddd \
+            --current coverage.xml --baseline "${baseline:-coverage-baseline/missing.xml}"
 
       - name: Upload coverage report
         if: always()
@@ -267,6 +308,18 @@ jobs:
           path: |
             MY_HOME_SYSTEM/coverage.xml
             MY_HOME_SYSTEM/htmlcov/
+          retention-days: 14
+
+      - name: Upload DDD coverage report
+        # backend 側の成果物(coverage-report)に相乗りさせると、アップロード対象の
+        # 共通祖先がリポジトリルートへ繰り上がって既存の
+        # `find coverage-baseline -name coverage.xml` が2件に一致してしまうため、
+        # frontend と同じく DDD 専用の成果物として分ける。
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ddd-coverage-report
+          path: DDD/coverage.xml
           retention-days: 14
 
   security:
