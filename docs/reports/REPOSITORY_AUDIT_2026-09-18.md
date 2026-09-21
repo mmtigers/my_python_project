@@ -228,7 +228,7 @@ graph TB
 | AUDIT-026 | Documentation | コメントが「BEGIN IMMEDIATE による原子性」を現存する防御として記述するが、実装は既に無い | LOW | P2 | S | `services/quest/user_service.py:104` |
 | AUDIT-027 | Testing | `lifespan`（マイグレーション適用・子プロセス起動・NAS prewarm）がフィクスチャ方針上ほぼ未検証 | LOW | P2 | M | `tests/conftest.py:60-75` |
 | AUDIT-028 | Infrastructure | `deploy.sh` が毎回 `npm ci` するため実機はオフラインでフロントを再ビルドできない | LOW | P2 | S | `family-quest/deploy.sh:88` |
-| AUDIT-029 | Testing | 障害検知系モジュールのカバレッジが低い（`nas_utils` 32% / `network_logger` 39% / `server_watchdog` 41%） | LOW | P2 | M | `core/nas_utils.py` 他 |
+| AUDIT-029 | Testing | 障害検知系モジュールのカバレッジが低い（`nas_utils` 32% / `network_logger` 39% / `server_watchdog` 41%）**（2026-09-21: `nas_utils` 91% / `server_watchdog` 93% へ改善済み。残件は 7.3 節を参照）** | LOW | P2 | M | `core/nas_utils.py` 他 |
 | AUDIT-030 | Operations | Discord エラー通知にスロットリング・重複排除が無い（in-flight 16 の上限のみ） | LOW | P3 | S | `core/logger.py:17,131` |
 | AUDIT-031 | Architecture | 整合性保証が単一プロセス前提（`threading.Lock`）で、デプロイ制約として強制されていない | LOW | P3 | L | `core/utils.py:57` / `unified_server.py:608` |
 | AUDIT-032 | Bug/Logic | `Optional` 戻り値をコメントの不変条件だけに依拠して unpack（pyright basic で2件検出） | LOW | P3 | S | `services/routine_service.py:154,516` |
@@ -1488,12 +1488,35 @@ UNIQUE 制約を検討する。
 
 ### 7.1 現状（実測）
 
+> **【訂正 2026-09-21・PR #839】** 下表の `DDD` のゲート欄「ラチェットのみ」は**事実誤り**でした。
+> 監査時点の `DDD` にはラチェットも固定閾値も存在せず、`test.yml` は `python -m pytest -v` を
+> `--cov` 無しで実行していたため、**カバレッジは一度も計測されていませんでした**
+> （`DDD/.coveragerc` は Issue #665 で作られていましたが CI に配線されていませんでした。
+> `check_coverage_ratchet.py` の `--label` も backend / frontend の2つだけです）。
+> 下表は監査時点の記録としてそのまま残し、訂正後の状態を別表に示します。
+
+**監査時点（2026-09-18 / commit `0e86ffa`）の記録**
+
 | 対象 | テスト数 | カバレッジ | ゲート |
 | --- | --- | --- | --- |
 | `MY_HOME_SYSTEM` | 1,400 | 79% | `--cov-fail-under=70` + master比 0.5pt ラチェット |
-| `DDD` | 305 | 77% | ラチェットのみ |
-| `family-quest` | 228 | — | ESLint + `tsc -b` + vitest + master比ラチェット |
+| `DDD` | 305 | 77% | ~~ラチェットのみ~~ → **ゲート無し（カバレッジ未計測）** |
+| `family-quest` | 228 | — | ESLint + `tsc -b` + vitest + master比ラチェット（固定閾値なし） |
 | `.github/scripts` | （lint ジョブで実行） | — | ブロッキング |
+
+**現在（2026-09-21 / commit `2e59b8e` / PR #839 反映後・CI 実測）**
+
+| 対象 | テスト数 | カバレッジ | ゲート |
+| --- | --- | --- | --- |
+| `MY_HOME_SYSTEM` | 2,168 | 86.00% | `--cov-fail-under=82` + master比 0.5pt ラチェット |
+| `DDD` | 309 | 77.39% | `--cov-fail-under=74` + master比 0.5pt ラチェット |
+| `family-quest` | 275 | lines 78.64% | ESLint + `tsc -b` + vitest + master比ラチェット + `coverage.thresholds` |
+| `.github/scripts` | 123 | — | ブロッキング |
+
+> なお PR #839 の CI で、ラチェットが**11日前の master run を比較元に選ぶ**事故が発覚しました
+> （backend は実測 86.00% に対して 74.76%、frontend は 78.64% に対して 47.22% と比較していた）。
+> つまり本監査の時点でも、ラチェットは記載どおりには機能していなかった可能性があります。
+> 経緯と再発時の確認手順は `docs/runbooks/ci_coverage_ratchet.md` を参照してください。
 
 **このカバレッジと本数は、個人プロジェクトとしては非常に高い。**
 とくに以下は特筆に値する。
@@ -1536,7 +1559,25 @@ UNIQUE 制約を検討する。
 
 ### 7.3 カバレッジの低い障害経路（AUDIT-029）
 
+> **【更新 2026-09-21】** 本節で挙げた最も低い4件は、監査後に解消済みです
+> （commit `2e59b8e` 時点の実測）。
+>
+> | モジュール | 監査時 | 現在 |
+> | --- | ---: | ---: |
+> | `core/nas_utils.py` | 32% | **91%** |
+> | `monitors/server_watchdog.py` | 41% | **93%** |
+> | `post_boot_health_check.py` | 52% | **93%** |
+> | `monitors/nature_remo_monitor.py` | 47% | **100%** |
+>
+> 残っているのは `core/sound_manager.py` 38% / `monitors/network_logger.py` 39% /
+> `services/train_service.py` 43% / `monitors/daily_timelapse_job.py` 53% /
+> `monitors/smart_timelapse_generator.py` 55% / `reset_game.py` 58% です
+> （`daily_timelapse_job.py` は監査後に本節の基準を下回ったもので、当時の表にはありません）。
+> **「監視が壊れていることを誰も検知できない」という本節の最大の懸念は解消されており**、
+> 14章ロードマップ #31 の優先度は見直してよい状態です。
+
 「壊れたときに気づくためのコード」のカバレッジが低い。これは優先度の逆転である。
+（以下は監査時点の記録）
 
 | モジュール | カバレッジ | 役割 |
 | --- | --- | --- |
@@ -2024,8 +2065,8 @@ FK 宣言は `user_inventory.reward_id` の1つだけ。その結果、
 | --- | --- | --- |
 | 29 | バックアップの暗号化（`age` / `gpg`）。子どもの健康記録を NAS 共有に平文で置かない | AUDIT-024 の整合性検証が先 |
 | 30 | `dist/` を CI の成果物から取得する方式へ変更（実機で `npm ci` しない） | AUDIT-001 の最小修正で当面の危機は去るため、優先度は中。AUDIT-028 も同時に解消 |
-| 31 | 障害検知系モジュール（`core/nas_utils.py` 32% / `server_watchdog.py` 41% / `network_logger.py` 39%）のカバレッジ改善 | — |
-| 32 | 監視の低カバレッジと `server_watchdog` の位置づけを見直す（層1に寄せるか、層2を強化するか） | #31 の結果 |
+| ~~31~~ | ~~障害検知系モジュール（`core/nas_utils.py` 32% / `server_watchdog.py` 41% / `network_logger.py` 39%）のカバレッジ改善~~ **（2026-09-21 更新: `nas_utils` 91% / `server_watchdog` 93% / `post_boot_health_check` 93% / `nature_remo_monitor` 100% と解消済み。残るのは `sound_manager` 38% / `network_logger` 39% / `train_service` 43% 等で、「半年以内」から前倒しできる規模。7.3節を参照）** | — |
+| 32 | 監視の低カバレッジと `server_watchdog` の位置づけを見直す（層1に寄せるか、層2を強化するか） **（#31 がほぼ解消したため、前提が変わっている）** | #31 の結果 |
 | 33 | FK の段階的追加（孤児 0 を確認できた関係から） | #19, #20, #10 の完了 |
 | 34 | **時系列テーブルの分離を検討する** | **#1 の実測と #10 の効果測定の結果、保持期間削除とインデックスで足りないと判明した場合のみ。** 現時点では根拠が無いため推奨しない |
 
