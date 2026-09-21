@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全93件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全94件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -51,6 +51,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [log_analyzer.md](./log_analyzer.md) | 蓄積された各種ログ（センサー、タスク消化、システムログ）のパターンを分析する。 |
 | [weekly_analyze_report.md](./weekly_analyze_report.md) | 週次で家庭内の状況（健全性、タスク消化率など）をAIで要約し、レポートとして出力（LINE等へ送信）する。 |
 | [analysis_service.md](./analysis_service.md) | DB・OS情報・外部APIからデータを取得し、Pandas等で加工・集計するデータ分析用サービス層。 |
+| [home_status_service.md](./home_status_service.md) | 「家のいまの状況」9枚のステータスカードの判定・HTML組み立て・CSS。Streamlitに依存せず、ダッシュボード本体と軽量ページ`/dashboard/m`の両方が使う。 |
 
 ## E. クエストバックエンド (Family Quest用API)
 
@@ -116,13 +117,13 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [state_file.md](./state_file.md) | 監視スクリプトの状態ファイル(JSON / 1行テキスト)を flock + tmp + os.replace で原子的に読み書きする共通ヘルパー(Issue #661)。 |
 | [utils.md](./utils.md) | システム全体で共通して使用されるユーティリティ関数群（タイムゾーン処理、指数バックオフによるリトライ機能等）を提供する。 |
 | [migrations.md](./migrations.md) | `migrations/`配下の`*.sql`ファイルを順に適用し、適用済みバージョンを`schema_migrations`テーブルで管理する軽量マイグレーションランナー。 |
-| [dashboard_common.md](./dashboard_common.md) | `views/dashboard`配下の各モジュールから共通利用されるCSS（スマホ幅のメディアクエリを含む）、ステータスカードのグリッド描画、`safe_section`を提供するモジュール（同名の`common.py`Facadeとはファイル名衝突のため別名で管理）。 |
+| [dashboard_common.md](./dashboard_common.md) | `views/dashboard`配下の各モジュールから共通利用されるCSS（スマホ幅のメディアクエリを含む）、キャッシュ付きローダ、グラフ・表・折りたたみの描画ヘルパー、`safe_section`を提供するモジュール（同名の`common.py`Facadeとはファイル名衝突のため別名で管理）。 |
 | [quest_tab.md](./quest_tab.md) | **廃止**: Streamlitダッシュボードの「Family Quest」タブ。同じ内容をスマホ最適化済みのPWA `family-quest`(`/quest`)が持つ二重管理だったため、スマホ対応の再設計でソースごと撤去された。仕様書は廃止noticeつきで履歴として残している。 |
 | [log_tab.md](./log_tab.md) | Streamlitダッシュボードのセンサーログ分析と、「🔧 システム」タブ配下（リソース状況・NAS状態・サーバーログ・メンテナンス操作）を描画するモジュール。 |
 | [misc_tab.md](./misc_tab.md) | Streamlitダッシュボードの「電車遅延」「防犯カメラ」「駐輪場」タブを描画するモジュール。 |
 | [health_tab.md](./health_tab.md) | Streamlitダッシュボードの「健康管理」タブ。子供の体調・排便・食事のデータフレームを表形式で表示する。 |
 | [sensor_tab.md](./sensor_tab.md) | Streamlitダッシュボードの「電力・環境」「気温詳細」「高砂実家」タブを描画するモジュール。 |
-| [summary.md](./summary.md) | Streamlitダッシュボード「🏠 ホーム」タブの9個のステータスカード（在宅状況・電気代・NAS死活等）を判定し、CSS Gridのグリッドとして描画するモジュール。 |
+| [summary.md](./summary.md) | Streamlitダッシュボード「🏠 ホーム」タブのステータスカード9枚を描画するモジュール（判定そのものは`home_status_service.md`へ移動し、材料を集めて描くだけになった）。 |
 
 ## 廃止済み仕様書一覧
 

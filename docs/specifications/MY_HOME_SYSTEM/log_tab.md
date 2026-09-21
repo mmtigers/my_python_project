@@ -9,7 +9,8 @@
 
 ## 関連ドキュメント
 
-* [analysis_service.md](./analysis_service.md) - `services.analysis_service`の実体。`get_disk_usage`, `get_memory_usage`, `load_nas_status`, `get_system_logs`を提供
+* [analysis_service.md](./analysis_service.md) - `services.analysis_service`の実体。`get_disk_usage`, `get_memory_usage`, `load_nas_status`, `get_system_logs`を提供。**（スマホ対応で変更）** 本ファイルは直接呼ばず、[dashboard_common.md](./dashboard_common.md)のキャッシュ付きラッパー経由で呼ぶ
+* [dashboard_common.md](./dashboard_common.md) - **（スマホ対応で追加）** キャッシュ付きラッパー(`get_disk_usage_cached` / `get_memory_usage_cached` / `load_nas_status_cached` / `get_system_logs_cached`)と表描画(`render_table`)を提供する共通モジュール
 * [backup_service.md](./backup_service.md) - `services.backup_service`の実体。`render_maintenance`内でバックアップボタン押下時に呼び出される`perform_backup`を提供
 * [dashboard.md](./dashboard.md) - 呼び出し元。**（スマホ対応で変更）** `views.dashboard.log_tab`をインポートし、「🔧 システム」タブの中で`render_resources`, `render_nas_status`, `render_server_logs`, `render_logs`, `render_maintenance`を呼び出す（以前は「ログ分析」「システム管理」の2タブで`render_logs`, `render_system`を呼んでいた）
 
@@ -18,7 +19,7 @@
 * **（Issue #651 の横展開）** 「システム再起動」ボタンが呼ぶ `subprocess.run(["sudo", "systemctl", "restart", "home_system"])` に `SUBPROCESS_TIMEOUT_SEC`(30秒)を付与し、`subprocess.TimeoutExpired` を捕捉して画面にエラーを出すようにした。timeout が無いと、systemd 側が応答しない状況で Streamlit のスクリプト実行スレッドが無限に待ち、ダッシュボード全体が固まる(再起動対象が自分の動くホストのサービスであるため、詰まる場面が現実にある)。
 
 * Streamlitダッシュボードの「🔧 システム」タブ配下と、センサーログ分析を描画するモジュール。**（スマホ対応で分割）** 以前は`render_logs`と、システム管理の全機能を1つにまとめた`render_system`の2関数だったが、`render_system`は責務ごとに`render_resources`（リソース）/`render_nas_status`（NAS）/`render_server_logs`（サーバーログ）/`render_maintenance`（再起動・バックアップ）の4関数へ分割された。呼び出し元（`dashboard.py`）は副次的なものを`st.expander`に畳んで並べる。
-* 根拠: `def render_logs(df_sensor: pd.DataFrame):`, `def render_resources():`, `def render_nas_status():`, `def render_server_logs():`, `def render_maintenance():` (行番号: 11, 27, 42, 56, 83 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
+* 根拠: `def render_logs(df_sensor: pd.DataFrame):`, `def render_resources():`, `def render_nas_status():`, `def render_server_logs():`, `def render_maintenance():` (行番号: 12, 32, 47, 63, 94 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
 * **（Issue #507で削除）** 以前は3つ目の公開関数として、直近3日分のアプリランキング(無料トップ・売上トップ)を`analysis_service.load_ranking_dates`/`load_ranking_data`経由で取得し週ごとに列表示する`render_trends`(「🌟 最近の流行・トレンド推移」タブ)が存在した。しかし参照先の`app_rankings`テーブルへ書き込むコード(収集スクリプト)がリポジトリのどこにも存在せず、収集に使うはずの`google-play-scraper`もIssue #496で未使用パッケージとして既に削除済みであり、`migrations/`にもテーブル定義が無いため新規構築したDBでは永久に「データがありません」としか表示されない死んだ機能だった(Issue #507)。オーナー判断によりUIごと削除され、対応する`analysis_service.load_ranking_dates`/`load_ranking_data`、`current_schema.sql`の`app_rankings`テーブル定義、`dashboard.py`のタブ登録もあわせて削除された。
 * `render_logs`は、渡された`df_sensor`（センサーデータ）を場所（`location`）でフィルタ可能な形で一覧表示する。**（スマホ対応で変更）** `df_sensor`が空のときは以前は無言で何も描画しなかったが、`st.info("センサーログがありません")`を出して早期`return`するようになった。
 * 根拠: `sel = st.multiselect("場所", locs, default=locs)` (行番号: 18 / 抜粋: "sel = st.multiselect(\"場所\", locs, default=locs)")、空のときの早期return (行番号: 12〜14 / 抜粋: "        st.info(\"センサーログがありません\")")
@@ -37,16 +38,16 @@
 | `pandas` | 外部ライブラリ | `render_logs`の引数型注釈（`pd.DataFrame`）およびフィルタ処理 | `import pandas as pd` (行番号: 3 / 抜粋: "import pandas as pd") |
 | `subprocess` | 標準ライブラリ | システム再起動コマンド(`systemctl restart`)の実行 | `import subprocess` (行番号: 4 / 抜粋: "import subprocess") |
 | `date` | 標準ライブラリ | 日付指定検索時の初期値(`date.today()`)取得に使用 | `from datetime import date` (行番号: 5 / 抜粋: "from datetime import date") |
-| `analysis_service` | 内部モジュール | ディスク/メモリ使用率・NASステータス・システムログの取得 | `from services import analysis_service` (行番号: 6 / 抜粋: "from services import analysis_service") |
+| `views.dashboard.common` (`view_common`) | 内部モジュール | **（スマホ対応で変更）** ディスク/メモリ使用率・NASステータス・システムログの**キャッシュ付き**取得と、表描画(`render_table`) | `from . import common as view_common` (行番号: 8 / 抜粋: "from . import common as view_common") |
 | `backup_service` | 内部モジュール | `render_maintenance`関数内でインポートされる（関数内import）。バックアップ実行処理(`perform_backup`)の提供 | `from services import backup_service` (行番号: 114 / 抜粋: "from services import backup_service") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `analysis_service.get_disk_usage` / `get_memory_usage` | ディスク・メモリ使用率の取得元・実装（`psutil`等の使用有無）が不明。 | `disk = analysis_service.get_disk_usage()` (行番号: 30 / 抜粋: "disk = analysis_service.get_disk_usage()") |
-| `analysis_service.load_nas_status` | NASステータスデータの取得元・スキーマ（`status_ping`, `status_mount`, `timestamp`以外のフィールド有無）が不明。 | `nas_data = analysis_service.load_nas_status()` (行番号: 45 / 抜粋: "nas_data = analysis_service.load_nas_status()") |
-| `analysis_service.get_system_logs` | サーバーログの取得元（journalctl等）・`priority`引数の解釈方法が不明。 | `logs = analysis_service.get_system_logs(lines=lines_val, priority=priority, target_date=target_date)` (行番号: 78 / 抜粋: "logs = analysis_service.get_system_logs(") |
+| `view_common.get_disk_usage_cached` / `get_memory_usage_cached` | ディスク・メモリ使用率の取得元・実装（`psutil`等の使用有無）が不明。 | `disk = view_common.get_disk_usage_cached()` (行番号: 32 / 抜粋: "disk = view_common.get_disk_usage_cached()") |
+| `view_common.load_nas_status_cached` | NASステータスデータの取得元・スキーマ（`status_ping`, `status_mount`, `timestamp`以外のフィールド有無）が不明。 | `nas_data = view_common.load_nas_status_cached()` (行番号: 50 / 抜粋: "nas_data = view_common.load_nas_status_cached()") |
+| `view_common.get_system_logs_cached` | サーバーログの取得元（journalctl等）・`priority`引数の解釈方法が不明。 | `logs = view_common.get_system_logs_cached(lines=lines_val, priority=priority, target_date=target_date)` (行番号: 87 / 抜粋: "logs = view_common.get_system_logs_cached(") |
 | `backup_service.perform_backup` | バックアップ処理の実装（対象データ・保存先・失敗時の`res`の意味）が不明。 | `success, res, size = backup_service.perform_backup()` (行番号: 117 / 抜粋: "success, res, size = backup_service.perform_backup()") |
 | `sudo systemctl restart home_system` (OSサービス) | 対象の`home_system`サービスの実体（`systemd`ユニット定義）が本ファイルからは不明。 | `subprocess.run(` (行番号: 99〜103 / 抜粋: "subprocess.run(") |
 
@@ -55,42 +56,42 @@
 ### `render_logs`
 
 * **役割**: `df_sensor`を場所（`location`）で絞り込むマルチセレクトと、絞り込んだ結果（最大200件）の表形式表示を提供する。
-* 根拠: `def render_logs(df_sensor: pd.DataFrame):` (行番号: 11〜24 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
+* 根拠: `def render_logs(df_sensor: pd.DataFrame):` (行番号: 12〜29 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
 
 
 * **引数/リクエスト**: `df_sensor` (型: `pd.DataFrame`。`location`, `timestamp`, `friendly_name`, `contact_state`, `power_watts`列を含むことを前提とするセンサーデータ)
-* 根拠: `def render_logs(df_sensor: pd.DataFrame):` (行番号: 11 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
+* 根拠: `def render_logs(df_sensor: pd.DataFrame):` (行番号: 12 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
 
 
 * **戻り値/レスポンス**: なし（**スマホ対応で変更**: `df_sensor`が空の場合は`st.info("センサーログがありません")`を表示して早期`return`する）
 * 根拠: `if df_sensor.empty:` (行番号: 12〜14 / 抜粋: "    if df_sensor.empty:")
 
 
-* **副作用**: `st.multiselect`, `st.dataframe`によるStreamlit画面への描画。
-* 根拠: `st.dataframe(...)` (行番号: 19〜24 / 抜粋: "st.dataframe(")
+* **副作用**: `st.multiselect`、`view_common.render_table`（内部で`st.dataframe`）によるStreamlit画面への描画。**（スマホ対応で変更）** 列は「時刻 / センサー / 場所 / 状態 / W」の表示名に絞り、時刻を短縮し、行番号を隠す。
+* 根拠: `view_common.render_table(` (行番号: 21 / 抜粋: "view_common.render_table(")
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない。呼び出し元の`dashboard.py`が`safe_section`で囲む）
-* 根拠: `def render_logs(df_sensor: pd.DataFrame):` 全体 (行番号: 11〜24 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
+* 根拠: `def render_logs(df_sensor: pd.DataFrame):` 全体 (行番号: 12〜29 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
 
 
 
 ### `render_resources` （スマホ対応で`render_system`から分割）
 
 * **役割**: ディスク使用率とメモリ使用率を、パーセント表記と`st.progress`のバーで表示する。
-* 根拠: `def render_resources():` (行番号: 27〜40 / 抜粋: "def render_resources():")
+* 根拠: `def render_resources():` (行番号: 32〜44 / 抜粋: "def render_resources():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def render_resources():` (行番号: 27 / 抜粋: "def render_resources():")
+* 根拠: `def render_resources():` (行番号: 32 / 抜粋: "def render_resources():")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `def render_resources():` (行番号: 27 / 抜粋: "def render_resources():")
+* 根拠: `def render_resources():` (行番号: 32 / 抜粋: "def render_resources():")
 
 
-* **副作用**: `analysis_service.get_disk_usage()` / `get_memory_usage()` 経由の外部データ取得と、`st.write` / `st.progress` による描画。
-* 根拠: `disk = analysis_service.get_disk_usage()` (行番号: 30 / 抜粋: "disk = analysis_service.get_disk_usage()")、`mem = analysis_service.get_memory_usage()` (行番号: 36 / 抜粋: "mem = analysis_service.get_memory_usage()")
+* **副作用**: `view_common.get_disk_usage_cached()` / `get_memory_usage_cached()` 経由のデータ取得（TTL 60秒のキャッシュ越し。メモリ使用率はホームタブのサマリーカードとも共有される）と、`st.write` / `st.progress` による描画。
+* 根拠: `disk = view_common.get_disk_usage_cached()` (行番号: 32 / 抜粋: "disk = view_common.get_disk_usage_cached()")、`mem = view_common.get_memory_usage_cached()` (行番号: 38 / 抜粋: "mem = view_common.get_memory_usage_cached()")
 
 
 * **エラーハンドリング**: なし（取得結果が falsy の場合は該当ブロックを描画しないだけ）
@@ -101,19 +102,19 @@
 ### `render_nas_status` （スマホ対応で`render_system`から分割）
 
 * **役割**: NASのPing疎通・マウント状態・最終確認時刻を`st.columns(3)`の`st.metric`で表示する。データが無い場合は`st.info("データなし")`。
-* 根拠: `def render_nas_status():` (行番号: 42〜54 / 抜粋: "def render_nas_status():")
+* 根拠: `def render_nas_status():` (行番号: 47〜60 / 抜粋: "def render_nas_status():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def render_nas_status():` (行番号: 42 / 抜粋: "def render_nas_status():")
+* 根拠: `def render_nas_status():` (行番号: 47 / 抜粋: "def render_nas_status():")
 
 
 * **戻り値/レスポンス**: なし（`nas_data`が`None`のとき早期`return`）
 * 根拠: `if nas_data is None:` (行番号: 46〜48 / 抜粋: "    if nas_data is None:")
 
 
-* **副作用**: `analysis_service.load_nas_status()` 経由の外部データ取得と、`st.columns` / `st.metric` による描画。
-* 根拠: `nas_data = analysis_service.load_nas_status()` (行番号: 45 / 抜粋: "nas_data = analysis_service.load_nas_status()")、`c1, c2, c3 = st.columns(3)` (行番号: 50 / 抜粋: "c1, c2, c3 = st.columns(3)")
+* **副作用**: `view_common.load_nas_status_cached()` 経由のデータ取得と、`st.columns` / `st.metric` による描画。**（スマホ対応で変更）** 以前はここだけがキャッシュを迂回して素の`analysis_service.load_nas_status()`を呼んでおり、「🔧 システム」タブを開くたびにNASの状態を別途読み直していた（ホームタブのサマリーとは別に）。
+* 根拠: `nas_data = view_common.load_nas_status_cached()` (行番号: 50 / 抜粋: "nas_data = view_common.load_nas_status_cached()")、`c1, c2, c3 = st.columns(3)` (行番号: 50 / 抜粋: "c1, c2, c3 = st.columns(3)")
 
 
 * **エラーハンドリング**: なし（`nas_data["status_ping"]` 等のキー欠落は捕捉していない）
@@ -124,23 +125,23 @@
 ### `render_server_logs` （スマホ対応で`render_system`から分割）
 
 * **役割**: journald由来のサーバーログの検索・表示。検索モード（「直近のログを表示」/「日付を指定して検索」）を`st.radio`（`horizontal=True`）で選び、`st.columns(2)`の左に対象日または表示行数、右にログレベルのセレクトボックスを置く。「🔄 ログを更新」ボタン押下で`st.rerun()`する。取得結果は`st.code(logs, language="text")`で表示し、空なら`st.info("ログなし")`。
-* 根拠: `def render_server_logs():` (行番号: 56〜80 / 抜粋: "def render_server_logs():")
+* 根拠: `def render_server_logs():` (行番号: 63〜91 / 抜粋: "def render_server_logs():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def render_server_logs():` (行番号: 56 / 抜粋: "def render_server_logs():")
+* 根拠: `def render_server_logs():` (行番号: 63 / 抜粋: "def render_server_logs():")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `def render_server_logs():` (行番号: 56 / 抜粋: "def render_server_logs():")
+* 根拠: `def render_server_logs():` (行番号: 63 / 抜粋: "def render_server_logs():")
 
 
-* **副作用**: `analysis_service.get_system_logs()` 経由の外部データ取得、`st.rerun()` によるアプリ全体の再実行、各種ウィジェットの描画。
-* 根拠: `logs = analysis_service.get_system_logs(lines=lines_val, priority=priority, target_date=target_date)` (行番号: 78 / 抜粋: "logs = analysis_service.get_system_logs(")、`if st.button("🔄 ログを更新"): st.rerun()` (行番号: 76 / 抜粋: "if st.button(\"🔄 ログを更新\"): st.rerun()")
+* **副作用**: `view_common.get_system_logs_cached()` 経由のデータ取得（TTL 60秒のキャッシュ越し。実体は`journalctl`のサブプロセス起動）、`st.rerun()` によるアプリ全体の再実行、各種ウィジェットの描画。**（スマホ対応で変更）** 「🔄 ログを更新」は再実行の前に`view_common.get_system_logs_cached.clear()`を呼ぶ — キャッシュを捨てないと、押しても同じ内容が返るため。
+* 根拠: `logs = view_common.get_system_logs_cached(lines=lines_val, priority=priority, target_date=target_date)` (行番号: 87 / 抜粋: "logs = view_common.get_system_logs_cached(")、`view_common.get_system_logs_cached.clear()` (行番号: 83 / 抜粋: "view_common.get_system_logs_cached.clear()")
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: 関数本体全体 (行番号: 56〜80 / 抜粋: "def render_server_logs():")
+* 根拠: 関数本体全体 (行番号: 63〜91 / 抜粋: "def render_server_logs():")
 
 
 * **補足（スマホ対応で変更）**: コメントに、以前は `st.columns([1, 1, 2])` の3列目を捨てる形で幅を調整していたが、空列はスマホ幅では縦積みされたぶんだけ無駄な余白になるだけなので2列にし、幅の調整はCSS側の縦積みルールに委ねた旨が記されている。
@@ -151,15 +152,15 @@
 ### `render_maintenance` （スマホ対応で`render_system`から分割）
 
 * **役割**: サービス再起動・バックアップといった管理操作を提供する。`st.warning`で破壊的操作である旨を出し、`st.checkbox("再起動することを理解しました", key="confirm_reboot_checkbox")`にチェックが入った場合のみ`st.button("🔄 システム再起動", type="primary")`を描画する。続けてバックアップ実行ボタンを置く。
-* 根拠: `def render_maintenance():` (行番号: 83〜118 / 抜粋: "def render_maintenance():")
+* 根拠: `def render_maintenance():` (行番号: 94〜130 / 抜粋: "def render_maintenance():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def render_maintenance():` (行番号: 83 / 抜粋: "def render_maintenance():")
+* 根拠: `def render_maintenance():` (行番号: 94 / 抜粋: "def render_maintenance():")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `def render_maintenance():` (行番号: 83 / 抜粋: "def render_maintenance():")
+* 根拠: `def render_maintenance():` (行番号: 94 / 抜粋: "def render_maintenance():")
 
 
 * **副作用**:
@@ -187,13 +188,13 @@ flowchart TD
     end
 
     subgraph render_resources_Flow["render_resources() (スマホ対応で分割)"]
-        RR1["開始"] --> RR2["外部: get_disk_usage() / get_memory_usage()"]
+        RR1["開始"] --> RR2["外部: get_disk_usage_cached() / get_memory_usage_cached()"]
         RR2 --> RR3["使用率プログレスバー表示"]
         RR3 --> RR4["終了"]
     end
 
     subgraph render_nas_status_Flow["render_nas_status() (スマホ対応で分割)"]
-        RN1["開始"] --> RN2["外部: analysis_service.load_nas_status()"]
+        RN1["開始"] --> RN2["外部: view_common.load_nas_status_cached()"]
         RN2 --> RN3{"nas_dataがNoneでないか"}
         RN3 -- No --> RN4["st.info('データなし')"]
         RN3 -- Yes --> RN5["3列のst.metricで表示"]
@@ -205,7 +206,7 @@ flowchart TD
         RS10["開始"] --> RS10b["検索モード・行数/対象日・ログレベル選択UI(2列)"]
         RS10b --> RS11{"更新ボタン押下か"}
         RS11 -- Yes --> RS12["st.rerun()"]
-        RS11 -- No --> RS13["外部: analysis_service.get_system_logs()"]
+        RS11 -- No --> RS13["外部: view_common.get_system_logs_cached()"]
         RS13 --> RS14{"ログが空か"}
         RS14 -- Yes --> RS14b["st.info('ログなし')"]
         RS14 -- No --> RS14c["ログをst.codeで表示"]
@@ -251,7 +252,7 @@ graph TD
     end
 
     subgraph Project_Internal
-        AnalysisService["services.analysis_service"]
+        AnalysisService["services.analysis_service (view_common のキャッシュ経由)"]
         BackupService["services.backup_service"]
     end
 
@@ -286,7 +287,7 @@ graph TD
 
 
 * **エラーハンドリングの不均一**: サービス再起動処理のみ`try...except`で保護されているが、ディスク/メモリ・NAS・ログ取得・バックアップ実行の各外部呼び出しには例外捕捉がなく、これらの関数が例外を送出した場合はタブ全体の描画が中断する可能性がある。ただし呼び出し元`dashboard.py`側で`views.dashboard.common.safe_section`により例外が隔離されるため(Issue #438)、他への影響は無い。**（スマホ対応で変更）** 保護の単位は「タブ」ではなく本ファイルの関数1つ1つ（リソース状況／NAS状態／サーバーログ／ログ分析／メンテナンス操作）になったため、例えばNAS状態の取得に失敗してもサーバーログの表示は生き残る。
-* 根拠: `disk = analysis_service.get_disk_usage()` (行番号: 30 / 抜粋: "disk = analysis_service.get_disk_usage()"), `success, res, size = backup_service.perform_backup()` (行番号: 117 / 抜粋: "success, res, size = backup_service.perform_backup()")
+* 根拠: `disk = view_common.get_disk_usage_cached()` (行番号: 32 / 抜粋: "disk = view_common.get_disk_usage_cached()"), `success, res, size = backup_service.perform_backup()` (行番号: 130 / 抜粋: "success, res, size = backup_service.perform_backup()")
 
 
 * **（スマホ対応）各関数は`st.title`ではなく`st.markdown("##### ...")`で始まる**: 呼び出し元が`st.expander`の中に置く前提のため。単独で使う場合は見出しレベルが浅く見える点に注意。
