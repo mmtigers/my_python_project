@@ -14,7 +14,8 @@ LINE_CHANNEL_ACCESS_TOKEN/SECRET が設定されていない環境(CI含む)で�
 """
 import os
 import sys
-from unittest.mock import AsyncMock, MagicMock
+from typing import ClassVar
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from linebot.v3.messaging import TextMessage
@@ -1100,3 +1101,99 @@ class TestDispatchRunsOnTheServerEventLoop:
         ])
 
         assert order == ["1件目", "2件目"]
+
+
+class TestNonTextMessages:
+    """Issue #836: 写真等を黙って捨てず、ログに残して写真・動画・音声・ファイルには未対応と返す。
+    スタンプ・位置情報は返信しない。未認可ユーザーにも返信しない。"""
+
+    def setup_method(self):
+        line_handler._SEEN_EVENT_IDS.clear()
+
+    def teardown_method(self):
+        line_handler._SEEN_EVENT_IDS.clear()
+
+    _MESSAGES: ClassVar[dict] = {
+        "image": {"id": "m1", "type": "image", "quoteToken": "q",
+                  "contentProvider": {"type": "line"}},
+        "video": {"id": "m1", "type": "video", "quoteToken": "q", "duration": 1000,
+                  "contentProvider": {"type": "line"}},
+        "audio": {"id": "m1", "type": "audio", "duration": 1000,
+                  "contentProvider": {"type": "line"}},
+        "file": {"id": "m1", "type": "file", "fileName": "a.pdf", "fileSize": 10},
+        "sticker": {"id": "m1", "type": "sticker", "packageId": "1", "stickerId": "1",
+                    "stickerResourceType": "STATIC", "quoteToken": "q"},
+        "location": {"id": "m1", "type": "location", "latitude": 35.0, "longitude": 135.0},
+    }
+
+    def _event(self, message_type, user_id="U1", event_id=None):
+        return MessageEvent.from_dict({
+            "type": "message",
+            "mode": "active",
+            "timestamp": 1700000000000,
+            "source": {"type": "user", "userId": user_id},
+            "webhookEventId": event_id or f"evt-{message_type}",
+            "deliveryContext": {"isRedelivery": False},
+            "replyToken": "tok",
+            "message": self._MESSAGES[message_type],
+        })
+
+    def _patch(self, monkeypatch, authorized=("U1",)):
+        replies = []
+        monkeypatch.setattr(
+            line_handler, "reply_message",
+            lambda token, messages, user_id=None: replies.append((token, messages, user_id)),
+        )
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", list(authorized))
+        text_handler = AsyncMock()
+        monkeypatch.setattr(line_handler, "handle_message_async", text_handler)
+        return replies, text_handler
+
+    @pytest.mark.parametrize("message_type", ["image", "video", "audio", "file"])
+    def test_media_gets_an_unsupported_reply(self, monkeypatch, message_type):
+        replies, text_handler = self._patch(monkeypatch)
+
+        line_handler.dispatch_events([self._event(message_type)])
+
+        assert len(replies) == 1
+        token, messages, user_id = replies[0]
+        assert token == "tok" and user_id == "U1"
+        assert messages[0].text == line_handler.UNSUPPORTED_MEDIA_REPLY
+        text_handler.assert_not_called()
+
+    @pytest.mark.parametrize("message_type", ["sticker", "location"])
+    def test_stickers_and_locations_are_logged_without_reply(self, monkeypatch, message_type):
+        replies, _ = self._patch(monkeypatch)
+        with patch.object(line_handler.logger, "info") as info:
+            line_handler.dispatch_events([self._event(message_type)])
+
+        assert replies == []
+        assert any(f"type={message_type}" in str(c) for c in info.call_args_list)
+
+    def test_photo_from_unauthorized_user_gets_no_reply(self, monkeypatch):
+        replies, _ = self._patch(monkeypatch, authorized=("U-family",))
+
+        line_handler.dispatch_events([self._event("image", user_id="U-stranger")])
+
+        assert replies == []
+
+    def test_photo_is_logged(self, monkeypatch):
+        self._patch(monkeypatch)
+        with patch.object(line_handler.logger, "info") as info:
+            line_handler.dispatch_events([self._event("image")])
+
+        assert any("type=image" in str(c) for c in info.call_args_list)
+
+    def test_text_messages_still_go_to_the_text_handler(self, monkeypatch):
+        replies, text_handler = self._patch(monkeypatch)
+        event = MessageEvent.from_dict({
+            "type": "message", "mode": "active", "timestamp": 1700000000000,
+            "source": {"type": "user", "userId": "U1"}, "webhookEventId": "evt-text",
+            "deliveryContext": {"isRedelivery": False}, "replyToken": "tok",
+            "message": {"id": "m1", "type": "text", "text": "こんにちは", "quoteToken": "q"},
+        })
+
+        line_handler.dispatch_events([event])
+
+        text_handler.assert_awaited_once_with(event)
+        assert replies == []

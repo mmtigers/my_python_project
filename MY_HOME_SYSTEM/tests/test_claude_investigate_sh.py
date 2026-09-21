@@ -113,3 +113,127 @@ class TestUtf8CharTruncation:
         )
 
         assert result.stdout.strip() == "100"
+
+
+class TestClaudeBinaryResolution:
+    """Issue #339: systemd 配下の PATH に ~/.local/bin が無く、exit=127 で自動調査が
+    一度も動いていなかった。PATH に頼らず claude を見つけられること。"""
+
+    def _run(self, tmp_path, env_extra):
+        func_src = _extract_function(_read_script(), "resolve_claude_bin")
+        env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": str(tmp_path)}
+        env.update(env_extra)
+        return subprocess.run(
+            ["bash", "-c", func_src + "\nresolve_claude_bin"],
+            capture_output=True, text=True, env=env, check=False,
+        )
+
+    def test_finds_claude_in_home_local_bin_without_path(self, tmp_path):
+        bin_dir = tmp_path / ".local" / "bin"
+        bin_dir.mkdir(parents=True)
+        claude = bin_dir / "claude"
+        claude.write_text("#!/bin/sh\n")
+        claude.chmod(0o755)
+
+        result = self._run(tmp_path, {})
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == str(claude)
+
+    def test_explicit_claude_bin_wins(self, tmp_path):
+        result = self._run(tmp_path, {"CLAUDE_BIN": "/opt/claude/bin/claude"})
+        assert result.stdout.strip() == "/opt/claude/bin/claude"
+
+    def test_fails_when_nowhere_to_be_found(self, tmp_path):
+        assert self._run(tmp_path, {}).returncode == 1
+
+    def test_invocation_uses_the_resolved_binary(self):
+        script = _read_script()
+        assert '"$CLAUDE_CMD" -p "$PROMPT"' in script
+        assert re.search(r'timeout[^\n]*\bclaude -p\b', script) is None
+
+
+class TestAutoIssueDailyCap:
+    """Issue #339: 起票モードは公開リポジトリへ無人で書き込むため、1日の件数に上限を設け、
+    件数を確認できないときは書かない側(ドライラン)に倒すこと。"""
+
+    def _run(self, tmp_path, gh_body, cap="2"):
+        func_src = _extract_function(_read_script(), "auto_issue_cap_reached")
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        gh = bin_dir / "gh"
+        gh.write_text("#!/bin/sh\n" + gh_body + "\n")
+        gh.chmod(0o755)
+        env = {
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "MAX_ISSUES_PER_DAY": cap,
+            "AUTO_ISSUE_LABEL": "auto-investigation",
+        }
+        return subprocess.run(
+            ["bash", "-c", func_src + "\nauto_issue_cap_reached"],
+            capture_output=True, text=True, env=env, check=False,
+        ).returncode
+
+    def test_below_cap_allows_filing(self, tmp_path):
+        assert self._run(tmp_path, "echo 1") == 1
+
+    def test_at_cap_switches_to_dry_run(self, tmp_path):
+        assert self._run(tmp_path, "echo 2") == 0
+
+    def test_gh_failure_is_treated_as_cap_reached(self, tmp_path):
+        assert self._run(tmp_path, "exit 1") == 0
+
+    def test_unparseable_count_is_treated_as_cap_reached(self, tmp_path):
+        assert self._run(tmp_path, "echo oops") == 0
+
+    def test_counts_only_today_in_jst_with_the_auto_label(self, tmp_path):
+        """gh に渡す検索条件そのものを確認する(ラベルと当日 JST の作成日)。"""
+        log = tmp_path / "args"
+        self._run(tmp_path, f'printf "%s\\n" "$@" > {log}; echo 0')
+        args = log.read_text().splitlines()
+        assert "auto-investigation" in args
+        assert any(a.startswith("created:>=") for a in args)
+        assert "--state" in args and "all" in args
+
+    def test_cap_check_runs_before_the_prompt_is_built(self):
+        script = _read_script()
+        cap_at = script.index('if [ "$DRY_RUN" != "1" ] && auto_issue_cap_reached; then')
+        prompt_at = script.index('if [ "$DRY_RUN" = "1" ]; then')
+        assert cap_at < prompt_at
+
+
+class TestFilingModePromptGuardrails:
+    """Issue #339: 公開リポジトリへの起票で、ログ由来の個人情報を書かせないこと、
+    重複起票と一時的な状態での起票を避けさせること。"""
+
+    def _filing_block(self) -> str:
+        script = _read_script()
+        start = script.index('if [ "$DRY_RUN" = "1" ]; then')
+        end = script.index("PROMPT=$(cat <<EOF")
+        return script[start:end].split("else", 1)[1]
+
+    def test_privacy_instruction_is_present(self):
+        block = self._filing_block()
+        assert "一般公開" in block
+        for word in ("メッセージ本文", "人名", "IPアドレス", "認証情報"):
+            assert word in block
+
+    def test_duplicate_check_and_label_are_required(self):
+        block = self._filing_block()
+        assert "gh issue list --label ${AUTO_ISSUE_LABEL}" in block
+        assert "gh issue comment" in block
+        assert "gh issue create --label ${AUTO_ISSUE_LABEL}" in block
+        for tool in ("Bash(gh issue list*)", "Bash(gh issue view*)", "Bash(gh issue comment*)"):
+            assert tool in block
+
+    def test_transient_states_are_not_filed(self):
+        block = self._filing_block()
+        assert "origin/master より遅れている" in block
+        assert "一時的な通信失敗" in block
+
+    def test_no_write_access_beyond_issues_and_draft_prs(self):
+        script = _read_script()
+        assert "git push" not in script.split("ALLOWED_TOOLS=", 1)[1].split("\n", 1)[0]
+        assert "--dangerously-skip-permissions" not in script.replace(
+            "--dangerously-skip-permissions は絶対に使わない", ""
+        )

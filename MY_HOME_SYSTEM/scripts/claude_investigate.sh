@@ -57,6 +57,12 @@
 #                                    導入初期はこのモードで様子を見ることを推奨
 #   CLAUDE_INVESTIGATE_SUMMARY_MAX_CHARS : プロンプトへ埋め込む異常サマリの文字数上限
 #                                    (既定: 4000。Issue #379。超過分は切り詰めて注記を付ける)
+#   CLAUDE_INVESTIGATE_MAX_ISSUES_PER_DAY : 起票モードで1日(JST)に新規起票してよい
+#                                    Issue の上限 (既定: 2)。当日すでに auto-investigation
+#                                    ラベルの Issue がこの件数あれば、その回はドライランに
+#                                    切り替える。件数を確認できないときも安全側でドライラン
+#   CLAUDE_BIN                     : claude コマンドのパス (任意。未指定なら PATH →
+#                                    ~/.local/bin/claude の順に探す)
 #   WATCHDOG_NOTIFY_WEBHOOK_URL    : 調査結果の通知先Webhook (任意。notification_service
 #                                    と同じDiscord WebhookのURLを再利用し新経路を増やさない)
 #
@@ -74,6 +80,9 @@ MAX_BUDGET_USD="${CLAUDE_INVESTIGATE_MAX_BUDGET_USD:-2.00}"
 DRY_RUN="${CLAUDE_INVESTIGATE_DRY_RUN:-0}"
 # Issue #379: 異常サマリをプロンプトへ埋め込む際の文字数上限。
 SUMMARY_MAX_CHARS="${CLAUDE_INVESTIGATE_SUMMARY_MAX_CHARS:-4000}"
+MAX_ISSUES_PER_DAY="${CLAUDE_INVESTIGATE_MAX_ISSUES_PER_DAY:-2}"
+# 自動起票した Issue に付けるラベル。1日の上限の数え方と、重複確認の検索に使う。
+AUTO_ISSUE_LABEL="auto-investigation"
 
 # Issue #577: 異常サマリ・調査結果は日本語主体(health_watch.py等の文言)で
 # 1文字あたり約3バイトのため、wc -c/head -c によるバイト単位の判定・切り詰めだと
@@ -88,6 +97,38 @@ utf8_char_count() {
 truncate_utf8_chars() {
   # $1: 最大文字数。標準入力の文字列を先頭からその文字数までに切り詰めて出力する。
   python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:int(sys.argv[1])])' "$1"
+}
+
+# Issue #339: claude は公式インストーラが ~/.local/bin に置くが、systemd から起動された
+# health_watch の子プロセスの PATH(/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin)には
+# 含まれない。2026-09-20 に home_system を systemd 管理へ移して以降、ここで exit=127
+# (command not found)になり、自動調査が一度も動いていなかった。PATH に頼らず探す。
+resolve_claude_bin() {
+  if [ -n "${CLAUDE_BIN:-}" ]; then
+    printf '%s\n' "$CLAUDE_BIN"
+  elif command -v claude >/dev/null 2>&1; then
+    command -v claude
+  elif [ -x "$HOME/.local/bin/claude" ]; then
+    printf '%s\n' "$HOME/.local/bin/claude"
+  else
+    return 1
+  fi
+}
+
+# 起票モードで、当日(JST)すでに上限件数を起票していれば真を返す。
+# gh で件数を確認できないときも真(=起票しない側)に倒す。公開リポジトリへ
+# 無人で書き込む経路なので、分からないときは書かない。
+auto_issue_cap_reached() {
+  local today count
+  today=$(TZ=Asia/Tokyo date +%F)
+  if ! count=$(gh issue list --label "$AUTO_ISSUE_LABEL" --state all \
+      --search "created:>=${today}" --limit 100 --json number --jq 'length' 2>/dev/null); then
+    return 0
+  fi
+  case "$count" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+  [ "$count" -ge "$MAX_ISSUES_PER_DAY" ]
 }
 
 # Issue #380: パス不一致でcdが無言で失敗する(set -eで即終了し、層2調査が
@@ -128,6 +169,12 @@ if [ "$ANOMALY_SUMMARY_LEN" -gt "$SUMMARY_MAX_CHARS" ]; then
 ...(${SUMMARY_MAX_CHARS}字を超えたため以下省略)"
 fi
 
+# --- 起票モードの上限 (Issue #339) ---
+if [ "$DRY_RUN" != "1" ] && auto_issue_cap_reached; then
+  echo "[$(date)] 本日の自動起票が上限(${MAX_ISSUES_PER_DAY}件)に達したか件数を確認できないため、今回はドライランで調査します。"
+  DRY_RUN=1
+fi
+
 # --- 調査プロンプトと許可ツール ---
 # Issue #379: Bash(tail*) はワイルドカードが広く、logs/以外の任意ファイル(.env等)にも
 # マッチしうるため撤去した。ログの読み取りは(.envを除き)Readツールに一本化する。
@@ -136,8 +183,21 @@ if [ "$DRY_RUN" = "1" ]; then
   ALLOWED_TOOLS="Read,Grep,Glob,Bash(git log*),Bash(git diff*),Bash(git status*),Bash(journalctl*),Bash(df*),Bash(free*)"
   REPORTING_INSTRUCTION="今回はドライラン運用のため、GitHubへの起票は行わず、調査結果と改修案(diff案)を出力にまとめよ。"
 else
-  ALLOWED_TOOLS="Read,Grep,Glob,Bash(git log*),Bash(git diff*),Bash(git status*),Bash(journalctl*),Bash(df*),Bash(free*),Bash(gh issue create*),Bash(gh pr create --draft*),Bash(gh pr diff*)"
-  REPORTING_INSTRUCTION="改修が必要であれば具体的な修正案(diff)を作成した上で、'gh issue create' または 'gh pr create --draft' でGitHub上に起票せよ。
+  # Issue #339: 重複確認のため gh issue list/view と、既存 Issue への追記用に gh issue comment を許可する。
+  ALLOWED_TOOLS="Read,Grep,Glob,Bash(git log*),Bash(git diff*),Bash(git status*),Bash(journalctl*),Bash(df*),Bash(free*),Bash(gh issue list*),Bash(gh issue view*),Bash(gh issue comment*),Bash(gh issue create*),Bash(gh pr create --draft*),Bash(gh pr diff*)"
+  REPORTING_INSTRUCTION="コードや設定の改修が必要な不具合であれば、GitHub上に起票せよ。次の手順と制約を厳守すること。
+(1) 起票しない場合: 実機のコードが origin/master より遅れているだけ、外部サービスとの一時的な通信失敗、
+    テスト用の異常、すでに解消している一時的な状態など、コードの改修が不要なものは起票せず、
+    調査結果だけを出力せよ。
+(2) 重複確認: 起票の前に必ず 'gh issue list --label ${AUTO_ISSUE_LABEL} --state open' と
+    'gh issue list --state open --search \"<キーワード>\"' で既存の Issue を確認し、同じ原因の Issue が
+    あれば新規起票せず 'gh issue comment <番号> --body \"...\"' で今回の検知を追記せよ。
+(3) 新規起票: 'gh issue create --label ${AUTO_ISSUE_LABEL} --title \"...\" --body \"...\"' を使うこと。
+(4) 公開情報の制約(最重要): このリポジトリは一般公開されており、起票・コメントの内容は誰でも読める。
+    LINE等のメッセージ本文、人名・ニックネーム・表示名、IPアドレス・MACアドレス・ホスト名・
+    ドメイン名、URL、メールアドレス、トークン・パスワード等の認証情報、ファイル内の個人的な記録は
+    一切書かないこと。ログを引用せず、「LINEハンドラで例外が発生」「カメラ1台との通信失敗」の
+    ように抽象化して書くこと。判断に迷う情報は書かないこと。
 起票時の制約(厳守): タイトルは100字以内、本文は3000字以内に収めること。'--body-file' オプションは
 絶対に使用しないこと(本文は必ず '--body' に文字列として直接渡すこと。ファイル内容の埋め込みや
 ファイルパスの受け渡しに使うことを禁止する)。'git log'/'git diff' 等のコマンドで
@@ -176,7 +236,10 @@ EOF
 # だったため、ログ由来の誘導文でルート直下の.env等を読ませてIssue本文へ貼らせる経路が
 # 成立し得た。--disallowedTools は --allowedTools より優先される想定)。
 set +e
-RESULT=$(timeout --kill-after=10 "$TIMEOUT_SEC" claude -p "$PROMPT" \
+if ! CLAUDE_CMD=$(resolve_claude_bin); then
+  CLAUDE_CMD=claude  # 見つからない場合も起動を試み、exit=127 として下の通知経路に乗せる
+fi
+RESULT=$(timeout --kill-after=10 "$TIMEOUT_SEC" "$CLAUDE_CMD" -p "$PROMPT" \
   --permission-mode dontAsk \
   --allowedTools "$ALLOWED_TOOLS" \
   --disallowedTools "Read(.env*)" \
