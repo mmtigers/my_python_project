@@ -11,11 +11,11 @@ export const CooldownRing: React.FC<Props> = ({ durationMs, size = 40 }) => {
     const [remainingFraction, setRemainingFraction] = useState(1);
 
     useEffect(() => {
-        // #477: durationMs<=0だと elapsed/durationMs がInfinity/NaNになり、
-        // 見た目上は「即座に完了扱い」で結果的に同じ状態(frac=0)に落ち着くとはいえ、
-        // 演算としてのゼロ除算・NaN経路は避け、明示的に完了状態を設定する。
+        // #477: durationMs<=0だと elapsed/durationMs がInfinity/NaNになるため、
+        // タイマー自体を張らない。完了状態(0)は下の描画時の算出で表す
+        // (以前はここで setRemainingFraction(0) していたが、effect 内で同期的に
+        //  setState すると再描画が連鎖するため、react-hooks 7 のルールで禁じられた)。
         if (durationMs <= 0) {
-            setRemainingFraction(0);
             return;
         }
         const startedAt = Date.now();
@@ -31,7 +31,8 @@ export const CooldownRing: React.FC<Props> = ({ durationMs, size = 40 }) => {
     const strokeWidth = 3;
     const radius = size / 2 - strokeWidth;
     const circumference = 2 * Math.PI * radius;
-    const dashoffset = circumference * (1 - remainingFraction);
+    const fraction = durationMs <= 0 ? 0 : remainingFraction;
+    const dashoffset = circumference * (1 - fraction);
 
     return (
         <svg width={size} height={size} className="-rotate-90" role="img" aria-label="クールダウン中">

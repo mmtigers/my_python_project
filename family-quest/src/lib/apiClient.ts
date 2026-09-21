@@ -120,7 +120,8 @@ export class ApiClient {
             // JSONによるSyntaxError)は、"Failed to fetch"のような生のブラウザ文言が
             // そのままモーダルに表示されてしまうのを避け、意味の伝わる文言に変換する。
             if (error instanceof TypeError || error instanceof SyntaxError) {
-                throw new Error('通信エラーが発生しました。ネットワーク接続をご確認のうえ、再度お試しください。');
+                // 元の例外は cause に残す(画面の文言は差し替えても、原因の追跡はできるように)。
+                throw new Error('通信エラーが発生しました。ネットワーク接続をご確認のうえ、再度お試しください。', { cause: error });
             }
             throw error;
         }

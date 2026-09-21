@@ -56,6 +56,16 @@ describe('apiClient error handling (#412 F-L3)', () => {
         await expect(apiClient.get('/api/quest/data'))
             .rejects.toThrow('通信エラーが発生しました。ネットワーク接続をご確認のうえ、再度お試しください。');
     });
+
+    it('keeps the original error as `cause` so the real reason stays traceable', async () => {
+        // 画面に出す文言は差し替えても、原因(Failed to fetch 等)は失わない。eslint 10 の
+        // preserve-caught-error ルールに合わせて追加した。
+        const original = new TypeError('Failed to fetch');
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(original));
+        const err = await apiClient.get('/api/quest/data').catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(Error);
+        expect((err as Error).cause).toBe(original);
+    });
 });
 
 describe('ApiClient baseUrl trailing slash normalization (#476)', () => {

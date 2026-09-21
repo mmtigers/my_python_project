@@ -82,6 +82,12 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     const [youtubeCooldownSeconds, setYoutubeCooldownSeconds] = useState(0);
     useEffect(() => {
         const serverValue = data?.youtube_cooldown_remaining_seconds ?? 0;
+        // react-hooks 7 の set-state-in-effect は effect 内の同期的な setState を咎めるが、
+        // ここはポーリングで届いたサーバー値を起点にローカルのカウントダウンを始め直す処理で、
+        // setInterval(外部のタイマー)との同期が本来の役割である。描画中に算出する形へ移すと
+        // 経過時間のために描画中に Date.now() を呼ぶことになり purity ルールに触れるため、
+        // 挙動は変えずにこの行だけルールを外す(再描画が1回増えるだけ)。
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- 上記の理由で意図的
         setYoutubeCooldownSeconds(serverValue);
         if (serverValue <= 0) return;
 

@@ -138,11 +138,13 @@ const RoutineFlow: React.FC<RoutineFlowProps> = ({ flowKey, flow, onCompleteStep
     const checklistStartIndex = flow.steps.findIndex((step) => step.is_checklist);
     const checklistAffectsBonus = checkpointIndex === -1 || checklistStartIndex < checkpointIndex;
 
-    let checklistRendered = false;
-    const rows = flow.steps.reduce<React.ReactNode[]>((acc, step) => {
+    // チェックリストのブロックは、最初のチェックリスト項目の位置に1回だけ差し込む。
+    // (以前は外側の `let checklistRendered` を reduce の中で書き換えていたが、
+    //  eslint-plugin-react-hooks 7 の immutability ルールが「描画後の再代入」として禁じる。
+    //  位置は checklistStartIndex で既に分かっているので、それと比べれば足りる)
+    const rows = flow.steps.reduce<React.ReactNode[]>((acc, step, index) => {
         if (step.is_checklist) {
-            if (!checklistRendered) {
-                checklistRendered = true;
+            if (index === checklistStartIndex) {
                 acc.push(
                     <RoutineChecklistBlock
                         key="checklist-block"
