@@ -161,7 +161,7 @@
 
 
 * **副作用**: `daemon=True`の`threading.Thread`を起動し、その中で`send_device_command(config.TV_PLUG_DEVICE_ID, "turnOn")`を呼び出す。成功時は情報ログのみ。失敗時（`send_device_command`が`None`または`statusCode`が100以外を返した場合、または例外発生時）はエラーログを出力し、さらに`config.LINE_PARENTS_GROUP_ID`が設定されていれば`notification_service.send_push`で親グループへLINE通知を送る。呼び出し元スレッド（APIルーティング処理）はこのスレッド起動をブロックしない。
-* 根拠: `unlock_task` 定義とスレッド起動 (行番号: 132〜148 / 抜粋: "def unlock_task():\n        logger.info(f\"📺 Initiating TV Unlock (Turn ON) for {context}\")"), スレッド起動 (行番号: 124〜125 / 抜粋: "t = threading.Thread(target=unlock_task, daemon=True)\n    t.start()"), Fail-Soft通知 (行番号: 116〜121 / 抜粋: "if config.LINE_PARENTS_GROUP_ID:\n                msg = \"⚠️ テレビの電源ON（自動ロック解除）に失敗しました。お手数ですが、SwitchBotアプリ等から手動でつけてあげてください。\"\n                notification_service.send_push(")
+* 根拠: `unlock_task` 定義とスレッド起動 (行番号: 132〜148 / 抜粋: "def unlock_task():\n        logger.info(f\"📺 Initiating TV Unlock (Turn ON) for {context}\")"), スレッド起動 (行番号: 151〜152 / 抜粋: "t = threading.Thread(target=unlock_task, daemon=True)\n    t.start()"), Fail-Soft通知 (行番号: 116〜121 / 抜粋: "if config.LINE_PARENTS_GROUP_ID:\n                msg = \"⚠️ テレビの電源ON（自動ロック解除）に失敗しました。お手数ですが、SwitchBotアプリ等から手動でつけてあげてください。\"\n                notification_service.send_push(")
 
 
 * **エラーハンドリング**: `unlock_task`内で`send_device_command`の戻り値が偽値または`statusCode != 100`の場合は`Exception`を送出して直後の`except Exception as e:`で捕捉し、任意の例外（`send_device_command`自体が投げうる例外も含む）をエラーログ出力とFail-Soft通知（LINE Push失敗時の例外は捕捉しない）で処理する。デーモンスレッド内で例外が伝播してもプロセス全体やAPIルーティングには影響しない。

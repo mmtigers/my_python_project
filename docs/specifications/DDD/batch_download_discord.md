@@ -82,7 +82,7 @@
 
 
 * **引数/リクエスト**: `messages`（辞書のリスト。各要素は`{"text": ...}`形式を想定し`.get("text", "")`で本文を取り出す。辞書でない要素は`str()`変換される）、`image_data=None`（引数として受け取るが本関数の実装内では未使用）、`channel="notify"`（`"error"`なら`DISCORD_WEBHOOK_ERROR`系、それ以外は`DISCORD_WEBHOOK_NOTIFY`系のURLを選択するチャンネル指定）
-* 根拠: [引数定義とチャンネル分岐] (行番号: 95, 83〜86 / 抜粋: "def _standalone_send_discord_webhook(messages, image_data=None, channel="notify") -> bool:", "if channel == "error":\n        url = os.getenv("DISCORD_WEBHOOK_ERROR") or os.getenv("DISCORD_WEBHOOK_URL")\n    else:\n        url = os.getenv("DISCORD_WEBHOOK_NOTIFY") or os.getenv("DISCORD_WEBHOOK_URL")")
+* 根拠: [引数定義とチャンネル分岐] (行番号: 95, 101〜104 / 抜粋: "def _standalone_send_discord_webhook(messages, image_data=None, channel="notify") -> bool:", "if channel == "error":\n        url = os.getenv("DISCORD_WEBHOOK_ERROR") or os.getenv("DISCORD_WEBHOOK_URL")\n    else:\n        url = os.getenv("DISCORD_WEBHOOK_NOTIFY") or os.getenv("DISCORD_WEBHOOK_URL")")
 
 
 * **戻り値/レスポンス**: `bool`（送信成功時`True`、Webhook URL未設定時または送信失敗時`False`）
@@ -126,7 +126,7 @@
 
 
 * **（Issue #397で追加）`SEGMENT_DOWNLOAD_MAX_ATTEMPTS: int = 3` / `SEGMENT_RETRY_BASE_DELAY: float = 1.0`について**: `ScrapingStrategy._download_segment`がHLSセグメント1個あたりに行う取得試行回数と、リトライ前の初回待機秒（指数バックオフで1秒→2秒）。数千セグメント中1つの一時的なタイムアウトで数GBのダウンロードが丸ごと破棄されるのを防ぐ。`BotDetectionError`はリトライ対象外。
-* 根拠: [定数定義とコメント] (行番号: 178〜183 / 抜粋: "# #397: HLSセグメント1個あたりの取得試行回数と、リトライ前の初回待機秒\n    # (指数バックオフ: 1秒→2秒)。数千セグメント中1つの一時的なタイムアウトで\n    # 数GBのダウンロードが丸ごと破棄されるのを防ぐ。BotDetectionError は\n    # リトライ対象外(即座にセッション中断)。\n    SEGMENT_DOWNLOAD_MAX_ATTEMPTS: int = 3\n    SEGMENT_RETRY_BASE_DELAY: float = 1.0")
+* 根拠: [定数定義とコメント] (行番号: 191〜196 / 抜粋: "# #397: HLSセグメント1個あたりの取得試行回数と、リトライ前の初回待機秒\n    # (指数バックオフ: 1秒→2秒)。数千セグメント中1つの一時的なタイムアウトで\n    # 数GBのダウンロードが丸ごと破棄されるのを防ぐ。BotDetectionError は\n    # リトライ対象外(即座にセッション中断)。\n    SEGMENT_DOWNLOAD_MAX_ATTEMPTS: int = 3\n    SEGMENT_RETRY_BASE_DELAY: float = 1.0")
 
 
 * **引数/リクエスト**: なし（フィールドはデフォルト値、環境変数、または`_resolve_cookies_file`の呼び出し結果から初期化される）
@@ -147,7 +147,7 @@
 ### `AppConfig.nas_marker_path`
 
 * **役割**: NASマウント確認用のマーカーファイル（`NAS_MOUNT_POINT / NAS_MARKER_FILE`）の完全パスを返すプロパティ。
-* 根拠: [プロパティ定義] (行番号: 239〜241 / 抜粋: "@property\n    def nas_marker_path(self) -> Path:\n        return self.NAS_MOUNT_POINT / self.NAS_MARKER_FILE")
+* 根拠: [プロパティ定義] (行番号: 272〜274 / 抜粋: "@property\n    def nas_marker_path(self) -> Path:\n        return self.NAS_MOUNT_POINT / self.NAS_MARKER_FILE")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
@@ -294,7 +294,7 @@
 
 
 * **副作用**: 指定パスのファイル読み込み（クローズは`with`文で保証）。
-* 根拠: [ファイル読み込み] (行番号: 393〜394 / 抜粋: "with open(path, "r", encoding="utf-8") as f:\n            return {line.strip() for line in f if line.strip()}")
+* 根拠: [ファイル読み込み] (行番号: 435〜436 / 抜粋: "with open(path, "r", encoding="utf-8") as f:\n            return {line.strip() for line in f if line.strip()}")
 
 
 * **エラーハンドリング**: なし（`open`/読み込みで発生した例外はそのまま呼び出し元(`load_history`)へ伝播する）
@@ -369,7 +369,7 @@
 
 
 * **副作用**: 一時ファイルへの書き込みとアトミックな`replace`によるクールダウンファイルの更新、情報ログ出力。
-* 根拠: [アトミック書き込み] (行番号: 323〜325 / 抜粋: "tmp_path = CONFIG.BOT_DETECTION_COOLDOWN_FILE.with_suffix('.tmp')\n            tmp_path.write_text(until.isoformat(), encoding="utf-8")\n            tmp_path.replace(CONFIG.BOT_DETECTION_COOLDOWN_FILE)")
+* 根拠: [アトミック書き込み] (行番号: 517〜519 / 抜粋: "tmp_path = CONFIG.BOT_DETECTION_COOLDOWN_FILE.with_suffix('.tmp')\n            tmp_path.write_text(until.isoformat(), encoding="utf-8")\n            tmp_path.replace(CONFIG.BOT_DETECTION_COOLDOWN_FILE)")
 
 
 * **エラーハンドリング**: 書き込み失敗時(`OSError`)はエラーログを出力する（例外の再送出はしない）。
@@ -536,7 +536,7 @@
 
 
 * **副作用**: `logger.warning` によるログ出力、`check_yt_dlp_freshness`の呼び出し。
-* 根拠: [ログ出力と呼び出し] (行番号: 393〜394 / 抜粋: "logger.warning("⚠️ ffmpeg not found.")\n        SystemHealthChecker.check_yt_dlp_freshness()")
+* 根拠: [ログ出力と呼び出し] (行番号: 619〜620 / 抜粋: "logger.warning("⚠️ ffmpeg not found.")\n        SystemHealthChecker.check_yt_dlp_freshness()")
 
 
 * **エラーハンドリング**: なし（`ffmpeg`未検出時も処理を継続する＝警告のみ）
@@ -586,7 +586,7 @@
 ### `UniversalYtDlpStrategy.download`
 
 * **役割**: `yt_dlp`を用いて汎用サイト（YouTube含む全対応サイト）から動画をダウンロードする。YouTubeドメインかどうかで保存カテゴリ（`youtube`/`others`）を振り分け、既存ファイルがあればスキップする。Cookieファイル設定時は`cookiefile`オプションを付与し、`yt-dlp`自身のリクエスト間隔にもスリープを設定する。`ydl_opts`には`noplaylist: True`が設定されており、リストの1行がプレイリスト/チャンネルURLだった場合に1タスクの中で無制限にダウンロードして`MAX_TASKS_PER_RUN`による1回あたりの上限が迂回されることを防いでいる。また`trim_file_name`（yt-dlp自身が持つ、拡張子を除いたファイル名を指定文字数に切り詰めるオプション）でファイル名長を制限しているが、これは`no_ext[:trim_file_name]`という単純な文字数ベースのスライスであり、UTF-8で1文字複数バイトになる文字（日本語等）に対してバイト数を保証しない。**（Issue #175で修正）** 以前の`150`文字は、日本語（UTF-8で3バイト/文字）のタイトルでは約85文字を超えるとext4等の255バイト制限を超過しうる不十分な値だったため、拡張子分の余白を見込んで日本語でも255バイトに収まる`80`文字に変更された。**（D-L1で修正）** 保存先ディレクトリ(`target_dir`。リストファイル名由来の`source_name`を含みうる)は、以前`outtmpl`文字列へf-stringで直接埋め込んでいたため、`source_name`に`'%'`が含まれる場合にyt-dlpのテンプレート展開(`%(...)s`)と衝突しテンプレートエラーになりうった。`'paths': {'home': str(target_dir)}`でディレクトリを分離し、`outtmpl`はファイル名部分のみのテンプレート(`'%(title)s.%(ext)s'`)にした。**（D-L2で修正）** 以前は`extract_info(download=False)`でメタデータを取得した後、改めて`ydl.download([task.url])`を呼んでおり、メタデータ取得のネットワークリクエストが2回発生し、ボット検知対策として抑えているはずのアクセス回数を自ら増やしていた。既に取得済みの`info`を`ydl.process_ie_result(info, download=True)`へ渡すことで、再抽出せずに1回のリクエストでダウンロードを完了させる。**（Issue #566で修正）** `noplaylist: True`は、動画とプレイリストの両方を指すURL（`watch?v=X&list=Y`形式）において動画側だけを選択させる効果しか持たず、動画IDを含まない純粋なプレイリスト/チャンネルURLには一切効果がない（yt-dlp内部の`InfoExtractor._yes_playlist`が、video_id不在時は`noplaylist`を参照せず常にプレイリスト全体を返す実装であるため）。そのため`extract_info(download=False)`で取得した`info`の`_type`が`'playlist'`または`'multi_video'`である場合、`noplaylist`だけでは防げないこのケースを明示的に検知し、`filename`の算出やダウンロード実行には進まず警告ログを出力したうえで`False`を返す（`list/*.txt`に紛れ込んだプレイリスト/チャンネルURLが1タスクの中で無制限にダウンロードされ、`MAX_TASKS_PER_RUN`によるガバナンスやボット検知回避のペーシングが丸ごと迂回されるのを防ぐ）。
-* 根拠: [UniversalYtDlpStrategy.downloadとnoplaylistのコメント] (行番号: 674, 675〜679 / 抜粋: "def download(self, task: DownloadTask) -> bool:", "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード\n            # してしまい、MAX_TASKS_PER_RUNによる1回あたりの上限governanceが\n            # まるごと迂回されてしまう。単一動画のみを対象にする。\n            'noplaylist': True,")、trim_file_nameの修正 (行番号: 680〜689 / 抜粋: "#175: yt-dlpのtrim_file_nameは文字数ベース(no_ext[:trim_file_name]の\n            # 単純なスライス)であり、バイト数を保証しない。")、[D-L1: paths/outtmplのコメント] (行番号: 665〜672 / 抜粋: "# D-L1: 保存先ディレクトリ(target_dir、リストファイル名由来のsource_name\n            # を含みうる)をouttmpl文字列へf-stringで直接埋め込むと" / "'paths': {'home': str(target_dir)},\n            'outtmpl': '%(title)s.%(ext)s',")、[D-L2: process_ie_resultのコメント] (行番号: 722〜728 / 抜粋: "# D-L2: 以前はここで改めてydl.download([task.url])を呼んでおり、\n                # 直前のextract_info(download=False)と合わせてメタデータ取得の\n                # ネットワークリクエストが2回発生していた" / "ydl.process_ie_result(info, download=True)")、[Issue #566: '_type'チェックとコメント] (行番号: 703〜715 / 抜粋: "# #566: yt-dlpの'noplaylist'は「動画とプレイリストの両方を指すURL\n                # (watch?v=X&list=Y)で動画側だけを選ぶ」オプションであり、動画IDを\n                # 含まない純粋なプレイリスト/チャンネルURLには効果がない\n                # (yt-dlp内部のInfoExtractor._yes_playlistがvideo_id不在時は\n                # noplaylistを一切参照せず常にプレイリスト全体を返す実装のため)。" / "if info.get('_type') in ('playlist', 'multi_video'):\n                    logger.warning(\n                        f"⚠️ プレイリスト/チャンネルURLは対象外です(1動画のみ処理可能): {task.url}"\n                    )\n                    return False")
+* 根拠: [UniversalYtDlpStrategy.downloadとnoplaylistのコメント] (行番号: 674, 695〜699 / 抜粋: "def download(self, task: DownloadTask) -> bool:", "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード\n            # してしまい、MAX_TASKS_PER_RUNによる1回あたりの上限governanceが\n            # まるごと迂回されてしまう。単一動画のみを対象にする。\n            'noplaylist': True,")、trim_file_nameの修正 (行番号: 680〜689 / 抜粋: "#175: yt-dlpのtrim_file_nameは文字数ベース(no_ext[:trim_file_name]の\n            # 単純なスライス)であり、バイト数を保証しない。")、[D-L1: paths/outtmplのコメント] (行番号: 685〜692 / 抜粋: "# D-L1: 保存先ディレクトリ(target_dir、リストファイル名由来のsource_name\n            # を含みうる)をouttmpl文字列へf-stringで直接埋め込むと" / "'paths': {'home': str(target_dir)},\n            'outtmpl': '%(title)s.%(ext)s',")、[D-L2: process_ie_resultのコメント] (行番号: 722〜728 / 抜粋: "# D-L2: 以前はここで改めてydl.download([task.url])を呼んでおり、\n                # 直前のextract_info(download=False)と合わせてメタデータ取得の\n                # ネットワークリクエストが2回発生していた" / "ydl.process_ie_result(info, download=True)")、[Issue #566: '_type'チェックとコメント] (行番号: 703〜715 / 抜粋: "# #566: yt-dlpの'noplaylist'は「動画とプレイリストの両方を指すURL\n                # (watch?v=X&list=Y)で動画側だけを選ぶ」オプションであり、動画IDを\n                # 含まない純粋なプレイリスト/チャンネルURLには効果がない\n                # (yt-dlp内部のInfoExtractor._yes_playlistがvideo_id不在時は\n                # noplaylistを一切参照せず常にプレイリスト全体を返す実装のため)。" / "if info.get('_type') in ('playlist', 'multi_video'):\n                    logger.warning(\n                        f"⚠️ プレイリスト/チャンネルURLは対象外です(1動画のみ処理可能): {task.url}"\n                    )\n                    return False")
 
 
 * **引数/リクエスト**: `task: DownloadTask`
@@ -642,7 +642,7 @@
 
 
 * **副作用**: `final_path.parent`内の走査(`iterdir`)、`final_path.name`で始まり`final_path`自身とは異なる各エントリの削除（ディレクトリは`shutil.rmtree(ignore_errors=True)`、ファイルは`unlink`）。
-* 根拠: [走査と削除処理] (行番号: 609〜616 / 抜粋: "for stale in final_path.parent.iterdir():\n                if stale == final_path or not stale.name.startswith(final_path.name):\n                    continue\n                try:\n                    if stale.is_dir():\n                        shutil.rmtree(stale, ignore_errors=True)\n                    else:\n                        stale.unlink()")
+* 根拠: [走査と削除処理] (行番号: 803〜810 / 抜粋: "for stale in final_path.parent.iterdir():\n                if stale == final_path or not stale.name.startswith(final_path.name):\n                    continue\n                try:\n                    if stale.is_dir():\n                        shutil.rmtree(stale, ignore_errors=True)\n                    else:\n                        stale.unlink()")
 
 
 * **エラーハンドリング**: `final_path.parent`が存在しない場合は何もせず`return`する。個別エントリの削除失敗(`OSError`)、および走査自体の失敗(`OSError`)はいずれも警告ログを出力するのみで、例外は再送出されず処理は継続する。
@@ -1180,7 +1180,7 @@ flowchart TD
 * **多重起動防止**: `fcntl.flock` によるロックファイル制御が導入されており、cron等での実行が重複した場合に `list.txt` / `list/*.txt` への同時読み書き競合を防いでいる（`run`メソッド）。**（D-L4で修正）** ロック競合時の終了は`sys.exit(1)`から`return`（終了コード`0`）へ変更された。多重起動スキップは想定内の正常系であり、以前は`run_task.sh`側がこれをERRORとして誤記録していた。
 * **（D-L3で追加）2回目のシグナルで強制中断**: `_signal_handler`は1回目のシグナルで`_shutdown_requested`フラグを立てるだけ（現在のタスク完了後にメインループが`break`する）だが、進行中のタスク（yt-dlpによる数GB規模のダウンロード等）はこれだけでは止まらない。`self._interrupt_count`が2以上（＝2回目以降のシグナル）になった時点で即座に`KeyboardInterrupt`を送出し、実行中の処理を強制的に中断できるようにした。ただしこれはPythonのシグナル配信の仕組み（メインスレッドで次のバイトコード境界、またはブロッキングI/Oの再試行時に例外が届く）に依存するベストエフォートであり、`ThreadPoolExecutor`のワーカースレッド内で実行中の処理（`ScrapingStrategy._download_segments_and_localize_manifest`のセグメント取得等）を即座に止める保証はない（ロックファイルの解放自体は`run`の`try/finally`が確実に行う）。**（2026-09-06 品質監査で修正）** ただし`_download_segments_and_localize_manifest`の`as_completed`ループ（メインスレッド）に`KeyboardInterrupt`が届いた場合については、同ループを囲む`except BaseException:`が捕捉して`executor.shutdown(wait=True, cancel_futures=True)`を呼ぶため、未着手のキュー済みセグメント取得はキャンセルされる（実行中の最大`_FRAGMENT_DOWNLOAD_WORKERS`件の完了は待つ）。以前は`except Exception:`だったため`KeyboardInterrupt`が素通りし、`with`ブロック終了時の暗黙の`shutdown(wait=True)`でキュー済み全件の完走を待っていた。
 * 根拠: [_download_segments_and_localize_manifestのexcept BaseException] (行番号: 988, 997〜1003 / 抜粋: "except BaseException:" / "# Exception ではなく BaseException を捕捉する: 2回目の停止シグナルで\n                # _handle_signal が送出する KeyboardInterrupt は Exception の派生ではなく、\n                # 以前はここを素通りして with ブロック終了時の shutdown(wait=True)\n                # (cancel_futures なし)に落ち" / "executor.shutdown(wait=True, cancel_futures=True)\n                raise")
-* 根拠: [_signal_handlerのD-L3コメント] (行番号: 1226〜1228 / 抜粋: "# D-L3: 1回目のシグナル後もタスクが終わらない(数GB規模のダウンロード中\n        # 等)場合、2回目のシグナルで即座に強制中断する。ロック解放は\n        # run()のtry/finallyが担保する。")
+* 根拠: [_signal_handlerのD-L3コメント] (行番号: 1301〜1303 / 抜粋: "# D-L3: 1回目のシグナル後もタスクが終わらない(数GB規模のダウンロード中\n        # 等)場合、2回目のシグナルで即座に強制中断する。ロック解放は\n        # run()のtry/finallyが担保する。")
 * **（D-L1で修正）outtmplへのディレクトリ埋め込み回避**: `UniversalYtDlpStrategy.download`は以前、保存先ディレクトリ(`target_dir`)をf-stringで`outtmpl`文字列に直接連結していたため、リストファイル名由来の`source_name`に`'%'`が含まれる場合にyt-dlpのテンプレート展開と衝突しテンプレートエラーになりうった。`'paths': {'home': str(target_dir)}`でディレクトリ指定を分離し、`outtmpl`はファイル名部分のみのテンプレートにした。同様のパターン（ユーザー制御可能な文字列を`outtmpl`へ直接連結すること）を新たに追加する際は注意すること。
 * **（D-L2で修正）メタデータ取得の二重リクエスト解消**: `UniversalYtDlpStrategy.download`は以前、`extract_info(download=False)`でメタデータを取得した後、改めて`ydl.download([task.url])`を呼んでおり、ネットワークリクエストが2回発生していた（ボット検知対策として抑えているはずのアクセス回数を自ら増やしていた）。取得済みの`info`を`ydl.process_ie_result(info, download=True)`へ渡すことで1回のリクエストに統一した。
 * **（D-L5で修正）JSパッカーのradix取り違え**: `ScrapingStrategy._extract_m3u8_url`は以前、正規表現で捕捉したパッカーの基数(`a`)を無視し、単語索引の復元を常にbase36固定（36文字にmod 36）で行っていた。radixが36以外（典型的には62）のページでは索引文字列を取り違え、対応する単語へ正しく置換できずm3u8抽出に失敗しうった。捕捉した`radix`をモジュールレベル関数`_packer_base_n_digits`に渡して正しい進数変換を行うよう修正した。

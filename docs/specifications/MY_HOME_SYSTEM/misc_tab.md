@@ -59,7 +59,7 @@
 ### `render_traffic`
 
 * **役割**: JR宝塚線・神戸線の運行状況を、遅延中(赤)・情報取得不可(グレー)・平常運転(緑)の3状態に応じた背景色のカードで表示し、さらに現在時刻に応じた通勤/帰宅ルートの検索結果を表示する。**（B4で修正）** カードに埋め込む`line['status']`/`line['detail']`（JR運行情報APIのスクレイピング結果由来）は`html.escape()`を通してから埋め込む。
-* 根拠: `def render_traffic():` (行番号: 20〜59 / 抜粋: "def render_traffic():"), `elif line.get("is_unavailable"):` (行番号: 32 / 抜粋: "elif line.get(\"is_unavailable\"):")、エスケープ (行番号: 34〜35 / 抜粋: "<h2 style=\"margin:5px 0; color:{status_color};\">{html.escape(line['status'])}</h2>\n                <p style=\"margin:0;\">{html.escape(line['detail'])}</p>")
+* 根拠: `def render_traffic():` (行番号: 20〜59 / 抜粋: "def render_traffic():"), `elif line.get("is_unavailable"):` (行番号: 32 / 抜粋: "elif line.get(\"is_unavailable\"):")、エスケープ (行番号: 41〜42 / 抜粋: "<h2 style=\"margin:5px 0; color:{status_color};\">{html.escape(line['status'])}</h2>\n                <p style=\"margin:0;\">{html.escape(line['detail'])}</p>")
 
 
 * **引数/リクエスト**: なし

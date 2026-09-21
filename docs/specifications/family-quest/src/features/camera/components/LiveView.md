@@ -37,7 +37,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `HlsPlayer`の内部実装 | 本ファイルからは`streamUrl`と`controls`プロパティを渡して呼び出している箇所のみが確認でき、HLS再生・エラー処理などの内部仕様は別ファイルにあるため。 | 根拠: [`<HlsPlayer streamUrl={...} controls />`] (行番号: 24 / 抜粋: "<HlsPlayer streamUrl={`/api/cameras/live/${selectedCamera}/stream.m3u8`} controls />") |
-| `/api/cameras/live/{id}/stream.m3u8` エンドポイント | ライブ配信用HLSマニフェストを返すバックエンドの実装が本ファイルには含まれないため。 | 根拠: [URL組み立て] (行番号: 41 / 抜粋: "<HlsPlayer streamUrl={`/api/cameras/live/${camera.id}/stream.m3u8`} />") |
+| `/api/cameras/live/{id}/stream.m3u8` エンドポイント | ライブ配信用HLSマニフェストを返すバックエンドの実装が本ファイルには含まれないため。 | 根拠: [URL組み立て] (行番号: 54 / 抜粋: "<HlsPlayer streamUrl={`/api/cameras/live/${camera.id}/stream.m3u8`} />") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -61,7 +61,7 @@
 
 
 * **エラーハンドリング**: なし。`cameras`プロパティが空配列の場合でも、単にグリッドが空表示になるのみでエラー処理は行われない。
-* 根拠: `cameras.map`のみで存在チェックやフォールバック表示が実装されていない (行番号: 31 / 抜粋: "{cameras.map(camera => (")
+* 根拠: `cameras.map`のみで存在チェックやフォールバック表示が実装されていない (行番号: 35 / 抜粋: "{cameras.map(camera => (")
 
 ## 5. 処理フロー図
 
@@ -129,7 +129,7 @@ graph TD
 * 単独表示・グリッド表示のいずれの場合も`HlsPlayer`は`key`属性を持たない（グリッド側の`<HlsPlayer>`自体ではなく、親の`<div key={camera.id}>`にのみ`key`が付与されている）。React上は問題にならないが、`selectedCamera`が変化してグリッド表示⇔単独表示が切り替わる際、`streamUrl`が変わっても同一の`HlsPlayer`インスタンスとして扱われず、常にアンマウント/再マウントが発生する構造になっている（`isSingleView`の条件分岐により表示している`<HlsPlayer>`要素自体が入れ替わるため）。
 * 根拠: [条件分岐] (行番号: 15, 29 / 抜粋: "{isSingleView && (" と "{!isSingleView && (")
 * `cameras`プロパティが空配列の場合の表示（空のグリッド）や、`selectedCamera`に存在しないカメラIDが設定された場合の挙動について、明示的なガード処理は実装されていない。
-* 根拠: [`cameras.map`] (行番号: 31 / 抜粋: "{cameras.map(camera => (")
+* 根拠: [`cameras.map`] (行番号: 35 / 抜粋: "{cameras.map(camera => (")
 * グリッド表示は`md:grid-cols-2`により最大2列固定であり、カメラ台数が多い場合の列数調整（3列以上へのブレークポイント）は実装されていない。
 * 根拠: [グリッドクラス] (行番号: 30 / 抜粋: "<div className=\"grid grid-cols-1 md:grid-cols-2 gap-4\">")
 

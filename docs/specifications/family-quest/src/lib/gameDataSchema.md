@@ -33,13 +33,13 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `z` | 外部ライブラリ(`zod`) | スキーマオブジェクト・各フィールドのバリデータ定義に使用 | 根拠: [インポート宣言] (行番号: 29 / 抜粋: "import { z } from 'zod';")（Issue #752 の冒頭コメント追記により行番号が 15 → 29 へ移動） |
+| `z` | 外部ライブラリ(`zod`) | スキーマオブジェクト・各フィールドのバリデータ定義に使用 | 根拠: [インポート宣言] (行番号: 28 / 抜粋: "import { z } from 'zod';")（Issue #752 の冒頭コメント追記により行番号が 15 → 29 へ移動） |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `zod`ライブラリ自体の`.parse()`/`.optional()`/`.nullable()`/`.union()`等の挙動 | `zod`パッケージの実装は本ファイル外であり、バリデーション失敗時に送出される例外の詳細な構造（`ZodError`のメッセージ形式等）は本ファイルからは不明。 | 根拠: [インポート宣言] (行番号: 15 / 抜粋: "import { z } from 'zod';") |
+| `zod`ライブラリ自体の`.parse()`/`.optional()`/`.nullable()`/`.union()`等の挙動 | `zod`パッケージの実装は本ファイル外であり、バリデーション失敗時に送出される例外の詳細な構造（`ZodError`のメッセージ形式等）は本ファイルからは不明。 | 根拠: [インポート宣言] (行番号: 28 / 抜粋: "import { z } from 'zod';") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -56,11 +56,11 @@
 ### `questSchema` (モジュールレベル定数、非export)
 
 * **（Issue #530 で修正）** `is_shared_completed_by` / `shared_completed_by_name` / `is_shared_pending_by` / `shared_pending_by_name` のスキーマ項目を削除した(バックエンドが送出しないため)。
-* 根拠: (行番号: 58 / 抜粋: "// #530: is_shared_* / shared_*_name はバックエンドが送出しないため削除")
+* 根拠: (行番号: 71 / 抜粋: "// #530: is_shared_* / shared_*_name はバックエンドが送出しないため削除")
 
 * **役割**: `gameData.quests`配列の1要素（`quest_master`テーブルの行 + `filter_active_quests`/`get_all_view_data`が付与する`bonus_gold`/`bonus_exp`等）を検証するZodスキーマ。`quest_id`/`title`は必須、他はすべて任意（`description`/`icon_key`/`start_time`/`end_time`/`target_user`/`pre_requisite_quest_id`は`.nullable()`も許容）。`days`は`number[] | null`のいずれかを許容する。**[修正済み・Issue #474]** 以前は`string`も許容していたが、`services/quest_service.py`の`get_all_view_data`が`day_of_week`カラム(カンマ区切り文字列)を常に`number[]`または`None`へ変換してから送出しており、実際のAPIレスポンスで`days`が生の文字列になることは無いことを確認した上で`string`分岐を削除した(文字列形式はサーバー内部の`MasterQuest.days`でのみ使われ、フロントへは渡らない)。共有クエスト判定用の`is_shared_completed_by`/`shared_completed_by_name`/`is_shared_pending_by`/`shared_pending_by_name`も任意フィールドとして含む。
 * 根拠: [定数定義] (行番号: 35〜54 / 抜粋: "const questSchema = z.object({\n    quest_id: z.number(),\n    title: z.string(),\n    description: z.string().nullable().optional(),")
-* 根拠: `days`の型 (行番号: 55 / 抜粋: "days: z.union([z.array(z.number()), z.null()]).optional(),")
+* 根拠: `days`の型 (行番号: 68 / 抜粋: "days: z.union([z.array(z.number()), z.null()]).optional(),")
 
 * **引数/リクエスト**: 該当なし
 * **戻り値/レスポンス**: 該当なし
@@ -212,9 +212,9 @@ graph TD
 * **[修正済み] `userSchema`が`nextLevelExp`を検証対象に含んでいなかった問題（Issue #470）**: `MY_HOME_SYSTEM/services/quest_service.py`の`GameSystem.get_all_view_data`は、`users`の各要素に`u['nextLevelExp'] = game_logic.GameLogic.calculate_next_level_exp(u['level'])`という形で`nextLevelExp`フィールドを以前から常に付与していたが、`userSchema`にはこのフィールドの定義が無く、`.strict()`を使わない設計のため`.parse()`自体は成功しつつも、パース後のオブジェクトからはこのフィールドが無音でstripされていた（バックエンドが実際に返しているフィールドがランタイム検証をすり抜けて消費側に届かない、この設計の既知の穴の一例）。現在は`userSchema`に`nextLevelExp: z.number().optional()`が追加され、`.parse()`後もこのフィールドが保持されるようになった（`types/index.ts`の`User.nextLevelExp?: number`とも対になる変更）。
 * 根拠: (行番号: 17〜37 / 抜粋: "// #470: get_all_view_dataが実際に付与しているフィールドだが、.strict()を\n    // 使わないためこれまでスキーマに含まれておらず、parse後は無音で消えていた\n    // (バックエンドの新フィールド追加を検知できないこの設計の既知の穴の一例)。\n    nextLevelExp: z.number().optional(),")、`MY_HOME_SYSTEM/services/quest_service.py`側の`nextLevelExp`付与箇所（直接ソース確認、行番号は`quest_service.md`の相互参照情報を参照）
 * **`questSchema`の`bonus_gold`/`bonus_exp`は任意扱いだが実際は常に付与される**: `GameSystem.get_all_view_data`は`filtered_quests`の全要素に対し、`target_user`の値にかかわらず必ず`q['bonus_gold']`/`q['bonus_exp']`のいずれかの分岐で数値（`0`を含む）を設定しており、値が存在しないケースはない。`questSchema`側は`.optional()`としているため、`.parse()`自体はこの点で失敗することはないが、スキーマ上は「無くてもよい」フィールドとして緩く定義されている。
-* 根拠: (行番号: 41 / 抜粋: "bonus_gold: z.number().optional(),")、`quest_service.md`の`GameSystem.get_all_view_data`解析内容（`if q['target_user'] and q['target_user'] != 'all': ... else: q['bonus_gold'] = 0`等、いずれの分岐でも設定される）
+* 根拠: (行番号: 60 / 抜粋: "bonus_gold: z.number().optional(),")、`quest_service.md`の`GameSystem.get_all_view_data`解析内容（`if q['target_user'] and q['target_user'] != 'all': ... else: q['bonus_gold'] = 0`等、いずれの分岐でも設定される）
 * **モジュールレベル定数はすべて非export**: `gameDataResponseSchema`以外の4つのサブスキーマ（`userSchema`/`questSchema`/`rewardSchema`/`questHistorySchema`）は`export`されておらず、本ファイル外から個別に参照することはできない。他のコンポーネントが「クエスト単体だけを検証したい」といった用途で再利用したい場合は、まずこれらを`export`する変更が必要になる。
-* 根拠: (行番号: 21, 35, 56, 69 / 抜粋: "const userSchema = z.object({", "const questSchema = z.object({", "const rewardSchema = z.object({", "const questHistorySchema = z.object({")
+* 根拠: (行番号: 34, 54, 74, 87 / 抜粋: "const userSchema = z.object({", "const questSchema = z.object({", "const rewardSchema = z.object({", "const questHistorySchema = z.object({")
 
 ## 9. 不明事項一覧
 

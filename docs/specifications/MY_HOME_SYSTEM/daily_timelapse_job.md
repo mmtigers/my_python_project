@@ -302,7 +302,7 @@ graph TD
 * **[修正済み] 既存summary動画ファイルの削除失敗（Issue #450）**: 以前は既存のsummary動画ファイルを削除する処理で`OSError`をキャッチしているが`pass`処理となっており、削除失敗時（権限不足や使用中など）の原因が握りつぶされ、既存ファイルが残った状態での再生成失敗として遅れて表面化していた。現在は`logger.warning(f"既存の出力ファイル削除に失敗しました: {sum_info.output_path}: {e}")`で警告ログを出力するよう修正され、削除失敗自体はログから追跡可能になった（ただし削除に失敗しても処理自体はそのまま後続の生成処理へ進む点は変わっていない）。
 
 
-* 根拠: [既存ファイル削除処理] (行番号: 157〜164 / 抜粋: "if os.path.exists(sum_info.output_path):\n            try:\n                os.remove(sum_info.output_path)\n            except OSError as e:\n                # #450: 権限エラー等で削除に失敗した場合、無音のまま後続の生成処理に\n                # 進んでいた(既存ファイルが残った状態での再生成失敗として遅れて表面化する)。\n                # 想定外のOSErrorとしてログに残す。\n                logger.warning(f\"既存の出力ファイル削除に失敗しました: {sum_info.output_path}: {e}\")")
+* 根拠: [既存ファイル削除処理] (行番号: 163〜170 / 抜粋: "if os.path.exists(sum_info.output_path):\n            try:\n                os.remove(sum_info.output_path)\n            except OSError as e:\n                # #450: 権限エラー等で削除に失敗した場合、無音のまま後続の生成処理に\n                # 進んでいた(既存ファイルが残った状態での再生成失敗として遅れて表面化する)。\n                # 想定外のOSErrorとしてログに残す。\n                logger.warning(f\"既存の出力ファイル削除に失敗しました: {sum_info.output_path}: {e}\")")
 
 
 

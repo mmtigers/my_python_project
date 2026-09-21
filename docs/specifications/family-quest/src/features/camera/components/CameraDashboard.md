@@ -26,7 +26,7 @@
 
 * 監視カメラ機能全体のエントリーポイントとなる、独立した全画面レイアウトのダッシュボードコンポーネント。
 * **Issue #326 (M12) でReact Query化**: 以前は生の`useEffect`+ローカルステート(`allCameras`/`loading`/`fetchError`)でデータ取得しており、他画面が従っているReact Query規約(`useGameData.ts`方式)から外れた最後の1箇所だった。現在は`useQuery`(queryKey: `['cameraSettings']`)でカメラ設定一覧を取得し、`order`昇順でのソートは`queryFn`内で行う。表示に使う`cameras`は取得結果`allCameras`から`enabled`が`true`のものだけを`useMemo`で抽出した派生値である。
-* 根拠: `useQuery`と`cameras`の定義 (行番号: 30〜41, 48 / 抜粋: "} = useQuery<CameraConfig[]>({\n        queryKey: ['cameraSettings'],", "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
+* 根拠: `useQuery`と`cameras`の定義 (行番号: 30〜41, 50 / 抜粋: "} = useQuery<CameraConfig[]>({\n        queryKey: ['cameraSettings'],", "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
 * 「ライブ映像」タブと「録画再生」タブを切り替え、それぞれ`LiveView`・`RecordView`コンポーネントへ描画を委譲する。
 * マウント中はページタイトル（`document.title`）を「ホーム監視カメラ」に変更し、アンマウント時に「Family Quest」へ戻す。
 * ヘッダーの歯車アイコンボタンから`CameraSettingsModal`を開き、`allCameras`（無効化されたカメラも含む全件）と、カメラの有効/無効切り替え成功時に呼ばれる`onToggled`コールバックとして`refetch`をawaitするラッパー関数を渡すことで、モーダル側の操作後に一覧を再取得する。
@@ -41,13 +41,13 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `React`, `useState`, `useEffect`, `useMemo` | ライブラリ (`react`) | コンポーネント定義、UI状態管理(`activeTab`/`settingsOpen`)、ページタイトルの副作用、`cameras`派生値のメモ化 | 根拠: [`import React, { useState, useEffect, useMemo } from 'react';`] (行番号: 1 / 抜粋: "import React, { useState, useEffect, useMemo } from 'react';") |
-| `useQuery` | ライブラリ (`@tanstack/react-query`) | カメラ設定一覧のフェッチ・キャッシュ・エラー・ローディング状態の管理(Issue #326で導入) | 根拠: [`import { useQuery } from '@tanstack/react-query';`] (行番号: 2 / 抜粋: "import { useQuery } from '@tanstack/react-query';") |
-| `LiveView` | 内部コンポーネント (`./LiveView`) | 「ライブ映像」タブ選択時に表示するコンポーネント | 根拠: [`import LiveView from './LiveView';`] (行番号: 3 / 抜粋: "import LiveView from './LiveView';") |
-| `RecordView` | 内部コンポーネント (`./RecordView`) | 「録画再生」タブ選択時に表示するコンポーネント | 根拠: [`import RecordView from './RecordView';`] (行番号: 4 / 抜粋: "import RecordView from './RecordView';") |
-| `CameraSettingsModal` | 内部コンポーネント (`./CameraSettingsModal`) | ヘッダーの設定ボタンから開くカメラ有効/無効切り替えモーダル | 根拠: [`import CameraSettingsModal from './CameraSettingsModal';`] (行番号: 5 / 抜粋: "import CameraSettingsModal from './CameraSettingsModal';") |
-| `CameraConfig` | 型定義 (`../types`) | カメラ設定情報（id, name, order, enabled）の型アノテーション | 根拠: [`import { CameraConfig } from '../types';`] (行番号: 6 / 抜粋: "import { CameraConfig } from '../types';") |
-| `Camera`, `Settings` | コンポーネント (`lucide-react`) | ヘッダー部の見出しアイコンおよび設定ボタンのアイコン表示 | 根拠: [`import { Camera, Settings } from 'lucide-react';`] (行番号: 7 / 抜粋: "import { Camera, Settings } from 'lucide-react';") |
-| `apiClient` | 内部モジュール (`@/lib/apiClient`) | カメラ設定一覧取得のためのHTTP通信(`queryFn`内から使用) | 根拠: [`import { apiClient } from '@/lib/apiClient';`] (行番号: 8 / 抜粋: "import { apiClient } from '@/lib/apiClient';") |
+| `useQuery` | ライブラリ (`@tanstack/react-query`) | カメラ設定一覧のフェッチ・キャッシュ・エラー・ローディング状態の管理(Issue #326で導入) | 根拠: [`import { useQuery } from '@tanstack/react-query';`] (行番号: 3 / 抜粋: "import { useQuery } from '@tanstack/react-query';") |
+| `LiveView` | 内部コンポーネント (`./LiveView`) | 「ライブ映像」タブ選択時に表示するコンポーネント | 根拠: [`import LiveView from './LiveView';`] (行番号: 4 / 抜粋: "import LiveView from './LiveView';") |
+| `RecordView` | 内部コンポーネント (`./RecordView`) | 「録画再生」タブ選択時に表示するコンポーネント | 根拠: [`import RecordView from './RecordView';`] (行番号: 5 / 抜粋: "import RecordView from './RecordView';") |
+| `CameraSettingsModal` | 内部コンポーネント (`./CameraSettingsModal`) | ヘッダーの設定ボタンから開くカメラ有効/無効切り替えモーダル | 根拠: [`import CameraSettingsModal from './CameraSettingsModal';`] (行番号: 6 / 抜粋: "import CameraSettingsModal from './CameraSettingsModal';") |
+| `CameraConfig` | 型定義 (`../types`) | カメラ設定情報（id, name, order, enabled）の型アノテーション | 根拠: [`import { CameraConfig } from '../types';`] (行番号: 7 / 抜粋: "import { CameraConfig } from '../types';") |
+| `Camera`, `Settings` | コンポーネント (`lucide-react`) | ヘッダー部の見出しアイコンおよび設定ボタンのアイコン表示 | 根拠: [`import { Camera, Settings } from 'lucide-react';`] (行番号: 8 / 抜粋: "import { Camera, Settings } from 'lucide-react';") |
+| `apiClient` | 内部モジュール (`@/lib/apiClient`) | カメラ設定一覧取得のためのHTTP通信(`queryFn`内から使用) | 根拠: [`import { apiClient } from '@/lib/apiClient';`] (行番号: 9 / 抜粋: "import { apiClient } from '@/lib/apiClient';") |
 
 ### ブラックボックスとなる外部要素
 
@@ -72,7 +72,7 @@
 
 
 * **戻り値/レスポンス**: JSX要素。`isLoading`（`useQuery`の初回ロード中フラグ）が`true`の間は「読み込み中...」のみを表示する`<div>`を返し、それ以外はヘッダー（見出しと設定ボタン）・（`fetchError`が真の場合のみ）エラーバナー・タブ切り替えボタン・（`activeTab`に応じた）`LiveView`または`RecordView`・`CameraSettingsModal`を含む全画面レイアウトの`<div>`を返す。
-* 根拠: [早期return] (行番号: 51 / 抜粋: "if (isLoading) return <div className=\"min-h-screen bg-gray-900 text-white flex items-center justify-center p-8\">読み込み中...</div>;")、[通常return] (行番号: 53〜113 / 抜粋: "return (\n        // 独立した全画面レイアウト\n        <div className=\"min-h-screen bg-gray-900 text-gray-100 p-4 md:p-8 font-sans\">")
+* 根拠: [早期return] (行番号: 53 / 抜粋: "if (isLoading) return <div className=\"min-h-screen bg-gray-900 text-white flex items-center justify-center p-8\">読み込み中...</div>;")、[通常return] (行番号: 53〜113 / 抜粋: "return (\n        // 独立した全画面レイアウト\n        <div className=\"min-h-screen bg-gray-900 text-gray-100 p-4 md:p-8 font-sans\">")
 
 
 * **副作用**: データ取得は`useQuery`が管理する（マウント時の初回フェッチ、キャッシュ、`refetch`）。`useEffect`（依存配列`[]`、マウント時1回）では`document.title`を「ホーム監視カメラ」へ変更し、クリーンアップ関数でアンマウント時に「Family Quest」へ戻すのみとなった（データ取得の副作用は`useEffect`から分離された）。設定ボタン（`aria-label="カメラ設定"`）のクリックで`setSettingsOpen(true)`し、`CameraSettingsModal`をマウント（`isOpen`で表示制御）する。エラーバナー内の「再試行」ボタンのクリックで`refetch()`を実行する（**Issue #121で追加、Issue #326で`refetch`に置換**）。
@@ -113,13 +113,13 @@
 ### `cameras` (`useMemo`)
 
 * **役割**: `allCameras`（`useQuery`の`data`、デフォルト`[]`）のうち`enabled`が`true`のものだけを抽出した、`LiveView`/`RecordView`へ渡す表示用カメラ一覧。`allCameras`が変化したときのみ再計算される。
-* 根拠: (行番号: 48 / 抜粋: "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
+* 根拠: (行番号: 50 / 抜粋: "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
 
 * **引数/リクエスト**: `allCameras`（クロージャ経由、`useMemo`の依存配列）
 * **戻り値/レスポンス**: `CameraConfig[]`（`enabled === true`の要素のみ、順序は`queryFn`でのソート順を維持）
 * **副作用**: なし
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 48 / 抜粋: "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
+* 根拠: (行番号: 50 / 抜粋: "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
 
 ## 5. 処理フロー図
 
@@ -225,11 +225,11 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `family-quest/src/lib/queryClient.ts` | 本ファイルの`useQuery`が`staleTime`等を指定していないため、実際のキャッシュ・リトライ挙動を決めるデフォルト設定を確認するため。 | 根拠: [コメント] (行番号: 27 / 抜粋: "// キャッシュ方針はqueryClient.tsのデフォルト(staleTime 60秒・retry 1)に従う。") |
 | 高 | `family-quest/src/features/camera/components/CameraSettingsModal.tsx` | 設定モーダルが`allCameras`をどう表示し、有効/無効切り替えをどのAPIで永続化しているかを確認するため。 | 根拠: [`<CameraSettingsModal .../>`] (行番号: 106〜111 / 抜粋: "<CameraSettingsModal\n                isOpen={settingsOpen}") |
-| 高 | `family-quest/src/features/camera/components/LiveView.tsx` | 「ライブ映像」タブ選択時に描画される内容の詳細仕様を確認するため。 | 根拠: [`<LiveView cameras={cameras} />`] (行番号: 100 / 抜粋: "<LiveView cameras={cameras} />") |
-| 高 | `family-quest/src/features/camera/components/RecordView.tsx` | 「録画再生」タブ選択時に描画される内容の詳細仕様を確認するため。 | 根拠: [`<RecordView cameras={cameras} />`] (行番号: 102 / 抜粋: "<RecordView cameras={cameras} />") |
+| 高 | `family-quest/src/features/camera/components/LiveView.tsx` | 「ライブ映像」タブ選択時に描画される内容の詳細仕様を確認するため。 | 根拠: [`<LiveView cameras={cameras} />`] (行番号: 102 / 抜粋: "<LiveView cameras={cameras} />") |
+| 高 | `family-quest/src/features/camera/components/RecordView.tsx` | 「録画再生」タブ選択時に描画される内容の詳細仕様を確認するため。 | 根拠: [`<RecordView cameras={cameras} />`] (行番号: 104 / 抜粋: "<RecordView cameras={cameras} />") |
 | 中 | `family-quest/src/lib/apiClient.ts` | `/api/cameras/settings`呼び出しの認証・共通エラー処理仕様を確認するため。 | 根拠: [`apiClient.get`] (行番号: 38 / 抜粋: "const data = await apiClient.get<CameraConfig[]>('/api/cameras/settings');") |
 | 中 | バックエンドの`/api/cameras/settings`エンドポイント実装 | カメラ設定（`enabled`, `order`等）がどのように永続化・管理されているかを確認するため。 | 根拠: [`apiClient.get<CameraConfig[]>('/api/cameras/settings')`] (行番号: 38) |
-| 低 | 本コンポーネントのルーティング／マウント元ファイル | `CameraDashboard`が「独立した全画面レイアウト」とコメントされており、アプリ全体のどのルートからマウントされるかを確認するため。 | 根拠: [コメント] (行番号: 54 / 抜粋: "// 独立した全画面レイアウト") |
+| 低 | 本コンポーネントのルーティング／マウント元ファイル | `CameraDashboard`が「独立した全画面レイアウト」とコメントされており、アプリ全体のどのルートからマウントされるかを確認するため。 | 根拠: [コメント] (行番号: 56 / 抜粋: "// 独立した全画面レイアウト") |
 
 ## 8. 保守上の注意点
 
@@ -240,7 +240,7 @@ graph TD
 * データ取得の`useEffect`からの分離に伴い、`useEffect`（依存配列`[]`）は`document.title`の変更・復元のみを担う。マウント時に変更し、アンマウント時に固定文字列`"Family Quest"`へ戻す実装だが、この値がアプリ全体のデフォルトタイトルと一致しているかどうかは本ファイルのみからは検証できない。
 * 根拠: [`useEffect`] (行番号: 43〜46 / 抜粋: "useEffect(() => {\n        document.title = \"ホーム監視カメラ\";\n        return () => { document.title = \"Family Quest\"; };\n    }, []);")
 * カメラ一覧のソートは`queryFn`内で行われ（`[...data].sort((a, b) => a.order - b.order)`）、表示用の`cameras`は`useMemo`で`allCameras.filter(c => c.enabled)`するのみでソートし直さない。`CameraConfig`の`order`が同値の場合の挙動（ソート安定性）は`Array.prototype.sort`のJavaScriptエンジンの実装依存となる。
-* 根拠: [`.sort`] (行番号: 39 / 抜粋: "return [...data].sort((a, b) => a.order - b.order);")、[`.filter`] (行番号: 48 / 抜粋: "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
+* 根拠: [`.sort`] (行番号: 41 / 抜粋: "return [...data].sort((a, b) => a.order - b.order);")、[`.filter`] (行番号: 50 / 抜粋: "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
 * 有効/無効の切り替えUI自体は本ファイルには存在せず、`CameraSettingsModal`に`allCameras`（無効化されたカメラも含む全件）と`onToggled`（切り替え成功時に呼ばれ`refetch`をawaitするラッパー）を渡すのみである。`CameraSettingsModal`の`onToggled`プロパティ型は`() => Promise<void> | void`であり、`refetch`（`Promise<QueryObserverResult>`を返す）をそのまま渡さずasyncラッパーで包むことで戻り値型を`Promise<void>`に合わせている。切り替えが実際にどのAPIを叩いて永続化されるかは`CameraSettingsModal`側の実装に依存し、本ファイルからは確認できない。
 * 根拠: [`CameraSettingsModal`への props 渡し] (行番号: 106〜111 / 抜粋: "<CameraSettingsModal\n                isOpen={settingsOpen}\n                onClose={() => setSettingsOpen(false)}\n                cameras={allCameras}\n                onToggled={async () => { await refetch(); }}\n            />")
 

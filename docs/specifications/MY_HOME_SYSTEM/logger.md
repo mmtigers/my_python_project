@@ -111,7 +111,7 @@
 
 
 * **副作用**: `if not _webhook_failure_logger.handlers:`のガードで多重登録を防ぎつつ、フォーマット済み(`'%(asctime)s [%(levelname)s] %(name)s: %(message)s'`)`StreamHandler`を追加し、`propagate`を`False`に設定する（アプリの名前付きロガーへは伝播させない）。
-* 根拠: `[条件分岐とハンドラ追加]` (行番号: 29〜35 / 抜粋: "if not _webhook_failure_logger.handlers:\n    _webhook_failure_handler = logging.StreamHandler()\n    _webhook_failure_handler.setFormatter(\n        logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')\n    )\n    _webhook_failure_logger.addHandler(_webhook_failure_handler)\n    _webhook_failure_logger.propagate = False")
+* 根拠: `[条件分岐とハンドラ追加]` (行番号: 46〜52 / 抜粋: "if not _webhook_failure_logger.handlers:\n    _webhook_failure_handler = logging.StreamHandler()\n    _webhook_failure_handler.setFormatter(\n        logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')\n    )\n    _webhook_failure_logger.addHandler(_webhook_failure_handler)\n    _webhook_failure_logger.propagate = False")
 
 
 * **エラーハンドリング**: なし

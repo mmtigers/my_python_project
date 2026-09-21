@@ -192,7 +192,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `skill`(`CustomSkillBuilder.create()`の戻り値)
 * **副作用**: `config.ALEXA_SKILL_ID`が未設定の場合、モジュールインポート時に`logger.warning`が発火する。
 * **エラーハンドリング**: なし(`config.ALEXA_SKILL_ID`が空の場合でも例外は送出せず、警告ログを出力した上でスキルID検証を無効にしたまま処理を継続する)。
-* 根拠: [ビルダー初期化とスキルID検証分岐] (行番号: 223-227 / 抜粋: 'sb = CustomSkillBuilder()\nif config.ALEXA_SKILL_ID:\n    sb.skill_id = config.ALEXA_SKILL_ID\nelse:\n    logger.warning("⚠️ ALEXA_SKILL_ID is not set — skill ID verification is DISABLED. Set the env var to enable it.")')、[ハンドラ登録] (行番号: 229-235 / 抜粋: "sb.add_request_handler(LaunchRequestHandler())\nsb.add_request_handler(HelpIntentHandler())\nsb.add_request_handler(CancelOrStopIntentHandler())\nsb.add_request_handler(FallbackIntentHandler())\nsb.add_request_handler(NavigateHomeIntentHandler())\nsb.add_request_handler(SessionEndedRequestHandler())\nsb.add_exception_handler(CatchAllExceptionHandler())")、[skill構築] (行番号: 246 / 抜粋: "skill = sb.create()")
+* 根拠: [ビルダー初期化とスキルID検証分岐] (行番号: 223-227 / 抜粋: 'sb = CustomSkillBuilder()\nif config.ALEXA_SKILL_ID:\n    sb.skill_id = config.ALEXA_SKILL_ID\nelse:\n    logger.warning("⚠️ ALEXA_SKILL_ID is not set — skill ID verification is DISABLED. Set the env var to enable it.")')、[ハンドラ登録] (行番号: 238-244 / 抜粋: "sb.add_request_handler(LaunchRequestHandler())\nsb.add_request_handler(HelpIntentHandler())\nsb.add_request_handler(CancelOrStopIntentHandler())\nsb.add_request_handler(FallbackIntentHandler())\nsb.add_request_handler(NavigateHomeIntentHandler())\nsb.add_request_handler(SessionEndedRequestHandler())\nsb.add_exception_handler(CatchAllExceptionHandler())")、[skill構築] (行番号: 246 / 抜粋: "skill = sb.create()")
 
 ## 5. 処理フロー図
 

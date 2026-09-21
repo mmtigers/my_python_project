@@ -84,7 +84,7 @@
 
 
 * **エラーハンドリング**: `ImportError` を捕捉し、エラーメッセージを `sys.stderr` に出力後 `sys.exit(1)` でプロセスを終了する。
-* 根拠: `except ImportError as e:` (行番号: 22〜24 / 抜粋: "except ImportError as e:\n    print(f"Error: Failed to import config or common modules. {e}", file=sys.stderr)\n    sys.exit(1)")
+* 根拠: `except ImportError as e:` (行番号: 24〜26 / 抜粋: "except ImportError as e:\n    print(f"Error: Failed to import config or common modules. {e}", file=sys.stderr)\n    sys.exit(1)")
 
 
 
@@ -141,7 +141,7 @@
 
 
 * **引数/リクエスト**: `name: str`, `status: str`, `message: str`
-* 根拠: (行番号: 52〜54 / 抜粋: "name: str\n    status: str\n    message: str")
+* 根拠: (行番号: 59〜61 / 抜粋: "name: str\n    status: str\n    message: str")
 
 
 * **戻り値/レスポンス**: `CheckResult` インスタンス

@@ -117,7 +117,7 @@
 ### ~~`UserAction`~~ （存在しない）
 
 * **（2026-09-06 品質監査で修正）** 以前の本仕様書は本ファイルに `UserAction`（`user_id` のみ）が定義されていると記述していたが、上記 `MasterQuest` の項に記載のとおり Issue #409 で未使用モデルとして削除済みであり、現行の `models/quest.py` にこのクラスは存在しない。本仕様書からも定義の記述を撤去した。
-* 根拠: コメント (行番号: 67〜68 / 抜粋: "# Request Models\n# (#409: 未使用だった UserAction / InventoryItem は削除)")、`models/quest.py` の全クラス定義に `UserAction` が無いこと (行番号: 1〜157)
+* 根拠: コメント (行番号: 71〜72 / 抜粋: "# Request Models\n# (#409: 未使用だった UserAction / InventoryItem は削除)")、`models/quest.py` の全クラス定義に `UserAction` が無いこと (行番号: 1〜157)
 
 
 
@@ -423,7 +423,7 @@
 ### ~~`InventoryItem`~~ （存在しない）
 
 * **（2026-09-06 品質監査で修正）** 以前の本仕様書は本ファイルに `InventoryItem`（`id`/`reward_id`/`title`/`desc`/`icon`/`status` 等）が定義されていると記述していたが、上記 `MasterQuest` の項に記載のとおり Issue #409 で未使用モデルとして削除済みであり、現行の `models/quest.py` にこのクラスは存在しない。本仕様書からも定義の記述を撤去した。
-* 根拠: コメント (行番号: 67〜68 / 抜粋: "# Request Models\n# (#409: 未使用だった UserAction / InventoryItem は削除)")、`models/quest.py` の全クラス定義に `InventoryItem` が無いこと (行番号: 1〜157)
+* 根拠: コメント (行番号: 71〜72 / 抜粋: "# Request Models\n# (#409: 未使用だった UserAction / InventoryItem は削除)")、`models/quest.py` の全クラス定義に `InventoryItem` が無いこと (行番号: 1〜157)
 
 
 
@@ -453,7 +453,7 @@
 ### `UseItemAction`
 
 * **役割**: Inventory Modelsとしてアイテム使用時のアクションリクエストを定義する。**（2026-09-06 品質監査で修正）** Issue #409 (Q-L4) で他のリクエストモデルに付与された ID 上限(`_SQLITE_INT_MAX` = `2**63-1`)が本モデルだけ漏れており、`inventory_id=2**64` を渡すと `sqlite3` の `OverflowError` で500になっていた（`/quest/cancel` 等は422）ため、`user_id`/`inventory_id` の両方に他モデルと同じ境界が付与された。
-* 根拠: クラス名と継承元 (行番号: 177 / 抜粋: "class UseItemAction(BaseModel):")、コメント (行番号: 154〜155 / 抜粋: "Q-L4 の上限(2**63-1)が本モデルだけ漏れており、inventory_id=2**64 で\n    # sqlite3 の OverflowError → 500 になっていた(/quest/cancel 等は 422)。")
+* 根拠: クラス名と継承元 (行番号: 177 / 抜粋: "class UseItemAction(BaseModel):")、コメント (行番号: 178〜179 / 抜粋: "Q-L4 の上限(2**63-1)が本モデルだけ漏れており、inventory_id=2**64 で\n    # sqlite3 の OverflowError → 500 になっていた(/quest/cancel 等は 422)。")
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str, `Field(min_length=1, max_length=64)`), `inventory_id` (int, `Field(ge=1, le=_SQLITE_INT_MAX)`)

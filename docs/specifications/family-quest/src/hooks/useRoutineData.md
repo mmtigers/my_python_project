@@ -41,9 +41,9 @@ React Queryを用いて、「きょうのすごろく」機能のデータ取得
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `apiClient`の内部実装 | ベースURL解決・エラーハンドリングの詳細な通信仕様は本ファイルからは読み取れないため（詳細は`apiClient.md`を参照）。 | 根拠: (行番号: 28, 60〜64 / 抜粋: "const raw = await apiClient.get<unknown>(`/api/routine/today?user_id=${encodeURIComponent(userId!)}`);", "const raw = await apiClient.post('/api/routine/complete', {") |
+| `apiClient`の内部実装 | ベースURL解決・エラーハンドリングの詳細な通信仕様は本ファイルからは読み取れないため（詳細は`apiClient.md`を参照）。 | 根拠: (行番号: 37, 60〜64 / 抜粋: "const raw = await apiClient.get<unknown>(`/api/routine/today?user_id=${encodeURIComponent(userId!)}`);", "const raw = await apiClient.post('/api/routine/complete', {") |
 | `GET /api/routine/today`・`POST /api/routine/complete`エンドポイントの実装 | リクエスト後のDBの挙動、チェックポイントの時刻ベース強制通過（`_apply_forced_transition`とコメントされている）の具体的なタイミング、`leveled_up`/`new_level`の生成条件は本ファイルからは不明（本タスクでは`MY_HOME_SYSTEM`側は解析対象外）。 | 根拠: (行番号: 7〜9 / 抜粋: "// チェックポイント(自由時間の終了)はサーバー側で時刻ベースに強制通過させる遅延評価\n// (services/routine_service.py の _apply_forced_transition)のため、") |
-| `routineTodayResponseSchema`/`routineActiveFlowSchema`の詳細なフィールド定義 | `../lib/routineDataSchema.ts`に実装があり、本ファイルからは`.parse()`の呼び出し結果のみが分かる。詳細は`routineDataSchema.md`を参照。 | 根拠: (行番号: 5, 29, 65 / 抜粋: "import { routineActiveFlowSchema, routineTodayResponseSchema, RoutineTodayResponse } from '../lib/routineDataSchema';", "return routineTodayResponseSchema.parse(raw);", "return routineActiveFlowSchema.parse(raw);") |
+| `routineTodayResponseSchema`/`routineActiveFlowSchema`の詳細なフィールド定義 | `../lib/routineDataSchema.ts`に実装があり、本ファイルからは`.parse()`の呼び出し結果のみが分かる。詳細は`routineDataSchema.md`を参照。 | 根拠: (行番号: 5, 38, 79 / 抜粋: "import { routineActiveFlowSchema, routineTodayResponseSchema, RoutineTodayResponse } from '../lib/routineDataSchema';", "return routineTodayResponseSchema.parse(raw);", "return routineActiveFlowSchema.parse(raw);") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -60,7 +60,7 @@ React Queryを用いて、「きょうのすごろく」機能のデータ取得
 ### `RoutineLevelUpInfo` (export型定義)
 
 * **役割**: **（コードレビューで発覚した欠落を修正して新規追加）** `onLevelUp`コールバックに渡される引数の型。`{ newLevel: number }`という単一フィールドのオブジェクト。コメントにより`useGameData.ts`の`onLevelUp`と同じ形を意図していると明記されている（ただし`useGameData.ts`側の`LevelUpInfo`は`user`/`level`/`job`の3フィールドを持ち、本フックの`RoutineLevelUpInfo`はユーザー名・職業を含まない`newLevel`のみである点で完全な同一形状ではない。9章参照）。**（再度のコードレビューで発覚した欠落を追加修正）** コメントが明記する通り、`onLevelUp`は完了報告(`completeStepMutation`)がその場でチェックポイント通過を伴った場合だけでなく、本人の操作を介さずポーリングだけで検知される受動的な通過(後述の`useEffect`)でも呼ばれる。
-* 根拠: [型定義] (行番号: 12〜15 / 抜粋: "// レベルアップ通知(useGameData.tsのonLevelUpと同じ形): チェックポイント通過に\n// 伴うレベルアップで呼ばれる。本人がステップを完了した「その場」(completeStepMutation)\n// と、何も操作せずポーリングだけで検知される受動的な通過(下のuseEffect)の両方が経路になる。\nexport type RoutineLevelUpInfo = { newLevel: number };")
+* 根拠: [型定義] (行番号: 15〜18 / 抜粋: "// レベルアップ通知(useGameData.tsのonLevelUpと同じ形): チェックポイント通過に\n// 伴うレベルアップで呼ばれる。本人がステップを完了した「その場」(completeStepMutation)\n// と、何も操作せずポーリングだけで検知される受動的な通過(下のuseEffect)の両方が経路になる。\nexport type RoutineLevelUpInfo = { newLevel: number };")
 
 * **引数/リクエスト**: 該当なし（型定義であり関数ではない）
 * **戻り値/レスポンス**: 該当なし
@@ -70,7 +70,7 @@ React Queryを用いて、「きょうのすごろく」機能のデータ取得
 ### `RoutineStepRewardInfo` (export型定義、大人用フロー分離で新規追加)
 
 * **役割**: `onStepReward`コールバックに渡される引数の型。`{ gold: number; exp: number }`の2フィールドを持つ。コメントによれば、バックエンドの大人用フロー(`routine_data.py`の`DAD_ROUTINE_FLOWS`/`MOM_ROUTINE_FLOWS`)でデイリークエストからすごろくへ寄せたステップを完了したときの即時報酬であり、「クエスト完了時と同じように『いくらもらえたか』をその場で見せるために呼び出し元へ通知する」ことを目的とする。
-* 根拠: [型定義] (行番号: 17〜20 / 抜粋: "// 大人用フロー(routine_data.py DAD/MOM_ROUTINE_FLOWS)で、デイリークエストから\n// すごろくへ寄せたステップを完了したときの即時報酬。クエスト完了時と同じように\n// 「いくらもらえたか」をその場で見せるために呼び出し元へ通知する。\nexport type RoutineStepRewardInfo = { gold: number; exp: number };")
+* 根拠: [型定義] (行番号: 20〜23 / 抜粋: "// 大人用フロー(routine_data.py DAD/MOM_ROUTINE_FLOWS)で、デイリークエストから\n// すごろくへ寄せたステップを完了したときの即時報酬。クエスト完了時と同じように\n// 「いくらもらえたか」をその場で見せるために呼び出し元へ通知する。\nexport type RoutineStepRewardInfo = { gold: number; exp: number };")
 
 * **引数/リクエスト**: 該当なし（型定義であり関数ではない）
 * **戻り値/レスポンス**: 該当なし
@@ -91,12 +91,12 @@ React Queryを用いて、「きょうのすごろく」機能のデータ取得
 * **副作用**: `userId`が真値の間、`GET /api/routine/today`へのポーリング通信（`refetchInterval` 15秒、`staleTime` 10秒）を実行する。`completeStep`の呼び出しにより`POST /api/routine/complete`へのPOSTリクエストを実行し、成功時に`queryClient.invalidateQueries`で`['routineToday', userId]`のキャッシュを無効化して再取得を促し、レスポンスが`leveled_up: true`かつ`new_level`が非nullで`onLevelUp`が渡されていれば呼び出す。失敗時は`onError`が渡されていれば呼び出す（**追加修正**）。**（追加修正）** さらに、ポーリングで取得した`data`が変化するたびに動く`useEffect`が、`data.flows.am`/`data.flows.pm`それぞれについて`started`かつ`leveled_up`かつ`new_level`が非nullかを調べ、`日付:flowKey`をキーとする`announcedLevelUpsRef`（`Set<string>`）にまだ記録されていなければ`onLevelUp`を呼び、記録する（同一イベントの二重通知防止）。
 * 根拠: `useQuery`のオプション (行番号: 30〜39 / 抜粋: "const { data, isLoading, error } = useQuery<RoutineTodayResponse>({\n        queryKey: ['routineToday', userId],\n        enabled: !!userId,\n        queryFn: async () => {\n            const raw = await apiClient.get<unknown>(`/api/routine/today?user_id=${encodeURIComponent(userId!)}`);\n            return routineTodayResponseSchema.parse(raw);\n        },\n        staleTime: 1000 * 10,\n        refetchInterval: POLL_INTERVAL_MS,\n    });")
 * 根拠: `onSuccess`でのキャッシュ無効化・`onLevelUp`呼び出し (行番号: 67〜75)
-* 根拠: ポーリング検知用`useEffect` (行番号: 49〜54 / 抜粋: "const announcedLevelUpsRef = useRef<Set<string>>(new Set());\n    useEffect(() => {\n        if (!data || !onLevelUp) return;\n        for (const flowKey of ['am', 'pm'] as const) {\n            const flow = data.flows[flowKey];\n            if (flow.started && flow.leveled_up && flow.new_level != null) {")
+* 根拠: ポーリング検知用`useEffect` (行番号: 57〜62 / 抜粋: "const announcedLevelUpsRef = useRef<Set<string>>(new Set());\n    useEffect(() => {\n        if (!data || !onLevelUp) return;\n        for (const flowKey of ['am', 'pm'] as const) {\n            const flow = data.flows[flowKey];\n            if (flow.started && flow.leveled_up && flow.new_level != null) {")
 * 根拠: `completeStep`内の`onError`呼び出し (行番号: 95〜104 / 抜粋: "const completeStep = async (flowKey: 'am' | 'pm', stepKey: string) => {\n        try {\n            await completeStepMutation.mutateAsync({ flowKey, stepKey });\n            return { success: true };\n        } catch (e) {\n            const detail = e instanceof Error ? e.message : String(e);\n            onError?.(detail);\n            return { success: false, detail };\n        }\n    };")
 
 * **エラーハンドリング**: `gameData`/`gameDataResponseSchema`と同様、`queryFn`内で`routineTodayResponseSchema.parse(raw)`が失敗した場合`ZodError`が送出され、これは`useQuery`の`error`としてそのまま戻り値の`error`に伝播する（本ファイル自体はこれを握りつぶしたり変換したりしない。`useGameData.ts`の`describeGameDataError`のような表示用文字列への変換関数はここには存在しない）。`completeStepMutation`の`mutationFn`内で`routineActiveFlowSchema.parse(raw)`が失敗した場合も同様に`ZodError`が送出され、`completeStep`の`try/catch`で捕捉される。`completeStep`は成功時`{ success: true }`、失敗時`{ success: false, detail: (エラーメッセージ) }`を返す（例外を再スローしない）。**（追加修正）** 失敗時は戻り値を返す前に`onError?.(detail)`も呼ぶため、呼び出し元は戻り値の`success`を見て自前でトーストを出す必要がなくなった。
-* 根拠: `queryFn`内の`.parse()`呼び出し (行番号: 35 / 抜粋: "return routineTodayResponseSchema.parse(raw);")
-* 根拠: `mutationFn`内の`.parse()`呼び出し (行番号: 71 / 抜粋: "return routineActiveFlowSchema.parse(raw);")
+* 根拠: `queryFn`内の`.parse()`呼び出し (行番号: 38 / 抜粋: "return routineTodayResponseSchema.parse(raw);")
+* 根拠: `mutationFn`内の`.parse()`呼び出し (行番号: 79 / 抜粋: "return routineActiveFlowSchema.parse(raw);")
 * 根拠: `completeStep`の`try/catch` (行番号: 95〜104 / 抜粋: "const completeStep = async (flowKey: 'am' | 'pm', stepKey: string) => {\n        try {\n            await completeStepMutation.mutateAsync({ flowKey, stepKey });\n            return { success: true };\n        } catch (e) {\n            const detail = e instanceof Error ? e.message : String(e);\n            onError?.(detail);\n            return { success: false, detail };\n        }\n    };")
 
 ### 受動的レベルアップ検知の`useEffect`（再度のコードレビューで発覚した欠落を追加修正）
@@ -119,7 +119,7 @@ React Queryを用いて、「きょうのすごろく」機能のデータ取得
 * **戻り値/レスポンス**: `data: RoutineTodayResponse | undefined`, `isLoading: boolean`, `error: unknown`
 * **副作用**: `userId`が真値の間の15秒間隔ポーリングによるHTTP GET
 * **エラーハンドリング**: `routineTodayResponseSchema.parse(raw)`が失敗した場合`ZodError`が`useQuery`のエラー状態として扱われる（変換・握りつぶしなし）
-* 根拠: (行番号: 32〜34 / 抜粋: "enabled: !!userId,\n        queryFn: async () => {\n            const raw = await apiClient.get<unknown>(`/api/routine/today?user_id=${encodeURIComponent(userId!)}`);")
+* 根拠: (行番号: 35〜37 / 抜粋: "enabled: !!userId,\n        queryFn: async () => {\n            const raw = await apiClient.get<unknown>(`/api/routine/today?user_id=${encodeURIComponent(userId!)}`);")
 
 ### `completeStepMutation` (`useMutation`) / `completeStep` (ラッパー)
 
@@ -248,13 +248,13 @@ graph TD
 ## 8. 保守上の注意点
 
 * **15秒ポーリングがチェックポイント反映の唯一の手段**: サーバー側の時刻ベース強制通過（`_apply_forced_transition`とコメントされている）をフロントが即座に検知する手段はプッシュ通知やWebSocketではなくこの15秒間隔ポーリングのみである。そのため、チェックポイント時刻を過ぎてから最大で`POLL_INTERVAL_MS`（15秒）程度、UIが古い状態（まだ自由時間に入っていない等）のまま表示され続ける可能性がある。
-* 根拠: (行番号: 7〜10, 32 / 抜粋: "// チェックポイント(自由時間の終了)はサーバー側で時刻ベースに強制通過させる遅延評価\n// (services/routine_service.py の _apply_forced_transition)のため、フロントは\n// 短い間隔でポーリングして「時刻になった瞬間」の反映をそう待たせずに拾う。", "refetchInterval: POLL_INTERVAL_MS,")
+* 根拠: (行番号: 7〜10, 41 / 抜粋: "// チェックポイント(自由時間の終了)はサーバー側で時刻ベースに強制通過させる遅延評価\n// (services/routine_service.py の _apply_forced_transition)のため、フロントは\n// 短い間隔でポーリングして「時刻になった瞬間」の反映をそう待たせずに拾う。", "refetchInterval: POLL_INTERVAL_MS,")
 * **`completeStep`に`userId`の`null`/`undefined`チェックが無い**: `useGameData.ts`の各ラッパー関数（`completeQuest`等、Issue #412）は対象IDが`null`/`undefined`の場合に通信自体を行わない事前ガードを持つが、本ファイルの`completeStepMutation`の`mutationFn`はフック引数の`userId`をそのままリクエストボディの`user_id`に使っており、`userId`が`undefined`のまま`completeStep`が呼ばれた場合の事前ガードは存在しない（`routineToday`クエリ自体は`enabled: !!userId`で防御されているが、`completeStep`単体にはこのガードが掛かっていない）。
-* 根拠: (行番号: 26, 59〜64 / 抜粋: "enabled: !!userId,", "mutationFn: async ({ flowKey, stepKey }: { flowKey: 'am' | 'pm'; stepKey: string }) => {\n            const raw = await apiClient.post('/api/routine/complete', {\n                user_id: userId,")
+* 根拠: (行番号: 35, 59〜64 / 抜粋: "enabled: !!userId,", "mutationFn: async ({ flowKey, stepKey }: { flowKey: 'am' | 'pm'; stepKey: string }) => {\n            const raw = await apiClient.post('/api/routine/complete', {\n                user_id: userId,")
 * **手動でステップを進める手段が意図的に存在しない**: `useRoutineData`が公開する更新系の関数は`completeStep`のみであり、チェックポイント（自由時間の終了）自体を手動で進めるAPI呼び出しは存在しない。これは`RoutineFlow.tsx`側のコメントにある通り、チェックポイントの通過は時刻ベースのサーバー側判定のみに委ねる設計意図によるものである（詳細は`RoutineFlow.md`を参照）。
 * 根拠: (行番号: 93〜100)
 * **`error`は未加工のまま公開される**: `useGameData.ts`の`gameDataError`のような、`ZodError`等を人間が読める文字列に変換する処理（`describeGameDataError`相当）は本ファイルには存在せず、`error`は`useQuery`の生の`error`値（`unknown`）がそのまま返る。呼び出し元でエラー表示を行う場合、この変換は呼び出し元またはさらに別のヘルパーの責務になる。
-* 根拠: (行番号: 24, 97 / 抜粋: "const { data, isLoading, error } = useQuery<RoutineTodayResponse>({", "error,")
+* 根拠: (行番号: 33, 97 / 抜粋: "const { data, isLoading, error } = useQuery<RoutineTodayResponse>({", "error,")
 * **（コードレビューで発覚した欠落を修正）** `onLevelUp`は呼び出し元(`App.tsx`/`FamilyDashboard.tsx`)が自前で`useSound`/`useToast`を使ってLEVEL UP演出を行うためのフックであり、本ファイル自体は効果音・トースト表示を一切行わない。`RoutineLevelUpInfo`が`newLevel`のみを持ち`useGameData.ts`の`LevelUpInfo`(`user`/`level`/`job`)と完全には一致しない形状であるため、呼び出し元は自身が保持するユーザー情報（`name`/`job_class`）と組み合わせてトーストメッセージを組み立てる必要がある。
 * 根拠: (行番号: 12〜14, 72〜74)
 * **（再度のコードレビューで発覚した欠落を追加修正）** `onLevelUp`の呼び出し元は`completeStepMutation`の`onSuccess`（行番号67〜75）だけでなく、ポーリング検知用の`useEffect`（行番号35〜56）の2箇所になった。前者は本人の完了操作をトリガーにするのに対し、後者はサーバー側`_apply_forced_transition`がGET経路から受動的にチェックポイントを通過させた場合のみを拾う。両者が同一のチェックポイント通過イベントに対して重複してonLevelUpを呼ぶことは無い（完了操作でチェックポイントを通過した直後の`invalidateQueries`による再取得は、既に`current_step_index`がチェックポイントを超えているため冪等ガードで`leveled_up`が立たない）。

@@ -23,7 +23,7 @@
 * モジュールDocstring上「YouTube URL Extractor (Integrated with MY_HOME_SYSTEM)」と称される、指定されたYouTubeチャンネルやプレイリストから動画URLを抽出するスクリプトである。
 * 根拠: [モジュールDocstring] (行番号: 4〜9 / 抜粋: "YouTube URL Extractor (Integrated with MY_HOME_SYSTEM)\n------------------------------------------------------\n指定されたYouTubeチャンネルやプレイリストから動画URLを抽出するスクリプト。\nMY_HOME_SYSTEMのエコシステム（ロガー、ディレクトリ構成）に準拠。")
 * `PROJECT_ROOT`は`file_utils.resolve_my_home_system_root(CURRENT_DIR)`（**品質で変更**。以前は本ファイル・`newface_monitor.py`がそれぞれ個別に`CURRENT_DIR.parent / "MY_HOME_SYSTEM"`という固定の兄弟ディレクトリ前提のみで実装しており、両ファイルで重複していた）として解決される。`core/`の実体は`MY_HOME_SYSTEM/core`配下にあり、DDDの単なる親ディレクトリ（リポジトリルート）を指す実装では`core.*`のインポートが常に失敗し、常にファイル内フォールバックスタブへ落ちてしまう不具合があったための修正である。共通化後も、環境変数`MY_HOME_SYSTEM_ROOT`による明示指定 → `CURRENT_DIR.parent / "MY_HOME_SYSTEM"`（`services`ディレクトリの存在確認付き） → 上位ディレクトリの`services`探索 → 解決不能時は`CURRENT_DIR`自身、という解決順序（`batch_download_discord.py`で先行実装済みだったロバストな方式）は変わらない。
-* 根拠: [PROJECT_ROOT定義とコメント] (行番号: 28〜35 / 抜粋: "# プロジェクトルートへのパス解決 (DDD/ から MY_HOME_SYSTEM/core/ を参照するため)。\n# 品質: プロジェクトルート解決をfile_utils.resolve_my_home_system_rootへ集約\n# (以前はnewface_monitor.pyと同じ、固定の兄弟ディレクトリ前提のみの単純な方式を\n# 個別に実装していた)。core/ は develop/MY_HOME_SYSTEM/core に実在する\n# (develop/core ではない)ため、DDDの単なる親ディレクトリではImportErrorになり、\n# 常にローカルフォールバック用スタブへ落ちてしまう点に変わりはない。\nCURRENT_DIR = Path(__file__).resolve().parent  # ~/develop/DDD\nPROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR)  # ~/develop/MY_HOME_SYSTEM")、共通化先の実装 (参考: [file_utils.md](./file_utils.md) の `resolve_my_home_system_root` 節)
+* 根拠: [PROJECT_ROOT定義とコメント] (行番号: 29〜36 / 抜粋: "# プロジェクトルートへのパス解決 (DDD/ から MY_HOME_SYSTEM/core/ を参照するため)。\n# 品質: プロジェクトルート解決をfile_utils.resolve_my_home_system_rootへ集約\n# (以前はnewface_monitor.pyと同じ、固定の兄弟ディレクトリ前提のみの単純な方式を\n# 個別に実装していた)。core/ は develop/MY_HOME_SYSTEM/core に実在する\n# (develop/core ではない)ため、DDDの単なる親ディレクトリではImportErrorになり、\n# 常にローカルフォールバック用スタブへ落ちてしまう点に変わりはない。\nCURRENT_DIR = Path(__file__).resolve().parent  # ~/develop/DDD\nPROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR)  # ~/develop/MY_HOME_SYSTEM")、共通化先の実装 (参考: [file_utils.md](./file_utils.md) の `resolve_my_home_system_root` 節)
 * `MY_HOME_SYSTEM`の共通コア機能（`core.logger.get_logger`, `core.nas_utils.get_managed_target_directory`）のインポートを試み、失敗時（開発環境・単体実行時）はファイル内にフォールバック実装（標準`logging`ベースのロガー、`fallback_dir_str`引数を尊重するディレクトリ解決関数）を用意している。**（Issue #463で追加）** 以前はこの切り替わりを無言で行っていたが、`core.*`のインポート失敗はNASではなくローカルディスクへの書き込みに切り替わることを意味するため、本番環境で`MY_HOME_SYSTEM`へのパス解決が崩れる等の異常があった場合に気づけるよう、フォールバック用ロガー(`logging.getLogger("UrlExtractor")`)自身で`logger.warning(...)`（捕捉した例外`e`の内容を含む）を出力するようになった。
 * 根拠: [try-exceptブロックとコメント] (行番号: 39〜54 / 抜粋: "try:\n    from core.logger import get_logger\n    from core.nas_utils import get_managed_target_directory\n    logger = get_logger(__name__)\nexcept ImportError as e:\n    # 開発環境や単体実行時のフォールバック\n    import logging\n    logging.basicConfig(level=logging.INFO)\n    logger = logging.getLogger("UrlExtractor")\n    # #463: core.*のインポート失敗はNASではなくローカルディスクへの書き込みに\n    # 切り替わることを意味する。本番環境でMY_HOME_SYSTEMへのパス解決が崩れる等の\n    # 変更があった場合に気づけるよう、無警告で切り替わらないようにする。\n    logger.warning(\n        f"⚠️ core.*のインポートに失敗したため開発用フォールバックへ切り替わりました "\n        f"(NASではなくローカルディスクへ書き込みます): {e}"\n    )")
 * `yt_dlp`を用いて対象URL（チャンネル・プレイリスト・単一動画）から動画URLを抽出する`YouTubeExtractor`、抽出結果をテキストファイルへ保存する`FileManager`、およびコマンドライン引数を解析してこれらを統括する`UrlExtractorApp`の3クラスで構成される。
@@ -31,7 +31,7 @@
 * チャンネルURLが指定された場合は`/videos`と`/playlists`の両方を自動探索し、通常動画一覧に加えて各プレイリストも個別に抽出する。
 * 根拠: [extract_iterメソッド] (行番号: 236〜245 / 抜粋: "チャンネルURLの場合は `/videos` と `/playlists` を自動探索する。")
 * **[削除済み] Issue #413 (D-L11)**: 以前は`--cron`引数指定時にSQLite DB（`home_system.db`）の`youtube_subscriptions`テーブルに登録されたアクティブなチャンネルURLを順次巡回する`SubscriptionManager`による自動サブスクリプションモード（レート制限対策のジッター付き待機・連続失敗時のサーキットブレーカーを含む）が存在したが、`youtube_subscriptions`テーブルへINSERT/UPDATEするコードがリポジトリ内のどこにも存在せず、`--cron`もどのcrontab/スケジューラにも未登録という、事実上一度も機能しえなかったデッドコードだったため、オーナー承認の上で`SubscriptionManager`クラス本体・`--cron`引数・関連の`AppConfig`定数（`SUBSCRIPTION_FILE`, `SUBSCRIPTION_SLEEP_RANGE`, `CONSECUTIVE_FAILURE_THRESHOLD`）・専用テスト一式を削除した（実装削除、機能追加なし）。詳細は8章を参照。
-* 根拠: [削除通知コメント] (行番号: 389〜397 / 抜粋: "# #413 (D-L11): 以前ここにあった SubscriptionManager クラス(定期巡回/サブスク\n# リプション機能。youtube_subscriptions テーブルをSQLite DBで管理し、--cron\n# 実行時に登録済みチャンネルを順次抽出していた)は削除した。youtube_subscriptions\n# テーブルへのINSERT/UPDATEを行うコードがリポジトリ内のどこにも存在せず(仕様書の\n# 旧版でも同じ結論)、crontabにも未登録の、事実上のデッド機能だったため\n# (オーナー判断: --cronは削除)。また同機能が使うDBパス\n# (/mnt/nas/home_system/youtube_extractor/home_system.db)は、MY_HOME_SYSTEM\n# 本体の home_system.db とは別ファイルであるにもかかわらず同名という紛らわしい\n# 設計でもあった。")
+* 根拠: [削除通知コメント] (行番号: 384〜392 / 抜粋: "# #413 (D-L11): 以前ここにあった SubscriptionManager クラス(定期巡回/サブスク\n# リプション機能。youtube_subscriptions テーブルをSQLite DBで管理し、--cron\n# 実行時に登録済みチャンネルを順次抽出していた)は削除した。youtube_subscriptions\n# テーブルへのINSERT/UPDATEを行うコードがリポジトリ内のどこにも存在せず(仕様書の\n# 旧版でも同じ結論)、crontabにも未登録の、事実上のデッド機能だったため\n# (オーナー判断: --cronは削除)。また同機能が使うDBパス\n# (/mnt/nas/home_system/youtube_extractor/home_system.db)は、MY_HOME_SYSTEM\n# 本体の home_system.db とは別ファイルであるにもかかわらず同名という紛らわしい\n# 設計でもあった。")
 * **(Issue #243バグ修正)** `FileManager.save`は以前、呼び出しのたびに常に`AppConfig.get_output_base_dir()`を内部で呼び出していた。1チャンネル/1URLから複数の`ExtractionResult`が得られる場合（`extract_iter`がプレイリストごとに複数回`yield`する等）、`save()`が結果件数分だけ`get_output_base_dir()`を再評価してしまい、NAS瞬断時の再マウント試行・障害通知が保存件数分だけ多重発生しうる不具合があった。現在は`save()`が`base_dir`引数（省略可能、`Optional[Path] = None`）を受け取り、呼び出し元が既に取得済みの値を渡せるようになった。`UrlExtractorApp.run()`は1回だけ取得した値を`save()`へ渡して使い回す。
 * 根拠: [FileManager.saveのbase_dir引数とコメント] (行番号: 318, 341〜345 / 抜粋: "def save(self, result: ExtractionResult, base_dir: Optional[Path] = None) -> bool:", "# #243: 呼び出し元から渡されなかった場合のみ遅延評価でディレクトリを取得する。\n        # 以前は常にここでget_output_base_dir()を呼んでいたため、呼び出し元\n        # (UrlExtractorApp.run())が1回に抑えていたつもりの重い処理(NASマウント確認・\n        # 自己修復・障害通知)が、保存件数分だけ再評価され、NAS瞬断時に再マウント試行・\n        # 通知が多重発生していた。\n        if base_dir is None:\n            base_dir = AppConfig.get_output_base_dir()")、UrlExtractorApp.run呼び出し箇所 (行番号: 431〜437 / 抜粋: "base_dir = AppConfig.get_output_base_dir()\n            # イテレータを回して処理\n            for result in self.extractor.extract_iter(target_url):\n                if self.file_manager.save(result, base_dir=base_dir):")
 
@@ -81,7 +81,7 @@
 
 
 * **戻り値/レスポンス**: `Path`（`fallback_dir_str`が渡されていればそれを`Path`化した値、なければ`Path("./data")`）
-* 根拠: [各return文] (行番号: 62〜64 / 抜粋: "if fallback_dir_str:\n            return Path(fallback_dir_str)\n        return Path("./data")")
+* 根拠: [各return文] (行番号: 63〜65 / 抜粋: "if fallback_dir_str:\n            return Path(fallback_dir_str)\n        return Path("./data")")
 
 
 * **副作用**: なし
@@ -111,7 +111,7 @@
 
 
 * **引数/リクエスト**: なし（`cls`のみ、`@classmethod`）
-* 根拠: [デコレータと引数] (行番号: 93〜94 / 抜粋: "@classmethod\n    def get_output_base_dir(cls) -> Path:")
+* 根拠: [デコレータと引数] (行番号: 101〜102 / 抜粋: "@classmethod\n    def get_output_base_dir(cls) -> Path:")
 
 
 * **戻り値/レスポンス**: `Path`（利用可能なディレクトリパス）
@@ -262,7 +262,7 @@
 
 
 * **副作用**: 保存先ディレクトリの作成(`mkdir`)、**（D-L10で変更）** 一時ファイル(`.tmp`)への書き込みと`tmp_path.replace(output_path)`によるアトミックな置換（以前は`output_path`への直接書き込み）、成功/失敗・上書き時のログ出力。
-* 根拠: [ディレクトリ作成とアトミック書き込み] (行番号: 342, 375〜380 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)", "tmp_path = output_path.with_suffix(output_path.suffix + '.tmp')\n        try:\n            with tmp_path.open("w", encoding="utf-8") as f:\n                for url in result.urls:\n                    f.write(url + "\\n")\n            tmp_path.replace(output_path)")
+* 根拠: [ディレクトリ作成とアトミック書き込み] (行番号: 342, 367〜372 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)", "tmp_path = output_path.with_suffix(output_path.suffix + '.tmp')\n        try:\n            with tmp_path.open("w", encoding="utf-8") as f:\n                for url in result.urls:\n                    f.write(url + "\\n")\n            tmp_path.replace(output_path)")
 
 
 * **エラーハンドリング**: ディレクトリ作成時の`OSError`を捕捉してエラーログを出力し`False`を返す。ファイル書き込み時の`IOError`を捕捉してエラーログを出力し`False`を返す。**（D-L10で追加）** 書き込み失敗時は、残置された`.tmp`ファイルをbest-effortで削除する（削除自体の失敗は無視する）。出力先ファイルが既に存在する場合は警告ログを出力するのみで上書きを継続する（`replace`によりアトミックに置き換わるため、書き込み成功時に既存ファイルが中途半端な状態になることはない）。
@@ -284,7 +284,7 @@
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: 2つのインスタンス属性への代入のみ。
-* 根拠: [属性代入] (行番号: 406〜407 / 抜粋: "self.extractor = YouTubeExtractor()\n        self.file_manager = FileManager()")
+* 根拠: [属性代入] (行番号: 401〜402 / 抜粋: "self.extractor = YouTubeExtractor()\n        self.file_manager = FileManager()")
 
 
 * **エラーハンドリング**: なし
@@ -297,7 +297,7 @@
 
 
 * **引数/リクエスト**: なし（`self`のみ、`sys.argv`経由で`argparse`が解析）
-* 根拠: [argparse定義] (行番号: 413〜415 / 抜粋: "parser = argparse.ArgumentParser(description="Extract YouTube URLs from channels or playlists.")\n        parser.add_argument("url", nargs="?", help="Target YouTube URL")\n        args = parser.parse_args()")
+* 根拠: [argparse定義] (行番号: 408〜410 / 抜粋: "parser = argparse.ArgumentParser(description="Extract YouTube URLs from channels or playlists.")\n        parser.add_argument("url", nargs="?", help="Target YouTube URL")\n        args = parser.parse_args()")
 
 
 * **戻り値/レスポンス**: `None`
@@ -305,11 +305,11 @@
 
 
 * **副作用**: 起動・完了ログ出力、URL未指定時の対話的`input()`呼び出し、`extractor.extract_iter`によるネットワークアクセスと`file_manager.save`によるファイル保存。ループ開始前に`AppConfig.get_output_base_dir()`を1回呼び出す（Issue #243）。
-* 根拠: [メイン処理フロー] (行番号: 414, 420〜442 / 抜粋: "logger.info("=== YouTube URL Extractor (v3.1.0) Started ===")")、base_dir事前取得箇所 (行番号: 432〜438 / 抜粋: "# #243: 1本のURLから複数のExtractionResultが得られる場合に\n            # get_output_base_dir()が結果ごとに再評価されないよう、\n            # 1回だけ取得した値をsave()へ渡して使い回す。\n            base_dir = AppConfig.get_output_base_dir()\n            # イテレータを回して処理\n            for result in self.extractor.extract_iter(target_url):\n                if self.file_manager.save(result, base_dir=base_dir):")
+* 根拠: [メイン処理フロー] (行番号: 414, 420〜442 / 抜粋: "logger.info("=== YouTube URL Extractor (v3.1.0) Started ===")")、base_dir事前取得箇所 (行番号: 424〜430 / 抜粋: "# #243: 1本のURLから複数のExtractionResultが得られる場合に\n            # get_output_base_dir()が結果ごとに再評価されないよう、\n            # 1回だけ取得した値をsave()へ渡して使い回す。\n            base_dir = AppConfig.get_output_base_dir()\n            # イテレータを回して処理\n            for result in self.extractor.extract_iter(target_url):\n                if self.file_manager.save(result, base_dir=base_dir):")
 
 
 * **エラーハンドリング**: 対話的URL入力時の`KeyboardInterrupt`を捕捉し、情報ログを出力して`sys.exit(0)`で正常終了する。それ以外の例外処理はこのメソッド自体にはない。
-* 根拠: [try-exceptブロック] (行番号: 423〜425 / 抜粋: "except KeyboardInterrupt:\n                logger.info("ユーザーにより中断されました")\n                sys.exit(0)")
+* 根拠: [try-exceptブロック] (行番号: 418〜420 / 抜粋: "except KeyboardInterrupt:\n                logger.info("ユーザーにより中断されました")\n                sys.exit(0)")
 
 
 ## 5. 処理フロー図
@@ -412,9 +412,9 @@ graph TD
 * **YDL_OPTS共有辞書のコピー渡し**: `yt_dlp.YoutubeDL.__init__`が渡された`params`辞書を直接書き換えるため、`AppConfig.YDL_OPTS`（クラス属性の共有辞書）をそのまま渡すと繰り返し呼び出し時に状態汚染が起きるリスクがあり、コード内コメントで明示的に`dict(AppConfig.YDL_OPTS)`によるコピー渡しが行われている。
 * 根拠: [コメントとコピー渡し] (行番号: 191〜196, 272〜273 / 抜粋: "# yt_dlp.YoutubeDL.__init__は渡されたparams辞書を直接書き換える\n            # （実測でjs_runtimes/http_headers/outtmpl等のキーが追加される）ため、")
 * **(Issue #243バグ修正の背景)** `FileManager.save`は`base_dir`引数を省略した場合のみ内部で`get_output_base_dir()`を呼び出す設計になった。`get_output_base_dir()`はNASマウント確認・自己修復・障害通知を伴う重い処理であるため、1回の処理で複数回`save()`を呼ぶ呼び出し元（現状は`UrlExtractorApp.run()`の直接URL実行分岐のみ）は、必ず処理開始時に1回だけ取得した値を`base_dir`として渡して使い回すこと。新たに`save()`を複数回呼ぶ処理を追加する際は、この呼び出し規約を踏襲すること。
-* 根拠: [save()のbase_dir引数コメント] (行番号: 341〜345 / 抜粋: "# #243: 呼び出し元から渡されなかった場合のみ遅延評価でディレクトリを取得する。\n        # 以前は常にここでget_output_base_dir()を呼んでいたため、呼び出し元\n        # (UrlExtractorApp.run())が1回に抑えていたつもりの重い処理(NASマウント確認・\n        # 自己修復・障害通知)が、保存件数分だけ再評価され、NAS瞬断時に再マウント試行・\n        # 通知が多重発生していた。")
+* 根拠: [save()のbase_dir引数コメント] (行番号: 333〜337 / 抜粋: "# #243: 呼び出し元から渡されなかった場合のみ遅延評価でディレクトリを取得する。\n        # 以前は常にここでget_output_base_dir()を呼んでいたため、呼び出し元\n        # (UrlExtractorApp.run())が1回に抑えていたつもりの重い処理(NASマウント確認・\n        # 自己修復・障害通知)が、保存件数分だけ再評価され、NAS瞬断時に再マウント試行・\n        # 通知が多重発生していた。")
 * **既存ファイルの無警告上書き**: `FileManager.save`は出力先に同名ファイルが既存の場合、警告ログを出力するのみで上書きを継続する。**（D-L10で追加）** ただし上書き自体は`.tmp`経由のアトミックな`replace`で行われるため、書き込み中に中断しても既存ファイルが破損した状態で残ることはない（以前は`output_path`への直接書き込みだったため、NAS瞬断等での中断時に破損ファイルが残りうった）。
-* 根拠: [上書きチェック] (行番号: 363〜364 / 抜粋: "if output_path.exists():\n            logger.warning(f"⚠️ 上書き: {filename} は既に存在します（チャンネル名/タイトルが重複している可能性）")")
+* 根拠: [上書きチェック] (行番号: 358〜359 / 抜粋: "if output_path.exists():\n            logger.warning(f"⚠️ 上書き: {filename} は既に存在します（チャンネル名/タイトルが重複している可能性）")")
 * **チャンネルURL探索の暗黙的な仕様依存**: `/videos`・`/playlists`のURLパス付与がYouTube側のURL構造に依存しており、YouTube側の仕様変更で機能しなくなるリスクがある。
 * 根拠: [extract_iter内のURL構築] (行番号: 259 / 抜粋: "base_url = target_url.split('?')[0].rstrip('/')")
 * **`_is_channel_url`の判定パターンの限定性**: 正規表現は`@handle`, `channel/`, `c/`, `user/`の4形式のみに対応しており、これら以外のURL形式（例: カスタムショートURL等）は判定対象外となる可能性がある。

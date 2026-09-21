@@ -129,7 +129,7 @@
 * 根拠: [注記コメント] (行番号: 100-106 / 抜粋: "Issue #661: 他の監視スクリプトの状態ファイルは core/state_file.py に集約したが、")
 
 * **（Issue #449 で修正）** 以前は`THROTTLE_STATE_FILE.read_text()`と`.write_text()`をそれぞれ独立した`try/except`で個別に呼び出しており、このスクリプトが（通常は逐次実行される前提だが）複数プロセスで同時実行された場合、読み取りから書き込みまでの間に他プロセスが割り込むと状態が上書き競合（lost update）する可能性があった。現在は状態ファイルを`r+`モードで一度だけ開き、読み取りから書き込みまでの区間全体を`fcntl.flock`による排他ロック（`fcntl.LOCK_EX`）で1つの不可分な区間にし、`finally`節で確実にロックを解放する。戻り値・挙動自体（判定ロジック）は変更されておらず、プロセス境界をまたいだアトミック性のみが追加された。
-* 根拠: `_is_new_history` (行番号: 100〜149 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")、[flockによる排他区間] (行番号: 103〜125 / 抜粋: "THROTTLE_STATE_FILE.touch(exist_ok=True)\n        with open(THROTTLE_STATE_FILE, "r+", encoding="utf-8") as f:\n            fcntl.flock(f.fileno(), fcntl.LOCK_EX)\n            try:\n                ...\n            finally:\n                fcntl.flock(f.fileno(), fcntl.LOCK_UN)")
+* 根拠: `_is_new_history` (行番号: 100〜149 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")、[flockによる排他区間] (行番号: 124〜146 / 抜粋: "THROTTLE_STATE_FILE.touch(exist_ok=True)\n        with open(THROTTLE_STATE_FILE, "r+", encoding="utf-8") as f:\n            fcntl.flock(f.fileno(), fcntl.LOCK_EX)\n            try:\n                ...\n            finally:\n                fcntl.flock(f.fileno(), fcntl.LOCK_UN)")
 
 
 * **引数/リクエスト**: `history_issues: int`
@@ -164,11 +164,11 @@
 
 
 * **副作用**: OSコマンド（`vcgencmd`）の実行、`_is_new_history`経由での`THROTTLE_STATE_FILE`の読み書き、ログ出力のみ。**`send_push`の直接呼び出しは行わない**（コード中のコメント「修正点2」により、`core/logger.py`側の仕様で`logger.error`がDiscordへ自動転送されることを理由に、二重通知防止のため意図的に削除されている）。
-* 根拠: `subprocess.run(['vcgencmd', 'get_throttled']` (行番号: 109 / 抜粋: "result = subprocess.run(['vcgencmd', 'get_throttled'], capture_output=True, text=True)")、`logger.error(f"⚠️ System Alert: {msg}")` (行番号: 133〜135 / 抜粋: "# 【修正点2】 core/logger.py の仕様上 logger.error だけでDiscordに自動送信されるため、\n                # send_push を削除して二重通知のスパムを防ぎます。\n                logger.error(f"⚠️ System Alert: {msg}")")、`elif history_issues != 0: if _is_new_history(history_issues): logger.warning(...) else: logger.debug(...)` (行番号: 139〜143 / 抜粋: "elif history_issues != 0:\n                if _is_new_history(history_issues):\n                    logger.warning(f"Hardware Throttling History (Recovered): {hex(val)}")\n                else:\n                    logger.debug(f"Throttling history already reported this boot: {hex(val)}")")
+* 根拠: `subprocess.run(['vcgencmd', 'get_throttled']` (行番号: 109 / 抜粋: "result = subprocess.run(['vcgencmd', 'get_throttled'], capture_output=True, text=True)")、`logger.error(f"⚠️ System Alert: {msg}")` (行番号: 216〜218 / 抜粋: "# 【修正点2】 core/logger.py の仕様上 logger.error だけでDiscordに自動送信されるため、\n                # send_push を削除して二重通知のスパムを防ぎます。\n                logger.error(f"⚠️ System Alert: {msg}")")、`elif history_issues != 0: if _is_new_history(history_issues): logger.warning(...) else: logger.debug(...)` (行番号: 222〜226 / 抜粋: "elif history_issues != 0:\n                if _is_new_history(history_issues):\n                    logger.warning(f"Hardware Throttling History (Recovered): {hex(val)}")\n                else:\n                    logger.debug(f"Throttling history already reported this boot: {hex(val)}")")
 
 
 * **エラーハンドリング**: コマンドが見つからない場合は `FileNotFoundError` をキャッチしてデバッグログを出力しスキップする。その他の例外はキャッチするが、無限ループ（監視ループからの繰り返し呼び出し）を防ぐため、意図的にエラートレースではなく例外メッセージのみをWARNINGレベルでログ出力する。
-* 根拠: `except FileNotFoundError:` (行番号: 145〜146 / 抜粋: "except FileNotFoundError:\n        logger.debug("vcgencmd not found, skipping throttling check.")") および `except Exception as e: # 万が一の予期せぬエラーも、無限ループを防ぐためにWARNINGに落とす` (行番号: 147〜149 / 抜粋: "except Exception as e:\n        # 万が一の予期せぬエラーも、無限ループを防ぐためにWARNINGに落とす\n        logger.warning(f"Throttling Check failed (Non-critical): {e}")")
+* 根拠: `except FileNotFoundError:` (行番号: 145〜146 / 抜粋: "except FileNotFoundError:\n        logger.debug("vcgencmd not found, skipping throttling check.")") および `except Exception as e: # 万が一の予期せぬエラーも、無限ループを防ぐためにWARNINGに落とす` (行番号: 230〜232 / 抜粋: "except Exception as e:\n        # 万が一の予期せぬエラーも、無限ループを防ぐためにWARNINGに落とす\n        logger.warning(f"Throttling Check failed (Non-critical): {e}")")
 
 
 

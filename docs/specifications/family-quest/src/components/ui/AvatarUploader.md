@@ -72,13 +72,13 @@
 * 根拠: `avatarImageSrc`の算出とプレビュー分岐 (行番号: 86〜112 / 抜粋: "const avatarImageSrc = preview || (isSameOriginAvatarPath(user.avatar) ? user.avatar : null);", "{avatarImageSrc ? (", "src={avatarImageSrc}", "{user.avatar || '👤'}")
 
 * **引数/リクエスト**: `AvatarUploaderProps` オブジェクト（`user`, `onClose`, `onUploadComplete` を分割代入で取得）
-* 根拠: `({ user, onClose, onUploadComplete })` (行番号: 17 / 抜粋: "= ({ user, onClose, onUploadComplete }) => {")
+* 根拠: `({ user, onClose, onUploadComplete })` (行番号: 19 / 抜粋: "= ({ user, onClose, onUploadComplete }) => {")
 
 * **戻り値/レスポンス**: `Modal` コンポーネントでラップされたJSX要素。`uploadDone`が`true`の場合は「閉じる」ボタンのみ、それ以外は「キャンセル」「保存する」ボタンを表示する。
 * 根拠: `return ( <Modal...` (行番号: 84〜163 / 抜粋: "return (\n        <Modal isOpen={true} onClose={onClose} title=\"アバター変更\">")、条件分岐 (139〜159行目)
 
 * **副作用**: API経由での画像データの送信（`apiClient.postForm`）とユーザーレコードの更新（`apiClient.post`）。成功・失敗いずれもモーダル内のインラインUI（`errorMessage`/`uploadDone`）で通知する（ブラウザ標準の`alert`は使用しない）。
-* 根拠: (行番号: 65〜66, 74 / 抜粋: "const { url } = await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);\n            await apiClient.post('/api/quest/user/update', { user_id: user.user_id, avatar_url: url });", "setErrorMessage(error instanceof Error ? error.message : \"アップロードに失敗しました\");")
+* 根拠: (行番号: 65〜66, 87 / 抜粋: "const { url } = await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);\n            await apiClient.post('/api/quest/user/update', { user_id: user.user_id, avatar_url: url });", "setErrorMessage(error instanceof Error ? error.message : \"アップロードに失敗しました\");")
 
 * **エラーハンドリング**: APIリクエスト時の例外をキャッチし、コンソールにエラーを出力し、`errorMessage`状態にセットしてインライン表示する。
 * 根拠: `catch (error) { ... }` (行番号: 72〜74 / 抜粋: "console.error('Upload failed:', error);\n            setErrorMessage(error instanceof Error ? error.message : \"アップロードに失敗しました\");")
@@ -89,7 +89,7 @@
 * 根拠: `const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>)` (行番号: 24〜50 / 抜粋: "if (!file.type.startsWith('image/')) {\n            setErrorMessage(\"画像ファイルを選択してください\");")
 
 * **引数/リクエスト**: `React.ChangeEvent<HTMLInputElement>` (ファイル入力のチェンジイベント)
-* 根拠: `(e: React.ChangeEvent<HTMLInputElement>)` (行番号: 24 / 抜粋: "const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {")
+* 根拠: `(e: React.ChangeEvent<HTMLInputElement>)` (行番号: 31 / 抜粋: "const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {")
 
 * **戻り値/レスポンス**: なし (void)
 * **副作用**: `setErrorMessage`, `setPreview` によるコンポーネントの再レンダリングのトリガー。
@@ -102,14 +102,14 @@
 
 * **役割**: 選択されたファイルを`FormData`（フィールド名`file`）に格納し、`/api/quest/upload`へアップロードして返ってきたURLを`/api/quest/user/update`へ明示的に紐付ける2段階のアップロード処理を行う。成功時は`onUploadComplete`を呼び出し`uploadDone`を`true`にするが、`onClose`は呼ばない（モーダルは自動では閉じない）。以前は存在しない`/api/quest/upload_avatar`にPOSTしており常に失敗していたバグの修正が施されている。**（#442で追加）** 1段階目のアップロードが成功した時点で返ってきたURLを`uploadedUrl`（`try`ブロック外で宣言したローカル変数）に保持しておき、その後（＝2段階目の紐付け）で例外が発生した場合、`catch`ブロック内で`uploadedUrl`からファイル名を取り出し、`DELETE /api/quest/upload/{filename}`へのベストエフォートのロールバック削除リクエストを追加で発行する。このロールバック呼び出し自体の失敗は`.catch()`で握りつぶしてコンソールにログ出力するのみで、ユーザーには通常の（1つ目の）エラーメッセージのみが表示される。
 * 根拠: `const handleUpload = async () =>` (行番号: 54〜95 / 抜粋: "const handleUpload = async () => {")
-* 根拠: バグ修正のコメント (行番号: 62〜65 / 抜粋: "// ★バグ修正: 以前は存在しない /api/quest/upload_avatar にPOSTしており\n            // 常に失敗していた(実際のアップロード先は /api/quest/upload、フィールド名は file)。\n            // さらにアップロードするだけではユーザーのアバターには反映されないため、\n            // 返ってきたURLを /api/quest/user/update で明示的に紐付ける。")
-* 根拠: ロールバック削除の追加 (行番号: 66, 69, 80〜91 / 抜粋: "let uploadedUrl: string | null = null;", "uploadedUrl = url;", "// #442: 1段階目(画像アップロード)は成功したが2段階目(ユーザーへの紐付け)が\n            // 失敗した場合、アップロード済みの画像がどのユーザーにも紐付かないまま\n            // サーバー上に孤立して残ってしまう。ベストエフォートでロールバック削除を\n            // 試みる(失敗してもユーザーへは元のエラーのみを表示する)。\n            if (uploadedUrl) {\n                const filename = uploadedUrl.split('/').pop();\n                if (filename) {\n                    apiClient.delete(`/api/quest/upload/${encodeURIComponent(filename)}`).catch(rollbackError => {\n                        console.error('Failed to roll back orphaned avatar upload:', rollbackError);\n                    });\n                }\n            }")
+* 根拠: バグ修正のコメント (行番号: 71〜74 / 抜粋: "// ★バグ修正: 以前は存在しない /api/quest/upload_avatar にPOSTしており\n            // 常に失敗していた(実際のアップロード先は /api/quest/upload、フィールド名は file)。\n            // さらにアップロードするだけではユーザーのアバターには反映されないため、\n            // 返ってきたURLを /api/quest/user/update で明示的に紐付ける。")
+* 根拠: ロールバック削除の追加 (行番号: 75, 78, 80〜91 / 抜粋: "let uploadedUrl: string | null = null;", "uploadedUrl = url;", "// #442: 1段階目(画像アップロード)は成功したが2段階目(ユーザーへの紐付け)が\n            // 失敗した場合、アップロード済みの画像がどのユーザーにも紐付かないまま\n            // サーバー上に孤立して残ってしまう。ベストエフォートでロールバック削除を\n            // 試みる(失敗してもユーザーへは元のエラーのみを表示する)。\n            if (uploadedUrl) {\n                const filename = uploadedUrl.split('/').pop();\n                if (filename) {\n                    apiClient.delete(`/api/quest/upload/${encodeURIComponent(filename)}`).catch(rollbackError => {\n                        console.error('Failed to roll back orphaned avatar upload:', rollbackError);\n                    });\n                }\n            }")
 
 * **引数/リクエスト**: なし
-* 根拠: `() =>` (行番号: 54 / 抜粋: "const handleUpload = async () => {")
+* 根拠: `() =>` (行番号: 63 / 抜粋: "const handleUpload = async () => {")
 
 * **戻り値/レスポンス**: `Promise<void>`
-* 根拠: `async` の指定 (行番号: 54 / 抜粋: "const handleUpload = async () => {")
+* 根拠: `async` の指定 (行番号: 63 / 抜粋: "const handleUpload = async () => {")
 
 * **副作用**: `setUploading` によるローディング状態変更、`setErrorMessage(null)`によるエラー表示クリア、`apiClient.postForm`（画像アップロード）と`apiClient.post`（アバターURL紐付け）による2回のネットワーク通信、成功時の `onUploadComplete` 呼び出しと `setUploadDone(true)`。**（#442で追加）** 2段階目が失敗した場合、`uploadedUrl`が設定されていれば`apiClient.delete('/api/quest/upload/{filename}')`によるロールバック削除リクエスト（結果を待たない fire-and-forget、失敗時は`console.error`のみ）を追加で発行する。`finally`での`setUploading(false)`。
 * 根拠: `setUploading(true);`, `await apiClient.postForm(...)`, `await apiClient.post(...)`, `onUploadComplete();`, `setUploadDone(true);` (行番号: 57〜75)、ロールバック削除 (行番号: 84〜90)

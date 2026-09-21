@@ -24,7 +24,7 @@
 ## 2. ファイルの概要
 
 購入済みアイテム(`user_inventory`)の一覧取得(`get_user_inventory`)と使用確定(`use_item`/`_use_item_locked`)を担う`InventoryService`クラス1つを定義するファイル。アイテム使用は`'pending'`状態での申請と`ROLE_ADULT`による承認を経る2段階フローではなく、所有者・所有状態(`'owned'`)確認後に即座に消費を確定する単一ステップの処理である。YouTube系ごほうび券(`config.YOUTUBE_REWARD_IDS`)については、連続視聴による目の負担を防ぐため2つの制限を課す機構を持つ。1つは「券の視聴分数 + 休憩15分」のクールダウン、もう1つはJSTの1日で使える合計視聴分数の上限で、それぞれ`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`/`config.YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`という**別々の**施行日を持ち、施行日を迎えるまでは実際には拒否せず予告バナー用の情報を返すのみに留める。日次上限については、使い切った後に追加でプリント(`config.YOUTUBE_EXTENSION_QUEST_IDS`)をやると上限が延びる仕組みも持ち、実効上限の算出は`get_youtube_daily_limit_with_extensions`に委譲する。ファイル末尾で`InventoryService`のシングルトンインスタンス`inventory_service`を生成しており、コメントによれば「Family Quest内で唯一`GameSystem`(quest/user/shop_service)の合成に含まれないシングルトン」である。
-根拠: `class InventoryService:` (行番号: 39)、`def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 126〜143)、`def _use_item_locked(self, user_id: str, inventory_id: int) -> Tuple[Dict[str, str], str]:` (行番号: 145〜234)、コメント (行番号: 144〜145 / 抜粋: "アイテム使用は承認フローを介さず即時確定する、Family Quest内で唯一\n# GameSystem(quest/user/shop_service)の合成に含まれないシングルトン。")
+根拠: `class InventoryService:` (行番号: 39)、`def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 126〜143)、`def _use_item_locked(self, user_id: str, inventory_id: int) -> Tuple[Dict[str, str], str]:` (行番号: 145〜234)、コメント (行番号: 237〜238 / 抜粋: "アイテム使用は承認フローを介さず即時確定する、Family Quest内で唯一\n# GameSystem(quest/user/shop_service)の合成に含まれないシングルトン。")
 
 ## 3. 外部依存関係
 

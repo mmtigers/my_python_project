@@ -29,7 +29,7 @@
 | `os` | 標準ライブラリ | パス操作、ファイル存在確認、ディレクトリ作成 | 根拠: `os.path.dirname`, `os.path.exists` など (行番号: 3, 6, 18, 35, 48 / 抜粋: "import os") |
 | `config` | 外部モジュール | デバイスIDやルートディレクトリの取得 | 根拠: `config.TV_PLUG_DEVICE_ID` 等 (行番号: 10, 18, 21 / 抜粋: "import config") |
 | `core.logger` | 外部モジュール | ロガーの初期化処理 | 根拠: `setup_logging` (行番号: 11, 15 / 抜粋: "from core.logger import setup_logging") |
-| `core.utils.get_now_jst`（Issue #592で追加） | 外部モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で標準ライブラリの`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「深夜2時」判定はJSTの深夜2時を意図していたため、ホストがJST以外の設定だと意図しない実時刻に実行されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_jst` (行番号: 13 / 抜粋: "from core.utils import get_now_jst")、`now = get_now_jst()` (行番号: 25-28 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う...\n    now = get_now_jst()") |
+| `core.utils.get_now_jst`（Issue #592で追加） | 外部モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で標準ライブラリの`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「深夜2時」判定はJSTの深夜2時を意図していたため、ホストがJST以外の設定だと意図しない実時刻に実行されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_jst` (行番号: 13 / 抜粋: "from core.utils import get_now_jst")、`now = get_now_jst()` (行番号: 26-29 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う...\n    now = get_now_jst()") |
 | `services.switchbot_service` | 外部モジュール | 外部デバイス（SwitchBot）へのコマンド送信 | 根拠: `send_device_command` (行番号: 13, 43 / 抜粋: "from services import switchbot_service") |
 
 ### ブラックボックスとなる外部要素
@@ -46,7 +46,7 @@
 ### `main`
 
 * **役割**: 設定値からデバイスIDを確認し、現在時刻が2:00〜2:05の範囲内かつ当日未実行の場合に、外部サービスを通じてTVプラグをオフにする。成功時は実行記録をファイルに保存する。**（Issue #592で修正）** 「現在時刻」の取得は、以前は標準ライブラリの`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接呼び出していたが、この「深夜2:00〜2:05」判定はJSTの深夜2時台を意図しているため、ホストがJST以外の設定だと本来と異なる実時刻に実行されてしまう問題があった（Issue #382/#293と同じ不具合クラス。#382/#293自体は別Issueで既にタイムゾーン非依存な実装に修正済みだったため対象外）。`core.utils.get_now_jst()`（"Asia/Tokyo"タイムゾーンのaware `datetime`を返す）に置き換え、`from datetime import datetime`のimportは不要になり削除された。
-* 根拠: `main` (行番号: 21〜51 / 抜粋: "def main():")、JST化のコメントと置き換え (行番号: 25〜28 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う(この「深夜2時」判定はJSTの深夜2時を\n    # 意図しており、ホストがJST以外の設定だと別の実時刻に実行されてしまう)。\n    now = get_now_jst()")
+* 根拠: `main` (行番号: 21〜51 / 抜粋: "def main():")、JST化のコメントと置き換え (行番号: 26〜29 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う(この「深夜2時」判定はJSTの深夜2時を\n    # 意図しており、ホストがJST以外の設定だと別の実時刻に実行されてしまう)。\n    now = get_now_jst()")
 
 
 * **引数/リクエスト**: なし

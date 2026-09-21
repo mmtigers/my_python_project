@@ -40,7 +40,7 @@
 * 根拠: [_run_monitor_lockedの解決・フォールバック判定とDataManager生成] (行番号: 2026〜2048 / 抜粋: "# #364: データディレクトリはここで1回だけ解決し、DataManagerに束縛して全サイトで\n    # 使い回す。" / "if MonitorConfig.is_local_fallback_dir(data_dir):" / "data_manager = DataManager(data_dir)")、[DataManagerクラスDocstring] (行番号: 775〜784 / 抜粋: "#364: 以前は全メソッドが静的メソッドで、呼び出しのたびに\n    MonitorConfig.get_data_dir()(= core.nas_utils.get_managed_target_directory。")
 * 保存データはNAS等のストレージ上に一時ファイル経由のアトミック書き込みで永続化される。書き込み後は一時ファイルを読み戻して検証し、既存データを`.bak`としてバックアップしてから本番ファイルへ置き換える多段の安全策を持つ（詳細は4章`DataManager.save_known_casts`を参照）。**（Issue #462で追加）** 日次サマリ(`daily_summary.json`)の読み書き(`load_daily_summary`/`save_daily_summary`)にも同じ隔離＋バックアップ復旧・読み戻し検証の仕組みが拡張適用され、既知キャストデータと同水準の耐障害性を持つようになった。**（2026-09-09 運用障害対応で追加）** サイト別連続失敗状態(`site_failures.json`)の読み書き(`load_site_failures`/`save_site_failures`)にも同じ隔離＋バックアップ復旧・読み戻し検証の仕組みが拡張適用され、3つの永続化データ（既知キャスト・日次サマリ・サイト別失敗状態）が同水準の耐障害性を持つようになった。加えて、この3つの`save_*`メソッドはNAS等の一過性の書き込み不良に備えた共通のリトライ機構(`DataManager._retry_transient_write`)も共有する。**（2026-09-19 運用障害対応で追加）** この「一過性の書き込み不良」の実体は、NAS(CIFS、`serverino`マウント)が同時に作成されたファイルへ同じinode番号を払い出し、cifsクライアントが別ファイル同士のページキャッシュを取り違える事象だった。NAS上へのファイル作成を伴う区間（一時ファイルの書き込み+検証、`.bak`更新+置き換え）はプロセス内共通ロック`DataManager._nas_file_create_lock`で直列化し、読み戻し検証も書き込んだバイト列との完全一致で行う（詳細は4章`DataManager._nas_file_create_lock`を参照）。**（Issue #461で追加）** 破損検知のたびに`.corrupted-*`として蓄積する隔離ファイルは、`DataManager.cleanup_old_quarantine_files`により`_run_monitor_locked`の巡回ごとに`_QUARANTINE_RETENTION_DAYS`（既定30日）より古いものが削除される。**（Issue #578で追加）** `load_daily_summary`/`load_site_failures`（および`load_known_casts`の`.bak`復旧パス）は、CIFS/autofsの瞬断等による一時的なI/Oエラー（`OSError`）と、JSON構文エラー等の内容起因の破損を区別し、前者では空状態へフォールバックせず`DataFileUnavailableError`/`KnownCastsUnavailableError`を送出して呼び出し元に保存処理そのものをスキップさせる（Issue #365で`load_known_casts`の一次ファイル読み込みに導入済みだった区別を、残る3箇所にも揃えたもの。詳細は8章参照）。
 * 根拠: [DataFileUnavailableError定義とコメント] (行番号: 841〜852 / 抜粋: "class DataFileUnavailableError(Exception):\n    \"\"\"load_daily_summary/load_site_failuresが、ファイルは存在するのにI/Oエラーで\n    読めなかったことを示す例外(#578)。")
-* 根拠: [DataManager.save_known_castsのコメント] (行番号: 959〜961 / 抜粋: "# アトミック書き込み: 一時ファイルに書き出してから置き換えることで、\n            # 書き込み中断時に既存データが破損/空になるのを防ぐ\n            # (batch_download_discord.py の _purge_skipped_tasks と同じパターン)")
+* 根拠: [DataManager.save_known_castsのコメント] (行番号: 1227〜1229 / 抜粋: "# アトミック書き込み: 一時ファイルに書き出してから置き換えることで、\n            # 書き込み中断時に既存データが破損/空になるのを防ぐ\n            # (batch_download_discord.py の _purge_skipped_tasks と同じパターン)")
 * `run_monitor`はモニタープロセスのエントリポイントとして、`fcntl.flock`による多重起動防止ロック（`_MONITOR_LOCK_FILE_PATH`）を非ブロッキングで取得してから処理本体`_run_monitor_locked`を呼び出す。cronの1回の実行が想定より長引く（1時間超）と新旧プロセスが並行実行され、既知キャストリスト・サマリファイルの読み書きが競合しうる問題への対策であり、`batch_download_discord.py`が既に採用している同種のロックパターンを踏襲している。
 * 根拠: [_MONITOR_LOCK_FILE_PATHのコメントとrun_monitor] (行番号: 1996〜2003 / 抜粋: "# M-7-4: 多重起動防止ロック。cron等での実行が重複すると、既知キャストリストや\n# サマリファイルへの読み書きが競合し、一時消失→再通知等のデータ不整合が起きうる\n# (batch_download_discord.pyでは既にflockによる同種のロックが導入済み)。")
 
@@ -155,7 +155,7 @@
 ### `SiteConfig`
 
 * **役割**: 監視対象サイト1件分の設定を保持するイミュータブル(`frozen=True`)なデータクラス。対象URL、キャスト一覧・名前・リンク・画像取得用のCSSセレクタ、既知キャストの保存先ファイル名、ID/画像/名前抽出時の各種特殊処理フラグを持つ。**（Issue #413で変更）** 新規サイトを追加する際は、このクラスのインスタンスを本ファイルに直接書き足すのではなく、`sites.json`にフィールド名をキーとするJSONエントリを1件追加するだけでよい（構築は`_load_sites`が担う）。
-* 根拠: [クラス定義とDocstring] (行番号: 133〜139 / 抜粋: "@dataclass(frozen=True)\nclass SiteConfig:\n    """監視対象サイト1件分の設定。\n\n    新しいサイトを監視対象に加える場合は、sites.json にこのデータクラスの\n    フィールド名をキーとするエントリを1件追加するだけでよい\n    （コード本体の変更は不要。読み込みは _load_sites が担う）。")
+* 根拠: [クラス定義とDocstring] (行番号: 172〜178 / 抜粋: "@dataclass(frozen=True)\nclass SiteConfig:\n    """監視対象サイト1件分の設定。\n\n    新しいサイトを監視対象に加える場合は、sites.json にこのデータクラスの\n    フィールド名をキーとするエントリを1件追加するだけでよい\n    （コード本体の変更は不要。読み込みは _load_sites が担う）。")
 
 
 * **引数/リクエスト**: `site_id: str`, `name: str`, `target_url: str`, `selector_container: str`, `selector_name: str`, `selector_link: str`, `selector_image: str`, `data_filename: str = ""`, `id_query_param: Optional[str] = None`, `image_attr: str = "src"`, `image_from_style: bool = False`, `name_first_text_only: bool = False`, `name_strip_after_tab: bool = False`, `skip_unnamed_casts: bool = False`
@@ -227,7 +227,7 @@
 
 
 * **`MASS_DETECTION_WARNING_THRESHOLD: int = 20`について**: `_check_site`が既知キャスト存在下での大量新規検知（known_castsデータ喪失等による誤検知の疑い）を警告ログとして検出する際の閾値。通常運用時の新規検知は数件〜十数件程度であることを踏まえた目安値。
-* 根拠: [定数定義とコメント] (行番号: 342〜344 / 抜粋: "# 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は\n    # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値\n    MASS_DETECTION_WARNING_THRESHOLD: int = 20")
+* 根拠: [定数定義とコメント] (行番号: 379〜381 / 抜粋: "# 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は\n    # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値\n    MASS_DETECTION_WARNING_THRESHOLD: int = 20")
 
 
 * **`KNOWN_CAST_PRUNE_AFTER_MISSES: int = 168`について（Issue #538で追加）**: `_merge_known_casts` が既知キャストを剪定する閾値。known_casts は #237 以来 union 保存(既知キャストを消さない)のため、退店済みキャストやフォールバック ID の揺れで生じたエントリが無限に蓄積していた。一覧ページからこの回数連続で欠けたキャストだけを剪定する(1時間毎のcron前提で約7日分)。#237 が防ぎたかった「単発のパース失敗で消える→再通知」は、単発では到底達しない閾値にすることで引き続き防ぐ。
@@ -235,7 +235,7 @@
 
 
 * **`AGE_PLAUSIBLE_MIN: int = 18` / `AGE_PLAUSIBLE_MAX: int = 79`について（D-L12で追加）**: `AGE_PATTERN`が「歳」「才」の明示無しに括弧内の2桁数字を年齢と判定する場合の妥当性チェック用範囲。`WebMonitor._extract_cast_age`（**品質で`_parse_html`から分離**）で、括弧内数字に「歳」「才」の明示が無い場合のみこの範囲でフィルタする（範囲外なら年齢として採用しない）。「歳」「才」で明示された数字は、この範囲に関わらず無条件に信頼する。
-* 根拠: [定数定義とコメント] (行番号: 351〜356 / 抜粋: "# D-L12: AGE_PATTERNが「歳」「才」の明示無しに括弧内の2桁数字を年齢と\n    # 判定する場合の妥当性チェック用範囲。この範囲外の値は年齢として採用しない\n    # (部屋番号・順位バッジ等の誤検知を減らすための足切り。「歳」「才」で\n    # 明示された数字は範囲に関わらず信頼する)。\n    AGE_PLAUSIBLE_MIN: int = 18\n    AGE_PLAUSIBLE_MAX: int = 79")
+* 根拠: [定数定義とコメント] (行番号: 388〜393 / 抜粋: "# D-L12: AGE_PATTERNが「歳」「才」の明示無しに括弧内の2桁数字を年齢と\n    # 判定する場合の妥当性チェック用範囲。この範囲外の値は年齢として採用しない\n    # (部屋番号・順位バッジ等の誤検知を減らすための足切り。「歳」「才」で\n    # 明示された数字は範囲に関わらず信頼する)。\n    AGE_PLAUSIBLE_MIN: int = 18\n    AGE_PLAUSIBLE_MAX: int = 79")
 
 
 * **`CONSECUTIVE_FAILURE_ALERT_THRESHOLD: int = 24`について（2026-09-02のbellica閉鎖対応で追加）**: ネットワーク起因の巡回失敗がこの回数連続したサイトを「閉鎖・移転の疑い」としてDiscordへ1回だけアラート通知し、以降の失敗ログをWARNINGに降格するための閾値。1時間毎のcron実行前提で約1日分に相当する。2026-09-02のbellica閉鎖時に、消失したサイトが毎時ERRORを出し続けて一次ヘルスチェックが発報し続けた事象の再発防止として導入された。
@@ -243,7 +243,7 @@
 
 
 * **`SELF_OUTAGE_SUPPRESS_RATIO: float = 0.5`について（Issue #395で追加）**: 同一実行内で失敗として計上したサイト数が総サイト数に占める割合がこの値を超える場合、個々のサイトの閉鎖ではなく自局側（Pi側の回線断・DNS障害等）の障害とみなし、`_send_pending_site_failure_alerts`が閉鎖疑いアラートの一斉送信を抑止する（79サイト分のアラートが同時に飛ぶのを防ぐ）。
-* 根拠: [定数定義とコメント] (行番号: 365〜368 / 抜粋: "# #395: 同一実行内で失敗したサイト数が総数に占める割合がこの値を超える場合、\n    # 個々のサイトの閉鎖ではなく自局側(Pi側の回線断・DNS障害等)の障害とみなし、\n    # 閉鎖疑いアラートの一斉送信を抑止する(79サイト分のアラートが同時に飛ぶのを防ぐ)。\n    SELF_OUTAGE_SUPPRESS_RATIO: float = 0.5")
+* 根拠: [定数定義とコメント] (行番号: 402〜405 / 抜粋: "# #395: 同一実行内で失敗したサイト数が総数に占める割合がこの値を超える場合、\n    # 個々のサイトの閉鎖ではなく自局側(Pi側の回線断・DNS障害等)の障害とみなし、\n    # 閉鎖疑いアラートの一斉送信を抑止する(79サイト分のアラートが同時に飛ぶのを防ぐ)。\n    SELF_OUTAGE_SUPPRESS_RATIO: float = 0.5")
 
 
 * **エラーハンドリング**: なし（`SITES`初期化時の`_load_sites`呼び出しが例外を送出しうる点を除く。上記`_load_sites`の項を参照）
@@ -252,7 +252,7 @@
 #### `MonitorConfig.SITES` / `sites.json` について（データ内容の補足、Issue #413で外部化）
 
 `SITES`は`SiteConfig`インスタンスを79件含むリストであり（2026-09-02にサイト閉鎖が確認された`bellica`は削除済み。削除理由は`sites.json`の該当エントリの`_comment`フィールドに記載）、モジュールimport時に`_load_sites(SITES_JSON_PATH)`によって`sites.json`から構築される。`sites.json`の各エントリは`SiteConfig`の必須フィールド（`site_id`/`name`/`target_url`/`selector_container`/`selector_name`/`selector_link`/`selector_image`）に加え、デフォルト値と異なる値を持つオプションフィールドのみを記載する形式（省略時は`SiteConfig`側のデフォルト値が使われる）。対象サイトのHTML構造上の特殊事情（例: lazyload画像は`image_attr: "data-original"`、インラインCSS背景画像は`image_from_style: true`、名前要素に年齢が兄弟要素またはタブ区切りで同居する場合は`name_first_text_only: true`/`name_strip_after_tab: true`、クエリパラメータ形式のID体系は`id_query_param`）は、以前は本ファイル内のPythonコメントとして付記していたが、`sites.json`側では同じ情報を各エントリの`_comment`キー（任意の文字列。`SiteConfig`の構築対象からは除外される）として保持しており、情報は失われていない。これらは設定データであり、個別のロジック（関数・メソッド）ではないため本セクションでは項目単位の列挙は行わず、全体としての設計方針のみを記載する。
-* 根拠: [SITES初期化とコメント] (行番号: 303〜305 / 抜粋: "# 新規サイトを監視対象に追加する場合は sites.json に1エントリ追記するだけでよい\n    # （本クラス・本ファイルの変更は不要。フィールドの意味は SiteConfig のdocstring参照）。\n    SITES: List[SiteConfig] = _load_sites(SITES_JSON_PATH)")、[sites.json 冒頭2件] (`sites.json` 行番号: 1〜21 / 抜粋: "{\n    "site_id": "petitpetit_dream",\n    ...\n    "_comment": "既存運用データ（known_casts.json）との後方互換のためファイル名を明示指定"\n  },")
+* 根拠: [SITES初期化とコメント] (行番号: 337〜339 / 抜粋: "# 新規サイトを監視対象に追加する場合は sites.json に1エントリ追記するだけでよい\n    # （本クラス・本ファイルの変更は不要。フィールドの意味は SiteConfig のdocstring参照）。\n    SITES: List[SiteConfig] = _load_sites(SITES_JSON_PATH)")、[sites.json 冒頭2件] (`sites.json` 行番号: 1〜21 / 抜粋: "{\n    "site_id": "petitpetit_dream",\n    ...\n    "_comment": "既存運用データ（known_casts.json）との後方互換のためファイル名を明示指定"\n  },")
 
 
 ### `MonitorConfig.get_data_dir`
@@ -396,7 +396,7 @@
 
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: `self.webhook_url`への代入、`self.session`への`_create_rate_limited_session()`結果の代入、`self._circuit_breaker`への`DiscordCircuitBreaker()`（既定の`failure_threshold=3`）の代入。
-* 根拠: [属性代入] (行番号: 482〜486 / 抜粋: "self.webhook_url = webhook_url\n        self.session = self._create_rate_limited_session()\n        # 連続送信失敗時に以降の送信をスキップするサーキットブレーカー\n        # (このインスタンスの生存期間=1回のプロセス実行の間だけ有効)\n        self._circuit_breaker = DiscordCircuitBreaker()")
+* 根拠: [属性代入] (行番号: 535〜539 / 抜粋: "self.webhook_url = webhook_url\n        self.session = self._create_rate_limited_session()\n        # 連続送信失敗時に以降の送信をスキップするサーキットブレーカー\n        # (このインスタンスの生存期間=1回のプロセス実行の間だけ有効)\n        self._circuit_breaker = DiscordCircuitBreaker()")
 
 
 * **エラーハンドリング**: なし
@@ -538,7 +538,7 @@
 ### `DataManager._LOAD_ERRORS` (クラス定数)
 
 * **役割**: JSONファイルの読み込み失敗とみなす例外群をまとめたクラス定数。`UnicodeDecodeError`は`IOError`/`OSError`のサブクラスではなく`ValueError`のサブクラスであるため、`IOError`のみを捕捉する実装では非UTF-8データによる破損（例:「'utf-8' codec can't decode byte ... : invalid start byte」）を検知できず、同一の破損ファイルへの読み込み失敗が繰り返され続けてしまう問題を踏まえ、`OSError`, `ValueError`, `TypeError`, `KeyError`をまとめて捕捉対象としている。`load_known_casts`（`_read_casts_file`経由）に加え、**Issue #174の修正**により`load_daily_summary`もこの定数で例外を捕捉するようになった（以前は`load_daily_summary`のみ`(json.JSONDecodeError, IOError)`という狭いパターンのままで同種のバグが残っていた）。
-* 根拠: [定義とコメント] (行番号: 784〜788 / 抜粋: "# 読み込み失敗とみなす例外群。UnicodeDecodeErrorはIOErrorのサブクラスではなく\n    # ValueErrorのサブクラスのため、IOErrorだけを捕捉すると非UTF-8データによる\n    # 破損（例: 'utf-8' codec can't decode byte ... : invalid start byte）を\n    # 検知できず、同じ破損ファイルへの読み込み失敗が繰り返され続けてしまう。\n    _LOAD_ERRORS = (OSError, ValueError, TypeError, KeyError)")
+* 根拠: [定義とコメント] (行番号: 867〜871 / 抜粋: "# 読み込み失敗とみなす例外群。UnicodeDecodeErrorはIOErrorのサブクラスではなく\n    # ValueErrorのサブクラスのため、IOErrorだけを捕捉すると非UTF-8データによる\n    # 破損（例: 'utf-8' codec can't decode byte ... : invalid start byte）を\n    # 検知できず、同じ破損ファイルへの読み込み失敗が繰り返され続けてしまう。\n    _LOAD_ERRORS = (OSError, ValueError, TypeError, KeyError)")
 
 
 * **副作用**: なし（タプルの定義のみ）
@@ -570,7 +570,7 @@
 ### `DataManager._QUARANTINE_RETENTION_DAYS` (クラス定数) / `DataManager.cleanup_old_quarantine_files`（Issue #461で追加）
 
 * **役割**: `_QUARANTINE_RETENTION_DAYS = 30`は、`load_known_casts`/`load_daily_summary`が破損検知のたびに作成する`.corrupted-*`隔離ファイルの保持日数を定義するクラス定数。`cleanup_old_quarantine_files(retention_days=_QUARANTINE_RETENTION_DAYS)`は、`self.data_dir`直下の`*.corrupted-*`パターンに一致するファイルのうち、最終更新時刻(`mtime`)が`retention_days`日より古いものを削除するインスタンスメソッド。`.bak`バックアップ（常に最新の1世代のみが上書き保持される）と異なり`.corrupted-*`には削除処理が存在せず、破損が繰り返されるたびに際限なく蓄積しディスクを圧迫し得た問題への対処。
-* 根拠: [クラス定数定義とコメント] (行番号: 798〜802 / 抜粋: "# #461: load_known_casts/load_daily_summaryが破損検知のたびに作成する\n    # .corrupted-*隔離ファイルは、.bak(常に最新の1世代のみ保持され上書きされる)\n    # と異なり削除処理を持たず、破損が繰り返されるたびに増え続けディスクを\n    # 圧迫し得た。この日数より古い隔離ファイルは巡回のたびに削除する。\n    _QUARANTINE_RETENTION_DAYS = 30")、[メソッド定義とDocstring] (行番号: 949〜977 / 抜粋: "def cleanup_old_quarantine_files(self, retention_days: int = _QUARANTINE_RETENTION_DAYS) -> int:\n        """`_QUARANTINE_RETENTION_DAYS`日より古い`.corrupted-*`隔離ファイルを削除する。")
+* 根拠: [クラス定数定義とコメント] (行番号: 881〜885 / 抜粋: "# #461: load_known_casts/load_daily_summaryが破損検知のたびに作成する\n    # .corrupted-*隔離ファイルは、.bak(常に最新の1世代のみ保持され上書きされる)\n    # と異なり削除処理を持たず、破損が繰り返されるたびに増え続けディスクを\n    # 圧迫し得た。この日数より古い隔離ファイルは巡回のたびに削除する。\n    _QUARANTINE_RETENTION_DAYS = 30")、[メソッド定義とDocstring] (行番号: 949〜977 / 抜粋: "def cleanup_old_quarantine_files(self, retention_days: int = _QUARANTINE_RETENTION_DAYS) -> int:\n        """`_QUARANTINE_RETENTION_DAYS`日より古い`.corrupted-*`隔離ファイルを削除する。")
 
 
 * **引数/リクエスト**: `retention_days: int = _QUARANTINE_RETENTION_DAYS`（省略時30日）
@@ -604,7 +604,7 @@
 
 
 * **副作用**: JSONファイルのオープン・パース(`open`, `json.load`)。
-* 根拠: [処理内容] (行番号: 861〜863 / 抜粋: "with open(data_file, 'r', encoding='utf-8') as f:\n            data = json.load(f)\n            return {CastMember(**item) for item in data}")
+* 根拠: [処理内容] (行番号: 985〜987 / 抜粋: "with open(data_file, 'r', encoding='utf-8') as f:\n            data = json.load(f)\n            return {CastMember(**item) for item in data}")
 
 
 * **エラーハンドリング**: なし。Docstringに明記の通り、パース失敗時（JSON構文エラー・非UTF-8データ・想定外のフィールド欠落等）は例外を握りつぶさずそのまま呼び出し元へ送出する設計であり、呼び出し元(`load_known_casts`/`save_known_casts`)側が`DataManager._LOAD_ERRORS`等で捕捉してハンドリングする。
@@ -636,7 +636,7 @@
 ### `DataManager._SAVE_VERIFY_MAX_ATTEMPTS` / `_SAVE_VERIFY_RETRY_DELAY_SECONDS`（クラス定数）/ `DataManager._retry_transient_write`（2026-09-09 運用障害対応で追加）
 
 * **役割**: 運用ログで、`save_known_casts`の一時ファイル書き込み→読み戻し検証(D-L8)が`json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)`（空ファイル相当の内容）で失敗する事象が発生した。NAS等の一時的な書き込み不良（例: `nas_monitor.py`の日次保持期間超過ファイル自動削除とのNAS I/O競合）による一過性の空振りと推測され、当時の実装では即座に諦めて既存データは保持されるため（安全機構自体は正しく機能）データ破損には至らないが、その回にDiscord通知済みの新規キャストが「既知」として保存されず、次回の巡回で重複通知される可能性があった。`save_known_casts`・`save_daily_summary`・`save_site_failures`はいずれも「一時ファイルへ書き込み→読み戻して検証」という同じ形の処理を持つため、リトライ制御を`_retry_transient_write`という共通の静的メソッドへ集約し、実際の書き込み+検証処理（`write_and_verify`引数、`_write_and_verify_tmp`/`_write_and_verify_json_tmp`のいずれかをクロージャで渡す）だけを3箇所それぞれから受け取る設計にした。`_SAVE_VERIFY_MAX_ATTEMPTS`（既定3回）まで、失敗のたびに`_SAVE_VERIFY_RETRY_DELAY_SECONDS`（既定2秒）待機してリトライし、全リトライが失敗した場合のみ最後の例外を呼び出し元へ伝播させ、既存データを保持したまま保存を諦める（各呼び出し元の安全側の挙動自体は変更しない）。
-* 根拠: [クラス定数の定義とコメント] (行番号: 830〜838 / 抜粋: "# 2026-09-09 運用障害対応: save_known_castsの一時ファイル書き込み→読み戻し\n    # 検証(D-L8)が、NAS等の一時的な書き込み不良(例: nas_monitor.pyの日次\n    # 保持期間超過ファイル自動削除とのNAS I/O競合)により空ファイル/破損内容と\n    # なって失敗することがある。" / "_SAVE_VERIFY_MAX_ATTEMPTS = 3\n    _SAVE_VERIFY_RETRY_DELAY_SECONDS = 2.0")、[`_retry_transient_write`定義とDocstring] (行番号: 1071〜1122 / 抜粋: "def _retry_transient_write(tmp_path: Path, write_and_verify: Callable[[], None]) -> None:\n        \"\"\"一時ファイルへの書き込み+検証処理を、NAS等の一時的な書き込み不良に\n        備えて最大`_SAVE_VERIFY_MAX_ATTEMPTS`回リトライする共通ヘルパー。")
+* 根拠: [クラス定数の定義とコメント] (行番号: 887〜895 / 抜粋: "# 2026-09-09 運用障害対応: save_known_castsの一時ファイル書き込み→読み戻し\n    # 検証(D-L8)が、NAS等の一時的な書き込み不良(例: nas_monitor.pyの日次\n    # 保持期間超過ファイル自動削除とのNAS I/O競合)により空ファイル/破損内容と\n    # なって失敗することがある。" / "_SAVE_VERIFY_MAX_ATTEMPTS = 3\n    _SAVE_VERIFY_RETRY_DELAY_SECONDS = 2.0")、[`_retry_transient_write`定義とDocstring] (行番号: 1071〜1122 / 抜粋: "def _retry_transient_write(tmp_path: Path, write_and_verify: Callable[[], None]) -> None:\n        \"\"\"一時ファイルへの書き込み+検証処理を、NAS等の一時的な書き込み不良に\n        備えて最大`_SAVE_VERIFY_MAX_ATTEMPTS`回リトライする共通ヘルパー。")
 
 
 * **引数/リクエスト**: `_retry_transient_write(tmp_path: Path, write_and_verify: Callable[[], None])`。`write_and_verify`は引数なしで呼ばれるコールバックで、呼び出し元が対象の`tmp_path`・保存データをクロージャで束縛して渡す。
@@ -865,7 +865,7 @@
 
 
 * **副作用**: ランダム待機(`time.sleep(random.uniform(1.0, 3.0))`)、対象サイトのURLへのHTTP GETリクエスト、デバッグログ出力。
-* 根拠: [処理内容] (行番号: 1388〜1391 / 抜粋: "time.sleep(random.uniform(1.0, 3.0))\n\n            logger.debug(f"Fetching URL: {site.target_url}")\n            response = self.session.get(site.target_url, timeout=MonitorConfig.TIMEOUT)")
+* 根拠: [処理内容] (行番号: 1735〜1738 / 抜粋: "time.sleep(random.uniform(1.0, 3.0))\n\n            logger.debug(f"Fetching URL: {site.target_url}")\n            response = self.session.get(site.target_url, timeout=MonitorConfig.TIMEOUT)")
 
 
 * **エラーハンドリング**: `requests.RequestException`発生時はデバッグログを出力したうえで例外を再送出(`raise`)し、呼び出し元でのハンドリングを要求する（Docstringにも「通信エラー時」に本例外を送出する旨明記）。**（Issue #395で追加）** 別ドメインへのリダイレクトを検知した場合は`SiteUnavailableError`を送出する（`requests.RequestException`ではないため`except`節には捕捉されず、そのまま呼び出し元`_check_site`へ伝播する）。**（2026-09-02のbellica閉鎖対応で変更）** 以前はここで無条件に`exc_info=True`付きのERRORログを出力していたが、ログの重大度は連続失敗状態に応じて呼び出し元の`_handle_site_network_failure`が決定するよう変更された（恒久的に消失したサイトが毎時ERRORを出し続けてヘルスチェックを発報させないようにするため）。
@@ -915,7 +915,7 @@
 ### `WebMonitor._parse_html`（D-L12で変更、品質でヘルパーメソッドへ分割）
 
 * **役割**: `BeautifulSoup`オブジェクトから、`selector_container`でキャストのコンテナ要素を抽出し、各コンテナについて`_extract_raw_name`/`_extract_cast_age`/`_extract_cast_link_and_id`/`_extract_cast_image_url`（いずれも品質で追加）を順に呼び出して`CastMember`を構築する。**（品質で変更）** 以前は名前・年齢・リンク/ID・画像の4種の抽出ロジックが170行超の単一`for`ループ本体に直接書かれ、深くネストした条件分岐で読みにくかったため、ループ制御（`skip_unnamed_casts`時の`continue`とログ出力）のみを本メソッドに残し、各フィールドの純粋な抽出処理を上記4つの静的ヘルパーメソッドへ分離した。抽出ロジック自体（ID抽出の複数段フォールバック等）は分離前と完全に同一である。ただし年齢抽出（`_extract_cast_age`）のみ、分離後に**Issue #589**で`.search()`から`.finditer()`ベースへ実装が変更されている（D-L12の妥当性チェック自体の範囲・判定基準は変更なし。詳細は前項参照）。
-* 根拠: [メソッド定義とDocstring] (行番号: 1949〜2013 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:\n        """HTMLスープからキャスト情報を抽出する。")、[ヘルパー呼び出し] (行番号: 1971, 1647〜1649 / 抜粋: "name, name_elem = self._extract_raw_name(div, site)", "age = self._extract_cast_age(name_elem)\n                detail_url, cast_id = self._extract_cast_link_and_id(div, site, name)\n                image_url = self._extract_cast_image_url(div, site)")
+* 根拠: [メソッド定義とDocstring] (行番号: 1949〜2013 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:\n        """HTMLスープからキャスト情報を抽出する。")、[ヘルパー呼び出し] (行番号: 1971, 1994〜1996 / 抜粋: "name, name_elem = self._extract_raw_name(div, site)", "age = self._extract_cast_age(name_elem)\n                detail_url, cast_id = self._extract_cast_link_and_id(div, site, name)\n                image_url = self._extract_cast_image_url(div, site)")
 
 
 * **引数/リクエスト**: `soup: BeautifulSoup`（解析対象のHTML）, `site: SiteConfig`（対象サイトの設定。セレクタ・ベースURLに使用）
@@ -1082,7 +1082,7 @@
 ### `_MONITOR_LOCK_FILE_PATH` (モジュール定数)
 
 * **役割**: 多重起動防止ロックに用いるロックファイル（`.newface_monitor.lock`）のパス。cron等での実行が重複すると、既知キャストリストやサマリファイルへの読み書きが競合し、一時消失→再通知等のデータ不整合が起きうる（`batch_download_discord.py`では既に`flock`による同種のロックが導入済み）ため、`run_monitor`が多重起動防止ロックの対象ファイルとして用いる。
-* 根拠: [定義とコメント] (行番号: 1996〜2000 / 抜粋: "# M-7-4: 多重起動防止ロック。cron等での実行が重複すると、既知キャストリストや\n# サマリファイルへの読み書きが競合し、一時消失→再通知等のデータ不整合が起きうる\n# (batch_download_discord.pyでは既にflockによる同種のロックが導入済み)。\n# cronの1回が想定より長く(1時間超)かかるとこの多重起動が起きやすい。\n_MONITOR_LOCK_FILE_PATH = CURRENT_DIR / ".newface_monitor.lock"")
+* 根拠: [定義とコメント] (行番号: 2343〜2347 / 抜粋: "# M-7-4: 多重起動防止ロック。cron等での実行が重複すると、既知キャストリストや\n# サマリファイルへの読み書きが競合し、一時消失→再通知等のデータ不整合が起きうる\n# (batch_download_discord.pyでは既にflockによる同種のロックが導入済み)。\n# cronの1回が想定より長く(1時間超)かかるとこの多重起動が起きやすい。\n_MONITOR_LOCK_FILE_PATH = CURRENT_DIR / ".newface_monitor.lock"")
 
 
 * **副作用**: なし（パス文字列の定義のみ）
@@ -1402,7 +1402,7 @@ graph TD
 * **（Issue #365で追加）隔離は内容起因の破損に限る**: `DataManager.load_known_casts`が`.corrupted-*`へ隔離するのは`_CONTENT_ERRORS`（`ValueError`/`TypeError`/`KeyError`）で読めなかった場合だけであり、`OSError`（NAS/CIFSの瞬断等）の場合は`KnownCastsUnavailableError`を送出して`_check_site`が当該サイトを今回の実行ではスキップする（巡回・通知・保存なし）。この例外を新たな呼び出し元で握りつぶして空集合として続行すると、全キャストの再通知とunion保存による退店済みキャストの復活を再発させるため、必ずスキップ扱いにすること。回帰テストは`test_newface_monitor_datamanager.py`の`TestLoadKnownCastsTransientIOErrorIsNotQuarantined`/`TestLoadKnownCastsContentErrorsAreQuarantined`。
 * 根拠: [OSError分岐のコメント] (行番号: 891〜898 / 抜粋: "# 中身は正しい可能性が高いため隔離せず、当該サイトの処理を\n            # スキップさせる(以前は種別を問わず .corrupted-* へ退避していたため、\n            # 正常なファイルが隔離され、.bakが無ければ空集合→全キャスト再通知、\n            # 以降はunionで保存されるため隔離前のデータは永久に戻らなかった)。")
 * **（Issue #461で解消）`.corrupted-*`隔離ファイルの自動クリーンアップを追加**: 以前は`DataManager.load_known_casts`/`load_daily_summary`が内容起因の読み込み失敗時に破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`として同一ディレクトリに退避するのみで、これらの隔離ファイルを削除・世代整理する処理が本ファイル内のどこにも存在せず、破損が繰り返し発生する運用環境では際限なく蓄積し続ける可能性があった。現在は`DataManager.cleanup_old_quarantine_files`（`_run_monitor_locked`が`DataManager`生成直後に1回だけ呼び出す）が、`_QUARANTINE_RETENTION_DAYS`（既定30日）より`mtime`が古い`.corrupted-*`ファイルを削除する。ただし`.bak`バックアップファイル自体は元々1世代のみが上書き保持される設計であり、こちらのクリーンアップは元から不要（新設のクリーンアップ対象にも含まれない）。
-* 根拠: [load_known_castsの隔離処理] (行番号: 908〜910 / 抜粋: "quarantine_path = data_file.with_name(\n            f"{data_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"\n        )")、[cleanup_old_quarantine_filesとコメント] (行番号: 798〜845 / 抜粋: "# #461: load_known_casts/load_daily_summaryが破損検知のたびに作成する\n    # .corrupted-*隔離ファイルは、.bak(常に最新の1世代のみ保持され上書きされる)\n    # と異なり削除処理を持たず、破損が繰り返されるたびに増え続けディスクを\n    # 圧迫し得た。")、[_run_monitor_lockedからの呼び出し] (行番号: 2048〜2051 / 抜粋: "data_manager = DataManager(data_dir)\n    # #461: 破損検知のたびに増え続ける.corrupted-*隔離ファイルを、巡回のたびに\n    # 一定期間より古いものだけ削除する(失敗しても本処理は継続する)。\n    data_manager.cleanup_old_quarantine_files()")
+* 根拠: [load_known_castsの隔離処理] (行番号: 908〜910 / 抜粋: "quarantine_path = data_file.with_name(\n            f"{data_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"\n        )")、[cleanup_old_quarantine_filesとコメント] (行番号: 798〜845 / 抜粋: "# #461: load_known_casts/load_daily_summaryが破損検知のたびに作成する\n    # .corrupted-*隔離ファイルは、.bak(常に最新の1世代のみ保持され上書きされる)\n    # と異なり削除処理を持たず、破損が繰り返されるたびに増え続けディスクを\n    # 圧迫し得た。")、[_run_monitor_lockedからの呼び出し] (行番号: 2395〜2398 / 抜粋: "data_manager = DataManager(data_dir)\n    # #461: 破損検知のたびに増え続ける.corrupted-*隔離ファイルを、巡回のたびに\n    # 一定期間より古いものだけ削除する(失敗しても本処理は継続する)。\n    data_manager.cleanup_old_quarantine_files()")
 * **（Issue #462で解消）`load_daily_summary`は`load_known_casts`ほど手厚い復旧をしない、という制約を解消**: Issue #174の修正により、`daily_summary.json`が非UTF-8データで破損しても`load_daily_summary`が例外を送出せず空辞書を返すようになり、`record_daily_new_casts`経由の無限再通知（`save_known_casts`未実行による既知キャストの巻き戻り）は解消されていた。ただし当時は`load_known_casts`が持つ隔離（`.corrupted-*`へのリネーム）・`.bak`バックアップからの自動復旧の仕組みが`load_daily_summary`/`save_daily_summary`には無く、破損時は単に累積中の未送信カウントが失われ`0`から再カウントされていた。Issue #462でこの非対称性が解消され、`load_daily_summary`/`save_daily_summary`にも`load_known_casts`/`save_known_casts`と同じ隔離・バックアップ復旧・読み戻し検証の仕組みが拡張適用された。破損ファイルは隔離のうえ`.bak`から復旧を試み、それも不可能な場合にのみ従来通り空辞書へフォールバックし累積カウントが失われる（完全に無くなったわけではなく発生条件が狭まった）。**（Issue #183で修正）** かつては加えてカレンダー日付が変わるだけでも累積が無条件にリセットされていたが、この日付ベースのリセット自体は廃止された。
 * 根拠: [load_daily_summaryの#462修正] (行番号: 1068〜1091 / 抜粋: "# #462: load_known_castsと同じ復旧機構(隔離+バックアップ復旧)を適用する。"), [save_daily_summaryの#462修正] (行番号: 1130〜1146), [record_daily_new_castsの累積] (行番号: 1180, 1187 / 抜粋: "data = self.load_daily_summary()" / "counts = data.setdefault('counts', {})")
 

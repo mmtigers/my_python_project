@@ -19,7 +19,7 @@
 
 `main.tsx`のService Worker更新戦略(Issue #362)がカバーできない領域、すなわちService Workerのスコープ外にあるページ向けの更新検知ロジックを、単体テスト可能な形で切り出したモジュールである。エクスポートは2つ: パスがスコープ外かどうかを判定する純粋関数`isOutsideServiceWorkerScope(pathname: string): boolean`と、定期呼び出し用の非同期チェック関数を生成するファクトリ関数`createUpdateChecker(pathname: string, deps: UpdateCheckDeps): () => Promise<void>`である。ファイル冒頭のコメントによれば、`vite-plugin-pwa`が生成するService Workerのスコープは`vite.config.ts`の`base`(`/quest/`)に閉じており、`/camera`のようなスコープ外のページでは`navigator.serviceWorker.controller`が常に`null`のままとなるため、`main.tsx`の`controllerchange`ベースの自動リロード(Issue #362)が一切発火しない。この隙間を埋めるため、スコープ外のページ自身のHTMLを定期的にno-cacheで再取得し、`Last-Modified`ヘッダの変化を見ることで同じ役割（新しいバンドルのデプロイ検知→自動リロード）を代替する。
 * 根拠: ファイル冒頭コメント全文 (行番号: 1〜12 / 抜粋: "// #591: vite-plugin-pwaのService Workerのスコープはvite.config.tsのbase(`/quest/`)\n// に閉じている。main.tsxのcontrollerchangeハンドラ(#362)は新しいSWが有効化された\n// 時点で自動リロードする仕組みだが、`/camera`のようにスコープ外のパスでは、その\n// ページ自体がSWの管理下に一切入らない(navigator.serviceWorker.controllerが常に\n// nullのまま)ため、controllerchangeイベント自体が発火しない。", "// SWの管理外にあるページに対しては、ページ自身のHTMLを定期的にno-cacheで\n// 再取得しLast-Modifiedヘッダの変化を見ることで、同じ問題を防ぐ。")
-* 根拠: エクスポートは2つ (行番号: 15, 31 / 抜粋: "export function isOutsideServiceWorkerScope(pathname: string): boolean {", "export function createUpdateChecker(pathname: string, deps: UpdateCheckDeps) {")
+* 根拠: エクスポートは2つ (行番号: 17, 33 / 抜粋: "export function isOutsideServiceWorkerScope(pathname: string): boolean {", "export function createUpdateChecker(pathname: string, deps: UpdateCheckDeps) {")
 
 ## 3. 外部依存関係
 

@@ -88,7 +88,7 @@
 ### `SilencePolicyFilter`
 
 * **（2026-09-06 品質監査で修正）** 直前に `_QUERY_SECRET_RE` / `redact_query_secrets(text)` / `SecretRedactionFilter` が追加された(次項)。`lifespan` は `uvicorn.access` ロガーに `SecretRedactionFilter` → `SilencePolicyFilter` の順で両方を登録する。
-* 根拠: (行番号: 140〜141 / 抜粋: "access_logger.addFilter(SecretRedactionFilter())\n    access_logger.addFilter(SilencePolicyFilter())")
+* 根拠: (行番号: 245〜246 / 抜粋: "access_logger.addFilter(SecretRedactionFilter())\n    access_logger.addFilter(SilencePolicyFilter())")
 
 ### `redact_query_secrets` / `SecretRedactionFilter` **（2026-09-06 品質監査で修正）**
 

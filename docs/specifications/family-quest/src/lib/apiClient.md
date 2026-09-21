@@ -37,8 +37,8 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `../types` | インポート元のファイル実装が提供されていないため、各データ構造のプロパティが不明 | 根拠: [import宣言] (行番号: 3 / 抜粋: "from \"../types\";") |
-| `import.meta.env.VITE_API_URL` | Viteの環境変数依存であり、本ファイル単体では設定値が不明 | 根拠: [getBaseUrl内の条件分岐] (行番号: 8 / 抜粋: "if (import.meta.env.VITE_API_URL) {") |
-| `window.location.origin` | ブラウザの実行環境に依存しており、静的解析ではURLが特定不可 | 根拠: [getBaseUrlのフォールバック] (行番号: 12 / 抜粋: "return typeof window !== 'undefined' ? window.location.origin : '';") |
+| `import.meta.env.VITE_API_URL` | Viteの環境変数依存であり、本ファイル単体では設定値が不明 | 根拠: [getBaseUrl内の条件分岐] (行番号: 9 / 抜粋: "if (import.meta.env.VITE_API_URL) {") |
+| `window.location.origin` | ブラウザの実行環境に依存しており、静的解析ではURLが特定不可 | 根拠: [getBaseUrlのフォールバック] (行番号: 13 / 抜粋: "return typeof window !== 'undefined' ? window.location.origin : '';") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -49,7 +49,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: [getBaseUrl関数] (行番号: 6 / 抜粋: "const getBaseUrl = (): string => {")
+* 根拠: [getBaseUrl関数] (行番号: 7 / 抜粋: "const getBaseUrl = (): string => {")
 
 
 * **戻り値/レスポンス**: `string` (決定されたベースURL)
@@ -57,7 +57,7 @@
 
 
 * **副作用**: グローバルオブジェクト (`import.meta.env`, `window`) へのアクセス
-* 根拠: [getBaseUrl内の処理] (行番号: 12 / 抜粋: "return typeof window !== 'undefined' ? window.location.origin : '';")
+* 根拠: [getBaseUrl内の処理] (行番号: 13 / 抜粋: "return typeof window !== 'undefined' ? window.location.origin : '';")
 
 
 * **エラーハンドリング**: なし
@@ -69,7 +69,7 @@
 
 * **役割**: API通信のベースとなるクラス。コンストラクタでベースURLを受け取り、共通のHTTPメソッドラッパー (`get`, `post`, `postForm`, `put`, `delete`) と、インベントリ機能固有のメソッド群を提供する。**（Issue #476で修正）** クラス自体が`export class ApiClient`として外部からもインポート可能にエクスポートされるようになった（以前はモジュール内部限定で、シングルトンインスタンス`apiClient`のみがエクスポートされていた）。また、コンストラクタが受け取った`baseUrl`の末尾のスラッシュを`replace(/\/+$/, '')`で正規化して除去するようになった。
 * 根拠: [ApiClientクラス定義] (行番号: 49〜137 / 抜粋: "export class ApiClient {")
-* 根拠: `export`化 (行番号: 49 / 抜粋: "export class ApiClient {")
+* 根拠: `export`化 (行番号: 50 / 抜粋: "export class ApiClient {")
 * 根拠: 末尾スラッシュの正規化 (行番号: 52〜57 / 抜粋: "constructor(baseUrl: string) {\n        // #476: VITE_API_URL等に末尾スラッシュ付きの値が設定されていても、\n        // cleanEndpoint(先頭に'/'を付与)と結合した際に「//」が生じないよう、\n        // 末尾のスラッシュをここで正規化しておく。\n        this.baseUrl = baseUrl.replace(/\\/+$/, '');\n    }")
 
 
@@ -119,11 +119,11 @@
 
 
 * **引数/リクエスト**: `endpoint: string`, `formData: FormData`
-* 根拠: [`postForm`引数] (行番号: 56 / 抜粋: "async postForm<T>(endpoint: string, formData: FormData): Promise<T> {")
+* 根拠: [`postForm`引数] (行番号: 77 / 抜粋: "async postForm<T>(endpoint: string, formData: FormData): Promise<T> {")
 
 
 * **戻り値/レスポンス**: `Promise<T>`
-* 根拠: [`postForm`戻り値] (行番号: 56 / 抜粋: "async postForm<T>(endpoint: string, formData: FormData): Promise<T> {")
+* 根拠: [`postForm`戻り値] (行番号: 77 / 抜粋: "async postForm<T>(endpoint: string, formData: FormData): Promise<T> {")
 
 
 * **副作用**: `_request` 呼び出しによるAPI通信（`FormData`をそのままbodyに渡す）
@@ -148,7 +148,7 @@
 
 
 * **引数/リクエスト**: `endpoint: string`, `options: RequestOptions`
-* 根拠: [_requestメソッド定義] (行番号: 77 / 抜粋: "private async _request<T>(endpoint: string, options: RequestOptions): Promise<T> {")
+* 根拠: [_requestメソッド定義] (行番号: 98 / 抜粋: "private async _request<T>(endpoint: string, options: RequestOptions): Promise<T> {")
 
 
 * **戻り値/レスポンス**: `Promise<T>` （204/空ボディの場合は `undefined`、それ以外はパースされたJSONレスポンス）
@@ -195,7 +195,7 @@
 ### `apiClient` (インスタンス定数)
 
 * **役割**: `BASE_URL` を用いて初期化された `ApiClient` のシングルトンインスタンス。外部モジュールからのAPI呼び出しに使用される。
-* 根拠: [インスタンスのエクスポート] (行番号: 108 / 抜粋: "export const apiClient = new ApiClient(BASE_URL);")
+* 根拠: [インスタンスのエクスポート] (行番号: 142 / 抜粋: "export const apiClient = new ApiClient(BASE_URL);")
 
 
 
@@ -286,8 +286,8 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `../types.ts` (または `../types/index.ts` 等) | `ApiResponse` 以外の戻り値型 (`InventoryResponse`とその`items: InventoryItem[]`) の正確な構造を把握し、API利用側で利用できるプロパティを確定するため。 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryResponse } from \"../types\";") |
-| 中 | `.env` ファイル | `VITE_API_URL` に設定される具体的なバックエンドのホスト情報を特定し、ルーティング全容を把握するため。 | 根拠: [getBaseUrl関数] (行番号: 8 / 抜粋: "if (import.meta.env.VITE_API_URL) {") |
-| 中 | バックエンドルーティングファイル (例: FastAPIの `main.py` やルーター設定) | `/api/quest/inventory/*` などのエンドポイントが実際にどのようなビジネスロジックを実行しているか把握するため。 | 根拠: [各API呼び出し先エンドポイント] (行番号: 104 / 抜粋: "'/api/quest/inventory/use'") |
+| 中 | `.env` ファイル | `VITE_API_URL` に設定される具体的なバックエンドのホスト情報を特定し、ルーティング全容を把握するため。 | 根拠: [getBaseUrl関数] (行番号: 9 / 抜粋: "if (import.meta.env.VITE_API_URL) {") |
+| 中 | バックエンドルーティングファイル (例: FastAPIの `main.py` やルーター設定) | `/api/quest/inventory/*` などのエンドポイントが実際にどのようなビジネスロジックを実行しているか把握するため。 | 根拠: [各API呼び出し先エンドポイント] (行番号: 138 / 抜粋: "'/api/quest/inventory/use'") |
 
 ## 8. 保守上の注意点
 
@@ -295,7 +295,7 @@ graph TD
 * **[修正済み] ベースURLとエンドポイントの結合時の`//`混入（Issue #476）**: `_request` 内で `cleanEndpoint` として先頭のスラッシュを付与・補完しているが、以前は`this.baseUrl` の末尾のスラッシュの有無について検査・トリム処理が無く、`VITE_API_URL`等の環境変数やオリジンの末尾にスラッシュが含まれていた場合、結合後のURLが `//` となる可能性があった。現在はコンストラクタで`baseUrl.replace(/\/+$/, '')`により末尾の連続するスラッシュを正規化して除去してから`this.baseUrl`に保持するようになった。
 * 根拠: (行番号: 52〜57 / 抜粋: "constructor(baseUrl: string) {\n        // #476: VITE_API_URL等に末尾スラッシュ付きの値が設定されていても、\n        // cleanEndpoint(先頭に'/'を付与)と結合した際に「//」が生じないよう、\n        // 末尾のスラッシュをここで正規化しておく。\n        this.baseUrl = baseUrl.replace(/\\/+$/, '');\n    }")
 * **`ApiClient`クラスのエクスポート（Issue #476）**: 以前は`ApiClient`クラス自体はモジュール内部限定で、シングルトンインスタンス`apiClient`のみが外部にエクスポートされていた。現在は`export class ApiClient`としてクラス自体も外部から利用可能（例えばテストコードが独自の`baseUrl`で別インスタンスを生成する場合など）になっている。シングルトン`apiClient`の使い方自体（`export const apiClient = new ApiClient(BASE_URL);`）は変わっていない。
-* 根拠: (行番号: 49, 139 / 抜粋: "export class ApiClient {", "export const apiClient = new ApiClient(BASE_URL);")
+* 根拠: (行番号: 50, 142 / 抜粋: "export class ApiClient {", "export const apiClient = new ApiClient(BASE_URL);")
 * **SSR環境の考慮**: `typeof window !== 'undefined'` の判定を行っているが、`undefined` (例: SSR/Node環境) かつ `.env` が未定義の場合、ベースURLが空文字 `''` となる。これによりリクエストが相対パスとして処理されるか、エラーになる。
 * **エラー時のJSONパース**: `response.json().catch(() => ({}))` と記載されており、APIが `text/html` 等の非JSONエラーレスポンスを返した場合、パースエラーは握りつぶされて常に空オブジェクトとして扱われる。
 * **[修正済み] 204/空ボディ応答でのJSONパース失敗（Issue #412 F-L3）**: 以前は成功応答を一律 `response.json()` していたため、`cancel`/`reject`系などボディを返さないエンドポイントで `"Unexpected end of JSON input"` が発生していた。`response.status === 204` および空文字列本文の場合は `undefined` を返すようにした。
