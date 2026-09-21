@@ -151,7 +151,7 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 
 ### `mobile_status_page`（GET `{_MOBILE_PATH}`、スマホ対応で追加）
 
-* **役割**: Streamlitを介さない読み取り専用のサマリーページを返す。スマートフォンで見るのはステータスカードの9枚、という用途に対して、Streamlitの初期化・WebSocket接続・Reactの読み込みを省く。ダッシュボード本体はグラフ・ログ・メンテナンス操作を持つ「詳しく見る側」として残し、このページからリンクする。`dashboard_path`（`{_BASE_PATH}/`）を渡すことで各カードが詳細タブへのリンクになり、`status_path`（`_MOBILE_STATUS_PATH`）を渡すことで自動更新が差分更新になる。
+* **役割**: Streamlitを介さない読み取り専用のサマリーページを返す。スマートフォンで見るのはステータスカードだけ、という用途に対して、Streamlitの初期化・WebSocket接続・Reactの読み込みを省く。ダッシュボード本体はグラフ・ログ・メンテナンス操作を持つ「詳しく見る側」として残し、このページからリンクする。`dashboard_path`（`{_BASE_PATH}/`）を渡すことで各カードが詳細タブへのリンクになり、`status_path`（`_MOBILE_STATUS_PATH`）を渡すことで自動更新が差分更新になる。
 * 根拠: `def mobile_status_page() -> HTMLResponse:` (行番号: 81〜104 / 抜粋: "def mobile_status_page() -> HTMLResponse:")
 
 * **引数/リクエスト**: なし

@@ -43,7 +43,7 @@
 | `config` | ファイル内に定義がないため、`SQLITE_DB_PATH`や`MONITOR_DEVICES`などの具体的な値や構造が不明。 | `config.SQLITE_DB_PATH` (行番号: 44 / 抜粋: "config.SQLITE_DB_PATH") |
 | `core.logger.setup_logging` | ファイル内に実装がないため、ログの出力先やフォーマットが不明。 | `setup_logging("analysis_service")` (行番号: 18 / 抜粋: "setup_logging("analysis_service")") |
 | データベースの各種テーブル | スキーマ定義が提供されていないため、カラムの型や制約、インデックスの有無が不明。 | `SELECT * FROM {table_name}` (行番号: 155, 164, 349 / 抜粋: "SELECT * FROM {table_name}") |
-| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 500 / 抜粋: "home_system.service") |
+| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 485 / 抜粋: "home_system.service") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -67,8 +67,8 @@
 
 * **エラーハンドリング**: なし
 * 根拠: 該当関数内に `try-except` なし (行番号: 33〜45 / 抜粋: "def get_ro_db_connection()")
-* **呼出し側での接続管理について（#411 S-L8で修正）**: この関数が返す接続を `with get_ro_db_connection() as conn:` の形で使っている呼出し元（`load_nas_status`・`load_bicycle_data`）は、sqlite3の`Connection.__exit__`がcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、接続がcloseされずリークしていた。この2箇所を`with contextlib.closing(get_ro_db_connection()) as conn:`に変更し、明示的にcloseするようにした。`load_data_from_db`・`load_weather_history`・`load_yearly_temperature_stats`は元々`try/finally`で`conn.close()`していたため対象外。**（Issue #507で削除）** 以前は同じパターンを使う3つ目の呼出し元として`load_ranking_dates`があったが、参照先の`app_rankings`テーブルへの書き込みコードが存在せず機能として死んでいたため、`load_ranking_data`とともに削除された。
-* 根拠: `with contextlib.closing(get_ro_db_connection()) as conn:` (`load_nas_status`: 行番号171、`load_bicycle_data`: 行番号403)
+* **呼出し側での接続管理について（#411 S-L8で修正）**: この関数が返す接続を `with get_ro_db_connection() as conn:` の形で使っている呼出し元（`load_nas_status`、および当時存在した`load_bicycle_data`）は、sqlite3の`Connection.__exit__`がcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、接続がcloseされずリークしていた。この2箇所を`with contextlib.closing(get_ro_db_connection()) as conn:`に変更し、明示的にcloseするようにした。`load_data_from_db`・`load_weather_history`・`load_yearly_temperature_stats`は元々`try/finally`で`conn.close()`していたため対象外。**（Issue #507で削除）** 以前は同じパターンを使う3つ目の呼出し元として`load_ranking_dates`があったが、参照先の`app_rankings`テーブルへの書き込みコードが存在せず機能として死んでいたため、`load_ranking_data`とともに削除された。
+* 根拠: `with contextlib.closing(get_ro_db_connection()) as conn:` (`load_nas_status`: 行番号171。`load_bicycle_data`は駐輪場の退役で削除済み)
 
 
 
@@ -200,11 +200,11 @@
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 165 / 抜粋: "return load_data_from_db(query)")
+* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 193 / 抜粋: "return load_data_from_db(query)")
 
 
 * **エラーハンドリング**: 内部で呼び出される `load_data_from_db` に依存。
-* 根拠: `return load_data_from_db(query)` (行番号: 165 / 抜粋: "return load_data_from_db(query)")
+* 根拠: `return load_data_from_db(query)` (行番号: 193 / 抜粋: "return load_data_from_db(query)")
 
 
 
@@ -335,27 +335,10 @@
 
 
 
-### `load_bicycle_data`
+### （2026-09-21で削除）`load_bicycle_data`
 
-* **役割**: 駐輪場データを取得する。対象テーブルが存在するか事前に検証する。
-* 根拠: `load_bicycle_data` (行番号: 349 / 抜粋: "SELECT * FROM {table_name}")
-
-
-* **引数/リクエスト**: `limit` (`int`, デフォルト `2000`): 取得件数の上限。
-* 根拠: `limit: int = 2000` (行番号: 438 / 抜粋: "limit: int = 2000")
-
-
-* **戻り値/レスポンス**: `pd.DataFrame` (駐輪場データのデータフレーム)
-* 根拠: `-> pd.DataFrame:` (行番号: 340 / 抜粋: "-> pd.DataFrame:")
-
-
-* **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db(query)` (行番号: 350 / 抜粋: "return load_data_from_db(query)")
-
-
-* **エラーハンドリング**: 例外発生時はエラーログを出力し空のデータフレームを返す。
-* 根拠: `except Exception as e:` (行番号: 353 / 抜粋: "return pd.DataFrame()")
-
+* **退役（2026-09-21）**: 以前は`bicycle_parking_records`（旧`config.SQLITE_TABLE_BICYCLE`）から`ORDER BY timestamp DESC LIMIT {limit}`で駐輪場の待機数を返す`load_bicycle_data(limit=2000)`が存在し、ダッシュボードの「🚲 駐輪場待機」カードと「🚃 おでかけ」タブの待機数推移グラフが呼び出し元だった。いずれも使わなくなったためオーナー判断で表示側ごと削除し、本関数と`config.SQLITE_TABLE_BICYCLE`も併せて削除した。`bicycle_parking_records`テーブル自体は履歴として残している（削除マイグレーションは追加していない）。
+* 根拠: 現行の`analysis_service.py`に`load_bicycle_data`という文字列が存在しないこと（削除の確認）
 
 
 ### （Issue #701で削除）`load_ai_report`
@@ -371,11 +354,11 @@
 ### `get_disk_usage`
 
 * **役割**: ルートディレクトリ（`/`）のディスク使用量（全体、使用済、空き、使用率）を取得する。
-* 根拠: `get_disk_usage` (行番号: 460 / 抜粋: "total, used, free = shutil.disk_usage("/")")
+* 根拠: `get_disk_usage` (行番号: 445 / 抜粋: "total, used, free = shutil.disk_usage("/")")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 457 / 抜粋: "def get_disk_usage()")
+* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 442 / 抜粋: "def get_disk_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (GB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -383,7 +366,7 @@
 
 
 * **副作用**: OSファイルシステムのディスク容量読み取り。
-* 根拠: `shutil.disk_usage("/")` (行番号: 460 / 抜粋: "shutil.disk_usage("/")")
+* 根拠: `shutil.disk_usage("/")` (行番号: 445 / 抜粋: "shutil.disk_usage("/")")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `None` を返す。
@@ -398,7 +381,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 476 / 抜粋: "def get_memory_usage()")
+* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 461 / 抜粋: "def get_memory_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (MB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -421,7 +404,7 @@
 
 
 * **引数/リクエスト**: `lines` (`int`, デフォルト `50`): 行数。`priority` (`Optional[str]`): ログの優先度。`target_date` (`Optional[date]`): 対象日付。
-* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 497 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
+* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 482 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
 
 
 * **戻り値/レスポンス**: `str` (取得したログの文字列。失敗時はエラーメッセージの文字列)
@@ -429,11 +412,11 @@
 
 
 * **副作用**: OSコマンド（`journalctl`）の実行。
-* 根拠: `subprocess.run` (行番号: 510 / 抜粋: "subprocess.run(cmd")
+* 根拠: `subprocess.run` (行番号: 495 / 抜粋: "subprocess.run(cmd")
 
 
 * **エラーハンドリング**: 例外発生時はエラーメッセージを文字列として返す。
-* 根拠: `except Exception as e:` (行番号: 513 / 抜粋: "return f"ログ取得エラー: {e}"")
+* 根拠: `except Exception as e:` (行番号: 498 / 抜粋: "return f"ログ取得エラー: {e}"")
 
 
 
@@ -489,7 +472,6 @@ graph TD
         CalcCost["calculate_monthly_cost_cumulative()"]
         LoadWea["load_weather_history()"]
         LoadYearly["load_yearly_temperature_stats()"]
-        LoadBike["load_bicycle_data()"]
     end
 
     subgraph System Stats & Utils
@@ -557,7 +539,6 @@ graph TD
 | デバイス情報の詳細 | `config.MONITOR_DEVICES` の内部構造が不明なため、どのようなデバイスがマッピング対象になるかが完全に特定できない。 | `config.py` |
 | 各種テーブルのスキーマ | `device_records`, `weather_history` 等のテーブル構造定義がないため、各カラムのデータ型や制約が不明。 | DBスキーマ定義ファイルまたは実際のSQLiteファイル |
 | NASのテーブル名 | `getattr(config, "SQLITE_TABLE_NAS", "nas_records")` とされており、本番環境で動的にどちらが使われるか不明。 | `config.py` |
-| 駐輪場データのテーブル名 | `getattr(config, "SQLITE_TABLE_BICYCLE", "bicycle_parking_records")` とされており、設定値が不明。 | `config.py` |
 | Systemdサービスの詳細 | `home_system.service` の実体が不明なため、このサービスが何を出力しているのか不明。（リポジトリ内を`*.service`・`*.timer`等で検索したが該当するSystemdユニット定義ファイルは見つからず、解消不可） | OSのSystemdサービス定義ファイル |
 
 ## 相互参照による補足情報
@@ -565,9 +546,8 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | デバイス情報の詳細 | `MY_HOME_SYSTEM/config.py`を直接確認したところ、`MONITOR_DEVICES`は`devices.json`（`DEVICES_JSON_PATH`、`config.py:232`）の`monitor_devices`キーを`DeviceConfig`Pydanticモデル（`config.py:160〜165`）でバリデーションし`model_dump()`した辞書のリストであることが判明した。`DeviceConfig`のフィールドは`id: str`, `type: str`, `location: str`, `name: str`, `notify_settings: NotifySettings`（デフォルトは`NotifySettings()`）であり、これは`analysis_service.py`側の`apply_friendly_names`が参照する`d["id"]`, `d.get("name", d["id"])`, `d.get("location", "その他")`という辞書アクセスと矛盾なく整合することを確認した。ただし`devices.json`自体（実際に登録されているデバイスの一覧データ）はリポジトリ内に見つからず、実データの内容は依然として不明である。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:160〜165, 232, 296〜313` |
-| 各種テーブルのスキーマ | `MY_HOME_SYSTEM/current_schema.sql`を直接確認したところ、本ファイルが参照する主要テーブルのスキーマが判明した。`device_records`: `id INTEGER PRIMARY KEY AUTOINCREMENT`, `timestamp DATETIME NOT NULL`, `device_name/device_id/device_type TEXT NOT NULL`, `power_watts/temperature_celsius/humidity_percent REAL`, `contact_state/movement_state/brightness_state/hub_onoff/cam_onoff TEXT`, `threshold_watts REAL`, `battery_level INTEGER`。`weather_history`: `id INTEGER PRIMARY KEY AUTOINCREMENT`, `date TEXT NOT NULL`, `location TEXT DEFAULT '伊丹'`, `min_temp/max_temp REAL`, `weather_desc TEXT`, `max_pop INTEGER`, `umbrella_level TEXT`, `recorded_at TEXT`, `UNIQUE(date, location)`。加えて`bicycle_parking_records`と`nas_records`のスキーマも確認でき、これらはそれぞれ`analysis_service.py`の`load_bicycle_data`・`load_nas_status`が発行する`SELECT * FROM {table_name}`クエリの対象カラムと整合する。**（Issue #507で削除）** 以前はここに`app_rankings`テーブルのスキーマも記載していたが、参照元だった`load_ranking_dates`/`load_ranking_data`が削除されたのに合わせ、`current_schema.sql`からも当該テーブル定義を削除したため記載を除いた。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql` |
+| 各種テーブルのスキーマ | `MY_HOME_SYSTEM/current_schema.sql`を直接確認したところ、本ファイルが参照する主要テーブルのスキーマが判明した。`device_records`: `id INTEGER PRIMARY KEY AUTOINCREMENT`, `timestamp DATETIME NOT NULL`, `device_name/device_id/device_type TEXT NOT NULL`, `power_watts/temperature_celsius/humidity_percent REAL`, `contact_state/movement_state/brightness_state/hub_onoff/cam_onoff TEXT`, `threshold_watts REAL`, `battery_level INTEGER`。`weather_history`: `id INTEGER PRIMARY KEY AUTOINCREMENT`, `date TEXT NOT NULL`, `location TEXT DEFAULT '伊丹'`, `min_temp/max_temp REAL`, `weather_desc TEXT`, `max_pop INTEGER`, `umbrella_level TEXT`, `recorded_at TEXT`, `UNIQUE(date, location)`。加えて`nas_records`のスキーマも確認でき、`analysis_service.py`の`load_nas_status`が発行する`SELECT * FROM {table_name}`クエリの対象カラムと整合する（当時は`bicycle_parking_records`と`load_bicycle_data`についても同様に確認していたが、いずれも2026-09-21に退役した）。**（Issue #507で削除）** 以前はここに`app_rankings`テーブルのスキーマも記載していたが、参照元だった`load_ranking_dates`/`load_ranking_data`が削除されたのに合わせ、`current_schema.sql`からも当該テーブル定義を削除したため記載を除いた。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql` |
 | NASのテーブル名 | `MY_HOME_SYSTEM/config.py:249`を直接確認したところ、`SQLITE_TABLE_NAS: str = "nas_records"`とハードコードされた文字列定数として定義されている（環境変数からの読み込みではない）。`analysis_service.py`側の`getattr(config, "SQLITE_TABLE_NAS", "nas_records")`のデフォルト値と完全に一致しており、本番環境でも常に`"nas_records"`が使われることが確定した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:249` |
-| 駐輪場データのテーブル名 | `MY_HOME_SYSTEM/config.py:250`を直接確認したところ、`SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"`とハードコードされた文字列定数として定義されている。`analysis_service.py`側の`getattr(config, "SQLITE_TABLE_BICYCLE", "bicycle_parking_records")`のデフォルト値と完全に一致しており、本番環境でも常に`"bicycle_parking_records"`が使われることが確定した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:250` |
 
 ## 10. 自己検証結果
 
