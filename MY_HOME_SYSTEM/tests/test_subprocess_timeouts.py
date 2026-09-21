@@ -178,10 +178,12 @@ class TestTimeoutDoesNotEscape:
         monkeypatch.setattr(
             health_watch, "check_service_active", _timing_out_check, raising=False
         )
-        # run_checks が組み立てる一覧のうち、他のチェックは実行させない
-        for name in ("check_journal_errors", "check_app_logs", "check_disk_usage",
-                     "check_memory_usage", "check_nas_mount", "check_deploy_config_drift"):
-            monkeypatch.setattr(health_watch, name, lambda *a, **k: None, raising=False)
+        # run_checks が組み立てる一覧のうち、他のチェックは実行させない。
+        # Issue #837: 名前の列挙だと後から増えたチェック(本物の git fetch をする
+        # check_repo_behind_upstream 等)が漏れるため、check_* をまとめて差し替える。
+        for name in dir(health_watch):
+            if name.startswith("check_") and name != "check_service_active" and callable(getattr(health_watch, name)):
+                monkeypatch.setattr(health_watch, name, lambda *a, **k: None, raising=False)
 
         exit_code = real_run_checks()
 

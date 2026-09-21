@@ -20,6 +20,19 @@ import config
 import monitors.health_watch as health_watch
 
 
+def _stub_every_check(monkeypatch):
+    """run_checks が呼ぶ check_* を全部「異常なし」に差し替える。
+
+    Issue #837: 各テストが差し替えるチェックを名前で列挙していたため、後から増えた
+    check_repo_behind_upstream(本物の git fetch)や check_recording_stalled が漏れていた。
+    実行したチェックアウトが origin/master より遅れた瞬間(並行して PR がマージされた等)に
+    「異常あり」となり、全件実行で稀に落ちていた。各テストはこの後で見たいチェックだけを上書きする。
+    """
+    for name in dir(health_watch):
+        if name.startswith("check_") and callable(getattr(health_watch, name)):
+            monkeypatch.setattr(health_watch, name, lambda *args, **kwargs: None)
+
+
 class TestFireInvestigateHook:
     def test_noop_when_hook_unset(self, monkeypatch):
         """既定(未設定)では何も起動しない = 従来挙動と完全に同一であること。"""
@@ -127,14 +140,11 @@ class TestRunChecksHookGating:
 
     def _patch_checks(self, monkeypatch, tmp_path, anomaly: bool):
         # 実コマンド依存のチェック群を決定的な結果に差し替える
+        _stub_every_check(monkeypatch)
         monkeypatch.setattr(
             health_watch, "check_service_active",
             (lambda: "home_system.service が active ではありません") if anomaly else (lambda: None),
         )
-        for name in ("check_api_responsive", "check_disk_usage", "check_memory_usage", "check_nas_mount", "check_deploy_config_drift"):
-            monkeypatch.setattr(health_watch, name, lambda: None)
-        monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)
-        monkeypatch.setattr(health_watch, "check_app_logs", lambda since: None)
         # 状態ファイルをテスト用ディレクトリへ隔離
         monkeypatch.setattr(health_watch, "MARKER_FILE", str(tmp_path / "marker"))
         monkeypatch.setattr(health_watch, "NOTIFY_STATE_FILE", str(tmp_path / "state"))
@@ -314,6 +324,7 @@ class TestCheckDeployConfigDrift:
 
     def test_run_checks_includes_deploy_config_check(self, tmp_path, monkeypatch):
         """run_checks のチェック一覧に組み込まれ、異常時は通知本文に含まれること。"""
+        _stub_every_check(monkeypatch)
         monkeypatch.setattr(config, "LOG_DIR", str(tmp_path))
         monkeypatch.setattr(health_watch, "MARKER_FILE", str(tmp_path / "marker"))
         monkeypatch.setattr(health_watch, "NOTIFY_STATE_FILE", str(tmp_path / "state"))
@@ -475,6 +486,7 @@ class TestQuestMasterDrift:
 
     def test_drift_is_registered_as_a_health_check(self, monkeypatch, tmp_path):
         """run_checks のチェック一覧に組み込まれ、既存の通知経路へ載ること。"""
+        _stub_every_check(monkeypatch)
         for name in (
             "check_service_active", "check_api_responsive", "check_disk_usage", "check_memory_usage",
             "check_nas_mount", "check_deploy_config_drift",
@@ -637,6 +649,7 @@ class TestCheckApiResponsive:
 
     def test_registered_in_run_checks(self, monkeypatch, tmp_path):
         """run_checks のチェック一覧に組み込まれ、既存の通知経路へ載ること。"""
+        _stub_every_check(monkeypatch)
         for name in (
             "check_service_active", "check_disk_usage", "check_memory_usage",
             "check_nas_mount", "check_deploy_config_drift", "check_quest_master_drift",
