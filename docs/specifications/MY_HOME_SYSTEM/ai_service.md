@@ -62,11 +62,11 @@
 ### `SimpleRateLimiter` (クラス)
 
 * **役割**: 指定された期間（1分）内のリクエスト数を制限する状態管理を行う。
-* 根拠: `class SimpleRateLimiter:` (行番号: 64 / 抜粋: "class SimpleRateLimiter:")
+* 根拠: `class SimpleRateLimiter:` (行番号: 80 / 抜粋: "class SimpleRateLimiter:")
 
 
 * **引数/リクエスト**: `limit: int` (デフォルト: `REQUESTS_PER_MINUTE_LIMIT`)
-* 根拠: `def __init__(self, limit: int = REQUESTS_PER_MINUTE_LIMIT):` (行番号: 69 / 抜粋: "def **init**(self, limit: int")
+* 根拠: `def __init__(self, limit: int = REQUESTS_PER_MINUTE_LIMIT):` (行番号: 85 / 抜粋: "def **init**(self, limit: int")
 
 
 * **戻り値/レスポンス**: オブジェクトインスタンス
@@ -85,11 +85,11 @@
 ### `SimpleRateLimiter.allow_request` (メソッド)
 
 * **役割**: リクエストが許可されるかどうかを判定し、1分経過時のカウンタリセットと許可時のカウンタ加算を行う。
-* 根拠: `async def allow_request(self) -> bool:` (行番号: 82 / 抜粋: "async def allow_request(self) -> bool:")
+* 根拠: `async def allow_request(self) -> bool:` (行番号: 98 / 抜粋: "async def allow_request(self) -> bool:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def allow_request(self)` (行番号: 82 / 抜粋: "async def allow_request(self)")
+* 根拠: `def allow_request(self)` (行番号: 98 / 抜粋: "async def allow_request(self)")
 
 
 * **戻り値/レスポンス**: `bool` (許可ならTrue、制限超過ならFalse)
@@ -108,7 +108,7 @@
 ### `tool_record_child_health` (関数)
 
 * **役割**: 子供の体調を記録するため `line_service.log_child_health` を呼び出し、結果メッセージを返す。**（Issue #373で修正）** `child_name`/`condition`のいずれかが欠落していればDBへ渡さず`"記録失敗: ..."`を返す。また`log_child_health`の返信本文が`line_service.SAVE_FAILED_PREFIX`で始まる（DB保存失敗）場合は`"記録完了:"`ではなく`"記録失敗: ..."`を返し、AIが保存成功と誤認して完了報告しないようにする。
-* 根拠: `async def tool_record_child_health` (行番号: 110 / 抜粋: "async def tool_record_child_health")、引数欠落チェック (行番号: 116-117)、失敗プレフィックス判定 (行番号: 124-125)
+* 根拠: `async def tool_record_child_health` (行番号: 126 / 抜粋: "async def tool_record_child_health")、引数欠落チェック (行番号: 116-117)、失敗プレフィックス判定 (行番号: 124-125)
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `args: Dict[str, Any]`
@@ -131,7 +131,7 @@
 ### `tool_record_food` (関数)
 
 * **役割**: 食事の内容を記録するため `line_service.log_food_record` を呼び出し、結果メッセージを返す。**（Issue #373で修正）** `item`が欠落していればDBへ渡さず`"記録失敗: ..."`を返す。また返信本文が`line_service.SAVE_FAILED_PREFIX`で始まる（DB保存失敗）場合は`"記録失敗: ..."`を返す（`tool_record_child_health`と同様）。
-* 根拠: `async def tool_record_food` (行番号: 140 / 抜粋: "async def tool_record_food")、引数欠落チェック (行番号: 145-146)、失敗プレフィックス判定 (行番号: 150-151)
+* 根拠: `async def tool_record_food` (行番号: 156 / 抜粋: "async def tool_record_food")、引数欠落チェック (行番号: 145-146)、失敗プレフィックス判定 (行番号: 150-151)
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `args: Dict[str, Any]`
@@ -161,7 +161,7 @@
 ### `_skip_optional_alias` (関数、Issue #224で追加)
 
 * **役割**: `_extract_referenced_tables`が使う内部ヘルパー。指定位置に続くテーブルエイリアス（`AS name`または`name`）があれば読み飛ばした位置を返す。次の識別子が`_SQL_KEYWORDS_NOT_ALIAS`に含まれるSQLキーワード（`WHERE`/`JOIN`等、テーブル参照の終端を示すもの）の場合はエイリアスとみなさず元の位置をそのまま返す。**導入経緯**: `_extract_referenced_tables`はカンマ結合(暗黙CROSS JOIN)の2つ目以降のテーブルを、直前のテーブル名の直後にカンマが続くかで判定していたが、`FROM power_usage c, quest_users s`のように1つ目のテーブルにエイリアスが付くと識別子の直後がカンマではなくエイリアス文字列になり、カンマ判定が即座に失敗して2つ目のテーブルが検出漏れしていた。
-* 根拠: 関数定義 (行番号: 188〜195 / 抜粋: "def _skip_optional_alias(sql: str, pos: int) -> int:")
+* 根拠: 関数定義 (行番号: 204〜211 / 抜粋: "def _skip_optional_alias(sql: str, pos: int) -> int:")
 
 
 
@@ -177,11 +177,11 @@
 ### `_strip_sql_comments` (関数、B3で追加)
 
 * **役割**: `_SQL_COMMENT_RE`を使い、渡されたSQL文字列中のブロックコメント・行コメントをすべて半角スペース1文字に置換して返す。`tool_search_db`がSELECT判定・`_extract_referenced_tables`によるテーブル抽出の前段でこれを呼び出し、以降の判定・実行はすべてコメント除去後のSQLに対して行う。
-* 根拠: `def _strip_sql_comments(sql: str) -> str:\n    return _SQL_COMMENT_RE.sub(" ", sql)` (行番号: 206〜207)
+* 根拠: `def _strip_sql_comments(sql: str) -> str:\n    return _SQL_COMMENT_RE.sub(" ", sql)` (行番号: 222〜223)
 
 
 * **引数/リクエスト**: `sql: str`
-* 根拠: (行番号: 206 / 抜粋: "def _strip_sql_comments(sql: str) -> str:")
+* 根拠: (行番号: 222 / 抜粋: "def _strip_sql_comments(sql: str) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（コメント部分を空白に置換したSQL文字列）
@@ -204,7 +204,7 @@
 
 
 * **引数/リクエスト**: `sql: str`
-* 根拠: 関数シグネチャ (行番号: 210 / 抜粋: "def _extract_referenced_tables(sql: str) -> List[str]:")
+* 根拠: 関数シグネチャ (行番号: 226 / 抜粋: "def _extract_referenced_tables(sql: str) -> List[str]:")
 
 
 * **戻り値/レスポンス**: `List[str]` (マッチしたテーブル名のリスト。同一テーブルが複数回参照されれば重複を含みうる)
@@ -240,7 +240,7 @@
 ### `_search_db_authorizer` (関数、Issue #357で追加)
 
 * **役割**: AIツール`search_db`専用のSQLite認可コールバック（`sqlite3.Connection.set_authorizer`に渡す）。SQLiteは文の準備時に、読み取るテーブル/列ごとに`SQLITE_READ`、使用する関数ごとに`SQLITE_FUNCTION`等をこのコールバックへ問い合わせ、`SQLITE_DENY`が返ると文全体をエラーにする。これにより、引用符の有無・スキーマ修飾・サブクエリ・UNION・テーブル値関数（`json_each`/`pragma_table_info`等。これらは関数名がテーブル名として`SQLITE_READ`に渡る）を問わず、SQLiteエンジン自身が「`ALLOWED_SEARCH_TABLES`以外は読めない」ことを強制する構造的な防御となる。
-* 根拠: `def _search_db_authorizer(action: int, arg1, arg2, db_name, trigger_or_view) -> int:` (行番号: 285)
+* 根拠: `def _search_db_authorizer(action: int, arg1, arg2, db_name, trigger_or_view) -> int:` (行番号: 301)
 
 
 * **引数/リクエスト**: `action: int`（SQLiteの認可アクションコード）, `arg1`（`SQLITE_READ`時はテーブル名）, `arg2`（`SQLITE_READ`時は列名、`SQLITE_FUNCTION`時は関数名）, `db_name`, `trigger_or_view`（sqlite3の`set_authorizer`コールバック規約に従う5引数）
@@ -261,7 +261,7 @@
 ### `_execute_restricted_read_query` (関数、Issue #357で追加)
 
 * **役割**: `core.database.get_db_cursor()`で取得した接続に`_search_db_authorizer`を設定してからSQLを実行する、AIツール`search_db`専用の読み取り関数。**（Issue #750 / AUDIT-021 で追加）** 認可コールバックに加えて、接続へ `set_progress_handler(_abort_if_too_slow, _AI_SQL_PROGRESS_INSTRUCTIONS)` を設定して**実行時間の上限**（`_AI_SQL_TIMEOUT_SEC`、既定5秒。超過すると SQLite が実行中の文を中断し `OperationalError("interrupted")` を送出する）を設け、取得も `fetchall()` から `fetchmany(_AI_SQL_MAX_ROWS)` に変えて**行数の上限**を設けている（最終的に `tool_search_db` が `result[:2000]` で切るが、切るのが「取得後」だったため巨大な結果セットの生成コストは払っていた）。中断時の例外は下記のエラーハンドリングがそのまま `"検索エラー: interrupted"` に変換するため、`tool_search_db` 側の既存のエラー判定（Issue #180）がそのまま効く。`core.database.execute_read_query`と同じ戻り値の契約（0件: `"該当するデータはありませんでした。"` / 正常: JSON文字列 / 失敗: `"検索エラー: ..."`で例外は送出しない）を維持し、`tool_search_db`側の既存のエラー判定（Issue #180）をそのまま使えるようにしている。`execute_read_query`自体は他の呼び出し元と共有されるため変更せず、認可コールバックはこのAI経路にのみ適用する。
-* 根拠: `def _execute_restricted_read_query(query: str, params: tuple = ()) -> str:` (行番号: 314)、`cursor.connection.set_authorizer(_search_db_authorizer)` (行番号: 282)
+* 根拠: `def _execute_restricted_read_query(query: str, params: tuple = ()) -> str:` (行番号: 330)、`cursor.connection.set_authorizer(_search_db_authorizer)` (行番号: 282)
 
 
 * **引数/リクエスト**: `query: str`, `params: tuple = ()`
@@ -282,7 +282,7 @@
 ### `tool_search_db` (関数)
 
 * **役割**: 引数で渡されたSQLクエリが `SELECT` で始まり、かつ参照テーブルが `ALLOWED_SEARCH_TABLES` に含まれることを確認したうえで読み取り専用のDB検索を行い、結果を文字列で返す。**（Issue #357で修正）** SELECT判定の直後・テーブル抽出の前に`_QUOTED_IDENTIFIER_CHARS`（`"` `` ` `` `[`）のいずれかを含むSQLを警告ログ付きで即拒否するようになった（引用符付き識別子は`_extract_referenced_tables`が検出できず許可テーブル判定を素通りしていたため）。加えて実行先を`core.database.execute_read_query`から`_execute_restricted_read_query`（`set_authorizer`により許可テーブル以外の読み取り・ATTACH・PRAGMA・危険関数をSQLiteエンジン側で構造的に拒否する）へ変更した。**（B3で修正）** SQLクエリを受け取った直後、SELECT判定やテーブル抽出より前に`_strip_sql_comments`を通し、ブロックコメント(`/* */`)・行コメント(`--`)を空白に置換したうえで以降の判定・実行を行うようになった。以前は`FROM/**/tablename`のようにキーワードと識別子の間にSQLコメントを挟むことで`_extract_referenced_tables`の抽出をすり抜け、UNION SELECTと組み合わせて`ALLOWED_SEARCH_TABLES`外のテーブルを読み取れることが実証されていた。**（Issue #180で修正）** `core.database.execute_read_query`（実体は`core/database.py`の`execute_read_query`）は例外発生時も送出せず内部で捕捉し、"検索エラー: ..."という非空文字列として返す設計になっている。以前はこの戻り値の実際の型・意味を誤認しており、`if not rows:`（`rows`は常に非空文字列のため恒偽でデッドコード）と`except Exception`（`execute_read_query`自体は例外を送出しないため到達不能）の両方が実質機能しておらず、DB実行時エラーの文字列がそのまま正常な検索結果としてログにも残らずAIへ渡っていた。`execute_read_query`の内部エラープレフィックス（`"検索エラー:"`）を判定し、検出時は警告ログを出力したうえでAIへエラーであることが分かる形（`"DB検索エラー: ..."`）で返すよう修正した。
-* 根拠: `async def tool_search_db` (行番号: 359 / 抜粋: "async def tool_search_db")、コメント除去 (行番号: 309 / 抜粋: "sql = _strip_sql_comments(sql)")、引用符付き識別子の拒否 (行番号: 318〜320 / 抜粋: "if any(ch in sql for ch in _QUOTED_IDENTIFIER_CHARS):")、実行先 (行番号: 334 / 抜粋: "result = await asyncio.to_thread(_execute_restricted_read_query, sql)")
+* 根拠: `async def tool_search_db` (行番号: 375 / 抜粋: "async def tool_search_db")、コメント除去 (行番号: 309 / 抜粋: "sql = _strip_sql_comments(sql)")、引用符付き識別子の拒否 (行番号: 318〜320 / 抜粋: "if any(ch in sql for ch in _QUOTED_IDENTIFIER_CHARS):")、実行先 (行番号: 334 / 抜粋: "result = await asyncio.to_thread(_execute_restricted_read_query, sql)")
 
 
 * **引数/リクエスト**: `args: Dict[str, Any]`
@@ -313,7 +313,7 @@
 ### `_log_retry_attempt` (関数)
 
 * **役割**: リトライ実行時にコールバックとして呼び出され、警告ログを出力する。
-* 根拠: `def _log_retry_attempt(retry_state):` (行番号: 487 / 抜粋: "def _log_retry_attempt(retry_state):")
+* 根拠: `def _log_retry_attempt(retry_state):` (行番号: 503 / 抜粋: "def _log_retry_attempt(retry_state):")
 
 
 * **引数/リクエスト**: `retry_state`
@@ -336,7 +336,7 @@
 ### `_call_gemini_api_with_retry` (関数)
 
 * **役割**: Gemini APIへのリクエストを送信し、**（Issue #804で変更）** 一時的な失敗（HTTP 429 / 503）発生時に指数バックオフによるリトライを行う。以前はクォータ超過（429）のみが対象で、**503 UNAVAILABLE は1回も再試行されなかった**。**（Issue #520で変更）** `google-genai` の `AsyncChat.send_message` はネイティブに非同期のため、旧SDKの同期メソッドを包んでいた `asyncio.to_thread` は不要になった。
-* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号: 545〜558 / 抜粋: "async def _call_gemini_api_with_retry")
+* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号: 562〜575 / 抜粋: "async def _call_gemini_api_with_retry")
 
 
 * **引数/リクエスト**: `chat_session`, `prompt: str`
@@ -353,9 +353,10 @@
 
 * **エラーハンドリング**: `tenacity` ライブラリによる自動リトライ（最大3回）。最終的に失敗した場合は例外を再スロー（`reraise=True`）。
 * 根拠: `@retry(retry=retry_if_exception(_is_transient_error), ...)`。**（Issue #520で変更）** 旧SDKは `ResourceExhausted` という専用の例外型で判別できたが、`google-genai` はHTTPステータスを持つ `APIError` に一本化されているため、型ではなくコードで判定する。**（Issue #804で変更）** 判定関数を `_is_quota_error` から `_is_transient_error` へ差し替えた
-* 根拠: `def _is_transient_error(exc: BaseException) -> bool:` (行番号: 525)
-* 根拠: `def _is_quota_error(exc: BaseException) -> bool:` (行番号: 496)
+* 根拠: `def _is_transient_error(exc: BaseException) -> bool:` (行番号: 541)
+* 根拠: `def _is_quota_error(exc: BaseException) -> bool:` (行番号: 512)
 * **（Issue #804）判定を2つに分けた理由**: 以前は `_is_quota_error` が「再試行すべきか」と「どの文面を返すか」の**2つの判断を兼ねていた**ため、再試行の対象を広げると文面まで変わってしまい 503 を足せなかった。現在は `_is_transient_error`（再試行の可否。429 / 503）と `_is_quota_error`（文面の判定。429 のみ）に分離してある
+* **（Issue #827で追加）再試行の時間予算**: 停止条件は `stop_after_attempt(MAX_RETRIES) | stop_before_delay(RETRY_TIME_BUDGET_SEC)`（9秒）、待機は `wait_exponential_jitter(initial=1, max=4)`（以前は `initial=2, max=10` で回数だけで停止）。#804 の再試行は所要時間に上限が無く、2026-09-21 12:05 に実機で 503 → 待機 → 503 の途中で `handlers/line_handler.py` の `AI_REPLY_TIMEOUT_SEC`（20秒）に達し、外側のタイムアウト文面（「記録が反映されているか確認のうえ…」）が返って**記録は保存されなかった**。`stop_before_delay` は次の待機を挟むと予算を超える時点で止めるが、最後に許可した試行そのものは予算を越えて走りうるため、「予算 + 1回の最悪応答時間（`OBSERVED_WORST_CALL_SEC` = 8秒、実測）< 20秒」を満たす値にしてあり、`tests/test_ai_transient_retry.py` がこの不等式を固定する
 * **再試行しないもの**: 400（不正なリクエスト）や 404（モデルの提供終了。Issue #801）は何度送っても同じ結果になるため対象外。**500 / 502 / 504 も意図的に含めていない** — 一般には再試行対象とされることが多いが、このリポジトリは以前から 500 を「リトライしても回復しないAPIエラー」として扱っており（`tests/test_ai_service.py` の `_fatal_api_error` が 500 を使い再試行しないことを固定している）、その判断を覆す根拠が無いため。実際に踏んで「待てば直る」と確認できたものだけを足す方針。再試行すると `handlers/line_handler.py` の `AI_REPLY_TIMEOUT_SEC`（20秒）を無駄に消費し、ユーザーにはタイムアウトの文面が出る
 
 
@@ -368,7 +369,7 @@
 ### `_extract_function_calls` (関数、Issue #374で追加)
 
 * **役割**: 応答の`parts`をすべて走査し、`function_call`を持つパートの`function_call`をリストで返す（L-L4対応。以前は`response.parts[0]`のみを検査していたため、テキスト+`function_call`の複数パート応答でツール呼び出しが無視され雑談扱いになっていた）。
-* 根拠: `def _extract_function_calls(response) -> List[Any]:` (行番号: 565〜577)
+* 根拠: `def _extract_function_calls(response) -> List[Any]:` (行番号: 582〜594)
 
 
 * **引数/リクエスト**: `response`（Gemini応答オブジェクト。`parts`属性を持つ）
@@ -389,7 +390,7 @@
 ### `_response_text_or_none` (関数、Issue #374で追加)
 
 * **役割**: `response.text`を安全に取り出す。旧SDK(`google-generativeai`)の`response.text`は`function_call`パートしか無い応答や空応答で`ValueError`を送出した。**（Issue #520で確認）** `google-genai`では同じ状況で`None`が返るようになったが、SDKの版差で再び送出する側に戻っても壊れないよう`try/except`は残している（空文字も`None`）。
-* 根拠: `def _response_text_or_none(response) -> Optional[str]:` (行番号: 580〜591)
+* 根拠: `def _response_text_or_none(response) -> Optional[str]:` (行番号: 597〜608)
 
 
 * **引数/リクエスト**: `response`
@@ -410,7 +411,7 @@
 ### `_dispatch_tool` (関数、Issue #374で追加)
 
 * **役割**: `function_call`の名前に応じて`tool_record_child_health`/`tool_record_food`/`tool_search_db`を実行し結果文字列を返す。未知の名前は`"エラー: 未知のツールが呼び出されました。"`を返す（以前`analyze_text_and_execute`内にインラインで書かれていた分岐を切り出したもの）。
-* 根拠: `async def _dispatch_tool(...)` (行番号: 594〜602)
+* 根拠: `async def _dispatch_tool(...)` (行番号: 611〜619)
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `fname: str`, `fargs: Dict[str, Any]`
@@ -431,7 +432,7 @@
 ### `_tool_results_fallback` (関数、Issue #374で追加)
 
 * **役割**: ツールは実行済みだが最終応答を生成できなかった場合に、蓄積した`tool_results`を改行連結し末尾に`(注記)`を添えた文字列を返す。
-* 根拠: `def _tool_results_fallback(tool_results: List[str], note: str) -> str:` (行番号: 605〜607)
+* 根拠: `def _tool_results_fallback(tool_results: List[str], note: str) -> str:` (行番号: 622〜624)
 
 
 * **引数/リクエスト**: `tool_results: List[str]`, `note: str`
@@ -452,7 +453,7 @@
 ### `analyze_text_and_execute` (関数)
 
 * **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。**（Issue #374で修正）** 1回目の応答取得後は`MAX_TOOL_ROUNDS`回を上限とするループになった: 各ラウンドで`_extract_function_calls`により全パートから`function_call`を収集し、無ければ`_response_text_or_none`でテキストを返す（テキストも無い場合、ツール実行済みなら`_tool_results_fallback`、未実行なら空応答エラー）。あれば全件を`_dispatch_tool`で実行し、`function_response`をまとめて1回で送信して次の応答を得る。以前は1回のツール実行後に`final_res.text`を無条件に読んでいたため、「智矢が熱、涼花も熱」のように2件目の`function_call`が返ると`response.text`が`ValueError`を送出→汎用`except`→「処理中にエラー」となり、1件目は保存済みなのにユーザーが失敗と誤解して再送→重複登録（#232と同種）という経路が残っていた。ループ上限到達時も`_tool_results_fallback`で実行結果を返す。**（Issue #232で修正）** 1回目のGemini呼び出しはクォータ超過とそれ以外のAPIエラーをそれぞれ専用メッセージで処理するのに対し、ツール実行後の2回目呼び出しは以前クォータ超過用のフォールバックしか持たず、それ以外のAPIエラーは関数末尾の汎用`except Exception`（「処理中にエラーが発生しました」）まで伝播していた。この時点で`tool_record_child_health`/`tool_record_food`は既にDB書き込みを完了しているため、ユーザーには保存が失敗したかのように見え、冪等性チェックの無い記録処理への重複登録を誘発しうる不具合があった。2回目呼び出しにも同等のハンドラを追加し、クォータ超過と同様に`tool_result`（実行結果）へ注記を添えて返すようにした。**（Issue #520で変更）** `google-genai`は例外型を`APIError`に一本化したため、両方の呼び出し点とも`except genai_errors.APIError`で受けたうえで`_is_quota_error(e)`によりクォータ超過かどうかを分岐する形になった。
-* 根拠: `async def analyze_text_and_execute` (行番号: 610 / 抜粋: "async def analyze_text_and_execute")、ループ (行番号: 582〜639 / 抜粋: "for _round in range(MAX_TOOL_ROUNDS):")
+* 根拠: `async def analyze_text_and_execute` (行番号: 627 / 抜粋: "async def analyze_text_and_execute")、ループ (行番号: 582〜639 / 抜粋: "for _round in range(MAX_TOOL_ROUNDS):")
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `text: str`

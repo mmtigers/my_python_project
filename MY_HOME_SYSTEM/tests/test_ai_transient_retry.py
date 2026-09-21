@@ -123,3 +123,64 @@ class TestRetryActuallyHappens:
         with pytest.raises(genai_errors.APIError):
             await ai_service._call_gemini_api_with_retry(chat, "hi")
         assert chat.calls == ai_service.MAX_RETRIES
+
+
+class TestRetryFitsInTheReplyBudget:
+    """再試行が LINE の応答上限(20秒)の内側で終わること (Issue #827)。
+
+    #804 で入れた再試行は回数(3回)でしか止まらず、2026-09-21 12:05 に実機で
+    503 → 待機 → 503 → 待機 の途中で line_handler の20秒に達した。外側で打ち切られると
+    ai_service の FALLBACK_MESSAGE(混雑しているので再送を)ではなくタイムアウトの文面が
+    返り、記録が保存されていないのに「反映されているか確認して」と案内してしまう。
+    """
+
+    def test_budget_plus_worst_call_is_under_the_reply_timeout(self):
+        """最後に許可した試行は予算を越えて走りうるので、その分を足しても20秒未満であること。"""
+        from handlers import line_handler
+
+        worst = ai_service.RETRY_TIME_BUDGET_SEC + ai_service.OBSERVED_WORST_CALL_SEC
+        assert worst < line_handler.AI_REPLY_TIMEOUT_SEC, (
+            f"再試行予算 {ai_service.RETRY_TIME_BUDGET_SEC}s + 1回の最悪応答 "
+            f"{ai_service.OBSERVED_WORST_CALL_SEC}s = {worst}s が、LINE の応答上限 "
+            f"{line_handler.AI_REPLY_TIMEOUT_SEC}s を超える"
+        )
+
+    def test_retry_stops_on_elapsed_time_not_only_attempts(self):
+        """停止条件に経過時間が入っていること。回数だけだと #827 が再発する。"""
+        import tenacity
+
+        stop = ai_service._call_gemini_api_with_retry.retry.stop
+        parts = getattr(stop, "stops", (stop,))
+        budgets = [p for p in parts if isinstance(p, tenacity.stop_before_delay)]
+        assert budgets, "stop_before_delay が停止条件に無い"
+        assert budgets[0].max_delay == ai_service.RETRY_TIME_BUDGET_SEC
+
+    async def test_slow_failures_stop_before_exhausting_attempts(self):
+        """1回の応答が遅いと、回数の上限に届く前に時間で止まること(実時間を小さく縮めて検証)。
+
+        503 が1回あたり 0.15 秒かかり、予算を 0.2 秒に絞ると、次の待機(>= 1 秒の計画値)を
+        挟んだ時点で予算を超えるため、1回で諦めるはず。回数だけで止める実装なら3回呼ぶ。
+        """
+        import asyncio
+
+        import tenacity
+
+        retrying = ai_service._call_gemini_api_with_retry.retry
+        original_stop = retrying.stop
+        retrying.stop = tenacity.stop_after_attempt(ai_service.MAX_RETRIES) | tenacity.stop_before_delay(0.2)
+
+        class _SlowFailing:
+            calls = 0
+
+            async def send_message(self, _prompt):
+                self.calls += 1
+                await asyncio.sleep(0.15)
+                raise _api_error(503)
+
+        chat = _SlowFailing()
+        try:
+            with pytest.raises(genai_errors.APIError):
+                await ai_service._call_gemini_api_with_retry(chat, "hi")
+        finally:
+            retrying.stop = original_stop
+        assert chat.calls == 1
