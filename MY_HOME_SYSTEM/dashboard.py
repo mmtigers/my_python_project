@@ -47,25 +47,31 @@ def _render_header_actions() -> None:
     ハンバーガーメニューを開かないと押せず、最も使う操作が最も遠かった。
     メイン画面の先頭に常設する。
     """
-    col_refresh, col_quest = st.columns(2)
-    with col_refresh:
-        if st.button("🔄 データを更新", width="stretch"):
-            # Issue #741: 以前はこの `clear()` の時点で `@st.cache_data` が
-            # 1つも存在せず、実際には何も消していなかった(押しても押さなくても
-            # 毎回DBを読み直していた)。`view_common` のキャッシュ付きローダを
-            # 使うようになり、TTL(60秒)を待たずに捨てる操作として機能する。
-            st.cache_data.clear()
-            st.rerun()
-    with col_quest:
-        # クエストの詳細はスマホ最適化済みのPWA(family-quest)側が正で、
-        # ダッシュボードに同じ内容を二重に持たない(下記「タブ構成」のコメント参照)。
-        #
-        # ルート相対のリンクにしているのは、このダッシュボードが
-        # unified_server.py(8000番)の config.DASHBOARD_BASE_PATH 配下に中継されて
-        # 配信されるため。閲覧しているオリジン(LANのIP:8000でも Cloudflare 経由の
-        # 公開ドメインでも)の /quest に解決され、config.FRONTEND_URL のような
-        # 固定URLを埋めるとLAN外から開いたときに繋がらない。
-        st.link_button("⚔️ ファミクエを開く", QUEST_APP_PATH, width="stretch")
+    # Issue: スマホ幅では `views/dashboard/common.py` のモバイルCSSが全ての
+    # stHorizontalBlock を 100% 幅へ強制するため、この2ボタンが縦に積まれて
+    # ヘッダーが2段になり、タブと本文が画面外へ押し下げられていた。
+    # `key` を付けた container は `.st-key-header_actions` クラスを持つので、
+    # CSS 側でこの行だけ横並びに戻している(グラフ・表の縦積みは維持する)。
+    with st.container(key="header_actions"):
+        col_refresh, col_quest = st.columns(2)
+        with col_refresh:
+            if st.button("🔄 データを更新", width="stretch"):
+                # Issue #741: 以前はこの `clear()` の時点で `@st.cache_data` が
+                # 1つも存在せず、実際には何も消していなかった(押しても押さなくても
+                # 毎回DBを読み直していた)。`view_common` のキャッシュ付きローダを
+                # 使うようになり、TTL(60秒)を待たずに捨てる操作として機能する。
+                st.cache_data.clear()
+                st.rerun()
+        with col_quest:
+            # クエストの詳細はスマホ最適化済みのPWA(family-quest)側が正で、
+            # ダッシュボードに同じ内容を二重に持たない(下記「タブ構成」のコメント参照)。
+            #
+            # ルート相対のリンクにしているのは、このダッシュボードが
+            # unified_server.py(8000番)の config.DASHBOARD_BASE_PATH 配下に中継されて
+            # 配信されるため。閲覧しているオリジン(LANのIP:8000でも Cloudflare 経由の
+            # 公開ドメインでも)の /quest に解決され、config.FRONTEND_URL のような
+            # 固定URLを埋めるとLAN外から開いたときに繋がらない。
+            st.link_button("⚔️ ファミクエを開く", QUEST_APP_PATH, width="stretch")
 
 
 def main():

@@ -139,8 +139,10 @@
 
 ### `_render_header_actions`
 
-* **役割**: 画面最上部の操作列を描画する。`st.columns(2)` の左に「🔄 データを更新」ボタン（押下で `st.cache_data.clear()` と `st.rerun()`。**（Issue #741で変更）** 以前はリポジトリ全体に `@st.cache_data` が1つも存在せず、この `clear()` は何も消していなかった。`view_common` のキャッシュ付きローダを使うようになり、TTL(60秒)を待たずに捨てる操作として機能するようになった）、右に「⚔️ ファミクエを開く」リンクボタン（`QUEST_APP_PATH`）を、いずれも `width="stretch"` で配置する。docstringには、以前「データを更新」がサイドバーにしか無く、`initial_sidebar_state="collapsed"` のためスマートフォンではハンバーガーメニューを開かないと押せず最も使う操作が最も遠かったため、メイン画面の先頭に常設する旨が記されている。
-* 根拠: `def _render_header_actions() -> None:` (行番号: 42〜64 / 抜粋: "def _render_header_actions() -> None:")
+* **役割**: 画面最上部の操作列を描画する。**（スマホのヘッダー改善で変更）** 全体を `st.container(key="header_actions")` で囲み、その中の `st.columns(2)` の左に「🔄 データを更新」ボタン（押下で `st.cache_data.clear()` と `st.rerun()`。**（Issue #741で変更）** 以前はリポジトリ全体に `@st.cache_data` が1つも存在せず、この `clear()` は何も消していなかった。`view_common` のキャッシュ付きローダを使うようになり、TTL(60秒)を待たずに捨てる操作として機能するようになった）、右に「⚔️ ファミクエを開く」リンクボタン（`QUEST_APP_PATH`）を、いずれも `width="stretch"` で配置する。docstringには、以前「データを更新」がサイドバーにしか無く、`initial_sidebar_state="collapsed"` のためスマートフォンではハンバーガーメニューを開かないと押せず最も使う操作が最も遠かったため、メイン画面の先頭に常設する旨が記されている。
+* 根拠: `def _render_header_actions() -> None:` (行番号: 42)
+* **`key` 付き container で囲う理由**: `views/dashboard/common.py` のモバイルCSSは**すべての** `[data-testid="stHorizontalBlock"]` の列を `flex: 1 1 100%` で縦積みにする。グラフ・表には必要な指定だが、短いボタン2つには過剰で、スマホではヘッダーが2段になりタブと本文を画面外へ押し下げていた（2026-09-21 に実機で確認）。`key` を渡した container は `.st-key-header_actions` クラスを持つため、CSS 側でこの行だけ横並びに戻せる
+* **この対応の弱点**: `key` の文字列と CSS のセレクタが一致していることに依存する。どちらかをリネームしても Python は通り Streamlit も警告を出さず、**スマホのレイアウトだけが静かに元へ戻る**。`tests/test_dashboard_mobile_header.py` が両者の一致を検査する
 
 
 * **引数/リクエスト**: なし
@@ -174,15 +176,15 @@
 ### `main`
 
 * **役割**: サイドバー設定、ヘッダー操作列の描画、各種データの読み込み、5個のタブの生成とレンダリングを行うアプリ本体の処理。例外発生時はログ記録・Discord通知・エラー画面表示を行う。**（スマホ対応で変更）** サイドバーからは「データを更新」ボタンが `_render_header_actions` へ移り、代わりに主要操作の場所とスマートフォンからのアクセス経路（8000番の `/dashboard` 経由）を案内する `st.caption` が置かれている。（AIレポート表示はIssue #701で退役し、`main()`からも削除された。）**（Issue #410 L-L5で修正）** 例外発生時に画面表示していた`traceback.format_exc()`を`logger.error`によるログ出力のみに変更し、内部のファイルパス・設定値がLAN内の閲覧者に露出しないようにした。
-* 根拠: `def main():` (行番号: 71〜210 / 抜粋: "def main():")、サイドバーの案内文 (行番号: 73〜76 / 抜粋: "\"主要な操作(データ更新)はメイン画面の先頭にあります。\"")、トレースバックのログのみ化 (行番号: 199 / 抜粋: "logger.error(traceback.format_exc())")
+* 根拠: `def main():` (行番号: 77〜216 / 抜粋: "def main():")、サイドバーの案内文 (行番号: 73〜76 / 抜粋: "\"主要な操作(データ更新)はメイン画面の先頭にあります。\"")、トレースバックのログのみ化 (行番号: 199 / 抜粋: "logger.error(traceback.format_exc())")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def main():` (行番号: 71 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 77 / 抜粋: "def main():")
 
 
 * **戻り値/レスポンス**: なし（Streamlit UIへの描画が主目的）
-* 根拠: `def main():` (行番号: 71 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 77 / 抜粋: "def main():")
 
 
 * **タブ構成（スマホ対応で再設計）**:

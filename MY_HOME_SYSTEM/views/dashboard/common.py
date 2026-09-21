@@ -125,6 +125,41 @@ CUSTOM_CSS = f"""
 
         /* 横方向にページ全体がはみ出すと、縦スクロール時に左右へ揺れて操作しづらい */
         section[data-testid="stMain"] {{ overflow-x: hidden; }}
+
+        /* Streamlit 既定のヘッダー(サイドバー展開「»」とメニュー「⋮」の行)は
+           position:fixed かつ半透明のため、スクロールした本文がその下を通ると
+           **透けて重なり読めなくなる**(2026-09-21 に実機のスマホで確認)。
+           不透明にして、本文が潜り込んでも上端が滲まないようにする。
+           PC 幅では画面が広く重なりが気にならないため、スマホ幅だけで適用する。 */
+        [data-testid="stHeader"] {{
+            background: #ffffff;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+        }}
+
+        /* ヘッダー操作列(更新 / ファミクエ)だけは横並びを維持する。
+           上の stHorizontalBlock の一律 100% 化はグラフ・表には必要だが、
+           短いボタン2つには過剰で、ヘッダーが2段になりタブと本文を
+           画面外へ押し下げていた。ボタンは 390px 幅でも十分に並ぶ。
+           `st.container(key="header_actions")` が付ける `.st-key-header_actions`
+           を目印にして、この行だけ既定の折り返し挙動へ戻す。 */
+        .st-key-header_actions [data-testid="stHorizontalBlock"] {{
+            flex-wrap: nowrap;
+        }}
+        .st-key-header_actions [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+        .st-key-header_actions [data-testid="stHorizontalBlock"] > [data-testid="column"] {{
+            flex: 1 1 0 !important;
+            min-width: 0 !important;
+            width: auto !important;
+        }}
+        /* 幅が詰まるぶん、ラベルが折り返して背が高くならないよう少しだけ縮める */
+        .st-key-header_actions .stButton > button,
+        .st-key-header_actions .stLinkButton > a {{
+            font-size: 0.85rem;
+            padding-left: 0.4rem;
+            padding-right: 0.4rem;
+            white-space: nowrap;
+        }}
     }}
 </style>
 """
