@@ -283,9 +283,19 @@ class TestGetBicycleStatus:
         df = pd.DataFrame([
             {"timestamp": "2026-09-19T12:00:00+09:00", "area_name": self.AREA_1A, "waiting_count": 1},
         ])
+        # 「書き換えていない」ことは、呼び出し前の型・値と比べて確かめる。
+        # 以前は `dtype == object` と比べていたが、pandas 3 では文字列列の既定型が
+        # object ではなく str(StringDtype)になるため、書き換えていなくても落ちた
+        # (2026-09-21、Dependabot の pandas 3 更新 #820)。型名を決め打ちしない。
+        original_dtype = df["timestamp"].dtype
+        original_values = df["timestamp"].tolist()
         val, _ = home_status_service.get_bicycle_status(df)
         assert "第1A: <b>1</b>台" in val
-        assert df["timestamp"].dtype == object
+        assert df["timestamp"].dtype == original_dtype
+        assert df["timestamp"].tolist() == original_values
+        assert not pd.api.types.is_datetime64_any_dtype(df["timestamp"]), (
+            "呼び出し元の列が日時型へ変換されている(.copy() せずに書き換えた)"
+        )
 
 
 class TestRenderSummary:
