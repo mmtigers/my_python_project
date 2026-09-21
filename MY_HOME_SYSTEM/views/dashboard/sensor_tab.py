@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from services import analysis_service
+from . import common as view_common
 
 # Issue #451/#453: device_type列に対する判定文字列。デバイスマスタ側の
 # 名称が変わると該当データが恒常的に0件になり、グラフが黙って空になる
@@ -39,8 +39,10 @@ def render_electricity(df_sensor: pd.DataFrame, now: datetime):
             fig = go.Figure()
             if not df_yesterday.empty:
                 df_yesterday["plot_time"] = df_yesterday["timestamp"] + timedelta(days=1)
+                df_yesterday = view_common.downsample_for_chart(df_yesterday, timestamp_col="plot_time")
                 fig.add_trace(go.Scatter(x=df_yesterday["plot_time"], y=df_yesterday["power_watts"], mode="lines", name="昨日", line=dict(color="#cccccc", width=2)))
             if not df_today.empty:
+                df_today = view_common.downsample_for_chart(df_today)
                 fig.add_trace(go.Scatter(x=df_today["timestamp"], y=df_today["power_watts"], mode="lines", name="今日", line=dict(color="#3366cc", width=3)))
             fig.update_layout(xaxis_range=[today_start, today_end], xaxis_title="時間", yaxis_title="電力(W)", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig, width="stretch")
@@ -55,7 +57,8 @@ def render_electricity(df_sensor: pd.DataFrame, now: datetime):
             (df_sensor["timestamp"] >= today_start) & (df_sensor["timestamp"] < today_end)
         ]
         if not df_app.empty:
-            fig_app = px.line(df_app, x="timestamp", y="power_watts", color="friendly_name", title="プラグ計測値")
+            fig_app = px.line(view_common.downsample_for_chart(df_app, series_col="friendly_name"),
+                              x="timestamp", y="power_watts", color="friendly_name", title="プラグ計測値")
             fig_app.update_xaxes(range=[today_start, today_end])
             st.plotly_chart(fig_app, width="stretch")
         else:
@@ -78,7 +81,8 @@ def render_temperature(df_sensor: pd.DataFrame, now: datetime):
     col1, col2 = st.columns(2)
     with col1:
         if not df_temp.empty:
-            fig_t = px.line(df_temp, x="timestamp", y="temperature_celsius", color="friendly_name", title="室温 (℃)")
+            fig_t = px.line(view_common.downsample_for_chart(df_temp, series_col="friendly_name"),
+                            x="timestamp", y="temperature_celsius", color="friendly_name", title="室温 (℃)")
             fig_t.update_xaxes(range=[today_start, today_end])
             st.plotly_chart(fig_t, width="stretch")
         else:
@@ -86,7 +90,8 @@ def render_temperature(df_sensor: pd.DataFrame, now: datetime):
 
     with col2:
         if not df_temp.empty:
-            fig_h = px.line(df_temp, x="timestamp", y="humidity_percent", color="friendly_name", title="湿度 (%)")
+            fig_h = px.line(view_common.downsample_for_chart(df_temp, series_col="friendly_name"),
+                            x="timestamp", y="humidity_percent", color="friendly_name", title="湿度 (%)")
             fig_h.update_xaxes(range=[today_start, today_end])
             st.plotly_chart(fig_h, width="stretch")
         else:
@@ -94,7 +99,7 @@ def render_temperature(df_sensor: pd.DataFrame, now: datetime):
 
     st.markdown("---")
     st.subheader(f"📅 年間気温・室温推移 ({now.year}年)")
-    df_yearly = analysis_service.load_yearly_temperature_stats(now.year)
+    df_yearly = view_common.load_yearly_temperature_stats_cached(now.year)
 
     if not df_yearly.empty:
         fig = go.Figure()

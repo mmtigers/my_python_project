@@ -37,7 +37,7 @@ class TestRenderTrafficRouteSelection:
         mock_st = _mock_st()
         with freeze_time(f"2026-09-19 {hour:02d}:00:00+09:00"), \
              patch.object(misc_tab, "st", mock_st), \
-             patch.object(misc_tab.train_service, "get_jr_traffic_status",
+             patch.object(misc_tab.view_common, "load_jr_traffic_status_cached",
                           return_value={"宝塚線": {"status": "平常運転", "detail": ""},
                                         "神戸線": {"status": "平常運転", "detail": ""}}), \
              patch.object(misc_tab, "_render_route_search") as mock_route:
@@ -65,7 +65,7 @@ class TestRenderTrafficRouteSelection:
     def test_delayed_line_is_colored_red(self):
         mock_st = _mock_st()
         with patch.object(misc_tab, "st", mock_st), \
-             patch.object(misc_tab.train_service, "get_jr_traffic_status",
+             patch.object(misc_tab.view_common, "load_jr_traffic_status_cached",
                           return_value={"宝塚線": {"status": "遅延", "detail": "人身事故", "is_delay": True},
                                         "神戸線": {"status": "平常運転", "detail": ""}}), \
              patch.object(misc_tab, "_render_route_search"):
@@ -78,7 +78,7 @@ class TestRenderTrafficRouteSelection:
         """Low修正: 取得不可を平常運転と同じ緑で出さない(遅延見逃し防止)。"""
         mock_st = _mock_st()
         with patch.object(misc_tab, "st", mock_st), \
-             patch.object(misc_tab.train_service, "get_jr_traffic_status",
+             patch.object(misc_tab.view_common, "load_jr_traffic_status_cached",
                           return_value={"宝塚線": {"status": "取得不可", "detail": "", "is_unavailable": True},
                                         "神戸線": {"status": "取得不可", "detail": "", "is_unavailable": True}}), \
              patch.object(misc_tab, "_render_route_search"):
@@ -93,7 +93,7 @@ class TestRenderRouteSearchFailure:
     def test_failed_lookup_shows_a_warning_instead_of_an_empty_card(self):
         mock_st = _mock_st()
         with patch.object(misc_tab, "st", mock_st), \
-             patch.object(misc_tab.train_service, "get_route_info",
+             patch.object(misc_tab.view_common, "load_route_info_cached",
                           return_value={"summary": "取得失敗"}):
             misc_tab._render_route_search(MagicMock(), "A", "B", "icon")
 
@@ -105,14 +105,14 @@ class TestRenderRouteSearchFailure:
                  "details": [], "url": "https://example.invalid/route"}
         mock_st = _mock_st()
         with patch.object(misc_tab, "st", mock_st), \
-             patch.object(misc_tab.train_service, "get_route_info", return_value=route):
+             patch.object(misc_tab.view_common, "load_route_info_cached", return_value=route):
             misc_tab._render_route_search(MagicMock(), "A", "B", "icon")
         mock_st.link_button.assert_called_once()
 
         route_without_url = dict(route, url="")
         mock_st2 = _mock_st()
         with patch.object(misc_tab, "st", mock_st2), \
-             patch.object(misc_tab.train_service, "get_route_info", return_value=route_without_url):
+             patch.object(misc_tab.view_common, "load_route_info_cached", return_value=route_without_url):
             misc_tab._render_route_search(MagicMock(), "A", "B", "icon")
         mock_st2.link_button.assert_not_called()
 

@@ -3,8 +3,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Tuple, Optional
 
-from services import train_service
 from services import analysis_service
+from . import common as view_common
 from .common import StatusCard, render_status_grid
 
 # === Status Helpers ===
@@ -83,7 +83,9 @@ def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:
     return val, theme
 
 def get_traffic_status() -> Tuple[str, str]:
-    jr_status = train_service.get_jr_traffic_status()
+    # スクレイピング(HTTP)はキャッシュ付きラッパー経由で呼ぶ。同じ描画の中で
+    # 「おでかけ」タブからも呼ばれるため、素で呼ぶと1回の表示で2回取りに行く。
+    jr_status = view_common.load_jr_traffic_status_cached()
     line_g = jr_status["宝塚線"]
     line_a = jr_status["神戸線"]
     # Issue #438: 同一関数内で is_suspended/is_unavailable は .get() を使う一方、
@@ -100,7 +102,7 @@ def get_traffic_status() -> Tuple[str, str]:
         return "🟢 平常運転", "theme-green"
 
 def get_server_status() -> Tuple[str, str]:
-    mem = analysis_service.get_memory_usage()
+    mem = view_common.get_memory_usage_cached()
     if mem:
         return f"💻 RAM: {int(mem['percent'])}%", "theme-green" if mem["percent"] < 80 else "theme-red"
     return "⚪ 取得失敗", "theme-gray"

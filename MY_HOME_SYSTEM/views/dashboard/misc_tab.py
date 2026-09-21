@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import pytz
 
 import config
-from services import train_service
+from . import common as view_common
 
 # Issue #451: 出勤/帰宅ルート判定の時間帯閾値(時)。4〜11時台は出勤ルート、
 # 12〜23時台は帰宅ルート、それ以外(深夜0〜3時台)も帰宅ルートを表示する。
@@ -19,7 +19,7 @@ RETURN_ROUTE_END_HOUR = 23
 
 def render_traffic():
     st.subheader("🚃 JR宝塚線・神戸線 運行状況")
-    jr_status = train_service.get_jr_traffic_status()
+    jr_status = view_common.load_jr_traffic_status_cached()
     line_g = jr_status["宝塚線"]
     line_a = jr_status["神戸線"]
 
@@ -61,7 +61,7 @@ def render_traffic():
 def _render_route_search(col, from_st: str, to_st: str, label_icon: str):
     with col:
         st.markdown(f"##### {label_icon} {from_st} → {to_st}")
-        data = train_service.get_route_info(from_st, to_st)
+        data = view_common.load_route_info_cached(from_st, to_st)
         if data["summary"] == "取得成功":
             details_html = ""
             if data.get("details"):
@@ -138,7 +138,10 @@ def render_bicycle(df_bicycle: pd.DataFrame):
         st.warning("指定されたエリアのデータが見つかりません。")
         return
 
-    fig = px.line(df_target, x="timestamp", y="waiting_count", color="area_name", title="待機人数の変化", markers=True, symbol="area_name")
+    # 「最新の状況」の表は間引き前のデータから作る(下の st.dataframe)。
+    # グラフ側は形しか読まないため、系列あたりの点数を間引いて転送量を抑える。
+    df_chart = view_common.downsample_for_chart(df_target, series_col="area_name")
+    fig = px.line(df_chart, x="timestamp", y="waiting_count", color="area_name", title="待機人数の変化", markers=True, symbol="area_name")
     fig.update_layout(xaxis_title="日時", yaxis_title="待機数 (人/台)", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     st.plotly_chart(fig, width="stretch")
 

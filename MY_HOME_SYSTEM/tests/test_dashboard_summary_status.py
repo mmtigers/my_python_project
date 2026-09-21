@@ -121,7 +121,7 @@ class TestGetItamiStatus:
 
 class TestGetTrafficStatus:
     def _patch(self, status):
-        return patch.object(summary.train_service, "get_jr_traffic_status", return_value=status)
+        return patch.object(summary.view_common, "load_jr_traffic_status_cached", return_value=status)
 
     def test_suspended_takes_priority(self):
         with self._patch({"宝塚線": {"is_suspended": True, "is_delay": True}, "神戸線": {}}):
@@ -149,15 +149,15 @@ class TestGetTrafficStatus:
 
 class TestGetServerStatus:
     def test_low_memory_is_green(self):
-        with patch.object(summary.analysis_service, "get_memory_usage", return_value={"percent": 42.7}):
+        with patch.object(summary.view_common, "get_memory_usage_cached", return_value={"percent": 42.7}):
             assert summary.get_server_status() == ("💻 RAM: 42%", "theme-green")
 
     def test_high_memory_is_red(self):
-        with patch.object(summary.analysis_service, "get_memory_usage", return_value={"percent": 91.0}):
+        with patch.object(summary.view_common, "get_memory_usage_cached", return_value={"percent": 91.0}):
             assert summary.get_server_status() == ("💻 RAM: 91%", "theme-red")
 
     def test_unavailable_memory_is_gray(self):
-        with patch.object(summary.analysis_service, "get_memory_usage", return_value=None):
+        with patch.object(summary.view_common, "get_memory_usage_cached", return_value=None):
             assert summary.get_server_status() == ("⚪ 取得失敗", "theme-gray")
 
 
@@ -297,8 +297,8 @@ class TestRenderSummary:
 
         with patch.object(summary, "render_status_grid") as mock_grid, \
              patch.object(summary.analysis_service, "calculate_monthly_cost_cumulative", return_value=4321), \
-             patch.object(summary.analysis_service, "get_memory_usage", return_value={"percent": 50}), \
-             patch.object(summary.train_service, "get_jr_traffic_status",
+             patch.object(summary.view_common, "get_memory_usage_cached", return_value={"percent": 50}), \
+             patch.object(summary.view_common, "load_jr_traffic_status_cached",
                           return_value={"宝塚線": {}, "神戸線": {}}):
             summary.render_summary(NOW, df_sensor, df_car, df_bicycle, None)
 

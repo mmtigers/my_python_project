@@ -1,13 +1,14 @@
 # MY_HOME_SYSTEM/views/dashboard/common.py
 import html
 import logging
+import math
 import traceback
 from contextlib import contextmanager
 from typing import Iterable, NamedTuple
 
 import pandas as pd
 import streamlit as st
-from services import analysis_service
+from services import analysis_service, train_service
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +253,121 @@ def load_bicycle_data_cached(limit: int) -> pd.DataFrame:
 def load_nas_status_cached() -> pd.Series | None:
     """`analysis_service.load_nas_status` のキャッシュ付きラッパー。"""
     return analysis_service.load_nas_status()
+
+
+# --- DB以外の重い読み取り ---
+# Issue #741 では SQLite の読み取りだけをキャッシュしたが、1回の描画で走る
+# 重い処理はそれだけではなかった。スマホでの初回表示は次のものにも待たされる。
+#
+#   - JR運行情報 / Yahoo!路線情報のスクレイピング(いずれもHTTP、timeout 5秒)
+#   - `journalctl` のサブプロセス起動
+#   - 年間気温の集計SQL(2テーブルを1年分)
+#
+# しかもJR運行情報はサマリーと「おでかけ」タブの2箇所から呼ばれており、
+# 同じ1回の描画の中で2回スクレイピングしていた。DBの読み取りと同じTTLで
+# キャッシュし、「🔄 データを更新」でまとめて捨てられるようにする
+# (`st.cache_data.clear()` は本モジュールのラッパーもすべて対象にする)。
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def load_jr_traffic_status_cached() -> dict:
+    """`train_service.get_jr_traffic_status` のキャッシュ付きラッパー。"""
+    return train_service.get_jr_traffic_status()
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def load_route_info_cached(from_station: str, to_station: str) -> dict:
+    """`train_service.get_route_info` のキャッシュ付きラッパー。
+
+    検索する出発時刻は「現在時刻+20分」で、TTL(60秒)の間は同じ結果を
+    使い回すことになるが、乗換案内の結果が60秒で変わることは実質無い。
+    """
+    return train_service.get_route_info(from_station, to_station)
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def load_yearly_temperature_stats_cached(year: int) -> pd.DataFrame:
+    """`analysis_service.load_yearly_temperature_stats` のキャッシュ付きラッパー。"""
+    return analysis_service.load_yearly_temperature_stats(year)
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def get_disk_usage_cached() -> dict | None:
+    """`analysis_service.get_disk_usage` のキャッシュ付きラッパー。"""
+    return analysis_service.get_disk_usage()
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def get_memory_usage_cached() -> dict | None:
+    """`analysis_service.get_memory_usage` のキャッシュ付きラッパー。
+
+    サマリーの「🖥️ サーバー」カードと「🔧 システム」タブのリソース表示の
+    2箇所から呼ばれる。
+    """
+    return analysis_service.get_memory_usage()
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def get_system_logs_cached(lines: int = 50, priority=None, target_date=None) -> str:
+    """`analysis_service.get_system_logs`(journalctl)のキャッシュ付きラッパー。
+
+    呼び出し側の「🔄 ログを更新」ボタンは、TTLを待たずに取り直すために
+    この関数の `.clear()` を呼ぶこと。
+    """
+    return analysis_service.get_system_logs(
+        lines=lines, priority=priority, target_date=target_date
+    )
+
+
+# === グラフのデータ量 ===
+# plotly に渡した点は、そのまま WebSocket のペイロードとしてスマートフォンへ
+# 転送される。駐輪場の推移(3系列 × 1,000点前後)のように「折れ線の形しか
+# 読まない」グラフでは、点を間引いても読み取れる情報は変わらない。
+CHART_MAX_POINTS_PER_SERIES = 500
+
+
+def downsample_for_chart(
+    df: pd.DataFrame,
+    *,
+    timestamp_col: str = "timestamp",
+    series_col: str | None = None,
+    max_points: int = CHART_MAX_POINTS_PER_SERIES,
+) -> pd.DataFrame:
+    """系列あたりの点数が `max_points` を超えるとき、等間隔に間引いて返す。
+
+    平均でリサンプルせず等間隔の間引き(stride)にしているのは、
+      - 列の型・構成をそのまま保てる(色分けに使う文字列列を落とさない)
+      - 欠測区間に元データに無い値を作らない
+    ため。ただし瞬間的なスパイクは間引きで落ちうるので、しきい値判定
+    (炊飯器の500W等)はグラフ用のこの関数を通さない生データ側で行うこと。
+
+    最新の点は必ず残す(右端が欠けると「止まっている」ように見えるため)。
+    """
+    if df is None or df.empty or max_points <= 0 or timestamp_col not in df.columns:
+        return df
+
+    if series_col and series_col in df.columns:
+        groups = [group for _, group in df.groupby(series_col, sort=False)]
+    else:
+        groups = [df]
+
+    if all(len(group) <= max_points for group in groups):
+        return df
+
+    thinned = []
+    for group in groups:
+        if len(group) <= max_points:
+            thinned.append(group)
+            continue
+        ordered = group.sort_values(timestamp_col)
+        step = math.ceil(len(ordered) / max_points)
+        picked = ordered.iloc[::step]
+        last_row = ordered.iloc[[-1]]
+        if picked.index[-1] != ordered.index[-1]:
+            picked = pd.concat([picked, last_row])
+        thinned.append(picked)
+
+    return pd.concat(thinned).sort_values(timestamp_col)
 
 
 class StatusCard(NamedTuple):

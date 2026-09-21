@@ -119,7 +119,7 @@ class TestRenderElectricity:
 
 class TestRenderTemperature:
     def _patch_yearly(self, df):
-        return patch.object(sensor_tab.analysis_service, "load_yearly_temperature_stats", return_value=df)
+        return patch.object(sensor_tab.view_common, "load_yearly_temperature_stats_cached", return_value=df)
 
     def test_empty_dataframe_shows_info_and_returns_early(self):
         mock_st = _mock_st()

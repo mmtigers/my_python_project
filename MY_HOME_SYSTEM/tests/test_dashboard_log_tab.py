@@ -79,8 +79,8 @@ class TestRenderResources:
     def test_disk_and_memory_are_rendered_as_progress_bars(self):
         mock_st = _mock_st()
         with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "get_disk_usage", return_value={"percent": 61.4}), \
-             patch.object(log_tab.analysis_service, "get_memory_usage", return_value={"percent": 38.9}):
+             patch.object(log_tab.view_common, "get_disk_usage_cached", return_value={"percent": 61.4}), \
+             patch.object(log_tab.view_common, "get_memory_usage_cached", return_value={"percent": 38.9}):
             log_tab.render_resources()
 
         assert [c.args[0] for c in mock_st.progress.call_args_list] == [61, 38]
@@ -88,8 +88,8 @@ class TestRenderResources:
     def test_unavailable_metrics_are_skipped_without_raising(self):
         mock_st = _mock_st()
         with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "get_disk_usage", return_value=None), \
-             patch.object(log_tab.analysis_service, "get_memory_usage", return_value=None):
+             patch.object(log_tab.view_common, "get_disk_usage_cached", return_value=None), \
+             patch.object(log_tab.view_common, "get_memory_usage_cached", return_value=None):
             log_tab.render_resources()
 
         mock_st.progress.assert_not_called()
@@ -99,7 +99,7 @@ class TestRenderNasStatus:
     def test_missing_data_shows_info_and_returns_early(self):
         mock_st = _mock_st()
         with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "load_nas_status", return_value=None):
+             patch.object(log_tab.view_common, "load_nas_status_cached", return_value=None):
             log_tab.render_nas_status()
 
         mock_st.info.assert_called_once()
@@ -109,7 +109,7 @@ class TestRenderNasStatus:
         nas = pd.Series({"status_ping": "OK", "status_mount": "OK", "timestamp": "2026-09-19 12:00"})
         mock_st = _mock_st()
         with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "load_nas_status", return_value=nas):
+             patch.object(log_tab.view_common, "load_nas_status_cached", return_value=nas):
             log_tab.render_nas_status()
 
         values = [c.args[1] for c in mock_st.metric.call_args_list]
@@ -121,7 +121,7 @@ class TestRenderNasStatus:
         nas = pd.Series({"status_ping": "NG", "status_mount": "NG", "timestamp": "2026-09-19 12:00"})
         mock_st = _mock_st()
         with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "load_nas_status", return_value=nas):
+             patch.object(log_tab.view_common, "load_nas_status_cached", return_value=nas):
             log_tab.render_nas_status()
 
         values = [c.args[1] for c in mock_st.metric.call_args_list]
@@ -135,7 +135,7 @@ class TestRenderServerLogs:
         mock_st.radio.return_value = "直近のログを表示"
         mock_st.selectbox.side_effect = [200, "全て"]
         with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "get_system_logs", return_value="log body") as mock_logs:
+             patch.object(log_tab.view_common, "get_system_logs_cached", return_value="log body") as mock_logs:
             log_tab.render_server_logs()
 
         assert mock_logs.call_args.kwargs == {"lines": 200, "priority": None, "target_date": None}
@@ -148,7 +148,7 @@ class TestRenderServerLogs:
         mock_st.date_input.return_value = target
         mock_st.selectbox.return_value = "エラー"
         with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "get_system_logs", return_value="log body") as mock_logs:
+             patch.object(log_tab.view_common, "get_system_logs_cached", return_value="log body") as mock_logs:
             log_tab.render_server_logs()
 
         assert mock_logs.call_args.kwargs["target_date"] == target
@@ -159,7 +159,7 @@ class TestRenderServerLogs:
         mock_st.radio.return_value = "直近のログを表示"
         mock_st.selectbox.side_effect = [50, "警告"]
         with patch.object(log_tab, "st", mock_st), \
-             patch.object(log_tab.analysis_service, "get_system_logs", return_value=""):
+             patch.object(log_tab.view_common, "get_system_logs_cached", return_value=""):
             log_tab.render_server_logs()
 
         mock_st.info.assert_called_once()
