@@ -1198,10 +1198,16 @@ class TestRestrictedQueryResourceLimits:
                     (f"menu-{i}",),
                 )
 
-        # 300^3 = 2,700万行ぶんの走査。上限が無ければワーカーを長時間占有する。
+        # 300^4 = 81億行ぶんの走査。上限が無ければワーカーを長時間占有する。
+        #
+        # 以前は3重結合(300^3 = 2,700万行)だったが、速い CI ランナーでは 0.2 秒の上限に
+        # 達する前に数え終わってしまい、中断されずに [{"c": 27000000}] が返って落ちた
+        # (2026-09-21、Dependabot の PR #820 / #821 で同時に発生。どちらの変更とも無関係)。
+        # 「上限が働くか」を検証したいので、**どのマシンでも上限内には終わらない**量にする。
+        # 中断されるためテストの所要時間は上限(0.2秒)程度のまま変わらない。
         table = config.SQLITE_TABLE_FOOD
         result = ai_service._execute_restricted_read_query(
-            f"SELECT count(*) AS c FROM {table} a, {table} b, {table} c"
+            f"SELECT count(*) AS c FROM {table} a, {table} b, {table} c, {table} d"
         )
 
         assert result.startswith("検索エラー:"), result
