@@ -451,3 +451,113 @@ class TestMainExitCode:
         .coveragerc の exclude_lines によりカバレッジ対象外のため)。"""
         source = Path(backup_service.__file__).read_text(encoding="utf-8")
         assert "sys.exit(0 if perform_backup()[0] else 1)" in source
+
+
+class TestConfigBackupRedactsCredentials:
+    """Issue #829: 設定ファイルを NAS へコピーするとき、認証情報の値を伏せ字にすること。
+
+    `devices.json` はカメラの `pass` と、`rtsp://<user>:<pass>@` 形式の `rtsp_url` を
+    平文で持つ。以前は毎晩そのまま NAS(CIFS の file_mode=0664)へコピーしており、
+    2026-09-21 時点で `devices_*.json` 22件すべてにカメラのパスワードが入っていた。
+    """
+
+    CAMERA_PASS = "Cam-Secret-9Z!"
+
+    def _write(self, name, content, *, binary=False):
+        path = os.path.join(config.BASE_DIR, name)
+        mode = "wb" if binary else "w"
+        kwargs = {} if binary else {"encoding": "utf-8"}
+        with open(path, mode, **kwargs) as f:
+            f.write(content)
+        return path
+
+    def _backups(self):
+        d = os.path.join(config.NAS_PROJECT_ROOT, "db_backups")
+        return {name: os.path.join(d, name) for name in os.listdir(d)}
+
+    def _devices_json(self):
+        import json
+
+        return json.dumps({
+            "cameras": [
+                {"id": "cam1", "ip": "192.168.1.110", "user": "admin", "pass": self.CAMERA_PASS},
+                {
+                    "id": "cam2", "ip": "192.168.1.5", "user": "admin", "pass": self.CAMERA_PASS,
+                    "rtsp_url": f"rtsp://admin:{self.CAMERA_PASS}@192.168.1.5:554/stream",
+                },
+            ]
+        }, ensure_ascii=False, indent=2)
+
+    def test_camera_passwords_do_not_reach_the_nas(self, monkeypatch):
+        """これが本 Issue そのもの。pass と rtsp_url の両方から消えること。"""
+        self._write("devices.json", self._devices_json())
+        monkeypatch.setattr(config, "BACKUP_FILES", [config.SQLITE_DB_PATH, "devices.json"])
+
+        success, _, _ = backup_service.perform_backup()
+
+        assert success is True
+        (dest,) = [p for n, p in self._backups().items() if n.startswith("devices_")]
+        with open(dest, encoding="utf-8") as f:
+            body = f.read()
+        assert self.CAMERA_PASS not in body
+        assert body.count(backup_service.REDACTED_MARK) == 3  # pass×2 + rtsp_url×1
+
+    def test_structure_and_usernames_are_kept_for_restore(self, monkeypatch):
+        """秘密の値以外は残し、JSON として読めること(復元時に構造と使うアカウントが分かる)。"""
+        import json
+
+        self._write("devices.json", self._devices_json())
+        monkeypatch.setattr(config, "BACKUP_FILES", [config.SQLITE_DB_PATH, "devices.json"])
+        backup_service.perform_backup()
+
+        (dest,) = [p for n, p in self._backups().items() if n.startswith("devices_")]
+        with open(dest, encoding="utf-8") as f:
+            data = json.load(f)
+        cam2 = data["cameras"][1]
+        assert cam2["ip"] == "192.168.1.5"
+        assert cam2["user"] == "admin"
+        assert cam2["rtsp_url"].startswith("rtsp://admin:")
+        assert cam2["rtsp_url"].endswith("@192.168.1.5:554/stream")
+
+    def test_source_file_is_not_modified(self, monkeypatch):
+        """伏せ字にするのは NAS 側のコピーだけ。実運用の devices.json を壊さないこと。"""
+        src = self._write("devices.json", self._devices_json())
+        monkeypatch.setattr(config, "BACKUP_FILES", [config.SQLITE_DB_PATH, "devices.json"])
+        backup_service.perform_backup()
+
+        with open(src, encoding="utf-8") as f:
+            assert self.CAMERA_PASS in f.read()
+
+    def test_url_password_is_redacted_in_non_json_files_too(self, monkeypatch):
+        self._write("config.py", 'RTSP = "rtsp://viewer:TopSecret1@10.0.0.2/s"\n')
+        monkeypatch.setattr(config, "BACKUP_FILES", [config.SQLITE_DB_PATH, "config.py"])
+        backup_service.perform_backup()
+
+        (dest,) = [p for n, p in self._backups().items() if n.startswith("config_")]
+        with open(dest, encoding="utf-8") as f:
+            body = f.read()
+        assert "TopSecret1" not in body
+        assert "rtsp://viewer:" in body
+
+    def test_json_key_rule_is_not_applied_to_python_sources(self):
+        """`"password": ...` という見た目の文字列でも、.py では意味が違うので触らない。"""
+        text = 'LABELS = {"password": "パスワード欄の見出し"}\n'
+        out, count = backup_service.redact_backup_text(text, is_json=False)
+        assert out == text
+        assert count == 0
+
+    def test_empty_secret_values_are_left_alone(self):
+        out, count = backup_service.redact_backup_text('{"pass": ""}', is_json=True)
+        assert out == '{"pass": ""}'
+        assert count == 0
+
+    def test_unreadable_file_is_not_copied_in_plaintext(self, monkeypatch):
+        """テキストとして読めない=秘密の有無を検査できないものは、NAS に置かない側へ倒す。
+        DB のバックアップ自体は成功すること。"""
+        self._write("devices.json", b"\xff\xfe\x00pass\x00", binary=True)
+        monkeypatch.setattr(config, "BACKUP_FILES", [config.SQLITE_DB_PATH, "devices.json"])
+
+        success, _, _ = backup_service.perform_backup()
+
+        assert success is True
+        assert not any(n.startswith("devices_") for n in self._backups())
