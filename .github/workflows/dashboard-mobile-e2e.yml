@@ -1,0 +1,86 @@
+# スマートフォン幅(390x844)の実画面に対する回帰チェック。
+#
+# 2026-09 の #807 / #822 は、いずれも「実機のスマホで開いて初めて分かった」崩れだった
+# (サマリーカードが生HTMLとして出る、固定ヘッダーが半透明で本文が透ける、先頭の行が
+# ヘッダーの下に隠れる)。既存の回帰テストはCSSの文字列や描画関数の呼び出しを見るもので、
+# 実際に描かれた結果の座標は見ていないため、「CSSは入っているのにレイアウトは崩れている」を
+# 拾えない。Streamlit を実際に起動し、Chromium のモバイルビューポートで開いて確認する。
+#
+# **常に非ブロッキング**(continue-on-error: true)である。ブラウザ実行は環境要因で
+# 落ちうるため、これでPRを止めない。崩れはスクリーンショット(成果物)で確認する。
+# 判定そのものを信頼してブロッキング化する場合は、先に数週間ぶん安定することを確かめること。
+name: Dashboard Mobile E2E
+
+on:
+  pull_request:
+    paths:
+      - 'MY_HOME_SYSTEM/dashboard.py'
+      - 'MY_HOME_SYSTEM/views/dashboard/**'
+      - 'MY_HOME_SYSTEM/routers/dashboard_router.py'
+      - 'MY_HOME_SYSTEM/services/dashboard_proxy_service.py'
+      - 'MY_HOME_SYSTEM/tests/test_dashboard_mobile_e2e.py'
+      - '.github/workflows/dashboard-mobile-e2e.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: ./MY_HOME_SYSTEM
+
+jobs:
+  mobile-e2e:
+    name: Mobile viewport (390x844)
+    runs-on: ubuntu-latest
+    # ブラウザのインストールと Streamlit の起動を含むため、pytest 本体より長めに取る
+    timeout-minutes: 30
+    # 判定は参考情報。ブラウザ実行の不安定さでPRを止めない。
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          # Issue #403: 実機 .venv とCIで同じ版を使うよう MY_HOME_SYSTEM/.python-version を参照する
+          python-version-file: MY_HOME_SYSTEM/.python-version
+          cache: pip
+          cache-dependency-path: |
+            MY_HOME_SYSTEM/requirements.txt
+            MY_HOME_SYSTEM/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Install Playwright (this job only)
+        # playwright は requirements-dev.txt には入れない。ブロッキングの test ジョブと
+        # 実機の .venv に、ここでしか使わない依存とブラウザを持ち込まないため。
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Run mobile viewport checks
+        env:
+          SQLITE_DB_PATH: ":memory:"
+          NAS_MOUNT_POINT: "./tmp_nas"
+          NOTIFICATION_TARGET: "none"
+          DASHBOARD_E2E: "1"
+          DASHBOARD_E2E_ARTIFACT_DIR: ${{ github.workspace }}/dashboard-mobile-screenshots
+        run: python -m pytest tests/test_dashboard_mobile_e2e.py -v
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dashboard-mobile-screenshots
+          path: dashboard-mobile-screenshots/
+          if-no-files-found: ignore
+          retention-days: 14

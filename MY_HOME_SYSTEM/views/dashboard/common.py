@@ -131,21 +131,57 @@ CUSTOM_CSS = f"""
 
         /* タブ選択は `st.tabs` ではなく `st.segmented_control` で描いている
            (選択中のタブの中身だけを実行するため。`dashboard.py` の
-           `_render_tab_selector` のdocstring参照)。5つ並ぶと390px幅には
-           収まらないので、旧タブ列と同じく横スクロールできるようにする。 */
+           `_render_tab_selector` のdocstring参照)。
+
+           既定のままだと5つのタブで合計約460pxになり、390px幅では
+           「🔧 システム」が画面外に出る。目的のタブを探せないのは元の
+           10タブ構成で一番困っていた点なので、5つとも同時に見えるよう
+           文字サイズと余白を詰めて等幅(flex: 1 1 0)で並べる。
+           それでも入りきらない環境のために横スクロールは残す。
+
+           高さは44px(タップターゲットの下限)を下回らせない。既定では32px。 */
         [data-testid="stSegmentedControl"],
         [data-testid="stButtonGroup"] {{
+            /* 既定は内容幅までしか広がらず、画面右側が空いたままになる */
+            width: 100%;
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
             scrollbar-width: none;
         }}
         [data-testid="stSegmentedControl"]::-webkit-scrollbar,
         [data-testid="stButtonGroup"]::-webkit-scrollbar {{ display: none; }}
+        [data-testid="stSegmentedControl"] [role="radiogroup"],
+        [data-testid="stButtonGroup"] [role="radiogroup"] {{
+            display: flex;
+            width: 100%;
+        }}
         [data-testid="stSegmentedControl"] button,
         [data-testid="stButtonGroup"] button {{
+            min-height: 44px;
             white-space: nowrap;
-            padding-left: 0.55rem;
-            padding-right: 0.55rem;
+            padding-left: 0.2rem;
+            padding-right: 0.2rem;
+        }}
+        [data-testid="stSegmentedControl"] button p,
+        [data-testid="stButtonGroup"] button p {{
+            white-space: nowrap;
+            font-size: 0.78rem;
+        }}
+        /* タブ名の絵文字は1枚あたり約20pxを占め、5つ並べると390px幅では
+           右端の「システム」がはみ出して横スクロールしないと押せない
+           (実測: 絵文字ありで約377px、なしで約257px。360px幅の端末では
+           さらに苦しい)。目的のタブを探せないのは10タブ構成で一番困っていた点
+           なので、スマホ幅では絵文字を落として5つとも見えることを優先する
+           (絵文字はPC幅では残る)。 */
+        [data-testid="stSegmentedControl"] button span:has(> [data-testid="stIconEmoji"]),
+        [data-testid="stButtonGroup"] button span:has(> [data-testid="stIconEmoji"]) {{
+            display: none;
+        }}
+
+        /* Streamlit の「Deploy」ボタンは、この用途では押す機会が無いのに
+           狭いヘッダーの一等地を占める。スマホ幅では隠す。 */
+        [data-testid="stAppDeployButton"] {{
+            display: none;
         }}
 
         /* 防犯カメラのギャラリーも2列で折り返す。4枚が全幅で縦に積まれると、
