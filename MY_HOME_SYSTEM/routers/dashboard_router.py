@@ -8,11 +8,22 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH` 配下で配信�
 
 `config.DASHBOARD_PROXY_ENABLED=false` のときは `unified_server.py` がこのルーターを
 include しないため、パス自体が存在しなくなる(404)。
+
+ベースパス配下には、中継のほかに「スマートフォンのホーム画面に追加する」ための
+マニフェストとアイコンも置く(中継先のStreamlitは持っていないため)。
 """
-from fastapi import APIRouter, Request, WebSocket
+import json
+
+from fastapi import APIRouter, HTTPException, Request, WebSocket
+from fastapi.responses import Response
 
 import config
-from services.dashboard_proxy_service import dashboard_proxy_service
+from services.dashboard_proxy_service import (
+    DASHBOARD_ICON_SIZES,
+    build_dashboard_manifest,
+    dashboard_proxy_service,
+    render_dashboard_icon_png,
+)
 
 router = APIRouter()
 
@@ -21,6 +32,34 @@ router = APIRouter()
 _PROXIED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 
 _BASE_PATH = config.DASHBOARD_BASE_PATH
+
+
+# --- スマートフォンのホーム画面に追加するための付帯物 ---
+# 中継先(Streamlit)は持っていないので、このアプリ自身が返す。
+# 中継の総当たりルート(`{path:path}`)より**前**に定義すること
+# (FastAPIは定義順に照合するため、後ろに置くと中継側が拾って404になる)。
+
+
+@router.get(f"{_BASE_PATH}/app.webmanifest", include_in_schema=False)
+def dashboard_manifest() -> Response:
+    """ホーム画面に追加したときアドレスバー無し(standalone)で開くための定義。"""
+    return Response(
+        content=json.dumps(build_dashboard_manifest(), ensure_ascii=False),
+        media_type="application/manifest+json",
+    )
+
+
+@router.get(f"{_BASE_PATH}/icon-{{size}}.png", include_in_schema=False)
+def dashboard_icon(size: int) -> Response:
+    """ホーム画面アイコン。マニフェストと apple-touch-icon から参照される。"""
+    if size not in DASHBOARD_ICON_SIZES:
+        raise HTTPException(status_code=404, detail="unknown icon size")
+    return Response(
+        content=render_dashboard_icon_png(size),
+        media_type="image/png",
+        # 内容はコードから決まり、実質変わらない。実機の再取得を減らす。
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.api_route(_BASE_PATH, methods=_PROXIED_METHODS, include_in_schema=False)

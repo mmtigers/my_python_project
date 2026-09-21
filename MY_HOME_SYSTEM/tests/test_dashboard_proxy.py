@@ -15,6 +15,7 @@ routers/dashboard_router.py)のテスト。
 """
 import asyncio
 import gzip
+import io
 import os
 import socket
 import sys
@@ -182,7 +183,9 @@ class _RecordingHttpUpstream:
 
     BODY = b"<html>dashboard</html>"
 
-    def __init__(self) -> None:
+    def __init__(self, body: bytes | None = None, content_type: str = "text/html") -> None:
+        self.body = self.BODY if body is None else body
+        self.content_type = content_type
         self.port = _free_port()
         self.received_headers: dict = {}
         self._server: ThreadingHTTPServer | None = None
@@ -198,14 +201,14 @@ class _RecordingHttpUpstream:
                 upstream.received_headers = {k.lower(): v for k, v in self.headers.items()}
                 accept_encoding = upstream.received_headers.get("accept-encoding", "")
                 if "gzip" in accept_encoding:
-                    body = gzip.compress(upstream.BODY)
+                    body = gzip.compress(upstream.body)
                     encoding = "gzip"
                 else:
-                    body = upstream.BODY
+                    body = upstream.body
                     encoding = None
 
                 self.send_response(200)
-                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Type", upstream.content_type)
                 self.send_header("Content-Length", str(len(body)))
                 if encoding:
                     self.send_header("Content-Encoding", encoding)
@@ -273,6 +276,135 @@ class TestResponsePassthrough:
         assert "BaseHTTP" not in res.headers.get("server", "")
         assert len(res.headers.get_list("date")) <= 1
         assert len(res.headers.get_list("server")) <= 1
+
+
+class TestMobileHomeScreenAssets:
+    """スマートフォンのホーム画面に追加するための付帯物。
+
+    Streamlit の静的ファイルは pip 管理で手を入れられないため、マニフェスト・
+    アイコンはこのアプリが返し、HTMLへの参照は中継層で `</head>` の直前に
+    差し込む。中継の総当たりルートより**前**に定義されていないと、
+    これらのパスも Streamlit に中継されて404になる。
+    """
+
+    def _client(self, monkeypatch, port: int = 1):
+        # port=1 は「中継先が居ない」状態。マニフェスト・アイコンは中継せずに
+        # このアプリが返すため、中継先が落ちていても 200 で返るのが正しい。
+        monkeypatch.setattr(config, "DASHBOARD_INTERNAL_URL", f"http://127.0.0.1:{port}")
+        app = FastAPI()
+        app.include_router(dashboard_router.router)
+        return TestClient(app)
+
+    def test_manifest_is_served_by_this_app_not_proxied(self, monkeypatch):
+        with self._client(monkeypatch) as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}/app.webmanifest")
+
+        assert res.status_code == 200
+        manifest = res.json()
+        assert manifest["display"] == "standalone"
+        # ホーム画面から開いたときにダッシュボードだけがアプリとして開くこと
+        assert manifest["scope"] == f"{config.DASHBOARD_BASE_PATH}/"
+        assert manifest["start_url"].startswith(config.DASHBOARD_BASE_PATH)
+        assert manifest["lang"] == "ja"
+
+    def test_icons_are_png_of_the_requested_size(self, monkeypatch):
+        from PIL import Image
+
+        with self._client(monkeypatch) as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}/icon-192.png")
+
+        assert res.status_code == 200
+        assert res.headers["content-type"] == "image/png"
+        assert res.content[:8] == b"\x89PNG\r\n\x1a\n"
+        assert Image.open(io.BytesIO(res.content)).size == (192, 192)
+
+    def test_unknown_icon_size_is_404_not_proxied(self, monkeypatch):
+        with self._client(monkeypatch) as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}/icon-9999.png")
+
+        assert res.status_code == 404
+
+    def test_manifest_lists_every_icon_size_that_is_served(self, monkeypatch):
+        """マニフェストが参照しているのに404になるサイズが無いこと。"""
+        with self._client(monkeypatch) as client:
+            manifest = client.get(f"{config.DASHBOARD_BASE_PATH}/app.webmanifest").json()
+            for icon in manifest["icons"]:
+                assert client.get(icon["src"]).status_code == 200
+
+
+class TestMobileHeadInjection:
+    """HTMLの `</head>` 直前への差し込み。"""
+
+    def _get_html(self, monkeypatch, upstream):
+        monkeypatch.setattr(config, "DASHBOARD_INTERNAL_URL", f"http://127.0.0.1:{upstream.port}")
+        app = FastAPI()
+        app.include_router(dashboard_router.router)
+        with TestClient(app) as client:
+            return client.get(
+                f"{config.DASHBOARD_BASE_PATH}/",
+                headers={"accept": "text/html,application/xhtml+xml"},
+            )
+
+    def test_manifest_and_icon_are_injected(self, monkeypatch):
+        html = b"<html><head><title>Streamlit</title></head><body></body></html>"
+        with _RecordingHttpUpstream(body=html) as upstream:
+            res = self._get_html(monkeypatch, upstream)
+
+        body = res.text
+        assert f'href="{config.DASHBOARD_BASE_PATH}/app.webmanifest"' in body
+        assert 'rel="apple-touch-icon"' in body
+        assert 'name="apple-mobile-web-app-capable"' in body
+        # 差し込みで head が壊れていないこと
+        assert body.count("</head>") == 1
+        assert body.index("app.webmanifest") < body.index("</head>")
+
+    def test_manifest_is_fetched_with_credentials(self, monkeypatch):
+        """マニフェストの取得は既定で認証情報を送らない。このパスは
+        Cloudflare Access の内側にあるため、`use-credentials` が無いと
+        取得が弾かれてホーム画面追加が効かない。"""
+        html = b"<html><head></head><body></body></html>"
+        with _RecordingHttpUpstream(body=html) as upstream:
+            res = self._get_html(monkeypatch, upstream)
+
+        assert 'crossorigin="use-credentials"' in res.text
+
+    def test_returning_from_the_background_reloads_the_page(self, monkeypatch):
+        """スマホでアプリを切り替えるとWebSocketが切れ、戻っても
+        "Connecting..." のままだったり古い値が出たままになる。"""
+        html = b"<html><head></head><body></body></html>"
+        with _RecordingHttpUpstream(body=html) as upstream:
+            res = self._get_html(monkeypatch, upstream)
+
+        assert "visibilitychange" in res.text
+        assert "location.reload()" in res.text
+
+    def test_html_requests_ask_for_uncompressed_bodies(self, monkeypatch):
+        """差し込みのために本文を読む必要があるため、HTMLだけは非圧縮を要求する。"""
+        html = b"<html><head></head><body></body></html>"
+        with _RecordingHttpUpstream(body=html) as upstream:
+            self._get_html(monkeypatch, upstream)
+
+        assert upstream.received_headers["accept-encoding"] == "identity"
+
+    def test_non_html_responses_are_passed_through_untouched(self, monkeypatch):
+        """静的アセット(JS等)に差し込むとファイルが壊れる。"""
+        script = b"console.log('streamlit');"
+        with _RecordingHttpUpstream(body=script, content_type="application/javascript") as upstream:
+            monkeypatch.setattr(config, "DASHBOARD_INTERNAL_URL", f"http://127.0.0.1:{upstream.port}")
+            app = FastAPI()
+            app.include_router(dashboard_router.router)
+            with TestClient(app) as client:
+                res = client.get(f"{config.DASHBOARD_BASE_PATH}/static/js/main.js")
+
+        assert res.content == script
+
+    def test_missing_head_is_left_alone(self):
+        """Streamlit側のテンプレートが変わって `</head>` が見つからなくても、
+        画面が壊れるのではなく差し込みだけが行われないこと。"""
+        from services import dashboard_proxy_service as proxy_module
+
+        original = "<html><body>no head</body></html>"
+        assert proxy_module.inject_mobile_head(original) == original
 
 
 class TestPinAcceptEncoding:

@@ -18,6 +18,18 @@ Streamlitダッシュボード(dashboard.py)を `unified_server.py` 経由で配
     IPレンジ経由に限定されていること)に依存する。**Cloudflare Access側で
     このパスをバイパス対象にしてはならない**。
 
+スマートフォン向けの付帯物(ホーム画面への追加・復帰時の再接続):
+    Streamlit のHTMLは自前では PWA のマニフェストを持たないため、ホーム画面に
+    追加してもブラウザのUIごと開き、アイコンも既定のスクリーンショットになる。
+    Streamlit 側のテンプレートには手を入れられない(pip管理の静的ファイル)ので、
+    この中継層で `</head>` の直前にマニフェスト・アイコン・復帰時の再読込
+    スクリプトを差し込む。マニフェストとアイコンの実体も同じベースパス配下で
+    このアプリが返す(`routers/dashboard_router.py`)。
+
+    注意: ホーム画面から開いた(standalone)ときのCookieの扱いはブラウザ依存で、
+    iOSではSafariのCookieと分離されることがある。その場合はホーム画面アイコンから
+    開いた最初の1回だけ Cloudflare Access のログインが要る(想定内の挙動)。
+
 実装上の注意:
     - StreamlitはHTTPだけでなく WebSocket(`_stcore/stream`)でブラウザと双方向通信
       するため、HTTPの中継だけでは画面が永久に "Connecting..." のままになる。
@@ -27,14 +39,16 @@ Streamlitダッシュボード(dashboard.py)を `unified_server.py` 経由で配
       起動引数は `deploy/systemd/home_dashboard.service` と `start_all.sh` にある。
 """
 import asyncio
+import io
 import logging
+from functools import lru_cache
 from typing import Dict, Iterable, Optional, Tuple
 
 import httpx
 import websockets
 from websockets import exceptions as ws_exceptions
 from fastapi import Request, WebSocket
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.websockets import WebSocketDisconnect
 
@@ -79,6 +93,129 @@ _UPSTREAM_UNAVAILABLE_MESSAGE = (
     "ダッシュボード(Streamlit)に接続できませんでした。"
     "home_dashboard.service が起動しているか確認してください。"
 )
+
+
+# === スマートフォン向けの付帯物 ===
+
+# ホーム画面に追加したときの表示名・配色。
+DASHBOARD_APP_NAME = "My Home Dashboard"
+DASHBOARD_APP_SHORT_NAME = "おうち"
+DASHBOARD_THEME_COLOR = "#0d47a1"
+DASHBOARD_BACKGROUND_COLOR = "#ffffff"
+
+# PWAマニフェストとapple-touch-iconで参照するアイコンのサイズ(px)。
+DASHBOARD_ICON_SIZES = (180, 192, 512)
+
+# バックグラウンドに回っていた時間がこれを超えて戻ってきたら、画面を作り直す(秒)。
+# スマートフォンでアプリを切り替えるとStreamlitのWebSocketは切断され、戻っても
+# "Connecting..." のままだったり、切れる前の古い値が出たままになる。
+# 表示データのキャッシュTTL(60秒)と揃えてあり、これを超えていれば
+# どのみち表示は作り直しになる。タブは `?tab=` に保存されているので復元される。
+MOBILE_RELOAD_AFTER_HIDDEN_SEC = 60
+
+
+def build_dashboard_manifest() -> dict:
+    """ホーム画面に追加するためのWebアプリマニフェストを組み立てる。
+
+    `start_url` / `scope` を `config.DASHBOARD_BASE_PATH` 配下に閉じることで、
+    ホーム画面から開いたときにダッシュボードだけがアプリとして開く
+    (`/quest` のPWAとは別アイコン・別スコープになる)。
+    """
+    base = config.DASHBOARD_BASE_PATH
+    return {
+        "name": DASHBOARD_APP_NAME,
+        "short_name": DASHBOARD_APP_SHORT_NAME,
+        "lang": "ja",
+        "start_url": f"{base}/",
+        "scope": f"{base}/",
+        "display": "standalone",
+        "orientation": "portrait",
+        "background_color": DASHBOARD_BACKGROUND_COLOR,
+        "theme_color": DASHBOARD_THEME_COLOR,
+        "icons": [
+            {
+                "src": f"{base}/icon-{size}.png",
+                "sizes": f"{size}x{size}",
+                "type": "image/png",
+                "purpose": "any",
+            }
+            for size in DASHBOARD_ICON_SIZES
+        ],
+    }
+
+
+@lru_cache(maxsize=len(DASHBOARD_ICON_SIZES))
+def render_dashboard_icon_png(size: int) -> bytes:
+    """ホーム画面アイコンのPNGを生成する(サイズごとに1回だけ描画してキャッシュ)。
+
+    絵文字やフォントに頼ると、実機のフォント事情で崩れたり豆腐になったりする。
+    図形(屋根の三角・本体の四角・窓)だけで描く。
+    """
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGBA", (size, size), DASHBOARD_THEME_COLOR)
+    draw = ImageDraw.Draw(image)
+    unit = size / 16
+
+    # 屋根
+    draw.polygon(
+        [(unit * 8, unit * 3), (unit * 14, unit * 8), (unit * 2, unit * 8)],
+        fill="#ffffff",
+    )
+    # 本体
+    draw.rectangle([unit * 4, unit * 8, unit * 12, unit * 13], fill="#ffffff")
+    # 窓(本体をくり抜いて見せる)
+    draw.rectangle([unit * 7, unit * 10, unit * 9, unit * 13], fill=DASHBOARD_THEME_COLOR)
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def build_mobile_head_snippet() -> str:
+    """`</head>` の直前に差し込むHTML断片を返す。
+
+    - マニフェスト: ホーム画面に追加したときアドレスバー無しで開く(standalone)
+    - `apple-touch-icon`: iOSはマニフェストのiconsを見ないため別途必要
+    - 復帰時の再読込: スマートフォンでアプリを切り替えるとWebSocketが切れ、
+      戻っても "Connecting..." のままだったり古い値が出たままになる
+
+    マニフェストの取得は既定で認証情報を送らない(no-cors / credentials omit)。
+    このパスはエッジのCloudflare Accessの内側にあるため、`use-credentials` を
+    付けないと取得が弾かれてホーム画面追加が効かない。
+    """
+    base = config.DASHBOARD_BASE_PATH
+    return (
+        f'<link rel="manifest" href="{base}/app.webmanifest" crossorigin="use-credentials">'
+        f'<link rel="apple-touch-icon" href="{base}/icon-180.png">'
+        f'<meta name="apple-mobile-web-app-capable" content="yes">'
+        f'<meta name="mobile-web-app-capable" content="yes">'
+        f'<meta name="apple-mobile-web-app-status-bar-style" content="default">'
+        f'<meta name="apple-mobile-web-app-title" content="{DASHBOARD_APP_SHORT_NAME}">'
+        f'<meta name="theme-color" content="{DASHBOARD_THEME_COLOR}">'
+        "<script>"
+        "(function(){"
+        "var hiddenAt=null;"
+        "document.addEventListener('visibilitychange',function(){"
+        "if(document.hidden){hiddenAt=Date.now();return;}"
+        f"if(hiddenAt&&Date.now()-hiddenAt>{MOBILE_RELOAD_AFTER_HIDDEN_SEC * 1000}){{window.location.reload();}}"
+        "hiddenAt=null;"
+        "});"
+        "})();"
+        "</script>"
+    )
+
+
+def inject_mobile_head(html_text: str) -> str:
+    """StreamlitのHTMLの `</head>` 直前にスマホ向けの指定を差し込む。
+
+    `</head>` が見つからない(Streamlitのテンプレートが変わった等)ときは
+    何もしない。差し込めなくてもダッシュボードは従来どおり動く。
+    """
+    if "</head>" not in html_text:
+        logger.warning("ダッシュボードのHTMLに </head> が見つからず、スマホ向けの指定を差し込めませんでした")
+        return html_text
+    return html_text.replace("</head>", build_mobile_head_snippet() + "</head>", 1)
 
 
 class DashboardProxyService:
@@ -169,17 +306,29 @@ class DashboardProxyService:
         return forwarded
 
     @staticmethod
-    def _pin_accept_encoding(headers: Dict[str, str]) -> Dict[str, str]:
+    def _pin_accept_encoding(headers: Dict[str, str], *, force_identity: bool = False) -> Dict[str, str]:
         """`accept-encoding` をブラウザが送ってきた値に固定する。
 
         httpx は明示しないと既定の `Accept-Encoding: gzip, deflate, ...` を付けるため、
         ブラウザが圧縮を要求していない場合でも中継先が gzip で返し、こちらはそれを
         そのまま流してしまう(=クライアントが解凍できずバイナリのまま表示される)。
         ヘルスチェックや `Accept-Encoding` を送らないクライアントで実際に壊れる。
+
+        `force_identity=True`(HTMLを取りに行くリクエスト)のときは非圧縮を要求する。
+        `</head>` への差し込み(`inject_mobile_head`)のために本文を読む必要があり、
+        圧縮されていると展開してから詰め直すことになるため。
         """
         pinned = dict(headers)
-        pinned.setdefault("accept-encoding", "identity")
+        if force_identity:
+            pinned["accept-encoding"] = "identity"
+        else:
+            pinned.setdefault("accept-encoding", "identity")
         return pinned
+
+    @staticmethod
+    def _wants_html(request: Request) -> bool:
+        """ブラウザが画面(HTML)を取りに来たリクエストかどうか。"""
+        return "text/html" in request.headers.get("accept", "")
 
     # --- HTTP ---
 
@@ -191,7 +340,8 @@ class DashboardProxyService:
                 request.headers.items(),
                 client_host=request.client.host if request.client else None,
                 forwarded_proto=request.url.scheme,
-            )
+            ),
+            force_identity=self._wants_html(request),
         )
 
         client = await self._get_client()
@@ -214,6 +364,22 @@ class DashboardProxyService:
             for name, value in upstream_response.headers.items()
             if name.lower() not in _EXCLUDED_RESPONSE_HEADERS
         }
+
+        # HTML(画面本体)だけは本文を読み切って、スマホ向けの指定を差し込む。
+        # Streamlit の index.html は数KBで、ストリームのまま流す利点が無い。
+        # 圧縮されて返ってきた場合(`force_identity` が効かない経路)は、展開して
+        # 詰め直すより素通しするほうが安全なので何もしない。
+        content_type = upstream_response.headers.get("content-type", "")
+        content_encoding = upstream_response.headers.get("content-encoding", "")
+        if content_type.startswith("text/html") and content_encoding in ("", "identity"):
+            body = await upstream_response.aread()
+            await upstream_response.aclose()
+            injected = inject_mobile_head(body.decode("utf-8", errors="replace"))
+            return Response(
+                content=injected.encode("utf-8"),
+                status_code=upstream_response.status_code,
+                headers=response_headers,
+            )
 
         return StreamingResponse(
             upstream_response.aiter_raw(),
