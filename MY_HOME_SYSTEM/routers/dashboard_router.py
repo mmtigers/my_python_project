@@ -81,7 +81,7 @@ def dashboard_icon(size: int) -> Response:
 def mobile_status_page() -> HTMLResponse:
     """Streamlitを介さない読み取り専用のサマリーページ。
 
-    スマートフォンで見るのは結局ステータスカードの9枚、という用途に対して、
+    スマートフォンで見るのは結局ステータスカードだけ、という用途に対して、
     Streamlit の初期化・WebSocket接続・Reactの読み込みを丸ごと省く。
     ダッシュボード本体(Streamlit)はグラフ・ログ・メンテナンス操作を持つ
     「詳しく見る側」として残し、このページからリンクする。

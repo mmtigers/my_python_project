@@ -155,7 +155,7 @@ def mobile_page(browser, dashboard_url, artifact_dir):
     )
     page = context.new_page()
     page.goto(dashboard_url, wait_until="networkidle", timeout=60_000)
-    # 初回描画(JR運行情報の取得を含む)が終わるまで待つ
+    # 初回描画が終わるまで待つ
     page.wait_for_selector('[data-testid="stAppViewContainer"]', timeout=60_000)
     page.wait_for_timeout(2_000)
     yield page
@@ -313,9 +313,9 @@ def _wait_until_light_page_ready(base_url: str, path: str, process: subprocess.P
 def light_page_url(tmp_path_factory):
     """空のDB(スキーマのみ)に対して軽量ページのサーバーを起動し、ページのURLを返す。
 
-    データが無くてもカード9枚は「データなし」として出る。JR運行情報の取得は
-    ネットワークが無ければ失敗するが、`_cached` が握って「情報取得不可」になるだけで
-    ページは返る(そのフェイルソフトも含めて実ブラウザで確認できる)。
+    データが無くてもカードは「データなし」として出る。1枚の取得が失敗しても
+    `_cached` が握るためページは返る(そのフェイルソフトも含めて実ブラウザで
+    確認できる)。
     """
     import config
 

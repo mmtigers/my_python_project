@@ -1,99 +1,18 @@
 # MY_HOME_SYSTEM/views/dashboard/misc_tab.py
-import html
+"""「見守り」タブのカメラ関連(ギャラリーと防犯ログ)の描画。
+
+かつては電車の運行情報・ルート検索・駐輪場の待機数もここにあり、それらを
+まとめた「おでかけ」タブの描画モジュールだった。いずれも使われなくなったため
+退役させ(オーナー判断)、カメラまわりだけが残っている。
+"""
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import os
 import glob
-from datetime import datetime, timedelta
-import pytz
 
 import config
 from . import common as view_common
 
-# Issue #451: 出勤/帰宅ルート判定の時間帯閾値(時)。4〜11時台は出勤ルート、
-# 12〜23時台は帰宅ルート、それ以外(深夜0〜3時台)も帰宅ルートを表示する。
-COMMUTE_ROUTE_START_HOUR = 4
-COMMUTE_ROUTE_END_HOUR = 12
-RETURN_ROUTE_END_HOUR = 23
-
-def render_traffic():
-    st.subheader("🚃 JR宝塚線・神戸線 運行状況")
-    jr_status = view_common.load_jr_traffic_status_cached()
-    line_g = jr_status["宝塚線"]
-    line_a = jr_status["神戸線"]
-
-    c_t1, c_t2 = st.columns(2)
-    for col, line, name in [(c_t1, line_g, "JR 宝塚線"), (c_t2, line_a, "JR 神戸線")]:
-        # Issue #438: is_delayだけ直接インデックスアクセスで、is_unavailableは
-        # .get()という方針不統一があった。キー欠落時も例外にならないよう統一する。
-        if line.get("is_delay"):
-            bg_color, status_color = "#ffebee", "#d32f2f"
-        elif line.get("is_unavailable"):
-            # Low修正: 取得不可を平常運転と同じ緑色で表示しない(遅延見逃し防止)
-            bg_color, status_color = "#f5f5f5", "#757575"
-        else:
-            bg_color, status_color = "#e8f5e9", "#2e7d32"
-        with col:
-            st.markdown(f"""
-            <div style="background-color:{bg_color}; padding:15px; border-radius:10px; border:1px solid #ccc;">
-                <h3 style="margin:0; color:#333;">{name}</h3>
-                <h2 style="margin:5px 0; color:{status_color};">{html.escape(line['status'])}</h2>
-                <p style="margin:0;">{html.escape(line['detail'])}</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-    st.markdown("---")
-    now_jst = datetime.now(pytz.timezone("Asia/Tokyo"))
-    dep_time = (now_jst + timedelta(minutes=20)).strftime("%H:%M")
-    st.subheader(f"📍 ルート検索 ({dep_time} 出発想定)")
-    
-    current_hour = now_jst.hour
-    container = st.container()
-    if COMMUTE_ROUTE_START_HOUR <= current_hour < COMMUTE_ROUTE_END_HOUR:
-        _render_route_search(container, "伊丹(兵庫県)", "長岡京", "📤 出勤ルート")
-    elif COMMUTE_ROUTE_END_HOUR <= current_hour <= RETURN_ROUTE_END_HOUR:
-        _render_route_search(container, "長岡京", "伊丹(兵庫県)", "📥 帰宅ルート")
-    else:
-        st.caption("※深夜帯のため帰宅ルートを表示します")
-        _render_route_search(container, "長岡京", "伊丹(兵庫県)", "📥 帰宅ルート")
-
-def _render_route_search(col, from_st: str, to_st: str, label_icon: str):
-    with col:
-        st.markdown(f"##### {label_icon} {from_st} → {to_st}")
-        data = view_common.load_route_info_cached(from_st, to_st)
-        if data["summary"] == "取得成功":
-            details_html = ""
-            if data.get("details"):
-                steps = []
-                for d in data["details"]:
-                    d_esc = html.escape(d)
-                    if "⬇️" in d: steps.append(f"<div class='line-node'>{d_esc}</div>")
-                    elif "🔄" in d: steps.append(f"<div class='transfer-mark'>{d_esc}</div>")
-                    else: steps.append(f"<div class='station-node'>{d_esc}</div>")
-                details_html = f"<div class='route-path'>{''.join(steps)}</div>"
-
-            st.markdown(f"""
-            <div class="route-card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <span style="font-size:1.3rem; font-weight:bold; color:#0d47a1;">{html.escape(data['departure'])}</span>
-                    <span style="color:#777;">➡</span>
-                    <span style="font-size:1.3rem; font-weight:bold; color:#0d47a1;">{html.escape(data['arrival'])}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; color:#555; margin-bottom:5px;">
-                    <span>⏱️ <b>{html.escape(data['duration'])}</b></span>
-                    <span>💰 {html.escape(data['cost'])}</span>
-                </div>
-                <div style="font-size:0.9rem; color:#666;">
-                    <span>🔄 乗換: {html.escape(data['transfer'])}</span>
-                </div>
-                {details_html}
-            </div>
-            """, unsafe_allow_html=True)
-            if data["url"]:
-                st.link_button(f"🔗 Yahoo!路線情報で見る", data["url"])
-        else:
-            st.warning("ルート情報を取得できませんでした")
 
 def render_photos(df_security_log: pd.DataFrame):
     st.subheader("🖼️ カメラ・ギャラリー")
@@ -127,34 +46,3 @@ def render_photos(df_security_log: pd.DataFrame):
         )
     else:
         st.info("不審な検知はありません")
-
-def render_bicycle(df_bicycle: pd.DataFrame):
-    st.title("🚲 駐輪場待機数推移")
-    if df_bicycle.empty:
-        st.info("駐輪場データがまだありません。")
-        return
-
-    target_areas = [
-        "JR伊丹駅前(第1)自転車駐車場 (A)",
-        "JR伊丹駅前(第3)自転車駐車場 (A)",
-        "JR伊丹駅前(第3)自転車駐車場 (E)",
-    ]
-    df_target = df_bicycle[df_bicycle["area_name"].isin(target_areas)].copy()
-
-    if df_target.empty:
-        st.warning("指定されたエリアのデータが見つかりません。")
-        return
-
-    # 「最新の状況」の表は間引き前のデータから作る(下の st.dataframe)。
-    # グラフ側は形しか読まないため、系列あたりの点数を間引いて転送量を抑える。
-    df_chart = view_common.downsample_for_chart(df_target, series_col="area_name")
-    fig = px.line(df_chart, x="timestamp", y="waiting_count", color="area_name", title="待機人数の変化", markers=True, symbol="area_name")
-    fig.update_layout(xaxis_title="日時", yaxis_title="待機数 (人/台)", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-    view_common.render_chart(fig)
-
-    st.subheader("📊 最新の状況")
-    latest_df = df_target.sort_values("timestamp", ascending=False).drop_duplicates("area_name")
-    view_common.render_table(
-        latest_df.sort_values("area_name"),
-        {"area_name": "駐輪場", "waiting_count": "待機", "status_text": "状態", "timestamp": "時刻"},
-    )

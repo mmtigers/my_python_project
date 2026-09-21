@@ -1,9 +1,8 @@
 # MY_HOME_SYSTEM/tests/test_summary_html_escaping.py
 """
 views/dashboard/common.py の render_status_card_html が title/value を
-HTMLエスケープすること(Issue #378)、および views/dashboard/summary.py の
-get_bicycle_status のように意図的なHTML断片を渡す呼び出し元では
-value_is_html=True でエスケープをスキップできることの回帰テスト。
+HTMLエスケープすること(Issue #378)、および意図的なHTML断片を渡す
+呼び出し元だけが value_is_html=True でエスケープをスキップできることの回帰テスト。
 """
 import os
 import sys
@@ -32,12 +31,12 @@ class TestRenderStatusCardHtmlEscaping:
         assert "🟢 活動中 (今)" in html_out
 
     def test_value_is_html_true_preserves_intentional_html_fragment(self):
-        """get_bicycle_status のように前日比の色付け(<span>)を意図的に組み立てる
-        呼び出し元は value_is_html=True でHTML断片をそのまま埋め込めること。"""
-        intentional_html = "第1A: <b>3</b>台 <span style='color:#d32f2f;'>(🔺1)</span>"
-        html_out = render_status_card_html("🚲 駐輪場待機", intentional_html, "theme-yellow", value_is_html=True)
+        """色付け(<span>)や改行(<br>)を意図的に組み立てる呼び出し元は、
+        value_is_html=True でHTML断片をそのまま埋め込めること。"""
+        intentional_html = "A: <b>3</b>件 <span class='diff-up'>(🔺1)</span>"
+        html_out = render_status_card_html("🔧 テスト", intentional_html, "theme-yellow", value_is_html=True)
         assert "<b>3</b>" in html_out
-        assert "<span style='color:#d32f2f;'>(🔺1)</span>" in html_out
+        assert "<span class='diff-up'>(🔺1)</span>" in html_out
 
     def test_title_is_still_escaped_even_when_value_is_html(self):
         """value_is_html=True はvalueのみに適用され、titleは常にエスケープされること。"""

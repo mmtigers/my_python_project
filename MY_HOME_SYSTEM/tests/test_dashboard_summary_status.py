@@ -124,31 +124,6 @@ class TestGetItamiStatus:
         assert home_status_service.get_itami_status(df, NOW) == ("⚪ データなし", "theme-gray")
 
 
-class TestGetTrafficStatus:
-    """取得(スクレイピング)は呼び出し側の責務になり、判定だけを受け持つ。"""
-
-    def test_suspended_takes_priority(self):
-        status = {"宝塚線": {"is_suspended": True, "is_delay": True}, "神戸線": {}}
-        assert home_status_service.get_traffic_status(status) == ("⛔ 運休発生", "theme-red")
-
-    def test_delay_is_yellow(self):
-        status = {"宝塚線": {}, "神戸線": {"is_delay": True}}
-        assert home_status_service.get_traffic_status(status) == ("⚠️ 遅延あり", "theme-yellow")
-
-    def test_unavailable_is_not_reported_as_normal(self):
-        """取得不可を「平常運転」と偽らないこと(遅延見逃し防止)。"""
-        status = {"宝塚線": {"is_unavailable": True}, "神戸線": {}}
-        assert home_status_service.get_traffic_status(status) == ("⚪ 情報取得不可", "theme-gray")
-
-    def test_normal_operation(self):
-        assert home_status_service.get_traffic_status({"宝塚線": {}, "神戸線": {}}) == ("🟢 平常運転", "theme-green")
-
-    def test_missing_keys_do_not_raise(self):
-        """Issue #438: is_delay だけ直接インデックスアクセスだったため、キーが
-        欠けた応答で KeyError になっていた。.get() へ統一されていること。"""
-        home_status_service.get_traffic_status({"宝塚線": {}, "神戸線": {}})
-
-
 class TestGetServerStatus:
     def test_low_memory_is_green(self):
         assert home_status_service.get_server_status({"percent": 42.7}) == ("💻 RAM: 42%", "theme-green")
@@ -211,118 +186,25 @@ class TestGetRiceStatus:
         assert home_status_service.get_rice_status(df, NOW) == ("🍚 炊いてない", "theme-red")
 
 
-class TestGetBicycleStatus:
-    AREA_1A = "JR伊丹駅前(第1)自転車駐車場 (A)"
-    AREA_3A = "JR伊丹駅前(第3)自転車駐車場 (A)"
-
-    def _df(self, rows):
-        df = pd.DataFrame(rows, columns=["timestamp", "area_name", "waiting_count"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        return df
-
-    def test_empty_is_no_data(self):
-        assert home_status_service.get_bicycle_status(pd.DataFrame()) == ("⚪ データなし", "theme-gray")
-
-    def test_no_target_area_is_no_data(self):
-        df = self._df([{"timestamp": NOW, "area_name": "対象外の駐輪場", "waiting_count": 5}])
-        assert home_status_service.get_bicycle_status(df) == ("⚪ データなし", "theme-gray")
-
-    def test_zero_waiting_is_green(self):
-        df = self._df([{"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 0}])
-        val, theme = home_status_service.get_bicycle_status(df)
-        assert theme == "theme-green"
-        assert "第1A: <b>0</b>台" in val
-        # 対象エリアのうちデータが無いものは "-" で埋める
-        assert "第3A: -" in val
-
-    def test_many_waiting_is_red(self):
-        df = self._df([
-            {"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 7},
-            {"timestamp": NOW, "area_name": self.AREA_3A, "waiting_count": 6},
-        ])
-        _, theme = home_status_service.get_bicycle_status(df)
-        assert theme == "theme-red"
-
-    def test_moderate_waiting_is_yellow(self):
-        df = self._df([{"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 4}])
-        _, theme = home_status_service.get_bicycle_status(df)
-        assert theme == "theme-yellow"
-
-    def test_increase_against_yesterday_is_marked_red(self):
-        df = self._df([
-            {"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 5},
-            {"timestamp": NOW - timedelta(days=1), "area_name": self.AREA_1A, "waiting_count": 2},
-        ])
-        val, _ = home_status_service.get_bicycle_status(df)
-        # 色そのものはCSS側(`.diff-up`)。値のHTMLに色を直接埋めるとダークモードで
-        # 差し替えられないため、クラスで「増加」を示していることを固定する。
-        assert "🔺3" in val and "diff-up" in val
-
-    def test_decrease_against_yesterday_is_marked_green(self):
-        df = self._df([
-            {"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 2},
-            {"timestamp": NOW - timedelta(days=1), "area_name": self.AREA_1A, "waiting_count": 5},
-        ])
-        val, _ = home_status_service.get_bicycle_status(df)
-        assert "🔻3" in val and "diff-down" in val
-
-    def test_no_change_against_yesterday(self):
-        df = self._df([
-            {"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 3},
-            {"timestamp": NOW - timedelta(days=1), "area_name": self.AREA_1A, "waiting_count": 3},
-        ])
-        val, _ = home_status_service.get_bicycle_status(df)
-        assert "➡️0" in val
-
-    def test_no_comparable_yesterday_data_shows_placeholder(self):
-        df = self._df([{"timestamp": NOW, "area_name": self.AREA_1A, "waiting_count": 3}])
-        val, _ = home_status_service.get_bicycle_status(df)
-        assert "(--)" in val
-
-    def test_string_timestamps_are_converted_without_mutating_the_caller_dataframe(self):
-        """DBから文字列で来た場合でもJSTに変換して処理し、
-        呼び出し元のDataFrameは書き換えないこと(.copy() している)。"""
-        df = pd.DataFrame([
-            {"timestamp": "2026-09-19T12:00:00+09:00", "area_name": self.AREA_1A, "waiting_count": 1},
-        ])
-        # 「書き換えていない」ことは、呼び出し前の型・値と比べて確かめる。
-        # 以前は `dtype == object` と比べていたが、pandas 3 では文字列列の既定型が
-        # object ではなく str(StringDtype)になるため、書き換えていなくても落ちた
-        # (2026-09-21、Dependabot の pandas 3 更新 #820)。型名を決め打ちしない。
-        original_dtype = df["timestamp"].dtype
-        original_values = df["timestamp"].tolist()
-        val, _ = home_status_service.get_bicycle_status(df)
-        assert "第1A: <b>1</b>台" in val
-        assert df["timestamp"].dtype == original_dtype
-        assert df["timestamp"].tolist() == original_values
-        assert not pd.api.types.is_datetime64_any_dtype(df["timestamp"]), (
-            "呼び出し元の列が日時型へ変換されている(.copy() せずに書き換えた)"
-        )
-
-
 class TestRenderSummary:
-    def test_renders_nine_status_cards(self):
+    def test_renders_all_status_cards(self):
         df_sensor = _sensor_df([_row(location="高砂", contact_state="detected")])
         df_car = pd.DataFrame([{"action": "ARRIVE"}])
-        df_bicycle = pd.DataFrame()
 
         with patch.object(summary.view_common, "render_status_grid") as mock_grid, \
              patch.object(summary.view_common, "get_monthly_cost_cached", return_value=4321), \
-             patch.object(summary.view_common, "get_memory_usage_cached", return_value={"percent": 50}), \
-             patch.object(summary.view_common, "load_jr_traffic_status_cached",
-                          return_value={"宝塚線": {}, "神戸線": {}}):
-            summary.render_summary(NOW, df_sensor, df_car, df_bicycle, None)
+             patch.object(summary.view_common, "get_memory_usage_cached", return_value={"percent": 50}):
+            summary.render_summary(NOW, df_sensor, df_car, None)
 
         cards = mock_grid.call_args[0][0]
-        assert len(cards) == 9
+        assert len(cards) == 7
         titles = [c.title for c in cards]
         assert titles[0] == "👵 高砂 (実家)"
         assert "💰 今月の電気代" in titles
         # 電気代は3桁区切りで整形される
         assert any(c.value == "⚡ 4,321 円" for c in cards)
-        # 駐輪場カードだけが意図的なHTML断片を持つ(Issue #378)
-        html_cards = [c.title for c in cards if c.value_is_html]
-        assert html_cards == ["🚲 駐輪場待機"]
+        # 退役したカード(駐輪場・JR運行情報)が復活していないこと
+        assert not any("駐輪場" in t or "JR" in t for t in titles)
 
     def test_section_failure_propagates_to_caller_for_safe_section_to_catch(self):
         """render_summary 自身は例外を握りつぶさず、dashboard.py 側の
@@ -331,7 +213,7 @@ class TestRenderSummary:
                           side_effect=RuntimeError("boom")), \
              patch.object(summary.view_common, "render_status_grid") as mock_grid:
             try:
-                summary.render_summary(NOW, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), None)
+                summary.render_summary(NOW, pd.DataFrame(), pd.DataFrame(), None)
             except RuntimeError:
                 pass
             else:
@@ -382,7 +264,7 @@ class TestRenderStatusGridIntegration:
         cards = [
             view_common.StatusCard("👵 高砂 (実家)", "🟢 元気 (1h以内)", "theme-green"),
             view_common.StatusCard("🏠 伊丹 (自宅)", "🟢 活動中 (今)", "theme-green"),
-            view_common.StatusCard("🚲 駐輪場待機", "第1A: <b>0</b>台<br>第3A: <b>1</b>台",
+            view_common.StatusCard("🔧 テスト", "<b>0</b>件<br><b>1</b>件",
                                    "theme-yellow", value_is_html=True),
         ]
         with patch.object(view_common, "st", mock_st):

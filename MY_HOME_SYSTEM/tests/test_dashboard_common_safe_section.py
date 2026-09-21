@@ -44,7 +44,7 @@ class TestSafeSection:
         mock_st = MagicMock()
         with patch.object(view_common, "st", mock_st), \
              patch.object(view_common, "logger"):
-            with view_common.safe_section("駐輪場"):
+            with view_common.safe_section("防犯カメラ"):
                 raise ValueError("something broke")
             # ここに到達すれば例外が正しく吸収されている
 
@@ -77,7 +77,6 @@ class TestDashboardSectionIsolation:
             # Issue #741: 読み込みは view_common のキャッシュ付きラッパー経由
             stack.enter_context(patch.object(view_common, "load_sensor_data_cached", return_value=pd.DataFrame()))
             stack.enter_context(patch.object(view_common, "load_generic_data_cached", return_value=pd.DataFrame()))
-            stack.enter_context(patch.object(view_common, "load_bicycle_data_cached", return_value=pd.DataFrame()))
             stack.enter_context(patch.object(view_common, "load_nas_status_cached", return_value=None))
             stack.enter_context(patch.object(dashboard.log_tab, "render_resources",
                                              side_effect=RuntimeError("resources exploded")))

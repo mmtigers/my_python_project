@@ -60,9 +60,7 @@ def _mock_st():
 
 def _patch_view_modules():
     return [
-        patch.object(dashboard.misc_tab, "render_traffic"),
         patch.object(dashboard.misc_tab, "render_photos"),
-        patch.object(dashboard.misc_tab, "render_bicycle"),
         patch.object(dashboard.sensor_tab, "render_electricity"),
         patch.object(dashboard.sensor_tab, "render_temperature"),
         patch.object(dashboard.sensor_tab, "render_takasago"),
@@ -86,12 +84,10 @@ class TestMainReadsThroughTheCache:
              patch.object(dashboard.view_common, "st", mock_st), \
              patch.object(dashboard.view_common, "load_sensor_data_cached", return_value=pd.DataFrame()) as cached_sensor, \
              patch.object(dashboard.view_common, "load_generic_data_cached", return_value=pd.DataFrame()) as cached_generic, \
-             patch.object(dashboard.view_common, "load_bicycle_data_cached", return_value=pd.DataFrame()) as cached_bicycle, \
              patch.object(dashboard.view_common, "load_nas_status_cached", return_value=None) as cached_nas, \
              patch.object(dashboard.analysis_service, "apply_friendly_names", return_value=pd.DataFrame()), \
              patch.object(dashboard.analysis_service, "load_sensor_data") as raw_sensor, \
              patch.object(dashboard.analysis_service, "load_generic_data") as raw_generic, \
-             patch.object(dashboard.analysis_service, "load_bicycle_data") as raw_bicycle, \
              patch.object(dashboard.analysis_service, "load_nas_status") as raw_nas, \
              patch.object(dashboard, "logger"):
             for p in patches:
@@ -103,14 +99,13 @@ class TestMainReadsThroughTheCache:
                     p.stop()
 
         cached_sensor.assert_called_once_with(limit=10000)
-        cached_bicycle.assert_called_once_with(limit=3000)
         cached_nas.assert_called_once_with()
         # ホームタブが使うのは車のテーブルだけ。以前は5タブ分(子供・排便・食事・
         # 車・防犯ログ)を main() の先頭でまとめて読んでいたが、選択中のタブしか
         # 描画しなくなったため、そのタブが使わないテーブルは読まない。
         cached_generic.assert_called_once_with(dashboard.config.SQLITE_TABLE_CAR)
 
-        for raw in (raw_sensor, raw_generic, raw_bicycle, raw_nas):
+        for raw in (raw_sensor, raw_generic, raw_nas):
             raw.assert_not_called()
 
     def test_watch_tab_reads_only_the_security_log_when_sections_are_closed(self):
@@ -182,14 +177,6 @@ class TestCachedLoadersActuallyCache:
 
         assert mock_load.call_count == 2
 
-    def test_bicycle_loader_caches(self):
-        with patch.object(view_common.analysis_service, "load_bicycle_data",
-                          return_value=pd.DataFrame()) as mock_load:
-            view_common.load_bicycle_data_cached(limit=3000)
-            view_common.load_bicycle_data_cached(limit=3000)
-
-        mock_load.assert_called_once_with(limit=3000)
-
     def test_nas_loader_caches_even_when_it_returns_none(self):
         with patch.object(view_common.analysis_service, "load_nas_status",
                           return_value=None) as mock_load:
@@ -220,33 +207,11 @@ class TestCachedLoadersActuallyCache:
 
 
 class TestExternalIoIsCachedToo:
-    """DB以外の重い読み取り(HTTPスクレイピング・journalctl・年間集計SQL)も
-    同じTTLで共有されること。
+    """DB以外の重い読み取り(journalctl・年間集計SQL)も同じTTLで共有されること。
 
-    DBの読み取りだけをキャッシュしていた頃は、1回の描画で
-    JR運行情報のスクレイピングがサマリーと「おでかけ」タブから2回走り、
-    `journalctl` はたたまれた expander のために毎回起動していた。
+    DBの読み取りだけをキャッシュしていた頃は、`journalctl` がたたまれた
+    expander のために毎回起動していた。
     """
-
-    def test_traffic_is_scraped_once_even_when_two_views_need_it(self):
-        from views.dashboard import misc_tab
-
-        fake_status = {
-            "宝塚線": {"status": "平常運転", "detail": "", "is_delay": False},
-            "神戸線": {"status": "平常運転", "detail": "", "is_delay": False},
-        }
-        mock_st = MagicMock()
-        mock_st.columns.side_effect = lambda spec, **kwargs: [
-            MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))
-        ]
-        with patch.object(view_common.train_service, "get_jr_traffic_status",
-                          return_value=fake_status) as mock_scrape, \
-             patch.object(view_common, "load_route_info_cached", return_value={"summary": "取得失敗"}), \
-             patch.object(misc_tab, "st", mock_st):
-            view_common.load_jr_traffic_status_cached()  # ホームタブのサマリーカード
-            misc_tab.render_traffic()                    # おでかけタブ
-
-        mock_scrape.assert_called_once()
 
     def test_system_logs_are_cached_and_the_refresh_button_clears_them(self):
         from views.dashboard import log_tab
@@ -297,13 +262,12 @@ class TestExternalIoIsCachedToo:
 class TestViewsDoNotBypassTheCache:
     """View が素のサービスを直接呼ぶ形に戻っていないこと。
 
-    戻しても画面は同じに見えるが、スマホでの初回表示にHTTP 2本と
-    サブプロセス1本が毎回上乗せされる(気づけるのは実機だけ)。
+    戻しても画面は同じに見えるが、スマホでの初回表示にサブプロセス1本と
+    集計SQLが毎回上乗せされる(気づけるのは実機だけ)。
     """
 
     FORBIDDEN: ClassVar[dict] = {
-        "summary.py": ["train_service.get_jr_traffic_status", "analysis_service.get_memory_usage"],
-        "misc_tab.py": ["train_service.get_jr_traffic_status", "train_service.get_route_info"],
+        "summary.py": ["analysis_service.get_memory_usage"],
         "sensor_tab.py": ["analysis_service.load_yearly_temperature_stats"],
         "log_tab.py": [
             "analysis_service.get_system_logs",
@@ -347,14 +311,14 @@ class TestChartDownsampling:
     """グラフに渡す点数を間引くこと(A-3)。
 
     plotly に渡した点はそのまま WebSocket のペイロードとしてスマートフォンへ
-    転送される。駐輪場の推移は3系列 × 1,000点前後あり、折れ線の形しか読まない。
+    転送される。気温・消費電力の推移は複数系列 × 数千点あり、折れ線の形しか読まない。
     """
 
     def _series(self, n, name="A", start="2026-09-01"):
         return pd.DataFrame({
             "timestamp": pd.date_range(start, periods=n, freq="1min"),
-            "waiting_count": range(n),
-            "area_name": [name] * n,
+            "value": range(n),
+            "friendly_name": [name] * n,
         })
 
     def test_small_series_is_returned_untouched(self):
@@ -371,22 +335,22 @@ class TestChartDownsampling:
         df = self._series(1001)
         out = view_common.downsample_for_chart(df, max_points=100)
         assert out["timestamp"].max() == df["timestamp"].max()
-        assert out["waiting_count"].iloc[-1] == df["waiting_count"].iloc[-1]
+        assert out["value"].iloc[-1] == df["value"].iloc[-1]
 
     def test_each_series_is_thinned_independently(self):
-        df = pd.concat([self._series(1000, "第1A"), self._series(10, "第3E")])
-        out = view_common.downsample_for_chart(df, series_col="area_name", max_points=50)
+        df = pd.concat([self._series(1000, "リビング"), self._series(10, "寝室")])
+        out = view_common.downsample_for_chart(df, series_col="friendly_name", max_points=50)
 
         # 少ない系列は間引かれず、多い系列だけが間引かれる
-        assert (out["area_name"] == "第3E").sum() == 10
-        assert (out["area_name"] == "第1A").sum() <= 51
+        assert (out["friendly_name"] == "寝室").sum() == 10
+        assert (out["friendly_name"] == "リビング").sum() <= 51
 
     def test_columns_and_dtypes_survive(self):
         """色分けに使う文字列列を落とさないこと(平均リサンプルにしない理由)。"""
         df = self._series(2000)
         out = view_common.downsample_for_chart(df, max_points=50)
         assert list(out.columns) == list(df.columns)
-        assert out["area_name"].iloc[0] == "A"
+        assert out["friendly_name"].iloc[0] == "A"
 
     def test_empty_and_missing_column_are_passed_through(self):
         empty = pd.DataFrame()

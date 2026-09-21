@@ -42,7 +42,6 @@ def _mock_st():
 def _patch_view_modules():
     """main()内で呼ばれる各Viewモジュールの関数呼び出しをすべて無害化する"""
     return [
-        patch.object(dashboard.misc_tab, "render_traffic"),
         patch.object(dashboard.misc_tab, "render_photos"),
         patch.object(dashboard.sensor_tab, "render_electricity"),
         patch.object(dashboard.sensor_tab, "render_temperature"),
@@ -53,7 +52,6 @@ def _patch_view_modules():
         patch.object(dashboard.log_tab, "render_nas_status"),
         patch.object(dashboard.log_tab, "render_server_logs"),
         patch.object(dashboard.log_tab, "render_maintenance"),
-        patch.object(dashboard.misc_tab, "render_bicycle"),
         patch.object(dashboard.summary, "render_summary"),
     ]
 
@@ -69,7 +67,6 @@ def _run_main():
     with patch.object(dashboard, "st", mock_st), \
          patch.object(dashboard.view_common, "load_sensor_data_cached", return_value=pd.DataFrame()), \
          patch.object(dashboard.view_common, "load_generic_data_cached", return_value=pd.DataFrame()), \
-         patch.object(dashboard.view_common, "load_bicycle_data_cached", return_value=pd.DataFrame()), \
          patch.object(dashboard.view_common, "load_nas_status_cached", return_value=None), \
          patch.object(dashboard.analysis_service, "apply_friendly_names", return_value=pd.DataFrame()), \
          patch.object(dashboard, "logger") as mock_logger:

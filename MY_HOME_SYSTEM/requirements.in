@@ -50,5 +50,6 @@ numpy
 plotly
 streamlit
 pytz
-beautifulsoup4
+# beautifulsoup4 は train_service.py(JR運行情報・Yahoo!路線情報のスクレイピング)
+# 専用だったため、同機能の退役にあわせて外した。
 lxml

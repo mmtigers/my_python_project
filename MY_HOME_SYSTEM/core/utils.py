@@ -24,8 +24,8 @@ def get_now_jst() -> datetime.datetime:
     """現在時刻をJSTのaware datetimeで返す。
 
     Issue #592の追加調査で判明した問題への対応: `monitors/tv_lock_monitor.py`の
-    深夜2時判定、`monitors/nas_monitor.py`の8時判定、`services/train_service.py`の
-    乗換案内API検索時刻のように、「実際の現地時刻(JST)」を前提に組まれた判定・
+    深夜2時判定、`monitors/nas_monitor.py`の8時判定のように、
+    「実際の現地時刻(JST)」を前提に組まれた判定・
     計算がホストOSのタイムゾーン設定に依存する`datetime.now()`(naive、ローカル
     タイムゾーン)を使っていた。ホストがJST以外の設定だと、意図した実時刻と
     ずれた時刻で判定・計算されてしまう(#382/#293と同じ不具合クラス)。

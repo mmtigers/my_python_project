@@ -10,7 +10,7 @@ import pandas as pd
 import pytz
 import streamlit as st
 from core.utils import get_now_jst
-from services import analysis_service, home_status_service, train_service
+from services import analysis_service, home_status_service
 
 logger = logging.getLogger(__name__)
 
@@ -27,18 +27,6 @@ CUSTOM_CSS = f"""
     }}
 
 {home_status_service.STATUS_CARD_CSS}
-
-    /* --- 電車ルートカード --- */
-    .route-card {{
-        background-color: #fff; padding: 15px; border-radius: 10px;
-        border: 1px solid #ddd; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    }}
-    .route-path {{
-        margin-top: 15px; padding-top: 10px; border-top: 1px dashed #ccc; font-size: 0.95rem; color: #333;
-    }}
-    .station-node {{ font-weight: bold; color: #000; }}
-    .line-node {{ color: #666; font-size: 0.85rem; margin: 0 5px; }}
-    .transfer-mark {{ color: #f57f17; font-weight:bold; margin: 0 5px; }}
 
     .streamlit-expanderHeader {{
         font-weight: bold; color: #0d47a1; background-color: #f0f8ff; border-radius: 5px;
@@ -238,7 +226,7 @@ CUSTOM_CSS = f"""
 #
 # Streamlit はウィジェット操作・タブ切替・ページ読み込みのたびにスクリプト
 # 全体を再実行するため、この状態では「タブを1回切り替える」たびに
-# SQLite から約33,000行(センサー最大30,000 + 駐輪場3,000 + 各種500)を
+# SQLite から約30,000行(センサー最大30,000 + 各種500)を
 # 読み直していた。長い読み取りは `unified_server` 側の書き込みと競合して
 # "database is locked" の確率も上げる(`analysis_service` 冒頭のコメント参照)。
 #
@@ -264,12 +252,6 @@ def load_generic_data_cached(table_name: str, limit: int = 500) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
-def load_bicycle_data_cached(limit: int) -> pd.DataFrame:
-    """`analysis_service.load_bicycle_data` のキャッシュ付きラッパー。"""
-    return analysis_service.load_bicycle_data(limit=limit)
-
-
-@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
 def load_nas_status_cached() -> pd.Series | None:
     """`analysis_service.load_nas_status` のキャッシュ付きラッパー。"""
     return analysis_service.load_nas_status()
@@ -279,30 +261,11 @@ def load_nas_status_cached() -> pd.Series | None:
 # Issue #741 では SQLite の読み取りだけをキャッシュしたが、1回の描画で走る
 # 重い処理はそれだけではなかった。スマホでの初回表示は次のものにも待たされる。
 #
-#   - JR運行情報 / Yahoo!路線情報のスクレイピング(いずれもHTTP、timeout 5秒)
 #   - `journalctl` のサブプロセス起動
 #   - 年間気温の集計SQL(2テーブルを1年分)
 #
-# しかもJR運行情報はサマリーと「おでかけ」タブの2箇所から呼ばれており、
-# 同じ1回の描画の中で2回スクレイピングしていた。DBの読み取りと同じTTLで
-# キャッシュし、「🔄 データを更新」でまとめて捨てられるようにする
-# (`st.cache_data.clear()` は本モジュールのラッパーもすべて対象にする)。
-
-
-@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
-def load_jr_traffic_status_cached() -> dict:
-    """`train_service.get_jr_traffic_status` のキャッシュ付きラッパー。"""
-    return train_service.get_jr_traffic_status()
-
-
-@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
-def load_route_info_cached(from_station: str, to_station: str) -> dict:
-    """`train_service.get_route_info` のキャッシュ付きラッパー。
-
-    検索する出発時刻は「現在時刻+20分」で、TTL(60秒)の間は同じ結果を
-    使い回すことになるが、乗換案内の結果が60秒で変わることは実質無い。
-    """
-    return train_service.get_route_info(from_station, to_station)
+# DBの読み取りと同じTTLでキャッシュし、「🔄 データを更新」でまとめて捨てられる
+# ようにする(`st.cache_data.clear()` は本モジュールのラッパーもすべて対象にする)。
 
 
 @st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
@@ -360,7 +323,7 @@ def get_system_logs_cached(lines: int = 50, priority=None, target_date=None) -> 
 
 # === グラフのデータ量 ===
 # plotly に渡した点は、そのまま WebSocket のペイロードとしてスマートフォンへ
-# 転送される。駐輪場の推移(3系列 × 1,000点前後)のように「折れ線の形しか
+# 転送される。気温・消費電力の推移(複数系列 × 数千点)のように「折れ線の形しか
 # 読まない」グラフでは、点を間引いても読み取れる情報は変わらない。
 CHART_MAX_POINTS_PER_SERIES = 500
 
@@ -542,7 +505,7 @@ render_status_card_html = home_status_service.render_status_card_html
 def render_status_grid(cards: Iterable[StatusCard]) -> None:
     """ステータスカードを自動折り返しのグリッドで1ブロックにまとめて描画する。
 
-    以前は `st.columns(3)` を3段重ねて9枚を並べていたが、Streamlitの列は画面幅が
+    以前は `st.columns(3)` を3段重ねてカードを並べていたが、Streamlitの列は画面幅が
     足りなくても横並びを維持するため、スマートフォンでは1枚あたり約100pxまで潰れて
     値が読めなかった。列数をCSS(`.status-grid`のauto-fit)側に委ねることで、
     スマホでは2列・PCでは3〜5列に自動で切り替わる。

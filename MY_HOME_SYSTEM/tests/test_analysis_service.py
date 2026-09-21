@@ -257,20 +257,6 @@ class TestCalculateMonthlyCostCumulative:
         assert result == int(3.0 * 31)
 
 
-class TestLoadBicycleData:
-    def test_returns_empty_when_no_data(self, isolated_db):
-        assert analysis_service.load_bicycle_data().empty
-
-    def test_returns_rows_when_seeded(self, isolated_db):
-        with get_db_cursor(commit=True) as cur:
-            cur.execute(
-                f"INSERT INTO {config.SQLITE_TABLE_BICYCLE} (area_name, status_text, waiting_count, timestamp) "
-                "VALUES ('駐輪場A', '空きあり', 0, '2026-01-01T00:00:00')"
-            )
-        result = analysis_service.load_bicycle_data()
-        assert len(result) == 1
-
-
 class TestWeatherFunctionsFailSoftOnSchemaMismatch:
     """
     Issue #114で修正済み: 以前はweather_historyテーブルの実カラムと

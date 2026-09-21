@@ -435,21 +435,6 @@ def load_yearly_temperature_stats(year: int, location: str = "伊丹") -> pd.Dat
     finally:
         conn.close()
 
-def load_bicycle_data(limit: int = 2000) -> pd.DataFrame:
-    """駐輪場データを取得"""
-    table_name = getattr(config, "SQLITE_TABLE_BICYCLE", "bicycle_parking_records")
-    try:
-        with contextlib.closing(get_ro_db_connection()) as conn:
-            cur = conn.cursor()
-            cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
-            if not cur.fetchone():
-                return pd.DataFrame()
-        query = f"SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT {limit}"
-        return load_data_from_db(query)
-    except Exception as e:
-        logger.error(f"Bicycle Data Load Error: {e}")
-        return pd.DataFrame()
-
 # ==========================================
 # System Stats & Utils
 # ==========================================

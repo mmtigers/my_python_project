@@ -1,11 +1,9 @@
 # MY_HOME_SYSTEM/tests/test_dashboard_misc_and_health_tab.py
 """
-views/dashboard/misc_tab.py の写真・駐輪場セクションと
+views/dashboard/misc_tab.py の写真セクションと
 views/dashboard/health_tab.py の回帰テスト(Issue #754)。
 
-HTMLエスケープ(Issue #378)は tests/test_misc_tab_html_escaping.py が既に
-検証しているので、本ファイルはそれ以外の分岐(データ有無・時間帯によるルート
-切り替え・列の出し分け)を対象にする。`.coveragerc` の omit から
+データ有無・列の出し分けといった分岐を対象にする。`.coveragerc` の omit から
 `views/dashboard/*` を外すのに合わせて追加した。
 """
 import os
@@ -13,7 +11,6 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
-from freezegun import freeze_time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -44,95 +41,6 @@ def _patch_st(mock_st):
     stack.enter_context(patch.object(health_tab, "st", mock_st))
     stack.enter_context(patch.object(view_common, "st", mock_st))
     return stack
-
-
-class TestRenderTrafficRouteSelection:
-    """Issue #451: 出勤/帰宅ルートは時刻で切り替わる。境界(4時・12時・24時)の判定。"""
-
-    def _run_at(self, hour):
-        # Issue #658: 実時刻に任せず freezegun で固定する。判定は JST の
-        # 「時」なので、JST のオフセット付きで凍結する。
-        mock_st = _mock_st()
-        with freeze_time(f"2026-09-19 {hour:02d}:00:00+09:00"), \
-             patch.object(misc_tab, "st", mock_st), \
-             patch.object(misc_tab.view_common, "load_jr_traffic_status_cached",
-                          return_value={"宝塚線": {"status": "平常運転", "detail": ""},
-                                        "神戸線": {"status": "平常運転", "detail": ""}}), \
-             patch.object(misc_tab, "_render_route_search") as mock_route:
-            misc_tab.render_traffic()
-        return mock_st, mock_route
-
-    def test_morning_shows_the_commute_route(self):
-        _, mock_route = self._run_at(8)
-        assert mock_route.call_args.args[1:] == ("伊丹(兵庫県)", "長岡京", "📤 出勤ルート")
-
-    def test_boundary_hour_four_is_already_the_commute_route(self):
-        _, mock_route = self._run_at(misc_tab.COMMUTE_ROUTE_START_HOUR)
-        assert mock_route.call_args.args[3] == "📤 出勤ルート"
-
-    def test_noon_switches_to_the_return_route(self):
-        _, mock_route = self._run_at(misc_tab.COMMUTE_ROUTE_END_HOUR)
-        assert mock_route.call_args.args[1:] == ("長岡京", "伊丹(兵庫県)", "📥 帰宅ルート")
-
-    def test_late_night_shows_the_return_route_with_a_caption(self):
-        mock_st, mock_route = self._run_at(2)
-        assert mock_route.call_args.args[3] == "📥 帰宅ルート"
-        captions = [str(c.args[0]) for c in mock_st.caption.call_args_list if c.args]
-        assert any("深夜帯" in c for c in captions), captions
-
-    def test_delayed_line_is_colored_red(self):
-        mock_st = _mock_st()
-        with patch.object(misc_tab, "st", mock_st), \
-             patch.object(misc_tab.view_common, "load_jr_traffic_status_cached",
-                          return_value={"宝塚線": {"status": "遅延", "detail": "人身事故", "is_delay": True},
-                                        "神戸線": {"status": "平常運転", "detail": ""}}), \
-             patch.object(misc_tab, "_render_route_search"):
-            misc_tab.render_traffic()
-
-        html_out = "\n".join(str(c.args[0]) for c in mock_st.markdown.call_args_list if c.args)
-        assert "#d32f2f" in html_out
-
-    def test_unavailable_line_is_not_colored_like_normal_operation(self):
-        """Low修正: 取得不可を平常運転と同じ緑で出さない(遅延見逃し防止)。"""
-        mock_st = _mock_st()
-        with patch.object(misc_tab, "st", mock_st), \
-             patch.object(misc_tab.view_common, "load_jr_traffic_status_cached",
-                          return_value={"宝塚線": {"status": "取得不可", "detail": "", "is_unavailable": True},
-                                        "神戸線": {"status": "取得不可", "detail": "", "is_unavailable": True}}), \
-             patch.object(misc_tab, "_render_route_search"):
-            misc_tab.render_traffic()
-
-        html_out = "\n".join(str(c.args[0]) for c in mock_st.markdown.call_args_list if c.args)
-        assert "#757575" in html_out
-        assert "#2e7d32" not in html_out
-
-
-class TestRenderRouteSearchFailure:
-    def test_failed_lookup_shows_a_warning_instead_of_an_empty_card(self):
-        mock_st = _mock_st()
-        with patch.object(misc_tab, "st", mock_st), \
-             patch.object(misc_tab.view_common, "load_route_info_cached",
-                          return_value={"summary": "取得失敗"}):
-            misc_tab._render_route_search(MagicMock(), "A", "B", "icon")
-
-        mock_st.warning.assert_called_once()
-
-    def test_yahoo_link_is_shown_only_when_a_url_is_returned(self):
-        route = {"summary": "取得成功", "departure": "08:00", "arrival": "08:30",
-                 "duration": "30分", "cost": "400円", "transfer": "1回",
-                 "details": [], "url": "https://example.invalid/route"}
-        mock_st = _mock_st()
-        with patch.object(misc_tab, "st", mock_st), \
-             patch.object(misc_tab.view_common, "load_route_info_cached", return_value=route):
-            misc_tab._render_route_search(MagicMock(), "A", "B", "icon")
-        mock_st.link_button.assert_called_once()
-
-        route_without_url = dict(route, url="")
-        mock_st2 = _mock_st()
-        with patch.object(misc_tab, "st", mock_st2), \
-             patch.object(misc_tab.view_common, "load_route_info_cached", return_value=route_without_url):
-            misc_tab._render_route_search(MagicMock(), "A", "B", "icon")
-        mock_st2.link_button.assert_not_called()
 
 
 class TestRenderPhotos:
@@ -211,42 +119,6 @@ class TestRenderPhotos:
 
         infos = [str(c.args[0]) for c in mock_st.info.call_args_list if c.args]
         assert "不審な検知はありません" in infos
-
-
-class TestRenderBicycle:
-    AREA = "JR伊丹駅前(第1)自転車駐車場 (A)"
-
-    def test_empty_dataframe_shows_info_and_returns_early(self):
-        mock_st = _mock_st()
-        with _patch_st(mock_st):
-            misc_tab.render_bicycle(pd.DataFrame())
-
-        mock_st.info.assert_called_once()
-        mock_st.plotly_chart.assert_not_called()
-
-    def test_data_for_untracked_areas_only_warns(self):
-        df = pd.DataFrame([{"timestamp": "2026-09-19 08:00", "area_name": "別の駐輪場",
-                            "waiting_count": 3, "status_text": "混雑"}])
-        mock_st = _mock_st()
-        with _patch_st(mock_st):
-            misc_tab.render_bicycle(df)
-
-        mock_st.warning.assert_called_once()
-        mock_st.plotly_chart.assert_not_called()
-
-    def test_tracked_area_is_charted_and_latest_row_is_tabled(self):
-        df = pd.DataFrame([
-            {"timestamp": "2026-09-19 08:00", "area_name": self.AREA, "waiting_count": 3, "status_text": "混雑"},
-            {"timestamp": "2026-09-19 09:00", "area_name": self.AREA, "waiting_count": 1, "status_text": "空き"},
-        ])
-        mock_st = _mock_st()
-        with _patch_st(mock_st):
-            misc_tab.render_bicycle(df)
-
-        mock_st.plotly_chart.assert_called_once()
-        latest = mock_st.dataframe.call_args.args[0]
-        assert len(latest) == 1
-        assert latest.iloc[0]["待機"] == 1
 
 
 class TestHealthTab:

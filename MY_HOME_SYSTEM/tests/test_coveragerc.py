@@ -2,9 +2,9 @@
 """
 .coveragerc の omit リストが実在するパスを指しているかの回帰テスト。
 
-Issue #189: omit の `train_service.py` は coverage.py の prep_patterns に
-よりcwd(MY_HOME_SYSTEM/)基準で絶対化されるため、実際には
-MY_HOME_SYSTEM/services/train_service.py に配置されているファイルには
+Issue #189: omit に書かれていた `train_service.py`(そのモジュール自体は後に
+退役)は coverage.py の prep_patterns によりcwd(MY_HOME_SYSTEM/)基準で
+絶対化されるため、実際には services/ 配下に置かれたファイルには
 一切マッチしなかった。マッチしない除外パターンは黙って無効になるため、
 CIの `--cov-fail-under` の分母に本来除外すべきファイルが入り続け、
 除外意図と食い違っていた(閾値を実態より押し下げる方向)。

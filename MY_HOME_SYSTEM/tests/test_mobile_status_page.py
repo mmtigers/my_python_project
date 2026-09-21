@@ -1,7 +1,7 @@
 # MY_HOME_SYSTEM/tests/test_mobile_status_page.py
 """軽量ページ `/dashboard/m` と、その土台である `services/home_status_service.py` のテスト。
 
-このページは「スマホで見るのは結局ステータスカードの9枚」という用途に対して、
+このページは「スマホで見るのは結局ステータスカードだけ」という用途に対して、
 Streamlit の初期化・WebSocket接続・Reactの読み込みを丸ごと省くためのもの。
 サーバーが1回のリクエストでHTMLを返して終わる。
 
@@ -27,6 +27,10 @@ from services import home_status_service
 
 NOW = datetime.fromisoformat("2026-09-19T12:00:00+09:00")
 
+# サマリーに並ぶカードの枚数。`home_status_service.build_status_cards` の
+# 戻り値と対になっているので、カードを増減させるときは一緒に直す。
+EXPECTED_CARD_COUNT = 7
+
 _VIEWS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "views", "dashboard"
 )
@@ -46,11 +50,10 @@ def _client() -> TestClient:
 
 
 def _stub_loaders(**overrides):
-    """DB・スクレイピングを差し替える(テストで実際に読みに行かせない)。"""
+    """DBの読み取りを差し替える(テストで実際に読みに行かせない)。"""
     defaults = {
         "load_sensor_data": pd.DataFrame(),
         "load_generic_data": pd.DataFrame(),
-        "load_bicycle_data": pd.DataFrame(),
         "load_nas_status": None,
         "get_memory_usage": {"percent": 42.0},
         "calculate_monthly_cost_cumulative": 1234,
@@ -58,15 +61,10 @@ def _stub_loaders(**overrides):
         "get_disk_usage": {"percent": 55.0},
     }
     defaults.update(overrides)
-    patches = [
+    return [
         patch.object(home_status_service.analysis_service, name, return_value=value)
         for name, value in defaults.items()
     ]
-    patches.append(
-        patch.object(home_status_service.train_service, "get_jr_traffic_status",
-                     return_value={"宝塚線": {}, "神戸線": {}})
-    )
-    return patches
 
 
 class TestMobileStatusPage:
@@ -86,7 +84,7 @@ class TestMobileStatusPage:
 
         assert res.status_code == 200
         assert res.headers["content-type"].startswith("text/html")
-        assert res.text.count('class="status-card') == 9
+        assert res.text.count('class="status-card') == EXPECTED_CARD_COUNT
         assert "status-grid" in res.text
 
     def test_page_refreshes_itself(self):
@@ -118,29 +116,29 @@ class TestMobileStatusPage:
         for p in patches:
             p.start()
         try:
-            with patch.object(home_status_service.train_service, "get_jr_traffic_status",
-                              side_effect=RuntimeError("scrape failed")), _client() as client:
+            with patch.object(home_status_service.analysis_service, "get_memory_usage",
+                              side_effect=RuntimeError("psutil failed")), _client() as client:
                 res = client.get(f"{config.DASHBOARD_BASE_PATH}/m")
         finally:
             for p in patches:
                 p.stop()
 
         assert res.status_code == 200
-        assert res.text.count('class="status-card') == 9
-        # 取れなかったものは「平常運転」と偽らずに「取得不可」と出す
-        assert "情報取得不可" in res.text
+        assert res.text.count('class="status-card') == EXPECTED_CARD_COUNT
+        # 取れなかったものは値を偽らずに「取得失敗」と出す
+        assert "取得失敗" in res.text
 
 
 class TestStatusCacheOnTheServerSide:
     """`unified_server` には `st.cache_data` が無いため、同じTTLのメモを自前で持つ。"""
 
-    def test_repeated_requests_do_not_scrape_again(self):
+    def test_repeated_requests_do_not_read_the_db_again(self):
         patches = _stub_loaders()
         for p in patches:
             p.start()
         try:
-            with patch.object(home_status_service.train_service, "get_jr_traffic_status",
-                              return_value={"宝塚線": {}, "神戸線": {}}) as mock_scrape, \
+            with patch.object(home_status_service.analysis_service, "load_sensor_data",
+                              return_value=pd.DataFrame()) as mock_load, \
                  _client() as client:
                 client.get(f"{config.DASHBOARD_BASE_PATH}/m")
                 client.get(f"{config.DASHBOARD_BASE_PATH}/m")
@@ -148,7 +146,7 @@ class TestStatusCacheOnTheServerSide:
             for p in patches:
                 p.stop()
 
-        mock_scrape.assert_called_once()
+        mock_load.assert_called_once()
 
     def test_failures_are_not_cached(self):
         """失敗をキャッシュすると、復旧しても60秒間は壊れたままになる。"""
@@ -222,8 +220,9 @@ class TestMobilePageHtmlSafety:
         assert "<script>alert(1)</script>" not in page
         assert "&lt;script&gt;" in page
 
-    def test_intentional_html_is_kept_for_the_bicycle_card(self):
-        cards = [home_status_service.StatusCard("🚲 駐輪場待機", "第1A: <b>3</b>台", "theme-green",
+    def test_intentional_html_is_kept_when_the_card_asks_for_it(self):
+        """`value_is_html=True` を指定した呼び出し元だけがHTML断片を埋め込めること。"""
+        cards = [home_status_service.StatusCard("🔧 テスト", "<b>3</b>台", "theme-green",
                                                 value_is_html=True)]
         page = home_status_service.render_mobile_status_page_html(
             cards, NOW,
@@ -246,7 +245,7 @@ class TestMobilePageHtmlSafety:
 class TestCardsLinkToTheirDetail:
     """A: 異常に気づいてから詳細を開くまでを1タップにする。
 
-    以前の軽量ページはカード9枚を出して行き止まりで、詳細を見るには
+    以前の軽量ページはカードを出して行き止まりで、詳細を見るには
     「📊 詳しく見る」からダッシュボード本体を開き、そこからタブを探し直す
     必要があった。カード自体を該当タブ(`?tab=...`)へのリンクにする。
     """
@@ -268,7 +267,7 @@ class TestCardsLinkToTheirDetail:
         page = self._page()
 
         hrefs = re.findall(r'<a class="status-card [^"]*" href="([^"]+)"', page)
-        assert len(hrefs) == 9, "9枚すべてがリンクになっていること"
+        assert len(hrefs) == EXPECTED_CARD_COUNT, "すべてのカードがリンクになっていること"
         for href in hrefs:
             assert href.startswith(f"{config.DASHBOARD_BASE_PATH}/?tab=")
             tab_key = href.rsplit("=", 1)[1]
@@ -280,7 +279,7 @@ class TestCardsLinkToTheirDetail:
         by_title = {card.title: card.tab for card in cards}
 
         assert by_title["👵 高砂 (実家)"] == "watch"
-        assert by_title["🚃 JR運行情報"] == "out"
+        assert by_title["🍚 炊飯器"] == "life"
         assert by_title["💰 今月の電気代"] == "life"
         assert by_title["🗄️ NAS"] == "sys"
 
@@ -306,7 +305,7 @@ class TestCardsLinkToTheirDetail:
         grid = home_status_service.render_status_grid_html(cards)
 
         assert "<a class=\"status-card" not in grid
-        assert grid.count('<div class="status-card') == 9
+        assert grid.count('<div class="status-card') == EXPECTED_CARD_COUNT
 
     def test_the_link_is_relative_to_the_viewing_origin(self):
         """固定URLを埋めるとLAN内のIPと公開ドメインのどちらかで繋がらなくなる。"""
@@ -332,7 +331,7 @@ class TestCardsLinkToTheirDetail:
 class TestAlertSummary:
     """B: 赤・黄のカードだけを名前で拾って先頭に出す。
 
-    9枚の並びは固定のまま。JR運行情報は7枚目にあり、運休が出ていても
+    カードの並びは固定のまま。後ろのほうにあるカードは、異常が出ていても
     画面をスクロールしないと気づけなかった。
     """
 
@@ -367,15 +366,15 @@ class TestAlertSummary:
         assert "alerts" in ok
 
     def test_alerts_link_to_the_detail_tab(self):
-        cards = [home_status_service.StatusCard("🚃 JR運行情報", "⛔ 運休発生", "theme-red", tab="out")]
+        cards = [home_status_service.StatusCard("🍚 炊飯器", "🍚 炊いてない", "theme-red", tab="life")]
 
         html_out = home_status_service.render_alerts_html(cards, dashboard_path="/dashboard/")
 
-        assert 'href="/dashboard/?tab=out"' in html_out
-        assert "JR運行情報" in html_out
+        assert 'href="/dashboard/?tab=life"' in html_out
+        assert "炊飯器" in html_out
 
     def test_alert_titles_are_escaped(self):
-        cards = [home_status_service.StatusCard("<script>x</script>", "v", "theme-red", tab="out")]
+        cards = [home_status_service.StatusCard("<script>x</script>", "v", "theme-red", tab="life")]
 
         html_out = home_status_service.render_alerts_html(cards, dashboard_path="/dashboard/")
 
@@ -417,22 +416,6 @@ class TestDarkMode:
         assert "prefers-color-scheme" not in home_status_service.STATUS_CARD_CSS
         assert "prefers-color-scheme" not in view_common.CUSTOM_CSS
 
-    def test_the_bicycle_diff_colours_can_be_themed(self):
-        """値のHTMLに `style='color:...'` を直接埋めるとダーク側で差し替えられない。"""
-        df = pd.DataFrame(
-            {
-                "area_name": ["JR伊丹駅前(第1)自転車駐車場 (A)"],
-                "waiting_count": [3],
-                "timestamp": [pd.Timestamp("2026-09-19T12:00:00+09:00")],
-            }
-        )
-
-        value, _ = home_status_service.get_bicycle_status(df)
-
-        assert "style='color:" not in value
-        assert "diff-" in value
-        assert ".diff-up" in home_status_service.STATUS_CARD_CSS
-
 
 class TestPartialRefresh:
     """C: 自動更新でページ全体を読み込み直さない。
@@ -456,7 +439,7 @@ class TestPartialRefresh:
         res = self._get(f"{config.DASHBOARD_BASE_PATH}/m/status")
 
         assert res.status_code == 200
-        assert res.text.count('class="status-card') == 9
+        assert res.text.count('class="status-card') == EXPECTED_CARD_COUNT
         assert res.text.startswith(f'<div id="{home_status_service.STATUS_SECTION_ID}">')
         # 断片なので、ページ全体の要素は含まない
         assert "<html" not in res.text
@@ -524,16 +507,16 @@ class TestPartialRefresh:
         assert 'classList.add("stale")' in page
         assert "#status.stale" in page
 
-    def test_repeated_fragment_requests_do_not_scrape_again(self):
+    def test_repeated_fragment_requests_do_not_read_the_db_again(self):
         """断片の取得経路もページ本体と同じTTLキャッシュを通ること。"""
         patches = _stub_loaders()
         for p in patches:
             p.start()
         try:
             with patch.object(
-                home_status_service.train_service, "get_jr_traffic_status",
-                return_value={"宝塚線": {}, "神戸線": {}},
-            ) as scrape, _client() as client:
+                home_status_service.analysis_service, "load_sensor_data",
+                return_value=pd.DataFrame(),
+            ) as load, _client() as client:
                 client.get(f"{config.DASHBOARD_BASE_PATH}/m")
                 client.get(f"{config.DASHBOARD_BASE_PATH}/m/status")
                 client.get(f"{config.DASHBOARD_BASE_PATH}/m/status")
@@ -541,14 +524,14 @@ class TestPartialRefresh:
             for p in patches:
                 p.stop()
 
-        assert scrape.call_count == 1
+        assert load.call_count == 1
 
 
 class TestSupportingValues:
     """D: 「いまの値」だけでは判断できないカードに、比べる相手を添える。
 
-    前日比を持っていたのは駐輪場カードだけで、「⚡ 12,345 円」が高いのか安いのか、
-    「🍚 炊いてない」が今日だけなのかが分からなかった。
+    「⚡ 12,345 円」が高いのか安いのか、「🍚 炊いてない」が今日だけなのかが
+    分からなかった。
     """
 
     def test_the_card_shows_the_supporting_line(self):
@@ -630,13 +613,6 @@ class TestSupportingValues:
 
         assert home_status_service.describe_car(df, now) == "08:15 に出発"
 
-    def test_the_train_card_names_the_affected_line(self):
-        """「⚠️ 遅延あり」だけでは、どちらの路線かが分からない。"""
-        jr = {"宝塚線": {"is_delay": True}, "神戸線": {}}
-
-        assert home_status_service.describe_traffic(jr) == "宝塚線"
-        assert home_status_service.describe_traffic({"宝塚線": {}, "神戸線": {}}) is None
-
     def test_the_cost_card_compares_with_last_month(self):
         assert home_status_service.describe_cost(12345, 11000) == "先月同日 11,000円 (+1,345)"
         assert home_status_service.describe_cost(9000, 11000) == "先月同日 11,000円 (-2,000)"
@@ -651,11 +627,11 @@ class TestSupportingValues:
         empty = pd.DataFrame()
         cards = home_status_service.build_status_cards(
             datetime.fromisoformat("2026-09-19T12:00:00+09:00"),
-            empty, empty, empty, None,
-            {"宝塚線": {}, "神戸線": {}}, {"percent": 42.0}, 1234,
+            empty, empty, None,
+            {"percent": 42.0}, 1234,
         )
 
-        assert len(cards) == 9
+        assert len(cards) == EXPECTED_CARD_COUNT
         assert all(card.sub is None for card in cards)
 
     def test_the_light_page_shows_them_too(self):
