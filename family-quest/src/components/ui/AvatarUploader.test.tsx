@@ -73,3 +73,52 @@ describe('AvatarUploader rollback on link failure (#442)', () => {
         expect(apiClient.delete).not.toHaveBeenCalled();
     });
 });
+
+
+// 保存ボタンの有効/無効は「検証を通ったファイルが選ばれているか」で決める。
+// 以前は描画中に fileInputRef.current.files を読んでいたが、ref は変わっても再描画を
+// 起こさないため値が古くなりうる(eslint-plugin-react-hooks 7 の refs ルール)。
+describe('AvatarUploader save button follows the selected file', () => {
+    afterEach(() => {
+        cleanup();
+        vi.resetAllMocks();
+    });
+
+    const saveButton = () => screen.getByText('保存する').closest('button') as HTMLButtonElement;
+    const input = () => document.querySelector('input[type="file"]') as HTMLInputElement;
+
+    it('is disabled until a file is chosen', () => {
+        render(<AvatarUploader user={user} onClose={vi.fn()} onUploadComplete={vi.fn()} />);
+        expect(saveButton()).toBeDisabled();
+    });
+
+    it('is enabled as soon as a valid image is chosen, without waiting for the preview', () => {
+        // FileReader を止め、プレビューが永久に来ない状況でも有効になることを確かめる
+        const readSpy = vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(() => {});
+        render(<AvatarUploader user={user} onClose={vi.fn()} onUploadComplete={vi.fn()} />);
+        fireEvent.change(input(), { target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } });
+        expect(saveButton()).toBeEnabled();
+        readSpy.mockRestore();
+    });
+
+    it('goes back to disabled when an invalid file replaces a valid one', async () => {
+        render(<AvatarUploader user={user} onClose={vi.fn()} onUploadComplete={vi.fn()} />);
+        fireEvent.change(input(), { target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } });
+        expect(saveButton()).toBeEnabled();
+        fireEvent.change(input(), { target: { files: [new File(['x'], 'a.txt', { type: 'text/plain' })] } });
+        expect(saveButton()).toBeDisabled();
+        expect(screen.getByText('画像ファイルを選択してください')).toBeInTheDocument();
+    });
+
+    it('uploads the chosen file itself', async () => {
+        vi.mocked(apiClient.postForm).mockResolvedValue({ url: '/uploads/x.png' });
+        vi.mocked(apiClient.post).mockResolvedValue({});
+        render(<AvatarUploader user={user} onClose={vi.fn()} onUploadComplete={vi.fn()} />);
+        const file = new File(['x'], 'mine.png', { type: 'image/png' });
+        fireEvent.change(input(), { target: { files: [file] } });
+        fireEvent.click(saveButton());
+        await waitFor(() => expect(apiClient.postForm).toHaveBeenCalled());
+        const form = vi.mocked(apiClient.postForm).mock.calls[0][1] as FormData;
+        expect(form.get('file')).toBe(file);
+    });
+});

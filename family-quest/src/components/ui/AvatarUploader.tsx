@@ -21,6 +21,11 @@ const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUpload
     const [preview, setPreview] = useState<string | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [uploadDone, setUploadDone] = useState(false);
+    // 選択中の(検証を通った)ファイル。以前は保存ボタンの有効/無効を描画中に
+    // `fileInputRef.current?.files?.[0]` から読んでいたが、ref は変わっても再描画を
+    // 起こさないため値が古くなりうる(eslint-plugin-react-hooks 7 の refs ルールも禁じる)。
+    // 実際は FileReader の完了で preview が入ることで辻褄が合っていただけだった。
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -34,14 +39,18 @@ const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUpload
             setErrorMessage("画像ファイルを選択してください");
             e.target.value = '';
             setPreview(null);
+            setSelectedFile(null);
             return;
         }
         if (file.size > MAX_AVATAR_SIZE_BYTES) {
             setErrorMessage("ファイルサイズが大きすぎます（5MBまで）");
             e.target.value = '';
             setPreview(null);
+            setSelectedFile(null);
             return;
         }
+
+        setSelectedFile(file);
 
         // プレビュー表示
         const reader = new FileReader();
@@ -52,12 +61,12 @@ const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUpload
     };
 
     const handleUpload = async () => {
-        if (!fileInputRef.current?.files?.[0]) return;
+        if (!selectedFile) return;
 
         setUploading(true);
         setErrorMessage(null);
         const formData = new FormData();
-        formData.append('file', fileInputRef.current.files[0]);
+        formData.append('file', selectedFile);
 
         // ★バグ修正: 以前は存在しない /api/quest/upload_avatar にPOSTしており
         // 常に失敗していた(実際のアップロード先は /api/quest/upload、フィールド名は file)。
@@ -171,7 +180,7 @@ const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUpload
                                 variant="primary"
                                 onClick={handleUpload}
                                 className="flex-1"
-                                disabled={!preview && !fileInputRef.current?.files?.[0]}
+                                disabled={!selectedFile}
                                 isLoading={uploading}
                             >
                                 保存する

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import HlsPlayer from '../../../components/ui/HlsPlayer';
 import { CameraConfig } from '../types';
 import { apiClient } from '@/lib/apiClient';
@@ -22,15 +22,22 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
     // ★変更: HlsPlayer に渡す onVideoRef はカメラごとに参照を安定させる。
     // (毎レンダー新規のインライン関数を渡すと、HlsPlayer 側の useEffect の依存配列に
     //  onVideoRef を含めた際に再レンダーのたびに HLS.js のセットアップがやり直されてしまう)
-    const videoRefSetters = useRef<{ [key: string]: (el: HTMLVideoElement | null) => void }>({});
-    const getVideoRefSetter = useCallback((cameraId: string) => {
-        if (!videoRefSetters.current[cameraId]) {
-            videoRefSetters.current[cameraId] = (el: HTMLVideoElement | null) => {
+    //
+    // 以前は ref のキャッシュ(videoRefSetters.current)に描画中に書き込んで遅延生成していたが、
+    // eslint-plugin-react-hooks 7 の refs ルールが「描画中の ref への書き込み」を禁じる。
+    // カメラ ID の並びが変わらない限り同じ関数オブジェクトを返せば足りるので、
+    // ID の並びをキーにメモ化する(cameras 配列そのものを依存にすると、親の再描画で
+    // 配列が作り直されるたびに関数が変わり、上記の HLS.js 再セットアップが起きる)。
+    const cameraIdsKey = cameras.map((camera) => camera.id).join('\n');
+    const videoRefSetters = useMemo(() => {
+        const setters: { [key: string]: (el: HTMLVideoElement | null) => void } = {};
+        for (const cameraId of cameraIdsKey.split('\n')) {
+            setters[cameraId] = (el: HTMLVideoElement | null) => {
                 videoRefs.current[cameraId] = el;
             };
         }
-        return videoRefSetters.current[cameraId];
-    }, []);
+        return setters;
+    }, [cameraIdsKey]);
 
     const handlePlay = async () => {
         if (isPreparing) return;
@@ -141,7 +148,7 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
                                     autoPlay={true}
                                     muted={true}
                                     startPosition={startOffsets[camera.id] || 0}
-                                    onVideoRef={getVideoRefSetter(camera.id)}
+                                    onVideoRef={videoRefSetters[camera.id]}
                                 />
                             ) : (
                                 <div className="absolute inset-0 flex items-center justify-center text-gray-600">待機中</div>

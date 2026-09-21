@@ -249,6 +249,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
+* **（eslint-plugin-react-hooks 7 への更新で追加）クールダウン同期の effect では `set-state-in-effect` ルールを1行だけ外している**: 完了通知（`completedSignal`）と壁時計の経過時間にクールダウン表示を合わせる処理で、effect（外部との同期）が本来の置き場所である。推奨される「描画中に算出する」形へ移すと描画中に `Date.now()` を呼ぶことになり `purity` ルールに触れる。加えて #363 や(a)(b)で挙動を何度も直してきた子ども向けの処理のため、書き換えによる退行を避け、**挙動は変えずに** `eslint-disable-next-line react-hooks/set-state-in-effect` で該当行だけを対象外にした（理由をコード中に明記）。再描画が1回増えるだけで表示の正しさには影響しない
 * `QuestList`内のソート用コンパレータ（`getStatusScore`、行番号314〜323）および`activeQuests`/`doneOrLockedQuests`への振り分け（行番号346〜358）は、Reactのコールバック内（`Array.sort`や単純なfor-of的処理）からはHooksを呼び出せないため、`useQuestStatus`フックと同じ判定ロジックを共有する素関数`getQuestLockState`を`../hooks/useQuestStatus`からインポートして直接呼び出している。ロック・申請中・完了の判定基準を変更する場合は、`useQuestStatus`と`getQuestLockState`の両方の実装（同一ファイル内であることが望ましい）を確認する必要がある。
 * 根拠: [コメント] (行番号: 311〜313 / 抜粋: "// ▼ ソート順: 進行中の期間限定 → 通常 → ロック中 → 承認待ち → 完了済み\n            // （ロック/申請中/完了の判定は useQuestStatus と共通の getQuestLockState に集約。\n            //  Hooksが使えないコンパレータからも直接呼べる）")
 * ソートの最終タイブレーク（同一ステータススコア・同一ボーナス合計の場合）は以前`(b.id as number) - (a.id as number)`という実カラムに存在しない`id`を参照しており、実際には`quest_id`カラムを使うべきところ`id`が常に`undefined`のため`NaN`になり並び順が不定だったバグ（M-6-5）があった。修正後は`quest_id`（無ければ`id`にフォールバック）を`Number()`で数値化して比較するようになった。**（#291でさらに修正）** その後`id`フィールド自体が`Quest`型定義から削除された（幽霊フィールドと判明したため）ことに伴い、`a.id`/`b.id`へのフォールバックも廃止され、`Number(a.quest_id ?? 0)`/`Number(b.quest_id ?? 0)`という`quest_id`のみの参照になった。

@@ -139,6 +139,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
+* **（eslint-plugin-react-hooks 7 への更新で変更）`durationMs <= 0` の完了状態は描画時に算出する**: 以前は effect 内で `setRemainingFraction(0)` していたが、effect 内の同期的な setState は再描画を連鎖させるとして react-hooks 7 の `set-state-in-effect` ルールが禁じる。現在は effect ではタイマーを張らずに `return` するだけにし、描画時に `const fraction = durationMs <= 0 ? 0 : remainingFraction` として扱う。見た目（完了状態で描かれる）は従来と同じで、#477 の回帰テストがそのまま通る
 * **[修正済み] `durationMs`が0以下の場合のゼロ除算・NaN経路（Issue #477）**: 以前は`durationMs`に`0`（または負の値）が渡されると、タイマー発火時点で`elapsed / durationMs`がゼロ除算となり（`durationMs`が負なら`NaN`）、見た目上は`Math.max(0, ...)`によって最終的に`frac = 0`（経過完了扱い）に落ち着いてはいたが、演算経路自体にゼロ除算・NaNが含まれていた。現在は`useEffect`の先頭で`durationMs <= 0`を明示的にガードし、`setRemainingFraction(0)`を直接呼んで即`return`する（`setInterval`自体を作成しない）ため、この経路には入らなくなった。見た目上の最終結果（frac=0）は変わっていない。
 * 根拠: `if (durationMs <= 0) {\n            setRemainingFraction(0);\n            return;\n        }` (行番号: 17〜20)、`const frac = Math.max(0, 1 - elapsed / durationMs);` (行番号: 24、`durationMs > 0`が保証された経路でのみ実行される)
 * 更新間隔は100ms固定であり、CSS側にも`transition: 'stroke-dashoffset 100ms linear'`が設定されているため、両者の間隔が一致していることが視覚的な滑らかさの前提になっている。片方のみ変更すると、カクつきや不整合が生じる可能性がある。
