@@ -123,10 +123,10 @@
 * 根拠: `return (` (行番号: 116〜121 / 抜粋: "f'<div class=\"status-card {theme}\">'")
 
 * **副作用**: なし（文字列を返すのみ）
-* 根拠: `safe_title = html.escape(title)` (行番号: 112 / 抜粋: "safe_title = html.escape(title)")
+* 根拠: `safe_title = html.escape(title)` (行番号: 109 / 抜粋: "safe_title = html.escape(title)")
 
 * **エラーハンドリング**: なし
-* 根拠: `safe_value = value if value_is_html else html.escape(value)` (行番号: 113 / 抜粋: "safe_value = value if value_is_html else html.escape(value)")
+* 根拠: `safe_value = value if value_is_html else html.escape(value)` (行番号: 110 / 抜粋: "safe_value = value if value_is_html else html.escape(value)")
 
 
 ### `render_status_grid_html`
@@ -138,10 +138,10 @@
 * 根拠: `def render_status_grid_html(cards) -> str:` (行番号: 123 / 抜粋: "def render_status_grid_html(cards) -> str:")
 
 * **戻り値/レスポンス**: `<div class="status-grid">…</div>` の文字列
-* 根拠: `return f'<div class="status-grid">{cards_html}</div>'` (行番号: 133 / 抜粋: "return f'<div class=\"status-grid\">{cards_html}</div>'")
+* 根拠: `return f'<div class="status-grid">{cards_html}</div>'` (行番号: 129 / 抜粋: "return f'<div class=\"status-grid\">{cards_html}</div>'")
 
 * **副作用**: なし
-* 根拠: `cards_html = "".join(` (行番号: 126 / 抜粋: "cards_html = \"\".join(")
+* 根拠: `cards_html = "".join(` (行番号: 125 / 抜粋: "cards_html = \"\".join(")
 
 * **エラーハンドリング**: なし
 * 根拠: `def render_status_grid_html(cards) -> str:` (行番号: 123 / 抜粋: "def render_status_grid_html(cards) -> str:")
@@ -170,7 +170,7 @@
 * 根拠: `def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:` (行番号: 233 / 抜粋: "def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:")
 
 * **エラーハンドリング**: 列の欠落・空DataFrameは早期returnで「データなし」を返す。JR運行情報はキー欠落でも例外にならないよう `.get()` に統一されている（Issue #438）。NASは `KeyError` を捕捉して「データ異常」を返す。
-* 根拠: `if df_sensor.empty or "location" not in df_sensor.columns or "contact_state" not in df_sensor.columns:` (行番号: 139 / 抜粋: "if df_sensor.empty or \"location\" not in df_sensor.columns"), `except KeyError:` (行番号: 248 / 抜粋: "except KeyError:")
+* 根拠: `if df_sensor.empty or "location" not in df_sensor.columns or "contact_state" not in df_sensor.columns:` (行番号: 139 / 抜粋: "if df_sensor.empty or \"location\" not in df_sensor.columns"), `except KeyError:` (行番号: 247 / 抜粋: "except KeyError:")
 
 
 ### `build_status_cards`
@@ -200,13 +200,13 @@
 * 根拠: `def _cached(key: str, loader: Callable[[], Any]) -> Any:` (行番号: 390 / 抜粋: "def _cached(key: str, loader: Callable[[], Any]) -> Any:")
 
 * **戻り値/レスポンス**: `loader` の戻り値、または取得失敗時は `None`
-* 根拠: `return None` (行番号: 408 / 抜粋: "return None")
+* 根拠: `return None` (行番号: 406 / 抜粋: "return None")
 
 * **副作用**: モジュールレベルの `_cache` 辞書の更新（`threading.Lock` で保護）。読み取りのみで、DBへの書き込みは行わない（CLAUDE.md「単一プロセス前提」の並行制御には触れない）。
-* 根拠: `_cache[key] = (time.monotonic(), value)` (行番号: 410 / 抜粋: "_cache[key] = (time.monotonic(), value)")
+* 根拠: `_cache[key] = (time.monotonic(), value)` (行番号: 409 / 抜粋: "_cache[key] = (time.monotonic(), value)")
 
 * **エラーハンドリング**: `except Exception` で捕捉し、警告ログを出して `None` を返す（`# noqa: BLE001` 付きで意図を明示）。
-* 根拠: `except Exception as e:  # noqa: BLE001 (1枚のカードの取得失敗でページ全体を落とさない)` (行番号: 406 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:  # noqa: BLE001 (1枚のカードの取得失敗でページ全体を落とさない)` (行番号: 404 / 抜粋: "except Exception as e:")
 
 
 ### `collect_status_cards`
@@ -215,16 +215,16 @@
 * 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 419〜454 / 抜粋: "def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:")
 
 * **引数/リクエスト**: `now` (`datetime | None`。省略時は `core.utils.get_now_jst()`)
-* 根拠: `now = now or get_now_jst()` (行番号: 426 / 抜粋: "now = now or get_now_jst()")
+* 根拠: `now = now or get_now_jst()` (行番号: 425 / 抜粋: "now = now or get_now_jst()")
 
 * **戻り値/レスポンス**: `(list[StatusCard], datetime)`
-* 根拠: `return cards, now` (行番号: 454 / 抜粋: "return cards, now")
+* 根拠: `return cards, now` (行番号: 446 / 抜粋: "return cards, now")
 
 * **副作用**: DBの読み取り、HTTPスクレイピング、キャッシュの更新。書き込みは行わない。
 * 根拠: `df_sensor = _cached("sensor", lambda: analysis_service.load_sensor_data(limit=MOBILE_SENSOR_ROW_LIMIT))` (行番号: 429 / 抜粋: "df_sensor = _cached(\"sensor\", ...)")
 
 * **エラーハンドリング**: 個々の取得失敗は `_cached` が `None` に丸める。JR運行情報が取れなかった場合は両路線 `is_unavailable=True` の辞書を渡し、カードは「情報取得不可」になる（「平常運転」と偽らない）。
-* 根拠: `jr_status or {"宝塚線": {"is_unavailable": True}, "神戸線": {"is_unavailable": True}},` (行番号: 450 / 抜粋: "jr_status or {\"宝塚線\": {\"is_unavailable\": True}")
+* 根拠: `jr_status or {"宝塚線": {"is_unavailable": True}, "神戸線": {"is_unavailable": True}},` (行番号: 442 / 抜粋: "jr_status or {\"宝塚線\": {\"is_unavailable\": True}")
 
 
 ### `MOBILE_PAGE_TITLE` / `MOBILE_PAGE_REFRESH_SEC` / `_MOBILE_PAGE_BASE_CSS` (モジュールレベル定数)
@@ -254,13 +254,13 @@
 * 根拠: `refresh_sec: int = MOBILE_PAGE_REFRESH_SEC,` (行番号: 493〜500 / 抜粋: "manifest_path: str,")
 
 * **戻り値/レスポンス**: HTML文字列（`<!DOCTYPE html>` から `</html>` まで）
-* 根拠: `return (` (行番号: 507 / 抜粋: "\"<!DOCTYPE html>\"")
+* 根拠: `return (` (行番号: 508 / 抜粋: "\"<!DOCTYPE html>\"")
 
 * **副作用**: なし（文字列を返すのみ）
-* 根拠: `f"{render_status_grid_html(cards)}"` (行番号: 525 / 抜粋: "f\"{render_status_grid_html(cards)}\"")
+* 根拠: `f"{render_status_grid_html(cards)}"` (行番号: 526 / 抜粋: "f\"{render_status_grid_html(cards)}\"")
 
 * **エラーハンドリング**: なし。埋め込むパス類とタイトルは `html.escape` を通す。
-* 根拠: `f'<link rel="manifest" href="{html.escape(manifest_path)}" crossorigin="use-credentials">'` (行番号: 517 / 抜粋: "html.escape(manifest_path)")
+* 根拠: `f'<link rel="manifest" href="{html.escape(manifest_path)}" crossorigin="use-credentials">'` (行番号: 516 / 抜粋: "html.escape(manifest_path)")
 
 
 ## 5. 処理フロー図
@@ -334,10 +334,10 @@ graph TD
 * 根拠: `def build_status_cards(` (行番号: 346 / 抜粋: "def build_status_cards(")
 
 * **取得失敗をキャッシュしないこと**: `_cached` は失敗時に `None` を返すだけでキャッシュに入れない。入れてしまうと、復旧してもTTLの60秒間は壊れた表示のままになる。
-* 根拠: `except Exception as e:  # noqa: BLE001 (1枚のカードの取得失敗でページ全体を落とさない)` (行番号: 406 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:  # noqa: BLE001 (1枚のカードの取得失敗でページ全体を落とさない)` (行番号: 404 / 抜粋: "except Exception as e:")
 
 * **`value_is_html=True` を渡す呼び出し元は、値の構築元に外部/DB由来の生文字列を含めないこと**: エスケープをスキップするため、格納型XSSの経路になりうる（Issue #378）。現状これを使うのは駐輪場カードだけで、値は数値と自前のHTML断片からのみ組み立てられている。
-* 根拠: `StatusCard("🚲 駐輪場待機", bicycle_val, bicycle_theme, value_is_html=True),` (行番号: 379 / 抜粋: "StatusCard(\"🚲 駐輪場待機\", bicycle_val, bicycle_theme, value_is_html=True),")
+* 根拠: `StatusCard("🚲 駐輪場待機", bicycle_val, bicycle_theme, value_is_html=True),` (行番号: 374 / 抜粋: "StatusCard(\"🚲 駐輪場待機\", bicycle_val, bicycle_theme, value_is_html=True),")
 
 ## 9. 不明事項一覧
 

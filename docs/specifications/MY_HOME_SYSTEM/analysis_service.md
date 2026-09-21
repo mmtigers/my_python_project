@@ -25,32 +25,32 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `sqlite3` | 標準ライブラリ | SQLiteデータベースへの接続およびクエリ実行 | `import sqlite3` (行番号: 2 / 抜粋: "import sqlite3") |
-| `shutil` | 標準ライブラリ | ディスク使用量の取得 | `import shutil` (行番号: 3 / 抜粋: "import shutil") |
-| `subprocess` | 標準ライブラリ | OSコマンド（free, journalctl）の実行 | `import subprocess` (行番号: 4 / 抜粋: "import subprocess") |
+| `sqlite3` | 標準ライブラリ | SQLiteデータベースへの接続およびクエリ実行 | `import sqlite3` (行番号: 4 / 抜粋: "import sqlite3") |
+| `shutil` | 標準ライブラリ | ディスク使用量の取得 | `import shutil` (行番号: 5 / 抜粋: "import shutil") |
+| `subprocess` | 標準ライブラリ | OSコマンド（free, journalctl）の実行 | `import subprocess` (行番号: 6 / 抜粋: "import subprocess") |
 | `os` | 標準ライブラリ | 未使用（インポートのみ） | `import os` (行番号: 5 / 抜粋: "import os") |
-| `datetime`, `timedelta`, `date` | 標準ライブラリ | 日付や時間の取得・計算 | `from datetime import ...` (行番号: 6 / 抜粋: "from datetime import datetime") |
-| `pytz` | サードパーティ | タイムゾーンの指定 | `import pytz` (行番号: 7 / 抜粋: "import pytz") |
+| `datetime`, `timedelta`, `date` | 標準ライブラリ | 日付や時間の取得・計算 | `from datetime import ...` (行番号: 7 / 抜粋: "from datetime import datetime") |
+| `pytz` | サードパーティ | タイムゾーンの指定 | `import pytz` (行番号: 8 / 抜粋: "import pytz") |
 | `typing` | 標準ライブラリ | 型ヒントの定義 | `from typing import ...` (行番号: 8 / 抜粋: "from typing import Dict, List") |
-| `pandas` as `pd` | サードパーティ | データの保持、加工、結合、集計 | `import pandas as pd` (行番号: 10 / 抜粋: "import pandas as pd") |
-| `config` | 内部ファイル | 各種定数、テーブル名、デバイス定義の取得 | `import config` (行番号: 12 / 抜粋: "import config") |
-| `core.logger` | 内部ファイル | ロガーのセットアップ | `from core.logger import setup_logging` (行番号: 13 / 抜粋: "from core.logger import setup_logging") |
+| `pandas` as `pd` | サードパーティ | データの保持、加工、結合、集計 | `import pandas as pd` (行番号: 11 / 抜粋: "import pandas as pd") |
+| `config` | 内部ファイル | 各種定数、テーブル名、デバイス定義の取得 | `import config` (行番号: 13 / 抜粋: "import config") |
+| `core.logger` | 内部ファイル | ロガーのセットアップ | `from core.logger import setup_logging` (行番号: 15 / 抜粋: "from core.logger import setup_logging") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` | ファイル内に定義がないため、`SQLITE_DB_PATH`や`MONITOR_DEVICES`などの具体的な値や構造が不明。 | `config.SQLITE_DB_PATH` (行番号: 38 / 抜粋: "config.SQLITE_DB_PATH") |
-| `core.logger.setup_logging` | ファイル内に実装がないため、ログの出力先やフォーマットが不明。 | `setup_logging("analysis_service")` (行番号: 17 / 抜粋: "setup_logging("analysis_service")") |
+| `config` | ファイル内に定義がないため、`SQLITE_DB_PATH`や`MONITOR_DEVICES`などの具体的な値や構造が不明。 | `config.SQLITE_DB_PATH` (行番号: 44 / 抜粋: "config.SQLITE_DB_PATH") |
+| `core.logger.setup_logging` | ファイル内に実装がないため、ログの出力先やフォーマットが不明。 | `setup_logging("analysis_service")` (行番号: 18 / 抜粋: "setup_logging("analysis_service")") |
 | データベースの各種テーブル | スキーマ定義が提供されていないため、カラムの型や制約、インデックスの有無が不明。 | `SELECT * FROM {table_name}` (行番号: 155, 164, 349 / 抜粋: "SELECT * FROM {table_name}") |
-| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 451 / 抜粋: "home_system.service") |
+| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 467 / 抜粋: "home_system.service") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `get_ro_db_connection`
 
 * **役割**: 読み取り専用でSQLiteデータベース接続を取得する。
-* 根拠: `get_ro_db_connection` (行番号: 38 / 抜粋: "f"file:{config.SQLITE_DB_PATH}?mode=ro"")
+* 根拠: `get_ro_db_connection` (行番号: 44 / 抜粋: "f"file:{config.SQLITE_DB_PATH}?mode=ro"")
 
 
 * **引数/リクエスト**: なし
@@ -58,11 +58,11 @@
 
 
 * **戻り値/レスポンス**: `sqlite3.Connection` (SQLiteの接続オブジェクト)
-* 根拠: `-> sqlite3.Connection:` (行番号: 32 / 抜粋: "-> sqlite3.Connection:")
+* 根拠: `-> sqlite3.Connection:` (行番号: 33 / 抜粋: "-> sqlite3.Connection:")
 
 
 * **副作用**: 外部データベース（SQLiteファイル）への接続を開く。
-* 根拠: `sqlite3.connect` (行番号: 37 / 抜粋: "sqlite3.connect(")
+* 根拠: `sqlite3.connect` (行番号: 43 / 抜粋: "sqlite3.connect(")
 
 
 * **エラーハンドリング**: なし
@@ -96,7 +96,7 @@
 ### `process_dataframe`
 
 * **役割**: DataFrameの `timestamp` カラムを`_vectorized_parse_timestamps_to_jst`に通し、日本時間（Asia/Tokyo）に変換する。不正な値を含む行はエラーではなく`pd.NaT`になる。
-* 根拠: `process_dataframe` (行番号: 82 / 抜粋: "df[\"timestamp\"] = _vectorized_parse_timestamps_to_jst(df[\"timestamp\"])")
+* 根拠: `process_dataframe` (行番号: 90 / 抜粋: "df[\"timestamp\"] = _vectorized_parse_timestamps_to_jst(df[\"timestamp\"])")
 
 
 * **引数/リクエスト**: `df` (`pd.DataFrame`): 処理対象のデータフレーム
@@ -119,7 +119,7 @@
 ### `apply_friendly_names`
 
 * **役割**: DataFrameのデバイスID等から表示名（`friendly_name`）や場所（`location`）をマッピングし、特定の名称を置換する。
-* 根拠: `apply_friendly_names` (行番号: 102 / 抜粋: "df["friendly_name"] = df["device_id"].map(id_map)")
+* 根拠: `apply_friendly_names` (行番号: 127 / 抜粋: "df["friendly_name"] = df["device_id"].map(id_map)")
 
 
 * **引数/リクエスト**: `df` (`pd.DataFrame`): 処理対象のデータフレーム
@@ -146,7 +146,7 @@
 
 
 * **引数/リクエスト**: `query` (`str`): 実行するSQL。`date_column` (`str`, デフォルト `"timestamp"`): 日付対象のカラム名。
-* 根拠: `query: str, date_column: str = "timestamp"` (行番号: 117 / 抜粋: "query: str, date_column: str = "timestamp"")
+* 根拠: `query: str, date_column: str = "timestamp"` (行番号: 142 / 抜粋: "query: str, date_column: str = "timestamp"")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (取得したデータのデータフレーム)
@@ -165,7 +165,7 @@
 ### `load_nas_status`
 
 * **役割**: データベースからNASの最新状態を1件取得する。
-* 根拠: `load_nas_status` (行番号: 155 / 抜粋: "ORDER BY timestamp DESC LIMIT 1")
+* 根拠: `load_nas_status` (行番号: 183 / 抜粋: "ORDER BY timestamp DESC LIMIT 1")
 
 
 * **引数/リクエスト**: なし
@@ -173,15 +173,15 @@
 
 
 * **戻り値/レスポンス**: `Optional[pd.Series]` (最新の1件。存在しない場合は `None`)
-* 根拠: `-> Optional[pd.Series]:` (行番号: 145 / 抜粋: "-> Optional[pd.Series]:")
+* 根拠: `-> Optional[pd.Series]:` (行番号: 170 / 抜粋: "-> Optional[pd.Series]:")
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `get_ro_db_connection()` (行番号: 149 / 抜粋: "with get_ro_db_connection() as conn:")
+* 根拠: `get_ro_db_connection()` (行番号: 174 / 抜粋: "with get_ro_db_connection() as conn:")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `None` を返す。
-* 根拠: `except Exception as e:` (行番号: 159 / 抜粋: "logger.error(f"NAS Data Load Error: {e}")")
+* 根拠: `except Exception as e:` (行番号: 187 / 抜粋: "logger.error(f"NAS Data Load Error: {e}")")
 
 
 
@@ -192,7 +192,7 @@
 
 
 * **引数/リクエスト**: `table_name` (`str`): テーブル名。`limit` (`int`, デフォルト `500`): 取得件数。
-* 根拠: `table_name: str, limit: int = 500` (行番号: 162 / 抜粋: "table_name: str, limit: int = 500")
+* 根拠: `table_name: str, limit: int = 500` (行番号: 190 / 抜粋: "table_name: str, limit: int = 500")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (取得したデータのデータフレーム)
@@ -211,7 +211,7 @@
 ### `load_sensor_data`
 
 * **役割**: `device_records`、SwitchBotのログ、電力使用量の3つのテーブルからデータを取得・統合・ソートし、表示名を適用する。電力使用量(`config.SQLITE_TABLE_POWER_USAGE`)由来の行は、`device_name`に`"Remo"`を含めば`device_type="Nature Remo E Lite"`(スマートメーター全体消費)、含まなければ`device_type="Plug"`(個別家電)として分類される。**（Issue #169で解消）** 以前はこの分類直後に`.replace("Plug", "Nature Remo E Lite")`が実行されており、"Plug"に分類された全行が無条件で"Nature Remo E Lite"へ上書きされていた(`str.contains("Plug")`で個別家電を絞り込む`views/dashboard/sensor_tab.py`側のフィルタが構造的に一致しなくなり、個別家電グラフが常に空になる・全プラグの消費電力がスマートメーター全体消費のグラフへ混入する不具合)。この一括置換は削除され、"Remo"を含むかどうかの判定結果がそのまま最終的な`device_type`になる。
-* 根拠: `load_sensor_data` (行番号: 217 / 抜粋: "df_merged = pd.concat(df_list, ignore_index=True)")、`device_type`分類 (行番号: 202〜205 / 抜粋: "df_power[\"device_type\"] = df_power[\"device_name\"].apply(\n            lambda x: \"Nature Remo E Lite\" if x and \"Remo\" in str(x) else \"Plug\"\n        )")
+* 根拠: `load_sensor_data` (行番号: 263 / 抜粋: "df_merged = pd.concat(df_list, ignore_index=True)")、`device_type`分類 (行番号: 202〜205 / 抜粋: "df_power[\"device_type\"] = df_power[\"device_name\"].apply(\n            lambda x: \"Nature Remo E Lite\" if x and \"Remo\" in str(x) else \"Plug\"\n        )")
 
 
 * **引数/リクエスト**: `limit` (`int`, デフォルト `5000`): 取得件数の上限。
@@ -223,7 +223,7 @@
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db` を複数回呼び出し。 (行番号: 180 / 抜粋: "df_legacy = load_data_from_db(query_legacy)")
+* 根拠: `load_data_from_db` を複数回呼び出し。 (行番号: 208 / 抜粋: "df_legacy = load_data_from_db(query_legacy)")
 
 
 * **エラーハンドリング**: 内部で呼び出される `load_data_from_db` に依存。
@@ -234,7 +234,7 @@
 ### `calculate_monthly_cost_cumulative`
 
 * **役割**: 当月の電力使用量データから、今月の電気代概算（kwh * 31）を算出する。新テーブルが空なら旧テーブルへフォールバックする。**（Issue #170で修正）** `power_usage`テーブルにはスマートメーター(全体消費)と各プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)が同居しているため、新テーブル側のSELECTに`device_name LIKE '%Remo%'`条件を追加し(`load_sensor_data`の`"Remo"`部分一致による分類基準と同一)、スマートメーターの行のみを対象にするよう修正した(以前は全デバイスを無差別に合算しておりプラグ分が二重計上されていた)。また、`time_diff`(経過時間)の算出を`device_id`ごとにグループ化してから`diff()`を取るよう変更した(以前は時系列でソートしただけの全行に対しdiff()を取っており、複数拠点のスマートメーター等、直前行が別デバイスの場合に誤った時間幅が使われていた)。**（Issue #410 L-L2で修正）** `start_of_month`を組み立てる`.replace(...)`に`microsecond=0`を追加した。以前は`now`の微秒がそのまま`start_of_month.isoformat()`（例: `"...T00:00:00.123456+09:00"`）に残っており、DB側が本番の保存規約(`core.utils.get_now_iso`)通り微秒無しでちょうど月初0時に記録されている場合、SQLiteの文字列比較(`timestamp >= '{start_of_month}'`)では`"+09:00"`より`"."`の方が文字コード上大きいため、その行が範囲外と判定され集計から漏れていた。
-* 根拠: `calculate_monthly_cost_cumulative` (行番号: 238〜285 / 抜粋: "return int(df[\"kwh\"].sum() * 31)")、`microsecond=0` (行番号: 246 / 抜粋: "start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()")、デバイス絞り込み (行番号: 248〜257 / 抜粋: "WHERE timestamp >= '{start_of_month}' AND device_name LIKE '%Remo%'")、device_idごとのグループ化 (行番号: 274〜278 / 抜粋: "df.groupby(\"device_id\", dropna=False)[\"timestamp\"].diff()")
+* 根拠: `calculate_monthly_cost_cumulative` (行番号: 238〜285 / 抜粋: "return int(df[\"kwh\"].sum() * 31)")、`microsecond=0` (行番号: 279 / 抜粋: "start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()")、デバイス絞り込み (行番号: 248〜257 / 抜粋: "WHERE timestamp >= '{start_of_month}' AND device_name LIKE '%Remo%'")、device_idごとのグループ化 (行番号: 274〜278 / 抜粋: "df.groupby(\"device_id\", dropna=False)[\"timestamp\"].diff()")
 
 
 * **引数/リクエスト**: なし
@@ -257,11 +257,11 @@
 ### `load_weather_history`
 
 * **役割**: 指定された日数分、指定された場所（デフォルトは伊丹）の天気履歴を取得する。**（Issue #410 L-L2で修正）** 遡り開始日(`start_date`)の算出に使う「現在時刻」を、以前のnaive`datetime.now()`（サーバーのローカルタイムゾーンに依存し、`get_today_date_str()`等が前提とするJSTと日付境界がズレうる）から、JST明示の`datetime.now(pytz.timezone("Asia/Tokyo"))`へ変更した。
-* 根拠: `load_weather_history` (行番号: 291〜308 / 抜粋: "FROM weather_history")、JST明示化 (行番号: 295 / 抜粋: "start_date = (datetime.now(pytz.timezone(\"Asia/Tokyo\")) - timedelta(days=days)).strftime(\"%Y-%m-%d\")")
+* 根拠: `load_weather_history` (行番号: 291〜308 / 抜粋: "FROM weather_history")、JST明示化 (行番号: 328 / 抜粋: "start_date = (datetime.now(pytz.timezone(\"Asia/Tokyo\")) - timedelta(days=days)).strftime(\"%Y-%m-%d\")")
 
 
 * **引数/リクエスト**: `days` (`int`, デフォルト `40`): 遡る日数。`location` (`str`, デフォルト `"伊丹"`): 取得対象の場所。
-* 根拠: `days: int = 40, location: str = "伊丹"` (行番号: 291 / 抜粋: "days: int = 40, location: str = "伊丹"")
+* 根拠: `days: int = 40, location: str = "伊丹"` (行番号: 324 / 抜粋: "days: int = 40, location: str = "伊丹"")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (天気履歴のデータフレーム)
@@ -280,11 +280,11 @@
 ### `load_yearly_temperature_stats`
 
 * **役割**: 指定年の天気履歴（外気温）と室内センサーログ（室温）の日次最小・最大統計を取得し、マージして返す。
-* 根拠: `load_yearly_temperature_stats` (行番号: 331 / 抜粋: "df_merged = pd.merge(df_weather, df_sensor, on="date"")
+* 根拠: `load_yearly_temperature_stats` (行番号: 396 / 抜粋: "df_merged = pd.merge(df_weather, df_sensor, on="date"")
 
 
 * **引数/リクエスト**: `year` (`int`): 対象年。`location` (`str`, デフォルト `"伊丹"`): 対象場所。
-* 根拠: `year: int, location: str = "伊丹"` (行番号: 279 / 抜粋: "year: int, location: str = "伊丹"")
+* 根拠: `year: int, location: str = "伊丹"` (行番号: 344 / 抜粋: "year: int, location: str = "伊丹"")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (マージされた統計データのデータフレーム)
@@ -292,7 +292,7 @@
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `pd.read_sql_query` (行番号: 291 / 抜粋: "df_weather = pd.read_sql_query(q_weather, conn)")
+* 根拠: `pd.read_sql_query` (行番号: 356 / 抜粋: "df_weather = pd.read_sql_query(q_weather, conn)")
 
 
 * **エラーハンドリング**: 各クエリ実行ごとに `try-except` で回避処理。全体の例外発生時はエラーログを出力し空のデータフレームを返す。`finally`で接続を閉じる。**（保守性 #410で修正）** 個別クエリの回避処理は以前bareの`except:`だったが、`except Exception:`へ変更した（`KeyboardInterrupt`/`SystemExit`等の`BaseException`まで握り潰さないようにする一般的なプラクティスに合わせた。挙動そのものは変わらない）。
@@ -307,7 +307,7 @@
 
 
 * **引数/リクエスト**: `limit` (`int`, デフォルト `2000`): 取得件数の上限。
-* 根拠: `limit: int = 2000` (行番号: 340 / 抜粋: "limit: int = 2000")
+* 根拠: `limit: int = 2000` (行番号: 405 / 抜粋: "limit: int = 2000")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (駐輪場データのデータフレーム)
@@ -336,7 +336,7 @@
 ### `get_disk_usage`
 
 * **役割**: ルートディレクトリ（`/`）のディスク使用量（全体、使用済、空き、使用率）を取得する。
-* 根拠: `get_disk_usage` (行番号: 407 / 抜粋: "total, used, free = shutil.disk_usage("/")")
+* 根拠: `get_disk_usage` (行番号: 427 / 抜粋: "total, used, free = shutil.disk_usage("/")")
 
 
 * **引数/リクエスト**: なし
@@ -348,7 +348,7 @@
 
 
 * **副作用**: OSファイルシステムのディスク容量読み取り。
-* 根拠: `shutil.disk_usage("/")` (行番号: 408 / 抜粋: "shutil.disk_usage("/")")
+* 根拠: `shutil.disk_usage("/")` (行番号: 427 / 抜粋: "shutil.disk_usage("/")")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `None` を返す。
@@ -386,7 +386,7 @@
 
 
 * **引数/リクエスト**: `lines` (`int`, デフォルト `50`): 行数。`priority` (`Optional[str]`): ログの優先度。`target_date` (`Optional[date]`): 対象日付。
-* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 440 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
+* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 464 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
 
 
 * **戻り値/レスポンス**: `str` (取得したログの文字列。失敗時はエラーメッセージの文字列)
@@ -394,11 +394,11 @@
 
 
 * **副作用**: OSコマンド（`journalctl`）の実行。
-* 根拠: `subprocess.run` (行番号: 453 / 抜粋: "subprocess.run(cmd")
+* 根拠: `subprocess.run` (行番号: 477 / 抜粋: "subprocess.run(cmd")
 
 
 * **エラーハンドリング**: 例外発生時はエラーメッセージを文字列として返す。
-* 根拠: `except Exception as e:` (行番号: 455 / 抜粋: "return f"ログ取得エラー: {e}"")
+* 根拠: `except Exception as e:` (行番号: 480 / 抜粋: "return f"ログ取得エラー: {e}"")
 
 
 
@@ -497,9 +497,9 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | データベースのパス(`SQLITE_DB_PATH`)や、テーブル名、デバイスのマッピング情報(`MONITOR_DEVICES`)が定義されており、これがないと正確なデータ構造や参照先が判明しないため。 | `config.SQLITE_DB_PATH`, `config.MONITOR_DEVICES` など多数の参照 (行番号: 12 / 抜粋: "import config") |
+| 高 | `config.py` | データベースのパス(`SQLITE_DB_PATH`)や、テーブル名、デバイスのマッピング情報(`MONITOR_DEVICES`)が定義されており、これがないと正確なデータ構造や参照先が判明しないため。 | `config.SQLITE_DB_PATH`, `config.MONITOR_DEVICES` など多数の参照 (行番号: 13 / 抜粋: "import config") |
 | 中 | データベースのスキーマ定義ファイル（または実際のSQLiteファイル） | `device_records`, `weather_history` など、複数のテーブルのカラム構造を把握しなければ、他サービスとの連携仕様が掴めないため。 | 各SQLクエリ内の `SELECT` 対象 (行番号: 266, 288 / 抜粋: "FROM weather_history") |
-| 低 | `core/logger.py` | ログの出力先、レベル（INFO, ERRORなど）、ローテーションルールを確認し、運用時の障害調査手法を確立するため。 | `setup_logging("analysis_service")` (行番号: 13 / 抜粋: "from core.logger import setup_logging") |
+| 低 | `core/logger.py` | ログの出力先、レベル（INFO, ERRORなど）、ローテーションルールを確認し、運用時の障害調査手法を確立するため。 | `setup_logging("analysis_service")` (行番号: 15 / 抜粋: "from core.logger import setup_logging") |
 
 ## 8. 保守上の注意点
 

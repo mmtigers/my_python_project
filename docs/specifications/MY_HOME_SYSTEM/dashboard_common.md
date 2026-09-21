@@ -21,9 +21,9 @@
 ## 2. ファイルの概要
 
 * `views/dashboard`パッケージ内の各タブ・サマリー描画モジュールから共通利用される、CSSスタイル定義・キャッシュ付きローダ・描画ヘルパーを提供するモジュール。
-* 根拠: `CUSTOM_CSS = f"""` (行番号: 20 / 抜粋: "CUSTOM_CSS = f\"\"\"")
+* 根拠: `CUSTOM_CSS = f"""` (行番号: 23 / 抜粋: "CUSTOM_CSS = f\"\"\"")
 * `CUSTOM_CSS`は、フォント指定、ステータスカードのグリッド（`.status-grid`）とカード（`.status-card`）、5種類のテーマ配色クラス（`.theme-green`, `.theme-yellow`, `.theme-red`, `.theme-blue`, `.theme-gray`）、経路検索カード（`.route-card`, `.route-path`等）、Streamlit標準要素のスタイル上書き（`.streamlit-expanderHeader`）、タップターゲットの最小高さ、およびスマートフォン幅（`max-width: 640px`）のメディアクエリを含む、f-string の文字列定数として定義されたCSSブロックである。
-* 根拠: `.status-grid {` (行番号: 27 / 抜粋: "    .status-grid {"), `.status-card {` (行番号: 33 / 抜粋: "    .status-card {"), `@media (max-width: {MOBILE_BREAKPOINT_PX}px) {` (行番号: 84 / 抜粋: "    @media (max-width: {MOBILE_BREAKPOINT_PX}px) {{")
+* 根拠: `.status-grid {` (行番号: 27 / 抜粋: "    .status-grid {"), `.status-card {` (行番号: 33 / 抜粋: "    .status-card {"), `@media (max-width: {MOBILE_BREAKPOINT_PX}px) {` (行番号: 56 / 抜粋: "    @media (max-width: {MOBILE_BREAKPOINT_PX}px) {{")
 * **（スマホ対応で追加）** メディアクエリは、(1) `.block-container` の左右パディング縮小（**（#822 で変更）** 上パディングは 1.2rem から 4.5rem に戻した。Streamlit 既定のヘッダーは `position: fixed` で約 3.75rem あり本文がその下に潜り込むため、1.2rem ではページを開いた時点で先頭の行（更新/ファミクエのボタン）の上半分が隠れていた。`tests/test_dashboard_mobile_header.py` が「上パディング ≥ 3.75rem」を検査する）、(2) `st.columns`（`[data-testid="stHorizontalBlock"]` / `[data-testid="stColumn"]`）を `flex: 1 1 100%` で縦積みにする、(3) タブ列（`[data-baseweb="tab-list"]`）の横スクロール許可とスクロールバー非表示、(4) 見出し（`h1`〜`h3`）の縮小、(5) `section[data-testid="stMain"]` の横方向はみ出し抑止、**（スマホのヘッダー改善で追加）** (6) Streamlit 既定ヘッダー（`[data-testid="stHeader"]`）の不透明化、(7) ヘッダー操作列（`.st-key-header_actions`）だけ (2) の縦積みを打ち消して横並びを維持、**（タブの遅延評価で追加）** (8) タブ選択（`[data-testid="stButtonGroup"]` / `[data-testid="stSegmentedControl"]`）の幅を100%にし、高さ44px以上・ラベルの絵文字を非表示にして5つとも画面内に収める、(9) サマリー直下の「詳しく見る」導線（`.st-key-summary_jump`）と防犯カメラのギャラリー（`.st-key-camera_gallery` / `.st-key-camera_gallery_past`）を2列で折り返す、(10) 押す機会の無い Streamlit の「Deploy」ボタン（`[data-testid="stAppDeployButton"]`）を隠す、を行う。
 
   (8) の絵文字非表示は実測に基づく。絵文字ありだと5つのタブで約377px必要になり、390px幅（さらに狭い360px端末では確実に）では右端の「システム」がはみ出して横スクロールしないと押せない。目的のタブを探せないのは10タブ構成で一番困っていた点なので、絵文字を落として5つとも読めることを優先している（絵文字はPC幅では残る）。`tests/test_dashboard_mobile_e2e.py` が実ブラウザでタブが画面内に収まることとラベルが切れていないことを検査する。
@@ -78,23 +78,23 @@
 ### `logger` (モジュールレベル変数)
 
 * **役割**: モジュール名でロガーを取得し、`safe_section`のエラー記録に使う。
-* 根拠: `logger = logging.getLogger(__name__)` (行番号: 10 / 抜粋: "logger = logging.getLogger(__name__)")
+* 根拠: `logger = logging.getLogger(__name__)` (行番号: 15 / 抜粋: "logger = logging.getLogger(__name__)")
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 10 / 抜粋: "logger = logging.getLogger(__name__)")
+* 根拠: (行番号: 15 / 抜粋: "logger = logging.getLogger(__name__)")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 10 / 抜粋: "logger = logging.getLogger(__name__)")
+* 根拠: (行番号: 15 / 抜粋: "logger = logging.getLogger(__name__)")
 
 
 * **副作用**: なし
-* 根拠: (行番号: 10 / 抜粋: "logger = logging.getLogger(__name__)")
+* 根拠: (行番号: 15 / 抜粋: "logger = logging.getLogger(__name__)")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 10 / 抜粋: "logger = logging.getLogger(__name__)")
+* 根拠: (行番号: 15 / 抜粋: "logger = logging.getLogger(__name__)")
 
 
 
@@ -105,19 +105,19 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 13 / 抜粋: "MOBILE_BREAKPOINT_PX = 640")
+* 根拠: (行番号: 18 / 抜粋: "MOBILE_BREAKPOINT_PX = 640")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 13 / 抜粋: "MOBILE_BREAKPOINT_PX = 640")
+* 根拠: (行番号: 18 / 抜粋: "MOBILE_BREAKPOINT_PX = 640")
 
 
 * **副作用**: なし
-* 根拠: (行番号: 13 / 抜粋: "MOBILE_BREAKPOINT_PX = 640")
+* 根拠: (行番号: 18 / 抜粋: "MOBILE_BREAKPOINT_PX = 640")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 13 / 抜粋: "MOBILE_BREAKPOINT_PX = 640")
+* 根拠: (行番号: 18 / 抜粋: "MOBILE_BREAKPOINT_PX = 640")
 
 
 
@@ -128,7 +128,7 @@
 
 
 * **引数/リクエスト**: なし（モジュールレベルのf-stringリテラル定義）
-* 根拠: `CUSTOM_CSS = f"""` (行番号: 18 / 抜粋: "CUSTOM_CSS = f\"\"\"")
+* 根拠: `CUSTOM_CSS = f"""` (行番号: 23 / 抜粋: "CUSTOM_CSS = f\"\"\"")
 
 
 * **戻り値/レスポンス**: なし（グローバル変数`CUSTOM_CSS`（型: `str`）への代入）
@@ -140,14 +140,14 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `CUSTOM_CSS = f"""` (行番号: 18 / 抜粋: "CUSTOM_CSS = f\"\"\"")
+* 根拠: `CUSTOM_CSS = f"""` (行番号: 23 / 抜粋: "CUSTOM_CSS = f\"\"\"")
 
 
 
 ### `DASHBOARD_CACHE_TTL_SEC` (モジュールレベル定数、Issue #741で追加)
 
 * **役割**: キャッシュ付きローダ4本に与える TTL（秒）。値は `60`。コメントに、センサーの書き込み間隔（5〜10分）より十分短いので表示の鮮度は実質劣化せず、「🔄 データを更新」ボタンが TTL を待たずに捨てる手段としてようやく意味を持つ旨が記されている。
-* 根拠: `DASHBOARD_CACHE_TTL_SEC = 60` (行番号: 151 / 抜粋: "DASHBOARD_CACHE_TTL_SEC = 60")
+* 根拠: `DASHBOARD_CACHE_TTL_SEC = 60` (行番号: 251 / 抜粋: "DASHBOARD_CACHE_TTL_SEC = 60")
 
 * **引数/リクエスト**: なし
 * 根拠: `DASHBOARD_CACHE_TTL_SEC = 60` (行番号: 151)
@@ -291,7 +291,7 @@
 
 
 * **副作用**: 委譲先の副作用（HTTP取得・サブプロセス起動・DB読み取り）と、Streamlitのキャッシュへの保存。
-* 根拠: `return analysis_service.get_system_logs(` (行番号: 345 / 抜粋: "return analysis_service.get_system_logs(")
+* 根拠: `return analysis_service.get_system_logs(` (行番号: 346 / 抜粋: "return analysis_service.get_system_logs(")
 
 
 * **エラーハンドリング**: なし（委譲先の挙動に従う）。`get_system_logs_cached` については、呼び出し元の「🔄 ログを更新」ボタンが `get_system_logs_cached.clear()` を呼ぶことでTTLを待たずに取り直す（docstringに明記）。
@@ -317,7 +317,7 @@
 
 
 * **エラーハンドリング**: 空DataFrame・`timestamp_col` 欠落・`max_points <= 0` はそのまま返す。
-* 根拠: `if df is None or df.empty or max_points <= 0 or timestamp_col not in df.columns:` (行番号: 373 / 抜粋: "if df is None or df.empty or max_points <= 0 or timestamp_col not in df.columns:")
+* 根拠: `if df is None or df.empty or max_points <= 0 or timestamp_col not in df.columns:` (行番号: 375 / 抜粋: "if df is None or df.empty or max_points <= 0 or timestamp_col not in df.columns:")
 
 
 ### `PLOTLY_MOBILE_CONFIG` / `CHART_HEIGHT_PX` / `render_chart` (スマホ対応で追加)
@@ -375,15 +375,15 @@
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `st.dataframe(view, width="stretch", hide_index=True, height=height)` (行番号: 525 / 抜粋: "st.dataframe(view, width=\"stretch\", hide_index=True, height=height)")
+* 根拠: `st.dataframe(view, width="stretch", hide_index=True, height=height)` (行番号: 522 / 抜粋: "st.dataframe(view, width=\"stretch\", hide_index=True, height=height)")
 
 
 * **副作用**: `st.dataframe`（または空データ時の `st.info`）による描画。
-* 根拠: `st.info("表示できるデータがありません")` (行番号: 513 / 抜粋: "st.info(\"表示できるデータがありません\")")
+* 根拠: `st.info("表示できるデータがありません")` (行番号: 507 / 抜粋: "st.info(\"表示できるデータがありません\")")
 
 
 * **エラーハンドリング**: 指定された列が1つも無い場合・空DataFrameの場合はプレースホルダ（`st.info`）を出して戻る（`KeyError` にはならない）。
-* 根拠: `if df.empty or not available:` (行番号: 512 / 抜粋: "if df.empty or not available:")
+* 根拠: `if df.empty or not available:` (行番号: 506 / 抜粋: "if df.empty or not available:")
 
 
 ### `lazy_section` (スマホ対応で追加)
@@ -397,11 +397,11 @@
 
 
 * **戻り値/レスポンス**: `bool`（開いていれば `True`）
-* 根拠: `return bool(st.toggle(label, key=f"lazy_section_{key}", value=default_open))` (行番号: 559 / 抜粋: "return bool(st.toggle(label, key=f\"lazy_section_{key}\", value=default_open))")
+* 根拠: `return bool(st.toggle(label, key=f"lazy_section_{key}", value=default_open))` (行番号: 558 / 抜粋: "return bool(st.toggle(label, key=f\"lazy_section_{key}\", value=default_open))")
 
 
 * **副作用**: `st.toggle` の描画と、`st.session_state` への開閉状態の保存（キーは `lazy_section_<key>`）。
-* 根拠: `return bool(st.toggle(label, key=f"lazy_section_{key}", value=default_open))` (行番号: 559 / 抜粋: "key=f\"lazy_section_{key}\"")
+* 根拠: `return bool(st.toggle(label, key=f"lazy_section_{key}", value=default_open))` (行番号: 558 / 抜粋: "key=f\"lazy_section_{key}\"")
 
 
 * **エラーハンドリング**: なし
@@ -529,11 +529,11 @@ graph TD
 
 
 * **CSSがPython文字列としてハードコード**: スタイル定義がすべて`CUSTOM_CSS`という1つの長い文字列としてPythonコード内にハードコードされており、`.css`ファイルとして分離されていない。デザイン変更のたびにPythonコードの編集が必要となる。
-* 根拠: `CUSTOM_CSS = f"""` (行番号: 20 / 抜粋: "CUSTOM_CSS = f\"\"\"")
+* 根拠: `CUSTOM_CSS = f"""` (行番号: 23 / 抜粋: "CUSTOM_CSS = f\"\"\"")
 
 
 * **（スマホ対応）`CUSTOM_CSS` は f-string なので波括弧のエスケープが必要**: CSS本体の `{` / `}` はすべて `{{` / `}}` と書かなければならない。エスケープを忘れると、モジュールのimport時点で `KeyError` 等になり、ダッシュボード全体が起動しない。
-* 根拠: `CUSTOM_CSS = f"""` (行番号: 18 / 抜粋: "CUSTOM_CSS = f\"\"\"") と、エスケープされた波括弧 (行番号: 27〜28 / 抜粋: "    .status-grid {{")
+* 根拠: `CUSTOM_CSS = f"""` (行番号: 23 / 抜粋: "CUSTOM_CSS = f\"\"\"") と、エスケープされた波括弧 (行番号: 27〜28 / 抜粋: "    .status-grid {{")
 
 
 * **（スマホ対応）メディアクエリはStreamlitのDOM属性セレクタに依存している**: `[data-testid="stHorizontalBlock"]` / `[data-testid="stColumn"]` / `[data-baseweb="tab-list"]` / `section[data-testid="stMain"]` は、Streamlitが出力するDOMの内部的な属性であり公開APIではない。ファイル冒頭のコメントにあるとおり、バージョンアップでこれらが変わった場合はCSSが効かなくなるだけで画面は壊れないが、スマートフォンでの縦積み・タブの横スクロールは失われる。旧バージョン向けに `[data-testid="column"]` も併記してある。

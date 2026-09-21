@@ -17,9 +17,9 @@
 * Streamlitダッシュボードの「健康管理」タブを描画するモジュール。子供の体調、排便、食事の3種類のデータフレームを引数として受け取り、それぞれ表形式で表示する単一の関数`render`のみで構成される。
 * 根拠: `def render(df_child: pd.DataFrame, df_poop: pd.DataFrame, df_food: pd.DataFrame):` (行番号: 7 / 抜粋: "def render(df_child: pd.DataFrame, df_poop: pd.DataFrame, df_food: pd.DataFrame):")
 * 子供・排便のデータは2カラムレイアウトで横並びに、食事のデータはその下に単独で表示される。
-* 根拠: `c1, c2 = st.columns(2)` (行番号: 6 / 抜粋: "c1, c2 = st.columns(2)")
+* 根拠: `c1, c2 = st.columns(2)` (行番号: 8 / 抜粋: "c1, c2 = st.columns(2)")
 * 各データフレームが空でない場合のみ、指定列に絞った表を表示する。**（スマホ対応で変更）** 列の指定は「元の列名 → 表示名」の辞書になり、描画は`view_common.render_table`に委譲する（子供: 時刻/名前/様子、排便: 時刻/名前/様子、食事: 時刻/メニュー）。`st.dataframe`は画面幅を超えると横スクロールの箱になるため、列を絞り・時刻を「09/21 03:04」に短縮し・行番号を隠す処理を共通ヘルパー側に寄せている。
-* 根拠: `view_common.render_table(df_child, {"timestamp": "時刻", "child_name": "名前", "condition": "様子"})` (行番号: 11 / 抜粋: "view_common.render_table(df_child, {\"timestamp\": \"時刻\", \"child_name\": \"名前\", \"condition\": \"様子\"})")
+* 根拠: `view_common.render_table(df_child, {"timestamp": "時刻", "child_name": "名前", "condition": "様子"})` (行番号: 12 / 抜粋: "view_common.render_table(df_child, {\"timestamp\": \"時刻\", \"child_name\": \"名前\", \"condition\": \"様子\"})")
 
 ## 3. 外部依存関係
 
@@ -58,7 +58,7 @@
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない。各`DataFrame`が空の場合は`if not ...empty:`分岐により当該表を描画しないだけで、エラー表示や警告は行わない）
-* 根拠: `if not df_food.empty:` (行番号: 17 / 抜粋: "if not df_food.empty:")
+* 根拠: `if not df_food.empty:` (行番号: 18 / 抜粋: "if not df_food.empty:")
 
 
 
@@ -114,7 +114,7 @@ graph TD
 
 
 * **他タブとの一貫性の欠如**: 同じ`views/dashboard`配下の他モジュール（例: `misc_tab.py`の`render_bicycle`）は空データ時に`st.info`等でメッセージを表示するのに対し、本ファイルは空の場合何も表示せず見出しのみが残る（`render_table`自体は空データにプレースホルダを出すが、本ファイルは`if not ...empty:`で呼び出し自体を省くためそこへ到達しない）。UI上の一貫性に欠ける可能性がある。
-* 根拠: `if not df_child.empty:` （elseブロックなし） (行番号: 10 / 抜粋: "if not df_child.empty:")
+* 根拠: `if not df_child.empty:` （elseブロックなし） (行番号: 11 / 抜粋: "if not df_child.empty:")
 
 
 ## 9. 不明事項一覧

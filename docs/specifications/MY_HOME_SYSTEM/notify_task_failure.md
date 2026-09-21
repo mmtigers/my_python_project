@@ -33,21 +33,21 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `os` | 標準 | パス組み立て・ファイル存在確認 | 根拠: [インポート宣言] (行番号: 34 / 抜粋: "import os") |
-| `sys` | 標準 | `sys.path` への親ディレクトリ追加・引数取得・終了コード返却 | 根拠: [インポート宣言] (行番号: 35 / 抜粋: "import sys") |
-| `time` | 標準 | 現在時刻（クールダウン判定の基準） | 根拠: [インポート宣言] (行番号: 36 / 抜粋: "import time") |
-| `config` | 自作 | 状態ファイルの置き場 `LOG_DIR` | 根拠: [インポート宣言] (行番号: 40 / 抜粋: "import config") |
-| `core.state_file` | 自作 | クールダウン状態ファイルの原子的な読み書き | 根拠: [インポート宣言] (行番号: 41 / 抜粋: "from core import state_file") |
-| `core.logger.get_logger` | 自作 | ロガー取得。`DiscordErrorHandler` はここで付く | 根拠: [インポート宣言] (行番号: 42 / 抜粋: "from core.logger import get_logger") |
+| `os` | 標準 | パス組み立て・ファイル存在確認 | 根拠: [インポート宣言] (行番号: 27 / 抜粋: "import os") |
+| `sys` | 標準 | `sys.path` への親ディレクトリ追加・引数取得・終了コード返却 | 根拠: [インポート宣言] (行番号: 28 / 抜粋: "import sys") |
+| `time` | 標準 | 現在時刻（クールダウン判定の基準） | 根拠: [インポート宣言] (行番号: 29 / 抜粋: "import time") |
+| `config` | 自作 | 状態ファイルの置き場 `LOG_DIR` | 根拠: [インポート宣言] (行番号: 33 / 抜粋: "import config") |
+| `core.state_file` | 自作 | クールダウン状態ファイルの原子的な読み書き | 根拠: [インポート宣言] (行番号: 34 / 抜粋: "from core import state_file") |
+| `core.logger.get_logger` | 自作 | ロガー取得。`DiscordErrorHandler` はここで付く | 根拠: [インポート宣言] (行番号: 35 / 抜粋: "from core.logger import get_logger") |
 
-インポートに先立ち親ディレクトリを `sys.path` へ追加している（根拠: [パス操作] (行番号: 38 / 抜粋: "sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), \"..\")))")）。
+インポートに先立ち親ディレクトリを `sys.path` へ追加している（根拠: [パス操作] (行番号: 31 / 抜粋: "sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), \"..\")))")）。
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.LOG_DIR` | 外部ファイルで定義されており具体的な値が不明。 | 根拠: [変数参照] (行番号: 57 / 抜粋: "os.path.join(config.LOG_DIR, f\".task_failure_{safe}\")") |
-| `core.logger.get_logger` が返すロガーに付くハンドラ構成 | Discord へ実際に送るかどうかは `config.DISCORD_WEBHOOK_ERROR` の有無に依存し、本ファイルからは読み取れない。 | 根拠: [ロガー取得] (行番号: 44 / 抜粋: "logger = get_logger(\"run_task\")") |
+| `config.LOG_DIR` | 外部ファイルで定義されており具体的な値が不明。 | 根拠: [変数参照] (行番号: 56 / 抜粋: "os.path.join(config.LOG_DIR, f\".task_failure_{safe}\")") |
+| `core.logger.get_logger` が返すロガーに付くハンドラ構成 | Discord へ実際に送るかどうかは `config.DISCORD_WEBHOOK_ERROR` の有無に依存し、本ファイルからは読み取れない。 | 根拠: [ロガー取得] (行番号: 37 / 抜粋: "logger = get_logger(\"run_task\")") |
 | 第1引数で渡される `script_name` | 実行時に `run_task.sh` から動的に渡される。 | 根拠: [引数取得] (行番号: 119 / 抜粋: "script_name, exit_code = args[0], args[1]") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -64,7 +64,7 @@
 * **引数/リクエスト**: `script_name: str`
 * 根拠: [関数定義] (行番号: 49)
 * **戻り値/レスポンス**: `str`（`config.LOG_DIR` 配下の `.task_failure_<正規化した名前>`）
-* 根拠: [戻り値] (行番号: 57 / 抜粋: "return os.path.join(config.LOG_DIR, f\".task_failure_{safe}\")")
+* 根拠: [戻り値] (行番号: 56 / 抜粋: "return os.path.join(config.LOG_DIR, f\".task_failure_{safe}\")")
 * **副作用**: なし
 * 根拠: [関数本体] (行番号: 56〜57)
 * **エラーハンドリング**: なし
@@ -77,9 +77,9 @@
 * **引数/リクエスト**: `script_name: str`, `now: float`（`time.time()` 基準の現在時刻）
 * 根拠: [関数定義] (行番号: 59)
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値] (行番号: 74 / 抜粋: "return now - last > COOLDOWN_SEC")
+* 根拠: [戻り値] (行番号: 73 / 抜粋: "return now - last > COOLDOWN_SEC")
 * **副作用**: 状態ファイルの読み取りのみ（書き込みはしない）
-* 根拠: [読み取り] (行番号: 67 / 抜粋: "raw = state_file.read_text(_state_path(script_name))")
+* 根拠: [読み取り] (行番号: 66 / 抜粋: "raw = state_file.read_text(_state_path(script_name))")
 * **エラーハンドリング**: `float()` の `ValueError` を捕捉し `True`（通知する）を返す
 * 根拠: [例外処理] (行番号: 71〜73 / 抜粋: "except ValueError:")
 
@@ -103,7 +103,7 @@
 * **引数/リクエスト**: `log_file: str`
 * 根拠: [関数定義] (行番号: 81)
 * **戻り値/レスポンス**: `str`
-* 根拠: [戻り値] (行番号: 91 / 抜粋: "return \"\".join(lines[-LOG_TAIL_LINES:])[-LOG_TAIL_LIMIT:]")
+* 根拠: [戻り値] (行番号: 90 / 抜粋: "return \"\".join(lines[-LOG_TAIL_LINES:])[-LOG_TAIL_LIMIT:]")
 * **副作用**: ログファイルの読み取りのみ
 * 根拠: [ファイル読み取り] (行番号: 87〜88 / 抜粋: "with open(log_file, \"r\", encoding=\"utf-8\", errors=\"replace\") as f:")
 * **エラーハンドリング**: `OSError` を捕捉して理由を含む文字列を返す。デコード不能なバイトは `errors="replace"` で潰す
@@ -117,7 +117,7 @@
 * **引数/リクエスト**: `script_name: str`, `exit_code: str`, `log_file: str`, `now: float`
 * 根拠: [関数定義] (行番号: 93)
 * **戻り値/レスポンス**: `bool`（通知したら `True`、抑制したら `False`）
-* 根拠: [戻り値] (行番号: 102, 110 / 抜粋: "return False", "return True")
+* 根拠: [戻り値] (行番号: 104, 110 / 抜粋: "return False", "return True")
 * **副作用**: `logger.info` / `logger.error`（後者は `DiscordErrorHandler` 経由で Discord の error チャンネルへ送られる）、ログファイルの読み取り、状態ファイルへの書き込み
 * 根拠: [ログ出力と記録] (行番号: 101, 105〜109 / 抜粋: "record_notification(script_name, now)")
 * **エラーハンドリング**: 本関数内に `try`/`except` は無い（読み取り側の例外は `read_log_tail`、書き込み側は `record_notification` が扱う）
@@ -131,7 +131,7 @@
 * **引数/リクエスト**: `argv`（省略時は `sys.argv[1:]`。テストから直接渡せるようにしてある）
 * 根拠: [関数定義] (行番号: 114〜115 / 抜粋: "args = list(sys.argv[1:] if argv is None else argv)")
 * **戻り値/レスポンス**: `int`（Usage エラーは `2`、それ以外は `0`）
-* 根拠: [戻り値] (行番号: 118, 125 / 抜粋: "return 2", "return 0")
+* 根拠: [戻り値] (行番号: 118, 124 / 抜粋: "return 2", "return 0")
 * **副作用**: `notify` の副作用、Usage の標準エラー出力
 * 根拠: [呼び出し] (行番号: 121 / 抜粋: "notify(script_name, exit_code, log_file, time.time())")
 * **エラーハンドリング**: 引数不足のみを扱う
@@ -210,7 +210,7 @@ graph TD
 | 優先度 | ファイル名 | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `run_task.sh` | 唯一の呼び出し元であり、どの引数で呼ばれるかが本ファイルの前提になっている | [呼び出し元](./run_task.md) |
-| 高 | `core/logger.py` | 通知が実際に Discord へ届くかは `DiscordErrorHandler` の付与条件と重複排除に依存する | [ロガー取得] (行番号: 44 / 抜粋: "logger = get_logger(\"run_task\")") |
+| 高 | `core/logger.py` | 通知が実際に Discord へ届くかは `DiscordErrorHandler` の付与条件と重複排除に依存する | [ロガー取得] (行番号: 37 / 抜粋: "logger = get_logger(\"run_task\")") |
 | 中 | `core/state_file.py` | クールダウン状態の読み書きの原子性の実体 | [読み書き] (行番号: 67, 77) |
 | 中 | `deploy/cron/crontab` | どのタスクが `run_task.sh` 経由か＝本ファイルの恩恵を受ける範囲を確定するため | [run_task.md の相互参照節](./run_task.md) |
 

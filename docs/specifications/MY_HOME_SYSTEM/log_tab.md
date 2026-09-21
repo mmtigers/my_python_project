@@ -22,9 +22,9 @@
 * 根拠: `def render_logs(df_sensor: pd.DataFrame):`, `def render_resources():`, `def render_nas_status():`, `def render_server_logs():`, `def render_maintenance():` (行番号: 12, 32, 47, 63, 94 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
 * **（Issue #507で削除）** 以前は3つ目の公開関数として、直近3日分のアプリランキング(無料トップ・売上トップ)を`analysis_service.load_ranking_dates`/`load_ranking_data`経由で取得し週ごとに列表示する`render_trends`(「🌟 最近の流行・トレンド推移」タブ)が存在した。しかし参照先の`app_rankings`テーブルへ書き込むコード(収集スクリプト)がリポジトリのどこにも存在せず、収集に使うはずの`google-play-scraper`もIssue #496で未使用パッケージとして既に削除済みであり、`migrations/`にもテーブル定義が無いため新規構築したDBでは永久に「データがありません」としか表示されない死んだ機能だった(Issue #507)。オーナー判断によりUIごと削除され、対応する`analysis_service.load_ranking_dates`/`load_ranking_data`、`current_schema.sql`の`app_rankings`テーブル定義、`dashboard.py`のタブ登録もあわせて削除された。
 * `render_logs`は、渡された`df_sensor`（センサーデータ）を場所（`location`）でフィルタ可能な形で一覧表示する。**（スマホ対応で変更）** `df_sensor`が空のときは以前は無言で何も描画しなかったが、`st.info("センサーログがありません")`を出して早期`return`するようになった。
-* 根拠: `sel = st.multiselect("場所", locs, default=locs)` (行番号: 18 / 抜粋: "sel = st.multiselect(\"場所\", locs, default=locs)")、空のときの早期return (行番号: 12〜14 / 抜粋: "        st.info(\"センサーログがありません\")")
+* 根拠: `sel = st.multiselect("場所", locs, default=locs)` (行番号: 19 / 抜粋: "sel = st.multiselect(\"場所\", locs, default=locs)")、空のときの早期return (行番号: 12〜14 / 抜粋: "        st.info(\"センサーログがありません\")")
 * **（スマホ対応で分割）** 旧`render_system`が持っていた機能は、ディスク/メモリ使用率（`render_resources`）、NASステータス（`render_nas_status`）、サーバーログの検索・表示（`render_server_logs`）、確認チェック付きのサービス再起動とバックアップ実行（`render_maintenance`）の4つに分かれた。各関数は`st.title`ではなく`st.markdown("##### ...")`の小見出しで始まる（呼び出し元が`st.expander`に畳むため）。以前はngrokのローカルAPI経由で取得した外部公開URLの接続状態も表示していたが、無認証のダッシュボードがngrok経由で外部公開されうるセキュリティ上の懸念から削除された（Issue #225）。
-* 根拠: `st.markdown("##### 💻 リソース状況")` (行番号: 29 / 抜粋: "st.markdown(\"##### 💻 リソース状況\")")、`st.markdown("##### 🛠️ メンテナンス操作")` (行番号: 90 / 抜粋: "st.markdown(\"##### 🛠️ メンテナンス操作\")")
+* 根拠: `st.markdown("##### 💻 リソース状況")` (行番号: 29 / 抜粋: "st.markdown(\"##### 💻 リソース状況\")")、`st.markdown("##### 🛠️ メンテナンス操作")` (行番号: 101 / 抜粋: "st.markdown(\"##### 🛠️ メンテナンス操作\")")
 * `render_maintenance`内のサービス再起動処理は、`subprocess.run`で`sudo systemctl restart home_system`を実行する破壊的操作であり、チェックボックスによる確認を経てからボタンが有効化される。docstringに、スマートフォンからも実行できるようにしたのはオーナー判断であること、誤タップで本番サービスが落ちる操作のため2段階確認を維持していること、タップターゲットは`common.CUSTOM_CSS`で44px以上を確保していることが記されている。
 * 根拠: `subprocess.run(` (行番号: 99〜103 / 抜粋: "subprocess.run(")、docstring (行番号: 84〜89 / 抜粋: "    スマートフォンからも実行できるようにした(オーナー判断)が、誤タップで本番サービスが")
 
@@ -37,18 +37,18 @@
 | `streamlit` | 外部ライブラリ | UI描画全般（タブ、フィルタ、メトリクス、コード表示、ボタン等） | `import streamlit as st` (行番号: 2 / 抜粋: "import streamlit as st") |
 | `pandas` | 外部ライブラリ | `render_logs`の引数型注釈（`pd.DataFrame`）およびフィルタ処理 | `import pandas as pd` (行番号: 3 / 抜粋: "import pandas as pd") |
 | `subprocess` | 標準ライブラリ | システム再起動コマンド(`systemctl restart`)の実行 | `import subprocess` (行番号: 4 / 抜粋: "import subprocess") |
-| `date` | 標準ライブラリ | 日付指定検索時の初期値(`date.today()`)取得に使用 | `from datetime import date` (行番号: 5 / 抜粋: "from datetime import date") |
-| `views.dashboard.common` (`view_common`) | 内部モジュール | **（スマホ対応で変更）** ディスク/メモリ使用率・NASステータス・システムログの**キャッシュ付き**取得と、表描画(`render_table`) | `from . import common as view_common` (行番号: 8 / 抜粋: "from . import common as view_common") |
-| `backup_service` | 内部モジュール | `render_maintenance`関数内でインポートされる（関数内import）。バックアップ実行処理(`perform_backup`)の提供 | `from services import backup_service` (行番号: 114 / 抜粋: "from services import backup_service") |
+| `date` | 標準ライブラリ | 日付指定検索時の初期値(`date.today()`)取得に使用 | `from datetime import date` (行番号: 8 / 抜粋: "from datetime import date") |
+| `views.dashboard.common` (`view_common`) | 内部モジュール | **（スマホ対応で変更）** ディスク/メモリ使用率・NASステータス・システムログの**キャッシュ付き**取得と、表描画(`render_table`) | `from . import common as view_common` (行番号: 10 / 抜粋: "from . import common as view_common") |
+| `backup_service` | 内部モジュール | `render_maintenance`関数内でインポートされる（関数内import）。バックアップ実行処理(`perform_backup`)の提供 | `from services import backup_service` (行番号: 125 / 抜粋: "from services import backup_service") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `view_common.get_disk_usage_cached` / `get_memory_usage_cached` | ディスク・メモリ使用率の取得元・実装（`psutil`等の使用有無）が不明。 | `disk = view_common.get_disk_usage_cached()` (行番号: 32 / 抜粋: "disk = view_common.get_disk_usage_cached()") |
-| `view_common.load_nas_status_cached` | NASステータスデータの取得元・スキーマ（`status_ping`, `status_mount`, `timestamp`以外のフィールド有無）が不明。 | `nas_data = view_common.load_nas_status_cached()` (行番号: 50 / 抜粋: "nas_data = view_common.load_nas_status_cached()") |
-| `view_common.get_system_logs_cached` | サーバーログの取得元（journalctl等）・`priority`引数の解釈方法が不明。 | `logs = view_common.get_system_logs_cached(lines=lines_val, priority=priority, target_date=target_date)` (行番号: 87 / 抜粋: "logs = view_common.get_system_logs_cached(") |
-| `backup_service.perform_backup` | バックアップ処理の実装（対象データ・保存先・失敗時の`res`の意味）が不明。 | `success, res, size = backup_service.perform_backup()` (行番号: 117 / 抜粋: "success, res, size = backup_service.perform_backup()") |
+| `view_common.get_disk_usage_cached` / `get_memory_usage_cached` | ディスク・メモリ使用率の取得元・実装（`psutil`等の使用有無）が不明。 | `disk = view_common.get_disk_usage_cached()` (行番号: 35 / 抜粋: "disk = view_common.get_disk_usage_cached()") |
+| `view_common.load_nas_status_cached` | NASステータスデータの取得元・スキーマ（`status_ping`, `status_mount`, `timestamp`以外のフィールド有無）が不明。 | `nas_data = view_common.load_nas_status_cached()` (行番号: 52 / 抜粋: "nas_data = view_common.load_nas_status_cached()") |
+| `view_common.get_system_logs_cached` | サーバーログの取得元（journalctl等）・`priority`引数の解釈方法が不明。 | `logs = view_common.get_system_logs_cached(lines=lines_val, priority=priority, target_date=target_date)` (行番号: 89 / 抜粋: "logs = view_common.get_system_logs_cached(") |
+| `backup_service.perform_backup` | バックアップ処理の実装（対象データ・保存先・失敗時の`res`の意味）が不明。 | `success, res, size = backup_service.perform_backup()` (行番号: 128 / 抜粋: "success, res, size = backup_service.perform_backup()") |
 | `sudo systemctl restart home_system` (OSサービス) | 対象の`home_system`サービスの実体（`systemd`ユニット定義）が本ファイルからは不明。 | `subprocess.run(` (行番号: 99〜103 / 抜粋: "subprocess.run(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -68,7 +68,7 @@
 
 
 * **副作用**: `st.multiselect`、`view_common.render_table`（内部で`st.dataframe`）によるStreamlit画面への描画。**（スマホ対応で変更）** 列は「時刻 / センサー / 場所 / 状態 / W」の表示名に絞り、時刻を短縮し、行番号を隠す。
-* 根拠: `view_common.render_table(` (行番号: 21 / 抜粋: "view_common.render_table(")
+* 根拠: `view_common.render_table(` (行番号: 20 / 抜粋: "view_common.render_table(")
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない。呼び出し元の`dashboard.py`が`safe_section`で囲む）
@@ -91,7 +91,7 @@
 
 
 * **副作用**: `view_common.get_disk_usage_cached()` / `get_memory_usage_cached()` 経由のデータ取得（TTL 60秒のキャッシュ越し。メモリ使用率はホームタブのサマリーカードとも共有される）と、`st.write` / `st.progress` による描画。
-* 根拠: `disk = view_common.get_disk_usage_cached()` (行番号: 32 / 抜粋: "disk = view_common.get_disk_usage_cached()")、`mem = view_common.get_memory_usage_cached()` (行番号: 38 / 抜粋: "mem = view_common.get_memory_usage_cached()")
+* 根拠: `disk = view_common.get_disk_usage_cached()` (行番号: 35 / 抜粋: "disk = view_common.get_disk_usage_cached()")、`mem = view_common.get_memory_usage_cached()` (行番号: 41 / 抜粋: "mem = view_common.get_memory_usage_cached()")
 
 
 * **エラーハンドリング**: なし（取得結果が falsy の場合は該当ブロックを描画しないだけ）
@@ -114,11 +114,11 @@
 
 
 * **副作用**: `view_common.load_nas_status_cached()` 経由のデータ取得と、`st.columns` / `st.metric` による描画。**（スマホ対応で変更）** 以前はここだけがキャッシュを迂回して素の`analysis_service.load_nas_status()`を呼んでおり、「🔧 システム」タブを開くたびにNASの状態を別途読み直していた（ホームタブのサマリーとは別に）。
-* 根拠: `nas_data = view_common.load_nas_status_cached()` (行番号: 50 / 抜粋: "nas_data = view_common.load_nas_status_cached()")、`c1, c2, c3 = st.columns(3)` (行番号: 50 / 抜粋: "c1, c2, c3 = st.columns(3)")
+* 根拠: `nas_data = view_common.load_nas_status_cached()` (行番号: 52 / 抜粋: "nas_data = view_common.load_nas_status_cached()")、`c1, c2, c3 = st.columns(3)` (行番号: 57 / 抜粋: "c1, c2, c3 = st.columns(3)")
 
 
 * **エラーハンドリング**: なし（`nas_data["status_ping"]` 等のキー欠落は捕捉していない）
-* 根拠: `with c1: st.metric("Ping疎通", ...)` (行番号: 51 / 抜粋: "    with c1: st.metric(\"Ping疎通\", f\"{'✅' if nas_data['status_ping']=='OK' else '❌'} {nas_data['status_ping']}\")")
+* 根拠: `with c1: st.metric("Ping疎通", ...)` (行番号: 58 / 抜粋: "    with c1: st.metric(\"Ping疎通\", f\"{'✅' if nas_data['status_ping']=='OK' else '❌'} {nas_data['status_ping']}\")")
 
 
 
@@ -137,7 +137,7 @@
 
 
 * **副作用**: `view_common.get_system_logs_cached()` 経由のデータ取得（TTL 60秒のキャッシュ越し。実体は`journalctl`のサブプロセス起動）、`st.rerun()` によるアプリ全体の再実行、各種ウィジェットの描画。**（スマホ対応で変更）** 「🔄 ログを更新」は再実行の前に`view_common.get_system_logs_cached.clear()`を呼ぶ — キャッシュを捨てないと、押しても同じ内容が返るため。
-* 根拠: `logs = view_common.get_system_logs_cached(lines=lines_val, priority=priority, target_date=target_date)` (行番号: 87 / 抜粋: "logs = view_common.get_system_logs_cached(")、`view_common.get_system_logs_cached.clear()` (行番号: 83 / 抜粋: "view_common.get_system_logs_cached.clear()")
+* 根拠: `logs = view_common.get_system_logs_cached(lines=lines_val, priority=priority, target_date=target_date)` (行番号: 89 / 抜粋: "logs = view_common.get_system_logs_cached(")、`view_common.get_system_logs_cached.clear()` (行番号: 86 / 抜粋: "view_common.get_system_logs_cached.clear()")
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
@@ -166,7 +166,7 @@
 * **副作用**:
     * チェックボックス確認後、再起動ボタン押下で`subprocess.run(["sudo", "systemctl", "restart", "home_system"], check=True, timeout=SUBPROCESS_TIMEOUT_SEC)`により実際にOSレベルの`systemctl restart`コマンドを実行する（本番サービス再起動という破壊的操作）。
     * `st.button("今すぐバックアップを実行")`押下で`backup_service.perform_backup()`を呼び出す（`backup_service`は関数内import）。
-* 根拠: `subprocess.run(` (行番号: 99〜103 / 抜粋: "subprocess.run(")、`success, res, size = backup_service.perform_backup()` (行番号: 117 / 抜粋: "success, res, size = backup_service.perform_backup()")
+* 根拠: `subprocess.run(` (行番号: 99〜103 / 抜粋: "subprocess.run(")、`success, res, size = backup_service.perform_backup()` (行番号: 128 / 抜粋: "success, res, size = backup_service.perform_backup()")
 
 
 * **エラーハンドリング**: 再起動処理のみ`try`で囲み、`subprocess.TimeoutExpired`（#651。`timeout`が無いとsystemd側が応答しない状況でStreamlitのスクリプト実行スレッドが無限に待ち、ダッシュボード全体が固まる）と、それ以外の`Exception`をそれぞれ捕捉して`st.error`で表示する。バックアップは`perform_backup`の戻り値`success`で成否を分岐するのみで、例外捕捉はしていない。
@@ -276,22 +276,22 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `services/analysis_service.py` | ディスク/メモリ・NAS・システムログ取得の各関数の実装とスキーマを把握するため。 | `analysis_service.get_system_logs(...)` (行番号: 78 / 抜粋: "logs = analysis_service.get_system_logs(") |
-| 高 | `services/backup_service.py` | `perform_backup`の戻り値タプル`(success, res, size)`の正確な意味とバックアップ対象を把握するため。 | `success, res, size = backup_service.perform_backup()` (行番号: 117 / 抜粋: "success, res, size = backup_service.perform_backup()") |
+| 高 | `services/backup_service.py` | `perform_backup`の戻り値タプル`(success, res, size)`の正確な意味とバックアップ対象を把握するため。 | `success, res, size = backup_service.perform_backup()` (行番号: 128 / 抜粋: "success, res, size = backup_service.perform_backup()") |
 | 中 | `deploy/systemd/home_system.service` | `systemctl restart home_system`で再起動される対象サービスの実体を把握するため。 | `subprocess.run(` (行番号: 99〜103 / 抜粋: "subprocess.run(") |
 | 中 | `dashboard.py` | 分割された5つの関数がどのタブ・どの`st.expander`に配置されるかを把握するため。 | 該当なし（本ファイルは呼び出し順を持たない） |
 
 ## 8. 保守上の注意点
 
 * **破壊的操作のUI保護が限定的**: サービス再起動はチェックボックス確認を要するが、`st.checkbox`はページ再描画のたびに状態がリセットされうるStreamlitの挙動に依存しており、確認の実効性は`key="confirm_reboot_checkbox"`によるセッション状態管理に依存する。バックアップ実行ボタン（116行目）には同様の確認ステップが存在しない。**（スマホ対応）** これらの操作はスマートフォンからも到達できる（オーナー判断）。呼び出し元では`st.expander`（既定で畳まれた状態）の中に置かれ、タップターゲットの最小高さは`views/dashboard/common.py`の`CUSTOM_CSS`が44pxを確保しているが、モバイル専用の非表示化はしていない。
-* 根拠: `confirm_reboot = st.checkbox("再起動することを理解しました", key="confirm_reboot_checkbox")` (行番号: 92 / 抜粋: "confirm_reboot = st.checkbox("), `if st.button("今すぐバックアップを実行"):` (行番号: 116 / 抜粋: "if st.button(\"今すぐバックアップを実行\"):")
+* 根拠: `confirm_reboot = st.checkbox("再起動することを理解しました", key="confirm_reboot_checkbox")` (行番号: 92 / 抜粋: "confirm_reboot = st.checkbox("), `if st.button("今すぐバックアップを実行"):` (行番号: 127 / 抜粋: "if st.button(\"今すぐバックアップを実行\"):")
 
 
 * **エラーハンドリングの不均一**: サービス再起動処理のみ`try...except`で保護されているが、ディスク/メモリ・NAS・ログ取得・バックアップ実行の各外部呼び出しには例外捕捉がなく、これらの関数が例外を送出した場合はタブ全体の描画が中断する可能性がある。ただし呼び出し元`dashboard.py`側で`views.dashboard.common.safe_section`により例外が隔離されるため(Issue #438)、他への影響は無い。**（スマホ対応で変更）** 保護の単位は「タブ」ではなく本ファイルの関数1つ1つ（リソース状況／NAS状態／サーバーログ／ログ分析／メンテナンス操作）になったため、例えばNAS状態の取得に失敗してもサーバーログの表示は生き残る。
-* 根拠: `disk = view_common.get_disk_usage_cached()` (行番号: 32 / 抜粋: "disk = view_common.get_disk_usage_cached()"), `success, res, size = backup_service.perform_backup()` (行番号: 130 / 抜粋: "success, res, size = backup_service.perform_backup()")
+* 根拠: `disk = view_common.get_disk_usage_cached()` (行番号: 35 / 抜粋: "disk = view_common.get_disk_usage_cached()"), `success, res, size = backup_service.perform_backup()` (行番号: 128 / 抜粋: "success, res, size = backup_service.perform_backup()")
 
 
 * **（スマホ対応）各関数は`st.title`ではなく`st.markdown("##### ...")`で始まる**: 呼び出し元が`st.expander`の中に置く前提のため。単独で使う場合は見出しレベルが浅く見える点に注意。
-* 根拠: `st.markdown("##### 💻 リソース状況")` (行番号: 29 / 抜粋: "st.markdown(\"##### 💻 リソース状況\")")
+* 根拠: `st.markdown("##### 💻 リソース状況")` (行番号: 34 / 抜粋: "st.markdown(\"##### 💻 リソース状況\")")
 
 
 * **（スマホ対応）`import subprocess` の直後に定数定義があり、`from datetime import date` がその後に続く**: 分割前から続く並びで、モジュール先頭にimportがまとまっていない（`SUBPROCESS_TIMEOUT_SEC`の定義がimportの間に挟まっている）。

@@ -36,7 +36,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `typing.Any`, `Optional`, `Tuple` | 標準ライブラリ | ヘルパーの引数・戻り値の型ヒント | 根拠: `from typing import Any, Optional, Tuple` (行番号: 27 / 抜粋: "from typing import Any, Optional, Tuple") |
+| `typing.Any`, `Optional`, `Tuple` | 標準ライブラリ | ヘルパーの引数・戻り値の型ヒント | 根拠: `from typing import Any, Optional, Tuple` (行番号: 33 / 抜粋: "from typing import Any, Optional, Tuple") |
 
 本ファイルはSQL文字列とタプル組み立てだけを担い、DB接続・ロギング・設定のいずれにも依存しない（実行は呼び出し元が`core.database.get_db_cursor`で行う）。
 
@@ -44,18 +44,18 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `quest_master` / `reward_master` の実スキーマ | 列の型・NOT NULL制約・デフォルト値は`migrations/`側にあり、本ファイルからは確認できない（`migrations/`がスキーマの唯一の定義元） | `INSERT INTO quest_master (` (行番号: 30 / 抜粋: "INSERT INTO quest_master (") |
+| `quest_master` / `reward_master` の実スキーマ | 列の型・NOT NULL制約・デフォルト値は`migrations/`側にあり、本ファイルからは確認できない（`migrations/`がスキーマの唯一の定義元） | `INSERT INTO quest_master (` (行番号: 37 / 抜粋: "INSERT INTO quest_master (") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `QUEST_UPSERT_SQL`（モジュールレベル定数）
 
 * **役割**: `quest_master`への16列のUPSERT文。`ON CONFLICT(quest_id) DO UPDATE SET`で`quest_id`以外の15列をすべて`excluded.*`で上書きする。列を欠落させると再UPSERT時にその列がNULLへ上書きされる（#164 の事故）ため、同期対象の列は必ずここに並ぶ。
-* 根拠: `QUEST_UPSERT_SQL = """` (行番号: 30 / 抜粋: "INSERT INTO quest_master (")
+* 根拠: `QUEST_UPSERT_SQL = """` (行番号: 37 / 抜粋: "INSERT INTO quest_master (")
 
 
 * **引数/リクエスト**: 該当なし（定数）。プレースホルダ`?`は16個で、`quest_upsert_params()`が返すタプルと対応する。
-* 根拠: `VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` (行番号: 36 / 抜粋: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+* 根拠: `VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` (行番号: 43 / 抜粋: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 
 * **戻り値/レスポンス**: 該当なし（`str`定数）
@@ -65,11 +65,11 @@
 ### `REWARD_UPSERT_SQL`（モジュールレベル定数）
 
 * **役割**: `reward_master`への8列のUPSERT文。`description`とレガシー列`desc`の両方を同期対象に含む（#165 の事故の再発防止）。`ON CONFLICT(reward_id) DO UPDATE SET`で`reward_id`以外の7列を上書きする。
-* 根拠: `REWARD_UPSERT_SQL = """` (行番号: 56 / 抜粋: "INSERT INTO reward_master (")
+* 根拠: `REWARD_UPSERT_SQL = """` (行番号: 63 / 抜粋: "INSERT INTO reward_master (")
 
 
 * **引数/リクエスト**: 該当なし（定数）。プレースホルダ`?`は8個。
-* 根拠: `VALUES (?, ?, ?, ?, ?, ?, ?, ?)` (行番号: 60 / 抜粋: "VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+* 根拠: `VALUES (?, ?, ?, ?, ?, ?, ?, ?)` (行番号: 66 / 抜粋: "VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
 
 
 * **戻り値/レスポンス**: 該当なし（`str`定数）
@@ -104,7 +104,7 @@
 
 
 * **戻り値/レスポンス**: `Tuple[Any, ...]`（8要素。`description`が6番目と7番目の両方に入る）
-* 根拠: [戻り値のタプル] (行番号: 117 / 抜粋: "return (reward_id, title, category, cost_gold, icon_key, description, description, target)")
+* 根拠: [戻り値のタプル] (行番号: 124 / 抜粋: "return (reward_id, title, category, cost_gold, icon_key, description, description, target)")
 
 
 * **副作用**: なし（純粋関数）

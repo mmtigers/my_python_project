@@ -34,26 +34,26 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `datetime` | 標準 | マーカー時刻の読み書き・経過時間計算 | 根拠: [インポート宣言] (行番号: 29 / 抜粋: "import datetime") |
-| `difflib` | 標準 | 構成ファイル差分の要約(`unified_diff`) | 根拠: [インポート宣言] (行番号: 30 / 抜粋: "import difflib") |
-| `glob` | 標準 | `logs/*.log`・`deploy/systemd/*.service`等のパターンマッチング | 根拠: [インポート宣言] (行番号: 31 / 抜粋: "import glob") |
-| `hashlib` | 標準 | 異常セットのフィンガープリント生成 | 根拠: [インポート宣言] (行番号: 23 / 抜粋: "import hashlib") |
-| `core.state_file`（Issue #661 で `json` の直接importを置き換え） | ローカルモジュール | マーカーファイル・再通知抑制状態ファイルの原子的な読み書き(`read_text`/`write_text_atomic`/`read_json`/`write_json_atomic`) | 根拠: [インポート宣言] (行番号: 43 / 抜粋: "from core import state_file") |
-| `os` | 標準 | パス操作・マウント確認 | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "import os") |
-| `shutil` | 標準 | ディスク使用量取得 | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "import shutil") |
-| `sqlite3` | 標準 | **（Issue #700 で追加）** チェック9でDB/テーブル不在・一時的なロックを`OperationalError`として識別する | 根拠: [インポート宣言] (行番号: 38 / 抜粋: "import sqlite3") |
-| `subprocess` | 標準 | `systemctl`/`journalctl`/`free`の実行 | 根拠: [インポート宣言] (行番号: 27 / 抜粋: "import subprocess") |
-| `sys` | 標準 | パス追加・終了コード返却 | 根拠: [インポート宣言] (行番号: 28 / 抜粋: "import sys") |
-| `requests` | 外部 | **（Issue #735 で追加）** チェック2のHTTPプローブ | 根拠: [インポート宣言] (行番号: 45 / 抜粋: "import requests") |
-| `typing` | 標準 | 型ヒント(`List`, `Optional`, `Tuple`) | 根拠: [インポート宣言] (行番号: 38 / 抜粋: "from typing import List, Optional, Tuple") |
-| `config` | 自作 | `LOG_DIR`, `NAS_MOUNT_POINT`の取得 | 根拠: [インポート宣言] (行番号: 33 / 抜粋: "import config") |
-| `core.logger` | 自作 | ロガーのセットアップ | 根拠: [インポート宣言] (行番号: 34 / 抜粋: "from core.logger import setup_logging") |
-| `services.notification_service` | 自作 | 異常通知の送信 | 根拠: [インポート宣言] (行番号: 35 / 抜粋: "from services.notification_service import send_push") |
-| `monitors.log_analyzer` | 自作 | ログ走査ロジックの流用 | 根拠: [インポート宣言] (行番号: 36 / 抜粋: "from monitors.log_analyzer import LogAnalyzer") |
-| `quest_data` | 自作 | **（Issue #700 で追加）** チェック9の比較元`QUESTS` | 根拠: [インポート宣言] (行番号: 46 / 抜粋: "import quest_data") |
-| `core.database.get_ro_connection` | 自作 | **（Issue #700 で追加）** チェック9の読み取り専用DB接続 | 根拠: [インポート宣言] (行番号: 48 / 抜粋: "from core.database import get_ro_connection") |
+| `datetime` | 標準 | マーカー時刻の読み書き・経過時間計算 | 根拠: [インポート宣言] (行番号: 37 / 抜粋: "import datetime") |
+| `difflib` | 標準 | 構成ファイル差分の要約(`unified_diff`) | 根拠: [インポート宣言] (行番号: 38 / 抜粋: "import difflib") |
+| `glob` | 標準 | `logs/*.log`・`deploy/systemd/*.service`等のパターンマッチング | 根拠: [インポート宣言] (行番号: 40 / 抜粋: "import glob") |
+| `hashlib` | 標準 | 異常セットのフィンガープリント生成 | 根拠: [インポート宣言] (行番号: 41 / 抜粋: "import hashlib") |
+| `core.state_file`（Issue #661 で `json` の直接importを置き換え） | ローカルモジュール | マーカーファイル・再通知抑制状態ファイルの原子的な読み書き(`read_text`/`write_text_atomic`/`read_json`/`write_json_atomic`) | 根拠: [インポート宣言] (行番号: 56 / 抜粋: "from core import state_file") |
+| `os` | 標準 | パス操作・マウント確認 | 根拠: [インポート宣言] (行番号: 42 / 抜粋: "import os") |
+| `shutil` | 標準 | ディスク使用量取得 | 根拠: [インポート宣言] (行番号: 43 / 抜粋: "import shutil") |
+| `sqlite3` | 標準 | **（Issue #700 で追加）** チェック9でDB/テーブル不在・一時的なロックを`OperationalError`として識別する | 根拠: [インポート宣言] (行番号: 44 / 抜粋: "import sqlite3") |
+| `subprocess` | 標準 | `systemctl`/`journalctl`/`free`の実行 | 根拠: [インポート宣言] (行番号: 45 / 抜粋: "import subprocess") |
+| `sys` | 標準 | パス追加・終了コード返却 | 根拠: [インポート宣言] (行番号: 46 / 抜粋: "import sys") |
+| `requests` | 外部 | **（Issue #735 で追加）** チェック2のHTTPプローブ | 根拠: [インポート宣言] (行番号: 50 / 抜粋: "import requests") |
+| `typing` | 標準 | 型ヒント(`List`, `Optional`, `Tuple`) | 根拠: [インポート宣言] (行番号: 47 / 抜粋: "from typing import List, Optional, Tuple") |
+| `config` | 自作 | `LOG_DIR`, `NAS_MOUNT_POINT`の取得 | 根拠: [インポート宣言] (行番号: 54 / 抜粋: "import config") |
+| `core.logger` | 自作 | ロガーのセットアップ | 根拠: [インポート宣言] (行番号: 58 / 抜粋: "from core.logger import setup_logging") |
+| `services.notification_service` | 自作 | 異常通知の送信 | 根拠: [インポート宣言] (行番号: 60 / 抜粋: "from services.notification_service import send_push") |
+| `monitors.log_analyzer` | 自作 | ログ走査ロジックの流用 | 根拠: [インポート宣言] (行番号: 61 / 抜粋: "from monitors.log_analyzer import LogAnalyzer") |
+| `quest_data` | 自作 | **（Issue #700 で追加）** チェック9の比較元`QUESTS` | 根拠: [インポート宣言] (行番号: 55 / 抜粋: "import quest_data") |
+| `core.database.get_ro_connection` | 自作 | **（Issue #700 で追加）** チェック9の読み取り専用DB接続 | 根拠: [インポート宣言] (行番号: 57 / 抜粋: "from core.database import get_ro_connection") |
 
-なお、インポートに先立ち親ディレクトリを`sys.path`へ追加している（根拠: [パス操作] (行番号: 31 / 抜粋: "sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))")）。
+なお、インポートに先立ち親ディレクトリを`sys.path`へ追加している（根拠: [パス操作] (行番号: 52 / 抜粋: "sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))")）。
 
 ### ブラックボックスとなる外部要素
 
@@ -105,11 +105,11 @@
 
 
 * **戻り値/レスポンス**: `datetime.datetime`。ファイルが無い/空/ISO8601としてパースできない場合は現在時刻から`DEFAULT_LOOKBACK_SEC`(3600秒)遡った時刻。
-* 根拠: [フォールバック] (行番号: 97 / 抜粋: "return datetime.datetime.now() - datetime.timedelta(seconds=DEFAULT_LOOKBACK_SEC)")
+* 根拠: [フォールバック] (行番号: 137 / 抜粋: "return datetime.datetime.now() - datetime.timedelta(seconds=DEFAULT_LOOKBACK_SEC)")
 
 
 * **副作用**: マーカーファイルの読み取り（`state_file.read_text`経由）。
-* 根拠: [state_fileへの委譲] (行番号: 92 / 抜粋: "raw = state_file.read_text(MARKER_FILE)")
+* 根拠: [state_fileへの委譲] (行番号: 131 / 抜粋: "raw = state_file.read_text(MARKER_FILE)")
 
 
 * **エラーハンドリング**: ファイルI/Oの失敗は`state_file.read_text`側が捕捉して警告ログを出し`None`を返す。本関数は加えて`fromisoformat`の`ValueError`を捕捉し、いずれの場合も既定の遡り時刻を返す。
@@ -132,11 +132,11 @@
 
 
 * **副作用**: マーカーファイルの原子的な差し替え（`state_file.write_text_atomic`経由）。
-* 根拠: [state_fileへの委譲] (行番号: 101 / 抜粋: "state_file.write_text_atomic(MARKER_FILE, dt.isoformat())")
+* 根拠: [state_fileへの委譲] (行番号: 141 / 抜粋: "state_file.write_text_atomic(MARKER_FILE, dt.isoformat())")
 
 
 * **エラーハンドリング**: 例外は`state_file.write_text_atomic`側が捕捉して警告ログを出し`False`を返すため、本関数からは送出されない（**Issue #661 での変更点**: 以前は書き込みの失敗がそのまま呼び出し元へ伝播していた）。
-* 根拠: [state_fileへの委譲] (行番号: 101 / 抜粋: "state_file.write_text_atomic(MARKER_FILE, dt.isoformat())")
+* 根拠: [state_fileへの委譲] (行番号: 141 / 抜粋: "state_file.write_text_atomic(MARKER_FILE, dt.isoformat())")
 
 
 
@@ -178,7 +178,7 @@
 
 
 * **副作用**: 外部へのHTTPリクエスト（既定では`http://127.0.0.1:8000`。ループバックのため実質ローカルのみ）。
-* 根拠: [HTTP呼び出し] (行番号: 306 / 抜粋: "res = requests.get(f\"{base}{path}\", timeout=timeout)")
+* 根拠: [HTTP呼び出し] (行番号: 330 / 抜粋: "res = requests.get(f\"{base}{path}\", timeout=timeout)")
 
 
 * **エラーハンドリング**: `requests.exceptions.RequestException`のみ捕捉し、異常メッセージとして返す（**例外のまま送出しないのは意図的**。`run_checks`は例外を`internal_errors`扱いにして通知本文へ載せないため、サーバー停止という最重要の異常が通知されなくなる）。
@@ -221,7 +221,7 @@
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`analyzer.start_date`へ直接代入し「前回マーカー以降」のみを走査対象にする）
-* 根拠: [属性代入] (行番号: 115 / 抜粋: "analyzer.start_date = since")
+* 根拠: [属性代入] (行番号: 241 / 抜粋: "analyzer.start_date = since")
 
 
 * **戻り値/レスポンス**: `Optional[str]`。エラーのあるファイルがあれば最大5ファイル分のファイル名・件数・最終エラー抜粋(最大120文字)を列挙したメッセージ、無ければ`None`。
@@ -478,7 +478,7 @@
 
 
 * **戻り値/レスポンス**: `str`
-* 根拠: [戻り値] (行番号: 328 / 抜粋: "return shown")
+* 根拠: [戻り値] (行番号: 487 / 抜粋: "return shown")
 
 
 * **副作用**: なし(純粋関数)
@@ -518,7 +518,7 @@
 * **役割**: 参照整合性を検査する `(ラベル, SQL)` の組。**2層に分かれているのが本質**で、一方は「起きてはならない不整合」、もう一方は「通常運用の設計どおりに生じる不整合」である。前者だけを通知する。
   * `_ORPHAN_CHECKS_STRICT`（6件）: 親が `quest_users`（`quest_history.user_id` / `reward_history.user_id` / `user_inventory.user_id` / `routine_progress.user_id` / `routine_step_events.user_id`）と自己参照の `quest_history.linked_history_id`。実行コードに `DELETE FROM quest_users` が存在しないため、ここの孤児は手動SQL・将来のスクリプトの事故しかありえない。
   * `_ORPHAN_CHECKS_EXPECTED`（2件）: 親が `quest_master` / `reward_master`（`quest_history.quest_id` / `reward_history.reward_id`）。`GameSystem.sync_master_data` の `DELETE ... WHERE quest_id NOT IN (...)` はクエストを退役させると**設計どおりマスタ行を消して履歴行を残す**（#700 で退役6件を実際に削除している）ため、孤児は想定内。毎時cronで「異常」として報告すると恒久的な誤検知になる。`check_quest_master_drift` が `reward_master` を比較対象から外したのと同じ判断。
-* 根拠: `_ORPHAN_CHECKS_STRICT: tuple[tuple[str, str], ...] = (` (行番号: 537 / 抜粋: "_ORPHAN_CHECKS_STRICT: tuple[tuple[str, str], ...] = (")
+* 根拠: `_ORPHAN_CHECKS_STRICT: tuple[tuple[str, str], ...] = (` (行番号: 573 / 抜粋: "_ORPHAN_CHECKS_STRICT: tuple[tuple[str, str], ...] = (")
 
 `quest_id = 0` は `inventory_service` のアイテム使用ログでマスタを参照しない疑似IDのため、`_ORPHAN_CHECKS_EXPECTED` の SQL が `h.quest_id != 0` で除外している。
 
@@ -584,7 +584,7 @@
 
 
 * **戻り値/レスポンス**: `bool`（通知すべきならTrue、抑制ならFalse）
-* 根拠: [戻り値] (行番号: 176, 182 / 抜粋: "return False", "return True")
+* 根拠: [戻り値] (行番号: 729, 736 / 抜粋: "return False", "return True")
 
 
 * **副作用**: 通知する判定の場合、状態ファイル(`NOTIFY_STATE_FILE`)へフィンガープリントと通知時刻(JSON)を書き込む。**（Issue #661で修正）** 読み書きはいずれも`core/state_file.py`(`read_json`/`write_json_atomic`)へ委譲し、書き込みは原子的な差し替えになった。
@@ -798,7 +798,7 @@ graph TD
 | 高 | `monitors/log_analyzer.py` | 流用している`LogAnalyzer`のキーワード・除外パターン・タイムスタンプ解析仕様が本スクリプトの検知精度を決めるため。 | 根拠: `LogAnalyzer`のインポートと流用 (行番号: 36, 109〜118) |
 | 中 | `services/notification_service.py` | 異常通知の実際の送信経路（Discord errorチャンネル）を確認するため。 | 根拠: `send_push`の呼び出し (行番号: 225) |
 | 中 | `monitors/server_watchdog.py` | 同種のサービス監視との棲み分け（プロセスツリーの違い）を確認するため。 | 根拠: モジュールdocstringの記述 (行番号: 5〜7) |
-| 中 | `sync_strict.py` | **（Issue #700 で追加）** チェック9が検知した乖離を解消する側。`--if-stale`がデプロイ経路から自動実行される。 | 根拠: メッセージ内の案内 (行番号: 388 / 抜粋: "→ MY_HOME_SYSTEM で `python sync_strict.py --dry-run` で影響を確認のうえ同期してください") |
+| 中 | `sync_strict.py` | **（Issue #700 で追加）** チェック9が検知した乖離を解消する側。`--if-stale`がデプロイ経路から自動実行される。 | 根拠: メッセージ内の案内 (行番号: 547 / 抜粋: "→ MY_HOME_SYSTEM で `python sync_strict.py --dry-run` で影響を確認のうえ同期してください") |
 
 ## 8. 保守上の注意点
 

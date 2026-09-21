@@ -37,10 +37,10 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `os`, `sys`, `subprocess`, `csv`, `datetime`, `math`, `time`, `json`, `tempfile`, `traceback`, `shutil`, `re`, `pathlib`, `typing`, `dataclasses` | 標準ライブラリ | ファイル操作、プロセス実行、時間計算、データ構造定義など | インポート宣言 (行番号: 1-9, 12-14, 16-18 / 抜粋: "import os") |
-| `numpy` | 外部ライブラリ | OpenCVで処理する画像配列データの型変換と操作 | インポート宣言 (行番号: 10 / 抜粋: "import numpy as np") |
-| `cv2` | 外部ライブラリ | 動画フレームの背景差分検出、モルフォロジー変換、輪郭抽出 | インポート宣言 (行番号: 11 / 抜粋: "import cv2") |
+| `numpy` | 外部ライブラリ | OpenCVで処理する画像配列データの型変換と操作 | インポート宣言 (行番号: 12 / 抜粋: "import numpy as np") |
+| `cv2` | 外部ライブラリ | 動画フレームの背景差分検出、モルフォロジー変換、輪郭抽出 | インポート宣言 (行番号: 13 / 抜粋: "import cv2") |
 | `core.discord` | ローカルモジュール | Discord Webhookへの動画ファイルおよびメッセージのPOST送信(分割・リトライ・URLマスクを集約。Issue #661で直接の`requests`利用から移行) | インポート宣言 (行番号: 38 / 抜粋: "from core import discord as core_discord") |
-| `psutil` | 外部ライブラリ(任意) | システム全体のCPU使用率の取得とロギング | インポート宣言 (行番号: 21 / 抜粋: "import psutil") |
+| `psutil` | 外部ライブラリ(任意) | システム全体のCPU使用率の取得とロギング | インポート宣言 (行番号: 28 / 抜粋: "import psutil") |
 | `config` | ローカルモジュール | 各種設定値（解像度、しきい値、Webhook URLなど）の読み込み | インポート宣言 (行番号: 37 / 抜粋: "import config") |
 | `core.logger` | ローカルモジュール | ロガーのセットアップ処理 | インポート宣言 (行番号: 39 / 抜粋: "from core.logger import setup_logging") |
 | `services.notification_service` | ローカルモジュール | プッシュ通知（LINE等）の送信 | インポート宣言 (行番号: 40 / 抜粋: "from services.notification_service import send_push") |
@@ -67,7 +67,7 @@
 
 
 * **戻り値/レスポンス**: `sys.stderr`または`subprocess.DEVNULL`（型ヒントなし）。
-* 根拠: 関数本体 (行番号: 69 / 抜粋: "return sys.stderr if DEBUG_FFMPEG else subprocess.DEVNULL")
+* 根拠: 関数本体 (行番号: 88 / 抜粋: "return sys.stderr if DEBUG_FFMPEG else subprocess.DEVNULL")
 
 
 * **副作用**: なし。
@@ -225,7 +225,7 @@
 * **戻り値/レスポンス**: `Dict[str, Any]` (JSON解析結果)。
 
 
-* 根拠: 関数シグネチャ (行番号: 139 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: 関数シグネチャ (行番号: 158 / 抜粋: "-> Dict[str, Any]:")
 
 
 
@@ -268,7 +268,7 @@
 * **戻り値/レスポンス**: `datetime.datetime`。
 
 
-* 根拠: 関数シグネチャ (行番号: 163 / 抜粋: "-> datetime.datetime:")
+* 根拠: 関数シグネチャ (行番号: 182 / 抜粋: "-> datetime.datetime:")
 
 
 
@@ -369,7 +369,7 @@
 * **戻り値/レスポンス**: `Tuple[str, str, str]` (`work_dir`, `output_dir`, `records_dir`のパス)。
 
 
-* 根拠: 関数シグネチャ (行番号: 205 / 抜粋: "-> Tuple[str, str, str]:")
+* 根拠: 関数シグネチャ (行番号: 224 / 抜粋: "-> Tuple[str, str, str]:")
 
 
 
@@ -394,7 +394,7 @@
 ### `mark_as_done`
 
 * **役割**: ジョブの完了記録として、`SummaryInfo`の内容をJSON形式で`.done`ファイルに書き出す。ファイル名は入力動画のベース名から拡張子を除いたものに`.done`を付与して生成する。
-* 根拠: 関数定義 (行番号: 231 / 抜粋: "json.dump(asdict(summary), f, indent=2, ensure_ascii=False)")
+* 根拠: 関数定義 (行番号: 279 / 抜粋: "json.dump(asdict(summary), f, indent=2, ensure_ascii=False)")
 
 
 * **引数/リクエスト**: `records_dir: str`, `base_filename: str`, `summary: SummaryInfo`
@@ -454,7 +454,7 @@
 * **戻り値/レスポンス**: `List[MotionRecord]`。
 
 
-* 根拠: メソッドシグネチャ (行番号: 246 / 抜粋: "-> List[MotionRecord]:")
+* 根拠: メソッドシグネチャ (行番号: 294 / 抜粋: "-> List[MotionRecord]:")
 
 
 
@@ -469,7 +469,7 @@
 
 * **エラーハンドリング**: `ffmpeg`のプロセス起動失敗、読み取り時の例外、非ゼロ終了時のエラー出力をスローする。終了時はプロセスを安全にkillする。**（Issue #761 / AUDIT-032 で追加）** `Popen`の直後に`assert process.stdout is not None and process.stderr is not None`を置いている。`stdout=subprocess.PIPE` / `stderr=subprocess.PIPE`を指定しているため`None`にはならないが、以降の`process.stdout.read` / `process.stderr.read`（stderr は別スレッドの`_drain_stderr`でドレインする。読まないとパイプバッファ満杯で`ffmpeg`がブロックしデッドロックするため）の前提を実行可能な形で表明する。**（Issue #743 / AUDIT-014 で追加）** ただし、この `assert` による絞り込みは**ネストした関数 `_drain_stderr` の中までは伝播しない**（クロージャが捕捉するのは `process` 自体であり、呼び出されるまでに `process.stderr` が差し替わる可能性を型チェッカは排除できないため）。そのためドレイン用のパイプを `stderr_pipe = process.stderr` としてローカル変数へ束縛し直し、`_drain_stderr` はそちらを読む。これは `pyrightconfig.json` で `reportOptionalMemberAccess` を `error` にするための変更で、実行時の挙動は変わらない。
 
-* 根拠: `stderr_pipe = process.stderr` (行番号: 325 / 抜粋: "stderr_pipe = process.stderr"), `chunk = stderr_pipe.read(4096)` (行番号: 330 / 抜粋: "chunk = stderr_pipe.read(4096)")
+* 根拠: `stderr_pipe = process.stderr` (行番号: 340 / 抜粋: "stderr_pipe = process.stderr"), `chunk = stderr_pipe.read(4096)` (行番号: 345 / 抜粋: "chunk = stderr_pipe.read(4096)")
 
 
 * 根拠: `except Exception as e:` および `finally:` (行番号: 303-305, 306-317 / 抜粋: "raise subprocess.CalledProcess...")
@@ -499,7 +499,7 @@
 * **戻り値/レスポンス**: `List[EventRecord]`。
 
 
-* 根拠: メソッドシグネチャ (行番号: 332 / 抜粋: "-> List[EventRecord]:")
+* 根拠: メソッドシグネチャ (行番号: 419 / 抜粋: "-> List[EventRecord]:")
 
 
 

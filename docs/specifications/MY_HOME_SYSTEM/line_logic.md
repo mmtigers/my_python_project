@@ -33,8 +33,8 @@
 | `config` | 外部モジュール | 設定値や定数（メンバー、DBパス等）の参照 | `import config` (行番号: 2 / 抜粋: "import config") |
 | `asyncio` | 標準ライブラリ | 非同期関数の同期実行ヘルパーの作成 | `import asyncio` (行番号: 3 / 抜粋: "import asyncio") |
 | `sqlite3` | 標準ライブラリ | データベースへの直接接続・クエリ実行 | `import sqlite3` (行番号: 4 / 抜粋: "import sqlite3") |
-| `datetime` | 標準ライブラリ | 日時のフォーマット処理 | `import datetime` (行番号: 5 / 抜粋: "import datetime") |
-| `parse_qsl` | 標準ライブラリ (`urllib.parse`) | Postbackデータのパース | `from urllib.parse import parse_qsl` (行番号: 6 / 抜粋: "from urllib.parse import parse_qsl") |
+| `datetime` | 標準ライブラリ | 日時のフォーマット処理 | `import datetime` (行番号: 4 / 抜粋: "import datetime") |
+| `parse_qsl` | 標準ライブラリ (`urllib.parse`) | Postbackデータのパース | `from urllib.parse import parse_qsl` (行番号: 7 / 抜粋: "from urllib.parse import parse_qsl") |
 | `MessagingApi`, `ReplyMessageRequest`, `TextMessage`, `FlexMessage`, `FlexContainer`, `QuickReply` | 外部ライブラリ (`linebot.v3.messaging`) | LINE APIのクライアント・メッセージモデル。`QuickReply`は`send_reply_text`の引数型ヒントで使用（**保守性 #410で修正**: 以前ここに含まれていた`QuickReplyItem`/`MessageAction`は、未使用だった`create_quick_reply`関数の削除に伴い未使用インポートとなったため削除した。旧版の本テーブルが記載していた`json`インポート・`PushMessageRequest`/`PostbackAction`の未使用インポートは、確認したところ現行ファイルには存在せず誤りだった） | `from linebot.v3.messaging import (` (行番号: 10-17 / 抜粋: "from linebot.v3.messaging import (") |
 | `PostbackEvent` | 外部ライブラリ (`linebot.v3.webhooks`) | LINE Webhookイベントの型定義 | `from linebot.v3.webhooks import PostbackEvent` (行番号: 18 / 抜粋: "from linebot.v3.webhooks import PostbackEvent") |
 | `setup_logging` | 外部モジュール (`core.logger`) | ロガーの初期化 | `from core.logger import setup_logging` (行番号: 24 / 抜粋: "from core.logger import setup_logging") |
@@ -46,17 +46,17 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` | 定義内容（`FAMILY_SETTINGS`, `SQLITE_DB_PATH`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD`など）の実装がないため | `TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]` (行番号: 35 / 抜粋: "TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]") |
-| `core.database.save_log_async` / `save_logs_batch_async` | 引数仕様やDB接続の実装詳細が不明なため([database.md](./database.md)に別途解析結果あり) | `sync_run(save_logs_batch_async(` (行番号: 220 / 抜粋: "sync_run(save_logs_batch_async(") |
-| `models.line.LinePostbackData` | 本ファイルからは`action: str`（必須）が唯一の必須フィールドで他は`Optional`であること、`extra`未設定（既定で未知フィールドを無視）であることまでは確認できるが、それ以外の詳細な検証ルールは不明 | `pb = LinePostbackData(**raw_dict)` (行番号: 203 / 抜粋: "pb = LinePostbackData(**raw_dict)") |
-| `child_health_records.condition` に格納される文字列の正規化ロジック (`handlers/line_handler.py` の `CONDITION_NOT_GENKI = "元気なし"` 定数と `_detect_condition_keyword()`、Issue #375) | `get_daily_health_summary`はDBから読み取った`condition`文字列（"元気なし"のような否定表現に正規化済みの場合がある）の中身だけを見てアイコンを判定しており、その正規化ロジック自体は本ファイルの外([line_handler.md](./line_handler.md)参照)にある。**（Issue #571で修正）** この依存関係を踏まえずに`"元気" in status`という部分文字列マッチのみで判定していたため、`"元気なし"`（"元気"を部分文字列として含む）も誤って肯定（✅）と判定していた。 | `status = row["condition"]` (行番号: 158 / 抜粋: "status = row["condition"]") |
+| `config` | 定義内容（`FAMILY_SETTINGS`, `SQLITE_DB_PATH`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD`など）の実装がないため | `TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]` (行番号: 31 / 抜粋: "TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]") |
+| `core.database.save_log_async` / `save_logs_batch_async` | 引数仕様やDB接続の実装詳細が不明なため([database.md](./database.md)に別途解析結果あり) | `sync_run(save_logs_batch_async(` (行番号: 208 / 抜粋: "sync_run(save_logs_batch_async(") |
+| `models.line.LinePostbackData` | 本ファイルからは`action: str`（必須）が唯一の必須フィールドで他は`Optional`であること、`extra`未設定（既定で未知フィールドを無視）であることまでは確認できるが、それ以外の詳細な検証ルールは不明 | `pb = LinePostbackData(**raw_dict)` (行番号: 440 / 抜粋: "pb = LinePostbackData(**raw_dict)") |
+| `child_health_records.condition` に格納される文字列の正規化ロジック (`handlers/line_handler.py` の `CONDITION_NOT_GENKI = "元気なし"` 定数と `_detect_condition_keyword()`、Issue #375) | `get_daily_health_summary`はDBから読み取った`condition`文字列（"元気なし"のような否定表現に正規化済みの場合がある）の中身だけを見てアイコンを判定しており、その正規化ロジック自体は本ファイルの外([line_handler.md](./line_handler.md)参照)にある。**（Issue #571で修正）** この依存関係を踏まえずに`"元気" in status`という部分文字列マッチのみで判定していたため、`"元気なし"`（"元気"を部分文字列として含む）も誤って肯定（✅）と判定していた。 | `status = row["condition"]` (行番号: 156 / 抜粋: "status = row["condition"]") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### 変数 `TARGET_MEMBERS`
 
 * **役割**: 設定ファイルから取得した家族メンバーのリスト。
-* 根拠: `TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]` (行番号: 35 / 抜粋: "TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]")
+* 根拠: `TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]` (行番号: 31 / 抜粋: "TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]")
 
 
 
@@ -170,7 +170,7 @@
 * **役割**: SQLiteデータベースに直接接続し、対象メンバーの今日の最新の体調記録を取得して文字列のサマリを作成する。メンバーごとに `condition` 文字列の内容から表示アイコン（✅/⚠️/❓）を選択する。
 * **（Issue #571で修正）** アイコン選択は以前 `icon = "✅" if "元気" in status else "⚠️"` という部分文字列マッチのみだった。`handlers/line_handler.py` の `_detect_condition_keyword()`（Issue #375で追加）は「元気ない」「元気がない」「元気なし」「元気じゃない」「元気ではない」等の否定表現をすべて固定文字列 `CONDITION_NOT_GENKI = "元気なし"` に正規化してDBへ保存するが、この`"元気なし"`自体が`"元気"`を部分文字列として含むため、否定表現（体調不良）が記録された場合でも`"元気" in status`が真になり、誤って✅（元気）アイコンが選択され意味が反転して表示されていた。否定表現（`"元気なし"`）を先に判定し、それに該当しない場合のみ肯定表現（`"元気"`）を判定するよう修正した。
 * 根拠: `def get_daily_health_summary():` (行番号: 129-170 / 抜粋: "def get_daily_health_summary():")
-* 根拠: `icon = "⚠️" if "元気なし" in status else ("✅" if "元気" in status else "⚠️")` (行番号: 164 / 抜粋: "icon = "⚠️" if "元気なし" in status else ("✅" if "元気" in status else "⚠️")")
+* 根拠: `icon = "⚠️" if "元気なし" in status else ("✅" if "元気" in status else "⚠️")` (行番号: 162 / 抜粋: "icon = "⚠️" if "元気なし" in status else ("✅" if "元気" in status else "⚠️")")
 * 根拠: `# #571: 部分文字列マッチ("元気" in status)だと、Issue #375で否定表現用に\n                    # 正規化される固定文字列(handlers/line_handler.py の\n                    # CONDITION_NOT_GENKI = "元気なし")も"元気"を含むため誤って\n                    # ✅(元気)と判定していた(「元気ない」等の否定入力が意味の反転した\n                    # 表示になっていた)。否定表現を先に判定する。` (行番号: 159-163 / 抜粋: "# #571: 部分文字列マッチ")
 
 
@@ -207,7 +207,7 @@
 
 * **役割**: ボタン押下などのPostbackEventを受信し、設定された `action` ごとに適切な記録（全件元気、子別記録、食事アンケート等）やUI表示を行う。`InputMode`/`UserInputState`ベースの手入力継続状態はもはや設定しない（コミット `1ecbe3b` で該当ロジックを撤去済み）。「その他（手入力）」系の分岐（`child_check`の`status=other`、`food_manual`）では状態を設定する代わりに案内テキストのみ返信し、続く自由文メッセージは `handlers/line_handler.py` のAIフォールバック(`services/ai_service.py`)経由で処理される前提になっている。コミット`8525dc2`（H-7修正）以降、`all_genki`・`child_check`（`target_name`ありの保存分岐）・`food_record_direct`の3フローは、DB保存結果（bool）を検査してから応答を分岐する。保存成功時のみ従来通りの完了メッセージ（Flex/テキスト）を返し、失敗時は「⚠️ 記録に失敗しました。もう一度お試しください。」を返信してエラーログを出力する。**（Issue #231で修正）** `all_genki`は以前、`TARGET_MEMBERS`分の`save_log_async`をそれぞれ独立に呼び出しリスト内包表記で結果を`all()`判定していたため、各呼び出しが個別にcommitされ、1件でも失敗すると「全体を失敗扱い」として案内する一方で既に成功していた分はコミット済みのまま残っていた。ユーザーが案内どおり再試行すると、成功済み分まで再度INSERTされ重複行が生じる不具合があった。現在は`save_logs_batch_async`(単一トランザクションで全件保存し1件でも失敗すれば全件ロールバックする)を1回呼び出すことで、真にall-or-nothingにし再試行を安全にしている。**（保守性 #410で修正）** `check_status`の記録確認画面の日付表示(`today_disp`)を、naiveな`datetime.datetime.now()`（サーバーのローカルタイムゾーン依存）から`core.utils.get_display_date()`（JST基準・`"%m/%d"`形式）へ変更した。また、`LinePostbackData(**raw_dict)`のバリデーション失敗時に`action`のみで再構築するtry/exceptフォールバックを削除した——`LinePostbackData`は`action`必須以外は全て`Optional`で`extra`設定も既定(未知フィールドは無視)のため、`raw_dict`に`action`キーが含まれる限り例外は送出されず、このフォールバックは到達不能だった。削除後、万一`action`キーが無い等でモデル構築が失敗しても、関数末尾の`except Exception`で握り潰される（挙動は実質変わらない: 到達不能だった旧フォールバックが動いていた場合の出力と、削除後に末尾の汎用ハンドラで捕捉された場合とで、ユーザーへの応答が「不明な操作」相当になる点は同じ）。**（Issue #583で修正）** `food_record_direct`アクションがDB保存する`food_records.meal_time_category`列は、以前は実際の記録時刻に関わらず常に固定文字列`"Dinner"`を保存していたが、現在は新設の`core.utils.get_meal_time_category_from_now()`（呼び出し時点のJST時刻から"Breakfast"/"Lunch"/"Snack"/"Dinner"のいずれかを判定するヘルパー）の戻り値をそのまま渡すよう修正されている。ここでの`category`変数（クイックリプライの選択肢が渡す麺類等の食品ジャンルラベル）はこの修正でも扱いが変わっておらず、従来どおり`menu_category`列（`f"{category}: {item}"`の形）にのみ使われる。
 * 根拠: `def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):` (行番号: 401-459 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
-* 根拠: `save_all_ok = sync_run(save_logs_batch_async(` (行番号: 220-224 / 抜粋: "save_all_ok = sync_run(save_logs_batch_async(")、`if not save_all_ok:` (行番号: 226 / 抜粋: "if not save_all_ok:")、`pb = LinePostbackData(**raw_dict)` (行番号: 203)、`today_disp = get_display_date()` (行番号: 324)
+* 根拠: `save_all_ok = sync_run(save_logs_batch_async(` (行番号: 220-224 / 抜粋: "save_all_ok = sync_run(save_logs_batch_async(")、`if not save_all_ok:` (行番号: 214 / 抜粋: "if not save_all_ok:")、`pb = LinePostbackData(**raw_dict)` (行番号: 203)、`today_disp = get_display_date()` (行番号: 324)
 * 根拠: `elif action == "food_record_direct":` (行番号: 360)、`save_ok = sync_run(save_log_async(` (行番号: 369-373 / 抜粋: "(user_id, user_name, get_today_date_str(), get_meal_time_category_from_now(), final_rec, get_now_iso())")
 
 

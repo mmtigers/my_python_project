@@ -52,8 +52,8 @@
 | `yt_dlp` | サードパーティ | YouTubeチャンネル/プレイリスト/動画のメタデータ抽出(`extract_info`) | 根拠: [import文] (行番号: 20 / 抜粋: "import yt_dlp") |
 | `file_utils.sanitize_filename` (as `_shared_sanitize_filename`) | ローカルモジュール | 保存ファイル名のサニタイズ処理の委譲先 | 根拠: [import文] (行番号: 22 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
 | `file_utils.resolve_my_home_system_root` | ローカルモジュール（**品質で追加**） | `PROJECT_ROOT`（`MY_HOME_SYSTEM`のパス）解決処理の委譲先。`newface_monitor.py`/`batch_download_discord.py`と共通化されている | 根拠: [import文] (行番号: 23 / 抜粋: "from file_utils import resolve_my_home_system_root") |
-| `core.logger.get_logger` | 内部モジュール（オプショナル、try節） | ロガーインスタンスの取得。インポート失敗時はファイル内フォールバック実装（`logging.getLogger`ベース）を使用 | 根拠: [import文] (行番号: 40 / 抜粋: "from core.logger import get_logger") |
-| `core.nas_utils.get_managed_target_directory` | 内部モジュール（オプショナル、try節） | NAS/ローカルの出力先ディレクトリの解決・管理。インポート失敗時はファイル内フォールバック実装（`fallback_dir_str`引数があればそれを、なければ`Path("./data")`を返す）を使用 | 根拠: [import文] (行番号: 41 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
+| `core.logger.get_logger` | 内部モジュール（オプショナル、try節） | ロガーインスタンスの取得。インポート失敗時はファイル内フォールバック実装（`logging.getLogger`ベース）を使用 | 根拠: [import文] (行番号: 41 / 抜粋: "from core.logger import get_logger") |
+| `core.nas_utils.get_managed_target_directory` | 内部モジュール（オプショナル、try節） | NAS/ローカルの出力先ディレクトリの解決・管理。インポート失敗時はファイル内フォールバック実装（`fallback_dir_str`引数があればそれを、なければ`Path("./data")`を返す）を使用 | 根拠: [import文] (行番号: 42 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
 
 **（#413 D-L11で変更）** 以前ここに存在した`sqlite3`（サブスクリプション管理用DB接続）・`contextlib.closing`（SQLite接続の確実なクローズ）の2行は、これらを使用していた`SubscriptionManager`クラスの削除に伴い、現在の`import`文には存在しない。
 
@@ -91,7 +91,7 @@
 ### `AppConfig`
 
 * **役割**: 出力先ディレクトリ、NASパス、サブディレクトリ名、レート制限対策のスリープ範囲、`yt_dlp`オプションなど、アプリケーション全体の設定値を保持する定数クラス（インスタンス化不要、クラス変数と`classmethod`のみで構成）。`INTRA_CHANNEL_SLEEP_RANGE`は、1チャンネル処理の内部で発行される`/videos`→`/playlists`→各プレイリストという複数リクエスト間に挟むジッター待機の範囲（既定1.0〜3.0秒、**Issue #227で追加**）。**（Issue #413 D-L11で削除）** 以前存在した`SUBSCRIPTION_FILE`・`SUBSCRIPTION_SLEEP_RANGE`（チャンネルURL「間」の巡回間隔）・`CONSECUTIVE_FAILURE_THRESHOLD`（サーキットブレーカーの連続失敗閾値）の3定数は、これらを使用していた`SubscriptionManager`クラス自体の削除に伴い削除された。
-* 根拠: [クラス定義とDocstring] (行番号: 70〜115 / 抜粋: "class AppConfig:\n    """アプリケーション設定を保持する定数クラス。"""")、内部リクエスト用スリープ範囲 (行番号: 83 / 抜粋: "INTRA_CHANNEL_SLEEP_RANGE: tuple = (1.0, 3.0)")
+* 根拠: [クラス定義とDocstring] (行番号: 70〜115 / 抜粋: "class AppConfig:\n    """アプリケーション設定を保持する定数クラス。"""")、内部リクエスト用スリープ範囲 (行番号: 91 / 抜粋: "INTRA_CHANNEL_SLEEP_RANGE: tuple = (1.0, 3.0)")
 
 
 * **引数/リクエスト**: なし（クラス変数として静的に定義）
@@ -152,7 +152,7 @@
 
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: `self.last_extract_internal_failures`への属性代入のみ
-* 根拠: (行番号: 140 / 抜粋: "self.last_extract_internal_failures: int = 0")
+* 根拠: (行番号: 148 / 抜粋: "self.last_extract_internal_failures: int = 0")
 
 
 * **エラーハンドリング**: なし
@@ -209,7 +209,7 @@
 
 
 * **副作用**: `yt_dlp.YoutubeDL.extract_info`によるネットワークアクセス、進捗・エラーのログ出力。
-* 根拠: [extract_info呼び出しとログ] (行番号: 184, 197 / 抜粋: "logger.info(f"🔍 解析開始: {target_url}")", "info = ydl.extract_info(target_url, download=False)")
+* 根拠: [extract_info呼び出しとログ] (行番号: 192, 205 / 抜粋: "logger.info(f"🔍 解析開始: {target_url}")", "info = ydl.extract_info(target_url, download=False)")
 
 
 * **エラーハンドリング**: `yt_dlp`実行時の例外を`except Exception`で捕捉し、スタックトレース付き(`exc_info=True`)でエラーログを出力して`None`を返す。抽出結果のURLが0件の場合も`None`を返す。
@@ -262,7 +262,7 @@
 
 
 * **副作用**: 保存先ディレクトリの作成(`mkdir`)、**（D-L10で変更）** 一時ファイル(`.tmp`)への書き込みと`tmp_path.replace(output_path)`によるアトミックな置換（以前は`output_path`への直接書き込み）、成功/失敗・上書き時のログ出力。
-* 根拠: [ディレクトリ作成とアトミック書き込み] (行番号: 350, 375〜380 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)", "tmp_path = output_path.with_suffix(output_path.suffix + '.tmp')\n        try:\n            with tmp_path.open("w", encoding="utf-8") as f:\n                for url in result.urls:\n                    f.write(url + "\\n")\n            tmp_path.replace(output_path)")
+* 根拠: [ディレクトリ作成とアトミック書き込み] (行番号: 342, 375〜380 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)", "tmp_path = output_path.with_suffix(output_path.suffix + '.tmp')\n        try:\n            with tmp_path.open("w", encoding="utf-8") as f:\n                for url in result.urls:\n                    f.write(url + "\\n")\n            tmp_path.replace(output_path)")
 
 
 * **エラーハンドリング**: ディレクトリ作成時の`OSError`を捕捉してエラーログを出力し`False`を返す。ファイル書き込み時の`IOError`を捕捉してエラーログを出力し`False`を返す。**（D-L10で追加）** 書き込み失敗時は、残置された`.tmp`ファイルをbest-effortで削除する（削除自体の失敗は無視する）。出力先ファイルが既に存在する場合は警告ログを出力するのみで上書きを継続する（`replace`によりアトミックに置き換わるため、書き込み成功時に既存ファイルが中途半端な状態になることはない）。
@@ -397,8 +397,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `core/nas_utils.py` | `get_managed_target_directory`の実際の実装（NASマウント確認・自動修復ロジック）が、フォールバック実装（`fallback_dir_str`があればそれを返すのみ）とどう異なるかを確認する必要があるため。 | 根拠: [import文] (行番号: 41 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
-| 中 | `core/logger.py` | `get_logger`の実際の実装（出力フォーマット、ログレベル、出力先）を確認するため。 | 根拠: [import文] (行番号: 40 / 抜粋: "from core.logger import get_logger") |
+| 高 | `core/nas_utils.py` | `get_managed_target_directory`の実際の実装（NASマウント確認・自動修復ロジック）が、フォールバック実装（`fallback_dir_str`があればそれを返すのみ）とどう異なるかを確認する必要があるため。 | 根拠: [import文] (行番号: 42 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
+| 中 | `core/logger.py` | `get_logger`の実際の実装（出力フォーマット、ログレベル、出力先）を確認するため。 | 根拠: [import文] (行番号: 41 / 抜粋: "from core.logger import get_logger") |
 | 中 | `file_utils.py` | `sanitize_filename`の具体的なサニタイズルールを確認するため（既に`docs/specifications/DDD/file_utils.md`として解析済み）。 | 根拠: [import文] (行番号: 22 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
 
 ## 8. 保守上の注意点
@@ -416,7 +416,7 @@ graph TD
 * **既存ファイルの無警告上書き**: `FileManager.save`は出力先に同名ファイルが既存の場合、警告ログを出力するのみで上書きを継続する。**（D-L10で追加）** ただし上書き自体は`.tmp`経由のアトミックな`replace`で行われるため、書き込み中に中断しても既存ファイルが破損した状態で残ることはない（以前は`output_path`への直接書き込みだったため、NAS瞬断等での中断時に破損ファイルが残りうった）。
 * 根拠: [上書きチェック] (行番号: 363〜364 / 抜粋: "if output_path.exists():\n            logger.warning(f"⚠️ 上書き: {filename} は既に存在します（チャンネル名/タイトルが重複している可能性）")")
 * **チャンネルURL探索の暗黙的な仕様依存**: `/videos`・`/playlists`のURLパス付与がYouTube側のURL構造に依存しており、YouTube側の仕様変更で機能しなくなるリスクがある。
-* 根拠: [extract_iter内のURL構築] (行番号: 251 / 抜粋: "base_url = target_url.split('?')[0].rstrip('/')")
+* 根拠: [extract_iter内のURL構築] (行番号: 259 / 抜粋: "base_url = target_url.split('?')[0].rstrip('/')")
 * **`_is_channel_url`の判定パターンの限定性**: 正規表現は`@handle`, `channel/`, `c/`, `user/`の4形式のみに対応しており、これら以外のURL形式（例: カスタムショートURL等）は判定対象外となる可能性がある。
 * 根拠: [正規表現定義] (行番号: 172 / 抜粋: "return bool(re.search(r"youtube\\.com/(@[\\w\\-\\.]+|channel/[\\w\\-]+|c/[\\w\\-]+|user/[\\w\\-]+)$", clean_url))")
 

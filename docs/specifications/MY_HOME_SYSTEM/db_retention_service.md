@@ -31,7 +31,7 @@ SQLite の**行**に対する保持期間削除を行うサービス層モジュ
 
 削除対象は明示的に登録したテーブルだけで、`RETENTION_TARGETS` に無いテーブルは1行も消えない。一方 `build_report()` は DB 内の**全**テーブルの行数を返すため、「対象に入れていないテーブルがどれだけ育っているか」も同じ出力で分かる。
 
-* 根拠: `RETENTION_TARGETS: tuple[RetentionTarget, ...] = (` (行番号: 74 / 抜粋: "RETENTION_TARGETS: tuple[RetentionTarget, ...] = (")
+* 根拠: `RETENTION_TARGETS: tuple[RetentionTarget, ...] = (` (行番号: 77 / 抜粋: "RETENTION_TARGETS: tuple[RetentionTarget, ...] = (")
 
 ### 削除対象に入れていないもの（モジュールdocstringに明記）
 
@@ -51,21 +51,21 @@ SQLite の**行**に対する保持期間削除を行うサービス層モジュ
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `os` | 標準 | バックアップディレクトリの走査・DB ファイルサイズの取得 | 根拠: [インポート宣言] (行番号: 43 / 抜粋: "import os") |
-| `sqlite3` | 標準 | 例外型（`sqlite3.Error`）と接続の型注釈 | 根拠: [インポート宣言] (行番号: 44 / 抜粋: "import sqlite3") |
+| `os` | 標準 | バックアップディレクトリの走査・DB ファイルサイズの取得 | 根拠: [インポート宣言] (行番号: 46 / 抜粋: "import os") |
+| `sqlite3` | 標準 | 例外型（`sqlite3.Error`）と接続の型注釈 | 根拠: [インポート宣言] (行番号: 47 / 抜粋: "import sqlite3") |
 | `time` | 標準 | バックアップの更新時刻との比較 | 根拠: [インポート宣言] (行番号: 45 / 抜粋: "import time") |
-| `dataclasses.dataclass`, `field` | 標準 | 計画・結果の値オブジェクト | 根拠: [インポート宣言] (行番号: 46 / 抜粋: "from dataclasses import dataclass, field") |
-| `datetime.timedelta` | 標準 | 保持期間の境界の算出 | 根拠: [インポート宣言] (行番号: 47 / 抜粋: "from datetime import timedelta") |
-| `config` | 自作 | `DB_ROW_RETENTION_*` / `DB_BACKUPS_DIR` / `SQLITE_DB_PATH` | 根拠: [インポート宣言] (行番号: 50 / 抜粋: "import config") |
-| `core.database.get_db_cursor`, `get_ro_connection` | 自作 | 削除用の書き込み接続と、集計用の読み取り専用接続 | 根拠: [インポート宣言] (行番号: 51 / 抜粋: "from core.database import get_db_cursor, get_ro_connection") |
-| `core.logger.setup_logging` | 自作 | ロガー取得（`DiscordErrorHandler` が付く） | 根拠: [インポート宣言] (行番号: 52 / 抜粋: "from core.logger import setup_logging") |
-| `core.utils.get_now_jst` | 自作 | 保持期間の境界を JST で計算する | 根拠: [インポート宣言] (行番号: 53 / 抜粋: "from core.utils import get_now_jst") |
+| `dataclasses.dataclass`, `field` | 標準 | 計画・結果の値オブジェクト | 根拠: [インポート宣言] (行番号: 49 / 抜粋: "from dataclasses import dataclass, field") |
+| `datetime.timedelta` | 標準 | 保持期間の境界の算出 | 根拠: [インポート宣言] (行番号: 50 / 抜粋: "from datetime import timedelta") |
+| `config` | 自作 | `DB_ROW_RETENTION_*` / `DB_BACKUPS_DIR` / `SQLITE_DB_PATH` | 根拠: [インポート宣言] (行番号: 53 / 抜粋: "import config") |
+| `core.database.get_db_cursor`, `get_ro_connection` | 自作 | 削除用の書き込み接続と、集計用の読み取り専用接続 | 根拠: [インポート宣言] (行番号: 54 / 抜粋: "from core.database import get_db_cursor, get_ro_connection") |
+| `core.logger.setup_logging` | 自作 | ロガー取得（`DiscordErrorHandler` が付く） | 根拠: [インポート宣言] (行番号: 55 / 抜粋: "from core.logger import setup_logging") |
+| `core.utils.get_now_jst` | 自作 | 保持期間の境界を JST で計算する | 根拠: [インポート宣言] (行番号: 56 / 抜粋: "from core.utils import get_now_jst") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.DB_BACKUPS_DIR` の実体 | NAS 上のパスであり、存在するかどうかは実行環境に依存する | 根拠: [変数参照] (行番号: 267 / 抜粋: "backups_dir = getattr(config, \"DB_BACKUPS_DIR\", \"\")") |
+| `config.DB_BACKUPS_DIR` の実体 | NAS 上のパスであり、存在するかどうかは実行環境に依存する | 根拠: [変数参照] (行番号: 275 / 抜粋: "backups_dir = getattr(config, \"DB_BACKUPS_DIR\", \"\")") |
 | 各対象テーブルの実際の行数・最古の時刻 | 実機の DB にのみ存在する。本ファイルからは判断できない（これを測るための `build_report` である） | 根拠: `def build_report(now=None) -> dict[str, Any]:` (行番号: 322) |
 | 書き込み側が実際に入れている時刻文字列の形式 | 本ファイルは `"%Y-%m-%d %H:%M:%S"` を前提に境界文字列を作るが、各テーブルへの書き込みは別モジュールが行う | 根拠: `def _cutoff_string(retention_days: int, now=None) -> str:` (行番号: 135) |
 
@@ -83,7 +83,7 @@ SQLite の**行**に対する保持期間削除を行うサービス層モジュ
 * 根拠: `class RetentionTarget:` (行番号: 62)
 
 * **副作用**: なし（`frozen=True`）
-* 根拠: `@dataclass(frozen=True)` (行番号: 58 / 抜粋: "@dataclass(frozen=True)")
+* 根拠: `@dataclass(frozen=True)` (行番号: 61 / 抜粋: "@dataclass(frozen=True)")
 
 * **エラーハンドリング**: なし
 * 根拠: `class RetentionTarget:` (行番号: 62)
@@ -91,7 +91,7 @@ SQLite の**行**に対する保持期間削除を行うサービス層モジュ
 ### `RETENTION_TARGETS` (モジュール定数)
 
 * **役割**: 削除対象テーブルの一覧。7件（`device_records` / `power_usage` / `switchbot_meter_logs` / `nas_records` / `bicycle_parking_records` / `security_logs` は `DB_ROW_RETENTION_SENSOR_DAYS`、`routine_step_events` は `occurred_at` 列と `DB_ROW_RETENTION_EVENT_DAYS`）。**ここに無いテーブルは1行も消えない。**
-* 根拠: `RETENTION_TARGETS: tuple[RetentionTarget, ...] = (` (行番号: 74 / 抜粋: "RETENTION_TARGETS: tuple[RetentionTarget, ...] = (")
+* 根拠: `RETENTION_TARGETS: tuple[RetentionTarget, ...] = (` (行番号: 77 / 抜粋: "RETENTION_TARGETS: tuple[RetentionTarget, ...] = (")
 
 ### `class TablePlan` / `class TableResult` / `class RetentionOutcome` (dataclass)
 

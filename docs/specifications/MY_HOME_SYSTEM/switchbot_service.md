@@ -33,7 +33,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `threading`（Issue #439で追加） | 標準ライブラリ | `DEVICE_NAME_CACHE`/`_fetch_attempted`を複数のWebhookリクエストスレッドから保護する`_device_cache_lock`(`threading.Lock`)の生成 | 根拠: `import threading` (行番号: 2 / 抜粋: "import threading")、[`_device_cache_lock`定義] (行番号: 28 / 抜粋: "_device_cache_lock = threading.Lock()") |
+| `threading`（Issue #439で追加） | 標準ライブラリ | `DEVICE_NAME_CACHE`/`_fetch_attempted`を複数のWebhookリクエストスレッドから保護する`_device_cache_lock`(`threading.Lock`)の生成 | 根拠: `import threading` (行番号: 2 / 抜粋: "import threading")、[`_device_cache_lock`定義] (行番号: 35 / 抜粋: "_device_cache_lock = threading.Lock()") |
 | `time` | 標準ライブラリ | 現在時刻の取得、リトライ時の待機（sleep） | 根拠: `import time` (行番号: 3 / 抜粋: "import time") |
 | `hashlib` | 標準ライブラリ | HMAC署名生成時のハッシュアルゴリズム（SHA256）指定 | 根拠: `import hashlib` (行番号: 4 / 抜粋: "import hashlib") |
 | `hmac` | 標準ライブラリ | 認証ヘッダー用のHMAC署名生成 | 根拠: `import hmac` (行番号: 5 / 抜粋: "import hmac") |
@@ -53,9 +53,9 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` | 設定値（トークン、シークレット、ホストURL）が環境変数から取得されているか等の実装詳細が不明。 | 根拠: `config.SWITCHBOT_API_TOKEN` (行番号: 80 / 抜粋: "token = config.SWITCHBOT_API_TOKEN") |
+| `config` | 設定値（トークン、シークレット、ホストURL）が環境変数から取得されているか等の実装詳細が不明。 | 根拠: `config.SWITCHBOT_API_TOKEN` (行番号: 157 / 抜粋: "token = config.SWITCHBOT_API_TOKEN") |
 | `DeviceStatusResponse` | モデルのプロパティ定義や、`dict()`呼び出し時の挙動（シリアライズ仕様）が不明。 | 根拠: `DeviceStatusResponse` (行番号: 28 / 抜粋: "validated = DeviceStatusResponse(**raw_data)") |
-| `setup_logging` | 生成されるロガーの設定（出力先、フォーマット、ログレベルなど）の詳細が不明。 | 根拠: `setup_logging` (行番号: 16 / 抜粋: "logger = setup_logging("service.switchbot")") |
+| `setup_logging` | 生成されるロガーの設定（出力先、フォーマット、ログレベルなど）の詳細が不明。 | 根拠: `setup_logging` (行番号: 19 / 抜粋: "logger = setup_logging("service.switchbot")") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -81,7 +81,7 @@
 
 
 * **副作用**: ロガーへの出力（警告、エラー、デバッグ）。失敗した試行ごとに1本の警告と、最後に「完全失敗」の警告1本が出る。最終試行ぶんの警告は `on_retry` が呼ばれないため例外ハンドラ側から同じ書式で出している。
-* 根拠: (行番号: 60〜62, 79〜80, 85 / 抜粋: "        logger.warning(f"⚠️ SwitchBot API connection issue (Attempt {attempts['n']}/{max_retries}): {error}")", "        _warn_connection_issue(e)", "    logger.warning("⚠️ SwitchBot API completely failed after retries. Operating in Fail-Soft mode.")")
+* 根拠: (行番号: 60〜62, 79〜80, 84 / 抜粋: "        logger.warning(f"⚠️ SwitchBot API connection issue (Attempt {attempts['n']}/{max_retries}): {error}")", "        _warn_connection_issue(e)", "    logger.warning("⚠️ SwitchBot API completely failed after retries. Operating in Fail-Soft mode.")")
 
 
 * **エラーハンドリング**:
@@ -103,7 +103,7 @@
 * `url`: `str` (リクエスト先URL)
 * `headers`: `Dict[str, str]` (リクエストヘッダー)
 * `json_data`: `Dict[str, Any]` (POSTするJSONペイロード)
-* 根拠: `post_switchbot_api` (行番号: 51 / 抜粋: "url: str, headers: Dict[str, str], json_data: Dict[str, Any]")
+* 根拠: `post_switchbot_api` (行番号: 88 / 抜粋: "url: str, headers: Dict[str, str], json_data: Dict[str, Any]")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` (APIレスポンスのJSONパース結果)
@@ -130,7 +130,7 @@
 * `command`: `str` (実行するコマンド名)
 * `parameter`: `str` (コマンドのパラメータ、デフォルト"default")
 * `command_type`: `str` (コマンドの種類、デフォルト"command")
-* 根拠: `send_device_command` (行番号: 58 / 抜粋: "device_id: str, command: str, parameter: str = "default", command_type: str = "command"")
+* 根拠: `send_device_command` (行番号: 101 / 抜粋: "device_id: str, command: str, parameter: str = "default", command_type: str = "command"")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` (送信結果のレスポンス、失敗時はNone)
@@ -138,7 +138,7 @@
 
 
 * **副作用**: APIへのPOSTリクエスト呼び出し、失敗時のエラーログ出力
-* 根拠: `post_switchbot_api` (行番号: 72 / 抜粋: "response_data = post_switchbot_api(url, headers, payload)")
+* 根拠: `post_switchbot_api` (行番号: 115 / 抜粋: "response_data = post_switchbot_api(url, headers, payload)")
 
 
 * **エラーハンドリング**: 実行中の任意の例外（`Exception`）をキャッチし、エラーログを出力して `None` を返す。
@@ -165,7 +165,7 @@
 
 
 * **エラーハンドリング**: `unlock_task`内で`send_device_command`の戻り値が偽値または`statusCode != 100`の場合は`Exception`を送出して直後の`except Exception as e:`で捕捉し、任意の例外（`send_device_command`自体が投げうる例外も含む）をエラーログ出力とFail-Soft通知（LINE Push失敗時の例外は捕捉しない）で処理する。デーモンスレッド内で例外が伝播してもプロセス全体やAPIルーティングには影響しない。
-* 根拠: `raise Exception` (行番号: 112 / 抜粋: "raise Exception(f\"API returned error: {res}\")")、`except Exception as e` (行番号: 113〜114 / 抜粋: "except Exception as e:\n            logger.error(f\"❌ TV Unlock failed: {e}\")")
+* 根拠: `raise Exception` (行番号: 139 / 抜粋: "raise Exception(f\"API returned error: {res}\")")、`except Exception as e` (行番号: 113〜114 / 抜粋: "except Exception as e:\n            logger.error(f\"❌ TV Unlock failed: {e}\")")
 
 
 ### `create_switchbot_auth_headers`
@@ -179,11 +179,11 @@
 
 
 * **戻り値/レスポンス**: `Dict[str, str]` (認証情報の入ったヘッダー辞書、設定不備時は空辞書)
-* 根拠: `create_switchbot_auth_headers` (行番号: 78 / 抜粋: "-> Dict[str, str]:")
+* 根拠: `create_switchbot_auth_headers` (行番号: 155 / 抜粋: "-> Dict[str, str]:")
 
 
 * **副作用**: 警告ログ出力（トークンまたはシークレット欠如時）
-* 根拠: `logger.warning` (行番号: 85 / 抜粋: "logger.warning("SwitchBot Token/Secret is missing in config.")")
+* 根拠: `logger.warning` (行番号: 162 / 抜粋: "logger.warning("SwitchBot Token/Secret is missing in config.")")
 
 
 * **エラーハンドリング**: トークンまたはシークレットが設定されていない場合、警告を出力して空の辞書を返す。
@@ -202,11 +202,11 @@
 
 
 * **戻り値/レスポンス**: `bool` (処理の成功・失敗)
-* 根拠: `fetch_device_name_cache` (行番号: 117 / 抜粋: "-> bool:")
+* 根拠: `fetch_device_name_cache` (行番号: 184 / 抜粋: "-> bool:")
 
 
 * **副作用**: `_device_cache_lock`保持下でのグローバル変数 `DEVICE_NAME_CACHE` の追加更新（マージ）。インフォメーションおよびエラーログ出力。APIへのGETリクエスト（ロック外）。
-* 根拠: `global DEVICE_NAME_CACHE` (行番号: 119 / 抜粋: "global DEVICE_NAME_CACHE")、[ロック保持下でのマージ] (行番号: 145〜147 / 抜粋: "with _device_cache_lock:\n                DEVICE_NAME_CACHE.update(new_names)")
+* 根拠: `global DEVICE_NAME_CACHE` (行番号: 186 / 抜粋: "global DEVICE_NAME_CACHE")、[ロック保持下でのマージ] (行番号: 145〜147 / 抜粋: "with _device_cache_lock:\n                DEVICE_NAME_CACHE.update(new_names)")
 
 
 * **エラーハンドリング**:
@@ -232,7 +232,7 @@
 
 
 * **戻り値/レスポンス**: `Optional[str]` (見つかった場合はデバイス名、存在しない場合はNone)
-* 根拠: `get_device_name_by_id` (行番号: 158 / 抜粋: "-> Optional[str]:")
+* 根拠: `get_device_name_by_id` (行番号: 225 / 抜粋: "-> Optional[str]:")
 
 
 * **副作用**: `_device_cache_lock`保持下での`DEVICE_NAME_CACHE`/`_fetch_attempted`の読み取り・書き込み、`DEVICE_NAME_CACHE` が空かつ未試行(`_fetch_attempted`が`False`)の場合、`fetch_device_name_cache()` を1回だけ呼び出して遅延ロードを試みる（**#411 S-L2で追加**: 以前は `fetch_device_name_cache` の呼出元がどこにも無く、`DEVICE_NAME_CACHE` は常に空のままだったため、`devices.json` に登録の無いセンサーからのWebhookは常に `Unknown_<mac>` 表示になっていた）。プロセス起動後の初回呼出し(＝最初のWebhook受信)時にのみ発火し、成否に関わらず以後は再試行しない。
@@ -240,7 +240,7 @@
 
 
 * **エラーハンドリング**: なし（辞書の `get` メソッドによりKeyErrorを回避）。遅延ロード自体が失敗しても`fetch_device_name_cache`内で例外は握り潰され`False`が返るのみで、本関数は`None`を返す。
-* 根拠: `DEVICE_NAME_CACHE.get` (行番号: 169 / 抜粋: "return DEVICE_NAME_CACHE.get(device_id, None)")
+* 根拠: `DEVICE_NAME_CACHE.get` (行番号: 241 / 抜粋: "return DEVICE_NAME_CACHE.get(device_id, None)")
 
 
 
@@ -259,7 +259,7 @@
 
 
 * **副作用**: APIへのGETリクエスト呼び出し、失敗時のエラーログ出力
-* 根拠: `request_switchbot_api` (行番号: 180 / 抜粋: "response_data = request_switchbot_api(url, headers)")
+* 根拠: `request_switchbot_api` (行番号: 252 / 抜粋: "response_data = request_switchbot_api(url, headers)")
 
 
 * **エラーハンドリング**: 実行中の任意の例外（`Exception`）をキャッチし、エラーログを出力して `None` を返す。
@@ -351,8 +351,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `models/switchbot.py` | `request_switchbot_api` 関数において、すべてのGET通信のレスポンスが `DeviceStatusResponse` でバリデーションされている。このモデルがデバイスリスト取得時（`/v1.1/devices`）のJSON構造も正しく処理できる設計になっているか確認する必要があるため。 | 根拠: `DeviceStatusResponse` (行番号: 14 / 抜粋: "from models.switchbot import DeviceStatusResponse") |
-| 中 | `config.py` | API通信のホストURL、トークン、シークレットの設定がどのように注入されているか（環境変数、DB、ファイル等）を把握し、デプロイやテスト要件を明確にするため。 | 根拠: `config` (行番号: 10 / 抜粋: "import config") |
+| 高 | `models/switchbot.py` | `request_switchbot_api` 関数において、すべてのGET通信のレスポンスが `DeviceStatusResponse` でバリデーションされている。このモデルがデバイスリスト取得時（`/v1.1/devices`）のJSON構造も正しく処理できる設計になっているか確認する必要があるため。 | 根拠: `DeviceStatusResponse` (行番号: 16 / 抜粋: "from models.switchbot import DeviceStatusResponse") |
+| 中 | `config.py` | API通信のホストURL、トークン、シークレットの設定がどのように注入されているか（環境変数、DB、ファイル等）を把握し、デプロイやテスト要件を明確にするため。 | 根拠: `config` (行番号: 11 / 抜粋: "import config") |
 
 ## 8. 保守上の注意点
 

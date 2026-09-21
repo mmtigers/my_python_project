@@ -33,7 +33,7 @@
 | `time` | 標準ライブラリ | LINEプロフィール表示名キャッシュ(`_profile_cache`)のTTL判定・エビクション、および冪等化キャッシュ(`_SEEN_EVENT_IDS`)の検知時刻取得 | インポート宣言 (行番号: 4 / 抜粋: "import time") |
 | `Optional`, `List`, `Any`, `Dict` | 標準ライブラリ (typing) | 型ヒント | インポート宣言 (行番号: 5 / 抜粋: "from typing import Optional, List, Any, Dict") |
 | `handlers.line_logic` | 内部モジュール | ポストバックイベントの処理委譲 | インポート宣言 (行番号: 7 / 抜粋: "import handlers.line_logic as line_logic") |
-| `WebhookHandler` (linebot.v3) | 外部ライブラリ | LINE Webhookイベントの検証・ディスパッチ(SDKへの後方互換登録用) | インポート宣言 (行番号: 9 / 抜粋: "from linebot.v3 import WebhookHandler") |
+| `WebhookHandler` (linebot.v3) | 外部ライブラリ | LINE Webhookイベントの検証・ディスパッチ(SDKへの後方互換登録用) | インポート宣言 (行番号: 10 / 抜粋: "from linebot.v3 import WebhookHandler") |
 | `Configuration`, `ApiClient`, `MessagingApi`, `ReplyMessageRequest`, `PushMessageRequest`（Issue #376で追加）, `TextMessage` (linebot.v3.messaging) | 外部ライブラリ | LINE APIクライアントの初期化、メッセージ送信オブジェクトの構築。`PushMessageRequest`は`reply_message`のreply失敗時pushフォールバックに使用 | インポート宣言 (行番号: 11-18 / 抜粋: "from linebot.v3.messaging import (") |
 | `MessageEvent`, `TextMessageContent`, `PostbackEvent` (linebot.v3.webhooks) | 外部ライブラリ | Webhookイベントの型定義およびルーティング | インポート宣言 (行番号: 19 / 抜粋: "from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent") |
 | `config` | 内部モジュール | APIトークンや設定値（家族のメンバー等）の取得 | インポート宣言 (行番号: 21 / 抜粋: "import config") |
@@ -47,10 +47,10 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config.LINE_CHANNEL_ACCESS_TOKEN` / `config.LINE_CHANNEL_SECRET` | 値の取得元や環境変数の仕様が不明 | 該当要素の使用 (行番号: 32, 34, 36 / 抜粋: "if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:") |
-| `config.FAMILY_SETTINGS["members"]` | データ構造やリストに含まれる要素の型・内容が不明 | 該当要素の使用 (行番号: 212 / 抜粋: "for member in config.FAMILY_SETTINGS[\"members\"]:") |
+| `config.FAMILY_SETTINGS["members"]` | データ構造やリストに含まれる要素の型・内容が不明 | 該当要素の使用 (行番号: 237 / 抜粋: "for member in config.FAMILY_SETTINGS[\"members\"]:") |
 | `line_service.log_child_health` / `line_service.split_text_into_line_messages` | 引数に対する具体的な処理内容および戻り値の型・形式が不明。**（#358で縮小）** 以前ブラックボックス視していた`get_user_status_message`/`get_active_quests_message`/`process_approval_command`は削除済みのため対象外。 | 該当要素の呼び出し (行番号: 280, 294 / 抜粋: "responses.append(await line_service.log_child_health(user_id, user_name, child, cond))") |
 | `ai_service.analyze_text_and_execute` | AI解析の具体的なロジック、副作用、戻り値の仕様が不明 | 該当要素の呼び出し (行番号: 288-289 / 抜粋: "ai_resp_text = await asyncio.wait_for(") |
-| `line_logic.handle_postback` | 委譲先の具体的な処理内容および副作用が不明。**（#358で明確化）** 承認/却下 postback を本ファイル側で先取りする分岐が撤去されたため、現在は認可済みユーザーの`PostbackEvent`がすべて無条件でここへ委譲される。**（Issue #572で変更なし）** 委譲前に`user_id is None`ガードが追加されたが、ガードを通過した場合の委譲先自体は変わらない。**（Issue #623で変更なし）** 委譲前に`_is_authorized_line_user(user_id)`ガードが追加されたが、これも同様にガードを通過した場合の委譲先自体は変わらない。 | 該当要素の呼び出し (行番号: 377 / 抜粋: "line_logic.handle_postback(event, line_bot_api)") |
+| `line_logic.handle_postback` | 委譲先の具体的な処理内容および副作用が不明。**（#358で明確化）** 承認/却下 postback を本ファイル側で先取りする分岐が撤去されたため、現在は認可済みユーザーの`PostbackEvent`がすべて無条件でここへ委譲される。**（Issue #572で変更なし）** 委譲前に`user_id is None`ガードが追加されたが、ガードを通過した場合の委譲先自体は変わらない。**（Issue #623で変更なし）** 委譲前に`_is_authorized_line_user(user_id)`ガードが追加されたが、これも同様にガードを通過した場合の委譲先自体は変わらない。 | 該当要素の呼び出し (行番号: 440 / 抜粋: "line_logic.handle_postback(event, line_bot_api)") |
 | `routers/webhook_router.py` の `callback_line` | 本ファイル外の実装であり、Webhook HTTPエントリーポイントとしての署名検証・ディスパッチの具体的な呼び出し経路は本ファイル内の記述からは確認できない | ファイル内に対応するルーター定義が存在しない（本ファイルはSDKのイベントハンドラー登録のみを行う） |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -108,7 +108,7 @@
 * 根拠: (行番号: 48, 134, 147 / 抜粋: "_profile_cache_lock = threading.Lock()", "with _profile_cache_lock:\n        _profile_cache[user_id] = (user_name, time.time())\n        _evict_oldest_profile_cache_entries()")
 
 * **（2026-09-06 品質監査で修正）** `line_bot_api.get_profile(user_id, _request_timeout=config.LINE_API_REQUEST_TIMEOUT)` として接続/読み取りタイムアウト(`config.LINE_API_REQUEST_TIMEOUT`、既定 `(5.0, 15.0)` 秒)を渡す。line-bot-sdk v3 は `_request_timeout` 未指定だと urllib3 に `timeout=None`(無期限ブロック)を渡すため、api.line.me への TCP がブラックホール化すると BackgroundTasks のワーカースレッドが永久に塞がっていた。
-* 根拠: [get_profile 呼び出し] (行番号: 135 / 抜粋: "profile = line_bot_api.get_profile(user_id, _request_timeout=config.LINE_API_REQUEST_TIMEOUT)")、[定数定義] (`MY_HOME_SYSTEM/config.py` 行番号: 219 / 抜粋: "LINE_API_REQUEST_TIMEOUT: tuple = (5.0, 15.0)")
+* 根拠: [get_profile 呼び出し] (行番号: 157 / 抜粋: "profile = line_bot_api.get_profile(user_id, _request_timeout=config.LINE_API_REQUEST_TIMEOUT)")、[定数定義] (`MY_HOME_SYSTEM/config.py` 行番号: 219 / 抜粋: "LINE_API_REQUEST_TIMEOUT: tuple = (5.0, 15.0)")
 
 * **役割**: LINEユーザーの表示名を取得する。`_profile_cache`（TTL=3600秒）にキャッシュがあればAPI呼び出しをせずそれを返し、なければ`line_bot_api.get_profile`を呼び出してキャッシュに格納する。メッセージ受信のたびに外部APIを呼んでいた従来の実装から変更され、API呼び出し頻度を抑制する。**（Issue #410で修正）** キャッシュ書き込み後に`_evict_oldest_profile_cache_entries`を呼び、`_profile_cache`が上限を超えないようにする。
 * 根拠: `def _get_display_name(user_id: str) -> str:` (行番号: 147-165 / 抜粋: "def _get_display_name(user_id: str) -> str:")、エビクション呼び出し (行番号: 141 / 抜粋: "_evict_oldest_profile_cache_entries()")
@@ -119,7 +119,7 @@
 
 
 * **戻り値/レスポンス**: `str` (表示名。取得失敗時は`"Unknown"`)
-* 根拠: `return user_name` (行番号: 142 / 抜粋: "return user_name")
+* 根拠: `return user_name` (行番号: 165 / 抜粋: "return user_name")
 
 
 * **副作用**: キャッシュヒット時はなし。キャッシュミス時は`line_bot_api.get_profile`呼び出し、`_profile_cache`への書き込み、および上限超過時のエビクション。
@@ -287,7 +287,7 @@
 ### `handle_postback`
 
 * **役割**: `PostbackEvent` (ボタン押下など) を受け取るハンドラー。`line_logic.handle_postback` へ処理を丸投げする。**（#358で撤去）** 以前ここにあった、`data`文字列が`"approve:"`/`"reject:"`で始まる場合にコマンド文字列へ変換して`_process_message_async`を呼び出す分岐は、それを生成する送信元（対応するpostbackアクションの発行元）がリポジトリ内に一切存在しないデッドコードだったため撤去された（オーナー判断、Issue #358）。これにより、本関数を通過する`PostbackEvent`はすべて`line_logic.handle_postback`へ委譲される。**（Issue #376 / L-L1で修正）** 先頭で`_is_redelivery`が真ならスキップし、関数全体を`try/except Exception`で包んでイベント単位で例外を隔離する。**（Issue #572で修正）** `handle_message`にはIssue #410（L-L6）で`event.source.user_id is None`（グループでのプロフィール未共有等）時の早期returnガードが追加されていたが、本関数には同等のガードが無く非対称だった。`user_id = event.source.user_id`で読み取った直後、`data_str`/`reply_token`の取得や`line_logic.handle_postback`への委譲より前に、`user_id`が`None`なら警告ログを出して処理をスキップするガードを追加し、この非対称性を解消した。**（Issue #623で修正）** `_process_message_async`にはIssue #620で`_is_authorized_line_user(user_id)`によるallowlistガードが既に導入されていたが、本関数（Postback経路）には同等のガードが無く、`_process_message_async`と同様の非対称性が残っていた。`user_id is None`ガードの直後、`data_str`/`reply_token`の取得や`line_logic.handle_postback`への委譲より前に、`_is_authorized_line_user(user_id)`が`False`を返す場合は警告ログのみを出して早期returnするガードを追加し、この非対称性を解消した（誰が認可対象かを教えることになる返信はしない点、allowlist未設定時は後方互換で誰でも許可される点も`_process_message_async`と同じ）。
-* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 400 / 抜粋: "def handle_postback(event: PostbackEvent):")、再配信スキップ (行番号: 342-344)、`user_id`のNoneガード (行番号: 346-353 / 抜粋: "if user_id is None:")、**（Issue #623で追加）** 認可ガード (行番号: 355-362 / 抜粋: "if not _is_authorized_line_user(user_id):\n            logger.warning(f\"⚠️ 未認可のLINEユーザーからのPostbackを拒否しました (user_id={user_id})\")\n            return")、撤去コメント (行番号: 369-371 / 抜粋: "以前ここにあった approve:/reject: postback の処理")、委譲 (行番号: 377 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")、例外隔離 (行番号: 382-383)
+* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 400 / 抜粋: "def handle_postback(event: PostbackEvent):")、再配信スキップ (行番号: 342-344)、`user_id`のNoneガード (行番号: 346-353 / 抜粋: "if user_id is None:")、**（Issue #623で追加）** 認可ガード (行番号: 355-362 / 抜粋: "if not _is_authorized_line_user(user_id):\n            logger.warning(f\"⚠️ 未認可のLINEユーザーからのPostbackを拒否しました (user_id={user_id})\")\n            return")、撤去コメント (行番号: 369-371 / 抜粋: "以前ここにあった approve:/reject: postback の処理")、委譲 (行番号: 440 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")、例外隔離 (行番号: 382-383)
 
 
 * **引数/リクエスト**:
@@ -300,7 +300,7 @@
 
 
 * **副作用**: `line_logic.handle_postback` の実行に伴う副作用、および`logger.info`/`logger.warning`/`logger.error`によるログ出力。**（Issue #623で追加）** 未認可ユーザーの場合は`logger.warning`の出力のみで、`line_logic.handle_postback`への委譲を含む以降のいずれの副作用も発生しない。
-* 根拠: 関数呼び出し (行番号: 377 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")、認可ガードの`logger.warning` (行番号: 361 / 抜粋: "logger.warning(f\"⚠️ 未認可のLINEユーザーからのPostbackを拒否しました")
+* 根拠: 関数呼び出し (行番号: 440 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")、認可ガードの`logger.warning` (行番号: 425 / 抜粋: "logger.warning(f\"⚠️ 未認可のLINEユーザーからのPostbackを拒否しました")
 
 
 * **エラーハンドリング**:

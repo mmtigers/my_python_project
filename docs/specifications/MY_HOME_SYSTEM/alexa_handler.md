@@ -28,7 +28,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `os` | 標準ライブラリ | APLドキュメントファイルパス(`_APL_DOCUMENT_PATH`)の組み立て(`os.path.join`, `os.path.dirname`) | 根拠: [インポート宣言および使用箇所] (行番号: 14, 32 / 抜粋: "import os", "_APL_DOCUMENT_PATH = os.path.join(os.path.dirname(__file__), \"..\", \"alexa\", \"apl\", \"main_screen.json\")") |
-| `json` | 標準ライブラリ | APLドキュメントJSONファイルの読み込み(`json.load`) | 根拠: [インポート宣言および使用箇所] (行番号: 15, 40 / 抜粋: "import json", "_apl_document_cache = json.load(f)") |
+| `json` | 標準ライブラリ | APLドキュメントJSONファイルの読み込み(`json.load`) | 根拠: [インポート宣言および使用箇所] (行番号: 15, 45 / 抜粋: "import json", "_apl_document_cache = json.load(f)") |
 | `typing`(`Any`, `Dict`, `List`, `Optional`) | 標準ライブラリ | 型ヒント | 根拠: [インポート宣言] (行番号: 16 / 抜粋: "from typing import Any, Dict, List, Optional") |
 | `ask_sdk_core.skill_builder.CustomSkillBuilder` | 外部パッケージ | Alexaスキル(`skill`)を構築するビルダー | 根拠: [インポート宣言] (行番号: 18 / 抜粋: "from ask_sdk_core.skill_builder import CustomSkillBuilder") |
 | `ask_sdk_core.dispatch_components`(`AbstractRequestHandler`, `AbstractExceptionHandler`) | 外部パッケージ | 各リクエスト/例外ハンドラクラスの基底クラス | 根拠: [インポート宣言] (行番号: 19 / 抜粋: "from ask_sdk_core.dispatch_components import AbstractRequestHandler, AbstractExceptionHandler") |
@@ -46,9 +46,9 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `ask_sdk_core`/`ask_sdk_model`(`CustomSkillBuilder`, `HandlerInput`, `Response`, `RenderDocumentDirective`等)の内部実装 | 外部パッケージ(`ask-sdk-core`/`ask-sdk-model`)のディスパッチ・シリアライズ処理の詳細は本ファイルからは分からない。 | 根拠: [各種インポート] (行番号: 18-24) |
-| `config.ALEXA_SKILL_ID`の実際の値 | `.env`等から供給される値そのものは本ファイルからは分からない。 | 根拠: [変数参照] (行番号: 224 / 抜粋: "if config.ALEXA_SKILL_ID:") |
+| `config.ALEXA_SKILL_ID`の実際の値 | `.env`等から供給される値そのものは本ファイルからは分からない。 | 根拠: [変数参照] (行番号: 233 / 抜粋: "if config.ALEXA_SKILL_ID:") |
 | `services.quest_service.game_system.get_all_view_data()`が返す`data`の完全なスキーマ | 本ファイルでは`data.get("pendingQuests", [])`の要素の`user_id`、`data.get("users", [])`の要素の`user_id`/`name`/`avatar`/`level`/`exp`/`nextLevelExp`/`gold`のみを参照しており、それ以外にどのようなキーが含まれるかは本ファイルからは分からない。 | 根拠: [呼び出しおよびキー参照] (行番号: 51, 54-57, 60-73 / 抜粋: "data = game_system.get_all_view_data()") |
-| `alexa/apl/main_screen.json`(APLドキュメント)の内容 | `_load_apl_document()`が読み込むJSONファイルの実体であり、`datasources={"payload": {"familyData": family_data}}`(行番号113)がどのように画面へレンダリングされるかの詳細は、このJSON自体を解析しない限り本ファイルからは分からない(なお`.json`ファイルは本リポジトリの仕様書ドリフト対象外のため対応する仕様書は存在しない)。 | 根拠: [ファイルパス定義および読み込み] (行番号: 32, 39 / 抜粋: "_APL_DOCUMENT_PATH = os.path.join(...)", "_apl_document_cache = json.load(f)") |
+| `alexa/apl/main_screen.json`(APLドキュメント)の内容 | `_load_apl_document()`が読み込むJSONファイルの実体であり、`datasources={"payload": {"familyData": family_data}}`(行番号113)がどのように画面へレンダリングされるかの詳細は、このJSON自体を解析しない限り本ファイルからは分からない(なお`.json`ファイルは本リポジトリの仕様書ドリフト対象外のため対応する仕様書は存在しない)。 | 根拠: [ファイルパス定義および読み込み] (行番号: 32, 45 / 抜粋: "_APL_DOCUMENT_PATH = os.path.join(...)", "_apl_document_cache = json.load(f)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -192,7 +192,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `skill`(`CustomSkillBuilder.create()`の戻り値)
 * **副作用**: `config.ALEXA_SKILL_ID`が未設定の場合、モジュールインポート時に`logger.warning`が発火する。
 * **エラーハンドリング**: なし(`config.ALEXA_SKILL_ID`が空の場合でも例外は送出せず、警告ログを出力した上でスキルID検証を無効にしたまま処理を継続する)。
-* 根拠: [ビルダー初期化とスキルID検証分岐] (行番号: 223-227 / 抜粋: 'sb = CustomSkillBuilder()\nif config.ALEXA_SKILL_ID:\n    sb.skill_id = config.ALEXA_SKILL_ID\nelse:\n    logger.warning("⚠️ ALEXA_SKILL_ID is not set — skill ID verification is DISABLED. Set the env var to enable it.")')、[ハンドラ登録] (行番号: 229-235 / 抜粋: "sb.add_request_handler(LaunchRequestHandler())\nsb.add_request_handler(HelpIntentHandler())\nsb.add_request_handler(CancelOrStopIntentHandler())\nsb.add_request_handler(FallbackIntentHandler())\nsb.add_request_handler(NavigateHomeIntentHandler())\nsb.add_request_handler(SessionEndedRequestHandler())\nsb.add_exception_handler(CatchAllExceptionHandler())")、[skill構築] (行番号: 237 / 抜粋: "skill = sb.create()")
+* 根拠: [ビルダー初期化とスキルID検証分岐] (行番号: 223-227 / 抜粋: 'sb = CustomSkillBuilder()\nif config.ALEXA_SKILL_ID:\n    sb.skill_id = config.ALEXA_SKILL_ID\nelse:\n    logger.warning("⚠️ ALEXA_SKILL_ID is not set — skill ID verification is DISABLED. Set the env var to enable it.")')、[ハンドラ登録] (行番号: 229-235 / 抜粋: "sb.add_request_handler(LaunchRequestHandler())\nsb.add_request_handler(HelpIntentHandler())\nsb.add_request_handler(CancelOrStopIntentHandler())\nsb.add_request_handler(FallbackIntentHandler())\nsb.add_request_handler(NavigateHomeIntentHandler())\nsb.add_request_handler(SessionEndedRequestHandler())\nsb.add_exception_handler(CatchAllExceptionHandler())")、[skill構築] (行番号: 246 / 抜粋: "skill = sb.create()")
 
 ## 5. 処理フロー図
 

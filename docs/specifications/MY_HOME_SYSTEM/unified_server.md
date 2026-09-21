@@ -40,11 +40,11 @@
 * 根拠: [ダッシュボード中継のinclude] (行番号: 508〜515 / 抜粋: "if config.DASHBOARD_PROXY_ENABLED:", "    app.include_router(dashboard_router.router, tags=[\"dashboard\"])")
 * **（スマホ対応で追加）** `lifespan` の終了処理で `dashboard_proxy_service.aclose()` を呼び、中継用の httpx コネクションプールを閉じる（`try/except` で囲み、失敗しても `logger.warning` のみで終了処理は続行する）。
 * 根拠: [lifespan終了処理] (行番号: 334〜340 / 抜粋: "        await dashboard_proxy_service.aclose()")
-* 根拠: `app = FastAPI(...)` (行番号: 230-235 / 抜粋: "app = FastAPI("), `uvicorn.run(...)` (行番号: 430 / 抜粋: "uvicorn.run(app, host="0.0.0.0"")
+* 根拠: `app = FastAPI(...)` (行番号: 230-235 / 抜粋: "app = FastAPI("), `uvicorn.run(...)` (行番号: 628 / 抜粋: "uvicorn.run(app, host="0.0.0.0"")
 
 ## 3. 外部依存関係
 
-* **（2026-09-06 品質監査で修正）** 標準ライブラリ `re` を追加インポート(`SecretRedactionFilter` 用)。根拠: (行番号: 8 / 抜粋: "import re")
+* **（2026-09-06 品質監査で修正）** 標準ライブラリ `re` を追加インポート(`SecretRedactionFilter` 用)。根拠: (行番号: 9 / 抜粋: "import re")
 
 ### インポート一覧
 
@@ -52,36 +52,36 @@
 | --- | --- | --- | --- |
 | `os` | 標準ライブラリ | パス操作、環境変数アクセス | 根拠: `[os]` (行番号: 2 / 抜粋: "import os") |
 | `sys` | 標準ライブラリ | Pythonパス追加、実行パス取得 | 根拠: `[sys]` (行番号: 3 / 抜粋: "import sys") |
-| `datetime` | 標準ライブラリ | 現在時刻の取得 | 根拠: `[datetime]` (行番号: 4 / 抜粋: "import datetime") |
-| `subprocess` | 標準ライブラリ | 外部プロセスの起動・管理 | 根拠: `[subprocess]` (行番号: 5 / 抜粋: "import subprocess") |
-| `logging` | 標準ライブラリ | ログの出力、フィルター作成 | 根拠: `[logging]` (行番号: 6 / 抜粋: "import logging") |
-| `ipaddress` | 標準ライブラリ | IPアドレスのパースと検証 | 根拠: `[ipaddress]` (行番号: 7 / 抜粋: "import ipaddress") |
-| `re` | 標準ライブラリ | アクセスログ中の秘密情報マスク用正規表現(`_QUERY_SECRET_RE`/`redact_query_secrets`/`SecretRedactionFilter`) | 根拠: `[re]` (行番号: 8 / 抜粋: "import re") |
-| `typing` (AsyncGenerator, Optional, Callable, Awaitable) | 標準ライブラリ | 型ヒントの定義 | 根拠: `[typing]` (行番号: 10 / 抜粋: "from typing import AsyncGenerat") |
-| `fastapi` | 外部パッケージ | Webフレームワーク基本機能 | 根拠: `[FastAPI]` (行番号: 12 / 抜粋: "from fastapi import FastAPI, Re") |
-| `fastapi.staticfiles` | 外部パッケージ | 静的ファイル配信 | 根拠: `[StaticFiles]` (行番号: 13 / 抜粋: "from fastapi.staticfiles import") |
-| `fastapi.responses` | 外部パッケージ | JSON/ファイルレスポンス生成 | 根拠: `[JSONResponse, FileResponse]` (行番号: 14 / 抜粋: "from fastapi.responses import J") |
-| `fastapi.middleware.cors` | 外部パッケージ | CORS処理ミドルウェア | 根拠: `[CORSMiddleware]` (行番号: 15 / 抜粋: "from fastapi.middleware.cors im") |
-| `uvicorn` | 外部パッケージ | ASGIサーバーの起動（トップレベルではなく`_run_uvicorn_server`関数内でのローカルインポート） | 根拠: `[uvicorn]` (行番号: 427 / 抜粋: "import uvicorn") |
-| `sqlite3` | 標準ライブラリ | 起動時マイグレーション適用のためのDB接続確立 | 根拠: `[sqlite3]` (行番号: 22 / 抜粋: "import sqlite3") |
-| `config` | ローカルモジュール | 設定値(`QUEST_DIST_DIR`, `SQLITE_DB_PATH`等)の取得 | 根拠: `[config]` (行番号: 24 / 抜粋: "import config") |
-| `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化処理 | 根拠: `[setup_logging]` (行番号: 25 / 抜粋: "from core.logger import setup_l") |
-| `core.migrations.apply_pending_migrations` | ローカルモジュール | 起動時のスキーママイグレーション適用 | 根拠: `[apply_pending_migrations]` (行番号: 26 / 抜粋: "from core.migrations import apply_pending_migrations") |
-| `services.sensor_service`, `services.camera_service` | ローカルモジュール | センサータスクの管理(`sensor_service`)、シャットダウン時のffmpegプロセス一括停止(`camera_service.stop_all_processes()`) | 根拠: `[sensor_service, camera_service]` (行番号: 27 / 抜粋: "from services import sensor_service, camera_service") |
-| `routers.*` (`quest_router`, `webhook_router`, `system_router`, `camera_router`, `alexa_router`, `routine_router`) | ローカルモジュール | 各APIエンドポイントのルーター。**（デイリールーティン機能追加で修正）** `routine_router`が新たにインポートされ`/api/routine`にマウントされる（下記「ブラックボックスとなる外部要素」および§8参照） | 根拠: `[routers]` (行番号: 30 / 抜粋: "from routers import quest_router, webhook_router, system_router, camera_router, alexa_router, routine_router") |
+| `datetime` | 標準ライブラリ | 現在時刻の取得 | 根拠: `[datetime]` (行番号: 5 / 抜粋: "import datetime") |
+| `subprocess` | 標準ライブラリ | 外部プロセスの起動・管理 | 根拠: `[subprocess]` (行番号: 6 / 抜粋: "import subprocess") |
+| `logging` | 標準ライブラリ | ログの出力、フィルター作成 | 根拠: `[logging]` (行番号: 7 / 抜粋: "import logging") |
+| `ipaddress` | 標準ライブラリ | IPアドレスのパースと検証 | 根拠: `[ipaddress]` (行番号: 8 / 抜粋: "import ipaddress") |
+| `re` | 標準ライブラリ | アクセスログ中の秘密情報マスク用正規表現(`_QUERY_SECRET_RE`/`redact_query_secrets`/`SecretRedactionFilter`) | 根拠: `[re]` (行番号: 9 / 抜粋: "import re") |
+| `typing` (AsyncGenerator, Optional, Callable, Awaitable) | 標準ライブラリ | 型ヒントの定義 | 根拠: `[typing]` (行番号: 12 / 抜粋: "from typing import AsyncGenerat") |
+| `fastapi` | 外部パッケージ | Webフレームワーク基本機能 | 根拠: `[FastAPI]` (行番号: 14 / 抜粋: "from fastapi import FastAPI, Re") |
+| `fastapi.staticfiles` | 外部パッケージ | 静的ファイル配信 | 根拠: `[StaticFiles]` (行番号: 15 / 抜粋: "from fastapi.staticfiles import") |
+| `fastapi.responses` | 外部パッケージ | JSON/ファイルレスポンス生成 | 根拠: `[JSONResponse, FileResponse]` (行番号: 16 / 抜粋: "from fastapi.responses import J") |
+| `fastapi.middleware.cors` | 外部パッケージ | CORS処理ミドルウェア | 根拠: `[CORSMiddleware]` (行番号: 17 / 抜粋: "from fastapi.middleware.cors im") |
+| `uvicorn` | 外部パッケージ | ASGIサーバーの起動（トップレベルではなく`_run_uvicorn_server`関数内でのローカルインポート） | 根拠: `[uvicorn]` (行番号: 625 / 抜粋: "import uvicorn") |
+| `sqlite3` | 標準ライブラリ | 起動時マイグレーション適用のためのDB接続確立 | 根拠: `[sqlite3]` (行番号: 24 / 抜粋: "import sqlite3") |
+| `config` | ローカルモジュール | 設定値(`QUEST_DIST_DIR`, `SQLITE_DB_PATH`等)の取得 | 根拠: `[config]` (行番号: 26 / 抜粋: "import config") |
+| `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化処理 | 根拠: `[setup_logging]` (行番号: 27 / 抜粋: "from core.logger import setup_l") |
+| `core.migrations.apply_pending_migrations` | ローカルモジュール | 起動時のスキーママイグレーション適用 | 根拠: `[apply_pending_migrations]` (行番号: 28 / 抜粋: "from core.migrations import apply_pending_migrations") |
+| `services.sensor_service`, `services.camera_service` | ローカルモジュール | センサータスクの管理(`sensor_service`)、シャットダウン時のffmpegプロセス一括停止(`camera_service.stop_all_processes()`) | 根拠: `[sensor_service, camera_service]` (行番号: 29 / 抜粋: "from services import sensor_service, camera_service") |
+| `routers.*` (`quest_router`, `webhook_router`, `system_router`, `camera_router`, `alexa_router`, `routine_router`) | ローカルモジュール | 各APIエンドポイントのルーター。**（デイリールーティン機能追加で修正）** `routine_router`が新たにインポートされ`/api/routine`にマウントされる（下記「ブラックボックスとなる外部要素」および§8参照） | 根拠: `[routers]` (行番号: 33 / 抜粋: "from routers import quest_router, webhook_router, system_router, camera_router, alexa_router, routine_router") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.QUEST_DIST_DIR` | 設定ファイル内の変数の有無・パス文字列が不明 | `getattr(config, "QUEST_DIST_DIR", None)` (行番号: 355 / 抜粋: "quest_dist_dir = getattr(config") |
-| `setup_logging()` | ログ出力フォーマット等の詳細仕様が不明 | `logger = setup_logging("unifie")` (行番号: 35 / 抜粋: "logger = setup_logging("unifie") |
-| `sensor_service.cancel_all_tasks()` | キャンセルされる具体的なタスク内容が不明 | `sensor_service.cancel_all_tasks()` (行番号: 227 / 抜粋: "sensor_service.cancel_all_tasks") |
+| `config.QUEST_DIST_DIR` | 設定ファイル内の変数の有無・パス文字列が不明 | `getattr(config, "QUEST_DIST_DIR", None)` (行番号: 537 / 抜粋: "quest_dist_dir = getattr(config") |
+| `setup_logging()` | ログ出力フォーマット等の詳細仕様が不明 | `logger = setup_logging("unifie")` (行番号: 41 / 抜粋: "logger = setup_logging("unifie") |
+| `sensor_service.cancel_all_tasks()` | キャンセルされる具体的なタスク内容が不明 | `sensor_service.cancel_all_tasks()` (行番号: 333 / 抜粋: "sensor_service.cancel_all_tasks") |
 | 各ルーター (`webhook`, `quest`, `system`, `camera`, `alexa`, `routine`) | 各パス配下の具体的なルーティング定義が不明（`alexa_router`は対応する仕様書が現時点で未作成のため特に不明。`routine_router`は[routine_router.md](./routine_router.md)を参照） | `app.include_router(...)` (行番号: 501-506 / 抜粋: "app.include_router(webhook_router.router)") |
-| `dashboard_router` / `dashboard_proxy_service` | **（スマホ対応で追加）** `config.DASHBOARD_BASE_PATH` 配下のルート定義と、HTTP/WebSocketの中継処理の詳細が本ファイルからは不明（[dashboard_router.md](./dashboard_router.md) / [dashboard_proxy_service.md](./dashboard_proxy_service.md) を参照） | `app.include_router(dashboard_router.router, tags=["dashboard"])` (行番号: 514 / 抜粋: "app.include_router(dashboard_router.router, tags=[\"dashboard\"])") |
+| `dashboard_router` / `dashboard_proxy_service` | **（スマホ対応で追加）** `config.DASHBOARD_BASE_PATH` 配下のルート定義と、HTTP/WebSocketの中継処理の詳細が本ファイルからは不明（[dashboard_router.md](./dashboard_router.md) / [dashboard_proxy_service.md](./dashboard_proxy_service.md) を参照） | `app.include_router(dashboard_router.router, tags=["dashboard"])` (行番号: 518 / 抜粋: "app.include_router(dashboard_router.router, tags=[\"dashboard\"])") |
 | `monitors/camera_monitor.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, camera_script])` (行番号: 183 / 抜粋: "camera_process = subprocess.Po") |
 | `scheduler_boot.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, scheduler_script])` (行番号: 192 / 抜粋: "scheduler_process = subprocess.") |
-| `apply_pending_migrations()` | マイグレーション適用の具体的な内部処理は `core/migrations.py` にあるため不明 | `apply_pending_migrations(migration_conn)` (行番号: 165 / 抜粋: "apply_pending_migrations(migration_conn)") |
+| `apply_pending_migrations()` | マイグレーション適用の具体的な内部処理は `core/migrations.py` にあるため不明 | `apply_pending_migrations(migration_conn)` (行番号: 275 / 抜粋: "apply_pending_migrations(migration_conn)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -141,7 +141,7 @@
 
 
 * **戻り値/レスポンス**: `AsyncGenerator[None, None]`
-* 根拠: `-> AsyncGenerator[None, None]:` (行番号: 236 / 抜粋: "-> AsyncGenerator[None, None]:")
+* 根拠: `-> AsyncGenerator[None, None]:` (行番号: 240 / 抜粋: "-> AsyncGenerator[None, None]:")
 
 
 * **副作用**: Uvicornロガー設定の変更、`config.SWITCHBOT_WEBHOOK_TOKEN`未設定時の警告ログ出力、`sqlite3.connect`によるマイグレーション用DB接続の確立と`apply_pending_migrations`の実行、外部プロセス(`subprocess.Popen`)の実行と強制終了(`terminate`, `kill`)、asyncioタスク(`_supervise_child_processes`)の生成とキャンセル、グローバル変数(`camera_process`, `scheduler_process`)の書き換え(`_set_child_process`経由)。
@@ -149,14 +149,14 @@
 
 
 * **エラーハンドリング**: NASパスプリウォーム失敗時の例外(`Exception`)は捕捉しエラーログ出力のうえ起動を継続する。**マイグレーション適用失敗時の例外(`Exception`)は、捕捉した上で`migration_ok = False`とし`logger.critical`（Discord通知経由）でCRITICALログを出力するのみで、起動そのものは継続する（`lifespan`は例外を再送出せず`yield`まで到達する）ものの、直後の`if migration_ok:`分岐によりcamera_monitor/schedulerの子プロセスも死活監視ループも起動されない**（Issue #383。以前は`logger.error`でエラーログを出すだけで握りつぶし、子プロセスの起動を含めてサービス継続していたが、この挙動は廃止されている）。子プロセスの起動失敗は`_spawn_child_process`内の`try/except Exception`で捕捉され`logger.error`を出して`None`を返す（Issue #360でcamera_monitor起動もscheduler同様に保護）。監視ループのcancel時の`CancelledError`は捕捉して握りつぶす。プロセス停止時のタイムアウト(`subprocess.TimeoutExpired`)も捕捉し、強制`kill()`へフォールバックする。
-* 根拠: `except Exception as e: logger.error(f"⚠️ NAS path prewarm failed...")` (行番号: 254-255 / 抜粋: "NAS path prewarm failed"), `except Exception as e: ... logger.critical(` (行番号: 268-274 / 抜粋: "🚨 Migration failed at startup"), `if migration_ok:` (行番号: 278 / 抜粋: "if migration_ok:"), `except (asyncio.CancelledError, Exception):` (行番号: 297 / 抜粋: "except (asyncio.CancelledError, Exception):"), `except subprocess.TimeoutExpired` (行番号: 305, 314 / 抜粋: "except subprocess.TimeoutExpired")
+* 根拠: `except Exception as e: logger.error(f"⚠️ NAS path prewarm failed...")` (行番号: 254-255 / 抜粋: "NAS path prewarm failed"), `except Exception as e: ... logger.critical(` (行番号: 268-274 / 抜粋: "🚨 Migration failed at startup"), `if migration_ok:` (行番号: 287 / 抜粋: "if migration_ok:"), `except (asyncio.CancelledError, Exception):` (行番号: 306 / 抜粋: "except (asyncio.CancelledError, Exception):"), `except subprocess.TimeoutExpired` (行番号: 305, 314 / 抜粋: "except subprocess.TimeoutExpired")
 
 
 
 ### `restart_dead_children` / `_supervise_child_processes` / `_spawn_child_process`（Issue #646で追加）
 
 * **役割**: 監視子プロセス(`CHILD_SCRIPTS`: `camera_monitor` → `monitors/camera_monitor.py`、`scheduler` → `scheduler_boot.py`)の死活監視と自動再起動。`restart_dead_children(now)`は各子プロセスを`poll()`し、終了していれば`_spawn_child_process`で再起動して`_set_child_process`でグローバル変数を差し替え、再起動した子プロセス名の一覧を返す(テスト容易性のため同期関数)。直近1時間(`_CHILD_RESTART_WINDOW_SEC`)の再起動回数が`CHILD_RESTART_MAX_PER_HOUR`(5)に達した子プロセスはクラッシュループとみなして`_child_restart_disabled`に登録し、以後は再起動せず`logger.critical`(Discord通知)を1回だけ出す。起動時に`Popen`が失敗して`None`のままの子プロセスは監視対象外(起動失敗の無限リトライにしない)。`_supervise_child_processes`は`CHILD_MONITOR_INTERVAL_SEC`(30秒)ごとに`restart_dead_children`を呼ぶ無限ループで、`lifespan`がタスクとして起動・キャンセルする。
-* 根拠: `CHILD_SCRIPTS: Dict[str, str] = {` (行番号: 141 / 抜粋: "CHILD_SCRIPTS: Dict[str, str] = {")、`CHILD_MONITOR_INTERVAL_SEC: float = 30.0` (行番号: 146)、`CHILD_RESTART_MAX_PER_HOUR: int = 5` (行番号: 149)、`def _spawn_child_process(name: str) -> Optional[subprocess.Popen]:` (行番号: 173 / 抜粋: "def _spawn_child_process(name: str) -> Optional[subprocess.Popen]:")、`def restart_dead_children(now: Optional[float] = None) -> List[str]:` (行番号: 188 / 抜粋: "def restart_dead_children(now: Optional[float] = None) -> List[str]:")、`async def _supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC) -> None:` (行番号: 229 / 抜粋: "async def _supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC) -> None:")
+* 根拠: `CHILD_SCRIPTS: Dict[str, str] = {` (行番号: 145 / 抜粋: "CHILD_SCRIPTS: Dict[str, str] = {")、`CHILD_MONITOR_INTERVAL_SEC: float = 30.0` (行番号: 146)、`CHILD_RESTART_MAX_PER_HOUR: int = 5` (行番号: 149)、`def _spawn_child_process(name: str) -> Optional[subprocess.Popen]:` (行番号: 173 / 抜粋: "def _spawn_child_process(name: str) -> Optional[subprocess.Popen]:")、`def restart_dead_children(now: Optional[float] = None) -> List[str]:` (行番号: 188 / 抜粋: "def restart_dead_children(now: Optional[float] = None) -> List[str]:")、`async def _supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC) -> None:` (行番号: 229 / 抜粋: "async def _supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC) -> None:")
 
 
 * **引数/リクエスト**: `restart_dead_children(now: Optional[float] = None)`(`time.monotonic()`基準の現在時刻。省略時は実時刻)、`_spawn_child_process(name: str)`、`_supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC)`
@@ -191,11 +191,11 @@
 
 
 * **副作用**: レスポンスヘッダーの追加のみ。ログ出力・I/Oは行わない。
-* 根拠: `response.headers[name] = value` (行番号: 391 / 抜粋: "response.headers[name] = value")
+* 根拠: `response.headers[name] = value` (行番号: 403 / 抜粋: "response.headers[name] = value")
 
 
 * **エラーハンドリング**: 独自の例外処理は持たない（`call_next` が送出した例外はそのまま `global_exception_handler` へ伝播する）。
-* 根拠: `response = await call_next(request)` (行番号: 374 / 抜粋: "response = await call_next(request)")
+* 根拠: `response = await call_next(request)` (行番号: 389 / 抜粋: "response = await call_next(request)")
 
 
 ### `ip_restriction_middleware`
@@ -213,7 +213,7 @@
 
 
 * **副作用**: 外部ネットワークからのアクセス判定時(`logger.info`)のログ出力。
-* 根拠: `logger.info(f"Allowed extern` (行番号: 321 / 抜粋: "logger.info(f"Allowed extern")
+* 根拠: `logger.info(f"Allowed extern` (行番号: 493 / 抜粋: "logger.info(f"Allowed extern")
 
 
 * **エラーハンドリング**: IPアドレス解析時(`ipaddress.ip_address`)の`ValueError`を補足し無視(`pass`)する。
@@ -236,11 +236,11 @@
 
 
 * **副作用**: エラーログへのスタックトレース出力。
-* 根拠: `logger.error(f"🔥 Global Exce` (行番号: 326 / 抜粋: "logger.error(f"🔥 Global Exce")
+* 根拠: `logger.error(f"🔥 Global Exce` (行番号: 498 / 抜粋: "logger.error(f"🔥 Global Exce")
 
 
 * **エラーハンドリング**: なし（本メソッド自体が最上位の例外ハンドラ）
-* 根拠: `@app.exception_handler(Exceptio` (行番号: 324 / 抜粋: "@app.exception_handler(Exceptio")
+* 根拠: `@app.exception_handler(Exceptio` (行番号: 496 / 抜粋: "@app.exception_handler(Exceptio")
 
 
 
@@ -255,7 +255,7 @@
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
-* 根拠: `return FileResponse(target_fil` (行番号: 378 / 抜粋: "return FileResponse(target_file"), `return JSONResponse(status_code` (行番号: 374 / 抜粋: "return JSONResponse(status_code")
+* 根拠: `return FileResponse(target_fil` (行番号: 560 / 抜粋: "return FileResponse(target_file"), `return JSONResponse(status_code` (行番号: 374 / 抜粋: "return JSONResponse(status_code")
 
 
 * **副作用**: なし
@@ -352,7 +352,7 @@
 
 
 * **副作用**: `uvicorn.run`の呼び出し（ASGIサーバーの起動。呼び出しはブロッキングでプロセスの生存期間中戻らない）
-* 根拠: (行番号: 430 / 抜粋: "uvicorn.run(app, host="0.0.0.0", port=8000)")
+* 根拠: (行番号: 628 / 抜粋: "uvicorn.run(app, host="0.0.0.0", port=8000)")
 
 
 * **エラーハンドリング**: なし
@@ -450,7 +450,7 @@ graph TD
 * 根拠: [ダッシュボード中継のinclude箇所のコメント] (行番号: 508〜513 / 抜粋: "# ★このパスを Cloudflare Access のバイパス対象に設定してはならない。")
 
 * **（スマホ対応）ダッシュボード中継のルートはOpenAPIスキーマに出ない**: `routers/dashboard_router.py` の3ルートはすべて `include_in_schema=False` である。`tests/test_unified_server_app.py` の `test_allowed_webhook_paths_matches_mounted_webhook_routes` はOpenAPIスキーマ上のパス一覧（`/webhook/`・`/callback/` 始まり）を突き合わせる実装なので、この検査には影響しない。
-* 根拠: [ダッシュボード中継のinclude] (行番号: 514 / 抜粋: "app.include_router(dashboard_router.router, tags=[\"dashboard\"])")
+* 根拠: [ダッシュボード中継のinclude] (行番号: 518 / 抜粋: "app.include_router(dashboard_router.router, tags=[\"dashboard\"])")
 
 * **（スマホ対応）WebSocketのルートはHTTPミドルウェアを通らない**: `security_headers_middleware` / `ip_restriction_middleware` は `@app.middleware("http")` で登録されているため、`config.DASHBOARD_BASE_PATH` 配下のWebSocket接続（Streamlitの `_stcore/stream`）には適用されない。これはFastAPI/Starletteの仕様であり、本ファイル固有の設定ではない。
 * 根拠: [ミドルウェア登録] (行番号: 355, 395 / 抜粋: "@app.middleware(\"http\")")

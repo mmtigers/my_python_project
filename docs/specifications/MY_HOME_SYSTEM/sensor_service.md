@@ -42,8 +42,8 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` 内の各定数 | `SQLITE_TABLE_SWITCHBOT_LOGS`、`SQLITE_TABLE_POWER_USAGE` の具体的な値や型が提供されていないため。 | `[config.SQLITE_TABLE_SWITCHBOT_LOGS]` (行番号: 154 / 抜粋: "config.SQLITE_TABLE_SWITCHBOT_LOGS,") |
-| `core.database.get_db_cursor` | DB接続の具体的な実装、扱うデータベースエンジン、コンテキストマネージャが返すカーソルオブジェクトの仕様が不明であるため。 | `[core.database.get_db_cursor]` (行番号: 162 / 抜粋: "with get_db_cursor() as") |
+| `config` 内の各定数 | `SQLITE_TABLE_SWITCHBOT_LOGS`、`SQLITE_TABLE_POWER_USAGE` の具体的な値や型が提供されていないため。 | `[config.SQLITE_TABLE_SWITCHBOT_LOGS]` (行番号: 225 / 抜粋: "config.SQLITE_TABLE_SWITCHBOT_LOGS,") |
+| `core.database.get_db_cursor` | DB接続の具体的な実装、扱うデータベースエンジン、コンテキストマネージャが返すカーソルオブジェクトの仕様が不明であるため。 | `[core.database.get_db_cursor]` (行番号: 247 / 抜粋: "with get_db_cursor() as") |
 | `core.database.save_log_async` | テーブル名、カラムリスト、値を渡した際の内部でのクエリ生成ロジックやエラーハンドリングの挙動が不明であるため。 | `[save_log_async]` (行番号: 142 / 抜粋: "await save_log_async(") |
 | `services.notification_service.send_push` | メッセージ形式の仕様、引数として渡す `"discord"` や `"notify"` の処理分岐、外部API連携の実装が不明であるため。 | `[send_push]` (行番号: 64 / 抜粋: "send_push,") |
 
@@ -99,7 +99,7 @@
 * 根拠: (行番号: 74 / 抜粋: "IS_ACTIVE[mac] = False" の直後に "try:\n        await asyncio.to_thread(")
 
 * **役割**: 指定された時間待機後、動きが止まった旨の通知を送信し、タスク状態をクリアする。
-* 根拠: `[send_inactive_notification]` (行番号: 61 / 抜粋: "msg: str = f"💤【{location}・見守")
+* 根拠: `[send_inactive_notification]` (行番号: 114 / 抜粋: "msg: str = f"💤【{location}・見守")
 * **（Issue #387 で修正）** `finally` の後片付け（`IS_ACTIVE[mac]=False`・`MOTION_TASKS` からの削除）は、`MOTION_TASKS[mac]` に「自分とは別の、まだ完了していない `asyncio.Task`」が登録されている（＝通知送信中に次の検知が来て新しいタイマータスクに置き換えられた）場合はスキップする。以前は無条件に実行していたため新タスクの参照を消してしまい、直後の検知で二重通知、さらに参照を失った新タスクが cancel 不能のまま満了して誤った「止まりました」通知を出していた。
 * 根拠: `registered = MOTION_TASKS.get(mac)` (行番号: 87〜95)
 
@@ -113,11 +113,11 @@
 
 
 * **副作用**: `asyncio.sleep` による待機、`send_push` による外部API呼び出し、グローバル変数 `IS_ACTIVE` の更新、`MOTION_TASKS` からの要素削除。
-* 根拠: `[send_inactive_notification]` (行番号: 73 / 抜粋: "del MOTION_TASKS[mac]")
+* 根拠: `[send_inactive_notification]` (行番号: 135 / 抜粋: "del MOTION_TASKS[mac]")
 
 
 * **エラーハンドリング**: `asyncio.CancelledError` をキャッチし、デバッグログを出力する。
-* 根拠: `[send_inactive_notification]` (行番号: 75 / 抜粋: "except asyncio.CancelledError:")
+* 根拠: `[send_inactive_notification]` (行番号: 107 / 抜粋: "except asyncio.CancelledError:")
 
 
 
@@ -147,7 +147,7 @@
 ### `cancel_all_tasks`
 
 * **役割**: 起動中のすべての見守りタイマータスクをキャンセルする。
-* 根拠: `[cancel_all_tasks]` (行番号: 127 / 抜粋: "for t in MOTION_TASKS.values()")
+* 根拠: `[cancel_all_tasks]` (行番号: 204 / 抜粋: "for t in MOTION_TASKS.values()")
 
 
 * **引数/リクエスト**: なし
@@ -159,7 +159,7 @@
 
 
 * **副作用**: グローバル変数 `MOTION_TASKS` に保持されている各タスクの `cancel()` 実行。
-* 根拠: `[cancel_all_tasks]` (行番号: 128 / 抜粋: "t.cancel()")
+* 根拠: `[cancel_all_tasks]` (行番号: 205 / 抜粋: "t.cancel()")
 
 
 * **エラーハンドリング**: なし
@@ -193,7 +193,7 @@
 ### `process_power_data`
 
 * **役割**: 電力データをDBに保存し、前回記録された値と閾値を比較して閾値を跨いだ場合（ON/OFF）に使用開始/終了の通知を送信する。
-* 根拠: `[process_power_data]` (行番号: 196 / 抜粋: "prev_wattage < threshold and w")
+* 根拠: `[process_power_data]` (行番号: 289 / 抜粋: "prev_wattage < threshold and w")
 
 
 * **引数/リクエスト**: `device_id: str`, `device_name: str`, `wattage: float`, `notify_settings: Dict[str, Any]`

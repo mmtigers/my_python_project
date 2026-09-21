@@ -85,21 +85,21 @@
 
 
 * **戻り値/レスポンス**: `Dict[str, Dict[str, Any]]`（`_STATE_FILE`が存在しない・読み込みに失敗した・JSONの中身が辞書でない場合はいずれも空の辞書）
-* 根拠: [返り値の型ガード] (行番号: 45 / 抜粋: "return states if isinstance(states, dict) else {}")
+* 根拠: [返り値の型ガード] (行番号: 44 / 抜粋: "return states if isinstance(states, dict) else {}")
 
 
 * **副作用**: `_STATE_FILE`の読み込み（`state_file.read_json`が存在確認と`flock`共有ロックの取得・解放を行う）。
-* 根拠: [state_fileへの委譲] (行番号: 44 / 抜粋: "states = state_file.read_json(_STATE_FILE, default={})")
+* 根拠: [state_fileへの委譲] (行番号: 43 / 抜粋: "states = state_file.read_json(_STATE_FILE, default={})")
 
 
 * **エラーハンドリング**: 例外は`core/state_file.read_json`側が捕捉して警告ログを出し`default`を返すため、本関数からは例外が送出されない（永続状態が読めなくても`main`は継続する）。
-* 根拠: [state_fileへの委譲] (行番号: 44 / 抜粋: "states = state_file.read_json(_STATE_FILE, default={})")
+* 根拠: [state_fileへの委譲] (行番号: 43 / 抜粋: "states = state_file.read_json(_STATE_FILE, default={})")
 
 
 ### `_save_persisted_states`
 
 * **役割**: 渡された状態辞書をJSONとして`_STATE_FILE`へ書き込み、次回プロセス実行時に復元できるようにする。`main`の終了直前に呼び出される。**（Issue #449で追加 / 2026-09-06 品質監査で修正）** 書き込みは`flock`排他ロック(`LOCK_EX`)のもとで一時ファイル`{_STATE_FILE}.tmp.{pid}`へ書き切り、`flush`/`fsync`の後`os.replace`で原子的に差し替える。`open(..., "w")`は`flock`取得より前にファイルを切り詰めるため、その瞬間に`LOCK_SH`で読んだ側が空ファイル → `JSONDecodeError` → `{}`（全デバイス初期状態扱い）になっていた（#449のflock追加では閉じていなかった競合）。**（Issue #661で修正）** この「flock + tmp + fsync + os.replace」方式そのものを`core/state_file.py`の`write_json_atomic`へ集約し、本関数はその呼び出しだけになった。失敗時に一時ファイルを削除する挙動も`state_file`側が持つ。
-* 根拠: `def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:` (行番号: 47 / 抜粋: "def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:")、[state_fileへの委譲] (行番号: 56 / 抜粋: "state_file.write_json_atomic(_STATE_FILE, states)")
+* 根拠: `def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:` (行番号: 47 / 抜粋: "def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:")、[state_fileへの委譲] (行番号: 55 / 抜粋: "state_file.write_json_atomic(_STATE_FILE, states)")
 
 
 * **引数/リクエスト**: `states` (`Dict[str, Dict[str, Any]]`: 永続化するデバイス状態の辞書)
@@ -111,11 +111,11 @@
 
 
 * **副作用**: `_STATE_FILE`の原子的な差し替え（一時ファイルの作成・`fsync`・`os.replace`）。`state_file.write_json_atomic`が行う。
-* 根拠: [state_fileへの委譲] (行番号: 56 / 抜粋: "state_file.write_json_atomic(_STATE_FILE, states)")
+* 根拠: [state_fileへの委譲] (行番号: 55 / 抜粋: "state_file.write_json_atomic(_STATE_FILE, states)")
 
 
 * **エラーハンドリング**: 例外は`core/state_file.write_json_atomic`側が捕捉して警告ログを出し`False`を返すため、本関数からは例外が送出されない（永続化に失敗しても`main`の処理は継続する）。
-* 根拠: [state_fileへの委譲] (行番号: 56 / 抜粋: "state_file.write_json_atomic(_STATE_FILE, states)")
+* 根拠: [state_fileへの委譲] (行番号: 55 / 抜粋: "state_file.write_json_atomic(_STATE_FILE, states)")
 
 
 ### `fetch_device_status_sync`

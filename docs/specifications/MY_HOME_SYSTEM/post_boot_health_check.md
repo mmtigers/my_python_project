@@ -43,23 +43,23 @@
 | `subprocess` | 標準ライブラリ | `vcgencmd`, `ping`, `tail`, `aplay`, `bluetoothctl` 等の外部コマンド実行 | `import subprocess` (行番号: 5 / 抜粋: "import subprocess") |
 | `shutil` | 標準ライブラリ | ディスク使用量取得（`disk_usage`） | `import shutil` (行番号: 6 / 抜粋: "import shutil") |
 | `requests` | 外部ライブラリ | HTTPヘルスチェック、外部API疎通確認 | `import requests` (行番号: 7 / 抜粋: "import requests") |
-| `core.database.get_ro_connection`（Issue #661 で `sqlite3`/`contextlib` の直接importを置き換え） | ローカルモジュール | DBファイルの整合性チェック用の読み取り専用接続(timeout 30秒、終了時に必ずclose) | `from core.database import get_ro_connection` (行番号: 20 / 抜粋: "from core.database import get_ro_connection") |
-| `typing.List` | 標準ライブラリ | `results` フィールドの型ヒント | `from typing import List` (行番号: 9 / 抜粋: "from typing import List") |
-| `dataclasses.dataclass` | 標準ライブラリ | `CheckResult` クラスの定義 | `from dataclasses import dataclass` (行番号: 10 / 抜粋: "from dataclasses import dataclass") |
-| `datetime`, `timedelta` | 標準ライブラリ | ログの時刻フィルタリング（直近10分判定） | `from datetime import datetime, timedelta` (行番号: 11 / 抜粋: "from datetime import datetime, timedelta") |
-| `concurrent.futures.ThreadPoolExecutor` | 標準ライブラリ | `check_services`でのサービス起動待ちリトライを対象ごとに並列実行する | `from concurrent.futures import ThreadPoolExecutor` (行番号: 12 / 抜粋: "from concurrent.futures import ThreadPoolExecutor") |
+| `core.database.get_ro_connection`（Issue #661 で `sqlite3`/`contextlib` の直接importを置き換え） | ローカルモジュール | DBファイルの整合性チェック用の読み取り専用接続(timeout 30秒、終了時に必ずclose) | `from core.database import get_ro_connection` (行番号: 21 / 抜粋: "from core.database import get_ro_connection") |
+| `typing.List` | 標準ライブラリ | `results` フィールドの型ヒント | `from typing import List` (行番号: 8 / 抜粋: "from typing import List") |
+| `dataclasses.dataclass` | 標準ライブラリ | `CheckResult` クラスの定義 | `from dataclasses import dataclass` (行番号: 9 / 抜粋: "from dataclasses import dataclass") |
+| `datetime`, `timedelta` | 標準ライブラリ | ログの時刻フィルタリング（直近10分判定） | `from datetime import datetime, timedelta` (行番号: 10 / 抜粋: "from datetime import datetime, timedelta") |
+| `concurrent.futures.ThreadPoolExecutor` | 標準ライブラリ | `check_services`でのサービス起動待ちリトライを対象ごとに並列実行する | `from concurrent.futures import ThreadPoolExecutor` (行番号: 11 / 抜粋: "from concurrent.futures import ThreadPoolExecutor") |
 | `config` | 内部モジュール | 各種設定値（`LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC`, `ENABLE_BLUETOOTH`）の取得 | `import config` (行番号: 19 / 抜粋: "import config") |
 | `core.logger.setup_logging` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.logger import setup_logging` (行番号: 19 / 抜粋: "from core.logger import setup_logging") |
 | `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 20 / 抜粋: "from services.notification_service import send_push") |
-| `services.switchbot_service` | 内部モジュール | SwitchBot API疎通確認用の認証ヘッダー生成（`create_switchbot_auth_headers`） | `from services import switchbot_service` (行番号: 21 / 抜粋: "from services import switchbot_service") |
+| `services.switchbot_service` | 内部モジュール | SwitchBot API疎通確認用の認証ヘッダー生成（`create_switchbot_auth_headers`） | `from services import switchbot_service` (行番号: 23 / 抜粋: "from services import switchbot_service") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `core.logger.setup_logging` | 生成されるロガーの出力先・フォーマット・ログレベルの詳細が不明。 | `logger = core.logger.setup_logging("health_check")` (行番号: 27 / 抜粋: "logger = setup_logging("health_check")") |
+| `core.logger.setup_logging` | 生成されるロガーの出力先・フォーマット・ログレベルの詳細が不明。 | `logger = core.logger.setup_logging("health_check")` (行番号: 29 / 抜粋: "logger = setup_logging("health_check")") |
 | `services.notification_service.send_push` | 通知の実際の送信方式や失敗時の挙動（例外送出の有無等）が不明。 | `services.notification_service.send_push(` (行番号: 249 / 抜粋: "send_push(") |
-| `config` の各設定値 | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC`, `ENABLE_BLUETOOTH` の実際の値・存在有無が不明（`LOG_DIR`等は `getattr` によるデフォルト値付きアクセス。`NATURE_REMO_ACCESS_TOKEN`は直接参照）。 | `getattr(config, 'LOG_DIR', os.path.join(BASE_DIR, 'logs'))` (行番号: 62 / 抜粋: "log_dir = getattr(config, 'LOG_DIR', os.path.join(BASE_DIR, 'logs'))") |
+| `config` の各設定値 | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC`, `ENABLE_BLUETOOTH` の実際の値・存在有無が不明（`LOG_DIR`等は `getattr` によるデフォルト値付きアクセス。`NATURE_REMO_ACCESS_TOKEN`は直接参照）。 | `getattr(config, 'LOG_DIR', os.path.join(BASE_DIR, 'logs'))` (行番号: 69 / 抜粋: "log_dir = getattr(config, 'LOG_DIR', os.path.join(BASE_DIR, 'logs'))") |
 | `vcgencmd`, `ping`, `tail`, `aplay`, `bluetoothctl` コマンド | 実行環境（Raspberry Pi等）にこれらのコマンドが存在する前提のコードだが、コマンドの実装自体は本ファイル外。いずれの呼び出しにも`timeout`引数（`bluetoothctl`のみ`stdin=subprocess.DEVNULL`も併用）が付与され、応答なく無限待機する事態を防いでいる。 | `subprocess.check_output(["vcgencmd", "measure_temp"], timeout=10)` (行番号: 97 / 抜粋: "res = subprocess.check_output(["vcgencmd", "measure_temp"], timeout=10).decode("utf-8")") |
 | SwitchBot / NatureRemo API | ステータスコードによる疎通確認と認証ヘッダーの送信は行うが、レスポンス本文の内容までは見ていないため、応答スキーマの詳細は不明。 | `("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers())` (行番号: 146 / 抜粋: "("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers()),") |
 
@@ -80,7 +80,7 @@
 
 
 * **副作用**: `sys.path` へのパス追加、失敗時の標準エラー出力・プロセス終了。
-* 根拠: `sys.path.append(BASE_DIR)` (行番号: 16 / 抜粋: "sys.path.append(BASE_DIR)")
+* 根拠: `sys.path.append(BASE_DIR)` (行番号: 15 / 抜粋: "sys.path.append(BASE_DIR)")
 
 
 * **エラーハンドリング**: `ImportError` を捕捉し、エラーメッセージを `sys.stderr` に出力後 `sys.exit(1)` でプロセスを終了する。
@@ -91,23 +91,23 @@
 ### `logger` (モジュールレベル変数)
 
 * **役割**: `core.logger.setup_logging` を用いて `"health_check"` 名のロガーインスタンスを生成する。
-* 根拠: `logger = core.logger.setup_logging("health_check")` (行番号: 27 / 抜粋: "logger = setup_logging("health_check")")
+* 根拠: `logger = core.logger.setup_logging("health_check")` (行番号: 29 / 抜粋: "logger = setup_logging("health_check")")
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 27 / 抜粋: "logger = setup_logging("health_check")")
+* 根拠: (行番号: 29 / 抜粋: "logger = setup_logging("health_check")")
 
 
 * **戻り値/レスポンス**: なし（グローバル変数への代入）
-* 根拠: (行番号: 27 / 抜粋: "logger = setup_logging("health_check")")
+* 根拠: (行番号: 29 / 抜粋: "logger = setup_logging("health_check")")
 
 
 * **副作用**: モジュール変数 `logger` の生成。
-* 根拠: (行番号: 27 / 抜粋: "logger = setup_logging("health_check")")
+* 根拠: (行番号: 29 / 抜粋: "logger = setup_logging("health_check")")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 27 / 抜粋: "logger = setup_logging("health_check")")
+* 根拠: (行番号: 29 / 抜粋: "logger = setup_logging("health_check")")
 
 
 
@@ -122,11 +122,11 @@
 
 
 * **戻り値/レスポンス**: `str | None`（`config.ENABLE_BLUETOOTH`が真かつ`config.SPEAKER_BLUETOOTH_MAC`が非空ならその値、そうでなければ`None`）
-* 根拠: `return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)` (行番号: 40 / 抜粋: "return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)")
+* 根拠: `return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)` (行番号: 44 / 抜粋: "return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)")
 
 
 * **副作用**: なし（`config`属性の読み取りのみ）。呼び出し結果はモジュールレベル変数 `TARGET_BLUETOOTH_MAC` に代入される。
-* 根拠: `TARGET_BLUETOOTH_MAC = resolve_target_bluetooth_mac()` (行番号: 42 / 抜粋: "TARGET_BLUETOOTH_MAC = resolve_target_bluetooth_mac()")
+* 根拠: `TARGET_BLUETOOTH_MAC = resolve_target_bluetooth_mac()` (行番号: 46 / 抜粋: "TARGET_BLUETOOTH_MAC = resolve_target_bluetooth_mac()")
 
 
 * **エラーハンドリング**: なし（`getattr`のデフォルト値により、`config`に該当属性が存在しない場合も例外は発生しない）。
@@ -145,7 +145,7 @@
 
 
 * **戻り値/レスポンス**: `CheckResult` インスタンス
-* 根拠: `@dataclass` (行番号: 50 / 抜粋: "@dataclass")
+* 根拠: `@dataclass` (行番号: 57 / 抜粋: "@dataclass")
 
 
 * **副作用**: なし
@@ -195,7 +195,7 @@
 
 
 * **副作用**: `self.max_retries=12`, `self.retry_interval=10`, `self.results=[]`, `self.log_file_path` の各インスタンス属性を設定する。
-* 根拠: `self.log_file_path = os.path.join(log_dir, "home_system.log")` (行番号: 63 / 抜粋: "self.log_file_path = os.path.join(log_dir, "home_system.log")")
+* 根拠: `self.log_file_path = os.path.join(log_dir, "home_system.log")` (行番号: 70 / 抜粋: "self.log_file_path = os.path.join(log_dir, "home_system.log")")
 
 
 * **エラーハンドリング**: なし
@@ -218,11 +218,11 @@
 
 
 * **副作用**: なし（ソケット接続を確立しコンテキスト終了時に自動クローズ）
-* 根拠: `with socket.create_connection((host, port), timeout=timeout):` (行番号: 68 / 抜粋: "with socket.create_connection((host, port), timeout=timeout):")
+* 根拠: `with socket.create_connection((host, port), timeout=timeout):` (行番号: 75 / 抜粋: "with socket.create_connection((host, port), timeout=timeout):")
 
 
 * **エラーハンドリング**: `socket.timeout`, `ConnectionRefusedError`, `OSError` を捕捉し `False` を返す。
-* 根拠: `except (socket.timeout, ConnectionRefusedError, OSError):` (行番号: 70 / 抜粋: "except (socket.timeout, ConnectionRefusedError, OSError):")
+* 根拠: `except (socket.timeout, ConnectionRefusedError, OSError):` (行番号: 77 / 抜粋: "except (socket.timeout, ConnectionRefusedError, OSError):")
 
 
 
@@ -237,11 +237,11 @@
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: `return 200 <= res.status_code < 400` (行番号: 76 / 抜粋: "return 200 <= res.status_code < 400")
+* 根拠: `return 200 <= res.status_code < 400` (行番号: 83 / 抜粋: "return 200 <= res.status_code < 400")
 
 
 * **副作用**: 外部へのHTTP GETリクエスト送信。
-* 根拠: `res = requests.get(url, headers=headers, timeout=timeout)` (行番号: 75 / 抜粋: "res = requests.get(url, headers=headers, timeout=timeout)")
+* 根拠: `res = requests.get(url, headers=headers, timeout=timeout)` (行番号: 82 / 抜粋: "res = requests.get(url, headers=headers, timeout=timeout)")
 
 
 * **エラーハンドリング**: 任意の `Exception` を捕捉し `False` を返す。
@@ -264,7 +264,7 @@
 
 
 * **副作用**: `/proc/uptime` ファイルの読み取り。
-* 根拠: `with open('/proc/uptime', 'r') as f:` (行番号: 82 / 抜粋: "with open('/proc/uptime', 'r') as f:")
+* 根拠: `with open('/proc/uptime', 'r') as f:` (行番号: 89 / 抜粋: "with open('/proc/uptime', 'r') as f:")
 
 
 * **エラーハンドリング**: **（修正済み）** 以前は無条件の `except:`（bare except）だったが、`except Exception:` に修正され、`SystemExit`/`KeyboardInterrupt`/`GeneratorExit`（いずれも`BaseException`直下でPython3のbare exceptでも捕捉されてしまう）を誤って握りつぶさなくなった。通常の例外はすべて捕捉して `"不明"` を返す点は変わらない。
@@ -314,7 +314,7 @@
 
 
 * **エラーハンドリング**: **（修正済み）** ping失敗時（`except Exception:`。以前は無条件の bare `except:` だった）は `STATUS_ERR` を追加して即 `return`。個々のAPI呼び出しは `_check_http` 内部で例外・非2xx/3xxステータスの両方を判定し、失敗時は `api_ngs` リストに追加、全体としては処理を継続する。
-* 根拠: `except Exception:` (行番号: 141 / 抜粋: "except Exception:"), `if not self._check_http(url, headers=headers):` (行番号: 160 / 抜粋: "if not self._check_http(url, headers=headers):")
+* 根拠: `except Exception:` (行番号: 141 / 抜粋: "except Exception:"), `if not self._check_http(url, headers=headers):` (行番号: 169 / 抜粋: "if not self._check_http(url, headers=headers):")
 
 
 
@@ -323,7 +323,7 @@
 * **役割**: SQLite DBファイルの存在確認と `PRAGMA quick_check` による整合性チェックを行う。
 * 根拠: `def check_database(self):` (行番号: 178〜206 / 抜粋: "def check_database(self):")
 * **（#411 S-L8で修正）** 以前は `conn.close()` を成功パス（`quick_check`実行後）の末尾でしか呼んでおらず、`cursor.execute`/`fetchone`が例外を送出した場合は`except Exception`節へは到達するが接続はcloseされずリークしていた。どの終了経路でも確実にcloseするよう変更した。**（Issue #661で修正）** 生の `sqlite3.connect(f"file:{db_path}?mode=ro", ...)` を `core/database.py` の `get_ro_connection(db_path=db_path)` へ寄せた（このスクリプトは `config.SQLITE_DB_PATH` が相対パスの場合に自前で `BASE_DIR` 基準の絶対パスへ解決してから接続するため、`db_path` を明示する）。あわせて接続の `timeout` が他の読み取り経路と同じ30秒(`RO_CONNECT_TIMEOUT_SEC`)になり、起動直後のマイグレーションやバックアップと重なっても即座に `"database is locked"` で ERROR 判定にならない。
-* 根拠: `with get_ro_connection(db_path=db_path) as conn:` (行番号: 187 / 抜粋: "with get_ro_connection(db_path=db_path) as conn:")
+* 根拠: `with get_ro_connection(db_path=db_path) as conn:` (行番号: 196 / 抜粋: "with get_ro_connection(db_path=db_path) as conn:")
 
 
 * **引数/リクエスト**: `self` のみ
@@ -335,7 +335,7 @@
 
 
 * **副作用**: 読み取り専用モード（`mode=ro`）でのSQLite接続・クエリ実行・接続クローズ、`self.results` への追加。
-* 根拠: `with get_ro_connection(db_path=db_path) as conn:` (行番号: 187 / 抜粋: "with get_ro_connection(db_path=db_path) as conn:")
+* 根拠: `with get_ro_connection(db_path=db_path) as conn:` (行番号: 196 / 抜粋: "with get_ro_connection(db_path=db_path) as conn:")
 
 
 * **エラーハンドリング**: DBファイル不在時は `STATUS_ERR` を追加して `return`。接続・クエリ実行中の任意の `Exception` を捕捉し `STATUS_ERR` とエラー内容を結果に追加する。
@@ -354,11 +354,11 @@
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ、`executor.map`が返す各サービスの `CheckResult` を対象の元の順序のまま追加）
-* 根拠: `self.results.extend(executor.map(self._wait_for_service, targets))` (行番号: 201 / 抜粋: "self.results.extend(executor.map(self._wait_for_service, targets))")
+* 根拠: `self.results.extend(executor.map(self._wait_for_service, targets))` (行番号: 226 / 抜粋: "self.results.extend(executor.map(self._wait_for_service, targets))")
 
 
 * **副作用**: `logger.info` によるログ出力、`ThreadPoolExecutor`の生成・3スレッドでの`_wait_for_service`並列実行（各スレッド内で`_check_port`/`_check_http`呼び出しと`time.sleep`が発生）、`self.results` への追加。
-* 根拠: `logger.info("⏳ Waiting for services to startup...")` (行番号: 194 / 抜粋: "logger.info("⏳ Waiting for services to startup...")")
+* 根拠: `logger.info("⏳ Waiting for services to startup...")` (行番号: 219 / 抜粋: "logger.info("⏳ Waiting for services to startup...")")
 
 
 * **エラーハンドリング**: 明示的な例外捕捉はなし（`_wait_for_service`側にも例外捕捉はなく、`_check_port`/`_check_http`が内部で例外を吸収して`bool`を返す設計に依存している）。
@@ -377,11 +377,11 @@
 
 
 * **戻り値/レスポンス**: `CheckResult`（対象名・判定ステータス・メッセージ）
-* 根拠: `return CheckResult(target["name"], status, msg)` (行番号: 226 / 抜粋: "return CheckResult(target["name"], status, msg)")
+* 根拠: `return CheckResult(target["name"], status, msg)` (行番号: 251 / 抜粋: "return CheckResult(target["name"], status, msg)")
 
 
 * **副作用**: `_check_port` / `_check_http` 呼び出し、リトライ間の `time.sleep(self.retry_interval)`。
-* 根拠: `time.sleep(self.retry_interval)` (行番号: 213 / 抜粋: "time.sleep(self.retry_interval)")
+* 根拠: `time.sleep(self.retry_interval)` (行番号: 238 / 抜粋: "time.sleep(self.retry_interval)")
 
 
 * **エラーハンドリング**: 明示的な例外捕捉はなし。`if target["critical"]:`の分岐で全リトライ失敗時のステータスを`STATUS_ERR`（`critical=True`）または`STATUS_WARN`（`critical=False`、現状到達しない）に振り分ける。
@@ -409,7 +409,7 @@
 
 
 * **エラーハンドリング**: NAS書き込みテストで `IOError`, `PermissionError` を捕捉し `STATUS_ERR` を設定・エラーログ出力・即時Discord通知を行う。カメラ設定が空の場合は `STATUS_WARN` とする。**（修正済み）** サウンドカード検出・Bluetooth接続確認処理は個別に `except Exception:` で保護されている（以前はいずれも無条件の bare `except:` だったが `except Exception:` に修正され、`SystemExit`/`KeyboardInterrupt`等を誤って捕捉しなくなった）。
-* 根拠: `except (IOError, PermissionError) as e:` (行番号: 244 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 275〜277 / 抜粋: "else:"), `except Exception: pass` (行番号: 300 / 抜粋: "except Exception: pass"), `except Exception:` (行番号: 315 / 抜粋: "except Exception:")
+* 根拠: `except (IOError, PermissionError) as e:` (行番号: 244 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 275〜277 / 抜粋: "else:"), `except Exception: pass` (行番号: 314 / 抜粋: "except Exception: pass"), `except Exception:` (行番号: 315 / 抜粋: "except Exception:")
 
 
 
@@ -432,7 +432,7 @@
 
 
 * **エラーハンドリング**: ログファイル未存在時は `STATUS_WARN` を追加して `return`。`tail` コマンド実行失敗など全体の `Exception` を捕捉した場合は `logger.error` 出力に加え `STATUS_WARN` を結果に追加して `return`（行の走査自体を行わない）。各行の日時パース失敗（`ValueError`）はその行をスキップする。
-* 根拠: `except Exception as e:\n            logger.error(f"Log check failed: {e}")\n            self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))\n            return` (行番号: 328〜331 / 抜粋: "self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))"), `except ValueError:` (行番号: 344 / 抜粋: "except ValueError:")
+* 根拠: `except Exception as e:\n            logger.error(f"Log check failed: {e}")\n            self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))\n            return` (行番号: 328〜331 / 抜粋: "self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))"), `except ValueError:` (行番号: 369 / 抜粋: "except ValueError:")
 
 
 
@@ -642,7 +642,7 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `common.py` | `setup_logging` と `send_push` の実装が本ファイルの全チェック結果通知・NAS権限エラー即時通知の挙動を左右するため。 | `import common` (行番号: 20 / 抜粋: "import common") |
 | 高 | `config.py` | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC`, `ENABLE_BLUETOOTH` の実値を把握し、どの環境を対象としたヘルスチェックかを確認するため。 | `getattr(config, "SQLITE_DB_PATH", "home_system.db")` (行番号: 161 / 抜粋: "db_path = getattr(config, "SQLITE_DB_PATH", "home_system.db")") |
-| 中 | `home_system.db`（対象DBファイル） | `PRAGMA quick_check` の対象となるDBのスキーマ・データ構造を把握し、健全性チェックの意味を正確に理解するため。 | `with get_ro_connection(db_path=db_path) as conn:` (行番号: 187 / 抜粋: "with get_ro_connection(db_path=db_path) as conn:") |
+| 中 | `home_system.db`（対象DBファイル） | `PRAGMA quick_check` の対象となるDBのスキーマ・データ構造を把握し、健全性チェックの意味を正確に理解するため。 | `with get_ro_connection(db_path=db_path) as conn:` (行番号: 196 / 抜粋: "with get_ro_connection(db_path=db_path) as conn:") |
 
 ## 8. 保守上の注意点
 

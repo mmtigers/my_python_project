@@ -29,17 +29,17 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `asyncio` | 標準 | クライアント生成の排他（`Lock`）、双方向転送タスクの生成・待機 | 根拠: [インポート宣言] (行番号: 29 / 抜粋: "import asyncio") |
-| `logging` | 標準 | 中継失敗時の警告ログ | 根拠: [インポート宣言] (行番号: 30 / 抜粋: "import logging") |
-| `typing` | 標準 | 型ヒントの提供（`Dict`, `Iterable`, `Optional`, `Tuple`） | 根拠: [インポート宣言] (行番号: 31 / 抜粋: "from typing import Dict, Iterable, Optional, Tuple") |
-| `httpx` | 外部 | HTTP中継用の非同期クライアント | 根拠: [インポート宣言] (行番号: 33 / 抜粋: "import httpx") |
-| `websockets` | 外部 | WebSocket中継用のクライアント（`websockets.connect`） | 根拠: [インポート宣言] (行番号: 34 / 抜粋: "import websockets") |
-| `websockets.exceptions` | 外部 | 切断例外（`ConnectionClosed`）の捕捉 | 根拠: [インポート宣言] (行番号: 35 / 抜粋: "from websockets import exceptions as ws_exceptions") |
-| `fastapi` | 外部 | 受け取るリクエスト／WebSocketの型（`Request`, `WebSocket`） | 根拠: [インポート宣言] (行番号: 36 / 抜粋: "from fastapi import Request, WebSocket") |
+| `asyncio` | 標準 | クライアント生成の排他（`Lock`）、双方向転送タスクの生成・待機 | 根拠: [インポート宣言] (行番号: 41 / 抜粋: "import asyncio") |
+| `logging` | 標準 | 中継失敗時の警告ログ | 根拠: [インポート宣言] (行番号: 43 / 抜粋: "import logging") |
+| `typing` | 標準 | 型ヒントの提供（`Dict`, `Iterable`, `Optional`, `Tuple`） | 根拠: [インポート宣言] (行番号: 45 / 抜粋: "from typing import Dict, Iterable, Optional, Tuple") |
+| `httpx` | 外部 | HTTP中継用の非同期クライアント | 根拠: [インポート宣言] (行番号: 47 / 抜粋: "import httpx") |
+| `websockets` | 外部 | WebSocket中継用のクライアント（`websockets.connect`） | 根拠: [インポート宣言] (行番号: 48 / 抜粋: "import websockets") |
+| `websockets.exceptions` | 外部 | 切断例外（`ConnectionClosed`）の捕捉 | 根拠: [インポート宣言] (行番号: 49 / 抜粋: "from websockets import exceptions as ws_exceptions") |
+| `fastapi` | 外部 | 受け取るリクエスト／WebSocketの型（`Request`, `WebSocket`） | 根拠: [インポート宣言] (行番号: 50 / 抜粋: "from fastapi import Request, WebSocket") |
 | `fastapi.responses` | 外部 | 返却するレスポンス型（`PlainTextResponse`, `StreamingResponse`） | 根拠: [インポート宣言] (行番号: 37 / 抜粋: "from fastapi.responses import PlainTextResponse, StreamingResponse") |
-| `starlette.background` | 外部 | レスポンス送出後にアップストリームのストリームを閉じる `BackgroundTask` | 根拠: [インポート宣言] (行番号: 38 / 抜粋: "from starlette.background import BackgroundTask") |
-| `starlette.websockets` | 外部 | ブラウザ側切断の例外 `WebSocketDisconnect` | 根拠: [インポート宣言] (行番号: 39 / 抜粋: "from starlette.websockets import WebSocketDisconnect") |
-| `config` | 内部 | 中継先URL・ベースパス・タイムアウトの取得 | 根拠: [インポート宣言] (行番号: 41 / 抜粋: "import config") |
+| `starlette.background` | 外部 | レスポンス送出後にアップストリームのストリームを閉じる `BackgroundTask` | 根拠: [インポート宣言] (行番号: 52 / 抜粋: "from starlette.background import BackgroundTask") |
+| `starlette.websockets` | 外部 | ブラウザ側切断の例外 `WebSocketDisconnect` | 根拠: [インポート宣言] (行番号: 53 / 抜粋: "from starlette.websockets import WebSocketDisconnect") |
+| `config` | 内部 | 中継先URL・ベースパス・タイムアウトの取得 | 根拠: [インポート宣言] (行番号: 55 / 抜粋: "import config") |
 
 ### ブラックボックスとなる外部要素
 
@@ -54,19 +54,19 @@
 ### `logger`
 
 * **役割**: モジュール名（`services.dashboard_proxy_service`）でロガーを取得し保持する。
-* 根拠: [変数宣言] (行番号: 43 / 抜粋: "logger = logging.getLogger(__name__)")
+* 根拠: [変数宣言] (行番号: 57 / 抜粋: "logger = logging.getLogger(__name__)")
 
 * **引数/リクエスト**: 該当なし
-* 根拠: [変数宣言] (行番号: 43 / 抜粋: "logger = logging.getLogger(__name__)")
+* 根拠: [変数宣言] (行番号: 57 / 抜粋: "logger = logging.getLogger(__name__)")
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [変数宣言] (行番号: 43 / 抜粋: "logger = logging.getLogger(__name__)")
+* 根拠: [変数宣言] (行番号: 57 / 抜粋: "logger = logging.getLogger(__name__)")
 
 * **副作用**: なし
-* 根拠: [変数宣言] (行番号: 43 / 抜粋: "logger = logging.getLogger(__name__)")
+* 根拠: [変数宣言] (行番号: 57 / 抜粋: "logger = logging.getLogger(__name__)")
 
 * **エラーハンドリング**: なし
-* 根拠: [変数宣言] (行番号: 43 / 抜粋: "logger = logging.getLogger(__name__)")
+* 根拠: [変数宣言] (行番号: 57 / 抜粋: "logger = logging.getLogger(__name__)")
 
 
 ### `_HOP_BY_HOP_HEADERS`
@@ -258,7 +258,7 @@
 * 根拠: [メソッド定義] (行番号: 236 / 抜粋: "async def _get_client(self) -> httpx.AsyncClient:")
 
 * **戻り値/レスポンス**: `httpx.AsyncClient`
-* 根拠: [return文] (行番号: 109 / 抜粋: "return self._client")
+* 根拠: [return文] (行番号: 247 / 抜粋: "return self._client")
 
 * **副作用**: `self._client` への代入（接続プールの生成）。
 * 根拠: [代入] (行番号: 102〜108 / 抜粋: "self._client = httpx.AsyncClient(")
@@ -294,7 +294,7 @@
 * 根拠: [メソッド定義] (行番号: 257 / 抜粋: "def _upstream_url(self, path: str, query_string: bytes, *, scheme: str) -> str:")
 
 * **戻り値/レスポンス**: 連結済みのURL文字列
-* 根拠: [return文] (行番号: 134 / 抜粋: "return url")
+* 根拠: [return文] (行番号: 272 / 抜粋: "return url")
 
 * **副作用**: なし
 * 根拠: [メソッド定義] (行番号: 257〜272 / 抜粋: "def _upstream_url(self, path: str, query_string: bytes, *, scheme: str) -> str:")
@@ -312,7 +312,7 @@
 * 根拠: [メソッド定義] (行番号: 136〜143 / 抜粋: "headers: Iterable[Tuple[str, str]],")
 
 * **戻り値/レスポンス**: `Dict[str, str]`
-* 根拠: [return文] (行番号: 168 / 抜粋: "return forwarded")
+* 根拠: [return文] (行番号: 306 / 抜粋: "return forwarded")
 
 * **副作用**: なし（引数の辞書を変更せず新しい辞書を構築する）
 * 根拠: [辞書内包表記] (行番号: 149〜151 / 抜粋: "forwarded: Dict[str, str] = {")
@@ -330,10 +330,10 @@
 * 根拠: `def _pin_accept_encoding(headers: Dict[str, str], *, force_identity: bool = False) -> Dict[str, str]:` (行番号: 309 / 抜粋: "def _pin_accept_encoding(headers: Dict[str, str], *, force_identity: bool = False) -> Dict[str, str]:")
 
 * **戻り値/レスポンス**: `accept-encoding` を補った新しい `Dict[str, str]`
-* 根拠: `return pinned` (行番号: 182 / 抜粋: "return pinned")
+* 根拠: `return pinned` (行番号: 326 / 抜粋: "return pinned")
 
 * **副作用**: なし（引数の辞書を変更せずコピーを返す）
-* 根拠: `pinned = dict(headers)` (行番号: 180 / 抜粋: "pinned = dict(headers)")
+* 根拠: `pinned = dict(headers)` (行番号: 321 / 抜粋: "pinned = dict(headers)")
 
 * **エラーハンドリング**: なし
 * 根拠: (行番号: 309〜326 / 抜粋: "def _pin_accept_encoding(headers: Dict[str, str]) -> Dict[str, str]:")
@@ -349,7 +349,7 @@
 * 根拠: `def _wants_html(request: Request) -> bool:` (行番号: 329 / 抜粋: "def _wants_html(request: Request) -> bool:")
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: `return "text/html" in request.headers.get("accept", "")` (行番号: 310 / 抜粋: "return \"text/html\" in request.headers.get(\"accept\", \"\")")
+* 根拠: `return "text/html" in request.headers.get("accept", "")` (行番号: 331 / 抜粋: "return \"text/html\" in request.headers.get(\"accept\", \"\")")
 
 * **副作用**: なし
 * 根拠: `def _wants_html(request: Request) -> bool:` (行番号: 329 / 抜粋: "def _wants_html(request: Request) -> bool:")
@@ -454,16 +454,16 @@
 * 根拠: [変数宣言] (行番号: 293〜294 / 抜粋: "dashboard_proxy_service = DashboardProxyService()")
 
 * **引数/リクエスト**: 該当なし
-* 根拠: [変数宣言] (行番号: 294 / 抜粋: "dashboard_proxy_service = DashboardProxyService()")
+* 根拠: [変数宣言] (行番号: 483 / 抜粋: "dashboard_proxy_service = DashboardProxyService()")
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [変数宣言] (行番号: 294 / 抜粋: "dashboard_proxy_service = DashboardProxyService()")
+* 根拠: [変数宣言] (行番号: 483 / 抜粋: "dashboard_proxy_service = DashboardProxyService()")
 
 * **副作用**: import時にインスタンスが1つ生成される（`httpx.AsyncClient` はこの時点では作られない）。
-* 根拠: [変数宣言] (行番号: 294 / 抜粋: "dashboard_proxy_service = DashboardProxyService()")
+* 根拠: [変数宣言] (行番号: 483 / 抜粋: "dashboard_proxy_service = DashboardProxyService()")
 
 * **エラーハンドリング**: なし
-* 根拠: [変数宣言] (行番号: 294 / 抜粋: "dashboard_proxy_service = DashboardProxyService()")
+* 根拠: [変数宣言] (行番号: 483 / 抜粋: "dashboard_proxy_service = DashboardProxyService()")
 
 
 ## 5. 処理フロー図

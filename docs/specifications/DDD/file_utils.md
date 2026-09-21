@@ -32,7 +32,7 @@
 | --- | --- | --- | --- |
 | `os` | 標準ライブラリ | `resolve_my_home_system_root`の`MY_HOME_SYSTEM_ROOT`環境変数の読み取り(`os.getenv`)（品質で追加） | 根拠: [import文] (行番号: 6 / 抜粋: "import os") |
 | `re` | 標準ライブラリ | 禁止文字を検出・置換するための正規表現処理(`re.sub`)。**（2026-09-06 品質監査で修正）** 加えてDiscord Webhook URLのトークン部分を検出する`_DISCORD_WEBHOOK_URL_RE`のコンパイル(`re.compile`)と置換(`.sub`) | 根拠: [import文] (行番号: 7 / 抜粋: "import re")、[利用箇所] (行番号: 111, 122 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(r\"(/api/webhooks/\\d+)/[A-Za-z0-9_\\-]+\")" / "return _DISCORD_WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))") |
-| `Path` (`pathlib`) | 標準ライブラリ | `resolve_my_home_system_root`の引数・戻り値の型、ディレクトリ存在確認（品質で追加） | 根拠: [import文] (行番号: 8 / 抜粋: "from pathlib import Path") |
+| `Path` (`pathlib`) | 標準ライブラリ | `resolve_my_home_system_root`の引数・戻り値の型、ディレクトリ存在確認（品質で追加） | 根拠: [import文] (行番号: 9 / 抜粋: "from pathlib import Path") |
 
 ### ブラックボックスとなる外部要素
 
@@ -111,11 +111,11 @@
 
 
 * **戻り値/レスポンス**: `resolve_nas_mount_point()`は`Path`、`resolve_nas_data_dir()`は`str`(呼び出し元の`NAS_DIR_STR`が`str`のため)。
-* 根拠: [組み立て] (行番号: 142 / 抜粋: "return str(resolve_nas_mount_point() / \"home_system\" / script_name / \"data\")")
+* 根拠: [組み立て] (行番号: 140 / 抜粋: "return str(resolve_nas_mount_point() / \"home_system\" / script_name / \"data\")")
 
 
 * **副作用**: なし（環境変数の読み取りのみ。ディレクトリの作成・存在確認は行わない）。
-* 根拠: [環境変数の読み取り] (行番号: 132 / 抜粋: "raw = os.getenv(\"NAS_MOUNT_POINT\")")
+* 根拠: [環境変数の読み取り] (行番号: 128 / 抜粋: "raw = os.getenv(\"NAS_MOUNT_POINT\")")
 
 
 * **エラーハンドリング**: 例外を送出しない。未設定・空文字・空白のみの値はすべて既定値へフォールバックする。

@@ -41,8 +41,8 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `s3.amazonaws.com`上のAmazon証明書チェーン（`SignatureCertChainUrl`） | 実際に取得される証明書の内容・更新頻度・障害時の挙動は、Amazon側のインフラに依存し本ファイルからは分からない。 | 根拠: [_fetch_leaf_certificate] (行番号: 89 / 抜粋: "resp = requests.get(cert_chain_url, timeout=5)") |
-| `cryptography`ライブラリの`x509`/署名検証の内部実装 | 証明書パース・SAN抽出・RSA署名検証（`public_key.verify`）の内部アルゴリズム実装の詳細は`cryptography`本体に依存し、本ファイルからは分からない。 | 根拠: [x509.load_pem_x509_certificates呼び出しとpublic_key.verify呼び出し] (行番号: 94, 132 / 抜粋: "certs = x509.load_pem_x509_certificates(resp.content)", "public_key.verify(signature, raw_body, padding.PKCS1v15(), hashes.SHA1())  # nosec B303") |
+| `s3.amazonaws.com`上のAmazon証明書チェーン（`SignatureCertChainUrl`） | 実際に取得される証明書の内容・更新頻度・障害時の挙動は、Amazon側のインフラに依存し本ファイルからは分からない。 | 根拠: [_fetch_leaf_certificate] (行番号: 133 / 抜粋: "resp = requests.get(cert_chain_url, timeout=5)") |
+| `cryptography`ライブラリの`x509`/署名検証の内部実装 | 証明書パース・SAN抽出・RSA署名検証（`public_key.verify`）の内部アルゴリズム実装の詳細は`cryptography`本体に依存し、本ファイルからは分からない。 | 根拠: [x509.load_pem_x509_certificates呼び出しとpublic_key.verify呼び出し] (行番号: 142, 203 / 抜粋: "certs = x509.load_pem_x509_certificates(resp.content)", "public_key.verify(signature, raw_body, padding.PKCS1v15(), hashes.SHA1())  # nosec B303") |
 | 呼び出し元（`MY_HOME_SYSTEM/routers/alexa_router.py`と推測されるが対応する仕様書は`docs/specifications/`配下に見つからなかった） | `verify_signature`/`verify_timestamp`が送出する`AlexaVerificationError`をどのように捕捉しHTTPレスポンスへ変換しているかの実装は本ファイルからは分からない。 | 根拠: [AlexaVerificationErrorクラスDocstring] (行番号: 52〜53 / 抜粋: "class AlexaVerificationError(Exception):\n    \"\"\"署名・証明書・タイムスタンプの検証に失敗した\"\"\"") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -154,7 +154,7 @@
 
 
 * **副作用**: `_fetch_leaf_certificate`経由のHTTPSリクエスト（キャッシュ済みなら省略）、`public_key.verify`によるCPU負荷のかかる暗号演算。
-* 根拠: (行番号: 112, 132 / 抜粋: "leaf_cert = _fetch_leaf_certificate(cert_chain_url)", "public_key.verify(signature, raw_body, padding.PKCS1v15(), hashes.SHA1())  # nosec B303")
+* 根拠: (行番号: 183, 203 / 抜粋: "leaf_cert = _fetch_leaf_certificate(cert_chain_url)", "public_key.verify(signature, raw_body, padding.PKCS1v15(), hashes.SHA1())  # nosec B303")
 
 
 * **エラーハンドリング**: ヘッダ欠落・URL形式不正・証明書期限切れ/未到達・SAN不一致・base64デコード失敗（`ValueError`/`TypeError`）・署名不一致（`InvalidSignature`）のいずれについても、それぞれ`AlexaVerificationError`（該当箇所は`from exc`で元例外を連鎖）を送出する。

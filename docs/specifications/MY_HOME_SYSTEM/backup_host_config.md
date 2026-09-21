@@ -33,11 +33,11 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `argparse` | 標準 | CLI 引数の解析 | 根拠: [インポート宣言] (行番号: 35 / 抜粋: "import argparse") |
-| `os` | 標準 | `sys.path` への親ディレクトリ追加 | 根拠: [インポート宣言] (行番号: 36 / 抜粋: "import os") |
-| `sys` | 標準 | 終了コード・stderr | 根拠: [インポート宣言] (行番号: 37 / 抜粋: "import sys") |
-| `config` | 自作 | 既定の出力先の表示 | 根拠: [インポート宣言] (行番号: 41 / 抜粋: "import config") |
-| `services.host_config_backup_service` | 自作 | 実処理 | 根拠: [インポート宣言] (行番号: 42 / 抜粋: "from services import host_config_backup_service as svc") |
+| `argparse` | 標準 | CLI 引数の解析 | 根拠: [インポート宣言] (行番号: 31 / 抜粋: "import argparse") |
+| `os` | 標準 | `sys.path` への親ディレクトリ追加 | 根拠: [インポート宣言] (行番号: 32 / 抜粋: "import os") |
+| `sys` | 標準 | 終了コード・stderr | 根拠: [インポート宣言] (行番号: 33 / 抜粋: "import sys") |
+| `config` | 自作 | 既定の出力先の表示 | 根拠: [インポート宣言] (行番号: 37 / 抜粋: "import config") |
+| `services.host_config_backup_service` | 自作 | 実処理 | 根拠: [インポート宣言] (行番号: 38 / 抜粋: "from services import host_config_backup_service as svc") |
 
 ## 4. 主要な構成要素
 

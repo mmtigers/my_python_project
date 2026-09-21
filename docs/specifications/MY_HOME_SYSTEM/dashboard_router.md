@@ -29,14 +29,14 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `fastapi` | 外部 | ルーター定義（`APIRouter`）とハンドラ引数の型（`Request`, `WebSocket`） | 根拠: [インポート宣言] (行番号: 12 / 抜粋: "from fastapi import APIRouter, Request, WebSocket") |
-| `config` | 内部 | 公開パス（`DASHBOARD_BASE_PATH`）の取得 | 根拠: [インポート宣言] (行番号: 14 / 抜粋: "import config") |
+| `config` | 内部 | 公開パス（`DASHBOARD_BASE_PATH`）の取得 | 根拠: [インポート宣言] (行番号: 23 / 抜粋: "import config") |
 | `services.dashboard_proxy_service` | 内部 | 中継処理のシングルトン `dashboard_proxy_service` | 根拠: [インポート宣言] (行番号: 15 / 抜粋: "from services.dashboard_proxy_service import dashboard_proxy_service") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.DASHBOARD_BASE_PATH` | 公開パスの実値は環境変数で上書き可能であり、本ファイルからは決まらない。import時に一度だけ読まれてルートのパス文字列になる。 | 根拠: [変数参照] (行番号: 23 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH") |
+| `config.DASHBOARD_BASE_PATH` | 公開パスの実値は環境変数で上書き可能であり、本ファイルからは決まらない。import時に一度だけ読まれてルートのパス文字列になる。 | 根拠: [変数参照] (行番号: 43 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH") |
 | `dashboard_proxy_service.forward_http` / `forward_websocket` | 中継の具体的な処理（ヘッダー加工・ストリーミング・エラー時の応答）が本ファイルからは不明。 | 根拠: [関数呼び出し] (行番号: 33, 39, 49 / 抜粋: "await dashboard_proxy_service.forward_http(request, _BASE_PATH)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -44,19 +44,19 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 ### `router`
 
 * **役割**: 本ファイルのルートをまとめる `APIRouter` インスタンス。prefixやtagsは指定していない（`unified_server.py` 側でtagsが付く）。
-* 根拠: [変数宣言] (行番号: 17 / 抜粋: "router = APIRouter()")
+* 根拠: [変数宣言] (行番号: 37 / 抜粋: "router = APIRouter()")
 
 * **引数/リクエスト**: 該当なし
-* 根拠: [変数宣言] (行番号: 17 / 抜粋: "router = APIRouter()")
+* 根拠: [変数宣言] (行番号: 37 / 抜粋: "router = APIRouter()")
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [変数宣言] (行番号: 17 / 抜粋: "router = APIRouter()")
+* 根拠: [変数宣言] (行番号: 37 / 抜粋: "router = APIRouter()")
 
 * **副作用**: なし
-* 根拠: [変数宣言] (行番号: 17 / 抜粋: "router = APIRouter()")
+* 根拠: [変数宣言] (行番号: 37 / 抜粋: "router = APIRouter()")
 
 * **エラーハンドリング**: なし
-* 根拠: [変数宣言] (行番号: 17 / 抜粋: "router = APIRouter()")
+* 根拠: [変数宣言] (行番号: 37 / 抜粋: "router = APIRouter()")
 
 
 ### `_PROXIED_METHODS`
@@ -80,19 +80,19 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 ### `_BASE_PATH`
 
 * **役割**: 公開パス。`config.DASHBOARD_BASE_PATH` をモジュールのimport時に1回だけ読み、以降のルート定義とパス組み立てに使う。
-* 根拠: [定数宣言] (行番号: 23 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
+* 根拠: [定数宣言] (行番号: 43 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
 
 * **引数/リクエスト**: 該当なし
-* 根拠: [定数宣言] (行番号: 23 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
+* 根拠: [定数宣言] (行番号: 43 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [定数宣言] (行番号: 23 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
+* 根拠: [定数宣言] (行番号: 43 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
 
 * **副作用**: なし
-* 根拠: [定数宣言] (行番号: 23 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
+* 根拠: [定数宣言] (行番号: 43 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
 
 * **エラーハンドリング**: なし
-* 根拠: [定数宣言] (行番号: 23 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
+* 根拠: [定数宣言] (行番号: 43 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
 
 
 ### `_MOBILE_PATH` / `_QUEST_APP_PATH` (モジュールレベル定数、スマホ対応で追加)
@@ -125,7 +125,7 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 * 根拠: `media_type="application/manifest+json",` (行番号: 56〜58 / 抜粋: "media_type=\"application/manifest+json\",")
 
 * **副作用**: なし（中継しない）
-* 根拠: `content=json.dumps(build_dashboard_manifest(), ensure_ascii=False),` (行番号: 57 / 抜粋: "content=json.dumps(build_dashboard_manifest(), ensure_ascii=False),")
+* 根拠: `content=json.dumps(build_dashboard_manifest(), ensure_ascii=False),` (行番号: 56 / 抜粋: "content=json.dumps(build_dashboard_manifest(), ensure_ascii=False),")
 
 * **エラーハンドリング**: なし
 * 根拠: `def dashboard_manifest() -> Response:` (行番号: 53 / 抜粋: "def dashboard_manifest() -> Response:")
@@ -140,13 +140,13 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 * 根拠: `@router.get(f"{_BASE_PATH}/icon-{{size}}.png", include_in_schema=False)` (行番号: 61 / 抜粋: "@router.get(f\"{_BASE_PATH}/icon-{{size}}.png\", include_in_schema=False)")
 
 * **戻り値/レスポンス**: `image/png` の `Response`。`Cache-Control: public, max-age=86400` を付ける（内容はコードから決まり実質変わらないため）。
-* 根拠: `headers={"Cache-Control": "public, max-age=86400"},` (行番号: 73 / 抜粋: "headers={\"Cache-Control\": \"public, max-age=86400\"},")
+* 根拠: `headers={"Cache-Control": "public, max-age=86400"},` (行番号: 70 / 抜粋: "headers={\"Cache-Control\": \"public, max-age=86400\"},")
 
 * **副作用**: 初回のみPNGを描画する（以降は関数側のキャッシュ）。
-* 根拠: `content=render_dashboard_icon_png(size),` (行番号: 71 / 抜粋: "content=render_dashboard_icon_png(size),")
+* 根拠: `content=render_dashboard_icon_png(size),` (行番号: 67 / 抜粋: "content=render_dashboard_icon_png(size),")
 
 * **エラーハンドリング**: `DASHBOARD_ICON_SIZES` に無いサイズは404（中継にフォールバックさせない）。
-* 根拠: `raise HTTPException(status_code=404, detail="unknown icon size")` (行番号: 68 / 抜粋: "raise HTTPException(status_code=404, detail=\"unknown icon size\")")
+* 根拠: `raise HTTPException(status_code=404, detail="unknown icon size")` (行番号: 65 / 抜粋: "raise HTTPException(status_code=404, detail=\"unknown icon size\")")
 
 
 ### `mobile_status_page`（GET `{_MOBILE_PATH}`、スマホ対応で追加）
@@ -158,13 +158,13 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 * 根拠: `@router.get(_MOBILE_PATH, include_in_schema=False)` (行番号: 77 / 抜粋: "@router.get(_MOBILE_PATH, include_in_schema=False)")
 
 * **戻り値/レスポンス**: `HTMLResponse`（`home_status_service.render_mobile_status_page_html` の出力）
-* 根拠: `return HTMLResponse(` (行番号: 92 / 抜粋: "return HTMLResponse(")
+* 根拠: `return HTMLResponse(` (行番号: 91 / 抜粋: "return HTMLResponse(")
 
 * **副作用**: `home_status_service.collect_status_cards()` 経由のDB読み取り・HTTPスクレイピング（いずれもTTL 60秒のキャッシュ越し）。**`async def` にしていない**のは、中で同期のDB読み取りとスクレイピングを行うため。`def` にしておくと Starlette がスレッドプールで実行し、イベントループ（IoT制御・Webhook受信）を止めない。
-* 根拠: `cards, fetched_at = home_status_service.collect_status_cards()` (行番号: 91 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")
+* 根拠: `cards, fetched_at = home_status_service.collect_status_cards()` (行番号: 90 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")
 
 * **エラーハンドリング**: 個々の取得失敗は `home_status_service` 側で `None` に丸められ、ページ全体は返る。
-* 根拠: `cards, fetched_at = home_status_service.collect_status_cards()` (行番号: 91 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")
+* 根拠: `cards, fetched_at = home_status_service.collect_status_cards()` (行番号: 90 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")
 
 
 ### `mobile_status_manifest`（GET `{_MOBILE_PATH}/app.webmanifest`、スマホ対応で追加）
@@ -179,7 +179,7 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 * 根拠: `media_type="application/manifest+json",` (行番号: 116〜118 / 抜粋: "media_type=\"application/manifest+json\",")
 
 * **副作用**: なし
-* 根拠: `manifest["start_url"] = _MOBILE_PATH` (行番号: 113 / 抜粋: "manifest[\"start_url\"] = _MOBILE_PATH")
+* 根拠: `manifest["start_url"] = _MOBILE_PATH` (行番号: 114 / 抜粋: "manifest[\"start_url\"] = _MOBILE_PATH")
 
 * **エラーハンドリング**: なし
 * 根拠: `def mobile_status_manifest() -> Response:` (行番号: 104 / 抜粋: "def mobile_status_manifest() -> Response:")
@@ -194,10 +194,10 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 * 根拠: [関数定義] (行番号: 123 / 抜粋: "async def proxy_dashboard_root(request: Request):")
 
 * **戻り値/レスポンス**: `dashboard_proxy_service.forward_http(request, _BASE_PATH)` の戻り値をそのまま返す
-* 根拠: [return文] (行番号: 33 / 抜粋: "return await dashboard_proxy_service.forward_http(request, _BASE_PATH)")
+* 根拠: [return文] (行番号: 129 / 抜粋: "return await dashboard_proxy_service.forward_http(request, _BASE_PATH)")
 
 * **副作用**: 中継先へのHTTPリクエスト送信（`forward_http` 内）。
-* 根拠: [関数呼び出し] (行番号: 33 / 抜粋: "await dashboard_proxy_service.forward_http(request, _BASE_PATH)")
+* 根拠: [関数呼び出し] (行番号: 129 / 抜粋: "await dashboard_proxy_service.forward_http(request, _BASE_PATH)")
 
 * **エラーハンドリング**: 本関数には `try`/`except` は無く、中継失敗時の扱いは `forward_http` 側に委ねられている。
 * 根拠: [関数定義] (行番号: 123〜129 / 抜粋: "async def proxy_dashboard_root(request: Request):")

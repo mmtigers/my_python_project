@@ -28,7 +28,7 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `asyncio` | 標準ライブラリ | 非同期処理制御およびスレッド委譲（`Lock`, `to_thread`） | `import asyncio` (抜粋: "import asyncio") |
-| `re` | 標準ライブラリ | `tool_search_db`が生成SQLから参照テーブル名を抽出するための正規表現マッチング、および**（B3で追加）** SQLコメント(`_SQL_COMMENT_RE`)を除去するための正規表現マッチング | `import re` (行番号: 3 / 抜粋: "import re") |
+| `re` | 標準ライブラリ | `tool_search_db`が生成SQLから参照テーブル名を抽出するための正規表現マッチング、および**（B3で追加）** SQLコメント(`_SQL_COMMENT_RE`)を除去するための正規表現マッチング | `import re` (行番号: 4 / 抜粋: "import re") |
 | `time` | 標準ライブラリ | レート制限における経過時間計測 | `import time` (抜粋: "import time") |
 | `json` | 標準ライブラリ | **（Issue #357で使用開始）** `_execute_restricted_read_query`が検索結果の行をJSON文字列へ変換するために使用 | `import json` (行番号: 3 / 抜粋: "import json") |
 | `sqlite3` | 標準ライブラリ | **（Issue #357で追加）** `_search_db_authorizer`が参照する認可アクションコード定数（`SQLITE_READ`/`SQLITE_SELECT`/`SQLITE_FUNCTION`/`SQLITE_RECURSIVE`）と戻り値定数（`SQLITE_OK`/`SQLITE_DENY`） | `import sqlite3` (行番号: 5 / 抜粋: "import sqlite3") |
@@ -51,7 +51,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config` の各種プロパティ | APIキーや各種定数の具体的な値や構造が不明なため | `config.GEMINI_API_KEY` 等 (抜粋: "if config.GEMINI_API_KEY:") |
-| `core.database.get_db_cursor` | **（Issue #357で`core.database.execute_read_query`から置き換え）** 接続確立・リトライ・PRAGMA設定・row_factory・close等の内部仕様は本ファイルからは分からない。本ファイルはyieldされたカーソルの`.connection`に`set_authorizer`を設定し`execute`/`fetchall`を呼ぶこと、および行が`dict(r)`で辞書化できること（`sqlite3.Row`相当）のみを前提とする（[database.md](./database.md)参照） | `with core.database.get_db_cursor() as cursor:` (行番号: 281 / 抜粋: "cursor.connection.set_authorizer(_search_db_authorizer)") |
+| `core.database.get_db_cursor` | **（Issue #357で`core.database.execute_read_query`から置き換え）** 接続確立・リトライ・PRAGMA設定・row_factory・close等の内部仕様は本ファイルからは分からない。本ファイルはyieldされたカーソルの`.connection`に`set_authorizer`を設定し`execute`/`fetchall`を呼ぶこと、および行が`dict(r)`で辞書化できること（`sqlite3.Row`相当）のみを前提とする（[database.md](./database.md)参照） | `with core.database.get_db_cursor() as cursor:` (行番号: 361 / 抜粋: "cursor.connection.set_authorizer(_search_db_authorizer)") |
 | `line_service.log_child_health` | 関数内部の挙動、戻り値（`msg_obj.text`を持つオブジェクト）の詳細な型が不明なため | `line_service.log_child_health` (抜粋: "await line_service.log_child_health") |
 | `line_service.log_food_record` | 関数内部の挙動、戻り値（`msg_obj.text`を持つオブジェクト）の詳細な型が不明なため | `line_service.log_food_record` (抜粋: "await line_service.log_food_record") |
 | `setup_logging` | ロガーの具体的な出力先やフォーマット仕様が不明なため | `setup_logging("ai_service")` (抜粋: "setup_logging("ai_service")") |
@@ -74,7 +74,7 @@
 
 
 * **副作用**: なし
-* 根拠: インスタンス変数の初期化のみ (行番号: 58 / 抜粋: "self.limit = limit")
+* 根拠: インスタンス変数の初期化のみ (行番号: 86 / 抜粋: "self.limit = limit")
 
 
 * **エラーハンドリング**: なし
@@ -97,7 +97,7 @@
 
 
 * **副作用**: `self.count` および `self.last_reset_time` の更新
-* 根拠: `self.count += 1` (行番号: 80 / 抜粋: "self.count += 1")
+* 根拠: `self.count += 1` (行番号: 115 / 抜粋: "self.count += 1")
 
 
 * **エラーハンドリング**: 非同期ロック (`asyncio.Lock`) により並行処理時の競合を防止。
@@ -120,7 +120,7 @@
 
 
 * **副作用**: `line_service.log_child_health` の呼び出し（外部サービス・DB操作の可能性）。引数欠落時は呼び出さない。
-* 根拠: `await line_service.log_child_health` (行番号: 122 / 抜粋: "await line_service.log_child_health")
+* 根拠: `await line_service.log_child_health` (行番号: 149 / 抜粋: "await line_service.log_child_health")
 
 
 * **エラーハンドリング**: try-except構文なし。引数欠落および保存失敗（返信本文のプレフィックス判定）を戻り値で表現する（Issue #373）。
@@ -143,7 +143,7 @@
 
 
 * **副作用**: `line_service.log_food_record` の呼び出し（外部サービス・DB操作の可能性）。引数欠落時は呼び出さない。
-* 根拠: `await line_service.log_food_record` (行番号: 148 / 抜粋: "await line_service.log_food_record")
+* 根拠: `await line_service.log_food_record` (行番号: 175 / 抜粋: "await line_service.log_food_record")
 
 
 * **エラーハンドリング**: try-except構文なし。引数欠落および保存失敗（返信本文のプレフィックス判定）を戻り値で表現する（Issue #373）。
@@ -208,11 +208,11 @@
 
 
 * **戻り値/レスポンス**: `List[str]` (マッチしたテーブル名のリスト。同一テーブルが複数回参照されれば重複を含みうる)
-* 根拠: `return tables` (行番号: 220 / 抜粋: "return tables")
+* 根拠: `return tables` (行番号: 262 / 抜粋: "return tables")
 
 
 * **副作用**: なし
-* 根拠: `tables: List[str] = []` へのローカル追加のみ (行番号: 198 / 抜粋: "tables: List[str] = []")
+* 根拠: `tables: List[str] = []` へのローカル追加のみ (行番号: 240 / 抜粋: "tables: List[str] = []")
 
 
 * **エラーハンドリング**: なし（正規表現マッチングのみ。マッチしない場合は空リストを返す）。`(` トークンにマッチした場合（サブクエリの開始）は `continue` でスキップし、テーブル名として追加しない。
@@ -282,7 +282,7 @@
 ### `tool_search_db` (関数)
 
 * **役割**: 引数で渡されたSQLクエリが `SELECT` で始まり、かつ参照テーブルが `ALLOWED_SEARCH_TABLES` に含まれることを確認したうえで読み取り専用のDB検索を行い、結果を文字列で返す。**（Issue #357で修正）** SELECT判定の直後・テーブル抽出の前に`_QUOTED_IDENTIFIER_CHARS`（`"` `` ` `` `[`）のいずれかを含むSQLを警告ログ付きで即拒否するようになった（引用符付き識別子は`_extract_referenced_tables`が検出できず許可テーブル判定を素通りしていたため）。加えて実行先を`core.database.execute_read_query`から`_execute_restricted_read_query`（`set_authorizer`により許可テーブル以外の読み取り・ATTACH・PRAGMA・危険関数をSQLiteエンジン側で構造的に拒否する）へ変更した。**（B3で修正）** SQLクエリを受け取った直後、SELECT判定やテーブル抽出より前に`_strip_sql_comments`を通し、ブロックコメント(`/* */`)・行コメント(`--`)を空白に置換したうえで以降の判定・実行を行うようになった。以前は`FROM/**/tablename`のようにキーワードと識別子の間にSQLコメントを挟むことで`_extract_referenced_tables`の抽出をすり抜け、UNION SELECTと組み合わせて`ALLOWED_SEARCH_TABLES`外のテーブルを読み取れることが実証されていた。**（Issue #180で修正）** `core.database.execute_read_query`（実体は`core/database.py`の`execute_read_query`）は例外発生時も送出せず内部で捕捉し、"検索エラー: ..."という非空文字列として返す設計になっている。以前はこの戻り値の実際の型・意味を誤認しており、`if not rows:`（`rows`は常に非空文字列のため恒偽でデッドコード）と`except Exception`（`execute_read_query`自体は例外を送出しないため到達不能）の両方が実質機能しておらず、DB実行時エラーの文字列がそのまま正常な検索結果としてログにも残らずAIへ渡っていた。`execute_read_query`の内部エラープレフィックス（`"検索エラー:"`）を判定し、検出時は警告ログを出力したうえでAIへエラーであることが分かる形（`"DB検索エラー: ..."`）で返すよう修正した。
-* 根拠: `async def tool_search_db` (行番号: 375 / 抜粋: "async def tool_search_db")、コメント除去 (行番号: 309 / 抜粋: "sql = _strip_sql_comments(sql)")、引用符付き識別子の拒否 (行番号: 318〜320 / 抜粋: "if any(ch in sql for ch in _QUOTED_IDENTIFIER_CHARS):")、実行先 (行番号: 334 / 抜粋: "result = await asyncio.to_thread(_execute_restricted_read_query, sql)")
+* 根拠: `async def tool_search_db` (行番号: 375 / 抜粋: "async def tool_search_db")、コメント除去 (行番号: 391 / 抜粋: "sql = _strip_sql_comments(sql)")、引用符付き識別子の拒否 (行番号: 318〜320 / 抜粋: "if any(ch in sql for ch in _QUOTED_IDENTIFIER_CHARS):")、実行先 (行番号: 416 / 抜粋: "result = await asyncio.to_thread(_execute_restricted_read_query, sql)")
 
 
 * **引数/リクエスト**: `args: Dict[str, Any]`
@@ -290,7 +290,7 @@
 
 
 * **戻り値/レスポンス**: `str`。正常時は`_execute_restricted_read_query`の戻り値文字列（該当データなしメッセージまたはJSON形式の検索結果文字列、2000文字でカット）をそのまま返す。同関数がエラーを返した場合（`"検索エラー:"`プレフィックスで検出）は`"DB検索エラー: ..."`という別形式のエラー文字列に変換して返す。引用符付き識別子を含む場合は`"エラー: 引用符付きの識別子（\" ` [）は使用できません。"`を返す。
-* 根拠: `return result[:2000]` (行番号: 349 / 抜粋: "return result[:2000]")、エラー変換 (行番号: 344〜346 / 抜粋: "if result.startswith(\"検索エラー:\"):")、引用符拒否メッセージ (行番号: 320)
+* 根拠: `return result[:2000]` (行番号: 431 / 抜粋: "return result[:2000]")、エラー変換 (行番号: 344〜346 / 抜粋: "if result.startswith(\"検索エラー:\"):")、引用符拒否メッセージ (行番号: 320)
 
 
 * **副作用**: `_execute_restricted_read_query` の呼び出し（DB読み取り）。引用符付き識別子の検出、許可外テーブルへのアクセス試行、および`_execute_restricted_read_query`がエラー文字列を返した場合を`logger.warning`で記録。
@@ -329,7 +329,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: try-except構文なし (行番号: 301 / 抜粋: "exception = retry_state")
+* 根拠: try-except構文なし (行番号: 505 / 抜粋: "exception = retry_state")
 
 
 
@@ -340,15 +340,15 @@
 
 
 * **引数/リクエスト**: `chat_session`, `prompt: str`
-* 根拠: 関数シグネチャ (行番号: 315 / 抜粋: "chat_session, prompt: str")
+* 根拠: 関数シグネチャ (行番号: 562 / 抜粋: "chat_session, prompt: str")
 
 
 * **戻り値/レスポンス**: APIレスポンスオブジェクト
-* 根拠: `return await chat_session.send_message(prompt)` (行番号: 484 / 抜粋: "return await chat_session.send_message(prompt)")
+* 根拠: `return await chat_session.send_message(prompt)` (行番号: 575 / 抜粋: "return await chat_session.send_message(prompt)")
 
 
 * **副作用**: APIへのネットワーク通信
-* 根拠: `chat_session.send_message` (行番号: 327 / 抜粋: "chat_session.send_message")
+* 根拠: `chat_session.send_message` (行番号: 575 / 抜粋: "chat_session.send_message")
 
 
 * **エラーハンドリング**: `tenacity` ライブラリによる自動リトライ（最大3回）。最終的に失敗した場合は例外を再スロー（`reraise=True`）。
@@ -457,7 +457,7 @@
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `text: str`
-* 根拠: 関数シグネチャ (行番号: 517 / 抜粋: "user_id: str, user_name: str, text: str")
+* 根拠: 関数シグネチャ (行番号: 627 / 抜粋: "user_id: str, user_name: str, text: str")
 
 
 * **戻り値/レスポンス**: `Optional[str]`
@@ -471,7 +471,7 @@
 * **エラーハンドリング**:
 * `MODEL_NAME` や APIキーが不在の場合は早期リターン (`None`)。
 * **（Issue #801で変更）** `MODEL_NAME` はモジュール内の直書きではなく `config.GEMINI_MODEL` を読む。
-  * 根拠: (行番号: 45 / 抜粋: "MODEL_NAME = config.GEMINI_MODEL")
+  * 根拠: (行番号: 46 / 抜粋: "MODEL_NAME = config.GEMINI_MODEL")
   * **なぜ変えたか**: 以前は `MODEL_NAME = 'gemini-2.0-flash'` と直書きで、2026-09-20 に Google 側がこのモデルを提供終了(404 NOT_FOUND)したことで **LINE Bot の対話機能が丸ごと停止**した。`handlers/line_handler.py` の `_process_message_async` は体調キーワードに当たらない全メッセージを本サービスへ渡すため、影響は対話機能全体に及ぶ。直書きのままでは復旧に PR とデプロイが必要だった
   * **既定値**: `config.GEMINI_MODEL` の既定は `gemini-flash-latest`(常に最新の安定版を指すエイリアス)。個別バージョンを既定にすると提供終了のたびに同じ全停止が起きるため、`.env` で明示したときだけ固定される
   * **起動時の検査**: 設定モデルが実在するかは `post_boot_health_check.check_ai_model` が起動時に確認し、起動レポート(Discord)に載せる。提供終了を「誰かが使ったとき」ではなく「起動したとき」に検出する
@@ -638,7 +638,7 @@ graph TD
 ## 8. 保守上の注意点
 
 * `tool_search_db` は `SELECT` 開始チェックに加え、`_extract_referenced_tables` によるテーブル名抽出と `ALLOWED_SEARCH_TABLES` との突合による許可テーブルチェックを行う。`_extract_referenced_tables` はH-6の修正により `FROM a, b` のようなカンマ結合（暗黙CROSS JOIN）の2つ目以降のテーブルと、サブクエリ内の`FROM`/`JOIN`も抽出対象になったが、依然として正規表現による簡易パーサであり、完全なSQL構文解析ではない点に留意。例えば `main.table_name` のようなスキーマ修飾名は識別子の`.`部分が正規表現にマッチしないため`main`のみが抽出され、意図せず許可テーブル判定に影響する可能性がある。**（Issue #224で強化）** H-6のカンマ結合対応後も、`FROM power_usage c, quest_users s`のように1つ目のテーブルにエイリアスが付くと、識別子の直後がカンマではなくエイリアス文字列になるため、2つ目以降のテーブルが検出漏れし許可テーブルチェックを回避しうる状態だった(読み取り専用接続のため直接的なデータ改ざんはないが、非公開テーブルの内容がAI応答経由で漏洩しうる)。`_skip_optional_alias`でエイリアス(`AS name`または`name`。ただし`WHERE`/`JOIN`等のSQLキーワードはエイリアスとみなさない)を読み飛ばしてからカンマ判定するよう修正した。**（B3で解消）** 以前はSQLコメント(`--`や`/* */`)の内容も区別なく走査対象になっており、`FROM/**/tablename`のようにキーワードと識別子の間にコメントを挟むことで`_extract_referenced_tables`の正規表現がテーブル名を検出できなくなり、UNION SELECTと組み合わせて`ALLOWED_SEARCH_TABLES`外のテーブルを読み取れることが実証されていた。`tool_search_db`が`_extract_referenced_tables`を呼ぶ前に`_strip_sql_comments`でコメントを空白へ置換するようになり、この経路は塞がれた。ただしコメント除去も正規表現ベースであり、文字列リテラル内に`--`や`/* */`と類似する内容が含まれる場合の扱いなど、完全なSQL字句解析ではない点は変わらない。
-* 根拠: `_extract_referenced_tables`, `ALLOWED_SEARCH_TABLES`, `_skip_optional_alias` (行番号: 141-146, 162-169, 184-220)、`_strip_sql_comments`/`_SQL_COMMENT_RE` (行番号: 172-181)、呼び出し順序 (行番号: 309 / 抜粋: "sql = _strip_sql_comments(sql)")
+* 根拠: `_extract_referenced_tables`, `ALLOWED_SEARCH_TABLES`, `_skip_optional_alias` (行番号: 141-146, 162-169, 184-220)、`_strip_sql_comments`/`_SQL_COMMENT_RE` (行番号: 172-181)、呼び出し順序 (行番号: 391 / 抜粋: "sql = _strip_sql_comments(sql)")
 * **[修正済み] Issue #357 引用符付き識別子による許可テーブル判定バイパス**: 上記の正規表現パーサは`"quest_users"`・`[quest_users]`・`` `quest_users` ``・`"main".quest_users`・`FROM"quest_users"`のいずれもテーブル参照として検出できず、許可テーブルを1つ含むUNION SELECT/スカラーサブクエリで`quest_users`/`security_logs`/`communication_logs`等の非公開テーブルが読めることが実証されていた（Issue #224で塞いだ経路と同種）。対策は二層: (1) 暫定として`tool_search_db`が`_QUOTED_IDENTIFIER_CHARS`（`"` `` ` `` `[`）を含むSQLをテーブル抽出前に即拒否する、(2) 構造的対策として実行先を`_execute_restricted_read_query`に変更し、`sqlite3.Connection.set_authorizer`に`_search_db_authorizer`を設定して`ALLOWED_SEARCH_TABLES`以外への`SQLITE_READ`・`_DENIED_SQL_FUNCTIONS`の`SQLITE_FUNCTION`・`SQLITE_ATTACH`/`SQLITE_PRAGMA`/書き込み/DDL等をSQLiteエンジン側で拒否する。(2)は正規表現層を経由しない直接呼び出しでも有効であり、`sqlite_master`やテーブル値関数（`pragma_table_info`/`json_each`）の読み取りも許可リスト外として拒否される。`core.database.execute_read_query`は他の呼び出し元と共有されるため変更しておらず、認可コールバックはこのAI経路にのみ適用している（本ファイルは`execute_read_query`をもう呼ばない）。注意: (1)の文字チェックは文字列リテラル内の`"`等も区別なく拒否するため、正当なクエリでもこれらの文字を含むものは実行できない（AIには`'`による文字列リテラルの使用が期待される）。
 * 根拠: `_QUOTED_IDENTIFIER_CHARS` (行番号: 230)、`_DENIED_SQL_FUNCTIONS` (行番号: 234-236)、`_search_db_authorizer` (行番号: 239-265)、`_execute_restricted_read_query` (行番号: 268-290)、`tool_search_db`内の拒否・実行先 (行番号: 318-320, 334)
 
@@ -650,7 +650,7 @@ graph TD
 * `datetime` モジュールがインポートされていない（旧版の記述を訂正。`json`はIssue #357で使用されるようになった）。
 
 * **[Issue #520] SDK移行の前提**: 本ファイルは `google-generativeai`（非推奨）から後継の `google-genai` へ移行済み。移行の動機は機能ではなく依存関係にある。旧SDKは `google-ai-generativelanguage==0.6.15` を厳密固定しており、それが `protobuf<6` を要求するため、`protobuf` / `proto-plus` / `googleapis-common-protos` / `google-api-core` / `grpcio-status` が軒並み更新できない状態になっていた。移行により `protobuf` は 5.29.6 から 6.33.6 へ前進した。ただし `streamlit` が `protobuf<7` を要求するため、protobuf 7系へはまだ上げられない点に留意。
-* **[Issue #520] クライアントはモジュールレベルの状態**: 旧SDKの `genai.configure(api_key=...)` はモジュール全体に効く設定だったが、`google-genai` は `client = genai.Client(api_key=...)` というインスタンスを持つ。`GEMINI_API_KEY` 未設定時は `client` が `None` になり `analyze_text_and_execute` は早期 `return None` する (行番号: 549 / 抜粋: "if not MODEL_NAME or not config.GEMINI_API_KEY or client is None:")。テストで本関数を通す場合は `MODEL_NAME` だけでなく `client` も差し替える必要がある。
+* **[Issue #520] クライアントはモジュールレベルの状態**: 旧SDKの `genai.configure(api_key=...)` はモジュール全体に効く設定だったが、`google-genai` は `client = genai.Client(api_key=...)` というインスタンスを持つ。`GEMINI_API_KEY` 未設定時は `client` が `None` になり `analyze_text_and_execute` は早期 `return None` する (行番号: 640 / 抜粋: "if not MODEL_NAME or not config.GEMINI_API_KEY or client is None:")。テストで本関数を通す場合は `MODEL_NAME` だけでなく `client` も差し替える必要がある。
 * **[Issue #520] ツールスキーマは無変更**: `tools_schema` の dict 形式（`function_declarations` を含む）は `GenerateContentConfig(tools=...)` にそのまま受け付けられるため、スキーマ定義は移行前後で変更していない。自動関数呼び出しの無効化は `start_chat(enable_automatic_function_calling=False)` から `AutomaticFunctionCallingConfig(disable=True)` へ移った (行番号: 580〜589 / 抜粋: "chat_manual = client.aio.chats.create(")。
 
 ## 9. 不明事項一覧
