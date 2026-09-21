@@ -242,6 +242,17 @@
 ### [要素名7：`--prepare` モード（systemd ExecStartPre 経路、Issue #646）]
 
 * **役割**: 第1引数が`--prepare`のとき`PREPARE_ONLY=true`とし、(1) Phase 0の掃除対象から`streamlit run`を外し、(2) Phase 3の直後に`exit 0`して Phase 4(サーバー/ダッシュボードの`nohup`起動)を行わない。実機の`deploy/systemd/home_system.service`はこのモードを`ExecStartPre`で呼び、`unified_server.py`本体を`ExecStart`(`Type=simple`)としてフォアグラウンド起動し、異常終了時は`Restart=on-failure`で自動復旧する。以前は`Type=oneshot`+`RemainAfterExit=yes`のもとで本スクリプトが`nohup ... & disown`でサーバーを起動しており、サーバー本体がsystemdの管理外にあった(落ちても通知のみ・人手復旧)。引数なしの従来経路(手動運用・開発用)は残している。
+
+### [要素名7.5：手動起動ガード（Issue #824で追加）]
+
+* **役割**: 引数解析の直後（`cd` と Phase 0 の掃除より前）で、`--prepare` なしの実行かつ `systemctl` が存在し、`home_system.service` / `home_dashboard.service` の**いずれか**が `systemctl is-enabled --quiet` で有効と判定された場合、`exit 1` で実行を拒否する。拒否メッセージは標準エラーへ出し、正しい手順（`sudo systemctl restart home_system.service home_dashboard.service`）と、上書き方法（`ALLOW_MANUAL_START=1`）を案内する。
+* 根拠: `if [ "$PREPARE_ONLY" != true ] && command -v systemctl >/dev/null 2>&1; then` から `# --- end 手動起動ガード ---` まで
+* **なぜ必要か**: systemd がユニットを管理している実機でフルモードを実行すると、(1) Phase 0 の掃除が systemd 管理下のプロセスへ SIGTERM を送る（フルモードでは `streamlit run` も対象）、(2) SIGTERM による終了は systemd から見て正常終了なので `Restart=on-failure` は再起動せず `home_system.service` は inactive になる、(3) Phase 4 が `nohup` で起動し直し、プロセスは systemd の管理外（親 PID 1 の孤児）になる、(4) `home_dashboard.service` は孤児が 8501 を握っているため起動に失敗し続ける。サイトは孤児が応答するので普通に動いて見え、**#646 の自動復旧だけが黙って止まる**。2026-09-21 09:54 に実機で起き、約1時間半 `NRestarts=344` のまま放置された。`docs/runbooks/ラズパイデプロイ前動作検証手順.md` には以前から「引数なしで直接実行しないこと」と書かれていたが防げなかったため、コードで拒否する
+* **判定に `is-enabled` を使う理由**: `is-active` だと、この事故で既に inactive に落ちた状態から再度叩いたときに素通りしてしまう。`is-enabled` は「このホストは systemd が面倒を見る設定になっている」ことを表す
+* **影響を受けない経路**: `--prepare`（systemd の `ExecStartPre`）、`systemctl` の無い環境（開発機・CI）、ユニットを disable した実機
+* **上書き**: 環境変数 `ALLOW_MANUAL_START` がちょうど `1` のときだけ、警告（起動後のプロセスは systemd 管理外になり自動再起動されない旨）を出して続行する。`true` / `yes` / `0` / 空文字は上書きとみなさない
+* **配置の制約**: 掃除（Phase 0）より後ろに置くと、拒否した時点で既にプロセスを止めている。`cd "$PROJECT_DIR"` より前に置いているのは、`cd` の失敗（CI 等）とガードによる拒否を取り違えないため。`tests/test_start_all_manual_start_guard.py` がこの配置を検査する
+* **テスト**: スクリプトを `# --- end 手動起動ガード ---` の行で切り出して末尾に `echo GUARD_PASSED` を足したものを、`systemctl` のスタブだけを置いた PATH で実行する。本物のガードのコードを検証しつつ、ガードを通過してもその先（掃除・NAS待ち・サーバー起動）は一切実行されないため、実機上で走らせても安全
 * 根拠: `PREPARE_ONLY=false` / `if [ "${1:-}" = "--prepare" ]; then` (行番号: 18〜21 / 抜粋: "PREPARE_ONLY=true")、掃除対象の絞り込み (行番号: 66〜78)、`exit 0` (行番号: 196〜201 / 抜粋: "Preparation finished (--prepare)")
 
 

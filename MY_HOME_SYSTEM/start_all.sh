@@ -6,7 +6,8 @@
 # 使い方:
 #   ./start_all.sh            Phase 0〜4 をすべて実行する(旧プロセス掃除 → 前処理 →
 #                             unified_server.py / ダッシュボードを nohup でバックグラウンド起動)。
-#                             手動運用・開発用の経路。
+#                             手動運用・開発用の経路。**systemd のユニットが有効な実機では拒否する**
+#                             (下の「手動起動ガード」参照。Issue #824)。
 #   ./start_all.sh --prepare  Phase 0〜3(前処理)だけを実行し、サーバー本体は起動しない。
 #                             deploy/systemd/home_system.service の ExecStartPre から呼ばれる経路で、
 #                             unified_server.py 本体は systemd が ExecStart でフォアグラウンド起動する
@@ -19,6 +20,46 @@ PREPARE_ONLY=false
 if [ "${1:-}" = "--prepare" ]; then
     PREPARE_ONLY=true
 fi
+
+# --- 手動起動ガード (Issue #824) ---
+# systemd がサーバー/ダッシュボードを管理している実機でフルモード(引数なし)を実行すると、
+#   1. 下の Phase 1 の掃除が systemd 管理下のプロセスへ SIGTERM を送る(フルモードでは
+#      "streamlit run" も掃除対象に入る)
+#   2. SIGTERM による終了は systemd から見て「正常終了」なので Restart=on-failure は再起動せず、
+#      home_system.service は inactive になる
+#   3. Phase 4 が nohup で起動し直し、プロセスは systemd の管理外(親 PID 1 の孤児)になる
+#   4. home_dashboard.service は孤児が 8501 を握っているため起動に失敗し続ける
+# という経路で **#646 の自動復旧が黙って止まる**。サイトは孤児が応答するので普通に動いて見え、
+# 誰も気づけない(2026-09-21 09:54 に実際に起き、約1時間半 NRestarts=344 のまま放置された)。
+# runbook にも「引数なしで実行しないこと」と書いてあったが防げなかったため、コードで拒否する。
+#
+# 判定は `is-enabled`(= このホストは systemd が面倒を見る設定になっている)で行う。
+# `is-active` だと、既にこの事故で inactive に落ちた状態から再度叩いたときに素通りしてしまう。
+# systemd が無い環境(開発機・CI)やユニットを disable した実機では従来どおり動く。
+# 意図して手動起動する場合だけ ALLOW_MANUAL_START=1 で上書きできる。
+# ここは掃除(Phase 1)より前に置くこと。後ろに置くと拒否した時点で既にプロセスを止めている。
+if [ "$PREPARE_ONLY" != true ] && command -v systemctl >/dev/null 2>&1; then
+    for managed_unit in home_system.service home_dashboard.service; do
+        if systemctl is-enabled --quiet "$managed_unit" 2>/dev/null; then
+            if [ "${ALLOW_MANUAL_START:-}" = "1" ]; then
+                printf '⚠️  %s は systemd で有効ですが、ALLOW_MANUAL_START=1 のため手動起動を続行します。\n' "$managed_unit" >&2
+                printf '    起動後のプロセスは systemd の管理外になり、落ちても自動再起動されません。\n' >&2
+                break
+            fi
+            printf '❌ %s が systemd で有効なため、start_all.sh のフルモード(引数なし)は実行しません。\n' "$managed_unit" >&2
+            printf '   このまま実行すると systemd 管理下のプロセスを止めて nohup で起動し直すため、\n' >&2
+            printf '   サービスが inactive になり、以後は落ちても自動再起動されなくなります (Issue #824)。\n' >&2
+            printf '\n' >&2
+            printf '   再起動したい場合:\n' >&2
+            printf '     sudo systemctl restart home_system.service home_dashboard.service\n' >&2
+            printf '\n' >&2
+            printf '   それでも手動で起動したい場合(非推奨):\n' >&2
+            printf '     ALLOW_MANUAL_START=1 %s\n' "$0" >&2
+            exit 1
+        fi
+    done
+fi
+# --- end 手動起動ガード ---
 
 # ★修正1: 親ディレクトリ(develop)も含めないと "No module named 'MY_HOME_SYSTEM'" エラーになる
 export PYTHONPATH="/home/masahiro/develop:/home/masahiro/develop/MY_HOME_SYSTEM"
