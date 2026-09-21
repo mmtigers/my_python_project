@@ -46,12 +46,14 @@ def _mock_st():
     mock = MagicMock()
     mock.sidebar.__enter__ = MagicMock(return_value=mock)
     mock.sidebar.__exit__ = MagicMock(return_value=False)
-    mock.tabs.return_value = [MagicMock() for _ in range(5)]
     mock.columns.side_effect = lambda spec, **kwargs: [
         MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))
     ]
-    mock.expander.return_value.__enter__ = MagicMock(return_value=MagicMock())
-    mock.expander.return_value.__exit__ = MagicMock(return_value=False)
+    # 選択中のタブだけを描画するようになったため(tests/test_dashboard_lazy_tabs.py)、
+    # 既定はホームタブ・折りたたみセクションは閉じた状態とする。
+    mock.segmented_control.return_value = "home"
+    mock.toggle.return_value = False
+    mock.query_params = {}
     return mock
 
 
@@ -76,10 +78,11 @@ def _patch_view_modules():
 class TestMainReadsThroughTheCache:
     """再実行のたびに素の analysis_service を叩く状態へ戻っていないこと。"""
 
-    def test_main_does_not_call_analysis_service_loaders_directly(self):
+    def test_home_tab_reads_through_the_cache_only(self):
         mock_st = _mock_st()
         patches = _patch_view_modules()
         with patch.object(dashboard, "st", mock_st), \
+             patch.object(dashboard.view_common, "st", mock_st), \
              patch.object(dashboard.view_common, "load_sensor_data_cached", return_value=pd.DataFrame()) as cached_sensor, \
              patch.object(dashboard.view_common, "load_generic_data_cached", return_value=pd.DataFrame()) as cached_generic, \
              patch.object(dashboard.view_common, "load_bicycle_data_cached", return_value=pd.DataFrame()) as cached_bicycle, \
@@ -101,11 +104,35 @@ class TestMainReadsThroughTheCache:
         cached_sensor.assert_called_once_with(limit=10000)
         cached_bicycle.assert_called_once_with(limit=3000)
         cached_nas.assert_called_once_with()
-        # 子供・排便・食事・車・防犯ログの5テーブル
-        assert cached_generic.call_count == 5
+        # ホームタブが使うのは車のテーブルだけ。以前は5タブ分(子供・排便・食事・
+        # 車・防犯ログ)を main() の先頭でまとめて読んでいたが、選択中のタブしか
+        # 描画しなくなったため、そのタブが使わないテーブルは読まない。
+        cached_generic.assert_called_once_with(dashboard.config.SQLITE_TABLE_CAR)
 
         for raw in (raw_sensor, raw_generic, raw_bicycle, raw_nas):
             raw.assert_not_called()
+
+    def test_watch_tab_reads_only_the_security_log_when_sections_are_closed(self):
+        """閉じたセクション(高砂・健康管理)のぶんまで読みに行かないこと。"""
+        mock_st = _mock_st()
+        mock_st.segmented_control.return_value = "watch"
+        patches = _patch_view_modules()
+        with patch.object(dashboard, "st", mock_st), \
+             patch.object(dashboard.view_common, "st", mock_st), \
+             patch.object(dashboard.view_common, "load_sensor_data_cached", return_value=pd.DataFrame()) as cached_sensor, \
+             patch.object(dashboard.view_common, "load_generic_data_cached", return_value=pd.DataFrame()) as cached_generic, \
+             patch.object(dashboard.analysis_service, "apply_friendly_names", return_value=pd.DataFrame()), \
+             patch.object(dashboard, "logger"):
+            for p in patches:
+                p.start()
+            try:
+                dashboard.main()
+            finally:
+                for p in patches:
+                    p.stop()
+
+        cached_generic.assert_called_once_with("security_logs", limit=100)
+        cached_sensor.assert_not_called()
 
     def test_refresh_button_clears_the_cache_and_reruns(self):
         """「🔄 データを更新」が TTL を待たずに捨てる操作として機能すること。"""

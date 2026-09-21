@@ -125,6 +125,43 @@ CUSTOM_CSS = f"""
             padding-right: 0.55rem;
         }}
 
+        /* タブ選択は `st.tabs` ではなく `st.segmented_control` で描いている
+           (選択中のタブの中身だけを実行するため。`dashboard.py` の
+           `_render_tab_selector` のdocstring参照)。5つ並ぶと390px幅には
+           収まらないので、旧タブ列と同じく横スクロールできるようにする。 */
+        [data-testid="stSegmentedControl"],
+        [data-testid="stButtonGroup"] {{
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+        }}
+        [data-testid="stSegmentedControl"]::-webkit-scrollbar,
+        [data-testid="stButtonGroup"]::-webkit-scrollbar {{ display: none; }}
+        [data-testid="stSegmentedControl"] button,
+        [data-testid="stButtonGroup"] button {{
+            white-space: nowrap;
+            padding-left: 0.55rem;
+            padding-right: 0.55rem;
+        }}
+
+        /* サマリー直下の「詳しく見る」導線。ヘッダー操作列と同じ理由で
+           一律100%化の対象から外すが、4つあるので2列で折り返す。 */
+        .st-key-summary_jump [data-testid="stHorizontalBlock"] {{
+            flex-wrap: wrap;
+        }}
+        .st-key-summary_jump [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+        .st-key-summary_jump [data-testid="stHorizontalBlock"] > [data-testid="column"] {{
+            flex: 1 1 45% !important;
+            min-width: 45% !important;
+            width: auto !important;
+        }}
+        .st-key-summary_jump .stButton > button {{
+            font-size: 0.85rem;
+            padding-left: 0.4rem;
+            padding-right: 0.4rem;
+            white-space: nowrap;
+        }}
+
         /* 見出しが2〜3行に折り返してスクロール量が増えるのを抑える */
         h1 {{ font-size: 1.5rem !important; }}
         h2 {{ font-size: 1.25rem !important; }}
@@ -274,6 +311,24 @@ def render_status_grid(cards: Iterable[StatusCard]) -> None:
         for card in cards
     )
     st.markdown(f'<div class="status-grid">{cards_html}</div>', unsafe_allow_html=True)
+
+
+def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:
+    """折りたたみセクションを描画し、「開いているか」を返す。
+
+    `st.expander` を使わない理由(スマホでの体感速度):
+        Streamlit の `st.expander` は**折りたたまれていても中身のPythonを実行する**
+        (結果をクライアント側で隠しているだけ)。そのため、たたまれた
+        「📜 サーバーログ」のために `journalctl` のサブプロセスが毎回起動し、
+        「🌡️ 気温・湿度の詳細」のために年間分の集計SQLが毎回走っていた。
+        開閉状態がPython側から読める `st.toggle` に置き換えることで、
+        呼び出し側が `if lazy_section(...):` で中身の実行ごと省ける。
+
+    開閉状態は `st.session_state` に残るため、同じセッションの中では
+    expander と同じ感覚(開いたら開いたまま)で使える。ページを再読み込み
+    すると閉じた状態に戻る。
+    """
+    return bool(st.toggle(label, key=f"lazy_section_{key}", value=default_open))
 
 
 @contextmanager
