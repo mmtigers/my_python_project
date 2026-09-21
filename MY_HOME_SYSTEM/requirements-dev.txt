@@ -120,7 +120,7 @@ rich==15.0.0
     # via
     #   bandit
     #   pip-audit
-ruff==0.16.7
+ruff==0.16.8
     # via -r requirements-dev.in
 six==1.17.0
     # via
@@ -141,7 +141,7 @@ typing-extensions==4.15.0
     #   -c requirements.txt
     #   anyio
     #   pytest-asyncio
-urllib3==2.7.0
+urllib3==2.8.0
     # via
     #   -c requirements.txt
     #   requests

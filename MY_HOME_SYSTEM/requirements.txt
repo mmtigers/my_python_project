@@ -227,7 +227,7 @@ starlette==1.6.0
     # via
     #   fastapi
     #   streamlit
-streamlit==1.63.0
+streamlit==1.64.0
     # via -r requirements.in
 tenacity==9.1.4
     # via
@@ -256,7 +256,7 @@ typing-inspection==0.4.2
     #   pydantic
 tzdata==2025.2
     # via pandas
-urllib3==2.7.0
+urllib3==2.8.0
     # via
     #   -r requirements.in
     #   line-bot-sdk
