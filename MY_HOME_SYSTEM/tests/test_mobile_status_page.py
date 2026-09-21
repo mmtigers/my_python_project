@@ -672,3 +672,19 @@ class TestSupportingValues:
         assert 'class="status-sub"' in page
         assert "先月同日 1,000円" in page
         assert "ディスク 55%" in page
+
+
+class TestCardColoursSurviveLinking:
+    """カードをリンクにしたときに、状態を表すテーマ色が消えないこと。
+
+    `a.status-card { color: inherit }` を入れると、要素+クラス(0,1,1)が
+    `.theme-green`(0,1,0)に勝ってしまい、値の文字色が本文色に戻る
+    (背景色だけで状態を示すことになり、配色の意図が半分失われる)。
+    """
+
+    def test_the_link_style_does_not_override_the_theme_colour(self):
+        assert "color: inherit" not in home_status_service.STATUS_CARD_CSS
+
+    def test_the_link_has_no_underline(self):
+        """下線が付くと、テーマ色で示している状態が読み取りにくくなる。"""
+        assert "text-decoration: none" in home_status_service.STATUS_CARD_CSS

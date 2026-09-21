@@ -18,6 +18,8 @@ on:
       - 'MY_HOME_SYSTEM/views/dashboard/**'
       - 'MY_HOME_SYSTEM/routers/dashboard_router.py'
       - 'MY_HOME_SYSTEM/services/dashboard_proxy_service.py'
+      # 軽量ページ(`/dashboard/m`)のHTML・CSS・自動更新スクリプトの実体
+      - 'MY_HOME_SYSTEM/services/home_status_service.py'
       - 'MY_HOME_SYSTEM/tests/test_dashboard_mobile_e2e.py'
       - '.github/workflows/dashboard-mobile-e2e.yml'
   workflow_dispatch:

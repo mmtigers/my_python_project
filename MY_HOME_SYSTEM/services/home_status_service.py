@@ -73,7 +73,6 @@ STATUS_CARD_CSS = """
        「状態」が読み取りにくくなるため打ち消す。見た目は <div> のときと同じ。 */
     a.status-card {
         text-decoration: none;
-        color: inherit;
         -webkit-tap-highlight-color: rgba(0,0,0,0.08);
     }
     a.status-card:active {
