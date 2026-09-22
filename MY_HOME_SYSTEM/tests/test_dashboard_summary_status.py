@@ -210,6 +210,16 @@ class TestGetQuestStatus:
         assert sub.startswith("たろう ")
         assert sub.endswith(" から")
 
+    def test_a_failed_read_is_not_reported_as_zero(self):
+        """取得失敗を「✅ なし」と緑で出すと、承認待ちが溜まっていても気づけない。
+
+        JR運行情報のカードが「取得不可を平常運転と偽らない」ために分けていたのと
+        同じ失敗モード。ローダ側が `None` を返し、カードがグレーになること。
+        """
+        val, theme = home_status_service.get_quest_status(None)
+        assert theme == "theme-gray"
+        assert val != "✅ なし"
+
     def test_no_supporting_line_without_pending_requests(self):
         assert home_status_service.describe_quest({"count": 0}, NOW) is None
         assert home_status_service.describe_quest(None, NOW) is None
@@ -245,6 +255,15 @@ class TestCardGroups:
         html_out = home_status_service.render_status_grid_html(self._cards())
         for label in home_status_service.CARD_GROUP_LABELS.values():
             assert html_out.count(f">{label}</h2>") == 1, label
+
+    def test_a_lone_card_does_not_stretch_across_the_row(self):
+        """1枚だけのグループ(ファミクエ)が行いっぱいに伸びると、上下のグループの
+        2列のリズムから外れて間延びして見える。"""
+        html_out = home_status_service.render_status_grid_html(self._cards())
+
+        assert "status-grid status-grid-solo" in html_out, "1枚のグループに目印が付いていない"
+        assert html_out.count("status-grid-solo") == 1, "2枚以上のグループにも付いている"
+        assert ".status-grid-solo > .status-card" in home_status_service.STATUS_CARD_CSS
 
     def test_cards_without_a_group_are_still_rendered(self):
         """`group` を付け忘れたカードが表示から漏れないこと。"""

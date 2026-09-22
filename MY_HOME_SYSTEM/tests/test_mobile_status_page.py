@@ -288,6 +288,21 @@ class TestCardsLinkToTheirDetail:
         assert by_title["💰 今月の電気代"] == "life"
         assert by_title["🗄️ NAS"] == "sys"
 
+    def test_the_page_and_the_card_agree_on_where_the_quest_app_is(self):
+        """軽量ページ下部のリンクとカードのリンク先が食い違わないこと。
+
+        以前は `dashboard_router` / `dashboard.py` / `home_status_service` の
+        3箇所に `"/quest"` が直書きされており、片方だけ直すとずれる状態だった。
+        """
+        from routers import dashboard_router
+
+        assert dashboard_router._QUEST_APP_PATH is home_status_service.QUEST_APP_PATH
+
+        page = self._page()
+        assert page.count(f'href="{home_status_service.QUEST_APP_PATH}"') == 2, (
+            "カードのリンクと下部のナビの2箇所でファミクエを指していること"
+        )
+
     def test_the_quest_card_links_to_the_pwa_not_a_tab(self):
         """ファミクエの詳細はダッシュボードではなく family-quest(PWA)側にある。"""
         cards, _ = self._collect()

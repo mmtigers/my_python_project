@@ -252,8 +252,11 @@ def load_generic_data_cached(table_name: str, limit: int = 500) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
-def load_pending_quest_approvals_cached() -> dict:
-    """`analysis_service.load_pending_quest_approvals` のキャッシュ付きラッパー。"""
+def load_pending_quest_approvals_cached() -> dict | None:
+    """`analysis_service.load_pending_quest_approvals` のキャッシュ付きラッパー。
+
+    取得できなかったときは `None` が返る(カードは「取得失敗」になる)。
+    """
     return analysis_service.load_pending_quest_approvals()
 
 

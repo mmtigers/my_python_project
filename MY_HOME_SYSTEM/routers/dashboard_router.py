@@ -34,8 +34,10 @@ from services.dashboard_proxy_service import (
 _MOBILE_PATH = f"{config.DASHBOARD_BASE_PATH}/m"
 # 軽量ページが自動更新で差し替える、カードのブロックだけを返すパス。
 _MOBILE_STATUS_PATH = f"{_MOBILE_PATH}/status"
-# ファミクエ(PWA)への導線。`unified_server.py` が `/quest` にSPAをマウントしている。
-_QUEST_APP_PATH = "/quest"
+# ファミクエ(PWA)への導線。定義の実体は `services/home_status_service.py` にある
+# (軽量ページ下部のリンクと、「📝 承認待ち」カードのリンク先が食い違わないように、
+#  パスの定義を1箇所に保つ)。
+_QUEST_APP_PATH = home_status_service.QUEST_APP_PATH
 
 router = APIRouter()
 

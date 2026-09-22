@@ -55,6 +55,17 @@ STATUS_CARD_CSS = """
         gap: 8px;
         margin-bottom: 8px;
     }
+    /* カードが1枚だけのグループ(ファミクエ)。auto-fit は1枚だとその1枚を行いっぱいに
+       引き伸ばすため、上下のグループの「2列のリズム」から外れて間延びして見える。
+       列を2つに固定して、スマホでは上下のカードとちょうど同じ幅・同じ左端にする
+       (`minmax(0, ...)` なのは、極端に狭い画面で横にはみ出さないため)。
+       画面が広いときは1列ぶんが広くなりすぎるので、カード側で頭打ちにする。 */
+    .status-grid-solo {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .status-grid-solo > .status-card {
+        max-width: 260px;
+    }
     .status-card {
         padding: 10px 6px;
         border-radius: 12px;
@@ -298,6 +309,9 @@ def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:
         label = CARD_GROUP_LABELS.get(group_key or "")
         if label:
             blocks.append(f'<h2 class="group-title">{html.escape(label)}</h2>')
+        # 1枚だけのグループは、カードが行いっぱいに伸びないよう目印を付ける
+        # (理由は `.status-grid-solo` のCSSコメントを参照)。
+        solo = " status-grid-solo" if len(group_cards_) == 1 else ""
         cards_html = "".join(
             render_status_card_html(
                 card.title,
@@ -309,7 +323,7 @@ def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:
             )
             for card in group_cards_
         )
-        blocks.append(f'<div class="status-grid">{cards_html}</div>')
+        blocks.append(f'<div class="status-grid{solo}">{cards_html}</div>')
     return "".join(blocks)
 
 

@@ -187,7 +187,7 @@ def load_nas_status() -> Optional[pd.Series]:
         logger.error(f"NAS Data Load Error: {e}")
         return None
 
-def load_pending_quest_approvals() -> dict[str, Any]:
+def load_pending_quest_approvals() -> Optional[Dict[str, Any]]:
     """承認待ちのクエスト申請の件数と、いちばん古い1件を返す。
 
     ダッシュボードのトップに出す「⚔️ ファミクエ」カード用。クエストの残数や
@@ -199,16 +199,20 @@ def load_pending_quest_approvals() -> dict[str, Any]:
     読み取り専用接続を使う(残高には触れない。CLAUDE.md「単一プロセス前提」)。
 
     Returns:
-        {"count": int, "oldest_at": str | None, "oldest_name": str | None}
-        取得に失敗した場合も同じ形(count=0)を返す。
+        {"count": int, "oldest_at": str | None, "oldest_name": str | None}。
+        **取得できなかったときは `None`** を返す(テーブルが無い・読み取りに失敗)。
+        ここで `count=0` を返すと、カードが「✅ なし」と緑で出てしまい、実際には
+        承認待ちが溜まっているのに気づけない(JR運行情報のカードが「取得不可を
+        平常運転と偽らない」ために分けていたのと同じ失敗モード)。
+        呼び出し側(`get_quest_status`)は `None` を「⚪ 取得失敗」として出す。
     """
-    empty: dict[str, Any] = {"count": 0, "oldest_at": None, "oldest_name": None}
+    empty: Dict[str, Any] = {"count": 0, "oldest_at": None, "oldest_name": None}
     try:
         with contextlib.closing(get_ro_db_connection()) as conn:
             cur = conn.cursor()
             cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='quest_history'")
             if not cur.fetchone():
-                return empty
+                return None
 
             cur.execute("SELECT COUNT(*) FROM quest_history WHERE status = 'pending'")
             count = int(cur.fetchone()[0])
@@ -232,7 +236,7 @@ def load_pending_quest_approvals() -> dict[str, Any]:
         return {"count": count, "oldest_at": oldest_at, "oldest_name": oldest_name}
     except Exception as e:
         logger.error(f"Pending Quest Approvals Load Error: {e}")
-        return empty
+        return None
 
 
 def load_generic_data(table_name: str, limit: int = 500) -> pd.DataFrame:
