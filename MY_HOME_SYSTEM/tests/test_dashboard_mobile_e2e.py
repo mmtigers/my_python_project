@@ -401,7 +401,11 @@ class TestLightPageLayout:
         assert cards.count() == rendered.count(), "リンクになっていないカードがある"
         for i in range(cards.count()):
             href = cards.nth(i).get_attribute("href")
-            assert href and "?tab=" in href, f"{i}枚目にリンク先が無い: {href!r}"
+            # 行き先はダッシュボードのタブか、ファミクエ(PWA)のどちらか。
+            ok = bool(href) and (
+                "?tab=" in href or href == home_status_service.QUEST_APP_PATH
+            )
+            assert ok, f"{i}枚目にリンク先が無い: {href!r}"
 
     def test_cards_are_large_enough_to_tap(self, light_page):
         """カード自体がタップ先になったので、44pxを下回らないこと。"""

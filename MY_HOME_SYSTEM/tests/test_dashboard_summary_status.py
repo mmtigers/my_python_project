@@ -124,6 +124,136 @@ class TestGetItamiStatus:
         assert home_status_service.get_itami_status(df, NOW) == ("⚪ データなし", "theme-gray")
 
 
+class TestGetCameraStatus:
+    """カメラの直近検知。**色は情報色(青)かグレーだけ**にする。
+
+    家族が出入りすれば毎日検知するため、赤・黄にすると「気になること」の
+    要約行が毎回埋まって意味を失う。
+    """
+
+    def _df(self, rows):
+        df = pd.DataFrame(rows, columns=["timestamp", "device_type", "movement_state", "friendly_name"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        return df
+
+    def _row(self, minutes_ago, name="玄関"):
+        return {
+            "timestamp": NOW - timedelta(minutes=minutes_ago),
+            "device_type": home_status_service.CAMERA_DEVICE_TYPE,
+            "movement_state": "ON",
+            "friendly_name": name,
+        }
+
+    def test_empty_is_no_data(self):
+        assert home_status_service.get_camera_status(pd.DataFrame(), NOW) == ("⚪ データなし", "theme-gray")
+
+    def test_missing_columns_is_no_data(self):
+        df = pd.DataFrame([{"timestamp": NOW}])
+        assert home_status_service.get_camera_status(df, NOW) == ("⚪ データなし", "theme-gray")
+
+    def test_other_devices_are_ignored(self):
+        """人感センサー等はここでは拾わない(伊丹カードの担当)。"""
+        df = self._df([{
+            "timestamp": NOW, "device_type": "Motion Sensor",
+            "movement_state": "detected", "friendly_name": "リビング",
+        }])
+        assert home_status_service.get_camera_status(df, NOW) == ("⚪ データなし", "theme-gray")
+
+    def test_just_now_is_reported_as_moving(self):
+        val, theme = home_status_service.get_camera_status(self._df([self._row(3)]), NOW)
+        assert val == "🎥 いま動きあり"
+        assert theme == "theme-blue"
+
+    def test_within_an_hour_shows_minutes(self):
+        val, _ = home_status_service.get_camera_status(self._df([self._row(25)]), NOW)
+        assert val == "🎥 25分前に検知"
+
+    def test_within_a_day_shows_hours(self):
+        val, _ = home_status_service.get_camera_status(self._df([self._row(200)]), NOW)
+        assert val == "🎥 3時間前に検知"
+
+    def test_older_than_a_day_is_gray(self):
+        val, theme = home_status_service.get_camera_status(self._df([self._row(60 * 30)]), NOW)
+        assert val == "🎥 24時間 検知なし"
+        assert theme == "theme-gray"
+
+    def test_detection_never_raises_an_alert(self):
+        """検知そのものは異常ではない(要約行を毎日埋めない)。"""
+        for minutes in (1, 30, 300, 60 * 48):
+            _, theme = home_status_service.get_camera_status(self._df([self._row(minutes)]), NOW)
+            assert theme in ("theme-blue", "theme-gray"), f"{minutes}分前が警告色になっている"
+
+    def test_the_place_is_added_as_a_supporting_line(self):
+        """「5分前に検知」だけでは、どのカメラかが分からない。"""
+        df = self._df([self._row(5, name="駐車場")])
+        assert home_status_service.describe_camera(df, NOW) == "駐車場 " + (NOW - timedelta(minutes=5)).strftime("%H:%M")
+
+
+class TestGetQuestStatus:
+    """ファミクエは「承認待ち」だけを出す(見た人が今すぐ動く必要がある情報)。"""
+
+    def test_none_is_a_failed_fetch(self):
+        assert home_status_service.get_quest_status(None) == ("⚪ 取得失敗", "theme-gray")
+
+    def test_zero_is_green(self):
+        assert home_status_service.get_quest_status({"count": 0}) == ("✅ なし", "theme-green")
+
+    def test_pending_is_yellow_so_it_reaches_the_alert_line(self):
+        val, theme = home_status_service.get_quest_status({"count": 3})
+        assert val == "⏳ 3件"
+        assert theme == "theme-yellow"
+
+    def test_the_oldest_request_is_named(self):
+        pending = {"count": 2, "oldest_at": (NOW - timedelta(hours=2)).isoformat(), "oldest_name": "たろう"}
+        sub = home_status_service.describe_quest(pending, NOW)
+        assert sub is not None
+        assert sub.startswith("たろう ")
+        assert sub.endswith(" から")
+
+    def test_no_supporting_line_without_pending_requests(self):
+        assert home_status_service.describe_quest({"count": 0}, NOW) is None
+        assert home_status_service.describe_quest(None, NOW) is None
+
+
+class TestCardGroups:
+    """カードは利用頻度順に並び、用途の変わり目に見出しが入る。"""
+
+    def _cards(self):
+        return home_status_service.build_status_cards(
+            NOW, pd.DataFrame(), pd.DataFrame(), None, {"percent": 40}, 1234,
+            pending_quests={"count": 0},
+        )
+
+    def test_watch_cards_come_first(self):
+        """スマホで最初に見たいのは見守り(実家・自宅・車・カメラ)。"""
+        groups = [card.group for card in self._cards()]
+        assert groups[:4] == ["watch"] * 4
+        assert groups[-2:] == ["sys"] * 2, "毎回は見ないシステム系が最後にあること"
+
+    def test_every_card_belongs_to_a_known_group(self):
+        for card in self._cards():
+            assert card.group in home_status_service.CARD_GROUP_LABELS, card.title
+
+    def test_groups_are_contiguous(self):
+        """同じグループのカードが離れて並んでいると、見出しが2回出てしまう。"""
+        seen = []
+        for group, _cards in home_status_service.group_cards(self._cards()):
+            assert group not in seen, f"{group} のカードが離れて並んでいる"
+            seen.append(group)
+
+    def test_headings_are_rendered_once_per_group(self):
+        html_out = home_status_service.render_status_grid_html(self._cards())
+        for label in home_status_service.CARD_GROUP_LABELS.values():
+            assert html_out.count(f">{label}</h2>") == 1, label
+
+    def test_cards_without_a_group_are_still_rendered(self):
+        """`group` を付け忘れたカードが表示から漏れないこと。"""
+        cards = [home_status_service.StatusCard("🔧 テスト", "v", "theme-green")]
+        html_out = home_status_service.render_status_grid_html(cards)
+        assert "status-card" in html_out
+        assert "group-title" not in html_out
+
+
 class TestGetServerStatus:
     def test_low_memory_is_green(self):
         assert home_status_service.get_server_status({"percent": 42.7}) == ("💻 RAM: 42%", "theme-green")
@@ -193,11 +323,13 @@ class TestRenderSummary:
 
         with patch.object(summary.view_common, "render_status_grid") as mock_grid, \
              patch.object(summary.view_common, "get_monthly_cost_cached", return_value=4321), \
+             patch.object(summary.view_common, "load_pending_quest_approvals_cached",
+                          return_value={"count": 0}), \
              patch.object(summary.view_common, "get_memory_usage_cached", return_value={"percent": 50}):
             summary.render_summary(NOW, df_sensor, df_car, None)
 
         cards = mock_grid.call_args[0][0]
-        assert len(cards) == 7
+        assert len(cards) == 9
         titles = [c.title for c in cards]
         assert titles[0] == "👵 高砂 (実家)"
         assert "💰 今月の電気代" in titles

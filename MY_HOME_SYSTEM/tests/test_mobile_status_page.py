@@ -29,7 +29,7 @@ NOW = datetime.fromisoformat("2026-09-19T12:00:00+09:00")
 
 # サマリーに並ぶカードの枚数。`home_status_service.build_status_cards` の
 # 戻り値と対になっているので、カードを増減させるときは一緒に直す。
-EXPECTED_CARD_COUNT = 7
+EXPECTED_CARD_COUNT = 9
 
 _VIEWS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "views", "dashboard"
@@ -55,6 +55,7 @@ def _stub_loaders(**overrides):
         "load_sensor_data": pd.DataFrame(),
         "load_generic_data": pd.DataFrame(),
         "load_nas_status": None,
+        "load_pending_quest_approvals": {"count": 0, "oldest_at": None, "oldest_name": None},
         "get_memory_usage": {"percent": 42.0},
         "calculate_monthly_cost_cumulative": 1234,
         "calculate_last_month_cost_same_point": 1000,
@@ -269,6 +270,9 @@ class TestCardsLinkToTheirDetail:
         hrefs = re.findall(r'<a class="status-card [^"]*" href="([^"]+)"', page)
         assert len(hrefs) == EXPECTED_CARD_COUNT, "すべてのカードがリンクになっていること"
         for href in hrefs:
+            if href == home_status_service.QUEST_APP_PATH:
+                # ファミクエだけは詳細がダッシュボードの外(PWA)にある。
+                continue
             assert href.startswith(f"{config.DASHBOARD_BASE_PATH}/?tab=")
             tab_key = href.rsplit("=", 1)[1]
             assert tab_key in home_status_service.DASHBOARD_TAB_KEYS, f"存在しないタブ: {tab_key}"
@@ -279,9 +283,19 @@ class TestCardsLinkToTheirDetail:
         by_title = {card.title: card.tab for card in cards}
 
         assert by_title["👵 高砂 (実家)"] == "watch"
+        assert by_title["🎥 カメラ"] == "watch"
         assert by_title["🍚 炊飯器"] == "life"
         assert by_title["💰 今月の電気代"] == "life"
         assert by_title["🗄️ NAS"] == "sys"
+
+    def test_the_quest_card_links_to_the_pwa_not_a_tab(self):
+        """ファミクエの詳細はダッシュボードではなく family-quest(PWA)側にある。"""
+        cards, _ = self._collect()
+        quest = next(card for card in cards if card.title == "📝 承認待ち")
+
+        assert quest.tab is None
+        assert quest.href == home_status_service.QUEST_APP_PATH
+        assert home_status_service.card_detail_href(quest, "/dashboard/") == "/quest"
 
     def _collect(self):
         patches = _stub_loaders()
@@ -629,6 +643,7 @@ class TestSupportingValues:
             datetime.fromisoformat("2026-09-19T12:00:00+09:00"),
             empty, empty, None,
             {"percent": 42.0}, 1234,
+            pending_quests={"count": 0},
         )
 
         assert len(cards) == EXPECTED_CARD_COUNT

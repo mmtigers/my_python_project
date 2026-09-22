@@ -38,7 +38,9 @@ st.set_page_config(
 )
 
 # family-quest(PWA)への導線。`unified_server.py` が `/quest` にSPAをマウントしている。
-QUEST_APP_PATH = "/quest"
+# 定義の実体は `services/home_status_service.py` にある(ヘッダーのボタンと、
+# サマリーの「⚔️ ファミクエ」カードのリンク先を1箇所に保つため)。
+QUEST_APP_PATH = home_status_service.QUEST_APP_PATH
 
 # 軽量ページ(Streamlitを介さない読み取り専用のサマリー)への導線。
 # `routers/dashboard_router.py` が 8000番側で直接返すため、8501番を直接見ている

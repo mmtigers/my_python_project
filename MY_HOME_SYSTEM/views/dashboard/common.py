@@ -252,6 +252,12 @@ def load_generic_data_cached(table_name: str, limit: int = 500) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
+def load_pending_quest_approvals_cached() -> dict:
+    """`analysis_service.load_pending_quest_approvals` のキャッシュ付きラッパー。"""
+    return analysis_service.load_pending_quest_approvals()
+
+
+@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)
 def load_nas_status_cached() -> pd.Series | None:
     """`analysis_service.load_nas_status` のキャッシュ付きラッパー。"""
     return analysis_service.load_nas_status()

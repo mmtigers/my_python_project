@@ -32,6 +32,7 @@ def render_summary(
         # (素で呼ぶと1回の描画で取り直しになる。tests/test_dashboard_cache.py)
         memory=view_common.get_memory_usage_cached(),
         monthly_cost=view_common.get_monthly_cost_cached(),
+        pending_quests=view_common.load_pending_quest_approvals_cached(),
         # 補足表示(値の下の小さい行)にだけ使う材料。取れなくてもカードは出る。
         last_month_cost=view_common.get_last_month_cost_cached(),
         disk=view_common.get_disk_usage_cached(),

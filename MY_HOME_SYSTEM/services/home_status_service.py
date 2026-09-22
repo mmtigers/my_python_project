@@ -95,6 +95,16 @@ STATUS_CARD_CSS = """
     .theme-red { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
     .theme-blue { background-color: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
     .theme-gray { background-color: #f5f5f5; color: #757575; border: 1px solid #e0e0e0; }
+
+    /* カードのグループ見出し。カード自体より小さく薄くして、
+       「読むもの」ではなく「並びの区切り」として見えるようにする。 */
+    .group-title {
+        font-size: 0.8rem;
+        font-weight: bold;
+        color: #666;
+        margin: 14px 0 6px;
+        letter-spacing: 0.04em;
+    }
 """
 
 
@@ -124,6 +134,23 @@ DASHBOARD_TABS: tuple[tuple[str, str], ...] = (
 )
 DASHBOARD_TAB_KEYS: tuple[str, ...] = tuple(key for key, _ in DASHBOARD_TABS)
 
+# family-quest(PWA)への導線。`unified_server.py` が `/quest` にSPAをマウントしている。
+# ここに置いてあるのはタブ定義と同じ理由で、Streamlit を import しない
+# `dashboard.py` 以外(軽量ページ・カードの組み立て)からも使うため。
+QUEST_APP_PATH = "/quest"
+
+# === カードの並びとグループ ===
+# 並び順は「スマホで開いたときに上から見たい順」= 利用頻度で決めてある。
+# 見守り(留守・在宅・車・カメラ)を最初に、毎回は見ないシステム系を最後に置く。
+# グループの見出しは、9枚が1つの塊に見えて目的のカードを探しにくくなるのを防ぐ。
+CARD_GROUPS: tuple[tuple[str, str], ...] = (
+    ("watch", "👀 見守り"),
+    ("quest", "⚔️ ファミクエ"),
+    ("life", "💡 くらし"),
+    ("sys", "🔧 システム"),
+)
+CARD_GROUP_LABELS: dict[str, str] = dict(CARD_GROUPS)
+
 
 class StatusCard(NamedTuple):
     """サマリーに並べる1枚のステータスカード。
@@ -135,6 +162,10 @@ class StatusCard(NamedTuple):
     `sub`: 値の下に小さく出す補足(前回値・前日比・最終検知時刻など)。「いまの値」
     だけでは高いのか低いのか判断できないカードに、比べる相手を添えるためのもの。
     常にHTMLエスケープされる(`value` と違い、HTML断片は渡せない)。
+    `href`: 詳細がダッシュボードのタブではなく別のアプリにあるカード(ファミクエ)
+    のための、直接のリンク先。指定すると `tab` より優先される。
+    `group`: カードが属する見出し(`CARD_GROUPS` のキー)。よく見るものから順に
+    並べたうえで、どこからどこまでが同じ用途かを見出しで示すために使う。
     """
     title: str
     value: str
@@ -142,6 +173,8 @@ class StatusCard(NamedTuple):
     value_is_html: bool = False
     tab: str | None = None
     sub: str | None = None
+    href: str | None = None
+    group: str | None = None
 
 
 def render_status_card_html(
@@ -192,12 +225,17 @@ def render_status_card_html(
 
 
 def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:
-    """カードの詳細が載っているタブへのURLを返す(タブが無いカードは None)。
+    """カードの詳細へのURLを返す(行き先が無いカードは None)。
+
+    `href` を持つカード(詳細がダッシュボードの外にあるファミクエ)はそれを、
+    そうでなければ `tab` からダッシュボードのタブへのURLを作る。
 
     `dashboard_path` は閲覧中のオリジンからのルート相対パス(例: `/dashboard/`)。
     固定URLを埋めると、LAN内のIP・Cloudflare 経由の公開ドメインのどちらか一方でしか
-    繋がらなくなる。
+    繋がらなくなる(`href` 側も同じ理由でルート相対にすること)。
     """
+    if card.href is not None:
+        return card.href
     if card.tab is None:
         return None
     return f"{dashboard_path}?tab={card.tab}"
@@ -230,24 +268,49 @@ def render_alerts_html(cards, *, dashboard_path: str | None = None) -> str:
     return f'<p class="alerts alerts-warn">⚠️ 気になること: {"、".join(items)}</p>'
 
 
-def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:
-    """カードを自動折り返しのグリッド1ブロックにまとめたHTMLを返す。
+def group_cards(cards) -> list[tuple[str | None, list[StatusCard]]]:
+    """カードを `group` ごとの塊に分ける(並び順は変えない)。
 
-    `dashboard_path` を渡すと、詳細タブを持つカードがそのタブへのリンクになる
+    `CARD_GROUPS` の順に並んでいる前提で、**隣り合う同じグループ**をまとめる。
+    グループを持たないカードは見出し `None` の塊になるので、`group` を付けずに
+    カードを足しても表示から漏れない。
+    """
+    grouped: list[tuple[str | None, list[StatusCard]]] = []
+    for card in cards:
+        if grouped and grouped[-1][0] == card.group:
+            grouped[-1][1].append(card)
+        else:
+            grouped.append((card.group, [card]))
+    return grouped
+
+
+def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:
+    """カードを自動折り返しのグリッドにまとめたHTMLを返す。
+
+    `group` を持つカードには見出しが付く(`CARD_GROUPS`)。9枚が1つの塊に見えると
+    目的のカードを探すのに時間がかかるため、用途の変わり目を示す。
+
+    `dashboard_path` を渡すと、詳細のあるカードがその行き先へのリンクになる
     (軽量ページ専用。理由は `render_status_card_html` の docstring を参照)。
     """
-    cards_html = "".join(
-        render_status_card_html(
-            card.title,
-            card.value,
-            card.theme,
-            value_is_html=card.value_is_html,
-            href=None if dashboard_path is None else card_detail_href(card, dashboard_path),
-            sub=card.sub,
+    blocks = []
+    for group_key, group_cards_ in group_cards(cards):
+        label = CARD_GROUP_LABELS.get(group_key or "")
+        if label:
+            blocks.append(f'<h2 class="group-title">{html.escape(label)}</h2>')
+        cards_html = "".join(
+            render_status_card_html(
+                card.title,
+                card.value,
+                card.theme,
+                value_is_html=card.value_is_html,
+                href=None if dashboard_path is None else card_detail_href(card, dashboard_path),
+                sub=card.sub,
+            )
+            for card in group_cards_
         )
-        for card in cards
-    )
-    return f'<div class="status-grid">{cards_html}</div>'
+        blocks.append(f'<div class="status-grid">{cards_html}</div>')
+    return "".join(blocks)
 
 
 # === 各カードの判定 ===
@@ -373,10 +436,65 @@ def get_nas_status_simple(nas_data: pd.Series | None) -> tuple[str, str]:
         return "⚠️ NAS: データ異常", "theme-yellow"
 
 
+def get_quest_status(pending: dict[str, Any] | None) -> tuple[str, str]:
+    """ファミクエで承認待ちになっている申請の件数。
+
+    クエストの進捗やランキングではなく承認待ちを出すのは、これだけが
+    「見た人が今すぐ動く必要がある」情報だからで、ほかは family-quest(PWA)側で見る。
+    待たせている状態を拾ってほしいので、1件でもあれば黄色にして要約行に出す。
+    """
+    if pending is None:
+        return "⚪ 取得失敗", "theme-gray"
+    count = int(pending.get("count", 0) or 0)
+    if count == 0:
+        return "✅ なし", "theme-green"
+    return f"⏳ {count}件", "theme-yellow"
+
+
 def get_car_status(df_car: pd.DataFrame) -> tuple[str, str]:
     if not df_car.empty and df_car.iloc[0]["action"] == "LEAVE":
         return "🚗 外出中", "theme-yellow"
     return "🏠 在宅", "theme-green"
+
+
+# カメラの動体検知が `device_records` に入るときの `device_type`
+# (`monitors/camera_monitor.py` が ONVIF のイベントを受けて書く)。
+CAMERA_DEVICE_TYPE = "ONVIF_CAMERA"
+
+
+def _camera_motion(df_sensor: pd.DataFrame) -> pd.DataFrame:
+    """カメラが動きを捉えた行(新しい順)。
+
+    判定(`get_camera_status`)と補足表示(`describe_camera`)が同じ抽出を共有する。
+    """
+    required_cols = ["device_type", "movement_state"]
+    if df_sensor.empty or not all(col in df_sensor.columns for col in required_cols):
+        return df_sensor.iloc[0:0]
+    return df_sensor[
+        (df_sensor["device_type"] == CAMERA_DEVICE_TYPE) &
+        (df_sensor["movement_state"] == "ON")
+    ].sort_values("timestamp", ascending=False)
+
+
+def get_camera_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
+    """カメラが最後に動きを捉えたのはいつか。
+
+    **色は常に情報色(青)かグレーにする**。家族が出入りすれば毎日検知するため、
+    赤・黄にすると「気になること」の要約行が毎回埋まって意味を失う。
+    「誰かが来たかどうか」は人が見て判断する情報として出すだけにとどめる。
+    """
+    df_cam = _camera_motion(df_sensor)
+    if df_cam.empty:
+        return "⚪ データなし", "theme-gray"
+
+    diff_m = (now - df_cam.iloc[0]["timestamp"]).total_seconds() / 60
+    if diff_m < 10:
+        return "🎥 いま動きあり", "theme-blue"
+    if diff_m < 60:
+        return f"🎥 {int(diff_m)}分前に検知", "theme-blue"
+    if diff_m < 24 * 60:
+        return f"🎥 {int(diff_m / 60)}時間前に検知", "theme-blue"
+    return "🎥 24時間 検知なし", "theme-gray"
 
 
 # 炊飯器が「稼働していた」とみなす消費電力(W)。
@@ -457,6 +575,29 @@ def describe_car(df_car: pd.DataFrame, now: datetime) -> str | None:
     return f"{at} に出発" if df_car.iloc[0]["action"] == "LEAVE" else f"{at} に帰宅"
 
 
+def describe_camera(df_sensor: pd.DataFrame, now: datetime) -> str | None:
+    """どのカメラが捉えたのか。値の「5分前に検知」だけでは場所が分からない。"""
+    df_cam = _camera_motion(df_sensor)
+    at = _format_moment(_latest_timestamp(df_cam), now)
+    if at is None:
+        return None
+    if "friendly_name" not in df_cam.columns:
+        return at
+    name = df_cam.iloc[0]["friendly_name"]
+    return at if pd.isna(name) else f"{name} {at}"
+
+
+def describe_quest(pending: dict[str, Any] | None, now: datetime) -> str | None:
+    """いちばん長く待たせている申請(誰の・いつ)。0件のときは出さない。"""
+    if not pending or not pending.get("count"):
+        return None
+    at = _format_moment(pd.to_datetime(pending.get("oldest_at"), errors="coerce"), now)
+    if at is None:
+        return None
+    name = pending.get("oldest_name")
+    return f"{name} {at} から" if name else f"{at} から"
+
+
 def describe_rice(df_sensor: pd.DataFrame, now: datetime) -> str | None:
     at = _format_moment(_latest_timestamp(_rice_cooking_rows(df_sensor)), now)
     return None if at is None else f"前回 {at}"
@@ -498,8 +639,15 @@ def build_status_cards(
     monthly_cost: int,
     last_month_cost: int | None = None,
     disk: dict[str, float] | None = None,
+    pending_quests: dict[str, Any] | None = None,
 ) -> list[StatusCard]:
     """渡された材料から、並べる順にカードを組み立てる(取得は行わない)。
+
+    並び順は「スマホで上から見たい順」= 利用頻度で決めてある(`CARD_GROUPS`)。
+    見守り(実家・自宅・車・カメラ)→ ファミクエ → くらし → システムの順で、
+    毎回は見ないシステム系が最後に来る。順番を変えるとどの位置に何があるかの
+    記憶が無効になるので、変えるときは軽量ページ・Streamlit の両方が同じ順に
+    なること(ここが唯一の定義元であること)を保ったまま変えること。
 
     `last_month_cost`・`disk` は補足表示(`sub`)にだけ使う。渡さなければ補足が
     出ないだけで、カードの値と色は変わらない。
@@ -507,26 +655,35 @@ def build_status_cards(
     taka_val, taka_theme = get_takasago_status(df_sensor, now)
     itami_val, itami_theme = get_itami_status(df_sensor, now)
     car_val, car_theme = get_car_status(df_car)
+    camera_val, camera_theme = get_camera_status(df_sensor, now)
+    quest_val, quest_theme = get_quest_status(pending_quests)
     rice_val, rice_theme = get_rice_status(df_sensor, now)
     server_val, server_theme = get_server_status(memory)
     nas_val, nas_theme = get_nas_status_simple(nas_data)
 
     # `tab` は「このカードの詳細が載っているタブ」。軽量ページはこれを使って
     # カード自体をリンクにする(異常に気づいてから詳細を開くまでを1タップにする)。
+    # ファミクエだけは詳細がダッシュボードの外(PWA)にあるので `href` を使う。
     return [
-        StatusCard("👵 高砂 (実家)", taka_val, taka_theme, tab="watch",
+        StatusCard("👵 高砂 (実家)", taka_val, taka_theme, tab="watch", group="watch",
                    sub=describe_takasago(df_sensor, now)),
-        StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme, tab="watch",
+        StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme, tab="watch", group="watch",
                    sub=describe_itami(df_sensor, now)),
-        StatusCard("🚗 車 (伊丹)", car_val, car_theme, tab="watch",
+        StatusCard("🚗 車 (伊丹)", car_val, car_theme, tab="watch", group="watch",
                    sub=describe_car(df_car, now)),
-        StatusCard("🍚 炊飯器", rice_val, rice_theme, tab="life",
+        StatusCard("🎥 カメラ", camera_val, camera_theme, tab="watch", group="watch",
+                   sub=describe_camera(df_sensor, now)),
+        # 見出し(「⚔️ ファミクエ」)と同じ言葉をカード名にすると2行続けて同じに
+        # 見えるため、カード側は中身(何を待たせているか)を名前にする。
+        StatusCard("📝 承認待ち", quest_val, quest_theme, href=QUEST_APP_PATH, group="quest",
+                   sub=describe_quest(pending_quests, now)),
+        StatusCard("🍚 炊飯器", rice_val, rice_theme, tab="life", group="life",
                    sub=describe_rice(df_sensor, now)),
-        StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue", tab="life",
+        StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue", tab="life", group="life",
                    sub=describe_cost(monthly_cost, last_month_cost)),
-        StatusCard("🖥️ サーバー", server_val, server_theme, tab="sys",
+        StatusCard("🖥️ サーバー", server_val, server_theme, tab="sys", group="sys",
                    sub=describe_server(disk)),
-        StatusCard("🗄️ NAS", nas_val, nas_theme, tab="sys",
+        StatusCard("🗄️ NAS", nas_val, nas_theme, tab="sys", group="sys",
                    sub=describe_nas(nas_data)),
     ]
 
@@ -585,6 +742,7 @@ def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard],
     monthly_cost = _cached("cost", analysis_service.calculate_monthly_cost_cumulative)
     last_month_cost = _cached("cost_last_month", analysis_service.calculate_last_month_cost_same_point)
     disk = _cached("disk", analysis_service.get_disk_usage)
+    pending_quests = _cached("quest", analysis_service.load_pending_quest_approvals)
 
     cards = build_status_cards(
         now,
@@ -595,6 +753,7 @@ def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard],
         monthly_cost or 0,
         last_month_cost=last_month_cost,
         disk=disk,
+        pending_quests=pending_quests,
     )
     return cards, now
 
