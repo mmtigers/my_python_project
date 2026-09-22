@@ -43,7 +43,7 @@
 | `config` | ファイル内に定義がないため、`SQLITE_DB_PATH`や`MONITOR_DEVICES`などの具体的な値や構造が不明。 | `config.SQLITE_DB_PATH` (行番号: 44 / 抜粋: "config.SQLITE_DB_PATH") |
 | `core.logger.setup_logging` | ファイル内に実装がないため、ログの出力先やフォーマットが不明。 | `setup_logging("analysis_service")` (行番号: 18 / 抜粋: "setup_logging("analysis_service")") |
 | データベースの各種テーブル | スキーマ定義が提供されていないため、カラムの型や制約、インデックスの有無が不明。 | `SELECT * FROM {table_name}` (行番号: 155, 164, 349 / 抜粋: "SELECT * FROM {table_name}") |
-| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 485 / 抜粋: "home_system.service") |
+| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 533 / 抜粋: "home_system.service") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -185,6 +185,28 @@
 
 
 
+### `load_pending_quest_approvals`
+
+* **役割**: ファミクエで承認待ちのクエスト申請の件数と、いちばん古い1件（誰の・いつの申請か）を返す。ダッシュボードのトップに出す「📝 承認待ち」カード用。クエストの残数やランキングではなく承認待ちを出すのは、これだけが「見た人が今すぐ動く必要がある」情報だからで、ほかは family-quest(PWA)側で見る。
+* 根拠: `def load_pending_quest_approvals() -> dict[str, Any]:` (行番号: 190 / 抜粋: "def load_pending_quest_approvals() -> dict[str, Any]:")
+
+
+* **引数/リクエスト**: なし
+* 根拠: `def load_pending_quest_approvals() -> dict[str, Any]:` (行番号: 190 / 抜粋: "def load_pending_quest_approvals() -> dict[str, Any]:")
+
+
+* **戻り値/レスポンス**: `{"count": int, "oldest_at": str | None, "oldest_name": str | None}`。`quest_history` テーブルが存在しない場合・0件の場合・取得に失敗した場合はいずれも `count=0` の同じ形を返す（呼び出し側が形を分岐しなくて済むようにするため）。
+* 根拠: `empty: dict[str, Any] = {"count": 0, "oldest_at": None, "oldest_name": None}` (行番号: 205 / 抜粋: "empty: dict[str, Any] = {\"count\": 0, \"oldest_at\": None, \"oldest_name\": None}")
+
+
+* **副作用**: 読み取り専用接続（`get_ro_db_connection`）でのDB読み取りのみ。`quest_users` の残高には触れない（CLAUDE.md「単一プロセス前提」の並行制御に影響しない）。集計は `quest_history` の `status` インデックス（`idx_quest_history_status_completed`）に乗る軽いクエリ2本だけ。
+* 根拠: `cur.execute("SELECT COUNT(*) FROM quest_history WHERE status = 'pending'")` (行番号: 213 / 抜粋: "cur.execute(\"SELECT COUNT(*) FROM quest_history WHERE status = 'pending'\")")
+
+
+* **エラーハンドリング**: `except Exception` でエラーログを出し、`count=0` の辞書を返す（1枚のカードの取得失敗でページ全体を落とさない）。
+* 根拠: `logger.error(f"Pending Quest Approvals Load Error: {e}")` (行番号: 234 / 抜粋: "logger.error(f\"Pending Quest Approvals Load Error: {e}\")")
+
+
 ### `load_generic_data`
 
 * **役割**: 指定したテーブルから汎用的に最新のデータを取得する。
@@ -192,7 +214,7 @@
 
 
 * **引数/リクエスト**: `table_name` (`str`): テーブル名。`limit` (`int`, デフォルト `500`): 取得件数。
-* 根拠: `table_name: str, limit: int = 500` (行番号: 190 / 抜粋: "table_name: str, limit: int = 500")
+* 根拠: `table_name: str, limit: int = 500` (行番号: 238 / 抜粋: "table_name: str, limit: int = 500")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (取得したデータのデータフレーム)
@@ -200,22 +222,22 @@
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 193 / 抜粋: "return load_data_from_db(query)")
+* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 241 / 抜粋: "return load_data_from_db(query)")
 
 
 * **エラーハンドリング**: 内部で呼び出される `load_data_from_db` に依存。
-* 根拠: `return load_data_from_db(query)` (行番号: 193 / 抜粋: "return load_data_from_db(query)")
+* 根拠: `return load_data_from_db(query)` (行番号: 241 / 抜粋: "return load_data_from_db(query)")
 
 
 
 ### `load_sensor_data`
 
 * **役割**: `device_records`、SwitchBotのログ、電力使用量の3つのテーブルからデータを取得・統合・ソートし、表示名を適用する。電力使用量(`config.SQLITE_TABLE_POWER_USAGE`)由来の行は、`device_name`に`"Remo"`を含めば`device_type="Nature Remo E Lite"`(スマートメーター全体消費)、含まなければ`device_type="Plug"`(個別家電)として分類される。**（Issue #169で解消）** 以前はこの分類直後に`.replace("Plug", "Nature Remo E Lite")`が実行されており、"Plug"に分類された全行が無条件で"Nature Remo E Lite"へ上書きされていた(`str.contains("Plug")`で個別家電を絞り込む`views/dashboard/sensor_tab.py`側のフィルタが構造的に一致しなくなり、個別家電グラフが常に空になる・全プラグの消費電力がスマートメーター全体消費のグラフへ混入する不具合)。この一括置換は削除され、"Remo"を含むかどうかの判定結果がそのまま最終的な`device_type`になる。
-* 根拠: `load_sensor_data` (行番号: 263 / 抜粋: "df_merged = pd.concat(df_list, ignore_index=True)")、`device_type`分類 (行番号: 202〜205 / 抜粋: "df_power[\"device_type\"] = df_power[\"device_name\"].apply(\n            lambda x: \"Nature Remo E Lite\" if x and \"Remo\" in str(x) else \"Plug\"\n        )")
+* 根拠: `load_sensor_data` (行番号: 311 / 抜粋: "df_merged = pd.concat(df_list, ignore_index=True)")、`device_type`分類 (行番号: 202〜205 / 抜粋: "df_power[\"device_type\"] = df_power[\"device_name\"].apply(\n            lambda x: \"Nature Remo E Lite\" if x and \"Remo\" in str(x) else \"Plug\"\n        )")
 
 
 * **引数/リクエスト**: `limit` (`int`, デフォルト `5000`): 取得件数の上限。
-* 根拠: `limit: int = 5000` (行番号: 195 / 抜粋: "def load_sensor_data(limit: int = 5000)")
+* 根拠: `limit: int = 5000` (行番号: 243 / 抜粋: "def load_sensor_data(limit: int = 5000)")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (統合されたセンサーデータのデータフレーム)
@@ -223,11 +245,11 @@
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db` を複数回呼び出し。 (行番号: 208 / 抜粋: "df_legacy = load_data_from_db(query_legacy)")
+* 根拠: `load_data_from_db` を複数回呼び出し。 (行番号: 256 / 抜粋: "df_legacy = load_data_from_db(query_legacy)")
 
 
 * **エラーハンドリング**: 内部で呼び出される `load_data_from_db` に依存。
-* 根拠: 該当関数内に独自の `try-except` なし (行番号: 195 / 抜粋: "def load_sensor_data(")
+* 根拠: 該当関数内に独自の `try-except` なし (行番号: 243 / 抜粋: "def load_sensor_data(")
 
 
 
@@ -238,7 +260,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 275 / 抜粋: "def calculate_monthly_cost_cumulative()")
+* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 323 / 抜粋: "def calculate_monthly_cost_cumulative()")
 
 
 * **戻り値/レスポンス**: `int` (計算された電気代概算)
@@ -256,47 +278,47 @@
 ### `calculate_last_month_cost_same_point`
 
 * **役割**: 先月の月初から「今と同じ日・同じ時刻」までの電気代概算を、今月ぶんと同じ方法（`_calculate_cost_between`）で算出する。ダッシュボードのカードが「今月いくら使ったか」だけを出していて高いのか安いのか判断できなかったため、比較対象として出す。先月に同じ日が無い場合（3/31 → 2/31）は先月の末日に丸める。
-* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 281 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
+* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 329 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
 
 * **引数/リクエスト**: なし
-* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 281 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
+* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 329 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
 
 * **戻り値/レスポンス**: `int`（先月の同じ時点までの電気代概算）
-* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 295 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
+* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 343 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
 
 * **副作用**: データベースの読み取り操作（`_calculate_cost_between` 経由）。
-* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 295 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
+* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 343 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
 
 * **エラーハンドリング**: `_calculate_cost_between` 側で例外を捕捉し `0` を返す。日付の丸めは `min(now.day, end_of_last_month.day)` で行うため、`ValueError: day is out of range` にはならない。
-* 根拠: `day = min(now.day, end_of_last_month.day)` (行番号: 291 / 抜粋: "day = min(now.day, end_of_last_month.day)")
+* 根拠: `day = min(now.day, end_of_last_month.day)` (行番号: 339 / 抜粋: "day = min(now.day, end_of_last_month.day)")
 
 
 ### `_start_of_month` / `_calculate_cost_between` / `ELECTRICITY_YEN_PER_KWH`
 
 * **役割**: `_start_of_month` は渡した時刻の月初（`microsecond=0`）を返す。`_calculate_cost_between` は期間内のスマートメーターの記録から電気代を概算する共通処理で、`WHERE timestamp >= '{start}' AND timestamp <= '{end}'` で期間を絞る（上限は先月ぶんの集計のために足されたもので、今月ぶんは「今」が上限なので結果は変わらない）。`ELECTRICITY_YEN_PER_KWH` は単価（31円/kWh）。
-* 根拠: `def _calculate_cost_between(start: datetime, end: datetime) -> int:` (行番号: 306 / 抜粋: "def _calculate_cost_between(start: datetime, end: datetime) -> int:"), `ELECTRICITY_YEN_PER_KWH = 31` (行番号: 272 / 抜粋: "ELECTRICITY_YEN_PER_KWH = 31")
+* 根拠: `def _calculate_cost_between(start: datetime, end: datetime) -> int:` (行番号: 354 / 抜粋: "def _calculate_cost_between(start: datetime, end: datetime) -> int:"), `ELECTRICITY_YEN_PER_KWH = 31` (行番号: 320 / 抜粋: "ELECTRICITY_YEN_PER_KWH = 31")
 
 * **引数/リクエスト**: `_start_of_month(moment: datetime)`, `_calculate_cost_between(start: datetime, end: datetime)`
-* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 298 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
+* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 346 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
 
 * **戻り値/レスポンス**: `_start_of_month` は `datetime`、`_calculate_cost_between` は `int`
-* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 298 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
+* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 346 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
 
 * **副作用**: `_calculate_cost_between` はデータベースの読み取り操作。
 * 根拠: `df = load_data_from_db(query)` (行番号: 328 / 抜粋: "df = load_data_from_db(query)")
 
 * **エラーハンドリング**: `_calculate_cost_between` は例外発生時にエラーログを出力し `0` を返す。
-* 根拠: `except Exception as e:` (行番号: 354 / 抜粋: "logger.error(f\"Cost Calc Error: {e}\")")
+* 根拠: `except Exception as e:` (行番号: 402 / 抜粋: "logger.error(f\"Cost Calc Error: {e}\")")
 
 
 ### `load_weather_history`
 
 * **役割**: 指定された日数分、指定された場所（デフォルトは伊丹）の天気履歴を取得する。**（Issue #410 L-L2で修正）** 遡り開始日(`start_date`)の算出に使う「現在時刻」を、以前のnaive`datetime.now()`（サーバーのローカルタイムゾーンに依存し、`get_today_date_str()`等が前提とするJSTと日付境界がズレうる）から、JST明示の`datetime.now(pytz.timezone("Asia/Tokyo"))`へ変更した。
-* 根拠: `load_weather_history` (行番号: 291〜308 / 抜粋: "FROM weather_history")、JST明示化 (行番号: 361 / 抜粋: "start_date = (datetime.now(pytz.timezone(\"Asia/Tokyo\")) - timedelta(days=days)).strftime(\"%Y-%m-%d\")")
+* 根拠: `load_weather_history` (行番号: 291〜308 / 抜粋: "FROM weather_history")、JST明示化 (行番号: 409 / 抜粋: "start_date = (datetime.now(pytz.timezone(\"Asia/Tokyo\")) - timedelta(days=days)).strftime(\"%Y-%m-%d\")")
 
 
 * **引数/リクエスト**: `days` (`int`, デフォルト `40`): 遡る日数。`location` (`str`, デフォルト `"伊丹"`): 取得対象の場所。
-* 根拠: `days: int = 40, location: str = "伊丹"` (行番号: 357 / 抜粋: "days: int = 40, location: str = "伊丹"")
+* 根拠: `days: int = 40, location: str = "伊丹"` (行番号: 405 / 抜粋: "days: int = 40, location: str = "伊丹"")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (天気履歴のデータフレーム)
@@ -315,11 +337,11 @@
 ### `load_yearly_temperature_stats`
 
 * **役割**: 指定年の天気履歴（外気温）と室内センサーログ（室温）の日次最小・最大統計を取得し、マージして返す。
-* 根拠: `load_yearly_temperature_stats` (行番号: 429 / 抜粋: "df_merged = pd.merge(df_weather, df_sensor, on="date"")
+* 根拠: `load_yearly_temperature_stats` (行番号: 477 / 抜粋: "df_merged = pd.merge(df_weather, df_sensor, on="date"")
 
 
 * **引数/リクエスト**: `year` (`int`): 対象年。`location` (`str`, デフォルト `"伊丹"`): 対象場所。
-* 根拠: `year: int, location: str = "伊丹"` (行番号: 377 / 抜粋: "year: int, location: str = "伊丹"")
+* 根拠: `year: int, location: str = "伊丹"` (行番号: 425 / 抜粋: "year: int, location: str = "伊丹"")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (マージされた統計データのデータフレーム)
@@ -327,7 +349,7 @@
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `pd.read_sql_query` (行番号: 389 / 抜粋: "df_weather = pd.read_sql_query(q_weather, conn)")
+* 根拠: `pd.read_sql_query` (行番号: 437 / 抜粋: "df_weather = pd.read_sql_query(q_weather, conn)")
 
 
 * **エラーハンドリング**: 各クエリ実行ごとに `try-except` で回避処理。全体の例外発生時はエラーログを出力し空のデータフレームを返す。`finally`で接続を閉じる。**（保守性 #410で修正）** 個別クエリの回避処理は以前bareの`except:`だったが、`except Exception:`へ変更した（`KeyboardInterrupt`/`SystemExit`等の`BaseException`まで握り潰さないようにする一般的なプラクティスに合わせた。挙動そのものは変わらない）。
@@ -354,11 +376,11 @@
 ### `get_disk_usage`
 
 * **役割**: ルートディレクトリ（`/`）のディスク使用量（全体、使用済、空き、使用率）を取得する。
-* 根拠: `get_disk_usage` (行番号: 445 / 抜粋: "total, used, free = shutil.disk_usage("/")")
+* 根拠: `get_disk_usage` (行番号: 493 / 抜粋: "total, used, free = shutil.disk_usage("/")")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 442 / 抜粋: "def get_disk_usage()")
+* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 490 / 抜粋: "def get_disk_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (GB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -366,7 +388,7 @@
 
 
 * **副作用**: OSファイルシステムのディスク容量読み取り。
-* 根拠: `shutil.disk_usage("/")` (行番号: 445 / 抜粋: "shutil.disk_usage("/")")
+* 根拠: `shutil.disk_usage("/")` (行番号: 493 / 抜粋: "shutil.disk_usage("/")")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `None` を返す。
@@ -381,7 +403,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 461 / 抜粋: "def get_memory_usage()")
+* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 509 / 抜粋: "def get_memory_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (MB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -404,7 +426,7 @@
 
 
 * **引数/リクエスト**: `lines` (`int`, デフォルト `50`): 行数。`priority` (`Optional[str]`): ログの優先度。`target_date` (`Optional[date]`): 対象日付。
-* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 482 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
+* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 530 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
 
 
 * **戻り値/レスポンス**: `str` (取得したログの文字列。失敗時はエラーメッセージの文字列)
@@ -412,11 +434,11 @@
 
 
 * **副作用**: OSコマンド（`journalctl`）の実行。
-* 根拠: `subprocess.run` (行番号: 495 / 抜粋: "subprocess.run(cmd")
+* 根拠: `subprocess.run` (行番号: 543 / 抜粋: "subprocess.run(cmd")
 
 
 * **エラーハンドリング**: 例外発生時はエラーメッセージを文字列として返す。
-* 根拠: `except Exception as e:` (行番号: 498 / 抜粋: "return f"ログ取得エラー: {e}"")
+* 根拠: `except Exception as e:` (行番号: 546 / 抜粋: "return f"ログ取得エラー: {e}"")
 
 
 

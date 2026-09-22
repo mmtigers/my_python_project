@@ -22,19 +22,19 @@
 * `services.analysis_service` からセンサー・子供・排泄・食事・車・防犯ログ・NASステータス等のデータを読み込み、4つのタブに展開表示する。**（Issue #701・2026-09-19で退役）** 以前はAIレポート（「セバスチャンからの報告」、`ai_report_records`の最新1件）も表示していたが、機能ごと削除した。
 * **（スマホ対応で再設計、2026-09-21に「🚃 おでかけ」を撤去）** 画面は4つのタブ（🏠 ホーム、👀 見守り、💡 くらし、🔧 システム）で構成され、レンダリングは `views.dashboard` 配下のビューモジュールに委譲する。サマリー（`views.dashboard.summary`）は常時最上部ではなく「ホーム」タブの中に入っている。
 * **（タブの遅延評価で変更）** タブは `st.tabs` ではなく `st.segmented_control`（`TAB_SELECTOR_STATE_KEY` をキーに選択状態を保持）で描き、**選択中のタブの描画関数だけ**を呼ぶ（`TAB_RENDERERS`）。`st.tabs` は選択されていないタブの中身もすべて実行するため、「🏠 ホーム」を開いただけの1回の描画で、`journalctl` の起動・年間気温の集計SQL・plotlyのグラフ6枚ぶんの生成まで毎回走っていた（当時はここに外部サイトのスクレイピングも2本入っていた。タブを10個から束ね直した再設計は「探しやすさ」を直したが、実行される処理量は減っていなかった）。折りたたみも同じ理由で `st.expander` から `view_common.lazy_section`（`st.toggle` ベース）へ置き換えられている。
-* 根拠: `def _render_tab_selector() -> str:` (行番号: 153 / 抜粋: "def _render_tab_selector() -> str:"), `TAB_RENDERERS: Dict[str, Callable[[datetime], None]] = {` (行番号: 281 / 抜粋: "TAB_RENDERERS: Dict[str, Callable[[datetime], None]] = {")
+* 根拠: `def _render_tab_selector() -> str:` (行番号: 155 / 抜粋: "def _render_tab_selector() -> str:"), `TAB_RENDERERS: Dict[str, Callable[[datetime], None]] = {` (行番号: 281 / 抜粋: "TAB_RENDERERS: Dict[str, Callable[[datetime], None]] = {")
 * **（タブの遅延評価で変更）** データの読み込みも各タブの描画関数の中で行う。以前は `main()` の先頭で全タブ分（センサー・子供・排泄・食事・車・防犯ログ・駐輪場・NAS）をまとめて読んでいたが、選択中のタブしか描画しないため、そのタブが使わないテーブルを読む必要がなくなった（例: ホームタブが読む `load_generic_data_cached` は車のテーブルだけ）。
-* 根拠: `def _render_home_tab(now: datetime) -> None:` (行番号: 191 / 抜粋: "def _render_home_tab(now: datetime) -> None:")
+* 根拠: `def _render_home_tab(now: datetime) -> None:` (行番号: 193 / 抜粋: "def _render_home_tab(now: datetime) -> None:")
 * **（タブの遅延評価で追加）** 選択中のタブは `?tab=` のクエリパラメータに保存される。「🔄 データを更新」（`st.rerun`）や再接続でホームタブに戻らず、`/dashboard?tab=watch` のようなURLをスマートフォンのホーム画面に置ける。
-* 根拠: `TAB_QUERY_PARAM = "tab"` (行番号: 80 / 抜粋: "TAB_QUERY_PARAM = \"tab\"")
+* 根拠: `TAB_QUERY_PARAM = "tab"` (行番号: 82 / 抜粋: "TAB_QUERY_PARAM = \"tab\"")
 * **（カードのリンク化で変更）** タブ定義（キーとラベル）の実体は本ファイルではなく `services.home_status_service.DASHBOARD_TABS` にあり、`TABS` はそれを読み込むだけになった。軽量ページ（`/dashboard/m`）が各ステータスカードを「詳細が載っているタブ」へのリンク（`?tab=...`）にするためにキーを必要とし、Streamlit を import する本ファイルはサーバー側（`unified_server`）から読めないため。上記の `?tab=` の解釈（`_requested_tab`）は本ファイルのまま。
-* 根拠: `TABS: tuple[tuple[str, str], ...] = home_status_service.DASHBOARD_TABS` (行番号: 68 / 抜粋: "TABS: tuple[tuple[str, str], ...] = home_status_service.DASHBOARD_TABS")
+* 根拠: `TABS: tuple[tuple[str, str], ...] = home_status_service.DASHBOARD_TABS` (行番号: 70 / 抜粋: "TABS: tuple[tuple[str, str], ...] = home_status_service.DASHBOARD_TABS")
 * **（スマホ対応で変更）** 以前は10個のタブ（クエスト、電車遅延、防犯カメラ、電力・環境、気温詳細、健康管理、高砂実家、ログ分析、システム管理、駐輪場）を持ち、そのすべての上にサマリーを常時表示していた。ソース中のコメントには、この構成ではスマートフォンで「どのタブを開いてもサマリーを越えるスクロールが必要」「タブ列が画面幅の数倍になり、目的のタブを探せない」状態だったため用途で束ね直した（当初5つ）、と記されている。クエストタブは同じ内容をスマホ最適化済みのPWA `family-quest`（`/quest`）が持つ二重管理だったため撤去され、ヘッダーのリンクボタンだけが残っている。
 * **（Issue #507で削除）** 以前は「トレンド」タブも存在したが、参照先の`app_rankings`テーブルへの書き込みコードが存在せず機能として死んでいたため、UIごと削除された。
 * **（2026-09-21で削除）** 「🚃 おでかけ」タブ（JR運行情報・Yahoo!路線情報のルート検索・駐輪場の待機数）も、いずれも使わなくなったためオーナー判断でUIごと削除された。サマリーの「🚲 駐輪場待機」「🚃 JR運行情報」カードも同時に撤去され、カードは9枚から7枚になっている。
 * 根拠: 退役の経緯を述べたコメント (行番号: 58〜61 / 抜粋: "# 「🚃 おでかけ」タブ(JR運行情報・Yahoo!路線情報のルート検索・駐輪場の待機数)は、")
 * **（スマホ対応で追加）** 画面最上部に操作列（`_render_header_actions`）を常設する。「🔄 データを更新」は以前サイドバーにしか無く、`initial_sidebar_state="collapsed"` のためスマートフォンではハンバーガーメニューを開かないと押せなかった。**（スマホ対応で追加）** 操作列の下に、いま表示しているデータの取得時刻（`view_common.cache_generation_started_at`）と相対表記、および軽量ページ `{DASHBOARD_BASE_PATH}/m` への導線を `st.caption` で出す。表示は最大60秒キャッシュされるため、描画時刻をそのまま「最終更新」と書くと嘘になる。
-* 根拠: `fetched_at = view_common.cache_generation_started_at()` (行番号: 133 / 抜粋: "fetched_at = view_common.cache_generation_started_at()"), `MOBILE_PAGE_PATH = f"{config.DASHBOARD_BASE_PATH}/m"` (行番号: 46 / 抜粋: "MOBILE_PAGE_PATH = f\"{config.DASHBOARD_BASE_PATH}/m\"")
+* 根拠: `fetched_at = view_common.cache_generation_started_at()` (行番号: 133 / 抜粋: "fetched_at = view_common.cache_generation_started_at()"), `MOBILE_PAGE_PATH = f"{config.DASHBOARD_BASE_PATH}/m"` (行番号: 48 / 抜粋: "MOBILE_PAGE_PATH = f\"{config.DASHBOARD_BASE_PATH}/m\"")
 * アプリ実行中に例外が発生した場合、エラーログを出力しDiscordへ通知を試み、画面上に汎用エラーメッセージを表示するフェイルセーフ処理を持つ（**Issue #410 L-L5で修正**: トレースバックは以前画面にも表示していたが、内部情報の露出防止のためログのみに変更した）。
 
 ## 3. 外部依存関係
@@ -68,14 +68,14 @@
 | `services.analysis_service` の各関数 | `apply_friendly_names` の実装（データ整形ロジック）が本ファイルからは不明。**（Issue #741で変更）** DB読み取りの各関数（`load_sensor_data`, `load_generic_data`, `load_nas_status`）は本ファイルから直接は呼ばれなくなり、`view_common` のキャッシュ付きラッパー経由になった。 | `df_security_log = analysis_service.apply_friendly_names(df_security_log)` |
 | `views.dashboard.common` のキャッシュ付きローダ | `load_sensor_data_cached` 等が `@st.cache_data(ttl=60)` で包まれていること、TTL とクリアの契機は `view_common` 側にある。 | `df_sensor = view_common.load_sensor_data_cached(limit=10000)` |
 | `config` の各設定値 | `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_DEFECATION`, `SQLITE_TABLE_FOOD`, `SQLITE_TABLE_CAR` の実際の値がどこでどう定義されているか不明。 | `df_child = view_common.load_generic_data_cached(config.SQLITE_TABLE_CHILD)` |
-| `services.notification_service.send_push` | エラー通知の送信方式・成否時の挙動（例外送出の有無など）が不明。 | `services.notification_service.send_push(` (行番号: 328 / 抜粋: "send_push(") |
+| `services.notification_service.send_push` | エラー通知の送信方式・成否時の挙動（例外送出の有無など）が不明。 | `services.notification_service.send_push(` (行番号: 330 / 抜粋: "send_push(") |
 | `view_common.CUSTOM_CSS` | CSSの具体的な内容・スタイル定義が不明。 | `view_common.CUSTOM_CSS` (行番号: 110 / 抜粋: "st.markdown(view_common.CUSTOM_CSS, unsafe_allow_html=True)") |
-| `view_common.safe_section` | 例外を隔離する仕組み（何を表示し、どこへログを出すか）が本ファイルからは不明。 | `view_common.safe_section("サマリー")` (行番号: 193 / 抜粋: "with view_common.safe_section(\"サマリー\"):") |
-| `summary.render_summary` | サマリー部の描画ロジック・使用データ項目の詳細が不明。 | `summary.render_summary(` (行番号: 194 / 抜粋: "summary.render_summary(") |
-| `misc_tab` の各関数 | `render_photos` の内部実装が不明。 | `misc_tab.render_photos(analysis_service.apply_friendly_names(df_security_log))` (行番号: 227 / 抜粋: "misc_tab.render_photos(analysis_service.apply_friendly_names(df_security_log))") |
+| `view_common.safe_section` | 例外を隔離する仕組み（何を表示し、どこへログを出すか）が本ファイルからは不明。 | `view_common.safe_section("サマリー")` (行番号: 195 / 抜粋: "with view_common.safe_section(\"サマリー\"):") |
+| `summary.render_summary` | サマリー部の描画ロジック・使用データ項目の詳細が不明。 | `summary.render_summary(` (行番号: 196 / 抜粋: "summary.render_summary(") |
+| `misc_tab` の各関数 | `render_photos` の内部実装が不明。 | `misc_tab.render_photos(analysis_service.apply_friendly_names(df_security_log))` (行番号: 229 / 抜粋: "misc_tab.render_photos(analysis_service.apply_friendly_names(df_security_log))") |
 | `sensor_tab` の各関数 | `render_electricity`, `render_temperature`, `render_takasago` の内部実装が不明。 | `sensor_tab.render_electricity(df_sensor, now)` (行番号: 190 / 抜粋: "sensor_tab.render_electricity(df_sensor, now)") |
 | `health_tab.render` | 健康管理の描画内容が不明。 | `health_tab.render(df_child, df_poop, df_food)` (行番号: 186 / 抜粋: "health_tab.render(df_child, df_poop, df_food)") |
-| `log_tab` の各関数 | **（スマホ対応で変更）** `render_logs` に加え、以前の `render_system` を分割した `render_resources` / `render_nas_status` / `render_server_logs` / `render_maintenance` の内部実装が不明。 | `log_tab.render_resources()` (行番号: 255 / 抜粋: "log_tab.render_resources()") |
+| `log_tab` の各関数 | **（スマホ対応で変更）** `render_logs` に加え、以前の `render_system` を分割した `render_resources` / `render_nas_status` / `render_server_logs` / `render_maintenance` の内部実装が不明。 | `log_tab.render_resources()` (行番号: 257 / 抜粋: "log_tab.render_resources()") |
 | `/quest` のSPA | `QUEST_APP_PATH` のリンク先で何が配信されるかは本ファイルからは不明（`unified_server.py` がマウントする旨のコメントのみ）。 | `QUEST_APP_PATH = "/quest"` (行番号: 41 / 抜粋: "QUEST_APP_PATH = \"/quest\"") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -128,7 +128,7 @@
 
 ### `QUEST_APP_PATH` (モジュールレベル定数)
 
-* **役割**: family-quest(PWA)へのリンク先パス `"/quest"`。コメントに「`unified_server.py` が `/quest` にSPAをマウントしている」と記されている。
+* **役割**: family-quest(PWA)へのリンク先パス `"/quest"`。**（トップ画面の刷新で変更）** 定義の実体は `services.home_status_service.QUEST_APP_PATH` にあり、本ファイルはそれを読み込むだけになった。サマリーの「📝 承認待ち」カードのリンク先と、ヘッダーの「⚔️ ファミクエを開く」ボタンが同じ場所を指すようにするためで、カードの組み立ては Streamlit を import しない `home_status_service` 側にある。
 * 根拠: `QUEST_APP_PATH = "/quest"` (行番号: 38〜39 / 抜粋: "QUEST_APP_PATH = \"/quest\"")
 
 
@@ -152,17 +152,17 @@
 ### `_render_header_actions`
 
 * **役割**: 画面最上部の操作列を描画する。**（スマホのヘッダー改善で変更）** 全体を `st.container(key="header_actions")` で囲み、その中の `st.columns(2)` の左に「🔄 データを更新」ボタン（押下で `st.cache_data.clear()` と `st.rerun()`。**（Issue #741で変更）** 以前はリポジトリ全体に `@st.cache_data` が1つも存在せず、この `clear()` は何も消していなかった。`view_common` のキャッシュ付きローダを使うようになり、TTL(60秒)を待たずに捨てる操作として機能するようになった）、右に「⚔️ ファミクエを開く」リンクボタン（`QUEST_APP_PATH`）を、いずれも `width="stretch"` で配置する。docstringには、以前「データを更新」がサイドバーにしか無く、`initial_sidebar_state="collapsed"` のためスマートフォンではハンバーガーメニューを開かないと押せず最も使う操作が最も遠かったため、メイン画面の先頭に常設する旨が記されている。
-* 根拠: `def _render_header_actions() -> None:` (行番号: 89)
+* 根拠: `def _render_header_actions() -> None:` (行番号: 91)
 * **`key` 付き container で囲う理由**: `views/dashboard/common.py` のモバイルCSSは**すべての** `[data-testid="stHorizontalBlock"]` の列を `flex: 1 1 100%` で縦積みにする。グラフ・表には必要な指定だが、短いボタン2つには過剰で、スマホではヘッダーが2段になりタブと本文を画面外へ押し下げていた（2026-09-21 に実機で確認）。`key` を渡した container は `.st-key-header_actions` クラスを持つため、CSS 側でこの行だけ横並びに戻せる
 * **この対応の弱点**: `key` の文字列と CSS のセレクタが一致していることに依存する。どちらかをリネームしても Python は通り Streamlit も警告を出さず、**スマホのレイアウトだけが静かに元へ戻る**。`tests/test_dashboard_mobile_header.py` が両者の一致を検査する
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 89 / 抜粋: "def _render_header_actions() -> None:")
+* 根拠: (行番号: 91 / 抜粋: "def _render_header_actions() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: (行番号: 89 / 抜粋: "def _render_header_actions() -> None:")
+* 根拠: (行番号: 91 / 抜粋: "def _render_header_actions() -> None:")
 
 
 * **副作用**: 2カラムのボタン描画。更新ボタン押下時は `st.cache_data.clear()`（キャッシュ全クリア）と `st.rerun()`（再実行）。
@@ -170,7 +170,7 @@
 
 
 * **エラーハンドリング**: なし（呼び出し元 `main()` の `try` の内側で呼ばれる）
-* 根拠: (行番号: 89〜132 / 抜粋: "def _render_header_actions() -> None:")
+* 根拠: (行番号: 91〜134 / 抜粋: "def _render_header_actions() -> None:")
 
 
 * **補足（リンクがルート相対である理由）**: ソースのコメントに、このダッシュボードは `unified_server.py`(8000番)の `config.DASHBOARD_BASE_PATH` 配下に中継されて配信されるため、閲覧しているオリジン（LANのIP:8000でもCloudflare経由の公開ドメインでも）の `/quest` に解決されるルート相対リンクにしている、`config.FRONTEND_URL` のような固定URLを埋めるとLAN外から開いたときに繋がらない、と記されている。
@@ -181,22 +181,22 @@
 ### （Issue #701で削除）`_render_ai_report`
 
 * **退役（2026-09-19、Issue #701）**: 以前は`_render_header_actions`と`main`の間に、`analysis_service.load_ai_report()`で取得した`ai_report_records`の最新1件（「セバスチャンからの報告」）を折りたたみ表示する`_render_ai_report()`が存在した（`main()`から`safe_section("AIレポート")`で保護して呼ばれていた）。しかしこのテーブルへの書込は2026-07-16を最後に止まっており（実機DBの最新行が`2026-07-16T19:01`）、2か月前の内容が現在の報告として出続けていた。Issue #584では「リポジトリ管理外の外部プロセスが書き込む前提」と結論していたが、その外部プロセスも動いていないことが実機で確認されたため、オーナー判断で機能ごと退役した。あわせて読み出し側の`analysis_service.load_ai_report()`と`config.SQLITE_TABLE_AI_REPORT`も削除した。`ai_report_records`テーブル自体は履歴として残しており、削除マイグレーションは追加していない。
-* 根拠: `main()`内の退役コメント (行番号: 318 / 抜粋: "# Issue #701 (2026-09-19): 以前はここで「セバスチャンからの報告」")、回帰テスト`tests/test_dashboard_low_items.py`の`TestAiReportRetired`
+* 根拠: `main()`内の退役コメント (行番号: 320 / 抜粋: "# Issue #701 (2026-09-19): 以前はここで「セバスチャンからの報告」")、回帰テスト`tests/test_dashboard_low_items.py`の`TestAiReportRetired`
 
 
 
 ### `main`
 
 * **役割**: サイドバー設定、ヘッダー操作列の描画、タブ選択UIの描画、**選択中のタブ1つだけ**のレンダリングを行うアプリ本体の処理（**タブの遅延評価で変更**: 以前は5タブ分のデータ読み込みと5タブ分のレンダリングを毎回行っていた）。例外発生時はログ記録・Discord通知・エラー画面表示を行う。**（スマホ対応で変更）** サイドバーからは「データを更新」ボタンが `_render_header_actions` へ移り、代わりに主要操作の場所とスマートフォンからのアクセス経路（8000番の `/dashboard` 経由）を案内する `st.caption` が置かれている。（AIレポート表示はIssue #701で退役し、`main()`からも削除された。）**（Issue #410 L-L5で修正）** 例外発生時に画面表示していた`traceback.format_exc()`を`logger.error`によるログ出力のみに変更し、内部のファイルパス・設定値がLAN内の閲覧者に露出しないようにした。
-* 根拠: `def main():` (行番号: 282〜341 / 抜粋: "def main():")、サイドバーの案内文 (行番号: 73〜76 / 抜粋: "\"主要な操作(データ更新)はメイン画面の先頭にあります。\"")、トレースバックのログのみ化 (行番号: 341 / 抜粋: "logger.error(traceback.format_exc())")
+* 根拠: `def main():` (行番号: 284〜343 / 抜粋: "def main():")、サイドバーの案内文 (行番号: 73〜76 / 抜粋: "\"主要な操作(データ更新)はメイン画面の先頭にあります。\"")、トレースバックのログのみ化 (行番号: 343 / 抜粋: "logger.error(traceback.format_exc())")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def main():` (行番号: 282 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 284 / 抜粋: "def main():")
 
 
 * **戻り値/レスポンス**: なし（Streamlit UIへの描画が主目的）
-* 根拠: `def main():` (行番号: 282 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 284 / 抜粋: "def main():")
 
 
 * **タブ構成（スマホ対応で再設計）**:
@@ -208,7 +208,7 @@
 | 💡 くらし | `sensor_tab.render_electricity` / ▸`sensor_tab.render_temperature` | 電力・環境 / 気温詳細 |
 | 🔧 システム | `log_tab.render_resources` / `log_tab.render_nas_status` / ▸`log_tab.render_server_logs` / ▸`log_tab.render_logs` / ▸`log_tab.render_maintenance` | リソース状況 / NAS状態 / サーバーログ / ログ分析 / メンテナンス操作 |
 
-* 根拠: `TABS: tuple[tuple[str, str], ...] = home_status_service.DASHBOARD_TABS` (行番号: 68 / 抜粋: "TABS: tuple[tuple[str, str], ...] = home_status_service.DASHBOARD_TABS")、各タブの描画関数 (行番号: 191〜216 / 抜粋: "def _render_home_tab(now: datetime) -> None:")、`TAB_RENDERERS: Dict[str, Callable[[datetime], None]] = {` (行番号: 281 / 抜粋: "TAB_RENDERERS: Dict[str, Callable[[datetime], None]] = {")
+* 根拠: `TABS: tuple[tuple[str, str], ...] = home_status_service.DASHBOARD_TABS` (行番号: 70 / 抜粋: "TABS: tuple[tuple[str, str], ...] = home_status_service.DASHBOARD_TABS")、各タブの描画関数 (行番号: 193〜218 / 抜粋: "def _render_home_tab(now: datetime) -> None:")、`TAB_RENDERERS: Dict[str, Callable[[datetime], None]] = {` (行番号: 281 / 抜粋: "TAB_RENDERERS: Dict[str, Callable[[datetime], None]] = {")
 
 
 * **副作用**:
@@ -226,7 +226,7 @@
     * **[修正済み・Issue #438]** 以前はこの`try`ブロックがサマリー表示・全タブのレンダリングまで含んでおり、いずれか1タブの描画例外でもダッシュボード全体がエラー画面になっていた。現在は各描画呼び出しを、[dashboard_common.md](./dashboard_common.md)の`safe_section`コンテキストマネージャで個別に囲み、1つのセクションの例外が他のセクションの描画を止めないようにした（詳細は8節参照）。**（スマホ対応で変更）** 保護の単位は「タブ」ではなく「セクション」になり、1つのタブの中の複数セクション（例: 🔧 システムの5セクション）もそれぞれ独立して保護される。（AIレポートの表示とその`safe_section("AIレポート")`はIssue #701で削除された。）
     * 上記の外側`except Exception as e:`で捕捉した場合、エラーメッセージをログ出力（`logger.error`）した上で、`services.notification_service.send_push`によるDiscord通知を試みる。**[修正済み・Issue #438]** この通知処理自体の失敗は、以前は`except Exception: pass`で握りつぶしていたが、現在は`except Exception as notify_err: logger.warning(...)`でログに記録するよう変更した。
     * 最後に `st.error(...)` でユーザー向けの汎用エラーメッセージを表示する。**（Issue #410 L-L5で修正）** 以前は続けて`st.code(traceback.format_exc())`でトレースバックを画面に出力していたが、内部のファイルパス・設定値の露出防止のため`logger.error(traceback.format_exc())`によるログ出力のみに変更した。
-* 根拠: 外側`except Exception as e:` (行番号: 181〜199 / 抜粋: "except Exception as e:")、通知失敗のログ化 (行番号: 191〜194 / 抜粋: "except Exception as notify_err:")、トレースバックのログのみ化 (行番号: 341 / 抜粋: "logger.error(traceback.format_exc())")、`safe_section`によるセクション単位保護 (行番号: 138〜179 / 抜粋: "with view_common.safe_section(")
+* 根拠: 外側`except Exception as e:` (行番号: 181〜199 / 抜粋: "except Exception as e:")、通知失敗のログ化 (行番号: 191〜194 / 抜粋: "except Exception as notify_err:")、トレースバックのログのみ化 (行番号: 343 / 抜粋: "logger.error(traceback.format_exc())")、`safe_section`によるセクション単位保護 (行番号: 138〜179 / 抜粋: "with view_common.safe_section(")
 
 
 
@@ -316,7 +316,7 @@ graph TD
 | 高 | `views/dashboard/common.py` | スマホ幅のレイアウト（列の縦積み・タブの横スクロール・ステータスカードのグリッド）がすべて`CUSTOM_CSS`側にあるため、見た目の仕様は本ファイルからは追えない。 | `st.markdown(view_common.CUSTOM_CSS, ...)` (行番号: 110, 117 / 抜粋: "st.markdown(view_common.CUSTOM_CSS, unsafe_allow_html=True)") |
 | 中 | `routers/dashboard_router.py`, `services/dashboard_proxy_service.py` | スマートフォンからの到達経路（8000番の`/dashboard`配下への中継）を把握するため。`QUEST_APP_PATH`をルート相対にしている理由もここに依存する。 | ルート相対リンクの理由を述べたコメント (行番号: 58〜63 / 抜粋: "unified_server.py(8000番)の config.DASHBOARD_BASE_PATH 配下に中継されて") |
 | 中 | `config.py` | `SQLITE_TABLE_CHILD` 等のテーブル名定数や `LINE_USER_ID` の実値を把握し、DB構造や通知先を確認するため。 | `df_child = view_common.load_generic_data_cached(config.SQLITE_TABLE_CHILD)` |
-| 中 | `common.py` | `send_push` の実装（Discord通知の具体的な送信方式・エラー処理）を確認するため。 | `services.notification_service.send_push(` (行番号: 328 / 抜粋: "send_push(") |
+| 中 | `common.py` | `send_push` の実装（Discord通知の具体的な送信方式・エラー処理）を確認するため。 | `services.notification_service.send_push(` (行番号: 330 / 抜粋: "send_push(") |
 
 ## 8. 保守上の注意点
 

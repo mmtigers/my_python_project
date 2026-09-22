@@ -13,20 +13,20 @@
 
 * [home_status_service.md](./home_status_service.md) - **（スマホ対応で追加）** カードの判定ロジック・HTML組み立て・CSSの実体。本ファイルと `routers/dashboard_router.py`（軽量ページ）の両方がここを呼ぶ
 * [dashboard.md](./dashboard.md) - 呼び出し元。「🏠 ホーム」タブで `summary.render_summary(now, df_sensor, df_car, nas_data)` を呼ぶ
-* [dashboard_common.md](./dashboard_common.md) - キャッシュ付きローダ（`get_memory_usage_cached` / `get_monthly_cost_cached`）とグリッド描画（`render_status_grid`）の提供元
+* [dashboard_common.md](./dashboard_common.md) - キャッシュ付きローダ（`get_memory_usage_cached` / `get_monthly_cost_cached` / `load_pending_quest_approvals_cached`）とグリッド描画（`render_status_grid`）の提供元
 
 ## 2. ファイルの概要
 
 * Streamlitダッシュボードの「🏠 ホーム」タブで、ステータスカードを描画する唯一の関数 `render_summary` のみで構成される。
 * 根拠: `def render_summary(` (行番号: 19 / 抜粋: "def render_summary(")
-* 本ファイル自身はカードの内容を判定しない。判定は `home_status_service.build_status_cards` に委譲し、そこへ渡す材料（センサー・車・NASのデータは引数、メモリ使用率・今月と先月の電気代・ディスク使用量は `view_common` のキャッシュ付きローダ）を集める役割だけを持つ。
+* 本ファイル自身はカードの内容を判定しない。判定は `home_status_service.build_status_cards` に委譲し、そこへ渡す材料（センサー・車・NASのデータは引数、メモリ使用率・今月と先月の電気代・ディスク使用量・承認待ちのクエスト申請は `view_common` のキャッシュ付きローダ）を集める役割だけを持つ。
 * 根拠: `cards = home_status_service.build_status_cards(` (行番号: 26 / 抜粋: "cards = home_status_service.build_status_cards(")
 * カードの上に「気になること」の1行を出すが、どのカードを拾うかも判定せず `home_status_service.summarize_alerts` に委譲する。軽量ページ（`/dashboard/m`）と同じ関数を使うため、2画面で「気になること」が食い違わない。異常が無いときも `st.success` で1行出す。
-* 根拠: `alerts = home_status_service.summarize_alerts(cards)` (行番号: 44 / 抜粋: "alerts = home_status_service.summarize_alerts(cards)")
+* 根拠: `alerts = home_status_service.summarize_alerts(cards)` (行番号: 45 / 抜粋: "alerts = home_status_service.summarize_alerts(cards)")
 * メモリ使用率・今月の電気代を素のサービスではなくキャッシュ付きラッパー経由で取るのは、いずれも1回の描画の中で他のタブからも呼ばれうる重い処理（psutil・集計SQL）であり、素で呼ぶと同じ描画で取り直しになるため。
 * 根拠: `memory=view_common.get_memory_usage_cached(),` (行番号: 33 / 抜粋: "memory=view_common.get_memory_usage_cached(),")
 * 描画は `view_common.render_status_grid` に渡すだけで、列数の決定はCSS Grid側（`.status-grid` の auto-fit）にある。以前は `st.columns(3)` を3段重ねており、Streamlitの列は画面幅が足りなくても横並びを維持するため、スマートフォンでは1枚あたり約100pxまで潰れて値が読めなかった。
-* 根拠: `view_common.render_status_grid(cards)` (行番号: 55 / 抜粋: "view_common.render_status_grid(cards)")
+* 根拠: `view_common.render_status_grid(cards)` (行番号: 56 / 抜粋: "view_common.render_status_grid(cards)")
 
 ## 3. 外部依存関係
 
@@ -63,10 +63,10 @@
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `view_common.render_status_grid(cards)` (行番号: 55 / 抜粋: "view_common.render_status_grid(cards)")
+* 根拠: `view_common.render_status_grid(cards)` (行番号: 56 / 抜粋: "view_common.render_status_grid(cards)")
 
 
-* **副作用**: `view_common` のキャッシュ付きローダ経由でのデータ取得（メモリ使用率・今月の電気代の集計SQL。いずれもTTL 60秒のキャッシュ越し）と、`view_common.render_status_grid` 経由のStreamlit画面への描画。
+* **副作用**: `view_common` のキャッシュ付きローダ経由でのデータ取得（メモリ使用率・今月の電気代の集計SQL・承認待ちのクエスト申請。いずれもTTL 60秒のキャッシュ越し）と、`view_common.render_status_grid` 経由のStreamlit画面への描画。
 * 根拠: `monthly_cost=view_common.get_monthly_cost_cached(),` (行番号: 34 / 抜粋: "monthly_cost=view_common.get_monthly_cost_cached(),")
 
 
@@ -107,7 +107,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `services/home_status_service.py` | 各カードの判定内容そのものがこちらに移ったため。 | `cards = home_status_service.build_status_cards(` (行番号: 26 / 抜粋: "cards = home_status_service.build_status_cards(") |
-| 中 | `views/dashboard/common.py` | キャッシュのTTL・グリッド描画の実装を把握するため。 | `view_common.render_status_grid(cards)` (行番号: 55 / 抜粋: "view_common.render_status_grid(cards)") |
+| 中 | `views/dashboard/common.py` | キャッシュのTTL・グリッド描画の実装を把握するため。 | `view_common.render_status_grid(cards)` (行番号: 56 / 抜粋: "view_common.render_status_grid(cards)") |
 
 ## 8. 保守上の注意点
 
