@@ -22,7 +22,19 @@ Developer Consoleへの登録はこのセッションからは実行できない
 ## 前提条件
 
 - Amazon開発者アカウント(https://developer.amazon.com/ )
-- unified_serverが公開HTTPSで到達可能であること(LINE Webhookが動いているなら満たしている)
+- unified_serverが公開HTTPSで到達可能であること
+- **`/webhook/alexa` が Cloudflare Access のバイパス対象になっていること**。
+  公開ドメインは Cloudflare Access の内側にあり、外部Webhookのパスは1つずつ
+  Bypass 設定が要る(Issue #517 / #725)。**LINE Webhook(`/callback/line`)が
+  動いていても、`/webhook/alexa` が通るとは限らない** — 2026-09-20 の点検では
+  `/callback/line` は届くのに `/webhook/alexa` だけがエッジで止められていた。
+  確認と追加の手順は `docs/runbooks/cloudflare_access_connectivity_check.md` の手順5。
+  スキル登録の前に次で **405** が返ることを確かめておく(302 ならバイパス漏れ):
+
+  ```bash
+  curl -s -o /dev/null -w '%{http_code}\n' https://<あなたの公開ドメイン>/webhook/alexa
+  ```
+
 - 証明書は正当なCA発行のものであること(自己署名不可。Let's EncryptなどでOK)
 
 ## 手順
@@ -98,6 +110,12 @@ Amazonによる認定審査は不要(このスキルは家族内利用のみを�
 
 ## トラブルシューティング
 
+- スキルを呼んでも「応答がありません」「スキルの応答に問題があります」となり、
+  `unified_server` のログに `/webhook/alexa` へのリクエストが1件も出ない
+  - リクエストがサーバーまで届いていない。まず Cloudflare Access のバイパス漏れを疑う
+    (「前提条件」の `curl` で 302 が返るなら、エッジのログイン画面にリダイレクトされている)。
+    `docs/runbooks/cloudflare_access_connectivity_check.md` の手順5に従い、
+    `/webhook/switchbot`・`/callback/line` と同じ形で Bypass(Everyone)を追加する
 - `/webhook/alexa` が400を返す
   - 署名(`Signature`ヘッダ)またはリクエストタイムスタンプの検証失敗。
     `unified_server`のログに `Alexa request signature verification failed` /
