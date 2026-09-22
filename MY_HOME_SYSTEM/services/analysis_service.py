@@ -187,7 +187,7 @@ def load_nas_status() -> Optional[pd.Series]:
         logger.error(f"NAS Data Load Error: {e}")
         return None
 
-def load_pending_quest_approvals() -> Optional[Dict[str, Any]]:
+def load_pending_quest_approvals() -> dict[str, Any] | None:
     """承認待ちのクエスト申請の件数と、いちばん古い1件を返す。
 
     ダッシュボードのトップに出す「⚔️ ファミクエ」カード用。クエストの残数や
@@ -206,7 +206,7 @@ def load_pending_quest_approvals() -> Optional[Dict[str, Any]]:
         平常運転と偽らない」ために分けていたのと同じ失敗モード)。
         呼び出し側(`get_quest_status`)は `None` を「⚪ 取得失敗」として出す。
     """
-    empty: Dict[str, Any] = {"count": 0, "oldest_at": None, "oldest_name": None}
+    empty: dict[str, Any] = {"count": 0, "oldest_at": None, "oldest_name": None}
     try:
         with contextlib.closing(get_ro_db_connection()) as conn:
             cur = conn.cursor()

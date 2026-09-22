@@ -188,15 +188,15 @@
 ### `load_pending_quest_approvals`
 
 * **役割**: ファミクエで承認待ちのクエスト申請の件数と、いちばん古い1件（誰の・いつの申請か）を返す。ダッシュボードのトップに出す「📝 承認待ち」カード用。クエストの残数やランキングではなく承認待ちを出すのは、これだけが「見た人が今すぐ動く必要がある」情報だからで、ほかは family-quest(PWA)側で見る。
-* 根拠: `def load_pending_quest_approvals() -> Optional[Dict[str, Any]]:` (行番号: 190 / 抜粋: "def load_pending_quest_approvals() -> Optional[Dict[str, Any]]:")
+* 根拠: `def load_pending_quest_approvals() -> dict[str, Any] | None:` (行番号: 190 / 抜粋: "def load_pending_quest_approvals() -> dict[str, Any] | None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def load_pending_quest_approvals() -> Optional[Dict[str, Any]]:` (行番号: 190 / 抜粋: "def load_pending_quest_approvals() -> Optional[Dict[str, Any]]:")
+* 根拠: `def load_pending_quest_approvals() -> dict[str, Any] | None:` (行番号: 190 / 抜粋: "def load_pending_quest_approvals() -> dict[str, Any] | None:")
 
 
 * **戻り値/レスポンス**: `{"count": int, "oldest_at": str | None, "oldest_name": str | None}`。承認待ちが0件のときは `count=0` の辞書、**テーブルが存在しない場合・読み取りに失敗した場合は `None`** を返す。ここで `count=0` を返してしまうと、カードが「✅ なし」と緑で出て、実際には承認待ちが溜まっていても気づけない（JR運行情報のカードが「取得不可を平常運転と偽らない」ために区別していたのと同じ失敗モード）。呼び出し側の `get_quest_status` は `None` を「⚪ 取得失敗」として出す。
-* 根拠: `empty: Dict[str, Any] = {"count": 0, "oldest_at": None, "oldest_name": None}` (行番号: 209 / 抜粋: "empty: Dict[str, Any] = {\"count\": 0, \"oldest_at\": None, \"oldest_name\": None}")
+* 根拠: `empty: dict[str, Any] = {"count": 0, "oldest_at": None, "oldest_name": None}` (行番号: 209 / 抜粋: "empty: dict[str, Any] = {\"count\": 0, \"oldest_at\": None, \"oldest_name\": None}")
 
 
 * **副作用**: 読み取り専用接続（`get_ro_db_connection`）でのDB読み取りのみ。`quest_users` の残高には触れない（CLAUDE.md「単一プロセス前提」の並行制御に影響しない）。集計は `quest_history` の `status` インデックス（`idx_quest_history_status_completed`）に乗る軽いクエリ2本だけ。
