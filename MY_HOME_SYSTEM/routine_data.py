@@ -9,19 +9,23 @@ Days Key: 0=月, 1=火, 2=水, 3=木, 4=金, 5=土, 6=日 (quest_data.pyと同�
 import datetime
 from typing import List, Optional, Tuple, TypedDict
 
+from core.jp_holidays import is_offday
+
 
 class _RoutineStepBase(TypedDict):
     key: str
     label: str
     icon_key: str
     checkpoint_time: Optional[str]  # 'HH:MM' 形式。設定されたステップだけが強制切替の対象
-    # 土日はチェックポイント時刻だけ変える(要件: フロー構成・ステップは平日と揃える)。
+    # 休日(土日・祝日・家の休み)はチェックポイント時刻だけ変える
+    # (要件: フロー構成・ステップは平日と揃える)。
     # Noneなら平日と同じcheckpoint_timeをそのまま使う。
     weekend_checkpoint_time: Optional[str]
-    # Trueなら土日はこのステップ自体をスキップする(要件: 休日PMはおやつ休憩から開始)。
+    # Trueなら休日はこのステップ自体をスキップする(要件: 休日PMはおやつ休憩から開始)。
     weekend_skip: bool
     # Trueならこのステップは日付をまたいで引き継ぐ(要件: 宿題は金曜終わっていれば
-    # 土日は不要、土曜終わっていれば日曜は不要)。判定はroutine_service側で行う。
+    # 土日は不要、土曜終わっていれば日曜は不要)。休日が連続する場合は直前の平日まで
+    # 遡るため、祝日を含む連休にもそのまま効く。判定はroutine_service側で行う。
     weekend_carryover: bool
     # Trueならこのステップは同じフロー内の他のchecklist=Trueなステップと合わせて
     # 順不同でチェックできる「チェックリスト」グループの一員になる(要件: 朝の準備・
@@ -38,7 +42,7 @@ class RoutineStep(_RoutineStepBase, total=False):
 
     `weekday_skip` は `weekend_skip` の逆で、Trueなら平日はこのステップ自体を
     スキップする(要件: パパの平日の昼は「お仕事」だけにし、キッチン/リビング
-    リセットは土日にだけ出す)。`weekend_skip` と同じく判定は routine_service 側
+    リセットは休日にだけ出す)。`weekend_skip` と同じく判定は routine_service 側
     (_resolve_skip_keys)で行う。必須フィールド側に置かなかったのは、既存の全ステップ
     リテラルを書き換えずに済ませるため。
 
@@ -65,6 +69,14 @@ class RoutineFlow(TypedDict):
 
 ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 WEEKEND_DAYS = {5, 6}
+
+# `weekend_*` という名前のフィールド(weekend_checkpoint_time / weekend_skip /
+# weekend_carryover)と `weekday_skip` の適用可否は、曜日ではなく
+# `core.jp_holidays.is_offday()`(土日 + 国民の祝日 + config.EXTRA_HOLIDAY_DATES)で
+# 判定する。祝日を平日として扱っていたため、祝日でも朝の締切が7:50のままだったり
+# パパの「お仕事」ステップが出たりしていた。フィールド名は互換のため据え置き、
+# 意味だけを「土日」から「休日」へ広げている(WEEKEND_DAYSはクエストの曜日指定
+# 判定側で今も土日そのものを表す定数として使う)。
 
 # フロー完走ボーナスの満額 (Youtube 30分チケット(quest_data.py REWARDS id=11)と同額)。
 # チェックポイント通過時、チェックポイントより前のステップの達成率に応じて按分する。
@@ -303,10 +315,11 @@ def get_checklist_range(flow: RoutineFlow) -> Optional[Tuple[int, int]]:
 
 
 def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:
-    """`now`の曜日に応じた、そのステップの実際のチェックポイント締切時刻を返す。
+    """`now`が休日か平日かに応じた、そのステップの実際のチェックポイント締切時刻を返す。
 
-    土日(weekend_checkpoint_time)の上書きが無ければ平日のcheckpoint_timeをそのまま使う。
+    休日(土日・国民の祝日・家の休み)はweekend_checkpoint_timeを使い、その上書きが
+    無ければ平日のcheckpoint_timeをそのまま使う(例: 朝の出発締切は平日7:50・休日9:30)。
     """
-    if now.weekday() in WEEKEND_DAYS and step['weekend_checkpoint_time']:
+    if is_offday(now) and step['weekend_checkpoint_time']:
         return step['weekend_checkpoint_time']
     return step['checkpoint_time']

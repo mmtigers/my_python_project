@@ -16,6 +16,7 @@
 * [webhook_router.md](./webhook_router.md) - `config.SWITCHBOT_WEBHOOK_TOKEN`(SwitchBot Webhook共有シークレット検証)を参照する呼び出し元
 * [line_handler.md](./line_handler.md) - `config.AUTHORIZED_LINE_USER_IDS`(認可済みLINEユーザーIDのallowlist)を参照する呼び出し元
 * [quest_service.md](./quest_service.md) - `config.TV_UNLOCK_QUEST_IDS`(TVロック解除対象クエストID)、`config.YOUTUBE_REWARD_IDS`(YouTube系ごほうび券の視聴制限対象reward_id)ほかYouTube視聴制限系定数を参照する呼び出し元
+* [jp_holidays.md](./jp_holidays.md) - **（祝日対応で追加）** `config.EXTRA_HOLIDAY_DATES`(祝日ではないが休日扱いにしたい日)を参照する呼び出し元
 * [sound_manager.md](./sound_manager.md) - `config.SOUND_MAP`, `SOUND_DIR`, `SOUND_PLAYER_CMD`等を参照する呼び出し元
 * [smart_timelapse_generator.md](./smart_timelapse_generator.md) - 解像度・しきい値・Webhook URL等の設定値を参照する呼び出し元
 * `financial_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） - 本ファイルとは対照的に`config`モジュール経由ではなく`os.getenv`を直接使用する設計(個人情報保護のため)
@@ -76,7 +77,7 @@
 
 
 * `reset_game.py`が管理者向けリセットAPI(`POST /api/quest/admin/reset_user`)を呼び出す際のサーバーのベースURL(`RESET_GAME_API_BASE_URL`、既定値`"http://127.0.0.1:8000"`)を定義する(Issue #547)。`reset_game.py`は`unified_server`と同じホストで実行される対話スクリプトという前提のため既定値はループバックアドレスとしており、LAN内の他端末からのアクセスを想定したホストIP指定である`FRONTEND_URL`とは用途が異なるためこの用途には流用しない、という趣旨のコメントが付されている。
-* 根拠: [RESET_GAME_API_BASE_URL定義とコメント] (行番号: 431〜435 / 抜粋: "# Issue #547: reset_game.py が管理者向けリセットAPI(POST /api/quest/admin/reset_user)を\n# 呼び出す際のサーバーのベースURL。reset_game.pyはunified_serverと同じホストで実行される\n# 前提の対話スクリプトのため、既定値はループバックアドレスとする(FRONTEND_URLはLAN内の\n# 他端末からのアクセスを想定したホストのIP指定のため、この用途には流用しない)。\nRESET_GAME_API_BASE_URL: str = os.getenv(\"RESET_GAME_API_BASE_URL\", \"http://127.0.0.1:8000\")")
+* 根拠: [RESET_GAME_API_BASE_URL定義とコメント] (行番号: 432〜436 / 抜粋: "# Issue #547: reset_game.py が管理者向けリセットAPI(POST /api/quest/admin/reset_user)を\n# 呼び出す際のサーバーのベースURL。reset_game.pyはunified_serverと同じホストで実行される\n# 前提の対話スクリプトのため、既定値はループバックアドレスとする(FRONTEND_URLはLAN内の\n# 他端末からのアクセスを想定したホストのIP指定のため、この用途には流用しない)。\nRESET_GAME_API_BASE_URL: str = os.getenv(\"RESET_GAME_API_BASE_URL\", \"http://127.0.0.1:8000\")")
 
 * **（Issue #738 / AUDIT-008 で追加）** 同じ箇所に、`monitors/routine_deadline_job.py`(スケジューラの定期タスク)がルーティンの締切処理API(`POST /api/routine/deadlines/process`)を呼ぶ際の`ROUTINE_DEADLINE_API_BASE_URL`(既定`"http://127.0.0.1:8000"`)と`ROUTINE_DEADLINE_API_TIMEOUT_SEC`(既定30秒)が加わった。既定がループバックなのは`RESET_GAME_API_BASE_URL`・`HEALTH_WATCH_PROBE_BASE_URL`と同じ理由(スケジューラはunified_serverと同じホストで動く)で、コメントにもその旨が明記されている。
 * 根拠: [ROUTINE_DEADLINE_API_BASE_URL定義とコメント] (行番号: 413〜420 / 抜粋: "# Issue #738 (AUDIT-008): monitors/routine_deadline_job.py(スケジューラの定期タスク)が\nROUTINE_DEADLINE_API_BASE_URL: str = os.getenv(\"ROUTINE_DEADLINE_API_BASE_URL\", \"http://127.0.0.1:8000\")\nROUTINE_DEADLINE_API_TIMEOUT_SEC: int = _get_int_env(\"ROUTINE_DEADLINE_API_TIMEOUT_SEC\", 30)")
@@ -106,7 +107,7 @@
 * 根拠: [YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM定義] (行番号: 748〜755 / 抜粋: "from datetime import date as _date\n_youtube_cooldown_enforce_from_str: str = os.getenv(\"YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM\", \"2026-09-12\")\ntry:\n    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM: _date = _date.fromisoformat(_youtube_cooldown_enforce_from_str)\nexcept Exception as e:\n    logger.warning(...)\n    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM = _date(2000, 1, 1)")
 * 同セクションに、券1枚あたりの視聴分数の対応表`YOUTUBE_REWARD_DURATION_MINUTES`(環境変数`YOUTUBE_REWARD_DURATION_MINUTES`、`"reward_id:分数"`のカンマ区切り、既定値`"10:10,11:30,12:60"`、`dict[int, int]`型)を追加した。コメントによれば用途は2つあり、(1)クールダウンの起点補正(クールダウンは券を使った瞬間`used_at`からの経過で計算されるため、視聴時間より短いクールダウンだと長い券ほど休憩が実質ゼロになる。券の長さ + 休憩時間を待ち時間にすることで「見終わってから休憩」が成立する)、(2)1日の合計視聴分数の集計、である。`"reward_id:分数"`の両側が`isdigit()`を満たす要素のみ辞書へ登録し、満たさない要素は`logger.warning`を出して無視する。ここに無い`reward_id`は長さ0分として扱われる。
 * 根拠: [YOUTUBE_REWARD_DURATION_MINUTES定義] (行番号: 757〜786 / 抜粋: "_youtube_reward_durations_str: str = os.getenv(\"YOUTUBE_REWARD_DURATION_MINUTES\", \"10:10,11:30,12:60\")", "YOUTUBE_REWARD_DURATION_MINUTES: dict[int, int] = {}")
-* 同セクションに、1日に使えるYouTube系ごほうび券の合計分数の上限`YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY`(既定60)・`YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY`(既定90)を`_get_int_env`経由で追加した。コメントによれば「クールダウン(間隔)だけでは『合計何分見たか』は縛れず、ゴールドが続く限り15分おきに何枚でも使えてしまうため、総量はこちらで制限する」もので、JSTの日付が変わるとリセットされる。`0`以下を設定すると「上限なし」になる。
+* 同セクションに、1日に使えるYouTube系ごほうび券の合計分数の上限`YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY`(既定60)・`YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY`(既定90)を`_get_int_env`経由で追加した。コメントによれば「クールダウン(間隔)だけでは『合計何分見たか』は縛れず、ゴールドが続く限り15分おきに何枚でも使えてしまうため、総量はこちらで制限する」もので、JSTの日付が変わるとリセットされる。`0`以下を設定すると「上限なし」になる。**（祝日対応で変更）** どちらを使うかを決める判定は`services/quest/locks.py`側にあり、`HOLIDAY`側は土日だけでなく国民の祝日と下記`EXTRA_HOLIDAY_DATES`にも適用される(判定の実体は[jp_holidays.md](./jp_holidays.md)の`is_offday`)。
 * 根拠: [YOUTUBE_DAILY_LIMIT_MINUTES_*定義] (行番号: 788〜793 / 抜粋: "YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY: int = _get_int_env(\"YOUTUBE_DAILY_LIMIT_MINUTES_WEEKDAY\", 60)", "YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY: int = _get_int_env(\"YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY\", 90)")
 * 同セクションに、日次上限を実際に強制し始める日`YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`(環境変数`YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`、`YYYY-MM-DD`形式、既定値`"2026-09-27"`、`datetime.date`型)を追加した。`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`と同じ猶予期間の仕組みだが、コメントによれば施行日は**クールダウンとは別管理**である(判定は`services/quest/locks.py`の`_is_youtube_daily_limit_enforced`)。パース失敗時は`logger.warning`を出したうえで`date(2000, 1, 1)`(=即時強制、安全側)にフォールバックする。捕捉する例外は`ValueError`のみで、コメントによれば「`_date.fromisoformat`が不正な日付文字列に対して送出するのはこれであり、それ以外の例外(実装の誤り)まで握り潰さないため」。すぐ上の`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`が`Exception`を捕捉しているのは先に書かれたコードの名残で、意図的な差ではない旨も同コメントに明記されている。
 * 根拠: [YOUTUBE_DAILY_LIMIT_ENFORCE_FROM定義] (行番号: 795〜810 / 抜粋: "_youtube_daily_limit_enforce_from_str: str = os.getenv(\"YOUTUBE_DAILY_LIMIT_ENFORCE_FROM\", \"2026-09-27\")", "    YOUTUBE_DAILY_LIMIT_ENFORCE_FROM: _date = _date.fromisoformat(_youtube_daily_limit_enforce_from_str)", "except ValueError as e:")
@@ -125,6 +126,10 @@
     * `DASHBOARD_PROXY_TIMEOUT_SEC`（`_get_int_env` 経由、既定 `30`）— 中継のタイムアウト秒数。
   セクション冒頭のコメントには、ダッシュボードが認証機構を持たず家族の健康記録・防犯ログの閲覧と `sudo systemctl restart` ボタンを備えるため 127.0.0.1 にのみバインドしていること、スマートフォンからの到達はこの中継経由に一本化すること、そして**このパスを Cloudflare Access のバイパス対象に設定してはならない**（`allowed_webhook_paths` とは逆で、バイパスすると無認証で外部公開される）ことが明記されている。
 * 根拠: [ダッシュボード公開設定セクション] (行番号: 666〜688 / 抜粋: "# 16. ダッシュボード(Streamlit)公開設定", "DASHBOARD_PROXY_ENABLED: bool = os.getenv(\"DASHBOARD_PROXY_ENABLED\", \"true\").strip().lower() != \"false\"")、バイパス禁止の注意書き (行番号: 677〜680 / 抜粋: "# 重要: このパスは `unified_server.py` の `allowed_webhook_paths` とは逆で、")
+
+
+* **（祝日対応で追加）** 「17. 祝日・休日判定設定」セクションを新設し、`EXTRA_HOLIDAY_DATES`(環境変数`EXTRA_HOLIDAY_DATES`、`YYYY-MM-DD`のカンマ区切り、既定は空、`frozenset`型)を定義する。セクション冒頭のコメントによれば、「国民の祝日」そのものは`core/jp_holidays.py`がローカル計算で判定する(外部の暦ライブラリは入れない)ため設定不要で、ここで設定するのは祝日ではないが家庭の運用上は休日として扱いたい日(年末年始・お盆・学校の振替休業日・家族旅行など)である。ここに入れた日は、すごろく(ルーティン)・デイリークエストの曜日判定・YouTubeごほうび券の日次上限のすべてで土日や祝日と同じ扱いになる。`_date.fromisoformat`で解釈できない要素は`logger.warning`を出して無視する(設定ミスでconfig全体のロードを落とさないため)。モジュールdocstringの目次にも「17. 祝日・休日判定設定」が追加された。
+* 根拠: [祝日・休日判定設定セクション] (行番号: 874〜899 / 抜粋: "# 17. 祝日・休日判定設定", "_extra_holiday_dates_str: str = os.getenv(\"EXTRA_HOLIDAY_DATES\", \"\")", "EXTRA_HOLIDAY_DATES: frozenset = frozenset(_extra_holiday_dates)")、[目次] (行番号: 22 / 抜粋: "    17. 祝日・休日判定設定")
 
 
 * 「11. Alexaスキル設定」セクション(Issue #488でモジュールdocstring目次の番号が旧18番から11番へ振り直された)で、`routers/alexa_router.py`経由のリクエスト検証に使う`ALEXA_SKILL_ID`（Alexa Developer Consoleで発行される`"amzn1.ask.skill.xxxx"`形式のID）を定義する。設定されていれば`ask-sdk-core`がリクエストの`context.System.application.applicationId`との一致を検証し他人のスキルからのリクエストを拒否するが、未設定でも動作する（署名検証のみになる）後方互換設計であることがコメントに明記されている。
@@ -159,7 +164,7 @@ Issue #488で、未実装のタイムラプススケジュール機能(`TIMELAPS
 | `.env`ファイル | 外部ファイルであり、実行時の環境変数の実際の内容がコードから読み取れないため。 | 根拠: `load_dotenv()` (行番号: 161 / 抜粋: `load_dotenv()`) |
 | `devices.json` | システムに接続されるカメラやモニター等のデバイス設定情報を持つ外部ファイルであり、具体的な内容が不明なため。 | 根拠: `with open(DEVICES_JSON_PATH, ` (行番号: 295 / 抜粋: `with open(DEVICES_JSON_PATH, `) |
 | `family_members.local.json` | Git管理対象外(gitignore)の外部ファイルであり、`FAMILY_SETTINGS["styles"]` の年齢等の実データがどのような値・構造で上書きされるか不明なため。 | 根拠: `# family_members.local.json (gitignore対象) から読み込み、` (行番号: 416 / 抜粋: `family_members.local.json`) |
-| `Pydantic`の内部実装 | 外部ライブラリであり、バリデーションの厳密な挙動（例：エイリアスやデフォルトファクトリの処理詳細）は提供コードから読み取れないため。 | 根拠: `class CameraConfig(BaseModel):` (行番号: 168 / 抜粋: `class CameraConfig(BaseModel):`) |
+| `Pydantic`の内部実装 | 外部ライブラリであり、バリデーションの厳密な挙動（例：エイリアスやデフォルトファクトリの処理詳細）は提供コードから読み取れないため。 | 根拠: `class CameraConfig(BaseModel):` (行番号: 169 / 抜粋: `class CameraConfig(BaseModel):`) |
 
 Issue #488で、`family_events.json`（家族の記念日・イベント設定`IMPORTANT_DATES`用）の読み込み処理は本ファイルから完全に削除されたため、外部依存としては存在しなくなった。
 
@@ -191,7 +196,7 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 * **役割**: 検証I/Oを伴うパス定数の遅延解決(PEP 562)。`_resolve_assets_dir()` が `ensure_safe_path_with_backoff` で `ASSETS_DIR` を検証・解決し、`_ASSETS_SUBDIRS_TO_CREATE` の各サブディレクトリを作る。モジュールの `__getattr__(name)` は `ASSETS_DIR` と `_ASSETS_DERIVED_PATHS` の派生パス(`UPLOAD_DIR`・`SOUND_DIR` 等)を初回アクセス時にだけ解決し、結果を `globals()` に書き込むため以降は通常の属性解決になる(=キャッシュ。テストは `monkeypatch.setattr`/`delattr` で上書き・再解決できる)。**（Issue #664）** `__getattr__` は `LOG_DIR` も扱い、`ensure_safe_path_with_backoff(_PREFERRED_LOG_DIR, "logs")` で解決する。`prewarm_nas_paths()` は `unified_server.py` の `lifespan` から呼ばれ、遅延化前と同じく起動時点で `ASSETS_DIR`・`LOG_DIR`・派生パスの検証・フォールバック判定を済ませる。
 * **戻り値/レスポンス**: `_resolve_assets_dir` / `__getattr__` は `str`、`prewarm_nas_paths` は `None`。未知の属性名では `__getattr__` が `AttributeError` を送出する。
 * **副作用**: NAS 上のディレクトリ作成、`globals()` への書き込み、失敗時の warning ログ(例外は送出せずローカルへフォールバック)。
-* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 672)、`def __getattr__(name: str) -> str:` (行番号: 686)、`def prewarm_nas_paths() -> None:` (行番号: 713)
+* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 673)、`def __getattr__(name: str) -> str:` (行番号: 687)、`def prewarm_nas_paths() -> None:` (行番号: 714)
 
 ### `verify_and_initialize_storage`
 
@@ -229,15 +234,15 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 ### `_get_int_env`
 
 * **役割**: 環境変数を整数として読み込む共通ヘルパー（**#411 S-L6で追加**）。以前は `MOTION_COOLDOWN_SEC`・`UPLOAD_MAX_FILE_SIZE_MB`・`RECORDING_RETENTION_DAYS`・`HLS_VOD_RETENTION_DAYS`・`DB_BACKUP_RETENTION_DAYS`に加え、小児科予約監視の`CLINIC_MONITOR_START_HOUR`・`CLINIC_MONITOR_END_HOUR`・`CLINIC_REQUEST_TIMEOUT`の計8変数それぞれで `int(os.getenv(name, "default"))` を直書きしており、`.env` に空文字や非数値（例: コメント混じりの値）が誤って設定されると `int()` が `ValueError` を送出し、`config` モジュール全体のimportが失敗してサーバーが起動不能になっていた。未設定/空文字はデフォルト値、非数値は警告ログを出してデフォルト値にフォールバックするようにした。なお小児科予約監視機能自体は未実装のままIssue #488で`config.py`から削除されたため、現在この関数を呼び出しているのは前者5箇所のみである。
-* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 98〜113)、呼出し例: `MOTION_COOLDOWN_SEC: int = _get_int_env("MOTION_COOLDOWN_SEC", 60)` (行番号: 310)
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 99〜114)、呼出し例: `MOTION_COOLDOWN_SEC: int = _get_int_env("MOTION_COOLDOWN_SEC", 60)` (行番号: 310)
 
 
 * **引数/リクエスト**: `name: str` (環境変数名), `default: int` (未設定/パース失敗時のデフォルト値)
-* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 98)
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 99)
 
 
 * **戻り値/レスポンス**: `int`
-* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 98)
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 99)
 
 
 * **副作用**: パース失敗時に `logger.warning` を出力
@@ -443,7 +448,7 @@ flowchart TD
 * **Issue #488での大規模クリーンアップ**: リポジトリ全体をgrepし`config.py`以外から一切参照されていないことを確認できた53個のモジュールレベル定数を削除した。内訳は、未実装の給与PDF機能(`GMAIL_USER`・`SALARY_PDF_PASSWORDS`等)、SUUMO/土地価格監視(`SUUMO_SEARCH_URL`等)、小児科予約監視(`CLINIC_MONITOR_URL`等)、Google Photos連携(`GOOGLE_PHOTOS_TOKEN`等。当時のドキュメントが参照していた`tools/google_photos_service.py`は本リポジトリに実体がなく、参照する箇所も存在しなかった)、ショッピング・美容院予約監視(`SHOPPING_TARGETS`等)、子供健康チェック機能(`CHILDREN_NAMES`等)といった未実装機能の設定値、Issue #485で削除済みのタイムラプス関連スクリプト(`monitors/timelapse_runner.py`/`monitors/timelapse_generator.py`)の残置設定(`TIMELAPSE_CAMERAS`・`TIMELAPSE_SCHEDULES`・`TMP_VIDEO_DIR`等)、およびカメラ設定の旧方式(`CAMERA_IP`等、`CAMERAS`リストに統合済み)などである。これに伴いモジュールdocstringの目次を21セクションから14セクションへ振り直した(削除されたのは旧5.給与、6.ショッピング・美容院予約監視、7.土地価格監視、8.Google Photos連携、9.不動産情報REINFOLIB、14.外部サイト監視SUUMO、15.小児科予約監視の各セクション)。一方で`ALLOW_ALL_ORIGINS`(345行目)は`config.py`以外からの直接参照がなく一見未使用に見えるが、346〜347行目で`CORS_ORIGINS`を`["*"]`に上書きするimport時の副作用を通じて間接的にCORS設定全体を制御しているため、今回のレビューで意図的に削除対象から除外された。今後の同種クリーンアップでもこの点(環境変数経由の間接的な副作用)には注意すること。
 * 根拠: [ALLOW_ALL_ORIGINSによるCORS_ORIGINS上書き] (行番号: 345〜347 / 抜粋: `ALLOW_ALL_ORIGINS: bool = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "true"\nif ALLOW_ALL_ORIGINS:\n    CORS_ORIGINS = ["*"]`), [モジュール目次(14セクション)] (行番号: 5〜19)
 * **（Issue #701・2026-09-19で削除）`SQLITE_TABLE_AI_REPORT`**: 以前は`SQLITE_TABLE_AI_REPORT = "ai_report_records"`と、Issue #584で付けた「このテーブルへの書込はリポジトリ管理外の外部プロセスが行う前提で、本リポジトリ側に書込コードは不要」というコメントがあった。しかし実機DBの最新行は`2026-07-16T19:01`で止まっており、その外部プロセスも動いていないことが確認された（Issue #584の前提が実機で成立していなかった）。ダッシュボードのAIレポート（「セバスチャンからの報告」、`dashboard.py`の`_render_ai_report`・`analysis_service.load_ai_report`）ごとオーナー判断で退役し、この定数とコメントも削除した。Issue #584の結論はこれにより置き換えられた。現在は同じ位置に退役の経緯を示す短いコメントのみが残る。`ai_report_records`テーブル自体は履歴として残しており（`migrations/0000_baseline_schema.sql`の定義も変更なし）、削除マイグレーションは追加していない。
-* 根拠: 退役コメント (行番号: 326 / 抜粋: "# Issue #701 (2026-09-19): 旧 SQLITE_TABLE_AI_REPORT")
+* 根拠: 退役コメント (行番号: 327 / 抜粋: "# Issue #701 (2026-09-19): 旧 SQLITE_TABLE_AI_REPORT")
 
 ## 9. 不明事項一覧
 

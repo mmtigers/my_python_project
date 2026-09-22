@@ -15,6 +15,7 @@
 * [quest_service.md](./quest_service.md) - `services/quest_service.py`（Issue #550後の下位互換シム）。`from services.quest.quest_service import QuestService`として本ファイルのクラスを再エクスポートする。実体はここに存在しないため、`QuestService`の詳細を読む際は必ず本ファイルを参照すること
 * [quest_approval_service.md](./quest_approval_service.md) - `services/quest/approval_service.py`。**（Issue #662で分離）** 本ファイルにあった承認・却下・取消(`process_approve_quest`/`process_reject_quest`/`process_cancel_quest`とその配下)の実体
 * [quest_rewards.md](./quest_rewards.md) - `services/quest/rewards.py`。**（Issue #662で分離）** 本ファイルにあった`_apply_quest_rewards`の実体。承認系と完了系が共有する
+* [jp_holidays.md](./jp_holidays.md) - **（祝日対応で追加）** `WEEKEND_DAYS`/`is_offday`の提供元。モジュール関数`matches_day_of_week`が祝日を「休日」として扱うために使う
 * [quest_locks.md](./quest_locks.md) - `JST`/`ROLE_ADULT`/`ROLE_CHILD`/`SPAM_CHECK_INTERVAL_SECONDS`/`INFINITE_QUEST_COOLDOWN_SECONDS`/`_acquire_user_balance_locks`/`_get_completion_lock`/`_get_user_balance_lock`/`_seconds_since_iso_timestamp`/`logger`の提供元
 * [quest_user_service.md](./quest_user_service.md) - `QuestService.__init__`が`UserService()`インスタンスを`self.user_service`として保持する（ただし本ファイル内で`self.user_service`を実際に参照する箇所は無い）
 * [quest_game_system.md](./quest_game_system.md) - `GameSystem.__init__`が`QuestService()`インスタンスを保持し、`filter_active_quests`/`_compute_boost_from_last_completed`/`is_within_reset_period`を呼び出す最大の利用元
@@ -29,7 +30,7 @@
 ## 2. ファイルの概要
 
 Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）から切り出された、クエスト完了のドメインロジックを担う`QuestService`クラス1つを定義するファイル。**（Issue #662の分割で変更）** 承認・却下・取消は[quest_approval_service.md](./quest_approval_service.md)の`ApprovalService`へ、報酬付与の実体は[quest_rewards.md](./quest_rewards.md)の`apply_quest_rewards`へ移された（本クラスに残る`_apply_quest_rewards`は、テストが差し替えるseamを維持するための薄いラッパー）。周期リセット判定(`is_within_reset_period`)、連続達成ボーナス計算(`_compute_boost_from_last_completed`/`calculate_quest_boost`)、クエスト完了の実処理(`process_complete_quest`系)、兄妹連携クエスト(`target_user == 'siblings'`)の完了のカスケード処理、TVロック解除の非同期トリガー呼び出し(`switchbot_service.trigger_tv_unlock`。**毎朝ミッション統合で変更**: 以前は本クラスのプライベートメソッド`_trigger_tv_unlock`だったが、`services/routine_service.py`と共有するため`switchbot_service`側の関数へ切り出された)、クエストの出現条件判定(`_is_quest_currently_active`/`filter_active_quests`)を含む。クエスト完了処理(`process_complete_quest`)は、`user_id`単位の`_get_user_balance_lock`と、`_get_completion_lock_key`が算出するキー（通常は`(user_id, quest_id)`、兄妹連携クエストは`('__coop__', quest_id)`）への`_get_completion_lock`を常に(balance lock→completion lock)の順にネストして取得し、二重加算と経路間のlost updateを防ぐ。**（Issue #662の分割で移動）** 承認(`process_approve_quest`)・却下(`process_reject_quest`)・取消(`process_cancel_quest`)と、それらが共有する`_get_lock_user_ids_for_history`によるロック対象の特定は、本ファイルには無く`services/quest/approval_service.py`側にある。
-根拠: `class QuestService:` (行番号: 26)、`def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 156〜179)、`with _get_user_balance_lock(user_id):\n            with _get_completion_lock(self._get_completion_lock_key(user_id, quest_id)):\n                return self._process_complete_quest_locked(user_id, quest_id)` (行番号: 179〜181)
+根拠: `class QuestService:` (行番号: 55)、`def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 185〜208)、`with _get_user_balance_lock(user_id):\n            with _get_completion_lock(self._get_completion_lock_key(user_id, quest_id)):\n                return self._process_complete_quest_locked(user_id, quest_id)` (行番号: 179〜181)
 根拠: 承認・却下・取消が本ファイルに無いこと（クラス本体の定義一覧に`process_approve_quest`/`process_reject_quest`/`process_cancel_quest`/`_get_lock_user_ids_for_history`が存在しない）。移動先は[quest_approval_service.md](./quest_approval_service.md)を参照。
 
 ## 3. 外部依存関係
@@ -47,6 +48,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 | `config` | 内部モジュール | `TV_UNLOCK_QUEST_IDS`/`TV_PLUG_DEVICE_ID`/`LINE_PARENTS_GROUP_ID`の参照 | `import config` (行番号: 9) |
 | `game_logic` | 内部モジュール | `GameLogic.calculate_drop_rewards`/`calc_level_progress`/`calc_level_down`の呼び出し | `import game_logic` (行番号: 10) |
 | `core.sound_manager` | 内部モジュール | 音声再生イベント発行 | `from core import sound_manager` (行番号: 11) |
+| `core.jp_holidays` (`WEEKEND_DAYS`, `is_offday`)（祝日対応で新規追加） | 内部モジュール | モジュール関数`matches_day_of_week`の休日判定（土日 + 国民の祝日 + `config.EXTRA_HOLIDAY_DATES`）と土日集合 | 根拠: `from core.jp_holidays import WEEKEND_DAYS, is_offday` (行番号: 11 / 抜粋: "from core.jp_holidays import WEEKEND_DAYS, is_offday") |
 | `services.switchbot_service` | 内部モジュール | TVプラグのON操作コマンド送信(`trigger_tv_unlock`。**毎朝ミッション統合で変更**: 以前は本クラスのプライベートメソッド`_trigger_tv_unlock`が`threading`/`services.notification_service`を直接importして`switchbot_service.send_device_command`を呼んでいたが、`services/routine_service.py`（朝の準備チェックリスト完了時）でも同じTV解錠処理が必要になったため`switchbot_service.trigger_tv_unlock`という共有関数へ切り出され、本ファイルは`threading`/`services.notification_service`を直接importする必要がなくなった) | `from services import switchbot_service` (行番号: 12) |
 | `services.quest.locks` (`INFINITE_QUEST_COOLDOWN_SECONDS`, `JST`, `ROLE_ADULT`, `ROLE_CHILD`, `SPAM_CHECK_INTERVAL_SECONDS`, `_acquire_user_balance_locks`, `_get_completion_lock`, `_get_user_balance_lock`, `_seconds_since_iso_timestamp`, `logger`) | 内部モジュール | 定数・ロックヘルパー・ロガーの共有基盤（詳細は[quest_locks.md](./quest_locks.md)参照） | `from services.quest.locks import (\n    INFINITE_QUEST_COOLDOWN_SECONDS,\n    JST,\n    ROLE_ADULT,\n    ROLE_CHILD,\n    SPAM_CHECK_INTERVAL_SECONDS,\n    _acquire_user_balance_locks,\n    _get_completion_lock,\n    _get_user_balance_lock,\n    _seconds_since_iso_timestamp,\n    logger,\n)` (行番号: 13〜24) |
 | `services.quest.user_service.UserService` | 内部モジュール | `QuestService.__init__`が保持する`self.user_service`の型 | `from services.quest.user_service import UserService` (行番号: 25) |
@@ -67,7 +69,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService.__init__`
 
 * **役割**: インスタンス初期化時に`UserService`のインスタンスを生成し`self.user_service`へ格納する。本ファイル内で`self.user_service`が実際に参照される箇所は無い。
-* 根拠: `def __init__(self):\n        self.user_service = UserService()` (行番号: 71〜72)
+* 根拠: `def __init__(self):\n        self.user_service = UserService()` (行番号: 100〜101)
 * **引数/リクエスト**: なし
 * 根拠: (行番号: 73)
 * **戻り値/レスポンス**: なし
@@ -78,7 +80,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService.is_within_reset_period`
 
 * **役割**: 完了日時文字列(`completed_at_str`)とリセット周期文字列(`reset_period`)から、現在の期間内に完了しているかを判定する。`completed_at_str`をISOパースし、`tzinfo`が無ければ保存規約(`core.utils.get_now_iso`)に合わせてJSTとみなして`JST`へ変換する。変換に失敗した場合は`"%Y-%m-%d"`形式でのパースにフォールバックし、それも失敗すれば`False`を返す。`reset_period == 'daily'`なら当日一致、`'weekly'`なら当該週(月曜起点)以降か、`'monthly'`なら`(year, month)`の一致で判定する。上記いずれにも一致しない値（空文字・`NULL`・想定外の文字列）の場合は、警告ログを出力したうえで`False`を返す。
-* 根拠: `def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:` (行番号: 27〜69)
+* 根拠: `def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:` (行番号: 56〜98)
 * 根拠: `if dt.tzinfo is None:\n                dt = dt.replace(tzinfo=JST)` (行番号: 44〜45)
 * 根拠: `if reset_period == 'daily':\n            return completed_date == today_jst\n        elif reset_period == 'weekly':\n            ...\n        elif reset_period == 'monthly':\n            ...\n            return (completed_date.year, completed_date.month) == (today_jst.year, today_jst.month)` (行番号: 54〜65)
 * 根拠: `logger.warning(f"⚠️ is_within_reset_period: 未知のreset_period値 ({reset_period!r}) のため常にFalseを返します。")\n        return False` (行番号: 70〜71)
@@ -94,7 +96,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService._compute_boost_from_last_completed`
 
 * **役割**: 対象クエストが`quest_type == 'daily'`かつ`day_of_week`が未設定(曜日限定でない)かつ`reset_period`が(未設定時のデフォルトの)`'daily'`の場合のみ、最終完了日(`last_completed_at`)からの経過日数に応じて取得経験値・ゴールドのボーナスを計算する(`missed_days × 10%`、最大100%)。DBアクセスを伴わない純粋関数として`calculate_quest_boost`から切り出されており、`GameSystem.get_all_view_data`のようにクエスト×ユーザーの組合せ数だけボーナスを算出する場面で、呼び出し側が全組合せ分の直近完了日時を1クエリでまとめて取得し本関数へ直接渡すことでN+1クエリを避けられる。
-* 根拠: `def _compute_boost_from_last_completed(self, quest: Any, last_completed_at: Optional[str]) -> Dict[str, int]:` (行番号: 74〜133)
+* 根拠: `def _compute_boost_from_last_completed(self, quest: Any, last_completed_at: Optional[str]) -> Dict[str, int]:` (行番号: 103〜162)
 * 根拠: `if quest['quest_type'] != 'daily':\n            return {"gold": 0, "exp": 0}` (行番号: 88〜89)、`if quest['day_of_week']:\n            return {"gold": 0, "exp": 0}` (行番号: 95〜96)、`if (quest['reset_period'] or 'daily') != 'daily':\n            return {"gold": 0, "exp": 0}` (行番号: 104〜105)
 * 根拠: `now_jst = datetime.datetime.now(JST)` (行番号: 111)
 * **引数/リクエスト**: `quest: Any`（`sqlite3.Row`または`dict`を想定）, `last_completed_at: Optional[str]`
@@ -109,7 +111,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService.calculate_quest_boost`
 
 * **役割**: `_compute_boost_from_last_completed`のDBアクセス付きラッパー。対象外と分かっているクエスト(daily以外・曜日限定・`reset_period≠daily`)は`_compute_boost_from_last_completed`側の早期returnガードに先立って自ら早期returnし、無駄なSELECTを避ける。対象クエストの直近の非`rejected`完了日時(`status != 'rejected'`)を`quest_history`へ1回問い合わせてから`_compute_boost_from_last_completed`に委譲する。`status = 'approved'`ではなく`status != 'rejected'`を条件とするのは、承認待ち(`pending`)の日を「サボり」と誤判定しないためである。
-* 根拠: `def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:` (行番号: 135〜154)
+* 根拠: `def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:` (行番号: 164〜183)
 * 根拠: `if quest['quest_type'] != 'daily' or quest['day_of_week'] or (quest['reset_period'] or 'daily') != 'daily':\n            return {"gold": 0, "exp": 0}` (行番号: 143〜144)
 * 根拠: `last_hist = cur.execute("""\n            SELECT completed_at FROM quest_history\n            WHERE user_id = ? AND quest_id = ? AND status != 'rejected'\n            ORDER BY completed_at DESC LIMIT 1\n        """, (user_id, quest['quest_id'])).fetchone()` (行番号: 149〜153)
 * **引数/リクエスト**: `cur`, `user_id: str`, `quest: Any`
@@ -124,7 +126,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService.process_complete_quest`
 
 * **役割**: `user_id`単位の`_get_user_balance_lock`と、`_get_completion_lock_key(user_id, quest_id)`で算出したキーの`_get_completion_lock`を、常にこの順(balance lock→completion lock)でネストして取得したうえで、実処理を`_process_complete_quest_locked`に委譲する薄いラッパー。ロック取得前に`quest_users`の存在を確認し、存在しない`user_id`では404を返してロック辞書にエントリを作らない。
-* 根拠: `def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 156〜179)
+* 根拠: `def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 185〜208)
 * 根拠: `with core.database.get_db_cursor() as cur:\n            exists = cur.execute("SELECT 1 FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()\n        if not exists:\n            raise HTTPException(status_code=404, detail="User not found")` (行番号: 174〜177)
 * 根拠: `with _get_user_balance_lock(user_id):\n            with _get_completion_lock(self._get_completion_lock_key(user_id, quest_id)):\n                return self._process_complete_quest_locked(user_id, quest_id)` (行番号: 179〜181)
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
@@ -139,7 +141,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService._get_completion_lock_key`
 
 * **役割**: `process_complete_quest`が使用する完了ロックのキーを算出する。対象クエストの`target_user`をDBから参照し、`'siblings'`(兄妹連携クエスト)であれば`user_id`に依存しない共通キー`('__coop__', quest_id)`を返し、それ以外は`(user_id, quest_id)`を返す。この問い合わせは、実際のロック取得より前・かつ`process_complete_quest`本体とは別の`get_db_cursor`トランザクションとして実行される。
-* 根拠: `def _get_completion_lock_key(self, user_id: str, quest_id: int) -> Tuple[str, int]:` (行番号: 181〜195)
+* 根拠: `def _get_completion_lock_key(self, user_id: str, quest_id: int) -> Tuple[str, int]:` (行番号: 210〜224)
 * 根拠: `with core.database.get_db_cursor() as cur:\n            quest = cur.execute(\n                "SELECT target_user FROM quest_master WHERE quest_id = ?", (quest_id,)\n            ).fetchone()\n        if quest and quest['target_user'] == 'siblings':\n            return ('__coop__', quest_id)\n        return (user_id, quest_id)` (行番号: 191〜197)
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
 * 根拠: (行番号: 183)
@@ -153,7 +155,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService._process_complete_quest_locked`
 
 * **役割**: クエスト完了の実処理。クエスト・ユーザーの存在確認後、対象者検証（`target_user`が`'all'`・本人の`user_id`・`'siblings'`(かつ`user['role'] == ROLE_CHILD`)のいずれでもなければ403）と出現条件検証（`_is_quest_currently_active(quest)`が`False`なら403）を行う。続いて前提クエスト(`pre_requisite_quest_id`)の達成チェック（前提クエスト自身の`reset_period`内に`status='approved'`の履歴が無ければ403）、直近の非`rejected`完了履歴からのスパムチェック（経過秒数が`quest_type`に応じた下限(`INFINITE_QUEST_COOLDOWN_SECONDS`または`SPAM_CHECK_INTERVAL_SECONDS`)未満なら429）、`quest_type != 'infinite'`の場合の周期リセットガード（`is_within_reset_period`が`True`なら400）を順に行う。ガードを通過後`calculate_quest_boost`でボーナスを計算し、`user['role'] != ROLE_ADULT`なら（`target_user == 'siblings'`の場合は`_process_coop_quest_completion`に委譲、それ以外は`quest_history`に`'pending'`で挿入して承認待ちレスポンスを返す）、`ROLE_ADULT`の場合のみ`_apply_quest_rewards`で即時に報酬を適用する。
-* 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 197〜304)
+* 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 226〜333)
 * 根拠: `is_sibling_target = quest['target_user'] == 'siblings'\n            if quest['target_user'] not in ('all', user_id) and not (\n                is_sibling_target and user['role'] == ROLE_CHILD\n            ):\n                raise HTTPException(status_code=403, detail="This quest is not available for you")\n            if not self._is_quest_currently_active(quest):\n                raise HTTPException(status_code=403, detail="This quest is not currently available")` (行番号: 217〜223)
 * 根拠: `prereq_id = quest['pre_requisite_quest_id'] if 'pre_requisite_quest_id' in quest.keys() else None\n            if prereq_id:\n                ...\n                if not (prereq_hist and prereq_hist['completed_at']\n                        and self.is_within_reset_period(prereq_hist['completed_at'], prereq_period)):\n                    raise HTTPException(status_code=403, detail="前提クエストがまだ達成されていません")` (行番号: 230〜243)
 * 根拠: `min_interval_seconds = INFINITE_QUEST_COOLDOWN_SECONDS if quest['quest_type'] == 'infinite' else SPAM_CHECK_INTERVAL_SECONDS\n                if elapsed is not None and elapsed < min_interval_seconds:\n                    raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")` (行番号: 258〜260)
@@ -172,7 +174,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService._get_sibling_partner_id`
 
 * **役割**: 兄妹連携クエスト(`target_user == 'siblings'`)の完了報告者に対する「相方」の`user_id`を返す。`quest_users.role = ROLE_CHILD`のユーザーがちょうど2人（兄・妹）いることを前提とし、報告者自身を除いたもう一方のIDを返す。
-* 根拠: `def _get_sibling_partner_id(self, cur, user_id: str) -> str:` (行番号: 306〜315)
+* 根拠: `def _get_sibling_partner_id(self, cur, user_id: str) -> str:` (行番号: 335〜344)
 * 根拠: `rows = cur.execute("SELECT user_id FROM quest_users WHERE role = ?", (ROLE_CHILD,)).fetchall()\n        child_ids = [row['user_id'] for row in rows]\n        if user_id not in child_ids or len(child_ids) != 2:\n            raise HTTPException(status_code=400, detail="兄妹クエストの対象ユーザー構成が不正です")\n        return next(uid for uid in child_ids if uid != user_id)` (行番号: 313〜317)
 * **引数/リクエスト**: `cur`, `user_id: str`
 * 根拠: (行番号: 308)
@@ -186,7 +188,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService._process_coop_quest_completion`
 
 * **役割**: 兄妹連携クエストの完了報告処理。`_get_sibling_partner_id`で相方を特定し、報告者・相方双方の`pending`な`quest_history`行を作成、後から報告者側の行に`linked_history_id`を`UPDATE`で設定して相互連結する。呼び出し元`process_complete_quest`が兄妹連携クエストを共通ロックキーで直列化するため、兄・妹がほぼ同時に完了報告しても本関数は排他的に1回ずつしか実行されない。
-* 根拠: `def _process_coop_quest_completion(self, cur, user, quest, now_iso: str, total_exp: int, total_gold: int) -> Dict[str, Any]:` (行番号: 317〜346)
+* 根拠: `def _process_coop_quest_completion(self, cur, user, quest, now_iso: str, total_exp: int, total_gold: int) -> Dict[str, Any]:` (行番号: 346〜375)
 * 根拠: `reporter_history_id = cur.lastrowid` (行番号: 330)、`cur.execute("UPDATE quest_history SET linked_history_id = ? WHERE id = ?", (partner_history_id, reporter_history_id))` (行番号: 338)
 * **引数/リクエスト**: `cur`, `user`, `quest`, `now_iso: str`, `total_exp: int`, `total_gold: int`
 * 根拠: (行番号: 319)
@@ -197,10 +199,21 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 * **エラーハンドリング**: なし（`_get_sibling_partner_id`から送出される`HTTPException`はそのまま伝播）
 * 根拠: (行番号: 319〜348)
 
+### `WEEKDAY_ONLY_DAYS` / `matches_day_of_week`（祝日対応で新規追加）
+
+* **役割**: `WEEKDAY_ONLY_DAYS`は「平日のみ」を表す曜日指定(月〜金すべて、`frozenset({0, 1, 2, 3, 4})`)。`matches_day_of_week(today_date, days_list)`は`quest_master.day_of_week`の曜日指定が今日に合致するかを返すモジュール関数で、祝日(国民の祝日・振替休日・`config.EXTRA_HOLIDAY_DATES`の「家の休み」)を土日と同じ「休日」として扱う。docstringが判定を3つに分けて明記している: (1) 今日の曜日が指定に含まれていれば合致する（祝日でも「ゴミ捨て(月・木)」のような特定曜日の用事は通常どおり出す。自治体のゴミ収集は祝日も通常どおりのことが多い、という運用判断）、(2) ただし「月〜金すべて」の指定だけは例外で休日には出さない（「会社勤務(通常)」「小学校に行く」のような学校/勤務がある日そのものを表すクエスト）、(3) 曜日は一致しないが土日(5と6の両方)を含む指定のクエストは休日なら出す（日曜だけ等の片方のみの指定は、その曜日に実際に予定が紐づくため広げない）。
+* 根拠: `WEEKDAY_ONLY_DAYS = frozenset({0, 1, 2, 3, 4})` (行番号: 28)、`def matches_day_of_week(today_date: datetime.date, days_list: list[int]) -> bool:` (行番号: 31)、[判定本体] (行番号: 49〜53 / 抜粋: "    days = set(days_list)\n    if today_date.weekday() in days:\n        return not (days == WEEKDAY_ONLY_DAYS and is_offday(today_date))\n    return WEEKEND_DAYS <= days and is_offday(today_date)")
+* **引数/リクエスト**: `today_date: datetime.date`, `days_list: list[int]`（`day_of_week`をカンマ区切りで`int`化したもの）
+* 根拠: `def matches_day_of_week(today_date: datetime.date, days_list: list[int]) -> bool:` (行番号: 31)
+* **戻り値/レスポンス**: `bool`
+* 根拠: [戻り値] (行番号: 51, 53 / 抜粋: "        return not (days == WEEKDAY_ONLY_DAYS and is_offday(today_date))")
+* **副作用**: なし
+* **エラーハンドリング**: なし（`days_list`のパースは呼び出し元の`_is_quest_currently_active`が行う）
+
 ### `QuestService._is_quest_currently_active`
 
-* **役割**: `quest_master`1行（`dict`または`sqlite3.Row`。いずれも`[]`でのアクセスに対応）を受け取り、「今」出現・実行可能な条件を満たすかを`bool`で返す。`start_date`/`end_date`のいずれかが設定されていれば（`quest_type`を問わず）`YYYY-MM-DD`形式（`split('-')`でパース）による期間チェック、`quest_type == 'random'`の場合は`f"{今日の日付}_{quest_id}"`をシードとした`random.Random(seed).random()`が`occurrence_chance`を超えていないかの出現抽選チェックを行う。`occurrence_chance`が`None`の場合は`1.0`（常に出現）にフォールバックする。`start_time`と`end_time`が両方設定されていれば現在時刻(JST)がその範囲内か（`start_time > end_time`の場合は日付をまたぐ範囲として扱う）、`day_of_week`が設定されていれば現在の曜日がその一覧に含まれるかを判定する。`filter_active_quests`と`_process_complete_quest_locked`の両方から呼ばれる共通ロジック。
-* 根拠: `def _is_quest_currently_active(self, quest, now: Optional[datetime.datetime] = None) -> bool:` (行番号: 359〜412)
+* **役割**: `quest_master`1行（`dict`または`sqlite3.Row`。いずれも`[]`でのアクセスに対応）を受け取り、「今」出現・実行可能な条件を満たすかを`bool`で返す。`start_date`/`end_date`のいずれかが設定されていれば（`quest_type`を問わず）`YYYY-MM-DD`形式（`split('-')`でパース）による期間チェック、`quest_type == 'random'`の場合は`f"{今日の日付}_{quest_id}"`をシードとした`random.Random(seed).random()`が`occurrence_chance`を超えていないかの出現抽選チェックを行う。`occurrence_chance`が`None`の場合は`1.0`（常に出現）にフォールバックする。`start_time`と`end_time`が両方設定されていれば現在時刻(JST)がその範囲内か（`start_time > end_time`の場合は日付をまたぐ範囲として扱う）、`day_of_week`が設定されていれば曜日判定を行う。**（祝日対応で変更）** この曜日判定は以前`today_date.weekday() not in days_list`という直接比較だったが、祝日を休日として扱うためモジュール関数`matches_day_of_week(today_date, days_list)`の呼び出しに置き換えられた（判定規則は同関数の項を参照）。`filter_active_quests`と`_process_complete_quest_locked`の両方から呼ばれる共通ロジック。
+* 根拠: `def _is_quest_currently_active(self, quest, now: Optional[datetime.datetime] = None) -> bool:` (行番号: 388〜441)
 * 根拠: `start_date = quest['start_date'] if 'start_date' in quest.keys() else None\n        end_date = quest['end_date'] if 'end_date' in quest.keys() else None\n        if start_date or end_date:` (行番号: 663〜665)
 * 根拠: `occurrence_chance = quest['occurrence_chance'] if quest['occurrence_chance'] is not None else 1.0\n            if random.Random(seed).random() > occurrence_chance:\n                return False` (行番号: 684〜686)
 * 根拠: `if quest['start_time'] and quest['end_time']:\n            if quest['start_time'] <= quest['end_time']:\n                if not (quest['start_time'] <= current_time_str <= quest['end_time']):\n                    return False\n            else:\n                if not (current_time_str >= quest['start_time'] or current_time_str <= quest['end_time']):\n                    return False` (行番号: 688〜694)
@@ -216,7 +229,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService.filter_active_quests`
 
 * **役割**: クエスト一覧(`List[dict]`)を受け取り、`_is_quest_currently_active`で「今」出現しているクエストのみに絞り込む。各クエストに`days`フィールド（`day_of_week`をカンマ区切りで`int`のリストへ変換したもの、未設定なら`None`）を追加する。
-* 根拠: `def filter_active_quests(self, quests: List[dict]) -> List[dict]:` (行番号: 414〜427)
+* 根拠: `def filter_active_quests(self, quests: List[dict]) -> List[dict]:` (行番号: 443〜456)
 * 根拠: `for q in quests:\n            if not self._is_quest_currently_active(q, now):\n                continue\n            q['days'] = [int(d) for d in q['day_of_week'].split(',')] if q['day_of_week'] else None\n            filtered.append(q)` (行番号: 707〜715)
 * **引数/リクエスト**: `quests: List[dict]`
 * 根拠: (行番号: 703)

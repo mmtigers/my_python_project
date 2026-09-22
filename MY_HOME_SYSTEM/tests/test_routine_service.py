@@ -6,7 +6,12 @@ quest_service.py の既存テストと異なり、本サービスの主要な分
 開始判定・チェックポイント通過判定)は現在時刻に依存するため、
 datetime.datetime.now() をmonkeypatchせず、公開メソッドに now を明示的に
 注入できる設計にしている(quest_service._is_quest_currently_activeの
-既存パターンに合わせた)。テストは常に2024-01-01(月曜日, JST)を基準にする。
+既存パターンに合わせた)。テストは常に2024-01-15(月曜日, JST)を基準にする。
+
+基準日が2024-01-01(元日)ではないのは、祝日を休日として扱うようになった
+(core/jp_holidays.py)ため。元日を基準にすると「平日の月曜」のテストが
+休日の挙動になってしまう。祝日そのものの挙動は
+tests/test_routine_holiday.py が固定する。
 """
 import datetime
 import json
@@ -22,7 +27,7 @@ from services import switchbot_service
 from services.routine_service import routine_service
 
 JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
-MONDAY = datetime.datetime(2024, 1, 1, tzinfo=JST)  # 2024-01-01は月曜日
+MONDAY = datetime.datetime(2024, 1, 15, tzinfo=JST)  # 2024-01-15は月曜日(祝日ではない)
 
 
 def _seed_user(user_id='daughter', gold=0, exp=0, level=1, role='role_child'):
@@ -57,15 +62,15 @@ def _state_after_deadlines(user_id, now):
 
 
 def _friday_at(hour, minute):
-    return (MONDAY + datetime.timedelta(days=4)).replace(hour=hour, minute=minute)  # 2024-01-05は金曜日
+    return (MONDAY + datetime.timedelta(days=4)).replace(hour=hour, minute=minute)  # 2024-01-19は金曜日
 
 
 def _saturday_at(hour, minute):
-    return (MONDAY + datetime.timedelta(days=5)).replace(hour=hour, minute=minute)  # 2024-01-06は土曜日
+    return (MONDAY + datetime.timedelta(days=5)).replace(hour=hour, minute=minute)  # 2024-01-20は土曜日
 
 
 def _sunday_at(hour, minute):
-    return (MONDAY + datetime.timedelta(days=6)).replace(hour=hour, minute=minute)  # 2024-01-07は日曜日
+    return (MONDAY + datetime.timedelta(days=6)).replace(hour=hour, minute=minute)  # 2024-01-21は日曜日
 
 
 class TestFlowStartGating:
@@ -952,7 +957,7 @@ class TestProcessDeadlines:
         _seed_user(gold=0, exp=0)
         result = routine_service.process_deadlines(now=_at(7, 51))
 
-        assert result['date'] == '2024-01-01'
+        assert result['date'] == '2024-01-15'
         assert result['processed_users'] == 1
         assert result['failed_users'] == 0
         # 1つも終えていないので按分は0だが、状態は'remind'へ確定する
@@ -1048,38 +1053,42 @@ class TestProcessDeadlinesJstBoundary:
 
     締切(07:50 / 17:30)も進捗の日付(progress_date)も JST の壁時計で決まるため、
     ホストOSのTZやUTC基準で判定すると「日付が変わる瞬間」に別の日の行を触る。
+
+    基準の月曜を 2026-09-21 から 2026-09-28 へ移したのは、前者が敬老の日で、
+    祝日を休日として扱うようになった(core/jp_holidays.py)いま平日の締切
+    (07:50)ではなく休日の締切(09:30)が適用されるため。
     """
 
-    @freeze_time("2026-09-20 22:51:00")  # = JST 2026-09-21(月) 07:51
+    @freeze_time("2026-09-27 22:51:00")  # = JST 2026-09-28(月) 07:51
     def test_uses_jst_for_the_deadline_and_the_progress_date(self, isolated_db):
         _seed_user(gold=0, exp=0)
         result = routine_service.process_deadlines()
 
-        assert result['date'] == '2026-09-21'
+        assert result['date'] == '2026-09-28'
         rows = _progress_rows('daughter')
-        assert [r['progress_date'] for r in rows] == ['2026-09-21']
+        assert [r['progress_date'] for r in rows] == ['2026-09-28']
         # JST 07:51 は平日amの締切(07:50)超過なので強制遷移が適用されている
         assert result['transitions'] == 1
 
-    @freeze_time("2026-09-20 22:49:00")  # = JST 2026-09-21(月) 07:49
+    @freeze_time("2026-09-27 22:49:00")  # = JST 2026-09-28(月) 07:49
     def test_does_not_transition_one_minute_before_the_jst_deadline(self, isolated_db):
         _seed_user(gold=0, exp=0)
         result = routine_service.process_deadlines()
-        assert result['date'] == '2026-09-21'
+        assert result['date'] == '2026-09-28'
         assert result['transitions'] == 0
 
-    @freeze_time("2026-09-20 14:59:59")  # = JST 2026-09-20(日) 23:59:59
+    @freeze_time("2026-09-27 14:59:59")  # = JST 2026-09-27(日) 23:59:59
     def test_just_before_jst_midnight_targets_the_previous_day(self, isolated_db):
         _seed_user(gold=0, exp=0)
         routine_service.process_deadlines()
-        assert {r['progress_date'] for r in _progress_rows('daughter')} == {'2026-09-20'}
+        assert {r['progress_date'] for r in _progress_rows('daughter')} == {'2026-09-27'}
 
-    @freeze_time("2026-09-20 15:00:01")  # = JST 2026-09-21(月) 00:00:01
+    @freeze_time("2026-09-27 15:00:01")  # = JST 2026-09-28(月) 00:00:01
     def test_just_after_jst_midnight_starts_a_new_day(self, isolated_db):
         """JSTの0時直後はどのフローも未開始(am 05:00 / pm 14:00)なので行を作らない。"""
         _seed_user(gold=0, exp=0)
         result = routine_service.process_deadlines()
-        assert result['date'] == '2026-09-21'
+        assert result['date'] == '2026-09-28'
         assert _progress_rows('daughter') == []
 
 
@@ -1104,10 +1113,10 @@ class TestRouterHttp:
         指定できるとチェックポイント通過(＝ボーナス確定)を任意の時刻で強制できてしまう。
         """
         _seed_user()
-        res = api_client.post("/api/routine/deadlines/process", json={"now": "2024-01-01T23:59:00+09:00"})
+        res = api_client.post("/api/routine/deadlines/process", json={"now": "2024-01-15T23:59:00+09:00"})
         assert res.status_code == 200
-        # 実時刻基準で処理されるため、2024-01-01 の行は作られない
-        assert [r for r in _progress_rows('daughter') if r['progress_date'] == '2024-01-01'] == []
+        # 実時刻基準で処理されるため、2024-01-15 の行は作られない
+        assert [r for r in _progress_rows('daughter') if r['progress_date'] == '2024-01-15'] == []
 
     def test_complete_invalid_flow_key_returns_422(self, api_client):
         res = api_client.post(
@@ -1152,7 +1161,7 @@ class TestStepEventRecording:
         assert ev['from_status'] == 'current'
         assert ev['to_status'] == 'done'
         assert ev['source'] == 'user'
-        assert ev['progress_date'] == '2024-01-01'
+        assert ev['progress_date'] == '2024-01-15'
         # 実時刻ではなく注入された now を基準にすること(テスト可能性のため)
         assert ev['occurred_at'] == _at(6, 12).isoformat()
 
@@ -1264,7 +1273,7 @@ class TestStepEventRecording:
         assert skips[0]['step_key'] == 'handwash'
         assert skips[0]['from_status'] is None
         assert skips[0]['to_status'] == 'done'
-        assert skips[0]['progress_date'] == '2024-01-06'
+        assert skips[0]['progress_date'] == '2024-01-20'
         assert skips[0]['occurred_at'] == _saturday_at(14, 0).isoformat()
 
     def test_homework_carryover_from_friday_is_recorded_as_skip(self, isolated_db):
@@ -1278,14 +1287,14 @@ class TestStepEventRecording:
 
         saturday_skips = {
             e['step_key'] for e in _step_events(flow_key='pm', source='carryover_skip')
-            if e['progress_date'] == '2024-01-06'
+            if e['progress_date'] == '2024-01-20'
         }
         assert 'homework' in saturday_skips
         assert 'handwash' in saturday_skips
 
         friday_user = {
             e['step_key'] for e in _step_events(flow_key='pm', source='user')
-            if e['progress_date'] == '2024-01-05' and e['to_status'] == 'done'
+            if e['progress_date'] == '2024-01-19' and e['to_status'] == 'done'
         }
         assert friday_user == {'handwash', 'snack', 'homework'}
 

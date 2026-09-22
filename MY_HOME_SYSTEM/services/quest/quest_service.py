@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from core.utils import get_now_iso
 from core.database import get_db_cursor
 from core import sound_manager
+from core.jp_holidays import WEEKEND_DAYS, is_offday
 from services.quest.locks import (
     INFINITE_QUEST_COOLDOWN_SECONDS,
     JST,
@@ -21,6 +22,34 @@ from services.quest.locks import (
 )
 from services.quest.rewards import apply_quest_rewards
 from services.quest.user_service import UserService
+
+# 「平日のみ」を表す曜日指定(月〜金すべて)。会社勤務・小学校に行く等、
+# 学校/勤務そのものを表すクエストがこの形で登録されている。
+WEEKDAY_ONLY_DAYS = frozenset({0, 1, 2, 3, 4})
+
+
+def matches_day_of_week(today_date: datetime.date, days_list: list[int]) -> bool:
+    """quest_master.day_of_week の曜日指定が今日に合致するかを返す。
+
+    祝日(国民の祝日・振替休日・config.EXTRA_HOLIDAY_DATES の「家の休み」)は
+    土日と同じ「休日」として扱う。ただし曜日指定の意味はクエストごとに違うため、
+    一律に土日へ読み替えるのではなく次の3つに分ける:
+
+    1. 今日の曜日が指定に含まれていれば合致する。祝日でも「ゴミ捨て(月・木)」の
+       ように特定曜日に紐づく用事は通常どおり出す(自治体のゴミ収集は祝日も
+       通常どおりのことが多い、という運用判断)。
+    2. ただし「月〜金すべて」(=平日のみ)の指定だけは例外で、休日には出さない。
+       これは「会社勤務(通常)」「小学校に行く」のような、学校/勤務がある日
+       そのものを表すクエストで、祝日に出ると平日の画面になってしまう。
+    3. 曜日は一致しないが土日(5と6の両方)を含む指定のクエストは、休日なら出す。
+       「朝の会 開催」「洗車」「パパのお手伝い」等の休日向けクエストが該当する。
+       日曜だけ(例: 習い事の連絡帳記入)のように片方だけの指定は、その曜日に
+       実際に予定が紐づいているものなので祝日には広げない。
+    """
+    days = set(days_list)
+    if today_date.weekday() in days:
+        return not (days == WEEKDAY_ONLY_DAYS and is_offday(today_date))
+    return WEEKEND_DAYS <= days and is_offday(today_date)
 
 
 class QuestService:
@@ -406,7 +435,7 @@ class QuestService:
 
         if quest['day_of_week']:
             days_list = [int(d) for d in quest['day_of_week'].split(',')]
-            if today_date.weekday() not in days_list:
+            if not matches_day_of_week(today_date, days_list):
                 return False
 
         return True

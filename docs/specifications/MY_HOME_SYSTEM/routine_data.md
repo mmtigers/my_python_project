@@ -10,6 +10,7 @@
 
 ## 関連ドキュメント
 
+* [jp_holidays.md](./jp_holidays.md) - **（祝日対応で追加）** `is_offday`（土日 + 国民の祝日 + `config.EXTRA_HOLIDAY_DATES`）の実体。`get_effective_checkpoint_time`の休日判定はこれに委譲する
 * [routine_service.md](./routine_service.md) - `FULL_BONUS_EXP`, `FULL_BONUS_GOLD`, `ROUTINE_FLOWS`, `RoutineFlow`, `get_checklist_range`（寝る準備チェックリスト化で新規追加）, `get_checkpoint_index`, `get_effective_checkpoint_time`（土日対応で新規追加）を本ファイルからimportして使用する呼び出し元
 * [routine_router.md](./routine_router.md) - `routine_service`経由で間接的に本ファイルのデータへ依存するルーター
 * [quest_data.md](./quest_data.md) - `FULL_BONUS_GOLD`/`FULL_BONUS_EXP`の値がコメントで参照している`REWARDS`(id=11「Youtube (30:00)」)の定義元。**（大人用フロー分離で追加）** ママの`cook_dinner`ステップが持つ`gold`/`exp`は、同ファイルの`QUESTS`から退役させたデイリークエスト(id=21「夕食を作る」)の報酬額をそのまま引き継いだものであり、二重計上を避けるための対応関係にある。パパの`work`ステップは`gold`/`exp`を持たず、報酬は同ファイルの`id=10`「会社勤務 (通常)」がそのまま持ち続ける。**（就寝ミッションの移設で追加）** `pm`フローの`sleep`「就寝」ステップが持つ`gold=70`/`exp=50`も同様に、退役させたデイリークエスト(id=1105「【夜】就寝ミッション」)の報酬額を引き継いだもので、子ども用・大人用の両フローに付いている(元クエストが`target='all'`だったことに対応)
@@ -17,7 +18,7 @@
 
 ## 2. ファイルの概要
 
-デイリールーティン(すごろく形式の生活導線UI)の「フロー定義」を保持する定数モジュールである。ファイル冒頭のdocstringが述べる通り、`quest_master`(クエストのマスターデータ)とは異なり、この内容は療育目的で固定された生活動線そのものであり親が編集する対象ではないため、DBテーブルではなくPythonの定数として持つ設計である。朝(`am`)・帰宅後(`pm`)の2つのフロー(`ROUTINE_FLOWS`)を定義し、各フローは開始時刻(`start_trigger_time`)・対象曜日(`day_of_week`)・ステップ列(`steps`)を持つ。**（土日対応で変更）** `day_of_week`は`ALL_DAYS`(月〜日)に統一され、平日・土日の両方でフローが開始する。ステップのうち1つには`checkpoint_time`(強制切替の締切時刻、平日用)を設定でき、そのインデックスを取得するヘルパー関数`get_checkpoint_index`も提供する。**（土日対応で追加）** 各ステップは任意で`weekend_checkpoint_time`(土日用の上書き時刻)を持つことができ、`now`の曜日に応じて実際に使う締切時刻を解決するヘルパー関数`get_effective_checkpoint_time`も追加された。現状、この上書きが実際に設定されているのは`am`フローの`free`ステップ(`weekend_checkpoint_time`が`09:30`)のみで、他のステップは`None`(平日と同じ`checkpoint_time`をそのまま使う)。**（休日PM微修正で追加）** さらに各ステップは`weekend_skip`(Trueなら土日はこのステップ自体をスキップ)・`weekend_carryover`(Trueなら日付をまたいだ完了引き継ぎの対象)の2つの`bool`フィールドを持つ。`pm`フローの`handwash`ステップのみ`weekend_skip=True`(土日はおやつ休憩から開始)、`homework`ステップのみ`weekend_carryover=True`(金曜/土曜に完了していれば以降の土日は不要)であり、他の全ステップは両方とも`False`である。これら2フィールドの実際の判定・スキップ処理自体は本ファイルにはヘルパー関数がなく、`services/routine_service.py`の`_resolve_skip_keys`/`_empty_statuses`/`_next_active_index`が行う([routine_service.md](./routine_service.md)参照)。**（朝の準備チェックリスト化で追加）** 各ステップはさらに`checklist`(Trueなら同じフロー内の他の`checklist=True`ステップと合わせて順不同でチェックできる「チェックリスト」グループの一員になる)という`bool`フィールドを持つ。`am`フローの先頭5ステップ(`meal`・`clothes`・`wash`・`teeth`・`toilet`、この順で表示される)、**（夜の切り替え/寝る準備チェックリスト化で追加）**`pm`フローのチェックポイント(`free`)通過後の4ステップ(`dinner`・`bath`・`nightclothes`・`nightteeth`)が`checklist=True`であり、他の全ステップは`False`である。`checklist=True`のステップがフロー内で連続する一塊であることは本ファイルのコメントで明記された前提だが、**（夜の切り替え/寝る準備チェックリスト化で変更）** この一塊は以前「フロー先頭のみ」を想定していたのに対し、現在は`am`のようにフロー先頭に置くことも、`pm`のようにチェックポイント通過後に置くことも可能な設計に一般化され、この前提を機械的に取得するヘルパー関数`get_checklist_range`が新設された。この前提・ヘルパーを実際に使って初期化・トグル処理を行うのは本ファイルではなく`services/routine_service.py`側である。フロー完走ボーナスの満額(`FULL_BONUS_GOLD`/`FULL_BONUS_EXP`)もここで定義される(土日・平日で同額)。
+デイリールーティン(すごろく形式の生活導線UI)の「フロー定義」を保持する定数モジュールである。ファイル冒頭のdocstringが述べる通り、`quest_master`(クエストのマスターデータ)とは異なり、この内容は療育目的で固定された生活動線そのものであり親が編集する対象ではないため、DBテーブルではなくPythonの定数として持つ設計である。朝(`am`)・帰宅後(`pm`)の2つのフロー(`ROUTINE_FLOWS`)を定義し、各フローは開始時刻(`start_trigger_time`)・対象曜日(`day_of_week`)・ステップ列(`steps`)を持つ。**（土日対応で変更）** `day_of_week`は`ALL_DAYS`(月〜日)に統一され、平日・土日の両方でフローが開始する。ステップのうち1つには`checkpoint_time`(強制切替の締切時刻、平日用)を設定でき、そのインデックスを取得するヘルパー関数`get_checkpoint_index`も提供する。**（土日対応で追加）** 各ステップは任意で`weekend_checkpoint_time`(休日用の上書き時刻)を持つことができ、`now`が休日かどうかに応じて実際に使う締切時刻を解決するヘルパー関数`get_effective_checkpoint_time`も追加された。**（祝日対応で変更）** この「休日」の判定は曜日ではなく`core.jp_holidays.is_offday`(土日 + 国民の祝日 + `config.EXTRA_HOLIDAY_DATES`の「家の休み」)に委譲されるようになった。以前は`now.weekday() in WEEKEND_DAYS`だったため、祝日は平日として扱われ朝の締切が7:50のままだった。`weekend_*`というフィールド名は互換のため据え置き、意味だけを「土日」から「休日」へ広げている旨がファイル内のコメントにも明記されている。現状、この上書きが実際に設定されているのは`am`フローの`free`ステップ(`weekend_checkpoint_time`が`09:30`)のみで、他のステップは`None`(平日と同じ`checkpoint_time`をそのまま使う)。**（休日PM微修正で追加）** さらに各ステップは`weekend_skip`(Trueなら土日はこのステップ自体をスキップ)・`weekend_carryover`(Trueなら日付をまたいだ完了引き継ぎの対象)の2つの`bool`フィールドを持つ。`pm`フローの`handwash`ステップのみ`weekend_skip=True`(土日はおやつ休憩から開始)、`homework`ステップのみ`weekend_carryover=True`(金曜/土曜に完了していれば以降の土日は不要)であり、他の全ステップは両方とも`False`である。これら2フィールドの実際の判定・スキップ処理自体は本ファイルにはヘルパー関数がなく、`services/routine_service.py`の`_resolve_skip_keys`/`_empty_statuses`/`_next_active_index`が行う([routine_service.md](./routine_service.md)参照)。**（朝の準備チェックリスト化で追加）** 各ステップはさらに`checklist`(Trueなら同じフロー内の他の`checklist=True`ステップと合わせて順不同でチェックできる「チェックリスト」グループの一員になる)という`bool`フィールドを持つ。`am`フローの先頭5ステップ(`meal`・`clothes`・`wash`・`teeth`・`toilet`、この順で表示される)、**（夜の切り替え/寝る準備チェックリスト化で追加）**`pm`フローのチェックポイント(`free`)通過後の4ステップ(`dinner`・`bath`・`nightclothes`・`nightteeth`)が`checklist=True`であり、他の全ステップは`False`である。`checklist=True`のステップがフロー内で連続する一塊であることは本ファイルのコメントで明記された前提だが、**（夜の切り替え/寝る準備チェックリスト化で変更）** この一塊は以前「フロー先頭のみ」を想定していたのに対し、現在は`am`のようにフロー先頭に置くことも、`pm`のようにチェックポイント通過後に置くことも可能な設計に一般化され、この前提を機械的に取得するヘルパー関数`get_checklist_range`が新設された。この前提・ヘルパーを実際に使って初期化・トグル処理を行うのは本ファイルではなく`services/routine_service.py`側である。フロー完走ボーナスの満額(`FULL_BONUS_GOLD`/`FULL_BONUS_EXP`)もここで定義される(土日・平日で同額)。
 根拠: [モジュールdocstring] (行番号: 3-10 / 抜粋: "quest_master とは異なり、この内容は療育目的で固定された生活動線そのものであり\n親が編集する対象ではないため、DBテーブルではなくこの定数として持つ\n(migrations/README.md・0010_add_routine_progress.sql参照)。")
 
 **（大人用フロー分離で追加）** 従来、`ROUTINE_FLOWS`は全ユーザーで共用されており、保護者(`role_adult`)の画面にも子ども向けのステップ(`homework`「宿題」・`tomorrow_prep`「明日の準備」)がそのまま表示されていた。本改修で、ユーザーごとにフローセットを切り替える仕組み(`ROUTINE_FLOW_SETS`・`get_flow_set`)と、大人用フローの定義(`_build_adult_flows`により生成される`DAD_ROUTINE_FLOWS`・`MOM_ROUTINE_FLOWS`・`ADULT_DEFAULT_ROUTINE_FLOWS`)が追加された。`ROUTINE_FLOWS`は子ども用フローセットとして残り、`get_flow_set`のフォールバック先も兼ねる。併せて`RoutineStep`に任意フィールド`gold`/`exp`(ステップ個別の即時報酬)が追加され、その取得ヘルパー`get_step_reward`も提供される。この報酬は、生活動線そのものだったデイリークエスト(`quest_data.py`の`QUESTS`)を「すごろく」側へ寄せる際に、元のクエストと同額の報酬を引き継ぐために使われる(**就寝ミッションの移設で対象追加**: ママの`cook_dinner`「夕食を作る」・パパの土日の`kitchen_reset`/`living_reset`に加え、子ども用・大人用の両`pm`フローの`sleep`「就寝」)。
@@ -34,7 +35,8 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `datetime`（土日対応で追加） | 標準 | `get_effective_checkpoint_time`の引数`now`の型ヒント(`datetime.datetime`)、および曜日判定(`now.weekday()`) | 根拠: [インポート宣言] (行番号: 9 / 抜粋: "import datetime") |
+| `datetime`（土日対応で追加） | 標準 | `get_effective_checkpoint_time`の引数`now`の型ヒント(`datetime.datetime`) | 根拠: [インポート宣言] (行番号: 9 / 抜粋: "import datetime") |
+| `core.jp_holidays`（祝日対応で追加） | 内部 | `get_effective_checkpoint_time`の休日判定(`is_offday`) | 根拠: [インポート宣言] (行番号: 12 / 抜粋: "from core.jp_holidays import is_offday") |
 | `typing.List` | 標準 | 型ヒント(`List[int]`, `List[RoutineStep]`) | 根拠: [インポート宣言] (行番号: 10 / 抜粋: "from typing import List, Optional, Tuple, TypedDict") |
 | `typing.Optional` | 標準 | 型ヒント(`Optional[str]`, `Optional[int]`) | 根拠: [インポート宣言] (行番号: 10 / 抜粋: "from typing import List, Optional, Tuple, TypedDict") |
 | `typing.Tuple`（夜の切り替え/寝る準備チェックリスト化で追加） | 標準 | `get_checklist_range`の戻り値の型ヒント(`Optional[Tuple[int, int]]`) | 根拠: [インポート宣言] (行番号: 10 / 抜粋: "from typing import List, Optional, Tuple, TypedDict") |
@@ -50,10 +52,10 @@
 ### `RoutineStep`
 
 * **役割**: すごろくの1マス(1ステップ)を表す型定義。`key`(内部識別子)・`label`(表示名)・`icon_key`(アイコン識別子)・`checkpoint_time`(チェックポイント時刻、'HH:MM'形式または`None`)・**（土日対応で追加）**`weekend_checkpoint_time`(土日用の上書き時刻、'HH:MM'形式または`None`)・**（休日PM微修正で追加）**`weekend_skip`(Trueなら土日はこのステップ自体をスキップする`bool`)・**（休日PM微修正で追加）**`weekend_carryover`(Trueならこのステップは日付をまたいだ完了引き継ぎの対象になる`bool`)・**（朝の準備チェックリスト化で追加）**`checklist`(Trueなら同じフロー内の他の`checklist=True`ステップと合わせて順不同でチェックできるグループの一員になる`bool`)の8フィールドを持つ`TypedDict`。`weekend_checkpoint_time`が`None`の場合は、土日でも平日と同じ`checkpoint_time`がそのまま使われる(`get_effective_checkpoint_time`参照)。`weekend_skip`/`weekend_carryover`/`checklist`いずれも実際の判定処理は本ファイルには実装されておらず、`services/routine_service.py`側に委ねられている。`checklist`フィールドのコメントには、`checklist=True`のステップはフロー内で連続する一塊のみを想定しているという設計上の前提が明記されている。**（夜の切り替え/寝る準備チェックリスト化で変更）** このコメントは以前「先頭から連続する一塊」という、フロー先頭固定を前提とした表現だったが、`pm`フローでチェックポイント通過後にもチェックリストを置けるようにしたことに伴い、「フロー先頭・チェックポイント通過後のどちらにも置ける単一の連続ブロック」という一般化された表現に改められ、このブロックを取得する`get_checklist_range`ヘルパー関数への参照も追加された。
-* 根拠: [クラス定義] (行番号: 13-33 / 抜粋: "class _RoutineStepBase(TypedDict):\n    key: str\n    label: str\n    icon_key: str\n    checkpoint_time: Optional[str]  # 'HH:MM' 形式。設定されたステップだけが強制切替の対象\n    # 土日はチェックポイント時刻だけ変える(要件: フロー構成・ステップは平日と揃える)。\n    # Noneなら平日と同じcheckpoint_timeをそのまま使う。\n    weekend_checkpoint_time: Optional[str]\n    # Trueなら土日はこのステップ自体をスキップする(要件: 休日PMはおやつ休憩から開始)。\n    weekend_skip: bool\n    # Trueならこのステップは日付をまたいで引き継ぐ(要件: 宿題は金曜終わっていれば\n    # 土日は不要、土曜終わっていれば日曜は不要)。判定はroutine_service側で行う。\n    weekend_carryover: bool")
+* 根拠: [クラス定義] (行番号: 15-37 / 抜粋: "class _RoutineStepBase(TypedDict):\n    key: str\n    label: str\n    icon_key: str\n    checkpoint_time: Optional[str]  # 'HH:MM' 形式。設定されたステップだけが強制切替の対象\n    # 土日はチェックポイント時刻だけ変える(要件: フロー構成・ステップは平日と揃える)。\n    # Noneなら平日と同じcheckpoint_timeをそのまま使う。\n    weekend_checkpoint_time: Optional[str]\n    # Trueなら土日はこのステップ自体をスキップする(要件: 休日PMはおやつ休憩から開始)。\n    weekend_skip: bool\n    # Trueならこのステップは日付をまたいで引き継ぐ(要件: 宿題は金曜終わっていれば\n    # 土日は不要、土曜終わっていれば日曜は不要)。判定はroutine_service側で行う。\n    weekend_carryover: bool")
 * **（大人用フロー分離で追加、パパのpm再構成で`weekday_skip`を追加）** 上記8フィールドの必須部分は`_RoutineStepBase`という別の`TypedDict`へ切り出され、`RoutineStep`はそれを継承しつつ`total=False`で任意フィールド`gold`(int)・`exp`(int)・`weekday_skip`(bool)を追加する形になった。`weekday_skip`はdocstringによれば「`weekend_skip`の逆で、Trueなら平日はこのステップ自体をスキップする(要件: パパの平日の昼は『お仕事』だけにし、キッチン/リビングリセットは土日にだけ出す)」もので、判定は`weekend_skip`と同じく`services/routine_service.py`の`_resolve_skip_keys`が行う。必須フィールド側に置かなかったのは、既存の全ステップリテラルを書き換えずに済ませるためだとdocstringに明記されている。これは「ステップ個別の即時報酬」であり、docstringによれば、大人用フローで生活動線そのものだったデイリークエスト(`quest_data.QUESTS`)を「すごろく」側へ寄せる際に、元のクエストと同額の報酬をそのステップの完了報告時点で付与するために使う。省略時は0として扱われ(`get_step_reward`)、子ども用フローの全ステップは`gold`/`exp`を持たないため従来どおりチェックポイント通過ボーナスの按分だけが報酬になる。`total=False`により既存のステップリテラル(これらのキーを持たない)もそのまま有効なままである。
-* 根拠: [クラス定義] (行番号: 13, 36-47 / 抜粋: "class _RoutineStepBase(TypedDict):" … "class RoutineStep(_RoutineStepBase, total=False):\n    \"\"\"ステップ個別の即時報酬(任意)。\n\n    大人用フロー(ROUTINE_FLOW_SETS)で、生活動線そのものだったデイリークエスト\n    (例: ママの「夕食を作る」)を quest_data.QUESTS から「すごろく」側へ寄せる\n    ために使う。指定したステップを順番どおり完了報告した時点で、元のクエストと\n    同額の gold/exp をその場で付与する(get_step_reward参照)。省略時は0で、\n    子ども用フローの全ステップは従来どおりチェックポイント通過ボーナス\n    (FULL_BONUS_GOLD/EXPの按分)だけを報酬とする。\n    \"\"\"\n    gold: int\n    exp: int")
-* 根拠: `checklist`フィールドの定義とその前提コメント (行番号: 26-33 / 抜粋: "# Trueならこのステップは同じフロー内の他のchecklist=Trueなステップと合わせて\n    # 順不同でチェックできる「チェックリスト」グループの一員になる(要件: 朝の準備・\n    # 寝る準備は順番を強制せず好きな順にチェックしたい)。フロー内でchecklist=Trueな\n    # ステップは連続する一塊のみを想定している(get_checklist_range参照)。この塊は\n    # フロー先頭(例: amの朝の準備5項目)・チェックポイント通過後(例: pmの寝る準備4項目)\n    # のどちらにも置けるが、routine_service側はシーケンシャルな進行が塊の先頭indexに\n    # 到達した時点で塊全体を一括'current'にする、という単一の仕組みで両対応している。\n    checklist: bool")
+* 根拠: [クラス定義] (行番号: 15, 36-47 / 抜粋: "class _RoutineStepBase(TypedDict):" … "class RoutineStep(_RoutineStepBase, total=False):\n    \"\"\"ステップ個別の即時報酬(任意)。\n\n    大人用フロー(ROUTINE_FLOW_SETS)で、生活動線そのものだったデイリークエスト\n    (例: ママの「夕食を作る」)を quest_data.QUESTS から「すごろく」側へ寄せる\n    ために使う。指定したステップを順番どおり完了報告した時点で、元のクエストと\n    同額の gold/exp をその場で付与する(get_step_reward参照)。省略時は0で、\n    子ども用フローの全ステップは従来どおりチェックポイント通過ボーナス\n    (FULL_BONUS_GOLD/EXPの按分)だけを報酬とする。\n    \"\"\"\n    gold: int\n    exp: int")
+* 根拠: `checklist`フィールドの定義とその前提コメント (行番号: 30-37 / 抜粋: "# Trueならこのステップは同じフロー内の他のchecklist=Trueなステップと合わせて\n    # 順不同でチェックできる「チェックリスト」グループの一員になる(要件: 朝の準備・\n    # 寝る準備は順番を強制せず好きな順にチェックしたい)。フロー内でchecklist=Trueな\n    # ステップは連続する一塊のみを想定している(get_checklist_range参照)。この塊は\n    # フロー先頭(例: amの朝の準備5項目)・チェックポイント通過後(例: pmの寝る準備4項目)\n    # のどちらにも置けるが、routine_service側はシーケンシャルな進行が塊の先頭indexに\n    # 到達した時点で塊全体を一括'current'にする、という単一の仕組みで両対応している。\n    checklist: bool")
 
 
 * **引数/リクエスト**: 該当なし(型定義であり呼び出し可能な関数ではない)
@@ -76,7 +78,7 @@
 ### `RoutineFlow`
 
 * **役割**: 1つのすごろくフロー(朝または帰宅後)全体を表す型定義。`title`(表示タイトル)・`day_of_week`(対象曜日のリスト、0=月〜6=日)・`start_trigger_time`(このフローが当日開始される時刻、'HH:MM')・`steps`(`RoutineStep`のリスト)の4フィールドを持つ`TypedDict`。
-* 根拠: [クラス定義] (行番号: 59-63 / 抜粋: "class RoutineFlow(TypedDict):\n    title: str\n    day_of_week: List[int]\n    start_trigger_time: str  # 'HH:MM'。この時刻を過ぎると当日分の進捗が開始する\n    steps: List[RoutineStep]")
+* 根拠: [クラス定義] (行番号: 63-67 / 抜粋: "class RoutineFlow(TypedDict):\n    title: str\n    day_of_week: List[int]\n    start_trigger_time: str  # 'HH:MM'。この時刻を過ぎると当日分の進捗が開始する\n    steps: List[RoutineStep]")
 
 
 * **引数/リクエスト**: 該当なし
@@ -98,8 +100,8 @@
 
 ### `ALL_DAYS` / `WEEKEND_DAYS`（土日対応で`WEEKDAYS`から変更）
 
-* **役割**: **（土日対応で変更）** 以前は月〜金(0〜4)のみを表す`WEEKDAYS`定数だったが、`ROUTINE_FLOWS`の両フローが土日にも開始するようになったため、月〜日全体を表す`ALL_DAYS`(`am`・`pm`両フローの`day_of_week`として共用)に置き換えられた。新設の`WEEKEND_DAYS`は土曜(5)・日曜(6)を表す`set`定数で、`get_effective_checkpoint_time`が「今日は土日か」を判定するために使う。
-* 根拠: [定数宣言] (行番号: 66-67 / 抜粋: "ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]\nWEEKEND_DAYS = {5, 6}")
+* **役割**: **（土日対応で変更）** 以前は月〜金(0〜4)のみを表す`WEEKDAYS`定数だったが、`ROUTINE_FLOWS`の両フローが土日にも開始するようになったため、月〜日全体を表す`ALL_DAYS`(`am`・`pm`両フローの`day_of_week`として共用)に置き換えられた。`WEEKEND_DAYS`は土曜(5)・日曜(6)を表す`set`定数。**（祝日対応で変更）** 以前は`get_effective_checkpoint_time`が「今日は土日か」を判定するのに使っていたが、休日判定が`core.jp_holidays.is_offday`へ移ったため本ファイル内での参照は無くなった。定数の直後のコメントに、`weekend_*`フィールドと`weekday_skip`の適用可否が曜日ではなく`is_offday`で判定されること、`WEEKEND_DAYS`はクエストの曜日指定判定側で今も土日そのものを表す定数として使われることが明記されている。
+* 根拠: [定数宣言] (行番号: 70-71 / 抜粋: "ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]\nWEEKEND_DAYS = {5, 6}")、[コメント] (行番号: 73-79 / 抜粋: "# `weekend_*` という名前のフィールド(weekend_checkpoint_time / weekend_skip /")
 
 
 * **引数/リクエスト**: 該当なし
@@ -122,7 +124,7 @@
 ### `FULL_BONUS_GOLD` / `FULL_BONUS_EXP`
 
 * **役割**: フロー完走ボーナスの満額を定義する定数。チェックポイント通過時、チェックポイントより前のステップの達成率に応じて按分される(按分処理の実体は`services/routine_service.py`の`_apply_forced_transition`、[routine_service.md](./routine_service.md)参照)。コメントにより、この満額はquest_data.pyのREWARDS(id=11「Youtube (30:00)」)のごほうび券と同額に設定されていることが明示されている。
-* 根拠: [定数宣言・コメント] (行番号: 69-72 / 抜粋: "# フロー完走ボーナスの満額 (Youtube 30分チケット(quest_data.py REWARDS id=11)と同額)。\n# チェックポイント通過時、チェックポイントより前のステップの達成率に応じて按分する。\nFULL_BONUS_GOLD = 150\nFULL_BONUS_EXP = 30")
+* 根拠: [定数宣言・コメント] (行番号: 81-84 / 抜粋: "# フロー完走ボーナスの満額 (Youtube 30分チケット(quest_data.py REWARDS id=11)と同額)。\n# チェックポイント通過時、チェックポイントより前のステップの達成率に応じて按分する。\nFULL_BONUS_GOLD = 150\nFULL_BONUS_EXP = 30")
 
 
 * **引数/リクエスト**: 該当なし
@@ -146,11 +148,11 @@
 
 * **役割**: フローキー(`'am'`/`'pm'`)をキーとする`RoutineFlow`の辞書。**（大人用フロー分離で変更）** 以前は全ユーザーがこの辞書を共用していたが、現在は智矢・涼花などの子ども用フローセットであり、保護者には`ROUTINE_FLOW_SETS`側の大人用フローが使われる。`get_flow_set`が、user_id固有定義にもなく`role`も`role_adult`でないユーザーに返すフォールバック先でもあるため、名前は`ROUTINE_FLOWS`のまま据え置かれている。`am`は「起きてから出発まで」(開始05:00、6ステップ、**画面非表示化で末尾の`leave`ステップを削除し7→6に変更**)、`pm`は「帰ってから寝るまで」(開始14:00、10ステップ、**夜の切り替え/寝る準備チェックリスト化でステップ数が6→10に変更**)を定義する。**（土日対応で変更）** いずれも`day_of_week`は`ALL_DAYS`(月〜日)であり、平日・土日ともに同じ時刻(05:00/14:00)で開始する。チェックポイントは`am`の`free`ステップに`checkpoint_time='07:50'`(平日)・`weekend_checkpoint_time='09:30'`(土日、**土日対応で追加**)、`pm`の`free`ステップに`checkpoint_time='18:00'`(平日・土日とも共通、`weekend_checkpoint_time`は未設定。**夜の切り替え/寝る準備チェックリスト化で20:00から変更、要件確認済み: 土日も平日と同じ18:00のまま現状維持**)を設定する。**（休日PM微修正で追加）** `pm`フローの先頭ステップ`handwash`には`weekend_skip=True`が設定されており、土日は`おやつ休憩`(`snack`)からフローが開始する。`pm`フローの`homework`(宿題)、**（夜の切り替え/寝る準備チェックリスト化で追加）**および新設の`tomorrow_prep`(明日の準備)ステップには`weekend_carryover=True`が設定されており、金曜または土曜に完了していれば以降の土日はスキップされる(具体的な判定ロジックは[routine_service.md](./routine_service.md)の`_resolve_skip_keys`を参照)。`am`フロー側のステップは`weekend_skip`/`weekend_carryover`とも全ステップ`False`のままであり対象外である。**（朝の準備チェックリスト化で変更）** `am`フローの先頭5ステップは、`meal`(朝ごはん)→`clothes`(着替える)→`wash`(顔を洗う)→`teeth`(歯磨き)→`toilet`(トイレ)の5ステップ`checklist=True`グループである。表示順はこの並びで固定だが、`checklist=True`により実施順は問わない(要件確認済み)。5項目均等割りだと満額150Gold/30EXPをちょうど割り切れる(1項目=30Gold/6EXP相当)ことがコメントに明記されている。`free`(チェックポイント)は引き続き`checklist=False`の逐次ステップであり、かつ`am`フローで最後のステップになった(**画面非表示化で変更**: 以前はこの後に単なる「出発」表示用ステップ`leave`が続いていたが、タップ操作以外の意味を持たなかったため削除した。`free`がフロー最後のステップになったことで、締切通過時の強制遷移(`_apply_forced_transition`)が計算する次アクティブindexがそのまま`len(steps)`と一致し、`is_complete=True`へ直接遷移するようになる。要件: 7:50を過ぎたら朝の準備の画面自体を表示しない)。**（夜の切り替え/寝る準備チェックリスト化で変更）** `pm`フローは、`handwash`→`snack`→`homework`の後に新設の`tomorrow_prep`(明日の準備)ステップが続き、その後の`free`(チェックポイント、18:00)を経て、以前は単一ステップだった`寝る準備`が`dinner`(晩ごはん)→`bath`(お風呂)→`nightclothes`(着替え)→`nightteeth`(歯磨き)の4ステップ`checklist=True`グループに変更され、最後に`sleep`(就寝)が続く構成になった。**（就寝ミッションの移設で追加）** この`sleep`は`gold=70`/`exp=50`のステップ個別報酬を持つ(退役させた`quest_data.py`のid=1105「【夜】就寝ミッション」からの移設)。寝る準備チェックリストは按分対象外で何をチェックしてもボーナスが増えないため、夜の生活動線に対する報酬はこの`sleep`に集約されている。このチェックリストは`am`と異なりチェックポイント(`free`)の**後**に置かれており、出発ボーナスの按分対象(チェックポイントより前の`handwash`/`snack`/`homework`/`tomorrow_prep`の4ステップ)には含まれない(`services/routine_service.py`の`_eligible_done_ratio`が対象範囲を決める、[routine_service.md](./routine_service.md)参照)。`dinner`のアイコンキーは`am`の`meal`ステップと同じ`'meal'`、`nightclothes`/`nightteeth`のアイコンキーも`am`の`clothes`/`teeth`と同じ値を再利用しており、`bath`のみ新規のアイコンキー`'bath'`を持つ。
 * 根拠: [定数宣言] (行番号: 67-126 / 抜粋: "ROUTINE_FLOWS: dict[str, RoutineFlow] = {\n    'am': {\n        'title': '起きてから出発まで',\n        # 土日も同じフローを使う(要件: なるべく平日と揃える)。チェックポイント時刻だけ\n        # 'free'ステップのweekend_checkpoint_timeで土日用に上書きする。\n        'day_of_week': ALL_DAYS,")
-* 根拠: `am`の朝の準備5項目がチェックリスト化された旨のコメント (行番号: 86-88 / 抜粋: "# 朝の準備5項目は順番を強制しないチェックリスト(要件確認済み: 表示順は\n            # 固定するが実施順は問わない)。5項目均等割りだと満額150Gold/30EXPを\n            # ぴったり割り切れる(1項目=30Gold/6EXP相当)。")
-* 根拠: `am`の`free`ステップの土日上書き、`checklist=False`、末尾ステップ化の経緯コメント(**画面非表示化で追加**) (行番号: 94-103 / 抜粋: "# 土日は学校が無いため、出発(チェックポイント通過)の締切を09:30に後ろ倒しする。\n            # （画面非表示化で変更）以前はこの後に単なる「出発」表示用ステップ(leave、\n            # タップ操作以外の意味を持たない)が続いていたが、削除した。'free'がこの\n            # フローで最後(かつ唯一)のchecklist=Trueブロック直後のステップのため、\n            # _apply_forced_transitionが締切通過時にnext_active_indexへ渡すindexが\n            # len(steps)と一致し、is_complete=Trueへ直接遷移するようになる(要件:\n            # 7:50を過ぎたら朝の準備の画面自体を表示しない。isRoutineFlowBlocking/\n            # isRoutineFlowFreeTimeは共にis_complete=Trueで false になるため、\n            # フロントエンド側の変更は不要)。\n            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '07:50', 'weekend_checkpoint_time': '09:30', 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},")
-* 根拠: `pm`フローのコメントによる休日スキップ方針の明記 (行番号: 108-109 / 抜粋: "# 土日も同じフローを使う(要件: なるべく平日と揃える)。土日は先頭の\n        # handwashだけスキップし、おやつ休憩から開始する(要件確認済み)。")
-* 根拠: `handwash`ステップの`weekend_skip=True` (行番号: 114-115 / 抜粋: "# 土日は手洗い・うがいをスキップし、おやつ休憩からスタートする(要件確認済み)。\n            {'key': 'handwash', 'label': '手洗い・うがい', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},")
-* 根拠: `homework`ステップの`weekend_carryover=True` (行番号: 117-119 / 抜粋: "# 金曜に完了していれば土日は不要、土曜に完了していれば日曜は不要\n            # (要件確認済み)。判定はroutine_service._resolve_skip_keysが行う。\n            {'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},")
+* 根拠: `am`の朝の準備5項目がチェックリスト化された旨のコメント (行番号: 98-100 / 抜粋: "# 朝の準備5項目は順番を強制しないチェックリスト(要件確認済み: 表示順は\n            # 固定するが実施順は問わない)。5項目均等割りだと満額150Gold/30EXPを\n            # ぴったり割り切れる(1項目=30Gold/6EXP相当)。")
+* 根拠: `am`の`free`ステップの土日上書き、`checklist=False`、末尾ステップ化の経緯コメント(**画面非表示化で追加**) (行番号: 106-115 / 抜粋: "# 土日は学校が無いため、出発(チェックポイント通過)の締切を09:30に後ろ倒しする。\n            # （画面非表示化で変更）以前はこの後に単なる「出発」表示用ステップ(leave、\n            # タップ操作以外の意味を持たない)が続いていたが、削除した。'free'がこの\n            # フローで最後(かつ唯一)のchecklist=Trueブロック直後のステップのため、\n            # _apply_forced_transitionが締切通過時にnext_active_indexへ渡すindexが\n            # len(steps)と一致し、is_complete=Trueへ直接遷移するようになる(要件:\n            # 7:50を過ぎたら朝の準備の画面自体を表示しない。isRoutineFlowBlocking/\n            # isRoutineFlowFreeTimeは共にis_complete=Trueで false になるため、\n            # フロントエンド側の変更は不要)。\n            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '07:50', 'weekend_checkpoint_time': '09:30', 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},")
+* 根拠: `pm`フローのコメントによる休日スキップ方針の明記 (行番号: 120-121 / 抜粋: "# 土日も同じフローを使う(要件: なるべく平日と揃える)。土日は先頭の\n        # handwashだけスキップし、おやつ休憩から開始する(要件確認済み)。")
+* 根拠: `handwash`ステップの`weekend_skip=True` (行番号: 126-127 / 抜粋: "# 土日は手洗い・うがいをスキップし、おやつ休憩からスタートする(要件確認済み)。\n            {'key': 'handwash', 'label': '手洗い・うがい', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},")
+* 根拠: `homework`ステップの`weekend_carryover=True` (行番号: 129-131 / 抜粋: "# 金曜に完了していれば土日は不要、土曜に完了していれば日曜は不要\n            # (要件確認済み)。判定はroutine_service._resolve_skip_keysが行う。\n            {'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},")
 * 根拠: **（明日の準備の移設で位置変更）**`tomorrow_prep`ステップ(`weekend_carryover=True`、`checklist=True`) (行番号: 111-116 / 抜粋: "# 明日の準備は「宿題の次」の一本道から寝る準備チェックリストへ移した\n            # (要件確認済み: 智矢の「明日の準備は別枠にしてほしい」)。これにより\n            # 自由時間(チェックポイント)に入る条件は手洗い・おやつ・宿題の3つだけになり、\n            # 明日の準備は晩ごはん〜歯磨きと同じく順不同でチェックできる。繰越ルール\n            # (金曜/土曜に完了していれば以降の土日は不要)は移設後もそのまま維持する。\n            {'key': 'tomorrow_prep', 'label': '明日の準備', 'icon_key': 'tomorrow_prep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},")
 * 根拠: `pm`の`free`ステップの締切が18:00に変更、土日も同時刻 (行番号: 114-116 / 抜粋: "# 自由時間→寝る準備の締切を18:00に変更(要件確認済み)。土日も平日と同じ\n            # 18:00のまま(要件確認済み: 現状維持)。\n            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '18:00', 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},")
 * 根拠: 寝る準備4項目のチェックリスト化コメントと4ステップの定義 (行番号: 117-123 / 抜粋: "# 寝る準備4項目は朝の準備と同様、順番を強制しないチェックリスト\n            # (要件確認済み)。チェックポイント(free)通過後に一括で'current'になる。\n            {'key': 'dinner', 'label': '晩ごはん', 'icon_key': 'meal', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},\n            {'key': 'bath', 'label': 'お風呂', 'icon_key': 'bath', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},\n            {'key': 'nightclothes', 'label': '着替え', 'icon_key': 'clothes', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},\n            {'key': 'nightteeth', 'label': '歯磨き', 'icon_key': 'teeth', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},")
@@ -195,10 +197,10 @@
 ### `_build_adult_flows`（大人用フロー分離で新規追加）
 
 * **役割**: 大人1人分の`am`/`pm`フローを組み立てて`dict[str, RoutineFlow]`で返すファクトリ関数。`am`は`_ADULT_AM_CHECKLIST`の5項目＋`free`(チェックポイント、平日07:50・土日09:30)という、子ども用`am`と同一の構成。`pm`は引数`pm_path_steps`→`free`(チェックポイント17:30)→`_ADULT_PM_CHECKLIST`の4項目→`sleep`(「就寝」、**就寝ミッションの移設で`gold=70`/`exp=50`を追加**。元クエスト id=1105 が`target='all'`だったため大人用フローにも付いている)という構成。**（パパのpm再構成で変更）** 以前は`lead_steps`/`task_steps`の2引数で、その間に共通の`handwash`「帰宅・手洗い」→`snack`「ひと休み」が固定で挟まっていたが、パパの平日の昼を「お仕事」だけにする要件によりこの固定の前置きが邪魔になったため、チェックポイントより前の一本道を`pm_path_steps`として**まるごと**受け取る形に変更された。docstringは「その人の生活動線によって中身も並びも異なるため(パパは14:00時点でまだ勤務中なので先頭が『お仕事』、ママは帰宅済みなので『帰宅・手洗い』から始まる)、共通の前置きは持たせず呼び出し側に任せている」「ここに置いたステップはチェックポイント(17:30)より前にあるため、出発ボーナスの按分対象になる(`_eligible_done_ratio`)」と明記している。
-* 根拠: [関数定義とdocstring] (行番号: 178-214 / 抜粋: "def _build_adult_flows(pm_path_steps: List[RoutineStep]) -> dict[str, RoutineFlow]:\n    \"\"\"大人1人分のam/pmフローを組み立てる。\n\n    `pm_path_steps` は pm フローのチェックポイント(自由時間)より前の一本道を\n    まるごと渡す。")
+* 根拠: [関数定義とdocstring] (行番号: 190-226 / 抜粋: "def _build_adult_flows(pm_path_steps: List[RoutineStep]) -> dict[str, RoutineFlow]:\n    \"\"\"大人1人分のam/pmフローを組み立てる。\n\n    `pm_path_steps` は pm フローのチェックポイント(自由時間)より前の一本道を\n    まるごと渡す。")
 
 * **引数/リクエスト**: `pm_path_steps: List[RoutineStep]` — `pm`フローのチェックポイントより前の一本道をまるごと渡すリスト(**パパのpm再構成で`task_steps`/`lead_steps`の2引数から変更**)。共通の前置き(「帰宅・手洗い」「ひと休み」)は持たないため、必要な人は呼び出し側でリストの先頭に含める。
-* 根拠: [関数シグネチャ] (行番号: 178 / 抜粋: "def _build_adult_flows(pm_path_steps: List[RoutineStep]) -> dict[str, RoutineFlow]:")、[pm_path_stepsの展開] (行番号: 206 / 抜粋: "                *pm_path_steps,")
+* 根拠: [関数シグネチャ] (行番号: 190 / 抜粋: "def _build_adult_flows(pm_path_steps: List[RoutineStep]) -> dict[str, RoutineFlow]:")、[pm_path_stepsの展開] (行番号: 218 / 抜粋: "                *pm_path_steps,")
 
 * **戻り値/レスポンス**: `dict[str, RoutineFlow]`。キーは`'am'`/`'pm'`の2つで、`ROUTINE_FLOWS`と同じ形。
 * 根拠: [return文] (行番号: 177-205 / 抜粋: "    return {\n        'am': {\n            'title': '起きてから出発まで',")
@@ -239,7 +241,7 @@
 ### `ROUTINE_FLOW_SETS` / `ROLE_ADULT`（大人用フロー分離で新規追加）
 
 * **役割**: `ROUTINE_FLOW_SETS`はuser_id(`'dad'`/`'mom'`)をキーに、そのユーザー固有のフローセットを引く辞書。コメントによれば「ここに無いユーザーは role で解決する(`get_flow_set`)」。`ROLE_ADULT`は`'role_adult'`という文字列定数で、`quest_users.role`の値と突き合わせるために使われる。
-* 根拠: [定数宣言] (行番号: 251-257 / 抜粋: "# user_id → その人のフローセット。ここに無いユーザーは role で解決する(get_flow_set)。\nROUTINE_FLOW_SETS: dict[str, dict[str, RoutineFlow]] = {\n    'dad': DAD_ROUTINE_FLOWS,\n    'mom': MOM_ROUTINE_FLOWS,\n}\n\nROLE_ADULT = 'role_adult'")
+* 根拠: [定数宣言] (行番号: 263-269 / 抜粋: "# user_id → その人のフローセット。ここに無いユーザーは role で解決する(get_flow_set)。\nROUTINE_FLOW_SETS: dict[str, dict[str, RoutineFlow]] = {\n    'dad': DAD_ROUTINE_FLOWS,\n    'mom': MOM_ROUTINE_FLOWS,\n}\n\nROLE_ADULT = 'role_adult'")
 
 * **引数/リクエスト**: 該当なし
 * 根拠: [定数宣言] (行番号: 229-235)
@@ -258,13 +260,13 @@
 ### `get_flow_set`（大人用フロー分離で新規追加）
 
 * **役割**: そのユーザーに出すべきフローセット(`flow_key -> RoutineFlow`)を返す。user_id固有の定義(`ROUTINE_FLOW_SETS`)を最優先し、無ければ`role`で振り分ける。docstringによれば、`role`が未設定(`quest_users.role`が`NULL`の旧データ等)の場合は従来どおり子ども用フロー(`ROUTINE_FLOWS`)にフォールバックする。
-* 根拠: [関数定義] (行番号: 260-271 / 抜粋: "def get_flow_set(user_id: str, role: Optional[str]) -> dict[str, RoutineFlow]:\n    \"\"\"そのユーザーに出すべきフローセット(flow_key -> RoutineFlow)を返す。\n\n    user_id 固有の定義を最優先し、無ければ role で振り分ける。role が未設定\n    (quest_users.role が NULL の旧データ等)の場合は従来どおり子ども用フローに\n    フォールバックする。\n    \"\"\"\n    if user_id in ROUTINE_FLOW_SETS:\n        return ROUTINE_FLOW_SETS[user_id]\n    if role == ROLE_ADULT:\n        return ADULT_DEFAULT_ROUTINE_FLOWS\n    return ROUTINE_FLOWS")
+* 根拠: [関数定義] (行番号: 272-283 / 抜粋: "def get_flow_set(user_id: str, role: Optional[str]) -> dict[str, RoutineFlow]:\n    \"\"\"そのユーザーに出すべきフローセット(flow_key -> RoutineFlow)を返す。\n\n    user_id 固有の定義を最優先し、無ければ role で振り分ける。role が未設定\n    (quest_users.role が NULL の旧データ等)の場合は従来どおり子ども用フローに\n    フォールバックする。\n    \"\"\"\n    if user_id in ROUTINE_FLOW_SETS:\n        return ROUTINE_FLOW_SETS[user_id]\n    if role == ROLE_ADULT:\n        return ADULT_DEFAULT_ROUTINE_FLOWS\n    return ROUTINE_FLOWS")
 
 * **引数/リクエスト**: `user_id: str`(対象ユーザーのID)、`role: Optional[str]`(`quest_users.role`の値。`None`可)
-* 根拠: [関数シグネチャ] (行番号: 260 / 抜粋: "def get_flow_set(user_id: str, role: Optional[str]) -> dict[str, RoutineFlow]:")
+* 根拠: [関数シグネチャ] (行番号: 272 / 抜粋: "def get_flow_set(user_id: str, role: Optional[str]) -> dict[str, RoutineFlow]:")
 
 * **戻り値/レスポンス**: `dict[str, RoutineFlow]`。`ROUTINE_FLOW_SETS[user_id]`、`ADULT_DEFAULT_ROUTINE_FLOWS`、`ROUTINE_FLOWS`のいずれか。
-* 根拠: [return文] (行番号: 267-271 / 抜粋: "    if user_id in ROUTINE_FLOW_SETS:\n        return ROUTINE_FLOW_SETS[user_id]\n    if role == ROLE_ADULT:\n        return ADULT_DEFAULT_ROUTINE_FLOWS\n    return ROUTINE_FLOWS")
+* 根拠: [return文] (行番号: 279-283 / 抜粋: "    if user_id in ROUTINE_FLOW_SETS:\n        return ROUTINE_FLOW_SETS[user_id]\n    if role == ROLE_ADULT:\n        return ADULT_DEFAULT_ROUTINE_FLOWS\n    return ROUTINE_FLOWS")
 
 * **副作用**: なし(モジュール定数を参照して返すのみ)
 * 根拠: [関数本体] (行番号: 245-249)
@@ -277,13 +279,13 @@
 ### `get_step_reward`（大人用フロー分離で新規追加）
 
 * **役割**: ステップ個別の即時報酬`(gold, exp)`のタプルを返す。`RoutineStep`の`gold`/`exp`は`total=False`の任意フィールドのため、未設定なら`(0, 0)`を返す。
-* 根拠: [関数定義] (行番号: 274-276 / 抜粋: "def get_step_reward(step: RoutineStep) -> Tuple[int, int]:\n    \"\"\"ステップ個別の即時報酬 (gold, exp) を返す。未設定なら (0, 0)。\"\"\"\n    return step.get('gold', 0), step.get('exp', 0)")
+* 根拠: [関数定義] (行番号: 286-288 / 抜粋: "def get_step_reward(step: RoutineStep) -> Tuple[int, int]:\n    \"\"\"ステップ個別の即時報酬 (gold, exp) を返す。未設定なら (0, 0)。\"\"\"\n    return step.get('gold', 0), step.get('exp', 0)")
 
 * **引数/リクエスト**: `step: RoutineStep`
-* 根拠: [関数シグネチャ] (行番号: 274 / 抜粋: "def get_step_reward(step: RoutineStep) -> Tuple[int, int]:")
+* 根拠: [関数シグネチャ] (行番号: 286 / 抜粋: "def get_step_reward(step: RoutineStep) -> Tuple[int, int]:")
 
 * **戻り値/レスポンス**: `Tuple[int, int]` — `(gold, exp)`。
-* 根拠: [return文] (行番号: 276 / 抜粋: "    return step.get('gold', 0), step.get('exp', 0)")
+* 根拠: [return文] (行番号: 288 / 抜粋: "    return step.get('gold', 0), step.get('exp', 0)")
 
 * **副作用**: なし
 * 根拠: [関数本体] (行番号: 242)
@@ -296,13 +298,13 @@
 ### `is_weekday_skip`（パパのpm再構成で新規追加）
 
 * **役割**: そのステップを平日にスキップするか(任意フィールド`weekday_skip`)を返す。未設定なら`False`。`get_step_reward`と同じく`total=False`の任意フィールドを安全に読むためのアクセサで、実際のスキップ判定は`services/routine_service.py`の`_resolve_skip_keys`が行う。
-* 根拠: [関数定義] (行番号: 279-281 / 抜粋: "def is_weekday_skip(step: RoutineStep) -> bool:")
+* 根拠: [関数定義] (行番号: 291-293 / 抜粋: "def is_weekday_skip(step: RoutineStep) -> bool:")
 
 * **引数/リクエスト**: `step: RoutineStep`
-* 根拠: [関数シグネチャ] (行番号: 279 / 抜粋: "def is_weekday_skip(step: RoutineStep) -> bool:")
+* 根拠: [関数シグネチャ] (行番号: 291 / 抜粋: "def is_weekday_skip(step: RoutineStep) -> bool:")
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: [return文] (行番号: 281 / 抜粋: "    return step.get('weekday_skip', False)")
+* 根拠: [return文] (行番号: 293 / 抜粋: "    return step.get('weekday_skip', False)")
 
 * **副作用**: なし
 * 根拠: [関数本体] (行番号: 272)
@@ -315,11 +317,11 @@
 ### `get_checkpoint_index`
 
 * **役割**: 渡された`flow`の`steps`を先頭から走査し、`checkpoint_time`が真値(空文字・None以外)であるステップの最初のインデックスを返す。フロー内にチェックポイントを持つステップが存在しない場合は`None`を返す。
-* 根拠: [関数定義] (行番号: 284-289 / 抜粋: "def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:\n    \"\"\"フロー内でチェックポイント(強制切替の境界)を持つステップのインデックスを返す。\"\"\"\n    for idx, step in enumerate(flow['steps']):\n        if step['checkpoint_time']:\n            return idx\n    return None")
+* 根拠: [関数定義] (行番号: 296-301 / 抜粋: "def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:\n    \"\"\"フロー内でチェックポイント(強制切替の境界)を持つステップのインデックスを返す。\"\"\"\n    for idx, step in enumerate(flow['steps']):\n        if step['checkpoint_time']:\n            return idx\n    return None")
 
 
 * **引数/リクエスト**: `flow: RoutineFlow`
-* 根拠: [関数定義] (行番号: 284 / 抜粋: "def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:")
+* 根拠: [関数定義] (行番号: 296 / 抜粋: "def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:")
 
 
 * **戻り値/レスポンス**: `Optional[int]` — チェックポイントを持つ最初のステップのインデックス、無ければ`None`
@@ -337,15 +339,15 @@
 ### `get_checklist_range`（夜の切り替え/寝る準備チェックリスト化で新規追加）
 
 * **役割**: 渡された`flow`の`steps`を走査し、`checklist=True`であるステップのインデックス一覧を集め、その最初と最後(+1)を`(開始index, 終了index+1)`のタプルとして返す。`checklist=True`のステップが1つも無ければ`None`を返す。`RoutineStep.checklist`フィールドのコメントが明記する「`checklist=True`のステップはフロー内で連続する一塊のみを想定する」という前提を、実際にその範囲として取り出すヘルパーであり、以前は本ファイルに存在せず`services/routine_service.py`側が`checklist`フラグをフロー先頭からの決め打ちで扱っていたものを、フロー先頭・チェックポイント通過後のどちらにも置ける汎用的な形に一般化するために新設された。
-* 根拠: [関数定義] (行番号: 292-302 / 抜粋: "def get_checklist_range(flow: RoutineFlow) -> Optional[Tuple[int, int]]:\n    \"\"\"フロー内のchecklist=Trueな連続ブロックの(開始index, 終了index+1)を返す。\n\n    checklist=Trueなステップが無ければNone。ブロックはフロー先頭(am)・\n    チェックポイント通過後(pm)のどちらにも置けるが、単一の連続ブロックのみを\n    想定している(routine_service側の初期化・トグル処理もこの前提で書かれている)。\n    \"\"\"\n    indices = [idx for idx, step in enumerate(flow['steps']) if step['checklist']]\n    if not indices:\n        return None\n    return indices[0], indices[-1] + 1")
+* 根拠: [関数定義] (行番号: 304-314 / 抜粋: "def get_checklist_range(flow: RoutineFlow) -> Optional[Tuple[int, int]]:\n    \"\"\"フロー内のchecklist=Trueな連続ブロックの(開始index, 終了index+1)を返す。\n\n    checklist=Trueなステップが無ければNone。ブロックはフロー先頭(am)・\n    チェックポイント通過後(pm)のどちらにも置けるが、単一の連続ブロックのみを\n    想定している(routine_service側の初期化・トグル処理もこの前提で書かれている)。\n    \"\"\"\n    indices = [idx for idx, step in enumerate(flow['steps']) if step['checklist']]\n    if not indices:\n        return None\n    return indices[0], indices[-1] + 1")
 
 
 * **引数/リクエスト**: `flow: RoutineFlow`
-* 根拠: [関数定義] (行番号: 292 / 抜粋: "def get_checklist_range(flow: RoutineFlow) -> Optional[Tuple[int, int]]:")
+* 根拠: [関数定義] (行番号: 304 / 抜粋: "def get_checklist_range(flow: RoutineFlow) -> Optional[Tuple[int, int]]:")
 
 
 * **戻り値/レスポンス**: `Optional[Tuple[int, int]]` — `checklist=True`なステップの(開始index, 終了index+1)、1つも無ければ`None`。`am`フローでは`(0, 5)`(`meal`〜`toilet`)、`pm`フローでは`(5, 9)`(`dinner`〜`nightteeth`)になる(いずれも本仕様書作成時点の`ROUTINE_FLOWS`の内容に基づく実測値)。
-* 根拠: [戻り値] (行番号: 299-302 / 抜粋: "indices = [idx for idx, step in enumerate(flow['steps']) if step['checklist']]\n    if not indices:\n        return None\n    return indices[0], indices[-1] + 1")
+* 根拠: [戻り値] (行番号: 311-314 / 抜粋: "indices = [idx for idx, step in enumerate(flow['steps']) if step['checklist']]\n    if not indices:\n        return None\n    return indices[0], indices[-1] + 1")
 
 
 * **副作用**: なし
@@ -358,16 +360,16 @@
 
 ### `get_effective_checkpoint_time`（土日対応で新規追加）
 
-* **役割**: 渡された`step`について、`now`の曜日が土日(`WEEKEND_DAYS`に含まれる)かつ`step['weekend_checkpoint_time']`が真値であればその値を、そうでなければ`step['checkpoint_time']`をそのまま返す。`services/routine_service.py`側は、チェックポイントの締切判定([routine_service.md](./routine_service.md)の`_apply_forced_transition`)とレスポンス表示用の`checkpoint_time`算出([routine_service.md](./routine_service.md)の`_serialize_flow`)の両方でこの関数を経由するようになった(以前はどちらも`step['checkpoint_time']`を直接参照していた)。
-* 根拠: [関数定義] (行番号: 305-312 / 抜粋: "def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:\n    \"\"\"`now`の曜日に応じた、そのステップの実際のチェックポイント締切時刻を返す。\n\n    土日(weekend_checkpoint_time)の上書きが無ければ平日のcheckpoint_timeをそのまま使う。\n    \"\"\"\n    if now.weekday() in WEEKEND_DAYS and step['weekend_checkpoint_time']:\n        return step['weekend_checkpoint_time']\n    return step['checkpoint_time']")
+* **役割**: **（祝日対応で変更）** 渡された`step`について、`now`が休日(`core.jp_holidays.is_offday`が`True`。土日・国民の祝日・家の休み)かつ`step['weekend_checkpoint_time']`が真値であればその値を、そうでなければ`step['checkpoint_time']`をそのまま返す。以前の判定は`now.weekday() in WEEKEND_DAYS`で、祝日には休日用の締切(朝9:30)が適用されなかった。`services/routine_service.py`側は、チェックポイントの締切判定([routine_service.md](./routine_service.md)の`_apply_forced_transition`)とレスポンス表示用の`checkpoint_time`算出([routine_service.md](./routine_service.md)の`_serialize_flow`)の両方でこの関数を経由するようになった(以前はどちらも`step['checkpoint_time']`を直接参照していた)。
+* 根拠: [関数定義] (行番号: 317-325 / 抜粋: "def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:")、[判定] (行番号: 323-325 / 抜粋: "    if is_offday(now) and step['weekend_checkpoint_time']:\n        return step['weekend_checkpoint_time']\n    return step['checkpoint_time']")
 
 
 * **引数/リクエスト**: `step: RoutineStep`, `now: datetime.datetime`
-* 根拠: [関数定義] (行番号: 305 / 抜粋: "def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 317 / 抜粋: "def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:")
 
 
 * **戻り値/レスポンス**: `Optional[str]` — 実際に使うべき締切時刻('HH:MM'形式)、チェックポイントでないステップ(`checkpoint_time`も`weekend_checkpoint_time`も`None`)の場合は`None`
-* 根拠: [戻り値] (行番号: 310-312 / 抜粋: "if now.weekday() in WEEKEND_DAYS and step['weekend_checkpoint_time']:\n        return step['weekend_checkpoint_time']\n    return step['checkpoint_time']")
+* 根拠: [戻り値] (行番号: 323-325 / 抜粋: "    if is_offday(now) and step['weekend_checkpoint_time']:\n        return step['weekend_checkpoint_time']\n    return step['checkpoint_time']")
 
 
 * **副作用**: なし
@@ -398,7 +400,7 @@ flowchart TD
     IndicesEmpty -- Yes --> ReturnRangeNone(["return None"])
     IndicesEmpty -- No --> ReturnRange(["return (indices[0], indices[-1] + 1)"])
 
-    EffStart(["Start: get_effective_checkpoint_time(step, now)"]) --> WeekendCheck{"now.weekday() が\nWEEKEND_DAYS(土日)に含まれるか?"}
+    EffStart(["Start: get_effective_checkpoint_time(step, now)"]) --> WeekendCheck{"is_offday(now) か?\n(土日 / 祝日 / 家の休み)"}
     WeekendCheck -- No --> ReturnPlain(["return step['checkpoint_time']"])
     WeekendCheck -- Yes --> OverrideCheck{"step['weekend_checkpoint_time']は真値か?"}
     OverrideCheck -- Yes --> ReturnOverride(["return step['weekend_checkpoint_time']"])
@@ -435,6 +437,12 @@ graph TD
         get_checklist_range["get_checklist_range(夜の切り替え/寝る準備チェックリスト化で新規追加)"]
         get_effective_checkpoint_time["get_effective_checkpoint_time(土日対応で新規追加)"]
     end
+
+    subgraph "内部モジュール"
+        jp_holidays["core/jp_holidays.py(祝日対応で追加)\nis_offday"]
+    end
+
+    get_effective_checkpoint_time --> jp_holidays
 
     subgraph "標準ライブラリ"
         typing
@@ -493,13 +501,13 @@ graph TD
 * `ROUTINE_FLOWS`はDBテーブルではなくこのファイルの定数として持つことが、モジュールdocstringにより意図的な設計として明記されている(療育目的の固定生活動線であり、親が編集する対象ではないため)。将来的にステップ内容を可変にする(親が編集できるようにする)場合は、この設計方針自体の見直しが必要になる。
   根拠: [モジュールdocstring] (行番号: 1-8)
 * **（土日対応で新規追加）** `weekend_checkpoint_time`が設定されているのは現状`am`フローの`free`ステップ(`'09:30'`)のみであり、他の全ステップ(`am`の他ステップ、`pm`の全ステップ)は`None`である。これは「土日はチェックポイント時刻だけ変える」という要件を、フロー構成・ステップ自体は複製せず単一の`ROUTINE_FLOWS`のまま実現するための設計判断であり、`day_of_week`を`WEEKDAYS`から`ALL_DAYS`(月〜日)に拡張したことと対になっている。**（夜の切り替え/寝る準備チェックリスト化で確認済み）** `pm`フローのチェックポイント締切を18:00に変更した際も、`weekend_checkpoint_time`は設定せず「土日も平日と同じ18:00」という要件をそのまま体現している(`free`ステップの`weekend_checkpoint_time`は引き続き`None`)。将来、他のステップやフロー全体を土日だけ差し替えたい場合は、この「ステップ単位の上書きフィールド」方式では表現できず、フロー自体を`am_weekend`のような別キーに分ける等の再設計が必要になる。
-  根拠: [フィールド定義・上書き設定] (行番号: 18-20, 103 / 抜粋: "# 土日はチェックポイント時刻だけ変える(要件: フロー構成・ステップは平日と揃える)。\n    # Noneなら平日と同じcheckpoint_timeをそのまま使う。\n    weekend_checkpoint_time: Optional[str]", "{'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '07:50', 'weekend_checkpoint_time': '09:30', 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},")
+  根拠: [フィールド定義・上書き設定] (行番号: 18-20, 115 / 抜粋: "# 土日はチェックポイント時刻だけ変える(要件: フロー構成・ステップは平日と揃える)。\n    # Noneなら平日と同じcheckpoint_timeをそのまま使う。\n    weekend_checkpoint_time: Optional[str]", "{'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '07:50', 'weekend_checkpoint_time': '09:30', 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},")
 * **（休日PM微修正で新規追加、夜の切り替え/寝る準備チェックリスト化で対象追加）** `weekend_skip`/`weekend_carryover`が`True`に設定されているのは現状`pm`フローの`handwash`(`weekend_skip`)と`homework`・`tomorrow_prep`(`weekend_carryover`)のみであり、他の全ステップ(`am`の全ステップ、`pm`の残り7ステップ)は両方とも`False`である。**（明日の準備の移設で変更）** `tomorrow_prep`は`checklist=True`(寝る準備チェックリストの一員)になったが、`weekend_carryover=True`はそのまま維持されている。`weekend_checkpoint_time`と同様、フロー構成・ステップ自体は複製せず単一の`ROUTINE_FLOWS`のまま「休日だけステップ構成を変える」要件を実現する設計判断だが、`weekend_checkpoint_time`が値(締切時刻の上書き)を持つのに対し、この2つは真偽値のフラグでしかなく、実際の判定ロジック(曜日判定・日付を跨いだ完了状態の参照・引き継ぎ判定)は本ファイルには一切実装されていない点が異なる。この判定を担う`_resolve_skip_keys`/`_empty_statuses`/`_next_active_index`は`services/routine_service.py`側にある([routine_service.md](./routine_service.md)参照)ため、本ファイルの`RoutineStep`はあくまで「どのステップが対象か」という宣言のみを保持する。`tomorrow_prep`が`homework`と同じ`weekend_carryover=True`を持つ点は要件確認済みだが、「明日の準備」という性質上、日によって中身が異なりうる作業を機械的に「前日完了済みなら不要」と扱ってよいかは運用上の判断であり、本ファイル自体はその是非を検証しない。
-  根拠: [フィールド定義・フラグ設定] (行番号: 21-25, 115, 119, 90 / 抜粋: "# Trueなら土日はこのステップ自体をスキップする(要件: 休日PMはおやつ休憩から開始)。\n    weekend_skip: bool\n    # Trueならこのステップは日付をまたいで引き継ぐ(要件: 宿題は金曜終わっていれば\n    # 土日は不要、土曜終わっていれば日曜は不要)。判定はroutine_service側で行う。\n    weekend_carryover: bool", "{'key': 'handwash', 'label': '手洗い・うがい', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},", "{'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},", "{'key': 'tomorrow_prep', 'label': '明日の準備', 'icon_key': 'tomorrow_prep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},")
+  根拠: [フィールド定義・フラグ設定] (行番号: 21-25, 127, 131, 90 / 抜粋: "# Trueなら土日はこのステップ自体をスキップする(要件: 休日PMはおやつ休憩から開始)。\n    weekend_skip: bool\n    # Trueならこのステップは日付をまたいで引き継ぐ(要件: 宿題は金曜終わっていれば\n    # 土日は不要、土曜終わっていれば日曜は不要)。判定はroutine_service側で行う。\n    weekend_carryover: bool", "{'key': 'handwash', 'label': '手洗い・うがい', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},", "{'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},", "{'key': 'tomorrow_prep', 'label': '明日の準備', 'icon_key': 'tomorrow_prep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},")
 * **（朝の準備チェックリスト化で新規追加、夜の切り替え/寝る準備チェックリスト化で前提を一般化）** `checklist=True`が設定されているのは現状`am`フローの先頭5ステップ(`meal`・`clothes`・`wash`・`teeth`・`toilet`)と`pm`フローのチェックポイント通過後4ステップ(`dinner`・`bath`・`nightclothes`・`nightteeth`)であり、他の全ステップ(`am`の`free`、`pm`の残り6ステップ)は`False`である。`weekend_skip`/`weekend_carryover`と同じく真偽値フラグのみで実際の判定・トグル処理は本ファイルに実装されておらず、`services/routine_service.py`側(`_empty_statuses`/`_activate_block`/`_toggle_checklist_step`/`_next_active_index`)に委ねられている。このフィールドには「`checklist=True`のステップはフロー内で連続する一塊のみを想定する」という設計上の制約がコメントで明記されている点が`weekend_skip`/`weekend_carryover`との違いだが、以前はこの制約が「フロー先頭のみ」に限定されていた(`am`にしかチェックリストが無く、チェックポイント以前の一本道が存在しなかったため)。`pm`のチェックポイント通過後にもチェックリストを置く要件により、この前提は「フロー先頭・チェックポイント通過後のどちらにも置ける単一の連続ブロック」に一般化され、その範囲を取得する`get_checklist_range`ヘルパーが新設された。この一般化に伴い、`routine_service.py`側の実装も「チェックリストとチェックポイント以降の逐次ステップを単純に2分割する」という以前の前提から、`get_checklist_range`の返す範囲を軸にした汎用的な処理へと書き直されている。将来、チェックリストを1フロー中に複数グループ分けたい場合は、本ファイル側の「単一の連続ブロックのみ」という前提コメントと`get_checklist_range`・`routine_service.py`側の実装の全てを見直す必要がある。
-  根拠: [フィールド定義・前提コメント] (行番号: 26-33, 86-88, 123-124 / 抜粋: "# Trueならこのステップは同じフロー内の他のchecklist=Trueなステップと合わせて\n    # 順不同でチェックできる「チェックリスト」グループの一員になる(要件: 朝の準備・\n    # 寝る準備は順番を強制せず好きな順にチェックしたい)。フロー内でchecklist=Trueな\n    # ステップは連続する一塊のみを想定している(get_checklist_range参照)。この塊は\n    # フロー先頭(例: amの朝の準備5項目)・チェックポイント通過後(例: pmの寝る準備4項目)\n    # のどちらにも置けるが、routine_service側はシーケンシャルな進行が塊の先頭indexに\n    # 到達した時点で塊全体を一括'current'にする、という単一の仕組みで両対応している。\n    checklist: bool", "# 朝の準備5項目は順番を強制しないチェックリスト(要件確認済み: 表示順は\n            # 固定するが実施順は問わない)。5項目均等割りだと満額150Gold/30EXPを\n            # ぴったり割り切れる(1項目=30Gold/6EXP相当)。", "# 寝る準備4項目は朝の準備と同様、順番を強制しないチェックリスト\n            # (要件確認済み)。チェックポイント(free)通過後に一括で'current'になる。")
+  根拠: [フィールド定義・前提コメント] (行番号: 30-37, 98-100, 135-136 / 抜粋: "# Trueならこのステップは同じフロー内の他のchecklist=Trueなステップと合わせて\n    # 順不同でチェックできる「チェックリスト」グループの一員になる(要件: 朝の準備・\n    # 寝る準備は順番を強制せず好きな順にチェックしたい)。フロー内でchecklist=Trueな\n    # ステップは連続する一塊のみを想定している(get_checklist_range参照)。この塊は\n    # フロー先頭(例: amの朝の準備5項目)・チェックポイント通過後(例: pmの寝る準備4項目)\n    # のどちらにも置けるが、routine_service側はシーケンシャルな進行が塊の先頭indexに\n    # 到達した時点で塊全体を一括'current'にする、という単一の仕組みで両対応している。\n    checklist: bool", "# 朝の準備5項目は順番を強制しないチェックリスト(要件確認済み: 表示順は\n            # 固定するが実施順は問わない)。5項目均等割りだと満額150Gold/30EXPを\n            # ぴったり割り切れる(1項目=30Gold/6EXP相当)。", "# 寝る準備4項目は朝の準備と同様、順番を強制しないチェックリスト\n            # (要件確認済み)。チェックポイント(free)通過後に一括で'current'になる。")
 * **（大人用フロー分離で新規追加）** ユーザーごとのフロー振り分けは`get_flow_set`の3段フォールバック(user_id固有 → `role == 'role_adult'` → 子ども用`ROUTINE_FLOWS`)だけで決まっており、`quest_users.role`がそのままフローの出し分けに直結する。したがって、`dad`/`mom`以外の新しい保護者ユーザーを追加した場合は`ADULT_DEFAULT_ROUTINE_FLOWS`(固有タスクなし)になり、その人固有の家事を載せたい場合は`ROUTINE_FLOW_SETS`へ明示的にエントリを追加する必要がある。逆に`role`が`NULL`のままのユーザーは子ども用フロー(宿題・明日の準備を含む)に落ちるため、ユーザー追加時は`role`の設定漏れに注意が必要である。
-  根拠: [関数本体] (行番号: 267-271 / 抜粋: "    if user_id in ROUTINE_FLOW_SETS:\n        return ROUTINE_FLOW_SETS[user_id]\n    if role == ROLE_ADULT:\n        return ADULT_DEFAULT_ROUTINE_FLOWS\n    return ROUTINE_FLOWS")
+  根拠: [関数本体] (行番号: 279-283 / 抜粋: "    if user_id in ROUTINE_FLOW_SETS:\n        return ROUTINE_FLOW_SETS[user_id]\n    if role == ROLE_ADULT:\n        return ADULT_DEFAULT_ROUTINE_FLOWS\n    return ROUTINE_FLOWS")
 * **（大人用フロー分離で新規追加）** ステップが持つ`gold`/`exp`は、`quest_data.QUESTS`から退役させたデイリークエストの報酬額をコメント上の申し合わせとして引き継いでいるだけで、コード上の同期機構は無い。`quest_data.py`側で当該クエスト(現状は id=21「夕食を作る」)を復活させると同じ作業に対して二重に報酬が入るため、どちらか一方だけが存在する状態を保つ必要がある(この対応関係は`MOM_ROUTINE_FLOWS`のコメントと`quest_data.py`側の退役コメントの双方に記録されている)。**（お仕事ステップ追加で追記）** 逆に、パパの`work`「お仕事」ステップは`gold`/`exp`を持たないため、同じ作業を表すデイリークエスト id=10「会社勤務 (通常)」と併存していても二重計上にならない。すごろくに載せたいが報酬はクエスト側に残したい、というケースはこの「報酬を持たないステップ」で表現する。
   根拠: [コメント] (行番号: 208-232 / 抜粋: "# パパ: 平日の昼は「お仕事」だけ(要件確認済み)。pmフローは14:00開始で、その時刻は\n# まだ勤務中のため一本道の先頭に置く。報酬は既存デイリークエスト id=10「会社勤務\n# (通常)」がそのまま持ち続けるため、このステップ自体は gold/exp を持たない\n# (二重計上を避ける)。「帰宅・手洗い」「ひと休み」は置かない。", "# ママ: 旧デイリークエスト id=21「夕食を作る」(exp150/gold150)を quest_data.QUESTS\n# から退役させてここへ移設した(要件確認済み)。毎日行うため weekend_skip=False で、\n# 元クエストに 'days' 指定が無かったことに対応する。")
 * **（大人用フロー分離で新規追加、パパのpm再構成で更新）** 大人用`pm`フローの出発ボーナス按分対象(チェックポイントより前のステップ)は、パパが3項目(`work`/`kitchen_reset`/`living_reset`)、ママが3項目(`handwash`/`snack`/`cook_dinner`)、`ADULT_DEFAULT_ROUTINE_FLOWS`が2項目(`handwash`/`snack`)と人によって異なる(子どもは4項目)。一方で`FULL_BONUS_GOLD`/`FULL_BONUS_EXP`は全員共通の`150`/`30`のままであるため、1ステップあたりの実質的な価値は人によって変わる。この点は本ファイルのコメントでは明示的に検討されておらず、意図的な割り切りか見落としかは判断できない(9章参照)。
