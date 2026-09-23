@@ -257,30 +257,28 @@ REWARDS = [
 
     # --- Medium (体験型) ---
     {'id': 13, 'title': '湯の華廊 チケット', 'category': 'special', 'cost_gold': 1000, 'icon_key': '♨️', 'desc': '広いお風呂で心も体も癒やされる', 'target': 'children'},
-    {'id': 30, 'title': 'ローラースケート場チケット', 'category': 'special', 'cost_gold': 1000, 'icon_key': '🛼', 'desc': '風になろう', 'target': 'children'},
-    {'id': 31, 'title': 'キッズランドチケット', 'category': 'special', 'cost_gold': 1500, 'icon_key': '🏰', 'desc': 'ピュアキッズでもOK', 'target': 'children'},
+    # id=30「ローラースケート場チケット」・id=31「キッズランドチケット」は、
+    # 出品から半年以上(2026-02〜)購入実績が0件だったため2026-09-23に廃止(reward_historyで確認済み)。
     {'id': 23, 'title': '夕飯リクエスト権', 'category': 'service', 'cost_gold': 800, 'icon_key': '🍽️', 'desc': '今夜のメニューはあなたが決める', 'target': 'all'},
 
     # --- Large (目標型) ---
     {'id': 25, 'title': '回転寿司に行く権', 'category': 'special', 'cost_gold': 2000, 'icon_key': '🍣', 'desc': '回るけど美味しい！パパにお願いしよう', 'target': 'all'},
-    {'id': 24, 'title': '好きなおもちゃ', 'category': 'item', 'cost_gold': 5000, 'icon_key': '🤖', 'desc': 'ずっと欲しかったあのおもちゃ', 'target': 'children'},
-    {'id': 32, 'title': 'いちご狩り', 'category': 'special', 'cost_gold': 4000, 'icon_key': '🍓', 'desc': '甘くて美味しいいちごをたくさん食べよう！', 'target': 'children'},
-    {'id': 33, 'title': 'しいたけ狩り', 'category': 'special', 'cost_gold': 4000, 'icon_key': '🍄', 'desc': '自分で採ったしいたけは最高に美味しいぞ', 'target': 'children'},
+    # id=24「好きなおもちゃ」・id=32「いちご狩り」・id=33「しいたけ狩り」も、
+    # 同様に購入実績0件のため2026-09-23に廃止。
     # {'id': 15, 'title': 'スマートウォッチ', 'category': 'item', 'cost_gold': 30000, 'icon_key': '⌚', 'desc': '高性能なハイエンド装備', 'target': 'dad'},
 
     # --- Premium (夢の報酬) ---
     {'id': 99, 'title': 'ユニバのチケット (ペア)', 'category': 'special', 'cost_gold': 30000, 'icon_key': '🎢', 'desc': 'ハリポタで最高の一日を', 'target': 'mom'},
     {'id': 103, 'title': 'ディズニーのチケット (ペア)', 'category': 'special', 'cost_gold': 60000, 'icon_key': '🐭', 'desc': '夢の国で最高の一日を', 'target': 'mom'},
     # {'id': 101, 'title': '映画のチケット＆半日自由時間', 'category': 'special', 'cost_gold': 20000, 'icon_key': '🎥', 'desc': '好きな映画を見てリフレッシュ'},
-    {'id': 100, 'title': 'ホテルに宿泊 (家族旅行)', 'category': 'special', 'cost_gold': 50000, 'icon_key': '🏨', 'desc': '日常を忘れて優雅な滞在', 'target': 'children'},
-    {'id': 102, 'title': 'SHARP ヘルシオ ホットクック', 'category': 'item', 'cost_gold': 60000, 'icon_key': '🍲', 'desc': '家事の時間を減らして家族の時間を増やす魔法の鍋', 'target': 'mom'},
-    {'id': 104, 'title': '鈴鹿サーキットのチケット', 'category': 'special', 'cost_gold': 30000, 'icon_key': '🏎️', 'desc': '遊園地と車のアトラクションで遊び尽くす！', 'target': 'children'},
-    
+    # id=100「ホテルに宿泊(家族旅行)」・id=102「SHARP ヘルシオ ホットクック」・
+    # id=104「鈴鹿サーキットのチケット」も、同様に購入実績0件のため2026-09-23に廃止。
+
     # Legend Reward
     {'id': 999, 'title': 'アルハンブラ (Van Cleef & Arpels)', 'category': 'special', 'cost_gold': 1100000, 'icon_key': '🍀', 'desc': '四つ葉のクローバーが象徴する幸運。ママへの究極の感謝状', 'target': 'mom'},
 
-    # 変更: 映画のチケット単体に変更 (2000G)
-    {'id': 101, 'title': '映画のチケット', 'category': 'medium', 'cost_gold': 2000, 'icon_key': '🎥', 'desc': '好きな映画を見てリフレッシュ。ポップコーン代は別。', 'target': 'mom'},
+    # 変更: 映画のチケット単体に変更 (2000G)。2026-09-23: 子どもにも表示するため target を 'all' に変更。
+    {'id': 101, 'title': '映画のチケット', 'category': 'medium', 'cost_gold': 2000, 'icon_key': '🎥', 'desc': '好きな映画を見てリフレッシュ。ポップコーン代は別。', 'target': 'all'},
     
     # 追加: 半日自由時間 (10000G)
     {'id': 120, 'title': '半日自由時間', 'category': 'special', 'cost_gold': 10000, 'icon_key': '🕊️', 'desc': '4時間程度の完全な自由時間。育児・家事免除。', 'target': 'adults'},
