@@ -69,6 +69,8 @@ const questSchema = z.object({
     target_user: z.string().nullable().optional(),
     pre_requisite_quest_id: z.number().nullable().optional(),
     // #530: is_shared_* / shared_*_name はバックエンドが送出しないため削除
+    // 毎日の必須クエスト(常時表示)かボーナスクエスト(折りたたみ表示)かの区分。
+    required: z.boolean(),
 });
 
 const rewardSchema = z.object({
@@ -174,6 +176,8 @@ export const inventoryResponseSchema = z.object({
     youtube_daily_limit_announcement: youtubeCooldownAnnouncementSchema.nullable(),
     // 延長機能が無効のときはnull。
     youtube_extension: youtubeExtensionSchema.nullable(),
+    // YouTube等の時間消費型ごほうびは自由時間中のみ使える(要件確認済み、2026-09-23)。
+    is_in_free_time: z.boolean(),
 });
 
 // GET /api/cameras/settings のレスポンス(camera_router.py の CameraSettingsResponse)。

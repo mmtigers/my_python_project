@@ -50,12 +50,13 @@
 
 ### `QUEST_UPSERT_SQL`（モジュールレベル定数）
 
-* **役割**: `quest_master`への16列のUPSERT文。`ON CONFLICT(quest_id) DO UPDATE SET`で`quest_id`以外の15列をすべて`excluded.*`で上書きする。列を欠落させると再UPSERT時にその列がNULLへ上書きされる（#164 の事故）ため、同期対象の列は必ずここに並ぶ。
+* **役割**: `quest_master`への17列のUPSERT文（**2026-09-23 要件追加**: クエストを「毎日の必須クエスト」/「ボーナスクエスト」に分ける`required`列が16列目から追加され17列になった）。`ON CONFLICT(quest_id) DO UPDATE SET`で`quest_id`以外の16列をすべて`excluded.*`で上書きする。列を欠落させると再UPSERT時にその列がNULLへ上書きされる（#164 の事故）ため、同期対象の列は必ずここに並ぶ。
 * 根拠: `QUEST_UPSERT_SQL = """` (行番号: 37 / 抜粋: "INSERT INTO quest_master (")
+* 根拠: `required = excluded.required` (行番号: 60)
 
 
-* **引数/リクエスト**: 該当なし（定数）。プレースホルダ`?`は16個で、`quest_upsert_params()`が返すタプルと対応する。
-* 根拠: `VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` (行番号: 43 / 抜粋: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+* **引数/リクエスト**: 該当なし（定数）。プレースホルダ`?`は17個で、`quest_upsert_params()`が返すタプルと対応する。
+* 根拠: `VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` (行番号: 43 / 抜粋: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 
 * **戻り値/レスポンス**: 該当なし（`str`定数）
@@ -65,11 +66,11 @@
 ### `REWARD_UPSERT_SQL`（モジュールレベル定数）
 
 * **役割**: `reward_master`への8列のUPSERT文。`description`とレガシー列`desc`の両方を同期対象に含む（#165 の事故の再発防止）。`ON CONFLICT(reward_id) DO UPDATE SET`で`reward_id`以外の7列を上書きする。
-* 根拠: `REWARD_UPSERT_SQL = """` (行番号: 63 / 抜粋: "INSERT INTO reward_master (")
+* 根拠: `REWARD_UPSERT_SQL = """` (行番号: 64 / 抜粋: "INSERT INTO reward_master (")
 
 
 * **引数/リクエスト**: 該当なし（定数）。プレースホルダ`?`は8個。
-* 根拠: `VALUES (?, ?, ?, ?, ?, ?, ?, ?)` (行番号: 66 / 抜粋: "VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+* 根拠: `VALUES (?, ?, ?, ?, ?, ?, ?, ?)` (行番号: 67 / 抜粋: "VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
 
 
 * **戻り値/レスポンス**: 該当なし（`str`定数）
@@ -78,16 +79,17 @@
 
 ### `quest_upsert_params`
 
-* **役割**: `QUEST_UPSERT_SQL`に渡す値のタプルを、列の並びを間違えない形で組み立てる。呼び出し元はPydanticモデル（`GameSystem.sync_master_data`）と生のdict（`sync_strict.py`）で表現が違うため、すべてキーワード専用引数（`*`）で受けてここで並べ替える。
-* 根拠: `def quest_upsert_params(` (行番号: 78 / 抜粋: "def quest_upsert_params(")
+* **役割**: `QUEST_UPSERT_SQL`に渡す値のタプルを、列の並びを間違えない形で組み立てる。呼び出し元はPydanticモデル（`GameSystem.sync_master_data`）と生のdict（`sync_strict.py`）で表現が違うため、すべてキーワード専用引数（`*`）で受けてここで並べ替える。**（2026-09-23 要件追加）** 17番目のキーワード引数`required`が追加された。
+* 根拠: `def quest_upsert_params(` (行番号: 79 / 抜粋: "def quest_upsert_params(")
+* 根拠: `required: Any,` (行番号: 97)
 
 
-* **引数/リクエスト**: キーワード専用の16引数 — `quest_id`, `title`, `description`, `quest_type`, `target_user`, `exp_gain`, `gold_gain`, `icon_key`, `day_of_week`, `start_date`, `end_date`, `occurrence_chance`, `start_time`, `end_time`, `pre_requisite_quest_id`, `reset_period`（いずれも`Any`）
-* 根拠: `def quest_upsert_params(` (行番号: 78 / 抜粋: "def quest_upsert_params(")
+* **引数/リクエスト**: キーワード専用の17引数 — `quest_id`, `title`, `description`, `quest_type`, `target_user`, `exp_gain`, `gold_gain`, `icon_key`, `day_of_week`, `start_date`, `end_date`, `occurrence_chance`, `start_time`, `end_time`, `pre_requisite_quest_id`, `reset_period`, `required`（いずれも`Any`）
+* 根拠: `def quest_upsert_params(` (行番号: 79 / 抜粋: "def quest_upsert_params(")
 
 
-* **戻り値/レスポンス**: `Tuple[Any, ...]`（`QUEST_UPSERT_SQL`のプレースホルダ順に並んだ16要素）
-* 根拠: [戻り値のタプル] (行番号: 96〜100 / 抜粋: "return (\n        quest_id, title, description, quest_type, target_user,")
+* **戻り値/レスポンス**: `Tuple[Any, ...]`（`QUEST_UPSERT_SQL`のプレースホルダ順に並んだ17要素）
+* 根拠: [戻り値のタプル] (行番号: 104〜108 / 抜粋: "return (\n        quest_id, title, description, quest_type, target_user,")
 
 
 * **副作用**: なし（純粋関数）
@@ -96,15 +98,15 @@
 ### `reward_upsert_params`
 
 * **役割**: `REWARD_UPSERT_SQL`に渡す値のタプルを組み立てる。レガシー列`desc`には`description`と同じ値を入れる。
-* 根拠: `def reward_upsert_params(` (行番号: 110 / 抜粋: "def reward_upsert_params(")
+* 根拠: `def reward_upsert_params(` (行番号: 112 / 抜粋: "def reward_upsert_params(")
 
 
 * **引数/リクエスト**: キーワード専用の7引数 — `reward_id`, `title`, `category`, `cost_gold`, `icon_key`, `description`（`Optional[str]`）, `target`
-* 根拠: `def reward_upsert_params(` (行番号: 110 / 抜粋: "def reward_upsert_params(")
+* 根拠: `def reward_upsert_params(` (行番号: 112 / 抜粋: "def reward_upsert_params(")
 
 
 * **戻り値/レスポンス**: `Tuple[Any, ...]`（8要素。`description`が6番目と7番目の両方に入る）
-* 根拠: [戻り値のタプル] (行番号: 124 / 抜粋: "return (reward_id, title, category, cost_gold, icon_key, description, description, target)")
+* 根拠: [戻り値のタプル] (行番号: 126 / 抜粋: "return (reward_id, title, category, cost_gold, icon_key, description, description, target)")
 
 
 * **副作用**: なし（純粋関数）

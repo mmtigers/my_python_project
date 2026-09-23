@@ -38,9 +38,9 @@ QUEST_UPSERT_SQL = """
         quest_id, title, description, quest_type, target_user,
         exp_gain, gold_gain, icon_key, day_of_week,
         start_date, end_date, occurrence_chance,
-        start_time, end_time, pre_requisite_quest_id, reset_period
+        start_time, end_time, pre_requisite_quest_id, reset_period, required
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(quest_id) DO UPDATE SET
         title = excluded.title,
         description = excluded.description,
@@ -56,7 +56,8 @@ QUEST_UPSERT_SQL = """
         start_time = excluded.start_time,
         end_time = excluded.end_time,
         pre_requisite_quest_id = excluded.pre_requisite_quest_id,
-        reset_period = excluded.reset_period
+        reset_period = excluded.reset_period,
+        required = excluded.required
 """
 
 REWARD_UPSERT_SQL = """
@@ -93,6 +94,7 @@ def quest_upsert_params(
     end_time: Any,
     pre_requisite_quest_id: Any,
     reset_period: Any,
+    required: Any,
 ) -> Tuple[Any, ...]:
     """`QUEST_UPSERT_SQL` に渡す値のタプルを、列の並びを間違えない形で組み立てる。
 
@@ -103,7 +105,7 @@ def quest_upsert_params(
         quest_id, title, description, quest_type, target_user,
         exp_gain, gold_gain, icon_key, day_of_week,
         start_date, end_date, occurrence_chance,
-        start_time, end_time, pre_requisite_quest_id, reset_period,
+        start_time, end_time, pre_requisite_quest_id, reset_period, required,
     )
 
 

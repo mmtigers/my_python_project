@@ -25,7 +25,7 @@ const DAD: User = { user_id: 'dad', name: 'Dad', level: 3, exp: 10, gold: 100, j
 function makeGameData() {
     return {
         users: [DAD, { user_id: 'son', name: 'Son', level: 1, exp: 0, gold: 0 }],
-        quests: [{ quest_id: 1, title: 'おふろそうじ' }],
+        quests: [{ quest_id: 1, title: 'おふろそうじ', required: true }],
         rewards: [],
         completedQuests: [],
         pendingQuests: [],

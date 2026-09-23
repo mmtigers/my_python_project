@@ -77,6 +77,9 @@ if os.path.exists(_QUEST_USERS_LOCAL_PATH):
 # ==========================================
 # category: life(生活), study(学習), house(家事), work(仕事), health(健康), moral(徳育), sport(体育)
 # difficulty: E(簡単/5-10G), D(普通/10-30G), C(努力/30-80G), B(困難/100-300G), A(激務/300-800G), S(伝説/1000G~)
+# required: 毎日の必須クエスト(常時表示)は True、ボーナスクエスト(折りたたみ表示)は False。
+# type(出現頻度)とは独立の区分で、2026-09-23の要件確認時点ではtype='daily'のものをTrue、
+# type in ('special','infinite','limited','random')のものをFalseとして初期値を揃えている。
 
 QUESTS = [
     # ==========================================
@@ -99,7 +102,7 @@ QUESTS = [
     # ------------------------------------------
     # A-2. 通常：パパ (Dad)
     # ------------------------------------------
-    {'id': 10, 'title': '会社勤務 (通常)', 'type': 'daily', 'target': 'dad', 'category': 'work', 'difficulty': 'C', 'exp': 200, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '家族の生活基盤を守るための戦い'},
+    {'id': 10, 'title': '会社勤務 (通常)', 'type': 'daily', 'required': True, 'target': 'dad', 'category': 'work', 'difficulty': 'C', 'exp': 200, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '家族の生活基盤を守るための戦い'},
     # id=12「キッチンリセット」・id=13「リビングリセット」(どちらも土日のみ、
     # exp80/gold50)は、パパ用の「きょうのすごろく」(routine_data.py
     # DAD_ROUTINE_FLOWS の pm フロー、weekday_skip=True の2ステップ)へ移設した
@@ -110,7 +113,7 @@ QUESTS = [
     # ------------------------------------------
     # A-3. 通常：ママ (Mom)
     # ------------------------------------------
-    {'id': 20, 'title': '昼食を作る', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 100, 'icon': '🥪', 'start_time': '11:00', 'end_time': '14:00', 'desc': '休日のエネルギー補給'},
+    {'id': 20, 'title': '昼食を作る', 'type': 'daily', 'required': True, 'target': 'mom', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 100, 'icon': '🥪', 'start_time': '11:00', 'end_time': '14:00', 'desc': '休日のエネルギー補給'},
     # id=21「夕食を作る」は、ママ用の「きょうのすごろく」(routine_data.py
     # MOM_ROUTINE_FLOWS の pm フロー、'cook_dinner'ステップ)へ移設したため廃止。
     # クエストとすごろくの両方に出て二重に報酬を得られる状態を避けるための退役で、
@@ -118,17 +121,17 @@ QUESTS = [
     # 引き継いでいる(元の start_time/end_time による時間帯制限は、すごろく側に
     # 同等の仕組みが無いためチェックポイント17:30までという条件に置き換わる)。
     # パパ側の同名クエスト id=61(special)はそのまま残る。
-    {'id': 23, 'title': '日中の家庭運営・育児基本給', 'type': 'daily', 'target': 'mom', 'category': 'work', 'difficulty': 'S', 'exp': 250, 'gold': 50, 'icon': '🏠', 'desc': '見えない家事と育児への報酬'},
-    {'id': 1000, 'title': 'ゴミ捨て (燃えるゴミ)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔥', 'days': '0,3', 'desc': '月・木は必ず遂行せよ', 'start_time': '08:00', 'end_time': '12:00'},
-    {'id': 1001, 'title': 'ゴミ捨て (プラスチック)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '♻️', 'days': '2', 'desc': '水曜日のプラゴミ回収', 'start_time': '08:00', 'end_time': '12:00'},
-    {'id': 1002, 'title': 'ゴミ捨て (ペットボトル)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🧴', 'days': '4', 'desc': '金曜日の資源回収', 'start_time': '08:00', 'end_time': '12:00'},
+    {'id': 23, 'title': '日中の家庭運営・育児基本給', 'type': 'daily', 'required': True, 'target': 'mom', 'category': 'work', 'difficulty': 'S', 'exp': 250, 'gold': 50, 'icon': '🏠', 'desc': '見えない家事と育児への報酬'},
+    {'id': 1000, 'title': 'ゴミ捨て (燃えるゴミ)', 'type': 'daily', 'required': True, 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔥', 'days': '0,3', 'desc': '月・木は必ず遂行せよ', 'start_time': '08:00', 'end_time': '12:00'},
+    {'id': 1001, 'title': 'ゴミ捨て (プラスチック)', 'type': 'daily', 'required': True, 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '♻️', 'days': '2', 'desc': '水曜日のプラゴミ回収', 'start_time': '08:00', 'end_time': '12:00'},
+    {'id': 1002, 'title': 'ゴミ捨て (ペットボトル)', 'type': 'daily', 'required': True, 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🧴', 'days': '4', 'desc': '金曜日の資源回収', 'start_time': '08:00', 'end_time': '12:00'},
     # id=1006「幼稚園の連絡帳記入」は現在行っていないため廃止(要件確認済み)。
     # すごろく(routine_data.py MOM_ROUTINE_FLOWS)にも載せていない。
     # id=1007「習い事の連絡帳記入」は、id=1006「幼稚園の連絡帳記入」と同様に実態と合わなくなって
     # いるため大人クエストの整理(2026-09-23)で廃止する。実績データでは2026-03/04に2回完了した
     # のみで、以降(2026-04-26〜今日まで約5ヶ月)は日曜日(days: '6')の出現日を迎えても一度も
     # 完了報告が無い。
-    {'id': 1008, 'title': '朝の会 開催', 'type': 'daily', 'target': 'mom', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🌅', 'days': '5,6', 'desc': '休日のスケジュール確認と挨拶', 'start_time': '07:00', 'end_time': '10:00'},
+    {'id': 1008, 'title': '朝の会 開催', 'type': 'daily', 'required': True, 'target': 'mom', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🌅', 'days': '5,6', 'desc': '休日のスケジュール確認と挨拶', 'start_time': '07:00', 'end_time': '10:00'},
 
 
     # ------------------------------------------
@@ -138,14 +141,14 @@ QUESTS = [
     # {'id': 101, 'title': '幼稚園に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'A', 'exp': 100, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '今日も元気に登園しよう'},
     # {'id': 44, 'title': '靴を並べる', 'type': 'daily', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '👞', 'desc': '玄関をきれいに'},
     # {'id': 1020, 'title': '基地のセキュリティチェック', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔒', 'desc': '寝る前に戸締まりを確認して報告せよ', 'start_time': '19:00', 'end_time': '20:30'},
-    {'id': 1021, 'title': '宿題と明日の準備', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 120, 'gold': 170, 'icon': '🎒', 'days': '0,1,2,3,4','desc': '宿題をクリアして明日必要なものをランドセルに入れよう'},
+    {'id': 1021, 'title': '宿題と明日の準備', 'type': 'daily', 'required': True, 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 120, 'gold': 170, 'icon': '🎒', 'days': '0,1,2,3,4','desc': '宿題をクリアして明日必要なものをランドセルに入れよう'},
     # 土日の宿題（週末課題）: 金・土・日のいずれかで完了報告すればよく、reset_period='weekly'により
     # その週(月曜起点)の残りの表示対象日でも既に達成済みとして扱われ、カードは再度表示されない。
-    {'id': 1023, 'title': '土日の宿題', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 120, 'gold': 170, 'icon': '📚', 'days': '4,5,6', 'reset_period': 'weekly', 'desc': '金・土・日のうちに週末の宿題をクリアしよう'},
+    {'id': 1023, 'title': '土日の宿題', 'type': 'daily', 'required': True, 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 120, 'gold': 170, 'icon': '📚', 'days': '4,5,6', 'reset_period': 'weekly', 'desc': '金・土・日のうちに週末の宿題をクリアしよう'},
     # {'id': 30, 'title': '学校の宿題', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 120, 'icon': '📝', 'desc': '宿題をクリアだ！'},
     # {'id': 1025, 'title': '小学校に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 100, 'icon': '🏢','days': '0,1,2,3,4', 'desc': '小学校に歩いて行こう'},
-    {'id': 1026, 'title': '小学校に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 100, 'gold': 100, 'icon': '🏢','days': '0,1,2,3,4', 'desc': '小学校に歩いて行こう'},
-    {'id': 1009, 'title': '習い事： ピアノ / あこーでぃおん', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫', 'desc': '先生とのお勉強やレッスン'},
+    {'id': 1026, 'title': '小学校に行く', 'type': 'daily', 'required': True, 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 100, 'gold': 100, 'icon': '🏢','days': '0,1,2,3,4', 'desc': '小学校に歩いて行こう'},
+    {'id': 1009, 'title': '習い事： ピアノ / あこーでぃおん', 'type': 'daily', 'required': True, 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫', 'desc': '先生とのお勉強やレッスン'},
     # id=1030「今日の九九タイム」(daily)は、id=1031「九九チャレンジ」(infinite)に統合し廃止した
     # (要件確認済み)。「毎日1回の練習」クエストと「何度でも挑戦」クエストが並んでいると
     # 子どもから見て九九系が2枚並んで紛らわしいという指摘があり、実績もどちらも少なかった
@@ -156,9 +159,9 @@ QUESTS = [
     # ------------------------------------------
     # A-5. 通常：涼花 (Daughter)
     # ------------------------------------------
-    {'id': 301, 'title': '朝ごはんを食べる (完食)', 'type': 'daily', 'target': 'daughter', 'category': 'health', 'difficulty': 'D', 'exp': 20, 'gold': 10, 'icon': '🍳', 'start_time': '07:00', 'end_time': '08:30', 'desc': 'もぐもぐ食べて大きくなろう'},
-    {'id': 303, 'title': '野菜を食べる', 'type': 'daily', 'target': 'daughter', 'category': 'health', 'difficulty': 'A', 'exp': 50, 'gold': 50, 'icon': '🥦', 'desc': '嫌いなものでも一口！'},
-    {'id': 304, 'title': 'パジャマを自分で着る', 'type': 'daily', 'target': 'daughter', 'category': 'life', 'difficulty': 'C', 'exp': 30, 'gold': 20, 'icon': '👚', 'start_time': '19:00', 'end_time': '20:30', 'desc': 'ボタンも自分で留められるかな？'},
+    {'id': 301, 'title': '朝ごはんを食べる (完食)', 'type': 'daily', 'required': True, 'target': 'daughter', 'category': 'health', 'difficulty': 'D', 'exp': 20, 'gold': 10, 'icon': '🍳', 'start_time': '07:00', 'end_time': '08:30', 'desc': 'もぐもぐ食べて大きくなろう'},
+    {'id': 303, 'title': '野菜を食べる', 'type': 'daily', 'required': True, 'target': 'daughter', 'category': 'health', 'difficulty': 'A', 'exp': 50, 'gold': 50, 'icon': '🥦', 'desc': '嫌いなものでも一口！'},
+    {'id': 304, 'title': 'パジャマを自分で着る', 'type': 'daily', 'required': True, 'target': 'daughter', 'category': 'life', 'difficulty': 'C', 'exp': 30, 'gold': 20, 'icon': '👚', 'start_time': '19:00', 'end_time': '20:30', 'desc': 'ボタンも自分で留められるかな？'},
 
     # ------------------------------------------
     # A-6. 通常：兄妹連携 (Siblings) — どちらか一方が完了報告すると2人とも報酬を得る
@@ -182,8 +185,8 @@ QUESTS = [
     # ------------------------------------------
     # B-2. 特別：パパ (Dad)
     # ------------------------------------------
-    {'id': 11, 'title': '会社勤務 (高負荷・残業)', 'type': 'special', 'target': 'dad', 'category': 'work', 'difficulty': 'A', 'exp': 350, 'gold': 200, 'icon': '🔥', 'days': '0,1,2,3,4', 'desc': '激務を乗り越え、多額の報酬を得る'},
-    {'id': 18, 'title': 'トイレ掃除 (念入り)', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 100, 'icon': '✨', 'days': '6', 'desc': 'トイレの神様にご挨拶。金運UP?'},
+    {'id': 11, 'title': '会社勤務 (高負荷・残業)', 'type': 'special', 'required': False, 'target': 'dad', 'category': 'work', 'difficulty': 'A', 'exp': 350, 'gold': 200, 'icon': '🔥', 'days': '0,1,2,3,4', 'desc': '激務を乗り越え、多額の報酬を得る'},
+    {'id': 18, 'title': 'トイレ掃除 (念入り)', 'type': 'special', 'required': False, 'target': 'dad', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 100, 'icon': '✨', 'days': '6', 'desc': 'トイレの神様にご挨拶。金運UP?'},
     # id=61「夕食を作る」は、大人クエストの整理(2026-09-23、要件確認済み)で廃止する。
     # id=65「洗車」・id=502「寝室の布団上げ＆掃除」は、大人クエストの整理(2026-09-23)で廃止する
     # (要件確認済み)。実績データではそれぞれ導入以降の完了回数が3回・4回にとどまっていた。
@@ -191,21 +194,21 @@ QUESTS = [
     # id=14「体重計測 (健康管理)」は、大人クエストの整理(2026-09-23)で廃止する(要件確認済み)。
     # id=15/16/17「洗濯物を干す/畳む/しまう」は、大人クエストの整理(2026-09-23、要件確認済み)で
     # id=15へ1件に統合した。報酬は3件合計(exp120/gold80)を引き継ぎ、id=16/17は廃止した。
-    {'id': 15, 'title': '洗濯物ミッション (干す/畳む/しまう)', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 120, 'gold': 80, 'icon': '🧺', 'desc': '干して、畳んで、しまうところまで。装備一式のメンテナンス'},
+    {'id': 15, 'title': '洗濯物ミッション (干す/畳む/しまう)', 'type': 'special', 'required': False, 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 120, 'gold': 80, 'icon': '🧺', 'desc': '干して、畳んで、しまうところまで。装備一式のメンテナンス'},
     # id=60「お風呂掃除」は、大人クエストの整理(2026-09-23、要件確認済み)で target を 'dad' から
     # 'son' へ変更し、智矢(ともや)専用クエストとして下記B-4セクションへ移設した。
 
     # ------------------------------------------
     # B-3. 特別：ママ (Mom)
     # ------------------------------------------
-    {'id': 503, 'title': '寝室の布団上げ＆掃除', 'type': 'special', 'target': 'mom', 'days': '5,6', 'exp': 40, 'gold': 100, 'icon': '🛏️', 'desc': '布団をあげて掃除機をかける'},
-    {'id': 504, 'title': 'アクセ装着と片付け', 'type': 'special', 'target': 'mom', 'days': '5,6', 'exp': 15, 'gold': 20, 'icon': '💍', 'desc': '週末のおしゃれを楽しみ、定位置に戻す'},
+    {'id': 503, 'title': '寝室の布団上げ＆掃除', 'type': 'special', 'required': False, 'target': 'mom', 'days': '5,6', 'exp': 40, 'gold': 100, 'icon': '🛏️', 'desc': '布団をあげて掃除機をかける'},
+    {'id': 504, 'title': 'アクセ装着と片付け', 'type': 'special', 'required': False, 'target': 'mom', 'days': '5,6', 'exp': 15, 'gold': 20, 'icon': '💍', 'desc': '週末のおしゃれを楽しみ、定位置に戻す'},
     # id=1011「女神のメンテナンス」は、大人クエストの整理(2026-09-23)で廃止する。実績データでは
     # 2026-02-13に1回完了して以降、7ヶ月以上(今日まで)一度も完了報告が無い。
     # id=500「昨夜の寝かしつけ」は、大人クエストの整理(2026-09-23、要件確認済み)で廃止する。
-    {'id': 505, 'title': '洗濯物を干す', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '☀️', 'desc': '日光の力で装備を浄化する'},
-    {'id': 506, 'title': '洗濯物を畳む', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 40, 'gold': 30, 'icon': '👕', 'desc': '装備品を整理整頓する'},
-    {'id': 507, 'title': '洗濯物をしまう', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
+    {'id': 505, 'title': '洗濯物を干す', 'type': 'special', 'required': False, 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '☀️', 'desc': '日光の力で装備を浄化する'},
+    {'id': 506, 'title': '洗濯物を畳む', 'type': 'special', 'required': False, 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 40, 'gold': 30, 'icon': '👕', 'desc': '装備品を整理整頓する'},
+    {'id': 507, 'title': '洗濯物をしまう', 'type': 'special', 'required': False, 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
 
 
     # ------------------------------------------
@@ -215,36 +218,37 @@ QUESTS = [
     # id=7「ルンバの水交換」・id=901「食器の片付け」・id=60「お風呂掃除」は、大人クエストの整理
     # (2026-09-23、要件確認済み)でtargetを智矢(ともや)専用へ変更し、それぞれB-1・B-2セクションから
     # ここへ移設した。定義内容(exp/gold/type等)は変更していない。
-    {'id': 7, 'title': 'ルンバの水交換', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🤖', 'desc': '掃除ロボットのメンテナンス任務'},
-    {'id': 901, 'title': '食器の片付け', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 15, 'gold': 50, 'icon': '🍽️', 'desc': 'ご飯のあとのお皿をきれいに洗おう', 'chance': 1.0},
-    {'id': 60, 'title': 'お風呂掃除', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 40, 'icon': '🧽', 'desc': '浴槽を磨いて湯船を準備する'},
+    {'id': 7, 'title': 'ルンバの水交換', 'type': 'special', 'required': False, 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🤖', 'desc': '掃除ロボットのメンテナンス任務'},
+    {'id': 901, 'title': '食器の片付け', 'type': 'infinite', 'required': False, 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 15, 'gold': 50, 'icon': '🍽️', 'desc': 'ご飯のあとのお皿をきれいに洗おう', 'chance': 1.0},
+    {'id': 60, 'title': 'お風呂掃除', 'type': 'special', 'required': False, 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 40, 'icon': '🧽', 'desc': '浴槽を磨いて湯船を準備する'},
 
     # 選択肢過多で「結局どれもやらない」を避けるための整理(2026-09-23)。
     # id=1031「九九チャレンジ」は、どちらも「学習系のプリント学習」で内容が重なり、
     # 導入(2026-09)から1回しか完了されていなかったため、このid=31へ統合し廃止した。
     # 九九の練習もここでカバーする想定で説明文に追記している。
-    {'id': 31, 'title': 'プリント', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 80, 'icon': '🧮', 'desc': '計算マスター。九九の練習もOK。1枚でもいいぞ'},
-    {'id': 45, 'title': 'ピアノの練習(10分)', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🎹', 'desc': '毎日少しずつ上手になろう'},
+    {'id': 31, 'title': 'プリント', 'type': 'infinite', 'required': False, 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 80, 'icon': '🧮', 'desc': '計算マスター。九九の練習もOK。1枚でもいいぞ'},
+    {'id': 45, 'title': 'ピアノの練習(10分)', 'type': 'special', 'required': False, 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🎹', 'desc': '毎日少しずつ上手になろう'},
     # {'id': 58, 'title': 'ピアノの練習(30分)', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 100, 'gold': 500, 'icon': '🎹', 'desc': '30分1人で練習しよう'},
     # id=43「一人で30分間 本を読む」は、同じ「一人読書」で時間だけ違うid=44と選択肢が
     # 重複するため2026-09-23に廃止し、完了実績で優勢だったid=44(45分)に一本化した。
-    {'id': 44, 'title': '一人で45分間 本を読む', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 45, 'gold': 90, 'icon': '📖', 'desc': '本の世界をもっと冒険しよう'},
+    {'id': 44, 'title': '一人で45分間 本を読む', 'type': 'special', 'required': False, 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 45, 'gold': 90, 'icon': '📖', 'desc': '本の世界をもっと冒険しよう'},
     # id=48「ママのお手伝い」・id=49「パパのお手伝い」は、頼む親で分かれていただけで
     # 内容は同じ「お手伝い」だったため2026-09-23に統合。曜日制限(id=49は土日のみ)は外し、
     # 毎日おこなえる任務にしたうえで報酬は高い方(exp50/gold50、id=49相当)を採用した。
-    {'id': 48, 'title': 'おうちのおてつだい', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🛠️', 'desc': 'ママでもパパでも、頼まれたことをやろう'},
-    {'id': 46, 'title': '休みの日は買い物についてくる', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '🛒', 'days': '5,6', 'desc': '荷物持ちのサポート任務'},
-    {'id': 56, 'title': '自分の部屋の掃除・片付け', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 70, 'icon': '🧹', 'days': '5,6', 'desc': '週末は自分の城をきれいにしよう'},
+    {'id': 48, 'title': 'おうちのおてつだい', 'type': 'infinite', 'required': False, 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🛠️', 'desc': 'ママでもパパでも、頼まれたことをやろう'},
+    {'id': 46, 'title': '休みの日は買い物についてくる', 'type': 'special', 'required': False, 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '🛒', 'days': '5,6', 'desc': '荷物持ちのサポート任務'},
+    {'id': 56, 'title': '自分の部屋の掃除・片付け', 'type': 'special', 'required': False, 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 70, 'icon': '🧹', 'days': '5,6', 'desc': '週末は自分の城をきれいにしよう'},
     # {'id': 57, 'title': 'チャリティーコンサートで演奏', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 2000, 'icon': '🧹', 'days': '5,6', 'desc': 'ふざけずに頑張ろう'},
     # {'id': 1022, 'title': '騎士のエスコート', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'C', 'exp': 50, 'gold': 20, 'icon': '🛡️', 'desc': '泣いている妹を慰める、守る'},
 
     # ------------------------------------------
     # B-5. 特別：涼花 (Daughter)
     # ------------------------------------------
-    {'id': 302, 'title': 'トイレでおしっこ成功', 'type': 'infinite', 'target': 'daughter', 'category': 'life', 'difficulty': 'B', 'exp': 50, 'gold': 30, 'icon': '🚽', 'desc': 'トイトレ頑張ろう！'},
-    {'id': 305, 'title': 'ママ・パパのおてつだい', 'type': 'infinite', 'target': 'daughter', 'category': 'house', 'difficulty': 'D', 'exp': 20, 'gold': 20, 'icon': '🌸', 'desc': 'ママやパパに頼まれたことをおてつだいしよう'},
-    {'id': 306, 'title': 'じぶんのおもちゃをおかたづけ', 'type': 'infinite', 'target': 'daughter', 'category': 'house', 'difficulty': 'D', 'exp': 20, 'gold': 15, 'icon': '🧸', 'desc': '遊んだあとはおもちゃをもとの場所にもどそう'},
-    {'id': 307, 'title': 'なぞり書きプリント', 'type': 'infinite', 'target': 'daughter', 'category': 'study', 'difficulty': 'D', 'exp': 30, 'gold': 30, 'icon': '✏️', 'desc': '線や数字をなぞって鉛筆のれんしゅうをしよう'},
+    {'id': 302, 'title': 'トイレでおしっこ成功', 'type': 'infinite', 'required': False, 'target': 'daughter', 'category': 'life', 'difficulty': 'B', 'exp': 50, 'gold': 30, 'icon': '🚽', 'desc': 'トイトレ頑張ろう！'},
+    # id=305「ママ・パパのおてつだい」は、すずかにはまだお手伝いは難しいため2026-09-23に
+    # 廃止した(要件確認済み)。
+    {'id': 306, 'title': 'じぶんのおもちゃをおかたづけ', 'type': 'infinite', 'required': False, 'target': 'daughter', 'category': 'house', 'difficulty': 'D', 'exp': 20, 'gold': 15, 'icon': '🧸', 'desc': '遊んだあとはおもちゃをもとの場所にもどそう'},
+    {'id': 307, 'title': 'なぞり書きプリント', 'type': 'infinite', 'required': False, 'target': 'daughter', 'category': 'study', 'difficulty': 'D', 'exp': 30, 'gold': 30, 'icon': '✏️', 'desc': '線や数字をなぞって鉛筆のれんしゅうをしよう'},
 
     # ------------------------------------------
     # B-6. 特別：兄妹連携 (Siblings) — どちらか一方が完了報告すると2人とも報酬を得る

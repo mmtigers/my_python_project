@@ -76,6 +76,9 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     const extension = data?.youtube_extension ?? null;
     const canExtendNow = extension?.can_extend_now ?? false;
 
+    // YouTube等の時間消費型ごほうびは自由時間中のみ使える(要件確認済み、2026-09-23)。
+    const isInFreeTime = data?.is_in_free_time ?? true;
+
     // YouTube系ごほうび券の連続使用防止クールダウン(15分)の残り秒数。
     // サーバー値(5秒間隔のポーリングで再同期)を起点に、表示だけ1秒間隔でローカルに
     // カウントダウンする(QuestList.tsxのCooldownRingと同様の考え方)。
@@ -237,25 +240,30 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
                 <div className="col-span-full">{dailyBudgetBanner}</div>
             )}
             {items.map((item: InventoryItem) => {
-                // 目の負担を防ぐための2つの制限。バックエンド(InventoryService._use_item_locked)と
-                // 同じ優先順位で、まず「今日の残り分数に収まるか」、次にクールダウンを見る。
+                // 目の負担・自由時間限定を防ぐための3つの制限。バックエンド
+                // (InventoryService._use_item_locked)と同じ優先順位で、まず自由時間中か、
+                // 次に「今日の残り分数に収まるか」、最後にクールダウンを見る。
                 // タップしてから429で断られるより、最初から使えないと分かるほうが子どもには親切。
+                const isOutsideFreeTime = item.is_youtube_reward && !isInFreeTime;
                 const durationMinutes = item.youtube_duration_minutes ?? 0;
                 const exceedsDailyLimit =
+                    !isOutsideFreeTime &&
                     item.is_youtube_reward &&
                     isDailyLimitEnforced &&
                     dailyRemainingMinutes !== null &&
                     durationMinutes > dailyRemainingMinutes;
                 const isCoolingDown =
-                    !exceedsDailyLimit && item.is_youtube_reward && youtubeCooldownSeconds > 0;
-                const isLocked = exceedsDailyLimit || isCoolingDown;
+                    !isOutsideFreeTime && !exceedsDailyLimit && item.is_youtube_reward && youtubeCooldownSeconds > 0;
+                const isLocked = isOutsideFreeTime || exceedsDailyLimit || isCoolingDown;
 
                 // 文言の優先順位はバックエンド(_use_item_locked)の判定順と揃える。
                 // 使い切っていても延長が残っているときは、諦めさせるのではなく次の行動を示す。
                 const outOfMinutesReason = canExtendNow && extension
                     ? `きょうのぶんはおしまい。プリントを1枚やると${extension.minutes_per_quest}分ふえるよ`
                     : 'きょうのYouTubeはおしまい。また明日つかおうね';
-                const lockedReason = exceedsDailyLimit
+                const lockedReason = isOutsideFreeTime
+                    ? '自由時間になったら見られるよ'
+                    : exceedsDailyLimit
                     ? (dailyRemainingMinutes === 0
                         ? outOfMinutesReason
                         : `きょうはあと${dailyRemainingMinutes}分。この券は使えません`)

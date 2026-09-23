@@ -59,6 +59,7 @@ function inventoryResponse(overrides: Partial<InventoryResponse> = {}): Inventor
             max_per_day: 2,
             can_extend_now: false,
         },
+        is_in_free_time: true,
         ...overrides,
     };
 }

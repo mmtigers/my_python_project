@@ -49,6 +49,9 @@ class MasterQuest(BaseModel):
     end_time: Optional[str] = None
     pre_requisite_quest_id: Optional[int] = None
     reset_period: Optional[Literal['daily', 'weekly', 'monthly']] = 'daily'
+    # 「毎日の必須クエスト」(常時表示)か「ボーナスクエスト」(折りたたみ表示)かの区分。
+    # type(出現頻度)とは独立に管理する(要件確認済み、2026-09-23)。
+    required: bool = True
 
     @field_validator("days")
     @classmethod
@@ -244,6 +247,8 @@ class ViewQuest(BaseModel):
     days: list[int] | None = None
     pre_requisite_quest_id: int | None = None
     reset_period: str | None = None
+    # 「毎日の必須クエスト」(常時表示)か「ボーナスクエスト」(折りたたみ表示)か。
+    required: bool = True
     # get_all_view_data が閲覧ユーザーの履歴から算出する連続達成ボーナス。
     bonus_gold: int = 0
     bonus_exp: int = 0

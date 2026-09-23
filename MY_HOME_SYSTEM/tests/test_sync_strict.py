@@ -445,12 +445,13 @@ class TestMasterSyncSqlIsSharedWithGameSystem:
             exp_gain=10, gold_gain=5, icon_key="📝", day_of_week="1",
             start_date="2026-01-01", end_date="2026-12-31", occurrence_chance=0.5,
             start_time="07:00", end_time="09:00", pre_requisite_quest_id=2, reset_period="daily",
+            required=True,
         )
         assert params == (
             1, "t", "d", "daily", "all",
             10, 5, "📝", "1",
             "2026-01-01", "2026-12-31", 0.5,
-            "07:00", "09:00", 2, "daily",
+            "07:00", "09:00", 2, "daily", True,
         )
         assert msql.QUEST_UPSERT_SQL.count("?") == len(params)
 

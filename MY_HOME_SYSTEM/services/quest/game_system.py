@@ -230,6 +230,7 @@ class GameSystem:
                     end_time=q.end_time,
                     pre_requisite_quest_id=q.pre_requisite_quest_id,
                     reset_period=q.reset_period,
+                    required=q.required,
                 ))
 
             active_r_ids = [r.id for r in valid_rewards]

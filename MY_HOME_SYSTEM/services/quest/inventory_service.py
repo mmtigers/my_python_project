@@ -10,6 +10,7 @@ from core.database import get_db_cursor
 import config
 from core import sound_manager
 from services import notification_service
+from services.routine_service import routine_service
 from services.quest.locks import (
     JST,
     _get_item_use_lock,
@@ -38,6 +39,11 @@ def _build_announcement(starts_on) -> dict[str, Any]:
 
 class InventoryService:
     def get_user_inventory(self, user_id: str) -> Dict[str, Any]:
+        # YouTube等の時間消費型ごほうびは自由時間中しか使えない(要件確認済み、2026-09-23)。
+        # フロントエンド(InventoryList.tsx)がタップ前にロック表示できるよう、実際の
+        # 使用可否判定(_use_item_locked)と同じ情報源(routine_service)から渡す。
+        is_in_free_time = routine_service.is_user_currently_in_free_time(user_id)
+
         with get_db_cursor() as cur:
             sql = """
                 SELECT ui.id, ui.reward_id, ui.status, ui.purchased_at, ui.used_at,
@@ -121,6 +127,7 @@ class InventoryService:
             "youtube_daily_used_minutes": youtube_daily_used_minutes,
             "youtube_daily_limit_announcement": youtube_daily_limit_announcement,
             "youtube_extension": youtube_extension,
+            "is_in_free_time": is_in_free_time,
         }
 
     def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:
@@ -169,6 +176,12 @@ class InventoryService:
             # ENFORCE_FROM(施行日)を迎えるまでは実際には拒否しない(いきなり制限が
             # かかると子どもが困惑するため、事前に予告バナーのみ表示する)。
             if item['reward_id'] in config.YOUTUBE_REWARD_IDS:
+                # 0. 自由時間中でなければ使用不可(要件確認済み、2026-09-23: YouTube等の
+                #    時間消費型ごほうびは自由時間中のみ使える)。他の2つの制限と異なり
+                #    施行日による猶予期間は設けない(新規要件のため最初から有効)。
+                if not routine_service.is_user_currently_in_free_time(user_id):
+                    raise HTTPException(429, "YouTubeは自由時間になってから見てね")
+
                 # 1. 1日の合計視聴分数の上限。クールダウンより先に判定するのは、
                 #    「もう少し待てば使える」より「今日はここまで」のほうが
                 #    子どもにとって行動が決まるメッセージになるため。

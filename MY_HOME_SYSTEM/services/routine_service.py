@@ -752,6 +752,19 @@ class RoutineService:
 
         return {"date": date_str, "flows": flows_out}
 
+    def is_user_currently_in_free_time(self, user_id: str, now: Optional[datetime.datetime] = None) -> bool:
+        """指定ユーザーが今まさに自由時間中かどうかを返す(要件確認済み、2026-09-23:
+
+        YouTube視聴は自由時間中のみ許可する)。当日開始済みのフロー(am/pm)のうち、
+        いずれかが自由時間(in_free_time)であれば True。朝も夕もまだ自由時間に
+        入っていなければ False。
+        """
+        state = self.get_today_state(user_id, now)
+        return any(
+            flow.get('started') and flow.get('in_free_time')
+            for flow in state['flows'].values()
+        )
+
     def _has_pending_deadline_work(
         self, cur, user_id: str, flows: dict[str, RoutineFlow], date_str: str, now: datetime.datetime
     ) -> bool:
