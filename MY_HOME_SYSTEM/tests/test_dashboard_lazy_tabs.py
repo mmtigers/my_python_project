@@ -6,13 +6,11 @@
     たたまれた expander の中身もすべて実行**する(描画結果をクライアント側で
     隠しているだけ)。そのため「🏠 ホーム」を開いただけの1回の描画で
 
-      - JR運行情報のスクレイピング(HTTP, timeout 5秒)
-      - Yahoo!路線情報のスクレイピング(HTTP, timeout 5秒)
       - `journalctl` のサブプロセス起動
       - 年間気温の集計SQL
       - plotly のグラフ6枚ぶんの生成とWebSocket転送
 
-    まで毎回走っていた。タブを10個から5個に束ね直した再設計は「探しやすさ」を
+    まで毎回走っていた。タブを10個から束ね直した再設計は「探しやすさ」を
     直したが、実行される処理量は1つも減っていなかった。
 
     `st.segmented_control`(選択状態がPython側から読める)と
@@ -64,8 +62,6 @@ def _patch_all_renderers(stack):
 
     return {
         "summary": stack.enter_context(patch.object(dashboard.summary, "render_summary")),
-        "traffic": stack.enter_context(patch.object(dashboard.misc_tab, "render_traffic")),
-        "bicycle": stack.enter_context(patch.object(dashboard.misc_tab, "render_bicycle")),
         "photos": stack.enter_context(patch.object(dashboard.misc_tab, "render_photos")),
         "takasago": stack.enter_context(patch.object(dashboard.sensor_tab, "render_takasago")),
         "health": stack.enter_context(patch.object(dashboard.health_tab, "render")),
@@ -89,7 +85,6 @@ def _run_main(active_tab="home", toggles_open=False):
         stack.enter_context(patch.object(view_common, "st", mock_st))
         stack.enter_context(patch.object(view_common, "load_sensor_data_cached", return_value=pd.DataFrame()))
         stack.enter_context(patch.object(view_common, "load_generic_data_cached", return_value=pd.DataFrame()))
-        stack.enter_context(patch.object(view_common, "load_bicycle_data_cached", return_value=pd.DataFrame()))
         stack.enter_context(patch.object(view_common, "load_nas_status_cached", return_value=None))
         stack.enter_context(patch.object(dashboard.analysis_service, "apply_friendly_names", return_value=pd.DataFrame()))
         stack.enter_context(patch.object(dashboard, "logger"))
@@ -105,8 +100,8 @@ class TestOnlyTheActiveTabRenders:
         _, renderers = _run_main(active_tab="home")
 
         renderers["summary"].assert_called_once()
-        # HTTPスクレイピング・サブプロセス・年間集計SQLを伴うタブは走らない
-        for name in ("traffic", "photos", "electricity", "resources", "nas"):
+        # サブプロセス・年間集計SQLを伴うタブは走らない
+        for name in ("photos", "electricity", "resources", "nas"):
             assert not renderers[name].called, f"{name} がホームタブで実行されている"
 
     def test_system_tab_does_not_run_the_summary(self):
@@ -115,7 +110,7 @@ class TestOnlyTheActiveTabRenders:
         renderers["resources"].assert_called_once()
         renderers["nas"].assert_called_once()
         assert not renderers["summary"].called
-        assert not renderers["traffic"].called
+        assert not renderers["photos"].called
 
     @pytest.mark.parametrize("tab_key", list(dashboard.TAB_KEYS))
     def test_every_tab_key_has_a_renderer_and_runs(self, tab_key):

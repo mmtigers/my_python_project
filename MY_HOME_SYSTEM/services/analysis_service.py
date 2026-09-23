@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from datetime import datetime, timedelta, date
 import pytz
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import pandas as pd
 
@@ -186,6 +186,58 @@ def load_nas_status() -> Optional[pd.Series]:
     except Exception as e:
         logger.error(f"NAS Data Load Error: {e}")
         return None
+
+def load_pending_quest_approvals() -> dict[str, Any] | None:
+    """承認待ちのクエスト申請の件数と、いちばん古い1件を返す。
+
+    ダッシュボードのトップに出す「⚔️ ファミクエ」カード用。クエストの残数や
+    ランキングではなく**承認待ち**を出すのは、これだけが「見た人が今すぐ
+    動く必要がある」情報だからで、ほかは family-quest(PWA)側で見る。
+
+    集計は `quest_history` の `status` インデックス
+    (`idx_quest_history_status_completed`)に乗る軽いクエリ2本だけで、
+    読み取り専用接続を使う(残高には触れない。CLAUDE.md「単一プロセス前提」)。
+
+    Returns:
+        {"count": int, "oldest_at": str | None, "oldest_name": str | None}。
+        **取得できなかったときは `None`** を返す(テーブルが無い・読み取りに失敗)。
+        ここで `count=0` を返すと、カードが「✅ なし」と緑で出てしまい、実際には
+        承認待ちが溜まっているのに気づけない(JR運行情報のカードが「取得不可を
+        平常運転と偽らない」ために分けていたのと同じ失敗モード)。
+        呼び出し側(`get_quest_status`)は `None` を「⚪ 取得失敗」として出す。
+    """
+    empty: dict[str, Any] = {"count": 0, "oldest_at": None, "oldest_name": None}
+    try:
+        with contextlib.closing(get_ro_db_connection()) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='quest_history'")
+            if not cur.fetchone():
+                return None
+
+            cur.execute("SELECT COUNT(*) FROM quest_history WHERE status = 'pending'")
+            count = int(cur.fetchone()[0])
+            if count == 0:
+                return empty
+
+            # いちばん古い1件(誰の・いつの申請が待たされているか)。
+            cur.execute(
+                """
+                SELECT h.completed_at, u.name
+                FROM quest_history h
+                LEFT JOIN quest_users u ON u.user_id = h.user_id
+                WHERE h.status = 'pending'
+                ORDER BY h.completed_at ASC
+                LIMIT 1
+                """
+            )
+            row = cur.fetchone()
+        oldest_at = row[0] if row else None
+        oldest_name = row[1] if row else None
+        return {"count": count, "oldest_at": oldest_at, "oldest_name": oldest_name}
+    except Exception as e:
+        logger.error(f"Pending Quest Approvals Load Error: {e}")
+        return None
+
 
 def load_generic_data(table_name: str, limit: int = 500) -> pd.DataFrame:
     """指定テーブルからデータを取得（汎用）"""
@@ -434,21 +486,6 @@ def load_yearly_temperature_stats(year: int, location: str = "伊丹") -> pd.Dat
         return pd.DataFrame()
     finally:
         conn.close()
-
-def load_bicycle_data(limit: int = 2000) -> pd.DataFrame:
-    """駐輪場データを取得"""
-    table_name = getattr(config, "SQLITE_TABLE_BICYCLE", "bicycle_parking_records")
-    try:
-        with contextlib.closing(get_ro_db_connection()) as conn:
-            cur = conn.cursor()
-            cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
-            if not cur.fetchone():
-                return pd.DataFrame()
-        query = f"SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT {limit}"
-        return load_data_from_db(query)
-    except Exception as e:
-        logger.error(f"Bicycle Data Load Error: {e}")
-        return pd.DataFrame()
 
 # ==========================================
 # System Stats & Utils

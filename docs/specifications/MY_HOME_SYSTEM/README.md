@@ -41,7 +41,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [line.md](./line.md) | LINE連携のイベント・Postbackデータ構造を定義するPydanticモデル群。 |
 | [line_service.md](./line_service.md) | LINEメッセージからの情報記録・取得、クエストステータス照会、承認・却下処理を担う。 |
 | [notification_service.md](./notification_service.md) | DiscordおよびLINEへのメッセージ（テキスト・画像）通知を行い、LINE送信失敗時にDiscordへフォールバックする。 |
-| [train_service.md](./train_service.md) | JR西日本の運行情報API、およびYahoo!路線情報から運行状況・最短経路を取得する（フェイルソフト設計）。 |
+| [train_service.md](./train_service.md) | **廃止**: JR西日本の運行情報API、およびYahoo!路線情報から運行状況・最短経路を取得していたモジュール。利用元（ダッシュボードの「🚃 JR運行情報」カードと「🚃 おでかけ」タブ）が使われなくなり、オーナー判断で機能ごと撤去されたためソースごと削除した。仕様書は廃止noticeつきで履歴として残している。 |
 
 ## D. AI・分析エンジン
 
@@ -51,7 +51,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [log_analyzer.md](./log_analyzer.md) | 蓄積された各種ログ（センサー、タスク消化、システムログ）のパターンを分析する。 |
 | [weekly_analyze_report.md](./weekly_analyze_report.md) | 週次で家庭内の状況（健全性、タスク消化率など）をAIで要約し、レポートとして出力（LINE等へ送信）する。 |
 | [analysis_service.md](./analysis_service.md) | DB・OS情報・外部APIからデータを取得し、Pandas等で加工・集計するデータ分析用サービス層。 |
-| [home_status_service.md](./home_status_service.md) | 「家のいまの状況」9枚のステータスカードの判定・HTML組み立て・CSS。Streamlitに依存せず、ダッシュボード本体と軽量ページ`/dashboard/m`の両方が使う。 |
+| [home_status_service.md](./home_status_service.md) | 「家のいまの状況」を表すステータスカードの判定・HTML組み立て・CSS。Streamlitに依存せず、ダッシュボード本体と軽量ページ`/dashboard/m`の両方が使う。 |
 
 ## E. クエストバックエンド (Family Quest用API)
 
@@ -102,7 +102,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [config.md](./config.md) | システム全体の環境変数、定数、ディレクトリパスの定義と初期化を行う。 |
 | [daily_timelapse_job.md](./daily_timelapse_job.md) | カメラ録画から特定日時の動画チャンクを検索し、動き検知に基づくタイムラプス動画を生成してDiscordへ通知・アップロードする日次バッチ。 |
 | [discord.md](./discord.md) | Discord Webhook への POST を集約する低レベルユーティリティ。2000字上限の分割・429/5xx のリトライ・Webhook URL のマスクを担う(Issue #661)。 |
-| [dashboard.md](./dashboard.md) | Streamlit製ダッシュボードアプリケーションのエントリーポイント。センサー等の各種データを5つのタブ（ホーム/おでかけ/見守り/くらし/システム）で表示する。 |
+| [dashboard.md](./dashboard.md) | Streamlit製ダッシュボードアプリケーションのエントリーポイント。センサー等の各種データを4つのタブ（ホーム/見守り/くらし/システム）で表示する。 |
 | [database.md](./database.md) | SQLiteデータベースへの接続、クエリ実行、データの書き込みを管理するユーティリティ機能を提供する。 |
 | [init_unified_db.md](./init_unified_db.md) | SQLiteデータベースの初期化とスキーマ整合性検証を行うスクリプト。テーブル・インデックス作成、マイグレーション適用を行う。 |
 | [jp_holidays.md](./jp_holidays.md) | 日本の国民の祝日(振替休日・国民の休日を含む)をローカル計算で判定し、ファミクエ上の「休日」(土日 + 祝日 + `config.EXTRA_HOLIDAY_DATES`)を返す共通モジュール。すごろく・クエストの曜日判定・YouTubeの日次上限が共有する。 |
@@ -121,10 +121,10 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [dashboard_common.md](./dashboard_common.md) | `views/dashboard`配下の各モジュールから共通利用されるCSS（スマホ幅のメディアクエリを含む）、キャッシュ付きローダ、グラフ・表・折りたたみの描画ヘルパー、`safe_section`を提供するモジュール（同名の`common.py`Facadeとはファイル名衝突のため別名で管理）。 |
 | [quest_tab.md](./quest_tab.md) | **廃止**: Streamlitダッシュボードの「Family Quest」タブ。同じ内容をスマホ最適化済みのPWA `family-quest`(`/quest`)が持つ二重管理だったため、スマホ対応の再設計でソースごと撤去された。仕様書は廃止noticeつきで履歴として残している。 |
 | [log_tab.md](./log_tab.md) | Streamlitダッシュボードのセンサーログ分析と、「🔧 システム」タブ配下（リソース状況・NAS状態・サーバーログ・メンテナンス操作）を描画するモジュール。 |
-| [misc_tab.md](./misc_tab.md) | Streamlitダッシュボードの「電車遅延」「防犯カメラ」「駐輪場」タブを描画するモジュール。 |
+| [misc_tab.md](./misc_tab.md) | Streamlitダッシュボードの「👀 見守り」タブのカメラ関連（ギャラリー・防犯ログ）を描画するモジュール。電車遅延・駐輪場の描画も持っていたが、機能ごと退役した。 |
 | [health_tab.md](./health_tab.md) | Streamlitダッシュボードの「健康管理」タブ。子供の体調・排便・食事のデータフレームを表形式で表示する。 |
 | [sensor_tab.md](./sensor_tab.md) | Streamlitダッシュボードの「電力・環境」「気温詳細」「高砂実家」タブを描画するモジュール。 |
-| [summary.md](./summary.md) | Streamlitダッシュボード「🏠 ホーム」タブのステータスカード9枚を描画するモジュール（判定そのものは`home_status_service.md`へ移動し、材料を集めて描くだけになった）。 |
+| [summary.md](./summary.md) | Streamlitダッシュボード「🏠 ホーム」タブのステータスカードを描画するモジュール（判定そのものは`home_status_service.md`へ移動し、材料を集めて描くだけになった）。 |
 
 ## 廃止済み仕様書一覧
 

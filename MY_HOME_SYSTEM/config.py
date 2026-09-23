@@ -328,7 +328,8 @@ SQLITE_TABLE_DEFECATION: str = "defecation_records"
 # ダッシュボードのAIレポート(セバスチャン)機能ごと退役した。テーブルは履歴として残す。
 SQLITE_TABLE_SHOPPING: str = "shopping_records"
 SQLITE_TABLE_NAS: str = "nas_records"
-SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"
+# 旧 SQLITE_TABLE_BICYCLE ("bicycle_parking_records") は、ダッシュボードの
+# 駐輪場待機数の表示ごと退役した(オーナー判断)。テーブルは履歴として残す。
 
 # Issue #649: 以前は ".env" も含めていたが、全シークレット(SwitchBot/LINE/Discord/Gemini)を
 # NAS の db_backups/ へ平文でコピーすることになり、NAS 共有の閲覧権限がそのままシークレットの

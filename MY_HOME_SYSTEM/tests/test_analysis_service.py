@@ -123,6 +123,85 @@ class TestLoadNasStatus:
         assert "2026-01-02" in str(row["timestamp"])
 
 
+class TestLoadPendingQuestApprovals:
+    """組み立てたSQL(テーブル存在チェック・COUNT・LEFT JOIN・ORDER BY)を実DBで通す。
+
+    呼び出し側(`get_quest_status` / `describe_quest`)のテストは戻り値の辞書を
+    直接渡しているため、SQLそのものの正しさはここでしか検証されない。
+    """
+
+    def _add_user(self, cur, user_id, name):
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, level, exp, gold) "
+            f"VALUES ('{user_id}', '{name}', 1, 0, 0)"
+        )
+
+    def _add_pending(self, cur, user_id, completed_at, status="pending"):
+        cur.execute(
+            "INSERT INTO quest_history (user_id, quest_id, quest_title, status, completed_at, "
+            "exp_earned, gold_earned, medals_earned) "
+            f"VALUES ('{user_id}', 1, 'おてつだい', '{status}', '{completed_at}', 0, 0, 0)"
+        )
+
+    def test_returns_none_without_the_table(self, isolated_db):
+        """テーブルが無いのを「0件」と返すと、カードが緑の「なし」になってしまう。"""
+        with get_db_cursor(commit=True) as cur:
+            cur.execute("DROP TABLE IF EXISTS quest_history")
+
+        assert analysis_service.load_pending_quest_approvals() is None
+
+    def test_no_pending_rows_is_zero(self, isolated_db):
+        result = analysis_service.load_pending_quest_approvals()
+        assert result == {"count": 0, "oldest_at": None, "oldest_name": None}
+
+    def test_only_pending_rows_are_counted(self, isolated_db):
+        """承認済み・却下済みまで数えると、待っていない申請まで表示されてしまう。"""
+        with get_db_cursor(commit=True) as cur:
+            self._add_user(cur, "u1", "たろう")
+            self._add_pending(cur, "u1", "2026-09-22T07:00:00")
+            self._add_pending(cur, "u1", "2026-09-22T08:00:00", status="approved")
+            self._add_pending(cur, "u1", "2026-09-22T09:00:00", status="rejected")
+
+        result = analysis_service.load_pending_quest_approvals()
+        assert result is not None
+        assert result["count"] == 1
+
+    def test_the_oldest_request_is_joined_with_the_user_name(self, isolated_db):
+        """いちばん長く待たせている申請(ORDER BY completed_at ASC)と、その申請者名。"""
+        with get_db_cursor(commit=True) as cur:
+            self._add_user(cur, "u1", "たろう")
+            self._add_user(cur, "u2", "はなこ")
+            # 挿入順と時刻順をわざとずらす(ORDER BY が効いていないと 'はなこ' が返る)。
+            self._add_pending(cur, "u2", "2026-09-22T10:00:00")
+            self._add_pending(cur, "u1", "2026-09-22T07:10:00")
+            self._add_pending(cur, "u2", "2026-09-22T09:00:00")
+
+        result = analysis_service.load_pending_quest_approvals()
+        assert result is not None
+        assert result["count"] == 3
+        assert result["oldest_at"] == "2026-09-22T07:10:00"
+        assert result["oldest_name"] == "たろう"
+
+    def test_a_row_whose_user_is_gone_still_counts(self, isolated_db):
+        """`quest_users` に相手が居ない行でも件数から落ちないこと(LEFT JOIN)。
+
+        通常は `quest_history.user_id` の外部キー(migrations/0018)がこの状態を
+        防ぐが、その制約より前に書かれた行が残っている環境はありうる。INNER JOIN
+        だとそういう行だけ静かに数から消え、承認待ちがあるのに「なし」と出る。
+        ここでは外部キーを一時的に外して、その古い行を再現する。
+        """
+        with get_db_cursor(commit=True) as cur:
+            cur.execute("PRAGMA foreign_keys = OFF")
+            self._add_pending(cur, "gone_user", "2026-09-22T07:00:00")
+            cur.execute("PRAGMA foreign_keys = ON")
+
+        result = analysis_service.load_pending_quest_approvals()
+        assert result is not None
+        assert result["count"] == 1
+        assert result["oldest_at"] == "2026-09-22T07:00:00"
+        assert result["oldest_name"] is None
+
+
 class TestLoadSensorData:
     def test_merges_legacy_meter_and_power_sources(self, isolated_db):
         with get_db_cursor(commit=True) as cur:
@@ -255,20 +334,6 @@ class TestCalculateMonthlyCostCumulative:
         # (device_idでグループ化せず時系列のまま混在diff()を取ると、10分/50分単位の
         # 誤った時間幅が使われ、異なる(98)結果になっていた)
         assert result == int(3.0 * 31)
-
-
-class TestLoadBicycleData:
-    def test_returns_empty_when_no_data(self, isolated_db):
-        assert analysis_service.load_bicycle_data().empty
-
-    def test_returns_rows_when_seeded(self, isolated_db):
-        with get_db_cursor(commit=True) as cur:
-            cur.execute(
-                f"INSERT INTO {config.SQLITE_TABLE_BICYCLE} (area_name, status_text, waiting_count, timestamp) "
-                "VALUES ('駐輪場A', '空きあり', 0, '2026-01-01T00:00:00')"
-            )
-        result = analysis_service.load_bicycle_data()
-        assert len(result) == 1
 
 
 class TestWeatherFunctionsFailSoftOnSchemaMismatch:

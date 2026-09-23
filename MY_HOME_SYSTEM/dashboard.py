@@ -38,7 +38,9 @@ st.set_page_config(
 )
 
 # family-quest(PWA)への導線。`unified_server.py` が `/quest` にSPAをマウントしている。
-QUEST_APP_PATH = "/quest"
+# 定義の実体は `services/home_status_service.py` にある(ヘッダーのボタンと、
+# サマリーの「⚔️ ファミクエ」カードのリンク先を1箇所に保つため)。
+QUEST_APP_PATH = home_status_service.QUEST_APP_PATH
 
 # 軽量ページ(Streamlitを介さない読み取り専用のサマリー)への導線。
 # `routers/dashboard_router.py` が 8000番側で直接返すため、8501番を直接見ている
@@ -54,6 +56,11 @@ MOBILE_PAGE_PATH = f"{config.DASHBOARD_BASE_PATH}/m"
 # クエストタブ(EXPランキング等)は、同じ内容をスマホ最適化済みのPWA
 # (family-quest, /quest)が持っており二重管理だったため、ダッシュボードからは
 # 撤去して導線(ヘッダーのリンクボタン)だけ残した。
+#
+# 「🚃 おでかけ」タブ(JR運行情報・Yahoo!路線情報のルート検索・駐輪場の待機数)は、
+# いずれも使わなくなったためオーナー判断で機能ごと削除した。サマリーの
+# 「🚲 駐輪場待機」「🚃 JR運行情報」カードも同時に撤去している
+# (駐輪場の bicycle_parking_records テーブルは履歴として残す)。
 #
 # Issue #507: 「📊 トレンド」タブ(app_rankingsテーブル参照)は、書き込み側の
 # 収集コードが存在せず(収集用のgoogle-play-scraperもIssue #496で未使用
@@ -78,7 +85,6 @@ TAB_QUERY_PARAM = "tab"
 # 「今の状態を見る」用途に必要な直近ぶんだけを読む。ここを増やすとスマホでの
 # 初回表示時間とWebSocketの転送量に直結する。
 SENSOR_ROW_LIMIT = 10000
-BICYCLE_ROW_LIMIT = 3000
 SECURITY_LOG_ROW_LIMIT = 100
 
 
@@ -152,10 +158,10 @@ def _render_tab_selector() -> str:
     `st.tabs` を使わない理由(スマホでの体感速度):
         Streamlit の `st.tabs` は**選択されていないタブの中身もすべて実行**する
         (描画結果をクライアント側で隠しているだけ)。そのため「🏠 ホーム」を
-        開いただけの1回の描画で、JR運行情報のスクレイピング(HTTP)・
-        Yahoo!路線情報のスクレイピング(HTTP)・`journalctl` のサブプロセス起動・
-        年間気温の集計SQL・plotlyのグラフ6枚ぶんの生成まで毎回走っていた。
-        タブを10個から5個に束ね直した再設計(上記「タブ定義」)は「探しやすさ」を
+        開いただけの1回の描画で、`journalctl` のサブプロセス起動・
+        年間気温の集計SQL・plotlyのグラフ6枚ぶんの生成まで毎回走っていた
+        (当時はここに外部サイトのスクレイピングも2本入っていた)。
+        タブを10個から束ね直した再設計(上記「タブ定義」)は「探しやすさ」を
         直したが、実行される処理量は減っていなかった。
         選択状態をPython側で持てる `st.segmented_control` に置き換え、
         選択中のタブの中身だけを描画する。
@@ -191,7 +197,6 @@ def _render_home_tab(now: datetime) -> None:
             now,
             view_common.load_sensor_data_cached(limit=SENSOR_ROW_LIMIT),
             view_common.load_generic_data_cached(config.SQLITE_TABLE_CAR),
-            view_common.load_bicycle_data_cached(limit=BICYCLE_ROW_LIMIT),
             view_common.load_nas_status_cached(),
         )
 
@@ -211,16 +216,6 @@ def _render_home_tab(now: datetime) -> None:
                     args=(tab_key,),
                     width="stretch",
                 )
-
-
-def _render_out_tab(now: datetime) -> None:
-    """🚃 おでかけ: 電車の運行状況・ルート、駐輪場。"""
-    with view_common.safe_section("電車遅延"):
-        misc_tab.render_traffic()
-
-    if view_common.lazy_section("🚲 駐輪場の待機数", key="bicycle"):
-        with view_common.safe_section("駐輪場"):
-            misc_tab.render_bicycle(view_common.load_bicycle_data_cached(limit=BICYCLE_ROW_LIMIT))
 
 
 def _render_watch_tab(now: datetime) -> None:
@@ -280,7 +275,6 @@ def _render_sys_tab(now: datetime) -> None:
 # タブキー -> 描画関数。`_render_tab_selector` が返したキーのものだけを呼ぶ。
 TAB_RENDERERS: dict[str, Callable[[datetime], None]] = {
     "home": _render_home_tab,
-    "out": _render_out_tab,
     "watch": _render_watch_tab,
     "life": _render_life_tab,
     "sys": _render_sys_tab,

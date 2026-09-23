@@ -295,8 +295,8 @@ class TestGetMealTimeCategoryFromNow:
 class TestGetNowJst:
     """Issue #592の追加調査の回帰テスト。
 
-    monitors/tv_lock_monitor.py・monitors/nas_monitor.py・services/camera_service.py・
-    services/train_service.pyが、ホストOSのタイムゾーン設定に依存するnaiveな
+    monitors/tv_lock_monitor.py・monitors/nas_monitor.py・services/camera_service.pyが、
+    ホストOSのタイムゾーン設定に依存するnaiveな
     datetime.now()の代わりに使うようになったget_now_jst()自体の単体テスト。
     freezegunでUTCの特定時刻に固定し、JSTへの変換が常に+9時間になることを検証する。
     """

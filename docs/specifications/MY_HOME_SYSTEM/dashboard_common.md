@@ -22,8 +22,8 @@
 
 * `views/dashboard`パッケージ内の各タブ・サマリー描画モジュールから共通利用される、CSSスタイル定義・キャッシュ付きローダ・描画ヘルパーを提供するモジュール。
 * 根拠: `CUSTOM_CSS = f"""` (行番号: 23 / 抜粋: "CUSTOM_CSS = f\"\"\"")
-* `CUSTOM_CSS`は、フォント指定、ステータスカードのグリッド（`.status-grid`）とカード（`.status-card`）、5種類のテーマ配色クラス（`.theme-green`, `.theme-yellow`, `.theme-red`, `.theme-blue`, `.theme-gray`）、経路検索カード（`.route-card`, `.route-path`等）、Streamlit標準要素のスタイル上書き（`.streamlit-expanderHeader`）、タップターゲットの最小高さ、およびスマートフォン幅（`max-width: 640px`）のメディアクエリを含む、f-string の文字列定数として定義されたCSSブロックである。
-* 根拠: `.status-grid {` (行番号: 27 / 抜粋: "    .status-grid {"), `.status-card {` (行番号: 33 / 抜粋: "    .status-card {"), `@media (max-width: {MOBILE_BREAKPOINT_PX}px) {` (行番号: 56 / 抜粋: "    @media (max-width: {MOBILE_BREAKPOINT_PX}px) {{")
+* `CUSTOM_CSS`は、フォント指定、ステータスカードのグリッド（`.status-grid`）とカード（`.status-card`）、5種類のテーマ配色クラス（`.theme-green`, `.theme-yellow`, `.theme-red`, `.theme-blue`, `.theme-gray`）、Streamlit標準要素のスタイル上書き（`.streamlit-expanderHeader`）、タップターゲットの最小高さ、およびスマートフォン幅（`max-width: 640px`）のメディアクエリを含む、f-string の文字列定数として定義されたCSSブロックである。
+* 根拠: `.status-grid {` (行番号: 27 / 抜粋: "    .status-grid {"), `.status-card {` (行番号: 33 / 抜粋: "    .status-card {"), `@media (max-width: {MOBILE_BREAKPOINT_PX}px) {` (行番号: 44 / 抜粋: "    @media (max-width: {MOBILE_BREAKPOINT_PX}px) {{")
 * **（スマホ対応で追加）** メディアクエリは、(1) `.block-container` の左右パディング縮小（**（#822 で変更）** 上パディングは 1.2rem から 4.5rem に戻した。Streamlit 既定のヘッダーは `position: fixed` で約 3.75rem あり本文がその下に潜り込むため、1.2rem ではページを開いた時点で先頭の行（更新/ファミクエのボタン）の上半分が隠れていた。`tests/test_dashboard_mobile_header.py` が「上パディング ≥ 3.75rem」を検査する）、(2) `st.columns`（`[data-testid="stHorizontalBlock"]` / `[data-testid="stColumn"]`）を `flex: 1 1 100%` で縦積みにする、(3) タブ列（`[data-baseweb="tab-list"]`）の横スクロール許可とスクロールバー非表示、(4) 見出し（`h1`〜`h3`）の縮小、(5) `section[data-testid="stMain"]` の横方向はみ出し抑止、**（スマホのヘッダー改善で追加）** (6) Streamlit 既定ヘッダー（`[data-testid="stHeader"]`）の不透明化、(7) ヘッダー操作列（`.st-key-header_actions`）だけ (2) の縦積みを打ち消して横並びを維持、**（タブの遅延評価で追加）** (8) タブ選択（`[data-testid="stButtonGroup"]` / `[data-testid="stSegmentedControl"]`）の幅を100%にし、高さ44px以上・ラベルの絵文字を非表示にして5つとも画面内に収める、(9) サマリー直下の「詳しく見る」導線（`.st-key-summary_jump`）と防犯カメラのギャラリー（`.st-key-camera_gallery` / `.st-key-camera_gallery_past`）を2列で折り返す、(10) 押す機会の無い Streamlit の「Deploy」ボタン（`[data-testid="stAppDeployButton"]`）を隠す、を行う。
 
   (8) の絵文字非表示は実測に基づく。絵文字ありだと5つのタブで約377px必要になり、390px幅（さらに狭い360px端末では確実に）では右端の「システム」がはみ出して横スクロールしないと押せない。目的のタブを探せないのは10タブ構成で一番困っていた点なので、絵文字を落として5つとも読めることを優先している（絵文字はPC幅では残る）。`tests/test_dashboard_mobile_e2e.py` が実ブラウザでタブが画面内に収まることとラベルが切れていないことを検査する。
@@ -32,17 +32,17 @@
 
   (7) は、`dashboard.py` の `_render_header_actions` が `st.container(key="header_actions")` で付ける `.st-key-header_actions` クラスを目印にする。**この対応は key の文字列と CSS セレクタの一致に依存しており、片方だけリネームすると無言で効かなくなる**（`tests/test_dashboard_mobile_header.py` が一致を検査する）。CSS冒頭のコメントに、これらはStreamlitが出力するDOMの属性セレクタに依存しており、Streamlitのバージョンが上がって`data-testid`が変わった場合は単に効かなくなるだけで画面は壊れない（レイアウトがStreamlit既定に戻る）旨が記されている。
 * 根拠: メディアクエリ本体 (行番号: 84〜124 / 抜粋: "        [data-testid=\"stHorizontalBlock\"] > [data-testid=\"stColumn\"],")、DOM依存についてのコメント (行番号: 15〜17 / 抜粋: "# Streamlitが出力するDOMの属性セレクタに依存するCSS。")
-* **（Issue #741で追加）** `analysis_service` のデータ読み込み関数を `@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC)` で包んだラッパー4本（`load_sensor_data_cached` / `load_generic_data_cached` / `load_bicycle_data_cached` / `load_nas_status_cached`）を提供する。`analysis_service` は `unified_server.py` からもインポートされるため、Streamlit 依存をそちらへ持ち込まずキャッシュを View 層に閉じ込める配置になっている。
-* 根拠: `def load_sensor_data_cached(limit: int) -> pd.DataFrame:` (行番号: 255)
+* **（Issue #741で追加）** `analysis_service` のデータ読み込み関数を `@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC)` で包んだラッパー4本（`load_sensor_data_cached` / `load_generic_data_cached` / `load_nas_status_cached` / `load_pending_quest_approvals_cached`）を提供する（**2026-09-21**: 駐輪場の退役で `load_bicycle_data_cached` を削除し、トップ画面の刷新で `load_pending_quest_approvals_cached` を足した）。`analysis_service` は `unified_server.py` からもインポートされるため、Streamlit 依存をそちらへ持ち込まずキャッシュを View 層に閉じ込める配置になっている。
+* 根拠: `def load_sensor_data_cached(limit: int) -> pd.DataFrame:` (行番号: 243)
 
 * **（スマホ対応で追加・後にサービス層へ移動）** `StatusCard` と `render_status_card_html` は `services/home_status_service.py` の定義を**再エクスポート**しているだけになった。カードのCSSも同モジュールの `STATUS_CARD_CSS` を `CUSTOM_CSS` に埋め込む形に変わっている（Streamlitを介さない軽量ページ `/dashboard/m` と同じ見た目・同じエスケープ規則にするため）。本ファイルが持つのは `render_status_grid`（`st.markdown` への描画）だけである。
-* 根拠: `StatusCard = home_status_service.StatusCard` (行番号: 538 / 抜粋: "StatusCard = home_status_service.StatusCard"), `render_status_card_html = home_status_service.render_status_card_html` (行番号: 539 / 抜粋: "render_status_card_html = home_status_service.render_status_card_html")
-* **（スマホ対応で追加）** DB以外の重い読み取りにも同じTTL(60秒)のキャッシュ付きラッパーを用意した: `load_jr_traffic_status_cached`（JR運行情報のスクレイピング。サマリーと「おでかけ」タブの2箇所から呼ばれ、以前は1回の描画で2回取りに行っていた）、`load_route_info_cached`（Yahoo!路線情報のスクレイピング）、`load_yearly_temperature_stats_cached`（年間気温の集計SQL）、`get_disk_usage_cached` / `get_memory_usage_cached`、`get_monthly_cost_cached`（今月の電気代の集計SQL）、**（補足表示の追加）** `get_last_month_cost_cached`（先月の同じ時点までの電気代。今月ぶんと同じ形のSQLをもう1本走らせるため、素で呼ぶとホームタブを開くたびに集計が2回になる）、`get_system_logs_cached`（`journalctl` のサブプロセス起動）。
-* 根拠: `def load_jr_traffic_status_cached() -> dict:` (行番号: 293 / 抜粋: "def load_jr_traffic_status_cached() -> dict:"), `def get_system_logs_cached(lines: int = 50, priority=None, target_date=None) -> str:` (行番号: 350 / 抜粋: "def get_system_logs_cached(lines: int = 50, priority=None, target_date=None) -> str:")
+* 根拠: `StatusCard = home_status_service.StatusCard` (行番号: 510 / 抜粋: "StatusCard = home_status_service.StatusCard"), `render_status_card_html = home_status_service.render_status_card_html` (行番号: 511 / 抜粋: "render_status_card_html = home_status_service.render_status_card_html")
+* **（スマホ対応で追加）** DB以外の重い読み取りにも同じTTL(60秒)のキャッシュ付きラッパーを用意した: `load_yearly_temperature_stats_cached`（年間気温の集計SQL）、`get_disk_usage_cached` / `get_memory_usage_cached`、`get_monthly_cost_cached`（今月の電気代の集計SQL）、**（補足表示の追加）** `get_last_month_cost_cached`（先月の同じ時点までの電気代。今月ぶんと同じ形のSQLをもう1本走らせるため、素で呼ぶとホームタブを開くたびに集計が2回になる）、`get_system_logs_cached`（`journalctl` のサブプロセス起動）。
+* 根拠: `def load_yearly_temperature_stats_cached(year: int) -> pd.DataFrame:` (行番号: 281 / 抜粋: "def load_yearly_temperature_stats_cached(year: int) -> pd.DataFrame:"), `def get_system_logs_cached(lines: int = 50, priority=None, target_date=None) -> str:` (行番号: 322 / 抜粋: "def get_system_logs_cached(lines: int = 50, priority=None, target_date=None) -> str:")
 * **（スマホ対応で追加）** スマートフォンでの操作性のためのヘルパーを持つ: `lazy_section`（`st.expander` の代替。`st.expander` は折りたたまれていても中身のPythonを実行するため、開いているときだけ中身を実行できるよう `st.toggle` ベースにしたもの）、`render_chart`（plotlyのモードバー非表示・ドラッグ無効・高さ280px）、`render_table`（列を表示名付きで絞る・時刻を短縮する・行番号を隠す）、`downsample_for_chart`（グラフに渡す点を系列あたり500点までに間引く）、`format_short_timestamp` / `format_relative_time`（「09/21 03:04」「3分前」）、`cache_generation_started_at`（いま表示しているキャッシュ世代の取得時刻）。
-* 根拠: `def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:` (行番号: 553 / 抜粋: "def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:"), `def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:` (行番号: 427 / 抜粋: "def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:"), `def render_table(` (行番号: 497 / 抜粋: "def render_table("), `def downsample_for_chart(` (行番号: 368 / 抜粋: "def downsample_for_chart(")
+* 根拠: `def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:` (行番号: 525 / 抜粋: "def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:"), `def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:` (行番号: 399 / 抜粋: "def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:"), `def render_table(` (行番号: 469 / 抜粋: "def render_table("), `def downsample_for_chart(` (行番号: 340 / 抜粋: "def downsample_for_chart(")
 * 本ファイルが持つカード関連の処理は `render_status_grid`（`st.markdown` への描画）だけで、ステータスカードの列数の決定は`st.columns`ではなくCSS Grid（`.status-grid` の `repeat(auto-fit, minmax(150px, 1fr))`）に委ねられ、スマホでは2列・PCでは3〜5列に自動で切り替わる。**（スマホ対応で変更）** `StatusCard`・`render_status_card_html`・カードのCSSは `services/home_status_service.py` に移り、本ファイルは再エクスポート／埋め込みをしているだけである（`value_is_html` の扱い・Issue #378 のエスケープ規約・#807 で1行にした理由は [home_status_service.md](./home_status_service.md) を参照）。
-* 根拠: `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 542 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:"), `StatusCard = home_status_service.StatusCard` (行番号: 538 / 抜粋: "StatusCard = home_status_service.StatusCard")
+* 根拠: `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 514 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:"), `StatusCard = home_status_service.StatusCard` (行番号: 510 / 抜粋: "StatusCard = home_status_service.StatusCard")
 
 ## 3. 外部依存関係
 
@@ -58,8 +58,7 @@
 | `datetime.datetime` | 標準ライブラリ | **（スマホ対応で追加）** `format_relative_time` / `cache_generation_started_at` の型注釈。 | `from datetime import datetime` |
 | `pytz` | サードパーティ | **（スマホ対応で追加）** naive な時刻をJSTとして扱うためのタイムゾーン（`_JST`）。 | `import pytz` |
 | `core.utils.get_now_jst` | 自作モジュール | **（スマホ対応で追加）** 相対表記・キャッシュ世代の基準となる現在時刻（JST固定）。 | `from core.utils import get_now_jst` |
-| `services.train_service` | 自作モジュール | **（スマホ対応で追加）** JR運行情報・経路検索のキャッシュ付きラッパーの委譲先。 | `from services import analysis_service, home_status_service, train_service` |
-| `services.home_status_service` | 自作モジュール | **（スマホ対応で追加）** `StatusCard` / `render_status_card_html` の再エクスポート元、カードCSS（`STATUS_CARD_CSS`）とグリッドHTML（`render_status_grid_html`）の提供元。 | `from services import analysis_service, home_status_service, train_service` |
+| `services.home_status_service` | 自作モジュール | **（スマホ対応で追加）** `StatusCard` / `render_status_card_html` の再エクスポート元、カードCSS（`STATUS_CARD_CSS`）とグリッドHTML（`render_status_grid_html`）の提供元。 | `from services import analysis_service, home_status_service` |
 | `pandas` | サードパーティ | **（Issue #741で追加）** キャッシュ付きローダの戻り値型注釈（`pd.DataFrame` / `pd.Series \| None`）に使用。 | `import pandas as pd` (行番号: 8) |
 | `services.analysis_service` | 自作モジュール | **（Issue #741で追加）** キャッシュ付きローダが委譲先として呼ぶデータ読み込み層。 | `from services import analysis_service` (行番号: 10) |
 | `streamlit` | サードパーティ | **（Issue #438で追加。上記の「streamlit未インポート」という記述は本Issue以降は当てはまらなくなった）** `safe_section`が例外捕捉時に`st.error`でプレースホルダを画面表示するために使用。**（スマホ対応で追加）** `render_status_grid`も`st.markdown`でグリッドを描画するために使用する。**（Issue #741で追加）** `st.cache_data` デコレータもここから取得する。`CUSTOM_CSS`の適用は引き続き呼び出し元（`dashboard.py`）が行う。 | `import streamlit as st` (行番号: 9) |
@@ -71,7 +70,7 @@
 | 要素 | 種類 | 本ファイルから分かること | 根拠 |
 | --- | --- | --- | --- |
 | `st.cache_data` | Streamlitのキャッシュ機構 | `ttl` 秒だけ戻り値を保持し、同じ引数の呼び出しでは関数本体を実行しない。`show_spinner=False` を指定している。キャッシュの破棄は呼び出し元（`dashboard.py` の「🔄 データを更新」ボタン）の `st.cache_data.clear()` が行う。内部のキー計算・保存方式は本ファイルからは判断できない（9章参照） | `@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)` (行番号: 154, 160, 166, 172) |
-| `analysis_service.load_sensor_data` / `load_generic_data` / `load_bicycle_data` / `load_nas_status` | 自作のデータ読み込み層 | 引数をそのまま委譲して戻り値をそのまま返す。実際のSQL・取得行数は `analysis_service` 側にある | `return analysis_service.load_sensor_data(limit=limit)` (行番号: 157) |
+| `analysis_service.load_sensor_data` / `load_generic_data` / `load_nas_status` | 自作のデータ読み込み層 | 引数をそのまま委譲して戻り値をそのまま返す。実際のSQL・取得行数は `analysis_service` 側にある | `return analysis_service.load_sensor_data(limit=limit)` (行番号: 157) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -147,7 +146,7 @@
 ### `DASHBOARD_CACHE_TTL_SEC` (モジュールレベル定数、Issue #741で追加)
 
 * **役割**: キャッシュ付きローダ4本に与える TTL（秒）。値は `60`。コメントに、センサーの書き込み間隔（5〜10分）より十分短いので表示の鮮度は実質劣化せず、「🔄 データを更新」ボタンが TTL を待たずに捨てる手段としてようやく意味を持つ旨が記されている。
-* 根拠: `DASHBOARD_CACHE_TTL_SEC = 60` (行番号: 251 / 抜粋: "DASHBOARD_CACHE_TTL_SEC = 60")
+* 根拠: `DASHBOARD_CACHE_TTL_SEC = 60` (行番号: 239 / 抜粋: "DASHBOARD_CACHE_TTL_SEC = 60")
 
 * **引数/リクエスト**: なし
 * 根拠: `DASHBOARD_CACHE_TTL_SEC = 60` (行番号: 151)
@@ -164,10 +163,10 @@
 ### `load_sensor_data_cached` (Issue #741で追加)
 
 * **役割**: `analysis_service.load_sensor_data` のキャッシュ付きラッパー。`dashboard.py` の `main()` が `limit=10000` で呼ぶ。
-* 根拠: `def load_sensor_data_cached(limit: int) -> pd.DataFrame:` (行番号: 255 / 抜粋: "def load_sensor_data_cached(")
+* 根拠: `def load_sensor_data_cached(limit: int) -> pd.DataFrame:` (行番号: 243 / 抜粋: "def load_sensor_data_cached(")
 
 * **引数/リクエスト**: `limit` (型: `int`。既定値なし)
-* 根拠: `def load_sensor_data_cached(limit: int) -> pd.DataFrame:` (行番号: 255)
+* 根拠: `def load_sensor_data_cached(limit: int) -> pd.DataFrame:` (行番号: 243)
 
 * **戻り値/レスポンス**: `pd.DataFrame`（`analysis_service.load_sensor_data(limit=limit)` の戻り値をそのまま返す）
 * 根拠: `return analysis_service.load_sensor_data(limit=limit)` (行番号: 157)
@@ -181,10 +180,10 @@
 ### `load_generic_data_cached` (Issue #741で追加)
 
 * **役割**: `analysis_service.load_generic_data` のキャッシュ付きラッパー。`dashboard.py` が子供・排便・食事・車・`security_logs` の5テーブルに対して呼ぶ。
-* 根拠: `def load_generic_data_cached(table_name: str, limit: int = 500) -> pd.DataFrame:` (行番号: 261 / 抜粋: "def load_generic_data_cached(")
+* 根拠: `def load_generic_data_cached(table_name: str, limit: int = 500) -> pd.DataFrame:` (行番号: 249 / 抜粋: "def load_generic_data_cached(")
 
 * **引数/リクエスト**: `table_name` (型: `str`)、`limit` (型: `int`。既定 `500`)
-* 根拠: `def load_generic_data_cached(table_name: str, limit: int = 500) -> pd.DataFrame:` (行番号: 261)
+* 根拠: `def load_generic_data_cached(table_name: str, limit: int = 500) -> pd.DataFrame:` (行番号: 249)
 
 * **戻り値/レスポンス**: `pd.DataFrame`
 * 根拠: `return analysis_service.load_generic_data(table_name, limit=limit)` (行番号: 163)
@@ -195,30 +194,30 @@
 * **エラーハンドリング**: なし
 * 根拠: `return analysis_service.load_generic_data(table_name, limit=limit)` (行番号: 163)
 
-### `load_bicycle_data_cached` (Issue #741で追加)
+### `load_pending_quest_approvals_cached` (トップ画面の刷新で追加)
 
-* **役割**: `analysis_service.load_bicycle_data` のキャッシュ付きラッパー。`dashboard.py` が `limit=3000` で呼ぶ。
-* 根拠: `def load_bicycle_data_cached(limit: int) -> pd.DataFrame:` (行番号: 267 / 抜粋: "def load_bicycle_data_cached(")
+* **役割**: `analysis_service.load_pending_quest_approvals` のキャッシュ付きラッパー。サマリーの「📝 承認待ち」カード用。
+* 根拠: `def load_pending_quest_approvals_cached() -> dict | None:` (行番号: 255 / 抜粋: "def load_pending_quest_approvals_cached() -> dict | None:")
 
-* **引数/リクエスト**: `limit` (型: `int`。既定値なし)
-* 根拠: `def load_bicycle_data_cached(limit: int) -> pd.DataFrame:` (行番号: 267)
+* **引数/リクエスト**: なし
+* 根拠: `def load_pending_quest_approvals_cached() -> dict | None:` (行番号: 255 / 抜粋: "def load_pending_quest_approvals_cached() -> dict | None:")
 
-* **戻り値/レスポンス**: `pd.DataFrame`
-* 根拠: `return analysis_service.load_bicycle_data(limit=limit)` (行番号: 169)
+* **戻り値/レスポンス**: `dict | None`（取得できなかったときは `None` が返り、カードは「⚪ 取得失敗」になる）
+* 根拠: `return analysis_service.load_pending_quest_approvals()` (行番号: 260 / 抜粋: "return analysis_service.load_pending_quest_approvals()")
 
-* **副作用**: `st.cache_data` のキャッシュへの書き込み。
-* 根拠: `@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)` (行番号: 166)
+* **副作用**: `st.cache_data` のキャッシュへの書き込みと、委譲先のDB読み取り。
+* 根拠: `@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)` (行番号: 266 / 抜粋: "@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)")
 
-* **エラーハンドリング**: なし
-* 根拠: `return analysis_service.load_bicycle_data(limit=limit)` (行番号: 169)
+* **エラーハンドリング**: なし（委譲先が失敗時に `None` を返す）
+* 根拠: `return analysis_service.load_pending_quest_approvals()` (行番号: 260 / 抜粋: "return analysis_service.load_pending_quest_approvals()")
 
 ### `load_nas_status_cached` (Issue #741で追加)
 
 * **役割**: `analysis_service.load_nas_status` のキャッシュ付きラッパー。引数を取らない。
-* 根拠: `def load_nas_status_cached() -> pd.Series | None:` (行番号: 273 / 抜粋: "def load_nas_status_cached(")
+* 根拠: `def load_nas_status_cached() -> pd.Series | None:` (行番号: 264 / 抜粋: "def load_nas_status_cached(")
 
 * **引数/リクエスト**: なし
-* 根拠: `def load_nas_status_cached() -> pd.Series | None:` (行番号: 273)
+* 根拠: `def load_nas_status_cached() -> pd.Series | None:` (行番号: 264)
 
 * **戻り値/レスポンス**: `pd.Series | None`（NAS状態の最新1行。データが無い場合は `None`）
 * 根拠: `return analysis_service.load_nas_status()` (行番号: 175)
@@ -232,37 +231,37 @@
 ### `StatusCard` / `render_status_card_html` （スマホ対応で追加、のちサービス層へ移動）
 
 * **役割**: どちらも `services/home_status_service.py` の定義をモジュール属性へ代入しているだけの**再エクスポート**。View 側から従来の名前で参照できるようにするためのもので、実体・仕様（`value_is_html` の扱い、Issue #378 のエスケープ規約、#807 で1行にした理由）は [home_status_service.md](./home_status_service.md) にある。
-* 根拠: `StatusCard = home_status_service.StatusCard` (行番号: 538 / 抜粋: "StatusCard = home_status_service.StatusCard")
+* 根拠: `StatusCard = home_status_service.StatusCard` (行番号: 510 / 抜粋: "StatusCard = home_status_service.StatusCard")
 
 
 * **引数/リクエスト**: 該当なし（代入のみ）
-* 根拠: `render_status_card_html = home_status_service.render_status_card_html` (行番号: 539 / 抜粋: "render_status_card_html = home_status_service.render_status_card_html")
+* 根拠: `render_status_card_html = home_status_service.render_status_card_html` (行番号: 511 / 抜粋: "render_status_card_html = home_status_service.render_status_card_html")
 
 
 * **戻り値/レスポンス**: 該当なし（代入のみ）
-* 根拠: `StatusCard = home_status_service.StatusCard` (行番号: 538 / 抜粋: "StatusCard = home_status_service.StatusCard")
+* 根拠: `StatusCard = home_status_service.StatusCard` (行番号: 510 / 抜粋: "StatusCard = home_status_service.StatusCard")
 
 
 * **副作用**: なし
-* 根拠: `StatusCard = home_status_service.StatusCard` (行番号: 538 / 抜粋: "StatusCard = home_status_service.StatusCard")
+* 根拠: `StatusCard = home_status_service.StatusCard` (行番号: 510 / 抜粋: "StatusCard = home_status_service.StatusCard")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `render_status_card_html = home_status_service.render_status_card_html` (行番号: 539 / 抜粋: "render_status_card_html = home_status_service.render_status_card_html")
+* 根拠: `render_status_card_html = home_status_service.render_status_card_html` (行番号: 511 / 抜粋: "render_status_card_html = home_status_service.render_status_card_html")
 
 
 ### `render_status_grid` (スマホ対応で追加)
 
-* **役割**: `StatusCard` の並びを `render_status_card_html` で1枚ずつHTML化し、`<div class="status-grid">` で囲んで1回の `st.markdown(..., unsafe_allow_html=True)` で描画する。docstringに、以前は `st.columns(3)` を3段重ねて9枚を並べていたが、Streamlitの列は画面幅が足りなくても横並びを維持するためスマートフォンでは1枚あたり約100pxまで潰れて値が読めなかったこと、列数の決定をCSS（`.status-grid`のauto-fit）に委ねることでスマホ2列・PC3〜5列に自動で切り替わることが記されている。
-* 根拠: `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 542〜550 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
+* **役割**: `StatusCard` の並びを `render_status_card_html` で1枚ずつHTML化し、`<div class="status-grid">` で囲んで1回の `st.markdown(..., unsafe_allow_html=True)` で描画する。docstringに、以前は `st.columns(3)` を3段重ねてカードを並べていたが、Streamlitの列は画面幅が足りなくても横並びを維持するためスマートフォンでは1枚あたり約100pxまで潰れて値が読めなかったこと、列数の決定をCSS（`.status-grid`のauto-fit）に委ねることでスマホ2列・PC3〜5列に自動で切り替わることが記されている。
+* 根拠: `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 514〜522 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
 
 
 * **引数/リクエスト**: `cards` (型: `Iterable[StatusCard]`)
-* 根拠: 関数シグネチャ (行番号: 542 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
+* 根拠: 関数シグネチャ (行番号: 514 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 関数シグネチャ (行番号: 542 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
+* 根拠: 関数シグネチャ (行番号: 514 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")
 
 
 * **副作用**: `st.markdown` による画面描画（`unsafe_allow_html=True`）。
@@ -276,32 +275,32 @@
 
 ### DB以外のキャッシュ付きラッパー群（スマホ対応で追加）
 
-`load_jr_traffic_status_cached` / `load_route_info_cached` / `load_yearly_temperature_stats_cached` / `get_disk_usage_cached` / `get_memory_usage_cached` / `get_monthly_cost_cached` / `get_last_month_cost_cached` / `get_system_logs_cached`
+`load_yearly_temperature_stats_cached` / `get_disk_usage_cached` / `get_memory_usage_cached` / `get_monthly_cost_cached` / `get_last_month_cost_cached` / `get_system_logs_cached`
 
-* **役割**: DBの読み取り（Issue #741の4本）と同じ `@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)` で、HTTPスクレイピング・サブプロセス起動・集計SQLも包む。1回の描画で走っていた「JR運行情報のスクレイピング×2回（サマリーと「おでかけ」タブ）」「Yahoo!路線情報のスクレイピング」「`journalctl` の起動」「年間気温の集計SQL」「今月の電気代の集計SQL」が、TTLの間は1回で済むようになる。
-* 根拠: `def load_jr_traffic_status_cached() -> dict:` (行番号: 293 / 抜粋: "def load_jr_traffic_status_cached() -> dict:"), `def get_monthly_cost_cached() -> int:` (行番号: 331 / 抜粋: "def get_monthly_cost_cached() -> int:")
-
-
-* **引数/リクエスト**: `load_route_info_cached(from_station, to_station)`、`load_yearly_temperature_stats_cached(year)`、`get_system_logs_cached(lines=50, priority=None, target_date=None)`。その他は引数なし。
-* 根拠: `def load_route_info_cached(from_station: str, to_station: str) -> dict:` (行番号: 299 / 抜粋: "def load_route_info_cached(from_station: str, to_station: str) -> dict:"), `def get_system_logs_cached(lines: int = 50, priority=None, target_date=None) -> str:` (行番号: 350 / 抜粋: "def get_system_logs_cached(lines: int = 50, priority=None, target_date=None) -> str:")
+* **役割**: DBの読み取り（Issue #741の3本）と同じ `@st.cache_data(ttl=DASHBOARD_CACHE_TTL_SEC, show_spinner=False)` で、サブプロセス起動・集計SQLも包む。1回の描画で走っていた「`journalctl` の起動」「年間気温の集計SQL」「今月の電気代の集計SQL」が、TTLの間は1回で済むようになる（**2026-09-21**: JR運行情報・Yahoo!路線情報のスクレイピングを包んでいた `load_jr_traffic_status_cached` / `load_route_info_cached` は、その機能ごと退役したため削除した）。
+* 根拠: `def load_yearly_temperature_stats_cached(year: int) -> pd.DataFrame:` (行番号: 281 / 抜粋: "def load_yearly_temperature_stats_cached(year: int) -> pd.DataFrame:"), `def get_monthly_cost_cached() -> int:` (行番号: 303 / 抜粋: "def get_monthly_cost_cached() -> int:")
 
 
-* **戻り値/レスポンス**: 委譲先（`train_service` / `analysis_service`）の戻り値をそのまま返す。
-* 根拠: `return train_service.get_jr_traffic_status()` (行番号: 295 / 抜粋: "return train_service.get_jr_traffic_status()")
+* **引数/リクエスト**: `load_yearly_temperature_stats_cached(year)`、`get_system_logs_cached(lines=50, priority=None, target_date=None)`。その他は引数なし。
+* 根拠: `def get_system_logs_cached(lines: int = 50, priority=None, target_date=None) -> str:` (行番号: 322 / 抜粋: "def get_system_logs_cached(lines: int = 50, priority=None, target_date=None) -> str:")
 
 
-* **副作用**: 委譲先の副作用（HTTP取得・サブプロセス起動・DB読み取り）と、Streamlitのキャッシュへの保存。
-* 根拠: `return analysis_service.get_system_logs(` (行番号: 356 / 抜粋: "return analysis_service.get_system_logs(")
+* **戻り値/レスポンス**: 委譲先（`analysis_service`）の戻り値をそのまま返す。
+* 根拠: `return analysis_service.calculate_monthly_cost_cumulative()` (行番号: 308 / 抜粋: "return analysis_service.calculate_monthly_cost_cumulative()")
+
+
+* **副作用**: 委譲先の副作用（サブプロセス起動・DB読み取り）と、Streamlitのキャッシュへの保存。
+* 根拠: `return analysis_service.get_system_logs(` (行番号: 328 / 抜粋: "return analysis_service.get_system_logs(")
 
 
 * **エラーハンドリング**: なし（委譲先の挙動に従う）。`get_system_logs_cached` については、呼び出し元の「🔄 ログを更新」ボタンが `get_system_logs_cached.clear()` を呼ぶことでTTLを待たずに取り直す（docstringに明記）。
-* 根拠: `呼び出し側の「🔄 ログを更新」ボタンは、TTLを待たずに取り直すために` (行番号: 353 / 抜粋: "呼び出し側の「🔄 ログを更新」ボタンは、TTLを待たずに取り直すために")
+* 根拠: `呼び出し側の「🔄 ログを更新」ボタンは、TTLを待たずに取り直すために` (行番号: 325 / 抜粋: "呼び出し側の「🔄 ログを更新」ボタンは、TTLを待たずに取り直すために")
 
 
 ### `downsample_for_chart` (スマホ対応で追加)
 
-* **役割**: 系列あたりの点数が `CHART_MAX_POINTS_PER_SERIES`（500）を超えるとき、等間隔に間引いたDataFrameを返す。plotlyに渡した点はそのままWebSocketの転送量としてスマートフォンへ流れるため、駐輪場の推移（3系列×1,000点前後）のように形しか読まないグラフで効く。平均リサンプルにしないのは、列の型・構成を保ち、欠測区間に元データに無い値を作らないため。最新の点は必ず残す（右端が欠けると「止まっている」ように見えるため）。
-* 根拠: `def downsample_for_chart(` (行番号: 368〜409 / 抜粋: "def downsample_for_chart(")
+* **役割**: 系列あたりの点数が `CHART_MAX_POINTS_PER_SERIES`（500）を超えるとき、等間隔に間引いたDataFrameを返す。plotlyに渡した点はそのままWebSocketの転送量としてスマートフォンへ流れるため、気温・消費電力の推移（複数系列×数千点）のように形しか読まないグラフで効く。平均リサンプルにしないのは、列の型・構成を保ち、欠測区間に元データに無い値を作らないため。最新の点は必ず残す（右端が欠けると「止まっている」ように見えるため）。
+* 根拠: `def downsample_for_chart(` (行番号: 340〜381 / 抜粋: "def downsample_for_chart(")
 
 
 * **引数/リクエスト**: `df` (`pd.DataFrame`)、キーワード専用の `timestamp_col`（既定 `"timestamp"`）、`series_col`（既定 `None`）、`max_points`（既定 `CHART_MAX_POINTS_PER_SERIES`）
@@ -313,43 +312,43 @@
 
 
 * **副作用**: なし
-* 根拠: `def downsample_for_chart(` (行番号: 368 / 抜粋: "def downsample_for_chart(")
+* 根拠: `def downsample_for_chart(` (行番号: 340 / 抜粋: "def downsample_for_chart(")
 
 
 * **エラーハンドリング**: 空DataFrame・`timestamp_col` 欠落・`max_points <= 0` はそのまま返す。
-* 根拠: `if df is None or df.empty or max_points <= 0 or timestamp_col not in df.columns:` (行番号: 385 / 抜粋: "if df is None or df.empty or max_points <= 0 or timestamp_col not in df.columns:")
+* 根拠: `if df is None or df.empty or max_points <= 0 or timestamp_col not in df.columns:` (行番号: 357 / 抜粋: "if df is None or df.empty or max_points <= 0 or timestamp_col not in df.columns:")
 
 
 ### `PLOTLY_MOBILE_CONFIG` / `CHART_HEIGHT_PX` / `render_chart` (スマホ対応で追加)
 
 * **役割**: plotlyのグラフをスマートフォン向けの設定で描画する。モードバー（ズーム・保存等のアイコン列）を隠し、`dragmode=False` でグラフ上のドラッグ（既定ではズーム）を無効にし、高さを280pxに、余白を詰める。ドラッグを無効にするのは、指でページをスクロールしようとしてグラフに触れると縦スクロールが奪われ、そのグラフから抜け出せなくなるため。
-* 根拠: `def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:` (行番号: 427〜439 / 抜粋: "def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:"), `PLOTLY_MOBILE_CONFIG = {` (行番号: 419 / 抜粋: "PLOTLY_MOBILE_CONFIG = {")
+* 根拠: `def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:` (行番号: 399〜411 / 抜粋: "def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:"), `PLOTLY_MOBILE_CONFIG = {` (行番号: 391 / 抜粋: "PLOTLY_MOBILE_CONFIG = {")
 
 
 * **引数/リクエスト**: `fig`（plotlyのFigure）、キーワード専用 `height`（既定 `CHART_HEIGHT_PX` = 280）
-* 根拠: `def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:` (行番号: 427 / 抜粋: "def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:")
+* 根拠: `def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:` (行番号: 399 / 抜粋: "def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `st.plotly_chart(fig, width="stretch", config=PLOTLY_MOBILE_CONFIG)` (行番号: 439 / 抜粋: "st.plotly_chart(fig, width=\"stretch\", config=PLOTLY_MOBILE_CONFIG)")
+* 根拠: `st.plotly_chart(fig, width="stretch", config=PLOTLY_MOBILE_CONFIG)` (行番号: 411 / 抜粋: "st.plotly_chart(fig, width=\"stretch\", config=PLOTLY_MOBILE_CONFIG)")
 
 
 * **副作用**: 渡された `fig` の `update_layout`（高さ・dragmode・余白）による変更と、`st.plotly_chart` による描画。
-* 根拠: `fig.update_layout(` (行番号: 434 / 抜粋: "fig.update_layout(")
+* 根拠: `fig.update_layout(` (行番号: 406 / 抜粋: "fig.update_layout(")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:` (行番号: 427 / 抜粋: "def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:")
+* 根拠: `def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:` (行番号: 399 / 抜粋: "def render_chart(fig, *, height: int = CHART_HEIGHT_PX) -> None:")
 
 
 ### `format_short_timestamp` / `format_relative_time` / `cache_generation_started_at` (スマホ対応で追加)
 
 * **役割**: 時刻を「09/21 03:04」に短縮する／「たった今」「3分前」「2時間前」「1日前」の相対表記にする／いま表示しているキャッシュ世代が作られた時刻を返す。表示は最大60秒キャッシュされるため、描画時刻をそのまま「最終更新」と書くと嘘になる。相対表記は1週間以上前と未来の時刻では使わず、短縮表記にフォールバックする。naive な時刻はJSTとして扱う。
-* 根拠: `def format_short_timestamp(value) -> str:` (行番号: 446 / 抜粋: "def format_short_timestamp(value) -> str:"), `def format_relative_time(value, now: datetime | None = None) -> str:` (行番号: 458 / 抜粋: "def format_relative_time(value, now: datetime | None = None) -> str:"), `def cache_generation_started_at() -> datetime:` (行番号: 486 / 抜粋: "def cache_generation_started_at() -> datetime:")
+* 根拠: `def format_short_timestamp(value) -> str:` (行番号: 418 / 抜粋: "def format_short_timestamp(value) -> str:"), `def format_relative_time(value, now: datetime | None = None) -> str:` (行番号: 430 / 抜粋: "def format_relative_time(value, now: datetime | None = None) -> str:"), `def cache_generation_started_at() -> datetime:` (行番号: 458 / 抜粋: "def cache_generation_started_at() -> datetime:")
 
 
 * **引数/リクエスト**: `format_short_timestamp(value)`、`format_relative_time(value, now=None)`、`cache_generation_started_at()`
-* 根拠: `def format_relative_time(value, now: datetime | None = None) -> str:` (行番号: 458 / 抜粋: "def format_relative_time(value, now: datetime | None = None) -> str:")
+* 根拠: `def format_relative_time(value, now: datetime | None = None) -> str:` (行番号: 430 / 抜粋: "def format_relative_time(value, now: datetime | None = None) -> str:")
 
 
 * **戻り値/レスポンス**: 整形済みの文字列（読めない値は空文字）／`datetime`
@@ -367,7 +366,7 @@
 ### `render_table` (スマホ対応で追加)
 
 * **役割**: スマートフォン幅でも読める表を描画する。`st.dataframe` は画面幅を超えると横スクロールの箱になるため、(1) 列は「元の列名 → 表示名」の辞書で挙げたもの**かつ実在するもの**だけに絞り、(2) 時刻列を「09/21 03:04」に短縮し（`relative_time=True` なら「(3分前)」を併記）、(3) 行番号（index）を隠す。
-* 根拠: `def render_table(` (行番号: 497〜532 / 抜粋: "def render_table(")
+* 根拠: `def render_table(` (行番号: 469〜504 / 抜粋: "def render_table(")
 
 
 * **引数/リクエスト**: `df`、`columns`（`dict`）、キーワード専用の `time_cols`（既定 `("timestamp",)`）、`relative_time`（既定 `False`）、`height`（既定 `None`）
@@ -375,43 +374,43 @@
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `st.dataframe(view, width="stretch", hide_index=True, height=height)` (行番号: 532 / 抜粋: "st.dataframe(view, width=\"stretch\", hide_index=True, height=height)")
+* 根拠: `st.dataframe(view, width="stretch", hide_index=True, height=height)` (行番号: 504 / 抜粋: "st.dataframe(view, width=\"stretch\", hide_index=True, height=height)")
 
 
 * **副作用**: `st.dataframe`（または空データ時の `st.info`）による描画。
-* 根拠: `st.info("表示できるデータがありません")` (行番号: 517 / 抜粋: "st.info(\"表示できるデータがありません\")")
+* 根拠: `st.info("表示できるデータがありません")` (行番号: 489 / 抜粋: "st.info(\"表示できるデータがありません\")")
 
 
 * **エラーハンドリング**: 指定された列が1つも無い場合・空DataFrameの場合はプレースホルダ（`st.info`）を出して戻る（`KeyError` にはならない）。
-* 根拠: `if df.empty or not available:` (行番号: 516 / 抜粋: "if df.empty or not available:")
+* 根拠: `if df.empty or not available:` (行番号: 488 / 抜粋: "if df.empty or not available:")
 
 
 ### `lazy_section` (スマホ対応で追加)
 
 * **役割**: 折りたたみセクションを描画し、「開いているか」を返す。`st.expander` は**折りたたまれていても中身のPythonを実行する**（結果をクライアント側で隠しているだけ）ため、たたまれた「📜 サーバーログ」のために `journalctl` が毎回起動し、「🌡️ 気温・湿度の詳細」のために年間集計SQLが毎回走っていた。開閉状態がPython側から読める `st.toggle` に置き換え、呼び出し側が `if lazy_section(...):` で中身の実行ごと省けるようにしたもの。
-* 根拠: `def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:` (行番号: 553〜568 / 抜粋: "def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:")
+* 根拠: `def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:` (行番号: 525〜540 / 抜粋: "def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:")
 
 
 * **引数/リクエスト**: `label` (str)、キーワード専用の `key` (str)、`default_open` (bool, 既定 `False`)
-* 根拠: `def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:` (行番号: 553 / 抜粋: "def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:")
+* 根拠: `def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:` (行番号: 525 / 抜粋: "def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（開いていれば `True`）
-* 根拠: `return bool(st.toggle(label, key=f"lazy_section_{key}", value=default_open))` (行番号: 568 / 抜粋: "return bool(st.toggle(label, key=f\"lazy_section_{key}\", value=default_open))")
+* 根拠: `return bool(st.toggle(label, key=f"lazy_section_{key}", value=default_open))` (行番号: 540 / 抜粋: "return bool(st.toggle(label, key=f\"lazy_section_{key}\", value=default_open))")
 
 
 * **副作用**: `st.toggle` の描画と、`st.session_state` への開閉状態の保存（キーは `lazy_section_<key>`）。
-* 根拠: `return bool(st.toggle(label, key=f"lazy_section_{key}", value=default_open))` (行番号: 568 / 抜粋: "key=f\"lazy_section_{key}\"")
+* 根拠: `return bool(st.toggle(label, key=f"lazy_section_{key}", value=default_open))` (行番号: 540 / 抜粋: "key=f\"lazy_section_{key}\"")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:` (行番号: 553 / 抜粋: "def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:")
+* 根拠: `def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:` (行番号: 525 / 抜粋: "def lazy_section(label: str, *, key: str, default_open: bool = False) -> bool:")
 
 
 ### `safe_section` (コンテキストマネージャ、Issue #438で追加)
 
 * **役割**: ダッシュボードの1セクション(タブ・サマリー等)の描画を`with`ブロックとして囲み、内部で発生した例外を捕捉してそのセクションのプレースホルダ表示に閉じ込める。以前は`dashboard.py`の`main()`全体を1つの`try/except`で囲んでおり、いずれか1つのタブの描画で例外が起きるとダッシュボード全体がエラー画面になり、無関係な他のタブの表示まで巻き込んでいた。本関数の導入により、`dashboard.py`はセクション単位で例外を隔離するようになった（**スマホ対応で変更**: 保護の単位は「タブ」ではなく、1つのタブ内の各セクション。`quest_tab.py`はスマホ対応で撤去された）。L-L5 (#410)と同じ方針で、`traceback`等の内部詳細(ファイルパス・設定値等)は画面に出さずログにのみ残す。
-* 根拠: 関数Docstring・実装 (行番号: 572〜591 / 抜粋: "def safe_section(section_name: str):")
+* 根拠: 関数Docstring・実装 (行番号: 544〜563 / 抜粋: "def safe_section(section_name: str):")
 
 
 * **引数/リクエスト**: `section_name` (型: `str`。エラーメッセージに含めるセクション名。例: `"クエスト"`)
@@ -497,7 +496,7 @@ graph TD
     DashboardCommonPy -->|"html.escape(title/value)"| HtmlModule
     DashboardCommonPy -->|"st.error / st.markdown / st.cache_data"| StreamlitModule
     DashboardCommonPy -->|"戻り値の型注釈"| PandasModule
-    DashboardCommonPy -->|"load_sensor_data / load_generic_data / load_bicycle_data / load_nas_status"| AnalysisService
+    DashboardCommonPy -->|"load_sensor_data / load_generic_data / load_nas_status"| AnalysisService
 
     Dashboard["dashboard.py"] -->|view_commonとしてimport, CUSTOM_CSS/safe_section/load_*_cachedを参照| DashboardCommonPy
     Summary["summary.py"] -->|.commonとしてimport, StatusCard/render_status_gridを呼び出し| DashboardCommonPy
@@ -518,14 +517,14 @@ graph TD
 * **[Issue #741] TTL を延ばすときの判断材料**: `DASHBOARD_CACHE_TTL_SEC` はセンサーの書き込み間隔より十分短い 60 秒にしてある。延ばすとダッシュボードが「今の状態」を見る用途で古い値を出す。逆に 0 にするとキャッシュが無効化され、`st.cache_data.clear()` を呼ぶ「🔄 データを更新」ボタンが再び無意味になる。
 
 * **[修正済み・実装はサービス層へ移動] カードのHTMLがMarkdownのインデントコードブロックとして生表示される**: `st.markdown` は本文に `textwrap.dedent()` を掛けてからMarkdownとして解釈する（`streamlit.string_util.clean_text`）。`render_status_grid` が組み立てる文字列は先頭行 `<div class="status-grid">` がインデント0のため共通インデントが0になり、dedentは何も削らない。以前の `render_status_card_html` は整形用の改行と4スペース字下げを含む複数行を返していたため、カードとカードの間に「空白だけの行」ができてHTMLブロックが終端され、続く4スペース字下げの行がインデントコードブロックと解釈されていた。結果、1枚目のカードだけが正しく描画され、2枚目以降は `<div class="status-card...` という生のタグ文字列としてスマートフォン画面に並び（長い行が横幅も溢れさせ）、サマリーが読めない状態になっていた。`render_status_card_html` が整形用の空白を一切持たない1行を返すようにして解消した（`tests/test_dashboard_summary_status.py` の `TestRenderStatusGridIntegration` が、Streamlitの前処理を再現したうえで改行が残っていないことを固定している）。
-* 根拠: `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 542 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")、現在の `render_status_card_html` の実体は [home_status_service.md](./home_status_service.md) にある
+* 根拠: `def render_status_grid(cards: Iterable[StatusCard]) -> None:` (行番号: 514 / 抜粋: "def render_status_grid(cards: Iterable[StatusCard]) -> None:")、現在の `render_status_card_html` の実体は [home_status_service.md](./home_status_service.md) にある
 
-* **[修正済み] Issue #378 render_status_card_htmlの格納型XSS**: `title`/`value`は呼び出し元（`views/dashboard/summary.py`）が`unsafe_allow_html=True`でそのままStreamlitに渡すため、以前はエスケープ無しでf-stringに埋め込んでいた。`title`にDB/スクレイピング由来の文字列が渡ると格納型XSSになり得る構造だった（値そのものは本ファイル外から渡されるため、本ファイル単体では実際に危険な値が渡っているかは判断できない）。`html.escape`で`title`を常に、`value`も既定でエスケープするよう修正し、`get_bicycle_status`のように意図的にHTML断片を組み立てる呼び出し元向けにキーワード専用引数`value_is_html`（既定`False`）でエスケープをスキップできるようにした。
+* **[修正済み] Issue #378 render_status_card_htmlの格納型XSS**: `title`/`value`は呼び出し元（`views/dashboard/summary.py`）が`unsafe_allow_html=True`でそのままStreamlitに渡すため、以前はエスケープ無しでf-stringに埋め込んでいた。`title`にDB/スクレイピング由来の文字列が渡ると格納型XSSになり得る構造だった（値そのものは本ファイル外から渡されるため、本ファイル単体では実際に危険な値が渡っているかは判断できない）。`html.escape`で`title`を常に、`value`も既定でエスケープするよう修正し、意図的にHTML断片を組み立てる呼び出し元向けにキーワード専用引数`value_is_html`（既定`False`）でエスケープをスキップできるようにした（2026-09-21時点でこれを使う呼び出し元は無い）。
 * 根拠: 現在の実装は [home_status_service.md](./home_status_service.md) にある（本ファイルは `import html` をしなくなった）
 
 
 * **（スマホ対応で移動）** 「HTMLエスケープの扱い」と「`theme`引数のバリデーション欠如」は、`render_status_card_html` ごと `services/home_status_service.py` へ移った。現在の注意点は [home_status_service.md](./home_status_service.md) の8章を参照。本ファイルは再エクスポートしているだけである。
-* 根拠: `render_status_card_html = home_status_service.render_status_card_html` (行番号: 539 / 抜粋: "render_status_card_html = home_status_service.render_status_card_html")
+* 根拠: `render_status_card_html = home_status_service.render_status_card_html` (行番号: 511 / 抜粋: "render_status_card_html = home_status_service.render_status_card_html")
 
 
 * **CSSがPython文字列としてハードコード**: スタイル定義がすべて`CUSTOM_CSS`という1つの長い文字列としてPythonコード内にハードコードされており、`.css`ファイルとして分離されていない。デザイン変更のたびにPythonコードの編集が必要となる。

@@ -43,7 +43,7 @@
 | `config` | ファイル内に定義がないため、`SQLITE_DB_PATH`や`MONITOR_DEVICES`などの具体的な値や構造が不明。 | `config.SQLITE_DB_PATH` (行番号: 44 / 抜粋: "config.SQLITE_DB_PATH") |
 | `core.logger.setup_logging` | ファイル内に実装がないため、ログの出力先やフォーマットが不明。 | `setup_logging("analysis_service")` (行番号: 18 / 抜粋: "setup_logging("analysis_service")") |
 | データベースの各種テーブル | スキーマ定義が提供されていないため、カラムの型や制約、インデックスの有無が不明。 | `SELECT * FROM {table_name}` (行番号: 155, 164, 349 / 抜粋: "SELECT * FROM {table_name}") |
-| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 500 / 抜粋: "home_system.service") |
+| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 537 / 抜粋: "home_system.service") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -67,8 +67,8 @@
 
 * **エラーハンドリング**: なし
 * 根拠: 該当関数内に `try-except` なし (行番号: 33〜45 / 抜粋: "def get_ro_db_connection()")
-* **呼出し側での接続管理について（#411 S-L8で修正）**: この関数が返す接続を `with get_ro_db_connection() as conn:` の形で使っている呼出し元（`load_nas_status`・`load_bicycle_data`）は、sqlite3の`Connection.__exit__`がcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、接続がcloseされずリークしていた。この2箇所を`with contextlib.closing(get_ro_db_connection()) as conn:`に変更し、明示的にcloseするようにした。`load_data_from_db`・`load_weather_history`・`load_yearly_temperature_stats`は元々`try/finally`で`conn.close()`していたため対象外。**（Issue #507で削除）** 以前は同じパターンを使う3つ目の呼出し元として`load_ranking_dates`があったが、参照先の`app_rankings`テーブルへの書き込みコードが存在せず機能として死んでいたため、`load_ranking_data`とともに削除された。
-* 根拠: `with contextlib.closing(get_ro_db_connection()) as conn:` (`load_nas_status`: 行番号171、`load_bicycle_data`: 行番号403)
+* **呼出し側での接続管理について（#411 S-L8で修正）**: この関数が返す接続を `with get_ro_db_connection() as conn:` の形で使っている呼出し元（`load_nas_status`、および当時存在した`load_bicycle_data`）は、sqlite3の`Connection.__exit__`がcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、接続がcloseされずリークしていた。この2箇所を`with contextlib.closing(get_ro_db_connection()) as conn:`に変更し、明示的にcloseするようにした。`load_data_from_db`・`load_weather_history`・`load_yearly_temperature_stats`は元々`try/finally`で`conn.close()`していたため対象外。**（Issue #507で削除）** 以前は同じパターンを使う3つ目の呼出し元として`load_ranking_dates`があったが、参照先の`app_rankings`テーブルへの書き込みコードが存在せず機能として死んでいたため、`load_ranking_data`とともに削除された。
+* 根拠: `with contextlib.closing(get_ro_db_connection()) as conn:` (`load_nas_status`: 行番号171。`load_bicycle_data`は駐輪場の退役で削除済み)
 
 
 
@@ -185,6 +185,28 @@
 
 
 
+### `load_pending_quest_approvals`
+
+* **役割**: ファミクエで承認待ちのクエスト申請の件数と、いちばん古い1件（誰の・いつの申請か）を返す。ダッシュボードのトップに出す「📝 承認待ち」カード用。クエストの残数やランキングではなく承認待ちを出すのは、これだけが「見た人が今すぐ動く必要がある」情報だからで、ほかは family-quest(PWA)側で見る。
+* 根拠: `def load_pending_quest_approvals() -> dict[str, Any] | None:` (行番号: 190 / 抜粋: "def load_pending_quest_approvals() -> dict[str, Any] | None:")
+
+
+* **引数/リクエスト**: なし
+* 根拠: `def load_pending_quest_approvals() -> dict[str, Any] | None:` (行番号: 190 / 抜粋: "def load_pending_quest_approvals() -> dict[str, Any] | None:")
+
+
+* **戻り値/レスポンス**: `{"count": int, "oldest_at": str | None, "oldest_name": str | None}`。承認待ちが0件のときは `count=0` の辞書、**テーブルが存在しない場合・読み取りに失敗した場合は `None`** を返す。ここで `count=0` を返してしまうと、カードが「✅ なし」と緑で出て、実際には承認待ちが溜まっていても気づけない（JR運行情報のカードが「取得不可を平常運転と偽らない」ために区別していたのと同じ失敗モード）。呼び出し側の `get_quest_status` は `None` を「⚪ 取得失敗」として出す。
+* 根拠: `empty: dict[str, Any] = {"count": 0, "oldest_at": None, "oldest_name": None}` (行番号: 209 / 抜粋: "empty: dict[str, Any] = {\"count\": 0, \"oldest_at\": None, \"oldest_name\": None}")
+
+
+* **副作用**: 読み取り専用接続（`get_ro_db_connection`）でのDB読み取りのみ。`quest_users` の残高には触れない（CLAUDE.md「単一プロセス前提」の並行制御に影響しない）。集計は `quest_history` の `status` インデックス（`idx_quest_history_status_completed`）に乗る軽いクエリ2本だけ。
+* 根拠: `cur.execute("SELECT COUNT(*) FROM quest_history WHERE status = 'pending'")` (行番号: 217 / 抜粋: "cur.execute(\"SELECT COUNT(*) FROM quest_history WHERE status = 'pending'\")")
+
+
+* **エラーハンドリング**: `except Exception` でエラーログを出し、`None` を返す（1枚のカードの取得失敗でページ全体を落とさないが、成功と取り違えもしない）。
+* 根拠: `logger.error(f"Pending Quest Approvals Load Error: {e}")` (行番号: 238 / 抜粋: "logger.error(f\"Pending Quest Approvals Load Error: {e}\")")
+
+
 ### `load_generic_data`
 
 * **役割**: 指定したテーブルから汎用的に最新のデータを取得する。
@@ -192,7 +214,7 @@
 
 
 * **引数/リクエスト**: `table_name` (`str`): テーブル名。`limit` (`int`, デフォルト `500`): 取得件数。
-* 根拠: `table_name: str, limit: int = 500` (行番号: 190 / 抜粋: "table_name: str, limit: int = 500")
+* 根拠: `table_name: str, limit: int = 500` (行番号: 242 / 抜粋: "table_name: str, limit: int = 500")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (取得したデータのデータフレーム)
@@ -200,22 +222,22 @@
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 165 / 抜粋: "return load_data_from_db(query)")
+* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 245 / 抜粋: "return load_data_from_db(query)")
 
 
 * **エラーハンドリング**: 内部で呼び出される `load_data_from_db` に依存。
-* 根拠: `return load_data_from_db(query)` (行番号: 165 / 抜粋: "return load_data_from_db(query)")
+* 根拠: `return load_data_from_db(query)` (行番号: 245 / 抜粋: "return load_data_from_db(query)")
 
 
 
 ### `load_sensor_data`
 
 * **役割**: `device_records`、SwitchBotのログ、電力使用量の3つのテーブルからデータを取得・統合・ソートし、表示名を適用する。電力使用量(`config.SQLITE_TABLE_POWER_USAGE`)由来の行は、`device_name`に`"Remo"`を含めば`device_type="Nature Remo E Lite"`(スマートメーター全体消費)、含まなければ`device_type="Plug"`(個別家電)として分類される。**（Issue #169で解消）** 以前はこの分類直後に`.replace("Plug", "Nature Remo E Lite")`が実行されており、"Plug"に分類された全行が無条件で"Nature Remo E Lite"へ上書きされていた(`str.contains("Plug")`で個別家電を絞り込む`views/dashboard/sensor_tab.py`側のフィルタが構造的に一致しなくなり、個別家電グラフが常に空になる・全プラグの消費電力がスマートメーター全体消費のグラフへ混入する不具合)。この一括置換は削除され、"Remo"を含むかどうかの判定結果がそのまま最終的な`device_type`になる。
-* 根拠: `load_sensor_data` (行番号: 263 / 抜粋: "df_merged = pd.concat(df_list, ignore_index=True)")、`device_type`分類 (行番号: 202〜205 / 抜粋: "df_power[\"device_type\"] = df_power[\"device_name\"].apply(\n            lambda x: \"Nature Remo E Lite\" if x and \"Remo\" in str(x) else \"Plug\"\n        )")
+* 根拠: `load_sensor_data` (行番号: 315 / 抜粋: "df_merged = pd.concat(df_list, ignore_index=True)")、`device_type`分類 (行番号: 202〜205 / 抜粋: "df_power[\"device_type\"] = df_power[\"device_name\"].apply(\n            lambda x: \"Nature Remo E Lite\" if x and \"Remo\" in str(x) else \"Plug\"\n        )")
 
 
 * **引数/リクエスト**: `limit` (`int`, デフォルト `5000`): 取得件数の上限。
-* 根拠: `limit: int = 5000` (行番号: 195 / 抜粋: "def load_sensor_data(limit: int = 5000)")
+* 根拠: `limit: int = 5000` (行番号: 247 / 抜粋: "def load_sensor_data(limit: int = 5000)")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (統合されたセンサーデータのデータフレーム)
@@ -223,11 +245,11 @@
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db` を複数回呼び出し。 (行番号: 208 / 抜粋: "df_legacy = load_data_from_db(query_legacy)")
+* 根拠: `load_data_from_db` を複数回呼び出し。 (行番号: 260 / 抜粋: "df_legacy = load_data_from_db(query_legacy)")
 
 
 * **エラーハンドリング**: 内部で呼び出される `load_data_from_db` に依存。
-* 根拠: 該当関数内に独自の `try-except` なし (行番号: 195 / 抜粋: "def load_sensor_data(")
+* 根拠: 該当関数内に独自の `try-except` なし (行番号: 247 / 抜粋: "def load_sensor_data(")
 
 
 
@@ -238,7 +260,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 275 / 抜粋: "def calculate_monthly_cost_cumulative()")
+* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 327 / 抜粋: "def calculate_monthly_cost_cumulative()")
 
 
 * **戻り値/レスポンス**: `int` (計算された電気代概算)
@@ -256,47 +278,47 @@
 ### `calculate_last_month_cost_same_point`
 
 * **役割**: 先月の月初から「今と同じ日・同じ時刻」までの電気代概算を、今月ぶんと同じ方法（`_calculate_cost_between`）で算出する。ダッシュボードのカードが「今月いくら使ったか」だけを出していて高いのか安いのか判断できなかったため、比較対象として出す。先月に同じ日が無い場合（3/31 → 2/31）は先月の末日に丸める。
-* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 281 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
+* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 333 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
 
 * **引数/リクエスト**: なし
-* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 281 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
+* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 333 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
 
 * **戻り値/レスポンス**: `int`（先月の同じ時点までの電気代概算）
-* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 295 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
+* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 347 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
 
 * **副作用**: データベースの読み取り操作（`_calculate_cost_between` 経由）。
-* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 295 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
+* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 347 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
 
 * **エラーハンドリング**: `_calculate_cost_between` 側で例外を捕捉し `0` を返す。日付の丸めは `min(now.day, end_of_last_month.day)` で行うため、`ValueError: day is out of range` にはならない。
-* 根拠: `day = min(now.day, end_of_last_month.day)` (行番号: 291 / 抜粋: "day = min(now.day, end_of_last_month.day)")
+* 根拠: `day = min(now.day, end_of_last_month.day)` (行番号: 343 / 抜粋: "day = min(now.day, end_of_last_month.day)")
 
 
 ### `_start_of_month` / `_calculate_cost_between` / `ELECTRICITY_YEN_PER_KWH`
 
 * **役割**: `_start_of_month` は渡した時刻の月初（`microsecond=0`）を返す。`_calculate_cost_between` は期間内のスマートメーターの記録から電気代を概算する共通処理で、`WHERE timestamp >= '{start}' AND timestamp <= '{end}'` で期間を絞る（上限は先月ぶんの集計のために足されたもので、今月ぶんは「今」が上限なので結果は変わらない）。`ELECTRICITY_YEN_PER_KWH` は単価（31円/kWh）。
-* 根拠: `def _calculate_cost_between(start: datetime, end: datetime) -> int:` (行番号: 306 / 抜粋: "def _calculate_cost_between(start: datetime, end: datetime) -> int:"), `ELECTRICITY_YEN_PER_KWH = 31` (行番号: 272 / 抜粋: "ELECTRICITY_YEN_PER_KWH = 31")
+* 根拠: `def _calculate_cost_between(start: datetime, end: datetime) -> int:` (行番号: 358 / 抜粋: "def _calculate_cost_between(start: datetime, end: datetime) -> int:"), `ELECTRICITY_YEN_PER_KWH = 31` (行番号: 324 / 抜粋: "ELECTRICITY_YEN_PER_KWH = 31")
 
 * **引数/リクエスト**: `_start_of_month(moment: datetime)`, `_calculate_cost_between(start: datetime, end: datetime)`
-* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 298 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
+* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 350 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
 
 * **戻り値/レスポンス**: `_start_of_month` は `datetime`、`_calculate_cost_between` は `int`
-* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 298 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
+* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 350 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
 
 * **副作用**: `_calculate_cost_between` はデータベースの読み取り操作。
 * 根拠: `df = load_data_from_db(query)` (行番号: 328 / 抜粋: "df = load_data_from_db(query)")
 
 * **エラーハンドリング**: `_calculate_cost_between` は例外発生時にエラーログを出力し `0` を返す。
-* 根拠: `except Exception as e:` (行番号: 354 / 抜粋: "logger.error(f\"Cost Calc Error: {e}\")")
+* 根拠: `except Exception as e:` (行番号: 406 / 抜粋: "logger.error(f\"Cost Calc Error: {e}\")")
 
 
 ### `load_weather_history`
 
 * **役割**: 指定された日数分、指定された場所（デフォルトは伊丹）の天気履歴を取得する。**（Issue #410 L-L2で修正）** 遡り開始日(`start_date`)の算出に使う「現在時刻」を、以前のnaive`datetime.now()`（サーバーのローカルタイムゾーンに依存し、`get_today_date_str()`等が前提とするJSTと日付境界がズレうる）から、JST明示の`datetime.now(pytz.timezone("Asia/Tokyo"))`へ変更した。
-* 根拠: `load_weather_history` (行番号: 291〜308 / 抜粋: "FROM weather_history")、JST明示化 (行番号: 361 / 抜粋: "start_date = (datetime.now(pytz.timezone(\"Asia/Tokyo\")) - timedelta(days=days)).strftime(\"%Y-%m-%d\")")
+* 根拠: `load_weather_history` (行番号: 291〜308 / 抜粋: "FROM weather_history")、JST明示化 (行番号: 413 / 抜粋: "start_date = (datetime.now(pytz.timezone(\"Asia/Tokyo\")) - timedelta(days=days)).strftime(\"%Y-%m-%d\")")
 
 
 * **引数/リクエスト**: `days` (`int`, デフォルト `40`): 遡る日数。`location` (`str`, デフォルト `"伊丹"`): 取得対象の場所。
-* 根拠: `days: int = 40, location: str = "伊丹"` (行番号: 357 / 抜粋: "days: int = 40, location: str = "伊丹"")
+* 根拠: `days: int = 40, location: str = "伊丹"` (行番号: 409 / 抜粋: "days: int = 40, location: str = "伊丹"")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (天気履歴のデータフレーム)
@@ -315,11 +337,11 @@
 ### `load_yearly_temperature_stats`
 
 * **役割**: 指定年の天気履歴（外気温）と室内センサーログ（室温）の日次最小・最大統計を取得し、マージして返す。
-* 根拠: `load_yearly_temperature_stats` (行番号: 429 / 抜粋: "df_merged = pd.merge(df_weather, df_sensor, on="date"")
+* 根拠: `load_yearly_temperature_stats` (行番号: 481 / 抜粋: "df_merged = pd.merge(df_weather, df_sensor, on="date"")
 
 
 * **引数/リクエスト**: `year` (`int`): 対象年。`location` (`str`, デフォルト `"伊丹"`): 対象場所。
-* 根拠: `year: int, location: str = "伊丹"` (行番号: 377 / 抜粋: "year: int, location: str = "伊丹"")
+* 根拠: `year: int, location: str = "伊丹"` (行番号: 429 / 抜粋: "year: int, location: str = "伊丹"")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (マージされた統計データのデータフレーム)
@@ -327,7 +349,7 @@
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `pd.read_sql_query` (行番号: 389 / 抜粋: "df_weather = pd.read_sql_query(q_weather, conn)")
+* 根拠: `pd.read_sql_query` (行番号: 441 / 抜粋: "df_weather = pd.read_sql_query(q_weather, conn)")
 
 
 * **エラーハンドリング**: 各クエリ実行ごとに `try-except` で回避処理。全体の例外発生時はエラーログを出力し空のデータフレームを返す。`finally`で接続を閉じる。**（保守性 #410で修正）** 個別クエリの回避処理は以前bareの`except:`だったが、`except Exception:`へ変更した（`KeyboardInterrupt`/`SystemExit`等の`BaseException`まで握り潰さないようにする一般的なプラクティスに合わせた。挙動そのものは変わらない）。
@@ -335,27 +357,10 @@
 
 
 
-### `load_bicycle_data`
+### （2026-09-21で削除）`load_bicycle_data`
 
-* **役割**: 駐輪場データを取得する。対象テーブルが存在するか事前に検証する。
-* 根拠: `load_bicycle_data` (行番号: 349 / 抜粋: "SELECT * FROM {table_name}")
-
-
-* **引数/リクエスト**: `limit` (`int`, デフォルト `2000`): 取得件数の上限。
-* 根拠: `limit: int = 2000` (行番号: 438 / 抜粋: "limit: int = 2000")
-
-
-* **戻り値/レスポンス**: `pd.DataFrame` (駐輪場データのデータフレーム)
-* 根拠: `-> pd.DataFrame:` (行番号: 340 / 抜粋: "-> pd.DataFrame:")
-
-
-* **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db(query)` (行番号: 350 / 抜粋: "return load_data_from_db(query)")
-
-
-* **エラーハンドリング**: 例外発生時はエラーログを出力し空のデータフレームを返す。
-* 根拠: `except Exception as e:` (行番号: 353 / 抜粋: "return pd.DataFrame()")
-
+* **退役（2026-09-21）**: 以前は`bicycle_parking_records`（旧`config.SQLITE_TABLE_BICYCLE`）から`ORDER BY timestamp DESC LIMIT {limit}`で駐輪場の待機数を返す`load_bicycle_data(limit=2000)`が存在し、ダッシュボードの「🚲 駐輪場待機」カードと「🚃 おでかけ」タブの待機数推移グラフが呼び出し元だった。いずれも使わなくなったためオーナー判断で表示側ごと削除し、本関数と`config.SQLITE_TABLE_BICYCLE`も併せて削除した。`bicycle_parking_records`テーブル自体は履歴として残している（削除マイグレーションは追加していない）。
+* 根拠: 現行の`analysis_service.py`に`load_bicycle_data`という文字列が存在しないこと（削除の確認）
 
 
 ### （Issue #701で削除）`load_ai_report`
@@ -371,11 +376,11 @@
 ### `get_disk_usage`
 
 * **役割**: ルートディレクトリ（`/`）のディスク使用量（全体、使用済、空き、使用率）を取得する。
-* 根拠: `get_disk_usage` (行番号: 460 / 抜粋: "total, used, free = shutil.disk_usage("/")")
+* 根拠: `get_disk_usage` (行番号: 497 / 抜粋: "total, used, free = shutil.disk_usage("/")")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 457 / 抜粋: "def get_disk_usage()")
+* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 494 / 抜粋: "def get_disk_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (GB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -383,7 +388,7 @@
 
 
 * **副作用**: OSファイルシステムのディスク容量読み取り。
-* 根拠: `shutil.disk_usage("/")` (行番号: 460 / 抜粋: "shutil.disk_usage("/")")
+* 根拠: `shutil.disk_usage("/")` (行番号: 497 / 抜粋: "shutil.disk_usage("/")")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `None` を返す。
@@ -398,7 +403,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 476 / 抜粋: "def get_memory_usage()")
+* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 513 / 抜粋: "def get_memory_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (MB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -421,7 +426,7 @@
 
 
 * **引数/リクエスト**: `lines` (`int`, デフォルト `50`): 行数。`priority` (`Optional[str]`): ログの優先度。`target_date` (`Optional[date]`): 対象日付。
-* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 497 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
+* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 534 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
 
 
 * **戻り値/レスポンス**: `str` (取得したログの文字列。失敗時はエラーメッセージの文字列)
@@ -429,11 +434,11 @@
 
 
 * **副作用**: OSコマンド（`journalctl`）の実行。
-* 根拠: `subprocess.run` (行番号: 510 / 抜粋: "subprocess.run(cmd")
+* 根拠: `subprocess.run` (行番号: 547 / 抜粋: "subprocess.run(cmd")
 
 
 * **エラーハンドリング**: 例外発生時はエラーメッセージを文字列として返す。
-* 根拠: `except Exception as e:` (行番号: 513 / 抜粋: "return f"ログ取得エラー: {e}"")
+* 根拠: `except Exception as e:` (行番号: 550 / 抜粋: "return f"ログ取得エラー: {e}"")
 
 
 
@@ -489,7 +494,6 @@ graph TD
         CalcCost["calculate_monthly_cost_cumulative()"]
         LoadWea["load_weather_history()"]
         LoadYearly["load_yearly_temperature_stats()"]
-        LoadBike["load_bicycle_data()"]
     end
 
     subgraph System Stats & Utils
@@ -557,7 +561,6 @@ graph TD
 | デバイス情報の詳細 | `config.MONITOR_DEVICES` の内部構造が不明なため、どのようなデバイスがマッピング対象になるかが完全に特定できない。 | `config.py` |
 | 各種テーブルのスキーマ | `device_records`, `weather_history` 等のテーブル構造定義がないため、各カラムのデータ型や制約が不明。 | DBスキーマ定義ファイルまたは実際のSQLiteファイル |
 | NASのテーブル名 | `getattr(config, "SQLITE_TABLE_NAS", "nas_records")` とされており、本番環境で動的にどちらが使われるか不明。 | `config.py` |
-| 駐輪場データのテーブル名 | `getattr(config, "SQLITE_TABLE_BICYCLE", "bicycle_parking_records")` とされており、設定値が不明。 | `config.py` |
 | Systemdサービスの詳細 | `home_system.service` の実体が不明なため、このサービスが何を出力しているのか不明。（リポジトリ内を`*.service`・`*.timer`等で検索したが該当するSystemdユニット定義ファイルは見つからず、解消不可） | OSのSystemdサービス定義ファイル |
 
 ## 相互参照による補足情報
@@ -565,9 +568,8 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | デバイス情報の詳細 | `MY_HOME_SYSTEM/config.py`を直接確認したところ、`MONITOR_DEVICES`は`devices.json`（`DEVICES_JSON_PATH`、`config.py:232`）の`monitor_devices`キーを`DeviceConfig`Pydanticモデル（`config.py:160〜165`）でバリデーションし`model_dump()`した辞書のリストであることが判明した。`DeviceConfig`のフィールドは`id: str`, `type: str`, `location: str`, `name: str`, `notify_settings: NotifySettings`（デフォルトは`NotifySettings()`）であり、これは`analysis_service.py`側の`apply_friendly_names`が参照する`d["id"]`, `d.get("name", d["id"])`, `d.get("location", "その他")`という辞書アクセスと矛盾なく整合することを確認した。ただし`devices.json`自体（実際に登録されているデバイスの一覧データ）はリポジトリ内に見つからず、実データの内容は依然として不明である。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:160〜165, 232, 296〜313` |
-| 各種テーブルのスキーマ | `MY_HOME_SYSTEM/current_schema.sql`を直接確認したところ、本ファイルが参照する主要テーブルのスキーマが判明した。`device_records`: `id INTEGER PRIMARY KEY AUTOINCREMENT`, `timestamp DATETIME NOT NULL`, `device_name/device_id/device_type TEXT NOT NULL`, `power_watts/temperature_celsius/humidity_percent REAL`, `contact_state/movement_state/brightness_state/hub_onoff/cam_onoff TEXT`, `threshold_watts REAL`, `battery_level INTEGER`。`weather_history`: `id INTEGER PRIMARY KEY AUTOINCREMENT`, `date TEXT NOT NULL`, `location TEXT DEFAULT '伊丹'`, `min_temp/max_temp REAL`, `weather_desc TEXT`, `max_pop INTEGER`, `umbrella_level TEXT`, `recorded_at TEXT`, `UNIQUE(date, location)`。加えて`bicycle_parking_records`と`nas_records`のスキーマも確認でき、これらはそれぞれ`analysis_service.py`の`load_bicycle_data`・`load_nas_status`が発行する`SELECT * FROM {table_name}`クエリの対象カラムと整合する。**（Issue #507で削除）** 以前はここに`app_rankings`テーブルのスキーマも記載していたが、参照元だった`load_ranking_dates`/`load_ranking_data`が削除されたのに合わせ、`current_schema.sql`からも当該テーブル定義を削除したため記載を除いた。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql` |
+| 各種テーブルのスキーマ | `MY_HOME_SYSTEM/current_schema.sql`を直接確認したところ、本ファイルが参照する主要テーブルのスキーマが判明した。`device_records`: `id INTEGER PRIMARY KEY AUTOINCREMENT`, `timestamp DATETIME NOT NULL`, `device_name/device_id/device_type TEXT NOT NULL`, `power_watts/temperature_celsius/humidity_percent REAL`, `contact_state/movement_state/brightness_state/hub_onoff/cam_onoff TEXT`, `threshold_watts REAL`, `battery_level INTEGER`。`weather_history`: `id INTEGER PRIMARY KEY AUTOINCREMENT`, `date TEXT NOT NULL`, `location TEXT DEFAULT '伊丹'`, `min_temp/max_temp REAL`, `weather_desc TEXT`, `max_pop INTEGER`, `umbrella_level TEXT`, `recorded_at TEXT`, `UNIQUE(date, location)`。加えて`nas_records`のスキーマも確認でき、`analysis_service.py`の`load_nas_status`が発行する`SELECT * FROM {table_name}`クエリの対象カラムと整合する（当時は`bicycle_parking_records`と`load_bicycle_data`についても同様に確認していたが、いずれも2026-09-21に退役した）。**（Issue #507で削除）** 以前はここに`app_rankings`テーブルのスキーマも記載していたが、参照元だった`load_ranking_dates`/`load_ranking_data`が削除されたのに合わせ、`current_schema.sql`からも当該テーブル定義を削除したため記載を除いた。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql` |
 | NASのテーブル名 | `MY_HOME_SYSTEM/config.py:249`を直接確認したところ、`SQLITE_TABLE_NAS: str = "nas_records"`とハードコードされた文字列定数として定義されている（環境変数からの読み込みではない）。`analysis_service.py`側の`getattr(config, "SQLITE_TABLE_NAS", "nas_records")`のデフォルト値と完全に一致しており、本番環境でも常に`"nas_records"`が使われることが確定した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:249` |
-| 駐輪場データのテーブル名 | `MY_HOME_SYSTEM/config.py:250`を直接確認したところ、`SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"`とハードコードされた文字列定数として定義されている。`analysis_service.py`側の`getattr(config, "SQLITE_TABLE_BICYCLE", "bicycle_parking_records")`のデフォルト値と完全に一致しており、本番環境でも常に`"bicycle_parking_records"`が使われることが確定した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:250` |
 
 ## 10. 自己検証結果
 

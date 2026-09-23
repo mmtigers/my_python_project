@@ -2,7 +2,7 @@
 """「家のいまの状況」(サマリーカード)の算出と、その最小表示。
 
 このモジュールが1箇所に集めているもの:
-    - 各カードの判定ロジック(実家の動き・在宅・炊飯器・駐輪場・電車・サーバー等)
+    - 各カードの判定ロジック(実家の動き・在宅・炊飯器・サーバー等)
     - カード1枚のHTML組み立て(XSS対策を含む。Issue #378)
     - カードのCSS
 
@@ -22,14 +22,14 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, NamedTuple
 
 import config
 import pandas as pd
 from core.utils import get_now_jst
 
-from services import analysis_service, train_service
+from services import analysis_service
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +39,8 @@ logger = logging.getLogger(__name__)
 STATUS_CACHE_TTL_SEC = 60
 
 # 軽量ページで読む行数。Streamlit 側(10,000行)より小さいのは、カードの判定に
-# 必要なのが「直近」と「今日」と「前日同時刻」だけのため。
+# 必要なのが「直近」と「今日」だけのため。
 MOBILE_SENSOR_ROW_LIMIT = 3000
-MOBILE_BICYCLE_ROW_LIMIT = 3000
 
 # カード1枚のCSS。Streamlit 側の CUSTOM_CSS と軽量ページの両方がこれを使う
 # (どちらかだけ直して見た目が食い違うのを防ぐ)。
@@ -56,12 +55,23 @@ STATUS_CARD_CSS = """
         gap: 8px;
         margin-bottom: 8px;
     }
+    /* カードが1枚だけのグループ(ファミクエ)。auto-fit は1枚だとその1枚を行いっぱいに
+       引き伸ばすため、上下のグループの「2列のリズム」から外れて間延びして見える。
+       列を2つに固定して、スマホでは上下のカードとちょうど同じ幅・同じ左端にする
+       (`minmax(0, ...)` なのは、極端に狭い画面で横にはみ出さないため)。
+       画面が広いときは1列ぶんが広くなりすぎるので、カード側で頭打ちにする。 */
+    .status-grid-solo {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .status-grid-solo > .status-card {
+        max-width: 260px;
+    }
     .status-card {
         padding: 10px 6px;
         border-radius: 12px;
         text-align: center;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        /* 固定heightだと値が2〜3行になるカード(駐輪場など)で文字が溢れるため min-height にする */
+        /* 固定heightだと値や補足が2〜3行に折り返すカードで文字が溢れるため min-height にする */
         min-height: 92px;
         display: flex;
         flex-direction: column;
@@ -97,13 +107,15 @@ STATUS_CARD_CSS = """
     .theme-blue { background-color: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
     .theme-gray { background-color: #f5f5f5; color: #757575; border: 1px solid #e0e0e0; }
 
-    /* 駐輪場カードの前日比。以前は `style='color:#...'` を値のHTMLに直接
-       埋めていたが、それだとダークモードで色を差し替えられない(軽量ページの
-       ダーク対応は下記 `_MOBILE_PAGE_DARK_CSS`)。クラスにして色はCSS側に置く。 */
-    .diff-up { color: #d32f2f; }
-    .diff-down { color: #388e3c; }
-    .diff-flat { color: #757575; }
-    .diff-none { color: #999; }
+    /* カードのグループ見出し。カード自体より小さく薄くして、
+       「読むもの」ではなく「並びの区切り」として見えるようにする。 */
+    .group-title {
+        font-size: 0.8rem;
+        font-weight: bold;
+        color: #666;
+        margin: 14px 0 6px;
+        letter-spacing: 0.04em;
+    }
 """
 
 
@@ -115,23 +127,40 @@ STATUS_CARD_CSS = """
 #     `unified_server` 側)からは読めないため、Streamlit を import しないここに置き、
 #     `dashboard.py` はこれを読み込んで使う。
 #
-# スマホ対応の再設計: 以前はサマリー9枚を常時最上部に出したうえでタブが10個
+# スマホ対応の再設計: 以前はサマリーを常時最上部に出したうえでタブが10個
 # (クエスト/電車遅延/防犯カメラ/電力・環境/気温詳細/健康管理/高砂実家/
 #  ログ分析/システム管理/駐輪場)あり、スマートフォンでは
 #   - どのタブを開いてもサマリーを越えるスクロールが必要
 #   - タブ列が画面幅の数倍になり、目的のタブを探せない
-# という状態だった。用途で5つに束ね直し、サマリーも「ホーム」タブに入れてある。
+# という状態だった。用途で束ね直し、サマリーも「ホーム」タブに入れてある。
+# (当初は5つ。「🚃 おでかけ」は中身の電車運行情報・駐輪場を退役させたため撤去した)
 #
 # キーは `?tab=` のクエリパラメータに入る値でもある
 # (`dashboard.py` の `_render_tab_selector`)。
 DASHBOARD_TABS: tuple[tuple[str, str], ...] = (
     ("home", "🏠 ホーム"),
-    ("out", "🚃 おでかけ"),
     ("watch", "👀 見守り"),
     ("life", "💡 くらし"),
     ("sys", "🔧 システム"),
 )
 DASHBOARD_TAB_KEYS: tuple[str, ...] = tuple(key for key, _ in DASHBOARD_TABS)
+
+# family-quest(PWA)への導線。`unified_server.py` が `/quest` にSPAをマウントしている。
+# ここに置いてあるのはタブ定義と同じ理由で、Streamlit を import しない
+# `dashboard.py` 以外(軽量ページ・カードの組み立て)からも使うため。
+QUEST_APP_PATH = "/quest"
+
+# === カードの並びとグループ ===
+# 並び順は「スマホで開いたときに上から見たい順」= 利用頻度で決めてある。
+# 見守り(留守・在宅・車・カメラ)を最初に、毎回は見ないシステム系を最後に置く。
+# グループの見出しは、9枚が1つの塊に見えて目的のカードを探しにくくなるのを防ぐ。
+CARD_GROUPS: tuple[tuple[str, str], ...] = (
+    ("watch", "👀 見守り"),
+    ("quest", "⚔️ ファミクエ"),
+    ("life", "💡 くらし"),
+    ("sys", "🔧 システム"),
+)
+CARD_GROUP_LABELS: dict[str, str] = dict(CARD_GROUPS)
 
 
 class StatusCard(NamedTuple):
@@ -144,6 +173,10 @@ class StatusCard(NamedTuple):
     `sub`: 値の下に小さく出す補足(前回値・前日比・最終検知時刻など)。「いまの値」
     だけでは高いのか低いのか判断できないカードに、比べる相手を添えるためのもの。
     常にHTMLエスケープされる(`value` と違い、HTML断片は渡せない)。
+    `href`: 詳細がダッシュボードのタブではなく別のアプリにあるカード(ファミクエ)
+    のための、直接のリンク先。指定すると `tab` より優先される。
+    `group`: カードが属する見出し(`CARD_GROUPS` のキー)。よく見るものから順に
+    並べたうえで、どこからどこまでが同じ用途かを見出しで示すために使う。
     """
     title: str
     value: str
@@ -151,6 +184,8 @@ class StatusCard(NamedTuple):
     value_is_html: bool = False
     tab: str | None = None
     sub: str | None = None
+    href: str | None = None
+    group: str | None = None
 
 
 def render_status_card_html(
@@ -168,7 +203,7 @@ def render_status_card_html(
     Issue #378: `title`/`value`はそのまま描画されるため、以前はスクレイピング由来・
     DB由来の文字列(quest_title/reward_title等)をそのまま埋め込むと格納型XSSに
     なりえた。`title`は常にHTMLエスケープする。`value`も既定でエスケープするが、
-    `get_bicycle_status`のように前日比の色付け等で意図的にHTML断片
+    色付け・改行等で意図的にHTML断片
     (`<span>`/`<br>`等)を組み立てて渡す呼び出し元は、`value_is_html=True`を
     指定してエスケープをスキップできる(その場合、`value`の構築元に外部/DB由来の
     生文字列を含めないこと)。
@@ -201,12 +236,17 @@ def render_status_card_html(
 
 
 def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:
-    """カードの詳細が載っているタブへのURLを返す(タブが無いカードは None)。
+    """カードの詳細へのURLを返す(行き先が無いカードは None)。
+
+    `href` を持つカード(詳細がダッシュボードの外にあるファミクエ)はそれを、
+    そうでなければ `tab` からダッシュボードのタブへのURLを作る。
 
     `dashboard_path` は閲覧中のオリジンからのルート相対パス(例: `/dashboard/`)。
     固定URLを埋めると、LAN内のIP・Cloudflare 経由の公開ドメインのどちらか一方でしか
-    繋がらなくなる。
+    繋がらなくなる(`href` 側も同じ理由でルート相対にすること)。
     """
+    if card.href is not None:
+        return card.href
     if card.tab is None:
         return None
     return f"{dashboard_path}?tab={card.tab}"
@@ -219,7 +259,7 @@ ALERT_THEMES: tuple[str, ...] = ("theme-red", "theme-yellow")
 def summarize_alerts(cards) -> list[StatusCard]:
     """いま気にすべきカードだけを、赤 → 黄 の順で返す。
 
-    9枚の並び自体は動かさない。「左上が高砂」と位置で覚えている画面で順番が
+    カードの並び自体は動かさない。「左上が高砂」と位置で覚えている画面で順番が
     入れ替わると、かえって読み違えるため(並べ替えではなく要約で解決する)。
     """
     return [card for theme in ALERT_THEMES for card in cards if card.theme == theme]
@@ -239,24 +279,52 @@ def render_alerts_html(cards, *, dashboard_path: str | None = None) -> str:
     return f'<p class="alerts alerts-warn">⚠️ 気になること: {"、".join(items)}</p>'
 
 
-def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:
-    """カードを自動折り返しのグリッド1ブロックにまとめたHTMLを返す。
+def group_cards(cards) -> list[tuple[str | None, list[StatusCard]]]:
+    """カードを `group` ごとの塊に分ける(並び順は変えない)。
 
-    `dashboard_path` を渡すと、詳細タブを持つカードがそのタブへのリンクになる
+    `CARD_GROUPS` の順に並んでいる前提で、**隣り合う同じグループ**をまとめる。
+    グループを持たないカードは見出し `None` の塊になるので、`group` を付けずに
+    カードを足しても表示から漏れない。
+    """
+    grouped: list[tuple[str | None, list[StatusCard]]] = []
+    for card in cards:
+        if grouped and grouped[-1][0] == card.group:
+            grouped[-1][1].append(card)
+        else:
+            grouped.append((card.group, [card]))
+    return grouped
+
+
+def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:
+    """カードを自動折り返しのグリッドにまとめたHTMLを返す。
+
+    `group` を持つカードには見出しが付く(`CARD_GROUPS`)。9枚が1つの塊に見えると
+    目的のカードを探すのに時間がかかるため、用途の変わり目を示す。
+
+    `dashboard_path` を渡すと、詳細のあるカードがその行き先へのリンクになる
     (軽量ページ専用。理由は `render_status_card_html` の docstring を参照)。
     """
-    cards_html = "".join(
-        render_status_card_html(
-            card.title,
-            card.value,
-            card.theme,
-            value_is_html=card.value_is_html,
-            href=None if dashboard_path is None else card_detail_href(card, dashboard_path),
-            sub=card.sub,
+    blocks = []
+    for group_key, group_cards_ in group_cards(cards):
+        label = CARD_GROUP_LABELS.get(group_key or "")
+        if label:
+            blocks.append(f'<h2 class="group-title">{html.escape(label)}</h2>')
+        # 1枚だけのグループは、カードが行いっぱいに伸びないよう目印を付ける
+        # (理由は `.status-grid-solo` のCSSコメントを参照)。
+        solo = " status-grid-solo" if len(group_cards_) == 1 else ""
+        cards_html = "".join(
+            render_status_card_html(
+                card.title,
+                card.value,
+                card.theme,
+                value_is_html=card.value_is_html,
+                href=None if dashboard_path is None else card_detail_href(card, dashboard_path),
+                sub=card.sub,
+            )
+            for card in group_cards_
         )
-        for card in cards
-    )
-    return f'<div class="status-grid">{cards_html}</div>'
+        blocks.append(f'<div class="status-grid{solo}">{cards_html}</div>')
+    return "".join(blocks)
 
 
 # === 各カードの判定 ===
@@ -364,28 +432,6 @@ def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
     return val, theme
 
 
-def get_traffic_status(jr_status: dict[str, dict[str, Any]]) -> tuple[str, str]:
-    """取得済みのJR運行情報からカードの表示を決める。
-
-    取得(スクレイピング)は呼び出し側が行う。Streamlit 側はキャッシュ付き
-    ラッパー経由、サーバー側は `collect_status_cards` 経由。
-    """
-    line_g = jr_status["宝塚線"]
-    line_a = jr_status["神戸線"]
-    # Issue #438: 同一関数内で is_suspended/is_unavailable は .get() を使う一方、
-    # is_delay だけ直接インデックスアクセスになっており方針が不統一だった。
-    # キーが欠落した応答でも例外にならないよう .get() へ統一する。
-    if line_g.get("is_suspended") or line_a.get("is_suspended"):
-        return "⛔ 運休発生", "theme-red"
-    elif line_g.get("is_delay") or line_a.get("is_delay"):
-        return "⚠️ 遅延あり", "theme-yellow"
-    elif line_g.get("is_unavailable") or line_a.get("is_unavailable"):
-        # Low修正: 取得不可を「平常運転」と偽らず区別する(遅延見逃し防止)
-        return "⚪ 情報取得不可", "theme-gray"
-    else:
-        return "🟢 平常運転", "theme-green"
-
-
 def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:
     if memory:
         return f"💻 RAM: {int(memory['percent'])}%", "theme-green" if memory["percent"] < 80 else "theme-red"
@@ -404,10 +450,65 @@ def get_nas_status_simple(nas_data: pd.Series | None) -> tuple[str, str]:
         return "⚠️ NAS: データ異常", "theme-yellow"
 
 
+def get_quest_status(pending: dict[str, Any] | None) -> tuple[str, str]:
+    """ファミクエで承認待ちになっている申請の件数。
+
+    クエストの進捗やランキングではなく承認待ちを出すのは、これだけが
+    「見た人が今すぐ動く必要がある」情報だからで、ほかは family-quest(PWA)側で見る。
+    待たせている状態を拾ってほしいので、1件でもあれば黄色にして要約行に出す。
+    """
+    if pending is None:
+        return "⚪ 取得失敗", "theme-gray"
+    count = int(pending.get("count", 0) or 0)
+    if count == 0:
+        return "✅ なし", "theme-green"
+    return f"⏳ {count}件", "theme-yellow"
+
+
 def get_car_status(df_car: pd.DataFrame) -> tuple[str, str]:
     if not df_car.empty and df_car.iloc[0]["action"] == "LEAVE":
         return "🚗 外出中", "theme-yellow"
     return "🏠 在宅", "theme-green"
+
+
+# カメラの動体検知が `device_records` に入るときの `device_type`
+# (`monitors/camera_monitor.py` が ONVIF のイベントを受けて書く)。
+CAMERA_DEVICE_TYPE = "ONVIF_CAMERA"
+
+
+def _camera_motion(df_sensor: pd.DataFrame) -> pd.DataFrame:
+    """カメラが動きを捉えた行(新しい順)。
+
+    判定(`get_camera_status`)と補足表示(`describe_camera`)が同じ抽出を共有する。
+    """
+    required_cols = ["device_type", "movement_state"]
+    if df_sensor.empty or not all(col in df_sensor.columns for col in required_cols):
+        return df_sensor.iloc[0:0]
+    return df_sensor[
+        (df_sensor["device_type"] == CAMERA_DEVICE_TYPE) &
+        (df_sensor["movement_state"] == "ON")
+    ].sort_values("timestamp", ascending=False)
+
+
+def get_camera_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
+    """カメラが最後に動きを捉えたのはいつか。
+
+    **色は常に情報色(青)かグレーにする**。家族が出入りすれば毎日検知するため、
+    赤・黄にすると「気になること」の要約行が毎回埋まって意味を失う。
+    「誰かが来たかどうか」は人が見て判断する情報として出すだけにとどめる。
+    """
+    df_cam = _camera_motion(df_sensor)
+    if df_cam.empty:
+        return "⚪ データなし", "theme-gray"
+
+    diff_m = (now - df_cam.iloc[0]["timestamp"]).total_seconds() / 60
+    if diff_m < 10:
+        return "🎥 いま動きあり", "theme-blue"
+    if diff_m < 60:
+        return f"🎥 {int(diff_m)}分前に検知", "theme-blue"
+    if diff_m < 24 * 60:
+        return f"🎥 {int(diff_m / 60)}時間前に検知", "theme-blue"
+    return "🎥 24時間 検知なし", "theme-gray"
 
 
 # 炊飯器が「稼働していた」とみなす消費電力(W)。
@@ -437,71 +538,6 @@ def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
     if not df_rice.empty and not df_rice[df_rice["timestamp"] >= today_start].empty:
         val = "🍚 ご飯あり"
         theme = "theme-green"
-    return val, theme
-
-
-def get_bicycle_status(df_bicycle: pd.DataFrame) -> tuple[str, str]:
-    if df_bicycle.empty:
-        return "⚪ データなし", "theme-gray"
-
-    targets = {
-        "JR伊丹駅前(第1)自転車駐車場 (A)": "第1A",
-        "JR伊丹駅前(第3)自転車駐車場 (A)": "第3A",
-        "JR伊丹駅前(第3)自転車駐車場 (E)": "第3E",
-    }
-
-    # タイムゾーン処理
-    if not pd.api.types.is_datetime64_any_dtype(df_bicycle["timestamp"]):
-        df_bicycle = df_bicycle.copy()
-        df_bicycle["timestamp"] = pd.to_datetime(df_bicycle["timestamp"]).dt.tz_convert("Asia/Tokyo")
-
-    latest_df = df_bicycle.sort_values("timestamp", ascending=False).drop_duplicates("area_name")
-    details = []
-    total_wait = 0
-    has_data = False
-
-    for full_name, short_name in targets.items():
-        row = latest_df[latest_df["area_name"] == full_name]
-        if not row.empty:
-            current_val = int(row.iloc[0]["waiting_count"])
-            current_time = row.iloc[0]["timestamp"]
-
-            # 前日比計算
-            target_time = current_time - timedelta(days=1)
-            df_area = df_bicycle[df_bicycle["area_name"] == full_name]
-            df_near = df_area[
-                (df_area["timestamp"] >= target_time - timedelta(hours=2)) &
-                (df_area["timestamp"] <= target_time + timedelta(hours=2))
-            ]
-
-            diff_str = ""
-            if not df_near.empty:
-                nearest_idx = (df_near["timestamp"] - target_time).abs().idxmin()
-                past_val = int(df_near.loc[nearest_idx]["waiting_count"])
-                diff = current_val - past_val
-                if diff > 0:
-                    diff_str = f" <span class='diff-up'>(🔺{diff})</span>"
-                elif diff < 0:
-                    diff_str = f" <span class='diff-down'>(🔻{abs(diff)})</span>"
-                else:
-                    diff_str = " <span class='diff-flat'>(➡️0)</span>"
-            else:
-                diff_str = " <span class='diff-none'>(--)</span>"
-
-            details.append(f"{short_name}: <b>{current_val}</b>台{diff_str}")
-            total_wait += current_val
-            has_data = True
-        else:
-            details.append(f"{short_name}: -")
-
-    if not has_data:
-        return "⚪ データなし", "theme-gray"
-
-    val = (
-        "<div style='font-size:0.85rem; line-height:1.4; text-align:left; display:inline-block;'>"
-        f"{'<br>'.join(details)}</div>"
-    )
-    theme = "theme-green" if total_wait == 0 else ("theme-yellow" if total_wait < 10 else "theme-red")
     return val, theme
 
 
@@ -553,18 +589,32 @@ def describe_car(df_car: pd.DataFrame, now: datetime) -> str | None:
     return f"{at} に出発" if df_car.iloc[0]["action"] == "LEAVE" else f"{at} に帰宅"
 
 
+def describe_camera(df_sensor: pd.DataFrame, now: datetime) -> str | None:
+    """どのカメラが捉えたのか。値の「5分前に検知」だけでは場所が分からない。"""
+    df_cam = _camera_motion(df_sensor)
+    at = _format_moment(_latest_timestamp(df_cam), now)
+    if at is None:
+        return None
+    if "friendly_name" not in df_cam.columns:
+        return at
+    name = df_cam.iloc[0]["friendly_name"]
+    return at if pd.isna(name) else f"{name} {at}"
+
+
+def describe_quest(pending: dict[str, Any] | None, now: datetime) -> str | None:
+    """いちばん長く待たせている申請(誰の・いつ)。0件のときは出さない。"""
+    if not pending or not pending.get("count"):
+        return None
+    at = _format_moment(pd.to_datetime(pending.get("oldest_at"), errors="coerce"), now)
+    if at is None:
+        return None
+    name = pending.get("oldest_name")
+    return f"{name} {at} から" if name else f"{at} から"
+
+
 def describe_rice(df_sensor: pd.DataFrame, now: datetime) -> str | None:
     at = _format_moment(_latest_timestamp(_rice_cooking_rows(df_sensor)), now)
     return None if at is None else f"前回 {at}"
-
-
-def describe_traffic(jr_status: dict[str, dict[str, Any]]) -> str | None:
-    """乱れている路線の名前。どれが止まっているかはカードの値からは分からない。"""
-    affected = [
-        name for name, line in jr_status.items()
-        if line.get("is_suspended") or line.get("is_delay")
-    ]
-    return "・".join(affected) if affected else None
 
 
 def describe_cost(monthly_cost: int, last_month_cost: int | None) -> str | None:
@@ -598,15 +648,20 @@ def build_status_cards(
     now: datetime,
     df_sensor: pd.DataFrame,
     df_car: pd.DataFrame,
-    df_bicycle: pd.DataFrame,
     nas_data: pd.Series | None,
-    jr_status: dict[str, dict[str, Any]],
     memory: dict[str, float] | None,
     monthly_cost: int,
     last_month_cost: int | None = None,
     disk: dict[str, float] | None = None,
+    pending_quests: dict[str, Any] | None = None,
 ) -> list[StatusCard]:
     """渡された材料から、並べる順にカードを組み立てる(取得は行わない)。
+
+    並び順は「スマホで上から見たい順」= 利用頻度で決めてある(`CARD_GROUPS`)。
+    見守り(実家・自宅・車・カメラ)→ ファミクエ → くらし → システムの順で、
+    毎回は見ないシステム系が最後に来る。順番を変えるとどの位置に何があるかの
+    記憶が無効になるので、変えるときは軽量ページ・Streamlit の両方が同じ順に
+    なること(ここが唯一の定義元であること)を保ったまま変えること。
 
     `last_month_cost`・`disk` は補足表示(`sub`)にだけ使う。渡さなければ補足が
     出ないだけで、カードの値と色は変わらない。
@@ -614,34 +669,35 @@ def build_status_cards(
     taka_val, taka_theme = get_takasago_status(df_sensor, now)
     itami_val, itami_theme = get_itami_status(df_sensor, now)
     car_val, car_theme = get_car_status(df_car)
+    camera_val, camera_theme = get_camera_status(df_sensor, now)
+    quest_val, quest_theme = get_quest_status(pending_quests)
     rice_val, rice_theme = get_rice_status(df_sensor, now)
-    bicycle_val, bicycle_theme = get_bicycle_status(df_bicycle)
-    traffic_val, traffic_theme = get_traffic_status(jr_status)
     server_val, server_theme = get_server_status(memory)
     nas_val, nas_theme = get_nas_status_simple(nas_data)
 
-    # Issue #378: get_bicycle_status は前日比の色付け(<span>)等を意図的に組み立てて
-    # 返すため、HTMLエスケープをスキップする(value_is_html=True)。
     # `tab` は「このカードの詳細が載っているタブ」。軽量ページはこれを使って
     # カード自体をリンクにする(異常に気づいてから詳細を開くまでを1タップにする)。
+    # ファミクエだけは詳細がダッシュボードの外(PWA)にあるので `href` を使う。
     return [
-        StatusCard("👵 高砂 (実家)", taka_val, taka_theme, tab="watch",
+        StatusCard("👵 高砂 (実家)", taka_val, taka_theme, tab="watch", group="watch",
                    sub=describe_takasago(df_sensor, now)),
-        StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme, tab="watch",
+        StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme, tab="watch", group="watch",
                    sub=describe_itami(df_sensor, now)),
-        StatusCard("🚗 車 (伊丹)", car_val, car_theme, tab="watch",
+        StatusCard("🚗 車 (伊丹)", car_val, car_theme, tab="watch", group="watch",
                    sub=describe_car(df_car, now)),
-        StatusCard("🍚 炊飯器", rice_val, rice_theme, tab="life",
+        StatusCard("🎥 カメラ", camera_val, camera_theme, tab="watch", group="watch",
+                   sub=describe_camera(df_sensor, now)),
+        # 見出し(「⚔️ ファミクエ」)と同じ言葉をカード名にすると2行続けて同じに
+        # 見えるため、カード側は中身(何を待たせているか)を名前にする。
+        StatusCard("📝 承認待ち", quest_val, quest_theme, href=QUEST_APP_PATH, group="quest",
+                   sub=describe_quest(pending_quests, now)),
+        StatusCard("🍚 炊飯器", rice_val, rice_theme, tab="life", group="life",
                    sub=describe_rice(df_sensor, now)),
-        StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue", tab="life",
+        StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue", tab="life", group="life",
                    sub=describe_cost(monthly_cost, last_month_cost)),
-        # 駐輪場は値そのものが前日比を含むので補足は付けない。
-        StatusCard("🚲 駐輪場待機", bicycle_val, bicycle_theme, value_is_html=True, tab="out"),
-        StatusCard("🚃 JR運行情報", traffic_val, traffic_theme, tab="out",
-                   sub=describe_traffic(jr_status)),
-        StatusCard("🖥️ サーバー", server_val, server_theme, tab="sys",
+        StatusCard("🖥️ サーバー", server_val, server_theme, tab="sys", group="sys",
                    sub=describe_server(disk)),
-        StatusCard("🗄️ NAS", nas_val, nas_theme, tab="sys",
+        StatusCard("🗄️ NAS", nas_val, nas_theme, tab="sys", group="sys",
                    sub=describe_nas(nas_data)),
     ]
 
@@ -695,32 +751,30 @@ def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard],
 
     df_sensor = _cached("sensor", lambda: analysis_service.load_sensor_data(limit=MOBILE_SENSOR_ROW_LIMIT))
     df_car = _cached("car", lambda: analysis_service.load_generic_data(config.SQLITE_TABLE_CAR))
-    df_bicycle = _cached("bicycle", lambda: analysis_service.load_bicycle_data(limit=MOBILE_BICYCLE_ROW_LIMIT))
     nas_data = _cached("nas", analysis_service.load_nas_status)
-    jr_status = _cached("jr", train_service.get_jr_traffic_status)
     memory = _cached("memory", analysis_service.get_memory_usage)
     monthly_cost = _cached("cost", analysis_service.calculate_monthly_cost_cumulative)
     last_month_cost = _cached("cost_last_month", analysis_service.calculate_last_month_cost_same_point)
     disk = _cached("disk", analysis_service.get_disk_usage)
+    pending_quests = _cached("quest", analysis_service.load_pending_quest_approvals)
 
     cards = build_status_cards(
         now,
         df_sensor if df_sensor is not None else empty,
         df_car if df_car is not None else empty,
-        df_bicycle if df_bicycle is not None else empty,
         nas_data,
-        jr_status or {"宝塚線": {"is_unavailable": True}, "神戸線": {"is_unavailable": True}},
         memory,
         monthly_cost or 0,
         last_month_cost=last_month_cost,
         disk=disk,
+        pending_quests=pending_quests,
     )
     return cards, now
 
 
 # === 軽量ページのHTML ===
 # Streamlit を介さない読み取り専用ページ(`/dashboard/m`)。
-# 「スマホで見るのは結局この9枚」という用途に対して、Streamlit の初期化・
+# 「スマホで見るのは結局このカードだけ」という用途に対して、Streamlit の初期化・
 # WebSocket 接続・React の読み込みを丸ごと省く。サーバーが1回のリクエストで
 # HTMLを返して終わりなので、回線が細い場所でも開く。
 # ダッシュボード本体(Streamlit)は、グラフ・ログ・メンテナンス操作を持つ
@@ -745,8 +799,8 @@ _MOBILE_PAGE_BASE_CSS = """
     h1 { font-size: 1.25rem; margin: 0 0 2px; }
     .meta { font-size: 0.8rem; color: #666; margin: 0 0 12px; }
 
-    /* 「気になること」の要約行。9枚の並びは固定のままにして、赤・黄のカードだけを
-       名前で拾って先頭に出す(JR運行情報は7枚目にあり、異常でも埋もれていた)。
+    /* 「気になること」の要約行。カードの並びは固定のままにして、赤・黄のカードだけを
+       名前で拾って先頭に出す(後ろのほうのカードは、異常でも埋もれていた)。
        異常が無いときも同じ位置に1行出すので、更新のたびに下の内容が跳ねない。 */
     .alerts {
         margin: 0 0 10px;
@@ -857,10 +911,6 @@ _MOBILE_PAGE_DARK_CSS = """
         .theme-red { background-color: #3d1f22; color: #ef9a9a; border-color: #6b2f35; }
         .theme-blue { background-color: #16304a; color: #90caf9; border-color: #24507a; }
         .theme-gray { background-color: #262626; color: #bdbdbd; border-color: #3a3a3a; }
-        .diff-up { color: #ef9a9a; }
-        .diff-down { color: #a5d6a7; }
-        .diff-flat { color: #bdbdbd; }
-        .diff-none { color: #9e9e9e; }
         nav a { background: #16304a; color: #90caf9; border-color: #24507a; }
         #status.stale::after { color: #ef9a9a; }
     }
