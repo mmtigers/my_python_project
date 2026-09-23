@@ -28,10 +28,21 @@
   (ドライラン時は調査結果の通知のみ)。フック未設定のうちは従来どおり
   検知・通知のみ（現運用: 通知を受けて人間がClaude Codeセッションで調査）。
 
-層3: 死活監視（ラズパイの外）
-  Cloudflare Zero Trust の Tunnel Health アラート。
-  ラズパイごと死ぬと層1自体が動けないため、既存のCloudflare Tunnel
-  （cloudflared、常時稼働）の切断をCloudflare側からメール通知させる。
+層3: 死活監視（ラズパイの外、Issue #775で拡充）
+  (a) health_watch.py からのハートビート送信（外部デッドマンスイッチ、推奨・主）。
+      health_watch.py が実行完了するたびに config.HEALTH_WATCH_DEADMAN_PING_URL
+      （healthchecks.io等のping URL）へ outbound でハートビートを送る
+      （_ping_deadman_switch）。電源断・SDカード故障・ネットワーク断・
+      systemdごと巻き込むハングでcron自体が動かなくなると、通知を出す主体
+      そのものが止まるため層1のDiscord通知では検知できない穴を塞ぐ。
+      外形監視（UptimeRobot等から/healthを叩く）は採らなかった —
+      /health はCloudflare Accessの内側にあり（#725）、無認証の外形監視では
+      常にAccessのログイン画面(302)が返って「常に落ちている」と誤判定される。
+      Pi側からのoutboundハートビートはAccessの制約を受けない。
+      未設定(既定)なら送信しない(段階投入)。
+  (b) Cloudflare Zero Trust の Tunnel Health アラート（従来からの補助）。
+      既存のCloudflare Tunnel（cloudflared、常時稼働）の切断をCloudflare側
+      からメール通知させる。(a)と独立した経路のため併用してよい。
 ```
 
 ### なぜこの構成か（2026-09-02改訂）
@@ -59,7 +70,24 @@
 
 毎時10分にしているのは、毎時0分に走る既存ジョブ（newface_monitor等)や時報系の負荷と重ねないため。
 
-### 層3: Cloudflare Tunnelアラート（ダッシュボードで1回、無料）
+### 層3(a): 外部デッドマンスイッチ（healthchecks.io等のアカウント作成が必要。Issue #775）
+
+1. [healthchecks.io](https://healthchecks.io/) 等でアカウントを作成し、新規チェック(Check)を1つ作る。
+2. **Period（周期）を60分**、**Grace（猶予）を180分**に設定する（health_watch.pyの毎時cron
+   ＝(a)節の設定と揃える。周期の3倍程度を猶予にすることで、一時的なネットワーク瞬断による
+   誤検知を避ける）。
+3. 通知先（メール等、Discordに依存しない経路）をサービス側の設定で有効化する。
+4. 発行されたping URL（例: `https://hc-ping.com/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`）を
+   実機の `.env` の `HEALTH_WATCH_DEADMAN_PING_URL` に設定する
+   （未設定のうちは送信されない。`HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC`は既定10秒）。
+5. `home_system.service` を再起動せず(cronの次回実行を待つか)、手動で一度
+   `python monitors/health_watch.py` を実行し、サービス側のダッシュボードでping受信を確認する。
+
+これでラズパイの電源断・SDカード故障・ネットワーク断・systemdごと巻き込むハングで
+health_watch.py自体が動かなくなった場合に、外部サービス側がハートビートの途絶を
+検知して通知する。
+
+### 層3(b): Cloudflare Tunnelアラート（ダッシュボードで1回、無料）
 
 1. [Cloudflare Zero Trustダッシュボード](https://one.dash.cloudflare.com/) → Notifications（アカウントの通知設定）
 2. 「Add」→ アラートタイプ **Tunnel Health（Tunnel status changes / becomes unhealthy）** を選択
@@ -69,8 +97,8 @@
 
 ### 残存ギャップと運用でのカバー
 
-- **層1のcron自体が壊れた場合**（venv破損等）: `run_task.sh` が `logs/health_watch.log` にERROR行を記録し、週次の `log_analyzer.py` レポートが拾う（最大1週間の検知遅延は許容）。
-- **通知の送信失敗**: health_watchはexit 1で終了し、同様に週次レポートで拾われる。
+- **層1のcron自体が壊れた場合**（venv破損等でPython自体が起動できない）: health_watch.py本体が動かないため層3(a)のハートビートも送られない。`HEALTH_WATCH_DEADMAN_PING_URL` を設定していれば、Grace（既定180分）を超えた時点で外部サービス側が検知・通知する（未設定なら従来どおり `run_task.sh` が `logs/health_watch.log` にERROR行を記録し、週次の `log_analyzer.py` レポートが拾う。最大1週間の検知遅延は許容）。
+- **通知の送信失敗**: health_watchはexit 1で終了し、同様に週次レポートで拾われる。ただし層3(a)の成功pingは `internal_errors`（チェック関数自体の例外）がある場合のみ抑止され、Discordへの異常通知(`send_push`)が失敗しただけでは抑止されない（cronとネットワークが生きている事実自体は変わらないため）。
 
 ## マーカーファイル規約
 

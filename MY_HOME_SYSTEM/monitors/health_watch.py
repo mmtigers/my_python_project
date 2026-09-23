@@ -32,6 +32,14 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
 設定されている場合のみ、通知と同じ抑制の内側で自動調査フック
 (scripts/claude_investigate.sh)を fire-and-forget 起動する。未設定なら
 従来どおり検知・通知のみ。
+
+層3(Issue #775): config.HEALTH_WATCH_DEADMAN_PING_URL が設定されている場合のみ、
+本スクリプトの実行完了ごとに外部デッドマンスイッチ(healthchecks.io等)へ
+ハートビートを送る(_ping_deadman_switch)。電源断・SDカード故障・ネットワーク断・
+systemdごと巻き込むハングでcron自体が動かなくなると、通知を出す主体そのものが
+止まるため上記チェック1〜12のDiscord通知では検知できない。外部サービス側で
+ハートビートの途絶を検知させることでこの穴を塞ぐ(通知経路はDiscordに依存しない)。
+未設定なら従来どおり送信しない。
 """
 
 import datetime
@@ -736,6 +744,32 @@ def _should_notify(anomaly_keys: List[str], now: datetime.datetime) -> bool:
     return True
 
 
+def _ping_deadman_switch(ok: bool) -> None:
+    """層3(Issue #775): 外部デッドマンスイッチへハートビートを送る。
+
+    `config.HEALTH_WATCH_DEADMAN_PING_URL` が未設定なら何もしない(既定)。設定時は
+    health_watch自身が完走したことを示すため、チェックの異常検知(anomalies)の
+    有無に関わらず `ok=True` で成功pingを送る — 異常の有無は既存のDiscord通知が
+    担っており、ここで塞ぎたいのは「cronそのものが動いているか」という別の信号
+    (電源断・SDカード故障・ネットワーク断・systemdごと巻き込むハングでcronが
+    動かなくなると、通知を出す主体そのものが止まり層1のDiscord通知も届かない)。
+    チェック関数自体が例外を送出した(internal_errors)場合のみ `ok=False` とし、
+    healthchecks.io の規約に従いURL末尾に `/fail` を付けて送る。
+
+    送信の成否・例外はここで握り潰しWARNINGログのみに留める。「Pi自体の停止検知」は
+    外部サービス側がハートビートの途絶で判定する設計のため、ping自体の失敗を
+    health_watchの異常検知・通知フロー(exit_code)に混ぜ込まない。
+    """
+    url = config.HEALTH_WATCH_DEADMAN_PING_URL
+    if not url:
+        return
+    target = url if ok else url.rstrip("/") + "/fail"
+    try:
+        requests.get(target, timeout=config.HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC)
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"⚠️ デッドマンスイッチへのハートビート送信に失敗しました: {e}")
+
+
 def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:
     """層2(自動調査)フックを発火する(Issue #339)。
 
@@ -843,6 +877,9 @@ def run_checks() -> int:
 
     # マーカーは通知の成否に関わらず更新する(同じログ行の重複検知を防ぐ)
     _write_marker(now)
+    # 層3(Issue #775): 完走したことを外部デッドマンスイッチへ知らせる。
+    # anomaliesの有無は問わない(それは既にDiscord通知が担う別の信号)。
+    _ping_deadman_switch(ok=not internal_errors)
     return exit_code
 
 
