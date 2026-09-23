@@ -386,7 +386,7 @@ const QuestItem: React.FC<{
                         {...interactiveProps}
                         className={`flex flex-col gap-0.5 h-full ${(canCancel || forceSlim) ? 'cursor-pointer select-none' : ''}`}
                     >
-                        <div className={`flex items-center gap-1.5 ${panelMode ? 'text-xs' : 'text-sm'} ${isLocked ? 'text-gray-500' : isDone ? 'text-gray-400 line-through decoration-2' : 'text-gray-300'}`}>
+                        <div className={`flex items-center gap-1.5 ${panelMode ? 'min-h-8 text-xs' : 'min-h-10 text-sm'} ${isLocked ? 'text-gray-500' : isDone ? 'text-gray-400 line-through decoration-2' : 'text-gray-300'}`}>
                             <span className="min-w-0 truncate">{displayTitle}</span>
                             {isLocked && <span className="text-[10px] text-gray-500 ml-1 flex-none">未開放</span>}
                             {isDone && (

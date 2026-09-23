@@ -798,13 +798,14 @@ YOUTUBE_DAILY_LIMIT_MINUTES_HOLIDAY: int = _get_int_env("YOUTUBE_DAILY_LIMIT_MIN
 # いきなり制限がかかると子どもが困惑するため、この日を迎えるまでは使用を拒否せず
 # family-quest側に予告バナーを表示するだけに留める
 # (services/quest/locks.py の _is_youtube_daily_limit_enforced が判定)。
-# 既定値はこの機能を追加した日(2026-09-20)の1週間後。実際にリリースする日程に
+# 既定値は2026-09-23の要件確認により、翌日(2026-09-24)へ前倒しした
+# (元は機能追加日(2026-09-20)の1週間後=2026-09-27だった)。実際にリリースする日程に
 # 合わせて調整すること。パース失敗時は安全側(=即時強制)にフォールバックする。
 # 捕捉するのは ValueError だけ: _date.fromisoformat が不正な日付文字列に対して
 # 送出するのはこれであり、それ以外の例外(実装の誤り)まで握り潰さないため。
 # すぐ上の YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM が Exception を捕捉しているのは
 # 先に書かれたコードの名残で、意図的な差ではない。
-_youtube_daily_limit_enforce_from_str: str = os.getenv("YOUTUBE_DAILY_LIMIT_ENFORCE_FROM", "2026-09-27")
+_youtube_daily_limit_enforce_from_str: str = os.getenv("YOUTUBE_DAILY_LIMIT_ENFORCE_FROM", "2026-09-24")
 try:
     YOUTUBE_DAILY_LIMIT_ENFORCE_FROM: _date = _date.fromisoformat(_youtube_daily_limit_enforce_from_str)
 except ValueError as e:
