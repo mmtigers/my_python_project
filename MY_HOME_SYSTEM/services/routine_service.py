@@ -858,7 +858,7 @@ class RoutineService:
         }
 
     def complete_step(
-        self, user_id: str, flow_key: str, step_key: str, now: Optional[datetime.datetime] = None
+        self, user_id: str, flow_key: str, step_key: str, now: datetime.datetime | None = None
     ) -> Dict[str, Any]:
         # Issue #737 (AUDIT-007): TV解錠(SwitchBot API 経由の fire-and-forget な物理的
         # 副作用)はトランザクションのコミット後に起動する。以前は with ブロック内
