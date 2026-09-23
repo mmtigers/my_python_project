@@ -649,6 +649,17 @@ HEALTH_WATCH_PROBE_BASE_URL: str = os.getenv("HEALTH_WATCH_PROBE_BASE_URL", "htt
 HEALTH_WATCH_PROBE_TIMEOUT_SEC: int = _get_int_env("HEALTH_WATCH_PROBE_TIMEOUT_SEC", 10)
 HEALTH_WATCH_PROBE_DB_TIMEOUT_SEC: int = _get_int_env("HEALTH_WATCH_PROBE_DB_TIMEOUT_SEC", 20)
 
+# Issue #775: 層3(ラズパイ自体の外部からの死活監視)。health_watch.py がチェックを
+# 完走するたびに、healthchecks.io等の外部サービスのping URLへハートビートを送る。
+# 電源断・SDカード故障・ネットワーク断・systemdごと巻き込むハングでcronが動かなく
+# なると、通知を出す主体そのものが止まるため、層1(check_*)のDiscord通知では検知
+# できない。外部サービス側でハートビートの途絶を検知して通知させることで塞ぐ
+# (通知経路はDiscordに依存しない。設定はサービス側のダッシュボードで行う)。
+# 未設定(既定)なら送信しない。サービス側のPeriod/Graceの目安はdocs/runbooks/
+# raspi_claude_log_monitoring.md の層3セクション参照。
+HEALTH_WATCH_DEADMAN_PING_URL: str = os.getenv("HEALTH_WATCH_DEADMAN_PING_URL", "")
+HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC: int = _get_int_env("HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC", 10)
+
 # ==========================================
 # 13. NASパスの遅延解決 (Issue #330 PR-B)
 # ==========================================

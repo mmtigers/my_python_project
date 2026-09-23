@@ -889,3 +889,84 @@ class TestCheckRepoBehindUpstream:
 
         assert keys_seen == ["repo_behind"]
         assert "コミット遅れています" in sent[0][0]["text"]
+
+
+class TestPingDeadmanSwitch:
+    """層3(Issue #775): 外部デッドマンスイッチへのハートビート送信。"""
+
+    def test_noop_when_url_unset(self, monkeypatch):
+        monkeypatch.setattr(config, "HEALTH_WATCH_DEADMAN_PING_URL", "", raising=False)
+        with patch.object(health_watch.requests, "get") as get:
+            health_watch._ping_deadman_switch(ok=True)
+        get.assert_not_called()
+
+    def test_pings_plain_url_on_success(self, monkeypatch):
+        monkeypatch.setattr(
+            config, "HEALTH_WATCH_DEADMAN_PING_URL", "https://hc-ping.com/abc123", raising=False
+        )
+        monkeypatch.setattr(config, "HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC", 7, raising=False)
+        with patch.object(health_watch.requests, "get") as get:
+            health_watch._ping_deadman_switch(ok=True)
+        get.assert_called_once_with("https://hc-ping.com/abc123", timeout=7)
+
+    def test_pings_fail_suffix_when_not_ok(self, monkeypatch):
+        monkeypatch.setattr(
+            config, "HEALTH_WATCH_DEADMAN_PING_URL", "https://hc-ping.com/abc123", raising=False
+        )
+        with patch.object(health_watch.requests, "get") as get:
+            health_watch._ping_deadman_switch(ok=False)
+        get.assert_called_once_with("https://hc-ping.com/abc123/fail", timeout=10)
+
+    def test_network_failure_is_swallowed_with_warning_log(self, monkeypatch):
+        """外部サービスへ到達できなくても例外を外へ漏らさないこと
+        (health_watch自体の異常検知・通知フロー・終了コードを巻き込まない)。"""
+        monkeypatch.setattr(
+            config, "HEALTH_WATCH_DEADMAN_PING_URL", "https://hc-ping.com/abc123", raising=False
+        )
+        fake_logger = MagicMock()
+        monkeypatch.setattr(health_watch, "logger", fake_logger)
+        with patch.object(
+            health_watch.requests, "get",
+            side_effect=health_watch.requests.exceptions.ConnectionError("unreachable"),
+        ):
+            health_watch._ping_deadman_switch(ok=True)  # 例外が外へ漏れないこと
+        assert fake_logger.warning.called
+
+    def test_run_checks_pings_success_even_with_anomalies(self, tmp_path, monkeypatch):
+        """アプリ側の異常検知(anomalies)はDiscord通知が担う別の信号のため、
+        internal_errorsが無ければcron完走の成功ping(ok=True)を送ること。"""
+        _stub_every_check(monkeypatch)
+        monkeypatch.setattr(
+            health_watch, "check_service_active",
+            lambda: "home_system.service が active ではありません",
+        )
+        monkeypatch.setattr(health_watch, "MARKER_FILE", str(tmp_path / "marker"))
+        monkeypatch.setattr(health_watch, "NOTIFY_STATE_FILE", str(tmp_path / "state"))
+        monkeypatch.setattr(health_watch, "send_push", MagicMock(return_value=True))
+        monkeypatch.setattr(health_watch, "_fire_investigate_hook", MagicMock())
+
+        ping = MagicMock()
+        monkeypatch.setattr(health_watch, "_ping_deadman_switch", ping)
+
+        health_watch.run_checks()
+
+        ping.assert_called_once_with(ok=True)
+
+    def test_run_checks_pings_failure_when_a_check_raises(self, tmp_path, monkeypatch):
+        """チェック関数自体が例外を送出した(internal_errors)場合はok=Falseで送ること。"""
+        _stub_every_check(monkeypatch)
+
+        def _boom():
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(health_watch, "check_service_active", _boom)
+        monkeypatch.setattr(health_watch, "MARKER_FILE", str(tmp_path / "marker"))
+        monkeypatch.setattr(health_watch, "NOTIFY_STATE_FILE", str(tmp_path / "state"))
+        monkeypatch.setattr(health_watch, "send_push", MagicMock(return_value=True))
+
+        ping = MagicMock()
+        monkeypatch.setattr(health_watch, "_ping_deadman_switch", ping)
+
+        health_watch.run_checks()
+
+        ping.assert_called_once_with(ok=False)
