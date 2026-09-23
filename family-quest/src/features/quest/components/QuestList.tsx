@@ -414,6 +414,34 @@ const QuestItem: React.FC<{
     );
 };
 
+// 「もっと見る」用の折りたたみ状態(件数上限超過分のforceSlim対象・カットオフ位置)を、
+// 必須クエスト・ボーナスクエストそれぞれの列に対して独立に算出する(要件確認済み、
+// 2026-09-23: 常時表示は必須クエストのみにし、ボーナスクエストは折りたたみ表示にする)。
+function computeOverflow(
+    list: Quest[],
+    currentUser: User,
+    completedQuests: QuestHistory[],
+    pendingQuests: QuestHistory[],
+): { activeCount: number; forceSlimIds: Set<number>; overflowCount: number; cutoffQuestId?: number } {
+    let activeCount = 0;
+    let countedForLimit = 0;
+    const forceSlim = new Set<number>();
+    let cutoffId: number | undefined;
+    for (const q of list) {
+        const { isLocked, isDone, isPending } = getQuestLockState(q, currentUser, completedQuests, pendingQuests);
+        if (isLocked || isDone) continue;
+        activeCount++;
+        if (isPending) continue; // 申請中は常にカード表示のままにする(件数上限の対象外)
+        countedForLimit++;
+        if (countedForLimit <= ACTIONABLE_CARD_LIMIT) {
+            cutoffId = q.quest_id;
+        } else if (q.quest_id !== undefined) {
+            forceSlim.add(q.quest_id);
+        }
+    }
+    return { activeCount, forceSlimIds: forceSlim, overflowCount: forceSlim.size, cutoffQuestId: cutoffId };
+}
+
 export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, completedSignal, processingQuestKeys, panelMode, iconFirst }: QuestListProps) {
     const sortedQuests = useMemo(() => {
         return quests.filter(q => {
@@ -464,6 +492,19 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
         });
     }, [quests, currentUser, completedQuests, pendingQuests]);
 
+    // 要件確認済み(2026-09-23): 常時表示は「毎日の必須クエスト」(required!==false)だけにし、
+    // 「ボーナスクエスト」(required===false)はクエストタブ内の折りたたみセクションへ分ける。
+    // required はサーバーが常に返すが、フォールバック用の疑似クエスト(masterData.js)等
+    // 欠けている場合は必須側に倒す(undefinedを隠さないため)。
+    const requiredQuests = useMemo(
+        () => sortedQuests.filter(q => q.required !== false),
+        [sortedQuests]
+    );
+    const bonusQuests = useMemo(
+        () => sortedQuests.filter(q => q.required === false),
+        [sortedQuests]
+    );
+
     // 「今できること」が1件も無いかどうかだけを、案内メッセージ表示のために調べる
     // (角度①の名残)。完了済み・未開放クエスト自体は、すごろく風の1本のレールで
     // 常時インライン表示するため、以前のような表示/非表示のトグルはもう無い
@@ -472,29 +513,24 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
     // 角度②: 実行可能(申請中を除く)なクエストがACTIONABLE_CARD_LIMITを超える分は、
     // 「もっと見る」で展開するまでカード化しない(forceSlimIds)。cutoffQuestIdは
     // 「もっと見る」ボタンを差し込む位置(上限に達した直後のクエスト)を示す。
-    const { activeCount, forceSlimIds, overflowCount, cutoffQuestId } = useMemo(() => {
-        let activeCount = 0;
-        let countedForLimit = 0;
-        const forceSlim = new Set<number>();
-        let cutoffId: number | undefined;
-        for (const q of sortedQuests) {
-            const { isLocked, isDone, isPending } = getQuestLockState(q, currentUser, completedQuests, pendingQuests);
-            if (isLocked || isDone) continue;
-            activeCount++;
-            if (isPending) continue; // 申請中は常にカード表示のままにする(件数上限の対象外)
-            countedForLimit++;
-            if (countedForLimit <= ACTIONABLE_CARD_LIMIT) {
-                cutoffId = q.quest_id;
-            } else if (q.quest_id !== undefined) {
-                forceSlim.add(q.quest_id);
-            }
-        }
-        return { activeCount, forceSlimIds: forceSlim, overflowCount: forceSlim.size, cutoffQuestId: cutoffId };
-    }, [sortedQuests, currentUser, completedQuests, pendingQuests]);
+    // 必須クエスト・ボーナスクエストの列を分けたため、上限判定もそれぞれ独立に行う。
+    const requiredOverflow = useMemo(
+        () => computeOverflow(requiredQuests, currentUser, completedQuests, pendingQuests),
+        [requiredQuests, currentUser, completedQuests, pendingQuests]
+    );
+    const bonusOverflow = useMemo(
+        () => computeOverflow(bonusQuests, currentUser, completedQuests, pendingQuests),
+        [bonusQuests, currentUser, completedQuests, pendingQuests]
+    );
+    const activeCount = requiredOverflow.activeCount + bonusOverflow.activeCount;
 
     // 一度「もっと見る」を開いたら、その画面を見ている間は展開したままにする
     // (折りたたみ直しのボタンは持たない。UI側の複雑さを避けるための単純化)。
-    const [showAllActionable, setShowAllActionable] = useState(false);
+    const [showAllRequired, setShowAllRequired] = useState(false);
+    const [showAllBonus, setShowAllBonus] = useState(false);
+    // ボーナスクエストのセクション自体の開閉(要件: 常時表示するのは必須クエストのみ)。
+    // 既定は畳んだ状態にする。
+    const [bonusExpanded, setBonusExpanded] = useState(false);
 
     const listContainerClass = panelMode
         ? 'flex flex-col animate-in fade-in duration-300'
@@ -503,7 +539,12 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
         ? 'text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-xs font-bold'
         : 'text-center border-b border-gray-600 pb-1 mb-3 text-yellow-300 text-sm font-bold';
 
-    const renderQuestCards = (list: Quest[]) => {
+    const renderQuestCards = (
+        list: Quest[],
+        overflow: { forceSlimIds: Set<number>; overflowCount: number; cutoffQuestId?: number },
+        showAll: boolean,
+        onShowAll: () => void,
+    ) => {
         const nodes: React.ReactNode[] = [];
         list.forEach((q, index) => {
             nodes.push(
@@ -524,7 +565,7 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                         completedSignal={completedSignal}
                         isProcessing={!!processingQuestKeys?.includes(getQuestProcessingKey(currentUser.user_id, q.quest_id))}
                         isLast={index === list.length - 1}
-                        forceSlim={!showAllActionable && forceSlimIds.has(q.quest_id ?? -1)}
+                        forceSlim={!showAll && overflow.forceSlimIds.has(q.quest_id ?? -1)}
                         panelMode={panelMode}
                         iconFirst={iconFirst}
                     />
@@ -533,7 +574,7 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
 
             // 上限に達した直後に「もっと見る」を差し込む。レールの接続線を途切れさせない
             // よう、ノード列を持つ疑似アイテムとして描画する(QuestItemのノード+線と同じ構造)。
-            if (!showAllActionable && overflowCount > 0 && q.quest_id === cutoffQuestId) {
+            if (!showAll && overflow.overflowCount > 0 && q.quest_id === overflow.cutoffQuestId) {
                 nodes.push(
                     <div key="more-toggle" className="flex gap-3">
                         <div className="flex flex-col items-center flex-none" style={{ width: panelMode ? 32 : 40 }}>
@@ -545,11 +586,11 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                         <div className={`flex-1 min-w-0 flex items-center ${panelMode ? 'pb-2' : 'pb-4'}`}>
                             <button
                                 type="button"
-                                onClick={() => setShowAllActionable(true)}
+                                onClick={onShowAll}
                                 className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200"
                             >
                                 <ChevronDown size={14} />
-                                もっと見る ({overflowCount}件)
+                                もっと見る ({overflow.overflowCount}件)
                             </button>
                         </div>
                     </div>
@@ -579,7 +620,28 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                 </div>
             )}
 
-            {renderQuestCards(sortedQuests)}
+            {renderQuestCards(requiredQuests, requiredOverflow, showAllRequired, () => setShowAllRequired(true))}
+
+            {bonusQuests.length > 0 && (
+                <div className={panelMode ? 'mt-1' : 'mt-2'}>
+                    <button
+                        type="button"
+                        onClick={() => setBonusExpanded(v => !v)}
+                        className={`flex items-center gap-1.5 w-full text-left text-gray-400 hover:text-gray-200 border-t border-gray-700 pt-2 ${panelMode ? 'text-xs' : 'text-sm'}`}
+                    >
+                        <ChevronDown
+                            size={14}
+                            className={`transition-transform ${bonusExpanded ? 'rotate-180' : ''}`}
+                        />
+                        <span className="font-bold">ボーナスクエスト ({bonusQuests.length}件)</span>
+                    </button>
+                    {bonusExpanded && (
+                        <div className="mt-2">
+                            {renderQuestCards(bonusQuests, bonusOverflow, showAllBonus, () => setShowAllBonus(true))}
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

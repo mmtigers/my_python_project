@@ -264,3 +264,66 @@ describe('QuestList forceSlim rows (over ACTIONABLE_CARD_LIMIT)', () => {
         expect(onQuestClick.mock.calls[0][0]).toMatchObject({ quest_id: 4 });
     });
 });
+
+// 要件確認済み(2026-09-23): 常時表示は「毎日の必須クエスト」(required!==false)だけにし、
+// 「ボーナスクエスト」(required===false)はクエストタブ内の折りたたみセクションへ分ける。
+describe('QuestList required/bonus split', () => {
+    afterEach(() => {
+        cleanup();
+    });
+
+    const requiredQuest: Quest = {
+        quest_id: 40, title: '朝ごはんを食べる', quest_type: 'daily', target_user: 'all', gold_gain: 10, required: true,
+    };
+    const bonusQuest: Quest = {
+        quest_id: 41, title: 'おうちのおてつだい', quest_type: 'infinite', target_user: 'all', gold_gain: 20, required: false,
+    };
+
+    it('shows the required quest by default but keeps the bonus quest collapsed', () => {
+        render(
+            <QuestList
+                quests={[requiredQuest, bonusQuest]}
+                completedQuests={[]}
+                pendingQuests={[]}
+                currentUser={son}
+                onQuestClick={vi.fn()}
+                completedSignal={null}
+            />
+        );
+        expect(screen.getByText('朝ごはんを食べる')).toBeInTheDocument();
+        expect(screen.queryByText('おうちのおてつだい')).not.toBeInTheDocument();
+        expect(screen.getByText('ボーナスクエスト (1件)')).toBeInTheDocument();
+    });
+
+    it('reveals the bonus quest after opening the collapsed section', () => {
+        render(
+            <QuestList
+                quests={[requiredQuest, bonusQuest]}
+                completedQuests={[]}
+                pendingQuests={[]}
+                currentUser={son}
+                onQuestClick={vi.fn()}
+                completedSignal={null}
+            />
+        );
+        fireEvent.click(screen.getByText('ボーナスクエスト (1件)'));
+        // 無限クエストは displayTitle に "(1回目)" のような周回数が付くため部分一致で見る。
+        expect(screen.getByText(/おうちのおてつだい/)).toBeInTheDocument();
+    });
+
+    it('treats a quest without an explicit required field as required (defensive default)', () => {
+        const legacyQuest: Quest = { quest_id: 42, title: '宿題', quest_type: 'daily', target_user: 'all', gold_gain: 5 };
+        render(
+            <QuestList
+                quests={[legacyQuest]}
+                completedQuests={[]}
+                pendingQuests={[]}
+                currentUser={son}
+                onQuestClick={vi.fn()}
+                completedSignal={null}
+            />
+        );
+        expect(screen.getByText('宿題')).toBeInTheDocument();
+        expect(screen.queryByText(/ボーナスクエスト/)).not.toBeInTheDocument();
+    });
+});

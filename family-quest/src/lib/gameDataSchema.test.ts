@@ -41,7 +41,7 @@ const realisticResponse = {
             exp_gain: 10, gold_gain: 5, icon_key: '🍽️', day_of_week: null, target_user: 'all',
             start_date: null, end_date: null, pre_requisite_quest_id: null, occurrence_chance: 1.0,
             start_time: null, end_time: null, reset_period: 'daily',
-            days: null, bonus_gold: 0, bonus_exp: 0,
+            days: null, bonus_gold: 0, bonus_exp: 0, required: false,
         },
         {
             // #371: target_user は以前ここで 'role_adult' としていたが、role_ プレフィックスの
@@ -53,14 +53,14 @@ const realisticResponse = {
             exp_gain: 20, gold_gain: 10, icon_key: '🌙', day_of_week: '0,1,2,3,4', target_user: 'mom',
             start_date: null, end_date: null, pre_requisite_quest_id: null, occurrence_chance: 1.0,
             start_time: '19:00', end_time: '22:00', reset_period: 'daily',
-            days: [0, 1, 2, 3, 4], bonus_gold: 5, bonus_exp: 5,
+            days: [0, 1, 2, 3, 4], bonus_gold: 5, bonus_exp: 5, required: true,
         },
         {
             quest_id: 3, title: 'きょうだいでお手伝い', description: null, quest_type: 'daily',
             exp_gain: 30, gold_gain: 50, icon_key: '🤝', day_of_week: null, target_user: 'siblings',
             start_date: null, end_date: null, pre_requisite_quest_id: 1, occurrence_chance: 1.0,
             start_time: null, end_time: null, reset_period: 'weekly',
-            days: null, bonus_gold: 0, bonus_exp: 0,
+            days: null, bonus_gold: 0, bonus_exp: 0, required: true,
         },
     ],
     rewards: [

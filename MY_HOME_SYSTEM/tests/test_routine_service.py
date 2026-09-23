@@ -231,6 +231,34 @@ class TestStepCompletion:
         assert exc_info.value.status_code == 400
 
 
+class TestIsUserCurrentlyInFreeTime:
+    """is_user_currently_in_free_time() の回帰テスト(要件確認済み、2026-09-23:
+    YouTube視聴・時間消費型ごほうびの使用は自由時間中のみ許可する、の判定元)。"""
+
+    def test_false_before_am_flow_starts(self, isolated_db):
+        _seed_user()
+        assert routine_service.is_user_currently_in_free_time('daughter', now=_at(4, 59)) is False
+
+    def test_false_while_morning_checklist_is_in_progress(self, isolated_db):
+        _seed_user()
+        routine_service.complete_step('daughter', 'am', 'meal', now=_at(6, 0))
+        assert routine_service.is_user_currently_in_free_time('daughter', now=_at(6, 0)) is False
+
+    def test_true_after_completing_the_morning_checklist(self, isolated_db):
+        _seed_user()
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+        assert routine_service.is_user_currently_in_free_time('daughter', now=_at(6, 0)) is True
+
+    def test_false_again_once_checkpoint_is_passed(self, isolated_db):
+        """自由時間チェックポイントを通過(出発)すると、amフローはもう自由時間ではない。"""
+        _seed_user()
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+        _state_after_deadlines('daughter', now=_at(7, 51))  # チェックポイント強制通過
+        assert routine_service.is_user_currently_in_free_time('daughter', now=_at(7, 51)) is False
+
+
 class TestMorningChecklistTvUnlock:
     """（毎朝ミッション統合で新規追加）朝の準備チェックリストが新たに全項目達成
     状態へ遷移した瞬間、旧「毎朝ミッション」クエスト承認時と同じTV電源ON処理

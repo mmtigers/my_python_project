@@ -25,6 +25,7 @@ from core.utils import get_now_iso
 from core.database import get_db_cursor
 from services import quest_service as qs_module
 from services.quest_service import JST, ROLE_CHILD
+from services.routine_service import routine_service
 
 YOUTUBE_REWARD_IDS = [701, 702]
 OTHER_REWARD_ID = 703
@@ -121,6 +122,10 @@ def _youtube_reward_ids(monkeypatch):
     monkeypatch.setattr(qs_module.config, "YOUTUBE_DAILY_LIMIT_ENFORCE_FROM", datetime.date(2000, 1, 1))
     monkeypatch.setattr(qs_module.notification_service, "send_push", lambda *a, **k: None)
     monkeypatch.setattr(qs_module.sound_manager, "play", lambda *a, **k: None)
+    # 本ファイルはクールダウン・日次上限の検証が目的であり、自由時間限定の制約
+    # (別issue、2026-09-23)は対象外にする。個別に自由時間の状態を検証したい
+    # テストはこの既定値を上書きする(test_inventory_free_time_gate.py参照)。
+    monkeypatch.setattr(routine_service, "is_user_currently_in_free_time", lambda *a, **k: True)
 
 
 def test_second_youtube_ticket_is_blocked_within_cooldown(isolated_db):
@@ -193,6 +198,7 @@ def test_get_user_inventory_reports_cooldown_and_youtube_flag(isolated_db):
         "youtube_daily_used_minutes",
         "youtube_daily_limit_announcement",
         "youtube_extension",
+        "is_in_free_time",
     }
     # 使ったのは701(10分券)なので、待ち時間は 10分 + 休憩15分 = 25分
     assert 0 < result["youtube_cooldown_remaining_seconds"] <= 25 * 60

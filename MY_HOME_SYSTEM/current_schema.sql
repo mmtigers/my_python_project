@@ -294,7 +294,7 @@ CREATE TABLE "quest_master" (
         days TEXT,
         pre_requisite_quest_id INTEGER DEFAULT NULL,
         reset_period TEXT DEFAULT 'daily'
-);
+, required INTEGER NOT NULL DEFAULT 1);
 CREATE INDEX idx_device_records_ts
     ON device_records (timestamp);
 CREATE INDEX idx_power_usage_ts

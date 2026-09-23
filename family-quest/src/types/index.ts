@@ -71,6 +71,10 @@ export interface Quest {
     // #530: 以前ここにあった is_shared_completed_by / shared_completed_by_name /
     // is_shared_pending_by / shared_pending_by_name は、バックエンドが #371 以降
     // 送出しない(get_available_quests という関数も存在しない)幽霊フィールドだったため削除。
+    // 毎日の必須クエスト(常時表示)かボーナスクエスト(折りたたみ表示)かの区分。
+    // 欠けている場合(フォールバック用の疑似クエスト等)は必須側として扱う
+    // (QuestList.tsx の `q.required !== false` 判定を参照)。
+    required?: boolean;
 }
 
 // クエスト履歴
@@ -162,6 +166,8 @@ export interface InventoryResponse {
     youtube_daily_limit_announcement: YoutubeCooldownAnnouncement | null;
     // プリントによる上限延長の状態。無効なときはnull。
     youtube_extension: YoutubeExtension | null;
+    // YouTube等の時間消費型ごほうびは自由時間中のみ使える(要件確認済み、2026-09-23)。
+    is_in_free_time: boolean;
 }
 
 // #102/#363: クエスト完了APIが実際に成功した時点で App → QuestList/QuestItem へ

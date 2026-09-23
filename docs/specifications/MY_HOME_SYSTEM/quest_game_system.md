@@ -172,11 +172,11 @@
 ### `GameSystem._report_dry_run`
 
 * **役割**: **（Issue #664 で追加）** `dry_run=True`のときにDBを変更せず、削除・更新される件数だけをログに出す。`get_db_cursor(commit=False)`を開き、`_count_rows_to_delete`のSELECTのみを実行する。クエスト側の削除見込み件数は`strict`の方針に従い、`strict=False`かつマスタが空の場合は(削除自体をスキップするため)0件として報告する。
-* 根拠: `def _report_dry_run(` (行番号: 288〜314)
+* 根拠: `def _report_dry_run(` (行番号: 289〜315)
 * **引数/リクエスト**: `valid_quests: List[Any]`, `valid_rewards: List[Any]`, `strict: bool`
 * 根拠: (行番号: 271〜273)
 * **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "dry-run", "message": "No changes were made."}`）
-* 根拠: (行番号: 314 / 抜粋: "return {\"status\": \"dry-run\", \"message\": \"No changes were made.\"}")
+* 根拠: (行番号: 315 / 抜粋: "return {\"status\": \"dry-run\", \"message\": \"No changes were made.\"}")
 * **副作用**: `get_db_cursor(commit=False)`によるDB参照(`SELECT COUNT(*)`)とログ出力のみ。コミットしないためDBへの変更は残らない
 * 根拠: (行番号: 281〜295)
 * **エラーハンドリング**: なし(`get_db_cursor`の挙動に依存)
@@ -185,7 +185,7 @@
 ### `GameSystem.get_all_view_data`
 
 * **役割**: `family-quest`フロントエンドのメイン画面向けに、ユーザー一覧・クエスト一覧・報酬一覧・完了済みクエスト・最近のログ・承認待ち一覧を1つの辞書にまとめて返す。`quest_users`の取得結果は、SQLiteのデフォルト順序(主キーのアルファベット順)ではなく`quest_data.USERS`の宣言順に並べ替える(`canonical_order`)。各クエストには`quest_service._compute_boost_from_last_completed`によるボーナス(`bonus_gold`/`bonus_exp`)を付与し、この際に必要な「対象ユーザー×クエストの直近の非rejected完了日時」を、クエストごとに個別SELECTするのではなく`GROUP BY user_id, quest_id`の1クエリでまとめて取得してN+1クエリを避ける(`last_completed_map`)。`target_user`が実在ユーザーでない(`'all'`/`'siblings'`等)場合は、閲覧中のユーザー(`viewer_user_id`)または兄妹の代表ユーザーをボーナス算出の代表として使う。過去1ヶ月の`quest_history`(`status='approved'`)から、`quest_service.is_within_reset_period`で現在の周期内と判定されたものだけを`completedQuests`として集約する(`infinite`型は全件、それ以外はユーザーごとに最新1件のみ評価)。
-* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 316〜474)
+* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 317〜475)
 * 根拠: `if _quest_service_shim.quest_data:\n                canonical_order = {u['user_id']: i for i, u in enumerate(_quest_service_shim.quest_data.USERS)}\n                users.sort(key=lambda u: canonical_order.get(u['user_id'], len(canonical_order)))` (行番号: 313〜315)
 * 根拠: `last_completed_map: Dict[tuple, str] = {\n                (row['user_id'], row['quest_id']): row['last_completed_at']\n                for row in cur.execute("""\n                    SELECT user_id, quest_id, MAX(completed_at) AS last_completed_at\n                    FROM quest_history\n                    WHERE status != 'rejected'\n                    GROUP BY user_id, quest_id\n                """)\n            }` (行番号: 222〜230)
 * 根拠: `if q['target_user'] == 'all' or not q['target_user']:\n                    boost_user_id = viewer_user_id\n                elif q['target_user'] == 'siblings' and sibling_child_ids:\n                    boost_user_id = sibling_child_ids[0]\n                else:\n                    boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 236〜241)
@@ -202,7 +202,7 @@
 ### `GameSystem._fetch_recent_logs`
 
 * **役割**: `quest_history`(`status='approved' AND quest_id != 0`、`id`降順、最大20件)と`reward_history`(`id`降順、最大20件)を取得しマージ、`ts`降順で先頭20件に切り詰めたうえで、`quest_users`から取得したユーザー名を付与し表示テキストと日付文字列を整形して返す。ユーザーが見つからない場合は`'誰か'`のプレースホルダを使う。
-* 根拠: `def _fetch_recent_logs(self, cur) -> List[dict]:` (行番号: 476〜494)
+* 根拠: `def _fetch_recent_logs(self, cur) -> List[dict]:` (行番号: 477〜495)
 * 根拠: `q_logs = cur.execute("""\n            SELECT id, user_id, quest_title as title, 'quest' as type, completed_at as ts\n            FROM quest_history WHERE status='approved' AND quest_id != 0 ORDER BY id DESC LIMIT 20\n        """).fetchall()` (行番号: 321〜324)
 * **引数/リクエスト**: `cur`（呼び出し元のトランザクション内で使うDBカーソル）
 * 根拠: (行番号: 320)

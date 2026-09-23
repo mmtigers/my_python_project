@@ -69,13 +69,15 @@
 
 * **役割**: Domain Modelsとしてクエスト情報を定義する。
 * 根拠: クラス名と継承元 (行番号: 28 / 抜粋: "class MasterQuest(BaseModel):")
-* **（Issue #409 で追加）** `id`/`exp`/`gold` に `Field(ge=...)`、`type` は `Literal['daily','special','infinite','limited','random']`(**（Issue #529 で修正）** 以前は `'limited'`/`'random'` を許容せず、サービス層・フロントエンド・仕様書が対応済みのタイプを `quest_data.py` に書くと `sync_master_data` が 500 になっていた。`chance` は `Field(default=1.0, ge=0.0, le=1.0)`)、`reset_period` は `Literal['daily','weekly','monthly']`、`days` は `^[0-6](,[0-6])*$` を検証する。**（2026-09-06 品質監査で修正）** 本モデルが受け付ける `'monthly'` は、以前は `services/quest_service.py` の `is_within_reset_period` に対応する分岐が無く常に `False`(未完了扱い)となっていたが、同関数に `'monthly'`(JSTの暦月一致)分岐が追加され、3値すべてがサービス側でも判定されるようになった（[quest_service.md](./quest_service.md) の `QuestService.is_within_reset_period` を参照）。`MasterReward.cost_gold` は `ge=0`。リクエストモデルの ID 系は `1〜2**63-1`、文字列は `max_length` 付き。未使用だった `UserAction`/`InventoryItem` は削除。
+* **（Issue #409 で追加）** `id`/`exp`/`gold` に `Field(ge=...)`、`type` は `Literal['daily','special','infinite','limited','random']`(**（Issue #529 で修正）** 以前は `'limited'`/`'random'` を許容せず、サービス層・フロントエンド・仕様書が対応済みのタイプを `quest_data.py` に書くと `sync_master_data` が 500 になっていた。`chance` は `Field(default=1.0, ge=0.0, le=1.0)`)、`reset_period` は `Literal['daily','weekly','monthly']`、`days` は `^[0-6](,[0-6])*$` を検証する。**（2026-09-06 品質監査で修正）** 本モデルが受け付ける `'monthly'` は、以前は `services/quest_service.py` の `is_within_reset_period` に対応する分岐が無く常に `False`(未完了扱い)となっていたが、同関数に `'monthly'`(JSTの暦月一致)分岐が追加され、3値すべてがサービス側でも判定されるようになった（[quest_service.md](./quest_service.md) の `QuestService.is_within_reset_period` を参照）。`MasterReward.cost_gold` は `ge=0`。リクエストモデルの ID 系は `1〜2**63-1`、文字列は `max_length` 付き。未使用だった `UserAction`/`InventoryItem` は削除。**（2026-09-23 要件追加）** `required: bool = True` は「毎日の必須クエスト」(常時表示)か「ボーナスクエスト」(折りたたみ表示)かを表す新フィールドで、`type`(出現頻度)とは独立に管理する。`quest_data.py` の各クエストがこの値を明示し、`sync_master_data` が `quest_master.required` 列(`migrations/0019_add_quest_master_required.sql` で追加、既定値1)へ書き込む。フロントエンド側の折りたたみ表示は [QuestList.md](../family-quest/src/features/quest/components/QuestList.md) を参照。
 * 根拠: `_SQLITE_INT_MAX = 2**63 - 1`、`_DAY_OF_WEEK_RE`、`def _validate_days` (models/quest.py)
-* 根拠: `reset_period: Optional[Literal['daily', 'weekly', 'monthly']] = 'daily'` (行番号: 47)
+* 根拠: `reset_period: Optional[Literal['daily', 'weekly', 'monthly']] = 'daily'` (行番号: 51)
+* 根拠: `required: bool = True` (行番号: 54)
 
 
-* **引数/リクエスト (フィールド)**: `id` (int), `title` (str), `desc` (Optional[str], 初期値: None), `type` (str), `target` (str, 初期値: 'all'), `exp` (int), `gold` (int), `icon` (str), `days` (Optional[str], 初期値: None), `start_date` (Optional[str], 初期値: None), `end_date` (Optional[str], 初期値: None), `chance` (Optional[float], 初期値: 1.0), `start_time` (Optional[str], 初期値: None), `end_time` (Optional[str], 初期値: None), `pre_requisite_quest_id` (Optional[int], 初期値: None), `reset_period` (Optional[Literal['daily','weekly','monthly']], 初期値: 'daily')
+* **引数/リクエスト (フィールド)**: `id` (int), `title` (str), `desc` (Optional[str], 初期値: None), `type` (str), `target` (str, 初期値: 'all'), `exp` (int), `gold` (int), `icon` (str), `days` (Optional[str], 初期値: None), `start_date` (Optional[str], 初期値: None), `end_date` (Optional[str], 初期値: None), `chance` (Optional[float], 初期値: 1.0), `start_time` (Optional[str], 初期値: None), `end_time` (Optional[str], 初期値: None), `pre_requisite_quest_id` (Optional[int], 初期値: None), `reset_period` (Optional[Literal['daily','weekly','monthly']], 初期値: 'daily'), `required` (bool, 初期値: True)
 * 根拠: フィールド定義 (行番号: 20〜35 / 抜粋: "target: str = 'all'" など)
+* 根拠: `required: bool = True` (行番号: 54)
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -94,7 +96,7 @@
 ### `MasterReward`
 
 * **役割**: Domain Modelsとして報酬情報を定義する。
-* 根拠: クラス名と継承元 (行番号: 62 / 抜粋: "class MasterReward(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 65 / 抜粋: "class MasterReward(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `id` (int), `title` (str), `category` (str), `cost_gold` (int), `icon_key` (str), `desc` (Optional[str], 初期値: None), `target` (str, 初期値: "all")
@@ -102,29 +104,29 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 62 / 抜粋: "class MasterReward(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 65 / 抜粋: "class MasterReward(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 62〜69 / 抜粋: "class MasterReward(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 65〜72 / 抜粋: "class MasterReward(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 62〜69 / 抜粋: "class MasterReward(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 65〜72 / 抜粋: "class MasterReward(BaseModel):")
 
 
 
 ### ~~`UserAction`~~ （存在しない）
 
 * **（2026-09-06 品質監査で修正）** 以前の本仕様書は本ファイルに `UserAction`（`user_id` のみ）が定義されていると記述していたが、上記 `MasterQuest` の項に記載のとおり Issue #409 で未使用モデルとして削除済みであり、現行の `models/quest.py` にこのクラスは存在しない。本仕様書からも定義の記述を撤去した。
-* 根拠: コメント (行番号: 71〜72 / 抜粋: "# Request Models\n# (#409: 未使用だった UserAction / InventoryItem は削除)")、`models/quest.py` の全クラス定義に `UserAction` が無いこと (行番号: 1〜157)
+* 根拠: コメント (行番号: 74〜75 / 抜粋: "# Request Models\n# (#409: 未使用だった UserAction / InventoryItem は削除)")、`models/quest.py` の全クラス定義に `UserAction` が無いこと (行番号: 1〜157)
 
 
 
 ### `QuestAction`
 
 * **役割**: Request Modelsとしてクエストに関するアクションリクエストを定義する。
-* 根拠: クラス名と継承元 (行番号: 73 / 抜粋: "class QuestAction(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 76 / 抜粋: "class QuestAction(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str), `quest_id` (int)
@@ -132,22 +134,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 73 / 抜粋: "class QuestAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 76 / 抜粋: "class QuestAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 73〜75 / 抜粋: "class QuestAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 76〜78 / 抜粋: "class QuestAction(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 73〜75 / 抜粋: "class QuestAction(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 76〜78 / 抜粋: "class QuestAction(BaseModel):")
 
 
 
 ### `RewardAction`
 
 * **役割**: Request Modelsとして報酬に関するアクションリクエストを定義する。
-* 根拠: クラス名と継承元 (行番号: 77 / 抜粋: "class RewardAction(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 80 / 抜粋: "class RewardAction(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str), `reward_id` (int)
@@ -155,22 +157,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 77 / 抜粋: "class RewardAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 80 / 抜粋: "class RewardAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 77〜79 / 抜粋: "class RewardAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 80〜82 / 抜粋: "class RewardAction(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 77〜79 / 抜粋: "class RewardAction(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 80〜82 / 抜粋: "class RewardAction(BaseModel):")
 
 
 
 ### `HistoryAction`
 
 * **役割**: Request Modelsとして履歴に関するアクションリクエストを定義する。
-* 根拠: クラス名と継承元 (行番号: 81 / 抜粋: "class HistoryAction(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 84 / 抜粋: "class HistoryAction(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str, `Field(min_length=1, max_length=64)`), `history_id` (int, `Field(ge=1, le=_SQLITE_INT_MAX)`)。**（2026-09-06 品質監査で修正）** 以前 `user_id` は境界なしの `str` だったが、`QuestAction`/`RewardAction`/`ApproveAction` と同じ `min_length=1, max_length=64` の制約が付与された。
@@ -178,11 +180,11 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 81 / 抜粋: "class HistoryAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 84 / 抜粋: "class HistoryAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 81〜83 / 抜粋: "class HistoryAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 84〜86 / 抜粋: "class HistoryAction(BaseModel):")
 
 
 * **エラーハンドリング**: 明示的な例外処理の記述はないが、`user_id` が空文字または65文字以上、`history_id` が1未満または `2**63-1` 超の場合は Pydantic が `ValidationError` を送出する（FastAPIでは422）。
@@ -193,7 +195,7 @@
 ### `ApproveAction`
 
 * **役割**: Request Modelsとして承認に関するアクションリクエストを定義する。
-* 根拠: クラス名と継承元 (行番号: 85 / 抜粋: "class ApproveAction(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 88 / 抜粋: "class ApproveAction(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `approver_id` (str), `history_id` (int)
@@ -201,22 +203,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 85 / 抜粋: "class ApproveAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 88 / 抜粋: "class ApproveAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 85〜90 / 抜粋: "class ApproveAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 88〜93 / 抜粋: "class ApproveAction(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 85〜90 / 抜粋: "class ApproveAction(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 88〜93 / 抜粋: "class ApproveAction(BaseModel):")
 
 
 
 ### `ResetUserAction`
 
 * **役割**: Request Modelsとして、`reset_game.py` が別プロセスから直接DBを書き換えていたユーザーデータのリセット処理をサーバーAPI経由に置き換えるための入力モデル。**（Issue #547で追加）**
-* 根拠: クラス名と継承元 (行番号: 96 / 抜粋: "class ResetUserAction(BaseModel):")、コメント (行番号: 92〜95 / 抜粋: "Issue #547: reset_game.py が別プロセスから直接DBを書き換えていたリセット処理を\n# サーバーAPI経由に置き換えるための入力モデル。admin_idはApproveAction.approver_id等と\n# 同様、サービス層(UserService.reset_user_data)がquest_users.role='role_adult'かどうかを\n# 検証する。")
+* 根拠: クラス名と継承元 (行番号: 99 / 抜粋: "class ResetUserAction(BaseModel):")、コメント (行番号: 92〜95 / 抜粋: "Issue #547: reset_game.py が別プロセスから直接DBを書き換えていたリセット処理を\n# サーバーAPI経由に置き換えるための入力モデル。admin_idはApproveAction.approver_id等と\n# 同様、サービス層(UserService.reset_user_data)がquest_users.role='role_adult'かどうかを\n# 検証する。")
 
 
 * **引数/リクエスト (フィールド)**: `admin_id` (str, `Field(min_length=1, max_length=64)`), `target_user_id` (str, `Field(min_length=1, max_length=64)`)
@@ -224,11 +226,11 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 96 / 抜粋: "class ResetUserAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 99 / 抜粋: "class ResetUserAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 96〜98 / 抜粋: "class ResetUserAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 99〜101 / 抜粋: "class ResetUserAction(BaseModel):")
 
 
 * **エラーハンドリング**: 明示的な例外処理の記述はないが、`admin_id`/`target_user_id` が空文字または65文字以上の場合は Pydantic が `ValidationError` を送出する（FastAPIでは422）。クラス自体には `admin_id` が管理者（`role_adult`）かどうかを検証するロジックはなく、コメントによればその検証はサービス層(`UserService.reset_user_data`)の責務である。
@@ -239,7 +241,7 @@
 ### `SyncMasterAction`
 
 * **役割**: Request Modelsとして、`POST /api/quest/sync_master` と `POST /api/quest/seed` の入力（管理者ID）を定義する。**（Issue #739 / AUDIT-009 で追加）** この2エンドポイントは `quest_master`/`reward_master` の `DELETE` を伴う破壊的な管理操作でありながら、`ResetUserAction` と違って認可チェックを持っていなかった。
-* 根拠: クラス名と継承元 (行番号: 104 / 抜粋: "class SyncMasterAction(BaseModel):")、コメント (行番号: 100〜103 / 抜粋: "Issue #739 (AUDIT-009): POST /api/quest/sync_master と POST /api/quest/seed は")
+* 根拠: クラス名と継承元 (行番号: 107 / 抜粋: "class SyncMasterAction(BaseModel):")、コメント (行番号: 100〜103 / 抜粋: "Issue #739 (AUDIT-009): POST /api/quest/sync_master と POST /api/quest/seed は")
 
 
 * **引数/リクエスト (フィールド)**: `admin_id` (str, `Field(min_length=1, max_length=64)`)
@@ -247,11 +249,11 @@
 
 
 * **戻り値/レスポンス**: 該当なし（レスポンスは `SyncResponse`）
-* 根拠: データモデル定義のため (行番号: 104 / 抜粋: "class SyncMasterAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 107 / 抜粋: "class SyncMasterAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 104〜105 / 抜粋: "class SyncMasterAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 107〜108 / 抜粋: "class SyncMasterAction(BaseModel):")
 
 
 * **エラーハンドリング**: `admin_id` が空文字または65文字以上なら Pydantic が `ValidationError` を送出する（FastAPIでは422）。`role_adult` かどうかの判定はサービス層(`GameSystem.sync_master_data_as_admin` → `locks._require_adult`)の責務で、満たさない場合は403。
@@ -262,7 +264,7 @@
 ### `UpdateUserAction`
 
 * **役割**: Request Modelsとしてユーザー情報更新のアクションリクエストを定義する。**（Issue #372で追加）** `avatar_url`に`field_validator`を持ち、`routers/quest_router.py`の`upload_image`が生成する`/uploads/<uuid4>.<jpg|jpeg|png|gif|webp>`形式（`_UPLOADED_AVATAR_RE`）か、パス区切り(`/`, `\\`)・HTML特殊文字(`<`, `>`, `"`, `'`)を含まず先頭が`.`でない16文字以下の短い文字列（絵文字アバター、`_EMOJI_AVATAR_MAX_LEN`）のみを受け付ける。それ以外は`ValueError`を送出し、FastAPIにより422となる。任意の`/uploads/`パスを許すと、他ユーザーのアップロード画像を自分のアバターに指定してから絵文字に戻す操作で、そのファイルが孤立扱いになり削除される経路が残るため。
-* 根拠: クラス名と継承元 (行番号: 118 / 抜粋: "class UpdateUserAction(BaseModel):")、`_UPLOADED_AVATAR_RE = re.compile(` (行番号: 75〜77)、`def _validate_avatar_url(cls, value: str) -> str:` (行番号: 124〜134)
+* 根拠: クラス名と継承元 (行番号: 121 / 抜粋: "class UpdateUserAction(BaseModel):")、`_UPLOADED_AVATAR_RE = re.compile(` (行番号: 75〜77)、`def _validate_avatar_url(cls, value: str) -> str:` (行番号: 127〜137)
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str, `Field(min_length=1, max_length=64)`), `avatar_url` (str、上記バリデータ付き)。**（2026-09-06 品質監査で修正）** 以前 `user_id` は境界なしの `str` だったが、他のリクエストモデルと同じ `min_length=1, max_length=64` の制約が付与された。
@@ -270,38 +272,38 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 118 / 抜粋: "class UpdateUserAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 121 / 抜粋: "class UpdateUserAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 118〜134 / 抜粋: "class UpdateUserAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 121〜137 / 抜粋: "class UpdateUserAction(BaseModel):")
 
 
 * **エラーハンドリング**: `avatar_url`が許容形式でない場合、バリデータが`ValueError`を送出する（FastAPIでは422 Unprocessable Entity）
-* 根拠: (行番号: 134 / 抜粋: "raise ValueError(\"avatar_url は /uploads/<uuid>.<ext> 形式か短い絵文字文字列のみ指定できます\")")
+* 根拠: (行番号: 137 / 抜粋: "raise ValueError(\"avatar_url は /uploads/<uuid>.<ext> 形式か短い絵文字文字列のみ指定できます\")")
 
 
 
 ### `SoundTestRequest`
 
 * **役割**: Request Modelsとしてサウンドテスト用のリクエストを定義する。
-* 根拠: クラス名と継承元 (行番号: 136 / 抜粋: "class SoundTestRequest(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 139 / 抜粋: "class SoundTestRequest(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `sound_key` (str)
-* 根拠: フィールド定義 (行番号: 137 / 抜粋: "sound_key: str")
+* 根拠: フィールド定義 (行番号: 140 / 抜粋: "sound_key: str")
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 136 / 抜粋: "class SoundTestRequest(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 139 / 抜粋: "class SoundTestRequest(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 136〜137 / 抜粋: "class SoundTestRequest(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 139〜140 / 抜粋: "class SoundTestRequest(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 136〜137 / 抜粋: "class SoundTestRequest(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 139〜140 / 抜粋: "class SoundTestRequest(BaseModel):")
 
 
 
@@ -316,22 +318,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 140 / 抜粋: "class SyncResponse(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 143 / 抜粋: "class SyncResponse(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 140〜142 / 抜粋: "class SyncResponse(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 143〜145 / 抜粋: "class SyncResponse(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 140〜142 / 抜粋: "class SyncResponse(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 143〜145 / 抜粋: "class SyncResponse(BaseModel):")
 
 
 
 ### `CompleteResponse`
 
 * **役割**: Response Modelsとして完了時のレスポンスを定義する。`/api/quest/complete`と`/api/quest/approve`の両エンドポイントで共有される。
-* 根拠: クラス名と継承元 (行番号: 144 / 抜粋: "class CompleteResponse(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 147 / 抜粋: "class CompleteResponse(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `status` (str), `leveledUp` (bool), `newLevel` (int), `earnedGold` (int), `earnedExp` (int), `earnedMedals` (int, 初期値: 0), `message` (Optional[str], 初期値: None)、**(Issue #238で追加)** `partnerUserId` (Optional[str], 初期値: None), `partnerLeveledUp` (bool, 初期値: False), `partnerNewLevel` (Optional[int], 初期値: None), `partnerEarnedMedals` (int, 初期値: 0)。追加された4フィールドは、兄妹連携クエストのカスケード承認(`quest_service.QuestService._process_approve_quest_locked`)時のみ相方(自分でタップしなかった方の子ども)の情報で埋まり、それ以外(通常の完了報告・単独クエストの承認)では常に既定値のままとなる。
@@ -339,22 +341,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 144 / 抜粋: "class CompleteResponse(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 147 / 抜粋: "class CompleteResponse(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 144〜158 / 抜粋: "class CompleteResponse(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 147〜161 / 抜粋: "class CompleteResponse(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 144〜158 / 抜粋: "class CompleteResponse(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 147〜161 / 抜粋: "class CompleteResponse(BaseModel):")
 
 
 
 ### `CancelResponse`
 
 * **役割**: Response Modelsとしてキャンセル時のレスポンスを定義する。
-* 根拠: クラス名と継承元 (行番号: 160 / 抜粋: "class CancelResponse(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 163 / 抜粋: "class CancelResponse(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `status` (str)
@@ -362,22 +364,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 160 / 抜粋: "class CancelResponse(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 163 / 抜粋: "class CancelResponse(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 160〜161 / 抜粋: "class CancelResponse(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 163〜164 / 抜粋: "class CancelResponse(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 160〜161 / 抜粋: "class CancelResponse(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 163〜164 / 抜粋: "class CancelResponse(BaseModel):")
 
 
 
 ### `ResetUserResponse`
 
 * **役割**: Response Modelsとして、`ResetUserAction` によるユーザーデータリセット処理の結果（削除件数）を返すレスポンスを定義する。**（Issue #547で追加）**
-* 根拠: クラス名と継承元 (行番号: 163 / 抜粋: "class ResetUserResponse(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 166 / 抜粋: "class ResetUserResponse(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `status` (str), `deletedHistoryCount` (int), `deletedInventoryCount` (int)
@@ -385,22 +387,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 163 / 抜粋: "class ResetUserResponse(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 166 / 抜粋: "class ResetUserResponse(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 163〜166 / 抜粋: "class ResetUserResponse(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 166〜169 / 抜粋: "class ResetUserResponse(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 163〜166 / 抜粋: "class ResetUserResponse(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 166〜169 / 抜粋: "class ResetUserResponse(BaseModel):")
 
 
 
 ### `PurchaseResponse`
 
 * **役割**: Response Modelsとして購入時のレスポンスを定義する。
-* 根拠: クラス名と継承元 (行番号: 168 / 抜粋: "class PurchaseResponse(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 171 / 抜粋: "class PurchaseResponse(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `status` (str), `newGold` (int)
@@ -408,29 +410,29 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 168 / 抜粋: "class PurchaseResponse(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 171 / 抜粋: "class PurchaseResponse(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 168〜170 / 抜粋: "class PurchaseResponse(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 171〜173 / 抜粋: "class PurchaseResponse(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 168〜170 / 抜粋: "class PurchaseResponse(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 171〜173 / 抜粋: "class PurchaseResponse(BaseModel):")
 
 
 
 ### ~~`InventoryItem`~~ （存在しない）
 
 * **（2026-09-06 品質監査で修正）** 以前の本仕様書は本ファイルに `InventoryItem`（`id`/`reward_id`/`title`/`desc`/`icon`/`status` 等）が定義されていると記述していたが、上記 `MasterQuest` の項に記載のとおり Issue #409 で未使用モデルとして削除済みであり、現行の `models/quest.py` にこのクラスは存在しない。本仕様書からも定義の記述を撤去した。
-* 根拠: コメント (行番号: 71〜72 / 抜粋: "# Request Models\n# (#409: 未使用だった UserAction / InventoryItem は削除)")、`models/quest.py` の全クラス定義に `InventoryItem` が無いこと (行番号: 1〜157)
+* 根拠: コメント (行番号: 74〜75 / 抜粋: "# Request Models\n# (#409: 未使用だった UserAction / InventoryItem は削除)")、`models/quest.py` の全クラス定義に `InventoryItem` が無いこと (行番号: 1〜157)
 
 
 
 ### `UseItemResponse`
 
 * **役割**: Inventory Modelsとしてアイテム使用時のレスポンスを定義する。
-* 根拠: クラス名と継承元 (行番号: 173 / 抜粋: "class UseItemResponse(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 176 / 抜粋: "class UseItemResponse(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `status` (str), `message` (str)
@@ -438,22 +440,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 173 / 抜粋: "class UseItemResponse(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 176 / 抜粋: "class UseItemResponse(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 173〜175 / 抜粋: "class UseItemResponse(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 176〜178 / 抜粋: "class UseItemResponse(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 173〜175 / 抜粋: "class UseItemResponse(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 176〜178 / 抜粋: "class UseItemResponse(BaseModel):")
 
 
 
 ### `UseItemAction`
 
 * **役割**: Inventory Modelsとしてアイテム使用時のアクションリクエストを定義する。**（2026-09-06 品質監査で修正）** Issue #409 (Q-L4) で他のリクエストモデルに付与された ID 上限(`_SQLITE_INT_MAX` = `2**63-1`)が本モデルだけ漏れており、`inventory_id=2**64` を渡すと `sqlite3` の `OverflowError` で500になっていた（`/quest/cancel` 等は422）ため、`user_id`/`inventory_id` の両方に他モデルと同じ境界が付与された。
-* 根拠: クラス名と継承元 (行番号: 177 / 抜粋: "class UseItemAction(BaseModel):")、コメント (行番号: 178〜179 / 抜粋: "Q-L4 の上限(2**63-1)が本モデルだけ漏れており、inventory_id=2**64 で\n    # sqlite3 の OverflowError → 500 になっていた(/quest/cancel 等は 422)。")
+* 根拠: クラス名と継承元 (行番号: 180 / 抜粋: "class UseItemAction(BaseModel):")、コメント (行番号: 181〜182 / 抜粋: "Q-L4 の上限(2**63-1)が本モデルだけ漏れており、inventory_id=2**64 で\n    # sqlite3 の OverflowError → 500 になっていた(/quest/cancel 等は 422)。")
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str, `Field(min_length=1, max_length=64)`), `inventory_id` (int, `Field(ge=1, le=_SQLITE_INT_MAX)`)
@@ -461,11 +463,11 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 177 / 抜粋: "class UseItemAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 180 / 抜粋: "class UseItemAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 177〜181 / 抜粋: "class UseItemAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 180〜184 / 抜粋: "class UseItemAction(BaseModel):")
 
 
 * **エラーハンドリング**: 明示的な例外処理の記述はないが、`user_id` が空文字または65文字以上、`inventory_id` が1未満または `2**63-1` 超の場合は Pydantic が `ValidationError` を送出する（FastAPIでは422）。
@@ -481,78 +483,79 @@
 #### `ViewUser`
 
 * **役割**: `users` 配列の1要素。`quest_users` テーブルの全列（`user_id`/`name`/`job_class`/`level`/`exp`/`gold`/`medal_count`/`avatar`/`updated_at`/`role`）に加え、`get_all_view_data` が `game_logic.GameLogic` で算出して付与する `nextLevelExp`/`maxHp`/`hp` を持つ。
-* 根拠: クラス定義 (行番号: 204 / 抜粋: "class ViewUser(BaseModel):")、算出フィールドのコメント (行番号: 209〜215)
+* 根拠: クラス定義 (行番号: 207 / 抜粋: "class ViewUser(BaseModel):")、算出フィールドのコメント (行番号: 209〜215)
 * **引数/リクエスト (フィールド)**: `user_id` (str), `name`/`job_class`/`avatar`/`updated_at`/`role` (str | None), `level`/`exp`/`gold` (int, 既定値あり), `medal_count` (int | None), `nextLevelExp`/`maxHp`/`hp` (int)
 * 根拠: フィールド定義 (行番号: 199〜216)
 * **戻り値/レスポンス**: 該当なし（`GameDataResponse.users` の要素型として使われる）
-* 根拠: データモデル定義のため (行番号: 204 / 抜粋: "class ViewUser(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 207 / 抜粋: "class ViewUser(BaseModel):")
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 204〜223 / 抜粋: "class ViewUser(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 207〜226 / 抜粋: "class ViewUser(BaseModel):")
 * **エラーハンドリング**: 明示的な例外処理は無いが、`response_model` としての検証で必須フィールド（`user_id`/`nextLevelExp`/`maxHp`/`hp`）が欠ける・型が合わない場合は FastAPI がレスポンス検証エラー（500）を送出する。
 * 根拠: フィールド定義 (行番号: 199〜216)
 
 #### `ViewQuest`
 
-* **役割**: `quests` 配列の1要素。`quest_master` の全列に加え、`QuestService.filter_active_quests` が `day_of_week` から組み立てて同名の TEXT 列を上書きする `days` (`list[int] | None`、#474) と、`get_all_view_data` が閲覧ユーザーの履歴から算出する `bonus_gold`/`bonus_exp` を持つ。
-* 根拠: クラス定義 (行番号: 226 / 抜粋: "class ViewQuest(BaseModel):")、`days` のコメント (行番号: 234〜236)
-* **引数/リクエスト (フィールド)**: `quest_id` (int), `title` (str), `description`/`quest_type`/`icon_key`/`day_of_week`/`target_user`/`start_date`/`end_date`/`start_time`/`end_time`/`reset_period` (str | None), `exp_gain`/`gold_gain`/`pre_requisite_quest_id` (int | None), `occurrence_chance` (float | None), `days` (list[int] | None), `bonus_gold`/`bonus_exp` (int, 既定値 0)
-* 根拠: フィールド定義 (行番号: 221〜241)
+* **役割**: `quests` 配列の1要素。`quest_master` の全列に加え、`QuestService.filter_active_quests` が `day_of_week` から組み立てて同名の TEXT 列を上書きする `days` (`list[int] | None`、#474) と、`get_all_view_data` が閲覧ユーザーの履歴から算出する `bonus_gold`/`bonus_exp` を持つ。**（2026-09-23 要件追加）** `required: bool = True`（`quest_master.required` 列そのまま）は「毎日の必須クエスト」か「ボーナスクエスト」かを示し、フロントエンド(`family-quest/src/features/quest/components/QuestList.tsx`)が常時表示と折りたたみ表示を出し分けるために使う。
+* 根拠: クラス定義 (行番号: 229 / 抜粋: "class ViewQuest(BaseModel):")、`days` のコメント (行番号: 245〜246)
+* 根拠: `required: bool = True` (行番号: 251)
+* **引数/リクエスト (フィールド)**: `quest_id` (int), `title` (str), `description`/`quest_type`/`icon_key`/`day_of_week`/`target_user`/`start_date`/`end_date`/`start_time`/`end_time`/`reset_period` (str | None), `exp_gain`/`gold_gain`/`pre_requisite_quest_id` (int | None), `occurrence_chance` (float | None), `days` (list[int] | None), `required` (bool, 既定値 True), `bonus_gold`/`bonus_exp` (int, 既定値 0)
+* 根拠: フィールド定義 (行番号: 230〜253)
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 226 / 抜粋: "class ViewQuest(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 229 / 抜粋: "class ViewQuest(BaseModel):")
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 226〜249 / 抜粋: "class ViewQuest(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 229〜254 / 抜粋: "class ViewQuest(BaseModel):")
 * **エラーハンドリング**: なし（必須は `quest_id`/`title` のみ）
 * 根拠: フィールド定義 (行番号: 221〜222)
 
 #### `ViewReward`
 
 * **役割**: `rewards` 配列の1要素。`reward_master` の列のうち、`get_all_view_data` が `r.pop('desc', None)` で除去するレガシー列 `desc`（#291）を除いた7フィールドを持つ。
-* 根拠: クラス定義 (行番号: 252 / 抜粋: "class ViewReward(BaseModel):")
+* 根拠: クラス定義 (行番号: 257 / 抜粋: "class ViewReward(BaseModel):")
 * **引数/リクエスト (フィールド)**: `reward_id` (int), `title` (str), `description`/`category`/`icon_key`/`target` (str | None), `cost_gold` (int | None)
 * 根拠: フィールド定義 (行番号: 247〜253)
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 252 / 抜粋: "class ViewReward(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 257 / 抜粋: "class ViewReward(BaseModel):")
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 252〜260 / 抜粋: "class ViewReward(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 257〜265 / 抜粋: "class ViewReward(BaseModel):")
 * **エラーハンドリング**: なし
 * 根拠: フィールド定義 (行番号: 247〜253)
 
 #### `ViewQuestHistory`
 
 * **役割**: `completedQuests` / `pendingQuests` 配列の1要素（`quest_history` テーブルの1行）。`status` はサーバーが `'pending'`/`'approved'`/`'rejected'` の3値しか生成しないが、想定外の値でレスポンスを500にしないよう `Literal` ではなく `str` で受ける（値の列挙はフロントエンドの `gameDataSchema.ts` の `z.enum` が持つ）。
-* 根拠: クラス定義 (行番号: 263 / 抜粋: "class ViewQuestHistory(BaseModel):")、`status` のコメント (行番号: 261〜263)
+* 根拠: クラス定義 (行番号: 268 / 抜粋: "class ViewQuestHistory(BaseModel):")、`status` のコメント (行番号: 261〜263)
 * **引数/リクエスト (フィールド)**: `id` (int), `status` (str), `user_id`/`quest_title`/`completed_at` (str | None), `quest_id`/`exp_earned`/`gold_earned`/`linked_history_id`/`medals_earned` (int | None)
 * 根拠: フィールド定義 (行番号: 258〜270)
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 263 / 抜粋: "class ViewQuestHistory(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 268 / 抜粋: "class ViewQuestHistory(BaseModel):")
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 263〜277 / 抜粋: "class ViewQuestHistory(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 268〜282 / 抜粋: "class ViewQuestHistory(BaseModel):")
 * **エラーハンドリング**: なし
 * 根拠: フィールド定義 (行番号: 258〜270)
 
 #### `ViewAdventureLog`
 
 * **役割**: `logs` 配列の1要素。`GameSystem._fetch_recent_logs` が組み立てる `id`/`text`/`dateStr`/`timestamp` の4フィールドを持つ（`id` は `"<type>_<id>"` 形式の文字列）。
-* 根拠: クラス定義 (行番号: 280 / 抜粋: "class ViewAdventureLog(BaseModel):")
+* 根拠: クラス定義 (行番号: 285 / 抜粋: "class ViewAdventureLog(BaseModel):")
 * **引数/リクエスト (フィールド)**: `id`/`text`/`dateStr`/`timestamp` (いずれも str、すべて必須)
 * 根拠: フィールド定義 (行番号: 275〜278)
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 280 / 抜粋: "class ViewAdventureLog(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 285 / 抜粋: "class ViewAdventureLog(BaseModel):")
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 280〜285 / 抜粋: "class ViewAdventureLog(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 285〜290 / 抜粋: "class ViewAdventureLog(BaseModel):")
 * **エラーハンドリング**: なし
 * 根拠: フィールド定義 (行番号: 275〜278)
 
 #### `GameDataResponse`
 
 * **役割**: `GET /api/quest/data` のレスポンス全体。`users`/`quests`/`rewards`/`completedQuests`/`logs`/`pendingQuests` の6配列を持つ。`logs` はフロントエンドのどのコンポーネントからも参照されていない（#412）が、サーバーは返し続けているため契約としては残している。
-* 根拠: クラス定義 (行番号: 288 / 抜粋: "class GameDataResponse(BaseModel):")、`logs` のコメント (行番号: 286〜287)
+* 根拠: クラス定義 (行番号: 293 / 抜粋: "class GameDataResponse(BaseModel):")、`logs` のコメント (行番号: 286〜287)
 * **引数/リクエスト (フィールド)**: `users` (list[ViewUser]), `quests` (list[ViewQuest]), `rewards` (list[ViewReward]), `completedQuests`/`pendingQuests` (list[ViewQuestHistory]), `logs` (list[ViewAdventureLog])
 * 根拠: フィールド定義 (行番号: 283〜289)
 * **戻り値/レスポンス**: `routers/quest_router.py` の `get_all_data` の `response_model` として使われ、OpenAPI 上の `GET /api/quest/data` のレスポンススキーマになる。
 * 根拠: `routers/quest_router.py` (行番号: 42 / 抜粋: "@router.get(\"/data\", response_model=GameDataResponse)")
 * **副作用**: なし（ただし `response_model` として使われることで、FastAPI がレスポンスを検証・再シリアライズする）
-* 根拠: 処理ロジックを含まないため (行番号: 288〜297 / 抜粋: "class GameDataResponse(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 293〜302 / 抜粋: "class GameDataResponse(BaseModel):")
 * **エラーハンドリング**: なし
 * 根拠: フィールド定義 (行番号: 283〜289)
 

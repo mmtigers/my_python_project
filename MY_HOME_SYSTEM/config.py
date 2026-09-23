@@ -835,7 +835,8 @@ if _youtube_extension_quest_ids_str:
 # プリント1枚あたり何分ぶん上限を延ばすか、および1日に何回まで延長できるか。
 # 回数に上限を設けるのは、プリントを大量に出せば無制限に見られる状態にしないため。
 # どちらも0以下にすると延長機能は無効になる。
-YOUTUBE_EXTENSION_MINUTES_PER_QUEST: int = _get_int_env("YOUTUBE_EXTENSION_MINUTES_PER_QUEST", 30)
+# 2026-09-23: 要件確認済みで30分→10分に変更(プリント1枚の延長幅を縮小)。
+YOUTUBE_EXTENSION_MINUTES_PER_QUEST: int = _get_int_env("YOUTUBE_EXTENSION_MINUTES_PER_QUEST", 10)
 YOUTUBE_EXTENSION_MAX_PER_DAY: int = _get_int_env("YOUTUBE_EXTENSION_MAX_PER_DAY", 2)
 
 # ==========================================
