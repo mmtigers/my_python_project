@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Undo2, Clock, TrendingUp, Lock, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { Undo2, Clock, TrendingUp, Lock, Check, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CompletedSignal, User, Quest, QuestHistory } from '@/types';
-import { Card } from '@/components/ui/Card';
 import { CooldownRing } from '@/components/ui/CooldownRing';
 import { useQuestStatus, getQuestLockState, getQuestProcessingKey, canCancelQuest } from '../hooks/useQuestStatus';
 import { isQuestVisibleToUser } from '@/lib/questTargeting';
@@ -40,7 +39,26 @@ interface BadgeCandidate {
 
 const MAX_VISIBLE_BADGES = 2;
 
-// 個別のクエストアイテムコンポーネント
+type QuestVariant = 'default' | 'completed' | 'pending' | 'infinite' | 'timeLimit' | 'random' | 'limited' | 'locked';
+
+// 「きょうのすごろく」(RoutineFlow.tsx)と同じノード+接続線の見た目に合わせた、
+// useQuestStatus が返す variant ごとの配色。判定ロジック自体は増やさず、既存の
+// variant をそのままキーにする。
+const QUEST_THEME: Record<QuestVariant, { node: string; nodeDone: string; seg: string; spotlight: string }> = {
+    default: { node: 'bg-gradient-to-br from-blue-300 to-blue-500 text-blue-950 border-blue-300', nodeDone: 'bg-blue-900/40 border-blue-500 text-blue-300', seg: 'bg-blue-500', spotlight: 'bg-gradient-to-br from-blue-900/50 to-blue-900/10 border-blue-500/60' },
+    infinite: { node: 'bg-gradient-to-br from-cyan-300 to-cyan-500 text-cyan-950 border-cyan-300', nodeDone: 'bg-cyan-900/40 border-cyan-500 text-cyan-300', seg: 'bg-cyan-500', spotlight: 'bg-gradient-to-br from-cyan-900/50 to-cyan-900/10 border-cyan-400/60 shadow-[0_0_8px_rgba(0,255,255,0.15)]' },
+    limited: { node: 'bg-gradient-to-br from-pink-300 to-pink-500 text-pink-950 border-pink-300', nodeDone: 'bg-pink-900/40 border-pink-500 text-pink-300', seg: 'bg-pink-500', spotlight: 'bg-gradient-to-br from-pink-900/50 to-pink-900/10 border-pink-400/60' },
+    random: { node: 'bg-gradient-to-br from-purple-300 to-purple-500 text-purple-950 border-purple-300', nodeDone: 'bg-purple-900/40 border-purple-500 text-purple-300', seg: 'bg-purple-500', spotlight: 'bg-gradient-to-br from-purple-900/50 to-purple-900/10 border-purple-400/60' },
+    timeLimit: { node: 'bg-gradient-to-br from-orange-300 to-orange-500 text-orange-950 border-orange-300', nodeDone: 'bg-orange-900/40 border-orange-500 text-orange-300', seg: 'bg-orange-500', spotlight: 'bg-gradient-to-br from-orange-900/50 to-red-900/10 border-orange-400/60' },
+    pending: { node: 'bg-gradient-to-br from-yellow-300 to-yellow-500 text-yellow-950 border-yellow-300', nodeDone: 'bg-yellow-900/40 border-yellow-500 text-yellow-300', seg: 'bg-yellow-500', spotlight: 'bg-gradient-to-br from-yellow-900/50 to-yellow-900/10 border-yellow-500/60' },
+    completed: { node: 'bg-gray-800 border-gray-600 text-gray-500', nodeDone: 'bg-green-900/30 border-green-600 text-green-400', seg: 'bg-green-600', spotlight: '' },
+    locked: { node: 'bg-gray-800 border-gray-600 text-gray-500', nodeDone: 'bg-gray-800 border-gray-600 text-gray-500', seg: 'bg-gray-700', spotlight: '' },
+};
+
+// 個別のクエストアイテムコンポーネント。RoutineFlow の RoutineStepRow と同じ
+// 「ノード(アイコン円)+接続線+コンテンツ」の構造を踏襲するが、RoutineFlow が
+// 単一の「今ここ」だけをハイライトするのに対し、クエストは順番を強制しないため
+// 「未完了かつ未ロック(申請中含む)」を満たす複数件が同時にハイライト表示される。
 const QuestItem: React.FC<{
     quest: Quest;
     completedQuests: QuestHistory[];
@@ -49,9 +67,10 @@ const QuestItem: React.FC<{
     onClick: (q: Quest) => void;
     completedSignal: CompletedSignal | null;
     isProcessing?: boolean;
+    isLast: boolean;
     panelMode?: boolean;
     iconFirst?: boolean;
-}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, isProcessing = false, panelMode, iconFirst }) => {
+}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, isProcessing = false, isLast, panelMode, iconFirst }) => {
 
     const [isCooldown, setIsCooldown] = useState(false);
     const COOLDOWN_MS = 60000;
@@ -167,32 +186,13 @@ const QuestItem: React.FC<{
         runComplete();
     };
 
-    // パネルモードでは viewport幅基準の md: 拡大/2カラム化には乗らず、
-    // 常に「狭い列でも崩れず、かつタップしやすい(44px以上)」固定サイズを使う。
-    // ★バグ修正: 1件あたりの表示が大きすぎた(アイコン・文字サイズ・カード高さ)ため、
-    // 全体的にコンパクトにする。説明文は line-clamp を外し、見切れず全文表示する。
-    // ★修正: アイコン周り(カード全体のp-2/md:p-6・列間のgap)の余白を半分程度に縮め、
-    // 浮いた分をクエスト名(タイトル)・ゴールド表示エリアに回す。
-    const cardSizeClasses = panelMode ? 'p-1 min-h-[56px]' : 'min-h-[56px] md:p-3 md:h-full';
-    const layoutClasses = panelMode ? 'flex items-center gap-1' : 'flex md:grid md:grid-cols-[auto_1fr_auto] items-center gap-1.5 md:gap-3';
-    const iconSizeClasses = panelMode ? (iconFirst ? 'text-4xl' : 'text-xl') : 'text-2xl md:text-5xl';
-    const titleSizeClasses = panelMode ? (iconFirst ? 'text-xs' : 'text-sm') : 'text-sm md:text-xl';
-    const descSizeClasses = panelMode ? 'text-[10px] text-gray-400 leading-tight' : 'text-xs md:text-sm text-gray-400 leading-tight md:leading-normal';
     const badgeSizeClasses = panelMode ? 'text-[10px]' : 'text-xs';
-    const rewardSizeClasses = panelMode ? 'text-xs font-bold' : 'text-xs md:text-lg font-bold';
-    const statusTextClasses = panelMode ? 'text-xs' : 'text-xs md:text-sm';
 
-    // ▼ バッジ候補を優先度付きで作り、上位2件だけを表示する(角度①: バッジ過多の整理)
+    // ▼ バッジ候補を優先度付きで作り、上位2件だけを表示する(角度①: バッジ過多の整理)。
+    // 「未開放」バッジは、ロック中のクエストがカード(スポットライト・ライト)ではなく
+    // 縮小1行(ロックノード+「未開放」テキスト)で表示されるようになったため廃止した
+    // (二重表示を避ける)。
     const badgeCandidates: BadgeCandidate[] = [];
-    if (isLocked) {
-        badgeCandidates.push({
-            key: 'locked', priority: 0, node: (
-                <span key="locked" className={`bg-gray-500 text-white ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5`}>
-                    <Lock size={10} /> 未開放
-                </span>
-            )
-        });
-    }
     if (isPending) {
         badgeCandidates.push({
             key: 'pending', priority: 2, node: (
@@ -222,161 +222,183 @@ const QuestItem: React.FC<{
     const visibleBadges = sortedBadges.slice(0, MAX_VISIBLE_BADGES);
     const hiddenBadgeCount = sortedBadges.length - visibleBadges.length;
 
+    // 「実行可能」= 未完了かつ未ロック(申請中も含む)。RoutineFlow の status==='current'
+    // と違い、複数件が同時にこの状態になりうる。
+    const isActionable = !isDone && !isLocked;
+    const theme = QUEST_THEME[variant];
+
+    const nodeSize = panelMode ? 'w-8 h-8' : (isActionable ? 'w-12 h-12' : 'w-10 h-10');
+    const nodeIconSize = panelMode ? 14 : (isActionable ? 22 : 18);
+    const nodeIconTextSize = panelMode ? 'text-base' : 'text-xl';
+
+    let nodeClass = 'border-gray-600 bg-gray-800 text-gray-500';
+    if (isDone) nodeClass = theme.nodeDone;
+    else if (isActionable) nodeClass = `${theme.node} ${!panelMode ? 'animate-pulse' : ''}`;
+
+    const interactiveProps = canCancel
+        ? {
+              // #660: 取消は長押し専用のため、キーボードからも到達できるよう
+              // role/tabIndex/Enter・Spaceでの取消操作を明示的に用意する。
+              role: 'button' as const,
+              tabIndex: isEffectivelyLocked || isProcessing ? -1 : 0,
+              'aria-label': `${quest.title} の完了を取り消す`,
+              onKeyDown: (e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      runCancel();
+                  }
+              },
+              ...longPressHandlers,
+          }
+        : {};
+
     return (
-        <div className="relative h-full group">
-            <Card
-                variant={variant}
-                onClick={canCancel ? undefined : handleTapComplete}
-                {...(canCancel
-                    ? {
-                          // #660: 取消は長押し専用で、onClick を外すと Card が role/tabIndex を
-                          // 付けなくなるためキーボードから一切到達できなかった。長押し相当の
-                          // 操作をキーボードに用意する(Enter/Space で取消を実行)。
-                          role: 'button' as const,
-                          tabIndex: isEffectivelyLocked || isProcessing ? -1 : 0,
-                          'aria-label': `${quest.title} の完了を取り消す`,
-                          onKeyDown: (e: React.KeyboardEvent) => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
-                                  runCancel();
-                              }
-                          },
-                      }
-                    : {})}
-                className={`${cardSizeClasses} transition-all duration-300 relative
-                    ${!isEffectivelyLocked ? 'cursor-pointer active:scale-[0.98] select-none' : ''}
-                    ${isEffectivelyLocked ? 'opacity-50 grayscale cursor-not-allowed bg-gray-200 border-gray-400' : ''}
-                `}
-                {...(canCancel ? longPressHandlers : {})}
-            >
-                {/* ランダムクエストのキラキラ演出 (Card内部でoverflow-hiddenされる) */}
-                {/* #412(F-L9): 外部URL(transparenttextures.com)への依存を廃止し、
-                    ネットワーク不要なCSSのみのドット柄(stardust風)に置き換える。
-                    以前はオフライン時に画像が欠落するだけでなく、常時起動キオスク端末で
-                    描画のたびに不要な外部通信が発生し続けていた。 */}
-                {isRandom && !isDone && !isPending && (
-                    <div
-                        className="absolute inset-0 opacity-20 pointer-events-none"
-                        style={{
-                            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.9) 1px, transparent 1.5px)',
-                            backgroundSize: '14px 14px',
-                        }}
-                    ></div>
+        <div className="flex gap-3">
+            {/* ノード + 接続線カラム */}
+            <div className="flex flex-col items-center flex-none" style={{ width: panelMode ? 32 : 40 }}>
+                <div className={`rounded-full border-2 flex items-center justify-center flex-none transition-all ${nodeClass} ${nodeSize}`}>
+                    {isDone ? (
+                        <Check size={nodeIconSize} />
+                    ) : isLocked ? (
+                        <Lock size={nodeIconSize} />
+                    ) : (
+                        <span className={nodeIconTextSize}>{quest.icon_key}</span>
+                    )}
+                </div>
+                {!isLast && (
+                    <div className={`w-[3px] flex-1 min-h-[12px] rounded-full ${isDone ? theme.seg : 'bg-gray-700'}`} />
                 )}
+            </div>
 
-                {/* #391: 完了/取消APIの送信中オーバーレイ。応答が返るまでカードを操作不能にし、
-                    「送信中」であることを見せる(再タップで確認モーダルが二重に開くのを防ぐ) */}
-                {isProcessing && (
-                    <div className="absolute inset-0 bg-black/40 z-20 flex items-center justify-center rounded-lg cursor-wait" aria-busy="true">
-                        <div className="bg-white/90 text-black px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
-                            <Loader2 size={16} className="animate-spin" />
-                            送信中...
-                        </div>
-                    </div>
-                )}
+            {/* コンテンツカラム */}
+            <div className={`flex-1 min-w-0 ${panelMode ? 'pb-2' : 'pb-4'}`}>
+                {isActionable ? (
+                    // 外側(relative, overflow可視)とカード本体(overflow-hidden)を分けているのは、
+                    // 「UP!」ボーナスリボンをカードの角外側にはみ出させて表示するため
+                    // (カード自身にoverflow-hiddenを付けているのはランダム演出・各種オーバーレイの
+                    // 角丸クリップ用で、リボンをその内側に置くと角で切れてしまう)。
+                    <div className="relative">
+                    <div className={`relative rounded-2xl border p-3 overflow-hidden transition-all ${theme.spotlight}`}>
+                        {/* ランダムクエストのキラキラ演出。#412(F-L9): 外部URL依存を廃止し
+                            ネットワーク不要なCSSのみのドット柄(stardust風)にしてある。 */}
+                        {isRandom && !isPending && (
+                            <div
+                                className="absolute inset-0 opacity-20 pointer-events-none"
+                                style={{
+                                    backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.9) 1px, transparent 1.5px)',
+                                    backgroundSize: '14px 14px',
+                                }}
+                            ></div>
+                        )}
 
-                {/* クールダウン時のオーバーレイ: 残り時間を円形プログレスで可視化 */}
-                {isCooldown && (
-                    <div className="absolute inset-0 bg-black/40 z-20 flex items-center justify-center rounded-lg cursor-not-allowed">
-                        <div className="bg-white/90 text-black px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
-                            <CooldownRing durationMs={COOLDOWN_MS} size={24} />
-                            Wait...
-                        </div>
-                    </div>
-                )}
+                        {/* #391: 完了/取消APIの送信中オーバーレイ。 */}
+                        {isProcessing && (
+                            <div className="absolute inset-0 bg-black/40 z-20 flex items-center justify-center rounded-2xl cursor-wait" aria-busy="true">
+                                <div className="bg-white/90 text-black px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
+                                    <Loader2 size={16} className="animate-spin" />
+                                    送信中...
+                                </div>
+                            </div>
+                        )}
 
-                {/* 長押し中のホールド進捗バー(取り消しジェスチャーのフィードバック) */}
-                {isPressing && (
-                    <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-red-950/60 z-30 rounded-b overflow-hidden">
+                        {/* クールダウン時のオーバーレイ: 残り時間を円形プログレスで可視化 */}
+                        {isCooldown && (
+                            <div className="absolute inset-0 bg-black/40 z-20 flex items-center justify-center rounded-2xl cursor-not-allowed">
+                                <div className="bg-white/90 text-black px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
+                                    <CooldownRing durationMs={COOLDOWN_MS} size={24} />
+                                    Wait...
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 長押し中のホールド進捗バー(取り消しジェスチャーのフィードバック) */}
+                        {isPressing && (
+                            <div className="absolute bottom-0 left-0 right-0 h-1 bg-red-950/60 z-30 rounded-b overflow-hidden">
+                                <div
+                                    className="h-full bg-red-400"
+                                    style={{ width: `${pressProgress * 100}%`, transition: 'width 30ms linear' }}
+                                />
+                            </div>
+                        )}
+
                         <div
-                            className="h-full bg-red-400"
-                            style={{ width: `${pressProgress * 100}%`, transition: 'width 30ms linear' }}
-                        />
-                    </div>
-                )}
-
-                <div className={`${layoutClasses} relative z-10 w-full h-full`}>
-                    {/* 1. アイコンエリア */}
-                    <div className="flex items-center justify-center min-w-[1.5rem]">
-                        {/* ▼ ロック時は鍵アイコンを表示 */}
-                        {isLocked ? (
-                            <span className={`${panelMode ? 'text-3xl' : 'text-2xl md:text-5xl'} text-gray-400`}>
-                                <Lock size={panelMode ? 24 : 32} />
-                            </span>
-                        ) : (
-                            <span className={`${iconSizeClasses} ${isInfinite ? 'text-cyan-200' : ''} ${isRandom && !isDone && !isPending ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>
-                                {quest.icon_key}
-                            </span>
-                        )}
-                    </div>
-
-                    {/* 2. テキスト情報エリア */}
-                    <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap mb-1">
-                            {visibleBadges.map(b => b.node)}
-                            {hiddenBadgeCount > 0 && (
-                                <span className={`text-gray-400 ${badgeSizeClasses} px-1 font-bold`}>+{hiddenBadgeCount}</span>
-                            )}
-                        </div>
-
-                        {/* タイトル */}
-                        <div className={`font-bold ${titleSizeClasses} leading-snug mb-1 ${isDone ? 'text-gray-400 line-through decoration-2' : isLocked ? 'text-gray-400' : 'text-white'}`}>
-                            {displayTitle}
-                        </div>
-
-                        {/* 説明文: iconFirst(非識字年齢向け)では非表示にし、アイコンでの識別を優先する */}
-                        {!iconFirst && quest.description && (
-                            <div className={descSizeClasses}>
-                                {quest.description}
+                            onClick={canCancel ? undefined : handleTapComplete}
+                            {...interactiveProps}
+                            className={`relative z-10 ${!isEffectivelyLocked ? 'cursor-pointer active:scale-[0.98] select-none' : 'opacity-60 cursor-not-allowed'}`}
+                        >
+                            <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                                {visibleBadges.map(b => b.node)}
+                                {hiddenBadgeCount > 0 && (
+                                    <span className={`text-gray-400 ${badgeSizeClasses} px-1 font-bold`}>+{hiddenBadgeCount}</span>
+                                )}
                             </div>
-                        )}
-                    </div>
-
-                    {/* 3. 報酬・ステータスエリア */}
-                    <div className="flex flex-col items-end justify-center gap-1 md:gap-2 min-w-[4rem]">
-                        {/* ▼ ロック時の表示 */}
-                        {isLocked ? (
-                            <span className={`text-gray-400 ${statusTextClasses} whitespace-nowrap font-mono`}>
-                                LOCKED
-                            </span>
-                        ) : isDone ? (
-                            <div className="flex flex-col items-end gap-0.5">
-                                <span className={`text-red-400 ${statusTextClasses} border border-red-500 px-2 py-1 rounded flex items-center gap-1 bg-red-950/30 whitespace-nowrap`}>
-                                    <Undo2 size={panelMode ? 14 : 12} className="md:w-4 md:h-4" /> 長押しで取消
-                                </span>
-                            </div>
-                        ) : isPending ? (
-                            <div className="flex flex-col items-end gap-0.5">
-                                <span className={`text-yellow-300 ${statusTextClasses} whitespace-nowrap`}>確認待ち</span>
-                                <span className="text-[9px] text-gray-400 whitespace-nowrap">長押しで取消</span>
-                            </div>
-                        ) : (
-                            totalGold > 0 && (
-                                <div className="flex flex-col items-end">
-                                    <span className={`font-mono ${rewardSizeClasses} whitespace-nowrap ${hasBonus ? 'text-yellow-200 scale-110' : 'text-yellow-300'}`}>
+                            <div className="flex items-center gap-2 mb-1">
+                                <div className={`font-black ${panelMode ? 'text-sm' : 'text-lg'} text-white min-w-0`}>
+                                    {displayTitle}
+                                </div>
+                                {totalGold > 0 && (
+                                    <span className={`font-mono text-xs font-bold whitespace-nowrap ml-auto ${hasBonus ? 'text-yellow-200 scale-110' : 'text-yellow-300'}`}>
                                         {totalGold} G
                                     </span>
+                                )}
+                            </div>
+                            {/* 説明文: iconFirst(非識字年齢向け)では非表示にし、アイコンでの識別を優先する */}
+                            {!iconFirst && quest.description && (
+                                <div className={panelMode ? 'text-[10px] text-gray-400' : 'text-xs text-gray-400'}>
+                                    {quest.description}
                                 </div>
-                            )
+                            )}
+                            {isPending && (
+                                <div className="text-[10px] text-yellow-300 mt-1">確認待ち・長押しで取消</div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* ボーナス演出は「UP!」バッジのみに統一(カード全体の点滅アニメと二重に効いていたのを解消)。
+                        カード本体の外側(overflow-hiddenでない側)に置き、角からはみ出させる。 */}
+                    {hasBonus && !isPending && (
+                        <div className="absolute -top-2 -right-2 bg-gradient-to-r from-red-600 to-orange-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg border border-white flex items-center gap-1 z-30 animate-bounce pointer-events-none">
+                            <TrendingUp size={10} />
+                            <span>UP!</span>
+                        </div>
+                    )}
+                    </div>
+                ) : (
+                    // 完了済み・未開放は縮小した1行のみのミュート表示にする
+                    // (RoutineStepRow の非カレント行と同じ扱い)。
+                    <div
+                        {...interactiveProps}
+                        className={`flex flex-col gap-0.5 h-full ${canCancel ? 'cursor-pointer select-none' : ''}`}
+                    >
+                        <div className={`flex items-center gap-1.5 ${panelMode ? 'text-xs' : 'text-sm'} ${isLocked ? 'text-gray-500' : 'text-gray-400 line-through decoration-2'}`}>
+                            <span className="min-w-0 truncate">{displayTitle}</span>
+                            {isLocked && <span className="text-[10px] text-gray-500 ml-1 flex-none">未開放</span>}
+                            {isDone && (
+                                isProcessing ? (
+                                    <Loader2 size={12} className="animate-spin ml-auto flex-none text-gray-400" />
+                                ) : (
+                                    <span className="text-[10px] text-red-400 ml-auto flex-none flex items-center gap-1">
+                                        <Undo2 size={11} />長押しで取消
+                                    </span>
+                                )
+                            )}
+                        </div>
+                        {isPressing && (
+                            <div className="h-0.5 bg-red-950/60 rounded-full overflow-hidden">
+                                <div
+                                    className="h-full bg-red-400"
+                                    style={{ width: `${pressProgress * 100}%`, transition: 'width 30ms linear' }}
+                                />
+                            </div>
                         )}
                     </div>
-                </div>
-            </Card>
-
-            {/* ボーナス演出は「UP!」バッジのみに統一(カード全体の点滅アニメと二重に効いていたのを解消) */}
-            {hasBonus && !isDone && !isPending && (
-                <div className="absolute -top-3 -right-2 bg-gradient-to-r from-red-600 to-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg border border-white flex items-center gap-1 z-30 animate-bounce pointer-events-none">
-                    <TrendingUp size={12} />
-                    <span>UP!</span>
-                </div>
-            )}
+                )}
+            </div>
         </div>
     );
 };
 
 export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, completedSignal, processingQuestKeys, panelMode, iconFirst }: QuestListProps) {
-    const [showDoneAndLocked, setShowDoneAndLocked] = useState(false);
-
     const sortedQuests = useMemo(() => {
         return quests.filter(q => {
             // ★変更: ターゲット判定 (role プレフィックスの対応)
@@ -426,32 +448,27 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
         });
     }, [quests, currentUser, completedQuests, pendingQuests]);
 
-    // ▼ 角度①: 「今できること」だけを最初に見せるため、完了済み/ロック中は折りたたむ。
-    // 申請中(承認待ち)は本人がまだ気にする状態なので折りたたまず常時表示する。
-    const { activeQuests, doneOrLockedQuests } = useMemo(() => {
-        const active: Quest[] = [];
-        const doneOrLocked: Quest[] = [];
-        for (const q of sortedQuests) {
+    // 「今できること」が1件も無いかどうかだけを、案内メッセージ表示のために調べる
+    // (角度①の名残)。完了済み・未開放クエスト自体は、すごろく風の1本のレールで
+    // 常時インライン表示するため、以前のような表示/非表示のトグルはもう無い
+    // (レール=路線図の接続線が、隠れたノードをまたぐのは不自然なため廃止した)。
+    const activeCount = useMemo(() => {
+        return sortedQuests.reduce((count, q) => {
             const { isLocked, isDone } = getQuestLockState(q, currentUser, completedQuests, pendingQuests);
-            if (isDone || isLocked) {
-                doneOrLocked.push(q);
-            } else {
-                active.push(q);
-            }
-        }
-        return { activeQuests: active, doneOrLockedQuests: doneOrLocked };
+            return (!isLocked && !isDone) ? count + 1 : count;
+        }, 0);
     }, [sortedQuests, currentUser, completedQuests, pendingQuests]);
 
     const listContainerClass = panelMode
-        ? 'space-y-2 animate-in fade-in duration-300'
-        : 'space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-20';
+        ? 'flex flex-col animate-in fade-in duration-300'
+        : 'flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 pb-20';
     const headerClass = panelMode
         ? 'text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-xs font-bold'
-        : 'md:col-span-2 text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm md:text-lg font-bold';
+        : 'text-center border-b border-gray-600 pb-1 mb-3 text-yellow-300 text-sm font-bold';
 
     const renderQuestCards = (list: Quest[]) => (
         <AnimatePresence mode="popLayout">
-            {list.map(q => (
+            {list.map((q, index) => (
                 <motion.div
                     key={q.quest_id}
                     layout
@@ -459,7 +476,6 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, x: -50, scale: 0.9, transition: { duration: 0.2 } }}
                     transition={{ type: "spring", stiffness: 300, damping: 25 }}
-                    className="h-full"
                 >
                     <QuestItem
                         quest={q}
@@ -469,6 +485,7 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                         onClick={onQuestClick}
                         completedSignal={completedSignal}
                         isProcessing={!!processingQuestKeys?.includes(getQuestProcessingKey(currentUser.user_id, q.quest_id))}
+                        isLast={index === list.length - 1}
                         panelMode={panelMode}
                         iconFirst={iconFirst}
                     />
@@ -485,37 +502,19 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                 </div>
             )}
 
-            {renderQuestCards(activeQuests)}
-
-            {activeQuests.length === 0 && doneOrLockedQuests.length === 0 && (
-                <div className={panelMode ? 'text-center text-gray-400 py-6 text-xs' : 'md:col-span-2 text-center text-gray-400 py-10 text-sm md:text-xl'}>
+            {sortedQuests.length === 0 && (
+                <div className={panelMode ? 'text-center text-gray-400 py-6 text-xs' : 'text-center text-gray-400 py-10 text-sm'}>
                     現在挑戦できるクエストはありません
                 </div>
             )}
 
-            {activeQuests.length === 0 && doneOrLockedQuests.length > 0 && (
-                <div className={panelMode ? 'text-center text-gray-400 py-3 text-xs' : 'md:col-span-2 text-center text-gray-400 py-6 text-sm'}>
+            {sortedQuests.length > 0 && activeCount === 0 && (
+                <div className={panelMode ? 'text-center text-gray-400 py-3 text-xs' : 'text-center text-gray-400 py-6 text-sm'}>
                     今できることはありません
                 </div>
             )}
 
-            {doneOrLockedQuests.length > 0 && (
-                <div className={panelMode ? '' : 'md:col-span-2'}>
-                    <button
-                        onClick={() => setShowDoneAndLocked(v => !v)}
-                        className="w-full min-h-[44px] flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 bg-black/20 hover:bg-black/30 rounded-lg py-2 transition-colors"
-                    >
-                        {showDoneAndLocked ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                        完了済み・未開放を{showDoneAndLocked ? '隠す' : '表示'} ({doneOrLockedQuests.length})
-                    </button>
-
-                    {showDoneAndLocked && (
-                        <div className={panelMode ? 'space-y-2 mt-2' : 'space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 mt-2'}>
-                            {renderQuestCards(doneOrLockedQuests)}
-                        </div>
-                    )}
-                </div>
-            )}
+            {renderQuestCards(sortedQuests)}
         </div>
     );
 };
