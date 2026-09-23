@@ -124,7 +124,10 @@ QUESTS = [
     {'id': 1002, 'title': 'ゴミ捨て (ペットボトル)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🧴', 'days': '4', 'desc': '金曜日の資源回収', 'start_time': '08:00', 'end_time': '12:00'},
     # id=1006「幼稚園の連絡帳記入」は現在行っていないため廃止(要件確認済み)。
     # すごろく(routine_data.py MOM_ROUTINE_FLOWS)にも載せていない。
-    {'id': 1007, 'title': '習い事の連絡帳記入', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '📒', 'days': '6', 'desc': '日曜日は療育の記録'},
+    # id=1007「習い事の連絡帳記入」は、id=1006「幼稚園の連絡帳記入」と同様に実態と合わなくなって
+    # いるため大人クエストの整理(2026-09-23)で廃止する。実績データでは2026-03/04に2回完了した
+    # のみで、以降(2026-04-26〜今日まで約5ヶ月)は日曜日(days: '6')の出現日を迎えても一度も
+    # 完了報告が無い。
     {'id': 1008, 'title': '朝の会 開催', 'type': 'daily', 'target': 'mom', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🌅', 'days': '5,6', 'desc': '休日のスケジュール確認と挨拶', 'start_time': '07:00', 'end_time': '10:00'},
 
 
@@ -195,7 +198,8 @@ QUESTS = [
     # ------------------------------------------
     {'id': 503, 'title': '寝室の布団上げ＆掃除', 'type': 'special', 'target': 'mom', 'days': '5,6', 'exp': 40, 'gold': 100, 'icon': '🛏️', 'desc': '布団をあげて掃除機をかける'},
     {'id': 504, 'title': 'アクセ装着と片付け', 'type': 'special', 'target': 'mom', 'days': '5,6', 'exp': 15, 'gold': 20, 'icon': '💍', 'desc': '週末のおしゃれを楽しみ、定位置に戻す'},
-    {'id': 1011, 'title': '女神のメンテナンス', 'type': 'special', 'target': 'mom', 'category': 'health', 'difficulty': 'D', 'exp': 40, 'gold': 20, 'icon': '🧖‍♀️', 'desc': 'パックやスキンケアで美を高める'},
+    # id=1011「女神のメンテナンス」は、大人クエストの整理(2026-09-23)で廃止する。実績データでは
+    # 2026-02-13に1回完了して以降、7ヶ月以上(今日まで)一度も完了報告が無い。
     {'id': 500, 'title': '昨夜の寝かしつけ', 'type': 'special', 'target': 'mom', 'exp': 300, 'gold': 200, 'icon': '💤', 'desc': '子供を寝かしつけた（翌朝申請用）'},
     {'id': 505, 'title': '洗濯物を干す', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '☀️', 'desc': '日光の力で装備を浄化する'},
     {'id': 506, 'title': '洗濯物を畳む', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 40, 'gold': 30, 'icon': '👕', 'desc': '装備品を整理整頓する'},
