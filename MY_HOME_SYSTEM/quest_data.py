@@ -148,7 +148,9 @@ QUESTS = [
     # {'id': 30, 'title': '学校の宿題', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 120, 'icon': '📝', 'desc': '宿題をクリアだ！'},
     # {'id': 1025, 'title': '小学校に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 100, 'icon': '🏢','days': '0,1,2,3,4', 'desc': '小学校に歩いて行こう'},
     {'id': 1026, 'title': '小学校に行く', 'type': 'daily', 'required': True, 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 100, 'gold': 100, 'icon': '🏢','days': '0,1,2,3,4', 'desc': '小学校に歩いて行こう'},
-    {'id': 1009, 'title': '習い事： ピアノ / あこーでぃおん', 'type': 'daily', 'required': True, 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫', 'desc': '先生とのお勉強やレッスン'},
+    # id=1009「習い事」は2026-09-23にrequiredをFalseへ変更し、ボーナスクエスト(折りたたみ表示)
+    # にした(要件確認済み)。type='daily'(出現頻度)は変更していない。
+    {'id': 1009, 'title': '習い事： ピアノ / あこーでぃおん', 'type': 'daily', 'required': False, 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫', 'desc': '先生とのお勉強やレッスン'},
     # id=1030「今日の九九タイム」(daily)は、id=1031「九九チャレンジ」(infinite)に統合し廃止した
     # (要件確認済み)。「毎日1回の練習」クエストと「何度でも挑戦」クエストが並んでいると
     # 子どもから見て九九系が2枚並んで紛らわしいという指摘があり、実績もどちらも少なかった
