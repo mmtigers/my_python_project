@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Undo2, Clock, TrendingUp, Lock, Check, Loader2 } from 'lucide-react';
+import { Undo2, Clock, TrendingUp, Lock, Check, Loader2, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CompletedSignal, User, Quest, QuestHistory } from '@/types';
 import { CooldownRing } from '@/components/ui/CooldownRing';
@@ -39,6 +39,13 @@ interface BadgeCandidate {
 
 const MAX_VISIBLE_BADGES = 2;
 
+// 角度②: 実行可能なクエストが多いと、スポットライト・ライトカードが何枚も並んで
+// 何をやればいいか一目でわからなくなる(特に低学年の子ども)。同時にカード表示するのは
+// 優先度順(ソート順)で上位何件かに絞り、残りは「もっと見る」の先に回す。
+// 申請中(isPending)はこの上限の対象外(常にカード表示のままにする。件数も少なく、
+// 本人がまだ気にしている状態のため)。
+const ACTIONABLE_CARD_LIMIT = 3;
+
 type QuestVariant = 'default' | 'completed' | 'pending' | 'infinite' | 'timeLimit' | 'random' | 'limited' | 'locked';
 
 // 「きょうのすごろく」(RoutineFlow.tsx)と同じノード+接続線の見た目に合わせた、
@@ -68,9 +75,13 @@ const QuestItem: React.FC<{
     completedSignal: CompletedSignal | null;
     isProcessing?: boolean;
     isLast: boolean;
+    // 角度②: 実行可能(isActionable)でも、件数上限(ACTIONABLE_CARD_LIMIT)を超えた分は
+    // 「もっと見る」で展開されるまでカードにせず縮小1行のままにする。QuestList側で
+    // ソート順に基づいて算出し、個々のQuestItemはこのフラグに従うだけ。
+    forceSlim?: boolean;
     panelMode?: boolean;
     iconFirst?: boolean;
-}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, isProcessing = false, isLast, panelMode, iconFirst }) => {
+}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, isProcessing = false, isLast, forceSlim = false, panelMode, iconFirst }) => {
 
     const [isCooldown, setIsCooldown] = useState(false);
     const COOLDOWN_MS = 60000;
@@ -224,7 +235,7 @@ const QuestItem: React.FC<{
 
     // 「実行可能」= 未完了かつ未ロック(申請中も含む)。RoutineFlow の status==='current'
     // と違い、複数件が同時にこの状態になりうる。
-    const isActionable = !isDone && !isLocked;
+    const isActionable = !isDone && !isLocked && !forceSlim;
     const theme = QUEST_THEME[variant];
 
     const nodeSize = panelMode ? 'w-8 h-8' : (isActionable ? 'w-12 h-12' : 'w-10 h-10');
@@ -452,12 +463,33 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
     // (角度①の名残)。完了済み・未開放クエスト自体は、すごろく風の1本のレールで
     // 常時インライン表示するため、以前のような表示/非表示のトグルはもう無い
     // (レール=路線図の接続線が、隠れたノードをまたぐのは不自然なため廃止した)。
-    const activeCount = useMemo(() => {
-        return sortedQuests.reduce((count, q) => {
-            const { isLocked, isDone } = getQuestLockState(q, currentUser, completedQuests, pendingQuests);
-            return (!isLocked && !isDone) ? count + 1 : count;
-        }, 0);
+    //
+    // 角度②: 実行可能(申請中を除く)なクエストがACTIONABLE_CARD_LIMITを超える分は、
+    // 「もっと見る」で展開するまでカード化しない(forceSlimIds)。cutoffQuestIdは
+    // 「もっと見る」ボタンを差し込む位置(上限に達した直後のクエスト)を示す。
+    const { activeCount, forceSlimIds, overflowCount, cutoffQuestId } = useMemo(() => {
+        let activeCount = 0;
+        let countedForLimit = 0;
+        const forceSlim = new Set<number>();
+        let cutoffId: number | undefined;
+        for (const q of sortedQuests) {
+            const { isLocked, isDone, isPending } = getQuestLockState(q, currentUser, completedQuests, pendingQuests);
+            if (isLocked || isDone) continue;
+            activeCount++;
+            if (isPending) continue; // 申請中は常にカード表示のままにする(件数上限の対象外)
+            countedForLimit++;
+            if (countedForLimit <= ACTIONABLE_CARD_LIMIT) {
+                cutoffId = q.quest_id;
+            } else if (q.quest_id !== undefined) {
+                forceSlim.add(q.quest_id);
+            }
+        }
+        return { activeCount, forceSlimIds: forceSlim, overflowCount: forceSlim.size, cutoffQuestId: cutoffId };
     }, [sortedQuests, currentUser, completedQuests, pendingQuests]);
+
+    // 一度「もっと見る」を開いたら、その画面を見ている間は展開したままにする
+    // (折りたたみ直しのボタンは持たない。UI側の複雑さを避けるための単純化)。
+    const [showAllActionable, setShowAllActionable] = useState(false);
 
     const listContainerClass = panelMode
         ? 'flex flex-col animate-in fade-in duration-300'
@@ -466,9 +498,10 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
         ? 'text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-xs font-bold'
         : 'text-center border-b border-gray-600 pb-1 mb-3 text-yellow-300 text-sm font-bold';
 
-    const renderQuestCards = (list: Quest[]) => (
-        <AnimatePresence mode="popLayout">
-            {list.map((q, index) => (
+    const renderQuestCards = (list: Quest[]) => {
+        const nodes: React.ReactNode[] = [];
+        list.forEach((q, index) => {
+            nodes.push(
                 <motion.div
                     key={q.quest_id}
                     layout
@@ -486,13 +519,40 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                         completedSignal={completedSignal}
                         isProcessing={!!processingQuestKeys?.includes(getQuestProcessingKey(currentUser.user_id, q.quest_id))}
                         isLast={index === list.length - 1}
+                        forceSlim={!showAllActionable && forceSlimIds.has(q.quest_id ?? -1)}
                         panelMode={panelMode}
                         iconFirst={iconFirst}
                     />
                 </motion.div>
-            ))}
-        </AnimatePresence>
-    );
+            );
+
+            // 上限に達した直後に「もっと見る」を差し込む。レールの接続線を途切れさせない
+            // よう、ノード列を持つ疑似アイテムとして描画する(QuestItemのノード+線と同じ構造)。
+            if (!showAllActionable && overflowCount > 0 && q.quest_id === cutoffQuestId) {
+                nodes.push(
+                    <div key="more-toggle" className="flex gap-3">
+                        <div className="flex flex-col items-center flex-none" style={{ width: panelMode ? 32 : 40 }}>
+                            <div className={`rounded-full border-2 border-gray-600 bg-gray-800 text-gray-400 flex items-center justify-center flex-none ${panelMode ? 'w-8 h-8' : 'w-10 h-10'}`}>
+                                <span className="text-lg leading-none">⋯</span>
+                            </div>
+                            <div className="w-[3px] flex-1 min-h-[12px] rounded-full bg-gray-700" />
+                        </div>
+                        <div className={`flex-1 min-w-0 flex items-center ${panelMode ? 'pb-2' : 'pb-4'}`}>
+                            <button
+                                type="button"
+                                onClick={() => setShowAllActionable(true)}
+                                className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200"
+                            >
+                                <ChevronDown size={14} />
+                                もっと見る ({overflowCount}件)
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+        });
+        return <AnimatePresence mode="popLayout">{nodes}</AnimatePresence>;
+    };
 
     return (
         <div className={listContainerClass}>
