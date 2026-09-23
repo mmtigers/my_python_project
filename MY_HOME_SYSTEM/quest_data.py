@@ -175,24 +175,26 @@ QUESTS = [
     # ------------------------------------------
     # B-1. 特別：共通 (All)
     # ------------------------------------------
-    {'id': 7, 'title': 'ルンバの水交換', 'type': 'special', 'target': 'all', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🤖', 'desc': '掃除ロボットのメンテナンス任務'},
-    {'id': 901, 'title': '食器の片付け', 'type': 'infinite', 'target': 'all', 'category': 'house', 'difficulty': 'C', 'exp': 15, 'gold': 50, 'icon': '🍽️', 'desc': 'ご飯のあとのお皿をきれいに洗おう', 'chance': 1.0},
+    # id=7「ルンバの水交換」・id=901「食器の片付け」は、大人クエストの整理(2026-09-23、要件確認済み)
+    # で target を 'all' から 'son' へ変更し、智矢(ともや)専用クエストにした。定義自体は下記
+    # B-4セクションへ移設している。
 
     # ------------------------------------------
     # B-2. 特別：パパ (Dad)
     # ------------------------------------------
     {'id': 11, 'title': '会社勤務 (高負荷・残業)', 'type': 'special', 'target': 'dad', 'category': 'work', 'difficulty': 'A', 'exp': 350, 'gold': 200, 'icon': '🔥', 'days': '0,1,2,3,4', 'desc': '激務を乗り越え、多額の報酬を得る'},
     {'id': 18, 'title': 'トイレ掃除 (念入り)', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 100, 'icon': '✨', 'days': '6', 'desc': 'トイレの神様にご挨拶。金運UP?'},
-    {'id': 61, 'title': '夕食を作る', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 200, 'icon': '👨‍🍳', 'desc': 'ママを休ませるための男飯', 'start_time': '15:00', 'end_time': '20:00'},
-    {'id': 65, 'title': '洗車', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 200, 'icon': '🚗', 'days': '5,6', 'desc': '愛車をピカピカに磨き上げる（※月1回までのセルフ運用）'},
-    {'id': 502, 'title': '寝室の布団上げ＆掃除', 'type': 'special', 'target': 'dad', 'days': '5,6', 'exp': 40, 'gold': 100, 'icon': '🛏️', 'desc': '布団をあげて掃除機をかける'},
-    {'id': 501, 'title': '昨夜の寝かしつけ', 'type': 'special', 'target': 'dad', 'exp': 300, 'gold': 200, 'icon': '💤', 'desc': '子供を寝かしつけた（翌朝申請用）'},
-    {'id': 14, 'title': '体重計測 (健康管理)', 'type': 'special', 'target': 'dad', 'category': 'health', 'difficulty': 'E', 'exp': 10, 'gold': 10, 'icon': '⚖️', 'desc': '身体ステータスのチェック'},
-    {'id': 15, 'title': '洗濯物を干す', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '☀️', 'desc': '日光の力で装備を浄化する'},
-    {'id': 16, 'title': '洗濯物を畳む', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 40, 'gold': 30, 'icon': '👕', 'desc': '装備品を整理整頓する'},
-    {'id': 17, 'title': '洗濯物をしまう', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
-    {'id': 60, 'title': 'お風呂掃除', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 40, 'icon': '🧽', 'desc': '浴槽を磨いて湯船を準備する'},
-    
+    # id=61「夕食を作る」は、大人クエストの整理(2026-09-23、要件確認済み)で廃止する。
+    # id=65「洗車」・id=502「寝室の布団上げ＆掃除」は、大人クエストの整理(2026-09-23)で廃止する
+    # (要件確認済み)。実績データではそれぞれ導入以降の完了回数が3回・4回にとどまっていた。
+    # id=501「昨夜の寝かしつけ」は、大人クエストの整理(2026-09-23、要件確認済み)で廃止する。
+    # id=14「体重計測 (健康管理)」は、大人クエストの整理(2026-09-23)で廃止する(要件確認済み)。
+    # id=15/16/17「洗濯物を干す/畳む/しまう」は、大人クエストの整理(2026-09-23、要件確認済み)で
+    # id=15へ1件に統合した。報酬は3件合計(exp120/gold80)を引き継ぎ、id=16/17は廃止した。
+    {'id': 15, 'title': '洗濯物ミッション (干す/畳む/しまう)', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 120, 'gold': 80, 'icon': '🧺', 'desc': '干して、畳んで、しまうところまで。装備一式のメンテナンス'},
+    # id=60「お風呂掃除」は、大人クエストの整理(2026-09-23、要件確認済み)で target を 'dad' から
+    # 'son' へ変更し、智矢(ともや)専用クエストとして下記B-4セクションへ移設した。
+
     # ------------------------------------------
     # B-3. 特別：ママ (Mom)
     # ------------------------------------------
@@ -200,7 +202,7 @@ QUESTS = [
     {'id': 504, 'title': 'アクセ装着と片付け', 'type': 'special', 'target': 'mom', 'days': '5,6', 'exp': 15, 'gold': 20, 'icon': '💍', 'desc': '週末のおしゃれを楽しみ、定位置に戻す'},
     # id=1011「女神のメンテナンス」は、大人クエストの整理(2026-09-23)で廃止する。実績データでは
     # 2026-02-13に1回完了して以降、7ヶ月以上(今日まで)一度も完了報告が無い。
-    {'id': 500, 'title': '昨夜の寝かしつけ', 'type': 'special', 'target': 'mom', 'exp': 300, 'gold': 200, 'icon': '💤', 'desc': '子供を寝かしつけた（翌朝申請用）'},
+    # id=500「昨夜の寝かしつけ」は、大人クエストの整理(2026-09-23、要件確認済み)で廃止する。
     {'id': 505, 'title': '洗濯物を干す', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '☀️', 'desc': '日光の力で装備を浄化する'},
     {'id': 506, 'title': '洗濯物を畳む', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 40, 'gold': 30, 'icon': '👕', 'desc': '装備品を整理整頓する'},
     {'id': 507, 'title': '洗濯物をしまう', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
@@ -209,7 +211,14 @@ QUESTS = [
     # ------------------------------------------
     # B-4. 特別：智矢 (Son)
     # ------------------------------------------
-   
+
+    # id=7「ルンバの水交換」・id=901「食器の片付け」・id=60「お風呂掃除」は、大人クエストの整理
+    # (2026-09-23、要件確認済み)でtargetを智矢(ともや)専用へ変更し、それぞれB-1・B-2セクションから
+    # ここへ移設した。定義内容(exp/gold/type等)は変更していない。
+    {'id': 7, 'title': 'ルンバの水交換', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🤖', 'desc': '掃除ロボットのメンテナンス任務'},
+    {'id': 901, 'title': '食器の片付け', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 15, 'gold': 50, 'icon': '🍽️', 'desc': 'ご飯のあとのお皿をきれいに洗おう', 'chance': 1.0},
+    {'id': 60, 'title': 'お風呂掃除', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 40, 'icon': '🧽', 'desc': '浴槽を磨いて湯船を準備する'},
+
     # 選択肢過多で「結局どれもやらない」を避けるための整理(2026-09-23)。
     # id=1031「九九チャレンジ」は、どちらも「学習系のプリント学習」で内容が重なり、
     # 導入(2026-09)から1回しか完了されていなかったため、このid=31へ統合し廃止した。
@@ -261,13 +270,19 @@ REWARDS = [
     {'id': 21, 'title': '好きなおやつ 1個', 'category': 'food', 'cost_gold': 100, 'icon_key': '🍪', 'desc': '1枚100円分だよ!!!', 'target': 'children'},
 
     # --- Medium (体験型) ---
-    {'id': 13, 'title': '湯の華廊 チケット', 'category': 'special', 'cost_gold': 1000, 'icon_key': '♨️', 'desc': '広いお風呂で心も体も癒やされる', 'target': 'children'},
+    # id=13「湯の華廊 チケット」は、すずか(daughter)のごほうび一覧から外すため2026-09-23に
+    # target を 'children' から 'son' へ変更した(要件確認済み)。
+    {'id': 13, 'title': '湯の華廊 チケット', 'category': 'special', 'cost_gold': 1000, 'icon_key': '♨️', 'desc': '広いお風呂で心も体も癒やされる', 'target': 'son'},
     # id=30「ローラースケート場チケット」・id=31「キッズランドチケット」は、
     # 出品から半年以上(2026-02〜)購入実績が0件だったため2026-09-23に廃止(reward_historyで確認済み)。
-    {'id': 23, 'title': '夕飯リクエスト権', 'category': 'service', 'cost_gold': 800, 'icon_key': '🍽️', 'desc': '今夜のメニューはあなたが決める', 'target': 'all'},
+    # id=23は、すずか(daughter)のごほうび一覧から外すため2026-09-23にtargetを'all'から
+    # 'adults'へ変更した(要件確認済み。智矢(son)も対象外になる)。
+    {'id': 23, 'title': '夕飯リクエスト権', 'category': 'service', 'cost_gold': 800, 'icon_key': '🍽️', 'desc': '今夜のメニューはあなたが決める', 'target': 'adults'},
 
     # --- Large (目標型) ---
-    {'id': 25, 'title': '回転寿司に行く権', 'category': 'special', 'cost_gold': 2000, 'icon_key': '🍣', 'desc': '回るけど美味しい！パパにお願いしよう', 'target': 'all'},
+    # id=25は、すずか(daughter)のごほうび一覧から外すため2026-09-23にtargetを'all'から
+    # 'adults'へ変更した(要件確認済み。智矢(son)も対象外になる)。
+    {'id': 25, 'title': '回転寿司に行く権', 'category': 'special', 'cost_gold': 2000, 'icon_key': '🍣', 'desc': '回るけど美味しい！パパにお願いしよう', 'target': 'adults'},
     # id=24「好きなおもちゃ」・id=32「いちご狩り」・id=33「しいたけ狩り」も、
     # 同様に購入実績0件のため2026-09-23に廃止。
     # {'id': 15, 'title': 'スマートウォッチ', 'category': 'item', 'cost_gold': 30000, 'icon_key': '⌚', 'desc': '高性能なハイエンド装備', 'target': 'dad'},
@@ -289,5 +304,10 @@ REWARDS = [
     {'id': 120, 'title': '半日自由時間', 'category': 'special', 'cost_gold': 10000, 'icon_key': '🕊️', 'desc': '4時間程度の完全な自由時間。育児・家事免除。', 'target': 'adults'},
 
     # 追加: Switchゲーム (350G)
-    {'id': 121, 'title': 'Switchのゲーム(45分)', 'category': 'small', 'cost_gold': 350, 'icon_key': '🎮', 'desc': '45分間ゲームで遊べる券。', 'target': 'children'},
+    # id=121は、すずか(daughter)のごほうび一覧から外すため2026-09-23にtargetを'children'から
+    # 'son'へ変更した(要件確認済み)。
+    {'id': 121, 'title': 'Switchのゲーム(45分)', 'category': 'small', 'cost_gold': 350, 'icon_key': '🎮', 'desc': '45分間ゲームで遊べる券。', 'target': 'son'},
+
+    # 追加: たまごっち (8000G、ともや専用、要件確認済み)
+    {'id': 122, 'title': 'たまごっち', 'category': 'item', 'cost_gold': 8000, 'icon_key': '🥚', 'desc': '育てて遊べる携帯育成ゲーム。', 'target': 'son'},
 ]
