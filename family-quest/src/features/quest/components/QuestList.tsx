@@ -241,11 +241,6 @@ const QuestItem: React.FC<{
     const nodeSize = panelMode ? 'w-8 h-8' : (isActionable ? 'w-12 h-12' : 'w-10 h-10');
     const nodeIconSize = panelMode ? 14 : (isActionable ? 22 : 18);
     const nodeIconTextSize = panelMode ? 'text-base' : 'text-xl';
-    // 折りたたみ(非actionable)行のテキストは1行分の高さしかなく、隣接するノードの
-    // アイコン円(w-10 h-10 / panelMode時 w-8 h-8、いずれもisActionable=falseのnodeSizeと同じ)
-    // より低いため、両方とも列の上端揃えだと円の中心とテキストの中心がずれて見えていた。
-    // テキスト行にノードと同じ高さのmin-heightを与え、items-centerで円の中心に揃える。
-    const nodeMinHeightClass = panelMode ? 'min-h-8' : 'min-h-10';
 
     let nodeClass = 'border-gray-600 bg-gray-800 text-gray-500';
     if (isDone) nodeClass = theme.nodeDone;
@@ -391,7 +386,7 @@ const QuestItem: React.FC<{
                         {...interactiveProps}
                         className={`flex flex-col gap-0.5 h-full ${(canCancel || forceSlim) ? 'cursor-pointer select-none' : ''}`}
                     >
-                        <div className={`flex items-center gap-1.5 ${nodeMinHeightClass} ${panelMode ? 'text-xs' : 'text-sm'} ${isLocked ? 'text-gray-500' : isDone ? 'text-gray-400 line-through decoration-2' : 'text-gray-300'}`}>
+                        <div className={`flex items-center gap-1.5 ${panelMode ? 'min-h-8 text-xs' : 'min-h-10 text-sm'} ${isLocked ? 'text-gray-500' : isDone ? 'text-gray-400 line-through decoration-2' : 'text-gray-300'}`}>
                             <span className="min-w-0 truncate">{displayTitle}</span>
                             {isLocked && <span className="text-[10px] text-gray-500 ml-1 flex-none">未開放</span>}
                             {isDone && (
