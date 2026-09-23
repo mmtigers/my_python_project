@@ -77,7 +77,7 @@
 
 
 * `reset_game.py`が管理者向けリセットAPI(`POST /api/quest/admin/reset_user`)を呼び出す際のサーバーのベースURL(`RESET_GAME_API_BASE_URL`、既定値`"http://127.0.0.1:8000"`)を定義する(Issue #547)。`reset_game.py`は`unified_server`と同じホストで実行される対話スクリプトという前提のため既定値はループバックアドレスとしており、LAN内の他端末からのアクセスを想定したホストIP指定である`FRONTEND_URL`とは用途が異なるためこの用途には流用しない、という趣旨のコメントが付されている。
-* 根拠: [RESET_GAME_API_BASE_URL定義とコメント] (行番号: 432〜436 / 抜粋: "# Issue #547: reset_game.py が管理者向けリセットAPI(POST /api/quest/admin/reset_user)を\n# 呼び出す際のサーバーのベースURL。reset_game.pyはunified_serverと同じホストで実行される\n# 前提の対話スクリプトのため、既定値はループバックアドレスとする(FRONTEND_URLはLAN内の\n# 他端末からのアクセスを想定したホストのIP指定のため、この用途には流用しない)。\nRESET_GAME_API_BASE_URL: str = os.getenv(\"RESET_GAME_API_BASE_URL\", \"http://127.0.0.1:8000\")")
+* 根拠: [RESET_GAME_API_BASE_URL定義とコメント] (行番号: 433〜437 / 抜粋: "# Issue #547: reset_game.py が管理者向けリセットAPI(POST /api/quest/admin/reset_user)を\n# 呼び出す際のサーバーのベースURL。reset_game.pyはunified_serverと同じホストで実行される\n# 前提の対話スクリプトのため、既定値はループバックアドレスとする(FRONTEND_URLはLAN内の\n# 他端末からのアクセスを想定したホストのIP指定のため、この用途には流用しない)。\nRESET_GAME_API_BASE_URL: str = os.getenv(\"RESET_GAME_API_BASE_URL\", \"http://127.0.0.1:8000\")")
 
 * **（Issue #738 / AUDIT-008 で追加）** 同じ箇所に、`monitors/routine_deadline_job.py`(スケジューラの定期タスク)がルーティンの締切処理API(`POST /api/routine/deadlines/process`)を呼ぶ際の`ROUTINE_DEADLINE_API_BASE_URL`(既定`"http://127.0.0.1:8000"`)と`ROUTINE_DEADLINE_API_TIMEOUT_SEC`(既定30秒)が加わった。既定がループバックなのは`RESET_GAME_API_BASE_URL`・`HEALTH_WATCH_PROBE_BASE_URL`と同じ理由(スケジューラはunified_serverと同じホストで動く)で、コメントにもその旨が明記されている。
 * 根拠: [ROUTINE_DEADLINE_API_BASE_URL定義とコメント] (行番号: 413〜420 / 抜粋: "# Issue #738 (AUDIT-008): monitors/routine_deadline_job.py(スケジューラの定期タスク)が\nROUTINE_DEADLINE_API_BASE_URL: str = os.getenv(\"ROUTINE_DEADLINE_API_BASE_URL\", \"http://127.0.0.1:8000\")\nROUTINE_DEADLINE_API_TIMEOUT_SEC: int = _get_int_env(\"ROUTINE_DEADLINE_API_TIMEOUT_SEC\", 30)")
@@ -195,7 +195,7 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 * **役割**: 検証I/Oを伴うパス定数の遅延解決(PEP 562)。`_resolve_assets_dir()` が `ensure_safe_path_with_backoff` で `ASSETS_DIR` を検証・解決し、`_ASSETS_SUBDIRS_TO_CREATE` の各サブディレクトリを作る。モジュールの `__getattr__(name)` は `ASSETS_DIR` と `_ASSETS_DERIVED_PATHS` の派生パス(`UPLOAD_DIR`・`SOUND_DIR` 等)を初回アクセス時にだけ解決し、結果を `globals()` に書き込むため以降は通常の属性解決になる(=キャッシュ。テストは `monkeypatch.setattr`/`delattr` で上書き・再解決できる)。**（Issue #664）** `__getattr__` は `LOG_DIR` も扱い、`ensure_safe_path_with_backoff(_PREFERRED_LOG_DIR, "logs")` で解決する。`prewarm_nas_paths()` は `unified_server.py` の `lifespan` から呼ばれ、遅延化前と同じく起動時点で `ASSETS_DIR`・`LOG_DIR`・派生パスの検証・フォールバック判定を済ませる。
 * **戻り値/レスポンス**: `_resolve_assets_dir` / `__getattr__` は `str`、`prewarm_nas_paths` は `None`。未知の属性名では `__getattr__` が `AttributeError` を送出する。
 * **副作用**: NAS 上のディレクトリ作成、`globals()` への書き込み、失敗時の warning ログ(例外は送出せずローカルへフォールバック)。
-* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 673)、`def __getattr__(name: str) -> str:` (行番号: 687)、`def prewarm_nas_paths() -> None:` (行番号: 714)
+* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 674)、`def __getattr__(name: str) -> str:` (行番号: 688)、`def prewarm_nas_paths() -> None:` (行番号: 715)
 
 ### `verify_and_initialize_storage`
 
