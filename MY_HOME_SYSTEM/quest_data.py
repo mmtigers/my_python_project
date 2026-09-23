@@ -206,23 +206,24 @@ QUESTS = [
     # B-4. 特別：智矢 (Son)
     # ------------------------------------------
    
-    {'id': 31, 'title': 'プリント', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 80, 'icon': '🧮', 'desc': '計算マスター。1枚でもいいぞ'},
+    # 選択肢過多で「結局どれもやらない」を避けるための整理(2026-09-23)。
+    # id=1031「九九チャレンジ」は、どちらも「学習系のプリント学習」で内容が重なり、
+    # 導入(2026-09)から1回しか完了されていなかったため、このid=31へ統合し廃止した。
+    # 九九の練習もここでカバーする想定で説明文に追記している。
+    {'id': 31, 'title': 'プリント', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 80, 'icon': '🧮', 'desc': '計算マスター。九九の練習もOK。1枚でもいいぞ'},
     {'id': 45, 'title': 'ピアノの練習(10分)', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🎹', 'desc': '毎日少しずつ上手になろう'},
     # {'id': 58, 'title': 'ピアノの練習(30分)', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 100, 'gold': 500, 'icon': '🎹', 'desc': '30分1人で練習しよう'},
-    {'id': 43, 'title': '一人で30分間 本を読む', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 30, 'gold': 60, 'icon': '📖', 'desc': '本の世界を冒険しよう'},
+    # id=43「一人で30分間 本を読む」は、同じ「一人読書」で時間だけ違うid=44と選択肢が
+    # 重複するため2026-09-23に廃止し、完了実績で優勢だったid=44(45分)に一本化した。
     {'id': 44, 'title': '一人で45分間 本を読む', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 45, 'gold': 90, 'icon': '📖', 'desc': '本の世界をもっと冒険しよう'},
-    {'id': 48, 'title': 'ママのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 30, 'icon': '🧚', 'desc': 'ママに頼まれたことをやろう'},
-    {'id': 49, 'title': 'パパのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🛠️', 'days': '5,6', 'desc': '週末はパパのサポート任務だ！'},
+    # id=48「ママのお手伝い」・id=49「パパのお手伝い」は、頼む親で分かれていただけで
+    # 内容は同じ「お手伝い」だったため2026-09-23に統合。曜日制限(id=49は土日のみ)は外し、
+    # 毎日おこなえる任務にしたうえで報酬は高い方(exp50/gold50、id=49相当)を採用した。
+    {'id': 48, 'title': 'おうちのおてつだい', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🛠️', 'desc': 'ママでもパパでも、頼まれたことをやろう'},
     {'id': 46, 'title': '休みの日は買い物についてくる', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '🛒', 'days': '5,6', 'desc': '荷物持ちのサポート任務'},
     {'id': 56, 'title': '自分の部屋の掃除・片付け', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 70, 'icon': '🧹', 'days': '5,6', 'desc': '週末は自分の城をきれいにしよう'},
     # {'id': 57, 'title': 'チャリティーコンサートで演奏', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 2000, 'icon': '🧹', 'days': '5,6', 'desc': 'ふざけずに頑張ろう'},
     # {'id': 1022, 'title': '騎士のエスコート', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'C', 'exp': 50, 'gold': 20, 'icon': '🛡️', 'desc': '泣いている妹を慰める、守る'},
-    # 九九チャレンジ(何度でも挑戦できる無限クエスト版。前提クエストで段階を連結する方式は
-    # 採用しない=「当日中の完了」しか見られない実装のため、複数日にまたがる進行チェーンに
-    # 不向きと判断した。段階分けが必要になった場合はここに数を増やす形で調整する)
-    # id=1030「今日の九九タイム」を統合(上のA-4節コメント参照)。exp/goldはdaily側の額を
-    # 引き継ぎ、説明文も「毎日の練習」と「何度でも挑戦」の両方の意味を持たせた。
-    {'id': 1031, 'title': '九九チャレンジ', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'D', 'exp': 60, 'gold': 60, 'icon': '🔢', 'desc': '声に出して九九を練習しよう。できるところまで何回でも挑戦しよう'},
 
     # ------------------------------------------
     # B-5. 特別：涼花 (Daughter)
