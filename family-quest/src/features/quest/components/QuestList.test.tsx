@@ -215,3 +215,52 @@ describe('QuestList in-flight processing overlay (#391)', () => {
         expect(onQuestClick).toHaveBeenCalledTimes(1);
     });
 });
+
+// 角度②: ACTIONABLE_CARD_LIMIT(3件)を超えた実行可能クエストは forceSlim として
+// 縮小1行になるが、isDone/isLocked とは異なりまだ実行可能なままなので、完了済みと
+// 混同されず(取り消し線なし)、タップで完了確認を開ける(handleTapComplete)必要がある。
+describe('QuestList forceSlim rows (over ACTIONABLE_CARD_LIMIT)', () => {
+    afterEach(() => {
+        cleanup();
+    });
+
+    const overflowQuests: Quest[] = [1, 2, 3, 4].map((n) => ({
+        quest_id: n,
+        title: `クエスト${n}`,
+        quest_type: 'daily',
+        target_user: 'all',
+        gold_gain: 3,
+    }));
+
+    it('renders the quest beyond the limit as a slim row without a completed-style strikethrough', () => {
+        render(
+            <QuestList
+                quests={overflowQuests}
+                completedQuests={[]}
+                pendingQuests={[]}
+                currentUser={son}
+                onQuestClick={vi.fn()}
+                completedSignal={null}
+            />
+        );
+        const overflowRow = screen.getByText('クエスト4');
+        expect(overflowRow.closest('div')).not.toHaveClass('line-through');
+    });
+
+    it('completes a forceSlim quest on tap, same as an actionable card', () => {
+        const onQuestClick = vi.fn();
+        render(
+            <QuestList
+                quests={overflowQuests}
+                completedQuests={[]}
+                pendingQuests={[]}
+                currentUser={son}
+                onQuestClick={onQuestClick}
+                completedSignal={null}
+            />
+        );
+        fireEvent.click(screen.getByText('クエスト4'));
+        expect(onQuestClick).toHaveBeenCalledTimes(1);
+        expect(onQuestClick.mock.calls[0][0]).toMatchObject({ quest_id: 4 });
+    });
+});

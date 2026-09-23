@@ -376,12 +376,17 @@ const QuestItem: React.FC<{
                     </div>
                 ) : (
                     // 完了済み・未開放は縮小した1行のみのミュート表示にする
-                    // (RoutineStepRow の非カレント行と同じ扱い)。
+                    // (RoutineStepRow の非カレント行と同じ扱い)。forceSlim(件数上限による
+                    // 強制縮小)は isDone/isLocked のどちらでもなく、まだ実行可能なクエストが
+                    // 縮小表示になっているだけなので、取り消し線を付けず(完了済みに見えて
+                    // しまうため)、タップで完了確認を開けるようにする(カード表示側の
+                    // handleTapComplete と同じ経路)。
                     <div
+                        onClick={forceSlim ? handleTapComplete : undefined}
                         {...interactiveProps}
-                        className={`flex flex-col gap-0.5 h-full ${canCancel ? 'cursor-pointer select-none' : ''}`}
+                        className={`flex flex-col gap-0.5 h-full ${(canCancel || forceSlim) ? 'cursor-pointer select-none' : ''}`}
                     >
-                        <div className={`flex items-center gap-1.5 ${panelMode ? 'text-xs' : 'text-sm'} ${isLocked ? 'text-gray-500' : 'text-gray-400 line-through decoration-2'}`}>
+                        <div className={`flex items-center gap-1.5 ${panelMode ? 'text-xs' : 'text-sm'} ${isLocked ? 'text-gray-500' : isDone ? 'text-gray-400 line-through decoration-2' : 'text-gray-300'}`}>
                             <span className="min-w-0 truncate">{displayTitle}</span>
                             {isLocked && <span className="text-[10px] text-gray-500 ml-1 flex-none">未開放</span>}
                             {isDone && (
