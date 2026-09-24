@@ -864,10 +864,14 @@ YOUTUBE_HOME_CARE_USER_IDS: set[str] = {"daughter"}
 # お昼寝の時間帯(要件確認済み、2026-09-24)。この間は涼花・智矢とも
 # YouTube系ごほうび券を使えない。自由時間ゲート・自宅保育の適用除外(上記)とは
 # 別軸の制限で、ルーティンフローの状態に関わらず常に適用する
-# (services/quest/inventory_service.py)。"HH:MM"形式。パース失敗時は安全側
-# (=開始・終了が同じ00:00になり実質無効化される)にフォールバックする。
-_youtube_nap_block_start_str: str = os.getenv("YOUTUBE_NAP_BLOCK_START", "13:30")
-_youtube_nap_block_end_str: str = os.getenv("YOUTUBE_NAP_BLOCK_END", "15:00")
+# (services/quest/inventory_service.py)。"HH:MM"形式。未設定/空文字はデフォルト値、
+# パース失敗時は安全側(=開始・終了が同じ00:00になり実質無効化される)に
+# フォールバックする(_get_int_envと同じ「空文字は未設定として扱う」方式。
+# Claude Code Reviewの指摘: os.getenv(name, default)だけだと、.env.exampleの
+# 空文字プレースホルダーをそのまま.envへコピーした場合にデフォルトへ
+# フォールバックせずパース失敗し、お昼寝ブロックが意図せず無効化されていた)。
+_youtube_nap_block_start_str: str = os.getenv("YOUTUBE_NAP_BLOCK_START", "").strip() or "13:30"
+_youtube_nap_block_end_str: str = os.getenv("YOUTUBE_NAP_BLOCK_END", "").strip() or "15:00"
 try:
     YOUTUBE_NAP_BLOCK_START: _time_of_day = _time_of_day.fromisoformat(_youtube_nap_block_start_str)
     YOUTUBE_NAP_BLOCK_END: _time_of_day = _time_of_day.fromisoformat(_youtube_nap_block_end_str)

@@ -102,6 +102,37 @@ class TestYoutubeRewardIdsParsing:
             assert cfg.YOUTUBE_REWARD_IDS == []
 
 
+class TestYoutubeNapBlockParsing:
+    """お昼寝ブロック(YOUTUBE_NAP_BLOCK_START/END)の回帰(Claude Code Reviewの指摘、
+    PR #855)。.env.example の空文字プレースホルダーをそのまま .env にコピーしても、
+    お昼寝ブロックが意図せず無効化されない(デフォルト値にフォールバックする)ことを
+    固定する。"""
+
+    def test_env_var_overrides_default(self):
+        with _with_env(YOUTUBE_NAP_BLOCK_START="10:00", YOUTUBE_NAP_BLOCK_END="11:30") as cfg:
+            assert cfg.YOUTUBE_NAP_BLOCK_START == cfg._time_of_day(10, 0)
+            assert cfg.YOUTUBE_NAP_BLOCK_END == cfg._time_of_day(11, 30)
+
+    def test_unset_env_var_falls_back_to_default(self):
+        with _with_env(YOUTUBE_NAP_BLOCK_START=None, YOUTUBE_NAP_BLOCK_END=None) as cfg:
+            assert cfg.YOUTUBE_NAP_BLOCK_START == cfg._time_of_day(13, 30)
+            assert cfg.YOUTUBE_NAP_BLOCK_END == cfg._time_of_day(15, 0)
+
+    def test_empty_string_falls_back_to_default(self):
+        """.env.example の空文字プレースホルダーをそのままコピーしても、
+        パース失敗による実質無効化(00:00〜00:00)ではなくデフォルト値になる"""
+        with _with_env(YOUTUBE_NAP_BLOCK_START="", YOUTUBE_NAP_BLOCK_END="") as cfg:
+            assert cfg.YOUTUBE_NAP_BLOCK_START == cfg._time_of_day(13, 30)
+            assert cfg.YOUTUBE_NAP_BLOCK_END == cfg._time_of_day(15, 0)
+
+    def test_malformed_value_disables_the_block(self):
+        """デフォルトへのフォールバックではなく空文字と同様に扱うのではなく、
+        パースできない値は安全側(常に偽になる00:00〜00:00)に倒す"""
+        with _with_env(YOUTUBE_NAP_BLOCK_START="not-a-time", YOUTUBE_NAP_BLOCK_END="15:00") as cfg:
+            assert cfg.YOUTUBE_NAP_BLOCK_START == cfg._time_of_day(0, 0)
+            assert cfg.YOUTUBE_NAP_BLOCK_END == cfg._time_of_day(0, 0)
+
+
 class TestAllowAllOrigins:
     def test_true_switches_cors_origins_to_wildcard(self):
         with _with_env(ALLOW_ALL_ORIGINS="true") as cfg:
