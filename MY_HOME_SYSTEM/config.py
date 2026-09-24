@@ -759,7 +759,7 @@ if _youtube_reward_ids_str:
 # (services/quest_service.py の _is_youtube_cooldown_enforced が判定)。
 # 既定値はこの機能を追加した日(2026-09-05)の1週間後。実際にリリースする日程に
 # 合わせて調整すること。パース失敗時は安全側(=即時強制)にフォールバックする。
-from datetime import date as _date
+from datetime import date as _date, time as _time_of_day
 _youtube_cooldown_enforce_from_str: str = os.getenv("YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM", "2026-09-12")
 try:
     YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM: _date = _date.fromisoformat(_youtube_cooldown_enforce_from_str)
@@ -850,6 +850,31 @@ if _youtube_extension_quest_ids_str:
 # 2026-09-23: 要件確認済みで30分→10分に変更(プリント1枚の延長幅を縮小)。
 YOUTUBE_EXTENSION_MINUTES_PER_QUEST: int = _get_int_env("YOUTUBE_EXTENSION_MINUTES_PER_QUEST", 10)
 YOUTUBE_EXTENSION_MAX_PER_DAY: int = _get_int_env("YOUTUBE_EXTENSION_MAX_PER_DAY", 2)
+
+# 涼花は今年度は自宅保育(登校しない)のため、is_user_currently_in_free_time
+# (登校/下校を前提としたルーティンフロー(routine_data.py)の自由時間判定)の
+# 対象外とするユーザーIDの集合(Issue報告、2026-09-24)。このゲートを涼花にも
+# 適用すると、平日07:50(登校の締切)〜14:00(下校の開始)の間ずっと「自由時間では
+# ない」扱いに固定され、YouTube系ごほうび券が一律使えなくなっていた
+# (登校前提の設計と、登校しない実態のミスマッチ)。ここに含まれるユーザーには
+# このゲートを適用せず、下記のお昼寝ブロックのみを適用する
+# (services/quest/inventory_service.py)。
+YOUTUBE_HOME_CARE_USER_IDS: set[str] = {"daughter"}
+
+# お昼寝の時間帯(要件確認済み、2026-09-24)。この間は涼花・智矢とも
+# YouTube系ごほうび券を使えない。自由時間ゲート・自宅保育の適用除外(上記)とは
+# 別軸の制限で、ルーティンフローの状態に関わらず常に適用する
+# (services/quest/inventory_service.py)。"HH:MM"形式。パース失敗時は安全側
+# (=開始・終了が同じ00:00になり実質無効化される)にフォールバックする。
+_youtube_nap_block_start_str: str = os.getenv("YOUTUBE_NAP_BLOCK_START", "13:30")
+_youtube_nap_block_end_str: str = os.getenv("YOUTUBE_NAP_BLOCK_END", "15:00")
+try:
+    YOUTUBE_NAP_BLOCK_START: _time_of_day = _time_of_day.fromisoformat(_youtube_nap_block_start_str)
+    YOUTUBE_NAP_BLOCK_END: _time_of_day = _time_of_day.fromisoformat(_youtube_nap_block_end_str)
+except ValueError as e:
+    logger.warning(f"⚠️ YOUTUBE_NAP_BLOCK_START/END parse error: {e}. お昼寝ブロックを無効化します。")
+    YOUTUBE_NAP_BLOCK_START = _time_of_day(0, 0)
+    YOUTUBE_NAP_BLOCK_END = _time_of_day(0, 0)
 
 # ==========================================
 # 15. 週次レポート設定

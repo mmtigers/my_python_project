@@ -25,6 +25,35 @@ from services.quest.locks import (
 )
 
 
+def _is_within_youtube_nap_block(now: datetime.datetime | None = None) -> bool:
+    """お昼寝の時間帯(config.YOUTUBE_NAP_BLOCK_START〜END)かどうかを返す。
+
+    涼花・智矢とも共通で、自由時間ゲート・自宅保育の適用除外(下記)とは別軸で
+    常に適用する制限のため、フローの状態を一切見ない単純な壁時計判定にしている。
+    """
+    if now is None:
+        now = datetime.datetime.now(JST)
+    t = now.time()
+    return config.YOUTUBE_NAP_BLOCK_START <= t < config.YOUTUBE_NAP_BLOCK_END
+
+
+def _is_user_in_youtube_free_time(user_id: str, now: datetime.datetime | None = None) -> bool:
+    """YouTube系ごほうび券を使える「自由時間」かどうかを返す。
+
+    お昼寝の時間帯は誰であっても常にFalse。それ以外は、涼花のように今年度
+    登校しない(自宅保育、config.YOUTUBE_HOME_CARE_USER_IDS)ユーザーは
+    is_user_currently_in_free_time が前提とする「登校/下校」に当てはまらないため
+    このゲート自体を適用せずTrueとする(2026-09-24: 平日07:50〜14:00がずっと
+    「自由時間ではない」扱いに固定され、券が一律使えなくなっていたことの修正)。
+    それ以外のユーザーは従来どおりルーティンフローの状態に従う。
+    """
+    if _is_within_youtube_nap_block(now):
+        return False
+    if user_id in config.YOUTUBE_HOME_CARE_USER_IDS:
+        return True
+    return routine_service.is_user_currently_in_free_time(user_id, now=now)
+
+
 def _build_announcement(starts_on) -> dict[str, Any]:
     """施行日の予告バナー(family-quest側)に渡す情報を組み立てる。
 
@@ -41,8 +70,8 @@ class InventoryService:
     def get_user_inventory(self, user_id: str) -> Dict[str, Any]:
         # YouTube等の時間消費型ごほうびは自由時間中しか使えない(要件確認済み、2026-09-23)。
         # フロントエンド(InventoryList.tsx)がタップ前にロック表示できるよう、実際の
-        # 使用可否判定(_use_item_locked)と同じ情報源(routine_service)から渡す。
-        is_in_free_time = routine_service.is_user_currently_in_free_time(user_id)
+        # 使用可否判定(_use_item_locked)と同じ判定(_is_user_in_youtube_free_time)から渡す。
+        is_in_free_time = _is_user_in_youtube_free_time(user_id)
 
         with get_db_cursor() as cur:
             sql = """
@@ -179,7 +208,13 @@ class InventoryService:
                 # 0. 自由時間中でなければ使用不可(要件確認済み、2026-09-23: YouTube等の
                 #    時間消費型ごほうびは自由時間中のみ使える)。他の2つの制限と異なり
                 #    施行日による猶予期間は設けない(新規要件のため最初から有効)。
-                if not routine_service.is_user_currently_in_free_time(user_id):
+                #    お昼寝の時間帯(config.YOUTUBE_NAP_BLOCK_START〜END、要件確認済み、
+                #    2026-09-24)は誰であっても常に対象。それ以外は自宅保育の子
+                #    (config.YOUTUBE_HOME_CARE_USER_IDS)を除きルーティンフローの
+                #    自由時間判定に従う(_is_user_in_youtube_free_time参照)。
+                if not _is_user_in_youtube_free_time(user_id):
+                    if _is_within_youtube_nap_block():
+                        raise HTTPException(429, "今はお昼寝の時間だからYouTubeはお休みしてね")
                     raise HTTPException(429, "YouTubeは自由時間になってから見てね")
 
                 # 1. 1日の合計視聴分数の上限。クールダウンより先に判定するのは、
