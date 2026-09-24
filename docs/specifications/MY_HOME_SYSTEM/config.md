@@ -160,7 +160,7 @@
 | `date`(`_date`という別名) | 標準ライブラリ(`datetime`) | `YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`(YouTube系ごほうび券クールダウンの施行開始日)・`YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`(日次上限の施行開始日)のパース・型注釈・フォールバック値の生成 | 根拠: `from datetime import date as _date` (行番号: 762 / 抜粋: `from datetime import date as _date`) |
 | `time`(`_time_of_day`という別名) | 標準ライブラリ(`datetime`) | **（Issue報告、2026-09-24で追加）** `YOUTUBE_NAP_BLOCK_START`/`YOUTUBE_NAP_BLOCK_END`(お昼寝の時間帯)のパース・型注釈・フォールバック値の生成。既存の`_date as _date`と同じimport文に相乗りしている(モジュール先頭の`import time`は標準ライブラリの`time`モジュールで別物のため、別名で衝突を避けている) | 根拠: `from datetime import date as _date, time as _time_of_day` (行番号: 762 / 抜粋: `from datetime import date as _date, time as _time_of_day`) |
 
-Issue #488で、未実装のタイムラプススケジュール機能(`TIMELAPSE_SCHEDULES`)の残置設定だった`from datetime import time as _dt_time`は使用箇所ごと削除され、現在`config.py`はこのエイリアスをインポートしていない。
+Issue #488で、未実装のタイムラプススケジュール機能(`TIMELAPSE_SCHEDULES`)の残置設定だった`from datetime import time as _dt_time`は使用箇所ごと削除され、当時`config.py`はこのエイリアスをインポートしていなくなった。**（Issue報告、2026-09-24で再追加）** ただしその後、上記`YOUTUBE_NAP_BLOCK_START`/`YOUTUBE_NAP_BLOCK_END`のために`datetime.time`が別名`_time_of_day`で改めてインポートされている。用途・別名とも`_dt_time`時代とは無関係の新規追加である。
 
 ### ブラックボックスとなる外部要素
 
