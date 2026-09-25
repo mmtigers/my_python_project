@@ -45,7 +45,7 @@ _PAGE_BASE_CSS = """
     }
     .alerts-warn { background: #fff3e0; color: #e65100; border: 1px solid #ffe0b2; }
     .alerts-ok { background: #f1f8e9; color: #558b2f; border: 1px solid #dcedc8; }
-    .alerts a { color: inherit; font-weight: bold; }
+    .alerts a { color: inherit; font-weight: bold; display: inline-flex; align-items: center; min-height: 44px; }
 
     /* 自動更新が失敗したときの見た目(取れなかったら古い表示を消さずに薄く残す)。 */
     #status.stale { opacity: 0.55; }
