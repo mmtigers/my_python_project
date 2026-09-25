@@ -20,7 +20,7 @@ _JST = pytz.timezone("Asia/Tokyo")
 
 
 def _jst(*args) -> datetime:
-    return _JST.localize(datetime(*args))
+    return _JST.localize(datetime(*args))  # noqa: DTZ001 -- localize()で直後にtz付与する
 
 
 @pytest.fixture(autouse=True)
@@ -173,7 +173,7 @@ class TestRenderWatchPage:
 class TestBuildFreshnessRows:
     def test_missing_data_is_flagged_red_when_threshold_set(self):
         rows = dashboard_page_service.build_freshness_rows(
-            pd.DataFrame(), None, None, datetime(2026, 1, 1)
+            pd.DataFrame(), None, None, _jst(2026, 1, 1)
         )
         electric_row = next(r for r in rows if r["label"] == "⚡ 電気・環境の見守り")
         assert electric_row["state"] == "red"
@@ -182,10 +182,10 @@ class TestBuildFreshnessRows:
 
     def test_no_matching_device_type_is_treated_as_missing(self):
         rows = dashboard_page_service.build_freshness_rows(
-            pd.DataFrame({"device_type": ["Camera"], "timestamp": [datetime(2026, 1, 1)]}),
+            pd.DataFrame({"device_type": ["Camera"], "timestamp": [_jst(2026, 1, 1)]}),
             None,
             None,
-            datetime(2026, 1, 1),
+            _jst(2026, 1, 1),
         )
         electric_row = next(r for r in rows if r["label"] == "⚡ 電気・環境の見守り")
         assert electric_row["state"] == "red"
