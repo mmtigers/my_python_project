@@ -31,6 +31,6 @@ def restart_home_system() -> tuple[bool, str]:
             f"再起動コマンドが {RESTART_TIMEOUT_SEC} 秒以内に完了しませんでした。"
             "systemctl 側の状態を確認してください。"
         )
-    except Exception as e:
+    except (subprocess.CalledProcessError, OSError) as e:
         logger.error(f"サービス再起動に失敗しました: {e}")
         return False, f"エラー: {e}"

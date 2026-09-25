@@ -28,7 +28,7 @@ def manual_backup() -> Dict[str, Any]:
 
 
 @router.post("/restart")
-def manual_restart() -> Dict[str, Any]:
+def manual_restart() -> dict[str, Any]:
     """システムページ(かんたん表示)の「サービス再起動」ボタンから呼ばれる。
 
     #829: 以前はStreamlit版ダッシュボードのスクリプト実行スレッド内で直接

@@ -311,7 +311,7 @@ def _list_snapshot_files() -> list[str]:
         img_dir = os.path.join(config.ASSETS_DIR, "snapshots")
         paths = sorted(glob.glob(os.path.join(img_dir, "*.jpg")), reverse=True)
         return [os.path.basename(p) for p in paths[:_SNAPSHOT_GLOB_LIMIT]]
-    except Exception:
+    except OSError:
         return []
 
 
@@ -322,7 +322,7 @@ def resolve_snapshot_path(filename: str) -> str | None:
     """
     try:
         base_dir = os.path.realpath(os.path.join(config.ASSETS_DIR, "snapshots"))
-    except Exception:
+    except OSError:
         return None
     candidate = os.path.realpath(os.path.join(base_dir, filename))
     if os.path.commonpath([base_dir, candidate]) != base_dir:
