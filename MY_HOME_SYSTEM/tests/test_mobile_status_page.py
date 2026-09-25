@@ -133,6 +133,39 @@ class TestHomeScreenInstall:
             assert icon.status_code == 200
             assert icon.headers["content-type"] == "image/png"
 
+    def test_an_unsupported_icon_size_is_rejected(self):
+        with _client() as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}/icon-999.png")
+            assert res.status_code == 404
+
+
+class TestDashboardSnapshot:
+    """見守りページのスナップショット画像1枚を返すエンドポイント(パストラバーサル対策込み)。"""
+
+    def test_existing_snapshot_is_served(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "ASSETS_DIR", str(tmp_path / "assets"))
+        snap_dir = tmp_path / "assets" / "snapshots"
+        snap_dir.mkdir(parents=True)
+        (snap_dir / "photo.jpg").write_bytes(b"fake-jpeg")
+        with _client() as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}/snapshot/photo.jpg")
+        assert res.status_code == 200
+        assert res.headers["content-type"] == "image/jpeg"
+
+    def test_missing_snapshot_returns_404(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "ASSETS_DIR", str(tmp_path / "assets"))
+        with _client() as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}/snapshot/missing.jpg")
+        assert res.status_code == 404
+
+    def test_path_traversal_is_rejected(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "ASSETS_DIR", str(tmp_path / "assets"))
+        (tmp_path / "assets").mkdir(parents=True)
+        (tmp_path / "assets" / "secret.txt").write_text("x")
+        with _client() as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}/snapshot/..%2Fsecret.txt")
+        assert res.status_code == 404
+
 
 class TestLegacyUrlRedirects:
     """#829でStreamlit版のURL体系(`?tab=`)・旧「かんたん表示」(`/dashboard/m`)を

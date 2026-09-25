@@ -39,13 +39,12 @@ fi
 # 意図して手動起動する場合だけ ALLOW_MANUAL_START=1 で上書きできる。
 # ここは掃除(Phase 1)より前に置くこと。後ろに置くと拒否した時点で既にプロセスを止めている。
 if [ "$PREPARE_ONLY" != true ] && command -v systemctl >/dev/null 2>&1; then
-    for managed_unit in home_system.service; do
-        if systemctl is-enabled --quiet "$managed_unit" 2>/dev/null; then
-            if [ "${ALLOW_MANUAL_START:-}" = "1" ]; then
-                printf '⚠️  %s は systemd で有効ですが、ALLOW_MANUAL_START=1 のため手動起動を続行します。\n' "$managed_unit" >&2
-                printf '    起動後のプロセスは systemd の管理外になり、落ちても自動再起動されません。\n' >&2
-                break
-            fi
+    managed_unit="home_system.service"
+    if systemctl is-enabled --quiet "$managed_unit" 2>/dev/null; then
+        if [ "${ALLOW_MANUAL_START:-}" = "1" ]; then
+            printf '⚠️  %s は systemd で有効ですが、ALLOW_MANUAL_START=1 のため手動起動を続行します。\n' "$managed_unit" >&2
+            printf '    起動後のプロセスは systemd の管理外になり、落ちても自動再起動されません。\n' >&2
+        else
             printf '❌ %s が systemd で有効なため、start_all.sh のフルモード(引数なし)は実行しません。\n' "$managed_unit" >&2
             printf '   このまま実行すると systemd 管理下のプロセスを止めて nohup で起動し直すため、\n' >&2
             printf '   サービスが inactive になり、以後は落ちても自動再起動されなくなります (Issue #824)。\n' >&2
@@ -57,7 +56,7 @@ if [ "$PREPARE_ONLY" != true ] && command -v systemctl >/dev/null 2>&1; then
             printf '     ALLOW_MANUAL_START=1 %s\n' "$0" >&2
             exit 1
         fi
-    done
+    fi
 fi
 # --- end 手動起動ガード ---
 

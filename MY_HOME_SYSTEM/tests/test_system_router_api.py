@@ -1,10 +1,10 @@
 # MY_HOME_SYSTEM/tests/test_system_router_api.py
 """
-routers/system_router.py (手動バックアップトリガー)のテスト。
+routers/system_router.py (手動バックアップトリガー・サービス再起動)のテスト。
 
-backup_service.perform_backup は実際にはNAS I/Oを伴うため、
-ここではrouter層の「成功/失敗をどうHTTPレスポンスへ変換するか」のみを
-services.backup_service.perform_backup をモックして検証する。
+backup_service.perform_backup / system_maintenance_service.restart_home_system は
+実際にはNAS I/O・systemctl呼び出しを伴うため、ここではrouter層の
+「成功/失敗をどうHTTPレスポンスへ変換するか」のみをモックして検証する。
 
 なお、このエンドポイントには認可チェックが一切なく、誰でもバックアップを
 トリガーできる(CODE_REVIEW_REPORT.md 2.1で指摘済み・未対応)。
@@ -60,3 +60,27 @@ def test_backup_endpoint_currently_requires_no_authentication(api_client, monkey
     res = api_client.post("/api/system/backup")
     assert res.status_code == 200
     assert len(calls) == 1
+
+
+def test_restart_success_returns_200(api_client, monkeypatch):
+    monkeypatch.setattr(
+        system_router.system_maintenance_service,
+        "restart_home_system",
+        lambda: (True, "再起動コマンドを送信しました"),
+    )
+    res = api_client.post("/api/system/restart")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "success"
+    assert body["message"] == "再起動コマンドを送信しました"
+
+
+def test_restart_failure_returns_500_with_message(api_client, monkeypatch):
+    monkeypatch.setattr(
+        system_router.system_maintenance_service,
+        "restart_home_system",
+        lambda: (False, "エラー: [Errno 2] No such file or directory: 'sudo'"),
+    )
+    res = api_client.post("/api/system/restart")
+    assert res.status_code == 500
+    assert res.json()["detail"] == "エラー: [Errno 2] No such file or directory: 'sudo'"
