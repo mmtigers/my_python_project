@@ -27,11 +27,10 @@ import config
 from core.logger import setup_logging
 from core.migrations import apply_pending_migrations
 from services import sensor_service, camera_service
-from services.dashboard_proxy_service import dashboard_proxy_service
 
 # Routers
 from routers import quest_router, webhook_router, system_router, camera_router, alexa_router, routine_router
-# ダッシュボード(Streamlit)の中継。config.DASHBOARD_PROXY_ENABLED=false のときは
+# かんたん表示ダッシュボード。config.DASHBOARD_ENABLED=false のときは
 # include しないため、import だけしてルートは生やさない。
 from routers import dashboard_router
 
@@ -332,13 +331,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     sensor_service.cancel_all_tasks()
 
-    # ダッシュボード中継用の httpx コネクションプールを閉じる
-    # (未クローズのまま落とすと "Unclosed client session" の警告が出る)。
-    try:
-        await dashboard_proxy_service.aclose()
-    except Exception as e:
-        logger.warning(f"ダッシュボード中継クライアントのクローズに失敗しました: {e}")
-
     logger.info("Bye!")
 
 app = FastAPI(
@@ -509,14 +501,14 @@ app.include_router(camera_router.router, prefix="/api/cameras", tags=["cameras"]
 app.include_router(alexa_router.router, tags=["alexa"])
 app.include_router(routine_router.router, prefix="/api/routine", tags=["routine"])
 
-# ダッシュボード(Streamlit・8501番)の中継。
-# 8501番は認証を持たないため localhost 束縛のままにし、外部からの到達は
-# 既に Cloudflare Access で保護されている本サーバー経由に一本化する
-# (詳細は services/dashboard_proxy_service.py のモジュールdocstring)。
+# かんたん表示ダッシュボード(`routers/dashboard_router.py`。Streamlit不使用、この
+# サーバーが直接HTMLを返す。#829でStreamlit版は廃止した)。
+# 外部からの到達制御は他のパスと同じくエッジのCloudflare Accessに委譲する
+# (詳細は config.py セクション16参照)。
 # ★このパスを Cloudflare Access のバイパス対象に設定してはならない。
-if config.DASHBOARD_PROXY_ENABLED:
+if config.DASHBOARD_ENABLED:
     app.include_router(dashboard_router.router, tags=["dashboard"])
-    logger.info(f"📊 Dashboard Proxy: {config.DASHBOARD_BASE_PATH} -> {config.DASHBOARD_INTERNAL_URL}")
+    logger.info(f"📊 Dashboard: {config.DASHBOARD_BASE_PATH}")
 
 # --- Static Files & SPA Serving ---
 

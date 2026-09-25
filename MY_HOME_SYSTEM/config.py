@@ -321,7 +321,6 @@ SQLITE_TABLE_DAILY_LOGS: str = "daily_logs"
 
 # Legacy/Specific Tables
 SQLITE_TABLE_FOOD: str = "food_records"
-SQLITE_TABLE_CAR: str = "car_records"
 SQLITE_TABLE_CHILD: str = "child_health_records"
 SQLITE_TABLE_DEFECATION: str = "defecation_records"
 # Issue #701 (2026-09-19): 旧 SQLITE_TABLE_AI_REPORT ("ai_report_records") は
@@ -330,6 +329,9 @@ SQLITE_TABLE_SHOPPING: str = "shopping_records"
 SQLITE_TABLE_NAS: str = "nas_records"
 # 旧 SQLITE_TABLE_BICYCLE ("bicycle_parking_records") は、ダッシュボードの
 # 駐輪場待機数の表示ごと退役した(オーナー判断)。テーブルは履歴として残す。
+# 旧 SQLITE_TABLE_CAR ("car_records") は、書き込み経路がリポジトリのどこにも
+# 存在せず常に空だった「車(伊丹)」カードごと#829で退役した(駐車場カメラの
+# 動体検知に置き換え)。テーブルは履歴として残す。
 
 # Issue #649: 以前は ".env" も含めていたが、全シークレット(SwitchBot/LINE/Discord/Gemini)を
 # NAS の db_backups/ へ平文でコピーすることになり、NAS 共有の閲覧権限がそのままシークレットの
@@ -422,7 +424,6 @@ CORS_EXTRA_ORIGINS: List[str] = [
 CORS_ORIGINS: List[str] = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "http://localhost:8501",   # Streamlitダッシュボード
     _frontend_origin,
     *CORS_EXTRA_ORIGINS,
 ]
@@ -891,28 +892,26 @@ ELEC_PRICE_PER_KWH: int = _get_int_env("ELEC_PRICE_PER_KWH", 31)
 
 
 # ==========================================
-# 16. ダッシュボード(Streamlit)公開設定
+# 16. ダッシュボード公開設定
 # ==========================================
-# Streamlitダッシュボード(dashboard.py)は認証機構を持たず、家族の健康記録・防犯ログの
-# 閲覧と `sudo systemctl restart` ボタンを備えるため、`home_dashboard.service`/
-# `start_all.sh` では 127.0.0.1 にのみバインドしている
-# (`docs/reports/CODE_REVIEW_REPORT_ALL.md` の Critical 指摘)。
-# そのままではスマートフォンから到達できないため、`unified_server.py` が
-# DASHBOARD_BASE_PATH 配下でリバースプロキシし、外部からのアクセス制御は
-# 他のパスと同じくエッジのCloudflare Accessに委譲する(Issue #321・2026-09-03決定)。
+# #829: 以前はStreamlit製の「詳細表示」(dashboard.py)を `unified_server.py` が
+# リバースプロキシしていたが、Streamlit版は廃止した。ダッシュボードは
+# `routers/dashboard_router.py` がこのサーバー自身の中でHTMLを直接組み立てて返す
+# (かんたん表示のみ。詳細表示・表示モード切替UIは廃止)ため、外部プロセスへの
+# 中継は無くなった。外部からのアクセス制御は他のパスと同じくエッジの
+# Cloudflare Accessに委譲する(Issue #321・2026-09-03決定)。
 #
 # 重要: このパスは `unified_server.py` の `allowed_webhook_paths` とは逆で、
 # **Cloudflare Access側でバイパス設定をしてはいけない**(バイパスすると無認証で
 # ダッシュボードが外部公開される)。詳細は
 # `docs/runbooks/cloudflare_access_connectivity_check.md` を参照。
-DASHBOARD_PROXY_ENABLED: bool = os.getenv("DASHBOARD_PROXY_ENABLED", "true").strip().lower() != "false"
-# プロキシ先(Streamlitの待ち受け先)。localhost以外を指定する運用は想定していない。
-DASHBOARD_INTERNAL_URL: str = os.getenv("DASHBOARD_INTERNAL_URL", "http://127.0.0.1:8501").strip().rstrip("/")
-# 公開パス。Streamlit側の `--server.baseUrlPath` と一致していなければ静的アセットが404になる。
-# 先頭のスラッシュを保証し、末尾のスラッシュは落とす("/dashboard" 形式に正規化)。
+DASHBOARD_ENABLED: bool = os.getenv("DASHBOARD_ENABLED", "true").strip().lower() != "false"
+# 公開パス。先頭のスラッシュを保証し、末尾のスラッシュは落とす("/dashboard" 形式に正規化)。
 DASHBOARD_BASE_PATH: str = "/" + os.getenv("DASHBOARD_BASE_PATH", "dashboard").strip().strip("/")
-# プロキシのタイムアウト(秒)。Streamlitは初回レンダリングで数秒かかることがある。
-DASHBOARD_PROXY_TIMEOUT_SEC: int = _get_int_env("DASHBOARD_PROXY_TIMEOUT_SEC", 30)
+
+# ホーム画面のリンクカードから開く外部サービス。ダッシュボード内に機能・表示は持たず、
+# リンクのみを置く方針(#829)。
+ASA_NOTE_URL: str = os.getenv("ASA_NOTE_URL", "https://go-to-school-one.vercel.app/")
 
 
 # ==========================================

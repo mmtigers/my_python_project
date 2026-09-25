@@ -244,6 +244,23 @@ def load_generic_data(table_name: str, limit: int = 500) -> pd.DataFrame:
     query = f"SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT {limit}"
     return load_data_from_db(query)
 
+def _classify_power_device_type(row) -> str:
+    """power_usage の1行を "Nature Remo E Lite"(スマートメーター全体) か "Plug"(個別家電)に分類する。
+
+    #829: device_category(migrations/0020以降、書き込み時点でnature_remo_monitor.py/
+    switchbot_power_monitor.pyが明示)を最優先で使う。マイグレーション適用前に書かれた
+    古い行はdevice_categoryがNoneなので、その行に限り従来のdevice_name文字列判定
+    (Nature Remoアプリのニックネームに"Remo"を含むか)にフォールバックする。
+    """
+    category = row.get("device_category")
+    if category == "smart_meter":
+        return "Nature Remo E Lite"
+    if category == "plug":
+        return "Plug"
+    name = row.get("device_name")
+    return "Nature Remo E Lite" if name and "Remo" in str(name) else "Plug"
+
+
 def load_sensor_data(limit: int = 5000) -> pd.DataFrame:
     """
     新旧テーブルからセンサーデータを統合して取得する
@@ -272,17 +289,21 @@ def load_sensor_data(limit: int = 5000) -> pd.DataFrame:
         df_meter["device_type"] = "Meter"
 
     # 3. Power Usage (New: 電力)
+    # #829: device_category(書き込み時点でnature_remo_monitor.py/switchbot_power_monitor.pyが
+    # 明示する種別。migrations/0020)があればそれを優先する。無い(マイグレーション適用前に
+    # 書かれた古い行)場合だけ、従来のdevice_name文字列判定にフォールバックする
+    # (このフォールバック自体がRemoというニックネーム依存で外れうる不具合の原因だったため、
+    # 新しい行はdevice_categoryで確実に判定できるようにした)。
     query_power = f"""
-        SELECT timestamp, device_id, device_name, 
+        SELECT timestamp, device_id, device_name, device_category,
                wattage as power_watts
         FROM {config.SQLITE_TABLE_POWER_USAGE}
         ORDER BY timestamp DESC LIMIT {limit}
     """
     df_power = load_data_from_db(query_power)
     if not df_power.empty:
-        df_power["device_type"] = df_power["device_name"].apply(
-            lambda x: "Nature Remo E Lite" if x and "Remo" in str(x) else "Plug"
-        )
+        df_power["device_type"] = df_power.apply(_classify_power_device_type, axis=1)
+        df_power = df_power.drop(columns=["device_category"])
 
     # --- 統合 ---
     # Issue #491: df_meter/df_powerはdf_legacyが持つ列(contact_state等)の一部を
@@ -365,13 +386,21 @@ def _calculate_cost_between(start: datetime, end: datetime) -> int:
         # #170: power_usageにはスマートメーター(全体消費)と各プラグ(個別家電)が
         # 同居しており、プラグの消費電力はスマートメーターの計測値に既に
         # 含まれる部分集合である。デバイスを絞らず全行を合算するとプラグ分が
-        # 二重計上されるため、load_sensor_data()と同じ分類基準
-        # (device_nameに"Remo"を含む)でスマートメーターの行のみに絞る。
+        # 二重計上されるため、スマートメーターの行のみに絞る。
+        # #829: 以前は device_name に "Remo" を含むかだけで判定していたが、これは
+        # Nature Remoアプリでユーザーが設定したニックネーム次第で外れ、ニックネームが
+        # "Remo" を含まない環境では本クエリが恒常的に0件になり電気代が0円表示に
+        # なっていた(電気代集計にだけこの警告が無く気づけなかった)。書き込み時点で
+        # 明示される device_category(migrations/0020以降)を優先し、それが無い
+        # (マイグレーション適用前の古い)行だけ従来のdevice_name判定にフォールバックする。
         query = f"""
             SELECT device_id, timestamp, wattage as power_watts
             FROM {config.SQLITE_TABLE_POWER_USAGE}
             WHERE timestamp >= '{start_of_month}' AND timestamp <= '{end_iso}'
-              AND device_name LIKE '%Remo%'
+              AND (
+                device_category = 'smart_meter'
+                OR (device_category IS NULL AND device_name LIKE '%Remo%')
+              )
             ORDER BY timestamp ASC
         """
         df = load_data_from_db(query)

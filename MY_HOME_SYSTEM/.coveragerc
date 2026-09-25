@@ -12,15 +12,14 @@ source = .
 # 本番サービスを落とせる `sudo systemctl restart` ボタンの確認フローすら
 # 検証されない状態が構造的に許されていた。
 #
-# 残す `dashboard.py` は import しただけで `st.set_page_config()` が走る
-# (トップレベルで UI を構築する)Streamlit のエントリポイントで、除外の理由が
-# 「実行不能」に当てはまる唯一のファイル。ここへ追加する場合は
+# #829: Streamlit版ダッシュボード(`dashboard.py`・`views/dashboard/*`)自体を
+# 廃止した。「実行不能なので除外する」エントリが1件も残らなくなったため
+# omit は tests/* と __init__.py だけになった。ここへ追加する場合は
 # tests/test_coveragerc.py(各エントリが実在するパスに一致するかの回帰テストと
 # 許可リスト)も参照。
 omit =
     tests/*
     */__init__.py
-    dashboard.py
 
 [report]
 exclude_lines =

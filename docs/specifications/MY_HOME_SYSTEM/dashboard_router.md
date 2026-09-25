@@ -9,18 +9,17 @@
 
 ## 関連ドキュメント
 
-* [dashboard_proxy_service.md](./dashboard_proxy_service.md) - 実際の中継処理の実体（本ファイルは委譲するだけ）
-* [config.md](./config.md) - `DASHBOARD_BASE_PATH` / `DASHBOARD_PROXY_ENABLED` の定義元
-* [unified_server.md](./unified_server.md) - 本ルーターを `config.DASHBOARD_PROXY_ENABLED` が真のときだけ include する側
-* [dashboard.md](./dashboard.md) - 中継先で動くStreamlitアプリ本体
+* [config.md](./config.md) - `DASHBOARD_BASE_PATH`/`ASA_NOTE_URL`の提供元
+* [home_status_service.md](./home_status_service.md) - `collect_status_cards`/`get_cached_materials`/`QUEST_APP_PATH`/`MOBILE_PAGE_REFRESH_SEC`/`get_now_jst`の実体
+* [dashboard_page_service.md](./dashboard_page_service.md) - 各`render_*`関数・`resolve_snapshot_path`の実体
+* [dashboard_pwa_service.md](./dashboard_pwa_service.md) - `build_dashboard_manifest`/`render_dashboard_icon_png`/`DASHBOARD_ICON_SIZES`の実体
+* [unified_server.md](./unified_server.md) - 本ルーターの`include_router`元。`config.DASHBOARD_ENABLED`が`False`のときはincludeされない
+* [dashboard_proxy_service.md](./dashboard_proxy_service.md) - Issue #829で廃止されたStreamlit版へのリバースプロキシ(履歴)
 
 ## 2. ファイルの概要
 
-> **（スマホ対応で追加）** ベースパス配下には、中継のほかに「スマートフォンのホーム画面に追加するためのマニフェスト・アイコン」と「Streamlitを介さない軽量ページ `{DASHBOARD_BASE_PATH}/m`」も置く。いずれも中継先のStreamlitは持っていないため、このアプリ自身が返す。**これらは中継の総当たりルート（`{path:path}`）より前に定義する必要がある**（FastAPIは定義順に照合するため、後ろに置くとStreamlitへ中継されて404になる）。
-
-Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashboard`）配下で配信するためのFastAPIルーター。スマートフォンからダッシュボードを見られるようにするための入口であり、実際の中継処理は `services/dashboard_proxy_service.py` に委譲する（CLAUDE.mdの「ルーターは薄く」の方針）。HTTP用に2本（ベースパスそのもの、ベースパス配下のワイルドカード）、WebSocket用に1本のルートを定義する。
-
-`config.DASHBOARD_PROXY_ENABLED=false` のときは `unified_server.py` がこのルーターをincludeしないため、パス自体が存在しなくなる（404）旨がモジュールdocstringに記されている。
+ダッシュボード(かんたん表示)を`config.DASHBOARD_BASE_PATH`(既定`/dashboard`)配下で配信するルーター。Issue #829で、Streamlit版の「詳細表示」とそれへのリバースプロキシ、および「かんたん表示」(カードのみの単一ページ)という構成を廃止し、この`unified_server`自身がホーム・見守り(`/watch`)・くらし(`/life`)・システム(`/sys`)の4ページをHTMLで直接返す構成に作り替えた(外部プロセスへの中継は無い)。ページの組み立ては`services/dashboard_page_service.py`に委譲し(CLAUDE.md「ルーターは薄く」の方針)、カードの判定・材料の取得キャッシュは`services/home_status_service.py`が正である。ベースパス配下には各ページのほか、スマートフォンのホーム画面に追加するためのマニフェスト・アイコン、ホームページの自動更新用フラグメント(`{DASHBOARD_BASE_PATH}/status`)、見守りページのカメラスナップショット画像、旧URL(`/dashboard/m`・`?tab=`クエリ)からのリダイレクトも置く。
+根拠: [モジュールdocstring] (行番号: 2〜20)
 
 ## 3. 外部依存関係
 
@@ -28,251 +27,263 @@ Streamlitダッシュボードを `config.DASHBOARD_BASE_PATH`（既定 `/dashbo
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `fastapi` | 外部 | ルーター定義（`APIRouter`）とハンドラ引数の型（`Request`, `WebSocket`） | 根拠: [インポート宣言] (行番号: 12 / 抜粋: "from fastapi import APIRouter, Request, WebSocket") |
-| `config` | 内部 | 公開パス（`DASHBOARD_BASE_PATH`）の取得 | 根拠: [インポート宣言] (行番号: 24 / 抜粋: "import config") |
-| `services.dashboard_proxy_service` | 内部 | 中継処理のシングルトン `dashboard_proxy_service` | 根拠: [インポート宣言] (行番号: 15 / 抜粋: "from services.dashboard_proxy_service import dashboard_proxy_service") |
+| `json` | 標準 | マニフェストのJSONエンコード | 根拠: [インポート宣言] (行番号: 21 / 抜粋: "import json") |
+| `fastapi.APIRouter` / `HTTPException` / `Response` | 外部 | ルーター定義、404送出、レスポンス組み立て | 根拠: [インポート宣言] (行番号: 23 / 抜粋: "from fastapi import APIRouter, HTTPException, Response") |
+| `fastapi.responses.FileResponse` / `HTMLResponse` / `RedirectResponse` | 外部 | 画像ファイル配信・HTML返却・リダイレクト | 根拠: [インポート宣言] (行番号: 24 / 抜粋: "from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse") |
+| `config` | 外部 | `DASHBOARD_BASE_PATH`/`ASA_NOTE_URL`の取得 | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "import config") |
+| `services.dashboard_page_service` | 外部 | 各ページのHTML組み立て | 根拠: [インポート宣言] (行番号: 27 / 抜粋: "from services import dashboard_page_service, dashboard_pwa_service, home_status_service") |
+| `services.dashboard_pwa_service` | 外部 | マニフェスト・アイコンの生成 | 根拠: [インポート宣言] (行番号: 27) |
+| `services.home_status_service` | 外部 | カードの取得・キャッシュ、`QUEST_APP_PATH`/`MOBILE_PAGE_REFRESH_SEC`/`get_now_jst` | 根拠: [インポート宣言] (行番号: 27) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.DASHBOARD_BASE_PATH` | 公開パスの実値は環境変数で上書き可能であり、本ファイルからは決まらない。import時に一度だけ読まれてルートのパス文字列になる。 | 根拠: [変数参照] (行番号: 48 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH") |
-| `dashboard_proxy_service.forward_http` / `forward_websocket` | 中継の具体的な処理（ヘッダー加工・ストリーミング・エラー時の応答）が本ファイルからは不明。 | 根拠: [関数呼び出し] (行番号: 33, 39, 49 / 抜粋: "await dashboard_proxy_service.forward_http(request, _BASE_PATH)") |
+| `config.DASHBOARD_BASE_PATH` / `config.ASA_NOTE_URL` | 実際の値は`config.py`側の定義に依存し不明。 | 根拠: [変数参照] (行番号: 31, 105 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH") |
+| `home_status_service.collect_status_cards` / `get_cached_materials` | 実装(DB読み取り・キャッシュ)は`home_status_service.py`側にあり、本ファイルからは呼び出しのみ。 | 根拠: [関数呼び出し] (行番号: 97, 131 / 抜粋: "home_status_service.collect_status_cards()") |
+| `dashboard_page_service`の各`render_*`関数 | 実装(HTML組み立て)は`dashboard_page_service.py`側にあり、本ファイルからは呼び出しのみ。 | 根拠: [関数呼び出し] (行番号: 99, 118, 133, 145, 153) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
-### `router`
+### モジュールレベル定数（`router` / `_BASE_PATH` / `_STATUS_PATH` / `_QUEST_APP_PATH` / `_LEGACY_TAB_REDIRECTS`）
 
-* **役割**: 本ファイルのルートをまとめる `APIRouter` インスタンス。prefixやtagsは指定していない（`unified_server.py` 側でtagsが付く）。
-* 根拠: [変数宣言] (行番号: 42 / 抜粋: "router = APIRouter()")
+* **役割**: `router`はAPIRouterインスタンス。`_BASE_PATH`は`config.DASHBOARD_BASE_PATH`。`_STATUS_PATH`はホームページの自動更新フラグメントのパス(`{_BASE_PATH}/status`)。`_QUEST_APP_PATH`はfamily-questへのパス(`home_status_service.QUEST_APP_PATH`の再参照)。`_LEGACY_TAB_REDIRECTS`はStreamlit版の`?tab=`クエリ値(`home`/`watch`/`life`/`sys`)から新しいページパスへの対応表。
+* 根拠: `router = APIRouter()` (行番号: 29)、`_BASE_PATH = config.DASHBOARD_BASE_PATH` (行番号: 31)、`_STATUS_PATH = f"{_BASE_PATH}/status"` (行番号: 32)、`_QUEST_APP_PATH = home_status_service.QUEST_APP_PATH` (行番号: 34)、`_LEGACY_TAB_REDIRECTS = {"home": _BASE_PATH, "watch": f"{_BASE_PATH}/watch",\n                         "life": f"{_BASE_PATH}/life", "sys": f"{_BASE_PATH}/sys"}` (行番号: 39〜40)
+
 
 * **引数/リクエスト**: 該当なし
-* 根拠: [変数宣言] (行番号: 42 / 抜粋: "router = APIRouter()")
+* 根拠: 同上
+
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [変数宣言] (行番号: 42 / 抜粋: "router = APIRouter()")
+* 根拠: 同上
+
 
 * **副作用**: なし
-* 根拠: [変数宣言] (行番号: 42 / 抜粋: "router = APIRouter()")
+* 根拠: 同上
+
 
 * **エラーハンドリング**: なし
-* 根拠: [変数宣言] (行番号: 42 / 抜粋: "router = APIRouter()")
+* 根拠: 同上
 
 
-### `_PROXIED_METHODS`
 
-* **役割**: 中継対象のHTTPメソッド一覧（`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`）。コメントに「ダッシュボードはGETが大半だが、`_stcore/upload_file` 等のためにPOST系も通す」と記されている。
-* 根拠: [定数宣言] (行番号: 19〜21 / 抜粋: '_PROXIED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]')
+### `GET {DASHBOARD_BASE_PATH}/app.webmanifest` (`dashboard_manifest`)
 
-* **引数/リクエスト**: 該当なし
-* 根拠: [定数宣言] (行番号: 21 / 抜粋: '_PROXIED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]')
+* **役割**: ホーム画面に追加したときアドレスバー無し(standalone)で開くためのWebアプリマニフェストをJSONで返す。
+* 根拠: [ルート定義] (行番号: 48〜54 / 抜粋: '@router.get(f"{_BASE_PATH}/app.webmanifest", include_in_schema=False)\ndef dashboard_manifest() -> Response:')
 
-* **戻り値/レスポンス**: 該当なし
-* 根拠: [定数宣言] (行番号: 21 / 抜粋: '_PROXIED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]')
-
-* **副作用**: なし
-* 根拠: [定数宣言] (行番号: 21 / 抜粋: '_PROXIED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]')
-
-* **エラーハンドリング**: なし
-* 根拠: [定数宣言] (行番号: 21 / 抜粋: '_PROXIED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]')
-
-
-### `_BASE_PATH`
-
-* **役割**: 公開パス。`config.DASHBOARD_BASE_PATH` をモジュールのimport時に1回だけ読み、以降のルート定義とパス組み立てに使う。
-* 根拠: [定数宣言] (行番号: 48 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
-
-* **引数/リクエスト**: 該当なし
-* 根拠: [定数宣言] (行番号: 48 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
-
-* **戻り値/レスポンス**: 該当なし
-* 根拠: [定数宣言] (行番号: 48 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
-
-* **副作用**: なし
-* 根拠: [定数宣言] (行番号: 48 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
-
-* **エラーハンドリング**: なし
-* 根拠: [定数宣言] (行番号: 48 / 抜粋: "_BASE_PATH = config.DASHBOARD_BASE_PATH")
-
-
-### `_MOBILE_PATH` / `_MOBILE_STATUS_PATH` / `_QUEST_APP_PATH` (モジュールレベル定数、スマホ対応で追加)
-
-* **役割**: 軽量ページのパス（`{DASHBOARD_BASE_PATH}/m`）、その自動更新が差し替えるカードのブロックだけを返すパス（`{DASHBOARD_BASE_PATH}/m/status`）、軽量ページ下部から張るファミクエ（`/quest`）への導線。**（トップ画面の刷新で変更）** `_QUEST_APP_PATH` は `home_status_service.QUEST_APP_PATH` を読み込むだけになった — ページ下部のリンクと「📝 承認待ち」カードのリンク先が食い違わないよう、パスの定義を1箇所に保つため。
-* 根拠: `_MOBILE_PATH = f"{config.DASHBOARD_BASE_PATH}/m"` (行番号: 33 / 抜粋: "_MOBILE_PATH = f\"{config.DASHBOARD_BASE_PATH}/m\""), `_MOBILE_STATUS_PATH = f"{_MOBILE_PATH}/status"` (行番号: 36 / 抜粋: "_MOBILE_STATUS_PATH = f\"{_MOBILE_PATH}/status\""), `_QUEST_APP_PATH = home_status_service.QUEST_APP_PATH` (行番号: 40 / 抜粋: "_QUEST_APP_PATH = home_status_service.QUEST_APP_PATH")
-
-* **引数/リクエスト**: なし（定数）
-* 根拠: (行番号: 33〜35 / 抜粋: "_MOBILE_PATH = f\"{config.DASHBOARD_BASE_PATH}/m\"")
-
-* **戻り値/レスポンス**: なし（定数）
-* 根拠: (行番号: 33〜35 / 抜粋: "_QUEST_APP_PATH = home_status_service.QUEST_APP_PATH")
-
-* **副作用**: なし
-* 根拠: (行番号: 33〜35 / 抜粋: "_MOBILE_PATH = f\"{config.DASHBOARD_BASE_PATH}/m\"")
-
-* **エラーハンドリング**: なし
-* 根拠: (行番号: 33〜35 / 抜粋: "_MOBILE_PATH = f\"{config.DASHBOARD_BASE_PATH}/m\"")
-
-
-### `dashboard_manifest`（GET `{_BASE_PATH}/app.webmanifest`、スマホ対応で追加）
-
-* **役割**: ダッシュボード本体をホーム画面に追加したときアドレスバー無し（standalone）で開くためのWebアプリマニフェストを返す。内容の組み立ては `services/dashboard_proxy_service.py` の `build_dashboard_manifest` が行う。
-* 根拠: `def dashboard_manifest() -> Response:` (行番号: 58〜63 / 抜粋: "def dashboard_manifest() -> Response:")
 
 * **引数/リクエスト**: なし
-* 根拠: `def dashboard_manifest() -> Response:` (行番号: 58 / 抜粋: "def dashboard_manifest() -> Response:")
-
-* **戻り値/レスポンス**: `application/manifest+json` の `Response`（JSONは `ensure_ascii=False` で日本語をそのまま出す）
-* 根拠: `media_type="application/manifest+json",` (行番号: 56〜58 / 抜粋: "media_type=\"application/manifest+json\",")
-
-* **副作用**: なし（中継しない）
-* 根拠: `content=json.dumps(build_dashboard_manifest(), ensure_ascii=False),` (行番号: 61 / 抜粋: "content=json.dumps(build_dashboard_manifest(), ensure_ascii=False),")
-
-* **エラーハンドリング**: なし
-* 根拠: `def dashboard_manifest() -> Response:` (行番号: 58 / 抜粋: "def dashboard_manifest() -> Response:")
+* 根拠: [関数定義] (行番号: 49)
 
 
-### `dashboard_icon`（GET `{_BASE_PATH}/icon-{size}.png`、スマホ対応で追加）
+* **戻り値/レスポンス**: `Response`(`media_type="application/manifest+json"`、`dashboard_pwa_service.build_dashboard_manifest()`をJSONエンコードした本文)
+* 根拠: [戻り値] (行番号: 51〜54)
 
-* **役割**: ホーム画面アイコンのPNGを返す。マニフェストの `icons` と `apple-touch-icon` から参照される。生成は `render_dashboard_icon_png`（図形だけで描画、サイズごとにキャッシュ）が行う。
-* 根拠: `def dashboard_icon(size: int) -> Response:` (行番号: 67〜76 / 抜粋: "def dashboard_icon(size: int) -> Response:")
-
-* **引数/リクエスト**: パスパラメータ `size` (int)
-* 根拠: `@router.get(f"{_BASE_PATH}/icon-{{size}}.png", include_in_schema=False)` (行番号: 66 / 抜粋: "@router.get(f\"{_BASE_PATH}/icon-{{size}}.png\", include_in_schema=False)")
-
-* **戻り値/レスポンス**: `image/png` の `Response`。`Cache-Control: public, max-age=86400` を付ける（内容はコードから決まり実質変わらないため）。
-* 根拠: `headers={"Cache-Control": "public, max-age=86400"},` (行番号: 75 / 抜粋: "headers={\"Cache-Control\": \"public, max-age=86400\"},")
-
-* **副作用**: 初回のみPNGを描画する（以降は関数側のキャッシュ）。
-* 根拠: `content=render_dashboard_icon_png(size),` (行番号: 72 / 抜粋: "content=render_dashboard_icon_png(size),")
-
-* **エラーハンドリング**: `DASHBOARD_ICON_SIZES` に無いサイズは404（中継にフォールバックさせない）。
-* 根拠: `raise HTTPException(status_code=404, detail="unknown icon size")` (行番号: 70 / 抜粋: "raise HTTPException(status_code=404, detail=\"unknown icon size\")")
-
-
-### `mobile_status_page`（GET `{_MOBILE_PATH}`、スマホ対応で追加）
-
-* **役割**: Streamlitを介さない読み取り専用のサマリーページを返す。スマートフォンで見るのはステータスカードだけ、という用途に対して、Streamlitの初期化・WebSocket接続・Reactの読み込みを省く。ダッシュボード本体はグラフ・ログ・メンテナンス操作を持つ「詳しく見る側」として残し、このページからリンクする。`dashboard_path`（`{_BASE_PATH}/`）を渡すことで各カードが詳細タブへのリンクになり、`status_path`（`_MOBILE_STATUS_PATH`）を渡すことで自動更新が差分更新になる。
-* 根拠: `def mobile_status_page() -> HTMLResponse:` (行番号: 83〜106 / 抜粋: "def mobile_status_page() -> HTMLResponse:")
-
-* **引数/リクエスト**: なし
-* 根拠: `@router.get(_MOBILE_PATH, include_in_schema=False)` (行番号: 82 / 抜粋: "@router.get(_MOBILE_PATH, include_in_schema=False)")
-
-* **戻り値/レスポンス**: `HTMLResponse`（`home_status_service.render_mobile_status_page_html` の出力）
-* 根拠: `return HTMLResponse(` (行番号: 91 / 抜粋: "return HTMLResponse(")
-
-* **副作用**: `home_status_service.collect_status_cards()` 経由のDB読み取り・HTTPスクレイピング（いずれもTTL 60秒のキャッシュ越し）。**`async def` にしていない**のは、中で同期のDB読み取りとスクレイピングを行うため。`def` にしておくと Starlette がスレッドプールで実行し、イベントループ（IoT制御・Webhook受信）を止めない。
-* 根拠: `cards, fetched_at = home_status_service.collect_status_cards()` (行番号: 90 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")
-
-* **エラーハンドリング**: 個々の取得失敗は `home_status_service` 側で `None` に丸められ、ページ全体は返る。
-* 根拠: `cards, fetched_at = home_status_service.collect_status_cards()` (行番号: 90 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")
-
-
-### `mobile_status_section`（GET `{_MOBILE_PATH}/status`、差分更新で追加）
-
-* **役割**: 軽量ページのカードのブロック（取得時刻・要約行・カードのグリッド）だけをHTML断片として返す。軽量ページの自動更新は以前 `<meta http-equiv="refresh">` による全ページ再読み込みで、60秒ごとに画面が白く瞬き、スクロール位置も先頭へ戻っていた。この断片だけを差し替えることで、見ている位置を保ったまま値が新しくなる。
-* 根拠: `def mobile_status_section() -> HTMLResponse:` (行番号: 110 / 抜粋: "def mobile_status_section() -> HTMLResponse:")
-
-* **引数/リクエスト**: なし
-* 根拠: `@router.get(_MOBILE_STATUS_PATH, include_in_schema=False)` (行番号: 109 / 抜粋: "@router.get(_MOBILE_STATUS_PATH, include_in_schema=False)")
-
-* **戻り値/レスポンス**: `HTMLResponse`（`home_status_service.render_status_section_html` の出力。`<div id="status">…</div>` の断片で、`<html>` や `<style>` は含まない）
-* 根拠: `home_status_service.render_status_section_html(` (行番号: 122 / 抜粋: "home_status_service.render_status_section_html(")
-
-* **副作用**: `home_status_service.collect_status_cards()` 経由のDB読み取り・HTTPスクレイピング。ページ全体を返す経路と同じTTL 60秒のメモを共有するため、DB・スクレイピングの回数は増えない。`mobile_status_page` と同じ理由で `async def` にしていない。
-* 根拠: `cards, fetched_at = home_status_service.collect_status_cards()` (行番号: 117 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")
-
-* **エラーハンドリング**: 個々の取得失敗は `home_status_service` 側で `None` に丸められ、断片は返る。ページ側のスクリプトは取得そのものに失敗した場合、古い表示を消さずに `#status` へ `stale` クラスを付けるだけにする。
-* 根拠: `cards, fetched_at = home_status_service.collect_status_cards()` (行番号: 117 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")
-
-
-### `mobile_status_manifest`（GET `{_MOBILE_PATH}/app.webmanifest`、スマホ対応で追加）
-
-* **役割**: 軽量ページ専用のマニフェスト。ダッシュボード本体のマニフェストと `name` / `start_url` / `scope` だけが異なる。軽量ページから追加すれば軽量ページが、本体から追加すれば本体が開く（追加した画面と違うものが開くと戸惑うため、1つにまとめていない）。
-* 根拠: `def mobile_status_manifest() -> Response:` (行番号: 131〜146 / 抜粋: "def mobile_status_manifest() -> Response:")
-
-* **引数/リクエスト**: なし
-* 根拠: `@router.get(f"{_MOBILE_PATH}/app.webmanifest", include_in_schema=False)` (行番号: 130 / 抜粋: "@router.get(f\"{_MOBILE_PATH}/app.webmanifest\", include_in_schema=False)")
-
-* **戻り値/レスポンス**: `application/manifest+json` の `Response`
-* 根拠: `media_type="application/manifest+json",` (行番号: 116〜118 / 抜粋: "media_type=\"application/manifest+json\",")
 
 * **副作用**: なし
-* 根拠: `manifest["start_url"] = _MOBILE_PATH` (行番号: 141 / 抜粋: "manifest[\"start_url\"] = _MOBILE_PATH")
+* 根拠: [関数本体] (行番号: 51〜54)
+
 
 * **エラーハンドリング**: なし
-* 根拠: `def mobile_status_manifest() -> Response:` (行番号: 131 / 抜粋: "def mobile_status_manifest() -> Response:")
+* 根拠: [関数本体] (行番号: 48〜54)
 
 
-### `proxy_dashboard_root`（`_BASE_PATH`、`_PROXIED_METHODS`、`include_in_schema=False`）
 
-* **役割**: ベースパスそのもの（例: `/dashboard`）へのアクセスを中継する。docstringに「Streamlitは末尾スラッシュ付きへリダイレクトを返すが、中継先も同じベースパスで動いているため `Location` はそのままブラウザに返して問題ない」と記されている。
-* 根拠: [デコレータ/関数定義] (行番号: 26〜37 / 抜粋: "@router.api_route(_BASE_PATH, methods=_PROXIED_METHODS, include_in_schema=False)")
+### `GET {DASHBOARD_BASE_PATH}/icon-{size}.png` (`dashboard_icon`)
 
-* **引数/リクエスト**: `request: Request`
-* 根拠: [関数定義] (行番号: 150 / 抜粋: "async def proxy_dashboard_root(request: Request):")
-
-* **戻り値/レスポンス**: `dashboard_proxy_service.forward_http(request, _BASE_PATH)` の戻り値をそのまま返す
-* 根拠: [return文] (行番号: 156 / 抜粋: "return await dashboard_proxy_service.forward_http(request, _BASE_PATH)")
-
-* **副作用**: 中継先へのHTTPリクエスト送信（`forward_http` 内）。
-* 根拠: [関数呼び出し] (行番号: 156 / 抜粋: "await dashboard_proxy_service.forward_http(request, _BASE_PATH)")
-
-* **エラーハンドリング**: 本関数には `try`/`except` は無く、中継失敗時の扱いは `forward_http` 側に委ねられている。
-* 根拠: [関数定義] (行番号: 150〜156 / 抜粋: "async def proxy_dashboard_root(request: Request):")
+* **役割**: ホーム画面アイコンのPNGを返す(マニフェストと`apple-touch-icon`から参照される)。1日(86400秒)のキャッシュヘッダーを付ける。
+* 根拠: [ルート定義] (行番号: 57〜67 / 抜粋: '@router.get(f"{_BASE_PATH}/icon-{{size}}.png", include_in_schema=False)\ndef dashboard_icon(size: int) -> Response:')
 
 
-### `proxy_dashboard`（`{_BASE_PATH}/{path:path}`、`_PROXIED_METHODS`、`include_in_schema=False`）
-
-* **役割**: ベースパス配下の静的アセット・API（`_stcore/*` 等）を中継する。
-* 根拠: [デコレータ/関数定義] (行番号: 36〜39 / 抜粋: '@router.api_route(f"{_BASE_PATH}/{{path:path}}", methods=_PROXIED_METHODS, include_in_schema=False)')
-
-* **引数/リクエスト**: `request: Request`、パスパラメータ `path: str`
-* 根拠: [関数定義] (行番号: 160 / 抜粋: "async def proxy_dashboard(request: Request, path: str):")
-
-* **戻り値/レスポンス**: `forward_http(request, f"{_BASE_PATH}/{path}")` の戻り値（ベースパスを付け直して渡す）
-* 根拠: [return文] (行番号: 39 / 抜粋: 'return await dashboard_proxy_service.forward_http(request, f"{_BASE_PATH}/{path}")')
-
-* **副作用**: 中継先へのHTTPリクエスト送信（`forward_http` 内）。
-* 根拠: [関数呼び出し] (行番号: 39 / 抜粋: 'await dashboard_proxy_service.forward_http(request, f"{_BASE_PATH}/{path}")')
-
-* **エラーハンドリング**: 本関数には `try`/`except` は無い。
-* 根拠: [関数定義] (行番号: 160〜162 / 抜粋: "async def proxy_dashboard(request: Request, path: str):")
+* **引数/リクエスト**: `size: int`(パスパラメータ)
+* 根拠: [関数定義] (行番号: 58)
 
 
-### `proxy_dashboard_websocket`（WebSocket `{_BASE_PATH}/{path:path}`）
+* **戻り値/レスポンス**: `Response`(`media_type="image/png"`、`Cache-Control: public, max-age=86400`)
+* 根拠: [戻り値] (行番号: 62〜67)
 
-* **役割**: StreamlitのWebSocket（`_stcore/stream`）を中継する。docstringに「これが無いとHTMLと静的アセットだけが配信され、画面は "Connecting..." のまま永久にデータが表示されない」と記されている。
-* 根拠: [デコレータ/関数定義] (行番号: 42〜49 / 抜粋: '@router.websocket(f"{_BASE_PATH}/{{path:path}}")')
 
-* **引数/リクエスト**: `websocket: WebSocket`、パスパラメータ `path: str`
-* 根拠: [関数定義] (行番号: 166 / 抜粋: "async def proxy_dashboard_websocket(websocket: WebSocket, path: str):")
+* **副作用**: なし
+* 根拠: [関数本体] (行番号: 60〜67)
 
-* **戻り値/レスポンス**: `None`（`forward_websocket` を `await` するのみ）
-* 根拠: [関数呼び出し] (行番号: 49 / 抜粋: 'await dashboard_proxy_service.forward_websocket(websocket, f"{_BASE_PATH}/{path}")')
 
-* **副作用**: 中継先へのWebSocket接続の確立とメッセージ転送（`forward_websocket` 内）。
-* 根拠: [関数呼び出し] (行番号: 49 / 抜粋: 'await dashboard_proxy_service.forward_websocket(websocket, f"{_BASE_PATH}/{path}")')
+* **エラーハンドリング**: `size`が`dashboard_pwa_service.DASHBOARD_ICON_SIZES`に含まれない場合は`404`(`HTTPException`)。
+* 根拠: [エラーハンドリング] (行番号: 60〜61 / 抜粋: 'if size not in dashboard_pwa_service.DASHBOARD_ICON_SIZES:\n        raise HTTPException(status_code=404, detail="unknown icon size")')
 
-* **エラーハンドリング**: 本関数には `try`/`except` は無く、接続失敗時のクローズは `forward_websocket` 側が行う。
-* 根拠: [関数定義] (行番号: 166〜172 / 抜粋: "async def proxy_dashboard_websocket(websocket: WebSocket, path: str):")
+
+
+### `GET {DASHBOARD_BASE_PATH}/m` (`legacy_mobile_path_redirect`)
+
+* **役割**: **(#829で新設)** 旧「かんたん表示」(`/dashboard/m`)のURLを新しいホームページ(`{_BASE_PATH}/`)へ301リダイレクトする。Streamlit版廃止前は本体(詳細表示)とかんたん表示が別URLだったため、スマートフォンのホーム画面に旧URLを追加している可能性がある。
+* 根拠: [ルート定義] (行番号: 70〜78 / 抜粋: '@router.get(f"{_BASE_PATH}/m", include_in_schema=False)\ndef legacy_mobile_path_redirect() -> RedirectResponse:')
+
+
+* **引数/リクエスト**: なし
+* 根拠: [関数定義] (行番号: 71)
+
+
+* **戻り値/レスポンス**: `RedirectResponse`(`status_code=301`、`url=f"{_BASE_PATH}/"`)
+* 根拠: [戻り値] (行番号: 78 / 抜粋: 'return RedirectResponse(url=f"{_BASE_PATH}/", status_code=301)')
+
+
+* **副作用**: なし
+* 根拠: [関数本体] (行番号: 78)
+
+
+* **エラーハンドリング**: なし
+* 根拠: [関数本体] (行番号: 70〜78)
+
+
+
+### `GET {DASHBOARD_BASE_PATH}` / `GET {DASHBOARD_BASE_PATH}/` (`dashboard_home`)
+
+* **役割**: ホームページ(ステータスカード＋見守り/くらし/システムへの導線＋外部リンク)を返す。クエリパラメータ`tab`(Streamlit版の`?tab=watch`等)が指定されていれば、`_LEGACY_TAB_REDIRECTS`を使って対応する新しいページへ302リダイレクトする(未知の値は`_BASE_PATH`=ホームへ)。
+* 根拠: [ルート定義] (行番号: 84〜110 / 抜粋: '@router.get(_BASE_PATH, include_in_schema=False)\n@router.get(f"{_BASE_PATH}/", include_in_schema=False)\ndef dashboard_home(tab: str | None = None) -> Response:')
+
+
+* **引数/リクエスト**: `tab: str | None = None`(クエリパラメータ)
+* 根拠: [関数定義] (行番号: 86)
+
+
+* **戻り値/レスポンス**: `tab`指定時は`RedirectResponse`(`status_code=302`)。それ以外は`HTMLResponse`(`dashboard_page_service.render_home_page`の結果)。
+* 根拠: [戻り値] (行番号: 95, 98〜110)
+
+
+* **副作用**: `home_status_service.collect_status_cards()`経由でDBの読み取り(TTLキャッシュ付き)。
+* 根拠: [関数呼び出し] (行番号: 97 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")
+
+
+* **エラーハンドリング**: `tab`が`_LEGACY_TAB_REDIRECTS`に無い値の場合は`.get(tab, _BASE_PATH)`によりホームへフォールバックする(例外は送出しない)。
+* 根拠: [条件分岐] (行番号: 93〜95 / 抜粋: 'if tab is not None:\n        target = _LEGACY_TAB_REDIRECTS.get(tab, _BASE_PATH)\n        return RedirectResponse(url=target, status_code=302)')
+
+
+
+### `GET {DASHBOARD_BASE_PATH}/status` (`dashboard_status_fragment`)
+
+* **役割**: ホームページの自動更新用に、カードのブロックだけ(`<div id="status">`)を返す。
+* 根拠: [ルート定義] (行番号: 113〜123 / 抜粋: '@router.get(_STATUS_PATH, include_in_schema=False)\ndef dashboard_status_fragment() -> HTMLResponse:')
+
+
+* **引数/リクエスト**: なし
+* 根拠: [関数定義] (行番号: 114)
+
+
+* **戻り値/レスポンス**: `HTMLResponse`(`dashboard_page_service.render_home_status_section`の結果)
+* 根拠: [戻り値] (行番号: 117〜123)
+
+
+* **副作用**: `home_status_service.collect_status_cards()`経由でDBの読み取り(ホームページ本体と同じTTLキャッシュを共有)。
+* 根拠: [関数呼び出し] (行番号: 116)
+
+
+* **エラーハンドリング**: なし(個々の取得失敗は`home_status_service`側で吸収される)
+* 根拠: [関数本体] (行番号: 113〜123)
+
+
+
+### `GET {DASHBOARD_BASE_PATH}/watch` (`dashboard_watch`)
+
+* **役割**: 👀見守りページを返す。`home_status_service.get_cached_materials()`で材料(`df_sensor`/`df_security_log`)を取得し、`dashboard_page_service.render_watch_page`に渡す。
+* 根拠: [ルート定義] (行番号: 129〜139 / 抜粋: '@router.get(f"{_BASE_PATH}/watch", include_in_schema=False)\ndef dashboard_watch() -> HTMLResponse:')
+
+
+* **引数/リクエスト**: なし
+* 根拠: [関数定義] (行番号: 130)
+
+
+* **戻り値/レスポンス**: `HTMLResponse`(見守りページ全体のHTML)
+* 根拠: [戻り値] (行番号: 132〜139)
+
+
+* **副作用**: `get_cached_materials()`経由でDBの読み取り
+* 根拠: [関数呼び出し] (行番号: 131)
+
+
+* **エラーハンドリング**: なし
+* 根拠: [関数本体] (行番号: 129〜139)
+
+
+
+### `GET {DASHBOARD_BASE_PATH}/life` (`dashboard_life`)
+
+* **役割**: 💡くらしページを返す。`collect_status_cards()`のカードのうち`life`グループだけを`dashboard_page_service.render_life_page`で描画する。
+* 根拠: [ルート定義] (行番号: 142〜145 / 抜粋: '@router.get(f"{_BASE_PATH}/life", include_in_schema=False)\ndef dashboard_life() -> HTMLResponse:\n    cards, _ = home_status_service.collect_status_cards()\n    return HTMLResponse(dashboard_page_service.render_life_page(cards, dashboard_path=f"{_BASE_PATH}/"))')
+
+
+* **引数/リクエスト**: なし
+* 根拠: [関数定義] (行番号: 143)
+
+
+* **戻り値/レスポンス**: `HTMLResponse`(くらしページ全体のHTML)
+* 根拠: [戻り値] (行番号: 145)
+
+
+* **副作用**: `collect_status_cards()`経由でDBの読み取り
+* 根拠: [関数呼び出し] (行番号: 144)
+
+
+* **エラーハンドリング**: なし
+* 根拠: [関数本体] (行番号: 142〜145)
+
+
+
+### `GET {DASHBOARD_BASE_PATH}/sys` (`dashboard_sys`)
+
+* **役割**: 🔧システムページを返す。`get_cached_materials()`で材料を取得し、`home_status_service.get_now_jst()`の現在時刻とあわせて`dashboard_page_service.render_sys_page`に渡す。
+* 根拠: [ルート定義] (行番号: 148〜161 / 抜粋: '@router.get(f"{_BASE_PATH}/sys", include_in_schema=False)\ndef dashboard_sys() -> HTMLResponse:')
+
+
+* **引数/リクエスト**: なし
+* 根拠: [関数定義] (行番号: 149)
+
+
+* **戻り値/レスポンス**: `HTMLResponse`(システムページ全体のHTML)
+* 根拠: [戻り値] (行番号: 152〜161)
+
+
+* **副作用**: `get_cached_materials()`経由でDBの読み取り
+* 根拠: [関数呼び出し] (行番号: 150〜151)
+
+
+* **エラーハンドリング**: なし
+* 根拠: [関数本体] (行番号: 148〜161)
+
+
+
+### `GET {DASHBOARD_BASE_PATH}/snapshot/{filename}` (`dashboard_snapshot`)
+
+* **役割**: 見守りページのカメラスナップショット画像を1枚返す。`dashboard_page_service.resolve_snapshot_path`でパストラバーサル対策込みの実パスに解決する。
+* 根拠: [ルート定義] (行番号: 164〜170 / 抜粋: '@router.get(f"{_BASE_PATH}/snapshot/{{filename}}", include_in_schema=False)\ndef dashboard_snapshot(filename: str) -> FileResponse:')
+
+
+* **引数/リクエスト**: `filename: str`(パスパラメータ)
+* 根拠: [関数定義] (行番号: 165)
+
+
+* **戻り値/レスポンス**: `FileResponse`(`media_type="image/jpeg"`)
+* 根拠: [戻り値] (行番号: 170)
+
+
+* **副作用**: なし(ファイル読み取りのみ)
+* 根拠: [関数本体] (行番号: 167〜170)
+
+
+* **エラーハンドリング**: `resolve_snapshot_path`が`None`を返した場合(見つからない/範囲外)は`404`(`HTTPException`)。
+* 根拠: [エラーハンドリング] (行番号: 168〜169 / 抜粋: 'if path is None:\n        raise HTTPException(status_code=404, detail="snapshot not found")')
+
 
 
 ## 5. 処理フロー図
 
 ```mermaid
 flowchart TD
-    Start([リクエスト受信]) --> Kind{"プロトコル"}
-    Kind -- "WebSocket" --> Ws["proxy_dashboard_websocket"]
-    Ws --> FwdWs["dashboard_proxy_service.forward_websocket(ws, _BASE_PATH + '/' + path)"]
-    FwdWs --> End([End])
-
-    Kind -- "HTTP" --> PathKind{"パスは _BASE_PATH ちょうど?"}
-    PathKind -- Yes --> Root["proxy_dashboard_root"]
-    Root --> FwdRoot["forward_http(request, _BASE_PATH)"]
-    FwdRoot --> End
-    PathKind -- No --> Sub["proxy_dashboard (path:path)"]
-    Sub --> FwdSub["forward_http(request, _BASE_PATH + '/' + path)"]
-    FwdSub --> End
+    Start([GET {BASE_PATH} または {BASE_PATH}/]) --> TabCheck{"?tab= が指定されている?"}
+    TabCheck -- Yes --> Redirect["_LEGACY_TAB_REDIRECTS.get(tab, BASE_PATH)へ302"]
+    TabCheck -- No --> Collect["home_status_service.collect_status_cards()"]
+    Collect --> Render["dashboard_page_service.render_home_page(...)"]
+    Render --> Return["HTMLResponseを返す"]
 ```
 
 ## 6. 依存関係図
@@ -280,61 +291,60 @@ flowchart TD
 ```mermaid
 graph TD
     subgraph "dashboard_router.py"
-        Router["router (APIRouter)"]
-        Methods["_PROXIED_METHODS"]
-        BasePath["_BASE_PATH"]
-        RootEp["proxy_dashboard_root"]
-        SubEp["proxy_dashboard"]
-        WsEp["proxy_dashboard_websocket"]
+        dashboard_manifest
+        dashboard_icon
+        legacy_mobile_path_redirect
+        dashboard_home
+        dashboard_status_fragment
+        dashboard_watch
+        dashboard_life
+        dashboard_sys
+        dashboard_snapshot
     end
 
     subgraph "外部モジュール"
         config
-        proxy["services.dashboard_proxy_service.dashboard_proxy_service"]
-        fastapi
+        home_status_service["services.home_status_service"]
+        dashboard_page_service["services.dashboard_page_service"]
+        dashboard_pwa_service["services.dashboard_pwa_service"]
     end
 
-    BasePath --> config
-    Router --> fastapi
-    RootEp --> Router
-    RootEp --> BasePath
-    RootEp --> Methods
-    RootEp --> proxy
-    SubEp --> Router
-    SubEp --> BasePath
-    SubEp --> Methods
-    SubEp --> proxy
-    WsEp --> Router
-    WsEp --> BasePath
-    WsEp --> proxy
+    dashboard_manifest --> dashboard_pwa_service
+    dashboard_icon --> dashboard_pwa_service
+    dashboard_home --> home_status_service
+    dashboard_home --> dashboard_page_service
+    dashboard_status_fragment --> home_status_service
+    dashboard_status_fragment --> dashboard_page_service
+    dashboard_watch --> home_status_service
+    dashboard_watch --> dashboard_page_service
+    dashboard_life --> home_status_service
+    dashboard_life --> dashboard_page_service
+    dashboard_sys --> home_status_service
+    dashboard_sys --> dashboard_page_service
+    dashboard_snapshot --> dashboard_page_service
+    dashboard_home --> config
 ```
 
 ## 7. 次のステップ（リバースエンジニアリングの提案）
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `services/dashboard_proxy_service.py` | 中継の実体（ヘッダー加工・WebSocket転送・失敗時の応答）を把握するため。本ファイルは委譲しかしない。 | 根拠: 全エンドポイントが `dashboard_proxy_service` を呼ぶのみ (行番号: 33, 39, 49) |
-| 中 | `unified_server.py` | 本ルーターをincludeする条件（`DASHBOARD_PROXY_ENABLED`）と、他ルートとの優先順位を確認するため。 | 根拠: モジュールdocstring (行番号: 9〜10) |
-| 中 | `config.py` | `DASHBOARD_BASE_PATH` の既定値と正規化（先頭スラッシュの扱い）を確認するため。 | 根拠: `_BASE_PATH = config.DASHBOARD_BASE_PATH` (行番号: 23) |
+| 高 | `services/dashboard_page_service.py` | 各`render_*`関数・`resolve_snapshot_path`の実装を確認するため。 | 呼び出し元は本ファイルにあるが実装は別ファイル |
+| 高 | `services/home_status_service.py` | `collect_status_cards`/`get_cached_materials`の実装を確認するため。 | 同上 |
+| 中 | `unified_server.py` | 本ルーターが`config.DASHBOARD_ENABLED`の条件でどう`include_router`されるかを確認するため。 | 根拠なし(本ファイル外) |
 
 ## 8. 保守上の注意点
 
-* **（スマホ対応で追加）ルートの定義順に依存する**: `app.webmanifest` / `icon-{size}.png` / `m` / `m/status` / `m/app.webmanifest` は、中継の総当たりルート（`{_BASE_PATH}/{path:path}`）より**前**に定義されていなければならない。後ろに移すと、これらのパスもStreamlitへ中継されて404になる（`tests/test_dashboard_proxy.py` の `TestMobileHomeScreenAssets` と `tests/test_mobile_status_page.py` の `TestPartialRefresh` が、中継先が居ない状態でも200で返ることを検査して固定している）。
-* 根拠: `@router.get(f"{_BASE_PATH}/app.webmanifest", include_in_schema=False)` (行番号: 57 / 抜粋: "@router.get(f\"{_BASE_PATH}/app.webmanifest\", include_in_schema=False)")
-
-
-* **`_BASE_PATH` はimport時に1回だけ評価される。** ルートのパス文字列そのものになるため、テスト等で実行時に `config.DASHBOARD_BASE_PATH` を差し替えても、既に登録済みのルートのパスは変わらない。
-* **中継の3本のルートはすべて `include_in_schema=False`** であり、OpenAPIスキーマに現れない。`tests/test_unified_server_app.py` の外部Webhook整合テストはOpenAPIスキーマ上のパス一覧を使っているため、ここでワイルドカードをスキーマに出すとその検査を濁すことになる。
-* **`{path:path}` のワイルドカードは貪欲に一致する。** `_BASE_PATH` 配下に別のルートを足す場合は、本ルーターより前にincludeされている必要がある。
-* エンドポイント関数自身は例外処理を持たないため、中継失敗時の挙動（503を返す等）はすべて `dashboard_proxy_service` 側の実装に依存する。
+* ★このパスをCloudflare Accessのバイパス対象に設定してはならない(モジュールdocstring外のCLAUDE.md記載事項だが、`allowed_webhook_paths`とは逆の扱いであることに注意)。
+* `_LEGACY_TAB_REDIRECTS`は`DASHBOARD_TABS`のキー(`home`/`watch`/`life`/`sys`)と一致させること。新しいページを追加する場合はこの対応表も更新する。
+* `dashboard_home`・`dashboard_status_fragment`・`dashboard_watch`・`dashboard_sys`はいずれも`home_status_service`の`_cached`(TTL60秒)を共有するため、同じリクエスト内で複数ページを開いてもDB読み取り回数は増えない(`tests/test_mobile_status_page.py`の`TestStatusCacheOnTheServerSide`が固定している)。
 
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| `DASHBOARD_BASE_PATH` の既定値・正規化規則 | 本ファイルは値を読むだけで、先頭スラッシュの有無をどう扱うかが不明。 | `config.py` |
-| `DASHBOARD_PROXY_ENABLED` による無効化の実装箇所 | docstringで言及されているが、判定そのものは本ファイルに無い。 | `unified_server.py` |
-| 中継先Streamlitが実際に使うパス（`_stcore/*` の一覧） | 本ファイルはワイルドカードで受けるだけで、個別のパスを列挙していない。 | Streamlit本体（外部ライブラリ） |
+| `config.DASHBOARD_ENABLED`が`False`のときの挙動 | 本ファイルには条件分岐が無く、`include_router`するかどうかは呼び出し元(`unified_server.py`)側の判断であるため。 | `unified_server.py` |
+| Cloudflare Accessの実際の設定(バイパス対象になっていないか) | 本ファイルのコメント・CLAUDE.mdの記載のみで、実際のエッジ設定は確認できないため。 | 実機のCloudflare Access設定 |
 
 ## 10. 自己検証結果
 
@@ -344,3 +354,6 @@ graph TD
 * [x] 完了: すべての仕様説明に「根拠（行番号・抜粋）」を明記した
 * [x] 完了: 根拠漏れが0件である
 * [x] 完了: Mermaid構文にエラーの原因となる記号（エスケープ漏れ）がない
+* [x] 完了: 不明事項を漏れなく列挙した
+
+完了

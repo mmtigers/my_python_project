@@ -1,0 +1,14 @@
+-- power_usage に書き込み時点での種別を持たせる。
+--
+-- 背景: 電気代集計(analysis_service._calculate_cost_between)とグラフ用の分類
+-- (analysis_service.load_sensor_data)は、これまで device_name に "Remo" という
+-- 文字列が含まれるかどうかだけでスマートメーター行を判定していた。この文字列は
+-- Nature Remoアプリでユーザーが設定した家電のニックネームに依存する
+-- (nature_remo_monitor.py の dev_name = f"{location}_{nickname}")ため、
+-- ニックネームが「Remo」を含まない名前になっていると集計が恒常的に0件になる
+-- (電気代0円表示の原因)。
+--
+-- 書き込み時点(nature_remo_monitor.py / switchbot_power_monitor.py)では、
+-- どちらの経路からの電力データかを確実に判定できる(EL_SMART_METER か
+-- SwitchBotプラグか)ため、そこで種別を明示して保存するようにする。
+ALTER TABLE power_usage ADD COLUMN device_category TEXT;

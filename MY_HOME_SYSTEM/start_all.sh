@@ -5,7 +5,8 @@
 # ==========================================
 # 使い方:
 #   ./start_all.sh            Phase 0〜4 をすべて実行する(旧プロセス掃除 → 前処理 →
-#                             unified_server.py / ダッシュボードを nohup でバックグラウンド起動)。
+#                             unified_server.py を nohup でバックグラウンド起動。ダッシュボードは
+#                             同プロセスが配信するため個別の起動は無い)。
 #                             手動運用・開発用の経路。**systemd のユニットが有効な実機では拒否する**
 #                             (下の「手動起動ガード」参照。Issue #824)。
 #   ./start_all.sh --prepare  Phase 0〜3(前処理)だけを実行し、サーバー本体は起動しない。
@@ -14,21 +15,20 @@
 #                             (Type=simple + Restart=on-failure。クラッシュ時に systemd が自動復旧する。
 #                             Issue #646: 以前は oneshot + nohup/disown でサーバーが systemd の管理外に
 #                             あり、落ちても通知のみで人手復旧だった)。
-#                             ダッシュボードは home_dashboard.service が別ユニットで管理するため、
-#                             この経路では起動も掃除もしない。
+#                             ダッシュボードは#829でStreamlit版(別プロセス・別ユニット)を廃止し、
+#                             unified_server.py 自身が配信するようになったため、この経路での
+#                             個別の起動・掃除は不要になった。
 PREPARE_ONLY=false
 if [ "${1:-}" = "--prepare" ]; then
     PREPARE_ONLY=true
 fi
 
 # --- 手動起動ガード (Issue #824) ---
-# systemd がサーバー/ダッシュボードを管理している実機でフルモード(引数なし)を実行すると、
-#   1. 下の Phase 1 の掃除が systemd 管理下のプロセスへ SIGTERM を送る(フルモードでは
-#      "streamlit run" も掃除対象に入る)
+# systemd がサーバーを管理している実機でフルモード(引数なし)を実行すると、
+#   1. 下の Phase 1 の掃除が systemd 管理下のプロセスへ SIGTERM を送る
 #   2. SIGTERM による終了は systemd から見て「正常終了」なので Restart=on-failure は再起動せず、
 #      home_system.service は inactive になる
 #   3. Phase 4 が nohup で起動し直し、プロセスは systemd の管理外(親 PID 1 の孤児)になる
-#   4. home_dashboard.service は孤児が 8501 を握っているため起動に失敗し続ける
 # という経路で **#646 の自動復旧が黙って止まる**。サイトは孤児が応答するので普通に動いて見え、
 # 誰も気づけない(2026-09-21 09:54 に実際に起き、約1時間半 NRestarts=344 のまま放置された)。
 # runbook にも「引数なしで実行しないこと」と書いてあったが防げなかったため、コードで拒否する。
@@ -39,7 +39,7 @@ fi
 # 意図して手動起動する場合だけ ALLOW_MANUAL_START=1 で上書きできる。
 # ここは掃除(Phase 1)より前に置くこと。後ろに置くと拒否した時点で既にプロセスを止めている。
 if [ "$PREPARE_ONLY" != true ] && command -v systemctl >/dev/null 2>&1; then
-    for managed_unit in home_system.service home_dashboard.service; do
+    for managed_unit in home_system.service; do
         if systemctl is-enabled --quiet "$managed_unit" 2>/dev/null; then
             if [ "${ALLOW_MANUAL_START:-}" = "1" ]; then
                 printf '⚠️  %s は systemd で有効ですが、ALLOW_MANUAL_START=1 のため手動起動を続行します。\n' "$managed_unit" >&2
@@ -51,7 +51,7 @@ if [ "$PREPARE_ONLY" != true ] && command -v systemctl >/dev/null 2>&1; then
             printf '   サービスが inactive になり、以後は落ちても自動再起動されなくなります (Issue #824)。\n' >&2
             printf '\n' >&2
             printf '   再起動したい場合:\n' >&2
-            printf '     sudo systemctl restart home_system.service home_dashboard.service\n' >&2
+            printf '     sudo systemctl restart home_system.service\n' >&2
             printf '\n' >&2
             printf '   それでも手動で起動したい場合(非推奨):\n' >&2
             printf '     ALLOW_MANUAL_START=1 %s\n' "$0" >&2
@@ -99,24 +99,9 @@ CLEANUP_TARGETS=(
   "unified_server.py"
   "camera_monitor.py"
   "scheduler_boot.py"
-  "streamlit run"
   "python.*monitors/(switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor|routine_deadline_job)\.py"
   "ffmpeg.*hls_streams"
 )
-
-if [ "$PREPARE_ONLY" = true ]; then
-  # systemd 経路(--prepare)では、ダッシュボード(streamlit)は home_dashboard.service が
-  # 別ユニットで管理している。ここで SIGTERM すると systemd 側が「予期しない停止」と扱うため
-  # 掃除対象から外す。unified_server.py・孤児化しうる子プロセス・ffmpeg は引き続き掃除する
-  # (旧来の nohup 起動が残っている場合の回収、および前世代の孤児の掃除)。
-  filtered_targets=()
-  for target in "${CLEANUP_TARGETS[@]}"; do
-    if [ "$target" != "streamlit run" ]; then
-      filtered_targets+=("$target")
-    fi
-  done
-  CLEANUP_TARGETS=("${filtered_targets[@]}")
-fi
 
 # まずは優しく停止 (SIGTERM)
 for target in "${CLEANUP_TARGETS[@]}"; do
@@ -277,29 +262,21 @@ echo "--- Check & Fix Webhooks (Cloudflare Tunnel) ---"
 $PYTHON_EXEC switchbot_webhook_fix.py > logs/webhook_fix.log 2>&1
 
 if [ "$PREPARE_ONLY" = true ]; then
-  # systemd 経路: サーバー本体(unified_server.py)は home_system.service の ExecStart が、
-  # ダッシュボードは home_dashboard.service がそれぞれフォアグラウンドで起動する。
+  # systemd 経路: サーバー本体(unified_server.py)は home_system.service の ExecStart が
+  # フォアグラウンドで起動する。ダッシュボードは#829でStreamlit版を廃止し、
+  # unified_server.py 自身が配信するようになったため、別ユニットの起動は不要。
   echo "✅ Preparation finished (--prepare). unified_server.py は systemd (ExecStart) が起動します。"
   exit 0
 fi
 
 # --- Phase 4: サーバー起動 (手動運用・開発用の経路。実機の systemd 経路では上の --prepare で終了する) ---
 echo "--- Start Home System Server ---"
-# unified_server.py が内部で scheduler_boot.py を起動します
+# unified_server.py が内部で scheduler_boot.py を起動します。ダッシュボード
+# (routers/dashboard_router.py)もこのプロセス自身が ${DASHBOARD_BASE_PATH} 配下で配信する。
 # ★修正: '&'のみのバックグラウンド化はSSHログアウト時にシェルからSIGHUPが
 # 送られて死ぬ余地があるため、nohupでSIGHUPを無視しdisownでジョブ管理からも外す
 nohup $PYTHON_EXEC unified_server.py < /dev/null > logs/server_boot.log 2>&1 &
 disown
 echo "🚀 System started. Check logs/server_boot.log for details."
-
-# ★修正: ダッシュボードは認証なしのため、外部公開せずローカルホストのみに限定する
-# スマートフォン等からの閲覧は unified_server.py(8000番)の ${DASHBOARD_BASE_PATH} 配下への
-# リバースプロキシ経由で行う(routers/dashboard_router.py)。Streamlit 側の
-# --server.baseUrlPath は config.DASHBOARD_BASE_PATH と一致している必要があり、
-# ずれると静的アセットのURLが合わず画面が真っ白になる。
-DASHBOARD_BASE_PATH="${DASHBOARD_BASE_PATH:-dashboard}"
-nohup $PYTHON_EXEC -m streamlit run dashboard.py --server.port 8501 --server.address 127.0.0.1 --server.baseUrlPath "${DASHBOARD_BASE_PATH#/}" < /dev/null > logs/dashboard_boot.log 2>&1 &
-disown
-echo "📊 Dashboard started."
 
 echo "✅ All systems go!"

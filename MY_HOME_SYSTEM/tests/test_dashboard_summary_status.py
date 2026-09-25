@@ -2,27 +2,19 @@
 """
 ステータスカードの判定ヘルパーの回帰テスト(Issue #754)。
 
-判定ロジックは `views/dashboard/summary.py` から
-`services/home_status_service.py` へ移した。Streamlit を介さない軽量ページ
-(`/dashboard/m`)が同じカードを出すため、判定を2箇所に持たないようにしたもの。
-
-`.coveragerc` の omit から `views/dashboard/*` を外すにあたって追加した。
+判定ロジックは `services/home_status_service.py` に一本化されている。
 これらは「DataFrame を受け取って (表示文字列, テーマ名) を返す」純粋関数で、
-Streamlit を起動せずに検証できる。omit されていた間はカバレッジのラチェット
-(master 比 0.5pt)の対象外だったため、分岐を増やしてもテストを書かずに済む
-状態が構造的に許されていた(#367 が解消した「水増しされた指標」の残り分)。
+Streamlit を起動せずに検証できる(#829でStreamlit版ダッシュボードは廃止済み)。
 """
 import os
 import sys
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from services import home_status_service
-from views.dashboard import summary
 
 # JST 固定。naive な datetime() を localize するより、オフセット付きの
 # ISO 文字列から起こすほうが「どの時刻か」が読んで分かる。
@@ -189,53 +181,16 @@ class TestGetCameraStatus:
         assert home_status_service.describe_camera(df, NOW) == "駐車場 " + (NOW - timedelta(minutes=5)).strftime("%H:%M")
 
 
-class TestGetQuestStatus:
-    """ファミクエは「承認待ち」だけを出す(見た人が今すぐ動く必要がある情報)。"""
-
-    def test_none_is_a_failed_fetch(self):
-        assert home_status_service.get_quest_status(None) == ("⚪ 取得失敗", "theme-gray")
-
-    def test_zero_is_green(self):
-        assert home_status_service.get_quest_status({"count": 0}) == ("✅ なし", "theme-green")
-
-    def test_pending_is_yellow_so_it_reaches_the_alert_line(self):
-        val, theme = home_status_service.get_quest_status({"count": 3})
-        assert val == "⏳ 3件"
-        assert theme == "theme-yellow"
-
-    def test_the_oldest_request_is_named(self):
-        pending = {"count": 2, "oldest_at": (NOW - timedelta(hours=2)).isoformat(), "oldest_name": "たろう"}
-        sub = home_status_service.describe_quest(pending, NOW)
-        assert sub is not None
-        assert sub.startswith("たろう ")
-        assert sub.endswith(" から")
-
-    def test_a_failed_read_is_not_reported_as_zero(self):
-        """取得失敗を「✅ なし」と緑で出すと、承認待ちが溜まっていても気づけない。
-
-        JR運行情報のカードが「取得不可を平常運転と偽らない」ために分けていたのと
-        同じ失敗モード。ローダ側が `None` を返し、カードがグレーになること。
-        """
-        val, theme = home_status_service.get_quest_status(None)
-        assert theme == "theme-gray"
-        assert val != "✅ なし"
-
-    def test_no_supporting_line_without_pending_requests(self):
-        assert home_status_service.describe_quest({"count": 0}, NOW) is None
-        assert home_status_service.describe_quest(None, NOW) is None
-
-
 class TestCardGroups:
     """カードは利用頻度順に並び、用途の変わり目に見出しが入る。"""
 
     def _cards(self):
         return home_status_service.build_status_cards(
-            NOW, pd.DataFrame(), pd.DataFrame(), None, {"percent": 40}, 1234,
-            pending_quests={"count": 0},
+            NOW, pd.DataFrame(), None, {"percent": 40}, 1234,
         )
 
     def test_watch_cards_come_first(self):
-        """スマホで最初に見たいのは見守り(実家・自宅・車・カメラ)。"""
+        """スマホで最初に見たいのは見守り(実家・自宅・駐車場・カメラ)。"""
         groups = [card.group for card in self._cards()]
         assert groups[:4] == ["watch"] * 4
         assert groups[-2:] == ["sys"] * 2, "毎回は見ないシステム系が最後にあること"
@@ -257,9 +212,14 @@ class TestCardGroups:
             assert html_out.count(f">{label}</h2>") == 1, label
 
     def test_a_lone_card_does_not_stretch_across_the_row(self):
-        """1枚だけのグループ(ファミクエ)が行いっぱいに伸びると、上下のグループの
+        """1枚だけのグループが行いっぱいに伸びると、上下のグループの
         2列のリズムから外れて間延びして見える。"""
-        html_out = home_status_service.render_status_grid_html(self._cards())
+        cards = [
+            home_status_service.StatusCard("A", "1", "theme-green", group="watch"),
+            home_status_service.StatusCard("B", "2", "theme-green", group="watch"),
+            home_status_service.StatusCard("C", "3", "theme-blue", group="solo"),
+        ]
+        html_out = home_status_service.render_status_grid_html(cards)
 
         assert "status-grid status-grid-solo" in html_out, "1枚のグループに目印が付いていない"
         assert html_out.count("status-grid-solo") == 1, "2枚以上のグループにも付いている"
@@ -298,17 +258,51 @@ class TestGetNasStatusSimple:
         assert home_status_service.get_nas_status_simple(pd.Series({"other": 1})) == ("⚠️ NAS: データ異常", "theme-yellow")
 
 
-class TestGetCarStatus:
-    def test_leave_means_out(self):
-        df = pd.DataFrame([{"action": "LEAVE"}])
-        assert home_status_service.get_car_status(df) == ("🚗 外出中", "theme-yellow")
+class TestGetParkingStatus:
+    """駐車場カメラの動体検知を流用する(#829。car_recordsは書き込み経路が
+    存在せず恒常的に空だったため廃止)。人の往来も拾うため在宅/外出中は
+    断定できず、カメラカードと同じく常に情報色(青)かグレー。"""
 
-    def test_arrive_means_home(self):
-        df = pd.DataFrame([{"action": "ARRIVE"}])
-        assert home_status_service.get_car_status(df) == ("🏠 在宅", "theme-green")
+    def _df(self, rows):
+        df = pd.DataFrame(rows, columns=["timestamp", "device_type", "movement_state", "friendly_name"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        return df
 
-    def test_empty_defaults_to_home(self):
-        assert home_status_service.get_car_status(pd.DataFrame()) == ("🏠 在宅", "theme-green")
+    def _row(self, minutes_ago, name=home_status_service.PARKING_CAMERA_NAME):
+        return {
+            "timestamp": NOW - timedelta(minutes=minutes_ago),
+            "device_type": home_status_service.CAMERA_DEVICE_TYPE,
+            "movement_state": "ON",
+            "friendly_name": name,
+        }
+
+    def test_empty_is_no_data(self):
+        assert home_status_service.get_parking_status(pd.DataFrame(), NOW) == ("⚪ データなし", "theme-gray")
+
+    def test_no_data_ever_recorded_is_not_reported_as_home(self):
+        """以前の car_records 依存版は空データでも「🏠 在宅」を返しており、
+        `データが無い`と`本当に在宅`を区別できていなかった(#829)。"""
+        val, theme = home_status_service.get_parking_status(pd.DataFrame(), NOW)
+        assert val != "🏠 在宅"
+        assert theme == "theme-gray"
+
+    def test_other_cameras_are_ignored(self):
+        df = self._df([self._row(3, name="玄関")])
+        assert home_status_service.get_parking_status(df, NOW) == ("⚪ データなし", "theme-gray")
+
+    def test_just_now_is_reported_as_moving(self):
+        val, theme = home_status_service.get_parking_status(self._df([self._row(3)]), NOW)
+        assert val == "🚗 いま動きあり"
+        assert theme == "theme-blue"
+
+    def test_detection_never_raises_an_alert(self):
+        for minutes in (1, 30, 300, 60 * 48):
+            _, theme = home_status_service.get_parking_status(self._df([self._row(minutes)]), NOW)
+            assert theme in ("theme-blue", "theme-gray"), f"{minutes}分前が警告色になっている"
+
+    def test_describe_reports_last_detection_time(self):
+        df = self._df([self._row(5)])
+        assert home_status_service.describe_parking(df, NOW) == "最終検知 " + (NOW - timedelta(minutes=5)).strftime("%H:%M")
 
 
 class TestGetRiceStatus:
@@ -335,106 +329,25 @@ class TestGetRiceStatus:
         assert home_status_service.get_rice_status(df, NOW) == ("🍚 炊いてない", "theme-red")
 
 
-class TestRenderSummary:
+class TestBuildStatusCards:
     def test_renders_all_status_cards(self):
         df_sensor = _sensor_df([_row(location="高砂", contact_state="detected")])
-        df_car = pd.DataFrame([{"action": "ARRIVE"}])
 
-        with patch.object(summary.view_common, "render_status_grid") as mock_grid, \
-             patch.object(summary.view_common, "get_monthly_cost_cached", return_value=4321), \
-             patch.object(summary.view_common, "load_pending_quest_approvals_cached",
-                          return_value={"count": 0}), \
-             patch.object(summary.view_common, "get_memory_usage_cached", return_value={"percent": 50}):
-            summary.render_summary(NOW, df_sensor, df_car, None)
+        cards = home_status_service.build_status_cards(
+            NOW, df_sensor, None, {"percent": 50}, 4321,
+        )
 
-        cards = mock_grid.call_args[0][0]
-        assert len(cards) == 9
+        assert len(cards) == 8
         titles = [c.title for c in cards]
         assert titles[0] == "👵 高砂 (実家)"
         assert "💰 今月の電気代" in titles
         # 電気代は3桁区切りで整形される
         assert any(c.value == "⚡ 4,321 円" for c in cards)
-        # 退役したカード(駐輪場・JR運行情報)が復活していないこと
-        assert not any("駐輪場" in t or "JR" in t for t in titles)
-
-    def test_section_failure_propagates_to_caller_for_safe_section_to_catch(self):
-        """render_summary 自身は例外を握りつぶさず、dashboard.py 側の
-        safe_section(#438)が隔離する設計であること。"""
-        with patch.object(summary.view_common, "get_monthly_cost_cached",
-                          side_effect=RuntimeError("boom")), \
-             patch.object(summary.view_common, "render_status_grid") as mock_grid:
-            try:
-                summary.render_summary(NOW, pd.DataFrame(), pd.DataFrame(), None)
-            except RuntimeError:
-                pass
-            else:
-                raise AssertionError("例外が呼び出し元へ伝播しなかった")
-        mock_grid.assert_not_called()
-
-
-class TestRenderStatusGridIntegration:
-    def test_grid_emits_a_single_markdown_block_with_all_cards(self):
-        from views.dashboard import common as view_common
-
-        mock_st = MagicMock()
-        cards = [
-            view_common.StatusCard("A", "1", "theme-green"),
-            view_common.StatusCard("B", "2", "theme-red"),
-        ]
-        with patch.object(view_common, "st", mock_st):
-            view_common.render_status_grid(cards)
-
-        mock_st.markdown.assert_called_once()
-        html_out = mock_st.markdown.call_args[0][0]
-        assert html_out.count("status-card") == 2
-        assert html_out.startswith('<div class="status-grid">')
-        assert mock_st.markdown.call_args[1]["unsafe_allow_html"] is True
-
-    def test_grid_html_survives_streamlit_markdown_preprocessing(self):
-        """カードのHTMLが「Markdownのインデントコードブロック」として
-        生のタグ文字列で表示されてしまう回帰の防止。
-
-        `st.markdown` は本文に `textwrap.dedent()` を掛けてからMarkdownとして
-        解釈する(`streamlit.string_util.clean_text`)。グリッドの先頭行
-        `<div class="status-grid">` はインデント0なので共通インデントが0になり、
-        dedentは何も削らない。以前の `render_status_card_html` は整形用の改行と
-        4スペース字下げを含む複数行を返していたため、
-
-          - カードとカードの間に「空白だけの行」ができてHTMLブロックが終端され
-          - 続く4スペース字下げの行がインデントコードブロックと解釈され
-
-        2枚目以降のカードがスマホ画面に `<div class="status-c...` という
-        生のタグ文字列として並んでいた(横幅も溢れた)。整形用の空白を
-        一切持たないことをここで固定する。
-        """
-        import textwrap
-
-        from views.dashboard import common as view_common
-
-        mock_st = MagicMock()
-        cards = [
-            view_common.StatusCard("👵 高砂 (実家)", "🟢 元気 (1h以内)", "theme-green"),
-            view_common.StatusCard("🏠 伊丹 (自宅)", "🟢 活動中 (今)", "theme-green"),
-            view_common.StatusCard("🔧 テスト", "<b>0</b>件<br><b>1</b>件",
-                                   "theme-yellow", value_is_html=True),
-        ]
-        with patch.object(view_common, "st", mock_st):
-            view_common.render_status_grid(cards)
-
-        html_out = mock_st.markdown.call_args[0][0]
-        # Streamlit が実際に行う前処理を再現する
-        rendered = textwrap.dedent(html_out).strip()
-
-        assert "\n" not in rendered, (
-            "グリッドのHTMLに改行が含まれている。空白行やインデント行ができると "
-            f"Markdownがコードブロックとして解釈する: {rendered!r}"
-        )
-        assert rendered.count('class="status-card') == 3
+        # 退役したカード(駐輪場・JR運行情報・ファミクエ)が復活していないこと
+        assert not any("駐輪場" in t or "JR" in t or "承認待ち" in t for t in titles)
 
     def test_single_card_html_has_no_formatting_whitespace(self):
-        from views.dashboard import common as view_common
-
-        card_html = view_common.render_status_card_html("タイトル", "値", "theme-green")
+        card_html = home_status_service.render_status_card_html("タイトル", "値", "theme-green")
         assert "\n" not in card_html
         assert card_html.startswith('<div class="status-card theme-green">')
         assert card_html.endswith("</div>")

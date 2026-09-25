@@ -35,12 +35,12 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `switchbot_webhook_fix.py` | スクリプト内で実行されているが、処理内容の実装が提供されていないため | `switchbot_webhook_fix.py` (行番号: 277 / 抜粋: "$PYTHON_EXEC switchbot_webhook_fix.py") |
-| `unified_server.py` | スクリプト内で実行および停止対象となっているが、実装内容が不明なため | `unified_server.py` (行番号: 291 / 抜粋: "$PYTHON_EXEC unified_server.py") |
+| `switchbot_webhook_fix.py` | スクリプト内で実行されているが、処理内容の実装が提供されていないため | `switchbot_webhook_fix.py` (行番号: 262 / 抜粋: "$PYTHON_EXEC switchbot_webhook_fix.py") |
+| `unified_server.py` | スクリプト内で実行および停止対象となっているが、実装内容が不明なため | `unified_server.py` (行番号: 278 / 抜粋: "$PYTHON_EXEC unified_server.py") |
 | `dashboard.py` | スクリプト内で実行されているが、実装内容が不明なため | `dashboard.py` (行番号: 301 / 抜粋: "run dashboard.py") |
-| `/mnt/nas` | マウント状況の確認先となっているが、システム上の具体的なNAS構成が不明なため | `MOUNT_POINT` (行番号: 153 / 抜粋: "MOUNT_POINT="/mnt/nas"") |
-| `family-quest/deploy.sh` | Phase 2で`--if-stale`引数付きで実行されるが、冪等判定・ビルドの実装内容は本ファイル外のため | `bash "$QUEST_DIR/deploy.sh" --if-stale` (行番号: 256 / 抜粋: "bash "$QUEST_DIR/deploy.sh" --if-stale") |
-| `sync_strict.py` | **（Issue #700 で追加）** Phase 2.5で`--if-stale`付きで実行されるが、鮮度判定・同期の実装内容は本ファイル外のため | `$PYTHON_EXEC sync_strict.py --if-stale` (行番号: 271 / 抜粋: "$PYTHON_EXEC sync_strict.py --if-stale > logs/quest_master_sync.log 2>&1") |
+| `/mnt/nas` | マウント状況の確認先となっているが、システム上の具体的なNAS構成が不明なため | `MOUNT_POINT` (行番号: 138 / 抜粋: "MOUNT_POINT="/mnt/nas"") |
+| `family-quest/deploy.sh` | Phase 2で`--if-stale`引数付きで実行されるが、冪等判定・ビルドの実装内容は本ファイル外のため | `bash "$QUEST_DIR/deploy.sh" --if-stale` (行番号: 241 / 抜粋: "bash "$QUEST_DIR/deploy.sh" --if-stale") |
+| `sync_strict.py` | **（Issue #700 で追加）** Phase 2.5で`--if-stale`付きで実行されるが、鮮度判定・同期の実装内容は本ファイル外のため | `$PYTHON_EXEC sync_strict.py --if-stale` (行番号: 256 / 抜粋: "$PYTHON_EXEC sync_strict.py --if-stale > logs/quest_master_sync.log 2>&1") |
 | 停止対象の各スクリプト群 | `camera_monitor.py`, `scheduler_boot.py`など`CLEANUP_TARGETS`配列に列挙されたプロセス停止対象の実装内容が不明なため | `CLEANUP_TARGETS`配列定義 (行番号: 31〜36 / 抜粋: "CLEANUP_TARGETS=(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -115,7 +115,7 @@
 
 
 * **副作用**: `ls "$MOUNT_POINT"`によるパスアクセス（自動マウントのトリガー、最大5回）、リトライ間隔分の`sleep`によるブロッキング待機、および標準出力へのマウント状態の警告・確認メッセージ出力。
-* 根拠: `ls "$MOUNT_POINT" >/dev/null 2>&1` (行番号: 80 / 抜粋: "ls "$MOUNT_POINT" >/dev/null 2>&1")、`sleep "$MOUNT_WAIT"` (行番号: 169 / 抜粋: "sleep "$MOUNT_WAIT"")、`echo`コマンド (行番号: 85, 90, 92 / 抜粋: "echo "✅ NAS Mounted."")
+* 根拠: `ls "$MOUNT_POINT" >/dev/null 2>&1` (行番号: 80 / 抜粋: "ls "$MOUNT_POINT" >/dev/null 2>&1")、`sleep "$MOUNT_WAIT"` (行番号: 154 / 抜粋: "sleep "$MOUNT_WAIT"")、`echo`コマンド (行番号: 85, 90, 92 / 抜粋: "echo "✅ NAS Mounted."")
 
 
 * **エラーハンドリング**: 5回のリトライを尽くしてもマウントされない場合、警告文を表示するのみでスクリプトの実行停止（異常終了）は行わず後続フェーズへ進む（アプリ側の`verify_and_initialize_storage`等によるバックオフ・フォールバックに委ねる設計）。
@@ -126,7 +126,7 @@
 ### [要素名4：Phase 1.5: Python依存関係の鮮度チェック]
 
 * **役割**: `REQ_FILES`配列（`requirements.txt` と `$DEVELOP_ROOT/DDD/requirements.txt`）のうち実在するものを連結したSHA256ハッシュを算出し、`.venv/.requirements-sha256`に記録済みのハッシュと比較する。一致しなければ依存定義が変更されたと判断し、各ファイルについて`$PYTHON_EXEC -m pip install -r "$req"`を順に実行して`.venv`を追従させ、**すべて成功した場合のみ**新しいハッシュを記録する。family-questの`deploy.sh --if-stale`と同じ冪等チェックの思想をバックエンドの依存関係にも適用したもの（Issue #483: `requirements.txt`変更後に`.venv`が追従しないと`ImportError`で起動失敗しうる問題への対応）。**（Issue #736 / AUDIT-006 で対象拡張）** `deploy/cron/crontab`はDDDのスクリプトも`MY_HOME_SYSTEM/.venv`のpythonで実行する（`run_task.sh`が`"${PROJECT_ROOT}/.venv/bin/python3"`を使い、`newface_monitor.py`の行は`.../MY_HOME_SYSTEM/.venv/bin/python`を明示している）のに、以前はMY_HOME_SYSTEM側の`requirements.txt`しか見ていなかった。そのためDDD固有の実行時依存（`yt-dlp` / `curl_cffi`）は「過去に手で`pip install`した」痕跡としてしか`.venv`に存在せず、`.venv`を作り直す・新しいホストへ移ると無音で失敗する状態だった。単一venvを共有しているという実態をこの配列で明示している。
-* 根拠: Phase 1.5ブロック (行番号: 138〜185 / 抜粋: "# --- Phase 1.5: Python依存関係の鮮度チェック ---")、[対象ファイル定義] (行番号: 197 / 抜粋: "REQ_FILES=(\"requirements.txt\" \"$DEVELOP_ROOT/DDD/requirements.txt\")")
+* 根拠: Phase 1.5ブロック (行番号: 138〜185 / 抜粋: "# --- Phase 1.5: Python依存関係の鮮度チェック ---")、[対象ファイル定義] (行番号: 182 / 抜粋: "REQ_FILES=(\"requirements.txt\" \"$DEVELOP_ROOT/DDD/requirements.txt\")")
 
 
 * **引数/リクエスト**: なし
@@ -184,7 +184,7 @@
 
 
 * **副作用**: `family-quest/deploy.sh --if-stale`の実行（`dist/`が古い場合はnpm install/buildによる`dist/`の再生成が発生する）。その標準出力・標準エラー出力の`logs/quest_deploy.log`への書き込み。標準出力へのログ表示。
-* 根拠: 実行・リダイレクト処理 (行番号: 256 / 抜粋: "bash "$QUEST_DIR/deploy.sh" --if-stale > logs/quest_deploy.log 2>&1")
+* 根拠: 実行・リダイレクト処理 (行番号: 241 / 抜粋: "bash "$QUEST_DIR/deploy.sh" --if-stale > logs/quest_deploy.log 2>&1")
 
 
 * **エラーハンドリング**: `deploy.sh`が失敗しても警告を表示するのみでスクリプトは続行する（既存の`dist/`を配信し続ける方がサーバー未起動よりマシという設計判断がコメントに明記されている）。
@@ -207,7 +207,7 @@
 
 
 * **副作用**: `$PYTHON_EXEC sync_strict.py --if-stale`の実行（差分がある場合のみDBの`quest_master`/`reward_master`が更新される）。その標準出力・標準エラー出力の`logs/quest_master_sync.log`への書き込み。標準出力へのログ表示。
-* 根拠: 実行・リダイレクト処理 (行番号: 271 / 抜粋: "$PYTHON_EXEC sync_strict.py --if-stale > logs/quest_master_sync.log 2>&1")
+* 根拠: 実行・リダイレクト処理 (行番号: 256 / 抜粋: "$PYTHON_EXEC sync_strict.py --if-stale > logs/quest_master_sync.log 2>&1")
 
 
 * **エラーハンドリング**: 同期が失敗しても警告を表示するのみでスクリプトは続行する（旧マスタで動かす方が起動失敗よりマシという、Phase 1.5/2と同じ設計判断がコメントに明記されている）。
@@ -348,9 +348,9 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `unified_server.py` | システム全体のコアとしてバックグラウンドで起動され、コメント上で`scheduler_boot.py`の起動も担うと記載されているため、全体ロジックの把握に必須。 | `unified_server.py` (行番号: 291 / 抜粋: "$PYTHON_EXEC unified_server.py") |
+| 高 | `unified_server.py` | システム全体のコアとしてバックグラウンドで起動され、コメント上で`scheduler_boot.py`の起動も担うと記載されているため、全体ロジックの把握に必須。 | `unified_server.py` (行番号: 278 / 抜粋: "$PYTHON_EXEC unified_server.py") |
 | 中 | `dashboard.py` | フロントエンド（ダッシュボード）の表示内容と、サーバーとの連携方法を把握するため。 | `dashboard.py` (行番号: 301 / 抜粋: "run dashboard.py") |
-| 中 | `switchbot_webhook_fix.py` | 起動時に毎回実行されており、外部API(SwitchBot/Cloudflare Tunnel)との通信や設定更新を担っていると推測されるため。 | `switchbot_webhook_fix.py` (行番号: 277 / 抜粋: "$PYTHON_EXEC switchbot_webhook_fix.py") |
+| 中 | `switchbot_webhook_fix.py` | 起動時に毎回実行されており、外部API(SwitchBot/Cloudflare Tunnel)との通信や設定更新を担っていると推測されるため。 | `switchbot_webhook_fix.py` (行番号: 262 / 抜粋: "$PYTHON_EXEC switchbot_webhook_fix.py") |
 | 低 | `camera_monitor.py`, `scheduler_boot.py` | `CLEANUP_TARGETS`配列に列挙されているプロセス。システムの一部を構成している可能性がある。 | クリーンアップ処理 (行番号: 31〜36 / 抜粋: "CLEANUP_TARGETS=(") |
 
 ## 8. 保守上の注意点

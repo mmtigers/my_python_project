@@ -118,10 +118,10 @@ class TestTimeoutIsPassed:
         assert run.call_args.kwargs["timeout"] > monitor.timeout
 
     def test_dashboard_restart_declares_a_timeout(self):
-        """ダッシュボードの再起動ボタン(Streamlit のスクリプト実行スレッドを塞ぐ)。"""
-        from views.dashboard import log_tab
+        """システムページの再起動ボタン(POST /api/system/restart)。"""
+        from services import system_maintenance_service
 
-        with open(log_tab.__file__, encoding="utf-8") as f:
+        with open(system_maintenance_service.__file__, encoding="utf-8") as f:
             source = f.read()
         restart_call = source[source.index('"restart", "home_system"'):]
         restart_call = restart_call[: restart_call.index(")")]

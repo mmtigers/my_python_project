@@ -117,7 +117,13 @@ async def process_location(location: str, token: str) -> None:
                 dev_name = f"{location}_{app.get('nickname', 'SmartMeter')}"
                 
                 # Serviceへ委譲
-                await sensor_service.process_power_data(dev_id, dev_name, power_val, {})
+                # device_category="smart_meter": 住宅全体のスマートメーター(EL_SMART_METER)から
+                # 来た値であることをここで明示する。以前は下流(analysis_service)が
+                # device_nameに"Remo"を含むかで推測しており、Nature Remoアプリの
+                # ニックネーム設定次第で電気代集計が0件になる不具合があった。
+                await sensor_service.process_power_data(
+                    dev_id, dev_name, power_val, {}, device_category="smart_meter"
+                )
                 
                 # Log Level Adjustment: DEBUG for steady state
                 # フォーマット処理の負荷を下げるため %s 記法を使用

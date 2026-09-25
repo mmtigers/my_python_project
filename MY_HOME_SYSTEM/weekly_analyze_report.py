@@ -2,6 +2,7 @@ import config
 from core.logger import setup_logging
 from core.database import get_db_cursor
 from services.notification_service import send_push
+from services import home_status_service
 from core import state_file
 import datetime
 import os
@@ -97,13 +98,19 @@ def get_analysis_data(start_dt: datetime.datetime) -> Optional[Dict[str, Any]]:
             data["food_counts"] = food_counts
             data["total_meals"] = total_meals
             
-            # 2. 車の利用 (設計書 3.2: car_records) 
-            sql_car = f"""
-                SELECT COUNT(*) 
-                FROM {config.SQLITE_TABLE_CAR} 
-                WHERE action = 'LEAVE' AND timestamp >= ?
+            # 2. 車の利用(駐車場カメラの動体検知回数で代替)
+            # #829: car_records(action='LEAVE'/'ARRIVE')は、書き込み経路が
+            # リポジトリのどこにも存在せず(過去に外部連携があったかは不明)、
+            # 常に0件だった。駐車場カメラ(device_records, device_type='ONVIF_CAMERA',
+            # device_name='駐車場')の動体検知回数に置き換える。人の往来も拾うため
+            # 「車が出入りした回数」そのものではないが、駐車場での動きの目安にはなる。
+            sql_car = """
+                SELECT COUNT(*)
+                FROM device_records
+                WHERE device_type = 'ONVIF_CAMERA' AND movement_state = 'ON'
+                  AND device_name = ? AND timestamp >= ?
             """
-            cursor.execute(sql_car, (start_str,))
+            cursor.execute(sql_car, (home_status_service.PARKING_CAMERA_NAME, start_str))
             row_car = cursor.fetchone()
             data["car_count"] = row_car[0] if row_car else 0
 
@@ -115,13 +122,18 @@ def get_analysis_data(start_dt: datetime.datetime) -> Optional[Dict[str, Any]]:
             # #170: power_usageにはスマートメーター(全体消費)と各プラグ(個別家電)が
             # 同居しており、プラグの消費電力はスマートメーターの計測値に既に含まれる
             # 部分集合である。デバイスを絞らずAVG(wattage)を取るとプラグのアイドル値が
-            # スマートメーター値を希釈してしまうため、services/analysis_service.pyの
-            # load_sensor_data()と同じ分類基準(device_nameに"Remo"を含む)で
-            # スマートメーターの行のみに絞る。
+            # スマートメーター値を希釈してしまうため、スマートメーターの行のみに絞る。
+            # #829: services/analysis_service.pyと同じ理由で、device_category
+            # (migrations/0020以降に書き込まれた行が持つ)を優先し、無い古い行だけ
+            # device_nameの"Remo"判定にフォールバックする。
             sql_power = f"""
                 SELECT AVG(wattage)
                 FROM {table_power}
-                WHERE timestamp >= ? AND device_name LIKE '%Remo%'
+                WHERE timestamp >= ?
+                  AND (
+                    device_category = 'smart_meter'
+                    OR (device_category IS NULL AND device_name LIKE '%Remo%')
+                  )
             """
             cursor.execute(sql_power, (start_str,))
             row_pow = cursor.fetchone()
@@ -183,7 +195,7 @@ def generate_text_section(period_name: str, data: Dict[str, Any], is_simple: boo
 
     text = f"【{period_name}】\n"
     text += f"🍳 自炊率: {cook_rate}% ({cook_count}/{total}回)\n"
-    text += f"🚗 車利用: {car_msg}\n"
+    text += f"🚗 駐車場の動き: {car_msg}\n"
     text += f"⚡ 電気代: 約{data['elec_bill']:,}円\n"
     text += f"🏥 健康: {health_msg}\n"
     

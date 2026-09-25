@@ -1,3 +1,10 @@
+> **廃止 (2026-09-25)**: このファイルはソース (`MY_HOME_SYSTEM/views/dashboard/log_tab.py`) が Issue #829(お家ダッシュボード改修:
+> Streamlit版の詳細表示・表示モード切替UIを廃止し、かんたん表示のみの構成にする)で削除されたため
+> 廃止されました。ダッシュボードの現行構成は `docs/specifications/MY_HOME_SYSTEM/dashboard_router.md`・
+> `docs/specifications/MY_HOME_SYSTEM/dashboard_page_service.md`・
+> `docs/specifications/MY_HOME_SYSTEM/home_status_service.md` を参照。以下は削除前時点の解析内容を
+> 履歴として残す。
+
 ## 1. 解析メタ情報
 
 | 項目 | 内容 |
