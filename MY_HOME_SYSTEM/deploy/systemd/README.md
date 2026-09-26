@@ -37,7 +37,9 @@ Webhook再登録(Phase 0〜3)を行う。`unified_server.py` は内部で `sched
 > 6監視タスクが静かに止まり、検知は毎時cronの `health_watch.py`、復旧は人手だった。
 > 当時 `Type=simple` への移行を見送った理由は「Phase 0(旧プロセス掃除)・Streamlitダッシュボードの
 > 別プロセス起動との整合を取り直す必要がある」ことだったため、Phase 0〜3 を `start_all.sh --prepare`
-> として `ExecStartPre` に分離し、ダッシュボードは `home_dashboard.service`(下記)へ切り出した。
+> として `ExecStartPre` に分離し、ダッシュボードは `home_dashboard.service`(当時の下記セクション)へ
+> 切り出した。**（Issue #829で変更）** その後Streamlit版ダッシュボードは廃止され、`unified_server.py`
+> 自身が配信するようになったため、`home_dashboard.service`自体が不要になり削除された(下記参照)。
 > `start_all.sh` を引数なしで実行する従来の経路(手動運用・開発用)は残している。
 > runbook(`docs/runbooks/raspi_claude_log_monitoring.md`)の「自動 `systemctl restart` は行わない」は
 > Claude 自動調査側のガードレールであり、systemd 自身の `Restart=` による復旧はその対象ではない。
@@ -65,19 +67,15 @@ systemctl status home_system.service   # Active: active (running) で Main PID �
 サーバーの標準出力・標準エラーは journal に入る(`journalctl -u home_system.service -f`)。
 アプリログは従来どおり `core/logger.py` が `logs/home_system.log` に書く。
 
-## home_dashboard.service
+## home_dashboard.service（廃止・Issue #829）
 
-Streamlit ダッシュボード(`dashboard.py`、認証なしのため `127.0.0.1:8501` のみにバインド)を
-`home_system.service` から独立したユニットとして常駐実行する(Issue #646。以前は `start_all.sh` の
-Phase 4 が `nohup` で起動していた)。
-
-導入手順(実機側):
-
-```bash
-sudo cp deploy/systemd/home_dashboard.service /etc/systemd/system/home_dashboard.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now home_dashboard.service
-```
+以前はStreamlit ダッシュボード(`dashboard.py`、認証なしのため `127.0.0.1:8501` のみにバインド)を
+`home_system.service` から独立したユニットとして常駐実行していた(Issue #646。以前は `start_all.sh` の
+Phase 4 が `nohup` で起動していた)。Streamlit版ダッシュボードの廃止に伴い、`dashboard.py`・
+`deploy/systemd/home_dashboard.service` ともにリポジトリから削除され、このユニット自体が不要になった。
+ダッシュボードは `home_system.service` が起動する `unified_server.py` 自身が配信する(`routers/dashboard_router.py`)。
+実機で本ユニットが有効化されたままであれば `sudo systemctl disable --now home_dashboard.service` で停止・
+無効化し、`/etc/systemd/system/home_dashboard.service` を削除すること。
 
 ## network_logger.service
 

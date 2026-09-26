@@ -93,7 +93,6 @@ class HostConfigTarget:
 HOST_CONFIG_TARGETS: tuple[HostConfigTarget, ...] = (
     # --- systemd ユニット(リポジトリにも正がある。実機コピーとのドリフト検出用) ---
     HostConfigTarget("/etc/systemd/system/home_system.service", "サーバー本体", repo_managed=True),
-    HostConfigTarget("/etc/systemd/system/home_dashboard.service", "ダッシュボード", repo_managed=True),
     HostConfigTarget("/etc/systemd/system/health-check.service", "起動時ヘルスチェック", repo_managed=True),
     HostConfigTarget("/etc/systemd/system/network_logger.service", "ネットワークロガー", repo_managed=True),
     HostConfigTarget("/etc/systemd/system/home_firewall.service", "ファイアウォール", repo_managed=True),
