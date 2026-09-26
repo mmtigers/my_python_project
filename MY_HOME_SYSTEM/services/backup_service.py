@@ -221,11 +221,16 @@ def _copy_latest_offsite(nas_backup_path: Path) -> bool:
 
 def _notify_and_log_error(message: str) -> None:
     """ERRORレベルの記録と管理者への即時通知を行う [cite: 361, 387]"""
-    logger.error(f"❌ {message}")
+    # Discord通知システム調査(2026-09-26)で、内容は障害通知なのにchannel="report"
+    # (定期レポート用チャンネル)に送っていたことが判明したためerrorチャンネルへ変更。
+    # 直後にsend_pushで同内容をerrorチャンネルへ送るため、logger.error自体の
+    # DiscordErrorHandler経由の通知はskip_discordで抑止し、二重通知を避ける
+    # (monitors/memory_monitor.pyと同じパターン)。
+    logger.error(f"❌ {message}", extra={"skip_discord": True})
     send_push(
         messages=[{"type": "text", "text": f"🚨 【重要】バックアップ失敗報\n{message}"}],
         target="discord",
-        channel="report"
+        channel="error"
     )
 
 if __name__ == "__main__":

@@ -52,6 +52,12 @@ from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 # MY_HOME_SYSTEM Core Imports
+# Discord通知システム調査(2026-09-26)で確認: このimportが成功する環境(実機はこちら)では、
+# 本ファイルのlogger.error()呼び出しは(a)本ファイル自身のDiscordNotifier経由の明示通知と
+# (b)core.logger.DiscordErrorHandler経由の自動転送(DISCORD_WEBHOOK_ERRORへ)の両方を
+# 発火させる。batch_download_discord.pyは標準のlogging.getLoggerのみを使うため(b)は
+# 発火しない。この非対称性は意図的な既存動作であり、変更する場合は両ファイルの
+# 通知経路を合わせて見直すこと。
 try:
     # システム統合環境下でのインポート
     from core.logger import get_logger

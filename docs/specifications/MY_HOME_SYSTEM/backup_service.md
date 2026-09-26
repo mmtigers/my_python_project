@@ -48,7 +48,7 @@
 | `config.NAS_MOUNT_POINT` | 定義元が存在せず、NASマウントポイントの実体・値が不明 | `os.path.join(config.NAS_MO..."` (行番号: 34 / 抜粋: "os.path.join(config.NAS_MO...") |
 | `config.BACKUP_FILES` | 定義元が存在せず、DB以外にバックアップ対象へ追加するファイルパス一覧の実体・値が不明 | `getattr(config, "BACKUP_FI..."` (行番号: 84 / 抜粋: "for entry in getattr(confi...") |
 | `core.logger.setup_logging` | 実装が提供されておらず、ログの出力先・出力形式が不明 | `setup_logging("backup")` (行番号: 15 / 抜粋: "logger = setup_logging("ba...") |
-| `services.notification_service.send_push` | 実装が提供されておらず、実際の通信方式や成否の扱いが不明 | `send_push(...)` (行番号: 225 / 抜粋: "send_push(") |
+| `services.notification_service.send_push` | 実装が提供されておらず、実際の通信方式や成否の扱いが不明 | `send_push(...)` (行番号: 230 / 抜粋: "send_push(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 

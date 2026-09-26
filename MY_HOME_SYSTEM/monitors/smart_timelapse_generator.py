@@ -762,5 +762,11 @@ def _run_smart_timelapse_job_locked(input_video: str) -> None:
         )
 
 if __name__ == "__main__":
+    # Discord通知システム調査(2026-09-26)で確認: 本スクリプトの単体起動(sys.argv[1]に
+    # 動画ファイルを渡すCLI実行)は、cron/systemd/scheduler_boot.py/他スクリプトの
+    # いずれからも呼び出されていない(実機のcrontab -lともdeploy/cron/crontabは
+    # 完全一致し、本ファイルへの言及は無い)。日次のダイジェスト生成は
+    # monitors/daily_timelapse_job.pyが本ファイルのクラス(MotionDetector等)を
+    # importして使う別経路であり、run_smart_timelapse_job自体は現状手動実行専用。
     if len(sys.argv) < 2 or not os.path.exists(sys.argv[1]): sys.exit(1)
     run_smart_timelapse_job(sys.argv[1])
