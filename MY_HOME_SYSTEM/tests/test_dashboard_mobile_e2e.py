@@ -197,7 +197,12 @@ class TestHomePageLayout:
         assert cards.count() == rendered.count(), "リンクになっていないカードがある"
         for i in range(cards.count()):
             href = cards.nth(i).get_attribute("href")
-            assert href and any(href.endswith(f"/{p}") for p in ("watch", "life", "sys")), (
+            # 見守りグループの複数枚は同じページを指しつつ `#takasago-log` 等の
+            # アンカーでページ内の別セクションへ飛ぶため、末尾はタブ名そのものとは
+            # 限らない(例: "/dashboard/watch#takasago-log")。アンカー/クエリを
+            # 落としたうえでタブ名末尾かどうかを見る。
+            path = (href or "").split("#", 1)[0].split("?", 1)[0]
+            assert href and any(path.endswith(f"/{p}") for p in ("watch", "life", "sys")), (
                 f"{i}枚目のリンク先が想定外: {href!r}"
             )
 
@@ -214,9 +219,10 @@ class TestHomePageLayout:
         )
         assert len(set(tops)) < len(tops), f"すべて別の段に並んでいる(1列になっている): {tops}"
 
-    def test_the_alert_line_is_always_there(self, home_page):
-        """B: 更新のたびに行が出たり消えたりすると、下の内容が上下に跳ねる。"""
-        assert home_page.locator("p.alerts").count() == 1
+    def test_there_is_no_alert_summary_line(self, home_page):
+        """不具合修正の回帰テスト: 「気になること」要約行は要望により削除された。
+        カード自体の色(赤・黄)で判断できるため、要約行を復活させないこと。"""
+        assert home_page.locator("p.alerts").count() == 0
 
     def test_the_cards_are_html_not_raw_tags(self, home_page):
         """#807 と同じ失敗(生のタグ文字列が画面に出る)をしていないこと。"""

@@ -264,16 +264,16 @@ class TestGetParkingStatus:
     断定できず、カメラカードと同じく常に情報色(青)かグレー。"""
 
     def _df(self, rows):
-        df = pd.DataFrame(rows, columns=["timestamp", "device_type", "movement_state", "friendly_name"])
+        df = pd.DataFrame(rows, columns=["timestamp", "device_type", "movement_state", "device_id"])
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         return df
 
-    def _row(self, minutes_ago, name=home_status_service.PARKING_CAMERA_NAME):
+    def _row(self, minutes_ago, device_id=home_status_service.PARKING_CAMERA_ID):
         return {
             "timestamp": NOW - timedelta(minutes=minutes_ago),
             "device_type": home_status_service.CAMERA_DEVICE_TYPE,
             "movement_state": "ON",
-            "friendly_name": name,
+            "device_id": device_id,
         }
 
     def test_empty_is_no_data(self):
@@ -287,7 +287,8 @@ class TestGetParkingStatus:
         assert theme == "theme-gray"
 
     def test_other_cameras_are_ignored(self):
-        df = self._df([self._row(3, name="玄関")])
+        """表示名(name)ではなくidで照合する(devices.jsonで表示名を変えても壊れないため)。"""
+        df = self._df([self._row(3, device_id="NC-9820_Entrance")])
         assert home_status_service.get_parking_status(df, NOW) == ("⚪ データなし", "theme-gray")
 
     def test_just_now_is_reported_as_moving(self):
@@ -305,30 +306,6 @@ class TestGetParkingStatus:
         assert home_status_service.describe_parking(df, NOW) == "最終検知 " + (NOW - timedelta(minutes=5)).strftime("%H:%M")
 
 
-class TestGetRiceStatus:
-    def test_missing_columns_returns_not_cooked(self):
-        assert home_status_service.get_rice_status(pd.DataFrame(), NOW) == ("🍚 炊いてない", "theme-red")
-
-    def test_no_rice_cooker_rows_returns_not_cooked(self):
-        df = _sensor_df([_row(device_name="エアコン", power_watts=800)])
-        assert home_status_service.get_rice_status(df, NOW) == ("🍚 炊いてない", "theme-red")
-
-    def test_high_wattage_today_means_rice_available(self):
-        df = _sensor_df([_row(device_name="炊飯器", power_watts=700,
-                              timestamp=NOW - timedelta(hours=2))])
-        assert home_status_service.get_rice_status(df, NOW) == ("🍚 ご飯あり", "theme-green")
-
-    def test_standby_wattage_does_not_count(self):
-        df = _sensor_df([_row(device_name="炊飯器", power_watts=3,
-                              timestamp=NOW - timedelta(hours=2))])
-        assert home_status_service.get_rice_status(df, NOW) == ("🍚 炊いてない", "theme-red")
-
-    def test_yesterdays_cooking_does_not_count(self):
-        df = _sensor_df([_row(device_name="炊飯器", power_watts=700,
-                              timestamp=NOW - timedelta(days=1))])
-        assert home_status_service.get_rice_status(df, NOW) == ("🍚 炊いてない", "theme-red")
-
-
 class TestBuildStatusCards:
     def test_renders_all_status_cards(self):
         df_sensor = _sensor_df([_row(location="高砂", contact_state="detected")])
@@ -337,14 +314,14 @@ class TestBuildStatusCards:
             NOW, df_sensor, None, {"percent": 50}, 4321,
         )
 
-        assert len(cards) == 8
+        assert len(cards) == 7
         titles = [c.title for c in cards]
         assert titles[0] == "👵 高砂 (実家)"
         assert "💰 今月の電気代" in titles
         # 電気代は3桁区切りで整形される
         assert any(c.value == "⚡ 4,321 円" for c in cards)
-        # 退役したカード(駐輪場・JR運行情報・ファミクエ)が復活していないこと
-        assert not any("駐輪場" in t or "JR" in t or "承認待ち" in t for t in titles)
+        # 退役したカード(駐輪場・JR運行情報・ファミクエ・炊飯器)が復活していないこと
+        assert not any("駐輪場" in t or "JR" in t or "承認待ち" in t or "炊飯器" in t for t in titles)
 
     def test_single_card_html_has_no_formatting_whitespace(self):
         card_html = home_status_service.render_status_card_html("タイトル", "値", "theme-green")

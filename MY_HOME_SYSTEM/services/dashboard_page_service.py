@@ -79,12 +79,15 @@ _PAGE_BASE_CSS = """
     }
     a.nav-card:active { transform: scale(0.98); }
     a.nav-card .nav-card-sub { font-size: 0.7rem; font-weight: normal; opacity: 0.75; }
+    /* #829の見直し: 以前は警告表示(.alerts-warn)と紛らわしいアンバー系の配色で、
+       ページ最下部にあったため「位置が分かりにくい」「警告と見分けがつかない」の
+       両方の原因になっていた。警告色(オレンジ/黄)ともナビカード(藍)とも被らない
+       ティール系の配色にし、ステータスカードのすぐ下(ナビカードより前)に置く。 */
     a.external-card {
         display: flex; align-items: center; justify-content: space-between;
         gap: 8px; padding: 14px 16px; min-height: 44px; border-radius: 12px;
         text-decoration: none; font-weight: bold; font-size: 0.95rem;
-        background: #fff8e1; color: #8d6e00; border: 1px solid #ffe082;
-        margin-bottom: 8px;
+        background: #e0f2f1; color: #00695c; border: 1px solid #80cbc4;
         -webkit-tap-highlight-color: rgba(0,0,0,0.08);
     }
 
@@ -147,7 +150,7 @@ _PAGE_BASE_CSS = """
         .alerts-ok { background: #1e2a17; color: #aed581; border-color: #33482a; }
         nav.top-nav a, a.back-link { background: #16304a; color: #90caf9; border-color: #24507a; }
         a.nav-card { background: #23264a; color: #c5cae9; border-color: #34386b; }
-        a.external-card { background: #3a2f0a; color: #ffe082; border-color: #5c4a12; }
+        a.external-card { background: #0d2b28; color: #4db6ac; border-color: #14413c; }
         table.simple-table th { color: #9e9e9e; }
         table.simple-table th, table.simple-table td { border-color: #333; }
         .freshness-row { border-color: #333; }
@@ -182,7 +185,7 @@ def _back_to_home_link(dashboard_path: str) -> str:
 # 見守り/くらし/システムの3ページへの導線。カードの詳細タブ(`tab`)と同じキーを使う。
 _NAV_CARDS: tuple[tuple[str, str, str], ...] = (
     ("watch", "👀 見守り", "カメラ・実家の様子"),
-    ("life", "💡 くらし", "電気・炊飯器"),
+    ("life", "💡 くらし", "電気"),
     ("sys", "🔧 システム", "各機能の状態"),
 )
 
@@ -199,7 +202,14 @@ def render_home_page(
     manifest_path: str | None = None,
     icon_path: str | None = None,
 ) -> str:
-    """ホームページ: ステータスカード + 各ページへのナビ + 外部リンク。"""
+    """ホームページ: ステータスカード + 外部リンク + 各ページへのナビ。
+
+    外部リンク(ファミクエ・あさノート)は、以前はナビカードのさらに下、ページ最下部に
+    警告表示(`.alerts-warn`)と紛らわしい配色で置かれており、「位置が分かりにくい」
+    「色で気づきにくい」の両方の原因になっていた。ステータスカードのすぐ下・
+    ナビカードより前に上げ、警告色と被らない配色(`.external-card`)にすることで
+    両方を解消する。
+    """
     nav_html = "".join(
         f'<a class="nav-card" href="{dashboard_path.rstrip("/")}/{key}">'
         f"{html.escape(label)}<span class=\"nav-card-sub\">{html.escape(sub)}</span></a>"
@@ -212,9 +222,10 @@ def render_home_page(
     body = (
         "<h1>🏠 おうちの様子</h1>"
         f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec)}'
+        '<h2>よく使うリンク</h2>'
+        f'<div class="link-grid">{links_html}</div>'
         '<h2>メニュー</h2>'
         f'<div class="link-grid">{nav_html}</div>'
-        f"{links_html}"
     )
     extra_head = _status_refresh_script(status_path, refresh_sec)
     if manifest_path is not None and icon_path is not None:
@@ -246,7 +257,6 @@ def _render_status_section(cards, fetched_at: datetime, *, dashboard_path: str, 
         f'<div id="{STATUS_SECTION_ID}">'
         f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
         f"・{int(refresh_sec)}秒ごとに自動更新</p>"
-        f"{home_status_service.render_alerts_html(cards, dashboard_path=dashboard_path)}"
         f"{home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path)}"
         "</div>"
     )
@@ -417,10 +427,17 @@ _CAMERA_SCRIPT = """
     document.addEventListener("DOMContentLoaded", function () {
         var buttons = document.querySelectorAll(".camera-btn");
         if (!buttons.length) { return; }
+        var ids = Array.prototype.map.call(buttons, function (b) { return b.dataset.cameraId; });
+
+        // ホームページの「🚗 駐車場」カードは、このページを開いたときに駐車場カメラを
+        // 選択済みにしたい(?camera=<id>)。指定が無い/未知のidなら記憶(localStorage)、
+        // それも無ければ先頭のカメラにフォールバックする。
+        var requested = null;
+        try { requested = new URLSearchParams(window.location.search).get("camera"); } catch (e) {}
         var saved = null;
         try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) {}
-        var ids = Array.prototype.map.call(buttons, function (b) { return b.dataset.cameraId; });
-        var initial = (saved && ids.indexOf(saved) !== -1) ? saved : ids[0];
+        var initial = (requested && ids.indexOf(requested) !== -1) ? requested
+            : (saved && ids.indexOf(saved) !== -1) ? saved : ids[0];
         window.dashboardSelectCamera(initial);
     });
 })();
@@ -435,7 +452,14 @@ def render_watch_page(
     dashboard_path: str,
     snapshot_url_prefix: str,
 ) -> str:
-    """👀 見守り: カメラのライブ選択・スナップショット・防犯ログ・実家センサーログ。"""
+    """👀 見守り: カメラのライブ選択・スナップショット・防犯ログ・実家/自宅センサーログ。
+
+    見守りグループの4枚のステータスカード(高砂・伊丹・駐車場・カメラ)は
+    すべてこのページの `tab="watch"` を指すため、`home_status_service.build_status_cards`
+    がカードごとに付ける `anchor` を使って、タップしたカードの内容が実際に載っている
+    セクションまで連れて行く。ここに置くid(`camera-section`/`takasago-log`/
+    `itami-log`)を変えるときはカード側の`anchor`も一緒に直すこと。
+    """
     cameras = [
         {"id": cam["id"], "name": cam["name"]}
         for cam in config.CAMERAS
@@ -444,20 +468,30 @@ def render_watch_page(
     df_security_log = analysis_service.apply_friendly_names(df_security_log)
     if not df_sensor.empty and "location" in df_sensor.columns:
         df_takasago = df_sensor[df_sensor["location"] == "高砂"]
+        df_itami = df_sensor[df_sensor["location"] == "伊丹"]
     else:
         df_takasago = df_sensor.iloc[0:0]
+        df_itami = df_sensor.iloc[0:0]
 
     body = (
         f"{_back_to_home_link(dashboard_path)}"
         "<h1>👀 見守り</h1>"
+        '<div id="camera-section">'
         "<h2>🎥 カメラの映像</h2>"
         f"{_render_camera_selector(cameras)}"
+        "</div>"
         "<h2>🖼️ 最近の写真</h2>"
         f"{_render_snapshot_gallery(snapshot_url_prefix)}"
         "<h2>🛡️ 防犯ログ</h2>"
         f'{_render_simple_table(df_security_log, {"timestamp": "検知時刻", "friendly_name": "デバイス", "classification": "検知種別"})}'
+        '<div id="takasago-log">'
         "<h2>👵 高砂実家のセンサーログ</h2>"
         f'{_render_simple_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'
+        "</div>"
+        '<div id="itami-log">'
+        "<h2>🏠 伊丹(自宅)のセンサーログ</h2>"
+        f'{_render_simple_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
+        "</div>"
     )
     return _page_shell("見守り - おうちの様子", body, extra_head=_CAMERA_SCRIPT)
 
@@ -466,7 +500,7 @@ def render_watch_page(
 
 
 def render_life_page(cards, *, dashboard_path: str) -> str:
-    """💡 くらし: 電気・炊飯器のカードを大きく見せる(詳細グラフは持たない)。"""
+    """💡 くらし: 電気のカードを大きく見せる(詳細グラフは持たない)。"""
     life_cards = [card for card in cards if card.group == "life"]
     body = (
         f"{_back_to_home_link(dashboard_path)}"

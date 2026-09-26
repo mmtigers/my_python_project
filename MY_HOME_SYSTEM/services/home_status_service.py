@@ -2,7 +2,7 @@
 """「家のいまの状況」(サマリーカード)の算出と、その最小表示。
 
 このモジュールが1箇所に集めているもの:
-    - 各カードの判定ロジック(実家の動き・在宅・炊飯器・サーバー等)
+    - 各カードの判定ロジック(実家の動き・在宅・サーバー等)
     - カード1枚のHTML組み立て(XSS対策を含む。Issue #378)
     - カードのCSS
     - 時刻の相対表記(見守りページのログ表示・システムページの鮮度表示と共有)
@@ -213,6 +213,10 @@ class StatusCard(NamedTuple):
     のための、直接のリンク先。指定すると `tab` より優先される。
     `group`: カードが属する見出し(`CARD_GROUPS` のキー)。よく見るものから順に
     並べたうえで、どこからどこまでが同じ用途かを見出しで示すために使う。
+    `anchor`: `tab` のURLの末尾にそのまま付け足す文字列(例: `#takasago-log`、
+    `?camera=xxx#camera-section`)。同じタブに複数のカードが属するとき、
+    どのカードをタップしても同じページの先頭に飛ぶだけになってしまうのを防ぎ、
+    タップしたカードの内容が実際に載っているページ内の場所まで連れて行く。
     """
     title: str
     value: str
@@ -222,6 +226,7 @@ class StatusCard(NamedTuple):
     sub: str | None = None
     href: str | None = None
     group: str | None = None
+    anchor: str | None = None
 
 
 def render_status_card_html(
@@ -286,34 +291,10 @@ def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:
         return card.href
     if card.tab is None:
         return None
-    return f"{dashboard_path.rstrip('/')}/{card.tab}"
-
-
-# 「気になること」として拾うテーマ。赤(異常)を先に、黄(注意)を後に並べる。
-ALERT_THEMES: tuple[str, ...] = ("theme-red", "theme-yellow")
-
-
-def summarize_alerts(cards) -> list[StatusCard]:
-    """いま気にすべきカードだけを、赤 → 黄 の順で返す。
-
-    カードの並び自体は動かさない。「左上が高砂」と位置で覚えている画面で順番が
-    入れ替わると、かえって読み違えるため(並べ替えではなく要約で解決する)。
-    """
-    return [card for theme in ALERT_THEMES for card in cards if card.theme == theme]
-
-
-def render_alerts_html(cards, *, dashboard_path: str | None = None) -> str:
-    """要約行のHTML。気になることが無いときも同じ高さの行を出す(画面が跳ねない)。"""
-    alerts = summarize_alerts(cards)
-    if not alerts:
-        return '<p class="alerts alerts-ok">✅ 気になることはありません</p>'
-
-    items = []
-    for card in alerts:
-        label = html.escape(card.title)
-        href = None if dashboard_path is None else card_detail_href(card, dashboard_path)
-        items.append(label if href is None else f'<a href="{html.escape(href)}">{label}</a>')
-    return f'<p class="alerts alerts-warn">⚠️ 気になること: {"、".join(items)}</p>'
+    href = f"{dashboard_path.rstrip('/')}/{card.tab}"
+    if card.anchor:
+        href += card.anchor
+    return href
 
 
 def group_cards(cards) -> list[tuple[str | None, list[StatusCard]]]:
@@ -491,8 +472,13 @@ def get_nas_status_simple(nas_data: pd.Series | None) -> tuple[str, str]:
 # (`monitors/camera_monitor.py` が ONVIF のイベントを受けて書く)。
 CAMERA_DEVICE_TYPE = "ONVIF_CAMERA"
 
-# 駐車場カメラの表示名(`config.CAMERAS`/`monitors/camera_monitor.py`が
-# `device_records.device_name` に書き込む値と同じ)。
+# 駐車場カメラの `config.CAMERAS` 上の `id`(`device_records.device_id` に
+# `monitors/camera_monitor.py` が書き込む値と同じ)。
+#
+# 以前は表示名(`name`)の完全一致(`friendly_name == "駐車場"`)で判定していたが、
+# `name` は運用者がdevices.jsonで自由に付ける文字列(実際には「駐車場カメラ」)で
+# あり、`name` を変えるたびに一致しなくなって静かに「⚪ データなし」に壊れる
+# (エラーにならないので気づけない)。`id` は変更されにくいため、`id` で照合する。
 #
 # #829: 以前は「車(伊丹)」カードを car_records(action='LEAVE'/'ARRIVE')テーブルから
 # 判定していたが、このテーブルへ書き込む経路がリポジトリ内のどこにも存在せず
@@ -502,7 +488,7 @@ CAMERA_DEVICE_TYPE = "ONVIF_CAMERA"
 # 断定はできず、あくまで「駐車場での最後の動き」という情報として扱う
 # (get_camera_status と同じ理由で常に情報色(青)/グレーにし、誤って外出/在宅を
 # 断定しない)。
-PARKING_CAMERA_NAME = "駐車場"
+PARKING_CAMERA_ID = "VIGI_C540_Parking"
 
 
 def _camera_motion(df_sensor: pd.DataFrame) -> pd.DataFrame:
@@ -543,9 +529,9 @@ def get_camera_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]
 def _parking_camera_motion(df_sensor: pd.DataFrame) -> pd.DataFrame:
     """駐車場カメラの動体検知行(新しい順)。`get_parking_status`/`describe_parking`が共有する。"""
     df_cam = _camera_motion(df_sensor)
-    if df_cam.empty or "friendly_name" not in df_cam.columns:
+    if df_cam.empty or "device_id" not in df_cam.columns:
         return df_cam.iloc[0:0]
-    return df_cam[df_cam["friendly_name"] == PARKING_CAMERA_NAME]
+    return df_cam[df_cam["device_id"] == PARKING_CAMERA_ID]
 
 
 def get_parking_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
@@ -565,36 +551,6 @@ def get_parking_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str
     if diff_m < 24 * 60:
         return f"🚗 {int(diff_m / 60)}時間前に検知", "theme-blue"
     return "🚗 24時間 検知なし", "theme-gray"
-
-
-# 炊飯器が「稼働していた」とみなす消費電力(W)。
-RICE_COOKER_ON_WATTS = 500
-
-
-def _rice_cooking_rows(df_sensor: pd.DataFrame) -> pd.DataFrame:
-    """炊飯器が稼働していた記録(日付で絞らない)。
-
-    判定(`get_rice_status`, 今日ぶん)と補足表示(`describe_rice`, 前回いつ)が
-    同じ条件を共有する。
-    """
-    if "device_name" not in df_sensor.columns or "power_watts" not in df_sensor.columns:
-        return df_sensor.iloc[0:0]
-    return df_sensor[
-        (df_sensor["device_name"].astype(str).str.contains("炊飯器")) &
-        (df_sensor["power_watts"] >= RICE_COOKER_ON_WATTS)
-    ]
-
-
-def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
-    val = "🍚 炊いてない"
-    theme = "theme-red"
-
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    df_rice = _rice_cooking_rows(df_sensor)
-    if not df_rice.empty and not df_rice[df_rice["timestamp"] >= today_start].empty:
-        val = "🍚 ご飯あり"
-        theme = "theme-green"
-    return val, theme
 
 
 # === 補足表示(カードの値の下に小さく出す) ===
@@ -664,11 +620,6 @@ def describe_camera(df_sensor: pd.DataFrame, now: datetime) -> str | None:
     return at if pd.isna(name) else f"{name} {at}"
 
 
-def describe_rice(df_sensor: pd.DataFrame, now: datetime) -> str | None:
-    at = _format_moment(_latest_timestamp(_rice_cooking_rows(df_sensor)), now)
-    return None if at is None else f"前回 {at}"
-
-
 def describe_cost(monthly_cost: int, last_month_cost: int | None) -> str | None:
     """先月の同じ時点と比べる。比較対象が無い(初月・取得失敗)ときは出さない。"""
     if not last_month_cost:
@@ -720,23 +671,25 @@ def build_status_cards(
     itami_val, itami_theme = get_itami_status(df_sensor, now)
     parking_val, parking_theme = get_parking_status(df_sensor, now)
     camera_val, camera_theme = get_camera_status(df_sensor, now)
-    rice_val, rice_theme = get_rice_status(df_sensor, now)
     server_val, server_theme = get_server_status(memory)
     nas_val, nas_theme = get_nas_status_simple(nas_data)
 
     # `tab` は「このカードの詳細が載っているタブ」。軽量ページはこれを使って
     # カード自体をリンクにする(異常に気づいてから詳細を開くまでを1タップにする)。
+    # 見守りグループの4枚はすべて `tab="watch"` の同じページを指すため、`anchor` で
+    # ページ内のどの場所(セクション)に連れて行くかを分ける(#829後の見直し。
+    # 以前は`anchor`が無く、4枚のどれを押しても同じページ先頭=カメラ映像に
+    # 飛ぶだけで、実質どのカードも同じ場所にしか行けなかった)。
     return [
         StatusCard("👵 高砂 (実家)", taka_val, taka_theme, tab="watch", group="watch",
-                   sub=describe_takasago(df_sensor, now)),
+                   sub=describe_takasago(df_sensor, now), anchor="#takasago-log"),
         StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme, tab="watch", group="watch",
-                   sub=describe_itami(df_sensor, now)),
+                   sub=describe_itami(df_sensor, now), anchor="#itami-log"),
         StatusCard("🚗 駐車場", parking_val, parking_theme, tab="watch", group="watch",
-                   sub=describe_parking(df_sensor, now)),
+                   sub=describe_parking(df_sensor, now),
+                   anchor=f"?camera={PARKING_CAMERA_ID}#camera-section"),
         StatusCard("🎥 カメラ", camera_val, camera_theme, tab="watch", group="watch",
-                   sub=describe_camera(df_sensor, now)),
-        StatusCard("🍚 炊飯器", rice_val, rice_theme, tab="life", group="life",
-                   sub=describe_rice(df_sensor, now)),
+                   sub=describe_camera(df_sensor, now), anchor="#camera-section"),
         StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue", tab="life", group="life",
                    sub=describe_cost(monthly_cost, last_month_cost)),
         StatusCard("🖥️ サーバー", server_val, server_theme, tab="sys", group="sys",
