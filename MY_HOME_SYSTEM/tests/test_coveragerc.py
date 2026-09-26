@@ -20,7 +20,11 @@ Issue #754: その残り分だった `views/dashboard/*` を omit から外し�
 各 render 関数は `st` を差し替えれば Streamlit を起動せずに検証でき
 (tests/test_dashboard_*.py)、除外したままではこの領域だけカバレッジの
 ラチェットが効かなかった。import しただけで `st.set_page_config()` が走る
-`dashboard.py` のみが「実行不能」に当てはまるため残している。
+`dashboard.py` のみが「実行不能」に当てはまるため残っていた。
+
+#829: そのStreamlit版ダッシュボード(`dashboard.py`・`views/dashboard/*`)自体を
+廃止した。「実行不能」を理由にした唯一の omit エントリが無くなったため、
+omit は tests/* と __init__.py だけになった。
 """
 import configparser
 import glob
@@ -36,7 +40,6 @@ MY_HOME_SYSTEM_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ALLOWED_OMIT_ENTRIES = {
     "tests/*",
     "*/__init__.py",
-    "dashboard.py",
 }
 
 

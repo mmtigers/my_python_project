@@ -98,17 +98,15 @@ class TestRefusesWhenSystemdManagesTheServices:
         assert "GUARD_PASSED" not in out, "ガードを素通りして掃除フェーズへ進んでいる"
         assert "home_system.service" in err
 
-    def test_refuses_when_only_the_dashboard_unit_is_enabled(self, tmp_path):
-        """ダッシュボードだけでも衝突する(フルモードは streamlit も掃除・nohup 起動する)。"""
-        rc, out, err = _run(tmp_path, enabled_units=["home_dashboard.service"])
-        assert rc == 1
-        assert "GUARD_PASSED" not in out
-        assert "home_dashboard.service" in err
-
     def test_message_tells_the_correct_way_to_restart(self, tmp_path):
-        """拒否するだけでなく、正しい手順が読み取れること。"""
+        """拒否するだけでなく、正しい手順が読み取れること。
+
+        #829: ダッシュボードはStreamlit版(別ユニット home_dashboard.service)を廃止し
+        unified_server.py 自身が配信するようになったため、再起動対象は
+        home_system.service だけになった。"""
         _, _, err = _run(tmp_path, enabled_units=["home_system.service"])
-        assert "systemctl restart home_system.service home_dashboard.service" in err
+        assert "systemctl restart home_system.service" in err
+        assert "home_dashboard.service" not in err
         assert "ALLOW_MANUAL_START=1" in err
 
     @pytest.mark.parametrize("value", ["0", "true", "yes", ""])
@@ -129,7 +127,7 @@ class TestAllowsTheLegitimatePaths:
         rc, out, _ = _run(
             tmp_path,
             args=["--prepare"],
-            enabled_units=["home_system.service", "home_dashboard.service"],
+            enabled_units=["home_system.service"],
         )
         assert rc == 0
         assert "GUARD_PASSED" in out

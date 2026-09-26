@@ -231,11 +231,26 @@ async def process_meter_data(device_id: str, device_name: str, temp: float, humi
         return
     logger.debug(f"🌡️ [Analog] Meter data saved: {device_name} (Temp: {temp}℃, Hum: {humidity}%)")
 
-async def process_power_data(device_id: str, device_name: str, wattage: float, notify_settings: Dict[str, Any]) -> None:
+async def process_power_data(
+    device_id: str,
+    device_name: str,
+    wattage: float,
+    notify_settings: Dict[str, Any],
+    device_category: str = "plug",
+) -> None:
     """
     電力データの保存と通知判定
     - 前回のDB値を参照して、閾値をまたいだ場合のみ通知する (Stateful Check)
-    
+
+    `device_category`: "smart_meter"(住宅全体のスマートメーター) か "plug"(個別家電の
+    プラグ計測)かを呼び出し元が明示する。以前は device_name に "Remo" という文字列が
+    含まれるかどうかで下流(analysis_service)が推測していたが、Nature Remoアプリで
+    設定するニックネーム次第で判定が外れ、電気代集計が恒常的に0件になっていた
+    (device_nameは表示用の自由文字列であり、種別の判定に使うべきではない)。
+    呼び出し元(nature_remo_monitor.py はスマートメーターであることを既に知っている)
+    で明示させることで、この一致問題を書き込み時点で解消する。既定値 "plug" は
+    switchbot_power_monitor.py(SwitchBotプラグ)が明示せずに呼ぶための後方互換。
+
     Silence Policy:
     - INFO: 閾値を跨ぐ（ON/OFF）状態の切り替わりが発生した場合。
     - DEBUG: 平常時の電力値（アナログ値）の保存処理。
@@ -269,8 +284,8 @@ async def process_power_data(device_id: str, device_name: str, wattage: float, n
     # ロックで落ちるほうが実害が大きい)。
     save_ok = await save_log_async(
         config.SQLITE_TABLE_POWER_USAGE,
-        ["device_id", "device_name", "wattage", "timestamp"],
-        (device_id, device_name, wattage, get_now_iso())
+        ["device_id", "device_name", "wattage", "timestamp", "device_category"],
+        (device_id, device_name, wattage, get_now_iso(), device_category)
     )
     if not save_ok:
         logger.error(f"⚡ 電力データの保存に失敗しました: {device_name} (id={device_id}, {wattage}W)")

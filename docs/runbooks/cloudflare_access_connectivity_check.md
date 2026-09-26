@@ -16,10 +16,11 @@ Issue #321(2026-09-03決定)で、外部アクセス制御はアプリ層のJWT�
 (現在は上記3件)が正で、エッジ側のバイパス設定と一致している必要がある。
 
 **逆に、絶対にバイパスしてはならないパスもある**: `config.DASHBOARD_BASE_PATH`
-(既定 `/dashboard`)は、Streamlitダッシュボード(`dashboard.py`、8501番)への
-リバースプロキシである。ダッシュボードは認証機構を持たず、家族の健康記録・防犯ログの
-閲覧と `sudo systemctl restart` ボタンを備えるため、8501番自体は 127.0.0.1 束縛のままにし、
-外部からの到達をこの中継経由(= Cloudflare Accessの保護下)に一本化している。
+(既定 `/dashboard`)は、`unified_server.py`自身が`routers/dashboard_router.py`で
+直接HTMLを返すダッシュボードのパスである(**Issue #829**でStreamlit版
+(`dashboard.py`、8501番へのリバースプロキシ)は廃止された)。ダッシュボードは認証機構を
+持たず、家族の健康記録・防犯ログの閲覧とサーバー再起動ボタンを備えるため、
+外部からの到達をこのサーバー経由(= Cloudflare Accessの保護下)に一本化している。
 ここをバイパス対象に設定すると、無認証でダッシュボードが外部公開される。
 本runbookの手順4で定期的に確認すること。
 
@@ -72,9 +73,9 @@ https://<公開ドメイン>/dashboard
 
 **問題のある結果**: 認証を求められずにダッシュボードがそのまま表示される場合、
 このパスがバイパス対象に設定されている。Zero Trust のポリシーからバイパス設定を
-外すこと。応急処置としては、オリジン側で `DASHBOARD_PROXY_ENABLED=false` を
-`.env` に設定して `home_system.service` を再起動すれば中継のルート自体が消える
-(その間スマートフォンからは閲覧できなくなる)。
+外すこと。応急処置としては、オリジン側で `DASHBOARD_ENABLED=false`（**Issue #829**
+で`DASHBOARD_PROXY_ENABLED`から改名）を`.env` に設定して `home_system.service` を
+再起動すればダッシュボードのルート自体が消える(その間スマートフォンからは閲覧できなくなる)。
 
 ## 5. `allowed_webhook_paths` の各パスが実際にバイパスされていることを確認する(Issue #725)
 

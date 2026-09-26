@@ -18,11 +18,6 @@
 fastapi
 uvicorn
 pydantic
-# ダッシュボード(Streamlit)を unified_server 経由で配信するリバースプロキシで直接 import する
-# (services/dashboard_proxy_service.py): HTTP中継に httpx、WebSocket中継に websockets。
-# どちらも従来は fastapi/uvicorn の推移的依存として入っていただけだった。
-httpx
-websockets
 # FastAPI の UploadFile / Form が実行時に要求する(routers/quest_router.py の upload_image)
 python-multipart
 aiofiles
@@ -47,9 +42,10 @@ psutil
 # --- 解析・ダッシュボード ---
 pandas
 numpy
-plotly
-streamlit
 pytz
+# ダッシュボードのホーム画面アイコン生成(services/dashboard_pwa_service.py)で直接 import
+# する。以前は streamlit の推移的依存として入っていただけだった(#829でstreamlit自体は撤去)。
+Pillow
 # beautifulsoup4 は train_service.py(JR運行情報・Yahoo!路線情報のスクレイピング)
 # 専用だったため、同機能の退役にあわせて外した。
 lxml

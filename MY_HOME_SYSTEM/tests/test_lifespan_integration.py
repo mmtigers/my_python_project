@@ -79,8 +79,9 @@ class TestLifespanShutdown:
         assert all(p.terminated and p.killed for p in spawned)
 
     def test_cleanup_helpers_are_called_on_shutdown(self, lifespan_client_factory, monkeypatch):
-        """#360 の ffmpeg 停止・モーションタスクの cancel・ダッシュボード中継の
-        httpx クライアントクローズが、いずれもシャットダウンで呼ばれること。"""
+        """#360 の ffmpeg 停止・モーションタスクの cancel が、いずれもシャットダウンで
+        呼ばれること。#829: ダッシュボード中継(httpxクライアント)はStreamlit版廃止に
+        伴い撤去したため、ここでは検証しない。"""
         calls = []
 
         monkeypatch.setattr(
@@ -92,40 +93,30 @@ class TestLifespanShutdown:
             lambda: calls.append("cancel_all_tasks"),
         )
 
-        async def _fake_aclose():
-            calls.append("aclose")
-
-        monkeypatch.setattr(unified_server.dashboard_proxy_service, "aclose", _fake_aclose)
-
         with lifespan_client_factory() as (_client, _spawned):
             assert calls == []
 
-        assert calls == ["stop_all_processes", "cancel_all_tasks", "aclose"]
+        assert calls == ["stop_all_processes", "cancel_all_tasks"]
 
     def test_cleanup_helper_failure_does_not_break_shutdown(self, lifespan_client_factory, monkeypatch):
-        """ffmpeg 停止・httpx クローズの失敗はログに落として握り、残りの後始末を
-        止めないこと(片方の失敗でもう片方が漏れると孤児プロセスが残る)。"""
+        """ffmpeg 停止の失敗はログに落として握り、残りの後始末を止めないこと
+        (失敗してもモーションタスクの cancel が漏れると孤児プロセスが残る)。"""
         calls = []
 
         def _stop_boom():
             calls.append("stop_all_processes")
             raise RuntimeError("ffmpeg is unkillable")
 
-        async def _aclose_boom():
-            calls.append("aclose")
-            raise RuntimeError("client already closed")
-
         monkeypatch.setattr(unified_server.camera_service, "stop_all_processes", _stop_boom)
         monkeypatch.setattr(
             unified_server.sensor_service, "cancel_all_tasks",
             lambda: calls.append("cancel_all_tasks"),
         )
-        monkeypatch.setattr(unified_server.dashboard_proxy_service, "aclose", _aclose_boom)
 
         with lifespan_client_factory() as (_client, spawned):
             pass
 
-        assert calls == ["stop_all_processes", "cancel_all_tasks", "aclose"]
+        assert calls == ["stop_all_processes", "cancel_all_tasks"]
         assert all(p.terminated for p in spawned)
 
     def test_cleanup_still_runs_when_migration_failed(self, lifespan_client_factory, monkeypatch):

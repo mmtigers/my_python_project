@@ -4,7 +4,9 @@
 # (サマリーカードが生HTMLとして出る、固定ヘッダーが半透明で本文が透ける、先頭の行が
 # ヘッダーの下に隠れる)。既存の回帰テストはCSSの文字列や描画関数の呼び出しを見るもので、
 # 実際に描かれた結果の座標は見ていないため、「CSSは入っているのにレイアウトは崩れている」を
-# 拾えない。Streamlit を実際に起動し、Chromium のモバイルビューポートで開いて確認する。
+# 拾えない。ダッシュボード(routers/dashboard_router.py。#829でStreamlit版は廃止し
+# unified_serverが直接HTMLを返す)を実際に起動し、Chromium のモバイルビューポートで
+# 開いて確認する。
 #
 # **常に非ブロッキング**(continue-on-error: true)である。ブラウザ実行は環境要因で
 # 落ちうるため、これでPRを止めない。崩れはスクリーンショット(成果物)で確認する。
@@ -14,11 +16,9 @@ name: Dashboard Mobile E2E
 on:
   pull_request:
     paths:
-      - 'MY_HOME_SYSTEM/dashboard.py'
-      - 'MY_HOME_SYSTEM/views/dashboard/**'
       - 'MY_HOME_SYSTEM/routers/dashboard_router.py'
-      - 'MY_HOME_SYSTEM/services/dashboard_proxy_service.py'
-      # 軽量ページ(`/dashboard/m`)のHTML・CSS・自動更新スクリプトの実体
+      - 'MY_HOME_SYSTEM/services/dashboard_page_service.py'
+      - 'MY_HOME_SYSTEM/services/dashboard_pwa_service.py'
       - 'MY_HOME_SYSTEM/services/home_status_service.py'
       - 'MY_HOME_SYSTEM/tests/test_dashboard_mobile_e2e.py'
       - '.github/workflows/dashboard-mobile-e2e.yml'
@@ -39,7 +39,7 @@ jobs:
   mobile-e2e:
     name: Mobile viewport (390x844)
     runs-on: ubuntu-latest
-    # ブラウザのインストールと Streamlit の起動を含むため、pytest 本体より長めに取る
+    # ブラウザのインストールとダッシュボードサーバーの起動を含むため、pytest 本体より長めに取る
     timeout-minutes: 30
     # 判定は参考情報。ブラウザ実行の不安定さでPRを止めない。
     continue-on-error: true

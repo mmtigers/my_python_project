@@ -5,19 +5,16 @@
     - 各カードの判定ロジック(実家の動き・在宅・炊飯器・サーバー等)
     - カード1枚のHTML組み立て(XSS対策を含む。Issue #378)
     - カードのCSS
+    - 時刻の相対表記(見守りページのログ表示・システムページの鮮度表示と共有)
 
-なぜ View 層(`views/dashboard/`)から出したか:
-    判定ロジックは以前 Streamlit の View 層にあり、`unified_server.py` 側からは
-    使えなかった(`import streamlit` を持ち込むとサーバーが巻き添えになる)。
-    スマートフォン向けの軽量ページ(`/dashboard/m`)は、Streamlit を介さずに
-    同じ内容を出すため、同じ判定を2つ書くことになっていた。
-
-    このモジュールは **Streamlit を import しない**。Streamlit 側
-    (`views/dashboard/summary.py`)もサーバー側(`routers/dashboard_router.py`)も
-    ここを参照することで、「片方だけ直して食い違う」状態を防ぐ。
+#829: 以前はStreamlit版ダッシュボード(`views/dashboard/`)と、Streamlitを介さない
+軽量ページ(`/dashboard/m`。旧かんたん表示)の2つが存在し、判定ロジックが
+食い違わないようこのモジュールに1本化していた。Streamlit版は廃止し、
+`routers/dashboard_router.py` 配下のページ(この`unified_server`が直接HTMLを返す)
+だけになったが、「Streamlitに依存しないダッシュボードの正のロジック置き場」という
+このモジュールの役割自体は変わらないため、そのまま維持する。
 """
 import html
-import json
 import logging
 import threading
 import time
@@ -25,25 +22,61 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, NamedTuple
 
-import config
 import pandas as pd
+import pytz
 from core.utils import get_now_jst
 
 from services import analysis_service
 
 logger = logging.getLogger(__name__)
 
+_JST = pytz.timezone("Asia/Tokyo")
+
+
+def format_short_timestamp(value) -> str:
+    """「09/21 03:04」形式にする。読めない値は空文字を返す。"""
+    ts = pd.to_datetime(value, errors="coerce")
+    if pd.isna(ts):
+        return ""
+    return ts.strftime("%m/%d %H:%M")
+
+
+def format_relative_time(value, now: datetime | None = None) -> str:
+    """「3分前」のような相対表記にする。1週間より古い・未来の時刻は短縮表記で返す。"""
+    ts = pd.to_datetime(value, errors="coerce")
+    if pd.isna(ts):
+        return ""
+
+    now = now or get_now_jst()
+    if ts.tzinfo is None:
+        # DB由来の naive な時刻は JST として扱う(`core.utils` のJST固定方針と同じ)
+        ts = ts.tz_localize(_JST)
+
+    seconds = (now - ts).total_seconds()
+    if seconds < 0 or seconds >= 7 * 86400:
+        return format_short_timestamp(ts)
+    if seconds < 60:
+        return "たった今"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}分前"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)}時間前"
+    return f"{int(seconds // 86400)}日前"
+
 # 軽量ページ側のキャッシュTTL(秒)。Streamlit 側(`views/dashboard/common.py` の
 # DASHBOARD_CACHE_TTL_SEC)と揃えてある。センサーの書き込み間隔(5〜10分)より
 # 十分短いので表示の鮮度は実質劣化しない。
 STATUS_CACHE_TTL_SEC = 60
 
-# 軽量ページで読む行数。Streamlit 側(10,000行)より小さいのは、カードの判定に
-# 必要なのが「直近」と「今日」だけのため。
+# ダッシュボードで読むセンサー行数。カードの判定・見守りページのログ表示に
+# 必要なのが「直近」と「今日」だけのため、多くは読まない。
 MOBILE_SENSOR_ROW_LIMIT = 3000
 
-# カード1枚のCSS。Streamlit 側の CUSTOM_CSS と軽量ページの両方がこれを使う
-# (どちらかだけ直して見た目が食い違うのを防ぐ)。
+# 見守りページの防犯ログで読む行数。表には先頭50件しか出さないが、
+# 「最近の異常」を取りこぼさない程度の余裕を持たせる。
+SECURITY_LOG_ROW_LIMIT = 200
+
+# カード1枚のCSS。ホームページと各サブページ(`services/dashboard_page_service.py`)が共有する。
 STATUS_CARD_CSS = """
     /* --- ステータスカード --- */
     /* スマホでは横3枚固定だと1枚あたりが潰れて値が読めなくなるため、
@@ -152,11 +185,14 @@ QUEST_APP_PATH = "/quest"
 
 # === カードの並びとグループ ===
 # 並び順は「スマホで開いたときに上から見たい順」= 利用頻度で決めてある。
-# 見守り(留守・在宅・車・カメラ)を最初に、毎回は見ないシステム系を最後に置く。
+# 見守り(留守・在宅・駐車場・カメラ)を最初に、毎回は見ないシステム系を最後に置く。
 # グループの見出しは、9枚が1つの塊に見えて目的のカードを探しにくくなるのを防ぐ。
+#
+# #829: ファミクエ(承認待ち件数)のカードは廃止した。ダッシュボード内にファミクエの
+# 状態表示を残さず、外部リンクカードのみにするという方針変更のため
+# (詳細は routers/dashboard_router.py の新しいページ構成を参照)。
 CARD_GROUPS: tuple[tuple[str, str], ...] = (
     ("watch", "👀 見守り"),
-    ("quest", "⚔️ ファミクエ"),
     ("life", "💡 くらし"),
     ("sys", "🔧 システム"),
 )
@@ -238,8 +274,9 @@ def render_status_card_html(
 def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:
     """カードの詳細へのURLを返す(行き先が無いカードは None)。
 
-    `href` を持つカード(詳細がダッシュボードの外にあるファミクエ)はそれを、
-    そうでなければ `tab` からダッシュボードのタブへのURLを作る。
+    `href` を持つカードはそれを、そうでなければ `tab` から見守り/くらし/システムの
+    各ページへのURLを作る(#829: 以前はStreamlit版の `?tab=` クエリだったが、
+    Streamlit版廃止に伴い専用ページ(`/watch`/`/life`/`/sys`)へのパスに変えた)。
 
     `dashboard_path` は閲覧中のオリジンからのルート相対パス(例: `/dashboard/`)。
     固定URLを埋めると、LAN内のIP・Cloudflare 経由の公開ドメインのどちらか一方でしか
@@ -249,7 +286,7 @@ def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:
         return card.href
     if card.tab is None:
         return None
-    return f"{dashboard_path}?tab={card.tab}"
+    return f"{dashboard_path.rstrip('/')}/{card.tab}"
 
 
 # 「気になること」として拾うテーマ。赤(異常)を先に、黄(注意)を後に並べる。
@@ -450,30 +487,22 @@ def get_nas_status_simple(nas_data: pd.Series | None) -> tuple[str, str]:
         return "⚠️ NAS: データ異常", "theme-yellow"
 
 
-def get_quest_status(pending: dict[str, Any] | None) -> tuple[str, str]:
-    """ファミクエで承認待ちになっている申請の件数。
-
-    クエストの進捗やランキングではなく承認待ちを出すのは、これだけが
-    「見た人が今すぐ動く必要がある」情報だからで、ほかは family-quest(PWA)側で見る。
-    待たせている状態を拾ってほしいので、1件でもあれば黄色にして要約行に出す。
-    """
-    if pending is None:
-        return "⚪ 取得失敗", "theme-gray"
-    count = int(pending.get("count", 0) or 0)
-    if count == 0:
-        return "✅ なし", "theme-green"
-    return f"⏳ {count}件", "theme-yellow"
-
-
-def get_car_status(df_car: pd.DataFrame) -> tuple[str, str]:
-    if not df_car.empty and df_car.iloc[0]["action"] == "LEAVE":
-        return "🚗 外出中", "theme-yellow"
-    return "🏠 在宅", "theme-green"
-
-
 # カメラの動体検知が `device_records` に入るときの `device_type`
 # (`monitors/camera_monitor.py` が ONVIF のイベントを受けて書く)。
 CAMERA_DEVICE_TYPE = "ONVIF_CAMERA"
+
+# 駐車場カメラの表示名(`config.CAMERAS`/`monitors/camera_monitor.py`が
+# `device_records.device_name` に書き込む値と同じ)。
+#
+# #829: 以前は「車(伊丹)」カードを car_records(action='LEAVE'/'ARRIVE')テーブルから
+# 判定していたが、このテーブルへ書き込む経路がリポジトリ内のどこにも存在せず
+# (car_recordsは常に空)、恒常的に「🏠 在宅」を返し続ける死んだ機能だった。
+# 駐車場カメラは既に動体検知イベントを`device_records`へ記録しているため、
+# これを流用する。ただし動体検知は人の往来も拾うため「車が今あるかどうか」を
+# 断定はできず、あくまで「駐車場での最後の動き」という情報として扱う
+# (get_camera_status と同じ理由で常に情報色(青)/グレーにし、誤って外出/在宅を
+# 断定しない)。
+PARKING_CAMERA_NAME = "駐車場"
 
 
 def _camera_motion(df_sensor: pd.DataFrame) -> pd.DataFrame:
@@ -509,6 +538,33 @@ def get_camera_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]
     if diff_m < 24 * 60:
         return f"🎥 {int(diff_m / 60)}時間前に検知", "theme-blue"
     return "🎥 24時間 検知なし", "theme-gray"
+
+
+def _parking_camera_motion(df_sensor: pd.DataFrame) -> pd.DataFrame:
+    """駐車場カメラの動体検知行(新しい順)。`get_parking_status`/`describe_parking`が共有する。"""
+    df_cam = _camera_motion(df_sensor)
+    if df_cam.empty or "friendly_name" not in df_cam.columns:
+        return df_cam.iloc[0:0]
+    return df_cam[df_cam["friendly_name"] == PARKING_CAMERA_NAME]
+
+
+def get_parking_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
+    """駐車場カメラが最後に動きを捉えたのはいつか(`get_camera_status`と同じ考え方)。
+
+    人の往来も拾うため「在宅/外出中」を断定できない。常に情報色(青)かグレーにする。
+    """
+    df_park = _parking_camera_motion(df_sensor)
+    if df_park.empty:
+        return "⚪ データなし", "theme-gray"
+
+    diff_m = (now - df_park.iloc[0]["timestamp"]).total_seconds() / 60
+    if diff_m < 10:
+        return "🚗 いま動きあり", "theme-blue"
+    if diff_m < 60:
+        return f"🚗 {int(diff_m)}分前に検知", "theme-blue"
+    if diff_m < 24 * 60:
+        return f"🚗 {int(diff_m / 60)}時間前に検知", "theme-blue"
+    return "🚗 24時間 検知なし", "theme-gray"
 
 
 # 炊飯器が「稼働していた」とみなす消費電力(W)。
@@ -582,11 +638,18 @@ def describe_itami(df_sensor: pd.DataFrame, now: datetime) -> str | None:
     return None if at is None else f"最終検知 {at}"
 
 
-def describe_car(df_car: pd.DataFrame, now: datetime) -> str | None:
-    at = _format_moment(_latest_timestamp(df_car), now)
-    if at is None or "action" not in df_car.columns:
-        return None
-    return f"{at} に出発" if df_car.iloc[0]["action"] == "LEAVE" else f"{at} に帰宅"
+def describe_parking(df_sensor: pd.DataFrame, now: datetime) -> str | None:
+    at = _format_moment(latest_parking_motion_at(df_sensor), now)
+    return None if at is None else f"最終検知 {at}"
+
+
+def latest_parking_motion_at(df_sensor: pd.DataFrame):
+    """駐車場カメラが最後に動きを捉えた時刻(無ければ None)。
+
+    システムページ(`services/dashboard_page_service.py`)の鮮度一覧が、カード判定と
+    同じ抽出(`_parking_camera_motion`)を使うための公開ラッパー。
+    """
+    return _latest_timestamp(_parking_camera_motion(df_sensor))
 
 
 def describe_camera(df_sensor: pd.DataFrame, now: datetime) -> str | None:
@@ -599,17 +662,6 @@ def describe_camera(df_sensor: pd.DataFrame, now: datetime) -> str | None:
         return at
     name = df_cam.iloc[0]["friendly_name"]
     return at if pd.isna(name) else f"{name} {at}"
-
-
-def describe_quest(pending: dict[str, Any] | None, now: datetime) -> str | None:
-    """いちばん長く待たせている申請(誰の・いつ)。0件のときは出さない。"""
-    if not pending or not pending.get("count"):
-        return None
-    at = _format_moment(pd.to_datetime(pending.get("oldest_at"), errors="coerce"), now)
-    if at is None:
-        return None
-    name = pending.get("oldest_name")
-    return f"{name} {at} から" if name else f"{at} から"
 
 
 def describe_rice(df_sensor: pd.DataFrame, now: datetime) -> str | None:
@@ -647,50 +699,42 @@ def describe_nas(nas_data: pd.Series | None) -> str | None:
 def build_status_cards(
     now: datetime,
     df_sensor: pd.DataFrame,
-    df_car: pd.DataFrame,
     nas_data: pd.Series | None,
     memory: dict[str, float] | None,
     monthly_cost: int,
     last_month_cost: int | None = None,
     disk: dict[str, float] | None = None,
-    pending_quests: dict[str, Any] | None = None,
 ) -> list[StatusCard]:
     """渡された材料から、並べる順にカードを組み立てる(取得は行わない)。
 
     並び順は「スマホで上から見たい順」= 利用頻度で決めてある(`CARD_GROUPS`)。
-    見守り(実家・自宅・車・カメラ)→ ファミクエ → くらし → システムの順で、
+    見守り(実家・自宅・駐車場・カメラ)→ くらし → システムの順で、
     毎回は見ないシステム系が最後に来る。順番を変えるとどの位置に何があるかの
-    記憶が無効になるので、変えるときは軽量ページ・Streamlit の両方が同じ順に
-    なること(ここが唯一の定義元であること)を保ったまま変えること。
+    記憶が無効になるので、変えるときは(#829でStreamlit側は廃止済みのため)
+    ここが唯一の定義元であることを保ったまま変えること。
 
     `last_month_cost`・`disk` は補足表示(`sub`)にだけ使う。渡さなければ補足が
     出ないだけで、カードの値と色は変わらない。
     """
     taka_val, taka_theme = get_takasago_status(df_sensor, now)
     itami_val, itami_theme = get_itami_status(df_sensor, now)
-    car_val, car_theme = get_car_status(df_car)
+    parking_val, parking_theme = get_parking_status(df_sensor, now)
     camera_val, camera_theme = get_camera_status(df_sensor, now)
-    quest_val, quest_theme = get_quest_status(pending_quests)
     rice_val, rice_theme = get_rice_status(df_sensor, now)
     server_val, server_theme = get_server_status(memory)
     nas_val, nas_theme = get_nas_status_simple(nas_data)
 
     # `tab` は「このカードの詳細が載っているタブ」。軽量ページはこれを使って
     # カード自体をリンクにする(異常に気づいてから詳細を開くまでを1タップにする)。
-    # ファミクエだけは詳細がダッシュボードの外(PWA)にあるので `href` を使う。
     return [
         StatusCard("👵 高砂 (実家)", taka_val, taka_theme, tab="watch", group="watch",
                    sub=describe_takasago(df_sensor, now)),
         StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme, tab="watch", group="watch",
                    sub=describe_itami(df_sensor, now)),
-        StatusCard("🚗 車 (伊丹)", car_val, car_theme, tab="watch", group="watch",
-                   sub=describe_car(df_car, now)),
+        StatusCard("🚗 駐車場", parking_val, parking_theme, tab="watch", group="watch",
+                   sub=describe_parking(df_sensor, now)),
         StatusCard("🎥 カメラ", camera_val, camera_theme, tab="watch", group="watch",
                    sub=describe_camera(df_sensor, now)),
-        # 見出し(「⚔️ ファミクエ」)と同じ言葉をカード名にすると2行続けて同じに
-        # 見えるため、カード側は中身(何を待たせているか)を名前にする。
-        StatusCard("📝 承認待ち", quest_val, quest_theme, href=QUEST_APP_PATH, group="quest",
-                   sub=describe_quest(pending_quests, now)),
         StatusCard("🍚 炊飯器", rice_val, rice_theme, tab="life", group="life",
                    sub=describe_rice(df_sensor, now)),
         StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue", tab="life", group="life",
@@ -740,266 +784,73 @@ def clear_status_cache() -> None:
         _cache.clear()
 
 
-def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:
-    """DB・スクレイピングから材料を集めてカードを組み立て、(カード, 取得時刻)を返す。
+class DashboardMaterials(NamedTuple):
+    """ダッシュボードの各ページ(ホーム・見守り・くらし・システム)が共有する材料。
 
-    Streamlit を介さない軽量ページ(`/dashboard/m`)用。取得はすべて読み取りで、
-    いずれかが失敗しても残りのカードは表示する。
+    `get_cached_materials()` が1回のTTL(`STATUS_CACHE_TTL_SEC`)内で使い回すため、
+    同じリクエストで複数ページぶんの材料を集めても、DB・スクレイピングの回数は
+    増えない(`_cached`のキーはページに関わらず共通)。
     """
-    now = now or get_now_jst()
+    df_sensor: pd.DataFrame
+    df_security_log: pd.DataFrame
+    nas_data: pd.Series | None
+    memory: dict[str, float] | None
+    disk: dict[str, float] | None
+    monthly_cost: int
+    last_month_cost: int | None
+
+
+def get_cached_materials() -> DashboardMaterials:
+    """DB・スクレイピングから材料を集める(TTLキャッシュ付き)。取得はすべて読み取りで、
+    いずれかが失敗しても他の材料は使える(`_cached`が個別に None を返すだけ)。
+    """
     empty = pd.DataFrame()
 
     df_sensor = _cached("sensor", lambda: analysis_service.load_sensor_data(limit=MOBILE_SENSOR_ROW_LIMIT))
-    df_car = _cached("car", lambda: analysis_service.load_generic_data(config.SQLITE_TABLE_CAR))
+    df_security_log = _cached(
+        "security_log", lambda: analysis_service.load_generic_data("security_logs", limit=SECURITY_LOG_ROW_LIMIT)
+    )
     nas_data = _cached("nas", analysis_service.load_nas_status)
     memory = _cached("memory", analysis_service.get_memory_usage)
     monthly_cost = _cached("cost", analysis_service.calculate_monthly_cost_cumulative)
     last_month_cost = _cached("cost_last_month", analysis_service.calculate_last_month_cost_same_point)
     disk = _cached("disk", analysis_service.get_disk_usage)
-    pending_quests = _cached("quest", analysis_service.load_pending_quest_approvals)
+
+    return DashboardMaterials(
+        df_sensor=df_sensor if df_sensor is not None else empty,
+        df_security_log=df_security_log if df_security_log is not None else empty,
+        nas_data=nas_data,
+        memory=memory,
+        disk=disk,
+        monthly_cost=monthly_cost or 0,
+        last_month_cost=last_month_cost,
+    )
+
+
+def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:
+    """材料を集めてカードを組み立て、(カード, 取得時刻)を返す。ホームページ用。"""
+    now = now or get_now_jst()
+    materials = get_cached_materials()
 
     cards = build_status_cards(
         now,
-        df_sensor if df_sensor is not None else empty,
-        df_car if df_car is not None else empty,
-        nas_data,
-        memory,
-        monthly_cost or 0,
-        last_month_cost=last_month_cost,
-        disk=disk,
-        pending_quests=pending_quests,
+        materials.df_sensor,
+        materials.nas_data,
+        materials.memory,
+        materials.monthly_cost,
+        last_month_cost=materials.last_month_cost,
+        disk=materials.disk,
     )
     return cards, now
 
 
-# === 軽量ページのHTML ===
-# Streamlit を介さない読み取り専用ページ(`/dashboard/m`)。
-# 「スマホで見るのは結局このカードだけ」という用途に対して、Streamlit の初期化・
-# WebSocket 接続・React の読み込みを丸ごと省く。サーバーが1回のリクエストで
-# HTMLを返して終わりなので、回線が細い場所でも開く。
-# ダッシュボード本体(Streamlit)は、グラフ・ログ・メンテナンス操作を持つ
-# 「詳しく見る側」として残す。
-
-MOBILE_PAGE_TITLE = "おうちの様子"
+# === ページ組み立て共通の定数 ===
+# HTML自体の組み立ては `services/dashboard_page_service.py`(Streamlit不使用)が担う。
+# ここに置くのは、ホームページ(`routers/dashboard_router.py`)と自動更新フラグメントの
+# 両方が参照する、ページ組み立てに依存しない値だけ。
 
 # ページの自動更新間隔(秒)。表示側のキャッシュTTLと同じにしてある。
 MOBILE_PAGE_REFRESH_SEC = STATUS_CACHE_TTL_SEC
 
-_MOBILE_PAGE_BASE_CSS = """
-    /* 端末がダークモードなら下の @media 側の配色になることをブラウザに伝える
-       (スクロールバー等、こちらで指定しない部分もダーク側に揃う)。 */
-    :root { color-scheme: light dark; }
-    body {
-        margin: 0;
-        padding: 12px 12px 32px;
-        background: #ffffff;
-        color: #222;
-        font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
-    }
-    h1 { font-size: 1.25rem; margin: 0 0 2px; }
-    .meta { font-size: 0.8rem; color: #666; margin: 0 0 12px; }
-
-    /* 「気になること」の要約行。カードの並びは固定のままにして、赤・黄のカードだけを
-       名前で拾って先頭に出す(後ろのほうのカードは、異常でも埋もれていた)。
-       異常が無いときも同じ位置に1行出すので、更新のたびに下の内容が跳ねない。 */
-    .alerts {
-        margin: 0 0 10px;
-        padding: 8px 10px;
-        border-radius: 10px;
-        font-size: 0.85rem;
-        line-height: 1.5;
-    }
-    .alerts-warn { background: #fff3e0; color: #e65100; border: 1px solid #ffe0b2; }
-    .alerts-ok { background: #f1f8e9; color: #558b2f; border: 1px solid #dcedc8; }
-    .alerts a { color: inherit; font-weight: bold; }
-
-    nav { display: flex; gap: 8px; margin-top: 16px; }
-    nav a {
-        flex: 1 1 0;
-        /* iOS/Android の推奨タップターゲット(44px) */
-        min-height: 44px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 12px;
-        border: 1px solid #bbdefb;
-        background: #e3f2fd;
-        color: #1565c0;
-        font-weight: bold;
-        text-decoration: none;
-        font-size: 0.9rem;
-    }
-"""
-
-# 軽量ページだけのダークモード。
-#
-# なぜ Streamlit 側(共有の STATUS_CARD_CSS)に入れないか:
-#     カードのCSSはダッシュボード本体と共有しているが、本体には Streamlit 自身の
-#     テーマ(ハンバーガーメニューで Light を選べる)がある。OSがダークでも本体を
-#     Light に固定している場合、共有CSSへ `prefers-color-scheme` を入れると
-#     「周りは白いのにカードだけ黒い」状態になる。夜にスマホで見るのは軽量ページ
-#     なので、ここだけをダークに対応させ、本体は Streamlit のテーマに任せる。
-# 差し替えが失敗したことが分かるようにするCSS(下記スクリプトが付け外しする)。
-_MOBILE_PAGE_STALE_CSS = """
-    #status.stale { opacity: 0.55; }
-    #status.stale::after {
-        content: "⚠️ 更新できていません(表示は最後に取得できた内容です)";
-        display: block;
-        margin-top: 8px;
-        font-size: 0.8rem;
-        color: #b71c1c;
-    }
-"""
-
-# 自動更新。ページ全体を読み込み直さず、カードのブロックだけを差し替える。
-#
-# 以前は `<meta http-equiv="refresh">` による全ページ再読み込みだった。60秒ごとに
-# 画面が白く瞬き、スクロール位置も先頭へ戻るため、下のカードを見ている最中に
-# 読めなくなることがあった。JS が動く環境ではこちらを使い、動かない環境のために
-# `<noscript>` の中に従来の meta refresh を残す(どちらか一方だけが働く)。
-#
-# `__STATUS_URL__` と `__REFRESH_MS__` は `render_mobile_status_page_html` が
-# 差し込む(URLは `json.dumps` を通すのでJS文字列として安全)。
-_MOBILE_PAGE_REFRESH_JS = """
-(function () {
-    var url = __STATUS_URL__;
-    var intervalMs = __REFRESH_MS__;
-    var inFlight = false;
-
-    function apply(html) {
-        var section = document.getElementById("status");
-        if (!section) { return; }
-        section.outerHTML = html;
-    }
-
-    function update() {
-        if (inFlight || document.hidden) { return; }
-        inFlight = true;
-        // Cloudflare Access の内側にあるため Cookie を送る必要がある。
-        fetch(url, { credentials: "same-origin", cache: "no-store" })
-            .then(function (res) {
-                if (!res.ok) { throw new Error("status " + res.status); }
-                return res.text();
-            })
-            .then(function (html) { apply(html); })
-            .catch(function () {
-                // 取れなかったときは古い表示を消さずに残し、古いことだけを示す
-                // (圏外・サーバー再起動の最中に画面が空になると、かえって困る)。
-                var section = document.getElementById("status");
-                if (section) { section.classList.add("stale"); }
-            })
-            .then(function () { inFlight = false; });
-    }
-
-    setInterval(update, intervalMs);
-    // 画面を消している間は更新しないぶん、戻ってきたら即座に取り直す。
-    document.addEventListener("visibilitychange", function () {
-        if (!document.hidden) { update(); }
-    });
-})();
-"""
-
-_MOBILE_PAGE_DARK_CSS = """
-    @media (prefers-color-scheme: dark) {
-        body { background: #121212; color: #e8e8e8; }
-        .meta { color: #9e9e9e; }
-        .status-title { color: #cfcfcf; }
-        .alerts-warn { background: #3a2a14; color: #ffb74d; border-color: #5c4322; }
-        .alerts-ok { background: #1e2a17; color: #aed581; border-color: #33482a; }
-        .theme-green { background-color: #1b3a24; color: #a5d6a7; border-color: #2e5c39; }
-        .theme-yellow { background-color: #3a3420; color: #ffe082; border-color: #5c5227; }
-        .theme-red { background-color: #3d1f22; color: #ef9a9a; border-color: #6b2f35; }
-        .theme-blue { background-color: #16304a; color: #90caf9; border-color: #24507a; }
-        .theme-gray { background-color: #262626; color: #bdbdbd; border-color: #3a3a3a; }
-        nav a { background: #16304a; color: #90caf9; border-color: #24507a; }
-        #status.stale::after { color: #ef9a9a; }
-    }
-"""
-
-
 # 自動更新で差し替える範囲を囲む要素のid。
 STATUS_SECTION_ID = "status"
-
-
-def render_status_section_html(
-    cards,
-    fetched_at: datetime,
-    *,
-    dashboard_path: str | None = None,
-    refresh_sec: int = MOBILE_PAGE_REFRESH_SEC,
-) -> str:
-    """取得時刻・要約行・カードのグリッドをまとめた1ブロック。
-
-    自動更新でここだけを差し替えられるよう、`id` を付けて切り出してある。
-    """
-    return (
-        f'<div id="{STATUS_SECTION_ID}">'
-        f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
-        f"・{int(refresh_sec)}秒ごとに自動更新</p>"
-        f"{render_alerts_html(cards, dashboard_path=dashboard_path)}"
-        f"{render_status_grid_html(cards, dashboard_path=dashboard_path)}"
-        "</div>"
-    )
-
-
-def render_mobile_status_page_html(
-    cards,
-    fetched_at: datetime,
-    *,
-    manifest_path: str,
-    icon_path: str,
-    dashboard_path: str,
-    quest_path: str,
-    status_path: str | None = None,
-    refresh_sec: int = MOBILE_PAGE_REFRESH_SEC,
-) -> str:
-    """軽量ページのHTML全体を組み立てる。
-
-    パス類を引数で受けるのは、このモジュールを配信層(ルーター・中継)から
-    独立させておくため(テストもここだけで完結する)。
-
-    `status_path` はカードのブロックだけを返すURL。渡すと自動更新が
-    「そこだけ差し替える」方式になり、渡さないと従来どおりページ全体を
-    読み込み直す。
-    """
-    if status_path is None:
-        # JS を使わない場合は従来どおり全体を再読み込みする。
-        refresh_head = f'<meta http-equiv="refresh" content="{int(refresh_sec)}">'
-        refresh_script = ""
-    else:
-        # JS が動かない環境だけが meta refresh を見る(二重に更新されない)。
-        refresh_head = f'<noscript><meta http-equiv="refresh" content="{int(refresh_sec)}"></noscript>'
-        refresh_script = (
-            "<script>"
-            + _MOBILE_PAGE_REFRESH_JS
-            .replace("__STATUS_URL__", json.dumps(status_path))
-            .replace("__REFRESH_MS__", str(int(refresh_sec) * 1000))
-            + "</script>"
-        )
-
-    return (
-        "<!DOCTYPE html>"
-        '<html lang="ja"><head>'
-        '<meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f"{refresh_head}"
-        f"<title>{html.escape(MOBILE_PAGE_TITLE)}</title>"
-        # マニフェストの取得は既定で認証情報を送らない。このパスは Cloudflare Access の
-        # 内側にあるため `use-credentials` が要る(`dashboard_proxy_service` と同じ理由)。
-        f'<link rel="manifest" href="{html.escape(manifest_path)}" crossorigin="use-credentials">'
-        f'<link rel="apple-touch-icon" href="{html.escape(icon_path)}">'
-        '<meta name="apple-mobile-web-app-capable" content="yes">'
-        '<meta name="mobile-web-app-capable" content="yes">'
-        '<meta name="theme-color" content="#0d47a1">'
-        f"<style>{_MOBILE_PAGE_BASE_CSS}{STATUS_CARD_CSS}"
-        f"{_MOBILE_PAGE_STALE_CSS}{_MOBILE_PAGE_DARK_CSS}</style>"
-        "</head><body>"
-        f"<h1>{html.escape(MOBILE_PAGE_TITLE)}</h1>"
-        f"{render_status_section_html(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec)}"
-        "<nav>"
-        f'<a href="{html.escape(dashboard_path)}">📊 詳しく見る</a>'
-        f'<a href="{html.escape(quest_path)}">⚔️ ファミクエ</a>'
-        "</nav>"
-        f"{refresh_script}"
-        "</body></html>"
-    )

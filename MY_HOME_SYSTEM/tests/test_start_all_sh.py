@@ -51,7 +51,7 @@ class TestStartAllShCleanupTargets:
         assert wait_loop_idx < force_kill_idx
 
     def test_all_cleanup_targets_are_force_killed_not_only_unified_server(self):
-        """H-9: unified_serverだけでなく、scheduler_boot/camera_monitor/streamlitも
+        """H-9: unified_serverだけでなく、scheduler_boot/camera_monitorも
         生き残っていれば強制終了(-9)の対象になること(孤児化の再発防止)。
         force-kill段階も同じ CLEANUP_TARGETS 配列をループする実装になっているため、
         force-killセクション内で配列がループされていることを確認する。"""
@@ -63,11 +63,11 @@ class TestStartAllShCleanupTargets:
     def test_cleanup_targets_cover_all_four_known_processes(self):
         targets = _cleanup_targets()
         # #360: scheduler 配下の監視スクリプトと HLS 用 ffmpeg も停止対象に含める
+        # #829: streamlit(Streamlit版ダッシュボード)は廃止したため停止対象から除いた
         assert set(targets) == {
             "unified_server.py",
             "camera_monitor.py",
             "scheduler_boot.py",
-            "streamlit run",
             # Issue #738 (AUDIT-008): routine_deadline_job.py を TASKS に追加したため停止対象にも追加
             (
                 "python.*monitors/(switchbot_power_monitor|nature_remo_monitor|server_watchdog"
@@ -234,9 +234,12 @@ class TestStartAllShGitHooksRegistration:
 
 class TestStartAllShPrepareMode:
     """Issue #646: systemd(home_system.service, Type=simple)の ExecStartPre から呼ばれる
-    `--prepare` モード。Phase 0〜3(前処理)だけを行い、サーバー本体(unified_server.py)と
-    ダッシュボード(streamlit)は起動しない(前者は systemd の ExecStart、後者は
-    home_dashboard.service が起動する)。"""
+    `--prepare` モード。Phase 0〜3(前処理)だけを行い、サーバー本体(unified_server.py)は
+    起動しない(systemd の ExecStart が起動する)。
+
+    #829: ダッシュボードはStreamlit版(別プロセス・別ユニット home_dashboard.service)を
+    廃止し、unified_server.py 自身が配信するようになったため、この経路での
+    個別の起動・掃除は無くなった。"""
 
     def test_prepare_flag_is_recognized(self):
         script = _read_script()
@@ -253,15 +256,6 @@ class TestStartAllShPrepareMode:
         exit_block = script[prepare_exit_idx: server_launch_idx]
         assert "exit 0" in exit_block
 
-    def test_prepare_mode_excludes_streamlit_from_cleanup_targets(self):
-        """ダッシュボードは home_dashboard.service が管理するため、--prepare では
-        streamlit を pkill 対象から外す(systemd 側が予期しない停止と扱うのを避ける)。
-        それ以外(unified_server/子プロセス/ffmpeg)は引き続き掃除する。"""
-        script = _read_script()
-        filter_block = script[script.index('if [ "$PREPARE_ONLY" = true ]; then'): script.index("# まずは優しく停止")]
-        assert '"$target" != "streamlit run"' in filter_block
-        assert 'CLEANUP_TARGETS=("${filtered_targets[@]}")' in filter_block
-
     def test_systemd_unit_uses_prepare_mode_and_restarts_on_failure(self):
         """home_system.service は --prepare を ExecStartPre に、unified_server.py を ExecStart に置き、
         Type=simple + Restart=on-failure で自動復旧すること(oneshot + nohup/disown からの移行)。"""
@@ -274,14 +268,11 @@ class TestStartAllShPrepareMode:
         assert any(line.startswith("ExecStart=") and line.endswith("unified_server.py") for line in unit)
         assert not any(line.startswith("RemainAfterExit") for line in unit)
 
-    def test_dashboard_has_its_own_systemd_unit_bound_to_localhost(self):
+    def test_no_separate_dashboard_systemd_unit_remains(self):
+        """#829: ダッシュボードはunified_server.py自身が配信するため、
+        Streamlit版の専用ユニット(home_dashboard.service)は撤去済みであること。"""
         unit_path = os.path.join(os.path.dirname(__file__), "..", "deploy", "systemd", "home_dashboard.service")
-        assert os.path.isfile(unit_path), "home_dashboard.service がリポジトリに無い"
-        with open(unit_path, "r", encoding="utf-8") as f:
-            unit = f.read()
-        assert "streamlit run dashboard.py" in unit
-        assert "--server.address 127.0.0.1" in unit
-        assert "Restart=on-failure" in unit
+        assert not os.path.isfile(unit_path), "home_dashboard.service が復活している"
 
 
 class TestStartAllShQuestMasterSyncFreshnessCheck:

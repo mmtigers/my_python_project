@@ -68,7 +68,10 @@ class TestGetAnalysisData:
                 "('自炊: カレー', datetime('now')), ('外食: マック', datetime('now')), "
                 "('自炊: うどん', datetime('now'))"
             )
-            cur.execute("INSERT INTO car_records (action, timestamp) VALUES ('LEAVE', datetime('now'))")
+            cur.execute(
+                "INSERT INTO device_records (device_name, device_type, movement_state, timestamp) "
+                "VALUES ('駐車場', 'ONVIF_CAMERA', 'ON', datetime('now'))"
+            )
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, wattage, timestamp) VALUES "
                 "('d1', 500, datetime('now'))"
@@ -150,7 +153,7 @@ class TestGenerateTextSection:
             "elec_bill": 0, "car_count": 0, "sick_count": 2,
         }
         text = report.generate_text_section("test", data)
-        assert "車利用: なし" in text
+        assert "駐車場の動き: なし" in text
         assert "不調が2回" in text
 
     def test_zero_total_meals_does_not_divide_by_zero(self):

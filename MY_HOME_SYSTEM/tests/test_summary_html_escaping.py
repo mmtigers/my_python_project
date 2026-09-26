@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM/tests/test_summary_html_escaping.py
 """
-views/dashboard/common.py の render_status_card_html が title/value を
+services/home_status_service.py の render_status_card_html が title/value を
 HTMLエスケープすること(Issue #378)、および意図的なHTML断片を渡す
 呼び出し元だけが value_is_html=True でエスケープをスキップできることの回帰テスト。
 """
@@ -9,7 +9,7 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from views.dashboard.common import render_status_card_html
+from services.home_status_service import render_status_card_html
 
 XSS_PAYLOAD = "<img src=x onerror=alert(1)>"
 

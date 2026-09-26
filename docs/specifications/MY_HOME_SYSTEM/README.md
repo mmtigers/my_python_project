@@ -1,17 +1,20 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全95件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全98件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
 | 仕様書 | 概要 |
 | --- | --- |
 | [unified_server.md](./unified_server.md) | FastAPIサーバーの起動・設定を行う統合エントリーポイント。ルートディレクトリ解決、CORS設定、IP検証、各種ルーターの統合を行う。 |
-| [system_router.md](./system_router.md) | 手動バックアップをトリガーするPOSTエンドポイントを提供するFastAPIルーター。 |
+| [system_router.md](./system_router.md) | 手動バックアップ・サービス再起動をトリガーするPOSTエンドポイントを提供するFastAPIルーター。 |
+| [system_maintenance_service.md](./system_maintenance_service.md) | システムページ(かんたん表示)の「サービス再起動」操作(`sudo systemctl restart home_system`)を担うサービス（Issue #829で`log_tab.py`から分離）。 |
 | [webhook_router.md](./webhook_router.md) | 外部システム（LINE Bot・SwitchBot等）からのWebhookリクエストを受け取り、適切なハンドラ・サービスへルーティングする。 |
 | [camera_router.md](./camera_router.md) | カメラのライブ配信（HLS）・録画セグメントの一覧取得や配信APIを提供する（`camera_service.py`に処理を委譲）。 |
-| [dashboard_router.md](./dashboard_router.md) | Streamlitダッシュボードを`config.DASHBOARD_BASE_PATH`（既定`/dashboard`）配下で配信するルーター。中継処理は`dashboard_proxy_service.py`へ委譲する。 |
-| [dashboard_proxy_service.md](./dashboard_proxy_service.md) | localhost束縛のStreamlitダッシュボード(8501)へHTTPとWebSocketの双方を中継するリバースプロキシ。スマートフォンからの到達をCloudflare Access配下の8000番経由に一本化するための実装。 |
+| [dashboard_router.md](./dashboard_router.md) | ダッシュボード(かんたん表示)を`config.DASHBOARD_BASE_PATH`（既定`/dashboard`）配下でHTMLとして直接配信するルーター（ホーム/見守り/くらし/システムの4ページ）。Issue #829でStreamlit版の詳細表示・逆プロキシ構成を廃止した。 |
+| [dashboard_page_service.md](./dashboard_page_service.md) | ダッシュボード(かんたん表示)のホーム/見守り/くらし/システム各ページのHTML組み立てを担うモジュール（Issue #829で新設）。 |
+| [dashboard_pwa_service.md](./dashboard_pwa_service.md) | ダッシュボードをスマートフォンのホーム画面に追加するためのPWAマニフェスト・アイコン生成（Issue #829で`dashboard_proxy_service.py`から分離）。 |
+| [dashboard_proxy_service.md](./dashboard_proxy_service.md) | **廃止(Issue #829)**: localhost束縛のStreamlitダッシュボード(8501)へHTTPとWebSocketの双方を中継していたリバースプロキシ。Streamlit版ダッシュボード廃止に伴い撤去され、マニフェスト・アイコン生成部分のみ[dashboard_pwa_service.md](./dashboard_pwa_service.md)へ引き継がれた。 |
 
 ## B. ハードウェア・IoT制御モジュール
 
@@ -102,7 +105,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [config.md](./config.md) | システム全体の環境変数、定数、ディレクトリパスの定義と初期化を行う。 |
 | [daily_timelapse_job.md](./daily_timelapse_job.md) | カメラ録画から特定日時の動画チャンクを検索し、動き検知に基づくタイムラプス動画を生成してDiscordへ通知・アップロードする日次バッチ。 |
 | [discord.md](./discord.md) | Discord Webhook への POST を集約する低レベルユーティリティ。2000字上限の分割・429/5xx のリトライ・Webhook URL のマスクを担う(Issue #661)。 |
-| [dashboard.md](./dashboard.md) | Streamlit製ダッシュボードアプリケーションのエントリーポイント。センサー等の各種データを4つのタブ（ホーム/見守り/くらし/システム）で表示する。 |
+| [dashboard.md](./dashboard.md) | **廃止(Issue #829)**: Streamlit製ダッシュボードアプリケーションのエントリーポイント。センサー等の各種データを4つのタブ（ホーム/見守り/くらし/システム）で表示していた。詳細表示・表示モード切替UIの廃止に伴いソースごと削除され、後継は[dashboard_router.md](./dashboard_router.md)/[dashboard_page_service.md](./dashboard_page_service.md)。 |
 | [database.md](./database.md) | SQLiteデータベースへの接続、クエリ実行、データの書き込みを管理するユーティリティ機能を提供する。 |
 | [init_unified_db.md](./init_unified_db.md) | SQLiteデータベースの初期化とスキーマ整合性検証を行うスクリプト。テーブル・インデックス作成、マイグレーション適用を行う。 |
 | [jp_holidays.md](./jp_holidays.md) | 日本の国民の祝日(振替休日・国民の休日を含む)をローカル計算で判定し、ファミクエ上の「休日」(土日 + 祝日 + `config.EXTRA_HOLIDAY_DATES`)を返す共通モジュール。すごろく・クエストの曜日判定・YouTubeの日次上限が共有する。 |
@@ -118,13 +121,13 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [state_file.md](./state_file.md) | 監視スクリプトの状態ファイル(JSON / 1行テキスト)を flock + tmp + os.replace で原子的に読み書きする共通ヘルパー(Issue #661)。 |
 | [utils.md](./utils.md) | システム全体で共通して使用されるユーティリティ関数群（タイムゾーン処理、指数バックオフによるリトライ機能等）を提供する。 |
 | [migrations.md](./migrations.md) | `migrations/`配下の`*.sql`ファイルを順に適用し、適用済みバージョンを`schema_migrations`テーブルで管理する軽量マイグレーションランナー。 |
-| [dashboard_common.md](./dashboard_common.md) | `views/dashboard`配下の各モジュールから共通利用されるCSS（スマホ幅のメディアクエリを含む）、キャッシュ付きローダ、グラフ・表・折りたたみの描画ヘルパー、`safe_section`を提供するモジュール（同名の`common.py`Facadeとはファイル名衝突のため別名で管理）。 |
+| [dashboard_common.md](./dashboard_common.md) | **廃止(Issue #829)**: `views/dashboard`配下の各モジュールから共通利用されるCSS（スマホ幅のメディアクエリを含む）、キャッシュ付きローダ、グラフ・表・折りたたみの描画ヘルパー、`safe_section`を提供していたモジュール。Streamlit版ダッシュボード廃止に伴いソースごと削除された。 |
 | [quest_tab.md](./quest_tab.md) | **廃止**: Streamlitダッシュボードの「Family Quest」タブ。同じ内容をスマホ最適化済みのPWA `family-quest`(`/quest`)が持つ二重管理だったため、スマホ対応の再設計でソースごと撤去された。仕様書は廃止noticeつきで履歴として残している。 |
-| [log_tab.md](./log_tab.md) | Streamlitダッシュボードのセンサーログ分析と、「🔧 システム」タブ配下（リソース状況・NAS状態・サーバーログ・メンテナンス操作）を描画するモジュール。 |
-| [misc_tab.md](./misc_tab.md) | Streamlitダッシュボードの「👀 見守り」タブのカメラ関連（ギャラリー・防犯ログ）を描画するモジュール。電車遅延・駐輪場の描画も持っていたが、機能ごと退役した。 |
-| [health_tab.md](./health_tab.md) | Streamlitダッシュボードの「健康管理」タブ。子供の体調・排便・食事のデータフレームを表形式で表示する。 |
-| [sensor_tab.md](./sensor_tab.md) | Streamlitダッシュボードの「電力・環境」「気温詳細」「高砂実家」タブを描画するモジュール。 |
-| [summary.md](./summary.md) | Streamlitダッシュボード「🏠 ホーム」タブのステータスカードを描画するモジュール（判定そのものは`home_status_service.md`へ移動し、材料を集めて描くだけになった）。 |
+| [log_tab.md](./log_tab.md) | **廃止(Issue #829)**: Streamlitダッシュボードのセンサーログ分析と、「🔧 システム」タブ配下（リソース状況・NAS状態・サーバーログ・メンテナンス操作）を描画していたモジュール。Streamlit版廃止に伴いソースごと削除され、メンテナンス操作の再起動処理は[system_maintenance_service.md](./system_maintenance_service.md)へ引き継がれた。 |
+| [misc_tab.md](./misc_tab.md) | **廃止(Issue #829)**: Streamlitダッシュボードの「👀 見守り」タブのカメラ関連（ギャラリー・防犯ログ）を描画していたモジュール。Streamlit版廃止に伴いソースごと削除され、同等の機能は[dashboard_page_service.md](./dashboard_page_service.md)の見守りページへ引き継がれた。 |
+| [health_tab.md](./health_tab.md) | **廃止(Issue #829)**: Streamlitダッシュボードの「健康管理」タブ。子供の体調・排便・食事のデータフレームを表形式で表示していた。ダッシュボードの表示モード刷新に伴い画面ごと廃止され、データ収集自体(LINE Bot経由)は継続している。 |
+| [sensor_tab.md](./sensor_tab.md) | **廃止(Issue #829)**: Streamlitダッシュボードの「電力・環境」「気温詳細」「高砂実家」タブを描画していたモジュール。Streamlit版廃止に伴いソースごと削除された。 |
+| [summary.md](./summary.md) | **廃止(Issue #829)**: Streamlitダッシュボード「🏠 ホーム」タブのステータスカードを描画していたモジュール。Streamlit版廃止に伴いソースごと削除され、後継は[dashboard_page_service.md](./dashboard_page_service.md)のホームページ。 |
 
 ## 廃止済み仕様書一覧
 

@@ -1,13 +1,14 @@
 # MY_HOME_SYSTEM/tests/test_mobile_status_page.py
-"""軽量ページ `/dashboard/m` と、その土台である `services/home_status_service.py` のテスト。
+"""ダッシュボードのホームページ(`/dashboard`)と、その土台である
+`services/home_status_service.py` / `services/dashboard_page_service.py` のテスト。
 
-このページは「スマホで見るのは結局ステータスカードだけ」という用途に対して、
-Streamlit の初期化・WebSocket接続・Reactの読み込みを丸ごと省くためのもの。
-サーバーが1回のリクエストでHTMLを返して終わる。
-
-同時に、判定ロジックを1箇所に集めた("カードの内容がダッシュボード本体と
-食い違わない")ことを固定する。2つの画面が同じ内容を別々に計算し始めると、
-どちらかを直した時にもう片方が古いままになる。
+#829: 以前はStreamlit版の「詳細表示」(`dashboard.py`)と、Streamlitを介さない
+「かんたん表示」(`/dashboard/m`。ステータスカードのみの単一ページ)が別々に存在した。
+詳細表示・表示モード切替UIを廃止し、かんたん表示を唯一のダッシュボードとする方針変更に
+伴い、`unified_server`自身がホーム/見守り/くらし/システムの4ページをHTMLで返す構成に
+なった。カードの判定ロジックは`home_status_service.py`に一本化されている
+("2つの画面が同じ内容を別々に計算し始めると、どちらかを直した時にもう片方が
+古いままになる"という以前からの方針は、ページが増えても変わらない)。
 """
 import os
 import sys
@@ -23,17 +24,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
 from routers import dashboard_router
-from services import home_status_service
+from services import dashboard_page_service, home_status_service
 
 NOW = datetime.fromisoformat("2026-09-19T12:00:00+09:00")
 
 # サマリーに並ぶカードの枚数。`home_status_service.build_status_cards` の
 # 戻り値と対になっているので、カードを増減させるときは一緒に直す。
-EXPECTED_CARD_COUNT = 9
-
-_VIEWS_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "views", "dashboard"
-)
+EXPECTED_CARD_COUNT = 8
 
 
 @pytest.fixture(autouse=True)
@@ -55,7 +52,6 @@ def _stub_loaders(**overrides):
         "load_sensor_data": pd.DataFrame(),
         "load_generic_data": pd.DataFrame(),
         "load_nas_status": None,
-        "load_pending_quest_approvals": {"count": 0, "oldest_at": None, "oldest_name": None},
         "get_memory_usage": {"percent": 42.0},
         "calculate_monthly_cost_cumulative": 1234,
         "calculate_last_month_cost_same_point": 1000,
@@ -68,19 +64,19 @@ def _stub_loaders(**overrides):
     ]
 
 
-class TestMobileStatusPage:
+class TestDashboardHomePage:
     def _get(self, **overrides):
         patches = _stub_loaders(**overrides)
         for p in patches:
             p.start()
         try:
             with _client() as client:
-                return client.get(f"{config.DASHBOARD_BASE_PATH}/m")
+                return client.get(f"{config.DASHBOARD_BASE_PATH}/")
         finally:
             for p in patches:
                 p.stop()
 
-    def test_page_renders_all_status_cards_without_streamlit(self):
+    def test_page_renders_all_status_cards(self):
         res = self._get()
 
         assert res.status_code == 200
@@ -91,25 +87,20 @@ class TestMobileStatusPage:
     def test_page_refreshes_itself(self):
         """置きっぱなしでも古い値を見せ続けないこと。"""
         res = self._get()
-        assert f'http-equiv="refresh" content="{home_status_service.MOBILE_PAGE_REFRESH_SEC}"' in res.text
+        assert f'var intervalMs = {home_status_service.MOBILE_PAGE_REFRESH_SEC * 1000};' in res.text
 
-    def test_page_links_back_to_the_full_dashboard_and_quest(self):
+    def test_page_links_to_the_three_sub_pages_and_external_links(self):
         res = self._get()
-        assert f'href="{config.DASHBOARD_BASE_PATH}/"' in res.text
+        assert f'href="{config.DASHBOARD_BASE_PATH}/watch"' in res.text
+        assert f'href="{config.DASHBOARD_BASE_PATH}/life"' in res.text
+        assert f'href="{config.DASHBOARD_BASE_PATH}/sys"' in res.text
         assert 'href="/quest"' in res.text
+        assert f'href="{config.ASA_NOTE_URL}"' in res.text
 
     def test_page_can_be_added_to_the_home_screen(self):
         res = self._get()
-        assert f'href="{config.DASHBOARD_BASE_PATH}/m/app.webmanifest"' in res.text
+        assert f'href="{config.DASHBOARD_BASE_PATH}/app.webmanifest"' in res.text
         assert 'crossorigin="use-credentials"' in res.text
-
-    def test_its_manifest_opens_the_light_page_not_the_full_one(self):
-        """追加した画面と違うものが開くと戸惑うため、start_url を分けてある。"""
-        with _client() as client:
-            manifest = client.get(f"{config.DASHBOARD_BASE_PATH}/m/app.webmanifest").json()
-
-        assert manifest["start_url"] == f"{config.DASHBOARD_BASE_PATH}/m"
-        assert manifest["display"] == "standalone"
 
     def test_a_failing_loader_does_not_take_down_the_page(self):
         """1枚のカードの取得失敗でページ全体を落とさないこと。"""
@@ -119,7 +110,7 @@ class TestMobileStatusPage:
         try:
             with patch.object(home_status_service.analysis_service, "get_memory_usage",
                               side_effect=RuntimeError("psutil failed")), _client() as client:
-                res = client.get(f"{config.DASHBOARD_BASE_PATH}/m")
+                res = client.get(f"{config.DASHBOARD_BASE_PATH}/")
         finally:
             for p in patches:
                 p.stop()
@@ -128,6 +119,127 @@ class TestMobileStatusPage:
         assert res.text.count('class="status-card') == EXPECTED_CARD_COUNT
         # 取れなかったものは値を偽らずに「取得失敗」と出す
         assert "取得失敗" in res.text
+
+
+class TestHomeScreenInstall:
+    def test_manifest_and_icon_are_served(self):
+        with _client() as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}/app.webmanifest")
+            assert res.status_code == 200
+            manifest = res.json()
+            assert manifest["start_url"] == f"{config.DASHBOARD_BASE_PATH}/"
+
+            icon = client.get(f"{config.DASHBOARD_BASE_PATH}/icon-180.png")
+            assert icon.status_code == 200
+            assert icon.headers["content-type"] == "image/png"
+
+    def test_an_unsupported_icon_size_is_rejected(self):
+        with _client() as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}/icon-999.png")
+            assert res.status_code == 404
+
+
+class TestDashboardSnapshot:
+    """見守りページのスナップショット画像1枚を返すエンドポイント(パストラバーサル対策込み)。"""
+
+    def test_existing_snapshot_is_served(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "ASSETS_DIR", str(tmp_path / "assets"))
+        snap_dir = tmp_path / "assets" / "snapshots"
+        snap_dir.mkdir(parents=True)
+        (snap_dir / "photo.jpg").write_bytes(b"fake-jpeg")
+        with _client() as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}/snapshot/photo.jpg")
+        assert res.status_code == 200
+        assert res.headers["content-type"] == "image/jpeg"
+
+    def test_missing_snapshot_returns_404(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "ASSETS_DIR", str(tmp_path / "assets"))
+        with _client() as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}/snapshot/missing.jpg")
+        assert res.status_code == 404
+
+    def test_path_traversal_is_rejected(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "ASSETS_DIR", str(tmp_path / "assets"))
+        (tmp_path / "assets").mkdir(parents=True)
+        (tmp_path / "assets" / "secret.txt").write_text("x")
+        with _client() as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}/snapshot/..%2Fsecret.txt")
+        assert res.status_code == 404
+
+
+class TestLegacyUrlRedirects:
+    """#829でStreamlit版のURL体系(`?tab=`)・旧「かんたん表示」(`/dashboard/m`)を
+    廃止したが、スマートフォンのホーム画面に古いURLを追加している可能性があるため、
+    どちらも新しいページへリダイレクトする。"""
+
+    def test_old_mobile_path_redirects_to_the_home_page(self):
+        with _client() as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}/m", follow_redirects=False)
+
+        assert res.status_code == 301
+        assert res.headers["location"] == f"{config.DASHBOARD_BASE_PATH}/"
+
+    @pytest.mark.parametrize("tab,expected_suffix", [
+        ("watch", "/watch"), ("life", "/life"), ("sys", "/sys"), ("home", ""),
+    ])
+    def test_old_tab_query_param_redirects_to_the_matching_page(self, tab, expected_suffix):
+        with _client() as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}?tab={tab}", follow_redirects=False)
+
+        assert res.status_code == 302
+        assert res.headers["location"] == f"{config.DASHBOARD_BASE_PATH}{expected_suffix}"
+
+    def test_an_unknown_tab_value_redirects_home(self):
+        with _client() as client:
+            res = client.get(f"{config.DASHBOARD_BASE_PATH}?tab=nonexistent", follow_redirects=False)
+
+        assert res.status_code == 302
+        assert res.headers["location"] == config.DASHBOARD_BASE_PATH
+
+
+class TestSubPages:
+    """👀見守り・💡くらし・🔧システムの3ページ(項目1)。"""
+
+    def _get(self, path, **overrides):
+        patches = _stub_loaders(**overrides)
+        for p in patches:
+            p.start()
+        try:
+            with _client() as client:
+                return client.get(f"{config.DASHBOARD_BASE_PATH}/{path}")
+        finally:
+            for p in patches:
+                p.stop()
+
+    @pytest.mark.parametrize("path", ["watch", "life", "sys"])
+    def test_each_page_has_a_back_to_home_link(self, path):
+        res = self._get(path)
+        assert res.status_code == 200
+        assert f'href="{config.DASHBOARD_BASE_PATH}/"' in res.text
+        assert "ホームへ戻る" in res.text
+
+    def test_watch_page_shows_camera_selector_gallery_and_logs(self):
+        res = self._get("watch")
+        assert "カメラの映像" in res.text
+        assert "最近の写真" in res.text
+        assert "防犯ログ" in res.text
+        assert "高砂実家のセンサーログ" in res.text
+
+    def test_life_page_shows_the_life_group_cards_only(self):
+        res = self._get("life")
+        assert "🍚 炊飯器" in res.text
+        assert "💰 今月の電気代" in res.text
+        assert "👵 高砂 (実家)" not in res.text
+
+    def test_sys_page_shows_overall_summary_and_maintenance_actions(self):
+        res = self._get("sys")
+        assert "すべて正常" in res.text or "確認が必要です" in res.text
+        assert "システム再起動" in res.text
+        assert "今すぐバックアップ" in res.text
+
+    def test_sys_page_restart_button_is_disabled_until_confirmed(self):
+        res = self._get("sys")
+        assert 'id="restartBtn" disabled' in res.text
 
 
 class TestStatusCacheOnTheServerSide:
@@ -141,8 +253,26 @@ class TestStatusCacheOnTheServerSide:
             with patch.object(home_status_service.analysis_service, "load_sensor_data",
                               return_value=pd.DataFrame()) as mock_load, \
                  _client() as client:
-                client.get(f"{config.DASHBOARD_BASE_PATH}/m")
-                client.get(f"{config.DASHBOARD_BASE_PATH}/m")
+                client.get(f"{config.DASHBOARD_BASE_PATH}/")
+                client.get(f"{config.DASHBOARD_BASE_PATH}/")
+        finally:
+            for p in patches:
+                p.stop()
+
+        mock_load.assert_called_once()
+
+    def test_sub_pages_share_the_same_cache_as_the_home_page(self):
+        """見守り/くらし/システムページを開いても、DB読み取り回数が増えないこと。"""
+        patches = _stub_loaders()
+        for p in patches:
+            p.start()
+        try:
+            with patch.object(home_status_service.analysis_service, "load_sensor_data",
+                              return_value=pd.DataFrame()) as mock_load, \
+                 _client() as client:
+                client.get(f"{config.DASHBOARD_BASE_PATH}/")
+                client.get(f"{config.DASHBOARD_BASE_PATH}/watch")
+                client.get(f"{config.DASHBOARD_BASE_PATH}/sys")
         finally:
             for p in patches:
                 p.stop()
@@ -158,64 +288,34 @@ class TestStatusCacheOnTheServerSide:
 
         assert failing.call_count == 2
 
-    def test_ttl_matches_the_streamlit_side(self):
-        from views.dashboard import common as view_common
-
-        assert home_status_service.STATUS_CACHE_TTL_SEC == view_common.DASHBOARD_CACHE_TTL_SEC
-
 
 class TestOneSourceOfTruth:
     def test_the_service_does_not_depend_on_streamlit(self):
-        """`unified_server.py` から使うため、Streamlit を持ち込まないこと。
-
-        (docstring 中の言及と区別するため、import 文そのものを見る)
-        """
+        """`unified_server.py` から使うため、Streamlit を持ち込まないこと。"""
         import ast
         import inspect
 
-        tree = ast.parse(inspect.getsource(home_status_service))
-        imported = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported.update(alias.name.split(".")[0] for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imported.add(node.module.split(".")[0])
+        for module in (home_status_service, dashboard_page_service):
+            tree = ast.parse(inspect.getsource(module))
+            imported = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported.update(alias.name.split(".")[0] for alias in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    imported.add(node.module.split(".")[0])
 
-        assert "streamlit" not in imported
-
-    def test_the_streamlit_view_no_longer_decides_card_contents(self):
-        """判定を View 側へ書き戻すと、軽量ページと内容が食い違う。"""
-        with open(os.path.join(_VIEWS_DIR, "summary.py"), encoding="utf-8") as f:
-            source = f.read()
-
-        for judgement in ("theme-green", "theme-red", "炊飯器", "高砂"):
-            assert judgement not in source, f"summary.py に判定({judgement})が戻っている"
-
-    def test_both_screens_use_the_same_card_builder(self):
-        from views.dashboard import summary
-
-        with open(os.path.join(_VIEWS_DIR, "summary.py"), encoding="utf-8") as f:
-            source = f.read()
-
-        assert "home_status_service.build_status_cards" in source
-        assert summary.home_status_service is home_status_service
-
-    def test_card_css_is_shared_with_the_streamlit_page(self):
-        from views.dashboard import common as view_common
-
-        assert home_status_service.STATUS_CARD_CSS in view_common.CUSTOM_CSS
+            assert "streamlit" not in imported, module.__name__
 
 
 class TestMobilePageHtmlSafety:
     def test_card_titles_and_values_are_escaped(self):
         """Issue #378 と同じ理由。DB・スクレイピング由来の文字列が混ざりうる。"""
         cards = [home_status_service.StatusCard("<script>alert(1)</script>", "<img src=x>", "theme-gray")]
-        page = home_status_service.render_mobile_status_page_html(
+        page = dashboard_page_service.render_home_page(
             cards, NOW,
-            manifest_path="/dashboard/m/app.webmanifest",
-            icon_path="/dashboard/icon-180.png",
-            dashboard_path="/dashboard/",
-            quest_path="/quest",
+            dashboard_path="/dashboard/", status_path="/dashboard/status",
+            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
+            refresh_sec=60,
         )
 
         assert "<script>alert(1)</script>" not in page
@@ -225,92 +325,28 @@ class TestMobilePageHtmlSafety:
         """`value_is_html=True` を指定した呼び出し元だけがHTML断片を埋め込めること。"""
         cards = [home_status_service.StatusCard("🔧 テスト", "<b>3</b>台", "theme-green",
                                                 value_is_html=True)]
-        page = home_status_service.render_mobile_status_page_html(
+        page = dashboard_page_service.render_home_page(
             cards, NOW,
-            manifest_path="/m.webmanifest", icon_path="/i.png",
-            dashboard_path="/dashboard/", quest_path="/quest",
+            dashboard_path="/dashboard/", status_path="/dashboard/status",
+            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
+            refresh_sec=60,
         )
 
         assert "<b>3</b>台" in page
 
     def test_links_are_large_enough_to_tap(self):
-        page = home_status_service.render_mobile_status_page_html(
+        page = dashboard_page_service.render_home_page(
             [], NOW,
-            manifest_path="/m.webmanifest", icon_path="/i.png",
-            dashboard_path="/dashboard/", quest_path="/quest",
+            dashboard_path="/dashboard/", status_path="/dashboard/status",
+            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
+            refresh_sec=60,
         )
 
         assert "min-height: 44px" in page
 
 
 class TestCardsLinkToTheirDetail:
-    """A: 異常に気づいてから詳細を開くまでを1タップにする。
-
-    以前の軽量ページはカードを出して行き止まりで、詳細を見るには
-    「📊 詳しく見る」からダッシュボード本体を開き、そこからタブを探し直す
-    必要があった。カード自体を該当タブ(`?tab=...`)へのリンクにする。
-    """
-
-    def _page(self, **overrides):
-        patches = _stub_loaders(**overrides)
-        for p in patches:
-            p.start()
-        try:
-            with _client() as client:
-                return client.get(f"{config.DASHBOARD_BASE_PATH}/m").text
-        finally:
-            for p in patches:
-                p.stop()
-
-    def test_every_card_links_to_a_tab_that_exists(self):
-        import re
-
-        page = self._page()
-
-        hrefs = re.findall(r'<a class="status-card [^"]*" href="([^"]+)"', page)
-        assert len(hrefs) == EXPECTED_CARD_COUNT, "すべてのカードがリンクになっていること"
-        for href in hrefs:
-            if href == home_status_service.QUEST_APP_PATH:
-                # ファミクエだけは詳細がダッシュボードの外(PWA)にある。
-                continue
-            assert href.startswith(f"{config.DASHBOARD_BASE_PATH}/?tab=")
-            tab_key = href.rsplit("=", 1)[1]
-            assert tab_key in home_status_service.DASHBOARD_TAB_KEYS, f"存在しないタブ: {tab_key}"
-
-    def test_cards_point_at_the_tab_that_actually_shows_them(self):
-        """リンク先が「そのカードの詳細が載っているタブ」であること。"""
-        cards, _ = self._collect()
-        by_title = {card.title: card.tab for card in cards}
-
-        assert by_title["👵 高砂 (実家)"] == "watch"
-        assert by_title["🎥 カメラ"] == "watch"
-        assert by_title["🍚 炊飯器"] == "life"
-        assert by_title["💰 今月の電気代"] == "life"
-        assert by_title["🗄️ NAS"] == "sys"
-
-    def test_the_page_and_the_card_agree_on_where_the_quest_app_is(self):
-        """軽量ページ下部のリンクとカードのリンク先が食い違わないこと。
-
-        以前は `dashboard_router` / `dashboard.py` / `home_status_service` の
-        3箇所に `"/quest"` が直書きされており、片方だけ直すとずれる状態だった。
-        """
-        from routers import dashboard_router
-
-        assert dashboard_router._QUEST_APP_PATH is home_status_service.QUEST_APP_PATH
-
-        page = self._page()
-        assert page.count(f'href="{home_status_service.QUEST_APP_PATH}"') == 2, (
-            "カードのリンクと下部のナビの2箇所でファミクエを指していること"
-        )
-
-    def test_the_quest_card_links_to_the_pwa_not_a_tab(self):
-        """ファミクエの詳細はダッシュボードではなく family-quest(PWA)側にある。"""
-        cards, _ = self._collect()
-        quest = next(card for card in cards if card.title == "📝 承認待ち")
-
-        assert quest.tab is None
-        assert quest.href == home_status_service.QUEST_APP_PATH
-        assert home_status_service.card_detail_href(quest, "/dashboard/") == "/quest"
+    """A: 異常に気づいてから詳細を開くまでを1タップにする。"""
 
     def _collect(self):
         patches = _stub_loaders()
@@ -322,47 +358,41 @@ class TestCardsLinkToTheirDetail:
             for p in patches:
                 p.stop()
 
-    def test_the_streamlit_grid_keeps_plain_cards(self):
-        """Streamlit 側はリンクにしない。
+    def test_every_card_links_to_a_page_that_exists(self):
+        page, _ = self._collect()
+        html_out = home_status_service.render_status_grid_html(page, dashboard_path="/dashboard/")
 
-        Streamlit でリンクを踏むとページ全体が再読み込みになり(セッションが
-        作り直され数秒かかる)、同じ移動を「詳しく見る」ボタン(再実行だけで
-        切り替わる)が既に担っているため。
-        """
+        import re
+        hrefs = re.findall(r'<a class="status-card [^"]*" href="([^"]+)"', html_out)
+        assert len(hrefs) == EXPECTED_CARD_COUNT, "すべてのカードがリンクになっていること"
+        for href in hrefs:
+            assert href.startswith("/dashboard/")
+            page_key = href.rsplit("/", 1)[1]
+            assert page_key in ("watch", "life", "sys")
+
+    def test_cards_point_at_the_page_that_actually_shows_them(self):
+        """リンク先が「そのカードの詳細が載っているページ」であること。"""
         cards, _ = self._collect()
+        by_title = {card.title: card.tab for card in cards}
 
-        grid = home_status_service.render_status_grid_html(cards)
-
-        assert "<a class=\"status-card" not in grid
-        assert grid.count('<div class="status-card') == EXPECTED_CARD_COUNT
+        assert by_title["👵 高砂 (実家)"] == "watch"
+        assert by_title["🎥 カメラ"] == "watch"
+        assert by_title["🍚 炊飯器"] == "life"
+        assert by_title["💰 今月の電気代"] == "life"
+        assert by_title["🗄️ NAS"] == "sys"
 
     def test_the_link_is_relative_to_the_viewing_origin(self):
         """固定URLを埋めるとLAN内のIPと公開ドメインのどちらかで繋がらなくなる。"""
         card = home_status_service.StatusCard("t", "v", "theme-gray", tab="watch")
 
-        assert home_status_service.card_detail_href(card, "/dashboard/") == "/dashboard/?tab=watch"
+        assert home_status_service.card_detail_href(card, "/dashboard/") == "/dashboard/watch"
         assert home_status_service.card_detail_href(
             home_status_service.StatusCard("t", "v", "theme-gray"), "/dashboard/"
         ) is None
 
-    def test_tab_keys_have_a_single_definition(self):
-        """`dashboard.py` 側にタブのキーを書き戻すと、リンク先とタブがずれる。"""
-        dashboard_py = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dashboard.py"
-        )
-        with open(dashboard_py, encoding="utf-8") as f:
-            source = f.read()
-
-        assert "home_status_service.DASHBOARD_TABS" in source
-        assert '("home", ' not in source, "dashboard.py にタブ定義が再び書かれている"
-
 
 class TestAlertSummary:
-    """B: 赤・黄のカードだけを名前で拾って先頭に出す。
-
-    カードの並びは固定のまま。後ろのほうにあるカードは、異常が出ていても
-    画面をスクロールしないと気づけなかった。
-    """
+    """B: 赤・黄のカードだけを名前で拾って先頭に出す。"""
 
     def test_red_comes_before_yellow(self):
         cards = [
@@ -394,12 +424,12 @@ class TestAlertSummary:
         assert "気になることはありません" in ok
         assert "alerts" in ok
 
-    def test_alerts_link_to_the_detail_tab(self):
+    def test_alerts_link_to_the_detail_page(self):
         cards = [home_status_service.StatusCard("🍚 炊飯器", "🍚 炊いてない", "theme-red", tab="life")]
 
         html_out = home_status_service.render_alerts_html(cards, dashboard_path="/dashboard/")
 
-        assert 'href="/dashboard/?tab=life"' in html_out
+        assert 'href="/dashboard/life"' in html_out
         assert "炊飯器" in html_out
 
     def test_alert_titles_are_escaped(self):
@@ -410,48 +440,27 @@ class TestAlertSummary:
         assert "<script>" not in html_out
         assert "&lt;script&gt;" in html_out
 
-    def test_the_streamlit_page_uses_the_same_rule(self):
-        """拾う条件を View 側に書き直すと、2つの画面で「気になること」が食い違う。"""
-        with open(os.path.join(_VIEWS_DIR, "summary.py"), encoding="utf-8") as f:
-            source = f.read()
-
-        assert "home_status_service.summarize_alerts" in source
-
 
 class TestDarkMode:
-    """B: 夜にスマホで見ると白背景が眩しい。軽量ページだけダークに対応する。"""
+    """B: 夜にスマホで見ると白背景が眩しい。"""
 
     def _page(self):
-        return home_status_service.render_mobile_status_page_html(
+        return dashboard_page_service.render_home_page(
             [], NOW,
-            manifest_path="/m.webmanifest", icon_path="/i.png",
-            dashboard_path="/dashboard/", quest_path="/quest",
+            dashboard_path="/dashboard/", status_path="/dashboard/status",
+            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
+            refresh_sec=60,
         )
 
-    def test_the_light_page_follows_the_device_setting(self):
+    def test_the_page_follows_the_device_setting(self):
         page = self._page()
 
         assert "prefers-color-scheme: dark" in page
         assert "color-scheme: light dark" in page
 
-    def test_the_streamlit_page_keeps_its_own_theme(self):
-        """本体は Streamlit のテーマ(Light固定もできる)に任せる。
-
-        共有CSSへ入れると、本体を Light に固定している端末で
-        「周りは白いのにカードだけ黒い」状態になる。
-        """
-        from views.dashboard import common as view_common
-
-        assert "prefers-color-scheme" not in home_status_service.STATUS_CARD_CSS
-        assert "prefers-color-scheme" not in view_common.CUSTOM_CSS
-
 
 class TestPartialRefresh:
-    """C: 自動更新でページ全体を読み込み直さない。
-
-    以前は `<meta http-equiv="refresh">` で60秒ごとに全体を再読み込みしており、
-    画面が白く瞬き、スクロール位置も先頭へ戻っていた。
-    """
+    """C: 自動更新でページ全体を読み込み直さない。"""
 
     def _get(self, path):
         patches = _stub_loaders()
@@ -465,7 +474,7 @@ class TestPartialRefresh:
                 p.stop()
 
     def test_the_cards_can_be_fetched_on_their_own(self):
-        res = self._get(f"{config.DASHBOARD_BASE_PATH}/m/status")
+        res = self._get(f"{config.DASHBOARD_BASE_PATH}/status")
 
         assert res.status_code == 200
         assert res.text.count('class="status-card') == EXPECTED_CARD_COUNT
@@ -476,61 +485,35 @@ class TestPartialRefresh:
 
     def test_the_fragment_replaces_itself(self):
         """差し替え後も同じidが残らないと、2回目以降の更新先を見失う。"""
-        res = self._get(f"{config.DASHBOARD_BASE_PATH}/m/status")
+        res = self._get(f"{config.DASHBOARD_BASE_PATH}/status")
 
         assert res.text.count(f'id="{home_status_service.STATUS_SECTION_ID}"') == 1
 
     def test_the_fragment_carries_the_fetch_time_and_the_alert_line(self):
         """時刻と要約も一緒に差し替わらないと、値だけ新しく見出しが古くなる。"""
-        res = self._get(f"{config.DASHBOARD_BASE_PATH}/m/status")
+        res = self._get(f"{config.DASHBOARD_BASE_PATH}/status")
 
         assert "時点" in res.text
         assert "alerts" in res.text
 
-    def test_the_fragment_is_routed_before_the_streamlit_proxy(self):
-        """総当たりの中継ルートより後ろに置くと、Streamlit へ流れて404になる。"""
-        res = self._get(f"{config.DASHBOARD_BASE_PATH}/m/status")
-
-        assert res.status_code == 200, "中継側が拾っている可能性がある"
-
-    def test_the_page_only_falls_back_to_a_full_reload_without_js(self):
-        res = self._get(f"{config.DASHBOARD_BASE_PATH}/m")
-
-        # meta refresh は noscript の中だけ(JS環境で二重に更新されない)
-        assert "<noscript><meta http-equiv=\"refresh\"" in res.text
-        assert res.text.count('http-equiv="refresh"') == 1
-        assert f'"{config.DASHBOARD_BASE_PATH}/m/status"' in res.text
-
-    def test_the_old_full_page_reload_is_still_available(self):
-        """`status_path` を渡さない呼び出し方(JSを使わない経路)を壊さない。"""
-        page = home_status_service.render_mobile_status_page_html(
-            [], NOW,
-            manifest_path="/m.webmanifest", icon_path="/i.png",
-            dashboard_path="/dashboard/", quest_path="/quest",
-        )
-
-        assert "<noscript>" not in page
-        assert f'http-equiv="refresh" content="{home_status_service.MOBILE_PAGE_REFRESH_SEC}"' in page
-        assert "<script>" not in page
-
     def test_the_script_sends_credentials(self):
         """Cloudflare Access の内側にあるため、Cookie を送らないと弾かれる。"""
-        page = home_status_service.render_mobile_status_page_html(
+        page = dashboard_page_service.render_home_page(
             [], NOW,
-            manifest_path="/m.webmanifest", icon_path="/i.png",
-            dashboard_path="/dashboard/", quest_path="/quest",
-            status_path="/dashboard/m/status",
+            dashboard_path="/dashboard/", status_path="/dashboard/status",
+            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
+            refresh_sec=60,
         )
 
         assert 'credentials: "same-origin"' in page
 
     def test_a_failed_update_keeps_the_last_values(self):
         """圏外・サーバー再起動の最中に画面が空になると、かえって困る。"""
-        page = home_status_service.render_mobile_status_page_html(
+        page = dashboard_page_service.render_home_page(
             [], NOW,
-            manifest_path="/m.webmanifest", icon_path="/i.png",
-            dashboard_path="/dashboard/", quest_path="/quest",
-            status_path="/dashboard/m/status",
+            dashboard_path="/dashboard/", status_path="/dashboard/status",
+            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
+            refresh_sec=60,
         )
 
         assert 'classList.add("stale")' in page
@@ -546,9 +529,9 @@ class TestPartialRefresh:
                 home_status_service.analysis_service, "load_sensor_data",
                 return_value=pd.DataFrame(),
             ) as load, _client() as client:
-                client.get(f"{config.DASHBOARD_BASE_PATH}/m")
-                client.get(f"{config.DASHBOARD_BASE_PATH}/m/status")
-                client.get(f"{config.DASHBOARD_BASE_PATH}/m/status")
+                client.get(f"{config.DASHBOARD_BASE_PATH}/")
+                client.get(f"{config.DASHBOARD_BASE_PATH}/status")
+                client.get(f"{config.DASHBOARD_BASE_PATH}/status")
         finally:
             for p in patches:
                 p.stop()
@@ -557,11 +540,7 @@ class TestPartialRefresh:
 
 
 class TestSupportingValues:
-    """D: 「いまの値」だけでは判断できないカードに、比べる相手を添える。
-
-    「⚡ 12,345 円」が高いのか安いのか、「🍚 炊いてない」が今日だけなのかが
-    分からなかった。
-    """
+    """D: 「いまの値」だけでは判断できないカードに、比べる相手を添える。"""
 
     def test_the_card_shows_the_supporting_line(self):
         card = home_status_service.StatusCard("💰 今月の電気代", "⚡ 1,234 円", "theme-blue",
@@ -633,14 +612,16 @@ class TestSupportingValues:
         assert value == "🍚 炊いてない", "今日の判定は変わらない"
         assert home_status_service.describe_rice(df, now) == "前回 昨日 18:40"
 
-    def test_the_car_says_when_it_left(self):
+    def test_the_parking_camera_says_when_it_last_detected_motion(self):
         df = pd.DataFrame({
-            "action": ["LEAVE"],
+            "device_type": [home_status_service.CAMERA_DEVICE_TYPE],
+            "movement_state": ["ON"],
+            "friendly_name": [home_status_service.PARKING_CAMERA_NAME],
             "timestamp": [pd.Timestamp("2026-09-19T08:15:00+09:00")],
         })
         now = datetime.fromisoformat("2026-09-19T12:00:00+09:00")
 
-        assert home_status_service.describe_car(df, now) == "08:15 に出発"
+        assert home_status_service.describe_parking(df, now) == "最終検知 08:15"
 
     def test_the_cost_card_compares_with_last_month(self):
         assert home_status_service.describe_cost(12345, 11000) == "先月同日 11,000円 (+1,345)"
@@ -656,21 +637,20 @@ class TestSupportingValues:
         empty = pd.DataFrame()
         cards = home_status_service.build_status_cards(
             datetime.fromisoformat("2026-09-19T12:00:00+09:00"),
-            empty, empty, None,
+            empty, None,
             {"percent": 42.0}, 1234,
-            pending_quests={"count": 0},
         )
 
         assert len(cards) == EXPECTED_CARD_COUNT
         assert all(card.sub is None for card in cards)
 
-    def test_the_light_page_shows_them_too(self):
+    def test_the_page_shows_them_too(self):
         patches = _stub_loaders()
         for p in patches:
             p.start()
         try:
             with _client() as client:
-                page = client.get(f"{config.DASHBOARD_BASE_PATH}/m").text
+                page = client.get(f"{config.DASHBOARD_BASE_PATH}/").text
         finally:
             for p in patches:
                 p.stop()
@@ -681,12 +661,7 @@ class TestSupportingValues:
 
 
 class TestCardColoursSurviveLinking:
-    """カードをリンクにしたときに、状態を表すテーマ色が消えないこと。
-
-    `a.status-card { color: inherit }` を入れると、要素+クラス(0,1,1)が
-    `.theme-green`(0,1,0)に勝ってしまい、値の文字色が本文色に戻る
-    (背景色だけで状態を示すことになり、配色の意図が半分失われる)。
-    """
+    """カードをリンクにしたときに、状態を表すテーマ色が消えないこと。"""
 
     def test_the_link_style_does_not_override_the_theme_colour(self):
         assert "color: inherit" not in home_status_service.STATUS_CARD_CSS

@@ -78,7 +78,7 @@ sqlite3 /mnt/nas/home_system/db_backups/home_system_<timestamp>.db "SELECT COUNT
 稼働中のファイルを差し替えると WAL と本体が食い違うため、必ず止めてから作業する。
 
 ```bash
-sudo systemctl stop home_system.service home_dashboard.service
+sudo systemctl stop home_system.service
 pgrep -af "unified_server.py|scheduler_boot.py|camera_monitor.py"   # 何も出ないこと
 ```
 
@@ -110,7 +110,7 @@ cp /mnt/nas/home_system/db_backups/devices_<timestamp>.json devices.json
 ## 5. 起動と検証
 
 ```bash
-sudo systemctl start home_system.service home_dashboard.service
+sudo systemctl start home_system.service
 sleep 20
 systemctl status home_system.service                # active (running)、Main PID が unified_server.py
 curl -s http://127.0.0.1:8000/health                  # {"status":"healthy"}

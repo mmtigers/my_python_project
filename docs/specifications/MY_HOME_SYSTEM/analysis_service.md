@@ -43,7 +43,7 @@
 | `config` | ファイル内に定義がないため、`SQLITE_DB_PATH`や`MONITOR_DEVICES`などの具体的な値や構造が不明。 | `config.SQLITE_DB_PATH` (行番号: 44 / 抜粋: "config.SQLITE_DB_PATH") |
 | `core.logger.setup_logging` | ファイル内に実装がないため、ログの出力先やフォーマットが不明。 | `setup_logging("analysis_service")` (行番号: 18 / 抜粋: "setup_logging("analysis_service")") |
 | データベースの各種テーブル | スキーマ定義が提供されていないため、カラムの型や制約、インデックスの有無が不明。 | `SELECT * FROM {table_name}` (行番号: 155, 164, 349 / 抜粋: "SELECT * FROM {table_name}") |
-| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 537 / 抜粋: "home_system.service") |
+| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 514 / 抜粋: "home_system.service") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -185,27 +185,9 @@
 
 
 
-### `load_pending_quest_approvals`
+### `load_pending_quest_approvals`（廃止・Issue #829）
 
-* **役割**: ファミクエで承認待ちのクエスト申請の件数と、いちばん古い1件（誰の・いつの申請か）を返す。ダッシュボードのトップに出す「📝 承認待ち」カード用。クエストの残数やランキングではなく承認待ちを出すのは、これだけが「見た人が今すぐ動く必要がある」情報だからで、ほかは family-quest(PWA)側で見る。
-* 根拠: `def load_pending_quest_approvals() -> dict[str, Any] | None:` (行番号: 190 / 抜粋: "def load_pending_quest_approvals() -> dict[str, Any] | None:")
-
-
-* **引数/リクエスト**: なし
-* 根拠: `def load_pending_quest_approvals() -> dict[str, Any] | None:` (行番号: 190 / 抜粋: "def load_pending_quest_approvals() -> dict[str, Any] | None:")
-
-
-* **戻り値/レスポンス**: `{"count": int, "oldest_at": str | None, "oldest_name": str | None}`。承認待ちが0件のときは `count=0` の辞書、**テーブルが存在しない場合・読み取りに失敗した場合は `None`** を返す。ここで `count=0` を返してしまうと、カードが「✅ なし」と緑で出て、実際には承認待ちが溜まっていても気づけない（JR運行情報のカードが「取得不可を平常運転と偽らない」ために区別していたのと同じ失敗モード）。呼び出し側の `get_quest_status` は `None` を「⚪ 取得失敗」として出す。
-* 根拠: `empty: dict[str, Any] = {"count": 0, "oldest_at": None, "oldest_name": None}` (行番号: 209 / 抜粋: "empty: dict[str, Any] = {\"count\": 0, \"oldest_at\": None, \"oldest_name\": None}")
-
-
-* **副作用**: 読み取り専用接続（`get_ro_db_connection`）でのDB読み取りのみ。`quest_users` の残高には触れない（CLAUDE.md「単一プロセス前提」の並行制御に影響しない）。集計は `quest_history` の `status` インデックス（`idx_quest_history_status_completed`）に乗る軽いクエリ2本だけ。
-* 根拠: `cur.execute("SELECT COUNT(*) FROM quest_history WHERE status = 'pending'")` (行番号: 217 / 抜粋: "cur.execute(\"SELECT COUNT(*) FROM quest_history WHERE status = 'pending'\")")
-
-
-* **エラーハンドリング**: `except Exception` でエラーログを出し、`None` を返す（1枚のカードの取得失敗でページ全体を落とさないが、成功と取り違えもしない）。
-* 根拠: `logger.error(f"Pending Quest Approvals Load Error: {e}")` (行番号: 238 / 抜粋: "logger.error(f\"Pending Quest Approvals Load Error: {e}\")")
-
+以前はファミクエの承認待ちクエスト申請の件数といちばん古い1件を返す関数で、ダッシュボードの「📝 承認待ち」カード用に使われていた。ダッシュボードリニューアル(Issue #829)でFamily Questをダッシュボード内表示から外部リンクカードのみに変更する決定（承認待ちカードは不要）に伴い、唯一の呼び出し元（`home_status_service.get_quest_status`）ごと削除され、この関数自体もリポジトリから削除された。
 
 ### `load_generic_data`
 
@@ -214,7 +196,7 @@
 
 
 * **引数/リクエスト**: `table_name` (`str`): テーブル名。`limit` (`int`, デフォルト `500`): 取得件数。
-* 根拠: `table_name: str, limit: int = 500` (行番号: 242 / 抜粋: "table_name: str, limit: int = 500")
+* 根拠: `table_name: str, limit: int = 500` (行番号: 190 / 抜粋: "table_name: str, limit: int = 500")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (取得したデータのデータフレーム)
@@ -222,22 +204,22 @@
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 245 / 抜粋: "return load_data_from_db(query)")
+* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 193 / 抜粋: "return load_data_from_db(query)")
 
 
 * **エラーハンドリング**: 内部で呼び出される `load_data_from_db` に依存。
-* 根拠: `return load_data_from_db(query)` (行番号: 245 / 抜粋: "return load_data_from_db(query)")
+* 根拠: `return load_data_from_db(query)` (行番号: 193 / 抜粋: "return load_data_from_db(query)")
 
 
 
-### `load_sensor_data`
+### `_classify_power_device_type` / `load_sensor_data`
 
-* **役割**: `device_records`、SwitchBotのログ、電力使用量の3つのテーブルからデータを取得・統合・ソートし、表示名を適用する。電力使用量(`config.SQLITE_TABLE_POWER_USAGE`)由来の行は、`device_name`に`"Remo"`を含めば`device_type="Nature Remo E Lite"`(スマートメーター全体消費)、含まなければ`device_type="Plug"`(個別家電)として分類される。**（Issue #169で解消）** 以前はこの分類直後に`.replace("Plug", "Nature Remo E Lite")`が実行されており、"Plug"に分類された全行が無条件で"Nature Remo E Lite"へ上書きされていた(`str.contains("Plug")`で個別家電を絞り込む`views/dashboard/sensor_tab.py`側のフィルタが構造的に一致しなくなり、個別家電グラフが常に空になる・全プラグの消費電力がスマートメーター全体消費のグラフへ混入する不具合)。この一括置換は削除され、"Remo"を含むかどうかの判定結果がそのまま最終的な`device_type`になる。
-* 根拠: `load_sensor_data` (行番号: 315 / 抜粋: "df_merged = pd.concat(df_list, ignore_index=True)")、`device_type`分類 (行番号: 202〜205 / 抜粋: "df_power[\"device_type\"] = df_power[\"device_name\"].apply(\n            lambda x: \"Nature Remo E Lite\" if x and \"Remo\" in str(x) else \"Plug\"\n        )")
+* **役割**: `load_sensor_data`は`device_records`、SwitchBotのログ、電力使用量の3つのテーブルからデータを取得・統合・ソートし、表示名を適用する。電力使用量(`config.SQLITE_TABLE_POWER_USAGE`)由来の行の`device_type`分類は`_classify_power_device_type`が担う。**（Issue #169で解消）** 以前はこの分類直後に`.replace("Plug", "Nature Remo E Lite")`が実行されており、"Plug"に分類された全行が無条件で"Nature Remo E Lite"へ上書きされていた(個別家電グラフが常に空になる・全プラグの消費電力がスマートメーター全体消費のグラフへ混入する不具合)。この一括置換は既に削除済み。**（Issue #829で修正）** `_classify_power_device_type`は、書き込み時点(`nature_remo_monitor.py`/`switchbot_power_monitor.py`)で明示される`device_category`列(`migrations/0020`で追加)を最優先で使い(`"smart_meter"`→`"Nature Remo E Lite"`、`"plug"`→`"Plug"`)、`device_category`が`None`(マイグレーション適用前の古い行)の場合だけ、従来の`device_name`に`"Remo"`を含むかという文字列判定にフォールバックする。以前は`device_name`文字列判定だけに頼っており、Nature Remoアプリでユーザーが設定するニックネームに`"Remo"`が含まれない環境では、スマートメーターの電力データが常に`"Plug"`に誤分類され、電気代集計(`_calculate_cost_between`)が恒常的に0円になる不具合があった。
+* 根拠: `def _classify_power_device_type(row) -> str:` (行番号: 195〜209)、`category = row.get("device_category")` (行番号: 255)、`load_sensor_data`内での呼び出し (行番号: 298〜306 / 抜粋: "df_power[\"device_type\"] = df_power.apply(_classify_power_device_type, axis=1)\n        df_power = df_power.drop(columns=[\"device_category\"])")
 
 
 * **引数/リクエスト**: `limit` (`int`, デフォルト `5000`): 取得件数の上限。
-* 根拠: `limit: int = 5000` (行番号: 247 / 抜粋: "def load_sensor_data(limit: int = 5000)")
+* 根拠: `limit: int = 5000` (行番号: 212 / 抜粋: "def load_sensor_data(limit: int = 5000)")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (統合されたセンサーデータのデータフレーム)
@@ -245,22 +227,22 @@
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db` を複数回呼び出し。 (行番号: 260 / 抜粋: "df_legacy = load_data_from_db(query_legacy)")
+* 根拠: `load_data_from_db` を複数回呼び出し。 (行番号: 225 / 抜粋: "df_legacy = load_data_from_db(query_legacy)")
 
 
 * **エラーハンドリング**: 内部で呼び出される `load_data_from_db` に依存。
-* 根拠: 該当関数内に独自の `try-except` なし (行番号: 247 / 抜粋: "def load_sensor_data(")
+* 根拠: 該当関数内に独自の `try-except` なし (行番号: 212 / 抜粋: "def load_sensor_data(")
 
 
 
 ### `calculate_monthly_cost_cumulative`
 
-* **役割**: 当月の電力使用量データから、今月の電気代概算（kwh × `ELECTRICITY_YEN_PER_KWH`=31）を算出する。**（補足表示の追加で変更）** 集計本体は期間を引数に取る `_calculate_cost_between(start, end)` へ切り出され、本関数は「月初（`_start_of_month`）から今まで」を渡す薄いラッパーになった。新テーブルが空なら旧テーブルへフォールバックする挙動は変わらない。**（Issue #170で修正）** `power_usage`テーブルにはスマートメーター(全体消費)と各プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)が同居しているため、新テーブル側のSELECTに`device_name LIKE '%Remo%'`条件を追加し(`load_sensor_data`の`"Remo"`部分一致による分類基準と同一)、スマートメーターの行のみを対象にするよう修正した(以前は全デバイスを無差別に合算しておりプラグ分が二重計上されていた)。また、`time_diff`(経過時間)の算出を`device_id`ごとにグループ化してから`diff()`を取るよう変更した(以前は時系列でソートしただけの全行に対しdiff()を取っており、複数拠点のスマートメーター等、直前行が別デバイスの場合に誤った時間幅が使われていた)。**（Issue #410 L-L2で修正）** `start_of_month`を組み立てる`.replace(...)`に`microsecond=0`を追加した。以前は`now`の微秒がそのまま`start_of_month.isoformat()`（例: `"...T00:00:00.123456+09:00"`）に残っており、DB側が本番の保存規約(`core.utils.get_now_iso`)通り微秒無しでちょうど月初0時に記録されている場合、SQLiteの文字列比較(`timestamp >= '{start_of_month}'`)では`"+09:00"`より`"."`の方が文字コード上大きいため、その行が範囲外と判定され集計から漏れていた。
-* 根拠: `calculate_monthly_cost_cumulative` (行番号: 238〜285 / 抜粋: "return int(df[\"kwh\"].sum() * 31)")、`microsecond=0` (行番号: 279 / 抜粋: "start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()")、デバイス絞り込み (行番号: 248〜257 / 抜粋: "WHERE timestamp >= '{start_of_month}' AND device_name LIKE '%Remo%'")、device_idごとのグループ化 (行番号: 274〜278 / 抜粋: "df.groupby(\"device_id\", dropna=False)[\"timestamp\"].diff()")
+* **役割**: 当月の電力使用量データから、今月の電気代概算（kwh × `ELECTRICITY_YEN_PER_KWH`=31）を算出する。**（補足表示の追加で変更）** 集計本体は期間を引数に取る `_calculate_cost_between(start, end)` へ切り出され、本関数は「月初（`_start_of_month`）から今まで」を渡す薄いラッパーになった。新テーブルが空なら旧テーブルへフォールバックする挙動は変わらない。**（Issue #170で修正）** `power_usage`テーブルにはスマートメーター(全体消費)と各プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)が同居しているため、新テーブル側のSELECTでスマートメーターの行のみを対象にするよう修正した(以前は全デバイスを無差別に合算しておりプラグ分が二重計上されていた)。また、`time_diff`(経過時間)の算出を`device_id`ごとにグループ化してから`diff()`を取るよう変更した。**（Issue #410 L-L2で修正）** `start_of_month`を組み立てる`.replace(...)`に`microsecond=0`を追加した。**（Issue #829で修正）** スマートメーター行の絞り込み条件を`device_name LIKE '%Remo%'`単独から`device_category = 'smart_meter' OR (device_category IS NULL AND device_name LIKE '%Remo%')`に変更した。以前は書き込み時点のNature Remoアプリのニックネーム設定に`"Remo"`という文字列が含まれるかだけに依存しており、含まれない環境では本SELECTが恒常的に0件になり電気代が0円表示になる不具合があった(`load_sensor_data`の`_classify_power_device_type`と同じ原因・同じ修正方針)。
+* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 296〜299)、`return int(df["kwh"].sum() * ELECTRICITY_YEN_PER_KWH)` (行番号: 433)、`return moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)` (行番号: 376)、device_categoryによる絞り込み (行番号: 399〜403 / 抜粋: "WHERE timestamp >= '{start_of_month}' AND timestamp <= '{end_iso}'\n              AND (\n                device_category = 'smart_meter'\n                OR (device_category IS NULL AND device_name LIKE '%Remo%')\n              )")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 327 / 抜粋: "def calculate_monthly_cost_cumulative()")
+* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 296 / 抜粋: "def calculate_monthly_cost_cumulative()")
 
 
 * **戻り値/レスポンス**: `int` (計算された電気代概算)
@@ -278,47 +260,47 @@
 ### `calculate_last_month_cost_same_point`
 
 * **役割**: 先月の月初から「今と同じ日・同じ時刻」までの電気代概算を、今月ぶんと同じ方法（`_calculate_cost_between`）で算出する。ダッシュボードのカードが「今月いくら使ったか」だけを出していて高いのか安いのか判断できなかったため、比較対象として出す。先月に同じ日が無い場合（3/31 → 2/31）は先月の末日に丸める。
-* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 333 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
+* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 302 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
 
 * **引数/リクエスト**: なし
-* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 333 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
+* 根拠: `def calculate_last_month_cost_same_point() -> int:` (行番号: 302 / 抜粋: "def calculate_last_month_cost_same_point() -> int:")
 
 * **戻り値/レスポンス**: `int`（先月の同じ時点までの電気代概算）
-* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 347 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
+* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 316 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
 
 * **副作用**: データベースの読み取り操作（`_calculate_cost_between` 経由）。
-* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 347 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
+* 根拠: `return _calculate_cost_between(_start_of_month(same_point), same_point)` (行番号: 316 / 抜粋: "return _calculate_cost_between(_start_of_month(same_point), same_point)")
 
 * **エラーハンドリング**: `_calculate_cost_between` 側で例外を捕捉し `0` を返す。日付の丸めは `min(now.day, end_of_last_month.day)` で行うため、`ValueError: day is out of range` にはならない。
-* 根拠: `day = min(now.day, end_of_last_month.day)` (行番号: 343 / 抜粋: "day = min(now.day, end_of_last_month.day)")
+* 根拠: `day = min(now.day, end_of_last_month.day)` (行番号: 312 / 抜粋: "day = min(now.day, end_of_last_month.day)")
 
 
 ### `_start_of_month` / `_calculate_cost_between` / `ELECTRICITY_YEN_PER_KWH`
 
 * **役割**: `_start_of_month` は渡した時刻の月初（`microsecond=0`）を返す。`_calculate_cost_between` は期間内のスマートメーターの記録から電気代を概算する共通処理で、`WHERE timestamp >= '{start}' AND timestamp <= '{end}'` で期間を絞る（上限は先月ぶんの集計のために足されたもので、今月ぶんは「今」が上限なので結果は変わらない）。`ELECTRICITY_YEN_PER_KWH` は単価（31円/kWh）。
-* 根拠: `def _calculate_cost_between(start: datetime, end: datetime) -> int:` (行番号: 358 / 抜粋: "def _calculate_cost_between(start: datetime, end: datetime) -> int:"), `ELECTRICITY_YEN_PER_KWH = 31` (行番号: 324 / 抜粋: "ELECTRICITY_YEN_PER_KWH = 31")
+* 根拠: `def _calculate_cost_between(start: datetime, end: datetime) -> int:` (行番号: 327 / 抜粋: "def _calculate_cost_between(start: datetime, end: datetime) -> int:"), `ELECTRICITY_YEN_PER_KWH = 31` (行番号: 293 / 抜粋: "ELECTRICITY_YEN_PER_KWH = 31")
 
 * **引数/リクエスト**: `_start_of_month(moment: datetime)`, `_calculate_cost_between(start: datetime, end: datetime)`
-* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 350 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
+* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 319 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
 
 * **戻り値/レスポンス**: `_start_of_month` は `datetime`、`_calculate_cost_between` は `int`
-* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 350 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
+* 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 319 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
 
 * **副作用**: `_calculate_cost_between` はデータベースの読み取り操作。
 * 根拠: `df = load_data_from_db(query)` (行番号: 328 / 抜粋: "df = load_data_from_db(query)")
 
 * **エラーハンドリング**: `_calculate_cost_between` は例外発生時にエラーログを出力し `0` を返す。
-* 根拠: `except Exception as e:` (行番号: 406 / 抜粋: "logger.error(f\"Cost Calc Error: {e}\")")
+* 根拠: `except Exception as e:` (行番号: 383 / 抜粋: "logger.error(f\"Cost Calc Error: {e}\")")
 
 
 ### `load_weather_history`
 
 * **役割**: 指定された日数分、指定された場所（デフォルトは伊丹）の天気履歴を取得する。**（Issue #410 L-L2で修正）** 遡り開始日(`start_date`)の算出に使う「現在時刻」を、以前のnaive`datetime.now()`（サーバーのローカルタイムゾーンに依存し、`get_today_date_str()`等が前提とするJSTと日付境界がズレうる）から、JST明示の`datetime.now(pytz.timezone("Asia/Tokyo"))`へ変更した。
-* 根拠: `load_weather_history` (行番号: 291〜308 / 抜粋: "FROM weather_history")、JST明示化 (行番号: 413 / 抜粋: "start_date = (datetime.now(pytz.timezone(\"Asia/Tokyo\")) - timedelta(days=days)).strftime(\"%Y-%m-%d\")")
+* 根拠: `load_weather_history` (行番号: 291〜308 / 抜粋: "FROM weather_history")、JST明示化 (行番号: 390 / 抜粋: "start_date = (datetime.now(pytz.timezone(\"Asia/Tokyo\")) - timedelta(days=days)).strftime(\"%Y-%m-%d\")")
 
 
 * **引数/リクエスト**: `days` (`int`, デフォルト `40`): 遡る日数。`location` (`str`, デフォルト `"伊丹"`): 取得対象の場所。
-* 根拠: `days: int = 40, location: str = "伊丹"` (行番号: 409 / 抜粋: "days: int = 40, location: str = "伊丹"")
+* 根拠: `days: int = 40, location: str = "伊丹"` (行番号: 386 / 抜粋: "days: int = 40, location: str = "伊丹"")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (天気履歴のデータフレーム)
@@ -337,11 +319,11 @@
 ### `load_yearly_temperature_stats`
 
 * **役割**: 指定年の天気履歴（外気温）と室内センサーログ（室温）の日次最小・最大統計を取得し、マージして返す。
-* 根拠: `load_yearly_temperature_stats` (行番号: 481 / 抜粋: "df_merged = pd.merge(df_weather, df_sensor, on="date"")
+* 根拠: `load_yearly_temperature_stats` (行番号: 458 / 抜粋: "df_merged = pd.merge(df_weather, df_sensor, on="date"")
 
 
 * **引数/リクエスト**: `year` (`int`): 対象年。`location` (`str`, デフォルト `"伊丹"`): 対象場所。
-* 根拠: `year: int, location: str = "伊丹"` (行番号: 429 / 抜粋: "year: int, location: str = "伊丹"")
+* 根拠: `year: int, location: str = "伊丹"` (行番号: 406 / 抜粋: "year: int, location: str = "伊丹"")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (マージされた統計データのデータフレーム)
@@ -349,7 +331,7 @@
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `pd.read_sql_query` (行番号: 441 / 抜粋: "df_weather = pd.read_sql_query(q_weather, conn)")
+* 根拠: `pd.read_sql_query` (行番号: 418 / 抜粋: "df_weather = pd.read_sql_query(q_weather, conn)")
 
 
 * **エラーハンドリング**: 各クエリ実行ごとに `try-except` で回避処理。全体の例外発生時はエラーログを出力し空のデータフレームを返す。`finally`で接続を閉じる。**（保守性 #410で修正）** 個別クエリの回避処理は以前bareの`except:`だったが、`except Exception:`へ変更した（`KeyboardInterrupt`/`SystemExit`等の`BaseException`まで握り潰さないようにする一般的なプラクティスに合わせた。挙動そのものは変わらない）。
@@ -376,11 +358,11 @@
 ### `get_disk_usage`
 
 * **役割**: ルートディレクトリ（`/`）のディスク使用量（全体、使用済、空き、使用率）を取得する。
-* 根拠: `get_disk_usage` (行番号: 497 / 抜粋: "total, used, free = shutil.disk_usage("/")")
+* 根拠: `get_disk_usage` (行番号: 474 / 抜粋: "total, used, free = shutil.disk_usage("/")")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 494 / 抜粋: "def get_disk_usage()")
+* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 471 / 抜粋: "def get_disk_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (GB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -388,7 +370,7 @@
 
 
 * **副作用**: OSファイルシステムのディスク容量読み取り。
-* 根拠: `shutil.disk_usage("/")` (行番号: 497 / 抜粋: "shutil.disk_usage("/")")
+* 根拠: `shutil.disk_usage("/")` (行番号: 474 / 抜粋: "shutil.disk_usage("/")")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `None` を返す。
@@ -403,7 +385,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 513 / 抜粋: "def get_memory_usage()")
+* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 490 / 抜粋: "def get_memory_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (MB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -426,7 +408,7 @@
 
 
 * **引数/リクエスト**: `lines` (`int`, デフォルト `50`): 行数。`priority` (`Optional[str]`): ログの優先度。`target_date` (`Optional[date]`): 対象日付。
-* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 534 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
+* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 511 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
 
 
 * **戻り値/レスポンス**: `str` (取得したログの文字列。失敗時はエラーメッセージの文字列)
@@ -434,11 +416,11 @@
 
 
 * **副作用**: OSコマンド（`journalctl`）の実行。
-* 根拠: `subprocess.run` (行番号: 547 / 抜粋: "subprocess.run(cmd")
+* 根拠: `subprocess.run` (行番号: 524 / 抜粋: "subprocess.run(cmd")
 
 
 * **エラーハンドリング**: 例外発生時はエラーメッセージを文字列として返す。
-* 根拠: `except Exception as e:` (行番号: 550 / 抜粋: "return f"ログ取得エラー: {e}"")
+* 根拠: `except Exception as e:` (行番号: 527 / 抜粋: "return f"ログ取得エラー: {e}"")
 
 
 
@@ -455,7 +437,7 @@ flowchart TD
     C1 -- No --> Q3[電力データ取得<br/>config.SQLITE_TABLE_POWER_USAGE]
     SetT1 --> Q3
     Q3 --> C2{電力データあり?}
-    C2 -- Yes --> SetT2[device_typeを判別・設定<br/>Nature Remo E Lite or Plug]
+    C2 -- Yes --> SetT2["_classify_power_device_type で判別・設定<br/>Nature Remo E Lite or Plug"]
     C2 -- No --> Merge[取得したDataFrameをリスト化]
     SetT2 --> Merge
     Merge --> C3{リストは空?}
@@ -544,7 +526,8 @@ graph TD
 
 * **[修正済み] Issue #456: process_dataframeの非ベクトル化タイムスタンプ変換**: 以前は`timestamp`カラムの各値へ`_parse_timestamp_to_jst`を`.apply()`で1件ずつ適用する実装であり、ベクトル化された`pd.to_datetime`に比べて大量データでは処理速度が低下する懸念があった。現在は`_vectorized_parse_timestamps_to_jst`がnaive/aware2群への分割とその群単位の`pd.to_datetime`一括適用でベクトル化している。なお、naive値を常にJST（`core.utils.get_now_iso`の保存規約）とみなして`tz_localize`する前提は変更していないため、万一この規約に反してUTC等の別タイムゾーンでnaiveなタイムスタンプが書き込まれるテーブル・経路が将来的に生まれた場合、9時間のズレが再発する点は同様に残る（M-1-4でUTC一律解釈からJST一律解釈に変更されたことに伴う前提）。
 * `_calculate_cost_between`（`calculate_monthly_cost_cumulative` と `calculate_last_month_cost_same_point` の共通処理）では、直近データ間の差分（`time_diff`）が1.0時間以内のものだけを抽出し、その総和に一律で `ELECTRICITY_YEN_PER_KWH`（31円/kWh）を掛けて概算を算出しているため、月の実際の稼働日数や欠損データの有無によって計算結果がブレる可能性がある。先月との比較も同じ方法で算出しているため、両者のブレ方は揃う（片方だけが別の方法で計算されることはない）。
-* **（Issue #170で解消）デバイス混在によるtime_diffの誤算出**: 以前は`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)の行を無差別にSELECTし、`device_id`でグループ化せず時系列のまま`diff()`を取っていたため、(1)プラグの消費電力がスマートメーターの計測値へ二重計上され、(2)複数拠点のスマートメーター等が交互に記録された場合に直前行が別デバイスとなり誤った時間幅が使われる、という2つの系統的な計算誤差があった。現在はSQL側で`device_name LIKE '%Remo%'`によりスマートメーターの行のみに絞り、`time_diff`の算出も`device_id`ごとにグループ化してから行う。`weekly_analyze_report.get_analysis_data`の電気代算出(`SELECT AVG(wattage)`)にも同様の問題があり、同じ`device_name LIKE '%Remo%'`条件で修正済み。
+* **（Issue #170で解消）デバイス混在によるtime_diffの誤算出**: 以前は`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)の行を無差別にSELECTし、`device_id`でグループ化せず時系列のまま`diff()`を取っていたため、(1)プラグの消費電力がスマートメーターの計測値へ二重計上され、(2)複数拠点のスマートメーター等が交互に記録された場合に直前行が別デバイスとなり誤った時間幅が使われる、という2つの系統的な計算誤差があった。現在はSQL側でスマートメーターの行のみに絞り、`time_diff`の算出も`device_id`ごとにグループ化してから行う。`weekly_analyze_report.get_analysis_data`の電気代算出(`SELECT AVG(wattage)`)にも同様の問題があり、同じ絞り込み条件で修正済み。
+* **（Issue #829で解消）`device_name`の`"Remo"`部分一致だけに頼った分類の脆さ**: 以前は`load_sensor_data`の分類・`_calculate_cost_between`の絞り込み・`weekly_analyze_report.get_analysis_data`の絞り込みの3箇所すべてが、`device_name`に`"Remo"`という文字列が含まれるかだけでスマートメーターの行を判定していた。`device_name`はNature Remoアプリでユーザーが設定するニックネーム(`nature_remo_monitor.py`の`f"{location}_{nickname}"`)に依存する表示用の自由文字列であり、ニックネームが`"Remo"`を含まない環境では電気代集計が恒常的に0円になっていた(電気代0円表示の不具合の実際の原因)。書き込み時点(`nature_remo_monitor.py`/`switchbot_power_monitor.py`)で明示される`device_category`列(`migrations/0020`で追加)を優先し、`device_category`が無い古い行だけ従来の`"Remo"`判定にフォールバックする方式に変更した。
 * `get_memory_usage` は `subprocess.run(["free", "-m"])` の出力を文字列分割でパースしているため、OSのディストリビューションやバージョン変更により `free` コマンドの出力形式が変わると `IndexError` 等が発生するリスクがある。
 * `get_system_logs` で `subprocess.run` に引数を渡す際、`target_date` などが外部から未検証のまま渡されると意図しないコマンド引数として解釈される可能性がある。
 * SQLiteの接続時に `?mode=ro` (Read Only) と URI オプションを使用しているため、SQLiteのバージョンやコンパイルオプションによっては URI がサポートされず接続エラーになる可能性がある。

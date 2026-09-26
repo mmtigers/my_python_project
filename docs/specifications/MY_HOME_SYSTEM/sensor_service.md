@@ -43,7 +43,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config` 内の各定数 | `SQLITE_TABLE_SWITCHBOT_LOGS`、`SQLITE_TABLE_POWER_USAGE` の具体的な値や型が提供されていないため。 | `[config.SQLITE_TABLE_SWITCHBOT_LOGS]` (行番号: 225 / 抜粋: "config.SQLITE_TABLE_SWITCHBOT_LOGS,") |
-| `core.database.get_db_cursor` | DB接続の具体的な実装、扱うデータベースエンジン、コンテキストマネージャが返すカーソルオブジェクトの仕様が不明であるため。 | `[core.database.get_db_cursor]` (行番号: 247 / 抜粋: "with get_db_cursor() as") |
+| `core.database.get_db_cursor` | DB接続の具体的な実装、扱うデータベースエンジン、コンテキストマネージャが返すカーソルオブジェクトの仕様が不明であるため。 | `[core.database.get_db_cursor]` (行番号: 262 / 抜粋: "with get_db_cursor() as") |
 | `core.database.save_log_async` | テーブル名、カラムリスト、値を渡した際の内部でのクエリ生成ロジックやエラーハンドリングの挙動が不明であるため。 | `[save_log_async]` (行番号: 142 / 抜粋: "await save_log_async(") |
 | `services.notification_service.send_push` | メッセージ形式の仕様、引数として渡す `"discord"` や `"notify"` の処理分岐、外部API連携の実装が不明であるため。 | `[send_push]` (行番号: 64 / 抜粋: "send_push,") |
 
@@ -192,20 +192,20 @@
 
 ### `process_power_data`
 
-* **役割**: 電力データをDBに保存し、前回記録された値と閾値を比較して閾値を跨いだ場合（ON/OFF）に使用開始/終了の通知を送信する。
-* 根拠: `[process_power_data]` (行番号: 289 / 抜粋: "prev_wattage < threshold and w")
+* **役割**: 電力データをDBに保存し、前回記録された値と閾値を比較して閾値を跨いだ場合（ON/OFF）に使用開始/終了の通知を送信する。**（Issue #829で追加）** `device_category`引数(既定`"plug"`)で書き込み時点の種別("smart_meter"住宅全体のスマートメーター/"plug"個別家電プラグ)を明示し、`power_usage`テーブルに保存する。以前は`analysis_service.py`側が`device_name`に`"Remo"`という文字列が含まれるかだけで下流的に推測しており、Nature Remoアプリのニックネーム設定次第で電気代集計が0円になる不具合の原因になっていた。
+* 根拠: `[process_power_data]` (行番号: 304 / 抜粋: "prev_wattage < threshold and w")、`device_category: str = "plug",` (行番号: 239)
 
 
-* **引数/リクエスト**: `device_id: str`, `device_name: str`, `wattage: float`, `notify_settings: Dict[str, Any]`
-* 根拠: `[process_power_data]` (行番号: 234 / 抜粋: "def process_power_data(device_")
+* **引数/リクエスト**: `device_id: str`, `device_name: str`, `wattage: float`, `notify_settings: Dict[str, Any]`, `device_category: str = "plug"`(キーワード可)
+* 根拠: `[process_power_data]` (行番号: 234〜240 / 抜粋: "async def process_power_data(\n    device_id: str,\n    device_name: str,\n    wattage: float,\n    notify_settings: Dict[str, Any],\n    device_category: str = \"plug\",\n) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
 * 根拠: `[process_power_data]` (行番号: 149 / 抜粋: "-> None:")
 
 
-* **副作用**: `core.database.get_db_cursor` による外部DBからの読み取り、`save_log_async` による外部DBへの書き込み、`send_push` による外部API呼び出し。
-* 根拠: `[process_power_data]` (行番号: 270 / 抜粋: "save_ok = await save_log_async(")
+* **副作用**: `core.database.get_db_cursor` による外部DBからの読み取り、`save_log_async` による外部DBへの書き込み(`device_id`/`device_name`/`wattage`/`timestamp`/`device_category`の5列)、`send_push` による外部API呼び出し。
+* 根拠: `[process_power_data]` (行番号: 285〜288 / 抜粋: "save_ok = await save_log_async(\n        config.SQLITE_TABLE_POWER_USAGE,\n        [\"device_id\", \"device_name\", \"wattage\", \"timestamp\", \"device_category\"],\n        (device_id, device_name, wattage, get_now_iso(), device_category)\n    )")
 
 
 * **エラーハンドリング**: DBからの前回値取得時に発生する全ての `Exception` をキャッチし、ログに記録した上で前回値を `0.0` として処理を続行する。**（Issue #740 / AUDIT-011 で追加）** 保存側も `save_log_async` の戻り値を `save_ok` で受け、`False` ならデバイス名・ワット数を含む `logger.error` を出す。ただし `process_meter_data` と異なり **early return はせず、閾値クロスの通知判定まで進む**（判定に使うのは取得済みの `prev_wattage` と引数の `wattage` だけで保存結果に依存せず、DB の一時的なロックで「電気の付けっぱなし通知」まで落とすほうが実害が大きいため）。

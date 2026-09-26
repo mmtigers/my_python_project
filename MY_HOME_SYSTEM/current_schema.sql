@@ -35,7 +35,7 @@ CREATE TABLE power_usage (
     device_name TEXT,
     wattage REAL,
     timestamp DATETIME NOT NULL
-);
+, device_category TEXT);
 CREATE TABLE device_records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp DATETIME NOT NULL,
