@@ -30,7 +30,7 @@ NOW = datetime.fromisoformat("2026-09-19T12:00:00+09:00")
 
 # サマリーに並ぶカードの枚数。`home_status_service.build_status_cards` の
 # 戻り値と対になっているので、カードを増減させるときは一緒に直す。
-EXPECTED_CARD_COUNT = 8
+EXPECTED_CARD_COUNT = 7
 
 
 @pytest.fixture(autouse=True)
@@ -227,7 +227,6 @@ class TestSubPages:
 
     def test_life_page_shows_the_life_group_cards_only(self):
         res = self._get("life")
-        assert "🍚 炊飯器" in res.text
         assert "💰 今月の電気代" in res.text
         assert "👵 高砂 (実家)" not in res.text
 
@@ -367,7 +366,7 @@ class TestCardsLinkToTheirDetail:
         assert len(hrefs) == EXPECTED_CARD_COUNT, "すべてのカードがリンクになっていること"
         for href in hrefs:
             assert href.startswith("/dashboard/")
-            page_key = href.rsplit("/", 1)[1]
+            page_key = href.split("#", 1)[0].split("?", 1)[0].rsplit("/", 1)[1]
             assert page_key in ("watch", "life", "sys")
 
     def test_cards_point_at_the_page_that_actually_shows_them(self):
@@ -377,9 +376,24 @@ class TestCardsLinkToTheirDetail:
 
         assert by_title["👵 高砂 (実家)"] == "watch"
         assert by_title["🎥 カメラ"] == "watch"
-        assert by_title["🍚 炊飯器"] == "life"
         assert by_title["💰 今月の電気代"] == "life"
         assert by_title["🗄️ NAS"] == "sys"
+
+    def test_watch_group_cards_link_to_different_places_on_the_page(self):
+        """不具合修正の回帰テスト: 以前は高砂・伊丹・駐車場・カメラの4枚が全部
+        `tab="watch"`だけを持ち、`anchor`が無かったため、どれをタップしても
+        同じURL(見守りページの先頭=カメラ映像)にしか飛べなかった。"""
+        cards, _ = self._collect()
+        watch_titles = ("👵 高砂 (実家)", "🏠 伊丹 (自宅)", "🚗 駐車場", "🎥 カメラ")
+        hrefs = {
+            card.title: home_status_service.card_detail_href(card, "/dashboard/")
+            for card in cards if card.title in watch_titles
+        }
+
+        assert set(hrefs) == set(watch_titles)
+        assert len(set(hrefs.values())) == len(watch_titles), "4枚のリンク先が全部違うこと"
+        for href in hrefs.values():
+            assert href.startswith("/dashboard/watch")
 
     def test_the_link_is_relative_to_the_viewing_origin(self):
         """固定URLを埋めるとLAN内のIPと公開ドメインのどちらかで繋がらなくなる。"""
@@ -390,22 +404,15 @@ class TestCardsLinkToTheirDetail:
             home_status_service.StatusCard("t", "v", "theme-gray"), "/dashboard/"
         ) is None
 
+    def test_anchor_is_appended_after_the_tab_url(self):
+        card = home_status_service.StatusCard("t", "v", "theme-gray", tab="watch", anchor="#takasago-log")
 
-class TestAlertSummary:
-    """B: 赤・黄のカードだけを名前で拾って先頭に出す。"""
+        assert home_status_service.card_detail_href(card, "/dashboard/") == "/dashboard/watch#takasago-log"
 
-    def test_red_comes_before_yellow(self):
-        cards = [
-            home_status_service.StatusCard("平常", "v", "theme-green"),
-            home_status_service.StatusCard("注意", "v", "theme-yellow"),
-            home_status_service.StatusCard("異常", "v", "theme-red"),
-            home_status_service.StatusCard("不明", "v", "theme-gray"),
-        ]
 
-        assert [c.title for c in home_status_service.summarize_alerts(cards)] == ["異常", "注意"]
-
+class TestStatusGridOrder:
     def test_the_grid_order_is_not_changed(self):
-        """並べ替えではなく要約で解決する(位置で覚えている画面を動かさない)。"""
+        """位置で覚えている画面を動かさない(カードの並びは判定結果に関わらず固定)。"""
         cards = [
             home_status_service.StatusCard("1番目", "v", "theme-green"),
             home_status_service.StatusCard("2番目", "v", "theme-red"),
@@ -415,30 +422,25 @@ class TestAlertSummary:
 
         assert grid.index("1番目") < grid.index("2番目")
 
-    def test_the_line_is_shown_even_when_nothing_is_wrong(self):
-        """毎分の更新で行が出たり消えたりすると、下の内容が上下に跳ねる。"""
-        ok = home_status_service.render_alerts_html(
-            [home_status_service.StatusCard("平常", "v", "theme-green")]
+
+class TestAlertSummaryRemoved:
+    """不具合修正: ホームページの「気になること」要約行は不要という要望により削除した。
+    カード自体が赤・黄の色で状態を示しているため、要約行が無くても情報は失われない。"""
+
+    def test_the_home_page_no_longer_shows_the_alert_line(self):
+        page = dashboard_page_service.render_home_page(
+            [home_status_service.StatusCard("異常", "v", "theme-red")], NOW,
+            dashboard_path="/dashboard/", status_path="/dashboard/status",
+            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
+            refresh_sec=60,
         )
 
-        assert "気になることはありません" in ok
-        assert "alerts" in ok
+        assert "気になること" not in page
 
-    def test_alerts_link_to_the_detail_page(self):
-        cards = [home_status_service.StatusCard("🍚 炊飯器", "🍚 炊いてない", "theme-red", tab="life")]
-
-        html_out = home_status_service.render_alerts_html(cards, dashboard_path="/dashboard/")
-
-        assert 'href="/dashboard/life"' in html_out
-        assert "炊飯器" in html_out
-
-    def test_alert_titles_are_escaped(self):
-        cards = [home_status_service.StatusCard("<script>x</script>", "v", "theme-red", tab="life")]
-
-        html_out = home_status_service.render_alerts_html(cards, dashboard_path="/dashboard/")
-
-        assert "<script>" not in html_out
-        assert "&lt;script&gt;" in html_out
+    def test_render_alerts_html_no_longer_exists(self):
+        """機能を隠すのではなく削除したことの確認(使われないコードを残さない)。"""
+        assert not hasattr(home_status_service, "render_alerts_html")
+        assert not hasattr(home_status_service, "summarize_alerts")
 
 
 class TestDarkMode:
@@ -489,12 +491,11 @@ class TestPartialRefresh:
 
         assert res.text.count(f'id="{home_status_service.STATUS_SECTION_ID}"') == 1
 
-    def test_the_fragment_carries_the_fetch_time_and_the_alert_line(self):
-        """時刻と要約も一緒に差し替わらないと、値だけ新しく見出しが古くなる。"""
+    def test_the_fragment_carries_the_fetch_time(self):
+        """時刻も一緒に差し替わらないと、値だけ新しく見出しが古くなる。"""
         res = self._get(f"{config.DASHBOARD_BASE_PATH}/status")
 
         assert "時点" in res.text
-        assert "alerts" in res.text
 
     def test_the_script_sends_credentials(self):
         """Cloudflare Access の内側にあるため、Cookie を送らないと弾かれる。"""
@@ -596,27 +597,11 @@ class TestSupportingValues:
         assert theme == "theme-green" and "元気" in value
         assert sub == "最終検知 11:30"
 
-    def test_the_rice_cooker_says_when_it_last_ran(self):
-        df = pd.DataFrame({
-            "device_name": ["炊飯器", "炊飯器"],
-            "power_watts": [700.0, 3.0],
-            "timestamp": [
-                pd.Timestamp("2026-09-18T18:40:00+09:00"),
-                pd.Timestamp("2026-09-19T08:00:00+09:00"),
-            ],
-        })
-        now = datetime.fromisoformat("2026-09-19T12:00:00+09:00")
-
-        value, _ = home_status_service.get_rice_status(df, now)
-
-        assert value == "🍚 炊いてない", "今日の判定は変わらない"
-        assert home_status_service.describe_rice(df, now) == "前回 昨日 18:40"
-
     def test_the_parking_camera_says_when_it_last_detected_motion(self):
         df = pd.DataFrame({
             "device_type": [home_status_service.CAMERA_DEVICE_TYPE],
             "movement_state": ["ON"],
-            "friendly_name": [home_status_service.PARKING_CAMERA_NAME],
+            "device_id": [home_status_service.PARKING_CAMERA_ID],
             "timestamp": [pd.Timestamp("2026-09-19T08:15:00+09:00")],
         })
         now = datetime.fromisoformat("2026-09-19T12:00:00+09:00")

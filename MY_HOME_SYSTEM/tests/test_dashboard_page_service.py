@@ -152,7 +152,10 @@ class TestRenderWatchPage:
         assert "玄関" in html
         assert "庭" not in html
 
-    def test_takasago_rows_are_filtered_by_location(self, monkeypatch):
+    def test_sensor_rows_are_split_into_takasago_and_itami_sections(self, monkeypatch):
+        """不具合修正: 以前は伊丹のセンサーログがどこにも表示されず、高砂だけの
+        表だった。今は高砂/伊丹それぞれ専用のセクション(`#takasago-log`/
+        `#itami-log`)に分けて表示し、見守りカードのタップ先として使う。"""
         monkeypatch.setattr(config, "CAMERAS", [])
         df_sensor = pd.DataFrame({
             "location": ["高砂", "伊丹"],
@@ -166,8 +169,14 @@ class TestRenderWatchPage:
             dashboard_path="/dashboard",
             snapshot_url_prefix="/dashboard/snapshot",
         )
-        assert "センサーA" in html
-        assert "センサーB" not in html
+
+        takasago_section = html.split('id="takasago-log"', 1)[1].split('id="itami-log"', 1)[0]
+        itami_section = html.split('id="itami-log"', 1)[1]
+
+        assert "センサーA" in takasago_section
+        assert "センサーB" not in takasago_section
+        assert "センサーB" in itami_section
+        assert "センサーA" not in itami_section
 
 
 class TestBuildFreshnessRows:

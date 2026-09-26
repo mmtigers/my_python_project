@@ -102,15 +102,18 @@ def get_analysis_data(start_dt: datetime.datetime) -> Optional[Dict[str, Any]]:
             # #829: car_records(action='LEAVE'/'ARRIVE')は、書き込み経路が
             # リポジトリのどこにも存在せず(過去に外部連携があったかは不明)、
             # 常に0件だった。駐車場カメラ(device_records, device_type='ONVIF_CAMERA',
-            # device_name='駐車場')の動体検知回数に置き換える。人の往来も拾うため
+            # device_id=PARKING_CAMERA_ID)の動体検知回数に置き換える。人の往来も拾うため
             # 「車が出入りした回数」そのものではないが、駐車場での動きの目安にはなる。
+            # ダッシュボードの不具合修正(駐車場カードが表示名の完全一致に依存していて
+            # 壊れていた)に合わせ、こちらも表示名(device_name)ではなくidで照合する
+            # (表示名はdevices.jsonで運用者が自由に変えられ、変えるたびに一致しなくなる)。
             sql_car = """
                 SELECT COUNT(*)
                 FROM device_records
                 WHERE device_type = 'ONVIF_CAMERA' AND movement_state = 'ON'
-                  AND device_name = ? AND timestamp >= ?
+                  AND device_id = ? AND timestamp >= ?
             """
-            cursor.execute(sql_car, (home_status_service.PARKING_CAMERA_NAME, start_str))
+            cursor.execute(sql_car, (home_status_service.PARKING_CAMERA_ID, start_str))
             row_car = cursor.fetchone()
             data["car_count"] = row_car[0] if row_car else 0
 
