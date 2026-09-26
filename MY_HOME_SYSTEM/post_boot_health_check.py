@@ -271,11 +271,15 @@ class PostBootHealthCheck:
                 # 権限エラーは介入が必要なため、ERRORとして即時通知 [cite: 361, 469]
                 nas_status, nas_msg = STATUS_ERR, "Permission Denied"
                 error_detail = f"NAS書き込み権限エラー: {e}"
-                logger.error(error_detail)
+                # Discord通知システム調査(2026-09-26)で、内容は障害通知なのにchannel="report"
+                # (定期レポート用チャンネル)に送っていたことが判明したためerrorチャンネルへ変更。
+                # 直後にsend_pushで同内容をerrorチャンネルへ送るため、logger.error自体の
+                # DiscordErrorHandler経由の通知はskip_discordで抑止し、二重通知を避ける。
+                logger.error(error_detail, extra={"skip_discord": True})
                 send_push(
                     messages=[{"type": "text", "text": f"🚨 [System Alert] NAS権限エラー\n内容: {error_detail}"}],
                     target="discord",
-                    channel="report"
+                    channel="error"
                 )
 
 
