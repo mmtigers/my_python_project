@@ -236,13 +236,13 @@
 ### `FFMPEG_RTSP_TIMEOUT_USEC`（不具合修正で新設）
 
 * **役割**: ライブHLS配信のffmpeg RTSP入力に設定するソケットI/Oタイムアウト(マイクロ秒、既定15秒)。実機で駐車場カメラをタップすると、ライブ映像ではなく固まった時点の古い映像が配信され続ける不具合を確認した。原因はffmpegのRTSP入力にioタイムアウトが既定で設定されておらず、TCP接続は張れるが応答が返らない種類のネットワーク不調に遭遇すると、ffmpegプロセスがエラーも出さず無期限にハングすること。`_start_hls_stream_locked`の`existing.poll() is None`チェックはOSプロセスの生死しか見ないため、ハングしたプロセスを「配信中」と誤認して再起動されず、固まった時点の映像を配信し続けてしまっていた。この定数をRTSP/tcpプロトコル自身のオプションである`-timeout`としてffmpegコマンドに渡し、応答が無ければffmpeg自身が終了するようにすることで、次のリクエストで新しいプロセスが起動されるようにする。**汎用オプションの`-rw_timeout`は`async:`プロトコル専用でRTSP/tcpの読み取りには効かない**ことを、疎通不能なホストに対するffmpeg実行(`-rw_timeout`では無期限にハングし続け、`-timeout`だけが指定通りに機能することを確認)で検証済み。
-* 根拠: `FFMPEG_RTSP_TIMEOUT_USEC = 15_000_000` (行番号: 52)、`"-timeout", str(FFMPEG_RTSP_TIMEOUT_USEC),` (行番号: 245)
+* 根拠: `FFMPEG_RTSP_TIMEOUT_USEC = 15_000_000` (行番号: 56)、`"-timeout", str(FFMPEG_RTSP_TIMEOUT_USEC),` (行番号: 249)
 
 
 ### `_start_hls_stream_locked`（Issue #439で`start_hls_stream`から分離）
 
 * **役割**: 指定カメラのライブHLSストリーミングをffmpegプロセスとして起動する実処理。既に同一カメラIDのプロセスが実行中であれば新規起動せず既存のプレイリストパスを返す。ffmpegログファイルは`chmod 0o600`（所有者のみ読み書き可）で作成し、起動バナー経由の認証情報露出を防ぐため`-hide_banner`/`-loglevel error`オプションを付与する。呼び出し元`start_hls_stream`が取得した`cam_id`単位のロック内で実行されることを前提とする。**（不具合修正）** RTSP入力(`-i`)の直前に`-timeout`(`FFMPEG_RTSP_TIMEOUT_USEC`)を追加した。
-* 根拠: [関数定義] (行番号: 224〜277 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")、`"-timeout", str(FFMPEG_RTSP_TIMEOUT_USEC),` (行番号: 245)
+* 根拠: [関数定義] (行番号: 224〜277 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")、`"-timeout", str(FFMPEG_RTSP_TIMEOUT_USEC),` (行番号: 249)
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`, `cam_id: str`
