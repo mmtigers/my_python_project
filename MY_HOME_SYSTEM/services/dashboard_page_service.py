@@ -116,6 +116,25 @@ _PAGE_BASE_CSS = """
         display: block; margin-top: 2px; font-size: 0.7rem; color: #666; text-align: center;
     }
 
+    /* くらしページの電気代詳細(日別推移の簡易バーグラフ) */
+    .cost-history { margin-bottom: 16px; }
+    .cost-row {
+        display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 0.85rem;
+    }
+    .cost-date { flex: none; width: 3.4em; color: #666; }
+    .cost-bar-track {
+        flex: 1; height: 10px; border-radius: 5px; background: #eee; overflow: hidden;
+    }
+    .cost-bar { height: 100%; border-radius: 5px; background: #1565c0; }
+    .cost-value { flex: none; width: 4.6em; text-align: right; font-weight: bold; }
+
+    /* システムページの各セクションを視覚的にグループ化する箱
+       (不具合修正: 以前は見出しと一覧が地続きで読みにくかった)。 */
+    .info-box {
+        border: 1px solid #eee; border-radius: 12px; padding: 12px; margin-bottom: 16px;
+    }
+    .info-box > h2:first-child { margin-top: 0; }
+
     /* システムページの機能ごとの鮮度一覧 */
     .freshness-row {
         display: flex; justify-content: space-between; align-items: baseline;
@@ -126,6 +145,15 @@ _PAGE_BASE_CSS = """
     .freshness-red { color: #c62828; font-weight: bold; }
     .freshness-ok { color: #2e7d32; }
     .freshness-info { color: #666; }
+
+    /* NASの容量推移(不具合修正で新設)。使用率0-100%固定でスケールする折れ線。 */
+    .nas-chart { width: 100%; max-width: 320px; height: auto; display: block; }
+    .nas-chart-grid { stroke: #eee; stroke-width: 1; }
+    .nas-chart-line { stroke: #1565c0; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    details > summary {
+        cursor: pointer; min-height: 44px; display: flex; align-items: center;
+        font-size: 0.85rem; color: #1565c0; -webkit-tap-highlight-color: rgba(0,0,0,0.08);
+    }
 
     .maintenance-box {
         border: 1px solid #eee; border-radius: 12px; padding: 12px; margin-bottom: 16px;
@@ -163,7 +191,13 @@ _PAGE_BASE_CSS = """
         table.simple-table th { color: #9e9e9e; }
         table.simple-table th, table.simple-table td { border-color: #333; }
         .snapshot-caption { color: #9e9e9e; }
+        .cost-date { color: #9e9e9e; }
+        .cost-bar-track { background: #333; }
+        .info-box { border-color: #333; }
         .freshness-row { border-color: #333; }
+        .nas-chart-grid { stroke: #333; }
+        .nas-chart-line { stroke: #64b5f6; }
+        details > summary { color: #90caf9; }
         .maintenance-box { border-color: #333; }
         .camera-btn { background: #16304a; color: #90caf9; border-color: #24507a; }
         #status.stale::after { color: #ef9a9a; }
@@ -420,6 +454,30 @@ def _render_simple_table(df: pd.DataFrame, columns: dict[str, str], *, limit: in
     return f'<table class="simple-table"><thead><tr>{head}</tr></thead><tbody>{"".join(body_rows)}</tbody></table>'
 
 
+# 見守りページのログ表で常時表示する件数。残りは<details>で折りたたむ。
+_LOG_TABLE_VISIBLE_ROWS = 5
+
+
+def _render_collapsible_log_table(
+    df: pd.DataFrame, columns: dict[str, str], *, visible: int = _LOG_TABLE_VISIBLE_ROWS, limit: int = 50
+) -> str:
+    """`_render_simple_table`を、先頭`visible`件だけ常時表示し残りを`<details>`で
+    折りたたむ形に拡張する。
+
+    **(UI改善)** 防犯ログ・センサーログが縦に長く連なりスクロールが大変だった問題の
+    改善。全件は引き続き`limit`件まで読み込み、隠れているだけでデータ自体は減らさない。
+    """
+    if df.empty or not any(col in df.columns for col in columns):
+        return _render_simple_table(df, columns, limit=limit)
+
+    head_html = _render_simple_table(df.head(visible), columns, limit=visible)
+    rest_df = df.iloc[visible:limit]
+    if rest_df.empty:
+        return head_html
+    rest_html = _render_simple_table(rest_df, columns, limit=len(rest_df))
+    return f"{head_html}<details><summary>さらに{len(rest_df)}件を表示</summary>{rest_html}</details>"
+
+
 def _render_camera_selector(cameras: list[dict[str, Any]]) -> str:
     if not cameras:
         return '<p class="empty-note">カメラが登録されていません</p>'
@@ -505,6 +563,11 @@ def render_watch_page(
     防犯ログは以前`security_logs`テーブルを読んでいたが、そこへ書き込むコードが
     存在せず常に空だったため、カメラの動体検知(`home_status_service.camera_motion_log`。
     `df_sensor`から抽出するため既に`apply_friendly_names`済み)を正のデータとして使う。
+
+    **(UI改善)** 3つのログ表(防犯ログ・高砂/伊丹センサーログ)は以前
+    `_render_simple_table`で最大50行を常に縦に並べており、スクロールが大変だった。
+    `_render_collapsible_log_table`で先頭5件だけを常時表示し、残りは`<details>`で
+    折りたたむ。
     """
     cameras = [
         {"id": cam["id"], "name": cam["name"]}
@@ -529,14 +592,14 @@ def render_watch_page(
         "<h2>🖼️ 最近の写真</h2>"
         f"{_render_snapshot_gallery(snapshot_url_prefix)}"
         "<h2>🛡️ 防犯ログ</h2>"
-        f'{_render_simple_table(df_camera_motion, {"timestamp": "検知時刻", "friendly_name": "カメラ"})}'
+        f'{_render_collapsible_log_table(df_camera_motion, {"timestamp": "検知時刻", "friendly_name": "カメラ"})}'
         '<div id="takasago-log">'
         "<h2>👵 高砂実家のセンサーログ</h2>"
-        f'{_render_simple_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'
+        f'{_render_collapsible_log_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'
         "</div>"
         '<div id="itami-log">'
         "<h2>🏠 伊丹(自宅)のセンサーログ</h2>"
-        f'{_render_simple_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
+        f'{_render_collapsible_log_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
         "</div>"
     )
     return _page_shell("見守り - おうちの様子", body, extra_head=_CAMERA_SCRIPT)
@@ -545,14 +608,44 @@ def render_watch_page(
 # === くらしページ ===
 
 
-def render_life_page(cards, *, dashboard_path: str) -> str:
-    """💡 くらし: 電気のカードを大きく見せる(詳細グラフは持たない)。"""
+def _render_daily_cost_history(rows: list[tuple[Any, int]]) -> str:
+    """日別の電気代(概算)を横棒グラフ付きの簡易リストで表示する(新しい順、先頭が今日)。
+
+    **(不具合修正で新設)** 以前は「今月の電気代」カードをタップしても同じカードを
+    もう一度表示するだけで詳細と呼べる情報が無かった。直近の日別推移を見せることで
+    タップする価値のある詳細にする。
+    """
+    if not rows:
+        return '<p class="empty-note">表示できるデータがありません</p>'
+    max_cost = max(cost for _, cost in rows) or 1
+    items = []
+    for i, (day, cost) in enumerate(rows):
+        label = "今日" if i == 0 else day.strftime("%m/%d")
+        width_pct = max(2, round(cost / max_cost * 100))
+        items.append(
+            '<div class="cost-row">'
+            f'<span class="cost-date">{html.escape(label)}</span>'
+            f'<div class="cost-bar-track"><div class="cost-bar" style="width:{width_pct}%"></div></div>'
+            f'<span class="cost-value">{cost:,}円</span>'
+            "</div>"
+        )
+    return f'<div class="cost-history">{"".join(items)}</div>'
+
+
+def render_life_page(cards, *, dashboard_path: str, daily_cost_rows: list[tuple[Any, int]] | None = None) -> str:
+    """💡 くらし: 電気のカードを大きく見せ、日別の電気代推移を詳細として表示する。
+
+    **(不具合修正)** `daily_cost_rows`(`analysis_service.calculate_daily_cost_series`)を
+    追加し、電気代カードをタップしても意味のある詳細が無かった不具合を修正した。
+    """
     life_cards = [card for card in cards if card.group == "life"]
     body = (
         f"{_back_to_home_link(dashboard_path)}"
         "<h1>💡 くらし</h1>"
         f"{home_status_service.render_status_grid_html(life_cards)}"
         '<p class="empty-note">今月の電気代はスマートメーターの記録からの概算です。</p>'
+        "<h2>📊 日別の電気代(概算)</h2>"
+        f"{_render_daily_cost_history(daily_cost_rows or [])}"
     )
     return _page_shell("くらし - おうちの様子", body)
 
@@ -639,16 +732,71 @@ def _render_overall_summary(rows: list[dict[str, Any]]) -> str:
     return f'<p class="alerts alerts-warn">⚠️ {red_count}件、確認が必要です</p>'
 
 
+# NASの容量推移グラフのサイズ(viewBox)。使用率(0-100%)固定でスケールするため
+# 実測範囲での拡大縮小は行わない。
+_NAS_CHART_WIDTH = 300
+_NAS_CHART_HEIGHT = 90
+_NAS_CHART_PAD = 8
+
+
+def _render_nas_history_chart(df: pd.DataFrame) -> str:
+    """NASの使用率推移を簡易な折れ線グラフ(インラインSVG)で表示する。
+
+    **(不具合修正で新設)** NASカードをタップしても容量の履歴を見る手段が無かった。
+    `analysis_service.load_nas_history`(`nas_records`、古い順)の`percent`列を
+    折れ線で描画する。グラフだけでは正確な値を読み取れないため、`<details>`で
+    折りたたんだ詳細テーブル(直近10件)も添える。
+    """
+    if df.empty or "percent" not in df.columns or len(df) < 2:
+        return '<p class="empty-note">表示できるデータがありません</p>'
+
+    values = df["percent"].astype(float)
+    w, h, pad = _NAS_CHART_WIDTH, _NAS_CHART_HEIGHT, _NAS_CHART_PAD
+    plot_w, plot_h = w - pad * 2, h - pad * 2
+    step = plot_w / (len(values) - 1)
+
+    def _y(v: float) -> float:
+        return pad + plot_h - (max(0.0, min(100.0, v)) / 100.0) * plot_h
+
+    points = " ".join(f"{pad + i * step:.1f},{_y(v):.1f}" for i, v in enumerate(values))
+    grid = "".join(
+        f'<line x1="{pad}" y1="{_y(v):.1f}" x2="{w - pad}" y2="{_y(v):.1f}" class="nas-chart-grid" />'
+        for v in (0, 50, 100)
+    )
+    latest = values.iloc[-1]
+    oldest_at = home_status_service.format_short_timestamp(df["timestamp"].iloc[0])
+    latest_at = home_status_service.format_short_timestamp(df["timestamp"].iloc[-1])
+    svg = (
+        f'<svg viewBox="0 0 {w} {h}" class="nas-chart" role="img" '
+        f'aria-label="NASの使用率推移。{html.escape(oldest_at)}から{html.escape(latest_at)}まで、'
+        f'現在の使用率は{latest:.0f}パーセント">'
+        f"{grid}"
+        f'<polyline points="{points}" class="nas-chart-line" fill="none" />'
+        "</svg>"
+    )
+    caption = f'<p class="meta">現在 {latest:.0f}%・{html.escape(oldest_at)} 〜 {html.escape(latest_at)}</p>'
+    detail_table = _render_simple_table(
+        df.tail(10).iloc[::-1], {"timestamp": "日時", "percent": "使用率(%)", "free_gb": "空き(GB)"}
+    )
+    return f"{svg}{caption}<details><summary>詳細データを見る</summary>{detail_table}</details>"
+
+
 def render_sys_page(
     df_sensor: pd.DataFrame,
     nas_data: pd.Series | None,
+    nas_history: pd.DataFrame,
     memory: dict[str, float] | None,
     disk: dict[str, float] | None,
     now: datetime,
     *,
     dashboard_path: str,
 ) -> str:
-    """🔧 システム: 全体サマリー・各機能の最終更新時刻・メンテナンス操作。"""
+    """🔧 システム: 全体サマリー・各機能の最終更新時刻・NASの容量推移・メンテナンス操作。
+
+    **(不具合修正)** 各セクションを`.info-box`で視覚的にグループ化してシステムページを
+    見やすくした。NASカード(`id="nas-history"`)のタップ先として、NASの容量推移
+    グラフ(`nas_history`)を追加した。
+    """
     rows = build_freshness_rows(df_sensor, nas_data, memory, now)
 
     disk_line = ""
@@ -659,9 +807,15 @@ def render_sys_page(
         f"{_back_to_home_link(dashboard_path)}"
         "<h1>🔧 システム</h1>"
         f"{_render_overall_summary(rows)}"
+        '<div class="info-box">'
         "<h2>各機能の最終更新</h2>"
         f"{_render_freshness_rows(rows)}"
         f"{disk_line}"
+        "</div>"
+        '<div class="info-box" id="nas-history">'
+        "<h2>🗄️ NASの容量推移</h2>"
+        f"{_render_nas_history_chart(nas_history)}"
+        "</div>"
         "<h2>🛠️ メンテナンス</h2>"
         '<div class="maintenance-box">'
         "<p>⚠️ 再起動するとダッシュボードやIoT機器の操作が一時的に使えなくなります。</p>"

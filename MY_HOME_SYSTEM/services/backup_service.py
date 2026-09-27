@@ -6,6 +6,7 @@ import sys
 import datetime
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from typing import Tuple
 # 設計書 (Source: 137) に従い core.logger を使用
@@ -103,6 +104,31 @@ def perform_backup() -> Tuple[bool, str, float]:
             except OSError as cleanup_err:
                 logger.error(f"❌ NAS側の不完全なバックアップファイルの削除に失敗: {cleanup_err}")
         return False, str(e), 0.0
+
+
+def trigger_manual_backup_async() -> None:
+    """手動バックアップをバックグラウンドスレッドで実行し、完了をDiscordへ通知する。
+
+    **(不具合修正)** ダッシュボードの「今すぐバックアップ」ボタンは、以前
+    `perform_backup()`の完了をAPIレスポンスとして待たせていた。`perform_backup()`は
+    NAS転送に加え、設定次第で`_copy_latest_offsite`(rclone、最大`OFFSITE_TIMEOUT_SEC`=
+    30分)まで含むため、完了前にスマートフォンのブラウザがバックグラウンド化・通信断に
+    なると結果を受け取れず、「タップしても完了したかどうか分からない」原因になっていた。
+    バックグラウンドスレッドで実行し、成功時はDiscordへ完了通知を送ることで、画面を
+    見ていなくても分かるようにする。失敗時は`perform_backup`内部の
+    `_notify_and_log_error`が既にDiscordのerrorチャンネルへ通知済みのため、ここでは
+    重ねて通知しない。
+    """
+    def _run() -> None:
+        success, msg, size_mb = perform_backup()
+        if success:
+            send_push(
+                messages=[{"type": "text", "text": f"✅ 手動バックアップ完了\n{msg} ({size_mb:.1f}MB)"}],
+                target="discord",
+                channel="report",
+            )
+
+    threading.Thread(target=_run, daemon=True).start()
 
 # === 設定ファイルのバックアップ時の伏せ字処理 (Issue #829) ===
 # `devices.json` はカメラの `user` / `pass` を平文で持ち、`rtsp_url` にも

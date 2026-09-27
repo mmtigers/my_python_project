@@ -141,7 +141,12 @@ def dashboard_watch() -> HTMLResponse:
 @router.get(f"{_BASE_PATH}/life", include_in_schema=False)
 def dashboard_life() -> HTMLResponse:
     cards, _ = home_status_service.collect_status_cards()
-    return HTMLResponse(dashboard_page_service.render_life_page(cards, dashboard_path=f"{_BASE_PATH}/"))
+    materials = home_status_service.get_cached_materials()
+    return HTMLResponse(
+        dashboard_page_service.render_life_page(
+            cards, dashboard_path=f"{_BASE_PATH}/", daily_cost_rows=materials.daily_cost_rows
+        )
+    )
 
 
 @router.get(f"{_BASE_PATH}/sys", include_in_schema=False)
@@ -152,6 +157,7 @@ def dashboard_sys() -> HTMLResponse:
         dashboard_page_service.render_sys_page(
             materials.df_sensor,
             materials.nas_data,
+            materials.nas_history,
             materials.memory,
             materials.disk,
             now,

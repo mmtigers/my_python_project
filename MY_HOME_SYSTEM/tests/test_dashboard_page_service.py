@@ -5,7 +5,7 @@ NAS(config.ASSETS_DIR)には一切触れず、tmp_pathへ差し替える。
 """
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -148,6 +148,43 @@ class TestRenderSimpleTable:
         )
         assert "<table" in html
         assert "玄関" in html
+
+
+class TestRenderCollapsibleLogTable:
+    """UI改善: 防犯ログ・センサーログが縦に長く連なりスクロールが大変だった問題の改善。"""
+
+    def _df(self, n: int) -> pd.DataFrame:
+        return pd.DataFrame({
+            "timestamp": [pd.Timestamp("2026-01-01") + pd.Timedelta(minutes=i) for i in range(n)],
+            "friendly_name": [f"デバイス{i}" for i in range(n)],
+        })
+
+    def test_empty_dataframe_shows_placeholder(self):
+        html = dashboard_page_service._render_collapsible_log_table(pd.DataFrame(), {"timestamp": "時刻"})
+        assert "表示できるデータがありません" in html
+
+    def test_few_rows_show_no_details_disclosure(self):
+        """行数が常時表示件数以下なら、折りたたみ自体が不要。"""
+        html = dashboard_page_service._render_collapsible_log_table(
+            self._df(3), {"timestamp": "時刻", "friendly_name": "デバイス"}, visible=5
+        )
+        assert "<details>" not in html
+        assert "デバイス0" in html
+        assert "デバイス2" in html
+
+    def test_extra_rows_are_collapsed_behind_details(self):
+        html = dashboard_page_service._render_collapsible_log_table(
+            self._df(8), {"timestamp": "時刻", "friendly_name": "デバイス"}, visible=5
+        )
+        assert "<details>" in html
+        assert "さらに3件を表示" in html
+        # 常時表示分(0〜4)は<details>の外、残り(5〜7)は<details>で折りたたまれる
+        visible_part = html.split("<details>", 1)[0]
+        collapsed_part = html.split("<details>", 1)[1]
+        assert "デバイス0" in visible_part
+        assert "デバイス4" in visible_part
+        assert "デバイス5" not in visible_part
+        assert "デバイス7" in collapsed_part
 
 
 class TestRenderCameraSelector:
@@ -331,3 +368,86 @@ class TestRenderLifePage:
         html = dashboard_page_service.render_life_page(cards, dashboard_path="/dashboard")
         assert "電気" in html
         assert "駐車場" not in html
+
+    def test_includes_daily_cost_history_when_provided(self):
+        """不具合修正: 電気代カードのタップ先に、日別推移という意味のある詳細を出す。"""
+        rows = [(date(2026, 9, 15), 300), (date(2026, 9, 14), 150)]
+        html = dashboard_page_service.render_life_page(
+            [], dashboard_path="/dashboard", daily_cost_rows=rows
+        )
+        assert "日別の電気代" in html
+        assert "300円" in html
+        assert "150円" in html
+
+    def test_omitting_daily_cost_rows_shows_the_empty_placeholder(self):
+        html = dashboard_page_service.render_life_page([], dashboard_path="/dashboard")
+        assert "表示できるデータがありません" in html
+
+
+class TestRenderDailyCostHistory:
+    def test_empty_rows_shows_placeholder(self):
+        html = dashboard_page_service._render_daily_cost_history([])
+        assert "表示できるデータがありません" in html
+
+    def test_first_row_is_labeled_today(self):
+        html = dashboard_page_service._render_daily_cost_history([(date(2026, 9, 15), 300)])
+        assert "今日" in html
+        assert "09/15" not in html
+
+    def test_other_rows_are_labeled_by_date(self):
+        html = dashboard_page_service._render_daily_cost_history(
+            [(date(2026, 9, 15), 300), (date(2026, 9, 14), 150)]
+        )
+        assert "09/14" in html
+
+    def test_bar_width_is_relative_to_the_maximum(self):
+        html = dashboard_page_service._render_daily_cost_history(
+            [(date(2026, 9, 15), 100), (date(2026, 9, 14), 50)]
+        )
+        assert "width:100%" in html
+        assert "width:50%" in html
+
+    def test_zero_cost_day_still_shows_a_visible_sliver(self):
+        """幅0%だとバー自体が見えなくなり「データが無い」ように見えてしまうため、
+        最小幅を確保する。"""
+        html = dashboard_page_service._render_daily_cost_history(
+            [(date(2026, 9, 15), 0), (date(2026, 9, 14), 100)]
+        )
+        assert "width:2%" in html
+
+
+class TestRenderNasHistoryChart:
+    """NASカードのタップ先(容量推移グラフ)。不具合修正で新設。"""
+
+    def test_empty_dataframe_shows_placeholder(self):
+        html = dashboard_page_service._render_nas_history_chart(pd.DataFrame())
+        assert "表示できるデータがありません" in html
+
+    def test_single_row_shows_placeholder(self):
+        """折れ線を引くには最低2点必要。"""
+        df = pd.DataFrame({"timestamp": [pd.Timestamp("2026-09-15")], "percent": [42.0], "free_gb": [100]})
+        html = dashboard_page_service._render_nas_history_chart(df)
+        assert "表示できるデータがありません" in html
+
+    def test_renders_svg_line_and_current_value(self):
+        df = pd.DataFrame({
+            "timestamp": [pd.Timestamp("2026-09-14"), pd.Timestamp("2026-09-15")],
+            "percent": [30.0, 42.0],
+            "free_gb": [120, 100],
+        })
+        html = dashboard_page_service._render_nas_history_chart(df)
+        assert "<svg" in html
+        assert "<polyline" in html
+        assert "現在 42%" in html
+
+    def test_includes_a_collapsible_detail_table(self):
+        """グラフだけでは正確な値が読み取れないため、詳細テーブルを併設する。"""
+        df = pd.DataFrame({
+            "timestamp": [pd.Timestamp("2026-09-14"), pd.Timestamp("2026-09-15")],
+            "percent": [30.0, 42.0],
+            "free_gb": [120, 100],
+        })
+        html = dashboard_page_service._render_nas_history_chart(df)
+        assert "<details>" in html
+        assert "詳細データを見る" in html
+        assert "<table" in html

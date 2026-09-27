@@ -8,6 +8,7 @@ services/backup_service.py の perform_backup のテスト。
 """
 import os
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -561,3 +562,66 @@ class TestConfigBackupRedactsCredentials:
 
         assert success is True
         assert not any(n.startswith("devices_") for n in self._backups())
+
+
+class TestTriggerManualBackupAsync:
+    """trigger_manual_backup_async() のテスト。
+
+    不具合修正: ダッシュボードの「今すぐバックアップ」ボタンは、以前
+    perform_backup()の完了(NAS転送・最大30分のオフサイト複製を含みうる)を
+    APIレスポンスとして待たせており、「タップしても完了したか分からない」原因に
+    なっていた。バックグラウンドスレッドで実行し、完了をDiscordへ通知する方式に
+    変更した。
+
+    実装はthreading.Thread(daemon=True)でバックグラウンド実行するため、
+    tests/test_switchbot_service.pyのTestTriggerTvUnlockと同じ方式
+    (threading.Thread.startをrunに差し替えて同一スレッドで同期実行させる)で
+    決定的にテストする。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _run_background_thread_synchronously(self, monkeypatch):
+        monkeypatch.setattr(threading.Thread, "start", threading.Thread.run)
+
+    def test_success_notifies_completion_via_discord_report_channel(self, monkeypatch):
+        monkeypatch.setattr(backup_service, "perform_backup", lambda: (True, "バックアップ完了", 12.5))
+        calls = []
+        monkeypatch.setattr(backup_service, "send_push", lambda **kwargs: calls.append(kwargs))
+
+        backup_service.trigger_manual_backup_async()
+
+        assert len(calls) == 1
+        assert calls[0]["channel"] == "report"
+        assert calls[0]["target"] == "discord"
+        text = calls[0]["messages"][0]["text"]
+        assert "バックアップ完了" in text
+        assert "12.5" in text
+
+    def test_failure_does_not_send_a_duplicate_notification(self, monkeypatch):
+        """失敗時はperform_backup内部の_notify_and_log_errorが既に通知済みのため、
+        trigger_manual_backup_async側で重ねて送らない。"""
+        monkeypatch.setattr(backup_service, "perform_backup", lambda: (False, "整合性確認に失敗", 0.0))
+        calls = []
+        monkeypatch.setattr(backup_service, "send_push", lambda **kwargs: calls.append(kwargs))
+
+        backup_service.trigger_manual_backup_async()
+
+        assert calls == []
+
+    def test_runs_in_a_daemon_thread(self, monkeypatch):
+        monkeypatch.setattr(backup_service, "perform_backup", lambda: (True, "ok", 1.0))
+        monkeypatch.setattr(backup_service, "send_push", lambda **kwargs: None)
+        captured_threads = []
+        real_thread_cls = threading.Thread
+
+        class _CapturingThread(real_thread_cls):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                captured_threads.append(self)
+
+        monkeypatch.setattr(threading, "Thread", _CapturingThread)
+
+        backup_service.trigger_manual_backup_async()
+
+        assert len(captured_threads) == 1
+        assert captured_threads[0].daemon is True
