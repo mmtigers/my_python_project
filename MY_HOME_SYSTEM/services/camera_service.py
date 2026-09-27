@@ -40,6 +40,21 @@ MAX_PLAUSIBLE_SEGMENT_GAP_SECONDS = 43200  # ファイル間の時間差の異�
 PLAYLIST_WAIT_MAX_ATTEMPTS = 10  # 生成中プレイリスト待機の最大試行回数
 PLAYLIST_WAIT_POLL_INTERVAL_SEC = 0.5  # 生成中プレイリスト待機のポーリング間隔(秒)
 
+# 不具合修正: ffmpegのRTSP入力にはioタイムアウトが既定で設定されておらず、
+# TCP接続は張れるが応答が返らない種類のネットワーク不調(実機で駐車場カメラの
+# ネットワーク瞬断後に確認)に遭遇すると、ffmpegプロセスはエラーも出さず
+# 無期限にハングする。`_start_hls_stream_locked`の`existing.poll() is None`
+# チェックはOSプロセスの生死しか見ないため、ハングしたプロセスを「配信中」と
+# 誤認して再起動されず、ライブのはずの映像が固まった時点の映像(録画のように
+# 見える)を配信し続けてしまう。RTSP/tcpプロトコル自身のソケットI/Oタイムアウト
+# である`-timeout`(マイクロ秒)を設定し、応答が無ければffmpeg自身が終了する
+# ようにすることで、次のリクエストで`existing.poll() is not None`となり
+# 新しいプロセスが起動されるようにする。
+# 注意: 汎用オプションの`-rw_timeout`は`async:`プロトコル専用であり、
+# RTSP/tcpの読み取りには効かないことを実機相当の検証で確認済み(疎通不能な
+# ホストに対して待ち続け、この`-timeout`だけが指定通りに機能する)。
+FFMPEG_RTSP_TIMEOUT_USEC = 15_000_000  # ライブRTSP入力のI/Oタイムアウト(15秒)
+
 _active_processes: Dict[str, subprocess.Popen] = {}
 _active_vod_processes: Dict[str, subprocess.Popen] = {} # VOD排他制御用の辞書を追加
 _rtsp_cache: Dict[str, str] = {}
@@ -231,6 +246,7 @@ def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:
         "-hide_banner",
         "-loglevel", "error",
         "-rtsp_transport", "tcp",
+        "-timeout", str(FFMPEG_RTSP_TIMEOUT_USEC),
         "-i", rtsp_url,
         "-c:v", "copy",
         "-an",
