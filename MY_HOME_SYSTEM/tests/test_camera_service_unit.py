@@ -236,12 +236,15 @@ class TestStartHlsStreamLogFileHandling:
         called_cmd = mock_popen.call_args[0][0]
         assert "-loglevel" in called_cmd
 
-    def test_rtsp_input_has_an_rw_timeout(self, tmp_path, monkeypatch):
+    def test_rtsp_input_has_an_io_timeout(self, tmp_path, monkeypatch):
         """不具合修正: ffmpegのRTSP入力にioタイムアウトが無いと、応答が返らない
         種類のネットワーク不調でffmpegがエラーも出さず無期限にハングし、
         `existing.poll() is None`チェックがハングしたプロセスを「配信中」と
         誤認して再起動しない(固まった時点の映像がライブとして配信され続ける)。
-        `-rw_timeout`が設定され、`-i`(RTSP URL)より前に渡されること。"""
+        RTSP/tcpプロトコル自身のソケットI/Oタイムアウトである`-timeout`が
+        設定され、`-i`(RTSP URL)より前に渡されること(汎用オプションの
+        `-rw_timeout`は`async:`プロトコル専用でRTSP/tcpには効かないことを
+        実機相当の検証で確認済みのため使わない)。"""
         monkeypatch.setattr(camera_service, "HLS_LIVE_DIR", str(tmp_path))
         monkeypatch.setattr(camera_service, "get_rtsp_url", lambda cam_conf: "rtsp://u:p@host/stream")
 
@@ -252,9 +255,10 @@ class TestStartHlsStreamLogFileHandling:
             camera_service.start_hls_stream({"id": "cam1", "name": "TestCam"})
 
         called_cmd = mock_popen.call_args[0][0]
-        assert "-rw_timeout" in called_cmd
-        timeout_idx = called_cmd.index("-rw_timeout")
-        assert called_cmd[timeout_idx + 1] == str(camera_service.FFMPEG_RW_TIMEOUT_USEC)
+        assert "-rw_timeout" not in called_cmd
+        assert "-timeout" in called_cmd
+        timeout_idx = called_cmd.index("-timeout")
+        assert called_cmd[timeout_idx + 1] == str(camera_service.FFMPEG_RTSP_TIMEOUT_USEC)
         assert timeout_idx < called_cmd.index("-i")
 
 
