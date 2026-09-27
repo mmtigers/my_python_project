@@ -104,6 +104,18 @@ FORCE_RECONNECT_INTERVAL_SEC: int = 540
 PULL_FAILURE_RECONNECT_THRESHOLD: int = 3
 RENEW_DURATION: str = "PT600S"
 
+# 不具合修正: ONVIF(zeep/requests)のSOAP呼び出しにはライブラリ既定でタイムアウトが
+# 一切無い。TCP接続自体は張れるが応答が返らない種類のネットワーク不調(実機で
+# 駐車場カメラがnetwork_logger.pyの"Ping:Unreachable"を記録した直後、4時間以上
+# 動体検知ログが完全に途絶える障害を確認)に遭遇すると、GetDeviceInformation()等の
+# 呼び出しが例外を送出しないまま無期限にハングし、監視スレッドがバックオフ・
+# エラーログ・Discord通知のいずれにも到達できず、完全に沈黙したまま止まり続ける
+# (既存のbackoff/通知経路自体は正しく実装されているが、例外が発生しないため
+# 一度も呼ばれない)。zeepのTransport.operation_timeoutを明示し、応答が
+# この秒数を超えたら例外(requests.exceptions.Timeout)を送出させることで、
+# 既存の`except Exception`によるバックオフ・再接続経路に必ず載るようにする。
+ONVIF_OPERATION_TIMEOUT_SEC: int = 10
+
 # Issue #703: NVR録画からスナップショットを切り出すときの試行計画。
 # (新しい順に並べた当日の録画ファイルの何番目を使うか, ファイル末尾から何秒手前にシークするか)
 # 録画は fragmented MP4(moof/mdat の繰り返し)で、CIFS 越しに見えるファイル末尾は
@@ -653,6 +665,7 @@ def _connect_and_subscribe(
 
     devicemgmt: Any = session.mycam.create_devicemgmt_service()
     devicemgmt.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
+    devicemgmt.zeep_client.transport.operation_timeout = ONVIF_OPERATION_TIMEOUT_SEC
 
     if not check_camera_time(devicemgmt, cam_name):
         raise ConnectionRefusedError(f"[{cam_name}] Time verification failed. Check camera clock.")
@@ -667,6 +680,7 @@ def _connect_and_subscribe(
     # 3. イベント購読
     session.events_service = session.mycam.create_events_service()
     session.events_service.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
+    session.events_service.zeep_client.transport.operation_timeout = ONVIF_OPERATION_TIMEOUT_SEC
 
     logger.debug(f"[{cam_name}] Creating subscription with TopicFilter...")
     # いったん生の戻り値を持たせる。次の ONVIFService 構築で失敗しても release() が
@@ -689,6 +703,7 @@ def _connect_and_subscribe(
     )
 
     pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
+    pullpoint.zeep_client.transport.operation_timeout = ONVIF_OPERATION_TIMEOUT_SEC
 
     _add_pullpoint(pullpoint)
     session.pullpoint = pullpoint
