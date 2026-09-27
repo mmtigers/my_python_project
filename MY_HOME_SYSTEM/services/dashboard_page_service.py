@@ -16,13 +16,14 @@ import glob
 import html
 import json
 import os
+import re
 from datetime import datetime
 from typing import Any
 
 import config
 import pandas as pd
 
-from services import analysis_service, home_status_service
+from services import home_status_service
 
 # === ページ共通のシェル ===
 
@@ -100,12 +101,20 @@ _PAGE_BASE_CSS = """
     table.simple-table th { color: #666; font-weight: bold; font-size: 0.75rem; }
     .empty-note { color: #888; font-size: 0.85rem; margin: 4px 0 16px; }
 
-    /* カメラのスナップショットギャラリー */
+    /* カメラのスナップショットギャラリー。タップで元画像を別タブに拡大表示する
+       (`.snapshot-item`が`<a target="_blank">`)。 */
     .snapshot-grid {
         display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
         gap: 6px; margin-bottom: 16px;
     }
-    .snapshot-grid img { width: 100%; border-radius: 8px; display: block; background: #eee; }
+    a.snapshot-item {
+        display: block; text-decoration: none; color: inherit;
+        -webkit-tap-highlight-color: rgba(0,0,0,0.08);
+    }
+    .snapshot-item img { width: 100%; border-radius: 8px; display: block; background: #eee; }
+    .snapshot-caption {
+        display: block; margin-top: 2px; font-size: 0.7rem; color: #666; text-align: center;
+    }
 
     /* システムページの機能ごとの鮮度一覧 */
     .freshness-row {
@@ -153,6 +162,7 @@ _PAGE_BASE_CSS = """
         a.external-card { background: #0d2b28; color: #4db6ac; border-color: #14413c; }
         table.simple-table th { color: #9e9e9e; }
         table.simple-table th, table.simple-table td { border-color: #333; }
+        .snapshot-caption { color: #9e9e9e; }
         .freshness-row { border-color: #333; }
         .maintenance-box { border-color: #333; }
         .camera-btn { background: #16304a; color: #90caf9; border-color: #24507a; }
@@ -342,15 +352,48 @@ def resolve_snapshot_path(filename: str) -> str | None:
     return candidate
 
 
+# ファイル名末尾の撮影日時(`monitors/camera_monitor.py`の`save_image_from_stream`が
+# `{カメラ名}_{種別}_{YYYYMMDD_HHMMSS}.jpg`の形式で付与する)。カメラ名に`_`を含みうる
+# ため、位置ではなく末尾のこのパターンで抽出する。
+_SNAPSHOT_TIMESTAMP_RE = re.compile(r"_(\d{8}_\d{6})\.jpg$")
+
+
+def _snapshot_timestamp(filename: str) -> datetime | None:
+    """スナップショットのファイル名から撮影日時を取り出す(形式が違えば None)。"""
+    m = _SNAPSHOT_TIMESTAMP_RE.search(filename)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%Y%m%d_%H%M%S")  # noqa: DTZ007
+    except ValueError:
+        return None
+
+
 def _render_snapshot_gallery(snapshot_url_prefix: str) -> str:
+    """カメラのスナップショット一覧。
+
+    以前は`<img>`を並べるだけで、タップしても拡大できず・いつの写真かも
+    分からなかった。各画像を元ファイルへの`<a target="_blank">`にしてタップで
+    拡大表示できるようにし、ファイル名から撮影日時を取り出してキャプションに出す。
+    """
     files = _list_snapshot_files()[:_SNAPSHOT_GALLERY_LIMIT]
     if not files:
         return '<p class="empty-note">写真なし</p>'
-    imgs = "".join(
-        f'<img src="{html.escape(snapshot_url_prefix)}/{html.escape(name)}" loading="lazy" alt="スナップショット">'
-        for name in files
-    )
-    return f'<div class="snapshot-grid">{imgs}</div>'
+    items = []
+    for name in files:
+        url = f"{html.escape(snapshot_url_prefix)}/{html.escape(name)}"
+        moment = _snapshot_timestamp(name)
+        caption = (
+            f'<span class="snapshot-caption">'
+            f'{html.escape(home_status_service.format_short_timestamp(moment))}</span>'
+            if moment is not None else ""
+        )
+        items.append(
+            f'<a class="snapshot-item" href="{url}" target="_blank" rel="noopener">'
+            f'<img src="{url}" loading="lazy" alt="スナップショット">'
+            f"{caption}</a>"
+        )
+    return f'<div class="snapshot-grid">{"".join(items)}</div>'
 
 
 def _render_simple_table(df: pd.DataFrame, columns: dict[str, str], *, limit: int = 50) -> str:
@@ -447,7 +490,6 @@ _CAMERA_SCRIPT = """
 
 def render_watch_page(
     df_sensor: pd.DataFrame,
-    df_security_log: pd.DataFrame,
     *,
     dashboard_path: str,
     snapshot_url_prefix: str,
@@ -459,13 +501,17 @@ def render_watch_page(
     がカードごとに付ける `anchor` を使って、タップしたカードの内容が実際に載っている
     セクションまで連れて行く。ここに置くid(`camera-section`/`takasago-log`/
     `itami-log`)を変えるときはカード側の`anchor`も一緒に直すこと。
+
+    防犯ログは以前`security_logs`テーブルを読んでいたが、そこへ書き込むコードが
+    存在せず常に空だったため、カメラの動体検知(`home_status_service.camera_motion_log`。
+    `df_sensor`から抽出するため既に`apply_friendly_names`済み)を正のデータとして使う。
     """
     cameras = [
         {"id": cam["id"], "name": cam["name"]}
         for cam in config.CAMERAS
         if cam.get("enabled", True)
     ]
-    df_security_log = analysis_service.apply_friendly_names(df_security_log)
+    df_camera_motion = home_status_service.camera_motion_log(df_sensor)
     if not df_sensor.empty and "location" in df_sensor.columns:
         df_takasago = df_sensor[df_sensor["location"] == "高砂"]
         df_itami = df_sensor[df_sensor["location"] == "伊丹"]
@@ -483,7 +529,7 @@ def render_watch_page(
         "<h2>🖼️ 最近の写真</h2>"
         f"{_render_snapshot_gallery(snapshot_url_prefix)}"
         "<h2>🛡️ 防犯ログ</h2>"
-        f'{_render_simple_table(df_security_log, {"timestamp": "検知時刻", "friendly_name": "デバイス", "classification": "検知種別"})}'
+        f'{_render_simple_table(df_camera_motion, {"timestamp": "検知時刻", "friendly_name": "カメラ"})}'
         '<div id="takasago-log">'
         "<h2>👵 高砂実家のセンサーログ</h2>"
         f'{_render_simple_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'

@@ -90,6 +90,48 @@ class TestRenderSnapshotGallery:
         assert "<img" in html
         assert "/dashboard/snapshot/photo.jpg" in html
 
+    def test_image_is_wrapped_in_a_link_to_enlarge_it(self):
+        """不具合修正: 以前は<img>のみで、タップしても拡大表示できなかった。"""
+        snap_dir = os.path.join(config.ASSETS_DIR, "snapshots")
+        os.makedirs(snap_dir)
+        with open(os.path.join(snap_dir, "photo.jpg"), "w") as f:
+            f.write("x")
+        html = dashboard_page_service._render_snapshot_gallery("/dashboard/snapshot")
+        assert '<a class="snapshot-item" href="/dashboard/snapshot/photo.jpg"' in html
+        assert 'target="_blank"' in html
+
+    def test_shows_capture_time_parsed_from_filename(self):
+        """不具合修正: 以前は撮影日時がどこにも表示されなかった。"""
+        snap_dir = os.path.join(config.ASSETS_DIR, "snapshots")
+        os.makedirs(snap_dir)
+        with open(os.path.join(snap_dir, "玄関_motion_20260115_083045.jpg"), "w") as f:
+            f.write("x")
+        html = dashboard_page_service._render_snapshot_gallery("/dashboard/snapshot")
+        assert "01/15 08:30" in html
+
+    def test_unparseable_filename_shows_no_caption_but_still_renders(self):
+        snap_dir = os.path.join(config.ASSETS_DIR, "snapshots")
+        os.makedirs(snap_dir)
+        with open(os.path.join(snap_dir, "legacy.jpg"), "w") as f:
+            f.write("x")
+        html = dashboard_page_service._render_snapshot_gallery("/dashboard/snapshot")
+        assert "snapshot-caption" not in html
+        assert "<img" in html
+
+
+class TestSnapshotTimestamp:
+    def test_parses_the_trailing_timestamp(self):
+        moment = dashboard_page_service._snapshot_timestamp("駐車場_motion_20260115_083045.jpg")
+        assert moment is not None
+        assert moment.strftime("%Y-%m-%d %H:%M:%S") == "2026-01-15 08:30:45"
+
+    def test_camera_name_containing_underscores_does_not_confuse_parsing(self):
+        moment = dashboard_page_service._snapshot_timestamp("entrance_cam_1_motion_20260115_083045.jpg")
+        assert moment is not None
+
+    def test_unrecognized_format_returns_none(self):
+        assert dashboard_page_service._snapshot_timestamp("legacy.jpg") is None
+
 
 class TestRenderSimpleTable:
     def test_empty_dataframe_shows_placeholder(self):
@@ -127,7 +169,6 @@ class TestRenderWatchPage:
         monkeypatch.setattr(config, "CAMERAS", [{"id": "entrance", "name": "玄関", "enabled": True}])
         html = dashboard_page_service.render_watch_page(
             pd.DataFrame(),
-            pd.DataFrame(),
             dashboard_path="/dashboard",
             snapshot_url_prefix="/dashboard/snapshot",
         )
@@ -144,7 +185,6 @@ class TestRenderWatchPage:
             ],
         )
         html = dashboard_page_service.render_watch_page(
-            pd.DataFrame(),
             pd.DataFrame(),
             dashboard_path="/dashboard",
             snapshot_url_prefix="/dashboard/snapshot",
@@ -165,7 +205,6 @@ class TestRenderWatchPage:
         })
         html = dashboard_page_service.render_watch_page(
             df_sensor,
-            pd.DataFrame(),
             dashboard_path="/dashboard",
             snapshot_url_prefix="/dashboard/snapshot",
         )
@@ -177,6 +216,27 @@ class TestRenderWatchPage:
         assert "センサーB" not in takasago_section
         assert "センサーB" in itami_section
         assert "センサーA" not in itami_section
+
+    def test_security_log_shows_camera_motion_detections(self, monkeypatch):
+        """不具合修正: 防犯ログは以前`security_logs`テーブル(書き込むコードが無く
+        常に空)を読んでおり、常に「表示できるデータがありません」だった。
+        カメラの動体検知(device_records)を正のデータとして表示する。"""
+        monkeypatch.setattr(config, "CAMERAS", [])
+        df_sensor = pd.DataFrame({
+            "device_type": ["ONVIF_CAMERA"],
+            "movement_state": ["ON"],
+            "timestamp": [pd.Timestamp("2026-01-01 10:00:00")],
+            "friendly_name": ["駐車場カメラ"],
+        })
+        html = dashboard_page_service.render_watch_page(
+            df_sensor,
+            dashboard_path="/dashboard",
+            snapshot_url_prefix="/dashboard/snapshot",
+        )
+
+        security_section = html.split("防犯ログ", 1)[1].split("高砂実家のセンサーログ", 1)[0]
+        assert "駐車場カメラ" in security_section
+        assert "表示できるデータがありません" not in security_section
 
 
 class TestBuildFreshnessRows:

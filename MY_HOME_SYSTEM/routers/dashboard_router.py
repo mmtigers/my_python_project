@@ -132,7 +132,6 @@ def dashboard_watch() -> HTMLResponse:
     return HTMLResponse(
         dashboard_page_service.render_watch_page(
             materials.df_sensor,
-            materials.df_security_log,
             dashboard_path=f"{_BASE_PATH}/",
             snapshot_url_prefix=f"{_BASE_PATH}/snapshot",
         )
