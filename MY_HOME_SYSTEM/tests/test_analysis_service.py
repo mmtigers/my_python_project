@@ -9,7 +9,7 @@ DB操作そのもの。テーブルが存在しない・カラムが一致しな
 import os
 import sqlite3
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytz
@@ -121,6 +121,48 @@ class TestLoadNasStatus:
         row = analysis_service.load_nas_status()
         assert row is not None
         assert "2026-01-02" in str(row["timestamp"])
+
+
+class TestLoadNasHistory:
+    """load_nas_history: NASカードの容量履歴グラフ用データ取得。不具合修正で新設。"""
+
+    def test_returns_empty_dataframe_when_no_data(self, isolated_db):
+        assert analysis_service.load_nas_history().empty
+
+    def test_returns_rows_oldest_first(self, isolated_db):
+        with get_db_cursor(commit=True) as cur:
+            for ts, percent in [
+                ("2026-01-03T00:00:00", 30.0),
+                ("2026-01-01T00:00:00", 10.0),
+                ("2026-01-02T00:00:00", 20.0),
+            ]:
+                cur.execute(
+                    f"INSERT INTO {config.SQLITE_TABLE_NAS} "
+                    "(timestamp, device_name, ip_address, status_ping, status_mount, "
+                    "total_gb, used_gb, free_gb, percent) "
+                    f"VALUES ('{ts}', 'NAS1', '192.168.1.1', 'ok', 'ok', 100, 50, 50, {percent})"
+                )
+
+        df = analysis_service.load_nas_history()
+
+        assert list(df["percent"]) == [10.0, 20.0, 30.0]
+
+    def test_respects_the_limit(self, isolated_db):
+        with get_db_cursor(commit=True) as cur:
+            for i in range(5):
+                cur.execute(
+                    f"INSERT INTO {config.SQLITE_TABLE_NAS} "
+                    "(timestamp, device_name, ip_address, status_ping, status_mount, "
+                    "total_gb, used_gb, free_gb, percent) "
+                    f"VALUES ('2026-01-0{i + 1}T00:00:00', 'NAS1', '192.168.1.1', 'ok', 'ok', "
+                    f"100, 50, 50, {i})"
+                )
+
+        df = analysis_service.load_nas_history(limit=2)
+
+        assert len(df) == 2
+        # 新しい順LIMITしたあと古い順に並べ直すため、直近2件(3,4)が残る
+        assert list(df["percent"]) == [3.0, 4.0]
 
 
 class TestLoadSensorData:
@@ -490,3 +532,40 @@ class TestCalculateLastMonthCostAtMonthEnd:
         assert analysis_service.calculate_last_month_cost_same_point() == int(
             1.0 * analysis_service.ELECTRICITY_YEN_PER_KWH
         )
+
+
+@freeze_time("2026-09-15 12:00:00")  # JST
+class TestCalculateDailyCostSeries:
+    """くらしページの電気代タップ時の詳細表示(日別推移)。不具合修正で新設。"""
+
+    def test_returns_requested_number_of_days_newest_first(self, isolated_db):
+        rows = analysis_service.calculate_daily_cost_series(days=5)
+        assert len(rows) == 5
+        dates = [day for day, _ in rows]
+        assert dates == sorted(dates, reverse=True)
+        assert dates[0] == datetime.now(pytz.timezone("Asia/Tokyo")).date()
+
+    def test_returns_zero_for_days_with_no_power_data(self, isolated_db):
+        rows = analysis_service.calculate_daily_cost_series(days=3)
+        assert all(cost == 0 for _, cost in rows)
+
+    def test_isolates_cost_by_calendar_day(self, isolated_db):
+        """前日ぶんの記録が今日の集計に混入しない(逆も同様)こと。"""
+        _insert_meter_rows([
+            # 前日(9/14): 1000W×1h = 1.0kWh
+            (1000, "2026-09-14T10:00:00"),
+            (1000, "2026-09-14T11:00:00"),
+            # 今日(9/15): 2000W×1h = 2.0kWh
+            (2000, "2026-09-15T00:00:01"),
+            (2000, "2026-09-15T01:00:01"),
+        ])
+
+        rows = analysis_service.calculate_daily_cost_series(days=3)
+        by_date = dict(rows)
+        today = datetime.now(pytz.timezone("Asia/Tokyo")).date()
+
+        assert by_date[today] == int(2.0 * analysis_service.ELECTRICITY_YEN_PER_KWH)
+        assert by_date[today - timedelta(days=1)] == int(1.0 * analysis_service.ELECTRICITY_YEN_PER_KWH)
+
+    def test_default_is_fourteen_days(self, isolated_db):
+        assert len(analysis_service.calculate_daily_cost_series()) == 14

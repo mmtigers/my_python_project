@@ -187,6 +187,24 @@ def load_nas_status() -> Optional[pd.Series]:
         logger.error(f"NAS Data Load Error: {e}")
         return None
 
+
+def load_nas_history(limit: int = 200) -> pd.DataFrame:
+    """NASの容量履歴を古い順(グラフ描画向き)で返す。
+
+    **(不具合修正で新設)** NASカードをタップしても容量の履歴を見る手段が無かった。
+    `nas_monitor.py`が定期的に書き込む`nas_records`(`timestamp`/`percent`/
+    `used_gb`/`free_gb`/`total_gb`)から直近`limit`件を取得する。
+    """
+    table_name = getattr(config, "SQLITE_TABLE_NAS", "nas_records")
+    query = (
+        f"SELECT timestamp, percent, used_gb, free_gb, total_gb FROM {table_name} "
+        f"ORDER BY timestamp DESC LIMIT {limit}"
+    )
+    df = load_data_from_db(query)
+    if df.empty:
+        return df
+    return df.sort_values("timestamp").reset_index(drop=True)
+
 def load_generic_data(table_name: str, limit: int = 500) -> pd.DataFrame:
     """指定テーブルからデータを取得（汎用）"""
     query = f"SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT {limit}"
@@ -297,6 +315,24 @@ def calculate_monthly_cost_cumulative() -> int:
     """今月の電気代概算(月初から今まで)。"""
     now = datetime.now(pytz.timezone("Asia/Tokyo"))
     return _calculate_cost_between(_start_of_month(now), now)
+
+
+def calculate_daily_cost_series(days: int = 14) -> list[tuple[date, int]]:
+    """直近`days`日分(当日を含む)の電気代概算を日ごとに算出する(新しい順、先頭が今日)。
+
+    **(不具合修正)** くらしページの「今月の電気代」カードをタップしても、以前は
+    同じカードをもう一度表示するだけで詳細と呼べる情報が無かった。この関数が
+    その詳細(直近の日別推移)を提供する。当日分(先頭行)は日が変わるまでの
+    途中経過であり、他の日と単純比較すると必ず低く見える点に注意。
+    """
+    now = datetime.now(pytz.timezone("Asia/Tokyo"))
+    results: list[tuple[date, int]] = []
+    for offset in range(days):
+        day_moment = now - timedelta(days=offset)
+        day_start = day_moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = now if offset == 0 else day_start + timedelta(days=1) - timedelta(seconds=1)
+        results.append((day_start.date(), _calculate_cost_between(day_start, day_end)))
+    return results
 
 
 def calculate_last_month_cost_same_point() -> int:

@@ -2,9 +2,16 @@
 """
 routers/system_router.py (手動バックアップトリガー・サービス再起動)のテスト。
 
-backup_service.perform_backup / system_maintenance_service.restart_home_system は
+backup_service.trigger_manual_backup_async / system_maintenance_service.restart_home_system は
 実際にはNAS I/O・systemctl呼び出しを伴うため、ここではrouter層の
-「成功/失敗をどうHTTPレスポンスへ変換するか」のみをモックして検証する。
+「どうHTTPレスポンスへ変換するか」のみをモックして検証する。
+
+**(不具合修正)** バックアップは以前`perform_backup()`の完了を待ってから応答して
+おり、成功/失敗をレスポンスにそのまま反映していた。完了(NAS転送・場合によっては
+オフサイト複製で最大30分)を待たせると「タップしても完了したか分からない」原因に
+なっていたため、`trigger_manual_backup_async`でバックグラウンド実行に切り替えた。
+そのため、このエンドポイントは常に「開始した」旨を返し、実際の成功/失敗は
+(`services/backup_service.py`側のテストが検証する)Discord通知で伝える。
 
 なお、このエンドポイントには認可チェックが一切なく、誰でもバックアップを
 トリガーできる(CODE_REVIEW_REPORT.md 2.1で指摘済み・未対応)。
@@ -19,29 +26,16 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from routers import system_router
 
 
-def test_backup_success_returns_200_with_size(api_client, monkeypatch):
-    monkeypatch.setattr(
-        system_router.backup_service, "perform_backup", lambda: (True, "バックアップ完了", 12.5)
-    )
+def test_backup_returns_200_and_starts_the_background_backup(api_client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(system_router.backup_service, "trigger_manual_backup_async", lambda: calls.append(1))
+
     res = api_client.post("/api/system/backup")
+
     assert res.status_code == 200
     body = res.json()
-    assert body["status"] == "success"
-    assert body["size_mb"] == 12.5
-
-
-def test_backup_failure_returns_500_with_message(api_client, monkeypatch):
-    monkeypatch.setattr(
-        system_router.backup_service,
-        "perform_backup",
-        lambda: (False, "NAS転送後の整合性確認に失敗しました。", 0.0),
-    )
-    res = api_client.post("/api/system/backup")
-    assert res.status_code == 500
-    # #408: 生の失敗メッセージ(NASパス等の内部情報を含みうる)はログにのみ残し、
-    # クライアントには固定の要約のみを返す。
-    assert res.json()["detail"] == "バックアップに失敗しました。サーバーログを確認してください。"
-    assert "整合性確認に失敗" not in res.json()["detail"]
+    assert body["status"] == "started"
+    assert len(calls) == 1
 
 
 def test_backup_endpoint_currently_requires_no_authentication(api_client, monkeypatch):
@@ -51,12 +45,7 @@ def test_backup_endpoint_currently_requires_no_authentication(api_client, monkey
     現状の挙動を明示的に固定して回帰検知するためのテスト。
     """
     calls = []
-
-    def _fake_backup():
-        calls.append(1)
-        return True, "ok", 1.0
-
-    monkeypatch.setattr(system_router.backup_service, "perform_backup", _fake_backup)
+    monkeypatch.setattr(system_router.backup_service, "trigger_manual_backup_async", lambda: calls.append(1))
     res = api_client.post("/api/system/backup")
     assert res.status_code == 200
     assert len(calls) == 1

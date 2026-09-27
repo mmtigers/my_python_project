@@ -535,3 +535,59 @@ class TestInnerMonitorLoop:
         _run(monkeypatch, stop_after=5)
 
         assert camera_monitor.active_pullpoints == []
+
+
+class TestOnvifOperationTimeout:
+    """
+    不具合修正: 実機で駐車場カメラがnetwork_logger.pyの"Ping:Unreachable"を記録した
+    直後、動体検知ログが4時間以上完全に途絶える障害が発生した。原因は、
+    ONVIF(zeep/requests)のSOAP呼び出しにライブラリ既定でタイムアウトが無く、
+    TCP接続は張れるが応答が返らない種類のネットワーク不調でGetDeviceInformation()等が
+    無期限にハングし、監視スレッドが例外を送出しないまま完全に停止してしまうこと
+    だった(バックオフ・エラーログ・Discord通知の経路自体は正しいが、一度も
+    呼ばれなかった)。`_connect_and_subscribe`がdevicemgmt/events_service/pullpointの
+    3つのzeepクライアントすべてに`operation_timeout`を明示することを固定する。
+    """
+
+    def test_operation_timeout_is_set_on_all_three_zeep_clients(self, monkeypatch):
+        monkeypatch.setattr(camera_monitor, "is_host_reachable", lambda ip: True)
+        monkeypatch.setattr(camera_monitor, "find_wsdl_path", lambda: "/tmp/wsdl")
+        monkeypatch.setattr(camera_monitor, "check_camera_time", lambda dm, name: True)
+
+        devicemgmt_svc = _FakeZeepHolder()
+        devicemgmt_svc.GetDeviceInformation = lambda: type("Info", (), {"Model": "FAKE-1"})()
+
+        events_svc = _FakeZeepHolder()
+        events_svc.CreatePullPointSubscription = lambda: _FakeRawPullpoint()
+
+        pullpoint_svc = _FakeZeepHolder()
+
+        class _FakeCamera:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def create_devicemgmt_service(self):
+                return devicemgmt_svc
+
+            def create_events_service(self):
+                return events_svc
+
+        monkeypatch.setattr(camera_monitor, "ONVIFCamera", _FakeCamera)
+        monkeypatch.setattr(camera_monitor, "ONVIFService", lambda **kwargs: pullpoint_svc)
+
+        session = camera_monitor._CameraSession()
+        camera_monitor._connect_and_subscribe(
+            {"name": "テストカメラ", "ip": "192.0.2.1", "user": "u", "pass": "p"}, session, True
+        )
+
+        assert devicemgmt_svc.zeep_client.transport.operation_timeout == camera_monitor.ONVIF_OPERATION_TIMEOUT_SEC
+        assert events_svc.zeep_client.transport.operation_timeout == camera_monitor.ONVIF_OPERATION_TIMEOUT_SEC
+        assert pullpoint_svc.zeep_client.transport.operation_timeout == camera_monitor.ONVIF_OPERATION_TIMEOUT_SEC
+
+
+class _FakeZeepHolder:
+    """`.zeep_client.transport`を持つだけの最小フェイク(ONVIFカメラ/イベント/
+    PullPointの各サービスオブジェクトの代役)。"""
+
+    def __init__(self):
+        self.zeep_client = _FakeZeepClient()

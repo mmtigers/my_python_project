@@ -12,7 +12,7 @@
 """
 import os
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from unittest.mock import patch
 
 import pandas as pd
@@ -52,10 +52,12 @@ def _stub_loaders(**overrides):
         "load_sensor_data": pd.DataFrame(),
         "load_generic_data": pd.DataFrame(),
         "load_nas_status": None,
+        "load_nas_history": pd.DataFrame(),
         "get_memory_usage": {"percent": 42.0},
         "calculate_monthly_cost_cumulative": 1234,
         "calculate_last_month_cost_same_point": 1000,
         "get_disk_usage": {"percent": 55.0},
+        "calculate_daily_cost_series": [(date(2026, 9, 19), 123)],
     }
     defaults.update(overrides)
     return [
@@ -230,11 +232,33 @@ class TestSubPages:
         assert "💰 今月の電気代" in res.text
         assert "👵 高砂 (実家)" not in res.text
 
+    def test_life_page_shows_daily_cost_detail(self):
+        """不具合修正: 電気代カードをタップしても、以前は同じカードの再掲だけで
+        詳細と呼べる情報が無かった。日別の電気代推移が表示されること。"""
+        res = self._get("life")
+        assert "日別の電気代" in res.text
+        assert "cost-history" in res.text
+        assert "123円" in res.text
+
     def test_sys_page_shows_overall_summary_and_maintenance_actions(self):
         res = self._get("sys")
         assert "すべて正常" in res.text or "確認が必要です" in res.text
         assert "システム再起動" in res.text
         assert "今すぐバックアップ" in res.text
+
+    def test_sys_page_shows_nas_capacity_history(self):
+        """不具合修正: NASカードをタップしても容量の履歴を見る手段が無かった。"""
+        res = self._get(
+            "sys",
+            load_nas_history=pd.DataFrame({
+                "timestamp": [pd.Timestamp("2026-09-14"), pd.Timestamp("2026-09-15")],
+                "percent": [30.0, 42.0],
+                "free_gb": [120, 100],
+            }),
+        )
+        assert 'id="nas-history"' in res.text
+        assert "<svg" in res.text
+        assert "現在 42%" in res.text
 
     def test_sys_page_restart_button_is_disabled_until_confirmed(self):
         res = self._get("sys")
@@ -394,6 +418,16 @@ class TestCardsLinkToTheirDetail:
         assert len(set(hrefs.values())) == len(watch_titles), "4枚のリンク先が全部違うこと"
         for href in hrefs.values():
             assert href.startswith("/dashboard/watch")
+
+    def test_nas_card_links_to_the_history_section(self):
+        """不具合修正: NASカードをタップしても容量履歴を見る手段が無かったため、
+        システムページ内のNAS履歴セクションへ飛ぶ`anchor`を付けた。"""
+        cards, _ = self._collect()
+        (nas_card,) = [card for card in cards if card.title == "🗄️ NAS"]
+
+        href = home_status_service.card_detail_href(nas_card, "/dashboard/")
+
+        assert href == "/dashboard/sys#nas-history"
 
     def test_the_link_is_relative_to_the_viewing_origin(self):
         """固定URLを埋めるとLAN内のIPと公開ドメインのどちらかで繋がらなくなる。"""

@@ -72,10 +72,6 @@ STATUS_CACHE_TTL_SEC = 60
 # 必要なのが「直近」と「今日」だけのため、多くは読まない。
 MOBILE_SENSOR_ROW_LIMIT = 3000
 
-# 見守りページの防犯ログで読む行数。表には先頭50件しか出さないが、
-# 「最近の異常」を取りこぼさない程度の余裕を持たせる。
-SECURITY_LOG_ROW_LIMIT = 200
-
 # カード1枚のCSS。ホームページと各サブページ(`services/dashboard_page_service.py`)が共有する。
 STATUS_CARD_CSS = """
     /* --- ステータスカード --- */
@@ -608,6 +604,18 @@ def latest_parking_motion_at(df_sensor: pd.DataFrame):
     return _latest_timestamp(_parking_camera_motion(df_sensor))
 
 
+def camera_motion_log(df_sensor: pd.DataFrame) -> pd.DataFrame:
+    """見守りページの防犯ログに出す、カメラが動きを捉えた行(新しい順)。
+
+    以前は`security_logs`テーブルを読んでいたが、このテーブルへ書き込むコードが
+    リポジトリ内のどこにも存在せず(camera_monitor.pyが動体検知を記録するのは
+    `device_records`のみ)、防犯ログは常に「表示できるデータがありません」の
+    ままだった。カード側の判定(`get_camera_status`)と同じ抽出(`_camera_motion`)を
+    正のデータとして使う。
+    """
+    return _camera_motion(df_sensor)
+
+
 def describe_camera(df_sensor: pd.DataFrame, now: datetime) -> str | None:
     """どのカメラが捉えたのか。値の「5分前に検知」だけでは場所が分からない。"""
     df_cam = _camera_motion(df_sensor)
@@ -695,7 +703,7 @@ def build_status_cards(
         StatusCard("🖥️ サーバー", server_val, server_theme, tab="sys", group="sys",
                    sub=describe_server(disk)),
         StatusCard("🗄️ NAS", nas_val, nas_theme, tab="sys", group="sys",
-                   sub=describe_nas(nas_data)),
+                   sub=describe_nas(nas_data), anchor="#nas-history"),
     ]
 
 
@@ -737,6 +745,10 @@ def clear_status_cache() -> None:
         _cache.clear()
 
 
+# くらしページの電気代詳細(日別推移)で遡る日数。
+DAILY_COST_HISTORY_DAYS = 14
+
+
 class DashboardMaterials(NamedTuple):
     """ダッシュボードの各ページ(ホーム・見守り・くらし・システム)が共有する材料。
 
@@ -745,12 +757,13 @@ class DashboardMaterials(NamedTuple):
     増えない(`_cached`のキーはページに関わらず共通)。
     """
     df_sensor: pd.DataFrame
-    df_security_log: pd.DataFrame
     nas_data: pd.Series | None
+    nas_history: pd.DataFrame
     memory: dict[str, float] | None
     disk: dict[str, float] | None
     monthly_cost: int
     last_month_cost: int | None
+    daily_cost_rows: list[tuple[Any, int]]
 
 
 def get_cached_materials() -> DashboardMaterials:
@@ -760,22 +773,24 @@ def get_cached_materials() -> DashboardMaterials:
     empty = pd.DataFrame()
 
     df_sensor = _cached("sensor", lambda: analysis_service.load_sensor_data(limit=MOBILE_SENSOR_ROW_LIMIT))
-    df_security_log = _cached(
-        "security_log", lambda: analysis_service.load_generic_data("security_logs", limit=SECURITY_LOG_ROW_LIMIT)
-    )
     nas_data = _cached("nas", analysis_service.load_nas_status)
+    nas_history = _cached("nas_history", analysis_service.load_nas_history)
     memory = _cached("memory", analysis_service.get_memory_usage)
     monthly_cost = _cached("cost", analysis_service.calculate_monthly_cost_cumulative)
     last_month_cost = _cached("cost_last_month", analysis_service.calculate_last_month_cost_same_point)
     disk = _cached("disk", analysis_service.get_disk_usage)
+    daily_cost_rows = _cached(
+        "daily_cost_rows", lambda: analysis_service.calculate_daily_cost_series(DAILY_COST_HISTORY_DAYS)
+    )
 
     return DashboardMaterials(
         df_sensor=df_sensor if df_sensor is not None else empty,
-        df_security_log=df_security_log if df_security_log is not None else empty,
         nas_data=nas_data,
+        nas_history=nas_history if nas_history is not None else empty,
         memory=memory,
         disk=disk,
         monthly_cost=monthly_cost or 0,
+        daily_cost_rows=daily_cost_rows or [],
         last_month_cost=last_month_cost,
     )
 
