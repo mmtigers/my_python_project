@@ -315,7 +315,7 @@
 
 ### `build_status_cards`
 
-* **役割**: 渡された材料から、画面に並べる順で7枚の `StatusCard` を組み立てる（取得は行わない）。並び順は`CARD_GROUPS`と同じ順(見守り→くらし→システム)。**(#829)** 以前は9枚(ファミクエの「📝承認待ち」カードを含む)だったが、ダッシュボード内にファミクエの状態表示を残さず外部リンクのみにする方針変更により、そのカードを削除して8枚になった。同時に、`df_car`/`pending_quests`引数も廃止された(車カードは`df_sensor`から駐車場カメラの動きを見るように変更、ファミクエカード自体が無くなったため)。**(不具合修正)** 炊飯器表示が不要という要望により「🍚 炊飯器」カードを削除し7枚になった。あわせて、見守りグループの4枚(高砂・伊丹・駐車場・カメラ)は以前すべて`tab="watch"`のみで`anchor`を持たなかったため、どのカードをタップしても同じURL(見守りページ先頭=カメラ映像)にしか飛べなかった不具合を修正し、それぞれ`anchor`(`#takasago-log`/`#itami-log`/`?camera={PARKING_CAMERA_ID}#camera-section`/`#camera-section`)で見守りページ内の異なる場所に振り分けるようにした。
+* **役割**: 渡された材料から、画面に並べる順で7枚の `StatusCard` を組み立てる（取得は行わない）。並び順は`CARD_GROUPS`と同じ順(見守り→くらし→システム)。**(#829)** 以前は9枚(ファミクエの「📝承認待ち」カードを含む)だったが、ダッシュボード内にファミクエの状態表示を残さず外部リンクのみにする方針変更により、そのカードを削除して8枚になった。同時に、`df_car`/`pending_quests`引数も廃止された(車カードは`df_sensor`から駐車場カメラの動きを見るように変更、ファミクエカード自体が無くなったため)。**(不具合修正)** 炊飯器表示が不要という要望により「🍚 炊飯器」カードを削除し7枚になった。あわせて、見守りグループの4枚(高砂・伊丹・駐車場・カメラ)は以前すべて`tab="watch"`のみで`anchor`を持たなかったため、どのカードをタップしても同じURL(見守りページ先頭=カメラ映像)にしか飛べなかった不具合を修正し、それぞれ`anchor`(`#takasago-log`/`#itami-log`/`?camera={PARKING_CAMERA_ID}#camera-section`/`#camera-section`)で見守りページ内の異なる場所に振り分けるようにした。**(不具合修正)** 「🗄️ NAS」カードにも`anchor="#nas-history"`を追加した。以前はNASカードをタップしてもシステムページの先頭に飛ぶだけで、容量履歴を見る手段が無かったため。
 * 根拠: `def build_status_cards(` (行番号: 658〜707)
 
 
@@ -359,33 +359,56 @@
 
 
 
+### `DAILY_COST_HISTORY_DAYS` (モジュールレベル定数)
+
+* **役割**: **(不具合修正で新設)** くらしページの電気代詳細(日別推移)で遡る日数。既定14日。
+* 根拠: `DAILY_COST_HISTORY_DAYS = 14` (行番号: 749)
+
+
+* **引数/リクエスト**: なし(定数)
+* 根拠: 同上
+
+
+* **戻り値/レスポンス**: なし(定数)
+* 根拠: 同上
+
+
+* **副作用**: なし
+* 根拠: 同上
+
+
+* **エラーハンドリング**: なし
+* 根拠: 同上
+
+
+
 ### `DashboardMaterials` (NamedTuple) / `get_cached_materials`
 
-* **役割**: **(#829で新設)** ホーム・見守り・くらし・システムの各ページが共有する材料(`df_sensor`/`nas_data`/`memory`/`disk`/`monthly_cost`/`last_month_cost`)をまとめた型と、それを`_cached`経由でTTLキャッシュしつつ集める関数。同じリクエストで複数ページぶんの材料を集めてもDB・スクレイピングの回数は増えない(`_cached`のキーはページに関わらず共通)。**(不具合修正で削除)** 以前は`df_security_log`(`security_logs`テーブルから`load_generic_data`で取得)も持っていたが、このテーブルへ書き込むコードがリポジトリ内のどこにも存在せず常に空だった(防犯ログが恒常的に「表示できるデータがありません」になる不具合の原因)。見守りページの防犯ログは`df_sensor`から`camera_motion_log`で抽出したカメラの動体検知を使うよう切り替えたため、この材料自体が不要になり削除された。
-* 根拠: `class DashboardMaterials(NamedTuple):` (行番号: 748〜760)、`def get_cached_materials() -> DashboardMaterials:` (行番号: 763〜783)
+* **役割**: **(#829で新設)** ホーム・見守り・くらし・システムの各ページが共有する材料(`df_sensor`/`nas_data`/`nas_history`/`memory`/`disk`/`monthly_cost`/`last_month_cost`/`daily_cost_rows`)をまとめた型と、それを`_cached`経由でTTLキャッシュしつつ集める関数。同じリクエストで複数ページぶんの材料を集めてもDB・スクレイピングの回数は増えない(`_cached`のキーはページに関わらず共通)。**(不具合修正で削除)** 以前は`df_security_log`(`security_logs`テーブルから`load_generic_data`で取得)も持っていたが、このテーブルへ書き込むコードがリポジトリ内のどこにも存在せず常に空だった(防犯ログが恒常的に「表示できるデータがありません」になる不具合の原因)。見守りページの防犯ログは`df_sensor`から`camera_motion_log`で抽出したカメラの動体検知を使うよう切り替えたため、この材料自体が不要になり削除された。**(不具合修正で追加)** NASカードのタップ先(容量履歴グラフ)用に`nas_history`(`analysis_service.load_nas_history`)、電気代カードのタップ先(日別推移)用に`daily_cost_rows`(`analysis_service.calculate_daily_cost_series`)をそれぞれ追加した。
+* 根拠: `class DashboardMaterials(NamedTuple):` (行番号: 752〜766)、`def get_cached_materials() -> DashboardMaterials:` (行番号: 769〜795)
 
 
 * **引数/リクエスト**: `get_cached_materials()`は引数なし
-* 根拠: [関数定義] (行番号: 756)
+* 根拠: [関数定義] (行番号: 769)
 
 
 * **戻り値/レスポンス**: `DashboardMaterials`(NamedTuple)
-* 根拠: [戻り値] (行番号: 771〜779)
+* 根拠: [戻り値] (行番号: 786〜795)
 
 
 * **副作用**: DBの読み取り、`psutil`相当のリソース取得、キャッシュの更新。書き込みは行わない。
-* 根拠: [関数本体] (行番号: 760〜769)
+* 根拠: [関数本体] (行番号: 775〜784)
 
 
 * **エラーハンドリング**: 個々の取得失敗は`_cached`が`None`に丸める。
-* 根拠: [フォールバック] (行番号: 772〜778 / 抜粋: 'df_sensor=df_sensor if df_sensor is not None else empty,')
+* 根拠: [フォールバック] (行番号: 787〜794 / 抜粋: 'df_sensor=df_sensor if df_sensor is not None else empty,')
 
 
 
 ### `collect_status_cards`
 
 * **役割**: `get_cached_materials`で材料を集め、`build_status_cards`に渡して`(カード一覧, 取得時刻)`を返す。ホームページ用。
-* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 786〜800)
+* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 798〜812)
 
 
 * **引数/リクエスト**: `now` (`datetime | None`。省略時は `core.utils.get_now_jst()`)
@@ -509,7 +532,7 @@
 ```mermaid
 flowchart TD
     subgraph get_cached_materials
-        M1["開始"] --> M2["_cached('sensor'/'nas') でDB読み取り"]
+        M1["開始"] --> M2["_cached('sensor'/'nas'/'nas_history'/'daily_cost_rows') でDB読み取り"]
         M2 --> M3["_cached('memory'/'cost'/'cost_last_month'/'disk') で取得"]
         M3 --> M4{"取得に失敗したものがあるか"}
         M4 -- Yes --> M5["空DataFrame / None で補う"]
