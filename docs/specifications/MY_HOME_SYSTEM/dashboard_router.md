@@ -185,7 +185,7 @@
 
 ### `GET {DASHBOARD_BASE_PATH}/watch` (`dashboard_watch`)
 
-* **役割**: 👀見守りページを返す。`home_status_service.get_cached_materials()`で材料(`df_sensor`/`df_security_log`)を取得し、`dashboard_page_service.render_watch_page`に渡す。
+* **役割**: 👀見守りページを返す。`home_status_service.get_cached_materials()`で材料(`df_sensor`)を取得し、`dashboard_page_service.render_watch_page`に渡す。**(不具合修正)** 以前は`materials.df_security_log`(常に空の`security_logs`テーブル由来)も渡していたが、この材料自体が`get_cached_materials()`から削除されたため、渡すのは`df_sensor`のみになった(防犯ログは`render_watch_page`内部で`df_sensor`から`home_status_service.camera_motion_log`により抽出される)。
 * 根拠: [ルート定義] (行番号: 129〜139 / 抜粋: '@router.get(f"{_BASE_PATH}/watch", include_in_schema=False)\ndef dashboard_watch() -> HTMLResponse:')
 
 
