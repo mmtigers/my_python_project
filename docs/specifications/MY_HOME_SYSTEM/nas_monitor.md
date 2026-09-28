@@ -42,7 +42,7 @@
 | `setup_logging` | 自作モジュール | ロガーの初期化と取得 | 根拠: `setup_logging` (行番号: 14 / 抜粋: "from core.logger import setup...") |
 | `save_log_generic` | 自作モジュール | データベースへのログ保存 | 根拠: `save_log_generic` (行番号: 15 / 抜粋: "from core.database import sav...") |
 | `get_now_iso`, `retry_with_backoff`（Issue #292） | 自作モジュール | 現在時刻のISOフォーマット取得、NAS I/O向けExponential Backoffリトライ | 根拠: `get_now_iso`, `retry_with_backoff` (行番号: 17 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst") |
-| `get_now_jst`（Issue #592で追加） | 自作モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「8時以降」判定はJSTの8時を意図していたため、ホストがJST以外の設定だと意図しない実時刻で判定されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_iso, retry_with_backoff, get_now_jst` (行番号: 17 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst")、`now = get_now_jst()` (行番号: 470〜472 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()") |
+| `get_now_jst`（Issue #592で追加） | 自作モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「8時以降」判定はJSTの8時を意図していたため、ホストがJST以外の設定だと意図しない実時刻で判定されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_iso, retry_with_backoff, get_now_jst` (行番号: 17 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst")、`now = get_now_jst()` (行番号: 476〜478 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()") |
 | `send_push` | 自作モジュール | プッシュ通知の送信 | 根拠: `send_push` (行番号: 17 / 抜粋: "from services.notification...") |
 
 ### ブラックボックスとなる外部要素
@@ -217,7 +217,7 @@
 
 
 * **副作用**: 外部プロセス(`rsync`コマンド)の実行、元ファイル(`fallback_dir/assets`配下のみ)の削除、外部APIによるプッシュ通知送信。
-* 根拠: `subprocess.run(cmd, ...)` および `send_push(...)` (行番号: 181, 186〜190 / 抜粋: "res = subprocess.run(cmd...")
+* 根拠: `subprocess.run(cmd, ...)` および `send_push(...)` (行番号: 223, 228〜231 / 抜粋: "res = subprocess.run(cmd...")
 
 
 * **エラーハンドリング**: 同期失敗時(`returncode != 0`)のエラーログ出力。`rsync`が120秒でタイムアウトした場合(`subprocess.TimeoutExpired`)専用のエラーログ出力。および想定外の`Exception`を捕捉してのエラーログ出力。
@@ -318,7 +318,7 @@
 
 
 * **副作用**: `cleanup_old_files`経由のファイル削除、`_run_db_row_retention` 経由の**SQLite の行の削除（`config.DB_ROW_RETENTION_ENABLED=true` のときのみ。既定はドライラン）**、および削除件数が1件以上あった場合の外部APIへのプッシュ通知送信。
-* 根拠: `result = self.cleanup_old_files(...)` (行番号: 290), `send_push(...)` (行番号: 299〜303)
+* 根拠: `result = self.cleanup_old_files(...)` (行番号: 350), `send_push(...)` (行番号: 365〜368)
 
 
 * **エラーハンドリング**: なし（対象ディレクトリが未設定(`falsy`)の場合は`continue`でその対象をスキップするのみ）。
@@ -372,7 +372,7 @@
 * **（2026-09-06 品質監査で修正）** 日次レポート(`is_report_time`)の判定を `now.hour == 8` の一致から「`now.hour >= 8` かつ状態ファイルの `last_report_date` が今日でない」に変更し、送信後に `last_report_date` を `_save_state` で保存する(Issue #388 で保持期間削除側に施したのと同じ修正。scheduler の実行間隔のずれで 7:5x → 9:0x になった日はレポートが丸ごと飛んでいた)。`today_str` の算出は両判定より前に移動した。
 * 根拠: (行番号: 417〜422, 454〜456 / 抜粋: "is_report_time = now.hour >= 8 and previous_state.get(\"last_report_date\") != today_str", "if is_report_time:\n            previous_state[\"last_report_date\"] = today_str\n            self._save_state(previous_state)")
 * **（Issue #592で修正）** 上記「8時以降」判定に使う現在時刻(`now`)の取得方法自体を、ホストOSのタイムゾーン設定に依存するnaiveな`datetime.now()`から`core.utils.get_now_jst()`（Issue #592で追加、"Asia/Tokyo"のaware `datetime`を返す）に置き換えた。「8時以降」判定はJSTの8時を意図しているため、ホストがJST以外の設定だと本来と異なる実時刻で日次レポート・保持期間クリーンアップの両方が判定されてしまう問題があった（Issue #382/#293と同じ不具合クラス）。この変更に伴い`from datetime import datetime`のimportは不要になり削除された。回帰テストの`TestNasMonitorDailyReportOncePerDay`クラスは、`freeze_time(...)`の引数をJST時刻の文字列からUTC相当の文字列に変更した（freezegunは素の文字列をUTCとして解釈するため。例: `freeze_time("2026-09-06 09:05:00")`は元々JST 9:05のつもりだったが実際にはUTC 9:05=JST 18:05と解釈されており、修正前から気づかれずにいたテスト側のバグだった。修正後は`freeze_time("2026-09-06 00:05:00")  # JST 09:05`のようにUTC時刻を明示する）。
-* 根拠: `now = get_now_jst()` (行番号: 470〜472 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()")
+* 根拠: `now = get_now_jst()` (行番号: 476〜478 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()")
 
 * **役割**: Ping、マウント、書き込み権限の確認を順に実行し、状態変化（正常⇔異常）の判定と保存、DBへの記録を必ず行う。異常継続中はここで処理を終了し、正常時はさらに保持期間超過ファイルの自動削除（レポート時刻のみ）と、状況（容量不足・定時）に応じた通知を統括する。
 * 根拠: `def run(self) -> None:` (行番号: 426〜511 / 抜粋: "def run(self) -> None:")
@@ -389,7 +389,7 @@
 
 
 * **副作用**: `save_to_db`呼び出し（毎回）、`send_push`呼び出し（異常検知時・容量不足時・定時レポート時）、`sync_fallback_data`呼び出し（復旧検知時）、`run_retention_cleanup`呼び出し（レポート時刻のみ、ファイル削除を伴う）、および`_save_state`によるステート保存。
-* 根拠: `self.save_to_db(...)` (行番号: 401), `send_push(...)` (行番号: 386, 450〜453), `self.sync_fallback_data()` (行番号: 395), `self.run_retention_cleanup()` (行番号: 430)
+* 根拠: `self.save_to_db(...)` (行番号: 462), `send_push(...)` (行番号: 446, 512〜515), `self.sync_fallback_data()` (行番号: 456), `self.run_retention_cleanup()` (行番号: 491)
 
 
 * **エラーハンドリング**: 異常継続時はDB記録後に早期リターンし、以降のレポート・クリーンアップ処理には到達しない。ディスク使用量取得に失敗した場合（`usage`が`None`）も早期リターンする。
@@ -500,6 +500,7 @@ flowchart TD
 
 ## 8. 保守上の注意点
 
+* **[2026-09 チャンネル再設計]** 容量不足警告・定期稼働レポート(512〜515行目)は、以前`channel = "error" if is_full else "report"`の条件分岐でどちらか一方へ送っていたが、いずれの場合も運用者向けチャンネル(`channel="report"`)へ統合された。NAS障害検知(446〜449行目)は変更なく即時対応チャンネル(`channel="error"`)のままだが、直前の`logger.error(...)`(439〜444行目)に`extra={"skip_discord": True}`を新たに付け、catch-all経由での二重通知(同じ障害が2チャンネルに別々に届く事態)を避けている。
 * `sync_fallback_data`関数内における`rsync --remove-source-files`の実行は、転送完了後に転送元のファイル群を削除する副作用を持つ。加えて`timeout=120`が設定されており、NASマウントが応答不能になった場合は`subprocess.TimeoutExpired`として専用のエラーログが出力される。
 * `sync_fallback_data`の同期先は以前`self.mount_point`(=`config.NAS_MOUNT_POINT`直下、例`/mnt/nas/`)を直接指定しており、アプリが実際に読み書きする`NAS_PROJECT_ROOT`(=`NAS_MOUNT_POINT/home_system`)の1階層下に配置されないため退避データが参照されない場所へ移動されてしまい、さらに同期元も`self.fallback_dir`全体だったため`last_memory_alert.txt`(`memory_monitor.py`)・`last_tv_lock.txt`(`tv_lock_monitor.py`)などローカル専用の状態ファイルまで巻き込んで移動・削除していた(Issue #162)。修正により、`__init__`で新設された`self.nas_project_root`(=`getattr(config, "NAS_PROJECT_ROOT", ...)`、31〜33行目)配下の`assets`を同期先に、`self.fallback_dir`配下の`assets`サブディレクトリのみを同期元に限定している(165, 170行目)。
 * **[修正済み] `_cleanup_empty_dirs`のOSError握りつぶし（Issue #450）**: 以前は`os.rmdir`実行時の`OSError`が全て`pass`されており、ディレクトリが空でない（`ENOTEMPTY`、想定内）以外の予期せぬ権限エラー等も種別を問わず握りつぶされていた。現在は`e.errno`が`errno.ENOTEMPTY`の場合のみ無視し、それ以外は`logger.warning`でログに残すよう修正された。
@@ -527,7 +528,7 @@ flowchart TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| プッシュ通知先の仕様 | `MY_HOME_SYSTEM/services/notification_service.py`の`send_push(messages, *, target="both", channel="notify", user_id=None, image_data=None, filename="snapshot.jpg")`(116〜163行目、Issue #289でシグネチャ再設計)を直接確認した。`target`引数は`"discord"`/`"line"`/`"both"`のいずれかを取り、`"discord"`または`"both"`の場合のみ`_send_discord_webhook`が呼ばれて`channel`引数(error/report/notify)に応じたDiscord Webhook URLへ送信される。`user_id`はLINE送信(`target`が`"line"`または`"both"`のとき)にのみ使用され、省略時は`config.LINE_USER_ID`にフォールバックする。本ファイル(`nas_monitor.py`)は`target="discord"`のみで呼び出す4箇所(186, 299, 358, 410行目)いずれも`user_id`を渡していないことを確認した(Issue #289で、以前渡していた`config.LINE_USER_ID`は撤去済み)。 | 直接ソース確認: `MY_HOME_SYSTEM/services/notification_service.py:116-163`（参考: `MY_HOME_SYSTEM/monitors/nas_monitor.py:186, 299, 358, 410`） |
+| プッシュ通知先の仕様 | `MY_HOME_SYSTEM/services/notification_service.py`の`send_push(messages, *, target="both", channel="notify", user_id=None, image_data=None, filename="snapshot.jpg")`(178〜225行目、Issue #289でシグネチャ再設計)を直接確認した。`target`引数は`"discord"`/`"line"`/`"both"`のいずれかを取り、`"discord"`または`"both"`の場合のみ`_send_discord_webhook`が呼ばれて`channel`引数(error/report/ddd/notify。2026-09チャンネル再設計で`ddd`を追加)に応じたDiscord Webhook URLへ送信される。`user_id`はLINE送信(`target`が`"line"`または`"both"`のとき)にのみ使用され、省略時は`config.LINE_USER_ID`にフォールバックする。本ファイル(`nas_monitor.py`)は`target="discord"`のみで呼び出す4箇所(228, 365, 446, 512行目)いずれも`user_id`を渡していないことを確認した(Issue #289で、以前渡していた`config.LINE_USER_ID`は撤去済み)。 | 直接ソース確認: `MY_HOME_SYSTEM/services/notification_service.py:178-225`（参考: `MY_HOME_SYSTEM/monitors/nas_monitor.py:228, 365, 446, 512`） |
 | DBのカラムの型定義 | `MY_HOME_SYSTEM/core/database.py`の`save_log_generic(table, columns_list, values_list)`(77〜96行目)を直接確認した。テーブル名・カラムリスト・値タプルから`INSERT INTO {table} ({columns}) VALUES ({placeholders})`を動的に構築する汎用関数であり、カラムの型自体は本関数には定義がない。本ファイル(`nas_monitor.py`)の`save_to_db`(332〜346行目)は`config.SQLITE_TABLE_SENSOR`（実体`"device_records"`、`config.py`276行目）へ`["timestamp", "device_name", "device_id", "device_type", "contact_state", "nas_usage_percent"]`列でINSERTしており(337行目)、`mount_ok`は独立した列ではなく`contact_state`列に`"mounted"`/`"unmounted"`という文字列として、`percent`（NAS使用率）は`nas_usage_percent`列に格納する設計であることを確認した。型は`MY_HOME_SYSTEM/current_schema.sql`の`CREATE TABLE device_records`で、`timestamp DATETIME NOT NULL`・`device_name TEXT`・`device_id TEXT`・`device_type TEXT`・`contact_state TEXT`・`nas_usage_percent REAL`と定義されている。以前は`battery_level`列（電池残量用に後付けされた列。**現在のスキーマには存在しない**）へ`percent`を誤って流用していたが、`MY_HOME_SYSTEM/migrations/0006_add_device_records_nas_usage_percent.sql`が`ALTER TABLE device_records ADD COLUMN nas_usage_percent REAL;`を実行して専用カラムを新設し、本ファイルの書き込み先も併せて切り替えられたことで、この列の混同は解消された。当該マイグレーションのコメント(2〜4行目)には「monitors/nas_monitor.py がNASのディスク使用率(%)を、電池残量用に後付けされた battery_level カラムへ誤って流用していたため、専用カラムを新設して分離する」「過去に battery_level へ書き込まれた行はそのまま残し、以後の書き込み先のみ切り替える」と明記されている（**旧版が`battery_level`の追加元として挙げていた`MY_HOME_SYSTEM/old/db_fix.py`は`old/`ディレクトリごと削除済みで、ベースライン`migrations/0000_baseline_schema.sql`の`device_records`にも`battery_level`は含まれないため、この列は現在のスキーマ定義のどこにも存在しない**。実機DBに残っている場合は過去の一回限りスクリプトの痕跡である）。 | 直接ソース確認: `MY_HOME_SYSTEM/core/database.py:77-96`, `MY_HOME_SYSTEM/monitors/nas_monitor.py:332-346`, `MY_HOME_SYSTEM/config.py:276`, `MY_HOME_SYSTEM/current_schema.sql`, `MY_HOME_SYSTEM/migrations/0000_baseline_schema.sql:90-105`, `MY_HOME_SYSTEM/migrations/0006_add_device_records_nas_usage_percent.sql:1-5`（参考: [database.md](./database.md)） |
 | ISO時刻のタイムゾーン | `MY_HOME_SYSTEM/core/utils.py`12〜13行目を直接確認した。`get_now_iso() -> str`は`return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()`という1行の実装であり、`pytz`ライブラリで明示的に"Asia/Tokyo"タイムゾーンを付与した現在時刻をISO 8601形式（オフセット付き、例: `2026-08-22T12:34:56.789012+09:00`）の文字列として返すことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:12-13` |
 | 設定値の初期値と定義内容 | `MY_HOME_SYSTEM/monitors/nas_monitor.py`を直接確認したところ、本ファイルは`config`の値を`getattr(config, "属性名", デフォルト値)`で参照している(26〜29, 173〜178行目)。対応する`config.py`側の実体を直接確認した: `NAS_IP: str = os.getenv("NAS_IP", "")`(Issue #663 で実環境の IP を既定値から外した。未設定なら `check_ping()` が疎通確認をスキップして True を返し、マウント/書き込みの判定に委ねる — ここで False を返すと「アドレスを知らない」だけで NAS 障害と判定してフォールバックへ退避してしまうため)、`NAS_CHECK_TIMEOUT: int = 5`(409行目、ハードコード)、`NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")`(436行目)、`RECORDING_RETENTION_DAYS: int = int(os.getenv("RECORDING_RETENTION_DAYS", "30"))`(442行目)、`DB_BACKUP_RETENTION_DAYS: int = int(os.getenv("DB_BACKUP_RETENTION_DAYS", "30"))`(444行目)、`DB_BACKUPS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "db_backups")`(445行目)、`ASSETS_DIR`は224〜227行目で`ensure_safe_path_with_backoff(os.path.join(NAS_PROJECT_ROOT, "assets"), "assets")`(NAS到達不能時はローカルの`temp_fallback/assets`へフェイルソフト)。以前は`nas_monitor.py`28行目が存在しない属性名`FALLBACK_DIR`を参照しており常にデフォルト値へフォールバックしていたが、修正コミット(`fix quest data and config bugs`)により現在は`getattr(config, "FALLBACK_ROOT", "/tmp/temp_fallback")`(28行目)に変更され、`config.py`に実在する属性`FALLBACK_ROOT: str = os.path.join(BASE_DIR, "temp_fallback")`(213行目)を正しく参照するようになったことを確認した。ただし`config.FALLBACK_ROOT`の値(`BASE_DIR/temp_fallback`)と`getattr`のフォールバック文字列(`"/tmp/temp_fallback"`)は異なるパスであるため、両者が一致するとは限らない点は変わらず残る。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:213, 408-409, 436, 442-445`, `MY_HOME_SYSTEM/monitors/nas_monitor.py:26-29, 173-178`（`FALLBACK_ROOT`属性への参照に修正済みであることを確認） |

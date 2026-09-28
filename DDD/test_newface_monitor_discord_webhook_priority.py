@@ -30,23 +30,51 @@ import newface_monitor as module  # noqa: E402
 
 
 class TestResolveDiscordWebhookUrlPriority:
+    def test_ddd_env_var_takes_priority_over_everything(self, monkeypatch):
+        """チャンネル再設計(2026-09): DDD専用のDISCORD_WEBHOOK_DDDが最優先。"""
+        monkeypatch.setenv("DISCORD_WEBHOOK_DDD", "https://discord.test/ddd")
+        monkeypatch.setenv("DISCORD_WEBHOOK_NOTIFY", "https://discord.test/notify")
+        monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.test/legacy-url")
+
+        assert module._resolve_discord_webhook_url() == "https://discord.test/ddd"
+
     def test_notify_env_var_takes_priority_when_both_are_set(self, monkeypatch):
+        monkeypatch.delenv("DISCORD_WEBHOOK_DDD", raising=False)
         monkeypatch.setenv("DISCORD_WEBHOOK_NOTIFY", "https://discord.test/notify")
         monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.test/legacy-url")
 
         assert module._resolve_discord_webhook_url() == "https://discord.test/notify"
 
     def test_legacy_url_is_used_as_fallback_when_notify_is_unset(self, monkeypatch):
+        monkeypatch.delenv("DISCORD_WEBHOOK_DDD", raising=False)
         monkeypatch.delenv("DISCORD_WEBHOOK_NOTIFY", raising=False)
         monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.test/legacy-url")
 
         assert module._resolve_discord_webhook_url() == "https://discord.test/legacy-url"
 
     def test_none_when_neither_is_set(self, monkeypatch):
+        monkeypatch.delenv("DISCORD_WEBHOOK_DDD", raising=False)
         monkeypatch.delenv("DISCORD_WEBHOOK_NOTIFY", raising=False)
         monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
 
         assert module._resolve_discord_webhook_url() is None
+
+
+class TestResolveOpsWebhookUrlPriority:
+    """チャンネル再設計(2026-09): サイト疎通不能アラート専用の解決先。"""
+
+    def test_report_env_var_is_used_when_set(self, monkeypatch):
+        monkeypatch.setenv("DISCORD_WEBHOOK_REPORT", "https://discord.test/report")
+        monkeypatch.setenv("DISCORD_WEBHOOK_NOTIFY", "https://discord.test/notify")
+
+        assert module._resolve_ops_webhook_url() == "https://discord.test/report"
+
+    def test_falls_back_to_resolve_discord_webhook_url_when_report_is_unset(self, monkeypatch):
+        monkeypatch.delenv("DISCORD_WEBHOOK_REPORT", raising=False)
+        monkeypatch.delenv("DISCORD_WEBHOOK_DDD", raising=False)
+        monkeypatch.setenv("DISCORD_WEBHOOK_NOTIFY", "https://discord.test/notify")
+
+        assert module._resolve_ops_webhook_url() == "https://discord.test/notify"
 
 
 if __name__ == "__main__":

@@ -262,7 +262,11 @@ def test_write_test_uses_process_unique_filename(tmp_path):
 # ---------------------------------------------------------------------------
 class TestDiscordErrorHandlerContentLimit:
     def _emit_and_capture(self, monkeypatch, record):
+        # チャンネル再設計(2026-09): 本テストのレコードはERROR(非CRITICAL)なので
+        # DISCORD_WEBHOOK_REPORT経由になる。内容の整形自体はレベルに依存しないため
+        # 両方設定しておく。
         monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
+        monkeypatch.setattr(config, "DISCORD_WEBHOOK_REPORT", "https://discord.example/webhook")
         handler = core_logger.DiscordErrorHandler()
         handler.setFormatter(logging.Formatter("%(message)s"))
         with patch("core.discord.requests.post") as mock_post:

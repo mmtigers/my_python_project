@@ -51,7 +51,7 @@
 | --- | --- | --- |
 | `config`モジュール | 設定値の実体や環境変数とのマッピング仕様がファイル内に記述されていないため。 | `getattr(config, 'TIMELAPSE_FPS_ANALYZE', 1)` などの呼び出し (行番号: 41 / 抜粋: "getattr(config, 'TIMELAPSE_...") |
 | `core.logger.setup_logging` | 出力先、ログローテーション、フォーマットなどのロギング仕様が不明なため。 | `logger = setup_logging(__name__)` (行番号: 36 / 抜粋: "logger = setup_logging(**name**)") |
-| `services.notification_service.send_push` | 実際の送信先プラットフォームの実装内容が不明なため。引数のマッピング(`target`/`channel`)自体は`notification_service.md`から判明しており、本ファイル側は`target="discord"`/`channel="report"`または`"error"`をキーワード引数で渡すよう修正済み(Issue #167)。動画生成が`False`を返した場合(例外なし)のエラー通知も追加済み(Issue #233)。Issue #289でsend_pushのシグネチャが再設計され、`target="discord"`のみの呼び出しに不要だった`user_id`(元は`getattr(config, "LINE_USER_ID", "")`)引数は撤去された。 | `send_push([...], target="discord", channel="report")` (行番号: 671〜676, 700〜705, 709〜714 / 抜粋: "send_push(\n                [{"type": "text"...") |
+| `services.notification_service.send_push` | 実際の送信先プラットフォームの実装内容が不明なため。引数のマッピング(`target`/`channel`)自体は`notification_service.md`から判明しており、本ファイル側は`target="discord"`/`channel="report"`をキーワード引数で渡すよう修正済み(Issue #167)。動画生成が`False`を返した場合(例外なし)のエラー通知も追加済み(Issue #233)。Issue #289でsend_pushのシグネチャが再設計され、`target="discord"`のみの呼び出しに不要だった`user_id`(元は`getattr(config, "LINE_USER_ID", "")`)引数は撤去された。**（2026-09 チャンネル再設計）** 動画生成失敗・予期せぬ例外の2通知は以前`channel="error"`だったが、即時対応チャンネルではなく運用者向けチャンネルへ送るよう`channel="report"`に変更され、直前の`logger.error(...)`に`extra={"skip_discord": True}`を付けて catch-all 経由の二重通知を避けている。「動きなし」通知は変更なし(元々`report`)。 | `send_push([...], target="discord", channel="report")` (行番号: 722〜726, 752〜756, 760〜764 / 抜粋: "send_push(\n                [{"type": "text"...") |
 | `ffmpeg`, `ffprobe` (外部コマンド) | システム上にインストールされた実行バイナリに依存しており、バージョンごとの挙動差異が保証されないため。 | `subprocess.run(["ffmpeg"...])` (行番号: 125 / 抜粋: "subprocess.run(["ffmpeg", "-ve...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -654,7 +654,7 @@
 * **副作用**: 他クラスの呼び出しによるすべての副作用、完了記録ファイル（`.done`）の生成、プッシュ通知送信。`VideoBuilder().build()`が例外を送出せず`False`を返した場合(動画生成失敗)も、Issue #233修正によりエラーログ出力とエラー通知送信を行う(修正前はこのケースで通知が一切送られなかった)。
 
 
-* 根拠: `mark_as_done(...)`, `send_push(...)` (行番号: 694, 672〜677, 700〜706 / 抜粋: "logger.error(f\"動画生成に失敗しま...")
+* 根拠: `mark_as_done(...)`, `send_push(...)` (行番号: 743, 751〜756 / 抜粋: "logger.error(f\"動画生成に失敗しま...")
 
 
 
@@ -662,7 +662,7 @@
 * **エラーハンドリング**: 全体処理を`try-except`で囲み、例外発生時にはスタックトレースをログに出力し、外部API経由でエラー通知を送信する。加えて、`VideoBuilder().build()`が`False`を返す(例外を伴わない失敗)場合を専用の`else`節で捕捉し、同様にエラーログ・エラー通知を行う(Issue #233修正)。
 
 
-* 根拠: `except Exception as e:`, `else:` (行番号: 696〜706, 708〜715 / 抜粋: "logger.error(f\"動画生成に失敗しま...")
+* 根拠: `except Exception as e:`, `else:` (行番号: 758〜764, 745〜756 / 抜粋: "logger.error(f\"動画生成に失敗しま...")
 
 
 
@@ -685,7 +685,7 @@ flowchart TD
     
     HasEvents -- Yes --> BuildVideo[VideoBuilder: クリップ生成と結合]
     BuildVideo --> VideoSuccess{動画生成成功?}
-    VideoSuccess -- "No(#233で修正)" --> SendPushBuildFail[ログ出力 + 外部：send_push エラー通知]
+    VideoSuccess -- "No(#233で修正)" --> SendPushBuildFail[ログ出力(skip_discord付き) + 外部：send_push report通知(2026-09チャンネル再設計で旧errorから変更)]
     SendPushBuildFail --> End
     
     VideoSuccess -- Yes --> MarkDone[完了ファイルの生成]
@@ -705,7 +705,7 @@ flowchart TD
     GetVideoInfo -.- ErrorHandler
     DetectMotion -.- ErrorHandler
     BuildVideo -.- ErrorHandler
-    ErrorHandler((例外発生)) --> SendPushError[外部：send_push エラー通知]
+    ErrorHandler((例外発生)) --> SendPushError[ログ出力(skip_discord付き) + 外部：send_push report通知(2026-09チャンネル再設計で旧errorから変更)]
     SendPushError --> End
 
 ```
@@ -787,6 +787,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
+* **[2026-09 チャンネル再設計]** 動画生成失敗(751〜756行目)・予期せぬ例外(758〜764行目)の2通知は即時対応チャンネルではなく運用者向けチャンネル(`channel="report"`)へ変更された(以前は`channel="error"`)。それぞれ直前の`logger.error(...)`に`extra={"skip_discord": True}`を付け、catch-all経由での二重通知を避けている。
 * `ffmpeg`および`ffprobe`コマンドのプロセス実行(`subprocess.run`, `subprocess.Popen`)に強く依存しており、実行マシンのコマンドパスやバージョンに影響を受ける。
 
 

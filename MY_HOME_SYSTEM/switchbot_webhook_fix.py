@@ -155,7 +155,7 @@ def fix_all_webhooks():
             "SwitchBotの旧Webhook設定を削除しましたが、新しいURLの登録に失敗しました。\n"
             f"SwitchBotイベント連携が停止している可能性があります。手動確認が必要です。\nURL: {base_url}"
         )
-        send_push([{"type": "text", "text": alert_body}], target="discord", channel="error")
+        send_push([{"type": "text", "text": alert_body}], target="discord", channel="report")
 
     # 実際に更新が走った時のみ通知を送信するよう最適化
     sb_updated = bool(sb_result)

@@ -54,7 +54,7 @@
 | --- | --- | --- |
 | `config` | モジュール内部で定義されている変数や初期化処理の内容が提供されていないため | `getattr(config, 'NVR_RECORD_DIR', ...)` (行番号: 81 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...)") |
 | `setup_logging` | ログ出力のフォーマット、出力先（ファイル/標準出力など）の仕様が提供されていないため | `logger = setup_logging(__name__)` (行番号: 37 / 抜粋: "logger = setup_logging(**name**)") |
-| `send_push` | 関数内部の処理、引数（`target`, `channel`など）に対する正確な挙動、エラーハンドリングの有無が提供されていないため | `send_push(...)` (行番号: 58〜63, 218〜222, 226〜230, 263〜267 / 抜粋: "send_push(messages=..., target="discord", ...)") |
+| `send_push` | 関数内部の処理、引数（`target`, `channel`など）に対する正確な挙動、エラーハンドリングの有無が提供されていないため | `send_push(...)` (行番号: 57〜61, 228〜232, 235〜239, 275〜279 / 抜粋: "send_push(messages=..., target="discord", ...)") |
 | `smart_timelapse_generator` の全インポート要素 | 各クラス(`MotionDetector`, `VideoBuilder`等)のメソッド、プロパティの仕様、各関数の詳細な処理内容、厳密な戻り値・引数の型定義が提供されていないため | `from monitors.smart_timelapse_generator import ...` (行番号: 24〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -175,7 +175,7 @@
 * 処理全体を `try...except Exception as e:` で囲み、予期せぬエラーが発生した場合はスタックトレースをログ出力し、Discordへエラー通知を送信する。
 
 
-* 根拠: [try-exceptブロックおよび早期リターン処理] (行番号: 266 / 抜粋: "except Exception as e:")、[既存ファイル削除失敗時のログ出力(#450)] (行番号: 157〜164)
+* 根拠: [try-exceptブロックおよび早期リターン処理] (行番号: 269 / 抜粋: "except Exception as e:")、[既存ファイル削除失敗時のログ出力(#450)] (行番号: 157〜164)
 
 
 
@@ -190,7 +190,7 @@
 ```mermaid
 flowchart TD
     Start(["Start"]) --> DepCheck{"外部: check_dependencies()"}
-    DepCheck -- False --> SendErrDep["外部: send_push(エラー)"] --> End(["End"])
+    DepCheck -- False --> SendErrDep["外部: send_push(report、2026-09チャンネル再設計で旧errorから変更)"] --> End(["End"])
     DepCheck -- True --> SetupDate["対象日付・時間帯の決定"]
     SetupDate --> FindFiles["NVRディレクトリから録画ファイルを検索・ソート"]
     FindFiles --> FilterTime["時間帯フィルタリング(開始・終了指定時)"]
@@ -220,7 +220,7 @@ flowchart TD
     LoopChunks -- No --> CheckClips{"有効クリップが1件以上あるか?"}
     CheckClips -- No --> CheckEventsFound{"検知イベント数(global_event_idx) > 0 か?(#233で追加)"}
     CheckEventsFound -- No --> SendInfo["外部: send_push(動きなし通知, report)"] --> End
-    CheckEventsFound -- "Yes(クリップ抽出全滅)" --> SendClipFailErr["ログ出力 + 外部: send_push(クリップ抽出失敗エラー通知, error, #233で追加)"] --> End
+    CheckEventsFound -- "Yes(クリップ抽出全滅)" --> SendClipFailErr["ログ出力(skip_discord付き) + 外部: send_push(クリップ抽出失敗通知, report, #233で追加/2026-09チャンネル再設計で旧errorから変更)"] --> End
     CheckClips -- Yes --> BuildConcat["外部: VideoBuilder._build_concat"]
     
     BuildConcat -- 成功 --> GenThumb["外部: VideoBuilder._generate_thumbnail"]
@@ -273,7 +273,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-
+* **[2026-09 チャンネル再設計]** 依存コマンド欠如(57行目)・クリップ抽出全滅(228行目)・予期せぬ例外(275行目)の3通知は、即時対応チャンネルではなく運用者向けチャンネル(`channel="report"`)へ送るよう変更された(以前は`channel="error"`)。「動きなし」通知(235行目)は変更なし。クリップ抽出全滅・例外の直前の`logger.error(...)`にはそれぞれ`extra={"skip_discord": True}`を付け、catch-all経由での二重通知を避けている。
 
 * 動画処理ループ内でハードコードされた `time.sleep(1)` が存在し、チャンク数に比例して固定の遅延が発生する仕様になっている。
 
@@ -318,7 +318,7 @@ graph TD
 * Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`(LINE宛先)が不要になった。これに伴い、以前存在していた`user_id = getattr(config, "LINE_USER_ID", "")`という、通知先(Discord)と変数名(LINE_USER_ID)が一致しない代入は削除され、4箇所とも`messages`のみを渡す形に更新された。
 
 
-* 根拠: [通知送信処理] (行番号: 59〜63, 219〜223, 226〜230, 264〜268 / 抜粋: "send_push(\n            messages=[...], target="discord"")
+* 根拠: [通知送信処理] (行番号: 58〜61, 229〜232, 236〜239, 276〜279 / 抜粋: "send_push(\n            messages=[...], target="discord"")
 
 
 

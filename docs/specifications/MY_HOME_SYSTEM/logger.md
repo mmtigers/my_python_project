@@ -18,7 +18,7 @@
 ## 2. ファイルの概要
 
 システム全体のログ出力設定を管轄するモジュール。コンソールへの標準出力、ログファイル(`home_system.log`)への書き込み、およびエラー発生時（ERRORレベル以上のログ）にスタックトレースを含めてDiscordのWebhookへ自動通知する機能を提供する。ログファイルのローテーション自体は本ファイルでは行わず、`WatchedFileHandler`（書き込み専用）を用いて外部の`logrotate`にローテーション処理を一元化する設計になっている（`home_system.log`が`unified_server`・`monitors`・cronスクリプト等の複数プロセスから同時に開かれるため、各プロセスが独自にファイルをrenameする方式のハンドラではローテーションが壊れることを避けるための設計、191〜195行目のコメント参照）。Discord通知（`DiscordErrorHandler.emit`）は、Webhook送信中に呼び出し元のスレッドをブロックしないよう、バックグラウンドスレッド上で行われる。`setup_logging`とは別に、同名の呼び出しパターン(`from core.logger import get_logger`)を期待する呼び出し元向けの単純なエイリアス関数`get_logger`も提供する。**（2026-09-06 品質監査で修正）** `setup_logging`は同名ロガーの再セットアップ時に既存ハンドラを`removeHandler`したうえで`close()`するようになり（以前は`handlers.clear()`のみでファイルディスクリプタがリークしていた）、`_send_webhook`の失敗ログはWebhook URLのトークン部分を`_redact_webhook_url`でマスクし、`exc_info`を付けずに例外種別とマスク済みメッセージのみを出力するようになった。
-* 根拠: `[get_logger]` (行番号: 311〜313 / 抜粋: "def get_logger(name: str) -> logging.Logger:")、`[setup_loggingのハンドラclose]` (行番号: 169〜174 / 抜粋: "for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()")、`[_redact_webhook_url]` (行番号: 137〜139 / 抜粋: "def _redact_webhook_url(text: str) -> str:")
+* 根拠: `[get_logger]` (行番号: 333〜335 / 抜粋: "def get_logger(name: str) -> logging.Logger:")、`[setup_loggingのハンドラclose]` (行番号: 169〜174 / 抜粋: "for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()")、`[_redact_webhook_url]` (行番号: 137〜139 / 抜粋: "def _redact_webhook_url(text: str) -> str:")
 
 ## 3. 外部依存関係
 
@@ -41,7 +41,8 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.DISCORD_WEBHOOK_ERROR` | `config`モジュールの実装が提供されておらず、Webhook送信先の実際のURL文字列が不明であるため。 | 根拠: `[config.DISCORD_WEBHOOK_ERROR]` (行番号: 175 / 抜粋: "url = self.webhook_url or config.DISCORD_WEBHOOK_ERROR") |
+| `config.DISCORD_WEBHOOK_ERROR` | `config`モジュールの実装が提供されておらず、Webhook送信先の実際のURL文字列が不明であるため。 | 根拠: `[config.DISCORD_WEBHOOK_ERROR]` (行番号: 188 / 抜粋: "url = self.webhook_url or config.DISCORD_WEBHOOK_ERROR") |
+| `config.DISCORD_WEBHOOK_REPORT` | **（2026-09 チャンネル再設計で追加）** 同上の理由で実際のURL文字列は不明。CRITICALでないERRORレベルの送信先として使われる。 | 根拠: `[config.DISCORD_WEBHOOK_REPORT]` (行番号: 190 / 抜粋: "url = config.DISCORD_WEBHOOK_REPORT") |
 | `config.BASE_DIR` | `config`モジュールの実装が提供されておらず、ログディレクトリが作成されるベースとなるルートパスが不明であるため。 | 根拠: `[config.BASE_DIR]` (行番号: 78 / 抜粋: "log_dir = os.path.join(config.BASE_DIR, \"logs\")") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -49,38 +50,41 @@
 ### `DiscordErrorHandler`
 
 * **役割**: エラーログをDiscordに通知するカスタムハンドラ。`logging.Handler`を継承し、指定されたWebhook URLの保持を担う。`__init__`時に`webhook_url`を明示的に渡された場合はそれを、渡されなければ`emit()`実行時に`config.DISCORD_WEBHOOK_ERROR`をフォールバックとして使用する（コード内コメント「初期化時にWebhook URLを受け取れるようにする」「指定されたURLがあれば使い、なければデフォルト設定を使う」参照）。
-* 根拠: `[DiscordErrorHandler]` (行番号: 150〜253 / 抜粋: "class DiscordErrorHandler(logging.Handler):\n    \"\"\"エラーログをDiscordに通知するハンドラ (スタックトレース対応版)\"\"\"\n    # ★追加: 初期化時にWebhook URLを受け取れるようにする\n    def __init__(self, webhook_url=None):")
+* **（2026-09 チャンネル再設計で変更）** 従来は上記の`webhook_url`/`config.DISCORD_WEBHOOK_ERROR`の解決結果を、レベルに関わらず一律に使っていた。現在は`emit()`内で`record.levelno`が`logging.CRITICAL`以上かどうかを見て、CRITICALのみこの解決結果(即時対応チャンネル)を使い、通常のERRORは`config.DISCORD_WEBHOOK_REPORT`(運用者向けチャンネル)を使うよう分岐する。`__init__`自体のシグネチャ・役割は変わっていない。
+* 根拠: `[DiscordErrorHandler]` (行番号: 150〜158 / 抜粋: "class DiscordErrorHandler(logging.Handler):")、[レベル分岐] (行番号: 186〜190 / 抜粋: "is_critical = record.levelno >= logging.CRITICAL\n                if is_critical:\n                    url = self.webhook_url or config.DISCORD_WEBHOOK_ERROR\n                else:\n                    url = config.DISCORD_WEBHOOK_REPORT")
 
 
 * **引数/リクエスト**: `webhook_url` (型: 明示なし/デフォルト `None`。Discordの通知先URL)
-* 根拠: `[__init__]` (行番号: 153 / 抜粋: "def __init__(self, webhook_url=None):")
+* 根拠: `[__init__]` (行番号: 161 / 抜粋: "def __init__(self, webhook_url=None):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `[__init__]` (行番号: 153〜155 / 抜粋: "def __init__(self, webhook_url=None):\n        super().__init__()\n        self.webhook_url = webhook_url")
+* 根拠: `[__init__]` (行番号: 161〜163 / 抜粋: "def __init__(self, webhook_url=None):\n        super().__init__()\n        self.webhook_url = webhook_url")
 
 
 * **副作用**: なし
-* 根拠: `[__init__]` (行番号: 155 / 抜粋: "self.webhook_url = webhook_url")
+* 根拠: `[__init__]` (行番号: 163 / 抜粋: "self.webhook_url = webhook_url")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[__init__]` (行番号: 153〜155 / 抜粋: "def __init__(self, webhook_url=None):")
+* 根拠: `[__init__]` (行番号: 161〜163 / 抜粋: "def __init__(self, webhook_url=None):")
 
 
 
 ### `DiscordErrorHandler.emit`
 
 * **役割**: ロガーから渡されたレコードがERRORレベル以上で、かつ`record.skip_discord`（`logger.error(..., extra={"skip_discord": True})` で付けるフラグ）が立っていない場合に、スタックトレース（最大1000文字）を付与したペイロードを組み立て、`_send_webhook`をバックグラウンドスレッドで起動してDiscordへ非同期に送信する。
+* **（2026-09 チャンネル再設計で追加）** 送信先はレベルで分岐する: `record.levelno >= logging.CRITICAL`なら`self.webhook_url or config.DISCORD_WEBHOOK_ERROR`(即時対応チャンネル)、そうでなければ(通常のERROR)`config.DISCORD_WEBHOOK_REPORT`(運用者向けチャンネル)。あわせて送信本文の見出しも`is_critical`で切り替える(CRITICAL: `"🚨 **重大エラー発生(CRITICAL)**"`、それ以外: `"😰 **エラー発生**"`)。以前はレベルを問わず一律`DISCORD_WEBHOOK_ERROR`固定で、個別の重大障害通知(`send_push(channel="error")`)と大量の軽微なERRORログが同一チャンネルに混在していた。
+* 根拠: [レベル分岐] (行番号: 186〜190 / 抜粋: "is_critical = record.levelno >= logging.CRITICAL")、[見出し切り替え] (行番号: 218〜219 / 抜粋: "title = \"🚨 **重大エラー発生(CRITICAL)**\" if is_critical else \"😰 **エラー発生**\"\n                content = f\"{title}\\n```python\\n{log_msg}\\n```\"")
 * **（Issue #742 / AUDIT-013 で変更）** 以前は `"Discord" not in str(record.msg)` を条件にしていた。要件は「通知システム自身の失敗を通知しようとしない（無限ループ防止）」であるのに、それを**メッセージ内容の推測**で実装していたため対象が広すぎ、`monitors/smart_timelapse_generator.py` の「Discord Webhook URLが設定されていないため動画を送信できません」「Discord送信失敗: {file_name}」のような**実障害まで無音**になっていた。さらに `record.msg` はフォーマット**前**の文字列のため、`logger.error("... %s", arg)` 形式では引数側の「Discord」が判定されず、**抑制の挙動がログの書き方に依存して変わる**という不整合もあった。現在は明示フラグによる opt-out で、フラグを付けているのは `services/notification_service.py` の `_send_discord_webhook`（2箇所＝通知システム自身の失敗）、同ファイルのLINEフォールバック通知、`monitors/memory_monitor.py`（直後に `send_push` で専用通知を送るため二重通知を避ける）のみ。
-* 根拠: `[emit]` (行番号: 158〜172 / 抜粋: "def emit(self, record):")、[opt-out 判定] (行番号: 172 / 抜粋: 'if record.levelno >= logging.ERROR and not getattr(record, "skip_discord", False):")
+* 根拠: `[emit]` (行番号: 166〜251 / 抜粋: "def emit(self, record):")、[opt-out 判定] (行番号: 172 / 抜粋: 'if record.levelno >= logging.ERROR and not getattr(record, "skip_discord", False):")
 * **（Issue #361 で修正）** (1) スタックトレースは `record.exc_info` がある場合のみ付ける（以前は exc_info の無い ERROR でも `format_stack()` を常に付け、本文が約900字を超えると Discord の2000字制限で 400 になり通知が無言で消えていた）。(2) 本文は `DISCORD_CONTENT_LIMIT`（1900）−200 字で切り詰め、トレースは残り容量の範囲で末尾を付け、最終的な content は `_truncate_discord_content` で 1900 字以内に収める。(3) 送信スレッドは `_register_sender` で追跡し、生存数が `DISCORD_MAX_INFLIGHT_SENDERS`（16）以上なら送信をスキップする。
 * **（Issue #759 / AUDIT-030 で追加）** Webhook URL の解決後・本文の組み立て前に `_claim_notification_slot(_dedup_key(record), time.monotonic())` で重複排除を行い、同一内容が `DISCORD_DEDUP_WINDOW_SEC`（600秒）以内に再度来た場合は送信しない。抑制していた件数は次にウィンドウを跨いで送る通知の本文末尾に「（同じエラーが直近10分で N 件抑制されました）」として添える。`DISCORD_MAX_INFLIGHT_SENDERS` は「同時実行数」の制限であって**レートの制限ではなく**、各送信が高速に完了すれば1分間に数百通送れてしまうため、この重複排除が実質的な唯一のレート制御になっている。判定を URL 解決の**後**に行うのは、Webhook 未設定で送らなかった分を「送信済み」として記録しないため。
 * 根拠: `if record.exc_info:` (行番号: 192〜193)、`body_limit = DISCORD_CONTENT_LIMIT - 200` (行番号: 197〜199)、[重複排除の判定] (行番号: 182〜186 / 抜粋: "should_send, suppressed_count = _claim_notification_slot(")、[抑制件数の付記] (行番号: 207〜212 / 抜粋: "if suppressed_count > 0:")、`if _inflight_count() >= DISCORD_MAX_INFLIGHT_SENDERS:` (行番号: 228〜229)
 
 
 * **引数/リクエスト**: `record` (型: 明示なし、暗黙的に`logging.LogRecord`。判定およびフォーマット対象のログレコード)
-* 根拠: `[emit]` (行番号: 158 / 抜粋: "def emit(self, record):")
+* 根拠: `[emit]` (行番号: 166 / 抜粋: "def emit(self, record):")
 
 
 * **戻り値/レスポンス**: なし (URLが存在しない場合は早期 `return`)
@@ -129,11 +133,11 @@
 
 
 * **引数/リクエスト**: `url` (型: 明示なし。送信先のDiscord Webhook URL)、`payload` (型: 明示なし、`emit`が組み立てた`dict`。送信するJSONペイロード)
-* 根拠: `[引数定義]` (行番号: 238 / 抜粋: "def _send_webhook(url, payload):")
+* 根拠: `[引数定義]` (行番号: 254 / 抜粋: "def _send_webhook(url, payload):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `[メソッド本体]` (行番号: 238〜253 / 抜粋: "def _send_webhook(url, payload):\n        try:\n            requests.post(url, json=payload, timeout=5)")
+* 根拠: `[メソッド本体]` (行番号: 254〜269 / 抜粋: "def _send_webhook(url, payload):\n        try:\n            requests.post(url, json=payload, timeout=5)")
 
 
 * **副作用**: `requests.post`によるDiscord Webhookへの外部API通信（タイムアウト5秒）。失敗時は`_webhook_failure_logger`への警告ログ出力（**（2026-09-06 品質監査で修正）** URLはトークン部分をマスク済み、スタックトレースは含まない）。
@@ -188,22 +192,24 @@
 * **エラーハンドリング**: なし
 * 根拠: 同上
 * **呼び出し元**: `DiscordErrorHandler._send_webhook`（`url`と例外`e`の両方に適用）
-* 根拠: `[呼び出し]` (行番号: 252 / 抜粋: "_redact_webhook_url(url), type(e).__name__, _redact_webhook_url(e),")
+* 根拠: `[呼び出し]` (行番号: 268 / 抜粋: "_redact_webhook_url(url), type(e).__name__, _redact_webhook_url(e),")
 
 ### `setup_logging`
 
 * **役割**: 指定された名前でロガーを初期化し、既存のハンドラを外した後、コンソール出力、ファイル出力、Discord通知の3種のハンドラを登録して返す。ロガーの`propagate`を`False`に設定し、rootロガーへの伝播を行わない。
-* 根拠: `[setup_logging]` (行番号: 255〜308 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:\n    \"\"\"ロガーのセットアップ\"\"\"\n    logger = logging.getLogger(name)\n    logger.propagate = False")
+* 根拠: `[setup_logging]` (行番号: 271〜330 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:\n    \"\"\"ロガーのセットアップ\"\"\"\n    logger = logging.getLogger(name)\n    logger.propagate = False")
 * **（2026-09-06 品質監査で修正）** 同名ロガーの再セットアップ時は、`list(logger.handlers)`のコピーを走査して各ハンドラを`logger.removeHandler()`で外したうえで`close()`する（`close()`の例外は`except Exception: pass`で無視）。以前は`if logger.handlers: logger.handlers.clear()`のみだったため、`WatchedFileHandler`が開いていた`home_system.log`のファイルディスクリプタが閉じられずに残り、関数内で`get_logger()`を呼ぶ経路（コメントによれば`DDD/newface_monitor.py`の`storage_warmup`等）では呼び出しのたびにfdがリークしていた（pytestの`ResourceWarning`でも検出）。
 * 根拠: `[既存ハンドラのremove+close]` (行番号: 164〜174 / 抜粋: "# 同名ロガーの再セットアップ時は、既存ハンドラを close() してから外す。\n    # 以前は handlers.clear() だけだったため、WatchedFileHandler が開いていた\n    # home_system.log のファイルディスクリプタが閉じられずに残り、\n    ...\n    for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()\n        except Exception:\n            pass")
 * **（Issue #384 で修正）** ファイル出力先は `config.LOG_DIR`（書き込み失敗時のフォールバック解決済み）を使う。以前は `config.BASE_DIR/logs` 固定だったため、`LOG_DIR` が `temp_fallback/logs` に落ちた場合に `health_watch`/`log_analyzer` が読む場所と実際の出力先が食い違っていた。
 * 根拠: `log_dir = getattr(config, "LOG_DIR", None) or os.path.join(config.BASE_DIR, "logs")` (行番号: 188)
 * **（Issue #665 で修正）** ロガーのレベルは`config.LOG_LEVEL`（環境変数`LOG_LEVEL`、既定`"INFO"`）を大文字化して`logging`モジュールの同名定数に解決する。定数が存在しない・整数でない不正値のときは`logging.INFO`にフォールバックする。以前は`logging.INFO`固定で、実機で DEBUG ログを出す手段が無かった。
 * 根拠: `level_name = str(getattr(config, "LOG_LEVEL", "INFO") or "INFO").upper()` (行番号: 177)
+* **（2026-09 チャンネル再設計で修正）** `DiscordErrorHandler`の装着可否を決める`target_url`は、以前は`webhook_url or config.DISCORD_WEBHOOK_ERROR`のみで判定していた。`emit()`側がCRITICAL/ERRORで`DISCORD_WEBHOOK_ERROR`/`DISCORD_WEBHOOK_REPORT`を使い分けるようになったため、いずれか一方でも設定されていればハンドラを装着するよう`or getattr(config, "DISCORD_WEBHOOK_REPORT", None)`を追加した。
+* 根拠: [target_url解決] (行番号: 318〜322 / 抜粋: "target_url = (\n        webhook_url\n        or getattr(config, \"DISCORD_WEBHOOK_ERROR\", None)\n        or getattr(config, \"DISCORD_WEBHOOK_REPORT\", None)\n    )")
 
 
 * **引数/リクエスト**: `name` (型: `str`。取得するロガーの名前)、`webhook_url` (型: `str`、デフォルト `None`。Discord通知先URL)
-* 根拠: `[setup_logging]` (行番号: 255 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
+* 根拠: `[setup_logging]` (行番号: 271 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
 
 
 * **戻り値/レスポンス**: `logging.Logger` (セットアップが完了したロガーインスタンス)
@@ -215,30 +221,30 @@
 
 
 * **エラーハンドリング**: 既存ハンドラの`close()`で発生した`Exception`のみ`pass`で無視する（**（2026-09-06 品質監査で修正）**）。それ以外に明示的な例外捕捉はない。
-* 根拠: `[close()の例外無視]` (行番号: 171〜174 / 抜粋: "try:\n            existing_handler.close()\n        except Exception:\n            pass")、`[setup_logging関数全体]` (行番号: 255〜308 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
+* 根拠: `[close()の例外無視]` (行番号: 171〜174 / 抜粋: "try:\n            existing_handler.close()\n        except Exception:\n            pass")、`[setup_logging関数全体]` (行番号: 271〜330 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
 
 
 
 ### `get_logger`
 
 * **役割**: `setup_logging()`のエイリアス。`from core.logger import get_logger`という形で本関数を参照する呼び出し元向けに、`webhook_url`を渡さず`setup_logging(name)`をそのまま呼び出して結果を返す。
-* 根拠: `[get_logger]` (行番号: 311〜313 / 抜粋: "def get_logger(name: str) -> logging.Logger:\n    \"\"\"setup_logging() のエイリアス。`from core.logger import get_logger` で参照される呼び出し元向け。\"\"\"\n    return setup_logging(name)")
+* 根拠: `[get_logger]` (行番号: 333〜335 / 抜粋: "def get_logger(name: str) -> logging.Logger:\n    \"\"\"setup_logging() のエイリアス。`from core.logger import get_logger` で参照される呼び出し元向け。\"\"\"\n    return setup_logging(name)")
 
 
 * **引数/リクエスト**: `name` (型: `str`。取得するロガーの名前。`setup_logging`と異なり`webhook_url`引数は受け取らない)
-* 根拠: `[関数シグネチャ]` (行番号: 311 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
+* 根拠: `[関数シグネチャ]` (行番号: 333 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
 
 
 * **戻り値/レスポンス**: `logging.Logger` (`setup_logging(name)`の戻り値をそのまま返却)
-* 根拠: `[return]` (行番号: 313 / 抜粋: "return setup_logging(name)")
+* 根拠: `[return]` (行番号: 335 / 抜粋: "return setup_logging(name)")
 
 
 * **副作用**: `setup_logging(name)`の呼び出しに伴う副作用（ハンドラの登録、ログディレクトリの作成等）と同一。
-* 根拠: `[return setup_logging(name)]` (行番号: 313 / 抜粋: "return setup_logging(name)")
+* 根拠: `[return setup_logging(name)]` (行番号: 335 / 抜粋: "return setup_logging(name)")
 
 
 * **エラーハンドリング**: なし（`setup_logging`のエラーハンドリングに依存。`setup_logging`自体も明示的な例外捕捉を持たない）
-* 根拠: `[get_logger関数全体]` (行番号: 311〜313 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
+* 根拠: `[get_logger関数全体]` (行番号: 333〜335 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
 
 
 
@@ -356,6 +362,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
+* **[2026-09 チャンネル再設計] catch-allの送信先はログレベル依存**: `logger.error(...)`（非CRITICAL）と`logger.critical(...)`は同じ`DiscordErrorHandler`を通るが、送信先チャンネルが異なる(`DISCORD_WEBHOOK_REPORT`/`DISCORD_WEBHOOK_ERROR`)。個別に`send_push(channel="error")`を明示送信している箇所（`server_watchdog.py`等）と、その直前の`logger.error(...)`の両方が生きていると、同一障害が「明示送信分」と「catch-all分(現在はREPORT)」の**別々のチャンネルに二重に届く**。呼び出し元でこれを避けたい場合は`extra={"skip_discord": True}`を付けること（本PRで`camera_monitor.py`・`daily_timelapse_job.py`・`nas_monitor.py`・`core/nas_utils.py`の該当箇所に付与済み）。
 * **[修正済み] 例外の握りつぶし（Issue #436）**: `_send_webhook` は以前 `except Exception: pass` で囲まれており、Webhookの送信失敗（ネットワークエラー、レート制限、無効なURL等）が発生しても一切のログ・警告が出力されずに無視されていた。専用の`_webhook_failure_logger`（`"core.logger.discord_webhook_failure"`という別名で`propagate=False`・独自の`StreamHandler`を持つ）へ`warning(...)`を出力するよう修正され、通知システム自体の障害を標準エラー出力から検知できるようになった。**（2026-09-06 品質監査で修正）** #436当初は生URLと`exc_info=True`のトレースバックを出力していたが、Webhookトークンの漏洩を避けるため、現在はURL・例外メッセージとも`_redact_webhook_url`でトークン部分を`<redacted>`にマスクし、`exc_info`は付けない（例外クラス名のみ残す）。一方 `DiscordErrorHandler.emit` はペイロード組み立て・スレッド起動時の例外を `self.handleError(record)`（`logging.Handler`標準機構）に委譲するよう変更されており、`sys.stderr`へ出力されるため、ハンドラの不調自体も検知可能になっている（Issue #288）。
 * **[修正済み] 再セットアップ時のファイルディスクリプタリーク（2026-09-06 品質監査で修正）**: `setup_logging`は以前、同名ロガーの既存ハンドラを`logger.handlers.clear()`で外すだけで`close()`していなかったため、`WatchedFileHandler`が開いていた`home_system.log`のfdが呼び出しのたびにリークしていた（`get_logger()`を関数内で繰り返し呼ぶ経路で顕在化）。現在は`removeHandler()`後に`close()`する（169〜174行目）。なお`_webhook_failure_logger`は`setup_logging`の対象外（別名ロガー）なので、このremove+closeの影響を受けない。
 * **マスク対象はDiscord Webhook URL形式のみ**: `_WEBHOOK_URL_RE`は`/api/webhooks/<数字>/<英数字・_・->`のパターンだけを対象とするため、それ以外の形式のURLやクエリ文字列中の秘密情報はマスクされない（67行目）。

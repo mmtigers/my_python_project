@@ -187,7 +187,8 @@ class TestSendPushUsesKeywordArguments:
         args, kwargs = mock_send_push.call_args
         assert len(args) == 1, "messages以外は必ずキーワード引数で渡すこと"
         assert kwargs.get("target") == "discord"
-        assert kwargs.get("channel") == "error"
+        # チャンネル再設計(2026-09): #alerts(error)ではなく#operations(report)へ。
+        assert kwargs.get("channel") == "report"
 
 
 class TestVideoBuildFailureNotifiesUser:
@@ -234,7 +235,8 @@ class TestVideoBuildFailureNotifiesUser:
         mock_send_push.assert_called_once()
         args, kwargs = mock_send_push.call_args
         assert kwargs.get("target") == "discord"
-        assert kwargs.get("channel") == "error"
+        # チャンネル再設計(2026-09): #alerts(error)ではなく#operations(report)へ。
+        assert kwargs.get("channel") == "report"
         mock_uploader_send.assert_not_called()
 
     def test_build_success_still_uploads_and_does_not_send_error(self, monkeypatch, tmp_path):

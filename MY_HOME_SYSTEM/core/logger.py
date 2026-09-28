@@ -148,13 +148,21 @@ def _truncate_discord_content(content: str, limit: int = DISCORD_CONTENT_LIMIT) 
 
 # === ロギング設定 ===
 class DiscordErrorHandler(logging.Handler):
-    """エラーログをDiscordに通知するハンドラ (スタックトレース対応版)"""
+    """エラーログをDiscordに通知するハンドラ (スタックトレース対応版)。
+
+    Discordチャンネル再設計(2026-09)により、レベルで送信先を分ける:
+    CRITICAL(プロセス自体が落ちる級の障害)は即時対応チャンネル
+    (config.DISCORD_WEBHOOK_ERROR)、通常のERRORは運用者が後で確認する
+    チャンネル(config.DISCORD_WEBHOOK_REPORT)へ送る。個別に
+    `send_push(channel="error")` を呼んでいる箇所(server_watchdog等)は
+    このレベル分岐と無関係にそれぞれの送信先へ届く。
+    """
     # ★追加: 初期化時にWebhook URLを受け取れるようにする
     def __init__(self, webhook_url=None):
         super().__init__()
         self.webhook_url = webhook_url
-    
-    
+
+
     def emit(self, record):
         # Issue #742 (AUDIT-013): 以前は `"Discord" not in str(record.msg)` を条件に
         # していた。要件は「通知システム自身の失敗を通知しようとしない(無限ループ防止)」
@@ -171,8 +179,15 @@ class DiscordErrorHandler(logging.Handler):
         # ハンドラ内部からの再入は構造的に起きない。
         if record.levelno >= logging.ERROR and not getattr(record, "skip_discord", False):
             try:
-                # ★修正: 指定されたURLがあれば使い、なければデフォルト設定を使う
-                url = self.webhook_url or config.DISCORD_WEBHOOK_ERROR
+                # Discordチャンネル再設計(2026-09): CRITICALのみ即時対応チャンネルへ、
+                # 通常のERRORは運用者向けチャンネルへ振り分ける(★従来はレベルを問わず
+                # 一律 DISCORD_WEBHOOK_ERROR 固定だったため、個別の重大障害と
+                # 大量の軽微なERRORログが同じチャンネルに混在していた)。
+                is_critical = record.levelno >= logging.CRITICAL
+                if is_critical:
+                    url = self.webhook_url or config.DISCORD_WEBHOOK_ERROR
+                else:
+                    url = config.DISCORD_WEBHOOK_REPORT
                 if not url:
                     return
 
@@ -200,7 +215,8 @@ class DiscordErrorHandler(logging.Handler):
                 if len(log_msg) > body_limit:
                     log_msg = log_msg[:body_limit] + "\n…(切り詰め)"
 
-                content = f"😰 **システムエラー発生**\n```python\n{log_msg}\n```"
+                title = "🚨 **重大エラー発生(CRITICAL)**" if is_critical else "😰 **エラー発生**"
+                content = f"{title}\n```python\n{log_msg}\n```"
 
                 # 抑制していた件数を添える。「静かになった」のか「抑制されている」のかを
                 # 運用側から区別できるようにするため(Issue #759)。
@@ -297,7 +313,13 @@ def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:
 
     # Discord通知
     # ★追加: 引数でURLが指定されていれば優先、なければconfig.DISCORD_WEBHOOK_ERRORを使用
-    target_url = webhook_url or getattr(config, "DISCORD_WEBHOOK_ERROR", None)
+    # DiscordErrorHandler.emit()はCRITICAL/ERRORでDISCORD_WEBHOOK_ERROR/REPORTを
+    # 使い分けるため、ハンドラの装着自体はどちらか一方でも設定されていれば行う。
+    target_url = (
+        webhook_url
+        or getattr(config, "DISCORD_WEBHOOK_ERROR", None)
+        or getattr(config, "DISCORD_WEBHOOK_REPORT", None)
+    )
 
     if target_url:
         discord_handler = DiscordErrorHandler(webhook_url=target_url)

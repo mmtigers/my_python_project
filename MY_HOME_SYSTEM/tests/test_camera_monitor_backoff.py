@@ -183,6 +183,35 @@ class TestFatalErrorBackoff:
         assert len(persistent) == 1
         assert "(5 times)" in persistent[0]
 
+    def test_skip_discord_only_set_on_milestone_failures(self, monkeypatch):
+        """
+        レビュー指摘の回帰テスト: 以前はskip_discordが5回目以降の全回に無条件で
+        付いており、send_pushを呼ばない非マイルストーン回(6回目等)はcatch-all
+        経由の通知もskip_discordで握りつぶされてDiscord通知が完全に消えていた。
+        skip_discordはsend_pushと同じ回(5回目・12の倍数回目)にだけ付き、それ以外
+        (6回目等)は付かない(=catch-all経由の通知に任せる)ことを固定する。
+        """
+        self._always_fail(monkeypatch)
+        calls = []
+        monkeypatch.setattr(
+            camera_monitor.logger,
+            "error",
+            lambda message, *a, **k: calls.append((str(message), k)),
+        )
+
+        # 1周につきsleep2回。12回目のsleepで6周(=連続6回失敗)に達する。
+        _run(monkeypatch, stop_after=12)
+        persistent = [(m, k) for m, k in calls if "Persistent Error" in m]
+        assert len(persistent) == 2
+
+        fifth_message, fifth_kwargs = persistent[0]
+        assert "(5 times)" in fifth_message
+        assert fifth_kwargs.get("extra") == {"skip_discord": True}
+
+        sixth_message, sixth_kwargs = persistent[1]
+        assert "(6 times)" in sixth_message
+        assert "extra" not in sixth_kwargs
+
     def test_survives_notification_failure(self, monkeypatch):
         """通知送信自体が失敗しても監視ループは止まらない。"""
         self._always_fail(monkeypatch)

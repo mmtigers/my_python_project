@@ -136,13 +136,14 @@ def main() -> None:
             )
             messages_to_send = [{"type": "text", "text": "🚨 **メモリリーク/リソース枯渇の兆候**\n" + "\n".join(alert_messages)}]
             
-            # 運用介入が必要なエラーとして送信
+            # 運用介入が必要なエラーとして送信(チャンネル再設計(2026-09):
+            # 即応必須の重大障害ではなく運用者向けチャンネル(#operations)へ)
             target = getattr(config, "NOTIFICATION_TARGET", "discord")
             success = send_push(
                 user_id=getattr(config, "LINE_PARENTS_GROUP_ID", ""),
                 messages=messages_to_send,
                 target=target,
-                channel="error"
+                channel="report"
             )
             
             if success:

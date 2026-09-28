@@ -26,11 +26,19 @@ if config.LINE_CHANNEL_ACCESS_TOKEN:
     line_configuration = Configuration(access_token=config.LINE_CHANNEL_ACCESS_TOKEN)
 
 def _send_discord_webhook(messages: List[Any], image_data: Optional[bytes] = None, channel: str = "notify", filename: str = "snapshot.jpg") -> bool:
-    """DiscordへのWebhook送信"""
+    """DiscordへのWebhook送信
+
+    チャンネル再設計(2026-09): "error"=即時対応(#alerts)、"report"=運用者向け
+    (#operations、定期レポート+軽微エラー)、"ddd"=DDDコンテンツ収集専用
+    (#ddd_download。未設定時はNOTIFY/レガシーURLへフォールバック)、
+    それ以外(既定"notify")=生活者向け(#home-life)。
+    """
     if channel == "error":
         url = config.DISCORD_WEBHOOK_ERROR
     elif channel == "report":
         url = config.DISCORD_WEBHOOK_REPORT
+    elif channel == "ddd":
+        url = config.DISCORD_WEBHOOK_DDD or config.DISCORD_WEBHOOK_NOTIFY or config.DISCORD_WEBHOOK_URL
     else:
         url = config.DISCORD_WEBHOOK_NOTIFY or config.DISCORD_WEBHOOK_URL
     

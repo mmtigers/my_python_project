@@ -273,10 +273,17 @@ ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK: bool = (
 WEBHOOK_BASE_URL: Optional[str] = os.getenv("WEBHOOK_BASE_URL")
 
 # Discord Webhooks
+# チャンネル再設計(2026-09): ERROR=即時対応チャンネル(#alerts)、
+# REPORT=運用者向け(#operations、定期レポート+軽微エラー)、
+# NOTIFY=生活者向け(#home-life、見守り/Family Quest)、
+# DDD=DDDコンテンツ収集の日常運用(#ddd_download)。
 DISCORD_WEBHOOK_ERROR: Optional[str] = os.getenv("DISCORD_WEBHOOK_ERROR")
 DISCORD_WEBHOOK_REPORT: Optional[str] = os.getenv("DISCORD_WEBHOOK_REPORT")
 DISCORD_WEBHOOK_NOTIFY: Optional[str] = os.getenv("DISCORD_WEBHOOK_NOTIFY")
 DISCORD_WEBHOOK_URL: Optional[str] = DISCORD_WEBHOOK_NOTIFY or os.getenv("DISCORD_WEBHOOK_URL")
+# DDD(newface_monitor/batch_download_discord)専用。未設定時は各スクリプトが
+# 従来通りDISCORD_WEBHOOK_NOTIFY/DISCORD_WEBHOOK_URLにフォールバックする。
+DISCORD_WEBHOOK_DDD: str | None = os.getenv("DISCORD_WEBHOOK_DDD")
 
 # Gemini
 GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")

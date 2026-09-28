@@ -29,6 +29,7 @@ os.environ["DISCORD_WEBHOOK_ERROR"] = ""
 os.environ["DISCORD_WEBHOOK_REPORT"] = ""
 os.environ["DISCORD_WEBHOOK_NOTIFY"] = ""
 os.environ["DISCORD_WEBHOOK_URL"] = ""
+os.environ["DISCORD_WEBHOOK_DDD"] = ""
 os.environ["LINE_CHANNEL_ACCESS_TOKEN"] = ""
 os.environ["LINE_USER_ID"] = ""
 
