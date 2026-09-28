@@ -966,7 +966,7 @@ _mfujin_excluded_categories_str: str = os.getenv(
     "MFUJIN_BLOG_EXCLUDED_CATEGORIES",
     "PR記事,お知らせ,自己紹介と連絡先,記事紹介,おまとめ,再掲載,公式紹介記事",
 )
-MFUJIN_BLOG_EXCLUDED_CATEGORIES: List[str] = [
+MFUJIN_BLOG_EXCLUDED_CATEGORIES: list[str] = [
     c.strip() for c in _mfujin_excluded_categories_str.split(",") if c.strip()
 ]
 # 抽出した本編漫画画像がこの枚数未満なら送信しない(0枚を含む。PR記事等の除外カテゴリに

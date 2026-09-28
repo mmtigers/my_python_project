@@ -17,7 +17,6 @@
 - 投稿日時は `time[itemprop="datePublished"]` の `datetime` 属性(ISO8601)。
 """
 import dataclasses
-from typing import List, Optional
 from urllib.parse import urljoin
 
 import config
@@ -79,9 +78,9 @@ class ArticleSummary:
 class ArticleContent:
     url: str
     title: str
-    published_at: Optional[str]
-    category: Optional[str]
-    image_urls: List[str]
+    published_at: str | None
+    category: str | None
+    image_urls: list[str]
 
 
 def build_session() -> requests.Session:
@@ -188,7 +187,7 @@ def fetch_article_content(session: requests.Session, url: str) -> ArticleContent
     return parse_article_content(BeautifulSoup(resp.content, "html.parser"), url)
 
 
-def is_excluded_category(category: Optional[str]) -> bool:
+def is_excluded_category(category: str | None) -> bool:
     """カテゴリが除外リスト(config.MFUJIN_BLOG_EXCLUDED_CATEGORIES)に完全一致するか。
 
     カテゴリが取得できなかった場合(None)は除外しない(判定材料が無いため、
@@ -199,14 +198,14 @@ def is_excluded_category(category: Optional[str]) -> bool:
     return category in config.MFUJIN_BLOG_EXCLUDED_CATEGORIES
 
 
-def validate_image_urls(session: requests.Session, image_urls: List[str]) -> List[str]:
+def validate_image_urls(session: requests.Session, image_urls: list[str]) -> list[str]:
     """各画像URLにHEADリクエストを送り、サイズ上限・Content-Typeを検証する。
 
     HEADが使えない/失敗した場合は検証をスキップしてそのまま含める(過度に厳格にして
     正常な画像まで除外しないため)。サイズ超過が明確な場合のみ除外する。
     """
     max_bytes = config.MFUJIN_BLOG_IMAGE_MAX_SIZE_MB * 1024 * 1024
-    validated: List[str] = []
+    validated: list[str] = []
     for url in image_urls:
         try:
             resp = session.head(
@@ -228,7 +227,7 @@ def validate_image_urls(session: requests.Session, image_urls: List[str]) -> Lis
     return validated
 
 
-def build_line_messages(article: ArticleContent) -> List[Message]:
+def build_line_messages(article: ArticleContent) -> list[Message]:
     """記事内容からLINE Messaging APIへ送るメッセージ列を組み立てる。
 
     タイトル(1通)+画像枚数が LINE の1回のpushで送れる上限(5通)に収まる場合は、
@@ -239,7 +238,7 @@ def build_line_messages(article: ArticleContent) -> List[Message]:
     title_text = f"【えむふじん 最新話】\n\n{article.title}\n\n元記事:\n{article.url}"
 
     if 1 + len(article.image_urls) <= _LINE_MAX_MESSAGES_PER_PUSH:
-        messages: List[Message] = [TextMessage(text=title_text)]
+        messages: list[Message] = [TextMessage(text=title_text)]
         for image_url in article.image_urls:
             messages.append(
                 ImageMessage(originalContentUrl=image_url, previewImageUrl=image_url)

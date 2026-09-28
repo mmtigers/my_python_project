@@ -180,7 +180,7 @@ def test_run_notifies_error_on_network_failure_and_records_nothing(isolated_db, 
     monkeypatch.setattr(blog, "build_session", lambda: object())
 
     def _raise(session):
-        raise ConnectionError("boom")
+        raise blog.requests.ConnectionError("boom")
 
     monkeypatch.setattr(blog, "fetch_latest_article_summary", _raise)
 

@@ -14,11 +14,11 @@ HTML解析・LINEメッセージ組み立ての実装は services/mfujin_blog_se
 import dataclasses
 import sys
 from pathlib import Path
-from typing import Optional
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 import config
+import requests
 from core.database import get_db_cursor
 from core.logger import setup_logging
 from core.utils import get_now_iso
@@ -28,7 +28,7 @@ from services.notification_service import send_push
 logger = setup_logging("mfujin_blog_monitor")
 
 
-def _get_existing_status(article_url: str) -> Optional[str]:
+def _get_existing_status(article_url: str) -> str | None:
     with get_db_cursor() as cur:
         cur.execute(
             f"SELECT status FROM {config.SQLITE_TABLE_MFUJIN_NOTIFICATIONS} WHERE article_url = ?",  # nosec B608
@@ -41,11 +41,11 @@ def _get_existing_status(article_url: str) -> Optional[str]:
 def _record(
     article_url: str,
     title: str,
-    published_at: Optional[str],
+    published_at: str | None,
     status: str,
     image_count: int,
     *,
-    error_detail: Optional[str] = None,
+    error_detail: str | None = None,
     sent: bool = False,
 ) -> None:
     now = get_now_iso()
@@ -97,7 +97,7 @@ def run() -> None:
 
     try:
         summary = blog.fetch_latest_article_summary(session)
-    except Exception as e:
+    except (requests.RequestException, blog.MfujinBlogError) as e:
         _notify_operational_error(f"最新記事一覧の取得に失敗しました: {e}")
         return
 
@@ -108,7 +108,7 @@ def run() -> None:
 
     try:
         article = blog.fetch_article_content(session, summary.url)
-    except Exception as e:
+    except (requests.RequestException, blog.MfujinBlogError) as e:
         _notify_operational_error(f"記事本文の取得に失敗しました (url={summary.url}): {e}")
         return
 
