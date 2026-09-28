@@ -124,7 +124,7 @@ def parse_latest_article_summary(soup: BeautifulSoup) -> ArticleSummary:
 def fetch_latest_article_summary(session: requests.Session) -> ArticleSummary:
     resp = session.get(config.MFUJIN_BLOG_TOP_URL, timeout=config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC)
     resp.raise_for_status()
-    return parse_latest_article_summary(BeautifulSoup(resp.content, "html.parser"))
+    return parse_latest_article_summary(BeautifulSoup(resp.content, "html.parser", from_encoding="utf-8"))
 
 
 def _is_manga_page_image(img: Tag) -> bool:
@@ -184,7 +184,7 @@ def parse_article_content(soup: BeautifulSoup, url: str) -> ArticleContent:
 def fetch_article_content(session: requests.Session, url: str) -> ArticleContent:
     resp = session.get(url, timeout=config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC)
     resp.raise_for_status()
-    return parse_article_content(BeautifulSoup(resp.content, "html.parser"), url)
+    return parse_article_content(BeautifulSoup(resp.content, "html.parser", from_encoding="utf-8"), url)
 
 
 def is_excluded_category(category: str | None) -> bool:

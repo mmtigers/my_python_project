@@ -107,6 +107,81 @@ def test_parse_article_content_raises_when_body_container_missing():
         pass
 
 
+class _FakeFetchResponse:
+    """requests.Response の代わり。.content(生バイト列)のみを模倣する。"""
+
+    def __init__(self, content: bytes):
+        self.content = content
+
+    def raise_for_status(self):
+        pass
+
+
+class _FakeSessionForFetch:
+    """fetch_*系がresp.contentから直接BeautifulSoupへ渡す経路を検証するための
+    最小限のセッション代替。requestsの`resp.encoding`(HTTPヘッダのcharset)を
+    経由しないため、BeautifulSoup側のエンコーディング自動判定に処理が委ねられる
+    実際の呼び出し経路を再現する。"""
+
+    def __init__(self, content: bytes):
+        self._content = content
+
+    def get(self, url, timeout=None):
+        return _FakeFetchResponse(self._content)
+
+
+def _spy_on_beautifulsoup(monkeypatch):
+    """blog.BeautifulSoup呼び出しをそのまま実行しつつ、渡されたkwargsを記録するスパイに
+    差し替える。戻り値のリストにkwargsが積まれる。"""
+    calls = []
+    original = blog.BeautifulSoup
+
+    def _recording(*args, **kwargs):
+        calls.append(kwargs)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(blog, "BeautifulSoup", _recording)
+    return calls
+
+
+def test_fetch_latest_article_summary_decodes_utf8_bytes_correctly(monkeypatch):
+    """2026-09-28の実機検証で、記事タイトルがLINE通知上で文字化けする障害が発生した
+    (BeautifulSoupへ生バイト列を渡す際にエンコーディング自動判定が外れていた)。
+
+    出力内容の正しさに加え、BeautifulSoup呼び出しがfrom_encoding="utf-8"を明示している
+    ことも直接検証する。エンコーディング自動判定(charset-normalizer等)は入力サンプルの
+    長さ・内容次第で偶然正しく推測することがあり、出力内容の一致だけを見るテストは
+    from_encoding指定を外した修正前のコードに対しても偶然パスしてしまいうる(実際に
+    確認済み)。呼び出し引数を直接検証することで、判定結果に依存しない確実な回帰防止にする。
+    """
+    import config
+
+    monkeypatch.setattr(config, "MFUJIN_BLOG_TOP_URL", "https://mfujin.test/")
+    monkeypatch.setattr(config, "MFUJIN_BLOG_REQUEST_TIMEOUT_SEC", 5)
+    session = _FakeSessionForFetch(TOP_PAGE_HTML.encode("utf-8"))
+    calls = _spy_on_beautifulsoup(monkeypatch)
+
+    summary = blog.fetch_latest_article_summary(session)
+
+    assert summary.title == "ダミー記事タイトルA"
+    assert calls and calls[0].get("from_encoding") == "utf-8"
+
+
+def test_fetch_article_content_decodes_utf8_bytes_correctly(monkeypatch):
+    """上と同じ障害・同じ理由の回帰テスト(記事ページ取得側)。"""
+    import config
+
+    monkeypatch.setattr(config, "MFUJIN_BLOG_REQUEST_TIMEOUT_SEC", 5)
+    session = _FakeSessionForFetch(_article_html().encode("utf-8"))
+    calls = _spy_on_beautifulsoup(monkeypatch)
+
+    article = blog.fetch_article_content(session, "https://mfujin.test/archives/dummy.html")
+
+    assert article.title == "ダミー記事タイトル"
+    assert article.category == "日常のひとこま"
+    assert calls and calls[0].get("from_encoding") == "utf-8"
+
+
 def test_is_excluded_category_matches_known_pr_category(monkeypatch):
     import config
 
