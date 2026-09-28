@@ -42,6 +42,13 @@
 # (cronはシェルのリダイレクトエラーを検知できず無言で失敗する)。mkdir -pを追加する。
 0 * * * * cd /home/masahiro/develop/DDD && mkdir -p /home/masahiro/develop/DDD/logs && /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python newface_monitor.py >> /home/masahiro/develop/DDD/logs/newface_monitor.log 2>&1
 
+# えむふじんブログ(https://mfujin.blog.jp/)の最新漫画をLINEへ通知(個人用)。
+# 朝7時頃の更新想定に対し余裕を見て12:00に本実行し、更新が遅れた日の取りこぼし救済として
+# 15:00にもう一度実行する(mfujin_blog_notificationsテーブルのUNIQUE制約により、
+# 既に送信/判定済みの記事であれば15:00側は何もしない冪等な呼び出し)。
+0 12 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/mfujin_blog_monitor.py
+0 15 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/mfujin_blog_monitor.py
+
 # Bluetoothスピーカー(Anker SoundCore 2)のキープアライブ — 2026-09-19 判断: 登録しない
 #
 # 経緯: #585 で「スクリプトがあるのに実行契機が皆無」の解消として
