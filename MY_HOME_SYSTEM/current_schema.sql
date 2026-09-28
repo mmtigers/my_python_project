@@ -405,3 +405,14 @@ CREATE INDEX idx_quest_cancellation_audit_history
     ON quest_cancellation_audit (history_id);
 CREATE INDEX idx_quest_cancellation_audit_user_time
     ON quest_cancellation_audit (user_id, cancelled_at DESC);
+CREATE TABLE mfujin_blog_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    article_url TEXT NOT NULL UNIQUE,
+    article_title TEXT NOT NULL,
+    published_at TEXT,
+    fetched_at TEXT NOT NULL,
+    sent_at TEXT,
+    status TEXT NOT NULL,
+    image_count INTEGER NOT NULL DEFAULT 0,
+    error_detail TEXT
+);

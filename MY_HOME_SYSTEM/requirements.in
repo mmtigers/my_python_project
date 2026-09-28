@@ -46,6 +46,8 @@ pytz
 # ダッシュボードのホーム画面アイコン生成(services/dashboard_pwa_service.py)で直接 import
 # する。以前は streamlit の推移的依存として入っていただけだった(#829でstreamlit自体は撤去)。
 Pillow
-# beautifulsoup4 は train_service.py(JR運行情報・Yahoo!路線情報のスクレイピング)
-# 専用だったため、同機能の退役にあわせて外した。
+# beautifulsoup4: services/mfujin_blog_service.py(えむふじんブログの記事HTML解析)が
+# 直接importする。以前train_service.py専用だったため同機能の退役にあわせて一度外したが
+# (Issue参照)、今回のブログ監視機能で再度必要になった。
+beautifulsoup4
 lxml

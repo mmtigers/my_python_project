@@ -20,6 +20,7 @@
     15. 週次レポート設定
     16. ダッシュボード(Streamlit)公開設定
     17. 祝日・休日判定設定
+    18. えむふじんブログ監視・LINE通知設定
 """
 import os
 import time
@@ -333,6 +334,7 @@ SQLITE_TABLE_DEFECATION: str = "defecation_records"
 # ダッシュボードのAIレポート(セバスチャン)機能ごと退役した。テーブルは履歴として残す。
 SQLITE_TABLE_SHOPPING: str = "shopping_records"
 SQLITE_TABLE_NAS: str = "nas_records"
+SQLITE_TABLE_MFUJIN_NOTIFICATIONS: str = "mfujin_blog_notifications"
 # 旧 SQLITE_TABLE_BICYCLE ("bicycle_parking_records") は、ダッシュボードの
 # 駐輪場待機数の表示ごと退役した(オーナー判断)。テーブルは履歴として残す。
 # 旧 SQLITE_TABLE_CAR ("car_records") は、書き込み経路がリポジトリのどこにも
@@ -945,3 +947,31 @@ for _raw_date in _extra_holiday_dates_str.split(","):
             "解釈できません。この要素は無視します。"
         )
 EXTRA_HOLIDAY_DATES: frozenset = frozenset(_extra_holiday_dates)
+
+# ==========================================
+# 18. えむふじんブログ監視・LINE通知設定
+# ==========================================
+# monitors/mfujin_blog_monitor.py が「コミックエッセイ えむふじんがあらわれた」
+# (https://mfujin.blog.jp/) の最新記事を巡回し、漫画記事と判定できた場合のみ
+# 本文中の漫画画像をLINEへ通知する個人用機能。HTML解析の実装は
+# services/mfujin_blog_service.py に集約する。
+MFUJIN_BLOG_ENABLED: bool = os.getenv("MFUJIN_BLOG_ENABLED", "true").strip().lower() != "false"
+MFUJIN_BLOG_TOP_URL: str = os.getenv("MFUJIN_BLOG_TOP_URL", "https://mfujin.blog.jp/").strip()
+# 通知先を既存の LINE_USER_ID と分けたい場合のみ設定する(未設定なら LINE_USER_ID を使う)。
+MFUJIN_BLOG_LINE_USER_ID: str = os.getenv("MFUJIN_BLOG_LINE_USER_ID", "").strip() or LINE_USER_ID
+# 「漫画記事」とみなさない除外カテゴリ(カンマ区切り、完全一致)。2026-09にサイドバーの
+# カテゴリ一覧で実在を確認した値を既定値にしている。サイト側でカテゴリが増減した場合は
+# ここを更新するだけでよい(コード変更不要)。
+_mfujin_excluded_categories_str: str = os.getenv(
+    "MFUJIN_BLOG_EXCLUDED_CATEGORIES",
+    "PR記事,お知らせ,自己紹介と連絡先,記事紹介,おまとめ,再掲載,公式紹介記事",
+)
+MFUJIN_BLOG_EXCLUDED_CATEGORIES: List[str] = [
+    c.strip() for c in _mfujin_excluded_categories_str.split(",") if c.strip()
+]
+# 抽出した本編漫画画像がこの枚数未満なら送信しない(0枚を含む。PR記事等の除外カテゴリに
+# 該当しないのに0枚だった場合は、HTML構造が変わった疑いとして誤送信せずエラー通知する)。
+MFUJIN_BLOG_MIN_IMAGE_COUNT: int = _get_int_env("MFUJIN_BLOG_MIN_IMAGE_COUNT", 1)
+MFUJIN_BLOG_REQUEST_TIMEOUT_SEC: int = _get_int_env("MFUJIN_BLOG_REQUEST_TIMEOUT_SEC", 20)
+# 画像1枚あたりの検証(HEADリクエスト)で許容する上限サイズ。超過分は送信対象から除外する。
+MFUJIN_BLOG_IMAGE_MAX_SIZE_MB: int = _get_int_env("MFUJIN_BLOG_IMAGE_MAX_SIZE_MB", 10)
