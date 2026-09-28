@@ -30,7 +30,7 @@
 | `sys` | 標準 | プロジェクトルートを`sys.path`へ追加 | 根拠: [インポート宣言] (行番号: 15 / 抜粋: "import sys") |
 | `pathlib.Path` | 標準 | 自ファイルの親の親(プロジェクトルート)を解決 | 根拠: [インポート宣言] (行番号: 16 / 抜粋: "from pathlib import Path") |
 | `typing.Optional` | 標準 | 型ヒント | 根拠: [インポート宣言] (行番号: 17 / 抜粋: "from typing import Optional") |
-| `config` | 外部 | `MFUJIN_BLOG_*`設定値・`SQLITE_TABLE_MFUJIN_NOTIFICATIONS` | 根拠: [インポート宣言] (行番号: 21 / 抜粋: "import config") |
+| `config` | 外部 | `MFUJIN_BLOG_*`設定値・`SQLITE_TABLE_MFUJIN_NOTIFICATIONS` | 根拠: [インポート宣言] (行番号: 20 / 抜粋: "import config") |
 | `core.database.get_db_cursor` | 外部 | SQLite接続(WAL・ロックリトライ込み) | 根拠: [インポート宣言] (行番号: 22 / 抜粋: "from core.database import get_db_cursor") |
 | `core.logger.setup_logging` | 外部 | ロガー初期化 | 根拠: [インポート宣言] (行番号: 23 / 抜粋: "from core.logger import setup_logging") |
 | `core.utils.get_now_iso` | 外部 | 現在時刻(JST、ISO形式)取得 | 根拠: [インポート宣言] (行番号: 24 / 抜粋: "from core.utils import get_now_iso") |
@@ -142,7 +142,7 @@
 ### モジュールレベル処理(`sys.path.append`)
 
 * **役割**: 本ファイルの親の親ディレクトリ(`MY_HOME_SYSTEM/`)を`sys.path`へ追加し、`config`等のトップレベルモジュールをcron実行時にも解決できるようにする。
-* 根拠: [モジュールレベル文] (行番号: 19 / 抜粋: "sys.path.append(str(Path(__file__).resolve().parent.parent))")
+* 根拠: [モジュールレベル文] (行番号: 18 / 抜粋: "sys.path.append(str(Path(__file__).resolve().parent.parent))")
 
 
 * **引数/リクエスト**: 該当なし

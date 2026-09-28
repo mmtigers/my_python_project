@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全98件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全100件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -44,6 +44,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [line.md](./line.md) | LINE連携のイベント・Postbackデータ構造を定義するPydanticモデル群。 |
 | [line_service.md](./line_service.md) | LINEメッセージからの情報記録・取得、クエストステータス照会、承認・却下処理を担う。 |
 | [notification_service.md](./notification_service.md) | DiscordおよびLINEへのメッセージ（テキスト・画像）通知を行い、LINE送信失敗時にDiscordへフォールバックする。 |
+| [mfujin_blog_service.md](./mfujin_blog_service.md) | 個人ブログ「コミックエッセイ えむふじんがあらわれた」の最新記事取得・漫画記事判定・本編漫画画像抽出・LINE通知メッセージ組み立て(2026-09新設)。 |
 | [train_service.md](./train_service.md) | **廃止**: JR西日本の運行情報API、およびYahoo!路線情報から運行状況・最短経路を取得していたモジュール。利用元（ダッシュボードの「🚃 JR運行情報」カードと「🚃 おでかけ」タブ）が使われなくなり、オーナー判断で機能ごと撤去されたためソースごと削除した。仕様書は廃止noticeつきで履歴として残している。 |
 
 ## D. AI・分析エンジン
@@ -94,6 +95,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [db_retention.md](./db_retention.md) | 上記を実機で確認・実行するための CLI(2026-09-20 新設、Issue #733)。引数なしで現状と削除予定のレポート、`--apply` で削除、`--vacuum` でファイル縮小。 |
 | [host_config_backup_service.md](./host_config_backup_service.md) | ホスト側(`/etc` 等)の運用設定のバックアップ(2026-09-20 新設、Issue #774)。`backup_service` の対象がリポジトリ配下のファイルだけで、常時録画・外部公開・NASマウントの設定が丸ごと対象外だった。**秘密を含むファイルは中身をコピーせず台帳(パス・所有者・パーミッション・sha256)だけを残す**(#649/#773 と同じ判断)。コピーするファイルも `password=`/`token=` の値を redact する。 |
 | [backup_host_config.md](./backup_host_config.md) | 上記を実機で実行するための CLI(2026-09-20 新設、Issue #774)。`--dry-run` で何を拾うかの確認、引数なしで1世代を書き出す。読めなかったファイルがあれば exit 1。 |
+| [mfujin_blog_monitor.md](./mfujin_blog_monitor.md) | 個人ブログ「コミックエッセイ えむふじんがあらわれた」をcron駆動で巡回し、漫画記事と判定できた場合のみLINE通知するバッチのオーケストレーション(2026-09新設)。`mfujin_blog_notifications`テーブルで重複送信を防止する。 |
 
 ## G. その他
 
