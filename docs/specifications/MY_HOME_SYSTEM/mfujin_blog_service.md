@@ -96,7 +96,7 @@
 ### `ArticleSummary` / `ArticleContent`
 
 * **役割**: `ArticleSummary`はトップページ一覧から取得できる最小情報(URL・タイトル)を保持する。`ArticleContent`は記事ページ全体から取得した情報(URL・タイトル・投稿日時・カテゴリ・本編漫画画像URLのリスト)を保持する。
-* 根拠: [クラス定義] (行番号: 72〜75 / 抜粋: '@dataclasses.dataclass\nclass ArticleSummary:\n    url: str\n    title: str')、(行番号: 78〜84 / 抜粋: '@dataclasses.dataclass\nclass ArticleContent:\n    url: str\n    title: str\n    published_at: Optional[str]\n    category: Optional[str]\n    image_urls: List[str]')
+* 根拠: [クラス定義] (行番号: 72〜75 / 抜粋: '@dataclasses.dataclass\nclass ArticleSummary:\n    url: str\n    title: str')、(行番号: 78〜84 / 抜粋: '@dataclasses.dataclass\nclass ArticleContent:\n    url: str\n    title: str\n    published_at: str | None\n    category: str | None\n    image_urls: list[str]')
 
 
 * **引数/リクエスト**: `ArticleSummary(url, title)` / `ArticleContent(url, title, published_at, category, image_urls)`
@@ -280,65 +280,65 @@
 ### `is_excluded_category`
 
 * **役割**: カテゴリ文字列が`config.MFUJIN_BLOG_EXCLUDED_CATEGORIES`(完全一致のリスト)に含まれるかを判定する。
-* 根拠: [関数定義] (行番号: 207〜215 / 抜粋: "def is_excluded_category(category: Optional[str]) -> bool:")
+* 根拠: [関数定義] (行番号: 207〜215 / 抜粋: "def is_excluded_category(category: str | None) -> bool:")
 
 
-* **引数/リクエスト**: `category: Optional[str]`
-* 根拠: (行番号: 191)
+* **引数/リクエスト**: `category: str | None`
+* 根拠: (行番号: 207)
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: (行番号: 198, 215 / 抜粋: "return False", "return category in config.MFUJIN_BLOG_EXCLUDED_CATEGORIES")
+* 根拠: (行番号: 214, 215 / 抜粋: "return False", "return category in config.MFUJIN_BLOG_EXCLUDED_CATEGORIES")
 
 
 * **副作用**: なし
-* 根拠: (行番号: 191〜199)
+* 根拠: (行番号: 207〜215)
 
 
 * **エラーハンドリング**: `category`が`None`の場合は除外しない(False)。
-* 根拠: (行番号: 197〜198 / 抜粋: 'if category is None:\n        return False')
+* 根拠: (行番号: 213〜214 / 抜粋: 'if category is None:\n        return False')
 
 
 
 ### `validate_image_urls`
 
 * **役割**: 抽出済み画像URL一覧の各URLへHEADリクエストを送り、ステータスコード(400以上は除外)・`Content-Length`ヘッダ(`config.MFUJIN_BLOG_IMAGE_MAX_SIZE_MB`換算のバイト数を超えたら除外)を検証し、通過したURLのみのリストを返す。
-* 根拠: [関数定義] (行番号: 218〜244 / 抜粋: "def validate_image_urls(session: requests.Session, image_urls: List[str]) -> List[str]:")
+* 根拠: [関数定義] (行番号: 218〜244 / 抜粋: "def validate_image_urls(session: requests.Session, image_urls: list[str]) -> list[str]:")
 
 
-* **引数/リクエスト**: `session: requests.Session`, `image_urls: List[str]`
-* 根拠: (行番号: 202)
+* **引数/リクエスト**: `session: requests.Session`, `image_urls: list[str]`
+* 根拠: (行番号: 218)
 
 
-* **戻り値/レスポンス**: `List[str]`(検証を通過したURLのみ)
+* **戻り値/レスポンス**: `list[str]`(検証を通過したURLのみ)
 * 根拠: (行番号: 244 / 抜粋: "return validated")
 
 
 * **副作用**: 各画像URLへの外部HTTP HEADリクエスト(タイムアウト`config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC`、リダイレクト追従あり)。ステータス400以上・サイズ超過・例外発生時はWARNINGログを出力する。
-* 根拠: (行番号: 212〜214, 216, 220〜223, 227)
+* 根拠: (行番号: 228〜230, 231〜232, 234〜239)
 
 
 * **エラーハンドリング**: `requests.RequestException`または`ValueError`(`Content-Length`が数値変換できない場合)を捕捉し、当該URLをWARNINGログとともに除外する(例外を上位に伝播させない)。
-* 根拠: (行番号: 226〜227 / 抜粋: 'except (requests.RequestException, ValueError) as e:\n            logger.warning(...)')
+* 根拠: (行番号: 242〜243 / 抜粋: 'except (requests.RequestException, ValueError) as e:\n            logger.warning(...)')
 
 
 
 ### `build_line_messages`
 
-* **役割**: `ArticleContent`からLINE Messaging APIへ送るメッセージ列(`List[Message]`)を組み立てる。「タイトル1通(`TextMessage`、【えむふじん 最新話】+タイトル+元記事URL) + 画像枚数」の合計が`_LINE_MAX_MESSAGES_PER_PUSH`(5)以下ならテキスト1通+`ImageMessage`(画像ごとに`originalContentUrl`/`previewImageUrl`とも画像URLをそのまま設定)というシンプルな構成にする。超える場合は、タイトル+元記事リンクボタンのバブルを先頭に、画像を`hero`画像とするバブルを`_FLEX_CAROUSEL_MAX_BUBBLES`(12)-1枚まで追加した`FlexMessage`(carousel)1通に切り替える(上限超過分は先頭から切り詰め、WARNINGログを出力)。
-* 根拠: [関数定義] (行番号: 247〜313 / 抜粋: "def build_line_messages(article: ArticleContent) -> List[Message]:")、[シンプル分岐] (行番号: 241〜247)、[Flex分岐] (行番号: 249〜297)
+* **役割**: `ArticleContent`からLINE Messaging APIへ送るメッセージ列(`list[Message]`)を組み立てる。「タイトル1通(`TextMessage`、【えむふじん 最新話】+タイトル+元記事URL) + 画像枚数」の合計が`_LINE_MAX_MESSAGES_PER_PUSH`(5)以下ならテキスト1通+`ImageMessage`(画像ごとに`originalContentUrl`/`previewImageUrl`とも画像URLをそのまま設定)というシンプルな構成にする。超える場合は、タイトル+元記事リンクボタンのバブルを先頭に、画像を`hero`画像とするバブルを`_FLEX_CAROUSEL_MAX_BUBBLES`(12)-1枚まで追加した`FlexMessage`(carousel)1通に切り替える(上限超過分は先頭から切り詰め、WARNINGログを出力)。
+* 根拠: [関数定義] (行番号: 247〜313 / 抜粋: "def build_line_messages(article: ArticleContent) -> list[Message]:")、[シンプル分岐] (行番号: 257〜263)、[Flex分岐] (行番号: 265〜313)
 
 
 * **引数/リクエスト**: `article: ArticleContent`
-* 根拠: (行番号: 231)
+* 根拠: (行番号: 247)
 
 
-* **戻り値/レスポンス**: `List[Message]`(`TextMessage`+`ImageMessage`の列、または`FlexMessage`1件のリスト)
-* 根拠: (行番号: 247, 297)
+* **戻り値/レスポンス**: `list[Message]`(`TextMessage`+`ImageMessage`の列、または`FlexMessage`1件のリスト)
+* 根拠: (行番号: 263, 313)
 
 
 * **副作用**: 画像枚数がFlex Carouselの上限を超える場合にWARNINGログを出力する。
-* 根拠: (行番号: 277〜281)
+* 根拠: (行番号: 293〜297)
 
 
 * **エラーハンドリング**: なし(例外送出箇所なし)。
@@ -418,8 +418,8 @@ graph TD
 | 優先度 | ファイル名 | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `monitors/mfujin_blog_monitor.py` | 本モジュールの唯一の呼び出し元。除外カテゴリ判定・画像枚数判定・DB記録・LINE送信の実際のオーケストレーションを確認するため。 | 根拠: モジュールdocstring (行番号: 12) |
-| 高 | `config.py` | `MFUJIN_BLOG_*`各設定値の既定値・環境変数名を確認するため。 | 根拠: `config`からの変数参照多数 (行番号: 126, 186, 199等) |
-| 中 | `services/notification_service.py` | `build_line_messages`が返す`List[Message]`を実際にLINEへ送信する`send_push`/`_send_line_push`の実装(特に`ImageMessage`が`isinstance(msg, Message)`分岐を通過することの確認)を見るため。 | 根拠: 本ファイルは送信自体を行わず`Message`オブジェクトを組み立てるのみ (行番号: 231〜297) |
+| 高 | `config.py` | `MFUJIN_BLOG_*`各設定値の既定値・環境変数名を確認するため。 | 根拠: `config`からの変数参照多数 (行番号: 142, 215, 224等) |
+| 中 | `services/notification_service.py` | `build_line_messages`が返す`list[Message]`を実際にLINEへ送信する`send_push`/`_send_line_push`の実装(特に`ImageMessage`が`isinstance(msg, Message)`分岐を通過することの確認)を見るため。 | 根拠: 本ファイルは送信自体を行わず`Message`オブジェクトを組み立てるのみ (行番号: 247〜313) |
 
 ## 8. 保守上の注意点
 
