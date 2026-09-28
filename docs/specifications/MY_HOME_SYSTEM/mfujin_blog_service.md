@@ -173,7 +173,8 @@
 
 
 * **戻り値/レスポンス**: `ArticleSummary`
-* 根拠: (行番号: 128 / 抜粋: 'return parse_latest_article_summary(BeautifulSoup(resp.content, "html.parser"))')
+* **(2026-09-28 実機障害対応で修正)** `resp.content`(生バイト列)を`BeautifulSoup`へ渡す際、`from_encoding="utf-8"`を明示するよう変更した。以前は指定が無く、`BeautifulSoup`自身のエンコーディング自動判定に委ねていたため、実機での検証時にLINE通知の記事タイトルが文字化けする障害が発生した(サイト側のHTML内にエンコーディング宣言が見つけにくい/無い場合、自動判定が外れうる)。サイトが常にUTF-8で配信していることを前提に、判定を経由せず明示的にUTF-8として復元するようにした。
+* 根拠: (行番号: 128 / 抜粋: 'return parse_latest_article_summary(BeautifulSoup(resp.content, "html.parser", from_encoding="utf-8"))')
 
 
 * **副作用**: `config.MFUJIN_BLOG_TOP_URL`への外部HTTP GETリクエスト(タイムアウト`config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC`)。
@@ -242,7 +243,8 @@
 
 
 * **戻り値/レスポンス**: `ArticleContent`
-* 根拠: (行番号: 188 / 抜粋: 'return parse_article_content(BeautifulSoup(resp.content, "html.parser"), url)')
+* **(2026-09-28 実機障害対応で修正)** `fetch_latest_article_summary`と同じ理由で`from_encoding="utf-8"`を明示するよう変更した。
+* 根拠: (行番号: 188 / 抜粋: 'return parse_article_content(BeautifulSoup(resp.content, "html.parser", from_encoding="utf-8"), url)')
 
 
 * **副作用**: `url`への外部HTTP GETリクエスト(タイムアウト`config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC`)。
