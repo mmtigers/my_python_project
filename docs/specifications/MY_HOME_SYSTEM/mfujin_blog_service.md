@@ -315,7 +315,7 @@
 
 
 * **副作用**: 各画像URLへの外部HTTP HEADリクエスト(タイムアウト`config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC`、リダイレクト追従あり)。ステータス400以上・サイズ超過・例外発生時はWARNINGログを出力する。
-* 根拠: (行番号: 228〜230, 231〜232, 234〜239)
+* 根拠: (行番号: 228〜230, 231〜232, 234〜239, 242〜243)
 
 
 * **エラーハンドリング**: `requests.RequestException`または`ValueError`(`Content-Length`が数値変換できない場合)を捕捉し、当該URLをWARNINGログとともに除外する(例外を上位に伝播させない)。
