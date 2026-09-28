@@ -138,7 +138,7 @@ python-dotenv==1.2.3
     # via -r requirements.in
 python-multipart==0.0.32
     # via -r requirements.in
-pytz==2026.3.post1
+pytz==2026.4
     # via -r requirements.in
 requests==2.34.2
     # via
