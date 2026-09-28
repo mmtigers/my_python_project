@@ -56,6 +56,10 @@ import yt_dlp
 # ==========================================
 # 0. 環境設定 & ロギング
 # ==========================================
+# Discord通知システム調査(2026-09-26)で確認: 標準のlogging.getLoggerのみを使っているため、
+# logger.error()はcore.logger.DiscordErrorHandler経由の自動Discord転送を発火しない
+# (DDD/newface_monitor.pyはcore.logger.get_loggerを使うため発火する。非対称)。
+# 本ファイルのDiscord通知は下のDiscordNotifier.send()による明示呼び出しのみが経路。
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',

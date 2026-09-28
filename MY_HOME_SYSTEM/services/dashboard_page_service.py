@@ -16,13 +16,14 @@ import glob
 import html
 import json
 import os
+import re
 from datetime import datetime
 from typing import Any
 
 import config
 import pandas as pd
 
-from services import analysis_service, home_status_service
+from services import home_status_service
 
 # === ページ共通のシェル ===
 
@@ -79,12 +80,15 @@ _PAGE_BASE_CSS = """
     }
     a.nav-card:active { transform: scale(0.98); }
     a.nav-card .nav-card-sub { font-size: 0.7rem; font-weight: normal; opacity: 0.75; }
+    /* #829の見直し: 以前は警告表示(.alerts-warn)と紛らわしいアンバー系の配色で、
+       ページ最下部にあったため「位置が分かりにくい」「警告と見分けがつかない」の
+       両方の原因になっていた。警告色(オレンジ/黄)ともナビカード(藍)とも被らない
+       ティール系の配色にし、ステータスカードのすぐ下(ナビカードより前)に置く。 */
     a.external-card {
         display: flex; align-items: center; justify-content: space-between;
         gap: 8px; padding: 14px 16px; min-height: 44px; border-radius: 12px;
         text-decoration: none; font-weight: bold; font-size: 0.95rem;
-        background: #fff8e1; color: #8d6e00; border: 1px solid #ffe082;
-        margin-bottom: 8px;
+        background: #e0f2f1; color: #00695c; border: 1px solid #80cbc4;
         -webkit-tap-highlight-color: rgba(0,0,0,0.08);
     }
 
@@ -97,12 +101,39 @@ _PAGE_BASE_CSS = """
     table.simple-table th { color: #666; font-weight: bold; font-size: 0.75rem; }
     .empty-note { color: #888; font-size: 0.85rem; margin: 4px 0 16px; }
 
-    /* カメラのスナップショットギャラリー */
+    /* カメラのスナップショットギャラリー。タップで元画像を別タブに拡大表示する
+       (`.snapshot-item`が`<a target="_blank">`)。 */
     .snapshot-grid {
         display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
         gap: 6px; margin-bottom: 16px;
     }
-    .snapshot-grid img { width: 100%; border-radius: 8px; display: block; background: #eee; }
+    a.snapshot-item {
+        display: block; text-decoration: none; color: inherit;
+        -webkit-tap-highlight-color: rgba(0,0,0,0.08);
+    }
+    .snapshot-item img { width: 100%; border-radius: 8px; display: block; background: #eee; }
+    .snapshot-caption {
+        display: block; margin-top: 2px; font-size: 0.7rem; color: #666; text-align: center;
+    }
+
+    /* くらしページの電気代詳細(日別推移の簡易バーグラフ) */
+    .cost-history { margin-bottom: 16px; }
+    .cost-row {
+        display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 0.85rem;
+    }
+    .cost-date { flex: none; width: 3.4em; color: #666; }
+    .cost-bar-track {
+        flex: 1; height: 10px; border-radius: 5px; background: #eee; overflow: hidden;
+    }
+    .cost-bar { height: 100%; border-radius: 5px; background: #1565c0; }
+    .cost-value { flex: none; width: 4.6em; text-align: right; font-weight: bold; }
+
+    /* システムページの各セクションを視覚的にグループ化する箱
+       (不具合修正: 以前は見出しと一覧が地続きで読みにくかった)。 */
+    .info-box {
+        border: 1px solid #eee; border-radius: 12px; padding: 12px; margin-bottom: 16px;
+    }
+    .info-box > h2:first-child { margin-top: 0; }
 
     /* システムページの機能ごとの鮮度一覧 */
     .freshness-row {
@@ -114,6 +145,15 @@ _PAGE_BASE_CSS = """
     .freshness-red { color: #c62828; font-weight: bold; }
     .freshness-ok { color: #2e7d32; }
     .freshness-info { color: #666; }
+
+    /* NASの容量推移(不具合修正で新設)。使用率0-100%固定でスケールする折れ線。 */
+    .nas-chart { width: 100%; max-width: 320px; height: auto; display: block; }
+    .nas-chart-grid { stroke: #eee; stroke-width: 1; }
+    .nas-chart-line { stroke: #1565c0; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    details > summary {
+        cursor: pointer; min-height: 44px; display: flex; align-items: center;
+        font-size: 0.85rem; color: #1565c0; -webkit-tap-highlight-color: rgba(0,0,0,0.08);
+    }
 
     .maintenance-box {
         border: 1px solid #eee; border-radius: 12px; padding: 12px; margin-bottom: 16px;
@@ -147,10 +187,17 @@ _PAGE_BASE_CSS = """
         .alerts-ok { background: #1e2a17; color: #aed581; border-color: #33482a; }
         nav.top-nav a, a.back-link { background: #16304a; color: #90caf9; border-color: #24507a; }
         a.nav-card { background: #23264a; color: #c5cae9; border-color: #34386b; }
-        a.external-card { background: #3a2f0a; color: #ffe082; border-color: #5c4a12; }
+        a.external-card { background: #0d2b28; color: #4db6ac; border-color: #14413c; }
         table.simple-table th { color: #9e9e9e; }
         table.simple-table th, table.simple-table td { border-color: #333; }
+        .snapshot-caption { color: #9e9e9e; }
+        .cost-date { color: #9e9e9e; }
+        .cost-bar-track { background: #333; }
+        .info-box { border-color: #333; }
         .freshness-row { border-color: #333; }
+        .nas-chart-grid { stroke: #333; }
+        .nas-chart-line { stroke: #64b5f6; }
+        details > summary { color: #90caf9; }
         .maintenance-box { border-color: #333; }
         .camera-btn { background: #16304a; color: #90caf9; border-color: #24507a; }
         #status.stale::after { color: #ef9a9a; }
@@ -182,7 +229,7 @@ def _back_to_home_link(dashboard_path: str) -> str:
 # 見守り/くらし/システムの3ページへの導線。カードの詳細タブ(`tab`)と同じキーを使う。
 _NAV_CARDS: tuple[tuple[str, str, str], ...] = (
     ("watch", "👀 見守り", "カメラ・実家の様子"),
-    ("life", "💡 くらし", "電気・炊飯器"),
+    ("life", "💡 くらし", "電気"),
     ("sys", "🔧 システム", "各機能の状態"),
 )
 
@@ -199,7 +246,14 @@ def render_home_page(
     manifest_path: str | None = None,
     icon_path: str | None = None,
 ) -> str:
-    """ホームページ: ステータスカード + 各ページへのナビ + 外部リンク。"""
+    """ホームページ: ステータスカード + 外部リンク + 各ページへのナビ。
+
+    外部リンク(ファミクエ・あさノート)は、以前はナビカードのさらに下、ページ最下部に
+    警告表示(`.alerts-warn`)と紛らわしい配色で置かれており、「位置が分かりにくい」
+    「色で気づきにくい」の両方の原因になっていた。ステータスカードのすぐ下・
+    ナビカードより前に上げ、警告色と被らない配色(`.external-card`)にすることで
+    両方を解消する。
+    """
     nav_html = "".join(
         f'<a class="nav-card" href="{dashboard_path.rstrip("/")}/{key}">'
         f"{html.escape(label)}<span class=\"nav-card-sub\">{html.escape(sub)}</span></a>"
@@ -212,9 +266,10 @@ def render_home_page(
     body = (
         "<h1>🏠 おうちの様子</h1>"
         f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec)}'
+        '<h2>よく使うリンク</h2>'
+        f'<div class="link-grid">{links_html}</div>'
         '<h2>メニュー</h2>'
         f'<div class="link-grid">{nav_html}</div>'
-        f"{links_html}"
     )
     extra_head = _status_refresh_script(status_path, refresh_sec)
     if manifest_path is not None and icon_path is not None:
@@ -246,7 +301,6 @@ def _render_status_section(cards, fetched_at: datetime, *, dashboard_path: str, 
         f'<div id="{STATUS_SECTION_ID}">'
         f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
         f"・{int(refresh_sec)}秒ごとに自動更新</p>"
-        f"{home_status_service.render_alerts_html(cards, dashboard_path=dashboard_path)}"
         f"{home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path)}"
         "</div>"
     )
@@ -332,15 +386,48 @@ def resolve_snapshot_path(filename: str) -> str | None:
     return candidate
 
 
+# ファイル名末尾の撮影日時(`monitors/camera_monitor.py`の`save_image_from_stream`が
+# `{カメラ名}_{種別}_{YYYYMMDD_HHMMSS}.jpg`の形式で付与する)。カメラ名に`_`を含みうる
+# ため、位置ではなく末尾のこのパターンで抽出する。
+_SNAPSHOT_TIMESTAMP_RE = re.compile(r"_(\d{8}_\d{6})\.jpg$")
+
+
+def _snapshot_timestamp(filename: str) -> datetime | None:
+    """スナップショットのファイル名から撮影日時を取り出す(形式が違えば None)。"""
+    m = _SNAPSHOT_TIMESTAMP_RE.search(filename)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%Y%m%d_%H%M%S")  # noqa: DTZ007
+    except ValueError:
+        return None
+
+
 def _render_snapshot_gallery(snapshot_url_prefix: str) -> str:
+    """カメラのスナップショット一覧。
+
+    以前は`<img>`を並べるだけで、タップしても拡大できず・いつの写真かも
+    分からなかった。各画像を元ファイルへの`<a target="_blank">`にしてタップで
+    拡大表示できるようにし、ファイル名から撮影日時を取り出してキャプションに出す。
+    """
     files = _list_snapshot_files()[:_SNAPSHOT_GALLERY_LIMIT]
     if not files:
         return '<p class="empty-note">写真なし</p>'
-    imgs = "".join(
-        f'<img src="{html.escape(snapshot_url_prefix)}/{html.escape(name)}" loading="lazy" alt="スナップショット">'
-        for name in files
-    )
-    return f'<div class="snapshot-grid">{imgs}</div>'
+    items = []
+    for name in files:
+        url = f"{html.escape(snapshot_url_prefix)}/{html.escape(name)}"
+        moment = _snapshot_timestamp(name)
+        caption = (
+            f'<span class="snapshot-caption">'
+            f'{html.escape(home_status_service.format_short_timestamp(moment))}</span>'
+            if moment is not None else ""
+        )
+        items.append(
+            f'<a class="snapshot-item" href="{url}" target="_blank" rel="noopener">'
+            f'<img src="{url}" loading="lazy" alt="スナップショット">'
+            f"{caption}</a>"
+        )
+    return f'<div class="snapshot-grid">{"".join(items)}</div>'
 
 
 def _render_simple_table(df: pd.DataFrame, columns: dict[str, str], *, limit: int = 50) -> str:
@@ -365,6 +452,30 @@ def _render_simple_table(df: pd.DataFrame, columns: dict[str, str], *, limit: in
             cells.append(f"<td>{html.escape(text)}</td>")
         body_rows.append(f"<tr>{''.join(cells)}</tr>")
     return f'<table class="simple-table"><thead><tr>{head}</tr></thead><tbody>{"".join(body_rows)}</tbody></table>'
+
+
+# 見守りページのログ表で常時表示する件数。残りは<details>で折りたたむ。
+_LOG_TABLE_VISIBLE_ROWS = 5
+
+
+def _render_collapsible_log_table(
+    df: pd.DataFrame, columns: dict[str, str], *, visible: int = _LOG_TABLE_VISIBLE_ROWS, limit: int = 50
+) -> str:
+    """`_render_simple_table`を、先頭`visible`件だけ常時表示し残りを`<details>`で
+    折りたたむ形に拡張する。
+
+    **(UI改善)** 防犯ログ・センサーログが縦に長く連なりスクロールが大変だった問題の
+    改善。全件は引き続き`limit`件まで読み込み、隠れているだけでデータ自体は減らさない。
+    """
+    if df.empty or not any(col in df.columns for col in columns):
+        return _render_simple_table(df, columns, limit=limit)
+
+    head_html = _render_simple_table(df.head(visible), columns, limit=visible)
+    rest_df = df.iloc[visible:limit]
+    if rest_df.empty:
+        return head_html
+    rest_html = _render_simple_table(rest_df, columns, limit=len(rest_df))
+    return f"{head_html}<details><summary>さらに{len(rest_df)}件を表示</summary>{rest_html}</details>"
 
 
 def _render_camera_selector(cameras: list[dict[str, Any]]) -> str:
@@ -417,10 +528,17 @@ _CAMERA_SCRIPT = """
     document.addEventListener("DOMContentLoaded", function () {
         var buttons = document.querySelectorAll(".camera-btn");
         if (!buttons.length) { return; }
+        var ids = Array.prototype.map.call(buttons, function (b) { return b.dataset.cameraId; });
+
+        // ホームページの「🚗 駐車場」カードは、このページを開いたときに駐車場カメラを
+        // 選択済みにしたい(?camera=<id>)。指定が無い/未知のidなら記憶(localStorage)、
+        // それも無ければ先頭のカメラにフォールバックする。
+        var requested = null;
+        try { requested = new URLSearchParams(window.location.search).get("camera"); } catch (e) {}
         var saved = null;
         try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) {}
-        var ids = Array.prototype.map.call(buttons, function (b) { return b.dataset.cameraId; });
-        var initial = (saved && ids.indexOf(saved) !== -1) ? saved : ids[0];
+        var initial = (requested && ids.indexOf(requested) !== -1) ? requested
+            : (saved && ids.indexOf(saved) !== -1) ? saved : ids[0];
         window.dashboardSelectCamera(initial);
     });
 })();
@@ -430,34 +548,59 @@ _CAMERA_SCRIPT = """
 
 def render_watch_page(
     df_sensor: pd.DataFrame,
-    df_security_log: pd.DataFrame,
     *,
     dashboard_path: str,
     snapshot_url_prefix: str,
 ) -> str:
-    """👀 見守り: カメラのライブ選択・スナップショット・防犯ログ・実家センサーログ。"""
+    """👀 見守り: カメラのライブ選択・スナップショット・防犯ログ・実家/自宅センサーログ。
+
+    見守りグループの4枚のステータスカード(高砂・伊丹・駐車場・カメラ)は
+    すべてこのページの `tab="watch"` を指すため、`home_status_service.build_status_cards`
+    がカードごとに付ける `anchor` を使って、タップしたカードの内容が実際に載っている
+    セクションまで連れて行く。ここに置くid(`camera-section`/`takasago-log`/
+    `itami-log`)を変えるときはカード側の`anchor`も一緒に直すこと。
+
+    防犯ログは以前`security_logs`テーブルを読んでいたが、そこへ書き込むコードが
+    存在せず常に空だったため、カメラの動体検知(`home_status_service.camera_motion_log`。
+    `df_sensor`から抽出するため既に`apply_friendly_names`済み)を正のデータとして使う。
+
+    **(UI改善)** 3つのログ表(防犯ログ・高砂/伊丹センサーログ)は以前
+    `_render_simple_table`で最大50行を常に縦に並べており、スクロールが大変だった。
+    `_render_collapsible_log_table`で先頭5件だけを常時表示し、残りは`<details>`で
+    折りたたむ。
+    """
     cameras = [
         {"id": cam["id"], "name": cam["name"]}
         for cam in config.CAMERAS
         if cam.get("enabled", True)
     ]
-    df_security_log = analysis_service.apply_friendly_names(df_security_log)
+    df_camera_motion = home_status_service.camera_motion_log(df_sensor)
     if not df_sensor.empty and "location" in df_sensor.columns:
         df_takasago = df_sensor[df_sensor["location"] == "高砂"]
+        df_itami = df_sensor[df_sensor["location"] == "伊丹"]
     else:
         df_takasago = df_sensor.iloc[0:0]
+        df_itami = df_sensor.iloc[0:0]
 
     body = (
         f"{_back_to_home_link(dashboard_path)}"
         "<h1>👀 見守り</h1>"
+        '<div id="camera-section">'
         "<h2>🎥 カメラの映像</h2>"
         f"{_render_camera_selector(cameras)}"
+        "</div>"
         "<h2>🖼️ 最近の写真</h2>"
         f"{_render_snapshot_gallery(snapshot_url_prefix)}"
         "<h2>🛡️ 防犯ログ</h2>"
-        f'{_render_simple_table(df_security_log, {"timestamp": "検知時刻", "friendly_name": "デバイス", "classification": "検知種別"})}'
+        f'{_render_collapsible_log_table(df_camera_motion, {"timestamp": "検知時刻", "friendly_name": "カメラ"})}'
+        '<div id="takasago-log">'
         "<h2>👵 高砂実家のセンサーログ</h2>"
-        f'{_render_simple_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'
+        f'{_render_collapsible_log_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'
+        "</div>"
+        '<div id="itami-log">'
+        "<h2>🏠 伊丹(自宅)のセンサーログ</h2>"
+        f'{_render_collapsible_log_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
+        "</div>"
     )
     return _page_shell("見守り - おうちの様子", body, extra_head=_CAMERA_SCRIPT)
 
@@ -465,14 +608,44 @@ def render_watch_page(
 # === くらしページ ===
 
 
-def render_life_page(cards, *, dashboard_path: str) -> str:
-    """💡 くらし: 電気・炊飯器のカードを大きく見せる(詳細グラフは持たない)。"""
+def _render_daily_cost_history(rows: list[tuple[Any, int]]) -> str:
+    """日別の電気代(概算)を横棒グラフ付きの簡易リストで表示する(新しい順、先頭が今日)。
+
+    **(不具合修正で新設)** 以前は「今月の電気代」カードをタップしても同じカードを
+    もう一度表示するだけで詳細と呼べる情報が無かった。直近の日別推移を見せることで
+    タップする価値のある詳細にする。
+    """
+    if not rows:
+        return '<p class="empty-note">表示できるデータがありません</p>'
+    max_cost = max(cost for _, cost in rows) or 1
+    items = []
+    for i, (day, cost) in enumerate(rows):
+        label = "今日" if i == 0 else day.strftime("%m/%d")
+        width_pct = max(2, round(cost / max_cost * 100))
+        items.append(
+            '<div class="cost-row">'
+            f'<span class="cost-date">{html.escape(label)}</span>'
+            f'<div class="cost-bar-track"><div class="cost-bar" style="width:{width_pct}%"></div></div>'
+            f'<span class="cost-value">{cost:,}円</span>'
+            "</div>"
+        )
+    return f'<div class="cost-history">{"".join(items)}</div>'
+
+
+def render_life_page(cards, *, dashboard_path: str, daily_cost_rows: list[tuple[Any, int]] | None = None) -> str:
+    """💡 くらし: 電気のカードを大きく見せ、日別の電気代推移を詳細として表示する。
+
+    **(不具合修正)** `daily_cost_rows`(`analysis_service.calculate_daily_cost_series`)を
+    追加し、電気代カードをタップしても意味のある詳細が無かった不具合を修正した。
+    """
     life_cards = [card for card in cards if card.group == "life"]
     body = (
         f"{_back_to_home_link(dashboard_path)}"
         "<h1>💡 くらし</h1>"
         f"{home_status_service.render_status_grid_html(life_cards)}"
         '<p class="empty-note">今月の電気代はスマートメーターの記録からの概算です。</p>'
+        "<h2>📊 日別の電気代(概算)</h2>"
+        f"{_render_daily_cost_history(daily_cost_rows or [])}"
     )
     return _page_shell("くらし - おうちの様子", body)
 
@@ -559,16 +732,71 @@ def _render_overall_summary(rows: list[dict[str, Any]]) -> str:
     return f'<p class="alerts alerts-warn">⚠️ {red_count}件、確認が必要です</p>'
 
 
+# NASの容量推移グラフのサイズ(viewBox)。使用率(0-100%)固定でスケールするため
+# 実測範囲での拡大縮小は行わない。
+_NAS_CHART_WIDTH = 300
+_NAS_CHART_HEIGHT = 90
+_NAS_CHART_PAD = 8
+
+
+def _render_nas_history_chart(df: pd.DataFrame) -> str:
+    """NASの使用率推移を簡易な折れ線グラフ(インラインSVG)で表示する。
+
+    **(不具合修正で新設)** NASカードをタップしても容量の履歴を見る手段が無かった。
+    `analysis_service.load_nas_history`(`nas_records`、古い順)の`percent`列を
+    折れ線で描画する。グラフだけでは正確な値を読み取れないため、`<details>`で
+    折りたたんだ詳細テーブル(直近10件)も添える。
+    """
+    if df.empty or "percent" not in df.columns or len(df) < 2:
+        return '<p class="empty-note">表示できるデータがありません</p>'
+
+    values = df["percent"].astype(float)
+    w, h, pad = _NAS_CHART_WIDTH, _NAS_CHART_HEIGHT, _NAS_CHART_PAD
+    plot_w, plot_h = w - pad * 2, h - pad * 2
+    step = plot_w / (len(values) - 1)
+
+    def _y(v: float) -> float:
+        return pad + plot_h - (max(0.0, min(100.0, v)) / 100.0) * plot_h
+
+    points = " ".join(f"{pad + i * step:.1f},{_y(v):.1f}" for i, v in enumerate(values))
+    grid = "".join(
+        f'<line x1="{pad}" y1="{_y(v):.1f}" x2="{w - pad}" y2="{_y(v):.1f}" class="nas-chart-grid" />'
+        for v in (0, 50, 100)
+    )
+    latest = values.iloc[-1]
+    oldest_at = home_status_service.format_short_timestamp(df["timestamp"].iloc[0])
+    latest_at = home_status_service.format_short_timestamp(df["timestamp"].iloc[-1])
+    svg = (
+        f'<svg viewBox="0 0 {w} {h}" class="nas-chart" role="img" '
+        f'aria-label="NASの使用率推移。{html.escape(oldest_at)}から{html.escape(latest_at)}まで、'
+        f'現在の使用率は{latest:.0f}パーセント">'
+        f"{grid}"
+        f'<polyline points="{points}" class="nas-chart-line" fill="none" />'
+        "</svg>"
+    )
+    caption = f'<p class="meta">現在 {latest:.0f}%・{html.escape(oldest_at)} 〜 {html.escape(latest_at)}</p>'
+    detail_table = _render_simple_table(
+        df.tail(10).iloc[::-1], {"timestamp": "日時", "percent": "使用率(%)", "free_gb": "空き(GB)"}
+    )
+    return f"{svg}{caption}<details><summary>詳細データを見る</summary>{detail_table}</details>"
+
+
 def render_sys_page(
     df_sensor: pd.DataFrame,
     nas_data: pd.Series | None,
+    nas_history: pd.DataFrame,
     memory: dict[str, float] | None,
     disk: dict[str, float] | None,
     now: datetime,
     *,
     dashboard_path: str,
 ) -> str:
-    """🔧 システム: 全体サマリー・各機能の最終更新時刻・メンテナンス操作。"""
+    """🔧 システム: 全体サマリー・各機能の最終更新時刻・NASの容量推移・メンテナンス操作。
+
+    **(不具合修正)** 各セクションを`.info-box`で視覚的にグループ化してシステムページを
+    見やすくした。NASカード(`id="nas-history"`)のタップ先として、NASの容量推移
+    グラフ(`nas_history`)を追加した。
+    """
     rows = build_freshness_rows(df_sensor, nas_data, memory, now)
 
     disk_line = ""
@@ -579,9 +807,15 @@ def render_sys_page(
         f"{_back_to_home_link(dashboard_path)}"
         "<h1>🔧 システム</h1>"
         f"{_render_overall_summary(rows)}"
+        '<div class="info-box">'
         "<h2>各機能の最終更新</h2>"
         f"{_render_freshness_rows(rows)}"
         f"{disk_line}"
+        "</div>"
+        '<div class="info-box" id="nas-history">'
+        "<h2>🗄️ NASの容量推移</h2>"
+        f"{_render_nas_history_chart(nas_history)}"
+        "</div>"
         "<h2>🛠️ メンテナンス</h2>"
         '<div class="maintenance-box">'
         "<p>⚠️ 再起動するとダッシュボードやIoT機器の操作が一時的に使えなくなります。</p>"

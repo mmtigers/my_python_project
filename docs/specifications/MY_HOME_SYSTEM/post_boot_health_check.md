@@ -409,18 +409,18 @@
 
 
 * **エラーハンドリング**: NAS書き込みテストで `IOError`, `PermissionError` を捕捉し `STATUS_ERR` を設定・エラーログ出力・即時Discord通知を行う。カメラ設定が空の場合は `STATUS_WARN` とする。**（修正済み）** サウンドカード検出・Bluetooth接続確認処理は個別に `except Exception:` で保護されている（以前はいずれも無条件の bare `except:` だったが `except Exception:` に修正され、`SystemExit`/`KeyboardInterrupt`等を誤って捕捉しなくなった）。
-* 根拠: `except (IOError, PermissionError) as e:` (行番号: 244 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 275〜277 / 抜粋: "else:"), `except Exception: pass` (行番号: 314 / 抜粋: "except Exception: pass"), `except Exception:` (行番号: 315 / 抜粋: "except Exception:")
+* 根拠: `except (IOError, PermissionError) as e:` (行番号: 244 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 275〜277 / 抜粋: "else:"), `except Exception: pass` (行番号: 318 / 抜粋: "except Exception: pass"), `except Exception:` (行番号: 315 / 抜粋: "except Exception:")
 
 
 
 ### `PostBootHealthCheck.check_recent_logs`
 
 * **役割**: ログファイルの末尾200行を取得し、直近10分以内に出力された `ERROR` または `CRITICAL` を含む行のみを抽出して結果を判定する。`tail` サブプロセス実行自体が失敗した場合は、ログを読めていない旨を `STATUS_WARN` として明示し、以降の行走査には進まない（旧実装では例外を捕捉してログ出力するのみで `error_lines` が空のまま `STATUS_OK "Clean"` に落ちていたが、修正済み）。
-* 根拠: `def check_recent_logs(self):` (行番号: 341〜383 / 抜粋: "def check_recent_logs(self):")
+* 根拠: `def check_recent_logs(self):` (行番号: 345〜387 / 抜粋: "def check_recent_logs(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 341 / 抜粋: "def check_recent_logs(self):")
+* 根拠: (行番号: 345 / 抜粋: "def check_recent_logs(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ `CheckResult` を追加。ログファイル未存在時・`tail` 失敗時はいずれも途中で `return`）
@@ -432,14 +432,14 @@
 
 
 * **エラーハンドリング**: ログファイル未存在時は `STATUS_WARN` を追加して `return`。`tail` コマンド実行失敗など全体の `Exception` を捕捉した場合は `logger.error` 出力に加え `STATUS_WARN` を結果に追加して `return`（行の走査自体を行わない）。各行の日時パース失敗（`ValueError`）はその行をスキップする。
-* 根拠: `except Exception as e:\n            logger.error(f"Log check failed: {e}")\n            self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))\n            return` (行番号: 328〜331 / 抜粋: "self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))"), `except ValueError:` (行番号: 369 / 抜粋: "except ValueError:")
+* 根拠: `except Exception as e:\n            logger.error(f"Log check failed: {e}")\n            self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))\n            return` (行番号: 328〜331 / 抜粋: "self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))"), `except ValueError:` (行番号: 373 / 抜粋: "except ValueError:")
 
 
 
 ### `PostBootHealthCheck.check_ai_model`
 
 * **役割**: **（Issue #801 で追加）** `config.GEMINI_MODEL` に設定されたモデルが実在し `generateContent` に使えるかを、Gemini のモデル一覧 API で確認して `CheckResult("AI Model", ...)` を追加する。利用可なら `STATUS_OK`、**利用不可なら `STATUS_ERR`** と復旧方法（`.env` の `GEMINI_MODEL` 変更）および代替候補を添える。
-* 根拠: `def check_ai_model(self):` (行番号: 385)
+* 根拠: `def check_ai_model(self):` (行番号: 389)
 * **なぜ起動時に検査するか**: docstring によれば、`services/ai_service.py` に直書きされていた `gemini-2.0-flash` が提供終了になり LINE Bot の対話機能が丸ごと停止していたが、ログ保持範囲（2026-09-09 以降）で Bot への受信が1通だけで **エラーが発生する機会自体が無かった**ため誰も気づかなかった。push 通知は Gemini を使わないので正常に届き続け、外からは Bot が生きているように見えていた。そこで「誰かが使ったとき」ではなく「起動したとき」に検査する
 * **引数/リクエスト**: `self` のみ
 * **戻り値/レスポンス**: なし（`self.results` に追加する）
@@ -452,7 +452,7 @@
 ### `PostBootHealthCheck.check_security_posture`
 
 * **役割**: **（Issue #799 で追加）** 未設定のせいで保護が黙って無効になっている設定を `core/security_posture.py` に問い合わせ、`CheckResult("Security", ...)` として結果に追加する。問題が無ければ `STATUS_OK`（「保護が無効な設定なし」）、1件以上あれば `STATUS_WARN` と、設定名・Issue 番号・無効になっている保護を並べた明細を追加する。
-* 根拠: `def check_security_posture(self):` (行番号: 444)
+* 根拠: `def check_security_posture(self):` (行番号: 448)
 * **なぜ起動レポートに載せるか**: docstring によれば、個別の警告は `handlers/alexa_handler.py` や `unified_server.py` に以前から存在したが **ログにしか出ない**ため数か月気づかれなかった（#319 は起票から未対応のまま、#799 は 2026-09-20 に発見）。起動レポートは Discord に届く唯一の定期的な出力であるため、ここに1行載せて可視化する。
 * **引数/リクエスト**: `self` のみ
 * **戻り値/レスポンス**: なし（`self.results` に追加する）
@@ -463,15 +463,15 @@
 ### `PostBootHealthCheck.run`
 
 * **役割**: 各チェックメソッド（ネットワーク・システムリソース・DB・周辺機器・サービス・ログ・**（Issue #799 で追加）**セキュリティ設定・**（Issue #801 で追加）**AI モデル）を順に実行し、最後にレポート送信を行う。
-* 根拠: `def run(self):` (行番号: 477)
+* 根拠: `def run(self):` (行番号: 481)
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 477 / 抜粋: "def run(self):")
+* 根拠: (行番号: 481 / 抜粋: "def run(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 477〜487 / 抜粋: "def run(self):")
+* 根拠: (行番号: 481〜491 / 抜粋: "def run(self):")
 
 
 * **副作用**: `logger.info` によるログ出力、各チェックメソッドの実行、`self._send_report()` の呼び出し。**（Issue #799 で追加）** `self.check_security_posture()` が `self.check_recent_logs()` と `self._send_report()` の間に入る。**（Issue #801 で追加）** その直後に `self.check_ai_model()` が入る。
@@ -479,22 +479,22 @@
 
 
 * **エラーハンドリング**: なし（各チェックメソッド内部で個別に処理される前提）
-* 根拠: (行番号: 477〜487 / 抜粋: "def run(self):")
+* 根拠: (行番号: 481〜491 / 抜粋: "def run(self):")
 
 
 
 ### `PostBootHealthCheck._send_report`
 
 * **役割**: `self.results` の内容からステータスアイコン付きのレポート文字列を組み立て、ログ出力とDiscord通知を行う。
-* 根拠: `def _send_report(self):` (行番号: 489〜522 / 抜粋: "def _send_report(self):")
+* 根拠: `def _send_report(self):` (行番号: 493〜526 / 抜粋: "def _send_report(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 489 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 493 / 抜粋: "def _send_report(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 489〜522 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 493〜526 / 抜粋: "def _send_report(self):")
 
 
 * **副作用**: `self._get_uptime()` の呼び出し、`logger.info` によるレポート全文のログ出力、`services.notification_service.send_push` によるDiscord通知送信。
@@ -502,7 +502,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 489〜522 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 493〜526 / 抜粋: "def _send_report(self):")
 
 
 

@@ -185,7 +185,7 @@
 
 ### `GET {DASHBOARD_BASE_PATH}/watch` (`dashboard_watch`)
 
-* **役割**: 👀見守りページを返す。`home_status_service.get_cached_materials()`で材料(`df_sensor`/`df_security_log`)を取得し、`dashboard_page_service.render_watch_page`に渡す。
+* **役割**: 👀見守りページを返す。`home_status_service.get_cached_materials()`で材料(`df_sensor`)を取得し、`dashboard_page_service.render_watch_page`に渡す。**(不具合修正)** 以前は`materials.df_security_log`(常に空の`security_logs`テーブル由来)も渡していたが、この材料自体が`get_cached_materials()`から削除されたため、渡すのは`df_sensor`のみになった(防犯ログは`render_watch_page`内部で`df_sensor`から`home_status_service.camera_motion_log`により抽出される)。
 * 根拠: [ルート定義] (行番号: 129〜139 / 抜粋: '@router.get(f"{_BASE_PATH}/watch", include_in_schema=False)\ndef dashboard_watch() -> HTMLResponse:')
 
 
@@ -208,47 +208,47 @@
 
 ### `GET {DASHBOARD_BASE_PATH}/life` (`dashboard_life`)
 
-* **役割**: 💡くらしページを返す。`collect_status_cards()`のカードのうち`life`グループだけを`dashboard_page_service.render_life_page`で描画する。
-* 根拠: [ルート定義] (行番号: 142〜145 / 抜粋: '@router.get(f"{_BASE_PATH}/life", include_in_schema=False)\ndef dashboard_life() -> HTMLResponse:\n    cards, _ = home_status_service.collect_status_cards()\n    return HTMLResponse(dashboard_page_service.render_life_page(cards, dashboard_path=f"{_BASE_PATH}/"))')
+* **役割**: 💡くらしページを返す。`collect_status_cards()`のカードのうち`life`グループだけを`dashboard_page_service.render_life_page`で描画する。**(不具合修正)** `get_cached_materials()`も呼び、`materials.daily_cost_rows`(日別の電気代推移)を渡すようにした。電気代カードをタップしても意味のある詳細が無かった不具合の修正。
+* 根拠: [ルート定義] (行番号: 141〜149 / 抜粋: '@router.get(f"{_BASE_PATH}/life", include_in_schema=False)\ndef dashboard_life() -> HTMLResponse:')
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 143)
+* 根拠: [関数定義] (行番号: 142)
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(くらしページ全体のHTML)
-* 根拠: [戻り値] (行番号: 145)
+* 根拠: [戻り値] (行番号: 145〜149)
 
 
-* **副作用**: `collect_status_cards()`経由でDBの読み取り
-* 根拠: [関数呼び出し] (行番号: 144)
+* **副作用**: `collect_status_cards()`・`get_cached_materials()`経由でDBの読み取り(同じTTLキャッシュを共有するため二重取得にはならない)
+* 根拠: [関数呼び出し] (行番号: 143〜144)
 
 
 * **エラーハンドリング**: なし
-* 根拠: [関数本体] (行番号: 142〜145)
+* 根拠: [関数本体] (行番号: 141〜149)
 
 
 
 ### `GET {DASHBOARD_BASE_PATH}/sys` (`dashboard_sys`)
 
-* **役割**: 🔧システムページを返す。`get_cached_materials()`で材料を取得し、`home_status_service.get_now_jst()`の現在時刻とあわせて`dashboard_page_service.render_sys_page`に渡す。
-* 根拠: [ルート定義] (行番号: 148〜161 / 抜粋: '@router.get(f"{_BASE_PATH}/sys", include_in_schema=False)\ndef dashboard_sys() -> HTMLResponse:')
+* **役割**: 🔧システムページを返す。`get_cached_materials()`で材料を取得し、`home_status_service.get_now_jst()`の現在時刻とあわせて`dashboard_page_service.render_sys_page`に渡す。**(不具合修正)** `materials.nas_history`(NASの容量履歴)も渡すようにした。NASカードをタップしても容量履歴を見る手段が無かった不具合の修正。
+* 根拠: [ルート定義] (行番号: 152〜165 / 抜粋: '@router.get(f"{_BASE_PATH}/sys", include_in_schema=False)\ndef dashboard_sys() -> HTMLResponse:')
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 149)
+* 根拠: [関数定義] (行番号: 153)
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(システムページ全体のHTML)
-* 根拠: [戻り値] (行番号: 152〜161)
+* 根拠: [戻り値] (行番号: 156〜165)
 
 
 * **副作用**: `get_cached_materials()`経由でDBの読み取り
-* 根拠: [関数呼び出し] (行番号: 150〜151)
+* 根拠: [関数呼び出し] (行番号: 154〜155)
 
 
 * **エラーハンドリング**: なし
-* 根拠: [関数本体] (行番号: 148〜161)
+* 根拠: [関数本体] (行番号: 152〜165)
 
 
 

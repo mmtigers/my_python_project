@@ -180,6 +180,12 @@ class CameraConfig(BaseModel):
 
 class NotifySettings(BaseModel):
     power_threshold_watts: Optional[float] = None
+    # Discord通知システム調査(2026-09-26)で判明: この値を読んで通知の送信/抑制を
+    # 分岐しているコードはリポジトリ内に存在しない(services/sensor_service.py・
+    # monitors/switchbot_power_monitor.pyのどちらも参照していない)。devices.jsonで
+    # LOG_ONLYに設定しても、動き検知・ドア開閉・電力閾値クロスの通知は現状常に
+    # Discordへ送信される。将来この値で通知を抑制する分岐を実装する場合は、この
+    # コメントと一緒に更新すること。
     notify_mode: str = "LOG_ONLY"
     target: Optional[str] = None
 

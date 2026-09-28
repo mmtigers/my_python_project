@@ -69,8 +69,9 @@ class TestGetAnalysisData:
                 "('自炊: うどん', datetime('now'))"
             )
             cur.execute(
-                "INSERT INTO device_records (device_name, device_type, movement_state, timestamp) "
-                "VALUES ('駐車場', 'ONVIF_CAMERA', 'ON', datetime('now'))"
+                "INSERT INTO device_records (device_id, device_name, device_type, movement_state, timestamp) "
+                "VALUES (?, '駐車場カメラ', 'ONVIF_CAMERA', 'ON', datetime('now'))",
+                (report.home_status_service.PARKING_CAMERA_ID,),
             )
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, wattage, timestamp) VALUES "
