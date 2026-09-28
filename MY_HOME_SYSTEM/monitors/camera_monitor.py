@@ -820,13 +820,13 @@ def _suspend_after_fatal_error(
     full_err_msg: str = f"{err_msg}{detailed_info}"
 
     if backoff.consecutive_errors >= 5:
-        # チャンネル再設計(2026-09): 直後に同じ内容をsend_push(channel="report")で
-        # 明示送信するため、ハンドラ経由(catch-all)の通知はopt-outして二重通知を避ける。
-        logger.error(
-            f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}",
-            extra={"skip_discord": True},
-        )
         if backoff.consecutive_errors == 5 or backoff.consecutive_errors % 12 == 0:
+            # チャンネル再設計(2026-09): 直後に同じ内容をsend_push(channel="report")で
+            # 明示送信するため、ハンドラ経由(catch-all)の通知はopt-outして二重通知を避ける。
+            logger.error(
+                f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}",
+                extra={"skip_discord": True},
+            )
             try:
                 alert_msg: str = (
                     f"🚨 **カメラ監視アラート**\n[{cam_name}] の接続障害が継続しています"
@@ -840,6 +840,12 @@ def _suspend_after_fatal_error(
                 logger.info(f"📤 [{cam_name}] 管理者へ障害通知を送信しました。")
             except Exception as push_err:
                 logger.error(f"🚨 通知送信に失敗しました: {push_err}")
+        else:
+            # マイルストーン以外の回はsend_pushを送らないため、skip_discordを付けず
+            # catch-all(core.logger.DiscordErrorHandler)経由の通知に任せる。
+            logger.error(
+                f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}"
+            )
 
         if "Unknown error" in err_msg or "Unauthorized" in err_msg:
             logger.error("💡 Hint: Check PASSWORD and CAMERA TIME settings.")
