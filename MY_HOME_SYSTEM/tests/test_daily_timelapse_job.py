@@ -88,8 +88,10 @@ class TestRunDailyTimelapseAllClipsFailedVsNoEvents:
 
         mock_send_push.assert_called_once()
         _, kwargs = mock_send_push.call_args
-        assert kwargs.get("channel") == "error", (
-            "イベント検知はあったがクリップ抽出が全滅した場合はerrorチャンネルに通知すべき"
+        # チャンネル再設計(2026-09): 即時対応が必要な重大障害ではないため、
+        # #alerts(error)ではなく運用者向け#operations(report)へ送る。
+        assert kwargs.get("channel") == "report", (
+            "イベント検知はあったがクリップ抽出が全滅した場合はreportチャンネルに通知すべき"
         )
         text = kwargs["messages"][0]["text"]
         assert "動きはありませんでした" not in text, (
@@ -219,7 +221,8 @@ class TestRunDailyTimelapseGuards:
         djt.run_daily_timelapse("entrance")
 
         assert notified, "FFmpeg 不在は通知しないと誰も気づけない"
-        assert notified[0]["channel"] == "error"
+        # チャンネル再設計(2026-09): #alerts(error)ではなく#operations(report)へ。
+        assert notified[0]["channel"] == "report"
 
     def test_aborts_on_malformed_target_date(self, monkeypatch):
         monkeypatch.setattr(djt, "check_dependencies", lambda: True)

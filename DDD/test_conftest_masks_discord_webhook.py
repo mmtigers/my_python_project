@@ -4,12 +4,16 @@ Issue #103の回帰テスト。
 
 newface_monitor.py は MY_HOME_SYSTEM を sys.path に追加して本物の
 core.logger.get_logger() を import しており、これはモジュール import 時点
-(=pytestのcollection時点)で config.DISCORD_WEBHOOK_ERROR を
+(=pytestのcollection時点)で config.DISCORD_WEBHOOK_ERROR/REPORT を
 DiscordErrorHandler に焼き込む。本番Raspberry Pi等、本物の認証情報が入った
 .env のある環境で `pytest DDD/` を実行すると、ERRORログを出すテストケースが
 実際にDiscordへWebhook POSTを送ってしまう経路が存在していた
 (DDD/conftest.py が無く、MY_HOME_SYSTEM/tests/conftest.py と同様の
 環境変数の無害化が行われていなかったため)。
+
+チャンネル再設計(2026-09): DiscordErrorHandlerはCRITICALのみDISCORD_WEBHOOK_ERROR、
+通常のERRORはDISCORD_WEBHOOK_REPORTへ送るようになったため、本テストのプローブ
+(logger.error、非CRITICAL)はDISCORD_WEBHOOK_REPORTの無害化を検証する。
 
 同一プロセス内でのmonkeypatchでは「モジュールimport時に一度だけ焼き込まれる」
 という挙動を正しく再現できない(既にimportされたnewface_monitorのlogger.handlers
@@ -61,7 +65,7 @@ class _RequestRecorder(http.server.BaseHTTPRequestHandler):
 def _run_probe_and_count_webhook_posts(*, conftest_active: bool) -> list:
     """
     ダミーのDiscord Webhookサーバをローカルに立て、そのURLを
-    DISCORD_WEBHOOK_ERROR に設定した状態で、サブプロセスのpytestで
+    DISCORD_WEBHOOK_REPORT に設定した状態で、サブプロセスのpytestで
     「ERRORログを1件出すだけ」のプローブテストを実行する。
     conftest_active=False の場合は DDD/conftest.py を一時的に退避し、
     「conftest.pyによる無害化が無ければ実際にPOSTが飛んでしまう」ことを
@@ -84,7 +88,9 @@ def _run_probe_and_count_webhook_posts(*, conftest_active: bool) -> list:
         probe_path.write_text(_PROBE_TEST_SOURCE, encoding="utf-8")
 
         env = os.environ.copy()
-        env["DISCORD_WEBHOOK_ERROR"] = f"http://127.0.0.1:{port}/fake-webhook"
+        # チャンネル再設計(2026-09): logger.error(非CRITICAL)はDISCORD_WEBHOOK_REPORT
+        # へ送られる(DISCORD_WEBHOOK_ERRORはCRITICAL専用になった)。
+        env["DISCORD_WEBHOOK_REPORT"] = f"http://127.0.0.1:{port}/fake-webhook"
 
         subprocess.run(
             [sys.executable, "-m", "pytest", str(probe_path), "-q"],

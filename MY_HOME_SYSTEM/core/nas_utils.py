@@ -131,8 +131,11 @@ def get_managed_target_directory(nas_dir_str: str, fallback_dir_str: str, mount_
 
     # 復旧失敗：Notification Guardを突破して致命的エラーを通知
     error_msg = f"🚨 【NAS障害・介入要求】\nNASへのアクセス及び自動修復に失敗しました。\nPath: {nas_dir_str}\nローカルへフォールバックします。"
-    logger.error(error_msg)
-    
+    # チャンネル再設計(2026-09): 直後にsend_push(channel="error")で同じ内容を
+    # 明示送信するため、catch-all側はopt-outする(付けないと#alertsと#operations
+    # の両方に同じ障害が別々に届いてしまう)。
+    logger.error(error_msg, extra={"skip_discord": True})
+
     # target="discord"のみのためLINE宛先(user_id)は不要(Issue #289)。
     # 以前はconfig.LINE_USER_ID未設定時にこの通知自体がスキップされてしまっていた。
     send_push(

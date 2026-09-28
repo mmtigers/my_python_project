@@ -805,7 +805,12 @@ def _suspend_after_fatal_error(
     full_err_msg: str = f"{err_msg}{detailed_info}"
 
     if backoff.consecutive_errors >= 5:
-        logger.error(f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}")
+        # チャンネル再設計(2026-09): 直後に同じ内容をsend_push(channel="report")で
+        # 明示送信するため、ハンドラ経由(catch-all)の通知はopt-outして二重通知を避ける。
+        logger.error(
+            f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}",
+            extra={"skip_discord": True},
+        )
         if backoff.consecutive_errors == 5 or backoff.consecutive_errors % 12 == 0:
             try:
                 alert_msg: str = (
@@ -815,7 +820,7 @@ def _suspend_after_fatal_error(
                 send_push(
                     [{"type": "text", "text": alert_msg}],
                     target="discord",
-                    channel="error"
+                    channel="report"
                 )
                 logger.info(f"📤 [{cam_name}] 管理者へ障害通知を送信しました。")
             except Exception as push_err:

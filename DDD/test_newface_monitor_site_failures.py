@@ -654,3 +654,27 @@ class TestNotifySiteFailureAlert:
         result = notifier.notify_site_failure_alert(_make_site(), 24)
 
         assert result is False
+
+    def test_uses_ops_webhook_url_when_given_distinct_from_default(self):
+        """チャンネル再設計(2026-09): ops_webhook_urlを渡した場合、疎通不能
+        アラートはそちら(運用者向けチャンネル)へ送られ、日常通知用の
+        webhook_urlは使われないこと。"""
+        notifier = module.DiscordNotifier(
+            webhook_url="https://discordapp.com/api/webhooks/daily",
+            ops_webhook_url="https://discordapp.com/api/webhooks/ops",
+        )
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        notifier.session.post = MagicMock(return_value=response)
+
+        result = notifier.notify_site_failure_alert(_make_site(), 24)
+
+        assert result is True
+        posted_url = notifier.session.post.call_args.args[0]
+        assert posted_url == "https://discordapp.com/api/webhooks/ops"
+
+    def test_ops_webhook_url_defaults_to_webhook_url_when_omitted(self):
+        """ops_webhook_url省略時は従来通りwebhook_urlと同じ送信先になること(後方互換)。"""
+        notifier = module.DiscordNotifier(webhook_url="https://discordapp.com/api/webhooks/test")
+
+        assert notifier.ops_webhook_url == notifier.webhook_url

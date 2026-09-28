@@ -258,6 +258,11 @@ SITES_JSON_PATH: Path = CURRENT_DIR / 'sites.json'
 def _resolve_discord_webhook_url() -> Optional[str]:
     """通知先のDiscord Webhook URLを環境変数から解決する。
 
+    チャンネル再設計(2026-09): DDD専用の`DISCORD_WEBHOOK_DDD`を最優先とする。
+    未設定の環境(移行前・DDD単体デプロイ等)では、#586以来の優先順位
+    (`DISCORD_WEBHOOK_NOTIFY` → レガシー`DISCORD_WEBHOOK_URL`)に従来通り
+    フォールバックする。
+
     #586: MY_HOME_SYSTEM/config.py は`DISCORD_WEBHOOK_NOTIFY`を優先し、未設定時
     のみレガシーの`DISCORD_WEBHOOK_URL`にフォールバックする
     (`DISCORD_WEBHOOK_NOTIFY or os.getenv("DISCORD_WEBHOOK_URL")`)。本ファイルは
@@ -265,13 +270,28 @@ def _resolve_discord_webhook_url() -> Optional[str]:
     ため、実機で`DISCORD_WEBHOOK_NOTIFY`のみが設定されている場合(config.py側の
     優先順位に合わせた運用)、本ファイルの通知だけが無設定として扱われ
     「not configured」警告のみでDiscord通知が一切送信されなくなっていた。
-    config.pyと同じ優先順位に揃える。
 
     MonitorConfigのクラス属性(モジュールimport時に1度だけ評価される)から
     切り出した関数として定義することで、モジュール全体をimportlib.reloadせずに
     単体テストできるようにしている。
     """
-    return os.getenv('DISCORD_WEBHOOK_NOTIFY') or os.getenv('DISCORD_WEBHOOK_URL')
+    return (
+        os.getenv('DISCORD_WEBHOOK_DDD')
+        or os.getenv('DISCORD_WEBHOOK_NOTIFY')
+        or os.getenv('DISCORD_WEBHOOK_URL')
+    )
+
+
+def _resolve_ops_webhook_url() -> Optional[str]:
+    """サイト疎通不能アラート(閉鎖疑い)専用の送信先を解決する(チャンネル再設計(2026-09))。
+
+    新規キャスト検知・日次サマリ等の日常通知は`_resolve_discord_webhook_url()`
+    (DDD専用チャンネル)へ送るが、閉鎖疑いアラートは運用者が確認すべき警告のため
+    MY_HOME_SYSTEM側の運用者向けチャンネルと同じ`DISCORD_WEBHOOK_REPORT`を使う。
+    未設定の場合は`_resolve_discord_webhook_url()`の解決結果にフォールバックし、
+    移行前の環境でもアラート自体は送信され続けるようにする。
+    """
+    return os.getenv('DISCORD_WEBHOOK_REPORT') or _resolve_discord_webhook_url()
 
 
 def _load_sites(json_path: Path) -> List[SiteConfig]:
@@ -363,6 +383,8 @@ class MonitorConfig:
 
     # Notification Settings
     DISCORD_WEBHOOK_URL: Optional[str] = _resolve_discord_webhook_url()
+    # チャンネル再設計(2026-09): サイト疎通不能アラート専用の送信先(#operations)。
+    OPS_WEBHOOK_URL: str | None = _resolve_ops_webhook_url()
     # Issue #451: 1時間毎のcron実行のうち、この時(hour)の実行でのみ日次サマリを
     # Discordへ送信する(_maybe_send_daily_summary参照)。以前は関数内に21という
     # リテラルが直書きされていた。
@@ -527,12 +549,15 @@ class DiscordNotifier:
         """
         return requests.utils.requote_uri(url)
 
-    def __init__(self, webhook_url: Optional[str]):
+    def __init__(self, webhook_url: str | None, ops_webhook_url: str | None = None):
         """
         Args:
-            webhook_url (Optional[str]): DiscordのWebhook URL。
+            webhook_url (Optional[str]): 新規キャスト検知・日次サマリ等、日常通知のWebhook URL。
+            ops_webhook_url (Optional[str]): サイト疎通不能アラート専用のWebhook URL
+                (チャンネル再設計(2026-09))。省略時はwebhook_urlと同じ送信先を使う。
         """
         self.webhook_url = webhook_url
+        self.ops_webhook_url = ops_webhook_url or webhook_url
         self.session = self._create_rate_limited_session()
         # 連続送信失敗時に以降の送信をスキップするサーキットブレーカー
         # (このインスタンスの生存期間=1回のプロセス実行の間だけ有効)
@@ -778,7 +803,7 @@ class DiscordNotifier:
             bool: 送信に成功した場合True。呼び出し元はTrueの場合のみアラート
                 送信済みとして記録する(失敗時は次回実行時に再試行される)。
         """
-        if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:
+        if not self.ops_webhook_url or 'YOUR_DISCORD' in self.ops_webhook_url:
             logger.warning("Discord Webhook URL is not configured. Skipping site failure alert.")
             return False
 
@@ -800,8 +825,10 @@ class DiscordNotifier:
 
         try:
             # Issue #661: POST は core/discord.py へ集約(上記と同じ理由で raise_for_status=True)。
+            # チャンネル再設計(2026-09): 日常のキャスト検知/日次サマリとは別の
+            # 運用者向けチャンネル(ops_webhook_url)へ送る。
             post_discord_webhook(
-                self.webhook_url,
+                self.ops_webhook_url,
                 content=content,
                 username="New Face Monitor",
                 timeout=10,
@@ -2402,7 +2429,7 @@ def _run_monitor_locked() -> None:
     try:
         # リソースを必要とするインスタンス化はウォームアップ確認後に実行
         monitor = WebMonitor()
-        notifier = DiscordNotifier(MonitorConfig.DISCORD_WEBHOOK_URL)
+        notifier = DiscordNotifier(MonitorConfig.DISCORD_WEBHOOK_URL, MonitorConfig.OPS_WEBHOOK_URL)
 
         # #395: 閉鎖疑いアラートはサイト処理中に即時送信せず、全サイト処理後に
         # 失敗サイトの割合(自局側障害の疑い)を見てからまとめて送信判断する。

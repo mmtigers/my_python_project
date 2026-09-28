@@ -57,7 +57,7 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
         send_push(
             messages=[{"type": "text", "text": "⚠️ 日次タイムラプス生成エラー\nFFmpeg等がインストールされていません。"}],
             target="discord",
-            channel="error"
+            channel="report"
         )
         return
 
@@ -218,14 +218,17 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
                         # #233: all_clip_filesは_build_clip()成功時のみ追加されるため、
                         # 「イベントは検知されたがクリップ抽出が全滅した」場合も空になり、
                         # 以前は下のelse節と同じ「動きなし」という事実と異なる通知を送っていた。
+                        # チャンネル再設計(2026-09): 直後にsend_push(channel="report")で
+                        # 同じ内容を明示送信するため、catch-all側はopt-outする。
                         logger.error(
                             f"{camera_name} の対象期間内 ({target_date_str}{time_range_log}) で "
-                            f"{global_event_idx} 件のイベントを検知しましたが、クリップ抽出が全て失敗しました。"
+                            f"{global_event_idx} 件のイベントを検知しましたが、クリップ抽出が全て失敗しました。",
+                            extra={"skip_discord": True},
                         )
                         send_push(
                             messages=[{"type": "text", "text": f"⚠️ {camera_name} ({target_date_str}{time_range_log}) 動き検知イベントはありましたが、クリップ生成に全て失敗しました。"}],
                             target="discord",
-                            channel="error"
+                            channel="report"
                         )
                     else:
                         logger.info(f"{camera_name} の対象期間内 ({target_date_str}{time_range_log}) に動き検知イベントはありませんでした。")
@@ -265,11 +268,14 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
 
         except Exception as e:
             err_msg = traceback.format_exc()
-            logger.error(f"日次バッチ処理中に予期せぬエラーが発生しました: {err_msg}")
+            logger.error(
+                f"日次バッチ処理中に予期せぬエラーが発生しました: {err_msg}",
+                extra={"skip_discord": True},
+            )
             send_push(
                 messages=[{"type": "text", "text": f"⚠️ 日次タイムラプス生成エラー ({camera_name})\n{str(e)}"}],
                 target="discord",
-                channel="error"
+                channel="report"
             )
 
 if __name__ == "__main__":

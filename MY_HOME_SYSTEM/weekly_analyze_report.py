@@ -296,7 +296,9 @@ def run_report() -> None:
     
     # LINE通知実行 (設計書 4.4: LINE Bot連携) [cite: 72]
     # send_push は設計書外の共通関数と想定されるが、ロガー運用に従い結果を記録
-    if send_push([{"type": "text", "text": full_msg}], target="discord"):
+    # チャンネル再設計(2026-09): 週次の定期レポートのため運用者向けチャンネル
+    # (#operations)へ明示送信する(以前はchannel省略で既定のnotify行きだった)。
+    if send_push([{"type": "text", "text": full_msg}], target="discord", channel="report"):
         logger.info("✅ レポート送信完了")
         # #234: 定時実行のときのみフラグを記録する(強制実行時は手動テスト用途のため記録しない)
         if not is_force:

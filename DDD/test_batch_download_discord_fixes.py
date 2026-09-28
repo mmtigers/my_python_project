@@ -1049,7 +1049,10 @@ class TestFileSystemManagerEnsureDirCatchesGenericOSError:
         self, monkeypatch, tmp_path
     ):
         calls = []
-        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda text, is_error=False: calls.append((text, is_error))))
+        monkeypatch.setattr(
+            module.DiscordNotifier, "send",
+            staticmethod(lambda text, is_error=False, channel=None: calls.append((text, is_error, channel))),
+        )
 
         def _raise_permission_error(*args, **kwargs):
             raise PermissionError("denied")
@@ -1061,14 +1064,18 @@ class TestFileSystemManagerEnsureDirCatchesGenericOSError:
         assert result is False
         assert len(calls) == 1
         assert "権限エラー" in calls[0][0]
-        assert calls[0][1] is True
+        # チャンネル再設計(2026-09): #alerts(is_error)ではなく#operations(report)へ送る。
+        assert calls[0][2] == "report"
 
     def test_read_only_filesystem_oserror_sends_notification_and_returns_false(
         self, monkeypatch, tmp_path
     ):
         """読み取り専用マウント(Errno 30)のような、PermissionError以外のOSErrorの回帰テスト。"""
         calls = []
-        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda text, is_error=False: calls.append((text, is_error))))
+        monkeypatch.setattr(
+            module.DiscordNotifier, "send",
+            staticmethod(lambda text, is_error=False, channel=None: calls.append((text, is_error, channel))),
+        )
 
         def _raise_read_only_error(*args, **kwargs):
             raise OSError(30, "Read-only file system")
@@ -1079,12 +1086,15 @@ class TestFileSystemManagerEnsureDirCatchesGenericOSError:
 
         assert result is False, "PermissionError以外のOSErrorも呼び出し元へ伝播させず捕捉すべき"
         assert len(calls) == 1, "OSError発生時も専用のDiscord通知を送るべき"
-        assert calls[0][1] is True
+        assert calls[0][2] == "report"
 
     def test_disk_full_oserror_sends_notification_and_returns_false(self, monkeypatch, tmp_path):
         """ディスクフル(Errno 28)のような、PermissionError以外のOSErrorの回帰テスト。"""
         calls = []
-        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda text, is_error=False: calls.append((text, is_error))))
+        monkeypatch.setattr(
+            module.DiscordNotifier, "send",
+            staticmethod(lambda text, is_error=False, channel=None: calls.append((text, is_error, channel))),
+        )
 
         def _raise_disk_full_error(*args, **kwargs):
             raise OSError(28, "No space left on device")
@@ -1095,11 +1105,14 @@ class TestFileSystemManagerEnsureDirCatchesGenericOSError:
 
         assert result is False
         assert len(calls) == 1
-        assert calls[0][1] is True
+        assert calls[0][2] == "report"
 
     def test_success_returns_true_and_sends_no_notification(self, monkeypatch, tmp_path):
         calls = []
-        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda text, is_error=False: calls.append((text, is_error))))
+        monkeypatch.setattr(
+            module.DiscordNotifier, "send",
+            staticmethod(lambda text, is_error=False, channel=None: calls.append((text, is_error, channel))),
+        )
 
         result = module.FileSystemManager.ensure_dir(tmp_path / "new_sub_dir")
 

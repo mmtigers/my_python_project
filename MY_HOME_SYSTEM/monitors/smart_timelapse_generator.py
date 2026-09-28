@@ -746,19 +746,21 @@ def _run_smart_timelapse_job_locked(input_video: str) -> None:
                 # #233: build()がFalseを返す場合(例外は発生しない)、以前はここで
                 # 何も通知せず関数が正常終了していた。動き検知イベントはあったのに
                 # 通知が一切来ず、利用者は処理自体に気づけなかった。
-                logger.error(f"動画生成に失敗しました: {input_video}")
+                # チャンネル再設計(2026-09): 直後にsend_push(channel="report")で
+                # 同じ内容を明示送信するため、catch-all側はopt-outする。
+                logger.error(f"動画生成に失敗しました: {input_video}", extra={"skip_discord": True})
                 send_push(
                     [{"type": "text", "text": f"⚠️ {sum_info.target_date} のタイムラプス動画生成に失敗しました"}],
                     target="discord",
-                    channel="error"
+                    channel="report"
                 )
 
     except Exception as e:
-        logger.error(f"エラー: {traceback.format_exc()}")
+        logger.error(f"エラー: {traceback.format_exc()}", extra={"skip_discord": True})
         send_push(
             [{"type": "text", "text": f"⚠️ エラー: {str(e)}"}],
             target="discord",
-            channel="error"
+            channel="report"
         )
 
 if __name__ == "__main__":

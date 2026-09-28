@@ -436,7 +436,13 @@ class NasMonitor:
 
         # 1. 状態遷移の検知（正常 -> 異常：フォールバック移行時）
         if not is_currently_healthy and was_healthy:
-            logger.error(f"❌ NAS connection lost or write failed. Falling back to local storage. (Ping: {ping_ok}, Mount: {mount_ok}, Write: {write_ok})")
+            # チャンネル再設計(2026-09): 直後にsend_push(channel="error")で同じ内容を
+            # 明示送信するため、catch-all側はopt-outする(付けないと#alertsと#operations
+            # の両方に同じ障害が別々に届いてしまう)。
+            logger.error(
+                f"❌ NAS connection lost or write failed. Falling back to local storage. (Ping: {ping_ok}, Mount: {mount_ok}, Write: {write_ok})",
+                extra={"skip_discord": True},
+            )
             send_push(
                 [{"type": "text", "text": f"🚨 【NAS障害】\nNASへのアクセスが失われました。\nローカルフォールバックへ移行します。\nIP: {self.ip}"}],
                 target="discord", channel="error"
@@ -501,10 +507,11 @@ class NasMonitor:
             f"(残り: {usage['free_gb']} GB)"
         )
         
-        channel = "error" if is_full else "report"
+        # チャンネル再設計(2026-09): 容量不足警告・定期レポートいずれも運用者向け
+        # チャンネル(#operations)へ統合(以前は容量不足時のみ#alerts相当へ送っていた)。
         send_push(
             [{"type": "text", "text": msg}],
-            target="discord", channel=channel
+            target="discord", channel="report"
         )
         if is_report_time:
             previous_state["last_report_date"] = today_str

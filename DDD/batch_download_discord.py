@@ -96,10 +96,21 @@ def _standalone_send_discord_webhook(messages, image_data=None, channel="notify"
     """MY_HOME_SYSTEM(LINE Bot SDKやconfig.py、DBを要する)を持たない単独環境向けの
     簡易Discord Webhook送信フォールバック。DISCORD_WEBHOOK_ERROR/DISCORD_WEBHOOK_NOTIFY
     (未設定時はDISCORD_WEBHOOK_URL)を直接参照し、追加の依存関係なしでテキスト通知のみ送る。
+
+    チャンネル再設計(2026-09): channel="report"(運用者向け#operations)と
+    channel="ddd"(DDD専用#ddd_download、未設定時はNOTIFY/URLへフォールバック)にも対応する。
     """
     url = None
     if channel == "error":
         url = os.getenv("DISCORD_WEBHOOK_ERROR") or os.getenv("DISCORD_WEBHOOK_URL")
+    elif channel == "report":
+        url = os.getenv("DISCORD_WEBHOOK_REPORT") or os.getenv("DISCORD_WEBHOOK_URL")
+    elif channel == "ddd":
+        url = (
+            os.getenv("DISCORD_WEBHOOK_DDD")
+            or os.getenv("DISCORD_WEBHOOK_NOTIFY")
+            or os.getenv("DISCORD_WEBHOOK_URL")
+        )
     else:
         url = os.getenv("DISCORD_WEBHOOK_NOTIFY") or os.getenv("DISCORD_WEBHOOK_URL")
     if not url:
@@ -411,16 +422,23 @@ _discord_circuit_breaker = DiscordCircuitBreaker(failure_threshold=CONFIG.DISCOR
 
 class DiscordNotifier:
     @staticmethod
-    def send(text: str, is_error: bool = False) -> None:
+    def send(text: str, is_error: bool = False, channel: str | None = None) -> None:
+        """Discordへ1件のテキスト通知を送る。
+
+        チャンネル再設計(2026-09): 既定では is_error に応じて
+        'error'(#alerts)/'ddd'(#ddd_download、日常のダウンロード完了通知)を選ぶが、
+        呼び出し元が channel を明示した場合はそちらを優先する
+        ('report'=#operations、運用者向けの軽微なエラーを送る場合に使う)。
+        """
         if _discord_circuit_breaker.is_open:
             # Webhookへの連続送信失敗を検知しているため、無駄なリクエストを
             # 重ねないよう以降の送信をスキップする。
             logger.warning(f"⚠️ Discord Webhookへの連続送信失敗を検知しているため、通知をスキップします: {text[:50]}")
             return
-        channel = 'error' if is_error else 'notify'
+        resolved_channel = channel or ('error' if is_error else 'ddd')
         message = {"type": "text", "text": text}
         try:
-            sent = _send_discord_webhook([message], channel=channel)
+            sent = _send_discord_webhook([message], channel=resolved_channel)
         except Exception as e:
             logger.error(f"⚠️ Discord通知エラー: {e}", exc_info=True)
             sent = False
@@ -549,7 +567,9 @@ class FileSystemManager:
             path.mkdir(parents=True, exist_ok=True)
             return True
         except PermissionError:
-            DiscordNotifier.send(f"❌ 権限エラー: {path}", is_error=True)
+            # チャンネル再設計(2026-09): ボット検知級の即時対応ではなく、
+            # 運用者が後で確認すればよい軽微なエラーとして#operationsへ送る。
+            DiscordNotifier.send(f"❌ 権限エラー: {path}", channel="report")
             return False
         except OSError as e:
             # #236: PermissionError以外のOSError(読み取り専用マウントのErrno 30、
@@ -557,7 +577,7 @@ class FileSystemManager:
             # 専用のDiscord通知を経由しないままrun_lockedのexcept Exceptionまで
             # 伝播し、インフラ障害の原因究明が遅れていた。extract_youtube_urls.pyの
             # process_subscriptions(#185)と同様にOSError全般を捕捉する。
-            DiscordNotifier.send(f"❌ ディレクトリ作成エラー: {path} ({e})", is_error=True)
+            DiscordNotifier.send(f"❌ ディレクトリ作成エラー: {path} ({e})", channel="report")
             return False
 
     @staticmethod
@@ -591,7 +611,8 @@ class FileSystemManager:
                 if check_path == check_path.parent: break
             total, used, free = shutil.disk_usage(check_path)
             if (free // (2**30)) < threshold_gb:
-                DiscordNotifier.send(f"⚠️ DISK FULL ({path}): 残り {free // (2**30)}GB", is_error=True)
+                # チャンネル再設計(2026-09): #operationsへ(#alertsは即時対応が要る障害専用)。
+                DiscordNotifier.send(f"⚠️ DISK FULL ({path}): 残り {free // (2**30)}GB", channel="report")
                 return False
             return True
         except Exception as e:
@@ -609,7 +630,9 @@ class SystemHealthChecker:
         if not CONFIG.REQUIRE_NAS_MOUNT:
             return True
         if not CONFIG.NAS_MOUNT_POINT.exists() or not CONFIG.nas_marker_path.exists():
-            DiscordNotifier.send("⛔ CRITICAL: NASマウントエラー", is_error=True)
+            # チャンネル再設計(2026-09): 当日の実行を見送るだけで自動復旧を待てるため
+            # #operationsへ(#alertsは即時対応が要る障害専用)。
+            DiscordNotifier.send("⛔ CRITICAL: NASマウントエラー", channel="report")
             return False
         return True
     
@@ -1590,9 +1613,11 @@ class BatchDownloader:
 
             if consecutive_failures >= CONFIG.CONSECUTIVE_FAILURE_THRESHOLD:
                 logger.error(f"⚠️ 連続{consecutive_failures}回失敗したため、レート制限の可能性を考慮し処理を中断します。")
+                # チャンネル再設計(2026-09): ボット検知級の即時対応ではなく、
+                # 運用者が後で確認すればよい軽微なエラーとして#operationsへ送る。
                 DiscordNotifier.send(
                     f"⚠️ 連続{consecutive_failures}回のダウンロード失敗を検知したため、以降のタスクをスキップします。",
-                    is_error=True
+                    channel="report"
                 )
                 break
 

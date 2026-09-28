@@ -15,6 +15,12 @@ Issue #742 (AUDIT-013) / #759 (AUDIT-030): 抑制の仕組みを2つとも入れ
 - 「メッセージに Discord という語が含まれるか」の推測 → `extra={"skip_discord": True}`
   という明示フラグ(推測では実障害まで無音になっていた)
 - レート制限が実質無かった状態 → 同一内容のクールダウン(重複排除)
+
+チャンネル再設計(2026-09): DiscordErrorHandler はレベルで送信先を分けるように
+なった(CRITICAL→config.DISCORD_WEBHOOK_ERROR、通常のERROR→
+config.DISCORD_WEBHOOK_REPORT)。既存テストの大半はデフォルトでERRORレベルの
+レコードを使うため、送信先として DISCORD_WEBHOOK_REPORT を用いる形に揃えている
+(挙動の本質はレベルに依存せず、両方のURLを設定した上で確認する)。
 """
 import itertools
 import logging
@@ -35,8 +41,8 @@ from core.logger import DiscordErrorHandler
 _msg_counter = itertools.count()
 
 
-def _make_error_record(msg=None, **extra) -> logging.LogRecord:
-    """テスト用の ERROR レコード。
+def _make_error_record(msg=None, level=logging.ERROR, **extra) -> logging.LogRecord:
+    """テスト用のログレコード(既定はERRORレベル=非CRITICAL)。
 
     msg を省略した場合は毎回異なる文字列にする。Issue #759 の重複排除は
     「同じログ行から出たエラー」を束ねるため、同一 msg を使い回すテストが
@@ -45,12 +51,16 @@ def _make_error_record(msg=None, **extra) -> logging.LogRecord:
     if msg is None:
         msg = f"something broke #{next(_msg_counter)}"
     record = logging.LogRecord(
-        name="test", level=logging.ERROR, pathname=__file__, lineno=1,
+        name="test", level=level, pathname=__file__, lineno=1,
         msg=msg, args=(), exc_info=None,
     )
     for key, value in extra.items():
         setattr(record, key, value)
     return record
+
+
+def _make_critical_record(msg=None, **extra) -> logging.LogRecord:
+    return _make_error_record(msg=msg, level=logging.CRITICAL, **extra)
 
 
 @pytest.fixture(autouse=True)
@@ -61,9 +71,17 @@ def _reset_dedup_state():
     core_logger.reset_discord_dedup_state()
 
 
+@pytest.fixture(autouse=True)
+def _set_discord_webhooks(monkeypatch):
+    """チャンネル再設計(2026-09): CRITICAL→ERROR、通常のERROR→REPORT の
+    2系統に送信先が分かれたため、既定で両方を設定しておく(個々のテストは
+    必要に応じてどちらかを上書き/未設定にする)。"""
+    monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook-alerts")
+    monkeypatch.setattr(config, "DISCORD_WEBHOOK_REPORT", "https://discord.example/webhook-ops")
+
+
 class TestEmitDoesNotBlockOnSlowDiscord:
     def test_emit_returns_quickly_even_if_discord_post_is_slow(self, monkeypatch):
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
         handler = DiscordErrorHandler()
 
         # C-L2 (Issue #414): 「遅いDiscord」は固定の time.sleep(2) ではなく、テスト終了時に
@@ -95,7 +113,6 @@ class TestEmitDoesNotBlockOnSlowDiscord:
 
 class TestEmitHandlesNonStringMsg:
     def test_emit_does_not_raise_when_msg_is_not_a_string(self, monkeypatch):
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
         handler = DiscordErrorHandler()
         record = _make_error_record(msg=ValueError("non-string msg"))
 
@@ -112,12 +129,11 @@ class TestEmitHandlesNonStringMsg:
 class TestEmitReportsFailuresInsteadOfSwallowingThem:
     """Issue #288の回帰テスト: emit()内で例外が起きた場合、以前は
     `except Exception: pass` で完全に握りつぶされ、ハンドラの不調を検知する
-    手段がなかった。標準のhandleError()経由でsys.stderrに可視化されるようにする。
+    手段がなかった。標準のhandleError()経由でsys.stderrへ可視化されるようにする。
     handleError()はlogging機構を再度通らないため、無限ループの心配はない。
     """
 
     def test_emit_calls_handle_error_when_formatting_fails(self, monkeypatch):
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
         handler = DiscordErrorHandler()
 
         with patch.object(handler, "format", side_effect=RuntimeError("boom")), \
@@ -128,7 +144,6 @@ class TestEmitReportsFailuresInsteadOfSwallowingThem:
         mock_handle_error.assert_called_once()
 
     def test_emit_calls_handle_error_when_thread_start_fails(self, monkeypatch):
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
         handler = DiscordErrorHandler()
 
         with patch("core.logger.threading.Thread") as mock_thread_cls, \
@@ -149,7 +164,6 @@ class TestEmitSkipsOnlyExplicitlyOptedOutRecords:
     """
 
     def test_emit_skips_records_flagged_with_skip_discord(self, monkeypatch):
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
         handler = DiscordErrorHandler()
         record = _make_error_record(msg="Discord送信失敗: boom", skip_discord=True)
 
@@ -160,7 +174,6 @@ class TestEmitSkipsOnlyExplicitlyOptedOutRecords:
 
     def test_emit_sends_records_that_mention_discord_without_the_flag(self, monkeypatch):
         """フラグの無い「Discord」を含むログは通知されること(本 Issue の本体)。"""
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
         handler = DiscordErrorHandler()
         record = _make_error_record(msg="Discord送信失敗: 20260920_timelapse.mp4")
 
@@ -189,7 +202,6 @@ class TestEmitDeduplicatesRepeatedErrors:
     """
 
     def test_same_message_is_sent_once_within_the_window(self, monkeypatch):
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
         handler = DiscordErrorHandler()
 
         with patch("core.discord.requests.post") as mock_post:
@@ -200,7 +212,6 @@ class TestEmitDeduplicatesRepeatedErrors:
         assert mock_post.call_count == 1
 
     def test_different_messages_are_not_deduplicated(self, monkeypatch):
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
         handler = DiscordErrorHandler()
 
         with patch("core.discord.requests.post") as mock_post:
@@ -211,10 +222,9 @@ class TestEmitDeduplicatesRepeatedErrors:
         assert mock_post.call_count == 2
 
     def test_message_is_sent_again_after_the_window_elapses(self, monkeypatch):
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
+        handler = DiscordErrorHandler()
         # ウィンドウを 0 にすれば実時間を待たずに経過後の挙動を確認できる
         monkeypatch.setattr(core_logger, "DISCORD_DEDUP_WINDOW_SEC", 0.0)
-        handler = DiscordErrorHandler()
 
         with patch("core.discord.requests.post") as mock_post:
             handler.emit(_make_error_record(msg="繰り返すエラー"))
@@ -225,7 +235,6 @@ class TestEmitDeduplicatesRepeatedErrors:
 
     def test_suppressed_count_is_reported_in_the_next_notification(self, monkeypatch):
         """「静かになった」のか「抑制されている」のかを運用側から区別できること。"""
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
         handler = DiscordErrorHandler()
 
         sent_payloads = []
@@ -247,16 +256,70 @@ class TestEmitDeduplicatesRepeatedErrors:
 
     def test_webhook_unset_does_not_consume_a_dedup_slot(self, monkeypatch):
         """Webhook 未設定で送らなかった分を「送信済み」として記録しないこと。"""
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "")
+        monkeypatch.setattr(config, "DISCORD_WEBHOOK_REPORT", "")
         handler = DiscordErrorHandler()
         handler.emit(_make_error_record(msg="設定前のエラー"))
 
-        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
+        monkeypatch.setattr(config, "DISCORD_WEBHOOK_REPORT", "https://discord.example/webhook-ops")
         with patch("core.discord.requests.post") as mock_post:
             handler.emit(_make_error_record(msg="設定前のエラー"))
             core_logger.flush_pending_discord_notifications(timeout=2.0)
 
         assert mock_post.call_count == 1
+
+
+class TestEmitRoutesBySeverity:
+    """チャンネル再設計(2026-09)の本体: CRITICALは即時対応チャンネル
+    (DISCORD_WEBHOOK_ERROR)、通常のERRORは運用者向けチャンネル
+    (DISCORD_WEBHOOK_REPORT)へ送る。"""
+
+    def test_critical_record_is_sent_to_error_webhook(self, monkeypatch):
+        handler = DiscordErrorHandler()
+        sent_urls = []
+
+        def _capture(url, **kwargs):
+            sent_urls.append(url)
+
+        with patch("core.logger.core_discord.post_with_retry", side_effect=_capture):
+            handler.emit(_make_critical_record(msg="CRITICALな障害"))
+            core_logger.flush_pending_discord_notifications(timeout=2.0)
+
+        assert sent_urls == ["https://discord.example/webhook-alerts"]
+
+    def test_non_critical_error_record_is_sent_to_report_webhook(self, monkeypatch):
+        handler = DiscordErrorHandler()
+        sent_urls = []
+
+        def _capture(url, **kwargs):
+            sent_urls.append(url)
+
+        with patch("core.logger.core_discord.post_with_retry", side_effect=_capture):
+            handler.emit(_make_error_record(msg="通常のエラー"))
+            core_logger.flush_pending_discord_notifications(timeout=2.0)
+
+        assert sent_urls == ["https://discord.example/webhook-ops"]
+
+    def test_critical_record_is_not_sent_when_only_report_webhook_is_configured(self, monkeypatch):
+        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "")
+        handler = DiscordErrorHandler()
+
+        with patch("core.discord.requests.post") as mock_post:
+            handler.emit(_make_critical_record(msg="CRITICALだがERROR未設定"))
+            time.sleep(0.3)
+
+        assert mock_post.call_count == 0
+
+    def test_critical_and_non_critical_are_deduplicated_independently(self, monkeypatch):
+        """レベルが異なれば同一メッセージ文字列でも別々に重複排除される
+        (dedup keyがrecord.levelnoを含むため)ことの確認。"""
+        handler = DiscordErrorHandler()
+
+        with patch("core.discord.requests.post") as mock_post:
+            handler.emit(_make_error_record(msg="共通メッセージ"))
+            handler.emit(_make_critical_record(msg="共通メッセージ"))
+            core_logger.flush_pending_discord_notifications(timeout=2.0)
+
+        assert mock_post.call_count == 2
 
 
 class TestWebhookFailureLogDoesNotLeakToken:
