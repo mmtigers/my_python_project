@@ -121,10 +121,27 @@ def parse_latest_article_summary(soup: BeautifulSoup) -> ArticleSummary:
     return ArticleSummary(url=link["href"].strip(), title=link.get_text(strip=True))
 
 
+def _decode_utf8(content: bytes) -> str:
+    """レスポンスの生バイト列をUTF-8としてデコードして文字列を返す。
+
+    2026-09-28の実機障害対応: `BeautifulSoup(bytes, from_encoding="utf-8")`は、
+    ページ末尾側(広告/トラッキング関連と見られる箇所)に含まれる不正なUTF-8バイト列に
+    より厳密デコードが失敗すると、指定した`from_encoding`を無視してBeautifulSoup自身の
+    エンコーディング自動判定(誤って無関係な多バイト系エンコーディングを検出することが
+    ある)にフォールバックしてしまい、本来UTF-8として正しくデコードできるはずの記事本文
+    (タイトル等)まで巻き添えで文字化けする実障害が発生した。bs4に生バイト列を渡さず、
+    ここで`errors="replace"`付きの寛容なデコードを自前で行ってから文字列として渡すことで、
+    bs4のエンコーディング自動判定を完全に迂回する。末尾側の不正バイトはU+FFFD(置換文字)に
+    置き換えられるが、記事タイトル・カテゴリ・漫画画像といった関心のある箇所は末尾より
+    十分前方にあるため影響しない。
+    """
+    return content.decode("utf-8", errors="replace")
+
+
 def fetch_latest_article_summary(session: requests.Session) -> ArticleSummary:
     resp = session.get(config.MFUJIN_BLOG_TOP_URL, timeout=config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC)
     resp.raise_for_status()
-    return parse_latest_article_summary(BeautifulSoup(resp.content, "html.parser", from_encoding="utf-8"))
+    return parse_latest_article_summary(BeautifulSoup(_decode_utf8(resp.content), "html.parser"))
 
 
 def _is_manga_page_image(img: Tag) -> bool:
@@ -184,7 +201,7 @@ def parse_article_content(soup: BeautifulSoup, url: str) -> ArticleContent:
 def fetch_article_content(session: requests.Session, url: str) -> ArticleContent:
     resp = session.get(url, timeout=config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC)
     resp.raise_for_status()
-    return parse_article_content(BeautifulSoup(resp.content, "html.parser", from_encoding="utf-8"), url)
+    return parse_article_content(BeautifulSoup(_decode_utf8(resp.content), "html.parser"), url)
 
 
 def is_excluded_category(category: str | None) -> bool:
