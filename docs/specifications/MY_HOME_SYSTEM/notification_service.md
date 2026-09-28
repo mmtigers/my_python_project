@@ -89,8 +89,9 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 ### `_send_discord_webhook`
 
-* **役割**: Discordの指定チャンネル(error, report, notify)に対応するWebhook URLへテキストおよび画像データを含めたメッセージを送信する。画像添付時はファイル名を指定してアップロードする。
-* 根拠: [関数定義] (行番号: 28〜74 / 抜粋: "def _send_discord_webhook(...)")
+* **役割**: Discordの指定チャンネル(error, report, ddd, notify)に対応するWebhook URLへテキストおよび画像データを含めたメッセージを送信する。画像添付時はファイル名を指定してアップロードする。
+* **（2026-09 チャンネル再設計で追加）** `channel="ddd"` は DDD(`newface_monitor.py`/`batch_download_discord.py`)のコンテンツ収集専用チャンネル向けで、`config.DISCORD_WEBHOOK_DDD`(未設定時は`DISCORD_WEBHOOK_NOTIFY`→レガシー`DISCORD_WEBHOOK_URL`の順にフォールバック)を使う。既定値`"notify"`(それ以外の値)は生活者向け(見守り・Family Quest)の`DISCORD_WEBHOOK_NOTIFY`のまま変更していない。
+* 根拠: [関数定義] (行番号: 28〜82 / 抜粋: "def _send_discord_webhook(...)")、[ddd分岐] (行番号: 40〜41 / 抜粋: "elif channel == \"ddd\":\n        url = config.DISCORD_WEBHOOK_DDD or config.DISCORD_WEBHOOK_NOTIFY or config.DISCORD_WEBHOOK_URL")
 * **（Issue #361 で修正）** 本文を `_split_discord_content` で `DISCORD_CONTENT_CHUNK_SIZE`（1900）字以下のチャンクに分割して順に送信し、画像は先頭チャンクにのみ添付する。各 POST は `_post_discord_with_retry` 経由で、429 または 5xx のときは `Retry-After`（または `X-RateLimit-Reset-After`、無ければ 1 秒、上限 `DISCORD_RETRY_MAX_WAIT_SECONDS`＝5 秒）待ってから `DISCORD_RETRY_ATTEMPTS`（1）回リトライする。以前は切り詰めも分割もせず送っていたため、週間ログ分析レポート等の長文は 400 で丸ごと届かず、DDD 側ではサーキットブレーカーの誤作動も招いていた。
 * 根拠: `chunks = _split_discord_content(text_content)` (行番号: 57)、`_post_discord_with_retry(url, ...)` (行番号: 63, 65)、`DISCORD_CONTENT_CHUNK_SIZE = 1900` (行番号: 79)、`DISCORD_RETRY_ATTEMPTS = 1` (行番号: 81)
 
@@ -100,7 +101,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 
 * **戻り値/レスポンス**: `bool` (HTTPステータスコードが200または204の場合にTrue、それ以外はFalse)
-* 根拠: [戻り値] (行番号: 67, 66, 68 / 抜粋: "if res.status_code not in [200, 204]:", "return False", "return True")
+* 根拠: [戻り値] (行番号: 75, 66, 68 / 抜粋: "if res.status_code not in [200, 204]:", "return False", "return True")
 
 
 * **副作用**: 外部のDiscord Webhook URLへのHTTP POSTリクエストの実行（画像添付時は`files`パラメータで`filename`を指定してアップロード、タイムアウト60秒。テキストのみの場合はJSON送信、タイムアウト10秒）。
@@ -116,7 +117,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 ### `_split_discord_content` / `_post_discord_with_retry`（Issue #361 で追加）
 
 * **役割**: `_split_discord_content(text, limit=1900)` は text を limit 字以下のチャンクに分割する（できるだけ改行位置で切る。空文字は1チャンク）。`_post_discord_with_retry(url, **kwargs)` は `requests.post` を呼び、429/5xx なら `Retry-After` 等に従って `_retry_sleep`（既定 `time.sleep`、テストで差し替え可能）で待機したうえで限定回数リトライし、最後のレスポンスを返す。
-* 根拠: `def _split_discord_content(text: str, limit: int = DISCORD_CONTENT_CHUNK_SIZE) -> List[str]:` (行番号: 94〜96)、`def _post_discord_with_retry(url: str, **kwargs):` (行番号: 99〜108)
+* 根拠: `def _split_discord_content(text: str, limit: int = DISCORD_CONTENT_CHUNK_SIZE) -> List[str]:` (行番号: 102〜104)、`def _post_discord_with_retry(url: str, **kwargs):` (行番号: 107〜116)
 * **引数/リクエスト**: `text: str, limit: int` / `url: str, **kwargs`（`requests.post` に渡す）
 * 根拠: (行番号: 86, 103)
 * **戻り値/レスポンス**: `List[str]` / `requests.Response`
@@ -129,14 +130,14 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 ### `_send_line_push`
 
 * **（2026-09-06 品質監査で修正）** `line_bot_api.push_message(PushMessageRequest(...), _request_timeout=config.LINE_API_REQUEST_TIMEOUT)` として接続/読み取りタイムアウト(既定 `(5.0, 15.0)` 秒)を渡す。line-bot-sdk v3 は未指定だと無期限ブロックになるため。
-* 根拠: (行番号: 162 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
+* 根拠: (行番号: 170 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
 
 * **役割**: LINE Messaging API (v3) を利用し、指定ユーザーIDに対してプッシュメッセージを送信する。辞書型で渡されたメッセージをv3用オブジェクト(`TextMessage`等)に変換する互換性維持処理を含む。
-* 根拠: [関数定義] (行番号: 111〜168 / 抜粋: "def _send_line_push(user_id: str...")
+* 根拠: [関数定義] (行番号: 119〜176 / 抜粋: "def _send_line_push(user_id: str...")
 
 
 * **引数/リクエスト**: `user_id: str`, `messages: List[Any]`
-* 根拠: [関数定義] (行番号: 111 / 抜粋: "def _send_line_push(user_id: str...")
+* 根拠: [関数定義] (行番号: 119 / 抜粋: "def _send_line_push(user_id: str...")
 
 
 * **戻り値/レスポンス**: `bool` (送信成功時にTrue)
@@ -155,15 +156,15 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 ### `send_push`
 
 * **役割**: 指定されたターゲット(discord, line, both)に応じてメッセージを各プラットフォームへ統合送信する。LINEに画像は送信せず注記を付与し、LINEの送信に失敗した場合はDiscordのerrorチャンネルへフォールバック通知を行う。`filename`はDiscord送信時にそのまま`_send_discord_webhook`へ引き継がれる。Issue #289で、LINE宛先(`user_id`)の解決をこの関数に一元化するようシグネチャを再設計した: `messages`のみが位置引数として渡せ、それ以外はすべてキーワード専用(`*`以降)。`user_id`は target に "line"/"both" を含む場合のみ使われ、省略時は`config.LINE_USER_ID`にフォールバックする。`target="discord"`のみの呼び出しでは`user_id`は一切不要になった。
-* 根拠: [関数定義] (行番号: 170〜222 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
+* 根拠: [関数定義] (行番号: 178〜230 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
 
 
 * **引数/リクエスト**: `messages: List[Any]`（唯一の位置引数）、以降キーワード専用で `target: str = "both"`, `channel: str = "notify"`, `user_id: Optional[str] = None`, `image_data: Optional[bytes] = None`, `filename: str = "snapshot.jpg"`
-* 根拠: [関数定義] (行番号: 170〜222 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
+* 根拠: [関数定義] (行番号: 178〜230 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値] (行番号: 222 / 抜粋: "return success")
+* 根拠: [戻り値] (行番号: 230 / 抜粋: "return success")
 
 
 * **副作用**: `_send_discord_webhook`（通常送信時および失敗時のフォールバック送信の計2箇所）および `_send_line_push` の呼び出し。

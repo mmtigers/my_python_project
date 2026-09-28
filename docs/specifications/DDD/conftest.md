@@ -35,8 +35,8 @@
 
 ### モジュールレベルの環境変数無害化処理
 
-* **役割**: pytestが`DDD/`配下のテストファイルを収集（import）する前に、本ファイル自身が最初にimportされる性質を利用し、`DISCORD_WEBHOOK_ERROR`・`DISCORD_WEBHOOK_ERROR_CAM`・`DISCORD_WEBHOOK_REPORT`・`DISCORD_WEBHOOK_NOTIFY`・`DISCORD_WEBHOOK_URL`・`LINE_CHANNEL_ACCESS_TOKEN`・`LINE_USER_ID`の7つの環境変数を、いずれもローカルの`.env`に実際の値が設定されているか否かに関わらず、空文字列で強制的に上書きする。関数やクラスとしては定義されておらず、モジュールのトップレベルで即時実行される代入文の並びである。
-* 根拠: [モジュール本体] (行番号: 23〜29 / 抜粋: "os.environ[\"DISCORD_WEBHOOK_ERROR\"] = \"\"\nos.environ[\"DISCORD_WEBHOOK_ERROR_CAM\"] = \"\"\nos.environ[\"DISCORD_WEBHOOK_REPORT\"] = \"\"\nos.environ[\"DISCORD_WEBHOOK_NOTIFY\"] = \"\"\nos.environ[\"DISCORD_WEBHOOK_URL\"] = \"\"\nos.environ[\"LINE_CHANNEL_ACCESS_TOKEN\"] = \"\"\nos.environ[\"LINE_USER_ID\"] = \"\"")
+* **役割**: pytestが`DDD/`配下のテストファイルを収集（import）する前に、本ファイル自身が最初にimportされる性質を利用し、`DISCORD_WEBHOOK_ERROR`・`DISCORD_WEBHOOK_ERROR_CAM`・`DISCORD_WEBHOOK_REPORT`・`DISCORD_WEBHOOK_NOTIFY`・`DISCORD_WEBHOOK_URL`・`DISCORD_WEBHOOK_DDD`（**2026-09 チャンネル再設計で追加**。DDD専用チャンネルのWebhook）・`LINE_CHANNEL_ACCESS_TOKEN`・`LINE_USER_ID`の8つの環境変数を、いずれもローカルの`.env`に実際の値が設定されているか否かに関わらず、空文字列で強制的に上書きする。関数やクラスとしては定義されておらず、モジュールのトップレベルで即時実行される代入文の並びである。
+* 根拠: [モジュール本体] (行番号: 23〜30 / 抜粋: "os.environ[\"DISCORD_WEBHOOK_ERROR\"] = \"\"\nos.environ[\"DISCORD_WEBHOOK_ERROR_CAM\"] = \"\"\nos.environ[\"DISCORD_WEBHOOK_REPORT\"] = \"\"\nos.environ[\"DISCORD_WEBHOOK_NOTIFY\"] = \"\"\nos.environ[\"DISCORD_WEBHOOK_URL\"] = \"\"\nos.environ[\"DISCORD_WEBHOOK_DDD\"] = \"\"\nos.environ[\"LINE_CHANNEL_ACCESS_TOKEN\"] = \"\"\nos.environ[\"LINE_USER_ID\"] = \"\"")
 
 
 * **引数/リクエスト**: なし（モジュールレベルのトップレベルコードであり、関数呼び出しの引数は存在しない）
@@ -59,7 +59,7 @@
 ```mermaid
 flowchart TD
     Start["pytestがDDD/配下のテストを収集開始"] --> LoadConftest["conftest.py が最初にimportされる(pytestの標準動作)"]
-    LoadConftest --> Mask["DISCORD_WEBHOOK_ERROR / _ERROR_CAM / _REPORT / _NOTIFY / _URL\nLINE_CHANNEL_ACCESS_TOKEN / LINE_USER_ID を\nos.environ上で空文字に強制上書き"]
+    LoadConftest --> Mask["DISCORD_WEBHOOK_ERROR / _ERROR_CAM / _REPORT / _NOTIFY / _URL / _DDD\nLINE_CHANNEL_ACCESS_TOKEN / LINE_USER_ID を\nos.environ上で空文字に強制上書き"]
     Mask --> CollectTests["後続で各test_*.pyがimportされる"]
     CollectTests --> ImportNewfaceMonitor["newface_monitor.py等がMY_HOME_SYSTEMのconfigをimport"]
     ImportNewfaceMonitor --> LoadDotenv["config.py内でload_dotenv()実行\n(既存の環境変数は上書きされないため空文字のまま維持)"]
