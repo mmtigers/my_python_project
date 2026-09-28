@@ -162,34 +162,56 @@
 
 
 
-### `fetch_latest_article_summary`
+### `_decode_utf8`
 
-* **役割**: `config.MFUJIN_BLOG_TOP_URL`へGETリクエストを送り、`raise_for_status()`でHTTPエラーを検知した後、`parse_latest_article_summary`で解析する。
-* 根拠: [関数定義] (行番号: 124〜127 / 抜粋: "def fetch_latest_article_summary(session: requests.Session) -> ArticleSummary:")
+* **役割**: レスポンスの生バイト列を`errors="replace"`付きでUTF-8としてデコードし文字列を返す。**(2026-09-28 実機障害対応で追加)** 以前は`BeautifulSoup(resp.content, "html.parser", from_encoding="utf-8")`のようにバイト列と`from_encoding`をbs4へ直接渡していたが、実機での検証で、ページ末尾側(広告/トラッキング関連と見られる箇所)に含まれる不正なUTF-8バイト列により厳密デコードが失敗すると、bs4は指定した`from_encoding`を無視して自身のエンコーディング自動判定(無関係な多バイト系エンコーディングを誤検出することがある)にフォールバックし、本来正しくデコードできるはずの記事タイトル等まで巻き添えで文字化けする障害が発生した。bs4に生バイト列を渡さず、本関数で寛容なデコードを自前で行ってから文字列として渡すことで、bs4のエンコーディング自動判定を完全に迂回する。
+* 根拠: [関数定義] (行番号: 124〜138 / 抜粋: 'def _decode_utf8(content: bytes) -> str:')、[デコード処理] (行番号: 139 / 抜粋: 'return content.decode("utf-8", errors="replace")')
 
 
-* **引数/リクエスト**: `session: requests.Session`
+* **引数/リクエスト**: `content: bytes`
 * 根拠: (行番号: 124)
 
 
+* **戻り値/レスポンス**: `str`(不正なバイト列はU+FFFD置換文字に置き換えられる)
+* 根拠: (行番号: 139)
+
+
+* **副作用**: なし
+* 根拠: (行番号: 124〜139)
+
+
+* **エラーハンドリング**: `errors="replace"`のため`UnicodeDecodeError`を送出しない(不正なバイト列は例外にせず置換文字で吸収する)。
+* 根拠: (行番号: 139 / 抜粋: 'return content.decode("utf-8", errors="replace")')
+
+
+
+### `fetch_latest_article_summary`
+
+* **役割**: `config.MFUJIN_BLOG_TOP_URL`へGETリクエストを送り、`raise_for_status()`でHTTPエラーを検知した後、`_decode_utf8`でデコードしたHTMLを`parse_latest_article_summary`で解析する。
+* 根拠: [関数定義] (行番号: 141〜144 / 抜粋: "def fetch_latest_article_summary(session: requests.Session) -> ArticleSummary:")
+
+
+* **引数/リクエスト**: `session: requests.Session`
+* 根拠: (行番号: 141)
+
+
 * **戻り値/レスポンス**: `ArticleSummary`
-* **(2026-09-28 実機障害対応で修正)** `resp.content`(生バイト列)を`BeautifulSoup`へ渡す際、`from_encoding="utf-8"`を明示するよう変更した。以前は指定が無く、`BeautifulSoup`自身のエンコーディング自動判定に委ねていたため、実機での検証時にLINE通知の記事タイトルが文字化けする障害が発生した(サイト側のHTML内にエンコーディング宣言が見つけにくい/無い場合、自動判定が外れうる)。サイトが常にUTF-8で配信していることを前提に、判定を経由せず明示的にUTF-8として復元するようにした。
-* 根拠: (行番号: 127 / 抜粋: 'return parse_latest_article_summary(BeautifulSoup(resp.content, "html.parser", from_encoding="utf-8"))')
+* 根拠: (行番号: 144 / 抜粋: 'return parse_latest_article_summary(BeautifulSoup(_decode_utf8(resp.content), "html.parser"))')
 
 
 * **副作用**: `config.MFUJIN_BLOG_TOP_URL`への外部HTTP GETリクエスト(タイムアウト`config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC`)。
-* 根拠: (行番号: 125 / 抜粋: "resp = session.get(config.MFUJIN_BLOG_TOP_URL, timeout=config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC)")
+* 根拠: (行番号: 142 / 抜粋: "resp = session.get(config.MFUJIN_BLOG_TOP_URL, timeout=config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC)")
 
 
 * **エラーハンドリング**: `resp.raise_for_status()`によりHTTPエラー(4xx/5xx)は`requests.HTTPError`として呼び出し元に伝播する(本関数内でキャッチしない)。
-* 根拠: (行番号: 126 / 抜粋: "resp.raise_for_status()")
+* 根拠: (行番号: 143 / 抜粋: "resp.raise_for_status()")
 
 
 
 ### `_is_manga_page_image`
 
 * **役割**: 与えられた`img`タグが「本編の漫画ページ画像」かどうかを判定する。`src`が空、または`.gif`で終わる場合はFalse(ヘッダー/フッターの固定バナー除外)。`height`属性があり`400`未満の場合もFalse(副次チェック)。
-* 根拠: [関数定義] (行番号: 130〜141 / 抜粋: "def _is_manga_page_image(img: Tag) -> bool:")
+* 根拠: [関数定義] (行番号: 147〜158 / 抜粋: "def _is_manga_page_image(img: Tag) -> bool:")
 
 
 * **引数/リクエスト**: `img: Tag`(BeautifulSoupの`<img>`要素)
@@ -212,7 +234,7 @@
 ### `parse_article_content`
 
 * **役割**: 記事ページのHTMLから、タイトル(`SELECTORS.article_title_link`)、投稿日時(`SELECTORS.published_time`の`datetime`属性)、カテゴリ(`SELECTORS.category`)、本編漫画画像URL一覧(`SELECTORS.body_container`配下の`SELECTORS.manga_image_candidate`のうち`_is_manga_page_image`がTrueのものだけ、DOM出現順を維持、`urljoin`で絶対URL化)を抽出し`ArticleContent`として返す。
-* 根拠: [関数定義] (行番号: 144〜181 / 抜粋: "def parse_article_content(soup: BeautifulSoup, url: str) -> ArticleContent:")
+* 根拠: [関数定義] (行番号: 161〜198 / 抜粋: "def parse_article_content(soup: BeautifulSoup, url: str) -> ArticleContent:")
 
 
 * **引数/リクエスト**: `soup: BeautifulSoup`, `url: str`(記事の絶対URL。相対画像パスの解決基準になる)
@@ -234,32 +256,31 @@
 
 ### `fetch_article_content`
 
-* **役割**: 記事URLへGETリクエストを送り、`raise_for_status()`の後`parse_article_content`で解析する。
-* 根拠: [関数定義] (行番号: 184〜187 / 抜粋: "def fetch_article_content(session: requests.Session, url: str) -> ArticleContent:")
+* **役割**: 記事URLへGETリクエストを送り、`raise_for_status()`の後`_decode_utf8`でデコードしたHTMLを`parse_article_content`で解析する。
+* 根拠: [関数定義] (行番号: 201〜204 / 抜粋: "def fetch_article_content(session: requests.Session, url: str) -> ArticleContent:")
 
 
 * **引数/リクエスト**: `session: requests.Session`, `url: str`
-* 根拠: (行番号: 184)
+* 根拠: (行番号: 201)
 
 
 * **戻り値/レスポンス**: `ArticleContent`
-* **(2026-09-28 実機障害対応で修正)** `fetch_latest_article_summary`と同じ理由で`from_encoding="utf-8"`を明示するよう変更した。
-* 根拠: (行番号: 187 / 抜粋: 'return parse_article_content(BeautifulSoup(resp.content, "html.parser", from_encoding="utf-8"), url)')
+* 根拠: (行番号: 204 / 抜粋: 'return parse_article_content(BeautifulSoup(_decode_utf8(resp.content), "html.parser"), url)')
 
 
 * **副作用**: `url`への外部HTTP GETリクエスト(タイムアウト`config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC`)。
-* 根拠: (行番号: 185)
+* 根拠: (行番号: 202)
 
 
 * **エラーハンドリング**: `resp.raise_for_status()`によりHTTPエラーは`requests.HTTPError`として伝播する。
-* 根拠: (行番号: 186)
+* 根拠: (行番号: 203)
 
 
 
 ### `is_excluded_category`
 
 * **役割**: カテゴリ文字列が`config.MFUJIN_BLOG_EXCLUDED_CATEGORIES`(完全一致のリスト)に含まれるかを判定する。
-* 根拠: [関数定義] (行番号: 190〜198 / 抜粋: "def is_excluded_category(category: Optional[str]) -> bool:")
+* 根拠: [関数定義] (行番号: 207〜215 / 抜粋: "def is_excluded_category(category: Optional[str]) -> bool:")
 
 
 * **引数/リクエスト**: `category: Optional[str]`
@@ -267,7 +288,7 @@
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: (行番号: 198, 198 / 抜粋: "return False", "return category in config.MFUJIN_BLOG_EXCLUDED_CATEGORIES")
+* 根拠: (行番号: 198, 215 / 抜粋: "return False", "return category in config.MFUJIN_BLOG_EXCLUDED_CATEGORIES")
 
 
 * **副作用**: なし
@@ -282,7 +303,7 @@
 ### `validate_image_urls`
 
 * **役割**: 抽出済み画像URL一覧の各URLへHEADリクエストを送り、ステータスコード(400以上は除外)・`Content-Length`ヘッダ(`config.MFUJIN_BLOG_IMAGE_MAX_SIZE_MB`換算のバイト数を超えたら除外)を検証し、通過したURLのみのリストを返す。
-* 根拠: [関数定義] (行番号: 201〜227 / 抜粋: "def validate_image_urls(session: requests.Session, image_urls: List[str]) -> List[str]:")
+* 根拠: [関数定義] (行番号: 218〜244 / 抜粋: "def validate_image_urls(session: requests.Session, image_urls: List[str]) -> List[str]:")
 
 
 * **引数/リクエスト**: `session: requests.Session`, `image_urls: List[str]`
@@ -290,7 +311,7 @@
 
 
 * **戻り値/レスポンス**: `List[str]`(検証を通過したURLのみ)
-* 根拠: (行番号: 227 / 抜粋: "return validated")
+* 根拠: (行番号: 244 / 抜粋: "return validated")
 
 
 * **副作用**: 各画像URLへの外部HTTP HEADリクエスト(タイムアウト`config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC`、リダイレクト追従あり)。ステータス400以上・サイズ超過・例外発生時はWARNINGログを出力する。
@@ -305,7 +326,7 @@
 ### `build_line_messages`
 
 * **役割**: `ArticleContent`からLINE Messaging APIへ送るメッセージ列(`List[Message]`)を組み立てる。「タイトル1通(`TextMessage`、【えむふじん 最新話】+タイトル+元記事URL) + 画像枚数」の合計が`_LINE_MAX_MESSAGES_PER_PUSH`(5)以下ならテキスト1通+`ImageMessage`(画像ごとに`originalContentUrl`/`previewImageUrl`とも画像URLをそのまま設定)というシンプルな構成にする。超える場合は、タイトル+元記事リンクボタンのバブルを先頭に、画像を`hero`画像とするバブルを`_FLEX_CAROUSEL_MAX_BUBBLES`(12)-1枚まで追加した`FlexMessage`(carousel)1通に切り替える(上限超過分は先頭から切り詰め、WARNINGログを出力)。
-* 根拠: [関数定義] (行番号: 230〜296 / 抜粋: "def build_line_messages(article: ArticleContent) -> List[Message]:")、[シンプル分岐] (行番号: 241〜247)、[Flex分岐] (行番号: 249〜297)
+* 根拠: [関数定義] (行番号: 247〜313 / 抜粋: "def build_line_messages(article: ArticleContent) -> List[Message]:")、[シンプル分岐] (行番号: 241〜247)、[Flex分岐] (行番号: 249〜297)
 
 
 * **引数/リクエスト**: `article: ArticleContent`
