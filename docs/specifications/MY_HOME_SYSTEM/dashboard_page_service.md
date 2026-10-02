@@ -376,7 +376,7 @@
 ### `_LOG_TABLE_VISIBLE_ROWS` / `_render_collapsible_log_table`
 
 * **役割**: **（UI改善で新設）** `_render_simple_table`を、先頭`visible`件(既定`_LOG_TABLE_VISIBLE_ROWS`=5)だけ常時表示し、残りを`<details><summary>`で折りたたむ形に拡張する。防犯ログ・センサーログが縦に長く連なりスクロールが大変だった問題の改善。全件は引き続き`limit`(既定50)件まで読み込み、隠すだけでデータ自体は減らさない。
-* 根拠: `_LOG_TABLE_VISIBLE_ROWS = 5` (行番号: 458)、`def _render_collapsible_log_table(` (行番号: 470〜487 / 抜粋: "def _render_collapsible_log_table(")
+* 根拠: `_LOG_TABLE_VISIBLE_ROWS = 5` (行番号: 467)、`def _render_collapsible_log_table(` (行番号: 470〜487 / 抜粋: "def _render_collapsible_log_table(")
 
 
 * **引数/リクエスト**: `df: pd.DataFrame`, `columns: dict[str, str]`、キーワード専用で `visible: int = _LOG_TABLE_VISIBLE_ROWS`, `limit: int = 50`

@@ -95,19 +95,19 @@
 > **(UI改善)** 実行状態をプロセス内(`_manual_state`、`threading.Lock`保護)に保持するようになった。実行中に再度呼ぶと二重起動せず`False`を返し(起動時は`True`)、起動ごとに`run_id`を採番し、完了時(例外時も)に`last_result`(`run_id`/`success`/`message`/`size_mb`/`finished_at`)を記録する。参照用に`get_manual_backup_state()`(`running`/`run_id`/`last_result`)と、NAS上の最新`home_system_*.db`の更新時刻・サイズを返す`get_latest_backup_info()`(無ければNone)を追加した。システムページのスピナー・トースト・最新時刻表示が使う。
 
 * **役割**: **（不具合修正で新設）** ダッシュボードの「今すぐバックアップ」ボタンから呼ばれる`perform_backup()`をバックグラウンドスレッドで実行し、成功時はDiscordへ完了通知(`channel="report"`)を送る。以前は`perform_backup()`の完了(NAS転送・設定次第で`_copy_latest_offsite`のrclone転送、最大`OFFSITE_TIMEOUT_SEC`=1800秒を含みうる)をAPIレスポンスとして待たせており、完了前にブラウザがバックグラウンド化・通信断になると結果を受け取れず「タップしても完了したか分からない」原因になっていた。
-* 根拠: `def trigger_manual_backup_async() -> None:` (行番号: 118〜167 / 抜粋: "def trigger_manual_backup_async() -> None:")
+* 根拠: `def trigger_manual_backup_async() -> bool:` (行番号: 118〜167 / 抜粋: "def trigger_manual_backup_async() -> bool:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def trigger_manual_backup_async() -> None:` (行番号: 118)
+* 根拠: `def trigger_manual_backup_async() -> bool:` (行番号: 118)
 
 
-* **戻り値/レスポンス**: `None`(呼び出し元へは即座に戻る。バックグラウンドスレッドの完了は待たない)
-* 根拠: `-> None:` (行番号: 109)、`threading.Thread(target=_run, daemon=True).start()` (行番号: 131)
+* **戻り値/レスポンス**: `bool`(起動できたら`True`、既に実行中で二重起動しなかったら`False`。呼び出し元へは即座に戻り、バックグラウンドスレッドの完了は待たない)
+* 根拠: `-> bool:` (行番号: 118)、`threading.Thread(target=_run, daemon=True).start()` (行番号: 166)
 
 
 * **副作用**: `threading.Thread(daemon=True)`を起動し、そのスレッド内で`perform_backup()`を実行する。成功時のみ`send_push(target="discord", channel="report")`を呼ぶ。
-* 根拠: `threading.Thread(target=_run, daemon=True).start()` (行番号: 166 / 抜粋: "threading.Thread(target=_run, daemon=True).start()")、`send_push(` (行番号: 125〜129)
+* 根拠: `threading.Thread(target=_run, daemon=True).start()` (行番号: 166 / 抜粋: "threading.Thread(target=_run, daemon=True).start()")、`send_push(` (行番号: 147)
 
 
 * **エラーハンドリング**: 失敗時(`success`が偽)は追加の通知を送らない。`perform_backup`内部の`_notify_and_log_error`が既にDiscordのerrorチャンネルへ通知済みのため、ここで重ねて通知すると二重送信になる。
