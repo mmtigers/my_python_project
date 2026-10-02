@@ -151,8 +151,8 @@
 * 根拠: [戻り値] (行番号: 95, 98〜110)
 
 
-* **副作用**: `home_status_service.collect_status_cards()`経由でDBの読み取り(TTLキャッシュ付き)。
-* 根拠: [関数呼び出し] (行番号: 97 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")
+* **副作用**: `home_status_service.collect_status_cards()`経由でDBの読み取り(TTLキャッシュ付き)。**(新機能)** `home_status_service.collect_link_health(config.ASA_NOTE_URL)`でファミクエ・あさノートの稼働チェック(DB読み取り・あさノートへのHTTP GET。TTL60秒のキャッシュ付き)を行い、結果を`render_home_page`の`link_health`に渡して外部リンクを色分けする。
+* 根拠: [関数呼び出し] (行番号: 97 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")、[稼働チェック] (行番号: 98 / 抜粋: "link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL)")
 
 
 * **エラーハンドリング**: `tab`が`_LEGACY_TAB_REDIRECTS`に無い値の場合は`.get(tab, _BASE_PATH)`によりホームへフォールバックする(例外は送出しない)。
@@ -162,7 +162,7 @@
 
 ### `GET {DASHBOARD_BASE_PATH}/status` (`dashboard_status_fragment`)
 
-* **役割**: ホームページの自動更新用に、カードのブロックだけ(`<div id="status">`)を返す。
+* **役割**: ホームページの自動更新用に、カードと外部リンクのブロック(`<div id="status">`)を返す。
 * 根拠: [ルート定義] (行番号: 113〜123 / 抜粋: '@router.get(_STATUS_PATH, include_in_schema=False)\ndef dashboard_status_fragment() -> HTMLResponse:')
 
 
@@ -174,7 +174,7 @@
 * 根拠: [戻り値] (行番号: 117〜123)
 
 
-* **副作用**: `home_status_service.collect_status_cards()`経由でDBの読み取り(ホームページ本体と同じTTLキャッシュを共有)。
+* **副作用**: `home_status_service.collect_status_cards()`経由でDBの読み取り(ホームページ本体と同じTTLキャッシュを共有)。**(新機能)** 外部リンク(ファミクエ・あさノート)の稼働チェック結果(`collect_link_health`。同じキャッシュを共有)も含め、フラグメントに外部リンクのブロックを入れる(自動更新で色が更新され、リンクが消えないようにするため)。
 * 根拠: [関数呼び出し] (行番号: 116)
 
 
@@ -189,20 +189,20 @@
 * 根拠: [ルート定義] (行番号: 129〜139 / 抜粋: '@router.get(f"{_BASE_PATH}/watch", include_in_schema=False)\ndef dashboard_watch() -> HTMLResponse:')
 
 
-* **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 130)
+* **引数/リクエスト**: クエリ`date`(`YYYY-MM-DD`、任意)。**(新機能)** 指定があれば`dashboard_page_service.parse_log_date`で解釈し、その日のログだけを表示する。この場合は共通キャッシュ(直近`MOBILE_SENSOR_ROW_LIMIT`件)ではなく`home_status_service.get_sensor_data_for_day`でDBから指定日の全件を取る。形式が不正な値は無視して通常表示になる。
+* 根拠: [関数定義] (行番号: 136 / 抜粋: "def dashboard_watch(date: str | None = None) -> HTMLResponse:")、[日付の解釈] (行番号: 139 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(見守りページ全体のHTML)
-* 根拠: [戻り値] (行番号: 132〜139)
+* 根拠: [戻り値] (行番号: 138〜146)
 
 
-* **副作用**: `get_cached_materials()`経由でDBの読み取り
-* 根拠: [関数呼び出し] (行番号: 131)
+* **副作用**: `get_cached_materials()`(日付未指定時)または`get_sensor_data_for_day`(日付指定時)経由でDBの読み取り
+* 根拠: [材料の取得] (行番号: 134〜137)
 
 
-* **エラーハンドリング**: なし
-* 根拠: [関数本体] (行番号: 129〜139)
+* **エラーハンドリング**: 不正な`date`はエラーにせず無視する(ブックマークの壊れたURLでも開けるように)。
+* 根拠: [関数本体] (行番号: 130〜146)
 
 
 

@@ -17,7 +17,7 @@ import html
 import json
 import os
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import config
@@ -91,6 +91,10 @@ _PAGE_BASE_CSS = """
         background: #e0f2f1; color: #00695c; border: 1px solid #80cbc4;
         -webkit-tap-highlight-color: rgba(0,0,0,0.08);
     }
+    /* 稼働状況による色分け(正常=緑、異常=赤)。色だけに頼らず文字(.link-state)も添える。 */
+    a.external-card.external-up { background: #e8f5e9; color: #2e7d32; border-color: #a5d6a7; }
+    a.external-card.external-down { background: #ffebee; color: #c62828; border-color: #ef9a9a; }
+    .link-state { font-size: 0.75rem; font-weight: normal; margin-left: 4px; }
 
     /* 見守りページの簡易テーブル(防犯ログ・実家センサーログ)。
        スマホでは横スクロールさせず、列を絞って縦に収める。 */
@@ -176,6 +180,19 @@ _PAGE_BASE_CSS = """
     button.primary { background: #1565c0; color: #fff; }
     .maintenance-result { font-size: 0.85rem; margin-top: 8px; white-space: pre-wrap; }
 
+    /* 見守りページのログの日付フィルタ */
+    .log-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 4px; }
+    .log-filter input[type="date"] {
+        min-height: 44px; padding: 0 10px; border-radius: 10px; border: 1px solid #bbb;
+        font-size: 1rem; background: inherit; color: inherit;
+    }
+    .log-filter button, a.log-filter-clear {
+        min-height: 44px; padding: 0 16px; border-radius: 10px; font-weight: bold; font-size: 0.9rem;
+        display: inline-flex; align-items: center; box-sizing: border-box;
+    }
+    .log-filter button { border: none; background: #1565c0; color: #fff; }
+    a.log-filter-clear { border: 1px solid #bbdefb; background: #e3f2fd; color: #1565c0; text-decoration: none; }
+
     /* 見守りページのカメラ選択 */
     .camera-select-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
     .camera-btn {
@@ -197,6 +214,8 @@ _PAGE_BASE_CSS = """
         nav.top-nav a, a.back-link { background: #16304a; color: #90caf9; border-color: #24507a; }
         a.nav-card { background: #23264a; color: #c5cae9; border-color: #34386b; }
         a.external-card { background: #0d2b28; color: #4db6ac; border-color: #14413c; }
+        a.external-card.external-up { background: #12301a; color: #81c784; border-color: #1f5130; }
+        a.external-card.external-down { background: #3b1518; color: #ef9a9a; border-color: #6b2429; }
         table.simple-table th { color: #9e9e9e; }
         table.simple-table th, table.simple-table td { border-color: #333; }
         .snapshot-caption { color: #9e9e9e; }
@@ -207,6 +226,8 @@ _PAGE_BASE_CSS = """
         .nas-chart-grid { stroke: #333; }
         .nas-chart-line { stroke: #64b5f6; }
         details > summary { color: #90caf9; }
+        .log-filter input[type="date"] { border-color: #555; }
+        a.log-filter-clear { background: #16304a; color: #90caf9; border-color: #24507a; }
         .maintenance-box { border-color: #333; }
         .camera-btn { background: #16304a; color: #90caf9; border-color: #24507a; }
         #status.stale::after { color: #ef9a9a; }
@@ -243,6 +264,31 @@ _NAV_CARDS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+def _render_external_link(href: str, label: str, healthy: bool | None) -> str:
+    """外部リンクカード1枚。`healthy`が True なら緑・「稼働中」、False なら赤・「停止中」、
+    None(未判定)なら従来のティールで状態表示なし。タップで遷移できる点は状態に関わらず同じ。"""
+    if healthy is None:
+        css, state = "external-card", ""
+    elif healthy:
+        css, state = "external-card external-up", '<span class="link-state">● 稼働中</span>'
+    else:
+        css, state = "external-card external-down", '<span class="link-state">● 停止中</span>'
+    return f'<a class="{css}" href="{html.escape(href)}"><span>{label}{state}</span><span>›</span></a>'
+
+
+def _render_external_links(quest_path: str, asa_note_url: str, link_health: dict[str, bool] | None) -> str:
+    """「よく使うリンク」(ファミクエ・あさノート)。`link_health`は
+    `home_status_service.collect_link_health`の戻り値(キー`quest`/`asa_note`)。"""
+    health = link_health or {}
+    return (
+        "<h2>よく使うリンク</h2>"
+        '<div class="link-grid">'
+        f'{_render_external_link(quest_path, "⚔️ ファミクエ", health.get("quest"))}'
+        f'{_render_external_link(asa_note_url, "📝 あさノート", health.get("asa_note"))}'
+        "</div>"
+    )
+
+
 def render_home_page(
     cards,
     fetched_at: datetime,
@@ -254,6 +300,7 @@ def render_home_page(
     refresh_sec: int,
     manifest_path: str | None = None,
     icon_path: str | None = None,
+    link_health: dict[str, bool] | None = None,
 ) -> str:
     """ホームページ: ステータスカード + 外部リンク + 各ページへのナビ。
 
@@ -262,21 +309,20 @@ def render_home_page(
     「色で気づきにくい」の両方の原因になっていた。ステータスカードのすぐ下・
     ナビカードより前に上げ、警告色と被らない配色(`.external-card`)にすることで
     両方を解消する。
+
+    **(新機能)** `link_health`を渡すと、外部リンクを稼働状況で色分けする(緑=稼働中・
+    赤=停止中)。リンクは自動更新の対象(`STATUS_SECTION_ID`の内側)に入れてあり、
+    色もカードと同じ周期で更新される。
     """
     nav_html = "".join(
         f'<a class="nav-card" href="{dashboard_path.rstrip("/")}/{key}">'
         f"{html.escape(label)}<span class=\"nav-card-sub\">{html.escape(sub)}</span></a>"
         for key, label, sub in _NAV_CARDS
     )
-    links_html = (
-        f'<a class="external-card" href="{html.escape(quest_path)}">⚔️ ファミクエ <span>›</span></a>'
-        f'<a class="external-card" href="{html.escape(asa_note_url)}">📝 あさノート <span>›</span></a>'
-    )
+    links_html = _render_external_links(quest_path, asa_note_url, link_health)
     body = (
         "<h1>🏠 おうちの様子</h1>"
-        f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec)}'
-        '<h2>よく使うリンク</h2>'
-        f'<div class="link-grid">{links_html}</div>'
+        f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html)}'
         '<h2>メニュー</h2>'
         f'<div class="link-grid">{nav_html}</div>'
     )
@@ -305,19 +351,42 @@ def _home_screen_install_head(manifest_path: str, icon_path: str) -> str:
 STATUS_SECTION_ID = home_status_service.STATUS_SECTION_ID
 
 
-def _render_status_section(cards, fetched_at: datetime, *, dashboard_path: str, refresh_sec: int) -> str:
+def _render_status_section(
+    cards, fetched_at: datetime, *, dashboard_path: str, refresh_sec: int, extra_html: str = ""
+) -> str:
     return (
         f'<div id="{STATUS_SECTION_ID}">'
         f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
         f"・{int(refresh_sec)}秒ごとに自動更新</p>"
         f"{home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path)}"
+        f"{extra_html}"
         "</div>"
     )
 
 
-def render_home_status_section(cards, fetched_at: datetime, *, dashboard_path: str, refresh_sec: int) -> str:
-    """ホームページの自動更新用フラグメント(カードのブロックだけ)。"""
-    return _render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec)
+def render_home_status_section(
+    cards,
+    fetched_at: datetime,
+    *,
+    dashboard_path: str,
+    refresh_sec: int,
+    quest_path: str | None = None,
+    asa_note_url: str | None = None,
+    link_health: dict[str, bool] | None = None,
+) -> str:
+    """ホームページの自動更新用フラグメント(カードと、外部リンクのブロック)。
+
+    `quest_path`/`asa_note_url`を渡したときだけ外部リンクを含める(ホームページ本体が
+    リンクを自動更新の範囲の中に持つため、差し替え後もリンクが消えないようにする)。
+    """
+    links_html = (
+        _render_external_links(quest_path, asa_note_url, link_health)
+        if quest_path is not None and asa_note_url is not None
+        else ""
+    )
+    return _render_status_section(
+        cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html
+    )
 
 
 def _status_refresh_script(status_path: str, refresh_sec: int) -> str:
@@ -519,6 +588,68 @@ def sensor_state_change_log(df: pd.DataFrame) -> pd.DataFrame:
     return ordered[changed].sort_values("timestamp", ascending=False, kind="stable")
 
 
+# 「開 → 閉」を1行にまとめる上限秒数(この秒数ちょうどを含む)。
+_OPEN_CLOSE_MERGE_SECONDS = 60
+
+
+def merge_open_close_events(df: pd.DataFrame) -> pd.DataFrame:
+    """開閉センサーの「open」の直後(同じ機器で`_OPEN_CLOSE_MERGE_SECONDS`秒以内)に
+    「close」が来た組を、1行(開いた時刻の行)にまとめる。新しい順で返す。
+
+    **(UI改善)** ドアを開けて閉める1回の出入りが、開いた行と閉じた行の2行に分かれて
+    ログが長くなっていた。まとめた行の`contact_state`は「開 → 閉（N秒）」にする。
+
+    - まとめるのは「open → close」の向きだけ。「close → open」や`timeoutnotclose`
+      (開けっぱなし)、人感センサー(`detected`)は対象外で、そのまま別行で残す。
+    - 機器の識別は`sensor_state_change_log`と同じ(`device_id`、無ければ`friendly_name`)。
+      「直後」は同じ機器の次の行で、他の機器の行は間に挟まっていても関係しない。
+    - `movement_state`が入っている行は(開閉以外の情報を持つため)まとめない。
+    - `sensor_state_change_log`の出力(機器ごとに状態が変わった行だけ)を想定する。
+    - `timestamp`が日時型でない・必要な列が無い場合は何もせずそのまま返す。
+    """
+    if (
+        df.empty
+        or "contact_state" not in df.columns
+        or "timestamp" not in df.columns
+        or not pd.api.types.is_datetime64_any_dtype(df["timestamp"])
+    ):
+        return df
+    device_col = next((c for c in ("device_id", "friendly_name") if c in df.columns), None)
+    if device_col is None:
+        return df
+
+    ordered = df.sort_values("timestamp", kind="stable")
+    state = ordered["contact_state"].fillna("").astype(str).str.strip().str.lower()
+    if "movement_state" in ordered.columns:
+        has_movement = ordered["movement_state"].fillna("").astype(str).str.strip() != ""
+    else:
+        has_movement = pd.Series(False, index=ordered.index)
+    device = ordered[device_col]
+
+    next_state = state.groupby(device).shift(-1)
+    next_has_movement = has_movement.groupby(device).shift(-1, fill_value=False).astype(bool)
+    elapsed = ordered["timestamp"].groupby(device).shift(-1) - ordered["timestamp"]
+    pair_start = (
+        (state == "open")
+        & (next_state == "close")
+        & ~has_movement
+        & ~next_has_movement
+        & (elapsed <= pd.Timedelta(seconds=_OPEN_CLOSE_MERGE_SECONDS))
+    )
+    if not pair_start.any():
+        return df
+
+    # 組の「close」側は、同じ機器の1つ前の行が組の開始である行。
+    pair_end = pair_start.groupby(device).shift(1, fill_value=False).astype(bool)
+
+    merged = ordered.copy()
+    merged["contact_state"] = merged["contact_state"].astype(object)
+    seconds = elapsed.dt.total_seconds().round().astype("Int64")
+    for idx in merged.index[pair_start]:
+        merged.at[idx, "contact_state"] = f"開 → 閉（{int(seconds.at[idx])}秒）"
+    return merged[~pair_end].sort_values("timestamp", ascending=False, kind="stable")
+
+
 def _render_camera_selector(cameras: list[dict[str, Any]]) -> str:
     if not cameras:
         return '<p class="empty-note">カメラが登録されていません</p>'
@@ -587,11 +718,47 @@ _CAMERA_SCRIPT = """
 """
 
 
+def parse_log_date(value: str | None) -> date | None:
+    """`?date=YYYY-MM-DD`を`date`にする。未指定・形式不正は None(=絞り込みなし)。"""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _render_log_date_filter(dashboard_path: str, selected_date: date | None) -> str:
+    """防犯ログ・センサーログ共通の日付フィルタ(GETフォーム。JS不要)。
+    送信後にログの位置へ戻れるよう、遷移先にフラグメント`#log-filter`を付ける。"""
+    watch_path = f"{html.escape(dashboard_path.rstrip('/'))}/watch"
+    value = selected_date.isoformat() if selected_date else ""
+    clear_link = (
+        f'<a class="log-filter-clear" href="{watch_path}#log-filter">クリア</a>' if selected_date else ""
+    )
+    note = (
+        f'<p class="meta">{selected_date.strftime("%Y/%m/%d")} のログを全件表示しています</p>'
+        if selected_date
+        else '<p class="meta">日付を選ぶと、その日のログだけを表示します</p>'
+    )
+    return (
+        '<div id="log-filter">'
+        f'<form class="log-filter" method="get" action="{watch_path}#log-filter">'
+        f'<input type="date" name="date" value="{value}" required aria-label="ログの日付">'
+        '<button type="submit">絞り込み</button>'
+        f"{clear_link}"
+        "</form>"
+        f"{note}"
+        "</div>"
+    )
+
+
 def render_watch_page(
     df_sensor: pd.DataFrame,
     *,
     dashboard_path: str,
     snapshot_url_prefix: str,
+    selected_date: date | None = None,
 ) -> str:
     """👀 見守り: カメラのライブ選択・スナップショット・防犯ログ・実家/自宅センサーログ。
 
@@ -613,6 +780,14 @@ def render_watch_page(
     **(UI改善)** 高砂・伊丹のセンサーログは`sensor_state_change_log`で、開閉/動体
     センサーの「状態が変わった行」だけに絞る(温湿度計・電力プラグの5分おきの記録は
     ここには出さない。値の確認は各カード/システムページ側にある)。
+
+    **(UI改善)** 開閉センサーの「open」の直後(60秒以内)に「close」が来た組は、
+    `merge_open_close_events`で「開 → 閉（N秒）」の1行にまとめる。
+
+    **(新機能)** `selected_date`を指定すると3つのログをその日(JST)に絞り、件数の上限
+    (通常50件)を外して指定日の全件を表示する(先頭5件の常時表示+折りたたみは同じ)。
+    `df_sensor`は呼び出し側(`dashboard_router`)が日付指定時に指定日の全件を渡す
+    前提で、ここでは日付による再フィルタはしない。
     """
     cameras = [
         {"id": cam["id"], "name": cam["name"]}
@@ -621,11 +796,17 @@ def render_watch_page(
     ]
     df_camera_motion = home_status_service.camera_motion_log(df_sensor)
     if not df_sensor.empty and "location" in df_sensor.columns:
-        df_takasago = sensor_state_change_log(df_sensor[df_sensor["location"] == "高砂"])
-        df_itami = sensor_state_change_log(df_sensor[df_sensor["location"] == "伊丹"])
+        df_takasago = merge_open_close_events(sensor_state_change_log(df_sensor[df_sensor["location"] == "高砂"]))
+        df_itami = merge_open_close_events(sensor_state_change_log(df_sensor[df_sensor["location"] == "伊丹"]))
     else:
         df_takasago = df_sensor.iloc[0:0]
         df_itami = df_sensor.iloc[0:0]
+
+    def _log_table(df: pd.DataFrame, columns: dict[str, str]) -> str:
+        # 日付指定時は上限を外して全件(`limit`は`df.iloc[visible:limit]`の上端)。
+        if selected_date is None:
+            return _render_collapsible_log_table(df, columns)
+        return _render_collapsible_log_table(df, columns, limit=max(len(df), _LOG_TABLE_VISIBLE_ROWS))
 
     body = (
         f"{_back_to_home_link(dashboard_path)}"
@@ -636,15 +817,16 @@ def render_watch_page(
         "</div>"
         "<h2>🖼️ 最近の写真</h2>"
         f"{_render_snapshot_gallery(snapshot_url_prefix)}"
+        f"{_render_log_date_filter(dashboard_path, selected_date)}"
         "<h2>🛡️ 防犯ログ</h2>"
-        f'{_render_collapsible_log_table(df_camera_motion, {"timestamp": "検知時刻", "friendly_name": "カメラ"})}'
+        f'{_log_table(df_camera_motion, {"timestamp": "検知時刻", "friendly_name": "カメラ"})}'
         '<div id="takasago-log">'
         "<h2>👵 高砂実家のセンサーログ</h2>"
-        f'{_render_collapsible_log_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'
+        f'{_log_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'
         "</div>"
         '<div id="itami-log">'
         "<h2>🏠 伊丹(自宅)のセンサーログ</h2>"
-        f'{_render_collapsible_log_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
+        f'{_log_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
         "</div>"
     )
     return _page_shell("見守り - おうちの様子", body, extra_head=_CAMERA_SCRIPT)

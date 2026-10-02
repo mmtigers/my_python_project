@@ -276,6 +276,59 @@ class TestRenderWatchPage:
         assert "表示できるデータがありません" not in security_section
 
 
+class TestWatchPageLogDateFilter:
+    def _sensor_rows(self, count: int) -> pd.DataFrame:
+        return pd.DataFrame({
+            "location": ["高砂"] * count,
+            "device_id": [f"dev{i}" for i in range(count)],
+            "timestamp": [pd.Timestamp("2026-10-01 10:00:00") + pd.Timedelta(minutes=i) for i in range(count)],
+            "friendly_name": [f"センサー{i}" for i in range(count)],
+            "contact_state": ["OPEN"] * count,
+        })
+
+    def _render(self, df, selected_date=None):
+        return dashboard_page_service.render_watch_page(
+            df,
+            dashboard_path="/dashboard/",
+            snapshot_url_prefix="/dashboard/snapshot",
+            selected_date=selected_date,
+        )
+
+    def test_filter_form_is_shown_without_selection(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render(pd.DataFrame())
+        assert 'type="date"' in html
+        assert 'action="/dashboard/watch#log-filter"' in html
+        assert 'class="log-filter-clear"' not in html
+
+    def test_selected_date_is_prefilled_and_clear_link_shown(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render(pd.DataFrame(), date(2026, 10, 1))
+        assert 'value="2026-10-01"' in html
+        assert 'href="/dashboard/watch#log-filter"' in html
+        assert "2026/10/01 のログを全件表示" in html
+
+    def test_without_selection_logs_are_capped_at_50_rows(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render(self._sensor_rows(60))
+        assert "さらに45件を表示" in html
+
+    def test_with_selection_all_rows_of_the_day_are_shown(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render(self._sensor_rows(60), date(2026, 10, 1))
+        assert "さらに55件を表示" in html
+        assert "センサー0" in html and "センサー59" in html
+
+
+class TestParseLogDate:
+    def test_valid_date(self):
+        assert dashboard_page_service.parse_log_date("2026-10-01") == date(2026, 10, 1)
+
+    @pytest.mark.parametrize("value", [None, "", "abc", "2026-13-01", "20261001'; DROP TABLE x;--"])
+    def test_invalid_or_missing_is_none(self, value):
+        assert dashboard_page_service.parse_log_date(value) is None
+
+
 class TestBuildFreshnessRows:
     def test_missing_data_is_flagged_red_when_threshold_set(self):
         rows = dashboard_page_service.build_freshness_rows(
@@ -451,6 +504,135 @@ class TestRenderNasHistoryChart:
         assert "<details>" in html
         assert "詳細データを見る" in html
         assert "<table" in html
+
+
+class TestMergeOpenCloseEvents:
+    """開閉センサーの「open」の直後(60秒以内)の「close」を、開いた時刻の1行にまとめる。"""
+
+    @staticmethod
+    def _df(rows):
+        return pd.DataFrame(
+            rows, columns=["timestamp", "device_id", "contact_state", "movement_state"]
+        )
+
+    def _merge(self, rows):
+        return dashboard_page_service.merge_open_close_events(self._df(rows))
+
+    def test_open_then_close_within_a_minute_becomes_one_row_at_open_time(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 12), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert len(out) == 1
+        row = out.iloc[0]
+        assert row["timestamp"] == _jst(2026, 10, 2, 6, 24, 0)
+        assert row["contact_state"] == "開 → 閉（12秒）"
+
+    def test_exactly_60_seconds_is_merged(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 25, 0), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert list(out["contact_state"]) == ["開 → 閉（60秒）"]
+
+    def test_over_60_seconds_is_not_merged(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 25, 1), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert list(out["contact_state"]) == ["close", "open"]
+
+    def test_close_then_open_is_not_merged(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 10), "door", "open", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "close", None),
+        ])
+        assert list(out["contact_state"]) == ["open", "close"]
+
+    def test_timeoutnotclose_and_detected_are_left_alone(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 30), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 20), "door", "timeoutnotclose", None),
+            (_jst(2026, 10, 2, 6, 24, 10), "pir", "detected", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert len(out) == 4
+
+    def test_other_device_in_between_does_not_block_merge(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 20), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 10), "window", "open", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        by_device = {r["device_id"]: r["contact_state"] for _, r in out.iterrows()}
+        assert by_device == {"door": "開 → 閉（20秒）", "window": "open"}
+
+    def test_pairs_of_different_devices_are_not_mixed(self):
+        """door が open、window が close でも、別機器同士はまとめない。"""
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 10), "window", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert len(out) == 2
+
+    def test_multiple_visits_are_merged_independently_and_sorted_newest_first(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 9, 0, 5), "door", "close", None),
+            (_jst(2026, 10, 2, 9, 0, 0), "door", "open", None),
+            (_jst(2026, 10, 2, 6, 24, 30), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert list(out["contact_state"]) == ["開 → 閉（5秒）", "開 → 閉（30秒）"]
+        assert list(out["timestamp"]) == [_jst(2026, 10, 2, 9, 0, 0), _jst(2026, 10, 2, 6, 24, 0)]
+
+    def test_rows_with_movement_state_are_not_merged(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 10), "door", "close", "detected"),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert len(out) == 2
+
+    def test_case_and_whitespace_insensitive(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 10), "door", " CLOSE ", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "Open", None),
+        ])
+        assert list(out["contact_state"]) == ["開 → 閉（10秒）"]
+
+    def test_non_datetime_timestamp_or_missing_columns_are_returned_unchanged(self):
+        df = pd.DataFrame({"timestamp": [2, 1], "device_id": ["d", "d"], "contact_state": ["close", "open"]})
+        assert dashboard_page_service.merge_open_close_events(df) is df
+        assert dashboard_page_service.merge_open_close_events(pd.DataFrame()).empty
+        no_device = pd.DataFrame({"timestamp": [_jst(2026, 10, 2, 6, 24, 10), _jst(2026, 10, 2, 6, 24, 0)],
+                                  "contact_state": ["close", "open"]})
+        assert dashboard_page_service.merge_open_close_events(no_device) is no_device
+
+    def test_does_not_modify_the_input_dataframe(self):
+        df = self._df([
+            (_jst(2026, 10, 2, 6, 24, 12), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        before = df.copy()
+        dashboard_page_service.merge_open_close_events(df)
+        pd.testing.assert_frame_equal(df, before)
+
+
+class TestWatchPageMergesOpenClose:
+    def test_watch_page_shows_one_row_for_open_close_pair(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        df_sensor = pd.DataFrame({
+            "location": ["高砂", "高砂"],
+            "device_id": ["door", "door"],
+            "timestamp": [_jst(2026, 10, 2, 6, 24, 12), _jst(2026, 10, 2, 6, 24, 0)],
+            "friendly_name": ["玄関ドア", "玄関ドア"],
+            "contact_state": ["close", "open"],
+        })
+        html = dashboard_page_service.render_watch_page(
+            df_sensor, dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot"
+        )
+        takasago = html.split('id="takasago-log"', 1)[1].split('id="itami-log"', 1)[0]
+        assert takasago.count("玄関ドア") == 1
+        assert "開 → 閉（12秒）" in takasago
 
 
 class TestSensorStateChangeLog:

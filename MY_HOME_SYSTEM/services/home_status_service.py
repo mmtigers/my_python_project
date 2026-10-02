@@ -16,14 +16,18 @@
 """
 import html
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, NamedTuple
 
+import config
 import pandas as pd
 import pytz
+import requests
+from core.database import get_ro_connection
 from core.utils import get_now_jst
 
 from services import analysis_service
@@ -793,6 +797,67 @@ def get_cached_materials() -> DashboardMaterials:
         daily_cost_rows=daily_cost_rows or [],
         last_month_cost=last_month_cost,
     )
+
+
+# === ホームの外部リンク(ファミクエ・あさノート)の稼働チェック ===
+
+# あさノート(外部サービス)へのチェックのタイムアウト(秒)。ホームの表示を待たせないよう短くする。
+ASA_NOTE_HEALTH_TIMEOUT_SEC = 3
+
+
+def check_quest_app_health() -> bool:
+    """ファミクエが使える状態か。次の両方を満たすとき True。
+
+    - ビルド成果物 `config.QUEST_DIST_DIR/index.html` がある(無いと `/quest` が404になる)。
+    - DBに届く(`quest_users`を読み取れる。マイグレーション失敗・DB破損・恒久ロックで
+      `/api/quest/data` が500になる状態を検知する)。
+
+    ファミクエは`unified_server`自身が配信するため、自分自身へのHTTPは使わず
+    プロセス内で確認する。例外は握りつぶして False(=異常)にする。
+    """
+    try:
+        if not os.path.isfile(os.path.join(config.QUEST_DIST_DIR, "index.html")):
+            return False
+        with get_ro_connection() as conn:
+            conn.execute("SELECT 1 FROM quest_users LIMIT 1").fetchall()
+        return True
+    except Exception as e:  # noqa: BLE001 (チェック失敗=異常として表示する)
+        logger.warning(f"ファミクエの稼働チェックに失敗しました: {e}")
+        return False
+
+
+def check_asa_note_health(url: str) -> bool:
+    """あさノート(外部サービス)が応答するか。最終的なHTTPステータスが200〜399なら True。
+    接続失敗・タイムアウト・4xx/5xx は False。本文は読まない。"""
+    try:
+        with requests.get(url, timeout=ASA_NOTE_HEALTH_TIMEOUT_SEC, stream=True) as res:
+            return 200 <= res.status_code < 400
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"あさノートの稼働チェックに失敗しました: {type(e).__name__}: {e}")
+        return False
+
+
+def collect_link_health(asa_note_url: str) -> dict[str, bool]:
+    """ホームの外部リンクの稼働状況(`{"quest": bool, "asa_note": bool}`)。
+    `STATUS_CACHE_TTL_SEC`のTTLキャッシュ付き。"""
+    quest = _cached("link_health_quest", check_quest_app_health)
+    asa_note = _cached(f"link_health_asa_note:{asa_note_url}", lambda: check_asa_note_health(asa_note_url))
+    return {"quest": bool(quest), "asa_note": bool(asa_note)}
+
+
+def get_sensor_data_for_day(day: date) -> pd.DataFrame:
+    """見守りページのログの日付フィルタ用に、指定日(JST)のセンサーデータを全件返す。
+
+    `get_cached_materials()`の`df_sensor`は直近`MOBILE_SENSOR_ROW_LIMIT`件までなので、
+    それより古い日は含まれない。日付指定時だけDBから範囲取得する。日付ごとに
+    キーが増えて`_cache`が肥大しないよう、このデータはキャッシュしない
+    (読み取り専用の1回きりの取得で、閲覧のたびに走るのは日付を指定したときだけ)。
+    """
+    try:
+        return analysis_service.load_sensor_data(day=day)
+    except Exception as e:  # noqa: BLE001 (取得失敗でページ全体を落とさない)
+        logger.warning(f"{day} のセンサーデータの取得に失敗しました: {e}")
+        return pd.DataFrame()
 
 
 def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:

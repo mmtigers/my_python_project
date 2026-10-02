@@ -95,6 +95,7 @@ def dashboard_home(tab: str | None = None) -> Response:
         return RedirectResponse(url=target, status_code=302)
 
     cards, fetched_at = home_status_service.collect_status_cards()
+    link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL)
     return HTMLResponse(
         dashboard_page_service.render_home_page(
             cards,
@@ -106,6 +107,7 @@ def dashboard_home(tab: str | None = None) -> Response:
             refresh_sec=home_status_service.MOBILE_PAGE_REFRESH_SEC,
             manifest_path=f"{_BASE_PATH}/app.webmanifest",
             icon_path=f"{_BASE_PATH}/icon-180.png",
+            link_health=link_health,
         )
     )
 
@@ -114,11 +116,15 @@ def dashboard_home(tab: str | None = None) -> Response:
 def dashboard_status_fragment() -> HTMLResponse:
     """ホームページの自動更新用(カードのブロックだけを返す)。"""
     cards, fetched_at = home_status_service.collect_status_cards()
+    link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL)
     return HTMLResponse(
         dashboard_page_service.render_home_status_section(
             cards, fetched_at,
             dashboard_path=f"{_BASE_PATH}/",
             refresh_sec=home_status_service.MOBILE_PAGE_REFRESH_SEC,
+            quest_path=_QUEST_APP_PATH,
+            asa_note_url=config.ASA_NOTE_URL,
+            link_health=link_health,
         )
     )
 
@@ -127,13 +133,20 @@ def dashboard_status_fragment() -> HTMLResponse:
 
 
 @router.get(f"{_BASE_PATH}/watch", include_in_schema=False)
-def dashboard_watch() -> HTMLResponse:
-    materials = home_status_service.get_cached_materials()
+def dashboard_watch(date: str | None = None) -> HTMLResponse:
+    """見守りページ。`?date=YYYY-MM-DD`でログ(防犯・センサー)をその日(JST)に絞る。
+    形式が不正な値は無視して通常表示にする(ブックマークの壊れたURLでも開けるように)。"""
+    selected_date = dashboard_page_service.parse_log_date(date)
+    if selected_date is not None:
+        df_sensor = home_status_service.get_sensor_data_for_day(selected_date)
+    else:
+        df_sensor = home_status_service.get_cached_materials().df_sensor
     return HTMLResponse(
         dashboard_page_service.render_watch_page(
-            materials.df_sensor,
+            df_sensor,
             dashboard_path=f"{_BASE_PATH}/",
             snapshot_url_prefix=f"{_BASE_PATH}/snapshot",
+            selected_date=selected_date,
         )
     )
 
