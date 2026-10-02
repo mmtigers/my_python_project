@@ -30,7 +30,7 @@ def manual_backup() -> Dict[str, Any]:
 
 
 @router.get("/backup/status")
-def backup_status() -> Dict[str, Any]:
+def backup_status() -> dict[str, Any]:
     """システムページが「実行中か」「結果」「最新のバックアップ時刻」を表示するために参照する。
 
     `latest_backup`はNAS上のファイルを列挙するため、manual_backupと同じ理由で

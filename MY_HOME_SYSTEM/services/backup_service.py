@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 from typing import Tuple
 # 設計書 (Source: 137) に従い core.logger を使用
+from core.utils import get_now_jst
 from core.logger import setup_logging  # 設計書に従い core.logger を使用 [cite: 137, 354]
 from services.notification_service import send_push
 import config
@@ -159,7 +160,7 @@ def trigger_manual_backup_async() -> bool:
                     "success": success,
                     "message": msg,
                     "size_mb": round(size_mb, 1),
-                    "finished_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                    "finished_at": get_now_jst().isoformat(timespec="seconds"),
                 }
 
     threading.Thread(target=_run, daemon=True).start()
@@ -206,7 +207,7 @@ def get_latest_backup_info() -> dict | None:
     mtime, name, size = newest
     return {
         "filename": name,
-        "created_at": datetime.datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
+        "created_at": datetime.datetime.fromtimestamp(mtime, tz=get_now_jst().tzinfo).isoformat(timespec="seconds"),
         "size_mb": round(size / (1024 * 1024), 1),
     }
 
