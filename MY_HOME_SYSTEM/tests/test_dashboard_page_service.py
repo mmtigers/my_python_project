@@ -506,6 +506,135 @@ class TestRenderNasHistoryChart:
         assert "<table" in html
 
 
+class TestMergeOpenCloseEvents:
+    """開閉センサーの「open」の直後(60秒以内)の「close」を、開いた時刻の1行にまとめる。"""
+
+    @staticmethod
+    def _df(rows):
+        return pd.DataFrame(
+            rows, columns=["timestamp", "device_id", "contact_state", "movement_state"]
+        )
+
+    def _merge(self, rows):
+        return dashboard_page_service.merge_open_close_events(self._df(rows))
+
+    def test_open_then_close_within_a_minute_becomes_one_row_at_open_time(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 12), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert len(out) == 1
+        row = out.iloc[0]
+        assert row["timestamp"] == _jst(2026, 10, 2, 6, 24, 0)
+        assert row["contact_state"] == "開 → 閉（12秒）"
+
+    def test_exactly_60_seconds_is_merged(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 25, 0), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert list(out["contact_state"]) == ["開 → 閉（60秒）"]
+
+    def test_over_60_seconds_is_not_merged(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 25, 1), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert list(out["contact_state"]) == ["close", "open"]
+
+    def test_close_then_open_is_not_merged(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 10), "door", "open", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "close", None),
+        ])
+        assert list(out["contact_state"]) == ["open", "close"]
+
+    def test_timeoutnotclose_and_detected_are_left_alone(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 30), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 20), "door", "timeoutnotclose", None),
+            (_jst(2026, 10, 2, 6, 24, 10), "pir", "detected", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert len(out) == 4
+
+    def test_other_device_in_between_does_not_block_merge(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 20), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 10), "window", "open", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        by_device = {r["device_id"]: r["contact_state"] for _, r in out.iterrows()}
+        assert by_device == {"door": "開 → 閉（20秒）", "window": "open"}
+
+    def test_pairs_of_different_devices_are_not_mixed(self):
+        """door が open、window が close でも、別機器同士はまとめない。"""
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 10), "window", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert len(out) == 2
+
+    def test_multiple_visits_are_merged_independently_and_sorted_newest_first(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 9, 0, 5), "door", "close", None),
+            (_jst(2026, 10, 2, 9, 0, 0), "door", "open", None),
+            (_jst(2026, 10, 2, 6, 24, 30), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert list(out["contact_state"]) == ["開 → 閉（5秒）", "開 → 閉（30秒）"]
+        assert list(out["timestamp"]) == [_jst(2026, 10, 2, 9, 0, 0), _jst(2026, 10, 2, 6, 24, 0)]
+
+    def test_rows_with_movement_state_are_not_merged(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 10), "door", "close", "detected"),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        assert len(out) == 2
+
+    def test_case_and_whitespace_insensitive(self):
+        out = self._merge([
+            (_jst(2026, 10, 2, 6, 24, 10), "door", " CLOSE ", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "Open", None),
+        ])
+        assert list(out["contact_state"]) == ["開 → 閉（10秒）"]
+
+    def test_non_datetime_timestamp_or_missing_columns_are_returned_unchanged(self):
+        df = pd.DataFrame({"timestamp": [2, 1], "device_id": ["d", "d"], "contact_state": ["close", "open"]})
+        assert dashboard_page_service.merge_open_close_events(df) is df
+        assert dashboard_page_service.merge_open_close_events(pd.DataFrame()).empty
+        no_device = pd.DataFrame({"timestamp": [_jst(2026, 10, 2, 6, 24, 10), _jst(2026, 10, 2, 6, 24, 0)],
+                                  "contact_state": ["close", "open"]})
+        assert dashboard_page_service.merge_open_close_events(no_device) is no_device
+
+    def test_does_not_modify_the_input_dataframe(self):
+        df = self._df([
+            (_jst(2026, 10, 2, 6, 24, 12), "door", "close", None),
+            (_jst(2026, 10, 2, 6, 24, 0), "door", "open", None),
+        ])
+        before = df.copy()
+        dashboard_page_service.merge_open_close_events(df)
+        pd.testing.assert_frame_equal(df, before)
+
+
+class TestWatchPageMergesOpenClose:
+    def test_watch_page_shows_one_row_for_open_close_pair(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        df_sensor = pd.DataFrame({
+            "location": ["高砂", "高砂"],
+            "device_id": ["door", "door"],
+            "timestamp": [_jst(2026, 10, 2, 6, 24, 12), _jst(2026, 10, 2, 6, 24, 0)],
+            "friendly_name": ["玄関ドア", "玄関ドア"],
+            "contact_state": ["close", "open"],
+        })
+        html = dashboard_page_service.render_watch_page(
+            df_sensor, dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot"
+        )
+        takasago = html.split('id="takasago-log"', 1)[1].split('id="itami-log"', 1)[0]
+        assert takasago.count("玄関ドア") == 1
+        assert "開 → 閉（12秒）" in takasago
+
+
 class TestSensorStateChangeLog:
     """見守りページのセンサーログを「開閉/動体の状態変化」だけに絞る(ノイズ軽減)。"""
 

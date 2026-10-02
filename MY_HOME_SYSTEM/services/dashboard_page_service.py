@@ -588,6 +588,68 @@ def sensor_state_change_log(df: pd.DataFrame) -> pd.DataFrame:
     return ordered[changed].sort_values("timestamp", ascending=False, kind="stable")
 
 
+# 「開 → 閉」を1行にまとめる上限秒数(この秒数ちょうどを含む)。
+_OPEN_CLOSE_MERGE_SECONDS = 60
+
+
+def merge_open_close_events(df: pd.DataFrame) -> pd.DataFrame:
+    """開閉センサーの「open」の直後(同じ機器で`_OPEN_CLOSE_MERGE_SECONDS`秒以内)に
+    「close」が来た組を、1行(開いた時刻の行)にまとめる。新しい順で返す。
+
+    **(UI改善)** ドアを開けて閉める1回の出入りが、開いた行と閉じた行の2行に分かれて
+    ログが長くなっていた。まとめた行の`contact_state`は「開 → 閉（N秒）」にする。
+
+    - まとめるのは「open → close」の向きだけ。「close → open」や`timeoutnotclose`
+      (開けっぱなし)、人感センサー(`detected`)は対象外で、そのまま別行で残す。
+    - 機器の識別は`sensor_state_change_log`と同じ(`device_id`、無ければ`friendly_name`)。
+      「直後」は同じ機器の次の行で、他の機器の行は間に挟まっていても関係しない。
+    - `movement_state`が入っている行は(開閉以外の情報を持つため)まとめない。
+    - `sensor_state_change_log`の出力(機器ごとに状態が変わった行だけ)を想定する。
+    - `timestamp`が日時型でない・必要な列が無い場合は何もせずそのまま返す。
+    """
+    if (
+        df.empty
+        or "contact_state" not in df.columns
+        or "timestamp" not in df.columns
+        or not pd.api.types.is_datetime64_any_dtype(df["timestamp"])
+    ):
+        return df
+    device_col = next((c for c in ("device_id", "friendly_name") if c in df.columns), None)
+    if device_col is None:
+        return df
+
+    ordered = df.sort_values("timestamp", kind="stable")
+    state = ordered["contact_state"].fillna("").astype(str).str.strip().str.lower()
+    if "movement_state" in ordered.columns:
+        has_movement = ordered["movement_state"].fillna("").astype(str).str.strip() != ""
+    else:
+        has_movement = pd.Series(False, index=ordered.index)
+    device = ordered[device_col]
+
+    next_state = state.groupby(device).shift(-1)
+    next_has_movement = has_movement.groupby(device).shift(-1, fill_value=False).astype(bool)
+    elapsed = ordered["timestamp"].groupby(device).shift(-1) - ordered["timestamp"]
+    pair_start = (
+        (state == "open")
+        & (next_state == "close")
+        & ~has_movement
+        & ~next_has_movement
+        & (elapsed <= pd.Timedelta(seconds=_OPEN_CLOSE_MERGE_SECONDS))
+    )
+    if not pair_start.any():
+        return df
+
+    # 組の「close」側は、同じ機器の1つ前の行が組の開始である行。
+    pair_end = pair_start.groupby(device).shift(1, fill_value=False).astype(bool)
+
+    merged = ordered.copy()
+    merged["contact_state"] = merged["contact_state"].astype(object)
+    seconds = elapsed.dt.total_seconds().round().astype("Int64")
+    for idx in merged.index[pair_start]:
+        merged.at[idx, "contact_state"] = f"開 → 閉（{int(seconds.at[idx])}秒）"
+    return merged[~pair_end].sort_values("timestamp", ascending=False, kind="stable")
+
+
 def _render_camera_selector(cameras: list[dict[str, Any]]) -> str:
     if not cameras:
         return '<p class="empty-note">カメラが登録されていません</p>'
@@ -719,6 +781,9 @@ def render_watch_page(
     センサーの「状態が変わった行」だけに絞る(温湿度計・電力プラグの5分おきの記録は
     ここには出さない。値の確認は各カード/システムページ側にある)。
 
+    **(UI改善)** 開閉センサーの「open」の直後(60秒以内)に「close」が来た組は、
+    `merge_open_close_events`で「開 → 閉（N秒）」の1行にまとめる。
+
     **(新機能)** `selected_date`を指定すると3つのログをその日(JST)に絞り、件数の上限
     (通常50件)を外して指定日の全件を表示する(先頭5件の常時表示+折りたたみは同じ)。
     `df_sensor`は呼び出し側(`dashboard_router`)が日付指定時に指定日の全件を渡す
@@ -731,8 +796,8 @@ def render_watch_page(
     ]
     df_camera_motion = home_status_service.camera_motion_log(df_sensor)
     if not df_sensor.empty and "location" in df_sensor.columns:
-        df_takasago = sensor_state_change_log(df_sensor[df_sensor["location"] == "高砂"])
-        df_itami = sensor_state_change_log(df_sensor[df_sensor["location"] == "伊丹"])
+        df_takasago = merge_open_close_events(sensor_state_change_log(df_sensor[df_sensor["location"] == "高砂"]))
+        df_itami = merge_open_close_events(sensor_state_change_log(df_sensor[df_sensor["location"] == "伊丹"]))
     else:
         df_takasago = df_sensor.iloc[0:0]
         df_itami = df_sensor.iloc[0:0]
