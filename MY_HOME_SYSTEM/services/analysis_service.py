@@ -227,18 +227,38 @@ def _classify_power_device_type(row) -> str:
     return "Nature Remo E Lite" if name and "Remo" in str(name) else "Plug"
 
 
-def load_sensor_data(limit: int = 5000) -> pd.DataFrame:
+def _sensor_range_clause(limit: int, day: Optional[date]) -> str:
+    """`load_sensor_data`の3クエリ共通の「WHERE ... ORDER BY ... LIMIT」部分を返す。
+
+    `day`指定時は、その日(JST)の記録を件数制限なしで取る。timestampは文字列で、
+    オフセット付き(UTC等)の行も混在しうるため、SQL側では前後1日の余裕を持たせた
+    日付文字列で粗く絞り(`day`は`date`型なので`isoformat()`の値は安全)、
+    正確なJST日付での絞り込みは`load_sensor_data`がJST変換後に行う。
+    """
+    if day is None:
+        return f"ORDER BY timestamp DESC LIMIT {limit}"
+    lower = (day - timedelta(days=1)).isoformat()
+    upper = (day + timedelta(days=2)).isoformat()
+    return f"WHERE timestamp >= '{lower}' AND timestamp < '{upper}' ORDER BY timestamp DESC"
+
+
+def load_sensor_data(limit: int = 5000, day: Optional[date] = None) -> pd.DataFrame:
     """
     新旧テーブルからセンサーデータを統合して取得する
     Target Tables: device_records, switchbot_meter_logs, power_usage
+
+    `day`を指定すると、`limit`によらず**その日(JST)の記録だけ**を全件返す
+    (見守りページのログの日付フィルタ用)。指定しない場合は従来どおり新しい順に
+    `limit`件。
     """
+    range_clause = _sensor_range_clause(limit, day)
     # 1. Legacy / Others (開閉センサー等)
     query_legacy = f"""
-        SELECT timestamp, device_id, device_name, device_type, 
-               temperature_celsius, humidity_percent, power_watts, 
+        SELECT timestamp, device_id, device_name, device_type,
+               temperature_celsius, humidity_percent, power_watts,
                contact_state, movement_state, brightness_state
-        FROM device_records 
-        ORDER BY timestamp DESC LIMIT {limit}
+        FROM device_records
+        {range_clause}
     """
     df_legacy = load_data_from_db(query_legacy)
 
@@ -248,7 +268,7 @@ def load_sensor_data(limit: int = 5000) -> pd.DataFrame:
                temperature as temperature_celsius, 
                humidity as humidity_percent
         FROM {config.SQLITE_TABLE_SWITCHBOT_LOGS}
-        ORDER BY timestamp DESC LIMIT {limit}
+        {range_clause}
     """
     df_meter = load_data_from_db(query_meter)
     if not df_meter.empty:
@@ -264,7 +284,7 @@ def load_sensor_data(limit: int = 5000) -> pd.DataFrame:
         SELECT timestamp, device_id, device_name, device_category,
                wattage as power_watts
         FROM {config.SQLITE_TABLE_POWER_USAGE}
-        ORDER BY timestamp DESC LIMIT {limit}
+        {range_clause}
     """
     df_power = load_data_from_db(query_power)
     if not df_power.empty:
@@ -304,6 +324,12 @@ def load_sensor_data(limit: int = 5000) -> pd.DataFrame:
     if "timestamp" in df_merged.columns:
         df_merged["timestamp"] = pd.to_datetime(df_merged["timestamp"])
         df_merged = df_merged.sort_values("timestamp", ascending=False).reset_index(drop=True)
+
+    if day is not None:
+        # SQL側は前後1日の余裕を持たせた粗い絞り込みなので、JSTの暦日で正確に絞る。
+        if "timestamp" in df_merged.columns:
+            df_merged = df_merged[df_merged["timestamp"].dt.date == day].reset_index(drop=True)
+        return apply_friendly_names(df_merged)
 
     return apply_friendly_names(df_merged).head(limit)
 

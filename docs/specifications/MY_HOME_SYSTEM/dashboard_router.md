@@ -189,20 +189,20 @@
 * 根拠: [ルート定義] (行番号: 129〜139 / 抜粋: '@router.get(f"{_BASE_PATH}/watch", include_in_schema=False)\ndef dashboard_watch() -> HTMLResponse:')
 
 
-* **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 130)
+* **引数/リクエスト**: クエリ`date`(`YYYY-MM-DD`、任意)。**(新機能)** 指定があれば`dashboard_page_service.parse_log_date`で解釈し、その日のログだけを表示する。この場合は共通キャッシュ(直近`MOBILE_SENSOR_ROW_LIMIT`件)ではなく`home_status_service.get_sensor_data_for_day`でDBから指定日の全件を取る。形式が不正な値は無視して通常表示になる。
+* 根拠: [関数定義] (行番号: 130 / 抜粋: "def dashboard_watch(date: str | None = None) -> HTMLResponse:")、[日付の解釈] (行番号: 133 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(見守りページ全体のHTML)
-* 根拠: [戻り値] (行番号: 132〜139)
+* 根拠: [戻り値] (行番号: 138〜146)
 
 
-* **副作用**: `get_cached_materials()`経由でDBの読み取り
-* 根拠: [関数呼び出し] (行番号: 131)
+* **副作用**: `get_cached_materials()`(日付未指定時)または`get_sensor_data_for_day`(日付指定時)経由でDBの読み取り
+* 根拠: [材料の取得] (行番号: 134〜137)
 
 
-* **エラーハンドリング**: なし
-* 根拠: [関数本体] (行番号: 129〜139)
+* **エラーハンドリング**: 不正な`date`はエラーにせず無視する(ブックマークの壊れたURLでも開けるように)。
+* 根拠: [関数本体] (行番号: 130〜146)
 
 
 

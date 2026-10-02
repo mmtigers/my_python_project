@@ -17,7 +17,7 @@ import html
 import json
 import os
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import config
@@ -176,6 +176,19 @@ _PAGE_BASE_CSS = """
     button.primary { background: #1565c0; color: #fff; }
     .maintenance-result { font-size: 0.85rem; margin-top: 8px; white-space: pre-wrap; }
 
+    /* 見守りページのログの日付フィルタ */
+    .log-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 4px; }
+    .log-filter input[type="date"] {
+        min-height: 44px; padding: 0 10px; border-radius: 10px; border: 1px solid #bbb;
+        font-size: 1rem; background: inherit; color: inherit;
+    }
+    .log-filter button, a.log-filter-clear {
+        min-height: 44px; padding: 0 16px; border-radius: 10px; font-weight: bold; font-size: 0.9rem;
+        display: inline-flex; align-items: center; box-sizing: border-box;
+    }
+    .log-filter button { border: none; background: #1565c0; color: #fff; }
+    a.log-filter-clear { border: 1px solid #bbdefb; background: #e3f2fd; color: #1565c0; text-decoration: none; }
+
     /* 見守りページのカメラ選択 */
     .camera-select-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
     .camera-btn {
@@ -207,6 +220,8 @@ _PAGE_BASE_CSS = """
         .nas-chart-grid { stroke: #333; }
         .nas-chart-line { stroke: #64b5f6; }
         details > summary { color: #90caf9; }
+        .log-filter input[type="date"] { border-color: #555; }
+        a.log-filter-clear { background: #16304a; color: #90caf9; border-color: #24507a; }
         .maintenance-box { border-color: #333; }
         .camera-btn { background: #16304a; color: #90caf9; border-color: #24507a; }
         #status.stale::after { color: #ef9a9a; }
@@ -587,11 +602,47 @@ _CAMERA_SCRIPT = """
 """
 
 
+def parse_log_date(value: str | None) -> date | None:
+    """`?date=YYYY-MM-DD`を`date`にする。未指定・形式不正は None(=絞り込みなし)。"""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _render_log_date_filter(dashboard_path: str, selected_date: date | None) -> str:
+    """防犯ログ・センサーログ共通の日付フィルタ(GETフォーム。JS不要)。
+    送信後にログの位置へ戻れるよう、遷移先にフラグメント`#log-filter`を付ける。"""
+    watch_path = f"{html.escape(dashboard_path.rstrip('/'))}/watch"
+    value = selected_date.isoformat() if selected_date else ""
+    clear_link = (
+        f'<a class="log-filter-clear" href="{watch_path}#log-filter">クリア</a>' if selected_date else ""
+    )
+    note = (
+        f'<p class="meta">{selected_date.strftime("%Y/%m/%d")} のログを全件表示しています</p>'
+        if selected_date
+        else '<p class="meta">日付を選ぶと、その日のログだけを表示します</p>'
+    )
+    return (
+        '<div id="log-filter">'
+        f'<form class="log-filter" method="get" action="{watch_path}#log-filter">'
+        f'<input type="date" name="date" value="{value}" required aria-label="ログの日付">'
+        '<button type="submit">絞り込み</button>'
+        f"{clear_link}"
+        "</form>"
+        f"{note}"
+        "</div>"
+    )
+
+
 def render_watch_page(
     df_sensor: pd.DataFrame,
     *,
     dashboard_path: str,
     snapshot_url_prefix: str,
+    selected_date: date | None = None,
 ) -> str:
     """👀 見守り: カメラのライブ選択・スナップショット・防犯ログ・実家/自宅センサーログ。
 
@@ -613,6 +664,11 @@ def render_watch_page(
     **(UI改善)** 高砂・伊丹のセンサーログは`sensor_state_change_log`で、開閉/動体
     センサーの「状態が変わった行」だけに絞る(温湿度計・電力プラグの5分おきの記録は
     ここには出さない。値の確認は各カード/システムページ側にある)。
+
+    **(新機能)** `selected_date`を指定すると3つのログをその日(JST)に絞り、件数の上限
+    (通常50件)を外して指定日の全件を表示する(先頭5件の常時表示+折りたたみは同じ)。
+    `df_sensor`は呼び出し側(`dashboard_router`)が日付指定時に指定日の全件を渡す
+    前提で、ここでは日付による再フィルタはしない。
     """
     cameras = [
         {"id": cam["id"], "name": cam["name"]}
@@ -627,6 +683,12 @@ def render_watch_page(
         df_takasago = df_sensor.iloc[0:0]
         df_itami = df_sensor.iloc[0:0]
 
+    def _log_table(df: pd.DataFrame, columns: dict[str, str]) -> str:
+        # 日付指定時は上限を外して全件(`limit`は`df.iloc[visible:limit]`の上端)。
+        if selected_date is None:
+            return _render_collapsible_log_table(df, columns)
+        return _render_collapsible_log_table(df, columns, limit=max(len(df), _LOG_TABLE_VISIBLE_ROWS))
+
     body = (
         f"{_back_to_home_link(dashboard_path)}"
         "<h1>👀 見守り</h1>"
@@ -636,15 +698,16 @@ def render_watch_page(
         "</div>"
         "<h2>🖼️ 最近の写真</h2>"
         f"{_render_snapshot_gallery(snapshot_url_prefix)}"
+        f"{_render_log_date_filter(dashboard_path, selected_date)}"
         "<h2>🛡️ 防犯ログ</h2>"
-        f'{_render_collapsible_log_table(df_camera_motion, {"timestamp": "検知時刻", "friendly_name": "カメラ"})}'
+        f'{_log_table(df_camera_motion, {"timestamp": "検知時刻", "friendly_name": "カメラ"})}'
         '<div id="takasago-log">'
         "<h2>👵 高砂実家のセンサーログ</h2>"
-        f'{_render_collapsible_log_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'
+        f'{_log_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'
         "</div>"
         '<div id="itami-log">'
         "<h2>🏠 伊丹(自宅)のセンサーログ</h2>"
-        f'{_render_collapsible_log_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
+        f'{_log_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
         "</div>"
     )
     return _page_shell("見守り - おうちの様子", body, extra_head=_CAMERA_SCRIPT)

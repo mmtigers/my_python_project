@@ -188,6 +188,61 @@ class TestLoadSensorData:
         assert result.empty
 
 
+class TestLoadSensorDataForDay:
+    """見守りページのログの日付フィルタ: `day`指定時はlimitによらずJSTのその日の全件を返す。"""
+
+    def _insert(self, ts, device_id="dev1", state="OPEN"):
+        with get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO device_records (timestamp, device_name, device_id, device_type, contact_state) "
+                "VALUES (?, 'Door', ?, 'Contact Sensor', ?)",
+                (ts, device_id, state),
+            )
+
+    def test_returns_only_rows_of_the_given_jst_day(self, isolated_db):
+        from datetime import date
+
+        self._insert("2026-09-30T23:59:59")
+        self._insert("2026-10-01T00:00:00")
+        self._insert("2026-10-01T23:59:59")
+        self._insert("2026-10-02T00:00:00")
+
+        result = analysis_service.load_sensor_data(day=date(2026, 10, 1))
+
+        assert sorted(result["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")) == [
+            "2026-10-01 00:00:00",
+            "2026-10-01 23:59:59",
+        ]
+
+    def test_day_filter_ignores_limit(self, isolated_db):
+        from datetime import date
+
+        for i in range(10):
+            self._insert(f"2026-10-01T10:{i:02d}:00")
+
+        result = analysis_service.load_sensor_data(limit=3, day=date(2026, 10, 1))
+
+        assert len(result) == 10
+
+    def test_offset_aware_timestamps_are_judged_by_jst_day(self, isolated_db):
+        """UTCで記録された行も、JSTに直した暦日で判定される(UTC 2026-09-30 16:00 = JST 10/01 01:00)。"""
+        from datetime import date
+
+        self._insert("2026-09-30T16:00:00+00:00")
+        self._insert("2026-10-01T16:00:00+00:00")  # JSTでは10/02 01:00
+
+        result = analysis_service.load_sensor_data(day=date(2026, 10, 1))
+
+        assert len(result) == 1
+
+    def test_day_without_data_returns_empty(self, isolated_db):
+        from datetime import date
+
+        self._insert("2026-10-01T10:00:00")
+
+        assert analysis_service.load_sensor_data(day=date(2026, 9, 1)).empty
+
+
 class TestLoadSensorDataPowerDeviceTypeClassification:
     """Issue #169の回帰テスト: device_nameに"Remo"を含むかで"Nature Remo E Lite"/"Plug"に
     正しく振り分けた直後、`.replace("Plug", "Nature Remo E Lite")`で全行を

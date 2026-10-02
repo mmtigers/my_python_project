@@ -127,13 +127,20 @@ def dashboard_status_fragment() -> HTMLResponse:
 
 
 @router.get(f"{_BASE_PATH}/watch", include_in_schema=False)
-def dashboard_watch() -> HTMLResponse:
-    materials = home_status_service.get_cached_materials()
+def dashboard_watch(date: str | None = None) -> HTMLResponse:
+    """見守りページ。`?date=YYYY-MM-DD`でログ(防犯・センサー)をその日(JST)に絞る。
+    形式が不正な値は無視して通常表示にする(ブックマークの壊れたURLでも開けるように)。"""
+    selected_date = dashboard_page_service.parse_log_date(date)
+    if selected_date is not None:
+        df_sensor = home_status_service.get_sensor_data_for_day(selected_date)
+    else:
+        df_sensor = home_status_service.get_cached_materials().df_sensor
     return HTMLResponse(
         dashboard_page_service.render_watch_page(
-            materials.df_sensor,
+            df_sensor,
             dashboard_path=f"{_BASE_PATH}/",
             snapshot_url_prefix=f"{_BASE_PATH}/snapshot",
+            selected_date=selected_date,
         )
     )
 

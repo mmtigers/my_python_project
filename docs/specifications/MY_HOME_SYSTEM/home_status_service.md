@@ -405,10 +405,21 @@
 
 
 
+### `get_sensor_data_for_day`
+
+* **役割**: **(新機能)** 見守りページのログの日付フィルタ用に、指定日(JST)のセンサーデータを全件返す。`get_cached_materials()`の`df_sensor`は直近`MOBILE_SENSOR_ROW_LIMIT`件までで、それより古い日は含まれないため、日付指定時だけ`analysis_service.load_sensor_data(day=day)`でDBから範囲取得する。日付ごとにキーが増えて`_cache`が肥大しないよう、このデータはキャッシュしない。
+* 根拠: `def get_sensor_data_for_day(day: date) -> pd.DataFrame:` (行番号: 798)
+* **引数/リクエスト**: `day` (`date`)
+* **戻り値/レスポンス**: `pd.DataFrame`(失敗時は空)
+* **副作用**: DBの読み取りのみ。
+* **エラーハンドリング**: 例外はログに警告を出して空のDataFrameにする(ページ全体を落とさない)。
+* 根拠: `return analysis_service.load_sensor_data(day=day)` (行番号: 806)
+
+
 ### `collect_status_cards`
 
 * **役割**: `get_cached_materials`で材料を集め、`build_status_cards`に渡して`(カード一覧, 取得時刻)`を返す。ホームページ用。
-* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 798〜812)
+* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 813〜827)
 
 
 * **引数/リクエスト**: `now` (`datetime | None`。省略時は `core.utils.get_now_jst()`)

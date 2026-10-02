@@ -19,7 +19,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, NamedTuple
 
 import pandas as pd
@@ -793,6 +793,21 @@ def get_cached_materials() -> DashboardMaterials:
         daily_cost_rows=daily_cost_rows or [],
         last_month_cost=last_month_cost,
     )
+
+
+def get_sensor_data_for_day(day: date) -> pd.DataFrame:
+    """見守りページのログの日付フィルタ用に、指定日(JST)のセンサーデータを全件返す。
+
+    `get_cached_materials()`の`df_sensor`は直近`MOBILE_SENSOR_ROW_LIMIT`件までなので、
+    それより古い日は含まれない。日付指定時だけDBから範囲取得する。日付ごとに
+    キーが増えて`_cache`が肥大しないよう、このデータはキャッシュしない
+    (読み取り専用の1回きりの取得で、閲覧のたびに走るのは日付を指定したときだけ)。
+    """
+    try:
+        return analysis_service.load_sensor_data(day=day)
+    except Exception as e:  # noqa: BLE001 (取得失敗でページ全体を落とさない)
+        logger.warning(f"{day} のセンサーデータの取得に失敗しました: {e}")
+        return pd.DataFrame()
 
 
 def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:

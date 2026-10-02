@@ -276,6 +276,59 @@ class TestRenderWatchPage:
         assert "表示できるデータがありません" not in security_section
 
 
+class TestWatchPageLogDateFilter:
+    def _sensor_rows(self, count: int) -> pd.DataFrame:
+        return pd.DataFrame({
+            "location": ["高砂"] * count,
+            "device_id": [f"dev{i}" for i in range(count)],
+            "timestamp": [pd.Timestamp("2026-10-01 10:00:00") + pd.Timedelta(minutes=i) for i in range(count)],
+            "friendly_name": [f"センサー{i}" for i in range(count)],
+            "contact_state": ["OPEN"] * count,
+        })
+
+    def _render(self, df, selected_date=None):
+        return dashboard_page_service.render_watch_page(
+            df,
+            dashboard_path="/dashboard/",
+            snapshot_url_prefix="/dashboard/snapshot",
+            selected_date=selected_date,
+        )
+
+    def test_filter_form_is_shown_without_selection(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render(pd.DataFrame())
+        assert 'type="date"' in html
+        assert 'action="/dashboard/watch#log-filter"' in html
+        assert 'class="log-filter-clear"' not in html
+
+    def test_selected_date_is_prefilled_and_clear_link_shown(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render(pd.DataFrame(), date(2026, 10, 1))
+        assert 'value="2026-10-01"' in html
+        assert 'href="/dashboard/watch#log-filter"' in html
+        assert "2026/10/01 のログを全件表示" in html
+
+    def test_without_selection_logs_are_capped_at_50_rows(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render(self._sensor_rows(60))
+        assert "さらに45件を表示" in html
+
+    def test_with_selection_all_rows_of_the_day_are_shown(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render(self._sensor_rows(60), date(2026, 10, 1))
+        assert "さらに55件を表示" in html
+        assert "センサー0" in html and "センサー59" in html
+
+
+class TestParseLogDate:
+    def test_valid_date(self):
+        assert dashboard_page_service.parse_log_date("2026-10-01") == date(2026, 10, 1)
+
+    @pytest.mark.parametrize("value", [None, "", "abc", "2026-13-01", "20261001'; DROP TABLE x;--"])
+    def test_invalid_or_missing_is_none(self, value):
+        assert dashboard_page_service.parse_log_date(value) is None
+
+
 class TestBuildFreshnessRows:
     def test_missing_data_is_flagged_red_when_threshold_set(self):
         rows = dashboard_page_service.build_freshness_rows(

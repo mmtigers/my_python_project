@@ -309,6 +309,40 @@ class TestStatusCacheOnTheServerSide:
 
         mock_load.assert_called_once()
 
+    def test_watch_page_with_date_loads_that_day_from_the_db(self):
+        """`?date=`指定時は共通キャッシュ(直近3000件)ではなく、指定日をDBから取る。"""
+        patches = _stub_loaders()
+        for p in patches:
+            p.start()
+        try:
+            with patch.object(home_status_service.analysis_service, "load_sensor_data",
+                              return_value=pd.DataFrame()) as mock_load, \
+                 _client() as client:
+                res = client.get(f"{config.DASHBOARD_BASE_PATH}/watch?date=2026-10-01")
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert res.status_code == 200
+        mock_load.assert_called_once_with(day=date(2026, 10, 1))
+        assert 'value="2026-10-01"' in res.text
+
+    def test_watch_page_with_invalid_date_falls_back_to_normal_view(self):
+        patches = _stub_loaders()
+        for p in patches:
+            p.start()
+        try:
+            with patch.object(home_status_service.analysis_service, "load_sensor_data",
+                              return_value=pd.DataFrame()) as mock_load, \
+                 _client() as client:
+                res = client.get(f"{config.DASHBOARD_BASE_PATH}/watch?date=not-a-date")
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert res.status_code == 200
+        mock_load.assert_called_once_with(limit=home_status_service.MOBILE_SENSOR_ROW_LIMIT)
+
     def test_failures_are_not_cached(self):
         """失敗をキャッシュすると、復旧しても60秒間は壊れたままになる。"""
         with patch.object(home_status_service.analysis_service, "get_memory_usage",
