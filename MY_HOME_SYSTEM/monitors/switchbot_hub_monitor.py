@@ -28,7 +28,7 @@ import ipaddress
 import os
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 # プロジェクトルートへのパス解決
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,8 +36,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from core import state_file
 from core.logger import setup_logging
-from monitors.network_logger import ping_host
 from services.notification_service import send_push
+
+from monitors.network_logger import ping_host
 
 logger = setup_logging("hub_monitor")
 
@@ -54,8 +55,8 @@ EVENT_RECOVERED = "recovered"
 
 
 def evaluate_state(
-    prev: Optional[Dict[str, Any]], ok: bool, now: float
-) -> Tuple[Dict[str, Any], Optional[str]]:
+    prev: dict[str, Any] | None, ok: bool, now: float
+) -> tuple[dict[str, Any], str | None]:
     """前回状態と今回の ping 結果から、新しい状態と通知イベントを返す(副作用なし)。
 
     状態: {"failures": 連続失敗回数, "alerting": 異常通知済みか, "last_notified": 最終通知UNIX時刻}
@@ -103,9 +104,9 @@ def build_message(event: str, name: str, location: str) -> str:
     )
 
 
-def select_hubs(devices: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def select_hubs(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """監視対象のハブ(type に "Hub" を含み、有効な ip を持つもの)を返す。"""
-    hubs: List[Dict[str, Any]] = []
+    hubs: list[dict[str, Any]] = []
     for device in devices:
         dtype = str(device.get("type") or "")
         if HUB_TYPE_KEYWORD not in dtype:
