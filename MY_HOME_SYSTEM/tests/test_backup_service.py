@@ -625,3 +625,72 @@ class TestTriggerManualBackupAsync:
 
         assert len(captured_threads) == 1
         assert captured_threads[0].daemon is True
+
+
+def _reset_manual_state():
+    with backup_service._manual_state_lock:
+        backup_service._manual_state.update({"running": False, "run_id": 0, "last_result": None})
+
+
+def _wait_manual_done(timeout=5.0):
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not backup_service.get_manual_backup_state()["running"]:
+            return
+        time.sleep(0.01)
+    raise AssertionError("手動バックアップが終わらない")
+
+
+def test_manual_backup_records_success_and_failure_result(monkeypatch):
+    _reset_manual_state()
+    monkeypatch.setattr(backup_service, "perform_backup", lambda: (True, "バックアップ完了", 2.0))
+    assert backup_service.trigger_manual_backup_async() is True
+    _wait_manual_done()
+    state = backup_service.get_manual_backup_state()
+    assert state["run_id"] == 1
+    assert state["last_result"]["success"] is True and state["last_result"]["run_id"] == 1
+
+    monkeypatch.setattr(backup_service, "perform_backup", lambda: (False, "NAS切断", 0.0))
+    assert backup_service.trigger_manual_backup_async() is True
+    _wait_manual_done()
+    last = backup_service.get_manual_backup_state()["last_result"]
+    assert last["run_id"] == 2 and last["success"] is False and last["message"] == "NAS切断"
+
+
+def test_manual_backup_exception_is_reported_as_failure(monkeypatch):
+    _reset_manual_state()
+
+    def _boom():
+        raise RuntimeError("想定外")
+
+    monkeypatch.setattr(backup_service, "perform_backup", _boom)
+    backup_service.trigger_manual_backup_async()
+    _wait_manual_done()
+    last = backup_service.get_manual_backup_state()["last_result"]
+    assert last["success"] is False and "想定外" in last["message"]
+
+
+def test_manual_backup_is_not_started_twice_while_running(monkeypatch):
+    _reset_manual_state()
+    release = threading.Event()
+    monkeypatch.setattr(backup_service, "perform_backup", lambda: (release.wait(5), "ok", 1.0))
+    assert backup_service.trigger_manual_backup_async() is True
+    assert backup_service.trigger_manual_backup_async() is False
+    assert backup_service.get_manual_backup_state()["running"] is True
+    release.set()
+    _wait_manual_done()
+
+
+def test_get_latest_backup_info_picks_newest_file(tmp_path):
+    backup_dir = Path(config.NAS_PROJECT_ROOT) / "db_backups"
+    assert backup_service.get_latest_backup_info() is None  # ディレクトリ無し
+    backup_dir.mkdir(parents=True)
+    old, new = backup_dir / "home_system_20261001_040000.db", backup_dir / "home_system_20261002_040000.db"
+    old.write_bytes(b"a")
+    new.write_bytes(b"b" * 10)
+    os.utime(old, (1_000_000, 1_000_000))
+    os.utime(new, (2_000_000, 2_000_000))
+    (backup_dir / "other.txt").write_text("x")
+    info = backup_service.get_latest_backup_info()
+    assert info["filename"] == new.name

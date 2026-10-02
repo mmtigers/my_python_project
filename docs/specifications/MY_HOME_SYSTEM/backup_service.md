@@ -35,9 +35,9 @@
 | `time` | 標準ライブラリ | 未使用 | `import time` (行番号: 5 / 抜粋: "import time") |
 | `Path` | `pathlib` | パス文字列の構築と操作 | `from pathlib import Path` (行番号: 10 / 抜粋: "from pathlib import Path") |
 | `Tuple` | `typing` | 関数の戻り値の型ヒント | `from typing import Tuple` (行番号: 11 / 抜粋: "from typing import Tuple") |
-| `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 14 / 抜粋: "from services.notification_service import send_push") |
-| `setup_logging` | `core.logger` | ロガーの初期化。設計書に従い使用 | `from core.logger import setup_logging` (行番号: 13 / 抜粋: "from core.logger import setup_logging") |
-| `config` | ローカルモジュール | 各種パスやIDなどの設定値の取得 | `import config` (行番号: 15 / 抜粋: "import config") |
+| `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 15 / 抜粋: "from services.notification_service import send_push") |
+| `setup_logging` | `core.logger` | ロガーの初期化。設計書に従い使用 | `from core.logger import setup_logging` (行番号: 14 / 抜粋: "from core.logger import setup_logging") |
+| `config` | ローカルモジュール | 各種パスやIDなどの設定値の取得 | `import config` (行番号: 16 / 抜粋: "import config") |
 
 ### ブラックボックスとなる外部要素
 
@@ -56,14 +56,14 @@
 ### `logger`
 
 * **役割**: `setup_logging` によって生成されたロガーインスタンスを保持する。
-* 根拠: `logger = setup_logging("backup")` (行番号: 18 / 抜粋: "logger = setup_logging("backup")")
+* 根拠: `logger = setup_logging("backup")` (行番号: 19 / 抜粋: "logger = setup_logging("backup")")
 
 
 
 ### `perform_backup`
 
 * **役割**: データベースのバックアップを実行し、NASへ転送する。転送成功後は `_backup_config_files` を呼び出し、`config.BACKUP_FILES` に列挙されたDB以外の設定ファイルもあわせてNASへコピーする。NASへの転送失敗時は管理者の介入が必要な恒久的障害として扱い、即時通知を行う。
-* 根拠: `def perform_backup() -> Tuple[bool, str, float]:` (行番号: 20〜106 / 抜粋: "def perform_backup() -> Tu...")
+* 根拠: `def perform_backup() -> Tuple[bool, str, float]:` (行番号: 21〜107 / 抜粋: "def perform_backup() -> Tu...")
 * **（#411 S-L8で修正）** 元・先の接続は以前 `with sqlite3.connect(...) as conn:` で開いていたが、sqlite3の`Connection.__exit__`はcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、定期実行されるバックアップ処理のたびに接続がcloseされずリークしていた。`contextlib.closing`で両接続を明示的にcloseするよう変更した。
 * 根拠: `with contextlib.closing(sqlite3.connect(src_db_path)) as src_conn, \` (行番号: 46〜48)
 * **（Issue #753 / AUDIT-024 で追加）** Phase 1 の直後、**NASへ転送する前**にバックアップファイルへ改めて接続し、`PRAGMA integrity_check` を実行する。結果が `"ok"` 以外（および `fetchone()` が偽値を返した場合）は `OSError` を送出して外側の `except` に落とし、失敗として扱う。`Connection.backup()` は正常完了すれば一貫したコピーになるが、**コピー元が既に破損していれば破損したままコピーされる**うえ、Phase 2 の転送確認はサイズ比較だけで内容を見ていないため、破損に気づかないまま `DB_BACKUP_RETENTION_DAYS`（既定30日）で健全な世代が消えうる。
@@ -71,7 +71,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def perform_backup():` (行番号: 20 / 抜粋: "def perform_backup() -> Tu...")
+* 根拠: `def perform_backup():` (行番号: 21 / 抜粋: "def perform_backup() -> Tu...")
 
 
 * **戻り値/レスポンス**: `Tuple[bool, str, float]`。成功時は `(True, "バックアップ完了", バックアップサイズMB)`、失敗時は `(False, エラーメッセージ, 0.0)` を返す。
@@ -92,30 +92,32 @@
 
 ### `trigger_manual_backup_async`
 
+> **(UI改善)** 実行状態をプロセス内(`_manual_state`、`threading.Lock`保護)に保持するようになった。実行中に再度呼ぶと二重起動せず`False`を返し(起動時は`True`)、起動ごとに`run_id`を採番し、完了時(例外時も)に`last_result`(`run_id`/`success`/`message`/`size_mb`/`finished_at`)を記録する。参照用に`get_manual_backup_state()`(`running`/`run_id`/`last_result`)と、NAS上の最新`home_system_*.db`の更新時刻・サイズを返す`get_latest_backup_info()`(無ければNone)を追加した。システムページのスピナー・トースト・最新時刻表示が使う。
+
 * **役割**: **（不具合修正で新設）** ダッシュボードの「今すぐバックアップ」ボタンから呼ばれる`perform_backup()`をバックグラウンドスレッドで実行し、成功時はDiscordへ完了通知(`channel="report"`)を送る。以前は`perform_backup()`の完了(NAS転送・設定次第で`_copy_latest_offsite`のrclone転送、最大`OFFSITE_TIMEOUT_SEC`=1800秒を含みうる)をAPIレスポンスとして待たせており、完了前にブラウザがバックグラウンド化・通信断になると結果を受け取れず「タップしても完了したか分からない」原因になっていた。
-* 根拠: `def trigger_manual_backup_async() -> None:` (行番号: 109〜131 / 抜粋: "def trigger_manual_backup_async() -> None:")
+* 根拠: `def trigger_manual_backup_async() -> bool:` (行番号: 118〜167 / 抜粋: "def trigger_manual_backup_async() -> bool:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def trigger_manual_backup_async() -> None:` (行番号: 109)
+* 根拠: `def trigger_manual_backup_async() -> bool:` (行番号: 118)
 
 
-* **戻り値/レスポンス**: `None`(呼び出し元へは即座に戻る。バックグラウンドスレッドの完了は待たない)
-* 根拠: `-> None:` (行番号: 109)、`threading.Thread(target=_run, daemon=True).start()` (行番号: 131)
+* **戻り値/レスポンス**: `bool`(起動できたら`True`、既に実行中で二重起動しなかったら`False`。呼び出し元へは即座に戻り、バックグラウンドスレッドの完了は待たない)
+* 根拠: `-> bool:` (行番号: 118)、`threading.Thread(target=_run, daemon=True).start()` (行番号: 166)
 
 
 * **副作用**: `threading.Thread(daemon=True)`を起動し、そのスレッド内で`perform_backup()`を実行する。成功時のみ`send_push(target="discord", channel="report")`を呼ぶ。
-* 根拠: `threading.Thread(target=_run, daemon=True).start()` (行番号: 131 / 抜粋: "threading.Thread(target=_run, daemon=True).start()")、`send_push(` (行番号: 125〜129)
+* 根拠: `threading.Thread(target=_run, daemon=True).start()` (行番号: 166 / 抜粋: "threading.Thread(target=_run, daemon=True).start()")、`send_push(` (行番号: 147)
 
 
 * **エラーハンドリング**: 失敗時(`success`が偽)は追加の通知を送らない。`perform_backup`内部の`_notify_and_log_error`が既にDiscordのerrorチャンネルへ通知済みのため、ここで重ねて通知すると二重送信になる。
-* 根拠: `if success:` (行番号: 124 / 抜粋: "if success:")。`else`節が無く失敗時に何もしないことを確認。
+* 根拠: `if success:` (行番号: 146 / 抜粋: "if success:")。`else`節が無く失敗時に何もしないことを確認。
 
 
 ### `redact_backup_text`
 
 * **役割**: **（Issue #829で追加）** 設定ファイルを NAS へ書き出す前に、認証情報の**値**を `REDACTED_MARK`（`***REDACTED-BY-backup_service***`）へ置き換えた本文と、置き換えた件数を返す純粋関数。
-* 根拠: `def redact_backup_text(text: str, *, is_json: bool) -> tuple[str, int]:` (行番号: 157)
+* 根拠: `def redact_backup_text(text: str, *, is_json: bool) -> tuple[str, int]:` (行番号: 238)
 * **置き換える対象**: (1) どのファイルでも、URL に埋め込まれたパスワード（`scheme://user:<ここ>@host`。`_URL_PASSWORD_RE`）。ユーザー名は残す。(2) `is_json=True` のときだけ、キー名が `pass` / `passwd` / `password` / `passphrase` / `secret` / `token` / `api_key`（`api-key`）である JSON 文字列の値（`_JSON_SECRET_FIELD_RE`、大文字小文字を区別しない）。空文字の値は置き換えず件数にも数えない
 * **なぜ必要か**: `devices.json` はカメラの `pass` と、`rtsp://<user>:<pass>@` 形式の `rtsp_url` を平文で持ち、以前は毎晩そのまま NAS（CIFS の `file_mode=0664`）へコピーしていた。2026-09-21 時点で `devices_*.json` 22件すべてにカメラのパスワードが入っていた。ホスト設定バックアップ（#774）と同じく「秘密の値は保全せず、構造だけを残す」方針
 * **ユーザー名を残す理由**: それ自体は秘密ではなく、復元時にどのアカウントを使えばよいかが分かるため（#774 と同じ判断）
@@ -126,15 +128,15 @@
 ### `_backup_config_files`
 
 * **役割**: `config.BACKUP_FILES` に列挙された設定ファイル(DB以外)をNASへコピーする。`src_db_path` と一致するエントリ（DB本体、既にPhase 1/2でバックアップ済み）はスキップする。個々のファイルのコピー失敗（ファイル不存在・`OSError`）はログに残すのみで、`perform_backup` 全体の成否には影響させない。 **（Issue #829で変更）** `shutil.copy2` でそのままコピーするのをやめ、UTF-8 として読み、`redact_backup_text`（`.json` なら JSON キー規則も適用）で認証情報を伏せ字にしてから書き出し、`shutil.copystat` で更新時刻等を引き継ぐ。伏せ字にした件数はログに出す。**UTF-8 として読めないファイルはコピーしない**（秘密の有無を検査できないものを平文で NAS に置かない側へ倒す。DB のバックアップ自体は成功扱いのまま）。
-* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str) -> None:` (行番号: 176〜207 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str) -> None:` (行番号: 257〜288 / 抜粋: "def _backup_config_files(n...")
 
 
 * **引数/リクエスト**: `nas_backup_dir: Path` (コピー先のNASバックアップディレクトリ), `timestamp: str` (ファイル名に付与するタイムスタンプ文字列), `src_db_path: str` (スキップ対象となるDBパス、`perform_backup`の`config.SQLITE_DB_PATH`)
-* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)` (行番号: 176 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)` (行番号: 257 / 抜粋: "def _backup_config_files(n...")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 176 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `-> None:` (行番号: 257 / 抜粋: "def _backup_config_files(n...")
 
 
 * **副作用**: `config.BACKUP_FILES` の各エントリについて、相対パスは `config.BASE_DIR` を基準に解決したうえで存在確認し、存在すれば `nas_backup_dir` へ `<ファイル名(拡張子除く)>_<timestamp><拡張子>` という名前で `shutil.copy2` によりコピーする。存在確認・コピー結果をログ出力する。
@@ -149,7 +151,7 @@
 ### `_copy_latest_offsite`
 
 * **役割**（2026-09-19 新設）: NAS へ転送済みのバックアップを、rclone のリモート（`config.DB_BACKUP_OFFSITE_REMOTE`）へ**最新1世代**として複製する。リモート側は常に `home_system_latest.db` の1ファイルだけを上書きする（世代管理は NAS 側の `db_backups/` と `DB_BACKUP_RETENTION_DAYS`）。以前はバックアップが NAS にしか無く、NAS が故障すると DB 本体とバックアップを同時に失う構成だった。
-* 根拠: `_copy_latest_offsite` (行番号: 214-245 / 抜粋: "def _copy_latest_offsite(nas_backup_path: Path) -> bool:")
+* 根拠: `_copy_latest_offsite` (行番号: 295-326 / 抜粋: "def _copy_latest_offsite(nas_backup_path: Path) -> bool:")
 * **呼び出し条件**: `perform_backup` の NAS 転送と整合性確認が成功し、`_backup_config_files` を終えた後にだけ呼ばれる。NAS 転送に失敗した場合は呼ばれない。
 * **無効化**: `DB_BACKUP_OFFSITE_REMOTE` が空（既定）なら何もせず `False` を返す。
 * **送るもの**: DB のみ。`devices.json` 等の設定ファイルはカメラの接続情報を含みうるため送らない。
@@ -164,15 +166,15 @@
 ### `_notify_and_log_error`
 
 * **役割**: ERRORレベルの記録と管理者への即時通知を行う。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 248〜260 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 329〜341 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **引数/リクエスト**: `message: str` (エラー内容を示すメッセージ文字列)
-* 根拠: `def _notify_and_log_error(message: str)` (行番号: 248 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str)` (行番号: 329 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 248 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `-> None:` (行番号: 329 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **副作用**: ロガーへのエラー書き込み、外部API呼び出し（`send_push`）。
@@ -180,7 +182,7 @@
 
 
 * **エラーハンドリング**: なし（内部で例外捕捉は行われていない）。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 248〜260 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 329〜341 / 抜粋: "def _notify_and_log_error(...)")
 
 
 
@@ -272,7 +274,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | データベースの正確なパス、一時ディレクトリの場所、NASの接続先、LINEユーザーIDなど、実行に必須となる環境依存の定数値を把握するため。 | `import config` (行番号: 15 / 抜粋: "import config") |
+| 高 | `config.py` | データベースの正確なパス、一時ディレクトリの場所、NASの接続先、LINEユーザーIDなど、実行に必須となる環境依存の定数値を把握するため。 | `import config` (行番号: 16 / 抜粋: "import config") |
 | 中 | `common.py` | `send_push` 関数が実際にどのサービス（LINEかDiscordか等）へどのように通知を送信しているか、またエラー時の挙動を確認するため。 | `from common import send_push` (行番号: 11 / 抜粋: "from common import send_push") |
 | 低 | `core/logger.py` | ログがどこ（標準出力、ファイル、外部監視システムなど）に、どのようなフォーマットで出力されているかを特定するため。 | `from core.logger import setup_logging` (行番号: 10 / 抜粋: "from core.logger import se...") |
 

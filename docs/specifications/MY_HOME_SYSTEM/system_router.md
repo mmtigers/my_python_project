@@ -21,7 +21,7 @@
 
 
 * 実際のバックアップ処理は外部モジュールである `services.backup_service` に、サービス再起動処理は`services.system_maintenance_service`に委譲している。**（Issue #829）** 再起動処理は以前Streamlit版ダッシュボード(`views/dashboard/log_tab.py`)のスクリプト実行スレッド内に直書きされていたが、Streamlit版廃止に伴い通常のAPIエンドポイントとして本ルーターへ切り出された。**(不具合修正)** バックアップは以前`backup_service.perform_backup()`の完了をこのエンドポイントのレスポンスとして待たせていたが、`trigger_manual_backup_async()`でバックグラウンド実行に切り替え、開始した旨を即座に返すようにした。
-* 根拠: `backup_service.trigger_manual_backup_async()` (行番号: 24 / 抜粋: "backup_service.trigger_manual_backup_async()")、`system_maintenance_service.restart_home_system()` (行番号: 38 / 抜粋: "success, msg = system_maintenance_service.restart_home_system()")
+* 根拠: `backup_service.trigger_manual_backup_async()` (行番号: 24 / 抜粋: "backup_service.trigger_manual_backup_async()")、`system_maintenance_service.restart_home_system()` (行番号: 58 / 抜粋: "success, msg = system_maintenance_service.restart_home_system()")
 
 
 
@@ -45,7 +45,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `backup_service.trigger_manual_backup_async` | 実装内容が含まれていないため。バックグラウンドスレッドでの`perform_backup()`実行・完了時のDiscord通知の詳細は[backup_service.md](./backup_service.md)側にある。 | 根拠: [backup_service.trigger_manual_backup_async] (行番号: 24 / 抜粋: "backup_service.trigger_manual_backup_async()") |
-| `system_maintenance_service.restart_home_system` | 実装内容が含まれていないため。`sudo systemctl restart home_system`の実行結果・タイムアウト挙動は[system_maintenance_service.md](./system_maintenance_service.md)側にある。 | 根拠: [system_maintenance_service.restart_home_system] (行番号: 38 / 抜粋: "success, msg = system_maintenance_service.restart_home_system()") |
+| `system_maintenance_service.restart_home_system` | 実装内容が含まれていないため。`sudo systemctl restart home_system`の実行結果・タイムアウト挙動は[system_maintenance_service.md](./system_maintenance_service.md)側にある。 | 根拠: [system_maintenance_service.restart_home_system] (行番号: 58 / 抜粋: "success, msg = system_maintenance_service.restart_home_system()") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -55,6 +55,10 @@
 * 根拠: [router] (行番号: 7 / 抜粋: "router = APIRouter()")
 
 
+
+### `backup_status`
+
+* **役割**: **(UI改善で新設)** `GET /backup/status`。システムページの「今すぐバックアップ」ボタンが、実行中か(`running`)・最後に起動した実行のID(`run_id`)・直近の結果(`last_result`)・NAS上の最新バックアップ(`latest_backup`: `filename`/`created_at`/`size_mb`、無ければnull)を表示するために参照する。NASのファイル列挙を伴うため`manual_backup`と同じ理由で`async def`にしない。
 
 ### `manual_backup`
 
@@ -66,7 +70,7 @@
 * 根拠: [manual_backup] (行番号: 10 / 抜粋: "def manual_backup() -> Dict[str, Any]:")
 
 
-* **戻り値/レスポンス**: `Dict[str, Any]` 型。常に`status="started"`と固定文言のメッセージ(「バックアップを開始しました。完了するとDiscordに通知します。」)を返す。**(不具合修正)** 以前は成功時`status="success"`+`size_mb`、失敗時`HTTPException(500)`という同期的な成否をそのまま反映していたが、バックグラウンド実行への変更により、このエンドポイントからは成否を判定できなくなった(成否は`backup_service`側のDiscord通知で伝える)。
+* **戻り値/レスポンス**: `Dict[str, Any]` 型。**(UI改善)** 起動したときは`status="started"`、既に実行中で二重起動しなかったときは`status="running"`を返し、どちらも`run_id`(画面が結果と突き合わせる実行ID)を含む。メッセージは固定文言(「バックアップを開始しました。完了するとDiscordに通知します。」)を返す。**(不具合修正)** 以前は成功時`status="success"`+`size_mb`、失敗時`HTTPException(500)`という同期的な成否をそのまま反映していたが、バックグラウンド実行への変更により、このエンドポイントからは成否を判定できなくなった(成否は`backup_service`側のDiscord通知で伝える)。
 * 根拠: [return文] (行番号: 25 / 抜粋: 'return {"status": "started", "message": "バックアップを開始しました。完了するとDiscordに通知します。"}')
 
 
@@ -86,19 +90,19 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: [manual_restart] (行番号: 29 / 抜粋: "def manual_restart() -> Dict[str, Any]:")
+* 根拠: [manual_restart] (行番号: 49 / 抜粋: "def manual_restart() -> Dict[str, Any]:")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` 型。成功時は `status`, `message` を含む辞書を返す。失敗時は`HTTPException(500)`で、`detail`は`restart_home_system`が返したメッセージそのもの。
-* 根拠: [戻り値] (行番号: 43 / 抜粋: 'return {"status": "success", "message": msg}')、[エラーハンドリング] (行番号: 39〜40 / 抜粋: "if not success:\n        raise HTTPException(status_code=500, detail=msg)")
+* 根拠: [戻り値] (行番号: 43 / 抜粋: 'return {"status": "success", "message": msg}')、[エラーハンドリング] (行番号: 59〜60 / 抜粋: "if not success:\n        raise HTTPException(status_code=500, detail=msg)")
 
 
 * **副作用**: 外部関数 `system_maintenance_service.restart_home_system()` を呼び出す(`sudo systemctl restart`の実行を含む)。
-* 根拠: [関数呼び出し] (行番号: 38 / 抜粋: "success, msg = system_maintenance_service.restart_home_system()")
+* 根拠: [関数呼び出し] (行番号: 58 / 抜粋: "success, msg = system_maintenance_service.restart_home_system()")
 
 
 * **エラーハンドリング**: `restart_home_system()` の戻り値 `success` が真でない場合、ステータスコード500の `HTTPException` を送出する（`detail`にはメッセージ`msg`をそのまま使う。`manual_backup`と異なり固定文言への差し替えは無い）。
-* 根拠: [if文と例外送出] (行番号: 39〜40 / 抜粋: "if not success:\n        raise HTTPException(status_code=500, detail=msg)")
+* 根拠: [if文と例外送出] (行番号: 59〜60 / 抜粋: "if not success:\n        raise HTTPException(status_code=500, detail=msg)")
 
 
 
@@ -151,7 +155,7 @@ graph TD
 ## 8. 保守上の注意点
 
 * `backup_service.trigger_manual_backup_async()`・`system_maintenance_service.restart_home_system()`はいずれも非同期関数 (`await`) ではなく同期関数として呼び出されている(`trigger_manual_backup_async()`自体はすぐ戻るが、内部でバックグラウンドスレッドを起動する)。
-* 根拠: [関数呼び出し] (行番号: 24, 38 / 抜粋: "backup_service.trigger_manual_backup_async()", "success, msg = system_maintenance_service.restart_home_system()")
+* 根拠: [関数呼び出し] (行番号: 24, 58 / 抜粋: "backup_service.trigger_manual_backup_async()", "success, msg = system_maintenance_service.restart_home_system()")
 
 
 * **(不具合修正)** `manual_backup`はバックグラウンド実行への変更により、このエンドポイントのレスポンスからはバックアップの成否を判定できない(常に`status="started"`)。成否は`backup_service`側(`perform_backup`内の例外処理・`trigger_manual_backup_async`の完了通知)に一本化されている([backup_service.md](./backup_service.md)参照)。`system_maintenance_service.restart_home_system()`側は自身の内部で`subprocess.TimeoutExpired`・`Exception`を捕捉して`(False, msg)`を返す設計になっており、`manual_restart`側でのtry-exceptは不要になっている（[system_maintenance_service.md](./system_maintenance_service.md)参照）。

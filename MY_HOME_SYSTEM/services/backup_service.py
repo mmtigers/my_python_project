@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 from typing import Tuple
 # 設計書 (Source: 137) に従い core.logger を使用
+from core.utils import get_now_jst
 from core.logger import setup_logging  # 設計書に従い core.logger を使用 [cite: 137, 354]
 from services.notification_service import send_push
 import config
@@ -106,7 +107,15 @@ def perform_backup() -> Tuple[bool, str, float]:
         return False, str(e), 0.0
 
 
-def trigger_manual_backup_async() -> None:
+# 手動バックアップの実行状態(ダッシュボードのシステムページが画面上で結果を出すために参照する)。
+# 単一プロセス前提(CLAUDE.md「並行制御」)のため、プロセス内のロックで十分。
+# 再起動すると消えるが、「最新のバックアップ時刻」は NAS 上のファイルから求める
+# (`get_latest_backup_info`)ので、結果を完全に失うことはない。
+_manual_state_lock = threading.Lock()
+_manual_state: dict = {"running": False, "run_id": 0, "last_result": None}
+
+
+def trigger_manual_backup_async() -> bool:
     """手動バックアップをバックグラウンドスレッドで実行し、完了をDiscordへ通知する。
 
     **(不具合修正)** ダッシュボードの「今すぐバックアップ」ボタンは、以前
@@ -118,17 +127,89 @@ def trigger_manual_backup_async() -> None:
     見ていなくても分かるようにする。失敗時は`perform_backup`内部の
     `_notify_and_log_error`が既にDiscordのerrorチャンネルへ通知済みのため、ここでは
     重ねて通知しない。
+
+    **(UI改善)** 画面側でも結果が分かるよう、実行中/直近の結果を`get_manual_backup_state`
+    で参照できるようにした。実行中にもう一度呼ばれた場合は二重に起動せず`False`を返す
+    (起動したときは`True`)。
     """
+    with _manual_state_lock:
+        if _manual_state["running"]:
+            return False
+        _manual_state["running"] = True
+        _manual_state["run_id"] += 1
+        run_id = _manual_state["run_id"]
+
     def _run() -> None:
-        success, msg, size_mb = perform_backup()
-        if success:
-            send_push(
-                messages=[{"type": "text", "text": f"✅ 手動バックアップ完了\n{msg} ({size_mb:.1f}MB)"}],
-                target="discord",
-                channel="report",
-            )
+        success, msg, size_mb = False, "予期しないエラーが発生しました", 0.0
+        try:
+            success, msg, size_mb = perform_backup()
+            if success:
+                send_push(
+                    messages=[{"type": "text", "text": f"✅ 手動バックアップ完了\n{msg} ({size_mb:.1f}MB)"}],
+                    target="discord",
+                    channel="report",
+                )
+        except Exception as e:  # noqa: BLE001 (スレッド内の例外を握りつぶさず、画面に失敗として返す)
+            logger.error(f"❌ 手動バックアップで予期しない例外: {e}")
+            success, msg = False, str(e)
+        finally:
+            with _manual_state_lock:
+                _manual_state["running"] = False
+                _manual_state["last_result"] = {
+                    "run_id": run_id,
+                    "success": success,
+                    "message": msg,
+                    "size_mb": round(size_mb, 1),
+                    "finished_at": get_now_jst().isoformat(timespec="seconds"),
+                }
 
     threading.Thread(target=_run, daemon=True).start()
+    return True
+
+
+def get_manual_backup_state() -> dict:
+    """手動バックアップの実行状態(`running`)・最後に起動した実行のID(`run_id`)・
+    直近の結果(`last_result`、未実行ならNone。`last_result["run_id"]`で起動と突き合わせる)。"""
+    with _manual_state_lock:
+        last = _manual_state["last_result"]
+        return {
+            "running": _manual_state["running"],
+            "run_id": _manual_state["run_id"],
+            "last_result": dict(last) if last else None,
+        }
+
+
+def get_latest_backup_info() -> dict | None:
+    """NAS上の最新のDBバックアップ(`home_system_<timestamp>.db`)の時刻とサイズを返す。
+
+    バックアップ先は`perform_backup`が書き込む場所(`NAS_PROJECT_ROOT/db_backups`)と同じ。
+    `shutil.copy2`が更新時刻を保つため、ファイルの更新時刻を作成時刻として使う
+    (`db_retention_service.recent_backup`と同じ判定)。見つからない・読めない場合はNone。
+    """
+    nas_root = getattr(config, "NAS_PROJECT_ROOT", os.path.join(config.NAS_MOUNT_POINT, "home_system"))
+    backup_dir = os.path.join(nas_root, "db_backups")
+    newest: tuple[float, str, int] | None = None
+    try:
+        names = os.listdir(backup_dir)
+    except OSError:
+        return None
+    for name in names:
+        if not (name.startswith("home_system_") and name.endswith(".db")):
+            continue
+        try:
+            st = os.stat(os.path.join(backup_dir, name))
+        except OSError:
+            continue
+        if newest is None or st.st_mtime > newest[0]:
+            newest = (st.st_mtime, name, st.st_size)
+    if newest is None:
+        return None
+    mtime, name, size = newest
+    return {
+        "filename": name,
+        "created_at": datetime.datetime.fromtimestamp(mtime, tz=get_now_jst().tzinfo).isoformat(timespec="seconds"),
+        "size_mb": round(size / (1024 * 1024), 1),
+    }
 
 # === 設定ファイルのバックアップ時の伏せ字処理 (Issue #829) ===
 # `devices.json` はカメラの `user` / `pass` を平文で持ち、`rtsp_url` にも

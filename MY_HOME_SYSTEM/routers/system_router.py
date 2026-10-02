@@ -21,8 +21,28 @@ def manual_backup() -> Dict[str, Any]:
     バックグラウンド実行に切り替え、開始した旨を即座に返す。完了(成功/失敗)は
     Discordへの通知で確認できる。
     """
-    backup_service.trigger_manual_backup_async()
-    return {"status": "started", "message": "バックアップを開始しました。完了するとDiscordに通知します。"}
+    started = backup_service.trigger_manual_backup_async()
+    run_id = backup_service.get_manual_backup_state()["run_id"]
+    if not started:
+        return {"status": "running", "run_id": run_id, "message": "バックアップは既に実行中です。"}
+    return {"status": "started", "run_id": run_id,
+            "message": "バックアップを開始しました。完了するとDiscordに通知します。"}
+
+
+@router.get("/backup/status")
+def backup_status() -> dict[str, Any]:
+    """システムページが「実行中か」「結果」「最新のバックアップ時刻」を表示するために参照する。
+
+    `latest_backup`はNAS上のファイルを列挙するため、manual_backupと同じ理由で
+    `async def`にしない(NASが遅いときにイベントループを止めない)。
+    """
+    state = backup_service.get_manual_backup_state()
+    return {
+        "running": state["running"],
+        "run_id": state["run_id"],
+        "last_result": state["last_result"],
+        "latest_backup": backup_service.get_latest_backup_info(),
+    }
 
 
 @router.post("/restart")
