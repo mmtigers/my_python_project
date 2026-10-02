@@ -98,7 +98,7 @@ CLEANUP_TARGETS=(
   "unified_server.py"
   "camera_monitor.py"
   "scheduler_boot.py"
-  "python.*monitors/(switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor|routine_deadline_job)\.py"
+  "python.*monitors/(switchbot_power_monitor|nature_remo_monitor|switchbot_hub_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor|routine_deadline_job)\.py"
   "ffmpeg.*hls_streams"
 )
 

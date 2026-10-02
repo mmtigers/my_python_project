@@ -22,6 +22,14 @@
         "power_threshold_watts": 5.0,
         "notify_mode": "LOG_ONLY"
       }
+    },
+    {
+      "id": "SWITCHBOT_HUB_DEVICE_ID",
+      "type": "Hub Mini",
+      "location": "拠点名",
+      "name": "ハブミニ",
+      "ip": "192.168.1.YYY",
+      "notify_settings": {}
     }
   ]
 }

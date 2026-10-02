@@ -39,6 +39,8 @@ TASKS: List[Task] = [
     # 頻度: 高 (5分〜10分)
     {"script": "monitors/switchbot_power_monitor.py", "interval": 300,  "last_run": 0, "args": []},
     {"script": "monitors/nature_remo_monitor.py",     "interval": 300,  "last_run": 0, "args": []},
+    # SwitchBotハブ(devices.json で ip を設定したもの)の ping 死活監視。連続失敗でLINE通知。
+    {"script": "monitors/switchbot_hub_monitor.py",   "interval": 300,  "last_run": 0, "args": []},
     {"script": "monitors/server_watchdog.py",         "interval": 600,  "last_run": 0, "args": []},
 
     # 頻度: 中 (5分) — #411 品質: 実値(interval=300秒=5分)と乖離していた「30分」表記を訂正

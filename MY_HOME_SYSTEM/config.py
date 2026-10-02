@@ -195,6 +195,11 @@ class DeviceConfig(BaseModel):
     type: str
     location: str
     name: str
+    # SwitchBotハブ(type に "Hub" を含むもの)の死活監視(monitors/switchbot_hub_monitor.py)が
+    # ping する先のIPアドレス。未設定のデバイスは ping 監視の対象外(ラズパイと別LANのハブ等)。
+    # ここでは形式を検証しない: 不正値で ValidationError にすると devices.json 全体
+    # (カメラ・全デバイス)の読み込みが失敗するため、監視スクリプト側で個別に弾く。
+    ip: Optional[str] = None
     notify_settings: NotifySettings = Field(default_factory=NotifySettings)
 
 # ==========================================
