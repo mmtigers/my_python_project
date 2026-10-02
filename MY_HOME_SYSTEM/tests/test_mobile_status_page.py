@@ -40,6 +40,18 @@ def _clear_status_cache():
     home_status_service.clear_status_cache()
 
 
+# 外部リンクの稼働チェック(あさノートへの実HTTP・実DBアクセス)の本物。個別のテストで使う。
+_REAL_CHECK_QUEST = home_status_service.check_quest_app_health
+_REAL_CHECK_ASA_NOTE = home_status_service.check_asa_note_health
+
+
+@pytest.fixture(autouse=True)
+def _stub_link_health_checks(monkeypatch):
+    """ホームを開くテストが実際に外部(あさノート)へHTTP接続しないよう、既定で「正常」に差し替える。"""
+    monkeypatch.setattr(home_status_service, "check_quest_app_health", lambda: True)
+    monkeypatch.setattr(home_status_service, "check_asa_note_health", lambda url: True)
+
+
 def _client() -> TestClient:
     app = FastAPI()
     app.include_router(dashboard_router.router)
@@ -729,3 +741,119 @@ class TestCardColoursSurviveLinking:
     def test_the_link_has_no_underline(self):
         """下線が付くと、テーマ色で示している状態が読み取りにくくなる。"""
         assert "text-decoration: none" in home_status_service.STATUS_CARD_CSS
+
+
+class TestExternalLinkHealth:
+    """ホームの「ファミクエ」「あさノート」ボタンの稼働状況による色分け(緑=稼働中・赤=停止中)。"""
+
+    def _home(self, path=""):
+        patches = _stub_loaders()
+        for p in patches:
+            p.start()
+        try:
+            with _client() as client:
+                return client.get(f"{config.DASHBOARD_BASE_PATH}{path}")
+        finally:
+            for p in patches:
+                p.stop()
+
+    def test_healthy_links_are_green_with_label(self):
+        res = self._home("/")
+        assert res.text.count("external-card external-up") == 2
+        assert "external-down" not in res.text.split("</style>", 1)[1]
+        assert "● 稼働中" in res.text
+
+    def test_down_app_is_red_and_other_stays_green(self, monkeypatch):
+        monkeypatch.setattr(home_status_service, "check_asa_note_health", lambda url: False)
+        res = self._home("/")
+        body = res.text.split("</style>", 1)[1]
+        asa = body.split("あさノート", 1)[0].rsplit("<a ", 1)[1]
+        quest = body.split("ファミクエ", 1)[0].rsplit("<a ", 1)[1]
+        assert "external-down" in asa
+        assert "external-up" in quest
+        assert "● 停止中" in res.text
+
+    def test_down_link_is_still_tappable(self, monkeypatch):
+        monkeypatch.setattr(home_status_service, "check_quest_app_health", lambda: False)
+        res = self._home("/")
+        assert 'class="external-card external-down" href="/quest"' in res.text
+
+    def test_status_fragment_keeps_links_so_color_refreshes(self, monkeypatch):
+        """自動更新はこのフラグメントで範囲ごと差し替わる。リンクが入っていないと更新で消える。"""
+        monkeypatch.setattr(home_status_service, "check_asa_note_health", lambda url: False)
+        res = self._home("/status")
+        assert "よく使うリンク" in res.text
+        assert "external-down" in res.text
+        assert 'href="/quest"' in res.text
+
+    def test_links_are_inside_the_refreshed_section(self):
+        res = self._home("/")
+        section = res.text.split(f'id="{home_status_service.STATUS_SECTION_ID}"', 1)[1].split("メニュー", 1)[0]
+        assert "ファミクエ" in section and "あさノート" in section
+
+    def test_render_without_health_keeps_plain_style(self):
+        html = dashboard_page_service._render_external_links("/quest", "https://x.example/", None)
+        assert "external-up" not in html and "external-down" not in html
+        assert "稼働中" not in html and "停止中" not in html
+
+    def test_health_is_cached_between_requests(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(home_status_service, "check_asa_note_health", lambda url: calls.append(url) or True)
+        home_status_service.collect_link_health("https://x.example/")
+        home_status_service.collect_link_health("https://x.example/")
+        assert calls == ["https://x.example/"]
+
+
+class TestCheckQuestAppHealth:
+    def _dist(self, tmp_path, monkeypatch, with_index=True):
+        if with_index:
+            (tmp_path / "index.html").write_text("<html></html>")
+        monkeypatch.setattr(config, "QUEST_DIST_DIR", str(tmp_path))
+
+    def test_ok_when_index_exists_and_db_readable(self, tmp_path, monkeypatch, isolated_db):
+        self._dist(tmp_path, monkeypatch)
+        assert _REAL_CHECK_QUEST() is True
+
+    def test_down_when_index_html_missing(self, tmp_path, monkeypatch, isolated_db):
+        self._dist(tmp_path, monkeypatch, with_index=False)
+        assert _REAL_CHECK_QUEST() is False
+
+    def test_down_when_db_unreachable(self, tmp_path, monkeypatch, isolated_db):
+        self._dist(tmp_path, monkeypatch)
+        monkeypatch.setattr(config, "SQLITE_DB_PATH", str(tmp_path / "missing" / "no.db"))
+        assert _REAL_CHECK_QUEST() is False
+
+
+class TestCheckAsaNoteHealth:
+    class _Resp:
+        def __init__(self, status):
+            self.status_code = status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    @pytest.mark.parametrize("status,expected", [(200, True), (302, True), (404, False), (503, False)])
+    def test_status_codes(self, monkeypatch, status, expected):
+        monkeypatch.setattr(home_status_service.requests, "get", lambda url, **kw: self._Resp(status))
+        assert _REAL_CHECK_ASA_NOTE("https://x.example/") is expected
+
+    def test_connection_error_is_down(self, monkeypatch):
+        def boom(url, **kw):
+            raise home_status_service.requests.exceptions.ConnectionError("no route")
+
+        monkeypatch.setattr(home_status_service.requests, "get", boom)
+        assert _REAL_CHECK_ASA_NOTE("https://x.example/") is False
+
+    def test_uses_short_timeout(self, monkeypatch):
+        seen = {}
+
+        def fake_get(url, **kw):
+            seen.update(kw)
+            return self._Resp(200)
+
+        monkeypatch.setattr(home_status_service.requests, "get", fake_get)
+        _REAL_CHECK_ASA_NOTE("https://x.example/")
+        assert seen["timeout"] == home_status_service.ASA_NOTE_HEALTH_TIMEOUT_SEC

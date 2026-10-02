@@ -91,6 +91,10 @@ _PAGE_BASE_CSS = """
         background: #e0f2f1; color: #00695c; border: 1px solid #80cbc4;
         -webkit-tap-highlight-color: rgba(0,0,0,0.08);
     }
+    /* 稼働状況による色分け(正常=緑、異常=赤)。色だけに頼らず文字(.link-state)も添える。 */
+    a.external-card.external-up { background: #e8f5e9; color: #2e7d32; border-color: #a5d6a7; }
+    a.external-card.external-down { background: #ffebee; color: #c62828; border-color: #ef9a9a; }
+    .link-state { font-size: 0.75rem; font-weight: normal; margin-left: 4px; }
 
     /* 見守りページの簡易テーブル(防犯ログ・実家センサーログ)。
        スマホでは横スクロールさせず、列を絞って縦に収める。 */
@@ -210,6 +214,8 @@ _PAGE_BASE_CSS = """
         nav.top-nav a, a.back-link { background: #16304a; color: #90caf9; border-color: #24507a; }
         a.nav-card { background: #23264a; color: #c5cae9; border-color: #34386b; }
         a.external-card { background: #0d2b28; color: #4db6ac; border-color: #14413c; }
+        a.external-card.external-up { background: #12301a; color: #81c784; border-color: #1f5130; }
+        a.external-card.external-down { background: #3b1518; color: #ef9a9a; border-color: #6b2429; }
         table.simple-table th { color: #9e9e9e; }
         table.simple-table th, table.simple-table td { border-color: #333; }
         .snapshot-caption { color: #9e9e9e; }
@@ -258,6 +264,31 @@ _NAV_CARDS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+def _render_external_link(href: str, label: str, healthy: bool | None) -> str:
+    """外部リンクカード1枚。`healthy`が True なら緑・「稼働中」、False なら赤・「停止中」、
+    None(未判定)なら従来のティールで状態表示なし。タップで遷移できる点は状態に関わらず同じ。"""
+    if healthy is None:
+        css, state = "external-card", ""
+    elif healthy:
+        css, state = "external-card external-up", '<span class="link-state">● 稼働中</span>'
+    else:
+        css, state = "external-card external-down", '<span class="link-state">● 停止中</span>'
+    return f'<a class="{css}" href="{html.escape(href)}"><span>{label}{state}</span><span>›</span></a>'
+
+
+def _render_external_links(quest_path: str, asa_note_url: str, link_health: dict[str, bool] | None) -> str:
+    """「よく使うリンク」(ファミクエ・あさノート)。`link_health`は
+    `home_status_service.collect_link_health`の戻り値(キー`quest`/`asa_note`)。"""
+    health = link_health or {}
+    return (
+        "<h2>よく使うリンク</h2>"
+        '<div class="link-grid">'
+        f'{_render_external_link(quest_path, "⚔️ ファミクエ", health.get("quest"))}'
+        f'{_render_external_link(asa_note_url, "📝 あさノート", health.get("asa_note"))}'
+        "</div>"
+    )
+
+
 def render_home_page(
     cards,
     fetched_at: datetime,
@@ -269,6 +300,7 @@ def render_home_page(
     refresh_sec: int,
     manifest_path: str | None = None,
     icon_path: str | None = None,
+    link_health: dict[str, bool] | None = None,
 ) -> str:
     """ホームページ: ステータスカード + 外部リンク + 各ページへのナビ。
 
@@ -277,21 +309,20 @@ def render_home_page(
     「色で気づきにくい」の両方の原因になっていた。ステータスカードのすぐ下・
     ナビカードより前に上げ、警告色と被らない配色(`.external-card`)にすることで
     両方を解消する。
+
+    **(新機能)** `link_health`を渡すと、外部リンクを稼働状況で色分けする(緑=稼働中・
+    赤=停止中)。リンクは自動更新の対象(`STATUS_SECTION_ID`の内側)に入れてあり、
+    色もカードと同じ周期で更新される。
     """
     nav_html = "".join(
         f'<a class="nav-card" href="{dashboard_path.rstrip("/")}/{key}">'
         f"{html.escape(label)}<span class=\"nav-card-sub\">{html.escape(sub)}</span></a>"
         for key, label, sub in _NAV_CARDS
     )
-    links_html = (
-        f'<a class="external-card" href="{html.escape(quest_path)}">⚔️ ファミクエ <span>›</span></a>'
-        f'<a class="external-card" href="{html.escape(asa_note_url)}">📝 あさノート <span>›</span></a>'
-    )
+    links_html = _render_external_links(quest_path, asa_note_url, link_health)
     body = (
         "<h1>🏠 おうちの様子</h1>"
-        f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec)}'
-        '<h2>よく使うリンク</h2>'
-        f'<div class="link-grid">{links_html}</div>'
+        f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html)}'
         '<h2>メニュー</h2>'
         f'<div class="link-grid">{nav_html}</div>'
     )
@@ -320,19 +351,42 @@ def _home_screen_install_head(manifest_path: str, icon_path: str) -> str:
 STATUS_SECTION_ID = home_status_service.STATUS_SECTION_ID
 
 
-def _render_status_section(cards, fetched_at: datetime, *, dashboard_path: str, refresh_sec: int) -> str:
+def _render_status_section(
+    cards, fetched_at: datetime, *, dashboard_path: str, refresh_sec: int, extra_html: str = ""
+) -> str:
     return (
         f'<div id="{STATUS_SECTION_ID}">'
         f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
         f"・{int(refresh_sec)}秒ごとに自動更新</p>"
         f"{home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path)}"
+        f"{extra_html}"
         "</div>"
     )
 
 
-def render_home_status_section(cards, fetched_at: datetime, *, dashboard_path: str, refresh_sec: int) -> str:
-    """ホームページの自動更新用フラグメント(カードのブロックだけ)。"""
-    return _render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec)
+def render_home_status_section(
+    cards,
+    fetched_at: datetime,
+    *,
+    dashboard_path: str,
+    refresh_sec: int,
+    quest_path: str | None = None,
+    asa_note_url: str | None = None,
+    link_health: dict[str, bool] | None = None,
+) -> str:
+    """ホームページの自動更新用フラグメント(カードと、外部リンクのブロック)。
+
+    `quest_path`/`asa_note_url`を渡したときだけ外部リンクを含める(ホームページ本体が
+    リンクを自動更新の範囲の中に持つため、差し替え後もリンクが消えないようにする)。
+    """
+    links_html = (
+        _render_external_links(quest_path, asa_note_url, link_health)
+        if quest_path is not None and asa_note_url is not None
+        else ""
+    )
+    return _render_status_section(
+        cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html
+    )
 
 
 def _status_refresh_script(status_path: str, refresh_sec: int) -> str:
