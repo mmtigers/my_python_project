@@ -99,6 +99,15 @@ _PAGE_BASE_CSS = """
         text-align: left; padding: 6px 4px; border-bottom: 1px solid #eee;
     }
     table.simple-table th { color: #666; font-weight: bold; font-size: 0.75rem; }
+    /* システムページのバックアップ完了/失敗トースト(画面下部に数秒だけ出る) */
+    .dashboard-toast {
+        position: fixed; left: 16px; right: 16px; bottom: 24px; z-index: 1000;
+        padding: 14px 16px; border-radius: 12px; font-weight: bold; font-size: 0.95rem;
+        color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.25); transition: opacity 0.5s;
+    }
+    .dashboard-toast.ok { background: #2e7d32; }
+    .dashboard-toast.ng { background: #c62828; }
+    .dashboard-toast.hide { opacity: 0; }
     .empty-note { color: #888; font-size: 0.85rem; margin: 4px 0 16px; }
 
     /* カメラのスナップショットギャラリー。タップで元画像を別タブに拡大表示する
@@ -478,6 +487,38 @@ def _render_collapsible_log_table(
     return f"{head_html}<details><summary>さらに{len(rest_df)}件を表示</summary>{rest_html}</details>"
 
 
+def sensor_state_change_log(df: pd.DataFrame) -> pd.DataFrame:
+    """センサーログを「開閉/動体センサーの状態が変わった行」だけに絞る(新しい順で返す)。
+
+    **(UI改善)** 見守りページのセンサーログは`location`だけで絞っていたため、温湿度計
+    (Meter)や電力プラグ(炊飯器など)が5分おきに残す定期記録も並び、開閉・動体の
+    重要なログが埋もれていた。
+
+    - `contact_state`/`movement_state`のどちらも持たない行(温湿度・電力の定期記録)は除く。
+    - 残った行も、同じ機器(`device_id`。無ければ`friendly_name`)で直前の行と状態が同じなら除く(最初の行は残す)。
+      取得範囲(`load_sensor_data`のlimit)の外にある過去の状態は分からないため、範囲内で
+      最も古い行は常に「変化」として残る。
+    """
+    state_cols = [c for c in ("contact_state", "movement_state") if c in df.columns]
+    if df.empty or not state_cols or "timestamp" not in df.columns:
+        return df.iloc[0:0]
+
+    states = df[state_cols].apply(lambda col: col.fillna("").astype(str).str.strip())
+    kept = df[(states != "").any(axis=1)]
+    if kept.empty:
+        return kept
+    ordered = kept.sort_values("timestamp", kind="stable")
+    # 機器の識別は`device_id`(無ければ`friendly_name`)。どちらも無ければ機器を区別できないため
+    # 状態の絞り込みだけを行い、重複の除去はしない。
+    device_col = next((c for c in ("device_id", "friendly_name") if c in ordered.columns), None)
+    if device_col is None:
+        return ordered.sort_values("timestamp", ascending=False, kind="stable")
+    key = states.loc[ordered.index].agg("|".join, axis=1)
+    previous = key.groupby(ordered[device_col]).shift()
+    changed = previous.isna() | (previous != key)
+    return ordered[changed].sort_values("timestamp", ascending=False, kind="stable")
+
+
 def _render_camera_selector(cameras: list[dict[str, Any]]) -> str:
     if not cameras:
         return '<p class="empty-note">カメラが登録されていません</p>'
@@ -568,6 +609,10 @@ def render_watch_page(
     `_render_simple_table`で最大50行を常に縦に並べており、スクロールが大変だった。
     `_render_collapsible_log_table`で先頭5件だけを常時表示し、残りは`<details>`で
     折りたたむ。
+
+    **(UI改善)** 高砂・伊丹のセンサーログは`sensor_state_change_log`で、開閉/動体
+    センサーの「状態が変わった行」だけに絞る(温湿度計・電力プラグの5分おきの記録は
+    ここには出さない。値の確認は各カード/システムページ側にある)。
     """
     cameras = [
         {"id": cam["id"], "name": cam["name"]}
@@ -576,8 +621,8 @@ def render_watch_page(
     ]
     df_camera_motion = home_status_service.camera_motion_log(df_sensor)
     if not df_sensor.empty and "location" in df_sensor.columns:
-        df_takasago = df_sensor[df_sensor["location"] == "高砂"]
-        df_itami = df_sensor[df_sensor["location"] == "伊丹"]
+        df_takasago = sensor_state_change_log(df_sensor[df_sensor["location"] == "高砂"])
+        df_itami = sensor_state_change_log(df_sensor[df_sensor["location"] == "伊丹"])
     else:
         df_takasago = df_sensor.iloc[0:0]
         df_itami = df_sensor.iloc[0:0]
@@ -796,6 +841,11 @@ def render_sys_page(
     **(不具合修正)** 各セクションを`.info-box`で視覚的にグループ化してシステムページを
     見やすくした。NASカード(`id="nas-history"`)のタップ先として、NASの容量推移
     グラフ(`nas_history`)を追加した。
+
+    **(UI改善)** 「今すぐバックアップ」は、実行中のスピナー表示・完了/失敗のトースト・
+    最新のバックアップ時刻の表示を持つ(`GET /api/system/backup/status`をJSから参照)。
+    最新時刻はNASのファイル列挙が必要なため、ページ描画には含めずJSで非同期に取得する
+    (NASが遅くてもシステムページ自体は開ける)。
     """
     rows = build_freshness_rows(df_sensor, nas_data, memory, now)
 
@@ -828,8 +878,10 @@ def render_sys_page(
         "</div>"
         '<div class="maintenance-box">'
         "<p>データベースを今すぐバックアップします。</p>"
-        '<button type="button" class="primary" onclick="dashboardBackup()">📦 今すぐバックアップ</button>'
-        '<div id="backupResult" class="maintenance-result"></div>'
+        '<p class="meta" id="backupLatest">最新のバックアップ: 確認中...</p>'
+        '<button type="button" class="primary" id="backupBtn" onclick="dashboardBackup()">'
+        "📦 今すぐバックアップ</button>"
+        '<div id="backupResult" class="maintenance-result" role="status" aria-live="polite"></div>'
         "</div>"
     )
     return _page_shell("システム - おうちの様子", body, extra_head=_MAINTENANCE_SCRIPT)
@@ -854,6 +906,80 @@ function dashboardPost(url, resultId, busyText) {
         });
 }
 function dashboardRestart() { dashboardPost("/api/system/restart", "restartResult", "再起動コマンドを送信しています..."); }
-function dashboardBackup() { dashboardPost("/api/system/backup", "backupResult", "バックアップ中..."); }
+
+var backupPollTimer = null;
+function dashboardToast(text, ok) {
+    var el = document.createElement("div");
+    el.className = "dashboard-toast " + (ok ? "ok" : "ng");
+    el.setAttribute("role", "alert");
+    el.textContent = text;
+    document.body.appendChild(el);
+    setTimeout(function () { el.classList.add("hide"); }, 5000);
+    setTimeout(function () { if (el.parentNode) { el.parentNode.removeChild(el); } }, 5600);
+}
+function backupFormatTime(iso) {
+    var m = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/.exec(iso || "");
+    return m ? (m[2] + "/" + m[3] + " " + m[4] + ":" + m[5]) : "";
+}
+function backupSetBusy(busy) {
+    var btn = document.getElementById("backupBtn");
+    btn.disabled = busy;
+    btn.textContent = busy ? "⏳ バックアップ中..." : "📦 今すぐバックアップ";
+}
+function backupShowLatest(info) {
+    var box = document.getElementById("backupLatest");
+    if (!info) { box.textContent = "最新のバックアップ: 見つかりません"; return; }
+    box.textContent = "最新のバックアップ: " + backupFormatTime(info.created_at) + " (" + info.size_mb + "MB)";
+}
+function backupFetchStatus() {
+    return fetch("/api/system/backup/status", { credentials: "same-origin" })
+        .then(function (res) { if (!res.ok) { throw new Error("HTTP " + res.status); } return res.json(); });
+}
+function backupPoll(runId) {
+    backupFetchStatus().then(function (st) {
+        backupShowLatest(st.latest_backup);
+        if (st.running) { backupPollTimer = setTimeout(function () { backupPoll(runId); }, 2000); return; }
+        backupSetBusy(false);
+        var box = document.getElementById("backupResult");
+        var last = st.last_result;
+        if (last && (runId === null || last.run_id === runId)) {
+            var ok = last.success;
+            var text = ok ? "✅ バックアップが完了しました (" + last.size_mb + "MB)" : "❌ バックアップに失敗しました: " + last.message;
+            box.textContent = text;
+            dashboardToast(text, ok);
+        } else {
+            box.textContent = "";
+        }
+    }).catch(function (e) {
+        // 一時的な通信エラーでは諦めず、少し待って再確認する(結果はサーバー側に残る)。
+        backupPollTimer = setTimeout(function () { backupPoll(runId); }, 4000);
+    });
+}
+function dashboardBackup() {
+    var box = document.getElementById("backupResult");
+    backupSetBusy(true);
+    box.textContent = "バックアップを開始しています...";
+    fetch("/api/system/backup", { method: "POST", credentials: "same-origin" })
+        .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+        .then(function (r) {
+            if (!r.ok) { throw new Error(r.data.detail || "開始できませんでした"); }
+            box.textContent = "バックアップ中です。完了までお待ちください...";
+            backupPoll(r.data.run_id);
+        })
+        .catch(function (e) {
+            backupSetBusy(false);
+            box.textContent = "❌ " + e.message;
+            dashboardToast("❌ バックアップを開始できませんでした: " + e.message, false);
+        });
+}
+document.addEventListener("DOMContentLoaded", function () {
+    // ページを開いた時点で実行中なら、スピナー表示に戻して結果を待つ。
+    backupFetchStatus().then(function (st) {
+        backupShowLatest(st.latest_backup);
+        if (st.running) { backupSetBusy(true); backupPoll(null); }
+    }).catch(function () {
+        document.getElementById("backupLatest").textContent = "最新のバックアップ: 取得できませんでした";
+    });
+});
 </script>
 """

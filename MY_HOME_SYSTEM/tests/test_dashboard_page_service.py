@@ -451,3 +451,65 @@ class TestRenderNasHistoryChart:
         assert "<details>" in html
         assert "詳細データを見る" in html
         assert "<table" in html
+
+
+class TestSensorStateChangeLog:
+    """見守りページのセンサーログを「開閉/動体の状態変化」だけに絞る(ノイズ軽減)。"""
+
+    @staticmethod
+    def _df(rows):
+        return pd.DataFrame(
+            rows, columns=["timestamp", "device_id", "contact_state", "movement_state"]
+        )
+
+    def test_drops_meter_and_power_rows_without_contact_or_movement_state(self):
+        df = self._df([
+            (_jst(2026, 10, 2, 10, 5), "meter", None, None),
+            (_jst(2026, 10, 2, 10, 0), "door", "open", None),
+            (_jst(2026, 10, 2, 9, 55), "plug", None, None),
+        ])
+        out = dashboard_page_service.sensor_state_change_log(df)
+        assert list(out["device_id"]) == ["door"]
+
+    def test_collapses_consecutive_identical_states_per_device(self):
+        df = self._df([
+            (_jst(2026, 10, 2, 10, 20), "door", "closed", None),
+            (_jst(2026, 10, 2, 10, 15), "door", "open", None),
+            (_jst(2026, 10, 2, 10, 10), "door", "open", None),
+            (_jst(2026, 10, 2, 10, 5), "door", "open", None),
+        ])
+        out = dashboard_page_service.sensor_state_change_log(df)
+        # 最初のopen(10:05)と、open->closedの変化(10:20)だけが残り、新しい順に並ぶ
+        assert list(out["timestamp"]) == [_jst(2026, 10, 2, 10, 20), _jst(2026, 10, 2, 10, 5)]
+
+    def test_devices_are_compared_independently(self):
+        df = self._df([
+            (_jst(2026, 10, 2, 10, 10), "a", "open", None),
+            (_jst(2026, 10, 2, 10, 5), "b", "open", None),
+        ])
+        out = dashboard_page_service.sensor_state_change_log(df)
+        assert set(out["device_id"]) == {"a", "b"}
+
+    def test_empty_or_missing_columns_returns_empty(self):
+        assert dashboard_page_service.sensor_state_change_log(pd.DataFrame()).empty
+        assert dashboard_page_service.sensor_state_change_log(
+            pd.DataFrame({"timestamp": [1], "device_id": ["x"]})
+        ).empty
+        # device_id/friendly_nameが無くても状態のある行は残る(重複除去だけ行わない)
+        no_device = pd.DataFrame({"timestamp": [2, 1], "contact_state": ["open", "open"]})
+        assert len(dashboard_page_service.sensor_state_change_log(no_device)) == 2
+
+    def test_watch_page_hides_periodic_meter_rows(self):
+        df = pd.DataFrame({
+            "timestamp": [_jst(2026, 10, 2, 10, 5), _jst(2026, 10, 2, 10, 0)],
+            "device_id": ["meter", "door"],
+            "friendly_name": ["洗面所温湿度計", "玄関ドア"],
+            "location": ["高砂", "高砂"],
+            "contact_state": [None, "open"],
+            "movement_state": [None, None],
+        })
+        html = dashboard_page_service.render_watch_page(
+            df, dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot"
+        )
+        assert "玄関ドア" in html
+        assert "洗面所温湿度計" not in html

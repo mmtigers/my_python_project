@@ -28,13 +28,14 @@ from routers import system_router
 
 def test_backup_returns_200_and_starts_the_background_backup(api_client, monkeypatch):
     calls = []
-    monkeypatch.setattr(system_router.backup_service, "trigger_manual_backup_async", lambda: calls.append(1))
+    monkeypatch.setattr(system_router.backup_service, "trigger_manual_backup_async", lambda: calls.append(1) or True)
 
     res = api_client.post("/api/system/backup")
 
     assert res.status_code == 200
     body = res.json()
     assert body["status"] == "started"
+    assert "run_id" in body
     assert len(calls) == 1
 
 
@@ -45,7 +46,7 @@ def test_backup_endpoint_currently_requires_no_authentication(api_client, monkey
     現状の挙動を明示的に固定して回帰検知するためのテスト。
     """
     calls = []
-    monkeypatch.setattr(system_router.backup_service, "trigger_manual_backup_async", lambda: calls.append(1))
+    monkeypatch.setattr(system_router.backup_service, "trigger_manual_backup_async", lambda: calls.append(1) or True)
     res = api_client.post("/api/system/backup")
     assert res.status_code == 200
     assert len(calls) == 1
@@ -73,3 +74,29 @@ def test_restart_failure_returns_500_with_message(api_client, monkeypatch):
     res = api_client.post("/api/system/restart")
     assert res.status_code == 500
     assert res.json()["detail"] == "エラー: [Errno 2] No such file or directory: 'sudo'"
+
+
+def test_backup_while_running_does_not_start_a_second_one(api_client, monkeypatch):
+    monkeypatch.setattr(system_router.backup_service, "trigger_manual_backup_async", lambda: False)
+    res = api_client.post("/api/system/backup")
+    assert res.status_code == 200
+    assert res.json()["status"] == "running"
+
+
+def test_backup_status_reports_state_and_latest_backup(api_client, monkeypatch):
+    monkeypatch.setattr(
+        system_router.backup_service, "get_manual_backup_state",
+        lambda: {"running": False, "run_id": 3,
+                 "last_result": {"run_id": 3, "success": True, "message": "ok", "size_mb": 1.5,
+                                 "finished_at": "2026-10-02T04:00:00"}},
+    )
+    monkeypatch.setattr(
+        system_router.backup_service, "get_latest_backup_info",
+        lambda: {"filename": "home_system_20261002_040000.db",
+                 "created_at": "2026-10-02T04:00:00", "size_mb": 1.5},
+    )
+    body = api_client.get("/api/system/backup/status").json()
+    assert body["running"] is False
+    assert body["run_id"] == 3
+    assert body["last_result"]["success"] is True
+    assert body["latest_backup"]["created_at"] == "2026-10-02T04:00:00"

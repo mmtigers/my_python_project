@@ -92,12 +92,14 @@
 
 ### `trigger_manual_backup_async`
 
+> **(UI改善)** 実行状態をプロセス内(`_manual_state`、`threading.Lock`保護)に保持するようになった。実行中に再度呼ぶと二重起動せず`False`を返し(起動時は`True`)、起動ごとに`run_id`を採番し、完了時(例外時も)に`last_result`(`run_id`/`success`/`message`/`size_mb`/`finished_at`)を記録する。参照用に`get_manual_backup_state()`(`running`/`run_id`/`last_result`)と、NAS上の最新`home_system_*.db`の更新時刻・サイズを返す`get_latest_backup_info()`(無ければNone)を追加した。システムページのスピナー・トースト・最新時刻表示が使う。
+
 * **役割**: **（不具合修正で新設）** ダッシュボードの「今すぐバックアップ」ボタンから呼ばれる`perform_backup()`をバックグラウンドスレッドで実行し、成功時はDiscordへ完了通知(`channel="report"`)を送る。以前は`perform_backup()`の完了(NAS転送・設定次第で`_copy_latest_offsite`のrclone転送、最大`OFFSITE_TIMEOUT_SEC`=1800秒を含みうる)をAPIレスポンスとして待たせており、完了前にブラウザがバックグラウンド化・通信断になると結果を受け取れず「タップしても完了したか分からない」原因になっていた。
-* 根拠: `def trigger_manual_backup_async() -> None:` (行番号: 109〜131 / 抜粋: "def trigger_manual_backup_async() -> None:")
+* 根拠: `def trigger_manual_backup_async() -> None:` (行番号: 117〜166 / 抜粋: "def trigger_manual_backup_async() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def trigger_manual_backup_async() -> None:` (行番号: 109)
+* 根拠: `def trigger_manual_backup_async() -> None:` (行番号: 117)
 
 
 * **戻り値/レスポンス**: `None`(呼び出し元へは即座に戻る。バックグラウンドスレッドの完了は待たない)
@@ -105,17 +107,17 @@
 
 
 * **副作用**: `threading.Thread(daemon=True)`を起動し、そのスレッド内で`perform_backup()`を実行する。成功時のみ`send_push(target="discord", channel="report")`を呼ぶ。
-* 根拠: `threading.Thread(target=_run, daemon=True).start()` (行番号: 131 / 抜粋: "threading.Thread(target=_run, daemon=True).start()")、`send_push(` (行番号: 125〜129)
+* 根拠: `threading.Thread(target=_run, daemon=True).start()` (行番号: 165 / 抜粋: "threading.Thread(target=_run, daemon=True).start()")、`send_push(` (行番号: 125〜129)
 
 
 * **エラーハンドリング**: 失敗時(`success`が偽)は追加の通知を送らない。`perform_backup`内部の`_notify_and_log_error`が既にDiscordのerrorチャンネルへ通知済みのため、ここで重ねて通知すると二重送信になる。
-* 根拠: `if success:` (行番号: 124 / 抜粋: "if success:")。`else`節が無く失敗時に何もしないことを確認。
+* 根拠: `if success:` (行番号: 145 / 抜粋: "if success:")。`else`節が無く失敗時に何もしないことを確認。
 
 
 ### `redact_backup_text`
 
 * **役割**: **（Issue #829で追加）** 設定ファイルを NAS へ書き出す前に、認証情報の**値**を `REDACTED_MARK`（`***REDACTED-BY-backup_service***`）へ置き換えた本文と、置き換えた件数を返す純粋関数。
-* 根拠: `def redact_backup_text(text: str, *, is_json: bool) -> tuple[str, int]:` (行番号: 157)
+* 根拠: `def redact_backup_text(text: str, *, is_json: bool) -> tuple[str, int]:` (行番号: 237)
 * **置き換える対象**: (1) どのファイルでも、URL に埋め込まれたパスワード（`scheme://user:<ここ>@host`。`_URL_PASSWORD_RE`）。ユーザー名は残す。(2) `is_json=True` のときだけ、キー名が `pass` / `passwd` / `password` / `passphrase` / `secret` / `token` / `api_key`（`api-key`）である JSON 文字列の値（`_JSON_SECRET_FIELD_RE`、大文字小文字を区別しない）。空文字の値は置き換えず件数にも数えない
 * **なぜ必要か**: `devices.json` はカメラの `pass` と、`rtsp://<user>:<pass>@` 形式の `rtsp_url` を平文で持ち、以前は毎晩そのまま NAS（CIFS の `file_mode=0664`）へコピーしていた。2026-09-21 時点で `devices_*.json` 22件すべてにカメラのパスワードが入っていた。ホスト設定バックアップ（#774）と同じく「秘密の値は保全せず、構造だけを残す」方針
 * **ユーザー名を残す理由**: それ自体は秘密ではなく、復元時にどのアカウントを使えばよいかが分かるため（#774 と同じ判断）
@@ -126,15 +128,15 @@
 ### `_backup_config_files`
 
 * **役割**: `config.BACKUP_FILES` に列挙された設定ファイル(DB以外)をNASへコピーする。`src_db_path` と一致するエントリ（DB本体、既にPhase 1/2でバックアップ済み）はスキップする。個々のファイルのコピー失敗（ファイル不存在・`OSError`）はログに残すのみで、`perform_backup` 全体の成否には影響させない。 **（Issue #829で変更）** `shutil.copy2` でそのままコピーするのをやめ、UTF-8 として読み、`redact_backup_text`（`.json` なら JSON キー規則も適用）で認証情報を伏せ字にしてから書き出し、`shutil.copystat` で更新時刻等を引き継ぐ。伏せ字にした件数はログに出す。**UTF-8 として読めないファイルはコピーしない**（秘密の有無を検査できないものを平文で NAS に置かない側へ倒す。DB のバックアップ自体は成功扱いのまま）。
-* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str) -> None:` (行番号: 176〜207 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str) -> None:` (行番号: 256〜287 / 抜粋: "def _backup_config_files(n...")
 
 
 * **引数/リクエスト**: `nas_backup_dir: Path` (コピー先のNASバックアップディレクトリ), `timestamp: str` (ファイル名に付与するタイムスタンプ文字列), `src_db_path: str` (スキップ対象となるDBパス、`perform_backup`の`config.SQLITE_DB_PATH`)
-* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)` (行番号: 176 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)` (行番号: 256 / 抜粋: "def _backup_config_files(n...")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 176 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `-> None:` (行番号: 256 / 抜粋: "def _backup_config_files(n...")
 
 
 * **副作用**: `config.BACKUP_FILES` の各エントリについて、相対パスは `config.BASE_DIR` を基準に解決したうえで存在確認し、存在すれば `nas_backup_dir` へ `<ファイル名(拡張子除く)>_<timestamp><拡張子>` という名前で `shutil.copy2` によりコピーする。存在確認・コピー結果をログ出力する。
@@ -149,7 +151,7 @@
 ### `_copy_latest_offsite`
 
 * **役割**（2026-09-19 新設）: NAS へ転送済みのバックアップを、rclone のリモート（`config.DB_BACKUP_OFFSITE_REMOTE`）へ**最新1世代**として複製する。リモート側は常に `home_system_latest.db` の1ファイルだけを上書きする（世代管理は NAS 側の `db_backups/` と `DB_BACKUP_RETENTION_DAYS`）。以前はバックアップが NAS にしか無く、NAS が故障すると DB 本体とバックアップを同時に失う構成だった。
-* 根拠: `_copy_latest_offsite` (行番号: 214-245 / 抜粋: "def _copy_latest_offsite(nas_backup_path: Path) -> bool:")
+* 根拠: `_copy_latest_offsite` (行番号: 294-325 / 抜粋: "def _copy_latest_offsite(nas_backup_path: Path) -> bool:")
 * **呼び出し条件**: `perform_backup` の NAS 転送と整合性確認が成功し、`_backup_config_files` を終えた後にだけ呼ばれる。NAS 転送に失敗した場合は呼ばれない。
 * **無効化**: `DB_BACKUP_OFFSITE_REMOTE` が空（既定）なら何もせず `False` を返す。
 * **送るもの**: DB のみ。`devices.json` 等の設定ファイルはカメラの接続情報を含みうるため送らない。
@@ -164,15 +166,15 @@
 ### `_notify_and_log_error`
 
 * **役割**: ERRORレベルの記録と管理者への即時通知を行う。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 248〜260 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 328〜340 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **引数/リクエスト**: `message: str` (エラー内容を示すメッセージ文字列)
-* 根拠: `def _notify_and_log_error(message: str)` (行番号: 248 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str)` (行番号: 328 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 248 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `-> None:` (行番号: 328 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **副作用**: ロガーへのエラー書き込み、外部API呼び出し（`send_push`）。
@@ -180,7 +182,7 @@
 
 
 * **エラーハンドリング**: なし（内部で例外捕捉は行われていない）。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 248〜260 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 328〜340 / 抜粋: "def _notify_and_log_error(...)")
 
 
 
