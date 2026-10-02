@@ -1,8 +1,11 @@
 # MY_HOME_SYSTEM/routers/system_router.py
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from typing import Dict, Any
 
+from core.logger import setup_logging
 from services import backup_service, system_maintenance_service
+
+logger = setup_logging("system_router")
 
 router = APIRouter()
 
@@ -59,3 +62,32 @@ def manual_restart() -> dict[str, Any]:
     if not success:
         raise HTTPException(status_code=500, detail=msg)
     return {"status": "success", "message": msg}
+
+
+@router.post("/deploy")
+def manual_deploy(request: Request) -> dict[str, Any]:
+    """システムページの「最新に更新して再起動」ボタンから呼ばれる。
+
+    実機で `git pull --ff-only` を実行し、新しいコミットが入ったときだけ再起動する。
+    取り込みに失敗したら再起動しない。post-merge フック(family-quest の再ビルド等)で
+    数分かかりうるため、manual_backup と同じくバックグラウンド実行にして開始した旨を
+    即座に返す。完了は `GET /api/system/deploy/status` をポーリングして確認する
+    (再起動でサーバーが一時的に応答しなくなる)。
+
+    リクエストは引数を一切受け取らない(ブランチ・コマンドを呼び出し側が指定できない)。
+    認可チェックは `/api/system/*` 共通で無いため、実行元IPをログに残す。
+    """
+    client = request.client.host if request.client else "unknown"
+    started = system_maintenance_service.trigger_deploy_async()
+    run_id = system_maintenance_service.get_deploy_state()["run_id"]
+    logger.info(f"POST /api/system/deploy from {client}: {'started' if started else 'already running'}")
+    if not started:
+        return {"status": "running", "run_id": run_id, "message": "更新は既に実行中です。"}
+    return {"status": "started", "run_id": run_id,
+            "message": "更新を開始しました。取り込みに失敗した場合は再起動しません。"}
+
+
+@router.get("/deploy/status")
+def deploy_status() -> dict[str, Any]:
+    """システムページが「実行中か」「結果」を表示するためにポーリングする。"""
+    return system_maintenance_service.get_deploy_state()

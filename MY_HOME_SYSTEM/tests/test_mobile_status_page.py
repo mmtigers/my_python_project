@@ -264,6 +264,13 @@ class TestSubPages:
         res = self._get("sys")
         assert 'id="restartBtn" disabled' in res.text
 
+    def test_sys_page_deploy_button_is_disabled_until_confirmed(self):
+        res = self._get("sys")
+        assert 'id="deployBtn" disabled' in res.text
+        assert 'id="deployConfirm"' in res.text
+        assert "/api/system/deploy" in res.text
+        assert "/api/system/deploy/status" in res.text
+
 
 class TestStatusCacheOnTheServerSide:
     """`unified_server` には `st.cache_data` が無いため、同じTTLのメモを自前で持つ。"""

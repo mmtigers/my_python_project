@@ -675,6 +675,7 @@
 ### `_MAINTENANCE_SCRIPT`
 
 * **役割**: システムページのメンテナンス操作(再起動・バックアップ)ボタンから`POST /api/system/restart`・`POST /api/system/backup`を`fetch`するJS。共通ヘルパー`dashboardPost(url, resultId, busyText)`(再起動で使用)が実行中メッセージを表示し、レスポンスのJSON(`message`または`detail`)を結果欄に表示する。**(UI改善)** バックアップは`dashboardBackup`が`POST /api/system/backup`で起動し、返された`run_id`が`GET /api/system/backup/status`の`last_result.run_id`と一致するまで2秒間隔でポーリングして、完了/失敗をトースト表示する(ページを開いた時点で実行中なら復帰してポーリングを再開する)。
+* **(「最新に更新して再起動」の追加)** システムページのメンテナンス欄に、確認チェックボックス(`deployConfirm`)付きの「⬇️ 最新に更新して再起動」ボタン(`deployBtn`、確認するまで`disabled`)が加わった。`_MAINTENANCE_SCRIPT`の`dashboardDeploy`が`POST /api/system/deploy`を呼び、`deployPoll`が`GET /api/system/deploy/status`を3秒間隔でポーリングする。再起動中はサーバーが応答しないため、通信エラーでも諦めず4秒間隔で待つ(上限約200回)。ページを開き直した時点で実行中ならポーリングを再開する。
 * 根拠: [定数宣言] (行番号: 604〜625 / 抜粋: '_MAINTENANCE_SCRIPT = """\n<script>\nfunction dashboardPost(url, resultId, busyText) {')、[エンドポイント] (行番号: 622〜623 / 抜粋: 'function dashboardRestart() { dashboardPost("/api/system/restart", "restartResult", "再起動コマンドを送信しています..."); }\nfunction dashboardBackup() { dashboardPost("/api/system/backup", "backupResult", "バックアップ中..."); }')
 
 
