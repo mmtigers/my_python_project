@@ -241,7 +241,7 @@
 
 
 * **引数/リクエスト**: `limit` (`int`, デフォルト `5000`): 取得件数の上限。**(新機能)** `day` (`date | None`, デフォルト `None`): 指定すると`limit`によらず**その日(JST)の記録だけを全件**返す(見守りページのログの日付フィルタ用)。3クエリ共通のWHERE/ORDER/LIMIT部分は`_sensor_range_clause`が組み立て、`day`指定時はtimestamp文字列を前後1日の余裕を持たせた日付(`day-1日`以上`day+2日`未満)で粗く絞る(オフセット付き=UTC等の行が混在するため)。JSTの暦日での正確な絞り込みは、JST変換後に`df_merged["timestamp"].dt.date == day`で行う。`day`は`date`型でありSQLへ埋め込むのは`isoformat()`の値のみ。
-* 根拠: `def load_sensor_data(limit: int = 5000, day: Optional[date] = None)` (行番号: 245)、`def _sensor_range_clause(limit: int, day: Optional[date]) -> str:` (行番号: 230)、`range_clause = _sensor_range_clause(limit, day)` (行番号: 254)、`if day is not None:` (行番号: 328)
+* 根拠: `def load_sensor_data(limit: int = 5000, day: date | None = None)` (行番号: 245)、`def _sensor_range_clause(limit: int, day: date | None) -> str:` (行番号: 230)、`range_clause = _sensor_range_clause(limit, day)` (行番号: 254)、`if day is not None:` (行番号: 328)
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (統合されたセンサーデータのデータフレーム)

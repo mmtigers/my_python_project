@@ -227,7 +227,7 @@ def _classify_power_device_type(row) -> str:
     return "Nature Remo E Lite" if name and "Remo" in str(name) else "Plug"
 
 
-def _sensor_range_clause(limit: int, day: Optional[date]) -> str:
+def _sensor_range_clause(limit: int, day: date | None) -> str:
     """`load_sensor_data`の3クエリ共通の「WHERE ... ORDER BY ... LIMIT」部分を返す。
 
     `day`指定時は、その日(JST)の記録を件数制限なしで取る。timestampは文字列で、
@@ -242,7 +242,7 @@ def _sensor_range_clause(limit: int, day: Optional[date]) -> str:
     return f"WHERE timestamp >= '{lower}' AND timestamp < '{upper}' ORDER BY timestamp DESC"
 
 
-def load_sensor_data(limit: int = 5000, day: Optional[date] = None) -> pd.DataFrame:
+def load_sensor_data(limit: int = 5000, day: date | None = None) -> pd.DataFrame:
     """
     新旧テーブルからセンサーデータを統合して取得する
     Target Tables: device_records, switchbot_meter_logs, power_usage
