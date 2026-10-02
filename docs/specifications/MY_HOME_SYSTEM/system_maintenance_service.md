@@ -17,14 +17,19 @@
 
 システムページ(かんたん表示)の「サービス再起動」操作を担うサービスモジュール。`sudo systemctl restart home_system`をタイムアウト付きで実行する処理のみを持つ。Issue #829でStreamlit版ダッシュボード(`views/dashboard/log_tab.py`)の中に直接書かれていたロジックを、Streamlit版廃止に伴いシステムページ(`routers/dashboard_router.py`が返すHTML)のPOSTエンドポイントから呼べるサービス関数として独立させた。
 
+* **(「最新に更新して再起動」の追加で更新)** 同モジュールは、システムページの「最新に更新して再起動」ボタンの処理も担う。実機で`git pull --ff-only`を実行し、**新しいコミットが入ったときだけ**`restart_home_system`で再起動する。取り込みに失敗した場合(手元の変更・fast-forwardできない履歴・ネットワーク断・認証失敗・タイムアウト)は**再起動せず**、失敗理由を結果として返す。新しいコミットが無いときも再起動しない(再起動だけしたいときは既存の再起動ボタン)。
+* `git pull`はpost-merge フック(family-questの再ビルド・クエストマスタ同期)を含み数分かかりうるため、`trigger_deploy_async`がバックグラウンドスレッドで実行して即座に返し、画面は`get_deploy_state`をポーリングする(バックアップと同じ構成)。再起動でこのプロセス自身が入れ替わるため、結果は状態ファイル`DEPLOY_STATE_FILE`(`dashboard_deploy_state.json`)へ保存し、再起動後の新プロセスが「再起動を要求した時刻より後に起動した」ことを根拠に成功へ確定させる。
+* 実行できるのは固定の`git pull --ff-only`だけで、ブランチ・コマンド・引数を呼び出し側から受け取らない。認可チェックは`/api/system/*`共通で無いため(CLAUDE.md参照)、実行の都度Discordの`report`チャンネルへ記録を残す。
+* 根拠: [関数定義] (行番号: 123 / 抜粋: "def _run_deploy("), [関数定義] (行番号: 186 / 抜粋: "def trigger_deploy_async("), [関数定義] (行番号: 205 / 抜粋: "def get_deploy_state(")
+
 ## 3. 外部依存関係
 
 ### インポート一覧
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `subprocess` | 標準 | `sudo systemctl restart`の実行 | 根拠: [インポート宣言] (行番号: 9 / 抜粋: "import subprocess") |
-| `core.logger.setup_logging` | 外部 | ロガーのセットアップ | 根拠: [インポート宣言] (行番号: 11 / 抜粋: "from core.logger import setup_logging") |
+| `subprocess` | 標準 | `sudo systemctl restart`の実行 | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "import subprocess") |
+| `core.logger.setup_logging` | 外部 | ロガーのセットアップ | 根拠: [インポート宣言] (行番号: 33 / 抜粋: "from core.logger import setup_logging") |
 
 ### ブラックボックスとなる外部要素
 
@@ -38,7 +43,7 @@
 ### `RESTART_TIMEOUT_SEC`
 
 * **役割**: `subprocess.run`に渡すタイムアウト秒数(30秒)を定義する定数。systemctl等の外部コマンドが応答しない場合にサーバーを固めないための上限。
-* 根拠: [定数宣言] (行番号: 16 / 抜粋: "RESTART_TIMEOUT_SEC: int = 30")
+* 根拠: [定数宣言] (行番号: 41 / 抜粋: "RESTART_TIMEOUT_SEC: int = 30")
 
 
 * **引数/リクエスト**: 該当なし
@@ -61,11 +66,11 @@
 ### `restart_home_system`
 
 * **役割**: `home_system`(systemdサービス)を`sudo systemctl restart home_system`で再起動する。
-* 根拠: [関数定義] (行番号: 19〜36 / 抜粋: "def restart_home_system() -> tuple[bool, str]:")、[外部コマンド実行] (行番号: 22〜26 / 抜粋: 'subprocess.run(\n            ["sudo", "systemctl", "restart", "home_system"],\n            check=True,\n            timeout=RESTART_TIMEOUT_SEC,\n        )')
+* 根拠: [関数定義] (行番号: 64〜81 / 抜粋: "def restart_home_system() -> tuple[bool, str]:")、[外部コマンド実行] (行番号: 22〜26 / 抜粋: 'subprocess.run(\n            ["sudo", "systemctl", "restart", "home_system"],\n            check=True,\n            timeout=RESTART_TIMEOUT_SEC,\n        )')
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 19 / 抜粋: "def restart_home_system() -> tuple[bool, str]:")
+* 根拠: [関数定義] (行番号: 64 / 抜粋: "def restart_home_system() -> tuple[bool, str]:")
 
 
 * **戻り値/レスポンス**: `tuple[bool, str]`(成功したかどうかのフラグと、画面に出すメッセージ)。成功時は`(True, "再起動コマンドを送信しました")`。
@@ -126,6 +131,10 @@ graph TD
 | 中 | `deploy/systemd/home_system.service` | 再起動対象の`home_system`サービスの実際の定義(ExecStart等)を確認するため。 | 根拠: [外部コマンド実行] (行番号: 23 / 抜粋: '"restart", "home_system"') |
 
 ## 8. 保守上の注意点
+
+* **(「最新に更新して再起動」の追加)** `restart_home_system`の呼び出しは、正常ならこのプロセス自身が停止させられるため戻らない。戻ってきた場合は異常なので、画面が「実行中」のまま待ち続けないよう失敗として確定させている(`_run_deploy`)。
+* 実機側の前提(リポジトリには記録が無く、実機で確認済みのもの): `sudo -n systemctl restart home_system`がパスワードなしで通ること、リモートがSSHで`git fetch`がパスワードなしで通ること。ssh鍵にパスフレーズがありエージェントも無い場合、サービスからの`git pull`は認証で失敗する(`GIT_TERMINAL_PROMPT=0`で入力待ちにはならず、失敗として画面に出る)。
+* 保存される状態は`run_id`・`phase`(`running`/`restarting`/`done`)・`success`・`message`・更新前後のコミット・`restart_requested_at`・`finished_at`。プロセスが入れ替わったのに`running`のまま残っている状態は「中断」として失敗扱いにする。
 
 * `sudo systemctl restart home_system`は自分自身が動くホストのサービスを再起動するため、`unified_server`プロセス自体が数秒間停止する。呼び出し元(システムページ)は再起動後の応答が一時的に得られなくなることを踏まえたUIにすること。
 * `subprocess.run`に`check=True`を渡しているため、コマンドが非ゼロ終了した場合は`subprocess.CalledProcessError`が送出され、`except Exception`側で捕捉される(専用のログメッセージやハンドリングは無く、他の例外と同じ扱いになる)。

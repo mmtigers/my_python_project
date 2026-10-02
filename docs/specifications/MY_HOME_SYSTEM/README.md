@@ -7,8 +7,8 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | 仕様書 | 概要 |
 | --- | --- |
 | [unified_server.md](./unified_server.md) | FastAPIサーバーの起動・設定を行う統合エントリーポイント。ルートディレクトリ解決、CORS設定、IP検証、各種ルーターの統合を行う。 |
-| [system_router.md](./system_router.md) | 手動バックアップ・サービス再起動をトリガーするPOSTエンドポイントを提供するFastAPIルーター。 |
-| [system_maintenance_service.md](./system_maintenance_service.md) | システムページ(かんたん表示)の「サービス再起動」操作(`sudo systemctl restart home_system`)を担うサービス（Issue #829で`log_tab.py`から分離）。 |
+| [system_router.md](./system_router.md) | 手動バックアップ・サービス再起動・「最新に更新して再起動」(`git pull --ff-only`→再起動)をトリガーするエンドポイントを提供するFastAPIルーター。 |
+| [system_maintenance_service.md](./system_maintenance_service.md) | システムページ(かんたん表示)の「サービス再起動」(`sudo systemctl restart home_system`)と「最新に更新して再起動」(`git pull --ff-only`→新しいコミットがあるときだけ再起動)を担うサービス（Issue #829で`log_tab.py`から分離）。 |
 | [webhook_router.md](./webhook_router.md) | 外部システム（LINE Bot・SwitchBot等）からのWebhookリクエストを受け取り、適切なハンドラ・サービスへルーティングする。 |
 | [camera_router.md](./camera_router.md) | カメラのライブ配信（HLS）・録画セグメントの一覧取得や配信APIを提供する（`camera_service.py`に処理を委譲）。 |
 | [dashboard_router.md](./dashboard_router.md) | ダッシュボード(かんたん表示)を`config.DASHBOARD_BASE_PATH`（既定`/dashboard`）配下でHTMLとして直接配信するルーター（ホーム/見守り/くらし/システムの4ページ）。Issue #829でStreamlit版の詳細表示・逆プロキシ構成を廃止した。 |

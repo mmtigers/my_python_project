@@ -868,6 +868,17 @@ def render_sys_page(
         "</div>"
         "<h2>🛠️ メンテナンス</h2>"
         '<div class="maintenance-box">'
+        "<p>GitHubの最新を取り込んで、システムを再起動します。"
+        "取り込みに失敗した場合は再起動しません(新しい内容が無いときも再起動しません)。</p>"
+        "<p>⚠️ 再起動中はダッシュボードやIoT機器の操作が一時的に使えなくなります。数分かかることがあります。</p>"
+        '<label><input type="checkbox" id="deployConfirm" onchange="'
+        'document.getElementById(\'deployBtn\').disabled = !this.checked;">'
+        "最新に更新して再起動することを理解しました</label><br>"
+        '<button type="button" class="danger" id="deployBtn" disabled onclick="dashboardDeploy()">'
+        "⬇️ 最新に更新して再起動</button>"
+        '<div id="deployResult" class="maintenance-result" role="status" aria-live="polite"></div>'
+        "</div>"
+        '<div class="maintenance-box">'
         "<p>⚠️ 再起動するとダッシュボードやIoT機器の操作が一時的に使えなくなります。</p>"
         '<label><input type="checkbox" id="restartConfirm" onchange="'
         'document.getElementById(\'restartBtn\').disabled = !this.checked;">'
@@ -972,7 +983,74 @@ function dashboardBackup() {
             dashboardToast("❌ バックアップを開始できませんでした: " + e.message, false);
         });
 }
+var deployFailCount = 0;
+function deploySetBusy(busy) {
+    var btn = document.getElementById("deployBtn");
+    var chk = document.getElementById("deployConfirm");
+    if (busy) {
+        btn.disabled = true;
+        btn.textContent = "⏳ 更新中...";
+    } else {
+        btn.textContent = "⬇️ 最新に更新して再起動";
+        btn.disabled = !chk.checked;
+    }
+}
+function deployPoll(runId) {
+    var box = document.getElementById("deployResult");
+    fetch("/api/system/deploy/status", { credentials: "same-origin" })
+        .then(function (res) { if (!res.ok) { throw new Error("HTTP " + res.status); } return res.json(); })
+        .then(function (st) {
+            deployFailCount = 0;
+            if (st.running) {
+                box.textContent = "更新中です。完了までお待ちください...";
+                setTimeout(function () { deployPoll(runId); }, 3000);
+                return;
+            }
+            deploySetBusy(false);
+            var last = st.last_result;
+            if (last && (runId === null || last.run_id === runId)) {
+                var text = (last.success ? "✅ " : "❌ ") + last.message;
+                box.textContent = last.success ? text + " ページを再読み込みすると新しい画面になります。" : text;
+                dashboardToast(text, last.success);
+            } else {
+                box.textContent = "";
+            }
+        })
+        .catch(function () {
+            // 再起動中はサーバーが応答しない。諦めず待つ(結果は状態ファイルに残る)。
+            deployFailCount += 1;
+            if (deployFailCount > 200) {
+                deploySetBusy(false);
+                box.textContent = "❌ サーバーが長時間応答しません。実機の状態を確認してください。";
+                return;
+            }
+            box.textContent = "サーバーを再起動しています。しばらくお待ちください...";
+            setTimeout(function () { deployPoll(runId); }, 4000);
+        });
+}
+function dashboardDeploy() {
+    var box = document.getElementById("deployResult");
+    deploySetBusy(true);
+    box.textContent = "更新を開始しています...";
+    fetch("/api/system/deploy", { method: "POST", credentials: "same-origin" })
+        .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+        .then(function (r) {
+            if (!r.ok) { throw new Error(r.data.detail || "開始できませんでした"); }
+            box.textContent = "更新中です。完了までお待ちください...";
+            deployPoll(r.data.run_id);
+        })
+        .catch(function (e) {
+            deploySetBusy(false);
+            box.textContent = "❌ " + e.message;
+            dashboardToast("❌ 更新を開始できませんでした: " + e.message, false);
+        });
+}
 document.addEventListener("DOMContentLoaded", function () {
+    // 更新の実行中にページを開き直した場合は、結果を待つ表示に戻す。
+    fetch("/api/system/deploy/status", { credentials: "same-origin" })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (st) { if (st && st.running) { deploySetBusy(true); deployPoll(null); } })
+        .catch(function () {});
     // ページを開いた時点で実行中なら、スピナー表示に戻して結果を待つ。
     backupFetchStatus().then(function (st) {
         backupShowLatest(st.latest_backup);
