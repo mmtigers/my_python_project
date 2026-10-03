@@ -68,11 +68,13 @@ const Header: React.FC<HeaderProps> = ({
             </div>
 
             {/* Title Area */}
-            <div className="pt-4 pb-2 text-center relative">
+            {/* 狭い画面(〜sm)では右上のボタン2つ(44px×2+余白)と重ならないよう、右側にその分の余白を取って
+                タイトルを左寄せ気味に収め、文字サイズも一段下げる */}
+            <div className="pt-4 pb-2 text-center relative pl-3 pr-24 sm:px-0">
                 {/* #412(F-L9): 'Press Start 2P' はどこにも読込設定が無く一度も読み込まれない
                     ままだった(常にcursiveフォールバックで描画されている死んだ指定)。
                     実際に使われているフォールバックのみを指定する。 */}
-                <h1 className="text-2xl font-black text-yellow-500 tracking-widest drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]" style={{ fontFamily: 'cursive, sans-serif' }}>
+                <h1 className="text-xl sm:text-2xl font-black text-yellow-500 tracking-widest drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]" style={{ fontFamily: 'cursive, sans-serif' }}>
                     FAMILY QUEST
                 </h1>
                 <p className="text-[10px] text-gray-400 font-mono">我が家の冒険譚</p>
