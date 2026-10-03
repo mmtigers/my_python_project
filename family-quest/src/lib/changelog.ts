@@ -1,0 +1,37 @@
+// アプリ内「アップデートのれきし」に表示する更新履歴。
+// 新しい順(先頭が最新)で手動追記する。ここで管理する version は履歴専用の版数で、
+// package.json の version とは連動しない。
+export interface ChangelogEntry {
+    version: string;
+    // 'YYYY-MM-DD'
+    date: string;
+    changes: string[];
+}
+
+export const CHANGELOG: readonly ChangelogEntry[] = [
+    {
+        version: '1.2.0',
+        date: '2026-10-03',
+        changes: [
+            'アップデートのれきしを見られるようにしました（トップ画面右上のボタン）',
+        ],
+    },
+    {
+        version: '1.1.0',
+        date: '2026-09-23',
+        changes: [
+            'YouTubeを自由時間だけ見られるようにしました',
+            'クエストを「必須」と「ボーナス」に分けました',
+            '習い事をボーナスクエストにしました',
+            'チェックマークの位置ずれを直しました',
+            '取り消し線が間違って出たり、タップしても反応しないことがあった不具合を直しました',
+        ],
+    },
+    {
+        version: '1.0.0',
+        date: '2026-09-21',
+        changes: [
+            'クエスト一覧を「きょうのすごろく」風の見た目にそろえました',
+        ],
+    },
+];

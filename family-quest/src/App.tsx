@@ -35,6 +35,7 @@ import ChunkErrorBoundary from './components/ui/ChunkErrorBoundary';
 // (実際に開かれるまでチャンクを読み込まない)
 const AvatarUploader = lazy(() => import('./components/ui/AvatarUploader'));
 const SettingsModal = lazy(() => import('./components/ui/SettingsModal'));
+const ChangelogModal = lazy(() => import('./components/ui/ChangelogModal'));
 
 import UserStatusCard from './features/family/components/UserStatusCard';
 import QuestList from './features/quest/components/QuestList';
@@ -103,6 +104,7 @@ function App() {
   // アバターアップロード対象(nullなら非表示)
   const [avatarUser, setAvatarUser] = useState<User | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
 
   // 角度⑤: レベルアップ/メダル獲得などの「成功の演出」は、作業を止めるブロッキングモーダルから
   // 自動で消えるトーストへ変更(連続してクエストを完了する際にテンポが悪かったため)。
@@ -517,6 +519,7 @@ function App() {
         onUserSwitch={handleUserChange}
         onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
         onSettingsClick={() => { setSettingsOpen(true); play('tap'); }}
+        onChangelogClick={() => { setChangelogOpen(true); play('tap'); }}
         showUserSwitcher={layoutMode !== 'landscape'}
         showLogSwitcher={layoutMode !== 'portrait'}
         showBackToMain={layoutMode === 'landscape'}
@@ -687,6 +690,10 @@ function App() {
 
         {settingsOpen && (
           <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} users={users} />
+        )}
+
+        {changelogOpen && (
+          <ChangelogModal isOpen={changelogOpen} onClose={() => setChangelogOpen(false)} />
         )}
       </Suspense>
       </ChunkErrorBoundary>
