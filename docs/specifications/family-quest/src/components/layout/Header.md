@@ -24,7 +24,7 @@
 * **（#479で修正）** 上記2propは元々`hideUserSwitcher`/`hideLogSwitcher`という否定形の名前で「省略時=表示（false相当）」を意味していたが、`showBackToMain`（省略時=非表示）と既定値の向きが逆でわかりにくかったため、`showUserSwitcher`/`showLogSwitcher`というshow*系の名前に改名し、それぞれデフォルト引数`= true`（省略時=表示）を明示するよう変更された。コンポーネント内部の条件式も否定演算子`!`を外して`showUserSwitcher`/`showLogSwitcher`をそのまま真偽判定に使う形になった。挙動そのもの（各propが真/偽どちらのときにどう表示されるか）に変更はない、純粋な命名・既定値表現の統一である。
 * コンポーネント自身は状態（State）を持たず、親から渡されたProps（表示データおよびコールバック関数）に基づいてレンダリングを行う純粋なプレゼンテーションコンポーネントである。
 * 根拠: `showUserSwitcher`/`showLogSwitcher`/`showBackToMain`の説明コメントと使用箇所 (13〜30, 81, 108, 153, 158行目 / 抜粋: "// #479: hideUserSwitcher/hideLogSwitcher(省略時=表示)とshowBackToMain\n    // (省略時=非表示)とで既定値の方向が非対称だったため、全てshow*系・\n    // 「省略時の意味」をprop名から読み取れる向きに統一する。", "{showBackToMain && (", "{showUserSwitcher && users.map((user, idx) => {", "{showLogSwitcher && (")
-* 根拠: デフォルト引数への変更 (行番号: 41〜42 / 抜粋: "showUserSwitcher = true,\n    showLogSwitcher = true,")
+* 根拠: デフォルト引数への変更 (行番号: 44〜45 / 抜粋: "showUserSwitcher = true,\n    showLogSwitcher = true,")
 * ユーザーアバターの表示可否判定には`isSameOriginAvatarPath(user.avatar)`（`lib/utils.ts`からインポート）を用いる。以前の`user.avatar && user.avatar.startsWith('/')`という判定は、プロトコル相対URL（`"//evil.example/x"`）もマッチしてしまい、外部ホストの画像に差し替えられる可能性があるバグ（M-9-5）だったため、`"//"`で始まるものを明示的に除外する共通ヘルパーに置き換えられた。
 * 根拠: `isSameOriginAvatarPath`のインポートと使用 (4, 111行目 / 抜粋: "import { isSameOriginAvatarPath } from '../../lib/utils';", "{isSameOriginAvatarPath(user.avatar) ? (")
 * **[修正済み] トグル系ボタンへの`aria-pressed`付与（Issue #412 F-L5）**: ホームボタン（`showBackToMain`）・ユーザー切替ボタン・記録ボタンはいずれも「選択中/非選択」という状態を持つトグルだが、以前は視覚的なスタイル（`scale`/枠線色等）でしか状態を表現しておらず、スクリーンリーダー利用者には選択状態が伝わらなかった。各ボタンに`aria-pressed`（それぞれ`viewMode === 'user'`/`isActive`/`viewMode === 'familyLog'`）と`aria-label`（見た目のテキストと同じ内容だが、アイコン+バッジのレイアウトのため明示）を追加した。
@@ -63,6 +63,7 @@
 * `onUserSwitch`: `(idx: number) => void`
 * `onLogSwitch`: `() => void`
 * `onSettingsClick`: `() => void`
+* `onChangelogClick`: `() => void`（トップ右上、表示せっていボタンの左隣に置く「アップデートのれきし」ボタン(`History`アイコン、`aria-label="アップデートのれきし"`)のクリックハンドラ。`App.tsx`が`ChangelogModal`を開く処理を渡す）
 * `showUserSwitcher`: `boolean`（オプショナル。**（#479で`hideUserSwitcher`から改名）** 偽の場合、ユーザー切替行を省略する。実装側のデフォルト引数`= true`により、省略時はtrue＝表示扱い）
 * `showLogSwitcher`: `boolean`（オプショナル。**（#479で`hideLogSwitcher`から改名）** 偽の場合、記録ボタンを省略する。実装側のデフォルト引数`= true`により、省略時はtrue＝表示扱い）
 * `showBackToMain`: `boolean`（オプショナル。真の場合、ユーザー切替行の代わりに「ホーム」ボタンを表示する）
@@ -73,9 +74,9 @@
 
 * **役割**: ナビゲーション（ホームボタン＋ユーザー切替＋記録ボタン）、表示設定ボタン、タイトルを含むヘッダーUIのレンダリング。**（Issue #412 F-L9で修正）** タイトル「FAMILY QUEST」の`fontFamily`から`"Press Start 2P"`を削除した。このフォントはGoogle Fonts等の読込設定がどこにも存在せず一度も読み込まれておらず、実際には常に次点の`cursive`フォールバックで描画され続けていた「死んだ指定」だったため、実際に使われているフォールバックのみを書くようにした（見た目に変化はない）。`showUserSwitcher`が偽の場合はユーザー切替のボタン群を、`showLogSwitcher`が偽の場合は記録ボタンを、`showBackToMain`が偽の場合はホームボタンを、それぞれ描画しない。**（#479で修正）** 分割代入部分でも`showUserSwitcher`/`showLogSwitcher`に`= true`のデフォルト引数が付き、内部の描画条件（108, 153, 158行目）も`!hideUserSwitcher`/`!hideLogSwitcher`という否定形から、否定を外した`showUserSwitcher`/`showLogSwitcher`の直接参照に変わった（挙動は変わらず、命名の意味と実際の真偽値の向きが一致するようになった）。
 * 根拠: `const Header: React.FC<HeaderProps> = ({...}) => { return (<header...` (行番号: 34〜191 / 抜粋: "const Header: React.FC<HeaderProps> = ({")
-* 根拠: デフォルト引数と描画条件の書き換え (行番号: 41〜42, 108, 153, 158 / 抜粋: "showUserSwitcher = true,\n    showLogSwitcher = true,", "{showUserSwitcher && users.map((user, idx) => {", "{(showUserSwitcher || showBackToMain) && showLogSwitcher && (", "{showLogSwitcher && (")
+* 根拠: デフォルト引数と描画条件の書き換え (行番号: 44〜45, 118, 163, 168 / 抜粋: "showUserSwitcher = true,\n    showLogSwitcher = true,", "{showUserSwitcher && users.map((user, idx) => {", "{(showUserSwitcher || showBackToMain) && showLogSwitcher && (", "{showLogSwitcher && (")
 
-* **引数/リクエスト**: `HeaderProps` で定義されたプロパティのオブジェクト（`users`, `currentUserIdx`, `viewMode`, `onUserSwitch`, `onLogSwitch`, `onSettingsClick`, `showUserSwitcher`, `showLogSwitcher`, `showBackToMain`, `onBackToMain`）
+* **引数/リクエスト**: `HeaderProps` で定義されたプロパティのオブジェクト（`users`, `currentUserIdx`, `viewMode`, `onUserSwitch`, `onLogSwitch`, `onSettingsClick`, `onChangelogClick`, `showUserSwitcher`, `showLogSwitcher`, `showBackToMain`, `onBackToMain`）
 * 根拠: (行番号: 34〜45 / 抜粋: "const Header: React.FC<HeaderProps> = ({\n    users,\n    currentUserIdx,\n    viewMode,\n    onUserSwitch,\n    onLogSwitch,\n    onSettingsClick,\n    showUserSwitcher = true,\n    showLogSwitcher = true,\n    showBackToMain,\n    onBackToMain,\n}) => {")
 
 * **戻り値/レスポンス**: JSX要素 (`<header>` タグをルートとするReact要素)
@@ -158,9 +159,9 @@ graph TD
 ## 8. 保守上の注意点
 
 * `users.map` 内でユーザーのアイコンを表示する際、`isSameOriginAvatarPath(user.avatar)`（`lib/utils.ts`の共通ヘルパー）の判定を用いている（111行目）。以前は本ファイル内でインラインに`user.avatar && user.avatar.startsWith('/')`と判定していたが、プロトコル相対URL（`"//evil.example/x"`）も`startsWith('/')`がtrueになり素通りしてしまうバグ（M-9-5）があった。ブラウザは`"//host/path"`を現在のプロトコルでの外部ホストへのリンクとして解決するため、外部ホストの画像に差し替えられる可能性があった（バックエンド側の無認証問題と組み合わさるとLAN内の誰でも設定可能な状態だった）。修正後は`"//"`で始まるものを明示的に除外する`isSameOriginAvatarPath`に置き換えられ、`FamilyLog.tsx`・`UserStatusCard.tsx`の同様の判定箇所とも共通化されている。
-* 根拠: (行番号: 4, 126行目 / 抜粋: "import { isSameOriginAvatarPath } from '../../lib/utils';", "{isSameOriginAvatarPath(user.avatar) ? (")
+* 根拠: (行番号: 4, 136行目 / 抜粋: "import { isSameOriginAvatarPath } from '../../lib/utils';", "{isSameOriginAvatarPath(user.avatar) ? (")
 * `showUserSwitcher`/`showLogSwitcher`/`showBackToMain`はいずれもオプショナル（`?: boolean;`）である。`showUserSwitcher`/`showLogSwitcher`は**（#479で修正）** 分割代入時のデフォルト引数`= true`により未指定時は`true`（表示する、従来どおりの挙動）となる。一方`showBackToMain`にはデフォルト引数が無く、`&&`による真偽判定（81行目）のため未指定時は`undefined`＝falsy、すなわち「ホームボタンを表示しない」扱いになる（この非対称自体は本Issueの対象外で変わっていない）。**[修正済み]** 以前の`hideUserSwitcher`/`hideLogSwitcher`（デフォルト引数なし、`!hide*`による否定判定）と実際の挙動（省略時=表示）は同じだったが、prop名だけからは「省略時にどちらの状態になるか」が読み取れなかった。show*系への改名とデフォルト引数の明示により、prop名と省略時の意味が一致するようになった。
-* 根拠: (行番号: 21, 25, 30, 41〜42, 81, 108, 153, 158行目 / 抜粋: "showUserSwitcher?: boolean;", "showLogSwitcher?: boolean;", "showBackToMain?: boolean;", "showUserSwitcher = true,\n    showLogSwitcher = true,", "{showBackToMain && (", "{showUserSwitcher && users.map((user, idx) => {", "{(showUserSwitcher || showBackToMain) && showLogSwitcher && (", "{showLogSwitcher && ("
+* 根拠: (行番号: 23, 27, 32, 44〜45, 91, 118, 163, 168行目 / 抜粋: "showUserSwitcher?: boolean;", "showLogSwitcher?: boolean;", "showBackToMain?: boolean;", "showUserSwitcher = true,\n    showLogSwitcher = true,", "{showBackToMain && (", "{showUserSwitcher && users.map((user, idx) => {", "{(showUserSwitcher || showBackToMain) && showLogSwitcher && (", "{showLogSwitcher && ("
 * ホームボタンの選択状態表示（強調スタイル）は`viewMode === 'user'`かどうかで切り替わり、`viewMode === 'familyLog'`の間はホームボタンが非選択スタイルになる。以前はスタイルが常に「選択中」固定だったため、記録画面に遷移してもホームボタンだけフォーカスされたままに見えていたバグの修正である。
 * 根拠: (行番号: 65〜69, 73〜74行目 / 抜粋: "// ★バグ修正: 以前はスタイルが常に「選択中」固定だったため、記録画面に\n                    // 遷移したあともホームボタンだけフォーカスされたままに見えていた。\n                    // 他のボタン同様、viewMode に応じて選択中/非選択を切り替える", "className={`relative transition-all duration-300 flex flex-col items-center group p-1 ${viewMode === 'user' ? 'scale-110 -translate-y-1 z-10' : 'scale-95 opacity-60 hover:opacity-100 hover:scale-100'\n                            }`}")
 * かつて存在した`onAdminOpen`（隠しボタンによる管理画面起動）、`onPartySwitch`/`onTrendsSwitch`（パーティ・週間ランキング画面切替）に対応するProps・UI要素は本ファイルには存在しない。

@@ -1,6 +1,6 @@
 import React from 'react';
 import { User } from '@/types';
-import { Scroll, Settings, Home } from 'lucide-react';
+import { Scroll, Settings, Home, History } from 'lucide-react';
 import { isSameOriginAvatarPath } from '../../lib/utils';
 
 interface HeaderProps {
@@ -10,6 +10,8 @@ interface HeaderProps {
     onUserSwitch: (idx: number) => void;
     onLogSwitch: () => void;
     onSettingsClick: () => void;
+    // トップ右上の「アップデートのれきし」ボタン(表示せっていボタンの左隣)。
+    onChangelogClick: () => void;
     // #479: hideUserSwitcher/hideLogSwitcher(省略時=表示)とshowBackToMain
     // (省略時=非表示)とで既定値の方向が非対称だったため、全てshow*系・
     // 「省略時の意味」をprop名から読み取れる向きに統一する。
@@ -38,6 +40,7 @@ const Header: React.FC<HeaderProps> = ({
     onUserSwitch,
     onLogSwitch,
     onSettingsClick,
+    onChangelogClick,
     showUserSwitcher = true,
     showLogSwitcher = true,
     showBackToMain,
@@ -46,8 +49,15 @@ const Header: React.FC<HeaderProps> = ({
     return (
         <header className="bg-gradient-to-b from-gray-900 to-black border-b-4 border-gray-800 pb-4 shadow-2xl relative z-20">
 
-            {/* 表示せっていボタン */}
+            {/* アップデートのれきし / 表示せっていボタン */}
             <div className="absolute top-2 right-2 flex gap-1 z-30">
+                <button
+                    onClick={onChangelogClick}
+                    aria-label="アップデートのれきし"
+                    className="w-10 h-10 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-gray-800/80 border border-gray-600 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
+                >
+                    <History size={18} />
+                </button>
                 <button
                     onClick={onSettingsClick}
                     aria-label="表示せってい"

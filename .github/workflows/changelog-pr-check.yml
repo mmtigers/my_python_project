@@ -1,0 +1,96 @@
+name: Changelog Check (PR)
+
+# family-quest のアプリ内「アップデートのれきし」(family-quest/src/lib/changelog.ts)は
+# 手動で追記する運用のため、足し忘れるとそのアップデートが履歴に出ない。
+# PR でアプリ本体を変更したのに changelog.ts が更新されていなければ気付きを与える。
+#
+# 方針: spec-drift-pr-check.yml と同じ、気付きを与えるだけの非ブロッキングチェック。
+# 内部リファクタなど履歴に載せない変更も多いため CI は赤くしない。
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'family-quest/src/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: changelog-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check changelog update
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: MY_HOME_SYSTEM/.python-version
+
+      - name: Run changelog check (non-blocking)
+        continue-on-error: true
+        run: |
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          head_sha="${{ github.event.pull_request.head.sha }}"
+          merge_base="$(git merge-base "$base_sha" "$head_sha")"
+          python3 .github/scripts/check_changelog_update.py \
+            --base "$merge_base" \
+            --head "$head_sha" \
+            --out changelog-report.md
+
+      - name: Read report
+        id: report
+        run: |
+          {
+            echo 'body<<CHANGELOG_EOF'
+            if [ -f changelog-report.md ]; then
+              cat changelog-report.md
+            else
+              echo "## 更新履歴チェック（PR差分）"
+              echo ""
+              echo "チェック自体が失敗しました。Actionsのログを確認してください（このチェックはブロッキングではありません）。"
+            fi
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upsert PR comment
+        # フォークからのPRでは GITHUB_TOKEN が読み取り専用で403になるため、
+        # コメント投稿の失敗でCI全体を赤くしない(spec-drift-pr-check.yml と同じ)。
+        continue-on-error: true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const marker = "<!-- changelog-check -->";
+            const body = marker + "\n" + ${{ toJSON(steps.report.outputs.body) }};
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
