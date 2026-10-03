@@ -25,6 +25,7 @@
 | [AvatarUploader.md](./src/components/ui/AvatarUploader.md) | アバター画像の選択・プレビュー・サーバーへのアップロードを行うモーダルUIコンポーネント。エラー・成功メッセージはモーダル内のインラインUIで表示する。 |
 | [Button.md](./src/components/ui/Button.md) | Framer Motionによるアニメーション付きボタン。バリエーション・サイズ・ローディング状態を制御し、クリック時に外部フックで音声再生も行う。 |
 | [Card.md](./src/components/ui/Card.md) | 汎用的なカード型UIコンポーネント。`variant`や`onClick`の有無に応じて適用スタイルを動的に切り替える。 |
+| [ChangelogModal.md](./src/components/ui/ChangelogModal.md) | アプリの更新履歴（バージョン・日付・変更点）を新しい順に表示するモーダル。ヘッダー右上のボタンから開く。 |
 | [ChunkErrorBoundary.md](./src/components/ui/ChunkErrorBoundary.md) | `lazy()`チャンクの読み込み失敗(SW更新後の旧チャンク404)を捕捉し自動再読み込みするエラーバウンダリ。それ以外の描画エラーには「再読み込み」ボタン付きフォールバックを表示する。 |
 | [ConfirmModal.md](./src/components/ui/ConfirmModal.md) | クエスト完了・報酬購入・クエスト却下の確認モーダル。Issue #552で`App.tsx`から抽出された。 |
 | [CooldownRing.md](./src/components/ui/CooldownRing.md) | 無限クエストの連打防止クールダウン(60秒)の残り時間を、円形SVGプログレスリングとして視覚的に表示するコンポーネント。 |
@@ -32,7 +33,6 @@
 | [HlsPlayer.md](./src/components/ui/HlsPlayer.md) | `hls.js`を用いてHLS形式の映像ストリームを再生する汎用UIコンポーネント。カメラ機能で利用され、非対応ブラウザ向けのネイティブ再生フォールバックも備える。 |
 | [MessageModal.md](./src/components/ui/MessageModal.md) | タイトル・メッセージ・任意アイコンを表示するモーダルダイアログ。`onRetry`が渡された場合は「閉じる」/「再試行」の2ボタン、渡されない場合は単一の「OK」ボタンを表示する。 |
 | [Modal.md](./src/components/ui/Modal.md) | ESCキー・背景クリック・閉じるボタンに応じて非表示処理を呼び出す汎用モーダルウィンドウ。 |
-| [ChangelogModal.md](./src/components/ui/ChangelogModal.md) | アプリの更新履歴（バージョン・日付・変更点）を新しい順に表示するモーダル。ヘッダー右上のボタンから開く。 |
 | [SettingsModal.md](./src/components/ui/SettingsModal.md) | 表示密度・非識字モード対象ユーザー・ユーザー別パネルアクセントカラーをまとめて設定するモーダル画面。`useSettings`フック経由でContext状態を操作する。 |
 
 ## src/context
