@@ -1,6 +1,6 @@
 # family-quest 仕様書一覧
 
-タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された64件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
+タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された66件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
 
 対応するソースファイル自体が削除済みの仕様書は、末尾の「廃止済み仕様書一覧」に記録のみ残しています(Issue #402 で仕様書ファイル自体は削除済み。新規の実装・参照の対象ではありません)。
 
@@ -32,6 +32,7 @@
 | [HlsPlayer.md](./src/components/ui/HlsPlayer.md) | `hls.js`を用いてHLS形式の映像ストリームを再生する汎用UIコンポーネント。カメラ機能で利用され、非対応ブラウザ向けのネイティブ再生フォールバックも備える。 |
 | [MessageModal.md](./src/components/ui/MessageModal.md) | タイトル・メッセージ・任意アイコンを表示するモーダルダイアログ。`onRetry`が渡された場合は「閉じる」/「再試行」の2ボタン、渡されない場合は単一の「OK」ボタンを表示する。 |
 | [Modal.md](./src/components/ui/Modal.md) | ESCキー・背景クリック・閉じるボタンに応じて非表示処理を呼び出す汎用モーダルウィンドウ。 |
+| [ChangelogModal.md](./src/components/ui/ChangelogModal.md) | アプリの更新履歴（バージョン・日付・変更点）を新しい順に表示するモーダル。ヘッダー右上のボタンから開く。 |
 | [SettingsModal.md](./src/components/ui/SettingsModal.md) | 表示密度・非識字モード対象ユーザー・ユーザー別パネルアクセントカラーをまとめて設定するモーダル画面。`useSettings`フック経由でContext状態を操作する。 |
 
 ## src/context
@@ -127,6 +128,7 @@
 | [questTargeting.md](./src/lib/questTargeting.md) | クエストの`target_user`判定（`all`/`siblings`/`role_`プレフィックス/個別`user_id`一致）を行う`isQuestVisibleToUser`を提供する。`QuestList.tsx`と`FamilyDashboard.tsx`で重複していたロジックを集約したもの。 |
 | [routing.md](./src/lib/routing.md) | `main.tsx`のルートビュー切り替え判定（`/camera`・`/quest/camera`をカメラビューとして扱うか）を担う純粋関数`isCameraRoute`を提供する（Issue #472）。 |
 | [userRole.md](./src/lib/userRole.md) | 保護者判定`isParentUser`と、承認・却下・購入の記録名義となる代表親を解決する`getRepresentativeParent`を提供する。Issue #552で`App.tsx`から新規抽出。 |
+| [changelog.md](./src/lib/changelog.md) | 「アップデートのれきし」に表示する更新履歴を型付き定数`CHANGELOG`として保持する。 |
 | [utils.md](./src/lib/utils.md) | Tailwind CSSのクラス名をマージ（結合・競合解決）するユーティリティ関数`cn`を提供する。 |
 
 ## src/types
