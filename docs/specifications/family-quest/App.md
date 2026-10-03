@@ -34,7 +34,7 @@
 * [src/components/ui/SettingsModal.md](src/components/ui/SettingsModal.md) - 子コンポーネント（表示設定モーダル、`React.lazy`で動的import）
 * [src/components/ui/MessageModal.md](src/components/ui/MessageModal.md) - 子コンポーネント（エラーメッセージ専用モーダル）
 * [src/components/ui/ConfirmModal.md](src/components/ui/ConfirmModal.md) - **（Issue #552で新規抽出）** 子コンポーネント（完了・購入・却下の確認モーダル本体。以前はApp.tsx内にインラインで定義されていた）
-* [src/components/ui/ChunkErrorBoundary.md](src/components/ui/ChunkErrorBoundary.md) - `lazy()`で分割した`AvatarUploader`/`SettingsModal`の`Suspense`を包むエラーバウンダリ（Issue #362）
+* [src/components/ui/ChunkErrorBoundary.md](src/components/ui/ChunkErrorBoundary.md) - `lazy()`で分割した`AvatarUploader`/`SettingsModal`/`ChangelogModal`の`Suspense`を包むエラーバウンダリ（Issue #362）
 * [src/features/family/components/FamilyDashboard.md](src/features/family/components/FamilyDashboard.md) - 横画面（landscape）時のメイン表示コンポーネント
 * [src/features/quest/context/QuestActivityContext.md](src/features/quest/context/QuestActivityContext.md) - **（Issue #659で新規追加）** 本ファイルが返り値全体を包む`QuestActivityProvider`の実装元
 * [src/features/quest/context/questActivityShared.md](src/features/quest/context/questActivityShared.md) - **（Issue #659で新規追加）** 上記Providerが配る`QuestActivityValue`型の定義元
@@ -96,6 +96,7 @@
 | `ChunkErrorBoundary` | コンポーネント | `lazy()`チャンク読み込み失敗時の自動再読み込み | 根拠: (行番号: 32 / 抜粋: "import ChunkErrorBoundary from './components/ui/ChunkErrorBoundary';") |
 | `AvatarUploader` (lazy) | コンポーネント | アバター画像アップロード画面の表示（動的import） | 根拠: (行番号: 36 / 抜粋: "const AvatarUploader = lazy(() => import('./components/ui/AvatarUploader'));") |
 | `SettingsModal` (lazy) | コンポーネント | 表示設定モーダルの表示（動的import） | 根拠: (行番号: 37 / 抜粋: "const SettingsModal = lazy(() => import('./components/ui/SettingsModal'));") |
+| `ChangelogModal` (lazy) | コンポーネント | 更新履歴(アップデートのれきし)モーダルの表示（動的import） | 根拠: (行番号: 38 / 抜粋: "const ChangelogModal = lazy(() => import('./components/ui/ChangelogModal'));") |
 | `UserStatusCard` | コンポーネント | 現在選択中ユーザーのステータス表示（縦画面） | 根拠: (行番号: 40 / 抜粋: "import UserStatusCard from './features/family/components/UserStatusCard';") |
 | `QuestList` | コンポーネント | クエスト一覧の表示（縦画面） | 根拠: (行番号: 41 / 抜粋: "import QuestList from './features/quest/components/QuestList';") |
 | `ApprovalList` | コンポーネント | 承認待ちクエスト一覧の表示（縦画面、保護者のみ） | 根拠: (行番号: 42 / 抜粋: "import ApprovalList from './features/quest/components/ApprovalList';") |
@@ -136,7 +137,7 @@
   * `approvingHistoryIdsRef`（`Set<ID>`）/`isApprovingAllRef`（承認の多重送信防止、Issue #119）と、その見た目用ミラーである`approvingHistoryIds`(state)/`isApprovingAll`(state)（Issue #391/F-L8: 承認ボタンの`isLoading`表示用に、同期的なrefの判定結果をstateにも書き写す）。**（Issue #659で変更）** このうち ref/state/同期関数の3点セットは`useBusyKeys`フック（[useBusyKeys.md](./src/features/quest/hooks/useBusyKeys.md)）へ切り出され、分割代入で従来と同じ変数名に束ね直している（`isApprovingAllRef`/`isApprovingAll`は集合ではなく単一のbooleanのため対象外で、`useRef`/`useState`のまま）。
   * `processingQuestKeysRef`（`Set<string>`）/`processingQuestKeys`(state)（Issue #391: クエスト完了/取消APIが送信中の`(user_id, quest_id)`の組を追跡し、応答前の再タップを無視しつつ`QuestItem`にローディング表示を出すためのもの）。**（Issue #659で変更）** こちらも`useBusyKeys`フック経由で宣言している。
   * `completedSignal`(state、`CompletedSignal | null`)（Issue #102/#363: 完了APIが実際に成功した時点でのみ完了音・無限クエストのクールダウンを発火させるため、対象クエストのid・完了した本人のuserId・発火のたびに変わるnonceを`QuestList`/`QuestItem`側へ通知する）。
-  * `messageData`(state、エラー専用)、`avatarUser`(state)、`settingsOpen`(state)。
+  * `messageData`(state、エラー専用)、`avatarUser`(state)、`settingsOpen`(state)、`changelogOpen`(state、更新履歴モーダルの開閉)。
   * `pendingQuestsRef`（`useRef(pendingQuests)`を`useEffect`で同期。バグ修正M-6-2: `handleApproveAll`の`onRetry`が古い`pendingQuests`クロージャを掴んだままになる問題の修正）。
 * 根拠: state/ref宣言全体 (行番号: 46〜48, 51〜55, 64〜70, 77〜79, 88, 91, 94〜95, 122〜125)
 * 根拠: `useConfirmDialog`分割代入 (行番号: 57〜62 / 抜粋: "// モーダル状態 (完了・購入・却下。取消は長押しでのみ発火するため確認を挟まない)\n  const {\n    confirmMode, confirmTarget, confirmUser, rejectReason, setRejectReason,\n    isConfirming, setIsConfirming, isConfirmingRef,\n    openConfirm, closeConfirm,\n  } = useConfirmDialog();")
@@ -308,7 +309,7 @@
 * 根拠: スワイプ操作 (行番号: 567〜576 / 抜粋: "{/* 角度⑯: 左右スワイプでもクエスト/ごほうびタブを切り替えられるようにする */}\n            <motion.div\n              className=\"min-h-[300px] animate-fade-in\"\n              onPanEnd={(_e, info) => {\n                const order: Array<'quest' | 'shop' | 'inventory'> = ['quest', 'shop', 'inventory'];")
 * **（すごろく機能で追加）** 根拠: `quest`タブの`RoutineFlow`/`RoutineFreeTimeBanner`分岐 (行番号: 577〜593 / 抜粋: "{activeTab === 'quest' && activeRoutineKey && routineFlows && (\n                <RoutineFlow\n                  flowKey={activeRoutineKey}\n                  flow={routineFlows[activeRoutineKey]}\n                  onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}\n                  isCompleting={isCompletingRoutine}\n                />\n              )}", "{activeTab === 'quest' && !activeRoutineKey && (\n                <>\n                  {freeTimeRoutineKey && routineFlows && (\n                    <div className=\"mb-3\">\n                      <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />\n                    </div>\n                  )}\n                  <QuestList")
 
-* **副作用**: `avatarUser`が設定されている場合、`Suspense`配下で遅延ロードされた`AvatarUploader`の`onUploadComplete`から`refreshData()`と`showToast`による成功通知が行われる。`settingsOpen`が真の場合、同じく`Suspense`配下で遅延ロードされた`SettingsModal`が表示される。この`Suspense`は`ChunkErrorBoundary`で包まれており（Issue #362）、SW更新後に旧チャンクが404になって`lazy()`がthrowしても、Appツリー全体がアンマウントされて白画面になることはなく、バウンダリが自動で再読み込みする。**（すごろく機能で追加）** `useRoutineData(currentUser.user_id, onLevelUp, onError)`によるポーリング通信（15秒間隔、詳細は`useRoutineData.md`参照）も本コンポーネントの副作用に加わる。完了報告の成否は`onError`（**追加修正**、`useRoutineData`側に集約。以前は本ファイル自前の`handleRoutineStepComplete`が`showToast`/`play('cancel')`で通知していた）が`showToast`/`play('cancel')`で通知し、チェックポイント通過ボーナスでのレベルアップは`onLevelUp`経由で既存の`handleLevelUp`(`play('levelUp')`＋LEVEL UPトースト)を呼ぶ。**（大人用フロー分離で追加）** 大人用フローのステップ個別報酬は`onStepReward`経由で`play('clear')`＋「クリア！」トーストを出す。
+* **副作用**: `avatarUser`が設定されている場合、`Suspense`配下で遅延ロードされた`AvatarUploader`の`onUploadComplete`から`refreshData()`と`showToast`による成功通知が行われる。`settingsOpen`が真の場合、同じく`Suspense`配下で遅延ロードされた`SettingsModal`が表示される。`changelogOpen`が真の場合も同様に、`Suspense`配下で遅延ロードされた`ChangelogModal`が表示される（ヘッダー右上のボタン`onChangelogClick`で開き、`onClose`で閉じる）。この`Suspense`は`ChunkErrorBoundary`で包まれており（Issue #362）、SW更新後に旧チャンクが404になって`lazy()`がthrowしても、Appツリー全体がアンマウントされて白画面になることはなく、バウンダリが自動で再読み込みする。**（すごろく機能で追加）** `useRoutineData(currentUser.user_id, onLevelUp, onError)`によるポーリング通信（15秒間隔、詳細は`useRoutineData.md`参照）も本コンポーネントの副作用に加わる。完了報告の成否は`onError`（**追加修正**、`useRoutineData`側に集約。以前は本ファイル自前の`handleRoutineStepComplete`が`showToast`/`play('cancel')`で通知していた）が`showToast`/`play('cancel')`で通知し、チェックポイント通過ボーナスでのレベルアップは`onLevelUp`経由で既存の`handleLevelUp`(`play('levelUp')`＋LEVEL UPトースト)を呼ぶ。**（大人用フロー分離で追加）** 大人用フローのステップ個別報酬は`onStepReward`経由で`play('clear')`＋「クリア！」トーストを出す。
 * 根拠: `ChunkErrorBoundary`によるラップ (行番号: 678〜679 / 抜粋: "<ChunkErrorBoundary>\n      <Suspense fallback={null}>")
 * 根拠: (行番号: 661〜674 / 抜粋: "<Suspense fallback={null}>\n        {avatarUser && (\n          <AvatarUploader\n            user={avatarUser}\n            onClose={() => setAvatarUser(null)}\n            onUploadComplete={() => {\n              refreshData();\n              showToast({ title: \"変更完了\", text: \"アバターを変更しました！\", icon: '🖼️' });\n            }}\n          />\n        )}\n\n        {settingsOpen && (\n          <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} users={users} />\n        )}\n      </Suspense>")
 
@@ -424,6 +425,7 @@ graph TD
     App --> ChunkErrorBoundary["外部: components/ui/ChunkErrorBoundary.tsx"]
     App -.lazy.-> AvatarUploader["外部: components/ui/AvatarUploader.tsx"]
     App -.lazy.-> SettingsModal["外部: components/ui/SettingsModal.tsx"]
+    App -.lazy.-> ChangelogModal["外部: components/ui/ChangelogModal.tsx"]
 
     App --> FamilyDashboard["外部: features/family/components/FamilyDashboard.tsx"]
     App --> UserStatusCard["外部: features/family/components/UserStatusCard.tsx"]
