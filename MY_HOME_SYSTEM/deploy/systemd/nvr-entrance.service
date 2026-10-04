@@ -21,6 +21,8 @@ StandardError=journal
 # から NVR_RTSP_URL として読み込む。以前は ExecStart に平文で書かれたユニットが
 # 644 で置かれており、リポジトリ管理もされていなかった。
 EnvironmentFile=/etc/nvr/entrance.env
+# Issue #890: ffmpeg は入力失敗時に認証情報付きの rtsp URL をそのまま出力するため、journal へ残さない
+LogFilterPatterns=~rtsp://[^[:space:]]*@
 
 # --- FFmpeg Command ---
 # -timeout 20000000: 20秒間データが来なければ諦めて終了する(Restart=always で再接続)。
