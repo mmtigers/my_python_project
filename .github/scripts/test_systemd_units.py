@@ -273,3 +273,13 @@ def test_oneshot_services_started_by_a_timer_do_not_declare_restart():
         if types and types[0] == "oneshot":
             restarts = [v for _l, k, v in service if k == "Restart"]
             assert not restarts, f"{name}: oneshot なのに Restart={restarts} がある"
+
+
+def test_nvr_services_filter_rtsp_credentials_from_journal():
+    """Issue #890: ffmpeg は入力失敗時に認証情報付きの rtsp URL を出力するため、
+    nvr-*.service は LogFilterPatterns で該当行を journal から除外すること。"""
+    units = sorted(SYSTEMD_DIR.glob("nvr-*.service"))
+    assert units, "nvr-*.service が見つからない"
+    for unit in units:
+        text = unit.read_text(encoding="utf-8")
+        assert "LogFilterPatterns=~rtsp://" in text, f"{unit.name} に RTSP 認証情報のログフィルタが無い"

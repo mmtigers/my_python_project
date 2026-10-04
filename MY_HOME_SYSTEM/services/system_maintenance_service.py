@@ -38,7 +38,9 @@ from services.notification_service import send_push
 logger = setup_logging("system_maintenance")
 
 # #651: systemctl 等の外部コマンドが応答しない場合にサーバーを固めないための上限(秒)。
-RESTART_TIMEOUT_SEC: int = 30
+# #886: `systemctl restart` は停止+起動のフルサイクルで実測40秒超かかるため、30秒だと
+# 再起動が成功しているのに失敗表示になる。余裕を持って120秒にする。
+RESTART_TIMEOUT_SEC: int = 120
 
 # リポジトリルート(MY_HOME_SYSTEM の1つ上。health_watch.REPO_ROOT と同じ求め方)。
 REPO_ROOT: str = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
