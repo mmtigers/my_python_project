@@ -445,10 +445,11 @@ class QuestService:
 
         # 'offday_run'(土日の宿題): 休日、または翌日が休日の登校日(金曜・祝前日)だけ出す。
         # 完了するまで休日区間の間は出し続け、次の登校日には出さない(平日の宿題に切り替わる)。
-        reset_period = quest['reset_period'] if 'reset_period' in quest.keys() else None
-        if reset_period == 'offday_run':
-            if not (is_offday(today_date) or is_offday(today_date + datetime.timedelta(days=1))):
-                return False
+        # (sqlite3.Row は `in` が値の照合になるため、dict へ変換して .get で読む)
+        if dict(quest).get('reset_period') == 'offday_run' and not (
+            is_offday(today_date) or is_offday(today_date + datetime.timedelta(days=1))
+        ):
+            return False
 
         return True
 
