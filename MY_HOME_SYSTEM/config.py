@@ -639,12 +639,16 @@ if _tv_unlock_quest_ids_str:
 
 TV_PLUG_DEVICE_ID: Optional[str] = os.getenv("TV_PLUG_DEVICE_ID")
 
-# プラグを切る前にテレビ本体をリモコン(SwitchBotハブの赤外線リモコン)で消すための設定。
-# TV_IR_REMOTE_DEVICE_ID はSwitchBotアプリに登録した「テレビ」の仮想リモコンのデバイスID。
-# 未設定ならこの機能は使わず、従来どおりプラグだけを切る。
+# プラグを切る前にテレビ本体をリモコン(Nature Remo)で消すための設定。
+# テレビがNature Remoのどの拠点にあるか(TV_NATURE_REMO_LOCATION: "itami" か "takasago"。
+# 対応するアクセストークンは上の NATURE_REMO_ACCESS_TOKEN / NATURE_REMO_ACCESS_TOKEN_TAKASAGO)と、
+# 電源の信号ID(TV_REMO_SIGNAL_ID)または家電の種類が「TV」の家電ID(TV_REMO_APPLIANCE_ID)を
+# 指定する。どれかが未設定なら、この機能は使わず従来どおりプラグだけを切る。
 # テレビがついているかは、プラグ(Plug Mini)が測る消費電力で判断する。
 # TV_POWER_ON_THRESHOLD_WATTS 以上ならオン状態とみなす(待機電力は通常1W未満)。
-TV_IR_REMOTE_DEVICE_ID: str | None = (os.getenv("TV_IR_REMOTE_DEVICE_ID") or "").strip() or None
+TV_NATURE_REMO_LOCATION: str = (os.getenv("TV_NATURE_REMO_LOCATION") or "").strip().lower()
+TV_REMO_SIGNAL_ID: str | None = (os.getenv("TV_REMO_SIGNAL_ID") or "").strip() or None
+TV_REMO_APPLIANCE_ID: str | None = (os.getenv("TV_REMO_APPLIANCE_ID") or "").strip() or None
 try:
     TV_POWER_ON_THRESHOLD_WATTS: float = float(os.getenv("TV_POWER_ON_THRESHOLD_WATTS") or "10")
 except ValueError:
