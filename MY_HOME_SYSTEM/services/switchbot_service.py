@@ -151,7 +151,7 @@ def get_tv_power_watts() -> float | None:
     return None
 
 
-def turn_off_tv_gracefully(sleep=time.sleep) -> Optional[Dict[str, Any]]:
+def turn_off_tv_gracefully(sleep=time.sleep) -> dict[str, Any] | None:
     """テレビがついていれば先にリモコンで消してから、TVプラグの電源をOFFにする。
 
     電源が入ったままプラグで100Vを断つのを避けるため(テレビ内蔵ストレージ・録画への
