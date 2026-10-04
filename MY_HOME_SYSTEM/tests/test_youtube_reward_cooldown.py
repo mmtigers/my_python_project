@@ -25,6 +25,7 @@ from core.utils import get_now_iso
 from core.database import get_db_cursor
 from services import quest_service as qs_module
 from services.quest_service import JST, ROLE_CHILD
+from services.quest import inventory_service
 from services.routine_service import routine_service
 
 YOUTUBE_REWARD_IDS = [701, 702]
@@ -126,6 +127,10 @@ def _youtube_reward_ids(monkeypatch):
     # (別issue、2026-09-23)は対象外にする。個別に自由時間の状態を検証したい
     # テストはこの既定値を上書きする(test_inventory_free_time_gate.py参照)。
     monkeypatch.setattr(routine_service, "is_user_currently_in_free_time", lambda *a, **k: True)
+    # お昼寝の時間帯(config.YOUTUBE_NAP_BLOCK_START〜END)は実時刻の壁時計判定なので、
+    # 実行した時刻(例: CIが13:30〜15:00 JSTに走った場合)でこのファイルの全テストが
+    # 落ちないよう無効化する。お昼寝そのものの検証は別ファイルで行っている。
+    monkeypatch.setattr(inventory_service, "_is_within_youtube_nap_block", lambda *a, **k: False)
 
 
 def test_second_youtube_ticket_is_blocked_within_cooldown(isolated_db):

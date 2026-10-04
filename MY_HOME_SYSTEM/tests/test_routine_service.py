@@ -115,17 +115,21 @@ class TestFlowStartGating:
     def test_pm_flow_started_after_14_on_weekend(self, isolated_db):
         """夕方(pm)の開始トリガーは土日も平日と同じ14:00(要件確認済み)。
 
-        ただし土日は手洗い・うがい(steps[0])をスキップしておやつ休憩(steps[1])から
-        始まる(要件: 休日のPMはおやつ休憩からスタート)。
+        土日は手洗い・うがい・おやつ休憩・宿題をすべてスキップし、14:00の開始と
+        同時に自由時間(steps[3])に入る(要件: 14時から自動で自由時間)。
         """
         _seed_user()
         state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
-        assert state['flows']['pm']['started'] is True
-        assert state['flows']['pm']['steps'][0]['key'] == 'handwash'
-        assert state['flows']['pm']['steps'][0]['status'] == 'done'
-        assert state['flows']['pm']['steps'][1]['key'] == 'snack'
-        assert state['flows']['pm']['steps'][1]['status'] == 'current'
-        assert state['flows']['pm']['current_step_index'] == 1
+        pm = state['flows']['pm']
+        assert pm['started'] is True
+        statuses = {s['key']: s['status'] for s in pm['steps']}
+        assert statuses['handwash'] == 'done'
+        assert statuses['snack'] == 'done'
+        assert statuses['homework'] == 'done'
+        assert pm['steps'][3]['key'] == 'free'
+        assert pm['steps'][3]['status'] == 'current'
+        assert pm['current_step_index'] == 3
+        assert pm['in_free_time'] is True
 
     def test_unknown_user_returns_404(self, isolated_db):
         from fastapi import HTTPException
@@ -579,12 +583,12 @@ class TestCheckpointBonus:
 
 
 class TestWeekendCheckpointOverride:
-    """土日は朝(am)のチェックポイントだけ11:00に後ろ倒しする(要件: なるべく平日と揃える)。"""
+    """土日は朝(am)のチェックポイントだけ12:00に後ろ倒しする(要件: なるべく平日と揃える)。"""
 
     def test_am_checkpoint_time_field_is_930_on_saturday(self, isolated_db):
         _seed_user()
         state = routine_service.get_today_state('daughter', now=_saturday_at(6, 0))
-        assert state['flows']['am']['checkpoint_time'] == '11:00'
+        assert state['flows']['am']['checkpoint_time'] == '12:00'
 
     def test_am_checkpoint_time_field_is_750_on_weekday(self, isolated_db):
         _seed_user()
@@ -592,7 +596,7 @@ class TestWeekendCheckpointOverride:
         assert state['flows']['am']['checkpoint_time'] == '07:50'
 
     def test_am_not_forced_past_at_800_on_saturday(self, isolated_db):
-        """平日なら7:50超えで強制通過する8:00でも、土日は11:00まではまだ猶予がある。"""
+        """平日なら7:50超えで強制通過する8:00でも、土日は12:00まではまだ猶予がある。"""
         _seed_user(gold=0, exp=0)
         for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
@@ -601,111 +605,89 @@ class TestWeekendCheckpointOverride:
         assert am['in_free_time'] is True
         assert am['bonus_gold'] == 0
 
-    def test_am_forced_past_at_1101_on_saturday(self, isolated_db):
+    def test_am_forced_past_at_1201_on_saturday(self, isolated_db):
         _seed_user(gold=0, exp=0)
         for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
-        state = _state_after_deadlines('daughter', now=_saturday_at(11, 1))
+        state = _state_after_deadlines('daughter', now=_saturday_at(12, 1))
         am = state['flows']['am']
         assert am['in_free_time'] is False
         assert am['bonus_gold'] == 150
 
-    def test_pm_checkpoint_time_unchanged_on_saturday(self, isolated_db):
-        """夕方(pm)は土日も平日と同じ17:30のまま(要件確認済み: 現状維持)。"""
+    def test_pm_checkpoint_time_is_1800_on_saturday(self, isolated_db):
+        """夕方(pm)の自由時間は土日祝だけ18:00まで(要件確認済み)。"""
         _seed_user()
         state = routine_service.get_today_state('daughter', now=_saturday_at(15, 0))
+        assert state['flows']['pm']['checkpoint_time'] == '18:00'
+
+    def test_pm_checkpoint_time_is_1730_on_weekday(self, isolated_db):
+        _seed_user()
+        state = routine_service.get_today_state('daughter', now=_friday_at(15, 0))
         assert state['flows']['pm']['checkpoint_time'] == '17:30'
+
+    def test_pm_not_forced_past_at_1731_on_saturday(self, isolated_db):
+        """平日なら17:30超えで強制通過するが、土日は18:00まで自由時間が続く。"""
+        _seed_user(gold=0, exp=0)
+        state = _state_after_deadlines('daughter', now=_saturday_at(17, 31))
+        assert state['flows']['pm']['in_free_time'] is True
+
+    def test_youtube_free_time_follows_the_holiday_schedule(self, isolated_db):
+        """休日のYouTubeは朝の準備後〜12:00と14:00〜18:00だけ(18:00〜20:00は見られない)。"""
+        _seed_user()
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
+        assert routine_service.is_user_currently_in_free_time('daughter', now=_saturday_at(10, 0)) is True
+        _state_after_deadlines('daughter', now=_saturday_at(12, 1))
+        assert routine_service.is_user_currently_in_free_time('daughter', now=_saturday_at(13, 0)) is False
+        assert routine_service.is_user_currently_in_free_time('daughter', now=_saturday_at(14, 0)) is True
+        assert routine_service.is_user_currently_in_free_time('daughter', now=_saturday_at(17, 59)) is True
+        _state_after_deadlines('daughter', now=_saturday_at(18, 1))
+        assert routine_service.is_user_currently_in_free_time('daughter', now=_saturday_at(19, 0)) is False
+
+    def test_pm_forced_past_at_1801_on_saturday(self, isolated_db):
+        _seed_user(gold=0, exp=0)
+        _state_after_deadlines('daughter', now=_saturday_at(14, 0))
+        state = _state_after_deadlines('daughter', now=_saturday_at(18, 1))
+        assert state['flows']['pm']['in_free_time'] is False
 
 
 class TestWeekendPmSkipAndCarryover:
-    """休日PMの微修正: handwashは常にスキップ、宿題は金曜/土曜の完了を引き継ぐ。"""
+    """休日PM: 手洗い・おやつ休憩・宿題はすべてスキップし、14:00から自由時間に入る。"""
 
-    def test_saturday_pm_starts_from_snack(self, isolated_db):
+    def test_saturday_pm_starts_in_free_time(self, isolated_db):
         _seed_user()
         state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
         pm = state['flows']['pm']
         statuses = {s['key']: s['status'] for s in pm['steps']}
         assert statuses['handwash'] == 'done'
-        assert statuses['snack'] == 'current'
-        assert pm['current_step_index'] == 1
+        assert statuses['snack'] == 'done'
+        assert statuses['homework'] == 'done'
+        assert statuses['free'] == 'current'
+        assert pm['current_step_index'] == 3
 
-    def test_sunday_pm_starts_from_snack(self, isolated_db):
+    def test_sunday_pm_starts_in_free_time(self, isolated_db):
         _seed_user()
         state = routine_service.get_today_state('daughter', now=_sunday_at(14, 0))
         pm = state['flows']['pm']
         statuses = {s['key']: s['status'] for s in pm['steps']}
-        assert statuses['handwash'] == 'done'
-        assert statuses['snack'] == 'current'
-        assert pm['current_step_index'] == 1
+        assert statuses['snack'] == 'done'
+        assert statuses['homework'] == 'done'
+        assert statuses['free'] == 'current'
+        assert pm['current_step_index'] == 3
 
-    def test_homework_done_friday_skips_saturday_and_sunday(self, isolated_db):
+    def test_homework_is_skipped_on_holiday_even_if_not_done_on_friday(self, isolated_db):
+        """金曜に宿題を終えていなくても、休日は宿題を出さない。"""
         _seed_user()
-        for key in ('handwash', 'snack', 'homework'):
-            routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
-
-        sat_state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
-        pm_sat = sat_state['flows']['pm']
-        statuses_sat = {s['key']: s['status'] for s in pm_sat['steps']}
-        assert statuses_sat['handwash'] == 'done'
-        assert statuses_sat['homework'] == 'done'
-        assert statuses_sat['snack'] == 'current'
-        assert pm_sat['current_step_index'] == 1
-
-        sun_state = routine_service.get_today_state('daughter', now=_sunday_at(14, 0))
-        pm_sun = sun_state['flows']['pm']
-        statuses_sun = {s['key']: s['status'] for s in pm_sun['steps']}
-        assert statuses_sun['homework'] == 'done'
-        assert statuses_sun['snack'] == 'current'
-
-    def test_homework_done_friday_skips_sunday_even_without_visiting_saturday(self, isolated_db):
-        """土曜のアプリ未起動(routine_progress行が無い)でも、金曜分の記録から
-        日曜のスキップ判定ができること(2日分の遡り: 金曜・土曜)。"""
-        _seed_user()
-        for key in ('handwash', 'snack', 'homework'):
-            routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
-
-        sun_state = routine_service.get_today_state('daughter', now=_sunday_at(14, 0))
-        pm_sun = sun_state['flows']['pm']
-        statuses_sun = {s['key']: s['status'] for s in pm_sun['steps']}
-        assert statuses_sun['homework'] == 'done'
-
-    def test_homework_done_saturday_only_skips_sunday_not_saturday(self, isolated_db):
-        _seed_user()
-        # 金曜は手洗い・おやつだけ完了し、宿題は完了しないまま
         routine_service.complete_step('daughter', 'pm', 'handwash', now=_friday_at(14, 0))
         routine_service.complete_step('daughter', 'pm', 'snack', now=_friday_at(14, 5))
 
-        sat_state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
-        pm_sat = sat_state['flows']['pm']
-        statuses_sat = {s['key']: s['status'] for s in pm_sat['steps']}
-        assert statuses_sat['handwash'] == 'done'  # 土日は常にスキップ
-        assert statuses_sat['homework'] == 'locked'  # 金曜未完了なのでスキップされない
-        assert pm_sat['current_step_index'] == 1  # snackが現在地
-
-        routine_service.complete_step('daughter', 'pm', 'snack', now=_saturday_at(14, 5))
-        routine_service.complete_step('daughter', 'pm', 'homework', now=_saturday_at(14, 10))
-
-        sun_state = routine_service.get_today_state('daughter', now=_sunday_at(14, 0))
-        pm_sun = sun_state['flows']['pm']
-        statuses_sun = {s['key']: s['status'] for s in pm_sun['steps']}
-        assert statuses_sun['homework'] == 'done'  # 土曜に完了したので日曜はスキップ
-        assert statuses_sun['snack'] == 'current'  # snack自体は日曜も必要
-
-    def test_homework_marked_remind_on_friday_does_not_skip_saturday(self, isolated_db):
-        """金曜にチェックポイントを過ぎて未完了扱い('remind')になった場合は
-        'done'ではないため、土曜はスキップされない。"""
-        _seed_user(gold=0, exp=0)
-        routine_service.complete_step('daughter', 'pm', 'handwash', now=_friday_at(14, 0))
-        routine_service.complete_step('daughter', 'pm', 'snack', now=_friday_at(14, 5))
-        _state_after_deadlines('daughter', now=_friday_at(18, 1))  # 強制通過
-
-        sat_state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
-        pm_sat = sat_state['flows']['pm']
-        statuses_sat = {s['key']: s['status'] for s in pm_sat['steps']}
-        assert statuses_sat['homework'] == 'locked'
+        state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
+        statuses = {s['key']: s['status'] for s in state['flows']['pm']['steps']}
+        assert statuses['homework'] == 'done'
+        assert statuses['free'] == 'current'
 
     def test_weekday_friday_homework_never_skipped(self, isolated_db):
-        """金曜自身は平日なのでcarryover判定の対象外(常に通常どおり表示)。"""
+        """金曜自身は平日なので休日スキップの対象外(常に通常どおり表示)。"""
         _seed_user()
         state = routine_service.get_today_state('daughter', now=_friday_at(14, 0))
         pm = state['flows']['pm']
@@ -713,41 +695,16 @@ class TestWeekendPmSkipAndCarryover:
         assert statuses['handwash'] == 'current'
         assert statuses['homework'] == 'locked'
 
-    def test_skipped_steps_are_excluded_from_the_bonus_denominator(self, isolated_db):
-        """スキップ扱いのステップは按分の分母から除かれ、残りを全部やれば満額になる。"""
-        _seed_user(gold=0, exp=0)
-        for key in ('handwash', 'snack', 'homework'):
-            routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
-
-        # 土曜はhandwash・homework・tomorrow_prepともスキップ済みなので、当日やるべき
-        # ステップはsnackだけ。それを完了させれば満額ボーナス(1/1)。
-        routine_service.complete_step('daughter', 'pm', 'snack', now=_saturday_at(14, 0))
-        state = _state_after_deadlines('daughter', now=_saturday_at(18, 1))
-        pm_sat = state['flows']['pm']
-        assert pm_sat['bonus_gold'] == 150
-        assert pm_sat['bonus_exp'] == 30
-
     def test_skipped_steps_do_not_earn_bonus_on_their_own(self, isolated_db):
-        """スキップだけが並んだ状態で何もしなければボーナスは0になる。
-
-        同じ土曜でも、当日やるべきsnackをやらなければ0/1で0。以前はスキップ済みの
-        3件が分子に入り 3/4 = 112Gold が何もせずに入っていた。
-        """
+        """休日は当日やるべきステップが無いので、何もしなくてもボーナスは0になる。"""
         _seed_user(gold=0, exp=0)
-        for key in ('handwash', 'snack', 'homework'):
-            routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
-
         state = _state_after_deadlines('daughter', now=_saturday_at(18, 1))
         pm_sat = state['flows']['pm']
         assert pm_sat['bonus_gold'] == 0
         assert pm_sat['bonus_exp'] == 0
 
     def test_weekend_skip_alone_does_not_inflate_the_preview(self, isolated_db):
-        """按分見込み(preview_bonus_gold)もスキップ分では増えない。
-
-        土曜のpmはhandwashがスキップされるが、当日やるべきsnack/homework/
-        tomorrow_prepの3件は未着手なので見込みは0。
-        """
+        """按分見込み(preview_bonus_gold)もスキップ分では増えない。"""
         _seed_user(gold=0, exp=0)
         state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
         assert state['flows']['pm']['preview_bonus_gold'] == 0
@@ -1084,7 +1041,7 @@ class TestProcessDeadlinesJstBoundary:
 
     基準の月曜を 2026-09-21 から 2026-09-28 へ移したのは、前者が敬老の日で、
     祝日を休日として扱うようになった(core/jp_holidays.py)いま平日の締切
-    (07:50)ではなく休日の締切(11:00)が適用されるため。
+    (07:50)ではなく休日の締切(12:00)が適用されるため。
     """
 
     @freeze_time("2026-09-27 22:51:00")  # = JST 2026-09-28(月) 07:51
@@ -1297,8 +1254,7 @@ class TestStepEventRecording:
         _state_after_deadlines('daughter', now=_saturday_at(14, 0))
 
         skips = _step_events(flow_key='pm', source='carryover_skip')
-        assert len(skips) == 1
-        assert skips[0]['step_key'] == 'handwash'
+        assert [e['step_key'] for e in skips] == ['handwash', 'snack', 'homework']
         assert skips[0]['from_status'] is None
         assert skips[0]['to_status'] == 'done'
         assert skips[0]['progress_date'] == '2024-01-20'
@@ -1580,7 +1536,7 @@ class TestDadWeekdayWeekendSplit:
         スキップ分を分母からも除くようにして(migrations/0012)、両方とも解消した。
         """
         _seed_user(user_id='dad', role='role_adult', gold=0, exp=0)
-        _state_after_deadlines('dad', now=_saturday_at(17, 31))
+        _state_after_deadlines('dad', now=_saturday_at(18, 1))
         gold, _exp, _level = _user_balance('dad')
         assert gold == 0
 
@@ -1596,7 +1552,7 @@ class TestDadWeekdayWeekendSplit:
         state = routine_service.complete_step('dad', 'pm', 'living_reset', now=_saturday_at(15, 1))
         assert state['granted_gold'] == 50
 
-        _state_after_deadlines('dad', now=_saturday_at(17, 31))  # チェックポイント通過
+        _state_after_deadlines('dad', now=_saturday_at(18, 1))  # チェックポイント通過
         gold, _exp, _level = _user_balance('dad')
         assert gold == 50 + 50 + 150  # ステップ個別報酬2件 + 満額ボーナス
 
@@ -1632,10 +1588,10 @@ class TestPmCheckpointIsSeventeenThirty:
             assert state['flows']['pm']['checkpoint_time'] == '17:30'
 
     def test_am_checkpoint_is_unchanged(self, isolated_db):
-        """朝の締切(平日07:50/土日11:00)は変更していない。"""
+        """朝の締切(平日07:50/土日12:00)は変更していない。"""
         _seed_user(user_id='son', role='role_child')
         assert routine_service.get_today_state('son', now=_at(6, 0))['flows']['am']['checkpoint_time'] == '07:50'
-        assert routine_service.get_today_state('son', now=_saturday_at(6, 0))['flows']['am']['checkpoint_time'] == '11:00'
+        assert routine_service.get_today_state('son', now=_saturday_at(6, 0))['flows']['am']['checkpoint_time'] == '12:00'
 
     def test_child_homework_is_reminded_after_1730(self, isolated_db):
         """17:30を過ぎると一本道の未完了ステップは'remind'になり、寝る準備へ進む。
@@ -1692,8 +1648,8 @@ class TestSkippedKeysPersistence:
                 "SELECT skipped_keys FROM routine_progress "
                 "WHERE user_id='daughter' AND flow_key='pm'"
             ).fetchone()
-        # 土曜のpmは手洗い・うがいだけがスキップ対象(宿題・明日の準備は金曜未完了)。
-        assert json.loads(row['skipped_keys']) == ['handwash']
+        # 土曜のpmは手洗い・おやつ休憩・宿題がスキップ対象(明日の準備は金曜未完了)。
+        assert sorted(json.loads(row['skipped_keys'])) == ['handwash', 'homework', 'snack']
 
     def test_weekday_progress_has_no_skipped_keys(self, isolated_db):
         """平日の子ども用フローはスキップ無しなので空配列で始まる。"""

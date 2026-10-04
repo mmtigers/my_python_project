@@ -103,7 +103,7 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
             {'key': 'wash', 'label': '顔を洗う', 'icon_key': 'wash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             {'key': 'teeth', 'label': '歯磨き', 'icon_key': 'teeth', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             {'key': 'toilet', 'label': 'トイレ', 'icon_key': 'toilet', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
-            # 土日は学校が無いため、出発(チェックポイント通過)の締切を11:00に後ろ倒しする。
+            # 土日は学校が無いため、出発(チェックポイント通過)の締切を12:00に後ろ倒しする。
             # （画面非表示化で変更）以前はこの後に単なる「出発」表示用ステップ(leave、
             # タップ操作以外の意味を持たない)が続いていたが、削除した。'free'がこの
             # フローで最後(かつ唯一)のchecklist=Trueブロック直後のステップのため、
@@ -112,26 +112,29 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
             # 7:50を過ぎたら朝の準備の画面自体を表示しない。isRoutineFlowBlocking/
             # isRoutineFlowFreeTimeは共にis_complete=Trueで false になるため、
             # フロントエンド側の変更は不要)。
-            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '07:50', 'weekend_checkpoint_time': '11:00', 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '07:50', 'weekend_checkpoint_time': '12:00', 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
         ],
     },
     'pm': {
         'title': '帰ってから寝るまで',
-        # 土日も同じフローを使う(要件: なるべく平日と揃える)。土日は先頭の
-        # handwashだけスキップし、おやつ休憩から開始する(要件確認済み)。
+        # 土日も同じフローを使う(要件: なるべく平日と揃える)。休日は先頭の
+        # handwash・snack・homeworkをスキップし、自由時間から開始する(要件確認済み)。
         'day_of_week': ALL_DAYS,
         # 実際の下校/帰宅時刻に合わせてユーザーが確定した値。土日も同じ14:00。
         'start_trigger_time': '14:00',
         'steps': [
-            # 土日は手洗い・うがいをスキップし、おやつ休憩からスタートする(要件確認済み)。
+            # 休日は手洗い・おやつ休憩・宿題をスキップし、14:00から自由時間に入る(要件確認済み)。
             {'key': 'handwash', 'label': '手洗い・うがい', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
-            {'key': 'snack', 'label': 'おやつ休憩', 'icon_key': 'snack', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
-            # 金曜に完了していれば土日は不要、土曜に完了していれば日曜は不要
-            # (要件確認済み)。判定はroutine_service._resolve_skip_keysが行う。
-            {'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},
+            {'key': 'snack', 'label': 'おやつ休憩', 'icon_key': 'snack', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
+            # 休日は宿題を出さない(金曜に未完了でも休日はスキップ。要件確認済み)。
+            # weekend_skip=Trueだと_resolve_skip_keysは繰越判定(weekend_carryover)まで
+            # 見ないため、weekend_carryoverはFalseにしておく。
+            {'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
             # 自由時間→寝る準備の締切は17:30(要件確認済み。以前は18:00だった)。
-            # 土日も平日と同じ17:30のまま(要件確認済み: 現状維持)。
-            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '17:30', 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+            # 休日(土日祝)は18:00まで(要件確認済み)。
+            # 休日は手洗い・おやつ休憩・宿題をすべてスキップするため、14:00に
+            # 開始した時点で自由時間に入る(要件確認済み: 14:00から自動で自由時間)。
+            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '17:30', 'weekend_checkpoint_time': '18:00', 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
             # 寝る準備4項目は朝の準備と同様、順番を強制しないチェックリスト
             # (要件確認済み)。チェックポイント(free)通過後に一括で'current'になる。
             {'key': 'dinner', 'label': '晩ごはん', 'icon_key': 'meal', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
@@ -206,7 +209,7 @@ def _build_adult_flows(pm_path_steps: List[RoutineStep]) -> dict[str, RoutineFlo
             'start_trigger_time': '05:00',
             'steps': [*_ADULT_AM_CHECKLIST, {
                 'key': 'free', 'label': '自由時間', 'icon_key': 'free',
-                'checkpoint_time': '07:50', 'weekend_checkpoint_time': '11:00',
+                'checkpoint_time': '07:50', 'weekend_checkpoint_time': '12:00',
                 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False,
             }],
         },
@@ -216,7 +219,7 @@ def _build_adult_flows(pm_path_steps: List[RoutineStep]) -> dict[str, RoutineFlo
             'start_trigger_time': '14:00',
             'steps': [
                 *pm_path_steps,
-                {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '17:30', 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+                {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '17:30', 'weekend_checkpoint_time': '18:00', 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
                 *_ADULT_PM_CHECKLIST,
                 # 子ども用フローと同じく、退役した id=1105「【夜】就寝ミッション」の報酬を
                 # ここへ移設している(元クエストは target='all' で大人も対象だった)。
@@ -318,7 +321,7 @@ def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> 
     """`now`が休日か平日かに応じた、そのステップの実際のチェックポイント締切時刻を返す。
 
     休日(土日・国民の祝日・家の休み)はweekend_checkpoint_timeを使い、その上書きが
-    無ければ平日のcheckpoint_timeをそのまま使う(例: 朝の出発締切は平日7:50・休日11:00)。
+    無ければ平日のcheckpoint_timeをそのまま使う(例: 朝の出発締切は平日7:50・休日12:00)。
     """
     if is_offday(now) and step['weekend_checkpoint_time']:
         return step['weekend_checkpoint_time']

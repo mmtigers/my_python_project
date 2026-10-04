@@ -13,6 +13,7 @@ services/switchbot_service.py のテスト。
   移動)。
 """
 import base64
+import datetime
 import hashlib
 import hmac
 import os
@@ -388,6 +389,14 @@ class TestTriggerTvUnlock:
     def _run_background_thread_synchronously(self, monkeypatch):
         monkeypatch.setattr(threading.Thread, "start", threading.Thread.run)
 
+    @pytest.fixture(autouse=True)
+    def _pin_clock_to_weekday_afternoon(self, monkeypatch):
+        """実時刻が休日のテレビ禁止時間帯に当たってもテストが変わらないよう平日の午後に固定する。"""
+        monkeypatch.setattr(
+            switchbot_service, "get_now_jst",
+            lambda: datetime.datetime(2026, 9, 18, 15, 0, tzinfo=datetime.timezone(datetime.timedelta(hours=9))),
+        )
+
     def test_success_status_code_does_not_notify_parents(self, monkeypatch):
         monkeypatch.setattr(
             switchbot_service, "send_device_command", MagicMock(return_value={"statusCode": 100})
@@ -462,3 +471,153 @@ class TestTriggerTvUnlock:
 
         assert len(captured_threads) == 1
         assert captured_threads[0].daemon is True
+
+
+class TestIsTvBlockedNow:
+    """休日(土日祝)は12:00〜14:00と20:00以降、テレビを自動でつけない。"""
+
+    @staticmethod
+    def _at(y, m, d, h, mi=0):
+        return datetime.datetime(y, m, d, h, mi, tzinfo=datetime.timezone(datetime.timedelta(hours=9)))
+
+    def test_blocked_at_noon_on_saturday(self):
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 12, 0)) is True
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 13, 59)) is True
+
+    def test_allowed_before_noon_and_from_14_to_20_on_saturday(self):
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 11, 59)) is False
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 14, 0)) is False
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 19, 59)) is False
+
+    def test_blocked_from_20_on_saturday(self):
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 20, 0)) is True
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 23, 59)) is True
+
+    def test_blocked_on_a_national_holiday(self):
+        # 2026-09-21(月)は敬老の日
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 21, 12, 30)) is True
+
+    def test_never_blocked_on_a_weekday(self):
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 18, 12, 30)) is False
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 18, 21, 0)) is False
+
+    def test_trigger_tv_unlock_does_nothing_in_a_blocked_window(self, monkeypatch):
+        monkeypatch.setattr(switchbot_service, "get_now_jst", lambda: self._at(2026, 9, 19, 12, 30))
+        send = MagicMock(return_value={"statusCode": 100})
+        monkeypatch.setattr(switchbot_service, "send_device_command", send)
+        monkeypatch.setattr(threading.Thread, "start", threading.Thread.run)
+
+        switchbot_service.trigger_tv_unlock(context="blocked")
+
+        send.assert_not_called()
+
+
+class TestTurnOffTvGracefully:
+    """プラグを切る前に、テレビがついていればリモコンで先に消す。"""
+
+    @pytest.fixture(autouse=True)
+    def _config(self, monkeypatch):
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1", raising=False)
+        monkeypatch.setattr(config, "TV_IR_REMOTE_DEVICE_ID", "ir-1", raising=False)
+        monkeypatch.setattr(config, "TV_POWER_ON_THRESHOLD_WATTS", 10.0, raising=False)
+        monkeypatch.setattr(config, "TV_GRACEFUL_OFF_WAIT_SECONDS", 15, raising=False)
+
+    @staticmethod
+    def _status(watts):
+        return {"statusCode": 100, "body": {"weight": watts}}
+
+    def _patch(self, monkeypatch, watts_sequence, remote_result=None):
+        """get_device_statusが watts_sequence を順に返し、コマンド送信は記録する。"""
+        calls = []
+        seq = list(watts_sequence)
+
+        def fake_status(_device_id):
+            return self._status(seq.pop(0) if len(seq) > 1 else seq[0])
+
+        def fake_command(device_id, command, *a, **k):
+            calls.append((device_id, command))
+            if device_id == "ir-1" and remote_result is not None:
+                return remote_result
+            return {"statusCode": 100}
+
+        monkeypatch.setattr(switchbot_service, "get_device_status", fake_status)
+        monkeypatch.setattr(switchbot_service, "send_device_command", fake_command)
+        return calls
+
+    def test_turns_off_remote_first_then_plug_when_tv_is_on(self, monkeypatch):
+        calls = self._patch(monkeypatch, [80.0, 0.5])
+        slept = []
+
+        switchbot_service.turn_off_tv_gracefully(sleep=slept.append)
+
+        assert calls == [("ir-1", "turnOff"), ("plug-1", "turnOff")]
+        assert slept == [5]  # 1回目の確認で下がっていたので待ちは5秒だけ
+
+    def test_only_cuts_plug_when_tv_is_already_off(self, monkeypatch):
+        calls = self._patch(monkeypatch, [0.4])
+
+        switchbot_service.turn_off_tv_gracefully(sleep=lambda s: None)
+
+        assert calls == [("plug-1", "turnOff")]
+
+    def test_cuts_plug_anyway_when_power_does_not_drop(self, monkeypatch):
+        calls = self._patch(monkeypatch, [80.0])
+        slept = []
+
+        switchbot_service.turn_off_tv_gracefully(sleep=slept.append)
+
+        assert calls == [("ir-1", "turnOff"), ("plug-1", "turnOff")]
+        assert sum(slept) == 15  # TV_GRACEFUL_OFF_WAIT_SECONDS まで待って諦める
+
+    def test_cuts_plug_when_remote_command_fails(self, monkeypatch):
+        calls = self._patch(monkeypatch, [80.0], remote_result={"statusCode": 190})
+        slept = []
+
+        switchbot_service.turn_off_tv_gracefully(sleep=slept.append)
+
+        assert calls == [("ir-1", "turnOff"), ("plug-1", "turnOff")]
+        assert slept == []  # リモコンが失敗したら待たない
+
+    def test_cuts_plug_when_power_is_unavailable(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(switchbot_service, "get_device_status", lambda _id: None)
+        monkeypatch.setattr(
+            switchbot_service, "send_device_command",
+            lambda device_id, command, *a, **k: calls.append((device_id, command)) or {"statusCode": 100},
+        )
+
+        switchbot_service.turn_off_tv_gracefully(sleep=lambda s: None)
+
+        assert calls == [("plug-1", "turnOff")]
+
+    def test_does_not_read_power_or_use_remote_when_not_configured(self, monkeypatch):
+        monkeypatch.setattr(config, "TV_IR_REMOTE_DEVICE_ID", None, raising=False)
+        calls = self._patch(monkeypatch, [80.0])
+        status = MagicMock()
+        monkeypatch.setattr(switchbot_service, "get_device_status", status)
+
+        switchbot_service.turn_off_tv_gracefully(sleep=lambda s: None)
+
+        assert calls == [("plug-1", "turnOff")]
+        status.assert_not_called()
+
+    def test_returns_the_plug_command_result(self, monkeypatch):
+        self._patch(monkeypatch, [0.0])
+        assert switchbot_service.turn_off_tv_gracefully(sleep=lambda s: None) == {"statusCode": 100}
+
+
+class TestGetTvPowerWatts:
+    def test_reads_weight_field_of_plug_mini(self, monkeypatch):
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1", raising=False)
+        monkeypatch.setattr(
+            switchbot_service, "get_device_status",
+            lambda _id: {"statusCode": 100, "body": {"weight": 85.5}},
+        )
+        assert switchbot_service.get_tv_power_watts() == 85.5
+
+    def test_none_without_plug_id_or_on_api_error(self, monkeypatch):
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", None, raising=False)
+        assert switchbot_service.get_tv_power_watts() is None
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1", raising=False)
+        monkeypatch.setattr(switchbot_service, "get_device_status", lambda _id: {"statusCode": 190})
+        assert switchbot_service.get_tv_power_watts() is None
