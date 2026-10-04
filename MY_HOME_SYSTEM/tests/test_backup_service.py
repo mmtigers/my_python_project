@@ -257,12 +257,14 @@ class TestOffsiteCopy:
         monkeypatch.setattr(config, "DB_BACKUP_OFFSITE_REMOTE", "gdrive:backup", raising=False)
         self._fake_rclone(monkeypatch, fail=fail)
         errors = []
-        monkeypatch.setattr(backup_service.logger, "error", lambda msg: errors.append(msg))
+        monkeypatch.setattr(backup_service.logger, "error", lambda msg, **kw: errors.append(msg))
+        monkeypatch.setattr(backup_service, "_offsite_failed", False)
 
         success, _msg, _size = backup_service.perform_backup()
 
         assert success is True
         assert any("オフサイト複製" in m for m in errors)
+        assert backup_service._offsite_failed is True  # Issue #891: 終了コード2の根拠
 
     def test_not_attempted_when_nas_backup_fails(self, monkeypatch):
         monkeypatch.setattr(config, "DB_BACKUP_OFFSITE_REMOTE", "gdrive:backup", raising=False)
@@ -285,10 +287,15 @@ class TestOffsiteCopy:
         monkeypatch.setattr(config, "DB_BACKUP_OFFSITE_REMOTE", "gdrive:backup", raising=False)
         monkeypatch.setattr(backup_service.shutil, "which", lambda name: None)
         errors = []
-        monkeypatch.setattr(backup_service.logger, "error", lambda msg: errors.append(msg))
+        monkeypatch.setattr(backup_service.logger, "error", lambda msg, **kw: errors.append(msg))
+        notified = []
+        monkeypatch.setattr(backup_service, "send_push", lambda **kwargs: notified.append(kwargs))
 
         assert backup_service._copy_latest_offsite(backup_service.Path("/nas/x.db")) is False
         assert any("rclone" in m for m in errors)
+        # Issue #891: 失敗はerrorチャンネルへ通知され、終了コード用フラグが立つ
+        assert notified and notified[0]["channel"] == "error"
+        assert backup_service._offsite_failed is True
 
 
 class _VerifyConnStub:
@@ -451,7 +458,7 @@ class TestMainExitCode:
         あることを、ソース上でも固定する(`if __name__` ブロックは
         .coveragerc の exclude_lines によりカバレッジ対象外のため)。"""
         source = Path(backup_service.__file__).read_text(encoding="utf-8")
-        assert "sys.exit(0 if perform_backup()[0] else 1)" in source
+        assert "sys.exit(1 if not _ok else (2 if _offsite_failed else 0))" in source
 
 
 class TestConfigBackupRedactsCredentials:

@@ -151,7 +151,7 @@
 ### `_copy_latest_offsite`
 
 * **役割**（2026-09-19 新設）: NAS へ転送済みのバックアップを、rclone のリモート（`config.DB_BACKUP_OFFSITE_REMOTE`）へ**最新1世代**として複製する。リモート側は常に `home_system_latest.db` の1ファイルだけを上書きする（世代管理は NAS 側の `db_backups/` と `DB_BACKUP_RETENTION_DAYS`）。以前はバックアップが NAS にしか無く、NAS が故障すると DB 本体とバックアップを同時に失う構成だった。
-* 根拠: `_copy_latest_offsite` (行番号: 295-326 / 抜粋: "def _copy_latest_offsite(nas_backup_path: Path) -> bool:")
+* 根拠: `_copy_latest_offsite` (行番号: 307-335 / 抜粋: "def _copy_latest_offsite(nas_backup_path: Path) -> bool:")
 * **呼び出し条件**: `perform_backup` の NAS 転送と整合性確認が成功し、`_backup_config_files` を終えた後にだけ呼ばれる。NAS 転送に失敗した場合は呼ばれない。
 * **無効化**: `DB_BACKUP_OFFSITE_REMOTE` が空（既定）なら何もせず `False` を返す。
 * **送るもの**: DB のみ。`devices.json` 等の設定ファイルはカメラの接続情報を含みうるため送らない。
@@ -161,20 +161,21 @@
 ### `if __name__ == "__main__":` ブロック
 
 * **役割**（Issue #753 / AUDIT-024 で変更）: `perform_backup()` を実行し、**その成功フラグを終了コードへ反映する**（成功なら 0、失敗なら 1）。以前は戻り値を捨てていたため、バックアップが失敗してもプロセスは常に exit 0 で終わり、cron/systemd の側からは成功と区別できなかった（Discord 通知は出るため実害は小さいが、通知経路が落ちていると完全に見えなくなる）。
-* 根拠: `sys.exit(0 if perform_backup()[0] else 1)` (行番号: 179 / 抜粋: "sys.exit(0 if perform_back...")
+* **（Issue #891）** NAS保存が成功してもオフサイト複製(`_copy_latest_offsite`)が失敗した場合は、失敗を errorチャンネルへ通知し(`_offsite_failure`)、終了コードを2にする(1=バックアップ失敗、0=全成功)。
+* 根拠: `sys.exit(1 if not _ok else (2 if _offsite_failed else 0))` (行番号: 179 / 抜粋: "sys.exit(0 if perform_back...")
 
 ### `_notify_and_log_error`
 
 * **役割**: ERRORレベルの記録と管理者への即時通知を行う。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 329〜341 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 338〜350 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **引数/リクエスト**: `message: str` (エラー内容を示すメッセージ文字列)
-* 根拠: `def _notify_and_log_error(message: str)` (行番号: 329 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str)` (行番号: 338 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 329 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `-> None:` (行番号: 338 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **副作用**: ロガーへのエラー書き込み、外部API呼び出し（`send_push`）。
@@ -182,7 +183,7 @@
 
 
 * **エラーハンドリング**: なし（内部で例外捕捉は行われていない）。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 329〜341 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 338〜350 / 抜粋: "def _notify_and_log_error(...)")
 
 
 
