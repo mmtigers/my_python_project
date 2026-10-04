@@ -247,7 +247,7 @@ graph LR
 | 優先度 | ファイル | 理由 |
 | --- | --- | --- |
 | 高 | `MY_HOME_SYSTEM/services/routine_service.py` | `is_offday`の最大の利用者。すごろくのスキップ判定・繰越の遡りが休日かどうかで分岐する |
-| 高 | `MY_HOME_SYSTEM/routine_data.py` | チェックポイント締切(平日7:50 / 休日11:00)の切り替えに使う |
+| 高 | `MY_HOME_SYSTEM/routine_data.py` | チェックポイント締切(平日7:50 / 休日12:00)の切り替えに使う |
 | 中 | `MY_HOME_SYSTEM/services/quest/quest_service.py` | デイリークエストの曜日指定(`day_of_week`)と休日の関係(`matches_day_of_week`) |
 | 中 | `MY_HOME_SYSTEM/services/quest/locks.py` | YouTubeごほうび券の日次上限の平日/休日切り替え |
 | 低 | `MY_HOME_SYSTEM/config.py` | `EXTRA_HOLIDAY_DATES`のパース(不正な要素は警告して無視) |

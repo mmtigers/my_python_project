@@ -152,3 +152,59 @@ class TestTvLockMonitor:
             tv_lock_monitor.main()
 
         mock_cmd.assert_called_once_with("tv-plug-1", "turnOff")
+
+
+class TestHolidaySlots:
+    """休日(土日祝)は12:00にオフ・14:00にオン・20:00にオフ(平日は何もしない)。"""
+
+    SATURDAY = datetime(2026, 9, 19)
+    FRIDAY = datetime(2026, 9, 18)
+
+    def _run(self, tmp_path, monkeypatch, now, result=None):
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "tv-plug-1", raising=False)
+        monkeypatch.setattr(tv_lock_monitor, "LAST_RUN_FILE", str(tmp_path / "last_tv_lock.txt"))
+        monkeypatch.setattr(
+            tv_lock_monitor, "HOLIDAY_RUN_FILE_TEMPLATE", str(tmp_path / "last_tv_lock_{hhmm}.txt")
+        )
+        with patch.object(tv_lock_monitor, "get_now_jst", lambda: now), \
+             patch.object(
+                 tv_lock_monitor.switchbot_service,
+                 "send_device_command",
+                 return_value=result or {"statusCode": 100},
+             ) as mock_cmd:
+            tv_lock_monitor.main()
+        return mock_cmd
+
+    def test_turns_off_at_noon_on_saturday(self, tmp_path, monkeypatch):
+        mock_cmd = self._run(tmp_path, monkeypatch, self.SATURDAY.replace(hour=12, minute=2))
+        mock_cmd.assert_called_once_with("tv-plug-1", "turnOff")
+
+    def test_turns_on_at_14_on_saturday(self, tmp_path, monkeypatch):
+        mock_cmd = self._run(tmp_path, monkeypatch, self.SATURDAY.replace(hour=14, minute=1))
+        mock_cmd.assert_called_once_with("tv-plug-1", "turnOn")
+
+    def test_turns_off_at_20_on_saturday(self, tmp_path, monkeypatch):
+        mock_cmd = self._run(tmp_path, monkeypatch, self.SATURDAY.replace(hour=20, minute=0))
+        mock_cmd.assert_called_once_with("tv-plug-1", "turnOff")
+
+    def test_does_nothing_at_noon_on_a_weekday(self, tmp_path, monkeypatch):
+        mock_cmd = self._run(tmp_path, monkeypatch, self.FRIDAY.replace(hour=12, minute=2))
+        mock_cmd.assert_not_called()
+
+    def test_does_nothing_at_20_on_a_weekday(self, tmp_path, monkeypatch):
+        mock_cmd = self._run(tmp_path, monkeypatch, self.FRIDAY.replace(hour=20, minute=2))
+        mock_cmd.assert_not_called()
+
+    def test_each_slot_runs_once_per_day(self, tmp_path, monkeypatch):
+        now = self.SATURDAY.replace(hour=12, minute=1)
+        self._run(tmp_path, monkeypatch, now)
+        mock_cmd = self._run(tmp_path, monkeypatch, now.replace(minute=4))
+        mock_cmd.assert_not_called()
+        # 別スロット(14:00)は独立して実行される
+        mock_cmd = self._run(tmp_path, monkeypatch, self.SATURDAY.replace(hour=14, minute=1))
+        mock_cmd.assert_called_once_with("tv-plug-1", "turnOn")
+
+    def test_holiday_slot_uses_a_separate_record_file(self, tmp_path, monkeypatch):
+        self._run(tmp_path, monkeypatch, self.SATURDAY.replace(hour=12, minute=1))
+        assert (tmp_path / "last_tv_lock_1200.txt").read_text().strip() == "2026-09-19"
+        assert not (tmp_path / "last_tv_lock.txt").exists()

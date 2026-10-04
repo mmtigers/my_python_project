@@ -1,3 +1,4 @@
+import datetime
 # MY_HOME_SYSTEM/tests/test_switchbot_service.py
 """
 services/switchbot_service.py のテスト。
@@ -388,6 +389,14 @@ class TestTriggerTvUnlock:
     def _run_background_thread_synchronously(self, monkeypatch):
         monkeypatch.setattr(threading.Thread, "start", threading.Thread.run)
 
+    @pytest.fixture(autouse=True)
+    def _pin_clock_to_weekday_afternoon(self, monkeypatch):
+        """実時刻が休日のテレビ禁止時間帯に当たってもテストが変わらないよう平日の午後に固定する。"""
+        monkeypatch.setattr(
+            switchbot_service, "get_now_jst",
+            lambda: datetime.datetime(2026, 9, 18, 15, 0, tzinfo=datetime.timezone(datetime.timedelta(hours=9))),
+        )
+
     def test_success_status_code_does_not_notify_parents(self, monkeypatch):
         monkeypatch.setattr(
             switchbot_service, "send_device_command", MagicMock(return_value={"statusCode": 100})
@@ -462,3 +471,42 @@ class TestTriggerTvUnlock:
 
         assert len(captured_threads) == 1
         assert captured_threads[0].daemon is True
+
+
+class TestIsTvBlockedNow:
+    """休日(土日祝)は12:00〜14:00と20:00以降、テレビを自動でつけない。"""
+
+    @staticmethod
+    def _at(y, m, d, h, mi=0):
+        return datetime.datetime(y, m, d, h, mi, tzinfo=datetime.timezone(datetime.timedelta(hours=9)))
+
+    def test_blocked_at_noon_on_saturday(self):
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 12, 0)) is True
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 13, 59)) is True
+
+    def test_allowed_before_noon_and_from_14_to_20_on_saturday(self):
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 11, 59)) is False
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 14, 0)) is False
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 19, 59)) is False
+
+    def test_blocked_from_20_on_saturday(self):
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 20, 0)) is True
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 19, 23, 59)) is True
+
+    def test_blocked_on_a_national_holiday(self):
+        # 2026-09-21(月)は敬老の日
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 21, 12, 30)) is True
+
+    def test_never_blocked_on_a_weekday(self):
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 18, 12, 30)) is False
+        assert switchbot_service.is_tv_blocked_now(self._at(2026, 9, 18, 21, 0)) is False
+
+    def test_trigger_tv_unlock_does_nothing_in_a_blocked_window(self, monkeypatch):
+        monkeypatch.setattr(switchbot_service, "get_now_jst", lambda: self._at(2026, 9, 19, 12, 30))
+        send = MagicMock(return_value={"statusCode": 100})
+        monkeypatch.setattr(switchbot_service, "send_device_command", send)
+        monkeypatch.setattr(threading.Thread, "start", threading.Thread.run)
+
+        switchbot_service.trigger_tv_unlock(context="blocked")
+
+        send.assert_not_called()

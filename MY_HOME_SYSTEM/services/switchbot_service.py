@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/services/switchbot_service.py
+import datetime
 import threading
 import time
 import hashlib
@@ -11,8 +12,9 @@ import requests
 import config
 # (以前ここにあった `from common import retry_api_call` のコメントは、common.py ごと廃止された。Issue #664)
 
+from core.jp_holidays import is_offday
 from core.logger import setup_logging   # 修正: core.loggerを使用
-from core.utils import retry_with_backoff
+from core.utils import get_now_jst, retry_with_backoff
 from models.switchbot import DeviceStatusResponse
 from services import notification_service
 
@@ -118,6 +120,20 @@ def send_device_command(device_id: str, command: str, parameter: str = "default"
         logger.error(f"Failed to send command [{command}] to device [ID:{device_id}]: {e}")
         return None
 
+# 休日(土日・祝日・家の休み)にテレビをつけられない時間帯 [開始時, 終了時)。
+# 12:00〜14:00(昼の休憩)と20:00以降(夜)。monitors/tv_lock_monitor.py が同じ時刻に
+# プラグをオフにし、ここで自動ON(trigger_tv_unlock)も止める。
+TV_OFFDAY_BLOCKED_HOURS = ((12, 14), (20, 24))
+
+
+def is_tv_blocked_now(now: Optional[datetime.datetime] = None) -> bool:
+    """休日のテレビ禁止時間帯(TV_OFFDAY_BLOCKED_HOURS)かどうかを返す。平日は常にFalse。"""
+    now = now or get_now_jst()
+    if not is_offday(now):
+        return False
+    return any(start <= now.hour < end for start, end in TV_OFFDAY_BLOCKED_HOURS)
+
+
 def trigger_tv_unlock(context: str) -> None:
     """TVプラグの電源をONにする(非同期・Fail-Soft)。
 
@@ -129,6 +145,10 @@ def trigger_tv_unlock(context: str) -> None:
     (本関数自体は未設定時のガードを持たない、切り出し前の挙動を踏襲)。
     `context`はログ出力にのみ使う識別用の文字列(例: "quest_id=101")。
     """
+    if is_tv_blocked_now():
+        logger.info(f"📺 TV Unlock skipped (休日のテレビ禁止時間帯): {context}")
+        return
+
     def unlock_task():
         logger.info(f"📺 Initiating TV Unlock (Turn ON) for {context}")
         try:

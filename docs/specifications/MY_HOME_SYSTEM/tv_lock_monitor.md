@@ -17,6 +17,7 @@
 ## 2. ファイルの概要
 
 * 深夜の特定時間帯（2:00〜2:05）にTVプラグデバイスの電源をオフにする制御を行うスクリプトです。
+* **（休日のテレビ時間帯で追加）** 休日（土日・国民の祝日・家の休み。`core.jp_holidays.is_offday`）だけ、12:00に`turnOff`、14:00に`turnOn`、20:00に`turnOff`も実行する（各時刻の0〜5分）。実行するスロットは`_SLOTS`（時・操作・休日のみか）で定義し、スロットごとに1日1回の記録ファイル（深夜2時は`last_tv_lock.txt`、休日スロットは`last_tv_lock_1200.txt`等）で重複実行を防ぐ。12:00〜14:00と20:00以降に「つけられない」ようにする側は、`switchbot_service.is_tv_blocked_now`がアプリ経由の自動ONを止めることで担保する（プラグ本体のボタンは止められない。要件確認済み: 切る時刻に1回だけオフ）。
 * 1日1回の重複実行を防止するための記録・判定機能を有しています。
 
 ## 3. 外部依存関係
@@ -29,7 +30,7 @@
 | `os` | 標準ライブラリ | パス操作、ファイル存在確認、ディレクトリ作成 | 根拠: `os.path.dirname`, `os.path.exists` など (行番号: 3, 6, 18, 35, 48 / 抜粋: "import os") |
 | `config` | 外部モジュール | デバイスIDやルートディレクトリの取得 | 根拠: `config.TV_PLUG_DEVICE_ID` 等 (行番号: 10, 18, 21 / 抜粋: "import config") |
 | `core.logger` | 外部モジュール | ロガーの初期化処理 | 根拠: `setup_logging` (行番号: 11, 15 / 抜粋: "from core.logger import setup_logging") |
-| `core.utils.get_now_jst`（Issue #592で追加） | 外部モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で標準ライブラリの`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「深夜2時」判定はJSTの深夜2時を意図していたため、ホストがJST以外の設定だと意図しない実時刻に実行されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_jst` (行番号: 13 / 抜粋: "from core.utils import get_now_jst")、`now = get_now_jst()` (行番号: 26-29 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う...\n    now = get_now_jst()") |
+| `core.utils.get_now_jst`（Issue #592で追加） | 外部モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で標準ライブラリの`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「深夜2時」判定はJSTの深夜2時を意図していたため、ホストがJST以外の設定だと意図しない実時刻に実行されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_jst` (行番号: 14 / 抜粋: "from core.utils import get_now_jst")、`now = get_now_jst()` (行番号: 47-50 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う...\n    now = get_now_jst()") |
 | `services.switchbot_service` | 外部モジュール | 外部デバイス（SwitchBot）へのコマンド送信 | 根拠: `send_device_command` (行番号: 13, 43 / 抜粋: "from services import switchbot_service") |
 
 ### ブラックボックスとなる外部要素
@@ -46,11 +47,11 @@
 ### `main`
 
 * **役割**: 設定値からデバイスIDを確認し、現在時刻が2:00〜2:05の範囲内かつ当日未実行の場合に、外部サービスを通じてTVプラグをオフにする。成功時は実行記録をファイルに保存する。**（Issue #592で修正）** 「現在時刻」の取得は、以前は標準ライブラリの`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接呼び出していたが、この「深夜2:00〜2:05」判定はJSTの深夜2時台を意図しているため、ホストがJST以外の設定だと本来と異なる実時刻に実行されてしまう問題があった（Issue #382/#293と同じ不具合クラス。#382/#293自体は別Issueで既にタイムゾーン非依存な実装に修正済みだったため対象外）。`core.utils.get_now_jst()`（"Asia/Tokyo"タイムゾーンのaware `datetime`を返す）に置き換え、`from datetime import datetime`のimportは不要になり削除された。
-* 根拠: `main` (行番号: 21〜51 / 抜粋: "def main():")、JST化のコメントと置き換え (行番号: 26〜29 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う(この「深夜2時」判定はJSTの深夜2時を\n    # 意図しており、ホストがJST以外の設定だと別の実時刻に実行されてしまう)。\n    now = get_now_jst()")
+* 根拠: `main` (行番号: 42〜77 / 抜粋: "def main():")、JST化のコメントと置き換え (行番号: 47〜50 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う(この「深夜2時」判定はJSTの深夜2時を\n    # 意図しており、ホストがJST以外の設定だと別の実時刻に実行されてしまう)。\n    now = get_now_jst()")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `main` (行番号: 21 / 抜粋: "def main():")
+* 根拠: `main` (行番号: 42 / 抜粋: "def main():")
 
 
 * **戻り値/レスポンス**: なし
@@ -59,7 +60,7 @@
 
 * **副作用**:
 * 外部APIまたはデバイスに対するオフコマンド（"turnOff"）送信
-* 根拠: `send_device_command`呼び出し (行番号: 42 / 抜粋: "switchbot_service.send_device_command")
+* 根拠: `send_device_command`呼び出し (行番号: 68 / 抜粋: "switchbot_service.send_device_command")
 
 
 * ローカルファイルシステム上のディレクトリ作成、およびファイル（`last_tv_lock.txt`）への日付文字列書き込み

@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
     {
+        version: '1.2.2',
+        date: '2026-10-04',
+        changes: [
+            '土日・祝日の自由時間を、朝は12時まで、午後は14時から18時までにしました',
+            '土日・祝日は、12時から14時と20時からはテレビがつかなくなります',
+        ],
+    },
+    {
         version: '1.2.1',
         date: '2026-10-04',
         changes: [
