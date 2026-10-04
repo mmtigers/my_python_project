@@ -115,6 +115,12 @@ QUEST_ID_LIST_LIMIT: int = 8
 # 更新時刻(mtime)ではなくファイル名の時刻を使うのは、この NAS(CIFS)では書き込み中の
 # ファイルの mtime が作成時刻のまま進まず、成長中かどうかの判定に使えないため。
 RECORDING_STALE_SEC: int = 30 * 60
+# Issue #894/#890: カメラへの接続が断続的に切れて再接続を繰り返す(フラッピング)と、短い
+# セグメントが次々作られるため「最新ファイルの古さ」だけでは検知できない(2026-10-02 の
+# parking は約13.5時間この状態で、チェック10が一度も発報しなかった)。正常時は10分ごとに
+# 1本(120分で12〜13本)なので、直近120分のセグメント数がこれ以上なら異常とみなす。
+RECORDING_FLAP_WINDOW_SEC: int = 120 * 60
+RECORDING_FLAP_MIN_SEGMENTS: int = 16
 # 録画ファイル名(ffmpeg -strftime のローカル時刻)の解釈に使うタイムゾーン
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -345,8 +351,8 @@ def check_api_responsive() -> Optional[str]:
     return None
 
 
-def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:
-    """録画フォルダの最新セグメントの開始時刻(ファイル名から、JST)を返す。無ければNone。
+def _recording_times(folder: str, now: datetime.datetime) -> list[datetime.datetime]:
+    """録画フォルダの当日・前日のセグメント開始時刻(ファイル名から、JST)を新しい順に返す。
 
     CIFS 越しに保持期間(30日)分を毎回列挙しないよう、当日と前日(日付の変わり目用)に絞る。
     ファイル名は ffmpeg の -strftime によるローカル時刻(実機のTZはAsia/Tokyo)。
@@ -355,12 +361,19 @@ def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.date
     for day in (now, now - datetime.timedelta(days=1)):
         pattern = os.path.join(folder, f"{day.strftime('%Y%m%d')}_*.mp4")
         names.extend(os.path.basename(p) for p in glob.glob(pattern))
+    times: list[datetime.datetime] = []
     for name in sorted(names, reverse=True):
         try:
-            return datetime.datetime.strptime(name[:15], "%Y%m%d_%H%M%S").replace(tzinfo=JST)
+            times.append(datetime.datetime.strptime(name[:15], "%Y%m%d_%H%M%S").replace(tzinfo=JST))
         except ValueError:
             continue
-    return None
+    return times
+
+
+def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:
+    """録画フォルダの最新セグメントの開始時刻を返す。無ければNone。"""
+    times = _recording_times(folder, now)
+    return times[0] if times else None
 
 
 def check_recording_stalled() -> str | None:
@@ -379,9 +392,16 @@ def check_recording_stalled() -> str | None:
         if not cam.get("enabled", True):
             continue
         folder_name = cam.get("nas_folder") or cam["name"]
-        latest = _latest_recording_time(os.path.join(config.NVR_RECORD_DIR, folder_name), now)
+        times = _recording_times(os.path.join(config.NVR_RECORD_DIR, folder_name), now)
+        latest = times[0] if times else None
         label = f"{cam['name']}({folder_name})"
-        if latest is None:
+        recent = sum(1 for t in times if (now - t).total_seconds() <= RECORDING_FLAP_WINDOW_SEC)
+        if recent >= RECORDING_FLAP_MIN_SEGMENTS:
+            stalled.append(
+                f"{label}: 直近{RECORDING_FLAP_WINDOW_SEC // 60}分で録画が{recent}本に分割されています"
+                "(接続が断続的に切れている可能性)"
+            )
+        elif latest is None:
             stalled.append(f"{label}: 今日・昨日の録画ファイルがありません")
         elif (now - latest).total_seconds() > RECORDING_STALE_SEC:
             minutes = int((now - latest).total_seconds() // 60)

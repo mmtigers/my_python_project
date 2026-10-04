@@ -725,6 +725,24 @@ class TestCheckRecordingStalled:
             result = health_watch.check_recording_stalled()
         assert result is not None and "駐車場(parking)" in result and "ありません" in result
 
+    def test_reports_flapping_camera_with_many_short_segments(self, tmp_path, monkeypatch):
+        """Issue #894: 接続が断続的に切れ、短いセグメントが大量に作られる状態を検知する。"""
+        from freezegun import freeze_time
+        self._setup(tmp_path, monkeypatch, [
+            {"name": "玄関", "nas_folder": "entrance"},
+            {"name": "駐車場", "nas_folder": "parking"},
+        ])
+        for i in range(12):  # 正常: 10分ごと(120分で12本)
+            self._touch(tmp_path, "entrance", f"20260919_{19 + (i * 10 + 5) // 60:02d}{(i * 10 + 5) % 60:02d}00.mp4")
+        for i in range(20):  # フラッピング: 6分ごと
+            m = 1 + i * 6
+            self._touch(tmp_path, "parking", f"20260919_{19 + m // 60:02d}{m % 60:02d}00.mp4")
+        with freeze_time(self.NOW):
+            result = health_watch.check_recording_stalled()
+        assert result is not None
+        assert "駐車場(parking)" in result and "20本に分割" in result
+        assert "玄関" not in result
+
     def test_previous_day_file_counts_just_after_midnight(self, tmp_path, monkeypatch):
         from freezegun import freeze_time
         self._setup(tmp_path, monkeypatch, [{"name": "玄関", "nas_folder": "entrance"}])
