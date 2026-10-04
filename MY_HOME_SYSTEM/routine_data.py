@@ -118,22 +118,22 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
     'pm': {
         'title': '帰ってから寝るまで',
         # 土日も同じフローを使う(要件: なるべく平日と揃える)。休日は先頭の
-        # handwash・snack・homeworkをスキップし、自由時間から開始する(要件確認済み)。
+        # handwash・snackをスキップし、宿題は未完了なら繰り越して出す(完了済みなら自由時間から開始)。
         'day_of_week': ALL_DAYS,
         # 実際の下校/帰宅時刻に合わせてユーザーが確定した値。土日も同じ14:00。
         'start_trigger_time': '14:00',
         'steps': [
-            # 休日は手洗い・おやつ休憩・宿題をスキップし、14:00から自由時間に入る(要件確認済み)。
+            # 休日は手洗い・おやつ休憩をスキップする(宿題は下の繰り越し判定に従う)。
             {'key': 'handwash', 'label': '手洗い・うがい', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
             {'key': 'snack', 'label': 'おやつ休憩', 'icon_key': 'snack', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
-            # 休日は宿題を出さない(金曜に未完了でも休日はスキップ。要件確認済み)。
-            # weekend_skip=Trueだと_resolve_skip_keysは繰越判定(weekend_carryover)まで
-            # 見ないため、weekend_carryoverはFalseにしておく。
-            {'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
+            # 宿題は休日に繰り越す(要件: 連休直前の登校日から休日の間に完了していれば不要、
+            # 未完了なら完了するまで休日も出す。次の登校日になれば通常の宿題に戻る)。
+            # weekend_skip=Falseにしておかないと_resolve_skip_keysが繰越判定まで見ない。
+            {'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},
             # 自由時間→寝る準備の締切は17:30(要件確認済み。以前は18:00だった)。
             # 休日(土日祝)は18:00まで(要件確認済み)。
-            # 休日は手洗い・おやつ休憩・宿題をすべてスキップするため、14:00に
-            # 開始した時点で自由時間に入る(要件確認済み: 14:00から自動で自由時間)。
+            # 休日は手洗い・おやつ休憩をスキップし、宿題も完了済みなら14:00に開始した
+            # 時点で自由時間に入る(未完了の宿題は繰り越して先に出る)。
             {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '17:30', 'weekend_checkpoint_time': '18:00', 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
             # 寝る準備4項目は朝の準備と同様、順番を強制しないチェックリスト
             # (要件確認済み)。チェックポイント(free)通過後に一括で'current'になる。

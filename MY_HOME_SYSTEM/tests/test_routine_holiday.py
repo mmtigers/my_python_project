@@ -86,8 +86,10 @@ class TestHolidayMorningDeadline:
 
 class TestHolidayEveningFlow:
     def test_pm_starts_in_free_time_on_a_holiday(self, isolated_db):
-        """休日は手洗い・おやつ休憩・宿題(weekend_skip)を飛ばし、14:00から自由時間に入る。"""
+        """休日は手洗い・おやつ休憩(weekend_skip)を飛ばし、宿題も金曜に完了済みなら14:00から自由時間に入る。"""
         _seed_user()
+        for key in ('handwash', 'snack', 'homework'):
+            routine_service.complete_step('daughter', 'pm', key, now=_at(FRIDAY, 14, 0))
         state = routine_service.get_today_state('daughter', now=_at(HOLIDAY_MONDAY, 14, 0))
         statuses = _statuses(state, 'pm')
         assert statuses['handwash'] == 'done'
@@ -110,8 +112,8 @@ class TestHolidayEveningFlow:
 
 
 class TestHolidayHomeworkSkip:
-    """宿題は休日(土日・祝日・家の休み)なら金曜の完了有無に関わらず、`weekend_skip`で
-    無条件にスキップされ、連休が明けた平日には再び必要になること。"""
+    """宿題は連休直前の登校日〜連休中に完了していれば休日はスキップ(`weekend_carryover`)、
+    未完了なら休日も繰り越して出ること。連休が明けた平日には再び通常どおり必要になる。"""
 
     def test_homework_done_friday_skips_the_whole_three_day_weekend(self, isolated_db):
         _seed_user()
@@ -132,12 +134,17 @@ class TestHolidayHomeworkSkip:
         state = routine_service.get_today_state('daughter', now=_at(next_school_day, 14, 0))
         assert _statuses(state, 'pm')['homework'] == 'locked'
 
-    def test_homework_is_skipped_on_holidays_even_if_not_done_on_friday(self, isolated_db):
-        """休日は宿題を出さない(金曜に未完了でも連休中はスキップ)。"""
+    def test_homework_is_carried_over_on_holidays_if_not_done_on_friday(self, isolated_db):
+        """金曜に未完了なら、連休中も完了するまで宿題が出る。"""
         _seed_user()
         routine_service.complete_step('daughter', 'pm', 'handwash', now=_at(FRIDAY, 14, 0))
         routine_service.complete_step('daughter', 'pm', 'snack', now=_at(FRIDAY, 14, 5))
 
+        for day in (SATURDAY, SUNDAY, HOLIDAY_MONDAY):
+            state = routine_service.get_today_state('daughter', now=_at(day, 14, 0))
+            assert _statuses(state, 'pm')['homework'] == 'current', day
+
+        routine_service.complete_step('daughter', 'pm', 'homework', now=_at(SUNDAY, 14, 0))
         state = routine_service.get_today_state('daughter', now=_at(HOLIDAY_MONDAY, 14, 0))
         assert _statuses(state, 'pm')['homework'] == 'done'
 

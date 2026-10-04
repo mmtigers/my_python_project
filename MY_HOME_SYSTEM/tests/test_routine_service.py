@@ -73,6 +73,13 @@ def _sunday_at(hour, minute):
     return (MONDAY + datetime.timedelta(days=6)).replace(hour=hour, minute=minute)  # 2024-01-21は日曜日
 
 
+
+def _finish_friday_pm():
+    """金曜の手洗い・おやつ・宿題を完了させる(休日に宿題が繰り越されない前提を作る)。"""
+    for key in ('handwash', 'snack', 'homework'):
+        routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
+
+
 class TestFlowStartGating:
     def test_am_flow_not_started_before_5am(self, isolated_db):
         _seed_user()
@@ -119,6 +126,7 @@ class TestFlowStartGating:
         同時に自由時間(steps[3])に入る(要件: 14時から自動で自由時間)。
         """
         _seed_user()
+        _finish_friday_pm()
         state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
         pm = state['flows']['pm']
         assert pm['started'] is True
@@ -628,12 +636,14 @@ class TestWeekendCheckpointOverride:
     def test_pm_not_forced_past_at_1731_on_saturday(self, isolated_db):
         """平日なら17:30超えで強制通過するが、土日は18:00まで自由時間が続く。"""
         _seed_user(gold=0, exp=0)
+        _finish_friday_pm()
         state = _state_after_deadlines('daughter', now=_saturday_at(17, 31))
         assert state['flows']['pm']['in_free_time'] is True
 
     def test_youtube_free_time_follows_the_holiday_schedule(self, isolated_db):
         """休日のYouTubeは朝の準備後〜12:00と14:00〜18:00だけ(18:00〜20:00は見られない)。"""
         _seed_user()
+        _finish_friday_pm()
         for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
         assert routine_service.is_user_currently_in_free_time('daughter', now=_saturday_at(10, 0)) is True
@@ -652,10 +662,11 @@ class TestWeekendCheckpointOverride:
 
 
 class TestWeekendPmSkipAndCarryover:
-    """休日PM: 手洗い・おやつ休憩・宿題はすべてスキップし、14:00から自由時間に入る。"""
+    """休日PM: 手洗い・おやつ休憩はスキップし、宿題が完了済みなら14:00から自由時間に入る。"""
 
     def test_saturday_pm_starts_in_free_time(self, isolated_db):
         _seed_user()
+        _finish_friday_pm()
         state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
         pm = state['flows']['pm']
         statuses = {s['key']: s['status'] for s in pm['steps']}
@@ -667,6 +678,7 @@ class TestWeekendPmSkipAndCarryover:
 
     def test_sunday_pm_starts_in_free_time(self, isolated_db):
         _seed_user()
+        _finish_friday_pm()
         state = routine_service.get_today_state('daughter', now=_sunday_at(14, 0))
         pm = state['flows']['pm']
         statuses = {s['key']: s['status'] for s in pm['steps']}
@@ -675,13 +687,21 @@ class TestWeekendPmSkipAndCarryover:
         assert statuses['free'] == 'current'
         assert pm['current_step_index'] == 3
 
-    def test_homework_is_skipped_on_holiday_even_if_not_done_on_friday(self, isolated_db):
-        """金曜に宿題を終えていなくても、休日は宿題を出さない。"""
+    def test_homework_is_carried_over_to_weekend_if_not_done_on_friday(self, isolated_db):
+        """金曜に宿題を終えていなければ、休日も完了するまで宿題が出る(自由時間はその後)。"""
         _seed_user()
         routine_service.complete_step('daughter', 'pm', 'handwash', now=_friday_at(14, 0))
         routine_service.complete_step('daughter', 'pm', 'snack', now=_friday_at(14, 5))
 
         state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
+        statuses = {s['key']: s['status'] for s in state['flows']['pm']['steps']}
+        assert statuses['homework'] == 'current'
+        assert statuses['free'] == 'locked'
+
+        routine_service.complete_step('daughter', 'pm', 'homework', now=_saturday_at(14, 30))
+
+        # 土曜に完了すれば日曜は不要(連休内の完了も繰越判定の対象)。
+        state = routine_service.get_today_state('daughter', now=_sunday_at(14, 0))
         statuses = {s['key']: s['status'] for s in state['flows']['pm']['steps']}
         assert statuses['homework'] == 'done'
         assert statuses['free'] == 'current'
@@ -1251,6 +1271,7 @@ class TestStepEventRecording:
         source='carryover_skip' として区別する(集計が0時ちょうどの達成として
         誤って所要時間に混ぜないため)。"""
         _seed_user()
+        _finish_friday_pm()
         _state_after_deadlines('daughter', now=_saturday_at(14, 0))
 
         skips = _step_events(flow_key='pm', source='carryover_skip')
@@ -1642,11 +1663,12 @@ class TestSkippedKeysPersistence:
     def test_skipped_keys_are_persisted_on_the_progress_row(self, isolated_db):
         """行の作成時にスキップ判定が確定値として保存される。"""
         _seed_user(gold=0, exp=0)
+        _finish_friday_pm()
         _state_after_deadlines('daughter', now=_saturday_at(14, 0))
         with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT skipped_keys FROM routine_progress "
-                "WHERE user_id='daughter' AND flow_key='pm'"
+                "WHERE user_id='daughter' AND flow_key='pm' AND progress_date='2024-01-20'"
             ).fetchone()
         # 土曜のpmは手洗い・おやつ休憩・宿題がスキップ対象(明日の準備は金曜未完了)。
         assert sorted(json.loads(row['skipped_keys'])) == ['handwash', 'homework', 'snack']

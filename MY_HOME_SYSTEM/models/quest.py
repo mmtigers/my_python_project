@@ -48,7 +48,7 @@ class MasterQuest(BaseModel):
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     pre_requisite_quest_id: Optional[int] = None
-    reset_period: Optional[Literal['daily', 'weekly', 'monthly']] = 'daily'
+    reset_period: Optional[Literal['daily', 'weekly', 'monthly', 'offday_run']] = 'daily'
     # 「毎日の必須クエスト」(常時表示)か「ボーナスクエスト」(折りたたみ表示)かの区分。
     # type(出現頻度)とは独立に管理する(要件確認済み、2026-09-23)。
     required: bool = True
