@@ -24,9 +24,9 @@
 ### `is_tv_remote_configured`
 
 * **役割**: 拠点のトークンと、信号IDまたは家電IDが揃っているかを返す。
-* 根拠: `is_tv_remote_configured` (行番号: 37 / 抜粋: "def is_tv_remote_configured() -> bool:")
+* 根拠: `is_tv_remote_configured` (行番号: 36 / 抜粋: "def is_tv_remote_configured() -> bool:")
 
 ### `send_tv_power`
 
 * **役割**: テレビの電源信号を送る。送信できたら`True`、失敗（未設定を含む）は`False`。例外は外へ出さない（呼び出し側は失敗してもプラグを切るため）。
-* 根拠: `send_tv_power` (行番号: 42 / 抜粋: "def send_tv_power() -> bool:")
+* 根拠: `send_tv_power` (行番号: 41 / 抜粋: "def send_tv_power() -> bool:")
