@@ -16,7 +16,7 @@ from core.jp_holidays import is_offday
 from core.logger import setup_logging   # 修正: core.loggerを使用
 from core.utils import get_now_jst, retry_with_backoff
 from models.switchbot import DeviceStatusResponse
-from services import notification_service
+from services import nature_remo_service, notification_service
 
 logger = setup_logging("service.switchbot")
 
@@ -155,23 +155,21 @@ def turn_off_tv_gracefully(sleep=time.sleep) -> dict[str, Any] | None:
     """テレビがついていれば先にリモコンで消してから、TVプラグの電源をOFFにする。
 
     電源が入ったままプラグで100Vを断つのを避けるため(テレビ内蔵ストレージ・録画への
-    負担)。TV_IR_REMOTE_DEVICE_ID が設定されていて、消費電力が
-    TV_POWER_ON_THRESHOLD_WATTS 以上(=オン状態)のときだけ、赤外線リモコンの
-    `turnOff` を送り、消費電力が下がるまで最大 TV_GRACEFUL_OFF_WAIT_SECONDS 秒待つ。
+    負担)。Nature Remoでテレビを操作できる設定(nature_remo_service.is_tv_remote_configured)
+    があり、消費電力が TV_POWER_ON_THRESHOLD_WATTS 以上(=オン状態)のときだけ、
+    Nature Remoで電源信号を送り、消費電力が下がるまで最大 TV_GRACEFUL_OFF_WAIT_SECONDS 秒待つ。
     消費電力を取得できない・リモコン未設定・リモコンの送信失敗・待っても下がらない場合も、
     ロックが目的なのでプラグは必ず切る。戻り値は最後のプラグ OFF コマンドの結果。
     """
-    remote_id = config.TV_IR_REMOTE_DEVICE_ID
-    if remote_id:
+    if nature_remo_service.is_tv_remote_configured():
         threshold = config.TV_POWER_ON_THRESHOLD_WATTS
         watts = get_tv_power_watts()
         if watts is None:
             logger.warning("📺 TV consumption unavailable; cutting the plug without the remote.")
         elif watts >= threshold:
             logger.info(f"📺 TV is on ({watts:.1f}W >= {threshold}W). Turning it off with the remote first.")
-            res = send_device_command(remote_id, "turnOff")
-            if not res or res.get("statusCode") != 100:
-                logger.error(f"❌ TV remote turnOff failed: {res}")
+            if not nature_remo_service.send_tv_power():
+                logger.error("❌ TV remote power signal failed; cutting the plug anyway.")
             else:
                 waited = 0
                 while waited < config.TV_GRACEFUL_OFF_WAIT_SECONDS:

@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全101件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全102件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -22,6 +22,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | --- | --- |
 | [switchbot_service.md](./switchbot_service.md) | SwitchBotデバイス（プラグ、ボット等）の制御およびステータス（電源状態、消費電力等）の取得。 |
 | [nature_remo_monitor.md](./nature_remo_monitor.md) | Nature Remoを介した家電制御と、温度・湿度等の環境センサーデータの監視。 |
+| [nature_remo_service.md](./nature_remo_service.md) | Nature Remo（クラウドAPI）でテレビの電源信号を送る。プラグを切る前にテレビを先に消すために使う。 |
 | [camera_monitor.md](./camera_monitor.md) | ネットワークカメラの稼働監視およびスナップショット取得。 |
 | [tv_lock_monitor.md](./tv_lock_monitor.md) | TVの稼働時間を監視し、規定時間を超えた場合のロック制御を行う。 |
 | [connect_speaker.md](./connect_speaker.md) | スマートスピーカー等への音声出力・通知連携。 |

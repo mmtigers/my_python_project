@@ -27,7 +27,7 @@ import requests
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
-from services import notification_service, switchbot_service
+from services import nature_remo_service, notification_service, switchbot_service
 
 
 @pytest.fixture(autouse=True)
@@ -513,21 +513,21 @@ class TestIsTvBlockedNow:
 
 
 class TestTurnOffTvGracefully:
-    """プラグを切る前に、テレビがついていればリモコンで先に消す。"""
+    """プラグを切る前に、テレビがついていればNature Remoで先に消す。"""
 
     @pytest.fixture(autouse=True)
     def _config(self, monkeypatch):
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1", raising=False)
-        monkeypatch.setattr(config, "TV_IR_REMOTE_DEVICE_ID", "ir-1", raising=False)
         monkeypatch.setattr(config, "TV_POWER_ON_THRESHOLD_WATTS", 10.0, raising=False)
         monkeypatch.setattr(config, "TV_GRACEFUL_OFF_WAIT_SECONDS", 15, raising=False)
+        monkeypatch.setattr(nature_remo_service, "is_tv_remote_configured", lambda: True)
 
     @staticmethod
     def _status(watts):
         return {"statusCode": 100, "body": {"weight": watts}}
 
-    def _patch(self, monkeypatch, watts_sequence, remote_result=None):
-        """get_device_statusが watts_sequence を順に返し、コマンド送信は記録する。"""
+    def _patch(self, monkeypatch, watts_sequence, remote_ok=True):
+        """消費電力が watts_sequence を順に返し、リモコン送信とプラグ操作は記録する。"""
         calls = []
         seq = list(watts_sequence)
 
@@ -536,12 +536,15 @@ class TestTurnOffTvGracefully:
 
         def fake_command(device_id, command, *a, **k):
             calls.append((device_id, command))
-            if device_id == "ir-1" and remote_result is not None:
-                return remote_result
             return {"statusCode": 100}
+
+        def fake_remote():
+            calls.append(("remo", "power"))
+            return remote_ok
 
         monkeypatch.setattr(switchbot_service, "get_device_status", fake_status)
         monkeypatch.setattr(switchbot_service, "send_device_command", fake_command)
+        monkeypatch.setattr(nature_remo_service, "send_tv_power", fake_remote)
         return calls
 
     def test_turns_off_remote_first_then_plug_when_tv_is_on(self, monkeypatch):
@@ -550,7 +553,7 @@ class TestTurnOffTvGracefully:
 
         switchbot_service.turn_off_tv_gracefully(sleep=slept.append)
 
-        assert calls == [("ir-1", "turnOff"), ("plug-1", "turnOff")]
+        assert calls == [("remo", "power"), ("plug-1", "turnOff")]
         assert slept == [5]  # 1回目の確認で下がっていたので待ちは5秒だけ
 
     def test_only_cuts_plug_when_tv_is_already_off(self, monkeypatch):
@@ -566,16 +569,16 @@ class TestTurnOffTvGracefully:
 
         switchbot_service.turn_off_tv_gracefully(sleep=slept.append)
 
-        assert calls == [("ir-1", "turnOff"), ("plug-1", "turnOff")]
+        assert calls == [("remo", "power"), ("plug-1", "turnOff")]
         assert sum(slept) == 15  # TV_GRACEFUL_OFF_WAIT_SECONDS まで待って諦める
 
-    def test_cuts_plug_when_remote_command_fails(self, monkeypatch):
-        calls = self._patch(monkeypatch, [80.0], remote_result={"statusCode": 190})
+    def test_cuts_plug_when_remote_signal_fails(self, monkeypatch):
+        calls = self._patch(monkeypatch, [80.0], remote_ok=False)
         slept = []
 
         switchbot_service.turn_off_tv_gracefully(sleep=slept.append)
 
-        assert calls == [("ir-1", "turnOff"), ("plug-1", "turnOff")]
+        assert calls == [("remo", "power"), ("plug-1", "turnOff")]
         assert slept == []  # リモコンが失敗したら待たない
 
     def test_cuts_plug_when_power_is_unavailable(self, monkeypatch):
@@ -585,13 +588,14 @@ class TestTurnOffTvGracefully:
             switchbot_service, "send_device_command",
             lambda device_id, command, *a, **k: calls.append((device_id, command)) or {"statusCode": 100},
         )
+        monkeypatch.setattr(nature_remo_service, "send_tv_power", lambda: calls.append(("remo", "power")) or True)
 
         switchbot_service.turn_off_tv_gracefully(sleep=lambda s: None)
 
         assert calls == [("plug-1", "turnOff")]
 
     def test_does_not_read_power_or_use_remote_when_not_configured(self, monkeypatch):
-        monkeypatch.setattr(config, "TV_IR_REMOTE_DEVICE_ID", None, raising=False)
+        monkeypatch.setattr(nature_remo_service, "is_tv_remote_configured", lambda: False)
         calls = self._patch(monkeypatch, [80.0])
         status = MagicMock()
         monkeypatch.setattr(switchbot_service, "get_device_status", status)
