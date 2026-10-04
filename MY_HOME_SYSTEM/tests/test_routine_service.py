@@ -579,12 +579,12 @@ class TestCheckpointBonus:
 
 
 class TestWeekendCheckpointOverride:
-    """土日は朝(am)のチェックポイントだけ09:30に後ろ倒しする(要件: なるべく平日と揃える)。"""
+    """土日は朝(am)のチェックポイントだけ11:00に後ろ倒しする(要件: なるべく平日と揃える)。"""
 
     def test_am_checkpoint_time_field_is_930_on_saturday(self, isolated_db):
         _seed_user()
         state = routine_service.get_today_state('daughter', now=_saturday_at(6, 0))
-        assert state['flows']['am']['checkpoint_time'] == '09:30'
+        assert state['flows']['am']['checkpoint_time'] == '11:00'
 
     def test_am_checkpoint_time_field_is_750_on_weekday(self, isolated_db):
         _seed_user()
@@ -592,7 +592,7 @@ class TestWeekendCheckpointOverride:
         assert state['flows']['am']['checkpoint_time'] == '07:50'
 
     def test_am_not_forced_past_at_800_on_saturday(self, isolated_db):
-        """平日なら7:50超えで強制通過する8:00でも、土日は09:30まではまだ猶予がある。"""
+        """平日なら7:50超えで強制通過する8:00でも、土日は11:00まではまだ猶予がある。"""
         _seed_user(gold=0, exp=0)
         for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
@@ -601,11 +601,11 @@ class TestWeekendCheckpointOverride:
         assert am['in_free_time'] is True
         assert am['bonus_gold'] == 0
 
-    def test_am_forced_past_at_931_on_saturday(self, isolated_db):
+    def test_am_forced_past_at_1101_on_saturday(self, isolated_db):
         _seed_user(gold=0, exp=0)
         for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
-        state = _state_after_deadlines('daughter', now=_saturday_at(9, 31))
+        state = _state_after_deadlines('daughter', now=_saturday_at(11, 1))
         am = state['flows']['am']
         assert am['in_free_time'] is False
         assert am['bonus_gold'] == 150
@@ -1084,7 +1084,7 @@ class TestProcessDeadlinesJstBoundary:
 
     基準の月曜を 2026-09-21 から 2026-09-28 へ移したのは、前者が敬老の日で、
     祝日を休日として扱うようになった(core/jp_holidays.py)いま平日の締切
-    (07:50)ではなく休日の締切(09:30)が適用されるため。
+    (07:50)ではなく休日の締切(11:00)が適用されるため。
     """
 
     @freeze_time("2026-09-27 22:51:00")  # = JST 2026-09-28(月) 07:51
@@ -1632,10 +1632,10 @@ class TestPmCheckpointIsSeventeenThirty:
             assert state['flows']['pm']['checkpoint_time'] == '17:30'
 
     def test_am_checkpoint_is_unchanged(self, isolated_db):
-        """朝の締切(平日07:50/土日09:30)は変更していない。"""
+        """朝の締切(平日07:50/土日11:00)は変更していない。"""
         _seed_user(user_id='son', role='role_child')
         assert routine_service.get_today_state('son', now=_at(6, 0))['flows']['am']['checkpoint_time'] == '07:50'
-        assert routine_service.get_today_state('son', now=_saturday_at(6, 0))['flows']['am']['checkpoint_time'] == '09:30'
+        assert routine_service.get_today_state('son', now=_saturday_at(6, 0))['flows']['am']['checkpoint_time'] == '11:00'
 
     def test_child_homework_is_reminded_after_1730(self, isolated_db):
         """17:30を過ぎると一本道の未完了ステップは'remind'になり、寝る準備へ進む。

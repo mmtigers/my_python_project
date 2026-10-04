@@ -103,7 +103,7 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
             {'key': 'wash', 'label': '顔を洗う', 'icon_key': 'wash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             {'key': 'teeth', 'label': '歯磨き', 'icon_key': 'teeth', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             {'key': 'toilet', 'label': 'トイレ', 'icon_key': 'toilet', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
-            # 土日は学校が無いため、出発(チェックポイント通過)の締切を09:30に後ろ倒しする。
+            # 土日は学校が無いため、出発(チェックポイント通過)の締切を11:00に後ろ倒しする。
             # （画面非表示化で変更）以前はこの後に単なる「出発」表示用ステップ(leave、
             # タップ操作以外の意味を持たない)が続いていたが、削除した。'free'がこの
             # フローで最後(かつ唯一)のchecklist=Trueブロック直後のステップのため、
@@ -112,7 +112,7 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
             # 7:50を過ぎたら朝の準備の画面自体を表示しない。isRoutineFlowBlocking/
             # isRoutineFlowFreeTimeは共にis_complete=Trueで false になるため、
             # フロントエンド側の変更は不要)。
-            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '07:50', 'weekend_checkpoint_time': '09:30', 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '07:50', 'weekend_checkpoint_time': '11:00', 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
         ],
     },
     'pm': {
@@ -206,7 +206,7 @@ def _build_adult_flows(pm_path_steps: List[RoutineStep]) -> dict[str, RoutineFlo
             'start_trigger_time': '05:00',
             'steps': [*_ADULT_AM_CHECKLIST, {
                 'key': 'free', 'label': '自由時間', 'icon_key': 'free',
-                'checkpoint_time': '07:50', 'weekend_checkpoint_time': '09:30',
+                'checkpoint_time': '07:50', 'weekend_checkpoint_time': '11:00',
                 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False,
             }],
         },
@@ -318,7 +318,7 @@ def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> 
     """`now`が休日か平日かに応じた、そのステップの実際のチェックポイント締切時刻を返す。
 
     休日(土日・国民の祝日・家の休み)はweekend_checkpoint_timeを使い、その上書きが
-    無ければ平日のcheckpoint_timeをそのまま使う(例: 朝の出発締切は平日7:50・休日9:30)。
+    無ければ平日のcheckpoint_timeをそのまま使う(例: 朝の出発締切は平日7:50・休日11:00)。
     """
     if is_offday(now) and step['weekend_checkpoint_time']:
         return step['weekend_checkpoint_time']

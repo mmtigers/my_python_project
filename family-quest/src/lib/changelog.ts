@@ -10,6 +10,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
     {
+        version: '1.2.1',
+        date: '2026-10-04',
+        changes: [
+            '土日・祝日の朝の自由時間を11時までにしました',
+        ],
+    },
+    {
         version: '1.2.0',
         date: '2026-10-03',
         changes: [
