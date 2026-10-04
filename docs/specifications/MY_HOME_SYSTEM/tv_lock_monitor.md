@@ -18,6 +18,7 @@
 
 * 深夜の特定時間帯（2:00〜2:05）にTVプラグデバイスの電源をオフにする制御を行うスクリプトです。
 * **（休日のテレビ時間帯で追加）** 休日（土日・国民の祝日・家の休み。`core.jp_holidays.is_offday`）だけ、12:00に`turnOff`、14:00に`turnOn`、20:00に`turnOff`も実行する（各時刻の0〜5分）。実行するスロットは`_SLOTS`（時・操作・休日のみか）で定義し、スロットごとに1日1回の記録ファイル（深夜2時は`last_tv_lock.txt`、休日スロットは`last_tv_lock_1200.txt`等）で重複実行を防ぐ。12:00〜14:00と20:00以降に「つけられない」ようにする側は、`switchbot_service.is_tv_blocked_now`がアプリ経由の自動ONを止めることで担保する（プラグ本体のボタンは止められない。要件確認済み: 切る時刻に1回だけオフ）。
+* **（先にリモコンで消す機能で追加）** `turnOff`のスロットは`send_device_command`ではなく`switchbot_service.turn_off_tv_gracefully`を呼ぶ。テレビがついていれば（プラグの消費電力が閾値以上）、先にハブの赤外線リモコンでテレビを消し、消費電力が下がるのを待ってからプラグを切る。`TV_IR_REMOTE_DEVICE_ID`が未設定なら従来どおりプラグだけ切る。`turnOn`（14:00）は従来どおり`send_device_command`。
 * 1日1回の重複実行を防止するための記録・判定機能を有しています。
 
 ## 3. 外部依存関係
@@ -60,7 +61,7 @@
 
 * **副作用**:
 * 外部APIまたはデバイスに対するオフコマンド（"turnOff"）送信
-* 根拠: `send_device_command`呼び出し (行番号: 68 / 抜粋: "switchbot_service.send_device_command")
+* 根拠: `send_device_command`呼び出し (行番号: 72 / 抜粋: "switchbot_service.send_device_command")
 
 
 * ローカルファイルシステム上のディレクトリ作成、およびファイル（`last_tv_lock.txt`）への日付文字列書き込み

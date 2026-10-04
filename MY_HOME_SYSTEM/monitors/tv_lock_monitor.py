@@ -65,7 +65,11 @@ def main():
 
         logger.info(f"📺 [TV Lock] Executing scheduled TV plug command {command} at {hour:02d}:00.")
         try:
-            res = switchbot_service.send_device_command(config.TV_PLUG_DEVICE_ID, command)
+            if command == "turnOff":
+                # テレビがついていれば、先にリモコンで消してからプラグを切る
+                res = switchbot_service.turn_off_tv_gracefully()
+            else:
+                res = switchbot_service.send_device_command(config.TV_PLUG_DEVICE_ID, command)
             if res and res.get("statusCode") == 100:
                 logger.info(f"✅ [TV Lock] Successfully sent {command} to TV plug.")
 

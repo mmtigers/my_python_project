@@ -126,6 +126,72 @@ def send_device_command(device_id: str, command: str, parameter: str = "default"
 TV_OFFDAY_BLOCKED_HOURS = ((12, 14), (20, 24))
 
 
+def get_tv_power_watts() -> float | None:
+    """TVプラグ(Plug Mini)が測っている現在の消費電力(W)を返す。取得できなければNone。
+
+    プラグのステータスは電力を `weight`(Plug Mini)・`power`・`watt` のいずれかで返す
+    (monitors/switchbot_power_monitor.py と同じ候補)。
+    """
+    if not config.TV_PLUG_DEVICE_ID:
+        return None
+    status = get_device_status(config.TV_PLUG_DEVICE_ID)
+    if not status or status.get("statusCode") != 100:
+        return None
+    body = status.get("body") or {}
+    for key in ("weight", "power", "watt"):
+        value = body.get(key)
+        if value is None:
+            continue
+        try:
+            watts = float(value)
+        except (TypeError, ValueError):
+            continue
+        if watts >= 0:
+            return watts
+    return None
+
+
+def turn_off_tv_gracefully(sleep=time.sleep) -> Optional[Dict[str, Any]]:
+    """テレビがついていれば先にリモコンで消してから、TVプラグの電源をOFFにする。
+
+    電源が入ったままプラグで100Vを断つのを避けるため(テレビ内蔵ストレージ・録画への
+    負担)。TV_IR_REMOTE_DEVICE_ID が設定されていて、消費電力が
+    TV_POWER_ON_THRESHOLD_WATTS 以上(=オン状態)のときだけ、赤外線リモコンの
+    `turnOff` を送り、消費電力が下がるまで最大 TV_GRACEFUL_OFF_WAIT_SECONDS 秒待つ。
+    消費電力を取得できない・リモコン未設定・リモコンの送信失敗・待っても下がらない場合も、
+    ロックが目的なのでプラグは必ず切る。戻り値は最後のプラグ OFF コマンドの結果。
+    """
+    remote_id = config.TV_IR_REMOTE_DEVICE_ID
+    if remote_id:
+        threshold = config.TV_POWER_ON_THRESHOLD_WATTS
+        watts = get_tv_power_watts()
+        if watts is None:
+            logger.warning("📺 TV consumption unavailable; cutting the plug without the remote.")
+        elif watts >= threshold:
+            logger.info(f"📺 TV is on ({watts:.1f}W >= {threshold}W). Turning it off with the remote first.")
+            res = send_device_command(remote_id, "turnOff")
+            if not res or res.get("statusCode") != 100:
+                logger.error(f"❌ TV remote turnOff failed: {res}")
+            else:
+                waited = 0
+                while waited < config.TV_GRACEFUL_OFF_WAIT_SECONDS:
+                    sleep(_TV_POWER_POLL_SECONDS)
+                    waited += _TV_POWER_POLL_SECONDS
+                    watts = get_tv_power_watts()
+                    if watts is not None and watts < threshold:
+                        logger.info(f"✅ TV turned off by the remote ({watts:.1f}W).")
+                        break
+                else:
+                    logger.warning("⚠️ TV power did not drop after the remote turnOff; cutting the plug anyway.")
+        else:
+            logger.info(f"📺 TV is already off ({watts:.1f}W < {threshold}W).")
+    return send_device_command(config.TV_PLUG_DEVICE_ID, "turnOff")
+
+
+# 消費電力が下がったかを確かめる間隔(秒)
+_TV_POWER_POLL_SECONDS = 5
+
+
 def is_tv_blocked_now(now: datetime.datetime | None = None) -> bool:
     """休日のテレビ禁止時間帯(TV_OFFDAY_BLOCKED_HOURS)かどうかを返す。平日は常にFalse。"""
     now = now or get_now_jst()

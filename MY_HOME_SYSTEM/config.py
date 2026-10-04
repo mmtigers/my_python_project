@@ -639,6 +639,20 @@ if _tv_unlock_quest_ids_str:
 
 TV_PLUG_DEVICE_ID: Optional[str] = os.getenv("TV_PLUG_DEVICE_ID")
 
+# プラグを切る前にテレビ本体をリモコン(SwitchBotハブの赤外線リモコン)で消すための設定。
+# TV_IR_REMOTE_DEVICE_ID はSwitchBotアプリに登録した「テレビ」の仮想リモコンのデバイスID。
+# 未設定ならこの機能は使わず、従来どおりプラグだけを切る。
+# テレビがついているかは、プラグ(Plug Mini)が測る消費電力で判断する。
+# TV_POWER_ON_THRESHOLD_WATTS 以上ならオン状態とみなす(待機電力は通常1W未満)。
+TV_IR_REMOTE_DEVICE_ID: Optional[str] = (os.getenv("TV_IR_REMOTE_DEVICE_ID") or "").strip() or None
+try:
+    TV_POWER_ON_THRESHOLD_WATTS: float = float(os.getenv("TV_POWER_ON_THRESHOLD_WATTS") or "10")
+except ValueError:
+    logger.warning("⚠️ 環境変数 TV_POWER_ON_THRESHOLD_WATTS は数値として解釈できません。デフォルト値 10 を使用します。")
+    TV_POWER_ON_THRESHOLD_WATTS = 10.0
+# リモコンで消してから、消費電力が下がるのを待つ最大秒数(超えてもプラグは切る)。
+TV_GRACEFUL_OFF_WAIT_SECONDS: int = _get_int_env("TV_GRACEFUL_OFF_WAIT_SECONDS", 45)
+
 # ==========================================
 # 11. Alexaスキル設定
 # ==========================================

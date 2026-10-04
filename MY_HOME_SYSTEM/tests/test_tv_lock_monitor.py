@@ -208,3 +208,22 @@ class TestHolidaySlots:
         self._run(tmp_path, monkeypatch, self.SATURDAY.replace(hour=12, minute=1))
         assert (tmp_path / "last_tv_lock_1200.txt").read_text().strip() == "2026-09-19"
         assert not (tmp_path / "last_tv_lock.txt").exists()
+
+
+class TestGracefulTurnOffIsUsed:
+    def test_turn_off_slots_go_through_turn_off_tv_gracefully(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "tv-plug-1", raising=False)
+        monkeypatch.setattr(tv_lock_monitor, "LAST_RUN_FILE", str(tmp_path / "last_tv_lock.txt"))
+        now = datetime(2026, 9, 5, 2, 1, 0, tzinfo=timezone(timedelta(hours=9)))
+
+        with patch.object(tv_lock_monitor, "get_now_jst", lambda: now), \
+             patch.object(
+                 tv_lock_monitor.switchbot_service,
+                 "turn_off_tv_gracefully",
+                 return_value={"statusCode": 100},
+             ) as mock_off, \
+             patch.object(tv_lock_monitor.switchbot_service, "send_device_command") as mock_cmd:
+            tv_lock_monitor.main()
+
+        mock_off.assert_called_once_with()
+        mock_cmd.assert_not_called()
