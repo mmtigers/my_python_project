@@ -9,8 +9,8 @@ if PROJECT_ROOT not in sys.path:
 
 import config
 from core import state_file
-from core.logger import setup_logging
 from core.jp_holidays import is_offday
+from core.logger import setup_logging
 from core.utils import get_now_jst
 from services import switchbot_service
 

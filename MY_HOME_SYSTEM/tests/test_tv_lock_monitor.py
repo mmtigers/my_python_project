@@ -14,7 +14,7 @@ importしている`get_now_jst`関数そのものを固定値を返す関数に�
 """
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -157,8 +157,8 @@ class TestTvLockMonitor:
 class TestHolidaySlots:
     """休日(土日祝)は12:00にオフ・14:00にオン・20:00にオフ(平日は何もしない)。"""
 
-    SATURDAY = datetime(2026, 9, 19)
-    FRIDAY = datetime(2026, 9, 18)
+    SATURDAY = datetime(2026, 9, 19, tzinfo=timezone(timedelta(hours=9)))
+    FRIDAY = datetime(2026, 9, 18, tzinfo=timezone(timedelta(hours=9)))
 
     def _run(self, tmp_path, monkeypatch, now, result=None):
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "tv-plug-1", raising=False)

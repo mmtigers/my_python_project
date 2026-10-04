@@ -1,4 +1,3 @@
-import datetime
 # MY_HOME_SYSTEM/tests/test_switchbot_service.py
 """
 services/switchbot_service.py のテスト。
@@ -14,6 +13,7 @@ services/switchbot_service.py のテスト。
   移動)。
 """
 import base64
+import datetime
 import hashlib
 import hmac
 import os

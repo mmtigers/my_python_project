@@ -126,7 +126,7 @@ def send_device_command(device_id: str, command: str, parameter: str = "default"
 TV_OFFDAY_BLOCKED_HOURS = ((12, 14), (20, 24))
 
 
-def is_tv_blocked_now(now: Optional[datetime.datetime] = None) -> bool:
+def is_tv_blocked_now(now: datetime.datetime | None = None) -> bool:
     """休日のテレビ禁止時間帯(TV_OFFDAY_BLOCKED_HOURS)かどうかを返す。平日は常にFalse。"""
     now = now or get_now_jst()
     if not is_offday(now):
