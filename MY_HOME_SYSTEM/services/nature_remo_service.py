@@ -13,9 +13,8 @@ turn_off_tv_gracefully から呼ぶ)。
 呼び出し側(turn_off_tv_gracefully)は、消費電力でテレビがついていると確認できたときだけ
 送るため、トグルでも「消す」動作になる。
 """
-import requests
-
 import config
+import requests
 from core.logger import setup_logging
 
 logger = setup_logging("service.nature_remo")
@@ -64,6 +63,6 @@ def send_tv_power() -> bool:
         res = requests.post(url, headers=headers, data=data, timeout=_REQUEST_TIMEOUT_SECONDS)
         res.raise_for_status()
         return True
-    except Exception as e:
+    except requests.RequestException as e:
         logger.error(f"❌ Nature Remo TV power signal failed: {e}")
         return False
