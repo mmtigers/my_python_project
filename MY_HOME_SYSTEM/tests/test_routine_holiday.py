@@ -45,12 +45,12 @@ def _statuses(state, flow_key):
 
 
 class TestHolidayMorningDeadline:
-    """朝(am)の締切は平日7:50・休日9:30。祝日は9:30側になる。"""
+    """朝(am)の締切は平日7:50・休日11:00。祝日は11:00側になる。"""
 
     def test_checkpoint_time_is_930_on_a_holiday(self, isolated_db):
         _seed_user()
         state = routine_service.get_today_state('daughter', now=_at(HOLIDAY_MONDAY, 6, 0))
-        assert state['flows']['am']['checkpoint_time'] == '09:30'
+        assert state['flows']['am']['checkpoint_time'] == '11:00'
 
     def test_checkpoint_time_is_750_on_a_plain_monday(self, isolated_db):
         _seed_user()
@@ -68,12 +68,12 @@ class TestHolidayMorningDeadline:
         after = routine_service.get_today_state('daughter', now=_at(HOLIDAY_MONDAY, 8, 0))
         assert after['flows']['am']['in_free_time'] is True
 
-    def test_forced_past_at_931_on_a_holiday(self, isolated_db):
+    def test_forced_past_at_1101_on_a_holiday(self, isolated_db):
         _seed_user(gold=0, exp=0)
         for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_at(HOLIDAY_MONDAY, 6, 0))
-        routine_service.process_deadlines(now=_at(HOLIDAY_MONDAY, 9, 31))
-        state = routine_service.get_today_state('daughter', now=_at(HOLIDAY_MONDAY, 9, 31))
+        routine_service.process_deadlines(now=_at(HOLIDAY_MONDAY, 11, 1))
+        state = routine_service.get_today_state('daughter', now=_at(HOLIDAY_MONDAY, 11, 1))
         assert state['flows']['am']['in_free_time'] is False
         assert state['flows']['am']['bonus_gold'] == 150
 
@@ -81,7 +81,7 @@ class TestHolidayMorningDeadline:
         """国民の休日(2026-09-22)も休日として扱う。"""
         _seed_user()
         state = routine_service.get_today_state('daughter', now=_at(CITIZENS_TUESDAY, 6, 0))
-        assert state['flows']['am']['checkpoint_time'] == '09:30'
+        assert state['flows']['am']['checkpoint_time'] == '11:00'
 
 
 class TestHolidayEveningFlow:
@@ -177,6 +177,6 @@ class TestExtraHolidayDatesAffectRoutine:
         _seed_user()
         monkeypatch.setattr(config, "EXTRA_HOLIDAY_DATES", frozenset({self.TARGET}))
         state = routine_service.get_today_state('daughter', now=_at(self.TARGET, 6, 0))
-        assert state['flows']['am']['checkpoint_time'] == '09:30'
+        assert state['flows']['am']['checkpoint_time'] == '11:00'
         pm = routine_service.get_today_state('daughter', now=_at(self.TARGET, 14, 0))
         assert _statuses(pm, 'pm')['handwash'] == 'done'

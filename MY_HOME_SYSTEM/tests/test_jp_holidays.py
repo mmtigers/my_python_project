@@ -201,7 +201,7 @@ class TestRoutineCheckpointTime:
     def test_holiday_uses_the_weekend_checkpoint_time(self):
         step = self._free_step()
         holiday = datetime.datetime(2026, 9, 21, 7, 0, tzinfo=self.JST)  # 敬老の日
-        assert routine_data.get_effective_checkpoint_time(step, holiday) == '09:30'
+        assert routine_data.get_effective_checkpoint_time(step, holiday) == '11:00'
 
     def test_plain_weekday_uses_the_weekday_checkpoint_time(self):
         step = self._free_step()
