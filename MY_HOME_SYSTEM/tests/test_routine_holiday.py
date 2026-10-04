@@ -109,8 +109,9 @@ class TestHolidayEveningFlow:
         assert statuses['handwash'] == 'current'
 
 
-class TestHolidayHomeworkCarryover:
-    """宿題(weekend_carryover)の遡りが、祝日を含む連休の長さに追従すること。"""
+class TestHolidayHomeworkSkip:
+    """宿題は休日(土日・祝日・家の休み)なら金曜の完了有無に関わらず、`weekend_skip`で
+    無条件にスキップされ、連休が明けた平日には再び必要になること。"""
 
     def test_homework_done_friday_skips_the_whole_three_day_weekend(self, isolated_db):
         _seed_user()
