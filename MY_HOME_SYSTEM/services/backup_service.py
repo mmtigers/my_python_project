@@ -292,6 +292,18 @@ OFFSITE_TIMEOUT_SEC: int = 1800
 OFFSITE_FILENAME: str = "home_system_latest.db"
 
 
+# 直近のオフサイト複製が「設定ありで失敗」したか(Issue #891)。__main__ が終了コードに反映する。
+_offsite_failed: bool = False
+
+
+def _offsite_failure(message: str) -> bool:
+    """オフサイト複製の失敗を記録し、Discordのerrorチャンネルへ通知する(NASバックアップ自体は成功扱い)。"""
+    global _offsite_failed
+    _offsite_failed = True
+    _notify_and_log_error(f"オフサイト複製に失敗: {message}")
+    return False
+
+
 def _copy_latest_offsite(nas_backup_path: Path) -> bool:
     """NAS へ転送済みのバックアップを、オフサイト(rclone のリモート)へ最新1世代として複製する。
 
@@ -307,8 +319,7 @@ def _copy_latest_offsite(nas_backup_path: Path) -> bool:
         return False
     rclone = shutil.which("rclone")
     if not rclone:
-        logger.error("❌ オフサイト複製に失敗: rclone コマンドが見つかりません")
-        return False
+        return _offsite_failure("rclone コマンドが見つかりません")
     dest = f"{remote.rstrip('/')}/{OFFSITE_FILENAME}"
     try:
         subprocess.run(  # nosec B603 - 引数はリスト渡しで、値は設定値とバックアップの実パスのみ
@@ -316,12 +327,10 @@ def _copy_latest_offsite(nas_backup_path: Path) -> bool:
             check=True, capture_output=True, text=True, timeout=OFFSITE_TIMEOUT_SEC,
         )
     except subprocess.TimeoutExpired:
-        logger.error(f"❌ オフサイト複製がタイムアウトしました({OFFSITE_TIMEOUT_SEC}秒): {dest}")
-        return False
+        return _offsite_failure(f"タイムアウト({OFFSITE_TIMEOUT_SEC}秒)")
     except subprocess.CalledProcessError as e:
         detail = (e.stderr or "").strip().splitlines()
-        logger.error(f"❌ オフサイト複製に失敗 (rc={e.returncode}): {detail[-1] if detail else 'no stderr'}")
-        return False
+        return _offsite_failure(f"rc={e.returncode}: {detail[-1][:200] if detail else 'no stderr'}")
     logger.info(f"✅ 最新のバックアップをオフサイトへ複製しました: {dest}")
     return True
 
@@ -344,4 +353,6 @@ if __name__ == "__main__":
     # Issue #753 (AUDIT-024): 以前は戻り値を捨てていたため、バックアップが失敗しても
     # プロセスは exit 0 で終わっていた(通知はあるが、cron/systemd からは成功に見える)。
     # 終了コードで失敗が分かるようにする。
-    sys.exit(0 if perform_backup()[0] else 1)
+    _ok = perform_backup()[0]
+    # Issue #891: NASへの保存は成功してもオフサイト複製が失敗した場合は終了コード2にする。
+    sys.exit(1 if not _ok else (2 if _offsite_failed else 0))
