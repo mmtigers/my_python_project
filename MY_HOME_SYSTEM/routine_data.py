@@ -117,8 +117,8 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
     },
     'pm': {
         'title': '帰ってから寝るまで',
-        # 土日も同じフローを使う(要件: なるべく平日と揃える)。土日は先頭の
-        # handwashだけスキップし、おやつ休憩から開始する(要件確認済み)。
+        # 土日も同じフローを使う(要件: なるべく平日と揃える)。休日は先頭の
+        # handwash・snack・homeworkをスキップし、自由時間から開始する(要件確認済み)。
         'day_of_week': ALL_DAYS,
         # 実際の下校/帰宅時刻に合わせてユーザーが確定した値。土日も同じ14:00。
         'start_trigger_time': '14:00',
@@ -126,9 +126,10 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
             # 休日は手洗い・おやつ休憩・宿題をスキップし、14:00から自由時間に入る(要件確認済み)。
             {'key': 'handwash', 'label': '手洗い・うがい', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
             {'key': 'snack', 'label': 'おやつ休憩', 'icon_key': 'snack', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
-            # 金曜に完了していれば土日は不要、土曜に完了していれば日曜は不要
-            # (要件確認済み)。判定はroutine_service._resolve_skip_keysが行う。
-            {'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': True, 'checklist': False},
+            # 休日は宿題を出さない(金曜に未完了でも休日はスキップ。要件確認済み)。
+            # weekend_skip=Trueだと_resolve_skip_keysは繰越判定(weekend_carryover)まで
+            # 見ないため、weekend_carryoverはFalseにしておく。
+            {'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
             # 自由時間→寝る準備の締切は17:30(要件確認済み。以前は18:00だった)。
             # 休日(土日祝)は18:00まで(要件確認済み)。
             # 休日は手洗い・おやつ休憩・宿題をすべてスキップするため、14:00に
