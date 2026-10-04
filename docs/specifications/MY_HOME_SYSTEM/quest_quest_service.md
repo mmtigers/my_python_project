@@ -215,7 +215,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 * **役割**: `quest_master`1行（`dict`または`sqlite3.Row`。いずれも`[]`でのアクセスに対応）を受け取り、「今」出現・実行可能な条件を満たすかを`bool`で返す。`start_date`/`end_date`のいずれかが設定されていれば（`quest_type`を問わず）`YYYY-MM-DD`形式（`split('-')`でパース）による期間チェック、`quest_type == 'random'`の場合は`f"{今日の日付}_{quest_id}"`をシードとした`random.Random(seed).random()`が`occurrence_chance`を超えていないかの出現抽選チェックを行う。`occurrence_chance`が`None`の場合は`1.0`（常に出現）にフォールバックする。`start_time`と`end_time`が両方設定されていれば現在時刻(JST)がその範囲内か（`start_time > end_time`の場合は日付をまたぐ範囲として扱う）、`day_of_week`が設定されていれば曜日判定を行う。**（祝日対応で変更）** この曜日判定は以前`today_date.weekday() not in days_list`という直接比較だったが、祝日を休日として扱うためモジュール関数`matches_day_of_week(today_date, days_list)`の呼び出しに置き換えられた（判定規則は同関数の項を参照）。`filter_active_quests`と`_process_complete_quest_locked`の両方から呼ばれる共通ロジック。
 * 根拠: `def _is_quest_currently_active(self, quest, now: Optional[datetime.datetime] = None) -> bool:` (行番号: 393〜453)
 * **（宿題の繰り越しで追加）** `reset_period == 'offday_run'`のクエストは、`day_of_week`による曜日判定の後に「今日が休日（`is_offday`）または翌日が休日」の場合だけ出現する（金曜・祝前日・休日区間の各日）。次の登校日には出ない。完了APIの検証（Issue #163）と表示フィルタで共通。`reset_period`キーが無い`dict`でも落ちず、`sqlite3.Row`でも動くよう`dict(quest).get('reset_period')`で読む（`sqlite3.Row`は`in`が値の照合になるため）。
-* 根拠: `if dict(quest).get('reset_period') == 'offday_run' and not (\n            is_offday(today_date) or is_offday(today_date + datetime.timedelta(days=1))\n        ):\n            return False` (行番号: 449〜452)
+* 根拠: `if dict(quest).get('reset_period') == 'offday_run':\n            return is_offday(today_date) or is_offday(today_date + datetime.timedelta(days=1))` (行番号: 449〜450)
 * 根拠: `start_date = quest['start_date'] if 'start_date' in quest.keys() else None\n        end_date = quest['end_date'] if 'end_date' in quest.keys() else None\n        if start_date or end_date:` (行番号: 663〜665)
 * 根拠: `occurrence_chance = quest['occurrence_chance'] if quest['occurrence_chance'] is not None else 1.0\n            if random.Random(seed).random() > occurrence_chance:\n                return False` (行番号: 684〜686)
 * 根拠: `if quest['start_time'] and quest['end_time']:\n            if quest['start_time'] <= quest['end_time']:\n                if not (quest['start_time'] <= current_time_str <= quest['end_time']):\n                    return False\n            else:\n                if not (current_time_str >= quest['start_time'] or current_time_str <= quest['end_time']):\n                    return False` (行番号: 688〜694)
@@ -231,7 +231,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService.filter_active_quests`
 
 * **役割**: クエスト一覧(`List[dict]`)を受け取り、`_is_quest_currently_active`で「今」出現しているクエストのみに絞り込む。各クエストに`days`フィールド（`day_of_week`をカンマ区切りで`int`のリストへ変換したもの、未設定なら`None`）を追加する。
-* 根拠: `def filter_active_quests(self, quests: List[dict]) -> List[dict]:` (行番号: 456〜469)
+* 根拠: `def filter_active_quests(self, quests: List[dict]) -> List[dict]:` (行番号: 454〜467)
 * 根拠: `for q in quests:\n            if not self._is_quest_currently_active(q, now):\n                continue\n            q['days'] = [int(d) for d in q['day_of_week'].split(',')] if q['day_of_week'] else None\n            filtered.append(q)` (行番号: 707〜715)
 * **引数/リクエスト**: `quests: List[dict]`
 * 根拠: (行番号: 703)
