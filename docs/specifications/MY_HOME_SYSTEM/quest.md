@@ -71,7 +71,8 @@
 * 根拠: クラス名と継承元 (行番号: 28 / 抜粋: "class MasterQuest(BaseModel):")
 * **（Issue #409 で追加）** `id`/`exp`/`gold` に `Field(ge=...)`、`type` は `Literal['daily','special','infinite','limited','random']`(**（Issue #529 で修正）** 以前は `'limited'`/`'random'` を許容せず、サービス層・フロントエンド・仕様書が対応済みのタイプを `quest_data.py` に書くと `sync_master_data` が 500 になっていた。`chance` は `Field(default=1.0, ge=0.0, le=1.0)`)、`reset_period` は `Literal['daily','weekly','monthly']`、`days` は `^[0-6](,[0-6])*$` を検証する。**（2026-09-06 品質監査で修正）** 本モデルが受け付ける `'monthly'` は、以前は `services/quest_service.py` の `is_within_reset_period` に対応する分岐が無く常に `False`(未完了扱い)となっていたが、同関数に `'monthly'`(JSTの暦月一致)分岐が追加され、3値すべてがサービス側でも判定されるようになった（[quest_service.md](./quest_service.md) の `QuestService.is_within_reset_period` を参照）。`MasterReward.cost_gold` は `ge=0`。リクエストモデルの ID 系は `1〜2**63-1`、文字列は `max_length` 付き。未使用だった `UserAction`/`InventoryItem` は削除。**（2026-09-23 要件追加）** `required: bool = True` は「毎日の必須クエスト」(常時表示)か「ボーナスクエスト」(折りたたみ表示)かを表す新フィールドで、`type`(出現頻度)とは独立に管理する。`quest_data.py` の各クエストがこの値を明示し、`sync_master_data` が `quest_master.required` 列(`migrations/0019_add_quest_master_required.sql` で追加、既定値1)へ書き込む。フロントエンド側の折りたたみ表示は [QuestList.md](../family-quest/src/features/quest/components/QuestList.md) を参照。
 * 根拠: `_SQLITE_INT_MAX = 2**63 - 1`、`_DAY_OF_WEEK_RE`、`def _validate_days` (models/quest.py)
-* 根拠: `reset_period: Optional[Literal['daily', 'weekly', 'monthly']] = 'daily'` (行番号: 51)
+* **（宿題の繰り越しで変更）** `reset_period` の許容値に `'offday_run'`（「土日の宿題」用。休日区間に入る前の登校日を起点に完了判定し、休日または翌日が休日の日だけ出現する。詳細は `quest_quest_service.md`）を追加した。
+* 根拠: `reset_period: Optional[Literal['daily', 'weekly', 'monthly', 'offday_run']] = 'daily'` (行番号: 51)
 * 根拠: `required: bool = True` (行番号: 54)
 
 
