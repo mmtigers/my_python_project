@@ -568,6 +568,15 @@ DB_ROW_RETENTION_REQUIRE_BACKUP_WITHIN_HOURS: int = _get_int_env(
     "DB_ROW_RETENTION_REQUIRE_BACKUP_WITHIN_HOURS", 26
 )
 
+# 画面タップログ(POST /api/ui-log/events → ui_tap_events)。UX改善のための操作ログで、
+# 既定は有効。false にすると受信しても保存せず 202 を返す(クライアントは送信を続けるが
+# 失敗扱いにならないため、再送の嵐にならない)。
+UI_TAP_LOG_ENABLED: bool = (
+    os.getenv("UI_TAP_LOG_ENABLED", "true").strip().lower() != "false"
+)
+# 1リクエストで受け付けるタップ数の上限(models/ui_log.py のバリデーションに使う)。
+UI_TAP_LOG_MAX_BATCH: int = 100
+
 # ==========================================
 # 8. Sound & Family設定
 # ==========================================

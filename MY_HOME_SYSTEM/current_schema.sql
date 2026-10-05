@@ -416,3 +416,22 @@ CREATE TABLE mfujin_blog_notifications (
     image_count INTEGER NOT NULL DEFAULT 0,
     error_detail TEXT
 );
+CREATE TABLE ui_tap_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,   
+    user_id TEXT,                    
+    session_id TEXT NOT NULL,        
+    occurred_at TEXT NOT NULL,       
+    received_at TEXT NOT NULL,       
+    screen TEXT NOT NULL,            
+    element_id TEXT,                 
+    element_tag TEXT,                
+    is_interactive INTEGER NOT NULL, 
+    x_pct REAL,                      
+    y_pct REAL,                      
+    layout_mode TEXT                 
+);
+CREATE INDEX idx_ui_tap_events_occurred_at
+    ON ui_tap_events(occurred_at);
+CREATE INDEX idx_ui_tap_events_user_occurred
+    ON ui_tap_events(user_id, occurred_at);
