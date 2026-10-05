@@ -10,6 +10,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
     {
+        version: '1.2.3',
+        date: '2026-10-04',
+        changes: [
+            '「土日の宿題」は、休みの前の日から休みのあいだだけ出るようになりました(月〜木は出ません)',
+            '宿題が終わっていないと、休みの日も「宿題」が出て、終わるまでつづきます',
+        ],
+    },
+    {
         version: '1.2.2',
         date: '2026-10-04',
         changes: [

@@ -26,6 +26,7 @@
     is_national_holiday(d)      : 国民の祝日(振替休日・国民の休日を含む)か
     is_offday(d)                : ファミクエ上の「休日」(土日 or 祝日 or 家の休み)か
     get_offday_reason(d)        : 休日である理由の表示名("土曜"/"敬老の日"等)、平日ならNone
+    offday_run_anchor(d)        : 連休の起点日(休日なら遡った直前の登校日、登校日ならその日自身)
 
 `is_offday` が「土日」と「祝日」をまとめて返す1つの関数になっているのは、
 呼び出し側(すごろくのスキップ判定・クエストの曜日判定・YouTubeの日次上限)が
@@ -187,3 +188,27 @@ def get_offday_reason(value: DateLike) -> str | None:
     if target.weekday() == 6:
         return "日曜"
     return None
+
+
+# 休日の連続区間(連休)を遡る上限日数。年末年始のように EXTRA_HOLIDAY_DATES で
+# 長い休みを設定しても、起点が際限なく過去へ延びないための歯止め
+# (services/routine_service.py の _CARRYOVER_MAX_LOOKBACK_DAYS と同じ値)。
+OFFDAY_RUN_MAX_LOOKBACK_DAYS = 7
+
+
+def offday_run_anchor(value: DateLike) -> datetime.date:
+    """「休日区間に入る前の登校日」を起点日として返す(宿題の繰り越し判定用)。
+
+    - 今日が休日なら、遡って最初に見つかる登校日(平日で祝日でない日)。
+      金曜→土日なら金曜、月曜が祝日の3連休の月曜なら金曜を返す。
+    - 今日が登校日ならその日自身を返す(「翌日が休日の登校日」が起点になるため)。
+    遡りは `OFFDAY_RUN_MAX_LOOKBACK_DAYS` 日で打ち切り、その場合は打ち切り日を返す。
+    """
+    target = _as_date(value)
+    if not is_offday(target):
+        return target
+    for delta in range(1, OFFDAY_RUN_MAX_LOOKBACK_DAYS + 1):
+        day = target - datetime.timedelta(days=delta)
+        if not is_offday(day):
+            return day
+    return target - datetime.timedelta(days=OFFDAY_RUN_MAX_LOOKBACK_DAYS)

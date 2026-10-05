@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from core.utils import get_now_iso
 from core.database import get_db_cursor
 from core import sound_manager
-from core.jp_holidays import WEEKEND_DAYS, is_offday
+from core.jp_holidays import WEEKEND_DAYS, is_offday, offday_run_anchor
 from services.quest.locks import (
     INFINITE_QUEST_COOLDOWN_SECONDS,
     JST,
@@ -84,6 +84,11 @@ class QuestService:
             # 週の月曜日を基準にする
             start_of_week = today_jst - datetime.timedelta(days=today_jst.weekday())
             return completed_date >= start_of_week
+        elif reset_period == 'offday_run':
+            # 「土日の宿題」用。週(月曜起点)ではなく「休日区間に入る前の登校日」を
+            # 起点にする。月曜が祝日の3連休で、土曜に完了済みの宿題が月曜に
+            # 「今週は未完了」へ戻って再表示・二重報酬になるのを防ぐ。
+            return completed_date >= offday_run_anchor(today_jst)
         elif reset_period == 'monthly':
             # models.quest.MasterQuest.reset_period は 'monthly' を受け付けるのに、ここに分岐が
             # 無く常に False(=未完了扱い)になっていた。monthly のクエストは周期内に何度でも
@@ -437,6 +442,12 @@ class QuestService:
             days_list = [int(d) for d in quest['day_of_week'].split(',')]
             if not matches_day_of_week(today_date, days_list):
                 return False
+
+        # 'offday_run'(土日の宿題): 休日、または翌日が休日の登校日(金曜・祝前日)だけ出す。
+        # 完了するまで休日区間の間は出し続け、次の登校日には出さない(平日の宿題に切り替わる)。
+        # (sqlite3.Row は `in` が値の照合になるため、dict へ変換して .get で読む)
+        if dict(quest).get('reset_period') == 'offday_run':
+            return is_offday(today_date) or is_offday(today_date + datetime.timedelta(days=1))
 
         return True
 
