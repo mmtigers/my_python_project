@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全102件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全105件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -95,6 +95,9 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [notify_task_failure.md](./notify_task_failure.md) | `run_task.sh` 経由の cron タスクが失敗したことを Discord へ通知する CLI(2026-09-20 新設、Issue #751)。タスクごとのクールダウン状態ファイルで通知の洪水を防ぐ。 |
 | [db_retention_service.md](./db_retention_service.md) | SQLite の**行**の保持期間削除(2026-09-20 新設、Issue #733)。従来の保持期間削除はすべて「ファイル」が対象で、DB の行を消す経路が無かった。既定はドライランで1行も削除せず、削除予定件数を報告するだけ。有効時も直近のバックアップを確認してからバッチ分割して削除する。 |
 | [db_retention.md](./db_retention.md) | 上記を実機で確認・実行するための CLI(2026-09-20 新設、Issue #733)。引数なしで現状と削除予定のレポート、`--apply` で削除、`--vacuum` でファイル縮小。 |
+| [ui_log_router.md](./ui_log_router.md) | 画面タップログ(UX改善用の操作ログ)を受け付ける`POST /api/ui-log/events`のルーター。薄いルーターで実処理は`ui_event_service`に委譲する。 |
+| [ui_log.md](./ui_log.md) | 画面タップログのリクエスト/レスポンスのPydanticモデル(`UiTapEvent`/`UiTapBatch`/`UiTapBatchResponse`)。 |
+| [ui_event_service.md](./ui_event_service.md) | 画面タップのバッチを`ui_tap_events`へ`INSERT OR IGNORE`で追記するサービス(冪等・時刻範囲チェック)。 |
 | [host_config_backup_service.md](./host_config_backup_service.md) | ホスト側(`/etc` 等)の運用設定のバックアップ(2026-09-20 新設、Issue #774)。`backup_service` の対象がリポジトリ配下のファイルだけで、常時録画・外部公開・NASマウントの設定が丸ごと対象外だった。**秘密を含むファイルは中身をコピーせず台帳(パス・所有者・パーミッション・sha256)だけを残す**(#649/#773 と同じ判断)。コピーするファイルも `password=`/`token=` の値を redact する。 |
 | [backup_host_config.md](./backup_host_config.md) | 上記を実機で実行するための CLI(2026-09-20 新設、Issue #774)。`--dry-run` で何を拾うかの確認、引数なしで1世代を書き出す。読めなかったファイルがあれば exit 1。 |
 | [mfujin_blog_monitor.md](./mfujin_blog_monitor.md) | 個人ブログ「コミックエッセイ えむふじんがあらわれた」をcron駆動で巡回し、漫画記事と判定できた場合のみLINE通知するバッチのオーケストレーション(2026-09新設)。`mfujin_blog_notifications`テーブルで重複送信を防止する。 |
