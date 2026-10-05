@@ -49,7 +49,15 @@ class UiEventService:
         rows = []
         rejected = 0
         for ev in batch.events:
-            occurred = datetime.datetime.fromtimestamp(ev.occurred_at_ms / 1000, tz=JST)
+            try:
+                occurred = datetime.datetime.fromtimestamp(ev.occurred_at_ms / 1000, tz=JST)
+            except (OverflowError, OSError, ValueError):
+                # 10**18 のような桁外れの値(端末の時計の異常や localStorage の改ざん)は
+                # datetime に変換できない。放置すると500になり、クライアントは5xxを
+                # 再試行扱いにして同じキューを永久に再送し、以降のタップが詰まる。
+                # 当該イベントだけを rejected として落とし、バッチ全体は受け付ける。
+                rejected += 1
+                continue
             if not (oldest <= occurred <= latest):
                 rejected += 1
                 continue
