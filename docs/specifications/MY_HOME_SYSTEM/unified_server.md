@@ -30,6 +30,7 @@
 
 * FastAPIを用いたAPIサーバーのエントリーポイント（起動・設定スクリプト）である。
 * システムのルートディレクトリ解決、CORS設定、IPアドレスベースの検証（Cloudflare等リバースプロキシ対応）、ログ抑制フィルターの設定、各種ルーターの統合を行う。CORS許可オリジンは`config.CORS_ORIGINS`を直接参照する（M-8-2で、本ファイル側に別途あった重複ハードコードリストを削除し一本化した。以前は本ファイル側のリストのみが実際に使われ、`config.py`側の設定やその元になる`ALLOW_ALL_ORIGINS`環境変数を変更してもCORS設定に反映されない状態だった）。
+* **（画面タップログで追加）** `routers.ui_log_router`を`app.include_router(ui_log_router.router, prefix="/api/ui-log", tags=["ui-log"])`で`/api/ui-log`配下にマウントする(`POST /api/ui-log/events`)。同一オリジンの内部APIであり新しい外部Webhookではないため、`allowed_webhook_paths`への追記は不要。根拠: `app.include_router(ui_log_router.router, prefix="/api/ui-log", tags=["ui-log"])` (行番号: 503)
 * 根拠: [CORSミドルウェア設定] (行番号: 245-251 / 抜粋: "allow_origins=config.CORS_ORIGINS,")
 * **（#411 S-L7で修正）** `allow_credentials`は`config.CORS_ORIGINS != ["*"]`で動的に決定する。以前は`ALLOW_ALL_ORIGINS=true`で`CORS_ORIGINS=["*"]`になっている場合でも`allow_credentials=True`に固定されており、StarletteのCORSMiddlewareはワイルドカード＋認証情報付きリクエストに対してリクエスト元Originをそのままエコーバックする(仕様上「*」は認証情報付きレスポンスヘッダとしては使えないため)。結果として、`ALLOW_ALL_ORIGINS=true`時は任意オリジンからCookie等の資格情報付きアクセスを実質許可してしまっていた。ワイルドカード指定時のみ`allow_credentials`をFalseにする。
 * 根拠: `allow_credentials=config.CORS_ORIGINS != ["*"]` (行番号: 248)
@@ -39,7 +40,7 @@
 * **（Issue #829で改訂）** `config.DASHBOARD_ENABLED` が真のときだけ `routers/dashboard_router.py` をincludeする。以前はStreamlitダッシュボードを`config.DASHBOARD_INTERNAL_URL`(既定 `http://127.0.0.1:8501`)へリバースプロキシしていたが、Streamlit版は廃止され、`dashboard_router`自身がこのサーバー内でHTMLを直接組み立てて返す(外部プロセスへの中継は無い)。`config.DASHBOARD_BASE_PATH`（既定 `/dashboard`）配下へのマウントである点は変わらない。外部（スマートフォン等）からの到達はCloudflare Accessの保護下にある本サーバー経由へ一本化する構成も変わらず、コメントに **このパスを Cloudflare Access のバイパス対象に設定してはならない** と明記されている。
 * 根拠: [ダッシュボードのinclude] (行番号: 509〜511 / 抜粋: "if config.DASHBOARD_ENABLED:", "    app.include_router(dashboard_router.router, tags=[\"dashboard\"])")
 * **（Issue #829で削除）** 以前は`lifespan`の終了処理で、Streamlit中継用のhttpxコネクションプールを閉じる`dashboard_proxy_service.aclose()`を呼んでいたが、中継自体が無くなったためこの呼び出しも削除された。`dashboard_router`はDB接続等の永続リソースを自前で保持しないため、代替のクリーンアップ処理は無い。
-* 根拠: `app = FastAPI(...)` (行番号: 230-235 / 抜粋: "app = FastAPI("), `uvicorn.run(...)` (行番号: 620 / 抜粋: "uvicorn.run(app, host="0.0.0.0"")
+* 根拠: `app = FastAPI(...)` (行番号: 230-235 / 抜粋: "app = FastAPI("), `uvicorn.run(...)` (行番号: 621 / 抜粋: "uvicorn.run(app, host="0.0.0.0"")
 
 ## 3. 外部依存関係
 
@@ -61,7 +62,7 @@
 | `fastapi.staticfiles` | 外部パッケージ | 静的ファイル配信 | 根拠: `[StaticFiles]` (行番号: 15 / 抜粋: "from fastapi.staticfiles import") |
 | `fastapi.responses` | 外部パッケージ | JSON/ファイルレスポンス生成 | 根拠: `[JSONResponse, FileResponse]` (行番号: 16 / 抜粋: "from fastapi.responses import J") |
 | `fastapi.middleware.cors` | 外部パッケージ | CORS処理ミドルウェア | 根拠: `[CORSMiddleware]` (行番号: 17 / 抜粋: "from fastapi.middleware.cors im") |
-| `uvicorn` | 外部パッケージ | ASGIサーバーの起動（トップレベルではなく`_run_uvicorn_server`関数内でのローカルインポート） | 根拠: `[uvicorn]` (行番号: 617 / 抜粋: "import uvicorn") |
+| `uvicorn` | 外部パッケージ | ASGIサーバーの起動（トップレベルではなく`_run_uvicorn_server`関数内でのローカルインポート） | 根拠: `[uvicorn]` (行番号: 618 / 抜粋: "import uvicorn") |
 | `sqlite3` | 標準ライブラリ | 起動時マイグレーション適用のためのDB接続確立 | 根拠: `[sqlite3]` (行番号: 24 / 抜粋: "import sqlite3") |
 | `config` | ローカルモジュール | 設定値(`QUEST_DIST_DIR`, `SQLITE_DB_PATH`等)の取得 | 根拠: `[config]` (行番号: 26 / 抜粋: "import config") |
 | `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化処理 | 根拠: `[setup_logging]` (行番号: 27 / 抜粋: "from core.logger import setup_l") |
@@ -73,11 +74,11 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.QUEST_DIST_DIR` | 設定ファイル内の変数の有無・パス文字列が不明 | `getattr(config, "QUEST_DIST_DIR", None)` (行番号: 529 / 抜粋: "quest_dist_dir = getattr(config") |
+| `config.QUEST_DIST_DIR` | 設定ファイル内の変数の有無・パス文字列が不明 | `getattr(config, "QUEST_DIST_DIR", None)` (行番号: 530 / 抜粋: "quest_dist_dir = getattr(config") |
 | `setup_logging()` | ログ出力フォーマット等の詳細仕様が不明 | `logger = setup_logging("unifie")` (行番号: 40 / 抜粋: "logger = setup_logging("unifie") |
 | `sensor_service.cancel_all_tasks()` | キャンセルされる具体的なタスク内容が不明 | `sensor_service.cancel_all_tasks()` (行番号: 332 / 抜粋: "sensor_service.cancel_all_tasks") |
-| 各ルーター (`webhook`, `quest`, `system`, `camera`, `alexa`, `routine`) | 各パス配下の具体的なルーティング定義が不明（`alexa_router`は対応する仕様書が現時点で未作成のため特に不明。`routine_router`は[routine_router.md](./routine_router.md)を参照） | `app.include_router(...)` (行番号: 501-506 / 抜粋: "app.include_router(webhook_router.router)") |
-| `dashboard_router` | **（Issue #829で改訂）** `config.DASHBOARD_BASE_PATH` 配下のルート定義・ページHTML組み立ての詳細が本ファイルからは不明（[dashboard_router.md](./dashboard_router.md) を参照。Streamlit版廃止に伴い、以前中継先だった`dashboard_proxy_service`への依存は無くなった） | `app.include_router(dashboard_router.router, tags=["dashboard"])` (行番号: 510 / 抜粋: "app.include_router(dashboard_router.router, tags=[\"dashboard\"])") |
+| 各ルーター (`webhook`, `quest`, `system`, `camera`, `alexa`, `routine`, `ui_log`) | 各パス配下の具体的なルーティング定義が不明（`alexa_router`は対応する仕様書が現時点で未作成のため特に不明。`routine_router`は[routine_router.md](./routine_router.md)、`ui_log_router`は[ui_log_router.md](./ui_log_router.md)を参照） | `app.include_router(...)` (行番号: 501-506 / 抜粋: "app.include_router(webhook_router.router)") |
+| `dashboard_router` | **（Issue #829で改訂）** `config.DASHBOARD_BASE_PATH` 配下のルート定義・ページHTML組み立ての詳細が本ファイルからは不明（[dashboard_router.md](./dashboard_router.md) を参照。Streamlit版廃止に伴い、以前中継先だった`dashboard_proxy_service`への依存は無くなった） | `app.include_router(dashboard_router.router, tags=["dashboard"])` (行番号: 511 / 抜粋: "app.include_router(dashboard_router.router, tags=[\"dashboard\"])") |
 | `monitors/camera_monitor.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, camera_script])` (行番号: 183 / 抜粋: "camera_process = subprocess.Po") |
 | `scheduler_boot.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, scheduler_script])` (行番号: 192 / 抜粋: "scheduler_process = subprocess.") |
 | `apply_pending_migrations()` | マイグレーション適用の具体的な内部処理は `core/migrations.py` にあるため不明 | `apply_pending_migrations(migration_conn)` (行番号: 274 / 抜粋: "apply_pending_migrations(migration_conn)") |
@@ -246,19 +247,19 @@
 ### `serve_quest_spa` (エンドポイント: `GET /quest/{full_path:path}`, `GET /camera/{full_path:path}`)
 
 * **役割**: SPA(Single Page Application)向けのリクエストハンドラ。`/quest/*`と`/camera/*`の両方に同一ハンドラが登録されている。指定されたパスのファイルが存在する場合はそれを返し、存在しない場合はフォールバックとして`index.html`を返す。
-* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 543-558 / 抜粋: "async def serve_quest_spa(full_path: str):")、`@app.get("/quest/{full_path:path}")` / `@app.get("/camera/{full_path:path}")` (行番号: 367-368)
+* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 544-559 / 抜粋: "async def serve_quest_spa(full_path: str):")、`@app.get("/quest/{full_path:path}")` / `@app.get("/camera/{full_path:path}")` (行番号: 367-368)
 
 
 * **引数/リクエスト**: `full_path: str`
-* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 543 / 抜粋: "async def serve_quest_spa(full_path: str):")
+* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 544 / 抜粋: "async def serve_quest_spa(full_path: str):")
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
-* 根拠: `return FileResponse(target_fil` (行番号: 552 / 抜粋: "return FileResponse(target_file"), `return JSONResponse(status_code` (行番号: 374 / 抜粋: "return JSONResponse(status_code")
+* 根拠: `return FileResponse(target_fil` (行番号: 553 / 抜粋: "return FileResponse(target_file"), `return JSONResponse(status_code` (行番号: 374 / 抜粋: "return JSONResponse(status_code")
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 543-558 / 抜粋: "async def serve_quest_spa(full_path: str):")
+* 根拠: 該当関数内処理 (行番号: 544-559 / 抜粋: "async def serve_quest_spa(full_path: str):")
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
@@ -269,11 +270,11 @@
 ### `serve_quest_root` (エンドポイント: `GET /quest`, `GET /quest/`, `GET /camera`, `GET /camera/`)
 
 * **役割**: SPAルートパスへのアクセスに対し`index.html`を返す。`/quest`系と`/camera`系の計4パスに同一ハンドラが登録されている。
-* 根拠: `async def serve_quest_root():` (行番号: 566-570 / 抜粋: "async def serve_quest_root():")、`@app.get("/quest")` 等4つのデコレータ (行番号: 388-391)
+* 根拠: `async def serve_quest_root():` (行番号: 567-571 / 抜粋: "async def serve_quest_root():")、`@app.get("/quest")` 等4つのデコレータ (行番号: 388-391)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def serve_quest_root():` (行番号: 566 / 抜粋: "async def serve_quest_root():")
+* 根拠: `async def serve_quest_root():` (行番号: 567 / 抜粋: "async def serve_quest_root():")
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
@@ -281,7 +282,7 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 566-570 / 抜粋: "async def serve_quest_root():")
+* 根拠: 該当関数内処理 (行番号: 567-571 / 抜粋: "async def serve_quest_root():")
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
@@ -292,11 +293,11 @@
 ### `root` (エンドポイント: `GET /`)
 
 * **役割**: 稼働状態、システム名、現在時刻を返すルートAPI。
-* 根拠: `async def root():` (行番号: 578-583 / 抜粋: "async def root():")
+* 根拠: `async def root():` (行番号: 579-584 / 抜粋: "async def root():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def root():` (行番号: 578 / 抜粋: "async def root():")
+* 根拠: `async def root():` (行番号: 579 / 抜粋: "async def root():")
 
 
 * **戻り値/レスポンス**: `dict` (status, system, timeキーを含む)
@@ -304,22 +305,22 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 578-583 / 抜粋: "async def root():")
+* 根拠: 該当関数内処理 (行番号: 579-584 / 抜粋: "async def root():")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数内処理 (行番号: 578-583 / 抜粋: "async def root():")
+* 根拠: 該当関数内処理 (行番号: 579-584 / 抜粋: "async def root():")
 
 
 
 ### `health_check` (エンドポイント: `GET /health`)
 
 * **役割**: **（Issue #735 / AUDIT-005 で変更）** liveness ではなく **readiness** を返す。`lifespan`がスキーマ適用に失敗すると`app.state.migration_ok`が`False`になり、監視子プロセスを起動しないまま「プロセスは生存しているが全APIがスキーマ未適用のDBに当たって500」という状態になる。以前は無条件に`{"status": "healthy"}`を返していたため、systemd(`Type=simple`)も`server_watchdog`(`systemctl` + `pgrep`)も`health_watch`(`check_service_active`)もこの状態を「正常」と報告していた。現在は`migration_ok`が`False`のとき`503`を返し、外形監視から見分けられるようにしている。
-* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 586 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
+* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 587 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
 
 
 * **引数/リクエスト**: `request: Request`（`app.state`を参照するために受け取る。リクエストボディ・クエリは読まない）
-* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 586 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
+* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 587 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
 
 
 * **戻り値/レスポンス**: `JSONResponse`。`migration_ok`が`False`なら`503` + `{"status": "unhealthy", "reason": "migration_failed"}`、それ以外は`200` + `{"status": "healthy"}`。`app.state.migration_ok`が存在しない場合（`lifespan`を通らないテスト経路等）は`getattr`の既定値`True`により`200`。
@@ -339,7 +340,7 @@
 ### `_run_uvicorn_server`（Issue #229で追加）
 
 * **役割**: 本番起動経路（`python unified_server.py`実行時の`if __name__ == "__main__":`）のエントリポイント。`uvicorn.run(app, host="0.0.0.0", port=8000)`を呼び出す。**（Issue #229で修正）** 以前はこの箇所で`uvicorn.config.LOGGING_CONFIG`を書き換え、`"uvicorn.access"`ロガー自体のレベルを`WARNING`に固定していた。uvicornのアクセスログは常に`logger.info()`（レベル20）で出力されるため、ロガーのレベルチェックの時点でログレコードが作られず、`lifespan()`内で登録される`SilencePolicyFilter`（GETの200/304ポーリングのみを選別して抑制し、POST・エラーは残す設計）が一度も呼び出されなかった。結果、POST等の状態変更リクエストやエラーレスポンスを含め、アクセスログが本番起動経路で一切残らない状態になっていた。現在はデフォルトの`log_config`（`uvicorn.access`はINFO）をそのまま使い、レコード生成自体は妨げず`SilencePolicyFilter`に選別を委ねる。本関数への切り出しは、以前は`if __name__ == "__main__":`直下にインラインで書かれ`import`されない限り実行されずテストが困難だった処理を、単体テストで`uvicorn.run`をモックして検証できるようにするため（このロジック自体はIssue #229の修正の一部）。
-* 根拠: [関数定義とコメント] (行番号: 605-620 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
+* 根拠: [関数定義とコメント] (行番号: 606-621 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
 
 
 * **引数/リクエスト**: なし
@@ -351,7 +352,7 @@
 
 
 * **副作用**: `uvicorn.run`の呼び出し（ASGIサーバーの起動。呼び出しはブロッキングでプロセスの生存期間中戻らない）
-* 根拠: (行番号: 620 / 抜粋: "uvicorn.run(app, host="0.0.0.0", port=8000)")
+* 根拠: (行番号: 621 / 抜粋: "uvicorn.run(app, host="0.0.0.0", port=8000)")
 
 
 * **エラーハンドリング**: なし
@@ -446,10 +447,10 @@ graph TD
 ## 8. 保守上の注意点
 
 * **（スマホ対応。Issue #829でStreamlit部分を訂正）** `/dashboard` は Cloudflare Access のバイパス対象にしてはならない**: `ip_restriction_middleware` の `allowed_webhook_paths`（`/webhook/switchbot`・`/callback/line`・`/webhook/alexa`）は「エッジ側でバイパス設定が必要なパス」の一覧だが、`config.DASHBOARD_BASE_PATH`（既定 `/dashboard`）はその逆で、**エッジの認証を必ず通す必要がある**。バイパスすると、認証機構を持たないダッシュボード（家族の健康記録・防犯ログの閲覧と再起動操作を備える。以前はStreamlit製だったが#829で廃止され、現在は`dashboard_router`自身がHTMLを返す。認証を持たない点は変わらない）が無認証で外部公開される。
-* 根拠: [ダッシュボードのinclude箇所のコメント] (行番号: 508 / 抜粋: "# ★このパスを Cloudflare Access のバイパス対象に設定してはならない。")
+* 根拠: [ダッシュボードのinclude箇所のコメント] (行番号: 509 / 抜粋: "# ★このパスを Cloudflare Access のバイパス対象に設定してはならない。")
 
 * **（スマホ対応。Issue #829でルート数の記述を訂正）** ダッシュボードのルートはOpenAPIスキーマに出ない**: `routers/dashboard_router.py` の全ルート(現在10個。ホーム/見守り/くらし/システムの4ページ・自動更新フラグメント・PWAマニフェスト・アイコン・スナップショット・旧URLリダイレクト用)はすべて `include_in_schema=False` である。`tests/test_unified_server_app.py` の `test_allowed_webhook_paths_matches_mounted_webhook_routes` はOpenAPIスキーマ上のパス一覧（`/webhook/`・`/callback/` 始まり）を突き合わせる実装なので、この検査には影響しない。
-* 根拠: [ダッシュボードのinclude] (行番号: 510 / 抜粋: "app.include_router(dashboard_router.router, tags=[\"dashboard\"])")
+* 根拠: [ダッシュボードのinclude] (行番号: 511 / 抜粋: "app.include_router(dashboard_router.router, tags=[\"dashboard\"])")
 
 * **（Issue #829で削除）** 以前はStreamlitの`_stcore/stream` WebSocket接続が`config.DASHBOARD_BASE_PATH`配下に存在し、`security_headers_middleware`/`ip_restriction_middleware`(いずれも`@app.middleware("http")`で登録)が適用されない点を注意点として記載していたが、Streamlit版廃止により`dashboard_router`にWebSocketルートは存在しなくなったため、この項目自体が本ファイルには当てはまらなくなった。
 
