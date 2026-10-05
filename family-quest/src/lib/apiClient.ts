@@ -57,6 +57,12 @@ export class ApiClient {
         this.baseUrl = baseUrl.replace(/\/+$/, '');
     }
 
+    /** エンドポイントを絶対URLにする(sendBeacon のように ApiClient 経由で送れない呼び出し用)。 */
+    url(endpoint: string): string {
+        const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+        return `${this.baseUrl}${cleanEndpoint}`;
+    }
+
     async get<T>(endpoint: string): Promise<T> {
         return this._request<T>(endpoint, { method: 'GET' });
     }

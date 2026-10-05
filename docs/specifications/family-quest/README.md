@@ -1,6 +1,6 @@
 # family-quest 仕様書一覧
 
-タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された66件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
+タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された68件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
 
 対応するソースファイル自体が削除済みの仕様書は、末尾の「廃止済み仕様書一覧」に記録のみ残しています(Issue #402 で仕様書ファイル自体は削除済み。新規の実装・参照の対象ではありません)。
 
@@ -109,6 +109,7 @@
 | [useConfirmDialog.md](./src/hooks/useConfirmDialog.md) | 完了・購入・却下の確認モーダルまわりの状態クラスタ(confirmMode/confirmTarget/confirmUser/rejectReason/isConfirming)を保持するカスタムフック。Issue #552で`App.tsx`から新規抽出。 |
 | [useCurrentUser.md](./src/hooks/useCurrentUser.md) | 選択中ユーザーの`localStorage`永続化解決・保存を行うカスタムフック。Issue #552で`App.tsx`から新規抽出。 |
 | [useOnlineStatus.md](./src/hooks/useOnlineStatus.md) | `navigator.onLine`と`online`/`offline`イベントを利用してオンライン／オフライン状態を検知するカスタムフック。 |
+| [useTapLogger.md](./src/hooks/useTapLogger.md) | 画面タップログ(`lib/tapLogger.ts`)をマウント中だけ有効にするカスタムフック。選択中ユーザー・画面・向きを`ref`経由で渡す。 |
 | [useSound.md](./src/hooks/useSound.md) | 効果音を再生するためのカスタムフック。音声ファイルパスを一元管理し、`HTMLAudioElement`インスタンスをキャッシュする。 |
 
 ## src/lib
@@ -125,6 +126,7 @@
 | [outOfScopeReload.md](./src/lib/outOfScopeReload.md) | Service Workerのスコープ(`/quest/`)外のページ（`/camera`）向けに、`controllerchange`(Issue #362)の代わりとなる更新検知を提供する`isOutsideServiceWorkerScope`・`createUpdateChecker`を提供する（Issue #591）。 |
 | [pathSegments.md](./src/lib/pathSegments.md) | `routing.ts`の`isCameraRoute`と`outOfScopeReload.ts`の`isOutsideServiceWorkerScope`で重複していたパスセグメント分割ロジックを集約した共有ヘルパー`getPathSegments`を提供する（コードレビュー指摘対応、2026-09-10）。 |
 | [queryClient.md](./src/lib/queryClient.md) | `@tanstack/react-query`の`QueryClient`を初期化し、システム全体のデータフェッチングのデフォルト動作（再試行回数・キャッシュ期限等）を定義したインスタンスをエクスポートする。 |
+| [tapLogger.md](./src/lib/tapLogger.md) | UX改善用の画面タップログ。pointerdownをキューにため、20件/30秒/画面を隠す時にバッチ送信し、失敗時は指数バックオフとlocalStorage退避で再送する(入力値は記録しない)。 |
 | [questTargeting.md](./src/lib/questTargeting.md) | クエストの`target_user`判定（`all`/`siblings`/`role_`プレフィックス/個別`user_id`一致）を行う`isQuestVisibleToUser`を提供する。`QuestList.tsx`と`FamilyDashboard.tsx`で重複していたロジックを集約したもの。 |
 | [routing.md](./src/lib/routing.md) | `main.tsx`のルートビュー切り替え判定（`/camera`・`/quest/camera`をカメラビューとして扱うか）を担う純粋関数`isCameraRoute`を提供する（Issue #472）。 |
 | [userRole.md](./src/lib/userRole.md) | 保護者判定`isParentUser`と、承認・却下・購入の記録名義となる代表親を解決する`getRepresentativeParent`を提供する。Issue #552で`App.tsx`から新規抽出。 |

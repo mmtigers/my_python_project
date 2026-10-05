@@ -173,6 +173,10 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
     return (
         <div
             onClickCapture={onInteract}
+            // 画面タップログ(lib/tapLogger.ts): 横画面は4人が同時に表示され、タップした
+            // パネルの人・タブが「選択中のユーザー」とは限らないため、パネル自身が申告する。
+            data-tap-user={user.user_id}
+            data-tap-screen={tab}
             className={`flex flex-col bg-black/30 border-2 rounded-xl overflow-hidden min-w-0 transition-all duration-300 ${borderClass} ${ringClass} ${isIdle ? 'opacity-70' : ''}`}
         >
             <div className="p-2 border-b border-gray-700">

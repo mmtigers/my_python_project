@@ -9,6 +9,7 @@ import RoutineFlow, { RoutineFreeTimeBanner } from './features/routine/component
 import { selectRoutineFlow } from './lib/routineDataSchema';
 import { useSound } from './hooks/useSound';
 import { useLayoutMode } from './hooks/useLayoutMode';
+import { useTapLogger } from './hooks/useTapLogger';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useCurrentUser } from './hooks/useCurrentUser';
 import { useConfirmDialog } from './hooks/useConfirmDialog';
@@ -148,6 +149,13 @@ function App() {
   // #393: usersが実データに揃ったら保存済みuser_idを解決し、以後のcurrentUserIdxの
   // 変化(ユーザー切替)を都度localStorageへ保存する(#552でuseCurrentUserへ抽出)。
   useCurrentUser(users, currentUserIdx, setCurrentUserIdx);
+
+  // 画面タップログ(UX改善用)。カメラ画面は main.tsx で App とは別にマウントされるため対象外。
+  useTapLogger({
+    userId: currentUser?.user_id ?? null,
+    screen: viewMode === 'familyLog' ? 'familyLog' : (activeTab === 'quest' && activeRoutineKey ? 'routine' : activeTab),
+    layoutMode,
+  });
 
   // ★バグ修正(M-6-2): handleApproveAllのonRetryが承認失敗時点の古いpendingQuests
   // クロージャを掴んだままになり、再試行すると既に承認済みの項目まで再承認しようとして

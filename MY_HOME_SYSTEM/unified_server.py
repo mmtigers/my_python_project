@@ -29,7 +29,7 @@ from core.migrations import apply_pending_migrations
 from services import sensor_service, camera_service
 
 # Routers
-from routers import quest_router, webhook_router, system_router, camera_router, alexa_router, routine_router
+from routers import quest_router, webhook_router, system_router, camera_router, alexa_router, routine_router, ui_log_router
 # かんたん表示ダッシュボード。config.DASHBOARD_ENABLED=false のときは
 # include しないため、import だけしてルートは生やさない。
 from routers import dashboard_router
@@ -500,6 +500,7 @@ app.include_router(system_router.router, prefix="/api/system", tags=["system"])
 app.include_router(camera_router.router, prefix="/api/cameras", tags=["cameras"])
 app.include_router(alexa_router.router, tags=["alexa"])
 app.include_router(routine_router.router, prefix="/api/routine", tags=["routine"])
+app.include_router(ui_log_router.router, prefix="/api/ui-log", tags=["ui-log"])
 
 # かんたん表示ダッシュボード(`routers/dashboard_router.py`。Streamlit不使用、この
 # サーバーが直接HTMLを返す。#829でStreamlit版は廃止した)。
