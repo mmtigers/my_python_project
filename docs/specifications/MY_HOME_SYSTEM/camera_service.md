@@ -41,7 +41,7 @@
 
 
 * 録画プレイリスト生成(`generate_record_playlist`)は、`process_key`（`カメラID_日付`）単位のロック（コンテキストマネージャ`_vod_generation_lock`）で排他制御された内部関数`_generate_record_playlist_locked`へ処理を委譲し、同一キーへの同時リクエストによるffmpegの二重起動と同一ファイルへの競合書き込みを防止する。**（Issue #247で修正）** 以前は`_get_vod_generation_lock`関数が`カメラID_日付`単位の`threading.Lock`を`_vod_generation_locks`辞書へ登録するのみで、`_active_vod_processes`に対応する`_prune_finished_vod_processes`のような削除・剪定手段が無く、日々無限に蓄積し続けていた。現在は参照カウント方式(`_RefCountedLock`)を導入した`_vod_generation_lock`コンテキストマネージャに置き換え、使用が終わった(参照カウントが0に戻った)エントリのみを安全に削除する。単純に「ロックが未取得状態なら削除」する方式だと、ロック取得元が辞書からロックオブジェクトを取り出した直後・実際に獲得する直前の隙間で別スレッドが剪定してしまい、同一`process_key`に対して2つの別々のロックオブジェクトが生成されて同時に「取得成功」する（このロック機構が本来防ぐべき二重起動と同じ問題を再発させる）ため、参照カウントで安全性を担保している。**（Issue #439で同一パターンを流用）** ライブ配信の起動(`start_hls_stream`)も、`cam_id`単位で同じ参照カウント方式（`_live_stream_lock`）により排他制御されるようになった。
-* 根拠: [ロック委譲] (行番号: 324 / 抜粋: "with _vod_generation_lock(process_key):")、`_RefCountedLock`と参照カウントによる安全な削除のコメント (行番号: 72〜74 / 抜粋: "# #247: _active_vod_processesには対応する_prune_finished_vod_processes()が\n# あるが、以前はこの辞書には剪定処理が存在せず、cam_id×target_dateの組み合わせが\n# 増えるたびに(long-running環境で日々)無限に蓄積していた。")、`_live_stream_lock`定義 (行番号: 105〜121)
+* 根拠: [ロック委譲] (行番号: 352 / 抜粋: "with _vod_generation_lock(process_key):")、`_RefCountedLock`と参照カウントによる安全な削除のコメント (行番号: 72〜74 / 抜粋: "# #247: _active_vod_processesには対応する_prune_finished_vod_processes()が\n# あるが、以前はこの辞書には剪定処理が存在せず、cam_id×target_dateの組み合わせが\n# 増えるたびに(long-running環境で日々)無限に蓄積していた。")、`_live_stream_lock`定義 (行番号: 105〜121)
 
 
 * `_active_vod_processes`に登録されたプロセスのうち完了済み（`poll()`が`None`でない）ものは、`_generate_record_playlist_locked`の呼び出しの都度`_prune_finished_vod_processes`により除去され、`カメラID_日付`キーが無限に蓄積することを防ぐ。
@@ -82,7 +82,7 @@
 | `config` | `config.NVR_RECORD_DIR`の値、`config.DEVICES_JSON_PATH`が指す実際のファイルパス、`config.CAMERAS`の実データがどのように設定されているか（環境変数、設定ファイル等）が本ファイルからは不明。 | 根拠: [config参照] (行番号: 306 / 抜粋: "nvr_base_dir = config.NVR_RECORD_DIR") |
 | `setup_logging` | 生成されるロガーの出力先・フォーマット・ログレベルの詳細が不明。 | 根拠: [ロガー生成] (行番号: 22 / 抜粋: "logger = setup_logging(\"camera_service\")") |
 | `ffmpeg` / `nice` (外部コマンド) | `subprocess.Popen`で起動される外部コマンドの内部動作・エラー時の終了コード仕様は本ファイルの管理対象外。 | 根拠: [Popen呼び出し] (行番号: 265, 451 / 抜粋: "\"nice\", \"-n\", str(FFMPEG_NICE_LEVEL),")（Issue #451でnice値をハードコード文字列から`FFMPEG_NICE_LEVEL`定数へ変更） |
-| `devices.json` (外部ファイル) | `set_camera_enabled`が読み書きする対象であり、既存カメラエントリの正確なJSON構造・件数は本ファイルからは不明。 | 根拠: [devices.json読み書き] (行番号: 473 / 抜粋: "if not os.path.exists(config.DEVICES_JSON_PATH):") |
+| `devices.json` (外部ファイル) | `set_camera_enabled`が読み書きする対象であり、既存カメラエントリの正確なJSON構造・件数は本ファイルからは不明。 | 根拠: [devices.json読み書き] (行番号: 501 / 抜粋: "if not os.path.exists(config.DEVICES_JSON_PATH):") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -236,29 +236,52 @@
 ### `FFMPEG_RTSP_TIMEOUT_USEC`（不具合修正で新設）
 
 * **役割**: ライブHLS配信のffmpeg RTSP入力に設定するソケットI/Oタイムアウト(マイクロ秒、既定15秒)。実機で駐車場カメラをタップすると、ライブ映像ではなく固まった時点の古い映像が配信され続ける不具合を確認した。原因はffmpegのRTSP入力にioタイムアウトが既定で設定されておらず、TCP接続は張れるが応答が返らない種類のネットワーク不調に遭遇すると、ffmpegプロセスがエラーも出さず無期限にハングすること。`_start_hls_stream_locked`の`existing.poll() is None`チェックはOSプロセスの生死しか見ないため、ハングしたプロセスを「配信中」と誤認して再起動されず、固まった時点の映像を配信し続けてしまっていた。この定数をRTSP/tcpプロトコル自身のオプションである`-timeout`としてffmpegコマンドに渡し、応答が無ければffmpeg自身が終了するようにすることで、次のリクエストで新しいプロセスが起動されるようにする。**汎用オプションの`-rw_timeout`は`async:`プロトコル専用でRTSP/tcpの読み取りには効かない**ことを、疎通不能なホストに対するffmpeg実行(`-rw_timeout`では無期限にハングし続け、`-timeout`だけが指定通りに機能することを確認)で検証済み。
-* 根拠: `FFMPEG_RTSP_TIMEOUT_USEC = 15_000_000` (行番号: 56)、`"-timeout", str(FFMPEG_RTSP_TIMEOUT_USEC),` (行番号: 249)
+* 根拠: `FFMPEG_RTSP_TIMEOUT_USEC = 15_000_000` (行番号: 56)、`"-timeout", str(FFMPEG_RTSP_TIMEOUT_USEC),` (行番号: 277)
+
+
+### `_remove_stale_live_outputs`（Issue #882で新設）
+
+* **役割**: ライブHLSの出力ディレクトリから、前回のffmpegが残した`stream.m3u8`・セグメント(`*.ts`)・書きかけの`*.m3u8.tmp`を削除する。ffmpegは`-hls_flags delete_segments`でも終了時に最後のプレイリストと直近のセグメントをディスクに残す(正常終了なら`#EXT-X-ENDLIST`付きになりVOD扱いで再生される)。新しいffmpegを起動してもプレイリストが書き換わるのは最初のセグメントを書き終えた後のため、それまでの間に`routers/camera_router.py`の`get_live_stream`(プレイリストが存在すれば即返す待機ループ)が古いプレイリストを返し、前回終了時点(例: 前日22時)の映像がライブとして再生されていた。`_start_hls_stream_locked`がffmpegを新規起動する直前にこれを呼ぶことで、ルーターが返すのは新しいffmpegが書いたプレイリストだけになる。`ffmpeg.log`は対象外(直後に`open(..., "w")`で作り直される)。
+* 根拠: [関数定義] (行番号: 224 / 抜粋: "def _remove_stale_live_outputs(cam_dir: str) -> None:")
+
+
+* **引数/リクエスト**: `cam_dir: str`（`init_output_dir(HLS_LIVE_DIR, cam_id)`が返すカメラ別ディレクトリ）
+* 根拠: [引数定義] (行番号: 224 / 抜粋: "def _remove_stale_live_outputs(cam_dir: str) -> None:")
+
+
+* **戻り値/レスポンス**: `None`
+* 根拠: [関数定義] (行番号: 224 / 抜粋: "def _remove_stale_live_outputs(cam_dir: str) -> None:")
+
+
+* **副作用**: `cam_dir`直下の`stream.m3u8`・`*.ts`・`*.m3u8.tmp`の削除。
+* 根拠: [削除対象の判定] (行番号: 239 / 抜粋: "if name == \"stream.m3u8\" or name.endswith((\".ts\", \".m3u8.tmp\")):")
+
+
+* **エラーハンドリング**: ディレクトリの列挙に失敗した場合(`OSError`)は何もせず戻る。個々のファイル削除で`FileNotFoundError`は無視し、それ以外の`OSError`は警告ログを出して残りの削除を続ける(古いファイルの削除失敗で配信の起動そのものを止めない)。
+* 根拠: [例外処理] (行番号: 242-245 / 抜粋: "except FileNotFoundError:\n                pass\n            except OSError as e:\n                logger.warning(f\"⚠️ 古いライブHLSファイルの削除に失敗: {name}: {e}\")")
 
 
 ### `_start_hls_stream_locked`（Issue #439で`start_hls_stream`から分離）
 
-* **役割**: 指定カメラのライブHLSストリーミングをffmpegプロセスとして起動する実処理。既に同一カメラIDのプロセスが実行中であれば新規起動せず既存のプレイリストパスを返す。ffmpegログファイルは`chmod 0o600`（所有者のみ読み書き可）で作成し、起動バナー経由の認証情報露出を防ぐため`-hide_banner`/`-loglevel error`オプションを付与する。呼び出し元`start_hls_stream`が取得した`cam_id`単位のロック内で実行されることを前提とする。**（不具合修正）** RTSP入力(`-i`)の直前に`-timeout`(`FFMPEG_RTSP_TIMEOUT_USEC`)を追加した。
-* 根拠: [関数定義] (行番号: 224〜277 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")、`"-timeout", str(FFMPEG_RTSP_TIMEOUT_USEC),` (行番号: 249)
+* **役割**: 指定カメラのライブHLSストリーミングをffmpegプロセスとして起動する実処理。既に同一カメラIDのプロセスが実行中であれば新規起動せず既存のプレイリストパスを返す。ffmpegログファイルは`chmod 0o600`（所有者のみ読み書き可）で作成し、起動バナー経由の認証情報露出を防ぐため`-hide_banner`/`-loglevel error`オプションを付与する。呼び出し元`start_hls_stream`が取得した`cam_id`単位のロック内で実行されることを前提とする。**（不具合修正）** RTSP入力(`-i`)の直前に`-timeout`(`FFMPEG_RTSP_TIMEOUT_USEC`)を追加した。**（Issue #882で修正）** ffmpegを新規起動する(既存プロセスが無い、または終了済みの)場合は、起動前に`_remove_stale_live_outputs`で前回の`stream.m3u8`・`*.ts`を削除する。既存プロセスが実行中の場合はその出力を消さずにプレイリストパスを返す。
+* 根拠: [古い出力の削除呼び出し] (行番号: 266 / 抜粋: "_remove_stale_live_outputs(cam_dir)")
+* 根拠: [関数定義] (行番号: 248〜305 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")、`"-timeout", str(FFMPEG_RTSP_TIMEOUT_USEC),` (行番号: 277)
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`, `cam_id: str`
-* 根拠: [引数定義] (行番号: 224 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")
+* 根拠: [引数定義] (行番号: 248 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（プレイリストファイルのパス。RTSP URL取得に失敗した場合は空文字列`""`）
-* 根拠: [各return文] (行番号: 255, 259〜260, 300 / 抜粋: "except Exception:\n        return \"\"")
+* 根拠: [各return文] (行番号: 255, 259〜260, 305 / 抜粋: "except Exception:\n        return \"\"")
 
 
-* **副作用**: `_state_lock`保持下での`_active_processes`の読み取り（既存プロセスチェック）・書き込み（登録）、出力ディレクトリの作成(`init_output_dir`)、ffmpegログファイルのオープンと`chmod 0o600`によるパーミッション設定、`subprocess.Popen`によるffmpegプロセスの起動、起動後の親プロセス側でのログファイルクローズ、マスク済みRTSP URLを含むログ出力。
-* 根拠: [既存プロセスチェック] (行番号: 252〜255 / 抜粋: "with _state_lock:\n        existing = _active_processes.get(cam_id)\n    if existing is not None and existing.poll() is None:\n        return playlist_path")、[ログファイル作成・chmod・Popen・クローズ・登録] (行番号: 285〜299 / 抜粋: "log_path = os.path.join(cam_dir, \"ffmpeg.log\")", "with _state_lock:\n        _active_processes[cam_id] = process")
+* **副作用**: `_state_lock`保持下での`_active_processes`の読み取り（既存プロセスチェック）・書き込み（登録）、出力ディレクトリの作成(`init_output_dir`)、**（Issue #882で追加）** ffmpeg新規起動前の前回出力(`stream.m3u8`・`*.ts`)の削除(`_remove_stale_live_outputs`)、ffmpegログファイルのオープンと`chmod 0o600`によるパーミッション設定、`subprocess.Popen`によるffmpegプロセスの起動、起動後の親プロセス側でのログファイルクローズ、マスク済みRTSP URLを含むログ出力。
+* 根拠: [既存プロセスチェック] (行番号: 252〜255 / 抜粋: "with _state_lock:\n        existing = _active_processes.get(cam_id)\n    if existing is not None and existing.poll() is None:\n        return playlist_path")、[ログファイル作成・chmod・Popen・クローズ・登録] (行番号: 290〜304 / 抜粋: "log_path = os.path.join(cam_dir, \"ffmpeg.log\")", "with _state_lock:\n        _active_processes[cam_id] = process")
 
 
 * **エラーハンドリング**: `get_rtsp_url`が例外を送出した場合、これを捕捉して空文字列を返す（フェイルソフト）。ffmpegプロセス自体の起動失敗（`subprocess.Popen`の例外）に対する捕捉は本関数内には存在しないが、ログファイルのクローズは`finally`ブロックにより保証される。
-* 根拠: [try-exceptブロックとfinally] (行番号: 257〜260, 291〜297 / 抜粋: "try:\n        rtsp_url = get_rtsp_url(cam_conf)\n    except Exception:\n        return \"\"")
+* 根拠: [try-exceptブロックとfinally] (行番号: 257〜260, 296〜302 / 抜粋: "try:\n        rtsp_url = get_rtsp_url(cam_conf)\n    except Exception:\n        return \"\"")
 
 
 ### `get_record_start_offset`
@@ -270,7 +293,7 @@
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`, `target_date: str`
-* 根拠: [引数定義] (行番号: 279 / 抜粋: "def get_record_start_offset(cam_conf: Dict[str, Any], target_date: str) -> int:")
+* 根拠: [引数定義] (行番号: 307 / 抜粋: "def get_record_start_offset(cam_conf: Dict[str, Any], target_date: str) -> int:")
 
 
 * **戻り値/レスポンス**: `int`（0時からの経過秒数）。該当ファイルが存在しない場合、または解析に失敗した場合は`0`。
@@ -288,11 +311,11 @@
 ### `_playlist_is_complete`（Issue #562で追加）
 
 * **役割**: 指定されたm3u8プレイリストファイルの中身に、ffmpegの`-hls_playlist_type vod`が処理完走時にのみ末尾へ書き込む`#EXT-X-ENDLIST`タグが含まれているかどうかを判定する。ファイルを開けない場合（`OSError`）は`False`を返す。`_generate_record_playlist_locked`が過去日付の既存プレイリストをキャッシュとして信頼してよいかどうかの判定に用いられる。
-* 根拠: [関数定義とDocstring] (行番号: 301〜310 / 抜粋: "def _playlist_is_complete(path: str) -> bool:\n    \"\"\"m3u8ファイルにffmpegの`-hls_playlist_type vod`が処理完走時のみ末尾へ\n    書き込む`#EXT-X-ENDLIST`タグが存在するかを確認する(#562)。\n    シャットダウン時のterminate等で生成途中のまま終わったプレイリストは\n    このタグを持たないため、過去日付キャッシュとして返してよいかの判定に使う。\"\"\"")
+* 根拠: [関数定義とDocstring] (行番号: 329〜338 / 抜粋: "def _playlist_is_complete(path: str) -> bool:\n    \"\"\"m3u8ファイルにffmpegの`-hls_playlist_type vod`が処理完走時のみ末尾へ\n    書き込む`#EXT-X-ENDLIST`タグが存在するかを確認する(#562)。\n    シャットダウン時のterminate等で生成途中のまま終わったプレイリストは\n    このタグを持たないため、過去日付キャッシュとして返してよいかの判定に使う。\"\"\"")
 
 
 * **引数/リクエスト**: `path: str`（判定対象のm3u8ファイルパス）
-* 根拠: [引数定義] (行番号: 301 / 抜粋: "def _playlist_is_complete(path: str) -> bool:")
+* 根拠: [引数定義] (行番号: 329 / 抜粋: "def _playlist_is_complete(path: str) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（`#EXT-X-ENDLIST`を含む場合`True`、ファイルを開けない場合（`OSError`）は`False`）
@@ -322,19 +345,19 @@
 ### `generate_record_playlist`
 
 * **役割**: 指定日の録画プレイリスト生成を、`process_key`（`カメラID_日付`）単位の`threading.Lock`で排他制御しながら内部実装`_generate_record_playlist_locked`へ委譲するラッパー関数。実際の生成ロジックは`_generate_record_playlist_locked`が担う。
-* 根拠: [関数定義] (行番号: 313〜325 / 抜粋: "def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 341〜353 / 抜粋: "def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`, `target_date: str`
-* 根拠: [引数定義] (行番号: 313 / 抜粋: "def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:")
+* 根拠: [引数定義] (行番号: 341 / 抜粋: "def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:")
 
 
 * **戻り値/レスポンス**: `Optional[str]`（`_generate_record_playlist_locked`の戻り値をそのまま返す）
-* 根拠: [戻り値] (行番号: 325 / 抜粋: "return _generate_record_playlist_locked(cam_conf, target_date, process_key)")
+* 根拠: [戻り値] (行番号: 353 / 抜粋: "return _generate_record_playlist_locked(cam_conf, target_date, process_key)")
 
 
 * **副作用**: `process_key`（`f"{cam_id}_{target_date}"`）の算出、`_vod_generation_lock`によるロックの取得・解放（`with`文。Issue #247で`_get_vod_generation_lock`から置き換え）。
-* 根拠: [process_key算出とロック取得] (行番号: 319, 324 / 抜粋: "process_key = f\"{cam_id}_{target_date}\"", "with _vod_generation_lock(process_key):")
+* 根拠: [process_key算出とロック取得] (行番号: 347, 352 / 抜粋: "process_key = f\"{cam_id}_{target_date}\"", "with _vod_generation_lock(process_key):")
 
 
 * **エラーハンドリング**: なし（内部実装`_generate_record_playlist_locked`に委譲）
@@ -343,17 +366,17 @@
 ### `_generate_record_playlist_locked`
 
 * **役割**: 指定日の10分単位分割mp4ファイル群を`ffconcat`形式のリストファイルにまとめ、ffmpegでVOD用HLSプレイリストへ変換する。呼び出し前に完了済みVODプロセスを`_prune_finished_vod_processes`で剪定したうえで同一カメラ・日付の変換プロセスの多重実行を防止し、過去日付かつ既にプレイリストファイルが存在し、**かつ`_playlist_is_complete`によりそのファイルの完全性が確認できた場合にのみ**、キャッシュされたプレイリストを返す。呼び出し元`generate_record_playlist`が取得した`process_key`単位のロック内で実行されることを前提とする。**（Issue #439で修正）** `_active_vod_processes`の読み取り（実行中チェック）と書き込み（プロセス登録）はいずれも`_state_lock`保持下で行うよう修正された。
-* 根拠: [関数定義] (行番号: 328〜459 / 抜粋: "def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str, process_key: str) -> Optional[str]:")、[`_state_lock`での実行中チェック] (行番号: 382〜384 / 抜粋: "with _state_lock:\n        existing_vod_process = _active_vod_processes.get(process_key)\n    if existing_vod_process is not None and existing_vod_process.poll() is None:")、[`_state_lock`での登録] (行番号: 474〜475 / 抜粋: "with _state_lock:\n        _active_vod_processes[process_key] = process")
+* 根拠: [関数定義] (行番号: 356〜487 / 抜粋: "def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str, process_key: str) -> Optional[str]:")、[`_state_lock`での実行中チェック] (行番号: 382〜384 / 抜粋: "with _state_lock:\n        existing_vod_process = _active_vod_processes.get(process_key)\n    if existing_vod_process is not None and existing_vod_process.poll() is None:")、[`_state_lock`での登録] (行番号: 474〜475 / 抜粋: "with _state_lock:\n        _active_vod_processes[process_key] = process")
 * **（Issue #562で修正）** 過去日付キャッシュのヒット条件に、プレイリストファイルの完全性チェック（`_playlist_is_complete`）が追加された。以前は`target_date < today_str and os.path.exists(playlist_path)`という2条件のみで「生成済み」と判定していたため、シャットダウン時のffmpeg `terminate()`（Issue #360系）や、本関数自身の下記「生成待機」タイムアウトにより生成途中のまま終わったプレイリストが存在すると、完全性を確認せずそのまま「完成品」として`HLS_VOD_RETENTION_DAYS`（既定3日）の間ずっと配信し続けてしまっていた。現在は`_playlist_is_complete(playlist_path)`（ffmpegの`-hls_playlist_type vod`が正常完走時にのみ書き込む`#EXT-X-ENDLIST`タグの有無を確認する）が`True`の場合にのみキャッシュを返し、不完全なプレイリストは以降の生成処理へフォールスルーして再生成される。
 * 根拠: [キャッシュ判定条件とコメント] (行番号: 393〜407 / 抜粋: "if target_date < today_str and os.path.exists(playlist_path) and _playlist_is_complete(playlist_path):")
 * **（Issue #592で修正）** `today_str`（過去日付キャッシュ判定の基準となる「今日の日付」）の算出方法を、ホストOSのタイムゾーン設定に依存するnaiveな`datetime.now().strftime("%Y%m%d")`から`get_now_jst().strftime("%Y%m%d")`に置き換えた。`target_date`引数はフロントエンド（ブラウザのローカル日付、実質的にJSTカレンダー日）から`YYYYMMDD`形式で渡される実世界のJST日付であり（`routers/camera_router.py`の`target_date`パスパラメータ）、これと比較する`today_str`もJST基準で揃えないと、ホストがJST以外の設定の場合にUTCとの9時間ずれによりJSTの日付境界をまたぐ時間帯で「当日か過去日か」の判定を誤りうる（Issue #382/#293と同じ不具合クラス。Issue #592の追加調査で見つかった別件）。この置き換えにより、本ファイルの`from datetime import datetime`は`.strptime()`呼び出し（`get_record_start_offset`・duration計算）に引き続き必要なため削除されていない。
-* 根拠: `today_str = get_now_jst().strftime("%Y%m%d")` (行番号: 377〜382 / 抜粋: "# Issue #592: target_dateはフロントエンド(ブラウザのローカル日付、実質JST)から\n    # 渡される「YYYYMMDD」形式の日付で、実世界のJSTカレンダー日を意図している。\n    # ホストOSのタイムゾーン設定に依存するnaiveなdatetime.now()で today_str を\n    # 求めると、ホストがJST以外の設定の場合、JSTの日付境界(UTCの日付境界と\n    # 9時間ずれる)をまたぐ時間帯で「当日」の判定を誤りうるため、明示的にJSTを使う。\n    today_str = get_now_jst().strftime(\"%Y%m%d\")")
+* 根拠: `today_str = get_now_jst().strftime("%Y%m%d")` (行番号: 405〜410 / 抜粋: "# Issue #592: target_dateはフロントエンド(ブラウザのローカル日付、実質JST)から\n    # 渡される「YYYYMMDD」形式の日付で、実世界のJSTカレンダー日を意図している。\n    # ホストOSのタイムゾーン設定に依存するnaiveなdatetime.now()で today_str を\n    # 求めると、ホストがJST以外の設定の場合、JSTの日付境界(UTCの日付境界と\n    # 9時間ずれる)をまたぐ時間帯で「当日」の判定を誤りうるため、明示的にJSTを使う。\n    today_str = get_now_jst().strftime(\"%Y%m%d\")")
 * **（Issue #359 / #405 で修正）** 当日分（`target_date == today_str`）のプレイリストが存在し、その更新時刻から `VOD_TODAY_REUSE_SECONDS`（300 秒）以内なら再生成せずに返す。以前は当日分をキャッシュ対象外としていたため、プレイリスト要求のたびに当日の全録画を再多重化していた。NVR ディレクトリは `config.NVR_RECORD_DIR` を直接参照する。
 * 根拠: `VOD_TODAY_REUSE_SECONDS = 300` (行番号: 29)、`nvr_base_dir = config.NVR_RECORD_DIR` (行番号: 359)、`if target_date == today_str and os.path.exists(playlist_path):` (行番号: 414〜421)
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`, `target_date: str`, `process_key: str`
-* 根拠: [引数定義] (行番号: 328 / 抜粋: "def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str, process_key: str) -> Optional[str]:")
+* 根拠: [引数定義] (行番号: 356 / 抜粋: "def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str, process_key: str) -> Optional[str]:")
 
 
 * **戻り値/レスポンス**: `Optional[str]`（生成または既存のプレイリストパス。保存先ディレクトリ不在時・対象ファイルなし時・生成待機後もファイルが存在しない場合は`None`）
@@ -371,15 +394,15 @@
 ### `get_camera_config_or_none`（Issue #551で新規追加）
 
 * **役割**: `config.CAMERAS`（`devices.json`からロードされたカメラ定義一覧）から`camera_id`に一致する設定辞書を検索して返す。見つからない場合は`None`を返す（例外は送出しない）。ルーター側の`camera_router.py`に5箇所重複していた`next((c for c in config.CAMERAS if c["id"] == camera_id), None)` + `HTTPException(404)`のうち、検索部分だけを本関数へ切り出し、404送出自体はルーター側の新設ヘルパー`_require_camera`が担うように責務分割した。
-* 根拠: [関数定義とDocstring] (行番号: 462〜467 / 抜粋: "def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:\n    \"\"\"config.CAMERAS(devices.jsonからロードされたカメラ定義一覧)からcamera_idに\n    一致する設定を返す。見つからない場合はNoneを返す(#551: camera_router側に\n    重複していた同一のlookup+404送出を、ルーターの`_require_camera`ヘルパーへ\n    一元化するために切り出した)。\"\"\"")
+* 根拠: [関数定義とDocstring] (行番号: 490〜495 / 抜粋: "def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:\n    \"\"\"config.CAMERAS(devices.jsonからロードされたカメラ定義一覧)からcamera_idに\n    一致する設定を返す。見つからない場合はNoneを返す(#551: camera_router側に\n    重複していた同一のlookup+404送出を、ルーターの`_require_camera`ヘルパーへ\n    一元化するために切り出した)。\"\"\"")
 
 
 * **引数/リクエスト**: `camera_id: str`
-* 根拠: [引数定義] (行番号: 462 / 抜粋: "def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:")
+* 根拠: [引数定義] (行番号: 490 / 抜粋: "def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]`（見つかったカメラ設定の辞書、または`None`）
-* 根拠: [戻り値] (行番号: 467 / 抜粋: "return next((c for c in config.CAMERAS if c[\"id\"] == camera_id), None)")
+* 根拠: [戻り値] (行番号: 495 / 抜粋: "return next((c for c in config.CAMERAS if c[\"id\"] == camera_id), None)")
 
 
 * **副作用**: なし（`config.CAMERAS`の参照のみ）
@@ -397,7 +420,7 @@
 
 
 * **引数/リクエスト**: `camera_id: str`, `enabled: bool`
-* 根拠: [引数定義] (行番号: 470 / 抜粋: "def set_camera_enabled(camera_id: str, enabled: bool) -> bool:")
+* 根拠: [引数定義] (行番号: 498 / 抜粋: "def set_camera_enabled(camera_id: str, enabled: bool) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（成功時`True`、`devices.json`不在または該当カメラ未検出時は`False`）
@@ -520,6 +543,7 @@ graph TD
     live_stream_lock --> contextlib_mod
     start_hls_stream --> start_hls_stream_locked
     start_hls_stream_locked --> init_output_dir
+    start_hls_stream_locked -->|"Issue #882"| remove_stale_live_outputs["_remove_stale_live_outputs()"]
     start_hls_stream_locked --> get_rtsp_url
     start_hls_stream_locked --> active_processes
     start_hls_stream_locked --> state_lock
@@ -570,7 +594,7 @@ graph TD
 | 中 | `core/logger.py` | `setup_logging`によるロガー設定（出力先、フォーマット、ログレベル）を確認するため。 | 根拠: [import文] (行番号: 13 / 抜粋: "from core.logger import setup_logging") |
 | 中 | `routers/camera_router.py` | 本モジュールの各関数（`start_hls_stream`, `get_record_start_offset`, `generate_record_playlist`, `set_camera_enabled`, `get_camera_config_or_none`（Issue #551）, `HLS_LIVE_DIR`, `HLS_VOD_DIR`）がどのようなHTTPエンドポイントから、どのようなエラーハンドリングと共に呼び出されているかを確認するため。 | 根拠: [呼び出し元ファイル。本ファイル単体からは不明] |
 | 低 | `onvif`ライブラリ（サードパーティパッケージ） | `ONVIFCamera`クラスの`GetProfiles`/`GetStreamUri`等のAPI仕様を確認するため。 | 根拠: [try-exceptインポート] (行番号: 14〜17 / 抜粋: "from onvif import ONVIFCamera") |
-| 低 | `MY_HOME_SYSTEM/tests/test_camera_service_unit.py` | URLマスクの空パスワード耐性、VODプロセスの剪定、`devices.json`のアトミック書込、ログファイルハンドルのclose、同時リクエストでのffmpeg単一起動など、本ファイルの期待仕様が単体テストとして記述されているため、実装意図の確認に有用。 | 根拠: [set_camera_enabled関数] (行番号: 470〜497 / 抜粋: "def set_camera_enabled(camera_id: str, enabled: bool) -> bool:") |
+| 低 | `MY_HOME_SYSTEM/tests/test_camera_service_unit.py` | URLマスクの空パスワード耐性、VODプロセスの剪定、`devices.json`のアトミック書込、ログファイルハンドルのclose、同時リクエストでのffmpeg単一起動など、本ファイルの期待仕様が単体テストとして記述されているため、実装意図の確認に有用。 | 根拠: [set_camera_enabled関数] (行番号: 498〜525 / 抜粋: "def set_camera_enabled(camera_id: str, enabled: bool) -> bool:") |
 
 ## 8. 保守上の注意点
 

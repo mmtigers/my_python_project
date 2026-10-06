@@ -262,6 +262,75 @@ class TestStartHlsStreamLogFileHandling:
         assert timeout_idx < called_cmd.index("-i")
 
 
+class TestStartHlsStreamRemovesStaleOutputs:
+    """#882: 前回のffmpegが残したstream.m3u8/.tsが残っていると、新しいffmpegが
+    最初のセグメントを書くまでの間にルーターが古いプレイリストを返し、前回終了時点
+    (例: 前日22時)の映像が再生されていた。新規起動の前に削除すること。"""
+
+    def _prepare_stale_files(self, tmp_path):
+        cam_dir = tmp_path / "cam1"
+        cam_dir.mkdir()
+        (cam_dir / "stream.m3u8").write_text("#EXTM3U\nstream41.ts\n#EXT-X-ENDLIST\n")
+        (cam_dir / "stream41.ts").write_bytes(b"old")
+        (cam_dir / "stream42.ts").write_bytes(b"old")
+        (cam_dir / "stream.m3u8.tmp").write_text("#EXTM3U\n")
+        return cam_dir
+
+    def test_stale_playlist_and_segments_are_removed_before_ffmpeg_starts(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(camera_service, "HLS_LIVE_DIR", str(tmp_path))
+        monkeypatch.setattr(camera_service, "get_rtsp_url", lambda cam_conf: "rtsp://u:p@host/stream")
+        cam_dir = self._prepare_stale_files(tmp_path)
+
+        remaining_at_popen = []
+
+        def _fake_popen(cmd, *args, **kwargs):
+            # ffmpeg起動の時点で古い出力が消えていること(起動後に消すと新しい出力まで消す)
+            remaining_at_popen.extend(sorted(os.listdir(cam_dir)))
+            proc = MagicMock()
+            proc.poll.return_value = None
+            return proc
+
+        with patch.object(camera_service.subprocess, "Popen", side_effect=_fake_popen):
+            result = camera_service.start_hls_stream({"id": "cam1", "name": "TestCam"})
+
+        assert result == str(cam_dir / "stream.m3u8")
+        assert remaining_at_popen == ["ffmpeg.log"]
+
+    def test_outputs_of_running_ffmpeg_are_kept(self, tmp_path, monkeypatch):
+        """配信中のffmpegがいる場合は再起動しないので、その出力を消してはならない。"""
+        monkeypatch.setattr(camera_service, "HLS_LIVE_DIR", str(tmp_path))
+        cam_dir = self._prepare_stale_files(tmp_path)
+        running = MagicMock()
+        running.poll.return_value = None
+        camera_service._active_processes["cam1"] = running
+
+        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
+            result = camera_service.start_hls_stream({"id": "cam1", "name": "TestCam"})
+
+        mock_popen.assert_not_called()
+        assert result == str(cam_dir / "stream.m3u8")
+        assert (cam_dir / "stream.m3u8").exists()
+        assert (cam_dir / "stream41.ts").exists()
+
+    def test_restart_after_ffmpeg_exited_removes_previous_outputs(self, tmp_path, monkeypatch):
+        """前回のffmpegが終了済み(poll()が終了コードを返す)なら、再起動前に消す。"""
+        monkeypatch.setattr(camera_service, "HLS_LIVE_DIR", str(tmp_path))
+        monkeypatch.setattr(camera_service, "get_rtsp_url", lambda cam_conf: "rtsp://u:p@host/stream")
+        cam_dir = self._prepare_stale_files(tmp_path)
+        exited = MagicMock()
+        exited.poll.return_value = 0
+        camera_service._active_processes["cam1"] = exited
+
+        new_proc = MagicMock()
+        new_proc.poll.return_value = None
+        with patch.object(camera_service.subprocess, "Popen", return_value=new_proc):
+            camera_service.start_hls_stream({"id": "cam1", "name": "TestCam"})
+
+        assert not (cam_dir / "stream.m3u8").exists()
+        assert not list(cam_dir.glob("*.ts"))
+        assert camera_service._active_processes["cam1"] is new_proc
+
+
 class TestGenerateRecordPlaylistConcurrency:
     def test_concurrent_calls_for_same_key_spawn_ffmpeg_only_once(self, tmp_path, monkeypatch):
         """M-3-4回帰防止: 同一cam_id・日付への同時リクエストでffmpegが

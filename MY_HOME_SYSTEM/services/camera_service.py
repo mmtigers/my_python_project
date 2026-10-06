@@ -221,6 +221,30 @@ def start_hls_stream(cam_conf: Dict[str, Any]) -> str:
         return _start_hls_stream_locked(cam_conf, cam_id)
 
 
+def _remove_stale_live_outputs(cam_dir: str) -> None:
+    """前回のffmpegが残したライブHLSの出力(stream.m3u8・セグメント.ts)を削除する(#882)。
+
+    ffmpegは`delete_segments`でも終了時に最後のプレイリストと直近のセグメントを
+    ディスクに残す(正常終了なら`#EXT-X-ENDLIST`付きのVOD扱いになる)。新しいffmpegを
+    起動してもプレイリストが書き換わるのは最初のセグメントを書き終えた後なので、
+    それまでの間、ルーターの「プレイリストが存在すれば即返す」待機ループが古い
+    プレイリストを返し、前回終了時点(例: 前日22時)の映像が再生されていた。
+    起動前に消しておけば、ルーターは新しいffmpegが書いたプレイリストだけを返す。
+    """
+    try:
+        names = os.listdir(cam_dir)
+    except OSError:
+        return
+    for name in names:
+        if name == "stream.m3u8" or name.endswith((".ts", ".m3u8.tmp")):
+            try:
+                os.remove(os.path.join(cam_dir, name))
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                logger.warning(f"⚠️ 古いライブHLSファイルの削除に失敗: {name}: {e}")
+
+
 def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:
     cam_dir = init_output_dir(HLS_LIVE_DIR, cam_id)
     playlist_path = os.path.join(cam_dir, "stream.m3u8")
@@ -236,6 +260,10 @@ def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:
         return ""
 
     logger.info(f"🎥 [{cam_conf['name']}] ライブHLS配信を開始 (RTSP: {_mask_rtsp_url_for_log(rtsp_url)})")
+
+    # 前回のffmpegの出力が残っていると、新しいffmpegが最初のセグメントを書くまでの
+    # 間に古い映像のプレイリストが返ってしまうため、起動前に消す(#882)。
+    _remove_stale_live_outputs(cam_dir)
 
     cmd = [
         "nice", "-n", str(FFMPEG_NICE_LEVEL),
