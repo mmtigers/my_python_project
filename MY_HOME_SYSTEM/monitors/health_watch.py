@@ -783,7 +783,7 @@ def check_service_running_stale_code() -> str | None:
     サービスが active でない・プロセス時刻や git が取れない場合は「判定できない」として
     スキップする(inactive はチェック1が通知する)。
     """
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(JST)
     started = _service_process_start_time(now)
     if started is None:
         return None

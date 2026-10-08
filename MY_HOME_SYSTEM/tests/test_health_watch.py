@@ -1001,7 +1001,7 @@ class TestCheckServiceRunningStaleCode:
     再起動されず旧コードのまま稼働)の再発防止。systemctl / ps / git は差し替える。
     """
 
-    START = datetime.datetime(2026, 10, 4, 19, 49, 32)
+    START = datetime.datetime(2026, 10, 4, 19, 49, 32, tzinfo=health_watch.JST)
 
     @staticmethod
     def _repo(tmp_path, monkeypatch, files):
@@ -1024,8 +1024,8 @@ class TestCheckServiceRunningStaleCode:
 
     def test_reports_files_updated_after_process_start(self, tmp_path, monkeypatch):
         self._repo(tmp_path, monkeypatch, {
-            "MY_HOME_SYSTEM/services/quest/quest_service.py": datetime.datetime(2026, 10, 5, 18, 28),
-            "MY_HOME_SYSTEM/config.py": datetime.datetime(2026, 10, 1, 9, 0),
+            "MY_HOME_SYSTEM/services/quest/quest_service.py": datetime.datetime(2026, 10, 5, 18, 28, tzinfo=health_watch.JST),
+            "MY_HOME_SYSTEM/config.py": datetime.datetime(2026, 10, 1, 9, 0, tzinfo=health_watch.JST),
         })
         self._started(monkeypatch, self.START)
         msg = health_watch.check_service_running_stale_code()
@@ -1037,7 +1037,7 @@ class TestCheckServiceRunningStaleCode:
         assert "systemctl restart home_system.service" in msg
 
     def test_returns_none_when_all_files_older_than_start(self, tmp_path, monkeypatch):
-        self._repo(tmp_path, monkeypatch, {"MY_HOME_SYSTEM/config.py": datetime.datetime(2026, 10, 1, 9, 0)})
+        self._repo(tmp_path, monkeypatch, {"MY_HOME_SYSTEM/config.py": datetime.datetime(2026, 10, 1, 9, 0, tzinfo=health_watch.JST)})
         self._started(monkeypatch, self.START)
         assert health_watch.check_service_running_stale_code() is None
 
@@ -1048,7 +1048,7 @@ class TestCheckServiceRunningStaleCode:
         assert health_watch.check_service_running_stale_code() is None
 
     def test_folds_files_beyond_the_display_limit(self, tmp_path, monkeypatch):
-        later = datetime.datetime(2026, 10, 6, 12, 0)
+        later = datetime.datetime(2026, 10, 6, 12, 0, tzinfo=health_watch.JST)
         names = [f"MY_HOME_SYSTEM/m{i}.py" for i in range(health_watch.STALE_CODE_FILE_LIMIT + 2)]
         self._repo(tmp_path, monkeypatch, {n: later for n in names})
         self._started(monkeypatch, self.START)
@@ -1074,8 +1074,8 @@ class TestCheckServiceRunningStaleCode:
             subprocess.CompletedProcess(args=["ps"], returncode=0, stdout="  3600\n", stderr=""),
         ])
         monkeypatch.setattr(health_watch.subprocess, "run", lambda *a, **k: next(calls))
-        now = datetime.datetime(2026, 10, 8, 21, 0, 0)
-        assert health_watch._service_process_start_time(now) == datetime.datetime(2026, 10, 8, 20, 0, 0)
+        now = datetime.datetime(2026, 10, 8, 21, 0, 0, tzinfo=health_watch.JST)
+        assert health_watch._service_process_start_time(now) == datetime.datetime(2026, 10, 8, 20, 0, 0, tzinfo=health_watch.JST)
 
     @pytest.mark.parametrize("pid_out", ["0\n", "\n", "abc\n"])
     def test_process_start_time_none_without_main_pid(self, monkeypatch, pid_out):
@@ -1083,7 +1083,7 @@ class TestCheckServiceRunningStaleCode:
             health_watch.subprocess, "run",
             lambda *a, **k: subprocess.CompletedProcess(args=["systemctl"], returncode=0, stdout=pid_out, stderr=""),
         )
-        assert health_watch._service_process_start_time(datetime.datetime.now()) is None
+        assert health_watch._service_process_start_time(datetime.datetime.now(health_watch.JST)) is None
 
     def test_registered_as_a_health_check(self, monkeypatch):
         _stub_every_check(monkeypatch)
