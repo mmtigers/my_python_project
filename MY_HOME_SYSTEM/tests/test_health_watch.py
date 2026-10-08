@@ -14,6 +14,8 @@ import subprocess
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
@@ -771,6 +773,7 @@ class TestCheckRecordingStalled:
             "check_service_active", "check_disk_usage", "check_memory_usage",
             "check_nas_mount", "check_deploy_config_drift", "check_quest_master_drift",
             "check_api_responsive", "check_orphaned_rows", "check_repo_behind_upstream",
+            "check_service_running_stale_code",
         ):
             monkeypatch.setattr(health_watch, name, lambda: None)
         monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)
@@ -881,6 +884,7 @@ class TestCheckRepoBehindUpstream:
             "check_service_active", "check_disk_usage", "check_memory_usage",
             "check_nas_mount", "check_deploy_config_drift", "check_quest_master_drift",
             "check_api_responsive", "check_recording_stalled", "check_orphaned_rows",
+            "check_service_running_stale_code",
         ):
             monkeypatch.setattr(health_watch, name, lambda: None)
         monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)
@@ -988,3 +992,113 @@ class TestPingDeadmanSwitch:
         health_watch.run_checks()
 
         ping.assert_called_once_with(ok=False)
+
+
+class TestCheckServiceRunningStaleCode:
+    """チェック13: 稼働中プロセスが起動後に更新されたコードを読み込めていないか。
+
+    2026-10-08「土日の宿題」が木曜にも表示された事故(#905 のマージ後にサービスが
+    再起動されず旧コードのまま稼働)の再発防止。systemctl / ps / git は差し替える。
+    """
+
+    START = datetime.datetime(2026, 10, 4, 19, 49, 32)
+
+    @staticmethod
+    def _repo(tmp_path, monkeypatch, files):
+        """files: {相対パス: mtime(datetime)} を tmp_path に作り、_git の ls-files を差し替える。"""
+        for rel, mtime in files.items():
+            path = tmp_path / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x = 1\n", encoding="utf-8")
+            ts = mtime.timestamp()
+            os.utime(path, (ts, ts))
+        monkeypatch.setattr(health_watch, "REPO_ROOT", str(tmp_path))
+        listed = "\0".join(files) + "\0"
+        monkeypatch.setattr(
+            health_watch, "_git",
+            lambda *a, **k: subprocess.CompletedProcess(args=["git"], returncode=0, stdout=listed, stderr=""),
+        )
+
+    def _started(self, monkeypatch, started):
+        monkeypatch.setattr(health_watch, "_service_process_start_time", lambda now: started)
+
+    def test_reports_files_updated_after_process_start(self, tmp_path, monkeypatch):
+        self._repo(tmp_path, monkeypatch, {
+            "MY_HOME_SYSTEM/services/quest/quest_service.py": datetime.datetime(2026, 10, 5, 18, 28),
+            "MY_HOME_SYSTEM/config.py": datetime.datetime(2026, 10, 1, 9, 0),
+        })
+        self._started(monkeypatch, self.START)
+        msg = health_watch.check_service_running_stale_code()
+        assert msg is not None
+        assert "古いコードで稼働中" in msg
+        assert "quest_service.py" in msg
+        assert "config.py" not in msg  # 起動前に更新済みのファイルは載せない
+        assert "10/04 19:49" in msg
+        assert "systemctl restart home_system.service" in msg
+
+    def test_returns_none_when_all_files_older_than_start(self, tmp_path, monkeypatch):
+        self._repo(tmp_path, monkeypatch, {"MY_HOME_SYSTEM/config.py": datetime.datetime(2026, 10, 1, 9, 0)})
+        self._started(monkeypatch, self.START)
+        assert health_watch.check_service_running_stale_code() is None
+
+    def test_grace_period_absorbs_edits_right_around_start(self, tmp_path, monkeypatch):
+        just_after = self.START + datetime.timedelta(seconds=health_watch.STALE_CODE_GRACE_SEC - 1)
+        self._repo(tmp_path, monkeypatch, {"MY_HOME_SYSTEM/config.py": just_after})
+        self._started(monkeypatch, self.START)
+        assert health_watch.check_service_running_stale_code() is None
+
+    def test_folds_files_beyond_the_display_limit(self, tmp_path, monkeypatch):
+        later = datetime.datetime(2026, 10, 6, 12, 0)
+        names = [f"MY_HOME_SYSTEM/m{i}.py" for i in range(health_watch.STALE_CODE_FILE_LIMIT + 2)]
+        self._repo(tmp_path, monkeypatch, {n: later for n in names})
+        self._started(monkeypatch, self.START)
+        assert "ほか2件" in health_watch.check_service_running_stale_code()
+
+    def test_skipped_when_process_start_unknown(self, monkeypatch):
+        """サービスが止まっている等で起動時刻が取れない場合は異常にしない(inactive はチェック1の担当)。"""
+        self._started(monkeypatch, None)
+        monkeypatch.setattr(health_watch, "_git", lambda *a, **k: pytest.fail("git を呼んではいけない"))
+        assert health_watch.check_service_running_stale_code() is None
+
+    def test_skipped_when_git_ls_files_fails(self, monkeypatch):
+        self._started(monkeypatch, self.START)
+        monkeypatch.setattr(
+            health_watch, "_git",
+            lambda *a, **k: subprocess.CompletedProcess(args=["git"], returncode=1, stdout="", stderr="not a git repo"),
+        )
+        assert health_watch.check_service_running_stale_code() is None
+
+    def test_process_start_time_derived_from_etimes(self, monkeypatch):
+        calls = iter([
+            subprocess.CompletedProcess(args=["systemctl"], returncode=0, stdout="1234\n", stderr=""),
+            subprocess.CompletedProcess(args=["ps"], returncode=0, stdout="  3600\n", stderr=""),
+        ])
+        monkeypatch.setattr(health_watch.subprocess, "run", lambda *a, **k: next(calls))
+        now = datetime.datetime(2026, 10, 8, 21, 0, 0)
+        assert health_watch._service_process_start_time(now) == datetime.datetime(2026, 10, 8, 20, 0, 0)
+
+    @pytest.mark.parametrize("pid_out", ["0\n", "\n", "abc\n"])
+    def test_process_start_time_none_without_main_pid(self, monkeypatch, pid_out):
+        monkeypatch.setattr(
+            health_watch.subprocess, "run",
+            lambda *a, **k: subprocess.CompletedProcess(args=["systemctl"], returncode=0, stdout=pid_out, stderr=""),
+        )
+        assert health_watch._service_process_start_time(datetime.datetime.now()) is None
+
+    def test_registered_as_a_health_check(self, monkeypatch):
+        _stub_every_check(monkeypatch)
+        monkeypatch.setattr(health_watch, "check_service_running_stale_code", lambda: "古いコードで稼働中")
+        monkeypatch.setattr(
+            health_watch, "_read_marker",
+            lambda: datetime.datetime.fromisoformat("2026-10-08T09:00:00"),
+        )
+        monkeypatch.setattr(health_watch, "_write_marker", lambda dt: None)
+        keys_seen = []
+        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now: keys_seen.extend(keys) or True)
+        monkeypatch.setattr(health_watch, "_fire_investigate_hook", lambda anomalies, now: None)
+        monkeypatch.setattr(health_watch, "_ping_deadman_switch", lambda ok: None)
+        monkeypatch.setattr(health_watch, "send_push", lambda messages, target=None, channel=None: True)
+
+        health_watch.run_checks()
+
+        assert keys_seen == ["stale_code"]

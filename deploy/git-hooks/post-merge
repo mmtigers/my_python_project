@@ -28,6 +28,13 @@
 # 差分が無ければDBに接続すらしないため、マスタ定義に無関係な pull ではコストも
 # 破壊的操作も発生しない。同期失敗は警告のみ(post-merge の終了コードは pull の
 # 結果に影響しない。start_all.sh の Phase 2.5 が次回のサーバー起動時に再試行する)。
+# サーバー再開の案内:
+# 上の2つは dist/ と DB しか更新せず、Python のサーバープロセス(home_system.service)は
+# 古いコードのまま動き続ける。2026-10-08「土日の宿題」が木曜にも表示された事故は、DB のマスタ
+# だけ新しく実行コードが古い、というこの食い違いが原因だった。そこで pull が MY_HOME_SYSTEM の
+# ランタイム .py を更新したときは、最後に再起動コマンドを案内する。**自動で再起動はしない**
+# (sudo が要る・pull 直後の無人再起動は録画/通知の取りこぼしを招く。health_watch の
+# チェック13が、再起動されないまま残った状態を毎時検知して Discord へ通知する)。
 set -u
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
@@ -47,16 +54,24 @@ fi
 
 if [ ! -f "$home_system_dir/sync_strict.py" ]; then
     echo "[post-merge] MY_HOME_SYSTEM/sync_strict.py が見つかりません。マスタ同期をスキップします。" >&2
-    exit 0
-fi
-
-if [ -x "$home_system_dir/.venv/bin/python3" ]; then
-    python_exec="$home_system_dir/.venv/bin/python3"
 else
-    python_exec="python3"
+    if [ -x "$home_system_dir/.venv/bin/python3" ]; then
+        python_exec="$home_system_dir/.venv/bin/python3"
+    else
+        python_exec="python3"
+    fi
+
+    if ! (cd "$home_system_dir" && "$python_exec" sync_strict.py --if-stale); then
+        echo "[post-merge] ⚠️ クエストマスタの同期に失敗しました。次回のサーバー起動時に再試行されます。" >&2
+    fi
 fi
 
-if ! (cd "$home_system_dir" && "$python_exec" sync_strict.py --if-stale); then
-    echo "[post-merge] ⚠️ クエストマスタの同期に失敗しました。次回のサーバー起動時に再試行されます。" >&2
+# サーバー再起動の案内。ORIG_HEAD は pull/merge 直前の HEAD(取れなければ何も出さない)。
+# テスト・ドキュメントだけの更新では案内しない(サーバーの挙動が変わらないため)。
+changed_runtime="$(git diff --name-only ORIG_HEAD HEAD -- 'MY_HOME_SYSTEM/*.py' ':!MY_HOME_SYSTEM/tests' 2>/dev/null || true)"
+if [ -n "$changed_runtime" ]; then
+    echo "[post-merge] ⚠️ サーバーのコード(MY_HOME_SYSTEM/*.py)が更新されました。稼働中のサーバーは古いコードのままです:" >&2
+    echo "$changed_runtime" | head -n 5 | sed 's/^/             - /' >&2
+    echo "[post-merge]    反映するには: sudo systemctl restart home_system.service" >&2
 fi
 exit 0

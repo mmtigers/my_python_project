@@ -24,6 +24,8 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
   11. 参照整合性が破れていないか(親が存在しない子行=孤児行。Issue #747)
   12. 実機のチェックアウトが upstream(origin/master)より遅れていないか
       (マージ済みの修正が実機で動いていない状態の検知。Issue #783)
+  13. 稼働中のサーバープロセスが、起動後に更新されたコードを読み込めていないか
+      (`git pull` 後の再起動漏れの検知)
 
 異常があれば notification_service 経由でDiscordのerrorチャンネルへ要約を通知する。
 自動復旧(systemctl restart等)は行わない(ランブックのガードレール参照)。
@@ -133,6 +135,11 @@ JST = ZoneInfo("Asia/Tokyo")
 #   - start_all.sh --prepare は .venv / dist の鮮度のみ
 # fetch はネットワークに出るため、他の外部コマンドより短い上限を別に持つ。
 GIT_FETCH_TIMEOUT_SEC: int = 20
+# チェック13: 稼働中プロセスの起動時刻よりこの秒数を超えて新しいソースがあれば「古いコードで稼働中」とみなす。
+# 起動直前の編集・ps の秒未満の丸めで誤検知しないための余裕。
+STALE_CODE_GRACE_SEC: int = 60
+# チェック13: 通知に載せる「起動後に更新されたファイル」の最大件数
+STALE_CODE_FILE_LIMIT: int = 3
 
 
 def _read_marker() -> datetime.datetime:
@@ -739,6 +746,77 @@ def check_repo_behind_upstream() -> str | None:
     )
 
 
+def _service_process_start_time(now: datetime.datetime) -> datetime.datetime | None:
+    """home_system.service のメインプロセスの起動時刻を返す(判定できなければ None)。
+
+    `systemctl show -p ActiveEnterTimestamp` はタイムゾーン略称付きの文字列で
+    パースが環境依存になるため、MainPID を取り `ps -o etimes=`(経過秒)から逆算する。
+    """
+    shown = subprocess.run(
+        ["systemctl", "show", WATCH_SERVICE_NAME, "-p", "MainPID", "--value"],
+        capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC,
+    )
+    pid = shown.stdout.strip()
+    if shown.returncode != 0 or not pid.isdigit() or int(pid) <= 0:
+        return None
+    elapsed = subprocess.run(
+        ["ps", "-o", "etimes=", "-p", pid],
+        capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC,
+    )
+    try:
+        return now - datetime.timedelta(seconds=int(elapsed.stdout.strip()))
+    except ValueError:
+        return None
+
+
+def check_service_running_stale_code() -> str | None:
+    """稼働中の home_system.service が、起動後に更新されたコードを読み込めていないかを確認する。
+
+    `git pull` はフロントの再ビルドとマスタ同期(post-merge)までしか行わず、Python の
+    サーバープロセスは再起動されない。そのため DB のマスタだけ新しく実行コードは古い、
+    という食い違いが起きる(2026-10-08「土日の宿題」が木曜にも表示された事故:
+    #905 のマージ後に再起動されず、旧コードが `offday_run` を未知の reset_period として
+    毎日表示していた)。起動時刻より後に更新されたランタイムの `.py`(tests/ 除く)が
+    あれば、そのプロセスは古いコードで動いているとみなす。
+
+    **検知のみで自動再起動はしない**(チェック12と同じ。ランブックのガードレール)。
+    サービスが active でない・プロセス時刻や git が取れない場合は「判定できない」として
+    スキップする(inactive はチェック1が通知する)。
+    """
+    now = datetime.datetime.now()
+    started = _service_process_start_time(now)
+    if started is None:
+        return None
+
+    listed = _git("ls-files", "-z", "--", "MY_HOME_SYSTEM/*.py", ":!MY_HOME_SYSTEM/tests")
+    if listed.returncode != 0:
+        logger.warning(f"⚠️ git ls-files に失敗したため稼働コードの鮮度チェックをスキップします: {listed.stderr.strip()[:200]}")
+        return None
+
+    threshold = started.timestamp() + STALE_CODE_GRACE_SEC
+    newer: list[tuple[float, str]] = []
+    for rel in filter(None, listed.stdout.split("\0")):
+        try:
+            mtime = os.stat(os.path.join(REPO_ROOT, rel)).st_mtime
+        except OSError:
+            continue
+        if mtime > threshold:
+            newer.append((mtime, rel))
+    if not newer:
+        return None
+
+    newer.sort(reverse=True)
+    lines = [f"  - {rel}" for _, rel in newer[:STALE_CODE_FILE_LIMIT]]
+    if len(newer) > len(lines):
+        lines.append(f"  - ほか{len(newer) - len(lines)}件")
+    return (
+        f"{WATCH_SERVICE_NAME} は起動({started.strftime('%m/%d %H:%M')})より後に更新されたコードを"
+        "読み込めていません(古いコードで稼働中):\n"
+        + "\n".join(lines)
+        + "\n  → `sudo systemctl restart home_system.service`"
+    )
+
+
 def _should_notify(anomaly_keys: List[str], now: datetime.datetime) -> bool:
     """同一の異常セットが継続している間の再通知を抑制する。
 
@@ -855,6 +933,7 @@ def run_checks() -> int:
         ("quest_master", check_quest_master_drift),
         ("orphaned_rows", check_orphaned_rows),
         ("repo_behind", check_repo_behind_upstream),
+        ("stale_code", check_service_running_stale_code),
     ]
 
     anomalies: List[str] = []

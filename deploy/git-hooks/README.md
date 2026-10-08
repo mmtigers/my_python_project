@@ -5,7 +5,7 @@
 
 | フック | 役割 |
 | --- | --- |
-| `post-merge` | `git pull` 後に `family-quest/deploy.sh --if-stale` を実行し、配信用ビルド `dist/` を最新化する(family-quest に変更が無ければ何もしない)。 |
+| `post-merge` | `git pull` 後に `family-quest/deploy.sh --if-stale` で配信用ビルド `dist/` を最新化し(family-quest に変更が無ければ何もしない)、`sync_strict.py --if-stale` でクエストマスタを同期する。`MY_HOME_SYSTEM` のランタイム `.py`(`tests/` 除く)が更新されたときは、稼働中のサーバーが古いコードのままであることを警告し、`sudo systemctl restart home_system.service` を案内する(**自動では再起動しない**。再起動されないまま残った場合は `health_watch.py` のチェック13が毎時検知して Discord へ通知する)。 |
 
 ## 登録(実機側)
 
