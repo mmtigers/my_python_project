@@ -500,6 +500,7 @@ flowchart TD
 
 ## 8. 保守上の注意点
 
+* **（Issue #902で追加）** 容量不足警告(使用率90%超)は、状態ファイルの `last_full_alert_date` が今日でないときだけ送り、送信後に今日の日付を保存する(1日1回)。以前は使用率が高止まりしている間、実行のたび(約1時間おき)に同じ警告が届いていた。日次レポートの時刻に容量不足と重なった場合は1通にまとめ、`last_report_date` と `last_full_alert_date` の両方を保存する。使用率が90%以下に戻れば `last_full_alert_date` は参照されず、再び超えた日にまた1回届く。
 * **[2026-09 チャンネル再設計]** 容量不足警告・定期稼働レポート(512〜515行目)は、以前`channel = "error" if is_full else "report"`の条件分岐でどちらか一方へ送っていたが、いずれの場合も運用者向けチャンネル(`channel="report"`)へ統合された。NAS障害検知(446〜449行目)は変更なく即時対応チャンネル(`channel="error"`)のままだが、直前の`logger.error(...)`(439〜444行目)に`extra={"skip_discord": True}`を新たに付け、catch-all経由での二重通知(同じ障害が2チャンネルに別々に届く事態)を避けている。
 * `sync_fallback_data`関数内における`rsync --remove-source-files`の実行は、転送完了後に転送元のファイル群を削除する副作用を持つ。加えて`timeout=120`が設定されており、NASマウントが応答不能になった場合は`subprocess.TimeoutExpired`として専用のエラーログが出力される。
 * `sync_fallback_data`の同期先は以前`self.mount_point`(=`config.NAS_MOUNT_POINT`直下、例`/mnt/nas/`)を直接指定しており、アプリが実際に読み書きする`NAS_PROJECT_ROOT`(=`NAS_MOUNT_POINT/home_system`)の1階層下に配置されないため退避データが参照されない場所へ移動されてしまい、さらに同期元も`self.fallback_dir`全体だったため`last_memory_alert.txt`(`memory_monitor.py`)・`last_tv_lock.txt`(`tv_lock_monitor.py`)などローカル専用の状態ファイルまで巻き込んで移動・削除していた(Issue #162)。修正により、`__init__`で新設された`self.nas_project_root`(=`getattr(config, "NAS_PROJECT_ROOT", ...)`、31〜33行目)配下の`assets`を同期先に、`self.fallback_dir`配下の`assets`サブディレクトリのみを同期元に限定している(165, 170行目)。

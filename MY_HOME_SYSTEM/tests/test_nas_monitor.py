@@ -521,6 +521,58 @@ class TestNasMonitorDailyReportOncePerDay:
         assert "last_report_date" not in state
 
 
+class TestNasFullAlertOncePerDay:
+    """Issue #902: 容量不足警告は使用率が90%超の間、1日1回だけ送る(実行のたびには送らない)。"""
+
+    def _make_monitor(self, monkeypatch, state, percent=93.0):
+        monitor = NasMonitor()
+        monkeypatch.setattr(monitor, "check_ping", lambda: True)
+        monkeypatch.setattr(monitor, "check_mount", lambda: True)
+        monkeypatch.setattr(monitor, "check_write_permission", lambda: True)
+        monkeypatch.setattr(monitor, "get_disk_usage", lambda: {"percent": percent, "used_gb": 1, "total_gb": 2, "free_gb": 1})
+        monkeypatch.setattr(monitor, "save_to_db", lambda *a, **k: None)
+        monkeypatch.setattr(monitor, "run_retention_cleanup", lambda: None)
+        monkeypatch.setattr(monitor, "_load_state", lambda: state)
+        monkeypatch.setattr(monitor, "_save_state", lambda s: state.update(s))
+        return monitor
+
+    def _run_at(self, monkeypatch, state, utc_time, percent=93.0):
+        import monitors.nas_monitor as nm
+        from freezegun import freeze_time
+        sent = []
+        monkeypatch.setattr(nm, "send_push", lambda msgs, **k: sent.append(msgs[0]["text"]))
+        with freeze_time(utc_time):
+            self._make_monitor(monkeypatch, state, percent).run()
+        return sent
+
+    def test_full_alert_is_sent_once_then_suppressed_for_the_day(self, monkeypatch):
+        state = {"is_healthy": True, "last_report_date": "2026-09-06"}
+        first = self._run_at(monkeypatch, state, "2026-09-06 03:05:00")  # JST 12:05
+        second = self._run_at(monkeypatch, state, "2026-09-06 04:05:00")  # JST 13:05
+        assert len(first) == 1 and "容量不足警告" in first[0]
+        assert state["last_full_alert_date"] == "2026-09-06"
+        assert second == []
+
+    def test_full_alert_is_sent_again_the_next_day(self, monkeypatch):
+        state = {"is_healthy": True, "last_report_date": "2026-09-07", "last_full_alert_date": "2026-09-06"}
+        sent = self._run_at(monkeypatch, state, "2026-09-07 03:05:00")  # JST 9/7 12:05
+        assert len(sent) == 1 and "容量不足警告" in sent[0]
+        assert state["last_full_alert_date"] == "2026-09-07"
+
+    def test_daily_report_while_full_is_one_message_and_marks_both(self, monkeypatch):
+        state = {"is_healthy": True}
+        sent = self._run_at(monkeypatch, state, "2026-09-06 00:05:00")  # JST 09:05
+        assert len(sent) == 1 and "容量不足警告" in sent[0]
+        assert state["last_report_date"] == "2026-09-06"
+        assert state["last_full_alert_date"] == "2026-09-06"
+
+    def test_no_full_alert_below_threshold(self, monkeypatch):
+        state = {"is_healthy": True, "last_report_date": "2026-09-06"}
+        sent = self._run_at(monkeypatch, state, "2026-09-06 03:05:00", percent=80.0)
+        assert sent == []
+        assert "last_full_alert_date" not in state
+
+
 class TestFallbackSnapshotsAreCleanedUp:
     """Issue #537: NAS 障害時の退避先 FALLBACK_ROOT/assets/snapshots も保持期間削除の対象にする。"""
 

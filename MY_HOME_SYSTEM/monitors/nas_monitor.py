@@ -492,7 +492,11 @@ class NasMonitor:
             previous_state["last_cleanup_date"] = today_str
             self._save_state(previous_state)
 
-        if not is_full and not is_report_time:
+        # 容量不足警告は使用率が高止まりしている間、実行のたび(約1時間おき)に届いて
+        # 通知が埋もれるため、1日1回に絞る(Issue #902)。
+        is_full_alert_due = is_full and previous_state.get("last_full_alert_date") != today_str
+
+        if not is_full_alert_due and not is_report_time:
             return
         
         status_icon = "🔴" if is_full else "🟢"
@@ -515,6 +519,9 @@ class NasMonitor:
         )
         if is_report_time:
             previous_state["last_report_date"] = today_str
+        if is_full:
+            previous_state["last_full_alert_date"] = today_str
+        if is_report_time or is_full:
             self._save_state(previous_state)
 
 if __name__ == "__main__":
