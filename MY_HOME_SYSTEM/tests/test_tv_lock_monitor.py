@@ -232,7 +232,7 @@ class TestGracefulTurnOffIsUsed:
 class TestRecutWhileBlocked:
     """Issue #900: 休日の禁止時間帯に入れ直されたら、次の5分の起動で再度切る。"""
 
-    SATURDAY = datetime(2026, 9, 5)  # 土曜
+    SATURDAY = datetime(2026, 9, 5, tzinfo=timezone(timedelta(hours=9)))  # 土曜
 
     def _run(self, monkeypatch, now, watts, tmp_path=None):
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "tv-plug-1", raising=False)
@@ -264,7 +264,7 @@ class TestRecutWhileBlocked:
         assert self._run(monkeypatch, self.SATURDAY.replace(hour=14, minute=30), 80.0).call_count == 0
 
     def test_does_not_cut_on_weekday(self, monkeypatch):
-        weekday = datetime(2026, 9, 7, 12, 30)  # 月曜(祝日でない)
+        weekday = datetime(2026, 9, 7, 12, 30, tzinfo=timezone(timedelta(hours=9)))  # 月曜(祝日でない)
         assert self._run(monkeypatch, weekday, 80.0).call_count == 0
 
     def test_no_extra_cut_in_the_run_that_executes_the_slot(self, monkeypatch, tmp_path):
