@@ -9,7 +9,7 @@ from core.utils import get_now_iso
 from core.database import get_db_cursor
 import config
 from core import sound_manager
-from services import notification_service
+from services import notification_service, switchbot_service
 from services.routine_service import routine_service
 from services.quest.locks import (
     JST,
@@ -52,6 +52,31 @@ def _is_user_in_youtube_free_time(user_id: str, now: datetime.datetime | None = 
     if user_id in config.YOUTUBE_HOME_CARE_USER_IDS:
         return True
     return routine_service.is_user_currently_in_free_time(user_id, now=now)
+
+
+def _check_tv_block_for_ticket(duration_minutes: int) -> None:
+    """休日のテレビ禁止時間帯にYouTube系券を使えないようにする(券の途中で突然切られるのを防ぐ)。
+
+    禁止中、または券の終了予定(いま+視聴分数)が次の禁止開始を超える場合は429。
+    ちょうど禁止開始に終わる券は許可する。平日・TV_PLUG_DEVICE_ID未設定では何もしない。
+    """
+    state = switchbot_service.get_tv_block_state()
+    if state is None:
+        return
+    if state["is_blocked"]:
+        until = state["blocked_until"]
+        raise HTTPException(
+            429,
+            f"いまはテレビがおやすみの時間だよ。{until}からつかえるよ" if until
+            else "いまはテレビがおやすみの時間だよ。また明日つかおうね",
+        )
+    seconds_until = state["seconds_until_next_block"]
+    if seconds_until is not None and duration_minutes * 60 > seconds_until:
+        raise HTTPException(
+            429,
+            f"{state['next_block_starts_at']}からテレビがおやすみだから、"
+            f"この{duration_minutes}分の券はいまはつかえません",
+        )
 
 
 def _build_announcement(starts_on) -> dict[str, Any]:
@@ -150,6 +175,8 @@ class InventoryService:
 
         return {
             "items": items,
+            # 休日のテレビ禁止時間帯の予告用(平日・ロック無し環境はNone)
+            "tv_block": switchbot_service.get_tv_block_state(),
             "youtube_cooldown_remaining_seconds": youtube_cooldown_remaining_seconds,
             "youtube_cooldown_announcement": youtube_cooldown_announcement,
             "youtube_daily_limit_minutes": youtube_daily_limit_minutes,
@@ -216,6 +243,10 @@ class InventoryService:
                     if _is_within_youtube_nap_block():
                         raise HTTPException(429, "今はお昼寝の時間だからYouTubeはお休みしてね")
                     raise HTTPException(429, "YouTubeは自由時間になってから見てね")
+
+                # 0'. 休日のテレビ禁止時間帯に入る/跨ぐ券は使えない(券を使った後に
+                #     プラグを切られて怒られるのを防ぐ)。券は消費されない。
+                _check_tv_block_for_ticket(get_youtube_reward_duration_minutes(item['reward_id']))
 
                 # 1. 1日の合計視聴分数の上限。クールダウンより先に判定するのは、
                 #    「もう少し待てば使える」より「今日はここまで」のほうが

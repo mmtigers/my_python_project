@@ -292,3 +292,81 @@ describe('InventoryList プリントによる上限の延長', () => {
         expect(screen.queryByText(/プリント/)).not.toBeInTheDocument();
     });
 });
+
+describe('InventoryList 休日のテレビおやすみ', () => {
+    const windows = [
+        { start: '12:00', end: '14:00' },
+        { start: '20:00', end: null },
+    ];
+    const upcoming = (seconds: number) => ({
+        is_blocked: false,
+        blocked_until: null,
+        next_block_starts_at: '12:00',
+        seconds_until_next_block: seconds,
+        windows,
+    });
+
+    afterEach(() => {
+        cleanup();
+        vi.resetAllMocks();
+    });
+
+    it('禁止開始まで余裕があるときは、きょうの予定を常時表示する', async () => {
+        vi.mocked(apiClient.fetchInventory).mockResolvedValue(
+            inventoryResponse({ tv_block: upcoming(3 * 3600) }),
+        );
+        renderWithClient(<InventoryList userId="son" />);
+        await waitFor(() => expect(screen.getByText('12:00〜14:00 と 20:00から')).toBeInTheDocument());
+    });
+
+    it('30分前以内はカウントダウン表示になる', async () => {
+        vi.mocked(apiClient.fetchInventory).mockResolvedValue(
+            inventoryResponse({ tv_block: upcoming(10 * 60), items: [youtubeTicket({ youtube_duration_minutes: 10 })] }),
+        );
+        renderWithClient(<InventoryList userId="son" />);
+        await waitFor(() => expect(screen.getByText('あと10分')).toBeInTheDocument());
+    });
+
+    it('禁止開始までに収まらない券はロックされ、理由を表示する', async () => {
+        vi.mocked(apiClient.fetchInventory).mockResolvedValue(
+            inventoryResponse({ tv_block: upcoming(15 * 60) }), // 30分券 > 15分
+        );
+        renderWithClient(<InventoryList userId="son" />);
+        await waitFor(() =>
+            expect(screen.getByText(/12:00からテレビがおやすみだから、この30分の券はいまはつかえません/)).toBeInTheDocument(),
+        );
+    });
+
+    it('ちょうど禁止開始に終わる券は使える', async () => {
+        vi.mocked(apiClient.fetchInventory).mockResolvedValue(
+            inventoryResponse({ tv_block: upcoming(30 * 60) }),
+        );
+        renderWithClient(<InventoryList userId="son" />);
+        await waitFor(() => expect(screen.getByText('あと30分')).toBeInTheDocument());
+        expect(screen.queryByText(/この30分の券はいまはつかえません/)).not.toBeInTheDocument();
+    });
+
+    it('禁止中は券がロックされ、再開時刻を表示する', async () => {
+        vi.mocked(apiClient.fetchInventory).mockResolvedValue(
+            inventoryResponse({
+                tv_block: {
+                    is_blocked: true,
+                    blocked_until: '14:00',
+                    next_block_starts_at: null,
+                    seconds_until_next_block: null,
+                    windows,
+                },
+            }),
+        );
+        renderWithClient(<InventoryList userId="son" />);
+        await waitFor(() => expect(screen.getByText('いまテレビおやすみ中')).toBeInTheDocument());
+        expect(screen.getByText('いまはテレビおやすみ。14:00からつかえるよ')).toBeInTheDocument();
+    });
+
+    it('平日(tv_block=null)では何も表示しない', async () => {
+        vi.mocked(apiClient.fetchInventory).mockResolvedValue(inventoryResponse({ tv_block: null }));
+        renderWithClient(<InventoryList userId="son" />);
+        await waitFor(() => expect(screen.getByText('あと60分')).toBeInTheDocument());
+        expect(screen.queryByText(/テレビ/)).not.toBeInTheDocument();
+    });
+});

@@ -198,6 +198,52 @@ def is_tv_blocked_now(now: datetime.datetime | None = None) -> bool:
     return any(start <= now.hour < end for start, end in TV_OFFDAY_BLOCKED_HOURS)
 
 
+def get_tv_block_state(now: datetime.datetime | None = None) -> dict[str, Any] | None:
+    """休日のテレビ禁止時間帯の状態を返す(ごほうび券の使用可否・family-questの予告表示用)。
+
+    平日、または TV_PLUG_DEVICE_ID 未設定(=ロック自体が無い環境)のときはNone。
+    - is_blocked: いま禁止時間帯か
+    - blocked_until: 禁止が終わる "HH:MM"。20時以降の枠は翌日まで続くためNone
+    - next_block_starts_at / seconds_until_next_block: 次の禁止開始の "HH:MM" と
+      そこまでの秒数(禁止中・本日もう禁止が無いときはNone)
+    - windows: 本日の禁止枠の一覧(表示用。終了が日付をまたぐ枠の end はNone)
+    """
+    if not config.TV_PLUG_DEVICE_ID:
+        return None
+    now = now or get_now_jst()
+    if not is_offday(now):
+        return None
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    windows: list[dict[str, Any]] = []
+    is_blocked = False
+    blocked_until: str | None = None
+    next_start: datetime.datetime | None = None
+    for start, end in TV_OFFDAY_BLOCKED_HOURS:
+        start_dt = midnight + datetime.timedelta(hours=start)
+        end_dt = midnight + datetime.timedelta(hours=end)
+        windows.append({"start": f"{start:02d}:00", "end": None if end >= 24 else f"{end:02d}:00"})
+        if start_dt <= now < end_dt:
+            is_blocked = True
+            blocked_until = None if end >= 24 else f"{end:02d}:00"
+        elif now < start_dt and next_start is None:
+            next_start = start_dt
+    if is_blocked or next_start is None:
+        return {
+            "is_blocked": is_blocked,
+            "blocked_until": blocked_until,
+            "next_block_starts_at": None,
+            "seconds_until_next_block": None,
+            "windows": windows,
+        }
+    return {
+        "is_blocked": False,
+        "blocked_until": None,
+        "next_block_starts_at": next_start.strftime("%H:%M"),
+        "seconds_until_next_block": int((next_start - now).total_seconds()),
+        "windows": windows,
+    }
+
+
 def trigger_tv_unlock(context: str) -> None:
     """TVプラグの電源をONにする(非同期・Fail-Soft)。
 

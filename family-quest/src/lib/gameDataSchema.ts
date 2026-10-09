@@ -166,6 +166,14 @@ const youtubeExtensionSchema = z.object({
     can_extend_now: z.boolean(),
 });
 
+const tvBlockStateSchema = z.object({
+    is_blocked: z.boolean(),
+    blocked_until: z.string().nullable(),
+    next_block_starts_at: z.string().nullable(),
+    seconds_until_next_block: z.number().nullable(),
+    windows: z.array(z.object({ start: z.string(), end: z.string().nullable() })),
+});
+
 export const inventoryResponseSchema = z.object({
     items: z.array(inventoryItemSchema),
     youtube_cooldown_remaining_seconds: z.number(),
@@ -178,6 +186,8 @@ export const inventoryResponseSchema = z.object({
     youtube_extension: youtubeExtensionSchema.nullable(),
     // YouTube等の時間消費型ごほうびは自由時間中のみ使える(要件確認済み、2026-09-23)。
     is_in_free_time: z.boolean(),
+    // 休日のテレビ禁止時間帯の予告・券ロック用。平日・ロック無し環境はnull。
+    tv_block: tvBlockStateSchema.nullish(),
 });
 
 // GET /api/cameras/settings のレスポンス(camera_router.py の CameraSettingsResponse)。

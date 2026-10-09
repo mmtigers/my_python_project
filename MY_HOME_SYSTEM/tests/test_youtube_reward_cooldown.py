@@ -204,6 +204,7 @@ def test_get_user_inventory_reports_cooldown_and_youtube_flag(isolated_db):
         "youtube_daily_limit_announcement",
         "youtube_extension",
         "is_in_free_time",
+        "tv_block",
     }
     # 使ったのは701(10分券)なので、待ち時間は 10分 + 休憩15分 = 25分
     assert 0 < result["youtube_cooldown_remaining_seconds"] <= 25 * 60
