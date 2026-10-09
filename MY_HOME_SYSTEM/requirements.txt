@@ -66,7 +66,7 @@ future==1.0.0
     # via line-bot-sdk
 google-auth==2.59.1
     # via google-genai
-google-genai==2.27.0
+google-genai==2.28.0
     # via -r requirements.in
 h11==0.16.0
     # via
@@ -140,7 +140,7 @@ python-dotenv==1.2.4
     # via -r requirements.in
 python-multipart==0.0.32
     # via -r requirements.in
-pytz==2026.4
+pytz==2026.5
     # via -r requirements.in
 requests==2.34.2
     # via
