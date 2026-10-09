@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -25,11 +26,13 @@ from services import camera_service
 def _reset_module_state():
     """モジュールグローバルの辞書がテスト間で干渉しないようにする"""
     camera_service._active_processes.clear()
+    camera_service._live_started_at.clear()
     camera_service._active_vod_processes.clear()
     camera_service._vod_generation_locks.clear()
     camera_service._rtsp_cache.clear()
     yield
     camera_service._active_processes.clear()
+    camera_service._live_started_at.clear()
     camera_service._active_vod_processes.clear()
     camera_service._vod_generation_locks.clear()
     camera_service._rtsp_cache.clear()
@@ -431,4 +434,57 @@ class TestGenerateRecordPlaylistPastDateCacheCompleteness:
             result = camera_service.generate_record_playlist(cam_conf, "20260101")
 
         assert result == str(playlist_path)
+        mock_popen.assert_not_called()
+
+
+class TestStartHlsStreamRestartsStalledFfmpeg:
+    """#882: プロセスは生きているのにプレイリストが更新されないffmpeg(ハング)は再起動する。"""
+
+    def _setup(self, tmp_path, monkeypatch, age_seconds):
+        monkeypatch.setattr(camera_service, "HLS_LIVE_DIR", str(tmp_path))
+        monkeypatch.setattr(camera_service, "get_rtsp_url", lambda cam_conf: "rtsp://u:p@host/stream")
+        cam_dir = tmp_path / "cam1"
+        cam_dir.mkdir()
+        playlist = cam_dir / "stream.m3u8"
+        playlist.write_text("#EXTM3U\n")
+        old = time.time() - age_seconds
+        os.utime(playlist, (old, old))
+        hung = MagicMock()
+        hung.poll.return_value = None
+        camera_service._active_processes["cam1"] = hung
+        return hung
+
+    def test_stalled_playlist_kills_and_restarts(self, tmp_path, monkeypatch):
+        hung = self._setup(tmp_path, monkeypatch, camera_service.HLS_LIVE_STALL_SECONDS + 10)
+        new_proc = MagicMock()
+        new_proc.poll.return_value = None
+        with patch.object(camera_service.subprocess, "Popen", return_value=new_proc) as mock_popen:
+            camera_service.start_hls_stream({"id": "cam1", "name": "TestCam"})
+        hung.kill.assert_called_once()
+        mock_popen.assert_called_once()
+        assert camera_service._active_processes["cam1"] is new_proc
+
+    def test_fresh_playlist_is_not_restarted(self, tmp_path, monkeypatch):
+        hung = self._setup(tmp_path, monkeypatch, 1)
+        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
+            camera_service.start_hls_stream({"id": "cam1", "name": "TestCam"})
+        hung.kill.assert_not_called()
+        mock_popen.assert_not_called()
+
+    def test_no_playlist_uses_start_time(self, tmp_path, monkeypatch):
+        hung = self._setup(tmp_path, monkeypatch, 0)
+        (tmp_path / "cam1" / "stream.m3u8").unlink()
+        camera_service._live_started_at["cam1"] = time.time() - camera_service.HLS_LIVE_STALL_SECONDS - 5
+        new_proc = MagicMock()
+        new_proc.poll.return_value = None
+        with patch.object(camera_service.subprocess, "Popen", return_value=new_proc):
+            camera_service.start_hls_stream({"id": "cam1", "name": "TestCam"})
+        hung.kill.assert_called_once()
+
+    def test_no_playlist_and_no_start_time_is_not_restarted(self, tmp_path, monkeypatch):
+        hung = self._setup(tmp_path, monkeypatch, 0)
+        (tmp_path / "cam1" / "stream.m3u8").unlink()
+        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
+            camera_service.start_hls_stream({"id": "cam1", "name": "TestCam"})
+        hung.kill.assert_not_called()
         mock_popen.assert_not_called()

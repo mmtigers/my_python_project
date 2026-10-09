@@ -55,7 +55,15 @@ PLAYLIST_WAIT_POLL_INTERVAL_SEC = 0.5  # 生成中プレイリスト待機のポ
 # ホストに対して待ち続け、この`-timeout`だけが指定通りに機能する)。
 FFMPEG_RTSP_TIMEOUT_USEC = 15_000_000  # ライブRTSP入力のI/Oタイムアウト(15秒)
 
+# #882: `-timeout`でも検知できないハング(プロセスは生きているのにセグメントが
+# 書かれない)に備え、プレイリストの更新が止まって一定時間を超えたら、生きて
+# いるffmpegでも強制終了して再起動する。セグメント長2秒・RTSPタイムアウト15秒
+# より十分長く取り、起動直後や一時的な遅延での誤再起動を避ける。
+HLS_LIVE_STALL_SECONDS = 30
+HLS_LIVE_KILL_WAIT_SECONDS = 5  # 停滞したffmpegをkillした後の終了待ち(秒)
+
 _active_processes: Dict[str, subprocess.Popen] = {}
+_live_started_at: dict[str, float] = {}  # cam_id -> ライブffmpegの起動時刻(monotonicではなくtime.time())
 _active_vod_processes: Dict[str, subprocess.Popen] = {} # VOD排他制御用の辞書を追加
 _rtsp_cache: Dict[str, str] = {}
 
@@ -132,6 +140,8 @@ def stop_all_processes(timeout: float = 5.0) -> int:
                 logger.warning(f"ffmpeg プロセス停止に失敗 ({key}): {e}")
             with _state_lock:
                 registry.pop(key, None)
+                if registry is _active_processes:
+                    _live_started_at.pop(key, None)
     if stopped:
         logger.info(f"🛑 ffmpeg プロセスを {stopped} 件停止しました")
     return stopped
@@ -245,14 +255,40 @@ def _remove_stale_live_outputs(cam_dir: str) -> None:
                 logger.warning(f"⚠️ 古いライブHLSファイルの削除に失敗: {name}: {e}")
 
 
+def _is_live_stalled(playlist_path: str, started_at: float | None) -> bool:
+    """生存中のライブffmpegが、プレイリストを更新しなくなったか(ハングか)を判定する(#882)。
+
+    プレイリストがあればその更新時刻、まだ無ければ起動時刻を基準にする。
+    どちらも分からない場合(起動時刻の記録が無い等)は、誤って再起動しないよう停滞なしとする。
+    """
+    try:
+        reference = os.path.getmtime(playlist_path)
+    except OSError:
+        reference = started_at
+    if reference is None:
+        return False
+    return time.time() - reference > HLS_LIVE_STALL_SECONDS
+
+
 def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:
     cam_dir = init_output_dir(HLS_LIVE_DIR, cam_id)
     playlist_path = os.path.join(cam_dir, "stream.m3u8")
 
     with _state_lock:
         existing = _active_processes.get(cam_id)
+        started_at = _live_started_at.get(cam_id)
     if existing is not None and existing.poll() is None:
-        return playlist_path
+        if not _is_live_stalled(playlist_path, started_at):
+            return playlist_path
+        logger.warning(
+            f"⚠️ [{cam_conf['name']}] ライブHLSの更新が{HLS_LIVE_STALL_SECONDS}秒以上止まっているため"
+            "ffmpegを再起動します(ハング検知)"
+        )
+        try:
+            existing.kill()
+            existing.wait(timeout=HLS_LIVE_KILL_WAIT_SECONDS)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            logger.warning(f"⚠️ 停滞したffmpegの停止に失敗: {e}")
 
     try:
         rtsp_url = get_rtsp_url(cam_conf)
@@ -302,6 +338,7 @@ def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:
         log_file.close()
     with _state_lock:
         _active_processes[cam_id] = process
+        _live_started_at[cam_id] = time.time()
     return playlist_path
 
 def get_record_start_offset(cam_conf: Dict[str, Any], target_date: str) -> int:
