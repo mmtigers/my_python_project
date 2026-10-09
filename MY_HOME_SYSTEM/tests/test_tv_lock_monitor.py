@@ -227,3 +227,51 @@ class TestGracefulTurnOffIsUsed:
 
         mock_off.assert_called_once_with()
         mock_cmd.assert_not_called()
+
+
+class TestRecutWhileBlocked:
+    """Issue #900: 休日の禁止時間帯に入れ直されたら、次の5分の起動で再度切る。"""
+
+    SATURDAY = datetime(2026, 9, 5, tzinfo=timezone(timedelta(hours=9)))  # 土曜
+
+    def _run(self, monkeypatch, now, watts, tmp_path=None):
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "tv-plug-1", raising=False)
+        monkeypatch.setattr(config, "TV_POWER_ON_THRESHOLD_WATTS", 10.0, raising=False)
+        if tmp_path is not None:
+            monkeypatch.setattr(
+                tv_lock_monitor, "HOLIDAY_RUN_FILE_TEMPLATE", str(tmp_path / "run_{hhmm}.txt")
+            )
+        sw = tv_lock_monitor.switchbot_service
+        with patch.object(tv_lock_monitor, "get_now_jst", lambda: now), \
+             patch.object(sw, "get_tv_power_watts", return_value=watts), \
+             patch.object(sw, "turn_off_tv_gracefully", return_value={"statusCode": 100}) as cut, \
+             patch.object(sw, "send_device_command", return_value={"statusCode": 100}):
+            tv_lock_monitor.main()
+        return cut
+
+    def test_cuts_when_tv_is_on_in_blocked_hours(self, monkeypatch):
+        assert self._run(monkeypatch, self.SATURDAY.replace(hour=12, minute=30), 80.0).call_count == 1
+        assert self._run(monkeypatch, self.SATURDAY.replace(hour=21, minute=10), 80.0).call_count == 1
+
+    def test_does_not_cut_when_tv_is_off(self, monkeypatch):
+        assert self._run(monkeypatch, self.SATURDAY.replace(hour=12, minute=30), 0.5).call_count == 0
+
+    def test_does_not_cut_when_power_unavailable(self, monkeypatch):
+        assert self._run(monkeypatch, self.SATURDAY.replace(hour=12, minute=30), None).call_count == 0
+
+    def test_does_not_cut_outside_blocked_hours(self, monkeypatch):
+        assert self._run(monkeypatch, self.SATURDAY.replace(hour=15, minute=0), 80.0).call_count == 0
+        assert self._run(monkeypatch, self.SATURDAY.replace(hour=14, minute=30), 80.0).call_count == 0
+
+    def test_does_not_cut_on_weekday(self, monkeypatch):
+        weekday = datetime(2026, 9, 7, 12, 30, tzinfo=timezone(timedelta(hours=9)))  # 月曜(祝日でない)
+        assert self._run(monkeypatch, weekday, 80.0).call_count == 0
+
+    def test_no_extra_cut_in_the_run_that_executes_the_slot(self, monkeypatch, tmp_path):
+        cut = self._run(monkeypatch, self.SATURDAY.replace(hour=12, minute=2), 80.0, tmp_path)
+        assert cut.call_count == 1  # スロットのオフ1回のみ(見張りは重ねない)
+
+    def test_cuts_after_slot_already_done_within_slot_window(self, monkeypatch, tmp_path):
+        (tmp_path / "run_1200.txt").write_text("2026-09-05")
+        cut = self._run(monkeypatch, self.SATURDAY.replace(hour=12, minute=3), 80.0, tmp_path)
+        assert cut.call_count == 1
