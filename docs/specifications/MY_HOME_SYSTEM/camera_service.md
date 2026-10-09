@@ -29,6 +29,7 @@
 
 
 * ライブ配信ffmpegプロセス起動時には`-hide_banner`/`-loglevel error`オプションを付与し、認証情報込みのRTSP URLがffmpeg自身の起動バナー経由でログファイルに平文出力されるのを防止する。また`ffmpeg.log`は`os.chmod`で`0o600`（所有者のみ読み書き可）に設定し、他ローカルユーザーからの閲覧を防ぐ。
+* **（Issue #882で追加）** 生存中のライブffmpegでも、`stream.m3u8`の更新時刻（無ければ`_live_started_at`の起動時刻）から`HLS_LIVE_STALL_SECONDS`（30秒）を超えて更新が止まっていれば、ハングとみなして`kill`し再起動する（`_is_live_stalled`）。`-timeout`で検知できない停止への備え。起動前には前回の`stream.m3u8`/`.ts`も削除する（`_remove_stale_live_outputs`）。
 * 根拠: [ffmpegコマンドとchmod] (行番号: 270, 288 / 抜粋: "\"-hide_banner\",")
 
 
