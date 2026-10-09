@@ -50,7 +50,7 @@
 
 ### `UiEventService.record_batch`
 
-* **役割**: バッチを保存し`{accepted, duplicated, rejected}`を返す。`UI_TAP_LOG_ENABLED`がfalseなら何も保存せず全件をacceptedとして返す(クライアントに失敗と誤認させ再送を繰り返させないため)。有効なら各タップの`occurred_at_ms`をJSTのISO文字列へ変換し、`now-30日 ≦ 時刻 ≦ now+10分`の範囲外はrejectedとして除外、残りを1トランザクションの`executemany`で`INSERT OR IGNORE`する。`accepted`は`cur.rowcount`(実際に挿入された行数)、`duplicated`は`len(rows)-inserted`。
+* **役割**: バッチを保存し`{accepted, duplicated, rejected}`を返す。`UI_TAP_LOG_ENABLED`がfalseなら何も保存せず全件をacceptedとして返す(クライアントに失敗と誤認させ再送を繰り返させないため)。有効なら各タップの`occurred_at_ms`をJSTのISO文字列へ変換し(`10**18`のように変換できない桁外れの値は`OverflowError`/`OSError`/`ValueError`を捕捉して当該イベントだけをrejectedにする。放置すると500になり、クライアントが5xxを再試行扱いにして同じキューを永久に再送するため)、`now-30日 ≦ 時刻 ≦ now+10分`の範囲外はrejectedとして除外、残りを1トランザクションの`executemany`で`INSERT OR IGNORE`する。`accepted`は`cur.rowcount`(実際に挿入された行数)、`duplicated`は`len(rows)-inserted`。
 * 根拠: [メソッド定義] (行番号: 35 / 抜粋: "def record_batch(self, batch: UiTapBatch, now: datetime.datetime | None = None) -> dict[str, int]:")、[無効時] (行番号: 41-42)、[範囲判定] (行番号: 51-55)、[保存] (行番号: 62-68)、[戻り値] (行番号: 72)
 * **引数/リクエスト**: `batch: UiTapBatch`, `now: datetime.datetime | None`(テスト用の注入。省略時は現在のJST)
 * 根拠: [メソッド定義] (行番号: 35)
@@ -58,13 +58,13 @@
 * 根拠: [戻り値] (行番号: 72)
 * **副作用**: `ui_tap_events`への追記(`get_db_cursor(commit=True)`)。範囲外があれば警告ログを出す。
 * 根拠: [保存] (行番号: 64-65)、[警告ログ] (行番号: 70-71)
-* **エラーハンドリング**: 明示的な`try`/`except`なし。DB例外はそのまま伝播する。
-* 根拠: [メソッド定義] (行番号: 35-72、`try`/`except`は存在しない)
+* **エラーハンドリング**: 時刻変換の`OverflowError`/`OSError`/`ValueError`のみ捕捉してrejected扱いにする。DB例外はそのまま伝播する。
+* 根拠: [時刻変換の例外捕捉] (行番号: 53-60 / 抜粋: "except (OverflowError, OSError, ValueError):")
 
 ### `ui_event_service`
 
 * **役割**: モジュールレベルのシングルトン(CLAUDE.mdのDI方針どおり)。
-* 根拠: [変数宣言] (行番号: 75 / 抜粋: "ui_event_service = UiEventService()")
+* 根拠: [変数宣言] (行番号: 83 / 抜粋: "ui_event_service = UiEventService()")
 * **引数/リクエスト**: 該当なし
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: なし

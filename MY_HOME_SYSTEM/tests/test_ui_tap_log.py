@@ -84,6 +84,14 @@ class TestRecordBatch:
         assert result == {"accepted": 1, "duplicated": 0, "rejected": 2}
         assert [r["event_id"] for r in _rows()] == ["evt-00000002"]
 
+    @pytest.mark.parametrize("ms", [10**18, 10**30, 2**63])
+    def test_unconvertible_timestamp_is_rejected_without_failing_the_batch(self, isolated_db, ms):
+        """桁外れの occurred_at_ms は当該イベントだけを破棄し、同じバッチの正常分は保存する。"""
+        batch = UiTapBatch(**_batch([_event(0, occurred_at_ms=ms), _event(1)]))
+        result = ui_event_service.record_batch(batch, now=NOW)
+        assert result == {"accepted": 1, "duplicated": 0, "rejected": 1}
+        assert [r["event_id"] for r in _rows()] == ["evt-00000001"]
+
     def test_disabled_saves_nothing_but_reports_accepted(self, isolated_db, monkeypatch):
         monkeypatch.setattr(config, "UI_TAP_LOG_ENABLED", False)
         batch = UiTapBatch(**_batch([_event(0), _event(1)]))
@@ -124,6 +132,15 @@ class TestEndpoint:
     ])
     def test_invalid_payload_is_rejected(self, api_client, payload):
         assert api_client.post("/api/ui-log/events", json=payload).status_code == 422
+
+    def test_endpoint_returns_202_for_an_unconvertible_timestamp(self, api_client):
+        """回帰: 以前は 500 になり、クライアントが5xxを再試行扱いにして永久に再送していた。"""
+        with freeze_time(NOW):
+            res = api_client.post(
+                "/api/ui-log/events", json=_batch([_event(0, occurred_at_ms=10**18), _event(1)])
+            )
+        assert res.status_code == 202
+        assert res.json() == {"accepted": 1, "duplicated": 0, "rejected": 1}
 
     def test_max_batch_of_100_is_accepted(self, api_client):
         with freeze_time(NOW):
