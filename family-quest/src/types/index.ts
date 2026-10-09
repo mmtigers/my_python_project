@@ -168,6 +168,18 @@ export interface InventoryResponse {
     youtube_extension: YoutubeExtension | null;
     // YouTube等の時間消費型ごほうびは自由時間中のみ使える(要件確認済み、2026-09-23)。
     is_in_free_time: boolean;
+    // 休日のテレビ禁止時間帯(12:00〜14:00 / 20:00以降)の予告・券ロック用。平日・ロック無し環境はnull。
+    tv_block?: TvBlockState | null;
+}
+
+export interface TvBlockState {
+    is_blocked: boolean;
+    // 禁止が終わる "HH:MM"。20時以降の枠は翌日まで続くためnull。
+    blocked_until: string | null;
+    next_block_starts_at: string | null;
+    // 次の禁止開始までの秒数(禁止中・本日もう禁止が無いときはnull)。
+    seconds_until_next_block: number | null;
+    windows: { start: string; end: string | null }[];
 }
 
 // #102/#363: クエスト完了APIが実際に成功した時点で App → QuestList/QuestItem へ

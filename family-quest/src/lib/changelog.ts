@@ -10,6 +10,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
     {
+        version: '1.2.4',
+        date: '2026-10-09',
+        changes: [
+            '土日・祝日は、「ごほうび」の画面にテレビがおやすみになる時間が出るようになりました',
+            'おやすみの30分前から「あと◯分」とおしらせします',
+            'テレビがおやすみになるまでに見おわらない券は、使えなくなりました(券はへりません)',
+        ],
+    },
+    {
         version: '1.2.3',
         date: '2026-10-04',
         changes: [

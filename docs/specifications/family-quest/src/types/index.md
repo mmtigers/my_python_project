@@ -142,7 +142,7 @@
 
 ### `InventoryResponse` (YouTubeごほうび券クールダウン機能で追加)
 
-* **役割**: `GET /api/quest/inventory/{user_id}`のレスポンス全体のデータ構造の定義。以前は`InventoryItem[]`という配列を直接返していたが、YouTube系ごほうび券のクールダウン残り秒数(`youtube_cooldown_remaining_seconds`)を併せて返す必要が生じたため、`{items, youtube_cooldown_remaining_seconds}`という辞書形状に変更された。`items`は従来どおり`InventoryItem[]`。**（猶予期間機能で追加）** クールダウンの猶予期間中に表示する予告情報`youtube_cooldown_announcement: YoutubeCooldownAnnouncement | null`も追加された。**（日次上限機能で追加）** 1日の合計視聴分数に関する3フィールドが追加された: `youtube_daily_limit_minutes: number | null`(上限分数。上限なし設定のときは`null`。コメントによれば施行前でも「今日はあと何分」を表示して慣れてもらうため猶予期間中も返る)、`youtube_daily_used_minutes: number`(JSTの今日すでに使った合計分数)、`youtube_daily_limit_announcement: YoutubeCooldownAnnouncement | null`(日次上限の予告情報)。**（プリントによる延長機能で追加）** `youtube_extension: YoutubeExtension | null`(プリントで上限を延ばす仕組みの状態。無効なときは`null`)。なお`youtube_daily_limit_minutes`はサーバー側で延長を反映した**実効上限**であり、設定値そのものではない。**（2026-09-23 要件追加）** `is_in_free_time: boolean`が追加された。YouTube等の時間消費型ごほうびの使用を自由時間中のみ許可する制限のためのフラグで、`InventoryList.tsx`がタップ前のロック表示に使う。
+* **役割**: `GET /api/quest/inventory/{user_id}`のレスポンス全体のデータ構造の定義。以前は`InventoryItem[]`という配列を直接返していたが、YouTube系ごほうび券のクールダウン残り秒数(`youtube_cooldown_remaining_seconds`)を併せて返す必要が生じたため、`{items, youtube_cooldown_remaining_seconds}`という辞書形状に変更された。`items`は従来どおり`InventoryItem[]`。**（猶予期間機能で追加）** クールダウンの猶予期間中に表示する予告情報`youtube_cooldown_announcement: YoutubeCooldownAnnouncement | null`も追加された。**（日次上限機能で追加）** 1日の合計視聴分数に関する3フィールドが追加された: `youtube_daily_limit_minutes: number | null`(上限分数。上限なし設定のときは`null`。コメントによれば施行前でも「今日はあと何分」を表示して慣れてもらうため猶予期間中も返る)、`youtube_daily_used_minutes: number`(JSTの今日すでに使った合計分数)、`youtube_daily_limit_announcement: YoutubeCooldownAnnouncement | null`(日次上限の予告情報)。**（プリントによる延長機能で追加）** `youtube_extension: YoutubeExtension | null`(プリントで上限を延ばす仕組みの状態。無効なときは`null`)。なお`youtube_daily_limit_minutes`はサーバー側で延長を反映した**実効上限**であり、設定値そのものではない。**（2026-09-23 要件追加）** `is_in_free_time: boolean`が追加された。YouTube等の時間消費型ごほうびの使用を自由時間中のみ許可する制限のためのフラグで、`InventoryList.tsx`がタップ前のロック表示に使う。 **（2026-10-09 要件追加）** 休日のテレビ禁止時間帯の予告・券ロック用に`tv_block?: TvBlockState | null`(新設の`TvBlockState`型)が追加された。
 * 根拠: [該当要素] (行番号: 157〜171 / 抜粋: "export interface InventoryResponse {\n    items: InventoryItem[];\n    youtube_cooldown_remaining_seconds: number;\n    youtube_cooldown_announcement: YoutubeCooldownAnnouncement | null;", "    youtube_daily_limit_minutes: number | null;", "    youtube_daily_used_minutes: number;", "    youtube_daily_limit_announcement: YoutubeCooldownAnnouncement | null;", "    youtube_extension: YoutubeExtension | null;\n}")
 * 根拠: `is_in_free_time: boolean;` (行番号: 170)
 
@@ -205,7 +205,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | これらをインポートしているコンポーネント・API群 | 定義された各型がどのように初期化され、操作されているかの実態を把握するため。 | [全体] 型定義のみであり、利用側が存在しないと機能しないため |
-| 中 | APIクライアントの実装ファイル | `QuestResult`などがAPIレスポンス用と明記されており、通信周りの処理を追う必要があるため。 | [QuestResult] (行番号: 185 / 抜粋: "// ★追加: クエスト完了結果 (APIレスポンス用)") |
+| 中 | APIクライアントの実装ファイル | `QuestResult`などがAPIレスポンス用と明記されており、通信周りの処理を追う必要があるため。 | [QuestResult] (行番号: 197 / 抜粋: "// ★追加: クエスト完了結果 (APIレスポンス用)") |
 
 ## 8. 保守上の注意点
 

@@ -79,6 +79,24 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     // YouTube等の時間消費型ごほうびは自由時間中のみ使える(要件確認済み、2026-09-23)。
     const isInFreeTime = data?.is_in_free_time ?? true;
 
+    // 休日のテレビ禁止時間帯(12:00〜14:00 / 20:00以降)。平日・ロック無し環境はnull。
+    // 禁止開始までの秒数はサーバー値(ポーリングで再同期)を起点にローカルで減らす。
+    const tvBlock = data?.tv_block ?? null;
+    const [tvSecondsLeft, setTvSecondsLeft] = useState<number | null>(null);
+    useEffect(() => {
+        const serverValue = data?.tv_block?.seconds_until_next_block ?? null;
+        // クールダウンと同じ理由(サーバー値を起点にしたローカルカウントダウン)で意図的。
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- 上記の理由で意図的
+        setTvSecondsLeft(serverValue);
+        if (serverValue === null) return;
+
+        const id = window.setInterval(() => {
+            setTvSecondsLeft((s) => (s === null ? s : Math.max(0, s - 1)));
+        }, 1000);
+        return () => window.clearInterval(id);
+    }, [data?.tv_block?.seconds_until_next_block]);
+    const isTvBlocked = tvBlock?.is_blocked ?? false;
+
     // YouTube系ごほうび券の連続使用防止クールダウン(15分)の残り秒数。
     // サーバー値(5秒間隔のポーリングで再同期)を起点に、表示だけ1秒間隔でローカルに
     // カウントダウンする(QuestList.tsxのCooldownRingと同様の考え方)。
@@ -177,6 +195,51 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
         </div>
     );
 
+    // 休日のテレビおやすみの予告。朝から常時出し、禁止開始の30分前/10分前で色を変える。
+    // 禁止開始までの秒数が0になった直後〜次のポーリングまでは「おやすみ中」として扱う。
+    const tvBlockActive = isTvBlocked || (tvSecondsLeft !== null && tvSecondsLeft <= 0);
+    const tvMinutesLeft = tvSecondsLeft === null ? null : Math.ceil(tvSecondsLeft / 60);
+    const tvBlockBanner = tvBlock && (() => {
+        const scheduleText = tvBlock.windows
+            .map((w) => (w.end ? `${w.start}〜${w.end}` : `${w.start}から`))
+            .join(' と ');
+        if (tvBlockActive) {
+            return (
+                <div className="flex items-center gap-2 p-2 rounded-xl border text-xs bg-slate-100 border-slate-300 text-slate-600">
+                    <span className="text-base leading-none flex-shrink-0">🌙</span>
+                    <p>
+                        <span className="font-bold">いまテレビおやすみ中</span>
+                        {tvBlock.blocked_until ? `(${tvBlock.blocked_until}まで)` : '(あしたまで)'}
+                    </p>
+                </div>
+            );
+        }
+        const soon = tvMinutesLeft !== null && tvMinutesLeft <= 30;
+        const urgent = tvMinutesLeft !== null && tvMinutesLeft <= 10;
+        const tone = urgent
+            ? 'bg-orange-50 border-orange-400 text-orange-800'
+            : soon
+            ? 'bg-amber-50 border-amber-300 text-amber-800'
+            : 'bg-indigo-50 border-indigo-200 text-indigo-800';
+        return (
+            <div className={`flex items-center gap-2 p-2 rounded-xl border text-xs ${tone}`}>
+                <span className="text-base leading-none flex-shrink-0">{soon ? '⏰' : '🌙'}</span>
+                <p>
+                    {soon && tvMinutesLeft !== null ? (
+                        <>
+                            <span className="font-bold">あと{tvMinutesLeft}分</span>
+                            で{tvBlock.next_block_starts_at}からテレビがおやすみ。キリのいいところまでね
+                        </>
+                    ) : (
+                        <>
+                            きょうは <span className="font-bold">{scheduleText}</span> テレビおやすみ
+                        </>
+                    )}
+                </p>
+            </div>
+        );
+    })();
+
     // 「きょうはあと何分見られるか」の表示。施行前でも出して慣れてもらう。
     const dailyBudgetBanner = dailyRemainingMinutes !== null && dailyLimitMinutes !== null && (
         <div
@@ -211,6 +274,7 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
         return (
             <div className="flex flex-col gap-3">
                 {announcementBanner}
+                {tvBlockBanner}
                 {dailyBudgetBanner}
                 <div className="text-center p-8 bg-white/50 rounded-xl border-2 border-dashed border-slate-300">
                     <div className="text-6xl mb-4 opacity-50">🎒</div>
@@ -236,6 +300,9 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
             {announcementBanner && (
                 <div className="col-span-full">{announcementBanner}</div>
             )}
+            {tvBlockBanner && (
+                <div className="col-span-full">{tvBlockBanner}</div>
+            )}
             {dailyBudgetBanner && (
                 <div className="col-span-full">{dailyBudgetBanner}</div>
             )}
@@ -246,15 +313,25 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
                 // タップしてから429で断られるより、最初から使えないと分かるほうが子どもには親切。
                 const isOutsideFreeTime = item.is_youtube_reward && !isInFreeTime;
                 const durationMinutes = item.youtube_duration_minutes ?? 0;
+                const isTvBlockedForItem = !isOutsideFreeTime && item.is_youtube_reward && tvBlockActive;
+                // 禁止開始までに見終わらない券(ちょうど終わる券は使える)。
+                const exceedsTvBlockStart =
+                    !isOutsideFreeTime &&
+                    !isTvBlockedForItem &&
+                    item.is_youtube_reward &&
+                    tvSecondsLeft !== null &&
+                    durationMinutes * 60 > tvSecondsLeft;
+                const isTvLocked = isTvBlockedForItem || exceedsTvBlockStart;
                 const exceedsDailyLimit =
                     !isOutsideFreeTime &&
+                    !isTvLocked &&
                     item.is_youtube_reward &&
                     isDailyLimitEnforced &&
                     dailyRemainingMinutes !== null &&
                     durationMinutes > dailyRemainingMinutes;
                 const isCoolingDown =
-                    !isOutsideFreeTime && !exceedsDailyLimit && item.is_youtube_reward && youtubeCooldownSeconds > 0;
-                const isLocked = isOutsideFreeTime || exceedsDailyLimit || isCoolingDown;
+                    !isOutsideFreeTime && !isTvLocked && !exceedsDailyLimit && item.is_youtube_reward && youtubeCooldownSeconds > 0;
+                const isLocked = isOutsideFreeTime || isTvLocked || exceedsDailyLimit || isCoolingDown;
 
                 // 文言の優先順位はバックエンド(_use_item_locked)の判定順と揃える。
                 // 使い切っていても延長が残っているときは、諦めさせるのではなく次の行動を示す。
@@ -263,6 +340,12 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
                     : 'きょうのYouTubeはおしまい。また明日つかおうね';
                 const lockedReason = isOutsideFreeTime
                     ? '自由時間になったら見られるよ'
+                    : isTvBlockedForItem
+                    ? (tvBlock?.blocked_until
+                        ? `いまはテレビおやすみ。${tvBlock.blocked_until}からつかえるよ`
+                        : 'いまはテレビおやすみ。また明日つかおうね')
+                    : exceedsTvBlockStart
+                    ? `${tvBlock?.next_block_starts_at}からテレビがおやすみだから、この${durationMinutes}分の券はいまはつかえません`
                     : exceedsDailyLimit
                     ? (dailyRemainingMinutes === 0
                         ? outOfMinutesReason
@@ -329,6 +412,11 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
                 }
             >
                 <p className="text-center">「{itemToUse?.title}」を使いますか？</p>
+                {itemToUse?.is_youtube_reward && tvBlock?.next_block_starts_at && (
+                    <p className="text-center text-xs text-slate-500 mt-2">
+                        {tvBlock.next_block_starts_at}からテレビがおやすみになるよ
+                    </p>
+                )}
             </Modal>
         </div>
     );
