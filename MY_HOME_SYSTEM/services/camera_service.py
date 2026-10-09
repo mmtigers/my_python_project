@@ -63,7 +63,7 @@ HLS_LIVE_STALL_SECONDS = 30
 HLS_LIVE_KILL_WAIT_SECONDS = 5  # 停滞したffmpegをkillした後の終了待ち(秒)
 
 _active_processes: Dict[str, subprocess.Popen] = {}
-_live_started_at: Dict[str, float] = {}  # cam_id -> ライブffmpegの起動時刻(monotonicではなくtime.time())
+_live_started_at: dict[str, float] = {}  # cam_id -> ライブffmpegの起動時刻(monotonicではなくtime.time())
 _active_vod_processes: Dict[str, subprocess.Popen] = {} # VOD排他制御用の辞書を追加
 _rtsp_cache: Dict[str, str] = {}
 
@@ -255,7 +255,7 @@ def _remove_stale_live_outputs(cam_dir: str) -> None:
                 logger.warning(f"⚠️ 古いライブHLSファイルの削除に失敗: {name}: {e}")
 
 
-def _is_live_stalled(playlist_path: str, started_at: Optional[float]) -> bool:
+def _is_live_stalled(playlist_path: str, started_at: float | None) -> bool:
     """生存中のライブffmpegが、プレイリストを更新しなくなったか(ハングか)を判定する(#882)。
 
     プレイリストがあればその更新時刻、まだ無ければ起動時刻を基準にする。
@@ -287,7 +287,7 @@ def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:
         try:
             existing.kill()
             existing.wait(timeout=HLS_LIVE_KILL_WAIT_SECONDS)
-        except Exception as e:
+        except (OSError, subprocess.TimeoutExpired) as e:
             logger.warning(f"⚠️ 停滞したffmpegの停止に失敗: {e}")
 
     try:

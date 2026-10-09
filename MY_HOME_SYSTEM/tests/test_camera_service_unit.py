@@ -9,9 +9,9 @@ start_hls_stream/generate_record_playlist等の実装(RTSP URLマスク・ffmpeg
 """
 import json
 import os
-import time
 import sys
 import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
