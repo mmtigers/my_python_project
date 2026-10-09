@@ -5,6 +5,8 @@
 # (メジャー更新は人が判断)。
 # 週次実行は月曜 09:00 JST に揃え、定期監査ワークフロー(spec-drift/pip-audit)と
 # 同じタイミングで棚卸しできるようにしている。
+# labels は指定しない: リポジトリに dependencies / javascript 等のラベルが無く、指定すると
+# 「ラベルが見つからない」警告コメントが毎PRに付くため(ラベルを付けたい場合は先に作成すること)。
 version: 2
 updates:
   # GitHub Actions (SHAピン留めの更新。コメントのバージョン表記も自動更新される)
@@ -15,9 +17,6 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Tokyo"
-    labels:
-      - "dependencies"
-      - "github-actions"
     # Issue #482: minor/patchはまとめて1PRにグループ化し、棚卸しコストを下げる。
     # メジャー更新は破壊的変更を単独で評価できるよう従来どおり個別PRのまま残す。
     groups:
@@ -36,9 +35,6 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Tokyo"
-    labels:
-      - "dependencies"
-      - "python"
     # 依存が多くPRが大量に立つのを避けるため、同時オープン数を抑える
     open-pull-requests-limit: 5
     groups:
@@ -53,9 +49,6 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Tokyo"
-    labels:
-      - "dependencies"
-      - "python"
     open-pull-requests-limit: 3
     groups:
       minor-and-patch:
@@ -69,9 +62,6 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Tokyo"
-    labels:
-      - "dependencies"
-      - "javascript"
     open-pull-requests-limit: 5
     groups:
       minor-and-patch:
