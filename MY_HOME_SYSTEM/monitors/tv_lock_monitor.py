@@ -49,6 +49,7 @@ def main():
     # ホストがJST以外の設定だと別の実時刻に実行されてしまう)。
     now = get_now_jst()
 
+    slot_executed = False
     for hour, command, holiday_only in _SLOTS:
         if now.hour != hour or not 0 <= now.minute <= 5:
             continue
@@ -64,6 +65,7 @@ def main():
             continue  # すでに実行済み
 
         logger.info(f"📺 [TV Lock] Executing scheduled TV plug command {command} at {hour:02d}:00.")
+        slot_executed = True
         try:
             if command == "turnOff":
                 # テレビがついていれば、先にリモコンで消してからプラグを切る
@@ -79,6 +81,28 @@ def main():
                 logger.error(f"❌ [TV Lock] API Error: {res}")
         except Exception as e:
             logger.error(f"❌ [TV Lock] Exception during {command}: {e}")
+
+    if not slot_executed:
+        _cut_if_turned_on_while_blocked(now)
+
+
+def _cut_if_turned_on_while_blocked(now) -> None:
+    """休日の禁止時間帯に、プラグ本体のボタン等で入れ直されていたら再度切る(Issue #900)。
+
+    5分間隔の起動ごとに消費電力を確認し、TV_POWER_ON_THRESHOLD_WATTS 以上なら
+    リモコン経由で消してからプラグを切る。電力を取得できないときは切らない
+    (誤って切るより見逃す方を選ぶ)。通知は送らない(家族との合意事項)。
+    """
+    if not switchbot_service.is_tv_blocked_now(now):
+        return
+    watts = switchbot_service.get_tv_power_watts()
+    if watts is None or watts < config.TV_POWER_ON_THRESHOLD_WATTS:
+        return
+    logger.info(f"📺 [TV Lock] TV is on during the blocked period ({watts:.1f}W). Cutting it again.")
+    res = switchbot_service.turn_off_tv_gracefully()
+    if not res or res.get("statusCode") != 100:
+        logger.error(f"❌ [TV Lock] Re-cut API Error: {res}")
+
 
 if __name__ == "__main__":
     main()

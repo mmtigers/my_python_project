@@ -18,6 +18,7 @@
 
 * 深夜の特定時間帯（2:00〜2:05）にTVプラグデバイスの電源をオフにする制御を行うスクリプトです。
 * **（休日のテレビ時間帯で追加）** 休日（土日・国民の祝日・家の休み。`core.jp_holidays.is_offday`）だけ、12:00に`turnOff`、14:00に`turnOn`、20:00に`turnOff`も実行する（各時刻の0〜5分）。実行するスロットは`_SLOTS`（時・操作・休日のみか）で定義し、スロットごとに1日1回の記録ファイル（深夜2時は`last_tv_lock.txt`、休日スロットは`last_tv_lock_1200.txt`等）で重複実行を防ぐ。12:00〜14:00と20:00以降に「つけられない」ようにする側は、`switchbot_service.is_tv_blocked_now`がアプリ経由の自動ONを止めることで担保する（プラグ本体のボタンは止められない。要件確認済み: 切る時刻に1回だけオフ）。
+* **（Issue #900で追加）** スロット処理を実行しなかった起動では、`_cut_if_turned_on_while_blocked`が休日の禁止時間帯（`switchbot_service.is_tv_blocked_now`）かどうかを見て、`get_tv_power_watts`が`TV_POWER_ON_THRESHOLD_WATTS`以上なら`turn_off_tv_gracefully`で再度切る。プラグ本体のボタンで入れ直されても最大5分で切れる。電力を取得できないときは切らず、通知は送らない（家族との合意）。API呼び出しは休日の禁止時間帯（計6時間）に最大72回/日増える。
 * **（先にリモコンで消す機能で追加）** `turnOff`のスロットは`send_device_command`ではなく`switchbot_service.turn_off_tv_gracefully`を呼ぶ。テレビがついていれば（プラグの消費電力が閾値以上）、先にNature Remoのリモコン信号でテレビを消し、消費電力が下がるのを待ってからプラグを切る。Nature Remoの設定(`TV_NATURE_REMO_LOCATION`と`TV_REMO_SIGNAL_ID`または`TV_REMO_APPLIANCE_ID`)が未設定なら従来どおりプラグだけ切る。`turnOn`（14:00）は従来どおり`send_device_command`。
 * 1日1回の重複実行を防止するための記録・判定機能を有しています。
 
@@ -61,7 +62,7 @@
 
 * **副作用**:
 * 外部APIまたはデバイスに対するオフコマンド（"turnOff"）送信
-* 根拠: `send_device_command`呼び出し (行番号: 72 / 抜粋: "switchbot_service.send_device_command")
+* 根拠: `send_device_command`呼び出し (行番号: 74 / 抜粋: "switchbot_service.send_device_command")
 
 
 * ローカルファイルシステム上のディレクトリ作成、およびファイル（`last_tv_lock.txt`）への日付文字列書き込み
