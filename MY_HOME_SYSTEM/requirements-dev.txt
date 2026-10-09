@@ -48,7 +48,7 @@ httpx==0.28.1
     # via
     #   -c requirements.txt
     #   -r requirements-dev.in
-hypothesis==6.168.3
+hypothesis==6.168.5
     # via -r requirements-dev.in
 idna==3.18
     # via
