@@ -39,10 +39,10 @@ SwitchBot ハブの稼働時と停止時で、SwitchBot API の応答に差が�
 | --- | --- |
 | `_get(path)` | API を GET し、HTTP ステータスと JSON 本文（JSON でなければ先頭500文字）を返す。通信例外は `{"http_status": None, "error": ...}` |
 | `collect()` | 機器一覧と各ハブの status を集めたスナップショットを返す |
-| `_flatten(value, prefix)` | 入れ子の dict/list を `a.b[0].c` 形式のキーへ平坦化する |
+| `_flatten(value, prefix)` | 入れ子の dict/list を `a.b[0].c` 形式のキーへ平坦化する。空の dict/list は子が無いため値そのもの（`{}` / `[]`）を残す（停止時に `body` や `deviceList` が空へ変わる変化を `--diff` が見落とさないため） |
 | `diff(before, after)` | 2つのスナップショットの差を文字列のリストで返す |
 | `main(argv)` | 引数に応じて `--diff` / 収集・保存を実行する |
 
 ## 5. テスト
 
-`tests/test_check_switchbot_hub_api.py`（API はモック）: ハブのみの収集・認証情報が出力に出ないこと・通信失敗の記録・差分の抽出（撮影時刻は無視）・`--diff` が API を呼ばないこと・資格情報未設定時の終了コード。
+`tests/test_check_switchbot_hub_api.py`（API はモック）: ハブのみの収集・認証情報が出力に出ないこと・通信失敗の記録・差分の抽出（撮影時刻は無視）・値が空の `{}` / `[]` になる変化の検出・`--diff` が API を呼ばないこと・資格情報未設定時の終了コード。
