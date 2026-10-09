@@ -86,6 +86,10 @@ def collect() -> dict[str, Any]:
 
 
 def _flatten(value: Any, prefix: str = "") -> dict[str, Any]:
+    # 空の dict/list は子が無く何も出力されなくなるため、値そのものを残す
+    # (停止時に body や deviceList が空へ変わっても差として検出するため)。
+    if isinstance(value, (dict, list)) and not value:
+        return {prefix: value}
     if isinstance(value, dict):
         out: dict[str, Any] = {}
         for k, v in value.items():

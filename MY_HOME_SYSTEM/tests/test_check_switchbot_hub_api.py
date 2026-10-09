@@ -62,6 +62,18 @@ def test_diff_reports_only_changed_fields_and_ignores_capture_time():
     assert tool.diff(before, before) == []
 
 
+def test_diff_detects_value_becoming_empty():
+    before = {"hubs": {"HUB1": {"body": {"deviceType": "Hub Mini"}}}, "list": [{"id": 1}]}
+    after = {"hubs": {"HUB1": {"body": {}}}, "list": []}
+
+    assert tool.diff(before, after) == [
+        "hubs.HUB1.body: '<なし>' -> {}",
+        "hubs.HUB1.body.deviceType: 'Hub Mini' -> '<なし>'",
+        "list: '<なし>' -> []",
+        "list[0].id: 1 -> '<なし>'",
+    ]
+
+
 def test_main_diff_mode_does_not_call_api(tmp_path, capsys):
     a = tmp_path / "a.json"
     b = tmp_path / "b.json"
