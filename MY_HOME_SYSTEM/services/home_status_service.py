@@ -876,6 +876,20 @@ def get_sensor_data_for_day(day: date) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def get_sensor_data_today() -> pd.DataFrame:
+    """見守りページの活動ヒートマップ用に、今日(JST)のセンサーデータを全件返す。
+
+    `get_cached_materials()`の`df_sensor`は直近`MOBILE_SENSOR_ROW_LIMIT`件までで、温湿度計などの
+    定期記録が多いと今日の早い時間帯が欠けるため、今日分だけ別に取る。固定キーで
+    `STATUS_CACHE_TTL_SEC`だけキャッシュする(日付入りのキーにすると日ごとにDataFrameが
+    溜まり続けるため。日付をまたいだ直後の最大TTL秒は前日のデータが返りうるが、
+    呼び出し側は表示日で絞るので、その間は「記録なし」になるだけ)。
+    """
+    today = get_now_jst().date()
+    df = _cached("sensor_today", lambda: analysis_service.load_sensor_data(day=today))
+    return df if df is not None else pd.DataFrame()
+
+
 def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:
     """材料を集めてカードを組み立て、(カード, 取得時刻)を返す。ホームページ用。"""
     now = now or get_now_jst()

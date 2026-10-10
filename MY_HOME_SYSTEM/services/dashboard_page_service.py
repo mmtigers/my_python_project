@@ -1066,6 +1066,7 @@ def render_watch_page(
     snapshot_url_prefix: str,
     selected_date: date | None = None,
     selected_device: str | None = None,
+    df_heatmap: pd.DataFrame | None = None,
 ) -> str:
     """👀 見守り: カメラのライブ選択・スナップショット・防犯ログ・実家/自宅センサーログ。
 
@@ -1094,6 +1095,10 @@ def render_watch_page(
     **(新機能)** `selected_device`(`device_id`)を指定すると、高砂・伊丹のセンサーログをその機器だけに絞る
     (防犯ログは対象外)。選択肢にない値は無視する。
 
+    **(新機能)** 高砂・伊丹の活動ヒートマップは表示日(`selected_date`、無ければ今日)の全件で集計する。
+    日付未指定時の`df_sensor`は直近N件のキャッシュで今日の早い時間帯が欠けうるため、呼び出し側が
+    今日分の全件を`df_heatmap`で渡す(省略時は`df_sensor`を使う)。
+
     **(新機能)** `selected_date`を指定すると3つのログをその日(JST)に絞り、件数の上限
     (通常50件)を外して指定日の全件を表示する(先頭5件の常時表示+折りたたみは同じ)。
     `df_sensor`は呼び出し側(`dashboard_router`)が日付指定時に指定日の全件を渡す
@@ -1119,6 +1124,22 @@ def render_watch_page(
 
     heatmap_now = home_status_service.get_now_jst()
     heatmap_day = selected_date or heatmap_now.date()
+    # ヒートマップは表と同じ絞り込み(状態変化行→機器→開閉の統合)を、表示日の全件に対して行う。
+    # `df_heatmap`が無ければ表と同じ`df_sensor`を使う。
+    if df_heatmap is None:
+        heat_takasago, heat_itami = df_takasago, df_itami
+    else:
+        heat_takasago, heat_itami = (
+            merge_open_close_events(
+                _filter_by_device(
+                    sensor_state_change_log(df_heatmap[df_heatmap["location"] == loc])
+                    if "location" in df_heatmap.columns
+                    else df_heatmap.iloc[0:0],
+                    selected_device,
+                )
+            )
+            for loc in ("高砂", "伊丹")
+        )
 
     def _log_table(df: pd.DataFrame, columns: dict[str, str]) -> str:
         # 日付指定時は上限を外して全件(`limit`は`df.iloc[visible:limit]`の上端)。
@@ -1140,12 +1161,12 @@ def render_watch_page(
         f'{_log_table(df_camera_motion, {"timestamp": "検知時刻", "friendly_name": "カメラ"})}'
         '<div id="takasago-log">'
         "<h2>👵 高砂実家のセンサーログ</h2>"
-        f"{_render_activity_heatmap(df_takasago, heatmap_day, heatmap_now)}"
+        f"{_render_activity_heatmap(heat_takasago, heatmap_day, heatmap_now)}"
         f'{_log_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'
         "</div>"
         '<div id="itami-log">'
         "<h2>🏠 伊丹(自宅)のセンサーログ</h2>"
-        f"{_render_activity_heatmap(df_itami, heatmap_day, heatmap_now)}"
+        f"{_render_activity_heatmap(heat_itami, heatmap_day, heatmap_now)}"
         f'{_log_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
         "</div>"
     )

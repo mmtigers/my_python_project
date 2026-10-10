@@ -389,11 +389,18 @@ class TestStatusCacheOnTheServerSide:
                 client.get(f"{config.DASHBOARD_BASE_PATH}/")
                 client.get(f"{config.DASHBOARD_BASE_PATH}/watch")
                 client.get(f"{config.DASHBOARD_BASE_PATH}/sys")
+                client.get(f"{config.DASHBOARD_BASE_PATH}/watch")
         finally:
             for p in patches:
                 p.stop()
 
-        mock_load.assert_called_once()
+        # 共通キャッシュ(直近N件)は1回だけ。見守りページのヒートマップ用に「今日の全件」を
+        # 1回だけ別に取る(これもTTLキャッシュ済みで、見守りを再度開いても増えない)。
+        limit_calls = [c for c in mock_load.call_args_list if "limit" in c.kwargs]
+        day_calls = [c for c in mock_load.call_args_list if "day" in c.kwargs]
+        assert len(limit_calls) == 1
+        assert len(day_calls) == 1
+        assert len(mock_load.call_args_list) == 2
 
     def test_watch_page_with_date_loads_that_day_from_the_db(self):
         """`?date=`指定時は共通キャッシュ(直近3000件)ではなく、指定日をDBから取る。"""
@@ -427,7 +434,9 @@ class TestStatusCacheOnTheServerSide:
                 p.stop()
 
         assert res.status_code == 200
-        mock_load.assert_called_once_with(limit=home_status_service.MOBILE_SENSOR_ROW_LIMIT)
+        # 日付指定が無効なら通常表示: 共通キャッシュ(直近N件)+ヒートマップ用の今日の全件
+        mock_load.assert_any_call(limit=home_status_service.MOBILE_SENSOR_ROW_LIMIT)
+        assert len(mock_load.call_args_list) == 2
 
     def test_failures_are_not_cached(self):
         """失敗をキャッシュすると、復旧しても60秒間は壊れたままになる。"""

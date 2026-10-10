@@ -1082,3 +1082,23 @@ class TestActivityHeatmap:
         assert 'class="heatmap"' in takasago and "7時台: 1回" in takasago
         itami = html.split('id="itami-log"', 1)[1]
         assert "この日の動きの記録はありません" in itami
+
+    def test_watch_page_heatmap_uses_df_heatmap_when_given(self, monkeypatch):
+        """キャッシュ由来の df_sensor に今日の早い時間帯が無くても、df_heatmap(今日の全件)で集計する。"""
+        monkeypatch.setattr(config, "CAMERAS", [])
+        monkeypatch.setattr(
+            dashboard_page_service.home_status_service, "get_now_jst", lambda: _jst(2026, 10, 2, 12, 0)
+        )
+        cols = {"location": ["高砂"], "device_id": ["pir"], "friendly_name": ["廊下の人感"], "contact_state": ["detected"]}
+        df_sensor = pd.DataFrame({**cols, "timestamp": [_jst(2026, 10, 2, 11, 0)]})
+        df_heatmap = pd.DataFrame({
+            "location": ["高砂"] * 3, "device_id": ["pir"] * 3, "friendly_name": ["廊下の人感"] * 3,
+            "contact_state": ["detected", "not_detected", "detected"],
+            "timestamp": [_jst(2026, 10, 2, 1, 0), _jst(2026, 10, 2, 2, 0), _jst(2026, 10, 2, 11, 0)],
+        })
+        html = dashboard_page_service.render_watch_page(
+            df_sensor, dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot",
+            df_heatmap=df_heatmap,
+        )
+        takasago = html.split('id="takasago-log"', 1)[1].split('id="itami-log"', 1)[0]
+        assert "1時台: 1回" in takasago and "11時台: 1回" in takasago
