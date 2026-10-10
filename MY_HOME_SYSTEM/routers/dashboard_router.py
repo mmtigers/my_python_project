@@ -167,11 +167,14 @@ def dashboard_life() -> HTMLResponse:
 
 
 @router.get(f"{_BASE_PATH}/sys", include_in_schema=False)
-def dashboard_sys(nas_days: int = dashboard_page_service.NAS_HISTORY_DEFAULT_DAYS) -> HTMLResponse:
+def dashboard_sys(nas_days: str | None = None) -> HTMLResponse:
     """システムページ。`?nas_days=7|30|90`でNAS容量グラフの表示期間を切り替える
-    (それ以外の値は既定の30日)。"""
-    if nas_days not in dashboard_page_service.NAS_HISTORY_DAYS_CHOICES:
-        nas_days = dashboard_page_service.NAS_HISTORY_DEFAULT_DAYS
+    (それ以外の値・数値でない値は既定の30日。壊れたブックマークでも開けるようにする)。"""
+    try:
+        days = int(nas_days) if nas_days is not None else None
+    except ValueError:
+        days = None
+    nas_days = days if days in dashboard_page_service.NAS_HISTORY_DAYS_CHOICES else dashboard_page_service.NAS_HISTORY_DEFAULT_DAYS
     materials = home_status_service.get_cached_materials()
     nas_history = home_status_service.get_nas_history(nas_days)
     now = home_status_service.get_now_jst()

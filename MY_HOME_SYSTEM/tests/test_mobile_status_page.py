@@ -274,15 +274,12 @@ class TestSubPages:
         assert "現在 42%" in res.text
 
     @pytest.mark.parametrize("query,expected_days", [
-        ("", 30), ("?nas_days=7", 7), ("?nas_days=90", 90), ("?nas_days=5", 30), ("?nas_days=abc", None),
+        ("", 30), ("?nas_days=7", 7), ("?nas_days=90", 90), ("?nas_days=5", 30), ("?nas_days=abc", 30), ("?nas_days=", 30),
     ])
     def test_sys_page_nas_period_selects_the_history_range(self, query, expected_days):
-        """?nas_days=7|30|90で期間を切り替える。範囲外は既定の30日。数値でない値は422。"""
+        """?nas_days=7|30|90で期間を切り替える。範囲外・数値でない値は既定の30日(422にしない)。"""
         with patch.object(home_status_service, "get_nas_history", return_value=pd.DataFrame()) as mock_load:
             res = self._get(f"sys{query}")
-        if expected_days is None:
-            assert res.status_code == 422
-            return
         assert res.status_code == 200
         mock_load.assert_called_once_with(expected_days)
         assert "表示期間" in res.text

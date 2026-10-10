@@ -232,10 +232,10 @@
 ### `GET {DASHBOARD_BASE_PATH}/sys` (`dashboard_sys`)
 
 * **役割**: 🔧システムページを返す。`get_cached_materials()`で材料を取得し、`home_status_service.get_now_jst()`の現在時刻とあわせて`dashboard_page_service.render_sys_page`に渡す。**(不具合修正)** `materials.nas_history`(NASの容量履歴)も渡すようにした。NASカードをタップしても容量履歴を見る手段が無かった不具合の修正。
-* 根拠: [ルート定義] (行番号: 152〜165 / 抜粋: '@router.get(f"{_BASE_PATH}/sys", include_in_schema=False)\ndef dashboard_sys(nas_days: int = dashboard_page_service.NAS_HISTORY_DEFAULT_DAYS) -> HTMLResponse:')
+* 根拠: [ルート定義] (行番号: 152〜165 / 抜粋: '@router.get(f"{_BASE_PATH}/sys", include_in_schema=False)\ndef dashboard_sys(nas_days: str | None = None) -> HTMLResponse:')
 
 
-* **引数/リクエスト**: **(新機能)** クエリ`nas_days`(7/30/90のいずれか。それ以外の整数は既定の30、数値でない値は422)。NAS容量グラフの表示期間で、`home_status_service.get_nas_history(nas_days)`を`render_sys_page`の`nas_history`に渡す(以前の`materials.nas_history`=直近200件は使わなくなった)。
+* **引数/リクエスト**: **(新機能)** クエリ`nas_days`(7/30/90のいずれか。それ以外の値・数値でない値は既定の30。`str | None`で受けて自前で変換するので422にならない)。NAS容量グラフの表示期間で、`home_status_service.get_nas_history(nas_days)`を`render_sys_page`の`nas_history`に渡す(以前の`materials.nas_history`=直近200件は使わなくなった)。
 * 根拠: [関数定義] (行番号: 153)
 
 
