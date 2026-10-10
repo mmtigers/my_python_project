@@ -11,7 +11,14 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import pytest
 from services import system_maintenance_service
+
+
+@pytest.fixture(autouse=True)
+def _isolated_restart_marker(tmp_path, monkeypatch):
+    """restart_home_system は再起動要求の時刻を状態ファイルへ書く。実リポジトリ直下に作らない。"""
+    monkeypatch.setattr(system_maintenance_service, "RESTART_MARKER_FILE", str(tmp_path / "restart_marker.json"))
 
 
 def test_success_returns_true_with_message(monkeypatch):

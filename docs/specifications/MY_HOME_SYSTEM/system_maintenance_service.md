@@ -20,7 +20,10 @@
 * **(「最新に更新して再起動」の追加で更新)** 同モジュールは、システムページの「最新に更新して再起動」ボタンの処理も担う。実機で`git pull --ff-only`を実行し、**新しいコミットが入ったときだけ**`restart_home_system`で再起動する。取り込みに失敗した場合(手元の変更・fast-forwardできない履歴・ネットワーク断・認証失敗・タイムアウト)は**再起動せず**、失敗理由を結果として返す。新しいコミットが無いときも再起動しない(再起動だけしたいときは既存の再起動ボタン)。
 * `git pull`はpost-merge フック(family-questの再ビルド・クエストマスタ同期)を含み数分かかりうるため、`trigger_deploy_async`がバックグラウンドスレッドで実行して即座に返し、画面は`get_deploy_state`をポーリングする(バックアップと同じ構成)。再起動でこのプロセス自身が入れ替わるため、結果は状態ファイル`DEPLOY_STATE_FILE`(`dashboard_deploy_state.json`)へ保存し、再起動後の新プロセスが「再起動を要求した時刻より後に起動した」ことを根拠に成功へ確定させる。
 * 実行できるのは固定の`git pull --ff-only`だけで、ブランチ・コマンド・引数を呼び出し側から受け取らない。認可チェックは`/api/system/*`共通で無いため(CLAUDE.md参照)、実行の都度Discordの`report`チャンネルへ記録を残す。
-* 根拠: [関数定義] (行番号: 125 / 抜粋: "def _run_deploy("), [関数定義] (行番号: 188 / 抜粋: "def trigger_deploy_async("), [関数定義] (行番号: 207 / 抜粋: "def get_deploy_state(")
+* 根拠: [関数定義] (行番号: 132 / 抜粋: "def _run_deploy("), [関数定義] (行番号: 195 / 抜粋: "def trigger_deploy_async("), [関数定義] (行番号: 214 / 抜粋: "def get_deploy_state(")
+
+* **(新機能)** `restart_home_system`は、再起動でこのプロセスが入れ替わる前に、要求した時刻を`RESTART_MARKER_FILE`(`dashboard_restart_marker.json`)へ書く(書けなくても再起動は続ける)。起動履歴のきっかけを「ダッシュボードからの再起動」と残すため、`system_info_service._determine_boot_reason`が起動時に読む。「最新に更新して再起動」の経路は従来の状態ファイル(`DEPLOY_STATE_FILE`)のほうで判定され、そちらが優先される。どちらの状態ファイルも実行時に生成されるため`.gitignore`に入れてある。
+* 根拠: `RESTART_MARKER_FILE: str = os.path.join(config.BASE_DIR, "dashboard_restart_marker.json")` (行番号: 58)
 
 ## 3. 外部依存関係
 
@@ -66,11 +69,11 @@
 ### `restart_home_system`
 
 * **役割**: `home_system`(systemdサービス)を`sudo systemctl restart home_system`で再起動する。
-* 根拠: [関数定義] (行番号: 66〜83 / 抜粋: "def restart_home_system() -> tuple[bool, str]:")、[外部コマンド実行] (行番号: 22〜26 / 抜粋: 'subprocess.run(\n            ["sudo", "systemctl", "restart", "home_system"],\n            check=True,\n            timeout=RESTART_TIMEOUT_SEC,\n        )')
+* 根拠: [関数定義] (行番号: 70〜90 / 抜粋: "def restart_home_system() -> tuple[bool, str]:")、[外部コマンド実行] (行番号: 22〜26 / 抜粋: 'subprocess.run(\n            ["sudo", "systemctl", "restart", "home_system"],\n            check=True,\n            timeout=RESTART_TIMEOUT_SEC,\n        )')
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 66 / 抜粋: "def restart_home_system() -> tuple[bool, str]:")
+* 根拠: [関数定義] (行番号: 70 / 抜粋: "def restart_home_system() -> tuple[bool, str]:")
 
 
 * **戻り値/レスポンス**: `tuple[bool, str]`(成功したかどうかのフラグと、画面に出すメッセージ)。成功時は`(True, "再起動コマンドを送信しました")`。

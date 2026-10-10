@@ -26,7 +26,7 @@ import sqlite3
 import config
 from core.logger import setup_logging
 from core.migrations import apply_pending_migrations
-from services import sensor_service, camera_service
+from services import sensor_service, camera_service, system_info_service
 
 # Routers
 from routers import quest_router, webhook_router, system_router, camera_router, alexa_router, routine_router, ui_log_router
@@ -281,6 +281,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "Monitor subprocesses will NOT be started; fix the DB/schema and restart."
         )
     app.state.migration_ok = migration_ok
+
+    if migration_ok:
+        # システムページの「起動履歴」用。失敗してもサーバーの起動は止めない(record_boot が握りつぶす)。
+        system_info_service.record_boot()
 
     supervisor_task: Optional[asyncio.Task] = None
     if migration_ok:

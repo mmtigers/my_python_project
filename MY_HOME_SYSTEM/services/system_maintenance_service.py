@@ -53,6 +53,10 @@ GIT_OUTPUT_TAIL_CHARS: int = 300
 # 実行状態の保存先(再起動をまたいで結果を引き継ぐため)
 DEPLOY_STATE_FILE: str = os.path.join(config.BASE_DIR, "dashboard_deploy_state.json")
 
+# 「システム再起動」を要求した時刻の記録(起動履歴のきっかけ判定用。
+# `system_info_service._determine_boot_reason` が起動時に読む)
+RESTART_MARKER_FILE: str = os.path.join(config.BASE_DIR, "dashboard_restart_marker.json")
+
 # このプロセスの起動時刻。再起動を要求した時刻より後なら「再起動後の新プロセス」と判定する。
 _PROCESS_STARTED_AT: float = time.time()
 _deploy_lock = threading.Lock()
@@ -65,6 +69,9 @@ PHASE_DONE = "done"              # 終了(success で成否)
 
 def restart_home_system() -> tuple[bool, str]:
     """`home_system` サービスを再起動する。戻り値は (成功したか, メッセージ)。"""
+    # 再起動でこのプロセスは入れ替わる。起動履歴に「ダッシュボードからの再起動」と残せるよう、
+    # 要求した時刻を先に書いておく(書けなくても再起動自体は続行する)。
+    state_file.write_json_atomic(RESTART_MARKER_FILE, {"requested_at": time.time()})
     try:
         subprocess.run(
             ["sudo", "systemctl", "restart", "home_system"],

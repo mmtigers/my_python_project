@@ -52,6 +52,24 @@ def test_backup_endpoint_currently_requires_no_authentication(api_client, monkey
     assert len(calls) == 1
 
 
+def test_git_status_returns_the_service_result(api_client, monkeypatch):
+    payload = {"ok": True, "head": {"sha": "abc1234", "date": "", "subject": "s"}, "recent": []}
+    monkeypatch.setattr(system_router.system_info_service, "get_git_status", lambda: payload)
+    res = api_client.get("/api/system/git/status")
+    assert res.status_code == 200
+    assert res.json() == payload
+
+
+def test_git_status_failure_is_200_with_error(api_client, monkeypatch):
+    """git が使えなくても画面に理由を出せるよう、500にせず ok:false で返す。"""
+    monkeypatch.setattr(
+        system_router.system_info_service, "get_git_status",
+        lambda: {"ok": False, "error": "Gitの情報を取得できませんでした", "recent": []},
+    )
+    res = api_client.get("/api/system/git/status")
+    assert res.status_code == 200 and res.json()["ok"] is False
+
+
 def test_restart_success_returns_200(api_client, monkeypatch):
     monkeypatch.setattr(
         system_router.system_maintenance_service,

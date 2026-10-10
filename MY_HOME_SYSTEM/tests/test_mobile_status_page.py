@@ -52,6 +52,16 @@ def _stub_link_health_checks(monkeypatch):
     monkeypatch.setattr(home_status_service, "check_asa_note_health", lambda url: True)
 
 
+@pytest.fixture(autouse=True)
+def _stub_release_history_remote(monkeypatch):
+    """アップデートページが実際に外部(あさノート・よるノート)へHTTP接続しないよう、取得を差し替える。"""
+    from services import release_history_service
+    release_history_service.clear_cache()
+    monkeypatch.setattr(release_history_service, "_fetch_remote", lambda url, app: [])
+    yield
+    release_history_service.clear_cache()
+
+
 def _client() -> TestClient:
     app = FastAPI()
     app.include_router(dashboard_router.router)
@@ -110,6 +120,7 @@ class TestDashboardHomePage:
         assert f'href="{config.DASHBOARD_BASE_PATH}/sys"' in res.text
         assert 'href="/quest"' in res.text
         assert f'href="{config.ASA_NOTE_URL}"' in res.text
+        assert f'href="{config.YORU_NOTE_URL}"' in res.text
 
     def test_page_can_be_added_to_the_home_screen(self):
         res = self._get()
@@ -225,7 +236,7 @@ class TestSubPages:
             for p in patches:
                 p.stop()
 
-    @pytest.mark.parametrize("path", ["watch", "life", "sys"])
+    @pytest.mark.parametrize("path", ["watch", "life", "sys", "updates"])
     def test_each_page_has_a_back_to_home_link(self, path):
         res = self._get(path)
         assert res.status_code == 200
@@ -271,6 +282,69 @@ class TestSubPages:
         assert 'id="nas-history"' in res.text
         assert "<svg" in res.text
         assert "現在 42%" in res.text
+
+    @pytest.mark.parametrize("query,expected_days", [
+        ("", 30), ("?nas_days=7", 7), ("?nas_days=90", 90), ("?nas_days=5", 30), ("?nas_days=abc", 30), ("?nas_days=", 30),
+    ])
+    def test_sys_page_nas_period_selects_the_history_range(self, query, expected_days):
+        """?nas_days=7|30|90で期間を切り替える。範囲外・数値でない値は既定の30日(422にしない)。"""
+        with patch.object(home_status_service, "get_nas_history", return_value=pd.DataFrame()) as mock_load:
+            res = self._get(f"sys{query}")
+        assert res.status_code == 200
+        mock_load.assert_called_once_with(expected_days)
+        assert "表示期間" in res.text
+
+    def test_watch_page_device_filter_param_is_accepted(self):
+        res = self._get("watch?device=no-such-device")
+        assert res.status_code == 200
+        assert 'name="device"' not in res.text or "すべての機器" in res.text
+
+    def test_home_has_an_updates_nav_card(self):
+        patches = _stub_loaders()
+        for p in patches:
+            p.start()
+        try:
+            with _client() as client:
+                res = client.get(f"{config.DASHBOARD_BASE_PATH}/")
+        finally:
+            for p in patches:
+                p.stop()
+        assert f'href="{config.DASHBOARD_BASE_PATH}/updates"' in res.text
+        assert "アップデート" in res.text
+
+    def test_updates_page_lists_local_apps_and_filters_by_app(self):
+        res = self._get("updates")
+        assert res.status_code == 200
+        assert "ダッシュボード" in res.text and "ファミクエ" in res.text
+        quest_only = self._get("updates?app=quest")
+        assert "release-badge-quest" in quest_only.text
+        assert "release-badge-dashboard" not in quest_only.text
+
+    def test_updates_page_ignores_an_unknown_app_filter(self):
+        res = self._get("updates?app=nonsense")
+        assert res.status_code == 200
+        assert "release-badge-dashboard" in res.text and "release-badge-quest" in res.text
+
+    def test_life_page_links_to_the_power_analysis_page(self):
+        res = self._get("life")
+        assert f'href="{config.DASHBOARD_BASE_PATH}/power"' in res.text and "電気のくわしい分析" in res.text
+
+    @pytest.mark.parametrize("query,expected_days", [
+        ("", 30), ("?days=60", 60), ("?days=90", 90), ("?days=7", 30), ("?days=abc", 30), ("?days=", 30),
+    ])
+    def test_power_page_selects_the_period(self, query, expected_days):
+        """?days=30|60|90で期間を切り替える。範囲外・数値でない値は既定の30日(422にしない)。"""
+        from services import power_analysis_service
+        seen = []
+        with patch.object(power_analysis_service, "build_power_report",
+                          side_effect=lambda days, now=None: seen.append(days) or {
+                              "days": days, "unit_price": 31.0, "generated_at": None, "meter_has_data": False,
+                              "monthly": [], "comparison": None, "daily": [], "temp_bands": [],
+                              "weather": {"has_data": False, "latest_date": None, "location": "伊丹"},
+                              "tv": {"configured": False, "has_data": False}}):
+            res = self._get(f"power{query}")
+        assert res.status_code == 200 and seen == [expected_days]
+        assert "⚡ 電気" in res.text and "ホームへ戻る" in res.text
 
     def test_sys_page_restart_button_is_disabled_until_confirmed(self):
         res = self._get("sys")
@@ -759,7 +833,7 @@ class TestExternalLinkHealth:
 
     def test_healthy_links_are_green_with_label(self):
         res = self._home("/")
-        assert res.text.count("external-card external-up") == 2
+        assert res.text.count("external-card external-up") == 3
         assert "external-down" not in res.text.split("</style>", 1)[1]
         assert "● 稼働中" in res.text
 
@@ -777,6 +851,25 @@ class TestExternalLinkHealth:
         monkeypatch.setattr(home_status_service, "check_quest_app_health", lambda: False)
         res = self._home("/")
         assert 'class="external-card external-down" href="/quest"' in res.text
+
+    def test_external_links_open_in_a_new_tab(self):
+        """よく使うリンク(ファミクエ・あさノート・よるノート)は新しいタブで開く。"""
+        res = self._home("/")
+        section = res.text.split(f'id="{home_status_service.STATUS_SECTION_ID}"', 1)[1].split("メニュー", 1)[0]
+        anchors = [a for a in section.split("<a ")[1:] if "external-card" in a]
+        assert len(anchors) == 3
+        assert all('target="_blank"' in a and 'rel="noopener"' in a for a in anchors)
+
+    def test_note_urls_point_to_the_deployed_apps(self):
+        assert config.ASA_NOTE_URL == "https://asa-note.vercel.app/"
+        assert config.YORU_NOTE_URL == "https://yorunote-mm.vercel.app/"
+
+    def test_down_yoru_note_is_red_and_only_that_link(self, monkeypatch):
+        monkeypatch.setattr(home_status_service, "check_asa_note_health", lambda url: "yorunote" not in url)
+        body = self._home("/").text.split("</style>", 1)[1]
+        yoru = body.split("よるノート", 1)[0].rsplit("<a ", 1)[1]
+        asa = body.split("あさノート", 1)[0].rsplit("<a ", 1)[1]
+        assert "external-down" in yoru and "external-up" in asa
 
     def test_status_fragment_keeps_links_so_color_refreshes(self, monkeypatch):
         """自動更新はこのフラグメントで範囲ごと差し替わる。リンクが入っていないと更新で消える。"""

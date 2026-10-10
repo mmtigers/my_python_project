@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""family-quest のソースを変更した PR で、更新履歴 (changelog.ts) の追記漏れを検知する。
+"""family-quest のソースを変更した PR で、更新履歴 (changelog.json) の追記漏れを検知する。
 
-アプリ内「アップデートのれきし」の元データ `family-quest/src/lib/changelog.ts` は手動で
+アプリ内「アップデートのれきし」の元データ `family-quest/src/lib/changelog.json`
+(`changelog.ts` が読み込む。お家ダッシュボードの「アップデート」ページも同じファイルを読む)は手動で
 追記する運用のため、足し忘れるとそのアップデートは履歴に出ない。PR の差分に
-family-quest/src のアプリ本体(テスト・型定義を除く)の変更があるのに changelog.ts が
+family-quest/src のアプリ本体(テスト・型定義を除く)の変更があるのに changelog.json が
 含まれていなければ、気付きを促すレポートを出す。
 
 あくまで非ブロッキング(常に exit 0)。内部リファクタなど履歴に載せない変更も多いため、
@@ -19,7 +20,7 @@ from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = PurePosixPath("family-quest/src")
-CHANGELOG_PATH = "family-quest/src/lib/changelog.ts"
+CHANGELOG_PATH = "family-quest/src/lib/changelog.json"
 APP_EXTENSIONS = {".ts", ".tsx", ".js", ".jsx"}
 EXCLUDE_SUFFIXES = (".d.ts", ".test.ts", ".test.tsx")
 EXCLUDE_DIRS = {"test"}
@@ -40,7 +41,7 @@ def is_app_source(path: str) -> bool:
 
 
 def find_missing(changed_files: list[str]) -> list[str]:
-    """changelog.ts が更新されていないとき、履歴対象になりうる変更ファイルを返す(更新済みなら空)。"""
+    """changelog.json が更新されていないとき、履歴対象になりうる変更ファイルを返す(更新済みなら空)。"""
     if CHANGELOG_PATH in changed_files:
         return []
     return [f for f in changed_files if is_app_source(f)]

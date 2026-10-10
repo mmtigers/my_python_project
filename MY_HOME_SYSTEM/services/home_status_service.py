@@ -837,12 +837,25 @@ def check_asa_note_health(url: str) -> bool:
         return False
 
 
-def collect_link_health(asa_note_url: str) -> dict[str, bool]:
-    """ホームの外部リンクの稼働状況(`{"quest": bool, "asa_note": bool}`)。
-    `STATUS_CACHE_TTL_SEC`のTTLキャッシュ付き。"""
+def collect_link_health(asa_note_url: str, yoru_note_url: str | None = None) -> dict[str, bool]:
+    """ホームの外部リンクの稼働状況(`{"quest": bool, "asa_note": bool}`。`yoru_note_url`を
+    渡したときだけ `"yoru_note"` も入る)。`STATUS_CACHE_TTL_SEC`のTTLキャッシュ付き。
+    よるノートもあさノートと同じ外部(Vercel)サービスなので同じチェック関数を使う。"""
     quest = _cached("link_health_quest", check_quest_app_health)
     asa_note = _cached(f"link_health_asa_note:{asa_note_url}", lambda: check_asa_note_health(asa_note_url))
-    return {"quest": bool(quest), "asa_note": bool(asa_note)}
+    health = {"quest": bool(quest), "asa_note": bool(asa_note)}
+    if yoru_note_url:
+        yoru_note = _cached(f"link_health_yoru_note:{yoru_note_url}", lambda: check_asa_note_health(yoru_note_url))
+        health["yoru_note"] = bool(yoru_note)
+    return health
+
+
+def get_nas_history(days: int) -> pd.DataFrame:
+    """システムページのNAS容量グラフ用に、直近`days`日の履歴を返す(期間ごとのTTLキャッシュ付き)。
+    期間は呼び出し側(`dashboard_router`)が7/30/90に絞るので、キャッシュのキーは3種類に収まる。
+    取得失敗は空のDataFrame(ページ全体を落とさない)。"""
+    df = _cached(f"nas_history:{days}", lambda: analysis_service.load_nas_history(days=days))
+    return df if df is not None else pd.DataFrame()
 
 
 def get_sensor_data_for_day(day: date) -> pd.DataFrame:

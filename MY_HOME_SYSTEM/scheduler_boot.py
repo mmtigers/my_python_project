@@ -50,6 +50,9 @@ TASKS: List[Task] = [
 
     # 頻度: 低 (1時間〜)
     {"script": "monitors/nas_monitor.py",             "interval": 3600, "last_run": 0, "args": []},
+    # 日次の気温(Open-Meteo)を weather_history へ。電気代と気温の分析(/dashboard/power)用。
+    # 日次データなので6時間ごとで十分(毎回直近7日分を更新するため、取りこぼしも次回で補われる)。
+    {"script": "monitors/weather_monitor.py",         "interval": 21600, "last_run": 0, "args": []},
 ]
 
 # #360: 実行中の子プロセス(監視スクリプト)を追跡する。以前は SIGTERM を受けると
