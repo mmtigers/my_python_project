@@ -1320,11 +1320,12 @@ def render_updates_page(
         selected_app = None
     base = f"{dashboard_path.rstrip('/')}/updates"
     counts = {s["app"]: len(s["entries"]) for s in sources}
-    chips = [
-        f'<a href="{html.escape(base)}"{" class=\"active\"" if selected_app is None else ""}>すべて({len(entries)})</a>'
-    ] + [
+    # f-stringの式の中にバックスラッシュを書けるのはPython 3.12以降(実機・CIは3.11)なので、
+    # 属性の文字列は式の外で作る。
+    active_attr = ' class="active"'
+    chips = [f'<a href="{html.escape(base)}"{active_attr if selected_app is None else ""}>すべて({len(entries)})</a>'] + [
         f'<a href="{html.escape(base)}?app={html.escape(s["app"])}"'
-        f'{" class=\"active\"" if selected_app == s["app"] else ""}>'
+        f'{active_attr if selected_app == s["app"] else ""}>'
         f'{html.escape(s["label"])}({counts[s["app"]]})</a>'
         for s in sources
     ]

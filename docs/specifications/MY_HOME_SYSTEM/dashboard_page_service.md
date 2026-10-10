@@ -679,14 +679,14 @@
 ### `_render_boot_history_box` / `_render_git_status_box` / `_GIT_STATUS_SCRIPT`
 
 * **役割**: **(新機能)** システムページの「🔁サーバーの起動履歴」と「🔀Gitの状態」。起動履歴は`system_info_service.get_boot_history`の結果を表にする(起動時刻・コミット・きっかけの表示名)。記録が無いときはその旨のプレースホルダ。異常終了は記録されないことを注記する。Gitの状態の枠は中身が空(「確認中...」)で、`_GIT_STATUS_SCRIPT`が`DOMContentLoaded`後に`GET /api/system/git/status`を取得して、起動中のコード・手元の最新・GitHubの最新・「取り込み済みだが未再起動」・「あとN件未取り込み」・最近のコミット(取り込み済み/未取り込み/起動中の印)を描く。**コミット件名は外部由来の文字列なので、DOMへは`textContent`で入れる(`innerHTML`は使わない)**。
-* 根拠: `def _render_boot_history_box(boots: list[dict[str, Any]]) -> str:` (行番号: 1364)、`def _render_git_status_box() -> str:` (行番号: 1392)
+* 根拠: `def _render_boot_history_box(boots: list[dict[str, Any]]) -> str:` (行番号: 1365)、`def _render_git_status_box() -> str:` (行番号: 1393)
 
 ### `render_sys_page`
 
 * **(新機能)** 引数`boot_history`(`list[dict] | None`)を追加し、NAS容量グラフとメンテナンス操作の間に、起動履歴とGitの状態の枠を置く。`_NAV_CARDS`にはホームのナビカード「📜アップデート」(`/updates`)も追加した。
 
 * **役割**: 🔧システムページ全体を組み立てる。全体サマリー(`_render_overall_summary`)・各機能の最終更新一覧(`_render_freshness_rows`)・NASの容量推移(`_render_nas_history_chart`)・保存容量の使用率(`disk`があれば)・メンテナンス操作(サービス再起動の確認チェックボックス付きボタン、今すぐバックアップボタン)を並べる。**(不具合修正)** `nas_history`引数を追加し、`id="nas-history"`の`.info-box`セクションとしてNASの容量推移グラフを表示するようにした(「🗄️ NAS」カードの`anchor`のタップ先)。あわせて「各機能の最終更新」・NAS推移の各セクションを`.info-box`で視覚的にグループ化し、システムページを見やすくした。**(UI改善)** バックアップ欄に「最新のバックアップ: 日時(サイズ)」(`id="backupLatest"`)を追加し、実行中のボタン無効化+スピナー表示・完了/失敗のトースト(`.dashboard-toast`)を出す。最新時刻はNAS列挙が必要なためページ描画には含めず、JSが`GET /api/system/backup/status`で非同期に取得する。
-* 根拠: [関数定義] (行番号: 1472〜1545 / 抜粋: "def render_sys_page(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    nas_history: pd.DataFrame,\n    memory: dict[str, float] | None,\n    disk: dict[str, float] | None,\n    now: datetime,\n    *,\n    dashboard_path: str,\n) -> str:")
+* 根拠: [関数定義] (行番号: 1473〜1546 / 抜粋: "def render_sys_page(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    nas_history: pd.DataFrame,\n    memory: dict[str, float] | None,\n    disk: dict[str, float] | None,\n    now: datetime,\n    *,\n    dashboard_path: str,\n) -> str:")
 
 
 * **引数/リクエスト**: `df_sensor: pd.DataFrame`, `nas_data: pd.Series | None`, `nas_history: pd.DataFrame`, `memory: dict[str, float] | None`, `disk: dict[str, float] | None`, `now: datetime`、キーワード専用で `dashboard_path: str`
