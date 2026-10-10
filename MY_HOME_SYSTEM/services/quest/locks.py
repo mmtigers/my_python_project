@@ -74,6 +74,10 @@ def _require_adult(cur, admin_id: str, detail: str = "権限がありません")
 SPAM_CHECK_INTERVAL_SECONDS = 10
 INFINITE_QUEST_COOLDOWN_SECONDS = 60
 
+# アイテム使用時に quest_history.quest_title へ付ける接頭辞(inventory_service が書き、
+# 記録画面用の user_service が券名を取り出すために外す。2か所の文字列を食い違わせないため共有する)。
+ITEM_USE_TITLE_PREFIX = "アイテム使用: "
+
 # YouTube系ごほうび券(config.YOUTUBE_REWARD_IDS)を「見終わってから」次の1枚を
 # 使用できるまでに空ける休憩時間(秒)。連続視聴による目の負担を防ぐ。
 #

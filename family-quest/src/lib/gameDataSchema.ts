@@ -166,7 +166,7 @@ const youtubeExtensionSchema = z.object({
     can_extend_now: z.boolean(),
 });
 
-const tvBlockStateSchema = z.object({
+export const tvBlockStateSchema = z.object({
     is_blocked: z.boolean(),
     blocked_until: z.string().nullable(),
     next_block_starts_at: z.string().nullable(),

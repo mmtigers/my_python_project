@@ -10,6 +10,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
     {
+        version: '1.3.0',
+        date: '2026-10-10',
+        changes: [
+            '券(ごほうび)をつかったことも、「記録」に出るようになりました',
+            '休日のテレビおやすみの時間が、どの画面でも上に出るようになりました',
+            '新しいアップデートがあると、上におしらせが出て、右上のボタンに「NEW」がつきます',
+        ],
+    },
+    {
         version: '1.2.4',
         date: '2026-10-09',
         changes: [

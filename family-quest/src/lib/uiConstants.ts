@@ -20,3 +20,9 @@ export const APPROVAL_SWIPE_THRESHOLD_PX = 90;
  * 取りこぼしの保険としては15秒で足りる。
  */
 export const INVENTORY_POLL_INTERVAL_MS = 15000;
+
+/**
+ * テレビおやすみ帯(画面上部)のポーリング間隔(ミリ秒)。禁止開始までの秒数は
+ * ローカルでカウントダウンするため、サーバー値との再同期だけなら30秒で足りる。
+ */
+export const TV_BLOCK_POLL_INTERVAL_MS = 30000;

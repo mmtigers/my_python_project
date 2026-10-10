@@ -1,7 +1,7 @@
 // family-quest/src/lib/apiClient.ts
 
-import { InventoryResponse } from "../types";
-import { inventoryResponseSchema } from './gameDataSchema';
+import { InventoryResponse, TvBlockState } from "../types";
+import { inventoryResponseSchema, tvBlockStateSchema } from './gameDataSchema';
 
 // 現在の環境に最も適したBASE_URLを動的に判定する
 const getBaseUrl = (): string => {
@@ -138,6 +138,12 @@ export class ApiClient {
         // #659: 取得境界で形状を検証する(gameData / purchase と同じ方針)。
         const raw = await this.get<unknown>(`/api/quest/inventory/${userId}`);
         return inventoryResponseSchema.parse(raw) as InventoryResponse;
+    }
+
+    // 休日のテレビおやすみ時間帯(全員共通)。平日・ロック無し環境はnull。
+    async fetchTvBlock(): Promise<TvBlockState | null> {
+        const raw = await this.get<unknown>('/api/quest/tv_block');
+        return tvBlockStateSchema.nullable().parse(raw) as TvBlockState | null;
     }
 
     async useItem(userId: string, inventoryId: number): Promise<ApiResponse> {
