@@ -129,3 +129,7 @@ coverage.xml
 tmp_nas/
 temp_fallback/
 temp_backups/
+
+# MY_HOME_SYSTEM: ダッシュボードの再起動操作が実行時に書く状態ファイル(system_maintenance_service)
+MY_HOME_SYSTEM/dashboard_deploy_state.json
+MY_HOME_SYSTEM/dashboard_restart_marker.json

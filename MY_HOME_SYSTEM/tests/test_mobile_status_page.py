@@ -52,6 +52,16 @@ def _stub_link_health_checks(monkeypatch):
     monkeypatch.setattr(home_status_service, "check_asa_note_health", lambda url: True)
 
 
+@pytest.fixture(autouse=True)
+def _stub_release_history_remote(monkeypatch):
+    """アップデートページが実際に外部(あさノート・よるノート)へHTTP接続しないよう、取得を差し替える。"""
+    from services import release_history_service
+    release_history_service.clear_cache()
+    monkeypatch.setattr(release_history_service, "_fetch_remote", lambda url, app: [])
+    yield
+    release_history_service.clear_cache()
+
+
 def _client() -> TestClient:
     app = FastAPI()
     app.include_router(dashboard_router.router)
@@ -226,7 +236,7 @@ class TestSubPages:
             for p in patches:
                 p.stop()
 
-    @pytest.mark.parametrize("path", ["watch", "life", "sys"])
+    @pytest.mark.parametrize("path", ["watch", "life", "sys", "updates"])
     def test_each_page_has_a_back_to_home_link(self, path):
         res = self._get(path)
         assert res.status_code == 200
@@ -288,6 +298,32 @@ class TestSubPages:
         res = self._get("watch?device=no-such-device")
         assert res.status_code == 200
         assert 'name="device"' not in res.text or "すべての機器" in res.text
+
+    def test_home_has_an_updates_nav_card(self):
+        patches = _stub_loaders()
+        for p in patches:
+            p.start()
+        try:
+            with _client() as client:
+                res = client.get(f"{config.DASHBOARD_BASE_PATH}/")
+        finally:
+            for p in patches:
+                p.stop()
+        assert f'href="{config.DASHBOARD_BASE_PATH}/updates"' in res.text
+        assert "アップデート" in res.text
+
+    def test_updates_page_lists_local_apps_and_filters_by_app(self):
+        res = self._get("updates")
+        assert res.status_code == 200
+        assert "ダッシュボード" in res.text and "ファミクエ" in res.text
+        quest_only = self._get("updates?app=quest")
+        assert "release-badge-quest" in quest_only.text
+        assert "release-badge-dashboard" not in quest_only.text
+
+    def test_updates_page_ignores_an_unknown_app_filter(self):
+        res = self._get("updates?app=nonsense")
+        assert res.status_code == 200
+        assert "release-badge-dashboard" in res.text and "release-badge-quest" in res.text
 
     def test_sys_page_restart_button_is_disabled_until_confirmed(self):
         res = self._get("sys")

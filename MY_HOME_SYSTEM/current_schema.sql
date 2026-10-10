@@ -435,3 +435,14 @@ CREATE INDEX idx_ui_tap_events_occurred_at
     ON ui_tap_events(occurred_at);
 CREATE INDEX idx_ui_tap_events_user_occurred
     ON ui_tap_events(user_id, occurred_at);
+CREATE TABLE server_boot_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    booted_at TEXT NOT NULL,      
+    commit_sha TEXT,              
+    commit_subject TEXT,          
+    branch TEXT,                  
+    pid INTEGER,                  
+    reason TEXT NOT NULL DEFAULT 'unknown'
+);
+CREATE INDEX idx_server_boot_events_booted_at
+    ON server_boot_events(booted_at);

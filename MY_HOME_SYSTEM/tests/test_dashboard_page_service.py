@@ -640,6 +640,123 @@ class TestSensorDeviceFilter:
         assert ">高砂の玄関</option>" in html
 
 
+class TestSysPageBootAndGit:
+    """システムページの「起動履歴」と「Gitの状態」。"""
+
+    @staticmethod
+    def _render(boots=None):
+        return dashboard_page_service.render_sys_page(
+            pd.DataFrame(), None, pd.DataFrame(), {"percent": 1.0}, {"percent": 1.0},
+            _jst(2026, 10, 10, 12, 0), dashboard_path="/dashboard/", boot_history=boots,
+        )
+
+    def test_empty_history_shows_a_placeholder(self):
+        html = self._render([])
+        assert 'id="boot-history"' in html and "起動の記録はまだありません" in html
+
+    def test_history_rows_show_time_commit_and_reason_label(self):
+        html = self._render([
+            {"booted_at": "2026-10-09T21:05:00+09:00", "commit_sha": "abc1234",
+             "commit_subject": "バグ修正", "branch": "master", "pid": 1, "reason": "update"},
+            {"booted_at": "2026-10-08T03:00:00+09:00", "commit_sha": None,
+             "commit_subject": None, "branch": None, "pid": 2, "reason": "unknown"},
+        ])
+        assert "10/09 21:05" in html and "abc1234" in html and "バグ修正" in html
+        assert "ダッシュボードから更新" in html
+        assert "不明(自動復旧・電源など)" in html
+
+    def test_commit_subject_is_html_escaped(self):
+        html = self._render([
+            {"booted_at": "2026-10-09T21:05:00+09:00", "commit_sha": "abc1234",
+             "commit_subject": "<script>alert(1)</script>", "branch": "m", "pid": 1, "reason": "manual"},
+        ])
+        assert "<script>alert(1)</script>" not in html
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+    def test_git_box_is_filled_by_js_not_by_the_page(self):
+        """git fetch は遅いので、ページ本体では呼ばず専用APIから非同期に取る。"""
+        html = self._render([])
+        assert 'id="git-status"' in html and 'id="gitStatusBody"' in html
+        assert "/api/system/git/status" in html
+        assert "確認中" in html
+
+    def test_git_script_renders_with_textcontent_not_innerhtml(self):
+        """コミット件名は外部由来の文字列。DOMへは textContent で入れる(XSS対策)。"""
+        script = dashboard_page_service._GIT_STATUS_SCRIPT
+        assert "innerHTML" not in script and "textContent" in script
+
+
+class TestRenderUpdatesPage:
+    """アップデートページ(全アプリの更新履歴)。"""
+
+    @staticmethod
+    def _entry(app, label, date, title="t", version="1.0.0", summary="s", details=("d1",)):
+        return {"app": app, "app_label": label, "version": version, "date": date,
+                "title": title, "summary": summary, "details": list(details)}
+
+    @staticmethod
+    def _sources(**oks):
+        apps = [("dashboard", "ダッシュボード"), ("quest", "ファミクエ"), ("asa", "あさノート"), ("yoru", "よるノート")]
+        return [{"app": a, "label": l, "entries": [], "ok": oks.get(a, True), "stale": False,
+                 "error": "取得できませんでした" if not oks.get(a, True) else ""} for a, l in apps]
+
+    def _render(self, entries, sources=None, selected=None):
+        return dashboard_page_service.render_updates_page(
+            entries, sources or self._sources(), dashboard_path="/dashboard/", selected_app=selected,
+        )
+
+    def test_entries_show_badge_version_date_title_summary_and_details(self):
+        html = self._render([self._entry("asa", "あさノート", "2026-10-09", "題名", "0.4.21", "要約", ("一つ目", "二つ目"))])
+        assert "release-badge-asa" in html and "あさノート" in html
+        assert "v0.4.21" in html and "2026-10-09" in html
+        assert "題名" in html and "要約" in html
+        assert "<li>一つ目</li>" in html and "<li>二つ目</li>" in html
+
+    def test_version_is_omitted_when_the_app_has_none(self):
+        html = self._render([self._entry("dashboard", "ダッシュボード", "2026-10-10", version="")])
+        assert ">v<" not in html and "v</span>" not in html
+
+    def test_external_text_is_html_escaped(self):
+        evil = "<script>alert(1)</script>"
+        html = self._render([self._entry("asa", "あさノート", "2026-10-09", title=evil, summary=evil, details=(evil,), version=evil)])
+        assert evil not in html
+        assert html.count("&lt;script&gt;alert(1)&lt;/script&gt;") >= 4
+
+    def test_filter_chips_show_counts_and_mark_the_selected_app(self):
+        sources = self._sources()
+        sources[1]["entries"] = [1, 2, 3]
+        html = self._render([self._entry("quest", "ファミクエ", "2026-10-04")] * 3, sources, selected="quest")
+        assert 'href="/dashboard/updates?app=quest" class="active">ファミクエ(3)' in html
+        assert 'href="/dashboard/updates">すべて(3)' in html
+
+    def test_selected_app_filters_the_cards(self):
+        entries = [self._entry("quest", "ファミクエ", "2026-10-04", title="Q"), self._entry("asa", "あさノート", "2026-10-09", title="A")]
+        html = self._render(entries, selected="asa")
+        assert "release-title\">A<" in html and "release-title\">Q<" not in html
+
+    def test_unknown_filter_is_ignored(self):
+        entries = [self._entry("quest", "ファミクエ", "2026-10-04", title="Q")]
+        assert "release-title\">Q<" in self._render(entries, selected="nonsense")
+
+    def test_failed_source_shows_a_warning(self):
+        html = self._render([], self._sources(asa=False))
+        assert "⚠️ あさノート: 取得できませんでした" in html
+        assert "表示できる更新履歴がありません" in html
+
+    def test_warning_is_scoped_to_the_selected_app(self):
+        html = self._render([], self._sources(asa=False), selected="quest")
+        assert "⚠️ あさノート" not in html
+
+    def test_many_entries_are_folded_after_the_visible_limit(self):
+        n = dashboard_page_service._RELEASES_VISIBLE + 5
+        html = self._render([self._entry("quest", "ファミクエ", "2026-10-04", title=f"T{i}") for i in range(n)])
+        assert "さらに5件を表示" in html
+        assert html.count('class="release-card"') == n
+
+    def test_has_a_back_link_to_home(self):
+        assert "ホームへ戻る" in self._render([])
+
+
 class TestMergeOpenCloseEvents:
     """開閉センサーの「open」の直後(60秒以内)の「close」を、開いた時刻の1行にまとめる。"""
 

@@ -190,7 +190,7 @@
 
 
 * **引数/リクエスト**: **(新機能)** クエリ`device`(`device_id`、任意)で高砂・伊丹のセンサーログをその機器だけに絞る(`render_watch_page(selected_device=...)`に渡す。一覧に無い値は無視される。防犯ログは対象外)。クエリ`date`(`YYYY-MM-DD`、任意)。**(新機能)** 指定があれば`dashboard_page_service.parse_log_date`で解釈し、その日のログだけを表示する。この場合は共通キャッシュ(直近`MOBILE_SENSOR_ROW_LIMIT`件)ではなく`home_status_service.get_sensor_data_for_day`でDBから指定日の全件を取る。形式が不正な値は無視して通常表示になる。
-* 根拠: [関数定義] (行番号: 138 / 抜粋: "def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLResponse:")、[日付の解釈] (行番号: 142 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
+* 根拠: [関数定義] (行番号: 139 / 抜粋: "def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLResponse:")、[日付の解釈] (行番号: 143 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(見守りページ全体のHTML)
@@ -229,7 +229,15 @@
 
 
 
+### `GET {DASHBOARD_BASE_PATH}/updates` (`dashboard_updates`)
+
+* **役割**: **(新機能)** アップデートページを返す。`release_history_service.get_release_history()`でダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を集め、`dashboard_page_service.render_updates_page`に渡す。あさノート・よるノートは外部から取得する(タイムアウト・キャッシュ付き。失敗しても残りのアプリは表示する)。`async def`にしない(外部取得が同期のため、イベントループを止めない)。
+* **引数/リクエスト**: クエリ`app`(`dashboard`/`quest`/`asa`/`yoru`、任意)で1アプリに絞る。未知の値は無視して全件。
+* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 198)
+
 ### `GET {DASHBOARD_BASE_PATH}/sys` (`dashboard_sys`)
+
+* **(新機能・起動履歴)** `system_info_service.get_boot_history()`の結果を`render_sys_page(boot_history=...)`に渡し、システムページに「サーバーの起動履歴」を出す。Gitの状態は含めない(ページ表示後にJSが`GET /api/system/git/status`から取得する)。
 
 * **役割**: 🔧システムページを返す。`get_cached_materials()`で材料を取得し、`home_status_service.get_now_jst()`の現在時刻とあわせて`dashboard_page_service.render_sys_page`に渡す。**(不具合修正)** `materials.nas_history`(NASの容量履歴)も渡すようにした。NASカードをタップしても容量履歴を見る手段が無かった不具合の修正。
 * 根拠: [ルート定義] (行番号: 152〜165 / 抜粋: '@router.get(f"{_BASE_PATH}/sys", include_in_schema=False)\ndef dashboard_sys(nas_days: str | None = None) -> HTMLResponse:')

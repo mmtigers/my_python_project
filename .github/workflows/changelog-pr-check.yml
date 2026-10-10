@@ -1,8 +1,8 @@
 name: Changelog Check (PR)
 
-# family-quest のアプリ内「アップデートのれきし」(family-quest/src/lib/changelog.ts)は
+# family-quest のアプリ内「アップデートのれきし」(family-quest/src/lib/changelog.json。changelog.ts が読み込む)は
 # 手動で追記する運用のため、足し忘れるとそのアップデートが履歴に出ない。
-# PR でアプリ本体を変更したのに changelog.ts が更新されていなければ気付きを与える。
+# PR でアプリ本体を変更したのに changelog.json が更新されていなければ気付きを与える。
 #
 # 方針: spec-drift-pr-check.yml と同じ、気付きを与えるだけの非ブロッキングチェック。
 # 内部リファクタなど履歴に載せない変更も多いため CI は赤くしない。

@@ -24,7 +24,7 @@ from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 import config
-from services import dashboard_page_service, dashboard_pwa_service, home_status_service
+from services import dashboard_page_service, dashboard_pwa_service, home_status_service, release_history_service, system_info_service
 
 router = APIRouter()
 
@@ -37,7 +37,8 @@ _QUEST_APP_PATH = home_status_service.QUEST_APP_PATH
 # 以前 `/dashboard?tab=watch` のようなURLをスマートフォンのホーム画面に置いていた
 # 場合でも開けるよう、同じ値からリダイレクトする。
 _LEGACY_TAB_REDIRECTS = {"home": _BASE_PATH, "watch": f"{_BASE_PATH}/watch",
-                         "life": f"{_BASE_PATH}/life", "sys": f"{_BASE_PATH}/sys"}
+                         "life": f"{_BASE_PATH}/life", "sys": f"{_BASE_PATH}/sys",
+                         "updates": f"{_BASE_PATH}/updates"}
 
 
 # --- スマートフォンのホーム画面に追加するための付帯物 ---
@@ -188,6 +189,22 @@ def dashboard_sys(nas_days: str | None = None) -> HTMLResponse:
             now,
             dashboard_path=f"{_BASE_PATH}/",
             nas_days=nas_days,
+            boot_history=system_info_service.get_boot_history(),
+        )
+    )
+
+
+@router.get(f"{_BASE_PATH}/updates", include_in_schema=False)
+def dashboard_updates(app: str | None = None) -> HTMLResponse:
+    """アップデートページ。ダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を
+    新しい順にまとめて表示する。`?app=dashboard|quest|asa|yoru`で1アプリに絞る
+    (未知の値は無視して全件)。あさノート・よるノートは外部から取得する(タイムアウト・
+    キャッシュ付き。失敗しても残りのアプリは表示する)。
+    `async def`にしない(外部取得が同期のため、イベントループを止めない)。"""
+    history = release_history_service.get_release_history()
+    return HTMLResponse(
+        dashboard_page_service.render_updates_page(
+            history["entries"], history["sources"], dashboard_path=f"{_BASE_PATH}/", selected_app=app,
         )
     )
 

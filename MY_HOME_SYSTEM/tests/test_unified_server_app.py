@@ -381,6 +381,10 @@ class TestLifespan:
         monkeypatch.setattr(
             unified_server, "apply_pending_migrations", lambda conn: migration_calls.append(conn)
         )
+        # 起動履歴の記録は git を subprocess で呼ぶ(上の Popen 差し替えの影響を受け、
+        # 「子プロセスの起動」として数えられてしまう)。このテストの対象ではないので止める。
+        # 起動の記録そのものは tests/test_lifespan_integration.py::TestLifespanBootRecord で検証する。
+        monkeypatch.setattr(unified_server.system_info_service, "record_boot", lambda: True)
 
         with TestClient(unified_server.app) as client:
             res = client.get("/health")
