@@ -143,8 +143,9 @@ _PAGE_BASE_CSS = """
 
     /* 見守りページの簡易テーブル(防犯ログ・実家センサーログ)。 */
     table.simple-table {
-        width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 16px;
+        width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.85rem; margin-bottom: 16px;
         background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+        overflow: hidden;
     }
     table.simple-table th, table.simple-table td {
         text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
