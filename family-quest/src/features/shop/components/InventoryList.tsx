@@ -244,6 +244,21 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     const gridClass = panelMode ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';
     const iconBoxClass = panelMode ? 'text-xl w-9 h-9' : 'text-2xl w-11 h-11';
 
+    // 同じごほうび券を複数枚持っているときは1枚にまとめ、「×N」で枚数を表示する。
+    // 代表(タップで使う1枚)は一覧の先頭のもの。使うと次の1枚が代表になる。
+    const groups: { item: InventoryItem; count: number }[] = [];
+    const groupIndex = new Map<string, number>();
+    for (const it of items) {
+        const key = it.reward_id !== undefined && it.reward_id !== null ? `r${it.reward_id}` : `t${it.title}`;
+        const idx = groupIndex.get(key);
+        if (idx === undefined) {
+            groupIndex.set(key, groups.length);
+            groups.push({ item: it, count: 1 });
+        } else {
+            groups[idx].count += 1;
+        }
+    }
+
     return (
         <div className={`grid ${gridClass} gap-2 pb-20`}>
             {announcementBanner && (
@@ -255,7 +270,7 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
             {dailyBudgetBanner && (
                 <div className="col-span-full">{dailyBudgetBanner}</div>
             )}
-            {items.map((item: InventoryItem) => {
+            {groups.map(({ item, count }) => {
                 // 目の負担・自由時間限定を防ぐための3つの制限。バックエンド
                 // (InventoryService._use_item_locked)と同じ優先順位で、まず自由時間中か、
                 // 次に「今日の残り分数に収まるか」、最後にクールダウンを見る。
@@ -319,6 +334,9 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
                         <div className="flex-1 min-w-0">
                             <h3 className="font-bold text-sm text-slate-800 leading-tight truncate">
                                 {item.title}
+                                {count > 1 && (
+                                    <span className="ml-1 text-xs font-bold text-blue-600">×{count}</span>
+                                )}
                             </h3>
                             <p className="text-[10px] text-slate-500 truncate">
                                 {isLocked ? lockedReason : (item.desc || '説明はありません')}
