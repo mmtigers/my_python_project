@@ -588,6 +588,14 @@ def sensor_state_change_log(df: pd.DataFrame) -> pd.DataFrame:
     - 残った行も、同じ機器(`device_id`。無ければ`friendly_name`)で直前の行と状態が同じなら除く(最初の行は残す)。
       取得範囲(`load_sensor_data`のlimit)の外にある過去の状態は分からないため、範囲内で
       最も古い行は常に「変化」として残る。
+    - **(UI改善)** 人感センサー(SwitchBotのWoPresence)は、検知が終わるたびに`not_detected`も
+      記録する(Webhookは検知結果を`contact_state`に入れる)。`detected`と`not_detected`が
+      短い間隔で入れ替わると、状態が毎回変わるため上の重複除去では減らず、ログが毎分
+      並んでいた。「動きを検知した」ことだけが知りたいので、`not_detected`の行は
+      **重複除去のあとで**除く(先に除くと、`detected`→`not_detected`→`detected`の
+      2回目の検知が「同じ状態の連続」として消えてしまう)。結果として、人感センサーは
+      「検知が始まった行」だけが残る。開閉センサー(`open`/`close`等)・カメラ(`movement_state`)
+      には影響しない。
     """
     state_cols = [c for c in ("contact_state", "movement_state") if c in df.columns]
     if df.empty or not state_cols or "timestamp" not in df.columns:
@@ -602,11 +610,23 @@ def sensor_state_change_log(df: pd.DataFrame) -> pd.DataFrame:
     # 状態の絞り込みだけを行い、重複の除去はしない。
     device_col = next((c for c in ("device_id", "friendly_name") if c in ordered.columns), None)
     if device_col is None:
-        return ordered.sort_values("timestamp", ascending=False, kind="stable")
+        return _drop_presence_cleared(ordered).sort_values("timestamp", ascending=False, kind="stable")
     key = states.loc[ordered.index].agg("|".join, axis=1)
     previous = key.groupby(ordered[device_col]).shift()
     changed = previous.isna() | (previous != key)
-    return ordered[changed].sort_values("timestamp", ascending=False, kind="stable")
+    return _drop_presence_cleared(ordered[changed]).sort_values("timestamp", ascending=False, kind="stable")
+
+
+# 人感センサーが「検知が終わった」ときに`contact_state`へ記録する値(Webhookは小文字化して保存する)。
+_PRESENCE_CLEARED_STATE = "not_detected"
+
+
+def _drop_presence_cleared(df: pd.DataFrame) -> pd.DataFrame:
+    """人感センサーの「検知なし(`not_detected`)」の行を除く。`sensor_state_change_log`専用。"""
+    if "contact_state" not in df.columns:
+        return df
+    cleared = df["contact_state"].fillna("").astype(str).str.strip().str.lower() == _PRESENCE_CLEARED_STATE
+    return df[~cleared]
 
 
 # 「開 → 閉」を1行にまとめる上限秒数(この秒数ちょうどを含む)。

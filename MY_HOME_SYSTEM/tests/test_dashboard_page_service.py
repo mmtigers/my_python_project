@@ -798,6 +798,50 @@ class TestSensorStateChangeLog:
         # 最初のopen(10:05)と、open->closedの変化(10:20)だけが残り、新しい順に並ぶ
         assert list(out["timestamp"]) == [_jst(2026, 10, 2, 10, 20), _jst(2026, 10, 2, 10, 5)]
 
+    def test_presence_sensor_keeps_only_detection_starts(self):
+        """人感センサーは「検知した」行だけ残す(not_detectedは出さない)。"""
+        df = self._df([
+            (_jst(2026, 10, 2, 10, 4), "pir", "not_detected", None),
+            (_jst(2026, 10, 2, 10, 3), "pir", "detected", None),
+            (_jst(2026, 10, 2, 10, 2), "pir", "not_detected", None),
+            (_jst(2026, 10, 2, 10, 1), "pir", "detected", None),
+        ])
+        out = dashboard_page_service.sensor_state_change_log(df)
+        assert list(out["contact_state"]) == ["detected", "detected"]
+        assert list(out["timestamp"]) == [_jst(2026, 10, 2, 10, 3), _jst(2026, 10, 2, 10, 1)]
+
+    def test_repeated_detections_are_still_collapsed(self):
+        """連続する同じ`detected`は従来どおり最初の1行だけ(間に not_detected が無い場合)。"""
+        df = self._df([
+            (_jst(2026, 10, 2, 10, 3), "pir", "detected", None),
+            (_jst(2026, 10, 2, 10, 2), "pir", "detected", None),
+            (_jst(2026, 10, 2, 10, 1), "pir", "detected", None),
+        ])
+        out = dashboard_page_service.sensor_state_change_log(df)
+        assert list(out["timestamp"]) == [_jst(2026, 10, 2, 10, 1)]
+
+    def test_not_detected_matching_is_case_and_space_insensitive(self):
+        df = self._df([
+            (_jst(2026, 10, 2, 10, 2), "pir", " NOT_DETECTED ", None),
+            (_jst(2026, 10, 2, 10, 1), "pir", "detected", None),
+        ])
+        out = dashboard_page_service.sensor_state_change_log(df)
+        assert list(out["contact_state"]) == ["detected"]
+
+    def test_door_and_camera_states_are_unaffected_by_the_presence_rule(self):
+        df = self._df([
+            (_jst(2026, 10, 2, 10, 3), "door", "close", None),
+            (_jst(2026, 10, 2, 10, 2), "door", "open", None),
+            (_jst(2026, 10, 2, 10, 1), "cam", None, "OFF"),
+        ])
+        out = dashboard_page_service.sensor_state_change_log(df)
+        assert set(out["device_id"]) == {"door", "cam"} and len(out) == 3
+
+    def test_presence_rule_applies_even_without_a_device_column(self):
+        df = pd.DataFrame({"timestamp": [2, 1], "contact_state": ["not_detected", "detected"]})
+        out = dashboard_page_service.sensor_state_change_log(df)
+        assert list(out["contact_state"]) == ["detected"]
+
     def test_devices_are_compared_independently(self):
         df = self._df([
             (_jst(2026, 10, 2, 10, 10), "a", "open", None),
