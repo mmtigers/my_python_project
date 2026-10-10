@@ -24,7 +24,7 @@
 ## 2. ファイルの概要
 
 購入済みアイテム(`user_inventory`)の一覧取得(`get_user_inventory`)と使用確定(`use_item`/`_use_item_locked`)を担う`InventoryService`クラス1つを定義するファイル。アイテム使用は`'pending'`状態での申請と`ROLE_ADULT`による承認を経る2段階フローではなく、所有者・所有状態(`'owned'`)確認後に即座に消費を確定する単一ステップの処理である。YouTube系ごほうび券(`config.YOUTUBE_REWARD_IDS`)については、連続視聴による目の負担を防ぐため2つの制限を課す機構を持つ。1つは「券の視聴分数 + 休憩15分」のクールダウン、もう1つはJSTの1日で使える合計視聴分数の上限で、それぞれ`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`/`config.YOUTUBE_DAILY_LIMIT_ENFORCE_FROM`という**別々の**施行日を持ち、施行日を迎えるまでは実際には拒否せず予告バナー用の情報を返すのみに留める。日次上限については、使い切った後に追加でプリント(`config.YOUTUBE_EXTENSION_QUEST_IDS`)をやると上限が延びる仕組みも持ち、実効上限の算出は`get_youtube_daily_limit_with_extensions`に委譲する。**（Issue報告、2026-09-24で追加）** これらに加え、モジュールレベル関数`_is_user_in_youtube_free_time`が「自由時間かどうか」の最終判定を担う。これは`routine_service.is_user_currently_in_free_time`(登校/下校を前提としたルーティンフローの状態)をそのまま使うのではなく、(1)`config.YOUTUBE_NAP_BLOCK_START`〜`YOUTUBE_NAP_BLOCK_END`のお昼寝の時間帯は誰であっても常に不可、(2)`config.YOUTUBE_HOME_CARE_USER_IDS`(今年度自宅保育で登校しない涼花)に含まれるユーザーはroutine_serviceのゲート自体を適用せず常に可、という2つのルールをこの順で先に適用してから、それ以外のユーザーだけ`routine_service.is_user_currently_in_free_time`に委ねる。ファイル末尾で`InventoryService`のシングルトンインスタンス`inventory_service`を生成しており、コメントによれば「Family Quest内で唯一`GameSystem`(quest/user/shop_service)の合成に含まれないシングルトン」である。
-根拠: `class InventoryService:` (行番号: 94)、`def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 189〜206)、`def _use_item_locked(self, user_id: str, inventory_id: int) -> Tuple[Dict[str, str], str]:` (行番号: 208〜313)、コメント (行番号: 316〜317 / 抜粋: "アイテム使用は承認フローを介さず即時確定する、Family Quest内で唯一\n# GameSystem(quest/user/shop_service)の合成に含まれないシングルトン。")、`def _is_user_in_youtube_free_time(user_id: str, now: datetime.datetime | None = None) -> bool:` (行番号: 40〜54)
+根拠: `class InventoryService:` (行番号: 95)、`def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 190〜207)、`def _use_item_locked(self, user_id: str, inventory_id: int) -> Tuple[Dict[str, str], str]:` (行番号: 209〜314)、コメント (行番号: 317〜318 / 抜粋: "アイテム使用は承認フローを介さず即時確定する、Family Quest内で唯一\n# GameSystem(quest/user/shop_service)の合成に含まれないシングルトン。")、`def _is_user_in_youtube_free_time(user_id: str, now: datetime.datetime | None = None) -> bool:` (行番号: 40〜54)
 
 ## 3. 外部依存関係
 
@@ -59,7 +59,7 @@
 ### `_is_within_youtube_nap_block` (モジュールレベル関数)
 
 * **役割**: **（Issue報告、2026-09-24で追加）** 現在時刻(JST)が`config.YOUTUBE_NAP_BLOCK_START`〜`YOUTUBE_NAP_BLOCK_END`のお昼寝の時間帯に入っているかどうかを返す。docstringによれば「涼花・智矢とも共通で、自由時間ゲート・自宅保育の適用除外とは別軸で常に適用する制限のため、フローの状態を一切見ない単純な壁時計判定にしている」。`now`省略時は`datetime.datetime.now(JST)`を使う。
-* 根拠: `def _is_within_youtube_nap_block(now: datetime.datetime | None = None) -> bool:` (行番号: 28〜37)
+* 根拠: `def _is_within_youtube_nap_block(now: datetime.datetime | None = None) -> bool:` (行番号: 29〜38)
 * **引数/リクエスト**: `now: datetime.datetime | None`（省略時は現在時刻）
 * 根拠: (行番号: 28)
 * **戻り値/レスポンス**: `bool`（`config.YOUTUBE_NAP_BLOCK_START <= t < config.YOUTUBE_NAP_BLOCK_END`。開始側は境界を含み終了側は含まない半開区間）
@@ -72,7 +72,7 @@
 ### `_is_user_in_youtube_free_time` (モジュールレベル関数)
 
 * **役割**: **（Issue報告、2026-09-24で追加）** `get_user_inventory`と`_use_item_locked`が共有する、YouTube系ごほうび券を使える「自由時間」かどうかの最終判定。まず`_is_within_youtube_nap_block`が真なら誰であっても`False`を返す(お昼寝の時間帯は最優先)。次に`user_id`が`config.YOUTUBE_HOME_CARE_USER_IDS`に含まれれば`True`を返す(登校/下校を前提とした自由時間ゲート自体を適用しない)。それ以外は`routine_service.is_user_currently_in_free_time(user_id, now=now)`の結果をそのまま返す。docstringによれば、涼花のように今年度登校しない(自宅保育)ユーザーに`is_user_currently_in_free_time`をそのまま適用すると「平日07:50〜14:00がずっと『自由時間ではない』扱いに固定され、券が一律使えなくなっていた」ため、この関数を新設した。
-* 根拠: `def _is_user_in_youtube_free_time(user_id: str, now: datetime.datetime | None = None) -> bool:` (行番号: 40〜54)
+* 根拠: `def _is_user_in_youtube_free_time(user_id: str, now: datetime.datetime | None = None) -> bool:` (行番号: 41〜55)
 * 根拠: `if _is_within_youtube_nap_block(now):\n        return False` (行番号: 50〜51)、`if user_id in config.YOUTUBE_HOME_CARE_USER_IDS:\n        return True` (行番号: 52〜53)、`return routine_service.is_user_currently_in_free_time(user_id, now=now)` (行番号: 54)
 * **引数/リクエスト**: `user_id: str`, `now: datetime.datetime | None`（省略時は現在時刻）
 * 根拠: (行番号: 40)
@@ -86,7 +86,7 @@
 ### `_build_announcement` (モジュールレベル関数)
 
 * **役割**: 施行日(`starts_on`)を受け取り、family-quest側の予告バナーに渡す`{"starts_on": ISO日付文字列, "days_remaining": 残り日数}`を組み立てる。docstringによれば「クールダウンと日次上限で同じ形(starts_on / days_remaining)を返すため共通化する」もの。`days_remaining`は`max(0, ...)`で負にならないよう丸められる。
-* 根拠: `def _build_announcement(starts_on) -> dict[str, Any]:` (行番号: 82〜91)
+* 根拠: `def _build_announcement(starts_on) -> dict[str, Any]:` (行番号: 83〜92)
 * **引数/リクエスト**: `starts_on`（`datetime.date`。型注釈は付いていない）
 * 根拠: (行番号: 25)
 * **戻り値/レスポンス**: `dict[str, Any]`（`starts_on: str`, `days_remaining: int`）
@@ -99,7 +99,7 @@
 ### `InventoryService.get_user_inventory`
 
 * **役割**: `user_id`の`status = 'owned'`な`user_inventory`行を`reward_master`とJOINして取得し、`purchased_at`降順で返す。各アイテムに`is_youtube_reward`(`reward_id`が`config.YOUTUBE_REWARD_IDS`に含まれるか)と`youtube_duration_minutes`(YouTube系なら`get_youtube_reward_duration_minutes`の戻り値、それ以外は`None`)を付与する。加えてYouTubeの視聴制限に関する4つの値を返す。(1) `_is_youtube_cooldown_enforced()`が`True`(施行日以降)であれば`_get_youtube_cooldown_remaining_seconds`で実際の残り秒数を算出し、`False`であれば`0`とする。(2) `False`の場合は代わりに`youtube_cooldown_announcement`を`_build_announcement`で組み立てる。(3) `youtube_daily_limit_minutes`/`youtube_daily_used_minutes`は**施行前でも返す**（コメントによれば「今日はあと何分」の表示は猶予期間中から出して慣れてもらうため。使用を拒否するかどうかだけが施行日で変わる）。上限なし設定では`get_youtube_daily_limit_minutes()`が`None`を返し、使用分数の集計自体もスキップされ`0`になる。返す`youtube_daily_limit_minutes`は`get_youtube_daily_limit_with_extensions`で**プリントによる延長を反映した実効上限**に差し替えられ、あわせて延長の状態を`youtube_extension`(`minutes_per_quest`/`granted_count`/`max_per_day`/`can_extend_now`)として返す（延長機能が無効な設定なら`None`）。(4) `_is_youtube_daily_limit_enforced()`が`False`かつ上限が有効なら`youtube_daily_limit_announcement`を組み立てる。**（2026-09-23 要件追加、2026-09-24 要件変更）** 冒頭で`_is_user_in_youtube_free_time(user_id)`を呼び、結果を`is_in_free_time`としてそのまま返す。YouTube等の時間消費型ごほうびの使用は自由時間中のみ許可する要件(`_use_item_locked`参照)のための情報で、フロントエンド(`InventoryList.tsx`)がタップ前にロック表示するために使う。この判定は、お昼寝の時間帯(常に不可)と自宅保育のユーザー(常に可)を先に見てから、それ以外だけ`routine_service.is_user_currently_in_free_time`に委ねる(`_is_user_in_youtube_free_time`参照)。委ねられた場合はDB参照(`with get_db_cursor()`)を開く**前**に呼んでいるため、`routine_service`側の独立した接続で読み取られる。 **（2026-10-09 要件追加）** 休日のテレビ禁止時間帯の予告用に`tv_block`(`switchbot_service.get_tv_block_state()`の戻り値。平日・`TV_PLUG_DEVICE_ID`未設定ではNone)をそのまま返す。
-* 根拠: `def get_user_inventory(self, user_id: str) -> Dict[str, Any]:` (行番号: 95〜187)
+* 根拠: `def get_user_inventory(self, user_id: str) -> Dict[str, Any]:` (行番号: 96〜188)
 * 根拠: `is_in_free_time = _is_user_in_youtube_free_time(user_id)` (行番号: 74)
 * 根拠: `item['is_youtube_reward'] = item['reward_id'] in config.YOUTUBE_REWARD_IDS` (行番号: 54)、`item['youtube_duration_minutes'] = (\n                    get_youtube_reward_duration_minutes(item['reward_id'])\n                    if item['is_youtube_reward']\n                    else None\n                )` (行番号: 58〜62)
 * 根拠: `cooldown_enforced = _is_youtube_cooldown_enforced()\n            youtube_cooldown_remaining_seconds = (\n                _get_youtube_cooldown_remaining_seconds(cur, user_id) if cooldown_enforced else 0\n            )` (行番号: 65〜68)
@@ -119,7 +119,7 @@
 ### `InventoryService.use_item`
 
 * **役割**: `_get_item_use_lock(user_id)`を取得したうえでDB更新部分を`_use_item_locked`に委譲する。ロックの保持範囲はDB更新(コミット)までに限定し、外部副作用(LINE送信・効果音)はロック解放後に実行する。これは、以前`_use_item_locked`の末尾で同期のLINE push(最大15秒)まで実行していたため、LINEが遅い/タイムアウトした場合に同一ユーザーの次の`use_item`がその往復の間直列化されていた問題への対策である。
-* 根拠: `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 189〜206)
+* 根拠: `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 190〜207)
 * 根拠: `with _get_item_use_lock(user_id):\n            result, msg = self._use_item_locked(user_id, inventory_id)\n\n        notification_service.send_push(\n            user_id=config.LINE_USER_ID,\n            messages=[{"type": "text", "text": msg}]\n        )\n        sound_manager.play("quest_clear")\n\n        return result` (行番号: 69〜81)
 * **引数/リクエスト**: `user_id: str`, `inventory_id: int`
 * 根拠: (行番号: 64)
@@ -133,7 +133,7 @@
 ### `InventoryService._use_item_locked`
 
 * **役割**: アイテムを使用し即座に消費を確定する(親の承認は不要)。`user_inventory`と`reward_master`・`quest_users`をJOINして対象アイテムを取得し、所有者一致・`status == 'owned'`を確認する。対象がYouTube系ごほうび券であれば、目の負担・自由時間限定を守るための3つの制限を**この順で**判定する。**（2026-09-23 要件追加、2026-09-24 要件変更）** まず0番目として、`_is_user_in_youtube_free_time(user_id)`が`False`なら429エラーを送出する。メッセージは原因で2通りに出し分ける: `_is_within_youtube_nap_block()`が真(お昼寝の時間帯)なら「今はお昼寝の時間だからYouTubeはお休みしてね」、そうでなければ(ルーティンフローの自由時間ゲートに引っかかった場合)「YouTubeは自由時間になってから見てね」。他の2つと異なり`ENFORCE_FROM`による施行猶予は設けず、新規要件として最初から有効である。次に1番目の日次上限(施行済みかつ上限が有効な場合)で、`get_youtube_used_minutes_today`と`get_youtube_reward_duration_minutes`の和が、`get_youtube_daily_limit_with_extensions`が返す**実効上限**(プリントによる延長を反映した値)を超えるなら429エラーを送出する。メッセージは3通りに出し分ける: 残りがあるなら「あと◯分だけなので、この◯分の券は使えません」、残り0かつ`can_extend_youtube_limit_now`が真なら「プリントを1枚やると◯分ふえるよ」(諦めさせるのではなく次の行動を示す)、残り0で延長も尽きているなら「また明日つかおうね」。次に2番目のクールダウン(施行済みの場合)で、`_get_youtube_cooldown_remaining_seconds`が正の値であれば429エラー(残り分数をメッセージに含める)を送出する。日次上限をクールダウンより先に見るのは、コメントによれば「『もう少し待てば使える』より『今日はここまで』のほうが子どもにとって行動が決まるメッセージになるため」である。`UPDATE ... SET status = 'consumed' ... WHERE id = ? AND status = 'owned'`という条件付きUPDATEで消費を確定し、`rowcount == 0`(先行リクエストが既に消費済み)なら400エラーとすることで、連打による二重使用を防ぐ。成功後、`quest_history`に`quest_id=0`・`status='approved'`のアイテム使用ログを挿入する。戻り値は`(APIレスポンス, 通知メッセージ)`のタプルで、通知の送信自体は呼び出し元(`use_item`)がロック解放後に行う。 **（2026-10-09 要件追加）** 自由時間チェックの直後に`_check_tv_block_for_ticket`を呼び、休日のテレビ禁止中、または券の終了予定(いま+視聴分数)が次の禁止開始を超える場合は429で拒否する(ちょうど禁止開始に終わる券は許可。券は消費されない)。平日・プラグ未設定では何もしない。
-* 根拠: `def _use_item_locked(self, user_id: str, inventory_id: int) -> Tuple[Dict[str, str], str]:` (行番号: 208〜313)
+* 根拠: `def _use_item_locked(self, user_id: str, inventory_id: int) -> Tuple[Dict[str, str], str]:` (行番号: 209〜314)
 * 根拠: `if item['reward_id'] in config.YOUTUBE_REWARD_IDS:` (行番号: 207)、`if not _is_user_in_youtube_free_time(user_id):\n                    if _is_within_youtube_nap_block():\n                        raise HTTPException(429, "今はお昼寝の時間だからYouTubeはお休みしてね")\n                    raise HTTPException(429, "YouTubeは自由時間になってから見てね")` (行番号: 215〜218)、`if _is_youtube_daily_limit_enforced():\n                    daily_limit = get_youtube_daily_limit_minutes()\n                    ...\n                        daily_limit, granted = get_youtube_daily_limit_with_extensions(\n                            cur, user_id, daily_limit\n                        )\n                        ...\n                            raise HTTPException(429, detail)` (行番号: 223〜248)、`if can_extend_youtube_limit_now(used_minutes, daily_limit, granted):` (行番号: 237)、`if _is_youtube_cooldown_enforced():\n                    cooldown_remaining = _get_youtube_cooldown_remaining_seconds(cur, user_id)\n                    if cooldown_remaining > 0:\n                        remaining_minutes = math.ceil(cooldown_remaining / 60)\n                        raise HTTPException(\n                            429,\n                            f"YouTubeのごほうび券は、目を休めるためあと{remaining_minutes}分ほど使えません",\n                        )` (行番号: 251〜258)
 * 根拠: `cur.execute("""\n                UPDATE user_inventory\n                SET status = 'consumed', used_at = ?\n                WHERE id = ? AND status = 'owned'\n            """, (now_iso, inventory_id))\n            if cur.rowcount == 0:\n                raise HTTPException(400, "Cannot use this item")` (行番号: 266〜272)
 * 根拠: `cur.execute("""\n                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)\n                VALUES (?, 0, ?, 0, 0, ?, 'approved')\n            """, (item['user_id'], log_title, now_iso))` (行番号: 275〜278)
@@ -152,6 +152,11 @@
 * 根拠: `inventory_service = InventoryService()` (行番号: 146)、コメント (行番号: 144〜145)
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルのインスタンス生成）
 * 根拠: (行番号: 146)
+
+### 追加・変更（2026-10-10: 記録への券使用表示・テレビおやすみ/アップデートの画面上部表示）
+
+* `_use_item_locked` の使用履歴INSERTで、`quest_title` を `locks.ITEM_USE_TITLE_PREFIX` + 券名で組み立てるようにした（値は従来の「アイテム使用: <券名>」と同一で、挙動の変更はない）。
+* 根拠: `log_title = f"{ITEM_USE_TITLE_PREFIX}{item['title']}"` (行番号: 306 / 抜粋: "log_title = f"{ITEM_USE_TITLE_PREFIX}{item['title']}"")
 
 ## 5. 処理フロー図
 
@@ -249,7 +254,7 @@ graph TD
 * **`_use_item_locked`のYouTube判定は`item['reward_id']`が`config.YOUTUBE_REWARD_IDS`に含まれるかのみで行われる**: `reward_master.category`等の他のフィールドは判定に使われない。券1枚あたりの視聴分数も`reward_master.title`("Youtube (30:00)"等)からは読まず、`config.YOUTUBE_REWARD_DURATION_MINUTES`の対応表を唯一の根拠とする。
 * 根拠: `if item['reward_id'] in config.YOUTUBE_REWARD_IDS:` (行番号: 207)
 * **（Issue報告、2026-09-24で追加）** **自由時間ゲートは「登校する子」を前提にした設計であり、`config.YOUTUBE_HOME_CARE_USER_IDS`は個別のユーザーIDでその前提を打ち消す例外リストである**: `routine_service.is_user_currently_in_free_time`は`routine_data.py`の登校/下校ベースのルーティンフロー(`am`/`pm`)の状態を見るため、今年度登校しない涼花にこれを適用すると平日07:50〜14:00がずっと「自由時間ではない」扱いに固定されてしまう。この不整合を`routine_data.py`側のフロー定義を変えて直すと、そのフローの締切挙動を汎用的にテストしている`tests/test_routine_service.py`(涼花のuser_id`'daughter'`を「子ども用フロー全般の汎用テスト対象」として使い回している)を巻き込むため、あえて避け、本ファイルの`_is_user_in_youtube_free_time`だけでユーザー単位の例外を吸収する設計にした。将来、他の子が自宅保育になる/涼花が就学する等で対象が変わる場合は、この集合を更新するだけで良い(`routine_data.py`・`routine_service.py`は触らない)。
-* 根拠: `def _is_user_in_youtube_free_time(user_id: str, now: datetime.datetime | None = None) -> bool:` (行番号: 40〜54)、`YOUTUBE_HOME_CARE_USER_IDS: set[str] = {"daughter"}` (config.py 行番号: 862)
+* 根拠: `def _is_user_in_youtube_free_time(user_id: str, now: datetime.datetime | None = None) -> bool:` (行番号: 41〜55)、`YOUTUBE_HOME_CARE_USER_IDS: set[str] = {"daughter"}` (config.py 行番号: 862)
 * **お昼寝ブロック(`config.YOUTUBE_NAP_BLOCK_START`〜`END`)は自由時間ゲート・自宅保育の適用除外より優先して判定される**: `_is_user_in_youtube_free_time`は最初に`_is_within_youtube_nap_block`をチェックし、真であれば`config.YOUTUBE_HOME_CARE_USER_IDS`に含まれるユーザーであっても`True`を返さない。両方の制限を追加する場合、判定順序を変えるとお昼寝の時間帯に自宅保育の子だけ使えてしまう回帰になるため注意すること。
 * 根拠: `if _is_within_youtube_nap_block(now):\n        return False\n    if user_id in config.YOUTUBE_HOME_CARE_USER_IDS:\n        return True` (行番号: 50〜53)
 
