@@ -92,6 +92,18 @@ describe('FamilyLog', () => {
         expect(screen.getByText('+20 G')).toBeInTheDocument();
     });
 
+    it('券を使った記録(type=item)には「つかった」の印を付け、ゴールドは出さない', () => {
+        render(
+            <FamilyLog
+                chronicle={[log({ userId: 'dad', text: 'とうさんは Youtube (30:00) をつかった！', type: 'item', gold: 0 })]}
+                users={users}
+            />,
+        );
+        expect(screen.getByText('とうさんは Youtube (30:00) をつかった！')).toBeInTheDocument();
+        expect(screen.getByText('🎫 つかった')).toBeInTheDocument();
+        expect(screen.queryByText(/G$/)).not.toBeInTheDocument();
+    });
+
     it('ゴールドが0の記録には増減を表示しない', () => {
         render(<FamilyLog chronicle={[log({ userId: 'dad', text: '記録', gold: 0 })]} users={users} />);
         expect(screen.queryByText(/G$/)).not.toBeInTheDocument();

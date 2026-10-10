@@ -12,6 +12,8 @@ interface HeaderProps {
     onSettingsClick: () => void;
     // トップ右上の「アップデートのれきし」ボタン(表示せっていボタンの左隣)。
     onChangelogClick: () => void;
+    // 見ていないアップデートがあるとき、履歴ボタンに「NEW」バッジを付ける(省略時はfalse)。
+    hasNewUpdate?: boolean;
     // #479: hideUserSwitcher/hideLogSwitcher(省略時=表示)とshowBackToMain
     // (省略時=非表示)とで既定値の方向が非対称だったため、全てshow*系・
     // 「省略時の意味」をprop名から読み取れる向きに統一する。
@@ -41,6 +43,7 @@ const Header: React.FC<HeaderProps> = ({
     onLogSwitch,
     onSettingsClick,
     onChangelogClick,
+    hasNewUpdate = false,
     showUserSwitcher = true,
     showLogSwitcher = true,
     showBackToMain,
@@ -53,10 +56,15 @@ const Header: React.FC<HeaderProps> = ({
             <div className="absolute top-2 right-2 flex gap-1 z-30">
                 <button
                     onClick={onChangelogClick}
-                    aria-label="アップデートのれきし"
-                    className="w-10 h-10 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-gray-800/80 border border-gray-600 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
+                    aria-label={hasNewUpdate ? 'アップデートのれきし(新しいおしらせあり)' : 'アップデートのれきし'}
+                    className="relative w-10 h-10 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-gray-800/80 border border-gray-600 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
                 >
                     <History size={18} />
+                    {hasNewUpdate && (
+                        <span className="absolute -top-1 -right-1 px-1 rounded-full bg-red-600 text-white text-[9px] font-black leading-4 border border-white animate-pulse">
+                            NEW
+                        </span>
+                    )}
                 </button>
                 <button
                     onClick={onSettingsClick}

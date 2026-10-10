@@ -69,6 +69,12 @@ const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ use
                                     {log.text}
                                 </div>
                                 <div className="flex gap-1.5 mt-0.5">
+                                    {/* アイテム(ごほうび券)を使った記録。ゴールド・経験値は動かないので印だけ付ける */}
+                                    {log.type === 'item' && (
+                                        <span className="text-[9px] font-bold px-1 rounded text-sky-300 bg-sky-900/30">
+                                            🎫 つかった
+                                        </span>
+                                    )}
                                     {(log.gold || 0) > 0 && (
                                         // M-6-4バグ修正: 報酬購入(type='reward')はゴールドを消費した記録のため
                                         // "-N G"、クエスト達成(type='quest')は獲得のため"+N G"と表示する。

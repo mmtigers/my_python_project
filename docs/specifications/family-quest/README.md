@@ -1,6 +1,6 @@
 # family-quest 仕様書一覧
 
-タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された68件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
+タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された74件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
 
 対応するソースファイル自体が削除済みの仕様書は、末尾の「廃止済み仕様書一覧」に記録のみ残しています(Issue #402 で仕様書ファイル自体は削除済み。新規の実装・参照の対象ではありません)。
 
@@ -15,6 +15,8 @@
 
 | 仕様書 | 概要 |
 | --- | --- |
+| [TvBlockHeaderBanner.md](./src/components/layout/TvBlockHeaderBanner.md) | ヘッダー直下に置く、全タブ・全ユーザー共通の休日テレビおやすみ帯。平日・取得失敗時は何も出さない。 |
+| [UpdateNoticeBanner.md](./src/components/layout/UpdateNoticeBanner.md) | 新しいアップデートがあるときだけ画面上部に出す案内帯（「見る」「閉じる」）。 |
 | [Header.md](./src/components/layout/Header.md) | ユーザー切替および記録（家族の年代記）表示へのナビゲーション機能を持つヘッダーUI。状態を持たないプレゼンテーションコンポーネントで、`showUserSwitcher`が偽の場合はユーザー切替行を省略する（2026-09-06 品質監査: 旧記述の`hideUserSwitcher`は #479 で`showUserSwitcher`へ改名済み。`Header.tsx` 行番号 21）。 |
 | [BottomNav.md](./src/components/layout/BottomNav.md) | 画面下部固定のフッターナビゲーション。「クエスト」「ごほうび」「もちもの」「記録」の4タブで構成される。 |
 
@@ -25,6 +27,7 @@
 | [AvatarUploader.md](./src/components/ui/AvatarUploader.md) | アバター画像の選択・プレビュー・サーバーへのアップロードを行うモーダルUIコンポーネント。エラー・成功メッセージはモーダル内のインラインUIで表示する。 |
 | [Button.md](./src/components/ui/Button.md) | Framer Motionによるアニメーション付きボタン。バリエーション・サイズ・ローディング状態を制御し、クリック時に外部フックで音声再生も行う。 |
 | [Card.md](./src/components/ui/Card.md) | 汎用的なカード型UIコンポーネント。`variant`や`onClick`の有無に応じて適用スタイルを動的に切り替える。 |
+| [TvBlockBanner.md](./src/components/ui/TvBlockBanner.md) | 休日のテレビおやすみの予告・表示バナー。ごほうび画面と画面上部の帯が共有する。 |
 | [ChangelogModal.md](./src/components/ui/ChangelogModal.md) | アプリの更新履歴（バージョン・日付・変更点）を新しい順に表示するモーダル。ヘッダー右上のボタンから開く。 |
 | [ChunkErrorBoundary.md](./src/components/ui/ChunkErrorBoundary.md) | `lazy()`チャンクの読み込み失敗(SW更新後の旧チャンク404)を捕捉し自動再読み込みするエラーバウンダリ。それ以外の描画エラーには「再読み込み」ボタン付きフォールバックを表示する。 |
 | [ConfirmModal.md](./src/components/ui/ConfirmModal.md) | クエスト完了・報酬購入・クエスト却下の確認モーダル。Issue #552で`App.tsx`から抽出された。 |
@@ -108,6 +111,8 @@
 | [useLongPress.md](./src/hooks/useLongPress.md) | クエスト取り消し操作の誤タップ防止のための長押しジェスチャーを提供するカスタムフック。 |
 | [useConfirmDialog.md](./src/hooks/useConfirmDialog.md) | 完了・購入・却下の確認モーダルまわりの状態クラスタ(confirmMode/confirmTarget/confirmUser/rejectReason/isConfirming)を保持するカスタムフック。Issue #552で`App.tsx`から新規抽出。 |
 | [useCurrentUser.md](./src/hooks/useCurrentUser.md) | 選択中ユーザーの`localStorage`永続化解決・保存を行うカスタムフック。Issue #552で`App.tsx`から新規抽出。 |
+| [useTvBlock.md](./src/hooks/useTvBlock.md) | 休日のテレビおやすみ状態の取得（30秒ポーリング）と、禁止開始までの秒数のローカルカウントダウン。 |
+| [useChangelogUnread.md](./src/hooks/useChangelogUnread.md) | 最新のアップデートをこの端末で未読か判定し、既読化するフック。 |
 | [useOnlineStatus.md](./src/hooks/useOnlineStatus.md) | `navigator.onLine`と`online`/`offline`イベントを利用してオンライン／オフライン状態を検知するカスタムフック。 |
 | [useTapLogger.md](./src/hooks/useTapLogger.md) | 画面タップログ(`lib/tapLogger.ts`)をマウント中だけ有効にするカスタムフック。選択中ユーザー・画面・向きを`ref`経由で渡す。 |
 | [useSound.md](./src/hooks/useSound.md) | 効果音を再生するためのカスタムフック。音声ファイルパスを一元管理し、`HTMLAudioElement`インスタンスをキャッシュする。 |
@@ -130,6 +135,7 @@
 | [questTargeting.md](./src/lib/questTargeting.md) | クエストの`target_user`判定（`all`/`siblings`/`role_`プレフィックス/個別`user_id`一致）を行う`isQuestVisibleToUser`を提供する。`QuestList.tsx`と`FamilyDashboard.tsx`で重複していたロジックを集約したもの。 |
 | [routing.md](./src/lib/routing.md) | `main.tsx`のルートビュー切り替え判定（`/camera`・`/quest/camera`をカメラビューとして扱うか）を担う純粋関数`isCameraRoute`を提供する（Issue #472）。 |
 | [userRole.md](./src/lib/userRole.md) | 保護者判定`isParentUser`と、承認・却下・購入の記録名義となる代表親を解決する`getRepresentativeParent`を提供する。Issue #552で`App.tsx`から新規抽出。 |
+| [changelogSeen.md](./src/lib/changelogSeen.md) | 「どのアップデートまで見たか」を端末ごとのlocalStorageで保持する読み書き関数。 |
 | [changelog.md](./src/lib/changelog.md) | 「アップデートのれきし」に表示する更新履歴を型付き定数`CHANGELOG`として保持する。 |
 | [utils.md](./src/lib/utils.md) | Tailwind CSSのクラス名をマージ（結合・競合解決）するユーティリティ関数`cn`を提供する。 |
 

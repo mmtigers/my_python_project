@@ -12,6 +12,7 @@ from core import sound_manager
 from services import notification_service, switchbot_service
 from services.routine_service import routine_service
 from services.quest.locks import (
+    ITEM_USE_TITLE_PREFIX,
     JST,
     _get_item_use_lock,
     _get_youtube_cooldown_remaining_seconds,
@@ -302,7 +303,7 @@ class InventoryService:
             if cur.rowcount == 0:
                 raise HTTPException(400, "Cannot use this item")
 
-            log_title = f"アイテム使用: {item['title']}"
+            log_title = f"{ITEM_USE_TITLE_PREFIX}{item['title']}"
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                 VALUES (?, 0, ?, 0, 0, ?, 'approved')

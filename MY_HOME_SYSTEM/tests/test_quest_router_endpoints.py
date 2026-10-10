@@ -314,3 +314,25 @@ class TestInventoryEndpoints:
         assert chronicle_res.status_code == 200
         titles = [c["title"] for c in chronicle_res.json()["chronicle"]]
         assert any("TestReward" in t for t in titles)
+        # 使った事実も「つかった」として記録に載る(券名だけを出し、接頭辞は付けない)
+        used = [c for c in chronicle_res.json()["chronicle"] if c["type"] == "item"]
+        assert len(used) == 1
+        assert used[0]["text"].endswith("TestReward をつかった！")
+        assert "アイテム使用" not in used[0]["text"]
+
+    def test_tv_block_endpoint_returns_state_shared_by_everyone(self, seeded_client, monkeypatch):
+        """画面上部の常時表示用。ユーザーに依らず switchbot_service の状態をそのまま返す。"""
+        from services import switchbot_service
+        state = {"is_blocked": False, "blocked_until": None, "next_block_starts_at": "12:00",
+                 "seconds_until_next_block": 600, "windows": [{"start": "12:00", "end": "14:00"}]}
+        monkeypatch.setattr(switchbot_service, "get_tv_block_state", lambda: state)
+        res = seeded_client.get("/api/quest/tv_block")
+        assert res.status_code == 200
+        assert res.json() == state
+
+    def test_tv_block_endpoint_is_null_on_weekdays(self, seeded_client, monkeypatch):
+        from services import switchbot_service
+        monkeypatch.setattr(switchbot_service, "get_tv_block_state", lambda: None)
+        res = seeded_client.get("/api/quest/tv_block")
+        assert res.status_code == 200
+        assert res.json() is None
