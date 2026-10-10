@@ -44,6 +44,11 @@
 * **副作用**: なし（既読化は呼び出し側）
 * **エラーハンドリング**: なし
 
+### 追加・変更（2026-10-10: おしらせを「記録」ボタンの横へ移動）
+
+* 帯自身が持っていた外側の幅指定ラッパー（`max-w-md md:max-w-5xl mx-auto`）を外し、帯だけを返すようにした。配置・幅は呼び出し先の `Header` の `notices` 枠（xl以上は記録ボタン右の空きスペース、xl未満はボタン行の下）が決める。
+* 根拠: `const UpdateNoticeBanner: React.FC<Props> = ({ entry, onOpen, onDismiss }) => (` (行番号: 15 / 抜粋: "const UpdateNoticeBanner: React.FC<Props> = ({ entry, onOpen, onDismiss }) => (")
+
 ## 5. 処理フロー図
 
 ```mermaid
