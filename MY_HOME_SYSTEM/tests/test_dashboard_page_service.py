@@ -1043,7 +1043,7 @@ class TestActivityHeatmap:
         assert dashboard_page_service._heatmap_level(count) == level
 
     def test_render_marks_levels_and_future_hours_today(self):
-        times = [_jst(2026, 10, 2, 8, m) for m in range(0, 12)] + [_jst(2026, 10, 2, 9, 0)]
+        times = [_jst(2026, 10, 2, 8, m) for m in range(12)] + [_jst(2026, 10, 2, 9, 0)]
         html = dashboard_page_service._render_activity_heatmap(
             self._df(times), date(2026, 10, 2), _jst(2026, 10, 2, 10, 30)
         )
