@@ -50,11 +50,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: Resolve ruff target version from .python-version
+        # ruff は target-version が未指定だと、新しいPythonでしか通らない構文(例: f-stringの式の
+        # 中のバックスラッシュ。3.12以降)を構文エラーとして検知しない。開発環境(3.12/3.13)で
+        # 書いたコードが、実機・CI(3.11)ではimport時にSyntaxErrorになり、サーバーが起動しない
+        # 事故が実際に起きた(PR #933)。そのため、実機・CIと同じ MY_HOME_SYSTEM/.python-version の
+        # 版を、構文チェック(E9)の target-version に渡す。版を二重に書かない(Issue #403と同じ方針)。
+        # 設定ファイル(ruff.toml)の target-version にしないのは、版依存の他のルールの指摘が
+        # フルレポートで増え、ラチェット(増えた指摘のブロック)に影響するため。
+        working-directory: .
+        run: |
+          version="py$(cut -d. -f1,2 MY_HOME_SYSTEM/.python-version | tr -d .)"
+          if [[ ! "$version" =~ ^py3[0-9]{1,2}$ ]]; then
+            echo "::error::MY_HOME_SYSTEM/.python-version から ruff の target-version を決められません: '$version'"
+            exit 1
+          fi
+          echo "RUFF_TARGET_VERSION=$version" >> "$GITHUB_ENV"
+
       - name: Ruff (correctness gate - blocking)
         # 未定義名の参照・構文エラー等、明確なバグのみをブロッキング条件とする。
         # 既存コードには多数のスタイル上の指摘(未使用import等)が残っているが、
         # それらでPRを一律ブロックしないよう、次のステップでは警告のみに留める。
-        run: ruff check . --select F821,F822,F823,E9 --output-format=github
+        # --target-version: 実機・CIのPython版で通らない構文も構文エラーとして検知する(上のステップ参照)。
+        run: ruff check . --select F821,F822,F823,E9 --target-version "$RUFF_TARGET_VERSION" --output-format=github
 
       - name: Ruff (full report - non-blocking)
         run: ruff check . --output-format=github
@@ -64,7 +82,7 @@ jobs:
         # H-11: MY_HOME_SYSTEM以外(DDD)は従来CI対象外だった。
         # 同じ「明確なバグのみブロッキング」方針をDDDにも適用する。
         working-directory: ./DDD
-        run: ruff check . --select F821,F822,F823,E9 --output-format=github
+        run: ruff check . --select F821,F822,F823,E9 --target-version "$RUFF_TARGET_VERSION" --output-format=github
 
       - name: Ruff DDD (full report - non-blocking)
         working-directory: ./DDD

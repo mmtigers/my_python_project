@@ -11,7 +11,7 @@
 <!-- 実行したものにチェック。該当しない項目は消してよい -->
 
 - [ ] `MY_HOME_SYSTEM`: `python -m pytest tests/`(env: `SQLITE_DB_PATH=:memory: NAS_MOUNT_POINT=./tmp_nas NOTIFICATION_TARGET=none`)
-- [ ] `MY_HOME_SYSTEM`: `ruff check . --select F821,F822,F823,E9` / `npx pyright` / `bandit -r . -x ./tests -lll`
+- [ ] `MY_HOME_SYSTEM`: `ruff check . --select F821,F822,F823,E9 --target-version py311` / `npx pyright` / `bandit -r . -x ./tests -lll`
 - [ ] `DDD`: `python -m pytest`(`core.*` のシグネチャを変えた場合は必須)
 - [ ] `family-quest`: `npm run lint && npm run build && npm test`
 - [ ] シェルスクリプトを変えた場合: `shellcheck -x`
