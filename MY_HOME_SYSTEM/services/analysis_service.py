@@ -188,19 +188,35 @@ def load_nas_status() -> Optional[pd.Series]:
         return None
 
 
-def load_nas_history(limit: int = 200) -> pd.DataFrame:
+def load_nas_history(limit: int = 200, days: int | None = None) -> pd.DataFrame:
     """NASの容量履歴を古い順(グラフ描画向き)で返す。
 
     **(不具合修正で新設)** NASカードをタップしても容量の履歴を見る手段が無かった。
     `nas_monitor.py`が定期的に書き込む`nas_records`(`timestamp`/`percent`/
     `used_gb`/`free_gb`/`total_gb`)から直近`limit`件を取得する。
+
+    **(新機能)** `days`を指定すると、件数ではなく**直近`days`日(JST)の全件**を返す
+    (`limit`は無視)。NAS容量グラフの期間切替(7/30/90日)用。timestampは文字列で
+    オフセット付きの行も混在しうるため、SQL側は1日の余裕を持たせて粗く絞り、
+    正確な期間での絞り込みはJST変換後に行う(`_sensor_range_clause`と同じ方針)。
     """
     table_name = getattr(config, "SQLITE_TABLE_NAS", "nas_records")
-    query = (
-        f"SELECT timestamp, percent, used_gb, free_gb, total_gb FROM {table_name} "
-        f"ORDER BY timestamp DESC LIMIT {limit}"
-    )
-    df = load_data_from_db(query)
+    if days is None:
+        query = (
+            f"SELECT timestamp, percent, used_gb, free_gb, total_gb FROM {table_name} "
+            f"ORDER BY timestamp DESC LIMIT {limit}"
+        )
+        df = load_data_from_db(query)
+    else:
+        now = datetime.now(pytz.timezone("Asia/Tokyo"))
+        lower = (now - timedelta(days=int(days) + 1)).date().isoformat()
+        query = (
+            f"SELECT timestamp, percent, used_gb, free_gb, total_gb FROM {table_name} "
+            f"WHERE timestamp >= '{lower}' ORDER BY timestamp DESC"
+        )
+        df = load_data_from_db(query)
+        if not df.empty:
+            df = df[df["timestamp"] >= now - timedelta(days=int(days))]
     if df.empty:
         return df
     return df.sort_values("timestamp").reset_index(drop=True)

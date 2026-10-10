@@ -135,8 +135,9 @@ def dashboard_status_fragment() -> HTMLResponse:
 
 
 @router.get(f"{_BASE_PATH}/watch", include_in_schema=False)
-def dashboard_watch(date: str | None = None) -> HTMLResponse:
+def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLResponse:
     """見守りページ。`?date=YYYY-MM-DD`でログ(防犯・センサー)をその日(JST)に絞る。
+    `?device=<device_id>`でセンサーログをその機器だけに絞る(組み合わせ可)。
     形式が不正な値は無視して通常表示にする(ブックマークの壊れたURLでも開けるように)。"""
     selected_date = dashboard_page_service.parse_log_date(date)
     if selected_date is not None:
@@ -149,6 +150,7 @@ def dashboard_watch(date: str | None = None) -> HTMLResponse:
             dashboard_path=f"{_BASE_PATH}/",
             snapshot_url_prefix=f"{_BASE_PATH}/snapshot",
             selected_date=selected_date,
+            selected_device=device or None,
         )
     )
 
@@ -165,18 +167,24 @@ def dashboard_life() -> HTMLResponse:
 
 
 @router.get(f"{_BASE_PATH}/sys", include_in_schema=False)
-def dashboard_sys() -> HTMLResponse:
+def dashboard_sys(nas_days: int = dashboard_page_service.NAS_HISTORY_DEFAULT_DAYS) -> HTMLResponse:
+    """システムページ。`?nas_days=7|30|90`でNAS容量グラフの表示期間を切り替える
+    (それ以外の値は既定の30日)。"""
+    if nas_days not in dashboard_page_service.NAS_HISTORY_DAYS_CHOICES:
+        nas_days = dashboard_page_service.NAS_HISTORY_DEFAULT_DAYS
     materials = home_status_service.get_cached_materials()
+    nas_history = home_status_service.get_nas_history(nas_days)
     now = home_status_service.get_now_jst()
     return HTMLResponse(
         dashboard_page_service.render_sys_page(
             materials.df_sensor,
             materials.nas_data,
-            materials.nas_history,
+            nas_history,
             materials.memory,
             materials.disk,
             now,
             dashboard_path=f"{_BASE_PATH}/",
+            nas_days=nas_days,
         )
     )
 

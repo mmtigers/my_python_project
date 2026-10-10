@@ -165,6 +165,41 @@ class TestLoadNasHistory:
         assert list(df["percent"]) == [3.0, 4.0]
 
 
+class TestLoadNasHistoryByDays:
+    """load_nas_history(days=...): 件数でなく直近N日(JST)の全件を返す(NASグラフの期間切替)。"""
+
+    @staticmethod
+    def _insert(ts, percent):
+        with get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_NAS} "
+                "(timestamp, device_name, ip_address, status_ping, status_mount, "
+                "total_gb, used_gb, free_gb, percent) "
+                f"VALUES ('{ts}', 'NAS1', '192.168.1.1', 'ok', 'ok', 100, 50, 50, {percent})"
+            )
+
+    def test_returns_only_rows_within_the_period_oldest_first(self, isolated_db):
+        from freezegun import freeze_time
+        with freeze_time("2026-10-10 12:00:00"):
+            now = datetime.now(pytz.timezone("Asia/Tokyo"))
+            for days_ago, percent in [(40, 1), (20, 2), (3, 3)]:
+                self._insert((now - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%S+09:00"), percent)
+            assert list(analysis_service.load_nas_history(days=30)["percent"]) == [2.0, 3.0]
+            assert list(analysis_service.load_nas_history(days=7)["percent"]) == [3.0]
+            assert list(analysis_service.load_nas_history(days=90)["percent"]) == [1.0, 2.0, 3.0]
+
+    def test_ignores_the_limit_when_days_is_given(self, isolated_db):
+        from freezegun import freeze_time
+        with freeze_time("2026-10-10 12:00:00"):
+            now = datetime.now(pytz.timezone("Asia/Tokyo"))
+            for i in range(5):
+                self._insert((now - timedelta(hours=i + 1)).strftime("%Y-%m-%dT%H:%M:%S+09:00"), i)
+            assert len(analysis_service.load_nas_history(limit=2, days=7)) == 5
+
+    def test_empty_when_no_data(self, isolated_db):
+        assert analysis_service.load_nas_history(days=30).empty
+
+
 class TestLoadSensorData:
     def test_merges_legacy_meter_and_power_sources(self, isolated_db):
         with get_db_cursor(commit=True) as cur:

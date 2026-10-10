@@ -419,10 +419,19 @@
 * **エラーハンドリング**: どのチェックも例外を送出せず、失敗は警告ログを出して False(=異常)にする。あさノートが遅い・不達でもタイムアウト(3秒)でページは返る。
 
 
+### `get_nas_history`
+
+* **役割**: **(新機能)** システムページのNAS容量グラフ用に、直近`days`日の履歴を`analysis_service.load_nas_history(days=days)`から返す。期間ごとのキー(`nas_history:{days}`)の`_cached`(TTL付き)経由。期間は呼び出し側(`dashboard_router`)が7/30/90に絞るのでキーは3種類に収まる。
+* 根拠: `def get_nas_history(days: int) -> pd.DataFrame:` (行番号: 853)
+* **引数/リクエスト**: `days: int`
+* **戻り値/レスポンス**: `pd.DataFrame`(取得失敗時は空)
+* **副作用**: DBの読み取りのみ(TTLキャッシュ)。
+* **エラーハンドリング**: `_cached`が例外を握りつぶして None を返し、空のDataFrameにフォールバックする。
+
 ### `get_sensor_data_for_day`
 
 * **役割**: **(新機能)** 見守りページのログの日付フィルタ用に、指定日(JST)のセンサーデータを全件返す。`get_cached_materials()`の`df_sensor`は直近`MOBILE_SENSOR_ROW_LIMIT`件までで、それより古い日は含まれないため、日付指定時だけ`analysis_service.load_sensor_data(day=day)`でDBから範囲取得する。日付ごとにキーが増えて`_cache`が肥大しないよう、このデータはキャッシュしない。
-* 根拠: `def get_sensor_data_for_day(day: date) -> pd.DataFrame:` (行番号: 853)
+* 根拠: `def get_sensor_data_for_day(day: date) -> pd.DataFrame:` (行番号: 861)
 * **引数/リクエスト**: `day` (`date`)
 * **戻り値/レスポンス**: `pd.DataFrame`(失敗時は空)
 * **副作用**: DBの読み取りのみ。
@@ -433,7 +442,7 @@
 ### `collect_status_cards`
 
 * **役割**: `get_cached_materials`で材料を集め、`build_status_cards`に渡して`(カード一覧, 取得時刻)`を返す。ホームページ用。
-* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 868〜882)
+* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 876〜890)
 
 
 * **引数/リクエスト**: `now` (`datetime | None`。省略時は `core.utils.get_now_jst()`)

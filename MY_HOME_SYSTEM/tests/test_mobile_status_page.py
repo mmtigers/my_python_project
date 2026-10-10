@@ -273,6 +273,25 @@ class TestSubPages:
         assert "<svg" in res.text
         assert "現在 42%" in res.text
 
+    @pytest.mark.parametrize("query,expected_days", [
+        ("", 30), ("?nas_days=7", 7), ("?nas_days=90", 90), ("?nas_days=5", 30), ("?nas_days=abc", None),
+    ])
+    def test_sys_page_nas_period_selects_the_history_range(self, query, expected_days):
+        """?nas_days=7|30|90で期間を切り替える。範囲外は既定の30日。数値でない値は422。"""
+        with patch.object(home_status_service, "get_nas_history", return_value=pd.DataFrame()) as mock_load:
+            res = self._get(f"sys{query}")
+        if expected_days is None:
+            assert res.status_code == 422
+            return
+        assert res.status_code == 200
+        mock_load.assert_called_once_with(expected_days)
+        assert "表示期間" in res.text
+
+    def test_watch_page_device_filter_param_is_accepted(self):
+        res = self._get("watch?device=no-such-device")
+        assert res.status_code == 200
+        assert 'name="device"' not in res.text or "すべての機器" in res.text
+
     def test_sys_page_restart_button_is_disabled_until_confirmed(self):
         res = self._get("sys")
         assert 'id="restartBtn" disabled' in res.text

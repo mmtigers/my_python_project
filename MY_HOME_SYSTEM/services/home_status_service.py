@@ -850,6 +850,14 @@ def collect_link_health(asa_note_url: str, yoru_note_url: str | None = None) -> 
     return health
 
 
+def get_nas_history(days: int) -> pd.DataFrame:
+    """システムページのNAS容量グラフ用に、直近`days`日の履歴を返す(期間ごとのTTLキャッシュ付き)。
+    期間は呼び出し側(`dashboard_router`)が7/30/90に絞るので、キャッシュのキーは3種類に収まる。
+    取得失敗は空のDataFrame(ページ全体を落とさない)。"""
+    df = _cached(f"nas_history:{days}", lambda: analysis_service.load_nas_history(days=days))
+    return df if df is not None else pd.DataFrame()
+
+
 def get_sensor_data_for_day(day: date) -> pd.DataFrame:
     """見守りページのログの日付フィルタ用に、指定日(JST)のセンサーデータを全件返す。
 

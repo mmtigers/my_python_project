@@ -509,6 +509,137 @@ class TestRenderNasHistoryChart:
         assert "<table" in html
 
 
+class TestNasChartImprovements:
+    """NAS容量グラフ: 実測レンジの縦軸・時刻軸・増加ペースと満杯予測・期間切替・間引き。"""
+
+    @staticmethod
+    def _history(days, per_day_gb, total=1000, start_used=500, step_hours=1):
+        n = int(days * 24 / step_hours) + 1
+        ts = [pd.Timestamp("2026-09-01") + pd.Timedelta(hours=i * step_hours) for i in range(n)]
+        used = [start_used + per_day_gb * (i * step_hours / 24) for i in range(n)]
+        return pd.DataFrame({
+            "timestamp": ts,
+            "used_gb": used,
+            "free_gb": [total - u for u in used],
+            "percent": [u / total * 100 for u in used],
+        })
+
+    def test_y_axis_follows_measured_range_not_0_to_100(self):
+        html = dashboard_page_service._render_nas_history_chart(self._history(10, 1.0))
+        # 使用率はおよそ50〜51%。0%や100%の目盛りは出ない。
+        assert ">0%<" not in html and ">100%<" not in html
+        assert "%</text>" in html
+
+    def test_points_are_positioned_by_time_not_by_index(self):
+        df = pd.DataFrame({
+            "timestamp": [pd.Timestamp("2026-09-01"), pd.Timestamp("2026-09-02"), pd.Timestamp("2026-09-10")],
+            "percent": [50.0, 51.0, 60.0],
+            "free_gb": [500, 490, 400],
+        })
+        html = dashboard_page_service._render_nas_history_chart(df)
+        xs = [float(p.split(",")[0]) for p in html.split('points="')[1].split('"')[0].split()]
+        # 1日目→2日目の間隔は、2日目→10日目(8日)の1/8
+        assert (xs[1] - xs[0]) * 8 == pytest.approx(xs[2] - xs[1], rel=0.01)
+
+    def test_forecast_shows_growth_rate_and_days_to_full(self):
+        df = self._history(10, 5.0, total=1000, start_used=500)  # 5GB/日、終点で空き450GB
+        forecast = dashboard_page_service.compute_nas_forecast(df)
+        assert forecast["per_day"] == pytest.approx(5.0)
+        assert forecast["days_to_full"] == pytest.approx(90.0, rel=0.01)
+        html = dashboard_page_service._render_nas_history_chart(df)
+        assert "+5.0GB/日" in html and "約90日後" in html
+        assert "空き 450GB" in html
+
+    def test_no_growth_has_no_days_to_full(self):
+        forecast = dashboard_page_service.compute_nas_forecast(self._history(10, -2.0))
+        assert forecast["per_day"] < 0 and forecast["days_to_full"] is None
+        assert "増えていません" in dashboard_page_service._render_nas_history_chart(self._history(10, -2.0))
+
+    def test_forecast_needs_at_least_two_days(self):
+        assert dashboard_page_service.compute_nas_forecast(self._history(1, 5.0)) is None
+        assert "データ不足" in dashboard_page_service._render_nas_history_chart(self._history(1, 5.0))
+
+    def test_forecast_is_skipped_without_used_gb(self):
+        df = pd.DataFrame({
+            "timestamp": [pd.Timestamp("2026-09-01"), pd.Timestamp("2026-09-09")],
+            "percent": [50.0, 52.0], "free_gb": [500, 480],
+        })
+        assert dashboard_page_service.compute_nas_forecast(df) is None
+
+    def test_many_points_are_thinned(self):
+        html = dashboard_page_service._render_nas_history_chart(self._history(90, 1.0))  # 2161点
+        n_points = len(html.split('points="')[1].split('"')[0].split())
+        assert n_points <= dashboard_page_service._NAS_CHART_MAX_POINTS
+
+    def test_flat_usage_still_gets_a_minimum_span(self):
+        df = pd.DataFrame({
+            "timestamp": [pd.Timestamp("2026-09-01"), pd.Timestamp("2026-09-05")],
+            "percent": [100.0, 100.0], "free_gb": [0, 0],
+        })
+        html = dashboard_page_service._render_nas_history_chart(df)
+        assert "<polyline" in html
+
+    def test_period_links_mark_the_current_period(self):
+        html = dashboard_page_service._render_nas_history_chart(
+            self._history(10, 1.0), days=30, sys_path="/dashboard/sys"
+        )
+        assert 'href="/dashboard/sys?nas_days=7#nas-history"' in html
+        assert 'href="/dashboard/sys?nas_days=90#nas-history"' in html
+        assert 'href="/dashboard/sys?nas_days=30#nas-history"' not in html
+        assert '<span class="nas-period-current">30日</span>' in html
+
+
+class TestSensorDeviceFilter:
+    """見守りページのセンサーログを機器ごとに絞る(?device=)。"""
+
+    @staticmethod
+    def _df():
+        rows = []
+        for i, (dev, name, loc) in enumerate([("A", "伊丹のリビング", "伊丹"), ("B", "伊丹の書斎", "伊丹"), ("C", "高砂の玄関", "高砂")]):
+            rows.append({
+                "device_id": dev, "friendly_name": name, "location": loc,
+                "timestamp": pd.Timestamp("2026-10-01 10:00:00") + pd.Timedelta(minutes=i),
+                "contact_state": "open", "movement_state": None,
+            })
+        return pd.DataFrame(rows)
+
+    def _render(self, device=None, monkeypatch=None):
+        return dashboard_page_service.render_watch_page(
+            self._df(), dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot",
+            selected_device=device,
+        )
+
+    def test_select_lists_all_devices(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render()
+        assert 'name="device"' in html
+        for name in ("伊丹のリビング", "伊丹の書斎", "高砂の玄関"):
+            assert f">{name}</option>" in html
+        assert "すべての機器" in html
+
+    def test_selected_device_limits_the_sensor_logs(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render("A")
+        log_part = html.split('id="takasago-log"', 1)[1]
+        assert "伊丹のリビング" in log_part
+        assert "伊丹の書斎" not in log_part and "高砂の玄関" not in log_part
+        assert '<option value="A" selected>' in html
+        assert 'class="log-filter-clear"' in html
+
+    def test_unknown_device_is_ignored(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render("ZZZ")
+        log_part = html.split('id="takasago-log"', 1)[1]
+        assert "伊丹のリビング" in log_part and "高砂の玄関" in log_part
+        assert 'class="log-filter-clear"' not in html
+
+    def test_options_come_from_unfiltered_devices(self, monkeypatch):
+        """絞り込み後も、他の機器へ選び直せること。"""
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render("A")
+        assert ">高砂の玄関</option>" in html
+
+
 class TestMergeOpenCloseEvents:
     """開閉センサーの「open」の直後(60秒以内)の「close」を、開いた時刻の1行にまとめる。"""
 
