@@ -837,12 +837,17 @@ def check_asa_note_health(url: str) -> bool:
         return False
 
 
-def collect_link_health(asa_note_url: str) -> dict[str, bool]:
-    """ホームの外部リンクの稼働状況(`{"quest": bool, "asa_note": bool}`)。
-    `STATUS_CACHE_TTL_SEC`のTTLキャッシュ付き。"""
+def collect_link_health(asa_note_url: str, yoru_note_url: str | None = None) -> dict[str, bool]:
+    """ホームの外部リンクの稼働状況(`{"quest": bool, "asa_note": bool}`。`yoru_note_url`を
+    渡したときだけ `"yoru_note"` も入る)。`STATUS_CACHE_TTL_SEC`のTTLキャッシュ付き。
+    よるノートもあさノートと同じ外部(Vercel)サービスなので同じチェック関数を使う。"""
     quest = _cached("link_health_quest", check_quest_app_health)
     asa_note = _cached(f"link_health_asa_note:{asa_note_url}", lambda: check_asa_note_health(asa_note_url))
-    return {"quest": bool(quest), "asa_note": bool(asa_note)}
+    health = {"quest": bool(quest), "asa_note": bool(asa_note)}
+    if yoru_note_url:
+        yoru_note = _cached(f"link_health_yoru_note:{yoru_note_url}", lambda: check_asa_note_health(yoru_note_url))
+        health["yoru_note"] = bool(yoru_note)
+    return health
 
 
 def get_sensor_data_for_day(day: date) -> pd.DataFrame:

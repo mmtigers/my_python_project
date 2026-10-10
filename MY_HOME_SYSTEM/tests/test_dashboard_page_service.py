@@ -192,13 +192,16 @@ class TestRenderCameraSelector:
         html = dashboard_page_service._render_camera_selector([])
         assert "カメラが登録されていません" in html
 
-    def test_renders_a_button_per_camera(self):
+    def test_renders_a_video_tile_per_camera_all_at_once(self):
+        """全台を初期表示から同時に並べる(切替ボタンは無い)。"""
         html = dashboard_page_service._render_camera_selector(
-            [{"id": "entrance", "name": "玄関"}, {"id": "parking", "name": "駐車場"}]
+            [{"id": "entrance", "name": "玄関"}, {"id": "garden", "name": "庭"}, {"id": "parking", "name": "駐車場"}]
         )
-        assert html.count("camera-btn") == 2
-        assert "玄関" in html
-        assert "駐車場" in html
+        assert html.count('class="camera-video"') == 3
+        for cid in ("entrance", "garden", "parking"):
+            assert f'data-camera-id="{cid}"' in html
+        assert "camera-btn" not in html
+        assert "玄関" in html and "庭" in html and "駐車場" in html
 
 
 class TestRenderWatchPage:

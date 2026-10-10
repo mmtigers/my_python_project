@@ -193,16 +193,16 @@ _PAGE_BASE_CSS = """
     .log-filter button { border: none; background: #1565c0; color: #fff; }
     a.log-filter-clear { border: 1px solid #bbdefb; background: #e3f2fd; color: #1565c0; text-decoration: none; }
 
-    /* 見守りページのカメラ選択 */
-    .camera-select-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-    .camera-btn {
-        min-height: 44px; padding: 0 14px; border-radius: 12px; border: 1px solid #bbdefb;
-        background: #e3f2fd; color: #1565c0; font-weight: bold; font-size: 0.9rem;
+    /* 見守りページのカメラ映像(全台を同時表示) */
+    .camera-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+        gap: 12px; margin-bottom: 16px;
     }
-    .camera-btn.active { background: #1565c0; color: #fff; }
+    .camera-name { font-weight: bold; font-size: 0.9rem; margin-bottom: 4px; }
+    .camera-tile-requested .camera-name { color: #1565c0; }
     .camera-video-box {
-        width: 100%; max-width: 480px; aspect-ratio: 16 / 9; background: #000;
-        border-radius: 8px; overflow: hidden; margin-bottom: 16px;
+        width: 100%; aspect-ratio: 16 / 9; background: #000;
+        border-radius: 8px; overflow: hidden;
     }
     .camera-video-box video { width: 100%; height: 100%; object-fit: contain; }
 
@@ -229,7 +229,7 @@ _PAGE_BASE_CSS = """
         .log-filter input[type="date"] { border-color: #555; }
         a.log-filter-clear { background: #16304a; color: #90caf9; border-color: #24507a; }
         .maintenance-box { border-color: #333; }
-        .camera-btn { background: #16304a; color: #90caf9; border-color: #24507a; }
+        .camera-tile-requested .camera-name { color: #90caf9; }
         #status.stale::after { color: #ef9a9a; }
     }
 """
@@ -273,18 +273,32 @@ def _render_external_link(href: str, label: str, healthy: bool | None) -> str:
         css, state = "external-card external-up", '<span class="link-state">● 稼働中</span>'
     else:
         css, state = "external-card external-down", '<span class="link-state">● 停止中</span>'
-    return f'<a class="{css}" href="{html.escape(href)}"><span>{label}{state}</span><span>›</span></a>'
+    # 別アプリへの遷移なのでダッシュボードを閉じないよう新しいタブで開く(rel=noopenerでwindow.openerを渡さない)
+    return (
+        f'<a class="{css}" href="{html.escape(href)}" target="_blank" rel="noopener">'
+        f"<span>{label}{state}</span><span>›</span></a>"
+    )
 
 
-def _render_external_links(quest_path: str, asa_note_url: str, link_health: dict[str, bool] | None) -> str:
-    """「よく使うリンク」(ファミクエ・あさノート)。`link_health`は
-    `home_status_service.collect_link_health`の戻り値(キー`quest`/`asa_note`)。"""
+def _render_external_links(
+    quest_path: str,
+    asa_note_url: str,
+    link_health: dict[str, bool] | None,
+    yoru_note_url: str | None = None,
+) -> str:
+    """「よく使うリンク」(ファミクエ・あさノート・よるノート)。`link_health`は
+    `home_status_service.collect_link_health`の戻り値(キー`quest`/`asa_note`/`yoru_note`)。
+    よるノートは`yoru_note_url`を渡したときだけ載せる。どのリンクも新しいタブで開く。"""
     health = link_health or {}
+    yoru_html = (
+        _render_external_link(yoru_note_url, "🌙 よるノート", health.get("yoru_note")) if yoru_note_url else ""
+    )
     return (
         "<h2>よく使うリンク</h2>"
         '<div class="link-grid">'
         f'{_render_external_link(quest_path, "⚔️ ファミクエ", health.get("quest"))}'
         f'{_render_external_link(asa_note_url, "📝 あさノート", health.get("asa_note"))}'
+        f"{yoru_html}"
         "</div>"
     )
 
@@ -301,6 +315,7 @@ def render_home_page(
     manifest_path: str | None = None,
     icon_path: str | None = None,
     link_health: dict[str, bool] | None = None,
+    yoru_note_url: str | None = None,
 ) -> str:
     """ホームページ: ステータスカード + 外部リンク + 各ページへのナビ。
 
@@ -319,7 +334,7 @@ def render_home_page(
         f"{html.escape(label)}<span class=\"nav-card-sub\">{html.escape(sub)}</span></a>"
         for key, label, sub in _NAV_CARDS
     )
-    links_html = _render_external_links(quest_path, asa_note_url, link_health)
+    links_html = _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url)
     body = (
         "<h1>🏠 おうちの様子</h1>"
         f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html)}'
@@ -373,6 +388,7 @@ def render_home_status_section(
     quest_path: str | None = None,
     asa_note_url: str | None = None,
     link_health: dict[str, bool] | None = None,
+    yoru_note_url: str | None = None,
 ) -> str:
     """ホームページの自動更新用フラグメント(カードと、外部リンクのブロック)。
 
@@ -380,7 +396,7 @@ def render_home_status_section(
     リンクを自動更新の範囲の中に持つため、差し替え後もリンクが消えないようにする)。
     """
     links_html = (
-        _render_external_links(quest_path, asa_note_url, link_health)
+        _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url)
         if quest_path is not None and asa_note_url is not None
         else ""
     )
@@ -651,34 +667,32 @@ def merge_open_close_events(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _render_camera_selector(cameras: list[dict[str, Any]]) -> str:
+    """有効なカメラ全台のライブ映像を、初期表示から同時に並べる(切替ボタン方式は廃止)。
+
+    各タイルは名前ラベル付きの`<video data-camera-id>`で、`_CAMERA_SCRIPT`が読み込み時に
+    全タイルのHLSを開始する。ライブ配信のffmpegはカメラごとに独立している。"""
     if not cameras:
         return '<p class="empty-note">カメラが登録されていません</p>'
-    buttons = "".join(
-        f'<button type="button" class="camera-btn" data-camera-id="{html.escape(cam["id"])}" '
-        f'onclick="dashboardSelectCamera(\'{html.escape(cam["id"])}\')">{html.escape(cam["name"])}</button>'
+    tiles = "".join(
+        '<div class="camera-tile">'
+        f'<div class="camera-name">{html.escape(cam["name"])}</div>'
+        '<div class="camera-video-box">'
+        f'<video class="camera-video" data-camera-id="{html.escape(cam["id"])}" '
+        'muted autoplay playsinline controls></video>'
+        "</div></div>"
         for cam in cameras
     )
-    return (
-        f'<div class="camera-select-row">{buttons}</div>'
-        '<div class="camera-video-box"><video id="dashboardCameraVideo" muted autoplay playsinline controls></video></div>'
-    )
+    return f'<div class="camera-grid">{tiles}</div>'
 
 
 _CAMERA_SCRIPT = """
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
 <script>
 (function () {
-    var STORAGE_KEY = "dashboardSelectedCamera";
-    var hls = null;
-
-    window.dashboardSelectCamera = function (cameraId) {
-        var video = document.getElementById("dashboardCameraVideo");
-        if (!video) { return; }
-        var url = "/api/cameras/live/" + encodeURIComponent(cameraId) + "/stream.m3u8";
-
-        if (hls) { hls.destroy(); hls = null; }
+    function startStream(video) {
+        var url = "/api/cameras/live/" + encodeURIComponent(video.dataset.cameraId) + "/stream.m3u8";
         if (window.Hls && window.Hls.isSupported()) {
-            hls = new window.Hls();
+            var hls = new window.Hls();
             hls.loadSource(url);
             hls.attachMedia(video);
             hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
@@ -690,28 +704,27 @@ _CAMERA_SCRIPT = """
                 video.play().catch(function () {});
             });
         }
-
-        try { localStorage.setItem(STORAGE_KEY, cameraId); } catch (e) {}
-        document.querySelectorAll(".camera-btn").forEach(function (btn) {
-            btn.classList.toggle("active", btn.dataset.cameraId === cameraId);
-        });
-    };
+    }
 
     document.addEventListener("DOMContentLoaded", function () {
-        var buttons = document.querySelectorAll(".camera-btn");
-        if (!buttons.length) { return; }
-        var ids = Array.prototype.map.call(buttons, function (b) { return b.dataset.cameraId; });
+        var videos = document.querySelectorAll(".camera-video");
+        if (!videos.length) { return; }
 
-        // ホームページの「🚗 駐車場」カードは、このページを開いたときに駐車場カメラを
-        // 選択済みにしたい(?camera=<id>)。指定が無い/未知のidなら記憶(localStorage)、
-        // それも無ければ先頭のカメラにフォールバックする。
+        // ホームページの「🚗 駐車場」カードは(?camera=<id>)でこのページを開く。
+        // 全台を同時に表示するので、指定されたカメラのタイルを先頭に移して目立たせる。
         var requested = null;
         try { requested = new URLSearchParams(window.location.search).get("camera"); } catch (e) {}
-        var saved = null;
-        try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) {}
-        var initial = (requested && ids.indexOf(requested) !== -1) ? requested
-            : (saved && ids.indexOf(saved) !== -1) ? saved : ids[0];
-        window.dashboardSelectCamera(initial);
+        Array.prototype.forEach.call(videos, function (video) {
+            if (requested && video.dataset.cameraId === requested) {
+                var tile = video.closest(".camera-tile");
+                if (tile && tile.parentNode) {
+                    tile.classList.add("camera-tile-requested");
+                    tile.parentNode.insertBefore(tile, tile.parentNode.firstChild);
+                }
+            }
+        });
+        // 先頭へ移したあとの並びで全台のストリームを開始する。
+        document.querySelectorAll(".camera-video").forEach(startStream);
     });
 })();
 </script>

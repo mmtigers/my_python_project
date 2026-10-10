@@ -151,8 +151,8 @@
 * 根拠: [戻り値] (行番号: 95, 98〜110)
 
 
-* **副作用**: `home_status_service.collect_status_cards()`経由でDBの読み取り(TTLキャッシュ付き)。**(新機能)** `home_status_service.collect_link_health(config.ASA_NOTE_URL)`でファミクエ・あさノートの稼働チェック(DB読み取り・あさノートへのHTTP GET。TTL60秒のキャッシュ付き)を行い、結果を`render_home_page`の`link_health`に渡して外部リンクを色分けする。
-* 根拠: [関数呼び出し] (行番号: 97 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")、[稼働チェック] (行番号: 98 / 抜粋: "link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL)")
+* **副作用**: `home_status_service.collect_status_cards()`経由でDBの読み取り(TTLキャッシュ付き)。**(新機能)** `home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)`でファミクエ・あさノート・よるノートの稼働チェック(DB読み取り・あさノートへのHTTP GET。TTL60秒のキャッシュ付き)を行い、結果を`render_home_page`の`link_health`に渡して外部リンクを色分けする。
+* 根拠: [関数呼び出し] (行番号: 97 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")、[稼働チェック] (行番号: 98 / 抜粋: "link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)")
 
 
 * **エラーハンドリング**: `tab`が`_LEGACY_TAB_REDIRECTS`に無い値の場合は`.get(tab, _BASE_PATH)`によりホームへフォールバックする(例外は送出しない)。
@@ -190,7 +190,7 @@
 
 
 * **引数/リクエスト**: クエリ`date`(`YYYY-MM-DD`、任意)。**(新機能)** 指定があれば`dashboard_page_service.parse_log_date`で解釈し、その日のログだけを表示する。この場合は共通キャッシュ(直近`MOBILE_SENSOR_ROW_LIMIT`件)ではなく`home_status_service.get_sensor_data_for_day`でDBから指定日の全件を取る。形式が不正な値は無視して通常表示になる。
-* 根拠: [関数定義] (行番号: 136 / 抜粋: "def dashboard_watch(date: str | None = None) -> HTMLResponse:")、[日付の解釈] (行番号: 139 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
+* 根拠: [関数定義] (行番号: 138 / 抜粋: "def dashboard_watch(date: str | None = None) -> HTMLResponse:")、[日付の解釈] (行番号: 141 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(見守りページ全体のHTML)

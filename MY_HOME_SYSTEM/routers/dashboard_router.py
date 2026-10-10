@@ -95,7 +95,7 @@ def dashboard_home(tab: str | None = None) -> Response:
         return RedirectResponse(url=target, status_code=302)
 
     cards, fetched_at = home_status_service.collect_status_cards()
-    link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL)
+    link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)
     return HTMLResponse(
         dashboard_page_service.render_home_page(
             cards,
@@ -104,6 +104,7 @@ def dashboard_home(tab: str | None = None) -> Response:
             status_path=_STATUS_PATH,
             quest_path=_QUEST_APP_PATH,
             asa_note_url=config.ASA_NOTE_URL,
+            yoru_note_url=config.YORU_NOTE_URL,
             refresh_sec=home_status_service.MOBILE_PAGE_REFRESH_SEC,
             manifest_path=f"{_BASE_PATH}/app.webmanifest",
             icon_path=f"{_BASE_PATH}/icon-180.png",
@@ -116,7 +117,7 @@ def dashboard_home(tab: str | None = None) -> Response:
 def dashboard_status_fragment() -> HTMLResponse:
     """ホームページの自動更新用(カードのブロックだけを返す)。"""
     cards, fetched_at = home_status_service.collect_status_cards()
-    link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL)
+    link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)
     return HTMLResponse(
         dashboard_page_service.render_home_status_section(
             cards, fetched_at,
@@ -124,6 +125,7 @@ def dashboard_status_fragment() -> HTMLResponse:
             refresh_sec=home_status_service.MOBILE_PAGE_REFRESH_SEC,
             quest_path=_QUEST_APP_PATH,
             asa_note_url=config.ASA_NOTE_URL,
+            yoru_note_url=config.YORU_NOTE_URL,
             link_health=link_health,
         )
     )

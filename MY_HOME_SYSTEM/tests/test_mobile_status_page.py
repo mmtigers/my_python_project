@@ -110,6 +110,7 @@ class TestDashboardHomePage:
         assert f'href="{config.DASHBOARD_BASE_PATH}/sys"' in res.text
         assert 'href="/quest"' in res.text
         assert f'href="{config.ASA_NOTE_URL}"' in res.text
+        assert f'href="{config.YORU_NOTE_URL}"' in res.text
 
     def test_page_can_be_added_to_the_home_screen(self):
         res = self._get()
@@ -759,7 +760,7 @@ class TestExternalLinkHealth:
 
     def test_healthy_links_are_green_with_label(self):
         res = self._home("/")
-        assert res.text.count("external-card external-up") == 2
+        assert res.text.count("external-card external-up") == 3
         assert "external-down" not in res.text.split("</style>", 1)[1]
         assert "● 稼働中" in res.text
 
@@ -777,6 +778,25 @@ class TestExternalLinkHealth:
         monkeypatch.setattr(home_status_service, "check_quest_app_health", lambda: False)
         res = self._home("/")
         assert 'class="external-card external-down" href="/quest"' in res.text
+
+    def test_external_links_open_in_a_new_tab(self):
+        """よく使うリンク(ファミクエ・あさノート・よるノート)は新しいタブで開く。"""
+        res = self._home("/")
+        section = res.text.split(f'id="{home_status_service.STATUS_SECTION_ID}"', 1)[1].split("メニュー", 1)[0]
+        anchors = [a for a in section.split("<a ")[1:] if "external-card" in a]
+        assert len(anchors) == 3
+        assert all('target="_blank"' in a and 'rel="noopener"' in a for a in anchors)
+
+    def test_note_urls_point_to_the_deployed_apps(self):
+        assert config.ASA_NOTE_URL == "https://asa-note.vercel.app/"
+        assert config.YORU_NOTE_URL == "https://yorunote-mm.vercel.app/"
+
+    def test_down_yoru_note_is_red_and_only_that_link(self, monkeypatch):
+        monkeypatch.setattr(home_status_service, "check_asa_note_health", lambda url: "yorunote" not in url)
+        body = self._home("/").text.split("</style>", 1)[1]
+        yoru = body.split("よるノート", 1)[0].rsplit("<a ", 1)[1]
+        asa = body.split("あさノート", 1)[0].rsplit("<a ", 1)[1]
+        assert "external-down" in yoru and "external-up" in asa
 
     def test_status_fragment_keeps_links_so_color_refreshes(self, monkeypatch):
         """自動更新はこのフラグメントで範囲ごと差し替わる。リンクが入っていないと更新で消える。"""

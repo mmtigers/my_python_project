@@ -958,7 +958,8 @@ DASHBOARD_BASE_PATH: str = "/" + os.getenv("DASHBOARD_BASE_PATH", "dashboard").s
 
 # ホーム画面のリンクカードから開く外部サービス。ダッシュボード内に機能・表示は持たず、
 # リンクのみを置く方針(#829)。
-ASA_NOTE_URL: str = os.getenv("ASA_NOTE_URL", "https://go-to-school-one.vercel.app/")
+ASA_NOTE_URL: str = os.getenv("ASA_NOTE_URL", "https://asa-note.vercel.app/")
+YORU_NOTE_URL: str = os.getenv("YORU_NOTE_URL", "https://yorunote-mm.vercel.app/")
 
 
 # ==========================================

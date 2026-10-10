@@ -41,7 +41,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config.ASSETS_DIR` | NAS上のパスの実際の値・遅延解決の詳細は`config.py`側に依存し不明。 | 根拠: [変数参照] (行番号: 311, 324 / 抜粋: "img_dir = os.path.join(config.ASSETS_DIR, \"snapshots\")") |
-| `config.CAMERAS` | 各カメラ設定(`id`/`name`/`enabled`)の実際の値は`config.py`(devices.json由来)に依存し不明。 | 根拠: [変数参照] (行番号: 794 / 抜粋: "for cam in config.CAMERAS") |
+| `config.CAMERAS` | 各カメラ設定(`id`/`name`/`enabled`)の実際の値は`config.py`(devices.json由来)に依存し不明。 | 根拠: [変数参照] (行番号: 807 / 抜粋: "for cam in config.CAMERAS") |
 | `home_status_service.render_status_grid_html`等 | 実装(カードの並び・エスケープ処理)は`home_status_service.py`側にあり本ファイルからは呼び出しのみ。 | 根拠: [関数呼び出し] (行番号: 260, 508 / 抜粋: "home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path)") |
 | `/api/cameras/live/{id}/stream.m3u8`・`/api/system/restart`・`/api/system/backup` | クライアント側JS(`_CAMERA_SCRIPT`/`_MAINTENANCE_SCRIPT`)が`fetch`するエンドポイントの実装は本ファイルの外(`routers/camera_router.py`・`routers/system_router.py`)にある。 | 根拠: [JS文字列内] (行番号: 394, 622〜623) |
 
@@ -141,14 +141,14 @@
 
 ### `_render_external_link` / `_render_external_links`
 
-* **役割**: **(新機能)** ホームの「よく使うリンク」(ファミクエ・あさノート)を稼働状況で色分けして組み立てる。`healthy`が True なら`external-up`(緑)＋「● 稼働中」、False なら`external-down`(赤)＋「● 停止中」、None(未判定)なら従来のティールで状態表示なし。色だけに頼らず文字も添える。異常時もリンクとしてタップできる。`_render_external_links`は`home_status_service.collect_link_health`の戻り値(キー`quest`/`asa_note`)を受け取り、見出し「よく使うリンク」とリンクのグリッドを返す。
-* 根拠: `def _render_external_link(href: str, label: str, healthy: bool | None) -> str:` (行番号: 267)、`def _render_external_links(quest_path: str, asa_note_url: str, link_health: dict[str, bool] | None) -> str:` (行番号: 279)
+* **役割**: **(新機能)** ホームの「よく使うリンク」(ファミクエ・あさノート・よるノート)を稼働状況で色分けして組み立てる。**(新機能)** どのリンクも`target="_blank" rel="noopener"`で新しいタブに開く。よるノートは`_render_external_links(..., yoru_note_url)`を渡したときだけ載る(`render_home_page`/`render_home_status_section`にも省略可の`yoru_note_url`を追加)。`healthy`が True なら`external-up`(緑)＋「● 稼働中」、False なら`external-down`(赤)＋「● 停止中」、None(未判定)なら従来のティールで状態表示なし。色だけに頼らず文字も添える。異常時もリンクとしてタップできる。`_render_external_links`は`home_status_service.collect_link_health`の戻り値(キー`quest`/`asa_note`)を受け取り、見出し「よく使うリンク」とリンクのグリッドを返す。
+* 根拠: `def _render_external_link(href: str, label: str, healthy: bool | None) -> str:` (行番号: 267)、`def _render_external_links(quest_path: str, asa_note_url: str, link_health: dict[str, bool] | None) -> str:` (行番号: 283)
 
 
 ### `render_home_page`
 
 * **役割**: ホームページ全体(ステータスカード＋ファミクエ・あさノートの外部リンクカード＋見守り/くらし/システムへのナビカード)のHTMLを組み立てる。**(新機能)** 引数`link_health`を追加し、外部リンクを稼働状況で色分けする(`_render_external_links`)。外部リンクは自動更新の対象である`<div id="status">`の内側に置くよう変更した(色もカードと同じ周期で更新されるため)。`manifest_path`/`icon_path`が両方渡されたときのみホーム画面追加用の`<head>`断片を先頭に足す。**(不具合修正)** 外部リンクカード(ファミクエ・あさノート)は、以前はナビカードのさらに下・ページ最下部に、警告表示(`.alerts-warn`)と紛らわしいアンバー系の配色で置かれており、「位置が分かりにくい」「色で気づきにくい」の両方の原因になっていた。ステータスカードのすぐ下・「よく使うリンク」見出しの下、ナビカード(「メニュー」見出し)より前の位置に上げ、配色も警告色と被らないティール系(`.external-card`)に変更した。
-* 根拠: [関数定義] (行番号: 292〜332 / 抜粋: "def render_home_page(\n    cards,\n    fetched_at: datetime,\n    *,\n    dashboard_path: str,\n    status_path: str,\n    quest_path: str,\n    asa_note_url: str,\n    refresh_sec: int,\n    manifest_path: str | None = None,\n    icon_path: str | None = None,\n) -> str:")、[配置と配色の変更] (行番号: 205〜227)
+* 根拠: [関数定義] (行番号: 306〜347 / 抜粋: "def render_home_page(\n    cards,\n    fetched_at: datetime,\n    *,\n    dashboard_path: str,\n    status_path: str,\n    quest_path: str,\n    asa_note_url: str,\n    refresh_sec: int,\n    manifest_path: str | None = None,\n    icon_path: str | None = None,\n) -> str:")、[配置と配色の変更] (行番号: 205〜227)
 
 
 * **引数/リクエスト**: `cards`, `fetched_at: datetime`、キーワード専用で `dashboard_path: str`, `status_path: str`, `quest_path: str`, `asa_note_url: str`, `refresh_sec: int`, `manifest_path: str | None = None`, `icon_path: str | None = None`, `link_health: dict[str, bool] | None = None`
@@ -171,7 +171,7 @@
 ### `_home_screen_install_head`
 
 * **役割**: ホーム画面に追加したときアドレスバー無し(standalone)で開くための`<head>`断片(`<link rel="manifest">`に`crossorigin="use-credentials"`付き、`apple-touch-icon`、各種metaタグ)を組み立てる。
-* 根拠: [関数定義] (行番号: 335〜347 / 抜粋: "def _home_screen_install_head(manifest_path: str, icon_path: str) -> str:")
+* 根拠: [関数定義] (行番号: 350〜362 / 抜粋: "def _home_screen_install_head(manifest_path: str, icon_path: str) -> str:")
 
 
 * **引数/リクエスト**: `manifest_path: str`, `icon_path: str`
@@ -194,7 +194,7 @@
 ### `STATUS_SECTION_ID`
 
 * **役割**: 自動更新で差し替える`<div>`の`id`(`home_status_service.STATUS_SECTION_ID`をそのまま再エクスポート)。
-* 根拠: [定数宣言] (行番号: 351 / 抜粋: "STATUS_SECTION_ID = home_status_service.STATUS_SECTION_ID")
+* 根拠: [定数宣言] (行番号: 366 / 抜粋: "STATUS_SECTION_ID = home_status_service.STATUS_SECTION_ID")
 
 
 * **引数/リクエスト**: 該当なし
@@ -217,7 +217,7 @@
 ### `_render_status_section` / `render_home_status_section`
 
 * **役割**: **(新機能)** 外部リンクのブロックも同じ`<div id="status">`の内側に含める(`_render_status_section`の引数`extra_html`。`render_home_status_section`は`quest_path`/`asa_note_url`/`link_health`を渡されたときだけ外部リンクを含める。自動更新で範囲ごと差し替わっても外部リンクが消えないようにするため)。取得時刻・カードのグリッド(`home_status_service.render_status_grid_html`)を`<div id="status">`でまとめた1ブロックを組み立てる。`render_home_status_section`は`_render_status_section`をそのまま呼ぶ公開ラッパーで、ホームページの自動更新フラグメント(`GET {DASHBOARD_BASE_PATH}/status`)として使われる。**(不具合修正で削除)** 以前はここで`home_status_service.render_alerts_html`による「気になること」要約行も組み立てていたが、カード自体の色で判断できるため不要という要望により削除された(ホームページ・自動更新フラグメントの両方から同時に消える)。
-* 根拠: [関数定義] (行番号: 354〜364, 367〜389 / 抜粋: "def _render_status_section(cards, fetched_at: datetime, *, dashboard_path: str, refresh_sec: int) -> str:", "def render_home_status_section(cards, fetched_at: datetime, *, dashboard_path: str, refresh_sec: int) -> str:\n    \"\"\"ホームページの自動更新用フラグメント(カードのブロックだけ)。\"\"\"\n    return _render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec)")
+* 根拠: [関数定義] (行番号: 369〜379, 382〜405 / 抜粋: "def _render_status_section(cards, fetched_at: datetime, *, dashboard_path: str, refresh_sec: int) -> str:", "def render_home_status_section(cards, fetched_at: datetime, *, dashboard_path: str, refresh_sec: int) -> str:\n    \"\"\"ホームページの自動更新用フラグメント(カードのブロックだけ)。\"\"\"\n    return _render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec)")
 
 
 * **引数/リクエスト**: `cards`, `fetched_at: datetime`、キーワード専用で `dashboard_path: str`, `refresh_sec: int`(`_render_status_section`は`extra_html: str = ""`、`render_home_status_section`は`quest_path`/`asa_note_url`/`link_health`をいずれも省略可)
@@ -240,7 +240,7 @@
 ### `_status_refresh_script`
 
 * **役割**: ホームページのカードブロックだけを差し替える自動更新JSを組み立てる。`status_path`を`intervalMs`(=`refresh_sec*1000`)間隔で`fetch`し、成功時は`outerHTML`を差し替え、失敗時は`#status`に`stale`クラスを付ける。タブが非表示のときは更新を止め、可視化されたら即座に更新する。
-* 根拠: [関数定義] (行番号: 392〜426 / 抜粋: "def _status_refresh_script(status_path: str, refresh_sec: int) -> str:")
+* 根拠: [関数定義] (行番号: 408〜442 / 抜粋: "def _status_refresh_script(status_path: str, refresh_sec: int) -> str:")
 
 
 * **引数/リクエスト**: `status_path: str`, `refresh_sec: int`
@@ -263,7 +263,7 @@
 ### `_list_snapshot_files`
 
 * **役割**: `config.ASSETS_DIR/snapshots`配下のJPEGファイル名一覧を新しい順(ファイル名の降順ソート)に最大`_SNAPSHOT_GLOB_LIMIT`(20)件返す。`config.ASSETS_DIR`はNAS上のパスで遅延解決のためNAS障害に触れうるが、例外を握りつぶして空リストを返す。
-* 根拠: [関数定義] (行番号: 435〜447 / 抜粋: "def _list_snapshot_files() -> list[str]:")、[例外処理] (行番号: 314〜315 / 抜粋: "except Exception:\n        return []")
+* 根拠: [関数定義] (行番号: 451〜463 / 抜粋: "def _list_snapshot_files() -> list[str]:")、[例外処理] (行番号: 314〜315 / 抜粋: "except Exception:\n        return []")
 
 
 * **引数/リクエスト**: なし
@@ -286,7 +286,7 @@
 ### `resolve_snapshot_path`
 
 * **役割**: 見守りページから要求された1件のスナップショットファイル名を、`config.ASSETS_DIR/snapshots`配下の実パスへ安全に解決する。パストラバーサル対策として、`os.path.realpath`で正規化した候補パスが`snapshots`ディレクトリの配下に収まっているか(`os.path.commonpath`)を検証する。
-* 根拠: [関数定義] (行番号: 450〜464 / 抜粋: "def resolve_snapshot_path(filename: str) -> str | None:")、[パストラバーサル対策] (行番号: 327〜329 / 抜粋: 'candidate = os.path.realpath(os.path.join(base_dir, filename))\n    if os.path.commonpath([base_dir, candidate]) != base_dir:\n        return None')
+* 根拠: [関数定義] (行番号: 466〜480 / 抜粋: "def resolve_snapshot_path(filename: str) -> str | None:")、[パストラバーサル対策] (行番号: 327〜329 / 抜粋: 'candidate = os.path.realpath(os.path.join(base_dir, filename))\n    if os.path.commonpath([base_dir, candidate]) != base_dir:\n        return None')
 
 
 * **引数/リクエスト**: `filename: str`
@@ -309,7 +309,7 @@
 ### `_SNAPSHOT_TIMESTAMP_RE` / `_snapshot_timestamp`
 
 * **役割**: **(不具合修正で新設)** スナップショットのファイル名(`monitors/camera_monitor.py`の`save_image_from_stream`が付与する`{カメラ名}_{種別}_{YYYYMMDD_HHMMSS}.jpg`形式)から撮影日時を取り出す。カメラ名が`_`を含みうるため、位置ではなく末尾のパターン(`_SNAPSHOT_TIMESTAMP_RE`)でマッチさせる。形式が違うファイル名(古い形式等)は`None`を返す。以前は「最近の写真」に撮影日時がまったく表示されていなかった不具合の修正。
-* 根拠: `_SNAPSHOT_TIMESTAMP_RE = re.compile(r"_(\d{8}_\d{6})\.jpg$")` (行番号: 358)、`def _snapshot_timestamp(filename: str) -> datetime | None:` (行番号: 473〜481)
+* 根拠: `_SNAPSHOT_TIMESTAMP_RE = re.compile(r"_(\d{8}_\d{6})\.jpg$")` (行番号: 358)、`def _snapshot_timestamp(filename: str) -> datetime | None:` (行番号: 489〜497)
 
 
 * **引数/リクエスト**: `filename: str`
@@ -332,7 +332,7 @@
 ### `_render_snapshot_gallery`
 
 * **役割**: `_list_snapshot_files`の結果を最大`_SNAPSHOT_GALLERY_LIMIT`(8)件に絞り、各画像を`<a class="snapshot-item" target="_blank">`で包んだグリッド(`snapshot-grid`)を組み立てる。ファイルが1件も無い場合は「写真なし」の注記を返す。**(不具合修正)** 以前は`<img>`を並べるだけで、タップしても元画像を拡大表示できなかった。各画像を元ファイルへのリンクにし、新しいタブで開けるようにした。あわせて`_snapshot_timestamp`でファイル名から撮影日時を解析し、`.snapshot-caption`として画像の下に表示するようにした(以前は撮影日時がどこにも出ていなかった)。日時を解析できないファイル名(古い形式)ではキャプションを出さず、画像自体は表示する。
-* 根拠: [関数定義] (行番号: 484〜508 / 抜粋: "def _render_snapshot_gallery(snapshot_url_prefix: str) -> str:")、[リンク化] (行番号: 391〜395 / 抜粋: '<a class="snapshot-item" href="{url}" target="_blank" rel="noopener">')、[キャプション] (行番号: 385〜390 / 抜粋: "moment = _snapshot_timestamp(name)")
+* 根拠: [関数定義] (行番号: 500〜524 / 抜粋: "def _render_snapshot_gallery(snapshot_url_prefix: str) -> str:")、[リンク化] (行番号: 391〜395 / 抜粋: '<a class="snapshot-item" href="{url}" target="_blank" rel="noopener">')、[キャプション] (行番号: 385〜390 / 抜粋: "moment = _snapshot_timestamp(name)")
 
 
 * **引数/リクエスト**: `snapshot_url_prefix: str`(画像を配信するURLプレフィックス)
@@ -355,7 +355,7 @@
 ### `_render_simple_table`
 
 * **役割**: DataFrameをスマホ向けの簡易`<table>`に変換する。`columns`(元の列名→表示名)で指定した列だけを`limit`(既定50)行ぶん描画し、`timestamp`列は`home_status_service.format_relative_time`/`format_short_timestamp`で「MM/DD HH:MM (N分前)」形式に整形する。DataFrameが空、または指定列が1つも存在しない場合は「表示できるデータがありません」を返す。
-* 根拠: [関数定義] (行番号: 511〜532 / 抜粋: "def _render_simple_table(df: pd.DataFrame, columns: dict[str, str], *, limit: int = 50) -> str:")
+* 根拠: [関数定義] (行番号: 527〜548 / 抜粋: "def _render_simple_table(df: pd.DataFrame, columns: dict[str, str], *, limit: int = 50) -> str:")
 
 
 * **引数/リクエスト**: `df: pd.DataFrame`, `columns: dict[str, str]`、キーワード専用で `limit: int = 50`
@@ -382,13 +382,13 @@
 ### `_OPEN_CLOSE_MERGE_SECONDS` / `merge_open_close_events`
 
 * **役割**: **(UI改善で新設)** 開閉センサーの「open」の直後(同じ機器で60秒以内、60秒ちょうどを含む)に「close」が来た組を、開いた時刻の1行にまとめる(新しい順で返す)。まとめた行の`contact_state`は「開 → 閉（N秒）」にする。ドアを開けて閉める1回の出入りが2行に分かれてログが長くなっていた問題の改善。まとめるのは「open → close」の向きだけで、「close → open」・`timeoutnotclose`(開けっぱなし)・人感センサー(`detected`)・`movement_state`が入っている行は対象外(そのまま別行)。機器の識別は`sensor_state_change_log`と同じ(`device_id`、無ければ`friendly_name`で、無ければ何もしない)で、「直後」は同じ機器の次の行(他の機器の行が間に挟まっていても関係しない)。`sensor_state_change_log`の出力を想定する。`timestamp`が日時型でない・必要な列が無い・まとめる組が無い場合は入力をそのまま返し、入力のDataFrameは変更しない。`render_watch_page`が高砂・伊丹のログにそれぞれ`sensor_state_change_log`の後で適用する(防犯ログ・ホームのカード判定には影響しない)。
-* 根拠: `_OPEN_CLOSE_MERGE_SECONDS = 60` (行番号: 592)、`def merge_open_close_events(df: pd.DataFrame) -> pd.DataFrame:` (行番号: 595)、`render_watch_page`内の適用 (行番号: 799〜800)
+* 根拠: `_OPEN_CLOSE_MERGE_SECONDS = 60` (行番号: 592)、`def merge_open_close_events(df: pd.DataFrame) -> pd.DataFrame:` (行番号: 611)、`render_watch_page`内の適用 (行番号: 799〜800)
 
 
 ### `_LOG_TABLE_VISIBLE_ROWS` / `_render_collapsible_log_table`
 
 * **役割**: **（UI改善で新設）** `_render_simple_table`を、先頭`visible`件(既定`_LOG_TABLE_VISIBLE_ROWS`=5)だけ常時表示し、残りを`<details><summary>`で折りたたむ形に拡張する。防犯ログ・センサーログが縦に長く連なりスクロールが大変だった問題の改善。全件は引き続き`limit`(既定50)件まで読み込み、隠すだけでデータ自体は減らさない。
-* 根拠: `_LOG_TABLE_VISIBLE_ROWS = 5` (行番号: 467)、`def _render_collapsible_log_table(` (行番号: 539〜556 / 抜粋: "def _render_collapsible_log_table(")
+* 根拠: `_LOG_TABLE_VISIBLE_ROWS = 5` (行番号: 467)、`def _render_collapsible_log_table(` (行番号: 555〜572 / 抜粋: "def _render_collapsible_log_table(")
 
 
 * **引数/リクエスト**: `df: pd.DataFrame`, `columns: dict[str, str]`、キーワード専用で `visible: int = _LOG_TABLE_VISIBLE_ROWS`, `limit: int = 50`
@@ -410,15 +410,15 @@
 
 ### `_render_camera_selector`
 
-* **役割**: カメラ一覧からカメラ切替ボタン(`onclick="dashboardSelectCamera(...)"`)と、選択中カメラのライブ映像を表示する`<video>`要素を組み立てる。カメラが1台も無い場合は「カメラが登録されていません」を返す。
-* 根拠: [関数定義] (行番号: 653〜664 / 抜粋: "def _render_camera_selector(cameras: list[dict[str, Any]]) -> str:")
+* **役割**: **(仕様変更)** カメラ一覧から、有効なカメラ全台のライブ映像タイル(名前ラベル＋`<video class="camera-video" data-camera-id>`)を`camera-grid`で並べて組み立てる。切替ボタン方式は廃止し、初期表示から全台を同時に表示する(ライブ配信のffmpegはカメラ単位で独立しているため互いに止め合わない)。カメラが1台も無い場合は「カメラが登録されていません」を返す。
+* 根拠: [関数定義] (行番号: 669〜685 / 抜粋: "def _render_camera_selector(cameras: list[dict[str, Any]]) -> str:")
 
 
 * **引数/リクエスト**: `cameras: list[dict[str, Any]]`(各要素は`id`/`name`キーを持つ)
 * 根拠: [関数定義] (行番号: 370)
 
 
-* **戻り値/レスポンス**: `str`(`camera-select-row`のボタン列＋`camera-video-box`の`<video>`、またはプレースホルダの`<p>`)
+* **戻り値/レスポンス**: `str`(`camera-grid`内の`camera-tile`群、またはプレースホルダの`<p>`)
 * 根拠: [戻り値] (行番号: 372, 378〜381)
 
 
@@ -433,7 +433,7 @@
 
 ### `_CAMERA_SCRIPT`
 
-* **役割**: hls.js(CDN読み込み)を使い、`dashboardSelectCamera(cameraId)`関数でカメラのライブHLS映像(`/api/cameras/live/{id}/stream.m3u8`)を`<video>`に切り替えるJS。選択結果は`localStorage`(`dashboardSelectedCamera`)に保存し、`DOMContentLoaded`時に初期選択するカメラを決める。ブラウザがhls.jsに非対応でもネイティブHLS再生(`canPlayType`)に対応していればそちらへフォールバックする。**(不具合修正)** 初期選択の優先順位を、以前の「前回選択(`localStorage`)→先頭のカメラ」の2段階から、「URLクエリ`?camera=<id>`→前回選択→先頭のカメラ」の3段階に変更した。ホームページの「🚗 駐車場」カードがこのクエリ付きでこのページへリンクすることで、タップ時に駐車場カメラを選択済みの状態で開けるようにするため。
+* **役割**: hls.js(CDN読み込み)を使い、`DOMContentLoaded`時に全`.camera-video`のライブHLS映像(`/api/cameras/live/{id}/stream.m3u8`)を同時に再生開始するJS(**仕様変更**: 以前の`dashboardSelectCamera`による1台切替と`localStorage`保存は廃止)。ブラウザがhls.jsに非対応でもネイティブHLS再生(`canPlayType`)に対応していればそちらへフォールバックする。URLクエリ`?camera=<id>`(ホームの「🚗 駐車場」カードが付ける)で指定されたカメラのタイルは、全台表示の中で先頭へ移し強調する。
 * 根拠: [定数宣言] (行番号: 394〜444 / 抜粋: '_CAMERA_SCRIPT = """\n<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>')、[localStorage保存] (行番号: 421 / 抜粋: 'try { localStorage.setItem(STORAGE_KEY, cameraId); } catch (e) {}')、[初期選択] (行番号: 427〜441 / 抜粋: 'var requested = null;\n        try { requested = new URLSearchParams(window.location.search).get("camera"); } catch (e) {}')
 
 
@@ -457,13 +457,13 @@
 ### `parse_log_date` / `_render_log_date_filter`
 
 * **役割**: **(新機能)** 見守りページのログの日付フィルタ。`parse_log_date`は`?date=YYYY-MM-DD`を`date`にする(未指定・形式不正は`None`=絞り込みなし)。`_render_log_date_filter`は3つのログ共通の日付入力(`<input type="date" name="date">`)と「絞り込み」ボタンのGETフォームを返す(JS不要)。遷移先に`#log-filter`を付けて送信後にログの位置へ戻る。日付指定時は「クリア」リンクと「YYYY/MM/DD のログを全件表示しています」の注記を出す。タップターゲットは44px。
-* 根拠: `def parse_log_date(value: str | None) -> date | None:` (行番号: 721)、`def _render_log_date_filter(dashboard_path: str, selected_date: date | None) -> str:` (行番号: 731)
+* 根拠: `def parse_log_date(value: str | None) -> date | None:` (行番号: 734)、`def _render_log_date_filter(dashboard_path: str, selected_date: date | None) -> str:` (行番号: 744)
 
 
 ### `render_watch_page`
 
 * **役割**: 👀見守りページ全体を組み立てる。**(UI改善)** 高砂・伊丹のセンサーログは`sensor_state_change_log`の後に`merge_open_close_events`を通し、「open」の直後60秒以内の「close」を「開 → 閉（N秒）」の1行にまとめる。**(新機能)** 引数`selected_date`(`date | None`)を追加。指定時は3つのログ表の件数上限(通常50件)を外して`df_sensor`の全行を表示する(先頭5件の常時表示+折りたたみは同じ)。`df_sensor`は呼び出し側が指定日の全件を渡す前提で、ここでは日付による再フィルタはしない。3つのログの上に日付フィルタ(`_render_log_date_filter`)を置く。`config.CAMERAS`から有効なカメラ一覧を作り、`df_sensor`から`location == "高砂"`/`location == "伊丹"`の行をそれぞれ抽出し(**(UI改善)** さらに`sensor_state_change_log`で開閉/動体の状態変化行だけに絞って)、カメラ選択・スナップショットギャラリー・防犯ログ表・高砂実家センサーログ表・伊丹(自宅)センサーログ表の順に並べる。**(不具合修正)** カメラ映像セクションに`id="camera-section"`、高砂ログに`id="takasago-log"`、伊丹ログに`id="itami-log"`を付けている。以前は見守りグループの4枚のステータスカード(高砂・伊丹・駐車場・カメラ)が全部このページの`tab="watch"`だけを指し`anchor`が無かったため、どのカードをタップしても同じURL(ページ先頭=カメラ映像)にしか飛べなかった。`home_status_service.build_status_cards`が付ける`anchor`(`#takasago-log`等)がこれらのidを指すことで、カードごとに該当セクションへ遷移できるようにした。伊丹用のセンサーログ表(`df_itami`)は今回新設したもので、以前は`location == "伊丹"`の行を表示する場所がどこにも無かった。**(不具合修正)** 防犯ログは以前引数`df_security_log`(`security_logs`テーブル。書き込むコードが存在せず常に空)を`analysis_service.apply_friendly_names`に通して表示していたが、この引数自体を削除し、`home_status_service.camera_motion_log(df_sensor)`(カメラの動体検知。`df_sensor`は`load_sensor_data`側で既に`apply_friendly_names`済み)を防犯ログの正のデータとして使うよう差し替えた。**(UI改善)** 3つのログ表(防犯ログ・高砂/伊丹センサーログ)は以前`_render_simple_table`で直接描画しており最大50行が縦に連なりスクロールが大変だったため、`_render_collapsible_log_table`に差し替えて先頭5件だけを常時表示するようにした。
-* 根拠: [関数定義] (行番号: 756〜832 / 抜粋: "def render_watch_page(\n    df_sensor: pd.DataFrame,\n    *,\n    dashboard_path: str,\n    snapshot_url_prefix: str,\n    selected_date: date | None = None,\n) -> str:")、[セクションid] (行番号: 525〜540 / 抜粋: '\'<div id="camera-section">\'', '\'<div id="takasago-log">\'', '\'<div id="itami-log">\'')、[防犯ログの差し替え] (行番号: 505〜507, 514 / 抜粋: "df_camera_motion = home_status_service.camera_motion_log(df_sensor)")
+* 根拠: [関数定義] (行番号: 769〜845 / 抜粋: "def render_watch_page(\n    df_sensor: pd.DataFrame,\n    *,\n    dashboard_path: str,\n    snapshot_url_prefix: str,\n    selected_date: date | None = None,\n) -> str:")、[セクションid] (行番号: 525〜540 / 抜粋: '\'<div id="camera-section">\'', '\'<div id="takasago-log">\'', '\'<div id="itami-log">\'')、[防犯ログの差し替え] (行番号: 505〜507, 514 / 抜粋: "df_camera_motion = home_status_service.camera_motion_log(df_sensor)")
 
 
 * **引数/リクエスト**: `df_sensor: pd.DataFrame`、キーワード専用で `dashboard_path: str`, `snapshot_url_prefix: str`
@@ -486,7 +486,7 @@
 ### `_render_daily_cost_history`
 
 * **役割**: **（不具合修正で新設）** `analysis_service.calculate_daily_cost_series`の結果(新しい順、先頭が今日)を横棒グラフ付きの簡易リスト(`.cost-history`)で表示する。以前は「今月の電気代」カードをタップしても同じカードの再掲だけで詳細と呼べる情報が無かったため、タップする価値のある詳細として日別推移を追加した。バーの幅は当該リスト内の最大値に対する相対値(`round(cost / max_cost * 100)`)で、0円の日でもバー自体が見えなくなって「データが無い」ように見えないよう最小2%の幅を確保する。先頭行(今日)は日付ではなく「今日」と表示する。
-* 根拠: `def _render_daily_cost_history(rows: list[tuple[Any, int]]) -> str:` (行番号: 838〜859 / 抜粋: "def _render_daily_cost_history(rows: list[tuple[Any, int]]) -> str:")
+* 根拠: `def _render_daily_cost_history(rows: list[tuple[Any, int]]) -> str:` (行番号: 851〜872 / 抜粋: "def _render_daily_cost_history(rows: list[tuple[Any, int]]) -> str:")
 
 
 * **引数/リクエスト**: `rows: list[tuple[Any, int]]`(`(日付, 電気代概算円)`のリスト)
@@ -509,7 +509,7 @@
 ### `render_life_page`
 
 * **役割**: 💡くらしページを組み立てる。渡された`cards`のうち`group == "life"`のものだけを`home_status_service.render_status_grid_html`で描画し、「今月の電気代はスマートメーターの記録からの概算です」の注記を添える。**(不具合修正)** `daily_cost_rows`引数(`analysis_service.calculate_daily_cost_series`)を追加し、`_render_daily_cost_history`で日別の電気代推移を「📊 日別の電気代(概算)」セクションとして表示するようにした。電気代カードをタップしても意味のある詳細が無かった不具合の修正。
-* 根拠: [関数定義] (行番号: 862〜877 / 抜粋: "def render_life_page(cards, *, dashboard_path: str, daily_cost_rows: list[tuple[Any, int]] | None = None) -> str:")
+* 根拠: [関数定義] (行番号: 875〜890 / 抜粋: "def render_life_page(cards, *, dashboard_path: str, daily_cost_rows: list[tuple[Any, int]] | None = None) -> str:")
 
 
 * **引数/リクエスト**: `cards`、キーワード専用で `dashboard_path: str`, `daily_cost_rows: list[tuple[Any, int]] | None = None`
@@ -532,7 +532,7 @@
 ### `FreshnessRow`
 
 * **役割**: システムページの鮮度一覧1行を表す型エイリアス(ラベル・最終更新時刻・異常とみなす経過分数のタプル。分数が`None`なら情報表示のみ)。
-* 根拠: [型宣言] (行番号: 882〜883 / 抜粋: "# (ラベル, 最終更新時刻を取り出す関数のキー, 異常とみなす経過分数。Noneは情報表示のみ)\nFreshnessRow = tuple[str, datetime | None, int | None]")
+* 根拠: [型宣言] (行番号: 895〜896 / 抜粋: "# (ラベル, 最終更新時刻を取り出す関数のキー, 異常とみなす経過分数。Noneは情報表示のみ)\nFreshnessRow = tuple[str, datetime | None, int | None]")
 
 
 * **引数/リクエスト**: 該当なし
@@ -578,7 +578,7 @@
 ### `build_freshness_rows`
 
 * **役割**: システムページの「各機能の最終データ更新時刻」一覧(⚡電気・環境の見守り/🗄️保存装置(NAS)/🚗駐車場カメラ(参考)/🖥️サーバー本体)を組み立てる。内部の`_add`ヘルパーが、時刻が無ければ「データがありません」(閾値ありなら赤、無ければ情報表示)、閾値を超えていれば赤で「(更新が止まっています)」を付記、それ以外は閾値の有無に応じて`ok`/`info`状態にする。駐車場カメラはイベント駆動(動きがあった時だけ記録)のため閾値`None`で「更新が無い=異常」とはみなさない。サーバー本体は`memory`の有無だけで`ok`/`red`を決める。
-* 根拠: [関数定義] (行番号: 895〜942 / 抜粋: "def build_freshness_rows(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    memory: dict[str, float] | None,\n    now: datetime,\n) -> list[dict[str, Any]]:")、[閾値判定] (行番号: 909〜919 / 抜粋: "def _add(label: str, at: datetime | None, threshold_min: int | None):")
+* 根拠: [関数定義] (行番号: 908〜955 / 抜粋: "def build_freshness_rows(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    memory: dict[str, float] | None,\n    now: datetime,\n) -> list[dict[str, Any]]:")、[閾値判定] (行番号: 922〜932 / 抜粋: "def _add(label: str, at: datetime | None, threshold_min: int | None):")
 
 
 * **引数/リクエスト**: `df_sensor: pd.DataFrame`, `nas_data: pd.Series | None`, `memory: dict[str, float] | None`, `now: datetime`
@@ -586,7 +586,7 @@
 
 
 * **戻り値/レスポンス**: `list[dict[str, Any]]`(各要素は`label`/`text`/`state`キーを持つ)
-* 根拠: [戻り値] (行番号: 942 / 抜粋: "return rows")、[辞書組み立て] (行番号: 511, 516, 519, 536〜540)
+* 根拠: [戻り値] (行番号: 955 / 抜粋: "return rows")、[辞書組み立て] (行番号: 511, 516, 519, 536〜540)
 
 
 * **副作用**: なし(渡された引数を読むのみ)
@@ -601,7 +601,7 @@
 ### `_render_freshness_rows`
 
 * **役割**: `build_freshness_rows`の戻り値を`<div class="freshness-row">`の並びに変換する。`state`(`red`/`ok`/`info`)に応じてCSSクラス(`freshness-red`/`freshness-ok`/`freshness-info`)を付ける。
-* 根拠: [関数定義] (行番号: 945〜952 / 抜粋: "def _render_freshness_rows(rows: list[dict[str, Any]]) -> str:")
+* 根拠: [関数定義] (行番号: 958〜965 / 抜粋: "def _render_freshness_rows(rows: list[dict[str, Any]]) -> str:")
 
 
 * **引数/リクエスト**: `rows: list[dict[str, Any]]`
@@ -624,7 +624,7 @@
 ### `_render_overall_summary`
 
 * **役割**: `build_freshness_rows`の戻り値のうち`state == "red"`の件数を数え、0件なら「✅ すべて正常です」、1件以上なら「⚠️ N件、確認が必要です」を返す(項目3の全体サマリー)。
-* 根拠: [関数定義] (行番号: 955〜959 / 抜粋: "def _render_overall_summary(rows: list[dict[str, Any]]) -> str:")
+* 根拠: [関数定義] (行番号: 968〜972 / 抜粋: "def _render_overall_summary(rows: list[dict[str, Any]]) -> str:")
 
 
 * **引数/リクエスト**: `rows: list[dict[str, Any]]`
@@ -647,7 +647,7 @@
 ### `_NAS_CHART_WIDTH` / `_NAS_CHART_HEIGHT` / `_NAS_CHART_PAD` / `_render_nas_history_chart`
 
 * **役割**: **（不具合修正で新設）** `analysis_service.load_nas_history`の`percent`列を、インラインSVGの折れ線グラフ(`.nas-chart`)で表示する。以前はNASカードをタップしても容量履歴を見る手段が無かった。使用率は0〜100%固定でスケールし(実測範囲での拡大縮小はしない)、0/50/100%の位置に補助線(`.nas-chart-grid`)を引く。グラフだけでは正確な値を読み取れないため、`<details>`で折りたたんだ詳細テーブル(直近10件、`_render_simple_table`を再利用)も併設する。データが無い、または2点未満の場合は「表示できるデータがありません」を返す(折れ線を引くには最低2点必要)。
-* 根拠: `_NAS_CHART_WIDTH = 300` (行番号: 737)、`_NAS_CHART_HEIGHT = 90` (行番号: 738)、`_NAS_CHART_PAD = 8` (行番号: 739)、`def _render_nas_history_chart(df: pd.DataFrame) -> str:` (行番号: 969〜1008 / 抜粋: "def _render_nas_history_chart(df: pd.DataFrame) -> str:")
+* 根拠: `_NAS_CHART_WIDTH = 300` (行番号: 737)、`_NAS_CHART_HEIGHT = 90` (行番号: 738)、`_NAS_CHART_PAD = 8` (行番号: 739)、`def _render_nas_history_chart(df: pd.DataFrame) -> str:` (行番号: 982〜1021 / 抜粋: "def _render_nas_history_chart(df: pd.DataFrame) -> str:")
 
 
 * **引数/リクエスト**: `df: pd.DataFrame`(`timestamp`/`percent`/`free_gb`等の列を持つ、`load_nas_history`と同じ形)
@@ -670,7 +670,7 @@
 ### `render_sys_page`
 
 * **役割**: 🔧システムページ全体を組み立てる。全体サマリー(`_render_overall_summary`)・各機能の最終更新一覧(`_render_freshness_rows`)・NASの容量推移(`_render_nas_history_chart`)・保存容量の使用率(`disk`があれば)・メンテナンス操作(サービス再起動の確認チェックボックス付きボタン、今すぐバックアップボタン)を並べる。**(不具合修正)** `nas_history`引数を追加し、`id="nas-history"`の`.info-box`セクションとしてNASの容量推移グラフを表示するようにした(「🗄️ NAS」カードの`anchor`のタップ先)。あわせて「各機能の最終更新」・NAS推移の各セクションを`.info-box`で視覚的にグループ化し、システムページを見やすくした。**(UI改善)** バックアップ欄に「最新のバックアップ: 日時(サイズ)」(`id="backupLatest"`)を追加し、実行中のボタン無効化+スピナー表示・完了/失敗のトースト(`.dashboard-toast`)を出す。最新時刻はNAS列挙が必要なためページ描画には含めず、JSが`GET /api/system/backup/status`で非同期に取得する。
-* 根拠: [関数定義] (行番号: 1011〜1080 / 抜粋: "def render_sys_page(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    nas_history: pd.DataFrame,\n    memory: dict[str, float] | None,\n    disk: dict[str, float] | None,\n    now: datetime,\n    *,\n    dashboard_path: str,\n) -> str:")
+* 根拠: [関数定義] (行番号: 1024〜1093 / 抜粋: "def render_sys_page(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    nas_history: pd.DataFrame,\n    memory: dict[str, float] | None,\n    disk: dict[str, float] | None,\n    now: datetime,\n    *,\n    dashboard_path: str,\n) -> str:")
 
 
 * **引数/リクエスト**: `df_sensor: pd.DataFrame`, `nas_data: pd.Series | None`, `nas_history: pd.DataFrame`, `memory: dict[str, float] | None`, `disk: dict[str, float] | None`, `now: datetime`、キーワード専用で `dashboard_path: str`
