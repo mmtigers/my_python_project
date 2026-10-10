@@ -311,7 +311,9 @@ def group_cards(cards) -> list[tuple[str | None, list[StatusCard]]]:
     return grouped
 
 
-def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:
+def render_status_grid_html(
+    cards, *, dashboard_path: str | None = None, show_group_titles: bool = True
+) -> str:
     """カードを自動折り返しのグリッドにまとめたHTMLを返す。
 
     `group` を持つカードには見出しが付く(`CARD_GROUPS`)。9枚が1つの塊に見えると
@@ -319,11 +321,14 @@ def render_status_grid_html(cards, *, dashboard_path: str | None = None) -> str:
 
     `dashboard_path` を渡すと、詳細のあるカードがその行き先へのリンクになる
     (軽量ページ専用。理由は `render_status_card_html` の docstring を参照)。
+
+    `show_group_titles=False` はグループ見出しを出さない(ページ自身の見出しが
+    グループ名と同じで、同じ見出しが2つ並んでしまうサブページ用。表示だけの違い)。
     """
     blocks = []
     for group_key, group_cards_ in group_cards(cards):
         label = CARD_GROUP_LABELS.get(group_key or "")
-        if label:
+        if label and show_group_titles:
             blocks.append(f'<h2 class="group-title">{html.escape(label)}</h2>')
         # 1枚だけのグループは、カードが行いっぱいに伸びないよう目印を付ける
         # (理由は `.status-grid-solo` のCSSコメントを参照)。

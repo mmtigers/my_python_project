@@ -270,11 +270,11 @@ _PAGE_BASE_CSS = """
     .git-commit-sha { font-family: ui-monospace, Menlo, Consolas, monospace; }
     .git-commit-badge { font-size: 0.8rem; margin-left: 6px; white-space: nowrap; display: inline-block; }
     .nas-period a.nas-period-link {
-        padding: 6px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent);
+        display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 999px; background: var(--accent-soft); color: var(--accent);
         border: 1px solid var(--accent-bd); text-decoration: none;
     }
     .nas-period .nas-period-current {
-        padding: 6px 12px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: bold;
+        display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: bold;
     }
     .nas-chart-line { stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     details > summary {
@@ -320,6 +320,40 @@ _PAGE_BASE_CSS = """
         border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border);
     }
     .camera-video-box video { width: 100%; height: 100%; object-fit: contain; }
+
+    /* サブページ上部: 「ホームへ戻る」と、兄弟ページへの切替タブ(ホームへ戻らず直接移動できる)。
+       現在のページは aria-current で示し、色だけに頼らず太字+塗りで区別する。 */
+    .page-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; }
+    .page-head > p { margin: 0; }
+    nav.page-tabs { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; }
+    nav.page-tabs a {
+        display: inline-flex; align-items: center; justify-content: center; flex: 1 1 auto;
+        min-height: 44px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border);
+        background: var(--surface); color: var(--text); font-size: 0.85rem; text-decoration: none;
+        white-space: nowrap; -webkit-tap-highlight-color: var(--tap);
+    }
+    nav.page-tabs a:hover { border-color: var(--accent); }
+    nav.page-tabs a[aria-current="page"] {
+        background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: bold;
+    }
+    /* 狭い画面では2x2に揃える(4つ目だけ次の行に余る並びを避ける)。 */
+    @media (max-width: 519px) { nav.page-tabs { display: grid; grid-template-columns: 1fr 1fr; width: 100%; } }
+    @media (min-width: 720px) { nav.page-tabs a { flex: 0 1 auto; padding: 0 16px; } }
+
+    /* システムページ: 広い画面では情報の箱を2列に並べて一覧性を上げる(狭い画面は1列のまま)。 */
+    .box-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 16px; align-items: start; }
+    @media (min-width: 900px) { .box-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .maintenance-group { margin-bottom: 16px; }
+    .maintenance-box h3 { font-size: 0.95rem; margin: 0 0 6px; }
+    .maintenance-box p { margin: 6px 0; font-size: 0.9rem; }
+    .maintenance-box.is-danger { border-color: var(--bad-bd); }
+    /* 確認チェックは、ラベルごとタップできる44px以上の行にする(誤操作防止の確認なので押し損ねにくく)。 */
+    label.confirm-row {
+        display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 0;
+        font-size: 0.9rem; cursor: pointer;
+    }
+    label.confirm-row input { width: 22px; height: 22px; flex: none; margin: 0; }
+    @media (max-width: 519px) { .maintenance-box button { width: 100%; } }
 """
 
 
@@ -338,8 +372,22 @@ def _page_shell(title: str, body_html: str, *, extra_head: str = "") -> str:
     )
 
 
-def _back_to_home_link(dashboard_path: str) -> str:
-    return f'<p><a class="back-link" href="{html.escape(dashboard_path)}">← ホームへ戻る</a></p>'
+def _back_to_home_link(dashboard_path: str, current: str | None = None) -> str:
+    """サブページ上部の「ホームへ戻る」と、兄弟ページ(`_NAV_CARDS`)への切替タブ。
+    `current`(ページのキー)を渡すとそのタブを現在地として示す。"""
+    base = html.escape(dashboard_path.rstrip("/"))
+    # f-stringの式の中にバックスラッシュを書けるのはPython 3.12以降(実機・CIは3.11)なので、式の外で作る。
+    current_attr = ' aria-current="page"'
+    tabs = "".join(
+        f'<a href="{base}/{key}"{current_attr if key == current else ""}>{html.escape(label)}</a>'
+        for key, label, _ in _NAV_CARDS
+    )
+    return (
+        '<div class="page-head">'
+        f'<p><a class="back-link" href="{html.escape(dashboard_path)}">← ホームへ戻る</a></p>'
+        f'<nav class="page-tabs" aria-label="ページの切り替え">{tabs}</nav>'
+        "</div>"
+    )
 
 
 # === ホームページ ===
@@ -986,7 +1034,7 @@ def render_watch_page(
         return _render_collapsible_log_table(df, columns, limit=max(len(df), _LOG_TABLE_VISIBLE_ROWS))
 
     body = (
-        f"{_back_to_home_link(dashboard_path)}"
+        f"{_back_to_home_link(dashboard_path, 'watch')}"
         "<h1>👀 見守り</h1>"
         '<div id="camera-section">'
         "<h2>🎥 カメラの映像</h2>"
@@ -1044,9 +1092,9 @@ def render_life_page(cards, *, dashboard_path: str, daily_cost_rows: list[tuple[
     """
     life_cards = [card for card in cards if card.group == "life"]
     body = (
-        f"{_back_to_home_link(dashboard_path)}"
+        f"{_back_to_home_link(dashboard_path, 'life')}"
         "<h1>💡 くらし</h1>"
-        f"{home_status_service.render_status_grid_html(life_cards)}"
+        f"{home_status_service.render_status_grid_html(life_cards, show_group_titles=False)}"
         '<p class="empty-note">今月の電気代はスマートメーターの記録からの概算です。</p>'
         f'<div class="link-grid"><a class="nav-card" href="{html.escape(dashboard_path.rstrip("/"))}/power">'
         '⚡ 電気のくわしい分析<span class="nav-card-sub">月ごとの推移・気温との関係・テレビ</span></a></div>'
@@ -1378,7 +1426,7 @@ def render_updates_page(
         )
         cards = head + more
     body = (
-        f"{_back_to_home_link(dashboard_path)}"
+        f"{_back_to_home_link(dashboard_path, 'updates')}"
         "<h1>📜 アップデート</h1>"
         '<p class="meta">ダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を、新しい順にまとめています。</p>'
         f'<div class="release-filter">{"".join(chips)}</div>'
@@ -1531,9 +1579,10 @@ def render_sys_page(
         disk_line = f'<p class="meta">保存容量の使用率: {int(disk["percent"])}%</p>'
 
     body = (
-        f"{_back_to_home_link(dashboard_path)}"
+        f"{_back_to_home_link(dashboard_path, 'sys')}"
         "<h1>🔧 システム</h1>"
         f"{_render_overall_summary(rows)}"
+        '<div class="box-grid">'
         '<div class="info-box">'
         "<h2>各機能の最終更新</h2>"
         f"{_render_freshness_rows(rows)}"
@@ -1545,33 +1594,43 @@ def render_sys_page(
         "</div>"
         f"{_render_boot_history_box(boot_history or [])}"
         f"{_render_git_status_box()}"
+        "</div>"
         "<h2>🛠️ メンテナンス</h2>"
+        '<div class="maintenance-group">'
+        # 日常的に使える安全な操作(バックアップ)を先に、影響の大きい再起動系を後ろにまとめる。
         '<div class="maintenance-box">'
-        "<p>GitHubの最新を取り込んで、システムを再起動します。"
-        "取り込みに失敗した場合は再起動しません(新しい内容が無いときも再起動しません)。</p>"
-        "<p>⚠️ 再起動中はダッシュボードやIoT機器の操作が一時的に使えなくなります。数分かかることがあります。</p>"
-        '<label><input type="checkbox" id="deployConfirm" onchange="'
-        'document.getElementById(\'deployBtn\').disabled = !this.checked;">'
-        "最新に更新して再起動することを理解しました</label><br>"
-        '<button type="button" class="danger" id="deployBtn" disabled onclick="dashboardDeploy()">'
-        "⬇️ 最新に更新して再起動</button>"
-        '<div id="deployResult" class="maintenance-result" role="status" aria-live="polite"></div>'
-        "</div>"
-        '<div class="maintenance-box">'
-        "<p>⚠️ 再起動するとダッシュボードやIoT機器の操作が一時的に使えなくなります。</p>"
-        '<label><input type="checkbox" id="restartConfirm" onchange="'
-        'document.getElementById(\'restartBtn\').disabled = !this.checked;">'
-        "再起動することを理解しました</label><br>"
-        '<button type="button" class="danger" id="restartBtn" disabled onclick="dashboardRestart()">'
-        "🔄 システム再起動</button>"
-        '<div id="restartResult" class="maintenance-result"></div>'
-        "</div>"
-        '<div class="maintenance-box">'
+        "<h3>📦 バックアップ</h3>"
         "<p>データベースを今すぐバックアップします。</p>"
         '<p class="meta" id="backupLatest">最新のバックアップ: 確認中...</p>'
         '<button type="button" class="primary" id="backupBtn" onclick="dashboardBackup()">'
         "📦 今すぐバックアップ</button>"
         '<div id="backupResult" class="maintenance-result" role="status" aria-live="polite"></div>'
+        "</div>"
+        '<p class="alerts alerts-warn">⚠️ 次の2つは再起動を伴います。再起動中はダッシュボードやIoT機器の操作が'
+        "一時的に使えなくなり、数分かかることがあります。</p>"
+        '<div class="box-grid">'
+        '<div class="maintenance-box is-danger">'
+        "<h3>⬇️ 最新に更新して再起動</h3>"
+        "<p>GitHubの最新を取り込んで、システムを再起動します。"
+        "取り込みに失敗した場合は再起動しません(新しい内容が無いときも再起動しません)。</p>"
+        '<label class="confirm-row"><input type="checkbox" id="deployConfirm" onchange="'
+        'document.getElementById(\'deployBtn\').disabled = !this.checked;">'
+        "最新に更新して再起動することを理解しました</label>"
+        '<button type="button" class="danger" id="deployBtn" disabled onclick="dashboardDeploy()">'
+        "⬇️ 最新に更新して再起動</button>"
+        '<div id="deployResult" class="maintenance-result" role="status" aria-live="polite"></div>'
+        "</div>"
+        '<div class="maintenance-box is-danger">'
+        "<h3>🔄 システム再起動</h3>"
+        "<p>更新は取り込まず、システムだけを再起動します。</p>"
+        '<label class="confirm-row"><input type="checkbox" id="restartConfirm" onchange="'
+        'document.getElementById(\'restartBtn\').disabled = !this.checked;">'
+        "再起動することを理解しました</label>"
+        '<button type="button" class="danger" id="restartBtn" disabled onclick="dashboardRestart()">'
+        "🔄 システム再起動</button>"
+        '<div id="restartResult" class="maintenance-result"></div>'
+        "</div>"
+        "</div>"
         "</div>"
     )
     return _page_shell("システム - おうちの様子", body, extra_head=_MAINTENANCE_SCRIPT + _GIT_STATUS_SCRIPT)
