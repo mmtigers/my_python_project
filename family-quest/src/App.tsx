@@ -535,17 +535,20 @@ function App() {
         onSettingsClick={() => { setSettingsOpen(true); play('tap'); }}
         onChangelogClick={openChangelog}
         hasNewUpdate={hasNewUpdate}
+        notices={
+          <>
+            {/* 全員が見るおしらせ。休日のテレビおやすみ(全タブ共通)と、新しいアップデート。 */}
+            <TvBlockHeaderBanner />
+            {hasNewUpdate && latestUpdate && (
+              <UpdateNoticeBanner entry={latestUpdate} onOpen={openChangelog} onDismiss={markUpdateSeen} />
+            )}
+          </>
+        }
         showUserSwitcher={layoutMode !== 'landscape'}
         showLogSwitcher={layoutMode !== 'portrait'}
         showBackToMain={layoutMode === 'landscape'}
         onBackToMain={() => { setViewMode('main'); play('tap'); }}
       />
-
-      {/* 全員が見る画面上部のおしらせ。休日のテレビおやすみ(全タブ共通)と、新しいアップデート。 */}
-      <TvBlockHeaderBanner />
-      {hasNewUpdate && latestUpdate && (
-        <UpdateNoticeBanner entry={latestUpdate} onOpen={openChangelog} onDismiss={markUpdateSeen} />
-      )}
 
       {/* ★修正①: max-w-md (スマホ幅) 固定を廃止し、md以上で幅広にする。
           横画面(4人表示)では画面幅をフルに使う */}

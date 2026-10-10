@@ -8,9 +8,7 @@ const TvBlockHeaderBanner: React.FC = () => {
     const { tvBlock, tvSecondsLeft, tvBlockActive } = useTvBlock();
     if (!tvBlock) return null;
     return (
-        <div className="px-3 pt-3 max-w-md md:max-w-5xl mx-auto w-full">
-            <TvBlockBanner tvBlock={tvBlock} tvSecondsLeft={tvSecondsLeft} tvBlockActive={tvBlockActive} large />
-        </div>
+        <TvBlockBanner tvBlock={tvBlock} tvSecondsLeft={tvSecondsLeft} tvBlockActive={tvBlockActive} large />
     );
 };
 

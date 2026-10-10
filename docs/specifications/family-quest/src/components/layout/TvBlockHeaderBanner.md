@@ -15,7 +15,7 @@
 
 ## 2. ファイルの概要
 
-* ヘッダー直下に置く、全タブ・全ユーザー共通のテレビおやすみ帯（`TvBlockHeaderBanner`）。`useTvBlock()` の結果を `TvBlockBanner`（large）で表示し、平日・取得失敗時（tvBlockがnull）は何も描画しない。
+* ヘッダーの「記録」ボタン横の空きスペース（`Header` の `notices`）に置く、全タブ・全ユーザー共通のテレビおやすみ帯（`TvBlockHeaderBanner`）。`useTvBlock()` の結果を `TvBlockBanner`（large）で表示し、平日・取得失敗時（tvBlockがnull）は何も描画しない。
 * 根拠: `const TvBlockHeaderBanner: React.FC = () => {` (行番号: 7 / 抜粋: "const TvBlockHeaderBanner: React.FC = () => {")
 
 ## 3. 外部依存関係
