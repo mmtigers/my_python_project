@@ -139,12 +139,12 @@ def apply_friendly_names(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-def load_data_from_db(query: str, date_column: str = "timestamp") -> pd.DataFrame:
-    """汎用データロード関数"""
+def load_data_from_db(query: str, date_column: str = "timestamp", params: tuple | None = None) -> pd.DataFrame:
+    """汎用データロード関数。`params`を渡すと`?`プレースホルダにバインドする(値を文字列連結しない)。"""
     conn = None
     try:
         conn = get_ro_db_connection()
-        df = pd.read_sql_query(query, conn)
+        df = pd.read_sql_query(query, conn, params=params)
         
         if date_column in df.columns:
             if date_column != "timestamp":
@@ -349,8 +349,9 @@ def load_sensor_data(limit: int = 5000, day: date | None = None) -> pd.DataFrame
 
     return apply_friendly_names(df_merged).head(limit)
 
-# 電気代の単価(円/kWh)。概算なので固定値。
-ELECTRICITY_YEN_PER_KWH = 31
+# 電気代の単価(円/kWh)。概算なので固定値。環境変数 ELECTRICITY_YEN_PER_KWH で変えられる
+# (既定31。config.ELECTRICITY_YEN_PER_KWH)。
+ELECTRICITY_YEN_PER_KWH = config.ELECTRICITY_YEN_PER_KWH
 
 
 def calculate_monthly_cost_cumulative() -> int:
@@ -402,44 +403,52 @@ def _start_of_month(moment: datetime) -> datetime:
     return moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
+def load_smart_meter_rows(start: datetime, end: datetime) -> pd.DataFrame:
+    """期間内のスマートメーター(住宅全体の消費電力)の記録を、古い順で返す。
+    列は`device_id`/`timestamp`(JST)/`power_watts`。電気代の概算(`_calculate_cost_between`)と
+    電力分析(`power_analysis_service`)が共通で使う。記録が無ければ空のDataFrame。"""
+    start_of_month = start.isoformat()
+    end_iso = end.isoformat()
+
+    # 1. 新テーブル (power_usage) から取得
+    # #170: power_usageにはスマートメーター(全体消費)と各プラグ(個別家電)が
+    # 同居しており、プラグの消費電力はスマートメーターの計測値に既に
+    # 含まれる部分集合である。デバイスを絞らず全行を合算するとプラグ分が
+    # 二重計上されるため、スマートメーターの行のみに絞る。
+    # #829: 以前は device_name に "Remo" を含むかだけで判定していたが、これは
+    # Nature Remoアプリでユーザーが設定したニックネーム次第で外れ、ニックネームが
+    # "Remo" を含まない環境では本クエリが恒常的に0件になり電気代が0円表示に
+    # なっていた(電気代集計にだけこの警告が無く気づけなかった)。書き込み時点で
+    # 明示される device_category(migrations/0020以降)を優先し、それが無い
+    # (マイグレーション適用前の古い)行だけ従来のdevice_name判定にフォールバックする。
+    query = f"""
+        SELECT device_id, timestamp, wattage as power_watts
+        FROM {config.SQLITE_TABLE_POWER_USAGE}
+        WHERE timestamp >= '{start_of_month}' AND timestamp <= '{end_iso}'
+          AND (
+            device_category = 'smart_meter'
+            OR (device_category IS NULL AND device_name LIKE '%Remo%')
+          )
+        ORDER BY timestamp ASC
+    """
+    df = load_data_from_db(query)
+
+    # 2. 新テーブルが空なら旧テーブル (device_records) へフォールバック
+    if df.empty:
+        query_old = f"""
+            SELECT device_id, timestamp, power_watts FROM device_records
+            WHERE device_type = 'Nature Remo E Lite'
+              AND timestamp >= '{start_of_month}' AND timestamp <= '{end_iso}'
+            ORDER BY timestamp ASC
+        """
+        df = load_data_from_db(query_old)
+    return df
+
+
 def _calculate_cost_between(start: datetime, end: datetime) -> int:
     """期間内のスマートメーターの記録から電気代を概算する。"""
     try:
-        start_of_month = start.isoformat()
-        end_iso = end.isoformat()
-
-        # 1. 新テーブル (power_usage) から取得
-        # #170: power_usageにはスマートメーター(全体消費)と各プラグ(個別家電)が
-        # 同居しており、プラグの消費電力はスマートメーターの計測値に既に
-        # 含まれる部分集合である。デバイスを絞らず全行を合算するとプラグ分が
-        # 二重計上されるため、スマートメーターの行のみに絞る。
-        # #829: 以前は device_name に "Remo" を含むかだけで判定していたが、これは
-        # Nature Remoアプリでユーザーが設定したニックネーム次第で外れ、ニックネームが
-        # "Remo" を含まない環境では本クエリが恒常的に0件になり電気代が0円表示に
-        # なっていた(電気代集計にだけこの警告が無く気づけなかった)。書き込み時点で
-        # 明示される device_category(migrations/0020以降)を優先し、それが無い
-        # (マイグレーション適用前の古い)行だけ従来のdevice_name判定にフォールバックする。
-        query = f"""
-            SELECT device_id, timestamp, wattage as power_watts
-            FROM {config.SQLITE_TABLE_POWER_USAGE}
-            WHERE timestamp >= '{start_of_month}' AND timestamp <= '{end_iso}'
-              AND (
-                device_category = 'smart_meter'
-                OR (device_category IS NULL AND device_name LIKE '%Remo%')
-              )
-            ORDER BY timestamp ASC
-        """
-        df = load_data_from_db(query)
-
-        # 2. 新テーブルが空なら旧テーブル (device_records) へフォールバック
-        if df.empty:
-            query_old = f"""
-                SELECT device_id, timestamp, power_watts FROM device_records
-                WHERE device_type = 'Nature Remo E Lite'
-                  AND timestamp >= '{start_of_month}' AND timestamp <= '{end_iso}'
-                ORDER BY timestamp ASC
-            """
-            df = load_data_from_db(query_old)
+        df = load_smart_meter_rows(start, end)
 
         if df.empty:
             return 0
@@ -460,6 +469,36 @@ def _calculate_cost_between(start: datetime, end: datetime) -> int:
     except Exception as e:
         logger.error(f"Cost Calc Error: {e}")
         return 0
+
+
+def load_power_rows(device_id: str, start: datetime, end: datetime) -> pd.DataFrame:
+    """指定した機器(`power_usage.device_id`)の消費電力の記録を、古い順で返す。
+    列は`device_id`/`timestamp`(JST)/`power_watts`。個別家電(テレビのプラグ等)の分析用。
+    値は`?`にバインドする。記録が無ければ空のDataFrame。"""
+    return load_data_from_db(
+        f"SELECT device_id, timestamp, wattage as power_watts FROM {config.SQLITE_TABLE_POWER_USAGE} "
+        "WHERE device_id = ? AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp ASC",
+        params=(device_id, start.isoformat(), end.isoformat()),
+    )
+
+
+def load_weather_range(start: date, end: date, location: str) -> pd.DataFrame:
+    """`start`〜`end`(両端を含む)の日次の気温を返す。列は`date`(`YYYY-MM-DD`)/`min_temp`/`max_temp`/`weather_desc`。
+    `weather_history`は`monitors/weather_monitor.py`が書く。記録が無い・読めないときは空のDataFrame。"""
+    try:
+        conn = get_ro_db_connection()
+        try:
+            return pd.read_sql_query(
+                "SELECT date, min_temp, max_temp, weather_desc FROM weather_history "
+                "WHERE location = ? AND date >= ? AND date <= ? ORDER BY date ASC",
+                conn, params=(location, start.isoformat(), end.isoformat()),
+            )
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001 (天気が読めなくても電力の分析は続ける)
+        logger.error(f"Weather Range Load Error: {e}")
+        return pd.DataFrame()
+
 
 def load_weather_history(days: int = 40, location: str = "伊丹") -> pd.DataFrame:
     # L-L2 (#410): naive datetime.now()はサーバーのローカルタイムゾーン(環境依存)を

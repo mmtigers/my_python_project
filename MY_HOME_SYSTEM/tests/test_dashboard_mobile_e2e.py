@@ -289,7 +289,7 @@ class TestHomePageDarkMode:
 class TestSubPagesLayout:
     """項目1: 各サブページに「ホームへ戻る」ボタンがあり、横はみ出しが無いこと。"""
 
-    @pytest.mark.parametrize("path,heading", [("watch", "見守り"), ("life", "くらし"), ("sys", "システム"), ("updates", "アップデート")])
+    @pytest.mark.parametrize("path,heading", [("watch", "見守り"), ("life", "くらし"), ("sys", "システム"), ("updates", "アップデート"), ("power", "電気")])
     def test_subpage_has_a_back_link_and_no_sideways_scroll(self, browser, dashboard_server, artifact_dir, path, heading):
         base_url, base_path = dashboard_server
         context = browser.new_context(viewport=MOBILE_VIEWPORT, device_scale_factor=3, is_mobile=True, has_touch=True)

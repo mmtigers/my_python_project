@@ -25,6 +25,8 @@ _GETENV_RE = re.compile(r"""os\.getenv\(\s*["']([A-Z][A-Z0-9_]*)["']""")
 # 落ちるため、ヘルパー経由に置き換えた結果 os.getenv(...) の直接呼び出しが
 # ヘルパー内部の1箇所に集約され、上のGETENV_REだけでは検出できなくなったため)
 _INT_ENV_RE = re.compile(r"""_get_int_env\(\s*["']([A-Z][A-Z0-9_]*)["']""")
+# config._get_float_env("KEY", default) 経由で読む実数系環境変数(電気の単価・天気の取得地点)も拾う
+_FLOAT_ENV_RE = re.compile(r"""_get_float_env\(\s*["']([A-Z][A-Z0-9_]*)["']""")
 # .env.example の非コメント行 "KEY=..." を拾う
 _ENV_LINE_RE = re.compile(r"^([A-Z][A-Z0-9_]*)\s*=", re.MULTILINE)
 
@@ -39,7 +41,7 @@ _ENV_INT_RE = re.compile(r"""_env_int\(\s*["']([A-Z][A-Z0-9_]*)["']""")
 
 def _config_env_keys() -> set[str]:
     text = CONFIG_PATH.read_text(encoding="utf-8")
-    keys = set(_GETENV_RE.findall(text)) | set(_INT_ENV_RE.findall(text))
+    keys = set(_GETENV_RE.findall(text)) | set(_INT_ENV_RE.findall(text)) | set(_FLOAT_ENV_RE.findall(text))
     for src in _DDD_SOURCES:
         ddd_text = src.read_text(encoding="utf-8")
         keys |= set(_GETENV_RE.findall(ddd_text)) | set(_ENV_INT_RE.findall(ddd_text))

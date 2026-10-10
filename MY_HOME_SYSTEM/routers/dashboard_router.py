@@ -24,7 +24,15 @@ from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 import config
-from services import dashboard_page_service, dashboard_pwa_service, home_status_service, release_history_service, system_info_service
+from services import (
+    dashboard_page_service,
+    dashboard_pwa_service,
+    home_status_service,
+    power_analysis_service,
+    power_page_service,
+    release_history_service,
+    system_info_service,
+)
 
 router = APIRouter()
 
@@ -192,6 +200,21 @@ def dashboard_sys(nas_days: str | None = None) -> HTMLResponse:
             boot_history=system_info_service.get_boot_history(),
         )
     )
+
+
+@router.get(f"{_BASE_PATH}/power", include_in_schema=False)
+def dashboard_power(days: str | None = None) -> HTMLResponse:
+    """電気ページ。月ごとの推移・日別の電気代・気温との関係・テレビの使い方を表示する。
+    `?days=30|60|90`で日別・気温・テレビの対象期間を切り替える(それ以外の値・数値でない値は30日。
+    壊れたブックマークでも開けるようにする)。分析は10分キャッシュされる。
+    `async def`にしない(DB取得とpandasの計算が同期のため、イベントループを止めない)。"""
+    try:
+        selected = int(days) if days is not None else None
+    except ValueError:
+        selected = None
+    selected = selected if selected in power_analysis_service.DAYS_CHOICES else power_analysis_service.DEFAULT_DAYS
+    report = power_analysis_service.build_power_report(selected)
+    return HTMLResponse(power_page_service.render_power_page(report, dashboard_path=f"{_BASE_PATH}/"))
 
 
 @router.get(f"{_BASE_PATH}/updates", include_in_schema=False)

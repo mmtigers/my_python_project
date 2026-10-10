@@ -163,6 +163,21 @@ _PAGE_BASE_CSS = """
     .nas-chart { width: 100%; max-width: 360px; height: auto; display: block; }
     .nas-chart-grid { stroke: #eee; stroke-width: 1; }
     .nas-chart-label { font-size: 8px; fill: #777; }
+    /* 電気ページ(月ごとの推移・日別・気温・テレビ。グラフはインラインSVG) */
+    .bar-chart { width: 100%; max-width: 420px; height: auto; display: block; margin: 8px 0; }
+    .bar-axis { stroke: #bbb; stroke-width: 1; }
+    .bar { fill: #1565c0; }
+    .bar-alt { fill: #ef6c00; }
+    .bar-faded { fill: #90caf9; }
+    .bar-label { font-size: 8px; fill: #666; }
+    .legend-box { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+    .legend-box.bar { background: #1565c0; }
+    .legend-box.bar-alt { background: #ef6c00; }
+    .power-lead { font-size: 1.05rem; margin: 6px 0; }
+    .power-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0; }
+    .power-stat { border: 1px solid #ddd; border-radius: 10px; padding: 8px 10px; }
+    .power-stat-value { font-weight: bold; font-size: 1.05rem; word-break: break-word; }
+    .band-days th, .band-days td { text-align: center; font-size: 0.7rem; padding: 2px; }
     /* アップデートページ(全アプリの更新履歴) */
     .release-filter { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
     .release-filter a {
@@ -252,6 +267,14 @@ _PAGE_BASE_CSS = """
         .nas-chart-grid { stroke: #333; }
         .nas-chart-label { fill: #aaa; }
         .git-status-warn { color: #ffb74d; }
+        .bar { fill: #64b5f6; }
+        .bar-alt { fill: #ffb74d; }
+        .bar-faded { fill: #2a4a6b; }
+        .bar-label { fill: #aaa; }
+        .bar-axis { stroke: #555; }
+        .legend-box.bar { background: #64b5f6; }
+        .legend-box.bar-alt { background: #ffb74d; }
+        .power-stat { border-color: #333; }
         .release-card { border-color: #333; }
         .release-filter a { background: #16304a; color: #90caf9; border-color: #24507a; }
         .release-filter a.active { background: #1565c0; color: #fff; }
@@ -994,6 +1017,8 @@ def render_life_page(cards, *, dashboard_path: str, daily_cost_rows: list[tuple[
         "<h1>💡 くらし</h1>"
         f"{home_status_service.render_status_grid_html(life_cards)}"
         '<p class="empty-note">今月の電気代はスマートメーターの記録からの概算です。</p>'
+        f'<div class="link-grid"><a class="nav-card" href="{html.escape(dashboard_path.rstrip("/"))}/power">'
+        '⚡ 電気のくわしい分析<span class="nav-card-sub">月ごとの推移・気温との関係・テレビ</span></a></div>'
         "<h2>📊 日別の電気代(概算)</h2>"
         f"{_render_daily_cost_history(daily_cost_rows or [])}"
     )

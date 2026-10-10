@@ -77,7 +77,7 @@
 
 
 * `reset_game.py`が管理者向けリセットAPI(`POST /api/quest/admin/reset_user`)を呼び出す際のサーバーのベースURL(`RESET_GAME_API_BASE_URL`、既定値`"http://127.0.0.1:8000"`)を定義する(Issue #547)。`reset_game.py`は`unified_server`と同じホストで実行される対話スクリプトという前提のため既定値はループバックアドレスとしており、LAN内の他端末からのアクセスを想定したホストIP指定である`FRONTEND_URL`とは用途が異なるためこの用途には流用しない、という趣旨のコメントが付されている。
-* 根拠: [RESET_GAME_API_BASE_URL定義とコメント] (行番号: 454〜458 / 抜粋: "# Issue #547: reset_game.py が管理者向けリセットAPI(POST /api/quest/admin/reset_user)を\n# 呼び出す際のサーバーのベースURL。reset_game.pyはunified_serverと同じホストで実行される\n# 前提の対話スクリプトのため、既定値はループバックアドレスとする(FRONTEND_URLはLAN内の\n# 他端末からのアクセスを想定したホストのIP指定のため、この用途には流用しない)。\nRESET_GAME_API_BASE_URL: str = os.getenv(\"RESET_GAME_API_BASE_URL\", \"http://127.0.0.1:8000\")")
+* 根拠: [RESET_GAME_API_BASE_URL定義とコメント] (行番号: 471〜475 / 抜粋: "# Issue #547: reset_game.py が管理者向けリセットAPI(POST /api/quest/admin/reset_user)を\n# 呼び出す際のサーバーのベースURL。reset_game.pyはunified_serverと同じホストで実行される\n# 前提の対話スクリプトのため、既定値はループバックアドレスとする(FRONTEND_URLはLAN内の\n# 他端末からのアクセスを想定したホストのIP指定のため、この用途には流用しない)。\nRESET_GAME_API_BASE_URL: str = os.getenv(\"RESET_GAME_API_BASE_URL\", \"http://127.0.0.1:8000\")")
 
 * **（Issue #738 / AUDIT-008 で追加）** 同じ箇所に、`monitors/routine_deadline_job.py`(スケジューラの定期タスク)がルーティンの締切処理API(`POST /api/routine/deadlines/process`)を呼ぶ際の`ROUTINE_DEADLINE_API_BASE_URL`(既定`"http://127.0.0.1:8000"`)と`ROUTINE_DEADLINE_API_TIMEOUT_SEC`(既定30秒)が加わった。既定がループバックなのは`RESET_GAME_API_BASE_URL`・`HEALTH_WATCH_PROBE_BASE_URL`と同じ理由(スケジューラはunified_serverと同じホストで動く)で、コメントにもその旨が明記されている。
 * 根拠: [ROUTINE_DEADLINE_API_BASE_URL定義とコメント] (行番号: 413〜420 / 抜粋: "# Issue #738 (AUDIT-008): monitors/routine_deadline_job.py(スケジューラの定期タスク)が\nROUTINE_DEADLINE_API_BASE_URL: str = os.getenv(\"ROUTINE_DEADLINE_API_BASE_URL\", \"http://127.0.0.1:8000\")\nROUTINE_DEADLINE_API_TIMEOUT_SEC: int = _get_int_env(\"ROUTINE_DEADLINE_API_TIMEOUT_SEC\", 30)")
@@ -96,7 +96,7 @@
 * **（Issue #735 / AUDIT-005 で追加）** 同セクションに、`monitors/health_watch.py`のチェック2（HTTPプローブ）が叩く先とタイムアウトを定義する3定数が加わった。`HEALTH_WATCH_PROBE_BASE_URL`（既定 `http://127.0.0.1:8000`）、`HEALTH_WATCH_PROBE_TIMEOUT_SEC`（既定10秒。DBを触らない`/health`用）、`HEALTH_WATCH_PROBE_DB_TIMEOUT_SEC`（既定20秒。DBまで到達する`/api/quest/data`用）。既定がループバックなのは`RESET_GAME_API_BASE_URL`と同じ理由で、`health_watch`はサーバーと同じホストのcronで動くためであり、`.env`でLAN内のホスト指定へ上書きされうる`FRONTEND_URL`は流用しない旨がコメントに明記されている。
 * 根拠: [HEALTH_WATCH_PROBE_*定義とコメント] (行番号: 559〜567 / 抜粋: "HEALTH_WATCH_PROBE_BASE_URL: str = os.getenv(\"HEALTH_WATCH_PROBE_BASE_URL\", \"http://127.0.0.1:8000\")", "HEALTH_WATCH_PROBE_TIMEOUT_SEC: int = _get_int_env(\"HEALTH_WATCH_PROBE_TIMEOUT_SEC\", 10)")
 * **（Issue #775 で追加）** 同セクションに、層3(外部デッドマンスイッチ)向けの`HEALTH_WATCH_DEADMAN_PING_URL`（既定は空文字＝未設定。設定するとhealthchecks.io等の外部サービスのping URLとして扱われる）と`HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC`（既定10秒）が加わった。`monitors/health_watch.py`の`run_checks`が完走するたびに`_ping_deadman_switch`がこのURLへハートビートを送り、未設定なら送信しない旨がコメントに明記されている。
-* 根拠: [HEALTH_WATCH_DEADMAN_PING_*定義] (行番号: 708〜709 / 抜粋: "HEALTH_WATCH_DEADMAN_PING_URL: str = os.getenv(\"HEALTH_WATCH_DEADMAN_PING_URL\", \"\")\nHEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC: int = _get_int_env(\"HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC\", 10)")
+* 根拠: [HEALTH_WATCH_DEADMAN_PING_*定義] (行番号: 725〜726 / 抜粋: "HEALTH_WATCH_DEADMAN_PING_URL: str = os.getenv(\"HEALTH_WATCH_DEADMAN_PING_URL\", \"\")\nHEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC: int = _get_int_env(\"HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC\", 10)")
 
 
 * 「13. NASパスの遅延解決 (Issue #330 PR-B)」セクション(Issue #488でモジュールdocstring目次の番号が旧20番から13番へ振り直された)で、NAS上のパス定数(`ASSETS_DIR`とその派生`SOUND_DIR`のみ)をPEP 562のモジュール`__getattr__`により**初回アクセス時に解決してモジュール属性へキャッシュ**する。以前はimport時に`ensure_safe_path_with_backoff`(書き込みテスト+Exponential Backoff、最悪 約31秒/パス)を実行しており、NAS障害・マウント遅延時にconfigをimportするだけのテスト・CLIツール・cronスクリプトまでブロックしていた。Issue #488で、未実装の給与PDF機能・小児科予約監視機能が削除されたことに伴い、`__getattr__`が扱っていた`TMP_VIDEO_DIR`分岐(旧・タイムラプス機能の残置設定)、および派生パス辞書`_ASSETS_DERIVED_PATHS`が保持していた`SALARY_IMAGE_DIR`/`CLINIC_HTML_DIR`/`CLINIC_STATS_CSV`/`CLINIC_GRAPH_PATH`は削除され、`_ASSETS_DERIVED_PATHS`は`{"SOUND_DIR": "sounds"}`の1エントリのみとなった。同様に、`ASSETS_DIR`配下で自動作成するサブディレクトリのリスト`_ASSETS_SUBDIRS_TO_CREATE`も(旧`["salary_images", "clinic_html"]`から)空リスト`[]`になった。`prewarm_nas_paths()`が解決する名前のタプルからも`TMP_VIDEO_DIR`が外れ、現在は`("ASSETS_DIR", *_ASSETS_DERIVED_PATHS)`のみとなっている。サーバー起動時は`unified_server.py`のlifespanが`prewarm_nas_paths()`を呼び、遅延化前と同じく起動時点で検証を済ませる。利用側の書き方(`config.ASSETS_DIR`等)は不変で、未知の属性名は従来どおり`AttributeError`を送出する。 **（Issue #664 で追加）** `LOG_DIR`(`BASE_DIR/logs`)も同じ仕組みへ移した。NAS依存ではないローカルパスだが、同じ`ensure_safe_path_with_backoff`をimport時に呼んでいたため、ディスクフル・権限異常時にはconfigをimportするだけで最大約31秒ブロックしうる取り残しだった(Issue #330 PR-B で`ASSETS_DIR`を遅延化した際に見落とされていた)。解決先のパスは`_PREFERRED_LOG_DIR`定数として残り、`prewarm_nas_paths()`が解決する名前のタプルも`("ASSETS_DIR", "LOG_DIR", *_ASSETS_DERIVED_PATHS)`になっている。`core/logger.py`は`getattr(config, "LOG_DIR", None)`で参照しており、遅延解決でも実パスが返る。
@@ -127,9 +127,11 @@
     * `DASHBOARD_ENABLED`（`DASHBOARD_PROXY_ENABLED`から改名。環境変数 `DASHBOARD_ENABLED`、既定 `true`。`"false"` 以外はすべて真）— `unified_server.py` が `routers/dashboard_router.py` をincludeするかどうかの分岐。
     * `DASHBOARD_BASE_PATH`（環境変数 `DASHBOARD_BASE_PATH`、既定 `"dashboard"`）— 先頭に `/` を付け、前後のスラッシュを落として `"/dashboard"` 形式へ正規化する。中継先を指定する`DASHBOARD_INTERNAL_URL`と中継タイムアウトの`DASHBOARD_PROXY_TIMEOUT_SEC`は、中継自体が無くなったため削除された。
     * `ASA_NOTE_URL`（環境変数 `ASA_NOTE_URL`、既定 `"https://asa-note.vercel.app/"`）— ホーム画面のリンクカードから開く外部サービス(あさノート)のURL。**(変更)** 旧既定 `go-to-school-one.vercel.app` から現行URLへ修正した。
-    * `YORU_NOTE_URL`（環境変数 `YORU_NOTE_URL`、既定 `"https://yorunote-mm.vercel.app/"`）— **(新機能)** 同じくリンクカードから開くよるノートのURL。ダッシュボード内に機能・表示は持たず、リンクのみを置く方針で追加された。
+    * `ELECTRICITY_YEN_PER_KWH`（環境変数 `ELECTRICITY_YEN_PER_KWH`、既定 `31.0`）— **(新機能)** 電気代の概算に使う単価(円/kWh)。契約プラン・時間帯別料金・燃料費調整は考慮しない固定値。`_get_float_env`で読み、数値でない値・有限でない値(nan/inf)は警告ログを出して既定値にする。
+    * `WEATHER_LOCATION_NAME`（既定 `"伊丹"`）・`WEATHER_LATITUDE`（既定 `34.78`）・`WEATHER_LONGITUDE`（既定 `135.40`）— **(新機能)** 電気代と気温の分析用に、`monitors/weather_monitor.py`が Open-Meteo から日次の気温を取得する地点と、`weather_history`へ書き込む地点名。
+* `YORU_NOTE_URL`（環境変数 `YORU_NOTE_URL`、既定 `"https://yorunote-mm.vercel.app/"`）— **(新機能)** 同じくリンクカードから開くよるノートのURL。ダッシュボード内に機能・表示は持たず、リンクのみを置く方針で追加された。
   セクション冒頭のコメントには、外部からのアクセス制御は他のパスと同じくエッジのCloudflare Accessに委譲すること(Issue #321・2026-09-03決定)、そして**このパスを Cloudflare Access のバイパス対象に設定してはならない**（`allowed_webhook_paths` とは逆で、バイパスすると無認証で外部公開される）ことが明記されている。
-* 根拠: [ダッシュボード公開設定セクション] (行番号: 942 / 抜粋: "# 16. ダッシュボード公開設定")、`DASHBOARD_ENABLED`/`DASHBOARD_BASE_PATH`/`ASA_NOTE_URL`定義 (行番号: 955, 957, 961 / 抜粋: "DASHBOARD_ENABLED: bool = os.getenv(\"DASHBOARD_ENABLED\", \"true\").strip().lower() != \"false\"", "DASHBOARD_BASE_PATH: str = \"/\" + os.getenv(\"DASHBOARD_BASE_PATH\", \"dashboard\").strip().strip(\"/\")", "ASA_NOTE_URL: str = os.getenv(\"ASA_NOTE_URL\", \"https://asa-note.vercel.app/\")")、バイパス禁止の注意書き (行番号: 904〜907 / 抜粋: "# 重要: このパスは `unified_server.py` の `allowed_webhook_paths` とは逆で、")
+* 根拠: [ダッシュボード公開設定セクション] (行番号: 959 / 抜粋: "# 16. ダッシュボード公開設定")、`DASHBOARD_ENABLED`/`DASHBOARD_BASE_PATH`/`ASA_NOTE_URL`定義 (行番号: 972, 974, 978 / 抜粋: "DASHBOARD_ENABLED: bool = os.getenv(\"DASHBOARD_ENABLED\", \"true\").strip().lower() != \"false\"", "DASHBOARD_BASE_PATH: str = \"/\" + os.getenv(\"DASHBOARD_BASE_PATH\", \"dashboard\").strip().strip(\"/\")", "ASA_NOTE_URL: str = os.getenv(\"ASA_NOTE_URL\", \"https://asa-note.vercel.app/\")")、バイパス禁止の注意書き (行番号: 904〜907 / 抜粋: "# 重要: このパスは `unified_server.py` の `allowed_webhook_paths` とは逆で、")
 
 
 * **（祝日対応で追加）** 「17. 祝日・休日判定設定」セクションを新設し、`EXTRA_HOLIDAY_DATES`(環境変数`EXTRA_HOLIDAY_DATES`、`YYYY-MM-DD`のカンマ区切り、既定は空、`frozenset`型)を定義する。セクション冒頭のコメントによれば、「国民の祝日」そのものは`core/jp_holidays.py`がローカル計算で判定する(外部の暦ライブラリは入れない)ため設定不要で、ここで設定するのは祝日ではないが家庭の運用上は休日として扱いたい日(年末年始・お盆・学校の振替休業日・家族旅行など)である。ここに入れた日は、すごろく(ルーティン)・デイリークエストの曜日判定・YouTubeごほうび券の日次上限のすべてで土日や祝日と同じ扱いになる。`_date.fromisoformat`で解釈できない要素は`logger.warning`を出して無視する(設定ミスでconfig全体のロードを落とさないため)。モジュールdocstringの目次にも「17. 祝日・休日判定設定」が追加された。
@@ -169,7 +171,7 @@ Issue #488で、未実装のタイムラプススケジュール機能(`TIMELAPS
 | `.env`ファイル | 外部ファイルであり、実行時の環境変数の実際の内容がコードから読み取れないため。 | 根拠: `load_dotenv()` (行番号: 161 / 抜粋: `load_dotenv()`) |
 | `devices.json` | システムに接続されるカメラやモニター等のデバイス設定情報を持つ外部ファイルであり、具体的な内容が不明なため。 | 根拠: `with open(DEVICES_JSON_PATH, ` (行番号: 295 / 抜粋: `with open(DEVICES_JSON_PATH, `) |
 | `family_members.local.json` | Git管理対象外(gitignore)の外部ファイルであり、`FAMILY_SETTINGS["styles"]` の年齢等の実データがどのような値・構造で上書きされるか不明なため。 | 根拠: `# family_members.local.json (gitignore対象) から読み込み、` (行番号: 416 / 抜粋: `family_members.local.json`) |
-| `Pydantic`の内部実装 | 外部ライブラリであり、バリデーションの厳密な挙動（例：エイリアスやデフォルトファクトリの処理詳細）は提供コードから読み取れないため。 | 根拠: `class CameraConfig(BaseModel):` (行番号: 170 / 抜粋: `class CameraConfig(BaseModel):`) |
+| `Pydantic`の内部実装 | 外部ライブラリであり、バリデーションの厳密な挙動（例：エイリアスやデフォルトファクトリの処理詳細）は提供コードから読み取れないため。 | 根拠: `class CameraConfig(BaseModel):` (行番号: 187 / 抜粋: `class CameraConfig(BaseModel):`) |
 
 Issue #488で、`family_events.json`（家族の記念日・イベント設定`IMPORTANT_DATES`用）の読み込み処理は本ファイルから完全に削除されたため、外部依存としては存在しなくなった。
 
@@ -200,7 +202,7 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 * **役割**: 検証I/Oを伴うパス定数の遅延解決(PEP 562)。`_resolve_assets_dir()` が `ensure_safe_path_with_backoff` で `ASSETS_DIR` を検証・解決し、`_ASSETS_SUBDIRS_TO_CREATE` の各サブディレクトリを作る。モジュールの `__getattr__(name)` は `ASSETS_DIR` と `_ASSETS_DERIVED_PATHS` の派生パス(`UPLOAD_DIR`・`SOUND_DIR` 等)を初回アクセス時にだけ解決し、結果を `globals()` に書き込むため以降は通常の属性解決になる(=キャッシュ。テストは `monkeypatch.setattr`/`delattr` で上書き・再解決できる)。**（Issue #664）** `__getattr__` は `LOG_DIR` も扱い、`ensure_safe_path_with_backoff(_PREFERRED_LOG_DIR, "logs")` で解決する。`prewarm_nas_paths()` は `unified_server.py` の `lifespan` から呼ばれ、遅延化前と同じく起動時点で `ASSETS_DIR`・`LOG_DIR`・派生パスの検証・フォールバック判定を済ませる。
 * **戻り値/レスポンス**: `_resolve_assets_dir` / `__getattr__` は `str`、`prewarm_nas_paths` は `None`。未知の属性名では `__getattr__` が `AttributeError` を送出する。
 * **副作用**: NAS 上のディレクトリ作成、`globals()` への書き込み、失敗時の warning ログ(例外は送出せずローカルへフォールバック)。
-* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 733)、`def __getattr__(name: str) -> str:` (行番号: 747)、`def prewarm_nas_paths() -> None:` (行番号: 774)
+* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 750)、`def __getattr__(name: str) -> str:` (行番号: 764)、`def prewarm_nas_paths() -> None:` (行番号: 791)
 
 ### `verify_and_initialize_storage`
 
@@ -238,15 +240,15 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 ### `_get_int_env`
 
 * **役割**: 環境変数を整数として読み込む共通ヘルパー（**#411 S-L6で追加**）。以前は `MOTION_COOLDOWN_SEC`・`UPLOAD_MAX_FILE_SIZE_MB`・`RECORDING_RETENTION_DAYS`・`HLS_VOD_RETENTION_DAYS`・`DB_BACKUP_RETENTION_DAYS`に加え、小児科予約監視の`CLINIC_MONITOR_START_HOUR`・`CLINIC_MONITOR_END_HOUR`・`CLINIC_REQUEST_TIMEOUT`の計8変数それぞれで `int(os.getenv(name, "default"))` を直書きしており、`.env` に空文字や非数値（例: コメント混じりの値）が誤って設定されると `int()` が `ValueError` を送出し、`config` モジュール全体のimportが失敗してサーバーが起動不能になっていた。未設定/空文字はデフォルト値、非数値は警告ログを出してデフォルト値にフォールバックするようにした。なお小児科予約監視機能自体は未実装のままIssue #488で`config.py`から削除されたため、現在この関数を呼び出しているのは前者5箇所のみである。
-* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 100〜115)、呼出し例: `MOTION_COOLDOWN_SEC: int = _get_int_env("MOTION_COOLDOWN_SEC", 60)` (行番号: 310)
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 101〜116)、呼出し例: `MOTION_COOLDOWN_SEC: int = _get_int_env("MOTION_COOLDOWN_SEC", 60)` (行番号: 310)
 
 
 * **引数/リクエスト**: `name: str` (環境変数名), `default: int` (未設定/パース失敗時のデフォルト値)
-* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 100)
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 101)
 
 
 * **戻り値/レスポンス**: `int`
-* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 100)
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 101)
 
 
 * **副作用**: パース失敗時に `logger.warning` を出力
@@ -453,7 +455,7 @@ flowchart TD
 * **Issue #488での大規模クリーンアップ**: リポジトリ全体をgrepし`config.py`以外から一切参照されていないことを確認できた53個のモジュールレベル定数を削除した。内訳は、未実装の給与PDF機能(`GMAIL_USER`・`SALARY_PDF_PASSWORDS`等)、SUUMO/土地価格監視(`SUUMO_SEARCH_URL`等)、小児科予約監視(`CLINIC_MONITOR_URL`等)、Google Photos連携(`GOOGLE_PHOTOS_TOKEN`等。当時のドキュメントが参照していた`tools/google_photos_service.py`は本リポジトリに実体がなく、参照する箇所も存在しなかった)、ショッピング・美容院予約監視(`SHOPPING_TARGETS`等)、子供健康チェック機能(`CHILDREN_NAMES`等)といった未実装機能の設定値、Issue #485で削除済みのタイムラプス関連スクリプト(`monitors/timelapse_runner.py`/`monitors/timelapse_generator.py`)の残置設定(`TIMELAPSE_CAMERAS`・`TIMELAPSE_SCHEDULES`・`TMP_VIDEO_DIR`等)、およびカメラ設定の旧方式(`CAMERA_IP`等、`CAMERAS`リストに統合済み)などである。これに伴いモジュールdocstringの目次を21セクションから14セクションへ振り直した(削除されたのは旧5.給与、6.ショッピング・美容院予約監視、7.土地価格監視、8.Google Photos連携、9.不動産情報REINFOLIB、14.外部サイト監視SUUMO、15.小児科予約監視の各セクション)。一方で`ALLOW_ALL_ORIGINS`(345行目)は`config.py`以外からの直接参照がなく一見未使用に見えるが、346〜347行目で`CORS_ORIGINS`を`["*"]`に上書きするimport時の副作用を通じて間接的にCORS設定全体を制御しているため、今回のレビューで意図的に削除対象から除外された。今後の同種クリーンアップでもこの点(環境変数経由の間接的な副作用)には注意すること。
 * 根拠: [ALLOW_ALL_ORIGINSによるCORS_ORIGINS上書き] (行番号: 345〜347 / 抜粋: `ALLOW_ALL_ORIGINS: bool = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "true"\nif ALLOW_ALL_ORIGINS:\n    CORS_ORIGINS = ["*"]`), [モジュール目次(14セクション)] (行番号: 5〜19)
 * **（Issue #701・2026-09-19で削除）`SQLITE_TABLE_AI_REPORT`**: 以前は`SQLITE_TABLE_AI_REPORT = "ai_report_records"`と、Issue #584で付けた「このテーブルへの書込はリポジトリ管理外の外部プロセスが行う前提で、本リポジトリ側に書込コードは不要」というコメントがあった。しかし実機DBの最新行は`2026-07-16T19:01`で止まっており、その外部プロセスも動いていないことが確認された（Issue #584の前提が実機で成立していなかった）。ダッシュボードのAIレポート（「セバスチャンからの報告」、`dashboard.py`の`_render_ai_report`・`analysis_service.load_ai_report`）ごとオーナー判断で退役し、この定数とコメントも削除した。Issue #584の結論はこれにより置き換えられた。現在は同じ位置に退役の経緯を示す短いコメントのみが残る。`ai_report_records`テーブル自体は履歴として残しており（`migrations/0000_baseline_schema.sql`の定義も変更なし）、削除マイグレーションは追加していない。
-* 根拠: 退役コメント (行番号: 345 / 抜粋: "# Issue #701 (2026-09-19): 旧 SQLITE_TABLE_AI_REPORT")
+* 根拠: 退役コメント (行番号: 362 / 抜粋: "# Issue #701 (2026-09-19): 旧 SQLITE_TABLE_AI_REPORT")
 
 ## 9. 不明事項一覧
 

@@ -26,6 +26,7 @@ import os
 import time
 import sys
 import json
+import math
 import logging
 from typing import Optional, List, Dict, Any
 from urllib.parse import urlparse
@@ -113,6 +114,22 @@ def _get_int_env(name: str, default: int) -> int:
     except ValueError:
         logger.warning(f"⚠️ 環境変数 {name}='{raw}' は整数として解釈できません。デフォルト値 {default} を使用します。")
         return default
+
+def _get_float_env(name: str, default: float) -> float:
+    """環境変数を実数として読み込む。未設定/空文字はデフォルト値、数値でない値・有限でない値
+    (nan/inf)は警告ログを出してデフォルト値にフォールバックする(`_get_int_env`と同じ方針)。"""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning(f"⚠️ 環境変数 {name}='{raw}' は数値として解釈できません。デフォルト値 {default} を使用します。")
+        return default
+    if not math.isfinite(value):
+        logger.warning(f"⚠️ 環境変数 {name}='{raw}' は有限の数値ではありません。デフォルト値 {default} を使用します。")
+        return default
+    return value
 
 if not logger.handlers:
     handler = logging.StreamHandler(sys.stdout)
@@ -960,6 +977,17 @@ DASHBOARD_BASE_PATH: str = "/" + os.getenv("DASHBOARD_BASE_PATH", "dashboard").s
 # リンクのみを置く方針(#829)。
 ASA_NOTE_URL: str = os.getenv("ASA_NOTE_URL", "https://asa-note.vercel.app/")
 YORU_NOTE_URL: str = os.getenv("YORU_NOTE_URL", "https://yorunote-mm.vercel.app/")
+
+# 電気代の概算に使う単価(円/kWh)。契約プラン・時間帯別料金・燃料費調整は考慮しない固定値で、
+# 「概算」であることを画面にも出している(analysis_service / power_analysis_service が共有する)。
+ELECTRICITY_YEN_PER_KWH: float = _get_float_env("ELECTRICITY_YEN_PER_KWH", 31.0)
+
+# 電気代と気温を突き合わせる分析(/dashboard/power)用の天気データの取得地点。
+# monitors/weather_monitor.py が Open-Meteo(キー不要の無料API)から日次の気温を取得し、
+# weather_history へ `WEATHER_LOCATION_NAME` の地点名で書き込む。既定は伊丹市付近。
+WEATHER_LOCATION_NAME: str = (os.getenv("WEATHER_LOCATION_NAME") or "伊丹").strip() or "伊丹"
+WEATHER_LATITUDE: float = _get_float_env("WEATHER_LATITUDE", 34.78)
+WEATHER_LONGITUDE: float = _get_float_env("WEATHER_LONGITUDE", 135.40)
 
 
 # ==========================================

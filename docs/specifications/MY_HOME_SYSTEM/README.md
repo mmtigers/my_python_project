@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全108件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全112件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -9,6 +9,10 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [unified_server.md](./unified_server.md) | FastAPIサーバーの起動・設定を行う統合エントリーポイント。ルートディレクトリ解決、CORS設定、IP検証、各種ルーターの統合を行う。 |
 | [system_router.md](./system_router.md) | 手動バックアップ・サービス再起動・「最新に更新して再起動」(`git pull --ff-only`→再起動)をトリガーするエンドポイントを提供するFastAPIルーター。 |
 | [system_info_service.md](./system_info_service.md) | システムページの「サーバーの起動履歴」(`server_boot_events`への起動時の追記と読み出し)と「Gitの状態」(起動中のコード・手元の最新・GitHubの最新の3段の比較)を担うサービス。 |
+| [power_analysis_service.md](./power_analysis_service.md) | 電気代・電力の分析(月ごとの推移・日別・気温帯別・テレビの点灯時間と視聴の回数)。記録の欠落を記録率で示し、各枠は独立して失敗を隔離する。 |
+| [power_page_service.md](./power_page_service.md) | ⚡電気ページ(`/dashboard/power`)のHTML組み立て。グラフはインラインSVG。 |
+| [weather_history_service.md](./weather_history_service.md) | 日次の気温をOpen-Meteoから取得して`weather_history`へ書き込むサービス(直近の更新と過去分のバックフィル)。 |
+| [weather_monitor.md](./weather_monitor.md) | 気温の取得を6時間ごとに実行する監視スクリプト(`--backfill-days`で過去分を取り込む)。 |
 | [release_history_service.md](./release_history_service.md) | 「アップデート」ページ用に、ダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を集めて1本にまとめるサービス(外部アプリはタイムアウト・キャッシュ付きで取得)。 |
 | [system_maintenance_service.md](./system_maintenance_service.md) | システムページ(かんたん表示)の「サービス再起動」(`sudo systemctl restart home_system`)と「最新に更新して再起動」(`git pull --ff-only`→新しいコミットがあるときだけ再起動)を担うサービス（Issue #829で`log_tab.py`から分離）。 |
 | [webhook_router.md](./webhook_router.md) | 外部システム（LINE Bot・SwitchBot等）からのWebhookリクエストを受け取り、適切なハンドラ・サービスへルーティングする。 |

@@ -325,6 +325,27 @@ class TestSubPages:
         assert res.status_code == 200
         assert "release-badge-dashboard" in res.text and "release-badge-quest" in res.text
 
+    def test_life_page_links_to_the_power_analysis_page(self):
+        res = self._get("life")
+        assert f'href="{config.DASHBOARD_BASE_PATH}/power"' in res.text and "電気のくわしい分析" in res.text
+
+    @pytest.mark.parametrize("query,expected_days", [
+        ("", 30), ("?days=60", 60), ("?days=90", 90), ("?days=7", 30), ("?days=abc", 30), ("?days=", 30),
+    ])
+    def test_power_page_selects_the_period(self, query, expected_days):
+        """?days=30|60|90で期間を切り替える。範囲外・数値でない値は既定の30日(422にしない)。"""
+        from services import power_analysis_service
+        seen = []
+        with patch.object(power_analysis_service, "build_power_report",
+                          side_effect=lambda days, now=None: seen.append(days) or {
+                              "days": days, "unit_price": 31.0, "generated_at": None, "meter_has_data": False,
+                              "monthly": [], "comparison": None, "daily": [], "temp_bands": [],
+                              "weather": {"has_data": False, "latest_date": None, "location": "伊丹"},
+                              "tv": {"configured": False, "has_data": False}}):
+            res = self._get(f"power{query}")
+        assert res.status_code == 200 and seen == [expected_days]
+        assert "⚡ 電気" in res.text and "ホームへ戻る" in res.text
+
     def test_sys_page_restart_button_is_disabled_until_confirmed(self):
         res = self._get("sys")
         assert 'id="restartBtn" disabled' in res.text
