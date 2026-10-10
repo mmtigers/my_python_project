@@ -15,6 +15,7 @@ from models.quest import (
     UpdateUserAction, SoundTestRequest, UseItemAction, ResetUserAction, ResetUserResponse,
     SyncMasterAction, GameDataResponse
 )
+from services import switchbot_service
 from services.quest_service import (
     game_system, quest_service, approval_service, shop_service, user_service, inventory_service,
     ImageTooLargeError, InvalidImageError,
@@ -130,6 +131,11 @@ def test_sound(req: SoundTestRequest):
 @router.get("/inventory/{user_id}")
 def get_inventory(user_id: str):
     return inventory_service.get_user_inventory(user_id)
+
+@router.get("/tv_block")
+def get_tv_block():
+    """休日のテレビおやすみ時間帯の状態(全員共通)。画面上部の常時表示用。平日・ロック無し環境はnull。"""
+    return switchbot_service.get_tv_block_state()
 
 @router.post("/inventory/use", response_model=UseItemResponse)
 def use_item(action: UseItemAction):

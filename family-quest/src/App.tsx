@@ -27,6 +27,9 @@ import { ActionResult, resolveErrorText } from './lib/actionResult';
 
 // UI Components
 import Header from './components/layout/Header';
+import TvBlockHeaderBanner from './components/layout/TvBlockHeaderBanner';
+import UpdateNoticeBanner from './components/layout/UpdateNoticeBanner';
+import { useChangelogUnread } from './hooks/useChangelogUnread';
 import BottomNav, { BottomNavTab } from './components/layout/BottomNav';
 import MessageModal from './components/ui/MessageModal';
 import { ConfirmModal } from './components/ui/ConfirmModal';
@@ -106,6 +109,9 @@ function App() {
   const [avatarUser, setAvatarUser] = useState<User | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
+  // 見ていないアップデートがあるときだけ、履歴ボタンのバッジと画面上部の帯を出す。
+  const { hasUnread: hasNewUpdate, latest: latestUpdate, markSeen: markUpdateSeen } = useChangelogUnread();
+  const openChangelog = () => { setChangelogOpen(true); markUpdateSeen(); play('tap'); };
 
   // 角度⑤: レベルアップ/メダル獲得などの「成功の演出」は、作業を止めるブロッキングモーダルから
   // 自動で消えるトーストへ変更(連続してクエストを完了する際にテンポが悪かったため)。
@@ -527,7 +533,17 @@ function App() {
         onUserSwitch={handleUserChange}
         onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
         onSettingsClick={() => { setSettingsOpen(true); play('tap'); }}
-        onChangelogClick={() => { setChangelogOpen(true); play('tap'); }}
+        onChangelogClick={openChangelog}
+        hasNewUpdate={hasNewUpdate}
+        notices={
+          <>
+            {/* 全員が見るおしらせ。休日のテレビおやすみ(全タブ共通)と、新しいアップデート。 */}
+            <TvBlockHeaderBanner />
+            {hasNewUpdate && latestUpdate && (
+              <UpdateNoticeBanner entry={latestUpdate} onOpen={openChangelog} onDismiss={markUpdateSeen} />
+            )}
+          </>
+        }
         showUserSwitcher={layoutMode !== 'landscape'}
         showLogSwitcher={layoutMode !== 'portrait'}
         showBackToMain={layoutMode === 'landscape'}

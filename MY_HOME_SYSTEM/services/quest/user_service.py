@@ -9,7 +9,7 @@ from fastapi import HTTPException, UploadFile
 from core.utils import get_now_iso
 from core.database import get_db_cursor
 import config
-from services.quest.locks import _get_user_balance_lock, _require_adult, logger
+from services.quest.locks import ITEM_USE_TITLE_PREFIX, _get_user_balance_lock, _require_adult, logger
 
 # Issue #551: routers/quest_router.py の upload_image に直書きされていた
 # 画像保存ロジック(拡張子/マジックバイト検証・サイズ上限付き保存)をこちらへ移した。
@@ -71,11 +71,14 @@ class UserService:
         }
 
     def _fetch_full_adventure_logs(self, cur) -> List[dict]:
-        # Q-L5: use_item が quest_id=0 で挿入する「アイテム使用」行はクエスト達成ではないため除外する
+        # Q-L5: use_item が quest_id=0 で挿入する「アイテム使用」行はクエスト達成ではないため、
+        # q_rows からは除外し、下の i_rows で「つかった」記録として別種別(item)で取得する。
         q_rows = cur.execute("SELECT 'quest' as type, user_id, quest_title as title, gold_earned as gold, exp_earned as exp, completed_at as ts FROM quest_history WHERE status='approved' AND quest_id != 0 ORDER BY completed_at DESC LIMIT 100").fetchall()
         r_rows = cur.execute("SELECT 'reward' as type, user_id, reward_title as title, cost_gold as gold, 0 as exp, redeemed_at as ts FROM reward_history ORDER BY redeemed_at DESC LIMIT 100").fetchall()
 
-        all_events = sorted(q_rows + r_rows, key=lambda x: x['ts'], reverse=True)[:100]
+        i_rows = cur.execute("SELECT 'item' as type, user_id, quest_title as title, 0 as gold, 0 as exp, completed_at as ts FROM quest_history WHERE status='approved' AND quest_id = 0 ORDER BY completed_at DESC LIMIT 100").fetchall()
+
+        all_events = sorted(q_rows + r_rows + i_rows, key=lambda x: x['ts'], reverse=True)[:100]
         user_info = {row['user_id']: {"name": row['name'], "avatar": row['avatar']} for row in cur.execute("SELECT user_id, name, avatar FROM quest_users")}
 
         formatted = []
@@ -86,6 +89,10 @@ class UserService:
                 text = f"{u['name']}は {ev['title']} を達成した！"
             elif ev['type'] == 'reward':
                 text = f"{u['name']}は {ev['title']} を獲得した！"
+            elif ev['type'] == 'item':
+                # use_item は quest_title を「アイテム使用: <券名>」で保存する。記録には券名だけを出す
+                item_title = ev['title'].removeprefix(ITEM_USE_TITLE_PREFIX)
+                text = f"{u['name']}は {item_title} をつかった！"
 
             formatted.append({
                 "type": ev['type'], "userId": ev['user_id'], "userName": u['name'], "userAvatar": u['avatar'],

@@ -121,6 +121,11 @@
 * **副作用**: なし
 * **エラーハンドリング**: 該当なし（`.parse()`失敗時の`ZodError`送出は`zod`ライブラリ側の挙動）
 
+### 追加・変更（2026-10-10: 記録への券使用表示・テレビおやすみ/アップデートの画面上部表示）
+
+* `tvBlockStateSchema` を `export` に変更した。`apiClient.fetchTvBlock` が、ごほうび画面の `tv_block` と同じ形状検証を共有するため。
+* 根拠: `export const tvBlockStateSchema =` (行番号: 169 / 抜粋: "export const tvBlockStateSchema =")
+
 ## 5. 処理フロー図
 
 以下は`gameDataResponseSchema`のオブジェクト構成（どのサブスキーマがどのフィールドに対応するか）を示す図です。本ファイル自体は宣言のみで実行時の分岐ロジックを持たないため、他の仕様書のような条件分岐フローではなく、スキーマの合成構造を示します。

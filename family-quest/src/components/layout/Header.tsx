@@ -12,6 +12,11 @@ interface HeaderProps {
     onSettingsClick: () => void;
     // トップ右上の「アップデートのれきし」ボタン(表示せっていボタンの左隣)。
     onChangelogClick: () => void;
+    // 見ていないアップデートがあるとき、履歴ボタンに「NEW」バッジを付ける(省略時はfalse)。
+    hasNewUpdate?: boolean;
+    // 記録ボタンの横の空きスペース(xl以上の幅)に出すおしらせ(休日のテレビおやすみ・アップデート)。
+    // xl未満では空きが無いため、ボタン行の下に縦に並べる。中身が空なら何も描画しない。
+    notices?: React.ReactNode;
     // #479: hideUserSwitcher/hideLogSwitcher(省略時=表示)とshowBackToMain
     // (省略時=非表示)とで既定値の方向が非対称だったため、全てshow*系・
     // 「省略時の意味」をprop名から読み取れる向きに統一する。
@@ -41,6 +46,8 @@ const Header: React.FC<HeaderProps> = ({
     onLogSwitch,
     onSettingsClick,
     onChangelogClick,
+    hasNewUpdate = false,
+    notices,
     showUserSwitcher = true,
     showLogSwitcher = true,
     showBackToMain,
@@ -53,10 +60,15 @@ const Header: React.FC<HeaderProps> = ({
             <div className="absolute top-2 right-2 flex gap-1 z-30">
                 <button
                     onClick={onChangelogClick}
-                    aria-label="アップデートのれきし"
-                    className="w-10 h-10 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-gray-800/80 border border-gray-600 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
+                    aria-label={hasNewUpdate ? 'アップデートのれきし(新しいおしらせあり)' : 'アップデートのれきし'}
+                    className="relative w-10 h-10 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-gray-800/80 border border-gray-600 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
                 >
                     <History size={18} />
+                    {hasNewUpdate && (
+                        <span className="absolute -top-1 -right-1 px-1 rounded-full bg-red-600 text-white text-[9px] font-black leading-4 border border-white animate-pulse">
+                            NEW
+                        </span>
+                    )}
                 </button>
                 <button
                     onClick={onSettingsClick}
@@ -83,6 +95,10 @@ const Header: React.FC<HeaderProps> = ({
             {/* Unified Navigation Area (Users + Log) */}
             {/* #412(F-L5): ホーム/ユーザー切替/記録の各ボタンは選択状態を持つ
                 トグルであるため aria-pressed で状態をスクリーンリーダーに伝える */}
+            {/* xl以上は「左の余白 | ボタン行 | おしらせ」の3列にして、ボタン行を中央に保ったまま
+                右の空きスペースにおしらせを置く。xl未満はおしらせがボタン行の下に並ぶ。 */}
+            <div className="xl:grid xl:grid-cols-[1fr_auto_1fr] xl:items-center xl:gap-6 xl:px-6">
+            <div aria-hidden="true" className="hidden xl:block" />
             <div className="flex flex-wrap justify-center items-end gap-2 sm:gap-4 px-2 mt-2">
 
                 {/* 1. ホームボタン(横画面のみ)。トップ画面でも表示して統一感を持たせる
@@ -197,6 +213,11 @@ const Header: React.FC<HeaderProps> = ({
                     </button>
                 )}
 
+            </div>
+
+            <div className="empty:hidden flex flex-col gap-2 min-w-0 w-full max-w-md mx-auto px-3 mt-3 xl:mt-2 xl:max-w-lg xl:mx-0 xl:px-0">
+                {notices}
+            </div>
             </div>
         </header>
     );

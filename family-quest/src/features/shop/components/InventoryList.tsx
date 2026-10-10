@@ -6,6 +6,8 @@ import { Card } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
 import { Modal } from '../../../components/ui/Modal';
 import { useSound } from '../../../hooks/useSound';
+import { useTvBlockCountdown } from '../../../hooks/useTvBlock';
+import TvBlockBanner from '../../../components/ui/TvBlockBanner';
 import { useToast } from '../../../context/useToast';
 import { Loader2, PackageOpen, Lock } from 'lucide-react';
 import { InventoryItem, InventoryResponse } from '../../../types';
@@ -82,20 +84,7 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     // 休日のテレビ禁止時間帯(12:00〜14:00 / 20:00以降)。平日・ロック無し環境はnull。
     // 禁止開始までの秒数はサーバー値(ポーリングで再同期)を起点にローカルで減らす。
     const tvBlock = data?.tv_block ?? null;
-    const [tvSecondsLeft, setTvSecondsLeft] = useState<number | null>(null);
-    useEffect(() => {
-        const serverValue = data?.tv_block?.seconds_until_next_block ?? null;
-        // クールダウンと同じ理由(サーバー値を起点にしたローカルカウントダウン)で意図的。
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- 上記の理由で意図的
-        setTvSecondsLeft(serverValue);
-        if (serverValue === null) return;
-
-        const id = window.setInterval(() => {
-            setTvSecondsLeft((s) => (s === null ? s : Math.max(0, s - 1)));
-        }, 1000);
-        return () => window.clearInterval(id);
-    }, [data?.tv_block?.seconds_until_next_block]);
-    const isTvBlocked = tvBlock?.is_blocked ?? false;
+    const { tvSecondsLeft, tvBlockActive } = useTvBlockCountdown(tvBlock);
 
     // YouTube系ごほうび券の連続使用防止クールダウン(15分)の残り秒数。
     // サーバー値(5秒間隔のポーリングで再同期)を起点に、表示だけ1秒間隔でローカルに
@@ -195,50 +184,10 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
         </div>
     );
 
-    // 休日のテレビおやすみの予告。朝から常時出し、禁止開始の30分前/10分前で色を変える。
-    // 禁止開始までの秒数が0になった直後〜次のポーリングまでは「おやすみ中」として扱う。
-    const tvBlockActive = isTvBlocked || (tvSecondsLeft !== null && tvSecondsLeft <= 0);
-    const tvMinutesLeft = tvSecondsLeft === null ? null : Math.ceil(tvSecondsLeft / 60);
-    const tvBlockBanner = tvBlock && (() => {
-        const scheduleText = tvBlock.windows
-            .map((w) => (w.end ? `${w.start}〜${w.end}` : `${w.start}から`))
-            .join(' と ');
-        if (tvBlockActive) {
-            return (
-                <div className="flex items-center gap-2 p-2 rounded-xl border text-xs bg-slate-100 border-slate-300 text-slate-600">
-                    <span className="text-base leading-none flex-shrink-0">🌙</span>
-                    <p>
-                        <span className="font-bold">いまテレビおやすみ中</span>
-                        {tvBlock.blocked_until ? `(${tvBlock.blocked_until}まで)` : '(あしたまで)'}
-                    </p>
-                </div>
-            );
-        }
-        const soon = tvMinutesLeft !== null && tvMinutesLeft <= 30;
-        const urgent = tvMinutesLeft !== null && tvMinutesLeft <= 10;
-        const tone = urgent
-            ? 'bg-orange-50 border-orange-400 text-orange-800'
-            : soon
-            ? 'bg-amber-50 border-amber-300 text-amber-800'
-            : 'bg-indigo-50 border-indigo-200 text-indigo-800';
-        return (
-            <div className={`flex items-center gap-2 p-2 rounded-xl border text-xs ${tone}`}>
-                <span className="text-base leading-none flex-shrink-0">{soon ? '⏰' : '🌙'}</span>
-                <p>
-                    {soon && tvMinutesLeft !== null ? (
-                        <>
-                            <span className="font-bold">あと{tvMinutesLeft}分</span>
-                            で{tvBlock.next_block_starts_at}からテレビがおやすみ。キリのいいところまでね
-                        </>
-                    ) : (
-                        <>
-                            きょうは <span className="font-bold">{scheduleText}</span> テレビおやすみ
-                        </>
-                    )}
-                </p>
-            </div>
-        );
-    })();
+    // 休日のテレビおやすみの予告(画面上部の帯と同じ TvBlockBanner。判定は useTvBlockCountdown)。
+    const tvBlockBanner = tvBlock && (
+        <TvBlockBanner tvBlock={tvBlock} tvSecondsLeft={tvSecondsLeft} tvBlockActive={tvBlockActive} />
+    );
 
     // 「きょうはあと何分見られるか」の表示。施行前でも出して慣れてもらう。
     const dailyBudgetBanner = dailyRemainingMinutes !== null && dailyLimitMinutes !== null && (

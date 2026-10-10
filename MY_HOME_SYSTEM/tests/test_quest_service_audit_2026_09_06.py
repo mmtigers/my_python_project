@@ -220,6 +220,13 @@ class TestItemUseRowsExcludedFromLogs:
         chronicle = UserService().get_family_chronicle()["chronicle"]
         assert not any("アイテム使用" in ev["text"] for ev in chronicle)
         assert any("RealQuest" in ev["text"] for ev in chronicle)
+        # 「つかった」記録としては別種別(item)で載り、クエスト達成(quest)には混ざらない
+        items = [ev for ev in chronicle if ev["type"] == "item"]
+        assert len(items) == 1
+        assert items[0]["title"] == "アイテム使用: Youtube"
+        assert "Youtube をつかった" in items[0]["text"]
+        assert items[0]["gold"] == 0 and items[0]["exp"] == 0
+        assert not any(ev["type"] == "quest" and "Youtube" in ev["text"] for ev in chronicle)
 
         logs = GameSystem().get_all_view_data()["logs"]
         assert not any("アイテム使用" in (log.get("title") or "") for log in logs)
