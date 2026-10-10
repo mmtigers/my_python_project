@@ -28,267 +28,298 @@ from services import home_status_service, system_info_service
 # === ページ共通のシェル ===
 
 _PAGE_BASE_CSS = """
-    :root { color-scheme: light dark; }
-    body {
-        margin: 0;
-        padding: 12px 12px 32px;
-        background: #ffffff;
-        color: #222;
-        font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+    /* === デザイントークン(色は「役割」で定義し、各ルールはここを参照する) ===
+       ok=正常 / warn=注意 / bad=異常 / accent=操作できるもの・情報(青) / muted=補助文字。
+       ダークモードはこの変数だけを差し替える。 */
+    :root {
+        color-scheme: light dark;
+        --bg: #f3f5f9; --surface: #ffffff; --surface-2: #eef1f6; --border: #dfe4ec;
+        --text: #1a2230; --muted: #5b6678; --faint: #8893a5;
+        --accent: #2457d6; --accent-soft: #e8eefc; --accent-bd: #c5d3f5; --on-accent: #ffffff;
+        --ok: #17713a; --ok-bg: #e6f5ec; --ok-bd: #b9e0c7;
+        --warn: #8a5600; --warn-bg: #fff3d6; --warn-bd: #efd78e;
+        --bad: #b3261e; --bad-bg: #fdebea; --bad-bd: #f2bdb9;
+        --neutral: #5b6678; --neutral-bg: #f1f3f7; --neutral-bd: #dfe4ec;
+        --bar-alt: #d9730d;
+        --radius: 14px; --radius-sm: 10px;
+        --shadow: 0 1px 2px rgba(20,30,50,0.06), 0 2px 8px rgba(20,30,50,0.04);
+        --tap: rgba(36,87,214,0.12);
     }
-    h1 { font-size: 1.25rem; margin: 0 0 2px; }
-    h2 { font-size: 1rem; margin: 20px 0 8px; }
-    .meta { font-size: 0.8rem; color: #666; margin: 0 0 12px; }
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --bg: #0e1319; --surface: #171e28; --surface-2: #202938; --border: #2a3545;
+            --text: #e6ebf2; --muted: #9aa7b8; --faint: #6f7d90;
+            --accent: #8ab4ff; --accent-soft: #1a2a48; --accent-bd: #2d4577; --on-accent: #0e1319;
+            --ok: #7fd39a; --ok-bg: #112a1c; --ok-bd: #22533a;
+            --warn: #f2c066; --warn-bg: #30250d; --warn-bd: #574314;
+            --bad: #ff9d96; --bad-bg: #351614; --bad-bd: #692a26;
+            --neutral: #9aa7b8; --neutral-bg: #1c2431; --neutral-bd: #2a3545;
+            --bar-alt: #f2a54a;
+            --shadow: 0 1px 2px rgba(0,0,0,0.4);
+            --tap: rgba(138,180,255,0.16);
+        }
+    }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0 auto;
+        max-width: 1080px;
+        padding: 16px 16px 40px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+        line-height: 1.5;
+        -webkit-text-size-adjust: 100%;
+    }
+    h1 { font-size: 1.4rem; font-weight: 800; letter-spacing: 0.01em; margin: 4px 0 2px; }
+    h2 {
+        font-size: 0.95rem; font-weight: 700; margin: 24px 0 10px; color: var(--text);
+    }
+    .meta { font-size: 0.8rem; color: var(--muted); margin: 0 0 14px; }
 
     .alerts {
-        margin: 0 0 10px; padding: 8px 10px; border-radius: 10px;
+        margin: 0 0 10px; padding: 10px 12px; border-radius: var(--radius-sm);
         font-size: 0.85rem; line-height: 1.5;
     }
-    .alerts-warn { background: #fff3e0; color: #e65100; border: 1px solid #ffe0b2; }
-    .alerts-ok { background: #f1f8e9; color: #558b2f; border: 1px solid #dcedc8; }
+    .alerts-warn { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-bd); }
+    .alerts-ok { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-bd); }
     .alerts a { color: inherit; font-weight: bold; display: inline-flex; align-items: center; min-height: 44px; }
 
     /* 自動更新が失敗したときの見た目(取れなかったら古い表示を消さずに薄く残す)。 */
     #status.stale { opacity: 0.55; }
     #status.stale::after {
         content: "⚠️ 更新できていません(表示は最後に取得できた内容です)";
-        display: block; margin-top: 8px; font-size: 0.8rem; color: #b71c1c;
+        display: block; margin-top: 8px; font-size: 0.8rem; color: var(--bad);
     }
 
-    /* ホームへ戻る・各種ナビ */
+    /* 操作できる要素(リンク・ボタン)は共通で「青の面+枠+太字」に揃え、
+       表示だけの要素(カード・箱)は白地+細い枠で区別する。 */
     nav.top-nav { margin: 0 0 16px; }
     nav.top-nav a, a.back-link {
         display: inline-flex; align-items: center; min-height: 44px;
-        padding: 0 14px; border-radius: 12px; border: 1px solid #bbdefb;
-        background: #e3f2fd; color: #1565c0; font-weight: bold;
+        padding: 0 16px; border-radius: 999px; border: 1px solid var(--accent-bd);
+        background: var(--accent-soft); color: var(--accent); font-weight: bold;
         text-decoration: none; font-size: 0.9rem;
+        -webkit-tap-highlight-color: var(--tap);
+    }
+    nav.top-nav a:hover, a.back-link:hover { border-color: var(--accent); }
+    a:focus-visible, button:focus-visible, summary:focus-visible, select:focus-visible, input:focus-visible {
+        outline: 2px solid var(--accent); outline-offset: 2px;
     }
 
-    /* ホーム画面の「見守り/くらし/システム」大きめナビカードと、
-       ファミクエ・あさノートの外部リンクカード。ステータスカードと似た見た目にしつつ、
-       「タップで移動する」ことが分かるよう矢印を添える。 */
+    /* ホーム画面のナビカードと外部リンクカード。「タップで移動する」ことが分かるよう
+       右端に矢印(›)を添える。 */
     .link-grid {
-        display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 8px; margin: 8px 0 4px;
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 10px; margin: 8px 0 4px;
     }
     a.nav-card {
-        display: flex; flex-direction: column; justify-content: center; align-items: center;
-        gap: 4px; padding: 16px 8px; min-height: 72px; border-radius: 12px;
+        position: relative; display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
+        gap: 2px; padding: 14px 32px 14px 16px; min-height: 76px; border-radius: var(--radius);
         text-decoration: none; font-weight: bold; font-size: 1rem;
-        background: #e8eaf6; color: #283593; border: 1px solid #c5cae9;
-        -webkit-tap-highlight-color: rgba(0,0,0,0.08);
+        background: var(--surface); color: var(--text); border: 1px solid var(--border);
+        box-shadow: var(--shadow); -webkit-tap-highlight-color: var(--tap);
+        transition: border-color 0.15s, background-color 0.15s;
     }
+    a.nav-card::after {
+        content: "›"; position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+        font-size: 1.5rem; font-weight: normal; color: var(--accent);
+    }
+    a.nav-card:hover { border-color: var(--accent); background: var(--accent-soft); }
     a.nav-card:active { transform: scale(0.98); }
-    a.nav-card .nav-card-sub { font-size: 0.7rem; font-weight: normal; opacity: 0.75; }
-    /* #829の見直し: 以前は警告表示(.alerts-warn)と紛らわしいアンバー系の配色で、
-       ページ最下部にあったため「位置が分かりにくい」「警告と見分けがつかない」の
-       両方の原因になっていた。警告色(オレンジ/黄)ともナビカード(藍)とも被らない
-       ティール系の配色にし、ステータスカードのすぐ下(ナビカードより前)に置く。 */
+    a.nav-card .nav-card-sub { font-size: 0.75rem; font-weight: normal; color: var(--muted); }
+    /* 外部リンク(ファミクエ等)。稼働状況は色+文字(.link-state)の両方で示す。
+       既定(状態不明)は警告色と被らない青系。 */
     a.external-card {
         display: flex; align-items: center; justify-content: space-between;
-        gap: 8px; padding: 14px 16px; min-height: 44px; border-radius: 12px;
+        gap: 8px; padding: 14px 16px; min-height: 52px; border-radius: var(--radius);
         text-decoration: none; font-weight: bold; font-size: 0.95rem;
-        background: #e0f2f1; color: #00695c; border: 1px solid #80cbc4;
-        -webkit-tap-highlight-color: rgba(0,0,0,0.08);
+        background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-bd);
+        -webkit-tap-highlight-color: var(--tap);
     }
-    /* 稼働状況による色分け(正常=緑、異常=赤)。色だけに頼らず文字(.link-state)も添える。 */
-    a.external-card.external-up { background: #e8f5e9; color: #2e7d32; border-color: #a5d6a7; }
-    a.external-card.external-down { background: #ffebee; color: #c62828; border-color: #ef9a9a; }
+    a.external-card:hover { border-color: var(--accent); }
+    a.external-card.external-up { background: var(--ok-bg); color: var(--ok); border-color: var(--ok-bd); }
+    a.external-card.external-down { background: var(--bad-bg); color: var(--bad); border-color: var(--bad-bd); }
     .link-state { font-size: 0.75rem; font-weight: normal; margin-left: 4px; }
 
-    /* 見守りページの簡易テーブル(防犯ログ・実家センサーログ)。
-       スマホでは横スクロールさせず、列を絞って縦に収める。 */
-    table.simple-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 16px; }
-    table.simple-table th, table.simple-table td {
-        text-align: left; padding: 6px 4px; border-bottom: 1px solid #eee;
+    /* 見守りページの簡易テーブル(防犯ログ・実家センサーログ)。 */
+    table.simple-table {
+        width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.85rem; margin-bottom: 16px;
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+        overflow: hidden;
     }
-    table.simple-table th { color: #666; font-weight: bold; font-size: 0.75rem; }
+    table.simple-table th, table.simple-table td {
+        text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
+    }
+    table.simple-table tr:last-child td { border-bottom: none; }
+    table.simple-table th {
+        color: var(--muted); font-weight: bold; font-size: 0.75rem; background: var(--surface-2);
+    }
     /* システムページのバックアップ完了/失敗トースト(画面下部に数秒だけ出る) */
     .dashboard-toast {
         position: fixed; left: 16px; right: 16px; bottom: 24px; z-index: 1000;
-        padding: 14px 16px; border-radius: 12px; font-weight: bold; font-size: 0.95rem;
-        color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.25); transition: opacity 0.5s;
+        max-width: 480px; margin: 0 auto;
+        padding: 14px 16px; border-radius: var(--radius); font-weight: bold; font-size: 0.95rem;
+        color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,0.3); transition: opacity 0.5s;
     }
-    .dashboard-toast.ok { background: #2e7d32; }
-    .dashboard-toast.ng { background: #c62828; }
+    .dashboard-toast.ok { background: #1f7a3d; }
+    .dashboard-toast.ng { background: #b3261e; }
     .dashboard-toast.hide { opacity: 0; }
-    .empty-note { color: #888; font-size: 0.85rem; margin: 4px 0 16px; }
+    .empty-note {
+        color: var(--muted); font-size: 0.85rem; margin: 4px 0 16px; padding: 12px;
+        border: 1px dashed var(--border); border-radius: var(--radius-sm);
+    }
 
-    /* カメラのスナップショットギャラリー。タップで元画像を別タブに拡大表示する
-       (`.snapshot-item`が`<a target="_blank">`)。 */
+    /* カメラのスナップショットギャラリー(`.snapshot-item`が`<a target="_blank">`)。 */
     .snapshot-grid {
-        display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-        gap: 6px; margin-bottom: 16px;
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 8px; margin-bottom: 16px;
     }
     a.snapshot-item {
         display: block; text-decoration: none; color: inherit;
-        -webkit-tap-highlight-color: rgba(0,0,0,0.08);
+        -webkit-tap-highlight-color: var(--tap);
     }
-    .snapshot-item img { width: 100%; border-radius: 8px; display: block; background: #eee; }
+    .snapshot-item img {
+        width: 100%; border-radius: var(--radius-sm); display: block; background: var(--surface-2);
+        border: 1px solid var(--border);
+    }
     .snapshot-caption {
-        display: block; margin-top: 2px; font-size: 0.7rem; color: #666; text-align: center;
+        display: block; margin-top: 4px; font-size: 0.7rem; color: var(--muted); text-align: center;
     }
 
     /* くらしページの電気代詳細(日別推移の簡易バーグラフ) */
-    .cost-history { margin-bottom: 16px; }
+    .cost-history {
+        margin-bottom: 16px; padding: 8px 14px; background: var(--surface);
+        border: 1px solid var(--border); border-radius: var(--radius);
+    }
     .cost-row {
-        display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 0.85rem;
+        display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 0.85rem;
     }
-    .cost-date { flex: none; width: 3.4em; color: #666; }
+    .cost-date { flex: none; width: 3.4em; color: var(--muted); }
     .cost-bar-track {
-        flex: 1; height: 10px; border-radius: 5px; background: #eee; overflow: hidden;
+        flex: 1; height: 10px; border-radius: 5px; background: var(--surface-2); overflow: hidden;
     }
-    .cost-bar { height: 100%; border-radius: 5px; background: #1565c0; }
+    .cost-bar { height: 100%; border-radius: 5px; background: var(--accent); }
     .cost-value { flex: none; width: 4.6em; text-align: right; font-weight: bold; }
 
-    /* システムページの各セクションを視覚的にグループ化する箱
-       (不具合修正: 以前は見出しと一覧が地続きで読みにくかった)。 */
+    /* システムページ等の各セクションを視覚的にグループ化する箱 */
     .info-box {
-        border: 1px solid #eee; border-radius: 12px; padding: 12px; margin-bottom: 16px;
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+        padding: 14px; margin-bottom: 16px; box-shadow: var(--shadow);
     }
     .info-box > h2:first-child { margin-top: 0; }
 
     /* システムページの機能ごとの鮮度一覧 */
     .freshness-row {
-        display: flex; justify-content: space-between; align-items: baseline;
-        padding: 8px 4px; border-bottom: 1px solid #eee; font-size: 0.9rem;
+        display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+        padding: 10px 4px; border-bottom: 1px solid var(--border); font-size: 0.9rem;
     }
+    .freshness-row:last-child { border-bottom: none; }
     .freshness-label { font-weight: bold; }
     .freshness-value { font-size: 0.85rem; }
-    .freshness-red { color: #c62828; font-weight: bold; }
-    .freshness-ok { color: #2e7d32; }
-    .freshness-info { color: #666; }
+    .freshness-red { color: var(--bad); font-weight: bold; }
+    .freshness-ok { color: var(--ok); }
+    .freshness-info { color: var(--muted); }
 
-    /* NASの容量推移(不具合修正で新設)。使用率0-100%固定でスケールする折れ線。 */
-    .nas-chart { width: 100%; max-width: 360px; height: auto; display: block; }
-    .nas-chart-grid { stroke: #eee; stroke-width: 1; }
-    .nas-chart-label { font-size: 8px; fill: #777; }
+    /* NASの容量推移。使用率0-100%固定でスケールする折れ線。 */
+    .nas-chart { width: 100%; max-width: 420px; height: auto; display: block; }
+    .nas-chart-grid { stroke: var(--border); stroke-width: 1; }
+    .nas-chart-label { font-size: 8px; fill: var(--muted); }
     /* 電気ページ(月ごとの推移・日別・気温・テレビ。グラフはインラインSVG) */
-    .bar-chart { width: 100%; max-width: 420px; height: auto; display: block; margin: 8px 0; }
-    .bar-axis { stroke: #bbb; stroke-width: 1; }
-    .bar { fill: #1565c0; }
-    .bar-alt { fill: #ef6c00; }
-    .bar-faded { fill: #90caf9; }
-    .bar-label { font-size: 8px; fill: #666; }
+    .bar-chart { width: 100%; max-width: 480px; height: auto; display: block; margin: 8px 0; }
+    .bar-axis { stroke: var(--faint); stroke-width: 1; }
+    .bar { fill: var(--accent); }
+    .bar-alt { fill: var(--bar-alt); }
+    .bar-faded { fill: var(--accent-bd); }
+    .bar-label { font-size: 8px; fill: var(--muted); }
     .legend-box { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
-    .legend-box.bar { background: #1565c0; }
-    .legend-box.bar-alt { background: #ef6c00; }
+    .legend-box.bar { background: var(--accent); }
+    .legend-box.bar-alt { background: var(--bar-alt); }
     .power-lead { font-size: 1.05rem; margin: 6px 0; }
-    .power-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0; }
-    .power-stat { border: 1px solid #ddd; border-radius: 10px; padding: 8px 10px; }
-    .power-stat-value { font-weight: bold; font-size: 1.05rem; word-break: break-word; }
+    .power-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 10px 0; }
+    .power-stat {
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+        padding: 10px 12px; box-shadow: var(--shadow);
+    }
+    .power-stat-value { font-weight: bold; font-size: 1.1rem; word-break: break-word; }
     .band-days th, .band-days td { text-align: center; font-size: 0.7rem; padding: 2px; }
     /* アップデートページ(全アプリの更新履歴) */
-    .release-filter { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+    .release-filter { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
     .release-filter a {
-        display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 22px;
-        border: 1px solid #bbdefb; background: #e3f2fd; color: #1565c0; text-decoration: none; font-size: 0.9rem;
+        display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 22px;
+        border: 1px solid var(--accent-bd); background: var(--accent-soft); color: var(--accent);
+        text-decoration: none; font-size: 0.9rem;
     }
-    .release-filter a.active { background: #1565c0; color: #fff; font-weight: bold; }
-    .release-card { border: 1px solid #ddd; border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+    .release-filter a.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: bold; }
+    .release-card {
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+        padding: 12px 14px; margin: 10px 0; box-shadow: var(--shadow);
+    }
     .release-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 0.85rem; }
-    .release-badge { padding: 2px 8px; border-radius: 10px; background: #1565c0; color: #fff; font-weight: bold; }
-    .release-badge-quest { background: #6a1b9a; }
-    .release-badge-asa { background: #e65100; }
-    .release-badge-yoru { background: #283593; }
+    .release-badge { padding: 2px 10px; border-radius: 10px; background: #2457d6; color: #fff; font-weight: bold; }
+    .release-badge-quest { background: #7b2cbf; }
+    .release-badge-asa { background: #c2570c; }
+    .release-badge-yoru { background: #34408f; }
     .release-title { font-weight: bold; margin: 6px 0 2px; word-break: break-word; }
     .release-card p, .release-card ul { margin: 4px 0; word-break: break-word; }
     .release-card ul { padding-left: 1.2em; }
-    .release-warn { color: #b26a00; font-size: 0.9rem; }
+    .release-warn { color: var(--warn); font-size: 0.9rem; }
     .git-status-line { margin: 4px 0; word-break: break-word; }
-    .git-status-warn { color: #b26a00; }
+    .git-status-warn { color: var(--warn); }
     .git-commit-list { list-style: none; padding: 0; margin: 8px 0 0; }
-    .git-commit-list li { padding: 6px 0; border-top: 1px solid #eee; word-break: break-word; }
-    .git-commit-sha { font-family: monospace; }
+    .git-commit-list li { padding: 8px 0; border-top: 1px solid var(--border); word-break: break-word; }
+    .git-commit-sha { font-family: ui-monospace, Menlo, Consolas, monospace; }
     .git-commit-badge { font-size: 0.8rem; margin-left: 6px; white-space: nowrap; display: inline-block; }
-    .nas-period a.nas-period-link { padding: 4px 10px; border-radius: 12px; background: #e3f2fd; color: #1565c0; text-decoration: none; }
-    .nas-period .nas-period-current { padding: 4px 10px; border-radius: 12px; background: #1565c0; color: #fff; font-weight: bold; }
-    .nas-chart-line { stroke: #1565c0; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .nas-period a.nas-period-link {
+        padding: 6px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent);
+        border: 1px solid var(--accent-bd); text-decoration: none;
+    }
+    .nas-period .nas-period-current {
+        padding: 6px 12px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: bold;
+    }
+    .nas-chart-line { stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     details > summary {
         cursor: pointer; min-height: 44px; display: flex; align-items: center;
-        font-size: 0.85rem; color: #1565c0; -webkit-tap-highlight-color: rgba(0,0,0,0.08);
+        font-size: 0.85rem; color: var(--accent); font-weight: bold; -webkit-tap-highlight-color: var(--tap);
     }
 
     .maintenance-box {
-        border: 1px solid #eee; border-radius: 12px; padding: 12px; margin-bottom: 16px;
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+        padding: 14px; margin-bottom: 16px; box-shadow: var(--shadow);
     }
     .maintenance-box button {
-        min-height: 44px; border-radius: 10px; border: none; font-weight: bold;
-        padding: 0 16px; margin-top: 8px;
+        min-height: 44px; border-radius: var(--radius-sm); border: none; font-weight: bold;
+        padding: 0 18px; margin-top: 8px; cursor: pointer; font-size: 0.9rem;
     }
-    button.danger { background: #c62828; color: #fff; }
-    button.danger:disabled { background: #e0e0e0; color: #9e9e9e; }
-    button.primary { background: #1565c0; color: #fff; }
+    button.danger { background: var(--bad); color: #fff; }
+    button.danger:disabled { background: var(--surface-2); color: var(--faint); cursor: not-allowed; }
+    button.primary { background: var(--accent); color: var(--on-accent); }
     .maintenance-result { font-size: 0.85rem; margin-top: 8px; white-space: pre-wrap; }
 
     /* 見守りページのログの日付フィルタ */
-    .log-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 4px; }
+    .log-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 8px; }
     .log-filter input[type="date"], .log-filter select {
-        min-height: 44px; max-width: 100%; padding: 0 10px; border-radius: 10px; border: 1px solid #bbb;
-        font-size: 1rem; background: inherit; color: inherit;
+        min-height: 44px; max-width: 100%; padding: 0 12px; border-radius: var(--radius-sm);
+        border: 1px solid var(--border); font-size: 1rem; background: var(--surface); color: var(--text);
     }
     .log-filter button, a.log-filter-clear {
-        min-height: 44px; padding: 0 16px; border-radius: 10px; font-weight: bold; font-size: 0.9rem;
-        display: inline-flex; align-items: center; box-sizing: border-box;
+        min-height: 44px; padding: 0 18px; border-radius: var(--radius-sm); font-weight: bold; font-size: 0.9rem;
+        display: inline-flex; align-items: center; box-sizing: border-box; cursor: pointer;
     }
-    .log-filter button { border: none; background: #1565c0; color: #fff; }
-    a.log-filter-clear { border: 1px solid #bbdefb; background: #e3f2fd; color: #1565c0; text-decoration: none; }
+    .log-filter button { border: none; background: var(--accent); color: var(--on-accent); }
+    a.log-filter-clear { border: 1px solid var(--accent-bd); background: var(--accent-soft); color: var(--accent); text-decoration: none; }
 
     /* 見守りページのカメラ映像(全台を同時表示) */
     .camera-grid {
-        display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-        gap: 12px; margin-bottom: 16px;
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+        gap: 14px; margin-bottom: 16px;
     }
-    .camera-name { font-weight: bold; font-size: 0.9rem; margin-bottom: 4px; }
-    .camera-tile-requested .camera-name { color: #1565c0; }
+    .camera-name { font-weight: bold; font-size: 0.9rem; margin-bottom: 6px; }
+    .camera-tile-requested .camera-name { color: var(--accent); }
     .camera-video-box {
         width: 100%; aspect-ratio: 16 / 9; background: #000;
-        border-radius: 8px; overflow: hidden;
+        border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border);
     }
     .camera-video-box video { width: 100%; height: 100%; object-fit: contain; }
-
-    @media (prefers-color-scheme: dark) {
-        body { background: #121212; color: #e8e8e8; }
-        .meta { color: #9e9e9e; }
-        .alerts-warn { background: #3a2a14; color: #ffb74d; border-color: #5c4322; }
-        .alerts-ok { background: #1e2a17; color: #aed581; border-color: #33482a; }
-        nav.top-nav a, a.back-link { background: #16304a; color: #90caf9; border-color: #24507a; }
-        a.nav-card { background: #23264a; color: #c5cae9; border-color: #34386b; }
-        a.external-card { background: #0d2b28; color: #4db6ac; border-color: #14413c; }
-        a.external-card.external-up { background: #12301a; color: #81c784; border-color: #1f5130; }
-        a.external-card.external-down { background: #3b1518; color: #ef9a9a; border-color: #6b2429; }
-        table.simple-table th { color: #9e9e9e; }
-        table.simple-table th, table.simple-table td { border-color: #333; }
-        .snapshot-caption { color: #9e9e9e; }
-        .cost-date { color: #9e9e9e; }
-        .cost-bar-track { background: #333; }
-        .info-box { border-color: #333; }
-        .freshness-row { border-color: #333; }
-        .nas-chart-grid { stroke: #333; }
-        .nas-chart-label { fill: #aaa; }
-        .git-status-warn { color: #ffb74d; }
-        .bar { fill: #64b5f6; }
-        .bar-alt { fill: #ffb74d; }
-        .bar-faded { fill: #2a4a6b; }
-        .bar-label { fill: #aaa; }
-        .bar-axis { stroke: #555; }
-        .legend-box.bar { background: #64b5f6; }
-        .legend-box.bar-alt { background: #ffb74d; }
-        .power-stat { border-color: #333; }
-        .release-card { border-color: #333; }
-        .release-filter a { background: #16304a; color: #90caf9; border-color: #24507a; }
-        .release-filter a.active { background: #1565c0; color: #fff; }
-        .release-warn { color: #ffb74d; }
-        .git-commit-list li { border-color: #333; }
-        .nas-period a.nas-period-link { background: #16304a; color: #90caf9; }
-        .nas-chart-line { stroke: #64b5f6; }
-        details > summary { color: #90caf9; }
-        .log-filter input[type="date"], .log-filter select { border-color: #555; }
-        a.log-filter-clear { background: #16304a; color: #90caf9; border-color: #24507a; }
-        .maintenance-box { border-color: #333; }
-        .camera-tile-requested .camera-name { color: #90caf9; }
-        #status.stale::after { color: #ef9a9a; }
-    }
 """
 
 

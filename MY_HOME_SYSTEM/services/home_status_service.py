@@ -78,75 +78,73 @@ MOBILE_SENSOR_ROW_LIMIT = 3000
 
 # カード1枚のCSS。ホームページと各サブページ(`services/dashboard_page_service.py`)が共有する。
 STATUS_CARD_CSS = """
-    /* --- ステータスカード --- */
-    /* スマホでは横3枚固定だと1枚あたりが潰れて値が読めなくなるため、
-       CSS Grid で「入るだけ並べて自動で折り返す」方式にする
-       (auto-fit + minmax: スマホ幅では2列、タブレット〜PCでは3〜5列になる)。 */
+    /* --- ステータスカード ---
+       CSS Grid で「入るだけ並べて自動で折り返す」(スマホ幅では2列、PCでは4〜6列)。
+       色は `_PAGE_BASE_CSS` のデザイントークンを参照する(ダークモードも変数側で切替)。
+       状態は背景色だけでなく、左端の太い帯・文字中の絵文字(⚠️/⚪等)でも判別できる。 */
     .status-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 8px;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 10px;
         margin-bottom: 8px;
     }
-    /* カードが1枚だけのグループ(ファミクエ)。auto-fit は1枚だとその1枚を行いっぱいに
-       引き伸ばすため、上下のグループの「2列のリズム」から外れて間延びして見える。
-       列を2つに固定して、スマホでは上下のカードとちょうど同じ幅・同じ左端にする
-       (`minmax(0, ...)` なのは、極端に狭い画面で横にはみ出さないため)。
-       画面が広いときは1列ぶんが広くなりすぎるので、カード側で頭打ちにする。 */
+    /* カードが1枚だけのグループ。auto-fit は1枚だとその1枚を行いっぱいに引き伸ばすため、
+       列を2つに固定して上下のグループと同じ幅・同じ左端にし、広い画面では頭打ちにする。
+       (`minmax(0, ...)` なのは、極端に狭い画面で横にはみ出さないため) */
     .status-grid-solo {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .status-grid-solo > .status-card {
-        max-width: 260px;
+        max-width: 300px;
     }
     .status-card {
-        padding: 10px 6px;
-        border-radius: 12px;
-        text-align: center;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        /* 固定heightだと値や補足が2〜3行に折り返すカードで文字が溢れるため min-height にする */
+        padding: 12px 12px 12px 14px;
+        border-radius: var(--radius);
+        text-align: left;
+        box-shadow: var(--shadow);
+        /* 値や補足が折り返しても溢れないよう固定heightではなく min-height */
         min-height: 92px;
         display: flex;
         flex-direction: column;
         justify-content: center;
-        align-items: center;
+        align-items: flex-start;
     }
-    /* 軽量ページではカード自体が詳細タブへのリンク(<a>)になる。
-       ブラウザ既定の下線・リンク色が付くと、テーマ色(theme-green 等)で表している
-       「状態」が読み取りにくくなるため打ち消す。見た目は <div> のときと同じ。 */
+    /* カード自体が詳細ページへのリンク(<a>)になる場合の打ち消し(下線・リンク色)。
+       テーマ色で「状態」を表しているため、既定のリンク表示にしない。 */
     a.status-card {
         text-decoration: none;
-        -webkit-tap-highlight-color: rgba(0,0,0,0.08);
+        -webkit-tap-highlight-color: var(--tap);
+        transition: transform 0.1s, box-shadow 0.15s;
     }
+    a.status-card:hover { box-shadow: 0 2px 4px rgba(20,30,50,0.1), 0 4px 14px rgba(20,30,50,0.08); }
     a.status-card:active {
         /* 押したことが分かるように少しだけ沈ませる(タップの手応え) */
         transform: scale(0.98);
     }
     .status-title {
-        font-size: 0.8rem; color: #555; margin-bottom: 5px; font-weight: bold; opacity: 0.8;
+        font-size: 0.78rem; color: var(--muted); margin-bottom: 4px; font-weight: bold;
     }
     .status-value {
-        font-size: 1.1rem; font-weight: bold; line-height: 1.25; white-space: normal;
+        font-size: 1.1rem; font-weight: bold; line-height: 1.3; white-space: normal;
         word-break: break-word;
     }
     /* 値の下の補足(前回値・前日比・最終検知時刻)。主役は値なので小さく薄く置く。 */
     .status-sub {
-        font-size: 0.7rem; font-weight: normal; line-height: 1.3; margin-top: 4px;
-        opacity: 0.75; white-space: normal; word-break: break-word;
+        font-size: 0.72rem; font-weight: normal; line-height: 1.3; margin-top: 4px;
+        color: var(--muted); white-space: normal; word-break: break-word;
     }
-    .theme-green { background-color: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
-    .theme-yellow { background-color: #fffde7; color: #f9a825; border: 1px solid #fff9c4; }
-    .theme-red { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
-    .theme-blue { background-color: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
-    .theme-gray { background-color: #f5f5f5; color: #757575; border: 1px solid #e0e0e0; }
+    .theme-green { background-color: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-bd); border-left: 5px solid var(--ok); }
+    .theme-yellow { background-color: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-bd); border-left: 5px solid var(--warn); }
+    .theme-red { background-color: var(--bad-bg); color: var(--bad); border: 1px solid var(--bad-bd); border-left: 5px solid var(--bad); }
+    .theme-blue { background-color: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-bd); border-left: 5px solid var(--accent); }
+    .theme-gray { background-color: var(--neutral-bg); color: var(--neutral); border: 1px solid var(--neutral-bd); border-left: 5px solid var(--faint); }
 
-    /* カードのグループ見出し。カード自体より小さく薄くして、
-       「読むもの」ではなく「並びの区切り」として見えるようにする。 */
+    /* カードのグループ見出し。カード自体より小さく薄くして「並びの区切り」として見せる。 */
     .group-title {
         font-size: 0.8rem;
         font-weight: bold;
-        color: #666;
-        margin: 14px 0 6px;
+        color: var(--muted);
+        margin: 18px 0 8px;
         letter-spacing: 0.04em;
     }
 """
