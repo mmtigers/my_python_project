@@ -411,7 +411,7 @@
 
 ### `ASA_NOTE_HEALTH_TIMEOUT_SEC` / `check_quest_app_health` / `check_asa_note_health` / `collect_link_health`
 
-* **役割**: **(新機能)** ホームの外部リンク(ファミクエ・あさノート)の稼働状況を判定する。`check_quest_app_health`は`config.QUEST_DIST_DIR/index.html`が存在し、かつ`quest_users`を読み取り専用接続(`get_ro_connection`)で読めるとき True(`/quest`が404になる状態と、DB異常で`/api/quest/data`が500になる状態の両方を異常とする。ファミクエは`unified_server`自身が配信するため自分自身へのHTTPは使わない)。`check_asa_note_health`は外部URLへ`requests.get`(`stream=True`で本文は読まない、タイムアウト`ASA_NOTE_HEALTH_TIMEOUT_SEC`=3秒)を送り、最終ステータスが200〜399なら True(接続失敗・タイムアウト・4xx/5xxは False)。`collect_link_health`は両者を`_cached`(TTL60秒)経由で呼び`{"quest": bool, "asa_note": bool}`を返す。
+* **役割**: **(新機能)** ホームの外部リンク(ファミクエ・あさノート)の稼働状況を判定する。`check_quest_app_health`は`config.QUEST_DIST_DIR/index.html`が存在し、かつ`quest_users`を読み取り専用接続(`get_ro_connection`)で読めるとき True(`/quest`が404になる状態と、DB異常で`/api/quest/data`が500になる状態の両方を異常とする。ファミクエは`unified_server`自身が配信するため自分自身へのHTTPは使わない)。`check_asa_note_health`は外部URLへ`requests.get`(`stream=True`で本文は読まない、タイムアウト`ASA_NOTE_HEALTH_TIMEOUT_SEC`=3秒)を送り、最終ステータスが200〜399なら True(接続失敗・タイムアウト・4xx/5xxは False)。`collect_link_health(asa_note_url, yoru_note_url=None)`は両者を`_cached`(TTL60秒)経由で呼び`{"quest": bool, "asa_note": bool}`を返す。**(新機能)** `yoru_note_url`を渡すとよるノートも同じ`check_asa_note_health`で判定し`"yoru_note"`キーを追加する。
 * 根拠: `ASA_NOTE_HEALTH_TIMEOUT_SEC = 3` (行番号: 805)、`def check_quest_app_health() -> bool:` (行番号: 808)、`def check_asa_note_health(url: str) -> bool:` (行番号: 829)、`def collect_link_health(asa_note_url: str) -> dict[str, bool]:` (行番号: 840)
 * **引数/リクエスト**: `check_asa_note_health(url: str)`、`collect_link_health(asa_note_url: str)`。他は引数なし。
 * **戻り値/レスポンス**: `bool`(`collect_link_health`は`dict[str, bool]`。`_cached`が`None`を返した場合は異常(False)として扱う)
@@ -419,10 +419,19 @@
 * **エラーハンドリング**: どのチェックも例外を送出せず、失敗は警告ログを出して False(=異常)にする。あさノートが遅い・不達でもタイムアウト(3秒)でページは返る。
 
 
+### `get_nas_history`
+
+* **役割**: **(新機能)** システムページのNAS容量グラフ用に、直近`days`日の履歴を`analysis_service.load_nas_history(days=days)`から返す。期間ごとのキー(`nas_history:{days}`)の`_cached`(TTL付き)経由。期間は呼び出し側(`dashboard_router`)が7/30/90に絞るのでキーは3種類に収まる。
+* 根拠: `def get_nas_history(days: int) -> pd.DataFrame:` (行番号: 853)
+* **引数/リクエスト**: `days: int`
+* **戻り値/レスポンス**: `pd.DataFrame`(取得失敗時は空)
+* **副作用**: DBの読み取りのみ(TTLキャッシュ)。
+* **エラーハンドリング**: `_cached`が例外を握りつぶして None を返し、空のDataFrameにフォールバックする。
+
 ### `get_sensor_data_for_day`
 
 * **役割**: **(新機能)** 見守りページのログの日付フィルタ用に、指定日(JST)のセンサーデータを全件返す。`get_cached_materials()`の`df_sensor`は直近`MOBILE_SENSOR_ROW_LIMIT`件までで、それより古い日は含まれないため、日付指定時だけ`analysis_service.load_sensor_data(day=day)`でDBから範囲取得する。日付ごとにキーが増えて`_cache`が肥大しないよう、このデータはキャッシュしない。
-* 根拠: `def get_sensor_data_for_day(day: date) -> pd.DataFrame:` (行番号: 848)
+* 根拠: `def get_sensor_data_for_day(day: date) -> pd.DataFrame:` (行番号: 861)
 * **引数/リクエスト**: `day` (`date`)
 * **戻り値/レスポンス**: `pd.DataFrame`(失敗時は空)
 * **副作用**: DBの読み取りのみ。
@@ -433,7 +442,7 @@
 ### `collect_status_cards`
 
 * **役割**: `get_cached_materials`で材料を集め、`build_status_cards`に渡して`(カード一覧, 取得時刻)`を返す。ホームページ用。
-* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 863〜877)
+* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 876〜890)
 
 
 * **引数/リクエスト**: `now` (`datetime | None`。省略時は `core.utils.get_now_jst()`)

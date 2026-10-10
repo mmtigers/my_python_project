@@ -24,7 +24,15 @@ from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 import config
-from services import dashboard_page_service, dashboard_pwa_service, home_status_service
+from services import (
+    dashboard_page_service,
+    dashboard_pwa_service,
+    home_status_service,
+    power_analysis_service,
+    power_page_service,
+    release_history_service,
+    system_info_service,
+)
 
 router = APIRouter()
 
@@ -37,7 +45,8 @@ _QUEST_APP_PATH = home_status_service.QUEST_APP_PATH
 # 以前 `/dashboard?tab=watch` のようなURLをスマートフォンのホーム画面に置いていた
 # 場合でも開けるよう、同じ値からリダイレクトする。
 _LEGACY_TAB_REDIRECTS = {"home": _BASE_PATH, "watch": f"{_BASE_PATH}/watch",
-                         "life": f"{_BASE_PATH}/life", "sys": f"{_BASE_PATH}/sys"}
+                         "life": f"{_BASE_PATH}/life", "sys": f"{_BASE_PATH}/sys",
+                         "updates": f"{_BASE_PATH}/updates"}
 
 
 # --- スマートフォンのホーム画面に追加するための付帯物 ---
@@ -95,7 +104,7 @@ def dashboard_home(tab: str | None = None) -> Response:
         return RedirectResponse(url=target, status_code=302)
 
     cards, fetched_at = home_status_service.collect_status_cards()
-    link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL)
+    link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)
     return HTMLResponse(
         dashboard_page_service.render_home_page(
             cards,
@@ -104,6 +113,7 @@ def dashboard_home(tab: str | None = None) -> Response:
             status_path=_STATUS_PATH,
             quest_path=_QUEST_APP_PATH,
             asa_note_url=config.ASA_NOTE_URL,
+            yoru_note_url=config.YORU_NOTE_URL,
             refresh_sec=home_status_service.MOBILE_PAGE_REFRESH_SEC,
             manifest_path=f"{_BASE_PATH}/app.webmanifest",
             icon_path=f"{_BASE_PATH}/icon-180.png",
@@ -116,7 +126,7 @@ def dashboard_home(tab: str | None = None) -> Response:
 def dashboard_status_fragment() -> HTMLResponse:
     """ホームページの自動更新用(カードのブロックだけを返す)。"""
     cards, fetched_at = home_status_service.collect_status_cards()
-    link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL)
+    link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)
     return HTMLResponse(
         dashboard_page_service.render_home_status_section(
             cards, fetched_at,
@@ -124,6 +134,7 @@ def dashboard_status_fragment() -> HTMLResponse:
             refresh_sec=home_status_service.MOBILE_PAGE_REFRESH_SEC,
             quest_path=_QUEST_APP_PATH,
             asa_note_url=config.ASA_NOTE_URL,
+            yoru_note_url=config.YORU_NOTE_URL,
             link_health=link_health,
         )
     )
@@ -133,8 +144,9 @@ def dashboard_status_fragment() -> HTMLResponse:
 
 
 @router.get(f"{_BASE_PATH}/watch", include_in_schema=False)
-def dashboard_watch(date: str | None = None) -> HTMLResponse:
+def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLResponse:
     """見守りページ。`?date=YYYY-MM-DD`でログ(防犯・センサー)をその日(JST)に絞る。
+    `?device=<device_id>`でセンサーログをその機器だけに絞る(組み合わせ可)。
     形式が不正な値は無視して通常表示にする(ブックマークの壊れたURLでも開けるように)。"""
     selected_date = dashboard_page_service.parse_log_date(date)
     if selected_date is not None:
@@ -147,6 +159,7 @@ def dashboard_watch(date: str | None = None) -> HTMLResponse:
             dashboard_path=f"{_BASE_PATH}/",
             snapshot_url_prefix=f"{_BASE_PATH}/snapshot",
             selected_date=selected_date,
+            selected_device=device or None,
         )
     )
 
@@ -163,18 +176,58 @@ def dashboard_life() -> HTMLResponse:
 
 
 @router.get(f"{_BASE_PATH}/sys", include_in_schema=False)
-def dashboard_sys() -> HTMLResponse:
+def dashboard_sys(nas_days: str | None = None) -> HTMLResponse:
+    """システムページ。`?nas_days=7|30|90`でNAS容量グラフの表示期間を切り替える
+    (それ以外の値・数値でない値は既定の30日。壊れたブックマークでも開けるようにする)。"""
+    try:
+        days = int(nas_days) if nas_days is not None else None
+    except ValueError:
+        days = None
+    nas_days = days if days in dashboard_page_service.NAS_HISTORY_DAYS_CHOICES else dashboard_page_service.NAS_HISTORY_DEFAULT_DAYS
     materials = home_status_service.get_cached_materials()
+    nas_history = home_status_service.get_nas_history(nas_days)
     now = home_status_service.get_now_jst()
     return HTMLResponse(
         dashboard_page_service.render_sys_page(
             materials.df_sensor,
             materials.nas_data,
-            materials.nas_history,
+            nas_history,
             materials.memory,
             materials.disk,
             now,
             dashboard_path=f"{_BASE_PATH}/",
+            nas_days=nas_days,
+            boot_history=system_info_service.get_boot_history(),
+        )
+    )
+
+
+@router.get(f"{_BASE_PATH}/power", include_in_schema=False)
+def dashboard_power(days: str | None = None) -> HTMLResponse:
+    """電気ページ。月ごとの推移・日別の電気代・気温との関係・テレビの使い方を表示する。
+    `?days=30|60|90`で日別・気温・テレビの対象期間を切り替える(それ以外の値・数値でない値は30日。
+    壊れたブックマークでも開けるようにする)。分析は10分キャッシュされる。
+    `async def`にしない(DB取得とpandasの計算が同期のため、イベントループを止めない)。"""
+    try:
+        selected = int(days) if days is not None else None
+    except ValueError:
+        selected = None
+    selected = selected if selected in power_analysis_service.DAYS_CHOICES else power_analysis_service.DEFAULT_DAYS
+    report = power_analysis_service.build_power_report(selected)
+    return HTMLResponse(power_page_service.render_power_page(report, dashboard_path=f"{_BASE_PATH}/"))
+
+
+@router.get(f"{_BASE_PATH}/updates", include_in_schema=False)
+def dashboard_updates(app: str | None = None) -> HTMLResponse:
+    """アップデートページ。ダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を
+    新しい順にまとめて表示する。`?app=dashboard|quest|asa|yoru`で1アプリに絞る
+    (未知の値は無視して全件)。あさノート・よるノートは外部から取得する(タイムアウト・
+    キャッシュ付き。失敗しても残りのアプリは表示する)。
+    `async def`にしない(外部取得が同期のため、イベントループを止めない)。"""
+    history = release_history_service.get_release_history()
+    return HTMLResponse(
+        dashboard_page_service.render_updates_page(
+            history["entries"], history["sources"], dashboard_path=f"{_BASE_PATH}/", selected_app=app,
         )
     )
 

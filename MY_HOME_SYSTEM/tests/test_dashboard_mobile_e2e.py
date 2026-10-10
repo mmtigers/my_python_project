@@ -229,10 +229,10 @@ class TestHomePageLayout:
         body_text = home_page.inner_text("body")
         assert "<div" not in body_text and "status-card" not in body_text
 
-    def test_nav_cards_link_to_the_three_pages(self, home_page):
-        """項目1: 見守り/くらし/システムへのナビカードがあること。"""
+    def test_nav_cards_link_to_the_four_pages(self, home_page):
+        """項目1: 見守り/くらし/システム/アップデートへのナビカードがあること。"""
         nav = home_page.locator("a.nav-card")
-        assert nav.count() == 3
+        assert nav.count() == 4
         for i in range(nav.count()):
             box = nav.nth(i).bounding_box()
             assert box is not None and box["height"] >= 44
@@ -289,7 +289,7 @@ class TestHomePageDarkMode:
 class TestSubPagesLayout:
     """項目1: 各サブページに「ホームへ戻る」ボタンがあり、横はみ出しが無いこと。"""
 
-    @pytest.mark.parametrize("path,heading", [("watch", "見守り"), ("life", "くらし"), ("sys", "システム")])
+    @pytest.mark.parametrize("path,heading", [("watch", "見守り"), ("life", "くらし"), ("sys", "システム"), ("updates", "アップデート"), ("power", "電気")])
     def test_subpage_has_a_back_link_and_no_sideways_scroll(self, browser, dashboard_server, artifact_dir, path, heading):
         base_url, base_path = dashboard_server
         context = browser.new_context(viewport=MOBILE_VIEWPORT, device_scale_factor=3, is_mobile=True, has_touch=True)

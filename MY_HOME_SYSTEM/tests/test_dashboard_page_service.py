@@ -192,13 +192,16 @@ class TestRenderCameraSelector:
         html = dashboard_page_service._render_camera_selector([])
         assert "カメラが登録されていません" in html
 
-    def test_renders_a_button_per_camera(self):
+    def test_renders_a_video_tile_per_camera_all_at_once(self):
+        """全台を初期表示から同時に並べる(切替ボタンは無い)。"""
         html = dashboard_page_service._render_camera_selector(
-            [{"id": "entrance", "name": "玄関"}, {"id": "parking", "name": "駐車場"}]
+            [{"id": "entrance", "name": "玄関"}, {"id": "garden", "name": "庭"}, {"id": "parking", "name": "駐車場"}]
         )
-        assert html.count("camera-btn") == 2
-        assert "玄関" in html
-        assert "駐車場" in html
+        assert html.count('class="camera-video"') == 3
+        for cid in ("entrance", "garden", "parking"):
+            assert f'data-camera-id="{cid}"' in html
+        assert "camera-btn" not in html
+        assert "玄関" in html and "庭" in html and "駐車場" in html
 
 
 class TestRenderWatchPage:
@@ -506,6 +509,254 @@ class TestRenderNasHistoryChart:
         assert "<table" in html
 
 
+class TestNasChartImprovements:
+    """NAS容量グラフ: 実測レンジの縦軸・時刻軸・増加ペースと満杯予測・期間切替・間引き。"""
+
+    @staticmethod
+    def _history(days, per_day_gb, total=1000, start_used=500, step_hours=1):
+        n = int(days * 24 / step_hours) + 1
+        ts = [pd.Timestamp("2026-09-01") + pd.Timedelta(hours=i * step_hours) for i in range(n)]
+        used = [start_used + per_day_gb * (i * step_hours / 24) for i in range(n)]
+        return pd.DataFrame({
+            "timestamp": ts,
+            "used_gb": used,
+            "free_gb": [total - u for u in used],
+            "percent": [u / total * 100 for u in used],
+        })
+
+    def test_y_axis_follows_measured_range_not_0_to_100(self):
+        html = dashboard_page_service._render_nas_history_chart(self._history(10, 1.0))
+        # 使用率はおよそ50〜51%。0%や100%の目盛りは出ない。
+        assert ">0%<" not in html and ">100%<" not in html
+        assert "%</text>" in html
+
+    def test_points_are_positioned_by_time_not_by_index(self):
+        df = pd.DataFrame({
+            "timestamp": [pd.Timestamp("2026-09-01"), pd.Timestamp("2026-09-02"), pd.Timestamp("2026-09-10")],
+            "percent": [50.0, 51.0, 60.0],
+            "free_gb": [500, 490, 400],
+        })
+        html = dashboard_page_service._render_nas_history_chart(df)
+        xs = [float(p.split(",")[0]) for p in html.split('points="')[1].split('"')[0].split()]
+        # 1日目→2日目の間隔は、2日目→10日目(8日)の1/8
+        assert (xs[1] - xs[0]) * 8 == pytest.approx(xs[2] - xs[1], rel=0.01)
+
+    def test_forecast_shows_growth_rate_and_days_to_full(self):
+        df = self._history(10, 5.0, total=1000, start_used=500)  # 5GB/日、終点で空き450GB
+        forecast = dashboard_page_service.compute_nas_forecast(df)
+        assert forecast["per_day"] == pytest.approx(5.0)
+        assert forecast["days_to_full"] == pytest.approx(90.0, rel=0.01)
+        html = dashboard_page_service._render_nas_history_chart(df)
+        assert "+5.0GB/日" in html and "約90日後" in html
+        assert "空き 450GB" in html
+
+    def test_no_growth_has_no_days_to_full(self):
+        forecast = dashboard_page_service.compute_nas_forecast(self._history(10, -2.0))
+        assert forecast["per_day"] < 0 and forecast["days_to_full"] is None
+        assert "増えていません" in dashboard_page_service._render_nas_history_chart(self._history(10, -2.0))
+
+    def test_forecast_needs_at_least_two_days(self):
+        assert dashboard_page_service.compute_nas_forecast(self._history(1, 5.0)) is None
+        assert "データ不足" in dashboard_page_service._render_nas_history_chart(self._history(1, 5.0))
+
+    def test_forecast_is_skipped_without_used_gb(self):
+        df = pd.DataFrame({
+            "timestamp": [pd.Timestamp("2026-09-01"), pd.Timestamp("2026-09-09")],
+            "percent": [50.0, 52.0], "free_gb": [500, 480],
+        })
+        assert dashboard_page_service.compute_nas_forecast(df) is None
+
+    def test_many_points_are_thinned(self):
+        html = dashboard_page_service._render_nas_history_chart(self._history(90, 1.0))  # 2161点
+        n_points = len(html.split('points="')[1].split('"')[0].split())
+        assert n_points <= dashboard_page_service._NAS_CHART_MAX_POINTS
+
+    def test_flat_usage_still_gets_a_minimum_span(self):
+        df = pd.DataFrame({
+            "timestamp": [pd.Timestamp("2026-09-01"), pd.Timestamp("2026-09-05")],
+            "percent": [100.0, 100.0], "free_gb": [0, 0],
+        })
+        html = dashboard_page_service._render_nas_history_chart(df)
+        assert "<polyline" in html
+
+    def test_period_links_mark_the_current_period(self):
+        html = dashboard_page_service._render_nas_history_chart(
+            self._history(10, 1.0), days=30, sys_path="/dashboard/sys"
+        )
+        assert 'href="/dashboard/sys?nas_days=7#nas-history"' in html
+        assert 'href="/dashboard/sys?nas_days=90#nas-history"' in html
+        assert 'href="/dashboard/sys?nas_days=30#nas-history"' not in html
+        assert '<span class="nas-period-current">30日</span>' in html
+
+
+class TestSensorDeviceFilter:
+    """見守りページのセンサーログを機器ごとに絞る(?device=)。"""
+
+    @staticmethod
+    def _df():
+        rows = []
+        for i, (dev, name, loc) in enumerate([("A", "伊丹のリビング", "伊丹"), ("B", "伊丹の書斎", "伊丹"), ("C", "高砂の玄関", "高砂")]):
+            rows.append({
+                "device_id": dev, "friendly_name": name, "location": loc,
+                "timestamp": pd.Timestamp("2026-10-01 10:00:00") + pd.Timedelta(minutes=i),
+                "contact_state": "open", "movement_state": None,
+            })
+        return pd.DataFrame(rows)
+
+    def _render(self, device=None, monkeypatch=None):
+        return dashboard_page_service.render_watch_page(
+            self._df(), dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot",
+            selected_device=device,
+        )
+
+    def test_select_lists_all_devices(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render()
+        assert 'name="device"' in html
+        for name in ("伊丹のリビング", "伊丹の書斎", "高砂の玄関"):
+            assert f">{name}</option>" in html
+        assert "すべての機器" in html
+
+    def test_selected_device_limits_the_sensor_logs(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render("A")
+        log_part = html.split('id="takasago-log"', 1)[1]
+        assert "伊丹のリビング" in log_part
+        assert "伊丹の書斎" not in log_part and "高砂の玄関" not in log_part
+        assert '<option value="A" selected>' in html
+        assert 'class="log-filter-clear"' in html
+
+    def test_unknown_device_is_ignored(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render("ZZZ")
+        log_part = html.split('id="takasago-log"', 1)[1]
+        assert "伊丹のリビング" in log_part and "高砂の玄関" in log_part
+        assert 'class="log-filter-clear"' not in html
+
+    def test_options_come_from_unfiltered_devices(self, monkeypatch):
+        """絞り込み後も、他の機器へ選び直せること。"""
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = self._render("A")
+        assert ">高砂の玄関</option>" in html
+
+
+class TestSysPageBootAndGit:
+    """システムページの「起動履歴」と「Gitの状態」。"""
+
+    @staticmethod
+    def _render(boots=None):
+        return dashboard_page_service.render_sys_page(
+            pd.DataFrame(), None, pd.DataFrame(), {"percent": 1.0}, {"percent": 1.0},
+            _jst(2026, 10, 10, 12, 0), dashboard_path="/dashboard/", boot_history=boots,
+        )
+
+    def test_empty_history_shows_a_placeholder(self):
+        html = self._render([])
+        assert 'id="boot-history"' in html and "起動の記録はまだありません" in html
+
+    def test_history_rows_show_time_commit_and_reason_label(self):
+        html = self._render([
+            {"booted_at": "2026-10-09T21:05:00+09:00", "commit_sha": "abc1234",
+             "commit_subject": "バグ修正", "branch": "master", "pid": 1, "reason": "update"},
+            {"booted_at": "2026-10-08T03:00:00+09:00", "commit_sha": None,
+             "commit_subject": None, "branch": None, "pid": 2, "reason": "unknown"},
+        ])
+        assert "10/09 21:05" in html and "abc1234" in html and "バグ修正" in html
+        assert "ダッシュボードから更新" in html
+        assert "不明(自動復旧・電源など)" in html
+
+    def test_commit_subject_is_html_escaped(self):
+        html = self._render([
+            {"booted_at": "2026-10-09T21:05:00+09:00", "commit_sha": "abc1234",
+             "commit_subject": "<script>alert(1)</script>", "branch": "m", "pid": 1, "reason": "manual"},
+        ])
+        assert "<script>alert(1)</script>" not in html
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+    def test_git_box_is_filled_by_js_not_by_the_page(self):
+        """git fetch は遅いので、ページ本体では呼ばず専用APIから非同期に取る。"""
+        html = self._render([])
+        assert 'id="git-status"' in html and 'id="gitStatusBody"' in html
+        assert "/api/system/git/status" in html
+        assert "確認中" in html
+
+    def test_git_script_renders_with_textcontent_not_innerhtml(self):
+        """コミット件名は外部由来の文字列。DOMへは textContent で入れる(XSS対策)。"""
+        script = dashboard_page_service._GIT_STATUS_SCRIPT
+        assert "innerHTML" not in script and "textContent" in script
+
+
+class TestRenderUpdatesPage:
+    """アップデートページ(全アプリの更新履歴)。"""
+
+    @staticmethod
+    def _entry(app, label, date, title="t", version="1.0.0", summary="s", details=("d1",)):
+        return {"app": app, "app_label": label, "version": version, "date": date,
+                "title": title, "summary": summary, "details": list(details)}
+
+    @staticmethod
+    def _sources(**oks):
+        apps = [("dashboard", "ダッシュボード"), ("quest", "ファミクエ"), ("asa", "あさノート"), ("yoru", "よるノート")]
+        return [{"app": a, "label": l, "entries": [], "ok": oks.get(a, True), "stale": False,
+                 "error": "取得できませんでした" if not oks.get(a, True) else ""} for a, l in apps]
+
+    def _render(self, entries, sources=None, selected=None):
+        return dashboard_page_service.render_updates_page(
+            entries, sources or self._sources(), dashboard_path="/dashboard/", selected_app=selected,
+        )
+
+    def test_entries_show_badge_version_date_title_summary_and_details(self):
+        html = self._render([self._entry("asa", "あさノート", "2026-10-09", "題名", "0.4.21", "要約", ("一つ目", "二つ目"))])
+        assert "release-badge-asa" in html and "あさノート" in html
+        assert "v0.4.21" in html and "2026-10-09" in html
+        assert "題名" in html and "要約" in html
+        assert "<li>一つ目</li>" in html and "<li>二つ目</li>" in html
+
+    def test_version_is_omitted_when_the_app_has_none(self):
+        html = self._render([self._entry("dashboard", "ダッシュボード", "2026-10-10", version="")])
+        assert ">v<" not in html and "v</span>" not in html
+
+    def test_external_text_is_html_escaped(self):
+        evil = "<script>alert(1)</script>"
+        html = self._render([self._entry("asa", "あさノート", "2026-10-09", title=evil, summary=evil, details=(evil,), version=evil)])
+        assert evil not in html
+        assert html.count("&lt;script&gt;alert(1)&lt;/script&gt;") >= 4
+
+    def test_filter_chips_show_counts_and_mark_the_selected_app(self):
+        sources = self._sources()
+        sources[1]["entries"] = [1, 2, 3]
+        html = self._render([self._entry("quest", "ファミクエ", "2026-10-04")] * 3, sources, selected="quest")
+        assert 'href="/dashboard/updates?app=quest" class="active">ファミクエ(3)' in html
+        assert 'href="/dashboard/updates">すべて(3)' in html
+
+    def test_selected_app_filters_the_cards(self):
+        entries = [self._entry("quest", "ファミクエ", "2026-10-04", title="Q"), self._entry("asa", "あさノート", "2026-10-09", title="A")]
+        html = self._render(entries, selected="asa")
+        assert "release-title\">A<" in html and "release-title\">Q<" not in html
+
+    def test_unknown_filter_is_ignored(self):
+        entries = [self._entry("quest", "ファミクエ", "2026-10-04", title="Q")]
+        assert "release-title\">Q<" in self._render(entries, selected="nonsense")
+
+    def test_failed_source_shows_a_warning(self):
+        html = self._render([], self._sources(asa=False))
+        assert "⚠️ あさノート: 取得できませんでした" in html
+        assert "表示できる更新履歴がありません" in html
+
+    def test_warning_is_scoped_to_the_selected_app(self):
+        html = self._render([], self._sources(asa=False), selected="quest")
+        assert "⚠️ あさノート" not in html
+
+    def test_many_entries_are_folded_after_the_visible_limit(self):
+        n = dashboard_page_service._RELEASES_VISIBLE + 5
+        html = self._render([self._entry("quest", "ファミクエ", "2026-10-04", title=f"T{i}") for i in range(n)])
+        assert "さらに5件を表示" in html
+        assert html.count('class="release-card"') == n
+
+    def test_has_a_back_link_to_home(self):
+        assert "ホームへ戻る" in self._render([])
+
+
 class TestMergeOpenCloseEvents:
     """開閉センサーの「open」の直後(60秒以内)の「close」を、開いた時刻の1行にまとめる。"""
 
@@ -663,6 +914,50 @@ class TestSensorStateChangeLog:
         out = dashboard_page_service.sensor_state_change_log(df)
         # 最初のopen(10:05)と、open->closedの変化(10:20)だけが残り、新しい順に並ぶ
         assert list(out["timestamp"]) == [_jst(2026, 10, 2, 10, 20), _jst(2026, 10, 2, 10, 5)]
+
+    def test_presence_sensor_keeps_only_detection_starts(self):
+        """人感センサーは「検知した」行だけ残す(not_detectedは出さない)。"""
+        df = self._df([
+            (_jst(2026, 10, 2, 10, 4), "pir", "not_detected", None),
+            (_jst(2026, 10, 2, 10, 3), "pir", "detected", None),
+            (_jst(2026, 10, 2, 10, 2), "pir", "not_detected", None),
+            (_jst(2026, 10, 2, 10, 1), "pir", "detected", None),
+        ])
+        out = dashboard_page_service.sensor_state_change_log(df)
+        assert list(out["contact_state"]) == ["detected", "detected"]
+        assert list(out["timestamp"]) == [_jst(2026, 10, 2, 10, 3), _jst(2026, 10, 2, 10, 1)]
+
+    def test_repeated_detections_are_still_collapsed(self):
+        """連続する同じ`detected`は従来どおり最初の1行だけ(間に not_detected が無い場合)。"""
+        df = self._df([
+            (_jst(2026, 10, 2, 10, 3), "pir", "detected", None),
+            (_jst(2026, 10, 2, 10, 2), "pir", "detected", None),
+            (_jst(2026, 10, 2, 10, 1), "pir", "detected", None),
+        ])
+        out = dashboard_page_service.sensor_state_change_log(df)
+        assert list(out["timestamp"]) == [_jst(2026, 10, 2, 10, 1)]
+
+    def test_not_detected_matching_is_case_and_space_insensitive(self):
+        df = self._df([
+            (_jst(2026, 10, 2, 10, 2), "pir", " NOT_DETECTED ", None),
+            (_jst(2026, 10, 2, 10, 1), "pir", "detected", None),
+        ])
+        out = dashboard_page_service.sensor_state_change_log(df)
+        assert list(out["contact_state"]) == ["detected"]
+
+    def test_door_and_camera_states_are_unaffected_by_the_presence_rule(self):
+        df = self._df([
+            (_jst(2026, 10, 2, 10, 3), "door", "close", None),
+            (_jst(2026, 10, 2, 10, 2), "door", "open", None),
+            (_jst(2026, 10, 2, 10, 1), "cam", None, "OFF"),
+        ])
+        out = dashboard_page_service.sensor_state_change_log(df)
+        assert set(out["device_id"]) == {"door", "cam"} and len(out) == 3
+
+    def test_presence_rule_applies_even_without_a_device_column(self):
+        df = pd.DataFrame({"timestamp": [2, 1], "contact_state": ["not_detected", "detected"]})
+        out = dashboard_page_service.sensor_state_change_log(df)
+        assert list(out["contact_state"]) == ["detected"]
 
     def test_devices_are_compared_independently(self):
         df = self._df([

@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Request
 from typing import Dict, Any
 
 from core.logger import setup_logging
-from services import backup_service, system_maintenance_service
+from services import backup_service, system_info_service, system_maintenance_service
 
 logger = setup_logging("system_router")
 
@@ -85,6 +85,16 @@ def manual_deploy(request: Request) -> dict[str, Any]:
         return {"status": "running", "run_id": run_id, "message": "更新は既に実行中です。"}
     return {"status": "started", "run_id": run_id,
             "message": "更新を開始しました。取り込みに失敗した場合は再起動しません。"}
+
+
+@router.get("/git/status")
+def git_status() -> dict[str, Any]:
+    """システムページの「Gitの状態」が、ページ表示後にJSで取得する(`git fetch` を含み遅いため
+    ページ本体には含めない)。起動中のコード・手元の最新・GitHubの最新の3段と最近のコミットを返す。
+    結果は5分キャッシュされる。失敗しても200で `ok: false` と `error` を返す(画面に理由を出す)。
+    `async def` にしない(git の外部コマンドでイベントループを止めないため)。
+    """
+    return system_info_service.get_git_status()
 
 
 @router.get("/deploy/status")

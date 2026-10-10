@@ -151,8 +151,8 @@
 * 根拠: [戻り値] (行番号: 95, 98〜110)
 
 
-* **副作用**: `home_status_service.collect_status_cards()`経由でDBの読み取り(TTLキャッシュ付き)。**(新機能)** `home_status_service.collect_link_health(config.ASA_NOTE_URL)`でファミクエ・あさノートの稼働チェック(DB読み取り・あさノートへのHTTP GET。TTL60秒のキャッシュ付き)を行い、結果を`render_home_page`の`link_health`に渡して外部リンクを色分けする。
-* 根拠: [関数呼び出し] (行番号: 97 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")、[稼働チェック] (行番号: 98 / 抜粋: "link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL)")
+* **副作用**: `home_status_service.collect_status_cards()`経由でDBの読み取り(TTLキャッシュ付き)。**(新機能)** `home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)`でファミクエ・あさノート・よるノートの稼働チェック(DB読み取り・あさノートへのHTTP GET。TTL60秒のキャッシュ付き)を行い、結果を`render_home_page`の`link_health`に渡して外部リンクを色分けする。
+* 根拠: [関数呼び出し] (行番号: 97 / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")、[稼働チェック] (行番号: 98 / 抜粋: "link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)")
 
 
 * **エラーハンドリング**: `tab`が`_LEGACY_TAB_REDIRECTS`に無い値の場合は`.get(tab, _BASE_PATH)`によりホームへフォールバックする(例外は送出しない)。
@@ -186,11 +186,11 @@
 ### `GET {DASHBOARD_BASE_PATH}/watch` (`dashboard_watch`)
 
 * **役割**: 👀見守りページを返す。`home_status_service.get_cached_materials()`で材料(`df_sensor`)を取得し、`dashboard_page_service.render_watch_page`に渡す。**(不具合修正)** 以前は`materials.df_security_log`(常に空の`security_logs`テーブル由来)も渡していたが、この材料自体が`get_cached_materials()`から削除されたため、渡すのは`df_sensor`のみになった(防犯ログは`render_watch_page`内部で`df_sensor`から`home_status_service.camera_motion_log`により抽出される)。
-* 根拠: [ルート定義] (行番号: 129〜139 / 抜粋: '@router.get(f"{_BASE_PATH}/watch", include_in_schema=False)\ndef dashboard_watch() -> HTMLResponse:')
+* 根拠: [ルート定義] (行番号: 129〜139 / 抜粋: '@router.get(f"{_BASE_PATH}/watch", include_in_schema=False)\ndef dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLResponse:')
 
 
-* **引数/リクエスト**: クエリ`date`(`YYYY-MM-DD`、任意)。**(新機能)** 指定があれば`dashboard_page_service.parse_log_date`で解釈し、その日のログだけを表示する。この場合は共通キャッシュ(直近`MOBILE_SENSOR_ROW_LIMIT`件)ではなく`home_status_service.get_sensor_data_for_day`でDBから指定日の全件を取る。形式が不正な値は無視して通常表示になる。
-* 根拠: [関数定義] (行番号: 136 / 抜粋: "def dashboard_watch(date: str | None = None) -> HTMLResponse:")、[日付の解釈] (行番号: 139 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
+* **引数/リクエスト**: **(新機能)** クエリ`device`(`device_id`、任意)で高砂・伊丹のセンサーログをその機器だけに絞る(`render_watch_page(selected_device=...)`に渡す。一覧に無い値は無視される。防犯ログは対象外)。クエリ`date`(`YYYY-MM-DD`、任意)。**(新機能)** 指定があれば`dashboard_page_service.parse_log_date`で解釈し、その日のログだけを表示する。この場合は共通キャッシュ(直近`MOBILE_SENSOR_ROW_LIMIT`件)ではなく`home_status_service.get_sensor_data_for_day`でDBから指定日の全件を取る。形式が不正な値は無視して通常表示になる。
+* 根拠: [関数定義] (行番号: 147 / 抜粋: "def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLResponse:")、[日付の解釈] (行番号: 151 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(見守りページ全体のHTML)
@@ -229,13 +229,27 @@
 
 
 
+### `GET {DASHBOARD_BASE_PATH}/power` (`dashboard_power`)
+
+* **役割**: **(新機能)** ⚡電気ページ。`power_analysis_service.build_power_report(days)`の結果を`power_page_service.render_power_page`で描く(月ごとの推移・日別の電気代・気温との関係・テレビの使い方)。分析は10分キャッシュされる。`async def`にしない(DB取得とpandasの計算が同期のため、イベントループを止めない)。
+* **引数/リクエスト**: クエリ`days`(30/60/90。それ以外の値・数値でない値は既定の30。`str | None`で受けて自前で変換するので422にならない)。日別・気温・テレビの対象期間を切り替える。
+* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 206)
+
+### `GET {DASHBOARD_BASE_PATH}/updates` (`dashboard_updates`)
+
+* **役割**: **(新機能)** アップデートページを返す。`release_history_service.get_release_history()`でダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を集め、`dashboard_page_service.render_updates_page`に渡す。あさノート・よるノートは外部から取得する(タイムアウト・キャッシュ付き。失敗しても残りのアプリは表示する)。`async def`にしない(外部取得が同期のため、イベントループを止めない)。
+* **引数/リクエスト**: クエリ`app`(`dashboard`/`quest`/`asa`/`yoru`、任意)で1アプリに絞る。未知の値は無視して全件。
+* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 221)
+
 ### `GET {DASHBOARD_BASE_PATH}/sys` (`dashboard_sys`)
 
+* **(新機能・起動履歴)** `system_info_service.get_boot_history()`の結果を`render_sys_page(boot_history=...)`に渡し、システムページに「サーバーの起動履歴」を出す。Gitの状態は含めない(ページ表示後にJSが`GET /api/system/git/status`から取得する)。
+
 * **役割**: 🔧システムページを返す。`get_cached_materials()`で材料を取得し、`home_status_service.get_now_jst()`の現在時刻とあわせて`dashboard_page_service.render_sys_page`に渡す。**(不具合修正)** `materials.nas_history`(NASの容量履歴)も渡すようにした。NASカードをタップしても容量履歴を見る手段が無かった不具合の修正。
-* 根拠: [ルート定義] (行番号: 152〜165 / 抜粋: '@router.get(f"{_BASE_PATH}/sys", include_in_schema=False)\ndef dashboard_sys() -> HTMLResponse:')
+* 根拠: [ルート定義] (行番号: 152〜165 / 抜粋: '@router.get(f"{_BASE_PATH}/sys", include_in_schema=False)\ndef dashboard_sys(nas_days: str | None = None) -> HTMLResponse:')
 
 
-* **引数/リクエスト**: なし
+* **引数/リクエスト**: **(新機能)** クエリ`nas_days`(7/30/90のいずれか。それ以外の値・数値でない値は既定の30。`str | None`で受けて自前で変換するので422にならない)。NAS容量グラフの表示期間で、`home_status_service.get_nas_history(nas_days)`を`render_sys_page`の`nas_history`に渡す(以前の`materials.nas_history`=直近200件は使わなくなった)。
 * 根拠: [関数定義] (行番号: 153)
 
 

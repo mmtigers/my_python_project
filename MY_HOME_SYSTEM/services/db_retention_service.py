@@ -83,6 +83,7 @@ RETENTION_TARGETS: tuple[RetentionTarget, ...] = (
     RetentionTarget("security_logs", "timestamp", "DB_ROW_RETENTION_SENSOR_DAYS", "防犯ログ"),
     RetentionTarget("routine_step_events", "occurred_at", "DB_ROW_RETENTION_EVENT_DAYS", "ルーティン遷移"),
     RetentionTarget("ui_tap_events", "occurred_at", "DB_ROW_RETENTION_EVENT_DAYS", "画面タップログ"),
+    RetentionTarget("server_boot_events", "booted_at", "DB_ROW_RETENTION_EVENT_DAYS", "サーバー起動履歴"),
 )
 
 # `build_report()` が行数を数える際、明らかに時系列でないテーブルは

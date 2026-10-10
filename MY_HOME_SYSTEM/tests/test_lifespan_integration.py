@@ -54,6 +54,39 @@ class TestLifespanStartup:
             assert len(spawned) == 2
 
 
+class TestLifespanBootRecord:
+    """起動履歴(システムページ)用に、起動のたびに server_boot_events へ1行追記する。"""
+
+    def test_boot_is_recorded_when_migration_succeeds(self, lifespan_client_factory, monkeypatch):
+        from services import system_info_service
+        monkeypatch.setattr(system_info_service, "_git", lambda *a, **k: "abc1234")
+        with lifespan_client_factory() as (_client, _spawned):
+            pass
+        rows = system_info_service.get_boot_history()
+        assert len(rows) == 1 and rows[0]["commit_sha"] == "abc1234"
+
+    def test_boot_is_not_recorded_when_migration_fails(self, lifespan_client_factory):
+        """テーブル自体が無い(マイグレーション失敗)ので記録を試みない。"""
+        from services import system_info_service
+        calls = []
+        original = system_info_service.record_boot
+        system_info_service.record_boot = lambda: calls.append(1)
+        try:
+            with lifespan_client_factory(migration_error=RuntimeError("locked")) as (_c, _s):
+                pass
+        finally:
+            system_info_service.record_boot = original
+        assert calls == []
+
+    def test_record_failure_does_not_abort_startup(self, lifespan_client_factory, monkeypatch):
+        from services import system_info_service
+        monkeypatch.setattr(system_info_service, "get_db_cursor",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db down")))
+        with lifespan_client_factory() as (client, spawned):
+            assert client.get("/health").status_code == 200
+            assert len(spawned) == 2
+
+
 class TestLifespanShutdown:
     """シャットダウン側: 子プロセスと ffmpeg / タスク / httpx クライアントの後始末。"""
 

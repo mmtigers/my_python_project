@@ -81,7 +81,7 @@
 ### `run_script`
 
 * **役割**: 指定されたスクリプトをサブプロセスとして実行し、実行結果をログに出力する。
-* 根拠: `def run_script(script_path: str, args: List[str]) -> bool:` (行番号: 108 / 抜粋: "def run_script(script_path: str, args: List[str]) -> bool:")、docstring (行番号: 110 / 抜粋: "指定されたスクリプトをサブプロセスとして実行する。")
+* 根拠: `def run_script(script_path: str, args: List[str]) -> bool:` (行番号: 111 / 抜粋: "def run_script(script_path: str, args: List[str]) -> bool:")、docstring (行番号: 113 / 抜粋: "指定されたスクリプトをサブプロセスとして実行する。")
 * **（Issue #360 / #361 で修正）** `subprocess.run` ではなく `subprocess.Popen` で起動して `_running_children[script_path]` に登録し、`proc.wait(timeout=3600)` で完了を待つ。これにより SIGTERM 受信時に `terminate_running_children()` から実行中の子プロセスを止められる。失敗時にログへ流す stderr は末尾 20 行に絞る（Discord 通知の 2000 字制限対策）。タイムアウト時は `proc.kill()` を試みる。`finally` で `_running_children` から自分のエントリを外す。
 * 根拠: `proc = subprocess.Popen(` (行番号: 145〜151)、`_running_children[script_path] = proc` (行番号: 152〜153)、`proc.wait(timeout=3600)` (行番号: 159)、`tail = "\n".join(stderr_tail)` (行番号: 178)、`_running_children.pop(script_path, None)` (行番号: 194〜197)
 * **（Issue #575で修正）** returncode が非0の場合の分岐を、単純な「失敗」扱いから二分岐に変更した。以前は returncode が 0 以外であれば理由を問わず一律で ERROR ログ（`core/logger.py` の `DiscordErrorHandler` 経由で Discord に通知される）を出していたため、`terminate_running_children()`（Issue #360）がシャットダウン・デプロイ時に `proc.terminate()` で実行中の監視スクリプトを止める（SIGTERM由来の負のreturncode、典型的には-15になる）たびに、「タスク失敗」という偽のDiscordアラートが飛んでいた。現在は returncode が非0のとき、まず `_children_lock` 配下で `script_path` が モジュールレベル集合 `_intentionally_terminated`（後述）に含まれるかを確認し、含まれていればその場で `discard` して消費したうえで INFO ログのみを出力し `False` を返す（Discord通知なし）。含まれていない場合（スクリプトが自発的に非0で終了した、真の失敗）は、従来どおり ERROR ログとstderr末尾の出力を行い `False` を返す。
@@ -89,15 +89,15 @@
 * **（#411 S-L5で修正・PYTHONPATH）** 以前は `env["PYTHONPATH"] = PROJECT_ROOT` で既存の `PYTHONPATH`(`start_all.sh` 等が設定した値)を無条件に上書きしていた。呼出元の設定を残しつつ `PROJECT_ROOT` を優先させるため、既存値がある場合は `os.pathsep` 区切りで先頭に追記するよう変更した。
 * 根拠: `existing_pythonpath = env.get("PYTHONPATH")` (行番号: 121)、`env["PYTHONPATH"] = (...)` (行番号: 122〜124)
 * **（#411 S-L5で修正・stderr保持）** 以前は `proc.communicate(timeout=3600)` でstdout/stderrをタスク完了まで全量メモリに保持していた（最大1時間分の出力を保持しうる）。ログ用途は末尾20行のみで十分なため、stdoutは`subprocess.DEVNULL`に捨て、stderrは別スレッド(`_drain_stderr`)で1行ずつ読みながら固定長`collections.deque(maxlen=20)`にのみ保持するよう変更し、メモリ使用量が出力量に依存しないようにした。
-* 根拠: `stderr_tail: "collections.deque[str]" = collections.deque(maxlen=20)` (行番号: 127)、`def _drain_stderr(pipe) -> None:` (行番号: 140〜149)、`stdout=subprocess.DEVNULL` (行番号: 148)
+* 根拠: `stderr_tail: "collections.deque[str]" = collections.deque(maxlen=20)` (行番号: 127)、`def _drain_stderr(pipe) -> None:` (行番号: 143〜152)、`stdout=subprocess.DEVNULL` (行番号: 148)
 
 
 * **引数/リクエスト**: `script_path` (`str`): 実行するスクリプトの相対パス, `args` (`List[str]`): スクリプトに渡す引数
-* 根拠: 関数定義 (行番号: 108 / 抜粋: "def run_script(script_path: str, args: List[str]) -> bool:")
+* 根拠: 関数定義 (行番号: 111 / 抜粋: "def run_script(script_path: str, args: List[str]) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`: 実行成功（returncode 0）ならTrue、それ以外（意図的terminate・真の失敗・タイムアウト・例外のいずれも）はFalse
-* 根拠: docstring (行番号: 117 / 抜粋: "bool: 実行成功(returncode 0)ならTrue")、`return True` (行番号: 164)、`return False` (行番号: 174, 180, 190, 193)
+* 根拠: docstring (行番号: 120 / 抜粋: "bool: 実行成功(returncode 0)ならTrue")、`return True` (行番号: 164)、`return False` (行番号: 174, 180, 190, 193)
 
 
 * **副作用**: 外部プロセスの起動（`_running_children`への登録・完了後の削除含む）。標準出力の破棄・標準エラー出力の末尾保持とログ出力。**（Issue #575で追加）** モジュールレベル集合 `_intentionally_terminated` からの該当エントリの読み取り・消費（`discard`）。
@@ -113,7 +113,7 @@
 ### `terminate_running_children` / `_handle_shutdown_signal` / `install_signal_handlers`（Issue #360 で追加）
 
 * **役割**: `_running_children`（実行中の子プロセスの `script_path → Popen`、`_children_lock` で保護）を走査し、生存中のものを `terminate()` → timeout 後 `kill()` して停止数を返す。`_handle_shutdown_signal` は SIGTERM/SIGINT で `_shutdown_event` を立てて `terminate_running_children()` を呼ぶ。`install_signal_handlers` は両シグナルにこのハンドラを登録する（メインスレッド以外からの呼び出し等で `ValueError`/`OSError` になる場合は無視）。以前は scheduler が SIGTERM で即死し、実行中の `nas_monitor.py` 等（最大3600s）が孤児として走り続けて再起動後の新世代と DB 書き込み・保持期間削除が競合していた。
-* 根拠: `_running_children: Dict[str, subprocess.Popen] = {}` (行番号: 48〜50)、`def terminate_running_children(timeout: float = 5.0) -> int:` (行番号: 69〜90)、`def _handle_shutdown_signal(signum, _frame) -> None:` (行番号: 93〜96)、`def install_signal_handlers() -> None:` (行番号: 99〜105)
+* 根拠: `_running_children: Dict[str, subprocess.Popen] = {}` (行番号: 48〜50)、`def terminate_running_children(timeout: float = 5.0) -> int:` (行番号: 72〜93)、`def _handle_shutdown_signal(signum, _frame) -> None:` (行番号: 96〜99)、`def install_signal_handlers() -> None:` (行番号: 102〜108)
 * **モジュールレベル集合 `_intentionally_terminated: Set[str]`（Issue #575で追加）**: `terminate_running_children()` が「今まさに意図的に停止させようとしているスクリプト」を記録するための集合。`_children_lock` で他の `_running_children` 操作と同じロックを共有して保護する。書き込み（`add`）は `terminate_running_children` が `proc.terminate()` を呼ぶ**直前**に行う。読み取り・消費（`in` チェック後に `discard`）は `run_script` が非0のreturncodeを受け取った直後に行い、含まれていれば「意図的な停止」としてINFOログのみを出す（後述）。`add` を「シグナル送信の前」に行っているのは、`run_script` 側の別スレッドで動く `proc.wait()` がこの `terminate()` を受けて即座に返り値付きで復帰し `run_script` が判定に入るタイミングとの間で、記録がまだ間に合っていないという競合を避けるため。
 * 根拠: `_intentionally_terminated: Set[str] = set()` およびコメント (行番号: 52〜56 / 抜粋: "#575: terminate_running_children が意図的に停止したスクリプトを記録する。")、`with _children_lock:`・`_intentionally_terminated.add(script)` (行番号: 69〜70、`proc.terminate()` 呼び出し (行番号: 71) の直前)、`from typing import ... Set, ...` (行番号: 10 / 抜粋: "from typing import List, Dict, Optional, Set, TypedDict")
 * **引数/リクエスト**: `timeout: float` / `(signum, _frame)` / なし
@@ -128,7 +128,7 @@
 ### `_is_task_due`（Issue #749 / AUDIT-020 で追加）
 
 * **役割**: タスクを今このタイミングで実行すべきかを判定する純関数。`last_run` が `0`（未実行の番兵）なら常に `True`、それ以外は `now - last_run >= interval` を返す。無限ループの `main()` を回さずに判定だけを単体テストできるよう、ループ本体から切り出してある。
-* 根拠: `def _is_task_due(task: Task, now: float) -> bool:` (行番号: 209〜225 / 抜粋: "def _is_task_due(task: Task, now: float) -> bool:")
+* 根拠: `def _is_task_due(task: Task, now: float) -> bool:` (行番号: 212〜228 / 抜粋: "def _is_task_due(task: Task, now: float) -> bool:")
 * **引数/リクエスト**: `task: Task`（`interval` と `last_run` を読む）, `now: float`（`time.monotonic()` 基準の現在値）
 * 根拠: 関数定義 (行番号: 199)
 * **戻り値/レスポンス**: `bool`
@@ -143,17 +143,17 @@
 ### `main`
 
 * **役割**: `ThreadPoolExecutor`（ワーカー数 = `TASKS`件数、最低1）を使って `TASKS` リストを巡回し、`_is_task_due()` が `True`（= 最終実行からの経過が `interval` 以上、または未実行）で、かつ当該スクリプトが実行中でないタスクに対して `run_script` を非同期（別スレッド）で投入する無限ループを実行する。**（Issue #749 / AUDIT-020 で変更）** 時刻の基準は `time.time()`（壁時計）ではなく `time.monotonic()`。Raspberry Pi は RTC を持たず、起動直後のシステム時刻は「最後にシャットダウンした時刻」か1970年で、NTP 同期の瞬間に大きくジャンプする。**後方へのジャンプでは `now - last_run` が負になり、`interval`（300〜3600秒）を超えるまで6つの監視タスク（電力・環境ロギング・`server_watchdog`・TVロック・メモリ・NAS）がすべて沈黙していた。**しかも `health_watch` は「タスクが実行されていない」ことを見ないため、その沈黙自体が検知されない。`unified_server.restart_dead_children` や `core.logger.flush_pending_discord_notifications` と同じく単調時計を使う。実行中のタスクは `in_flight` 辞書（スクリプトパス→`Future`）で管理し、完了していないタスクは同一周期内で再投入しない（多重起動防止）。
-* 根拠: `def main() -> None:` (行番号: 228 / 抜粋: "メインループ。")
+* 根拠: `def main() -> None:` (行番号: 231 / 抜粋: "メインループ。")
 * **（Issue #360 で修正）** 冒頭で `install_signal_handlers()` を呼び、メインループは `while True` ではなく `while not _shutdown_event.is_set()`、スリープは `_shutdown_event.wait(10)`（シャットダウン要求で即抜ける）。ループを抜けた後に `terminate_running_children()` を呼ぶ。
 * 根拠: `install_signal_handlers()` (行番号: 167)、`while not _shutdown_event.is_set():` (行番号: 172)、`_shutdown_event.wait(10)` (行番号: 189)、`terminate_running_children()` (行番号: 191)
 
 
 * **引数/リクエスト**: なし
-* 根拠: 関数定義 (行番号: 228 / 抜粋: "def main() -> None:")
+* 根拠: 関数定義 (行番号: 231 / 抜粋: "def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 関数定義 (行番号: 228 / 抜粋: "def main() -> None:")
+* 根拠: 関数定義 (行番号: 231 / 抜粋: "def main() -> None:")
 
 
 * **副作用**: `ThreadPoolExecutor.submit` による `run_script` の並列実行。`TASKS` 内各タスクの `last_run` の更新。`in_flight` 辞書への `Future` の登録。1回のループ終了ごとの10秒間のスリープ。
@@ -180,7 +180,7 @@
 
 
 * **副作用**: `sys.exit(1)` によるプロセスの終了。
-* 根拠: `sys.exit(1)` (行番号: 282 / 抜粋: "sys.exit(1)")
+* 根拠: `sys.exit(1)` (行番号: 285 / 抜粋: "sys.exit(1)")
 
 
 * **エラーハンドリング**: `KeyboardInterrupt` をキャッチして停止ログを出力し正常終了する。それ以外の `Exception` をキャッチしてクリティカルログを出力し、`sys.exit(1)` で異常終了させる。
@@ -288,7 +288,7 @@ graph TD
 | --- | --- | --- |
 | `config` モジュールの役割 | 明示的な呼び出しがないがインポートされており、副作用の有無が判断できないため | `config.py` (または同名のパッケージ) |
 | ログの出力仕様 | 初期化関数 `setup_logging` の詳細な設定（コンソール出力、ファイル出力先など）が不明なため | `core/logger.py` |
-| 各監視スクリプトの詳細仕様 | `TASKS` で呼び出される各Pythonスクリプトが行う具体的な処理内容（API通信やDB操作の有無など）が不明なため | `monitors/*.py`, `weekly_analyze_report.py` |
+| 各監視スクリプトの詳細仕様 | **（電気と気温の分析で更新: `monitors/weather_monitor.py`(21600秒=6時間間隔、`args: []`)が末尾に加わり計9本になった。日次の気温をOpen-Meteoから取得して`weather_history`へ保存する。詳細は[weather_monitor.md](./weather_monitor.md)）** `TASKS` で呼び出される各Pythonスクリプトが行う具体的な処理内容（API通信やDB操作の有無など）が不明なため | `monitors/*.py`, `weekly_analyze_report.py` |
 
 ## 相互参照による補足情報
 

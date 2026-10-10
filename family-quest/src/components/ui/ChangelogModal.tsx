@@ -8,7 +8,7 @@ interface Props {
 }
 
 // アプリの更新履歴(バージョン・日付・変更点)を新しい順に表示するモーダル。
-// データの正は src/lib/changelog.ts。
+// データの正は src/lib/changelog.json(src/lib/changelog.ts が型付きで公開)。
 const ChangelogModal: React.FC<Props> = ({ isOpen, onClose }) => {
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="アップデートのれきし" maxWidth="md">

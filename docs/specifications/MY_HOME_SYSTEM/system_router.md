@@ -83,10 +83,16 @@
 
 
 
+### `git_status` (エンドポイント: `GET /api/system/git/status`)
+
+* **役割**: **(新機能)** システムページの「Gitの状態」が、ページ表示後にJSで取得する。`system_info_service.get_git_status()`の結果(起動中のコード・手元の最新・GitHubの最新の3段と最近のコミット)をそのまま返す。`git fetch`を含み遅いためページ本体には含めない。結果は5分キャッシュされる。`async def`にしない(gitの外部コマンドでイベントループを止めないため)。
+* **エラーハンドリング**: 失敗しても500にせず、200で`ok: false`と`error`を返す(画面に理由を出すため)。
+* 根拠: `def git_status() -> dict[str, Any]:` (行番号: 91)
+
 ### `manual_restart`
 
 > **(「最新に更新して再起動」の追加)** 下記2エンドポイントが加わった。`POST /api/system/deploy`(`manual_deploy`)は`git pull --ff-only`→再起動をバックグラウンドで起動し、起動した旨を即座に返す(実行中なら`status: "running"`)。引数は一切受け取らず、実行元IPをログに残す。`GET /api/system/deploy/status`(`deploy_status`)は`{running, run_id, last_result}`を返し、システムページがポーリングする。処理本体は[system_maintenance_service.md](./system_maintenance_service.md)。認可は無い(同ルーター共通の既知の妥協点)。
-> 根拠: [関数定義] (行番号: 68 / 抜粋: "def manual_deploy("), [関数定義] (行番号: 91 / 抜粋: "def deploy_status(")
+> 根拠: [関数定義] (行番号: 68 / 抜粋: "def manual_deploy("), [関数定義] (行番号: 101 / 抜粋: "def deploy_status(")
 
 * **役割**: **（Issue #829で追加）** `/restart` パスに対するPOSTリクエストを受け取り、`system_maintenance_service.restart_home_system()`(`sudo systemctl restart home_system`をタイムアウト付きで実行)を呼ぶ。システムページ(かんたん表示)の「サービス再起動」ボタンから呼ばれる。以前はStreamlit版ダッシュボードのスクリプト実行スレッド内で直接`subprocess.run`していたが、システムページのHTMLはこのサーバー自身が返すようになったため、通常のAPIエンドポイントとして切り出された。`manual_backup`と同じ理由で`async def`にしない。
 * 根拠: [manual_restart] (行番号: 30〜43 / 抜粋: '@router.post("/restart")\ndef manual_restart() -> Dict[str, Any]:')

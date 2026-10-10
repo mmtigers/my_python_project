@@ -23,7 +23,7 @@ from typing import Any
 import config
 import pandas as pd
 
-from services import home_status_service
+from services import home_status_service, system_info_service
 
 # === ページ共通のシェル ===
 
@@ -160,8 +160,49 @@ _PAGE_BASE_CSS = """
     .freshness-info { color: #666; }
 
     /* NASの容量推移(不具合修正で新設)。使用率0-100%固定でスケールする折れ線。 */
-    .nas-chart { width: 100%; max-width: 320px; height: auto; display: block; }
+    .nas-chart { width: 100%; max-width: 360px; height: auto; display: block; }
     .nas-chart-grid { stroke: #eee; stroke-width: 1; }
+    .nas-chart-label { font-size: 8px; fill: #777; }
+    /* 電気ページ(月ごとの推移・日別・気温・テレビ。グラフはインラインSVG) */
+    .bar-chart { width: 100%; max-width: 420px; height: auto; display: block; margin: 8px 0; }
+    .bar-axis { stroke: #bbb; stroke-width: 1; }
+    .bar { fill: #1565c0; }
+    .bar-alt { fill: #ef6c00; }
+    .bar-faded { fill: #90caf9; }
+    .bar-label { font-size: 8px; fill: #666; }
+    .legend-box { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+    .legend-box.bar { background: #1565c0; }
+    .legend-box.bar-alt { background: #ef6c00; }
+    .power-lead { font-size: 1.05rem; margin: 6px 0; }
+    .power-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0; }
+    .power-stat { border: 1px solid #ddd; border-radius: 10px; padding: 8px 10px; }
+    .power-stat-value { font-weight: bold; font-size: 1.05rem; word-break: break-word; }
+    .band-days th, .band-days td { text-align: center; font-size: 0.7rem; padding: 2px; }
+    /* アップデートページ(全アプリの更新履歴) */
+    .release-filter { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+    .release-filter a {
+        display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 22px;
+        border: 1px solid #bbdefb; background: #e3f2fd; color: #1565c0; text-decoration: none; font-size: 0.9rem;
+    }
+    .release-filter a.active { background: #1565c0; color: #fff; font-weight: bold; }
+    .release-card { border: 1px solid #ddd; border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+    .release-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 0.85rem; }
+    .release-badge { padding: 2px 8px; border-radius: 10px; background: #1565c0; color: #fff; font-weight: bold; }
+    .release-badge-quest { background: #6a1b9a; }
+    .release-badge-asa { background: #e65100; }
+    .release-badge-yoru { background: #283593; }
+    .release-title { font-weight: bold; margin: 6px 0 2px; word-break: break-word; }
+    .release-card p, .release-card ul { margin: 4px 0; word-break: break-word; }
+    .release-card ul { padding-left: 1.2em; }
+    .release-warn { color: #b26a00; font-size: 0.9rem; }
+    .git-status-line { margin: 4px 0; word-break: break-word; }
+    .git-status-warn { color: #b26a00; }
+    .git-commit-list { list-style: none; padding: 0; margin: 8px 0 0; }
+    .git-commit-list li { padding: 6px 0; border-top: 1px solid #eee; word-break: break-word; }
+    .git-commit-sha { font-family: monospace; }
+    .git-commit-badge { font-size: 0.8rem; margin-left: 6px; white-space: nowrap; display: inline-block; }
+    .nas-period a.nas-period-link { padding: 4px 10px; border-radius: 12px; background: #e3f2fd; color: #1565c0; text-decoration: none; }
+    .nas-period .nas-period-current { padding: 4px 10px; border-radius: 12px; background: #1565c0; color: #fff; font-weight: bold; }
     .nas-chart-line { stroke: #1565c0; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     details > summary {
         cursor: pointer; min-height: 44px; display: flex; align-items: center;
@@ -182,8 +223,8 @@ _PAGE_BASE_CSS = """
 
     /* 見守りページのログの日付フィルタ */
     .log-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 4px; }
-    .log-filter input[type="date"] {
-        min-height: 44px; padding: 0 10px; border-radius: 10px; border: 1px solid #bbb;
+    .log-filter input[type="date"], .log-filter select {
+        min-height: 44px; max-width: 100%; padding: 0 10px; border-radius: 10px; border: 1px solid #bbb;
         font-size: 1rem; background: inherit; color: inherit;
     }
     .log-filter button, a.log-filter-clear {
@@ -193,16 +234,16 @@ _PAGE_BASE_CSS = """
     .log-filter button { border: none; background: #1565c0; color: #fff; }
     a.log-filter-clear { border: 1px solid #bbdefb; background: #e3f2fd; color: #1565c0; text-decoration: none; }
 
-    /* 見守りページのカメラ選択 */
-    .camera-select-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-    .camera-btn {
-        min-height: 44px; padding: 0 14px; border-radius: 12px; border: 1px solid #bbdefb;
-        background: #e3f2fd; color: #1565c0; font-weight: bold; font-size: 0.9rem;
+    /* 見守りページのカメラ映像(全台を同時表示) */
+    .camera-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+        gap: 12px; margin-bottom: 16px;
     }
-    .camera-btn.active { background: #1565c0; color: #fff; }
+    .camera-name { font-weight: bold; font-size: 0.9rem; margin-bottom: 4px; }
+    .camera-tile-requested .camera-name { color: #1565c0; }
     .camera-video-box {
-        width: 100%; max-width: 480px; aspect-ratio: 16 / 9; background: #000;
-        border-radius: 8px; overflow: hidden; margin-bottom: 16px;
+        width: 100%; aspect-ratio: 16 / 9; background: #000;
+        border-radius: 8px; overflow: hidden;
     }
     .camera-video-box video { width: 100%; height: 100%; object-fit: contain; }
 
@@ -224,12 +265,28 @@ _PAGE_BASE_CSS = """
         .info-box { border-color: #333; }
         .freshness-row { border-color: #333; }
         .nas-chart-grid { stroke: #333; }
+        .nas-chart-label { fill: #aaa; }
+        .git-status-warn { color: #ffb74d; }
+        .bar { fill: #64b5f6; }
+        .bar-alt { fill: #ffb74d; }
+        .bar-faded { fill: #2a4a6b; }
+        .bar-label { fill: #aaa; }
+        .bar-axis { stroke: #555; }
+        .legend-box.bar { background: #64b5f6; }
+        .legend-box.bar-alt { background: #ffb74d; }
+        .power-stat { border-color: #333; }
+        .release-card { border-color: #333; }
+        .release-filter a { background: #16304a; color: #90caf9; border-color: #24507a; }
+        .release-filter a.active { background: #1565c0; color: #fff; }
+        .release-warn { color: #ffb74d; }
+        .git-commit-list li { border-color: #333; }
+        .nas-period a.nas-period-link { background: #16304a; color: #90caf9; }
         .nas-chart-line { stroke: #64b5f6; }
         details > summary { color: #90caf9; }
-        .log-filter input[type="date"] { border-color: #555; }
+        .log-filter input[type="date"], .log-filter select { border-color: #555; }
         a.log-filter-clear { background: #16304a; color: #90caf9; border-color: #24507a; }
         .maintenance-box { border-color: #333; }
-        .camera-btn { background: #16304a; color: #90caf9; border-color: #24507a; }
+        .camera-tile-requested .camera-name { color: #90caf9; }
         #status.stale::after { color: #ef9a9a; }
     }
 """
@@ -256,11 +313,12 @@ def _back_to_home_link(dashboard_path: str) -> str:
 
 # === ホームページ ===
 
-# 見守り/くらし/システムの3ページへの導線。カードの詳細タブ(`tab`)と同じキーを使う。
+# 見守り/くらし/システム/アップデートの各ページへの導線。見守り〜システムはカードの詳細タブ(`tab`)と同じキーを使う。
 _NAV_CARDS: tuple[tuple[str, str, str], ...] = (
     ("watch", "👀 見守り", "カメラ・実家の様子"),
     ("life", "💡 くらし", "電気"),
     ("sys", "🔧 システム", "各機能の状態"),
+    ("updates", "📜 アップデート", "各アプリの更新履歴"),
 )
 
 
@@ -273,18 +331,32 @@ def _render_external_link(href: str, label: str, healthy: bool | None) -> str:
         css, state = "external-card external-up", '<span class="link-state">● 稼働中</span>'
     else:
         css, state = "external-card external-down", '<span class="link-state">● 停止中</span>'
-    return f'<a class="{css}" href="{html.escape(href)}"><span>{label}{state}</span><span>›</span></a>'
+    # 別アプリへの遷移なのでダッシュボードを閉じないよう新しいタブで開く(rel=noopenerでwindow.openerを渡さない)
+    return (
+        f'<a class="{css}" href="{html.escape(href)}" target="_blank" rel="noopener">'
+        f"<span>{label}{state}</span><span>›</span></a>"
+    )
 
 
-def _render_external_links(quest_path: str, asa_note_url: str, link_health: dict[str, bool] | None) -> str:
-    """「よく使うリンク」(ファミクエ・あさノート)。`link_health`は
-    `home_status_service.collect_link_health`の戻り値(キー`quest`/`asa_note`)。"""
+def _render_external_links(
+    quest_path: str,
+    asa_note_url: str,
+    link_health: dict[str, bool] | None,
+    yoru_note_url: str | None = None,
+) -> str:
+    """「よく使うリンク」(ファミクエ・あさノート・よるノート)。`link_health`は
+    `home_status_service.collect_link_health`の戻り値(キー`quest`/`asa_note`/`yoru_note`)。
+    よるノートは`yoru_note_url`を渡したときだけ載せる。どのリンクも新しいタブで開く。"""
     health = link_health or {}
+    yoru_html = (
+        _render_external_link(yoru_note_url, "🌙 よるノート", health.get("yoru_note")) if yoru_note_url else ""
+    )
     return (
         "<h2>よく使うリンク</h2>"
         '<div class="link-grid">'
         f'{_render_external_link(quest_path, "⚔️ ファミクエ", health.get("quest"))}'
         f'{_render_external_link(asa_note_url, "📝 あさノート", health.get("asa_note"))}'
+        f"{yoru_html}"
         "</div>"
     )
 
@@ -301,6 +373,7 @@ def render_home_page(
     manifest_path: str | None = None,
     icon_path: str | None = None,
     link_health: dict[str, bool] | None = None,
+    yoru_note_url: str | None = None,
 ) -> str:
     """ホームページ: ステータスカード + 外部リンク + 各ページへのナビ。
 
@@ -319,7 +392,7 @@ def render_home_page(
         f"{html.escape(label)}<span class=\"nav-card-sub\">{html.escape(sub)}</span></a>"
         for key, label, sub in _NAV_CARDS
     )
-    links_html = _render_external_links(quest_path, asa_note_url, link_health)
+    links_html = _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url)
     body = (
         "<h1>🏠 おうちの様子</h1>"
         f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html)}'
@@ -373,6 +446,7 @@ def render_home_status_section(
     quest_path: str | None = None,
     asa_note_url: str | None = None,
     link_health: dict[str, bool] | None = None,
+    yoru_note_url: str | None = None,
 ) -> str:
     """ホームページの自動更新用フラグメント(カードと、外部リンクのブロック)。
 
@@ -380,7 +454,7 @@ def render_home_status_section(
     リンクを自動更新の範囲の中に持つため、差し替え後もリンクが消えないようにする)。
     """
     links_html = (
-        _render_external_links(quest_path, asa_note_url, link_health)
+        _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url)
         if quest_path is not None and asa_note_url is not None
         else ""
     )
@@ -567,6 +641,14 @@ def sensor_state_change_log(df: pd.DataFrame) -> pd.DataFrame:
     - 残った行も、同じ機器(`device_id`。無ければ`friendly_name`)で直前の行と状態が同じなら除く(最初の行は残す)。
       取得範囲(`load_sensor_data`のlimit)の外にある過去の状態は分からないため、範囲内で
       最も古い行は常に「変化」として残る。
+    - **(UI改善)** 人感センサー(SwitchBotのWoPresence)は、検知が終わるたびに`not_detected`も
+      記録する(Webhookは検知結果を`contact_state`に入れる)。`detected`と`not_detected`が
+      短い間隔で入れ替わると、状態が毎回変わるため上の重複除去では減らず、ログが毎分
+      並んでいた。「動きを検知した」ことだけが知りたいので、`not_detected`の行は
+      **重複除去のあとで**除く(先に除くと、`detected`→`not_detected`→`detected`の
+      2回目の検知が「同じ状態の連続」として消えてしまう)。結果として、人感センサーは
+      「検知が始まった行」だけが残る。開閉センサー(`open`/`close`等)・カメラ(`movement_state`)
+      には影響しない。
     """
     state_cols = [c for c in ("contact_state", "movement_state") if c in df.columns]
     if df.empty or not state_cols or "timestamp" not in df.columns:
@@ -581,11 +663,23 @@ def sensor_state_change_log(df: pd.DataFrame) -> pd.DataFrame:
     # 状態の絞り込みだけを行い、重複の除去はしない。
     device_col = next((c for c in ("device_id", "friendly_name") if c in ordered.columns), None)
     if device_col is None:
-        return ordered.sort_values("timestamp", ascending=False, kind="stable")
+        return _drop_presence_cleared(ordered).sort_values("timestamp", ascending=False, kind="stable")
     key = states.loc[ordered.index].agg("|".join, axis=1)
     previous = key.groupby(ordered[device_col]).shift()
     changed = previous.isna() | (previous != key)
-    return ordered[changed].sort_values("timestamp", ascending=False, kind="stable")
+    return _drop_presence_cleared(ordered[changed]).sort_values("timestamp", ascending=False, kind="stable")
+
+
+# 人感センサーが「検知が終わった」ときに`contact_state`へ記録する値(Webhookは小文字化して保存する)。
+_PRESENCE_CLEARED_STATE = "not_detected"
+
+
+def _drop_presence_cleared(df: pd.DataFrame) -> pd.DataFrame:
+    """人感センサーの「検知なし(`not_detected`)」の行を除く。`sensor_state_change_log`専用。"""
+    if "contact_state" not in df.columns:
+        return df
+    cleared = df["contact_state"].fillna("").astype(str).str.strip().str.lower() == _PRESENCE_CLEARED_STATE
+    return df[~cleared]
 
 
 # 「開 → 閉」を1行にまとめる上限秒数(この秒数ちょうどを含む)。
@@ -651,34 +745,32 @@ def merge_open_close_events(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _render_camera_selector(cameras: list[dict[str, Any]]) -> str:
+    """有効なカメラ全台のライブ映像を、初期表示から同時に並べる(切替ボタン方式は廃止)。
+
+    各タイルは名前ラベル付きの`<video data-camera-id>`で、`_CAMERA_SCRIPT`が読み込み時に
+    全タイルのHLSを開始する。ライブ配信のffmpegはカメラごとに独立している。"""
     if not cameras:
         return '<p class="empty-note">カメラが登録されていません</p>'
-    buttons = "".join(
-        f'<button type="button" class="camera-btn" data-camera-id="{html.escape(cam["id"])}" '
-        f'onclick="dashboardSelectCamera(\'{html.escape(cam["id"])}\')">{html.escape(cam["name"])}</button>'
+    tiles = "".join(
+        '<div class="camera-tile">'
+        f'<div class="camera-name">{html.escape(cam["name"])}</div>'
+        '<div class="camera-video-box">'
+        f'<video class="camera-video" data-camera-id="{html.escape(cam["id"])}" '
+        'muted autoplay playsinline controls></video>'
+        "</div></div>"
         for cam in cameras
     )
-    return (
-        f'<div class="camera-select-row">{buttons}</div>'
-        '<div class="camera-video-box"><video id="dashboardCameraVideo" muted autoplay playsinline controls></video></div>'
-    )
+    return f'<div class="camera-grid">{tiles}</div>'
 
 
 _CAMERA_SCRIPT = """
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
 <script>
 (function () {
-    var STORAGE_KEY = "dashboardSelectedCamera";
-    var hls = null;
-
-    window.dashboardSelectCamera = function (cameraId) {
-        var video = document.getElementById("dashboardCameraVideo");
-        if (!video) { return; }
-        var url = "/api/cameras/live/" + encodeURIComponent(cameraId) + "/stream.m3u8";
-
-        if (hls) { hls.destroy(); hls = null; }
+    function startStream(video) {
+        var url = "/api/cameras/live/" + encodeURIComponent(video.dataset.cameraId) + "/stream.m3u8";
         if (window.Hls && window.Hls.isSupported()) {
-            hls = new window.Hls();
+            var hls = new window.Hls();
             hls.loadSource(url);
             hls.attachMedia(video);
             hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
@@ -690,28 +782,27 @@ _CAMERA_SCRIPT = """
                 video.play().catch(function () {});
             });
         }
-
-        try { localStorage.setItem(STORAGE_KEY, cameraId); } catch (e) {}
-        document.querySelectorAll(".camera-btn").forEach(function (btn) {
-            btn.classList.toggle("active", btn.dataset.cameraId === cameraId);
-        });
-    };
+    }
 
     document.addEventListener("DOMContentLoaded", function () {
-        var buttons = document.querySelectorAll(".camera-btn");
-        if (!buttons.length) { return; }
-        var ids = Array.prototype.map.call(buttons, function (b) { return b.dataset.cameraId; });
+        var videos = document.querySelectorAll(".camera-video");
+        if (!videos.length) { return; }
 
-        // ホームページの「🚗 駐車場」カードは、このページを開いたときに駐車場カメラを
-        // 選択済みにしたい(?camera=<id>)。指定が無い/未知のidなら記憶(localStorage)、
-        // それも無ければ先頭のカメラにフォールバックする。
+        // ホームページの「🚗 駐車場」カードは(?camera=<id>)でこのページを開く。
+        // 全台を同時に表示するので、指定されたカメラのタイルを先頭に移して目立たせる。
         var requested = null;
         try { requested = new URLSearchParams(window.location.search).get("camera"); } catch (e) {}
-        var saved = null;
-        try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) {}
-        var initial = (requested && ids.indexOf(requested) !== -1) ? requested
-            : (saved && ids.indexOf(saved) !== -1) ? saved : ids[0];
-        window.dashboardSelectCamera(initial);
+        Array.prototype.forEach.call(videos, function (video) {
+            if (requested && video.dataset.cameraId === requested) {
+                var tile = video.closest(".camera-tile");
+                if (tile && tile.parentNode) {
+                    tile.classList.add("camera-tile-requested");
+                    tile.parentNode.insertBefore(tile, tile.parentNode.firstChild);
+                }
+            }
+        });
+        // 先頭へ移したあとの並びで全台のストリームを開始する。
+        document.querySelectorAll(".camera-video").forEach(startStream);
     });
 })();
 </script>
@@ -728,23 +819,69 @@ def parse_log_date(value: str | None) -> date | None:
         return None
 
 
-def _render_log_date_filter(dashboard_path: str, selected_date: date | None) -> str:
-    """防犯ログ・センサーログ共通の日付フィルタ(GETフォーム。JS不要)。
-    送信後にログの位置へ戻れるよう、遷移先にフラグメント`#log-filter`を付ける。"""
+def _sensor_device_options(*frames: pd.DataFrame) -> list[tuple[str, str]]:
+    """センサーログの機器フィルタの選択肢`(値, 表示名)`を、表示名の昇順で返す。
+    値は`device_id`(無ければ`friendly_name`)。同じ値は1つにまとめる。"""
+    options: dict[str, str] = {}
+    for frame in frames:
+        if frame.empty or "friendly_name" not in frame.columns:
+            continue
+        key_col = "device_id" if "device_id" in frame.columns else "friendly_name"
+        for key, name in frame[[key_col, "friendly_name"]].drop_duplicates().itertuples(index=False):
+            if pd.notna(key) and pd.notna(name) and str(key) not in options:
+                options[str(key)] = str(name)
+    return sorted(((k, v) for k, v in options.items()), key=lambda kv: kv[1])
+
+
+def _filter_by_device(df: pd.DataFrame, device: str | None) -> pd.DataFrame:
+    """`_sensor_device_options`と同じキー(`device_id`、無ければ`friendly_name`)で機器を絞る。"""
+    if not device or df.empty:
+        return df
+    key_col = "device_id" if "device_id" in df.columns else "friendly_name"
+    if key_col not in df.columns:
+        return df
+    return df[df[key_col].astype(str) == device]
+
+
+def _render_log_date_filter(
+    dashboard_path: str,
+    selected_date: date | None,
+    device_options: list[tuple[str, str]] | None = None,
+    selected_device: str | None = None,
+) -> str:
+    """防犯ログ・センサーログ共通の絞り込み(GETフォーム。JS不要)。
+    送信後にログの位置へ戻れるよう、遷移先にフラグメント`#log-filter`を付ける。
+
+    **(新機能)** 日付に加えて、センサーログを機器(`device_options`)で絞れる。
+    日付と機器は組み合わせられ、どちらか一方だけでも絞り込める(防犯ログは日付だけに従う)。
+    """
     watch_path = f"{html.escape(dashboard_path.rstrip('/'))}/watch"
     value = selected_date.isoformat() if selected_date else ""
-    clear_link = (
-        f'<a class="log-filter-clear" href="{watch_path}#log-filter">クリア</a>' if selected_date else ""
-    )
+    device_name = dict(device_options or []).get(selected_device or "")
+    active = selected_date is not None or device_name is not None
+    clear_link = f'<a class="log-filter-clear" href="{watch_path}#log-filter">クリア</a>' if active else ""
+    select_html = ""
+    if device_options:
+        opts = ['<option value="">すべての機器</option>'] + [
+            f'<option value="{html.escape(k)}"{" selected" if k == selected_device else ""}>{html.escape(v)}</option>'
+            for k, v in device_options
+        ]
+        select_html = f'<select name="device" aria-label="センサーの機器">{"".join(opts)}</select>'
+    parts = []
+    if selected_date:
+        parts.append(f'{selected_date.strftime("%Y/%m/%d")} のログを全件表示')
+    if device_name:
+        parts.append(f"センサーログは「{html.escape(device_name)}」だけ表示")
     note = (
-        f'<p class="meta">{selected_date.strftime("%Y/%m/%d")} のログを全件表示しています</p>'
-        if selected_date
-        else '<p class="meta">日付を選ぶと、その日のログだけを表示します</p>'
+        f'<p class="meta">{" ・ ".join(parts)}しています</p>'
+        if parts
+        else '<p class="meta">日付や機器を選ぶと、ログを絞り込みます</p>'
     )
     return (
         '<div id="log-filter">'
         f'<form class="log-filter" method="get" action="{watch_path}#log-filter">'
-        f'<input type="date" name="date" value="{value}" required aria-label="ログの日付">'
+        f'<input type="date" name="date" value="{value}" aria-label="ログの日付">'
+        f"{select_html}"
         '<button type="submit">絞り込み</button>'
         f"{clear_link}"
         "</form>"
@@ -759,6 +896,7 @@ def render_watch_page(
     dashboard_path: str,
     snapshot_url_prefix: str,
     selected_date: date | None = None,
+    selected_device: str | None = None,
 ) -> str:
     """👀 見守り: カメラのライブ選択・スナップショット・防犯ログ・実家/自宅センサーログ。
 
@@ -784,6 +922,9 @@ def render_watch_page(
     **(UI改善)** 開閉センサーの「open」の直後(60秒以内)に「close」が来た組は、
     `merge_open_close_events`で「開 → 閉（N秒）」の1行にまとめる。
 
+    **(新機能)** `selected_device`(`device_id`)を指定すると、高砂・伊丹のセンサーログをその機器だけに絞る
+    (防犯ログは対象外)。選択肢にない値は無視する。
+
     **(新機能)** `selected_date`を指定すると3つのログをその日(JST)に絞り、件数の上限
     (通常50件)を外して指定日の全件を表示する(先頭5件の常時表示+折りたたみは同じ)。
     `df_sensor`は呼び出し側(`dashboard_router`)が日付指定時に指定日の全件を渡す
@@ -796,11 +937,16 @@ def render_watch_page(
     ]
     df_camera_motion = home_status_service.camera_motion_log(df_sensor)
     if not df_sensor.empty and "location" in df_sensor.columns:
-        df_takasago = merge_open_close_events(sensor_state_change_log(df_sensor[df_sensor["location"] == "高砂"]))
-        df_itami = merge_open_close_events(sensor_state_change_log(df_sensor[df_sensor["location"] == "伊丹"]))
+        changes_takasago = sensor_state_change_log(df_sensor[df_sensor["location"] == "高砂"])
+        changes_itami = sensor_state_change_log(df_sensor[df_sensor["location"] == "伊丹"])
     else:
-        df_takasago = df_sensor.iloc[0:0]
-        df_itami = df_sensor.iloc[0:0]
+        changes_takasago = changes_itami = df_sensor.iloc[0:0]
+    # 機器の選択肢は絞り込む前の全機器から作る(選んだ機器だけが残って選び直せなくなるのを防ぐ)。
+    device_options = _sensor_device_options(changes_takasago, changes_itami)
+    if selected_device not in dict(device_options):
+        selected_device = None  # 一覧に無い値(古いブックマーク等)は無視して全機器を表示する
+    df_takasago = merge_open_close_events(_filter_by_device(changes_takasago, selected_device))
+    df_itami = merge_open_close_events(_filter_by_device(changes_itami, selected_device))
 
     def _log_table(df: pd.DataFrame, columns: dict[str, str]) -> str:
         # 日付指定時は上限を外して全件(`limit`は`df.iloc[visible:limit]`の上端)。
@@ -817,7 +963,7 @@ def render_watch_page(
         "</div>"
         "<h2>🖼️ 最近の写真</h2>"
         f"{_render_snapshot_gallery(snapshot_url_prefix)}"
-        f"{_render_log_date_filter(dashboard_path, selected_date)}"
+        f"{_render_log_date_filter(dashboard_path, selected_date, device_options, selected_device)}"
         "<h2>🛡️ 防犯ログ</h2>"
         f'{_log_table(df_camera_motion, {"timestamp": "検知時刻", "friendly_name": "カメラ"})}'
         '<div id="takasago-log">'
@@ -871,6 +1017,8 @@ def render_life_page(cards, *, dashboard_path: str, daily_cost_rows: list[tuple[
         "<h1>💡 くらし</h1>"
         f"{home_status_service.render_status_grid_html(life_cards)}"
         '<p class="empty-note">今月の電気代はスマートメーターの記録からの概算です。</p>'
+        f'<div class="link-grid"><a class="nav-card" href="{html.escape(dashboard_path.rstrip("/"))}/power">'
+        '⚡ 電気のくわしい分析<span class="nav-card-sub">月ごとの推移・気温との関係・テレビ</span></a></div>'
         "<h2>📊 日別の電気代(概算)</h2>"
         f"{_render_daily_cost_history(daily_cost_rows or [])}"
     )
@@ -959,53 +1107,367 @@ def _render_overall_summary(rows: list[dict[str, Any]]) -> str:
     return f'<p class="alerts alerts-warn">⚠️ {red_count}件、確認が必要です</p>'
 
 
-# NASの容量推移グラフのサイズ(viewBox)。使用率(0-100%)固定でスケールするため
-# 実測範囲での拡大縮小は行わない。
+# NASの容量推移グラフのサイズ(viewBox)。
 _NAS_CHART_WIDTH = 300
-_NAS_CHART_HEIGHT = 90
-_NAS_CHART_PAD = 8
+_NAS_CHART_HEIGHT = 120
+_NAS_CHART_PAD_X = 30   # 左はY軸ラベル(%)の分を空ける
+_NAS_CHART_PAD_TOP = 10
+_NAS_CHART_PAD_BOTTOM = 18  # 下はX軸ラベル(日付)の分
+# 縦軸が狭すぎると数%の揺れが拡大されて誇張されるため、最低でもこの幅(%)は取る。
+_NAS_CHART_MIN_SPAN = 4.0
+# 描画する点の上限。1時間おきの記録を90日分描くと2000点を超えるため、時間でまとめて間引く。
+_NAS_CHART_MAX_POINTS = 150
+# 期間切替の選択肢(日)と既定。ルーターもこの値で入力を絞る。
+NAS_HISTORY_DAYS_CHOICES = (7, 30, 90)
+NAS_HISTORY_DEFAULT_DAYS = 30
+# 増加ペースの予測に必要な最低限の期間(日)。これより短いと日内の増減に引きずられる。
+_NAS_FORECAST_MIN_DAYS = 2.0
 
 
-def _render_nas_history_chart(df: pd.DataFrame) -> str:
-    """NASの使用率推移を簡易な折れ線グラフ(インラインSVG)で表示する。
+def compute_nas_forecast(df: pd.DataFrame) -> dict[str, Any] | None:
+    """NASの使用量(`used_gb`)の増加ペース(GB/日)と、満杯までの見込み日数を求める。
+
+    期間内の`used_gb`を時刻に対して最小二乗法で直線近似した傾きをペースとする。
+    録画の自動削除で使用量がのこぎり状に増減するため、あくまで目安。
+    返す辞書: `per_day`(GB/日)、`days_to_full`(増加中で空きがあるとき。それ以外は None)。
+    必要な列が無い・有効な点が2未満・期間が`_NAS_FORECAST_MIN_DAYS`日未満のときは None。
+    """
+    if df.empty or not {"timestamp", "used_gb", "free_gb"} <= set(df.columns):
+        return None
+    valid = df.assign(
+        _t=pd.to_datetime(df["timestamp"], errors="coerce"),
+        _used=pd.to_numeric(df["used_gb"], errors="coerce"),
+    ).dropna(subset=["_t", "_used"])
+    if len(valid) < 2:
+        return None
+    days = (valid["_t"] - valid["_t"].iloc[0]).dt.total_seconds() / 86400.0
+    if days.iloc[-1] - days.iloc[0] < _NAS_FORECAST_MIN_DAYS:
+        return None
+    x_mean, y_mean = days.mean(), valid["_used"].mean()
+    denom = ((days - x_mean) ** 2).sum()
+    if denom == 0:
+        return None
+    per_day = float(((days - x_mean) * (valid["_used"] - y_mean)).sum() / denom)
+    free = pd.to_numeric(valid["free_gb"], errors="coerce").iloc[-1]
+    days_to_full = None
+    if per_day > 0 and not pd.isna(free) and free >= 0:
+        days_to_full = float(free) / per_day
+    return {"per_day": per_day, "days_to_full": days_to_full}
+
+
+def _downsample_by_time(df: pd.DataFrame, max_points: int) -> pd.DataFrame:
+    """点数が`max_points`を超えるとき、期間を等間隔の時間枠に分け、各枠の最後の1行だけ残す。"""
+    if len(df) <= max_points:
+        return df
+    ts = pd.to_datetime(df["timestamp"])
+    span_sec = max((ts.iloc[-1] - ts.iloc[0]).total_seconds(), 1.0)
+    # 最後の点はちょうど期間の終端にあたり、そのまま割ると枠が1つ余る(max_points+1個目)ため、収める。
+    bucket = ((ts - ts.iloc[0]).dt.total_seconds() // (span_sec / max_points)).astype(int).clip(upper=max_points - 1)
+    return df.groupby(bucket, sort=True).tail(1)
+
+
+def _format_nas_forecast(forecast: dict[str, Any] | None) -> str:
+    if forecast is None:
+        return '<p class="meta">増加ペース: データ不足(2日分以上の記録が必要です)</p>'
+    per_day = forecast["per_day"]
+    if forecast["days_to_full"] is None:
+        trend = "増えていません" if per_day <= 0 else "計算できません"
+        return f'<p class="meta">増加ペース: {per_day:+.1f}GB/日(使用量は{trend})</p>'
+    days = forecast["days_to_full"]
+    full = f"約{days:.0f}日後" if days < 3650 else "10年以上先"
+    return (
+        f'<p class="meta">増加ペース: {per_day:+.1f}GB/日 ・ このままなら満杯まで<b>{full}</b>'
+        "(直線での目安です。録画の自動削除で変わります)</p>"
+    )
+
+
+def _render_nas_period_links(sys_path: str, days: int) -> str:
+    """表示期間の切替リンク(7/30/90日)。JS不要。現在の期間は強調して押せなくする。"""
+    items = []
+    for choice in NAS_HISTORY_DAYS_CHOICES:
+        if choice == days:
+            items.append(f'<span class="nas-period-current">{choice}日</span>')
+        else:
+            items.append(f'<a class="nas-period-link" href="{html.escape(sys_path)}?nas_days={choice}#nas-history">{choice}日</a>')
+    return f'<p class="nas-period">表示期間: {" ".join(items)}</p>'
+
+
+def _render_nas_history_chart(
+    df: pd.DataFrame, *, days: int | None = None, sys_path: str | None = None
+) -> str:
+    """NASの使用率推移を折れ線グラフ(インラインSVG)で表示する。
 
     **(不具合修正で新設)** NASカードをタップしても容量の履歴を見る手段が無かった。
-    `analysis_service.load_nas_history`(`nas_records`、古い順)の`percent`列を
-    折れ線で描画する。グラフだけでは正確な値を読み取れないため、`<details>`で
-    折りたたんだ詳細テーブル(直近10件)も添える。
-    """
-    if df.empty or "percent" not in df.columns or len(df) < 2:
-        return '<p class="empty-note">表示できるデータがありません</p>'
+    `analysis_service.load_nas_history`(`nas_records`、古い順)の`percent`列を描画する。
 
-    values = df["percent"].astype(float)
-    w, h, pad = _NAS_CHART_WIDTH, _NAS_CHART_HEIGHT, _NAS_CHART_PAD
-    plot_w, plot_h = w - pad * 2, h - pad * 2
-    step = plot_w / (len(values) - 1)
+    **(UI改善)** 以前の描画は「縦軸0-100%固定」「点を時刻でなく件数で等間隔」だったため、
+    使用率が数%しか動かないNASでは水平線にしか見えなかった。
+    - 縦軸は実測の最小〜最大に余白を足した範囲(最低`_NAS_CHART_MIN_SPAN`%幅)にし、軸ラベル(%)を付ける。
+    - 横軸は時刻で配置し、始点・終点の日付を付ける(記録が欠けた区間は線が飛ぶ)。
+    - グラフの上に「空き容量・使用率・増加ペース・満杯までの目安」を文字で出す(`compute_nas_forecast`)。
+    - `days`と`sys_path`を渡すと、表示期間(7/30/90日)の切替リンクを付ける。
+    グラフだけでは正確な値を読み取れないため、`<details>`の詳細テーブル(直近10件)も添える。
+    """
+    period_html = _render_nas_period_links(sys_path, days) if days is not None and sys_path else ""
+    if df.empty or "percent" not in df.columns or len(df) < 2:
+        return f'{period_html}<p class="empty-note">表示できるデータがありません</p>'
+
+    plot = df.assign(_pct=pd.to_numeric(df["percent"], errors="coerce")).dropna(subset=["_pct"])
+    plot = plot.assign(_t=pd.to_datetime(plot["timestamp"], errors="coerce")).dropna(subset=["_t"])
+    if len(plot) < 2:
+        return f'{period_html}<p class="empty-note">表示できるデータがありません</p>'
+    plot = _downsample_by_time(plot, _NAS_CHART_MAX_POINTS)
+
+    values = plot["_pct"].astype(float)
+    w, h = _NAS_CHART_WIDTH, _NAS_CHART_HEIGHT
+    x0, x1 = _NAS_CHART_PAD_X, w - 8
+    y0, y1 = _NAS_CHART_PAD_TOP, h - _NAS_CHART_PAD_BOTTOM
+    lo, hi = float(values.min()), float(values.max())
+    pad = max((_NAS_CHART_MIN_SPAN - (hi - lo)) / 2.0, 1.0)
+    lo, hi = max(0.0, lo - pad), min(100.0, hi + pad)
+    if hi - lo < _NAS_CHART_MIN_SPAN:  # 0%/100%の端に張り付いたときは反対側へ広げる
+        lo, hi = (0.0, _NAS_CHART_MIN_SPAN) if lo <= 0 else (100.0 - _NAS_CHART_MIN_SPAN, 100.0)
+    t_start, t_end = plot["_t"].iloc[0], plot["_t"].iloc[-1]
+    t_span = max((t_end - t_start).total_seconds(), 1.0)
 
     def _y(v: float) -> float:
-        return pad + plot_h - (max(0.0, min(100.0, v)) / 100.0) * plot_h
+        return y1 - (max(lo, min(hi, v)) - lo) / (hi - lo) * (y1 - y0)
 
-    points = " ".join(f"{pad + i * step:.1f},{_y(v):.1f}" for i, v in enumerate(values))
+    def _x(t) -> float:
+        return x0 + (t - t_start).total_seconds() / t_span * (x1 - x0)
+
+    points = " ".join(f"{_x(t):.1f},{_y(v):.1f}" for t, v in zip(plot["_t"], values))
+    mid = (lo + hi) / 2.0
     grid = "".join(
-        f'<line x1="{pad}" y1="{_y(v):.1f}" x2="{w - pad}" y2="{_y(v):.1f}" class="nas-chart-grid" />'
-        for v in (0, 50, 100)
+        f'<line x1="{x0}" y1="{_y(v):.1f}" x2="{x1}" y2="{_y(v):.1f}" class="nas-chart-grid" />'
+        f'<text x="{x0 - 4}" y="{_y(v) + 3:.1f}" text-anchor="end" class="nas-chart-label">{v:.0f}%</text>'
+        for v in (hi, mid, lo)
     )
-    latest = values.iloc[-1]
-    oldest_at = home_status_service.format_short_timestamp(df["timestamp"].iloc[0])
-    latest_at = home_status_service.format_short_timestamp(df["timestamp"].iloc[-1])
+    oldest_at = home_status_service.format_short_timestamp(t_start)
+    latest_at = home_status_service.format_short_timestamp(t_end)
+    x_labels = (
+        f'<text x="{x0}" y="{h - 4}" text-anchor="start" class="nas-chart-label">{html.escape(oldest_at)}</text>'
+        f'<text x="{x1}" y="{h - 4}" text-anchor="end" class="nas-chart-label">{html.escape(latest_at)}</text>'
+    )
+    latest = float(values.iloc[-1])
     svg = (
         f'<svg viewBox="0 0 {w} {h}" class="nas-chart" role="img" '
         f'aria-label="NASの使用率推移。{html.escape(oldest_at)}から{html.escape(latest_at)}まで、'
         f'現在の使用率は{latest:.0f}パーセント">'
         f"{grid}"
         f'<polyline points="{points}" class="nas-chart-line" fill="none" />'
+        f"{x_labels}"
         "</svg>"
     )
-    caption = f'<p class="meta">現在 {latest:.0f}%・{html.escape(oldest_at)} 〜 {html.escape(latest_at)}</p>'
+    free_gb = pd.to_numeric(df["free_gb"], errors="coerce").dropna() if "free_gb" in df.columns else None
+    free_text = f"空き {int(free_gb.iloc[-1]):,}GB ・ " if free_gb is not None and not free_gb.empty else ""
+    caption = (
+        f'<p class="meta"><b>{free_text}現在 {latest:.0f}%</b> ・ {html.escape(oldest_at)} 〜 {html.escape(latest_at)}'
+        "(縦軸は実測の範囲に合わせています)</p>"
+    )
     detail_table = _render_simple_table(
         df.tail(10).iloc[::-1], {"timestamp": "日時", "percent": "使用率(%)", "free_gb": "空き(GB)"}
     )
-    return f"{svg}{caption}<details><summary>詳細データを見る</summary>{detail_table}</details>"
+    return (
+        f"{period_html}{caption}{_format_nas_forecast(compute_nas_forecast(df))}{svg}"
+        f"<details><summary>詳細データを見る</summary>{detail_table}</details>"
+    )
+
+
+# アップデートページで最初から開いて見せる件数。これを超える分は<details>で折りたたむ。
+_RELEASES_VISIBLE = 20
+
+
+def _render_release_card(entry: dict[str, Any]) -> str:
+    """更新履歴1件。**取得元(外部アプリ)由来の文字列なので、すべてエスケープして出す**。"""
+    version = f'<span>v{html.escape(entry["version"])}</span>' if entry.get("version") else ""
+    parts = [
+        (
+            '<div class="release-card">'
+            '<div class="release-head">'
+            f'<span class="release-badge release-badge-{html.escape(entry["app"])}">{html.escape(entry["app_label"])}</span>'
+            f"{version}"
+            f'<span class="meta">{html.escape(entry["date"])}</span>'
+            "</div>"
+        )
+    ]
+    if entry.get("title"):
+        parts.append(f'<div class="release-title">{html.escape(entry["title"])}</div>')
+    if entry.get("summary"):
+        parts.append(f'<p>{html.escape(entry["summary"])}</p>')
+    if entry.get("details"):
+        parts.append("<ul>" + "".join(f"<li>{html.escape(d)}</li>" for d in entry["details"]) + "</ul>")
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def render_updates_page(
+    entries: list[dict[str, Any]],
+    sources: list[dict[str, Any]],
+    *,
+    dashboard_path: str,
+    selected_app: str | None = None,
+) -> str:
+    """📜 アップデート: ダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を、
+    日付の新しい順に1本で表示する。
+
+    `entries`/`sources`は`release_history_service.get_release_history`の戻り値。
+    `selected_app`(アプリのキー)を渡すとそのアプリだけに絞る(未知の値は無視して全件)。
+    取得に失敗したアプリは、画面の上に注意を出す(古い内容があればそれを表示する)。
+    """
+    known = {s["app"] for s in sources}
+    if selected_app not in known:
+        selected_app = None
+    base = f"{dashboard_path.rstrip('/')}/updates"
+    counts = {s["app"]: len(s["entries"]) for s in sources}
+    # f-stringの式の中にバックスラッシュを書けるのはPython 3.12以降(実機・CIは3.11)なので、
+    # 属性の文字列は式の外で作る。
+    active_attr = ' class="active"'
+    chips = [f'<a href="{html.escape(base)}"{active_attr if selected_app is None else ""}>すべて({len(entries)})</a>'] + [
+        f'<a href="{html.escape(base)}?app={html.escape(s["app"])}"'
+        f'{active_attr if selected_app == s["app"] else ""}>'
+        f'{html.escape(s["label"])}({counts[s["app"]]})</a>'
+        for s in sources
+    ]
+    warnings = "".join(
+        f'<p class="release-warn">⚠️ {html.escape(s["label"])}: {html.escape(s["error"])}</p>'
+        for s in sources
+        if not s["ok"] and (selected_app is None or selected_app == s["app"])
+    )
+    shown = [e for e in entries if selected_app is None or e["app"] == selected_app]
+    if not shown:
+        cards = '<p class="empty-note">表示できる更新履歴がありません</p>'
+    else:
+        head = "".join(_render_release_card(e) for e in shown[:_RELEASES_VISIBLE])
+        rest = shown[_RELEASES_VISIBLE:]
+        more = (
+            f"<details><summary>さらに{len(rest)}件を表示</summary>{''.join(_render_release_card(e) for e in rest)}</details>"
+            if rest
+            else ""
+        )
+        cards = head + more
+    body = (
+        f"{_back_to_home_link(dashboard_path)}"
+        "<h1>📜 アップデート</h1>"
+        '<p class="meta">ダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を、新しい順にまとめています。</p>'
+        f'<div class="release-filter">{"".join(chips)}</div>'
+        f"{warnings}"
+        f"{cards}"
+    )
+    return _page_shell("アップデート - おうちの様子", body)
+
+
+def _format_boot_time(value: Any) -> str:
+    """起動履歴の時刻(ISO8601)を「10/09 21:05」形式にする。読めない値は空文字。"""
+    return home_status_service.format_short_timestamp(value)
+
+
+def _render_boot_history_box(boots: list[dict[str, Any]]) -> str:
+    """サーバーの起動履歴(新しい順)。`system_info_service.get_boot_history`の結果を受け取る。
+
+    起動の記録は`unified_server`の起動時に1行ずつ追記される。異常終了は記録できないため、
+    「起動した時刻」の履歴であることを注記する。"""
+    if not boots:
+        body = '<p class="empty-note">起動の記録はまだありません(この機能の導入後の最初の起動から記録されます)</p>'
+    else:
+        rows = []
+        for b in boots:
+            sha = b.get("commit_sha") or "不明"
+            subject = b.get("commit_subject") or ""
+            reason = system_info_service.REASON_LABELS.get(b.get("reason") or "", "不明")
+            rows.append(
+                "<tr>"
+                f"<td>{html.escape(_format_boot_time(b.get('booted_at')))}</td>"
+                f"<td><span class=\"git-commit-sha\">{html.escape(str(sha))}</span> {html.escape(subject)}</td>"
+                f"<td>{html.escape(reason)}</td>"
+                "</tr>"
+            )
+        body = (
+            '<table class="simple-table"><thead><tr><th>起動</th><th>コミット</th><th>きっかけ</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table>'
+            '<p class="meta">起動した時刻の履歴です(停電などの異常終了そのものは記録されません)。</p>'
+        )
+    return f'<div class="info-box" id="boot-history"><h2>🔁 サーバーの起動履歴</h2>{body}</div>'
+
+
+def _render_git_status_box() -> str:
+    """Gitの状態の枠。中身はページ表示後に`_GIT_STATUS_SCRIPT`が`/api/system/git/status`から埋める
+    (`git fetch`を含み遅いので、ページ本体では待たない)。"""
+    return (
+        '<div class="info-box" id="git-status"><h2>🔀 Gitの状態</h2>'
+        '<div id="gitStatusBody"><p class="meta">確認中...</p></div></div>'
+    )
+
+
+_GIT_STATUS_SCRIPT = """
+<script>
+(function () {
+    function el(tag, text, cls) {
+        var node = document.createElement(tag);
+        if (cls) { node.className = cls; }
+        node.textContent = text;
+        return node;
+    }
+    function fmtBoot(iso) {
+        return iso ? iso.slice(5, 10).replace("-", "/") + " " + iso.slice(11, 16) : "";
+    }
+    function commitText(c) { return c.sha + " " + c.subject + (c.date ? " (" + c.date + ")" : ""); }
+
+    function render(d) {
+        var box = document.getElementById("gitStatusBody");
+        if (!box) { return; }
+        box.textContent = "";
+        if (!d.ok) { box.appendChild(el("p", d.error || "取得できませんでした", "git-status-line git-status-warn")); return; }
+        if (d.running) {
+            box.appendChild(el("p", "▶ 起動中のコード: " + d.running.sha + " " + d.running.subject
+                + "(起動 " + fmtBoot(d.running.booted_at) + ")", "git-status-line"));
+        } else {
+            box.appendChild(el("p", "▶ 起動中のコード: 記録なし(この機能の導入後の最初の起動から分かります)", "git-status-line"));
+        }
+        box.appendChild(el("p", "📁 手元(実機)の最新: " + commitText(d.head) + (d.branch ? " ・ ブランチ " + d.branch : ""), "git-status-line"));
+        if (d.pending_restart) {
+            box.appendChild(el("p", "⚠️ 取り込み済みですが、まだ再起動されていません(起動中のコードは古いままです)", "git-status-line git-status-warn"));
+        }
+        if (d.remote) {
+            box.appendChild(el("p", "☁️ GitHubの最新: " + commitText(d.remote), "git-status-line"));
+            if (d.behind === 0) {
+                box.appendChild(el("p", "✅ 手元はGitHubの最新に追いついています", "git-status-line"));
+            } else if (d.behind > 0) {
+                box.appendChild(el("p", "⬇️ GitHubの最新まで、あと" + d.behind + "件取り込まれていません", "git-status-line git-status-warn"));
+            }
+            if (d.ahead > 0) {
+                box.appendChild(el("p", "手元にだけあるコミットが" + d.ahead + "件あります", "git-status-line git-status-warn"));
+            }
+        }
+        if (d.error) { box.appendChild(el("p", d.error, "git-status-line git-status-warn")); }
+        if (d.recent && d.recent.length) {
+            box.appendChild(el("p", "最近のコミット", "meta"));
+            var list = document.createElement("ul");
+            list.className = "git-commit-list";
+            d.recent.forEach(function (c) {
+                var li = document.createElement("li");
+                li.appendChild(el("span", c.sha, "git-commit-sha"));
+                li.appendChild(document.createTextNode(" " + c.subject + (c.date ? " (" + c.date + ")" : "")));
+                var badge = c.running ? "▶ 起動中" : (c.pulled ? "✅ 取り込み済み" : "⬇️ 未取り込み");
+                li.appendChild(el("span", badge, "git-commit-badge"));
+                list.appendChild(li);
+            });
+            box.appendChild(list);
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+        fetch("/api/system/git/status", { credentials: "same-origin" })
+            .then(function (res) { return res.json(); })
+            .then(render)
+            .catch(function () {
+                var box = document.getElementById("gitStatusBody");
+                if (box) { box.textContent = "Gitの状態を取得できませんでした"; }
+            });
+    });
+})();
+</script>
+"""
 
 
 def render_sys_page(
@@ -1017,6 +1479,8 @@ def render_sys_page(
     now: datetime,
     *,
     dashboard_path: str,
+    nas_days: int = NAS_HISTORY_DEFAULT_DAYS,
+    boot_history: list[dict[str, Any]] | None = None,
 ) -> str:
     """🔧 システム: 全体サマリー・各機能の最終更新時刻・NASの容量推移・メンテナンス操作。
 
@@ -1046,8 +1510,10 @@ def render_sys_page(
         "</div>"
         '<div class="info-box" id="nas-history">'
         "<h2>🗄️ NASの容量推移</h2>"
-        f"{_render_nas_history_chart(nas_history)}"
+        f"{_render_nas_history_chart(nas_history, days=nas_days, sys_path=dashboard_path.rstrip('/') + '/sys')}"
         "</div>"
+        f"{_render_boot_history_box(boot_history or [])}"
+        f"{_render_git_status_box()}"
         "<h2>🛠️ メンテナンス</h2>"
         '<div class="maintenance-box">'
         "<p>GitHubの最新を取り込んで、システムを再起動します。"
@@ -1077,7 +1543,7 @@ def render_sys_page(
         '<div id="backupResult" class="maintenance-result" role="status" aria-live="polite"></div>'
         "</div>"
     )
-    return _page_shell("システム - おうちの様子", body, extra_head=_MAINTENANCE_SCRIPT)
+    return _page_shell("システム - おうちの様子", body, extra_head=_MAINTENANCE_SCRIPT + _GIT_STATUS_SCRIPT)
 
 
 _MAINTENANCE_SCRIPT = """

@@ -10,7 +10,7 @@ module = importlib.util.module_from_spec(_spec)
 sys.modules["check_changelog_update"] = module
 _spec.loader.exec_module(module)  # type: ignore[union-attr]
 
-CHANGELOG = "family-quest/src/lib/changelog.ts"
+CHANGELOG = "family-quest/src/lib/changelog.json"
 
 
 def test_app_source_change_without_changelog_is_flagged():
