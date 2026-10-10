@@ -757,6 +757,25 @@ class TestRenderUpdatesPage:
         assert "ホームへ戻る" in self._render([])
 
 
+class TestPageTabs:
+    """サブページ上部の兄弟ページ切替タブ(ホームへ戻らず直接移動できる)。"""
+
+    def test_tabs_link_to_every_sibling_page_and_mark_the_current_one(self):
+        html = dashboard_page_service._back_to_home_link("/dashboard/", "sys")
+        for key in ("watch", "life", "sys", "updates"):
+            assert f'href="/dashboard/{key}"' in html
+        assert html.count('aria-current="page"') == 1
+        assert 'href="/dashboard/sys" aria-current="page"' in html
+        assert "ホームへ戻る" in html
+
+    def test_no_tab_is_current_when_the_page_has_no_tab(self):
+        assert "aria-current" not in dashboard_page_service._back_to_home_link("/dashboard/")
+
+    def test_life_page_does_not_repeat_its_title_as_a_group_heading(self):
+        html = dashboard_page_service.render_life_page([], dashboard_path="/dashboard/")
+        assert 'class="group-title"' not in html
+
+
 class TestMergeOpenCloseEvents:
     """開閉センサーの「open」の直後(60秒以内)の「close」を、開いた時刻の1行にまとめる。"""
 
