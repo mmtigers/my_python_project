@@ -38,6 +38,7 @@ _PAGE_BASE_CSS = """
         --accent: #2457d6; --accent-soft: #e8eefc; --accent-bd: #c5d3f5; --on-accent: #ffffff;
         --ok: #17713a; --ok-bg: #e6f5ec; --ok-bd: #b9e0c7;
         --warn: #8a5600; --warn-bg: #fff3d6; --warn-bd: #efd78e;
+        --hm-0: #e4e7ec; --hm-1: #f9c9c5; --hm-2: #ee7b73; --hm-3: #c0261c;
         --bad: #b3261e; --bad-bg: #fdebea; --bad-bd: #f2bdb9;
         --neutral: #5b6678; --neutral-bg: #f1f3f7; --neutral-bd: #dfe4ec;
         --bar-alt: #d9730d;
@@ -52,6 +53,7 @@ _PAGE_BASE_CSS = """
             --accent: #8ab4ff; --accent-soft: #1a2a48; --accent-bd: #2d4577; --on-accent: #0e1319;
             --ok: #7fd39a; --ok-bg: #112a1c; --ok-bd: #22533a;
             --warn: #f2c066; --warn-bg: #30250d; --warn-bd: #574314;
+            --hm-0: #2a3340; --hm-1: #6b3532; --hm-2: #b5473f; --hm-3: #ff6b60;
             --bad: #ff9d96; --bad-bg: #351614; --bad-bd: #692a26;
             --neutral: #9aa7b8; --neutral-bg: #1c2431; --neutral-bd: #2a3545;
             --bar-alt: #f2a54a;
@@ -140,6 +142,24 @@ _PAGE_BASE_CSS = """
     a.external-card.external-up { background: var(--ok-bg); color: var(--ok); border-color: var(--ok-bd); }
     a.external-card.external-down { background: var(--bad-bg); color: var(--bad); border-color: var(--bad-bd); }
     .link-state { font-size: 0.75rem; font-weight: normal; margin-left: 4px; }
+
+    /* 見守りページの「1日の活動ヒートマップ」(行=機器、列=0〜23時の1時間マス)。
+       回数が多いほど濃い赤。色だけに頼らず、各マスに title/aria-label で回数を持たせる。 */
+    .heatmap { margin: 4px 0 16px; padding: 10px 12px; background: var(--surface);
+        border: 1px solid var(--border); border-radius: var(--radius-sm); }
+    .heatmap-row { display: grid; grid-template-columns: 6.5em 1fr; gap: 6px; align-items: center; margin-bottom: 3px; }
+    .heatmap-name { font-size: 0.75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .heatmap-cells { display: grid; grid-template-columns: repeat(24, 1fr); gap: 1px; }
+    .heatmap-cell { height: 22px; background: var(--hm-0); border-radius: 2px; }
+    .heatmap-cell.hm-1 { background: var(--hm-1); }
+    .heatmap-cell.hm-2 { background: var(--hm-2); }
+    .heatmap-cell.hm-3 { background: var(--hm-3); }
+    .heatmap-cell.hm-future { background: transparent; border: 1px dashed var(--border); box-sizing: border-box; }
+    .heatmap-axis { display: grid; grid-template-columns: 6.5em 1fr; gap: 6px; font-size: 0.65rem; color: var(--faint); }
+    .heatmap-axis-ticks { position: relative; height: 1em; }
+    .heatmap-axis-ticks span { position: absolute; transform: translateX(-50%); }
+    .heatmap-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; font-size: 0.7rem; color: var(--muted); }
+    .heatmap-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 3px; }
 
     /* 見守りページの簡易テーブル(防犯ログ・実家センサーログ)。 */
     table.simple-table {
@@ -969,6 +989,76 @@ def _render_log_date_filter(
     )
 
 
+# ヒートマップの色段階の下限(1時間あたりの回数)。0回は「動きなし」。
+_HEATMAP_LEVEL_THRESHOLDS = (1, 3, 10)  # 1〜2回=薄い赤 / 3〜9回=中間の赤 / 10回以上=濃い赤
+_HEATMAP_LEVEL_LABELS = ("動きなし", "1〜2回", "3〜9回", "10回以上")
+
+
+def hourly_activity_counts(df: pd.DataFrame, day: date) -> dict[str, list[int]]:
+    """`day`(JST)の機器別・時間別(0〜23時)の件数を返す。キーは機器の表示名。
+
+    入力は`sensor_state_change_log`(+`merge_open_close_events`)の出力を想定する
+    (状態が変わった行だけ。開→閉は1行にまとまっている)。1行を1回として数える。
+    `timestamp`が日時型でない・必要な列が無い場合は空を返す。
+    """
+    if df.empty or "timestamp" not in df.columns or "friendly_name" not in df.columns:
+        return {}
+    if not pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
+        return {}
+    on_day = df[df["timestamp"].dt.date == day]
+    counts: dict[str, list[int]] = {}
+    for name, hour in zip(on_day["friendly_name"], on_day["timestamp"].dt.hour):
+        if pd.isna(name):
+            continue
+        counts.setdefault(str(name), [0] * 24)[int(hour)] += 1
+    return counts
+
+
+def _heatmap_level(count: int) -> int:
+    """件数 → 色段階(0=なし、1=薄い赤、2=中間、3=濃い赤)。"""
+    return sum(count >= t for t in _HEATMAP_LEVEL_THRESHOLDS)
+
+
+def _render_activity_heatmap(df: pd.DataFrame, day: date, now: datetime) -> str:
+    """機器×0〜23時の活動ヒートマップ(純HTML/CSS。JS・外部ライブラリなし)。
+
+    今日を表示するとき、まだ来ていない時間帯のマスは枠線だけにして「動きなし」と区別する。
+    """
+    counts = hourly_activity_counts(df, day)
+    if not counts:
+        return '<p class="empty-note">この日の動きの記録はありません</p>'
+    current_hour = now.hour if day == now.date() else (24 if day < now.date() else -1)
+    rows = []
+    for name in sorted(counts):
+        cells = []
+        for hour, count in enumerate(counts[name]):
+            if hour > current_hour:
+                cells.append(f'<div class="heatmap-cell hm-future" title="{hour}時台: まだ先です"></div>')
+                continue
+            label = f"{hour}時台: {count}回" if count else f"{hour}時台: 動きなし"
+            cells.append(
+                f'<div class="heatmap-cell hm-{_heatmap_level(count)}" role="img" '
+                f'title="{label}" aria-label="{html.escape(name)} {label}"></div>'
+            )
+        rows.append(
+            f'<div class="heatmap-row"><div class="heatmap-name" title="{html.escape(name)}">'
+            f'{html.escape(name)}</div><div class="heatmap-cells">{"".join(cells)}</div></div>'
+        )
+    ticks = "".join(
+        f'<span style="left:{h / 24 * 100:.2f}%">{h}</span>' for h in (0, 6, 12, 18)
+    ) + '<span style="left:100%">24</span>'
+    legend = "".join(
+        f'<span><i style="background:var(--hm-{lvl})"></i>{html.escape(label)}</span>'
+        for lvl, label in enumerate(_HEATMAP_LEVEL_LABELS)
+    )
+    return (
+        f'<div class="heatmap"><div class="meta">{day.strftime("%Y/%m/%d")} の動き(1時間ごとの回数)</div>'
+        f'{"".join(rows)}'
+        f'<div class="heatmap-axis"><div></div><div class="heatmap-axis-ticks">{ticks}</div></div>'
+        f'<div class="heatmap-legend">{legend}</div></div>'
+    )
+
+
 def render_watch_page(
     df_sensor: pd.DataFrame,
     *,
@@ -1027,6 +1117,9 @@ def render_watch_page(
     df_takasago = merge_open_close_events(_filter_by_device(changes_takasago, selected_device))
     df_itami = merge_open_close_events(_filter_by_device(changes_itami, selected_device))
 
+    heatmap_now = home_status_service.get_now_jst()
+    heatmap_day = selected_date or heatmap_now.date()
+
     def _log_table(df: pd.DataFrame, columns: dict[str, str]) -> str:
         # 日付指定時は上限を外して全件(`limit`は`df.iloc[visible:limit]`の上端)。
         if selected_date is None:
@@ -1047,10 +1140,12 @@ def render_watch_page(
         f'{_log_table(df_camera_motion, {"timestamp": "検知時刻", "friendly_name": "カメラ"})}'
         '<div id="takasago-log">'
         "<h2>👵 高砂実家のセンサーログ</h2>"
+        f"{_render_activity_heatmap(df_takasago, heatmap_day, heatmap_now)}"
         f'{_log_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'
         "</div>"
         '<div id="itami-log">'
         "<h2>🏠 伊丹(自宅)のセンサーログ</h2>"
+        f"{_render_activity_heatmap(df_itami, heatmap_day, heatmap_now)}"
         f'{_log_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
         "</div>"
     )

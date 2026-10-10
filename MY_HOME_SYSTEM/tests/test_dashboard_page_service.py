@@ -1009,3 +1009,76 @@ class TestSensorStateChangeLog:
         )
         assert "玄関ドア" in html
         assert "洗面所温湿度計" not in html
+
+
+class TestActivityHeatmap:
+    """見守りページの「1日の活動ヒートマップ」(機器×0〜23時)。"""
+
+    @staticmethod
+    def _df(times, name="玄関センサー"):
+        return pd.DataFrame({
+            "timestamp": times,
+            "friendly_name": [name] * len(times),
+            "device_id": ["d1"] * len(times),
+            "contact_state": ["detected"] * len(times),
+        })
+
+    def test_counts_per_hour_for_the_given_day_only(self):
+        df = self._df([
+            _jst(2026, 10, 2, 6, 5), _jst(2026, 10, 2, 6, 40), _jst(2026, 10, 2, 23, 59),
+            _jst(2026, 10, 1, 6, 0), _jst(2026, 10, 3, 0, 0),  # 別の日は数えない
+        ])
+        counts = dashboard_page_service.hourly_activity_counts(df, date(2026, 10, 2))
+        assert counts["玄関センサー"][6] == 2
+        assert counts["玄関センサー"][23] == 1
+        assert sum(counts["玄関センサー"]) == 3
+
+    def test_empty_or_missing_columns_returns_empty(self):
+        day = date(2026, 10, 2)
+        assert dashboard_page_service.hourly_activity_counts(pd.DataFrame(), day) == {}
+        assert dashboard_page_service.hourly_activity_counts(pd.DataFrame({"timestamp": []}), day) == {}
+
+    @pytest.mark.parametrize("count,level", [(0, 0), (1, 1), (2, 1), (3, 2), (9, 2), (10, 3), (50, 3)])
+    def test_level_thresholds(self, count, level):
+        assert dashboard_page_service._heatmap_level(count) == level
+
+    def test_render_marks_levels_and_future_hours_today(self):
+        times = [_jst(2026, 10, 2, 8, m) for m in range(0, 12)] + [_jst(2026, 10, 2, 9, 0)]
+        html = dashboard_page_service._render_activity_heatmap(
+            self._df(times), date(2026, 10, 2), _jst(2026, 10, 2, 10, 30)
+        )
+        assert "8時台: 12回" in html and 'hm-3' in html
+        assert "9時台: 1回" in html and 'hm-1' in html
+        assert "7時台: 動きなし" in html
+        assert "11時台: まだ先です" in html  # 現在(10時台)より先
+        assert "10時台: 動きなし" in html  # 現在の時間帯は未来扱いにしない
+
+    def test_past_day_has_no_future_cells(self):
+        html = dashboard_page_service._render_activity_heatmap(
+            self._df([_jst(2026, 10, 1, 8, 0)]), date(2026, 10, 1), _jst(2026, 10, 2, 10, 0)
+        )
+        assert "まだ先です" not in html
+
+    def test_empty_day_shows_note(self):
+        html = dashboard_page_service._render_activity_heatmap(
+            self._df([_jst(2026, 10, 1, 8, 0)]), date(2026, 10, 2), _jst(2026, 10, 2, 10, 0)
+        )
+        assert "この日の動きの記録はありません" in html
+
+    def test_watch_page_renders_heatmap_for_selected_date(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        df_sensor = pd.DataFrame({
+            "location": ["高砂"],
+            "device_id": ["pir"],
+            "timestamp": [_jst(2026, 10, 2, 7, 10)],
+            "friendly_name": ["廊下の人感"],
+            "contact_state": ["detected"],
+        })
+        html = dashboard_page_service.render_watch_page(
+            df_sensor, dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot",
+            selected_date=date(2026, 10, 2),
+        )
+        takasago = html.split('id="takasago-log"', 1)[1].split('id="itami-log"', 1)[0]
+        assert 'class="heatmap"' in takasago and "7時台: 1回" in takasago
+        itami = html.split('id="itami-log"', 1)[1]
+        assert "この日の動きの記録はありません" in itami
