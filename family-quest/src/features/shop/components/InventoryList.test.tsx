@@ -370,3 +370,30 @@ describe('InventoryList 休日のテレビおやすみ', () => {
         expect(screen.queryByText(/テレビ/)).not.toBeInTheDocument();
     });
 });
+
+describe('InventoryList 同じ券のまとめ表示', () => {
+    afterEach(() => {
+        cleanup();
+        vi.resetAllMocks();
+    });
+
+    it('同じごほうび券を複数枚持っていれば1枚にまとめて枚数を表示する', async () => {
+        vi.mocked(apiClient.fetchInventory).mockResolvedValue(
+            inventoryResponse({
+                items: [
+                    youtubeTicket({ id: 1 }),
+                    youtubeTicket({ id: 2 }),
+                    youtubeTicket({ id: 3 }),
+                    youtubeTicket({ id: 4, reward_id: 10, title: 'Youtube (10:00)', youtube_duration_minutes: 10 }),
+                ],
+            }),
+        );
+
+        renderWithClient(<InventoryList userId="son" />);
+
+        await waitFor(() => expect(screen.getByText('×3')).toBeInTheDocument());
+        expect(screen.getAllByText(/Youtube \(30:00\)/)).toHaveLength(1);
+        // 1枚だけの券には枚数を付けない
+        expect(screen.getAllByText(/^×\d+$/)).toHaveLength(1);
+    });
+});
