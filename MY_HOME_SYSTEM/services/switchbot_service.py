@@ -166,6 +166,8 @@ def turn_off_tv_gracefully(sleep=time.sleep) -> dict[str, Any] | None:
         watts = get_tv_power_watts()
         if watts is None:
             logger.warning("📺 TV consumption unavailable; cutting the plug without the remote.")
+        elif watts >= threshold and not _tv_still_on_after_recheck(threshold, sleep):
+            logger.info("📺 TV power dropped on recheck (already turning off); skipping the remote toggle.")
         elif watts >= threshold:
             logger.info(f"📺 TV is on ({watts:.1f}W >= {threshold}W). Turning it off with the remote first.")
             if not nature_remo_service.send_tv_power():
@@ -188,6 +190,18 @@ def turn_off_tv_gracefully(sleep=time.sleep) -> dict[str, Any] | None:
 
 # 消費電力が下がったかを確かめる間隔(秒)
 _TV_POWER_POLL_SECONDS = 5
+
+
+def _tv_still_on_after_recheck(threshold: float, sleep=time.sleep) -> bool:
+    """電源信号を送る直前に消費電力を取り直し、まだオン状態ならTrue。
+
+    Nature Remoの電源信号はトグルなので、直前に手で消した・プラグの電力値が遅れている
+    だけのテレビへ送ると逆にテレビをつけてしまう。再取得で下がっていた、または
+    取得できなかったときはFalse(信号を送らずプラグだけ切る)。
+    """
+    sleep(_TV_POWER_POLL_SECONDS)
+    watts = get_tv_power_watts()
+    return watts is not None and watts >= threshold
 
 
 def is_tv_blocked_now(now: datetime.datetime | None = None) -> bool:
