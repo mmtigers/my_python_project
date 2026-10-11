@@ -105,6 +105,7 @@ def dashboard_home(tab: str | None = None) -> Response:
 
     cards, fetched_at = home_status_service.collect_status_cards()
     link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)
+    heatmap_html = _home_heatmap_html()
     return HTMLResponse(
         dashboard_page_service.render_home_page(
             cards,
@@ -118,7 +119,17 @@ def dashboard_home(tab: str | None = None) -> Response:
             manifest_path=f"{_BASE_PATH}/app.webmanifest",
             icon_path=f"{_BASE_PATH}/icon-180.png",
             link_health=link_health,
+            heatmap_html=heatmap_html,
         )
+    )
+
+
+def _home_heatmap_html() -> str:
+    """ホームの「📊 今日の動き」。今日(JST)の全件(60秒キャッシュ)から作る。"""
+    return dashboard_page_service.render_home_activity_heatmaps(
+        home_status_service.get_sensor_data_today(),
+        home_status_service.get_now_jst(),
+        dashboard_path=f"{_BASE_PATH}/",
     )
 
 
@@ -136,6 +147,7 @@ def dashboard_status_fragment() -> HTMLResponse:
             asa_note_url=config.ASA_NOTE_URL,
             yoru_note_url=config.YORU_NOTE_URL,
             link_health=link_health,
+            heatmap_html=_home_heatmap_html(),
         )
     )
 
@@ -144,9 +156,17 @@ def dashboard_status_fragment() -> HTMLResponse:
 
 
 @router.get(f"{_BASE_PATH}/watch", include_in_schema=False)
-def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLResponse:
+def dashboard_watch(
+    date: str | None = None,
+    device: str | None = None,
+    hour: str | None = None,
+    src: str | None = None,
+    hdev: str | None = None,
+) -> HTMLResponse:
     """見守りページ。`?date=YYYY-MM-DD`でログ(防犯・センサー)をその日(JST)に絞る。
     `?device=<device_id>`でセンサーログをその機器だけに絞る(組み合わせ可)。
+    `?hour=0〜23&src=security|takasago|itami[&hdev=<device_id>]`はヒートマップのマスをタップした先で、
+    その日のその時間のログを「時間帯の詳細」として出す(`date`未指定なら今日)。
     形式が不正な値は無視して通常表示にする(ブックマークの壊れたURLでも開けるように)。"""
     selected_date = dashboard_page_service.parse_log_date(date)
     if selected_date is not None:
@@ -164,6 +184,9 @@ def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLR
             selected_date=selected_date,
             selected_device=device or None,
             df_heatmap=df_heatmap,
+            hour=dashboard_page_service.parse_log_hour(hour),
+            hour_src=dashboard_page_service.parse_log_source(src),
+            hour_device=hdev or None,
         )
     )
 

@@ -375,7 +375,8 @@ class TestStatusCacheOnTheServerSide:
             for p in patches:
                 p.stop()
 
-        mock_load.assert_called_once()
+        # 共通キャッシュ(直近N件)と、ホームの「今日の動き」用の今日の全件を各1回。2回目は増えない。
+        assert mock_load.call_count == 2
 
     def test_sub_pages_share_the_same_cache_as_the_home_page(self):
         """見守り/くらし/システムページを開いても、DB読み取り回数が増えないこと。"""
@@ -707,7 +708,8 @@ class TestPartialRefresh:
             for p in patches:
                 p.stop()
 
-        assert load.call_count == 1
+        # 直近N件 + 今日の全件(ホームの「今日の動き」用)を各1回。断片を何度取っても増えない。
+        assert load.call_count == 2
 
 
 class TestSupportingValues:
