@@ -151,8 +151,11 @@ def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLR
     selected_date = dashboard_page_service.parse_log_date(date)
     if selected_date is not None:
         df_sensor = home_status_service.get_sensor_data_for_day(selected_date)
+        df_heatmap = None  # 指定日の全件が既に df_sensor
     else:
         df_sensor = home_status_service.get_cached_materials().df_sensor
+        # キャッシュは直近N件のため、ヒートマップ用に今日(JST)の全件を別に取る
+        df_heatmap = home_status_service.get_sensor_data_today()
     return HTMLResponse(
         dashboard_page_service.render_watch_page(
             df_sensor,
@@ -160,6 +163,7 @@ def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLR
             snapshot_url_prefix=f"{_BASE_PATH}/snapshot",
             selected_date=selected_date,
             selected_device=device or None,
+            df_heatmap=df_heatmap,
         )
     )
 

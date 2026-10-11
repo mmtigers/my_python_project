@@ -41,7 +41,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config.ASSETS_DIR` | NAS上のパスの実際の値・遅延解決の詳細は`config.py`側に依存し不明。 | 根拠: [変数参照] (行番号: 311, 324 / 抜粋: "img_dir = os.path.join(config.ASSETS_DIR, \"snapshots\")") |
-| `config.CAMERAS` | 各カメラ設定(`id`/`name`/`enabled`)の実際の値は`config.py`(devices.json由来)に依存し不明。 | 根拠: [変数参照] (行番号: 1104 / 抜粋: "for cam in config.CAMERAS") |
+| `config.CAMERAS` | 各カメラ設定(`id`/`name`/`enabled`)の実際の値は`config.py`(devices.json由来)に依存し不明。 | 根拠: [変数参照] (行番号: 1109 / 抜粋: "for cam in config.CAMERAS") |
 | `home_status_service.render_status_grid_html`等 | 実装(カードの並び・エスケープ処理)は`home_status_service.py`側にあり本ファイルからは呼び出しのみ。 | 根拠: [関数呼び出し] (行番号: 260, 508 / 抜粋: "home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path)") |
 | `/api/cameras/live/{id}/stream.m3u8`・`/api/system/restart`・`/api/system/backup` | クライアント側JS(`_CAMERA_SCRIPT`/`_MAINTENANCE_SCRIPT`)が`fetch`するエンドポイントの実装は本ファイルの外(`routers/camera_router.py`・`routers/system_router.py`)にある。 | 根拠: [JS文字列内] (行番号: 394, 622〜623) |
 
@@ -466,7 +466,7 @@
 
 ### `render_watch_page`
 
-* **役割**: 👀見守りページ全体を組み立てる。**(UI改善)** 高砂・伊丹のセンサーログは`sensor_state_change_log`の後に`merge_open_close_events`を通し、「open」の直後60秒以内の「close」を「開 → 閉（N秒）」の1行にまとめる。**(新機能)** 引数`selected_device`(`str | None`)を追加。高砂・伊丹のセンサーログ(防犯ログは対象外)をその`device_id`の機器だけに絞る。機器の選択肢は絞り込む前の全機器から作り(選び直せなくなるのを防ぐ)、選択肢に無い値は無視して全機器を表示する。**(新機能)** 引数`selected_date`(`date | None`)を追加。指定時は3つのログ表の件数上限(通常50件)を外して`df_sensor`の全行を表示する(先頭5件の常時表示+折りたたみは同じ)。`df_sensor`は呼び出し側が指定日の全件を渡す前提で、ここでは日付による再フィルタはしない。3つのログの上に日付フィルタ(`_render_log_date_filter`)を置く。`config.CAMERAS`から有効なカメラ一覧を作り、`df_sensor`から`location == "高砂"`/`location == "伊丹"`の行をそれぞれ抽出し(**(UI改善)** さらに`sensor_state_change_log`で開閉/動体の状態変化行だけに絞って)、カメラ選択・スナップショットギャラリー・防犯ログ表・高砂実家センサーログ表・伊丹(自宅)センサーログ表の順に並べる。**(不具合修正)** カメラ映像セクションに`id="camera-section"`、高砂ログに`id="takasago-log"`、伊丹ログに`id="itami-log"`を付けている。以前は見守りグループの4枚のステータスカード(高砂・伊丹・駐車場・カメラ)が全部このページの`tab="watch"`だけを指し`anchor`が無かったため、どのカードをタップしても同じURL(ページ先頭=カメラ映像)にしか飛べなかった。`home_status_service.build_status_cards`が付ける`anchor`(`#takasago-log`等)がこれらのidを指すことで、カードごとに該当セクションへ遷移できるようにした。伊丹用のセンサーログ表(`df_itami`)は今回新設したもので、以前は`location == "伊丹"`の行を表示する場所がどこにも無かった。**(不具合修正)** 防犯ログは以前引数`df_security_log`(`security_logs`テーブル。書き込むコードが存在せず常に空)を`analysis_service.apply_friendly_names`に通して表示していたが、この引数自体を削除し、`home_status_service.camera_motion_log(df_sensor)`(カメラの動体検知。`df_sensor`は`load_sensor_data`側で既に`apply_friendly_names`済み)を防犯ログの正のデータとして使うよう差し替えた。**(UI改善)** 3つのログ表(防犯ログ・高砂/伊丹センサーログ)は以前`_render_simple_table`で直接描画しており最大50行が縦に連なりスクロールが大変だったため、`_render_collapsible_log_table`に差し替えて先頭5件だけを常時表示するようにした。
+* **役割**: 👀見守りページ全体を組み立てる。**(UI改善)** 高砂・伊丹のセンサーログは`sensor_state_change_log`の後に`merge_open_close_events`を通し、「open」の直後60秒以内の「close」を「開 → 閉（N秒）」の1行にまとめる。**(新機能)** 引数`selected_device`(`str | None`)を追加。高砂・伊丹のセンサーログ(防犯ログは対象外)をその`device_id`の機器だけに絞る。機器の選択肢は絞り込む前の全機器から作り(選び直せなくなるのを防ぐ)、選択肢に無い値は無視して全機器を表示する。**(新機能)** 引数`selected_date`(`date | None`)を追加。指定時は3つのログ表の件数上限(通常50件)を外して`df_sensor`の全行を表示する(先頭5件の常時表示+折りたたみは同じ)。`df_sensor`は呼び出し側が指定日の全件を渡す前提で、ここでは日付による再フィルタはしない。3つのログの上に日付フィルタ(`_render_log_date_filter`)を置く。`config.CAMERAS`から有効なカメラ一覧を作り、`df_sensor`から`location == "高砂"`/`location == "伊丹"`の行をそれぞれ抽出し(**(UI改善)** さらに`sensor_state_change_log`で開閉/動体の状態変化行だけに絞って)、カメラ選択・スナップショットギャラリー・防犯ログ表・高砂実家センサーログ表・伊丹(自宅)センサーログ表の順に並べる。**(不具合修正)** カメラ映像セクションに`id="camera-section"`、高砂ログに`id="takasago-log"`、伊丹ログに`id="itami-log"`を付けている。以前は見守りグループの4枚のステータスカード(高砂・伊丹・駐車場・カメラ)が全部このページの`tab="watch"`だけを指し`anchor`が無かったため、どのカードをタップしても同じURL(ページ先頭=カメラ映像)にしか飛べなかった。`home_status_service.build_status_cards`が付ける`anchor`(`#takasago-log`等)がこれらのidを指すことで、カードごとに該当セクションへ遷移できるようにした。伊丹用のセンサーログ表(`df_itami`)は今回新設したもので、以前は`location == "伊丹"`の行を表示する場所がどこにも無かった。**(不具合修正)** 防犯ログは以前引数`df_security_log`(`security_logs`テーブル。書き込むコードが存在せず常に空)を`analysis_service.apply_friendly_names`に通して表示していたが、この引数自体を削除し、`home_status_service.camera_motion_log(df_sensor)`(カメラの動体検知。`df_sensor`は`load_sensor_data`側で既に`apply_friendly_names`済み)を防犯ログの正のデータとして使うよう差し替えた。**(UI改善)** 3つのログ表(防犯ログ・高砂/伊丹センサーログ)は以前`_render_simple_table`で直接描画しており最大50行が縦に連なりスクロールが大変だったため、`_render_collapsible_log_table`に差し替えて先頭5件だけを常時表示するようにした。 **(新機能)** 引数`df_heatmap`(`pd.DataFrame | None`)を追加。高砂・伊丹の活動ヒートマップの集計元で、表と同じ絞り込み(`location`→`sensor_state_change_log`→機器フィルタ→`merge_open_close_events`)を通して使う。日付未指定時、呼び出し側は今日(JST)の全件を渡す(`df_sensor`は直近N件のキャッシュで今日の早い時間帯が欠けうるため)。省略時は表と同じ`df_sensor`から作る。
 * 根拠: [関数定義] (行番号: 1062〜1152 / 抜粋: "def render_watch_page(\n    df_sensor: pd.DataFrame,\n    *,\n    dashboard_path: str,\n    snapshot_url_prefix: str,\n    selected_date: date | None = None,\n    selected_device: str | None = None,\n) -> str:")、[セクションid] (行番号: 525〜540 / 抜粋: '\'<div id="camera-section">\'', '\'<div id="takasago-log">\'', '\'<div id="itami-log">\'')、[防犯ログの差し替え] (行番号: 505〜507, 514 / 抜粋: "df_camera_motion = home_status_service.camera_motion_log(df_sensor)")
 
 
@@ -490,7 +490,7 @@
 ### `_render_daily_cost_history`
 
 * **役割**: **（不具合修正で新設）** `analysis_service.calculate_daily_cost_series`の結果(新しい順、先頭が今日)を横棒グラフ付きの簡易リスト(`.cost-history`)で表示する。以前は「今月の電気代」カードをタップしても同じカードの再掲だけで詳細と呼べる情報が無かったため、タップする価値のある詳細として日別推移を追加した。バーの幅は当該リスト内の最大値に対する相対値(`round(cost / max_cost * 100)`)で、0円の日でもバー自体が見えなくなって「データが無い」ように見えないよう最小2%の幅を確保する。先頭行(今日)は日付ではなく「今日」と表示する。
-* 根拠: `def _render_daily_cost_history(rows: list[tuple[Any, int]]) -> str:` (行番号: 1158〜1179 / 抜粋: "def _render_daily_cost_history(rows: list[tuple[Any, int]]) -> str:")
+* 根拠: `def _render_daily_cost_history(rows: list[tuple[Any, int]]) -> str:` (行番号: 1179〜1200 / 抜粋: "def _render_daily_cost_history(rows: list[tuple[Any, int]]) -> str:")
 
 
 * **引数/リクエスト**: `rows: list[tuple[Any, int]]`(`(日付, 電気代概算円)`のリスト)
@@ -515,7 +515,7 @@
 * **(新機能)** 電気代の詳細の下に、電気ページ(`{dashboard_path}/power`)へのリンクカード「⚡電気のくわしい分析」を置く。電気ページ用のCSS(`.bar-chart`・`.bar`・`.power-stat`等。グラフはインラインSVG)は、他のページと同じ共通スタイルに追加してある(組み立ては[power_page_service.md](./power_page_service.md))。
 
 * **役割**: 💡くらしページを組み立てる。渡された`cards`のうち`group == "life"`のものだけを`home_status_service.render_status_grid_html(show_group_titles=False)`で描画し(ページ見出し「💡 くらし」とグループ見出しが重複するため)、「今月の電気代はスマートメーターの記録からの概算です」の注記を添える。**(不具合修正)** `daily_cost_rows`引数(`analysis_service.calculate_daily_cost_series`)を追加し、`_render_daily_cost_history`で日別の電気代推移を「📊 日別の電気代(概算)」セクションとして表示するようにした。電気代カードをタップしても意味のある詳細が無かった不具合の修正。
-* 根拠: [関数定義] (行番号: 1182〜1199 / 抜粋: "def render_life_page(cards, *, dashboard_path: str, daily_cost_rows: list[tuple[Any, int]] | None = None) -> str:")
+* 根拠: [関数定義] (行番号: 1203〜1220 / 抜粋: "def render_life_page(cards, *, dashboard_path: str, daily_cost_rows: list[tuple[Any, int]] | None = None) -> str:")
 
 
 * **引数/リクエスト**: `cards`、キーワード専用で `dashboard_path: str`, `daily_cost_rows: list[tuple[Any, int]] | None = None`
@@ -538,7 +538,7 @@
 ### `FreshnessRow`
 
 * **役割**: システムページの鮮度一覧1行を表す型エイリアス(ラベル・最終更新時刻・異常とみなす経過分数のタプル。分数が`None`なら情報表示のみ)。
-* 根拠: [型宣言] (行番号: 1204〜1205 / 抜粋: "# (ラベル, 最終更新時刻を取り出す関数のキー, 異常とみなす経過分数。Noneは情報表示のみ)\nFreshnessRow = tuple[str, datetime | None, int | None]")
+* 根拠: [型宣言] (行番号: 1225〜1226 / 抜粋: "# (ラベル, 最終更新時刻を取り出す関数のキー, 異常とみなす経過分数。Noneは情報表示のみ)\nFreshnessRow = tuple[str, datetime | None, int | None]")
 
 
 * **引数/リクエスト**: 該当なし
@@ -584,7 +584,7 @@
 ### `build_freshness_rows`
 
 * **役割**: システムページの「各機能の最終データ更新時刻」一覧(⚡電気・環境の見守り/🗄️保存装置(NAS)/🚗駐車場カメラ(参考)/🖥️サーバー本体)を組み立てる。内部の`_add`ヘルパーが、時刻が無ければ「データがありません」(閾値ありなら赤、無ければ情報表示)、閾値を超えていれば赤で「(更新が止まっています)」を付記、それ以外は閾値の有無に応じて`ok`/`info`状態にする。駐車場カメラはイベント駆動(動きがあった時だけ記録)のため閾値`None`で「更新が無い=異常」とはみなさない。サーバー本体は`memory`の有無だけで`ok`/`red`を決める。
-* 根拠: [関数定義] (行番号: 1217〜1264 / 抜粋: "def build_freshness_rows(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    memory: dict[str, float] | None,\n    now: datetime,\n) -> list[dict[str, Any]]:")、[閾値判定] (行番号: 1231〜1241 / 抜粋: "def _add(label: str, at: datetime | None, threshold_min: int | None):")
+* 根拠: [関数定義] (行番号: 1238〜1285 / 抜粋: "def build_freshness_rows(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    memory: dict[str, float] | None,\n    now: datetime,\n) -> list[dict[str, Any]]:")、[閾値判定] (行番号: 1252〜1262 / 抜粋: "def _add(label: str, at: datetime | None, threshold_min: int | None):")
 
 
 * **引数/リクエスト**: `df_sensor: pd.DataFrame`, `nas_data: pd.Series | None`, `memory: dict[str, float] | None`, `now: datetime`
@@ -592,7 +592,7 @@
 
 
 * **戻り値/レスポンス**: `list[dict[str, Any]]`(各要素は`label`/`text`/`state`キーを持つ)
-* 根拠: [戻り値] (行番号: 1264 / 抜粋: "return rows")、[辞書組み立て] (行番号: 511, 516, 519, 536〜540)
+* 根拠: [戻り値] (行番号: 1285 / 抜粋: "return rows")、[辞書組み立て] (行番号: 511, 516, 519, 536〜540)
 
 
 * **副作用**: なし(渡された引数を読むのみ)
@@ -607,7 +607,7 @@
 ### `_render_freshness_rows`
 
 * **役割**: `build_freshness_rows`の戻り値を`<div class="freshness-row">`の並びに変換する。`state`(`red`/`ok`/`info`)に応じてCSSクラス(`freshness-red`/`freshness-ok`/`freshness-info`)を付ける。
-* 根拠: [関数定義] (行番号: 1267〜1274 / 抜粋: "def _render_freshness_rows(rows: list[dict[str, Any]]) -> str:")
+* 根拠: [関数定義] (行番号: 1288〜1295 / 抜粋: "def _render_freshness_rows(rows: list[dict[str, Any]]) -> str:")
 
 
 * **引数/リクエスト**: `rows: list[dict[str, Any]]`
@@ -630,7 +630,7 @@
 ### `_render_overall_summary`
 
 * **役割**: `build_freshness_rows`の戻り値のうち`state == "red"`の件数を数え、0件なら「✅ すべて正常です」、1件以上なら「⚠️ N件、確認が必要です」を返す(項目3の全体サマリー)。
-* 根拠: [関数定義] (行番号: 1277〜1281 / 抜粋: "def _render_overall_summary(rows: list[dict[str, Any]]) -> str:")
+* 根拠: [関数定義] (行番号: 1298〜1302 / 抜粋: "def _render_overall_summary(rows: list[dict[str, Any]]) -> str:")
 
 
 * **引数/リクエスト**: `rows: list[dict[str, Any]]`
@@ -654,7 +654,7 @@
 
 * **役割(UI改善)**: 以前の描画は「縦軸0-100%固定」「点を時刻でなく件数で等間隔」で、使用率が数%しか動かないNASでは水平線にしか見えなかった。現在は(1)縦軸を実測の最小〜最大に余白を足した範囲(最低`_NAS_CHART_MIN_SPAN`=4%幅。0%/100%に張り付くときは反対側へ広げる)にして%の軸ラベルを付け、(2)横軸を時刻で配置して始点・終点の日付を付け、(3)点数が`_NAS_CHART_MAX_POINTS`(150)を超えるときは期間を等間隔の時間枠に分け各枠の最後の1行だけ描く(`_downsample_by_time`)、(4)グラフの上に「空き容量・現在の使用率」と増加ペース・満杯までの目安(`compute_nas_forecast`/`_format_nas_forecast`)を文字で出し、(5)`days`/`sys_path`を渡すと表示期間(7/30/90日。`NAS_HISTORY_DAYS_CHOICES`、既定30)の切替リンク(`?nas_days=`。JS不要)を付ける。`compute_nas_forecast`は期間内の`used_gb`を時刻に対する最小二乗の直線で近似した傾きを増加ペース(GB/日)とし、増加中で空きがあるときだけ`空き ÷ ペース`を満杯までの日数とする(期間が2日未満・`used_gb`/`free_gb`列が無い・有効な点が2未満なら予測しない)。録画の自動削除で使用量が増減するため直線の目安であることを画面にも書く。`render_sys_page`には`nas_days`(既定30)を追加した。
 * **以下は旧仕様(新設時)の記述**: **（不具合修正で新設）** `analysis_service.load_nas_history`の`percent`列を、インラインSVGの折れ線グラフ(`.nas-chart`)で表示する。以前はNASカードをタップしても容量履歴を見る手段が無かった。使用率は0〜100%固定でスケールし(実測範囲での拡大縮小はしない)、0/50/100%の位置に補助線(`.nas-chart-grid`)を引く。グラフだけでは正確な値を読み取れないため、`<details>`で折りたたんだ詳細テーブル(直近10件、`_render_simple_table`を再利用)も併設する。データが無い、または2点未満の場合は「表示できるデータがありません」を返す(折れ線を引くには最低2点必要)。
-* 根拠: `_NAS_CHART_WIDTH = 300` (行番号: 737)、`_NAS_CHART_HEIGHT = 90` (行番号: 738)、`_NAS_CHART_PAD = 8` (行番号: 739)、`def _render_nas_history_chart(df: pd.DataFrame) -> str:` (行番号: 1369〜1448 / 抜粋: "def _render_nas_history_chart(df: pd.DataFrame) -> str:")
+* 根拠: `_NAS_CHART_WIDTH = 300` (行番号: 737)、`_NAS_CHART_HEIGHT = 90` (行番号: 738)、`_NAS_CHART_PAD = 8` (行番号: 739)、`def _render_nas_history_chart(df: pd.DataFrame) -> str:` (行番号: 1390〜1469 / 抜粋: "def _render_nas_history_chart(df: pd.DataFrame) -> str:")
 
 
 * **引数/リクエスト**: `df: pd.DataFrame`(`timestamp`/`percent`/`free_gb`等の列を持つ、`load_nas_history`と同じ形)
@@ -677,20 +677,20 @@
 ### `render_updates_page` / `_render_release_card` / `_RELEASES_VISIBLE`
 
 * **役割**: **(新機能)** 📜アップデートページ。`release_history_service.get_release_history`の`entries`/`sources`を受け取り、4アプリの更新履歴を新しい順に1本で表示する。アプリ名のバッジ(`release-badge-<app>`)・版数(あれば`v...`)・日付・タイトル・要約・詳細の箇条書きを持つカード(`_render_release_card`)。絞り込みのチップ(`?app=`。「すべて(件数)」と各アプリ(件数)。選択中は`active`)。取得に失敗したアプリは画面上部に注意(`release-warn`。古い内容があればそれを表示)。最初の`_RELEASES_VISIBLE`(20)件だけ展開し、残りは`<details>`で折りたたむ。**取得元は外部アプリ由来の文字列なので、すべて`html.escape`して出す**。
-* 根拠: `def render_updates_page(` (行番号: 1478)、`def _render_release_card(entry: dict[str, Any]) -> str:` (行番号: 1455)
+* 根拠: `def render_updates_page(` (行番号: 1499)、`def _render_release_card(entry: dict[str, Any]) -> str:` (行番号: 1476)
 * **引数/リクエスト**: `entries`, `sources`、キーワード専用で`dashboard_path`, `selected_app`(未知の値は無視して全件)。
 
 ### `_render_boot_history_box` / `_render_git_status_box` / `_GIT_STATUS_SCRIPT`
 
 * **役割**: **(新機能)** システムページの「🔁サーバーの起動履歴」と「🔀Gitの状態」。起動履歴は`system_info_service.get_boot_history`の結果を表にする(起動時刻・コミット・きっかけの表示名)。記録が無いときはその旨のプレースホルダ。異常終了は記録されないことを注記する。Gitの状態の枠は中身が空(「確認中...」)で、`_GIT_STATUS_SCRIPT`が`DOMContentLoaded`後に`GET /api/system/git/status`を取得して、起動中のコード・手元の最新・GitHubの最新・「取り込み済みだが未再起動」・「あとN件未取り込み」・最近のコミット(取り込み済み/未取り込み/起動中の印)を描く。**コミット件名は外部由来の文字列なので、DOMへは`textContent`で入れる(`innerHTML`は使わない)**。
-* 根拠: `def _render_boot_history_box(boots: list[dict[str, Any]]) -> str:` (行番号: 1539)、`def _render_git_status_box() -> str:` (行番号: 1567)
+* 根拠: `def _render_boot_history_box(boots: list[dict[str, Any]]) -> str:` (行番号: 1560)、`def _render_git_status_box() -> str:` (行番号: 1588)
 
 ### `render_sys_page`
 
 * **(新機能)** 引数`boot_history`(`list[dict] | None`)を追加し、NAS容量グラフとメンテナンス操作の間に、起動履歴とGitの状態の枠を置く。`_NAV_CARDS`にはホームのナビカード「📜アップデート」(`/updates`)も追加した。
 
 * **役割**: 🔧システムページ全体を組み立てる。全体サマリー(`_render_overall_summary`)・各機能の最終更新一覧(`_render_freshness_rows`)・NASの容量推移(`_render_nas_history_chart`)・保存容量の使用率(`disk`があれば)・メンテナンス操作(サービス再起動の確認チェックボックス付きボタン、今すぐバックアップボタン)を並べる。**(不具合修正)** `nas_history`引数を追加し、`id="nas-history"`の`.info-box`セクションとしてNASの容量推移グラフを表示するようにした(「🗄️ NAS」カードの`anchor`のタップ先)。あわせて「各機能の最終更新」・NAS推移の各セクションを`.info-box`で視覚的にグループ化し、システムページを見やすくした。**(UI改善)** 情報の箱は`.box-grid`で包み、900px以上では2列に並べる。メンテナンスは「📦 バックアップ」(安全な日常操作)を先頭に、再起動を伴う2操作(最新に更新して再起動・システム再起動)を共通の注意文の下に`.is-danger`の箱として並べ、各箱に見出しを付けた。確認チェックは44px以上の`label.confirm-row`にした。ボタン・チェックボックスのid、呼び出すAPIは変更していない。**(UI改善)** バックアップ欄に「最新のバックアップ: 日時(サイズ)」(`id="backupLatest"`)を追加し、実行中のボタン無効化+スピナー表示・完了/失敗のトースト(`.dashboard-toast`)を出す。最新時刻はNAS列挙が必要なためページ描画には含めず、JSが`GET /api/system/backup/status`で非同期に取得する。
-* 根拠: [関数定義] (行番号: 1647〜1731 / 抜粋: "def render_sys_page(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    nas_history: pd.DataFrame,\n    memory: dict[str, float] | None,\n    disk: dict[str, float] | None,\n    now: datetime,\n    *,\n    dashboard_path: str,\n) -> str:")
+* 根拠: [関数定義] (行番号: 1668〜1752 / 抜粋: "def render_sys_page(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    nas_history: pd.DataFrame,\n    memory: dict[str, float] | None,\n    disk: dict[str, float] | None,\n    now: datetime,\n    *,\n    dashboard_path: str,\n) -> str:")
 
 
 * **引数/リクエスト**: `df_sensor: pd.DataFrame`, `nas_data: pd.Series | None`, `nas_history: pd.DataFrame`, `memory: dict[str, float] | None`, `disk: dict[str, float] | None`, `now: datetime`、キーワード専用で `dashboard_path: str`

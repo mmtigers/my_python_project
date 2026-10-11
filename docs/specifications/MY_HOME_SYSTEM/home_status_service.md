@@ -428,6 +428,10 @@
 * **副作用**: DBの読み取りのみ(TTLキャッシュ)。
 * **エラーハンドリング**: `_cached`が例外を握りつぶして None を返し、空のDataFrameにフォールバックする。
 
+### `get_sensor_data_today`
+
+* **役割**: **(新機能)** 見守りページの活動ヒートマップ用に、今日(JST)のセンサーデータを全件返す。共通キャッシュの`df_sensor`は直近`MOBILE_SENSOR_ROW_LIMIT`件までで、温湿度計などの定期記録が多いと今日の早い時間帯が欠けるため、今日分だけ別に`load_sensor_data(day=今日)`で取る。固定キー`sensor_today`で`STATUS_CACHE_TTL_SEC`だけ`_cached`にキャッシュする(日付入りのキーだと日ごとにDataFrameが溜まり続けるため。日付をまたいだ直後の最大TTL秒は前日のデータが返りうるが、呼び出し側が表示日で絞るので「記録なし」になるだけ)。取得に失敗したら空のDataFrame。
+
 ### `get_sensor_data_for_day`
 
 * **役割**: **(新機能)** 見守りページのログの日付フィルタ用に、指定日(JST)のセンサーデータを全件返す。`get_cached_materials()`の`df_sensor`は直近`MOBILE_SENSOR_ROW_LIMIT`件までで、それより古い日は含まれないため、日付指定時だけ`analysis_service.load_sensor_data(day=day)`でDBから範囲取得する。日付ごとにキーが増えて`_cache`が肥大しないよう、このデータはキャッシュしない。
@@ -442,7 +446,7 @@
 ### `collect_status_cards`
 
 * **役割**: `get_cached_materials`で材料を集め、`build_status_cards`に渡して`(カード一覧, 取得時刻)`を返す。ホームページ用。
-* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 879〜893)
+* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 893〜907)
 
 
 * **引数/リクエスト**: `now` (`datetime | None`。省略時は `core.utils.get_now_jst()`)
