@@ -17,8 +17,10 @@ import html
 import json
 import os
 import re
+from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
+from urllib.parse import urlencode
 
 import config
 import pandas as pd
@@ -147,17 +149,28 @@ _PAGE_BASE_CSS = """
        回数が多いほど濃い赤。色だけに頼らず、各マスに title/aria-label で回数を持たせる。 */
     .heatmap { margin: 4px 0 16px; padding: 10px 12px; background: var(--surface);
         border: 1px solid var(--border); border-radius: var(--radius-sm); }
-    .heatmap-row { display: grid; grid-template-columns: 6.5em 1fr; gap: 6px; align-items: center; margin-bottom: 3px; }
-    .heatmap-name { font-size: 0.75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .heatmap-row { margin-bottom: 8px; }
+    .heatmap-name { font-size: 0.75rem; color: var(--muted); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .heatmap-cells { display: grid; grid-template-columns: repeat(24, 1fr); gap: 1px; }
-    .heatmap-cell { height: 22px; background: var(--hm-0); border-radius: 2px; }
+    /* 1マスの高さは44px(タップ対象の最小サイズ)。幅は390pxで約14pxと狭いので、隣のマスを
+       押してしまっても詳細側の「前の時間/次の時間」で直せる。 */
+    .heatmap-cell { display: block; height: 44px; background: var(--hm-0); border-radius: 2px; }
+    a.heatmap-cell { -webkit-tap-highlight-color: var(--tap); }
+    a.heatmap-cell:active { opacity: 0.6; }
     .heatmap-cell.hm-1 { background: var(--hm-1); }
     .heatmap-cell.hm-2 { background: var(--hm-2); }
     .heatmap-cell.hm-3 { background: var(--hm-3); }
     .heatmap-cell.hm-future { background: transparent; border: 1px dashed var(--border); box-sizing: border-box; }
-    .heatmap-axis { display: grid; grid-template-columns: 6.5em 1fr; gap: 6px; font-size: 0.65rem; color: var(--faint); }
-    .heatmap-axis-ticks { position: relative; height: 1em; }
+    .heatmap-axis-ticks { position: relative; height: 1em; font-size: 0.65rem; color: var(--faint); }
     .heatmap-axis-ticks span { position: absolute; transform: translateX(-50%); }
+    .heatmap-hint { margin: 6px 0 0; font-size: 0.7rem; color: var(--faint); }
+    /* 時間帯の詳細ログ(ヒートマップのマスをタップした先)。前後の時間へ移るリンクを添える。 */
+    .hour-nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 10px; }
+    .hour-nav a {
+        display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: var(--radius-sm);
+        border: 1px solid var(--border); background: var(--surface); color: var(--accent);
+        font-weight: bold; font-size: 0.85rem; text-decoration: none;
+    }
     .heatmap-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; font-size: 0.7rem; color: var(--muted); }
     .heatmap-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 3px; }
 
@@ -473,8 +486,12 @@ def render_home_page(
     icon_path: str | None = None,
     link_health: dict[str, bool] | None = None,
     yoru_note_url: str | None = None,
+    heatmap_html: str = "",
 ) -> str:
-    """ホームページ: ステータスカード + 外部リンク + 各ページへのナビ。
+    """ホームページ: ステータスカード + 外部リンク + 今日の動き(ヒートマップ) + 各ページへのナビ。
+
+    **(新機能)** `heatmap_html`(`render_home_activity_heatmaps`の出力)を、外部リンクの下に置く。
+    自動更新の範囲(`STATUS_SECTION_ID`)の内側なので、カードと同じ周期で色も更新される。
 
     外部リンク(ファミクエ・あさノート)は、以前はナビカードのさらに下、ページ最下部に
     警告表示(`.alerts-warn`)と紛らわしい配色で置かれており、「位置が分かりにくい」
@@ -491,7 +508,7 @@ def render_home_page(
         f"{html.escape(label)}<span class=\"nav-card-sub\">{html.escape(sub)}</span></a>"
         for key, label, sub in _NAV_CARDS
     )
-    links_html = _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url)
+    links_html = _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url) + heatmap_html
     body = (
         "<h1>🏠 おうちの様子</h1>"
         f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html)}'
@@ -546,8 +563,11 @@ def render_home_status_section(
     asa_note_url: str | None = None,
     link_health: dict[str, bool] | None = None,
     yoru_note_url: str | None = None,
+    heatmap_html: str = "",
 ) -> str:
-    """ホームページの自動更新用フラグメント(カードと、外部リンクのブロック)。
+    """ホームページの自動更新用フラグメント(カードと、外部リンクのブロック、今日の動き)。
+
+    `heatmap_html`はホームページ本体と同じ位置(外部リンクの下)に入れる。
 
     `quest_path`/`asa_note_url`を渡したときだけ外部リンクを含める(ホームページ本体が
     リンクを自動更新の範囲の中に持つため、差し替え後もリンクが消えないようにする)。
@@ -556,7 +576,7 @@ def render_home_status_section(
         _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url)
         if quest_path is not None and asa_note_url is not None
         else ""
-    )
+    ) + heatmap_html
     return _render_status_section(
         cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html
     )
@@ -995,7 +1015,7 @@ _HEATMAP_LEVEL_LABELS = ("動きなし", "1〜2回", "3〜9回", "10回以上")
 
 
 def hourly_activity_counts(df: pd.DataFrame, day: date) -> dict[str, list[int]]:
-    """`day`(JST)の機器別・時間別(0〜23時)の件数を返す。キーは機器の表示名。
+    """`day`(JST)の機器別・時間別(0〜23時)の件数を返す。キーは機器の表示名(無ければ「不明」)。
 
     入力は`sensor_state_change_log`(+`merge_open_close_events`)の出力を想定する
     (状態が変わった行だけ。開→閉は1行にまとまっている)。1行を1回として数える。
@@ -1008,10 +1028,15 @@ def hourly_activity_counts(df: pd.DataFrame, day: date) -> dict[str, list[int]]:
     on_day = df[df["timestamp"].dt.date == day]
     counts: dict[str, list[int]] = {}
     for name, hour in zip(on_day["friendly_name"], on_day["timestamp"].dt.hour):
-        if pd.isna(name):
-            continue
-        counts.setdefault(str(name), [0] * 24)[int(hour)] += 1
+        key = "不明" if pd.isna(name) else str(name)
+        counts.setdefault(key, [0] * 24)[int(hour)] += 1
     return counts
+
+
+def _total_hourly_counts(df: pd.DataFrame, day: date) -> list[int]:
+    """全機器を合算した時間別(0〜23時)の件数。"""
+    per_device = hourly_activity_counts(df, day)
+    return [sum(c[h] for c in per_device.values()) for h in range(24)]
 
 
 def _heatmap_level(count: int) -> int:
@@ -1019,28 +1044,68 @@ def _heatmap_level(count: int) -> int:
     return sum(count >= t for t in _HEATMAP_LEVEL_THRESHOLDS)
 
 
-def _render_activity_heatmap(df: pd.DataFrame, day: date, now: datetime) -> str:
-    """機器×0〜23時の活動ヒートマップ(純HTML/CSS。JS・外部ライブラリなし)。
+# 活動ヒートマップ・時間帯詳細の対象。キーは`?src=`の値。
+HEATMAP_SOURCES = ("security", "takasago", "itami")
+_HEATMAP_SOURCE_LABELS = {"security": "🛡️ 防犯", "takasago": "👵 高砂(実家)", "itami": "🏠 伊丹(自宅)"}
+_HEATMAP_SOURCE_ANCHORS = {"security": "security-log", "takasago": "takasago-log", "itami": "itami-log"}
+_HEATMAP_SOURCE_COLUMNS = {
+    "security": {"timestamp": "検知時刻", "friendly_name": "カメラ"},
+    "takasago": {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"},
+    "itami": {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"},
+}
 
-    今日を表示するとき、まだ来ていない時間帯のマスは枠線だけにして「動きなし」と区別する。
+
+def parse_log_hour(value: str | None) -> int | None:
+    """`?hour=`を0〜23の整数にする。未指定・範囲外・数値でない値は None(=詳細を出さない)。"""
+    try:
+        hour = int(value) if value is not None else None
+    except ValueError:
+        return None
+    return hour if hour is not None and 0 <= hour <= 23 else None
+
+
+def parse_log_source(value: str | None) -> str | None:
+    """`?src=`を`HEATMAP_SOURCES`のいずれかにする。それ以外は None。"""
+    return value if value in HEATMAP_SOURCES else None
+
+
+def _hour_detail_href(dashboard_path: str, day: date, hour: int, src: str, device: str | None = None) -> str:
+    """ヒートマップのマスの遷移先(見守りページの該当時間の詳細ログ)。JS不要のただのリンク。"""
+    query = {"date": day.isoformat(), "hour": str(hour), "src": src}
+    if device:
+        query["hdev"] = device
+    return f"{dashboard_path.rstrip('/')}/watch?{urlencode(query)}#hour-log"
+
+
+def _render_heatmap_rows(
+    rows: list[tuple[str, list[int], Callable[[int], str | None] | None]],
+    day: date,
+    now: datetime,
+    *,
+    hint: bool = False,
+) -> str:
+    """`(行の名前, 0〜23時の件数, 時間→遷移先URL)`の行からヒートマップを描く(純HTML/CSS)。
+
+    遷移先が返る(=リンクにする)のは件数が1以上のマスだけ。今日を表示するとき、まだ来ていない
+    時間帯のマスは枠線だけにして「動きなし」と区別する。各マスは色だけに頼らず
+    `title`/`aria-label`に回数を持つ。
     """
-    counts = hourly_activity_counts(df, day)
-    if not counts:
-        return '<p class="empty-note">この日の動きの記録はありません</p>'
     current_hour = now.hour if day == now.date() else (24 if day < now.date() else -1)
-    rows = []
-    for name in sorted(counts):
+    row_html = []
+    for name, counts, href_for in rows:
         cells = []
-        for hour, count in enumerate(counts[name]):
+        for hour, count in enumerate(counts):
             if hour > current_hour:
                 cells.append(f'<div class="heatmap-cell hm-future" title="{hour}時台: まだ先です"></div>')
                 continue
             label = f"{hour}時台: {count}回" if count else f"{hour}時台: 動きなし"
-            cells.append(
-                f'<div class="heatmap-cell hm-{_heatmap_level(count)}" role="img" '
-                f'title="{label}" aria-label="{html.escape(name)} {label}"></div>'
-            )
-        rows.append(
+            attrs = f'class="heatmap-cell hm-{_heatmap_level(count)}" title="{label}" aria-label="{html.escape(name)} {label}"'
+            href = href_for(hour) if href_for and count else None
+            if href:
+                cells.append(f'<a {attrs} href="{html.escape(href)}"></a>')
+            else:
+                cells.append(f'<div {attrs} role="img"></div>')
+        row_html.append(
             f'<div class="heatmap-row"><div class="heatmap-name" title="{html.escape(name)}">'
             f'{html.escape(name)}</div><div class="heatmap-cells">{"".join(cells)}</div></div>'
         )
@@ -1051,11 +1116,122 @@ def _render_activity_heatmap(df: pd.DataFrame, day: date, now: datetime) -> str:
         f'<span><i style="background:var(--hm-{lvl})"></i>{html.escape(label)}</span>'
         for lvl, label in enumerate(_HEATMAP_LEVEL_LABELS)
     )
+    hint_html = '<p class="heatmap-hint">色のついたマスをタップすると、その時間のログを見られます</p>' if hint else ""
     return (
         f'<div class="heatmap"><div class="meta">{day.strftime("%Y/%m/%d")} の動き(1時間ごとの回数)</div>'
-        f'{"".join(rows)}'
-        f'<div class="heatmap-axis"><div></div><div class="heatmap-axis-ticks">{ticks}</div></div>'
-        f'<div class="heatmap-legend">{legend}</div></div>'
+        f'{"".join(row_html)}'
+        f'<div class="heatmap-axis-ticks">{ticks}</div>'
+        f'<div class="heatmap-legend">{legend}</div>{hint_html}</div>'
+    )
+
+
+def _device_keys(df: pd.DataFrame) -> dict[str, str]:
+    """表示名 → 機器の識別子(`device_id`、無ければ`friendly_name`)。`_filter_by_device`と同じキー。"""
+    key_col = "device_id" if "device_id" in df.columns else "friendly_name"
+    if df.empty or key_col not in df.columns or "friendly_name" not in df.columns:
+        return {}
+    pairs = df[["friendly_name", key_col]].dropna().drop_duplicates("friendly_name")
+    return {str(name): str(key) for name, key in pairs.itertuples(index=False)}
+
+
+def _render_activity_heatmap(
+    df: pd.DataFrame,
+    day: date,
+    now: datetime,
+    *,
+    link: Callable[[str | None, int], str] | None = None,
+) -> str:
+    """機器×0〜23時の活動ヒートマップ(見守りページ用。1機器=1行)。
+
+    `link(機器の識別子, 時)`を渡すと、件数のあるマスがその時間の詳細ログへのリンクになる。
+    """
+    counts = hourly_activity_counts(df, day)
+    if not counts:
+        return '<p class="empty-note">この日の動きの記録はありません</p>'
+    keys = _device_keys(df)
+    rows = []
+    for name in sorted(counts):
+        device = keys.get(name)
+        href_for = (lambda hour, d=device: link(d, hour)) if link else None
+        rows.append((name, counts[name], href_for))
+    return _render_heatmap_rows(rows, day, now, hint=link is not None)
+
+
+def activity_source_frames(df: pd.DataFrame, device: str | None = None) -> dict[str, pd.DataFrame]:
+    """ヒートマップ・時間帯詳細の元になる、`HEATMAP_SOURCES`ごとの行(表と同じ絞り込み)。
+
+    防犯=カメラの動体検知(`camera_motion_log`)。高砂・伊丹=`location`で絞り、
+    `sensor_state_change_log`→(`device`指定時は機器で絞る)→`merge_open_close_events`の順。
+    """
+    frames = {"security": home_status_service.camera_motion_log(df)}
+    for src, location in (("takasago", "高砂"), ("itami", "伊丹")):
+        if df.empty or "location" not in df.columns:
+            frames[src] = df.iloc[0:0]
+        else:
+            changes = sensor_state_change_log(df[df["location"] == location])
+            frames[src] = merge_open_close_events(_filter_by_device(changes, device))
+    return frames
+
+
+def render_home_activity_heatmaps(df_today: pd.DataFrame, now: datetime, *, dashboard_path: str) -> str:
+    """ホームページの「📊 今日の動き」: 防犯・高砂・伊丹を機器を合算した1行ずつにまとめて並べる。
+
+    マスをタップすると、見守りページの該当時間の詳細ログ(`?date=今日&hour=&src=`)へ移る。
+    機器別の行は見守りページにある(ホームは一目で分かるよう3行に絞る)。
+    """
+    day = now.date()
+    frames = activity_source_frames(df_today)
+    rows = []
+    for src in HEATMAP_SOURCES:
+        rows.append((
+            _HEATMAP_SOURCE_LABELS[src],
+            _total_hourly_counts(frames[src], day),
+            lambda hour, s=src: _hour_detail_href(dashboard_path, day, hour, s),
+        ))
+    return f'<h2>📊 今日の動き</h2>{_render_heatmap_rows(rows, day, now, hint=True)}'
+
+
+def _render_hour_detail(
+    df: pd.DataFrame,
+    *,
+    src: str,
+    day: date,
+    hour: int,
+    device: str | None,
+    dashboard_path: str,
+) -> str:
+    """ヒートマップのマスをタップした先: `day`の`hour`時台のログ(時刻順)。
+
+    件数はヒートマップのマスと同じ元データ(`activity_source_frames`)なので一致する。
+    前後の時間・ヒートマップへ戻るリンクを添える(幅の狭いマスで隣を押した場合の訂正用)。
+    """
+    watch = f"{dashboard_path.rstrip('/')}/watch"
+    in_hour = pd.DataFrame()
+    if not df.empty and "timestamp" in df.columns and pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
+        mask = (df["timestamp"].dt.date == day) & (df["timestamp"].dt.hour == hour)
+        in_hour = _filter_by_device(df[mask], device).sort_values("timestamp", kind="stable")
+    names = in_hour["friendly_name"].dropna().unique() if "friendly_name" in in_hour.columns else []
+    device_note = f"・{html.escape(str(names[0]))}" if device and len(names) == 1 else ""
+
+    def _link(label: str, target_hour: int | None) -> str:
+        if target_hour is None or not 0 <= target_hour <= 23:
+            return ""
+        return f'<a href="{html.escape(_hour_detail_href(dashboard_path, day, target_hour, src, device))}">{label}</a>'
+
+    close_href = f"{watch}?{urlencode({'date': day.isoformat()})}#{_HEATMAP_SOURCE_ANCHORS[src]}"
+    table = (
+        _render_simple_table(in_hour, _HEATMAP_SOURCE_COLUMNS[src], limit=max(len(in_hour), 1))
+        if not in_hour.empty
+        else '<p class="empty-note">この時間のログはありません</p>'
+    )
+    return (
+        '<div id="hour-log">'
+        f"<h2>🔎 {day.strftime('%m/%d')} {hour}時台のログ</h2>"
+        f'<p class="meta">{html.escape(_HEATMAP_SOURCE_LABELS[src])}{device_note} ・ {len(in_hour)}件</p>'
+        f'<div class="hour-nav">{_link("◀ 前の時間", hour - 1)}{_link("次の時間 ▶", hour + 1)}'
+        f'<a href="{html.escape(close_href)}">閉じる</a></div>'
+        f"{table}"
+        "</div>"
     )
 
 
@@ -1067,6 +1243,9 @@ def render_watch_page(
     selected_date: date | None = None,
     selected_device: str | None = None,
     df_heatmap: pd.DataFrame | None = None,
+    hour: int | None = None,
+    hour_src: str | None = None,
+    hour_device: str | None = None,
 ) -> str:
     """👀 見守り: カメラのライブ選択・スナップショット・防犯ログ・実家/自宅センサーログ。
 
@@ -1099,6 +1278,11 @@ def render_watch_page(
     日付未指定時の`df_sensor`は直近N件のキャッシュで今日の早い時間帯が欠けうるため、呼び出し側が
     今日分の全件を`df_heatmap`で渡す(省略時は`df_sensor`を使う)。
 
+    **(新機能)** 防犯ログにもカメラ別の活動ヒートマップを置く。ヒートマップの件数のあるマスは
+    リンクで、タップすると`hour`(0〜23)・`hour_src`(`HEATMAP_SOURCES`)・`hour_device`
+    (機器の識別子。省略時はその種別の全機器)で、その時間のログ(`_render_hour_detail`)を
+    フィルタの下に出す。`hour`と`hour_src`のどちらかが無効なら出さない。
+
     **(新機能)** `selected_date`を指定すると3つのログをその日(JST)に絞り、件数の上限
     (通常50件)を外して指定日の全件を表示する(先頭5件の常時表示+折りたたみは同じ)。
     `df_sensor`は呼び出し側(`dashboard_router`)が日付指定時に指定日の全件を渡す
@@ -1127,18 +1311,22 @@ def render_watch_page(
     # ヒートマップは表と同じ絞り込み(状態変化行→機器→開閉の統合)を、表示日の全件に対して行う。
     # `df_heatmap`が無ければ表と同じ`df_sensor`を使う。
     if df_heatmap is None:
-        heat_takasago, heat_itami = df_takasago, df_itami
+        heat_frames = {"security": df_camera_motion, "takasago": df_takasago, "itami": df_itami}
     else:
-        heat_takasago, heat_itami = (
-            merge_open_close_events(
-                _filter_by_device(
-                    sensor_state_change_log(df_heatmap[df_heatmap["location"] == loc])
-                    if "location" in df_heatmap.columns
-                    else df_heatmap.iloc[0:0],
-                    selected_device,
-                )
-            )
-            for loc in ("高砂", "伊丹")
+        heat_frames = activity_source_frames(df_heatmap, selected_device)
+
+    def _cell_link(src: str) -> Callable[[str | None, int], str]:
+        return lambda device, h: _hour_detail_href(dashboard_path, heatmap_day, h, src, device)
+
+    hour_detail_html = ""
+    if hour is not None and hour_src in HEATMAP_SOURCES:
+        hour_detail_html = _render_hour_detail(
+            heat_frames[hour_src],
+            src=hour_src,
+            day=heatmap_day,
+            hour=hour,
+            device=hour_device,
+            dashboard_path=dashboard_path,
         )
 
     def _log_table(df: pd.DataFrame, columns: dict[str, str]) -> str:
@@ -1157,16 +1345,20 @@ def render_watch_page(
         "<h2>🖼️ 最近の写真</h2>"
         f"{_render_snapshot_gallery(snapshot_url_prefix)}"
         f"{_render_log_date_filter(dashboard_path, selected_date, device_options, selected_device)}"
+        f"{hour_detail_html}"
+        '<div id="security-log">'
         "<h2>🛡️ 防犯ログ</h2>"
+        f'{_render_activity_heatmap(heat_frames["security"], heatmap_day, heatmap_now, link=_cell_link("security"))}'
         f'{_log_table(df_camera_motion, {"timestamp": "検知時刻", "friendly_name": "カメラ"})}'
+        "</div>"
         '<div id="takasago-log">'
         "<h2>👵 高砂実家のセンサーログ</h2>"
-        f"{_render_activity_heatmap(heat_takasago, heatmap_day, heatmap_now)}"
+        f'{_render_activity_heatmap(heat_frames["takasago"], heatmap_day, heatmap_now, link=_cell_link("takasago"))}'
         f'{_log_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'
         "</div>"
         '<div id="itami-log">'
         "<h2>🏠 伊丹(自宅)のセンサーログ</h2>"
-        f"{_render_activity_heatmap(heat_itami, heatmap_day, heatmap_now)}"
+        f'{_render_activity_heatmap(heat_frames["itami"], heatmap_day, heatmap_now, link=_cell_link("itami"))}'
         f'{_log_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
         "</div>"
     )

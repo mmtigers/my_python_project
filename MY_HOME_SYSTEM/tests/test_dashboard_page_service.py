@@ -1102,3 +1102,93 @@ class TestActivityHeatmap:
         )
         takasago = html.split('id="takasago-log"', 1)[1].split('id="itami-log"', 1)[0]
         assert "1時台: 1回" in takasago and "11時台: 1回" in takasago
+
+
+class TestHeatmapTapToHourDetail:
+    """ヒートマップ: 防犯の追加・ホームへの集約・マスのタップで時間帯の詳細ログ。"""
+
+    DAY = date(2026, 10, 2)
+
+    @staticmethod
+    def _sensor_df():
+        rows = [
+            # (location, device_id, friendly_name, contact_state, movement_state, timestamp)
+            ("高砂", "pir", "廊下の人感", "detected", None, _jst(2026, 10, 2, 7, 10)),
+            ("高砂", "pir", "廊下の人感", "not_detected", None, _jst(2026, 10, 2, 7, 12)),
+            ("高砂", "pir", "廊下の人感", "detected", None, _jst(2026, 10, 2, 7, 40)),
+            ("伊丹", "door", "玄関ドア", "open", None, _jst(2026, 10, 2, 9, 0)),
+            ("伊丹", "cam1", "駐車場カメラ", None, "ON", _jst(2026, 10, 2, 9, 30)),
+        ]
+        df = pd.DataFrame(rows, columns=["location", "device_id", "friendly_name", "contact_state", "movement_state", "timestamp"])
+        df["device_type"] = ["Hub" if d != "cam1" else dashboard_page_service.home_status_service.CAMERA_DEVICE_TYPE for d in df["device_id"]]
+        return df
+
+    @pytest.fixture(autouse=True)
+    def _no_cameras(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        monkeypatch.setattr(
+            dashboard_page_service.home_status_service, "get_now_jst", lambda: _jst(2026, 10, 2, 12, 0)
+        )
+
+    def _watch(self, **kwargs):
+        return dashboard_page_service.render_watch_page(
+            self._sensor_df(), dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot",
+            selected_date=self.DAY, **kwargs,
+        )
+
+    def test_parsers_reject_invalid_values(self):
+        assert dashboard_page_service.parse_log_hour("7") == 7
+        for bad in (None, "", "24", "-1", "abc"):
+            assert dashboard_page_service.parse_log_hour(bad) is None
+        assert dashboard_page_service.parse_log_source("itami") == "itami"
+        assert dashboard_page_service.parse_log_source("evil") is None
+
+    def test_watch_page_has_security_heatmap_and_links_only_for_active_cells(self):
+        html = self._watch()
+        security = html.split('id="security-log"', 1)[1].split('id="takasago-log"', 1)[0]
+        assert 'class="heatmap"' in security
+        assert "9時台: 1回" in security
+        # 件数のあるマスだけがリンク。動きなしのマスはリンクにしない
+        assert 'href="/dashboard/watch?date=2026-10-02&amp;hour=9&amp;src=security&amp;hdev=cam1#hour-log"' in security
+        assert security.count("<a class=\"heatmap-cell") == 1
+
+    def test_hour_detail_lists_only_that_hour_for_that_source(self):
+        html = self._watch(hour=7, hour_src="takasago")
+        detail = html.split('id="hour-log"', 1)[1].split('id="security-log"', 1)[0]
+        assert "10/02 7時台のログ" in detail
+        assert "廊下の人感" in detail and "玄関ドア" not in detail
+        assert "2件" in detail  # detected が2回(not_detected は除外済み)
+        assert "前の時間" in detail and "次の時間" in detail and "閉じる" in detail
+
+    def test_hour_detail_can_filter_by_device(self):
+        html = self._watch(hour=9, hour_src="itami", hour_device="door")
+        detail = html.split('id="hour-log"', 1)[1].split('id="security-log"', 1)[0]
+        assert "玄関ドア" in detail and "駐車場カメラ" not in detail
+
+    def test_hour_detail_edges_have_no_out_of_range_neighbors(self):
+        html = self._watch(hour=0, hour_src="security")
+        detail = html.split('id="hour-log"', 1)[1].split('id="security-log"', 1)[0]
+        assert "前の時間" not in detail and "次の時間" in detail
+        assert "この時間のログはありません" in detail
+
+    def test_no_detail_without_both_hour_and_source(self):
+        assert 'id="hour-log"' not in self._watch(hour=7)
+        assert 'id="hour-log"' not in self._watch(hour_src="takasago")
+        assert 'id="hour-log"' not in self._watch()
+
+    def test_home_heatmaps_aggregate_three_rows_and_link_to_watch(self):
+        html = dashboard_page_service.render_home_activity_heatmaps(
+            self._sensor_df(), _jst(2026, 10, 2, 12, 0), dashboard_path="/dashboard/"
+        )
+        assert "今日の動き" in html
+        for label in ("防犯", "高砂", "伊丹"):
+            assert label in html
+        assert html.count('class="heatmap-row"') == 3
+        assert 'href="/dashboard/watch?date=2026-10-02&amp;hour=7&amp;src=takasago#hour-log"' in html
+
+    def test_home_heatmaps_render_even_with_no_data(self):
+        html = dashboard_page_service.render_home_activity_heatmaps(
+            pd.DataFrame(), _jst(2026, 10, 2, 12, 0), dashboard_path="/dashboard/"
+        )
+        assert html.count('class="heatmap-row"') == 3
+        assert "<a class=\"heatmap-cell" not in html
