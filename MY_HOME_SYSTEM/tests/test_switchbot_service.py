@@ -548,13 +548,30 @@ class TestTurnOffTvGracefully:
         return calls
 
     def test_turns_off_remote_first_then_plug_when_tv_is_on(self, monkeypatch):
-        calls = self._patch(monkeypatch, [80.0, 0.5])
+        calls = self._patch(monkeypatch, [80.0, 80.0, 0.5])
         slept = []
 
         switchbot_service.turn_off_tv_gracefully(sleep=slept.append)
 
         assert calls == [("remo", "power"), ("plug-1", "turnOff")]
-        assert slept == [5]  # 1回目の確認で下がっていたので待ちは5秒だけ
+        assert slept == [5, 5]  # 再確認の5秒 + 送信後1回目の確認で下がった5秒
+
+    def test_skips_remote_toggle_when_power_dropped_on_recheck(self, monkeypatch):
+        # 手で消した直後で電力値が遅れていただけ: トグル信号を送るとつけてしまう
+        calls = self._patch(monkeypatch, [80.0, 0.5])
+
+        switchbot_service.turn_off_tv_gracefully(sleep=lambda s: None)
+
+        assert calls == [("plug-1", "turnOff")]
+
+    def test_skips_remote_toggle_when_recheck_unavailable(self, monkeypatch):
+        calls = self._patch(monkeypatch, [80.0])
+        seq = iter([self._status(80.0), None])
+        monkeypatch.setattr(switchbot_service, "get_device_status", lambda _id: next(seq))
+
+        switchbot_service.turn_off_tv_gracefully(sleep=lambda s: None)
+
+        assert calls == [("plug-1", "turnOff")]
 
     def test_only_cuts_plug_when_tv_is_already_off(self, monkeypatch):
         calls = self._patch(monkeypatch, [0.4])
@@ -570,7 +587,7 @@ class TestTurnOffTvGracefully:
         switchbot_service.turn_off_tv_gracefully(sleep=slept.append)
 
         assert calls == [("remo", "power"), ("plug-1", "turnOff")]
-        assert sum(slept) == 15  # TV_GRACEFUL_OFF_WAIT_SECONDS まで待って諦める
+        assert sum(slept) == 5 + 15  # 再確認の5秒 + TV_GRACEFUL_OFF_WAIT_SECONDS まで待って諦める
 
     def test_cuts_plug_when_remote_signal_fails(self, monkeypatch):
         calls = self._patch(monkeypatch, [80.0], remote_ok=False)
@@ -579,7 +596,7 @@ class TestTurnOffTvGracefully:
         switchbot_service.turn_off_tv_gracefully(sleep=slept.append)
 
         assert calls == [("remo", "power"), ("plug-1", "turnOff")]
-        assert slept == []  # リモコンが失敗したら待たない
+        assert slept == [5]  # 再確認の5秒だけ。リモコンが失敗したらその後は待たない
 
     def test_cuts_plug_when_power_is_unavailable(self, monkeypatch):
         calls = []
