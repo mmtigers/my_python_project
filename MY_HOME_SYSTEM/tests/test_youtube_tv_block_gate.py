@@ -174,9 +174,10 @@ class TestTvBlockState:
 
 def test_monitor_slots_match_blocked_hours():
     """tv_lock_monitor の休日スロットが TV_OFFDAY_BLOCKED_HOURS と食い違わないこと。"""
-    offs = {h for h, cmd, holiday_only in tv_lock_monitor._SLOTS if holiday_only and cmd == "turnOff"}
-    ons = {h for h, cmd, holiday_only in tv_lock_monitor._SLOTS if holiday_only and cmd == "turnOn"}
-    starts = {s for s, _ in switchbot_service.TV_OFFDAY_BLOCKED_HOURS}
-    ends = {e for _, e in switchbot_service.TV_OFFDAY_BLOCKED_HOURS if e < 24}
+    # 解除(turnOn)は禁止明けの1分前(13:59)に打ち、14:00ちょうどに使える状態にする。
+    offs = {h * 60 + m for h, m, cmd, holiday_only in tv_lock_monitor._SLOTS if holiday_only and cmd == "turnOff"}
+    ons = {h * 60 + m for h, m, cmd, holiday_only in tv_lock_monitor._SLOTS if holiday_only and cmd == "turnOn"}
+    starts = {s * 60 for s, _ in switchbot_service.TV_OFFDAY_BLOCKED_HOURS}
+    ends = {e * 60 - 1 for _, e in switchbot_service.TV_OFFDAY_BLOCKED_HOURS if e < 24}
     assert offs == starts
     assert ons == ends

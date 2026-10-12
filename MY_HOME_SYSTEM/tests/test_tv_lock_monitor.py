@@ -155,7 +155,7 @@ class TestTvLockMonitor:
 
 
 class TestHolidaySlots:
-    """休日(土日祝)は12:00にオフ・14:00にオン・20:00にオフ(平日は何もしない)。"""
+    """休日(土日祝)は12:00にオフ・13:59にオン・20:00にオフ(平日は何もしない)。"""
 
     SATURDAY = datetime(2026, 9, 19, tzinfo=timezone(timedelta(hours=9)))
     FRIDAY = datetime(2026, 9, 18, tzinfo=timezone(timedelta(hours=9)))
@@ -179,9 +179,17 @@ class TestHolidaySlots:
         mock_cmd = self._run(tmp_path, monkeypatch, self.SATURDAY.replace(hour=12, minute=2))
         mock_cmd.assert_called_once_with("tv-plug-1", "turnOff")
 
-    def test_turns_on_at_14_on_saturday(self, tmp_path, monkeypatch):
+    def test_turns_on_at_1359_on_saturday(self, tmp_path, monkeypatch):
+        mock_cmd = self._run(tmp_path, monkeypatch, self.SATURDAY.replace(hour=13, minute=59, second=10))
+        mock_cmd.assert_called_once_with("tv-plug-1", "turnOn")
+
+    def test_turn_on_slot_catches_up_just_after_14(self, tmp_path, monkeypatch):
         mock_cmd = self._run(tmp_path, monkeypatch, self.SATURDAY.replace(hour=14, minute=1))
         mock_cmd.assert_called_once_with("tv-plug-1", "turnOn")
+
+    def test_does_not_turn_on_before_1359(self, tmp_path, monkeypatch):
+        mock_cmd = self._run(tmp_path, monkeypatch, self.SATURDAY.replace(hour=13, minute=58))
+        mock_cmd.assert_not_called()
 
     def test_turns_off_at_20_on_saturday(self, tmp_path, monkeypatch):
         mock_cmd = self._run(tmp_path, monkeypatch, self.SATURDAY.replace(hour=20, minute=0))
@@ -200,8 +208,8 @@ class TestHolidaySlots:
         self._run(tmp_path, monkeypatch, now)
         mock_cmd = self._run(tmp_path, monkeypatch, now.replace(minute=4))
         mock_cmd.assert_not_called()
-        # 別スロット(14:00)は独立して実行される
-        mock_cmd = self._run(tmp_path, monkeypatch, self.SATURDAY.replace(hour=14, minute=1))
+        # 別スロット(13:59)は独立して実行される
+        mock_cmd = self._run(tmp_path, monkeypatch, self.SATURDAY.replace(hour=13, minute=59))
         mock_cmd.assert_called_once_with("tv-plug-1", "turnOn")
 
     def test_holiday_slot_uses_a_separate_record_file(self, tmp_path, monkeypatch):
@@ -230,7 +238,7 @@ class TestGracefulTurnOffIsUsed:
 
 
 class TestRecutWhileBlocked:
-    """Issue #900: 休日の禁止時間帯に入れ直されたら、次の5分の起動で再度切る。"""
+    """Issue #900: 休日の禁止時間帯に入れ直されたら、次の1分の起動で再度切る。"""
 
     SATURDAY = datetime(2026, 9, 5, tzinfo=timezone(timedelta(hours=9)))  # 土曜
 

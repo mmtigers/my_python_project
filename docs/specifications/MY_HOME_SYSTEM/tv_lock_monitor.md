@@ -17,9 +17,9 @@
 ## 2. ファイルの概要
 
 * 深夜の特定時間帯（2:00〜2:05）にTVプラグデバイスの電源をオフにする制御を行うスクリプトです。
-* **（休日のテレビ時間帯で追加）** 休日（土日・国民の祝日・家の休み。`core.jp_holidays.is_offday`）だけ、12:00に`turnOff`、14:00に`turnOn`、20:00に`turnOff`も実行する（各時刻の0〜5分）。実行するスロットは`_SLOTS`（時・操作・休日のみか）で定義し、スロットごとに1日1回の記録ファイル（深夜2時は`last_tv_lock.txt`、休日スロットは`last_tv_lock_1200.txt`等）で重複実行を防ぐ。12:00〜14:00と20:00以降に「つけられない」ようにする側は、`switchbot_service.is_tv_blocked_now`がアプリ経由の自動ONを止めることで担保する（プラグ本体のボタンは止められない。要件確認済み: 切る時刻に1回だけオフ）。
-* **（Issue #900で追加）** スロット処理を実行しなかった起動では、`_cut_if_turned_on_while_blocked`が休日の禁止時間帯（`switchbot_service.is_tv_blocked_now`）かどうかを見て、`get_tv_power_watts`が`TV_POWER_ON_THRESHOLD_WATTS`以上なら`turn_off_tv_gracefully`で再度切る。プラグ本体のボタンで入れ直されても最大5分で切れる。電力を取得できないときは切らず、通知は送らない（家族との合意）。API呼び出しは休日の禁止時間帯（計6時間）に最大72回/日増える。
-* **（先にリモコンで消す機能で追加）** `turnOff`のスロットは`send_device_command`ではなく`switchbot_service.turn_off_tv_gracefully`を呼ぶ。テレビがついていれば（プラグの消費電力が閾値以上）、先にNature Remoのリモコン信号でテレビを消し、消費電力が下がるのを待ってからプラグを切る。Nature Remoの設定(`TV_NATURE_REMO_LOCATION`と`TV_REMO_SIGNAL_ID`または`TV_REMO_APPLIANCE_ID`)が未設定なら従来どおりプラグだけ切る。`turnOn`（14:00）は従来どおり`send_device_command`。
+* **（休日のテレビ時間帯で追加）** 休日（土日・国民の祝日・家の休み。`core.jp_holidays.is_offday`）だけ、12:00に`turnOff`、13:59に`turnOn`（14:00ちょうどに使える状態にするため）、20:00に`turnOff`も実行する（各時刻から5分以内）。実行するスロットは`_SLOTS`（時・分・操作・休日のみか）で定義し、スロットごとに1日1回の記録ファイル（深夜2時は`last_tv_lock.txt`、休日スロットは`last_tv_lock_1200.txt`・`last_tv_lock_1359.txt`等）で重複実行を防ぐ。12:00〜14:00と20:00以降に「つけられない」ようにする側は、`switchbot_service.is_tv_blocked_now`がアプリ経由の自動ONを止めることで担保する（プラグ本体のボタンは止められない。要件確認済み: 切る時刻に1回だけオフ）。
+* **（Issue #900で追加）** スロット処理を実行しなかった起動では、`_cut_if_turned_on_while_blocked`が休日の禁止時間帯（`switchbot_service.is_tv_blocked_now`）かどうかを見て、`get_tv_power_watts`が`TV_POWER_ON_THRESHOLD_WATTS`以上なら`turn_off_tv_gracefully`で再度切る。プラグ本体のボタンで入れ直されても最大1分（起動間隔）で切れる。13:59以降は直前の`turnOn`を打ち消さないよう再切断しない。電力を取得できないときは切らず、通知は送らない（家族との合意）。API呼び出しは休日の禁止時間帯（計6時間）に最大360回/日増える（起動間隔60秒）。
+* **（先にリモコンで消す機能で追加）** `turnOff`のスロットは`send_device_command`ではなく`switchbot_service.turn_off_tv_gracefully`を呼ぶ。テレビがついていれば（プラグの消費電力が閾値以上）、先にNature Remoのリモコン信号でテレビを消し、消費電力が下がるのを待ってからプラグを切る。Nature Remoの設定(`TV_NATURE_REMO_LOCATION`と`TV_REMO_SIGNAL_ID`または`TV_REMO_APPLIANCE_ID`)が未設定なら従来どおりプラグだけ切る。`turnOn`（13:59）は従来どおり`send_device_command`。
 * 1日1回の重複実行を防止するための記録・判定機能を有しています。
 
 ## 3. 外部依存関係
@@ -32,7 +32,7 @@
 | `os` | 標準ライブラリ | パス操作、ファイル存在確認、ディレクトリ作成 | 根拠: `os.path.dirname`, `os.path.exists` など (行番号: 3, 6, 18, 35, 48 / 抜粋: "import os") |
 | `config` | 外部モジュール | デバイスIDやルートディレクトリの取得 | 根拠: `config.TV_PLUG_DEVICE_ID` 等 (行番号: 10, 18, 21 / 抜粋: "import config") |
 | `core.logger` | 外部モジュール | ロガーの初期化処理 | 根拠: `setup_logging` (行番号: 11, 15 / 抜粋: "from core.logger import setup_logging") |
-| `core.utils.get_now_jst`（Issue #592で追加） | 外部モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で標準ライブラリの`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「深夜2時」判定はJSTの深夜2時を意図していたため、ホストがJST以外の設定だと意図しない実時刻に実行されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_jst` (行番号: 14 / 抜粋: "from core.utils import get_now_jst")、`now = get_now_jst()` (行番号: 47-50 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う...\n    now = get_now_jst()") |
+| `core.utils.get_now_jst`（Issue #592で追加） | 外部モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で標準ライブラリの`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「深夜2時」判定はJSTの深夜2時を意図していたため、ホストがJST以外の設定だと意図しない実時刻に実行されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_jst` (行番号: 14 / 抜粋: "from core.utils import get_now_jst")、`now = get_now_jst()` (行番号: 49-52 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う...\n    now = get_now_jst()") |
 | `services.switchbot_service` | 外部モジュール | 外部デバイス（SwitchBot）へのコマンド送信 | 根拠: `send_device_command` (行番号: 13, 43 / 抜粋: "from services import switchbot_service") |
 
 ### ブラックボックスとなる外部要素
@@ -49,11 +49,11 @@
 ### `main`
 
 * **役割**: 設定値からデバイスIDを確認し、現在時刻が2:00〜2:05の範囲内かつ当日未実行の場合に、外部サービスを通じてTVプラグをオフにする。成功時は実行記録をファイルに保存する。**（Issue #592で修正）** 「現在時刻」の取得は、以前は標準ライブラリの`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接呼び出していたが、この「深夜2:00〜2:05」判定はJSTの深夜2時台を意図しているため、ホストがJST以外の設定だと本来と異なる実時刻に実行されてしまう問題があった（Issue #382/#293と同じ不具合クラス。#382/#293自体は別Issueで既にタイムゾーン非依存な実装に修正済みだったため対象外）。`core.utils.get_now_jst()`（"Asia/Tokyo"タイムゾーンのaware `datetime`を返す）に置き換え、`from datetime import datetime`のimportは不要になり削除された。
-* 根拠: `main` (行番号: 42〜77 / 抜粋: "def main():")、JST化のコメントと置き換え (行番号: 47〜50 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う(この「深夜2時」判定はJSTの深夜2時を\n    # 意図しており、ホストがJST以外の設定だと別の実時刻に実行されてしまう)。\n    now = get_now_jst()")
+* 根拠: `main` (行番号: 44〜89 / 抜粋: "def main():")、JST化のコメントと置き換え (行番号: 49〜52 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う(この「深夜2時」判定はJSTの深夜2時を\n    # 意図しており、ホストがJST以外の設定だと別の実時刻に実行されてしまう)。\n    now = get_now_jst()")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `main` (行番号: 42 / 抜粋: "def main():")
+* 根拠: `main` (行番号: 44 / 抜粋: "def main():")
 
 
 * **戻り値/レスポンス**: なし
@@ -62,7 +62,7 @@
 
 * **副作用**:
 * 外部APIまたはデバイスに対するオフコマンド（"turnOff"）送信
-* 根拠: `send_device_command`呼び出し (行番号: 74 / 抜粋: "switchbot_service.send_device_command")
+* 根拠: `send_device_command`呼び出し (行番号: 77 / 抜粋: "switchbot_service.send_device_command")
 
 
 * ローカルファイルシステム上のディレクトリ作成、およびファイル（`last_tv_lock.txt`）への日付文字列書き込み
@@ -185,7 +185,7 @@ graph TD
 | --- | --- | --- |
 | `TV_PLUG_DEVICE_ID` および `FALLBACK_ROOT` の具体的な値 | `config.py`を直接確認した。544行目で`TV_PLUG_DEVICE_ID: Optional[str] = os.getenv("TV_PLUG_DEVICE_ID")`と定義されており、`.env`ファイル由来の環境変数(静的な埋め込み値ではない)であることが判明した。実際のデバイスID文字列自体は`.env`(gitignore対象)に格納されるため本リポジトリからは確認不能。`FALLBACK_ROOT`は213行目で`FALLBACK_ROOT: str = os.path.join(BASE_DIR, "temp_fallback")`と定義されており、`BASE_DIR`直下の`temp_fallback`ディレクトリを指す固定パスであることが判明した(530行目で`MEMORY_ALERT_LAST_NOTIFY_FILE`の生成にも使われている)。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:213, 530, 544` |
 | `send_device_command`の完全なレスポンス構造とエラー発生条件 | `switchbot_service.md`の解析によれば、`send_device_command`はSwitchBot APIへのPOSTリクエストを行い、成功時は`Optional[Dict[str, Any]]`のレスポンス、任意の`Exception`発生時はエラーログを出力して`None`を返すフェイルソフト設計であることが判明した。 | switchbot_service.md |
-| このスクリプトがどのように定期実行されるか（Cron等の呼び出し元） | `scheduler_boot.py`を直接確認した。36行目の`TASKS`リストに`{"script": "monitors/tv_lock_monitor.py", "interval": 300, "last_run": 0, "args": []}`というエントリがあり、`ThreadPoolExecutor`ベースの自作スケジューラ(`run_script`関数、45行目〜)によって300秒(5分)間隔でサブプロセスとして定期実行される設計であることが判明した。OS側のcron/systemdタイマーではなく、アプリケーション内蔵のスケジューラである。 | 直接ソース確認: `MY_HOME_SYSTEM/scheduler_boot.py:29-43` |
+| このスクリプトがどのように定期実行されるか（Cron等の呼び出し元） | `scheduler_boot.py`を直接確認した。36行目の`TASKS`リストに`{"script": "monitors/tv_lock_monitor.py", "interval": 300, "last_run": 0, "args": []}`というエントリがあり、`ThreadPoolExecutor`ベースの自作スケジューラ(`run_script`関数、45行目〜)によって60秒間隔（2026-10-12に300秒から短縮。休日の解除を14:00ちょうどにするため）でサブプロセスとして定期実行される設計であることが判明した。OS側のcron/systemdタイマーではなく、アプリケーション内蔵のスケジューラである。 | 直接ソース確認: `MY_HOME_SYSTEM/scheduler_boot.py:29-43` |
 
 ## 10. 自己検証結果
 
