@@ -43,8 +43,9 @@ TASKS: List[Task] = [
     {"script": "monitors/switchbot_hub_monitor.py",   "interval": 300,  "last_run": 0, "args": []},
     {"script": "monitors/server_watchdog.py",         "interval": 600,  "last_run": 0, "args": []},
 
-    # 頻度: 中 (5分) — #411 品質: 実値(interval=300秒=5分)と乖離していた「30分」表記を訂正
-    {"script": "monitors/tv_lock_monitor.py",         "interval": 300,  "last_run": 0, "args": []},
+    # 頻度: 高 (60秒) — 休日のテレビ解除を14:00ちょうど(13:59スロット)に効かせるため。
+    # 300秒間隔だと起動位相次第でスロットの実行が最大5分遅れる(実例: 14:04)。
+    {"script": "monitors/tv_lock_monitor.py",         "interval": 60,   "last_run": 0, "args": []},
     # 頻度: 中 (10分 = 600秒)
     {"script": "monitors/memory_monitor.py",          "interval": 600,  "last_run": 0, "args": []},
 
