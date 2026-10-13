@@ -14,9 +14,9 @@
 
 ---
 
-## 0. 対応状況（最終更新: 2026-09-02）
+## 0. 対応状況（最終更新: 2026-09-02／最終棚卸し: 2026-10-13・Issue #959）
 
-指摘34件（Critical 9・High 6・Medium 19）のうち**27件は対応完了**、**4件は部分対応（残作業あり）**、3件は意思決定により対応方針確定/対象外。（2026-09-16棚卸しで High#3 と M17 を「対応済み」へ更新した結果。内訳は下表を参照）
+指摘34件（Critical 9・High 6・Medium 19）のうち**27件は対応完了**、**3件は部分対応（残作業あり）**、4件は意思決定により対応方針確定/対象外。（2026-09-16棚卸しで High#3 と M17 を「対応済み」へ更新し、2026-10-13棚卸し（Issue #959）で Critical#3 を「部分対応」から「対応方針確定（エッジ委譲）」へ更新した結果。内訳は下表を参照）
 
 > **状態管理の方針（2026-09-02・Issue #323）**: 残件の状態管理の正は**GitHub Issue**に一本化する。本レポートは「レビュー時点の歴史的記録+未解決項目のIssueへのポインタ」であり、以下の表はIssue #323対応時点のスナップショット（状態欄は2026-09-16棚卸しで更新済み）。
 
@@ -27,13 +27,13 @@
 
 > **2026-09-03決定（Issue #321）**: 上記の判断待ち事項について、オーナーが**案B（エッジのCloudflare Access委譲を正式設計として確定）**を選択した。JWT検証（`Cf-Access-Jwt-Assertion`の署名/aud検証）は再実装せず、アプリ層は引き続きIPベースの簡易チェックのみとし、外部アクセス制御はインフラ側のCloudflare Accessに委譲する設計を正式なものとする。前提条件（オリジンへの直接到達をCloudflareのIPレンジ経由に限定するルーター/FW設定）はオーナー側の運用事項として別途確認する。`unified_server.py`のミドルウェアdocstring/コメントもこの決定を反映済み。
 
-### 🔲 残件（未対応・部分対応・9件、うち3件は意思決定により方針確定/対象外。2026-09-16棚卸しで High#3・M17 は「対応済み」へ更新）
+### 🔲 残件（未対応・部分対応・9件、うち4件は意思決定により方針確定/対象外。2026-09-16棚卸しで High#3・M17 は「対応済み」へ更新。2026-10-13棚卸しで Critical#3 は「対応方針確定」へ更新）
 
 | # | 項目 | 状態 | 詳細 |
 |---|---|---|---|
 | Critical#1 | APIの認可欠如（`user_id`/`approver_id`のクライアント信頼） | 未対応（意思決定によりスコープ外） | 棚卸し課題4で対応スコープ外と合意済み。docs改善バックログのB1と同一課題。**追跡先だったIssue #614は「CLAUDE.mdに明記した」という対応でクローズ済み**のため、現在この設計判断の正は`CLAUDE.md`「MY_HOME_SYSTEM: リクエストフローとレイヤリング」節であり、オープンなIssueではない。再検討のトリガーはLAN外到達経路の変化（Cloudflare Access委譲の前提が崩れること。Issue #321/#615） |
 | Critical#2 | IPアドレス制限ヘッダー詐称 | **対応方針確定（エッジ委譲、Issue #321・案B）** | 一度`access_control_middleware`によるCloudflare Access JWT検証必須化（PR #80）で対応完了と記録されたが、2026-08-28のfamily-quest障害でPR #80はrevert済み。オーナーはJWT検証を再実装せず、エッジのCloudflare Access委譲を正式設計として確定する案Bを選択（2026-09-03）。アプリ層は`ip_restriction_middleware`によるIPベースの簡易チェックのみで、`Cf-Access-Jwt-Assertion`の検証は意図的に行わない。`CODE_REVIEW_REPORT_2026-08-22.md`のH-10と同一課題 |
-| Critical#3 | Streamlitダッシュボードの無認証公開 | 部分対応（2026-09-18更新） | `--server.address 127.0.0.1`（`start_all.sh` Phase 4・`deploy/systemd/home_dashboard.service`）で外部露出は解消済み。`sudo systemctl restart`ボタンには誤操作防止の確認チェックボックスがある（`views/dashboard/log_tab.py` の `render_maintenance`）。**スマホ対応で追加**: 8501番の localhost 束縛は維持したまま、`unified_server.py`(8000番)の `/dashboard` 配下へのリバースプロキシ（`routers/dashboard_router.py` / `services/dashboard_proxy_service.py`、`config.DASHBOARD_PROXY_ENABLED` で無効化可）を追加し、LAN外からの閲覧は**エッジのCloudflare Accessの保護下**に置いた（本レポートの改善案「外部公開が必要ならCloudflare Access等の認証層の配下に置く」に対応）。ただし**アプリ内認証は依然として無い**ためLAN内からは誰でも8000番経由で到達・実行できる。LAN内を信頼境界とする方針（棚卸し課題4）の範囲内。前提条件として `/dashboard` を Cloudflare Access のバイパス対象にしてはならない（点検手順は `docs/runbooks/cloudflare_access_connectivity_check.md` の手順4） |
+| Critical#3 | Streamlitダッシュボードの無認証公開 | **当該経路は消滅（Streamlit廃止、Issue #829）／後継は対応方針確定（エッジ委譲、Issue #321・案B）**（2026-10-13棚卸し、Issue #959） | 指摘対象だった Streamlit 版（`dashboard.py`・`deploy/systemd/home_dashboard.service`・`services/dashboard_proxy_service.py`・`views/dashboard/`）は Issue #829 で**すべて削除**され、8501番のプロセス自体が存在しない。後継は `routers/dashboard_router.py`（`unified_server.py` 8000番が `config.DASHBOARD_BASE_PATH` 配下で HTML を直接返す）で、**アプリ内認証は持たず**、`/restart` 等の操作 API もある。外部からの保護は Critical#2/#8 と同じく**エッジの Cloudflare Access 委譲**（Issue #321・案B）と `MY_HOME_SYSTEM/scripts/firewall_apply.sh` が担い、LAN 内を信頼境界とする方針（棚卸し課題4）の範囲内。前提条件として `/dashboard` を Cloudflare Access のバイパス対象にしてはならない（点検手順は `docs/runbooks/cloudflare_access_connectivity_check.md` の手順4）。（2026-09-18 時点の記述は、`--server.address 127.0.0.1` での 8501 番の localhost 束縛と `views/dashboard/log_tab.py` の確認チェックボックスを根拠にした「部分対応」だった） |
 | Critical#8 | カメラ機能の無認証公開 | **対応方針確定（エッジ委譲、Issue #321・案B）** | 外部アクセスは一度`access_control_middleware`でCloudflare Access JWT検証必須化（PR #80）されたが、2026-08-28のrevertで消滅。Critical#2と同じくオーナーが案B（エッジ委譲の正式化）を選択（2026-09-03）したため、現在の外部アクセス防御（エッジのCloudflare Access、インフラ側・コード外）が正式設計となった。LAN内アクセスは引き続き無認証だが、棚卸し課題4でLAN内を信頼境界とする方針が合意済み |
 | High#3 | `UserStatusCard`のHP固定表示 | ✅ 対応済み（Issue #327でクローズ） | HP再計算バグは是正済み。「HP表示UIが存在しない」点は**オーナー判断によりHP表示の廃止で確定**し、フロントエンドの型定義・Zodスキーマからも`hp`/`maxHp`を削除済み（`family-quest/src/types/index.ts:25-31`・`src/lib/gameDataSchema.ts:31`に経緯コメントあり）。バックエンドは`get_all_view_data`で`hp`/`maxHp`を送出し続けているが、フロントは未使用 |
 | M2 | `config.py`の子供の氏名・年齢ハードコード | 部分対応 | 年齢は`family_members.local.json`（`.gitignore`で除外・git追跡対象外）に切り出し済み。氏名は`config.py`の`FAMILY_SETTINGS`に引き続き残存 |
