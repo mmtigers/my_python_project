@@ -307,7 +307,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         try:
             await supervisor_task
         except (asyncio.CancelledError, Exception):
-            pass
+            pass  # #953: 意図的。シャットダウン時に監視ループを止めるだけ(cancel の完了待ち)
 
     if scheduler_process:
         logger.info("Stopping scheduler...")

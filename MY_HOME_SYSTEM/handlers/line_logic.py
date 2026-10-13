@@ -71,8 +71,8 @@ def get_user_name(event, line_bot_api: MessagingApi) -> str:
         elif event.source.type == "user":
             profile = line_bot_api.get_profile(user_id, _request_timeout=config.LINE_API_REQUEST_TIMEOUT)
             return profile.display_name
-    except Exception:
-        pass
+    except Exception as e:  # #953: 失敗理由を残す(呼び名は既定値に倒して処理は続ける)
+        logger.warning(f"LINEプロフィール取得に失敗しました: {e}")
     return "家族のみんな"
 
 

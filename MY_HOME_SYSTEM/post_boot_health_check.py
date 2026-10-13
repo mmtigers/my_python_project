@@ -320,7 +320,7 @@ class PostBootHealthCheck:
         try:
             if "card" in subprocess.check_output(["aplay", "-l"], stderr=subprocess.DEVNULL, timeout=10).decode():
                 has_card = True
-        except Exception: pass
+        except Exception: pass  # #953: 意図的。aplay 不在・失敗は has_card=False として下で報告される
 
         if TARGET_BLUETOOTH_MAC:
             try:

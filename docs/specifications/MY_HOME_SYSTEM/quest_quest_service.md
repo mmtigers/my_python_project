@@ -105,8 +105,8 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 * 根拠: (行番号: 76,128〜135)
 * **副作用**: なし（純粋な計算）
 * 根拠: (行番号: 76〜135)
-* **エラーハンドリング**: `last_completed_at`のISOパース失敗時は`except Exception: pass`で無視しボーナスなし扱いとする
-* 根拠: `except Exception:\n                pass` (行番号: 118〜119)
+* **エラーハンドリング**: `last_completed_at`のISOパース失敗時は例外を捕捉してボーナスなし扱いとする。**（Issue #953）** 以前はログなしの`pass`だったが、データ異常の手がかりを残すため`logger.warning`で値を記録する
+* 根拠: [例外の捕捉と警告ログ] (行番号: 150〜151 / 抜粋: "except Exception:  # #953: 壊れた日時はボーナス無しに倒すが、データ異常の手がかりは残す")
 
 ### `QuestService.calculate_quest_boost`
 

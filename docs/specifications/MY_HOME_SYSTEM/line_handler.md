@@ -126,8 +126,8 @@
 * 根拠: `if line_bot_api: profile = line_bot_api.get_profile(user_id)` (行番号: 134-135 / 抜粋: "profile = line_bot_api.get_profile(user_id)")
 
 
-* **エラーハンドリング**: `get_profile`失敗時は例外を無視し`"Unknown"`のまま続行（キャッシュにも`"Unknown"`が書き込まれ、TTL間は再試行されない）。
-* 根拠: `except Exception: pass` (行番号: 137-138 / 抜粋: "except Exception:")
+* **エラーハンドリング**: `get_profile`失敗時は例外を捕捉して`"Unknown"`のまま続行（キャッシュにも`"Unknown"`が書き込まれ、TTL間は再試行されない）。**（Issue #953）** 以前はログなしで握りつぶしていたが、失敗理由を`logger.warning`で残すようになった。
+* 根拠: [例外の捕捉と警告ログ] (行番号: 167-168 / 抜粋: "except Exception as e:  # #953: 失敗理由を残す(表示名は \"Unknown\" に倒して処理は続ける)")
 
 
 
@@ -453,7 +453,7 @@ graph TD
 * 根拠: 同期ラッパーの`asyncio.run` (抜粋: "asyncio.run(handle_message_async(event))" / "asyncio.run(dispatch_events_async(events))")、同期I/Oの退避 (抜粋: "await asyncio.to_thread(reply_message, reply_token, messages, user_id=user_id)")
 
 
-* **変数初期化の順序と依存**: `line_handler` と `line_bot_api` がグローバルスコープで定義され、`config.LINE_CHANNEL_ACCESS_TOKEN`/`config.LINE_CHANNEL_SECRET`が揃っている場合のみ条件付きで初期化される。`reply_message`は`if not line_bot_api: return`で早期returnするが、`handle_message_async`/`_get_display_name`は`line_bot_api`が`None`のままでも例外を出さずに動作継続する（`_get_display_name`は`try/except Exception: pass`で吸収）。
+* **変数初期化の順序と依存**: `line_handler` と `line_bot_api` がグローバルスコープで定義され、`config.LINE_CHANNEL_ACCESS_TOKEN`/`config.LINE_CHANNEL_SECRET`が揃っている場合のみ条件付きで初期化される。`reply_message`は`if not line_bot_api: return`で早期returnするが、`handle_message_async`/`_get_display_name`は`line_bot_api`が`None`のままでも例外を出さずに動作継続する（`_get_display_name`は`try/except Exception`で吸収し、Issue #953 以降は警告ログを残す）。
 * 根拠: モジュールレベルの条件分岐 (行番号: 32-39 / 抜粋: "if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:")
 
 

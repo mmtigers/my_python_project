@@ -29,7 +29,7 @@ def perform_backup() -> Tuple[bool, str, float]:
         Tuple[bool, str, float]: (成功フラグ, メッセージ, バックアップサイズMB)
     """
     src_db_path = config.SQLITE_DB_PATH
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = get_now_jst().strftime("%Y%m%d_%H%M%S")  # #953: OSのTZに依らずJSTで命名
     filename = f"home_system_{timestamp}.db"
     
     # パス設定

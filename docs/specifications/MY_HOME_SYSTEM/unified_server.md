@@ -449,6 +449,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
+* **（Issue #953）シャットダウン時の監視ループ停止の握りつぶし**: `lifespan`の終了処理で`supervisor_task`を`cancel()`した後の完了待ちの例外(`CancelledError`含む)は握りつぶす。監視ループを止めるだけのため意図的であることを行末コメントで明記した(コメントのみの変更で挙動は不変)。根拠: (行番号: 310 / 抜粋: "pass  # #953: 意図的。シャットダウン時に監視ループを止めるだけ(cancel の完了待ち)")
 * **（スマホ対応。Issue #829でStreamlit部分を訂正）** `/dashboard` は Cloudflare Access のバイパス対象にしてはならない**: `ip_restriction_middleware` の `allowed_webhook_paths`（`/webhook/switchbot`・`/callback/line`・`/webhook/alexa`）は「エッジ側でバイパス設定が必要なパス」の一覧だが、`config.DASHBOARD_BASE_PATH`（既定 `/dashboard`）はその逆で、**エッジの認証を必ず通す必要がある**。バイパスすると、認証機構を持たないダッシュボード（家族の健康記録・防犯ログの閲覧と再起動操作を備える。以前はStreamlit製だったが#829で廃止され、現在は`dashboard_router`自身がHTMLを返す。認証を持たない点は変わらない）が無認証で外部公開される。
 * 根拠: [ダッシュボードのinclude箇所のコメント] (行番号: 513 / 抜粋: "# ★このパスを Cloudflare Access のバイパス対象に設定してはならない。")
 

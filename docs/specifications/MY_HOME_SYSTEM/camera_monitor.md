@@ -534,6 +534,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
+* **（Issue #953）終了時の購読解除の握りつぶし**: `cleanup_handler`の`Unsubscribe`失敗は`except Exception: pass`で握りつぶす。解除できなくてもカメラ側の購読は TerminationTime で失効するため意図的であることを行末コメントで明記した(コメントのみの変更で挙動は不変)。根拠: (行番号: 240 / 抜粋: "pass  # #953: 意図的。終了時の後始末で、解除できなくてもカメラ側の購読は TerminationTime で失効する")
 * **[2026-09 チャンネル再設計]** 連続障害アラート(`send_push(..., channel="report")`)は、即時対応チャンネルではなく運用者向けチャンネルへ送るよう変更された(以前は`channel="error"`)。`send_push`が実際に送信される回(5回目・12の倍数回)だけ、直前の`logger.error(...)`に`extra={"skip_discord": True}`を付けてcatch-all経由での二重通知(同じ障害が2チャンネルに別々に届く事態)を避ける。それ以外の回(6〜11回目等)は`send_push`を呼ばないため`skip_discord`も付けず、catch-all経由の通知に任せる(付けてしまうとその回のDiscord通知が完全に消えるレビュー指摘があり、修正した)。
 * **[修正済み] スレッド間の状態共有リスク（Issue #439）**: 複数スレッド（`ThreadPoolExecutor`）からグローバル変数 `last_motion_detected` や `active_pullpoints` への参照・更新が行われている。以前はスレッドセーフなロック機構が存在せず、タイミングにより競合状態（Race Condition。特に`active_pullpoints`の「存在確認してから削除」パターンでは`list.remove()`が`ValueError`を送出しうり、`finally`節内で発生すると後始末処理自体が中断しうる不具合の恐れがあった）が発生する可能性があった。`_motion_lock`（クールダウン判定の読んでから書くまでを保護）と`_pullpoints_lock`（`active_pullpoints`への追加・削除・走査を保護する`_add_pullpoint`/`_discard_pullpoint`/`cleanup_handler`のスナップショット取得を通じて保護）という2つの`threading.Lock`が導入され、この競合状態は解消された。
 * **ハードコードされた識別子**: `"玄関カメラ"` という特定の名前を用いた条件分岐が記述されており、設定ファイル(`config.py`)上の名前変更に弱く、カメラ増設・名称変更時にこのロジックが意図せず無効化される。**（Issue #766 で一部解消）** このうち「購読期限切れ前の自発的な再購読」は全カメラ共通になったため名前依存が外れた。残るのは `PullMessages` 失敗時の扱い(玄関は1回目、他は3回連続で再接続)と、生イベントペイロードのdebugログ出力の2箇所。増設したカメラは後者の分岐に入らないため、既定では「3回連続で再接続」側の挙動になる。

@@ -200,7 +200,7 @@ def run_script(script_path: str, args: List[str]) -> bool:
                 proc.kill()
                 proc.wait(timeout=5)
             except Exception:
-                pass
+                pass  # #953: 意図的。タイムアウト時の後始末で、直前に ERROR を記録済み
         return False
     except Exception as e:
         logger.exception(f"🔥 Unexpected error running {script_path}: {e}")
