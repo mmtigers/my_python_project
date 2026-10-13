@@ -182,7 +182,8 @@ jobs:
   test:
     name: Test + Coverage
     runs-on: ubuntu-latest
-    # C-L1 (Issue #414): pytest約1分 + DDDテスト約15秒 + インストール時間に対して十分な余裕
+    # C-L1 (Issue #414): pytest + DDDテスト + インストール時間に対して十分な余裕
+    # (2026-10 実測: ジョブ全体で約3.5分、うち pytest 約2〜3分・DDDテスト約15秒。Issue #951)
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -283,7 +284,7 @@ jobs:
       - name: Run DDD tests with coverage
         # Issue #493: DDDは全体の約3分半かかるという前提でPR差分ベースの条件付き
         # スキップ(約37行のbashとpathspec維持)を行っていたが、実測は15秒程度
-        # (CI全体でも約2分)であり、そもそも短縮の必要性が薄かった。この機構は
+        # (当時はCI全体でも約2分)であり、そもそも短縮の必要性が薄かった。この機構は
         # Issue #368で「pathspec の維持漏れによりDDDテストが黙ってスキップされる」
         # という失敗モードを既に一度起こしており、リスクがコストに見合わないため
         # 撤去し、常に実行する。

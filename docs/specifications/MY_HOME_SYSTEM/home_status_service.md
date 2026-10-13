@@ -627,6 +627,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
+* **（Issue #951）コメントの Streamlit 版への言及**: #829 の後も「Streamlit 側と揃えてある」「`?tab=` のリンクにする」等、廃止済みの Streamlit 版を現役として書くコメントが残っていたため、「#829 以前は」の経緯として読める表記に改め、カードのリンクは `card_detail_href` がサブページのパスへ向けることに合わせた(コメントのみの変更で挙動・行数は不変)。
 * **このモジュールに Streamlit を import しないこと**: `unified_server.py` が読み込むため、Streamlit 依存を持ち込むとサーバー側が巻き添えになる。`tests/test_mobile_status_page.py` の `TestOneSourceOfTruth` が`home_status_service`と`dashboard_page_service`両方のimport文を検査して固定している。
 * 根拠: `from services import analysis_service` (行番号: 29)
 

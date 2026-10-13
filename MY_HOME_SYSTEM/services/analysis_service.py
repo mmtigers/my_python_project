@@ -600,7 +600,7 @@ def get_disk_usage() -> Optional[Dict[str, float]]:
         return None
 
 # Issue #651: ダッシュボードから呼ぶ外部コマンド(free/journalctl)の待ち時間上限(秒)。
-# journalctl -n 5000 が応答しない場合に Streamlit のリクエストを無限に固めない。
+# journalctl -n 5000 が応答しない場合にダッシュボードのリクエストを無限に固めない。
 SUBPROCESS_TIMEOUT_SEC: int = 30
 
 
