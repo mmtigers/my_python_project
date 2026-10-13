@@ -68,7 +68,18 @@ class TestNasMonitorStatePersistence(unittest.TestCase):
     同期が行われなくなる。"""
 
     def test_state_file_is_not_under_tmp(self):
-        monitor = NasMonitor()
+        # Issue #952: 以前は実際の BASE_DIR(=チェックアウト先)のまま検査しており、
+        # リポジトリ自体を /tmp 配下に置くと失敗した。意図は「状態ファイルが固定の
+        # /tmp ではなく BASE_DIR 配下(永続領域)に置かれること」なので、BASE_DIR を
+        # /tmp 以外のパスに固定して検証する(コンストラクタはパスを組み立てるだけで
+        # ディレクトリには触れないため、実在しないパスでよい)。
+        base_dir = "/srv/home_system_test_base"
+        with patch.object(config, "BASE_DIR", base_dir):
+            monitor = NasMonitor()
+        self.assertTrue(
+            monitor.state_file.startswith(base_dir + os.sep),
+            "状態ファイルは BASE_DIR 配下(永続領域)に置く"
+        )
         self.assertFalse(
             monitor.state_file.startswith("/tmp"),
             "状態ファイルが/tmpにあると再起動でヘルス状態がリセットされる"
