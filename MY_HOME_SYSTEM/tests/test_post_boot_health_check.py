@@ -229,6 +229,24 @@ class TestCheckServicesDashboard:
         dashboard_result = next(r for r in checker.results if r.name == "Dashboard")
         assert dashboard_result.status == STATUS_ERR
 
+    def test_dashboard_is_checked_over_http_on_unified_server(self, monkeypatch):
+        """Issue #944: 廃止済みのStreamlit(8501番)ではなく、unified_server(8000番)が
+        DASHBOARD_BASE_PATH 配下で返すページを HTTP で確認する。"""
+        monkeypatch.setattr(config, "DASHBOARD_BASE_PATH", "/dashboard")
+        checker = PostBootHealthCheck()
+        checker.max_retries = 1
+        checker.retry_interval = 0
+
+        with patch.object(health_check_module.time, "sleep"), \
+                patch.object(checker, "_check_port", return_value=True) as check_port, \
+                patch.object(checker, "_check_http", return_value=True) as check_http:
+            checker.check_services()
+
+        assert all(call.args[1] != 8501 for call in check_port.call_args_list)
+        assert "http://127.0.0.1:8000/dashboard" in [call.args[0] for call in check_http.call_args_list]
+        dashboard_result = next(r for r in checker.results if r.name == "Dashboard")
+        assert dashboard_result.status == STATUS_OK
+
 
 class TestTargetBluetoothMac:
     def test_none_when_bluetooth_disabled(self, monkeypatch):

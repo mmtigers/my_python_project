@@ -555,11 +555,11 @@ def load_yearly_temperature_stats(year: int, location: str = "伊丹") -> pd.Dat
         
         df_new = pd.DataFrame()
         try: df_new = pd.read_sql_query(q_new, conn)
-        except Exception: pass
+        except Exception: pass  # #953: 意図的。新旧どちらかのテーブルが無い環境では片方だけで集計する
             
         df_old = pd.DataFrame()
         try: df_old = pd.read_sql_query(q_old, conn)
-        except Exception: pass
+        except Exception: pass  # #953: 意図的。上と同じ(旧テーブル不在時)
 
         if not df_new.empty and not df_old.empty:
             df_sensor = pd.concat([df_new, df_old]).groupby("date").agg({"in_max": "max", "in_min": "min"}).reset_index()
@@ -600,7 +600,7 @@ def get_disk_usage() -> Optional[Dict[str, float]]:
         return None
 
 # Issue #651: ダッシュボードから呼ぶ外部コマンド(free/journalctl)の待ち時間上限(秒)。
-# journalctl -n 5000 が応答しない場合に Streamlit のリクエストを無限に固めない。
+# journalctl -n 5000 が応答しない場合にダッシュボードのリクエストを無限に固めない。
 SUBPROCESS_TIMEOUT_SEC: int = 30
 
 

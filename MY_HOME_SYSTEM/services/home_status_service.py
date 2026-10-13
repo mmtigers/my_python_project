@@ -67,8 +67,8 @@ def format_relative_time(value, now: datetime | None = None) -> str:
         return f"{int(seconds // 3600)}時間前"
     return f"{int(seconds // 86400)}日前"
 
-# 軽量ページ側のキャッシュTTL(秒)。Streamlit 側(`views/dashboard/common.py` の
-# DASHBOARD_CACHE_TTL_SEC)と揃えてある。センサーの書き込み間隔(5〜10分)より
+# ダッシュボードのキャッシュTTL(秒)。#829 で廃止した Streamlit 版の
+# DASHBOARD_CACHE_TTL_SEC と揃えていた値を引き継いでいる。センサーの書き込み間隔(5〜10分)より
 # 十分短いので表示の鮮度は実質劣化しない。
 STATUS_CACHE_TTL_SEC = 60
 
@@ -152,11 +152,11 @@ STATUS_CARD_CSS = """
 
 # === ダッシュボードのタブ定義 ===
 # ここに置いてある理由:
-#     各カードは「どのタブに詳細があるか」(`StatusCard.tab`)を持つ。軽量ページは
-#     その情報からカードを `?tab=...` のリンクにするので、タブのキーを知る必要が
-#     ある。定義が `dashboard.py` 側にあると軽量ページ(Streamlit を持たない
-#     `unified_server` 側)からは読めないため、Streamlit を import しないここに置き、
-#     `dashboard.py` はこれを読み込んで使う。
+#     各カードは「どのページに詳細があるか」(`StatusCard.tab`)を持つ。ホームは
+#     その情報からカードを `{DASHBOARD_BASE_PATH}/<キー>` のリンクにするので、
+#     キーを知る必要がある。#829 以前は Streamlit 版の `dashboard.py` もこれを
+#     読み込んでいたため、Streamlit を import しないここに置いた(Streamlit 版の
+#     廃止後も、カードの組み立てと同じ場所に置く理由は変わらない)。
 #
 # スマホ対応の再設計: 以前はサマリーを常時最上部に出したうえでタブが10個
 # (クエスト/電車遅延/防犯カメラ/電力・環境/気温詳細/健康管理/高砂実家/
@@ -166,8 +166,8 @@ STATUS_CARD_CSS = """
 # という状態だった。用途で束ね直し、サマリーも「ホーム」タブに入れてある。
 # (当初は5つ。「🚃 おでかけ」は中身の電車運行情報・駐輪場を退役させたため撤去した)
 #
-# キーは `?tab=` のクエリパラメータに入る値でもある
-# (`dashboard.py` の `_render_tab_selector`)。
+# キーはサブページのパス(`/watch` 等)でもある。Streamlit 版の `?tab=` の値と同じため、
+# 旧URLのリダイレクト(`routers/dashboard_router.py`)もこのキーで対応付く。
 DASHBOARD_TABS: tuple[tuple[str, str], ...] = (
     ("home", "🏠 ホーム"),
     ("watch", "👀 見守り"),
@@ -177,8 +177,8 @@ DASHBOARD_TABS: tuple[tuple[str, str], ...] = (
 DASHBOARD_TAB_KEYS: tuple[str, ...] = tuple(key for key, _ in DASHBOARD_TABS)
 
 # family-quest(PWA)への導線。`unified_server.py` が `/quest` にSPAをマウントしている。
-# ここに置いてあるのはタブ定義と同じ理由で、Streamlit を import しない
-# `dashboard.py` 以外(軽量ページ・カードの組み立て)からも使うため。
+# ここに置いてあるのはタブ定義と同じ理由で、カードの組み立てとページの組み立ての
+# 両方から使うため(#829 以前は Streamlit 版の `dashboard.py` からも使っていた)。
 QUEST_APP_PATH = "/quest"
 
 # === カードの並びとグループ ===
@@ -202,8 +202,8 @@ class StatusCard(NamedTuple):
 
     `value_is_html`: `value` に意図的なHTML断片(色付けの`<span>`・改行の`<br>`等)を
     含める呼び出し元だけ True にする。詳細は `render_status_card_html` を参照。
-    `tab`: このカードの詳細が載っているタブのキー(`DASHBOARD_TABS`)。軽量ページは
-    これを使ってカード自体を `?tab=...` へのリンクにする。
+    `tab`: このカードの詳細が載っているページのキー(`DASHBOARD_TABS`)。ホームは
+    これを使ってカード自体をそのページへのリンクにする(`card_detail_href`)。
     `sub`: 値の下に小さく出す補足(前回値・前日比・最終検知時刻など)。「いまの値」
     だけでは高いのか低いのか判断できないカードに、比べる相手を添えるためのもの。
     常にHTMLエスケープされる(`value` と違い、HTML断片は渡せない)。
@@ -247,17 +247,17 @@ def render_status_card_html(
     指定してエスケープをスキップできる(その場合、`value`の構築元に外部/DB由来の
     生文字列を含めないこと)。
 
-    `href` を渡すとカード全体がリンク(`<a>`)になる。軽量ページ専用で、Streamlit 側は
-    渡さない — Streamlit ではリンクを踏むとページ全体が再読み込みになり
-    (セッションが作り直され数秒かかる)、同じ移動を `dashboard.py` の
-    「詳しく見る」ボタン(再実行だけで切り替わる)が既に担っているため。
+    `href` を渡すとカード全体がリンク(`<a>`)になる。#829 で廃止した Streamlit 版は
+    渡していなかった(リンクを踏むとページ全体が再読み込みになり、同じ移動を
+    `dashboard.py` の「詳しく見る」ボタンが担っていたため)。現在は
+    `unified_server` が返すページだけが呼び出し元で、ホームのカードが使う。
     """
     safe_title = html.escape(title)
     safe_value = value if value_is_html else html.escape(value)
-    # 改行・インデントを入れずに1行で返すこと。Streamlit 側の `st.markdown` は本文に
-    # `textwrap.dedent()` をかけてからMarkdownとして解釈するため、整形用の空白が
+    # 改行・インデントを入れずに1行で返す。#829 で廃止した Streamlit 版の `st.markdown` は本文に
+    # `textwrap.dedent()` をかけてからMarkdownとして解釈していたため、整形用の空白が
     # 残っていると「空白だけの行がHTMLブロックを終端し、続く字下げがコードブロックに
-    # なる」ことで、2枚目以降のカードが生のタグ文字列として画面に出る(#807)。
+    # なる」ことで、2枚目以降のカードが生のタグ文字列として画面に出ていた(#807)。
     if href is None:
         open_tag = f'<div class="status-card {theme}">'
         close_tag = "</div>"
@@ -350,7 +350,7 @@ def render_status_grid_html(
 
 # === 各カードの判定 ===
 # いずれも副作用を持たない純粋関数。入力(DataFrame・取得済みの値)は呼び出し側が渡す
-# (Streamlit 側はキャッシュ付きローダから、サーバー側は下記の collect_status_cards から)。
+# (下記の collect_status_cards から。#829 以前は Streamlit 版のキャッシュ付きローダからも)。
 
 def _takasago_activity(df_sensor: pd.DataFrame) -> pd.DataFrame:
     """高砂(実家)で「動きがあった」とみなす行。
@@ -715,7 +715,7 @@ def build_status_cards(
 
 
 # === 軽量ページ用の取得(TTLキャッシュ付き) ===
-# `unified_server` は Streamlit を持たないため `@st.cache_data` は使えない。
+# `unified_server` は Streamlit を使わないため(#829)、`@st.cache_data` の代わりに
 # 同じTTLの小さなメモを自前で持つ。読み取り専用なので、並行制御の前提
 # (CLAUDE.md「単一プロセス前提」)には触れない。
 

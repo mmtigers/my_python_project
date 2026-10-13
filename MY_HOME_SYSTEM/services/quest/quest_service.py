@@ -147,8 +147,8 @@ class QuestService:
             try:
                 dt = datetime.datetime.fromisoformat(last_completed_at)
                 last_date = dt.date()
-            except Exception:
-                pass
+            except Exception:  # #953: 壊れた日時はボーナス無しに倒すが、データ異常の手がかりは残す
+                logger.warning(f"⚠️ last_completed_at を日時として解釈できません ({last_completed_at!r})。ボーナス無しとして扱います。")
 
         if not last_date:
             return {"gold": 0, "exp": 0}

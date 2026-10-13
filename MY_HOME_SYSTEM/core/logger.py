@@ -283,7 +283,7 @@ def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:
         try:
             existing_handler.close()
         except Exception:
-            pass
+            pass  # #953: 意図的。ロガー自身の再設定中のため、ここでログは出せない(後始末の失敗は無害)
     
     # Issue #665: レベルは config.LOG_LEVEL(環境変数 LOG_LEVEL、既定 INFO)。不正値は INFO。
     level_name = str(getattr(config, "LOG_LEVEL", "INFO") or "INFO").upper()

@@ -237,7 +237,7 @@ def cleanup_handler(signum: int, frame: Any) -> None:
             elif hasattr(svc, 'service') and hasattr(svc.service, 'Unsubscribe'):
                 svc.service.Unsubscribe(_soapheaders=None)
         except Exception:
-            pass
+            pass  # #953: 意図的。終了時の後始末で、解除できなくてもカメラ側の購読は TerminationTime で失効する
     logger.info("👋 Cleanup completed. Exiting.")
     os._exit(0)
 

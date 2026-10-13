@@ -123,7 +123,7 @@
 * 根拠: [週次レポート設定セクション] (行番号: 655〜661 / 抜粋: "# 15. 週次レポート設定", "ELEC_PRICE_PER_KWH: int = _get_int_env(\"ELEC_PRICE_PER_KWH\", 31)")
 
 
-* **（Issue #829で全面改訂）** 「16. ダッシュボード公開設定」セクション（見出しは当初「ダッシュボード(Streamlit)公開設定」だったが、Streamlit版廃止に伴い改称された）を持つ。以前はStreamlit製の「詳細表示」(`dashboard.py`)を`unified_server.py`がリバースプロキシする設計で、そのための4定数（`DASHBOARD_PROXY_ENABLED`/`DASHBOARD_INTERNAL_URL`/`DASHBOARD_BASE_PATH`/`DASHBOARD_PROXY_TIMEOUT_SEC`）を持っていたが、Streamlit版は廃止され、ダッシュボードは`routers/dashboard_router.py`がこのサーバー自身の中でHTMLを直接組み立てて返す(かんたん表示のみ。詳細表示・表示モード切替UIは廃止)ため、外部プロセスへの中継自体が無くなった。これに伴い定数も次の3つに置き換わった。
+* **（Issue #829で全面改訂）** 「16. ダッシュボード公開設定」セクション（見出しは当初「ダッシュボード(Streamlit)公開設定」だったが、Streamlit版廃止に伴い改称された。モジュールdocstringの目次も Issue #951 で同じ表記に揃えた）を持つ。以前はStreamlit製の「詳細表示」(`dashboard.py`)を`unified_server.py`がリバースプロキシする設計で、そのための4定数（`DASHBOARD_PROXY_ENABLED`/`DASHBOARD_INTERNAL_URL`/`DASHBOARD_BASE_PATH`/`DASHBOARD_PROXY_TIMEOUT_SEC`）を持っていたが、Streamlit版は廃止され、ダッシュボードは`routers/dashboard_router.py`がこのサーバー自身の中でHTMLを直接組み立てて返す(かんたん表示のみ。詳細表示・表示モード切替UIは廃止)ため、外部プロセスへの中継自体が無くなった。これに伴い定数も次の3つに置き換わった。
     * `DASHBOARD_ENABLED`（`DASHBOARD_PROXY_ENABLED`から改名。環境変数 `DASHBOARD_ENABLED`、既定 `true`。`"false"` 以外はすべて真）— `unified_server.py` が `routers/dashboard_router.py` をincludeするかどうかの分岐。
     * `DASHBOARD_BASE_PATH`（環境変数 `DASHBOARD_BASE_PATH`、既定 `"dashboard"`）— 先頭に `/` を付け、前後のスラッシュを落として `"/dashboard"` 形式へ正規化する。中継先を指定する`DASHBOARD_INTERNAL_URL`と中継タイムアウトの`DASHBOARD_PROXY_TIMEOUT_SEC`は、中継自体が無くなったため削除された。
     * `ASA_NOTE_URL`（環境変数 `ASA_NOTE_URL`、既定 `"https://asa-note.vercel.app/"`）— ホーム画面のリンクカードから開く外部サービス(あさノート)のURL。**(変更)** 旧既定 `go-to-school-one.vercel.app` から現行URLへ修正した。

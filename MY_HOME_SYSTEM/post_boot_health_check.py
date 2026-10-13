@@ -209,11 +209,16 @@ class PostBootHealthCheck:
     def check_services(self):
         # Issue #663: 既定値は config.py の1箇所だけに持つ。
         frontend_url = getattr(config, "FRONTEND_URL", "http://127.0.0.1:8000/quest")
-        
+        # Issue #944: ダッシュボードは #829 で Streamlit(8501番)を廃止し、unified_server
+        # 自身が DASHBOARD_BASE_PATH 配下で HTML を返す構成になった。廃止済みの 8501 番を
+        # 待ち続けると起動のたびに ERR になり、本物の障害通知を埋もれさせるため、
+        # 実際の配信経路(8000番のダッシュボードのページ)を HTTP で確認する。
+        dashboard_url = f"http://127.0.0.1:8000{config.DASHBOARD_BASE_PATH}"
+
         targets = [
             {"name": "Backend Server", "type": "port", "val": 8000, "critical": True},
             {"name": "Family Quest",   "type": "http", "val": frontend_url, "critical": True},
-            {"name": "Dashboard",      "type": "port", "val": 8501, "critical": True},
+            {"name": "Dashboard",      "type": "http", "val": dashboard_url, "critical": True},
         ]
 
         logger.info("⏳ Waiting for services to startup...")
@@ -315,7 +320,7 @@ class PostBootHealthCheck:
         try:
             if "card" in subprocess.check_output(["aplay", "-l"], stderr=subprocess.DEVNULL, timeout=10).decode():
                 has_card = True
-        except Exception: pass
+        except Exception: pass  # #953: 意図的。aplay 不在・失敗は has_card=False として下で報告される
 
         if TARGET_BLUETOOTH_MAC:
             try:

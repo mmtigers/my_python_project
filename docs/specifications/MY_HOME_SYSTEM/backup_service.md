@@ -29,7 +29,7 @@
 | `sqlite3` | 標準ライブラリ | DB接続およびバックアップ機能の利用 | `import sqlite3` (行番号: 3 / 抜粋: "import sqlite3") |
 | `os` | 標準ライブラリ | パス結合、ディレクトリ作成、ファイルサイズ取得、ファイル削除 | `import os` (行番号: 4 / 抜粋: "import os") |
 | `sys` | 標準ライブラリ | **（Issue #753 で追加）** `if __name__ == "__main__":` から `sys.exit` で終了コードを返すため | `import sys` (行番号: 5 / 抜粋: "import sys") |
-| `datetime` | 標準ライブラリ | バックアップファイル名用のタイムスタンプ生成 | `import datetime` (行番号: 6 / 抜粋: "import datetime") |
+| `datetime` | 標準ライブラリ | 最新バックアップの時刻変換(`fromtimestamp`)等。**（Issue #953）** ファイル名用のタイムスタンプは`datetime.datetime.now()`(OSローカル時刻)から`core.utils.get_now_jst()`へ変更した | `import datetime` (行番号: 6 / 抜粋: "import datetime") |
 | `shutil` | 標準ライブラリ | ファイルのNASへのコピー | `import shutil` (行番号: 7 / 抜粋: "import shutil") |
 | `threading` | 標準ライブラリ | **(不具合修正で追加)** `trigger_manual_backup_async`がバックアップ処理をバックグラウンドスレッドで実行するため | `import threading` (行番号: 9 / 抜粋: "import threading") |
 | `time` | 標準ライブラリ | 未使用 | `import time` (行番号: 5 / 抜粋: "import time") |
@@ -281,6 +281,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
+* **（Issue #953）バックアップファイル名の時刻はJST**: `perform_backup`は`home_system_<YYYYMMDD_HHMMSS>.db`の時刻を`get_now_jst()`で作る(以前は`datetime.datetime.now()`でOSのタイムゾーンに依存していた。実機はJSTのため既存のファイル名と並びは変わらない)。最新バックアップの判定(`get_latest_backup_info`)はファイル名ではなく`st_mtime`で行うため、命名の時刻基準には依存しない。
 * **（Issue #664 で解消）** 以前は Deprecated Facade である `common` から `setup_logging` をインポートした直後に `core.logger` の `setup_logging` で上書きしており、未使用のインポートが残っていた。`common.py` の廃止に伴い `core.logger` からの1本だけになっている。
 * `import time` が宣言されているが、コード内で一度も使用されていない。
 * Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`引数が不要になった。これに伴い`_notify_and_log_error`の`send_push`呼び出しからは、以前存在した`user_id=getattr(config, "LINE_USER_ID", None)`(target="discord"であるにも関わらずLINE宛先を渡していた不整合)が撤去されている。

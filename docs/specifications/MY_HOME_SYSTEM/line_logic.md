@@ -130,8 +130,8 @@
 * 根拠: `profile = line_bot_api.get_group_member_profile(...)` / `profile = line_bot_api.get_profile(user_id)` (行番号: 69, 72 / 抜粋: "profile = line_bot_api.get_profile(user_id)")
 
 
-* **エラーハンドリング**: 取得失敗時は例外を握り潰し（`pass`）、デフォルト値を返す。
-* 根拠: `except Exception: pass` (行番号: 74-75 / 抜粋: "except Exception:")
+* **エラーハンドリング**: 取得失敗時は例外を捕捉して`logger.warning`で失敗理由を残し（Issue #953。以前はログなしの`pass`）、デフォルト値`"家族のみんな"`を返す。
+* 根拠: [例外の捕捉と警告ログ] (行番号: 74-75 / 抜粋: "except Exception as e:  # #953: 失敗理由を残す(呼び名は既定値に倒して処理は続ける)")
 
 
 
@@ -326,7 +326,7 @@ graph TD
 
 * **2026年のリファクタリング**: `handle_message`、`ask_outing_question`、`handle_child_record`、`handle_stomach_record` および `USER_INPUT_STATE` ステートマシン（`models/line.py` の `InputMode`/`UserInputState` を含む）はコミット `1ecbe3b` で削除された。これらは本番のLINE Webhook経路（`handlers/line_handler.py`）から一切呼び出されない到達不能コードだったため。現在このファイルに残るのは `handle_postback()`（ボタン操作のディスパッチ）と、それが使うUI生成ヘルパー群のみ。
 * `get_daily_health_summary` にて、他箇所で利用されている `core.database` (非同期アクセス) ではなく、`sqlite3` モジュールを利用した同期的かつ直接的なDB接続が行われている。
-* `get_user_name` において、`except Exception:` で例外の握り潰し（`pass`）が行われており、通信エラー時の追跡が困難になる可能性がある。
+* **（Issue #953 で解消）** `get_user_name` は以前 `except Exception: pass` で例外をログなしで握り潰しており通信エラー時の追跡が困難だったが、現在は `logger.warning` で失敗理由を残す（戻り値の既定値は変わらない）。
 * **[修正済み] Issue #410 保守性**: Postbackデータパース時、`LinePostbackData` の変換に失敗した場合に未定義パラメータのみを取得するフォールバック処理があったが、`LinePostbackData`は`action`必須以外は`Optional`かつ`extra`未設定（既定で未知フィールドは無視）のため、`raw_dict`に`action`キーが含まれる限り実際にはバリデーションエラーが送出されず到達不能なコードだった。削除し、`pb = LinePostbackData(**raw_dict)`を直接呼ぶよう単純化した（万一の失敗は`handle_postback`末尾の`except Exception`が捕捉する）。
 * **[修正済み] Issue #410 保守性 未使用の関数・インポート**: `create_quick_reply`、`get_quota_text` はファイル内・他ファイルのいずれからも呼び出し箇所が無いデッドコードだったため削除した（`get_quota_text`内にあったbareの`except:`も関数ごと解消）。付随して未使用となった`linebot.v3.messaging`の`QuickReplyItem`/`MessageAction`インポートも削除した。
 * **[修正済み] Issue #571 バグ**: `get_daily_health_summary`のアイコン選択が`"元気" in status`という部分文字列マッチのみだったため、Issue #375で`handlers/line_handler.py`の`_detect_condition_keyword()`が否定表現（「元気ない」「元気がない」「元気なし」「元気じゃない」「元気ではない」）を正規化した固定文字列`CONDITION_NOT_GENKI = "元気なし"`（"元気"を部分文字列として含む）まで誤って肯定判定し、体調不良（元気なし）の記録が✅（元気）として表示される意味の反転が発生していた。DBの`condition`列にどんな文字列が入り得るかは`handlers/line_handler.py`側の正規化ロジック（本ファイルの外、[line_handler.md](./line_handler.md)参照）に依存しており、本ファイル単体の実装だけを見ていると気付きにくい不具合だった。否定表現（`"元気なし"`）を先に判定してから肯定表現（`"元気"`）を判定するよう修正した。

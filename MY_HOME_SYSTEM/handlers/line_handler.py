@@ -164,8 +164,8 @@ def _get_display_name(user_id: str) -> str:
         if line_bot_api:
             profile = line_bot_api.get_profile(user_id, _request_timeout=config.LINE_API_REQUEST_TIMEOUT)
             user_name = profile.display_name
-    except Exception:
-        pass
+    except Exception as e:  # #953: 失敗理由を残す(表示名は "Unknown" に倒して処理は続ける)
+        logger.warning(f"LINEプロフィール取得に失敗しました (user_id={user_id}): {e}")
 
     with _profile_cache_lock:
         _profile_cache[user_id] = (user_name, time.time())

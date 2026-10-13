@@ -3,7 +3,23 @@
 **レビュー日**: 2026-08-14
 **レビュー対象**: リポジトリ全体のファイル・ディレクトリ構成（`MY_HOME_SYSTEM/`、`family-quest/`、`DDD/`、`docs/`、リポジトリルート）
 **スコープ**: 本レポートはファイル/ディレクトリの配置・命名・階層構造のみを対象とする。コードの正確性・セキュリティは対象外（`CODE_REVIEW_REPORT_ALL.md`、`MY_HOME_SYSTEM/CODE_REVIEW_REPORT.md`を参照）。
+**最終棚卸し**: 2026-10-13（Issue #959。下記「0. 対応状況」）
 **方針**: 本PRでは、コードのみで安全に直せる構成上の問題はその場で修正した（詳細は各指摘の「対応」欄）。git履歴の書き換えやリポジトリ名の変更、外部cron/systemdからの呼び出しパスに影響する変更など、利用者の判断が必要なものは指摘のみに留めた。
+
+---
+
+## 0. 対応状況（最終棚卸し: 2026-10-13・Issue #959）
+
+本文の「未対応」は 2026-08-14 のレビュー時点の記録。2026-10-13 に現行コードと突き合わせた結果、次のとおり解消を確認した（本文の見出しにも追記してある）。
+
+| 指摘（本文の見出し） | 現状（2026-10-13 確認） | 根拠 |
+|---|---|---|
+| `tools/`ディレクトリのレイヤー構造（未対応分: `tools/financial_service.py`・`tools/google_photos_service.py`） | **解消**: 両ファイルとも削除済み | コミット `1a1ae3d`（2026-08-23、未使用レガシースクリプトの削除） |
+| `MY_HOME_SYSTEM/old/`と`monitors/old/`の2つのレガシー置き場 | **解消**: 両ディレクトリとも削除済み | コミット `1a1ae3d`（同上） |
+| `docs/specifications/family-quest/`の孤立した仕様書 | **解消**: `check_spec_drift.py full` の孤立報告なし。`useLayoutMode.ts` の仕様書も存在 | `docs/specifications/family-quest/src/hooks/useLayoutMode.md` |
+| `MY_HOME_SYSTEM/`・`DDD/`にトップレベルREADMEが無い | **解消**: `MY_HOME_SYSTEM/README.md`・`DDD/README.md` が存在 | コミット `4515748`（2026-08-31） |
+| `family-quest`にテストディレクトリが存在しない | **解消**: `family-quest/src` に `*.test.*` が48ファイル（Vitest） | `.github/workflows/test.yml` の `frontend` ジョブ（`npm test`） |
+| `family-quest`・`DDD`向けのCIワークフローが無い | **解消**: `test.yml` の `frontend` ジョブ（ESLint・`tsc -b`・Vitest）と、DDD の pytest・カバレッジ（床74＋ラチェット）が同ワークフローで実行される | `.github/workflows/test.yml`（Issue #493/#495/#665） |
 
 ---
 
@@ -34,7 +50,7 @@
 
 **対応**: `camera_digest_service.py`を`old/camera_digest_service.py`へ移動し、唯一の呼び出し元である`old/send_ai_report.py`のimportを更新（`import tools.camera_digest_service as camera_digest_service` → `import camera_digest_service`。`old/`内の他モジュール（`weather_service`等）と同じフラットimport方式に統一）。
 
-**未対応（要判断）**: `tools/financial_service.py`（家計シミュレーション用Streamlitページ、`streamlit run tools/financial_service.py`で個別起動される想定）と`tools/google_photos_service.py`はコード内から一切import されておらず、`services/`ないし`views/`への移動が構成上は自然だが、リポジトリ外のcron/systemd等から直接パス指定で起動されている可能性があり、呼び出し元を確認できないため本PRでは移動を見送った。移動する場合は運用側の起動コマンドも合わせて更新が必要。
+**未対応（要判断）→ 解消（2026-10-13確認: 両ファイルともコミット`1a1ae3d`で削除済み）**: `tools/financial_service.py`（家計シミュレーション用Streamlitページ、`streamlit run tools/financial_service.py`で個別起動される想定）と`tools/google_photos_service.py`はコード内から一切import されておらず、`services/`ないし`views/`への移動が構成上は自然だが、リポジトリ外のcron/systemd等から直接パス指定で起動されている可能性があり、呼び出し元を確認できないため本PRでは移動を見送った。移動する場合は運用側の起動コマンドも合わせて更新が必要。
 
 ### [主要] `_service`命名のモジュールが`MY_HOME_SYSTEM/`直下に置かれていた
 **対象**: `MY_HOME_SYSTEM/train_service.py`, `MY_HOME_SYSTEM/sound_manager.py`
@@ -69,28 +85,28 @@
 
 **対応**: `chmod 644`で修正。
 
-### [軽微・未対応] `MY_HOME_SYSTEM/old/`と`monitors/old/`という2つの独立したレガシー置き場が存在
+### [軽微・解消済み（2026-10-13確認）] `MY_HOME_SYSTEM/old/`と`monitors/old/`という2つの独立したレガシー置き場が存在
 **対象**: `MY_HOME_SYSTEM/old/`（README付き、約20ファイル）、`MY_HOME_SYSTEM/monitors/old/`（README無し、7ファイル）
 
 **問題**: いずれも現行コードから参照されないレガシースクリプト群だが、置き場が2箇所に分かれており規約が統一されていない（`old/README.md`の内容も現行アプリと無関係なインフラメモになっている）。
 
 **未対応理由**: 統合の実施自体はローリスクだが、内容の刷新（README書き直し）を含めると本レビューの範囲（構成整理）を超えるため、次回の対応候補として記録するに留めた。
 
-### [軽微・未対応] `docs/specifications/family-quest/`に孤立した仕様書が残存
+### [軽微・解消済み（2026-10-13確認）] `docs/specifications/family-quest/`に孤立した仕様書が残存
 **対象**: 削除済みコンポーネント（`AdminDashboard`, `GuildBoard`, `BattleEffect`, `BossCard`, `FamilyMileageCard`, `FamilyParty`, `WeeklyTrends`, `EquipmentShop`, `ShopContainer`）に対応する`.md`が、PR #9のフロントエンド刷新後も削除されずに残っている。逆に新設された`family-quest/src/hooks/useLayoutMode.ts`に対応する仕様書がない。
 
 **未対応理由**: これを検知する`check_spec_drift.py`の週次監査が既に仕組みとして存在し、非ブロッキングでIssue化される設計になっている。本PRのスコープ外として、既存の監査フローに委ねる。
 
-### [軽微・未対応] `MY_HOME_SYSTEM/`・`DDD/`にトップレベルREADMEが無い
+### [軽微・解消済み（2026-10-13確認）] `MY_HOME_SYSTEM/`・`DDD/`にトップレベルREADMEが無い
 `family-quest/README.md`は存在するが、より大規模な2つのPythonサブプロジェクトにはディレクトリ構成やDDDという略称の意味を説明するREADMEがない。追加を推奨するが、内容作成は本レビューのスコープ外とした。
 
 ### [軽微・対応済み] `docs/merge_mds.py`が`docs/`直下に混在(ファイルは削除済み)
 Markdownを1ファイルに結合する開発者個人用スクリプトと見られ、CIスクリプト（`.github/scripts/`配下）とは性質が異なる。移動先候補は`.github/scripts/`または新設の`scripts/`だが、用途が本人以外に不明なため削除も含めて所有者の判断が必要。
 
-### [軽微・未対応] `family-quest`にテストディレクトリが存在しない
+### [軽微・解消済み（2026-10-13確認）] `family-quest`にテストディレクトリが存在しない
 `MY_HOME_SYSTEM/tests/`（30+ファイル、`conftest.py`あり）と比べ、`family-quest/`側はテストの仕組み自体が無い。ファイル構成の指摘というより開発体制上のギャップとして記録。
 
-### [軽微・未対応] `family-quest`・`DDD`向けのCIワークフローが無い
+### [軽微・解消済み（2026-10-13確認）] `family-quest`・`DDD`向けのCIワークフローが無い
 `.github/workflows/test.yml`は`MY_HOME_SYSTEM`専用。`family-quest`の`eslint`/`tsc -b`/`vite build`を検証するCIジョブが無い。
 
 ---

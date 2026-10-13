@@ -139,7 +139,7 @@ async def check_tcp_port(ip: str, port: int) -> Dict[str, Any]:
             try:
                 await writer.wait_closed()
             except Exception:
-                pass
+                pass  # #953: 意図的。接続の後始末(close済みの接続の待機失敗は無害)
 
 
 async def monitor_camera(cam_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:

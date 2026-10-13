@@ -701,3 +701,18 @@ def test_get_latest_backup_info_picks_newest_file(tmp_path):
     (backup_dir / "other.txt").write_text("x")
     info = backup_service.get_latest_backup_info()
     assert info["filename"] == new.name
+
+
+def test_backup_filename_uses_jst_regardless_of_os_timezone():
+    """#953: ファイル名の時刻は OS のタイムゾーンではなく JST で付ける。
+
+    UTC 2026-10-12 15:30 は JST 2026-10-13 00:30(日付が変わる境界)。
+    """
+    from freezegun import freeze_time
+
+    with freeze_time("2026-10-12 15:30:00"):
+        success, _msg, _size_mb = backup_service.perform_backup()
+
+    assert success is True
+    backups = os.listdir(os.path.join(config.NAS_PROJECT_ROOT, "db_backups"))
+    assert "home_system_20261013_003000.db" in backups
