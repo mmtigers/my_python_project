@@ -12,9 +12,10 @@ updates:
   # GitHub Actions (SHAピン留めの更新。コメントのバージョン表記も自動更新される)
   - package-ecosystem: "github-actions"
     directory: "/"
+    # SHAピン留めのアクション更新は急がないので月次にする(Actions 無料枠の節約。Dependabot の
+    # 更新ジョブ自体と、各PRの CI・レビューが分数を使う)。セキュリティ更新は別枠で即時に来る。
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "09:00"
       timezone: "Asia/Tokyo"
     # Issue #482: minor/patchはまとめて1PRにグループ化し、棚卸しコストを下げる。

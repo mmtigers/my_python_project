@@ -10,6 +10,18 @@ name: Spec Drift Check (PR)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    # 非ブロッキングの気付き用チェックなので、判定の対象(ソース・仕様書・判定スクリプト)に
+    # 関係する変更のときだけ走らせる。ジョブは数十秒でも1ジョブ=最低1分で課金されるため、
+    # docs/reports や workflow だけの PR では起動しない(Actions 無料枠の節約)。
+    # required status checks には入っていない前提(入れる場合は paths を外すこと。
+    # paths で起動しない workflow のチェックは pending のまま残り、マージが止まる)。
+    paths:
+      - 'MY_HOME_SYSTEM/**'
+      - 'DDD/**'
+      - 'family-quest/src/**'
+      - 'docs/specifications/**'
+      - '.github/scripts/check_spec_drift.py'
+      - '.github/workflows/spec-drift-pr-check.yml'
 
 permissions:
   contents: read

@@ -15,6 +15,9 @@ name: Dashboard Mobile E2E
 
 on:
   pull_request:
+    # draft の間は走らせない(Actions 無料枠の節約)。Ready for review にした時点で1回走る。
+    # draft のまま確認したいときは workflow_dispatch で手動実行する。
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'MY_HOME_SYSTEM/routers/dashboard_router.py'
       - 'MY_HOME_SYSTEM/services/dashboard_page_service.py'
@@ -38,6 +41,7 @@ defaults:
 jobs:
   mobile-e2e:
     name: Mobile viewport (390x844)
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     # ブラウザのインストールとダッシュボードサーバーの起動を含むため、pytest 本体より長めに取る
     timeout-minutes: 30
