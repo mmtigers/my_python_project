@@ -11,7 +11,19 @@
 # `ruff --fix` / `ruff format` による一括整形は行わないこと。このリポジトリの
 # docs/specifications/ 配下の仕様書は行番号を明記してソースを引用する規約が
 # あり、一括整形すると全仕様書の引用と git blame が壊れる。
+#
+# Issue #948: 以前は `select` を書かず ruff の既定規則に任せていたが、既定規則は
+# ruff のバージョンで変わる(0.16 系の既定は UP/BLE/I/S 等を含み E7 を含まず、
+# MY_HOME_SYSTEM のフルレポートが約1080件に膨らんでいた)。Dependabot の minor/patch
+# 自動マージで規則集合が黙って変わらないよう、明示して固定する。
+# E7(E701 等の1行複文)は、0.16 系の既定に含まれていなかったため既存指摘
+# (2026-10-13 実測: MY_HOME_SYSTEM 26件・DDD 15件)が増分ラチェットで「新規」扱いに
+# なる。仕様書の行番号引用の規約上、一括整形でも消せないため今回は入れていない。
+# 規則を増やすときは、既存指摘を手で解消する PR と同時に、ここへ段階的に追記すること
+# (増分ラチェット `.github/scripts/check_lint_ratchet.py` は base 側の ruff.toml で
+# base を測るため、規則を追加した PR では既存指摘が「新規」として報告される)。
 [lint]
+select = ["E4", "E9", "F"]
 ignore = [
     # sys.path.append(PROJECT_ROOT) の後に import する必要があるため
     # (MY_HOME_SYSTEM・DDDの多くのエントリーポイント・monitorsスクリプトで
