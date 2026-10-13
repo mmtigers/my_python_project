@@ -100,6 +100,24 @@ class TestRecordBatch:
         assert _rows() == []
 
 
+    def test_db_lock_is_fail_soft(self, isolated_db, monkeypatch):
+        """Issue #971: DBロック競合で例外を伝播させず、保存できなかった分を rejected に数える。"""
+        import sqlite3
+        from contextlib import contextmanager
+
+        from services import ui_event_service as svc_module
+
+        @contextmanager
+        def _locked(commit=False):
+            raise sqlite3.OperationalError("database is locked")
+            yield  # pragma: no cover
+
+        monkeypatch.setattr(svc_module, "get_db_cursor", _locked)
+        batch = UiTapBatch(**_batch([_event(0), _event(1), _event(0, event_id="evt-99999999", occurred_at_ms=0)]))
+        result = ui_event_service.record_batch(batch, now=NOW)
+        assert result == {"accepted": 0, "duplicated": 0, "rejected": 3}
+
+
 class TestEndpoint:
     def test_post_returns_202_and_saves(self, api_client):
         with freeze_time(NOW):
@@ -141,6 +159,24 @@ class TestEndpoint:
             )
         assert res.status_code == 202
         assert res.json() == {"accepted": 1, "duplicated": 0, "rejected": 1}
+
+    def test_endpoint_returns_202_when_db_is_locked(self, api_client, monkeypatch):
+        """回帰(Issue #971): 以前は500になり、ExceptionGroup でトレースバックが journal に二重出力されていた。"""
+        import sqlite3
+        from contextlib import contextmanager
+
+        from services import ui_event_service as svc_module
+
+        @contextmanager
+        def _locked(commit=False):
+            raise sqlite3.OperationalError("database is locked")
+            yield  # pragma: no cover
+
+        monkeypatch.setattr(svc_module, "get_db_cursor", _locked)
+        with freeze_time(NOW):
+            res = api_client.post("/api/ui-log/events", json=_batch([_event(0), _event(1)]))
+        assert res.status_code == 202
+        assert res.json() == {"accepted": 0, "duplicated": 0, "rejected": 2}
 
     def test_max_batch_of_100_is_accepted(self, api_client):
         with freeze_time(NOW):

@@ -6,6 +6,7 @@
 無関係(CLAUDE.md の並行制御の前提に影響しない)。
 """
 import datetime
+import sqlite3
 
 import config
 from core.database import get_db_cursor
@@ -69,11 +70,26 @@ class UiEventService:
 
         inserted = 0
         if rows:
-            with get_db_cursor(commit=True) as cur:
-                cur.executemany(_INSERT_SQL, rows)
-                # executemany の rowcount は実際に挿入された行の合計(INSERT OR IGNORE で
-                # 無視された重複は含まれない)。
-                inserted = cur.rowcount
+            try:
+                with get_db_cursor(commit=True) as cur:
+                    cur.executemany(_INSERT_SQL, rows)
+                    # executemany の rowcount は実際に挿入された行の合計(INSERT OR IGNORE で
+                    # 無視された重複は含まれない)。
+                    inserted = cur.rowcount
+            except sqlite3.OperationalError as e:
+                # Issue #971: Webhook 等の書き込みと重なった "database is locked" 等。
+                # 以前は握らずに伝播して500になり、starlette/anyio の ExceptionGroup で
+                # 同じトレースバックが journal に二重出力されてログを汚していた。
+                # タップログは UX 分析用のベストエフォートな記録で、失っても実害がないため、
+                # save_log_generic と同じくフェイルソフトにして警告ログにとどめる。
+                # 2xx を返すのは、5xx だとクライアント(tapLogger)が再試行し、書き込みが
+                # 集中している最中に負荷を足すため。保存できなかった分は rejected に数え、
+                # accepted + duplicated + rejected が送信件数と一致するようにする。
+                logger.warning(
+                    f"タップログ: DB書き込みに失敗したため {len(rows)} 件を破棄しました "
+                    f"(session={batch.session_id}): {e}"
+                )
+                return {"accepted": 0, "duplicated": 0, "rejected": rejected + len(rows)}
 
         if rejected:
             logger.warning(f"タップログ: 時刻が範囲外のため {rejected} 件を破棄しました (session={batch.session_id})")
