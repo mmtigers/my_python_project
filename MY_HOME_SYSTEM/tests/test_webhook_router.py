@@ -15,7 +15,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
 from routers import webhook_router
-from services import sensor_service
+from services import sensor_service, switchbot_webhook_service
 from models.switchbot import SwitchBotContext, SwitchBotWebhookBody
 
 
@@ -87,9 +87,10 @@ async def test_rejection_logs_error_only_once_per_process(monkeypatch):
     """#648: 拒否のたびに ERROR(=Discord通知)を出すと外部から通知を大量発火できるため1回だけ。"""
     monkeypatch.setattr(config, "SWITCHBOT_WEBHOOK_TOKEN", None, raising=False)
     monkeypatch.setattr(config, "ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK", False, raising=False)
-    monkeypatch.setattr(webhook_router, "_unconfigured_webhook_error_logged", False, raising=False)
+    # Issue #954: トークン検証は services/switchbot_webhook_service へ移した(挙動は同じ)。
+    monkeypatch.setattr(switchbot_webhook_service, "_unconfigured_webhook_error_logged", False, raising=False)
     fake_logger = MagicMock()
-    monkeypatch.setattr(webhook_router, "logger", fake_logger)
+    monkeypatch.setattr(switchbot_webhook_service, "logger", fake_logger)
 
     for _ in range(3):
         with pytest.raises(HTTPException):
