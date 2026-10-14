@@ -119,7 +119,7 @@ rich==15.0.0
     # via
     #   bandit
     #   pip-audit
-ruff==0.16.10
+ruff==0.17.0
     # via -r requirements-dev.in
 six==1.17.0
     # via
@@ -135,7 +135,7 @@ tomli==2.4.1
     # via pip-audit
 tomli-w==1.2.0
     # via pip-audit
-typing-extensions==4.15.0
+typing-extensions==4.16.0
     # via
     #   -c requirements.txt
     #   anyio
