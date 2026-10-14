@@ -9,7 +9,7 @@
 | サブシステム | パス | スタック | 役割 |
 | --- | --- | --- | --- |
 | バックエンドコア | `MY_HOME_SYSTEM/` | Python 3.11, FastAPI, SQLite | IoT機器の制御、環境ロギング、LINE/Discord通知、Family Quest API |
-| フロントエンド | `family-quest/` | React 18, TypeScript, Vite, Tailwind | RPG風の家族タスク/クエスト管理PWA（バックエンドが配信） |
+| フロントエンド | `family-quest/` | React 19, TypeScript, Vite, Tailwind | RPG風の家族タスク/クエスト管理PWA（バックエンドが配信） |
 | バッチ処理 | `DDD/` | Python, yt-dlp | 他とは無関係な動画・コンテンツのスクレイピング・ダウンロード自動化 |
 
 `docs/specifications/` には、ソースファイル1つにつき1つのリバースエンジニアリング済みMarkdown仕様書が格納されている（詳細は後述の「仕様書ドリフト規約」を参照）。個別のファイルを読み込む前にまずここで概要を確認するとよい。サブシステム間をまたぐ全体アーキテクチャ・データフローは `docs/specifications/全体設計書.md` を参照。
