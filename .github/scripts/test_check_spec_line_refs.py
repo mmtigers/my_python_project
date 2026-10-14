@@ -653,3 +653,96 @@ def test_triage_snippet_missing_from_source(fake_repo):
     """抜粋がソースのどこにも無い(表記ゆれ・要約)引用は「見つからない」。"""
     total = _triage(fake_repo, '* 根拠: 要約 (行番号: 5〜7 / 抜粋: "this text is not in the source")\n')
     assert total == {checker.TRIAGE_MISSING: 1}
+
+
+# --- シンボル参照(Issue #950) -------------------------------------------------
+
+
+def test_repository_symbol_references_are_accurate():
+    """リポジトリの仕様書の `参照: シンボル / 抜粋: …` が、実ソースのそのシンボルの中にあること。"""
+    problems, _ = checker.scan_symbol_references()
+    assert not problems, "シンボル参照に問題があります(%d件):\n%s" % (
+        len(problems), "\n".join("  - " + p for p in problems)
+    )
+
+
+def test_symbol_reference_accepts_snippet_inside_the_symbol(fake_repo):
+    _write_spec(fake_repo, '* 根拠: 戻り値 (参照: farewell / 抜粋: "return \\"bye \\" + name")\n')
+    problems, checked = checker.scan_symbol_references()
+    assert (problems, checked) == ([], 1)
+
+
+def test_symbol_reference_accepts_qualified_method_name(fake_repo):
+    _write_spec(fake_repo, '* 根拠: 戻り値 (参照: Greeter.greet / 抜粋: "return \\"hello \\" + name")\n')
+    assert checker.scan_symbol_references() == ([], 1)
+
+
+def test_symbol_reference_detects_snippet_outside_the_symbol(fake_repo):
+    """抜粋が別の関数の中にある(=参照先が違う)なら問題として報告する。"""
+    _write_spec(fake_repo, '* 根拠: 戻り値 (参照: farewell / 抜粋: "return \\"hello \\" + name")\n')
+    problems, _ = checker.scan_symbol_references()
+    assert len(problems) == 1 and "farewell" in problems[0]
+
+
+def test_symbol_reference_detects_missing_symbol(fake_repo):
+    _write_spec(fake_repo, '* 根拠: 戻り値 (参照: no_such_function / 抜粋: "return \\"bye \\" + name")\n')
+    problems, _ = checker.scan_symbol_references()
+    assert len(problems) == 1 and "no_such_function" in problems[0]
+
+
+def test_symbol_reference_survives_line_shifts(fake_repo):
+    """行が増減しても、同じ関数の中にある限り通る(行番号引用との違い)。"""
+    src = fake_repo / "MY_HOME_SYSTEM" / "sample.py"
+    src.write_text("# 先頭に行を足してすべての行番号をずらす\n" * 20 + src.read_text(encoding="utf-8"), encoding="utf-8")
+    _write_spec(fake_repo, '* 根拠: 戻り値 (参照: farewell / 抜粋: "return \\"bye \\" + name")\n')
+    assert checker.scan_symbol_references() == ([], 1)
+
+
+def test_symbol_reference_beside_line_number_citation_does_not_break_the_gate(fake_repo):
+    """同じ行に `行番号:` 引用と `参照:` 引用が並んでも、前者のゲートから外れない。
+
+    以前の境界(次の `行番号:` ブロックまで)だと、前者の抜粋として後ろの `参照:` の抜粋まで拾われ、
+    抜粋の数が項の数と合わなくなって、ゲートから黙って外れていた。
+    """
+    _write_spec(
+        fake_repo,
+        '* 根拠: [定義] (行番号: 99 / 抜粋: "def farewell(")、[戻り値] (参照: farewell / 抜粋: "return \\"bye \\" + name")\n',
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert len(findings) == 1 and findings[0].actual == 9
+
+
+def test_convert_rewrites_stale_citation_when_heading_symbol_contains_the_snippet(fake_repo):
+    spec = _write_spec(
+        fake_repo,
+        "### `farewell`\n\n* 根拠: 戻り値 (行番号: 98〜99 / 抜粋: \"return \\\"bye \\\" + name\")\n",
+    )
+    converted, skipped = checker.convert_to_symbol_references([spec])
+    assert (converted, skipped) == (1, 0)
+    assert '(参照: farewell / 抜粋: "return' in spec.read_text(encoding="utf-8")
+    assert checker.scan_symbol_references()[0] == []
+
+
+def test_convert_leaves_citation_that_is_not_verifiable(fake_repo):
+    """見出しのシンボルの中に抜粋が無いもの(別の関数を引いている)は触らない。"""
+    body = "### `farewell`\n\n* 根拠: 戻り値 (行番号: 98〜99 / 抜粋: \"return \\\"hello \\\" + name\")\n"
+    spec = _write_spec(fake_repo, body)
+    converted, skipped = checker.convert_to_symbol_references([spec])
+    assert (converted, skipped) == (0, 1)
+    assert spec.read_text(encoding="utf-8") == body
+
+
+def test_convert_leaves_gated_single_line_citation(fake_repo):
+    """単一行で抜粋が一意な引用はゲート(--fix が行番号を直す)の対象なので、変換しない。"""
+    body = "### `farewell`\n\n* 根拠: 戻り値 (行番号: 99 / 抜粋: \"return \\\"bye \\\" + name\")\n"
+    spec = _write_spec(fake_repo, body)
+    assert checker.convert_to_symbol_references([spec]) == (0, 0)
+    assert spec.read_text(encoding="utf-8") == body
+
+
+def test_convert_leaves_citation_that_is_already_correct(fake_repo):
+    body = "### `farewell`\n\n* 根拠: 戻り値 (行番号: 9〜10 / 抜粋: \"return \\\"bye \\\" + name\")\n"
+    spec = _write_spec(fake_repo, body)
+    assert checker.convert_to_symbol_references([spec]) == (0, 0)
+    assert spec.read_text(encoding="utf-8") == body

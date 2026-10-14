@@ -133,7 +133,7 @@
 * 根拠: [メソッド本体] (行番号: 39-44)
 
 * **エラーハンドリング**: 行が見つからなければ`HTTPException(status_code=404, detail="User not found")`
-* 根拠: [例外送出] (行番号: 41-42 / 抜粋: "        if not user:\n            raise HTTPException(status_code=404, detail=\"User not found\")")
+* 根拠: [例外送出] (参照: _get_user_row / 抜粋: "        if not user:\n            raise HTTPException(status_code=404, detail=\"User not found\")")
 
 
 
@@ -328,11 +328,11 @@
 
 
 * **戻り値/レスポンス**: `None`(`statuses`を直接ミューテートする破壊的メソッド)
-* 根拠: [型ヒント] (行番号: 135 / 抜粋: "-> None:")
+* 根拠: [型ヒント] (参照: _activate_block / 抜粋: "-> None:")
 
 
 * **副作用**: 呼び出し元から渡された`statuses`辞書を直接書き換える(対象ステップ、またはチェックリストブロック内の未`'done'`な各ステップを`'current'`にする)。DBへの書き込みは行わない。
-* 根拠: [メソッド本体] (行番号: 142-152 / 抜粋: "if index >= len(flow['steps']):\n            return\n        step = flow['steps'][index]\n        if not step['checklist']:\n            statuses[step['key']] = 'current'\n            return\n        start, end = get_checklist_range(flow)\n        for i in range(start, end):\n            key = flow['steps'][i]['key']\n            if statuses.get(key) != 'done':\n                statuses[key] = 'current'")
+* 根拠: [メソッド本体] (参照: _activate_block / 抜粋: "if index >= len(flow['steps']):\n            return\n        step = flow['steps'][index]\n        if not step['checklist']:\n            statuses[step['key']] = 'current'\n            return\n        start, end = get_checklist_range(flow)\n        for i in range(start, end):\n            key = flow['steps'][i]['key']\n            if statuses.get(key) != 'done':\n                statuses[key] = 'current'")
 
 
 * **エラーハンドリング**: `try`/`except`は存在しない。**（Issue #761 / AUDIT-032 で追加）** `step['checklist']`が`True`のとき`get_checklist_range(flow)`が`None`を返さない、という不変条件を`assert`で実行可能にした。この不変条件は`routine_data.py`のフロー定義に依存しており、`routine_data.py`は家族の生活動線を記述するデータで**変更頻度が最も高いファイル**であるため、コメントだけでは定義変更で黙って破れる。破れたときに`"None" is not iterable`の`TypeError`で500になるより、どのフローの定義が壊れているかを名指しして止める（`AssertionError`は`unified_server`の`global_exception_handler`が500にするため外形の結果は同じだが、ログに原因が残る）。
@@ -351,7 +351,7 @@
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`(`id`, **（ステップ遷移の追記記録で追加）**`user_id`, `flow_key`, `progress_date`, `current_step_index`, `in_free_time`(bool化済み), `steps_status`(JSONデコード済みdict), `bonus_gold`, `bonus_exp`, **（スキップ分の按分除外で追加）**`skipped_keys`(当日スキップされたステップkeyの`set`), **（ステップ遷移の追記記録で追加）**`_saved_steps_status`(DB保存済み`steps_status`の複製))
-* 根拠: [戻り値] (行番号: 160-180 / 抜粋: "'skipped_keys': set(json.loads(row['skipped_keys'])),")
+* 根拠: [戻り値] (参照: _row_to_progress / 抜粋: "'skipped_keys': set(json.loads(row['skipped_keys'])),")
 
 
 * **副作用**: なし
@@ -374,7 +374,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [型ヒント] (行番号: 177 / 抜粋: "    ) -> None:")
+* 根拠: [型ヒント] (参照: _insert_step_events / 抜粋: "    ) -> None:")
 
 
 * **副作用**: `routine_step_events`テーブルへの`INSERT`(`changes`の件数分)。
@@ -397,7 +397,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [型ヒント] (行番号: 197 / 抜粋: "-> None:")
+* 根拠: [型ヒント] (参照: _record_step_events / 抜粋: "-> None:")
 
 
 * **副作用**: `_insert_step_events`経由での`routine_step_events`への`INSERT`。
@@ -405,7 +405,7 @@
 
 
 * **エラーハンドリング**: なし(`try`/`except`は存在しない。`_saved_steps_status`が欠けている場合は`progress.get(...) or {}`により空辞書として扱われ、全ステップが変更扱いになる)
-* 根拠: [メソッド定義] (行番号: 205-219 / 抜粋: "saved = progress.get('_saved_steps_status') or {}")
+* 根拠: [メソッド定義] (参照: _record_step_events / 抜粋: "saved = progress.get('_saved_steps_status') or {}")
 
 
 
@@ -420,7 +420,7 @@
 
 
 * **戻り値/レスポンス**: `sqlite3.Row`または`None`(型注釈は無い)
-* 根拠: [メソッド定義] (行番号: 232-236 / 抜粋: "return cur.execute(")
+* 根拠: [メソッド定義] (参照: _fetch_progress_row / 抜粋: "return cur.execute(")
 
 
 * **副作用**: `routine_progress`への`SELECT`のみ。
@@ -439,15 +439,15 @@
 
 
 * **引数/リクエスト**: `cur`(DBカーソル)、`user_id: str`、`flow_key: str`、`flow: RoutineFlow`、`date_str: str`、`now: datetime.datetime`
-* 根拠: [メソッド定義] (行番号: 238-240 / 抜粋: "self, cur, user_id: str, flow_key: str, flow: RoutineFlow, date_str: str, now: datetime.datetime")
+* 根拠: [メソッド定義] (参照: _build_initial_progress / 抜粋: "self, cur, user_id: str, flow_key: str, flow: RoutineFlow, date_str: str, now: datetime.datetime")
 
 
 * **戻り値/レスポンス**: `dict[str, Any]`(`id`は`None`。`skipped_keys`は`set`)
-* 根拠: [戻り値] (行番号: 252-265 / 抜粋: "'id': None,")
+* 根拠: [戻り値] (参照: _build_initial_progress / 抜粋: "'id': None,")
 
 
 * **副作用**: `_resolve_skip_keys`経由の`routine_progress`への`SELECT`(土日のみ)。**書き込みは一切行わない**。
-* 根拠: [処理本体] (行番号: 247-248 / 抜粋: "skip_keys = self._resolve_skip_keys(cur, user_id, flow_key, flow, now)")
+* 根拠: [処理本体] (参照: _build_initial_progress / 抜粋: "skip_keys = self._resolve_skip_keys(cur, user_id, flow_key, flow, now)")
 
 
 * **エラーハンドリング**: なし(`try`/`except`は存在しない)
@@ -462,7 +462,7 @@
 
 
 * **引数/リクエスト**: `cur`(DBカーソル)、`user_id: str`、`flow_key: str`、`flow: RoutineFlow`、`date_str: str`、`now: datetime.datetime`
-* 根拠: [メソッド定義] (行番号: 267-269 / 抜粋: "self, cur, user_id: str, flow_key: str, flow: RoutineFlow, date_str: str, now: datetime.datetime")
+* 根拠: [メソッド定義] (参照: _read_progress / 抜粋: "self, cur, user_id: str, flow_key: str, flow: RoutineFlow, date_str: str, now: datetime.datetime")
 
 
 * **戻り値/レスポンス**: `dict[str, Any]`(`_row_to_progress`または`_build_initial_progress`の戻り値)
@@ -470,7 +470,7 @@
 
 
 * **副作用**: `SELECT`のみ(書き込みなし)。
-* 根拠: [処理本体] (行番号: 276 / 抜粋: "row = self._fetch_progress_row(cur, user_id, flow_key, date_str)")
+* 根拠: [処理本体] (参照: _read_progress / 抜粋: "row = self._fetch_progress_row(cur, user_id, flow_key, date_str)")
 
 
 * **エラーハンドリング**: なし(`try`/`except`は存在しない)
@@ -493,7 +493,7 @@
 
 
 * **副作用**: 該当行が存在しない場合、`routine_progress`テーブルへの`INSERT`を実行する(**休日PM微修正で変更**: `current_step_index`/`in_free_time`はスキップ計算結果、`steps_status`は`_empty_statuses`が返す`statuses`)。土日の場合、`_resolve_skip_keys`経由で`_was_done_on_any_date`が`routine_progress`への`SELECT`も行う。**（ステップ遷移の追記記録で追加）** さらに`_insert_step_events`経由で`routine_step_events`への`INSERT`(`skip_keys`の件数分)も行う。**（スキップ分の按分除外で変更）** `INSERT`する列に`skipped_keys`が加わった。
-* 根拠: [INSERT文] (行番号: 239-252 / 抜粋: "cur.execute(\"\"\"\n            INSERT INTO routine_progress\n                (user_id, flow_key, progress_date, current_step_index, in_free_time,\n                 steps_status, skipped_keys, bonus_gold, bonus_exp, created_at, updated_at)\n            VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)\n        \"\"\", (")
+* 根拠: [INSERT文] (参照: _get_or_create_progress / 抜粋: "cur.execute(\"\"\"\n            INSERT INTO routine_progress\n                (user_id, flow_key, progress_date, current_step_index, in_free_time,\n                 steps_status, skipped_keys, bonus_gold, bonus_exp, created_at, updated_at)\n            VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)\n        \"\"\", (")
 
 
 * **エラーハンドリング**: なし(`INSERT`失敗時の例外は捕捉されない。呼び出し元の`with core.database.get_db_cursor(commit=True)`側のロールバック挙動に委ねられる)
@@ -512,7 +512,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [型ヒント] (行番号: 261 / 抜粋: "    ) -> None:")
+* 根拠: [型ヒント] (参照: _save_progress / 抜粋: "    ) -> None:")
 
 
 * **副作用**: `routine_progress`テーブルへの`UPDATE`実行。**（ステップ遷移の追記記録で追加）** `_record_step_events`経由での`routine_step_events`への`INSERT`、および`progress['_saved_steps_status']`の書き換え(呼び出し元が持つ辞書を破壊的に更新する)。
@@ -539,7 +539,7 @@
 
 
 * **戻り値/レスポンス**: `float` — `0.0`〜`1.0`の達成率
-* 根拠: [戻り値] (行番号: 307-317 / 抜粋: "checkpoint_idx = get_checkpoint_index(flow)\n        if checkpoint_idx is None:\n            return 1.0\n        skipped_keys = progress.get('skipped_keys') or set()\n        eligible_keys = [\n            s['key'] for s in flow['steps'][:checkpoint_idx] if s['key'] not in skipped_keys\n        ]\n        if not eligible_keys:\n            return 0.0\n        done_count = sum(1 for k in eligible_keys if progress['steps_status'].get(k) == 'done')\n        return done_count / len(eligible_keys)")
+* 根拠: [戻り値] (参照: _eligible_done_ratio / 抜粋: "checkpoint_idx = get_checkpoint_index(flow)\n        if checkpoint_idx is None:\n            return 1.0\n        skipped_keys = progress.get('skipped_keys') or set()\n        eligible_keys = [\n            s['key'] for s in flow['steps'][:checkpoint_idx] if s['key'] not in skipped_keys\n        ]\n        if not eligible_keys:\n            return 0.0\n        done_count = sum(1 for k in eligible_keys if progress['steps_status'].get(k) == 'done')\n        return done_count / len(eligible_keys)")
 
 
 * **副作用**: なし
@@ -562,7 +562,7 @@
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値] (行番号: 313-317 / 抜粋: "        return all(")
+* 根拠: [戻り値] (参照: _is_checkpoint_path_cleared / 抜粋: "        return all(")
 
 
 * **副作用**: なし
@@ -588,7 +588,7 @@
 
 
 * **副作用**: `progress['steps_status']`のインプレース書き換え、`_grant_step_reward`経由の`quest_users`への`UPDATE`とログ出力(報酬を持つステップのみ)、一本道が埋まった場合のログ出力と`switchbot_service.trigger_tv_unlock`呼び出し。DBへの進捗保存は呼び出し元(`complete_step`)の`_save_progress`が行う。
-* 根拠: [TV解錠とログ] (行番号: 413-418 / 抜粋: "        logger.info(")
+* 根拠: [TV解錠とログ] (参照: _complete_remind_step / 抜粋: "        logger.info(")
 
 
 * **エラーハンドリング**: なし。呼び出し元が`'remind'`であることを確認済みのため、チェックポイントを二重に`'done'`にする経路は`progress['steps_status'].get(checkpoint_step['key']) == 'done'`の早期returnでも二重にガードされている。
@@ -606,7 +606,7 @@
 
 
 * **戻り値/レスポンス**: `Tuple[int, int]` — `(round(FULL_BONUS_GOLD * ratio), round(FULL_BONUS_EXP * ratio))`
-* 根拠: [戻り値] (行番号: 308-309 / 抜粋: "ratio = self._eligible_done_ratio(flow, progress)\n        return round(FULL_BONUS_GOLD * ratio), round(FULL_BONUS_EXP * ratio)")
+* 根拠: [戻り値] (参照: _compute_bonus_preview / 抜粋: "ratio = self._eligible_done_ratio(flow, progress)\n        return round(FULL_BONUS_GOLD * ratio), round(FULL_BONUS_EXP * ratio)")
 
 
 * **副作用**: なし
@@ -637,7 +637,7 @@
 
 
 * **エラーハンドリング**: 対象ユーザーが存在しない場合は例外を送出せず早期リターンで`{"leveled_up": False, "new_level": None}`を返す(サイレントスキップ)。
-* 根拠: [条件分岐] (行番号: 313-314 / 抜粋: "if not user:\n            return {\"leveled_up\": False, \"new_level\": None}")
+* 根拠: [条件分岐] (参照: _grant_bonus / 抜粋: "if not user:\n            return {\"leveled_up\": False, \"new_level\": None}")
 
 
 
@@ -650,7 +650,7 @@
 * 根拠: [メソッドシグネチャ] (行番号: 326)
 
 * **戻り値/レスポンス**: `None`(結果は`progress`のインプレース書き換えで返す)
-* 根拠: [メソッドシグネチャ] (行番号: 326 / 抜粋: "-> None:")
+* 根拠: [メソッドシグネチャ] (参照: _grant_step_reward / 抜粋: "-> None:")
 
 * **副作用**: 報酬が非0の場合のみ、`_grant_bonus`経由で`quest_users`の`gold`/`exp`/`level`を`UPDATE`(レベルアップ時は`sound_manager.play("level_up")`も鳴る)、`progress`辞書の`granted_gold`/`granted_exp`/`leveled_up`/`new_level`の書き換え、`logger.info`によるログ出力。
 * 根拠: [メソッド本体] (行番号: 339-350 / 抜粋: "        result = self._grant_bonus(cur, user_id, gold, exp)" … "        logger.info(\n            f\"Routine Step Reward: User={user_id}, Step={step['key']}, Gold={gold}, Exp={exp}\"\n        )")
@@ -667,7 +667,7 @@
 
 
 * **引数/リクエスト**: `flow: RoutineFlow`、`progress: dict[str, Any]`、`now: datetime.datetime`(DBカーソルは不要)
-* 根拠: [メソッド定義] (行番号: 484-486 / 抜粋: "self, flow: RoutineFlow, progress: dict[str, Any], now: datetime.datetime")
+* 根拠: [メソッド定義] (参照: _is_forced_transition_due / 抜粋: "self, flow: RoutineFlow, progress: dict[str, Any], now: datetime.datetime")
 
 
 * **戻り値/レスポンス**: `bool`(`True`=締切を過ぎており、かつまだ通過していない)
@@ -679,7 +679,7 @@
 
 
 * **エラーハンドリング**: `get_effective_checkpoint_time`が`None`を返した場合は`assert`でフロー名・ステップ名つきに止める(Issue #761 / AUDIT-032 で導入された表明をそのまま移設)。
-* 根拠: [assert] (行番号: 503-507 / 抜粋: "assert checkpoint_time is not None, (")
+* 根拠: [assert] (参照: _is_forced_transition_due / 抜粋: "assert checkpoint_time is not None, (")
 
 
 
@@ -689,7 +689,7 @@
 * 根拠: [ボーナス付与後のフラグ更新] (行番号: 578-583 / 抜粋: "            bonus_result = self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)\n            # 同一リクエスト内で先にステップ個別報酬(_grant_step_reward)によるレベル\n            # アップが起きている場合があるため、フラグは上書きせずORで畳み込む\n            # (new_levelは後から付与した側=こちらが最新のレベルになる)。\n            progress['leveled_up'] = bonus_result['leveled_up'] or progress.get('leveled_up', False)\n            progress['new_level'] = bonus_result['new_level']")
 
 * **役割**: チェックポイント(自由時間の終了予定時刻)を過ぎていれば、チェックポイントより前の未完了ステップを`'remind'`(「まだだよ」)に変え、チェックポイント以前のステップの達成率に応じたボーナスを`_grant_bonus`で付与したうえで、進捗をチェックポイントの次のステップへ進める。`current_step_index`が既にチェックポイントを通過していれば何もしない(冪等)。**（Issue #738 / AUDIT-008 で変更）** docstringの「どちらからも安全に呼べる」対象が`get_today_state`(GET)・`complete_step`(POST)から、`process_deadlines`(スケジューラの定期実行)・`complete_step`(POST)へ変わった — GETは読み取り専用になったため本メソッドを呼ばない。また冒頭の3つのガードは`_is_forced_transition_due`へ切り出され、本メソッドは`if not self._is_forced_transition_due(flow, progress, now): return progress`で始まる形になった(判定内容は同一)。**（コードレビューで発覚した欠落を修正）** ボーナスを付与した場合、`_grant_bonus`の戻り値(`leveled_up`/`new_level`)を`progress['leveled_up']`/`progress['new_level']`へ積み、`_serialize_flow`のレスポンスへ反映できるようにした(以前はこの伝播が無く、レベルアップがフロントへ一切通知されなかった)。ボーナスが0の場合(達成率0)はこれらのキー自体が`progress`に追加されないため、`_serialize_flow`側は`.get(..., False)`/`.get(...)`で安全にデフォルト値を補う。**（土日対応で変更）** 締切時刻の算出が`checkpoint_step['checkpoint_time']`の直接参照から`routine_data.get_effective_checkpoint_time(checkpoint_step, now)`経由に変わり、`now`が土日であれば`weekend_checkpoint_time`(設定されていれば)を締切として使うようになった。**（休日PM微修正で変更）** チェックポイント通過後に次のステップへ進めるインデックス計算が、単純な`checkpoint_idx + 1`から`self._next_active_index(flow, progress['steps_status'], checkpoint_idx + 1)`に変わり、チェックポイント直後のステップが(将来的に)`weekend_skip`/`weekend_carryover`でスキップ済みだった場合でも、それを`'current'`へ誤って書き戻さず正しく飛ばせるようになった(現状の`pm`フローの構成では`checkpoint_idx`より後のステップはスキップ対象にならないため、実際の挙動は変わらない防御的な変更)。**（朝の準備チェックリスト化で変更）** 達成率`ratio`の計算式(`done_count / len(eligible_keys)`)が本メソッドへのインライン実装から独立ヘルパー`self._eligible_done_ratio(flow, progress)`の呼び出しに置き換わった。計算内容自体は変わっておらず、`_serialize_flow`の`preview_bonus_gold`が使う`_compute_bonus_preview`と同じロジックを共有するための切り出しである。**（夜の切り替え/寝る準備チェックリスト化で変更）** チェックポイント通過後に次ステップを`'current'`にする処理が、`next_step['key']`への直接代入から`self._activate_block(flow, progress['steps_status'], next_index)`呼び出しに置き換わった。これにより、チェックポイントの直後が(`pm`フローの`free`のように)単一の通常ステップの場合はそのステップだけが`'current'`になり、直後が`checklist=True`なブロックの先頭だった場合はブロック全体が一括で`'current'`になる — `pm`フローでチェックポイント(`free`)の直後に寝る準備4項目のチェックリストが置かれたことで、このメソッドが初めて「チェックポイント通過でチェックリストブロックを活性化する」経路を実際に通るようになった。**（画面非表示化で変更）** `am`フローは元々チェックポイント直後に単なる表示用ステップ`leave`が続いていたが削除されたため、`am`では`next_active_index(flow, statuses, checkpoint_idx + 1)`が`len(flow['steps'])`を返すようになり、`_activate_block`は`index >= len(flow['steps'])`のガードにより何もしない(そのままフロー完了=`is_complete=True`になる)。**（自由時間の時間固定をやめる変更で修正）** 締切を過ぎた時点でチェックポイントステップ(自由時間)を無条件に`'done'`にするのをやめ、`_is_checkpoint_path_cleared`が`True`のときだけ`'done'`、そうでなければ`'remind'`にするようになった。これにより「宿題を飛ばしても時間が来れば自由時間が始まる」状態が無くなり、TV解錠も締切では起こらない(TV解錠はもともと本メソッドからは呼ばれていない)。寝る準備チェックリストの活性化(`next_index`への進行と`_activate_block`)は従来どおり締切で行う — 晩ごはん・お風呂は宿題の進捗と無関係に進むため。`'remind'`になった一本道のステップは締切後も`complete_step`から完了報告でき(`_complete_remind_step`)、全部埋まった時点で自由時間が`'done'`になりTVが解錠される。`am`フローでもこの変更は効くため、朝の準備を7:50までに終えられなかった日は`free`が`'done'`ではなく`'remind'`として残る(`am`のチェックリストは追いつき完了の対象外のため、その日のうちに`'done'`へ変わることはない)。
-* 根拠: [メソッド定義・docstring] (行番号: 526-589 / 抜粋: "def _apply_forced_transition(\n        self, cur, user_id: str, flow_key: str, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime\n    ) -> Dict[str, Any]:\n        \"\"\"チェックポイント(自由時間の終了予定時刻)を過ぎていれば、未完了ステップを\n        「まだだよ」に変え、チェックポイントより前のステップの達成率に応じたボーナスを\n        付与したうえでチェックポイントの次のステップへ進める。\n\n        current_step_indexがチェックポイントを既に通過していれば何もしない(冪等)ため、\n        GET(状態取得)・POST(ステップ完了)のどちらからも安全に呼べる。\n        \"\"\"")、[leveled_up/new_levelの伝播] (行番号: 388-391 / 抜粋: "if bonus_gold or bonus_exp:\n            bonus_result = self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)\n            progress['leveled_up'] = bonus_result['leveled_up']\n            progress['new_level'] = bonus_result['new_level']")、[土日対応の締切算出] (行番号: 363-364 / 抜粋: "checkpoint_step = flow['steps'][checkpoint_idx]\n        hour, minute = map(int, get_effective_checkpoint_time(checkpoint_step, now).split(':'))")、[休日PM微修正の次ステップ算出] (行番号: 571 / 抜粋: "next_index = self._next_active_index(flow, progress['steps_status'], checkpoint_idx + 1)")、[朝の準備チェックリスト化のratio共通化] (行番号: 369 / 抜粋: "ratio = self._eligible_done_ratio(flow, progress)")、[夜の切り替え/寝る準備チェックリスト化のブロック活性化] (行番号: 382-385 / 抜粋: "next_index = self._next_active_index(flow, progress['steps_status'], checkpoint_idx + 1)\n        progress['current_step_index'] = next_index\n        progress['in_free_time'] = False\n        self._activate_block(flow, progress['steps_status'], next_index)")
+* 根拠: [メソッド定義・docstring] (行番号: 526-589 / 抜粋: "def _apply_forced_transition(\n        self, cur, user_id: str, flow_key: str, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime\n    ) -> Dict[str, Any]:\n        \"\"\"チェックポイント(自由時間の終了予定時刻)を過ぎていれば、未完了ステップを\n        「まだだよ」に変え、チェックポイントより前のステップの達成率に応じたボーナスを\n        付与したうえでチェックポイントの次のステップへ進める。\n\n        current_step_indexがチェックポイントを既に通過していれば何もしない(冪等)ため、\n        GET(状態取得)・POST(ステップ完了)のどちらからも安全に呼べる。\n        \"\"\"")、[leveled_up/new_levelの伝播] (参照: _apply_forced_transition / 抜粋: "if bonus_gold or bonus_exp:\n            bonus_result = self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)\n            progress['leveled_up'] = bonus_result['leveled_up']\n            progress['new_level'] = bonus_result['new_level']")、[土日対応の締切算出] (参照: _apply_forced_transition / 抜粋: "checkpoint_step = flow['steps'][checkpoint_idx]\n        hour, minute = map(int, get_effective_checkpoint_time(checkpoint_step, now).split(':'))")、[休日PM微修正の次ステップ算出] (行番号: 571 / 抜粋: "next_index = self._next_active_index(flow, progress['steps_status'], checkpoint_idx + 1)")、[朝の準備チェックリスト化のratio共通化] (参照: _apply_forced_transition / 抜粋: "ratio = self._eligible_done_ratio(flow, progress)")、[夜の切り替え/寝る準備チェックリスト化のブロック活性化] (参照: _apply_forced_transition / 抜粋: "next_index = self._next_active_index(flow, progress['steps_status'], checkpoint_idx + 1)\n        progress['current_step_index'] = next_index\n        progress['in_free_time'] = False\n        self._activate_block(flow, progress['steps_status'], next_index)")
 
 
 * **引数/リクエスト**: `cur`(DBカーソル)、`user_id: str`、`flow_key: str`、`flow: RoutineFlow`、`progress: Dict[str, Any]`、`now: datetime.datetime`
@@ -701,18 +701,18 @@
 
 
 * **副作用**: チェックポイント通過条件を満たした場合、`self._save_progress(cur, progress)`による`routine_progress`のUPDATE、`self._grant_bonus(...)`による`quest_users`のUPDATE(ボーナスが0でない場合のみ、レベルアップ時は効果音再生も伴う)、および`logger.info(...)`によるログ出力を行う。条件を満たさない場合は副作用なし。
-* 根拠: [呼び出し] (行番号: 387-398 / 抜粋: "self._save_progress(cur, progress, 'forced_transition', now.isoformat())\n        if bonus_gold or bonus_exp:\n            bonus_result = self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)\n            progress['leveled_up'] = bonus_result['leveled_up'] or progress.get('leveled_up', False)\n            progress['new_level'] = bonus_result['new_level']\n\n        logger.info(\n            f\"Routine Checkpoint Passed: User={user_id}, Flow={flow_key}, \"\n            f\"Ratio={ratio:.2f}, Gold={bonus_gold}, Exp={bonus_exp}\"\n        )")
+* 根拠: [呼び出し] (参照: _apply_forced_transition / 抜粋: "self._save_progress(cur, progress, 'forced_transition', now.isoformat())\n        if bonus_gold or bonus_exp:\n            bonus_result = self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)\n            progress['leveled_up'] = bonus_result['leveled_up'] or progress.get('leveled_up', False)\n            progress['new_level'] = bonus_result['new_level']\n\n        logger.info(\n            f\"Routine Checkpoint Passed: User={user_id}, Flow={flow_key}, \"\n            f\"Ratio={ratio:.2f}, Gold={bonus_gold}, Exp={bonus_exp}\"\n        )")
 
 
 * **エラーハンドリング**: 明示的な`try`/`except`は無い。**（Issue #738 / AUDIT-008 で変更）** `checkpoint_idx is None`(チェックポイントを持つステップがフローに存在しない)、既に`current_step_index > checkpoint_idx`(通過済み)、締切時刻に未到達、の3つのガードは`_is_forced_transition_due`へ移り、本メソッドはその戻り値が`False`なら`progress`をそのまま返す早期リターンだけを持つ(`checkpoint_idx`の再取得には`assert checkpoint_idx is not None`が付く)。ゼロ除算回避は`_eligible_done_ratio`側の責務であり、**（スキップ分の按分除外で変更）** `eligible_keys`(スキップ分を除いた「当日やるべきステップ」)が空の場合に返す値は`1.0`から`0.0`になった(§4の`_eligible_done_ratio`参照)。**（土日対応で確認済み・Issue #761 / AUDIT-032 で`assert`化）** `get_effective_checkpoint_time`が`None`を返すこと(=チェックポイントでないステップに対して呼ぶこと)は`checkpoint_idx`で既にチェックポイントの位置を特定してから呼び出しているため起こらない。この前提は`routine_data.py`のフロー定義に依存するため、`.split(':')`する前に`assert checkpoint_time is not None`で表明し、破れたときに`"split" is not a known attribute of "None"`ではなくフロー名・ステップ名つきで止まるようにした。
-* 根拠: [早期リターン] (行番号: 359-361 / 抜粋: "checkpoint_idx = get_checkpoint_index(flow)\n        if checkpoint_idx is None or progress['current_step_index'] > checkpoint_idx:\n            return progress")、[時刻未到達の早期リターン] (行番号: 366-367 / 抜粋: "if now < deadline:\n            return progress")
+* 根拠: [早期リターン] (参照: _apply_forced_transition / 抜粋: "checkpoint_idx = get_checkpoint_index(flow)\n        if checkpoint_idx is None or progress['current_step_index'] > checkpoint_idx:\n            return progress")、[時刻未到達の早期リターン] (行番号: 366-367 / 抜粋: "if now < deadline:\n            return progress")
 
 
 
 ### `_toggle_checklist_step`（朝の準備チェックリスト化で新規追加、夜の切り替え/寝る準備チェックリスト化でチェックポイント固定の前提を「ブロック境界」概念へ一般化、毎朝ミッション統合でシグネチャ変更・TV解錠トリガー追加)
 
 * **役割**: `checklist=True`なステップを順不同でチェック/チェック解除する。**（夜の切り替え/寝る準備チェックリスト化で全面的に書き直し）** 以前は「チェックリストブロックはフロー先頭にあり、その直後がチェックポイントである」という`am`固有の構造を前提に、`get_checkpoint_index(flow)`だけでロック判定・全項目達成時の遷移先を決めていた。`pm`フローのチェックポイント通過後にもチェックリスト(寝る準備4項目、直後は単なる`sleep`でありチェックポイントではない)を置く要件により、この前提を`routine_data.get_checklist_range(flow)`が返す`(start, end)`を軸にした一般化された実装に書き直した。まず`get_checklist_range(flow)`でブロックの範囲を取得し(`target_step['checklist']`が`True`である以上必ず存在する。**Issue #761 / AUDIT-032 でこの不変条件を`assert`にした**)、`progress['current_step_index'] > end`(ブロックの境界=直後のステップより後まで進行済み、`am`なら出発済み・`pm`なら就寝を完了済み)であれば`HTTPException(400, "すでに次のステップに進んでいるため変更できません")`を送出して変更を拒否する。**（夜の切り替え/寝る準備チェックリスト化で新規追加）** 対象ステップの現在の状態が`'locked'`(=シーケンシャルな進行がまだそのブロックに到達していない)であれば`HTTPException(400, "まだこのステップには進んでいません")`を送出して拒否する — これは`am`では常に起こらない(チェックリストがフロー先頭にあり`_empty_statuses`が最初から全項目を`'current'`にするため)が、`pm`ではチェックポイント通過前に寝る準備の項目をチェックしようとするケースを防ぐために必要になった。これらのガードを通過すれば、まずブロック内の全ステップ(`checklist_keys`)が既に全て`'done'`かどうか(`was_all_done`)をトグル**前**に記録したうえで、対象ステップの`steps_status`を`'current'`(未チェック)⇔`'done'`(チェック済み)でトグルする。**（毎朝ミッション統合で追加）** トグル後に`all_done`(全て`'done'`か)を再計算し、`all_done`が`True`かつ`was_all_done`が`False`(＝今回のトグルで新たに全項目達成状態になった。既に全達成だった状態からのトグルや、取り消し操作では発火しない)かつ`flow_key == 'am'`(`pm`の寝る準備チェックリストは対象外)かつ`user_id == TV_UNLOCK_TARGET_USER_ID`(**TV対象を智矢個人へ限定する修正で`user_role == ROLE_CHILD`から変更**。涼花も`role_child`だが対象外で、TV操作の対象は智矢個人のクリアに限定する)かつ`config.TV_PLUG_DEVICE_ID`が設定済みであれば、`switchbot_service.trigger_tv_unlock("朝の準備チェックリスト全項目達成")`を呼ぶ。これは廃止された`quest_id=1100`「毎朝ミッション」クエスト承認時のTV電源ON処理と同等の処理を、チェックリスト全項目達成のタイミングへ移設したもの。続いて、`all_done`に応じて全て`'done'`ならば`current_step_index`をブロック境界(`end`)へ進め、境界が範囲内(`end < len(flow['steps'])`)であれば境界のステップを`'current'`にし、`in_free_time`はその境界ステップが実際にチェックポイント(`checkpoint_time`を持つ)かどうかで決める(`am`の境界は`free`でチェックポイントのため`True`、`pm`の境界は`sleep`でチェックポイントでないため`False`)。境界がフロー末尾を超える場合は`in_free_time=False`とする。1つでも未チェックが残っていれば、`current_step_index`をブロック先頭(`start`)へ戻し(全チェック済みから1つ取り消した場合の巻き戻しに対応)、`in_free_time=False`、境界のステップ(範囲内であれば)を`'locked'`に戻す。
-* 根拠: [メソッド定義・docstring] (行番号: 591-662 / 抜粋: "def _toggle_checklist_step(\n        self, flow: RoutineFlow, progress: Dict[str, Any], target_step: Dict[str, Any],\n        flow_key: str, user_id: str,\n    ) -> None:\n        \"\"\"checklist=Trueなステップを順不同でチェック/チェック解除する(要件: 朝の準備・\n        寝る準備は好きな順にチェックでき、間違えたら取り消せるようにしたい)。\n\n        チェックリストのブロック(get_checklist_range)は、amではフロー先頭(その直後に\n        出発チェックポイントが続く)、pmではチェックポイント通過後(その直後は単に\n        「就寝」)に置かれており、いずれも「ブロックの直後のステップ」がブロックの\n        境界(boundary)になる。境界を既に過ぎている(current_step_indexが境界より後、\n        =amなら出発済み・pmなら就寝を完了済み)場合は変更を拒否する。ブロックが\n        まだ'locked'(シーケンシャルな進行がまだそこに到達していない)状態での\n        トグルも同様に拒否する。\n        チェックリスト全項目が'done'になった/でなくなったタイミングで、フローの\n        現在地(current_step_index)・in_free_timeをブロックの前後にまとめて進める/戻す。\n\n        （毎朝ミッション統合で追加）amフローのチェックリスト(朝の準備)が新たに\n        全項目達成状態へ遷移した瞬間(既に全達成だった状態からのトグルでは発火しない)、\n        対象ユーザーが智矢(TV_UNLOCK_TARGET_USER_ID)であれば、旧quest_id=1100\n        「毎朝ミッション」(廃止済み、routine_data.py参照)の承認時と同じTV電源ON処理\n        (switchbot_service.trigger_tv_unlock)を呼ぶ。涼花も子供(role_child)だが、\n        TV操作の対象は智矢のクリアに限定する(要件確認済み)。pmの寝る準備チェックリストは\n        対象外。\n        \"\"\"")、[境界超過・未到達のガード] (行番号: 427-433 / 抜粋: "start, end = get_checklist_range(flow)  # target_step['checklist']がTrueなので必ず存在する\n        if progress['current_step_index'] > end:\n            raise HTTPException(status_code=400, detail=\"すでに次のステップに進んでいるため変更できません\")\n\n        key = target_step['key']\n        if progress['steps_status'].get(key) == 'locked':\n            raise HTTPException(status_code=400, detail=\"まだこのステップには進んでいません\")")、[達成状態の記録とトグル本体] (行番号: 632-636 / 抜粋: "checklist_keys = [flow['steps'][i]['key'] for i in range(start, end)]\n        was_all_done = all(progress['steps_status'].get(k) == 'done' for k in checklist_keys)\n\n        # 'current'=未チェック(いつでもチェック可能)、'done'=チェック済み、の2値をトグルする。\n        progress['steps_status'][key] = 'current' if progress['steps_status'].get(key) == 'done' else 'done'")、[TV解錠トリガー（毎朝ミッション統合で追加、TV対象を智矢個人へ限定する修正でuser_id判定に変更）] (行番号: 441-449 / 抜粋: "all_done = all(progress['steps_status'].get(k) == 'done' for k in checklist_keys)\n        if (\n            all_done\n            and not was_all_done\n            and flow_key == 'am'\n            and user_id == TV_UNLOCK_TARGET_USER_ID\n            and config.TV_PLUG_DEVICE_ID\n        ):\n            switchbot_service.trigger_tv_unlock(\"朝の準備チェックリスト全項目達成\")")、[全項目達成時の遷移/巻き戻し] (行番号: 650-662 / 抜粋: "if all_done:\n            progress['current_step_index'] = end\n            if end < len(flow['steps']):\n                boundary_step = flow['steps'][end]\n                progress['steps_status'][boundary_step['key']] = 'current'\n                progress['in_free_time'] = bool(boundary_step['checkpoint_time'])\n            else:\n                progress['in_free_time'] = False\n        else:\n            progress['current_step_index'] = start\n            progress['in_free_time'] = False\n            if end < len(flow['steps']):\n                progress['steps_status'][flow['steps'][end]['key']] = 'locked'")
+* 根拠: [メソッド定義・docstring] (行番号: 591-662 / 抜粋: "def _toggle_checklist_step(\n        self, flow: RoutineFlow, progress: Dict[str, Any], target_step: Dict[str, Any],\n        flow_key: str, user_id: str,\n    ) -> None:\n        \"\"\"checklist=Trueなステップを順不同でチェック/チェック解除する(要件: 朝の準備・\n        寝る準備は好きな順にチェックでき、間違えたら取り消せるようにしたい)。\n\n        チェックリストのブロック(get_checklist_range)は、amではフロー先頭(その直後に\n        出発チェックポイントが続く)、pmではチェックポイント通過後(その直後は単に\n        「就寝」)に置かれており、いずれも「ブロックの直後のステップ」がブロックの\n        境界(boundary)になる。境界を既に過ぎている(current_step_indexが境界より後、\n        =amなら出発済み・pmなら就寝を完了済み)場合は変更を拒否する。ブロックが\n        まだ'locked'(シーケンシャルな進行がまだそこに到達していない)状態での\n        トグルも同様に拒否する。\n        チェックリスト全項目が'done'になった/でなくなったタイミングで、フローの\n        現在地(current_step_index)・in_free_timeをブロックの前後にまとめて進める/戻す。\n\n        （毎朝ミッション統合で追加）amフローのチェックリスト(朝の準備)が新たに\n        全項目達成状態へ遷移した瞬間(既に全達成だった状態からのトグルでは発火しない)、\n        対象ユーザーが智矢(TV_UNLOCK_TARGET_USER_ID)であれば、旧quest_id=1100\n        「毎朝ミッション」(廃止済み、routine_data.py参照)の承認時と同じTV電源ON処理\n        (switchbot_service.trigger_tv_unlock)を呼ぶ。涼花も子供(role_child)だが、\n        TV操作の対象は智矢のクリアに限定する(要件確認済み)。pmの寝る準備チェックリストは\n        対象外。\n        \"\"\"")、[境界超過・未到達のガード] (行番号: 427-433 / 抜粋: "start, end = get_checklist_range(flow)  # target_step['checklist']がTrueなので必ず存在する\n        if progress['current_step_index'] > end:\n            raise HTTPException(status_code=400, detail=\"すでに次のステップに進んでいるため変更できません\")\n\n        key = target_step['key']\n        if progress['steps_status'].get(key) == 'locked':\n            raise HTTPException(status_code=400, detail=\"まだこのステップには進んでいません\")")、[達成状態の記録とトグル本体] (行番号: 632-636 / 抜粋: "checklist_keys = [flow['steps'][i]['key'] for i in range(start, end)]\n        was_all_done = all(progress['steps_status'].get(k) == 'done' for k in checklist_keys)\n\n        # 'current'=未チェック(いつでもチェック可能)、'done'=チェック済み、の2値をトグルする。\n        progress['steps_status'][key] = 'current' if progress['steps_status'].get(key) == 'done' else 'done'")、[TV解錠トリガー（毎朝ミッション統合で追加、TV対象を智矢個人へ限定する修正でuser_id判定に変更）] (参照: _toggle_checklist_step / 抜粋: "all_done = all(progress['steps_status'].get(k) == 'done' for k in checklist_keys)\n        if (\n            all_done\n            and not was_all_done\n            and flow_key == 'am'\n            and user_id == TV_UNLOCK_TARGET_USER_ID\n            and config.TV_PLUG_DEVICE_ID\n        ):\n            switchbot_service.trigger_tv_unlock(\"朝の準備チェックリスト全項目達成\")")、[全項目達成時の遷移/巻き戻し] (行番号: 650-662 / 抜粋: "if all_done:\n            progress['current_step_index'] = end\n            if end < len(flow['steps']):\n                boundary_step = flow['steps'][end]\n                progress['steps_status'][boundary_step['key']] = 'current'\n                progress['in_free_time'] = bool(boundary_step['checkpoint_time'])\n            else:\n                progress['in_free_time'] = False\n        else:\n            progress['current_step_index'] = start\n            progress['in_free_time'] = False\n            if end < len(flow['steps']):\n                progress['steps_status'][flow['steps'][end]['key']] = 'locked'")
 
 
 * **引数/リクエスト**: `flow: RoutineFlow`、`progress: Dict[str, Any]`、`target_step: Dict[str, Any]`(トグル対象の`RoutineStep`)、**（毎朝ミッション統合で追加）**`flow_key: str`(`'am'`/`'pm'`。TV解錠トリガーを`am`のみに限定するために使う)、`user_id: str`(呼び出し元ユーザーのID。**TV対象を智矢個人へ限定する修正で`user_role: Optional[str]`から変更**。以前は呼び出し元ユーザーの`role`を渡し`ROLE_CHILD`かどうかで判定していたが、涼花(`role_child`)も対象に含まれてしまうため、`TV_UNLOCK_TARGET_USER_ID`との比較に置き換えられた)
@@ -720,7 +720,7 @@
 
 
 * **戻り値/レスポンス**: `None`(`progress`を直接ミューテートする破壊的メソッド)
-* 根拠: [型ヒント] (行番号: 405 / 抜粋: "-> None:")
+* 根拠: [型ヒント] (参照: _toggle_checklist_step / 抜粋: "-> None:")
 
 
 * **副作用**: 呼び出し元の`progress`辞書(`steps_status`/`current_step_index`/`in_free_time`)を直接書き換える。DBへの`UPDATE`自体は行わず、呼び出し元の`complete_step`が続けて`self._save_progress(cur, progress)`を呼ぶことで永続化される。**（毎朝ミッション統合で追加、Issue #737 / AUDIT-007 で発火位置を変更）** 条件が揃った場合、本メソッドは`switchbot_service.trigger_tv_unlock`を**直接は呼ばず**、`progress['_tv_unlock_reason']`に理由文字列を控えるだけにする。実際の発火は呼び出し元`complete_step`が**トランザクションのコミット後・ユーザー残高ロック解放後**に行う（詳細は`complete_step`の項を参照）。とくにこの経路は、発火判定の後に`_save_progress`と`_apply_forced_transition`という「例外を投げうるコード」が2つ続くため、以前は「TVだけ点いてチェックリストはロールバック」が最も起きやすかった。
@@ -735,7 +735,7 @@
 ### `_serialize_flow`
 
 * **役割**: `flow`(定義)と`progress`(内部表現)から、APIレスポンス用の辞書を組み立てる。チェックポイントの有無・時刻、各ステップの`is_checkpoint`/`status`、`current_step_index`、`in_free_time`、全ステップ完了判定(`is_complete`)、ボーナスgold/expを含む。**（コードレビューで発覚した欠落を修正）** `leveled_up`/`new_level`も含めるようになった。これらは`progress`に無ければ(=このリクエストでチェックポイントを通過していなければ)`.get(..., False)`/`.get(...)`によりそれぞれ`False`/`None`にフォールバックする。**（土日対応で変更）** 第3引数`now`が追加され、レスポンスに含める`checkpoint_time`は`flow['steps'][checkpoint_idx]['checkpoint_time']`の直接参照ではなく`routine_data.get_effective_checkpoint_time(flow['steps'][checkpoint_idx], now)`で「今日」時点の実際の締切時刻(土日なら`weekend_checkpoint_time`があればそちら)を解決するようになった。**（朝の準備チェックリスト化で変更）** 各ステップの出力に`is_checklist`(`step['checklist']`をそのまま転記)が追加され、フロントエンドは`is_checkpoint`と同じ扱いでこのフラグを見てチェックボックス風のUIを出し分けられるようになった。また`self._compute_bonus_preview(flow, progress)`で算出した`preview_bonus_gold`(現在のチェック状況に基づく出発ボーナスの見込みgold、チェックポイント通過前後を問わず常に計算される)と`bonus_full_gold`(`FULL_BONUS_GOLD`の値そのもの)がレスポンスに追加された。EXP側のプレビュー(`_compute_bonus_preview`の第2戻り値)は変数`_preview_bonus_exp`で受け取るが、要件上ゴールドの見込み額のみを画面に出せば十分なためレスポンスには含めない。**（大人用フロー分離で変更）** 各ステップの出力に`gold`/`exp`(`get_step_reward(step)`の戻り値、そのステップ固有の即時報酬額。子ども用フローのステップは常に0)が追加され、フロントエンドが「+50 G」のような報酬チップを描画できるようになった。トップレベルにも`granted_gold`/`granted_exp`(`progress.get(..., 0)`)が追加された。これは`leveled_up`と同じく、ステップ個別報酬を付与した「その1回のレスポンス」でのみ非0になり、付与を行わない`GET /today`経由では常に0である。
-* 根拠: [メソッド定義] (行番号: 664-714 / 抜粋: "def _serialize_flow(self, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime) -> Dict[str, Any]:\n        checkpoint_idx = get_checkpoint_index(flow)\n        # 土日は締切時刻が変わりうる(get_effective_checkpoint_time)ため、表示用の\n        # checkpoint_timeも「今日」時点の実際の時刻をnowから解決する。\n        checkpoint_time = (\n            get_effective_checkpoint_time(flow['steps'][checkpoint_idx], now) if checkpoint_idx is not None else None\n        )")、[leveled_up/new_levelのフォールバック] (行番号: 707-708 / 抜粋: "\"leveled_up\": progress.get('leveled_up', False),\n            \"new_level\": progress.get('new_level'),")、[is_checklistの転記] (行番号: 471-481 / 抜粋: "steps_out = [\n            {\n                \"key\": step['key'],\n                \"label\": step['label'],\n                \"icon_key\": step['icon_key'],\n                \"is_checkpoint\": bool(step['checkpoint_time']),\n                \"is_checklist\": step['checklist'],\n                \"status\": progress['steps_status'].get(step['key'], 'locked'),\n            }\n            for step in flow['steps']\n        ]")、[ボーナス見込み額の算出・格納] (行番号: 686, 696-700 / 抜粋: "preview_bonus_gold, _preview_bonus_exp = self._compute_bonus_preview(flow, progress)", "# チェックリスト(例: 朝の準備)を1つチェックするたびに増えていく、出発時に\n            # もらえるゴールドの見込み額(要件: チェックした分が画面でわかるようにしたい)。\n            # チェックポイント通過前はライブプレビュー、通過後はbonus_goldと同じ値になる。\n            \"preview_bonus_gold\": preview_bonus_gold,\n            \"bonus_full_gold\": FULL_BONUS_GOLD,")
+* 根拠: [メソッド定義] (行番号: 664-714 / 抜粋: "def _serialize_flow(self, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime) -> Dict[str, Any]:\n        checkpoint_idx = get_checkpoint_index(flow)\n        # 土日は締切時刻が変わりうる(get_effective_checkpoint_time)ため、表示用の\n        # checkpoint_timeも「今日」時点の実際の時刻をnowから解決する。\n        checkpoint_time = (\n            get_effective_checkpoint_time(flow['steps'][checkpoint_idx], now) if checkpoint_idx is not None else None\n        )")、[leveled_up/new_levelのフォールバック] (行番号: 707-708 / 抜粋: "\"leveled_up\": progress.get('leveled_up', False),\n            \"new_level\": progress.get('new_level'),")、[is_checklistの転記] (参照: _serialize_flow / 抜粋: "steps_out = [\n            {\n                \"key\": step['key'],\n                \"label\": step['label'],\n                \"icon_key\": step['icon_key'],\n                \"is_checkpoint\": bool(step['checkpoint_time']),\n                \"is_checklist\": step['checklist'],\n                \"status\": progress['steps_status'].get(step['key'], 'locked'),\n            }\n            for step in flow['steps']\n        ]")、[ボーナス見込み額の算出・格納] (行番号: 686, 696-700 / 抜粋: "preview_bonus_gold, _preview_bonus_exp = self._compute_bonus_preview(flow, progress)", "# チェックリスト(例: 朝の準備)を1つチェックするたびに増えていく、出発時に\n            # もらえるゴールドの見込み額(要件: チェックした分が画面でわかるようにしたい)。\n            # チェックポイント通過前はライブプレビュー、通過後はbonus_goldと同じ値になる。\n            \"preview_bonus_gold\": preview_bonus_gold,\n            \"bonus_full_gold\": FULL_BONUS_GOLD,")
 
 
 * **引数/リクエスト**: `flow: RoutineFlow`、`progress: Dict[str, Any]`、**（土日対応で追加）**`now: datetime.datetime`
@@ -743,7 +743,7 @@
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`(`started`, `title`, `checkpoint_time`, `current_step_index`, `in_free_time`, `is_complete`, `bonus_gold`, `bonus_exp`, **（朝の準備チェックリスト化で追加）**`preview_bonus_gold`, `bonus_full_gold`, `leveled_up`, `new_level`, **（大人用フロー分離で追加）**`granted_gold`, `granted_exp`, `steps`(各要素は`key`/`label`/`icon_key`/`is_checkpoint`/**（朝の準備チェックリスト化で追加）**`is_checklist`/`status`/**（大人用フロー分離で追加）**`gold`/`exp`))
-* 根拠: [ステップ個別報酬の出力] (行番号: 479-483 / 抜粋: "                # 大人用フローに寄せたデイリークエスト相当のステップ個別報酬\n                # (子ども用フローのステップは常に0)。画面に「+50 G」として出す。\n                \"gold\": get_step_reward(step)[0],\n                \"exp\": get_step_reward(step)[1],")、[granted_gold/granted_expの出力] (行番号: 509-513 / 抜粋: "            # leveled_upと同じく、ステップ個別報酬を付与した「その1回のレスポンス」\n            # でのみ非0になる(GET /todayは付与を行わないため常に0)。\n            \"granted_gold\": progress.get('granted_gold', 0),\n            \"granted_exp\": progress.get('granted_exp', 0),")
+* 根拠: [ステップ個別報酬の出力] (参照: _serialize_flow / 抜粋: "                # 大人用フローに寄せたデイリークエスト相当のステップ個別報酬\n                # (子ども用フローのステップは常に0)。画面に「+50 G」として出す。\n                \"gold\": get_step_reward(step)[0],\n                \"exp\": get_step_reward(step)[1],")、[granted_gold/granted_expの出力] (参照: _serialize_flow / 抜粋: "            # leveled_upと同じく、ステップ個別報酬を付与した「その1回のレスポンス」\n            # でのみ非0になる(GET /todayは付与を行わないため常に0)。\n            \"granted_gold\": progress.get('granted_gold', 0),\n            \"granted_exp\": progress.get('granted_exp', 0),")
 * 根拠: [戻り値] (行番号: 363-386)
 
 
@@ -763,7 +763,7 @@
 
 
 * **引数/リクエスト**: `user_id: str`、`now: Optional[datetime.datetime] = None`(省略時は`datetime.datetime.now(JST)`)
-* 根拠: [メソッド定義] (行番号: 716 / 抜粋: "def get_today_state(self, user_id: str, now: Optional[datetime.datetime] = None) -> Dict[str, Any]:")、[デフォルト値解決] (行番号: 727 / 抜粋: "now = now or datetime.datetime.now(JST)")
+* 根拠: [メソッド定義] (行番号: 716 / 抜粋: "def get_today_state(self, user_id: str, now: Optional[datetime.datetime] = None) -> Dict[str, Any]:")、[デフォルト値解決] (参照: get_today_state / 抜粋: "now = now or datetime.datetime.now(JST)")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` — `{"date": date_str, "flows": flows_out}`。`flows_out`の各値は、未開始フローなら`{"started": False, "title": flow['title']}`、開始済みなら`_serialize_flow`の戻り値。**（Issue #738 / AUDIT-008 で変更）** 書き込みを行わなくなったため、「そのリクエストでだけ立つ」性質のキー(`leveled_up`/`new_level`/`granted_gold`/`granted_exp`)はGET経路では常に初期値(`False`/`None`/`0`/`0`)になる。
@@ -775,7 +775,7 @@
 
 
 * **エラーハンドリング**: 対象ユーザーが`quest_users`テーブルに存在しない場合、`_flow_set_for`→`_get_user_row`が`HTTPException(status_code=404, detail="User not found")`を送出する(挙動・ステータスコード・メッセージは変更なし)。
-* 根拠: [フローセット解決経由の存在確認] (行番号: 731 / 抜粋: "flows = self._flow_set_for(cur, user_id)")、[例外送出の実体] (§4の`_get_user_row`参照、行番号: 42-43)
+* 根拠: [フローセット解決経由の存在確認] (参照: get_today_state / 抜粋: "flows = self._flow_set_for(cur, user_id)")、[例外送出の実体] (§4の`_get_user_row`参照、行番号: 42-43)
 
 
 
@@ -809,7 +809,7 @@
 
 
 * **引数/リクエスト**: `cur`(DBカーソル)、`user_id: str`、`flows: dict[str, RoutineFlow]`、`date_str: str`、`now: datetime.datetime`
-* 根拠: [メソッド定義] (行番号: 741-743 / 抜粋: "self, cur, user_id: str, flows: dict[str, RoutineFlow], date_str: str, now: datetime.datetime")
+* 根拠: [メソッド定義] (参照: _has_pending_deadline_work / 抜粋: "self, cur, user_id: str, flows: dict[str, RoutineFlow], date_str: str, now: datetime.datetime")
 
 
 * **戻り値/レスポンス**: `bool`
@@ -817,7 +817,7 @@
 
 
 * **副作用**: `routine_progress`への`SELECT`のみ。
-* 根拠: [処理本体] (行番号: 752 / 抜粋: "row = self._fetch_progress_row(cur, user_id, flow_key, date_str)")
+* 根拠: [処理本体] (参照: _has_pending_deadline_work / 抜粋: "row = self._fetch_progress_row(cur, user_id, flow_key, date_str)")
 
 
 * **エラーハンドリング**: なし(`try`/`except`は存在しない)
@@ -828,11 +828,11 @@
 ### `_process_user_deadlines`（Issue #738 / AUDIT-008 で新規追加）
 
 * **役割**: 1ユーザー分の締切処理を行い、強制遷移を適用したフロー数を返す。まず`get_db_cursor()`(読み取り専用)で`_has_pending_deadline_work`を評価し、不要なら`0`を返して終了する。必要な場合のみ`_get_user_balance_lock(user_id)`→`get_db_cursor(commit=True)`を取り、開始済みの各フローについて`_get_or_create_progress`→`_apply_forced_transition`を実行する。`current_step_index`が変化したフロー数を数えて返す。ロックを取るのは`_grant_bonus`が`quest_users`をread-modify-writeするためで、クエスト完了・承認・購入と同じロックを共有する。
-* 根拠: [メソッド定義] (行番号: 787-810 / 抜粋: "def _process_user_deadlines(")、[事前判定] (行番号: 765-767 / 抜粋: "with get_db_cursor() as cur:  # まず読み取りだけで必要性を判定する")、[ロックと書き込み] (行番号: 772-774 / 抜粋: "with _get_user_balance_lock(user_id):")
+* 根拠: [メソッド定義] (行番号: 787-810 / 抜粋: "def _process_user_deadlines(")、[事前判定] (参照: _process_user_deadlines / 抜粋: "with get_db_cursor() as cur:  # まず読み取りだけで必要性を判定する")、[ロックと書き込み] (参照: _process_user_deadlines / 抜粋: "with _get_user_balance_lock(user_id):")
 
 
 * **引数/リクエスト**: `user_id: str`、`role: str | None`、`date_str: str`、`now: datetime.datetime`
-* 根拠: [メソッド定義] (行番号: 760-762 / 抜粋: "self, user_id: str, role: str | None, date_str: str, now: datetime.datetime")
+* 根拠: [メソッド定義] (参照: _process_user_deadlines / 抜粋: "self, user_id: str, role: str | None, date_str: str, now: datetime.datetime")
 
 
 * **戻り値/レスポンス**: `int`(強制遷移を適用したフロー数。0〜2)
@@ -840,7 +840,7 @@
 
 
 * **副作用**: 必要と判定された場合のみ、ユーザー残高ロックの取得・解放、`routine_progress`への`INSERT`/`UPDATE`、`quest_users`への`UPDATE`(ボーナスが0でない場合)、`routine_step_events`への`INSERT`、ログ出力。不要な場合は`SELECT`のみ。
-* 根拠: [呼び出し] (行番号: 779-780 / 抜粋: "progress = self._get_or_create_progress(cur, user_id, flow_key, flow, date_str, now)")
+* 根拠: [呼び出し] (参照: _process_user_deadlines / 抜粋: "progress = self._get_or_create_progress(cur, user_id, flow_key, flow, date_str, now)")
 
 
 * **エラーハンドリング**: なし(例外は呼び出し元`process_deadlines`のユーザー単位`try`/`except`が捕捉する)
@@ -851,23 +851,23 @@
 ### `process_deadlines`（Issue #738 / AUDIT-008 で新規追加、公開メソッド）
 
 * **役割**: 全ユーザーの締切超過(チェックポイント通過)を適用する公開メソッド。`quest_users`から`(user_id, role)`の一覧を読み取り、1人ずつ`_process_user_deadlines`を呼ぶ。docstringによれば、`scheduler_boot.TASKS`に登録された`monitors/routine_deadline_job.py`が60秒ごとに`POST /api/routine/deadlines/process`を叩き、**`unified_server`のプロセス内で**この関数が動く。スケジューラは別プロセスのため`quest_users`を直接書かずHTTP APIを経由する必要がある(CLAUDE.md「並行制御は単一プロセス前提」/`reset_game.py`と同じ方針)。`now`はテスト用の注入専用で、APIからは渡せない(クライアントが締切判定の基準時刻を操作できてしまうため)。
-* 根拠: [メソッド定義・docstring] (行番号: 812-858 / 抜粋: "def process_deadlines(self, now: datetime.datetime | None = None) -> dict[str, Any]:", "`now` はテスト用の注入専用で、APIからは渡せない")、[ユーザー一覧の取得] (行番号: 805-809 / 抜粋: "for row in cur.execute(\"SELECT user_id, role FROM quest_users\").fetchall()")
+* 根拠: [メソッド定義・docstring] (行番号: 812-858 / 抜粋: "def process_deadlines(self, now: datetime.datetime | None = None) -> dict[str, Any]:", "`now` はテスト用の注入専用で、APIからは渡せない")、[ユーザー一覧の取得] (参照: process_deadlines / 抜粋: "for row in cur.execute(\"SELECT user_id, role FROM quest_users\").fetchall()")
 
 
 * **引数/リクエスト**: `now: datetime.datetime | None = None`(省略時は`datetime.datetime.now(JST)`)
-* 根拠: [メソッド定義] (行番号: 812 / 抜粋: "def process_deadlines(self, now: datetime.datetime | None = None) -> dict[str, Any]:")、[デフォルト値解決] (行番号: 801 / 抜粋: "now = now or datetime.datetime.now(JST)")
+* 根拠: [メソッド定義] (行番号: 812 / 抜粋: "def process_deadlines(self, now: datetime.datetime | None = None) -> dict[str, Any]:")、[デフォルト値解決] (参照: process_deadlines / 抜粋: "now = now or datetime.datetime.now(JST)")
 
 
 * **戻り値/レスポンス**: `dict[str, Any]` — `{"date": <YYYY-MM-DD>, "processed_users": <成功したユーザー数>, "failed_users": <失敗したユーザー数>, "transitions": <強制遷移を適用したフロー数の合計>}`
-* 根拠: [戻り値] (行番号: 826-831 / 抜粋: "return {")
+* 根拠: [戻り値] (参照: process_deadlines / 抜粋: "return {")
 
 
 * **副作用**: `quest_users`への`SELECT`、および`_process_user_deadlines`経由の副作用(必要なユーザーのみ)。遷移が発生したか失敗があった場合のみ`logger.info`でサマリを出力する。
-* 根拠: [ログ出力] (行番号: 820-825 / 抜粋: "if transitions or failed:")
+* 根拠: [ログ出力] (参照: process_deadlines / 抜粋: "if transitions or failed:")
 
 
 * **エラーハンドリング**: ユーザー単位で`except Exception`(`# noqa: BLE001`)を張り、`logger.exception`で記録して`failed_users`を加算し、次のユーザーの処理を続ける。docstringが述べる通り、1ユーザーの失敗が他のユーザーやスケジューラのタスク全体を巻き込まないようにするため。
-* 根拠: [例外処理] (行番号: 815-818 / 抜粋: "except Exception:  # noqa: BLE001 — 無人実行なので、失敗理由に関わらず")
+* 根拠: [例外処理] (参照: process_deadlines / 抜粋: "except Exception:  # noqa: BLE001 — 無人実行なので、失敗理由に関わらず")
 
 
 
@@ -884,11 +884,11 @@
   **（大人用フロー分離で追加）** 逐次ステップ分岐では、対象ステップを`'done'`にした直後に`self._grant_step_reward(cur, user_id, progress, current_step)`を呼び、そのステップが`gold`/`exp`を持つ場合(大人用フローへ寄せた旧デイリークエスト相当のステップ)に限り即時報酬を付与する。付与は次ステップへ進める処理の前に行われ、チェックリスト分岐(`_toggle_checklist_step`)には報酬付与の経路が無い(大人用フローのチェックリスト項目は`gold`/`exp`を持たないため)。
 
   どちらの分岐でも、その後`self._save_progress(cur, progress)`で永続化し、直後に締切を過ぎていた場合に備えた2回目の`_apply_forced_transition`を適用する。**（休日PM微修正で変更）** `_get_or_create_progress`呼び出しにも`now`を渡すようになった。
-* 根拠: [メソッド定義] (行番号: 860-959 / 抜粋: "def complete_step(\n        self, user_id: str, flow_key: str, step_key: str, now: Optional[datetime.datetime] = None\n    ) -> Dict[str, Any]:")、[フローセット解決とflow_key検証（大人用フロー分離で変更）] (行番号: 539-545 / 抜粋: "                # フローの内容はユーザー(子ども/パパ/ママ)によって異なるため、\n                # flow_keyの検証もユーザーを解決してから行う。\n                flows = self._flow_set_for(cur, user_id)\n                if flow_key not in flows:\n                    raise HTTPException(status_code=404, detail=\"Unknown flow_key\")\n                flow = flows[flow_key]")、[ステップ個別報酬の付与（大人用フロー分離で追加）] (行番号: 922-923 / 抜粋: "                    progress['steps_status'][step_key] = 'done'\n                    self._grant_step_reward(cur, user_id, progress, current_step)")、[休日PM微修正のnow伝播] (行番号: 551 / 抜粋: "progress = self._get_or_create_progress(cur, user_id, flow_key, flow, date_str, now)")、[対象ステップ探索とUnknown step_key] (行番号: 890-892 / 抜粋: "target_step = next((s for s in flow['steps'] if s['key'] == step_key), None)\n                if target_step is None:\n                    raise HTTPException(status_code=404, detail=\"Unknown step_key\")")、[チェックリスト分岐] (行番号: 910-914 / 抜粋: "if target_step['checklist']:\n                    # チェックリストのステップは、そのブロックに進行が到達していれば\n                    # (='locked'でなければ)順不同でチェック/チェック解除できる\n                    # (要件: 朝の準備・寝る準備は好きな順で良い)。\n                    self._toggle_checklist_step(flow, progress, target_step, flow_key, user_id)")、[逐次ステップ分岐] (行番号: 567-593 / 抜粋: "else:\n                    current_step = flow['steps'][idx]\n                    if current_step['key'] != step_key:\n                        raise HTTPException(status_code=409, detail=\"表示が古いようです。再読み込みしてください\")\n                    if current_step['checkpoint_time']:\n                        raise HTTPException(status_code=400, detail=\"自由時間は時間になると自動的に次へ進みます\")\n\n                    progress['steps_status'][step_key] = 'done'\n                    next_index = self._next_active_index(flow, progress['steps_status'], idx + 1)\n                    progress['current_step_index'] = next_index\n                    self._activate_block(flow, progress['steps_status'], next_index)\n                    if next_index < len(flow['steps']):\n                        entered_free_time = bool(flow['steps'][next_index]['checkpoint_time'])\n                        progress['in_free_time'] = entered_free_time")、[夕方フリータイムTV解錠トリガー（夕方フリータイムでTV解錠を追加、TV対象を智矢個人へ限定する修正でuser_id判定に変更）] (行番号: 588-594 / 抜粋: "if (\n                            entered_free_time\n                            and flow_key == 'pm'\n                            and user_id == TV_UNLOCK_TARGET_USER_ID\n                            and config.TV_PLUG_DEVICE_ID\n                        ):\n                            switchbot_service.trigger_tv_unlock(\"夕方の自由時間開始(宿題・明日の準備完了)\")")
+* 根拠: [メソッド定義] (行番号: 860-959 / 抜粋: "def complete_step(\n        self, user_id: str, flow_key: str, step_key: str, now: Optional[datetime.datetime] = None\n    ) -> Dict[str, Any]:")、[フローセット解決とflow_key検証（大人用フロー分離で変更）] (参照: complete_step / 抜粋: "                # フローの内容はユーザー(子ども/パパ/ママ)によって異なるため、\n                # flow_keyの検証もユーザーを解決してから行う。\n                flows = self._flow_set_for(cur, user_id)\n                if flow_key not in flows:\n                    raise HTTPException(status_code=404, detail=\"Unknown flow_key\")\n                flow = flows[flow_key]")、[ステップ個別報酬の付与（大人用フロー分離で追加）] (行番号: 922-923 / 抜粋: "                    progress['steps_status'][step_key] = 'done'\n                    self._grant_step_reward(cur, user_id, progress, current_step)")、[休日PM微修正のnow伝播] (参照: complete_step / 抜粋: "progress = self._get_or_create_progress(cur, user_id, flow_key, flow, date_str, now)")、[対象ステップ探索とUnknown step_key] (行番号: 890-892 / 抜粋: "target_step = next((s for s in flow['steps'] if s['key'] == step_key), None)\n                if target_step is None:\n                    raise HTTPException(status_code=404, detail=\"Unknown step_key\")")、[チェックリスト分岐] (行番号: 910-914 / 抜粋: "if target_step['checklist']:\n                    # チェックリストのステップは、そのブロックに進行が到達していれば\n                    # (='locked'でなければ)順不同でチェック/チェック解除できる\n                    # (要件: 朝の準備・寝る準備は好きな順で良い)。\n                    self._toggle_checklist_step(flow, progress, target_step, flow_key, user_id)")、[逐次ステップ分岐] (行番号: 567-593 / 抜粋: "else:\n                    current_step = flow['steps'][idx]\n                    if current_step['key'] != step_key:\n                        raise HTTPException(status_code=409, detail=\"表示が古いようです。再読み込みしてください\")\n                    if current_step['checkpoint_time']:\n                        raise HTTPException(status_code=400, detail=\"自由時間は時間になると自動的に次へ進みます\")\n\n                    progress['steps_status'][step_key] = 'done'\n                    next_index = self._next_active_index(flow, progress['steps_status'], idx + 1)\n                    progress['current_step_index'] = next_index\n                    self._activate_block(flow, progress['steps_status'], next_index)\n                    if next_index < len(flow['steps']):\n                        entered_free_time = bool(flow['steps'][next_index]['checkpoint_time'])\n                        progress['in_free_time'] = entered_free_time")、[夕方フリータイムTV解錠トリガー（夕方フリータイムでTV解錠を追加、TV対象を智矢個人へ限定する修正でuser_id判定に変更）] (行番号: 588-594 / 抜粋: "if (\n                            entered_free_time\n                            and flow_key == 'pm'\n                            and user_id == TV_UNLOCK_TARGET_USER_ID\n                            and config.TV_PLUG_DEVICE_ID\n                        ):\n                            switchbot_service.trigger_tv_unlock(\"夕方の自由時間開始(宿題・明日の準備完了)\")")
 
 
 * **引数/リクエスト**: `user_id: str`、`flow_key: str`、`step_key: str`、`now: Optional[datetime.datetime] = None`(省略時は`datetime.datetime.now(JST)`)
-* 根拠: [メソッド定義] (行番号: 408-410)、[デフォルト値解決] (行番号: 546 / 抜粋: "now = now or datetime.datetime.now(JST)")
+* 根拠: [メソッド定義] (行番号: 408-410)、[デフォルト値解決] (参照: complete_step / 抜粋: "now = now or datetime.datetime.now(JST)")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`(`_serialize_flow(flow, progress, now)`の戻り値、更新後の状態)
@@ -896,11 +896,11 @@
 
 
 * **副作用**: `_get_user_balance_lock(user_id)`・`core.database.get_db_cursor(commit=True)`によるロック・トランザクション、`_get_or_create_progress`による`INSERT`(初回のみ、土日は`_resolve_skip_keys`経由の`SELECT`も伴う)、チェックリストなら`_toggle_checklist_step`による`progress`のインプレース書き換え(条件成立時は`switchbot_service.trigger_tv_unlock`も呼ぶ)、逐次ステップなら対象ステップを`'done'`・次ステップを`'current'`にする書き換えと、**（大人用フロー分離で追加）**`_grant_step_reward`によるステップ個別報酬の付与(該当ステップのみ。`quest_users`の`gold`/`exp`/`level`への`UPDATE`とログ出力を伴う)(**夕方フリータイムでTV解錠を追加**: `pm`で自由時間に到達した瞬間、条件成立時は同じく`switchbot_service.trigger_tv_unlock`を呼ぶ)、そのいずれも続く`_save_progress`による`UPDATE`で永続化される。加えて2回の`_apply_forced_transition`呼び出し(1回目: 完了処理前の状態同期、2回目: 完了直後にチェックポイントへ到達し既に締切時刻を過ぎていた場合の即時通過処理)に伴う追加の`UPDATE`・ボーナス付与・ログ出力(条件成立時)。
-* 根拠: [ロック・トランザクション] (行番号: 415-416)、[1回目の強制切替] (行番号: 600 / 抜粋: "progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)")、[ステップ完了/トグル処理] (行番号: 437-469)、[夕方フリータイムTV解錠トリガー] (行番号: 462-468)、[2回目の強制切替とそのコメント] (行番号: 597-600 / 抜粋: "# 直後にチェックポイントへ到達し、かつ既に締切時刻を過ぎている場合\n                # (例: 出遅れて自由時間に入った瞬間には既に7:50だった)、この場で\n                # 通過処理まで済ませ、フロントが追加のポーリングを待たずに済むようにする。\n                progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)")
+* 根拠: [ロック・トランザクション] (行番号: 415-416)、[1回目の強制切替] (参照: complete_step / 抜粋: "progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)")、[ステップ完了/トグル処理] (行番号: 437-469)、[夕方フリータイムTV解錠トリガー] (行番号: 462-468)、[2回目の強制切替とそのコメント] (参照: complete_step / 抜粋: "# 直後にチェックポイントへ到達し、かつ既に締切時刻を過ぎている場合\n                # (例: 出遅れて自由時間に入った瞬間には既に7:50だった)、この場で\n                # 通過処理まで済ませ、フロントが追加のポーリングを待たずに済むようにする。\n                progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)")
 
 
 * **エラーハンドリング**: (1) **（大人用フロー分離で変更）** `flow_key`が、そのユーザー向けに解決されたフローセット(`_flow_set_for`の戻り値)に存在しなければ`HTTPException(404, "Unknown flow_key")`。(2) 対象ユーザーが存在しなければ`HTTPException(404, "User not found")`(送出箇所は`_flow_set_for`→`_get_user_row`)。なお、**（大人用フロー分離で追加）** 保護者が子ども専用のステップ(例: `homework`)を指定した場合は、そのユーザーのフローに当該ステップが存在しないため(5)の`HTTPException(404, "Unknown step_key")`になる。(3) フローが本日まだ開始していなければ`HTTPException(400, "このフローはまだ開始していません")`。(4) 進捗の`current_step_index`が既に全ステップ数以上(完了済み)であれば`HTTPException(400, "本日のフローは完了しています")`。(5) **（朝の準備チェックリスト化で追加）** `step_key`が`flow['steps']`のどのキーとも一致しなければ`HTTPException(404, "Unknown step_key")`。(6) `checklist=False`の逐次ステップに限り、リクエストの`step_key`が現在のステップキーと一致しなければ`HTTPException(409, "表示が古いようです。再読み込みしてください")`。(7) 同じく逐次ステップに限り、現在のステップがチェックポイント(自由時間)であれば`HTTPException(400, "自由時間は時間になると自動的に次へ進みます")`(自由時間は時間経過による自動遷移のみで、明示的な完了操作は許可しない)。(8) **（朝の準備チェックリスト化で追加、夜の切り替え/寝る準備チェックリスト化でエラーメッセージ・条件を一般化）** `checklist=True`のステップは、そのチェックリストブロックの境界を既に過ぎていれば`_toggle_checklist_step`内で`HTTPException(400, "すでに次のステップに進んでいるため変更できません")`(以前のメッセージは`am`固有の「すでに出発済みのため変更できません」だった)。(9) **（夜の切り替え/寝る準備チェックリスト化で追加）** `checklist=True`のステップが、そのブロックにまだ進行が到達していない(`'locked'`)状態であれば`_toggle_checklist_step`内で`HTTPException(400, "まだこのステップには進んでいません")`。
-* 根拠: [flow_key検証（大人用フロー分離で変更）] (行番号: 541-543 / 抜粋: "                flows = self._flow_set_for(cur, user_id)\n                if flow_key not in flows:\n                    raise HTTPException(status_code=404, detail=\"Unknown flow_key\")")、[ユーザー検証] (§4の`_get_user_row`参照、行番号: 42-43)、[開始判定] (行番号: 547-548 / 抜粋: "if not self._is_flow_started_today(flow, now):\n                    raise HTTPException(status_code=400, detail=\"このフローはまだ開始していません\")")、[完了済み判定] (行番号: 555-556 / 抜粋: "if idx >= len(flow['steps']):\n                    raise HTTPException(status_code=400, detail=\"本日のフローは完了しています\")")、[step_key未検出] (行番号: 891-892 / 抜粋: "if target_step is None:\n                    raise HTTPException(status_code=404, detail=\"Unknown step_key\")")、[ステップ不一致判定] (行番号: 917-918 / 抜粋: "if current_step['key'] != step_key:\n                        raise HTTPException(status_code=409, detail=\"表示が古いようです。再読み込みしてください\")")、[チェックポイント判定] (行番号: 919-920 / 抜粋: "if current_step['checkpoint_time']:\n                        raise HTTPException(status_code=400, detail=\"自由時間は時間になると自動的に次へ進みます\")")、[チェックリストのエラーハンドリング] (§4の`_toggle_checklist_step`参照、行番号: 307-313)
+* 根拠: [flow_key検証（大人用フロー分離で変更）] (参照: complete_step / 抜粋: "                flows = self._flow_set_for(cur, user_id)\n                if flow_key not in flows:\n                    raise HTTPException(status_code=404, detail=\"Unknown flow_key\")")、[ユーザー検証] (§4の`_get_user_row`参照、行番号: 42-43)、[開始判定] (参照: complete_step / 抜粋: "if not self._is_flow_started_today(flow, now):\n                    raise HTTPException(status_code=400, detail=\"このフローはまだ開始していません\")")、[完了済み判定] (行番号: 555-556 / 抜粋: "if idx >= len(flow['steps']):\n                    raise HTTPException(status_code=400, detail=\"本日のフローは完了しています\")")、[step_key未検出] (行番号: 891-892 / 抜粋: "if target_step is None:\n                    raise HTTPException(status_code=404, detail=\"Unknown step_key\")")、[ステップ不一致判定] (行番号: 917-918 / 抜粋: "if current_step['key'] != step_key:\n                        raise HTTPException(status_code=409, detail=\"表示が古いようです。再読み込みしてください\")")、[チェックポイント判定] (行番号: 919-920 / 抜粋: "if current_step['checkpoint_time']:\n                        raise HTTPException(status_code=400, detail=\"自由時間は時間になると自動的に次へ進みます\")")、[チェックリストのエラーハンドリング] (§4の`_toggle_checklist_step`参照、行番号: 307-313)
 
 
 

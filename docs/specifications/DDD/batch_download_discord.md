@@ -174,7 +174,7 @@
 ### `_is_bot_detection_error`
 
 * **役割**: 例外オブジェクトの文字列表現（小文字化し、Unicodeのアポストロフィ`’`をASCIIの`'`に正規化）に`CONFIG.BOT_DETECTION_MARKERS`のいずれかが一致するかを判定する関数。**（2026-09-06 品質監査で修正）** マーカーの種別で一致パターンを使い分ける: `marker.isdigit()`が真の数字マーカー（"429"/"403"/"503"）は`(?<![\w\-/.])NNN(?![\w\-/]|\.\w)`（前に英数字・`_`・`-`・`/`・`.`が無く、後ろに英数字・`_`・`-`・`/`が続かず、かつ「`.`＋英数字」も続かない位置）で、フレーズマーカーは従来どおり`\b...\b`（正規表現の単語境界）で`re.search`する。以前は数字マーカーも`\b`のみで判定していたが、正規表現の単語境界は`-`・`/`・`.`も境界とみなすため、品番・パス・一時ファイル名に含まれる数字列（ソースコメントの例: "ssis-403"、"ipx-403:"、"/dm18/ja/ssis-403"、"ssni-429.mp4.fragments"、"seg-403-v1"）にも一致し、単なる通信エラー1件で`BotDetectionError`→12時間クールダウンに入っていた。"HTTP Error 403: Forbidden"・"too many 503 error responses"・"error 429."のような本来の文言は引き続き一致する（ソースコメント記載の例）。**（Issue #467で修正）** 以前は数字のみのマーカー（"403"/"429"/"503"）だけを`\b`による厳密一致で判定し、フレーズマーカー（"sign in to confirm you're not a bot"等）は部分文字列一致(`in`)のままだった。数字マーカーを単純な部分文字列一致で判定すると、エラーメッセージに埋め込まれた動画ID等の英数字列（例: "AbC403XyZ"）に偶然含まれる数字列にまで誤爆し、`BOT_DETECTION_COOLDOWN_HOURS`（12時間）のセッション全停止を誤って引き起こし得たための修正だったが、フレーズマーカー側も無関係なログにたまたま同一フレーズが含まれる場合に誤検知しうる同種の問題を抱えていたため、マーカー種別を問わず`\b`による単語境界一致に統一した。**（Issue #396で修正）** 以前のフレーズマーカー`"sign in to confirm"`は、yt-dlpの年齢制限メッセージ「Sign in to confirm your age. This video may be inappropriate for some users.」にも部分一致し、年齢制限動画1本で`BotDetectionError`→セッション中断＋12時間クールダウンに入っていた。マーカーをボット検知に固有の`"sign in to confirm you're not a bot"`/`"confirm you're not a bot"`に絞るとともに、`CONFIG.BOT_DETECTION_EXCLUDED_MARKERS`（`"confirm your age"`）を含むメッセージはマーカー判定より優先して`False`を返す。
-* 根拠: [数字マーカーの分岐] (行番号: 285〜300 / 抜粋: "for marker in CONFIG.BOT_DETECTION_MARKERS:\n        if marker.isdigit():\n            # 数字マーカー(403/429/503)は \\b だけでは不十分: 正規表現の単語境界は\n            # \"-\" \"/\" \".\" も境界とみなすため、品番・パス・一時ファイル名に含まれる\n            # 数字列(\"ssis-403\" \"ipx-403:\" \"/dm18/ja/ssis-403\" \"ssni-429.mp4.fragments\"\n            # \"seg-403-v1\")にも一致し、単なる通信エラー1件で BotDetectionError →\n            # 12時間クールダウンに入っていた。" / "pattern = rf\"(?<![\\w\\-/.]){re.escape(marker)}(?![\\w\\-/]|\\.\\w)\"\n        else:\n            pattern = rf\"\\b{re.escape(marker)}\\b\"\n        if re.search(pattern, message):\n            return True")
+* 根拠: [数字マーカーの分岐] (参照: _is_bot_detection_error / 抜粋: "for marker in CONFIG.BOT_DETECTION_MARKERS:\n        if marker.isdigit():\n            # 数字マーカー(403/429/503)は \\b だけでは不十分: 正規表現の単語境界は\n            # \"-\" \"/\" \".\" も境界とみなすため、品番・パス・一時ファイル名に含まれる\n            # 数字列(\"ssis-403\" \"ipx-403:\" \"/dm18/ja/ssis-403\" \"ssni-429.mp4.fragments\"\n            # \"seg-403-v1\")にも一致し、単なる通信エラー1件で BotDetectionError →\n            # 12時間クールダウンに入っていた。" / "pattern = rf\"(?<![\\w\\-/.]){re.escape(marker)}(?![\\w\\-/]|\\.\\w)\"\n        else:\n            pattern = rf\"\\b{re.escape(marker)}\\b\"\n        if re.search(pattern, message):\n            return True")
 * 根拠: [関数定義とコメント] (行番号: 303〜335 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:\n    # M-7-2: "403"/"429"/"503" のような数字だけのマーカーを単純な部分文字列\n    # マッチ(in)で判定すると、エラーメッセージに埋め込まれた動画ID等の\n    # 英数字列(例: "...AbC403XyZ...")に偶然含まれる数字列にまで誤爆し" / "# #467: フレーズマーカーも従来は部分文字列一致(in)のままだったため、\n    # 無関係なログにたまたま同一フレーズが含まれる場合に誤検知しうる\n    # (可能性は低いが数字マーカーと同種の問題)。フレーズ・数字を問わず\n    # 単語境界(\\b)で厳密に判定する方式に統一する。" / "for marker in CONFIG.BOT_DETECTION_MARKERS:\n        if re.search(rf"\\b{re.escape(marker)}\\b", message):\n            return True")、[マーカー定義] (行番号: 207〜222 / 抜粋: "BOT_DETECTION_MARKERS: Tuple[str, ...] = (\n        \"sign in to confirm you're not a bot\",\n        \"confirm you're not a bot\"," / "BOT_DETECTION_EXCLUDED_MARKERS: Tuple[str, ...] = (\n        \"confirm your age\",\n    )")
 
 
@@ -236,7 +236,7 @@
 
 
 * **引数/リクエスト**: `url: str`, `source_name: str`
-* 根拠: [フィールド定義] (行番号: 252〜253 / 抜粋: "url: str\n    source_name: str")
+* 根拠: [フィールド定義] (参照: DownloadTask / 抜粋: "url: str\n    source_name: str")
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -268,7 +268,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 330 / 抜粋: "-> None:")
+* 根拠: [戻り値ヒント] (参照: DiscordNotifier.send / 抜粋: "-> None:")
 
 
 * **副作用**: サーキットブレーカーの開放チェック（開いていれば警告ログを出力し早期return）、`_send_discord_webhook` の呼び出しによる外部APIへの通知送信、送信結果に応じた`_discord_circuit_breaker`の状態更新(`record_success`/`record_failure`)。
@@ -316,7 +316,7 @@
 
 
 * **エラーハンドリング**: 主ファイル読み込みで例外発生時は`exc_info=True`付きでエラーログを出力したうえで、`.bak`バックアップが存在すればその読み込みを試みる（例外は再送出しない）。バックアップの読み込みにも失敗した場合はそちらも`exc_info=True`付きでエラーログを出力し、最終的に空集合を返す。主ファイルが存在しない場合もそのまま空集合を返す（この経路ではログを出力しない）。
-* 根拠: [try-exceptブロックとコメント] (行番号: 399〜419 / 抜粋: "except Exception as e:\n                # M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが\n                # 全て「未ダウンロード」扱いになり、全件の再ダウンロード・再通知の\n                # 嵐を引き起こす。方針として安全側(空の履歴として続行)には倒すが、\n                # 原因調査ができるよう必ずログには残す。\n                logger.error(f"⚠️ 履歴ファイルの読み込みに失敗しました: {e}", exc_info=True)" / "except Exception as e:\n                    logger.error(f"⚠️ バックアップ履歴ファイルの読み込みにも失敗しました: {e}", exc_info=True)")
+* 根拠: [try-exceptブロックとコメント] (参照: HistoryManager.load_history / 抜粋: "except Exception as e:\n                # M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが\n                # 全て「未ダウンロード」扱いになり、全件の再ダウンロード・再通知の\n                # 嵐を引き起こす。方針として安全側(空の履歴として続行)には倒すが、\n                # 原因調査ができるよう必ずログには残す。\n                logger.error(f"⚠️ 履歴ファイルの読み込みに失敗しました: {e}", exc_info=True)" / "except Exception as e:\n                    logger.error(f"⚠️ バックアップ履歴ファイルの読み込みにも失敗しました: {e}", exc_info=True)")
 
 
 ### `HistoryManager.add_history`（Issue #464で変更）
@@ -354,7 +354,7 @@
 
 
 * **エラーハンドリング**: ファイルが壊れている場合（`ValueError`/`OSError`）は安全側（＝クールダウンしない）に倒して`None`を返す。
-* 根拠: [try-exceptブロックとコメント] (行番号: 311〜313 / 抜粋: "except (ValueError, OSError):\n            # 壊れたクールダウンファイルは安全側（＝クールダウンしない）に倒す\n            return None")
+* 根拠: [try-exceptブロックとコメント] (参照: CooldownManager.is_in_cooldown / 抜粋: "except (ValueError, OSError):\n            # 壊れたクールダウンファイルは安全側（＝クールダウンしない）に倒す\n            return None")
 
 
 ### `CooldownManager.trigger_cooldown`
@@ -373,7 +373,7 @@
 
 
 * **エラーハンドリング**: 書き込み失敗時(`OSError`)はエラーログを出力する（例外の再送出はしない）。
-* 根拠: [try-exceptブロック] (行番号: 327〜328 / 抜粋: "except OSError as e:\n            logger.error(f"⚠️ クールダウンファイルの書き込みに失敗しました: {e}", exc_info=True)")
+* 根拠: [try-exceptブロック] (参照: CooldownManager.trigger_cooldown / 抜粋: "except OSError as e:\n            logger.error(f"⚠️ クールダウンファイルの書き込みに失敗しました: {e}", exc_info=True)")
 
 
 ### `CooldownManager.clear`
@@ -392,7 +392,7 @@
 
 
 * **エラーハンドリング**: `OSError`を捕捉して無視（`pass`）。
-* 根拠: [try-exceptブロック] (行番号: 334〜335 / 抜粋: "except OSError:\n            pass")
+* 根拠: [try-exceptブロック] (参照: CooldownManager.clear / 抜粋: "except OSError:\n            pass")
 
 
 ### `NetworkManager.create_session`
@@ -461,7 +461,7 @@
 
 
 * **副作用**: `CONFIG.LOCAL_TMP_DIR.glob("*.fragments.tmp")`で列挙した各ディレクトリの`shutil.rmtree`による削除、削除成功時の情報ログ出力。
-* 根拠: [glob と rmtree] (行番号: 483〜488 / 抜粋: "for stale_dir in CONFIG.LOCAL_TMP_DIR.glob("*.fragments.tmp"):
+* 根拠: [glob と rmtree] (参照: FileSystemManager.sweep_stale_fragment_dirs / 抜粋: "for stale_dir in CONFIG.LOCAL_TMP_DIR.glob("*.fragments.tmp"):
             try:
                 shutil.rmtree(stale_dir)")
 
@@ -480,7 +480,7 @@
 
 * **引数/リクエスト**: `path: Path`、`min_free_gb: Optional[int] = None`
 * **戻り値/レスポンス**: `bool`（容量十分なら`True`、不足時`False`、例外時は安全側に倒して`False`）
-* 根拠: [引数と戻り値ヒント] (行番号: 582〜583 / 抜粋: "threshold_gb = CONFIG.MIN_FREE_SPACE_GB if min_free_gb is None else min_free_gb")
+* 根拠: [引数と戻り値ヒント] (参照: FileSystemManager.check_disk_space / 抜粋: "threshold_gb = CONFIG.MIN_FREE_SPACE_GB if min_free_gb is None else min_free_gb")
 
 
 * **副作用**: `DiscordNotifier.send` による容量不足時の警告通知、例外時のエラーログ出力。
@@ -488,7 +488,7 @@
 
 
 * **エラーハンドリング**: `shutil.disk_usage` 等での例外を捕捉し、エラーログを出力した上で `False`（＝ダウンロード中断）を返す。
-* 根拠: [try-exceptブロック] (行番号: 373〜375 / 抜粋: "except Exception as e:")
+* 根拠: [try-exceptブロック] (参照: FileSystemManager.check_disk_space / 抜粋: "except Exception as e:")
 
 
 ### `SystemHealthChecker.is_within_time_window`
@@ -554,11 +554,11 @@
 
 
 * **副作用**: バージョンが古い場合の警告ログ出力。
-* 根拠: [警告ログ] (行番号: 411〜416 / 抜粋: "logger.warning(\n                f"⚠️ yt-dlpのバージョンが古い可能性があります ")")
+* 根拠: [警告ログ] (参照: SystemHealthChecker.check_yt_dlp_freshness / 抜粋: "logger.warning(\n                f"⚠️ yt-dlpのバージョンが古い可能性があります ")")
 
 
 * **エラーハンドリング**: バージョン文字列の解析失敗(`ValueError`/`AttributeError`)時は判定をスキップして即座に`return`する（警告や例外なし）。
-* 根拠: [try-exceptブロック] (行番号: 406〜407 / 抜粋: "except (ValueError, AttributeError):\n            return")
+* 根拠: [try-exceptブロック] (参照: SystemHealthChecker.check_yt_dlp_freshness / 抜粋: "except (ValueError, AttributeError):\n            return")
 
 
 ### `DownloadStrategy` (抽象基底クラス)
@@ -580,13 +580,13 @@
 
 
 * **エラーハンドリング**: `_determine_save_dir`はディレクトリ作成/容量チェックに失敗した場合`None`を返す。
-* 根拠: [ガード節] (行番号: 436〜437 / 抜粋: "if not FileSystemManager.check_disk_space(target_dir): return None")
+* 根拠: [ガード節] (参照: DownloadStrategy / 抜粋: "if not FileSystemManager.check_disk_space(target_dir): return None")
 
 
 ### `UniversalYtDlpStrategy.download`
 
 * **役割**: `yt_dlp`を用いて汎用サイト（YouTube含む全対応サイト）から動画をダウンロードする。YouTubeドメインかどうかで保存カテゴリ（`youtube`/`others`）を振り分け、既存ファイルがあればスキップする。Cookieファイル設定時は`cookiefile`オプションを付与し、`yt-dlp`自身のリクエスト間隔にもスリープを設定する。`ydl_opts`には`noplaylist: True`が設定されており、リストの1行がプレイリスト/チャンネルURLだった場合に1タスクの中で無制限にダウンロードして`MAX_TASKS_PER_RUN`による1回あたりの上限が迂回されることを防いでいる。また`trim_file_name`（yt-dlp自身が持つ、拡張子を除いたファイル名を指定文字数に切り詰めるオプション）でファイル名長を制限しているが、これは`no_ext[:trim_file_name]`という単純な文字数ベースのスライスであり、UTF-8で1文字複数バイトになる文字（日本語等）に対してバイト数を保証しない。**（Issue #175で修正）** 以前の`150`文字は、日本語（UTF-8で3バイト/文字）のタイトルでは約85文字を超えるとext4等の255バイト制限を超過しうる不十分な値だったため、拡張子分の余白を見込んで日本語でも255バイトに収まる`80`文字に変更された。**（D-L1で修正）** 保存先ディレクトリ(`target_dir`。リストファイル名由来の`source_name`を含みうる)は、以前`outtmpl`文字列へf-stringで直接埋め込んでいたため、`source_name`に`'%'`が含まれる場合にyt-dlpのテンプレート展開(`%(...)s`)と衝突しテンプレートエラーになりうった。`'paths': {'home': str(target_dir)}`でディレクトリを分離し、`outtmpl`はファイル名部分のみのテンプレート(`'%(title)s.%(ext)s'`)にした。**（D-L2で修正）** 以前は`extract_info(download=False)`でメタデータを取得した後、改めて`ydl.download([task.url])`を呼んでおり、メタデータ取得のネットワークリクエストが2回発生し、ボット検知対策として抑えているはずのアクセス回数を自ら増やしていた。既に取得済みの`info`を`ydl.process_ie_result(info, download=True)`へ渡すことで、再抽出せずに1回のリクエストでダウンロードを完了させる。**（Issue #566で修正）** `noplaylist: True`は、動画とプレイリストの両方を指すURL（`watch?v=X&list=Y`形式）において動画側だけを選択させる効果しか持たず、動画IDを含まない純粋なプレイリスト/チャンネルURLには一切効果がない（yt-dlp内部の`InfoExtractor._yes_playlist`が、video_id不在時は`noplaylist`を参照せず常にプレイリスト全体を返す実装であるため）。そのため`extract_info(download=False)`で取得した`info`の`_type`が`'playlist'`または`'multi_video'`である場合、`noplaylist`だけでは防げないこのケースを明示的に検知し、`filename`の算出やダウンロード実行には進まず警告ログを出力したうえで`False`を返す（`list/*.txt`に紛れ込んだプレイリスト/チャンネルURLが1タスクの中で無制限にダウンロードされ、`MAX_TASKS_PER_RUN`によるガバナンスやボット検知回避のペーシングが丸ごと迂回されるのを防ぐ）。
-* 根拠: [UniversalYtDlpStrategy.downloadとnoplaylistのコメント] (行番号: 701, 722〜726 / 抜粋: "def download(self, task: DownloadTask) -> bool:", "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード\n            # してしまい、MAX_TASKS_PER_RUNによる1回あたりの上限governanceが\n            # まるごと迂回されてしまう。単一動画のみを対象にする。\n            'noplaylist': True,")、trim_file_nameの修正 (行番号: 680〜689 / 抜粋: "#175: yt-dlpのtrim_file_nameは文字数ベース(no_ext[:trim_file_name]の\n            # 単純なスライス)であり、バイト数を保証しない。")、[D-L1: paths/outtmplのコメント] (行番号: 712〜719 / 抜粋: "# D-L1: 保存先ディレクトリ(target_dir、リストファイル名由来のsource_name\n            # を含みうる)をouttmpl文字列へf-stringで直接埋め込むと" / "'paths': {'home': str(target_dir)},\n            'outtmpl': '%(title)s.%(ext)s',")、[D-L2: process_ie_resultのコメント] (行番号: 722〜728 / 抜粋: "# D-L2: 以前はここで改めてydl.download([task.url])を呼んでおり、\n                # 直前のextract_info(download=False)と合わせてメタデータ取得の\n                # ネットワークリクエストが2回発生していた" / "ydl.process_ie_result(info, download=True)")、[Issue #566: '_type'チェックとコメント] (行番号: 703〜715 / 抜粋: "# #566: yt-dlpの'noplaylist'は「動画とプレイリストの両方を指すURL\n                # (watch?v=X&list=Y)で動画側だけを選ぶ」オプションであり、動画IDを\n                # 含まない純粋なプレイリスト/チャンネルURLには効果がない\n                # (yt-dlp内部のInfoExtractor._yes_playlistがvideo_id不在時は\n                # noplaylistを一切参照せず常にプレイリスト全体を返す実装のため)。" / "if info.get('_type') in ('playlist', 'multi_video'):\n                    logger.warning(\n                        f"⚠️ プレイリスト/チャンネルURLは対象外です(1動画のみ処理可能): {task.url}"\n                    )\n                    return False")
+* 根拠: [UniversalYtDlpStrategy.downloadとnoplaylistのコメント] (行番号: 701, 722〜726 / 抜粋: "def download(self, task: DownloadTask) -> bool:", "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード\n            # してしまい、MAX_TASKS_PER_RUNによる1回あたりの上限governanceが\n            # まるごと迂回されてしまう。単一動画のみを対象にする。\n            'noplaylist': True,")、trim_file_nameの修正 (参照: UniversalYtDlpStrategy.download / 抜粋: "#175: yt-dlpのtrim_file_nameは文字数ベース(no_ext[:trim_file_name]の\n            # 単純なスライス)であり、バイト数を保証しない。")、[D-L1: paths/outtmplのコメント] (行番号: 712〜719 / 抜粋: "# D-L1: 保存先ディレクトリ(target_dir、リストファイル名由来のsource_name\n            # を含みうる)をouttmpl文字列へf-stringで直接埋め込むと" / "'paths': {'home': str(target_dir)},\n            'outtmpl': '%(title)s.%(ext)s',")、[D-L2: process_ie_resultのコメント] (参照: UniversalYtDlpStrategy.download / 抜粋: "# D-L2: 以前はここで改めてydl.download([task.url])を呼んでおり、\n                # 直前のextract_info(download=False)と合わせてメタデータ取得の\n                # ネットワークリクエストが2回発生していた" / "ydl.process_ie_result(info, download=True)")、[Issue #566: '_type'チェックとコメント] (参照: UniversalYtDlpStrategy.download / 抜粋: "# #566: yt-dlpの'noplaylist'は「動画とプレイリストの両方を指すURL\n                # (watch?v=X&list=Y)で動画側だけを選ぶ」オプションであり、動画IDを\n                # 含まない純粋なプレイリスト/チャンネルURLには効果がない\n                # (yt-dlp内部のInfoExtractor._yes_playlistがvideo_id不在時は\n                # noplaylistを一切参照せず常にプレイリスト全体を返す実装のため)。" / "if info.get('_type') in ('playlist', 'multi_video'):\n                    logger.warning(\n                        f"⚠️ プレイリスト/チャンネルURLは対象外です(1動画のみ処理可能): {task.url}"\n                    )\n                    return False")
 
 
 * **引数/リクエスト**: `task: DownloadTask`
@@ -598,11 +598,11 @@
 
 
 * **副作用**: 保存先ディレクトリの決定・作成、`yt_dlp`によるメタデータ取得とダウンロード（**D-L2で変更**。以前は`extract_info`＋`download`の2リクエストだったが、`extract_info`＋`process_ie_result`の1リクエストに統一）、成功時のDiscord通知。**（Issue #566で追加）** 抽出結果`info`の`_type`が`'playlist'`/`'multi_video'`だった場合は、ダウンロードやDiscord通知を一切行わず`logger.warning`による警告ログのみを出力する。
-* 根拠: [ダウンロード実行と通知] (行番号: 728〜729 / 抜粋: "ydl.process_ie_result(info, download=True)\n                DiscordNotifier.send(f"✅ 動画保存完了\\nファイル: `{filename.name}`")")、[Issue #566: 警告ログ出力] (行番号: 711〜715 / 抜粋: "if info.get('_type') in ('playlist', 'multi_video'):\n                    logger.warning(\n                        f"⚠️ プレイリスト/チャンネルURLは対象外です(1動画のみ処理可能): {task.url}"\n                    )\n                    return False")
+* 根拠: [ダウンロード実行と通知] (参照: UniversalYtDlpStrategy.download / 抜粋: "ydl.process_ie_result(info, download=True)\n                DiscordNotifier.send(f"✅ 動画保存完了\\nファイル: `{filename.name}`")")、[Issue #566: 警告ログ出力] (参照: UniversalYtDlpStrategy.download / 抜粋: "if info.get('_type') in ('playlist', 'multi_video'):\n                    logger.warning(\n                        f"⚠️ プレイリスト/チャンネルURLは対象外です(1動画のみ処理可能): {task.url}"\n                    )\n                    return False")
 
 
 * **エラーハンドリング**: **（Issue #566で追加）** `extract_info`の戻り値`info`の`_type`が`'playlist'`または`'multi_video'`の場合、これは例外ではなく正常な抽出結果だが、`noplaylist`オプションでは防げない「プレイリスト/チャンネルURL全体の抽出」を意味するため、例外を送出せず`filename`算出前に早期`return False`する（1タスクの中での無制限ダウンロードを未然に防ぐガード節）。それ以外の`yt_dlp`実行時の例外は`except Exception`で捕捉してエラーログを出力し、ボット検知マーカーに一致する場合は`BotDetectionError`として再送出、それ以外は`False`を返す。
-* 根拠: [_typeチェックによる早期return] (行番号: 711〜715 / 抜粋: "if info.get('_type') in ('playlist', 'multi_video'):\n                    logger.warning(\n                        f"⚠️ プレイリスト/チャンネルURLは対象外です(1動画のみ処理可能): {task.url}"\n                    )\n                    return False")、[try-exceptブロック] (行番号: 731〜737 / 抜粋: "except Exception as e:\n            logger.error(f"⚠️ Universal DL エラー: {e}", exc_info=True)\n            if _is_bot_detection_error(e):")
+* 根拠: [_typeチェックによる早期return] (参照: UniversalYtDlpStrategy.download / 抜粋: "if info.get('_type') in ('playlist', 'multi_video'):\n                    logger.warning(\n                        f"⚠️ プレイリスト/チャンネルURLは対象外です(1動画のみ処理可能): {task.url}"\n                    )\n                    return False")、[try-exceptブロック] (参照: UniversalYtDlpStrategy.download / 抜粋: "except Exception as e:\n            logger.error(f"⚠️ Universal DL エラー: {e}", exc_info=True)\n            if _is_bot_detection_error(e):")
 
 
 ### `ScrapingStrategy.download`
@@ -624,7 +624,7 @@
 
 
 * **エラーハンドリング**: HTML取得失敗時や m3u8 URL抽出失敗時は警告ログを出力して`False`を返す（例外送出なし）。`_fetch_html`が`BotDetectionError`を送出した場合はそのまま呼び出し元に伝播する。
-* 根拠: [ガード節] (行番号: 576〜578 / 抜粋: "if not m3u8_url:")
+* 根拠: [ガード節] (参照: ScrapingStrategy.download / 抜粋: "if not m3u8_url:")
 
 
 ### `ScrapingStrategy._cleanup_stale_ytdlp_artifacts`
@@ -665,7 +665,7 @@
 
 
 * **エラーハンドリング**: ボット検知ステータスコード/ブロックページ検知時は`BotDetectionError`を送出してそのまま再送出。それ以外の例外はエラーログを出力し、ボット検知マーカーに一致すれば`BotDetectionError`へ変換して送出、一致しなければ`None`を返す。
-* 根拠: [try-exceptブロック] (行番号: 523〜541 / 抜粋: "if res.status_code in CONFIG.SCRAPING_BLOCK_STATUS_CODES:\n                raise BotDetectionError(f"{url}: HTTP {res.status_code}（ボット検知/レート制限の可能性）")")
+* 根拠: [try-exceptブロック] (参照: ScrapingStrategy._fetch_html / 抜粋: "if res.status_code in CONFIG.SCRAPING_BLOCK_STATUS_CODES:\n                raise BotDetectionError(f"{url}: HTTP {res.status_code}（ボット検知/レート制限の可能性）")")
 
 
 ### `_packer_base_n_digits`（D-L5で追加）
@@ -742,7 +742,7 @@
 
 
 * **副作用**: なし（純粋な文字列変換処理）
-* 根拠: [処理内容] (行番号: 630〜638 / 抜粋: "lines = []\n        for line in manifest_text.splitlines():\n            stripped = line.strip()\n            if stripped.startswith('#'):\n                lines.append(re.sub(r'URI="([^"]+)"', _absolutize_uri_attr, line))\n            elif stripped:\n                lines.append(urljoin(base_url, stripped))")
+* 根拠: [処理内容] (参照: ScrapingStrategy._localize_m3u8_manifest / 抜粋: "lines = []\n        for line in manifest_text.splitlines():\n            stripped = line.strip()\n            if stripped.startswith('#'):\n                lines.append(re.sub(r'URI="([^"]+)"', _absolutize_uri_attr, line))\n            elif stripped:\n                lines.append(urljoin(base_url, stripped))")
 
 
 * **エラーハンドリング**: なし
@@ -767,7 +767,7 @@
 
 
 * **エラーハンドリング**: ステータスコードがボット検知/レート制限系（403/429/503）の場合は`BotDetectionError`を送出する。`raise_for_status`によるその他のHTTPエラーはそのまま呼び出し元（`_download_segment`）へ伝播する（本メソッド内での例外の捕捉はない）。
-* 根拠: [ボット検知チェック] (行番号: 809〜811 / 抜粋: "if res.status_code in CONFIG.SCRAPING_BLOCK_STATUS_CODES:\n            raise BotDetectionError(f"{url}: HTTP {res.status_code}（ボット検知/レート制限の可能性）")\n        res.raise_for_status()")
+* 根拠: [ボット検知チェック] (参照: ScrapingStrategy._fetch_segment_once / 抜粋: "if res.status_code in CONFIG.SCRAPING_BLOCK_STATUS_CODES:\n            raise BotDetectionError(f"{url}: HTTP {res.status_code}（ボット検知/レート制限の可能性）")\n        res.raise_for_status()")
 
 
 ### `ScrapingStrategy._download_segment`（Issue #397で変更）
@@ -876,7 +876,7 @@
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: `None`（暗黙）
 * **副作用**: `signal.signal`によるシグナルハンドラ登録、`NetworkManager.create_session`と`HistoryManager.load_history`の呼び出し、`self._shutdown_requested`/`self._interrupt_count`の初期化。
-* 根拠: [シグナル登録] (行番号: 1123〜1124 / 抜粋: "signal.signal(signal.SIGINT, self._signal_handler)")
+* 根拠: [シグナル登録] (参照: BatchDownloader.__init__ / 抜粋: "signal.signal(signal.SIGINT, self._signal_handler)")
 
 
 * **エラーハンドリング**: なし
@@ -894,7 +894,7 @@
 
 
 * **副作用**: `self._interrupt_count`のインクリメント、1回目は`self._shutdown_requested`を`True`に変更しログ出力、2回目以降はCRITICALログ出力後に`KeyboardInterrupt`を送出（ロックファイルの解放は`run`の`try/finally`が担保する）。
-* 根拠: [フラグ変更と強制中断] (行番号: 1128〜1137 / 抜粋: "self._interrupt_count += 1\n        if self._interrupt_count == 1:" / "raise KeyboardInterrupt(\"second interrupt signal received; forcing immediate shutdown\")")
+* 根拠: [フラグ変更と強制中断] (参照: BatchDownloader._signal_handler / 抜粋: "self._interrupt_count += 1\n        if self._interrupt_count == 1:" / "raise KeyboardInterrupt(\"second interrupt signal received; forcing immediate shutdown\")")
 
 
 * **エラーハンドリング**: なし（本メソッド自体はKeyboardInterruptを捕捉しない。呼び出し元の`_run_locked`内の各`try`ブロック、および最終的に`run`の`try/finally`がロック解放を保証する）
@@ -940,7 +940,7 @@
 ### `BatchDownloader._purge_skipped_tasks`
 
 * **役割**: YouTube機能無効化等でスキップ対象となったタスクをアーカイブファイル(`archived_tasks.txt`)へ追記したうえで、元のリストファイル（`list.txt`または`list/{source_name}.txt`）から該当URLを物理削除する。ファイル上書きは一時ファイル(`.tmp`)経由のアトミックな`replace`で行う。
-* 根拠: [_purge_skipped_tasks Docstring] (行番号: 836〜842 / 抜粋: "スキップ対象となったタスクを元リストから物理削除し、アーカイブへ退避する。")
+* 根拠: [_purge_skipped_tasks Docstring] (参照: BatchDownloader._purge_skipped_tasks / 抜粋: "スキップ対象となったタスクを元リストから物理削除し、アーカイブへ退避する。")
 
 
 * **引数/リクエスト**: `skipped_tasks: List[DownloadTask]`
@@ -948,11 +948,11 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 836 / 抜粋: "-> None:")
+* 根拠: [戻り値ヒント] (参照: BatchDownloader._purge_skipped_tasks / 抜粋: "-> None:")
 
 
 * **副作用**: アーカイブファイルへの追記、各リストファイルのアトミックな上書き更新。
-* 根拠: [アトミック上書き] (行番号: 889〜892 / 抜粋: "temp_path.replace(file_path)")
+* 根拠: [アトミック上書き] (参照: BatchDownloader._purge_skipped_tasks / 抜粋: "temp_path.replace(file_path)")
 
 
 * **エラーハンドリング**: アーカイブファイルへの書き込み失敗時は、データロスト防止のため元ファイルの削除処理へ進まずに`return`で中断する。個別リストファイルのパージ失敗時は例外を捕捉してエラーログを出力し、他のリストファイルの処理を継続する。
@@ -970,11 +970,11 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 899 / 抜粋: "-> None:")
+* 根拠: [戻り値ヒント] (参照: BatchDownloader._sleep_between_tasks / 抜粋: "-> None:")
 
 
 * **副作用**: `time.sleep`による待機、デバッグログ出力。
-* 根拠: [待機処理] (行番号: 912〜914 / 抜粋: "delay = random.uniform(low, high)\n        logger.debug(f"💤 次のタスクまで {delay:.1f} 秒待機します")\n        time.sleep(delay)")
+* 根拠: [待機処理] (参照: BatchDownloader._sleep_between_tasks / 抜粋: "delay = random.uniform(low, high)\n        logger.debug(f"💤 次のタスクまで {delay:.1f} 秒待機します")\n        time.sleep(delay)")
 
 
 * **エラーハンドリング**: なし
@@ -1033,7 +1033,7 @@
 
 
 * **副作用**: `_preflight_checks`/`_prepare_tasks`/`_process_tasks`（いずれも品質で追加）への委譲による間接的な副作用と、起動バナーのログ出力。
-* 根拠: [起動バナー] (行番号: 1496〜1500 / 抜粋: "logger.info(\"=\"*60)\n        logger.info(\"   🚀 Smart Pipeline Downloader (v2.4.0)\")")
+* 根拠: [起動バナー] (参照: BatchDownloader._run_locked / 抜粋: "logger.info(\"=\"*60)\n        logger.info(\"   🚀 Smart Pipeline Downloader (v2.4.0)\")")
 
 
 * **エラーハンドリング**: 本メソッド自体には`try/except`は無い。個別タスク実行時のエラーハンドリングは`_process_tasks`（品質で追加）に委譲される（詳細は同メソッドの項を参照）。
