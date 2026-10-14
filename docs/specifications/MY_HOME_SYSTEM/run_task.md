@@ -159,10 +159,10 @@ graph TD
 * `PROJECT_ROOT` および `DEVELOP_ROOT` にハードコードされた絶対パス (`/home/masahiro/develop/...`) が使用されており、実行環境（ユーザー名など）が変わると動作しません。
 * 第一引数 (`$1`) に対して、パスや拡張子の検証が行われていないため、任意のコマンドや意図しないファイルが実行される可能性があります。
 
-* **（Issue #751 / AUDIT-022）** `run_task.sh` を**経由していない** cron エントリ（`monitors/daily_timelapse_job.py` × 2・`DDD/newface_monitor.py`・`tools/keep_alive_*.sh`）は、この失敗通知の恩恵を受けません。これらを `run_task.sh` 経由へ統一するのが本来の姿ですが、`daily_timelapse_job.py` は引数付き、`newface_monitor.py` は `cd DDD` と `mkdir -p DDD/logs` を要するため、`run_task.sh` 側に作業ディレクトリ指定を足すか DDD 用ラッパーが必要になります（未対応）。
+* **（Issue #947 で対応）** 以前 `run_task.sh` を経由していなかった cron エントリ（`monitors/daily_timelapse_job.py` × 2・`DDD/newface_monitor.py`・`rclone sync`）を全て経由に統一した（`deploy/cron/crontab` の全エントリが経由することは `.github/scripts/test_crontab_run_task.py` が固定する）。そのため `run_task.sh` は次を追加で受け付ける。(1) 環境変数 `RUN_TASK_CWD`（作業ディレクトリ。既定は `PROJECT_ROOT`）と `RUN_TASK_LOG_DIR`（タスク自身のログ先。既定は `PROJECT_ROOT/logs`）。`newface_monitor.py` は `DDD` で動かし、ログは従来どおり `DDD/logs/newface_monitor.log`（logrotate の対象パス）に出す。ログ先は毎回 `mkdir -p` する（Issue #587 の再発防止を wrapper 側へ移した）。失敗通知側の `run_task.log` は常に `PROJECT_ROOT/logs`。(2) 拡張子が `.sh` のタスクは `bash` で、それ以外は venv の Python で実行する（`tools/rclone_sync_docs.sh` が rclone の終了コードをそのまま返し、非0なら通知される）。なお `tools/keep_alive_*.sh` は crontab 未登録（BTスピーカー休止）のため対象外。
 
 * **（2026-09-06 品質監査で修正）** `PYTHONPATH` の組み立てを `"${DEVELOP_ROOT}:${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"` に変更した。cron では `PYTHONPATH` が未設定のため、以前の `...:${PYTHONPATH}` は末尾に空要素(=カレントディレクトリ)を暗黙の import ルートとして加えていた。
-* 根拠: (行番号: 31 / 抜粋: "export PYTHONPATH=\"${DEVELOP_ROOT}:${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}\"")
+* 根拠: (行番号: 49 / 抜粋: "export PYTHONPATH=\"${DEVELOP_ROOT}:${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}\"")
 
 ## 9. 不明事項一覧
 

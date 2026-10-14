@@ -26,21 +26,22 @@
 # 2. 一括ダウンロード (毎日 2:00 に変更)
 0 2 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh /home/masahiro/develop/DDD/batch_download_discord.py
 
-0 3 * * * /usr/bin/rclone sync /home/masahiro/develop/docs gdrive:お家開発/docs > /dev/null 2>&1
+# docs/ の Google Drive 同期。Issue #947: 以前は出力を /dev/null に捨てており失敗が常に無言だった。
+# tools/rclone_sync_docs.sh の終了コードを run_task.sh が見て、失敗時に通知する。
+0 3 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh tools/rclone_sync_docs.sh
 
 # 毎日 09:15 に当日の 07:30～09:00 の entranceタイムラプスを生成
-15 9 * * * cd /home/masahiro/develop/MY_HOME_SYSTEM && /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python monitors/daily_timelapse_job.py entrance --date $(date +\%Y-\%m-\%d) --start 07:30 --end 09:00
+15 9 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/daily_timelapse_job.py entrance --date $(date +\%Y-\%m-\%d) --start 07:30 --end 09:00
 
 # 毎日 15:15 に当日の 13:00～15:00 の entranceタイムラプスを生成
-15 15 * * * cd /home/masahiro/develop/MY_HOME_SYSTEM && /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python monitors/daily_timelapse_job.py entrance --date $(date +\%Y-\%m-\%d) --start 13:00 --end 15:00
+15 15 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/daily_timelapse_job.py entrance --date $(date +\%Y-\%m-\%d) --start 13:00 --end 15:00
 
 # newface monitor per 1hour
-# Issue #587: DDD/logs はリポジトリ管理外(.gitignore対象)で、他のcronエントリと
-# 異なりrun_task.sh(起動のたびにMY_HOME_SYSTEM/logsをmkdir -pするstart_all.shに
-# 依存)を経由しないため、このディレクトリを作成する手段がどこにも無かった。
-# 存在しない場合はリダイレクト自体が失敗しPythonプロセスが一切起動しない
-# (cronはシェルのリダイレクトエラーを検知できず無言で失敗する)。mkdir -pを追加する。
-0 * * * * cd /home/masahiro/develop/DDD && mkdir -p /home/masahiro/develop/DDD/logs && /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python newface_monitor.py >> /home/masahiro/develop/DDD/logs/newface_monitor.log 2>&1
+# Issue #947: run_task.sh 経由にして、Python が起動する前の失敗(ImportError・.venv破損)も
+# 通知されるようにした。作業ディレクトリとログ先は DDD のまま(RUN_TASK_CWD / RUN_TASK_LOG_DIR)。
+# DDD/logs は gitignore 対象だが、Issue #587 の mkdir -p は run_task.sh が毎回行う。
+# ログは従来どおり DDD/logs/newface_monitor.log(logrotate の対象パスもそのまま)。
+0 * * * * RUN_TASK_CWD=/home/masahiro/develop/DDD RUN_TASK_LOG_DIR=/home/masahiro/develop/DDD/logs /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh newface_monitor.py
 
 # えむふじんブログ(https://mfujin.blog.jp/)の最新漫画をLINEへ通知(個人用)。
 # 朝7時頃の更新想定に対し余裕を見て12:00に本実行し、更新が遅れた日の取りこぼし救済として
