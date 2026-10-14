@@ -8,7 +8,13 @@
 PROJECT_ROOT="/home/masahiro/develop/MY_HOME_SYSTEM"
 DEVELOP_ROOT="/home/masahiro/develop"
 VENV_PYTHON="${PROJECT_ROOT}/.venv/bin/python3"
+# 通知側のログ(run_task.log)は常にここへ出す。タスク自身のログ先は下の TASK_LOG_DIR で変えられる
 LOG_DIR="${PROJECT_ROOT}/logs"
+# Issue #947: DDD のスクリプト(newface_monitor.py)のように、作業ディレクトリとログ先が
+# MY_HOME_SYSTEM と異なるタスクも、この wrapper(失敗通知)を経由できるようにする。
+# crontab の行頭で `RUN_TASK_CWD=... RUN_TASK_LOG_DIR=... run_task.sh ...` と環境変数で渡す。
+TASK_CWD="${RUN_TASK_CWD:-${PROJECT_ROOT}}"
+TASK_LOG_DIR="${RUN_TASK_LOG_DIR:-${LOG_DIR}}"
 
 # 引数チェック
 if [ $# -lt 1 ]; then
@@ -20,10 +26,22 @@ SCRIPT_NAME=$1
 shift # 最初の引数(スクリプト名)をずらして、残りを引数として渡す
 
 # ログファイル名をスクリプト名から自動生成
-LOG_FILE="${LOG_DIR}/$(basename "${SCRIPT_NAME}" .py).log"
+SCRIPT_BASE="$(basename "${SCRIPT_NAME}")"
+LOG_FILE="${TASK_LOG_DIR}/${SCRIPT_BASE%.*}.log"
 
-# プロジェクトルートに移動
-cd "${PROJECT_ROOT}" || exit 1
+# ログ先ディレクトリは gitignore 対象(DDD/logs 等)で存在しない場合があり、無いと
+# リダイレクトが失敗してタスクが無言で起動しない(Issue #587)。毎回 mkdir -p する。
+mkdir -p "${TASK_LOG_DIR}" "${LOG_DIR}" || exit 1
+
+# 作業ディレクトリに移動(既定はプロジェクトルート)
+cd "${TASK_CWD}" || exit 1
+
+# .sh は bash で、それ以外(.py)は venv の Python で実行する(rclone ラッパー等。Issue #947)
+if [[ "${SCRIPT_NAME}" == *.sh ]]; then
+    RUNNER=(bash)
+else
+    RUNNER=("${VENV_PYTHON}")
+fi
 
 # ★修正: 親ディレクトリ(develop)もパスに追加する
 # (cron では PYTHONPATH が未設定のため、末尾の ":" で空要素(=カレントディレクトリ)が
@@ -33,7 +51,7 @@ export PYTHONPATH="${DEVELOP_ROOT}:${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 # 実行 & ログ出力
 echo "--- [$(date '+%Y-%m-%d %H:%M:%S')] Start: ${SCRIPT_NAME} ---" >> "${LOG_FILE}"
 
-"${VENV_PYTHON}" "${SCRIPT_NAME}" "$@" >> "${LOG_FILE}" 2>&1
+"${RUNNER[@]}" "${SCRIPT_NAME}" "$@" >> "${LOG_FILE}" 2>&1
 
 EXIT_CODE=$?
 
