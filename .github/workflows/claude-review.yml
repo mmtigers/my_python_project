@@ -9,9 +9,13 @@ name: Claude Code Review
 # (詳細: https://github.com/anthropics/claude-code-action の Setup Guide)。
 # このシークレットが未設定の間は本ジョブは失敗する。
 
+# Issue #974: Actions 無料枠(月2,000分)の節約のため、push のたび(synchronize)には走らせない。
+# 走るのは PR を開いたとき・再オープンしたとき・draft から Ready にしたときだけ。
+# 追加 push 後にレビューし直したいときは、PR を一度 Draft に戻して Ready for review にする
+# (ready_for_review で起動する)か、close して reopen する。
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review]
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
