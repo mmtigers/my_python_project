@@ -621,21 +621,12 @@ def _snippet_first_line(snippet: str) -> str:
     return _split_snippet_lines(body)[0]
 
 
-def report_non_definition_citations() -> Tuple[Dict[str, Tuple[int, int]], int, int]:
-    """ゲートに入らない引用について「抜粋の先頭行が引用行±1に実在するか」を数える。
+def _iter_ungated_citations():
+    """ゲートに入らない引用を1件ずつ返す: (仕様書名, 行リスト, 引用の項, 抜粋の先頭行)。
 
-    Issue #655: 本チェッカーが保証しているのは `def X(` / `class X` で始まる引用だけで、
-    式や文の抜粋(全体の大半)は未検証だった。まずは件数を可視化する。戻り値は
-    (仕様書名 -> (不一致数, 検査数), 総不一致数, 総検査数)。
-
-    AUDIT-019: その後、式・文の抜粋でも**ソース内で一意に一致する**ものは scan() が
-    厳密に検証するようになった。ここで二重に数えると「非ゲートの件数」が実態より
-    多く見え、main() が出す保証範囲の表示が誤りになるため、scan() と同じ条件で
-    一意に決まる引用はこのレポートから除く。残るのは、抜粋が一意でない・
-    ソースに見つからない・`.sh` / TypeScript 側といった、今も非ゲートのものだけ。
+    `report_non_definition_citations()` と `triage_non_gated_citations()` が共有する。
+    除外条件(def/class の引用・短すぎる抜粋・scan() が厳密に検証するもの)はここに1箇所だけ持つ。
     """
-    per_spec: Dict[str, Tuple[int, int]] = {}
-    total_bad = total_checked = 0
     scanned = _source_index()
     for spec in sorted(SPEC_ROOT.rglob("*.md")):
         if spec.name == "README.md":
@@ -647,7 +638,7 @@ def report_non_definition_citations() -> Tuple[Dict[str, Tuple[int, int]], int, 
         # scan() が実際に走査する仕様書(対応する .py が一意に決まるもの)だけ、
         # 一意な抜粋がゲート済みとして除外できる。
         gated = source.suffix == ".py" or len(scanned.get(spec.stem) or []) != 1
-        bad = checked = 0
+        name = str(spec.relative_to(SPEC_ROOT))
         for line in spec.read_text(encoding="utf-8").splitlines():
             blocks = list(_BLOCK_RE.finditer(line))
             for b_i, block in enumerate(blocks):
@@ -675,16 +666,76 @@ def report_non_definition_citations() -> Tuple[Dict[str, Tuple[int, int]], int, 
                     # (広く除外すると、ゲートにも非ゲートの集計にも現れない引用が生まれる)。
                     if gated and _literal_target(snippet, items[pos], src_lines) is not None:
                         continue
-                    cited = int(_ITEM_RE.findall(items[pos])[0].split("〜")[0].split("~")[0].split("-")[0])
-                    checked += 1
-                    window = src_lines[max(0, cited - 2): cited + 1]
-                    if not any(head in l for l in window):
-                        bad += 1
-        if checked:
-            per_spec[str(spec.relative_to(SPEC_ROOT))] = (bad, checked)
-            total_bad += bad
-            total_checked += checked
+                    yield name, src_lines, items[pos], head
+
+
+def _cited_span(item: str) -> Tuple[int, int]:
+    """引用の項(`12` / `12〜20`)から (開始行, 終了行) を返す。"""
+    nums = [int(n) for n in re.findall(r"\d+", item)]
+    return nums[0], nums[-1]
+
+
+def report_non_definition_citations() -> Tuple[Dict[str, Tuple[int, int]], int, int]:
+    """ゲートに入らない引用について「抜粋の先頭行が引用行±1に実在するか」を数える。
+
+    Issue #655: 本チェッカーが保証しているのは `def X(` / `class X` で始まる引用だけで、
+    式や文の抜粋(全体の大半)は未検証だった。まずは件数を可視化する。戻り値は
+    (仕様書名 -> (不一致数, 検査数), 総不一致数, 総検査数)。
+
+    AUDIT-019: その後、式・文の抜粋でも**ソース内で一意に一致する**ものは scan() が
+    厳密に検証するようになった。ここで二重に数えると「非ゲートの件数」が実態より
+    多く見え、main() が出す保証範囲の表示が誤りになるため、scan() と同じ条件で
+    一意に決まる引用はこのレポートから除く。残るのは、抜粋が一意でない・
+    ソースに見つからない・`.sh` / TypeScript 側といった、今も非ゲートのものだけ。
+    """
+    counts: Dict[str, List[int]] = {}
+    total_bad = total_checked = 0
+    for name, src_lines, item, head in _iter_ungated_citations():
+        cited = _cited_span(item)[0]
+        window = src_lines[max(0, cited - 2): cited + 1]
+        bad = 0 if any(head in l for l in window) else 1
+        entry = counts.setdefault(name, [0, 0])
+        entry[0] += bad
+        entry[1] += 1
+        total_bad += bad
+        total_checked += 1
+    per_spec = {name: (bad, checked) for name, (bad, checked) in counts.items()}
     return per_spec, total_bad, total_checked
+
+
+# triage_non_gated_citations() の分類名
+TRIAGE_OK = "引用範囲内に抜粋が実在(おそらく正しい)"
+TRIAGE_UNIQUE = "抜粋は別の1行に実在(引用範囲の外=ずれている)"
+TRIAGE_MULTI = "抜粋は複数行に実在し、どれも引用範囲の外(ずれているが位置を決められない)"
+TRIAGE_MISSING = "抜粋がソースに見つからない(表記ゆれ・要約・ソース側の変更)"
+
+
+def triage_non_gated_citations() -> Tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
+    """ゲート外の引用を、抜粋の先頭行の実在位置で4種類に仕分ける(Issue #950)。
+
+    `--report` の「引用行±1」判定は、範囲引用(`12〜40`)の途中に抜粋がある正しい引用も
+    「見つからない」と数えてしまう。ここでは範囲引用は範囲の終端まで見て、さらに
+    ずれている引用を「位置が決まる/決まらない」「そもそもソースに無い」に分ける。
+    戻り値は (仕様書名 -> 分類別件数, 全体の分類別件数)。
+    """
+    per_spec: Dict[str, Dict[str, int]] = {}
+    total: Dict[str, int] = {}
+    for name, src_lines, item, head in _iter_ungated_citations():
+        start, end = _cited_span(item)
+        if any(head in l for l in src_lines[max(0, start - 2): max(start, end)]):
+            kind = TRIAGE_OK
+        else:
+            occurrences = [i for i, l in enumerate(src_lines) if head in l]
+            if not occurrences:
+                kind = TRIAGE_MISSING
+            elif len(occurrences) == 1:
+                kind = TRIAGE_UNIQUE
+            else:
+                kind = TRIAGE_MULTI
+        per_spec.setdefault(name, {}).setdefault(kind, 0)
+        per_spec[name][kind] += 1
+        total[kind] = total.get(kind, 0) + 1
+    return per_spec, total
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -695,7 +746,27 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="ゲートに入らない引用も「抜粋の先頭行が引用行±1にあるか」で粗く照合し、件数だけ報告する(exit 0)",
     )
+    parser.add_argument(
+        "--triage",
+        action="store_true",
+        help="ゲートに入らない引用を、抜粋の実在位置で4種類(正しそう/ずれ・位置確定/ずれ・位置不明/ソースに無い)に仕分けして件数を出す(exit 0。Issue #950)",
+    )
     args = parser.parse_args(argv)
+
+    if args.triage:
+        per_spec, total = triage_non_gated_citations()
+        kinds = (TRIAGE_OK, TRIAGE_UNIQUE, TRIAGE_MULTI, TRIAGE_MISSING)
+        grand = sum(total.values())
+        print("ℹ️ ゲートに入らない引用 %d件の仕分け(抜粋の先頭行の実在位置による。ゲートではない):" % grand)
+        for kind in kinds:
+            print("  %5d件  %s" % (total.get(kind, 0), kind))
+        print()
+        print("  仕様書ごと(ずれている/ソースに無い の合計が多い順):")
+        bad_kinds = kinds[1:]
+        worst = sorted(per_spec.items(), key=lambda kv: sum(kv[1].get(k, 0) for k in bad_kinds), reverse=True)
+        for name, counts in worst[:20]:
+            print("  %4d/%-4d  %s" % (sum(counts.get(k, 0) for k in bad_kinds), sum(counts.values()), name))
+        return 0
 
     if args.report:
         per_spec, total_bad, total_checked = report_non_definition_citations()

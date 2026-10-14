@@ -623,3 +623,33 @@ def test_is_skipped_source_judges_paths_relative_to_repo_root(tmp_path, monkeypa
     # リポジトリ内のドット始まりディレクトリ(.venv 等)は従来どおり対象外
     assert checker._is_skipped_source(repo_root / ".venv" / "lib" / "mod.py") is True
     assert checker._is_skipped_source(repo_root / "MY_HOME_SYSTEM" / "tests" / "test_x.py") is True
+
+
+def _triage(repo, body):
+    _write_spec(repo, body)
+    _, total = checker.triage_non_gated_citations()
+    return total
+
+
+def test_triage_range_citation_whose_snippet_is_inside_the_range_is_ok(fake_repo):
+    """範囲引用の途中に抜粋がある引用は「引用範囲内に実在」(Issue #950。±1判定だと誤って未検出になる)。"""
+    total = _triage(fake_repo, '* 根拠: 戻り値 (行番号: 5〜7 / 抜粋: "return \\"hello \\" + name")\n')
+    assert total == {checker.TRIAGE_OK: 1}
+
+
+def test_triage_range_citation_whose_snippet_is_elsewhere_is_unique(fake_repo):
+    """抜粋が引用範囲の外の1行にだけ実在する範囲引用は「ずれている・位置確定」。"""
+    total = _triage(fake_repo, '* 根拠: 戻り値 (行番号: 1〜2 / 抜粋: "return \\"bye \\" + name")\n')
+    assert total == {checker.TRIAGE_UNIQUE: 1}
+
+
+def test_triage_ambiguous_snippet_outside_the_range_is_multi(fake_repo):
+    """抜粋が複数行に実在し、どれも引用範囲の外なら「ずれている・位置不明」。"""
+    total = _triage(fake_repo, '* 根拠: 戻り値 (行番号: 1〜2 / 抜粋: "return \\"")\n')
+    assert total == {checker.TRIAGE_MULTI: 1}
+
+
+def test_triage_snippet_missing_from_source(fake_repo):
+    """抜粋がソースのどこにも無い(表記ゆれ・要約)引用は「見つからない」。"""
+    total = _triage(fake_repo, '* 根拠: 要約 (行番号: 5〜7 / 抜粋: "this text is not in the source")\n')
+    assert total == {checker.TRIAGE_MISSING: 1}
