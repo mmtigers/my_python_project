@@ -113,11 +113,11 @@
 
 
 * **引数/リクエスト**: `*args`, `**kwargs`（本フォールバック実装では`kwargs.get("fallback_dir_str")`のみを参照する）
-* 根拠: [引数定義と参照箇所] (行番号: 69〜74 / 抜粋: "fallback_dir_str = kwargs.get("fallback_dir_str")")
+* 根拠: [引数定義と参照箇所] (参照: get_managed_target_directory / 抜粋: "fallback_dir_str = kwargs.get("fallback_dir_str")")
 
 
 * **戻り値/レスポンス**: `Path`（`fallback_dir_str`が渡されていればそれを`Path`化した値、なければ`Path("./data")`）
-* 根拠: [各return文] (行番号: 70〜71 / 抜粋: "if fallback_dir_str:\n            return Path(fallback_dir_str)\n        return Path("./data")")
+* 根拠: [各return文] (参照: get_managed_target_directory / 抜粋: "if fallback_dir_str:\n            return Path(fallback_dir_str)\n        return Path("./data")")
 
 
 * **副作用**: なし
@@ -131,15 +131,15 @@
 
 
 * **引数/リクエスト**: `target_dir: Path`（アクセス確認を行う対象ディレクトリ）, `max_retries: int = 5`（最大リトライ回数）, `base_delay: float = 1.0`（ベースとなる待機時間・秒）
-* 根拠: [引数定義とDocstring] (行番号: 80〜88 / 抜粋: "target_dir (Path): アクセス確認を行う対象ディレクトリ。\n            max_retries (int): 最大リトライ回数。\n            base_delay (float): ベースとなる待機時間（秒）。")
+* 根拠: [引数定義とDocstring] (参照: wait_for_storage_warmup / 抜粋: "target_dir (Path): アクセス確認を行う対象ディレクトリ。\n            max_retries (int): 最大リトライ回数。\n            base_delay (float): ベースとなる待機時間（秒）。")
 
 
 * **戻り値/レスポンス**: `bool`（アクセス確立できた場合`True`、最大リトライ到達で`False`）
-* 根拠: [Docstring] (行番号: 85〜86 / 抜粋: "bool: ストレージへのアクセスが確立できた場合はTrue、タイムアウトした場合はFalse。")
+* 根拠: [Docstring] (参照: wait_for_storage_warmup / 抜粋: "bool: ストレージへのアクセスが確立できた場合はTrue、タイムアウトした場合はFalse。")
 
 
 * **副作用**: ディレクトリ作成試行(`target_dir.mkdir`)、テストファイル(`.storage_warmup_test`)の書き込み・削除、デバッグ/エラーログ出力、リトライ時の`time.sleep`。
-* 根拠: [処理内容] (行番号: 100〜111 / 抜粋: "test_file.write_text("warmup_check", encoding="utf-8")\n                test_file.unlink()")
+* 根拠: [処理内容] (参照: wait_for_storage_warmup / 抜粋: "test_file.write_text("warmup_check", encoding="utf-8")\n                test_file.unlink()")
 
 
 * **エラーハンドリング**: ディレクトリ作成失敗(`OSError`)時はデバッグログを出力し後続I/Oテストへ処理を継続。テストファイルの書き込み/削除失敗(`IOError`/`OSError`)時はExponential Backoffで待機しリトライ。最大試行後もアクセスできない場合はエラーログを出力し`False`を返す（パニックを起こさない設計）。
@@ -159,7 +159,7 @@
 
 
 * **引数/リクエスト**: `site_id: str`, `name: str`, `target_url: str`, `selector_container: str`, `selector_name: str`, `selector_link: str`, `selector_image: str`, `data_filename: str = ""`, `id_query_param: Optional[str] = None`, `image_attr: str = "src"`, `image_from_style: bool = False`, `name_first_text_only: bool = False`, `name_strip_after_tab: bool = False`, `skip_unnamed_casts: bool = False`
-* 根拠: [フィールド定義] (行番号: 185〜198 / 抜粋: "site_id: str\n    name: str\n    target_url: str\n    selector_container: str\n    selector_name: str\n    selector_link: str\n    selector_image: str")
+* 根拠: [フィールド定義] (参照: SiteConfig / 抜粋: "site_id: str\n    name: str\n    target_url: str\n    selector_container: str\n    selector_name: str\n    selector_link: str\n    selector_image: str")
 
 
 * **戻り値/レスポンス**: 該当なし（データクラスのフィールド定義自体）
@@ -175,7 +175,7 @@
 
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: `str`
-* 根拠: [戻り値ヒントとreturn文] (行番号: 212〜219 / 抜粋: "return self.data_filename or f"known_casts_{self.site_id}.json"")
+* 根拠: [戻り値ヒントとreturn文] (参照: SiteConfig.get_data_filename / 抜粋: "return self.data_filename or f"known_casts_{self.site_id}.json"")
 
 
 * **副作用**: なし
@@ -223,7 +223,7 @@
 * **戻り値**: `Optional[str]`。`DISCORD_WEBHOOK_DDD`が設定されていればその値、未設定なら`DISCORD_WEBHOOK_NOTIFY`の値、それも未設定なら`DISCORD_WEBHOOK_URL`の値、いずれも未設定なら`None`。
 * **副作用**: なし（環境変数の読み取りのみ）
 * **エラーハンドリング**: なし
-* 根拠: [解決式] (行番号: 278〜282 / 抜粋: "return (\n        os.getenv('DISCORD_WEBHOOK_DDD')\n        or os.getenv('DISCORD_WEBHOOK_NOTIFY')\n        or os.getenv('DISCORD_WEBHOOK_URL')\n    )")
+* 根拠: [解決式] (参照: _resolve_discord_webhook_url / 抜粋: "return (\n        os.getenv('DISCORD_WEBHOOK_DDD')\n        or os.getenv('DISCORD_WEBHOOK_NOTIFY')\n        or os.getenv('DISCORD_WEBHOOK_URL')\n    )")
 
 ### `_resolve_ops_webhook_url`（2026-09 チャンネル再設計で新規追加）
 
@@ -274,11 +274,11 @@
 
 
 * **戻り値/レスポンス**: `Path`（利用可能なデータディレクトリパス）
-* 根拠: [Docstringと戻り値] (行番号: 382〜384 / 抜粋: "Returns:\n            Path: 利用可能なディレクトリパス\n        """\n        return get_managed_target_directory(")
+* 根拠: [Docstringと戻り値] (参照: MonitorConfig.get_data_dir / 抜粋: "Returns:\n            Path: 利用可能なディレクトリパス\n        """\n        return get_managed_target_directory(")
 
 
 * **副作用**: `get_managed_target_directory`（インポート成功時は`core.nas_utils`、失敗時はフォールバック実装）の呼び出し。
-* 根拠: [呼び出し] (行番号: 385〜389 / 抜粋: "return get_managed_target_directory(\n            nas_dir_str=cls.NAS_DIR_STR,\n            fallback_dir_str=cls.LOCAL_DIR_STR,\n            mount_point=cls.MOUNT_POINT\n        )")
+* 根拠: [呼び出し] (参照: MonitorConfig.get_data_dir / 抜粋: "return get_managed_target_directory(\n            nas_dir_str=cls.NAS_DIR_STR,\n            fallback_dir_str=cls.LOCAL_DIR_STR,\n            mount_point=cls.MOUNT_POINT\n        )")
 
 
 * **エラーハンドリング**: なし（本メソッド自体には例外処理なし。委譲先の実装に依存）
@@ -291,11 +291,11 @@
 
 
 * **引数/リクエスト**: `cls`（`@classmethod`）, `data_dir: Path`（`get_data_dir()`が返したディレクトリ）
-* 根拠: [引数定義とDocstring] (行番号: 402〜412 / 抜粋: "data_dir (Path): get_data_dir() が返したディレクトリ。")
+* 根拠: [引数定義とDocstring] (参照: MonitorConfig.is_local_fallback_dir / 抜粋: "data_dir (Path): get_data_dir() が返したディレクトリ。")
 
 
 * **戻り値/レスポンス**: `bool`（ローカルフォールバック先であれば`True`）
-* 根拠: [Docstringと戻り値] (行番号: 404〜407 / 抜粋: "Returns:\n            bool: ローカルフォールバック先であれば True。")
+* 根拠: [Docstringと戻り値] (参照: MonitorConfig.is_local_fallback_dir / 抜粋: "Returns:\n            bool: ローカルフォールバック先であれば True。")
 
 
 * **副作用**: なし（`Path.resolve()`によるパス正規化のみ。NASアクセスは行わない）
@@ -309,7 +309,7 @@
 
 
 * **引数/リクエスト**: `id: str`, `name: str`, `detail_url: str`, `image_url: str`, `age: str = ""`（一覧ページ上に年齢表記が見つからない場合は空文字）, `missed_runs: int = 0`（**Issue #538で追加**。連続欠落回数）
-* 根拠: [フィールド定義とDocstring] (行番号: 423〜429 / 抜粋: "age (str): 年齢（数字のみ、例: "23"）。一覧ページ上に年齢表記が\n            見つからないサイト・キャストでは空文字となる。")
+* 根拠: [フィールド定義とDocstring] (参照: CastMember / 抜粋: "age (str): 年齢（数字のみ、例: "23"）。一覧ページ上に年齢表記が\n            見つからないサイト・キャストでは空文字となる。")
 
 
 * **戻り値/レスポンス**: 該当なし（データクラスのフィールド定義自体）
@@ -404,7 +404,7 @@
 
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: `self.webhook_url`・`self.ops_webhook_url`(`ops_webhook_url or webhook_url`)への代入、`self.session`への`_create_rate_limited_session()`結果の代入、`self._circuit_breaker`への`DiscordCircuitBreaker()`（既定の`failure_threshold=3`）の代入。
-* 根拠: [属性代入] (行番号: 541〜545 / 抜粋: "self.webhook_url = webhook_url\n        self.session = self._create_rate_limited_session()\n        # 連続送信失敗時に以降の送信をスキップするサーキットブレーカー\n        # (このインスタンスの生存期間=1回のプロセス実行の間だけ有効)\n        self._circuit_breaker = DiscordCircuitBreaker()")
+* 根拠: [属性代入] (参照: DiscordNotifier.__init__ / 抜粋: "self.webhook_url = webhook_url\n        self.session = self._create_rate_limited_session()\n        # 連続送信失敗時に以降の送信をスキップするサーキットブレーカー\n        # (このインスタンスの生存期間=1回のプロセス実行の間だけ有効)\n        self._circuit_breaker = DiscordCircuitBreaker()")
 
 
 * **エラーハンドリング**: なし
@@ -421,11 +421,11 @@
 
 
 * **戻り値/レスポンス**: `requests.Session`（429/5xx時に自動リトライするセッション）
-* 根拠: [Docstringと戻り値] (行番号: 497〜510 / 抜粋: "Returns:\n            requests.Session: 429/5xx時に自動リトライするセッション。")
+* 根拠: [Docstringと戻り値] (参照: DiscordNotifier._create_rate_limited_session / 抜粋: "Returns:\n            requests.Session: 429/5xx時に自動リトライするセッション。")
 
 
 * **副作用**: なし（セッションオブジェクトの生成・設定のみ、外部通信は発生しない）
-* 根拠: [処理内容] (行番号: 500〜509 / 抜粋: "session = requests.Session()\n        retries = Retry(")
+* 根拠: [処理内容] (参照: DiscordNotifier._create_rate_limited_session / 抜粋: "session = requests.Session()\n        retries = Retry(")
 
 
 * **エラーハンドリング**: なし
@@ -444,7 +444,7 @@
 
 * **副作用**: `self.session.close()`によるHTTPセッションのクローズ。
 * **エラーハンドリング**: `self.session`が存在する場合にのみクローズを実行するガード節のみ。
-* 根拠: [ガード節] (行番号: 514 / 抜粋: "if self.session:")
+* 根拠: [ガード節] (参照: DiscordNotifier.close / 抜粋: "if self.session:")
 
 
 ### `DiscordNotifier.notify`（D-L6・D-L9で変更）
@@ -485,7 +485,7 @@
 
 
 * **引数/リクエスト**: `counts: Dict[str, int]`（site_id→新規検知件数）, `site_names: Dict[str, str]`（site_id→表示名）, `date_str: str`（サマリ対象日）
-* 根拠: [引数定義とDocstring] (行番号: 644〜653 / 抜粋: "counts (Dict[str, int]): site_id -> 新規検知件数 の集計。\n            site_names (Dict[str, str]): site_id -> 表示名 の対応表。\n            date_str (str): サマリ対象日（'YYYY-MM-DD'）。")
+* 根拠: [引数定義とDocstring] (参照: DiscordNotifier.notify_daily_summary / 抜粋: "counts (Dict[str, int]): site_id -> 新規検知件数 の集計。\n            site_names (Dict[str, str]): site_id -> 表示名 の対応表。\n            date_str (str): サマリ対象日（'YYYY-MM-DD'）。")
 
 
 * **戻り値/レスポンス**: `bool`（Issue #226で`None`から変更）。送信に成功した場合`True`、Webhook未設定・サーキットブレーカーが開いている・送信失敗のいずれかの場合`False`。
@@ -510,15 +510,15 @@
 
 
 * **引数/リクエスト**: `site: SiteConfig`（連続失敗中のサイトの設定）, `failure_count: int`（現在の連続失敗回数）
-* 根拠: [引数定義とDocstring] (行番号: 697〜702 / 抜粋: "site (SiteConfig): 連続失敗中のサイトの設定。\n            failure_count (int): 現在の連続失敗回数。")
+* 根拠: [引数定義とDocstring] (参照: DiscordNotifier.notify_site_failure_alert / 抜粋: "site (SiteConfig): 連続失敗中のサイトの設定。\n            failure_count (int): 現在の連続失敗回数。")
 
 
 * **戻り値/レスポンス**: `bool`。送信に成功した場合`True`、Webhook未設定・サーキットブレーカーが開いている・送信失敗のいずれかの場合`False`。呼び出し元（`_handle_site_network_failure`）は`True`の場合のみアラート送信済みとして記録し、失敗時は次回実行時に再試行される。
-* 根拠: [Docstring] (行番号: 700〜702 / 抜粋: "Returns:\n            bool: 送信に成功した場合True。呼び出し元はTrueの場合のみアラート\n                送信済みとして記録する(失敗時は次回実行時に再試行される)。")
+* 根拠: [Docstring] (参照: DiscordNotifier.notify_site_failure_alert / 抜粋: "Returns:\n            bool: 送信に成功した場合True。呼び出し元はTrueの場合のみアラート\n                送信済みとして記録する(失敗時は次回実行時に再試行される)。")
 
 
 * **副作用**: Webhookへの送信（`post_discord_webhook(..., username="New Face Monitor", session=self.session, raise_for_status=True)`。**2026-09チャンネル再設計で送信先を`self.ops_webhook_url`に変更**）、成功/失敗ログ出力と`self._circuit_breaker`の状態更新(`record_success`/`record_failure`)。
-* 根拠: [送信処理] (行番号: 803〜811 / 抜粋: "post_discord_webhook(\n                self.webhook_url,\n                content=content,\n                username=\"New Face Monitor\",\n                timeout=10,\n                session=self.session,\n                raise_for_status=True,\n            )")
+* 根拠: [送信処理] (参照: DiscordNotifier.notify_site_failure_alert / 抜粋: "post_discord_webhook(\n                self.webhook_url,\n                content=content,\n                username=\"New Face Monitor\",\n                timeout=10,\n                session=self.session,\n                raise_for_status=True,\n            )")
 
 
 * **エラーハンドリング**: Webhook URL(`self.ops_webhook_url`)が未設定または`'YOUR_DISCORD'`を含む場合、およびサーキットブレーカーが開いている場合は警告ログを出力し`False`を返す（送信自体は試みない）。`requests.RequestException`発生時はエラーログを出力し`record_failure()`を呼んで`False`を返す。
@@ -532,7 +532,7 @@
 
 
 * **引数/リクエスト**: `__init__`: `data_dir: Path`（解決済みのデータディレクトリ。呼び出し元がフォールバック中でないことを確認した上で渡す前提）。`_data_file`: `site: SiteConfig`
-* 根拠: [引数定義とDocstring] (行番号: 807〜816 / 抜粋: "data_dir (Path): 解決済みのデータディレクトリ(NAS上、または検証済みの\n                ローカルパス)。呼び出し元(_run_monitor_locked)がフォールバック中で\n                ないことを確認した上で渡す前提。")
+* 根拠: [引数定義とDocstring] (参照: DataManager.__init__ / 抜粋: "data_dir (Path): 解決済みのデータディレクトリ(NAS上、または検証済みの\n                ローカルパス)。呼び出し元(_run_monitor_locked)がフォールバック中で\n                ないことを確認した上で渡す前提。")
 
 
 * **戻り値/レスポンス**: `__init__`: `None`。`_data_file`: `Path`
@@ -608,7 +608,7 @@
 
 
 * **戻り値/レスポンス**: `Set[CastMember]`
-* 根拠: [戻り値ヒントとreturn文] (行番号: 863〜870 / 抜粋: "return {CastMember(**item) for item in data}")
+* 根拠: [戻り値ヒントとreturn文] (参照: DataManager._read_casts_file / 抜粋: "return {CastMember(**item) for item in data}")
 
 
 * **副作用**: JSONファイルのオープン・パース(`open`, `json.load`)。
@@ -626,7 +626,7 @@
 
 
 * **引数/リクエスト**: `site: SiteConfig`
-* 根拠: [引数定義とDocstring] (行番号: 869〜873 / 抜粋: "site (SiteConfig): 対象サイトの設定。")
+* 根拠: [引数定義とDocstring] (参照: DataManager.load_known_casts / 抜粋: "site (SiteConfig): 対象サイトの設定。")
 
 
 * **戻り値/レスポンス**: `Set[CastMember]`（ファイル不在時、または内容破損＋`.bak`バックアップからの復旧も失敗した場合は空集合）。`OSError`（一次ファイル・`.bak`のいずれでも）時は戻り値を返さず`KnownCastsUnavailableError`を送出する。
@@ -682,17 +682,17 @@
 
 * **副作用**: **（2026-09-19で変更）** JSONを`json.dumps(..., ensure_ascii=False, indent=2)`でUTF-8バイト列にし、`_write_bytes_and_compare`で書き込み+バイト列完全一致の読み戻し検証を行う（以前は`open(tmp_path, 'w')`+`json.dump`で書き、JSONとしてパースできるかだけを検証していた）。続けて`_write_and_verify_tmp`は`DataManager._read_casts_file(tmp_path)`、`_write_and_verify_json_tmp`は`open(tmp_path, 'r')`+`json.load`による読み戻し検証も従来どおり行う。
 * **エラーハンドリング**: いずれも例外を捕捉せずそのまま送出する（呼び出し元の`_retry_transient_write`がリトライ判断とログ出力を担う）。
-* 根拠: [処理内容] (行番号: 1206〜1208 / 抜粋: "DataManager._write_bytes_and_compare(\n            tmp_path, json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')\n        )" / "DataManager._read_casts_file(tmp_path)")、(行番号: 1385〜1391 / 抜粋: "DataManager._write_bytes_and_compare(" / "with open(tmp_path, 'r', encoding='utf-8') as f:\n            json.load(f)")
+* 根拠: [処理内容] (参照: DataManager._write_and_verify_tmp / 抜粋: "DataManager._write_bytes_and_compare(\n            tmp_path, json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')\n        )" / "DataManager._read_casts_file(tmp_path)")、(行番号: 1385〜1391 / 抜粋: "DataManager._write_bytes_and_compare(" / "with open(tmp_path, 'r', encoding='utf-8') as f:\n            json.load(f)")
 
 
 ### `DataManager.save_known_casts`（D-L7・D-L8・2026-09-09 運用障害対応で変更）
 
 * **役割**: 指定サイトのキャスト集合をJSONファイルへアトミックに保存するインスタンスメソッド。一時ファイルへ書き出したのち`replace`で置き換えることで書き込み中断時の既存データ破損/消失を防ぐ従来のアトミック書き込みパターンに加え、(1)一時ファイルを本番ファイルへ置き換える前に`_read_casts_file`で一時ファイルを読み戻して正しくパースできることを検証し、(2)本番ファイルへの置換前に現在の本番ファイルの内容を`.bak`としてバックアップする、という2つの安全策を追加している。**（D-L7で変更）** `.bak`の更新自体も、以前は`backup_path.write_bytes(data_file.read_bytes())`という非アトミックな直接上書きだったが、他の永続化と同じ「`.bak.tmp`へ書き込み→`replace`」パターンに揃えた。書き込み中に中断しても`.bak`本体は直前の内容のまま無傷で残る。**（D-L8で変更）** `tmp_path.replace(data_file)`に到達する前に例外（読み戻し検証失敗等）が発生すると、以前は書き込み済みの`.tmp`ファイルが削除されずディレクトリに残り続けていた。`tmp_path`が生成済みであれば、外側の`except`節でbest-effortに削除する。**（2026-09-09 運用障害対応で変更）** (1)の書き込み+検証は`DataManager._write_and_verify_tmp`へ切り出したうえで、`DataManager._retry_transient_write`（前項参照。`save_daily_summary`/`save_site_failures`と共通）へ委譲し、NAS等の一過性の書き込み不良に備えて`_SAVE_VERIFY_MAX_ATTEMPTS`（既定3回）までリトライする。全リトライ失敗時のみ最後の例外が呼び出し元の`except`節へ伝播し、それ以外の挙動（D-L7の`.bak`更新・D-L8のtmp削除）は変更していない。
-* 根拠: [メソッド定義とDocstring] (行番号: 1247〜1291 / 抜粋: "def save_known_casts(self, site: SiteConfig, casts: Set[CastMember]) -> None:\n        """指定サイトのキャストデータをJSONファイルに保存する。")、[`_retry_transient_write`呼び出し] (行番号: 1071〜1073 / 抜粋: "DataManager._retry_transient_write(\n                tmp_path, lambda: DataManager._write_and_verify_tmp(tmp_path, data)\n            )")
+* 根拠: [メソッド定義とDocstring] (行番号: 1247〜1291 / 抜粋: "def save_known_casts(self, site: SiteConfig, casts: Set[CastMember]) -> None:\n        """指定サイトのキャストデータをJSONファイルに保存する。")、[`_retry_transient_write`呼び出し] (参照: DataManager.save_known_casts / 抜粋: "DataManager._retry_transient_write(\n                tmp_path, lambda: DataManager._write_and_verify_tmp(tmp_path, data)\n            )")
 
 
 * **引数/リクエスト**: `site: SiteConfig`, `casts: Set[CastMember]`（保存対象のキャスト集合）
-* 根拠: [引数定義とDocstring] (行番号: 1006〜1008 / 抜粋: "site (SiteConfig): 対象サイトの設定。\n            casts (Set[CastMember]): 保存対象のキャスト集合。")
+* 根拠: [引数定義とDocstring] (参照: DataManager.save_known_casts / 抜粋: "site (SiteConfig): 対象サイトの設定。\n            casts (Set[CastMember]): 保存対象のキャスト集合。")
 
 
 * **戻り値/レスポンス**: `None`
@@ -760,11 +760,11 @@
 ### `DataManager.save_daily_summary`（Issue #462・2026-09-09 運用障害対応で変更）
 
 * **役割**: 日次サマリの集計状態を、`save_known_casts`と同じ一時ファイル経由のアトミックパターンでJSONファイルに保存するインスタンスメソッド。**（Issue #462で追加）** `save_known_casts`と同様、(1)一時ファイル(`.tmp`)へ書き出した内容を`json.load`で読み戻して正しくパースできることを検証し、(2)本番ファイルへの置換前に、既存の本番ファイルが存在すればその内容を`.bak.tmp`経由のアトミックな`replace`で`.bak`バックアップへ複製・更新する（`load_daily_summary`が破損時の復旧に使う）、という2つの安全策が追加された。読み戻し検証・`replace`到達前に例外が発生した場合、生成済みの`tmp_path`は外側の`except`節でbest-effortに削除される（`save_known_casts`のD-L8修正と同じパターン）。**（2026-09-09 運用障害対応で変更）** (1)の書き込み+検証は`DataManager._write_and_verify_json_tmp`へ切り出したうえで、`save_known_casts`と共通の`DataManager._retry_transient_write`（前々項参照）へ委譲し、NAS等の一過性の書き込み不良に備えて`_SAVE_VERIFY_MAX_ATTEMPTS`（既定3回）までリトライするようになった。以前は`save_known_casts`と同じ検証を持ちながらリトライを持たなかったため、NAS I/O競合等による一過性の空振りが起きるたびに、その時点までに累積していた新規検知件数の保存を諦めていた（次回21時台のサマリ送信での過少報告に繋がる）。
-* 根拠: [メソッド定義とDocstring] (行番号: 1426〜1453 / 抜粋: "def save_daily_summary(self, data: Dict) -> None:\n        """日次サマリの集計状態をJSONファイルに保存する。")、[`_retry_transient_write`呼び出し] (行番号: 1256〜1259 / 抜粋: "# 2026-09-09 運用障害対応: save_known_castsと同じ理由でリトライする。\n            DataManager._retry_transient_write(\n                tmp_path, lambda: DataManager._write_and_verify_json_tmp(tmp_path, data)\n            )")
+* 根拠: [メソッド定義とDocstring] (行番号: 1426〜1453 / 抜粋: "def save_daily_summary(self, data: Dict) -> None:\n        """日次サマリの集計状態をJSONファイルに保存する。")、[`_retry_transient_write`呼び出し] (参照: DataManager.save_daily_summary / 抜粋: "# 2026-09-09 運用障害対応: save_known_castsと同じ理由でリトライする。\n            DataManager._retry_transient_write(\n                tmp_path, lambda: DataManager._write_and_verify_json_tmp(tmp_path, data)\n            )")
 
 
 * **引数/リクエスト**: `data: Dict`（保存対象の集計状態）
-* 根拠: [引数定義とDocstring] (行番号: 1245〜1246 / 抜粋: "data (Dict): 保存対象の集計状態。")
+* 根拠: [引数定義とDocstring] (参照: DataManager.save_daily_summary / 抜粋: "data (Dict): 保存対象の集計状態。")
 
 
 * **戻り値/レスポンス**: `None`
@@ -786,7 +786,7 @@
 
 
 * **引数/リクエスト**: `site_id: str`（検知元サイトのID）, `count: int`（当該サイトで新たに検知した件数）
-* 根拠: [引数定義とDocstring] (行番号: 1172〜1190 / 抜粋: "site_id (str): 検知元サイトのID。\n            count (int): 当該サイトで新たに検知した件数。")
+* 根拠: [引数定義とDocstring] (参照: DataManager.record_daily_new_casts / 抜粋: "site_id (str): 検知元サイトのID。\n            count (int): 当該サイトで新たに検知した件数。")
 
 
 * **戻り値/レスポンス**: `None`
@@ -794,7 +794,7 @@
 
 
 * **副作用**: `DataManager.load_daily_summary`/`save_daily_summary`の呼び出し（ファイル読み書き）。`count <= 0`の場合は何もせず即座に`return`する。**（Issue #578）** `load_daily_summary`が`DataFileUnavailableError`を送出した場合も、`save_daily_summary`を呼ばず即座に`return`する。
-* 根拠: [ガード節と呼び出し] (行番号: 1175〜1189 / 抜粋: "if count <= 0:\n            return")
+* 根拠: [ガード節と呼び出し] (参照: DataManager.record_daily_new_casts / 抜粋: "if count <= 0:\n            return")
 
 
 * **エラーハンドリング**: **（Issue #578で追加）** `load_daily_summary`が送出する`DataFileUnavailableError`のみを捕捉し、`save_daily_summary`側のエラーハンドリング（`(OSError, ValueError, TypeError)`をログのみで握りつぶす。詳細は`save_daily_summary`を参照）には手を加えていない。
@@ -819,7 +819,7 @@
 * **`mark_site_failure_alerted(site_id: str) -> None`**: 閉鎖疑いアラートを送信済み(`alerted: True`)として記録する。**（Issue #578で追加）** `load_site_failures()`の`DataFileUnavailableError`を捕捉した場合は`logger.warning`を出力し保存をスキップして早期`return`する（次回実行時に閾値到達が続いていれば改めて送信判断される）。
 * 根拠: [メソッド定義とexcept節] (行番号: 1673〜1689 / 抜粋: "def mark_site_failure_alerted(self, site_id: str) -> None:" / "except DataFileUnavailableError as e:\n                # #578: 読めない状態のまま保存すると他サイト分の状態を消してしまうため\n                # スキップする" / "logger.warning(f\"Skipping alerted-flag update for '{site_id}': {e}\")\n                return")
 * **`clear_site_failure(site_id: str) -> None`**: 疎通成功時に当該サイトのエントリを削除する。記録が無いサイトについては何もしない（毎時の正常巡回のたびに全サイト分のNAS書き込みが発生しないようにするため）。**（Issue #578で追加）** `load_site_failures()`の`DataFileUnavailableError`を捕捉した場合も`logger.warning`を出力し保存をスキップして早期`return`する（誤ってcountがクリアされないまま残るだけで、次回巡回で再度成功すれば改めて解消を試みられる）。
-* 根拠: [メソッド定義とガード節・except節] (行番号: 1311〜1330 / 抜粋: "except DataFileUnavailableError as e:\n                # #578: 読めない状態のまま保存すると他サイト分の状態を消してしまうため\n                # スキップする" / "logger.warning(f\"Skipping site failure clear for '{site_id}': {e}\")\n                return" / "if site_id not in data:\n                return")
+* 根拠: [メソッド定義とガード節・except節] (参照: DataManager.record_daily_new_casts / 抜粋: "except DataFileUnavailableError as e:\n                # #578: 読めない状態のまま保存すると他サイト分の状態を消してしまうため\n                # スキップする" / "logger.warning(f\"Skipping site failure clear for '{site_id}': {e}\")\n                return" / "if site_id not in data:\n                return")
 
 
 ### `WebMonitor.__init__`
@@ -848,11 +848,11 @@
 
 
 * **戻り値/レスポンス**: `requests.Session`（設定済みセッションオブジェクト）
-* 根拠: [Docstringと戻り値] (行番号: 1355〜1369 / 抜粋: "Returns:\n            requests.Session: 設定済みのセッションオブジェクト。")
+* 根拠: [Docstringと戻り値] (参照: WebMonitor._create_robust_session / 抜粋: "Returns:\n            requests.Session: 設定済みのセッションオブジェクト。")
 
 
 * **副作用**: なし（セッションオブジェクトの生成・設定のみ、外部通信は発生しない）
-* 根拠: [処理内容] (行番号: 1358〜1368 / 抜粋: "session = requests.Session()\n        retries = Retry(")
+* 根拠: [処理内容] (参照: WebMonitor._create_robust_session / 抜粋: "session = requests.Session()\n        retries = Retry(")
 
 
 * **エラーハンドリング**: なし
@@ -865,11 +865,11 @@
 
 
 * **引数/リクエスト**: `site: SiteConfig`
-* 根拠: [引数定義とDocstring] (行番号: 1375〜1379 / 抜粋: "site (SiteConfig): 対象サイトの設定。")
+* 根拠: [引数定義とDocstring] (参照: WebMonitor.fetch_current_casts / 抜粋: "site (SiteConfig): 対象サイトの設定。")
 
 
 * **戻り値/レスポンス**: `Set[CastMember]`（現在掲載されているキャストの集合）
-* 根拠: [Docstring] (行番号: 1377〜1378 / 抜粋: "Returns:\n            Set[CastMember]: 現在掲載されているキャストの集合。")
+* 根拠: [Docstring] (参照: WebMonitor.fetch_current_casts / 抜粋: "Returns:\n            Set[CastMember]: 現在掲載されているキャストの集合。")
 
 
 * **副作用**: ランダム待機(`time.sleep(random.uniform(1.0, 3.0))`)、対象サイトのURLへのHTTP GETリクエスト、デバッグログ出力。
@@ -877,7 +877,7 @@
 
 
 * **エラーハンドリング**: `requests.RequestException`発生時はデバッグログを出力したうえで例外を再送出(`raise`)し、呼び出し元でのハンドリングを要求する（Docstringにも「通信エラー時」に本例外を送出する旨明記）。**（Issue #395で追加）** 別ドメインへのリダイレクトを検知した場合は`SiteUnavailableError`を送出する（`requests.RequestException`ではないため`except`節には捕捉されず、そのまま呼び出し元`_check_site`へ伝播する）。**（2026-09-02のbellica閉鎖対応で変更）** 以前はここで無条件に`exc_info=True`付きのERRORログを出力していたが、ログの重大度は連続失敗状態に応じて呼び出し元の`_handle_site_network_failure`が決定するよう変更された（恒久的に消失したサイトが毎時ERRORを出し続けてヘルスチェックを発報させないようにするため）。
-* 根拠: [try-exceptブロックとコメント] (行番号: 1406〜1412 / 抜粋: "except requests.RequestException as e:\n            # 呼び出し元でハンドリングするために再送出する。ログの重大度は\n            # 連続失敗状態に応じて _handle_site_network_failure が決定するため、\n            # ここでは無条件にERRORを記録しない")
+* 根拠: [try-exceptブロックとコメント] (参照: WebMonitor.fetch_current_casts / 抜粋: "except requests.RequestException as e:\n            # 呼び出し元でハンドリングするために再送出する。ログの重大度は\n            # 連続失敗状態に応じて _handle_site_network_failure が決定するため、\n            # ここでは無条件にERRORを記録しない")
 
 
 ### `WebMonitor._extract_raw_name` / `_extract_cast_link_and_id` / `_extract_cast_image_url`（品質で追加）
@@ -904,7 +904,7 @@
 ### `WebMonitor._extract_cast_age`（D-L12で追加、Issue #589で修正）
 
 * **役割**: name要素全体のテキスト（`name_elem.get_text(strip=True)`。`name_first_text_only`/`name_strip_after_tab`で名前から切り離された年齢の兄弟要素・タブ区切り部分も含む）から`AGE_PATTERN`にマッチする年齢候補を抽出する`@staticmethod`。**（Issue #589で修正）** 以前は`AGE_PATTERN.search()`により文字列中最初（最も左）の1件のみを候補とし、それが「歳」「才」の明示が無い括弧内数字でD-L12の妥当性範囲チェック（`MonitorConfig.AGE_PLAUSIBLE_MIN`〜`AGE_PLAUSIBLE_MAX`、18〜79）に落ちた場合、以降の候補を一切試さないまま抽出自体が空文字で終わっていた（例: `"No.(12) さくら(25歳)"`のように、部屋番号・連番等の括弧数字が本来の年齢表記より前に出現するケース。`"(12)"`が却下された時点で検索打ち切りとなり、後続の`"(25歳)"`を一切試さなかった）。現在は`AGE_PATTERN.finditer()`で文字列中の全マッチを出現順に走査し、(a)括弧内数字に「歳」「才」の明示がある、(b)括弧内数字のみだが妥当性範囲内である、(c)括弧無しで「歳」「才」が続く数字（正規表現上この形式は常に「歳」「才」を伴う）、のいずれかを満たす最初の候補が見つかった時点でそれを採用し`break`する。妥当性チェックに落ちた候補は（以前のように抽出全体を打ち切るのではなく）読み飛ばされ、ループが後続の候補を試す点が変更点であり、D-L12由来の妥当性チェックそのものの範囲・判定基準（`MonitorConfig.AGE_PLAUSIBLE_MIN`/`MAX`）は変更していない。回帰テストは`test_newface_monitor_parse.py`の`TestExtractCastAgeSkipsImplausibleLeadingNumber`（4パターン: 却下後の後続候補採用、通常時の非退行確認、妥当な年齢が皆無な場合に空文字を維持、「歳」「才」明示時は範囲外でも信頼するD-L12挙動の維持）。
-* 根拠: [メソッド定義とDocstring] (行番号: 1449〜1463 / 抜粋: "@staticmethod\n    def _extract_cast_age(name_elem: Optional[Tag]) -> str:\n        \"\"\"name要素全体のテキストから年齢を抽出する（品質: _parse_htmlから分離）。")、[Issue #589のコメントとfinditerループ] (行番号: 1466〜1489 / 抜粋: "# Issue #589: 以前はAGE_PATTERN.search()で最初の一致のみを見ていたため、\n            # \"No.(12) さくら(25歳)\"のように年齢より前に(歳/才の無い)2桁の括弧数字\n            # (連番・部屋番号等)が出現すると、その数字がD-L12の妥当性範囲チェックで\n            # 却下された時点で検索を打ち切ってしまい、後続の本来の年齢\n            # (\"(25歳)\")を一切試さないまま年齢抽出自体が失敗していた。\n            # finditer()で全ての候補を出現順に走査し、妥当性チェックを通過する\n            # 最初の候補が見つかるまで後続の候補も試すよう修正した。" / "for age_match in AGE_PATTERN.finditer(name_elem.get_text(strip=True)):" / "if bracket_suffix or (\n                        MonitorConfig.AGE_PLAUSIBLE_MIN\n                        <= int(bracket_num)\n                        <= MonitorConfig.AGE_PLAUSIBLE_MAX\n                    ):\n                        age = bracket_num\n                        break")
+* 根拠: [メソッド定義とDocstring] (行番号: 1449〜1463 / 抜粋: "@staticmethod\n    def _extract_cast_age(name_elem: Optional[Tag]) -> str:\n        \"\"\"name要素全体のテキストから年齢を抽出する（品質: _parse_htmlから分離）。")、[Issue #589のコメントとfinditerループ] (参照: WebMonitor._extract_cast_age / 抜粋: "# Issue #589: 以前はAGE_PATTERN.search()で最初の一致のみを見ていたため、\n            # \"No.(12) さくら(25歳)\"のように年齢より前に(歳/才の無い)2桁の括弧数字\n            # (連番・部屋番号等)が出現すると、その数字がD-L12の妥当性範囲チェックで\n            # 却下された時点で検索を打ち切ってしまい、後続の本来の年齢\n            # (\"(25歳)\")を一切試さないまま年齢抽出自体が失敗していた。\n            # finditer()で全ての候補を出現順に走査し、妥当性チェックを通過する\n            # 最初の候補が見つかるまで後続の候補も試すよう修正した。" / "for age_match in AGE_PATTERN.finditer(name_elem.get_text(strip=True)):" / "if bracket_suffix or (\n                        MonitorConfig.AGE_PLAUSIBLE_MIN\n                        <= int(bracket_num)\n                        <= MonitorConfig.AGE_PLAUSIBLE_MAX\n                    ):\n                        age = bracket_num\n                        break")
 
 
 * **引数/リクエスト**: `name_elem: Optional[Tag]`（名前要素。存在しない場合は`None`）
@@ -917,7 +917,7 @@
 
 * **副作用**: なし（`name_elem.get_text(strip=True)`によるテキスト抽出と正規表現マッチのみ。ログ出力・状態変更は行わない）
 * **エラーハンドリング**: なし（`name_elem`が`None`の場合は`if name_elem:`分岐によりループ自体を実行せず空文字を返す。個別要素のパース失敗全体は呼び出し元`_parse_html`の`try/except`が捕捉する）
-* 根拠: [name_elemのNoneガード] (行番号: 1465 / 抜粋: "if name_elem:")
+* 根拠: [name_elemのNoneガード] (参照: WebMonitor._extract_cast_age / 抜粋: "if name_elem:")
 
 
 ### `WebMonitor._parse_html`（D-L12で変更、品質でヘルパーメソッドへ分割）
@@ -939,7 +939,7 @@
 
 
 * **エラーハンドリング**: コンテナ要素が1件も見つからない場合は警告ログを出力し空集合を返す。個別のキャスト要素パース中に例外が発生した場合は警告ログを出力し、その要素をスキップして次の要素の処理を継続する（`continue`）。
-* 根拠: [try-exceptブロック] (行番号: 1660〜1663 / 抜粋: "except Exception as e:\n                # 個別のパースエラーで全体を止めない\n                logger.warning(f"Error parsing specific cast element (site: '{site.site_id}'): {e}")\n                continue")
+* 根拠: [try-exceptブロック] (参照: WebMonitor._parse_html / 抜粋: "except Exception as e:\n                # 個別のパースエラーで全体を止めない\n                logger.warning(f"Error parsing specific cast element (site: '{site.site_id}'): {e}")\n                continue")
 
 
 ### `WebMonitor.close`
@@ -952,7 +952,7 @@
 * **戻り値/レスポンス**: `None`（暗黙）
 * **副作用**: `self.session.close()`によるHTTPセッションのクローズ。
 * **エラーハンドリング**: `self.session`が存在する場合にのみクローズを実行するガード節のみ。
-* 根拠: [ガード節] (行番号: 1670 / 抜粋: "if self.session:")
+* 根拠: [ガード節] (参照: WebMonitor.close / 抜粋: "if self.session:")
 
 
 ### `SiteUnavailableError` / `SiteCheckResult`（Issue #395で追加）
@@ -985,7 +985,7 @@
 
 
 * **副作用**: `data_manager.record_site_failure`による失敗回数の加算・保存。ログ出力（連続失敗回数と例外内容を含む）: アラート送信済みならWARNING（「closure alert already sent」）、未送信でも閾値以上ならWARNING（「closure alert threshold reached; alert pending」）、閾値未満なら`log_level`（既定ERROR）。**（Issue #395で変更）** Discordへの送信と`mark_site_failure_alerted`は本関数では行わない（`_send_pending_site_failure_alerts`へ移動）。
-* 根拠: [処理本体] (行番号: 1734〜1748 / 抜粋: "count, alerted = data_manager.record_site_failure(site.site_id)\n    threshold_reached = count >= MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD" / "if alerted:\n        logger.warning(f\"{message} (closure alert already sent)\")\n    elif threshold_reached:\n        logger.warning(f\"{message} (closure alert threshold reached; alert pending)\")\n    else:\n        logger.log(log_level, message)")
+* 根拠: [処理本体] (参照: _handle_site_network_failure / 抜粋: "count, alerted = data_manager.record_site_failure(site.site_id)\n    threshold_reached = count >= MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD" / "if alerted:\n        logger.warning(f\"{message} (closure alert already sent)\")\n    elif threshold_reached:\n        logger.warning(f\"{message} (closure alert threshold reached; alert pending)\")\n    else:\n        logger.log(log_level, message)")
 
 
 * **エラーハンドリング**: なし（本関数自体に例外処理はない。アラート送信失敗時の再試行は`_send_pending_site_failure_alerts`側で「`alerted`を立てない」ことにより実現され、本関数は次回も閾値以上・未アラートとして送信要求を返し続ける）。
@@ -999,19 +999,19 @@
 
 
 * **引数/リクエスト**: `notifier: DiscordNotifier`, `data_manager: DataManager`, `pending: List[Tuple[SiteConfig, int]]`（(サイト設定, 連続失敗回数)のリスト）, `failed_count: int`（今回の実行で失敗として計上したサイト数）, `total_count: int`（今回の実行で処理対象としたサイト数）
-* 根拠: [引数定義とDocstring] (行番号: 1768〜1788 / 抜粋: "pending (List[Tuple[SiteConfig, int]]): (サイト設定, 連続失敗回数) のリスト。\n        failed_count (int): 今回の実行で失敗として計上したサイト数。\n        total_count (int): 今回の実行で処理対象としたサイト数。")
+* 根拠: [引数定義とDocstring] (参照: _send_pending_site_failure_alerts / 抜粋: "pending (List[Tuple[SiteConfig, int]]): (サイト設定, 連続失敗回数) のリスト。\n        failed_count (int): 今回の実行で失敗として計上したサイト数。\n        total_count (int): 今回の実行で処理対象としたサイト数。")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 1757 / 抜粋: ") -> None:")
+* 根拠: [戻り値ヒント] (参照: _send_pending_site_failure_alerts / 抜粋: ") -> None:")
 
 
 * **副作用**: 抑止時の警告ログ出力。非抑止時の`notifier.notify_site_failure_alert`によるDiscord送信と、成功時の`data_manager.mark_site_failure_alerted`による`site_failures.json`更新。`pending`が空なら何もしない。
-* 根拠: [ガード節と送信ループ] (行番号: 1772〜1785 / 抜粋: "if not pending:\n        return" / "for site, count in pending:\n        # 送信に失敗した場合はalertedを立てず、次回実行時に再試行する")
+* 根拠: [ガード節と送信ループ] (参照: _send_pending_site_failure_alerts / 抜粋: "if not pending:\n        return" / "for site, count in pending:\n        # 送信に失敗した場合はalertedを立てず、次回実行時に再試行する")
 
 
 * **エラーハンドリング**: 送信失敗（`notify_site_failure_alert`が`False`）時は`alerted`を立てず、次回実行時に再試行される。
-* 根拠: [送信成否分岐] (行番号: 1784〜1787 / 抜粋: "if notifier.notify_site_failure_alert(site, count):\n            data_manager.mark_site_failure_alerted(site.site_id)")
+* 根拠: [送信成否分岐] (参照: _send_pending_site_failure_alerts / 抜粋: "if notifier.notify_site_failure_alert(site, count):\n            data_manager.mark_site_failure_alerted(site.site_id)")
 
 
 ### `_merge_known_casts`（Issue #538で追加）
@@ -1050,7 +1050,7 @@
 
 
 * **引数/リクエスト**: `monitor: WebMonitor`（使い回すインスタンス）, `notifier: DiscordNotifier`（使い回すインスタンス）, `site: SiteConfig`（処理対象のサイト設定）, `data_manager: DataManager`（**Issue #364で追加**。今回の実行で解決済みのデータディレクトリに束縛された`DataManager`。既知キャストの読み書き・失敗状態・日次集計は全てこのインスタンス経由で行い、NAS状態を再評価しない）
-* 根拠: [引数定義とDocstring] (行番号: 1835〜1848 / 抜粋: "monitor (WebMonitor): 使い回すWebMonitorインスタンス。\n        notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。\n        site (SiteConfig): 処理対象のサイト設定。\n        data_manager (DataManager): 今回の実行で解決済みのデータディレクトリに\n            束縛されたDataManager(#364)。")
+* 根拠: [引数定義とDocstring] (参照: _check_site / 抜粋: "monitor (WebMonitor): 使い回すWebMonitorインスタンス。\n        notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。\n        site (SiteConfig): 処理対象のサイト設定。\n        data_manager (DataManager): 今回の実行で解決済みのデータディレクトリに\n            束縛されたDataManager(#364)。")
 
 
 * **戻り値/レスポンス**: `SiteCheckResult`（**Issue #395で変更**。以前は`None`。既知キャスト読み込み不可でのスキップ時と正常完了時は`SiteCheckResult()`（`failed=False`）、疎通不能・別ドメインへのリダイレクト・キャスト0件で失敗計上した場合は`failed=True`かつ`_handle_site_network_failure`の戻り値を`pending_alert_count`に持つ）
@@ -1058,11 +1058,11 @@
 
 
 * **副作用**: `data_manager.load_known_casts`/`save_known_casts`の呼び出し、`monitor.fetch_current_casts`によるHTTP通信、新規検知時の`notifier.notify`によるDiscord通知と`data_manager.record_daily_new_casts`による日次集計更新。**（D-L9で変更）** `record_daily_new_casts`に渡す件数は、以前は`len(new_casts)`（検知した新規件数そのもの）だったが、`notifier.notify`の戻り値（実際にDiscordへ送信できた件数）を使うよう変更した。サーキットブレーカーが開いて送信をスキップしたキャストまで日次サマリに計上すると、実際には送られていない件数分だけ過大報告になっていたため。既知キャスト(`known_casts`)が1件以上存在するにもかかわらず、新規検知件数が`MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD`（既定値20）以上となった場合は、`known_casts`データの喪失・巻き戻り（NAS同期不整合やキャッシュ破損からの復旧漏れ等）による大量誤検知・再通知の疑いとして警告ログを出力する（通知自体は継続され、あくまで調査の手がかりを残す目的）。**（Issue #237で修正）** `save_known_casts`に渡す保存対象は、新規検知の有無に関わらず常に和集合ベースで求められる（**Issue #538以降は`known_casts.union(current_casts)`ではなく`_merge_known_casts(known_casts, current_casts)`により、和集合に加えて長期間欠落したキャストの剪定も行う。詳細は前項の`_check_site`の`_merge_known_casts`に関する記載を参照**）。以前（#237時点）は新規検知が1件でもあれば和集合、1件も無ければ`current_casts`による全置換という非対称な実装だったため、`_parse_html`が個別カードのパース失敗を`except Exception`で握りつぶしフェイルソフトに処理を続行する設計（既知キャストのカードが単発でパース失敗し`current_casts`から漏れるケースがある）と組み合わさると、同一実行内に他の真の新規キャストが1件も無い場合に限り、そのカードが`known_casts`から恒久的に消え、次回正常にパースできた際に「新規キャスト」として誤って再通知されていた。
-* 根拠: [メイン処理フローと大量検知時の警告] (行番号: 1848, 1886〜1891 / 抜粋: "known_casts = data_manager.load_known_casts(site)" / "if known_casts and len(new_casts) >= MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD:\n        logger.warning(\n            f\"Unusually large diff for site '{site.site_id}': \"")、常時_merge_known_castsでの保存(#538) (行番号: 1902, 1938 / 抜粋: "updated_casts, pruned_count = _merge_known_casts(known_casts, current_casts)" / "data_manager.save_known_casts(site, updated_casts)")、[D-L9: sent_countの利用] (行番号: 1910〜1916 / 抜粋: "# D-L9: サーキットブレーカーが開いて送信をスキップしたキャストまで\n        # 日次サマリに計上すると、実際にDiscordへ送られていない件数分だけ\n        # 過大報告になる。notify()の戻り値(実際に送信できた件数)を使う。\n        sent_count = notifier.notify(new_casts, site_name=site.name)\n        data_manager.record_daily_new_casts(site.site_id, sent_count)")
+* 根拠: [メイン処理フローと大量検知時の警告] (行番号: 1848, 1886〜1891 / 抜粋: "known_casts = data_manager.load_known_casts(site)" / "if known_casts and len(new_casts) >= MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD:\n        logger.warning(\n            f\"Unusually large diff for site '{site.site_id}': \"")、常時_merge_known_castsでの保存(#538) (行番号: 1902, 1938 / 抜粋: "updated_casts, pruned_count = _merge_known_casts(known_casts, current_casts)" / "data_manager.save_known_casts(site, updated_casts)")、[D-L9: sent_countの利用] (参照: _check_site / 抜粋: "# D-L9: サーキットブレーカーが開いて送信をスキップしたキャストまで\n        # 日次サマリに計上すると、実際にDiscordへ送られていない件数分だけ\n        # 過大報告になる。notify()の戻り値(実際に送信できた件数)を使う。\n        sent_count = notifier.notify(new_casts, site_name=site.name)\n        data_manager.record_daily_new_casts(site.site_id, sent_count)")
 
 
 * **エラーハンドリング**: **（Issue #365で追加）** `data_manager.load_known_casts`が`KnownCastsUnavailableError`（既知キャストファイルは存在するがI/Oエラーで読めない）を送出した場合はWARNINGログ（「Skipping site ... because known casts are unavailable」）を出力し、巡回（`fetch_current_casts`）・通知・保存のいずれも行わず`return`する（空集合で続行すると全キャストの再通知と、union保存による退店済みキャストの復活を招くため）。`monitor.fetch_current_casts`での`requests.RequestException`または`SiteUnavailableError`（**Issue #395で追加**。別ドメインへのリダイレクト）発生時は`_handle_site_network_failure`に処理を委譲し、`SiteCheckResult(failed=True, pending_alert_count=...)`を返す（当該サイトのみ中断、他サイトへは影響しない。失敗回数の記録・ログレベルの決定は委譲先が行い、Discordアラートの送信可否は`_run_monitor_locked`が全サイト処理後に判断する）。**（Issue #395で変更）** 取得できたキャストが0件の場合も、以前のように`clear_site_failure`してデバッグログで`return`するのではなく、`SiteUnavailableError("no casts parsed")`を理由として`_handle_site_network_failure`に`log_level=logging.WARNING`で委譲し、連続失敗として計上する（200を返すがポータルへリダイレクト後に要素が見つからないだけ、というbellicaの症状を検知するため。レイアウト変更の可能性もあるため閾値未満ではERRORにしない）。連続失敗状態の解消（`data_manager.clear_site_failure`）は、到達できて1件以上のキャストを取得できた時点で行う。
-* 根拠: [KnownCastsUnavailableErrorによるスキップ] (行番号: 1849〜1856 / 抜粋: "except KnownCastsUnavailableError as e:\n        # #365: I/Oエラーで既知キャストが読めない場合、空集合で続行すると\n        # 全キャストの再通知と退店済みキャストの復活(union保存)を招くため、\n        # 巡回・通知・保存のいずれも行わず当該サイトを今回はスキップする" / "return SiteCheckResult()")、[try-except・0件時の失敗計上・成功時のクリア] (行番号: 1860〜1878 / 抜粋: "except (requests.RequestException, SiteUnavailableError) as e:\n        pending = _handle_site_network_failure(notifier, site, e, data_manager)\n        return SiteCheckResult(failed=True, pending_alert_count=pending)" / "if not current_casts:\n        # #395: 200を返すが1件も抽出できない状態が続くのも消失サイトの症状" / "log_level=logging.WARNING," / "# 到達できてキャストを取得できた時点で連続失敗の記録があれば解消する\n    data_manager.clear_site_failure(site.site_id)")
+* 根拠: [KnownCastsUnavailableErrorによるスキップ] (参照: _check_site / 抜粋: "except KnownCastsUnavailableError as e:\n        # #365: I/Oエラーで既知キャストが読めない場合、空集合で続行すると\n        # 全キャストの再通知と退店済みキャストの復活(union保存)を招くため、\n        # 巡回・通知・保存のいずれも行わず当該サイトを今回はスキップする" / "return SiteCheckResult()")、[try-except・0件時の失敗計上・成功時のクリア] (参照: _check_site / 抜粋: "except (requests.RequestException, SiteUnavailableError) as e:\n        pending = _handle_site_network_failure(notifier, site, e, data_manager)\n        return SiteCheckResult(failed=True, pending_alert_count=pending)" / "if not current_casts:\n        # #395: 200を返すが1件も抽出できない状態が続くのも消失サイトの症状" / "log_level=logging.WARNING," / "# 到達できてキャストを取得できた時点で連続失敗の記録があれば解消する\n    data_manager.clear_site_failure(site.site_id)")
 
 
 ### `_maybe_send_daily_summary`
@@ -1072,7 +1072,7 @@
 
 
 * **引数/リクエスト**: `notifier: DiscordNotifier`（使い回すインスタンス）, `data_manager: DataManager`（**Issue #364で追加**。今回の実行で解決済みのデータディレクトリに束縛された`DataManager`）
-* 根拠: [引数定義とDocstring] (行番号: 1959〜1978 / 抜粋: "notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。\n        data_manager (DataManager): 今回の実行で解決済みのデータディレクトリに\n            束縛されたDataManager(#364)。")
+* 根拠: [引数定義とDocstring] (参照: _maybe_send_daily_summary / 抜粋: "notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。\n        data_manager (DataManager): 今回の実行で解決済みのデータディレクトリに\n            束縛されたDataManager(#364)。")
 
 
 * **戻り値/レスポンス**: `None`
@@ -1084,7 +1084,7 @@
 
 
 * **エラーハンドリング**: 現在時刻が21時台でない場合、または当日分が送信済みの場合は早期`return`する。**（Issue #578で追加）** `data_manager.load_daily_summary()`が送出する`DataFileUnavailableError`を捕捉し、警告ログを出力して早期`return`する（本関数が捕捉する唯一の例外）。**[修正済み・Issue #451]** 以前は判定条件にリテラル`21`が直書きされていたが、現在は`MonitorConfig.DAILY_SUMMARY_HOUR`定数を参照する(値は変更していない)。
-* 根拠: [ガード節] (行番号: 1964〜1966 / 抜粋: "if now.hour != MonitorConfig.DAILY_SUMMARY_HOUR:\n        return")
+* 根拠: [ガード節] (参照: _maybe_send_daily_summary / 抜粋: "if now.hour != MonitorConfig.DAILY_SUMMARY_HOUR:\n        return")
 
 
 ### `_MONITOR_LOCK_FILE_PATH` (モジュール定数)
@@ -1112,11 +1112,11 @@
 
 
 * **副作用**: ロックファイルのオープン(`os.open`)、非ブロッキング排他ロック取得の試行(`fcntl.flock(..., fcntl.LOCK_EX | fcntl.LOCK_NB)`)、取得成功時の`_run_monitor_locked()`呼び出し、`finally`ブロックでのロック解放(`fcntl.flock(..., fcntl.LOCK_UN)`)とファイルディスクリプタのクローズ。
-* 根拠: [ロック処理] (行番号: 2005〜2019 / 抜粋: "lock_fd = os.open(str(_MONITOR_LOCK_FILE_PATH), os.O_CREAT | os.O_RDWR)\n    try:\n        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)")
+* 根拠: [ロック処理] (参照: run_monitor / 抜粋: "lock_fd = os.open(str(_MONITOR_LOCK_FILE_PATH), os.O_CREAT | os.O_RDWR)\n    try:\n        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)")
 
 
 * **エラーハンドリング**: ロック取得失敗(`BlockingIOError`/`OSError`)時は「他のインスタンスが既に実行中」である旨の情報ログを出力し、ファイルディスクリプタをクローズして即座に`return`する（多重起動をスキップし、`_run_monitor_locked`は呼び出されない）。ロック取得後は`_run_monitor_locked()`の呼び出しを`try`/`finally`で囲み、内部で例外が発生してもロック解放とディスクリプタのクローズを確実に行う。
-* 根拠: [try-exceptとfinally] (行番号: 2008〜2019 / 抜粋: "except (BlockingIOError, OSError):\n        logger.info("⏭️ 他のインスタンスが既に実行中のため終了します (lock busy)")\n        os.close(lock_fd)\n        return")
+* 根拠: [try-exceptとfinally] (参照: run_monitor / 抜粋: "except (BlockingIOError, OSError):\n        logger.info("⏭️ 他のインスタンスが既に実行中のため終了します (lock busy)")\n        os.close(lock_fd)\n        return")
 
 
 ### `_run_monitor_locked`
@@ -1134,7 +1134,7 @@
 
 
 * **副作用**: デバッグログ出力（開始・終了）、`MonitorConfig.get_data_dir()`の1回の呼び出し（NAS状態の検証・自己修復・障害通知を伴いうる）、`wait_for_storage_warmup`の呼び出し、`DataManager`・`WebMonitor`・`DiscordNotifier`のインスタンス化、**（Issue #461で追加）** `data_manager.cleanup_old_quarantine_files()`の呼び出し（`.corrupted-*`隔離ファイルのディレクトリ走査・削除）、全`SITES`エントリに対する`_check_site`の逐次呼び出し、**（Issue #395で追加）** 各`SiteCheckResult`から失敗サイト数と保留アラート（`pending_alert_count`）を集計し、ループ後に`_send_pending_site_failure_alerts(notifier, data_manager, pending_alerts, failed_count, len(MonitorConfig.SITES))`を呼び出して閉鎖疑いアラートをまとめて送信判断すること、`_maybe_send_daily_summary`の呼び出し、`finally`ブロックでの`monitor.close()`/`notifier.close()`呼び出し。
-* 根拠: [失敗集計と保留アラート送信] (行番号: 2060〜2078 / 抜粋: "# #395: 閉鎖疑いアラートはサイト処理中に即時送信せず、全サイト処理後に\n        # 失敗サイトの割合(自局側障害の疑い)を見てからまとめて送信判断する。\n        failed_count = 0\n        pending_alerts: List[Tuple[SiteConfig, int]] = []" / "_send_pending_site_failure_alerts(\n            notifier, data_manager, pending_alerts, failed_count, len(MonitorConfig.SITES)\n        )")
+* 根拠: [失敗集計と保留アラート送信] (参照: _run_monitor_locked / 抜粋: "# #395: 閉鎖疑いアラートはサイト処理中に即時送信せず、全サイト処理後に\n        # 失敗サイトの割合(自局側障害の疑い)を見てからまとめて送信判断する。\n        failed_count = 0\n        pending_alerts: List[Tuple[SiteConfig, int]] = []" / "_send_pending_site_failure_alerts(\n            notifier, data_manager, pending_alerts, failed_count, len(MonitorConfig.SITES)\n        )")
 * 根拠: [メイン処理フロー] (行番号: 2410, 2428, 2437〜2443, 2479 / 抜粋: "data_dir = MonitorConfig.get_data_dir()" / "data_manager = DataManager(data_dir)" / "monitor = WebMonitor()\n        notifier = DiscordNotifier(MonitorConfig.DISCORD_WEBHOOK_URL, MonitorConfig.OPS_WEBHOOK_URL)\n\n        for site in MonitorConfig.SITES:\n            try:\n                _check_site(monitor, notifier, site, data_manager)" / "_maybe_send_daily_summary(notifier, data_manager)")
 
 

@@ -208,6 +208,24 @@ def _source_index(suffixes: Tuple[str, ...] = (".py",)) -> Dict[str, List[Path]]
     return index
 
 
+# `(参照: Class.method / 抜粋: "…")`。シンボル参照の書式(Issue #950。検証は scan_symbol_references)
+_SYMBOL_BLOCK_RE = re.compile(r"参照: ([A-Za-z_][\w.]*) / 抜粋: ")
+
+
+def _block_stop(line: str, block, blocks, index: int) -> int:
+    """`行番号:` ブロックに属する抜粋の終端(次のブロックの手前)を返す。
+
+    次の `行番号:` ブロックだけでなく、次の `参照: シンボル` ブロックも境界にする(Issue #950)。
+    境界にしないと、シンボル参照へ書き換えた引用が同じ行に並んでいるとき、手前の行番号引用の
+    抜粋として後ろの `抜粋: "…"` まで拾われ、抜粋の数が項の数と合わなくなってゲートから黙って外れる。
+    """
+    stop = blocks[index + 1].start() if index + 1 < len(blocks) else len(line)
+    symbol = _SYMBOL_BLOCK_RE.search(line, block.end())
+    if symbol is not None:
+        stop = min(stop, symbol.start())
+    return stop
+
+
 def _split_snippets(rest: str) -> List[str]:
     """`抜粋: "a", "b"` の抜粋部分をスニペット単位に分割する(書式A)。"""
     match = re.search(r'抜粋: (".*)$', rest)
@@ -468,7 +486,7 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
             rewritten = line
             shift = 0
             for b_i, block in enumerate(blocks):
-                stop = blocks[b_i + 1].start() if b_i + 1 < len(blocks) else len(line)
+                stop = _block_stop(line, block, blocks, b_i)
                 rest = line[block.end():stop]
                 # 書式B(Issue #679)の抜粋はブロックの手前にある。直前のブロックの
                 # 終わりまでに窓を限ることで、1行に複数の根拠が並ぶときに
@@ -642,7 +660,7 @@ def _iter_ungated_citations():
         for line in spec.read_text(encoding="utf-8").splitlines():
             blocks = list(_BLOCK_RE.finditer(line))
             for b_i, block in enumerate(blocks):
-                stop = blocks[b_i + 1].start() if b_i + 1 < len(blocks) else len(line)
+                stop = _block_stop(line, block, blocks, b_i)
                 rest = line[block.end():stop]
                 before = line[blocks[b_i - 1].end() if b_i else 0:block.start()]
                 snippets = _split_snippets(rest)
@@ -738,6 +756,134 @@ def triage_non_gated_citations() -> Tuple[Dict[str, Dict[str, int]], Dict[str, i
     return per_spec, total
 
 
+# --- シンボル参照(Issue #950) -----------------------------------------------
+#
+# 行番号は、ソースの行が増減するたびに静かに古くなる(非ゲート分の約45%が既にずれていた)。
+# 行番号の代わりに「どの関数/メソッドの中か」を書く書式を用意する:
+#
+#     (参照: Class.method / 抜粋: "return foo(")
+#
+# 検証は「そのシンボルがソースに存在し、抜粋の先頭行がその本体の中にある」こと。行が
+# 増減しても、同じ関数の中にある限り通る(関数の改名・削除・抜粋の移動だけが検知される)。
+# 対象は Python のソースに1対1で対応する仕様書のみ。
+
+
+def _resolve_symbol(symbol: str, qualified: Dict, flat: Dict) -> Optional[Tuple[int, int]]:
+    """`name` / `Class.method` からソース内の行範囲を引く。曖昧・不在なら None。"""
+    if "." in symbol:
+        klass, _, name = symbol.rpartition(".")
+        return qualified.get((klass.split(".")[-1], name))
+    return _resolve(symbol, None, qualified, flat)
+
+
+def _symbol_blocks(line: str):
+    """1行から (ブロックの開始, 終了, シンボル, 抜粋リスト) を順に返す。"""
+    blocks = list(_SYMBOL_BLOCK_RE.finditer(line))
+    for i, block in enumerate(blocks):
+        stop = blocks[i + 1].start() if i + 1 < len(blocks) else len(line)
+        other = _BLOCK_RE.search(line, block.end())
+        if other is not None:
+            stop = min(stop, other.start())
+        yield block.start(), block.end(), block.group(1), _split_snippets(line[block.start():stop])
+
+
+def scan_symbol_references() -> Tuple[List[str], int]:
+    """`参照: シンボル / 抜粋: ...` の引用を検証する。戻り値は (問題の一覧, 検証した抜粋の数)。"""
+    index = _source_index()
+    problems: List[str] = []
+    checked = 0
+    for spec in sorted(SPEC_ROOT.rglob("*.md")):
+        if spec.name == "README.md":
+            continue
+        candidates = index.get(spec.stem)
+        if not candidates or len(candidates) != 1:
+            continue
+        src_lines = candidates[0].read_text(encoding="utf-8").splitlines()
+        qualified, flat = _definitions("\n".join(src_lines))
+        if qualified is None:
+            continue
+        for lineno, line in enumerate(spec.read_text(encoding="utf-8").splitlines(), 1):
+            for _, _, symbol, snippets in _symbol_blocks(line):
+                where = "%s:%d" % (spec.relative_to(REPO_ROOT), lineno)
+                span = _resolve_symbol(symbol, qualified, flat)
+                if span is None:
+                    problems.append("%s `%s` がソースに存在しない(または同名が複数で一意に決まらない)" % (where, symbol))
+                    continue
+                body = src_lines[span[0] - 1: span[1]]
+                for snippet in snippets:
+                    head = _snippet_first_line(snippet)
+                    if len(head) < _MIN_LITERAL_HEAD:
+                        continue
+                    checked += 1
+                    if not any(head in l for l in body):
+                        problems.append(
+                            "%s 抜粋 `%s` が `%s`(%d〜%d行)の中に見つからない" % (where, head[:60], symbol, span[0], span[1])
+                        )
+    return problems, checked
+
+
+def convert_to_symbol_references(specs: List[Path], write: bool = True) -> Tuple[int, int]:
+    """指定した仕様書の「ずれている行番号引用」を、シンボル参照へ書き換える。戻り値は (変換数, 変換できなかった数)。
+
+    変換するのは、(1) 引用が 1 項 + 抜粋 1 つの書式Aで、(2) 引用した行(範囲引用なら範囲)に
+    抜粋の先頭行が無く(=すでにずれている)、(3) 直前の `### `シンボル`` 見出しのシンボルが
+    ソースで一意に決まり、(4) その本体の中に抜粋の先頭行がある、ものだけ。
+    どれかを満たさない引用は触らない(位置が確かめられないものを、確かめたことにしない)。
+    ゲート済みの引用(def/class・一意な単一行リテラル)も触らない。
+    """
+    index = _source_index()
+    converted = skipped = 0
+    for spec in specs:
+        candidates = index.get(spec.stem)
+        if not candidates or len(candidates) != 1:
+            continue
+        src_lines = candidates[0].read_text(encoding="utf-8").splitlines()
+        qualified, flat = _definitions("\n".join(src_lines))
+        if qualified is None:
+            continue
+        heading_symbol: Optional[str] = None
+        out_lines: List[str] = []
+        for line in spec.read_text(encoding="utf-8").splitlines():
+            heading = _HEADING_RE.match(line)
+            if heading:
+                heading_symbol = heading.group(1)
+            blocks = list(_BLOCK_RE.finditer(line))
+            edits: List[Tuple[int, int, str]] = []
+            for b_i, block in enumerate(blocks):
+                stop = _block_stop(line, block, blocks, b_i)
+                rest = line[block.end():stop]
+                before = line[blocks[b_i - 1].end() if b_i else 0:block.start()]
+                snippets = _split_snippets(rest)
+                items = _ITEM_RE.findall(block.group(1))
+                if len(items) != 1 or len(snippets) != 1 or not rest.startswith(" / 抜粋: "):
+                    continue
+                _, def_claimed = _definition_pairs(rest, before, snippets, _backtick_snippets(before), items)
+                snippet = snippets[0]
+                if 0 in def_claimed or re.match(r'"(?:async )?(?:def|class) \w+', snippet.strip()):
+                    continue
+                head = _snippet_first_line(snippet)
+                if len(head) < _MIN_LITERAL_HEAD:
+                    continue
+                if _literal_target(snippet, items[0], src_lines) is not None:
+                    continue  # ゲート済み
+                start, end = _cited_span(items[0])
+                if any(head in l for l in src_lines[max(0, start - 2): max(start, end)]):
+                    continue  # 引用した場所に実在する(ずれていない)
+                span = _resolve_symbol(heading_symbol, qualified, flat) if heading_symbol else None
+                if span is None or not any(head in l for l in src_lines[span[0] - 1: span[1]]):
+                    skipped += 1
+                    continue
+                edits.append((block.start(), block.end(), "参照: %s" % heading_symbol))
+            for a, b, text in reversed(edits):
+                line = line[:a] + text + line[b:]
+                converted += 1
+            out_lines.append(line)
+        if write:
+            text = "\n".join(out_lines) + ("\n" if spec.read_text(encoding="utf-8").endswith("\n") else "")
+            spec.write_text(text, encoding="utf-8")
+    return converted, skipped
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--fix", action="store_true", help="不一致を実ソースの位置へ書き換える")
@@ -751,7 +897,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="ゲートに入らない引用を、抜粋の実在位置で4種類(正しそう/ずれ・位置確定/ずれ・位置不明/ソースに無い)に仕分けして件数を出す(exit 0。Issue #950)",
     )
+    parser.add_argument(
+        "--to-symbol-refs",
+        nargs="+",
+        metavar="SPEC.md",
+        type=Path,
+        help="指定した仕様書の「ずれている行番号引用」を、見出しのシンボルが確かめられるものに限り `参照: シンボル` へ書き換える(Issue #950)",
+    )
     args = parser.parse_args(argv)
+
+    if args.to_symbol_refs:
+        converted, skipped = convert_to_symbol_references([p.resolve() for p in args.to_symbol_refs])
+        print("✅ シンボル参照へ %d件を書き換えました(確かめられず据え置き: %d件)。" % (converted, skipped))
+        return 0
 
     if args.triage:
         per_spec, total = triage_non_gated_citations()
@@ -790,6 +948,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     for spec, reason in skipped:
         print("⚠️ 検証をスキップ: %s (%s)" % (spec.relative_to(REPO_ROOT), reason))
 
+    symbol_problems, symbol_checked = scan_symbol_references()
+    if symbol_problems:
+        print("❌ シンボル参照チェック: %d件中 %d件に問題があります。" % (symbol_checked, len(symbol_problems)))
+        for problem in symbol_problems:
+            print("  - " + problem)
+        print()
+
     # Issue #748 (AUDIT-019): 以前の出力は「✅ N件すべて一致」としか言わず、
     # それを見た人は「仕様書の行番号引用はすべて正しい」と読んでしまっていた。
     # 保証範囲を、結果と同じ場所に必ず出す(制限自体は docs/specifications/README.md にも
@@ -807,11 +972,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         "   (--report で内訳。抜粋の表記ゆれによる偽陽性を含む)。保証範囲: docs/specifications/README.md",
     ]
 
-    if not findings:
+    scope_lines.append("   別に、`参照: シンボル` の引用 %d件(行番号に依存しない書式。Issue #950)を検証しています。" % symbol_checked)
+
+    if not findings and not symbol_problems:
         print("✅ 行番号引用チェック: ゲート対象 %d件はすべて実ソースの位置と一致しています。" % checked)
         for line in scope_lines:
             print(line)
         return 0
+    if not findings:
+        return 1
 
     print("❌ 行番号引用チェック: ゲート対象 %d件中 %d件が実ソースと一致しません。" % (checked, len(findings)))
     for line in scope_lines:
