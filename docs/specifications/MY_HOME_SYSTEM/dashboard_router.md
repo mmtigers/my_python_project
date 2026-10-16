@@ -139,11 +139,13 @@
 
 ### `GET {DASHBOARD_BASE_PATH}` / `GET {DASHBOARD_BASE_PATH}/` (`dashboard_home`)
 
+* **(新機能)** クエリパラメータ`hm_loc`(`itami`/`takasago`)・`hm_metric`(`temp`/`hum`)を追加した。ホームの「過去30日の温度/湿度」ヒートマップの拠点・指標で、不正な値は既定(伊丹・温度)にする。`_home_climate_html`が10分キャッシュの集計(`home_status_service.get_hourly_climate`)から作り、`climate_html`として渡す。
+
 * **役割**: ホームページ(ステータスカード＋見守り/くらし/システムへの導線＋外部リンク)を返す。クエリパラメータ`tab`(Streamlit版の`?tab=watch`等)が指定されていれば、`_LEGACY_TAB_REDIRECTS`を使って対応する新しいページへ302リダイレクトする(未知の値は`_BASE_PATH`=ホームへ)。 **(新機能)** ホームの「📊 今日の動き」(防犯・高砂・伊丹の3行ヒートマップ)を`_home_heatmap_html()`で作って`heatmap_html`として渡す。元データは`home_status_service.get_sensor_data_today()`(60秒キャッシュ)。
-* 根拠: [ルート定義] (行番号: 84〜110 / 抜粋: '@router.get(_BASE_PATH, include_in_schema=False)\n@router.get(f"{_BASE_PATH}/", include_in_schema=False)\ndef dashboard_home(tab: str | None = None) -> Response:')
+* 根拠: [ルート定義] (行番号: 84〜110 / 抜粋: '@router.get(_BASE_PATH, include_in_schema=False)\n@router.get(f"{_BASE_PATH}/", include_in_schema=False)\ndef dashboard_home(tab: str | None = None, hm_loc: str | None = None, hm_metric: str | None = None) -> Response:')
 
 
-* **引数/リクエスト**: `tab: str | None = None`(クエリパラメータ)
+* **引数/リクエスト**: `tab: str | None = None`、`hm_loc: str | None = None`、`hm_metric: str | None = None`(いずれもクエリパラメータ)
 * 根拠: [関数定義] (行番号: 86)
 
 
@@ -162,8 +164,10 @@
 
 ### `GET {DASHBOARD_BASE_PATH}/status` (`dashboard_status_fragment`)
 
+* **(新機能)** `hm_loc`/`hm_metric`を受け取り、ホーム本体と同じ`_home_climate_html`で温湿度ヒートマップを含める(自動更新で選択が戻らないよう、ホームのJSが現在のクエリ文字列を付けて取得する)。
+
 * **役割**: ホームページの自動更新用に、カードと外部リンクのブロック(`<div id="status">`)を返す。 **(新機能)** ホームの「📊 今日の動き」(防犯・高砂・伊丹の3行ヒートマップ)を`_home_heatmap_html()`で作って`heatmap_html`として渡す。元データは`home_status_service.get_sensor_data_today()`(60秒キャッシュ)。 **(新機能)** 自動更新でも同じ`_home_heatmap_html()`を`heatmap_html`として渡すので、ホーム本体とヒートマップの位置・内容が食い違わない。
-* 根拠: [ルート定義] (行番号: 113〜123 / 抜粋: '@router.get(_STATUS_PATH, include_in_schema=False)\ndef dashboard_status_fragment() -> HTMLResponse:')
+* 根拠: [ルート定義] (行番号: 113〜123 / 抜粋: '@router.get(_STATUS_PATH, include_in_schema=False)\ndef dashboard_status_fragment(hm_loc: str | None = None, hm_metric: str | None = None) -> HTMLResponse:')
 
 
 * **引数/リクエスト**: なし
@@ -190,7 +194,7 @@
 
 
 * **引数/リクエスト**: **(新機能)** クエリ`device`(`device_id`、任意)で高砂・伊丹のセンサーログをその機器だけに絞る(`render_watch_page(selected_device=...)`に渡す。一覧に無い値は無視される。防犯ログは対象外)。クエリ`date`(`YYYY-MM-DD`、任意)。**(新機能)** 指定があれば`dashboard_page_service.parse_log_date`で解釈し、その日のログだけを表示する。この場合は共通キャッシュ(直近`MOBILE_SENSOR_ROW_LIMIT`件)ではなく`home_status_service.get_sensor_data_for_day`でDBから指定日の全件を取る。形式が不正な値は無視して通常表示になる。
-* 根拠: [関数定義] (行番号: 159 / 抜粋: "def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLResponse:")、[日付の解釈] (行番号: 171 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
+* 根拠: [関数定義] (行番号: 176 / 抜粋: "def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLResponse:")、[日付の解釈] (行番号: 188 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(見守りページ全体のHTML)
@@ -233,13 +237,13 @@
 
 * **役割**: **(新機能)** ⚡電気ページ。`power_analysis_service.build_power_report(days)`の結果を`power_page_service.render_power_page`で描く(月ごとの推移・日別の電気代・気温との関係・テレビの使い方)。分析は10分キャッシュされる。`async def`にしない(DB取得とpandasの計算が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`days`(30/60/90。それ以外の値・数値でない値は既定の30。`str | None`で受けて自前で変換するので422にならない)。日別・気温・テレビの対象期間を切り替える。
-* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 233)
+* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 250)
 
 ### `GET {DASHBOARD_BASE_PATH}/updates` (`dashboard_updates`)
 
 * **役割**: **(新機能)** アップデートページを返す。`release_history_service.get_release_history()`でダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を集め、`dashboard_page_service.render_updates_page`に渡す。あさノート・よるノートは外部から取得する(タイムアウト・キャッシュ付き。失敗しても残りのアプリは表示する)。`async def`にしない(外部取得が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`app`(`dashboard`/`quest`/`asa`/`yoru`、任意)で1アプリに絞る。未知の値は無視して全件。
-* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 248)
+* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 265)
 
 ### `GET {DASHBOARD_BASE_PATH}/sys` (`dashboard_sys`)
 

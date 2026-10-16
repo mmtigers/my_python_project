@@ -20,7 +20,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, NamedTuple
 
 import config
@@ -312,7 +312,11 @@ def group_cards(cards) -> list[tuple[str | None, list[StatusCard]]]:
 
 
 def render_status_grid_html(
-    cards, *, dashboard_path: str | None = None, show_group_titles: bool = True
+    cards,
+    *,
+    dashboard_path: str | None = None,
+    show_group_titles: bool = True,
+    group_extras: dict[str, str] | None = None,
 ) -> str:
     """カードを自動折り返しのグリッドにまとめたHTMLを返す。
 
@@ -321,6 +325,9 @@ def render_status_grid_html(
 
     `dashboard_path` を渡すと、詳細のあるカードがその行き先へのリンクになる
     (軽量ページ専用。理由は `render_status_card_html` の docstring を参照)。
+
+    `group_extras` は `{グループのキー: HTML}`。そのグループのカードの直後に差し込む
+    (ホームの「見守り」の直下に温湿度ヒートマップを置くため)。
 
     `show_group_titles=False` はグループ見出しを出さない(ページ自身の見出しが
     グループ名と同じで、同じ見出しが2つ並んでしまうサブページ用。表示だけの違い)。
@@ -345,6 +352,8 @@ def render_status_grid_html(
             for card in group_cards_
         )
         blocks.append(f'<div class="status-grid{solo}">{cards_html}</div>')
+        if group_extras and group_key in group_extras:
+            blocks.append(group_extras[group_key])
     return "".join(blocks)
 
 
@@ -723,8 +732,8 @@ _cache_lock = threading.Lock()
 _cache: dict[str, tuple[float, Any]] = {}
 
 
-def _cached(key: str, loader: Callable[[], Any]) -> Any:
-    """`STATUS_CACHE_TTL_SEC` の間は前回の値を返す。
+def _cached(key: str, loader: Callable[[], Any], ttl: float | None = None) -> Any:
+    """`ttl`(省略時は`STATUS_CACHE_TTL_SEC`)の間は前回の値を返す。
 
     取得に失敗した場合は例外を伝播させず None を返す(1枚のカードの取得失敗で
     ページ全体を落とさない)。失敗はキャッシュしないので、次の要求で再試行する。
@@ -732,7 +741,7 @@ def _cached(key: str, loader: Callable[[], Any]) -> Any:
     now = time.monotonic()
     with _cache_lock:
         cached = _cache.get(key)
-        if cached is not None and now - cached[0] < STATUS_CACHE_TTL_SEC:
+        if cached is not None and now - cached[0] < (STATUS_CACHE_TTL_SEC if ttl is None else ttl):
             return cached[1]
 
     try:
@@ -887,6 +896,20 @@ def get_sensor_data_today() -> pd.DataFrame:
     """
     today = get_now_jst().date()
     df = _cached("sensor_today", lambda: analysis_service.load_sensor_data(day=today))
+    return df if df is not None else pd.DataFrame()
+
+
+# ホームの温湿度ヒートマップ。5分おきの記録を1時間ごとに平均するだけなので、ホームの
+# 自動更新(60秒)より長くキャッシュして、閲覧のたびの集計を避ける。
+CLIMATE_CACHE_TTL_SEC = 600
+CLIMATE_DAYS = 30
+
+
+def get_hourly_climate() -> pd.DataFrame:
+    """過去`CLIMATE_DAYS`日(今日を含む)の温湿度を、日付×時間×機器の平均で返す(10分キャッシュ)。
+    取得に失敗したときは空のDataFrame。"""
+    start = get_now_jst().date() - timedelta(days=CLIMATE_DAYS - 1)
+    df = _cached(f"climate:{start.isoformat()}", lambda: analysis_service.load_hourly_climate(start), ttl=CLIMATE_CACHE_TTL_SEC)
     return df if df is not None else pd.DataFrame()
 
 

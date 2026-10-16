@@ -18,7 +18,7 @@ import json
 import os
 import re
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
 
@@ -44,6 +44,7 @@ _PAGE_BASE_CSS = """
         --bad: #b3261e; --bad-bg: #fdebea; --bad-bd: #f2bdb9;
         --neutral: #5b6678; --neutral-bg: #f1f3f7; --neutral-bd: #dfe4ec;
         --bar-alt: #d9730d;
+        --cl-0: #4f7fe0; --cl-1: #a9c6f5; --cl-2: #f1e6a6; --cl-3: #f0a35e; --cl-4: #d1432f;
         --radius: 14px; --radius-sm: 10px;
         --shadow: 0 1px 2px rgba(20,30,50,0.06), 0 2px 8px rgba(20,30,50,0.04);
         --tap: rgba(36,87,214,0.12);
@@ -59,6 +60,7 @@ _PAGE_BASE_CSS = """
             --bad: #ff9d96; --bad-bg: #351614; --bad-bd: #692a26;
             --neutral: #9aa7b8; --neutral-bg: #1c2431; --neutral-bd: #2a3545;
             --bar-alt: #f2a54a;
+            --cl-0: #4c7bd8; --cl-1: #2f4f86; --cl-2: #4d4a2c; --cl-3: #a4642a; --cl-4: #e05a45;
             --shadow: 0 1px 2px rgba(0,0,0,0.4);
             --tap: rgba(138,180,255,0.16);
         }
@@ -173,6 +175,29 @@ _PAGE_BASE_CSS = """
     }
     .heatmap-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; font-size: 0.7rem; color: var(--muted); }
     .heatmap-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 3px; }
+
+    /* ホームの温湿度ヒートマップ(行=日付、列=0〜23時。値は1時間の平均)。閲覧用でタップしない。
+       値の段階は色+凡例+各マスのtitleで示し、記録なしは枠線だけにして0と区別する。 */
+    .climate { margin: 4px 0 16px; padding: 10px 12px; background: var(--surface);
+        border: 1px solid var(--border); border-radius: var(--radius-sm); }
+    .climate-switch { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+    .climate-switch a {
+        display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 999px;
+        border: 1px solid var(--border); background: var(--surface); color: var(--text);
+        font-size: 0.85rem; text-decoration: none; -webkit-tap-highlight-color: var(--tap);
+    }
+    .climate-switch a[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: bold; }
+    .climate-row { display: flex; align-items: center; gap: 6px; }
+    .climate-day { flex: none; width: 5.2em; font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
+    .climate-cells { flex: 1; display: grid; grid-template-columns: repeat(24, 1fr); gap: 1px; min-width: 0; }
+    .climate-cell { height: 13px; border-radius: 2px; background: var(--hm-0); }
+    .climate-cell.cl-0 { background: var(--cl-0); }
+    .climate-cell.cl-1 { background: var(--cl-1); }
+    .climate-cell.cl-2 { background: var(--cl-2); }
+    .climate-cell.cl-3 { background: var(--cl-3); }
+    .climate-cell.cl-4 { background: var(--cl-4); }
+    .climate-cell.cl-none { background: transparent; border: 1px dashed var(--border); box-sizing: border-box; }
+    .climate-axis { margin-left: calc(5.2em + 6px); }
 
     /* 見守りページの簡易テーブル(防犯ログ・実家センサーログ)。 */
     table.simple-table {
@@ -565,8 +590,12 @@ def render_home_page(
     link_health: dict[str, bool] | None = None,
     yoru_note_url: str | None = None,
     heatmap_html: str = "",
+    climate_html: str = "",
 ) -> str:
     """ホームページ: ステータスカード + 外部リンク + 今日の動き(ヒートマップ) + 各ページへのナビ。
+
+    **(新機能)** `climate_html`(`render_home_climate_heatmap`の出力。過去30日の温度/湿度)を、
+    ステータスカードの「見守り」グループの直下に置く。
 
     **(新機能)** `heatmap_html`(`render_home_activity_heatmaps`の出力)を、外部リンクの下に置く。
     自動更新の範囲(`STATUS_SECTION_ID`)の内側なので、カードと同じ周期で色も更新される。
@@ -589,7 +618,7 @@ def render_home_page(
     links_html = _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url) + heatmap_html
     body = (
         "<h1>🏠 おうちの様子</h1>"
-        f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html)}'
+        f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html, climate_html=climate_html)}'
         '<h2>メニュー</h2>'
         f'<div class="link-grid">{nav_html}</div>'
     )
@@ -619,13 +648,22 @@ STATUS_SECTION_ID = home_status_service.STATUS_SECTION_ID
 
 
 def _render_status_section(
-    cards, fetched_at: datetime, *, dashboard_path: str, refresh_sec: int, extra_html: str = ""
+    cards,
+    fetched_at: datetime,
+    *,
+    dashboard_path: str,
+    refresh_sec: int,
+    extra_html: str = "",
+    climate_html: str = "",
 ) -> str:
+    # 温湿度ヒートマップは「見守り」グループの直下に置く
+    extras = {"watch": climate_html} if climate_html else None
+    grid_html = home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path, group_extras=extras)
     return (
         f'<div id="{STATUS_SECTION_ID}">'
         f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
         f"・{int(refresh_sec)}秒ごとに自動更新</p>"
-        f"{home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path)}"
+        f"{grid_html}"
         f"{extra_html}"
         "</div>"
     )
@@ -642,6 +680,7 @@ def render_home_status_section(
     link_health: dict[str, bool] | None = None,
     yoru_note_url: str | None = None,
     heatmap_html: str = "",
+    climate_html: str = "",
 ) -> str:
     """ホームページの自動更新用フラグメント(カードと、外部リンクのブロック、今日の動き)。
 
@@ -656,7 +695,8 @@ def render_home_status_section(
         else ""
     ) + heatmap_html
     return _render_status_section(
-        cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html
+        cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec,
+        extra_html=links_html, climate_html=climate_html,
     )
 
 
@@ -665,7 +705,8 @@ def _status_refresh_script(status_path: str, refresh_sec: int) -> str:
     return (
         "<script>"
         "(function () {"
-        f"var url = {json.dumps(status_path)};"
+        # 温湿度ヒートマップの選択(?hm_loc=&hm_metric=)を自動更新でも引き継ぐ
+        f"var url = {json.dumps(status_path)} + window.location.search;"
         f"var intervalMs = {int(refresh_sec) * 1000};"
         "var inFlight = false;"
         "function apply(html) {"
@@ -1120,6 +1161,140 @@ def _total_hourly_counts(df: pd.DataFrame, day: date) -> list[int]:
 def _heatmap_level(count: int) -> int:
     """件数 → 色段階(0=なし、1=薄い赤、2=中間、3=濃い赤)。"""
     return sum(count >= t for t in _HEATMAP_LEVEL_THRESHOLDS)
+
+
+# === ホームの温湿度ヒートマップ(過去30日) ===
+
+CLIMATE_LOCATIONS = ("伊丹", "高砂")
+CLIMATE_METRICS = ("temp", "hum")
+CLIMATE_DEFAULT_LOCATION = "伊丹"
+CLIMATE_DEFAULT_METRIC = "temp"
+_CLIMATE_METRIC_LABELS = {"temp": "🌡️ 温度", "hum": "💧 湿度"}
+_CLIMATE_METRIC_COLUMNS = {"temp": "temp_avg", "hum": "hum_avg"}
+_CLIMATE_METRIC_UNITS = {"temp": "℃", "hum": "%"}
+# 5段階の境界(各値未満の段階 → 最後だけ以上)。温度=15/20/25/30℃、湿度=30/40/60/70%。
+_CLIMATE_THRESHOLDS = {"temp": (15.0, 20.0, 25.0, 30.0), "hum": (30.0, 40.0, 60.0, 70.0)}
+_CLIMATE_LEGENDS = {
+    "temp": ("〜15℃", "15〜20℃", "20〜25℃", "25〜30℃", "30℃〜"),
+    "hum": ("〜30%", "30〜40%", "40〜60%", "60〜70%", "70%〜"),
+}
+_WEEKDAYS = "月火水木金土日"
+
+
+def parse_climate_location(value: str | None) -> str:
+    """`?hm_loc=`の値。`itami`/`takasago`以外は既定(伊丹)。"""
+    return {"itami": "伊丹", "takasago": "高砂"}.get(value or "", CLIMATE_DEFAULT_LOCATION)
+
+
+def parse_climate_metric(value: str | None) -> str:
+    """`?hm_metric=`の値。`temp`/`hum`以外は既定(温度)。"""
+    return value if value in CLIMATE_METRICS else CLIMATE_DEFAULT_METRIC
+
+
+def _climate_location(device_id: Any, device_name: Any) -> str | None:
+    """機器の拠点。`devices.json`の`location`を優先し、無ければ機器名の先頭(`伊丹_`/`高砂_`。
+    Nature Remoの保存名)で判定する。どちらでも分からなければ None(ヒートマップに含めない)。"""
+    for dev in config.MONITOR_DEVICES:
+        if dev.get("id") == device_id and dev.get("location") in CLIMATE_LOCATIONS:
+            return dev["location"]
+    name = str(device_name or "")
+    return next((loc for loc in CLIMATE_LOCATIONS if name.startswith(loc)), None)
+
+
+def _climate_level(value: float, metric: str) -> int:
+    """値 → 色段階(0〜4)。"""
+    return sum(value >= t for t in _CLIMATE_THRESHOLDS[metric])
+
+
+def climate_hourly_grid(df: pd.DataFrame, location: str, metric: str) -> dict[str, list[float | None]]:
+    """拠点の`日付 → 0〜23時の平均値(記録なしは None)`。同じ拠点の複数機器は記録数で重み付けして平均する。"""
+    column = _CLIMATE_METRIC_COLUMNS[metric]
+    required = {"date", "hour", "device_id", "device_name", "n", column}
+    if df.empty or not required.issubset(df.columns):
+        return {}
+    keep = [_climate_location(i, n) == location for i, n in zip(df["device_id"], df["device_name"])]
+    part = df[keep].dropna(subset=[column])
+    if part.empty:
+        return {}
+    part = part.assign(_w=part[column] * part["n"])
+    grouped = part.groupby(["date", "hour"]).agg(w=("_w", "sum"), n=("n", "sum"))
+    grid: dict[str, list[float | None]] = {}
+    for (day, hour), row in grouped.iterrows():
+        h = int(hour)
+        if 0 <= h <= 23 and row["n"] > 0:
+            grid.setdefault(str(day), [None] * 24)[h] = float(row["w"] / row["n"])
+    return grid
+
+
+def _climate_switch(dashboard_path: str, location: str, metric: str, locations: list[str]) -> str:
+    """拠点・指標の切り替えリンク(JS不要)。選んだ組み合わせは`?hm_loc=&hm_metric=`で持つ。"""
+    base = dashboard_path.rstrip("/") + "/"
+    loc_key = {"伊丹": "itami", "高砂": "takasago"}
+
+    def link(loc: str, met: str, label: str, current: bool) -> str:
+        query = urlencode({"hm_loc": loc_key[loc], "hm_metric": met})
+        attr = ' aria-current="true"' if current else ""
+        return f'<a href="{html.escape(base)}?{html.escape(query)}#climate-heatmap"{attr}>{html.escape(label)}</a>'
+
+    items = [link(loc, metric, loc, loc == location) for loc in locations]
+    items += [link(location, met, _CLIMATE_METRIC_LABELS[met], met == metric) for met in CLIMATE_METRICS]
+    return f'<div class="climate-switch">{"".join(items)}</div>'
+
+
+def render_home_climate_heatmap(
+    df: pd.DataFrame,
+    now: datetime,
+    *,
+    dashboard_path: str,
+    location: str = CLIMATE_DEFAULT_LOCATION,
+    metric: str = CLIMATE_DEFAULT_METRIC,
+    days: int = 30,
+) -> str:
+    """ホームの「過去30日の温度/湿度」ヒートマップ。行=日付(新しい日が上)、列=0〜23時、値=1時間の平均。
+
+    マスはタップできない閲覧用。記録のない時間・まだ来ていない時間は枠線だけにする。
+    記録のある拠点だけを切り替えに出す(1つも無ければ案内だけ)。
+    """
+    present = [loc for loc in CLIMATE_LOCATIONS if climate_hourly_grid(df, loc, "temp") or climate_hourly_grid(df, loc, "hum")]
+    heading = f'<h2 id="climate-heatmap">{_CLIMATE_METRIC_LABELS[metric]}の推移(過去{days}日)</h2>'
+    if not present:
+        return heading + '<p class="empty-note">温度・湿度の記録がまだありません</p>'
+    if location not in present:
+        location = present[0]
+    grid = climate_hourly_grid(df, location, metric)
+    unit = _CLIMATE_METRIC_UNITS[metric]
+    today = now.date()
+    rows = []
+    for offset in range(days):
+        day = today - timedelta(days=offset)
+        values = grid.get(day.isoformat(), [None] * 24)
+        cells = []
+        for hour, value in enumerate(values):
+            future = day == today and hour > now.hour
+            if value is None or future:
+                note = "まだ先です" if future else "記録なし"
+                cells.append(f'<div class="climate-cell cl-none" title="{day.month}/{day.day} {hour}時台: {note}"></div>')
+            else:
+                cells.append(
+                    f'<div class="climate-cell cl-{_climate_level(value, metric)}" '
+                    f'title="{day.month}/{day.day} {hour}時台: {value:.1f}{unit}"></div>'
+                )
+        label = f"{day.month}/{day.day}({_WEEKDAYS[day.weekday()]})"
+        rows.append(f'<div class="climate-row"><span class="climate-day">{label}</span><div class="climate-cells">{"".join(cells)}</div></div>')
+    ticks = "".join(f'<span style="left:{h / 24 * 100:.2f}%">{h}</span>' for h in (0, 6, 12, 18)) + '<span style="left:100%">24</span>'
+    legend = "".join(
+        f'<span><i style="background:var(--cl-{i})"></i>{html.escape(text)}</span>'
+        for i, text in enumerate(_CLIMATE_LEGENDS[metric])
+    )
+    return (
+        f"{heading}"
+        f'<div class="climate">{_climate_switch(dashboard_path, location, metric, present)}'
+        f'<div class="meta">{html.escape(location)}・1時間ごとの平均(5分おきの記録から)</div>'
+        f'<div class="climate-axis heatmap-axis-ticks">{ticks}</div>'
+        f'{"".join(rows)}'
+        f'<div class="heatmap-legend">{legend}<span><i style="border:1px dashed var(--border)"></i>記録なし</span></div>'
+        "</div>"
+    )
 
 
 # 活動ヒートマップ・時間帯詳細の対象。キーは`?src=`の値。
