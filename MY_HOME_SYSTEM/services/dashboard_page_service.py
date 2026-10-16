@@ -67,7 +67,7 @@ _PAGE_BASE_CSS = """
     body {
         margin: 0 auto;
         max-width: 1080px;
-        padding: 16px 16px 40px;
+        padding: 16px 16px calc(88px + env(safe-area-inset-bottom));
         background: var(--bg);
         color: var(--text);
         font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
@@ -189,7 +189,7 @@ _PAGE_BASE_CSS = """
     }
     /* システムページのバックアップ完了/失敗トースト(画面下部に数秒だけ出る) */
     .dashboard-toast {
-        position: fixed; left: 16px; right: 16px; bottom: 24px; z-index: 1000;
+        position: fixed; left: 16px; right: 16px; bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 1000;
         max-width: 480px; margin: 0 auto;
         padding: 14px 16px; border-radius: var(--radius); font-weight: bold; font-size: 0.95rem;
         color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,0.3); transition: opacity 0.5s;
@@ -296,6 +296,50 @@ _PAGE_BASE_CSS = """
     .release-card p, .release-card ul { margin: 4px 0; word-break: break-word; }
     .release-card ul { padding-left: 1.2em; }
     .release-warn { color: var(--warn); font-size: 0.9rem; }
+    /* 画面下に固定するフッターナビ(全ページ共通)。現在地は面+太字+aria-currentで示し、色だけに頼らない。
+       下端はiOSのホームインジケーター分(safe-area)を空ける。 */
+    nav.bottom-nav {
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+        background: var(--surface); border-top: 1px solid var(--border);
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+    nav.bottom-nav ul { list-style: none; display: flex; gap: 2px; max-width: 1080px; margin: 0 auto; padding: 6px 6px; }
+    nav.bottom-nav li { flex: 1 1 0; min-width: 0; }
+    nav.bottom-nav a {
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+        min-height: 48px; padding: 4px 2px; border-radius: 14px; color: var(--muted);
+        font-size: 10.5px; text-decoration: none; white-space: nowrap;
+        -webkit-tap-highlight-color: var(--tap);
+    }
+    nav.bottom-nav a .bn-icon { font-size: 1.15rem; line-height: 1; }
+    nav.bottom-nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: bold; }
+    @media print { nav.bottom-nav { display: none; } }
+
+    /* システムページ: 起動履歴のカードとGitの状態 */
+    .status-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+    .badge {
+        display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: 999px;
+        font-size: 0.8rem; font-weight: bold; border: 1px solid var(--neutral-bd);
+        background: var(--neutral-bg); color: var(--neutral);
+    }
+    .badge-ok { background: var(--ok-bg); color: var(--ok); border-color: var(--ok-bd); }
+    .badge-warn { background: var(--warn-bg); color: var(--warn); border-color: var(--warn-bd); }
+    .badge-info { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-bd); }
+    .boot-list { list-style: none; margin: 0; padding: 0; }
+    .boot-card {
+        padding: 10px 12px; margin: 0 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+        background: var(--surface-2); word-break: break-word;
+    }
+    .boot-card.is-latest { border-color: var(--accent-bd); background: var(--accent-soft); }
+    .boot-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 4px; }
+    .boot-time { font-weight: bold; font-size: 0.95rem; }
+    .boot-commit { font-size: 0.85rem; }
+    .boot-branch { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+    .git-trio { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 0 0 10px; }
+    .git-card { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); word-break: break-word; }
+    .git-card-label { font-size: 0.75rem; color: var(--muted); margin: 0 0 2px; }
+    .git-card-main { font-size: 0.9rem; margin: 0; }
+    .git-card-sub { font-size: 0.75rem; color: var(--muted); margin: 2px 0 0; }
     .git-status-line { margin: 4px 0; word-break: break-word; }
     .git-status-warn { color: var(--warn); }
     .git-commit-list { list-style: none; padding: 0; margin: 8px 0 0; }
@@ -390,17 +434,51 @@ _PAGE_BASE_CSS = """
 """
 
 
-def _page_shell(title: str, body_html: str, *, extra_head: str = "") -> str:
+_FOOTER_ITEMS: tuple[tuple[str, str, str], ...] = (
+    ("", "🏠", "ホーム"),
+    ("watch", "👀", "見守り"),
+    ("life", "💡", "くらし"),
+    ("sys", "🔧", "システム"),
+    ("updates", "📜", "アップデート"),
+)
+
+
+def _render_bottom_nav(dashboard_path: str, current: str | None) -> str:
+    """画面下のフッターナビ。`current`はホームなら"home"、他は`_FOOTER_ITEMS`のキー。"""
+    base = dashboard_path.rstrip("/")
+    items = []
+    for key, icon, label in _FOOTER_ITEMS:
+        href = html.escape(f"{base}/{key}" if key else f"{base}/")
+        is_current = (key or "home") == current
+        attr = ' aria-current="page"' if is_current else ""
+        items.append(
+            f'<li><a href="{href}"{attr}><span class="bn-icon" aria-hidden="true">{icon}</span>'
+            f"<span>{html.escape(label)}</span></a></li>"
+        )
+    return f'<nav class="bottom-nav" aria-label="メインメニュー"><ul>{"".join(items)}</ul></nav>'
+
+
+def _page_shell(
+    title: str,
+    body_html: str,
+    *,
+    extra_head: str = "",
+    dashboard_path: str | None = None,
+    current: str | None = None,
+) -> str:
+    """`dashboard_path`を渡すと、画面下にフッターナビを付ける(`current`が現在地)。"""
+    footer = _render_bottom_nav(dashboard_path, current) if dashboard_path is not None else ""
     return (
         "<!DOCTYPE html>"
         '<html lang="ja"><head>'
         '<meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'
         f"<title>{html.escape(title)}</title>"
         f"<style>{_PAGE_BASE_CSS}{home_status_service.STATUS_CARD_CSS}</style>"
         f"{extra_head}"
         "</head><body>"
         f"{body_html}"
+        f"{footer}"
         "</body></html>"
     )
 
@@ -518,7 +596,7 @@ def render_home_page(
     extra_head = _status_refresh_script(status_path, refresh_sec)
     if manifest_path is not None and icon_path is not None:
         extra_head = _home_screen_install_head(manifest_path, icon_path) + extra_head
-    return _page_shell("おうちの様子", body, extra_head=extra_head)
+    return _page_shell("おうちの様子", body, extra_head=extra_head, dashboard_path=dashboard_path, current="home")
 
 
 def _home_screen_install_head(manifest_path: str, icon_path: str) -> str:
@@ -1362,7 +1440,7 @@ def render_watch_page(
         f'{_log_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
         "</div>"
     )
-    return _page_shell("見守り - おうちの様子", body, extra_head=_CAMERA_SCRIPT)
+    return _page_shell("見守り - おうちの様子", body, extra_head=_CAMERA_SCRIPT, dashboard_path=dashboard_path, current="watch")
 
 
 # === くらしページ ===
@@ -1409,7 +1487,7 @@ def render_life_page(cards, *, dashboard_path: str, daily_cost_rows: list[tuple[
         "<h2>📊 日別の電気代(概算)</h2>"
         f"{_render_daily_cost_history(daily_cost_rows or [])}"
     )
-    return _page_shell("くらし - おうちの様子", body)
+    return _page_shell("くらし - おうちの様子", body, dashboard_path=dashboard_path, current="life")
 
 
 # === システムページ ===
@@ -1741,7 +1819,7 @@ def render_updates_page(
         f"{warnings}"
         f"{cards}"
     )
-    return _page_shell("アップデート - おうちの様子", body)
+    return _page_shell("アップデート - おうちの様子", body, dashboard_path=dashboard_path, current="updates")
 
 
 def _format_boot_time(value: Any) -> str:
@@ -1749,29 +1827,42 @@ def _format_boot_time(value: Any) -> str:
     return home_status_service.format_short_timestamp(value)
 
 
+_BOOT_REASON_BADGE_CLASS = {
+    system_info_service.REASON_UPDATE: "badge badge-info",
+    system_info_service.REASON_MANUAL: "badge badge-warn",
+}
+
+
 def _render_boot_history_box(boots: list[dict[str, Any]]) -> str:
-    """サーバーの起動履歴(新しい順)。`system_info_service.get_boot_history`の結果を受け取る。
+    """サーバーの起動履歴(新しい順)をカードで表示する。`system_info_service.get_boot_history`の結果を受け取る。
 
     起動の記録は`unified_server`の起動時に1行ずつ追記される。異常終了は記録できないため、
-    「起動した時刻」の履歴であることを注記する。"""
+    「起動した時刻」の履歴であることを注記する。先頭の1件は「最新の起動」として強調する。"""
     if not boots:
         body = '<p class="empty-note">起動の記録はまだありません(この機能の導入後の最初の起動から記録されます)</p>'
     else:
-        rows = []
-        for b in boots:
+        cards = []
+        for i, b in enumerate(boots):
             sha = b.get("commit_sha") or "不明"
             subject = b.get("commit_subject") or ""
+            branch = b.get("branch") or ""
             reason = system_info_service.REASON_LABELS.get(b.get("reason") or "", "不明")
-            rows.append(
-                "<tr>"
-                f"<td>{html.escape(_format_boot_time(b.get('booted_at')))}</td>"
-                f"<td><span class=\"git-commit-sha\">{html.escape(str(sha))}</span> {html.escape(subject)}</td>"
-                f"<td>{html.escape(reason)}</td>"
-                "</tr>"
+            badge_cls = _BOOT_REASON_BADGE_CLASS.get(b.get("reason") or "", "badge")
+            latest = '<span class="badge badge-ok">最新の起動</span>' if i == 0 else ""
+            branch_html = f'<div class="boot-branch">ブランチ: {html.escape(branch)}</div>' if branch else ""
+            cards.append(
+                f'<li class="boot-card{" is-latest" if i == 0 else ""}">'
+                '<div class="boot-card-head">'
+                f'<span class="boot-time">{html.escape(_format_boot_time(b.get("booted_at")))}</span>'
+                f"{latest}"
+                f'<span class="{badge_cls}">{html.escape(reason)}</span>'
+                "</div>"
+                f'<div class="boot-commit"><span class="git-commit-sha">{html.escape(str(sha))}</span> {html.escape(subject)}</div>'
+                f"{branch_html}"
+                "</li>"
             )
         body = (
-            '<table class="simple-table"><thead><tr><th>起動</th><th>コミット</th><th>きっかけ</th></tr></thead>'
-            f'<tbody>{"".join(rows)}</tbody></table>'
+            f'<ul class="boot-list">{"".join(cards)}</ul>'
             '<p class="meta">起動した時刻の履歴です(停電などの異常終了そのものは記録されません)。</p>'
         )
     return f'<div class="info-box" id="boot-history"><h2>🔁 サーバーの起動履歴</h2>{body}</div>'
@@ -1800,31 +1891,47 @@ _GIT_STATUS_SCRIPT = """
     }
     function commitText(c) { return c.sha + " " + c.subject + (c.date ? " (" + c.date + ")" : ""); }
 
+    function badge(text, cls) { return el("span", text, "badge " + cls); }
+    function card(label, c, sub) {
+        var node = document.createElement("div");
+        node.className = "git-card";
+        node.appendChild(el("p", label, "git-card-label"));
+        node.appendChild(el("p", c, "git-card-main"));
+        if (sub) { node.appendChild(el("p", sub, "git-card-sub")); }
+        return node;
+    }
+
     function render(d) {
         var box = document.getElementById("gitStatusBody");
         if (!box) { return; }
         box.textContent = "";
         if (!d.ok) { box.appendChild(el("p", d.error || "取得できませんでした", "git-status-line git-status-warn")); return; }
+
+        // 上部の状態バッジ(重要度の高い順)
+        var badges = document.createElement("div");
+        badges.className = "status-badges";
+        if (d.pending_restart) { badges.appendChild(badge("⚠️ 未再起動", "badge-warn")); }
+        if (d.dirty === true) { badges.appendChild(badge("⚠️ 未コミットの変更 " + d.dirty_count + "件", "badge-warn")); }
+        else if (d.dirty === false) { badges.appendChild(badge("✅ 変更なし", "badge-ok")); }
+        if (d.behind > 0) { badges.appendChild(badge("⬇️ 未取り込み " + d.behind + "件", "badge-warn")); }
+        else if (d.behind === 0) { badges.appendChild(badge("✅ 最新", "badge-ok")); }
+        if (d.ahead > 0) { badges.appendChild(badge("手元だけ " + d.ahead + "件", "badge-info")); }
+        if (badges.childNodes.length) { box.appendChild(badges); }
+
+        // 3段(起動中 / 手元 / GitHub)
+        var trio = document.createElement("div");
+        trio.className = "git-trio";
         if (d.running) {
-            box.appendChild(el("p", "▶ 起動中のコード: " + d.running.sha + " " + d.running.subject
-                + "(起動 " + fmtBoot(d.running.booted_at) + ")", "git-status-line"));
+            trio.appendChild(card("▶ 起動中のコード", d.running.sha + " " + d.running.subject, "起動 " + fmtBoot(d.running.booted_at)));
         } else {
-            box.appendChild(el("p", "▶ 起動中のコード: 記録なし(この機能の導入後の最初の起動から分かります)", "git-status-line"));
+            trio.appendChild(card("▶ 起動中のコード", "記録なし", "この機能の導入後の最初の起動から分かります"));
         }
-        box.appendChild(el("p", "📁 手元(実機)の最新: " + commitText(d.head) + (d.branch ? " ・ ブランチ " + d.branch : ""), "git-status-line"));
+        trio.appendChild(card("📁 手元(実機)の最新", commitText(d.head), d.branch ? "ブランチ " + d.branch : ""));
+        if (d.remote) { trio.appendChild(card("☁️ GitHubの最新", commitText(d.remote), "")); }
+        box.appendChild(trio);
+
         if (d.pending_restart) {
-            box.appendChild(el("p", "⚠️ 取り込み済みですが、まだ再起動されていません(起動中のコードは古いままです)", "git-status-line git-status-warn"));
-        }
-        if (d.remote) {
-            box.appendChild(el("p", "☁️ GitHubの最新: " + commitText(d.remote), "git-status-line"));
-            if (d.behind === 0) {
-                box.appendChild(el("p", "✅ 手元はGitHubの最新に追いついています", "git-status-line"));
-            } else if (d.behind > 0) {
-                box.appendChild(el("p", "⬇️ GitHubの最新まで、あと" + d.behind + "件取り込まれていません", "git-status-line git-status-warn"));
-            }
-            if (d.ahead > 0) {
-                box.appendChild(el("p", "手元にだけあるコミットが" + d.ahead + "件あります", "git-status-line git-status-warn"));
-            }
+            box.appendChild(el("p", "取り込み済みですが、まだ再起動されていません(起動中のコードは古いままです)", "git-status-line git-status-warn"));
         }
         if (d.error) { box.appendChild(el("p", d.error, "git-status-line git-status-warn")); }
         if (d.recent && d.recent.length) {
@@ -1833,10 +1940,10 @@ _GIT_STATUS_SCRIPT = """
             list.className = "git-commit-list";
             d.recent.forEach(function (c) {
                 var li = document.createElement("li");
+                li.appendChild(el("span", c.running ? "▶ 起動中" : (c.pulled ? "✅ 取り込み済み" : "⬇️ 未取り込み"), "git-commit-badge"));
+                li.appendChild(document.createTextNode(" "));
                 li.appendChild(el("span", c.sha, "git-commit-sha"));
                 li.appendChild(document.createTextNode(" " + c.subject + (c.date ? " (" + c.date + ")" : "")));
-                var badge = c.running ? "▶ 起動中" : (c.pulled ? "✅ 取り込み済み" : "⬇️ 未取り込み");
-                li.appendChild(el("span", badge, "git-commit-badge"));
                 list.appendChild(li);
             });
             box.appendChild(list);
@@ -1891,6 +1998,8 @@ def render_sys_page(
         "<h1>🔧 システム</h1>"
         f"{_render_overall_summary(rows)}"
         '<div class="box-grid">'
+        f"{_render_git_status_box()}"
+        f"{_render_boot_history_box(boot_history or [])}"
         '<div class="info-box">'
         "<h2>各機能の最終更新</h2>"
         f"{_render_freshness_rows(rows)}"
@@ -1900,8 +2009,6 @@ def render_sys_page(
         "<h2>🗄️ NASの容量推移</h2>"
         f"{_render_nas_history_chart(nas_history, days=nas_days, sys_path=dashboard_path.rstrip('/') + '/sys')}"
         "</div>"
-        f"{_render_boot_history_box(boot_history or [])}"
-        f"{_render_git_status_box()}"
         "</div>"
         "<h2>🛠️ メンテナンス</h2>"
         '<div class="maintenance-group">'
@@ -1941,7 +2048,10 @@ def render_sys_page(
         "</div>"
         "</div>"
     )
-    return _page_shell("システム - おうちの様子", body, extra_head=_MAINTENANCE_SCRIPT + _GIT_STATUS_SCRIPT)
+    return _page_shell(
+        "システム - おうちの様子", body, extra_head=_MAINTENANCE_SCRIPT + _GIT_STATUS_SCRIPT,
+        dashboard_path=dashboard_path, current="sys",
+    )
 
 
 _MAINTENANCE_SCRIPT = """

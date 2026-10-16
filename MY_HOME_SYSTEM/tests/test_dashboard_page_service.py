@@ -686,6 +686,41 @@ class TestSysPageBootAndGit:
         assert "innerHTML" not in script and "textContent" in script
 
 
+class TestBottomNavAndBootCards:
+    """フッターナビ(5項目・現在地)と、起動履歴のカード表示。"""
+
+    def test_footer_has_five_items_and_marks_current(self):
+        html = dashboard_page_service._render_bottom_nav("/dashboard/", "life")
+        for label in ("ホーム", "見守り", "くらし", "システム", "アップデート"):
+            assert label in html
+        assert html.count('aria-current="page"') == 1
+        assert 'href="/dashboard/life" aria-current="page"' in html
+        assert 'href="/dashboard/"' in html
+
+    def test_home_is_current_on_the_home_key(self):
+        html = dashboard_page_service._render_bottom_nav("/dashboard/", "home")
+        assert 'href="/dashboard/" aria-current="page"' in html
+
+    def test_shell_adds_footer_only_when_dashboard_path_is_given(self):
+        assert 'class="bottom-nav"' not in dashboard_page_service._page_shell("t", "<p>x</p>")
+        assert 'class="bottom-nav"' in dashboard_page_service._page_shell("t", "x", dashboard_path="/dashboard/", current="sys")
+
+    def test_boot_history_is_cards_and_first_is_latest(self):
+        html = TestSysPageBootAndGit._render([
+            {"booted_at": "2026-10-09T21:05:00+09:00", "commit_sha": "abc1234",
+             "commit_subject": "s", "branch": "master", "pid": 1, "reason": "update"},
+            {"booted_at": "2026-10-08T03:00:00+09:00", "commit_sha": None,
+             "commit_subject": None, "branch": None, "pid": 2, "reason": "unknown"},
+        ])
+        assert "<table" not in html.split('id="boot-history"')[1].split("</div>")[0]
+        assert html.count("最新の起動") == 1 and html.count("boot-card") >= 2
+        assert "ブランチ: master" in html
+
+    def test_git_box_comes_before_maintenance_and_history(self):
+        html = TestSysPageBootAndGit._render([])
+        assert html.index('id="git-status"') < html.index('id="boot-history"') < html.index("メンテナンス")
+
+
 class TestRenderUpdatesPage:
     """アップデートページ(全アプリの更新履歴)。"""
 

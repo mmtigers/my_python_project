@@ -198,6 +198,20 @@ class TestGitStatus:
             "bbb2222": (True, False), "aaa1111": (True, True),
         }
 
+    def test_dirty_flag_reports_count_only(self, env, monkeypatch):
+        git = _status_git()
+        git.responses["status --porcelain --untracked-files=no"] = " M a.py\n M b.py"
+        _use_git(monkeypatch, git)
+        st = svc.get_git_status()
+        assert st["dirty"] is True and st["dirty_count"] == 2
+
+    def test_clean_tree_and_unknown(self, env, monkeypatch):
+        git = _status_git()
+        git.responses["status --porcelain --untracked-files=no"] = ""
+        _use_git(monkeypatch, git)
+        st = svc.get_git_status()
+        assert st["dirty"] is False and st["dirty_count"] == 0
+
     def test_running_equals_head_means_no_pending_restart(self, env, monkeypatch):
         _use_git(monkeypatch, _status_git(behind="0"))
         _boot("bbb2222")
