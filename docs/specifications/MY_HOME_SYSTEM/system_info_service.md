@@ -20,9 +20,9 @@
 システムページの「サーバーの起動履歴」と「Gitの状態」のためのサービス。
 
 * **起動履歴**: `unified_server`の起動時に`record_boot`が`server_boot_events`へ1行追記する(起動時刻・git短縮ハッシュ・コミット件名・ブランチ・PID・きっかけ)。`get_boot_history`が新しい順に返す。異常終了(電源断等)は記録できないため「起動した時刻」の履歴であり、「停止した時刻」の履歴ではない。きっかけ(`reason`)は`_determine_boot_reason`が、起動の直前にダッシュボードが残した記録から推定する(`update`=「最新に更新して再起動」の状態ファイルが`restarting`で、要求から`BOOT_REASON_WINDOW_SEC`(900秒)以内/`manual`=「システム再起動」の記録(`RESTART_MARKER_FILE`)が同じ窓以内/それ以外は`unknown`。`update`が`manual`より優先)。
-* **Gitの状態**: 「起動中のコード(最後に記録した起動のコミット)」「手元(実機の作業ツリー)の最新」「GitHubの最新(追跡先ブランチ)」の3段を比べる(`get_git_status`)。GitHubの最新を知るため`git fetch`(タイムアウト`GIT_FETCH_TIMEOUT_SEC`=20秒)を実行する。外部通信で遅いため、ページ本体では呼ばず、ページ表示後にJSが`GET /api/system/git/status`から取得する。成功した結果は`GIT_STATUS_CACHE_TTL_SEC`(300秒)キャッシュし、失敗はキャッシュしない。
+* **Gitの状態**: 「起動中のコード(最後に記録した起動のコミット)」「手元(実機の作業ツリー)の最新」「GitHubの最新(追跡先ブランチ)」の3段を比べる(`get_git_status`)。GitHubの最新を知るため`git fetch`(タイムアウト`GIT_FETCH_TIMEOUT_SEC`=20秒)を実行する。外部通信で遅いため、ページ本体では呼ばず、ページ表示後にJSが`GET /api/system/git/status`から取得する。成功した結果は`GIT_STATUS_CACHE_TTL_SEC`(300秒)キャッシュし、失敗はキャッシュしない。**(新機能)** 結果には、作業ツリーの未コミットの変更の有無`dirty`と件数`dirty_count`も含める(`git status --porcelain --untracked-files=no`の行数。追跡中のファイルだけが対象で、ファイル名や差分は返さない。`git pull --ff-only`が手元の変更で失敗する原因を見えるようにするため)。`git status`が失敗したときは両方`None`のまま。
 * どの公開関数も例外を送出しない(起動処理・ページ表示を落とさない)。失敗は警告ログにして、空/エラー入りの結果を返す。
-* 根拠: [関数定義] (行番号: 100 / 抜粋: "def record_boot("), [関数定義] (行番号: 124 / 抜粋: "def get_boot_history("), [関数定義] (行番号: 210 / 抜粋: "def get_git_status(")
+* 根拠: [関数定義] (行番号: 100 / 抜粋: "def record_boot("), [関数定義] (行番号: 124 / 抜粋: "def get_boot_history("), [関数定義] (行番号: 218 / 抜粋: "def get_git_status(")
 
 ## 3. 外部依存関係
 
@@ -56,5 +56,5 @@
 ### `get_git_status`
 
 * **役割**: 3段のGit状態と最近のコミットを返す。`ok`/`error`/`fetch_ok`/`branch`/`upstream`/`head`/`remote`/`running`/`behind`/`ahead`/`pending_restart`/`recent`を持つ。`pending_restart`は「起動中のコミット≠手元のHEAD」(更新済みだが未再起動)。`recent`は追跡先の先頭`RECENT_COMMITS_LIMIT`件を、手元へ取り込み済みか(`pulled`)・起動中のコミットか(`running`)の印付きで並べる。
-* 根拠: `def get_git_status(force: bool = False) -> dict[str, Any]:` (行番号: 210)
+* 根拠: `def get_git_status(force: bool = False) -> dict[str, Any]:` (行番号: 218)
 * **エラーハンドリング**: リポジトリが無ければ`ok: false`。追跡先が無ければ`fetch`せず`remote: None`と注記。`git fetch`だけ失敗したときは手元の最後の追跡情報で比較し、`fetch_ok: false`と注記する。予期しない例外は`ok: false`の辞書にする。`force=True`でキャッシュを無視する。

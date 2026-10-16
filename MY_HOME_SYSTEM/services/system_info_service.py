@@ -156,6 +156,7 @@ def _compute_git_status() -> dict[str, Any]:
         "ok": False, "error": "", "fetch_ok": None, "branch": None, "upstream": None,
         "head": None, "remote": None, "running": None,
         "behind": None, "ahead": None, "pending_restart": None, "recent": [],
+        "dirty": None, "dirty_count": None,
     }
     head_sha = _git("rev-parse", "--short", "HEAD")
     if head_sha is None:
@@ -168,6 +169,13 @@ def _compute_git_status() -> dict[str, Any]:
     status["head"] = head_log[0] if head_log else {"sha": head_sha, "date": "", "subject": ""}
     status["branch"] = _git("rev-parse", "--abbrev-ref", "HEAD")
     status["ok"] = True
+
+    # 作業ツリーの未コミットの変更(追跡中のファイルのみ。件数だけ返し、ファイル名や差分は返さない)。
+    # `git pull --ff-only` が手元の変更で失敗する原因になるため、有無を見えるようにする。取れなければ None のまま。
+    porcelain = _git("status", "--porcelain", "--untracked-files=no")
+    if porcelain is not None:
+        status["dirty_count"] = len([ln for ln in porcelain.splitlines() if ln.strip()])
+        status["dirty"] = status["dirty_count"] > 0
 
     # 起動中のコード(最後に記録した起動時点のコミット)
     boots = get_boot_history(1)

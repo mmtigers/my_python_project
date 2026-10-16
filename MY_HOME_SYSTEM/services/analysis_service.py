@@ -167,6 +167,31 @@ def load_data_from_db(query: str, date_column: str = "timestamp", params: tuple 
 # Data Fetching Methods (Core Logic)
 # ==========================================
 
+def load_hourly_climate(start: date) -> pd.DataFrame:
+    """温湿度の「日付×時間(JST)×機器」ごとの平均を返す(ホームの温湿度ヒートマップ用)。
+
+    `start`(その日の0時以降)から現在までの`switchbot_meter_logs`を集計する。時刻は
+    JSTオフセット付きで保存されているため、`timestamp`の文字位置で日付(先頭10文字)と
+    時(12〜13文字目)をそのまま取れる。湿度は取得できなかったときに0.0%で保存される
+    (`nature_remo_monitor.py`)ため、0以下は平均から外す。
+
+    戻り値の列: date(YYYY-MM-DD) / hour(0〜23) / device_id / device_name / temp_avg / hum_avg / n。
+    取得に失敗したときは空のDataFrame(`load_data_from_db`が握る)。
+    """
+    query = f"""
+        SELECT substr(timestamp, 1, 10) AS date,
+               CAST(substr(timestamp, 12, 2) AS INTEGER) AS hour,
+               device_id, device_name,
+               AVG(temperature) AS temp_avg,
+               AVG(CASE WHEN humidity > 0 THEN humidity END) AS hum_avg,
+               COUNT(*) AS n
+        FROM {config.SQLITE_TABLE_SWITCHBOT_LOGS}
+        WHERE timestamp >= ? AND temperature IS NOT NULL
+        GROUP BY date, hour, device_id, device_name
+    """
+    return load_data_from_db(query, params=(start.isoformat(),))
+
+
 def load_nas_status() -> Optional[pd.Series]:
     """NASの最新状態を取得"""
     table_name = getattr(config, "SQLITE_TABLE_NAS", "nas_records")

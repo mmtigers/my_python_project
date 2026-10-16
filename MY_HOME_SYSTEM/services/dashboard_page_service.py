@@ -18,14 +18,14 @@ import json
 import os
 import re
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import config
 import pandas as pd
 
-from services import home_status_service, system_info_service
+from services import home_status_service, system_info_service, timelapse_service
 
 # === ページ共通のシェル ===
 
@@ -44,6 +44,7 @@ _PAGE_BASE_CSS = """
         --bad: #b3261e; --bad-bg: #fdebea; --bad-bd: #f2bdb9;
         --neutral: #5b6678; --neutral-bg: #f1f3f7; --neutral-bd: #dfe4ec;
         --bar-alt: #d9730d;
+        --cl-0: #4f7fe0; --cl-1: #a9c6f5; --cl-2: #f1e6a6; --cl-3: #f0a35e; --cl-4: #d1432f;
         --radius: 14px; --radius-sm: 10px;
         --shadow: 0 1px 2px rgba(20,30,50,0.06), 0 2px 8px rgba(20,30,50,0.04);
         --tap: rgba(36,87,214,0.12);
@@ -59,6 +60,7 @@ _PAGE_BASE_CSS = """
             --bad: #ff9d96; --bad-bg: #351614; --bad-bd: #692a26;
             --neutral: #9aa7b8; --neutral-bg: #1c2431; --neutral-bd: #2a3545;
             --bar-alt: #f2a54a;
+            --cl-0: #4c7bd8; --cl-1: #2f4f86; --cl-2: #4d4a2c; --cl-3: #a4642a; --cl-4: #e05a45;
             --shadow: 0 1px 2px rgba(0,0,0,0.4);
             --tap: rgba(138,180,255,0.16);
         }
@@ -67,7 +69,7 @@ _PAGE_BASE_CSS = """
     body {
         margin: 0 auto;
         max-width: 1080px;
-        padding: 16px 16px 40px;
+        padding: 16px 16px calc(88px + env(safe-area-inset-bottom));
         background: var(--bg);
         color: var(--text);
         font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
@@ -174,6 +176,29 @@ _PAGE_BASE_CSS = """
     .heatmap-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; font-size: 0.7rem; color: var(--muted); }
     .heatmap-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 3px; }
 
+    /* ホームの温湿度ヒートマップ(行=日付、列=0〜23時。値は1時間の平均)。閲覧用でタップしない。
+       値の段階は色+凡例+各マスのtitleで示し、記録なしは枠線だけにして0と区別する。 */
+    .climate { margin: 4px 0 16px; padding: 10px 12px; background: var(--surface);
+        border: 1px solid var(--border); border-radius: var(--radius-sm); }
+    .climate-switch { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+    .climate-switch a {
+        display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 999px;
+        border: 1px solid var(--border); background: var(--surface); color: var(--text);
+        font-size: 0.85rem; text-decoration: none; -webkit-tap-highlight-color: var(--tap);
+    }
+    .climate-switch a[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: bold; }
+    .climate-row { display: flex; align-items: center; gap: 6px; }
+    .climate-day { flex: none; width: 5.2em; font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
+    .climate-cells { flex: 1; display: grid; grid-template-columns: repeat(24, 1fr); gap: 1px; min-width: 0; }
+    .climate-cell { height: 13px; border-radius: 2px; background: var(--hm-0); }
+    .climate-cell.cl-0 { background: var(--cl-0); }
+    .climate-cell.cl-1 { background: var(--cl-1); }
+    .climate-cell.cl-2 { background: var(--cl-2); }
+    .climate-cell.cl-3 { background: var(--cl-3); }
+    .climate-cell.cl-4 { background: var(--cl-4); }
+    .climate-cell.cl-none { background: transparent; border: 1px dashed var(--border); box-sizing: border-box; }
+    .climate-axis { margin-left: calc(5.2em + 6px); }
+
     /* 見守りページの簡易テーブル(防犯ログ・実家センサーログ)。 */
     table.simple-table {
         width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.85rem; margin-bottom: 16px;
@@ -189,7 +214,7 @@ _PAGE_BASE_CSS = """
     }
     /* システムページのバックアップ完了/失敗トースト(画面下部に数秒だけ出る) */
     .dashboard-toast {
-        position: fixed; left: 16px; right: 16px; bottom: 24px; z-index: 1000;
+        position: fixed; left: 16px; right: 16px; bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 1000;
         max-width: 480px; margin: 0 auto;
         padding: 14px 16px; border-radius: var(--radius); font-weight: bold; font-size: 0.95rem;
         color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,0.3); transition: opacity 0.5s;
@@ -296,6 +321,50 @@ _PAGE_BASE_CSS = """
     .release-card p, .release-card ul { margin: 4px 0; word-break: break-word; }
     .release-card ul { padding-left: 1.2em; }
     .release-warn { color: var(--warn); font-size: 0.9rem; }
+    /* 画面下に固定するフッターナビ(全ページ共通)。現在地は面+太字+aria-currentで示し、色だけに頼らない。
+       下端はiOSのホームインジケーター分(safe-area)を空ける。 */
+    nav.bottom-nav {
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+        background: var(--surface); border-top: 1px solid var(--border);
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+    nav.bottom-nav ul { list-style: none; display: flex; gap: 2px; max-width: 1080px; margin: 0 auto; padding: 6px 6px; }
+    nav.bottom-nav li { flex: 1 1 0; min-width: 0; }
+    nav.bottom-nav a {
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+        min-height: 48px; padding: 4px 2px; border-radius: 14px; color: var(--muted);
+        font-size: 10.5px; text-decoration: none; white-space: nowrap;
+        -webkit-tap-highlight-color: var(--tap);
+    }
+    nav.bottom-nav a .bn-icon { font-size: 1.15rem; line-height: 1; }
+    nav.bottom-nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: bold; }
+    @media print { nav.bottom-nav { display: none; } }
+
+    /* システムページ: 起動履歴のカードとGitの状態 */
+    .status-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+    .badge {
+        display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: 999px;
+        font-size: 0.8rem; font-weight: bold; border: 1px solid var(--neutral-bd);
+        background: var(--neutral-bg); color: var(--neutral);
+    }
+    .badge-ok { background: var(--ok-bg); color: var(--ok); border-color: var(--ok-bd); }
+    .badge-warn { background: var(--warn-bg); color: var(--warn); border-color: var(--warn-bd); }
+    .badge-info { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-bd); }
+    .boot-list { list-style: none; margin: 0; padding: 0; }
+    .boot-card {
+        padding: 10px 12px; margin: 0 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+        background: var(--surface-2); word-break: break-word;
+    }
+    .boot-card.is-latest { border-color: var(--accent-bd); background: var(--accent-soft); }
+    .boot-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 4px; }
+    .boot-time { font-weight: bold; font-size: 0.95rem; }
+    .boot-commit { font-size: 0.85rem; }
+    .boot-branch { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+    .git-trio { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 0 0 10px; }
+    .git-card { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); word-break: break-word; }
+    .git-card-label { font-size: 0.75rem; color: var(--muted); margin: 0 0 2px; }
+    .git-card-main { font-size: 0.9rem; margin: 0; }
+    .git-card-sub { font-size: 0.75rem; color: var(--muted); margin: 2px 0 0; }
     .git-status-line { margin: 4px 0; word-break: break-word; }
     .git-status-warn { color: var(--warn); }
     .git-commit-list { list-style: none; padding: 0; margin: 8px 0 0; }
@@ -327,6 +396,30 @@ _PAGE_BASE_CSS = """
     button.danger:disabled { background: var(--surface-2); color: var(--faint); cursor: not-allowed; }
     button.primary { background: var(--accent); color: var(--on-accent); }
     .maintenance-result { font-size: 0.85rem; margin-top: 8px; white-space: pre-wrap; }
+
+    /* 見守りページのタイムラプス一覧。カードを開くとその場で再生できる(JS不要。動画は開くまで読み込まない)。 */
+    .tl-card {
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+        margin: 0 0 8px; box-shadow: var(--shadow); overflow: hidden;
+    }
+    .tl-card > summary { padding: 8px 12px 8px 8px; gap: 10px; min-height: 64px; list-style: none; color: var(--text); }
+    .tl-card > summary::-webkit-details-marker { display: none; }
+    .tl-card > summary::after { content: "▸"; margin-left: auto; color: var(--accent); font-size: 1.2rem; transition: transform 0.15s; }
+    .tl-card[open] > summary::after { transform: rotate(90deg); }
+    #timelapse-section { margin-bottom: 16px; }
+    .tl-thumb {
+        flex: none; width: 96px; height: 54px; object-fit: cover; border-radius: 8px; background: var(--surface-2);
+        border: 1px solid var(--border);
+    }
+    .tl-thumb-none { display: inline-flex; align-items: center; justify-content: center; font-size: 1.4rem; }
+    .tl-meta { display: flex; flex-direction: column; min-width: 0; }
+    .tl-title { font-weight: bold; font-size: 0.95rem; }
+    .tl-sub { font-size: 0.75rem; font-weight: normal; color: var(--muted); }
+    .tl-body { padding: 0 8px 10px; }
+    .tl-body video { width: 100%; max-height: 70vh; background: #000; border-radius: var(--radius-sm); display: block; }
+    .tl-body a.tl-save { display: inline-flex; align-items: center; min-height: 44px; font-size: 0.85rem; color: var(--accent); }
+    .tl-more { margin: 4px 0 12px; }
+    .tl-more a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; color: var(--accent); font-weight: bold; text-decoration: none; }
 
     /* 見守りページのログの日付フィルタ */
     .log-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 8px; }
@@ -390,17 +483,51 @@ _PAGE_BASE_CSS = """
 """
 
 
-def _page_shell(title: str, body_html: str, *, extra_head: str = "") -> str:
+_FOOTER_ITEMS: tuple[tuple[str, str, str], ...] = (
+    ("", "🏠", "ホーム"),
+    ("watch", "👀", "見守り"),
+    ("life", "💡", "くらし"),
+    ("sys", "🔧", "システム"),
+    ("updates", "📜", "アップデート"),
+)
+
+
+def _render_bottom_nav(dashboard_path: str, current: str | None) -> str:
+    """画面下のフッターナビ。`current`はホームなら"home"、他は`_FOOTER_ITEMS`のキー。"""
+    base = dashboard_path.rstrip("/")
+    items = []
+    for key, icon, label in _FOOTER_ITEMS:
+        href = html.escape(f"{base}/{key}" if key else f"{base}/")
+        is_current = (key or "home") == current
+        attr = ' aria-current="page"' if is_current else ""
+        items.append(
+            f'<li><a href="{href}"{attr}><span class="bn-icon" aria-hidden="true">{icon}</span>'
+            f"<span>{html.escape(label)}</span></a></li>"
+        )
+    return f'<nav class="bottom-nav" aria-label="メインメニュー"><ul>{"".join(items)}</ul></nav>'
+
+
+def _page_shell(
+    title: str,
+    body_html: str,
+    *,
+    extra_head: str = "",
+    dashboard_path: str | None = None,
+    current: str | None = None,
+) -> str:
+    """`dashboard_path`を渡すと、画面下にフッターナビを付ける(`current`が現在地)。"""
+    footer = _render_bottom_nav(dashboard_path, current) if dashboard_path is not None else ""
     return (
         "<!DOCTYPE html>"
         '<html lang="ja"><head>'
         '<meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'
         f"<title>{html.escape(title)}</title>"
         f"<style>{_PAGE_BASE_CSS}{home_status_service.STATUS_CARD_CSS}</style>"
         f"{extra_head}"
         "</head><body>"
         f"{body_html}"
+        f"{footer}"
         "</body></html>"
     )
 
@@ -487,8 +614,12 @@ def render_home_page(
     link_health: dict[str, bool] | None = None,
     yoru_note_url: str | None = None,
     heatmap_html: str = "",
+    climate_html: str = "",
 ) -> str:
     """ホームページ: ステータスカード + 外部リンク + 今日の動き(ヒートマップ) + 各ページへのナビ。
+
+    **(新機能)** `climate_html`(`render_home_climate_heatmap`の出力。過去30日の温度/湿度)を、
+    ステータスカードの「見守り」グループの直下に置く。
 
     **(新機能)** `heatmap_html`(`render_home_activity_heatmaps`の出力)を、外部リンクの下に置く。
     自動更新の範囲(`STATUS_SECTION_ID`)の内側なので、カードと同じ周期で色も更新される。
@@ -511,14 +642,14 @@ def render_home_page(
     links_html = _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url) + heatmap_html
     body = (
         "<h1>🏠 おうちの様子</h1>"
-        f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html)}'
+        f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html, climate_html=climate_html)}'
         '<h2>メニュー</h2>'
         f'<div class="link-grid">{nav_html}</div>'
     )
     extra_head = _status_refresh_script(status_path, refresh_sec)
     if manifest_path is not None and icon_path is not None:
         extra_head = _home_screen_install_head(manifest_path, icon_path) + extra_head
-    return _page_shell("おうちの様子", body, extra_head=extra_head)
+    return _page_shell("おうちの様子", body, extra_head=extra_head, dashboard_path=dashboard_path, current="home")
 
 
 def _home_screen_install_head(manifest_path: str, icon_path: str) -> str:
@@ -541,13 +672,22 @@ STATUS_SECTION_ID = home_status_service.STATUS_SECTION_ID
 
 
 def _render_status_section(
-    cards, fetched_at: datetime, *, dashboard_path: str, refresh_sec: int, extra_html: str = ""
+    cards,
+    fetched_at: datetime,
+    *,
+    dashboard_path: str,
+    refresh_sec: int,
+    extra_html: str = "",
+    climate_html: str = "",
 ) -> str:
+    # 温湿度ヒートマップは「見守り」グループの直下に置く
+    extras = {"watch": climate_html} if climate_html else None
+    grid_html = home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path, group_extras=extras)
     return (
         f'<div id="{STATUS_SECTION_ID}">'
         f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
         f"・{int(refresh_sec)}秒ごとに自動更新</p>"
-        f"{home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path)}"
+        f"{grid_html}"
         f"{extra_html}"
         "</div>"
     )
@@ -564,6 +704,7 @@ def render_home_status_section(
     link_health: dict[str, bool] | None = None,
     yoru_note_url: str | None = None,
     heatmap_html: str = "",
+    climate_html: str = "",
 ) -> str:
     """ホームページの自動更新用フラグメント(カードと、外部リンクのブロック、今日の動き)。
 
@@ -578,7 +719,8 @@ def render_home_status_section(
         else ""
     ) + heatmap_html
     return _render_status_section(
-        cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html
+        cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec,
+        extra_html=links_html, climate_html=climate_html,
     )
 
 
@@ -587,7 +729,8 @@ def _status_refresh_script(status_path: str, refresh_sec: int) -> str:
     return (
         "<script>"
         "(function () {"
-        f"var url = {json.dumps(status_path)};"
+        # 温湿度ヒートマップの選択(?hm_loc=&hm_metric=)を自動更新でも引き継ぐ
+        f"var url = {json.dumps(status_path)} + window.location.search;"
         f"var intervalMs = {int(refresh_sec) * 1000};"
         "var inFlight = false;"
         "function apply(html) {"
@@ -617,6 +760,75 @@ def _status_refresh_script(status_path: str, refresh_sec: int) -> str:
         "})();"
         "</script>"
     )
+
+
+# === 見守りページのタイムラプス一覧 ===
+
+_TIMELAPSE_VISIBLE = 10
+
+
+def _timelapse_label(item: timelapse_service.Timelapse) -> str:
+    """「10/16(金) 朝 07:30〜09:00」。時間帯の指定が無い動画は日付だけ。"""
+    label = f"{item.day.month}/{item.day.day}({_WEEKDAYS[item.day.weekday()]})"
+    if item.start and item.end:
+        part = "朝" if item.start < "1200" else "午後"
+        label += f" {part} {item.start[:2]}:{item.start[2:]}〜{item.end[:2]}:{item.end[2:]}"
+    return label
+
+
+def _render_timelapse_card(
+    item: timelapse_service.Timelapse, camera_names: dict[str, str], url_prefix: str
+) -> str:
+    base = f"{url_prefix.rstrip('/')}/{quote(item.filename)}"
+    video_url = html.escape(base)
+    thumb_url = html.escape(base[: -len(".mp4")] + ".jpg")
+    thumb = (
+        f'<img class="tl-thumb" src="{thumb_url}" alt="" loading="lazy" width="96" height="54">'
+        if item.has_thumbnail
+        else '<span class="tl-thumb tl-thumb-none" aria-hidden="true">🎞️</span>'
+    )
+    poster = f' poster="{thumb_url}"' if item.has_thumbnail else ""
+    camera = camera_names.get(item.camera, item.camera)
+    size_mb = item.size_bytes / (1024 * 1024)
+    return (
+        '<details class="tl-card"><summary>'
+        f"{thumb}"
+        f'<span class="tl-meta"><span class="tl-title">{html.escape(_timelapse_label(item))}</span>'
+        f'<span class="tl-sub">{html.escape(camera)} ・ {size_mb:.1f}MB</span></span>'
+        "</summary>"
+        '<div class="tl-body">'
+        f'<video controls playsinline preload="none"{poster} src="{video_url}"></video>'
+        f'<a class="tl-save" href="{video_url}" download>⬇️ 保存する</a>'
+        "</div></details>"
+    )
+
+
+def _render_timelapse_section(
+    items: list[timelapse_service.Timelapse],
+    *,
+    dashboard_path: str,
+    camera_names: dict[str, str],
+    show_all: bool = False,
+    url_prefix: str = timelapse_service.URL_PREFIX,
+) -> str:
+    """見守りページの「🎞️ タイムラプス」。新しい順で、先頭10件だけ出し、残りは`?tl_all=1`で出す。
+    カードをタップするとその場で再生する(動画は開くまで読み込まない)。動画の無いときは案内だけ。"""
+    heading = '<div id="timelapse-section"><h2>🎞️ タイムラプス</h2>'
+    if not items:
+        return heading + '<p class="empty-note">タイムラプスはまだありません(毎日、朝と午後の玄関の動きから自動で作られます)</p></div>'
+    shown = items if show_all else items[:_TIMELAPSE_VISIBLE]
+    cards = "".join(_render_timelapse_card(i, camera_names, url_prefix) for i in shown)
+    watch = f"{html.escape(dashboard_path.rstrip('/'))}/watch"
+    more = ""
+    if len(items) > _TIMELAPSE_VISIBLE:
+        if show_all:
+            more = f'<div class="tl-more"><a href="{watch}#timelapse-section">最新{_TIMELAPSE_VISIBLE}件だけにする</a></div>'
+        else:
+            more = (
+                f'<div class="tl-more"><a href="{watch}?tl_all=1#timelapse-section">'
+                f"さらに{len(items) - _TIMELAPSE_VISIBLE}件を表示</a></div>"
+            )
+    return f'{heading}<p class="meta">直近{config.RECORDING_RETENTION_DAYS}日分です。タップすると再生します。</p>{cards}{more}</div>'
 
 
 # === 見守りページ ===
@@ -1044,6 +1256,140 @@ def _heatmap_level(count: int) -> int:
     return sum(count >= t for t in _HEATMAP_LEVEL_THRESHOLDS)
 
 
+# === ホームの温湿度ヒートマップ(過去30日) ===
+
+CLIMATE_LOCATIONS = ("伊丹", "高砂")
+CLIMATE_METRICS = ("temp", "hum")
+CLIMATE_DEFAULT_LOCATION = "伊丹"
+CLIMATE_DEFAULT_METRIC = "temp"
+_CLIMATE_METRIC_LABELS = {"temp": "🌡️ 温度", "hum": "💧 湿度"}
+_CLIMATE_METRIC_COLUMNS = {"temp": "temp_avg", "hum": "hum_avg"}
+_CLIMATE_METRIC_UNITS = {"temp": "℃", "hum": "%"}
+# 5段階の境界(各値未満の段階 → 最後だけ以上)。温度=15/20/25/30℃、湿度=30/40/60/70%。
+_CLIMATE_THRESHOLDS = {"temp": (15.0, 20.0, 25.0, 30.0), "hum": (30.0, 40.0, 60.0, 70.0)}
+_CLIMATE_LEGENDS = {
+    "temp": ("〜15℃", "15〜20℃", "20〜25℃", "25〜30℃", "30℃〜"),
+    "hum": ("〜30%", "30〜40%", "40〜60%", "60〜70%", "70%〜"),
+}
+_WEEKDAYS = "月火水木金土日"
+
+
+def parse_climate_location(value: str | None) -> str:
+    """`?hm_loc=`の値。`itami`/`takasago`以外は既定(伊丹)。"""
+    return {"itami": "伊丹", "takasago": "高砂"}.get(value or "", CLIMATE_DEFAULT_LOCATION)
+
+
+def parse_climate_metric(value: str | None) -> str:
+    """`?hm_metric=`の値。`temp`/`hum`以外は既定(温度)。"""
+    return value if value in CLIMATE_METRICS else CLIMATE_DEFAULT_METRIC
+
+
+def _climate_location(device_id: Any, device_name: Any) -> str | None:
+    """機器の拠点。`devices.json`の`location`を優先し、無ければ機器名の先頭(`伊丹_`/`高砂_`。
+    Nature Remoの保存名)で判定する。どちらでも分からなければ None(ヒートマップに含めない)。"""
+    for dev in config.MONITOR_DEVICES:
+        if dev.get("id") == device_id and dev.get("location") in CLIMATE_LOCATIONS:
+            return dev["location"]
+    name = str(device_name or "")
+    return next((loc for loc in CLIMATE_LOCATIONS if name.startswith(loc)), None)
+
+
+def _climate_level(value: float, metric: str) -> int:
+    """値 → 色段階(0〜4)。"""
+    return sum(value >= t for t in _CLIMATE_THRESHOLDS[metric])
+
+
+def climate_hourly_grid(df: pd.DataFrame, location: str, metric: str) -> dict[str, list[float | None]]:
+    """拠点の`日付 → 0〜23時の平均値(記録なしは None)`。同じ拠点の複数機器は記録数で重み付けして平均する。"""
+    column = _CLIMATE_METRIC_COLUMNS[metric]
+    required = {"date", "hour", "device_id", "device_name", "n", column}
+    if df.empty or not required.issubset(df.columns):
+        return {}
+    keep = [_climate_location(i, n) == location for i, n in zip(df["device_id"], df["device_name"])]
+    part = df[keep].dropna(subset=[column])
+    if part.empty:
+        return {}
+    part = part.assign(_w=part[column] * part["n"])
+    grouped = part.groupby(["date", "hour"]).agg(w=("_w", "sum"), n=("n", "sum"))
+    grid: dict[str, list[float | None]] = {}
+    for (day, hour), row in grouped.iterrows():
+        h = int(hour)
+        if 0 <= h <= 23 and row["n"] > 0:
+            grid.setdefault(str(day), [None] * 24)[h] = float(row["w"] / row["n"])
+    return grid
+
+
+def _climate_switch(dashboard_path: str, location: str, metric: str, locations: list[str]) -> str:
+    """拠点・指標の切り替えリンク(JS不要)。選んだ組み合わせは`?hm_loc=&hm_metric=`で持つ。"""
+    base = dashboard_path.rstrip("/") + "/"
+    loc_key = {"伊丹": "itami", "高砂": "takasago"}
+
+    def link(loc: str, met: str, label: str, current: bool) -> str:
+        query = urlencode({"hm_loc": loc_key[loc], "hm_metric": met})
+        attr = ' aria-current="true"' if current else ""
+        return f'<a href="{html.escape(base)}?{html.escape(query)}#climate-heatmap"{attr}>{html.escape(label)}</a>'
+
+    items = [link(loc, metric, loc, loc == location) for loc in locations]
+    items += [link(location, met, _CLIMATE_METRIC_LABELS[met], met == metric) for met in CLIMATE_METRICS]
+    return f'<div class="climate-switch">{"".join(items)}</div>'
+
+
+def render_home_climate_heatmap(
+    df: pd.DataFrame,
+    now: datetime,
+    *,
+    dashboard_path: str,
+    location: str = CLIMATE_DEFAULT_LOCATION,
+    metric: str = CLIMATE_DEFAULT_METRIC,
+    days: int = 30,
+) -> str:
+    """ホームの「過去30日の温度/湿度」ヒートマップ。行=日付(新しい日が上)、列=0〜23時、値=1時間の平均。
+
+    マスはタップできない閲覧用。記録のない時間・まだ来ていない時間は枠線だけにする。
+    記録のある拠点だけを切り替えに出す(1つも無ければ案内だけ)。
+    """
+    present = [loc for loc in CLIMATE_LOCATIONS if climate_hourly_grid(df, loc, "temp") or climate_hourly_grid(df, loc, "hum")]
+    heading = f'<h2 id="climate-heatmap">{_CLIMATE_METRIC_LABELS[metric]}の推移(過去{days}日)</h2>'
+    if not present:
+        return heading + '<p class="empty-note">温度・湿度の記録がまだありません</p>'
+    if location not in present:
+        location = present[0]
+    grid = climate_hourly_grid(df, location, metric)
+    unit = _CLIMATE_METRIC_UNITS[metric]
+    today = now.date()
+    rows = []
+    for offset in range(days):
+        day = today - timedelta(days=offset)
+        values = grid.get(day.isoformat(), [None] * 24)
+        cells = []
+        for hour, value in enumerate(values):
+            future = day == today and hour > now.hour
+            if value is None or future:
+                note = "まだ先です" if future else "記録なし"
+                cells.append(f'<div class="climate-cell cl-none" title="{day.month}/{day.day} {hour}時台: {note}"></div>')
+            else:
+                cells.append(
+                    f'<div class="climate-cell cl-{_climate_level(value, metric)}" '
+                    f'title="{day.month}/{day.day} {hour}時台: {value:.1f}{unit}"></div>'
+                )
+        label = f"{day.month}/{day.day}({_WEEKDAYS[day.weekday()]})"
+        rows.append(f'<div class="climate-row"><span class="climate-day">{label}</span><div class="climate-cells">{"".join(cells)}</div></div>')
+    ticks = "".join(f'<span style="left:{h / 24 * 100:.2f}%">{h}</span>' for h in (0, 6, 12, 18)) + '<span style="left:100%">24</span>'
+    legend = "".join(
+        f'<span><i style="background:var(--cl-{i})"></i>{html.escape(text)}</span>'
+        for i, text in enumerate(_CLIMATE_LEGENDS[metric])
+    )
+    return (
+        f"{heading}"
+        f'<div class="climate">{_climate_switch(dashboard_path, location, metric, present)}'
+        f'<div class="meta">{html.escape(location)}・1時間ごとの平均(5分おきの記録から)</div>'
+        f'<div class="climate-axis heatmap-axis-ticks">{ticks}</div>'
+        f'{"".join(rows)}'
+        f'<div class="heatmap-legend">{legend}<span><i style="border:1px dashed var(--border)"></i>記録なし</span></div>'
+        "</div>"
+    )
+
+
 # 活動ヒートマップ・時間帯詳細の対象。キーは`?src=`の値。
 HEATMAP_SOURCES = ("security", "takasago", "itami")
 _HEATMAP_SOURCE_LABELS = {"security": "🛡️ 防犯", "takasago": "👵 高砂(実家)", "itami": "🏠 伊丹(自宅)"}
@@ -1246,6 +1592,8 @@ def render_watch_page(
     hour: int | None = None,
     hour_src: str | None = None,
     hour_device: str | None = None,
+    timelapses: list[timelapse_service.Timelapse] | None = None,
+    show_all_timelapses: bool = False,
 ) -> str:
     """👀 見守り: カメラのライブ選択・スナップショット・防犯ログ・実家/自宅センサーログ。
 
@@ -1270,6 +1618,9 @@ def render_watch_page(
 
     **(UI改善)** 開閉センサーの「open」の直後(60秒以内)に「close」が来た組は、
     `merge_open_close_events`で「開 → 閉（N秒）」の1行にまとめる。
+
+    **(新機能)** `timelapses`(`timelapse_service.list_timelapses`の結果。新しい順)を渡すと、最近の写真の下に
+    「🎞️ タイムラプス」を出す(`show_all_timelapses`で先頭10件の上限を外す)。省略時は動画なしの案内になる。
 
     **(新機能)** `selected_device`(`device_id`)を指定すると、高砂・伊丹のセンサーログをその機器だけに絞る
     (防犯ログは対象外)。選択肢にない値は無視する。
@@ -1344,6 +1695,7 @@ def render_watch_page(
         "</div>"
         "<h2>🖼️ 最近の写真</h2>"
         f"{_render_snapshot_gallery(snapshot_url_prefix)}"
+        f"{_render_timelapse_section(timelapses or [], dashboard_path=dashboard_path, camera_names={c['id']: c['name'] for c in cameras}, show_all=show_all_timelapses)}"
         f"{_render_log_date_filter(dashboard_path, selected_date, device_options, selected_device)}"
         f"{hour_detail_html}"
         '<div id="security-log">'
@@ -1362,7 +1714,7 @@ def render_watch_page(
         f'{_log_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
         "</div>"
     )
-    return _page_shell("見守り - おうちの様子", body, extra_head=_CAMERA_SCRIPT)
+    return _page_shell("見守り - おうちの様子", body, extra_head=_CAMERA_SCRIPT, dashboard_path=dashboard_path, current="watch")
 
 
 # === くらしページ ===
@@ -1409,7 +1761,7 @@ def render_life_page(cards, *, dashboard_path: str, daily_cost_rows: list[tuple[
         "<h2>📊 日別の電気代(概算)</h2>"
         f"{_render_daily_cost_history(daily_cost_rows or [])}"
     )
-    return _page_shell("くらし - おうちの様子", body)
+    return _page_shell("くらし - おうちの様子", body, dashboard_path=dashboard_path, current="life")
 
 
 # === システムページ ===
@@ -1741,7 +2093,7 @@ def render_updates_page(
         f"{warnings}"
         f"{cards}"
     )
-    return _page_shell("アップデート - おうちの様子", body)
+    return _page_shell("アップデート - おうちの様子", body, dashboard_path=dashboard_path, current="updates")
 
 
 def _format_boot_time(value: Any) -> str:
@@ -1749,29 +2101,42 @@ def _format_boot_time(value: Any) -> str:
     return home_status_service.format_short_timestamp(value)
 
 
+_BOOT_REASON_BADGE_CLASS = {
+    system_info_service.REASON_UPDATE: "badge badge-info",
+    system_info_service.REASON_MANUAL: "badge badge-warn",
+}
+
+
 def _render_boot_history_box(boots: list[dict[str, Any]]) -> str:
-    """サーバーの起動履歴(新しい順)。`system_info_service.get_boot_history`の結果を受け取る。
+    """サーバーの起動履歴(新しい順)をカードで表示する。`system_info_service.get_boot_history`の結果を受け取る。
 
     起動の記録は`unified_server`の起動時に1行ずつ追記される。異常終了は記録できないため、
-    「起動した時刻」の履歴であることを注記する。"""
+    「起動した時刻」の履歴であることを注記する。先頭の1件は「最新の起動」として強調する。"""
     if not boots:
         body = '<p class="empty-note">起動の記録はまだありません(この機能の導入後の最初の起動から記録されます)</p>'
     else:
-        rows = []
-        for b in boots:
+        cards = []
+        for i, b in enumerate(boots):
             sha = b.get("commit_sha") or "不明"
             subject = b.get("commit_subject") or ""
+            branch = b.get("branch") or ""
             reason = system_info_service.REASON_LABELS.get(b.get("reason") or "", "不明")
-            rows.append(
-                "<tr>"
-                f"<td>{html.escape(_format_boot_time(b.get('booted_at')))}</td>"
-                f"<td><span class=\"git-commit-sha\">{html.escape(str(sha))}</span> {html.escape(subject)}</td>"
-                f"<td>{html.escape(reason)}</td>"
-                "</tr>"
+            badge_cls = _BOOT_REASON_BADGE_CLASS.get(b.get("reason") or "", "badge")
+            latest = '<span class="badge badge-ok">最新の起動</span>' if i == 0 else ""
+            branch_html = f'<div class="boot-branch">ブランチ: {html.escape(branch)}</div>' if branch else ""
+            cards.append(
+                f'<li class="boot-card{" is-latest" if i == 0 else ""}">'
+                '<div class="boot-card-head">'
+                f'<span class="boot-time">{html.escape(_format_boot_time(b.get("booted_at")))}</span>'
+                f"{latest}"
+                f'<span class="{badge_cls}">{html.escape(reason)}</span>'
+                "</div>"
+                f'<div class="boot-commit"><span class="git-commit-sha">{html.escape(str(sha))}</span> {html.escape(subject)}</div>'
+                f"{branch_html}"
+                "</li>"
             )
         body = (
-            '<table class="simple-table"><thead><tr><th>起動</th><th>コミット</th><th>きっかけ</th></tr></thead>'
-            f'<tbody>{"".join(rows)}</tbody></table>'
+            f'<ul class="boot-list">{"".join(cards)}</ul>'
             '<p class="meta">起動した時刻の履歴です(停電などの異常終了そのものは記録されません)。</p>'
         )
     return f'<div class="info-box" id="boot-history"><h2>🔁 サーバーの起動履歴</h2>{body}</div>'
@@ -1800,31 +2165,47 @@ _GIT_STATUS_SCRIPT = """
     }
     function commitText(c) { return c.sha + " " + c.subject + (c.date ? " (" + c.date + ")" : ""); }
 
+    function badge(text, cls) { return el("span", text, "badge " + cls); }
+    function card(label, c, sub) {
+        var node = document.createElement("div");
+        node.className = "git-card";
+        node.appendChild(el("p", label, "git-card-label"));
+        node.appendChild(el("p", c, "git-card-main"));
+        if (sub) { node.appendChild(el("p", sub, "git-card-sub")); }
+        return node;
+    }
+
     function render(d) {
         var box = document.getElementById("gitStatusBody");
         if (!box) { return; }
         box.textContent = "";
         if (!d.ok) { box.appendChild(el("p", d.error || "取得できませんでした", "git-status-line git-status-warn")); return; }
+
+        // 上部の状態バッジ(重要度の高い順)
+        var badges = document.createElement("div");
+        badges.className = "status-badges";
+        if (d.pending_restart) { badges.appendChild(badge("⚠️ 未再起動", "badge-warn")); }
+        if (d.dirty === true) { badges.appendChild(badge("⚠️ 未コミットの変更 " + d.dirty_count + "件", "badge-warn")); }
+        else if (d.dirty === false) { badges.appendChild(badge("✅ 変更なし", "badge-ok")); }
+        if (d.behind > 0) { badges.appendChild(badge("⬇️ 未取り込み " + d.behind + "件", "badge-warn")); }
+        else if (d.behind === 0) { badges.appendChild(badge("✅ 最新", "badge-ok")); }
+        if (d.ahead > 0) { badges.appendChild(badge("手元だけ " + d.ahead + "件", "badge-info")); }
+        if (badges.childNodes.length) { box.appendChild(badges); }
+
+        // 3段(起動中 / 手元 / GitHub)
+        var trio = document.createElement("div");
+        trio.className = "git-trio";
         if (d.running) {
-            box.appendChild(el("p", "▶ 起動中のコード: " + d.running.sha + " " + d.running.subject
-                + "(起動 " + fmtBoot(d.running.booted_at) + ")", "git-status-line"));
+            trio.appendChild(card("▶ 起動中のコード", d.running.sha + " " + d.running.subject, "起動 " + fmtBoot(d.running.booted_at)));
         } else {
-            box.appendChild(el("p", "▶ 起動中のコード: 記録なし(この機能の導入後の最初の起動から分かります)", "git-status-line"));
+            trio.appendChild(card("▶ 起動中のコード", "記録なし", "この機能の導入後の最初の起動から分かります"));
         }
-        box.appendChild(el("p", "📁 手元(実機)の最新: " + commitText(d.head) + (d.branch ? " ・ ブランチ " + d.branch : ""), "git-status-line"));
+        trio.appendChild(card("📁 手元(実機)の最新", commitText(d.head), d.branch ? "ブランチ " + d.branch : ""));
+        if (d.remote) { trio.appendChild(card("☁️ GitHubの最新", commitText(d.remote), "")); }
+        box.appendChild(trio);
+
         if (d.pending_restart) {
-            box.appendChild(el("p", "⚠️ 取り込み済みですが、まだ再起動されていません(起動中のコードは古いままです)", "git-status-line git-status-warn"));
-        }
-        if (d.remote) {
-            box.appendChild(el("p", "☁️ GitHubの最新: " + commitText(d.remote), "git-status-line"));
-            if (d.behind === 0) {
-                box.appendChild(el("p", "✅ 手元はGitHubの最新に追いついています", "git-status-line"));
-            } else if (d.behind > 0) {
-                box.appendChild(el("p", "⬇️ GitHubの最新まで、あと" + d.behind + "件取り込まれていません", "git-status-line git-status-warn"));
-            }
-            if (d.ahead > 0) {
-                box.appendChild(el("p", "手元にだけあるコミットが" + d.ahead + "件あります", "git-status-line git-status-warn"));
-            }
+            box.appendChild(el("p", "取り込み済みですが、まだ再起動されていません(起動中のコードは古いままです)", "git-status-line git-status-warn"));
         }
         if (d.error) { box.appendChild(el("p", d.error, "git-status-line git-status-warn")); }
         if (d.recent && d.recent.length) {
@@ -1833,10 +2214,10 @@ _GIT_STATUS_SCRIPT = """
             list.className = "git-commit-list";
             d.recent.forEach(function (c) {
                 var li = document.createElement("li");
+                li.appendChild(el("span", c.running ? "▶ 起動中" : (c.pulled ? "✅ 取り込み済み" : "⬇️ 未取り込み"), "git-commit-badge"));
+                li.appendChild(document.createTextNode(" "));
                 li.appendChild(el("span", c.sha, "git-commit-sha"));
                 li.appendChild(document.createTextNode(" " + c.subject + (c.date ? " (" + c.date + ")" : "")));
-                var badge = c.running ? "▶ 起動中" : (c.pulled ? "✅ 取り込み済み" : "⬇️ 未取り込み");
-                li.appendChild(el("span", badge, "git-commit-badge"));
                 list.appendChild(li);
             });
             box.appendChild(list);
@@ -1891,6 +2272,8 @@ def render_sys_page(
         "<h1>🔧 システム</h1>"
         f"{_render_overall_summary(rows)}"
         '<div class="box-grid">'
+        f"{_render_git_status_box()}"
+        f"{_render_boot_history_box(boot_history or [])}"
         '<div class="info-box">'
         "<h2>各機能の最終更新</h2>"
         f"{_render_freshness_rows(rows)}"
@@ -1900,8 +2283,6 @@ def render_sys_page(
         "<h2>🗄️ NASの容量推移</h2>"
         f"{_render_nas_history_chart(nas_history, days=nas_days, sys_path=dashboard_path.rstrip('/') + '/sys')}"
         "</div>"
-        f"{_render_boot_history_box(boot_history or [])}"
-        f"{_render_git_status_box()}"
         "</div>"
         "<h2>🛠️ メンテナンス</h2>"
         '<div class="maintenance-group">'
@@ -1941,7 +2322,10 @@ def render_sys_page(
         "</div>"
         "</div>"
     )
-    return _page_shell("システム - おうちの様子", body, extra_head=_MAINTENANCE_SCRIPT + _GIT_STATUS_SCRIPT)
+    return _page_shell(
+        "システム - おうちの様子", body, extra_head=_MAINTENANCE_SCRIPT + _GIT_STATUS_SCRIPT,
+        dashboard_path=dashboard_path, current="sys",
+    )
 
 
 _MAINTENANCE_SCRIPT = """

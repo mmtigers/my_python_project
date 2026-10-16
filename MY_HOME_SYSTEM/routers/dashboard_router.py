@@ -32,6 +32,7 @@ from services import (
     power_page_service,
     release_history_service,
     system_info_service,
+    timelapse_service,
 )
 
 router = APIRouter()
@@ -92,8 +93,10 @@ def legacy_mobile_path_redirect() -> RedirectResponse:
 
 @router.get(_BASE_PATH, include_in_schema=False)
 @router.get(f"{_BASE_PATH}/", include_in_schema=False)
-def dashboard_home(tab: str | None = None) -> Response:
+def dashboard_home(tab: str | None = None, hm_loc: str | None = None, hm_metric: str | None = None) -> Response:
     """ホームページ: ステータスカード + 見守り/くらし/システムへの導線 + 外部リンク。
+
+    `?hm_loc=itami|takasago&hm_metric=temp|hum`は温湿度ヒートマップの拠点・指標(不正な値は既定)。
 
     `tab` はStreamlit版で使っていたクエリパラメータ(`/dashboard?tab=watch`)。
     スマートフォンのホーム画面にこの形のURLを追加している可能性があるため、
@@ -106,6 +109,7 @@ def dashboard_home(tab: str | None = None) -> Response:
     cards, fetched_at = home_status_service.collect_status_cards()
     link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)
     heatmap_html = _home_heatmap_html()
+    climate_html = _home_climate_html(hm_loc, hm_metric)
     return HTMLResponse(
         dashboard_page_service.render_home_page(
             cards,
@@ -120,6 +124,7 @@ def dashboard_home(tab: str | None = None) -> Response:
             icon_path=f"{_BASE_PATH}/icon-180.png",
             link_health=link_health,
             heatmap_html=heatmap_html,
+            climate_html=climate_html,
         )
     )
 
@@ -133,8 +138,20 @@ def _home_heatmap_html() -> str:
     )
 
 
+def _home_climate_html(hm_loc: str | None, hm_metric: str | None) -> str:
+    """ホームの「過去30日の温度/湿度」。10分キャッシュの集計から作る。"""
+    return dashboard_page_service.render_home_climate_heatmap(
+        home_status_service.get_hourly_climate(),
+        home_status_service.get_now_jst(),
+        dashboard_path=f"{_BASE_PATH}/",
+        location=dashboard_page_service.parse_climate_location(hm_loc),
+        metric=dashboard_page_service.parse_climate_metric(hm_metric),
+        days=home_status_service.CLIMATE_DAYS,
+    )
+
+
 @router.get(_STATUS_PATH, include_in_schema=False)
-def dashboard_status_fragment() -> HTMLResponse:
+def dashboard_status_fragment(hm_loc: str | None = None, hm_metric: str | None = None) -> HTMLResponse:
     """ホームページの自動更新用(カードのブロックだけを返す)。"""
     cards, fetched_at = home_status_service.collect_status_cards()
     link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)
@@ -148,6 +165,7 @@ def dashboard_status_fragment() -> HTMLResponse:
             yoru_note_url=config.YORU_NOTE_URL,
             link_health=link_health,
             heatmap_html=_home_heatmap_html(),
+            climate_html=_home_climate_html(hm_loc, hm_metric),
         )
     )
 
@@ -162,11 +180,13 @@ def dashboard_watch(
     hour: str | None = None,
     src: str | None = None,
     hdev: str | None = None,
+    tl_all: str | None = None,
 ) -> HTMLResponse:
     """見守りページ。`?date=YYYY-MM-DD`でログ(防犯・センサー)をその日(JST)に絞る。
     `?device=<device_id>`でセンサーログをその機器だけに絞る(組み合わせ可)。
     `?hour=0〜23&src=security|takasago|itami[&hdev=<device_id>]`はヒートマップのマスをタップした先で、
     その日のその時間のログを「時間帯の詳細」として出す(`date`未指定なら今日)。
+    `?tl_all=1`はタイムラプス一覧の先頭10件の上限を外す(最近の写真の下。動画は`/assets/timelapse/`の静的配信を使う)。
     形式が不正な値は無視して通常表示にする(ブックマークの壊れたURLでも開けるように)。"""
     selected_date = dashboard_page_service.parse_log_date(date)
     if selected_date is not None:
@@ -187,6 +207,8 @@ def dashboard_watch(
             hour=dashboard_page_service.parse_log_hour(hour),
             hour_src=dashboard_page_service.parse_log_source(src),
             hour_device=hdev or None,
+            timelapses=timelapse_service.list_timelapses(),
+            show_all_timelapses=tl_all == "1",
         )
     )
 
