@@ -20,12 +20,12 @@ import re
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import config
 import pandas as pd
 
-from services import home_status_service, system_info_service
+from services import home_status_service, system_info_service, timelapse_service
 
 # === ページ共通のシェル ===
 
@@ -397,6 +397,30 @@ _PAGE_BASE_CSS = """
     button.primary { background: var(--accent); color: var(--on-accent); }
     .maintenance-result { font-size: 0.85rem; margin-top: 8px; white-space: pre-wrap; }
 
+    /* 見守りページのタイムラプス一覧。カードを開くとその場で再生できる(JS不要。動画は開くまで読み込まない)。 */
+    .tl-card {
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+        margin: 0 0 8px; box-shadow: var(--shadow); overflow: hidden;
+    }
+    .tl-card > summary { padding: 8px 12px 8px 8px; gap: 10px; min-height: 64px; list-style: none; color: var(--text); }
+    .tl-card > summary::-webkit-details-marker { display: none; }
+    .tl-card > summary::after { content: "▸"; margin-left: auto; color: var(--accent); font-size: 1.2rem; transition: transform 0.15s; }
+    .tl-card[open] > summary::after { transform: rotate(90deg); }
+    #timelapse-section { margin-bottom: 16px; }
+    .tl-thumb {
+        flex: none; width: 96px; height: 54px; object-fit: cover; border-radius: 8px; background: var(--surface-2);
+        border: 1px solid var(--border);
+    }
+    .tl-thumb-none { display: inline-flex; align-items: center; justify-content: center; font-size: 1.4rem; }
+    .tl-meta { display: flex; flex-direction: column; min-width: 0; }
+    .tl-title { font-weight: bold; font-size: 0.95rem; }
+    .tl-sub { font-size: 0.75rem; font-weight: normal; color: var(--muted); }
+    .tl-body { padding: 0 8px 10px; }
+    .tl-body video { width: 100%; max-height: 70vh; background: #000; border-radius: var(--radius-sm); display: block; }
+    .tl-body a.tl-save { display: inline-flex; align-items: center; min-height: 44px; font-size: 0.85rem; color: var(--accent); }
+    .tl-more { margin: 4px 0 12px; }
+    .tl-more a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; color: var(--accent); font-weight: bold; text-decoration: none; }
+
     /* 見守りページのログの日付フィルタ */
     .log-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 8px; }
     .log-filter input[type="date"], .log-filter select {
@@ -736,6 +760,75 @@ def _status_refresh_script(status_path: str, refresh_sec: int) -> str:
         "})();"
         "</script>"
     )
+
+
+# === 見守りページのタイムラプス一覧 ===
+
+_TIMELAPSE_VISIBLE = 10
+
+
+def _timelapse_label(item: timelapse_service.Timelapse) -> str:
+    """「10/16(金) 朝 07:30〜09:00」。時間帯の指定が無い動画は日付だけ。"""
+    label = f"{item.day.month}/{item.day.day}({_WEEKDAYS[item.day.weekday()]})"
+    if item.start and item.end:
+        part = "朝" if item.start < "1200" else "午後"
+        label += f" {part} {item.start[:2]}:{item.start[2:]}〜{item.end[:2]}:{item.end[2:]}"
+    return label
+
+
+def _render_timelapse_card(
+    item: timelapse_service.Timelapse, camera_names: dict[str, str], url_prefix: str
+) -> str:
+    base = f"{url_prefix.rstrip('/')}/{quote(item.filename)}"
+    video_url = html.escape(base)
+    thumb_url = html.escape(base[: -len(".mp4")] + ".jpg")
+    thumb = (
+        f'<img class="tl-thumb" src="{thumb_url}" alt="" loading="lazy" width="96" height="54">'
+        if item.has_thumbnail
+        else '<span class="tl-thumb tl-thumb-none" aria-hidden="true">🎞️</span>'
+    )
+    poster = f' poster="{thumb_url}"' if item.has_thumbnail else ""
+    camera = camera_names.get(item.camera, item.camera)
+    size_mb = item.size_bytes / (1024 * 1024)
+    return (
+        '<details class="tl-card"><summary>'
+        f"{thumb}"
+        f'<span class="tl-meta"><span class="tl-title">{html.escape(_timelapse_label(item))}</span>'
+        f'<span class="tl-sub">{html.escape(camera)} ・ {size_mb:.1f}MB</span></span>'
+        "</summary>"
+        '<div class="tl-body">'
+        f'<video controls playsinline preload="none"{poster} src="{video_url}"></video>'
+        f'<a class="tl-save" href="{video_url}" download>⬇️ 保存する</a>'
+        "</div></details>"
+    )
+
+
+def _render_timelapse_section(
+    items: list[timelapse_service.Timelapse],
+    *,
+    dashboard_path: str,
+    camera_names: dict[str, str],
+    show_all: bool = False,
+    url_prefix: str = timelapse_service.URL_PREFIX,
+) -> str:
+    """見守りページの「🎞️ タイムラプス」。新しい順で、先頭10件だけ出し、残りは`?tl_all=1`で出す。
+    カードをタップするとその場で再生する(動画は開くまで読み込まない)。動画の無いときは案内だけ。"""
+    heading = '<div id="timelapse-section"><h2>🎞️ タイムラプス</h2>'
+    if not items:
+        return heading + '<p class="empty-note">タイムラプスはまだありません(毎日、朝と午後の玄関の動きから自動で作られます)</p></div>'
+    shown = items if show_all else items[:_TIMELAPSE_VISIBLE]
+    cards = "".join(_render_timelapse_card(i, camera_names, url_prefix) for i in shown)
+    watch = f"{html.escape(dashboard_path.rstrip('/'))}/watch"
+    more = ""
+    if len(items) > _TIMELAPSE_VISIBLE:
+        if show_all:
+            more = f'<div class="tl-more"><a href="{watch}#timelapse-section">最新{_TIMELAPSE_VISIBLE}件だけにする</a></div>'
+        else:
+            more = (
+                f'<div class="tl-more"><a href="{watch}?tl_all=1#timelapse-section">'
+                f"さらに{len(items) - _TIMELAPSE_VISIBLE}件を表示</a></div>"
+            )
+    return f'{heading}<p class="meta">直近{config.RECORDING_RETENTION_DAYS}日分です。タップすると再生します。</p>{cards}{more}</div>'
 
 
 # === 見守りページ ===
@@ -1499,6 +1592,8 @@ def render_watch_page(
     hour: int | None = None,
     hour_src: str | None = None,
     hour_device: str | None = None,
+    timelapses: list[timelapse_service.Timelapse] | None = None,
+    show_all_timelapses: bool = False,
 ) -> str:
     """👀 見守り: カメラのライブ選択・スナップショット・防犯ログ・実家/自宅センサーログ。
 
@@ -1523,6 +1618,9 @@ def render_watch_page(
 
     **(UI改善)** 開閉センサーの「open」の直後(60秒以内)に「close」が来た組は、
     `merge_open_close_events`で「開 → 閉（N秒）」の1行にまとめる。
+
+    **(新機能)** `timelapses`(`timelapse_service.list_timelapses`の結果。新しい順)を渡すと、最近の写真の下に
+    「🎞️ タイムラプス」を出す(`show_all_timelapses`で先頭10件の上限を外す)。省略時は動画なしの案内になる。
 
     **(新機能)** `selected_device`(`device_id`)を指定すると、高砂・伊丹のセンサーログをその機器だけに絞る
     (防犯ログは対象外)。選択肢にない値は無視する。
@@ -1597,6 +1695,7 @@ def render_watch_page(
         "</div>"
         "<h2>🖼️ 最近の写真</h2>"
         f"{_render_snapshot_gallery(snapshot_url_prefix)}"
+        f"{_render_timelapse_section(timelapses or [], dashboard_path=dashboard_path, camera_names={c['id']: c['name'] for c in cameras}, show_all=show_all_timelapses)}"
         f"{_render_log_date_filter(dashboard_path, selected_date, device_options, selected_device)}"
         f"{hour_detail_html}"
         '<div id="security-log">'

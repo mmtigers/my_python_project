@@ -32,6 +32,7 @@ from services import (
     power_page_service,
     release_history_service,
     system_info_service,
+    timelapse_service,
 )
 
 router = APIRouter()
@@ -179,11 +180,13 @@ def dashboard_watch(
     hour: str | None = None,
     src: str | None = None,
     hdev: str | None = None,
+    tl_all: str | None = None,
 ) -> HTMLResponse:
     """見守りページ。`?date=YYYY-MM-DD`でログ(防犯・センサー)をその日(JST)に絞る。
     `?device=<device_id>`でセンサーログをその機器だけに絞る(組み合わせ可)。
     `?hour=0〜23&src=security|takasago|itami[&hdev=<device_id>]`はヒートマップのマスをタップした先で、
     その日のその時間のログを「時間帯の詳細」として出す(`date`未指定なら今日)。
+    `?tl_all=1`はタイムラプス一覧の先頭10件の上限を外す(最近の写真の下。動画は`/assets/timelapse/`の静的配信を使う)。
     形式が不正な値は無視して通常表示にする(ブックマークの壊れたURLでも開けるように)。"""
     selected_date = dashboard_page_service.parse_log_date(date)
     if selected_date is not None:
@@ -204,6 +207,8 @@ def dashboard_watch(
             hour=dashboard_page_service.parse_log_hour(hour),
             hour_src=dashboard_page_service.parse_log_source(src),
             hour_device=hdev or None,
+            timelapses=timelapse_service.list_timelapses(),
+            show_all_timelapses=tl_all == "1",
         )
     )
 

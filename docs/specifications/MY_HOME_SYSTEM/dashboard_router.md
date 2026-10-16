@@ -189,12 +189,14 @@
 
 ### `GET {DASHBOARD_BASE_PATH}/watch` (`dashboard_watch`)
 
+* **(新機能)** クエリパラメータ`tl_all`(`1`のときタイムラプス一覧の先頭10件の上限を外す)を追加し、`timelapse_service.list_timelapses()`の結果を`render_watch_page`へ渡す。
+
 * **役割**: 👀見守りページを返す。`home_status_service.get_cached_materials()`で材料(`df_sensor`)を取得し、`dashboard_page_service.render_watch_page`に渡す。**(不具合修正)** 以前は`materials.df_security_log`(常に空の`security_logs`テーブル由来)も渡していたが、この材料自体が`get_cached_materials()`から削除されたため、渡すのは`df_sensor`のみになった(防犯ログは`render_watch_page`内部で`df_sensor`から`home_status_service.camera_motion_log`により抽出される)。 **(新機能)** 日付未指定のときは、共通キャッシュ(直近N件)の`df_sensor`を表・防犯ログに使い、活動ヒートマップ用に`home_status_service.get_sensor_data_today()`(今日の全件。TTLキャッシュ)を`df_heatmap`として`render_watch_page`へ渡す(直近N件では今日の早い時間帯が欠けうるため)。日付指定時は指定日の全件が既に`df_sensor`なので`df_heatmap`は渡さない。 **(新機能)** クエリ`hour`・`src`・`hdev`を追加(ヒートマップのマスをタップした先)。`parse_log_hour`/`parse_log_source`で検証し、不正値は無視する。`hour`と`src`が有効なとき、その日(`date`未指定なら今日)のその時間のログを「時間帯の詳細」として出す。`hdev`はその機器だけに絞る(`device`フィルタとは独立)。
 * 根拠: [ルート定義] (行番号: 129〜139 / 抜粋: '@router.get(f"{_BASE_PATH}/watch", include_in_schema=False)\ndef dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLResponse:')
 
 
 * **引数/リクエスト**: **(新機能)** クエリ`device`(`device_id`、任意)で高砂・伊丹のセンサーログをその機器だけに絞る(`render_watch_page(selected_device=...)`に渡す。一覧に無い値は無視される。防犯ログは対象外)。クエリ`date`(`YYYY-MM-DD`、任意)。**(新機能)** 指定があれば`dashboard_page_service.parse_log_date`で解釈し、その日のログだけを表示する。この場合は共通キャッシュ(直近`MOBILE_SENSOR_ROW_LIMIT`件)ではなく`home_status_service.get_sensor_data_for_day`でDBから指定日の全件を取る。形式が不正な値は無視して通常表示になる。
-* 根拠: [関数定義] (行番号: 176 / 抜粋: "def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLResponse:")、[日付の解釈] (行番号: 188 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
+* 根拠: [関数定義] (行番号: 177 / 抜粋: "def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLResponse:")、[日付の解釈] (行番号: 191 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(見守りページ全体のHTML)
@@ -237,13 +239,13 @@
 
 * **役割**: **(新機能)** ⚡電気ページ。`power_analysis_service.build_power_report(days)`の結果を`power_page_service.render_power_page`で描く(月ごとの推移・日別の電気代・気温との関係・テレビの使い方)。分析は10分キャッシュされる。`async def`にしない(DB取得とpandasの計算が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`days`(30/60/90。それ以外の値・数値でない値は既定の30。`str | None`で受けて自前で変換するので422にならない)。日別・気温・テレビの対象期間を切り替える。
-* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 250)
+* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 255)
 
 ### `GET {DASHBOARD_BASE_PATH}/updates` (`dashboard_updates`)
 
 * **役割**: **(新機能)** アップデートページを返す。`release_history_service.get_release_history()`でダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を集め、`dashboard_page_service.render_updates_page`に渡す。あさノート・よるノートは外部から取得する(タイムアウト・キャッシュ付き。失敗しても残りのアプリは表示する)。`async def`にしない(外部取得が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`app`(`dashboard`/`quest`/`asa`/`yoru`、任意)で1アプリに絞る。未知の値は無視して全件。
-* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 265)
+* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 270)
 
 ### `GET {DASHBOARD_BASE_PATH}/sys` (`dashboard_sys`)
 
