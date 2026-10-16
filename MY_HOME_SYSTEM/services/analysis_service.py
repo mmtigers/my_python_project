@@ -167,6 +167,31 @@ def load_data_from_db(query: str, date_column: str = "timestamp", params: tuple 
 # Data Fetching Methods (Core Logic)
 # ==========================================
 
+def load_activity_events(start: date) -> pd.DataFrame:
+    """ホームの「動き」ヒートマップ(過去30日)用に、`start`以降の開閉・動体の記録だけを返す。
+
+    `load_sensor_data`は温湿度・電力の5分おきの記録まで結合するため30日分では重い。
+    動きの集計(`sensor_state_change_log`・`camera_motion_log`)が見るのは`device_records`の
+    `contact_state`/`movement_state`を持つ行だけなので、SQL側でそれらに絞る。
+    timestampにはオフセット付きの行も混在しうるため、SQLは前日から粗く絞り(`load_sensor_data`の
+    `day`指定と同じ余裕)、JSTの日付はこの戻り値(JST変換済み)を見る側が判定する。
+    戻り値は`load_sensor_data`と同じ列(`friendly_name`/`location`付き)。失敗時は空のDataFrame。
+    """
+    query = """
+        SELECT timestamp, device_id, device_name, device_type,
+               contact_state, movement_state, brightness_state
+        FROM device_records
+        WHERE timestamp >= ?
+          AND ((contact_state IS NOT NULL AND contact_state != '')
+               OR (movement_state IS NOT NULL AND movement_state != ''))
+        ORDER BY timestamp DESC
+    """
+    df = load_data_from_db(query, params=((start - timedelta(days=1)).isoformat(),))
+    if df.empty:
+        return df
+    return apply_friendly_names(df)
+
+
 def load_hourly_climate(start: date) -> pd.DataFrame:
     """温湿度の「日付×時間(JST)×機器」ごとの平均を返す(ホームの温湿度ヒートマップ用)。
 

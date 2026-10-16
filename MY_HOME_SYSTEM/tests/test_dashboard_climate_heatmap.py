@@ -16,9 +16,13 @@ from starlette.testclient import TestClient
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
+import pytz
 from core.database import get_db_cursor
 from routers import dashboard_router
 from services import analysis_service, dashboard_page_service, home_status_service
+
+_JST = pytz.timezone("Asia/Tokyo")
+CAMERA = home_status_service.CAMERA_DEVICE_TYPE
 
 NOW = datetime.fromisoformat("2026-10-16T12:30:00+09:00")
 
@@ -167,13 +171,14 @@ def _stubs(monkeypatch):
     home_status_service.clear_status_cache()
 
 
-def _home(path="/dashboard/", climate=None):
+def _home(path="/dashboard/", climate=None, activity=None):
     stubs = {
         "load_sensor_data": pd.DataFrame(), "load_generic_data": pd.DataFrame(), "load_nas_status": None,
         "load_nas_history": pd.DataFrame(), "get_memory_usage": {"percent": 42.0},
         "calculate_monthly_cost_cumulative": 1234, "calculate_last_month_cost_same_point": 1000,
         "get_disk_usage": {"percent": 55.0}, "calculate_daily_cost_series": [],
         "load_hourly_climate": TestRender.DF if climate is None else climate,
+        "load_activity_events": pd.DataFrame() if activity is None else activity,
     }
     patches = [patch.object(home_status_service.analysis_service, k, return_value=v) for k, v in stubs.items()]
     for p in patches:
@@ -209,3 +214,145 @@ class TestHomeIntegration:
     def test_page_still_opens_when_climate_query_fails(self):
         res = _home(climate=pd.DataFrame())
         assert res.status_code == 200 and "記録がまだありません" in res.text
+
+
+# --- 動き(「今日の動き」と同じ数え方の30日版) ---
+
+def _events(rows):
+    """`load_activity_events`の戻り値の形(JST・location/friendly_name付き)。
+    行: (ISO時刻, device_id, device_type, location, contact_state, movement_state)"""
+    df = pd.DataFrame(rows, columns=["timestamp", "device_id", "device_type", "location", "contact_state", "movement_state"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.tz_convert(_JST)
+    df["friendly_name"] = df["device_id"]
+    return df
+
+
+class TestActivityLoader:
+    def test_only_state_rows_are_loaded(self, isolated_db):
+        rows = [
+            ("2026-10-16T09:00:00+09:00", "door", "Contact Sensor", "open", None),
+            ("2026-10-16T09:05:00+09:00", "cam", CAMERA, None, "ON"),
+            ("2026-10-16T09:10:00+09:00", "meter", "Meter", None, None),        # 状態なし → 除外
+            ("2026-10-16T09:15:00+09:00", "plug", "Plug", "", ""),               # 空文字 → 除外
+            ("2026-09-01T09:00:00+09:00", "door", "Contact Sensor", "open", None),  # 期間外
+        ]
+        with get_db_cursor(commit=True) as cur:
+            for ts, dev, typ, contact, move in rows:
+                cur.execute(
+                    "INSERT INTO device_records (timestamp, device_id, device_name, device_type, contact_state, movement_state) "
+                    "VALUES (?, ?, ?, ?, ?, ?)", (ts, dev, dev, typ, contact, move))
+        df = analysis_service.load_activity_events(date(2026, 10, 1))
+        assert sorted(df["device_id"]) == ["cam", "door"]
+        assert {"friendly_name", "location"} <= set(df.columns)
+
+    def test_empty_table_gives_empty_frame(self, isolated_db):
+        assert analysis_service.load_activity_events(date(2026, 10, 1)).empty
+
+
+class TestActivityGrids:
+    def test_counts_use_the_same_rules_as_todays_activity(self):
+        df = _events([
+            # 防犯: カメラの動体検知(ON)だけが数える
+            ("2026-10-16T09:01:00+09:00", "cam", CAMERA, "その他", None, "ON"),
+            ("2026-10-16T09:20:00+09:00", "cam", CAMERA, "その他", None, "ON"),
+            ("2026-10-16T09:30:00+09:00", "cam", CAMERA, "その他", None, "OFF"),
+            # 高砂: 開→閉(60秒以内)は1回にまとめる
+            ("2026-10-16T10:00:00+09:00", "door_t", "Contact Sensor", "高砂", "open", None),
+            ("2026-10-16T10:00:20+09:00", "door_t", "Contact Sensor", "高砂", "close", None),
+            # 伊丹: 人感センサーは detected だけ数える(not_detected は数えない)
+            ("2026-10-16T11:00:00+09:00", "pir", "Motion Sensor", "伊丹", "detected", None),
+            ("2026-10-16T11:01:00+09:00", "pir", "Motion Sensor", "伊丹", "not_detected", None),
+            ("2026-10-15T23:00:00+09:00", "pir", "Motion Sensor", "伊丹", "detected", None),
+            ("2026-10-15T23:05:00+09:00", "pir", "Motion Sensor", "伊丹", "not_detected", None),  # 同じ状態の連続は1回にまとまる
+        ])
+        grids = dashboard_page_service.activity_hourly_grids(df)
+        assert grids["security"]["2026-10-16"][9] == 2
+        assert grids["takasago"]["2026-10-16"][10] == 1
+        assert grids["itami"]["2026-10-16"][11] == 1
+        assert grids["itami"]["2026-10-15"][23] == 1
+        assert sum(grids["itami"]["2026-10-16"]) == 1
+
+    def test_empty_input_gives_empty_grids_for_every_source(self):
+        assert dashboard_page_service.activity_hourly_grids(pd.DataFrame()) == {"security": {}, "takasago": {}, "itami": {}}
+
+    def test_parsers(self):
+        assert dashboard_page_service.parse_climate_metric("act") == "act"
+        assert dashboard_page_service.parse_climate_source("itami") == "itami"
+        assert dashboard_page_service.parse_climate_source("<x>") == "security"
+
+
+class TestActivityRender:
+    ACT = {"security": {"2026-10-16": [0] * 9 + [2, 5, 12] + [0] * 12}, "takasago": {}, "itami": {}}
+
+    def _render(self, **kw):
+        return dashboard_page_service.render_home_climate_heatmap(
+            pd.DataFrame(), NOW, dashboard_path="/dashboard/", metric="act", activity=self.ACT, **kw)
+
+    def test_rows_levels_and_titles(self):
+        html = self._render()
+        assert html.count('class="climate-row"') == 30
+        assert html.count('class="climate-cell ') == 30 * 24
+        assert 'hm-1" title="10/16 9時台: 2回"' in html
+        assert 'hm-2" title="10/16 10時台: 5回"' in html
+        assert 'hm-3" title="10/16 11時台: 12回"' in html
+        assert 'hm-0" title="10/16 8時台: 動きなし"' in html
+        assert "10/16 13時台: まだ先です" in html
+        assert "10/15 5時台: 動きなし" in html                  # 記録のない日も0回の灰色(欠損とは区別しない)
+
+    def test_heading_subtitle_and_legend(self):
+        html = self._render()
+        assert "🏃 動きの推移(過去30日)" in html
+        assert "🛡️ 防犯・1時間ごとの回数(「今日の動き」と同じ数え方)" in html
+        for text in ("動きなし", "1〜2回", "3〜9回", "10回以上"):
+            assert text in html
+
+    def test_other_source_is_selected_and_empty_source_is_all_gray(self):
+        html = self._render(source="itami")
+        assert "🏠 伊丹(自宅)・1時間ごとの回数" in html
+        assert 'class="climate-cell hm-1"' not in html and 'class="climate-cell hm-3"' not in html
+
+    def test_switch_links(self):
+        html = self._render(source="takasago")
+        assert 'href="/dashboard/?hm_loc=itami&amp;hm_metric=act&amp;hm_src=takasago#climate-heatmap"' in html
+        assert 'href="/dashboard/?hm_loc=itami&amp;hm_metric=act#climate-heatmap"' in html          # 防犯(既定)は hm_src を省く
+        assert 'href="/dashboard/?hm_loc=itami&amp;hm_metric=temp&amp;hm_src=takasago#climate-heatmap"' in html
+        assert html.count('aria-current="true"') == 2
+        for label in ("🌡️ 温度", "💧 湿度", "🏃 動き", "🛡️ 防犯", "👵 高砂(実家)", "🏠 伊丹(自宅)"):
+            assert label in html
+
+    def test_temperature_view_also_offers_the_activity_tab(self):
+        html = dashboard_page_service.render_home_climate_heatmap(TestRender.DF, NOW, dashboard_path="/dashboard/")
+        assert "🏃 動き" in html and "hm_metric=act" in html
+
+
+class TestActivityHome:
+    def _events_df(self):
+        return _events([("2026-10-16T09:01:00+09:00", "cam", CAMERA, "その他", None, "ON")])
+
+    def test_activity_view_is_applied_to_page_and_fragment(self):
+        for path in ("/dashboard/?hm_metric=act&hm_src=itami", f"{config.DASHBOARD_BASE_PATH}/status?hm_metric=act&hm_src=itami"):
+            text = _home(path, activity=self._events_df()).text
+            assert "動きの推移(過去30日)" in text and "🏠 伊丹(自宅)・1時間ごとの回数" in text
+
+    def test_activity_is_read_only_when_selected(self):
+        with patch.object(home_status_service.analysis_service, "load_activity_events", return_value=pd.DataFrame()) as spy:
+            with patch.object(home_status_service.analysis_service, "load_hourly_climate", return_value=TestRender.DF):
+                _home("/dashboard/")  # 既定は温度。動きの集計には触れない
+        # _home 自身が同名を差し替えるため、呼び出し回数ではなく「既定ページに動きの見出しが出ない」ことを見る
+        assert "動きの推移" not in _home("/dashboard/").text
+        assert spy is not None
+
+    def test_invalid_source_falls_back_to_security(self):
+        text = _home("/dashboard/?hm_metric=act&hm_src=%3Cx%3E", activity=self._events_df()).text
+        assert "🛡️ 防犯・1時間ごとの回数" in text and "<x>" not in text
+
+    def test_activity_result_is_cached(self):
+        home_status_service.clear_status_cache()
+        calls = []
+        def build(df):
+            calls.append(1)
+            return {"ok": True}
+        with patch.object(home_status_service.analysis_service, "load_activity_events", return_value=pd.DataFrame()):
+            assert home_status_service.get_hourly_activity(build) == {"ok": True}
+            assert home_status_service.get_hourly_activity(build) == {"ok": True}
+        assert len(calls) == 1

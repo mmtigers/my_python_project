@@ -913,6 +913,22 @@ def get_hourly_climate() -> pd.DataFrame:
     return df if df is not None else pd.DataFrame()
 
 
+def get_hourly_activity(build: Callable[[pd.DataFrame], dict]) -> dict:
+    """過去`CLIMATE_DAYS`日の動きを、`build`(開閉・動体の記録のDataFrame → 集計済みの辞書)で集計して返す(10分キャッシュ)。
+
+    DataFrameは保持せず集計結果の軽い辞書だけをキャッシュする。集計の中身(今日の動きと同じ数え方)は
+    `dashboard_page_service`にあり、そちらを import すると循環するため、呼び出し側から`build`を渡す。
+    取得・集計に失敗したときは空の辞書。
+    """
+    start = get_now_jst().date() - timedelta(days=CLIMATE_DAYS - 1)
+    value = _cached(
+        f"activity:{start.isoformat()}",
+        lambda: build(analysis_service.load_activity_events(start)),
+        ttl=CLIMATE_CACHE_TTL_SEC,
+    )
+    return value if isinstance(value, dict) else {}
+
+
 def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:
     """材料を集めてカードを組み立て、(カード, 取得時刻)を返す。ホームページ用。"""
     now = now or get_now_jst()
