@@ -344,6 +344,8 @@
 
 ### `_cached` / `clear_status_cache`
 
+* **(新機能)** `get_hourly_activity(build)`: 過去`CLIMATE_DAYS`日の動きを、`analysis_service.load_activity_events`の結果を`build`(呼び出し側の`dashboard_page_service.activity_hourly_grids`。循環importを避けるため引数で受け取る)で集計した軽い辞書として10分キャッシュして返す。DataFrameは保持しない。
+
 * **(新機能)** `_cached`に任意の`ttl`(秒。省略時は`STATUS_CACHE_TTL_SEC`)を追加した。温湿度ヒートマップの集計(`get_hourly_climate`。`CLIMATE_CACHE_TTL_SEC`=600秒、対象は`CLIMATE_DAYS`=30日)が、ホームの自動更新(60秒)より長く保持するために使う。
 
 * **役割**: `unified_server`には`st.cache_data`が無いため、同じTTL（60秒）の小さなメモを自前で持つ。`_cached(key, loader)`はTTL内なら前回値を返し、`loader`が例外を送出した場合は例外を伝播させず`None`を返す。**失敗はキャッシュしない**。`clear_status_cache()`はTTLを待たずに捨てる。
@@ -450,7 +452,7 @@
 ### `collect_status_cards`
 
 * **役割**: `get_cached_materials`で材料を集め、`build_status_cards`に渡して`(カード一覧, 取得時刻)`を返す。ホームページ用。
-* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 916〜930)
+* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 932〜946)
 
 
 * **引数/リクエスト**: `now` (`datetime | None`。省略時は `core.utils.get_now_jst()`)
