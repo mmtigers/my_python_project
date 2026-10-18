@@ -116,7 +116,7 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 44-87 / 抜粋: "def filter(self, record: logging.LogRecord) -> bool:")
+* 根拠: 該当関数内処理 (行番号: 117-133 / 抜粋: "def filter(self, record: logging.LogRecord) -> bool:")
 
 
 * **エラーハンドリング**: 関数内部での例外発生時は全てキャッチし無視(`pass`)することで、ロギング処理全体の停止を防ぎ、デフォルトとして`True`を返す安全策を持つ。
