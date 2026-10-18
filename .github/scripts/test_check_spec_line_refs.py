@@ -317,6 +317,27 @@ def test_verifies_typescript_citation(fake_repo_other_languages):
     assert findings[0].actual == 3
 
 
+def test_typescript_spec_is_not_matched_to_same_named_python_source(fake_repo_other_languages):
+    """family-quest の仕様書は、ベース名が同じ Python ソースではなく TS ソースと照合すること(Issue #950)。
+
+    `family-quest/src/lib/utils.md` が `core/utils.py` に対応づいていた時期、TS の引用は
+    Python のソースと突き合わされ、ずれていても検知されなかった。
+    """
+    repo = fake_repo_other_languages
+    (repo / "MY_HOME_SYSTEM" / "sample.py").write_text("X = 1\n", encoding="utf-8")
+    spec = repo / "docs" / "specifications" / "family-quest" / "src" / "lib" / "sample.md"
+    spec.write_text(
+        '* 根拠: 上限 (行番号: 99 / 抜粋: "export const RETRY_LIMIT = 3;")\n',
+        encoding="utf-8",
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert findings[0].actual == 3
+    # 非ゲート側の集計にも、ゲート済みの引用を二重に数えない
+    _, _, ungated = checker.report_non_definition_citations()
+    assert ungated == 0
+
+
 def test_fix_rewrites_typescript_citation(fake_repo_other_languages):
     path = (
         fake_repo_other_languages

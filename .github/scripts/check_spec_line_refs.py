@@ -518,6 +518,11 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
         if spec.name == "README.md":
             continue
         candidates = index.get(spec.stem)
+        if spec.relative_to(SPEC_ROOT).parts[0] in FQ_SPEC_ROOT_PARTS:
+            # family-quest の仕様書は TypeScript のソースに対応する。ベース名が同じ Python
+            # (`family-quest/src/lib/utils.md` と `core/utils.py` など)を候補にすると、TS の引用を
+            # Python のソースと突き合わせてしまい、検証が無言で素通りする(Issue #950)。
+            candidates = None
         if not candidates or len(candidates) != 1:
             if skipped is not None and _spec_expects_python_source(spec):
                 # Issue #722: 規約どおり廃止noticeを付けて処理済みの仕様書は、
@@ -778,7 +783,12 @@ def _iter_ungated_citations():
         src_lines = source.read_text(encoding="utf-8").splitlines()
         # scan() が実際に走査する仕様書(対応する .py が一意に決まるもの)だけ、
         # 一意な抜粋がゲート済みとして除外できる。
-        gated = source.suffix == ".py" or len(scanned.get(spec.stem) or []) != 1
+        # scan() は family-quest の仕様書を常に TS ソースと照合する(同名の .py があっても)。ここも同じ条件にする。
+        gated = (
+            source.suffix == ".py"
+            or spec.relative_to(SPEC_ROOT).parts[0] in FQ_SPEC_ROOT_PARTS
+            or len(scanned.get(spec.stem) or []) != 1
+        )
         name = str(spec.relative_to(SPEC_ROOT))
         for line in spec.read_text(encoding="utf-8").splitlines():
             blocks = list(_BLOCK_RE.finditer(line))
