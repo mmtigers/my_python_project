@@ -26,7 +26,6 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `dataclasses` | 標準 | `Selectors`/`ArticleSummary`/`ArticleContent`のデータクラス定義 | 根拠: [インポート宣言] (行番号: 19 / 抜粋: "import dataclasses") |
-| `typing.List, typing.Optional` | 標準 | 型ヒント | 根拠: [インポート宣言] (行番号: 20 / 抜粋: "from typing import List, Optional") |
 | `urllib.parse.urljoin` | 標準 | 相対パスの画像URLを記事URL基準で絶対URL化 | 根拠: [インポート宣言] (行番号: 20 / 抜粋: "from urllib.parse import urljoin") |
 | `config` | 外部 | `MFUJIN_BLOG_*`設定値の取得 | 根拠: [インポート宣言] (行番号: 22 / 抜粋: "import config") |
 | `requests` | 外部 | HTTPセッション・GET/HEADリクエスト | 根拠: [インポート宣言] (行番号: 23 / 抜粋: "import requests") |
@@ -250,7 +249,7 @@
 
 
 * **エラーハンドリング**: `SELECTORS.body_container`に一致する要素が無い場合は`MfujinBlogError`を送出する。タイトル/投稿日時/カテゴリの各要素が無い場合はそれぞれ空文字列/`None`/`None`にフォールバックし、例外は送出しない(画像0枚の異常判定は呼び出し元に委ねる設計であることがdocstringに明記されている)。
-* 根拠: (行番号: 161〜166 / 抜粋: 'if body is None:\n        raise MfujinBlogError(...)')、(行番号: 152〜153, 155〜156, 158〜159)、(行番号: 148〜150 / 抜粋: "画像が0枚になること自体はここではエラーにしない...")
+* 根拠: (行番号: 161〜166 / 抜粋: 'if body is None:\n        raise MfujinBlogError(...)')、(行番号: 152〜153, 155〜156, 158〜159)、(参照: parse_article_content / 抜粋: "画像が0枚になること自体はここではエラーにしない...")
 
 
 

@@ -49,8 +49,8 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config`モジュール | 設定値の実体や環境変数とのマッピング仕様がファイル内に記述されていないため。 | `getattr(config, 'TIMELAPSE_FPS_ANALYZE', 1)` などの呼び出し (行番号: 41 / 抜粋: "getattr(config, 'TIMELAPSE_...") |
-| `core.logger.setup_logging` | 出力先、ログローテーション、フォーマットなどのロギング仕様が不明なため。 | `logger = setup_logging(__name__)` (行番号: 36 / 抜粋: "logger = setup_logging(**name**)") |
+| `config`モジュール | 設定値の実体や環境変数とのマッピング仕様がファイル内に記述されていないため。 | `getattr(config, 'TIMELAPSE_FPS_ANALYZE', 1)` などの呼び出し (行番号: 48 / 抜粋: "getattr(config, 'TIMELAPSE_...") |
+| `core.logger.setup_logging` | 出力先、ログローテーション、フォーマットなどのロギング仕様が不明なため。 | `logger = setup_logging(__name__)` (行番号: 43 / 抜粋: "logger = setup_logging(**name**)") |
 | `services.notification_service.send_push` | 実際の送信先プラットフォームの実装内容が不明なため。引数のマッピング(`target`/`channel`)自体は`notification_service.md`から判明しており、本ファイル側は`target="discord"`/`channel="report"`をキーワード引数で渡すよう修正済み(Issue #167)。動画生成が`False`を返した場合(例外なし)のエラー通知も追加済み(Issue #233)。Issue #289でsend_pushのシグネチャが再設計され、`target="discord"`のみの呼び出しに不要だった`user_id`(元は`getattr(config, "LINE_USER_ID", "")`)引数は撤去された。**（2026-09 チャンネル再設計）** 動画生成失敗・予期せぬ例外の2通知は以前`channel="error"`だったが、即時対応チャンネルではなく運用者向けチャンネルへ送るよう`channel="report"`に変更され、直前の`logger.error(...)`に`extra={"skip_discord": True}`を付けて catch-all 経由の二重通知を避けている。「動きなし」通知は変更なし(元々`report`)。 | `send_push([...], target="discord", channel="report")` (行番号: 722〜726, 752〜756, 760〜764 / 抜粋: "send_push(\n                [{"type": "text"...") |
 | `ffmpeg`, `ffprobe` (外部コマンド) | システム上にインストールされた実行バイナリに依存しており、バージョンごとの挙動差異が保証されないため。 | `subprocess.run(["ffmpeg"...])` (行番号: 125 / 抜粋: "subprocess.run(["ffmpeg", "-ve...") |
 
@@ -209,7 +209,7 @@
 * **役割**: `ffprobe`コマンドを用いて入力動画のメタデータ情報をJSON形式で取得する。
 
 
-* 根拠: 関数定義およびコマンド実行部 (行番号: 140 / 抜粋: "cmd = ['ffprobe', '-v', 'quiet...")
+* 根拠: 関数定義およびコマンド実行部 (行番号: 159 / 抜粋: "cmd = ['ffprobe', '-v', 'quiet...")
 
 
 
@@ -233,7 +233,7 @@
 * **副作用**: 外部プロセス（`ffprobe`）の実行。
 
 
-* 根拠: `subprocess.run(cmd...)` (行番号: 143 / 抜粋: "res = subprocess.run(cmd, captu...")
+* 根拠: `subprocess.run(cmd...)` (行番号: 162 / 抜粋: "res = subprocess.run(cmd, captu...")
 
 
 
@@ -241,7 +241,7 @@
 * **エラーハンドリング**: `TimeoutExpired`および一般的な`Exception`をキャッチし、規定回数リトライする。失敗時は空の辞書を返す。
 
 
-* 根拠: `except subprocess.TimeoutExpired as e:` (行番号: 151 / 抜粋: "except subprocess.TimeoutExpire...")
+* 根拠: `except subprocess.TimeoutExpired as e:` (参照: get_video_info / 抜粋: "except subprocess.TimeoutExpire...")
 
 
 
@@ -252,7 +252,7 @@
 * **役割**: 動画のメタデータ（`creation_time`）またはファイル名から動画の開始日時（`datetime`）を抽出する。
 
 
-* 根拠: 日付パース処理 (行番号: 167 / 抜粋: "dt = datetime.datetime.fromiso...")
+* 根拠: 日付パース処理 (行番号: 186 / 抜粋: "dt = datetime.datetime.fromiso...")
 
 
 
@@ -276,7 +276,7 @@
 * **副作用**: なし。
 
 
-* 根拠: 処理内容が変数と文字列の解析のみであるため (行番号: 188-189 / 抜粋: "return datetime.datetime.combi...")
+* 根拠: 処理内容が変数と文字列の解析のみであるため (参照: get_video_start_dt / 抜粋: "return datetime.datetime.combi...")
 
 
 
@@ -312,7 +312,7 @@
 ### `escape_drawtext`
 
 * **役割**: FFmpegの`drawtext`フィルタに渡すテキスト中の特殊文字（バックスラッシュ、シングルクォート、コロン）をエスケープする。
-* 根拠: 関数定義 (行番号: 195 / 抜粋: "return text.replace('\\\\', '\\\\\\\\').replace(...)")
+* 根拠: 関数定義 (行番号: 214 / 抜粋: "return text.replace('\\\\', '\\\\\\\\').replace(...)")
 
 
 * **引数/リクエスト**: `text: str`
@@ -331,7 +331,7 @@
 ### `check_roi`
 
 * **役割**: 設定されたROI（関心領域: `ROI_X`, `ROI_Y`, `ROI_W`, `ROI_H`）が、映像の幅・高さ内に収まっている妥当な値かを検証する。`MotionDetector.__init__`から呼び出される。
-* 根拠: 関数定義 (行番号: 198-199 / 抜粋: "if ROI_W <= 0 or ROI_H <= 0: raise ValueError(...)")
+* 根拠: 関数定義 (参照: check_roi / 抜粋: "if ROI_W <= 0 or ROI_H <= 0:\n        raise ValueError(")
 
 
 * **引数/リクエスト**: `w: int`, `h: int`
@@ -385,7 +385,7 @@
 * **エラーハンドリング**: クリーンアップ時の例外をキャッチし、警告ログを出力する。
 
 
-* 根拠: `except Exception as e:` (行番号: 222-223 / 抜粋: "logger.warning(f"作業ディレクトリのクリ...")
+* 根拠: `except Exception as e:` (参照: setup_directories / 抜粋: "logger.warning(f"作業ディレクトリのクリ...")
 
 
 
@@ -413,7 +413,7 @@
 ### `log_cpu_usage`
 
 * **役割**: `psutil`がインストールされている場合のみ、現在のCPU使用率をINFOレベルでログ出力する。
-* 根拠: 関数定義 (行番号: 269-271 / 抜粋: "if psutil is not None: logger.info(f"現在のCPU使用率: {psutil.cpu_percent()}%")")
+* 根拠: 関数定義 (参照: log_cpu_usage / 抜粋: "if psutil is not None:\n        logger.info(f\"現在のCPU使用率: {psutil.cpu_percent()}%\")")
 
 
 * **引数/リクエスト**: なし。
@@ -435,7 +435,7 @@
 * **役割**: 動画から指定したROI（関心領域）内の動きを検知し、モーション記録のリストを生成する。
 
 
-* 根拠: 背景差分と輪郭抽出処理 (行番号: 279 / 抜粋: "fgmask = self.fgbg.apply(roi_f...")
+* 根拠: 背景差分と輪郭抽出処理 (行番号: 364 / 抜粋: "fgmask = self.fgbg.apply(roi_f...")
 
 * **（Issue #782 で追加）** `detect` が起動する `ffmpeg` に `-threads FFMPEG_THREADS`(既定2、`config.TIMELAPSE_FFMPEG_THREADS` で上書き可)を付けてデコードのスレッド数を制限する。`-vf fps=1` で解析するのは毎秒1フレームだが**入力は全フレームがデコードされる**ため負荷が高く、上限が無いと Pi 5 の4コアをほぼ使い切って(実測: 1プロセスで約245% CPU、load average 4.66)CPU温度がソフト温度上限(80°C)に達しスロットリングしていた。`nice -n 15` と `ionice` は既に付いているが、これらは優先度を下げるだけで他に走るものが無ければ全コアを使うため発熱は止まらない。日次のバッチで即時性の要求が無いため、実行時間が延びることを許容して上限を設けている。同じ上限は `Summarizer` の `libx264` 再エンコードにも適用する。
 * 根拠: [変数宣言] (行番号: 62 / 抜粋: "FFMPEG_THREADS = getattr(config, 'TIMELAPSE_FFMPEG_THREADS', 2)")、[解析コマンド] (行番号: 303 / 抜粋: "'-threads', str(FFMPEG_THREADS),")
@@ -483,7 +483,7 @@
 * **役割**: 検出されたモーション記録間の時間差を評価し、しきい値（`GAP_THRESH`）以内のものを一つのイベントに結合する。また、イベントごとにスコアやメタデータを付与してCSVへ出力する。
 
 
-* 根拠: イベント結合ロジック (行番号: 342 / 抜粋: "if record.time_sec - last_reco...")
+* 根拠: イベント結合ロジック (行番号: 429 / 抜粋: "if record.time_sec - last_reco...")
 
 
 
@@ -507,7 +507,7 @@
 * **副作用**: 作業ディレクトリに`events.csv`および`events_enriched.csv`を生成する。
 
 
-* 根拠: `csv.writer`処理 (行番号: 376-389 / 抜粋: "with open(events_csv, "w", new...")
+* 根拠: `csv.writer`処理 (参照: EventBuilder / 抜粋: "with open(events_csv, "w", new...")
 
 
 
@@ -515,7 +515,7 @@
 * **エラーハンドリング**: モーション記録が空の場合は空のリストを即時返却する。
 
 
-* 根拠: `if not motion_records:` (行番号: 334-335 / 抜粋: "if not motion_records: return")
+* 根拠: `if not motion_records:` (参照: EventBuilder.build / 抜粋: "if not motion_records:\n            return []")
 
 
 
@@ -526,7 +526,7 @@
 * **役割**: 生成されたイベントリストに基づき、入力動画から該当する時間帯を切り出し（クリップ化）、それらを一つに結合してタイムラプス動画とサムネイル画像を生成する。
 
 
-* 根拠: 切り出し・結合処理の実行部 (行番号: 424 / 抜粋: "if not self._build_concat(clip...")
+* 根拠: 切り出し・結合処理の実行部 (行番号: 511 / 抜粋: "if not self._build_concat(clip...")
 
 
 
@@ -558,7 +558,7 @@
 * **エラーハンドリング**: FFmpegプロセス実行時のタイムアウト、プロセスのエラーコードをキャッチし、処理をスキップまたは失敗として扱う。
 
 
-* 根拠: `except subprocess.TimeoutExpired:` (行番号: 442-447 / 抜粋: "except subprocess.CalledProces...")
+* 根拠: `except subprocess.TimeoutExpired:` (参照: VideoBuilder / 抜粋: "except subprocess.CalledProces...")
 
 
 
@@ -569,7 +569,7 @@
 * **役割**: 生成された動画ファイルのサイズを判定し、制限（`MAX_FILE_SIZE_BYTES`）を超える場合はFFmpegを用いて動画を分割した後、Discord Webhookに対して動画ファイルと完了通知を送信する。送信そのものは`core.discord.post_webhook`へ委譲する(Issue #661)。分割ファイル(`*_part_*.mp4`)は送信専用の一時生成物であり、送信の成否に関わらず`finally`節で削除する(Issue #171: 以前はこの削除が無く、元動画とは別にローカルディスクへ重複して残り続けていた)。元動画(`summary.output_path`)自体はここでは削除せず、`nas_monitor`の保持期間ベースのリテンションクリーンアップに委ねる。
 
 
-* 根拠: 分割ロジックと送信ロジック (行番号: 589 / 抜粋: "pc = math.ceil(summary.file_si...")
+* 根拠: 分割ロジックと送信ロジック (行番号: 623 / 抜粋: "pc = math.ceil(summary.file_si...")
 * 根拠: `split_files: List[Path] = []` および `finally:` ブロック (行番号: 584, 609〜618 / 抜粋: "for s_file in split_files:\n try:\n os.remove(s_file)")
 
 
@@ -619,7 +619,7 @@
 * **エラーハンドリング**: 動画分割プロセスの失敗やWebhook送信時の例外をキャッチし、ログにエラーを出力する。分割ファイルの削除自体が失敗した場合(`OSError`)も個別に捕捉してログ出力するのみで処理を継続する。
 
 
-* 根拠: `except Exception as e: logger.error(f"分割送信エラー: {e}")` (行番号: 608 / 抜粋: "except Exception as e: logger....")、`except OSError as cleanup_err:` (行番号: 617〜618)
+* 根拠: `except Exception as e: logger.error(f"分割送信エラー: {e}")` (行番号: 642 / 抜粋: "except Exception as e: logger....")、`except OSError as cleanup_err:` (行番号: 617〜618)
 
 
 
@@ -630,7 +630,7 @@
 * **役割**: 全体の処理フローを統括するメイン関数。依存コマンドの確認からディレクトリ設定、動画解析、イベント生成、動画結合、結果ファイルの保存、Discordへのアップロードまでを順次呼び出す。
 
 
-* 根拠: 処理のオーケストレーション (行番号: 584 / 抜粋: "info = get_video_info(input_vi...")
+* 根拠: 処理のオーケストレーション (行番号: 711 / 抜粋: "info = get_video_info(input_vi...")
 
 
 

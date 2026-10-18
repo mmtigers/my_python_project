@@ -34,7 +34,7 @@
 
 
 * **（Issue #439で追加）** ライブ配信の起動(`start_hls_stream`)・録画プレイリスト生成(`generate_record_playlist`)に加え、`_active_processes`/`_active_vod_processes`/`_rtsp_cache`の3グローバル辞書への読み書き自体も、モジュールレベルの`_state_lock`で保護されるようになった。以前はこれら3辞書がロック無しで複数スレッドから同時にチェック・更新されており、「チェックしてから更新する」までの一連の操作が原子的でなかったため、既に終了したプロセスをactiveと誤認する等の不整合が起こりうる状態だった。
-* 根拠: [`_state_lock`定義とコメント] (行番号: 45〜50 / 抜粋: "# 読み書きの一連の操作をこのLockで保護する。\n_state_lock = threading.Lock()")
+* 根拠: [`_state_lock`定義とコメント] (行番号: 74 / 抜粋: "# 読み書きの一連の操作をこのLockで保護する。\n_state_lock = threading.Lock()")
 
 
 * `start_hls_stream`で開いたffmpegログファイルのハンドルは、`subprocess.Popen`呼び出し後に`finally`ブロックで親プロセス側から明示的に`close()`される（子プロセスは`dup()`済みのfdを保持するため親側は不要であり、以前はプロセス再起動のたびにファイルハンドルがリークしていた）。
@@ -46,7 +46,7 @@
 
 
 * `_active_vod_processes`に登録されたプロセスのうち完了済み（`poll()`が`None`でない）ものは、`_generate_record_playlist_locked`の呼び出しの都度`_prune_finished_vod_processes`により除去され、`カメラID_日付`キーが無限に蓄積することを防ぐ。
-* 根拠: [プルーニング呼び出し] (行番号: 378 / 抜粋: "_prune_finished_vod_processes()")
+* 根拠: [プルーニング呼び出し] (参照: _generate_record_playlist_locked / 抜粋: "_prune_finished_vod_processes()")
 
 
 * `set_camera_enabled`は`devices.json`上の該当カメラの`enabled`フラグを更新し、`config.CAMERAS`にも反映する。ここで更新されるのは**サーバープロセス内の**`config.CAMERAS`だけだが、別プロセスの`monitors/camera_monitor.py`は監視ループごとに`devices.json`を読み直す（`is_camera_enabled`、Issue #652）ため、`devices.json`への書き込みを通じて無効化・再有効化が数十秒以内に伝播する。書き込みは一時ファイル(`.tmp`)への書き込み後に`os.replace`でアトミックに置き換える方式であり、書き込み途中のクラッシュ・電源断による`devices.json`破損を防ぐ。
@@ -62,7 +62,6 @@
 | `core.utils.RefCountedLockRegistry`（Issue #661 で追加） | ローカルモジュール | `_vod_generation_locks`/`_live_stream_locks`の実体。以前このファイルにあった`_RefCountedLock`との重複を解消するため、参照カウント付きロックのレジストリを`core/utils.py`側へ一本化した | 根拠: [import文] (行番号: 14 / 抜粋: "from core.utils import get_now_jst, RefCountedLockRegistry") |
 | `json` | 標準ライブラリ | `devices.json`の読み込み・書き込み（`set_camera_enabled`） | 根拠: [import文] (行番号: 2 / 抜粋: "import json") |
 | `os` | 標準ライブラリ | パス操作(`os.path.join`, `os.path.dirname`, `os.makedirs`, `os.path.exists`, `os.path.basename`)、環境変数取得(`os.getenv`)、`os.chmod`によるパーミッション変更、`os.replace`によるアトミックなファイル置換 | 根拠: [import文] (行番号: 3 / 抜粋: "import os") |
-| `sys` | 標準ライブラリ | `sys.path` を走査したWSDLディレクトリ探索 | 根拠: [import文] (行番号: 4 / 抜粋: "import sys") |
 | `subprocess` | 標準ライブラリ | ffmpegプロセスの起動(`Popen`)と型ヒント(`subprocess.Popen`) | 根拠: [import文] (行番号: 4 / 抜粋: "import subprocess") |
 | `threading` | 標準ライブラリ | **（Issue #439で拡大）** 以前はVOD生成の`process_key`単位ロック(`_vod_generation_locks`/`_vod_generation_locks_guard`)のみで使用していたが、現在は`_active_processes`/`_active_vod_processes`/`_rtsp_cache`の3辞書を保護する`_state_lock`、およびライブ配信の`cam_id`単位ロック(`_live_stream_locks`/`_live_stream_locks_guard`)にも使用される | 根拠: [import文] (行番号: 5 / 抜粋: "import threading")、[新規ロック定義] (行番号: 75, 102 / 抜粋: "_state_lock = threading.Lock()", "_live_stream_locks_guard = threading.Lock()") |
 | `time` | 標準ライブラリ | プレイリスト生成待機のスリープ(`time.sleep`) | 根拠: [import文] (行番号: 6 / 抜粋: "import time") |
@@ -80,7 +79,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `ONVIFCamera` (onvifライブラリ) | `create_media_service`, `GetProfiles`, `create_type`, `GetStreamUri` 等のメソッドの内部実装・通信プロトコル詳細は本ファイルからは不明。 | 根拠: [ONVIFCameraの利用箇所] (行番号: 200 / 抜粋: "mycam = ONVIFCamera(cam_conf['ip'], cam_conf.get('port', 80), cam_conf['user'], cam_conf.get('pass', ''), wsdl_dir=wsdl_path)") |
-| `config` | `config.NVR_RECORD_DIR`の値、`config.DEVICES_JSON_PATH`が指す実際のファイルパス、`config.CAMERAS`の実データがどのように設定されているか（環境変数、設定ファイル等）が本ファイルからは不明。 | 根拠: [config参照] (行番号: 306 / 抜粋: "nvr_base_dir = config.NVR_RECORD_DIR") |
+| `config` | `config.NVR_RECORD_DIR`の値、`config.DEVICES_JSON_PATH`が指す実際のファイルパス、`config.CAMERAS`の実データがどのように設定されているか（環境変数、設定ファイル等）が本ファイルからは不明。 | 根拠: [config参照] (参照: get_record_start_offset / 抜粋: "nvr_base_dir = config.NVR_RECORD_DIR") |
 | `setup_logging` | 生成されるロガーの出力先・フォーマット・ログレベルの詳細が不明。 | 根拠: [ロガー生成] (行番号: 22 / 抜粋: "logger = setup_logging(\"camera_service\")") |
 | `ffmpeg` / `nice` (外部コマンド) | `subprocess.Popen`で起動される外部コマンドの内部動作・エラー時の終了コード仕様は本ファイルの管理対象外。 | 根拠: [Popen呼び出し] (行番号: 265, 451 / 抜粋: "\"nice\", \"-n\", str(FFMPEG_NICE_LEVEL),")（Issue #451でnice値をハードコード文字列から`FFMPEG_NICE_LEVEL`定数へ変更） |
 | `devices.json` (外部ファイル) | `set_camera_enabled`が読み書きする対象であり、既存カメラエントリの正確なJSON構造・件数は本ファイルからは不明。 | 根拠: [devices.json読み書き] (行番号: 538 / 抜粋: "if not os.path.exists(config.DEVICES_JSON_PATH):") |
@@ -90,7 +89,7 @@
 ### `_state_lock`（Issue #439で追加）
 
 * **役割**: `_active_processes`（ライブ配信プロセス）・`_active_vod_processes`（VODプロセス）・`_rtsp_cache`（RTSP URLキャッシュ）の3つのモジュールレベル辞書を保護するグローバルロック。FastAPIの同期エンドポイント（スレッドプール実行）から複数スレッドで同時に読み書きされうるため、個々のdict操作自体はGILにより原子的でも「チェックしてから更新する」までの一連の操作は原子的でなかった（既に終了したプロセスをactiveと誤認する等の不整合が起こりうる）ことへの対応として追加された。
-* 根拠: [変数定義とコメント] (行番号: 45〜50 / 抜粋: "# 読み書きの一連の操作をこのLockで保護する。\n_state_lock = threading.Lock()")
+* 根拠: [変数定義とコメント] (行番号: 74 / 抜粋: "# 読み書きの一連の操作をこのLockで保護する。\n_state_lock = threading.Lock()")
 
 
 * **引数/リクエスト**: 該当なし
@@ -112,7 +111,7 @@
 
 
 * **戻り値/レスポンス**: なし（`@contextlib.contextmanager` によるジェネレータベースのコンテキストマネージャ。`with` 文のブロック内で保護対象の処理を実行する）
-* 根拠: [デコレータ] (行番号: 73 / 抜粋: "@contextlib.contextmanager")
+* 根拠: [デコレータ] (参照: _vod_generation_lock / 抜粋: "@contextlib.contextmanager")
 
 
 * **副作用**: レジストリ（`_vod_generation_locks` / `_live_stream_locks`）へのエントリ登録（未登録時のみ）、`ref_count` の増減、`ref_count` が 0 に戻った場合のエントリ削除、実ロックの獲得・解放。いずれも `RefCountedLockRegistry.acquire` が行う。
@@ -591,10 +590,10 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | `config.NVR_RECORD_DIR`属性の有無や値、`config.DEVICES_JSON_PATH`、`cam_conf`辞書（`id`, `ip`, `user`, `pass`, `port`, `rtsp_url`, `nas_folder`, `name`, `enabled`）を供給する`CAMERAS`設定の全容を把握する必要があるため。 | 根拠: [getattr呼び出し] (行番号: 182 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...)") |
+| 高 | `config.py` | `config.NVR_RECORD_DIR`属性の有無や値、`config.DEVICES_JSON_PATH`、`cam_conf`辞書（`id`, `ip`, `user`, `pass`, `port`, `rtsp_url`, `nas_folder`, `name`, `enabled`）を供給する`CAMERAS`設定の全容を把握する必要があるため。 | 根拠: [getattr呼び出し] (参照: get_record_start_offset / 抜粋: "nvr_base_dir = config.NVR_RECORD_DIR ...)") |
 | 中 | `core/logger.py` | `setup_logging`によるロガー設定（出力先、フォーマット、ログレベル）を確認するため。 | 根拠: [import文] (行番号: 13 / 抜粋: "from core.logger import setup_logging") |
 | 中 | `routers/camera_router.py` | 本モジュールの各関数（`start_hls_stream`, `get_record_start_offset`, `generate_record_playlist`, `set_camera_enabled`, `get_camera_config_or_none`（Issue #551）, `HLS_LIVE_DIR`, `HLS_VOD_DIR`）がどのようなHTTPエンドポイントから、どのようなエラーハンドリングと共に呼び出されているかを確認するため。 | 根拠: [呼び出し元ファイル。本ファイル単体からは不明] |
-| 低 | `onvif`ライブラリ（サードパーティパッケージ） | `ONVIFCamera`クラスの`GetProfiles`/`GetStreamUri`等のAPI仕様を確認するため。 | 根拠: [try-exceptインポート] (行番号: 14〜17 / 抜粋: "from onvif import ONVIFCamera") |
+| 低 | `onvif`ライブラリ（サードパーティパッケージ） | `ONVIFCamera`クラスの`GetProfiles`/`GetStreamUri`等のAPI仕様を確認するため。 | 根拠: [try-exceptインポート] (行番号: 18 / 抜粋: "from onvif import ONVIFCamera") |
 | 低 | `MY_HOME_SYSTEM/tests/test_camera_service_unit.py` | URLマスクの空パスワード耐性、VODプロセスの剪定、`devices.json`のアトミック書込、ログファイルハンドルのclose、同時リクエストでのffmpeg単一起動など、本ファイルの期待仕様が単体テストとして記述されているため、実装意図の確認に有用。 | 根拠: [set_camera_enabled関数] (行番号: 535〜562 / 抜粋: "def set_camera_enabled(camera_id: str, enabled: bool) -> bool:") |
 
 ## 8. 保守上の注意点

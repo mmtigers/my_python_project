@@ -50,6 +50,9 @@ Issue #550 の分割後は存在しない行範囲を指すものまで残って
 対象は `MY_HOME_SYSTEM/**/*.py` と `DDD/**/*.py`（テスト・`__init__.py` は除く）に
 1対1で対応する仕様書のみ。TypeScript側は `def`/`class` の規約が異なるため対象外。
 
+行番号の代わりに「どの関数の中か」を書く `(参照: シンボル / 抜粋: "…")` 書式(Issue #950)は
+scan_symbol_references が検証する。こちらは Python に加えてシェル(`.sh`)の関数名も解決する。
+
 ## 使い方
 
     python3 .github/scripts/check_spec_line_refs.py            # 検証(不一致があれば exit 1)
@@ -69,7 +72,7 @@ import collections
 import re
 import sys
 from pathlib import Path
-from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, NamedTuple, Optional, Tuple
 
 # Issue #722: 「廃止notice」の判定は check_spec_drift.py が持つものを**共有する**。
 # 同じ判定を2箇所に複製すると RETIRED_NOTICE_PREFIX の書式を変えたときに片方だけ
@@ -122,21 +125,33 @@ class Finding(NamedTuple):
         )
 
 
-def _definitions(source: str) -> Tuple[Optional[Dict], Optional[Dict]]:
-    """(クラス名, メソッド名) -> 範囲 と、名前 -> 範囲リスト を返す。"""
+def _definitions(source: str, with_decorators: bool = False) -> Tuple[Optional[Dict], Optional[Dict]]:
+    """(クラス名, メソッド名) -> 範囲 と、名前 -> 範囲リスト を返す。
+
+    範囲の開始は `def`/`class` の行(行番号引用のゲートが照合する位置)。`with_decorators=True` のときは
+    デコレータの行から始める(シンボル参照用。`@router.get(...)` や `@classmethod` の抜粋も、
+    そのシンボルの中にあるものとして扱うため。Issue #950)。
+    """
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return None, None
+
+    def span(node) -> Tuple[int, int]:
+        start = node.lineno
+        if with_decorators and node.decorator_list:
+            start = min([start] + [d.lineno for d in node.decorator_list])
+        return (start, node.end_lineno)
+
     qualified: Dict[Tuple[str, str], Tuple[int, int]] = {}
     flat: Dict[str, List[Tuple[int, int]]] = collections.defaultdict(list)
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
             for child in node.body:
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    qualified[(node.name, child.name)] = (child.lineno, child.end_lineno)
+                    qualified[(node.name, child.name)] = span(child)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            flat[node.name].append((node.lineno, node.end_lineno))
+            flat[node.name].append(span(node))
     return qualified, flat
 
 
@@ -212,6 +227,12 @@ def _source_index(suffixes: Tuple[str, ...] = (".py",)) -> Dict[str, List[Path]]
 _SYMBOL_BLOCK_RE = re.compile(r"参照: ([A-Za-z_][\w.]*) / 抜粋: ")
 
 
+# 引用の閉じ括弧の直後に次の引用(`` `x` `` や `[種別]`)が続く箇所。`(行番号: 1 / 抜粋: "a"), `b` (行番号: 2)` の
+# ように1行に引用が並ぶとき、手前の抜粋をここで閉じる(Issue #950: 閉じないと後ろの引用の文字まで抜粋に取り込み、
+# 「ソースに見つからない」扱いになっていた)。
+_CITATION_END_RE = re.compile(r'"\)(?=(?:、|, ?|，)\s*[`\[])')
+
+
 def _block_stop(line: str, block, blocks, index: int) -> int:
     """`行番号:` ブロックに属する抜粋の終端(次のブロックの手前)を返す。
 
@@ -223,7 +244,38 @@ def _block_stop(line: str, block, blocks, index: int) -> int:
     symbol = _SYMBOL_BLOCK_RE.search(line, block.end())
     if symbol is not None:
         stop = min(stop, symbol.start())
+    closing = _CITATION_END_RE.search(line, block.end(), stop)
+    if closing is not None:
+        stop = closing.start() + 2  # `")` までを抜粋に含める
     return stop
+
+
+# `(`other.py` 行番号: 13〜17 / 抜粋: …)` のように、括弧の中で**別ファイル**を名指しした引用の目印
+_NAMED_FILE_RE = re.compile(r"`([\w/.-]+\.(?:py|sh|ts|tsx))`")
+_FILE_BEFORE_PAREN_RE = re.compile(r"`([\w/.-]+\.(?:py|sh|ts|tsx))`\s*$")
+
+
+def _names_other_file(line: str, block, source: Optional[Path]) -> bool:
+    """この `行番号:` ブロックが、仕様書に対応するソース以外のファイルの行を指しているか。
+
+    書式Aの引用でも `(`test_foo.py` 行番号: 13〜17 / 抜粋: …)` のように括弧の中で別ファイルを
+    名指しすることがある(書式Bの同種は _backtick_snippets が除外する。Issue #679)。その行番号は
+    対応ソースの行ではないので、照合すると「ずれている」と誤検知する(Issue #950)。名指しされた
+    ファイルが対応ソース自身なら、通常どおり検証する。
+    """
+    paren = line.rfind("(", 0, block.start())
+    if paren == -1:
+        return False
+    named = _NAMED_FILE_RE.findall(line[paren:block.start()])
+    # 括弧の**直前**にファイル名だけが置かれた形(`` `routers/x.py` (行番号: 42) ``)も見る。
+    # 直前に限るのは、表の別の列や前の文で触れたファイル名を拾わないため。
+    before = _FILE_BEFORE_PAREN_RE.search(line, 0, paren)
+    if before is not None:
+        named.append(before.group(1))
+    if not named:
+        return False
+    own = source.name if source is not None else None
+    return any(Path(name).name != own for name in named)
 
 
 def _split_snippets(rest: str) -> List[str]:
@@ -464,6 +516,7 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
             qualified, flat = {}, {}
             is_python = False
         else:
+            source = candidates[0]
             source_text = candidates[0].read_text(encoding="utf-8")
             qualified, flat = _definitions(source_text)
             if qualified is None:
@@ -486,6 +539,8 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
             rewritten = line
             shift = 0
             for b_i, block in enumerate(blocks):
+                if _names_other_file(line, block, source):
+                    continue
                 stop = _block_stop(line, block, blocks, b_i)
                 rest = line[block.end():stop]
                 # 書式B(Issue #679)の抜粋はブロックの手前にある。直前のブロックの
@@ -622,13 +677,42 @@ def _report_source_for_spec(spec: Path) -> Optional[Path]:
 _SNIPPET_NEWLINE_RE = re.compile(r"(?<!\\)\\n")
 
 
+# 抜粋の中のエスケープ(`\\"` → `"`、`\\\\` → `\\`)。仕様書では正規表現などソースのバックスラッシュを
+# `\\\\d` のように2つで書くため、1つへ戻してから照合する(Issue #950: 戻さずに照合していたため、
+# 正規表現を含む抜粋はすべて「ソースに見つからない」扱いになっていた)。Markdown の表の中で
+# パイプを `\\|` と書いたものも `|` へ戻す(シェルのパイプを含む抜粋が表に入るため)。
+_SNIPPET_ESCAPE_RE = re.compile(r'\\(["\\|])')
+# Markdown に食われたダンダー名(`__init__` → `**init**`、`__name__` → `**name**`)。抜粋を書き写す際に
+# 強調記法として解釈されたもの。ソースの `**` は `2**30` のように単語を挟まないので、戻しても誤一致しない。
+# 英字の識別子に限る(`"🚨 **重大エラー発生**"` のような、ソース中の文字列リテラルの強調は戻さない)。
+_MANGLED_DUNDER_RE = re.compile(r"\*\*([A-Za-z_][A-Za-z0-9_]*)\*\*")
+# 抜粋の省略記号。`from core.logger import setup...` のように途中で切った抜粋は、手前の部分で照合する。
+_SNIPPET_ELLIPSIS_RE = re.compile(r"(?:\.\.\.|…)")
+
+
+def _normalize_snippet_line(part: str) -> str:
+    """抜粋の1行を、ソースと照合できる形へ戻す。
+
+    エスケープを戻し、Markdown に食われたダンダー名を戻し、行全体を囲むバッククォート(`` `import sys` ``)を外し、省略記号から後ろを落とす。
+    省略記号を落とした結果は抜粋の**先頭部分**なので、`head in line` の照合はそのまま使える。
+    """
+    part = _SNIPPET_ESCAPE_RE.sub(r"\1", part).strip()
+    part = _MANGLED_DUNDER_RE.sub(r"__\1__", part)
+    if len(part) >= 2 and part.startswith("`") and part.endswith("`") and part.count("`") == 2:
+        part = part[1:-1].strip()
+    ellipsis = _SNIPPET_ELLIPSIS_RE.search(part)
+    if ellipsis is not None:
+        part = part[:ellipsis.start()].rstrip()
+    return part
+
+
 def _split_snippet_lines(body: str) -> List[str]:
-    """抜粋の本文を行のリストへ分割し、各行のエスケープを戻して strip する。"""
-    return [part.replace('\\"', '"').strip() for part in _SNIPPET_NEWLINE_RE.split(body)]
+    """抜粋の本文を行のリストへ分割し、各行を照合できる形へ戻す(_normalize_snippet_line)。"""
+    return [_normalize_snippet_line(part) for part in _SNIPPET_NEWLINE_RE.split(body)]
 
 
-def _snippet_first_line(snippet: str) -> str:
-    """引用の抜粋から、照合に使う先頭1行を取り出す。"""
+def _snippet_lines(snippet: str) -> List[str]:
+    """引用の抜粋を、照合に使う行のリストにして返す(各行は _normalize_snippet_line 済み)。"""
     body = snippet.strip()
     if body.startswith('"'):
         body = body[1:]
@@ -636,7 +720,12 @@ def _snippet_first_line(snippet: str) -> str:
     close = body.rfind('"')
     if close != -1:
         body = body[:close]
-    return _split_snippet_lines(body)[0]
+    return _split_snippet_lines(body)
+
+
+def _snippet_first_line(snippet: str) -> str:
+    """引用の抜粋から、照合に使う先頭1行を取り出す。"""
+    return _snippet_lines(snippet)[0]
 
 
 def _iter_ungated_citations():
@@ -660,6 +749,8 @@ def _iter_ungated_citations():
         for line in spec.read_text(encoding="utf-8").splitlines():
             blocks = list(_BLOCK_RE.finditer(line))
             for b_i, block in enumerate(blocks):
+                if _names_other_file(line, block, source):
+                    continue
                 stop = _block_stop(line, block, blocks, b_i)
                 rest = line[block.end():stop]
                 before = line[blocks[b_i - 1].end() if b_i else 0:block.start()]
@@ -765,7 +856,8 @@ def triage_non_gated_citations() -> Tuple[Dict[str, Dict[str, int]], Dict[str, i
 #
 # 検証は「そのシンボルがソースに存在し、抜粋の先頭行がその本体の中にある」こと。行が
 # 増減しても、同じ関数の中にある限り通る(関数の改名・削除・抜粋の移動だけが検知される)。
-# 対象は Python のソースに1対1で対応する仕様書のみ。
+# 対象は Python と シェル(`.sh`)のソースに1対1で対応する仕様書。シェルのシンボルは関数名
+# (`name() {`)だけ(_shell_function_spans)。
 
 
 def _resolve_symbol(symbol: str, qualified: Dict, flat: Dict) -> Optional[Tuple[int, int]]:
@@ -789,7 +881,7 @@ def _symbol_spans(source: str) -> List[Tuple[str, int, int]]:
     scan_symbol_references で「一意に決まらない」とならないように)。
     """
     tree = ast.parse(source)
-    qualified, flat = _definitions(source)
+    qualified, flat = _definitions(source, with_decorators=True)
     spans: List[Tuple[str, int, int]] = []
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -802,20 +894,99 @@ def _symbol_spans(source: str) -> List[Tuple[str, int, int]]:
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
             ]
         for name, target in names:
-            span = (target.lineno, target.end_lineno)
+            start = min([target.lineno] + [d.lineno for d in target.decorator_list])
+            span = (start, target.end_lineno)
             if _resolve_symbol(name, qualified, flat) == span:
                 spans.append((name, span[0], span[1]))
     return spans
 
 
-def _enclosing_symbol(head: str, src_lines: List[str], spans: List[Tuple[str, int, int]]) -> Optional[str]:
-    """抜粋の先頭行を含むシンボルを返す。出現が全て同じ1つのシンボルの中にあるときだけ。
+# シェル関数の定義行(`name() {` / `function name {`)。行頭(インデント無し)のものだけを関数とみなす。
+_SHELL_FUNC_RE = re.compile(r"^(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*\))?\s*\{\s*(?:#.*)?$")
+_SHELL_FUNC_END_RE = re.compile(r"^\}\s*(?:#.*)?$")
 
-    出現ごとに「それを含む最も内側のシンボル」を求め、全出現で一致したらそれを返す。
+
+def _shell_function_spans(source: str) -> List[Tuple[str, int, int]]:
+    """シェルスクリプトの関数を (関数名, 開始行, 終了行) で返す(Issue #950)。
+
+    関数の範囲は「行頭の `name() {` から、次の行頭の `}` まで」とする。このリポジトリの
+    シェルスクリプトはすべてこの書き方で、本体はインデントされている。`function` キーワードの
+    有無はどちらも受け付ける(`function name {` は `()` が無くても関数定義)。閉じ括弧が
+    見つからないもの・同名が複数あるもの(どちらを指すか決められない)は返さない。
+    """
+    lines = source.splitlines()
+    spans: List[Tuple[str, int, int]] = []
+    i = 0
+    while i < len(lines):
+        match = _SHELL_FUNC_RE.match(lines[i])
+        if match and (lines[i].startswith("function") or "(" in lines[i]):
+            for j in range(i + 1, len(lines)):
+                if _SHELL_FUNC_END_RE.match(lines[j]):
+                    spans.append((match.group(1), i + 1, j + 1))
+                    i = j
+                    break
+        i += 1
+    counts = collections.Counter(name for name, _, _ in spans)
+    return [span for span in spans if counts[span[0]] == 1]
+
+
+class _SymbolTable(NamedTuple):
+    """シンボル参照の解決に使う、仕様書1件ぶんの対応ソースの情報。"""
+    source: Path
+    src_lines: List[str]
+    # シンボル -> (開始行, 終了行)。曖昧・不在なら None
+    resolve: Callable[[str], Optional[Tuple[int, int]]]
+    # _enclosing_symbol 用の (シンボル, 開始行, 終了行) 一覧
+    spans: List[Tuple[str, int, int]]
+
+
+def _symbol_table_for_spec(spec: Path, py_index: Dict[str, List[Path]], sh_index: Dict[str, List[Path]]) -> Optional[_SymbolTable]:
+    """仕様書に対応するソースのシンボル表を返す(Python を優先し、無ければシェル)。対応が一意でなければ None。"""
+    candidates = py_index.get(spec.stem)
+    if candidates and len(candidates) == 1:
+        source_text = candidates[0].read_text(encoding="utf-8")
+        qualified, flat = _definitions(source_text, with_decorators=True)
+        if qualified is None:
+            return None
+        return _SymbolTable(
+            candidates[0], source_text.splitlines(),
+            lambda symbol: _resolve_symbol(symbol, qualified, flat), _symbol_spans(source_text),
+        )
+    if candidates:
+        return None
+    candidates = sh_index.get(spec.stem)
+    if not candidates or len(candidates) != 1:
+        return None
+    source_text = candidates[0].read_text(encoding="utf-8")
+    spans = _shell_function_spans(source_text)
+    by_name = {name: (start, end) for name, start, end in spans}
+    return _SymbolTable(candidates[0], source_text.splitlines(), by_name.get, spans)
+
+
+def _snippet_hits(snippet_lines: List[str], src_lines: List[str]) -> List[int]:
+    """抜粋がソースに現れる位置(先頭行の行番号、1始まり)を返す。
+
+    複数行の抜粋は、空でない行が**連続する行に順に**現れる位置だけを数える。先頭行だけでは
+    複数箇所に現れる抜粋(`except Exception:` 等)も、続く行まで見れば1箇所に決まることが多い。
+    """
+    lines = [line for line in snippet_lines if line]
+    if not lines:
+        return []
+    return [
+        i + 1
+        for i in range(len(src_lines) - len(lines) + 1)
+        if all(part in src_lines[i + k] for k, part in enumerate(lines))
+    ]
+
+
+def _enclosing_symbol(snippet_lines: List[str], src_lines: List[str], spans: List[Tuple[str, int, int]]) -> Optional[str]:
+    """抜粋を含むシンボルを返す。出現が全て同じ1つのシンボルの中にあるときだけ。
+
+    出現(_snippet_hits)ごとに「それを含む最も内側のシンボル」を求め、全出現で一致したらそれを返す。
     モジュールレベル(どのシンボルにも含まれない)の出現が1つでもあれば None。
     """
     found: Optional[str] = None
-    hits = [i + 1 for i, line in enumerate(src_lines) if head in line]
+    hits = _snippet_hits(snippet_lines, src_lines)
     if not hits:
         return None
     for lineno in hits:
@@ -837,28 +1008,28 @@ def _symbol_blocks(line: str):
         other = _BLOCK_RE.search(line, block.end())
         if other is not None:
             stop = min(stop, other.start())
+        closing = _CITATION_END_RE.search(line, block.end(), stop)
+        if closing is not None:
+            stop = closing.start() + 2  # `")` までを抜粋に含める(_block_stop と同じ)
         yield block.start(), block.end(), block.group(1), _split_snippets(line[block.start():stop])
 
 
 def scan_symbol_references() -> Tuple[List[str], int]:
     """`参照: シンボル / 抜粋: ...` の引用を検証する。戻り値は (問題の一覧, 検証した抜粋の数)。"""
-    index = _source_index()
+    py_index, sh_index = _source_index(), _source_index((".sh",))
     problems: List[str] = []
     checked = 0
     for spec in sorted(SPEC_ROOT.rglob("*.md")):
         if spec.name == "README.md":
             continue
-        candidates = index.get(spec.stem)
-        if not candidates or len(candidates) != 1:
+        table = _symbol_table_for_spec(spec, py_index, sh_index)
+        if table is None:
             continue
-        src_lines = candidates[0].read_text(encoding="utf-8").splitlines()
-        qualified, flat = _definitions("\n".join(src_lines))
-        if qualified is None:
-            continue
+        src_lines = table.src_lines
         for lineno, line in enumerate(spec.read_text(encoding="utf-8").splitlines(), 1):
             for _, _, symbol, snippets in _symbol_blocks(line):
                 where = "%s:%d" % (spec.relative_to(REPO_ROOT), lineno)
-                span = _resolve_symbol(symbol, qualified, flat)
+                span = table.resolve(symbol)
                 if span is None:
                     problems.append("%s `%s` がソースに存在しない(または同名が複数で一意に決まらない)" % (where, symbol))
                     continue
@@ -889,19 +1060,14 @@ def convert_to_symbol_references(specs: List[Path], write: bool = True) -> Tuple
     見出しのシンボルが解決でき、その中に抜粋が無いもの(別の関数を引いている)は従来どおり触らない
     (著者の意図した場所と抜粋の場所が食い違っており、どちらが正しいか機械では決められないため)。
     """
-    index = _source_index()
+    py_index, sh_index = _source_index(), _source_index((".sh",))
     converted = skipped = 0
     for spec in specs:
         converted_before = converted
-        candidates = index.get(spec.stem)
-        if not candidates or len(candidates) != 1:
+        table = _symbol_table_for_spec(spec, py_index, sh_index)
+        if table is None:
             continue
-        source_text = candidates[0].read_text(encoding="utf-8")
-        src_lines = source_text.splitlines()
-        qualified, flat = _definitions(source_text)
-        if qualified is None:
-            continue
-        spans = _symbol_spans(source_text)
+        src_lines, spans = table.src_lines, table.spans
         heading_symbol: Optional[str] = None
         original = spec.read_text(encoding="utf-8")
         out_lines: List[str] = []
@@ -915,6 +1081,8 @@ def convert_to_symbol_references(specs: List[Path], write: bool = True) -> Tuple
             blocks = list(_BLOCK_RE.finditer(line))
             edits: List[Tuple[int, int, str]] = []
             for b_i, block in enumerate(blocks):
+                if _names_other_file(line, block, table.source):
+                    continue
                 stop = _block_stop(line, block, blocks, b_i)
                 rest = line[block.end():stop]
                 before = line[blocks[b_i - 1].end() if b_i else 0:block.start()]
@@ -934,13 +1102,13 @@ def convert_to_symbol_references(specs: List[Path], write: bool = True) -> Tuple
                 start, end = _cited_span(items[0])
                 if any(head in l for l in src_lines[max(0, start - 2): max(start, end)]):
                     continue  # 引用した場所に実在する(ずれていない)
-                span = _resolve_symbol(heading_symbol, qualified, flat) if heading_symbol else None
+                span = table.resolve(heading_symbol) if heading_symbol else None
                 if span is not None:
                     symbol = heading_symbol
                     if not any(head in l for l in src_lines[span[0] - 1: span[1]]):
                         symbol = None
                 else:
-                    symbol = _enclosing_symbol(head, src_lines, spans)
+                    symbol = _enclosing_symbol(_snippet_lines(snippet), src_lines, spans)
                 if symbol is None:
                     skipped += 1
                     continue

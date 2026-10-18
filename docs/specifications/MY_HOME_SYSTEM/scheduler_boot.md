@@ -49,7 +49,6 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` | モジュールがインポートされているが、本ファイル内での使用箇所や実装内容が提供されていないため | `import config` (行番号: 14 / 抜粋: "import config") |
 | `setup_logging` | 実装内容が外部ファイル(`core.logger`)にあるため、ログの出力先やフォーマット仕様が不明 | `from core.logger import setup_logging` (行番号: 16 / 抜粋: "from core.logger import setup_log") |
 | `TASKS` に定義されている各スクリプト | サブプロセスとして呼び出される対象ファイル（`monitors/*.py`など）の実装が提供されていないため | `TASKS: List[Task] = [...]` (行番号: 40 / 抜粋: "{"script": "monitors/switchbot") |
 
@@ -115,7 +114,7 @@
 * **役割**: `_running_children`（実行中の子プロセスの `script_path → Popen`、`_children_lock` で保護）を走査し、生存中のものを `terminate()` → timeout 後 `kill()` して停止数を返す。`_handle_shutdown_signal` は SIGTERM/SIGINT で `_shutdown_event` を立てて `terminate_running_children()` を呼ぶ。`install_signal_handlers` は両シグナルにこのハンドラを登録する（メインスレッド以外からの呼び出し等で `ValueError`/`OSError` になる場合は無視）。以前は scheduler が SIGTERM で即死し、実行中の `nas_monitor.py` 等（最大3600s）が孤児として走り続けて再起動後の新世代と DB 書き込み・保持期間削除が競合していた。
 * 根拠: `_running_children: Dict[str, subprocess.Popen] = {}` (行番号: 48〜50)、`def terminate_running_children(timeout: float = 5.0) -> int:` (行番号: 73〜94)、`def _handle_shutdown_signal(signum, _frame) -> None:` (行番号: 97〜100)、`def install_signal_handlers() -> None:` (行番号: 103〜109)
 * **モジュールレベル集合 `_intentionally_terminated: Set[str]`（Issue #575で追加）**: `terminate_running_children()` が「今まさに意図的に停止させようとしているスクリプト」を記録するための集合。`_children_lock` で他の `_running_children` 操作と同じロックを共有して保護する。書き込み（`add`）は `terminate_running_children` が `proc.terminate()` を呼ぶ**直前**に行う。読み取り・消費（`in` チェック後に `discard`）は `run_script` が非0のreturncodeを受け取った直後に行い、含まれていれば「意図的な停止」としてINFOログのみを出す（後述）。`add` を「シグナル送信の前」に行っているのは、`run_script` 側の別スレッドで動く `proc.wait()` がこの `terminate()` を受けて即座に返り値付きで復帰し `run_script` が判定に入るタイミングとの間で、記録がまだ間に合っていないという競合を避けるため。
-* 根拠: `_intentionally_terminated: Set[str] = set()` およびコメント (行番号: 52〜56 / 抜粋: "#575: terminate_running_children が意図的に停止したスクリプトを記録する。")、`with _children_lock:`・`_intentionally_terminated.add(script)` (行番号: 69〜70、`proc.terminate()` 呼び出し (行番号: 71) の直前)、`from typing import ... Set, ...` (行番号: 10 / 抜粋: "from typing import List, Dict, Optional, Set, TypedDict")
+* 根拠: `_intentionally_terminated: Set[str] = set()` およびコメント (行番号: 66 / 抜粋: "#575: terminate_running_children が意図的に停止したスクリプトを記録する。")、`with _children_lock:`・`_intentionally_terminated.add(script)` (行番号: 69〜70、`proc.terminate()` 呼び出し (行番号: 71) の直前)、`from typing import ... Set, ...` (行番号: 10 / 抜粋: "from typing import List, Dict, Optional, Set, TypedDict")
 * **引数/リクエスト**: `timeout: float` / `(signum, _frame)` / なし
 * 根拠: (行番号: 59, 83, 89)
 * **戻り値/レスポンス**: `int`（停止数）/ なし / なし
@@ -168,15 +167,15 @@
 ### `__main__` 実行ブロック
 
 * **役割**: `main` 関数を呼び出してスケジューラを起動し、停止命令や予期せぬエラー時にプロセスを終了させる。
-* 根拠: `if __name__ == "__main__":` (行番号: 237 / 抜粋: "if **name** == "**main**":")
+* 根拠: `if __name__ == "__main__":` (行番号: 279 / 抜粋: "if **name** == "**main**":")
 
 
 * **引数/リクエスト**: なし
-* 根拠: ブロック定義 (行番号: 128 / 抜粋: "if **name** == "**main**":")
+* 根拠: ブロック定義 (行番号: 279 / 抜粋: "if **name** == "**main**":")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: ブロック定義 (行番号: 128 / 抜粋: "if **name** == "**main**":")
+* 根拠: ブロック定義 (行番号: 279 / 抜粋: "if **name** == "**main**":")
 
 
 * **副作用**: `sys.exit(1)` によるプロセスの終了。

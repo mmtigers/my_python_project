@@ -28,7 +28,7 @@
 
 `reward_master.desc`はアプリが読まないレガシー列（読むのは`description`）だが、過去に書かれた行が残っているため、両経路とも`description`と同じ値を書いて食い違いを残さない方針であることがdocstringに明記されている。
 
-* 根拠: モジュールdocstring (行番号: 1〜26 / 抜粋: "`quest_master` / `reward_master` への UPSERT を1箇所に集約するモジュール(Issue #664)。")
+* 根拠: モジュールdocstring (行番号: 1〜26 / 抜粋: "\"\"\"quest_master / reward_master への UPSERT を1箇所に集約するモジュール(Issue #664)。")
 
 ## 3. 外部依存関係
 

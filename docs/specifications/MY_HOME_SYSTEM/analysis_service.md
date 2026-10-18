@@ -28,10 +28,9 @@
 | `sqlite3` | 標準ライブラリ | SQLiteデータベースへの接続およびクエリ実行 | `import sqlite3` (行番号: 4 / 抜粋: "import sqlite3") |
 | `shutil` | 標準ライブラリ | ディスク使用量の取得 | `import shutil` (行番号: 5 / 抜粋: "import shutil") |
 | `subprocess` | 標準ライブラリ | OSコマンド（free, journalctl）の実行 | `import subprocess` (行番号: 6 / 抜粋: "import subprocess") |
-| `os` | 標準ライブラリ | 未使用（インポートのみ） | `import os` (行番号: 5 / 抜粋: "import os") |
 | `datetime`, `timedelta`, `date` | 標準ライブラリ | 日付や時間の取得・計算 | `from datetime import ...` (行番号: 7 / 抜粋: "from datetime import datetime") |
 | `pytz` | サードパーティ | タイムゾーンの指定 | `import pytz` (行番号: 8 / 抜粋: "import pytz") |
-| `typing` | 標準ライブラリ | 型ヒントの定義 | `from typing import ...` (行番号: 8 / 抜粋: "from typing import Dict, List") |
+| `typing` | 標準ライブラリ | 型ヒントの定義 | `from typing import ...` (行番号: 9 / 抜粋: "from typing import Dict, Optional") |
 | `pandas` as `pd` | サードパーティ | データの保持、加工、結合、集計 | `import pandas as pd` (行番号: 11 / 抜粋: "import pandas as pd") |
 | `config` | 内部ファイル | 各種定数、テーブル名、デバイス定義の取得 | `import config` (行番号: 13 / 抜粋: "import config") |
 | `core.logger` | 内部ファイル | ロガーのセットアップ | `from core.logger import setup_logging` (行番号: 15 / 抜粋: "from core.logger import setup_logging") |
@@ -256,7 +255,7 @@
 ### `_classify_power_device_type` / `load_sensor_data`
 
 * **役割**: `load_sensor_data`は`device_records`、SwitchBotのログ、電力使用量の3つのテーブルからデータを取得・統合・ソートし、表示名を適用する。電力使用量(`config.SQLITE_TABLE_POWER_USAGE`)由来の行の`device_type`分類は`_classify_power_device_type`が担う。**（Issue #169で解消）** 以前はこの分類直後に`.replace("Plug", "Nature Remo E Lite")`が実行されており、"Plug"に分類された全行が無条件で"Nature Remo E Lite"へ上書きされていた(個別家電グラフが常に空になる・全プラグの消費電力がスマートメーター全体消費のグラフへ混入する不具合)。この一括置換は既に削除済み。**（Issue #829で修正）** `_classify_power_device_type`は、書き込み時点(`nature_remo_monitor.py`/`switchbot_power_monitor.py`)で明示される`device_category`列(`migrations/0020`で追加)を最優先で使い(`"smart_meter"`→`"Nature Remo E Lite"`、`"plug"`→`"Plug"`)、`device_category`が`None`(マイグレーション適用前の古い行)の場合だけ、従来の`device_name`に`"Remo"`を含むかという文字列判定にフォールバックする。以前は`device_name`文字列判定だけに頼っており、Nature Remoアプリでユーザーが設定するニックネームに`"Remo"`が含まれない環境では、スマートメーターの電力データが常に`"Plug"`に誤分類され、電気代集計(`_calculate_cost_between`)が恒常的に0円になる不具合があった。
-* 根拠: `def _classify_power_device_type(row) -> str:` (行番号: 279〜293)、`category = row.get("device_category")` (行番号: 255)、`load_sensor_data`内での呼び出し (行番号: 298〜306 / 抜粋: "df_power[\"device_type\"] = df_power.apply(_classify_power_device_type, axis=1)\n        df_power = df_power.drop(columns=[\"device_category\"])")
+* 根拠: `def _classify_power_device_type(row) -> str:` (行番号: 279〜293)、`category = row.get("device_category")` (行番号: 255)、`load_sensor_data`内での呼び出し (参照: load_sensor_data / 抜粋: "df_power[\"device_type\"] = df_power.apply(_classify_power_device_type, axis=1)\n        df_power = df_power.drop(columns=[\"device_category\"])")
 
 
 * **引数/リクエスト**: `limit` (`int`, デフォルト `5000`): 取得件数の上限。**(新機能)** `day` (`date | None`, デフォルト `None`): 指定すると`limit`によらず**その日(JST)の記録だけを全件**返す(見守りページのログの日付フィルタ用)。3クエリ共通のWHERE/ORDER/LIMIT部分は`_sensor_range_clause`が組み立て、`day`指定時はtimestamp文字列を前後1日の余裕を持たせた日付(`day-1日`以上`day+2日`未満)で粗く絞る(オフセット付き=UTC等の行が混在するため)。JSTの暦日での正確な絞り込みは、JST変換後に`df_merged["timestamp"].dt.date == day`で行う。`day`は`date`型でありSQLへ埋め込むのは`isoformat()`の値のみ。
@@ -264,7 +263,7 @@
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (統合されたセンサーデータのデータフレーム)
-* 根拠: `-> pd.DataFrame:` (行番号: 167 / 抜粋: "-> pd.DataFrame:")
+* 根拠: `-> pd.DataFrame:` (参照: load_sensor_data / 抜粋: "-> pd.DataFrame:")
 
 
 * **副作用**: データベースの読み取り操作。
@@ -279,7 +278,7 @@
 ### `calculate_monthly_cost_cumulative`
 
 * **役割**: 当月の電力使用量データから、今月の電気代概算（kwh × `ELECTRICITY_YEN_PER_KWH`=31）を算出する。**（補足表示の追加で変更）** 集計本体は期間を引数に取る `_calculate_cost_between(start, end)` へ切り出され、本関数は「月初（`_start_of_month`）から今まで」を渡す薄いラッパーになった。新テーブルが空なら旧テーブルへフォールバックする挙動は変わらない。**（Issue #170で修正）** `power_usage`テーブルにはスマートメーター(全体消費)と各プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)が同居しているため、新テーブル側のSELECTでスマートメーターの行のみを対象にするよう修正した(以前は全デバイスを無差別に合算しておりプラグ分が二重計上されていた)。また、`time_diff`(経過時間)の算出を`device_id`ごとにグループ化してから`diff()`を取るよう変更した。**（Issue #410 L-L2で修正）** `start_of_month`を組み立てる`.replace(...)`に`microsecond=0`を追加した。**（Issue #829で修正）** スマートメーター行の絞り込み条件を`device_name LIKE '%Remo%'`単独から`device_category = 'smart_meter' OR (device_category IS NULL AND device_name LIKE '%Remo%')`に変更した。以前は書き込み時点のNature Remoアプリのニックネーム設定に`"Remo"`という文字列が含まれるかだけに依存しており、含まれない環境では本SELECTが恒常的に0件になり電気代が0円表示になる不具合があった(`load_sensor_data`の`_classify_power_device_type`と同じ原因・同じ修正方針)。
-* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 407〜410)、`return int(df["kwh"].sum() * ELECTRICITY_YEN_PER_KWH)` (行番号: 433)、`return moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)` (行番号: 376)、device_categoryによる絞り込み (行番号: 399〜403 / 抜粋: "WHERE timestamp >= '{start_of_month}' AND timestamp <= '{end_iso}'\n              AND (\n                device_category = 'smart_meter'\n                OR (device_category IS NULL AND device_name LIKE '%Remo%')\n              )")
+* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 407〜410)、`return int(df["kwh"].sum() * ELECTRICITY_YEN_PER_KWH)` (行番号: 433)、`return moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)` (行番号: 376)、device_categoryによる絞り込み (参照: load_smart_meter_rows / 抜粋: "WHERE timestamp >= '{start_of_month}' AND timestamp <= '{end_iso}'\n              AND (\n                device_category = 'smart_meter'\n                OR (device_category IS NULL AND device_name LIKE '%Remo%')\n              )")
 
 
 * **引数/リクエスト**: なし
@@ -295,7 +294,7 @@
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `0` を返す（`_calculate_cost_between` 側）。
-* 根拠: `except Exception as e:` (行番号: 287〜289 / 抜粋: "return 0")
+* 根拠: `except Exception as e:` (参照: _calculate_cost_between / 抜粋: "return 0")
 
 
 ### `calculate_daily_cost_series`
@@ -341,7 +340,7 @@
 ### `_start_of_month` / `_calculate_cost_between` / `ELECTRICITY_YEN_PER_KWH`
 
 * **役割**: `_start_of_month` は渡した時刻の月初（`microsecond=0`）を返す。`_calculate_cost_between` は期間内のスマートメーターの記録から電気代を概算する共通処理で、`WHERE timestamp >= '{start}' AND timestamp <= '{end}'` で期間を絞る（上限は先月ぶんの集計のために足されたもので、今月ぶんは「今」が上限なので結果は変わらない）。`ELECTRICITY_YEN_PER_KWH` は単価（既定31円/kWh）。**(変更)** 値は`config.ELECTRICITY_YEN_PER_KWH`(環境変数`ELECTRICITY_YEN_PER_KWH`で変更可)から取る。
-* 根拠: `def _calculate_cost_between(start: datetime, end: datetime) -> int:` (行番号: 498 / 抜粋: "def _calculate_cost_between(start: datetime, end: datetime) -> int:"), `ELECTRICITY_YEN_PER_KWH = 31` (行番号: 353 / 抜粋: "ELECTRICITY_YEN_PER_KWH = 31")
+* 根拠: `def _calculate_cost_between(start: datetime, end: datetime) -> int:` (行番号: 498 / 抜粋: "def _calculate_cost_between(start: datetime, end: datetime) -> int:"), `ELECTRICITY_YEN_PER_KWH = config.ELECTRICITY_YEN_PER_KWH` (行番号: 404 / 抜粋: "ELECTRICITY_YEN_PER_KWH = config.ELECTRICITY_YEN_PER_KWH")
 
 * **引数/リクエスト**: `_start_of_month(moment: datetime)`, `_calculate_cost_between(start: datetime, end: datetime)`
 * 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 448 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
@@ -350,7 +349,7 @@
 * 根拠: `def _start_of_month(moment: datetime) -> datetime:` (行番号: 448 / 抜粋: "def _start_of_month(moment: datetime) -> datetime:")
 
 * **副作用**: `_calculate_cost_between` はデータベースの読み取り操作。
-* 根拠: `df = load_data_from_db(query)` (行番号: 328 / 抜粋: "df = load_data_from_db(query)")
+* 根拠: `df = load_data_from_db(query)` (参照: load_smart_meter_rows / 抜粋: "df = load_data_from_db(query)")
 
 * **エラーハンドリング**: `_calculate_cost_between` は例外発生時にエラーログを出力し `0` を返す。
 * 根拠: `except Exception as e:` (行番号: 520 / 抜粋: "logger.error(f\"Cost Calc Error: {e}\")")

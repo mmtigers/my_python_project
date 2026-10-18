@@ -33,11 +33,11 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.SOUND_MAP` | イベントキーとファイル名の具体的な対応が定義されているファイルが提供されていないため判断不可。 | `config.SOUND_MAP.get(event_key)` (行番号: 23 / 抜粋: "config.SOUND_MAP.get(event_k...") |
-| `config.SOUND_DIR` | 音声ファイルが格納されるべき具体的なディレクトリパスが不明。 | `os.path.join(config.SOUND_DIR` (行番号: 29 / 抜粋: "os.path.join(config.SOUND_DIR,") |
-| `config.SOUND_PLAYER_CMD` | 実行される具体的なプレイヤーコマンド（例: `aplay`, `afplay`など）が不明。 | `shutil.which(config.SOUND_P...` (行番号: 37 / 抜粋: "shutil.which(config.SOUND_PLAY...") |
+| `config.SOUND_MAP` | イベントキーとファイル名の具体的な対応が定義されているファイルが提供されていないため判断不可。 | `config.SOUND_MAP.get(event_key)` (行番号: 24 / 抜粋: "config.SOUND_MAP.get(event_k...") |
+| `config.SOUND_DIR` | 音声ファイルが格納されるべき具体的なディレクトリパスが不明。 | `os.path.join(config.SOUND_DIR` (参照: play / 抜粋: "os.path.join(config.SOUND_DIR,") |
+| `config.SOUND_PLAYER_CMD` | 実行される具体的なプレイヤーコマンド（例: `aplay`, `afplay`など）が不明。 | `shutil.which(config.SOUND_P...` (行番号: 38 / 抜粋: "shutil.which(config.SOUND_PLAY...") |
 | `config.SOUND_PLAYER_ARGS` | コマンドに付与される具体的な引数が不明。 | `config.SOUND_PLAYER_ARGS` (行番号: 45 / 抜粋: "hasattr(config, "SOUND_PLAYER_") |
-| `config.DEFAULT_SOUND_SOURCE` | 復旧用の音声ファイルが格納されているデフォルトディレクトリのパスが不明。 | `config.DEFAULT_SOUND_SOURCE` (行番号: 90 / 抜粋: "os.path.join(config.DEFAULT_SO...") |
+| `config.DEFAULT_SOUND_SOURCE` | 復旧用の音声ファイルが格納されているデフォルトディレクトリのパスが不明。 | `config.DEFAULT_SOUND_SOURCE` (行番号: 96 / 抜粋: "os.path.join(config.DEFAULT_SO...") |
 | `setup_logging`の実装 | 生成されるロガーの仕様（標準出力へのフォーマット、ログレベルなど）が不明。 | `setup_logging("sound_manager")` (行番号: 11 / 抜粋: "logger = setup_logging("sound") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -57,7 +57,7 @@
 
 
 * **副作用**: 外部プロセスの起動による音声再生（`subprocess.Popen`）と、その終了を回収するデーモンスレッド（`threading.Thread(target=proc.wait)`。Issue #654: 呼び出し元の uvicorn は SIGCHLD を処理しないため、wait しないと再生プロセスが `<defunct>` として蓄積していた）、システムログへの書き込み。
-* 根拠: `subprocess.Popen` (行番号: 53-57 / 抜粋: "subprocess.Popen( cmd, st...")
+* 根拠: `subprocess.Popen` (参照: play / 抜粋: "proc = subprocess.Popen(\n            cmd,\n            stdout=subprocess.DEVNULL,")
 
 
 * **エラーハンドリング**: OSレベルのエラー(`OSError`)およびその他の予期せぬエラー(`Exception`)をキャッチし、ログに記録（システムを停止させないFail-Soft構成）。
@@ -157,7 +157,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `config.py` | 音声プレイヤーのコマンドや、システムで使用される全てのイベントキーの対応表などの実体を把握するため。 | `import config` (行番号: 6 / 抜粋: "import config") |
-| 中 | `core/logger.py` | ログ出力のフォーマットや保存先、エラー発生時の監視システムへの連携有無を確認するため。 | `from core.logger import setup...` (行番号: 8 / 抜粋: "from core.logger import setup...") |
+| 中 | `core/logger.py` | ログ出力のフォーマットや保存先、エラー発生時の監視システムへの連携有無を確認するため。 | `from core.logger import setup...` (行番号: 9 / 抜粋: "from core.logger import setup...") |
 
 ## 8. 保守上の注意点
 

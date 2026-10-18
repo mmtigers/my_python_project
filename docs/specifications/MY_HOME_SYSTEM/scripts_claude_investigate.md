@@ -31,8 +31,8 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `flock` | 外部コマンド | ロックファイル(`logs/.claude_investigate.lock`)による多重起動防止 | 根拠: [ロック取得] (行番号: 146-147 / 抜粋: "exec 9>\"$LOCK_FILE\"\nif ! flock -n 9; then") |
-| `timeout` | 外部コマンド(coreutils) | `claude -p`の暴走対策(既定900秒、SIGTERM後10秒でSIGKILL昇格) | 根拠: [起動コマンド] (行番号: 179 / 抜粋: "RESULT=$(timeout --kill-after=10 \"$TIMEOUT_SEC\" claude -p \"$PROMPT\"") |
-| `claude` | 外部コマンド(Claude Code CLI) | ヘッドレスの原因調査本体 | 根拠: [起動コマンド] (行番号: 179-184 / 抜粋: "claude -p \"$PROMPT\"") |
+| `timeout` | 外部コマンド(coreutils) | `claude -p`の暴走対策(既定900秒、SIGTERM後10秒でSIGKILL昇格) | 根拠: [起動コマンド] (行番号: 242 / 抜粋: "RESULT=$(timeout --kill-after=10 \"$TIMEOUT_SEC\" \"$CLAUDE_CMD\" -p \"$PROMPT\" \\") |
+| `claude` | 外部コマンド(Claude Code CLI) | ヘッドレスの原因調査本体 | 根拠: [起動コマンド] (行番号: 242 / 抜粋: "\"$CLAUDE_CMD\" -p \"$PROMPT\"")、実行ファイルの解決 (参照: resolve_claude_bin / 抜粋: "printf '%s\\n' \"$CLAUDE_BIN\"") |
 | `jq` | 外部コマンド | `--output-format json`の`.result`抽出、および通知ペイロードのJSON組み立て | 根拠: [結果抽出/ペイロード] (行番号: 247, 262 / 抜粋: "jq -r '.result // .'", "PAYLOAD=$(jq -n --arg content") |
 | `curl` | 外部コマンド | `WATCHDOG_NOTIFY_WEBHOOK_URL`への調査結果POST | 根拠: [通知] (行番号: 264-267 / 抜粋: "curl -fsS -X POST \"$WATCHDOG_NOTIFY_WEBHOOK_URL\"") |
 | `python3` | 外部コマンド(Issue #577で追加) | `utf8_char_count`/`truncate_utf8_chars`関数内から`python3 -c`でUTF-8文字単位の文字数カウント・切り詰めを実行する。ロケールに依存する`wc -m`/`cut -c`は使わず、旧`wc -c`/`head -c`のバイト単位カウント・切り詰めを置き換えた | 根拠: [関数定義] (行番号: 94-101 / 抜粋: "python3 -c 'import sys; print(len(sys.stdin.read()))'", "python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:int(sys.argv[1])])' \"$1\"") |
@@ -59,7 +59,7 @@
 * 根拠: (行番号: 73-270 / 抜粋: "set -euo pipefail", "exit \"$CLAUDE_EXIT\"")、(Issue #577追加分の根拠は次項の`utf8_char_count`/`truncate_utf8_chars`サブセクション参照)
 
 * **引数/リクエスト**: コマンドライン引数なし。入力は標準入力の異常サマリのみ(空なら異常終了)。
-* 根拠: [標準入力の読み取り] (行番号: 112-116 / 抜粋: "ANOMALY_SUMMARY=$(cat)\nif [ -z \"$ANOMALY_SUMMARY\" ]; then")
+* 根拠: [標準入力の読み取り] (行番号: 153〜154 / 抜粋: "ANOMALY_SUMMARY=$(cat)\nif [ -z \"$ANOMALY_SUMMARY\" ]; then")
 
 * **戻り値/レスポンス**: 終了コード。多重起動スキップ時は`0`、サマリ空は`1`、以降は`claude -p`(timeout込み)の終了コードを透過する。
 * 根拠: (行番号: 149, 154-156, 270 / 抜粋: "exit 0", "exit 1", "exit \"$CLAUDE_EXIT\"")
@@ -134,7 +134,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `monitors/health_watch.py` | 本スクリプトの唯一の起動経路(`_fire_investigate_hook`)であり、発火条件(通知抑制との連動)を確認するため。 | 根拠: 冒頭コメント (行番号: 5-7 / 抜粋: "層1の monitors/health_watch.py が異常を検知したときに") |
+| 高 | `monitors/health_watch.py` | 本スクリプトの唯一の起動経路(`_fire_investigate_hook`)であり、発火条件(通知抑制との連動)を確認するため。 | 根拠: 冒頭コメント (行番号: 5-7 / 抜粋: "層1の monitors/health_watch.py が異常を検知した") |
 | 中 | `docs/runbooks/raspi_claude_log_monitoring.md` | ガードレールの設計意図と実機での有効化手順を確認するため。 | 根拠: 冒頭コメント (行番号: 10 / 抜粋: "詳細設計・ガードレールは docs/runbooks/raspi_claude_log_monitoring.md を参照") |
 
 ## 8. 保守上の注意点

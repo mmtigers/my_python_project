@@ -32,7 +32,6 @@
 | `datetime` | 標準ライブラリ | 最新バックアップの時刻変換(`fromtimestamp`)等。**（Issue #953）** ファイル名用のタイムスタンプは`datetime.datetime.now()`(OSローカル時刻)から`core.utils.get_now_jst()`へ変更した | `import datetime` (行番号: 6 / 抜粋: "import datetime") |
 | `shutil` | 標準ライブラリ | ファイルのNASへのコピー | `import shutil` (行番号: 7 / 抜粋: "import shutil") |
 | `threading` | 標準ライブラリ | **(不具合修正で追加)** `trigger_manual_backup_async`がバックアップ処理をバックグラウンドスレッドで実行するため | `import threading` (行番号: 9 / 抜粋: "import threading") |
-| `time` | 標準ライブラリ | 未使用 | `import time` (行番号: 5 / 抜粋: "import time") |
 | `Path` | `pathlib` | パス文字列の構築と操作 | `from pathlib import Path` (行番号: 10 / 抜粋: "from pathlib import Path") |
 | `Tuple` | `typing` | 関数の戻り値の型ヒント | `from typing import Tuple` (行番号: 11 / 抜粋: "from typing import Tuple") |
 | `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 15 / 抜粋: "from services.notification_service import send_push") |
@@ -43,13 +42,13 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.SQLITE_DB_PATH` | 定義元が存在せず、バックアップ対象の元DBパスの実体・値が不明 | `config.SQLITE_DB_PATH` (行番号: 27 / 抜粋: "src_db_path = config.SQLIT...") |
-| `config.BASE_DIR` | 定義元が存在せず、一時ディレクトリのベースパスの実体・値が不明 | `config.BASE_DIR` (行番号: 32 / 抜粋: "temp_dir = Path(config.BAS...") |
-| `config.NAS_PROJECT_ROOT` | 定義元が存在せず、NASのルートパスの実体・値が不明 | `getattr(config, "NAS_PROJE..."` (行番号: 34 / 抜粋: "nas_root = getattr(config,...") |
-| `config.NAS_MOUNT_POINT` | 定義元が存在せず、NASマウントポイントの実体・値が不明 | `os.path.join(config.NAS_MO..."` (行番号: 34 / 抜粋: "os.path.join(config.NAS_MO...") |
-| `config.BACKUP_FILES` | 定義元が存在せず、DB以外にバックアップ対象へ追加するファイルパス一覧の実体・値が不明 | `getattr(config, "BACKUP_FI..."` (行番号: 84 / 抜粋: "for entry in getattr(confi...") |
-| `core.logger.setup_logging` | 実装が提供されておらず、ログの出力先・出力形式が不明 | `setup_logging("backup")` (行番号: 15 / 抜粋: "logger = setup_logging("ba...") |
-| `services.notification_service.send_push` | 実装が提供されておらず、実際の通信方式や成否の扱いが不明 | `send_push(...)` (行番号: 230 / 抜粋: "send_push(") |
+| `config.SQLITE_DB_PATH` | 定義元が存在せず、バックアップ対象の元DBパスの実体・値が不明 | `config.SQLITE_DB_PATH` (行番号: 31 / 抜粋: "src_db_path = config.SQLIT...") |
+| `config.BASE_DIR` | 定義元が存在せず、一時ディレクトリのベースパスの実体・値が不明 | `config.BASE_DIR` (行番号: 36 / 抜粋: "temp_dir = Path(config.BAS...") |
+| `config.NAS_PROJECT_ROOT` | 定義元が存在せず、NASのルートパスの実体・値が不明 | `getattr(config, "NAS_PROJE..."` (参照: perform_backup / 抜粋: "nas_root = getattr(config,...") |
+| `config.NAS_MOUNT_POINT` | 定義元が存在せず、NASマウントポイントの実体・値が不明 | `os.path.join(config.NAS_MO..."` (参照: perform_backup / 抜粋: "os.path.join(config.NAS_MO...") |
+| `config.BACKUP_FILES` | 定義元が存在せず、DB以外にバックアップ対象へ追加するファイルパス一覧の実体・値が不明 | `getattr(config, "BACKUP_FI..."` (行番号: 266 / 抜粋: "for entry in getattr(confi...") |
+| `core.logger.setup_logging` | 実装が提供されておらず、ログの出力先・出力形式が不明 | `setup_logging("backup")` (行番号: 19 / 抜粋: "logger = setup_logging("ba...") |
+| `services.notification_service.send_push` | 実装が提供されておらず、実際の通信方式や成否の扱いが不明 | `send_push(...)` (参照: trigger_manual_backup_async / 抜粋: "send_push(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -67,7 +66,7 @@
 * **（#411 S-L8で修正）** 元・先の接続は以前 `with sqlite3.connect(...) as conn:` で開いていたが、sqlite3の`Connection.__exit__`はcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、定期実行されるバックアップ処理のたびに接続がcloseされずリークしていた。`contextlib.closing`で両接続を明示的にcloseするよう変更した。
 * 根拠: `with contextlib.closing(sqlite3.connect(src_db_path)) as src_conn, \` (行番号: 46〜48)
 * **（Issue #753 / AUDIT-024 で追加）** Phase 1 の直後、**NASへ転送する前**にバックアップファイルへ改めて接続し、`PRAGMA integrity_check` を実行する。結果が `"ok"` 以外（および `fetchone()` が偽値を返した場合）は `OSError` を送出して外側の `except` に落とし、失敗として扱う。`Connection.backup()` は正常完了すれば一貫したコピーになるが、**コピー元が既に破損していれば破損したままコピーされる**うえ、Phase 2 の転送確認はサイズ比較だけで内容を見ていないため、破損に気づかないまま `DB_BACKUP_RETENTION_DAYS`（既定30日）で健全な世代が消えうる。
-* 根拠: `result = verify_conn.execute("PRAGMA integrity_check").fetchone()` (行番号: 59 / 抜粋: "result = verify_conn.execu...")、`raise OSError(f"バックアップの整合性検証に失敗しました: {result}")` (行番号: 61)
+* 根拠: `result = verify_conn.execute("PRAGMA integrity_check").fetchone()` (行番号: 62 / 抜粋: "result = verify_conn.execu...")、`raise OSError(f"バックアップの整合性検証に失敗しました: {result}")` (行番号: 61)
 
 
 * **引数/リクエスト**: なし
@@ -162,7 +161,7 @@
 
 * **役割**（Issue #753 / AUDIT-024 で変更）: `perform_backup()` を実行し、**その成功フラグを終了コードへ反映する**（成功なら 0、失敗なら 1）。以前は戻り値を捨てていたため、バックアップが失敗してもプロセスは常に exit 0 で終わり、cron/systemd の側からは成功と区別できなかった（Discord 通知は出るため実害は小さいが、通知経路が落ちていると完全に見えなくなる）。
 * **（Issue #891）** NAS保存が成功してもオフサイト複製(`_copy_latest_offsite`)が失敗した場合は、失敗を errorチャンネルへ通知し(`_offsite_failure`)、終了コードを2にする(1=バックアップ失敗、0=全成功)。
-* 根拠: `sys.exit(1 if not _ok else (2 if _offsite_failed else 0))` (行番号: 179 / 抜粋: "sys.exit(0 if perform_back...")
+* 根拠: `sys.exit(1 if not _ok else (2 if _offsite_failed else 0))` (行番号: 358 / 抜粋: "sys.exit(1 if not _ok else (2 if _offsite_failed else 0))")
 
 ### `_notify_and_log_error`
 
@@ -179,7 +178,7 @@
 
 
 * **副作用**: ロガーへのエラー書き込み、外部API呼び出し（`send_push`）。
-* 根拠: `logger.error(...)`、`send_push(...)` (行番号: 101〜102 / 抜粋: "logger.error(f"❌ {message...")
+* 根拠: `logger.error(...)`、`send_push(...)` (参照: _notify_and_log_error / 抜粋: "logger.error(f"❌ {message...")
 
 
 * **エラーハンドリング**: なし（内部で例外捕捉は行われていない）。
@@ -276,8 +275,8 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `config.py` | データベースの正確なパス、一時ディレクトリの場所、NASの接続先、LINEユーザーIDなど、実行に必須となる環境依存の定数値を把握するため。 | `import config` (行番号: 16 / 抜粋: "import config") |
-| 中 | `common.py` | `send_push` 関数が実際にどのサービス（LINEかDiscordか等）へどのように通知を送信しているか、またエラー時の挙動を確認するため。 | `from common import send_push` (行番号: 11 / 抜粋: "from common import send_push") |
-| 低 | `core/logger.py` | ログがどこ（標準出力、ファイル、外部監視システムなど）に、どのようなフォーマットで出力されているかを特定するため。 | `from core.logger import setup_logging` (行番号: 10 / 抜粋: "from core.logger import se...") |
+| 中 | `services/notification_service.py` | `send_push` 関数が実際にどのサービス（LINEかDiscordか等）へどのように通知を送信しているか、またエラー時の挙動を確認するため。 | `from services.notification_service import send_push` (行番号: 15 / 抜粋: "from services.notification_service import send_push") |
+| 低 | `core/logger.py` | ログがどこ（標準出力、ファイル、外部監視システムなど）に、どのようなフォーマットで出力されているかを特定するため。 | `from core.logger import setup_logging` (行番号: 14 / 抜粋: "from core.logger import se...") |
 
 ## 8. 保守上の注意点
 

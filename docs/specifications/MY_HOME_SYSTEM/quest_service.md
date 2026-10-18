@@ -76,7 +76,7 @@ Issue #550で`services/quest_service.py`（旧1572行・5クラス）が`service
 
 * **役割**: プロジェクトルート直下の`quest_data`モジュール（マスターデータのハードコードリスト）を`import quest_data`で取得し、モジュールレベル変数`quest_data`として保持する。Issue #487により、以前あった`except ImportError`内の`from .. import quest_data`という相対importフォールバックは削除されている。`services`はトップレベルパッケージであり親がパッケージではないため、このフォールバックは構造上決して成功しない到達不能コードだった上、mypyがこの1行で解析を停止する原因になっていたためである。`sys.path`にPROJECT_ROOTが入っているため、通常の`import quest_data`のみで解決する。
 * 根拠: `try:\n    import quest_data\nexcept ImportError:\n    logger.warning("quest_data module not found.")\n    quest_data = None` (行番号: 117〜121)
-* 根拠: コメント (行番号: 105〜110 / 抜粋: "Issue #487: quest_data は sys.path に PROJECT_ROOT が入っているため通常の\n# importで解決する。以前あった `from .. import quest_data` のフォールバックは、\n# services がトップレベルパッケージ...であるため構造上決して成功せず、到達不能コードだった上、\n# mypyがこの1行で解析を停止しコードベース全体を検証できなくなっていた。")
+* 根拠: コメント (行番号: 123 / 抜粋: "Issue #487: quest_data は sys.path に PROJECT_ROOT が入っているため通常の\n# importで解決する。以前あった `from .. import quest_data` のフォールバックは、\n# services がトップレベルパッケージ...であるため構造上決して成功せず、到達不能コードだった上、\n# mypyがこの1行で解析を停止しコードベース全体を検証できなくなっていた。")
 * **引数/リクエスト**: なし
 * 根拠: (行番号: 117〜121)
 * **戻り値/レスポンス**: なし（モジュール変数`quest_data`への代入）

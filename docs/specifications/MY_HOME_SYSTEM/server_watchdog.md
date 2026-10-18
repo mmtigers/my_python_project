@@ -36,25 +36,24 @@
 | `Path` | 標準ライブラリ | ロックファイルのパス生成とファイル操作 | 根拠: `from pathlib import Path` (行番号: 7 / 抜粋: "from pathlib import Path") |
 | `sys` | 標準ライブラリ | モジュールインポートパスの追加 | 根拠: `import sys` (行番号: 8 / 抜粋: "import sys") |
 | `os` | 標準ライブラリ | パスの絶対パス変換およびディレクトリ名取得 | 根拠: `import os` (行番号: 9 / 抜粋: "import os") |
-| `Optional` | 標準ライブラリ | 型ヒント（コード内での明示的な使用箇所はなし） | 根拠: `from typing import Optional` (行番号: 8 / 抜粋: "from typing import Optional") |
 | `config` | 外部ファイル | 設定値（`BASE_DIR`, `LINE_USER_ID`）の読み込み | 根拠: `import config` (行番号: 13 / 抜粋: "import config") |
-| `setup_logging` | 外部ファイル | ロガーの初期化 | 根拠: `from core.logger import setup_logging` (行番号: 14 / 抜粋: "from core.logger import setup...") |
-| `send_push` | 外部ファイル | 外部への通知送信 | 根拠: `from services.notification_service import send_push` (行番号: 15 / 抜粋: "from services.notification_...") |
+| `setup_logging` | 外部ファイル | ロガーの初期化 | 根拠: `from core.logger import setup_logging` (行番号: 15 / 抜粋: "from core.logger import setup...") |
+| `send_push` | 外部ファイル | 外部への通知送信 | 根拠: `from services.notification_service import send_push` (行番号: 16 / 抜粋: "from services.notification_...") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config`モジュール | `BASE_DIR`や`LINE_USER_ID`の具体的な値、およびその他の設定内容が現在のファイルからは判断不可 | 根拠: `config` (行番号: 13 / 抜粋: "import config") |
-| `core.logger` | ロギングの出力先（コンソール、ファイル等）、フォーマットなどの具体的な振る舞いが判断不可 | 根拠: `setup_logging("watchdog")` (行番号: 24 / 抜粋: "logger = setup_logging("watc...") |
-| `services.notification_service` | `send_push`関数の通信先の仕様、リトライ制御の有無、フォーマット変換などの実装詳細が判断不可 | 根拠: `send_push(config.LINE_US...` (行番号: 14 / 抜粋: "from services.notification_...") |
+| `core.logger` | ロギングの出力先（コンソール、ファイル等）、フォーマットなどの具体的な振る舞いが判断不可 | 根拠: `setup_logging("watchdog")` (行番号: 39 / 抜粋: "logger = setup_logging("watc...") |
+| `services.notification_service` | `send_push`関数の通信先の仕様、リトライ制御の有無、フォーマット変換などの実装詳細が判断不可 | 根拠: `send_push(config.LINE_US...` (行番号: 16 / 抜粋: "from services.notification_...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `get_service_status`
 
 * **役割**: `systemctl is-active`コマンドを使用して、指定したサービスの現在のステータス文字列を取得する。
-* 根拠: `get_service_status` (行番号: 42〜56 / 抜粋: "res = subprocess.run...")
+* 根拠: `get_service_status` (参照: get_service_status / 抜粋: "res = subprocess.run...")
 
 
 * **引数/リクエスト**: `service_name: str`
@@ -66,7 +65,7 @@
 
 
 * **副作用**: OSコマンド（`systemctl`）の実行。
-* 根拠: `subprocess.run(["systemctl", "is-active", service_name]` (行番号: 50〜53 / 抜粋: "res = subprocess.run...")
+* 根拠: `subprocess.run(["systemctl", "is-active", service_name]` (参照: get_service_status / 抜粋: "res = subprocess.run...")
 
 
 * **エラーハンドリング**: 実行時に例外が発生した場合は、エラーとして文字列 `"error"` を返す。
@@ -91,7 +90,7 @@
 
 
 * **副作用**: OSコマンド（`pgrep`）の実行。
-* 根拠: `subprocess.run(["pgrep", "-f", pattern]` (行番号: 71〜74 / 抜粋: "res = subprocess.run...")
+* 根拠: `subprocess.run(["pgrep", "-f", pattern]` (参照: is_process_alive / 抜粋: "res = subprocess.run...")
 
 
 * **エラーハンドリング**: 実行時に例外が発生した場合は `False` を返す。
@@ -164,7 +163,7 @@
 
 
 * **副作用**: OSコマンド（`vcgencmd`）の実行、`_is_new_history`経由での`THROTTLE_STATE_FILE`の読み書き、ログ出力のみ。**`send_push`の直接呼び出しは行わない**（コード中のコメント「修正点2」により、`core/logger.py`側の仕様で`logger.error`がDiscordへ自動転送されることを理由に、二重通知防止のため意図的に削除されている）。
-* 根拠: `subprocess.run(['vcgencmd', 'get_throttled']` (行番号: 109 / 抜粋: "result = subprocess.run(['vcgencmd', 'get_throttled'], capture_output=True, text=True)")、`logger.error(f"⚠️ System Alert: {msg}")` (行番号: 216〜218 / 抜粋: "# 【修正点2】 core/logger.py の仕様上 logger.error だけでDiscordに自動送信されるため、\n                # send_push を削除して二重通知のスパムを防ぎます。\n                logger.error(f"⚠️ System Alert: {msg}")")、`elif history_issues != 0: if _is_new_history(history_issues): logger.warning(...) else: logger.debug(...)` (行番号: 222〜226 / 抜粋: "elif history_issues != 0:\n                if _is_new_history(history_issues):\n                    logger.warning(f"Hardware Throttling History (Recovered): {hex(val)}")\n                else:\n                    logger.debug(f"Throttling history already reported this boot: {hex(val)}")")
+* 根拠: `subprocess.run(['vcgencmd', 'get_throttled']` (行番号: 192 / 抜粋: "result = subprocess.run(['vcgencmd', 'get_throttled'], capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_SEC)")、`logger.error(f"⚠️ System Alert: {msg}")` (行番号: 216〜218 / 抜粋: "# 【修正点2】 core/logger.py の仕様上 logger.error だけでDiscordに自動送信されるため、\n                # send_push を削除して二重通知のスパムを防ぎます。\n                logger.error(f"⚠️ System Alert: {msg}")")、`elif history_issues != 0: if _is_new_history(history_issues): logger.warning(...) else: logger.debug(...)` (行番号: 222〜226 / 抜粋: "elif history_issues != 0:\n                if _is_new_history(history_issues):\n                    logger.warning(f"Hardware Throttling History (Recovered): {hex(val)}")\n                else:\n                    logger.debug(f"Throttling history already reported this boot: {hex(val)}")")
 
 
 * **エラーハンドリング**: コマンドが見つからない場合は `FileNotFoundError` をキャッチしてデバッグログを出力しスキップする。その他の例外はキャッチするが、無限ループ（監視ループからの繰り返し呼び出し）を防ぐため、意図的にエラートレースではなく例外メッセージのみをWARNINGレベルでログ出力する。
@@ -322,8 +321,8 @@ flowchart TD
 | --- | --- | --- | --- |
 | 高 | `config.py` | ロックファイル・スロットリング履歴状態ファイルの保存先である `BASE_DIR` および、通知の送信先となる `LINE_USER_ID` の実際の値を確認するため。 | 根拠: `config.BASE_DIR`, `config.LINE_USER_ID` (行番号: 21, 23, 168 / 抜粋: "Path(config.BASE_DIR)") |
 | 高 | `services/notification_service.py` | `send_push`関数が引数の `target="discord"` や `channel="error"` 等をどのようにハンドリングしているか、APIの実態を把握するため。 | 根拠: `send_push(config.LINE_USER_...` (行番号: 168, 179, 184 / 抜粋: "send_push(config.LINE_USER...") |
-| 中 | `home_system.service` (systemd設定ファイル) | スクリプトが正常性の判断に使用している対象サービスが、内部でどのようにプロセスの起動・再起動を管理しているか把握するため。 | 根拠: `WATCH_SERVICE_NAME: str = ...` (行番号: 17 / 抜粋: "WATCH_SERVICE_NAME: str = ...") |
-| 中 | `unified_server.py` | 監視対象の実体となるPythonプロセス。このプロセスが停止する原因の特定や、プロセス側のヘルスチェック機能を調べるため。 | 根拠: `WATCH_PROCESS_NAME: str = ...` (行番号: 18 / 抜粋: "WATCH_PROCESS_NAME: str = ...") |
+| 中 | `home_system.service` (systemd設定ファイル) | スクリプトが正常性の判断に使用している対象サービスが、内部でどのようにプロセスの起動・再起動を管理しているか把握するため。 | 根拠: `WATCH_SERVICE_NAME: str = ...` (行番号: 19 / 抜粋: "WATCH_SERVICE_NAME: str = ...") |
+| 中 | `unified_server.py` | 監視対象の実体となるPythonプロセス。このプロセスが停止する原因の特定や、プロセス側のヘルスチェック機能を調べるため。 | 根拠: `WATCH_PROCESS_NAME: str = ...` (行番号: 22 / 抜粋: "WATCH_PROCESS_NAME: str = ...") |
 
 ## 8. 保守上の注意点
 

@@ -65,8 +65,8 @@
 * 根拠: `send_device_command`呼び出し (行番号: 77 / 抜粋: "switchbot_service.send_device_command")
 
 
-* ローカルファイルシステム上のディレクトリ作成、およびファイル（`last_tv_lock.txt`）への日付文字列書き込み
-* 根拠: `os.makedirs`, `open` (行番号: 48-50 / 抜粋: "with open(LAST_RUN_FILE, "w") as f:")
+* 実行済みフラグファイル（深夜2時の実行は`last_tv_lock.txt`、それ以外の時刻は時刻別のファイル。`_run_file_for`が選ぶ）への日付文字列書き込み。**（#661）** 書き込みは`core/state_file.write_text_atomic`(tmp + fsync + `os.replace`)へ一本化した
+* 根拠: `state_file.write_text_atomic` (参照: main / 抜粋: "state_file.write_text_atomic(run_file, today_str)")、ファイルの選択 (参照: _run_file_for / 抜粋: "return HOLIDAY_RUN_FILE_TEMPLATE.format(hhmm=f\"{hour:02d}{minute:02d}\")")
 
 
 

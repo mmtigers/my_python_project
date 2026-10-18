@@ -25,9 +25,9 @@
 * LINEからのリクエストをハンドラへ委譲し、SwitchBotからのセンサーイベント（対象デバイス限定、重複排除後）をログDBへ保存し、サービスロジックへ委譲する責務を持つ。
 * 根拠: ルーター定義と2つのエンドポイントの存在 (行番号: 17 / 抜粋: `router = APIRouter()`)、(行番号: 19 / 抜粋: `@router.post("/callback/line")`)、(行番号: 45 / 抜粋: `@router.post("/webhook/switchbot")`)
 * コミット`94c2198`（H-4修正）により、SwitchBot公式Webhookペイロード形式（`context.deviceType`に`"WoContact"`/`"WoPresence"`等が入る形式）に対応した。`TARGET_DEVICE_TYPES`はデバイス一覧APIの語彙（`"Contact Sensor"`, `"Motion Sensor"`）と公式Webhookの語彙（`"WoContact"`, `"WoPresence"`）を併存させたsetに変更され、`device_type`の解決ロジックも`ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"`という`or`連鎖に変更された（修正前の`getattr(ctx, "deviceType", ...)`はモデル上`deviceType`が常に定義済みの`Optional`フィールドだったため、デフォルト値が効かず常に`None`になるバグがあった）。
-* 根拠: （⚠️ Issue #954 で移動済み。現在は `services/switchbot_webhook_service.py` にある。この行の行番号は移動前の `routers/webhook_router.py` のもの）  `TARGET_DEVICE_TYPES = {` (行番号: 40-43 / 抜粋: "TARGET_DEVICE_TYPES = {"), `device_type = ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"` (行番号: 132 / 抜粋: "device_type = ctx.deviceType or getattr")
+* 根拠: （Issue #954 で `services/switchbot_webhook_service.py` へ移動した処理は、そのファイル名と行番号で示す）`TARGET_DEVICE_TYPES = {` (`services/switchbot_webhook_service.py` 行番号: 27〜30 / 抜粋: "TARGET_DEVICE_TYPES = {"), `device_type = ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"` (`services/switchbot_webhook_service.py` 行番号: 93 / 抜粋: "device_type = ctx.deviceType or getattr")
 * Issue #251の修正により、`state`（開閉/検知ステータス）の解決ロジックが変更された。WoContact(開閉センサー)/`"Contact Sensor"`では、`ctx.openState`（`"open"`/`"close"`/`"timeOutNotClose"`、実際の開閉状態）が設定されていればそちらを優先し、未設定時のみ`ctx.detectionState`（内蔵PIRのモーション検知結果。`"DETECTED"`/`"NOT_DETECTED"`）へフォールバックする。それ以外のデバイスタイプ（WoPresence等）は従来通り`ctx.detectionState`を用いる。修正前は開閉センサーでも常に`ctx.detectionState`を開閉状態として扱っていたため、実機からのWebhookでは値が`"open"`/`"timeoutnotclose"`のいずれとも一致せず、ドア開放時の防犯通知が発火しないバグがあった。
-* 根拠: （⚠️ Issue #954 で移動済み。現在は `services/switchbot_webhook_service.py` にある。この行の行番号は移動前の `routers/webhook_router.py` のもの）  `state`解決の分岐 (行番号: 68-80 / 抜粋: "if device_type in (\"WoContact\", \"Contact Sensor\") and ctx.openState is not None:")
+* 根拠: （Issue #954 で `services/switchbot_webhook_service.py` へ移動した処理は、そのファイル名と行番号で示す）`state`解決の分岐 (`services/switchbot_webhook_service.py` 行番号: 109〜112 / 抜粋: "if device_type in (\"WoContact\", \"Contact Sensor\") and ctx.openState is not None:")
 
 
 
@@ -101,17 +101,17 @@
 ### 変数 `TARGET_DEVICE_TYPES`
 
 * **役割**: SwitchBot Webhookで処理対象とするデバイスタイプの集合(`set`)定義。デバイス一覧API(`GET /devices`)の語彙(`"Contact Sensor"`, `"Motion Sensor"`)と、SwitchBot公式Webhookペイロードの語彙(`"WoContact"`, `"WoPresence"`)の両方を許容する（コミット`94c2198`, H-4修正で後者を追加。従来は前者のみのリストだったため、公式Webhook形式のペイロードが全て「対象外デバイス」として黙って捨てられていた）。
-* 根拠: （⚠️ Issue #954 で移動済み。現在は `services/switchbot_webhook_service.py` にある。この行の行番号は移動前の `routers/webhook_router.py` のもの）  集合の定義 (行番号: 40-43 / 抜粋: `TARGET_DEVICE_TYPES = {`)
+* 根拠: （Issue #954 で `services/switchbot_webhook_service.py` へ移動した処理は、そのファイル名と行番号で示す）集合の定義 (`services/switchbot_webhook_service.py` 行番号: 27〜30 / 抜粋: `TARGET_DEVICE_TYPES = {`)
 
 
 
 ### エンドポイント `switchbot_webhook`
 
 * **（2026-09-06 品質監査で修正）** (1) トークン検証は `hmac.compare_digest(token.encode("utf-8"), config.SWITCHBOT_WEBHOOK_TOKEN.encode("utf-8"))` の bytes 比較に変更した。`str` 同士の `compare_digest` は非ASCII文字を含むと `TypeError` を送出するため、以前は外部公開エンドポイントに `?token=%C3%A9` を1回送るだけで 500 + `global_exception_handler` 経由の Discord エラー通知を誰でも発生させられた。(2) `sb_tool.get_device_name_by_id(mac)` は `await asyncio.to_thread(...)` でスレッドプール実行に変更した。キャッシュ未取得時(プロセス起動後の最初のイベント)は SwitchBot API へ同期HTTP(最大 10秒×4回 + バックオフ)を行うため、`async def` ハンドラ内で直接呼ぶとその間イベントループ全体(LINE callback・Alexa・`/health`・quest API)が停止していた。
-* 根拠: （⚠️ Issue #954 で移動済み。現在は `services/switchbot_webhook_service.py` にある。この行の行番号は移動前の `routers/webhook_router.py` のもの）  [bytes比較] (行番号: 84〜86 / 抜粋: "hmac.compare_digest(\n            token.encode(\"utf-8\"), config.SWITCHBOT_WEBHOOK_TOKEN.encode(\"utf-8\")")、[to_thread] (行番号: 100 / 抜粋: "api_name = await asyncio.to_thread(sb_tool.get_device_name_by_id, mac)")、[import] (行番号: 2 / 抜粋: "import asyncio")
+* 根拠: （Issue #954 で `services/switchbot_webhook_service.py` へ移動した処理は、そのファイル名と行番号で示す）[bytes比較] (`services/switchbot_webhook_service.py` 行番号: 79〜81 / 抜粋: "hmac.compare_digest(\n            token.encode(\"utf-8\"), config.SWITCHBOT_WEBHOOK_TOKEN.encode(\"utf-8\")")、[to_thread] (行番号: 100 / 抜粋: "api_name = await asyncio.to_thread(sb_tool.get_device_name_by_id, mac)")、[import] (行番号: 2 / 抜粋: "import asyncio")
 
 * **役割**: SwitchBotからのWebhookを受信し、(設定されていれば)共有シークレットトークンを検証したうえで、対象デバイスか、および重複イベントでないかを検証し、ログ保存とセンサーロジックの呼び出しを行う。デバイスタイプの判定には`ctx.deviceType`(context直下、公式Webhook形式)を優先し、`None`の場合のみ`body.deviceType`(トップレベル)、それも無ければ`"Unknown"`にフォールバックする（コミット`94c2198`, H-4修正）。この解決済みの`device_type`変数は、`sensor_service.process_sensor_data`の第4引数にもそのまま渡される（#94修正: 以前はここで未解決の`body.deviceType`（公式Webhook形式では`context`側にのみ値が入るため常に`None`）を渡していたため、公式形式のモーションイベントが`process_sensor_data`側のMotion判定に到達せず、見守り通知・無反応監視タイマーが一切発火しなかった）。開閉/検知ステータスを表す`state`変数は、`device_type`が`"WoContact"`/`"Contact Sensor"`かつ`ctx.openState`が設定されている場合はそちらを優先し、それ以外は`ctx.detectionState`を用いる（Issue #251修正: WoContactの`detectionState`は内蔵PIRのモーション検知結果であり開閉状態ではないため、開閉判定を誤らせないよう区別した）。
-* 根拠: （⚠️ Issue #954 で移動済み。現在は `services/switchbot_webhook_service.py` にある。この行の行番号は移動前の `routers/webhook_router.py` のもの）  `switchbot_webhook`関数定義とその内部処理 (行番号: 45〜119 / 抜粋: `@router.post("/webhook/switchbot")`), `state`解決の分岐 (行番号: 68-80 / 抜粋: "if device_type in (\"WoContact\", \"Contact Sensor\") and ctx.openState is not None:"), `await sensor_service.process_sensor_data(mac, name, location, device_type, state)` (行番号: 117)
+* 根拠: （Issue #954 で `services/switchbot_webhook_service.py` へ移動した処理は、そのファイル名と行番号で示す）`switchbot_webhook`関数定義とその内部処理 (行番号: 70〜152 / 抜粋: `@router.post("/webhook/switchbot")`), `state`解決の分岐 (`services/switchbot_webhook_service.py` 行番号: 109〜112 / 抜粋: "if device_type in (\"WoContact\", \"Contact Sensor\") and ctx.openState is not None:"), `await sensor_service.process_sensor_data(mac, name, location, device_type, state)` (行番号: 150)
 
 
 * **引数/リクエスト**: `body`: `SwitchBotWebhookBody` (Pydanticモデルなどの型)、`token`: `str`（省略可、デフォルト`None`。クエリパラメータ `?token=...`）
@@ -133,7 +133,7 @@
 * `config.SWITCHBOT_WEBHOOK_TOKEN` が設定されている場合、クエリパラメータ `token` が一致しなければ HTTP 401 を送出する(`hmac.compare_digest`によるタイミング攻撃耐性のある比較)。**（Issue #648）** 未設定の場合は HTTP 503 で拒否する(フェイルクローズ)。このエンドポイントは `ip_restriction_middleware` の対象外で、エッジの Cloudflare Access もバイパスする設計(#321/#517)のため、このトークンが唯一の防御であり、無検証で受け付けると第三者が任意の `deviceMac` を POST して `device_records`/`daily_logs` への書き込み・LINE/Discord 通知・SwitchBot API 呼び出し(リトライ込み)を誘発できた。実機のトークン設定(#318)が済むまでの移行用に、`config.ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK`(環境変数 `ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK=true`)を明示的に立てた場合のみ従来どおり無検証で受け付ける。拒否時の `logger.error`(= `DiscordErrorHandler` 経由の通知)はプロセスごとに最初の1回だけで、以降は `logger.debug` に落とす(外部から通知を大量発火させられないようにするため。モジュールグローバル `_unconfigured_webhook_error_logged`)。
 * 対象外デバイスや重複イベントの場合は早期リターン。
 * 明示的な `try-except` ブロックはそれ以外にはなし。
-* 根拠: （⚠️ Issue #954 で移動済み。現在は `services/switchbot_webhook_service.py` にある。この行の行番号は移動前の `routers/webhook_router.py` のもの）  トークン検証 (行番号: 51〜53 / 抜粋: `if config.SWITCHBOT_WEBHOOK_TOKEN:`)、ガード節 (行番号: 64, 85 / 抜粋: `if device_type not in...`)
+* 根拠: （Issue #954 で `services/switchbot_webhook_service.py` へ移動した処理は、そのファイル名と行番号で示す）トークン検証 (`services/switchbot_webhook_service.py` 行番号: 56 / 抜粋: `if not config.SWITCHBOT_WEBHOOK_TOKEN:`)、ガード節 (`services/switchbot_webhook_service.py` 行番号: 96 / 抜粋: `if device_type not in TARGET_DEVICE_TYPES:`)
 
 
 
@@ -249,7 +249,7 @@ graph TD
 
 
 * **(コミット`94c2198`, H-4修正で解消)** 修正前は `device_type = getattr(ctx, "deviceType", getattr(body, "deviceType", "Unknown"))` という実装だったが、`SwitchBotContext.deviceType` がPydanticの`Optional`フィールドとして常に定義済みだったため`getattr`のデフォルト値が効かず、`ctx.deviceType`が未設定(`None`)の場合でも`getattr`は`None`をそのまま返し、`body.deviceType`側へのフォールバックが機能しなかった。加えて`TARGET_DEVICE_TYPES`はデバイス一覧APIの語彙のみだったため、SwitchBot公式Webhookのペイロード（`context.deviceType`に`"WoContact"`等が入る形式）は常に「対象外デバイス」として黙って捨てられていた。現在は`device_type = ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"`という`or`連鎖に変更され、`TARGET_DEVICE_TYPES`も公式Webhook語彙を含むsetに拡張されている。
-* 根拠: （⚠️ Issue #954 で移動済み。現在は `services/switchbot_webhook_service.py` にある。この行の行番号は移動前の `routers/webhook_router.py` のもの）  `device_type = ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"` (行番号: 132 / 抜粋: "device_type = ctx.deviceType or getattr"), `TARGET_DEVICE_TYPES = {` (行番号: 40-43 / 抜粋: "TARGET_DEVICE_TYPES = {")
+* 根拠: （Issue #954 で `services/switchbot_webhook_service.py` へ移動した処理は、そのファイル名と行番号で示す）`device_type = ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"` (`services/switchbot_webhook_service.py` 行番号: 93 / 抜粋: "device_type = ctx.deviceType or getattr"), `TARGET_DEVICE_TYPES = {` (`services/switchbot_webhook_service.py` 行番号: 27〜30 / 抜粋: "TARGET_DEVICE_TYPES = {")
 
 
 * `switchbot_webhook` 内のデバイスタイプ判定において、`ctx.deviceType`（優先）または`body.deviceType`から`deviceType`を取得し、対象外の場合は辞書形式のリターンを行う。
@@ -257,7 +257,7 @@ graph TD
 
 
 * **(Issue #251修正)** 修正前は開閉/検知ステータスを表す`state`変数が常に`str(ctx.detectionState).lower()`で解決されていた。しかしSwitchBot公式Webhookドキュメントによれば、WoContact(開閉センサー)の`detectionState`は内蔵PIRのモーション検知結果(`"DETECTED"`/`"NOT_DETECTED"`)であり、実際の開閉状態は別フィールドの`ctx.openState`(`"open"`/`"close"`/`"timeOutNotClose"`)が表す。そのため修正前は実機からのWebhookで`state`が`"open"`/`"timeoutnotclose"`のいずれとも一致せず、ドア開放時の防犯通知(`sensor_service.process_sensor_data`のContact Sensor Logic分岐)が発火しないバグがあった。現在は`device_type`が`"WoContact"`/`"Contact Sensor"`かつ`ctx.openState`が設定されている場合はそちらを優先し、未設定時(過去互換ペイロード)のみ`ctx.detectionState`へフォールバックする。WoPresence(人感センサー)は元々`detectionState`がモーション検知状態を正しく表すため、この分岐の対象外(従来通り`detectionState`を使用)。
-* 根拠: （⚠️ Issue #954 で移動済み。現在は `services/switchbot_webhook_service.py` にある。この行の行番号は移動前の `routers/webhook_router.py` のもの）  `state`解決の分岐 (行番号: 68-80 / 抜粋: "if device_type in (\"WoContact\", \"Contact Sensor\") and ctx.openState is not None:")
+* 根拠: （Issue #954 で `services/switchbot_webhook_service.py` へ移動した処理は、そのファイル名と行番号で示す）`state`解決の分岐 (`services/switchbot_webhook_service.py` 行番号: 109〜112 / 抜粋: "if device_type in (\"WoContact\", \"Contact Sensor\") and ctx.openState is not None:")
 
 
 * イベント重複排除ロジックはインメモリで処理されているかなど詳細不明だが、この関数の処理に依存している。

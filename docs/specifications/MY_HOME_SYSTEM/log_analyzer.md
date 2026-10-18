@@ -28,7 +28,6 @@
 | `glob` | 標準ライブラリ | ログディレクトリ内のファイルパターンマッチング | `import glob` (行番号: 2 / 抜粋: "import glob") |
 | `re` | 標準ライブラリ | ログ行のタイムスタンプ解析（正規表現） | `import re` (行番号: 3 / 抜粋: "import re") |
 | `datetime` | 標準ライブラリ | 現在日時の取得、日付計算、文字列と日付の相互変換 | `import datetime` (行番号: 4 / 抜粋: "import datetime") |
-| `logging` | 標準ライブラリ | インポートのみ（直接的な利用箇所はファイル内に見当たらない） | `import logging` (行番号: 5 / 抜粋: "import logging") |
 | `typing` | 標準ライブラリ | 型ヒント（List, Dict, Any, Optional。いずれもクラス変数・メソッドの型注釈で使用されている） | `from typing import List, Dict, Any, Optional` (行番号: 5 / 抜粋: "from typing import List, Dict, Any, Optional") |
 | `config` | 自作モジュール | ログディレクトリパス、通知先IDの取得 | `import config` (行番号: 8 / 抜粋: "import config") |
 | `core.logger.setup_logging` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.logger import setup_logging` (行番号: 9 / 抜粋: "from core.logger import setup_logging") |
@@ -131,7 +130,7 @@
 
 
 * **副作用**: なし
-* 根拠: `_parse_timestamp`内部処理 (行番号: 70 / 抜粋: "match_iso = re.match(r'^(\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2})', line)")
+* 根拠: `_parse_timestamp`内部処理 (行番号: 85 / 抜粋: "match_iso = re.match(r'^(\\d{4}-\\d{2}-\\d{2}\\s\\d{2}:\\d{2}:\\d{2})', line)")
 
 
 * **エラーハンドリング**: `ValueError` をキャッチし、無視して次のフォーマット判定またはNoneの返却へ進む。

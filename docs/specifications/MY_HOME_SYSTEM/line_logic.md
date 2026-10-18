@@ -21,7 +21,7 @@
 * LINEプラットフォームへ返すテキスト、QuickReply、FlexMessageなどのUIコンポーネントを生成・送信するヘルパー関数群も提供する。
 * 2026年のリファクタリング（コミット `1ecbe3b`）により、`handle_message`、`ask_outing_question`、`handle_child_record`、`handle_stomach_record` および `USER_INPUT_STATE` ステートマシンは削除された。これらは本番のLINE Webhook経路（`handlers/line_handler.py`）から一切呼び出されない到達不能コードだったため。テキストメッセージの自由文処理は現在 `handlers/line_handler.py` の `_process_message_async()` → `services/ai_service.py` に一本化されている。
 * コミット `8525dc2`（H-7修正）により、`all_genki`・`child_check`・`food_record_direct`の3記録フローは`sync_run(save_log_async(...))`(または`all_genki`は後述の`save_logs_batch_async`)の戻り値（保存成否のbool）を検査するようになった。保存に失敗した場合は成功メッセージを返さず「⚠️ 記録に失敗しました。もう一度お試しください。」を返信しエラーログを出力する。これに伴い`sync_run`自体も、内部で例外が発生した場合に暗黙の`None`ではなく明示的に`False`を返すよう変更された。**（Issue #231で修正）** `all_genki`は以前、`TARGET_MEMBERS`分の`save_log_async`をそれぞれ独立に呼びリスト内包表記で結果を`all()`判定していたため、各呼び出しが個別にcommitされ、一部だけ失敗しても既に成功していた分がコミット済みのまま残った。案内どおりユーザーが再試行すると成功済み分まで重複INSERTされていた。現在は`save_logs_batch_async`(単一トランザクションで全件保存)を1回呼び出す方式に変更し、1件でも失敗すれば全件ロールバックされる真のall-or-nothingにしている。
-* 根拠: `if not save_all_ok:\n                logger.error(...)\n                send_reply_text(..., "⚠️ 記録に失敗しました。もう一度お試しください。")` (行番号: 226-228 / 抜粋: "if not save_all_ok:"), `except Exception as e:\n        logger.error(f"Sync execution error: {e}")\n        return False` (行番号: 44-46 / 抜粋: "return False")
+* 根拠: `if not save_all_ok:\n                logger.error(...)\n                send_reply_text(..., "⚠️ 記録に失敗しました。もう一度お試しください。")` (参照: _handle_all_genki / 抜粋: "if not save_all_ok:"), `except Exception as e:\n        logger.error(f"Sync execution error: {e}")\n        return False` (行番号: 44-46 / 抜粋: "return False")
 * 根拠: [ファイル全体の構成] (行番号: 401-459 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
 
 ## 3. 外部依存関係
@@ -32,7 +32,6 @@
 | --- | --- | --- | --- |
 | `config` | 外部モジュール | 設定値や定数（メンバー、DBパス等）の参照 | `import config` (行番号: 2 / 抜粋: "import config") |
 | `asyncio` | 標準ライブラリ | 非同期関数の同期実行ヘルパーの作成 | `import asyncio` (行番号: 3 / 抜粋: "import asyncio") |
-| `sqlite3` | 標準ライブラリ | データベースへの直接接続・クエリ実行 | `import sqlite3` (行番号: 4 / 抜粋: "import sqlite3") |
 | `datetime` | 標準ライブラリ | 日時のフォーマット処理 | `import datetime` (行番号: 4 / 抜粋: "import datetime") |
 | `parse_qsl` | 標準ライブラリ (`urllib.parse`) | Postbackデータのパース | `from urllib.parse import parse_qsl` (行番号: 7 / 抜粋: "from urllib.parse import parse_qsl") |
 | `MessagingApi`, `ReplyMessageRequest`, `TextMessage`, `FlexMessage`, `FlexContainer`, `QuickReply` | 外部ライブラリ (`linebot.v3.messaging`) | LINE APIのクライアント・メッセージモデル。`QuickReply`は`send_reply_text`の引数型ヒントで使用（**保守性 #410で修正**: 以前ここに含まれていた`QuickReplyItem`/`MessageAction`は、未使用だった`create_quick_reply`関数の削除に伴い未使用インポートとなったため削除した。旧版の本テーブルが記載していた`json`インポート・`PushMessageRequest`/`PostbackAction`の未使用インポートは、確認したところ現行ファイルには存在せず誤りだった） | `from linebot.v3.messaging import (` (行番号: 10-17 / 抜粋: "from linebot.v3.messaging import (") |
@@ -161,7 +160,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: [関数本体] (行番号: 81-127 / 抜粋: "try-exceptなし")
+* 根拠: [関数本体] (行番号: 81-127)
 
 
 
@@ -183,8 +182,8 @@
 
 
 * **副作用**: ローカルDB (`config.SQLITE_DB_PATH`) に対するSELECTクエリの発行。
-* **（#411 S-L8で修正）** 接続は以前 `with sqlite3.connect(...) as conn:` で開いていたが、sqlite3の`Connection.__exit__`はcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、LINE Botへのリクエストのたびに接続がcloseされずリークしていた。`contextlib.closing`で明示的にcloseするよう変更した。
-* 根拠: `with contextlib.closing(sqlite3.connect(config.SQLITE_DB_PATH)) as conn:` (行番号: 139 / 抜粋: "with contextlib.closing(sqlite3.connect(config.SQLITE_DB_PATH)) as conn:")
+* **（#411 S-L8で修正）** 接続は以前 `with sqlite3.connect(...) as conn:` で開いていたが、sqlite3の`Connection.__exit__`はcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、LINE Botへのリクエストのたびに接続がcloseされずリークしていた。`contextlib.closing`で明示的にcloseするよう変更した。**（その後の変更）** 現在は`core.database.get_ro_connection()`(読み取り専用・timeout 30秒。close も同ヘルパーが行う)で開く。以前の既定5秒では、毎日04:00のバックアップや保持期間削除と重なると "database is locked" でLINEの応答が失敗しうるため。
+* 根拠: `with get_ro_connection() as conn:` (参照: get_daily_health_summary / 抜粋: "with get_ro_connection() as conn:")
 * 根拠: `for name in TARGET_MEMBERS:` / `cur.execute(f"""` (行番号: 143, 145-149 / 抜粋: "for name in TARGET_MEMBERS:")
 
 
@@ -207,8 +206,8 @@
 
 * **役割**: ボタン押下などのPostbackEventを受信し、設定された `action` ごとに適切な記録（全件元気、子別記録、食事アンケート等）やUI表示を行う。`InputMode`/`UserInputState`ベースの手入力継続状態はもはや設定しない（コミット `1ecbe3b` で該当ロジックを撤去済み）。「その他（手入力）」系の分岐（`child_check`の`status=other`、`food_manual`）では状態を設定する代わりに案内テキストのみ返信し、続く自由文メッセージは `handlers/line_handler.py` のAIフォールバック(`services/ai_service.py`)経由で処理される前提になっている。コミット`8525dc2`（H-7修正）以降、`all_genki`・`child_check`（`target_name`ありの保存分岐）・`food_record_direct`の3フローは、DB保存結果（bool）を検査してから応答を分岐する。保存成功時のみ従来通りの完了メッセージ（Flex/テキスト）を返し、失敗時は「⚠️ 記録に失敗しました。もう一度お試しください。」を返信してエラーログを出力する。**（Issue #231で修正）** `all_genki`は以前、`TARGET_MEMBERS`分の`save_log_async`をそれぞれ独立に呼び出しリスト内包表記で結果を`all()`判定していたため、各呼び出しが個別にcommitされ、1件でも失敗すると「全体を失敗扱い」として案内する一方で既に成功していた分はコミット済みのまま残っていた。ユーザーが案内どおり再試行すると、成功済み分まで再度INSERTされ重複行が生じる不具合があった。現在は`save_logs_batch_async`(単一トランザクションで全件保存し1件でも失敗すれば全件ロールバックする)を1回呼び出すことで、真にall-or-nothingにし再試行を安全にしている。**（保守性 #410で修正）** `check_status`の記録確認画面の日付表示(`today_disp`)を、naiveな`datetime.datetime.now()`（サーバーのローカルタイムゾーン依存）から`core.utils.get_display_date()`（JST基準・`"%m/%d"`形式）へ変更した。また、`LinePostbackData(**raw_dict)`のバリデーション失敗時に`action`のみで再構築するtry/exceptフォールバックを削除した——`LinePostbackData`は`action`必須以外は全て`Optional`で`extra`設定も既定(未知フィールドは無視)のため、`raw_dict`に`action`キーが含まれる限り例外は送出されず、このフォールバックは到達不能だった。削除後、万一`action`キーが無い等でモデル構築が失敗しても、関数末尾の`except Exception`で握り潰される（挙動は実質変わらない: 到達不能だった旧フォールバックが動いていた場合の出力と、削除後に末尾の汎用ハンドラで捕捉された場合とで、ユーザーへの応答が「不明な操作」相当になる点は同じ）。**（Issue #583で修正）** `food_record_direct`アクションがDB保存する`food_records.meal_time_category`列は、以前は実際の記録時刻に関わらず常に固定文字列`"Dinner"`を保存していたが、現在は新設の`core.utils.get_meal_time_category_from_now()`（呼び出し時点のJST時刻から"Breakfast"/"Lunch"/"Snack"/"Dinner"のいずれかを判定するヘルパー）の戻り値をそのまま渡すよう修正されている。ここでの`category`変数（クイックリプライの選択肢が渡す麺類等の食品ジャンルラベル）はこの修正でも扱いが変わっておらず、従来どおり`menu_category`列（`f"{category}: {item}"`の形）にのみ使われる。
 * 根拠: `def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):` (行番号: 401-459 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
-* 根拠: `save_all_ok = sync_run(save_logs_batch_async(` (行番号: 220-224 / 抜粋: "save_all_ok = sync_run(save_logs_batch_async(")、`if not save_all_ok:` (行番号: 214 / 抜粋: "if not save_all_ok:")、`pb = LinePostbackData(**raw_dict)` (行番号: 203)、`today_disp = get_display_date()` (行番号: 324)
-* 根拠: `elif action == "food_record_direct":` (行番号: 360)、`save_ok = sync_run(save_log_async(` (行番号: 369-373 / 抜粋: "(user_id, user_name, get_today_date_str(), get_meal_time_category_from_now(), final_rec, get_now_iso())")
+* 根拠: `save_all_ok = sync_run(save_logs_batch_async(` (参照: _handle_all_genki / 抜粋: "save_all_ok = sync_run(save_logs_batch_async(")、`if not save_all_ok:` (行番号: 214 / 抜粋: "if not save_all_ok:")、`pb = LinePostbackData(**raw_dict)` (行番号: 203)、`today_disp = get_display_date()` (行番号: 324)
+* 根拠: `elif action == "food_record_direct":` (行番号: 360)、`save_ok = sync_run(save_log_async(` (参照: _handle_food_record_direct / 抜粋: "(ctx.user_id, ctx.user_name, get_today_date_str(), get_meal_time_category_from_now(), final_rec, get_now_iso())")
 
 
 * **引数/リクエスト**: `event` (PostbackEvent), `line_bot_api` (MessagingApi)
@@ -222,7 +221,7 @@
 * **副作用**:
 * `save_log_async`/`save_logs_batch_async`（Issue #231以降、`all_genki`は`save_logs_batch_async`）を用いたDBへの書き込み処理（`sync_run`で同期化）。保存結果は`all_genki`では`save_logs_batch_async`の単一の戻り値を`save_all_ok`として判定、`child_check`/`food_record_direct`では単一の戻り値を`save_ok`として判定する。`food_record_direct`が書き込む`meal_time_category`列の値は`get_meal_time_category_from_now()`（Issue #583で追加、呼び出し時点のJST時刻に依存）の戻り値。
 * LINE APIを通じたリプライ送信（テキスト・FlexMessage）。保存失敗時は`send_reply_text`で失敗テキストのみ返信し、成功時のみ従来のFlexMessage/テキストを送信する。
-* 根拠: `sync_run(save_logs_batch_async(` (行番号: 220-224 / 抜粋: "save_all_ok = sync_run(save_logs_batch_async(") / `line_bot_api.reply_message(` (行番号: 252-258) / `get_meal_time_category_from_now()` (行番号: 372)
+* 根拠: `sync_run(save_logs_batch_async(` (参照: _handle_all_genki / 抜粋: "save_all_ok = sync_run(save_logs_batch_async(") / `line_bot_api.reply_message(` (行番号: 252-258) / `get_meal_time_category_from_now()` (行番号: 372)
 
 
 * **エラーハンドリング**:
@@ -231,7 +230,7 @@
 * `all_genki`/`child_check`/`food_record_direct`はDB保存結果が偽の場合、成功メッセージを送らずエラーログ出力＋失敗テキスト返信を行う。
 * 全体の処理エラーをキャッチしログ出力する。
 * 根拠: `else: logger.warning(...)` / `except Exception as e: logger.error(...)` (行番号: 396-405, 407-408 / 抜粋: "logger.warning(f\"Unknown action received:")
-* 根拠: `logger.error(f"all_genki の記録保存に失敗しました (user_id={user_id})")` (行番号: 227 / 抜粋: "の記録保存に失敗しました")
+* 根拠: `logger.error(f"all_genki の記録保存に失敗しました (user_id={user_id})")` (参照: _handle_all_genki / 抜粋: "の記録保存に失敗しました")
 
 
 

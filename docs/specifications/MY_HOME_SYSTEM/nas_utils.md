@@ -30,7 +30,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 | `pathlib.Path` | 標準ライブラリ | パス操作 | `from pathlib import Path` (行番号: 4 / 抜粋: "from pathlib import Path") |
 | `config` | 外部モジュール | `LINE_USER_ID` の取得など。**Issue #111の修正**により、`import config`自体が失敗した場合のフォールバックとして`config = None`が明示的に定義されるようになった（以前はこのフォールバック節が`get_logger`/`send_push`のみを定義し`config`を定義していなかったため、`import config`が失敗すると`config`という名前自体が未束縛のままモジュールロードが完了し、`get_managed_target_directory`のNAS復旧失敗経路で`NameError`が送出されていた）。 | `import config` (行番号: 7 / 抜粋: "import config"), `config = None` (行番号: 22 / 抜粋: "config = None") |
 | `core.logger.get_logger` | 外部関数 | ロガーの取得 | `from core.logger import get_logger` (行番号: 11 / 抜粋: "from core.logger import get_logger") |
-| `services.notification_service.send_push` | 外部関数 | エラー時のプッシュ通知送信 | `from services.notification_service import send_push` (行番号: 9 / 抜粋: "from services.notification_service import...") |
+| `services.notification_service.send_push` | 外部関数 | エラー時のプッシュ通知送信 | `from services.notification_service import send_push` (行番号: 12 / 抜粋: "from services.notification_service import...") |
 
 ### ブラックボックスとなる外部要素
 
@@ -38,7 +38,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 | --- | --- | --- |
 | `config` | 実装が提供されていないため、どのような変数が定義されているか不明（`LINE_USER_ID` 以外） | `import config` (行番号: 7 / 抜粋: "import config") |
 | `get_logger` | 内部実装やログの出力先、フォーマットが不明（`core.logger` に依存のため要確認） | `from core.logger import get_logger` (行番号: 11 / 抜粋: "from core.logger import get_logger") |
-| `send_push` | 通知の具体的な送信処理、対応プラットフォームなどの実装が不明（`services.notification_service` に依存のため要確認） | `from services.notification_service import send_push` (行番号: 9 / 抜粋: "from services.notification_service import...") |
+| `send_push` | 通知の具体的な送信処理、対応プラットフォームなどの実装が不明（`services.notification_service` に依存のため要確認） | `from services.notification_service import send_push` (行番号: 12 / 抜粋: "from services.notification_service import...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -59,7 +59,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 
 
 * **副作用**: OSコマンド(`sudo mount`)の実行、ログの出力
-* 根拠: `attempt_remount`内処理 (行番号: 40, 45 / 抜粋: "res = subprocess.run...", "logger.info(...)")
+* 根拠: `attempt_remount`内処理 (行番号: 43, 45 / 抜粋: "res = subprocess.run...", "logger.info(...)")
 
 
 * **エラーハンドリング**: `subprocess.TimeoutExpired`とその他の`Exception`を別々にキャッチし、いずれもエラーログを出力してFalseを返す。

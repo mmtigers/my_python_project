@@ -29,7 +29,6 @@
 | `dataclasses` | 標準 | `dataclasses.replace`で検証済み画像URLに差し替えた`ArticleContent`を作る | 根拠: [インポート宣言] (行番号: 14 / 抜粋: "import dataclasses") |
 | `sys` | 標準 | プロジェクトルートを`sys.path`へ追加 | 根拠: [インポート宣言] (行番号: 15 / 抜粋: "import sys") |
 | `pathlib.Path` | 標準 | 自ファイルの親の親(プロジェクトルート)を解決 | 根拠: [インポート宣言] (行番号: 16 / 抜粋: "from pathlib import Path") |
-| `typing.Optional` | 標準 | 型ヒント | 根拠: [インポート宣言] (行番号: 17 / 抜粋: "from typing import Optional") |
 | `config` | 外部 | `MFUJIN_BLOG_*`設定値・`SQLITE_TABLE_MFUJIN_NOTIFICATIONS` | 根拠: [インポート宣言] (行番号: 20 / 抜粋: "import config") |
 | `core.database.get_db_cursor` | 外部 | SQLite接続(WAL・ロックリトライ込み) | 根拠: [インポート宣言] (行番号: 22 / 抜粋: "from core.database import get_db_cursor") |
 | `core.logger.setup_logging` | 外部 | ロガー初期化 | 根拠: [インポート宣言] (行番号: 23 / 抜粋: "from core.logger import setup_logging") |

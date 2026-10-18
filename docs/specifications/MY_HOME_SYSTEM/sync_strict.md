@@ -30,7 +30,7 @@
 
 **（Issue #664 で変更）本ファイルは同期処理そのものを持たない。** 同期の実体(`DELETE ... NOT IN` とUPSERTのループ)は`services/quest/game_system.py`の`GameSystem.sync_master_data(strict=True)`へ統合され、本ファイルに残るのはCLIの責務(引数解析と、破壊的操作に対する安全ガード)だけである。統合前はここと`GameSystem.sync_master_data()`に「マスタ→DB同期」が二重に書かれており、UPSERTの列リストが食い違う事故が#100(`reset_period`欠落)・#164(時間帯/期間/出現率/前提クエスト欠落)・#165(`description`欠落)と3度起きていた。#664の前段(PR #670)でUPSERT文自体は`services/quest/master_sync_sql.py`へ寄せられたが、削除方針と同期ループは二重のまま残っていたため、ここで完全に1本化された。
 * 根拠: モジュールdocstring (行番号: 3〜16 / 抜粋: "同期の実体(`DELETE ... NOT IN` + UPSERT)は")
-* 根拠: `game_system.sync_master_data(strict=True, dry_run=dry_run)` (行番号: 107 / 抜粋: "game_system.sync_master_data(strict=True, dry_run=dry_run)")
+* 根拠: `game_system.sync_master_data(strict=strict, dry_run=dry_run)` (参照: run_sync / 抜粋: "game_system.sync_master_data(strict=strict, dry_run=dry_run)")。**（Issue #700）** `strict`は呼び出し元から渡され、`--if-stale`(無人実行)だけが`False`を渡す (参照: run_sync / 抜粋: "strict: `GameSystem.sync_master_data` へそのまま渡す。`--if-stale`")
 
 `strict=True`が API 経路(`POST /api/quest/seed` = `strict=False`)と異なる点は3つで、いずれも`GameSystem.sync_master_data`側のdocstringに記載されている: (1) マスタのクエストが空のとき`quest_master`を全削除する(`strict=False`は#242の安全弁として削除自体をスキップする)、(2) `quest_users`は同期しない(CLIの対象は一貫して`quest_master`/`reward_master`の2テーブル)、(3) マスタ各エントリの欠損キーを統合前の本ファイルと同じ既定値で補ってから`MasterQuest`/`MasterReward`で検証する。
 * 根拠: モジュールdocstring (行番号: 17〜18 / 抜粋: "`strict=True` が API 経路(`POST /api/quest/seed` = `strict=False`)と違う点は")
@@ -88,7 +88,7 @@
 * **戻り値/レスポンス**: 該当なし(例外クラス)
 * **副作用**: なし
 * **エラーハンドリング**: 該当なし。呼び出し元(`main`)が`except SyncAborted:`で捕捉し`sys.exit(1)`する
-* 根拠: (行番号: 118〜119 / 抜粋: "except SyncAborted:")
+* 根拠: (参照: main / 抜粋: "except SyncAborted:")
 
 ### `confirm_or_abort`
 
@@ -249,7 +249,7 @@ graph TD
 * **安全ガードとマスタの読み込み口は一致させること**: `run_sync`は`load_master_module()`で取得したマスタの件数を`confirm_or_abort`に渡し、続けて`sync_master_data`が同じ読み込み口から読む。ここを別々の経路(例: `from quest_data import QUESTS`のモジュールレベルimport)に戻すと、ガードが見たマスタと実際に書かれるマスタがずれうる。
 * 根拠: コメント (参照: run_sync / 抜粋: "別々に読むと、ガードが見たマスタと実際に書かれるマスタがずれうる。")
 * **`--dry-run`は確認プロンプトを通らない**: `run_sync`は`dry_run=True`のとき`load_master_module()`も`confirm_or_abort`も呼ばずに`sync_master_data(strict=True, dry_run=True)`へ進む。DBを変更しないため問題にはならないが、「dry-runでは空マスタガードが働かない」という非対称は意図的なものである。
-* 根拠: (行番号: 96〜107 / 抜粋: "if not dry_run:")
+* 根拠: (参照: run_sync / 抜粋: "if not dry_run:")
 * **`confirm_or_abort`の対話プロンプトはCLI実行前提**: `input_func`のデフォルトは組み込み`input`であり、`unified_server.py`等のAPI経由で本モジュールの関数を直接呼び出すような使い方は想定されていない(現状そのような呼び出し元は本ファイルからは確認できない)。API経路が使うのは`strict=False`側である。
 * **（Issue #700）`--if-stale`は差分があるときだけ同期すること**: マーカーの判定を外して毎回同期すると、`DELETE ... NOT IN`を含む破壊的操作が`git pull`・サーバー起動のたびに走る。逆に**同期が失敗したのにマーカーを進めると、以後のデプロイで永久に同期されなくなる**ため、マーカーの更新は同期成功後に限ること。回帰テストは`tests/test_sync_strict.py::TestRunSyncIfStale`(差分なしで`sync_master_data`を呼ばないこと、`strict=False`で呼ぶこと、プロンプトを出さないこと、中止・失敗・dry-runでマーカーを更新しないこと)。
 * 根拠: `def run_sync_if_stale(dry_run: bool = False, base_dir=None, marker_path=None) -> int:` (行番号: 138〜206)

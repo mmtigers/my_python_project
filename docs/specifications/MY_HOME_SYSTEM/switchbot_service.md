@@ -43,9 +43,9 @@
 | `requests` | 外部ライブラリ | 外部API（SwitchBot API）へのHTTPリクエスト送信 | 根拠: `import requests` (行番号: 11 / 抜粋: "import requests") |
 | `config` | 内部モジュール | APIホストURL、トークン、シークレット等の設定値取得 | 根拠: `import config` (行番号: 12 / 抜粋: "import config") |
 | `core.logger` | 内部モジュール | ロガー（`setup_logging`）の取得 | 根拠: `from core.logger import...` (行番号: 16 / 抜粋: "from core.logger import setup_logging") |
-| `core.utils`（#661で追加） | 内部モジュール | Exponential Backoff リトライの共通実装（`retry_with_backoff`）の取得。`request_switchbot_api` の独自ループを置き換えた | 根拠: `from core.utils import...` (行番号: 15 / 抜粋: "from core.utils import retry_with_backoff") |
+| `core.utils`（#661で追加） | 内部モジュール | Exponential Backoff リトライの共通実装（`retry_with_backoff`）の取得。`request_switchbot_api` の独自ループを置き換えた | 根拠: `from core.utils import...` (行番号: 17 / 抜粋: "from core.utils import get_now_jst, retry_with_backoff") |
 | `models.switchbot` | 内部モジュール | レスポンスデータ検証用のPydanticモデル取得 | 根拠: `from models.switchbot import...` (行番号: 18 / 抜粋: "from models.switchbot import DeviceStatusResponse") |
-| `services.notification_service`（毎朝ミッション統合で追加） | 内部モジュール | `trigger_tv_unlock`のFail-Soft通知（TV電源ON失敗時に親グループへLINE Push） | 根拠: `from services import notification_service` (行番号: 19 / 抜粋: "from services import notification_service") |
+| `services.notification_service`（毎朝ミッション統合で追加） | 内部モジュール | `trigger_tv_unlock`のFail-Soft通知（TV電源ON失敗時に親グループへLINE Push） | 根拠: `from services import notification_service` (行番号: 19 / 抜粋: "from services import nature_remo_service, notification_service") |
 
 * **（Issue #664）** 12行目には長らく `# from common import retry_api_call # 削除` というコメントだけが残っていたが、`common.py`（Deprecated Facade）そのものの廃止に伴い「`common.py` ごと廃止された」旨の注記へ置き換えられた。実行される import は増減しておらず、リトライの実体は上表の `core.utils.retry_with_backoff` である（#661 以前は本モジュール内の独自ループだった）。根拠: コメント行 (行番号: 13 / 抜粋: "# (以前ここにあった `from common import retry_api_call` のコメントは、common.py ごと廃止された。Issue #664)")
 
@@ -54,7 +54,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config` | 設定値（トークン、シークレット、ホストURL）が環境変数から取得されているか等の実装詳細が不明。 | 根拠: `config.SWITCHBOT_API_TOKEN` (行番号: 301 / 抜粋: "token = config.SWITCHBOT_API_TOKEN") |
-| `DeviceStatusResponse` | モデルのプロパティ定義や、`dict()`呼び出し時の挙動（シリアライズ仕様）が不明。 | 根拠: `DeviceStatusResponse` (行番号: 28 / 抜粋: "validated = DeviceStatusResponse(**raw_data)") |
+| `DeviceStatusResponse` | モデルのプロパティ定義や、`model_dump()`呼び出し時の挙動（シリアライズ仕様）が不明。 | 根拠: `DeviceStatusResponse` (参照: request_switchbot_api / 抜粋: "return DeviceStatusResponse(**response.json()).model_dump()") |
 | `setup_logging` | 生成されるロガーの設定（出力先、フォーマット、ログレベルなど）の詳細が不明。 | 根拠: `setup_logging` (行番号: 21 / 抜粋: "logger = setup_logging("service.switchbot")") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -111,7 +111,7 @@
 
 
 * **副作用**: 外部APIへのデータ送信（デバイスの操作など）
-* 根拠: `requests.post` (行番号: 53 / 抜粋: "response = requests.post(url, ...")
+* 根拠: `requests.post` (行番号: 98 / 抜粋: "response = requests.post(url, ...")
 
 
 * **エラーハンドリング**: HTTPエラーステータスが返却された場合、`response.raise_for_status()` により例外を送出。

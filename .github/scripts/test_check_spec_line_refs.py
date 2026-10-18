@@ -803,3 +803,166 @@ def test_convert_does_not_inherit_symbol_across_h2_heading(fake_repo):
     )
     assert checker.convert_to_symbol_references([spec]) == (1, 0)
     assert "参照: Greeter.greet" in spec.read_text(encoding="utf-8")
+
+
+# --- 抜粋の正規化(Issue #950) -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        # 仕様書ではソースのバックスラッシュを2つで書く
+        (r're.compile(r"(\\d+)/x")', r're.compile(r"(\d+)/x")'),
+        (r'say \"hi\"', 'say "hi"'),
+        # Markdown の表でエスケープしたパイプ
+        (r'pactl list sinks short \| grep -q', "pactl list sinks short | grep -q"),
+        # 行全体を囲むバッククォート
+        ("`import sys`", "import sys"),
+        # 省略記号から後ろは落とす(先頭部分で照合する)
+        ("from core.logger import setup...", "from core.logger import setup"),
+        ("_RE = re.compile(…)", "_RE = re.compile("),
+        # Markdown の強調記法に食われたダンダー名
+        ("def **init**(self)", "def __init__(self)"),
+        ("logger = setup_logging(**name**)", "logger = setup_logging(__name__)"),
+        # 文字列リテラル中の Markdown 強調(日本語)は戻さない
+        ('title = "🚨 **重大エラー発生**"', 'title = "🚨 **重大エラー発生**"'),
+    ],
+)
+def test_normalize_snippet_line(raw, expected):
+    assert checker._normalize_snippet_line(raw) == expected
+
+
+def test_escaped_backslash_snippet_is_gated(fake_repo):
+    """正規表現のように `\\\\` で書いた抜粋も、ソースの `\\` と照合してゲートに入る。"""
+    src = fake_repo / "MY_HOME_SYSTEM" / "sample.py"
+    src.write_text(src.read_text(encoding="utf-8") + '\n\nPATTERN = r"\\d+-\\w+"\n', encoding="utf-8")
+    _write_spec(fake_repo, '* 根拠: 定義 (行番号: 1 / 抜粋: "PATTERN = r\\"\\\\d+-\\\\w+\\"")\n')
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert len(findings) == 1 and findings[0].actual == 13
+
+
+def test_symbol_reference_includes_decorator_lines(fake_repo):
+    """デコレータの行(`@staticmethod` 等)も、そのシンボルの中として扱う。"""
+    src = fake_repo / "MY_HOME_SYSTEM" / "sample.py"
+    src.write_text(
+        src.read_text(encoding="utf-8") + "\n\nclass Tool:\n    @staticmethod\n    def run(x):\n        return x\n",
+        encoding="utf-8",
+    )
+    _write_spec(fake_repo, '* 根拠: 静的メソッド (参照: Tool.run / 抜粋: "@staticmethod")\n')
+    assert checker.scan_symbol_references() == ([], 1)
+
+
+def test_convert_uses_following_lines_to_disambiguate(fake_repo):
+    """先頭行が複数のシンボルに現れても、複数行の抜粋全体が1箇所に決まれば変換する。"""
+    src = fake_repo / "MY_HOME_SYSTEM" / "sample.py"
+    src.write_text(
+        src.read_text(encoding="utf-8")
+        + "\n\ndef first():\n    try:\n        pass\n    except Exception:\n        return 1\n"
+        + "\n\ndef second():\n    try:\n        pass\n    except Exception:\n        return 2\n",
+        encoding="utf-8",
+    )
+    spec = _write_spec(
+        fake_repo,
+        "### 処理の流れ\n\n* 根拠: 例外 (行番号: 90〜91 / 抜粋: \"except Exception:\\n        return 2\")\n",
+    )
+    assert checker.convert_to_symbol_references([spec]) == (1, 0)
+    assert "参照: second" in spec.read_text(encoding="utf-8")
+
+
+def test_citation_naming_another_file_is_not_checked(fake_repo):
+    """括弧の中で別ファイルを名指しした `行番号:` は、そのファイルの行なので照合しない(誤検知しない)。"""
+    _write_spec(fake_repo, '* 根拠: テスト側 (`test_sample.py` 行番号: 40 / 抜粋: "def farewell(name):")\n')
+    assert checker.scan(fix=False) == ([], 0)
+
+
+def test_citation_naming_its_own_source_is_still_checked(fake_repo):
+    _write_spec(fake_repo, '* 根拠: 定義 (`sample.py` 行番号: 40 / 抜粋: "def farewell(name):")\n')
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1 and len(findings) == 1
+
+
+def test_excerpt_ends_at_its_own_closing_paren(fake_repo):
+    """1行に引用が並ぶとき(`(行番号: 9 / 抜粋: "a"), `b` (行番号: 99)`)、手前の抜粋は自分の `")` で閉じる。"""
+    _write_spec(
+        fake_repo,
+        '* 根拠: [戻り値] (行番号: 99 / 抜粋: "return \\"bye \\" + name"), `farewell` (行番号: 9)\n',
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert len(findings) == 1 and findings[0].actual == 10
+
+
+def test_citation_with_file_named_just_before_paren_is_not_checked(fake_repo):
+    """`` `routers/other.py` (行番号: 42 / 抜粋: …) `` も別ファイルの行として照合しない。"""
+    _write_spec(fake_repo, '* 根拠: 呼び出し側 `routers/other.py` (行番号: 40 / 抜粋: "def farewell(name):")\n')
+    assert checker.scan(fix=False) == ([], 0)
+
+
+def test_symbol_reference_excerpt_ends_at_its_own_closing_paren(fake_repo):
+    """シンボル参照の抜粋も、後ろに並ぶ別の引用(`` `x` (行番号: …) ``)の文字を取り込まない。"""
+    _write_spec(
+        fake_repo,
+        '* 根拠: 戻り値 (参照: farewell / 抜粋: "return \\"bye \\" + name"), `Greeter` (行番号: 4)\n',
+    )
+    assert checker.scan_symbol_references() == ([], 1)
+
+
+# --- シェルのシンボル参照(Issue #950) -------------------------------------------
+
+_SHELL_SAMPLE = textwrap.dedent(
+    '''\
+    #!/bin/bash
+    set -eu
+
+    log() {
+        echo "[$(date)] $1" >> "$LOG_FILE"
+    }
+
+    function check_mount {
+        if ! mountpoint -q "$MOUNT_POINT"; then
+            log "NAS未マウント"
+            return 1
+        fi
+    }
+
+    log "start"
+    '''
+)
+
+
+def _write_shell(repo, body):
+    (repo / "MY_HOME_SYSTEM" / "tool.sh").write_text(_SHELL_SAMPLE, encoding="utf-8")
+    path = repo / "docs" / "specifications" / "MY_HOME_SYSTEM" / "tool.md"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_shell_function_spans():
+    assert checker._shell_function_spans(_SHELL_SAMPLE) == [("log", 4, 6), ("check_mount", 8, 13)]
+
+
+def test_shell_function_spans_drop_duplicates_and_unclosed():
+    source = "a() {\n  :\n}\na() {\n  :\n}\nb() {\n  echo\n"
+    assert checker._shell_function_spans(source) == []
+
+
+def test_shell_symbol_reference_is_checked(fake_repo):
+    _write_shell(fake_repo, '* 根拠: 未マウント時 (参照: check_mount / 抜粋: "if ! mountpoint -q \\"$MOUNT_POINT\\"; then")\n')
+    assert checker.scan_symbol_references() == ([], 1)
+
+
+def test_shell_symbol_reference_detects_snippet_in_another_function(fake_repo):
+    _write_shell(fake_repo, '* 根拠: 未マウント時 (参照: log / 抜粋: "if ! mountpoint -q \\"$MOUNT_POINT\\"; then")\n')
+    problems, _ = checker.scan_symbol_references()
+    assert len(problems) == 1 and "log" in problems[0]
+
+
+def test_convert_shell_citation_to_symbol_reference(fake_repo):
+    spec = _write_shell(
+        fake_repo,
+        "### `check_mount`\n\n* 根拠: 未マウント時 (行番号: 30〜40 / 抜粋: \"log \\\"NAS未マウント\\\"\")\n",
+    )
+    assert checker.convert_to_symbol_references([spec]) == (1, 0)
+    assert "参照: check_mount" in spec.read_text(encoding="utf-8")
+    assert checker.scan_symbol_references()[0] == []

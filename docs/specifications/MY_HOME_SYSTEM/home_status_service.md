@@ -34,7 +34,7 @@
 | `threading` | 標準ライブラリ | 自前キャッシュの排他（`threading.Lock`） | `import threading` (行番号: 20 / 抜粋: "import threading") |
 | `time` | 標準ライブラリ | キャッシュのTTL判定（`time.monotonic()`） | `import time` (行番号: 21 / 抜粋: "import time") |
 | `collections.abc.Callable` | 標準ライブラリ | `_cached` の引数の型注釈 | `from collections.abc import Callable` (行番号: 22 / 抜粋: "from collections.abc import Callable") |
-| `datetime.datetime` | 標準ライブラリ | 時刻比較（経過分数） | `from datetime import datetime` (行番号: 22 / 抜粋: "from datetime import datetime") |
+| `datetime.date`, `datetime.datetime`, `datetime.timedelta` | 標準ライブラリ | 時刻比較（経過分数） | `from datetime import date, datetime, timedelta` (行番号: 23 / 抜粋: "from datetime import date, datetime, timedelta") |
 | `typing.Any` / `NamedTuple` | 標準ライブラリ | 型注釈、`StatusCard`/`DashboardMaterials` の定義 | `from typing import Any, NamedTuple` (行番号: 24 / 抜粋: "from typing import Any, NamedTuple") |
 | `pandas` | 外部ライブラリ | DataFrame/Series の判定処理 | `import pandas as pd` (行番号: 27 / 抜粋: "import pandas as pd") |
 | `pytz` | 外部ライブラリ | `format_relative_time`の naive タイムスタンプJST化(`_JST`) | `import pytz` (行番号: 28 / 抜粋: "import pytz") |

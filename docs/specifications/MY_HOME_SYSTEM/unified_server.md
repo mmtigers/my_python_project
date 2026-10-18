@@ -31,7 +31,7 @@
 * FastAPIを用いたAPIサーバーのエントリーポイント（起動・設定スクリプト）である。
 * システムのルートディレクトリ解決、CORS設定、IPアドレスベースの検証（Cloudflare等リバースプロキシ対応）、ログ抑制フィルターの設定、各種ルーターの統合を行う。CORS許可オリジンは`config.CORS_ORIGINS`を直接参照する（M-8-2で、本ファイル側に別途あった重複ハードコードリストを削除し一本化した。以前は本ファイル側のリストのみが実際に使われ、`config.py`側の設定やその元になる`ALLOW_ALL_ORIGINS`環境変数を変更してもCORS設定に反映されない状態だった）。
 * **（画面タップログで追加）** `routers.ui_log_router`を`app.include_router(ui_log_router.router, prefix="/api/ui-log", tags=["ui-log"])`で`/api/ui-log`配下にマウントする(`POST /api/ui-log/events`)。同一オリジンの内部APIであり新しい外部Webhookではないため、`allowed_webhook_paths`への追記は不要。根拠: `app.include_router(ui_log_router.router, prefix="/api/ui-log", tags=["ui-log"])` (行番号: 503)
-* 根拠: [CORSミドルウェア設定] (行番号: 245-251 / 抜粋: "allow_origins=config.CORS_ORIGINS,")
+* 根拠: [CORSミドルウェア設定] (行番号: 357 / 抜粋: "allow_origins=config.CORS_ORIGINS,")
 * **（#411 S-L7で修正）** `allow_credentials`は`config.CORS_ORIGINS != ["*"]`で動的に決定する。以前は`ALLOW_ALL_ORIGINS=true`で`CORS_ORIGINS=["*"]`になっている場合でも`allow_credentials=True`に固定されており、StarletteのCORSMiddlewareはワイルドカード＋認証情報付きリクエストに対してリクエスト元Originをそのままエコーバックする(仕様上「*」は認証情報付きレスポンスヘッダとしては使えないため)。結果として、`ALLOW_ALL_ORIGINS=true`時は任意オリジンからCookie等の資格情報付きアクセスを実質許可してしまっていた。ワイルドカード指定時のみ`allow_credentials`をFalseにする。
 * 根拠: `allow_credentials=config.CORS_ORIGINS != ["*"]` (行番号: 248)
 * 静的ファイル（`/assets`, `/uploads`, SPA用ファイル）の配信ルーティングを行う。
@@ -40,7 +40,7 @@
 * **（Issue #829で改訂）** `config.DASHBOARD_ENABLED` が真のときだけ `routers/dashboard_router.py` をincludeする。以前はStreamlitダッシュボードを`config.DASHBOARD_INTERNAL_URL`(既定 `http://127.0.0.1:8501`)へリバースプロキシしていたが、Streamlit版は廃止され、`dashboard_router`自身がこのサーバー内でHTMLを直接組み立てて返す(外部プロセスへの中継は無い)。`config.DASHBOARD_BASE_PATH`（既定 `/dashboard`）配下へのマウントである点は変わらない。外部（スマートフォン等）からの到達はCloudflare Accessの保護下にある本サーバー経由へ一本化する構成も変わらず、コメントに **このパスを Cloudflare Access のバイパス対象に設定してはならない** と明記されている。
 * 根拠: [ダッシュボードのinclude] (行番号: 509〜511 / 抜粋: "if config.DASHBOARD_ENABLED:", "    app.include_router(dashboard_router.router, tags=[\"dashboard\"])")
 * **（Issue #829で削除）** 以前は`lifespan`の終了処理で、Streamlit中継用のhttpxコネクションプールを閉じる`dashboard_proxy_service.aclose()`を呼んでいたが、中継自体が無くなったためこの呼び出しも削除された。`dashboard_router`はDB接続等の永続リソースを自前で保持しないため、代替のクリーンアップ処理は無い。
-* 根拠: `app = FastAPI(...)` (行番号: 230-235 / 抜粋: "app = FastAPI("), `uvicorn.run(...)` (行番号: 625 / 抜粋: "uvicorn.run(app, host="0.0.0.0"")
+* 根拠: `app = FastAPI(...)` (行番号: 340 / 抜粋: "app = FastAPI("), `uvicorn.run(...)` (行番号: 625 / 抜粋: "uvicorn.run(app, host="0.0.0.0"")
 
 ## 3. 外部依存関係
 
@@ -79,8 +79,8 @@
 | `sensor_service.cancel_all_tasks()` | キャンセルされる具体的なタスク内容が不明 | `sensor_service.cancel_all_tasks()` (行番号: 336 / 抜粋: "sensor_service.cancel_all_tasks") |
 | 各ルーター (`webhook`, `quest`, `system`, `camera`, `alexa`, `routine`, `ui_log`) | 各パス配下の具体的なルーティング定義が不明（`alexa_router`は対応する仕様書が現時点で未作成のため特に不明。`routine_router`は[routine_router.md](./routine_router.md)、`ui_log_router`は[ui_log_router.md](./ui_log_router.md)を参照） | `app.include_router(...)` (行番号: 501-506 / 抜粋: "app.include_router(webhook_router.router)") |
 | `dashboard_router` | **（Issue #829で改訂）** `config.DASHBOARD_BASE_PATH` 配下のルート定義・ページHTML組み立ての詳細が本ファイルからは不明（[dashboard_router.md](./dashboard_router.md) を参照。Streamlit版廃止に伴い、以前中継先だった`dashboard_proxy_service`への依存は無くなった） | `app.include_router(dashboard_router.router, tags=["dashboard"])` (行番号: 515 / 抜粋: "app.include_router(dashboard_router.router, tags=[\"dashboard\"])") |
-| `monitors/camera_monitor.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, camera_script])` (行番号: 183 / 抜粋: "camera_process = subprocess.Po") |
-| `scheduler_boot.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, scheduler_script])` (行番号: 192 / 抜粋: "scheduler_process = subprocess.") |
+| `monitors/camera_monitor.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, script_path])` (参照: _spawn_child_process / 抜粋: "proc = subprocess.Popen([sys.executable, script_path])") |
+| `scheduler_boot.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, script_path])` (参照: _spawn_child_process / 抜粋: "proc = subprocess.Popen([sys.executable, script_path])") |
 | `apply_pending_migrations()` | マイグレーション適用の具体的な内部処理は `core/migrations.py` にあるため不明 | `apply_pending_migrations(migration_conn)` (行番号: 274 / 抜粋: "apply_pending_migrations(migration_conn)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -101,7 +101,7 @@
 * **副作用**: `record.args` / `record.msg` の書き換え(後段の全ハンドラ・フォーマッタでマスク済みの値のみが出力される)
 * 根拠: (行番号: 115〜124)
 * **エラーハンドリング**: マスク処理中の例外は `except Exception: pass` で握りつぶし、ログ出力自体は止めない
-* 根拠: (行番号: 125〜127 / 抜粋: "except Exception:\n            # マスク処理の失敗でログ出力自体を止めない\n            pass")
+* 根拠: (参照: SecretRedactionFilter.filter / 抜粋: "except Exception:\n            # マスク処理の失敗でログ出力自体を止めない\n            pass")
 
 * **役割**: Uvicorn等のアクセスログ出力を評価し、GETリクエストかつ正常系（200 OK または 304 Not Modified）で、特定のパス・キーワード（ポーリング、ヘルスチェック、静的アセット等）を含む場合のみログ出力を抑制する（Falseを返す）。それ以外や例外発生時はログを出力する。**（Issue #177で修正）** 正常系判定は以前`" 200 "`/`" 304 "`という前後スペース付きの部分文字列一致だったが、uvicornの実際のアクセスログフォーマット（`h11_impl.py`/`httptools_impl.py`の`'%s - "%s %s HTTP/%s" %d'`）ではステータスコードがメッセージ末尾に前方スペースのみで出力され後方にスペースが付かない（例: `'127.0.0.1 - "GET /path HTTP/1.1" 200'`）ため、この判定は常に不一致となり抑制対象キーワード判定へ到達しない死にコードになっていた。現在は末尾の空白を除去したうえで`endswith(" 200")`/`endswith(" 304")`により末尾一致で判定する。
 * 根拠: `class SilencePolicyFilter(logging.Filter):` (行番号: 43-92 / 抜粋: "class SilencePolicyFilter(logging.Filter):")、末尾一致判定への修正 (行番号: 53-60 / 抜粋: "#177: uvicornのアクセスログフォーマット('%s - \"%s %s HTTP/%s\" %d'、\n            # h11_impl.py/httptools_impl.py)ではステータスコードがメッセージ末尾に")
@@ -120,7 +120,7 @@
 
 
 * **エラーハンドリング**: 関数内部での例外発生時は全てキャッチし無視(`pass`)することで、ロギング処理全体の停止を防ぎ、デフォルトとして`True`を返す安全策を持つ。
-* 根拠: `except Exception: pass` (行番号: 83-85 / 抜粋: "except Exception:\n            # フィルタ処理中の予期せぬエラーでアプリケーションを止めないための安全策\n            pass")
+* 根拠: `except Exception: pass` (参照: SilencePolicyFilter.filter / 抜粋: "except Exception:\n            # フィルタ処理中の予期せぬエラーでアプリケーションを止めないための安全策\n            pass")
 
 
 
@@ -220,7 +220,7 @@
 
 
 * **エラーハンドリング**: IPアドレス解析時(`ipaddress.ip_address`)の`ValueError`を補足し無視(`pass`)する。
-* 根拠: `except ValueError: pass` (行番号: 303-304 / 抜粋: "except ValueError: pass")
+* 根拠: `except ValueError: pass` (参照: ip_restriction_middleware / 抜粋: "except ValueError:\n        pass")
 
 
 

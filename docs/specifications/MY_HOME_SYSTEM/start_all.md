@@ -40,7 +40,7 @@
 | `/mnt/nas` | マウント状況の確認先となっているが、システム上の具体的なNAS構成が不明なため | `MOUNT_POINT` (行番号: 137 / 抜粋: "MOUNT_POINT="/mnt/nas"") |
 | `family-quest/deploy.sh` | Phase 2で`--if-stale`引数付きで実行されるが、冪等判定・ビルドの実装内容は本ファイル外のため | `bash "$QUEST_DIR/deploy.sh" --if-stale` (行番号: 240 / 抜粋: "bash "$QUEST_DIR/deploy.sh" --if-stale") |
 | `sync_strict.py` | **（Issue #700 で追加）** Phase 2.5で`--if-stale`付きで実行されるが、鮮度判定・同期の実装内容は本ファイル外のため | `$PYTHON_EXEC sync_strict.py --if-stale` (行番号: 255 / 抜粋: "$PYTHON_EXEC sync_strict.py --if-stale > logs/quest_master_sync.log 2>&1") |
-| 停止対象の各スクリプト群 | `camera_monitor.py`, `scheduler_boot.py`など`CLEANUP_TARGETS`配列に列挙されたプロセス停止対象の実装内容が不明なため | `CLEANUP_TARGETS`配列定義 (行番号: 31〜36 / 抜粋: "CLEANUP_TARGETS=(") |
+| 停止対象の各スクリプト群 | `camera_monitor.py`, `scheduler_boot.py`など`CLEANUP_TARGETS`配列に列挙されたプロセス停止対象の実装内容が不明なため | `CLEANUP_TARGETS`配列定義 (行番号: 97 / 抜粋: "CLEANUP_TARGETS=(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -51,7 +51,7 @@
 ### [要素名1：環境セットアップ]
 
 * **役割**: `PYTHONPATH`とディレクトリ変数(`DEVELOP_ROOT`=リポジトリルート、それを基点にした`PROJECT_DIR`・`QUEST_DIR`)を設定し、対象ディレクトリへ移動する。その後、仮想環境のPython実行ファイルの有無を判定してパスを決定し、ログ用ディレクトリを作成する。
-* 根拠: 環境変数および初期処理 (行番号: 8〜22 / 抜粋: "export PYTHONPATH="..."")
+* 根拠: 環境変数および初期処理 (行番号: 64 / 抜粋: "export PYTHONPATH="..."")
 
 
 * **引数/リクエスト**: なし
@@ -63,7 +63,7 @@
 
 
 * **副作用**: 環境変数`PYTHONPATH`, `DEVELOP_ROOT`, `PROJECT_DIR`, `QUEST_DIR`, `PYTHON_EXEC`の設定。カレントディレクトリの変更。`logs`ディレクトリの作成。
-* 根拠: コマンド群 (行番号: 8〜22 / 抜粋: "mkdir -p logs")
+* 根拠: コマンド群 (行番号: 79 / 抜粋: "mkdir -p logs")
 
 
 * **エラーハンドリング**: プロジェクトディレクトリへの移動(`cd`)に失敗した場合、スクリプトをステータスコード1で異常終了(`exit 1`)する。
@@ -74,7 +74,7 @@
 ### [要素名2：Phase 0: クリーンアップ処理]
 
 * **役割**: 停止対象プロセス名の配列`CLEANUP_TARGETS`(`unified_server.py`, `camera_monitor.py`, `scheduler_boot.py`)を定義し、各対象へ`pkill`でSIGTERMを送って優しく停止させる。以前は`scheduler.py`という実在しないプロセス名を対象にしており実体の`scheduler_boot.py`にマッチしないため旧schedulerプロセスが再起動のたびに生き残っていた点と、存在しない`bluetooth_monitor.py`を対象にしていた点を修正し、実ファイル名の配列に置き換えている。**（Issue #829で変更）** 以前含まれていた`streamlit run`(Streamlit版ダッシュボード)は、その廃止に伴い配列から削除された。
-* 根拠: クリーンアップ処理ブロックおよび修正コメント (行番号: 44〜64 / 抜粋: "CLEANUP_TARGETS=(")
+* 根拠: クリーンアップ処理ブロックおよび修正コメント (行番号: 97 / 抜粋: "CLEANUP_TARGETS=(")
 * **（Issue #360 で修正）** `CLEANUP_TARGETS` に scheduler が起動する監視スクリプト6本に限定した正規表現（`python.*monitors/(switchbot_power_monitor|...|nas_monitor)\.py`）と `ffmpeg.*hls_streams`（ライブ配信/VOD 生成の ffmpeg）を追加。旧世代が孤児化して残ると、新世代と同じ HLS パスへ二重書き込みしたり古い設定で DB 書き込み・保持期間削除を続けたりするため。
 * **（SwitchBotハブ死活監視の追加で更新）** 同正規表現に`switchbot_hub_monitor`が加わり、対象は scheduler が起動する監視スクリプト8本になった（`scheduler_boot.TASKS`に`monitors/switchbot_hub_monitor.py`を300秒間隔で登録したため。[switchbot_hub_monitor.md](./switchbot_hub_monitor.md)参照）。
 * **（電気と気温の分析で更新）** 同正規表現に`weather_monitor`が加わり、対象は scheduler が起動する監視スクリプト8本になった（`scheduler_boot.TASKS`に気温の取得タスクを6時間間隔で追加したため。入れ忘れると、再起動時に実行中の旧世代の`weather_monitor.py`が掃除されずに残る）。
@@ -92,18 +92,18 @@
 
 
 * **副作用**: `CLEANUP_TARGETS`内の各プロセスを停止・強制終了させる。標準出力へのログ表示。
-* 根拠: `for target in "${CLEANUP_TARGETS[@]}"; do pkill -f "$target"; done` (行番号: 81〜83 / 抜粋: "pkill -f "$target"")
+* 根拠: `for target in "${CLEANUP_TARGETS[@]}"; do pkill -f "$target"; done` (行番号: 107 / 抜粋: "pkill -f "$target"")
 
 
 * **エラーハンドリング**: 最大5秒間、`CLEANUP_TARGETS`内のいずれかがまだ実行中かを`pgrep`でループ確認し、5秒経過後もなお生存している対象に対しては、対象ごとに個別に強制終了(`pkill -9 -f "$target"`)を実施する（以前は強制終了ループが`unified_server.py`のみを対象としており、他プロセスが生き残る余地があった）。
-* 根拠: 待機ループおよび強制終了ループ (行番号: 85〜108 / 抜粋: "pkill -9 -f "$target"")
+* 根拠: 待機ループおよび強制終了ループ (行番号: 131 / 抜粋: "pkill -9 -f "$target"")
 
 
 
 ### [要素名3：Phase 1: NASマウント確認]
 
 * **役割**: `mountpoint`コマンドが存在するか確認し、存在する場合は指定したマウントポイント（`/mnt/nas`）が正しくマウントされているかを最大5回、Exponential Backoff（1秒→2秒→4秒→8秒→16秒）付きでチェックする。各試行の直前に`ls "$MOUNT_POINT"`でパスへアクセスし、autofs等の自動マウントをトリガーしてから`mountpoint -q`で判定する。以前は1回チェックして未マウントなら警告を出すだけで即座に後続フェーズへ進んでいたが、起動直後はautofsのアイドルアンマウント後の自動マウント完了まで数秒かかることがある（`config.py`の`verify_and_initialize_storage`が遭遇するENOENTと同種の一過性の遅延）ため、リトライして待ち合わせる方式に変更された。
-* 根拠: NASマウント確認ブロック (行番号: 68〜94 / 抜粋: "echo "--- Check NAS Mount ---"")
+* 根拠: NASマウント確認ブロック (行番号: 136 / 抜粋: "echo "--- Check NAS Mount ---"")
 
 
 * **引数/リクエスト**: なし
@@ -115,11 +115,11 @@
 
 
 * **副作用**: `ls "$MOUNT_POINT"`によるパスアクセス（自動マウントのトリガー、最大5回）、リトライ間隔分の`sleep`によるブロッキング待機、および標準出力へのマウント状態の警告・確認メッセージ出力。
-* 根拠: `ls "$MOUNT_POINT" >/dev/null 2>&1` (行番号: 80 / 抜粋: "ls "$MOUNT_POINT" >/dev/null 2>&1")、`sleep "$MOUNT_WAIT"` (行番号: 153 / 抜粋: "sleep "$MOUNT_WAIT"")、`echo`コマンド (行番号: 85, 90, 92 / 抜粋: "echo "✅ NAS Mounted."")
+* 根拠: `ls "$MOUNT_POINT" >/dev/null 2>&1` (行番号: 147 / 抜粋: "ls "$MOUNT_POINT" >/dev/null 2>&1")、`sleep "$MOUNT_WAIT"` (行番号: 153 / 抜粋: "sleep "$MOUNT_WAIT"")、`echo`コマンド (行番号: 85, 90, 92 / 抜粋: "echo "✅ NAS Mounted."")
 
 
 * **エラーハンドリング**: 5回のリトライを尽くしてもマウントされない場合、警告文を表示するのみでスクリプトの実行停止（異常終了）は行わず後続フェーズへ進む（アプリ側の`verify_and_initialize_storage`等によるバックオフ・フォールバックに委ねる設計）。
-* 根拠: if分岐内 (行番号: 91〜93 / 抜粋: "echo "⚠️ NAS is still NOT mounted after retries...."")
+* 根拠: if分岐内 (行番号: 159 / 抜粋: "echo "⚠️ NAS is still NOT mounted after retries...."")
 
 
 
@@ -149,7 +149,7 @@
 ### [要素名4.5：Phase 1.6: git フックの登録 (core.hooksPath)]
 
 * **役割**: リポジトリ管理のgitフックディレクトリ`$DEVELOP_ROOT/deploy/git-hooks`(post-mergeフック: `git pull`後に`family-quest/deploy.sh --if-stale`を自動実行)を、`git config core.hooksPath`でリポジトリに登録する。コメントに、以前は`.git/hooks/post-merge`へのローカル設置でgit管理外だったためclone後に手で再設置が必要だった経緯と、`core.hooksPath`を設定すると`.git/hooks/`配下のフックは実行されなくなる注意が明記されている。
-* 根拠: Phase 1.6ブロック (行番号: 129〜148 / 抜粋: "# --- Phase 1.6: git フックの登録 (core.hooksPath) ---")
+* 根拠: Phase 1.6ブロック (行番号: 211 / 抜粋: "# --- Phase 1.6: git フックの登録 (core.hooksPath) ---")
 
 
 * **引数/リクエスト**: なし
@@ -165,14 +165,14 @@
 
 
 * **エラーハンドリング**: ディレクトリ不在・gitリポジトリでない・`git config`失敗のいずれも警告を標準エラー出力へ表示するのみでスクリプトは続行する(フック登録の失敗でサーバー起動を止めない)。
-* 根拠: else分岐 (行番号: 142〜148 / 抜粋: "Skipping hook registration.")
+* 根拠: else分岐 (行番号: 229 / 抜粋: "Skipping hook registration.")
 
 
 
 ### [要素名5：Phase 2: family-quest フロントエンド鮮度チェック]
 
 * **役割**: サーバー起動前に`family-quest/deploy.sh --if-stale`を実行し、配信用ビルド成果物`dist/`が現在のチェックアウト(HEAD)の`family-quest`ツリーからビルドされたものかを冪等チェックさせ、古ければ再ビルドさせる。コメントに、`git pull`以外の経路(`git reset --hard`等)での更新では`post-merge`フックが発火せず、`dist/`が旧世代のままサーバーだけ新コードで起動してAPIスキーマ不整合を起こした障害(2026-09-01)の再発防止である旨が明記されている。
-* 根拠: Phase 2ブロック (行番号: 150〜159 / 抜粋: "# --- Phase 2: family-quest フロントエンドの鮮度チェック ---")
+* 根拠: Phase 2ブロック (行番号: 232 / 抜粋: "# --- Phase 2: family-quest フロントエンドの鮮度チェック ---")
 
 
 * **引数/リクエスト**: なし
@@ -195,7 +195,7 @@
 ### [要素名5.5：Phase 2.5: クエストマスタの鮮度チェック（Issue #700で追加）]
 
 * **役割**: サーバー起動前に`sync_strict.py --if-stale`を実行し、`quest_data.py`/`routine_data.py`に差分があるときだけ`quest_master`/`reward_master`をDBへ同期させる。コメントに、マスタ同期が`POST /api/quest/sync_master`か`sync_strict.py`を手で叩いたときにしか走らず実機DBが古いまま残っていたこと(2026-09-19に退役済みクエスト6件が残り、移設先のすごろくステップ報酬と二重取得になっていた障害)、`post-merge`フックからも同じコマンドを呼ぶが`git reset --hard`等の経路の回収としてサーバー起動前にも必ず通すこと(family-questのdist鮮度チェックと同じ思想)、`--if-stale`のため破壊的操作が毎起動では走らないことが明記されている。
-* 根拠: Phase 2.5ブロック (行番号: 192〜205 / 抜粋: "# --- Phase 2.5: クエストマスタ(quest_master/reward_master)の鮮度チェック ---")
+* 根拠: Phase 2.5ブロック (行番号: 244 / 抜粋: "# --- Phase 2.5: クエストマスタ(quest_master/reward_master)の鮮度チェック ---")
 
 
 * **引数/リクエスト**: なし
@@ -211,7 +211,7 @@
 
 
 * **エラーハンドリング**: 同期が失敗しても警告を表示するのみでスクリプトは続行する（旧マスタで動かす方が起動失敗よりマシという、Phase 1.5/2と同じ設計判断がコメントに明記されている）。
-* 根拠: if分岐と設計コメント (行番号: 199〜205 / 抜粋: "# (旧マスタで動かす方が停止よりマシ。Phase 1.5/2 と同じ判断)")
+* 根拠: if分岐と設計コメント (行番号: 253 / 抜粋: "# (旧マスタで動かす方が停止よりマシ。Phase 1.5/2 と同じ判断)")
 
 
 
@@ -252,7 +252,7 @@
 * **上書き**: 環境変数 `ALLOW_MANUAL_START` がちょうど `1` のときだけ、警告（起動後のプロセスは systemd 管理外になり自動再起動されない旨）を出して続行する。`true` / `yes` / `0` / 空文字は上書きとみなさない
 * **配置の制約**: 掃除（Phase 0）より後ろに置くと、拒否した時点で既にプロセスを止めている。`cd "$PROJECT_DIR"` より前に置いているのは、`cd` の失敗（CI 等）とガードによる拒否を取り違えないため。`tests/test_start_all_manual_start_guard.py` がこの配置を検査する
 * **テスト**: スクリプトを `# --- end 手動起動ガード ---` の行で切り出して末尾に `echo GUARD_PASSED` を足したものを、`systemctl` のスタブだけを置いた PATH で実行する。本物のガードのコードを検証しつつ、ガードを通過してもその先（掃除・NAS待ち・サーバー起動）は一切実行されないため、実機上で走らせても安全
-* 根拠: `PREPARE_ONLY=false` / `if [ "${1:-}" = "--prepare" ]; then` (行番号: 18〜21 / 抜粋: "PREPARE_ONLY=true")、掃除対象の絞り込み (行番号: 66〜78)、`exit 0` (行番号: 196〜201 / 抜粋: "Preparation finished (--prepare)")
+* 根拠: `PREPARE_ONLY=false` / `if [ "${1:-}" = "--prepare" ]; then` (行番号: 23 / 抜粋: "PREPARE_ONLY=true")、掃除対象の絞り込み (行番号: 66〜78)、`exit 0` (行番号: 267 / 抜粋: "Preparation finished (--prepare)")
 
 
 * **引数/リクエスト**: `$1`（`--prepare`のみ解釈。それ以外・省略時は従来動作）
@@ -344,7 +344,7 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `unified_server.py` | システム全体のコアとしてバックグラウンドで起動され、コメント上で`scheduler_boot.py`の起動も担うと記載されているため、全体ロジックの把握に必須。**（Issue #829）** ダッシュボード(`routers/dashboard_router.py`)もこのプロセス自身が配信するようになった。 | `unified_server.py` (行番号: 277 / 抜粋: "$PYTHON_EXEC unified_server.py") |
 | 中 | `switchbot_webhook_fix.py` | 起動時に毎回実行されており、外部API(SwitchBot/Cloudflare Tunnel)との通信や設定更新を担っていると推測されるため。 | `switchbot_webhook_fix.py` (行番号: 261 / 抜粋: "$PYTHON_EXEC switchbot_webhook_fix.py") |
-| 低 | `camera_monitor.py`, `scheduler_boot.py` | `CLEANUP_TARGETS`配列に列挙されているプロセス。システムの一部を構成している可能性がある。 | クリーンアップ処理 (行番号: 31〜36 / 抜粋: "CLEANUP_TARGETS=(") |
+| 低 | `camera_monitor.py`, `scheduler_boot.py` | `CLEANUP_TARGETS`配列に列挙されているプロセス。システムの一部を構成している可能性がある。 | クリーンアップ処理 (行番号: 97 / 抜粋: "CLEANUP_TARGETS=(") |
 
 ## 8. 保守上の注意点
 
@@ -358,8 +358,8 @@ graph TD
 * **[修正済み] NASマウント確認が待たずに次フェーズへ進んでいた**: 以前のPhase 1は`mountpoint -q`を1回チェックするのみで、未マウントでも警告を表示するだけで即座にPhase 3(Webhook修正)・Phase 4(サーバー起動)へ進んでいた。起動直後はautofsのアイドルアンマウント後の自動マウント完了まで数秒かかることがあり、これは`config.py`の`verify_and_initialize_storage`（Exponential Backoffで自己修復）が扱う遅延と同種の事象であるにもかかわらず、本スクリプト側にはリトライが一切なかった。現在はパスアクセスによる自動マウントのトリガーと、最大5回・Exponential Backoff（1s/2s/4s/8s/16s）のリトライへ変更されている（74〜99行目）。ただしリトライを尽くしても未マウントの場合は依然として警告のみで後続フェーズへ進む点（アプリ側のバックオフ・フォールバックに委ねる設計）は変わらない。
 * **[修正済み] requirements.txt変更時に.venvが追従しない問題(Issue #483)**: 以前は本スクリプトにPython依存関係を更新する経路が一切なく、`requirements.txt`を変更するPRをマージして実機で`git pull`しても`.venv`は古いままだった。新規パッケージをimportするコードが含まれていれば`unified_server.py`が`ImportError`で起動失敗し、2026-09-01のfamily-quest dist不整合障害と同型の穴がバックエンド側に残っていた。現在はPhase 1.5で`requirements.txt`と`DDD/requirements.txt`を連結したSHA256ハッシュを`.venv/.requirements-sha256`と比較し、不一致なら各ファイルについて`pip install`を実行してハッシュを更新するようになっている（138〜193行目）。**（Issue #736 / AUDIT-006）** DDD側を対象に含めたのは、cronがDDDのスクリプトも`MY_HOME_SYSTEM/.venv`のpythonで実行しているのに`yt-dlp`/`curl_cffi`がどのインストール経路にも含まれておらず、`.venv`を作り直すとDDDのバッチが無音で失敗する状態だったため。**副作用としてPhase 1.5の所要時間が延びる**（`yt-dlp`は更新頻度が高い）ので、`home_system.service`の`TimeoutStartSec`（Issue #731で900秒を明示）と併せて見ること。`requirements.txt`変更後の初回起動はpipインストール分だけ遅くなる点、およびネットワーク断時は`pip install`が失敗し既存の`.venv`のまま起動を続行する点に留意。
 
-* **（2026-09-06 品質監査で修正）** `CLEANUP_TARGETS` の監視スクリプト用パターンを `"python.*monitors/[a-z_]*\.py"` から `scheduler_boot.py` の `TASKS` が起動する6本(`switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor`)に限定した。以前のパターンは systemd の `network_logger.service` や cron 起動の `health_watch.py`/`daily_timelapse_job.py`(ffmpeg を伴い長時間走る)/`log_analyzer.py` まで巻き添えで SIGTERM していた。`TASKS` を変更したらここも更新すること(`tests/test_start_all_sh.py` が両者の整合を検証する)。
-* 根拠: (行番号: 38〜45 / 抜粋: "\"python.*monitors/(switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor)\\.py\"")
+* **（2026-09-06 品質監査で修正）** `CLEANUP_TARGETS` の監視スクリプト用パターンを `"python.*monitors/[a-z_]*\.py"` から `scheduler_boot.py` の `TASKS` が起動するものに限定した(当初は6本。現在は`switchbot_power_monitor|nature_remo_monitor|switchbot_hub_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor|routine_deadline_job|weather_monitor`の9本)。以前のパターンは systemd の `network_logger.service` や cron 起動の `health_watch.py`/`daily_timelapse_job.py`(ffmpeg を伴い長時間走る)/`log_analyzer.py` まで巻き添えで SIGTERM していた。`TASKS` を変更したらここも更新すること(`tests/test_start_all_sh.py` が両者の整合を検証する)。
+* 根拠: (行番号: 101 / 抜粋: "\"python.*monitors/(switchbot_power_monitor|nature_remo_monitor|switchbot_hub_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor|routine_deadline_job|weather_monitor)\\.py\"")
 * **（Issue #700）Phase 2.5 も失敗を握りつぶす設計**: `sync_strict.py --if-stale`が失敗しても警告表示のみで後続フェーズへ進むため、マスタ同期が壊れている場合は旧マスタのまま配信され続ける。検知は`logs/quest_master_sync.log`の確認と、`monitors/health_watch.py`のチェック8(コードとDBの乖離をDiscordへ通知)に依存する。鮮度判定は`quest_data.py`/`routine_data.py`の**内容ハッシュ**と`logs/.quest_master_sync_marker`の比較であり、Phase 2(gitツリーハッシュ)とは判定方法が異なる(未コミットのローカル変更も検知する)。
 
 ## 9. 不明事項一覧

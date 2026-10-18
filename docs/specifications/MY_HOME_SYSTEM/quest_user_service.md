@@ -203,7 +203,7 @@
 ### `UserService.delete_unlinked_avatar`
 
 * **役割**: `AvatarUploader.tsx`側の2段階アップロードフロー（1. 画像アップロード→2. `/user/update`でのユーザーへの紐付け）のうち2段階目が失敗した際のロールバック用。`filename`から`os.path.basename`でファイル名部分のみを取り出し`config.UPLOAD_DIR`と結合し、結合結果の親ディレクトリが正規化済み`UPLOAD_DIR`と一致することを確認してパストラバーサルを防ぐ。加えて`quest_users`テーブルに当該ファイルを`avatar`として参照する行が1件でも存在すれば削除しない（安全策）。
-* 根拠: `def delete_unlinked_avatar(self, filename: str) -> bool:` (行番号: 274〜310)、docstring (行番号: 257〜270 / 抜粋: "#442: AvatarUploader.tsxの2段階アップロード...")
+* 根拠: `def delete_unlinked_avatar(self, filename: str) -> bool:` (行番号: 274〜310)、docstring (参照: UserService.delete_unlinked_avatar / 抜粋: "#442: AvatarUploader.tsxの2段階アップロード...")
 * **引数/リクエスト**: `filename: str`（削除対象のアップロード済みファイル名。ディレクトリ部分は`os.path.basename`で無視される）
 * 根拠: (行番号: 256, 271)
 * **戻り値/レスポンス**: `bool`（実際に削除できた場合のみ`True`。参照中・パス不正・ファイル未存在・削除失敗時は`False`）

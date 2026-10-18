@@ -47,7 +47,7 @@
 
 
 * **引数/リクエスト**: `userId`: str, `type`: str
-* 根拠: [LineSource属性] (行番号: 7〜8 / 抜粋: "userId: str type: str")
+* 根拠: [LineSource属性] (行番号: 7〜8 / 抜粋: "userId: str\n    type: str")
 
 
 * **戻り値/レスポンス**: `LineSource` インスタンス
@@ -116,7 +116,7 @@
 
 
 * **引数/リクエスト**: `destination`: str, `events`: List[LineEvent]
-* 根拠: [LineWebhookBody属性] (行番号: 25〜26 / 抜粋: "destination: str events: List[LineEvent]")
+* 根拠: [LineWebhookBody属性] (行番号: 25〜26 / 抜粋: "destination: str\n    events: List[LineEvent]")
 
 
 * **戻り値/レスポンス**: `LineWebhookBody` インスタンス

@@ -69,7 +69,7 @@
 | --- | --- | --- |
 | `services.notification_service._send_discord_webhook` | 実装が別ファイルに存在し、Webhook URLや認証方式、`image_data`引数の扱いなど詳細は本ファイルからは不明。ただし見つからない場合のフォールバック(`_standalone_send_discord_webhook`)自体は本ファイル内に実装があり、無効化されたダミー(`pass`)ではなく`os.getenv`で`DISCORD_WEBHOOK_ERROR`/`DISCORD_WEBHOOK_NOTIFY`(または`DISCORD_WEBHOOK_URL`)を参照し`requests.post`で実際に送信する簡易実装であることは本ファイルから確認できる。 | 根拠: [フォールバック関数定義とimport/except] (行番号: 99〜121, 142 / 抜粋: "def _standalone_send_discord_webhook(messages, image_data=None, channel="notify") -> bool:", "_send_discord_webhook = _standalone_send_discord_webhook") |
 | `file_utils.sanitize_filename` | サニタイズの具体的なルール（禁止文字、長さ制限等）が本ファイルからは不明。 | 根拠: [import文] (行番号: 42 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
-| `MY_HOME_SYSTEM_ROOT` 環境変数 / `services` ディレクトリ探索 | プロジェクトルート自動探索ロジックが依存する `services` ディレクトリの実際の配置や、環境変数が設定される運用上の前提が不明。**（品質で修正）** 解決ロジック自体は`file_utils.resolve_my_home_system_root`へ集約され、`newface_monitor.py`/`extract_youtube_urls.py`と共通化された。 | 根拠: [PROJECT_ROOT解決処理] (行番号: 67〜72 / 抜粋: "PROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR)")、詳細は`file_utils.md`の`resolve_my_home_system_root`を参照 |
+| `MY_HOME_SYSTEM_ROOT` 環境変数 / `services` ディレクトリ探索 | プロジェクトルート自動探索ロジックが依存する `services` ディレクトリの実際の配置や、環境変数が設定される運用上の前提が不明。**（品質で修正）** 解決ロジック自体は`file_utils.resolve_my_home_system_root`へ集約され、`newface_monitor.py`/`extract_youtube_urls.py`と共通化された。 | 根拠: [PROJECT_ROOT解決処理] (行番号: 94 / 抜粋: "PROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR)")、詳細は`file_utils.md`の`resolve_my_home_system_root`を参照 |
 | `yt_dlp.YoutubeDL` / `yt_dlp.version.__version__` | `extract_info`/`download`の内部実装や、バージョン文字列の生成規則の詳細は`yt_dlp`本体に依存し、本ファイルからは分からない。 | 根拠: [yt_dlp利用箇所] (行番号: 472, 547, 915 / 抜粋: "installed = datetime.datetime.strptime(yt_dlp.version.__version__, "%Y.%m.%d")", "with yt_dlp.YoutubeDL(ydl_opts) as ydl:") |
 | `curl_cffi`のブラウザ偽装(`impersonate`)実装 | `impersonate="chrome"`が実際にどのChrome版相当のTLS/HTTP指紋を再現するか、対応バージョンの下限など`curl_cffi`本体の実装詳細は本ファイルからは分からない。 | 根拠: [curl_cffi呼び出し箇所] (行番号: 701〜706, 746〜751 / 抜粋: "impersonate="chrome",") |
 
@@ -331,7 +331,7 @@
 
 
 * **副作用**: 履歴ファイルへの追記書き込み、書き込み失敗時のエラーログ出力(`exc_info=True`)。追記成功時はさらに、履歴ファイル全体を一時ファイル(`.bak.tmp`)へコピーしたうえで`.bak`へアトミックに置き換える（バックアップ更新）。バックアップ作成失敗時は警告ログを出力。
-* 根拠: [ファイル書き込みとバックアップ処理] (行番号: 425〜426, 495, 439〜445 / 抜粋: "with open(CONFIG.HISTORY_FILE_PATH, "a", encoding="utf-8") as f:\n                f.write(f"{url}\\n")", "logger.error(f"⚠️ 履歴ファイルへの書き込みに失敗しました (url={url}): {e}", exc_info=True)", "bak_tmp_path.write_bytes(CONFIG.HISTORY_FILE_PATH.read_bytes())\n            bak_tmp_path.replace(backup_path)")
+* 根拠: [ファイル書き込みとバックアップ処理] (行番号: 489〜490, 495, 439〜445 / 抜粋: "with open(CONFIG.HISTORY_FILE_PATH, "a", encoding="utf-8") as f:\n                f.write(f"{url}\\n")", "logger.error(f"⚠️ 履歴ファイルへの書き込みに失敗しました (url={url}): {e}", exc_info=True)", "bak_tmp_path.write_bytes(CONFIG.HISTORY_FILE_PATH.read_bytes())\n            bak_tmp_path.replace(backup_path)")
 
 
 * **エラーハンドリング**: 主ファイルへの追記で例外発生時は`exc_info=True`付きでエラーログを出力し、`return`でバックアップ処理に進まず終了する（処理は継続し、例外は再送出しない）。バックアップ作成中の`OSError`は捕捉して警告ログを出力するのみで、メソッドは正常終了する（追記自体は既に成功しているため致命的扱いにしない）。
@@ -483,8 +483,8 @@
 * 根拠: [引数と戻り値ヒント] (参照: FileSystemManager.check_disk_space / 抜粋: "threshold_gb = CONFIG.MIN_FREE_SPACE_GB if min_free_gb is None else min_free_gb")
 
 
-* **副作用**: `DiscordNotifier.send` による容量不足時の警告通知、例外時のエラーログ出力。
-* 根拠: [通知送信] (行番号: 370 / 抜粋: "DiscordNotifier.send(f"⚠️ DISK FULL: 残り {free // (2**30)}GB", is_error=True)")
+* **副作用**: `DiscordNotifier.send` による容量不足時の警告通知(`channel="report"`。2026-09チャンネル再設計で`is_error=True`から変更)、例外時のエラーログ出力。
+* 根拠: [通知送信] (参照: FileSystemManager.check_disk_space / 抜粋: "DiscordNotifier.send(f"⚠️ DISK FULL ({path}): 残り {free // (2**30)}GB", channel="report")")
 
 
 * **エラーハンドリング**: `shutil.disk_usage` 等での例外を捕捉し、エラーログを出力した上で `False`（＝ダウンロード中断）を返す。
@@ -518,7 +518,7 @@
 
 
 * **副作用**: `REQUIRE_NAS_MOUNT`有効時、未マウント検知時のDiscord通知(`channel="report"`。2026-09チャンネル再設計で`is_error=True`から変更)。
-* 根拠: [通知送信] (行番号: 616 / 抜粋: "DiscordNotifier.send("⛔ CRITICAL: NASマウントエラー", is_error=True)")
+* 根拠: [通知送信] (参照: SystemHealthChecker.verify_nas_mount / 抜粋: "DiscordNotifier.send("⛔ CRITICAL: NASマウントエラー", channel="report")")
 
 
 * **エラーハンドリング**: なし（例外は捕捉されず呼び出し元に伝播しうる）
@@ -698,7 +698,7 @@
 
 
 * **副作用**: なし（純粋な文字列解析処理。索引復元は`_packer_base_n_digits`に委譲）
-* 根拠: [処理内容] (行番号: 761〜780 / 抜粋: "match = re.search(r\"eval\\(function\\(p,a,c,k,e,d\\).*?return p}\\('(.*?)',\\s*(\\d+),\\s*(\\d+),\\s*'([^']*)'\\.split\\('\\|'\\)\", html)")
+* 根拠: [処理内容] (参照: ScrapingStrategy._extract_m3u8_url / 抜粋: "match = re.search(r\"eval\\(function\\(p,a,c,k,e,d\\).*?return p}\\('(.*?)',\\s*(\\d+),\\s*(\\d+),\\s*'([^']*)'\\.split\\('\\|'\\)\", html)")
 
 
 * **エラーハンドリング**: 難読化コードのマッチ失敗時は即座に`None`を返す（例外処理なし）。
@@ -730,7 +730,7 @@
 ### `ScrapingStrategy._localize_m3u8_manifest`
 
 * **役割**: m3u8マニフェスト内の相対URI（セグメント/サブプレイリスト/`#EXT-X-KEY`の`URI`属性等）を`urljoin`で絶対URLへ書き換える静的メソッド。マニフェストをローカルファイルとして`yt-dlp`に渡すため、相対URIが取得元のCDN URLではなくローカルファイルパス基準で誤って解決されるのを防ぐ。
-* 根拠: [_localize_m3u8_manifestとDocstring] (行番号: 619〜626 / 抜粋: "@staticmethod\n    def _localize_m3u8_manifest(manifest_text: str, base_url: str) -> str:\n        """m3u8内の相対URI(セグメント/サブプレイリスト/鍵URI等)を絶対URLへ書き換える。")
+* 根拠: [_localize_m3u8_manifestとDocstring] (参照: ScrapingStrategy._localize_m3u8_manifest / 抜粋: "@staticmethod\n    def _localize_m3u8_manifest(manifest_text: str, base_url: str) -> str:\n        """m3u8内の相対URI(セグメント/サブプレイリスト/鍵URI等)を絶対URLへ書き換える。")
 
 
 * **引数/リクエスト**: `manifest_text: str`（元のマニフェスト本文）, `base_url: str`（相対URI解決の基準となるURL）
@@ -738,7 +738,7 @@
 
 
 * **戻り値/レスポンス**: `str`（絶対URL化済みのマニフェスト本文）
-* 根拠: [戻り値ヒントと末尾return] (行番号: 958, 639 / 抜粋: "def _localize_m3u8_manifest(manifest_text: str, base_url: str) -> str:", "return "\\n".join(lines)")
+* 根拠: [戻り値ヒントと末尾return] (行番号: 958, 977 / 抜粋: "def _localize_m3u8_manifest(manifest_text: str, base_url: str) -> str:", "return "\\n".join(lines)")
 
 
 * **副作用**: なし（純粋な文字列変換処理）
@@ -785,7 +785,7 @@
 
 
 * **副作用**: `_fetch_segment_once`の呼び出し（HTTP GET）。失敗時は警告ログ（試行回数・待機秒・URLを含む）を出力し、`CONFIG.SEGMENT_RETRY_BASE_DELAY * 2^(attempt-1)`秒（1秒→2秒）の`time.sleep`を挟んで再試行する。
-* 根拠: [リトライループ] (行番号: 826〜840 / 抜粋: "for attempt in range(1, CONFIG.SEGMENT_DOWNLOAD_MAX_ATTEMPTS + 1):" / "delay = CONFIG.SEGMENT_RETRY_BASE_DELAY * (2 ** (attempt - 1))" / "time.sleep(delay)")
+* 根拠: [リトライループ] (参照: ScrapingStrategy._download_segment / 抜粋: "for attempt in range(1, CONFIG.SEGMENT_DOWNLOAD_MAX_ATTEMPTS + 1):", "delay = CONFIG.SEGMENT_RETRY_BASE_DELAY * (2 ** (attempt - 1))", "time.sleep(delay)")
 
 
 * **エラーハンドリング**: `BotDetectionError`（403/429/503）はIP単位のブロックであり再試行しても悪化させるだけなので、リトライせず即座に再送出する（`_download_segments_and_localize_manifest`経由でセッション中断へつながる）。それ以外の`Exception`（タイムアウト・接続断・`raise_for_status`のHTTPエラー等）は最大試行回数まで再試行し、尽きた場合は最後に発生した例外をそのまま送出する。
@@ -911,8 +911,8 @@
 * 根拠: [戻り値ヒント] (行番号: 1334 / 抜粋: "def _get_strategy(self, url: str) -> DownloadStrategy:")
 
 
-* **副作用**: 無効化されたYouTube URLに対するログ出力。
-* 根拠: [ログ出力] (行番号: 787 / 抜粋: "logger.info(f"🚫 YouTube機能は設定により無効化されています: {url}")")
+* **副作用**: なし(**Issue #535** で「YouTube 機能が無効なURLのログ出力」も分岐ごと削除された。YouTube タスクの除外とログは `_prepare_tasks` 側で行う)。
+* 根拠: [除外側のログ] (参照: BatchDownloader._prepare_tasks / 抜粋: "logger.info(f"🚫 YouTube機能が無効なため、{len(skipped_tasks)} 件のタスクをスキップおよびパージします。")")
 
 
 * **エラーハンドリング**: なし
@@ -1018,7 +1018,7 @@
 
 
 * **エラーハンドリング**: `_process_tasks`が、`BotDetectionError`を捕捉した場合は`exc_info=True`付きで`logger.critical`によりログ出力したうえでクールダウンをトリガーし、Discord通知を送信してループを`break`で即座に中断する。それ以外の個別タスク実行時の例外は捕捉してエラーログを出力し、次のタスクへ処理を継続する。連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`に達した場合もエラー通知のうえループを中断する。時間帯超過時や停止シグナル受信時はループを`break`で中断する。**（本PRで修正）** `logger.critical`呼び出しに以前`exc_info`が付いておらず、同じメソッド内の他の例外ログ（`except Exception as e:`側）が`exc_info=True`付きであることとの一貫性が無かった。
-* 根拠: [try-exceptとbreak] (行番号: 1443〜1465 / 抜粋: "except BotDetectionError as e:\n                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}", exc_info=True)\n                CooldownManager.trigger_cooldown()")
+* 根拠: [try-exceptとbreak] (参照: BatchDownloader._process_tasks / 抜粋: "except BotDetectionError as e:\n                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}", exc_info=True)\n                CooldownManager.trigger_cooldown()")
 
 
 ### `BatchDownloader._run_locked`（品質でヘルパーメソッドへ分割）

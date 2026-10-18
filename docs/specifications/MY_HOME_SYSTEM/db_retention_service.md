@@ -53,7 +53,7 @@ SQLite の**行**に対する保持期間削除を行うサービス層モジュ
 | --- | --- | --- | --- |
 | `os` | 標準 | バックアップディレクトリの走査・DB ファイルサイズの取得 | 根拠: [インポート宣言] (行番号: 46 / 抜粋: "import os") |
 | `sqlite3` | 標準 | 例外型（`sqlite3.Error`）と接続の型注釈 | 根拠: [インポート宣言] (行番号: 47 / 抜粋: "import sqlite3") |
-| `time` | 標準 | バックアップの更新時刻との比較 | 根拠: [インポート宣言] (行番号: 45 / 抜粋: "import time") |
+| `time` | 標準 | バックアップの更新時刻との比較 | 根拠: [インポート宣言] (行番号: 48 / 抜粋: "import time") |
 | `dataclasses.dataclass`, `field` | 標準 | 計画・結果の値オブジェクト | 根拠: [インポート宣言] (行番号: 49 / 抜粋: "from dataclasses import dataclass, field") |
 | `datetime.timedelta` | 標準 | 保持期間の境界の算出 | 根拠: [インポート宣言] (行番号: 50 / 抜粋: "from datetime import timedelta") |
 | `config` | 自作 | `DB_ROW_RETENTION_*` / `DB_BACKUPS_DIR` / `SQLITE_DB_PATH` | 根拠: [インポート宣言] (行番号: 53 / 抜粋: "import config") |

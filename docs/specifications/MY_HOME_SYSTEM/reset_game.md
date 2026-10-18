@@ -94,7 +94,7 @@
 
 
 * **エラーハンドリング**: DBファイルが存在しない場合、エラーログと標準出力にメッセージを出力後 `sys.exit(1)` する。接続処理中の任意の `Exception` はエラーログに記録した上で再送出（`raise`）する。
-* 根拠: `if not os.path.exists(DB_PATH):` (行番号: 77〜80 / 抜粋: "sys.exit(1)"), `except Exception as e:\n        logging.error(f"DB接続エラー: {e}")\n        raise` (行番号: 86〜88 / 抜粋: "raise")
+* 根拠: `if not os.path.exists(DB_PATH):` (参照: get_db_connection / 抜粋: "sys.exit(1)"), `except Exception as e:\n        logging.error(f"DB接続エラー: {e}")\n        raise` (行番号: 86〜88 / 抜粋: "raise")
 
 
 
@@ -216,7 +216,7 @@
 ### モジュールレベル実行部（`if __name__ == "__main__":`）
 
 * **役割**: スクリプトを直接実行した場合に `main()` を呼び出す。
-* 根拠: `if __name__ == "__main__":\n    main()` (行番号: 264〜265 / 抜粋: "if __name__ == "__main__":\n    main()")
+* 根拠: `if __name__ == "__main__":\n    main()` (行番号: 266 / 抜粋: "if __name__ == "__main__":\n    main()")
 
 
 * **引数/リクエスト**: なし
@@ -232,7 +232,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 264〜265 / 抜粋: "if __name__ == "__main__":")
+* 根拠: (行番号: 266 / 抜粋: "if __name__ == "__main__":")
 
 
 

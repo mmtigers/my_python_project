@@ -41,7 +41,7 @@
 | `retry_if_exception` | 外部ライブラリ | **（Issue #804で変更）** 一時的失敗(`_is_transient_error`)判定関数によるリトライ条件指定。以前はクォータ超過(429)のみを条件にしていた | `from tenacity import (... retry_if_exception,)` (行番号: 21 / 抜粋: "retry_if_exception,") |
 | `tenacity` | 外部ライブラリ | API呼び出し失敗時のリトライ制御 | `from tenacity import (...)` (抜粋: "from tenacity import (") |
 | `config` | 内部モジュール | APIキー、DBテーブル名、家族設定などの定数参照 | `import config` (抜粋: "import config") |
-| `core.database.get_db_cursor`・`core.database.execute_read_query` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor, execute_read_query` (行番号: 24 / 抜粋: "from core.database import get_db_cursor, execute_read_query") |
+| `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする。`execute_read_query` は、DB検索を `_execute_restricted_read_query` へ切り替えたため import しなくなった | 根拠: `from core.database import get_db_cursor` (行番号: 25 / 抜粋: "from core.database import get_db_cursor") |
 | `setup_logging` | 内部モジュール | ロガーの初期化 | `from core.logger import setup_logging` (抜粋: "from core.logger import setup_logging") |
 | `get_now_iso` | 内部モジュール | 現在時刻のISO文字列取得 | `from core.utils import get_now_iso` (抜粋: "from core.utils import get_now_iso") |
 | `line_service` | 内部モジュール | LINEサービス連携（記録機能の実装） | `from services import line_service` (抜粋: "from services import line_service") |
@@ -70,7 +70,7 @@
 
 
 * **戻り値/レスポンス**: オブジェクトインスタンス
-* 根拠: コンストラクタ定義による (行番号: 57 / 抜粋: "def **init**")
+* 根拠: コンストラクタ定義による (行番号: 85 / 抜粋: "def **init**")
 
 
 * **副作用**: なし
@@ -78,7 +78,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 例外処理の記述なし (行番号: 61 / 抜粋: "self._lock = asyncio.Lock()")
+* 根拠: 例外処理の記述なし (参照: SimpleRateLimiter.__init__ / 抜粋: "self._lock = threading.Lock()")
 
 
 
@@ -100,8 +100,8 @@
 * 根拠: `self.count += 1` (行番号: 115 / 抜粋: "self.count += 1")
 
 
-* **エラーハンドリング**: 非同期ロック (`asyncio.Lock`) により並行処理時の競合を防止。
-* 根拠: `async with self._lock:` (行番号: 70 / 抜粋: "async with self._lock:")
+* **エラーハンドリング**: スレッドロック (`threading.Lock`) により並行処理時の競合を防止する(**M-5-3**: 着信ごとに `asyncio.run` で新しいイベントループが作られるため、ループに紐づく `asyncio.Lock` ではなくスレッドを跨いで機能する `threading.Lock` を使う)。
+* 根拠: `with self._lock:` (参照: SimpleRateLimiter.allow_request / 抜粋: "with self._lock:")
 
 
 
@@ -154,7 +154,7 @@
 ### `ALLOWED_SEARCH_TABLES` (変数)
 
 * **役割**: `tool_search_db`がSELECTで参照することを許可するテーブル名の集合(set)。`config.SQLITE_TABLE_CHILD`, `_FOOD`, `_SHOPPING`, `_POWER_USAGE`の4テーブルのみを許可する。
-* 根拠: `ALLOWED_SEARCH_TABLES = {...}` (行番号: 141-146 / 抜粋: "ALLOWED_SEARCH_TABLES = {")
+* 根拠: `ALLOWED_SEARCH_TABLES = {...}` (行番号: 183 / 抜粋: "ALLOWED_SEARCH_TABLES = {")
 
 
 
@@ -168,9 +168,9 @@
 ### `_SQL_COMMENT_RE` (変数、B3で追加)
 
 * **役割**: SQLのブロックコメント(`/* ... */`)および行コメント(`-- ...`)にマッチする正規表現。`_extract_referenced_tables`は`FROM`/`JOIN`キーワードの直後に空白が続くことを前提としているが、`FROM/**/tablename`のようにキーワードと識別子の間にSQLコメントを挟むとこの前提が崩れ、テーブル名を検出できず`ALLOWED_SEARCH_TABLES`による許可テーブル判定をすり抜けられる（UNION SELECTと組み合わせた許可外テーブルの読み取りバイパスを実証済み）。`tool_search_db`が実行前に`_strip_sql_comments`経由でこの正規表現を使い、コメント部分を空白へ置換して無害化する。
-* 根拠: `_SQL_COMMENT_RE = re.compile(r"/\*.*?\*/|--[^\n]*", re.DOTALL)` (行番号: 172〜177 / 抜粋: "# B3: `FROM/**/tablename` のようにキーワードと識別子の間にSQLコメントを挟むと、\n...\n_SQL_COMMENT_RE = re.compile(r\"/\\*.*?\\*/|--[^\\n]*\", re.DOTALL)")
+* 根拠: `_SQL_COMMENT_RE = re.compile(r"/\*.*?\*/|--[^\n]*", re.DOTALL)` (行番号: 214〜219 / 抜粋: "# B3: `FROM/**/tablename` のようにキーワードと識別子の間にSQLコメントを挟むと、\n...\n_SQL_COMMENT_RE = re.compile(r\"/\\*.*?\\*/|--[^\\n]*\", re.DOTALL)")
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルのコンパイル済み正規表現）
-* 根拠: (行番号: 177 / 抜粋: "_SQL_COMMENT_RE = re.compile(r\"/\\*.*?\\*/|--[^\\n]*\", re.DOTALL)")
+* 根拠: (行番号: 219 / 抜粋: "_SQL_COMMENT_RE = re.compile(r\"/\\*.*?\\*/|--[^\\n]*\", re.DOTALL)")
 
 
 
@@ -248,7 +248,7 @@
 
 
 * **戻り値/レスポンス**: `int`。`SQLITE_SELECT`/`SQLITE_RECURSIVE`は`SQLITE_OK`。`SQLITE_READ`は`arg1 in ALLOWED_SEARCH_TABLES`なら`SQLITE_OK`、それ以外（`sqlite_master`等のシステムテーブル、テーブル値関数を含む）は`SQLITE_DENY`。`SQLITE_FUNCTION`は関数名（小文字化）が`_DENIED_SQL_FUNCTIONS`に含まれれば`SQLITE_DENY`、それ以外は`SQLITE_OK`。上記以外のアクション（`SQLITE_ATTACH`/`SQLITE_PRAGMA`/`SQLITE_INSERT`/`SQLITE_UPDATE`/`SQLITE_DELETE`/DDL等）はすべて`SQLITE_DENY`。
-* 根拠: 各分岐 (行番号: 254〜265 / 抜粋: "return sqlite3.SQLITE_OK if arg1 in ALLOWED_SEARCH_TABLES else sqlite3.SQLITE_DENY" / "return sqlite3.SQLITE_DENY")
+* 根拠: 各分岐 (参照: _search_db_authorizer / 抜粋: "return sqlite3.SQLITE_OK if arg1 in ALLOWED_SEARCH_TABLES else sqlite3.SQLITE_DENY", "return sqlite3.SQLITE_DENY")
 
 
 * **副作用**: なし（純粋関数）
@@ -269,7 +269,7 @@
 
 
 * **戻り値/レスポンス**: `str`。0件なら`"該当するデータはありませんでした。"`、行があれば`json.dumps([dict(r) for r in rows], ensure_ascii=False, default=str)`、例外時は`f"検索エラー: {str(e)}"`。
-* 根拠: (行番号: 286〜290 / 抜粋: "return \"該当するデータはありませんでした。\"" / "return json.dumps(...)" / "return f\"検索エラー: {str(e)}\"")
+* 根拠: (参照: _execute_restricted_read_query / 抜粋: "return \"該当するデータはありませんでした。\"", "return json.dumps(...)", "return f\"検索エラー: {str(e)}\"")
 
 
 * **副作用**: `core.database.get_db_cursor()`によるDB接続の確立・クローズ、接続への`set_authorizer`設定、**（Issue #750 で追加）**接続への`set_progress_handler`設定、SQLの実行（認可コールバックにより読み取り以外は拒否され、progress handler により実行時間が打ち切られる）。
