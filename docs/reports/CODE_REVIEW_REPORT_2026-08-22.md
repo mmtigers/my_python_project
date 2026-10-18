@@ -37,7 +37,7 @@ High 12件+M-10-1のコード照合結果（2026-09-02、Issue #323の調査に�
 
 2026-09-02時点では Medium の個別項目を網羅照合していなかったため、2026-10-18 に全項目を現行コードと突き合わせた。「根拠」の多くはコード・テスト内の `M-x-y` コメント(修正時に付与されたもの)で辿れる。
 
-**サマリー**: 全45項目のうち、**未対応は M-5-4 の1件のみ**(リスク低のため現状維持)。それ以外は修正済み、または対象ファイルの削除・運用形態の変更で解消している。
+**サマリー**: 全45項目のうち、**未対応は M-5-4 の1件のみ**(リスク低。Issue #991 で追跡)。それ以外は修正済み、または対象ファイルの削除・運用形態の変更で解消している。
 
 | # | 状態 | 根拠(現行コード) |
 |---|---|---|
@@ -59,7 +59,7 @@ High 12件+M-10-1のコード照合結果（2026-09-02、Issue #323の調査に�
 | M-5-1 | ✅ 対応済み | `services/ai_service.py`。`tests/test_ai_service.py` |
 | M-5-2 | ✅ 対応済み | `tests/test_sensor_service.py` |
 | M-5-3 | ✅ 対応済み | `services/ai_service.py`。`tests/test_ai_service.py` |
-| M-5-4 | ⚠️ 未対応(現状維持) | `services/analysis_service.py` の f-string SQL は残っている。ただし埋め込むテーブル名は `config` の定数のみで、外部入力からの到達経路は無く、接続も読み取り専用。UI 入力に接続する変更をするときに併せて直す前提で、Issue化しない |
+| M-5-4 | ⚠️ 未対応(**Issue #991**) | `services/analysis_service.py` の f-string SQL は残っている。埋め込んでいるのはテーブル名(`config` の定数)・`LIMIT` の件数・サーバー側で作った日付文字列・`load_weather_history` の地名で、外部入力からの到達経路は無い(リクエストパラメーターが届く `?nas_days=` は 7/30/90 の許可リストで絞られる)。接続も読み取り専用。予防的な修正として Issue #991 で追跡する |
 | M-5-5 | ✅ 対応済み | `core/logger.py`(`DiscordErrorHandler` の送信をバックグラウンドスレッドへ移動)。`tests/test_logger.py` |
 | M-6-1〜5 | ✅ 対応済み | `family-quest/src` の `App.tsx`・`useGameData.ts`・`InventoryList.tsx`・`FamilyLog.tsx`・`QuestList.tsx`(各 `M-6-x` コメント)。`App.completeQuest.test.tsx`・`App.approveAll.test.tsx`・`FamilyLog.test.tsx` |
 | M-7-1〜3 | ✅ 対応済み | `DDD/batch_download_discord.py`。`DDD/test_batch_download_discord_fixes.py` |
