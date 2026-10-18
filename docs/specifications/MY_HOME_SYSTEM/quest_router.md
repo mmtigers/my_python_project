@@ -384,7 +384,7 @@
 
 
 * **エラーハンドリング**: `req.sound_key` が `config.SOUND_MAP` に存在しない場合、HTTP 400エラーを送出。
-* 根拠: 例外処理 (行番号: 114-115 / 抜粋: "raise HTTPException(status_code=400")
+* 根拠: 例外処理 (参照: upload_image / 抜粋: "raise HTTPException(status_code=400")
 
 
 

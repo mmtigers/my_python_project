@@ -1047,3 +1047,32 @@ def test_excerpt_ends_before_bold_note(fake_repo):
     findings, checked = checker.scan(fix=False)
     assert checked == 1
     assert len(findings) == 1 and findings[0].actual == 10
+
+
+def test_convert_include_valid_rewrites_ambiguous_citation_within_one_symbol(fake_repo):
+    """いまは正しいが抜粋が一意でない引用を、範囲内の出現が1シンボルに収まるなら参照書式へ移すこと(Issue #950)。"""
+    # `return "` は6行目(Greeter.greet)と10行目(farewell)に現れるが、引用範囲 6 には前者だけがある。
+    path = _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 6 / 抜粋: "return \\"")\n')
+    assert checker.convert_to_symbol_references([path], include_valid=False) == (0, 0)
+    assert "行番号: 6" in path.read_text(encoding="utf-8")
+    assert checker.convert_to_symbol_references([path], include_valid=True) == (1, 0)
+    assert "参照: Greeter.greet" in path.read_text(encoding="utf-8")
+    problems, checked = checker.scan_symbol_references()
+    assert problems == [] and checked == 1
+
+
+def test_convert_include_valid_keeps_citation_spanning_several_symbols(fake_repo):
+    """範囲が複数のシンボルにまたがり、出現が別々のシンボルにある引用は触らないこと。"""
+    path = _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 5〜10 / 抜粋: "return \\"")\n')
+    assert checker.convert_to_symbol_references([path], include_valid=True) == (0, 1)
+    assert "行番号: 5〜10" in path.read_text(encoding="utf-8")
+
+
+def test_convert_include_valid_leaves_gated_citations_alone(fake_repo):
+    """一意でゲート済みの引用(単一行・範囲内検証)は、行番号のまま検証されるので書き換えないこと。"""
+    single = '* 根拠: 戻り値 (行番号: 10 / 抜粋: "return \\"bye \\" + name")\n'
+    ranged = '* 根拠: 戻り値 (行番号: 9〜10 / 抜粋: "return \\"bye \\" + name")\n'
+    path = _write_spec(fake_repo, single + ranged)
+    assert checker.convert_to_symbol_references([path], include_valid=True) == (0, 0)
+    assert path.read_text(encoding="utf-8") == single + ranged
+

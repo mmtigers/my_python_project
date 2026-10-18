@@ -134,7 +134,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 * **エラーハンドリング**: `send_push`は`target="discord"`のみで呼び出すため`user_id`引数は不要(Issue #289でsend_pushのシグネチャからLINE宛先解決を分離し、Discord専用呼び出しではuser_id自体が不要になった)。以前は`config.LINE_USER_ID`が未設定だとこの通知自体がスキップされてしまっていたが、現在は`config.LINE_USER_ID`の値に関わらず必ず通知が送信される。
   なお`import config`自体は依然として維持されている。これは**Issue #111の修正**で追加された、`import config`が失敗した場合に`config`という名前そのものが未束縛のままモジュールロードが完了してしまう問題（未束縛だと後続コードで`NameError`が送出され、`get_managed_target_directory`のFail-Softロジックに到達できない）を防ぐための「カナリア」importであり、`tests/test_nas_utils.py`がこの契約(`nas_utils.config is None`)を回帰テストしているため、本文中で`config`を直接参照しなくなった後も削除していない（`core/nas_utils.py`の`# noqa: F401`コメント参照）。
 * **（2026-09 チャンネル再設計で追加）** `send_push`呼び出しの直前にある`logger.error(error_msg, extra={"skip_discord": True})`(137行目)は、`core/logger.py`のcatch-all(`DiscordErrorHandler`)経由での二重通知(同じ障害が即時対応チャンネルと運用者向けチャンネルへ別々に届く事態)を避けるためのopt-outで、本PRで新規に追加された。
-* 根拠: `send_push`呼び出し (行番号: 141〜144 / 抜粋: "send_push(\n        [{\"type\": \"text\", \"text\": error_msg}],\n        target=\"discord\", channel=\"error\"\n    )")、[skip_discordの追加] (行番号: 137 / 抜粋: "logger.error(error_msg, extra={\"skip_discord\": True})")
+* 根拠: `send_push`呼び出し (参照: get_managed_target_directory / 抜粋: "send_push(\n        [{\"type\": \"text\", \"text\": error_msg}],\n        target=\"discord\", channel=\"error\"\n    )")、[skip_discordの追加] (行番号: 137 / 抜粋: "logger.error(error_msg, extra={\"skip_discord\": True})")
 * 根拠: `config = None`フォールバック(Issue #111) / カナリアimport(Issue #289) (行番号: 6〜21 / 抜粋: "try:\n    import config  # noqa: F401 — Issue #111回帰テスト用の\"カナリア\"import")
 
 

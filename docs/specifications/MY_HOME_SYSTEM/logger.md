@@ -170,7 +170,7 @@
 * **戻り値/レスポンス**: `str` / `tuple[bool, int]` / なし
 * 根拠: (行番号: 68, 79, 113)
 * **副作用**: モジュールグローバル `_recent_notifications`（`content_key -> (直近の送信時刻, 抑制件数)`）の更新。`_dedup_lock` で排他する。エントリ数は `DISCORD_DEDUP_MAX_ENTRIES`（256）で頭打ちにし、超えたら最も古いものから捨てる。
-* 根拠: [状態更新] (行番号: 95〜110 / 抜粋: "_recent_notifications[content_key] = (now, 0)")
+* 根拠: [状態更新] (参照: _claim_notification_slot / 抜粋: "_recent_notifications[content_key] = (now, 0)")
 * **エラーハンドリング**: なし
 * 根拠: (行番号: 79〜111)
 

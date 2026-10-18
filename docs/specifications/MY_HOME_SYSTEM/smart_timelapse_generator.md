@@ -438,7 +438,7 @@
 * 根拠: 背景差分と輪郭抽出処理 (行番号: 367 / 抜粋: "fgmask = self.fgbg.apply(roi_f...")
 
 * **（Issue #782 で追加）** `detect` が起動する `ffmpeg` に `-threads FFMPEG_THREADS`(既定2、`config.TIMELAPSE_FFMPEG_THREADS` で上書き可)を付けてデコードのスレッド数を制限する。`-vf fps=1` で解析するのは毎秒1フレームだが**入力は全フレームがデコードされる**ため負荷が高く、上限が無いと Pi 5 の4コアをほぼ使い切って(実測: 1プロセスで約245% CPU、load average 4.66)CPU温度がソフト温度上限(80°C)に達しスロットリングしていた。`nice -n 15` と `ionice` は既に付いているが、これらは優先度を下げるだけで他に走るものが無ければ全コアを使うため発熱は止まらない。日次のバッチで即時性の要求が無いため、実行時間が延びることを許容して上限を設けている。同じ上限は `Summarizer` の `libx264` 再エンコードにも適用する。
-* 根拠: [変数宣言] (行番号: 62 / 抜粋: "FFMPEG_THREADS = getattr(config, 'TIMELAPSE_FFMPEG_THREADS', 2)")、[解析コマンド] (行番号: 291 / 抜粋: "'-threads', str(FFMPEG_THREADS),")
+* 根拠: [変数宣言] (行番号: 62 / 抜粋: "FFMPEG_THREADS = getattr(config, 'TIMELAPSE_FFMPEG_THREADS', 2)")、[解析コマンド] (参照: _build_detect_cmd / 抜粋: "'-threads', str(FFMPEG_THREADS),")
 
 
 

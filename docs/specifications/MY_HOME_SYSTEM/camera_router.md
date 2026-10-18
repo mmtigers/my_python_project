@@ -47,7 +47,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `camera_service` | 本タスクの指示により、本ファイル執筆時点では `camera_service.py` を読み込まずブラックボックスとして扱う。`start_hls_stream`, `get_record_start_offset`, `generate_record_playlist`, `set_camera_enabled`, `get_camera_config_or_none`, `HLS_VOD_DIR`, `HLS_LIVE_DIR` の内部実装・戻り値の詳細仕様は不明（**Issue #551で追加**の`get_camera_config_or_none`は戻り値が`config.CAMERAS`から検索した辞書または`None`であることは呼び出し側`_require_camera`の使い方から明らかだが、内部実装自体は本ファイルからは不明）。**（Issue #457対応）** `start_hls_stream`の呼び出しは`get_live_stream`が`async def`化されたことに伴い`await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)`という形に変わった（呼び出し先の関数自体のシグネチャ・戻り値は変わらない）。 | 根拠: [import文と呼び出し箇所] (行番号: 9, 22, 61, 73, 106, 117, 128, 148 / 抜粋: "from services import camera_service", "await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)", "cam_conf = camera_service.get_camera_config_or_none(camera_id)") |
-| `config` | `config.CAMERAS` の構造（各カメラ辞書のキー、読み込み元ファイル等）が本ファイルからは不明。 | 根拠: [config.CAMERASの参照] (行番号: 49 / 抜粋: "config.CAMERAS") |
+| `config` | `config.CAMERAS` の構造（各カメラ辞書のキー、読み込み元ファイル等）が本ファイルからは不明。 | 根拠: [config.CAMERASの参照] (参照: get_camera_settings / 抜粋: "config.CAMERAS") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -154,7 +154,7 @@
 
 
 * **エラーハンドリング**: `camera_service.set_camera_enabled`が`False`を返した場合（対象カメラが見つからない等）、`HTTPException(status_code=404, detail="Camera not found")`を送出する。
-* 根拠: `if not camera_service.set_camera_enabled(camera_id, payload.enabled):\n        raise HTTPException(status_code=404, detail="Camera not found")` (行番号: 61〜62 / 抜粋: "raise HTTPException(status_code=404, detail=\"Camera not found\")")
+* 根拠: `if not camera_service.set_camera_enabled(camera_id, payload.enabled):\n        raise HTTPException(status_code=404, detail="Camera not found")` (参照: update_camera_settings / 抜粋: "raise HTTPException(status_code=404, detail=\"Camera not found\")")
 
 
 ### `get_live_stream` (`GET /live/{camera_id}/stream.m3u8`)
@@ -168,7 +168,7 @@
 
 
 * **戻り値/レスポンス**: `FileResponse`（media_type="application/vnd.apple.mpegurl"）。カメラ未検出時は404、ストリーム初期化失敗時は500、生成タイムアウト時は503を送出。
-* 根拠: [FileResponse返却] (行番号: 84 / 抜粋: "return FileResponse(playlist_path, media_type="application/vnd.apple.mpegurl")")
+* 根拠: [FileResponse返却] (参照: get_live_stream / 抜粋: "return FileResponse(playlist_path, media_type="application/vnd.apple.mpegurl")")
 
 
 * **副作用**: `camera_service.start_hls_stream` を`asyncio.to_thread`経由でスレッドプール実行（ストリーム開始プロセスの起動を誘発しうる）、最大10回×0.5秒の`await asyncio.sleep(0.5)`による非同期待機ループ（イベントループはブロックしない）。
@@ -200,7 +200,7 @@
 
 
 * **エラーハンドリング**: カメラID未検出時に404の `HTTPException` を送出（`_require_camera`内で送出）。
-* 根拠: [呼び出し] (行番号: 104 / 抜粋: "cam_conf = _require_camera(camera_id)")
+* 根拠: [呼び出し] (参照: get_record_info / 抜粋: "cam_conf = _require_camera(camera_id)")
 
 
 ### `get_record_file` (`GET /record/{camera_id}/{target_date}/{filename}`)
@@ -230,7 +230,7 @@
 ### `get_live_segment` (`GET /live/{camera_id}/{segment_file}`)
 
 * **役割**: ライブHLSの `.ts` セグメントファイルを、拡張子チェックとパストラバーサル検証を経て配信する。Issue #172の修正（コミット時点）により、`.ts`以外の拡張子は400で拒否するようになった。修正前は拡張子を一切検証していなかったため、`_resolve_segment_path`のパストラバーサル対策のみでは防げない形で、同一ディレクトリ内に配置される`ffmpeg.log`（RTSP認証情報を含みうる。`camera_service.md`参照）等の任意ファイルがそのまま配信され得た。**（Issue #551で修正）** カメラ設定のルックアップは`_require_camera(camera_id)`呼び出しに置き換わった（存在確認のみが目的のため戻り値は受け取らない）。
-* 根拠: [エンドポイント定義とDocstring] (行番号: 138〜152 / 抜粋: "def get_live_segment(camera_id: str, segment_file: str):\n    """ライブのHLSセグメント（.tsファイル）を配信"""")、[拡張子チェック] (行番号: 143〜144 / 抜粋: "if not segment_file.endswith(\".ts\"):\n        raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")、[カメラ確認] (行番号: 146 / 抜粋: "_require_camera(camera_id)")
+* 根拠: [エンドポイント定義とDocstring] (行番号: 138〜152 / 抜粋: "def get_live_segment(camera_id: str, segment_file: str):\n    """ライブのHLSセグメント（.tsファイル）を配信"""")、[拡張子チェック] (行番号: 143〜144 / 抜粋: "if not segment_file.endswith(\".ts\"):\n        raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")、[カメラ確認] (参照: get_live_segment / 抜粋: "_require_camera(camera_id)")
 
 
 * **引数/リクエスト**: `camera_id: str`, `segment_file: str`（いずれもパスパラメータ）
@@ -238,7 +238,7 @@
 
 
 * **戻り値/レスポンス**: `FileResponse`（media_type="video/MP2T"）
-* 根拠: [レスポンス返却] (行番号: 152 / 抜粋: "return FileResponse(segment_path, media_type="video/MP2T")")
+* 根拠: [レスポンス返却] (参照: get_live_segment / 抜粋: "return FileResponse(segment_path, media_type="video/MP2T")")
 
 
 * **副作用**: `_resolve_segment_path` によるパス検証、`camera_service.HLS_LIVE_DIR` の参照。

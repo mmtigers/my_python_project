@@ -73,7 +73,7 @@
 ### `get_analysis_data`
 
 * **役割**: 指定された開始日時から現在までの食事、駐車場の動き、電気代、体調のデータをDBから集計する。**（Issue #170で修正）** 電気代算出(`sql_power`)は以前`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)を無差別に`AVG(wattage)`していたため、プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)のアイドル値がスマートメーターの平均消費電力を希釈していた。`services/analysis_service.py`の`load_sensor_data`と同じ分類基準(`device_name`に`"Remo"`を含む)でスマートメーターの行のみに絞るよう修正した。 **（Issue #663で修正）** 電気代の単価は、以前このファイルにモジュール定数`DEFAULT_ELEC_PRICE_PER_KWH = 31`として直書きされていた(コメント自身が「本来はconfig.pyまたは.envから読み込むべき値」と記述)。`config.py`のセクション15`ELEC_PRICE_PER_KWH`(環境変数`ELEC_PRICE_PER_KWH`、既定31)へ移し、`config.ELEC_PRICE_PER_KWH`を参照する形にした。既定値は従来と同じため計算結果は変わらない。 **（Issue #829で修正）** 車利用の集計(`sql_car`)は以前`car_records`テーブル(`action = 'LEAVE'`)を参照していたが、`car_records`への書き込み経路がリポジトリ内に存在せず常に0件だった(ダッシュボード側の車在場判定バグと同根)。`device_records`テーブルから`device_type = 'ONVIF_CAMERA' AND movement_state = 'ON'`かつ駐車場カメラを特定する条件の件数を集計する形に置き換えた。人の往来も拾うため厳密な車の出入り回数ではないが、駐車場での動きの目安として`data["car_count"]`に格納する(呼び出し元`generate_text_section`の表示文言も「🚗 車利用」→「🚗 駐車場の動き」に変更)。同Issueで、電気代算出(`sql_power`)のスマートメーター判定も、`migrations/0020`以降に書き込まれる`device_category = 'smart_meter'`列を優先し、それが`NULL`の古い行だけ従来の`device_name LIKE '%Remo%'`判定にフォールバックする形に変更した(`services/analysis_service.py`の`_classify_power_device_type`と同じ考え方)。**（不具合修正）** 駐車場カメラを特定する条件は、以前`device_name = '駐車場'`(定数は`home_status_service.PARKING_CAMERA_NAME`、表示名の完全一致)だったが、実際にdevices.jsonへ登録されている表示名は「駐車場カメラ」で一致せず、この集計は常に0件になっていた(ダッシュボードの「🚗 駐車場」カードが同じ定数で「⚪ データなし」になっていた不具合と同根)。表示名は運用者が自由に変更できる値のため、変更されにくい`device_id = ?`(定数は`home_status_service.PARKING_CAMERA_ID`)による照合に変更した。
-* 根拠: `get_analysis_data` 定義部 (行番号: 147〜186 / 抜粋: "def get_analysis_data(start_dt")、駐車場カメラの動体検知件数クエリ (行番号: 87〜93 / 抜粋: "sql_car = \"\"\"\n                SELECT COUNT(*)\n                FROM device_records\n                WHERE device_type = 'ONVIF_CAMERA' AND movement_state = 'ON'\n                  AND device_id = ? AND timestamp >= ?\n            \"\"\"\n            cursor.execute(sql_car, (home_status_service.PARKING_CAMERA_ID, start_str))")、電気代クエリのデバイス絞り込み(行番号: 114〜118 / 抜粋: "WHERE timestamp >= ?\n                  AND (\n                    device_category = 'smart_meter'\n                    OR (device_category IS NULL AND device_name LIKE '%Remo%')\n                  )")
+* 根拠: `get_analysis_data` 定義部 (行番号: 147〜186 / 抜粋: "def get_analysis_data(start_dt")、駐車場カメラの動体検知件数クエリ (行番号: 87〜93 / 抜粋: "sql_car = \"\"\"\n                SELECT COUNT(*)\n                FROM device_records\n                WHERE device_type = 'ONVIF_CAMERA' AND movement_state = 'ON'\n                  AND device_id = ? AND timestamp >= ?\n            \"\"\"\n            cursor.execute(sql_car, (home_status_service.PARKING_CAMERA_ID, start_str))")、電気代クエリのデバイス絞り込み(参照: _estimate_elec_bill / 抜粋: "WHERE timestamp >= ?\n                  AND (\n                    device_category = 'smart_meter'\n                    OR (device_category IS NULL AND device_name LIKE '%Remo%')\n                  )")
 
 
 **（Issue #954 で分割）** 本関数は122行あったため、挙動を変えずに4つの集計を非公開関数へ切り出した。本体に残るのは、1つの`get_db_cursor()`と`try`の中でこれらを順に呼んで辞書を組み立てる流れだけで、各関数の例外は分割前と同じく本体の`except Exception`で捕捉される(結果のキーの順序・SQLの実行順も同じ)。
@@ -88,7 +88,7 @@
 * 根拠: `data["elec_bill"] = _estimate_elec_bill(cursor, start_str, start_dt, now)` (行番号: 177)
 
 * **引数/リクエスト**: `start_dt: datetime.datetime` - 集計開始日時。
-* 根拠: `get_analysis_data` 引数部 (行番号: 147 / 抜粋: "start_dt: datetime.datetime")
+* 根拠: `get_analysis_data` 引数部 (参照: get_analysis_data / 抜粋: "start_dt: datetime.datetime")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` - 集計結果の辞書。DB接続失敗時や例外発生時は `None`。

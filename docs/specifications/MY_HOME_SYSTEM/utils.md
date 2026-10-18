@@ -81,7 +81,7 @@
 ### `get_today_date_str`
 
 * **役割**: "Asia/Tokyo" タイムゾーンの現在日時を "YYYY-MM-DD" 形式の文字列で返す。
-* 根拠: [get_today_date_str] (行番号: 15〜16 / 抜粋: "return datetime.datetime.now(p...")
+* 根拠: [get_today_date_str] (参照: get_now_iso / 抜粋: "return datetime.datetime.now(p...")
 
 
 * **引数/リクエスト**: なし
@@ -93,18 +93,18 @@
 
 
 * **副作用**: なし
-* 根拠: [get_today_date_str] (行番号: 15〜16 / 抜粋: "return datetime.datetime.now(p...")
+* 根拠: [get_today_date_str] (参照: get_now_iso / 抜粋: "return datetime.datetime.now(p...")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [get_today_date_str] (行番号: 15〜16 / 抜粋: "return datetime.datetime.now(p...")
+* 根拠: [get_today_date_str] (参照: get_now_iso / 抜粋: "return datetime.datetime.now(p...")
 
 
 
 ### `get_display_date`
 
 * **役割**: "Asia/Tokyo" タイムゾーンの現在日時を "MM/DD" 形式の文字列で返す。
-* 根拠: [get_display_date] (行番号: 18〜19 / 抜粋: "return datetime.datetime.now(p...")
+* 根拠: [get_display_date] (参照: get_today_date_str / 抜粋: "return datetime.datetime.now(p...")
 
 
 * **引数/リクエスト**: なし
@@ -116,11 +116,11 @@
 
 
 * **副作用**: なし
-* 根拠: [get_display_date] (行番号: 18〜19 / 抜粋: "return datetime.datetime.now(p...")
+* 根拠: [get_display_date] (参照: get_today_date_str / 抜粋: "return datetime.datetime.now(p...")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [get_display_date] (行番号: 18〜19 / 抜粋: "return datetime.datetime.now(p...")
+* 根拠: [get_display_date] (参照: get_today_date_str / 抜粋: "return datetime.datetime.now(p...")
 
 
 
@@ -139,11 +139,11 @@
 
 
 * **副作用**: なし
-* 根拠: [get_now_jst] (行番号: 35 / 抜粋: "return datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))")
+* 根拠: [get_now_jst] (参照: get_now_jst / 抜粋: "return datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [get_now_jst] (行番号: 35 / 抜粋: "return datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))")
+* 根拠: [get_now_jst] (参照: get_now_jst / 抜粋: "return datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))")
 
 
 

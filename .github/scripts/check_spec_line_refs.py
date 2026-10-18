@@ -1047,6 +1047,25 @@ def _enclosing_symbol(snippet_lines: List[str], src_lines: List[str], spans: Lis
     return found
 
 
+def _symbol_enclosing_span(
+    snippet_lines: List[str], src_lines: List[str], spans: List[Tuple[str, int, int]], start: int, end: int
+) -> Optional[str]:
+    """引用範囲 start〜end の中にある抜粋の出現が、すべて同じ1つのシンボルの中にあるときそのシンボルを返す。"""
+    found: Optional[str] = None
+    hits = [h for h in _snippet_hits(snippet_lines, src_lines) if start <= h <= end]
+    if not hits:
+        return None
+    for lineno in hits:
+        inside = [(e - s, name) for name, s, e in spans if s <= lineno <= e]
+        if not inside:
+            return None
+        name = min(inside)[1]
+        if found is not None and name != found:
+            return None
+        found = name
+    return found
+
+
 def _symbol_blocks(line: str):
     """1行から (ブロックの開始, 終了, シンボル, 抜粋リスト) を順に返す。"""
     blocks = list(_SYMBOL_BLOCK_RE.finditer(line))
@@ -1093,7 +1112,7 @@ def scan_symbol_references() -> Tuple[List[str], int]:
     return problems, checked
 
 
-def convert_to_symbol_references(specs: List[Path], write: bool = True) -> Tuple[int, int]:
+def convert_to_symbol_references(specs: List[Path], write: bool = True, include_valid: bool = False) -> Tuple[int, int]:
     """指定した仕様書の「ずれている行番号引用」を、シンボル参照へ書き換える。戻り値は (変換数, 変換できなかった数)。
 
     変換するのは、(1) 引用が 1 項 + 抜粋 1 つの書式Aで、(2) 引用した行(範囲引用なら範囲)に
@@ -1101,6 +1120,11 @@ def convert_to_symbol_references(specs: List[Path], write: bool = True) -> Tuple
     ソースで一意に決まり、(4) その本体の中に抜粋の先頭行がある、ものだけ。
     どれかを満たさない引用は触らない(位置が確かめられないものを、確かめたことにしない)。
     ゲート済みの引用(def/class・一意な単一行リテラル)も触らない。
+
+    `include_valid=True` のときは、(2) を外して「いまは正しい」引用も対象にする。ただし抜粋が
+    複数行に現れる等でゲートに入れられない引用に限り(ゲート済みは行番号のまま検証される)、
+    **引用範囲の中にある出現**がすべて同じ1つのシンボルの中にあるときだけ、そのシンボルへ書き換える。
+    範囲が複数のシンボルやモジュールレベルにまたがる引用は触らない(行番号が持つ範囲の情報を捨てないため)。
 
     (3) の見出しが無い・シンボルとして解決できない場合に限り、抜粋の先頭行のソース内の出現が
     **すべて同じ1つのシンボルの中にある**なら、そのシンボルを使う(`_enclosing_symbol`)。
@@ -1147,8 +1171,18 @@ def convert_to_symbol_references(specs: List[Path], write: bool = True) -> Tuple
                 if _literal_target(snippet, items[0], src_lines) is not None:
                     continue  # ゲート済み
                 start, end = _cited_span(items[0])
-                if any(head in l for l in src_lines[max(0, start - 2): max(start, end)]):
+                in_cited_place = any(head in l for l in src_lines[max(0, start - 2): max(start, end)])
+                if in_cited_place and not include_valid:
                     continue  # 引用した場所に実在する(ずれていない)
+                if in_cited_place:
+                    if _range_containment(snippet, items[0], src_lines) is not None:
+                        continue  # 範囲内検証でゲート済み(行番号のまま検証される)
+                    symbol = _symbol_enclosing_span(_snippet_lines(snippet), src_lines, spans, start, end)
+                    if symbol is None:
+                        skipped += 1
+                        continue
+                    edits.append((block.start(), block.end(), "参照: %s" % symbol))
+                    continue
                 span = table.resolve(heading_symbol) if heading_symbol else None
                 if span is not None:
                     symbol = heading_symbol
@@ -1185,6 +1219,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="ゲートに入らない引用を、抜粋の実在位置で4種類(正しそう/ずれ・位置確定/ずれ・位置不明/ソースに無い)に仕分けして件数を出す(exit 0。Issue #950)",
     )
     parser.add_argument(
+        "--include-valid",
+        action="store_true",
+        help="--to-symbol-refs で、いまは正しい(引用範囲内に抜粋がある)ゲート外の引用も、範囲内の出現が1シンボルに収まるものに限り書き換える(Issue #950)",
+    )
+    parser.add_argument(
         "--to-symbol-refs",
         nargs="+",
         metavar="SPEC.md",
@@ -1194,7 +1233,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     if args.to_symbol_refs:
-        converted, skipped = convert_to_symbol_references([p.resolve() for p in args.to_symbol_refs])
+        converted, skipped = convert_to_symbol_references([p.resolve() for p in args.to_symbol_refs], include_valid=args.include_valid)
         print("✅ シンボル参照へ %d件を書き換えました(確かめられず据え置き: %d件)。" % (converted, skipped))
         return 0
 

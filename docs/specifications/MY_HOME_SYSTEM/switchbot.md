@@ -36,7 +36,7 @@ SwitchBotに関連するWebhookペイロードおよびAPI経由のデバイス�
 ### `SwitchBotContext`
 
 * **役割**: Webhookで送られてくる詳細コンテキストのデータ構造を定義するPydanticモデル。SwitchBot公式Webhookのペイロードでは`deviceType`(例: `"WoContact"`, `"WoPresence"`)がトップレベルではなくこのcontext内に入るため、当該フィールドを保持する(以前は未定義フィールドでpydanticに黙って捨てられ、常にNoneにフォールバックしていた)。また、WoContact(開閉センサー)の実際の開閉状態を表す`openState`("open"/"close"/"timeOutNotClose")フィールドを保持する。同デバイスの`detectionState`は内蔵PIRのモーション検知結果("DETECTED"/"NOT_DETECTED")であり開閉状態ではないため、両者は別フィールドとして区別されている(Issue #251)。
-* 根拠: `class SwitchBotContext(BaseModel):` (行番号: 5-26 / 抜粋: '"""Webhookで送られてくる詳細コンテキスト"""'); `deviceType: Optional[str] = None` (行番号: 12 / 抜粋: "deviceType: Optional[str] = None"); `openState: Optional[str] = None` (行番号: 19 / 抜粋: "openState: Optional[str] = None")
+* 根拠: `class SwitchBotContext(BaseModel):` (行番号: 5-26 / 抜粋: '"""Webhookで送られてくる詳細コンテキスト"""'); `deviceType: Optional[str] = None` (参照: SwitchBotContext / 抜粋: "deviceType: Optional[str] = None"); `openState: Optional[str] = None` (行番号: 19 / 抜粋: "openState: Optional[str] = None")
 
 
 * **引数/リクエスト**: 該当なし（クラス定義のため）

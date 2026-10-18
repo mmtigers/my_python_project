@@ -89,7 +89,7 @@
 
 
 * **戻り値/レスポンス**: `Tuple[Any, ...]`（`QUEST_UPSERT_SQL`のプレースホルダ順に並んだ17要素）
-* 根拠: [戻り値のタプル] (行番号: 104〜108 / 抜粋: "return (\n        quest_id, title, description, quest_type, target_user,")
+* 根拠: [戻り値のタプル] (参照: quest_upsert_params / 抜粋: "return (\n        quest_id, title, description, quest_type, target_user,")
 
 
 * **副作用**: なし（純粋関数）

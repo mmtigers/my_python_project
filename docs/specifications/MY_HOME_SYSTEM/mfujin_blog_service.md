@@ -203,7 +203,7 @@
 
 
 * **エラーハンドリング**: `resp.raise_for_status()`によりHTTPエラー(4xx/5xx)は`requests.HTTPError`として呼び出し元に伝播する(本関数内でキャッチしない)。
-* 根拠: (行番号: 143 / 抜粋: "resp.raise_for_status()")
+* 根拠: (参照: fetch_latest_article_summary / 抜粋: "resp.raise_for_status()")
 
 
 

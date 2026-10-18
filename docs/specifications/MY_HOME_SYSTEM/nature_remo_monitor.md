@@ -89,7 +89,7 @@
 
 
 * **エラーハンドリング**: 通信エラーなどすべての例外を `Exception` としてキャッチし、ロガーにエラー内容を出力して、取得できた範囲のデータを返す。
-* 根拠: `[fetch_data_sync]` (行番号: 70〜72 / 抜粋: "except Exception as e:")
+* 根拠: `[fetch_data_sync]` (参照: fetch_data_sync / 抜粋: "except Exception as e:")
 
 
 

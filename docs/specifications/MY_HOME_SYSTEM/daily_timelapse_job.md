@@ -73,14 +73,14 @@
 * **引数/リクエスト**: `time_str: str` (時刻を表す文字列)
 
 
-* 根拠: [関数の引数定義] (行番号: 39 / 抜粋: "time_str: str")
+* 根拠: [関数の引数定義] (参照: parse_time / 抜粋: "time_str: str")
 
 
 
 
 * **戻り値/レスポンス**: `datetime.time` または入力がFalsyな場合は `None`
 
-* 根拠: [関数の戻り値型ヒントと初期分岐] (行番号: 42 / 抜粋: "return None")
+* 根拠: [関数の戻り値型ヒントと初期分岐] (参照: parse_time / 抜粋: "return None")
 
 
 
