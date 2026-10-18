@@ -31,7 +31,7 @@ High 12件+M-10-1のコード照合結果（2026-09-02、Issue #323の調査に�
 | M-10-1 | `test.yml`に`permissions:`ブロックが無い | ✅ 対応済み | `permissions: contents: read`を明示済み（`test.yml`冒頭） |
 
 - **「5. 品質向上ロードマップ」のPhase 3**: 2026-09-16棚卸しの結果、**5項目すべてが完了または方針確定済み**であることを確認した（当時の「未着手」という記述は既に正しくない）。(1) スキーマ管理の`migrations/`一本化は**完了**（Issue #330。ただし`init_unified_db.py`は「廃止」ではなく、マイグレーション適用と検証のみを行う薄いラッパーとして残す形になった。空DBからの構築検証は`tests/test_migrations.py`・`tests/test_current_schema_sql.py`が担う）。(2) H-10 認証境界の実装は、Issue #321の案B（エッジのCloudflare Access委譲）採用により**実装しない方針で確定**。(3) 設定の一本化は**完了**（CORS許可オリジンは`config.CORS_ORIGINS`の1箇所のみ／`ENABLE_APPROVAL_FLOW`は撤去済み／config import時のNASブロッキングはPEP 562の`__getattr__`による遅延解決＋`prewarm_nas_paths()`で分離済み）。(4) タイムラプス/監視ジョブの排他制御は**完了**（`monitors/smart_timelapse_generator.py`の`timelapse_job_lock()`）。(5) フロントエンドのvitest導入は**完了**（CIの`frontend`ジョブで`npm test`を実行）。
-- **H-4 の「残」(`DeviceStatusResponse.body: Dict[str, Any]`)**: 2026-10-18 時点でも現存する。デバイス種別ごとに中身が異なるレスポンスをそのまま `model_dump()` で返す用途(`services/switchbot_service.py`)で、型を絞っても防げる障害が無いため、**現状維持としIssue化しない**(2026-10-18棚卸し・Issue #960)。
+- **H-4 の「残」(`DeviceStatusResponse.body: Dict[str, Any]`)**: 2026-10-18 に対応済み（Issue #960）。`body` を `DeviceStatusBody` に型付けし、システムが実際に読んでいるフィールド（`weight`・`power`・`watt`・`temperature`・`humidity`・`powerState`）だけを定義、未知のキーは通す。機種ごとに型が違うため型は緩くしてある。`tests/test_switchbot_service.py::TestGetDeviceStatus`
 
 ### Medium の個別照合（2026-10-18棚卸し・Issue #960）
 
@@ -81,7 +81,7 @@ High 12件+M-10-1のコード照合結果（2026-09-02、Issue #323の調査に�
 | M-10-2 | ✅ 対応済み | `.github/scripts/check_spec_drift.py` の除外判定(`EXCLUDE_PARTS`)・rename 検知(#407)・同名 stem の衝突回避(#105) |
 | M-10-3 | ✅ 解消(対象削除) | `tools/haircut_advisor.py` はリポジトリから削除済み |
 
-- Low(4章)は今回も網羅照合していない。
+- Low（4章）の13項目は、次節のとおり2026-10-18に全件照合した。
 
 ---
 
@@ -356,6 +356,24 @@ High 12件+M-10-1のコード照合結果（2026-09-02、Issue #323の調査に�
 ---
 
 ## 4. Low(価値のあるもののみ)
+
+> **対応状況（2026-10-18棚卸し・Issue #960）**: 下の13項目を現行コードと突き合わせた。**未対応は無い**（修正済み・対象の削除・意図した現状維持のいずれか）。箇条書き本文はレビュー時点の記録のまま残している。
+
+| # | 項目 | 状態 | 根拠（2026-10-18時点の現行コード） |
+|---|---|---|---|
+| 1 | `ENABLE_APPROVAL_FLOW` の参照0件 | ✅ 対応済み | `config.py`・`.env.example` から撤去済み |
+| 2 | `gameHelpers.js` の死にコード／`masterData.js` の `cost_gold` 欠落 | ✅ 対応済み | `gameHelpers.js` は削除済み。`family-quest/src/lib/masterData.js` のフォールバック報酬に `cost_gold` がある |
+| 3 | `train_service.py` の fail-soft | ✅ 解消（機能ごと削除） | 2026-09-21 に鉄道情報機能とソースを削除（`docs/specifications/全体設計書.md`） |
+| 4 | `core/logger.py` のローテーション競合／`emit` の `"Discord" not in record.msg` | ✅ 対応済み | `WatchedFileHandler`（ローテーションは logrotate 側）に変更。`emit` は文字列推測をやめ、`extra={"skip_discord": True}` の明示フラグ判定（#742） |
+| 5 | `process_reject_quest` が履歴を DELETE して `'rejected'` が生成されない | ✅ 対応済み | `services/quest/approval_service.py` が `UPDATE quest_history SET status = 'rejected'` で却下履歴を残す |
+| 6 | `filter_active_quests` のログが `q.get('id')`／`target_user` をブースト計算の user_id に渡す | ✅ 対応済み | 該当のログ出力は無くなった。`services/quest/game_system.py` は `target_user` が実在ユーザーでないとき閲覧者・兄妹の user_id を代表に使う（F-L6 #412） |
+| 7 | `sync_master_data` のみ naive `datetime.now()` | ✅ 対応済み | `updated_at` は `get_now_iso()` |
+| 8 | `camera_monitor.py` の `/tmp` 残骸と玄関カメラの全ペイロード INFO ログ | ✅ 対応済み | 失敗パスでも `os.remove`（`tempfile.gettempdir()` 経由、C-L7）。ペイロードのログは debug に降格 |
+| 9 | `keep_alive_anker.sh` の `TIMESTAMP` が起動時の1回評価 | ✅ 対応済み | #249 で修正済み。`tests/test_keep_alive_anker_sh.py` |
+| 10 | `scripts/merge_mds.py` の非決定性 | ✅ 解消（削除） | ファイルがリポジトリに存在しない |
+| 11 | `nas_utils.py` のコメントと `copy2` の乖離 | ✅ 対応済み | コメントを実際の挙動（無条件上書きは意図したもの）に合わせて修正済み |
+| 12 | GitHub Actions のタグ pin／フォーク PR で 403 | ✅ 対応済み（後半は現状維持） | 使用中の `uses:` はすべて40桁の SHA に pin 済み。フォーク PR のコメント投稿が 403 で失敗する点は、「気付きを与えるだけ」の非ブロッキングとしてワークフロー内に明記して許容 |
+| 13 | DDD `sanitize_filename` の空 stem・`".."` | ✅ 対応済み | 空になったら `"untitled"` を補い、Windows 予約名も回避する（`DDD/file_utils.py`） |
 
 - `config.py:172` `ENABLE_APPROVAL_FLOW` は定義のみで参照0件(H-5 と関連する痕跡)。削除か復活かを H-5 と同時に決めるべき。
 - `family-quest/src/utils/gameHelpers.js` は完全な死にコードで、かつ `getDayIndex()`(日曜=0)が実装の曜日規約(月曜=0)と矛盾する「将来の罠」。削除推奨。`masterData.js` のフォールバック報酬は `cost_gold` 欠落で「undefinedG」表示になる。

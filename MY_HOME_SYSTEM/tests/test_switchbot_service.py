@@ -268,6 +268,42 @@ class TestGetDeviceStatus:
 
         assert result["body"]["power"] == "on"
 
+    def _get_status(self, monkeypatch, payload):
+        monkeypatch.setattr(config, "SWITCHBOT_API_TOKEN", "token")
+        monkeypatch.setattr(config, "SWITCHBOT_API_SECRET", "secret")
+        fake_response = MagicMock()
+        fake_response.json.return_value = payload
+        fake_response.raise_for_status.return_value = None
+        monkeypatch.setattr(switchbot_service.requests, "get", lambda *a, **kw: fake_response)
+        return switchbot_service.get_device_status("dev1")
+
+    def test_body_keeps_unknown_keys_and_does_not_add_absent_ones(self, monkeypatch):
+        """H-4回帰防止: body は型付きだが、未知のキーは捨てず、レスポンスに無かったキーを
+        None で補わない(呼び出し側は `"temperature" in data` でキーの有無を見るため)。"""
+        result = self._get_status(monkeypatch, {
+            "statusCode": 100, "message": "success",
+            "body": {"weight": 85.5, "voltage": 100.2, "deviceType": "Plug Mini (JP)"},
+        })
+        assert result["body"] == {"weight": 85.5, "voltage": 100.2, "deviceType": "Plug Mini (JP)"}
+        assert "temperature" not in result["body"]
+
+    def test_body_accepts_numbers_and_strings_for_the_same_field(self, monkeypatch):
+        """同じ名前でも機種によって型が違う(power は数値のことも "on" のこともある)ため、
+        どちらでもステータス全体を落とさない。"""
+        as_number = self._get_status(monkeypatch, {"statusCode": 100, "message": "ok", "body": {"power": 12.5}})
+        as_string = self._get_status(monkeypatch, {"statusCode": 100, "message": "ok", "body": {"power": "on"}})
+        assert as_number["body"]["power"] == 12.5
+        assert as_string["body"]["power"] == "on"
+
+    def test_failure_response_without_body_is_accepted(self, monkeypatch):
+        result = self._get_status(monkeypatch, {"statusCode": 190, "message": "device internal error"})
+        assert result["statusCode"] == 190
+
+    def test_body_that_is_not_an_object_is_rejected(self, monkeypatch):
+        """想定外の形(オブジェクトでない body)は握りつぶさず、取得失敗(None)として扱う。"""
+        result = self._get_status(monkeypatch, {"statusCode": 100, "message": "ok", "body": ["weight", 1]})
+        assert result is None
+
     def test_exception_is_caught_and_returns_none(self, monkeypatch):
         def _raise(*a, **kw):
             raise requests.exceptions.Timeout("no response")

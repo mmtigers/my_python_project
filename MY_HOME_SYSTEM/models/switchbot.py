@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM/models/switchbot.py
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Optional, Union
 
 class SwitchBotContext(BaseModel):
     """Webhookで送られてくる詳細コンテキスト"""
@@ -32,8 +32,34 @@ class SwitchBotWebhookBody(BaseModel):
     context: SwitchBotContext
     deviceType: Optional[str] = None
 
+class DeviceStatusBody(BaseModel):
+    """GET /v1.1/devices/{id}/status の `body`。
+
+    デバイス種別ごとに中身が大きく変わるため、**システム内で実際に読んでいる**フィールド
+    (`services/switchbot_service.get_tv_power_watts`・`monitors/switchbot_power_monitor.
+    fetch_device_status_sync`)だけを定義し、それ以外のキーは `extra="allow"` でそのまま通す。
+
+    型は意図的に緩くしてある。Plug Mini は電力を `weight`(数値)や `power`(`"on"` のような
+    文字列)で返すなど、同じ名前でも機種によって型が違い、呼び出し側が個別に `float()` で
+    変換して不正値を読み飛ばしているため。ここで厳密にすると、1つのフィールドの形が違うだけで
+    ステータス全体が取れなくなる。
+    """
+    model_config = ConfigDict(extra="allow")
+
+    # 電力: Plug Mini は weight、機種により power / watt
+    weight: Optional[Union[float, str]] = None
+    power: Optional[Union[float, str]] = None
+    watt: Optional[Union[float, str]] = None
+    # 温湿度計
+    temperature: Optional[Union[float, str]] = None
+    humidity: Optional[Union[float, str]] = None
+    # ON/OFF を文字列で返す機種
+    powerState: Optional[str] = None
+
+
 class DeviceStatusResponse(BaseModel):
     """API経由で取得したデバイス状態（GET /v1.1/devices/{id}/status 用）"""
     statusCode: int
     message: str
-    body: Dict[str, Any]  # デバイスにより中身が激しく変わるため一旦Any
+    # 失敗レスポンス(statusCode != 100)では body が空・欠落しうるため既定は空。
+    body: DeviceStatusBody = Field(default_factory=DeviceStatusBody)
