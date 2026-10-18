@@ -22,7 +22,7 @@
 * 指定された間隔（秒）で、プロジェクト内のPythonスクリプトを定期的にサブプロセスとして実行し管理する無限ループのスケジューラ。
 * `ThreadPoolExecutor` により各タスクを並列実行する。1タスクの長時間化が他のタスクの実行タイミングを丸ごと遅延させないための設計。
 * **（Issue #738 / AUDIT-008 で追加）** `TASKS`の先頭に`monitors/routine_deadline_job.py`(interval 60秒)が加わった。デイリールーティンの締切(チェックポイント時刻)超過処理を、フロントエンドの15秒ポーリング(`GET /api/routine/today`)からこのスケジューラへ移したもの。同スクリプト自体はDBを触らず`POST /api/routine/deadlines/process`を叩くだけのHTTPクライアントで、実処理は`unified_server`のプロセス内で動く(スケジューラは別プロセスのため`quest_users`を直接書けない — CLAUDE.md「並行制御は単一プロセス前提」)。
-* 根拠: `main` 関数内のループおよび `TASKS` 定義 (行番号: 199〜235, 30〜44 / 抜粋: "with ThreadPoolExecutor(...", "TASKS: List[Task] = [")
+* 根拠: `main` 関数内のループおよび `TASKS` 定義 (行番号: 247, 30〜44 / 抜粋: "with ThreadPoolExecutor(...", "TASKS: List[Task] = [")
 
 
 

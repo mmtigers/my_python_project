@@ -117,7 +117,7 @@
 * **引数/リクエスト**: `script_name: str`, `exit_code: str`, `log_file: str`, `now: float`
 * 根拠: [関数定義] (行番号: 93)
 * **戻り値/レスポンス**: `bool`（通知したら `True`、抑制したら `False`）
-* 根拠: [戻り値] (行番号: 104, 110 / 抜粋: "return False", "return True")
+* 根拠: [戻り値] (行番号: 104, 111 / 抜粋: "return False", "return True")
 * **副作用**: `logger.info` / `logger.error`（後者は `DiscordErrorHandler` 経由で Discord の error チャンネルへ送られる）、ログファイルの読み取り、状態ファイルへの書き込み
 * 根拠: [ログ出力と記録] (行番号: 101, 105〜109 / 抜粋: "record_notification(script_name, now)")
 * **エラーハンドリング**: 本関数内に `try`/`except` は無い（読み取り側の例外は `read_log_tail`、書き込み側は `record_notification` が扱う）

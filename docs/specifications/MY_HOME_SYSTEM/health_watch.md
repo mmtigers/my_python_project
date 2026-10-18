@@ -503,7 +503,7 @@
 
 
 * **戻り値/レスポンス**: `str | None`(異常メッセージ、正常なら`None`)
-* 根拠: [戻り値] (行番号: 374、385〜389 / 抜粋: "return None")
+* 根拠: [戻り値] (参照: check_quest_master_drift / 抜粋: "return None")
 
 
 * **副作用**: DBの読み取りのみ(`get_ro_connection`による`mode=ro`接続で、SQLite側が書き込みを拒否する)。
@@ -661,7 +661,7 @@
 
 
 * **エラーハンドリング**: フックパスが存在しない/実行権限がない場合はエラーログのみで起動しない。起動時の例外（`Popen`失敗等）も捕捉してエラーログのみとし、層1本体（検知・通知・マーカー更新）を巻き込まない。
-* 根拠: [ガード/例外処理] (行番号: 204〜206, 228〜230 / 抜粋: "if not (os.path.isfile(hook) and os.access(hook, os.X_OK)):", "except Exception as e:\n        logger.error(f\"調査フックの起動に失敗しました: {e}\")")
+* 根拠: [ガード/例外処理] (行番号: 886, 913〜914 / 抜粋: "if not (os.path.isfile(hook) and os.access(hook, os.X_OK)):", "except Exception as e:\n        logger.error(f\"調査フックの起動に失敗しました: {e}\")")
 
 
 

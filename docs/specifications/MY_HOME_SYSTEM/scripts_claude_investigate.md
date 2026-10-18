@@ -65,7 +65,7 @@
 * 根拠: (行番号: 149, 154-156, 270 / 抜粋: "exit 0", "exit 1", "exit \"$CLAUDE_EXIT\"")
 
 * **副作用**: `logs/.claude_investigate.lock`の作成(flock用fd 9)、`claude -p`によるAPI呼び出しとリポジトリ読み取り(非ドライラン時は`gh`によるIssue/Draft PR起票を許可)、`WATCHDOG_NOTIFY_WEBHOOK_URL`へのHTTP POST(調査結果は**（Issue #577で修正）** `truncate_utf8_chars`でUTF-8文字単位の先頭1500文字に切り詰め。旧`head -c 1500`のバイト単位切り詰めから変更)、標準出力へのログ(起動元のhealth_watch.py側で`logs/claude_investigate.log`へ追記される)。加えて`utf8_char_count`/`truncate_utf8_chars`呼び出しのたびに`python3`サブプロセスが起動する。
-* 根拠: [ロック/起動/通知] (行番号: 146, 179-184, 261 / 抜粋: "exec 9>\"$LOCK_FILE\"", "claude -p \"$PROMPT\"", "SNIPPET=$(printf '%s' \"$RESULT\" | truncate_utf8_chars 1500)")
+* 根拠: [ロック/起動/通知] (行番号: 146, 242, 261 / 抜粋: "exec 9>\"$LOCK_FILE\"", "\"$CLAUDE_CMD\" -p \"$PROMPT\"", "SNIPPET=$(printf '%s' \"$RESULT\" | truncate_utf8_chars 1500)")
 
 * **エラーハンドリング**: `set -euo pipefail`を基本としつつ、`claude -p`の呼び出しは`set +e`で囲んで終了コードを捕捉し、失敗時は`RESULT`にエラー説明を組み立てて通知に載せる。`curl`失敗は`|| echo ... >&2`で握りつぶし通知失敗として記録のみ。
 * 根拠: (行番号: 238-245, 264 / 抜粋: "set +e", "CLAUDE_EXIT=$?", "|| echo \"[$(date)] 通知送信に失敗しました\" >&2")

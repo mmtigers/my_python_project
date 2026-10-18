@@ -586,7 +586,7 @@
 
 
 * **戻り値/レスポンス**: `int`（削除できたファイル数。`self.data_dir`のファイル一覧取得自体に失敗した場合は`0`）
-* 根拠: [戻り値ヒントとDocstring・各return] (行番号: 832〜833, 841, 1010 / 抜粋: "Returns:\n            int: 削除できたファイル数。", "return 0", "return deleted")
+* 根拠: [戻り値ヒントとDocstring・各return] (行番号: 989〜990, 998, 1010 / 抜粋: "Returns:\n            int: 削除できたファイル数。", "return 0", "return deleted")
 
 
 * **副作用**: `self.data_dir.glob("*.corrupted-*")`によるディレクトリ走査、条件（`is_file()`かつ`mtime`が閾値より古い）に合致する各ファイルの削除(`path.unlink()`)、1件以上削除した場合は削除件数を含む情報ログ出力。
@@ -725,7 +725,7 @@
 ### `DataManager.load_daily_summary`（Issue #462で変更）
 
 * **（2026-09-06 品質監査で修正）** JSON として読めた内容を `_is_valid_daily_summary(data)` で形状検証し、不正(トップレベルが辞書でない、`'counts'` キーがあって辞書でない — `null` を含む)な場合は ERROR ログを出して内容破損として扱い、`_LOAD_ERRORS` と同じ隔離(`.corrupted-*`)+ `.bak` 復旧の経路へ進める(復旧した `.bak` の内容も同様に検証し、不正なら空辞書)。以前は `[]` や `{"counts": null}` をそのまま返し、`record_daily_new_casts` の `data.setdefault`/`counts.get` で `AttributeError` になっていた。
-* 根拠: (行番号: 1042〜1055, 1089〜1092 / 抜粋: "if self._is_valid_daily_summary(data):\n                return data", "Backup file {backup_file} is also malformed; starting from an empty summary.")
+* 根拠: (行番号: 1329〜1330, 1376 / 抜粋: "if self._is_valid_daily_summary(data):\n                return data", "Backup file {backup_file} is also malformed; starting from an empty summary.")
 
 ### `DataManager._is_valid_daily_summary` **（2026-09-06 品質監査で修正）**
 
@@ -1381,7 +1381,7 @@ graph TD
 | 高 | `core/nas_utils.py` | `get_managed_target_directory`の実際の実装（NASマウント確認・自動修復ロジック）が、フォールバック実装（`fallback_dir_str`をそのまま返すのみ）とどう異なるかを確認する必要があるため。 | 根拠: [import文] (行番号: 64 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
 | 中 | `core/utils.py` | `wait_for_storage_warmup`の実際の実装が、フォールバック実装（Exponential Backoffでのテストファイル書き込み確認）と同等かどうかを確認するため。 | 根拠: [import文] (行番号: 65 / 抜粋: "from core.utils import wait_for_storage_warmup") |
 | 中 | `core/logger.py` | `get_logger`の実際の実装（出力フォーマット、ログレベル、出力先）を確認するため。 | 根拠: [import文] (行番号: 63 / 抜粋: "from core.logger import get_logger") |
-| 低 | `MonitorConfig.SITES`に登録された各対象Webサイトの実際のHTML構造 | `selector_container`等のCSSセレクタが正しく機能する前提となる実際のマークアップ構造を確認するため（コード外の外部サイト、79件）。 | 根拠: [SiteConfig各エントリのセレクタ定義] (行番号: 211〜214等 / 抜粋: "selector_container='ul.gallist li',") |
+| 低 | `MonitorConfig.SITES`に登録された各対象Webサイトの実際のHTML構造 | `selector_container`等のCSSセレクタが正しく機能する前提となる実際のマークアップ構造を確認するため（コード外の外部サイト、79件）。 | 根拠: [SiteConfigのセレクタ項目] (行番号: 233 / 抜粋: "selector_container: str")、[一覧の取得] (参照: WebMonitor._parse_html / 抜粋: "containers = soup.select(site.selector_container)") |
 
 ## 8. 保守上の注意点
 

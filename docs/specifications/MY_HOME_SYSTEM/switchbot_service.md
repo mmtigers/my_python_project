@@ -64,7 +64,7 @@
 * **役割**: SwitchBot APIに対してGETリクエストを送信する。タイムアウトや接続エラー時にはExponential Backoffを用いて最大指定回数リトライする。取得したデータをモデルでバリデーションして返す。
 * 根拠: `request_switchbot_api` (行番号: 39〜87 / 抜粋: "def request_switchbot_api(url: str, headers: Dict[str, str], max_retries: int = 4) -> Optional[Dict[str, Any]]:")
 * バックオフのループ自体は `core.utils.retry_with_backoff` へ委譲している。docstringによれば、これは #661 で独自ループを共通実装へ寄せたものであり、「GETは冪等なので再送して安全」であるのに対しコマンド送信の `post_switchbot_api` は二重実行の副作用がありうるため統合の対象外である、と説明されている。
-* 根拠: [docstring および委譲呼び出し] (行番号: 40〜41, 70〜76 / 抜粋: "#661: バックオフのループ自体は `core.utils.retry_with_backoff` に寄せた", "        return retry_with_backoff(")
+* 根拠: [docstring および委譲呼び出し] (行番号: 42, 70〜76 / 抜粋: "#661: バックオフのループ自体は `core.utils.retry_with_backoff` に寄せた", "        return retry_with_backoff(")
 * `max_retries` は初回を含む総試行回数として扱われ、`retry_with_backoff` へは `max_retries - 1`(初回を含まない追加リトライ回数)として渡される。
 * 根拠: (行番号: 74 / 抜粋: "            max_retries=max_retries - 1,  # max_retries は初回を含む総試行回数")
 
@@ -81,7 +81,7 @@
 
 
 * **副作用**: ロガーへの出力（警告、エラー、デバッグ）。失敗した試行ごとに1本の警告と、最後に「完全失敗」の警告1本が出る。最終試行ぶんの警告は `on_retry` が呼ばれないため例外ハンドラ側から同じ書式で出している。
-* 根拠: (行番号: 60〜62, 79〜80, 86 / 抜粋: "        logger.warning(f"⚠️ SwitchBot API connection issue (Attempt {attempts['n']}/{max_retries}): {error}")", "        _warn_connection_issue(e)", "    logger.warning("⚠️ SwitchBot API completely failed after retries. Operating in Fail-Soft mode.")")
+* 根拠: (行番号: 65, 79〜80, 86 / 抜粋: "        logger.warning(f"⚠️ SwitchBot API connection issue (Attempt {attempts['n']}/{max_retries}): {error}")", "        _warn_connection_issue(e)", "    logger.warning("⚠️ SwitchBot API completely failed after retries. Operating in Fail-Soft mode.")")
 
 
 * **エラーハンドリング**:

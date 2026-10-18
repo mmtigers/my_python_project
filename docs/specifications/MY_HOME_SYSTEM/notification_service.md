@@ -98,11 +98,11 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 
 * **戻り値/レスポンス**: `bool` (HTTPステータスコードが200または204の場合にTrue、それ以外はFalse)
-* 根拠: [戻り値] (行番号: 75, 66, 68 / 抜粋: "if res.status_code not in [200, 204]:", "return False", "return True")
+* 根拠: [戻り値] (行番号: 75, 83, 85 / 抜粋: "if res.status_code not in [200, 204]:", "return False", "return True")
 
 
-* **副作用**: 外部のDiscord Webhook URLへのHTTP POSTリクエストの実行（画像添付時は`files`パラメータで`filename`を指定してアップロード、タイムアウト60秒。テキストのみの場合はJSON送信、タイムアウト10秒）。
-* 根拠: [外部通信] (行番号: 58〜59, 61 / 抜粋: "files = {'file': (filename, image_data)}", "res = requests.post(url, files=files...")
+* **副作用**: 外部のDiscord Webhook URLへのHTTP POSTリクエストの実行（**#661**: 送信と429/5xxの限定リトライは`_post_discord_with_retry`経由。画像添付時は`files`パラメータで`filename`を指定してアップロード、タイムアウト60秒。テキストのみの場合はJSON送信、タイムアウト10秒）。
+* 根拠: [外部通信] (行番号: 69, 70 / 抜粋: "files = {'file': (filename, image_data)}", "res = _post_discord_with_retry(url, files=files, data={'content': chunk}, timeout=60)")
 
 
 * **エラーハンドリング**: HTTPステータスコードが200/204以外の場合、レスポンス内容を含めたエラーログを出力してFalseを返す。リクエスト時に例外が発生した場合も、エラーログを出力してFalseを返す。URLが設定されていない場合は早期リターンでFalseを返す。**（Issue #742 / AUDIT-013 で変更）** これら2つの `logger.error` には `extra={"skip_discord": True}` を付けている。通知システム自身の失敗をここから再び Discord へ送ろうとしないための opt-out で、以前は `core/logger.py` 側が「メッセージに Discord という語が含まれるか」で推測的に抑制していた（その推測が広すぎ、無関係な実障害まで無音にしていた）。**この関数にエラーログを足すときも同じフラグを付けること。**

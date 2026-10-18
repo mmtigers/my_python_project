@@ -369,7 +369,7 @@
 ### 関数 `run`
 
 * **（2026-09-06 品質監査で修正）** 日次レポート(`is_report_time`)の判定を `now.hour == 8` の一致から「`now.hour >= 8` かつ状態ファイルの `last_report_date` が今日でない」に変更し、送信後に `last_report_date` を `_save_state` で保存する(Issue #388 で保持期間削除側に施したのと同じ修正。scheduler の実行間隔のずれで 7:5x → 9:0x になった日はレポートが丸ごと飛んでいた)。`today_str` の算出は両判定より前に移動した。
-* 根拠: (行番号: 417〜422, 454〜456 / 抜粋: "is_report_time = now.hour >= 8 and previous_state.get(\"last_report_date\") != today_str", "if is_report_time:\n            previous_state[\"last_report_date\"] = today_str\n            self._save_state(previous_state)")
+* 根拠: (行番号: 483, 520〜521 / 抜粋: "is_report_time = now.hour >= 8 and previous_state.get(\"last_report_date\") != today_str", "if is_report_time:\n            previous_state[\"last_report_date\"] = today_str")
 * **（Issue #592で修正）** 上記「8時以降」判定に使う現在時刻(`now`)の取得方法自体を、ホストOSのタイムゾーン設定に依存するnaiveな`datetime.now()`から`core.utils.get_now_jst()`（Issue #592で追加、"Asia/Tokyo"のaware `datetime`を返す）に置き換えた。「8時以降」判定はJSTの8時を意図しているため、ホストがJST以外の設定だと本来と異なる実時刻で日次レポート・保持期間クリーンアップの両方が判定されてしまう問題があった（Issue #382/#293と同じ不具合クラス）。この変更に伴い`from datetime import datetime`のimportは不要になり削除された。回帰テストの`TestNasMonitorDailyReportOncePerDay`クラスは、`freeze_time(...)`の引数をJST時刻の文字列からUTC相当の文字列に変更した（freezegunは素の文字列をUTCとして解釈するため。例: `freeze_time("2026-09-06 09:05:00")`は元々JST 9:05のつもりだったが実際にはUTC 9:05=JST 18:05と解釈されており、修正前から気づかれずにいたテスト側のバグだった。修正後は`freeze_time("2026-09-06 00:05:00")  # JST 09:05`のようにUTC時刻を明示する）。
 * 根拠: `now = get_now_jst()` (行番号: 476〜478 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()")
 

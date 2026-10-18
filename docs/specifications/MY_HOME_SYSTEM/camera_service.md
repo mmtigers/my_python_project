@@ -30,7 +30,7 @@
 
 * ライブ配信ffmpegプロセス起動時には`-hide_banner`/`-loglevel error`オプションを付与し、認証情報込みのRTSP URLがffmpeg自身の起動バナー経由でログファイルに平文出力されるのを防止する。また`ffmpeg.log`は`os.chmod`で`0o600`（所有者のみ読み書き可）に設定し、他ローカルユーザーからの閲覧を防ぐ。
 * **（Issue #882で追加）** 生存中のライブffmpegでも、`stream.m3u8`の更新時刻（無ければ`_live_started_at`の起動時刻）から`HLS_LIVE_STALL_SECONDS`（30秒）を超えて更新が止まっていれば、ハングとみなして`kill`し再起動する（`_is_live_stalled`）。`-timeout`で検知できない停止への備え。起動前には前回の`stream.m3u8`/`.ts`も削除する（`_remove_stale_live_outputs`）。
-* 根拠: [ffmpegコマンドとchmod] (行番号: 270, 288 / 抜粋: "\"-hide_banner\",")
+* 根拠: [ffmpegコマンドとchmod] (行番号: 310, 329 / 抜粋: "\"-hide_banner\",", "os.chmod(log_path, FFMPEG_LOG_FILE_MODE)")
 
 
 * **（Issue #439で追加）** ライブ配信の起動(`start_hls_stream`)・録画プレイリスト生成(`generate_record_playlist`)に加え、`_active_processes`/`_active_vod_processes`/`_rtsp_cache`の3グローバル辞書への読み書き自体も、モジュールレベルの`_state_lock`で保護されるようになった。以前はこれら3辞書がロック無しで複数スレッドから同時にチェック・更新されており、「チェックしてから更新する」までの一連の操作が原子的でなかったため、既に終了したプロセスをactiveと誤認する等の不整合が起こりうる状態だった。
@@ -63,7 +63,7 @@
 | `json` | 標準ライブラリ | `devices.json`の読み込み・書き込み（`set_camera_enabled`） | 根拠: [import文] (行番号: 2 / 抜粋: "import json") |
 | `os` | 標準ライブラリ | パス操作(`os.path.join`, `os.path.dirname`, `os.makedirs`, `os.path.exists`, `os.path.basename`)、環境変数取得(`os.getenv`)、`os.chmod`によるパーミッション変更、`os.replace`によるアトミックなファイル置換 | 根拠: [import文] (行番号: 3 / 抜粋: "import os") |
 | `subprocess` | 標準ライブラリ | ffmpegプロセスの起動(`Popen`)と型ヒント(`subprocess.Popen`) | 根拠: [import文] (行番号: 4 / 抜粋: "import subprocess") |
-| `threading` | 標準ライブラリ | **（Issue #439で拡大）** 以前はVOD生成の`process_key`単位ロック(`_vod_generation_locks`/`_vod_generation_locks_guard`)のみで使用していたが、現在は`_active_processes`/`_active_vod_processes`/`_rtsp_cache`の3辞書を保護する`_state_lock`、およびライブ配信の`cam_id`単位ロック(`_live_stream_locks`/`_live_stream_locks_guard`)にも使用される | 根拠: [import文] (行番号: 5 / 抜粋: "import threading")、[新規ロック定義] (行番号: 75, 102 / 抜粋: "_state_lock = threading.Lock()", "_live_stream_locks_guard = threading.Lock()") |
+| `threading` | 標準ライブラリ | **（Issue #439で拡大）** 以前はVOD生成の`process_key`単位ロック(`_vod_generation_locks`/`_vod_generation_locks_guard`)のみで使用していたが、現在は`_active_processes`/`_active_vod_processes`/`_rtsp_cache`の3辞書を保護する`_state_lock`に使用される。ライブ配信の`cam_id`単位ロック`_live_stream_locks`は、参照カウント付きロックのレジストリ(`core/utils.py`の`RefCountedLockRegistry`)へ一本化された | 根拠: [import文] (行番号: 5 / 抜粋: "import threading")、[ロック定義] (行番号: 75, 109 / 抜粋: "_state_lock = threading.Lock()", "_live_stream_locks = RefCountedLockRegistry()") |
 | `time` | 標準ライブラリ | プレイリスト生成待機のスリープ(`time.sleep`) | 根拠: [import文] (行番号: 6 / 抜粋: "import time") |
 | `urllib.parse` | 標準ライブラリ | RTSP URIのパース(`urlparse`)、認証情報のURLエンコード(`quote`)、ログ用マスク処理(`_mask_rtsp_url_for_log`内での`urlparse`/`_replace`) | 根拠: [import文] (行番号: 7 / 抜粋: "import urllib.parse") |
 | `glob` | 標準ライブラリ | 日付パターンに一致するmp4ファイルの検索(`glob.glob`) | 根拠: [import文] (行番号: 8 / 抜粋: "import glob") |

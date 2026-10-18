@@ -190,7 +190,7 @@
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値] (行番号: 36, 64 / 抜粋: "return False", "return now >= trigger")
+* 根拠: [戻り値] (行番号: 61, 64 / 抜粋: "return False", "return now >= trigger")
 
 
 * **副作用**: なし
@@ -236,7 +236,7 @@
 
 
 * **戻り値/レスポンス**: `bool` — いずれかの日付で`key`が`'done'`であれば`True`
-* 根拠: [戻り値] (行番号: 58-59, 99 / 抜粋: "if not dates:\n            return False", "return any(json.loads(row['steps_status']).get(key) == 'done' for row in rows)")
+* 根拠: [戻り値] (行番号: 91〜92, 99 / 抜粋: "if not dates:\n            return False", "return any(json.loads(row['steps_status']).get(key) == 'done' for row in rows)")
 
 
 * **副作用**: なし(`routine_progress`テーブルへの`SELECT`のみで書き込みは行わない)
@@ -671,7 +671,7 @@
 
 
 * **戻り値/レスポンス**: `bool`(`True`=締切を過ぎており、かつまだ通過していない)
-* 根拠: [戻り値] (行番号: 495, 524 / 抜粋: "return False", "return now >= deadline")
+* 根拠: [戻り値] (行番号: 509, 524 / 抜粋: "return False", "return now >= deadline")
 
 
 * **副作用**: なし(DBアクセスもしない)
@@ -836,7 +836,7 @@
 
 
 * **戻り値/レスポンス**: `int`(強制遷移を適用したフロー数。0〜2)
-* 根拠: [戻り値] (行番号: 767, 810 / 抜粋: "return 0", "return applied")
+* 根拠: [戻り値] (行番号: 795, 810 / 抜粋: "return 0", "return applied")
 
 
 * **副作用**: 必要と判定された場合のみ、ユーザー残高ロックの取得・解放、`routine_progress`への`INSERT`/`UPDATE`、`quest_users`への`UPDATE`(ボーナスが0でない場合)、`routine_step_events`への`INSERT`、ログ出力。不要な場合は`SELECT`のみ。
@@ -874,7 +874,7 @@
 ### `complete_step`（朝の準備チェックリスト化でチェックリスト/逐次の2分岐に変更、自由時間の時間固定をやめる変更で追いつき完了の分岐を追加、Issue #737 で TV 解錠の発火位置を変更）
 
 > **（Issue #737 / AUDIT-007）TV解錠はコミット後に起動する。** `switchbot_service.trigger_tv_unlock`はdaemonスレッドを起動する fire-and-forget で、**呼んだ瞬間に取り消せない物理的な副作用**である。以前は3箇所（`_complete_remind_step`・`_toggle_checklist_step`・`complete_step`の自由時間到達分岐）がいずれも`get_db_cursor(commit=True)`の`with`ブロック**内**で直接呼んでいたため、その後のコミットが失敗（`database is locked`のリトライ超過・ディスクフル）してロールバックされても**TVだけが点く**状態になりえた。さらにチェックリスト経路では`was_all_done`が「今回のDB状態」から計算されるため、ロールバック後にUIが未達成を表示してもう一度チェックすると**TV解錠が二度発火する**。現在は3箇所とも`progress['_tv_unlock_reason']`に理由を控えるだけにし、`complete_step`が`with`を抜けた後（コミット済み・ロック解放済み）で1回だけ発火する。これは`services/quest/approval_service.py`の`_process_approve_quest_locked`（および#544の`inventory_service`）と同じパターンで、**同種の修正が3箇所で行われ3箇所で漏れていた**（根本原因RC-3）ものを揃えたものである。`_tv_unlock_reason`は`granted_gold`/`leveled_up`と同じ「このリクエスト限りのフラグ」の慣習に沿い、`_serialize_flow`の戻り値には含まれない（取り出し時に`pop`する）。
-> * 根拠: [フラグの宣言とコミット後の発火] (行番号: 660〜667, 762〜772 / 抜粋: "tv_unlock_reason: Optional[str] = None", "if tv_unlock_reason:\n            switchbot_service.trigger_tv_unlock(tv_unlock_reason)")
+> * 根拠: [フラグの宣言とコミット後の発火] (行番号: 871, 957〜958 / 抜粋: "tv_unlock_reason: str | None = None", "if tv_unlock_reason:\n            switchbot_service.trigger_tv_unlock(tv_unlock_reason)")
 
 * **役割**: 指定ユーザーの指定フロー・指定ステップを完了(またはチェックリストならトグル)させる公開メソッド。**（大人用フロー分離で変更）** フローの内容はユーザー(子ども/パパ/ママ)によって異なるため、`flow_key`の妥当性チェックはメソッド冒頭ではなくDBカーソル取得後に移り、`self._flow_set_for(cur, user_id)`(ユーザー存在確認も兼ねる)で解決したフローセットにキーがあるかで判定するようになった。続いてフロー開始済みチェック、進捗取得(`_get_or_create_progress`)と強制切替の適用(`_apply_forced_transition`)、完了済みフロー判定の後、`step_key`に対応する`RoutineStep`を`flow['steps']`から探す(見つからなければ`HTTPException(404, "Unknown step_key")`)。**（自由時間の時間固定をやめる変更で変更）** 「完了済みフロー判定」は`step_key`解決より後ろへ移り、`'remind'`な逐次ステップ(追いつき完了の対象)であればフローを最後まで終えた後でも`400 "本日のフローは完了しています"`にならないようになった。**（朝の準備チェックリスト化で変更、自由時間の時間固定をやめる変更で3分岐へ）** ここで`target_step`の性質により処理が分岐する:
   - **（自由時間の時間固定をやめる変更で追加）** 逐次ステップ(`checklist=False`)かつ**チェックポイントステップ自身でない**(`checkpoint_time`が未設定)かつ現在のステータスが`'remind'`の場合は、`self._complete_remind_step(...)`へ委譲する(§4参照)。締切を過ぎて「まだだよ」になったステップを後から終わらせる経路で、進行(`current_step_index`)は動かさない。チェックリストの判定より先に評価されるため、`am`の朝の準備(チェックリスト)はこの経路に入らず、従来どおり締切後の変更が拒否される(登校時刻は動かせないため、追いつきの対象外)。**（レビュー指摘で修正）** `checkpoint_time`の除外が無いと、締切で`'remind'`になったチェックポイント(自由時間)自身を`step_key`に指定して直接完了報告でき、`_complete_remind_step`が冒頭で無条件に`'done'`を立てるため「宿題を残したまま自由時間が`'done'`」になってしまっていた。自由時間は一本道を全て終えた結果としてのみ`'done'`になるべきもので、直接指定された場合は逐次分岐側の`400 "自由時間は時間になると自動的に次へ進みます"`(進行が自由時間に居る場合)か`409`(既に先へ進んでいる場合)で従来どおり弾かれる。

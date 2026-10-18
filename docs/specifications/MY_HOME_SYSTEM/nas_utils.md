@@ -59,7 +59,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 
 
 * **副作用**: OSコマンド(`sudo mount`)の実行、ログの出力
-* 根拠: `attempt_remount`内処理 (行番号: 43, 45 / 抜粋: "res = subprocess.run...", "logger.info(...)")
+* 根拠: `attempt_remount`内処理 (行番号: 43, 51 / 抜粋: "res = subprocess.run...", "logger.info(...)")
 
 
 * **エラーハンドリング**: `subprocess.TimeoutExpired`とその他の`Exception`を別々にキャッチし、いずれもエラーログを出力してFalseを返す。

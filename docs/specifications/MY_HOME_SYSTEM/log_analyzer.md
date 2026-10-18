@@ -39,7 +39,7 @@
 | --- | --- | --- |
 | `config.LOG_DIR` | 外部ファイルで定義されており、具体的なパスや型が提供されていないため。 | `self.log_dir = config.LOG_DIR` (行番号: 56 / 抜粋: "self.log_dir = config.LOG_DIR") |
 | `core.logger.setup_logging` | 外部ファイルで定義されており、内部処理や戻り値の型仕様が不明なため。 | `logger = core.logger.setup_logging(...` (行番号: 13 / 抜粋: "logger = setup_logging("log_analyzer")") |
-| `services.notification_service.send_push` | 外部ファイルで定義されており、引数の詳細仕様やエラー挙動が不明なため。 | `services.notification_service.send_push([...` (行番号: 164, 190 / 抜粋: "send_push([{"type": "text", "text": msg}], target="discord", channel="report")") |
+| `services.notification_service.send_push` | 外部ファイルで定義されており、引数の詳細仕様やエラー挙動が不明なため。 | `services.notification_service.send_push([...` (参照: LogAnalyzer._send_report / 抜粋: "send_push([{\"type\": \"text\", \"text\": msg}], target=\"discord\", channel=\"report\")") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -226,7 +226,7 @@
 
 
 * **副作用**: `services.notification_service.send_push` による外部システムへの通信。
-* 根拠: 外部モジュール呼び出し (行番号: 164, 190 / 抜粋: "send_push([{"type": "text", "text": msg}], target="discord", channel="report")")
+* 根拠: 外部モジュール呼び出し (参照: LogAnalyzer._send_report / 抜粋: "send_push([{\"type\": \"text\", \"text\": msg}], target=\"discord\", channel=\"report\")")
 
 
 * **エラーハンドリング**: なし

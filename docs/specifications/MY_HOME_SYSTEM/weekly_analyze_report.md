@@ -158,7 +158,7 @@
 * ロガーによる状態のログ出力（INFO, ERROR, DEBUG）。
 * `services.notification_service.send_push` を呼び出し外部システムへ通知を送信。**（2026-09 チャンネル再設計で変更）** 以前は`channel`引数を省略しており既定値`"notify"`(生活者向けチャンネル)へ送られていたが、週次の定期レポートという性質から`channel="report"`(運用者向けチャンネル)を明示指定するよう変更された。
 * 送信成功時、モジュール定数`LAST_RUN_FILE`(`config.FALLBACK_ROOT`配下)へ実行日(`YYYY-MM-DD`)を書き込む(Issue #234で追加。`--force`実行時は書き込まない)。**（Issue #661で修正）** このフラグファイルの読み書きは`core/state_file.py`の`read_text`/`write_text_atomic`へ委譲し、書き込みは一時ファイル + `fsync` + `os.replace`による原子的な差し替えになった(親ディレクトリの作成も`state_file`側が行うため、呼び出し側の`os.makedirs`は不要になっている)。読み取り失敗時は`None`が返り「未送信」として扱われる(重複送信より送信欠落の方が困るため)。
-* 根拠: 各種処理部 (行番号: 222, 241, 278 / 抜粋: "is_force = len(sys.argv) > 1 a", "logger.info("📊 週間レポート生成プロセ", "services.notification_service.send_push([{"type": ")、実行済みフラグ書き込み (参照: run_report / 抜粋: "if not is_force:\n            state_file.write_text_atomic(LAST_RUN_FILE, today_str)")
+* 根拠: 各種処理部 (行番号: 222, 241, 304 / 抜粋: "is_force = len(sys.argv) > 1 a", "logger.info(\"📊 週間レポート生成プロセ", "if send_push([{\"type\": \"text\", \"text\": full_msg}], target=\"discord\", channel=\"report\"):")、実行済みフラグ書き込み (参照: run_report / 抜粋: "if not is_force:\n            state_file.write_text_atomic(LAST_RUN_FILE, today_str)")
 
 
 * **エラーハンドリング**: 日付計算失敗時（`start_week` 等が `None`）、および週間データ取得失敗時（`stats_week` が `None`）はエラーログを出力し、処理を中断（`return`）する。`--force`が指定されていない場合、`LAST_RUN_FILE`に本日日付が既に記録されていれば、月曜8時台であっても処理を中断する(Issue #234で追加。外部cronの多重起動による重複送信を防止)。
@@ -232,8 +232,8 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `config.py` | 使用されている各種テーブル名や定数値（`SQLITE_TABLE_POWER_USAGE` など）を特定するため。 | 根拠: `config.SQLITE_TABLE_FOOD` (参照: get_analysis_data / 抜粋: "config.SQLITE_TABLE_FOOD") |
-| 高 | `common.py` | DB接続先やクエリ結果を扱うカーソルの仕様、およびプッシュ通知の実際の送信先・処理内容を把握するため。 | 根拠: `core.database.get_db_cursor`, `services.notification_service.send_push` (行番号: 59, 278 / 抜粋: "get_db_cursor()", "services.notification_service.send_push([{"type": ") |
-| 中 | （データベーススキーマ定義ファイル） | `menu_category`、`action`、`wattage`、`condition` カラムのデータ型や格納形式、制約を確認するため。 | 根拠: DBクエリ実行部 (行番号: 62, 133 / 抜粋: "SELECT menu_category FROM", "SELECT AVG(wattage)") |
+| 高 | `core/database.py`・`services/notification_service.py` | DB接続先やクエリ結果を扱うカーソルの仕様、およびプッシュ通知の実際の送信先・処理内容を把握するため。 | 根拠: `core.database.get_db_cursor`, `services.notification_service.send_push` (行番号: 59, 304 / 抜粋: "with get_db_cursor() as cursor:", "if send_push([{\"type\": \"text\", \"text\": full_msg}]") |
+| 中 | （データベーススキーマ定義ファイル） | `menu_category`、`action`、`wattage`、`condition` カラムのデータ型や格納形式、制約を確認するため。 | 根拠: DBクエリ実行部 (行番号: 78, 133 / 抜粋: "SELECT menu_category", "SELECT AVG(wattage)") |
 
 ## 8. 保守上の注意点
 
