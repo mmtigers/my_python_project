@@ -155,26 +155,37 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService._process_complete_quest_locked`
 
 * **役割**: クエスト完了の実処理。クエスト・ユーザーの存在確認後、対象者検証（`target_user`が`'all'`・本人の`user_id`・`'siblings'`(かつ`user['role'] == ROLE_CHILD`)のいずれでもなければ403）と出現条件検証（`_is_quest_currently_active(quest)`が`False`なら403）を行う。続いて前提クエスト(`pre_requisite_quest_id`)の達成チェック（前提クエスト自身の`reset_period`内に`status='approved'`の履歴が無ければ403）、直近の非`rejected`完了履歴からのスパムチェック（経過秒数が`quest_type`に応じた下限(`INFINITE_QUEST_COOLDOWN_SECONDS`または`SPAM_CHECK_INTERVAL_SECONDS`)未満なら429）、`quest_type != 'infinite'`の場合の周期リセットガード（`is_within_reset_period`が`True`なら400）を順に行う。ガードを通過後`calculate_quest_boost`でボーナスを計算し、`user['role'] != ROLE_ADULT`なら（`target_user == 'siblings'`の場合は`_process_coop_quest_completion`に委譲、それ以外は`quest_history`に`'pending'`で挿入して承認待ちレスポンスを返す）、`ROLE_ADULT`の場合のみ`_apply_quest_rewards`で即時に報酬を適用する。
-* 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 231〜338)
-* 根拠: `is_sibling_target = quest['target_user'] == 'siblings'\n            if quest['target_user'] not in ('all', user_id) and not (\n                is_sibling_target and user['role'] == ROLE_CHILD\n            ):\n                raise HTTPException(status_code=403, detail="This quest is not available for you")\n            if not self._is_quest_currently_active(quest):\n                raise HTTPException(status_code=403, detail="This quest is not currently available")` (行番号: 217〜223)
-* 根拠: `prereq_id = quest['pre_requisite_quest_id'] if 'pre_requisite_quest_id' in quest.keys() else None\n            if prereq_id:\n                ...\n                if not (prereq_hist and prereq_hist['completed_at']\n                        and self.is_within_reset_period(prereq_hist['completed_at'], prereq_period)):\n                    raise HTTPException(status_code=403, detail="前提クエストがまだ達成されていません")` (行番号: 230〜243)
-* 根拠: `min_interval_seconds = INFINITE_QUEST_COOLDOWN_SECONDS if quest['quest_type'] == 'infinite' else SPAM_CHECK_INTERVAL_SECONDS\n                if elapsed is not None and elapsed < min_interval_seconds:\n                    raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")` (行番号: 258〜260)
-* 根拠: `if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:\n                reset_period = quest['reset_period'] or 'daily'\n                if self.is_within_reset_period(last_hist['completed_at'], reset_period):\n                    period_label = {"weekly": "今週", "monthly": "今月"}.get(reset_period, "本日")\n                    raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")` (行番号: 267〜271)
-* 根拠: `if user['role'] != ROLE_ADULT:\n                if quest['target_user'] == 'siblings':\n                    return self._process_coop_quest_completion(cur, user, quest, now_iso, total_exp, total_gold)\n                cur.execute("""\n                    INSERT INTO quest_history (...)\n                    VALUES (?, ?, ?, ?, ?, ?, 'pending')\n                """, ...)` (行番号: 284〜291)
-* 根拠: `result = self._apply_quest_rewards(cur, user, quest, now_iso, override_rewards={"gold": total_gold, "exp": total_exp})` (行番号: 304)
+* 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 231〜263)
+* 根拠: `is_sibling_target = quest['target_user'] == 'siblings'\n            if quest['target_user'] not in ('all', user_id) and not (\n                is_sibling_target and user['role'] == ROLE_CHILD\n            ):\n                raise HTTPException(status_code=403, detail="This quest is not available for you")\n            if not self._is_quest_currently_active(quest):\n                raise HTTPException(status_code=403, detail="This quest is not currently available")` (行番号: 277〜283)
+* 根拠: `prereq_id = quest['pre_requisite_quest_id'] if 'pre_requisite_quest_id' in quest.keys() else None\n            if prereq_id:\n                ...\n                if not (prereq_hist and prereq_hist['completed_at']\n                        and self.is_within_reset_period(prereq_hist['completed_at'], prereq_period)):\n                    raise HTTPException(status_code=403, detail="前提クエストがまだ達成されていません")` (行番号: 292〜305)
+* 根拠: `min_interval_seconds = INFINITE_QUEST_COOLDOWN_SECONDS if quest['quest_type'] == 'infinite' else SPAM_CHECK_INTERVAL_SECONDS\n                if elapsed is not None and elapsed < min_interval_seconds:\n                    raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")` (行番号: 322〜324)
+* 根拠: `if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:\n                reset_period = quest['reset_period'] or 'daily'\n                if self.is_within_reset_period(last_hist['completed_at'], reset_period):\n                    period_label = {"weekly": "今週", "monthly": "今月"}.get(reset_period, "本日")\n                    raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")` (行番号: 331〜335)
+* 根拠: `if user['role'] != ROLE_ADULT:\n                if quest['target_user'] == 'siblings':\n                    return self._process_coop_quest_completion(cur, user, quest, now_iso, total_exp, total_gold)\n                cur.execute("""\n                    INSERT INTO quest_history (...)\n                    VALUES (?, ?, ?, ?, ?, ?, 'pending')\n                """, ...)` (行番号: 254〜258)
+* 根拠: `result = self._apply_quest_rewards(cur, user, quest, now_iso, override_rewards={"gold": total_gold, "exp": total_exp})` (行番号: 261)
+**（Issue #954 で分割）** 本メソッドは108行あったため、挙動を変えずに次の4つの非公開メソッドへ切り出した。いずれも本メソッドから同じ`cur`を受け取って呼ばれるだけなので、呼び出し元`complete_quest`が取る user balance lock → completion lock の内側・同じトランザクションの中で実行される(ロックの範囲と取得順は分割前と同じ)。検証の順序(対象者・出現条件 → 前提クエスト → 間隔・周期)と、それぞれが送出する例外も同じ。残高を書き換える`_apply_quest_rewards`/`_process_coop_quest_completion`の呼び出しは本メソッドに残している。
+
+| メソッド | 役割 | 根拠 |
+| --- | --- | --- |
+| `_validate_quest_target_and_availability` | `target_user`が`'all'`・本人・`'siblings'`(子どものみ)以外なら403、出現条件(`_is_quest_currently_active`)を満たさなければ403(#163) | `def _validate_quest_target_and_availability(self, user_id: str, user: Any, quest: Any) -> None:` (行番号: 265) |
+| `_validate_prerequisite_quest` | 前提クエストの今周期の承認済み履歴が無ければ403。前提クエストがマスタに無ければ daily 扱い | `def _validate_prerequisite_quest(self, cur: Any, user_id: str, quest: Any) -> None:` (行番号: 285) |
+| `_validate_completion_interval` | 直前の(却下以外の)完了からの間隔が10秒(infinite は60秒)未満なら429(B2)、infinite 以外で周期内に完了済みなら400(M-1-3) | `def _validate_completion_interval(self, cur: Any, user_id: str, quest: Any) -> None:` (行番号: 307) |
+| `_submit_pending_completion` | 大人以外(兄妹連携を除く)の完了を`status='pending'`で`quest_history`に記録し、効果音を鳴らして承認待ちの応答を返す | `def _submit_pending_completion(` (行番号: 337) |
+
+* 根拠: `self._validate_completion_interval(cur, user_id, quest)` (行番号: 241)
+
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
-* 根拠: (行番号: 199)
+* 根拠: (行番号: 231)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`status`、`leveledUp`、`newLevel`、`earnedGold`、`earnedExp`、`earnedMedals`、`message`（pending時のみ））
-* 根拠: (行番号: 296〜301,304〜306)
+* 根拠: (行番号: 350〜355, 261〜263)
 * **副作用**: DB参照/更新（`quest_master`, `quest_users`, `quest_history`）、`sound_manager.play("submit")`呼び出し（pending時）、`_apply_quest_rewards`/`_process_coop_quest_completion`の呼び出し、ログ出力
-* 根拠: (行番号: 201〜202,288〜291,294,304,293,305)
+* 根拠: (行番号: 233〜234, 343〜348, 256, 261〜262)
 * **エラーハンドリング**: クエスト・ユーザー不在時`HTTPException(404)`。対象者不一致または出現条件不成立時`HTTPException(403)`。前提クエスト未達成時`HTTPException(403, "前提クエストがまだ達成されていません")`。スパムチェック未達時`HTTPException(429)`。周期リセットガード抵触時`HTTPException(400)`。
-* 根拠: (行番号: 204〜205,221〜223,243,260,271)
+* 根拠: (行番号: 237, 281, 283, 305, 324, 335)
 
 ### `QuestService._get_sibling_partner_id`
 
 * **役割**: 兄妹連携クエスト(`target_user == 'siblings'`)の完了報告者に対する「相方」の`user_id`を返す。`quest_users.role = ROLE_CHILD`のユーザーがちょうど2人（兄・妹）いることを前提とし、報告者自身を除いたもう一方のIDを返す。
-* 根拠: `def _get_sibling_partner_id(self, cur, user_id: str) -> str:` (行番号: 340〜349)
+* 根拠: `def _get_sibling_partner_id(self, cur, user_id: str) -> str:` (行番号: 357〜366)
 * 根拠: `rows = cur.execute("SELECT user_id FROM quest_users WHERE role = ?", (ROLE_CHILD,)).fetchall()\n        child_ids = [row['user_id'] for row in rows]\n        if user_id not in child_ids or len(child_ids) != 2:\n            raise HTTPException(status_code=400, detail="兄妹クエストの対象ユーザー構成が不正です")\n        return next(uid for uid in child_ids if uid != user_id)` (行番号: 313〜317)
 * **引数/リクエスト**: `cur`, `user_id: str`
 * 根拠: (行番号: 308)
@@ -188,7 +199,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService._process_coop_quest_completion`
 
 * **役割**: 兄妹連携クエストの完了報告処理。`_get_sibling_partner_id`で相方を特定し、報告者・相方双方の`pending`な`quest_history`行を作成、後から報告者側の行に`linked_history_id`を`UPDATE`で設定して相互連結する。呼び出し元`process_complete_quest`が兄妹連携クエストを共通ロックキーで直列化するため、兄・妹がほぼ同時に完了報告しても本関数は排他的に1回ずつしか実行されない。
-* 根拠: `def _process_coop_quest_completion(self, cur, user, quest, now_iso: str, total_exp: int, total_gold: int) -> Dict[str, Any]:` (行番号: 351〜380)
+* 根拠: `def _process_coop_quest_completion(self, cur, user, quest, now_iso: str, total_exp: int, total_gold: int) -> Dict[str, Any]:` (行番号: 368〜397)
 * 根拠: `reporter_history_id = cur.lastrowid` (行番号: 330)、`cur.execute("UPDATE quest_history SET linked_history_id = ? WHERE id = ?", (partner_history_id, reporter_history_id))` (行番号: 338)
 * **引数/リクエスト**: `cur`, `user`, `quest`, `now_iso: str`, `total_exp: int`, `total_gold: int`
 * 根拠: (行番号: 319)
@@ -213,7 +224,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService._is_quest_currently_active`
 
 * **役割**: `quest_master`1行（`dict`または`sqlite3.Row`。いずれも`[]`でのアクセスに対応）を受け取り、「今」出現・実行可能な条件を満たすかを`bool`で返す。`start_date`/`end_date`のいずれかが設定されていれば（`quest_type`を問わず）`YYYY-MM-DD`形式（`split('-')`でパース）による期間チェック、`quest_type == 'random'`の場合は`f"{今日の日付}_{quest_id}"`をシードとした`random.Random(seed).random()`が`occurrence_chance`を超えていないかの出現抽選チェックを行う。`occurrence_chance`が`None`の場合は`1.0`（常に出現）にフォールバックする。`start_time`と`end_time`が両方設定されていれば現在時刻(JST)がその範囲内か（`start_time > end_time`の場合は日付をまたぐ範囲として扱う）、`day_of_week`が設定されていれば曜日判定を行う。**（祝日対応で変更）** この曜日判定は以前`today_date.weekday() not in days_list`という直接比較だったが、祝日を休日として扱うためモジュール関数`matches_day_of_week(today_date, days_list)`の呼び出しに置き換えられた（判定規則は同関数の項を参照）。`filter_active_quests`と`_process_complete_quest_locked`の両方から呼ばれる共通ロジック。
-* 根拠: `def _is_quest_currently_active(self, quest, now: Optional[datetime.datetime] = None) -> bool:` (行番号: 393〜453)
+* 根拠: `def _is_quest_currently_active(self, quest, now: Optional[datetime.datetime] = None) -> bool:` (行番号: 410〜469)
 * **（宿題の繰り越しで追加）** `reset_period == 'offday_run'`のクエストは、`day_of_week`による曜日判定の後に「今日が休日（`is_offday`）または翌日が休日」の場合だけ出現する（金曜・祝前日・休日区間の各日）。次の登校日には出ない。完了APIの検証（Issue #163）と表示フィルタで共通。`reset_period`キーが無い`dict`でも落ちず、`sqlite3.Row`でも動くよう`dict(quest).get('reset_period')`で読む（`sqlite3.Row`は`in`が値の照合になるため）。
 * 根拠: `if dict(quest).get('reset_period') == 'offday_run':\n            return is_offday(today_date) or is_offday(today_date + datetime.timedelta(days=1))` (行番号: 449〜450)
 * 根拠: `start_date = quest['start_date'] if 'start_date' in quest.keys() else None\n        end_date = quest['end_date'] if 'end_date' in quest.keys() else None\n        if start_date or end_date:` (行番号: 663〜665)
@@ -231,7 +242,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 ### `QuestService.filter_active_quests`
 
 * **役割**: クエスト一覧(`List[dict]`)を受け取り、`_is_quest_currently_active`で「今」出現しているクエストのみに絞り込む。各クエストに`days`フィールド（`day_of_week`をカンマ区切りで`int`のリストへ変換したもの、未設定なら`None`）を追加する。
-* 根拠: `def filter_active_quests(self, quests: List[dict]) -> List[dict]:` (行番号: 454〜467)
+* 根拠: `def filter_active_quests(self, quests: List[dict]) -> List[dict]:` (行番号: 471〜484)
 * 根拠: `for q in quests:\n            if not self._is_quest_currently_active(q, now):\n                continue\n            q['days'] = [int(d) for d in q['day_of_week'].split(',')] if q['day_of_week'] else None\n            filtered.append(q)` (行番号: 707〜715)
 * **引数/リクエスト**: `quests: List[dict]`
 * 根拠: (行番号: 703)

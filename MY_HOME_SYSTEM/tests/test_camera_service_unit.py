@@ -437,6 +437,98 @@ class TestGenerateRecordPlaylistPastDateCacheCompleteness:
         mock_popen.assert_not_called()
 
 
+
+class TestGenerateRecordPlaylistBasics:
+    """Issue #954: `_generate_record_playlist_locked` を分割する前に、未カバーだった
+    早期リターン・実行中の待機・ffconcat の duration 計算の挙動を固定する。"""
+
+    def _setup(self, tmp_path, monkeypatch, filenames):
+        nvr_dir = tmp_path / "nvr"
+        cam_nvr_dir = nvr_dir / "TestCam"
+        cam_nvr_dir.mkdir(parents=True)
+        for name in filenames:
+            (cam_nvr_dir / name).write_bytes(b"x")
+        monkeypatch.setattr(config, "NVR_RECORD_DIR", str(nvr_dir), raising=False)
+        vod_dir = tmp_path / "vod"
+        monkeypatch.setattr(camera_service, "HLS_VOD_DIR", str(vod_dir))
+        return cam_nvr_dir, vod_dir
+
+    @staticmethod
+    def _fake_popen(cmd, **kwargs):
+        with open(cmd[-1], "w") as f:
+            f.write("#EXTM3U\n#EXT-X-ENDLIST\n")
+        proc = MagicMock()
+        proc.poll.return_value = 0
+        return proc
+
+    def test_missing_record_dir_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "NVR_RECORD_DIR", str(tmp_path / "nowhere"), raising=False)
+        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
+            assert camera_service.generate_record_playlist({"id": "cam1", "name": "TestCam"}, "20260101") is None
+        mock_popen.assert_not_called()
+
+    def test_no_recordings_for_date_returns_none(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch, ["20260102_100000.mp4"])
+        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
+            assert camera_service.generate_record_playlist({"id": "cam1", "name": "TestCam"}, "20260101") is None
+        mock_popen.assert_not_called()
+
+    def test_concat_durations_follow_real_gaps_and_fall_back_for_implausible_ones(self, tmp_path, monkeypatch):
+        cam_nvr_dir, vod_dir = self._setup(
+            tmp_path, monkeypatch,
+            # 10:00→10:05 は5分の実時間差。10:05→23:30 は上限を超えるため既定値。末尾も既定値。
+            ["20260101_100000.mp4", "20260101_100500.mp4", "20260101_233000.mp4"],
+        )
+        assert 13 * 3600 > camera_service.MAX_PLAUSIBLE_SEGMENT_GAP_SECONDS
+        with patch.object(camera_service.subprocess, "Popen", side_effect=self._fake_popen) as mock_popen:
+            result = camera_service.generate_record_playlist({"id": "cam1", "name": "TestCam"}, "20260101")
+
+        assert result == str(vod_dir / "cam1" / "record_20260101.m3u8")
+        concat = (vod_dir / "cam1" / "concat_20260101.txt").read_text(encoding="utf-8")
+        default = camera_service.DEFAULT_SEGMENT_DURATION_SECONDS
+        assert concat == (
+            "ffconcat version 1.0\n"
+            f"file '{cam_nvr_dir / '20260101_100000.mp4'}'\n"
+            "duration 300.0\n"
+            f"file '{cam_nvr_dir / '20260101_100500.mp4'}'\n"
+            f"duration {default}\n"
+            f"file '{cam_nvr_dir / '20260101_233000.mp4'}'\n"
+            f"duration {default}\n"
+        )
+        cmd = mock_popen.call_args.args[0]
+        assert cmd[:3] == ["nice", "-n", str(camera_service.FFMPEG_NICE_LEVEL)]
+        assert cmd[cmd.index("-i") + 1] == str(vod_dir / "cam1" / "concat_20260101.txt")
+
+    def test_waits_for_running_generation_instead_of_spawning_again(self, tmp_path, monkeypatch):
+        _, vod_dir = self._setup(tmp_path, monkeypatch, ["20260101_100000.mp4"])
+        running = MagicMock()
+        running.poll.return_value = None
+        camera_service._active_vod_processes["cam1_20260101"] = running
+        playlist = vod_dir / "cam1" / "record_20260101.m3u8"
+        playlist.parent.mkdir(parents=True)
+        playlist.write_text("#EXTM3U\n")
+
+        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
+            result = camera_service.generate_record_playlist({"id": "cam1", "name": "TestCam"}, "20260101")
+
+        assert result == str(playlist)
+        mock_popen.assert_not_called()
+
+    def test_running_generation_without_playlist_gives_up_after_waiting(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch, ["20260101_100000.mp4"])
+        running = MagicMock()
+        running.poll.return_value = None
+        camera_service._active_vod_processes["cam1_20260101"] = running
+        sleeps = []
+        monkeypatch.setattr(camera_service.time, "sleep", sleeps.append)
+
+        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
+            result = camera_service.generate_record_playlist({"id": "cam1", "name": "TestCam"}, "20260101")
+
+        assert result is None
+        assert len(sleeps) == camera_service.PLAYLIST_WAIT_MAX_ATTEMPTS
+        mock_popen.assert_not_called()
+
 class TestStartHlsStreamRestartsStalledFfmpeg:
     """#882: プロセスは生きているのにプレイリストが更新されないffmpeg(ハング)は再起動する。"""
 

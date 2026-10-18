@@ -624,6 +624,134 @@ def _tool_results_fallback(tool_results: List[str], note: str) -> str:
     return "\n".join(tool_results) + f"\n({note})"
 
 
+def _build_system_prompt(user_name: str) -> str:
+    """セバスチャン(執事)としての振る舞いと現在情報を含むシステムプロンプトを組み立てる。"""
+    system_prompt = f"""
+        あなたは「セバスチャン」という名前の、有能で忠実な執事です。
+        ユーザー（{user_name}様）の生活をサポートするために、会話を通じて記録を行ったり、情報を検索したりします。
+        
+        【現在情報】
+        - 現在時刻: {get_now_iso()}
+        - ユーザー名: {user_name}
+        
+        【振る舞いの指針】
+        - 丁寧で落ち着いた口調（です・ます調）で話してください。
+        - ユーザーが記録を求めた場合は、適切なツールを呼び出してください。
+        - ユーザーが質問をした場合は、search_dbツールを使って過去のデータを検索してください。
+        - ツールを呼び出した後は、その結果に基づいて「承知いたしました。〜を記録しました。」のように完了報告をしてください。
+        - 雑談の場合は、気の利いた返答を短めに返してください。
+        """
+    return system_prompt
+
+
+def _create_manual_chat(gemini_client: genai.Client) -> Any:
+    """自動関数呼び出しを無効にした Gemini のチャットセッションを作る。"""
+    # Geminiセッション開始 (Auto Function Calling無効化)。
+    # Issue #520: 旧SDKの GenerativeModel(...).start_chat(...) は
+    # client.aio.chats.create(...) に置き換わり、tools と自動関数呼び出しの
+    # 設定は GenerateContentConfig にまとまった。tools_schema の dict 形式は
+    # そのまま受け付けられるため、スキーマ定義は変更していない。
+    return gemini_client.aio.chats.create(
+        model=MODEL_NAME,
+        config=genai_types.GenerateContentConfig(
+            tools=tools_schema,
+            automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(
+                disable=True
+            ),
+        ),
+    )
+
+
+def _initial_api_error_message(e: "genai_errors.APIError") -> str:
+    """最初の API 呼び出しが再試行し尽くしても失敗したときの返信文面を決める。"""
+    if _is_quota_error(e):
+        logger.warning("⚠️ Gemini Quota Exhausted after max retries.")
+        return FALLBACK_MESSAGE
+    if _is_transient_error(e):
+        # Issue #804: 429 以外の一時的失敗(503 等)。再試行し尽くしても駄目だった
+        # ケースなので、「予期せぬエラー」ではなく**再送すれば直る**ことを伝える。
+        # ここを汎用の文面にすると、家族には「壊れている」としか見えない。
+        logger.warning(f"⚠️ Gemini temporarily unavailable after max retries: {e}")
+        return FALLBACK_MESSAGE
+    logger.error(f"❌ Gemini API Fatal Error: {e}")
+    return "申し訳ございません。AIサービスで予期せぬエラーが発生しました。"
+
+
+async def _execute_function_calls(
+    calls: List[Any], user_id: str, user_name: str, tool_results: List[str]
+) -> List[Any]:
+    """function_call をすべて実行し、結果を tool_results に追記して function_response を返す。"""
+    function_responses = []
+    for fc in calls:
+        fname = fc.name
+        fargs = dict(fc.args)
+        logger.info(f"🤖 AI Triggered Tool: {fname} args={fargs}")
+
+        tool_result = await _dispatch_tool(user_id, user_name, fname, fargs)
+        tool_results.append(tool_result)
+        function_responses.append(genai_types.Part.from_function_response(
+            name=fname,
+            response={"result": tool_result},
+        ))
+    return function_responses
+
+
+async def _run_tool_rounds(chat_manual: Any, response: Any, user_id: str, user_name: str) -> str:
+    """ツール実行→結果送信→次の応答、を MAX_TOOL_ROUNDS 回まで繰り返し、返信文面を返す。"""
+    # Issue #374: ツール実行→結果送信→次の応答、を上限回数までループする。
+    # 以前は1回のツール実行後に `final_res.text` を無条件に読んでおり、
+    # 「智矢が熱、涼花も熱」のように2件目の function_call が返ると
+    # response.text が ValueError を送出→汎用 except→「処理中にエラー」となり、
+    # 1件目は保存済みなのにユーザーが失敗と誤解して再送→重複登録(#232と同種)
+    # という経路が残っていた。
+    tool_results: List[str] = []
+    for _round in range(MAX_TOOL_ROUNDS):
+        calls = _extract_function_calls(response)
+
+        # --- Normal Chat / 最終応答 ---
+        if not calls:
+            final_text = _response_text_or_none(response)
+            if final_text:
+                return final_text
+            if tool_results:
+                # ツールは実行済みだが最終応答テキストが取り出せない(空応答等)
+                logger.warning("⚠️ Gemini returned no text after tool execution; falling back to tool results.")
+                return _tool_results_fallback(tool_results, "AIの応答が空だったため、実行結果のみ表示します")
+            logger.error("❌ Empty response from Gemini")
+            return "エラー: AIからの応答が空でした。"
+
+        # --- Handle Function Call(s) ---
+        # 1つの応答に複数の function_call が含まれる場合はすべて実行し、
+        # function_response もまとめて1回で返す。
+        function_responses = await _execute_function_calls(calls, user_id, user_name, tool_results)
+
+        # ツールの結果送信もリトライ対象にする (今回は簡易的に同じリトライ関数を利用)
+        try:
+            response = await _call_gemini_api_with_retry(chat_manual, function_responses)
+        except genai_errors.APIError as e:
+            if _is_quota_error(e):
+                # ツール実行は成功しているが、最終回答生成でコケた場合
+                logger.warning("⚠️ Gemini Quota Exhausted during tool output generation.")
+                return _tool_results_fallback(tool_results, "AIの応答生成が制限を超過したため、実行結果のみ表示します")
+            # #232: ツール実行(record_child_health/record_food等、DB書き込みを伴う)は
+            # 既に成功しているにもかかわらず、最終応答生成でクォータ超過以外の
+            # APIErrorが発生すると、以前はここで捕捉されず関数末尾の汎用
+            # except Exceptionまで伝播し「処理中にエラーが発生しました」という
+            # 一般エラーになっていた。ユーザーは保存に失敗したと誤解して同じ内容を
+            # 再送信し、冪等性チェックの無い記録処理が重複登録を起こしうる。
+            # クォータ超過と同様にtool_resultを返し、実行結果を正しく伝える。
+            logger.error(f"❌ Gemini API Fatal Error during tool output generation: {e}")
+            return _tool_results_fallback(tool_results, "AIの応答生成でエラーが発生したため、実行結果のみ表示します")
+
+        if not response or not response.parts:
+            logger.warning("⚠️ Empty response from Gemini after tool execution; falling back to tool results.")
+            return _tool_results_fallback(tool_results, "AIの応答が空だったため、実行結果のみ表示します")
+
+    # ループ上限到達: AIが function_call を返し続けた場合の安全弁
+    logger.warning(f"⚠️ Tool call rounds exceeded MAX_TOOL_ROUNDS={MAX_TOOL_ROUNDS}; falling back to tool results.")
+    return _tool_results_fallback(tool_results, "ツール呼び出し回数が上限に達したため、実行結果のみ表示します")
+
+
 async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> Optional[str]:
     """
     ユーザーの入力を解析し、適切なツールを実行するか、会話応答を返す。
@@ -646,122 +774,21 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
         return FALLBACK_MESSAGE
 
     try:
-        
-        system_prompt = f"""
-        あなたは「セバスチャン」という名前の、有能で忠実な執事です。
-        ユーザー（{user_name}様）の生活をサポートするために、会話を通じて記録を行ったり、情報を検索したりします。
-        
-        【現在情報】
-        - 現在時刻: {get_now_iso()}
-        - ユーザー名: {user_name}
-        
-        【振る舞いの指針】
-        - 丁寧で落ち着いた口調（です・ます調）で話してください。
-        - ユーザーが記録を求めた場合は、適切なツールを呼び出してください。
-        - ユーザーが質問をした場合は、search_dbツールを使って過去のデータを検索してください。
-        - ツールを呼び出した後は、その結果に基づいて「承知いたしました。〜を記録しました。」のように完了報告をしてください。
-        - 雑談の場合は、気の利いた返答を短めに返してください。
-        """
-
-        # Geminiセッション開始 (Auto Function Calling無効化)。
-        # Issue #520: 旧SDKの GenerativeModel(...).start_chat(...) は
-        # client.aio.chats.create(...) に置き換わり、tools と自動関数呼び出しの
-        # 設定は GenerateContentConfig にまとまった。tools_schema の dict 形式は
-        # そのまま受け付けられるため、スキーマ定義は変更していない。
-        chat_manual = client.aio.chats.create(
-            model=MODEL_NAME,
-            config=genai_types.GenerateContentConfig(
-                tools=tools_schema,
-                automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(
-                    disable=True
-                ),
-            ),
-        )
+        system_prompt = _build_system_prompt(user_name)
+        chat_manual = _create_manual_chat(client)
         full_prompt = f"{system_prompt}\n\nユーザーメッセージ: {text}"
 
         # 2. API呼び出し (Retry Logic適用)
         try:
             response = await _call_gemini_api_with_retry(chat_manual, full_prompt)
         except genai_errors.APIError as e:
-            if _is_quota_error(e):
-                logger.warning("⚠️ Gemini Quota Exhausted after max retries.")
-                return FALLBACK_MESSAGE
-            if _is_transient_error(e):
-                # Issue #804: 429 以外の一時的失敗(503 等)。再試行し尽くしても駄目だった
-                # ケースなので、「予期せぬエラー」ではなく**再送すれば直る**ことを伝える。
-                # ここを汎用の文面にすると、家族には「壊れている」としか見えない。
-                logger.warning(f"⚠️ Gemini temporarily unavailable after max retries: {e}")
-                return FALLBACK_MESSAGE
-            logger.error(f"❌ Gemini API Fatal Error: {e}")
-            return "申し訳ございません。AIサービスで予期せぬエラーが発生しました。"
+            return _initial_api_error_message(e)
 
         if not response or not response.parts:
             logger.error("❌ Empty response from Gemini")
             return "エラー: AIからの応答が空でした。"
 
-        # Issue #374: ツール実行→結果送信→次の応答、を上限回数までループする。
-        # 以前は1回のツール実行後に `final_res.text` を無条件に読んでおり、
-        # 「智矢が熱、涼花も熱」のように2件目の function_call が返ると
-        # response.text が ValueError を送出→汎用 except→「処理中にエラー」となり、
-        # 1件目は保存済みなのにユーザーが失敗と誤解して再送→重複登録(#232と同種)
-        # という経路が残っていた。
-        tool_results: List[str] = []
-        for _round in range(MAX_TOOL_ROUNDS):
-            calls = _extract_function_calls(response)
-
-            # --- Normal Chat / 最終応答 ---
-            if not calls:
-                final_text = _response_text_or_none(response)
-                if final_text:
-                    return final_text
-                if tool_results:
-                    # ツールは実行済みだが最終応答テキストが取り出せない(空応答等)
-                    logger.warning("⚠️ Gemini returned no text after tool execution; falling back to tool results.")
-                    return _tool_results_fallback(tool_results, "AIの応答が空だったため、実行結果のみ表示します")
-                logger.error("❌ Empty response from Gemini")
-                return "エラー: AIからの応答が空でした。"
-
-            # --- Handle Function Call(s) ---
-            # 1つの応答に複数の function_call が含まれる場合はすべて実行し、
-            # function_response もまとめて1回で返す。
-            function_responses = []
-            for fc in calls:
-                fname = fc.name
-                fargs = dict(fc.args)
-                logger.info(f"🤖 AI Triggered Tool: {fname} args={fargs}")
-
-                tool_result = await _dispatch_tool(user_id, user_name, fname, fargs)
-                tool_results.append(tool_result)
-                function_responses.append(genai_types.Part.from_function_response(
-                    name=fname,
-                    response={"result": tool_result},
-                ))
-
-            # ツールの結果送信もリトライ対象にする (今回は簡易的に同じリトライ関数を利用)
-            try:
-                response = await _call_gemini_api_with_retry(chat_manual, function_responses)
-            except genai_errors.APIError as e:
-                if _is_quota_error(e):
-                    # ツール実行は成功しているが、最終回答生成でコケた場合
-                    logger.warning("⚠️ Gemini Quota Exhausted during tool output generation.")
-                    return _tool_results_fallback(tool_results, "AIの応答生成が制限を超過したため、実行結果のみ表示します")
-                # #232: ツール実行(record_child_health/record_food等、DB書き込みを伴う)は
-                # 既に成功しているにもかかわらず、最終応答生成でクォータ超過以外の
-                # APIErrorが発生すると、以前はここで捕捉されず関数末尾の汎用
-                # except Exceptionまで伝播し「処理中にエラーが発生しました」という
-                # 一般エラーになっていた。ユーザーは保存に失敗したと誤解して同じ内容を
-                # 再送信し、冪等性チェックの無い記録処理が重複登録を起こしうる。
-                # クォータ超過と同様にtool_resultを返し、実行結果を正しく伝える。
-                logger.error(f"❌ Gemini API Fatal Error during tool output generation: {e}")
-                return _tool_results_fallback(tool_results, "AIの応答生成でエラーが発生したため、実行結果のみ表示します")
-
-            if not response or not response.parts:
-                logger.warning("⚠️ Empty response from Gemini after tool execution; falling back to tool results.")
-                return _tool_results_fallback(tool_results, "AIの応答が空だったため、実行結果のみ表示します")
-
-        # ループ上限到達: AIが function_call を返し続けた場合の安全弁
-        logger.warning(f"⚠️ Tool call rounds exceeded MAX_TOOL_ROUNDS={MAX_TOOL_ROUNDS}; falling back to tool results.")
-        return _tool_results_fallback(tool_results, "ツール呼び出し回数が上限に達したため、実行結果のみ表示します")
+        return await _run_tool_rounds(chat_manual, response, user_id, user_name)
 
     except Exception as e:
         logger.error(f"AI Analysis Unexpected Error: {e}")

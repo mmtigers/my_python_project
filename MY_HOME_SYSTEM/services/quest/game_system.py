@@ -344,90 +344,13 @@ class GameSystem:
         from services import quest_service as _quest_service_shim
 
         with get_db_cursor() as cur:
-            users = [dict(row) for row in cur.execute("SELECT * FROM quest_users")]
-
-            # SQLiteは "SELECT * FROM quest_users" にORDER BYが無いと、user_idが
-            # TEXT PRIMARY KEYであるため主キーのアルファベット順(dad, daughter, mom, son)
-            # で返すことがあり、quest_data.USERSの宣言順(dad, mom, son, daughter)と
-            # 一致しない。family-quest側の App.tsx は users[currentUserIdx] という
-            # 配列インデックスでタブと現在のユーザーを対応づけているため、この順序の
-            # 食い違いがあるとタブの位置と実際に表示される家族が入れ替わってしまう
-            # (例: 「ともや」のタブに寝かしつけ(mom/dad向け)クエストが出る)。
-            # quest_data.USERS の宣言順を唯一の正としてソートし直すことで、
-            # DBの内部的な返却順に依存しないようにする。
-            if _quest_service_shim.quest_data:
-                canonical_order = {u['user_id']: i for i, u in enumerate(_quest_service_shim.quest_data.USERS)}
-                users.sort(key=lambda u: canonical_order.get(u['user_id'], len(canonical_order)))
-
-            for u in users:
-                u['nextLevelExp'] = game_logic.GameLogic.calculate_next_level_exp(u['level'])
-                u['maxHp'] = game_logic.GameLogic.calculate_max_hp(u['level'])
-                u['hp'] = u['maxHp']
+            users = self._fetch_users_in_canonical_order(cur, _quest_service_shim.quest_data)
 
             all_quests = [dict(row) for row in cur.execute("SELECT * FROM quest_master")]
             filtered_quests = self.quest_service.filter_active_quests(all_quests)
+            self._attach_quest_bonuses(cur, filtered_quests, users, viewer_user_id)
 
-            # quest_master.target_user は実際の quest_users.user_id (例: 'dad')の他に、
-            # 'siblings' のようなグループ指定も取りうる。後者を calculate_quest_boost に
-            # そのまま user_id として渡すと quest_history に一致行が存在しないため、
-            # 実際の履歴に関わらずボーナスが常に0固定になっていた(実害はないが意味が誤り)。
-            # target_user が実在ユーザーでない場合は、閲覧中のユーザー(viewer_user_id)の
-            # 履歴を代表として使う。
-            known_user_ids = {u['user_id'] for u in users}
-            # F-L6(#412): target_user='siblings'(兄妹連携)クエストは、_process_coop_quest_completion
-            # が兄妹2人分のquest_historyを同一completed_atで必ずセットで作成するため、
-            # どちらの子のuser_idで見ても連続達成ボーナスは同じ結果になるはずだが、
-            # 以前は下のelse節でviewer_user_idにフォールバックしていたため、viewer_user_idが
-            # 兄妹のどちらでもない場合(親が閲覧中、または横画面4分割ビューでviewer_user_idが
-            # 常にusers[0]固定になる場合。Echo Show等)、その閲覧者にはこのクエストの
-            # quest_history行が一切無いため連続達成ボーナスが常に0固定になっていた。
-            # 兄妹のいずれか(以下の実装では最初に見つかった方)のuser_idを使う。
-            sibling_child_ids = [u['user_id'] for u in users if u.get('role') == ROLE_CHILD]
-
-            # 品質(#409 N+1対策): 以前はここでクエストごとにcalculate_quest_boostを呼び、
-            # クエストごとにquest_historyへの個別SELECTを発行していた(GET /data 1回で
-            # クエスト数分のクエリが発生)。対象となりうる全(user_id, quest_id)組合せの
-            # 「直近の非rejected完了日時」を1クエリでまとめて取得し、辞書引きに
-            # 置き換える。completed_atはcore.utils.get_now_iso()(常にJSTのisoformat、
-            # 固定長・ゼロ埋め)で記録されるため、文字列としてのMAX()が時系列上の
-            # 最新値と一致する(calculate_quest_boost個別呼び出し版のORDER BY DESC
-            # LIMIT 1と同じ前提)。
-            last_completed_map: dict[tuple, str] = {
-                (row['user_id'], row['quest_id']): row['last_completed_at']
-                for row in cur.execute("""
-                    SELECT user_id, quest_id, MAX(completed_at) AS last_completed_at
-                    FROM quest_history
-                    WHERE status != 'rejected'
-                    GROUP BY user_id, quest_id
-                """)
-            }
-
-            for q in filtered_quests:
-                # Q-L2(#409): target_user='all' の daily クエストも、完了時には閲覧ユーザーの
-                # 履歴に基づくボーナスが付くのに、表示側は常に 0 固定だった。'all' の場合は
-                # 閲覧中のユーザー(viewer_user_id)の履歴で算出する。
-                if q['target_user'] == 'all' or not q['target_user']:
-                    boost_user_id = viewer_user_id
-                elif q['target_user'] == 'siblings' and sibling_child_ids:
-                    boost_user_id = sibling_child_ids[0]
-                else:
-                    boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id
-                if boost_user_id:
-                    last_completed_at = last_completed_map.get((boost_user_id, q['quest_id']))
-                    boost = self.quest_service._compute_boost_from_last_completed(q, last_completed_at)
-                    q['bonus_gold'] = boost['gold']
-                    q['bonus_exp'] = boost['exp']
-                else:
-                    q['bonus_gold'] = 0
-                    q['bonus_exp'] = 0
-
-            rewards = [dict(row) for row in cur.execute("SELECT * FROM reward_master")]
-            for r in rewards:
-                # #291: icon/cost という重複フィールド名の付与(icon_key/cost_gold
-                # の別名)を廃止し、DBの実カラム名に一本化する。desc は
-                # description の同期用レガシー列(sync_strict.py参照)であり、
-                # このビュー応答では description のみを正としてdesc自体を落とす。
-                r.pop('desc', None)
+            rewards = self._fetch_rewards(cur)
 
             # 過去1ヶ月の完了履歴を取得して周期を判定する
             # ※SQLiteの date('now') はUTC基準のため、Python側でJSTの閾値文字列を生成する
@@ -445,50 +368,7 @@ class GameSystem:
                 "SELECT * FROM quest_history WHERE status='pending' ORDER BY completed_at DESC"
             )]
 
-            # #662: 以前は filtered_quests × recent_completed の二重ループで、
-            # クエスト数 Q・履歴数 H に対して O(Q×H) だった(履歴は直近30日分すべて)。
-            # quest_id で1度だけ索引を作れば O(Q+H) になる。recent_completed は
-            # completed_at の降順で取得済みで、defaultdict への追加もその順序を保つため、
-            # 「ユーザーごとの最新履歴を先に見る」という下の判定はそのまま成り立つ。
-            completed_by_quest: dict[Any, list[dict[str, Any]]] = collections.defaultdict(list)
-            for c in recent_completed:
-                completed_by_quest[c['quest_id']].append(c)
-
-            valid_completed = []
-
-            for q in filtered_quests:
-                q_id = q['quest_id']
-                reset_period = q.get('reset_period') or 'daily'
-                is_infinite = (q.get('quest_type') == 'infinite')
-                history_for_quest = completed_by_quest.get(q_id, ())
-
-                if is_infinite:
-                    # 無限クエストは条件を満たす全履歴を追加
-                    for c in history_for_quest:
-                        if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
-                            valid_completed.append(c)
-                else:
-                    # 通常クエストの場合、ユーザーごとに最新の履歴を評価する
-                    users_processed = set()
-                    for c in history_for_quest:
-                        uid = c['user_id']
-                        if uid not in users_processed:
-                            if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
-                                valid_completed.append(c)
-                            # 期間外であっても最新履歴を処理済みにし、同ユーザーの過去履歴検索を終了する
-                            users_processed.add(uid)
-
-            # Q-M3/F-M5 (#371): 以前ここにあった target_user が 'role_' プレフィックスの
-            # クエストの共有表示判定(is_shared_completed_by/is_shared_pending_by)は、
-            # completion API側(_process_complete_quest_locked)が 'all'/本人/'siblings'
-            # 以外を無条件403で拒否するため、'role_*' ターゲットは一覧には出ても
-            # 誰も完了できないという不整合な潜在バグだった(quest_data.pyに実際の
-            # 'role_*' ターゲットが存在しないため顕在化していなかった)。オーナー判断
-            # (role_* ターゲットは今後も使わない)により、この表示側の分岐を削除した。
-            # 複数人ターゲットの共有表示が必要な唯一のケースである兄妹連携クエスト
-            # (target_user='siblings')は、linked_history_idによる連結で別途処理される。
-
-            completed = valid_completed
+            completed = self._select_valid_completed(filtered_quests, recent_completed)
 
             logs = self._fetch_recent_logs(cur)
 
@@ -497,6 +377,145 @@ class GameSystem:
             "completedQuests": completed, "logs": logs,
             "pendingQuests": pending,
         }
+
+    def _fetch_users_in_canonical_order(self, cur: Any, quest_data: Any) -> list[dict[str, Any]]:
+        """quest_users を quest_data.USERS の宣言順に並べ、表示用のレベル派生値を付けて返す。"""
+        users = [dict(row) for row in cur.execute("SELECT * FROM quest_users")]
+
+        # SQLiteは "SELECT * FROM quest_users" にORDER BYが無いと、user_idが
+        # TEXT PRIMARY KEYであるため主キーのアルファベット順(dad, daughter, mom, son)
+        # で返すことがあり、quest_data.USERSの宣言順(dad, mom, son, daughter)と
+        # 一致しない。family-quest側の App.tsx は users[currentUserIdx] という
+        # 配列インデックスでタブと現在のユーザーを対応づけているため、この順序の
+        # 食い違いがあるとタブの位置と実際に表示される家族が入れ替わってしまう
+        # (例: 「ともや」のタブに寝かしつけ(mom/dad向け)クエストが出る)。
+        # quest_data.USERS の宣言順を唯一の正としてソートし直すことで、
+        # DBの内部的な返却順に依存しないようにする。
+        if quest_data:
+            canonical_order = {u['user_id']: i for i, u in enumerate(quest_data.USERS)}
+            users.sort(key=lambda u: canonical_order.get(u['user_id'], len(canonical_order)))
+
+        for u in users:
+            u['nextLevelExp'] = game_logic.GameLogic.calculate_next_level_exp(u['level'])
+            u['maxHp'] = game_logic.GameLogic.calculate_max_hp(u['level'])
+            u['hp'] = u['maxHp']
+        return users
+
+    def _attach_quest_bonuses(
+        self, cur: Any, quests: list[dict[str, Any]], users: list[dict[str, Any]], viewer_user_id: Optional[str]
+    ) -> None:
+        """各クエストに連続達成ボーナス(bonus_gold/bonus_exp)をその場で付ける。"""
+        # quest_master.target_user は実際の quest_users.user_id (例: 'dad')の他に、
+        # 'siblings' のようなグループ指定も取りうる。後者を calculate_quest_boost に
+        # そのまま user_id として渡すと quest_history に一致行が存在しないため、
+        # 実際の履歴に関わらずボーナスが常に0固定になっていた(実害はないが意味が誤り)。
+        # target_user が実在ユーザーでない場合は、閲覧中のユーザー(viewer_user_id)の
+        # 履歴を代表として使う。
+        known_user_ids = {u['user_id'] for u in users}
+        # F-L6(#412): target_user='siblings'(兄妹連携)クエストは、_process_coop_quest_completion
+        # が兄妹2人分のquest_historyを同一completed_atで必ずセットで作成するため、
+        # どちらの子のuser_idで見ても連続達成ボーナスは同じ結果になるはずだが、
+        # 以前は下のelse節でviewer_user_idにフォールバックしていたため、viewer_user_idが
+        # 兄妹のどちらでもない場合(親が閲覧中、または横画面4分割ビューでviewer_user_idが
+        # 常にusers[0]固定になる場合。Echo Show等)、その閲覧者にはこのクエストの
+        # quest_history行が一切無いため連続達成ボーナスが常に0固定になっていた。
+        # 兄妹のいずれか(以下の実装では最初に見つかった方)のuser_idを使う。
+        sibling_child_ids = [u['user_id'] for u in users if u.get('role') == ROLE_CHILD]
+
+        # 品質(#409 N+1対策): 以前はここでクエストごとにcalculate_quest_boostを呼び、
+        # クエストごとにquest_historyへの個別SELECTを発行していた(GET /data 1回で
+        # クエスト数分のクエリが発生)。対象となりうる全(user_id, quest_id)組合せの
+        # 「直近の非rejected完了日時」を1クエリでまとめて取得し、辞書引きに
+        # 置き換える。completed_atはcore.utils.get_now_iso()(常にJSTのisoformat、
+        # 固定長・ゼロ埋め)で記録されるため、文字列としてのMAX()が時系列上の
+        # 最新値と一致する(calculate_quest_boost個別呼び出し版のORDER BY DESC
+        # LIMIT 1と同じ前提)。
+        last_completed_map: dict[tuple, str] = {
+            (row['user_id'], row['quest_id']): row['last_completed_at']
+            for row in cur.execute("""
+                SELECT user_id, quest_id, MAX(completed_at) AS last_completed_at
+                FROM quest_history
+                WHERE status != 'rejected'
+                GROUP BY user_id, quest_id
+            """)
+        }
+
+        for q in quests:
+            # Q-L2(#409): target_user='all' の daily クエストも、完了時には閲覧ユーザーの
+            # 履歴に基づくボーナスが付くのに、表示側は常に 0 固定だった。'all' の場合は
+            # 閲覧中のユーザー(viewer_user_id)の履歴で算出する。
+            if q['target_user'] == 'all' or not q['target_user']:
+                boost_user_id = viewer_user_id
+            elif q['target_user'] == 'siblings' and sibling_child_ids:
+                boost_user_id = sibling_child_ids[0]
+            else:
+                boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id
+            if boost_user_id:
+                last_completed_at = last_completed_map.get((boost_user_id, q['quest_id']))
+                boost = self.quest_service._compute_boost_from_last_completed(q, last_completed_at)
+                q['bonus_gold'] = boost['gold']
+                q['bonus_exp'] = boost['exp']
+            else:
+                q['bonus_gold'] = 0
+                q['bonus_exp'] = 0
+
+    def _fetch_rewards(self, cur: Any) -> list[dict[str, Any]]:
+        rewards = [dict(row) for row in cur.execute("SELECT * FROM reward_master")]
+        for r in rewards:
+            # #291: icon/cost という重複フィールド名の付与(icon_key/cost_gold
+            # の別名)を廃止し、DBの実カラム名に一本化する。desc は
+            # description の同期用レガシー列(sync_strict.py参照)であり、
+            # このビュー応答では description のみを正としてdesc自体を落とす。
+            r.pop('desc', None)
+        return rewards
+
+    def _select_valid_completed(
+        self, quests: list[dict[str, Any]], recent_completed: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """直近の承認済み履歴から、各クエストのリセット周期内で「完了」とみなす履歴を選ぶ。"""
+        # #662: 以前は filtered_quests × recent_completed の二重ループで、
+        # クエスト数 Q・履歴数 H に対して O(Q×H) だった(履歴は直近30日分すべて)。
+        # quest_id で1度だけ索引を作れば O(Q+H) になる。recent_completed は
+        # completed_at の降順で取得済みで、defaultdict への追加もその順序を保つため、
+        # 「ユーザーごとの最新履歴を先に見る」という下の判定はそのまま成り立つ。
+        completed_by_quest: dict[Any, list[dict[str, Any]]] = collections.defaultdict(list)
+        for c in recent_completed:
+            completed_by_quest[c['quest_id']].append(c)
+
+        valid_completed = []
+
+        for q in quests:
+            q_id = q['quest_id']
+            reset_period = q.get('reset_period') or 'daily'
+            is_infinite = (q.get('quest_type') == 'infinite')
+            history_for_quest = completed_by_quest.get(q_id, ())
+
+            if is_infinite:
+                # 無限クエストは条件を満たす全履歴を追加
+                for c in history_for_quest:
+                    if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
+                        valid_completed.append(c)
+            else:
+                # 通常クエストの場合、ユーザーごとに最新の履歴を評価する
+                users_processed = set()
+                for c in history_for_quest:
+                    uid = c['user_id']
+                    if uid not in users_processed:
+                        if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
+                            valid_completed.append(c)
+                        # 期間外であっても最新履歴を処理済みにし、同ユーザーの過去履歴検索を終了する
+                        users_processed.add(uid)
+
+        # Q-M3/F-M5 (#371): 以前ここにあった target_user が 'role_' プレフィックスの
+        # クエストの共有表示判定(is_shared_completed_by/is_shared_pending_by)は、
+        # completion API側(_process_complete_quest_locked)が 'all'/本人/'siblings'
+        # 以外を無条件403で拒否するため、'role_*' ターゲットは一覧には出ても
+        # 誰も完了できないという不整合な潜在バグだった(quest_data.pyに実際の
+        # 'role_*' ターゲットが存在しないため顕在化していなかった)。オーナー判断
+        # (role_* ターゲットは今後も使わない)により、この表示側の分岐を削除した。
+        # 複数人ターゲットの共有表示が必要な唯一のケースである兄妹連携クエスト
+        # (target_user='siblings')は、linked_history_idによる連結で別途処理される。
+        return valid_completed
 
     def _fetch_recent_logs(self, cur) -> list[dict]:
         q_logs = cur.execute("""

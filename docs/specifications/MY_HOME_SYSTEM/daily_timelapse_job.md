@@ -51,7 +51,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` | モジュール内部で定義されている変数や初期化処理の内容が提供されていないため | `getattr(config, 'NVR_RECORD_DIR', ...)` (行番号: 210 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...)") |
+| `config` | モジュール内部で定義されている変数や初期化処理の内容が提供されていないため | `getattr(config, 'NVR_RECORD_DIR', ...)` (行番号: 198 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...)") |
 | `setup_logging` | ログ出力のフォーマット、出力先（ファイル/標準出力など）の仕様が提供されていないため | `logger = setup_logging(__name__)` (行番号: 37 / 抜粋: "logger = setup_logging(**name**)") |
 | `send_push` | 関数内部の処理、引数（`target`, `channel`など）に対する正確な挙動、エラーハンドリングの有無が提供されていないため | `send_push(...)` (行番号: 53 / 抜粋: "def _send_report(text: str) -> None:") |
 | `smart_timelapse_generator` の全インポート要素 | 各クラス(`MotionDetector`, `VideoBuilder`等)のメソッド、プロパティの仕様、各関数の詳細な処理内容、厳密な戻り値・引数の型定義が提供されていないため | `from monitors.smart_timelapse_generator import ...` (行番号: 24〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
@@ -104,7 +104,7 @@
 
 ### 内部ヘルパー関数（Issue #954 で `run_daily_timelapse` から分割）
 
-`run_daily_timelapse` が227行あったため、挙動を変えずに以下の非公開関数へ切り出した。いずれもモジュール内からのみ呼ばれ、テストが差し替える `send_push`・`get_video_info` 等のモジュールグローバルをそのまま参照する（差し替えの効き方は分割前と同じ）。
+`run_daily_timelapse` が227行あったため、挙動を変えずに以下の非公開関数へ切り出した(`_select_target_files` は2回目の分割で追加し、本体は98行になった)。いずれもモジュール内からのみ呼ばれ、テストが差し替える `send_push`・`get_video_info` 等のモジュールグローバルをそのまま参照する（差し替えの効き方は分割前と同じ）。
 
 | 関数 | 役割 | 戻り値 | 根拠 |
 | --- | --- | --- | --- |
@@ -117,19 +117,20 @@
 | `_extract_chunk_clips` | 1チャンクの解析（動画情報取得→動き検知→イベント構築→CSV退避→クリップ切り出し）。`duration <= 0` なら警告してスキップ。Event ID は `event_offset` から続けて `Event001` 形式で1日通して再採番する | `(クリップのパスのリスト, 検知イベント数, イベント長の合計)` | `def _extract_chunk_clips(filepath, work, temp_dir, motion_detector, event_builder, video_builder, event_offset):` (行番号: 127) |
 | `_notify_no_clips` | 有効クリップが0件のときの通知。検知イベント数が1以上なら「クリップ生成に全て失敗」(ERRORログは `skip_discord` 付き)、0なら「動きはありませんでした」(#233) | `None` | `def _notify_no_clips(camera_name, target_date_str, time_range_log, event_count) -> None:` (行番号: 167) |
 | `_write_done_record` | `SummaryInfo` を `asdict` してJSONで `<rec>/<名前>.done` に保存する | `None` | `def _write_done_record(rec: str, done_filename: str, sum_info: SummaryInfo) -> None:` (行番号: 185) |
+| `_select_target_files` | 録画ディレクトリの確認、対象日のチャンクの検索(時系列順)、時間帯の指定があれば書式の検証と `_filter_files_by_time_range` での絞り込みを行い `(ファイル一覧, 開始時刻, 終了時刻)` を返す。ディレクトリが無い・書式が不正・対象ファイルが無い場合はログを出して `None`(#497 の「先に None で束縛」もここ) | `(list, time, time)` または `None` | `def _select_target_files(camera_name: str, target_date, start_time_str, end_time_str):` (行番号: 192) |
 
 * エラーハンドリング: ヘルパー自身は `_resolve_target_date`（`ValueError` を捕捉）と `_remove_stale_output`（`OSError` を捕捉）以外は例外を捕捉しない。`_extract_chunk_clips` 等で起きた例外は、呼び出し元 `run_daily_timelapse` の `except Exception` で通知される。
-* 根拠: `except Exception as e:` (行番号: 309)
+* 根拠: `except Exception as e:` (行番号: 321)
 
 ### `run_daily_timelapse`
 
 * **（Issue #497 C-4 で修正）** 時間帯フィルタリングの分岐(`if target_files and (start_time_str or end_time_str):`)に入る前に `start_time = None` / `end_time = None` を束縛する。以前は `target_files` が空で `start_time_str`/`end_time_str` が指定されていると未束縛のまま後段の出力ファイル名組み立てで参照され `NameError` になり得た(pyright の reportPossiblyUnboundVariable で検出)。
-* 根拠: (行番号: 225〜227 / 抜粋: "start_time = None\n    end_time = None\n    if target_files and (start_time_str or end_time_str):")
+* 根拠: (行番号: 213〜215 / 抜粋: "start_time = None\n    end_time = None\n    if target_files and (start_time_str or end_time_str):")
 
 * **役割**: 対象カメラの録画ディレクトリから、指定日付および時間帯の動画ファイルを取得・フィルタリングし、動き検知エンジンのパイプライン（検知・イベント構築・クリップ生成・結合・サムネイル作成）を実行して結果をDiscordへアップロード・通知する。
 
 
-* 根拠: [関数定義] (行番号: 192 / 抜粋: "def run_daily_timelapse(...) -> None:")
+* 根拠: [関数定義] (行番号: 230 / 抜粋: "def run_daily_timelapse(...) -> None:")
 
 
 
@@ -147,14 +148,14 @@
 * `end_time_str: str = None`: フィルタリングの終了時刻
 
 
-* 根拠: [関数の引数定義] (行番号: 192 / 抜粋: "camera_name: str, target_date_str: str = None...")
+* 根拠: [関数の引数定義] (行番号: 230 / 抜粋: "camera_name: str, target_date_str: str = None...")
 
 
 
 
 * **戻り値/レスポンス**: `None`
 
-* 根拠: [関数の戻り値型ヒント] (行番号: 192 / 抜粋: "-> None:")
+* 根拠: [関数の戻り値型ヒント] (行番号: 230 / 抜粋: "-> None:")
 
 
 
@@ -193,7 +194,7 @@
 * 処理全体を `try...except Exception as e:` で囲み、予期せぬエラーが発生した場合はスタックトレースをログ出力し、Discordへエラー通知を送信する。
 
 
-* 根拠: [try-exceptブロックおよび早期リターン処理] (行番号: 309 / 抜粋: "except Exception as e:")、[既存ファイル削除失敗時のログ出力(#450)] (行番号: 106 / 抜粋: "def _remove_stale_output(output_path: str) -> None:")
+* 根拠: [try-exceptブロックおよび早期リターン処理] (行番号: 321 / 抜粋: "except Exception as e:")、[既存ファイル削除失敗時のログ出力(#450)] (行番号: 106 / 抜粋: "def _remove_stale_output(output_path: str) -> None:")
 
 
 
@@ -296,7 +297,7 @@ graph TD
 * 動画処理ループ内でハードコードされた `time.sleep(1)` が存在し、チャンク数に比例して固定の遅延が発生する仕様になっている。
 
 
-* 根拠: [ループ内処理] (行番号: 273 / 抜粋: "time.sleep(1)")
+* 根拠: [ループ内処理] (行番号: 285 / 抜粋: "time.sleep(1)")
 
 
 
@@ -328,7 +329,7 @@ graph TD
 * 録画ファイルの検索先ディレクトリは `getattr(config, 'NVR_RECORD_DIR', "/mnt/nas/home_system/nvr_recordings")` により `config.NVR_RECORD_DIR` を優先的に参照し、未定義時のみ同文字列にフォールバックする（以前はこのパスがハードコード直書きされておりバグの原因になっていたが、修正済み）。
 
 
-* 根拠: [NASディレクトリ指定] (行番号: 210 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...")
+* 根拠: [NASディレクトリ指定] (行番号: 198 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...")
 
 
 

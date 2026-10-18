@@ -233,61 +233,7 @@ class InventoryService:
             # ENFORCE_FROM(施行日)を迎えるまでは実際には拒否しない(いきなり制限が
             # かかると子どもが困惑するため、事前に予告バナーのみ表示する)。
             if item['reward_id'] in config.YOUTUBE_REWARD_IDS:
-                # 0. 自由時間中でなければ使用不可(要件確認済み、2026-09-23: YouTube等の
-                #    時間消費型ごほうびは自由時間中のみ使える)。他の2つの制限と異なり
-                #    施行日による猶予期間は設けない(新規要件のため最初から有効)。
-                #    お昼寝の時間帯(config.YOUTUBE_NAP_BLOCK_START〜END、要件確認済み、
-                #    2026-09-24)は誰であっても常に対象。それ以外は自宅保育の子
-                #    (config.YOUTUBE_HOME_CARE_USER_IDS)を除きルーティンフローの
-                #    自由時間判定に従う(_is_user_in_youtube_free_time参照)。
-                if not _is_user_in_youtube_free_time(user_id):
-                    if _is_within_youtube_nap_block():
-                        raise HTTPException(429, "今はお昼寝の時間だからYouTubeはお休みしてね")
-                    raise HTTPException(429, "YouTubeは自由時間になってから見てね")
-
-                # 0'. 休日のテレビ禁止時間帯に入る/跨ぐ券は使えない(券を使った後に
-                #     プラグを切られて怒られるのを防ぐ)。券は消費されない。
-                _check_tv_block_for_ticket(get_youtube_reward_duration_minutes(item['reward_id']))
-
-                # 1. 1日の合計視聴分数の上限。クールダウンより先に判定するのは、
-                #    「もう少し待てば使える」より「今日はここまで」のほうが
-                #    子どもにとって行動が決まるメッセージになるため。
-                if _is_youtube_daily_limit_enforced():
-                    daily_limit = get_youtube_daily_limit_minutes()
-                    if daily_limit is not None:
-                        used_minutes = get_youtube_used_minutes_today(cur, user_id)
-                        # 使い切った後にやった(承認済みの)プリントぶんを上乗せした実効上限
-                        daily_limit, granted = get_youtube_daily_limit_with_extensions(
-                            cur, user_id, daily_limit
-                        )
-                        this_ticket_minutes = get_youtube_reward_duration_minutes(item['reward_id'])
-                        if used_minutes + this_ticket_minutes > daily_limit:
-                            remaining_today = max(0, daily_limit - used_minutes)
-                            if remaining_today <= 0:
-                                detail = f"今日のYouTubeは{daily_limit}分までです。"
-                                # まだ延長できるなら、諦めさせるのではなく次の行動を示す
-                                if can_extend_youtube_limit_now(used_minutes, daily_limit, granted):
-                                    detail += (
-                                        f"プリントを1枚やると{config.YOUTUBE_EXTENSION_MINUTES_PER_QUEST}分ふえるよ"
-                                    )
-                                else:
-                                    detail += "また明日つかおうね"
-                            else:
-                                detail = (
-                                    f"今日のYouTubeはあと{remaining_today}分だけなので、"
-                                    f"この{this_ticket_minutes}分の券は使えません"
-                                )
-                            raise HTTPException(429, detail)
-
-                # 2. 連続使用を防ぐクールダウン(券の視聴分数 + 休憩15分)。
-                if _is_youtube_cooldown_enforced():
-                    cooldown_remaining = _get_youtube_cooldown_remaining_seconds(cur, user_id)
-                    if cooldown_remaining > 0:
-                        remaining_minutes = math.ceil(cooldown_remaining / 60)
-                        raise HTTPException(
-                            429,
-                            f"YouTubeのごほうび券は、目を休めるためあと{remaining_minutes}分ほど使えません",
-                        )
+                self._check_youtube_ticket_restrictions(cur, user_id, item['reward_id'])
 
             now_iso = get_now_iso()
 
@@ -312,6 +258,71 @@ class InventoryService:
             msg = f"🎒 {item['user_name']}が「{item['title']}」を使用しました。"
 
         return {"status": "consumed", "message": "つかいました！"}, msg
+
+    def _check_youtube_ticket_restrictions(self, cur: Any, user_id: str, reward_id: Any) -> None:
+        """YouTube系ごほうび券を今使ってよいかを判定し、使えなければ HTTPException(429) を送出する。
+
+        判定順は 自由時間 → テレビ禁止時間帯 → 1日の上限 → クールダウン。券は消費しない。
+        """
+        # 0. 自由時間中でなければ使用不可(要件確認済み、2026-09-23: YouTube等の
+        #    時間消費型ごほうびは自由時間中のみ使える)。他の2つの制限と異なり
+        #    施行日による猶予期間は設けない(新規要件のため最初から有効)。
+        #    お昼寝の時間帯(config.YOUTUBE_NAP_BLOCK_START〜END、要件確認済み、
+        #    2026-09-24)は誰であっても常に対象。それ以外は自宅保育の子
+        #    (config.YOUTUBE_HOME_CARE_USER_IDS)を除きルーティンフローの
+        #    自由時間判定に従う(_is_user_in_youtube_free_time参照)。
+        if not _is_user_in_youtube_free_time(user_id):
+            if _is_within_youtube_nap_block():
+                raise HTTPException(429, "今はお昼寝の時間だからYouTubeはお休みしてね")
+            raise HTTPException(429, "YouTubeは自由時間になってから見てね")
+
+        # 0'. 休日のテレビ禁止時間帯に入る/跨ぐ券は使えない(券を使った後に
+        #     プラグを切られて怒られるのを防ぐ)。券は消費されない。
+        _check_tv_block_for_ticket(get_youtube_reward_duration_minutes(reward_id))
+
+        # 1. 1日の合計視聴分数の上限(_check_youtube_daily_limit)。
+        self._check_youtube_daily_limit(cur, user_id, reward_id)
+
+        # 2. 連続使用を防ぐクールダウン(券の視聴分数 + 休憩15分)。
+        if _is_youtube_cooldown_enforced():
+            cooldown_remaining = _get_youtube_cooldown_remaining_seconds(cur, user_id)
+            if cooldown_remaining > 0:
+                remaining_minutes = math.ceil(cooldown_remaining / 60)
+                raise HTTPException(
+                    429,
+                    f"YouTubeのごほうび券は、目を休めるためあと{remaining_minutes}分ほど使えません",
+                )
+
+    def _check_youtube_daily_limit(self, cur: Any, user_id: str, reward_id: Any) -> None:
+        """1日の合計視聴分数の上限を超える券なら、次の行動を示す文面で HTTPException(429) を送出する。"""
+        # クールダウンより先に判定するのは、「もう少し待てば使える」より
+        # 「今日はここまで」のほうが子どもにとって行動が決まるメッセージになるため。
+        if _is_youtube_daily_limit_enforced():
+            daily_limit = get_youtube_daily_limit_minutes()
+            if daily_limit is not None:
+                used_minutes = get_youtube_used_minutes_today(cur, user_id)
+                # 使い切った後にやった(承認済みの)プリントぶんを上乗せした実効上限
+                daily_limit, granted = get_youtube_daily_limit_with_extensions(
+                    cur, user_id, daily_limit
+                )
+                this_ticket_minutes = get_youtube_reward_duration_minutes(reward_id)
+                if used_minutes + this_ticket_minutes > daily_limit:
+                    remaining_today = max(0, daily_limit - used_minutes)
+                    if remaining_today <= 0:
+                        detail = f"今日のYouTubeは{daily_limit}分までです。"
+                        # まだ延長できるなら、諦めさせるのではなく次の行動を示す
+                        if can_extend_youtube_limit_now(used_minutes, daily_limit, granted):
+                            detail += (
+                                f"プリントを1枚やると{config.YOUTUBE_EXTENSION_MINUTES_PER_QUEST}分ふえるよ"
+                            )
+                        else:
+                            detail += "また明日つかおうね"
+                    else:
+                        detail = (
+                            f"今日のYouTubeはあと{remaining_today}分だけなので、"
+                            f"この{this_ticket_minutes}分の券は使えません"
+                        )
+                    raise HTTPException(429, detail)
 
 
 # アイテム使用は承認フローを介さず即時確定する、Family Quest内で唯一

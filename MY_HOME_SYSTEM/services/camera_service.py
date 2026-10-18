@@ -7,7 +7,7 @@ import time
 import urllib.parse
 import glob
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 # #661: WSDL 探索は core/onvif_utils.py に一本化(以前は本ファイルと camera_monitor/camera_service に同一実装が重複)
 from core.onvif_utils import find_wsdl_path
 from core.logger import setup_logging
@@ -390,6 +390,95 @@ def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Opti
         return _generate_record_playlist_locked(cam_conf, target_date, process_key)
 
 
+def _reusable_record_playlist(cam_conf: Dict[str, Any], target_date: str, playlist_path: str) -> Optional[str]:
+    """既存のプレイリストを再エンコードせずに返してよければそのパスを、そうでなければ None を返す。"""
+    # 2. キャッシュ: 過去日付（録画が確定済み）かつ既にプレイリストが生成済みであれば、再エンコードせずそれを返す
+    #    当日分は録画ファイルが増え続けるため、キャッシュ対象から除外し毎回最新の状態で再生成する
+    #    #562: シャットダウン時のffmpeg terminate(Issue #360系)や、下記の生成待機タイムアウトに
+    #    より生成途中で終わったプレイリストが存在すると、以前は完全性を確認せずそのまま
+    #    「完成品」としてHLS_VOD_RETENTION_DAYS(既定3日)の間ずっと配信し続けてしまっていた。
+    #    ffmpegは`-hls_playlist_type vod`指定時、正常に完走した場合にのみ末尾へ
+    #    `#EXT-X-ENDLIST`タグを書き込むため、これの有無で完全性を確認してからキャッシュを返す。
+    #    不完全なら以降の生成処理へフォールスルーし、再生成する。
+    # Issue #592: target_dateはフロントエンド(ブラウザのローカル日付、実質JST)から
+    # 渡される「YYYYMMDD」形式の日付で、実世界のJSTカレンダー日を意図している。
+    # ホストOSのタイムゾーン設定に依存するnaiveなdatetime.now()で today_str を
+    # 求めると、ホストがJST以外の設定の場合、JSTの日付境界(UTCの日付境界と
+    # 9時間ずれる)をまたぐ時間帯で「当日」の判定を誤りうるため、明示的にJSTを使う。
+    today_str = get_now_jst().strftime("%Y%m%d")
+    if target_date < today_str and os.path.exists(playlist_path) and _playlist_is_complete(playlist_path):
+        logger.debug(f"✅ [{cam_conf['name']}] {target_date} のプレイリストは生成済みのためキャッシュを返します。")
+        return playlist_path
+
+    # #359: 当日分は録画が増え続けるためキャッシュ対象外だが、以前はプレイリスト要求の
+    # たびに当日の全録画を再多重化していた(連続再生・再読込のたびに数GBを再生成)。
+    # 生成完了から VOD_TODAY_REUSE_SECONDS 以内なら再利用し、それを過ぎたら再生成する。
+    if target_date == today_str and os.path.exists(playlist_path):
+        try:
+            age = time.time() - os.path.getmtime(playlist_path)
+        except OSError:
+            age = None
+        if age is not None and age < VOD_TODAY_REUSE_SECONDS:
+            logger.debug(f"✅ [{cam_conf['name']}] 当日プレイリストは {age:.0f}s 前に生成済みのため再利用します。")
+            return playlist_path
+    return None
+
+
+def _segment_duration(mp4: str, next_mp4: Optional[str]) -> float:
+    """ffconcat に書く mp4 1本分の duration(次のファイルとの開始時刻の差)を返す。
+
+    最後のファイル(next_mp4 が None)や時刻を読めない場合は既定値を返す。
+    """
+    duration = DEFAULT_SEGMENT_DURATION_SECONDS
+    if next_mp4 is None:
+        return duration
+    try:
+        # 20260720_210200.mp4 のようなファイル名から時刻部分(210200)を抽出
+        curr_time_str = os.path.basename(mp4).split("_")[1].split(".")[0]
+        next_time_str = os.path.basename(next_mp4).split("_")[1].split(".")[0]
+        
+        dt_curr = datetime.strptime(curr_time_str, "%H%M%S")
+        dt_next = datetime.strptime(next_time_str, "%H%M%S")
+        
+        diff_seconds = (dt_next - dt_curr).total_seconds()
+        
+        # 0秒以上かつ異常値(12時間以上等)でなければ、実時間差をdurationに設定
+        # これにより、ファイルが欠落している隙間は最終フレームで停止したまま時間を稼ぐ
+        if 0 < diff_seconds <= MAX_PLAUSIBLE_SEGMENT_GAP_SECONDS:
+            duration = diff_seconds
+    except Exception as e:
+        logger.warning(f"Failed to calculate duration for {mp4}: {e}")
+    return duration
+
+
+def _write_ffconcat_file(concat_file_path: str, mp4_files: List[str]) -> None:
+    """ffmpegのconcatファイルリスト作成 (ffconcat version 1.0 を使用しタイムラインを補正)"""
+    with open(concat_file_path, "w", encoding="utf-8") as f:
+        f.write("ffconcat version 1.0\n")
+        for i, mp4 in enumerate(mp4_files):
+            next_mp4 = mp4_files[i + 1] if i < len(mp4_files) - 1 else None
+            f.write(f"file '{mp4}'\n")
+            # 次のファイルとの時間差を計算し、動画の再生時間(duration)を明示する
+            f.write(f"duration {_segment_duration(mp4, next_mp4)}\n")
+
+
+def _build_vod_ffmpeg_cmd(concat_file_path: str, playlist_path: str) -> List[str]:
+    """ffconcat のリストを再エンコードせずに HLS(VOD)へ多重化する ffmpeg コマンド。"""
+    return [
+        "nice", "-n", str(FFMPEG_NICE_LEVEL),
+        "ffmpeg", "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", concat_file_path,
+        "-c:v", "copy",
+        "-an",
+        "-f", "hls",
+        "-hls_time", str(HLS_VOD_SEGMENT_SECONDS),
+        "-hls_playlist_type", "vod",
+        playlist_path
+    ]
+
+
 def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str, process_key: str) -> Optional[str]:
     cam_id = cam_conf['id']
     nas_folder_name = cam_conf.get("nas_folder", cam_conf["name"])
@@ -431,84 +520,15 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
             time.sleep(PLAYLIST_WAIT_POLL_INTERVAL_SEC)
         return None
 
-    # 2. キャッシュ: 過去日付（録画が確定済み）かつ既にプレイリストが生成済みであれば、再エンコードせずそれを返す
-    #    当日分は録画ファイルが増え続けるため、キャッシュ対象から除外し毎回最新の状態で再生成する
-    #    #562: シャットダウン時のffmpeg terminate(Issue #360系)や、下記の生成待機タイムアウトに
-    #    より生成途中で終わったプレイリストが存在すると、以前は完全性を確認せずそのまま
-    #    「完成品」としてHLS_VOD_RETENTION_DAYS(既定3日)の間ずっと配信し続けてしまっていた。
-    #    ffmpegは`-hls_playlist_type vod`指定時、正常に完走した場合にのみ末尾へ
-    #    `#EXT-X-ENDLIST`タグを書き込むため、これの有無で完全性を確認してからキャッシュを返す。
-    #    不完全なら以降の生成処理へフォールスルーし、再生成する。
-    # Issue #592: target_dateはフロントエンド(ブラウザのローカル日付、実質JST)から
-    # 渡される「YYYYMMDD」形式の日付で、実世界のJSTカレンダー日を意図している。
-    # ホストOSのタイムゾーン設定に依存するnaiveなdatetime.now()で today_str を
-    # 求めると、ホストがJST以外の設定の場合、JSTの日付境界(UTCの日付境界と
-    # 9時間ずれる)をまたぐ時間帯で「当日」の判定を誤りうるため、明示的にJSTを使う。
-    today_str = get_now_jst().strftime("%Y%m%d")
-    if target_date < today_str and os.path.exists(playlist_path) and _playlist_is_complete(playlist_path):
-        logger.debug(f"✅ [{cam_conf['name']}] {target_date} のプレイリストは生成済みのためキャッシュを返します。")
-        return playlist_path
+    cached = _reusable_record_playlist(cam_conf, target_date, playlist_path)
+    if cached is not None:
+        return cached
 
-    # #359: 当日分は録画が増え続けるためキャッシュ対象外だが、以前はプレイリスト要求の
-    # たびに当日の全録画を再多重化していた(連続再生・再読込のたびに数GBを再生成)。
-    # 生成完了から VOD_TODAY_REUSE_SECONDS 以内なら再利用し、それを過ぎたら再生成する。
-    if target_date == today_str and os.path.exists(playlist_path):
-        try:
-            age = time.time() - os.path.getmtime(playlist_path)
-        except OSError:
-            age = None
-        if age is not None and age < VOD_TODAY_REUSE_SECONDS:
-            logger.debug(f"✅ [{cam_conf['name']}] 当日プレイリストは {age:.0f}s 前に生成済みのため再利用します。")
-            return playlist_path
-
-    # ffmpegのconcatファイルリスト作成 (ffconcat version 1.0 を使用しタイムラインを補正)
-    with open(concat_file_path, "w", encoding="utf-8") as f:
-        f.write("ffconcat version 1.0\n")
-        
-        for i in range(len(mp4_files)):
-            mp4 = mp4_files[i]
-            f.write(f"file '{mp4}'\n")
-            
-            # 次のファイルとの時間差を計算し、動画の再生時間(duration)を明示する
-            duration = DEFAULT_SEGMENT_DURATION_SECONDS
-            
-            if i < len(mp4_files) - 1:
-                try:
-                    # 20260720_210200.mp4 のようなファイル名から時刻部分(210200)を抽出
-                    curr_time_str = os.path.basename(mp4).split("_")[1].split(".")[0]
-                    next_time_str = os.path.basename(mp4_files[i+1]).split("_")[1].split(".")[0]
-                    
-                    dt_curr = datetime.strptime(curr_time_str, "%H%M%S")
-                    dt_next = datetime.strptime(next_time_str, "%H%M%S")
-                    
-                    diff_seconds = (dt_next - dt_curr).total_seconds()
-                    
-                    # 0秒以上かつ異常値(12時間以上等)でなければ、実時間差をdurationに設定
-                    # これにより、ファイルが欠落している隙間は最終フレームで停止したまま時間を稼ぐ
-                    if 0 < diff_seconds <= MAX_PLAUSIBLE_SEGMENT_GAP_SECONDS:
-                        duration = diff_seconds
-                except Exception as e:
-                    logger.warning(f"Failed to calculate duration for {mp4}: {e}")
-            
-            f.write(f"duration {duration}\n")
+    _write_ffconcat_file(concat_file_path, mp4_files)
 
     logger.info(f"🎞️ [{cam_conf['name']}] {target_date} の録画プレイリスト生成中...")
 
-    cmd = [
-        "nice", "-n", str(FFMPEG_NICE_LEVEL),
-        "ffmpeg", "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", concat_file_path,
-        "-c:v", "copy",
-        "-an",
-        "-f", "hls",
-        "-hls_time", str(HLS_VOD_SEGMENT_SECONDS),
-        "-hls_playlist_type", "vod",
-        playlist_path
-    ]
-
-    
+    cmd = _build_vod_ffmpeg_cmd(concat_file_path, playlist_path)
 
     # 3. subprocess.run (ブロック) から Popen (非同期) に変更し、プロセスを登録する
     process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

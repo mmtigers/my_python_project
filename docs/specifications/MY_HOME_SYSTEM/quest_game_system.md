@@ -31,8 +31,8 @@
 
 マスターデータ(`quest_data.USERS`/`QUESTS`/`REWARDS`)とDBの同期(`sync_master_data`)、および画面表示用の集約データ生成(`get_all_view_data`)を担う`GameSystem`クラス1つを定義するファイル。`GameSystem.__init__`は`QuestService`/`ApprovalService`/`UserService`/`ShopService`の4インスタンスを合成し(`InventoryService`は含まない)、ファイル末尾でこれら4サービスと`GameSystem`自身のシングルトンをモジュールレベルの変数(`game_system`/`quest_service`/`approval_service`/`shop_service`/`user_service`)として公開する。**（Issue #662で追加）** `ApprovalService`/`approval_service`は、`QuestService`から承認・却下・取消を分離した際に加わった。`sync_master_data`/`get_all_view_data`はいずれも、`quest_data`モジュールをこのファイル自身ではモジュールグローバルとしてimportせず、実行のたびに下位互換シム(`services/quest_service.py`)を`from services import quest_service as _quest_service_shim`として動的にimportし、`_quest_service_shim.quest_data`を経由して現在値を読む設計になっている。これは、テストが`monkeypatch.setattr(services.quest_service, "quest_data", fake)`という形でシム側の属性を差し替える前提のためである。
 根拠: `class GameSystem:` (行番号: 96)、`def __init__(self):\n        self.quest_service = QuestService()\n        self.user_service = UserService()\n        self.shop_service = ShopService()` (行番号: 97〜101)
-根拠: `from services import quest_service as _quest_service_shim` (行番号: 30, 171)、コメント (行番号: 25〜29 / 抜粋: "quest_data は互換シム(services/quest_service.py)側でimportされ、テストが\n        # `from services import quest_service as qs; monkeypatch.setattr(qs, \"quest_data\", fake)`\n        # という形で差し替える(Issue #529等)。")
-根拠: `game_system = GameSystem()\nquest_service = game_system.quest_service\nshop_service = game_system.shop_service\nuser_service = game_system.user_service` (行番号: 365〜368)
+根拠: `from services import quest_service as _quest_service_shim` (行番号: 38, 344)、コメント (行番号: 25〜29 / 抜粋: "quest_data は互換シム(services/quest_service.py)側でimportされ、テストが\n        # `from services import quest_service as qs; monkeypatch.setattr(qs, \"quest_data\", fake)`\n        # という形で差し替える(Issue #529等)。")
+根拠: `game_system = GameSystem()\nquest_service = game_system.quest_service\nshop_service = game_system.shop_service\nuser_service = game_system.user_service` (行番号: 541〜545)
 
 ## 3. 外部依存関係
 
@@ -196,40 +196,50 @@
 ### `GameSystem.get_all_view_data`
 
 * **役割**: `family-quest`フロントエンドのメイン画面向けに、ユーザー一覧・クエスト一覧・報酬一覧・完了済みクエスト・最近のログ・承認待ち一覧を1つの辞書にまとめて返す。`quest_users`の取得結果は、SQLiteのデフォルト順序(主キーのアルファベット順)ではなく`quest_data.USERS`の宣言順に並べ替える(`canonical_order`)。各クエストには`quest_service._compute_boost_from_last_completed`によるボーナス(`bonus_gold`/`bonus_exp`)を付与し、この際に必要な「対象ユーザー×クエストの直近の非rejected完了日時」を、クエストごとに個別SELECTするのではなく`GROUP BY user_id, quest_id`の1クエリでまとめて取得してN+1クエリを避ける(`last_completed_map`)。`target_user`が実在ユーザーでない(`'all'`/`'siblings'`等)場合は、閲覧中のユーザー(`viewer_user_id`)または兄妹の代表ユーザーをボーナス算出の代表として使う。過去1ヶ月の`quest_history`(`status='approved'`)から、`quest_service.is_within_reset_period`で現在の周期内と判定されたものだけを`completedQuests`として集約する(`infinite`型は全件、それ以外はユーザーごとに最新1件のみ評価)。
-* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 341〜499)
-* 根拠: `if _quest_service_shim.quest_data:\n                canonical_order = {u['user_id']: i for i, u in enumerate(_quest_service_shim.quest_data.USERS)}\n                users.sort(key=lambda u: canonical_order.get(u['user_id'], len(canonical_order)))` (行番号: 337〜339)
-* 根拠: `last_completed_map: Dict[tuple, str] = {\n                (row['user_id'], row['quest_id']): row['last_completed_at']\n                for row in cur.execute("""\n                    SELECT user_id, quest_id, MAX(completed_at) AS last_completed_at\n                    FROM quest_history\n                    WHERE status != 'rejected'\n                    GROUP BY user_id, quest_id\n                """)\n            }` (行番号: 222〜230)
-* 根拠: `if q['target_user'] == 'all' or not q['target_user']:\n                    boost_user_id = viewer_user_id\n                elif q['target_user'] == 'siblings' and sibling_child_ids:\n                    boost_user_id = sibling_child_ids[0]\n                else:\n                    boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 236〜241)
-* 根拠: `if is_infinite:\n                    for c in recent_completed:\n                        if c['quest_id'] == q_id:\n                            if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):\n                                valid_completed.append(c)\n                else:\n                    users_processed = set()\n                    for c in recent_completed:\n                        ...` (行番号: 282〜322)
+* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> dict[str, Any]:` (行番号: 341)
+
+**（Issue #954 で分割）** 本メソッドは159行あったため、挙動を変えずに次の4つの非公開メソッドへ切り出した。本体に残るのは、1つの`get_db_cursor()`の中でこれらと周期判定用の履歴取得(`recent_completed`/`pending`)、`_fetch_recent_logs`を順に呼んで辞書を組み立てる流れだけである。
+
+| メソッド | 役割 | 根拠 |
+| --- | --- | --- |
+| `_fetch_users_in_canonical_order` | `quest_users`を`quest_data.USERS`の宣言順に並べ替え(`canonical_order`)、`nextLevelExp`/`maxHp`/`hp`を付ける。`quest_data`は呼び出し元が下位互換シム経由で読んだ現在値を受け取る | `def _fetch_users_in_canonical_order(self, cur: Any, quest_data: Any) -> list[dict[str, Any]]:` (行番号: 381) |
+| `_attach_quest_bonuses` | 各クエストに`bonus_gold`/`bonus_exp`をその場で付ける。`last_completed_map`を1クエリで作り(N+1対策 #409)、`target_user`が`'all'`/`'siblings'`/実在しないユーザーの場合の代表ユーザー選択(#409 Q-L2 / #412 F-L6)もここ | `def _attach_quest_bonuses(` (行番号: 404) |
+| `_fetch_rewards` | `reward_master`を取得し、レガシー列`desc`を落とす(#291) | `def _fetch_rewards(self, cur: Any) -> list[dict[str, Any]]:` (行番号: 462) |
+| `_select_valid_completed` | 過去30日の承認済み履歴から、リセット周期内の完了だけを選ぶ。`quest_id`の索引を1度作り(#662)、`infinite`型は全件、それ以外はユーザーごとに最新1件だけを評価する | `def _select_valid_completed(` (行番号: 472) |
+
+* 根拠: `if quest_data:` (行番号: 394)
+* 根拠: `last_completed_map: dict[tuple, str] = {` (行番号: 433)
+* 根拠: `if q['target_user'] == 'all' or not q['target_user']:` (行番号: 447)
+* 根拠: `if is_infinite:` (行番号: 493)
 * **引数/リクエスト**: `viewer_user_id: Optional[str] = None`
-* 根拠: (行番号: 168)
-* **戻り値/レスポンス**: `Dict[str, Any]`（`users`, `quests`, `rewards`, `completedQuests`, `logs`, `pendingQuests`）
-* 根拠: (行番号: 338〜342)
+* 根拠: (行番号: 341)
+* **戻り値/レスポンス**: `dict[str, Any]`（`users`, `quests`, `rewards`, `completedQuests`, `logs`, `pendingQuests`）
+* 根拠: (行番号: 375〜379)
 * **副作用**: DB参照（`quest_users`, `quest_master`, `reward_master`, `quest_history`）、`_fetch_recent_logs`の呼び出し
-* 根拠: (行番号: 174, 194, 251, 266〜269, 271〜273, 336)
+* 根拠: (行番号: 349, 363, 368, 373, 383, 433〜441, 463)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 168〜342)
+* 根拠: (行番号: 341〜379)
 
 ### `GameSystem._fetch_recent_logs`
 
 * **役割**: `quest_history`(`status='approved' AND quest_id != 0`、`id`降順、最大20件)と`reward_history`(`id`降順、最大20件)を取得しマージ、`ts`降順で先頭20件に切り詰めたうえで、`quest_users`から取得したユーザー名を付与し表示テキストと日付文字列を整形して返す。ユーザーが見つからない場合は`'誰か'`のプレースホルダを使う。
-* 根拠: `def _fetch_recent_logs(self, cur) -> List[dict]:` (行番号: 501〜519)
-* 根拠: `q_logs = cur.execute("""\n            SELECT id, user_id, quest_title as title, 'quest' as type, completed_at as ts\n            FROM quest_history WHERE status='approved' AND quest_id != 0 ORDER BY id DESC LIMIT 20\n        """).fetchall()` (行番号: 345〜348)
+* 根拠: `def _fetch_recent_logs(self, cur) -> list[dict]:` (行番号: 520)
+* 根拠: `q_logs = cur.execute("""` (行番号: 521)
 * **引数/リクエスト**: `cur`（呼び出し元のトランザクション内で使うDBカーソル）
-* 根拠: (行番号: 344)
-* **戻り値/レスポンス**: `List[dict]`（各要素は`id`, `text`, `dateStr`, `timestamp`）
-* 根拠: (行番号: 361〜362)
+* 根拠: (行番号: 520)
+* **戻り値/レスポンス**: `list[dict]`（各要素は`id`, `text`, `dateStr`, `timestamp`）
+* 根拠: (行番号: 538)
 * **副作用**: DB参照（`quest_history`, `reward_history`, `quest_users`）
-* 根拠: (行番号: 345, 349, 354)
+* 根拠: (行番号: 521, 527, 530)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 344〜362)
+* 根拠: (行番号: 520〜538)
 
 ### `game_system` / `quest_service` / `approval_service` / `shop_service` / `user_service` (モジュールレベル変数)
 
 * **役割**: `GameSystem`のシングルトンインスタンス`game_system`と、その内部に保持される`quest_service`/`approval_service`/`shop_service`/`user_service`をモジュールレベルの変数として公開する。下位互換シム(`services/quest_service.py`)がこれらをそのまま再エクスポートし、`routers/quest_router.py`がシム経由でimportして使用する。
-* 根拠: `game_system = GameSystem()\nquest_service = game_system.quest_service\nshop_service = game_system.shop_service\nuser_service = game_system.user_service` (行番号: 365〜368)
+* 根拠: `game_system = GameSystem()\nquest_service = game_system.quest_service\nshop_service = game_system.shop_service\nuser_service = game_system.user_service` (行番号: 541〜545)
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルの変数代入。`GameSystem()`のインスタンス化自体は`__init__`の副作用を参照）
-* 根拠: (行番号: 365)
+* 根拠: (行番号: 541)
 
 ## 5. 処理フロー図
 
@@ -311,7 +321,7 @@ graph TD
 ## 8. 保守上の注意点
 
 * **`quest_data`をモジュールグローバルとしてimportしない設計**: `load_master_module`/`get_all_view_data`はいずれも実行のたびに`from services import quest_service as _quest_service_shim`をローカルimportし、`_quest_service_shim.quest_data`経由で現在値を読む。これは、テストが下位互換シム側の`quest_data`属性を`monkeypatch`で差し替える前提を尊重するためのコメント付きの意図的な設計であり、通常の`import quest_data`に書き換えると差し替えが本ファイルの実行結果に反映されなくなる。
-* 根拠: `from services import quest_service as _quest_service_shim` (行番号: 39, 324)、docstring (行番号: 27〜36)
+* 根拠: `from services import quest_service as _quest_service_shim` (行番号: 38, 344)、docstring (行番号: 27〜36)
 * **`sync_master_data`のクエストマスタ全削除に対する安全弁は`strict=False`だけのもの**: `quest_data.QUESTS`が空の場合、`strict=False`(API経路)は`quest_master`への`DELETE`自体をスキップする(意図しない全消去防止 #242)が、`strict=True`(手動CLI)は全削除する。一方、報酬(`reward_master`)側は`strict`によらず`REWARDS`が空でも`DELETE`自体はスキップされず、`user_inventory`から参照が残っている行のみが個別に保護される非対称な実装になっている。
 * 根拠: `elif strict:` (行番号: 219〜225)、`else:\n                stale_rewards = cur.execute("SELECT reward_id FROM reward_master").fetchall()` (行番号: 270〜271)
 * **（Issue #664）マスタ同期の実装をここ以外に増やさないこと**: 以前は手動CLI`sync_strict.py`にも同等の`DELETE ... NOT IN`+UPSERTがあり、列リストが食い違う事故が#100・#164・#165と3度起きた。新しい列の追加や削除方針の変更は本メソッド(+`services/quest/master_sync_sql.py`)だけで行う。`tests/test_sync_strict.py`の`TestMasterSyncSqlIsSharedWithGameSystem`が`sync_strict.py`側に同期の再実装が現れないことを、`TestStrictFlagPreservesLegacySyncStrictBehaviour`が`strict`の3分岐を固定している。
@@ -319,9 +329,9 @@ graph TD
 * **`strict=True`の欠損キー補完は後方互換のためだけに存在する**: `_apply_legacy_quest_defaults`/`_apply_legacy_reward_defaults`は、統合前の`sync_strict.py`が生dictを直接UPSERTしていたときの緩さを再現するためのもので、`quest_data.py`の実データはこれらのキーをすべて持っている(つまり通常は何も補われない)。ここを削ると、キーの一部を欠いたマスタでCLIを実行したときの結果が統合前と変わる。
 * 根拠: `def _apply_legacy_quest_defaults(q: Dict[str, Any]) -> Dict[str, Any]:` (行番号: 48〜64 / 抜粋: "統合にあたって検証は `MasterQuest` に一本化したが、**CLI の受理範囲は")
 * **`get_all_view_data`のユーザー順序はSQLiteのデフォルト順に依存しない**: `quest_data.USERS`の宣言順で明示的にソートし直しているため、DBの内部的な返却順が変わっても`family-quest`側の`users[currentUserIdx]`という配列インデックス対応が崩れないよう配慮されている。ただし`_quest_service_shim.quest_data`が`None`(import失敗時)の場合、このソート自体がスキップされDBのデフォルト順のまま返る。
-* 根拠: `if _quest_service_shim.quest_data:\n                canonical_order = ...` (行番号: 337〜339)
+* 根拠: `if quest_data:` (行番号: 394)（Issue #954 以降は `_fetch_users_in_canonical_order` が、呼び出し元がシム経由で読んだ `quest_data` を引数で受け取る）
 * **N+1クエリ対策はクエストのボーナス計算のみに適用**: `last_completed_map`によるまとめ取得は`_compute_boost_from_last_completed`のためのものであり、`completedQuests`集約処理(`recent_completed`のループ)は各クエスト×各履歴をPython側でループする実装のままである。
-* 根拠: (行番号: 374〜382, 429〜450)
+* 根拠: (行番号: 433〜441, 481〜483)
 
 ## 9. 不明事項一覧
 
