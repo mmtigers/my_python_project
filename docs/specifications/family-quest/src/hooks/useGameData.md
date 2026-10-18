@@ -46,7 +46,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `apiClient` の内部実装 | ベースURL、ヘッダ付与、認証トークン処理、エラー詳細などの具体的な通信仕様が本ファイルからは読み取れないため。 | 根拠: (行番号: 86〜91 / 抜粋: "queryFn: async () => {\n            const viewerUserId = viewerUserIdRef.current;") |
+| `apiClient` の内部実装 | ベースURL、ヘッダ付与、認証トークン処理、エラー詳細などの具体的な通信仕様が本ファイルからは読み取れないため。 | 根拠: (参照: useGameData / 抜粋: "queryFn: async () => {\n            const viewerUserId = viewerUserIdRef.current;") |
 | 各APIエンドポイントの仕様 | リクエスト後のDBの挙動、トランザクション、外部影響が不明であるため。 | 根拠: (行番号: 151 / 抜粋: "return apiClient.post<QuestResult>('/api/quest/complete', { // 型指定") |
 | マスターデータの実体 | `INITIAL_USERS`, `MASTER_QUESTS`, `MASTER_REWARDS` 等の具体的なオブジェクト構造・値が不明であるため。 | 根拠: (行番号: 389 / 抜粋: "users: gameData?.users \|\| INITIAL_USERS,") |
 | `gameDataResponseSchema` の詳細なフィールド定義 | `../lib/gameDataSchema.ts`に実装があり、各フィールドの厳密なZod型（`optional`/`nullable`の組み合わせ等）は本ファイルからは呼び出し結果（`.parse()`の成否）のみで、定義の全容は不明。 | 根拠: (行番号: 5, 95 / 抜粋: "import { chronicleResponseSchema, gameDataResponseSchema, purchaseResponseSchema } from '../lib/gameDataSchema';", "return gameDataResponseSchema.parse(raw) as GameDataResponse;") |
@@ -125,10 +125,10 @@
 * 根拠: (行番号: 275 / 抜粋: "const completeQuest = async (user: User, quest: Quest) => {")
 
 * **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, status?: string, message?: string, earnedMedals?: number, leveledUp?: boolean, detail?: string }`
-* 根拠: (行番号: 294〜303 / 抜粋: "return {\n                success: true,\n                // ★バグ修正: 以前は status/message を返り値から落としていたため、\n                // 子供が申請したクエスト（承認待ち）でも「申請完了」メッセージが\n                // App.tsx 側で絶対に表示されなかった（res.status が常に undefined）。\n                status: res.status,\n                message: res.message,\n                earnedMedals: res.earnedMedals,\n                leveledUp: res.leveledUp,\n            };")
+* 根拠: (参照: useGameData / 抜粋: "return {\n                success: true,\n                // ★バグ修正: 以前は status/message を返り値から落としていたため、\n                // 子供が申請したクエスト（承認待ち）でも「申請完了」メッセージが\n                // App.tsx 側で絶対に表示されなかった（res.status が常に undefined）。\n                status: res.status,\n                message: res.message,\n                earnedMedals: res.earnedMedals,\n                leveledUp: res.leveledUp,\n            };")
 
 * **副作用**: `/api/quest/complete` へのPOSTリクエスト。`queryClient.invalidateQueries` によるキャッシュ破棄（`['gameData']`および`['chronicle']`の両方）。成功時、`res.leveledUp`が真かつ`onLevelUp`が渡されていれば`onLevelUp({ user, level, job })`を実行。
-* 根拠: (行番号: 156〜161 / 抜粋: "onSuccess: (res, variables) => {\n            queryClient.invalidateQueries({ queryKey: ['gameData'] });\n            // ★バグ修正: クエスト完了(承認不要な大人の即時完了、または子どもの承認後)は\n            // 冒険の記録(年代記)に載るはずだが、chronicleクエリを無効化していなかったため\n            // staleTime(5分)が切れるまで反映されなかった。\n            queryClient.invalidateQueries({ queryKey: ['chronicle'] });")
+* 根拠: (参照: useGameData / 抜粋: "onSuccess: (res, variables) => {\n            queryClient.invalidateQueries({ queryKey: ['gameData'] });\n            // ★バグ修正: クエスト完了(承認不要な大人の即時完了、または子どもの承認後)は\n            // 冒険の記録(年代記)に載るはずだが、chronicleクエリを無効化していなかったため\n            // staleTime(5分)が切れるまで反映されなかった。\n            queryClient.invalidateQueries({ queryKey: ['chronicle'] });")
 
 * **エラーハンドリング**: **（#412で追加）** `quest.quest_id`が`null`/`undefined`の場合は通信を行わず`{ success: false, reason: 'error', detail: 'クエスト情報が正しく取得できていません(再読み込みしてください)' }`を返す。事前チェックで申請中の場合は`{ success: false, reason: 'pending' }`を返す。`catch` 時に `{ success: false, reason: 'error', detail: extractErrorDetail(e) }` を返却し、Mutation側の`onError`で `handleError` を呼ぶ。
 * 根拠: (行番号: 282〜284, 287〜289, 304〜306 / 抜粋: "if (qId == null) {\n            return { success: false, reason: 'error', detail: 'クエスト情報が正しく取得できていません(再読み込みしてください)' };\n        }", "if (isPending) {\n            return { success: false, reason: 'pending' };\n        }", "} catch (e) {\n            return { success: false, reason: 'error', detail: extractErrorDetail(e) };\n        }")
@@ -148,10 +148,10 @@
 * 根拠: (行番号: 309 / 抜粋: "const cancelQuest = async (user: User, historyItem: QuestHistory) => {")
 
 * **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, detail?: string }`
-* 根拠: (行番号: 317 / 抜粋: "return { success: true };")
+* 根拠: (参照: useGameData / 抜粋: "return { success: true };")
 
 * **副作用**: `/api/quest/quest/cancel` へのPOSTリクエスト。キャッシュ破棄（`['gameData']`および`['chronicle']`）。
-* 根拠: (行番号: 157〜161 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });")
+* 根拠: (参照: useGameData / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });")
 
 * **エラーハンドリング**: **（#412で追加）** `historyItem.id`が`null`/`undefined`の場合は通信せず`{ success: false, reason: 'error', detail: '履歴情報が正しく取得できていません(再読み込みしてください)' }`を返す。`catch` 時に `{ success: false, reason: 'error', detail: extractErrorDetail(e) }` を返却し、Mutation側の`onError`で `handleError` を呼ぶ。
 * 根拠: (行番号: 312〜314, 318〜320 / 抜粋: "if (hId == null) {\n            return { success: false, reason: 'error', detail: '履歴情報が正しく取得できていません(再読み込みしてください)' };\n        }", "} catch (e) {\n            return { success: false, reason: 'error', detail: extractErrorDetail(e) };\n        }")
@@ -191,10 +191,10 @@
 * 根拠: (行番号: 349 / 抜粋: "const rejectQuest = async (user: User, historyItem: QuestHistory, rejectReason?: string) => {")
 
 * **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, detail?: string }`
-* 根拠: (行番号: 358 / 抜粋: "return { success: true };")
+* 根拠: (参照: useGameData / 抜粋: "return { success: true };")
 
 * **副作用**: `/api/quest/reject` へのPOSTリクエスト。キャッシュ破棄（`['gameData']`のみ。`chronicle`は無効化されない）。
-* 根拠: (行番号: 245〜247 / 抜粋: "onSuccess: () => {\n            queryClient.invalidateQueries({ queryKey: ['gameData'] });\n        },")
+* 根拠: (参照: useGameData / 抜粋: "onSuccess: () => {\n            queryClient.invalidateQueries({ queryKey: ['gameData'] });\n        },")
 
 * **エラーハンドリング**: 権限外は事前弾き。**（#412で追加）** `historyItem.id`が`null`/`undefined`の場合も通信せず`{ success: false, reason: 'error', detail: '履歴情報が正しく取得できていません(再読み込みしてください)' }`を返す。通信エラー時は `{ success: false, reason: 'error', detail: extractErrorDetail(e) }` を返す。
 * 根拠: (行番号: 350, 353, 359〜361 / 抜粋: "if (user.role !== 'role_adult') return { success: false, reason: 'permission' };", "if (hId == null) {", "} catch (e) {\n            return { success: false, reason: 'error', detail: extractErrorDetail(e) };\n        }")
@@ -212,7 +212,7 @@
 * 根拠: (行番号: 377 / 抜粋: "return { success: true, newGold: res.newGold, reward };")
 
 * **副作用**: `/api/quest/reward/purchase` へのPOST。キャッシュ破棄（`['gameData']`, `['inventory', variables.user.user_id]`, `['chronicle']`）。
-* 根拠: (行番号: 265〜268 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });\n            queryClient.invalidateQueries({ queryKey: ['inventory', variables.user.user_id] });\n            // 購入は reward_history に記録され冒険の記録に載る\n            queryClient.invalidateQueries({ queryKey: ['chronicle'] });")
+* 根拠: (参照: useGameData / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });\n            queryClient.invalidateQueries({ queryKey: ['inventory', variables.user.user_id] });\n            // 購入は reward_history に記録され冒険の記録に載る\n            queryClient.invalidateQueries({ queryKey: ['chronicle'] });")
 
 * **エラーハンドリング**: ゴールド不足時は `{ success: false, reason: 'gold' }`。**（#412で追加）** `reward.reward_id`が`null`/`undefined`の場合は通信せず`{ success: false, reason: 'error', detail: '報酬情報が正しく取得できていません(再読み込みしてください)' }`を返す。通信エラー時は `{ success: false, reason: 'error', detail: extractErrorDetail(e) }`。**（Issue #444で変更）** `mutationFn`が`purchaseResponseSchema.parse(raw)`を返すようになったことで`mutateAsync`の戻り値の型が`PurchaseResponse`として正しく推論されるため、以前ここにあった`as unknown as PurchaseResponse`という無検証キャストは不要になり削除された。`purchaseResponseSchema.parse`自体が失敗した場合（Zodの`ZodError`）は、この`try`ブロック内の例外として`catch`節に落ち、他の通信エラーと同様に`extractErrorDetail(e)`で処理される。
 * 根拠: (行番号: 367, 371〜373, 376 / 抜粋: "if ((user.gold || 0) < cost) return { success: false, reason: 'gold' };", "if (rId == null) {\n            return { success: false, reason: 'error', detail: '報酬情報が正しく取得できていません(再読み込みしてください)' };\n        }", "const res = await buyRewardMutation.mutateAsync({ user, reward, rewardId: rId });")
@@ -230,7 +230,7 @@
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `void`
 * **副作用**: キャッシュ破棄（`['gameData']`, `['inventory']`。`['inventory']`は前方一致的に全ユーザー分のインベントリを強制再取得する）
-* 根拠: (行番号: 384〜385 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });\n        queryClient.invalidateQueries({ queryKey: ['inventory'] }); // 全インベントリも強制再取得")
+* 根拠: (参照: useGameData / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });\n        queryClient.invalidateQueries({ queryKey: ['inventory'] }); // 全インベントリも強制再取得")
 
 * **エラーハンドリング**: なし
 
@@ -312,7 +312,7 @@ graph TD
 * **ポーリング対象の縮小**: `useQuery` で `refetchInterval` が設定されているのは `gameData`(10秒間隔)と `chronicle`(60秒間隔)の2つである。**(Issue #657 で訂正)** 以前ここには「`chronicle` は `staleTime`(5分)のみでポーリングされない」と書かれていたが、2026-09-06 の品質監査で 60 秒ポーリングを追加済みで、本仕様書の §4(`refetchInterval: 1000 * 60`)とも食い違っていた。以前存在した`familyMileage`・`bounties`のポーリングは廃止されている。加えて、アイテム使用承認フローの廃止（2026-08-29 コミット`9d5edec`）に伴い、以前存在した`pendingInventory`クエリ（および対応する10秒間隔のポーリング）自体が削除された。
 * 根拠: (行番号: 97〜98, 136 / 抜粋: "staleTime: 1000 * 30,\n        refetchInterval: 1000 * 10, // 10秒に1回のポーリングに制限", "refetchInterval: 1000 * 60,")
 * **（#291で追加）ランタイム型検証層の導入**: `gameData`クエリはOpenAPI→TS生成パイプラインが存在しないバックエンドとの型契約のズレを検知する目的で、Zodスキーマ`gameDataResponseSchema`（`../lib/gameDataSchema.ts`）によるランタイム検証を経由するようになった。`.strict()`は意図的に使われておらず、未知のフィールドは無視される（将来バックエンドが新フィールドを追加してもparseは失敗しない。**#412**でこの性質を利用して`logs`フィールドをスキーマから削除しても、バックエンドが引き続き`logs`を返すこと自体は`.parse()`の成否に影響しない）。一方、スキーマに定義された必須フィールドが欠けている、または型が一致しない場合は`.parse()`が例外を送出し、`useQuery`はエラー状態になる。`chronicleData`クエリ（`/api/quest/family/chronicle`）は対象外であり、この検証を経由しない。新しいフィールドを`GameDataResponse`関連の型に追加する際は、`gameDataSchema.ts`側のスキーマも合わせて更新しないと、実際にはバックエンドから返っているフィールドがランタイム検証をすり抜けず`.parse()`失敗の原因になる可能性がある（逆に、スキーマ側にだけフィールドを追加し忘れても、`.strict()`でない以上parse自体は失敗せず、単に検証対象から漏れるだけである点に注意）。
-* 根拠: (行番号: 86〜95 / 抜粋: "queryFn: async () => {\n            const viewerUserId = viewerUserIdRef.current;\n            const endpoint = viewerUserId\n                ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`\n                : '/api/quest/data';\n            const raw = await apiClient.get<unknown>(endpoint);\n            // #291: バックエンドのレスポンス形状がここで定義したスキーマ(gameDataSchema.ts)と\n            // 食い違っている場合、コンポーネント側で無言でundefinedを参照する幽霊フィールド\n            // バグとしてではなく、ここで即座にエラーとして検知させる。\n            return gameDataResponseSchema.parse(raw) as GameDataResponse;\n        },")
+* 根拠: (参照: useGameData / 抜粋: "queryFn: async () => {\n            const viewerUserId = viewerUserIdRef.current;\n            const endpoint = viewerUserId\n                ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`\n                : '/api/quest/data';\n            const raw = await apiClient.get<unknown>(endpoint);\n            // #291: バックエンドのレスポンス形状がここで定義したスキーマ(gameDataSchema.ts)と\n            // 食い違っている場合、コンポーネント側で無言でundefinedを参照する幽霊フィールド\n            // バグとしてではなく、ここで即座にエラーとして検知させる。\n            return gameDataResponseSchema.parse(raw) as GameDataResponse;\n        },")
 * **`chronicle`キャッシュの無効化漏れ修正**: `completeQuest`/`cancelQuest`/`approveQuest`/`buyReward`の成功時には`gameData`に加えて`chronicle`クエリも無効化されるようになった（以前は`completeQuest`成功時に`chronicle`を無効化しておらず、`staleTime`（5分）が切れるまで冒険の記録に反映されなかったバグの修正）。ただし`rejectQuest`は`gameData`のみを無効化し、`chronicle`は無効化されない（却下は記録に載らないため）。新しい状態変更アクションを追加する際は、そのアクションが年代記に影響するかどうかを踏まえて`chronicle`の無効化要否を判断する必要がある。
 * 根拠: (行番号: 132〜135, 159〜161, 176〜179, 236〜239行目 / 抜粋: "// ★バグ修正: クエスト完了(承認不要な大人の即時完了、または子どもの承認後)は\n            // 冒険の記録(年代記)に載るはずだが、chronicleクエリを無効化していなかったため\n            // staleTime(5分)が切れるまで反映されなかった。")
 * **[修正済み] `buyRewardMutation` の戻り値キャスト・無検証問題（Issue #444）**: 以前は`buyReward`内で`mutateAsync`の戻り値を`as unknown as PurchaseResponse`として無検証に型キャストしており、`apiClient.post`自体の戻り値の型（ジェネリック`<T>`）と実際のレスポンス形状との整合はランタイムでは検証されていなかった。現在は`buyRewardMutation`の`mutationFn`内で`purchaseResponseSchema.parse(raw)`（Zod、`gameDataSchema.ts`）によるランタイム検証を経由してから返すため、`mutateAsync`の戻り値の型が正しく`PurchaseResponse`として推論され、呼び出し側の無検証キャストは不要になり削除された。これにより`gameData`クエリ（#291）に続き、購入APIのレスポンスもフロント・バックエンド間の型契約のズレを取得境界で検知できるようになった。
@@ -320,7 +320,7 @@ graph TD
 * **役割ベースの権限チェックへの統一**: `approveQuest` と `rejectQuest` 内の権限チェックは `user.role !== 'role_adult'` という役割ベースの判定に統一されている。あくまでクライアント側の事前チェックであり、バックエンド側の認可を代替するものではない。
 * 根拠: (行番号: 295, 321 / 抜粋: "if (user.role !== 'role_adult') return { success: false, reason: 'permission' };")
 * **`refreshData` のキャッシュ無効化範囲**: `queryClient.invalidateQueries({ queryKey: ['inventory'] })` はキー全体（`['inventory', userId]`形式のクエリすべて）を前方一致で無効化する設計であり、コメントで「全インベントリも強制再取得」と明示されている。
-* 根拠: (行番号: 384〜385 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });\n        queryClient.invalidateQueries({ queryKey: ['inventory'] }); // 全インベントリも強制再取得")
+* 根拠: (参照: useGameData / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });\n        queryClient.invalidateQueries({ queryKey: ['inventory'] }); // 全インベントリも強制再取得")
 * **[修正済み] `viewerUserIdRef`によるviewer_user_id送信の反映遅延（Issue #473）**: `gameData`クエリの`queryFn`は`viewerUserIdRef.current`が設定されている場合のみ`gameData`取得URLに`viewer_user_id`クエリパラメータを付与する。この値は`useEffect`が`gameData`受信後に`currentUserIdx`に対応するユーザーの`user_id`で更新する。`queryKey`は依然として`['gameData']`のみ（`currentUserIdx`を含まない）であり、`viewer_user_id`が変わっても自動的に別クエリとして再フェッチされるわけではない点は変わっていないが、以前は反映がユーザー切替直後の1回のフェッチには間に合わず、次のポーリング（最大10秒後）または他操作による`invalidateQueries`まで遅延していた。現在は`useEffect`内で`viewer.user_id`が実際に変化した（かつ初回代入ではない）ことを検知した時点で`refetchGameData()`を明示的に呼ぶため、ユーザー切替は次の1回のフェッチに即座に反映されるようになった。
 * 根拠: (行番号: 66〜73, 79〜99, 101〜117 / 抜粋: "const viewerUserIdRef = useRef<string | undefined>(undefined);", "const viewerUserId = viewerUserIdRef.current;\n            const endpoint = viewerUserId\n                ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`\n                : '/api/quest/data';", "useEffect(() => {\n        const viewer = gameData?.users?.[currentUserIdx];\n        if (!viewer || viewer.user_id === viewerUserIdRef.current) return;\n\n        const isInitialAssignment = viewerUserIdRef.current === undefined;\n        viewerUserIdRef.current = viewer.user_id;\n\n        if (!isInitialAssignment) {\n            refetchGameData();\n        }\n    }, [gameData, currentUserIdx, refetchGameData]);")
 * **（#412で追加）IDの必須化はミューテーション境界のみに限定**: `Quest.quest_id`/`QuestHistory.id`/`Reward.reward_id`自体は`@/types`側では引き続きoptionalなままである（表示専用の文脈やテストフィクスチャでは値が無くても構わないため）。本ファイルでは「実際にAPIリクエストを送る直前」の境界（各ラッパー関数の先頭のnullチェック、および各`mutationFn`の引数型`questId`/`historyId`/`rewardId: ID`）でのみ必須性を強制しており、ドメイン型自体を必須化していない。新しい状態変更アクションを追加する際も、同様に「読み取り用の型は緩いまま、リクエスト直前でのみ確定させる」パターンに従うこと。

@@ -101,7 +101,7 @@
 * 根拠: (行番号: 72 / 抜粋: "export const isRoutineFlowBlocking = (flow: RoutineFlowState | undefined): flow is RoutineActiveFlow =>")
 
 * **戻り値/レスポンス**: `boolean`（型ガードとして`flow is RoutineActiveFlow`）
-* 根拠: (行番号: 72 / 抜粋: "): flow is RoutineActiveFlow =>")
+* 根拠: (参照: isRoutineFlowBlocking / 抜粋: "): flow is RoutineActiveFlow =>")
 
 * **副作用**: なし
 * **エラーハンドリング**: なし（`flow`が`undefined`の場合も`!!flow`により例外を投げず`false`を返す）

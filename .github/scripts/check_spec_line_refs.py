@@ -54,7 +54,7 @@ Issue #550 の分割後は存在しない行範囲を指すものまで残って
 1対1で対応する仕様書のみ。TypeScript側は `def`/`class` の規約が異なるため対象外。
 
 行番号の代わりに「どの関数の中か」を書く `(参照: シンボル / 抜粋: "…")` 書式(Issue #950)は
-scan_symbol_references が検証する。こちらは Python に加えてシェル(`.sh`)の関数名も解決する。
+scan_symbol_references が検証する。こちらは Python に加えてシェル(`.sh`)の関数名と、TypeScript のトップレベル宣言名(_ts_symbol_spans)も解決する。
 
 ## 使い方
 
@@ -977,6 +977,45 @@ def _shell_function_spans(source: str) -> List[Tuple[str, int, int]]:
     return [span for span in spans if counts[span[0]] == 1]
 
 
+# TypeScript のトップレベル宣言(行頭=インデント無しで始まるもの)。`export`/`default`/`async`/`declare` は任意。
+_TS_DECL_RE = re.compile(
+    r"^(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:async\s+)?"
+    r"(?:function\s*\*?\s*|const\s+|let\s+|class\s+|abstract\s+class\s+|type\s+|interface\s+|enum\s+)([A-Za-z_$][\w$]*)"
+)
+# 宣言の続きとみなす行頭(閉じ括弧・空行・コメント以外で行頭から始まる行は、次の文の開始)
+_TS_CONTINUATION_RE = re.compile(r"^(?:[})\]]|\s)")
+
+
+def _ts_symbol_spans(source: str) -> List[Tuple[str, int, int]]:
+    """TypeScript のトップレベル宣言を (名前, 開始行, 終了行) で返す(Issue #950)。
+
+    構文木は使わず、整形済みのコードに頼る: 宣言は行頭から始まり、次の「行頭から始まる文」の
+    直前(末尾の空行・コメント行を除く)までを範囲とする。行頭の `}` `)` `]` と、インデントされた行は
+    直前の宣言の続き。直前の宣言に付くコメント(`//` `/**` `*`)は次の宣言側に数える。
+    同名の宣言が複数あるもの(型と値の同名、オーバーロード)は、どちらを指すか決められないので返さない。
+    """
+    lines = source.splitlines()
+    starts: List[Tuple[int, Optional[str]]] = []  # (行index, 宣言名 or None=宣言でない文)
+    for i, line in enumerate(lines):
+        if not line.strip() or _TS_CONTINUATION_RE.match(line):
+            continue
+        if line.startswith(("//", "/*", "*")):
+            continue
+        match = _TS_DECL_RE.match(line)
+        starts.append((i, match.group(1) if match else None))
+    spans: List[Tuple[str, int, int]] = []
+    for k, (i, name) in enumerate(starts):
+        if name is None:
+            continue
+        limit = starts[k + 1][0] if k + 1 < len(starts) else len(lines)
+        end = limit - 1
+        while end > i and (not lines[end].strip() or lines[end].lstrip().startswith(("//", "/*", "*"))) and not lines[end].startswith(("}", ")", "]")):
+            end -= 1
+        spans.append((name, i + 1, end + 1))
+    counts = collections.Counter(name for name, _, _ in spans)
+    return [span for span in spans if counts[span[0]] == 1]
+
+
 class _SymbolTable(NamedTuple):
     """シンボル参照の解決に使う、仕様書1件ぶんの対応ソースの情報。"""
     source: Path
@@ -989,6 +1028,15 @@ class _SymbolTable(NamedTuple):
 
 def _symbol_table_for_spec(spec: Path, py_index: Dict[str, List[Path]], sh_index: Dict[str, List[Path]]) -> Optional[_SymbolTable]:
     """仕様書に対応するソースのシンボル表を返す(Python を優先し、無ければシェル)。対応が一意でなければ None。"""
+    if spec.relative_to(SPEC_ROOT).parts[0] in FQ_SPEC_ROOT_PARTS:
+        # family-quest の仕様書は TypeScript のソースに対応する(同名の .py があっても)。
+        source = _report_source_for_spec(spec)
+        if source is None:
+            return None
+        source_text = source.read_text(encoding="utf-8")
+        spans = _ts_symbol_spans(source_text)
+        by_name = {name: (start, end) for name, start, end in spans}
+        return _SymbolTable(source, source_text.splitlines(), by_name.get, spans)
     candidates = py_index.get(spec.stem)
     if candidates and len(candidates) == 1:
         source_text = candidates[0].read_text(encoding="utf-8")

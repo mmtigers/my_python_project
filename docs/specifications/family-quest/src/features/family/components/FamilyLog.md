@@ -89,7 +89,7 @@
 
 
 * **戻り値/レスポンス**: JSX.Element
-* 根拠: (行番号: 32〜86 / 抜粋: "return (\n        <div className=\"bg-black/20 border border-gray-700 rounded-xl p-3 space-y-3 min-w-0\">")
+* 根拠: (参照: UserLogColumn / 抜粋: "return (\n        <div className=\"bg-black/20 border border-gray-700 rounded-xl p-3 space-y-3 min-w-0\">")
 
 
 * **副作用**: なし

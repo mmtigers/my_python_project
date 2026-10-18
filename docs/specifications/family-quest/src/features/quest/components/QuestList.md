@@ -107,10 +107,10 @@
 * 根拠: 修正後の`runComplete` (行番号: 160〜166行目 / 抜粋: "const runComplete = () => {\n        // #102: 完了音・クールダウン開始はここでは行わない(上のuseEffect/App側を参照)。\n        // ここではあくまで確認モーダルを開く(onClick)のみを行う。\n        // #391: 完了/取消APIの送信中(isProcessing)は再タップを受け付けない。\n        if (isCooldown || isEffectivelyLocked || isProcessing) return;\n        onClick({ ...quest, _isInfinite: !!isInfinite });\n    };")
 
 * **引数/リクエスト**: オブジェクト `{ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, isProcessing, isLast, forceSlim, panelMode, iconFirst }`
-* 根拠: Propsの型定義 (行番号: 70〜84 / 抜粋: "completedQuests: QuestHistory[];\n    pendingQuests: QuestHistory[];\n    currentUser: User;\n    onClick: (q: Quest) => void;\n    completedSignal: CompletedSignal | null;\n    isProcessing?: boolean;\n    isLast: boolean;")
+* 根拠: Propsの型定義 (参照: QuestItem / 抜粋: "completedQuests: QuestHistory[];\n    pendingQuests: QuestHistory[];\n    currentUser: User;\n    onClick: (q: Quest) => void;\n    completedSignal: CompletedSignal | null;\n    isProcessing?: boolean;\n    isLast: boolean;")
 
 * **戻り値/レスポンス**: ReactElement（JSX）
-* 根拠: `return` 文 (行番号: 255〜398 / 抜粋: "return (\n        <div className=\"flex gap-3\">")
+* 根拠: `return` 文 (参照: QuestItem / 抜粋: "return (\n        <div className=\"flex gap-3\">")
 
 * **副作用**:
   * `useEffect`により、`isInfinite`かつ`completedSignal`が非nullのときに評価される。`completedSignal.id !== questId`（`questId = quest.quest_id`）または`completedSignal.userId !== currentUser.user_id`の場合は明示的に`setIsCooldown(false)`（Issue #567: ユーザー切替時の固着防止）。一致する場合は`remainingMs = COOLDOWN_MS - (Date.now() - completedSignal.nonce)`を算出し、`remainingMs <= 0`（クールダウンが既に終わっているはずの古いsignal、Issue #567: 再マウント時の誤再ロック防止）なら`setIsCooldown(false)`、そうでなければ`setIsCooldown(true)`後`remainingMs`ミリ秒後の`setTimeout`で`isCooldown`を`false`に戻す（クリーンアップ関数で`clearTimeout`）。Issue #102で新規追加、Issue #363で`userId`条件を追加、Issue #567で不一致時の明示的解除と`nonce`ベースの残り時間計算を追加。
@@ -151,7 +151,7 @@
 * 根拠: インターフェース定義および引数 (行番号: 11〜30, 445 / 抜粋: "interface QuestListProps {")
 
 * **戻り値/レスポンス**: ReactElement（JSX）
-* 根拠: `return` 文 (行番号: 603〜646 / 抜粋: "return (\n        <div className={listContainerClass}>")
+* 根拠: `return` 文 (参照: QuestList / 抜粋: "return (\n        <div className={listContainerClass}>")
 
 * **副作用**: なし（`useMemo`による`sortedQuests`/`requiredQuests`/`bonusQuests`/`requiredOverflow`/`bonusOverflow`等のメモ化と、`useState`による`showAllRequired`/`showAllBonus`（「もっと見る」展開状態）・`bonusExpanded`（ボーナス列の折りたたみ状態）の管理のみで、外部API呼び出しやDOM直接操作は存在しない）
 * 根拠: `useMemo` ブロック (行番号: 446〜525 / 抜粋: "const sortedQuests = useMemo(() => {", "const requiredOverflow = useMemo(\n        () => computeOverflow(requiredQuests, currentUser, completedQuests, pendingQuests),")
@@ -333,7 +333,7 @@ graph TD
 * 根拠: (行番号: 154〜158, 182〜183 / 抜粋: "// 完了済み/申請中の取り消しは「長押し」でのみ発火させ、うっかりタップでの\n    // 誤取り消しを防ぐ。\n    // (無限クエストは完了済み(isDone)にはならないが、子どもの申請中(isPending)は\n    // 通常クエストと同様に取り消し可能。判定は useQuestStatus.canCancelQuest に集約)\n    const canCancel = canCancelQuest({ isDone, isPending }, isEffectivelyLocked);", "const handleTapComplete = () => {\n        if (canCancel || isCooldown) return;")
 * `panelMode`/`iconFirst`はいずれもレイアウト・表示切り替え専用のオプショナルpropで、クエストの判定ロジック自体（`isDone`/`isLocked`等）には影響しない。**（すごろく風UI化で変更）** 以前あった`cardSizeClasses`/`layoutClasses`/`iconSizeClasses`等8種類のスタイル変数は、`Card`ベースの横長カードレイアウトとともに廃止された。現在は`panelMode`によって`nodeSize`（ノード直径、`w-8 h-8`↔`w-12 h-12`/`w-10 h-10`）・`nodeIconSize`・ノード列の幅（`style={{ width: panelMode ? 32 : 40 }}`）・カード内フォントサイズ（`panelMode ? 'text-sm' : 'text-lg'`等、各所に直接三項演算子でインライン）が個別に分岐しており、いずれか一方のモードのみを追加・変更する際は該当箇所を漏れなく確認する必要がある。
 * 根拠: ノードサイズの分岐 (行番号: 241 / 抜粋: "const nodeSize = panelMode ? 'w-8 h-8' : (isActionable ? 'w-12 h-12' : 'w-10 h-10');")
-* 根拠: ノード列の幅 (行番号: 269 / 抜粋: "<div className=\"flex flex-col items-center flex-none\" style={{ width: panelMode ? 32 : 40 }}>")
+* 根拠: ノード列の幅 (参照: QuestItem / 抜粋: "<div className=\"flex flex-col items-center flex-none\" style={{ width: panelMode ? 32 : 40 }}>")
 * **[修正済み] 曜日フィルタの二重判定を削除（Issue #412 F-L1）**: `QuestList`（本ファイル、`sortedQuests`の`useMemo`）は以前`new Date().getDay()`で端末ローカル時刻の曜日を求め、`q.days`を使って再度曜日フィルタしていた。しかしサーバー側（`quest_service.py`の`filter_active_quests` → `_is_quest_currently_active`）が既にJST基準で`day_of_week`フィルタ済みの`quests`のみを返しているため、端末のタイムゾーンがJSTと異なる場合（特にJSTの0〜9時に相当する時間帯）に、サーバー側では「今日」扱いのクエストが端末側の判定では「昨日/明日」となり消えてしまっていた。修正後はこのクライアント側フィルタを削除し、`quest.days`フィールド自体もどこからも参照されなくなった（型定義からは削除していない）。
 * 根拠: `sortedQuests`内のコメント (抜粋: "// #412(F-L1): quest.days による曜日フィルタは削除した。サーバー側\n            // (quest_service.py の filter_active_quests → _is_quest_currently_active)\n            // が既にJST基準で day_of_week フィルタ済みの quests のみを返しているため、")
 * **[修正済み] 外部URL依存の背景パターンをCSSのみの表現へ置換（Issue #412 F-L9）**: `isRandom`（ランダムクエスト）のカード装飾(現在は未申請(`!isPending`)のとき表示)は以前`bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]`という外部ホストの画像を毎回読み込んでいた。オフライン時に画像が欠落するだけでなく、常時表示している端末では描画のたびに不要な外部通信が発生し続けていた。修正後は`radial-gradient`によるドット柄（ネットワーク不要）に置き換えた。
