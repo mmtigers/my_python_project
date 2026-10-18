@@ -226,11 +226,11 @@ def load_nas_status() -> Optional[pd.Series]:
         # リークしていた。contextlib.closingで明示的にcloseする。
         with contextlib.closing(get_ro_db_connection()) as conn:
             cur = conn.cursor()
-            cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
             if not cur.fetchone():
                 return None
             
-        query = f"SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT 1"
+        query = f"SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT 1"  # table_nameはconfig由来(上でsqlite_master照合済み)
         df = load_data_from_db(query)
         return df.iloc[0] if not df.empty else None
     except Exception as e:
@@ -253,28 +253,42 @@ def load_nas_history(limit: int = 200, days: int | None = None) -> pd.DataFrame:
     table_name = getattr(config, "SQLITE_TABLE_NAS", "nas_records")
     if days is None:
         query = (
-            f"SELECT timestamp, percent, used_gb, free_gb, total_gb FROM {table_name} "
-            f"ORDER BY timestamp DESC LIMIT {limit}"
+            f"SELECT timestamp, percent, used_gb, free_gb, total_gb FROM {table_name} "  # table_nameはconfig由来
+            "ORDER BY timestamp DESC LIMIT ?"
         )
-        df = load_data_from_db(query)
+        df = load_data_from_db(query, params=(int(limit),))
     else:
         now = datetime.now(pytz.timezone("Asia/Tokyo"))
         lower = (now - timedelta(days=int(days) + 1)).date().isoformat()
         query = (
-            f"SELECT timestamp, percent, used_gb, free_gb, total_gb FROM {table_name} "
-            f"WHERE timestamp >= '{lower}' ORDER BY timestamp DESC"
+            f"SELECT timestamp, percent, used_gb, free_gb, total_gb FROM {table_name} "  # table_nameはconfig由来
+            "WHERE timestamp >= ? ORDER BY timestamp DESC"
         )
-        df = load_data_from_db(query)
+        df = load_data_from_db(query, params=(lower,))
         if not df.empty:
             df = df[df["timestamp"] >= now - timedelta(days=int(days))]
     if df.empty:
         return df
     return df.sort_values("timestamp").reset_index(drop=True)
 
+def _generic_data_tables() -> frozenset[str]:
+    """`load_generic_data`が読んでよいテーブル名(`config.SQLITE_TABLE_*`の定数)。
+    テーブル名は`?`にバインドできないため、許可リストで照合してから文字列に埋め込む。"""
+    return frozenset(
+        value for name, value in vars(config).items()
+        if name.startswith("SQLITE_TABLE_") and isinstance(value, str) and value.isidentifier()
+    )
+
+
 def load_generic_data(table_name: str, limit: int = 500) -> pd.DataFrame:
-    """指定テーブルからデータを取得（汎用）"""
-    query = f"SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT {limit}"
-    return load_data_from_db(query)
+    """指定テーブルからデータを取得（汎用）。
+
+    #991 (M-5-4): `table_name`は`config.SQLITE_TABLE_*`に定義されたものだけを受け付ける
+    (それ以外は`ValueError`)。`limit`は`?`にバインドする。"""
+    if table_name not in _generic_data_tables():
+        raise ValueError(f"load_generic_data: 許可されていないテーブル名です: {table_name!r}")
+    query = f"SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT ?"  # 許可リスト照合済み
+    return load_data_from_db(query, params=(int(limit),))
 
 def _classify_power_device_type(row) -> str:
     """power_usage の1行を "Nature Remo E Lite"(スマートメーター全体) か "Plug"(個別家電)に分類する。
@@ -293,8 +307,8 @@ def _classify_power_device_type(row) -> str:
     return "Nature Remo E Lite" if name and "Remo" in str(name) else "Plug"
 
 
-def _sensor_range_clause(limit: int, day: date | None) -> str:
-    """`load_sensor_data`の3クエリ共通の「WHERE ... ORDER BY ... LIMIT」部分を返す。
+def _sensor_range_clause(limit: int, day: date | None) -> tuple[str, tuple]:
+    """`load_sensor_data`の3クエリ共通の「WHERE ... ORDER BY ... LIMIT」部分と、そのバインド値を返す。
 
     `day`指定時は、その日(JST)の記録を件数制限なしで取る。timestampは文字列で、
     オフセット付き(UTC等)の行も混在しうるため、SQL側では前後1日の余裕を持たせた
@@ -302,10 +316,10 @@ def _sensor_range_clause(limit: int, day: date | None) -> str:
     正確なJST日付での絞り込みは`load_sensor_data`がJST変換後に行う。
     """
     if day is None:
-        return f"ORDER BY timestamp DESC LIMIT {limit}"
+        return "ORDER BY timestamp DESC LIMIT ?", (int(limit),)
     lower = (day - timedelta(days=1)).isoformat()
     upper = (day + timedelta(days=2)).isoformat()
-    return f"WHERE timestamp >= '{lower}' AND timestamp < '{upper}' ORDER BY timestamp DESC"
+    return "WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp DESC", (lower, upper)
 
 
 def load_sensor_data(limit: int = 5000, day: date | None = None) -> pd.DataFrame:
@@ -317,7 +331,7 @@ def load_sensor_data(limit: int = 5000, day: date | None = None) -> pd.DataFrame
     (見守りページのログの日付フィルタ用)。指定しない場合は従来どおり新しい順に
     `limit`件。
     """
-    range_clause = _sensor_range_clause(limit, day)
+    range_clause, range_params = _sensor_range_clause(limit, day)
     # 1. Legacy / Others (開閉センサー等)
     query_legacy = f"""
         SELECT timestamp, device_id, device_name, device_type,
@@ -326,7 +340,7 @@ def load_sensor_data(limit: int = 5000, day: date | None = None) -> pd.DataFrame
         FROM device_records
         {range_clause}
     """
-    df_legacy = load_data_from_db(query_legacy)
+    df_legacy = load_data_from_db(query_legacy, params=range_params)
 
     # 2. SwitchBot Meter Logs (New: 温湿度)
     query_meter = f"""
@@ -336,7 +350,7 @@ def load_sensor_data(limit: int = 5000, day: date | None = None) -> pd.DataFrame
         FROM {config.SQLITE_TABLE_SWITCHBOT_LOGS}
         {range_clause}
     """
-    df_meter = load_data_from_db(query_meter)
+    df_meter = load_data_from_db(query_meter, params=range_params)
     if not df_meter.empty:
         df_meter["device_type"] = "Meter"
 
@@ -352,7 +366,7 @@ def load_sensor_data(limit: int = 5000, day: date | None = None) -> pd.DataFrame
         FROM {config.SQLITE_TABLE_POWER_USAGE}
         {range_clause}
     """
-    df_power = load_data_from_db(query_power)
+    df_power = load_data_from_db(query_power, params=range_params)
     if not df_power.empty:
         df_power["device_type"] = df_power.apply(_classify_power_device_type, axis=1)
         df_power = df_power.drop(columns=["device_category"])
@@ -474,24 +488,24 @@ def load_smart_meter_rows(start: datetime, end: datetime) -> pd.DataFrame:
     query = f"""
         SELECT device_id, timestamp, wattage as power_watts
         FROM {config.SQLITE_TABLE_POWER_USAGE}
-        WHERE timestamp >= '{start_of_month}' AND timestamp <= '{end_iso}'
+        WHERE timestamp >= ? AND timestamp <= ?
           AND (
             device_category = 'smart_meter'
             OR (device_category IS NULL AND device_name LIKE '%Remo%')
           )
         ORDER BY timestamp ASC
     """
-    df = load_data_from_db(query)
+    df = load_data_from_db(query, params=(start_of_month, end_iso))
 
     # 2. 新テーブルが空なら旧テーブル (device_records) へフォールバック
     if df.empty:
-        query_old = f"""
+        query_old = """
             SELECT device_id, timestamp, power_watts FROM device_records
             WHERE device_type = 'Nature Remo E Lite'
-              AND timestamp >= '{start_of_month}' AND timestamp <= '{end_iso}'
+              AND timestamp >= ? AND timestamp <= ?
             ORDER BY timestamp ASC
         """
-        df = load_data_from_db(query_old)
+        df = load_data_from_db(query_old, params=(start_of_month, end_iso))
     return df
 
 
@@ -555,14 +569,14 @@ def load_weather_history(days: int = 40, location: str = "伊丹") -> pd.DataFra
     # 使うため、他関数(get_today_date_str等)が前提とするJSTと日付境界がズレうる。
     # JSTで明示的に現在時刻を取得する。
     start_date = (datetime.now(pytz.timezone("Asia/Tokyo")) - timedelta(days=days)).strftime("%Y-%m-%d")
-    query = f"""
+    query = """
         SELECT date, min_temp, max_temp, weather_desc, umbrella_level 
         FROM weather_history 
-        WHERE location = '{location}' AND date >= '{start_date}'
+        WHERE location = ? AND date >= ?
     """
     conn = get_ro_db_connection()
     try:
-        df = pd.read_sql_query(query, conn)
+        df = pd.read_sql_query(query, conn, params=(location, start_date))
         return df
     except Exception as e:
         logger.error(f"Weather Load Error: {e}")
@@ -577,38 +591,39 @@ def load_yearly_temperature_stats(year: int, location: str = "伊丹") -> pd.Dat
         start_date = f"{year}-01-01"
         end_date = f"{year}-12-31"
 
-        q_weather = f"""
+        q_weather = """
             SELECT date, max_temp as out_max, min_temp as out_min
             FROM weather_history
-            WHERE location = '{location}' AND date >= '{start_date}' AND date <= '{end_date}'
+            WHERE location = ? AND date >= ? AND date <= ?
         """
-        df_weather = pd.read_sql_query(q_weather, conn)
+        df_weather = pd.read_sql_query(q_weather, conn, params=(location, start_date, end_date))
         
         itami_ids = [d["id"] for d in config.MONITOR_DEVICES if d.get("location") == location]
         if not itami_ids:
             return df_weather
             
-        ids_str = "'" + "','".join(itami_ids) + "'"
+        ids_placeholders = ",".join("?" * len(itami_ids))
+        range_params = (start_date, f"{end_date}T23:59:59", *itami_ids)
 
         q_new = f"""
             SELECT substr(timestamp, 1, 10) as date, MAX(temperature) as in_max, MIN(temperature) as in_min
             FROM {config.SQLITE_TABLE_SWITCHBOT_LOGS}
-            WHERE timestamp >= '{start_date}' AND timestamp <= '{end_date}T23:59:59'
-            AND device_id IN ({ids_str}) AND temperature IS NOT NULL GROUP BY date
+            WHERE timestamp >= ? AND timestamp <= ?
+            AND device_id IN ({ids_placeholders}) AND temperature IS NOT NULL GROUP BY date
         """
         q_old = f"""
             SELECT substr(timestamp, 1, 10) as date, MAX(temperature_celsius) as in_max, MIN(temperature_celsius) as in_min
             FROM device_records
-            WHERE timestamp >= '{start_date}' AND timestamp <= '{end_date}T23:59:59'
-            AND device_id IN ({ids_str}) AND temperature_celsius IS NOT NULL GROUP BY date
+            WHERE timestamp >= ? AND timestamp <= ?
+            AND device_id IN ({ids_placeholders}) AND temperature_celsius IS NOT NULL GROUP BY date
         """
         
         df_new = pd.DataFrame()
-        try: df_new = pd.read_sql_query(q_new, conn)
+        try: df_new = pd.read_sql_query(q_new, conn, params=range_params)
         except Exception: pass  # #953: 意図的。新旧どちらかのテーブルが無い環境では片方だけで集計する
             
         df_old = pd.DataFrame()
-        try: df_old = pd.read_sql_query(q_old, conn)
+        try: df_old = pd.read_sql_query(q_old, conn, params=range_params)
         except Exception: pass  # #953: 意図的。上と同じ(旧テーブル不在時)
 
         if not df_new.empty and not df_old.empty:
