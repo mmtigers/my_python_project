@@ -31,7 +31,7 @@ High 12件+M-10-1のコード照合結果（2026-09-02、Issue #323の調査に�
 | M-10-1 | `test.yml`に`permissions:`ブロックが無い | ✅ 対応済み | `permissions: contents: read`を明示済み（`test.yml`冒頭） |
 
 - **「5. 品質向上ロードマップ」のPhase 3**: 2026-09-16棚卸しの結果、**5項目すべてが完了または方針確定済み**であることを確認した（当時の「未着手」という記述は既に正しくない）。(1) スキーマ管理の`migrations/`一本化は**完了**（Issue #330。ただし`init_unified_db.py`は「廃止」ではなく、マイグレーション適用と検証のみを行う薄いラッパーとして残す形になった。空DBからの構築検証は`tests/test_migrations.py`・`tests/test_current_schema_sql.py`が担う）。(2) H-10 認証境界の実装は、Issue #321の案B（エッジのCloudflare Access委譲）採用により**実装しない方針で確定**。(3) 設定の一本化は**完了**（CORS許可オリジンは`config.CORS_ORIGINS`の1箇所のみ／`ENABLE_APPROVAL_FLOW`は撤去済み／config import時のNASブロッキングはPEP 562の`__getattr__`による遅延解決＋`prewarm_nas_paths()`で分離済み）。(4) タイムラプス/監視ジョブの排他制御は**完了**（`monitors/smart_timelapse_generator.py`の`timelapse_job_lock()`）。(5) フロントエンドのvitest導入は**完了**（CIの`frontend`ジョブで`npm test`を実行）。
-- **H-4 の「残」(`DeviceStatusResponse.body: Dict[str, Any]`)**: 2026-10-18 時点でも現存する。デバイス種別ごとに中身が異なるレスポンスをそのまま `model_dump()` で返す用途(`services/switchbot_service.py`)で、型を絞っても防げる障害が無いため、**現状維持としIssue化しない**(2026-10-18棚卸し・Issue #960)。
+- **H-4 の「残」(`DeviceStatusResponse.body: Dict[str, Any]`)**: 2026-10-18 に対応済み（Issue #960）。`body` を `DeviceStatusBody` に型付けし、システムが実際に読んでいるフィールド（`weight`・`power`・`watt`・`temperature`・`humidity`・`powerState`）だけを定義、未知のキーは通す。機種ごとに型が違うため型は緩くしてある。`tests/test_switchbot_service.py::TestGetDeviceStatus`
 
 ### Medium の個別照合（2026-10-18棚卸し・Issue #960）
 
