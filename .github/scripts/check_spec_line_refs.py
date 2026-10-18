@@ -38,10 +38,13 @@ Issue #550 の分割後は存在しない行範囲を指すものまで残って
 次のものは引き続き対象外（誤検知を出さない側に倒す）。
 
 - 抜粋がソース内に見つからない／2箇所以上に現れる引用（どの行を指すか決められない）
-- 範囲引用（`行番号: 137〜237`）に**単一行**の抜粋が付いたもの。抜粋は範囲の先頭とは
+- 範囲引用（`行番号: 137〜237`）に**単一行**の抜粋が付いたものの**位置の追従**。抜粋は範囲の先頭とは
   限らない（モジュールdocstringの1行目、クラス本体の途中の1行など）ため、先頭行の
   ズレに合わせて終端もずらすと引用の幅そのものが壊れる。抜粋が複数行なら両端が
   決まるので、そちらは対象に含める
+  （ただし抜粋の先頭行がソース内で一意なら、その行が引用範囲の**中に**あることだけは
+  検証する — `_range_containment`、Issue #950。正しい引用は必ず含むので誤検知にならず、
+  範囲がずれて抜粋を含まなくなったことを検知できる。--fix では書き換えない）
 - 8文字未満の短い抜粋（`return` 等。偶然の一致が多い）
 - 同名の定義が複数あり、直前の `### `クラス名.メソッド名`` 見出しでも一意化できないもの
 - `行番号: A, B / 抜粋: "s1", "s2"` のように要素数が一致する並列引用は、位置対応で
@@ -423,6 +426,26 @@ def _literal_target(
     return (start, end)
 
 
+def _range_containment(snippet: str, cited: str, src_lines: List[str]) -> Optional[Tuple[int, int, int]]:
+    """範囲引用の抜粋が、引用した範囲の**中に**あるかを調べるための材料を返す(Issue #950)。
+
+    `_literal_target` が確定できない範囲引用(単一行の抜粋が付いたもの、範囲が抜粋より広いもの)も、
+    抜粋の先頭行がソース内で一意なら「その行は引用範囲 `開始〜終了` の中になければならない」。
+    抜粋が範囲の先頭とは限らないので位置の書き換え先は決まらない(--fix の対象外)が、
+    範囲が抜粋の行を含まなくなった＝ずれた、ことは確実に言える。正しい引用は必ず含むので誤検知にならない。
+    返り値は `(抜粋の行, 範囲の開始, 範囲の終了)`。範囲引用でない・先頭行が一意でないなら None。
+    **ゲートの判定と `--report` の除外は必ずこの関数を共有すること**(`_literal_target` と同じ理由)。
+    """
+    head = _literal_head(snippet)
+    if head is None or not re.search(r"[〜~-]", cited):
+        return None
+    bounds = [int(v) for v in re.findall(r"\d+", cited)]
+    if len(bounds) != 2:
+        return None
+    line = _unique_literal_line(head, src_lines)
+    return None if line is None else (line, bounds[0], bounds[1])
+
+
 def _definition_pairs(rest, before, snippets, back_snippets, items):
     """根拠ブロックの def/class 引用を (位置, 抜粋) で返し、その位置集合も返す。
 
@@ -495,6 +518,11 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
         if spec.name == "README.md":
             continue
         candidates = index.get(spec.stem)
+        if spec.relative_to(SPEC_ROOT).parts[0] in FQ_SPEC_ROOT_PARTS:
+            # family-quest の仕様書は TypeScript のソースに対応する。ベース名が同じ Python
+            # (`family-quest/src/lib/utils.md` と `core/utils.py` など)を候補にすると、TS の引用を
+            # Python のソースと突き合わせてしまい、検証が無言で素通りする(Issue #950)。
+            candidates = None
         if not candidates or len(candidates) != 1:
             if skipped is not None and _spec_expects_python_source(spec):
                 # Issue #722: 規約どおり廃止noticeを付けて処理済みの仕様書は、
@@ -604,6 +632,17 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
                         cited = items[pos]
                         target = _literal_target(snippet, cited, src_lines)
                         if target is None:
+                            contained = _range_containment(snippet, cited, src_lines)
+                            if contained is None:
+                                continue
+                            checked += 1
+                            line_no, lo, hi = contained
+                            if lo <= line_no <= hi:
+                                continue
+                            findings.append(Finding(
+                                spec, idx + 1, _literal_head(snippet) or "", cited, line_no,
+                                "抜粋の行が引用範囲の外にある(範囲がずれている)",
+                            ))
                             continue
                         start_line, end_line = target
                         checked += 1
@@ -744,7 +783,12 @@ def _iter_ungated_citations():
         src_lines = source.read_text(encoding="utf-8").splitlines()
         # scan() が実際に走査する仕様書(対応する .py が一意に決まるもの)だけ、
         # 一意な抜粋がゲート済みとして除外できる。
-        gated = source.suffix == ".py" or len(scanned.get(spec.stem) or []) != 1
+        # scan() は family-quest の仕様書を常に TS ソースと照合する(同名の .py があっても)。ここも同じ条件にする。
+        gated = (
+            source.suffix == ".py"
+            or spec.relative_to(SPEC_ROOT).parts[0] in FQ_SPEC_ROOT_PARTS
+            or len(scanned.get(spec.stem) or []) != 1
+        )
         name = str(spec.relative_to(SPEC_ROOT))
         for line in spec.read_text(encoding="utf-8").splitlines():
             blocks = list(_BLOCK_RE.finditer(line))
@@ -773,7 +817,10 @@ def _iter_ungated_citations():
                     # scan() が厳密に検証するのは「単一行の引用 かつ 抜粋がソース内で
                     # 一意」のものだけ。ここの除外条件はそれと完全に一致させる
                     # (広く除外すると、ゲートにも非ゲートの集計にも現れない引用が生まれる)。
-                    if gated and _literal_target(snippet, items[pos], src_lines) is not None:
+                    if gated and (
+                        _literal_target(snippet, items[pos], src_lines) is not None
+                        or _range_containment(snippet, items[pos], src_lines) is not None
+                    ):
                         continue
                     yield name, src_lines, items[pos], head
 
@@ -1000,6 +1047,25 @@ def _enclosing_symbol(snippet_lines: List[str], src_lines: List[str], spans: Lis
     return found
 
 
+def _symbol_enclosing_span(
+    snippet_lines: List[str], src_lines: List[str], spans: List[Tuple[str, int, int]], start: int, end: int
+) -> Optional[str]:
+    """引用範囲 start〜end の中にある抜粋の出現が、すべて同じ1つのシンボルの中にあるときそのシンボルを返す。"""
+    found: Optional[str] = None
+    hits = [h for h in _snippet_hits(snippet_lines, src_lines) if start <= h <= end]
+    if not hits:
+        return None
+    for lineno in hits:
+        inside = [(e - s, name) for name, s, e in spans if s <= lineno <= e]
+        if not inside:
+            return None
+        name = min(inside)[1]
+        if found is not None and name != found:
+            return None
+        found = name
+    return found
+
+
 def _symbol_blocks(line: str):
     """1行から (ブロックの開始, 終了, シンボル, 抜粋リスト) を順に返す。"""
     blocks = list(_SYMBOL_BLOCK_RE.finditer(line))
@@ -1046,7 +1112,7 @@ def scan_symbol_references() -> Tuple[List[str], int]:
     return problems, checked
 
 
-def convert_to_symbol_references(specs: List[Path], write: bool = True) -> Tuple[int, int]:
+def convert_to_symbol_references(specs: List[Path], write: bool = True, include_valid: bool = False) -> Tuple[int, int]:
     """指定した仕様書の「ずれている行番号引用」を、シンボル参照へ書き換える。戻り値は (変換数, 変換できなかった数)。
 
     変換するのは、(1) 引用が 1 項 + 抜粋 1 つの書式Aで、(2) 引用した行(範囲引用なら範囲)に
@@ -1054,6 +1120,11 @@ def convert_to_symbol_references(specs: List[Path], write: bool = True) -> Tuple
     ソースで一意に決まり、(4) その本体の中に抜粋の先頭行がある、ものだけ。
     どれかを満たさない引用は触らない(位置が確かめられないものを、確かめたことにしない)。
     ゲート済みの引用(def/class・一意な単一行リテラル)も触らない。
+
+    `include_valid=True` のときは、(2) を外して「いまは正しい」引用も対象にする。ただし抜粋が
+    複数行に現れる等でゲートに入れられない引用に限り(ゲート済みは行番号のまま検証される)、
+    **引用範囲の中にある出現**がすべて同じ1つのシンボルの中にあるときだけ、そのシンボルへ書き換える。
+    範囲が複数のシンボルやモジュールレベルにまたがる引用は触らない(行番号が持つ範囲の情報を捨てないため)。
 
     (3) の見出しが無い・シンボルとして解決できない場合に限り、抜粋の先頭行のソース内の出現が
     **すべて同じ1つのシンボルの中にある**なら、そのシンボルを使う(`_enclosing_symbol`)。
@@ -1100,8 +1171,18 @@ def convert_to_symbol_references(specs: List[Path], write: bool = True) -> Tuple
                 if _literal_target(snippet, items[0], src_lines) is not None:
                     continue  # ゲート済み
                 start, end = _cited_span(items[0])
-                if any(head in l for l in src_lines[max(0, start - 2): max(start, end)]):
+                in_cited_place = any(head in l for l in src_lines[max(0, start - 2): max(start, end)])
+                if in_cited_place and not include_valid:
                     continue  # 引用した場所に実在する(ずれていない)
+                if in_cited_place:
+                    if _range_containment(snippet, items[0], src_lines) is not None:
+                        continue  # 範囲内検証でゲート済み(行番号のまま検証される)
+                    symbol = _symbol_enclosing_span(_snippet_lines(snippet), src_lines, spans, start, end)
+                    if symbol is None:
+                        skipped += 1
+                        continue
+                    edits.append((block.start(), block.end(), "参照: %s" % symbol))
+                    continue
                 span = table.resolve(heading_symbol) if heading_symbol else None
                 if span is not None:
                     symbol = heading_symbol
@@ -1138,6 +1219,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="ゲートに入らない引用を、抜粋の実在位置で4種類(正しそう/ずれ・位置確定/ずれ・位置不明/ソースに無い)に仕分けして件数を出す(exit 0。Issue #950)",
     )
     parser.add_argument(
+        "--include-valid",
+        action="store_true",
+        help="--to-symbol-refs で、いまは正しい(引用範囲内に抜粋がある)ゲート外の引用も、範囲内の出現が1シンボルに収まるものに限り書き換える(Issue #950)",
+    )
+    parser.add_argument(
         "--to-symbol-refs",
         nargs="+",
         metavar="SPEC.md",
@@ -1147,7 +1233,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     if args.to_symbol_refs:
-        converted, skipped = convert_to_symbol_references([p.resolve() for p in args.to_symbol_refs])
+        converted, skipped = convert_to_symbol_references([p.resolve() for p in args.to_symbol_refs], include_valid=args.include_valid)
         print("✅ シンボル参照へ %d件を書き換えました(確かめられず据え置き: %d件)。" % (converted, skipped))
         return 0
 

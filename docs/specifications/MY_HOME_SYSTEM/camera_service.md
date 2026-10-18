@@ -124,7 +124,7 @@
 ### `_prune_finished_vod_processes`
 
 * **役割**: `_active_vod_processes`に登録されたプロセスのうち、`poll()`が`None`でない（完了済み）ものをすべて辞書から除去する。**（Issue #439で修正）** 以前はロックなしで走査・削除していたが、現在はスキャンから削除までを`_state_lock`で囲んだ単一の原子的区間として実行する。
-* 根拠: [関数定義とDocstring] (行番号: 153〜156 / 抜粋: "キーがcam_id×target_dateの組み合わせのため、剪定しないと日々増え続けて")、[`_state_lock`での保護] (参照: _prune_finished_vod_processes / 抜粋: "with _state_lock:\n        finished_keys = [key for key, proc in _active_vod_processes.items() if proc.poll() is not None]\n        for key in finished_keys:\n            _active_vod_processes.pop(key, None)")
+* 根拠: [関数定義とDocstring] (行番号: 150〜153 / 抜粋: "キーがcam_id×target_dateの組み合わせのため、剪定しないと日々増え続けて")、[`_state_lock`での保護] (参照: _prune_finished_vod_processes / 抜粋: "with _state_lock:\n        finished_keys = [key for key, proc in _active_vod_processes.items() if proc.poll() is not None]\n        for key in finished_keys:\n            _active_vod_processes.pop(key, None)")
 
 
 * **引数/リクエスト**: なし

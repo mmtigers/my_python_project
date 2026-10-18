@@ -73,7 +73,7 @@
 ### `is_duplicate_webhook`
 
 * **役割**: インメモリキャッシュ（`EVENT_CACHE`）を参照し、直近イベントから `DEDUPE_TTL_SECONDS`（3秒）以内で同一ステータスの場合は重複と判定しキャッシュを更新する。**（Issue #621で修正）** 判定の前に`_touch_mac(mac)`を呼び、サイズ上限つきキャッシュのLRU基準（最終アクセス時刻）を更新する。
-* 根拠: `[is_duplicate_webhook]` (参照: is_duplicate_webhook / 抜粋: "if last_event[\"state\"] == state and time_passed <= DEDUPE_TTL_SECONDS:")、`_touch_mac`呼び出し (行番号: 82 / 抜粋: "_touch_mac(mac)  # Issue #621: サイズ上限つきキャッシュのLRU基準を更新")
+* 根拠: `[is_duplicate_webhook]` (参照: is_duplicate_webhook / 抜粋: "if last_event[\"state\"] == state and time_passed <= DEDUPE_TTL_SECONDS:")、`_touch_mac`呼び出し (参照: is_duplicate_webhook / 抜粋: "_touch_mac(mac)  # Issue #621: サイズ上限つきキャッシュのLRU基準を更新")
 
 
 * **引数/リクエスト**: `mac: str`, `state: str`, `event_timestamp: float`
@@ -124,7 +124,7 @@
 ### `process_sensor_data`
 
 * **役割**: モーションセンサーまたは開閉センサーの状態変化を検知し、必要に応じて通知送信や無反応検知タイマーのセット・キャンセルを行う。モーション判定は`dev_type`が`"Motion"`を部分一致で含む場合（デバイス一覧APIの語彙`"Motion Sensor"`向け）に加え、`dev_type`がSwitchBot公式Webhookの語彙`"WoPresence"`と完全一致する場合にも成立する（#94修正: 以前は`"Motion" in dev_type`のみだったため、公式Webhook形式(`context.deviceType="WoPresence"`)のモーションイベントがこの分岐に到達せず、見守り通知・無反応監視タイマーが一切発火しなかった）。**（Issue #621で修正）** 関数冒頭で`_touch_mac(mac)`を呼び、サイズ上限つきキャッシュのLRU基準を更新する。
-* 根拠: `[process_sensor_data]` (行番号: 167 / 抜粋: "if dev_type and (\"Motion\" in dev_type or dev_type == \"WoPresence\"):")、`_touch_mac`呼び出し (行番号: 157 / 抜粋: "_touch_mac(mac)  # Issue #621: サイズ上限つきキャッシュのLRU基準を更新")
+* 根拠: `[process_sensor_data]` (行番号: 167 / 抜粋: "if dev_type and (\"Motion\" in dev_type or dev_type == \"WoPresence\"):")、`_touch_mac`呼び出し (参照: process_sensor_data / 抜粋: "_touch_mac(mac)  # Issue #621: サイズ上限つきキャッシュのLRU基準を更新")
 
 
 * **引数/リクエスト**: `mac: str`, `name: str`, `location: str`, `dev_type: str`, `state: str`
@@ -132,7 +132,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[process_sensor_data]` (行番号: 149 / 抜粋: ") -> None:")
+* 根拠: `[process_sensor_data]` (参照: process_sensor_data / 抜粋: ") -> None:")
 
 
 * **副作用**: `_touch_mac`経由の`_mac_last_seen`更新・上限超過時のeviction、グローバル変数 `MOTION_TASKS` のキャンセル・新規タスク追加、`IS_ACTIVE` および `LAST_NOTIFY_TIME` の更新、`send_push` を用いた外部API呼び出し。
@@ -182,11 +182,11 @@
 
 
 * **副作用**: `save_log_async` を介した外部DBへの書き込み。
-* 根拠: `[process_meter_data]` (行番号: 224 / 抜粋: "save_ok = await save_log_async(")
+* 根拠: `[process_meter_data]` (参照: process_meter_data / 抜粋: "save_ok = await save_log_async(")
 
 
 * **エラーハンドリング**: **（Issue #740 / AUDIT-011 で追加）** `save_log_async` は Fail-Soft で `False` を返すため戻り値を `save_ok` で受け、`False` なら「どのデバイスの分が欠けたか」を含む `logger.error` を出して **早期 return** する（保存されていないのに DEBUG に `Meter data saved` と出る状態を作らない）。ポーリング経路（scheduler 駆動）で再送の概念が無く、次回ポーリングで新しい値が取れるため、例外にはせず処理を止めるだけにしている。
-* 根拠: `[process_meter_data]` (行番号: 229〜231 / 抜粋: "if not save_ok:")
+* 根拠: `[process_meter_data]` (参照: process_meter_data / 抜粋: "if not save_ok:")
 
 
 
@@ -201,11 +201,11 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[process_power_data]` (行番号: 149 / 抜粋: "-> None:")
+* 根拠: `[process_power_data]` (参照: process_sensor_data / 抜粋: "-> None:")
 
 
 * **副作用**: `core.database.get_db_cursor` による外部DBからの読み取り、`save_log_async` による外部DBへの書き込み(`device_id`/`device_name`/`wattage`/`timestamp`/`device_category`の5列)、`send_push` による外部API呼び出し。
-* 根拠: `[process_power_data]` (行番号: 285〜288 / 抜粋: "save_ok = await save_log_async(\n        config.SQLITE_TABLE_POWER_USAGE,\n        [\"device_id\", \"device_name\", \"wattage\", \"timestamp\", \"device_category\"],\n        (device_id, device_name, wattage, get_now_iso(), device_category)\n    )")
+* 根拠: `[process_power_data]` (参照: process_power_data / 抜粋: "save_ok = await save_log_async(\n        config.SQLITE_TABLE_POWER_USAGE,\n        [\"device_id\", \"device_name\", \"wattage\", \"timestamp\", \"device_category\"],\n        (device_id, device_name, wattage, get_now_iso(), device_category)\n    )")
 
 
 * **エラーハンドリング**: DBからの前回値取得時に発生する全ての `Exception` をキャッチし、ログに記録した上で前回値を `0.0` として処理を続行する。**（Issue #740 / AUDIT-011 で追加）** 保存側も `save_log_async` の戻り値を `save_ok` で受け、`False` ならデバイス名・ワット数を含む `logger.error` を出す。ただし `process_meter_data` と異なり **early return はせず、閾値クロスの通知判定まで進む**（判定に使うのは取得済みの `prev_wattage` と引数の `wattage` だけで保存結果に依存せず、DB の一時的なロックで「電気の付けっぱなし通知」まで落とすほうが実害が大きいため）。

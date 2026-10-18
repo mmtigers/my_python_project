@@ -76,7 +76,7 @@
 ### `is_process_alive`
 
 * **役割**: `pgrep -f`コマンドを使用して、指定したキーワードに合致するプロセスが起動しているかを判定する。
-* 根拠: `is_process_alive` (行番号: 58〜77 / 抜粋: "res = subprocess.run...")
+* 根拠: `is_process_alive` (参照: get_service_status / 抜粋: "res = subprocess.run...")
 * **（#411 S-L11で修正）** 以前は`pgrep -f process_keyword`の単純な部分文字列マッチだったため、`cat unified_server.py`や`vim unified_server.py`のような無関係なコマンドの引数にキーワードが含まれるだけでもヒットし、本来のサーバープロセスが落ちていても誤って「生きている」と判定しうる誤検知の余地があった。`python[0-9.]*\s+\S*<keyword>(\s|$)`という正規表現を組み立て、pythonインタプリタが当該スクリプトを引数として実行しているパターンにのみマッチするよう絞り込んだ。
 * 根拠: `pattern = rf"python[0-9.]*\s+\S*{re.escape(process_keyword)}(\s|$)"` (行番号: 69)
 

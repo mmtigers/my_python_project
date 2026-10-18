@@ -57,7 +57,7 @@
 * **引数/リクエスト**: `value: DateLike`
 * 根拠: [関数シグネチャ] (行番号: 57 / 抜粋: "def _as_date(value: DateLike) -> datetime.date:")
 * **戻り値/レスポンス**: `datetime.date`(`datetime.datetime`なら`.date()`、それ以外はそのまま)
-* 根拠: [戻り値] (行番号: 64〜66 / 抜粋: "if isinstance(value, datetime.datetime):\n        return value.date()\n    return value")
+* 根拠: [戻り値] (行番号: 63〜65 / 抜粋: "if isinstance(value, datetime.datetime):\n        return value.date()\n    return value")
 * **副作用**: なし
 * **エラーハンドリング**: なし
 

@@ -25,7 +25,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `typing` | 標準 | 型ヒントの提供 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "from typing import List...") |
-| `linebot.v3.messaging` | 外部 | LINE API v3のクライアント | 根拠: [インポート宣言] (行番号: 7〜16 / 抜粋: "from linebot.v3.messaging...")。**（Issue #未採番で修正）** `send_reply`削除に伴い、以前インポートしていた`ReplyMessageRequest`は未使用となったためインポート自体を削除済み。 |
+| `linebot.v3.messaging` | 外部 | LINE API v3のクライアント | 根拠: [インポート宣言] (行番号: 6〜15 / 抜粋: "from linebot.v3.messaging...")。**（Issue #未採番で修正）** `send_reply`削除に伴い、以前インポートしていた`ReplyMessageRequest`は未使用となったためインポート自体を削除済み。 |
 | `config` | 外部 | 設定値（トークンやURL）の取得 | 根拠: [インポート宣言] (行番号: 17 / 抜粋: "import config") |
 | `core.logger` | 外部 | ロガーのセットアップ | 根拠: [インポート宣言] (行番号: 19 / 抜粋: "from core.logger import setup_logging") |
 

@@ -56,7 +56,7 @@
 ### `TARGET_DEVICE_TYPES`
 
 * **役割**: 監視対象として許可するデバイスの種類のリストを定義する。
-* 根拠: [変数定義] (行番号: 19-23 / 抜粋: "`TARGET_DEVICE_TYPES: List[str] = [...]`")
+* 根拠: [変数定義] (行番号: 18-22 / 抜粋: "`TARGET_DEVICE_TYPES: List[str] = [...]`")
 
 
 

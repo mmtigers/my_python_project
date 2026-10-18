@@ -30,7 +30,7 @@
 * React Queryを用いてサーバーとの定期的な同期（`INVENTORY_POLL_INTERVAL_MS`(15秒)間隔のポーリング。Issue #660 で5秒から緩和）を行いつつ、使用成功時には画面への即時反映（`setQueryData`によるフィルタ除去。楽観的UI更新）を行う責務を持つ。
 * 根拠: (行番号: 57〜61 / 抜粋: "const { data, isLoading, isError, error } = useQuery({\n        queryKey: queryKey,\n        queryFn: () => apiClient.fetchInventory(userId),\n        refetchInterval: INVENTORY_POLL_INTERVAL_MS\n    });")
 * `panelMode`プロパティにより、狭いパネル（横画面の4人並びレイアウト等）に埋め込まれる際にレイアウト（グリッド列数・アイコンサイズ）を切り替える。
-* 根拠: (行番号: 22〜26, 244〜245 / 抜粋: "// PC横画面の4人並びパネルなど、実際の表示幅が狭い枠内に埋め込む場合に指定する。", "const gridClass = panelMode ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';\n    const iconBoxClass = panelMode ? 'text-xl w-9 h-9' : 'text-2xl w-11 h-11';")
+* 根拠: (行番号: 21〜25, 244〜245 / 抜粋: "// PC横画面の4人並びパネルなど、実際の表示幅が狭い枠内に埋め込む場合に指定する。", "const gridClass = panelMode ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';\n    const iconBoxClass = panelMode ? 'text-xl w-9 h-9' : 'text-2xl w-11 h-11';")
 * **バグ修正(M-6-3)**: 以前は使用ミューテーション（`useMutationAction`）に`onError`が無く、通信エラー等が発生してもユーザーに一切通知されないサイレント失敗になっていた。`useToast`によるエラートースト表示を追加し、`apiClient`がスローする`Error.message`（バックエンドの`{"detail": "..."}`）を`extractErrorDetail`で取り出して表示するようにした。
 * 根拠: (行番号: 14〜17, 144〜146 / 抜粋: "// M-6-3/#412(品質): apiClient側でスローされるErrorのmessageには、バックエンドが返す\n// {\"detail\": \"...\"} の内容が入っている(apiClient.ts参照)。以前はこのファイルと\n// CameraDashboard.tsxにほぼ同じ関数が重複していたため lib/errorDetail.ts に集約した。\nimport { extractErrorDetail } from '../../../lib/errorDetail';", "// M-6-3: 以前はonErrorが無く、使用申請の失敗(通信エラー等)が\n        // ユーザーに一切通知されないサイレント失敗になっていた。\n        onError: (error) => {")
 * **バグ修正(Issue #119)**: 使用確認`Modal`の「はい」ボタンは、押下と同時に`setItemToUse(null)`でモーダルを閉じる実装のため、連打（ダブルタップ）で1回目のクリックが画面に反映される前に2回目のクリックイベントが発火し、同一アイテムに対し`useMutationAction.mutate`が二重に呼ばれることがあった。2回目のリクエストはサーバー側で`status != 'owned'`（既に1回目で`'consumed'`に更新済み）により`400`（`"Cannot use this item"`）となり、実際は1回目が成功しているにもかかわらずエラートーストが表示されてしまっていた。`isUsingItemRef`（`useRef`）による同期的なガードを追加し、2回目以降のクリックは`useMutationAction.mutate`を呼ばずに無視するようにした（`onSettled`でリクエスト完了時に解除）。
@@ -95,7 +95,7 @@
 
 
 * **引数/リクエスト**: `Props`（`{ userId: string; panelMode?: boolean }`）
-* 根拠: [`Props`] (行番号: 20〜27 / 抜粋: "type Props = {\n    userId: string;\n    // PC横画面の4人並びパネルなど、実際の表示幅が狭い枠内に埋め込む場合に指定する。\n    // 通常の sm:grid-cols-2 はブラウザの「ビューポート幅」基準のため、狭いパネルに\n    // 埋め込まれていても(ビューポート自体は広いPC画面なので)2カラム化してしまい、\n    // アイコン・ボタンが見切れる原因になっていた。panelMode時は常に1カラムにする。\n    panelMode?: boolean;\n};")
+* 根拠: [`Props`] (行番号: 19〜26 / 抜粋: "type Props = {\n    userId: string;\n    // PC横画面の4人並びパネルなど、実際の表示幅が狭い枠内に埋め込む場合に指定する。\n    // 通常の sm:grid-cols-2 はブラウザの「ビューポート幅」基準のため、狭いパネルに\n    // 埋め込まれていても(ビューポート自体は広いPC画面なので)2カラム化してしまい、\n    // アイコン・ボタンが見切れる原因になっていた。panelMode時は常に1カラムにする。\n    panelMode?: boolean;\n};")
 
 
 * **戻り値/レスポンス**: `ReactElement`（ローディングUI、空状態UI、またはアイテム一覧のグリッドUIと使用確認`Modal`）

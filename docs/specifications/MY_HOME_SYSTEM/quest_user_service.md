@@ -108,7 +108,7 @@
 * **引数/リクエスト**: なし（`self`のみ）
 * 根拠: (行番号: 44)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`stats: {totalLevel, totalGold, totalQuests, partyRank}` と `chronicle`）
-* 根拠: (行番号: 67〜70 / 抜粋: "return {\n            \"stats\": {\"totalLevel\": total_level, \"totalGold\": total_gold, \"totalQuests\": total_quests, \"partyRank\": rank},\n            \"chronicle\": logs\n        }")
+* 根拠: (参照: UserService.get_family_chronicle / 抜粋: "return {\n            \"stats\": {\"totalLevel\": total_level, \"totalGold\": total_gold, \"totalQuests\": total_quests, \"partyRank\": rank},\n            \"chronicle\": logs\n        }")
 * **副作用**: DB参照（`quest_users`, `quest_history`。`_fetch_full_adventure_logs`経由で`reward_history`も参照）
 * 根拠: (行番号: 46, 53, 65)
 * **エラーハンドリング**: なし

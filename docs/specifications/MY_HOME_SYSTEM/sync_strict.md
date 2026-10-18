@@ -237,7 +237,7 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `services/quest/game_system.py` | **同期の実体がここにある**(Issue #664)。削除方針・UPSERT列リスト・dry-run集計・`strict`の意味はすべてこのファイルを読まないと分からない。 | 根拠: `from services.quest.game_system import game_system, load_master_module` (行番号: 24) |
 | 高 | `quest_data.py` | 同期元となるマスターデータ `QUESTS`、`REWARDS` の正確なスキーマおよび内容を確認するため。 | 根拠: `quest_data = load_master_module()` (行番号: 101) |
-| 中 | `services/quest/master_sync_sql.py` | `quest_master`/`reward_master`への実際のUPSERT列リストを確認するため。 | 根拠: モジュールdocstring (行番号: 8〜10 / 抜粋: "#664 の前段で SQL 自体は") |
+| 中 | `services/quest/master_sync_sql.py` | `quest_master`/`reward_master`への実際のUPSERT列リストを確認するため。 | 根拠: モジュールdocstring (行番号: 7〜9 / 抜粋: "#664 の前段で SQL 自体は") |
 | 中 | `services/quest_service.py` | `load_master_module()`が経由する互換シムで、`quest_data`の実体を保持している。 | 根拠: モジュールdocstring (行番号: 3〜4 / 抜粋: "`services/quest/game_system.py` の `GameSystem.sync_master_data(strict=True)` へ統合した。") |
 
 ## 8. 保守上の注意点

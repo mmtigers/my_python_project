@@ -85,7 +85,7 @@
 ### 関数 `send_reply_text`
 
 * **（2026-09-06 品質監査で修正）** `api.reply_message(..., _request_timeout=config.LINE_API_REQUEST_TIMEOUT)` として接続/読み取りタイムアウトを渡す(SDK 既定は無期限ブロック)。
-* 根拠: (行番号: 58 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
+* 根拠: (参照: send_reply_text / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
 
 * **役割**: LINE Messaging APIを呼び出してテキストメッセージを返信する。
 * 根拠: `def send_reply_text(api: MessagingApi, reply_token: str, text: str, quick_reply: QuickReply = None):` (行番号: 48-61 / 抜粋: "def send_reply_text(api: MessagingApi, reply_token: str, text: str, quick_reply: QuickReply = None):")
@@ -96,15 +96,15 @@
 
 
 * **戻り値/レスポンス**: なし (None)
-* 根拠: return文なし (行番号: 48-61 / 抜粋: "api.reply_message(")
+* 根拠: return文なし (参照: send_reply_text / 抜粋: "api.reply_message(")
 
 
 * **副作用**: 外部API (LINE API) へのネットワークリクエスト実行。
-* 根拠: `api.reply_message(` (行番号: 53 / 抜粋: "api.reply_message(")
+* 根拠: `api.reply_message(` (参照: send_reply_text / 抜粋: "api.reply_message(")
 
 
 * **エラーハンドリング**: APIリクエスト失敗時に例外をキャッチしログ出力する。
-* 根拠: `except Exception as e: logger.error(...)` (行番号: 60-61 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e: logger.error(...)` (参照: send_reply_text / 抜粋: "except Exception as e:")
 
 
 

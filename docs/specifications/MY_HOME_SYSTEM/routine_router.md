@@ -121,7 +121,7 @@
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`(`routine_service.complete_step(...)`の戻り値をそのまま返す。実際の形状は[routine_service.md](./routine_service.md)の`_serialize_flow`を参照)
-* 根拠: [関数定義・戻り値] (行番号: 40-41 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: [関数定義・戻り値] (参照: complete_step / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: `routine_service.complete_step`の呼び出しに伴う副作用(DB書き込み・ゲームデータ更新等)を間接的に引き起こす。本ファイル自体には副作用となるコードは存在しない。
