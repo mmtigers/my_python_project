@@ -236,71 +236,9 @@ class QuestService:
             if not quest or not user:
                 raise HTTPException(status_code=404, detail="Not found")
 
-            # 対象者・出現条件のサーバー側検証(Issue #163)。
-            # filter_active_quests(GET /dataの表示整形専用)にしか無かった判定を、
-            # API直叩きでバイパスして他人向けクエスト・時間帯外・曜日外・
-            # 未出現のrandomクエストを完了できてしまう穴を塞ぐ。報酬購入側は
-            # Issue #95で同種のサーバー側targetチェックを追加済みだったが、
-            # 完了側には未展開のまま残っていた。
-            # target_user は 'all'/本人のuser_id/'siblings'(role_childのみ)の
-            # いずれかのみ許可する。'siblings'をrole_adultが完了すると、
-            # _process_coop_quest_completionを経由せず単独即時報酬になってしまう
-            # (兄妹連携クエストの前提を破る)ため、これも合わせて拒否する。
-            is_sibling_target = quest['target_user'] == 'siblings'
-            if quest['target_user'] not in ('all', user_id) and not (
-                is_sibling_target and user['role'] == ROLE_CHILD
-            ):
-                raise HTTPException(status_code=403, detail="This quest is not available for you")
-            if not self._is_quest_currently_active(quest):
-                raise HTTPException(status_code=403, detail="This quest is not currently available")
-
-            # 前提クエスト(pre_requisite_quest_id)の達成チェック。フロントエンド
-            # (useQuestStatus.getQuestLockState)は「前提クエストの今周期の承認済み履歴」が
-            # 無ければカードをロックするが、サーバー側には対応する検査が無く、API直叩きで
-            # ロックを素通りして報酬を得られた。フロントと同じ条件(承認済み・前提クエスト自身の
-            # reset_period 内)で拒否する。前提クエストがマスタから消えている場合は daily 扱い。
-            prereq_id = quest['pre_requisite_quest_id'] if 'pre_requisite_quest_id' in quest.keys() else None
-            if prereq_id:
-                prereq_quest = cur.execute(
-                    "SELECT reset_period FROM quest_master WHERE quest_id = ?", (prereq_id,)
-                ).fetchone()
-                prereq_period = (prereq_quest['reset_period'] if prereq_quest else None) or 'daily'
-                prereq_hist = cur.execute("""
-                    SELECT completed_at FROM quest_history
-                    WHERE user_id = ? AND quest_id = ? AND status = 'approved'
-                    ORDER BY completed_at DESC LIMIT 1
-                """, (user_id, prereq_id)).fetchone()
-                if not (prereq_hist and prereq_hist['completed_at']
-                        and self.is_within_reset_period(prereq_hist['completed_at'], prereq_period)):
-                    raise HTTPException(status_code=403, detail="前提クエストがまだ達成されていません")
-
-            # スパムチェック
-            last_hist = cur.execute("""
-                SELECT completed_at FROM quest_history
-                WHERE user_id = ? AND quest_id = ? AND status != 'rejected'
-                ORDER BY completed_at DESC LIMIT 1
-            """, (user_id, quest['quest_id'])).fetchone()
-
-            if last_hist and last_hist['completed_at']:
-                elapsed = _seconds_since_iso_timestamp(last_hist['completed_at'])
-                # B2: infiniteクエストはフロントエンド(QuestList.tsx)が60秒のクールダウンを
-                # UIとして提示しているが、サーバー側は全クエスト共通の10秒間隔しか強制していなかった
-                # ため、リロードやAPI直叩きで実質10秒間隔まで周回できてしまっていた。
-                # infiniteのみフロントの意図(60秒)に合わせてサーバー側の下限も引き上げる。
-                min_interval_seconds = INFINITE_QUEST_COOLDOWN_SECONDS if quest['quest_type'] == 'infinite' else SPAM_CHECK_INTERVAL_SECONDS
-                if elapsed is not None and elapsed < min_interval_seconds:
-                    raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")
-
-            # M-1-3: daily/weekly の周期リセットをサーバー側でも強制する。
-            # is_within_reset_period は元々 get_all_view_data の表示専用
-            # (completedQuests算出)にしか使われておらず、上の10秒スパムチェックだけでは
-            # API直叩き等で同一クエストを周期内に何度でも完了・多重報酬できてしまっていた。
-            # 'infinite' タイプ(「何回でも挑戦しよう」等)は仕様上多重完了が前提のため対象外。
-            if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:
-                reset_period = quest['reset_period'] or 'daily'
-                if self.is_within_reset_period(last_hist['completed_at'], reset_period):
-                    period_label = {"weekly": "今週", "monthly": "今月"}.get(reset_period, "本日")
-                    raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")
+            self._validate_quest_target_and_availability(user_id, user, quest)
+            self._validate_prerequisite_quest(cur, user_id, quest)
+            self._validate_completion_interval(cur, user_id, quest)
 
             now_iso = get_now_iso()
             boost = self.calculate_quest_boost(cur, user_id, quest)
@@ -317,25 +255,104 @@ class QuestService:
                 if quest['target_user'] == 'siblings':
                     return self._process_coop_quest_completion(cur, user, quest, now_iso, total_exp, total_gold)
 
-                cur.execute("""
-                    INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
-                    VALUES (?, ?, ?, ?, ?, ?, 'pending')
-                """, (user_id, quest['quest_id'], quest['title'], total_exp, total_gold, now_iso))
-
-                logger.info(f"Quest Pending: User={user_id}, Quest={quest['title']}, BonusG={boost['gold']}")
-                sound_manager.play("submit")
-
-                return {
-                    "status": "pending",
-                    "leveledUp": False, "newLevel": user['level'],
-                    "earnedGold": 0, "earnedExp": 0, "earnedMedals": 0,
-                    "message": "親の承認待ちです"
-                }
+                return self._submit_pending_completion(cur, user, quest, now_iso, total_exp, total_gold, boost['gold'])
 
             # 大人
             result = self._apply_quest_rewards(cur, user, quest, now_iso, override_rewards={"gold": total_gold, "exp": total_exp})
             logger.info(f"Adult Quest Completed: User={user_id}, Exp={total_exp}, Gold={total_gold}")
             return result
+
+    def _validate_quest_target_and_availability(self, user_id: str, user: Any, quest: Any) -> None:
+        """対象者・出現条件を満たさない完了を 403 で拒否する。"""
+        # 対象者・出現条件のサーバー側検証(Issue #163)。
+        # filter_active_quests(GET /dataの表示整形専用)にしか無かった判定を、
+        # API直叩きでバイパスして他人向けクエスト・時間帯外・曜日外・
+        # 未出現のrandomクエストを完了できてしまう穴を塞ぐ。報酬購入側は
+        # Issue #95で同種のサーバー側targetチェックを追加済みだったが、
+        # 完了側には未展開のまま残っていた。
+        # target_user は 'all'/本人のuser_id/'siblings'(role_childのみ)の
+        # いずれかのみ許可する。'siblings'をrole_adultが完了すると、
+        # _process_coop_quest_completionを経由せず単独即時報酬になってしまう
+        # (兄妹連携クエストの前提を破る)ため、これも合わせて拒否する。
+        is_sibling_target = quest['target_user'] == 'siblings'
+        if quest['target_user'] not in ('all', user_id) and not (
+            is_sibling_target and user['role'] == ROLE_CHILD
+        ):
+            raise HTTPException(status_code=403, detail="This quest is not available for you")
+        if not self._is_quest_currently_active(quest):
+            raise HTTPException(status_code=403, detail="This quest is not currently available")
+
+    def _validate_prerequisite_quest(self, cur: Any, user_id: str, quest: Any) -> None:
+        """前提クエストが今周期に承認済みでなければ 403 で拒否する。"""
+        # 前提クエスト(pre_requisite_quest_id)の達成チェック。フロントエンド
+        # (useQuestStatus.getQuestLockState)は「前提クエストの今周期の承認済み履歴」が
+        # 無ければカードをロックするが、サーバー側には対応する検査が無く、API直叩きで
+        # ロックを素通りして報酬を得られた。フロントと同じ条件(承認済み・前提クエスト自身の
+        # reset_period 内)で拒否する。前提クエストがマスタから消えている場合は daily 扱い。
+        prereq_id = quest['pre_requisite_quest_id'] if 'pre_requisite_quest_id' in quest.keys() else None
+        if prereq_id:
+            prereq_quest = cur.execute(
+                "SELECT reset_period FROM quest_master WHERE quest_id = ?", (prereq_id,)
+            ).fetchone()
+            prereq_period = (prereq_quest['reset_period'] if prereq_quest else None) or 'daily'
+            prereq_hist = cur.execute("""
+                SELECT completed_at FROM quest_history
+                WHERE user_id = ? AND quest_id = ? AND status = 'approved'
+                ORDER BY completed_at DESC LIMIT 1
+            """, (user_id, prereq_id)).fetchone()
+            if not (prereq_hist and prereq_hist['completed_at']
+                    and self.is_within_reset_period(prereq_hist['completed_at'], prereq_period)):
+                raise HTTPException(status_code=403, detail="前提クエストがまだ達成されていません")
+
+    def _validate_completion_interval(self, cur: Any, user_id: str, quest: Any) -> None:
+        """直前の完了からの間隔(429)と、周期内の重複完了(400)を拒否する。"""
+        # スパムチェック
+        last_hist = cur.execute("""
+            SELECT completed_at FROM quest_history
+            WHERE user_id = ? AND quest_id = ? AND status != 'rejected'
+            ORDER BY completed_at DESC LIMIT 1
+        """, (user_id, quest['quest_id'])).fetchone()
+
+        if last_hist and last_hist['completed_at']:
+            elapsed = _seconds_since_iso_timestamp(last_hist['completed_at'])
+            # B2: infiniteクエストはフロントエンド(QuestList.tsx)が60秒のクールダウンを
+            # UIとして提示しているが、サーバー側は全クエスト共通の10秒間隔しか強制していなかった
+            # ため、リロードやAPI直叩きで実質10秒間隔まで周回できてしまっていた。
+            # infiniteのみフロントの意図(60秒)に合わせてサーバー側の下限も引き上げる。
+            min_interval_seconds = INFINITE_QUEST_COOLDOWN_SECONDS if quest['quest_type'] == 'infinite' else SPAM_CHECK_INTERVAL_SECONDS
+            if elapsed is not None and elapsed < min_interval_seconds:
+                raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")
+
+        # M-1-3: daily/weekly の周期リセットをサーバー側でも強制する。
+        # is_within_reset_period は元々 get_all_view_data の表示専用
+        # (completedQuests算出)にしか使われておらず、上の10秒スパムチェックだけでは
+        # API直叩き等で同一クエストを周期内に何度でも完了・多重報酬できてしまっていた。
+        # 'infinite' タイプ(「何回でも挑戦しよう」等)は仕様上多重完了が前提のため対象外。
+        if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:
+            reset_period = quest['reset_period'] or 'daily'
+            if self.is_within_reset_period(last_hist['completed_at'], reset_period):
+                period_label = {"weekly": "今週", "monthly": "今月"}.get(reset_period, "本日")
+                raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")
+
+    def _submit_pending_completion(
+        self, cur: Any, user: Any, quest: Any, now_iso: str, total_exp: int, total_gold: int, bonus_gold: int
+    ) -> Dict[str, Any]:
+        """大人以外の完了を承認待ち(pending)として記録し、APIの応答を返す。"""
+        user_id = user['user_id']
+        cur.execute("""
+            INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending')
+        """, (user_id, quest['quest_id'], quest['title'], total_exp, total_gold, now_iso))
+
+        logger.info(f"Quest Pending: User={user_id}, Quest={quest['title']}, BonusG={bonus_gold}")
+        sound_manager.play("submit")
+
+        return {
+            "status": "pending",
+            "leveledUp": False, "newLevel": user['level'],
+            "earnedGold": 0, "earnedExp": 0, "earnedMedals": 0,
+            "message": "親の承認待ちです"
+        }
 
     def _get_sibling_partner_id(self, cur, user_id: str) -> str:
         """
