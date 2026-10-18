@@ -6,7 +6,7 @@
 
 ---
 
-## 0. 対応状況（2026-09-02追記・Issue #323）
+## 0. 対応状況（2026-09-02追記・Issue #323／最終棚卸し: 2026-10-18・Issue #960）
 
 > **状態管理の方針**: 残件の状態管理の正は**GitHub Issue**に一本化する。本レポート（および他のレビューレポート）は「レビュー時点の歴史的記録+未解決項目のIssueへのポインタ」であり、以下の表はIssue #323時点のスナップショット（状態欄は2026-09-16棚卸しで更新済み）。
 
@@ -31,7 +31,57 @@ High 12件+M-10-1のコード照合結果（2026-09-02、Issue #323の調査に�
 | M-10-1 | `test.yml`に`permissions:`ブロックが無い | ✅ 対応済み | `permissions: contents: read`を明示済み（`test.yml`冒頭） |
 
 - **「5. 品質向上ロードマップ」のPhase 3**: 2026-09-16棚卸しの結果、**5項目すべてが完了または方針確定済み**であることを確認した（当時の「未着手」という記述は既に正しくない）。(1) スキーマ管理の`migrations/`一本化は**完了**（Issue #330。ただし`init_unified_db.py`は「廃止」ではなく、マイグレーション適用と検証のみを行う薄いラッパーとして残す形になった。空DBからの構築検証は`tests/test_migrations.py`・`tests/test_current_schema_sql.py`が担う）。(2) H-10 認証境界の実装は、Issue #321の案B（エッジのCloudflare Access委譲）採用により**実装しない方針で確定**。(3) 設定の一本化は**完了**（CORS許可オリジンは`config.CORS_ORIGINS`の1箇所のみ／`ENABLE_APPROVAL_FLOW`は撤去済み／config import時のNASブロッキングはPEP 562の`__getattr__`による遅延解決＋`prewarm_nas_paths()`で分離済み）。(4) タイムラプス/監視ジョブの排他制御は**完了**（`monitors/smart_timelapse_generator.py`の`timelapse_job_lock()`）。(5) フロントエンドのvitest導入は**完了**（CIの`frontend`ジョブで`npm test`を実行）。
-- Medium各グループ（M-1〜M-10）の個別項目は多くが個別修正済みだが、本表では網羅照合していない。未解決と判明したものは都度Issue化する方針（上記のとおりIssueが正）。
+- **H-4 の「残」(`DeviceStatusResponse.body: Dict[str, Any]`)**: 2026-10-18 時点でも現存する。デバイス種別ごとに中身が異なるレスポンスをそのまま `model_dump()` で返す用途(`services/switchbot_service.py`)で、型を絞っても防げる障害が無いため、**現状維持としIssue化しない**(2026-10-18棚卸し・Issue #960)。
+
+### Medium の個別照合（2026-10-18棚卸し・Issue #960）
+
+2026-09-02時点では Medium の個別項目を網羅照合していなかったため、2026-10-18 に全項目を現行コードと突き合わせた。「根拠」の多くはコード・テスト内の `M-x-y` コメント(修正時に付与されたもの)で辿れる。
+
+**サマリー**: 全45項目のうち、**未対応は M-5-4 の1件のみ**(リスク低のため現状維持)。それ以外は修正済み、または対象ファイルの削除・運用形態の変更で解消している。
+
+| # | 状態 | 根拠(現行コード) |
+|---|---|---|
+| M-1-1 | ✅ 対応済み | `services/quest/approval_service.py` が `if quest and ...` でガード。`tests/test_quest_service_edge_cases.py` |
+| M-1-2 | ✅ 対応済み | `services/quest/game_system.py` の同期処理が `user_inventory` に参照の残る報酬の削除をスキップ。`tests/test_quest_service_edge_cases.py`・`tests/test_sync_strict.py` |
+| M-1-3 | ✅ 対応済み | `services/quest/quest_service.py` の完了処理がサーバー側で `is_within_reset_period` を判定。`tests/test_quest_completion_idempotency.py` |
+| M-1-4 | ✅ 対応済み | `is_within_reset_period` は tz 無しを JST として扱う。`analysis_service.py` も naive/aware を分けて変換。`tests/test_analysis_service.py` |
+| M-1-5 | ✅ 対応済み | Issue #330 で `migrations/` に一本化(実行時 ALTER は退役) |
+| M-2 | ✅ 対応済み | `core/migrations.py` は既知のエラー文言(duplicate column / already exists)だけを適用済みとして扱う。`tests/test_migrations.py` |
+| M-3-1〜4 | ✅ 対応済み | `services/camera_service.py`(`_mask_rtsp_url_for_log` 等)。`tests/test_camera_service_unit.py` |
+| M-3-5 | ✅ 対応済み | `tests/test_camera_service_unit.py`(サービス本体を monkeypatch せずに検証、24件) |
+| M-4-1 | ✅ 対応済み | `monitors/smart_timelapse_generator.py` の `timelapse_job_lock()`。`tests/test_timelapse_job_lock.py` |
+| M-4-2 | ✅ 解消(対象削除) | `monitors/scheduled_timelapse.py` はリポジトリから削除済み |
+| M-4-3 | ✅ 対応済み | `tests/test_smart_timelapse_generator.py` |
+| M-4-4 | ✅ 対応済み | `tests/test_nas_monitor.py`(retention 対象) |
+| M-4-5 | ✅ 対応済み | `monitors/switchbot_power_monitor.py`。`tests/test_switchbot_power_monitor.py` |
+| M-4-6 | ✅ 対応済み | `tests/test_nas_monitor.py` |
+| M-4-7 | ✅ 解消(運用形態の変更) | `unified_server.py` は `deploy/systemd/home_system.service` が管理する構成に統一され(`start_all.sh` は `--prepare` のみ)、systemd 稼働との AND 判定が運用形態と一致した。pgrep の部分一致は #411 S-L11 で厳密化 |
+| M-5-1 | ✅ 対応済み | `services/ai_service.py`。`tests/test_ai_service.py` |
+| M-5-2 | ✅ 対応済み | `tests/test_sensor_service.py` |
+| M-5-3 | ✅ 対応済み | `services/ai_service.py`。`tests/test_ai_service.py` |
+| M-5-4 | ⚠️ 未対応(現状維持) | `services/analysis_service.py` の f-string SQL は残っている。ただし埋め込むテーブル名は `config` の定数のみで、外部入力からの到達経路は無く、接続も読み取り専用。UI 入力に接続する変更をするときに併せて直す前提で、Issue化しない |
+| M-5-5 | ✅ 対応済み | `core/logger.py`(`DiscordErrorHandler` の送信をバックグラウンドスレッドへ移動)。`tests/test_logger.py` |
+| M-6-1〜5 | ✅ 対応済み | `family-quest/src` の `App.tsx`・`useGameData.ts`・`InventoryList.tsx`・`FamilyLog.tsx`・`QuestList.tsx`(各 `M-6-x` コメント)。`App.completeQuest.test.tsx`・`App.approveAll.test.tsx`・`FamilyLog.test.tsx` |
+| M-7-1〜3 | ✅ 対応済み | `DDD/batch_download_discord.py`。`DDD/test_batch_download_discord_fixes.py` |
+| M-7-4 | ✅ 対応済み | `DDD/file_utils.py` の `resolve_my_home_system_root()` へ集約(#553) |
+| M-7-5 | ✅ 対応済み | `DDD/newface_monitor.py` の known_casts を union 保存(#237・#538) |
+| M-7-6 | ✅ 対応済み | `DDD/newface_monitor.py` の flock ロック(コード中のコメントは「M-7-4」と表記)。`DDD/test_newface_monitor_lock.py` |
+| M-8-1 | ✅ 対応済み | `config.py` のモジュール `__getattr__` による遅延解決+`prewarm_nas_paths()`(#330 PR-B) |
+| M-8-2 | ✅ 対応済み | CORS は `config.CORS_ORIGINS` の1箇所のみ。`tests/test_unified_server_app.py` |
+| M-8-3 | ✅ 対応済み | `tools/connect_speaker.sh`。`tests/test_connect_speaker_sh.py` |
+| M-8-4 | ✅ 対応済み | `tests/test_start_all_sh.py`(本体は systemd 管理へ移行済み) |
+| M-8-5 | ✅ 対応済み | `tests/test_keep_alive_anker_sh.py` |
+| M-9-1 | ✅ 対応済み | `tests/test_quest_data_local_overrides.py`(ローカルオーバーレイへ分離) |
+| M-9-2 | ✅ 対応済み | `config.py` の `BACKUP_FILES` から `.env` が外れている |
+| M-9-3 | ✅ 対応済み | `services/quest/user_service.py` のサイズ上限。`tests/test_quest_router_api.py` |
+| M-9-4 | ✅ 対応済み | `services/switchbot_webhook_service.verify_token` がトークン未設定時に 503 で拒否(フェイルクローズ。#648) |
+| M-9-5 | ✅ 対応済み | `family-quest/src/lib/utils.ts`。`utils.test.ts` |
+| M-9-6 | ✅ 対応済み | `sync_strict.py`。`tests/test_sync_strict.py` |
+| M-10-1 | ✅ 対応済み | 上表のとおり |
+| M-10-2 | ✅ 対応済み | `.github/scripts/check_spec_drift.py` の除外判定(`EXCLUDE_PARTS`)・rename 検知(#407)・同名 stem の衝突回避(#105) |
+| M-10-3 | ✅ 解消(対象削除) | `tools/haircut_advisor.py` はリポジトリから削除済み |
+
+- Low(4章)は今回も網羅照合していない。
 
 ---
 
