@@ -104,6 +104,7 @@ def _build_time_suffix(start_time_str, end_time_str, start_time, end_time) -> st
 
 
 def _remove_stale_output(output_path: str) -> None:
+    """同名の summary 動画が残っていれば削除する。削除に失敗しても警告ログのみで処理を続ける。"""
     if os.path.exists(output_path):
         try:
             os.remove(output_path)
@@ -165,6 +166,10 @@ def _extract_chunk_clips(filepath, work, temp_dir, motion_detector, event_builde
 
 
 def _notify_no_clips(camera_name, target_date_str, time_range_log, event_count) -> None:
+    """有効クリップが0件だったことを report チャンネルへ通知する。
+
+    検知イベントが1件以上あれば「クリップ生成に全て失敗」、0件なら「動きなし」と送り分ける。
+    """
     if event_count > 0:
         # #233: all_clip_filesは_build_clip()成功時のみ追加されるため、
         # 「イベントは検知されたがクリップ抽出が全滅した」場合も空になり、

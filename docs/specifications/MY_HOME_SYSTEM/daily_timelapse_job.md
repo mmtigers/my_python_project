@@ -113,11 +113,11 @@
 | `_filter_files_by_time_range` | ファイル名 `YYYYMMDD_HHMMSS.mp4` の開始時刻から各チャンクを15分長とみなし、指定時間帯と重なるものだけ残す。命名に合わないファイルは除外 | 絞り込んだファイルパスのリスト | `def _filter_files_by_time_range(target_files, target_date, start_time, end_time):` (行番号: 74) |
 | `_build_time_suffix` | 出力ファイル名の時間帯部分（例: `_0600-0900`、片側未指定は `start`/`end`）。時間指定が無ければ空文字 | `str` | `def _build_time_suffix(start_time_str, end_time_str, start_time, end_time) -> str:` (行番号: 97) |
 | `_remove_stale_output` | 既存のsummary動画を削除。`OSError` は警告ログのみで処理を続ける(#450) | `None` | `def _remove_stale_output(output_path: str) -> None:` (行番号: 106) |
-| `_stash_chunk_csvs` | `motion.csv`/`events.csv`/`events_enriched.csv` を `<名前>_<チャンク名>.csv` にリネームし、次チャンクでの上書きを防ぐ | `None` | `def _stash_chunk_csvs(work: str, base_name: str) -> None:` (行番号: 117) |
-| `_extract_chunk_clips` | 1チャンクの解析（動画情報取得→動き検知→イベント構築→CSV退避→クリップ切り出し）。`duration <= 0` なら警告してスキップ。Event ID は `event_offset` から続けて `Event001` 形式で1日通して再採番する | `(クリップのパスのリスト, 検知イベント数, イベント長の合計)` | `def _extract_chunk_clips(filepath, work, temp_dir, motion_detector, event_builder, video_builder, event_offset):` (行番号: 127) |
-| `_notify_no_clips` | 有効クリップが0件のときの通知。検知イベント数が1以上なら「クリップ生成に全て失敗」(ERRORログは `skip_discord` 付き)、0なら「動きはありませんでした」(#233) | `None` | `def _notify_no_clips(camera_name, target_date_str, time_range_log, event_count) -> None:` (行番号: 167) |
-| `_write_done_record` | `SummaryInfo` を `asdict` してJSONで `<rec>/<名前>.done` に保存する | `None` | `def _write_done_record(rec: str, done_filename: str, sum_info: SummaryInfo) -> None:` (行番号: 185) |
-| `_select_target_files` | 録画ディレクトリの確認、対象日のチャンクの検索(時系列順)、時間帯の指定があれば書式の検証と `_filter_files_by_time_range` での絞り込みを行い `(ファイル一覧, 開始時刻, 終了時刻)` を返す。ディレクトリが無い・書式が不正・対象ファイルが無い場合はログを出して `None`(#497 の「先に None で束縛」もここ) | `(list, time, time)` または `None` | `def _select_target_files(camera_name: str, target_date, start_time_str, end_time_str):` (行番号: 192) |
+| `_stash_chunk_csvs` | `motion.csv`/`events.csv`/`events_enriched.csv` を `<名前>_<チャンク名>.csv` にリネームし、次チャンクでの上書きを防ぐ | `None` | `def _stash_chunk_csvs(work: str, base_name: str) -> None:` (行番号: 118) |
+| `_extract_chunk_clips` | 1チャンクの解析（動画情報取得→動き検知→イベント構築→CSV退避→クリップ切り出し）。`duration <= 0` なら警告してスキップ。Event ID は `event_offset` から続けて `Event001` 形式で1日通して再採番する | `(クリップのパスのリスト, 検知イベント数, イベント長の合計)` | `def _extract_chunk_clips(filepath, work, temp_dir, motion_detector, event_builder, video_builder, event_offset):` (行番号: 128) |
+| `_notify_no_clips` | 有効クリップが0件のときの通知。検知イベント数が1以上なら「クリップ生成に全て失敗」(ERRORログは `skip_discord` 付き)、0なら「動きはありませんでした」(#233) | `None` | `def _notify_no_clips(camera_name, target_date_str, time_range_log, event_count) -> None:` (行番号: 168) |
+| `_write_done_record` | `SummaryInfo` を `asdict` してJSONで `<rec>/<名前>.done` に保存する | `None` | `def _write_done_record(rec: str, done_filename: str, sum_info: SummaryInfo) -> None:` (行番号: 190) |
+| `_select_target_files` | 録画ディレクトリの確認、対象日のチャンクの検索(時系列順)、時間帯の指定があれば書式の検証と `_filter_files_by_time_range` での絞り込みを行い `(ファイル一覧, 開始時刻, 終了時刻)` を返す。ディレクトリが無い・書式が不正・対象ファイルが無い場合はログを出して `None`(#497 の「先に None で束縛」もここ) | `(list, time, time)` または `None` | `def _select_target_files(camera_name: str, target_date, start_time_str, end_time_str):` (行番号: 197) |
 
 * エラーハンドリング: ヘルパー自身は `_resolve_target_date`（`ValueError` を捕捉）と `_remove_stale_output`（`OSError` を捕捉）以外は例外を捕捉しない。`_extract_chunk_clips` 等で起きた例外は、呼び出し元 `run_daily_timelapse` の `except Exception` で通知される。
 * 根拠: `except Exception as e:` (行番号: 321)
@@ -125,12 +125,12 @@
 ### `run_daily_timelapse`
 
 * **（Issue #497 C-4 で修正）** 時間帯フィルタリングの分岐(`if target_files and (start_time_str or end_time_str):`)に入る前に `start_time = None` / `end_time = None` を束縛する。以前は `target_files` が空で `start_time_str`/`end_time_str` が指定されていると未束縛のまま後段の出力ファイル名組み立てで参照され `NameError` になり得た(pyright の reportPossiblyUnboundVariable で検出)。
-* 根拠: (行番号: 213〜215 / 抜粋: "start_time = None\n    end_time = None\n    if target_files and (start_time_str or end_time_str):")
+* 根拠: (行番号: 218〜220 / 抜粋: "start_time = None\n    end_time = None\n    if target_files and (start_time_str or end_time_str):")
 
 * **役割**: 対象カメラの録画ディレクトリから、指定日付および時間帯の動画ファイルを取得・フィルタリングし、動き検知エンジンのパイプライン（検知・イベント構築・クリップ生成・結合・サムネイル作成）を実行して結果をDiscordへアップロード・通知する。
 
 
-* 根拠: [関数定義] (行番号: 230 / 抜粋: "def run_daily_timelapse(...) -> None:")
+* 根拠: [関数定義] (行番号: 235 / 抜粋: "def run_daily_timelapse(...) -> None:")
 
 
 
@@ -176,7 +176,7 @@
 * サマリー情報のJSONファイル (`.done`) のディスクへの保存
 
 
-* 根拠: [ファイルI/OおよびAPI呼び出し処理] (行番号: 124 / 抜粋: "os.rename(src_csv, dst_csv)")、[クリップ抽出全滅時の分岐] (行番号: 168 / 抜粋: "if event_count > 0:")
+* 根拠: [ファイルI/OおよびAPI呼び出し処理] (行番号: 125 / 抜粋: "os.rename(src_csv, dst_csv)")、[クリップ抽出全滅時の分岐] (行番号: 173 / 抜粋: "if event_count > 0:")
 
 
 
@@ -194,7 +194,7 @@
 * 処理全体を `try...except Exception as e:` で囲み、予期せぬエラーが発生した場合はスタックトレースをログ出力し、Discordへエラー通知を送信する。
 
 
-* 根拠: [try-exceptブロックおよび早期リターン処理] (行番号: 321 / 抜粋: "except Exception as e:")、[既存ファイル削除失敗時のログ出力(#450)] (行番号: 106 / 抜粋: "def _remove_stale_output(output_path: str) -> None:")
+* 根拠: [try-exceptブロックおよび早期リターン処理] (行番号: 326 / 抜粋: "except Exception as e:")、[既存ファイル削除失敗時のログ出力(#450)] (行番号: 106 / 抜粋: "def _remove_stale_output(output_path: str) -> None:")
 
 
 
@@ -297,7 +297,7 @@ graph TD
 * 動画処理ループ内でハードコードされた `time.sleep(1)` が存在し、チャンク数に比例して固定の遅延が発生する仕様になっている。
 
 
-* 根拠: [ループ内処理] (行番号: 285 / 抜粋: "time.sleep(1)")
+* 根拠: [ループ内処理] (行番号: 290 / 抜粋: "time.sleep(1)")
 
 
 
@@ -313,7 +313,7 @@ graph TD
 * `VideoBuilder` クラスのインスタンスに対し、`_build_clip`, `_build_concat`, `_generate_thumbnail` のようにアンダースコア始まりのメソッド（Pythonの慣例における非公開/内部メソッド）を直接呼び出している。
 
 
-* 根拠: [クリップ生成・結合処理] (行番号: 161 / 抜粋: "clip_path = video_builder._build_clip(filepath, ev, temp_dir, start_dt)")
+* 根拠: [クリップ生成・結合処理] (行番号: 162 / 抜粋: "clip_path = video_builder._build_clip(filepath, ev, temp_dir, start_dt)")
 
 
 
@@ -345,7 +345,7 @@ graph TD
 * `all_clip_files` は各イベントの `_build_clip()` 成功時のみ追加される実装のため、「イベント検知はあったがクリップ抽出が全滅した」場合と「そもそもイベントが無かった」場合の両方で空になる。Issue #233修正前はこの2つを区別せず一律「動きなし」通知を送っていたため、クリップ抽出全滅というエラー状態が利用者から見えなくなっていた。修正後は`global_event_idx`(全チャンクを通した検知イベント総数)の値で両者を区別し、前者はクリップ生成失敗として通知する(2026-09のチャンネル再設計で送信先は`report`)。Issue #954 以降、この分岐は `_notify_no_clips` にある。
 
 
-* 根拠: [クリップ抽出結果の分岐] (行番号: 168 / 抜粋: "if event_count > 0:")
+* 根拠: [クリップ抽出結果の分岐] (行番号: 173 / 抜粋: "if event_count > 0:")
 
 
 
