@@ -32,28 +32,27 @@
 | --- | --- | --- | --- |
 | `errno`（Issue #450で追加） | 標準ライブラリ | `_cleanup_empty_dirs`で`os.rmdir`失敗時の`OSError.errno`が`errno.ENOTEMPTY`(ディレクトリが空でない、想定内)かどうかを判定するため | 根拠: `import errno` (行番号: 1 / 抜粋: "import errno") |
 | `os` | 標準ライブラリ | ファイルパス操作、存在確認、削除など | 根拠: `import os` (行番号: 2 / 抜粋: "import os") |
-| `json` | 標準ライブラリ | 状態を記録したJSONファイルの読み書き | 根拠: `import json` (行番号: 3 / 抜粋: "import json") |
 | `shutil` | 標準ライブラリ | ディスク使用量の取得 | 根拠: `import shutil` (行番号: 3 / 抜粋: "import shutil") |
 | `subprocess` | 標準ライブラリ | pingおよびrsyncコマンドの実行 | 根拠: `import subprocess` (行番号: 5 / 抜粋: "import subprocess") |
 | `sys` | 標準ライブラリ | モジュール検索パスへの親ディレクトリ追加 | 根拠: `import sys` (行番号: 6 / 抜粋: "import sys") |
 | `time` | 標準ライブラリ | 保持期間の基準時刻（カットオフ）の計算 | 根拠: `import time` (行番号: 7 / 抜粋: "import time") |
 | `Dict, Optional, Any, Tuple` | 標準ライブラリ(typing) | 型アノテーション | 根拠: `from typing import Dict, Optional, Any, Tuple` (行番号: 8 / 抜粋: "from typing import Dict...") |
 | `config` | 自作モジュール | NASのIP、マウント先、LINE ID、保持期間などの設定値取得 | 根拠: `import config` (行番号: 13 / 抜粋: "import config") |
-| `setup_logging` | 自作モジュール | ロガーの初期化と取得 | 根拠: `setup_logging` (行番号: 14 / 抜粋: "from core.logger import setup...") |
-| `save_log_generic` | 自作モジュール | データベースへのログ保存 | 根拠: `save_log_generic` (行番号: 15 / 抜粋: "from core.database import sav...") |
+| `setup_logging` | 自作モジュール | ロガーの初期化と取得 | 根拠: `setup_logging` (行番号: 15 / 抜粋: "from core.logger import setup...") |
+| `save_log_generic` | 自作モジュール | データベースへのログ保存 | 根拠: `save_log_generic` (行番号: 16 / 抜粋: "from core.database import sav...") |
 | `get_now_iso`, `retry_with_backoff`（Issue #292） | 自作モジュール | 現在時刻のISOフォーマット取得、NAS I/O向けExponential Backoffリトライ | 根拠: `get_now_iso`, `retry_with_backoff` (行番号: 17 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst") |
 | `get_now_jst`（Issue #592で追加） | 自作モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「8時以降」判定はJSTの8時を意図していたため、ホストがJST以外の設定だと意図しない実時刻で判定されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_iso, retry_with_backoff, get_now_jst` (行番号: 17 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst")、`now = get_now_jst()` (行番号: 476〜478 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()") |
-| `send_push` | 自作モジュール | プッシュ通知の送信 | 根拠: `send_push` (行番号: 17 / 抜粋: "from services.notification...") |
+| `send_push` | 自作モジュール | プッシュ通知の送信 | 根拠: `send_push` (行番号: 19 / 抜粋: "from services.notification...") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config`の各設定値 | 具体的な設定値や型、スキーマ（NAS_IP、保持日数、バックアップ/録画ディレクトリ等）が不明 | 根拠: `config` (行番号: 13 / 抜粋: "import config") |
-| `setup_logging` | ログの出力先、フォーマット等の詳細が不明 | 根拠: `setup_logging` (行番号: 14 / 抜粋: "from core.logger import setup...") |
-| `save_log_generic` | データベースの接続情報やテーブルスキーマの詳細が不明 | 根拠: `save_log_generic` (行番号: 15 / 抜粋: "from core.database import sav...") |
-| `get_now_iso` | タイムゾーンや出力される正確な文字列フォーマットが不明 | 根拠: `get_now_iso` (行番号: 16 / 抜粋: "from core.utils import get_no...") |
-| `send_push` | 実際の送信先仕様（`target`引数と各種チャンネルの関連）が不明 | 根拠: `send_push` (行番号: 17 / 抜粋: "from services.notification...") |
+| `setup_logging` | ログの出力先、フォーマット等の詳細が不明 | 根拠: `setup_logging` (行番号: 15 / 抜粋: "from core.logger import setup...") |
+| `save_log_generic` | データベースの接続情報やテーブルスキーマの詳細が不明 | 根拠: `save_log_generic` (行番号: 16 / 抜粋: "from core.database import sav...") |
+| `get_now_iso` | タイムゾーンや出力される正確な文字列フォーマットが不明 | 根拠: `get_now_iso` (行番号: 17 / 抜粋: "from core.utils import get_no...") |
+| `send_push` | 実際の送信先仕様（`target`引数と各種チャンネルの関連）が不明 | 根拠: `send_push` (行番号: 19 / 抜粋: "from services.notification...") |
 | 外部コマンド`ping` | 実行環境に依存するためコマンドの正確な挙動が不明 | 根拠: `subprocess.run` (行番号: 54〜59 / 抜粋: "cmd = ["ping", "-c", "1"...]") |
 | 外部コマンド`rsync` | 実行環境に依存するためコマンドの正確な挙動が不明 | 根拠: `subprocess.run` (行番号: 92〜99 / 抜粋: "cmd = [") |
 
@@ -96,41 +95,41 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def _load_state(self) -> Dict[str, bool]:` (行番号: 51 / 抜粋: "def _load_state(self) -> Di...")
+* 根拠: `def _load_state(self) -> Dict[str, Any]:` (行番号: 51 / 抜粋: "def _load_state(self) -> Dict[str, Any]:")
 
 
-* **戻り値/レスポンス**: `Dict[str, bool]`（状態辞書）
-* 根拠: `return json.load(f)` および `return {"is_healthy": True}` (行番号: 38, 41 / 抜粋: "return {"is_healthy": True}")
+* **戻り値/レスポンス**: `Dict[str, Any]`（状態辞書。ファイルが無い初回は`{"is_healthy": True}`、破損時は`{"is_healthy": False}`）
+* 根拠: (参照: NasMonitor._load_state / 抜粋: "return {\"is_healthy\": True}  # 初回(ファイル無し)は正常とみなす", "return {\"is_healthy\": False}", "return state")
 
 
-* **副作用**: ローカルファイルの読み込み。
-* 根拠: `with open(self.state_file, 'r', encoding='utf-8') as f:` (行番号: 37 / 抜粋: "with open(self.state_file...")
+* **副作用**: ローカルファイルの読み込み(**#661** で`core/state_file.read_json`(flock + tmp + `os.replace`の共通実装)へ一本化)。
+* 根拠: (参照: NasMonitor._load_state / 抜粋: "state = state_file.read_json(self.state_file, default=sentinel)")
 
 
-* **エラーハンドリング**: `Exception`を捕捉し、エラーログ出力後デフォルト値を返す。
-* 根拠: `except Exception as e:` (行番号: 39〜40 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: 本メソッドに`try`/`except`は無い。`state_file.read_json`が破損時に返す番兵(`sentinel`)か、辞書でない値を受け取った場合はエラーログを出して異常継続扱いの値を返す。
+* 根拠: (参照: NasMonitor._load_state / 抜粋: "if state is sentinel or not isinstance(state, dict):\n            logger.error(\"State load error (異常継続扱いにフォールバック)\")")
 * **（Issue #653 で変更）** ファイルが存在するのに JSON として読めない(書き込み途中の電源断等で破損)場合は、以前の「正常(`is_healthy: True`)」ではなく `{"is_healthy": False}`(異常継続扱い)を返す。障害中に状態が壊れると「障害中だった」事実が失われ、復旧時の `sync_fallback_data` がスキップされていたため。ファイルが無い初回のみ正常とみなす。
 
 ### 関数 `_save_state`
 
 * **役割**: 現在の監視状態をJSONファイルとして保存する。
-* 根拠: `def _save_state(self, state: Dict[str, bool]) -> None:` (行番号: 71〜80 / 抜粋: "def _save_state(self, state...")
+* 根拠: `def _save_state(self, state: Dict[str, Any]) -> None:` (行番号: 71〜80 / 抜粋: "def _save_state(self, state: Dict[str, Any]) -> None:")
 
 
-* **引数/リクエスト**: `state`: `Dict[str, bool]`
-* 根拠: `state: Dict[str, bool]` (行番号: 43 / 抜粋: "state: Dict[str, bool]")
+* **引数/リクエスト**: `state`: `Dict[str, Any]`
+* 根拠: (参照: NasMonitor._save_state / 抜粋: "def _save_state(self, state: Dict[str, Any]) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
 * 根拠: `-> None:` (参照: _save_state / 抜粋: "-> None:")
 
 
-* **副作用**: ローカルファイルへの書き込み。
-* 根拠: `with open(self.state_file, 'w', encoding='utf-8') as f:` (行番号: 46〜47 / 抜粋: "json.dump(state, f)")
+* **副作用**: ローカルファイルへの書き込み(**#661** で`core/state_file.write_json_atomic`へ一本化)。
+* 根拠: (参照: NasMonitor._save_state / 抜粋: "if not state_file.write_json_atomic(self.state_file, state):")
 
 
-* **エラーハンドリング**: `Exception`を捕捉し、エラーログを出力する。
-* 根拠: `except Exception as e:` (行番号: 48〜49 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: 本メソッドに`try`/`except`は無い。`state_file.write_json_atomic`が失敗(`False`)を返した場合にエラーログを出力する。
+* 根拠: (参照: NasMonitor._save_state / 抜粋: "logger.error(\"State save error\")")
 * **（Issue #653 で変更）** 素の `open('w')` ではなく、`<state_file>.tmp.<pid>` に書き切って `fsync` したうえで `os.replace` で原子的に差し替える(`switchbot_power_monitor._save_persisted_states` と同方式)。失敗時は一時ファイルを削除する。`tests/test_nas_monitor.py::TestNasMonitorStateFileRobustness` が破損時フォールバックと原子的書き込みを固定する。
 
 ### 関数 `check_ping`
@@ -167,7 +166,7 @@
 
 
 * **戻り値/レスポンス**: `bool`（マウントされていればTrue）
-* 根拠: `return os.path.ismount(self.mount_point)` (行番号: 69 / 抜粋: "return os.path.ismount(self...")
+* 根拠: `return os.path.ismount(self.mount_point)` (行番号: 116 / 抜粋: "return os.path.ismount(self...")
 
 
 * **副作用**: なし
@@ -290,7 +289,7 @@
 
 
 * **エラーハンドリング**: ファイルの`mtime`/`size`取得や削除時に発生した`OSError`を個別に捕捉し、警告ログを出力してそのファイルをスキップする（処理全体は継続）。
-* 根拠: `except OSError as e:` (行番号: 253〜254 / 抜粋: "logger.warning(f"Cleanup skip...")
+* 根拠: `except OSError as e:` (参照: cleanup_old_files / 抜粋: "logger.warning(f"Cleanup skip...")
 
 
 
@@ -370,7 +369,7 @@
 ### 関数 `run`
 
 * **（2026-09-06 品質監査で修正）** 日次レポート(`is_report_time`)の判定を `now.hour == 8` の一致から「`now.hour >= 8` かつ状態ファイルの `last_report_date` が今日でない」に変更し、送信後に `last_report_date` を `_save_state` で保存する(Issue #388 で保持期間削除側に施したのと同じ修正。scheduler の実行間隔のずれで 7:5x → 9:0x になった日はレポートが丸ごと飛んでいた)。`today_str` の算出は両判定より前に移動した。
-* 根拠: (行番号: 417〜422, 454〜456 / 抜粋: "is_report_time = now.hour >= 8 and previous_state.get(\"last_report_date\") != today_str", "if is_report_time:\n            previous_state[\"last_report_date\"] = today_str\n            self._save_state(previous_state)")
+* 根拠: (行番号: 483, 520〜521 / 抜粋: "is_report_time = now.hour >= 8 and previous_state.get(\"last_report_date\") != today_str", "if is_report_time:\n            previous_state[\"last_report_date\"] = today_str")
 * **（Issue #592で修正）** 上記「8時以降」判定に使う現在時刻(`now`)の取得方法自体を、ホストOSのタイムゾーン設定に依存するnaiveな`datetime.now()`から`core.utils.get_now_jst()`（Issue #592で追加、"Asia/Tokyo"のaware `datetime`を返す）に置き換えた。「8時以降」判定はJSTの8時を意図しているため、ホストがJST以外の設定だと本来と異なる実時刻で日次レポート・保持期間クリーンアップの両方が判定されてしまう問題があった（Issue #382/#293と同じ不具合クラス）。この変更に伴い`from datetime import datetime`のimportは不要になり削除された。回帰テストの`TestNasMonitorDailyReportOncePerDay`クラスは、`freeze_time(...)`の引数をJST時刻の文字列からUTC相当の文字列に変更した（freezegunは素の文字列をUTCとして解釈するため。例: `freeze_time("2026-09-06 09:05:00")`は元々JST 9:05のつもりだったが実際にはUTC 9:05=JST 18:05と解釈されており、修正前から気づかれずにいたテスト側のバグだった。修正後は`freeze_time("2026-09-06 00:05:00")  # JST 09:05`のようにUTC時刻を明示する）。
 * 根拠: `now = get_now_jst()` (行番号: 476〜478 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()")
 
@@ -494,7 +493,7 @@ flowchart TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | NASのIP、マウントポイント、LINE ID、NVR録画/スナップショット/DBバックアップの各保持日数・ディレクトリなどの初期設定値全体を把握するため。 | 根拠: `getattr(config, "NAS_IP", ...)` (行番号: 26 / 抜粋: "getattr(config, "NAS_IP"...")、`getattr(config, "NVR_RECORD_DIR", ...)` (行番号: 173〜178) |
+| 高 | `config.py` | NASのIP、マウントポイント、LINE ID、NVR録画/スナップショット/DBバックアップの各保持日数・ディレクトリなどの初期設定値全体を把握するため。 | 根拠: `getattr(config, "NAS_IP", ...)` (行番号: 30 / 抜粋: "getattr(config, "NAS_IP"...")、`getattr(config, "NVR_RECORD_DIR", ...)` (行番号: 173〜178) |
 | 中 | `services/notification_service.py` | `target="discord"`が内部でどのように処理・分岐されているか特定するため。 | 根拠: `send_push(...)` (参照: run / 抜粋: "target="discord", channel="report"") |
 | 中 | `core/database.py` | 引数で渡しているデータが実際にどのような型やテーブル構造で保存されているか確認するため。 | 根拠: `save_log_generic(...)` (参照: NasMonitor.save_to_db / 抜粋: "save_log_generic(") |
 

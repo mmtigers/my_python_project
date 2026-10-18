@@ -26,7 +26,7 @@
 
 ラズパイの一次ヘルスチェックを行うcron想定のスクリプト。`home_system.service`の稼働状態、**unified_serverがHTTPに応答し、DBまで到達する経路も200を返すか(チェック2・Issue #735)**、journalctlのエラーログ、アプリログのERROR行、ディスク/メモリ使用率、NASマウント、実機構成(crontab/systemd/logrotate)とリポジトリ`deploy/`配下の一致(チェック8・構成ドリフト検知)、`quest_data.QUESTS`と実機DBの`quest_master`の一致(チェック9・マスタデータのドリフト検知)、カメラごとの常時録画(NVR)が止まっていないか(チェック10)、参照整合性が破れていないか(チェック11・Issue #747)、**実機のチェックアウトが upstream より遅れていないか(チェック12・Issue #783)**、**稼働中のサーバープロセスが起動後に更新されたコードを読み込めていないか(チェック13・再起動漏れの検知)** の13項目を決定論的にチェックし、異常があればDiscordのerrorチャンネルへ要約を通知する。前回チェック時刻をマーカーファイルで管理してログ走査の重複を防ぎ、同一の異常セットが継続する間は再通知を6時間抑制する。自動復旧(systemctl restart等)は行わない。**Issue #339(層2)**: `config.HEALTH_WATCH_INVESTIGATE_HOOK`にスクリプトパスが設定されている場合のみ、通知と同じ抑制の内側で自動調査フック(`scripts/claude_investigate.sh`)を`_fire_investigate_hook()`によりfire-and-forget起動する。未設定(既定)なら従来どおり検知・通知のみ。**Issue #775(層3)**: `run_checks`が完走するたびに(anomaliesの有無を問わず)`_ping_deadman_switch()`が`config.HEALTH_WATCH_DEADMAN_PING_URL`(healthchecks.io等)へハートビートを送る。Pi自体の電源断・SDカード故障・ネットワーク断・systemdごと巻き込むハングでcron自体が動かなくなると、通知を出す主体そのものが止まり上記チェックのDiscord通知が一切届かなくなる。この「静かに死ぬ」経路を、外部サービス側のハートビート途絶検知(通知経路はDiscordに依存しない)で塞ぐ。未設定(既定)なら送信しない。**Issue #735 / AUDIT-005(チェック2)**: 既存のチェック1(`systemctl is-active`)も`server_watchdog`(`systemctl` + `pgrep`)も「プロセスが生きているか」しか見ておらず、マイグレーション失敗・DB破損・SQLiteの恒久ロック・イベントループ停止のような「プロセスは生存しているが全APIが500」という状態をどの監視も検知できなかった。本スクリプトはcron駆動でサーバーのプロセスツリーから完全に独立した唯一の監視であるため、ここに`check_api_responsive`によるHTTPプローブを追加した。**常時録画停止検知(チェック10)**: 録画は`nvr-*.service`のffmpegが担うが、2026-08〜09にparkingカメラが計12日ほど再起動ループしていても誰にも通知されなかった。カメラごとの録画フォルダの最新セグメント(ファイル名の時刻、CIFSではmtimeが書き込み中は進まないため)が`RECORDING_STALE_SEC`(30分)より古ければ異常とする。**Issue #700(チェック10)**: `quest_data.py`から退役させたクエストが実機の`quest_master`に残り続け、移設先(「きょうのすごろく」のステップ報酬)と二重報酬になっていた事故を受け、コードとDBの乖離を検知する項目を追加した。**検知のみで自動修正はしない**（同期の実行は`sync_strict.py --if-stale`の責務）。
 * 根拠: モジュールdocstring (行番号: 9〜23 / 抜粋: "9. 実機構成(crontab / systemdユニット / logrotate設定)がリポジトリの deploy/ 配下と\n     一致しているか(構成ドリフト検知。", "10. `quest_data.QUESTS` と実機DBの `quest_master` が一致しているか")
-* 根拠: モジュールdocstring (行番号: 28〜31 / 抜粋: "層2(Issue #339): config.HEALTH_WATCH_INVESTIGATE_HOOK にスクリプトパスが\n設定されている場合のみ、通知と同じ抑制の内側で自動調査フック")
+* 根拠: モジュールdocstring (行番号: 33 / 抜粋: "層2(Issue #339): config.HEALTH_WATCH_INVESTIGATE_HOOK にスクリプトパスが\n設定されている場合のみ、通知と同じ抑制の内側で自動調査フック")
 
 ## 3. 外部依存関係
 
@@ -64,10 +64,10 @@
 | `config.LOG_DIR` / `config.NAS_MOUNT_POINT` | 外部ファイルで定義されており具体的な値が不明。 | 根拠: [変数参照] (行番号: 45, 47, 114, 158 / 抜粋: "os.path.join(config.LOG_DIR, ...)") |
 | `setup_logging` | ロガーの具体的な設定が不明。 | 根拠: [関数呼び出し] (行番号: 38 / 抜粋: 'logger = setup_logging("health_watch")') |
 | `send_push` | 送信処理の内部実装・エラー挙動が不明。 | 根拠: [関数呼び出し] (行番号: 225 / 抜粋: 'send_push([{"type": "text", "text": msg}], target="discord", channel="error")') |
-| `LogAnalyzer` | 走査キーワード・タイムスタンプ解析の実装詳細は別ファイル。 | 根拠: [クラス利用] (行番号: 109〜118 / 抜粋: "analyzer = LogAnalyzer(days_back=0)") |
+| `LogAnalyzer` | 走査キーワード・タイムスタンプ解析の実装詳細は別ファイル。 | 根拠: [クラス利用] (参照: _journal_stdio_errors / 抜粋: "analyzer = LogAnalyzer(days_back=0)") |
 | 外部コマンド `systemctl`/`journalctl`/`free`/`crontab` | OS側コマンドの出力仕様に依存。 | 根拠: [外部コマンド実行] (行番号: 100〜103, 112〜119, 184, 243 / 抜粋: 'subprocess.run(["systemctl", "is-active", ...])', 'subprocess.run(["crontab", "-l"], ...)') |
 | `quest_data.QUESTS` の内容 | **（Issue #700 で追加）** マスタ定義の実体は別ファイルで、ローカルオーバーレイの有無でも変わりうる。本ファイルは`id`の集合だけを参照する | 根拠: [集合生成] (行番号: 358 / 抜粋: 'master_ids = {q["id"] for q in quest_data.QUESTS}') |
-| `core.database.get_ro_connection` | **（Issue #700 で追加）** 接続先(`config.SQLITE_DB_PATH`)・タイムアウトの詳細は`core/database.py`側 | 根拠: [DB読み取り] (行番号: 359〜361 / 抜粋: "with get_ro_connection() as conn:") |
+| `core.database.get_ro_connection` | **（Issue #700 で追加）** 接続先(`config.SQLITE_DB_PATH`)・タイムアウトの詳細は`core/database.py`側 | 根拠: [DB読み取り] (参照: check_quest_master_drift / 抜粋: "with get_ro_connection() as conn:") |
 | 実機側ファイル `/etc/systemd/system/*.service`・`/etc/logrotate.d/*` | 実機に導入済みの構成ファイル。存在・内容は実行環境に依存。 | 根拠: [定数定義] (行番号: 74〜77 / 抜粋: '(os.path.join(HOME_SYSTEM_DIR, "deploy", "systemd"), "*.service", "/etc/systemd/system")') |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -503,7 +503,7 @@
 
 
 * **戻り値/レスポンス**: `str | None`(異常メッセージ、正常なら`None`)
-* 根拠: [戻り値] (行番号: 374、385〜389 / 抜粋: "return None")
+* 根拠: [戻り値] (参照: check_quest_master_drift / 抜粋: "return None")
 
 
 * **副作用**: DBの読み取りのみ(`get_ro_connection`による`mode=ro`接続で、SQLite側が書き込みを拒否する)。
@@ -661,7 +661,7 @@
 
 
 * **エラーハンドリング**: フックパスが存在しない/実行権限がない場合はエラーログのみで起動しない。起動時の例外（`Popen`失敗等）も捕捉してエラーログのみとし、層1本体（検知・通知・マーカー更新）を巻き込まない。
-* 根拠: [ガード/例外処理] (行番号: 204〜206, 228〜230 / 抜粋: "if not (os.path.isfile(hook) and os.access(hook, os.X_OK)):", "except Exception as e:\n        logger.error(f\"調査フックの起動に失敗しました: {e}\")")
+* 根拠: [ガード/例外処理] (行番号: 886, 913〜914 / 抜粋: "if not (os.path.isfile(hook) and os.access(hook, os.X_OK)):", "except Exception as e:\n        logger.error(f\"調査フックの起動に失敗しました: {e}\")")
 
 
 
@@ -690,24 +690,24 @@
 
 ### `__main__` ブロック
 
-* **役割**: スクリプト直接実行時に`run_checks`を呼び、その戻り値を終了コードとしてプロセスを終了する。
-* 根拠: [エントリーポイント] (行番号: 289〜290 / 抜粋: "sys.exit(run_checks())")
+* **役割**: スクリプト直接実行時に`main`を呼び、その戻り値を終了コードとしてプロセスを終了する。**(Issue #651)** `main`は`flock(LOCK_NB)`で多重起動を防いでから`run_checks`を実行し、ロックが取れない(前回がまだ実行中)ときは警告ログを出して`0`を返す。
+* 根拠: [エントリーポイント] (行番号: 1004〜1005 / 抜粋: "if __name__ == \"__main__\":\n    sys.exit(main())")、[多重起動防止] (参照: main / 抜粋: "fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [エントリーポイント] (行番号: 289〜290)
+* 根拠: [エントリーポイント] (行番号: 1004〜1005)
 
 
 * **戻り値/レスポンス**: プロセス終了コード
-* 根拠: [エントリーポイント] (行番号: 290)
+* 根拠: [エントリーポイント] (行番号: 1005)
 
 
 * **副作用**: `run_checks`の実行
-* 根拠: [エントリーポイント] (行番号: 290)
+* 根拠: [エントリーポイント] (行番号: 1005)
 
 
 * **エラーハンドリング**: なし
-* 根拠: [エントリーポイント] (行番号: 289〜290)
+* 根拠: [エントリーポイント] (行番号: 1004〜1005)
 
 
 

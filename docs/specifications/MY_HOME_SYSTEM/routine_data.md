@@ -326,7 +326,7 @@
 
 
 * **戻り値/レスポンス**: `Optional[int]` — チェックポイントを持つ最初のステップのインデックス、無ければ`None`
-* 根拠: [戻り値] (行番号: 303-304 / 抜粋: "return idx" / "return None")
+* 根拠: [戻り値] (参照: get_checkpoint_index / 抜粋: "return idx", "return None")
 
 
 * **副作用**: なし

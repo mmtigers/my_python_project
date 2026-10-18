@@ -110,15 +110,15 @@ graph TD
 
 
 * `title`要素は`span`タグでラップされ、Tailwind CSSクラス`text-yellow-400`が直接指定されているため、テーマ変更時などに個別の対応が必要になる可能性がある。
-* 根拠: `title` (行番号: 17 / 抜粋: "title={<span className="text-y...")
+* 根拠: `title` (行番号: 20 / 抜粋: "title={<span className="text-y...")
 
 
 * `message`要素には`whitespace-pre-wrap`クラスが適用されているため、渡された文字列に含まれる改行コードはそのまま表示に反映される。
-* 根拠: `message` (行番号: 26 / 抜粋: "<div className="text-lg whites...")
+* 根拠: `message` (行番号: 44 / 抜粋: "<div className="text-lg whites...")
 
 
 * `icon`が渡された場合、`animate-bounce`クラスが付与されるため、常にバウンスアニメーションが実行される。
-* 根拠: `icon` (行番号: 25 / 抜粋: "{icon && <div className="text-...")
+* 根拠: `icon` (行番号: 43 / 抜粋: "{icon && <div className="text-...")
 
 
 

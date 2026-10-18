@@ -102,15 +102,15 @@
 
 
 * **戻り値/レスポンス**: `sqlite3.Connection`（`with`ブロックへ`yield`される）。
-* 根拠: `yield conn` (行番号: 79 / 抜粋: "yield conn")
+* 根拠: `yield conn` (参照: get_ro_connection / 抜粋: "yield conn")
 
 
 * **副作用**: 読み取り専用のDB接続を開く。ブロックを抜けると`finally`で必ず`close()`する。
-* 根拠: `conn.close()` (行番号: 81 / 抜粋: "conn.close()")
+* 根拠: `conn.close()` (参照: get_ro_connection / 抜粋: "conn.close()")
 
 
 * **エラーハンドリング**: 独自の例外捕捉は行わない（接続失敗・クエリ失敗の例外はそのまま呼び出し元へ伝播し、接続だけは`finally`で確実に閉じられる）。
-* 根拠: `finally:` (行番号: 80 / 抜粋: "finally:")
+* 根拠: `finally:` (参照: get_ro_connection / 抜粋: "finally:")
 
 
 ### `execute_read_query`
@@ -206,7 +206,7 @@
 
 
 * **戻り値/レスポンス**: `bool`: 全件の保存に成功した場合は`True`、いずれか1件でも失敗した場合は`False`（この場合、全件がロールバックされテーブルには一切残らない）。
-* 根拠: (行番号: 121, 124 / 抜粋: "return True", "return False")
+* 根拠: (行番号: 152, 155 / 抜粋: "return True", "return False")
 
 
 * **副作用**: 単一のDBトランザクション内での複数回のINSERT実行（データ書き込み）。
@@ -338,7 +338,7 @@ graph TD
 * `get_db_cursor` の `with` 文本体（`yield`後）で例外が発生した場合はロールバックされた後に例外が再送出される (行番号: 49-51) ため、呼び出し元で適切なエラーハンドリングを行う必要がある（H-1で書き直され、以前存在した「本体例外がリトライされ`RuntimeError`に化ける」不具合は解消されている）。
 * `execute_read_query` で例外が発生した場合、例外を送出せず文字列 (`検索エラー: ...`) を返す。呼び出し元が戻り値を常にJSON文字列としてパースしようとすると、パースエラー（`JSONDecodeError`など）が発生する可能性が高い。
 * **`save_log_generic`と`save_logs_batch_generic`はSQL文字列展開時の識別子検証が同一（Issue #409 Q-L9で非対称を解消済み）**: いずれも `values_list` に対してプレースホルダー（`?`）を用いているが、`table` と `columns_list` は文字列展開でSQL文に直接埋め込まれている点は共通である。**（B3で追加）** `save_log_generic`はSQL組み立て前に`_SQL_IDENTIFIER_RE`によるSQLite識別子ホワイトリスト検証を行うようになり、`table`/`columns_list`に不正な文字種が含まれる場合はINSERTを実行せず`False`を返すようになった。当初`save_logs_batch_generic`（Issue #231で追加）はこの検証を経由しない非対称な状態だったが、**（Issue #409 Q-L9で修正）** 同じ`_SQL_IDENTIFIER_RE`による検証が追加され、現在は両関数とも同一のチェックを行う。現状の全呼び出し元はいずれもリテラル固定値かconfig定数のみのため実害はないが、この検証は将来いずれかの関数に動的な値が渡された場合のSQLインジェクションに対する構造的な防御として両関数に共通して機能する。
-* 根拠: `save_log_generic`の検証 (行番号: 79-81 / 抜粋: "if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):")、`save_logs_batch_generic`の検証 (行番号: 111-113 / 抜粋: "if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):\n        logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
+* 根拠: `save_log_generic`の検証 (参照: save_log_generic / 抜粋: "if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):")、`save_logs_batch_generic`の検証 (行番号: 111-113 / 抜粋: "if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):\n        logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
 * `get_db_cursor` は接続確立時に`sqlite3.OperationalError`以外の例外（例: PRAGMA実行時のエラー）が発生した場合、`except sqlite3.OperationalError`節では捕捉されずリトライされないまま例外がそのまま送出される（`conn`は開いたままクローズされない）。この経路は本ファイル内に専用の例外処理を持たない。
 
 ## 9. 不明事項一覧

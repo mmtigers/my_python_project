@@ -43,7 +43,7 @@
 | `core.logger.setup_logging` | ログの出力先（標準出力、ファイルなど）およびフォーマットの実装が不明。 | `[トップレベル]` (行番号: 18 / 抜粋: "logger = setup_logging("nature") |
 | `sensor_service.process_power_data` | 電力データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 124 / 抜粋: "await sensor_service.process_p") |
 | `sensor_service.process_meter_data` | 温湿度データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 148 / 抜粋: "await sensor_service.process_m") |
-| `Nature Remo API` | `api.nature.global` の正確なレスポンススキーマの全容（コード上でアクセスしているキー以外）が不明。 | `[fetch_data_sync]` (行番号: 59 / 抜粋: "url_app = "[https://api.nature](https://www.google.com/search?q=https://api.nature).") |
+| `Nature Remo API` | `api.nature.global` の正確なレスポンススキーマの全容（コード上でアクセスしているキー以外）が不明。 | `[fetch_data_sync]` (行番号: 59 / 抜粋: "url_app = \"https://api.nature.global/1/appliances\"") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -96,7 +96,7 @@
 ### `process_location`
 
 * **役割**: 拠点とトークンを受け取り、別スレッドでAPI通信を実行。取得したデータからスマートメーターの電力値 (`EPC: 231`) とセンサーの温湿度を抽出し、外部サービスへ非同期で委譲する。**（Issue #235で修正）** 電力値のパースは以前`val_str.isdigit()`で数字文字列かどうかを判定していたが、`str.isdigit()`は符号付き文字列(例: `"-120"`)に対して`False`を返すPython仕様のため、太陽光発電等による逆潮流(売電)時の負の瞬時電力値が警告も無く無条件に破棄されていた。`float(val_str)`への直接パースを`try/except`で試み、失敗時のみ警告ログを出す方式に変更した。**（Issue #829で修正）** `sensor_service.process_power_data`呼び出しに`device_category="smart_meter"`を明示的に渡すようになった。以前は下流(`analysis_service.py`)が`device_name`に`"Remo"`という文字列が含まれるかだけで住宅全体のスマートメーターかどうかを推測していたが、`device_name`はここで`f"{location}_{app.get('nickname', 'SmartMeter')}"`のようにNature RemoアプリのニックネームからDynamicに組み立てられる表示用の自由文字列であり、ニックネームが`"Remo"`を含まない環境では電気代集計が恒常的に0円になる不具合があった。この関数はスマートメーター(`EL_SMART_METER`)であることを既に知っているため、書き込み時点で種別を明示するようにした。
-* 根拠: `[process_location]` (行番号: 78〜146 / 抜粋: "async def process_location(loc")、電力値パース処理 (行番号: 99〜111 / 抜粋: "try: power_val = float(val_str)")、`device_category`の明示 (行番号: 124〜126 / 抜粋: "await sensor_service.process_power_data(\n                    dev_id, dev_name, power_val, {}, device_category=\"smart_meter\"\n                )")
+* 根拠: `[process_location]` (行番号: 78〜146 / 抜粋: "async def process_location(loc")、電力値パース処理 (参照: process_location / 抜粋: "try:\n                        power_val = float(val_str)\n                    except (TypeError, ValueError):")、`device_category`の明示 (行番号: 124〜126 / 抜粋: "await sensor_service.process_power_data(\n                    dev_id, dev_name, power_val, {}, device_category=\"smart_meter\"\n                )")
 
 
 * **引数/リクエスト**: `location: str` (拠点名), `token: str` (APIトークン)
@@ -142,7 +142,7 @@
 ### `__main__` (エントリーポイント)
 
 * **役割**: スクリプトが直接実行された際、イベントループを起動して `main()` 関数を実行する。
-* 根拠: `[__main__]` (行番号: 157〜163 / 抜粋: "if __name__ == "__main__":")
+* 根拠: `[__main__]` (行番号: 170 / 抜粋: "if __name__ == "__main__":")
 
 
 * **引数/リクエスト**: なし
@@ -150,7 +150,7 @@
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `[__main__]` (行番号: 157〜163 / 抜粋: "asyncio.run(main())")
+* 根拠: `[__main__]` (行番号: 172 / 抜粋: "asyncio.run(main())")
 
 
 * **副作用**: 非同期イベントループの開始。
@@ -158,7 +158,7 @@
 
 
 * **エラーハンドリング**: `KeyboardInterrupt` をキャッチして INFO ログを出力。その他の予期せぬ例外 (`Exception`) をキャッチし、CRITICAL ログを出力する。
-* 根拠: `[__main__]` (行番号: 160〜163 / 抜粋: "except KeyboardInterrupt:")
+* 根拠: `[__main__]` (行番号: 173 / 抜粋: "except KeyboardInterrupt:")
 
 
 

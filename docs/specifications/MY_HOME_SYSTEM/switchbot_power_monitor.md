@@ -30,13 +30,13 @@
 | --- | --- | --- | --- |
 | `asyncio` | 標準ライブラリ | 非同期処理の実行と制御 | 根拠: [インポート宣言] (行番号: 2 / 抜粋: "`import asyncio`") |
 | `core.state_file`（Issue #661 で追加。`fcntl`/`json`の直接importを置き換え） | ローカルモジュール | 状態ファイルの原子的な読み書き（`read_json`/`write_json_atomic`）。`flock`・一時ファイル・`fsync`・`os.replace`はすべてこのモジュール側が担う | 根拠: [インポート宣言] (行番号: 13 / 抜粋: "`from core import state_file`") |
-| `sys` | 標準ライブラリ | モジュール検索パスの操作 | 根拠: [インポート宣言] (行番号: 4 / 抜粋: "`import sys`") |
-| `os` | 標準ライブラリ | パスの絶対パス解決・操作 | 根拠: [インポート宣言] (行番号: 5 / 抜粋: "`import os`") |
-| `typing` | 標準ライブラリ | 型アノテーションの提供 | 根拠: [インポート宣言] (行番号: 7 / 抜粋: "`from typing import Dict, Any, Optional, List, Set`") |
-| `config` | 外部モジュール | デバイスリスト設定の取得 | 根拠: [インポート宣言] (行番号: 12 / 抜粋: "`import config`") |
-| `sb_tool` | 外部モジュール | SwitchBot APIからの状態取得 | 根拠: [インポート宣言] (行番号: 13 / 抜粋: "`from services import switchbot_service as sb_tool`") |
-| `sensor_service` | 外部モジュール | センサーデータの処理依頼 | 根拠: [インポート宣言] (行番号: 14 / 抜粋: "`from services import sensor_service`") |
-| `setup_logging` | 外部モジュール | ロガーの初期化処理 | 根拠: [インポート宣言] (行番号: 15 / 抜粋: "`from core.logger import setup_logging`") |
+| `sys` | 標準ライブラリ | モジュール検索パスの操作 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "`import sys`") |
+| `os` | 標準ライブラリ | パスの絶対パス解決・操作 | 根拠: [インポート宣言] (行番号: 4 / 抜粋: "`import os`") |
+| `typing` | 標準ライブラリ | 型アノテーションの提供 | 根拠: [インポート宣言] (行番号: 5 / 抜粋: "`from typing import Dict, Any, Optional, List, Set`") |
+| `config` | 外部モジュール | デバイスリスト設定の取得 | 根拠: [インポート宣言] (行番号: 10 / 抜粋: "`import config`") |
+| `sb_tool` | 外部モジュール | SwitchBot APIからの状態取得 | 根拠: [インポート宣言] (行番号: 11 / 抜粋: "`from services import switchbot_service as sb_tool`") |
+| `sensor_service` | 外部モジュール | センサーデータの処理依頼 | 根拠: [インポート宣言] (行番号: 12 / 抜粋: "`from services import sensor_service`") |
+| `setup_logging` | 外部モジュール | ロガーの初期化処理 | 根拠: [インポート宣言] (行番号: 14 / 抜粋: "`from core.logger import setup_logging`") |
 
 （注: 旧版で「未使用インポート」として掲載していた`time`は、確認したところ現在のファイル冒頭のインポート一覧に存在しない。今回の変更(`fcntl`追加)とは無関係の、旧版仕様書側の記載誤りであったため本更新にあわせて削除した。）
 
@@ -44,12 +44,12 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.MONITOR_DEVICES` | 設定値の具体的なデータ構造や内容が提供コード外のため不明。 | 根拠: [`main`内の変数代入] (行番号: 158 / 抜粋: "`devices: List[Dict[str, Any]] = getattr(config, "MONITOR_DEVICES", [])`") |
-| `config.BASE_DIR` | 実際のパス値が提供コード外のため不明。永続化先ファイルのディレクトリを決定する。 | 根拠: [`_STATE_FILE`の変数定義] (行番号: 34 / 抜粋: "`_STATE_FILE: str = os.path.join(config.BASE_DIR, "switchbot_device_states.json")`") |
-| `sb_tool.get_device_status` | SwitchBot API通信の内部実装およびAPIからのレスポンスの厳密な仕様が不明。 | 根拠: [`fetch_device_status_sync`内のAPI呼出] (行番号: 70 / 抜粋: "`status: Optional[Dict[str, Any]] = sb_tool.get_device_status(device_id)`") |
-| `sensor_service.process_power_data` | 電力データ処理（保存や通知など）の内部実装が不明。 | 根拠: [`main`内の非同期呼出] (行番号: 205-207 / 抜粋: "`await sensor_service.process_power_data(...)`") |
-| `sensor_service.process_meter_data` | 温湿度データ処理の内部実装が不明。 | 根拠: [`main`内の非同期呼出] (行番号: 211-213 / 抜粋: "`await sensor_service.process_meter_data(...)`") |
-| `setup_logging` | ログの出力先、フォーマット設定の内部実装が不明。 | 根拠: [ロガー初期化処理] (行番号: 17 / 抜粋: "`logger = setup_logging("device_monitor")`") |
+| `config.MONITOR_DEVICES` | 設定値の具体的なデータ構造や内容が提供コード外のため不明。 | 根拠: [`main`内の変数代入] (行番号: 161 / 抜粋: "`devices: List[Dict[str, Any]] = getattr(config, "MONITOR_DEVICES", [])`") |
+| `config.BASE_DIR` | 実際のパス値が提供コード外のため不明。永続化先ファイルのディレクトリを決定する。 | 根拠: [`_STATE_FILE`の変数定義] (行番号: 33 / 抜粋: "`_STATE_FILE: str = os.path.join(config.BASE_DIR, "switchbot_device_states.json")`") |
+| `sb_tool.get_device_status` | SwitchBot API通信の内部実装およびAPIからのレスポンスの厳密な仕様が不明。 | 根拠: [`fetch_device_status_sync`内のAPI呼出] (行番号: 60 / 抜粋: "`status: Optional[Dict[str, Any]] = sb_tool.get_device_status(device_id)`") |
+| `sensor_service.process_power_data` | 電力データ処理（保存や通知など）の内部実装が不明。 | 根拠: [`main`内の非同期呼出] (参照: main / 抜粋: "`await sensor_service.process_power_data(...)`") |
+| `sensor_service.process_meter_data` | 温湿度データ処理の内部実装が不明。 | 根拠: [`main`内の非同期呼出] (参照: main / 抜粋: "`await sensor_service.process_meter_data(...)`") |
+| `setup_logging` | ログの出力先、フォーマット設定の内部実装が不明。 | 根拠: [ロガー初期化処理] (行番号: 16 / 抜粋: "`logger = setup_logging("device_monitor")`") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -70,7 +70,7 @@
 ### `_STATE_FILE`
 
 * **役割**: `_last_device_states`の永続化先となるJSONファイルの絶対パスを保持する定数。`config.BASE_DIR`直下の`switchbot_device_states.json`を指す。
-* 根拠: [変数定義] (行番号: 34 / 抜粋: "`_STATE_FILE: str = os.path.join(config.BASE_DIR, "switchbot_device_states.json")`")
+* 根拠: [変数定義] (行番号: 33 / 抜粋: "`_STATE_FILE: str = os.path.join(config.BASE_DIR, "switchbot_device_states.json")`")
 
 
 
@@ -121,19 +121,19 @@
 ### `fetch_device_status_sync`
 
 * **役割**: 指定されたデバイスIDを用いて外部APIからステータスを取得し、電力、温湿度、電源状態（ON/OFF）を抽出・加工して辞書として返す。
-* 根拠: [関数定義] (行番号: 67-118 / 抜粋: "`def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[str, Any]]:`")
+* 根拠: [関数定義] (参照: fetch_device_status_sync / 抜粋: "`def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[str, Any]]:`")
 
 
 * **引数/リクエスト**: `device_id` (str: デバイスID), `device_type` (str: デバイスのタイプ)
-* 根拠: [関数の引数定義] (行番号: 67 / 抜粋: "`(device_id: str, device_type: str)`")
+* 根拠: [関数の引数定義] (行番号: 57 / 抜粋: "`(device_id: str, device_type: str)`")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` (抽出されたステータスデータ辞書。取得失敗やエラー時は `None`)
-* 根拠: [関数の戻り値型定義] (行番号: 67 / 抜粋: "`-> Optional[Dict[str, Any]]:`")
+* 根拠: [関数の戻り値型定義] (行番号: 57 / 抜粋: "`-> Optional[Dict[str, Any]]:`")
 
 
 * **副作用**: `sb_tool.get_device_status` を呼び出し外部APIと通信を行う。
-* 根拠: [外部モジュールの関数呼出] (行番号: 70 / 抜粋: "`status: Optional[Dict[str, Any]] = sb_tool.get_device_status(device_id)`")
+* 根拠: [外部モジュールの関数呼出] (行番号: 60 / 抜粋: "`status: Optional[Dict[str, Any]] = sb_tool.get_device_status(device_id)`")
 
 
 * **エラーハンドリング**: APIの `statusCode` が100以外の場合にエラーログを出力し `None` を返す。また、処理全体を `try-except` で囲み、予期せぬ例外発生時にエラーログを出力して `None` を返す。
@@ -144,30 +144,30 @@
 ### `log_device_state_change`
 
 * **役割**: 前回の状態と現在の状態を比較し、状態の変化がない場合やデジタルな変化（電源ON/OFF等）かアナログな変化（温湿度の微少変動等）かに応じて出力するログレベル（INFO / DEBUG）を制御する。
-* 根拠: [関数定義] (行番号: 120-161 / 抜粋: "`def log_device_state_change(...) -> None:`")
+* 根拠: [関数定義] (参照: log_device_state_change / 抜粋: "`def log_device_state_change(...) -> None:`")
 
 
 * **引数/リクエスト**: `dname` (str: デバイス名), `did` (str: デバイスID), `last_status` (Optional[Dict[str, Any]]: 前回の状態), `current_status` (Dict[str, Any]: 現在の状態)
-* 根拠: [関数の引数定義] (行番号: 121-124 / 抜粋: "`dname: str, did: str, last_status: Optional[Dict[str, Any]], current_status: Dict[str, Any]`")
+* 根拠: [関数の引数定義] (参照: log_device_state_change / 抜粋: "dname: str,", "did: str,", "last_status: Optional[Dict[str, Any]],")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [関数の戻り値型定義] (行番号: 125 / 抜粋: "`) -> None:`")
+* 根拠: [関数の戻り値型定義] (参照: log_device_state_change / 抜粋: "`) -> None:`")
 
 
 * **副作用**: なし（ロガーへの出力のみ）
-* 根拠: [関数内の処理] (行番号: 120-161 / 抜粋: "`logger.info(...)`, `logger.debug(...)`")
+* 根拠: [関数内の処理] (参照: log_device_state_change / 抜粋: "logger.info(", "logger.debug(")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [関数内の処理] (行番号: 120-161 / 抜粋: "関数内にtry-except文は存在しない")
+* 根拠: [関数内の処理] (行番号: 110-151)
 
 
 
 ### `main`
 
 * **役割**: 設定ファイルから監視対象デバイス一覧を取得し、非同期に各デバイスのステータス取得、状態変化のログ出力、キャッシュ更新、およびセンサーサービスへのデータ処理依頼をループで実行する監視のメイン処理。処理開始時に`_load_persisted_states`で前回プロセス実行時の状態をディスクから復元し、処理終了直前に`_save_persisted_states`で最新状態をディスクへ書き戻す。
-* 根拠: [関数定義] (行番号: 163-228 / 抜粋: "`async def main() -> None:`")
+* 根拠: [関数定義] (参照: main / 抜粋: "`async def main() -> None:`")
 
 
 * **引数/リクエスト**: なし
@@ -175,7 +175,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [関数の戻り値型定義] (行番号: 163 / 抜粋: "`-> None:`")
+* 根拠: [関数の戻り値型定義] (参照: main / 抜粋: "`-> None:`")
 
 
 * **副作用**: グローバル変数 `_last_device_states` の更新（起動時のクリアと復元、状態変化時の更新）、`_STATE_FILE`への状態の読み込み・書き込み（`_load_persisted_states`/`_save_persisted_states`経由。Issue #661 以降は`core/state_file.py`が`flock`・一時ファイル・`os.replace`を担う）、および `sensor_service` 内の非同期関数呼び出し。
@@ -183,7 +183,7 @@
 
 
 * **エラーハンドリング**: なし（例外処理は呼び出し元の `if __name__ == "__main__":` ブロック内で実施。ただし内部で呼び出す`_load_persisted_states`/`_save_persisted_states`はそれぞれ内部で例外を捕捉するため、永続化処理の失敗が`main`まで伝播することはない）
-* 根拠: [関数内の処理] (行番号: 163-228 / 抜粋: "関数内にtry-except文は存在しない")
+* 根拠: [関数内の処理] (行番号: 153-218)
 
 
 
@@ -292,7 +292,7 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `config.py` | `MONITOR_DEVICES` 内の辞書の構造（特に `notify_settings` などのキーの有無）、および `_STATE_FILE` の実際のパスを決定する `BASE_DIR` の値を把握することで、設定起因の不具合調査が可能になるため。 | 根拠: [`main`内の参照および`_STATE_FILE`の定義] (行番号: 34, 158, 193 / 抜粋: "`os.path.join(config.BASE_DIR, "switchbot_device_states.json")`", "`getattr(config, "MONITOR_DEVICES", [])`" および "`device.get("notify_settings", {})`") |
 | 高 | `services/sensor_service.py` | 取得した電力や温湿度データが最終的にどのようにDB保存・通知されているかを追跡し、データ損失時の調査範囲を明確にするため。 | 根拠: [`main`内の呼出] (行番号: 192, 198 / 抜粋: "`await sensor_service.process_power_data(...)`") |
-| 中 | `services/switchbot_service.py` | SwitchBot APIへのリクエストパラメータやレスポンスの生データ形式を把握し、新しいセンサー値に対応させる際の設計方針を決めるため。 | 根拠: [`fetch_device_status_sync`内の呼出] (行番号: 57 / 抜粋: "`sb_tool.get_device_status(device_id)`") |
+| 中 | `services/switchbot_service.py` | SwitchBot APIへのリクエストパラメータやレスポンスの生データ形式を把握し、新しいセンサー値に対応させる際の設計方針を決めるため。 | 根拠: [`fetch_device_status_sync`内の呼出] (行番号: 60 / 抜粋: "`sb_tool.get_device_status(device_id)`") |
 
 ## 8. 保守上の注意点
 

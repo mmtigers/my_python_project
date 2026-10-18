@@ -58,7 +58,7 @@
 ### `get_now_iso`
 
 * **役割**: "Asia/Tokyo" タイムゾーンの現在日時をISO 8601形式の文字列で返す。
-* 根拠: [get_now_iso] (行番号: 12〜13 / 抜粋: "return datetime.datetime.now(p...")
+* 根拠: [get_now_iso] (参照: get_now_iso / 抜粋: "return datetime.datetime.now(p...")
 
 
 * **引数/リクエスト**: なし
@@ -70,11 +70,11 @@
 
 
 * **副作用**: なし
-* 根拠: [get_now_iso] (行番号: 12〜13 / 抜粋: "return datetime.datetime.now(p...")
+* 根拠: [get_now_iso] (参照: get_now_iso / 抜粋: "return datetime.datetime.now(p...")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [get_now_iso] (行番号: 12〜13 / 抜粋: "return datetime.datetime.now(p...")
+* 根拠: [get_now_iso] (参照: get_now_iso / 抜粋: "return datetime.datetime.now(p...")
 
 
 
@@ -196,14 +196,14 @@
 ### `with_exponential_backoff`
 
 * **役割**: 関数実行時の例外を捕捉し、指数関数的バックオフを用いて無限にリトライ処理を行うデコレータを返す。
-* 根拠: [with_exponential_backoff] (行番号: 39〜51 / 抜粋: "while True: ... except Excepti...")
+* 根拠: [with_exponential_backoff] (参照: with_exponential_backoff / 抜粋: "while True: ... except Excepti...")
 
 
 * **引数/リクエスト**:
 * `base_delay` (`int`): 初回のリトライ待機時間（秒）。デフォルトは5。
 * `max_delay` (`int`): 最大待機時間の上限（秒）。デフォルトは300。
 * `alert_threshold` (`int`): エラーログのレベルをERRORに引き上げる基準となる連続失敗回数。デフォルトは5。
-* 根拠: [with_exponential_backoff] (行番号: 21〜24 / 抜粋: "base_delay: int = 5, ... alert...")
+* 根拠: [with_exponential_backoff] (参照: with_exponential_backoff / 抜粋: "base_delay: int = 5, ... alert...")
 
 
 * **戻り値/レスポンス**: `Callable`。対象の関数をラップしたデコレータ関数。
@@ -211,7 +211,7 @@
 
 
 * **副作用**: 失敗回数に応じて `logger.warning` または `logger.error` によりログが出力され、`time.sleep` でスレッドが一時停止する。
-* 根拠: [wrapper内部] (行番号: 44〜51 / 抜粋: "logger.error(...) ... time.sle...")
+* 根拠: [wrapper内部] (参照: with_exponential_backoff / 抜粋: "logger.error(...) ... time.sle...")
 
 
 * **エラーハンドリング**: デコレートされた関数で発生したすべての `Exception` をキャッチし、リトライを行う。
@@ -251,7 +251,7 @@
 ### `wait_for_storage_warmup`
 
 * **役割**: 対象のファイルまたはディレクトリが存在し、読み書きアクセスが可能になるまで指数関数的バックオフを用いて待機する。
-* 根拠: [wait_for_storage_warmup] (行番号: 79〜84 / 抜粋: "if check_target.exists() and o...")
+* 根拠: [wait_for_storage_warmup] (参照: wait_for_storage_warmup / 抜粋: "if check_target.exists() and o...")
 
 
 * **引数/リクエスト**:
@@ -259,7 +259,7 @@
 * `max_retries` (`int`): 最大リトライ回数。デフォルトは5。
 * `base_delay` (`float`): 初回の待機時間（秒）。デフォルトは1.0。
 * `max_delay` (`float`): 最大の待機時間（秒）。デフォルトは16.0。
-* 根拠: [wait_for_storage_warmup] (行番号: 56〜60 / 抜粋: "target_path: Union[str, Path],...")
+* 根拠: [wait_for_storage_warmup] (参照: wait_for_storage_warmup / 抜粋: "target_path: Union[str, Path],...")
 
 
 * **戻り値/レスポンス**: `bool`。指定回数内にアクセス可能となった場合は `True`、不可の場合は `False`。
@@ -267,11 +267,11 @@
 
 
 * **副作用**: チェックプロセス中および失敗時に `logger.info`, `logger.debug`, `logger.error` でログが出力される。また `time.sleep` によりスレッドが一時停止する。
-* 根拠: [wait_for_storage_warmup] (行番号: 83〜93 / 抜粋: "logger.info(...) ... time.slee...")
+* 根拠: [wait_for_storage_warmup] (参照: wait_for_storage_warmup / 抜粋: "logger.info(...) ... time.slee...")
 
 
 * **エラーハンドリング**: 例外の捕捉は行われていない（`Path`の生成や`os.access`で発生する例外はそのままスローされる可能性がある）。パスが存在しない、あるいは権限がない場合はリトライを実施する。
-* 根拠: [wait_for_storage_warmup] (行番号: 79〜93 / 抜粋: "for attempt in range(max_retri...")
+* 根拠: [wait_for_storage_warmup] (参照: wait_for_storage_warmup / 抜粋: "for attempt in range(max_retri...")
 
 
 

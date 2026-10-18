@@ -51,7 +51,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` | モジュール内部で定義されている変数や初期化処理の内容が提供されていないため | `getattr(config, 'NVR_RECORD_DIR', ...)` (行番号: 198 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...)") |
+| `config` | モジュール内部で定義されている変数や初期化処理の内容が提供されていないため | `getattr(config, 'NVR_RECORD_DIR', ...)` (行番号: 203 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...)") |
 | `setup_logging` | ログ出力のフォーマット、出力先（ファイル/標準出力など）の仕様が提供されていないため | `logger = setup_logging(__name__)` (行番号: 37 / 抜粋: "logger = setup_logging(**name**)") |
 | `send_push` | 関数内部の処理、引数（`target`, `channel`など）に対する正確な挙動、エラーハンドリングの有無が提供されていないため | `send_push(...)` (行番号: 53 / 抜粋: "def _send_report(text: str) -> None:") |
 | `smart_timelapse_generator` の全インポート要素 | 各クラス(`MotionDetector`, `VideoBuilder`等)のメソッド、プロパティの仕様、各関数の詳細な処理内容、厳密な戻り値・引数の型定義が提供されていないため | `from monitors.smart_timelapse_generator import ...` (行番号: 24〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
@@ -148,14 +148,14 @@
 * `end_time_str: str = None`: フィルタリングの終了時刻
 
 
-* 根拠: [関数の引数定義] (行番号: 230 / 抜粋: "camera_name: str, target_date_str: str = None...")
+* 根拠: [関数の引数定義] (行番号: 235 / 抜粋: "camera_name: str, target_date_str: str = None...")
 
 
 
 
 * **戻り値/レスポンス**: `None`
 
-* 根拠: [関数の戻り値型ヒント] (行番号: 230 / 抜粋: "-> None:")
+* 根拠: [関数の戻り値型ヒント] (行番号: 235 / 抜粋: "def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_time_str: str = None, end_time_str: str = None) -> None:")
 
 
 
@@ -329,7 +329,7 @@ graph TD
 * 録画ファイルの検索先ディレクトリは `getattr(config, 'NVR_RECORD_DIR', "/mnt/nas/home_system/nvr_recordings")` により `config.NVR_RECORD_DIR` を優先的に参照し、未定義時のみ同文字列にフォールバックする（以前はこのパスがハードコード直書きされておりバグの原因になっていたが、修正済み）。
 
 
-* 根拠: [NASディレクトリ指定] (行番号: 198 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...")
+* 根拠: [NASディレクトリ指定] (行番号: 203 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...")
 
 
 

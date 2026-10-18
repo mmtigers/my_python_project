@@ -122,7 +122,7 @@
 
 
 * **副作用**: なし。
-* 根拠: 外部リソース変更なし (行番号: 145-200 / 抜粋: "return { "Timestamp": datetime")
+* 根拠: 外部リソース変更なし (参照: monitor_camera / 抜粋: "return {\n        \"Timestamp\": datetime.datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\"),")
 
 
 * **エラーハンドリング**: 引数の辞書に "ip" キーがない場合、警告ログを出力しNoneを返して終了する。

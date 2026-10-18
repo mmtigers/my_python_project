@@ -70,7 +70,7 @@
 * 根拠: 同上
 
 * **役割**: SwitchBot APIを利用してWebhook URLの現在設定を取得し、必要に応じて古い設定の削除と新しいURLの登録を行う。**（Issue #318で追加）** `config.SWITCHBOT_WEBHOOK_TOKEN`が設定されている場合、登録・照会に用いる`target_url`に`?token=...`を付与する(`webhook_router.py`側のトークン検証と一致させるため)。
-* 根拠: [関数定義およびDocstring] (行番号: 27〜36 / 抜粋: "SwitchBotのWebhook URLを更新"), `if config.SWITCHBOT_WEBHOOK_TOKEN:\n        ...\n        target_url = f"{target_url}?token={config.SWITCHBOT_WEBHOOK_TOKEN}"` (行番号: 38〜42)
+* 根拠: [関数定義およびDocstring] (参照: update_switchbot_webhook / 抜粋: "\"\"\"SwitchBotのWebhook URLを更新"), `if config.SWITCHBOT_WEBHOOK_TOKEN:\n        ...\n        target_url = f"{target_url}?token={config.SWITCHBOT_WEBHOOK_TOKEN}"` (行番号: 38〜42)
 
 
 * **引数/リクエスト**: `base_url` (型: 不明 / 環境変数から取得されたベースURLの文字列)
@@ -79,7 +79,7 @@
 
 * **戻り値/レスポンス**: `Optional[bool]` — `True`: 新しいURLの登録に成功した(変更あり)。`False`: 既に設定済み、またはURL照会自体に失敗し何も変更していない。`None`: 旧URLを削除した後、新URLの登録に失敗した(Issue #166。SwitchBotのWebhookが未設定のまま残っている危険な状態を、「既に設定済みで変更不要」の`False`と区別するために導入された)。
 * 根拠: [return文] (行番号: 48, 52, 74, 84 / 抜粋: "return False", "return True", "return None")
-* 根拠: [Docstringの戻り値説明] (行番号: 30〜36 / 抜粋: "True  - 新しいURLの登録に成功した(変更あり)")
+* 根拠: [Docstringの戻り値説明] (参照: update_switchbot_webhook / 抜粋: "True  - 新しいURLの登録に成功した(変更あり)")
 
 
 * **副作用**:
@@ -111,7 +111,7 @@
 * **副作用**:
 * 外部API呼び出し: `https://api.line.me/v2/bot/channel/webhook/endpoint` へのGETリクエスト
 * 外部API呼び出し: `https://api.line.me/v2/bot/channel/webhook/endpoint` へのPUTリクエスト
-* 根拠: [requestsメソッド] (行番号: 86, 91 / 抜粋: "requests.get(...)", "requests.put(...)")
+* 根拠: [requestsメソッド] (行番号: 119, 124 / 抜粋: "requests.get(...)", "requests.put(...)")
 
 
 * **エラーハンドリング**: 例外(`Exception`)発生時にエラーログを出力し、`False`を返す。
@@ -134,7 +134,7 @@
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: [return文の不在] (行番号: 120〜148 / 抜粋: "return文なし")
+* 根拠: [return文の不在] (行番号: 135〜164)
 
 
 * **副作用**:
@@ -221,7 +221,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `common.py` | ロギングの設定内容や、更新完了時の通知（Discordへの送信仕様など）の具体的な挙動を把握するため。 | `import common` (行番号: 18 / 抜粋: "logger = setup_logging...") |
+| 高 | `common.py` | ロギングの設定内容や、更新完了時の通知（Discordへの送信仕様など）の具体的な挙動を把握するため。 | `import common` (行番号: 27 / 抜粋: "logger = setup_logging...") |
 | 高 | `services/switchbot_service.py` | SwitchBot API通信に必須となる認証ヘッダーの生成仕様（暗号化やトークン仕様）を確認するため。 | `from services import switchbot_service as sb_tool` (参照: update_switchbot_webhook / 抜粋: "sb_tool.create_switchbot_auth_headers()") |
 | 中 | `config.py` | LINE関連のトークンやユーザーIDがどのように管理・取得されているか（環境変数かファイルか）を特定するため。 | `import config` (参照: update_line_webhook / 抜粋: "config.LINE_CHANNEL_ACCESS_TOKEN") |
 

@@ -44,8 +44,8 @@
 | --- | --- | --- |
 | `config` 内の各定数 | `SQLITE_TABLE_SWITCHBOT_LOGS`、`SQLITE_TABLE_POWER_USAGE` の具体的な値や型が提供されていないため。 | `[config.SQLITE_TABLE_SWITCHBOT_LOGS]` (行番号: 225 / 抜粋: "config.SQLITE_TABLE_SWITCHBOT_LOGS,") |
 | `core.database.get_db_cursor` | DB接続の具体的な実装、扱うデータベースエンジン、コンテキストマネージャが返すカーソルオブジェクトの仕様が不明であるため。 | `[core.database.get_db_cursor]` (行番号: 262 / 抜粋: "with get_db_cursor() as") |
-| `core.database.save_log_async` | テーブル名、カラムリスト、値を渡した際の内部でのクエリ生成ロジックやエラーハンドリングの挙動が不明であるため。 | `[save_log_async]` (行番号: 142 / 抜粋: "await save_log_async(") |
-| `services.notification_service.send_push` | メッセージ形式の仕様、引数として渡す `"discord"` や `"notify"` の処理分岐、外部API連携の実装が不明であるため。 | `[send_push]` (行番号: 64 / 抜粋: "send_push,") |
+| `core.database.save_log_async` | テーブル名、カラムリスト、値を渡した際の内部でのクエリ生成ロジックやエラーハンドリングの挙動が不明であるため。 | `[save_log_async]` (参照: process_meter_data / 抜粋: "await save_log_async(") |
+| `services.notification_service.send_push` | メッセージ形式の仕様、引数として渡す `"discord"` や `"notify"` の処理分岐、外部API連携の実装が不明であるため。 | `[send_push]` (参照: send_inactive_notification / 抜粋: "send_push,") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -73,7 +73,7 @@
 ### `is_duplicate_webhook`
 
 * **役割**: インメモリキャッシュ（`EVENT_CACHE`）を参照し、直近イベントから `DEDUPE_TTL_SECONDS`（3秒）以内で同一ステータスの場合は重複と判定しキャッシュを更新する。**（Issue #621で修正）** 判定の前に`_touch_mac(mac)`を呼び、サイズ上限つきキャッシュのLRU基準（最終アクセス時刻）を更新する。
-* 根拠: `[is_duplicate_webhook]` (行番号: 82 / 抜粋: "last_event['state'] == state a")、`_touch_mac`呼び出し (行番号: 82 / 抜粋: "_touch_mac(mac)  # Issue #621: サイズ上限つきキャッシュのLRU基準を更新")
+* 根拠: `[is_duplicate_webhook]` (参照: is_duplicate_webhook / 抜粋: "if last_event[\"state\"] == state and time_passed <= DEDUPE_TTL_SECONDS:")、`_touch_mac`呼び出し (行番号: 82 / 抜粋: "_touch_mac(mac)  # Issue #621: サイズ上限つきキャッシュのLRU基準を更新")
 
 
 * **引数/リクエスト**: `mac: str`, `state: str`, `event_timestamp: float`
@@ -96,7 +96,7 @@
 ### `send_inactive_notification`
 
 * **（Issue #534 で修正）** `asyncio.sleep(timeout)` 明けに、通知送信(`asyncio.to_thread(send_push, ...)`)より前に `IS_ACTIVE[mac] = False` を設定する。以前は `finally` でのみ落としていたため、送信中(キャンセル不能)に次の検知が届くと `process_sensor_data` は「まだアクティブ」とみなして再開通知を出さず、ユーザーには「止まりました」だけが残っていた。`finally` 側の後片付け(#387 の superseded 判定)はそのまま残る。
-* 根拠: (行番号: 74 / 抜粋: "IS_ACTIVE[mac] = False" の直後に "try:\n        await asyncio.to_thread(")
+* 根拠: (参照: send_inactive_notification / 抜粋: "IS_ACTIVE[mac] = False\n    try:\n        await asyncio.to_thread(")
 
 * **役割**: 指定された時間待機後、動きが止まった旨の通知を送信し、タスク状態をクリアする。
 * 根拠: `[send_inactive_notification]` (行番号: 114 / 抜粋: "msg: str = f"💤【{location}・見守")

@@ -23,13 +23,12 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `asyncio` | 標準ライブラリ | 非同期処理の実行 | `import asyncio` (行番号: 2 / 抜粋: "import asyncio") |
 | `typing` | 標準ライブラリ | 型ヒントの提供。`Union`（元々使用）に加え`List`もIssue #377で`split_text_into_line_messages`の型ヒントに使用され始めた | `from typing import List, Union` (行番号: 2 / 抜粋: "from typing import List, Union") |
 | `linebot.v3.messaging` | 外部ライブラリ | LINEメッセージモデルの構築。使用されているのは`TextMessage`のみ | `from linebot.v3.messaging import TextMessage` (行番号: 5 / 抜粋: "from linebot.v3.messaging import TextMessage") |
 | `config` | 外部モジュール | 設定値や定数の取得 | `import config` (行番号: 7 / 抜粋: "import config") |
-| `core.logger` | 外部モジュール | ロガーの設定 | `from core.logger import...` (行番号: 9 / 抜粋: "from core.logger import setup...") |
+| `core.logger` | 外部モジュール | ロガーの設定 | `from core.logger import...` (行番号: 8 / 抜粋: "from core.logger import setup...") |
 | `core.utils` | 外部モジュール | 時刻や日付文字列の取得。`get_meal_time_category_from_now`（Issue #583で追加）は`log_food_record`が`food_records.meal_time_category`の算出に使用する | `from core.utils import get_now_iso, get_today_date_str, get_meal_time_category_from_now` (行番号: 10) |
-| `core.database` | 外部モジュール | 非同期でのログ保存 | `from core.database import...` (行番号: 11 / 抜粋: "from core.database import sav...") |
+| `core.database` | 外部モジュール | 非同期でのログ保存 | `from core.database import...` (行番号: 10 / 抜粋: "from core.database import sav...") |
 
 **（Issue #410で削除）** 以前このテーブルにあった`sqlite3`（標準ライブラリ）・`datetime`（標準ライブラリ）・`common`（外部モジュール）・`linebot.v3.messaging`の`QuickReply`/`QuickReplyItem`/`MessageAction`（未使用インポートとして記載）・`typing`の`Tuple`/`Optional`/`Dict`/`Any`（未使用インポートとして記載、ただし実際には元々インポートされていなかった旧版の誤記）は、`log_daily_action`/`log_ohayo`/`get_daily_health_summary_text`の削除に伴い（`sqlite3`/`datetime`/`common`は）実際に未使用となったため削除、または（`QuickReply`系・`typing`系は）元々インポートされていなかった旧版の記載誤りだった。
 
@@ -39,7 +38,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config`内の定数 | `FAMILY_SETTINGS`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD`の具体的な値や構造が不明。 | `TARGET_MEMBERS = config.FAMIL...` (行番号: 16 / 抜粋: "TARGET_MEMBERS = config.FAMIL...") |
+| `config`内の定数 | `FAMILY_SETTINGS`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD`の具体的な値や構造が不明。 | `TARGET_MEMBERS = config.FAMIL...` (行番号: 15 / 抜粋: "TARGET_MEMBERS = config.FAMIL...") |
 | `core.database.save_log_async` | 非同期DB書き込みの実装詳細や対象スキーマ構造が不明。本ファイルは戻り値が真偽値（失敗時`False`、例外は送出しないFail-Soft）であることのみを前提とする（Issue #373）。 | `save_ok = await save_log_async(` (行番号: 111 / 抜粋: "save_ok = await save_log_async(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）

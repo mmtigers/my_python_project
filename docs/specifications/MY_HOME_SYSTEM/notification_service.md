@@ -24,10 +24,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `json` | 標準 | 未使用 | 根拠: [インポート宣言] (行番号: 2 / 抜粋: "import json") |
-| `logging` | 標準 | 未使用 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "import logging") |
-| `requests` | 外部 | HTTPリクエスト送信 | 根拠: [インポート宣言] (行番号: 4 / 抜粋: "import requests") |
-| `typing` | 標準 | 型ヒントの提供 | 根拠: [インポート宣言] (行番号: 5 / 抜粋: "from typing import List...") |
+| `typing` | 標準 | 型ヒントの提供 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "from typing import List...") |
 | `linebot.v3.messaging` | 外部 | LINE API v3のクライアント | 根拠: [インポート宣言] (行番号: 7〜16 / 抜粋: "from linebot.v3.messaging...")。**（Issue #未採番で修正）** `send_reply`削除に伴い、以前インポートしていた`ReplyMessageRequest`は未使用となったためインポート自体を削除済み。 |
 | `config` | 外部 | 設定値（トークンやURL）の取得 | 根拠: [インポート宣言] (行番号: 17 / 抜粋: "import config") |
 | `core.logger` | 外部 | ロガーのセットアップ | 根拠: [インポート宣言] (行番号: 19 / 抜粋: "from core.logger import setup_logging") |
@@ -37,7 +34,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config`の各変数 | トークン(`LINE_CHANNEL_ACCESS_TOKEN`)やURL(`DISCORD_WEBHOOK_ERROR`等)の具体的な値が不明。 | 根拠: [変数参照] (行番号: 27, 33等 / 抜粋: "config.LINE_CHANNEL_ACCESS_TOKEN") |
-| `setup_logging`関数 | ロガーの具体的な設定（出力先、ログレベル、フォーマット）が不明。 | 根拠: [関数呼び出し] (行番号: 23 / 抜粋: "logger = setup_logging(...)") |
+| `setup_logging`関数 | ロガーの具体的な設定（出力先、ログレベル、フォーマット）が不明。 | 根拠: [関数呼び出し] (行番号: 21 / 抜粋: "logger = setup_logging(...)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -101,11 +98,11 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 
 * **戻り値/レスポンス**: `bool` (HTTPステータスコードが200または204の場合にTrue、それ以外はFalse)
-* 根拠: [戻り値] (行番号: 75, 66, 68 / 抜粋: "if res.status_code not in [200, 204]:", "return False", "return True")
+* 根拠: [戻り値] (行番号: 75, 83, 85 / 抜粋: "if res.status_code not in [200, 204]:", "return False", "return True")
 
 
-* **副作用**: 外部のDiscord Webhook URLへのHTTP POSTリクエストの実行（画像添付時は`files`パラメータで`filename`を指定してアップロード、タイムアウト60秒。テキストのみの場合はJSON送信、タイムアウト10秒）。
-* 根拠: [外部通信] (行番号: 58〜59, 61 / 抜粋: "files = {'file': (filename, image_data)}", "res = requests.post(url, files=files...")
+* **副作用**: 外部のDiscord Webhook URLへのHTTP POSTリクエストの実行（**#661**: 送信と429/5xxの限定リトライは`_post_discord_with_retry`経由。画像添付時は`files`パラメータで`filename`を指定してアップロード、タイムアウト60秒。テキストのみの場合はJSON送信、タイムアウト10秒）。
+* 根拠: [外部通信] (行番号: 69, 70 / 抜粋: "files = {'file': (filename, image_data)}", "res = _post_discord_with_retry(url, files=files, data={'content': chunk}, timeout=60)")
 
 
 * **エラーハンドリング**: HTTPステータスコードが200/204以外の場合、レスポンス内容を含めたエラーログを出力してFalseを返す。リクエスト時に例外が発生した場合も、エラーログを出力してFalseを返す。URLが設定されていない場合は早期リターンでFalseを返す。**（Issue #742 / AUDIT-013 で変更）** これら2つの `logger.error` には `extra={"skip_discord": True}` を付けている。通知システム自身の失敗をここから再び Discord へ送ろうとしないための opt-out で、以前は `core/logger.py` 側が「メッセージに Discord という語が含まれるか」で推測的に抑制していた（その推測が広すぎ、無関係な実障害まで無音にしていた）。**この関数にエラーログを足すときも同じフラグを付けること。**
@@ -145,7 +142,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 
 * **副作用**: LINE APIへのHTTP POSTリクエスト実行。
-* 根拠: [外部通信] (行番号: 102〜109 / 抜粋: "line_bot_api.push_message(...)")
+* 根拠: [外部通信] (参照: _send_line_push / 抜粋: "line_bot_api.push_message(...)")
 
 
 * **エラーハンドリング**: 送信対象のメッセージがない場合は警告ログを出力しFalse。送信処理中に例外が発生した場合はエラーログを出力しFalseを返す。

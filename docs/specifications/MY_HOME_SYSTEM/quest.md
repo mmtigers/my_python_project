@@ -28,7 +28,7 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `BaseModel` | クラス | データモデル定義の親クラスとして使用 | `from pydantic import BaseModel` (行番号: 4 / 抜粋: "from pydantic import BaseModel") |
-| `Optional` | 型ヒント | 任意（null許容）フィールドの型定義に使用 | `from typing import Optional` (行番号: 3 / 抜粋: "from typing import Optional") |
+| `Literal`, `Optional` | 型ヒント | 任意（null許容）フィールドの型定義に使用 | `from typing import Literal, Optional` (行番号: 5 / 抜粋: "from typing import Literal, Optional") |
 
 ### ブラックボックスとなる外部要素
 
@@ -100,8 +100,8 @@
 * 根拠: クラス名と継承元 (行番号: 65 / 抜粋: "class MasterReward(BaseModel):")
 
 
-* **引数/リクエスト (フィールド)**: `id` (int), `title` (str), `category` (str), `cost_gold` (int), `icon_key` (str), `desc` (Optional[str], 初期値: None), `target` (str, 初期値: "all")
-* 根拠: フィールド定義 (行番号: 38〜44 / 抜粋: "target: str = "all"" など)
+* **引数/リクエスト (フィールド)**: `id` (int), `title` (str), `category` (str), `cost_gold` (int), `icon_key` (str), `desc` (Optional[str], 初期値: None), `target` (Optional[str], 初期値: "all")
+* 根拠: フィールド定義 (参照: MasterReward / 抜粋: "target: Optional[str] = \"all\"")
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -235,7 +235,7 @@
 
 
 * **エラーハンドリング**: 明示的な例外処理の記述はないが、`admin_id`/`target_user_id` が空文字または65文字以上の場合は Pydantic が `ValidationError` を送出する（FastAPIでは422）。クラス自体には `admin_id` が管理者（`role_adult`）かどうかを検証するロジックはなく、コメントによればその検証はサービス層(`UserService.reset_user_data`)の責務である。
-* 根拠: フィールド定義 (行番号: 97〜98 / 抜粋: "admin_id: str = Field(min_length=1, max_length=64)", "target_user_id: str = Field(min_length=1, max_length=64)")、コメント (行番号: 93〜94 / 抜粋: "admin_idはApproveAction.approver_id等と\n# 同様、サービス層(UserService.reset_user_data)がquest_users.role='role_adult'かどうかを\n# 検証する。")
+* 根拠: フィールド定義 (行番号: 97〜98 / 抜粋: "admin_id: str = Field(min_length=1, max_length=64)", "target_user_id: str = Field(min_length=1, max_length=64)")、コメント (行番号: 96 / 抜粋: "admin_idはApproveAction.approver_id等と\n# 同様、サービス層(UserService.reset_user_data)がquest_users.role='role_adult'かどうかを\n# 検証する。")
 
 
 

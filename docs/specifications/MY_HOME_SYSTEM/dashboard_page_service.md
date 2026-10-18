@@ -30,7 +30,7 @@
 | `json` | 標準 | 自動更新スクリプトへのURL埋め込み(`json.dumps`) | 根拠: [インポート宣言] (行番号: 17 / 抜粋: "import json") |
 | `os` | 標準 | パス操作(`os.path.join`/`os.path.realpath`等) | 根拠: [インポート宣言] (行番号: 18 / 抜粋: "import os") |
 | `re` | 標準 | **(不具合修正で追加)** スナップショットのファイル名末尾から撮影日時を抽出する正規表現(`_SNAPSHOT_TIMESTAMP_RE`) | 根拠: [インポート宣言] (行番号: 19 / 抜粋: "import re") |
-| `datetime.datetime` | 標準 | 型ヒント・時刻計算・ファイル名からの日時解析(`datetime.strptime`) | 根拠: [インポート宣言] (行番号: 20 / 抜粋: "from datetime import datetime") |
+| `datetime.date`, `datetime.datetime`, `datetime.timedelta` | 標準 | 型ヒント・時刻計算・ファイル名からの日時解析(`datetime.strptime`) | 根拠: [インポート宣言] (行番号: 21 / 抜粋: "from datetime import date, datetime, timedelta") |
 | `typing.Any` | 標準 | 型ヒント | 根拠: [インポート宣言] (行番号: 22 / 抜粋: "from typing import Any") |
 | `config` | 外部 | `ASSETS_DIR`/`CAMERAS`の取得 | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "import config") |
 | `pandas` | 外部 | DataFrame操作 | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "import pandas as pd") |
@@ -264,8 +264,8 @@
 
 ### `_list_snapshot_files`
 
-* **役割**: `config.ASSETS_DIR/snapshots`配下のJPEGファイル名一覧を新しい順(ファイル名の降順ソート)に最大`_SNAPSHOT_GLOB_LIMIT`(20)件返す。`config.ASSETS_DIR`はNAS上のパスで遅延解決のためNAS障害に触れうるが、例外を握りつぶして空リストを返す。
-* 根拠: [関数定義] (行番号: 843〜855 / 抜粋: "def _list_snapshot_files() -> list[str]:")、[例外処理] (行番号: 314〜315 / 抜粋: "except Exception:\n        return []")
+* **役割**: `config.ASSETS_DIR/snapshots`配下のJPEGファイル名一覧を新しい順(ファイル名の降順ソート)に最大`_SNAPSHOT_GLOB_LIMIT`(20)件返す。`config.ASSETS_DIR`はNAS上のパスで遅延解決のためNAS障害に触れうるが、`OSError`を握りつぶして空リストを返す。
+* 根拠: [関数定義] (行番号: 843〜855 / 抜粋: "def _list_snapshot_files() -> list[str]:")、[例外処理] (参照: _list_snapshot_files / 抜粋: "except OSError:\n        return []")
 
 
 * **引数/リクエスト**: なし

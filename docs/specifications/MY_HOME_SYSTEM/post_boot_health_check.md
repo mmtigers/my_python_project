@@ -58,7 +58,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `core.logger.setup_logging` | 生成されるロガーの出力先・フォーマット・ログレベルの詳細が不明。 | `logger = core.logger.setup_logging("health_check")` (行番号: 29 / 抜粋: "logger = setup_logging("health_check")") |
-| `services.notification_service.send_push` | 通知の実際の送信方式や失敗時の挙動（例外送出の有無等）が不明。 | `services.notification_service.send_push(` (行番号: 249 / 抜粋: "send_push(") |
+| `services.notification_service.send_push` | 通知の実際の送信方式や失敗時の挙動（例外送出の有無等）が不明。 | `services.notification_service.send_push(` (参照: PostBootHealthCheck.check_peripherals / 抜粋: "send_push(") |
 | `config` の各設定値 | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC`, `ENABLE_BLUETOOTH` の実際の値・存在有無が不明（`LOG_DIR`等は `getattr` によるデフォルト値付きアクセス。`NATURE_REMO_ACCESS_TOKEN`は直接参照）。 | `getattr(config, 'LOG_DIR', os.path.join(BASE_DIR, 'logs'))` (行番号: 69 / 抜粋: "log_dir = getattr(config, 'LOG_DIR', os.path.join(BASE_DIR, 'logs'))") |
 | `vcgencmd`, `ping`, `tail`, `aplay`, `bluetoothctl` コマンド | 実行環境（Raspberry Pi等）にこれらのコマンドが存在する前提のコードだが、コマンドの実装自体は本ファイル外。いずれの呼び出しにも`timeout`引数（`bluetoothctl`のみ`stdin=subprocess.DEVNULL`も併用）が付与され、応答なく無限待機する事態を防いでいる。 | `subprocess.check_output(["vcgencmd", "measure_temp"], timeout=10)` (行番号: 97 / 抜粋: "res = subprocess.check_output(["vcgencmd", "measure_temp"], timeout=10).decode("utf-8")") |
 | SwitchBot / NatureRemo API | ステータスコードによる疎通確認と認証ヘッダーの送信は行うが、レスポンス本文の内容までは見ていないため、応答スキーマの詳細は不明。 | `("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers())` (行番号: 146 / 抜粋: "("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers()),") |
@@ -409,7 +409,7 @@
 
 
 * **エラーハンドリング**: NAS書き込みテストで `IOError`, `PermissionError` を捕捉し `STATUS_ERR` を設定・エラーログ出力・即時Discord通知を行う。カメラ設定が空の場合は `STATUS_WARN` とする。**（修正済み）** サウンドカード検出・Bluetooth接続確認処理は個別に `except Exception:` で保護されている（以前はいずれも無条件の bare `except:` だったが `except Exception:` に修正され、`SystemExit`/`KeyboardInterrupt`等を誤って捕捉しなくなった）。
-* 根拠: `except (IOError, PermissionError) as e:` (行番号: 244 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 275〜277 / 抜粋: "else:"), `except Exception: pass` (行番号: 323 / 抜粋: "except Exception: pass"), `except Exception:` (参照: PostBootHealthCheck.check_peripherals / 抜粋: "except Exception:")
+* 根拠: `except (IOError, PermissionError) as e:` (行番号: 275 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 275〜277 / 抜粋: "else:"), `except Exception: pass` (行番号: 323 / 抜粋: "except Exception: pass"), `except Exception:` (参照: PostBootHealthCheck.check_peripherals / 抜粋: "except Exception:")
 
 
 
@@ -509,23 +509,23 @@
 ### モジュールレベル実行部（`if __name__ == "__main__":`）
 
 * **役割**: スクリプトを直接実行した場合に `PostBootHealthCheck` をインスタンス化し `run()` を呼び出す。
-* 根拠: `if __name__ == "__main__":\n    checker = PostBootHealthCheck()\n    checker.run()` (行番号: 407〜409 / 抜粋: "if __name__ == "__main__":")
+* 根拠: `if __name__ == "__main__":\n    checker = PostBootHealthCheck()\n    checker.run()` (行番号: 533 / 抜粋: "if __name__ == "__main__":")
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 407〜409 / 抜粋: "checker = PostBootHealthCheck()")
+* 根拠: (行番号: 534 / 抜粋: "checker = PostBootHealthCheck()")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 407〜409 / 抜粋: "checker.run()")
+* 根拠: (行番号: 535 / 抜粋: "checker.run()")
 
 
 * **副作用**: `PostBootHealthCheck` インスタンスの生成、`run()` を通じた全チェックの実行とレポート送信。
-* 根拠: `checker = PostBootHealthCheck()\n    checker.run()` (行番号: 408〜409 / 抜粋: "checker.run()")
+* 根拠: `checker = PostBootHealthCheck()\n    checker.run()` (行番号: 535 / 抜粋: "checker.run()")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 407〜409 / 抜粋: "if __name__ == "__main__":")
+* 根拠: (行番号: 533 / 抜粋: "if __name__ == "__main__":")
 
 
 
@@ -640,7 +640,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `common.py` | `setup_logging` と `send_push` の実装が本ファイルの全チェック結果通知・NAS権限エラー即時通知の挙動を左右するため。 | `import common` (行番号: 20 / 抜粋: "import common") |
+| 高 | `core/logger.py`・`services/notification_service.py` | `setup_logging` と `send_push` の実装が本ファイルの全チェック結果通知・NAS権限エラー即時通知の挙動を左右するため。 | `from core.logger import setup_logging`・`from services.notification_service import send_push` (行番号: 19, 20 / 抜粋: "from core.logger import setup_logging", "from services.notification_service import send_push") |
 | 高 | `config.py` | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC`, `ENABLE_BLUETOOTH` の実値を把握し、どの環境を対象としたヘルスチェックかを確認するため。 | `getattr(config, "SQLITE_DB_PATH", "home_system.db")` (行番号: 161 / 抜粋: "db_path = getattr(config, "SQLITE_DB_PATH", "home_system.db")") |
 | 中 | `home_system.db`（対象DBファイル） | `PRAGMA quick_check` の対象となるDBのスキーマ・データ構造を把握し、健全性チェックの意味を正確に理解するため。 | `with get_ro_connection(db_path=db_path) as conn:` (行番号: 196 / 抜粋: "with get_ro_connection(db_path=db_path) as conn:") |
 

@@ -26,7 +26,7 @@
 | --- | --- | --- | --- |
 | `math` | 標準ライブラリ | 経験値計算における累乗と切り捨て処理 | `import math` (行番号: 1 / 抜粋: "import math") |
 | `random` | 標準ライブラリ | ドロップ報酬のメダル獲得確率判定 | `import random` (行番号: 2 / 抜粋: "import random") |
-| `Tuple`, `Dict`, `Any`, `Optional` | 標準ライブラリ(型ヒント) | 関数の引数・戻り値の型定義。ただし `Optional` はファイル内で一度も使用されていない（未使用インポート） | `from typing import Tuple, Dict, Any, Optional` (行番号: 3 / 抜粋: "from typing import Tuple, Dict, Any, Optional") |
+| `Tuple`, `Dict`, `Any` | 標準ライブラリ(型ヒント) | 関数の引数・戻り値の型定義(未使用だった `Optional` の import は削除された) | `from typing import Tuple, Dict, Any` (行番号: 3 / 抜粋: "from typing import Tuple, Dict, Any") |
 
 ### ブラックボックスとなる外部要素
 

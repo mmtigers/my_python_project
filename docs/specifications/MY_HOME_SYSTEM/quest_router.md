@@ -73,7 +73,7 @@
 
 
 * **戻り値/レスポンス**: `SyncResponse`（`game_system.sync_master_data_as_admin()` の戻り値）
-* 根拠: レスポンス型指定 (行番号: 36 / 抜粋: "response_model=SyncResponse")
+* 根拠: レスポンス型指定 (参照: sync_master_data / 抜粋: "response_model=SyncResponse")
 
 
 * **副作用**: 不明（外部関数 `game_system.sync_master_data_as_admin()` に依存。認可通過後に `sync_master_data()` と同じ同期が走る）
@@ -115,7 +115,7 @@
 ### `complete_quest`
 
 * **役割**: クエストを完了させるエンドポイント。
-* 根拠: ルーティング定義 (行番号: 48-50 / 抜粋: "@router.post("/complete")")
+* 根拠: ルーティング定義 (参照: complete_quest / 抜粋: "@router.post(\"/complete\"")
 
 
 * **引数/リクエスト**: `QuestAction` (フィールドとして `user_id`, `quest_id` を持つ)
@@ -123,7 +123,7 @@
 
 
 * **戻り値/レスポンス**: `CompleteResponse`
-* 根拠: レスポンス型指定 (行番号: 48 / 抜粋: "response_model=CompleteResponse")
+* 根拠: レスポンス型指定 (参照: complete_quest / 抜粋: "response_model=CompleteResponse")
 
 
 * **副作用**: 不明（外部関数 `quest_service.process_complete_quest()` に依存）
@@ -138,7 +138,7 @@
 ### `approve_quest`
 
 * **役割**: 完了したクエストを承認するエンドポイント。
-* 根拠: ルーティング定義 (行番号: 52-54 / 抜粋: "@router.post("/approve")")
+* 根拠: ルーティング定義 (参照: approve_quest / 抜粋: "@router.post(\"/approve\"")
 
 
 * **引数/リクエスト**: `ApproveAction` (フィールドとして `approver_id`, `history_id` を持つ)
@@ -146,7 +146,7 @@
 
 
 * **戻り値/レスポンス**: `CompleteResponse`
-* 根拠: レスポンス型指定 (行番号: 52 / 抜粋: "response_model=CompleteResponse")
+* 根拠: レスポンス型指定 (参照: approve_quest / 抜粋: "response_model=CompleteResponse")
 
 
 * **副作用**: 不明（外部関数 `approval_service.process_approve_quest()` に依存）
@@ -161,7 +161,7 @@
 ### `reject_quest`
 
 * **役割**: 完了したクエストを却下するエンドポイント。
-* 根拠: ルーティング定義 (行番号: 56-58 / 抜粋: "@router.post("/reject")")
+* 根拠: ルーティング定義 (参照: reject_quest / 抜粋: "@router.post(\"/reject\"")
 
 
 * **引数/リクエスト**: `ApproveAction` (フィールドとして `approver_id`, `history_id` を持つ)
@@ -169,7 +169,7 @@
 
 
 * **戻り値/レスポンス**: `CancelResponse`
-* 根拠: レスポンス型指定 (行番号: 56 / 抜粋: "response_model=CancelResponse")
+* 根拠: レスポンス型指定 (参照: reject_quest / 抜粋: "response_model=CancelResponse")
 
 
 * **副作用**: 不明（外部関数 `approval_service.process_reject_quest()` に依存）
@@ -184,7 +184,7 @@
 ### `cancel_quest`
 
 * **役割**: クエスト履歴をキャンセルするエンドポイント。
-* 根拠: ルーティング定義 (行番号: 60-62 / 抜粋: "@router.post("/quest/cancel")")
+* 根拠: ルーティング定義 (参照: cancel_quest / 抜粋: "@router.post(\"/quest/cancel\"")
 
 
 * **引数/リクエスト**: `HistoryAction` (フィールドとして `user_id`, `history_id` を持つ)
@@ -192,7 +192,7 @@
 
 
 * **戻り値/レスポンス**: `CancelResponse`
-* 根拠: レスポンス型指定 (行番号: 60 / 抜粋: "response_model=CancelResponse")
+* 根拠: レスポンス型指定 (参照: cancel_quest / 抜粋: "response_model=CancelResponse")
 
 
 * **副作用**: 不明（外部関数 `approval_service.process_cancel_quest()` に依存）
@@ -207,7 +207,7 @@
 ### `purchase_reward`
 
 * **役割**: 報酬を購入するエンドポイント。
-* 根拠: ルーティング定義 (行番号: 64-66 / 抜粋: "@router.post("/reward/purchase")")
+* 根拠: ルーティング定義 (参照: purchase_reward / 抜粋: "@router.post(\"/reward/purchase\"")
 
 
 * **引数/リクエスト**: `RewardAction` (フィールドとして `user_id`, `reward_id` を持つ)
@@ -230,7 +230,7 @@
 ### `get_family_chronicle`
 
 * **役割**: ファミリーのクロニクル（年代記・履歴情報）を取得するエンドポイント。
-* 根拠: ルーティング定義 (行番号: 68-70 / 抜粋: "@router.get("/family/chronicle")")
+* 根拠: ルーティング定義 (参照: get_family_chronicle / 抜粋: "@router.get("/family/chronicle")")
 
 
 * **引数/リクエスト**: なし
@@ -253,7 +253,7 @@
 ### `seed_data_endpoint`
 
 * **役割**: データをシードする（マスターデータを同期する）エンドポイント。実装は `sync_master_data` と同一で、Issue #739 (AUDIT-009) の認可（`admin_id` + `role_adult`）も同じく要求する。
-* 根拠: ルーティング定義 (行番号: 77-79 / 抜粋: "@router.post("/seed", response_model=SyncResponse)")
+* 根拠: ルーティング定義 (参照: seed_data_endpoint / 抜粋: "@router.post("/seed", response_model=SyncResponse)")
 
 
 * **引数/リクエスト**: `SyncMasterAction`（`admin_id`）
@@ -261,7 +261,7 @@
 
 
 * **戻り値/レスポンス**: `SyncResponse`
-* 根拠: レスポンス型指定 (行番号: 77 / 抜粋: "response_model=SyncResponse")
+* 根拠: レスポンス型指定 (参照: seed_data_endpoint / 抜粋: "response_model=SyncResponse")
 
 
 * **副作用**: 不明（外部関数 `game_system.sync_master_data_as_admin()` に依存）
@@ -276,7 +276,7 @@
 ### `update_user_avatar`
 
 * **役割**: ユーザーのアバター情報を更新するエンドポイント。
-* 根拠: ルーティング定義 (行番号: 76-78 / 抜粋: "@router.post("/user/update")")
+* 根拠: ルーティング定義 (参照: update_user_avatar / 抜粋: "@router.post("/user/update")")
 
 
 * **引数/リクエスト**: `UpdateUserAction` (フィールドとして `user_id`, `avatar_url` を持つ)
@@ -322,7 +322,7 @@
 ### `delete_uploaded_image` (`DELETE /upload/{filename}`)（Issue #442で追加）
 
 * **役割**: `AvatarUploader.tsx`側の2段階アップロードフロー（1. 画像アップロード→2. `POST /user/update`でユーザーへ紐付け）のうち2段階目が失敗した際のロールバック用エンドポイント。まだどのユーザーにも紐付けられていない、アップロード直後の孤立画像を削除する。ベストエフォートの後始末であるため、削除できなかった場合（既に存在しない、他ユーザーが参照中等）もエラーにはせず状態を返すのみとする。
-* 根拠: [ルーティング定義とコメント] (行番号: 87-96 / 抜粋: "# #442: AvatarUploader.tsxの2段階アップロード(画像アップロード→ユーザーへの紐付け)の\n# うち2段階目が失敗した際、1段階目でアップロード済みの画像をロールバック削除するための\n# エンドポイント。...\n@router.delete("/upload/{filename}")\ndef delete_uploaded_image(filename: str):")
+* 根拠: [ルーティング定義とコメント] (行番号: 98 / 抜粋: "# #442: AvatarUploader.tsxの2段階アップロード(画像アップロード→ユーザーへの紐付け)の\n# うち2段階目が失敗した際、1段階目でアップロード済みの画像をロールバック削除するための\n# エンドポイント。...\n@router.delete("/upload/{filename}")\ndef delete_uploaded_image(filename: str):")
 
 
 * **引数/リクエスト**: `filename: str`（パスパラメータ、削除対象のアップロード済みファイル名）
@@ -368,7 +368,7 @@
 ### `test_sound`
 
 * **役割**: 指定されたキーに基づく音声再生テストを行うエンドポイント。
-* 根拠: ルーティング定義 (行番号: 112-118 / 抜粋: "@router.post("/test_sound")")
+* 根拠: ルーティング定義 (参照: test_sound / 抜粋: "@router.post("/test_sound")")
 
 
 * **引数/リクエスト**: `SoundTestRequest` (フィールドとして `sound_key` を持つ)
@@ -376,7 +376,7 @@
 
 
 * **戻り値/レスポンス**: 再生ステータスと再生キー（`{"status": "playing", "key": <指定キー>}`）
-* 根拠: 戻り値 (行番号: 118 / 抜粋: "return {"status": "playing"...")
+* 根拠: 戻り値 (行番号: 129 / 抜粋: "return {"status": "playing"...")
 
 
 * **副作用**: 外部関数 `sound_manager.play()` による音声の再生。
@@ -391,7 +391,7 @@
 ### `get_inventory`
 
 * **役割**: 特定ユーザーのインベントリ（所持品）情報を取得するエンドポイント。
-* 根拠: ルーティング定義 (行番号: 120-122 / 抜粋: "@router.get("/inventory/{user_id}")")
+* 根拠: ルーティング定義 (参照: get_inventory / 抜粋: "@router.get("/inventory/{user_id}")")
 
 
 * **引数/リクエスト**: `user_id` (`str` 型, パスパラメータ)
@@ -414,7 +414,7 @@
 ### `use_item`
 
 * **役割**: アイテムを使用するエンドポイント。
-* 根拠: ルーティング定義 (行番号: 124-126 / 抜粋: "@router.post("/inventory/use")")
+* 根拠: ルーティング定義 (参照: use_item / 抜粋: "@router.post(\"/inventory/use\"")
 
 
 * **引数/リクエスト**: `UseItemAction` (フィールドとして `user_id`, `inventory_id` を持つ)

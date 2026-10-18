@@ -35,8 +35,8 @@
 | `HTTPException` | 例外クラス | 処理失敗時のHTTPエラーレスポンス生成用 | 根拠: [HTTPException] (行番号: 2 / 抜粋: "from fastapi import APIRouter") |
 | `Dict` | 型ヒント | 戻り値の型定義用 | 根拠: [Dict] (行番号: 3 / 抜粋: "from typing import Dict, Any") |
 | `Any` | 型ヒント | 戻り値の型定義用 | 根拠: [Any] (行番号: 3 / 抜粋: "from typing import Dict, Any") |
-| `backup_service` | モジュール | バックアップ処理の実行用 | 根拠: [backup_service] (行番号: 6 / 抜粋: "from services import backup_service, system_maintenance_service") |
-| `system_maintenance_service` | モジュール | サービス再起動処理の実行用（Issue #829で追加） | 根拠: [system_maintenance_service] (行番号: 6 / 抜粋: "from services import backup_service, system_maintenance_service") |
+| `backup_service` | モジュール | バックアップ処理の実行用 | 根拠: [backup_service] (行番号: 6 / 抜粋: "from services import backup_service, system_info_service, system_maintenance_service") |
+| `system_maintenance_service` | モジュール | サービス再起動処理の実行用（Issue #829で追加） | 根拠: [system_maintenance_service] (行番号: 6 / 抜粋: "from services import backup_service, system_info_service, system_maintenance_service") |
 
 **(不具合修正で削除)** 以前あった`core.logger.setup_logging`/`logger`は、`manual_backup`が失敗メッセージを`logger.error`でログ出力する処理ごと不要になったため削除された(失敗時の通知は`backup_service`側の`_notify_and_log_error`に一本化)。
 
@@ -158,7 +158,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `services/backup_service.py` | バックアップ処理の成否判定条件や、実際にバックアップされる対象（データベース、ファイル群など）、外部システムへの影響を特定するため。 | 根拠: [import文] (行番号: 6 / 抜粋: "from services import backup_service, system_maintenance_service") |
+| 高 | `services/backup_service.py` | バックアップ処理の成否判定条件や、実際にバックアップされる対象（データベース、ファイル群など）、外部システムへの影響を特定するため。 | 根拠: [import文] (行番号: 6 / 抜粋: "from services import backup_service, system_info_service, system_maintenance_service") |
 | 高 | `services/system_maintenance_service.py` | `restart_home_system()`の成否判定条件・タイムアウト値・`sudo`権限の前提を特定するため。 | 根拠: [import文] (行番号: 5) |
 
 ## 8. 保守上の注意点
