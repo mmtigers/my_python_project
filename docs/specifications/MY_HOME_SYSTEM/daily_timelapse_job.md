@@ -39,7 +39,6 @@
 | `traceback` | 標準ライブラリ | エラー発生時のスタックトレース取得 | `import traceback` (行番号: 8 / 抜粋: "import traceback") |
 | `argparse` | 標準ライブラリ | コマンドライン引数の解析 | `import argparse` (行番号: 9 / 抜粋: "import argparse") |
 | `re` | 標準ライブラリ | ファイル名からの時刻文字列の正規表現抽出 | `import re` (行番号: 10 / 抜粋: "import re") |
-| `Path` | 標準ライブラリ | （インポートされているが未使用） | `from pathlib import Path` (行番号: 11 / 抜粋: "from pathlib import Path") |
 | `asdict` | 標準ライブラリ | データクラスの辞書化（JSON保存時） | `from dataclasses import asdict` (行番号: 11 / 抜粋: "from dataclasses import asdict") |
 | `config` | 内部モジュール | LINEのユーザーID取得など設定情報の参照 | `import config` (行番号: 18 / 抜粋: "import config") |
 | `setup_logging` | 内部モジュール | ロガーの初期化 | `from core.logger import setup_logging` (行番号: 19 / 抜粋: "from core.logger import setup_logging") |
@@ -52,9 +51,9 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` | モジュール内部で定義されている変数や初期化処理の内容が提供されていないため | `getattr(config, 'NVR_RECORD_DIR', ...)` (行番号: 81 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...)") |
+| `config` | モジュール内部で定義されている変数や初期化処理の内容が提供されていないため | `getattr(config, 'NVR_RECORD_DIR', ...)` (行番号: 210 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...)") |
 | `setup_logging` | ログ出力のフォーマット、出力先（ファイル/標準出力など）の仕様が提供されていないため | `logger = setup_logging(__name__)` (行番号: 37 / 抜粋: "logger = setup_logging(**name**)") |
-| `send_push` | 関数内部の処理、引数（`target`, `channel`など）に対する正確な挙動、エラーハンドリングの有無が提供されていないため | `send_push(...)` (行番号: 57〜61, 228〜232, 235〜239, 275〜279 / 抜粋: "send_push(messages=..., target="discord", ...)") |
+| `send_push` | 関数内部の処理、引数（`target`, `channel`など）に対する正確な挙動、エラーハンドリングの有無が提供されていないため | `send_push(...)` (行番号: 53 / 抜粋: "def _send_report(text: str) -> None:") |
 | `smart_timelapse_generator` の全インポート要素 | 各クラス(`MotionDetector`, `VideoBuilder`等)のメソッド、プロパティの仕様、各関数の詳細な処理内容、厳密な戻り値・引数の型定義が提供されていないため | `from monitors.smart_timelapse_generator import ...` (行番号: 24〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -103,15 +102,34 @@
 
 
 
+### 内部ヘルパー関数（Issue #954 で `run_daily_timelapse` から分割）
+
+`run_daily_timelapse` が227行あったため、挙動を変えずに以下の非公開関数へ切り出した。いずれもモジュール内からのみ呼ばれ、テストが差し替える `send_push`・`get_video_info` 等のモジュールグローバルをそのまま参照する（差し替えの効き方は分割前と同じ）。
+
+| 関数 | 役割 | 戻り値 | 根拠 |
+| --- | --- | --- | --- |
+| `_send_report` | `send_push(target="discord", channel="report")` で1通送る。本ファイルの通知はすべてこれを経由する | `None` | `def _send_report(text: str) -> None:` (行番号: 53) |
+| `_resolve_target_date` | 対象日の決定。未指定なら `datetime.date.today()` の前日、`YYYY-MM-DD` として解釈できなければエラーログを出して `None` | `(date, 'YYYY-MM-DD')` または `None` | `def _resolve_target_date(target_date_str: str = None):` (行番号: 62) |
+| `_filter_files_by_time_range` | ファイル名 `YYYYMMDD_HHMMSS.mp4` の開始時刻から各チャンクを15分長とみなし、指定時間帯と重なるものだけ残す。命名に合わないファイルは除外 | 絞り込んだファイルパスのリスト | `def _filter_files_by_time_range(target_files, target_date, start_time, end_time):` (行番号: 74) |
+| `_build_time_suffix` | 出力ファイル名の時間帯部分（例: `_0600-0900`、片側未指定は `start`/`end`）。時間指定が無ければ空文字 | `str` | `def _build_time_suffix(start_time_str, end_time_str, start_time, end_time) -> str:` (行番号: 97) |
+| `_remove_stale_output` | 既存のsummary動画を削除。`OSError` は警告ログのみで処理を続ける(#450) | `None` | `def _remove_stale_output(output_path: str) -> None:` (行番号: 106) |
+| `_stash_chunk_csvs` | `motion.csv`/`events.csv`/`events_enriched.csv` を `<名前>_<チャンク名>.csv` にリネームし、次チャンクでの上書きを防ぐ | `None` | `def _stash_chunk_csvs(work: str, base_name: str) -> None:` (行番号: 117) |
+| `_extract_chunk_clips` | 1チャンクの解析（動画情報取得→動き検知→イベント構築→CSV退避→クリップ切り出し）。`duration <= 0` なら警告してスキップ。Event ID は `event_offset` から続けて `Event001` 形式で1日通して再採番する | `(クリップのパスのリスト, 検知イベント数, イベント長の合計)` | `def _extract_chunk_clips(filepath, work, temp_dir, motion_detector, event_builder, video_builder, event_offset):` (行番号: 127) |
+| `_notify_no_clips` | 有効クリップが0件のときの通知。検知イベント数が1以上なら「クリップ生成に全て失敗」(ERRORログは `skip_discord` 付き)、0なら「動きはありませんでした」(#233) | `None` | `def _notify_no_clips(camera_name, target_date_str, time_range_log, event_count) -> None:` (行番号: 167) |
+| `_write_done_record` | `SummaryInfo` を `asdict` してJSONで `<rec>/<名前>.done` に保存する | `None` | `def _write_done_record(rec: str, done_filename: str, sum_info: SummaryInfo) -> None:` (行番号: 185) |
+
+* エラーハンドリング: ヘルパー自身は `_resolve_target_date`（`ValueError` を捕捉）と `_remove_stale_output`（`OSError` を捕捉）以外は例外を捕捉しない。`_extract_chunk_clips` 等で起きた例外は、呼び出し元 `run_daily_timelapse` の `except Exception` で通知される。
+* 根拠: `except Exception as e:` (行番号: 309)
+
 ### `run_daily_timelapse`
 
 * **（Issue #497 C-4 で修正）** 時間帯フィルタリングの分岐(`if target_files and (start_time_str or end_time_str):`)に入る前に `start_time = None` / `end_time = None` を束縛する。以前は `target_files` が空で `start_time_str`/`end_time_str` が指定されていると未束縛のまま後段の出力ファイル名組み立てで参照され `NameError` になり得た(pyright の reportPossiblyUnboundVariable で検出)。
-* 根拠: (行番号: 91〜96 / 抜粋: "start_time = None\n    end_time = None\n    if target_files and (start_time_str or end_time_str):")
+* 根拠: (行番号: 225〜227 / 抜粋: "start_time = None\n    end_time = None\n    if target_files and (start_time_str or end_time_str):")
 
 * **役割**: 対象カメラの録画ディレクトリから、指定日付および時間帯の動画ファイルを取得・フィルタリングし、動き検知エンジンのパイプライン（検知・イベント構築・クリップ生成・結合・サムネイル作成）を実行して結果をDiscordへアップロード・通知する。
 
 
-* 根拠: [関数定義] (行番号: 53 / 抜粋: "def run_daily_timelapse(...) -> None:")
+* 根拠: [関数定義] (行番号: 192 / 抜粋: "def run_daily_timelapse(...) -> None:")
 
 
 
@@ -129,20 +147,20 @@
 * `end_time_str: str = None`: フィルタリングの終了時刻
 
 
-* 根拠: [関数の引数定義] (行番号: 53 / 抜粋: "camera_name: str, target_date_str: str = None...")
+* 根拠: [関数の引数定義] (行番号: 192 / 抜粋: "camera_name: str, target_date_str: str = None...")
 
 
 
 
 * **戻り値/レスポンス**: `None`
 
-* 根拠: [関数の戻り値型ヒント] (行番号: 53 / 抜粋: "-> None:")
+* 根拠: [関数の戻り値型ヒント] (行番号: 192 / 抜粋: "-> None:")
 
 
 
 
 * **副作用**:
-* DiscordへのPush通知（依存ファイル経由）。全チャンク処理後、有効クリップが1件も無い場合は`global_event_idx`(検知イベント総数)の値で通知内容を分岐する: `0`件なら「動きなし」の`report`通知、1件以上(=イベント検知はあったがクリップ抽出が全滅)なら`error`通知(Issue #233修正、修正前は後者の場合も「動きなし」という事実と異なる通知を送っていた)。
+* DiscordへのPush通知（依存ファイル経由）。全チャンク処理後、有効クリップが1件も無い場合は`global_event_idx`(検知イベント総数)の値で通知内容を分岐する: `0`件なら「動きなし」の`report`通知、1件以上(=イベント検知はあったがクリップ抽出が全滅)なら「クリップ生成に全て失敗」の`report`通知(2026-09のチャンネル再設計で旧`error`から変更)(Issue #233修正、修正前は後者の場合も「動きなし」という事実と異なる通知を送っていた)。
 
 
 * ディレクトリの作成・一時ディレクトリの作成と破棄
@@ -157,7 +175,7 @@
 * サマリー情報のJSONファイル (`.done`) のディスクへの保存
 
 
-* 根拠: [ファイルI/OおよびAPI呼び出し処理] (行番号: 200 / 抜粋: "os.rename(src_csv, dst_csv)")、[クリップ抽出全滅時の分岐] (行番号: 210〜232 / 抜粋: "if global_event_idx > 0:")
+* 根拠: [ファイルI/OおよびAPI呼び出し処理] (行番号: 124 / 抜粋: "os.rename(src_csv, dst_csv)")、[クリップ抽出全滅時の分岐] (行番号: 168 / 抜粋: "if event_count > 0:")
 
 
 
@@ -175,7 +193,7 @@
 * 処理全体を `try...except Exception as e:` で囲み、予期せぬエラーが発生した場合はスタックトレースをログ出力し、Discordへエラー通知を送信する。
 
 
-* 根拠: [try-exceptブロックおよび早期リターン処理] (行番号: 269 / 抜粋: "except Exception as e:")、[既存ファイル削除失敗時のログ出力(#450)] (行番号: 157〜164)
+* 根拠: [try-exceptブロックおよび早期リターン処理] (行番号: 309 / 抜粋: "except Exception as e:")、[既存ファイル削除失敗時のログ出力(#450)] (行番号: 106 / 抜粋: "def _remove_stale_output(output_path: str) -> None:")
 
 
 
@@ -278,7 +296,7 @@ graph TD
 * 動画処理ループ内でハードコードされた `time.sleep(1)` が存在し、チャンク数に比例して固定の遅延が発生する仕様になっている。
 
 
-* 根拠: [ループ内処理] (行番号: 163〜164 / 抜粋: "for filepath in target_files: time.sleep(1)")
+* 根拠: [ループ内処理] (行番号: 273 / 抜粋: "time.sleep(1)")
 
 
 
@@ -286,7 +304,7 @@ graph TD
 * チャンクファイルの長さを最大15分と仮定し、ハードコードされた固定値(`datetime.timedelta(minutes=15)`)を使用して時間帯フィルタリングの終了時刻を算出しているため、カメラ側の設定変更により録画時間が15分を超えた場合にフィルタリング漏れが発生する可能性がある。
 
 
-* 根拠: [フィルタリング処理] (行番号: 117 / 抜粋: "file_end_dt = file_start_dt + datetime.timedelta(minutes=15)")
+* 根拠: [フィルタリング処理] (行番号: 88 / 抜粋: "file_end_dt = file_start_dt + datetime.timedelta(minutes=15)")
 
 
 
@@ -294,15 +312,15 @@ graph TD
 * `VideoBuilder` クラスのインスタンスに対し、`_build_clip`, `_build_concat`, `_generate_thumbnail` のようにアンダースコア始まりのメソッド（Pythonの慣例における非公開/内部メソッド）を直接呼び出している。
 
 
-* 根拠: [クリップ生成・結合処理] (行番号: 199 / 抜粋: "clip_path = video_builder._build_clip(...)")
+* 根拠: [クリップ生成・結合処理] (行番号: 161 / 抜粋: "clip_path = video_builder._build_clip(filepath, ev, temp_dir, start_dt)")
 
 
 
 
-* **[修正済み] 既存summary動画ファイルの削除失敗（Issue #450）**: 以前は既存のsummary動画ファイルを削除する処理で`OSError`をキャッチしているが`pass`処理となっており、削除失敗時（権限不足や使用中など）の原因が握りつぶされ、既存ファイルが残った状態での再生成失敗として遅れて表面化していた。現在は`logger.warning(f"既存の出力ファイル削除に失敗しました: {sum_info.output_path}: {e}")`で警告ログを出力するよう修正され、削除失敗自体はログから追跡可能になった（ただし削除に失敗しても処理自体はそのまま後続の生成処理へ進む点は変わっていない）。
+* **[修正済み] 既存summary動画ファイルの削除失敗（Issue #450）**: 以前は既存のsummary動画ファイルを削除する処理で`OSError`をキャッチしているが`pass`処理となっており、削除失敗時（権限不足や使用中など）の原因が握りつぶされ、既存ファイルが残った状態での再生成失敗として遅れて表面化していた。現在は`logger.warning(f"既存の出力ファイル削除に失敗しました: {output_path}: {e}")`（Issue #954 で `_remove_stale_output` へ切り出し）で警告ログを出力するよう修正され、削除失敗自体はログから追跡可能になった（ただし削除に失敗しても処理自体はそのまま後続の生成処理へ進む点は変わっていない）。
 
 
-* 根拠: [既存ファイル削除処理] (行番号: 163〜170 / 抜粋: "if os.path.exists(sum_info.output_path):\n            try:\n                os.remove(sum_info.output_path)\n            except OSError as e:\n                # #450: 権限エラー等で削除に失敗した場合、無音のまま後続の生成処理に\n                # 進んでいた(既存ファイルが残った状態での再生成失敗として遅れて表面化する)。\n                # 想定外のOSErrorとしてログに残す。\n                logger.warning(f\"既存の出力ファイル削除に失敗しました: {sum_info.output_path}: {e}\")")
+* 根拠: [既存ファイル削除処理] (行番号: 106 / 抜粋: "def _remove_stale_output(output_path: str) -> None:")
 
 
 
@@ -310,23 +328,23 @@ graph TD
 * 録画ファイルの検索先ディレクトリは `getattr(config, 'NVR_RECORD_DIR', "/mnt/nas/home_system/nvr_recordings")` により `config.NVR_RECORD_DIR` を優先的に参照し、未定義時のみ同文字列にフォールバックする（以前はこのパスがハードコード直書きされておりバグの原因になっていたが、修正済み）。
 
 
-* 根拠: [NASディレクトリ指定] (行番号: 82 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...")
+* 根拠: [NASディレクトリ指定] (行番号: 210 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...")
 
 
 
 
-* Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`(LINE宛先)が不要になった。これに伴い、以前存在していた`user_id = getattr(config, "LINE_USER_ID", "")`という、通知先(Discord)と変数名(LINE_USER_ID)が一致しない代入は削除され、4箇所とも`messages`のみを渡す形に更新された。
+* Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`(LINE宛先)が不要になった。これに伴い、以前存在していた`user_id = getattr(config, "LINE_USER_ID", "")`という、通知先(Discord)と変数名(LINE_USER_ID)が一致しない代入は削除され、4箇所とも`messages`のみを渡す形に更新された。Issue #954 以降、この4箇所の呼び出しは `_send_report(text)` に集約され、`send_push` の呼び出し自体は同関数内の1箇所になった。
 
 
-* 根拠: [通知送信処理] (行番号: 58〜61, 229〜232, 236〜239, 276〜279 / 抜粋: "send_push(\n            messages=[...], target="discord"")
+* 根拠: [通知送信処理] (行番号: 53 / 抜粋: "def _send_report(text: str) -> None:")
 
 
 
 
-* `all_clip_files` は各イベントの `_build_clip()` 成功時のみ追加される実装のため、「イベント検知はあったがクリップ抽出が全滅した」場合と「そもそもイベントが無かった」場合の両方で空になる。Issue #233修正前はこの2つを区別せず一律「動きなし」通知を送っていたため、クリップ抽出全滅というエラー状態が利用者から見えなくなっていた。修正後は`global_event_idx`(全チャンクを通した検知イベント総数)の値で両者を区別し、前者は`error`チャンネルへ通知する。
+* `all_clip_files` は各イベントの `_build_clip()` 成功時のみ追加される実装のため、「イベント検知はあったがクリップ抽出が全滅した」場合と「そもそもイベントが無かった」場合の両方で空になる。Issue #233修正前はこの2つを区別せず一律「動きなし」通知を送っていたため、クリップ抽出全滅というエラー状態が利用者から見えなくなっていた。修正後は`global_event_idx`(全チャンクを通した検知イベント総数)の値で両者を区別し、前者はクリップ生成失敗として通知する(2026-09のチャンネル再設計で送信先は`report`)。Issue #954 以降、この分岐は `_notify_no_clips` にある。
 
 
-* 根拠: [クリップ抽出結果の分岐] (行番号: 210〜232 / 抜粋: "if not all_clip_files: if global_event_idx > 0:")
+* 根拠: [クリップ抽出結果の分岐] (行番号: 168 / 抜粋: "if event_count > 0:")
 
 
 

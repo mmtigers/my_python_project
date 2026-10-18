@@ -50,27 +50,157 @@ def parse_time(time_str: str) -> datetime.time:
     else:
         raise ValueError(f"時刻のフォーマットが不正です。HH:MM形式で指定してください: {time_str}")
 
+def _send_report(text: str) -> None:
+    """運用者向け #operations(report)チャンネルへ1通送る。"""
+    send_push(
+        messages=[{"type": "text", "text": text}],
+        target="discord",
+        channel="report"
+    )
+
+
+def _resolve_target_date(target_date_str: str = None):
+    """対象日を (date, 'YYYY-MM-DD') で返す。未指定なら昨日、書式不正なら None。"""
+    if not target_date_str:
+        target_date = datetime.date.today() - datetime.timedelta(days=1)
+        return target_date, target_date.strftime('%Y-%m-%d')
+    try:
+        return datetime.datetime.strptime(target_date_str, '%Y-%m-%d').date(), target_date_str
+    except ValueError:
+        logger.error(f"日付フォーマットが不正です(YYYY-MM-DD): {target_date_str}")
+        return None
+
+
+def _filter_files_by_time_range(target_files, target_date, start_time, end_time):
+    """チャンク名の開始時刻から、指定時間帯と重なるチャンクだけを残す。"""
+    filter_start_dt = datetime.datetime.combine(target_date, start_time) if start_time else datetime.datetime.min
+    filter_end_dt = datetime.datetime.combine(target_date, end_time) if end_time else datetime.datetime.max
+
+    filtered_files = []
+    for f in target_files:
+        base_name = os.path.basename(f)
+        m = re.search(r'\d{8}_(\d{6})\.mp4', base_name)
+        if m:
+            t_str = m.group(1)
+            file_start_time = datetime.time(int(t_str[0:2]), int(t_str[2:4]), int(t_str[4:6]))
+            file_start_dt = datetime.datetime.combine(target_date, file_start_time)
+            # チャンクの最大長を安全を見て15分と仮定し、終了時刻を算出
+            file_end_dt = file_start_dt + datetime.timedelta(minutes=15)
+
+            # 重複判定: (ファイル開始 < フィルタ終了) AND (ファイル終了 > フィルタ開始)
+            # 例: 05:56開始でも、06:00以降に被っていれば対象に含める
+            if file_start_dt < filter_end_dt and file_end_dt > filter_start_dt:
+                filtered_files.append(f)
+    return filtered_files
+
+
+def _build_time_suffix(start_time_str, end_time_str, start_time, end_time) -> str:
+    """出力ファイル名に付ける時間帯: 例 entrance_2026-07-15_0600-0900_summary.mp4 の `_0600-0900`。"""
+    if not (start_time_str or end_time_str):
+        return ""
+    s_str = start_time.strftime('%H%M') if start_time else "start"
+    e_str = end_time.strftime('%H%M') if end_time else "end"
+    return f"_{s_str}-{e_str}"
+
+
+def _remove_stale_output(output_path: str) -> None:
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except OSError as e:
+            # #450: 権限エラー等で削除に失敗した場合、無音のまま後続の生成処理に
+            # 進んでいた(既存ファイルが残った状態での再生成失敗として遅れて表面化する)。
+            # 想定外のOSErrorとしてログに残す。
+            logger.warning(f"既存の出力ファイル削除に失敗しました: {output_path}: {e}")
+
+
+def _stash_chunk_csvs(work: str, base_name: str) -> None:
+    """CSVファイルの退避 (次チャンクでの上書きを防止)"""
+    file_no_ext = os.path.splitext(base_name)[0]
+    for csv_name in ["motion.csv", "events.csv", "events_enriched.csv"]:
+        src_csv = os.path.join(work, csv_name)
+        if os.path.exists(src_csv):
+            dst_csv = os.path.join(work, f"{os.path.splitext(csv_name)[0]}_{file_no_ext}.csv")
+            os.rename(src_csv, dst_csv)
+
+
+def _extract_chunk_clips(filepath, work, temp_dir, motion_detector, event_builder, video_builder, event_offset):
+    """1チャンクを解析してクリップを切り出す。
+
+    戻り値は (クリップのパス一覧, 検知イベント数, イベント長の合計)。
+    Event ID は event_offset から続けて1日通して一意に再採番する。
+    """
+    base_name = os.path.basename(filepath)
+    logger.info(f"--- チャンク処理開始: {base_name} ---")
+
+    info = get_video_info(filepath)
+    start_dt = get_video_start_dt(filepath, info)
+    duration = float(info.get('format', {}).get('duration', 0))
+
+    if duration <= 0:
+        logger.warning(f"動画長が不正なためスキップします: {base_name}")
+        return [], 0, 0
+
+    # 1. 動き検知
+    records = motion_detector.detect(filepath, work, duration)
+
+    # 2. イベント構築
+    events = event_builder.build(records, work)
+
+    _stash_chunk_csvs(work, base_name)
+
+    clips = []
+    event_duration = 0
+    # 3. 各イベントごとにクリップを切り出し
+    for i, ev in enumerate(events or [], start=1):
+        # 1日通して一意のEvent IDを再採番 (Event001, Event002...)
+        ev.event_id = f"Event{event_offset + i:03d}"
+        event_duration += ev.duration
+
+        # エンジンの隠蔽メソッドを直接利用してクリップを生成
+        clip_path = video_builder._build_clip(filepath, ev, temp_dir, start_dt)
+        if clip_path:
+            clips.append(clip_path)
+    return clips, len(events or []), event_duration
+
+
+def _notify_no_clips(camera_name, target_date_str, time_range_log, event_count) -> None:
+    if event_count > 0:
+        # #233: all_clip_filesは_build_clip()成功時のみ追加されるため、
+        # 「イベントは検知されたがクリップ抽出が全滅した」場合も空になり、
+        # 以前は下のelse節と同じ「動きなし」という事実と異なる通知を送っていた。
+        # チャンネル再設計(2026-09): 直後にsend_push(channel="report")で
+        # 同じ内容を明示送信するため、catch-all側はopt-outする。
+        logger.error(
+            f"{camera_name} の対象期間内 ({target_date_str}{time_range_log}) で "
+            f"{event_count} 件のイベントを検知しましたが、クリップ抽出が全て失敗しました。",
+            extra={"skip_discord": True},
+        )
+        _send_report(f"⚠️ {camera_name} ({target_date_str}{time_range_log}) 動き検知イベントはありましたが、クリップ生成に全て失敗しました。")
+    else:
+        logger.info(f"{camera_name} の対象期間内 ({target_date_str}{time_range_log}) に動き検知イベントはありませんでした。")
+        _send_report(f"ℹ️ {camera_name} ({target_date_str}{time_range_log}) の動きはありませんでした。")
+
+
+def _write_done_record(rec: str, done_filename: str, sum_info: SummaryInfo) -> None:
+    """完了ファイルの保存"""
+    record_file = os.path.join(rec, f"{done_filename}.done")
+    with open(record_file, "w", encoding="utf-8") as f:
+        json.dump(asdict(sum_info), f, indent=2, ensure_ascii=False)
+
+
 def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_time_str: str = None, end_time_str: str = None) -> None:
     t_start = time.perf_counter()
 
     if not check_dependencies():
-        send_push(
-            messages=[{"type": "text", "text": "⚠️ 日次タイムラプス生成エラー\nFFmpeg等がインストールされていません。"}],
-            target="discord",
-            channel="report"
-        )
+        _send_report("⚠️ 日次タイムラプス生成エラー\nFFmpeg等がインストールされていません。")
         return
 
     # ターゲット日付の決定（指定がなければ昨日の日付）
-    if not target_date_str:
-        target_date = datetime.date.today() - datetime.timedelta(days=1)
-        target_date_str = target_date.strftime('%Y-%m-%d')
-    else:
-        try:
-            target_date = datetime.datetime.strptime(target_date_str, '%Y-%m-%d').date()
-        except ValueError:
-            logger.error(f"日付フォーマットが不正です(YYYY-MM-DD): {target_date_str}")
-            return
+    resolved = _resolve_target_date(target_date_str)
+    if resolved is None:
+        return
+    target_date, target_date_str = resolved
 
     time_range_log = f" (時間指定: {start_time_str or '開始'} ～ {end_time_str or '終了'})" if start_time_str or end_time_str else ""
     logger.info(f"==========【日次タイムラプスバッチ開始】==========")
@@ -86,10 +216,10 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
     # YYYYMMDD形式でファイルを検索し、時系列にソート
     date_prefix = target_date.strftime('%Y%m%d')
     target_files = sorted(glob.glob(os.path.join(nvr_dir, f"{date_prefix}_*.mp4")))
-    
+
     # --- 時間帯フィルタリング処理 ---
     # Issue #497 (C-4): target_filesが空でstart_time_str/end_time_strが指定されている
-    # 場合、この分岐に入らずstart_time/end_timeが未束縛のまま156行目付近の
+    # 場合、この分岐に入らずstart_time/end_timeが未束縛のまま
     # 出力ファイル名組み立てで参照され、NameErrorになりうる(pyrightの
     # reportPossiblyUnboundVariableで検出済み)。先に None で束縛しておく。
     start_time = None
@@ -101,27 +231,7 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
         except ValueError as ve:
             logger.error(str(ve))
             return
-            
-        filter_start_dt = datetime.datetime.combine(target_date, start_time) if start_time else datetime.datetime.min
-        filter_end_dt = datetime.datetime.combine(target_date, end_time) if end_time else datetime.datetime.max
-        
-        filtered_files = []
-        for f in target_files:
-            base_name = os.path.basename(f)
-            m = re.search(r'\d{8}_(\d{6})\.mp4', base_name)
-            if m:
-                t_str = m.group(1)
-                file_start_time = datetime.time(int(t_str[0:2]), int(t_str[2:4]), int(t_str[4:6]))
-                file_start_dt = datetime.datetime.combine(target_date, file_start_time)
-                # チャンクの最大長を安全を見て15分と仮定し、終了時刻を算出
-                file_end_dt = file_start_dt + datetime.timedelta(minutes=15)
-                
-                # 重複判定: (ファイル開始 < フィルタ終了) AND (ファイル終了 > フィルタ開始)
-                # 例: 05:56開始でも、06:00以降に被っていれば対象に含める
-                if file_start_dt < filter_end_dt and file_end_dt > filter_start_dt:
-                    filtered_files.append(f)
-        
-        target_files = filtered_files
+        target_files = _filter_files_by_time_range(target_files, target_date, start_time, end_time)
 
     if not target_files:
         logger.info(f"対象期間の録画ファイルが存在しません。処理を終了します。")
@@ -152,91 +262,25 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
         global_event_idx = 0
         total_event_duration = 0
 
-        # 出力ファイル名に時間帯を付与: 例 entrance_2026-07-15_0600-0900_summary.mp4
-        time_suffix = ""
-        if start_time_str or end_time_str:
-            s_str = start_time.strftime('%H%M') if start_time else "start"
-            e_str = end_time.strftime('%H%M') if end_time else "end"
-            time_suffix = f"_{s_str}-{e_str}"
-
+        time_suffix = _build_time_suffix(start_time_str, end_time_str, start_time, end_time)
         sum_info.output_path = os.path.join(out, f"{camera_name}_{target_date_str}{time_suffix}_summary.mp4")
-        if os.path.exists(sum_info.output_path):
-            try:
-                os.remove(sum_info.output_path)
-            except OSError as e:
-                # #450: 権限エラー等で削除に失敗した場合、無音のまま後続の生成処理に
-                # 進んでいた(既存ファイルが残った状態での再生成失敗として遅れて表面化する)。
-                # 想定外のOSErrorとしてログに残す。
-                logger.warning(f"既存の出力ファイル削除に失敗しました: {sum_info.output_path}: {e}")
+        _remove_stale_output(sum_info.output_path)
 
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 # チャンクファイルを順番に解析
                 for filepath in target_files:
                     time.sleep(1)
-                    base_name = os.path.basename(filepath)
-                    logger.info(f"--- チャンク処理開始: {base_name} ---")
-
-                    info = get_video_info(filepath)
-                    start_dt = get_video_start_dt(filepath, info)
-                    duration = float(info.get('format', {}).get('duration', 0))
-
-                    if duration <= 0:
-                        logger.warning(f"動画長が不正なためスキップします: {base_name}")
-                        continue
-
-                    # 1. 動き検知
-                    records = motion_detector.detect(filepath, work, duration)
-
-                    # 2. イベント構築
-                    events = event_builder.build(records, work)
-
-                    # CSVファイルの退避 (次チャンクでの上書きを防止)
-                    file_no_ext = os.path.splitext(base_name)[0]
-                    for csv_name in ["motion.csv", "events.csv", "events_enriched.csv"]:
-                        src_csv = os.path.join(work, csv_name)
-                        if os.path.exists(src_csv):
-                            dst_csv = os.path.join(work, f"{os.path.splitext(csv_name)[0]}_{file_no_ext}.csv")
-                            os.rename(src_csv, dst_csv)
-
-                    if events:
-                        # 3. 各イベントごとにクリップを切り出し
-                        for ev in events:
-                            global_event_idx += 1
-                            # 1日通して一意のEvent IDを再採番 (Event001, Event002...)
-                            ev.event_id = f"Event{global_event_idx:03d}"
-                            total_event_duration += ev.duration
-
-                            # エンジンの隠蔽メソッドを直接利用してクリップを生成
-                            clip_path = video_builder._build_clip(filepath, ev, temp_dir, start_dt)
-                            if clip_path:
-                                all_clip_files.append(clip_path)
+                    clips, event_count, event_duration = _extract_chunk_clips(
+                        filepath, work, temp_dir, motion_detector, event_builder, video_builder, global_event_idx
+                    )
+                    all_clip_files.extend(clips)
+                    global_event_idx += event_count
+                    total_event_duration += event_duration
 
                 # 全ファイルの解析ループ終了
                 if not all_clip_files:
-                    if global_event_idx > 0:
-                        # #233: all_clip_filesは_build_clip()成功時のみ追加されるため、
-                        # 「イベントは検知されたがクリップ抽出が全滅した」場合も空になり、
-                        # 以前は下のelse節と同じ「動きなし」という事実と異なる通知を送っていた。
-                        # チャンネル再設計(2026-09): 直後にsend_push(channel="report")で
-                        # 同じ内容を明示送信するため、catch-all側はopt-outする。
-                        logger.error(
-                            f"{camera_name} の対象期間内 ({target_date_str}{time_range_log}) で "
-                            f"{global_event_idx} 件のイベントを検知しましたが、クリップ抽出が全て失敗しました。",
-                            extra={"skip_discord": True},
-                        )
-                        send_push(
-                            messages=[{"type": "text", "text": f"⚠️ {camera_name} ({target_date_str}{time_range_log}) 動き検知イベントはありましたが、クリップ生成に全て失敗しました。"}],
-                            target="discord",
-                            channel="report"
-                        )
-                    else:
-                        logger.info(f"{camera_name} の対象期間内 ({target_date_str}{time_range_log}) に動き検知イベントはありませんでした。")
-                        send_push(
-                            messages=[{"type": "text", "text": f"ℹ️ {camera_name} ({target_date_str}{time_range_log}) の動きはありませんでした。"}],
-                            target="discord",
-                            channel="report"
-                        )
+                    _notify_no_clips(camera_name, target_date_str, time_range_log, global_event_idx)
                     return
 
                 logger.info(f"全 {len(target_files)} ファイルの解析完了。有効クリップ総数: {len(all_clip_files)} 件")
@@ -253,11 +297,7 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
                     sum_info.summary_duration = total_event_duration
                     sum_info.file_size_bytes = os.path.getsize(sum_info.output_path)
 
-                    # 完了ファイルの保存
-                    done_filename = f"{camera_name}_{target_date_str}{time_suffix}"
-                    record_file = os.path.join(rec, f"{done_filename}.done")
-                    with open(record_file, "w", encoding="utf-8") as f:
-                        json.dump(asdict(sum_info), f, indent=2, ensure_ascii=False)
+                    _write_done_record(rec, f"{camera_name}_{target_date_str}{time_suffix}", sum_info)
 
                     # 5. Discordへ一括アップロード
                     base_filename = os.path.basename(sum_info.output_path)
@@ -272,11 +312,8 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
                 f"日次バッチ処理中に予期せぬエラーが発生しました: {err_msg}",
                 extra={"skip_discord": True},
             )
-            send_push(
-                messages=[{"type": "text", "text": f"⚠️ 日次タイムラプス生成エラー ({camera_name})\n{str(e)}"}],
-                target="discord",
-                channel="report"
-            )
+            _send_report(f"⚠️ 日次タイムラプス生成エラー ({camera_name})\n{str(e)}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="日次/時間指定タイムラプスバッチ処理")

@@ -8,6 +8,7 @@ all_clip_files は各イベントの _build_clip() 成功時のみ追加され�
 ありませんでした」という事実と異なる通知を送っていた不具合。
 """
 import datetime
+import json
 import os
 import sys
 from unittest.mock import MagicMock
@@ -114,6 +115,68 @@ class TestRunDailyTimelapseAllClipsFailedVsNoEvents:
         _, kwargs = mock_send_push.call_args
         assert kwargs.get("channel") == "report"
         assert "動きはありませんでした" in kwargs["messages"][0]["text"]
+
+
+    def test_success_writes_done_record_and_uploads_concatenated_video(self, monkeypatch, tmp_path):
+        """Issue #954 の分割前後で正常系の出力(ファイル名・.done の中身・アップロード)が変わらないことを固定する。"""
+        mock_send_push = self._patch_common(monkeypatch, tmp_path, events_per_chunk=2)
+        built_events = []
+
+        def fake_build_clip(self, filepath, ev, temp_dir, start_dt):
+            built_events.append(ev.event_id)
+            return os.path.join(temp_dir, f"{ev.event_id}.mp4")
+
+        def fake_build_concat(self, clips, output_path, temp_dir):
+            with open(output_path, "wb") as f:
+                f.write(b"x" * 123)
+            return True
+
+        monkeypatch.setattr(
+            djt, "VideoBuilder",
+            lambda: type("StubVideoBuilder", (), {
+                "_build_clip": fake_build_clip,
+                "_build_concat": fake_build_concat,
+                "_generate_thumbnail": lambda self, path: None,
+            })()
+        )
+        uploads = []
+        monkeypatch.setattr(
+            djt, "Uploader",
+            lambda: type("StubUploader", (), {
+                "split_and_send": lambda self, info, name: uploads.append((info, name))
+            })()
+        )
+
+        djt.run_daily_timelapse("entrance", target_date_str="2026-08-30", start_time_str="06:00")
+
+        assert built_events == ["Event001", "Event002"]
+        expected_name = "entrance_2026-08-30_0600-end_summary.mp4"
+        assert len(uploads) == 1 and uploads[0][1] == expected_name
+        done_path = tmp_path / "entrance_2026-08-30_0600-end.done"
+        record = json.loads(done_path.read_text(encoding="utf-8"))
+        assert record["events"] == 2
+        assert record["summary_duration"] == 10.0
+        assert record["file_size_bytes"] == 123
+        assert record["output_path"] == str(tmp_path / expected_name)
+        mock_send_push.assert_not_called()
+
+    def test_unexpected_exception_is_reported_to_report_channel(self, monkeypatch, tmp_path):
+        mock_send_push = self._patch_common(monkeypatch, tmp_path, events_per_chunk=1)
+
+        def boom(self, *a, **k):
+            raise RuntimeError("clip boom")
+
+        monkeypatch.setattr(
+            djt, "VideoBuilder",
+            lambda: type("StubVideoBuilder", (), {"_build_clip": boom})()
+        )
+
+        djt.run_daily_timelapse("entrance", target_date_str="2026-08-30")
+
+        mock_send_push.assert_called_once()
+        _, kwargs = mock_send_push.call_args
+        assert kwargs.get("channel") == "report"
+        assert "clip boom" in kwargs["messages"][0]["text"]
 
 
 class TestParseTime:
