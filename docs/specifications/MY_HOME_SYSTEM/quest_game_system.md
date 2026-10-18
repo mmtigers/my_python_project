@@ -32,7 +32,7 @@
 マスターデータ(`quest_data.USERS`/`QUESTS`/`REWARDS`)とDBの同期(`sync_master_data`)、および画面表示用の集約データ生成(`get_all_view_data`)を担う`GameSystem`クラス1つを定義するファイル。`GameSystem.__init__`は`QuestService`/`ApprovalService`/`UserService`/`ShopService`の4インスタンスを合成し(`InventoryService`は含まない)、ファイル末尾でこれら4サービスと`GameSystem`自身のシングルトンをモジュールレベルの変数(`game_system`/`quest_service`/`approval_service`/`shop_service`/`user_service`)として公開する。**（Issue #662で追加）** `ApprovalService`/`approval_service`は、`QuestService`から承認・却下・取消を分離した際に加わった。`sync_master_data`/`get_all_view_data`はいずれも、`quest_data`モジュールをこのファイル自身ではモジュールグローバルとしてimportせず、実行のたびに下位互換シム(`services/quest_service.py`)を`from services import quest_service as _quest_service_shim`として動的にimportし、`_quest_service_shim.quest_data`を経由して現在値を読む設計になっている。これは、テストが`monkeypatch.setattr(services.quest_service, "quest_data", fake)`という形でシム側の属性を差し替える前提のためである。
 根拠: `class GameSystem:` (行番号: 96)、`def __init__(self):\n        self.quest_service = QuestService()\n        self.user_service = UserService()\n        self.shop_service = ShopService()` (行番号: 97〜101)
 根拠: `from services import quest_service as _quest_service_shim` (行番号: 30, 171)、コメント (行番号: 25〜29 / 抜粋: "quest_data は互換シム(services/quest_service.py)側でimportされ、テストが\n        # `from services import quest_service as qs; monkeypatch.setattr(qs, \"quest_data\", fake)`\n        # という形で差し替える(Issue #529等)。")
-根拠: `game_system = GameSystem()\nquest_service = game_system.quest_service\nshop_service = game_system.shop_service\nuser_service = game_system.user_service` (行番号: 341〜344)
+根拠: `game_system = GameSystem()\nquest_service = game_system.quest_service\nshop_service = game_system.shop_service\nuser_service = game_system.user_service` (行番号: 365〜368)
 
 ## 3. 外部依存関係
 
@@ -54,7 +54,7 @@
 | `services.quest.user_service.UserService` | 内部モジュール | `GameSystem.__init__`が保持する`self.user_service`の型 | `from services.quest.user_service import UserService` (行番号: 14) |
 | `services.quest.approval_service.ApprovalService` | 内部モジュール | `GameSystem.__init__`が保持する`self.approval_service`の型 | `from services.quest.approval_service import ApprovalService` (行番号: 22) |
 | `services.quest.master_sync_sql` (`QUEST_UPSERT_SQL`, `REWARD_UPSERT_SQL`, `quest_upsert_params`, `reward_upsert_params`) | 内部モジュール | `quest_master`/`reward_master`へのUPSERT文と値タプルの組み立て（Issue #664で一元化） | `from services.quest.master_sync_sql import (` (行番号: 14〜19) |
-| `services.quest_service`（下位互換シム、`load_master_module`/`get_all_view_data`内でのローカルimport） | 内部モジュール | `quest_data`モジュールの現在値をシム経由で読むため | `from services import quest_service as _quest_service_shim` (行番号: 39, 300) |
+| `services.quest_service`（下位互換シム、`load_master_module`/`get_all_view_data`内でのローカルimport） | 内部モジュール | `quest_data`モジュールの現在値をシム経由で読むため | `from services import quest_service as _quest_service_shim` (行番号: 39, 324) |
 
 ### ブラックボックスとなる外部要素
 
@@ -145,80 +145,91 @@
 ### `GameSystem.sync_master_data`
 
 * **役割**: `quest_data`モジュール(`load_master_module()`が下位互換シム経由で取得し`importlib.reload`した現在値)の`USERS`/`QUESTS`/`REWARDS`をそれぞれ`MasterUser`/`MasterQuest`/`MasterReward`でバリデーションし、DBへUPSERT/DELETEで反映する。ユーザーは`ON CONFLICT DO UPDATE`で`name`/`job_class`を更新し`role`は`COALESCE(excluded.role, quest_users.role)`で新しい値が`None`なら既存値を保持する。クエストは`active_q_ids`に含まれない行を`DELETE`してから全件を`ON CONFLICT DO UPDATE`でUPSERTする。報酬は、マスタから削除された`reward_id`のうち`user_inventory`に参照が残っているものを削除対象から除外したうえで、残りを`DELETE`してから全件をUPSERTする。UPSERT文と値タプルの組み立ては`services/quest/master_sync_sql.py`（[quest_master_sync_sql.md](./quest_master_sync_sql.md)）に一元化されている（Issue #664）。
-* 根拠: `def sync_master_data(self, strict: bool = False, dry_run: bool = False) -> Dict[str, str]:` (行番号: 120〜286)
+* 根拠: `def sync_master_data(self, strict: bool = False, dry_run: bool = False) -> Dict[str, str]:` (行番号: 120〜155)
 
 **（Issue #664 改善案2 で変更）** 手動実行CLI`sync_strict.py`にあったもう1つの「マスタ→DB同期」の実装が本メソッドへ統合され、**マスタ同期の実装はリポジトリ内でここ1箇所だけになった**。統合前は両者に`DELETE ... NOT IN ({placeholders})`とUPSERTのループが別々に書かれており、列リストが食い違う事故が#100（`reset_period`欠落）・#164（時間帯/期間/出現率/前提クエスト欠落）・#165（`description`欠落）と3度起きていた。CLI固有の差分は`strict`/`dry_run`の2引数で表現され、`sync_strict.py`には引数解析と破壊的操作の安全ガードだけが残る。
-* 根拠: docstring (行番号: 104〜126 / 抜粋: "Issue #664: 以前はこれと同じ「マスタ→DB同期」が手動CLIの `sync_strict.py` にも")
+* 根拠: docstring (行番号: 123 / 抜粋: "Issue #664: 以前はこれと同じ「マスタ→DB同期」が手動CLIの `sync_strict.py` にも")
+
+**（Issue #954 で分割）** 本メソッドは168行あったため、挙動を変えずに次の4つの非公開メソッドへ切り出した。本体に残るのは、検証→(`dry_run`なら`_report_dry_run`へ)→1つの`get_db_cursor(commit=True)`の中で3テーブルを順に同期、という流れだけである。3つの同期メソッドは同じ`cur`を受け取るため、分割前と同じく1トランザクションで実行され、途中で例外が出れば`get_db_cursor`がまとめてロールバックする。
+
+| メソッド | 役割 | 根拠 |
+| --- | --- | --- |
+| `_load_validated_master` | `load_master_module()`で読み込み、`MasterUser`/`MasterQuest`/`MasterReward`で検証した`(users, quests, rewards)`を返す。`strict`時の欠損キー補完と`quest_users`の除外もここ。例外は`HTTPException(500)`に変換する | `def _load_validated_master(self, strict: bool) -> tuple[list[Any], list[Any], list[Any]]:` (行番号: 157) |
+| `_upsert_master_users` | `quest_users`へのUPSERT。衝突時は`name`/`job_class`/`role`だけを更新し、残高(`gold`/`exp`/`level`)は新規行の初期値としてのみ書く | `def _upsert_master_users(self, cur: Any, valid_users: list[Any]) -> None:` (行番号: 185) |
+| `_sync_quest_master` | `quest_master`のマスタに無い行の削除(空マスタ時の`strict`分岐を含む)とUPSERT | `def _sync_quest_master(self, cur: Any, valid_quests: list[Any], strict: bool) -> None:` (行番号: 209) |
+| `_sync_reward_master` | `reward_master`のマスタに無い行の削除(`user_inventory`から参照される行は残す)とUPSERT | `def _sync_reward_master(self, cur: Any, valid_rewards: list[Any]) -> None:` (行番号: 261) |
+
+* 根拠: `with get_db_cursor(commit=True) as cur:` (行番号: 149)
 
 `strict`による分岐は次の3点である。
 * **マスタのクエストが空のときの扱い**: `strict=False`は`quest_master`への`DELETE`自体をスキップする安全弁（#242。API経路には確認プロンプトが無いため）。`strict=True`は`DELETE FROM quest_master`で全削除する（事故を防ぐ役割はCLI側の`--allow-empty-master`と確認プロンプトが担う）。報酬側は`strict`によらず、`user_inventory`から参照が残っている行のみが個別に保護される非対称な実装のまま。
-* 根拠: `elif strict:` (行番号: 187〜201 / 抜粋: "Deleted ALL quests (Master is empty)")
+* 根拠: `elif strict:` (行番号: 219〜225 / 抜粋: "Deleted ALL quests (Master is empty)")
 * **`quest_users`の同期**: `strict=True`のとき`valid_users`は空リストとなり、ユーザーのUPSERTループは一切回らない。CLIの対象は一貫して`quest_master`/`reward_master`の2テーブルである。
-* 根拠: `valid_users = [] if strict else [MasterUser(**u) for u in quest_data.USERS]` (行番号: 143〜145)
+* 根拠: `valid_users = [] if strict else [MasterUser(**u) for u in quest_data.USERS]` (行番号: 166)
 * **マスタ各エントリの欠損キーの扱い**: `strict=True`のとき、`_apply_legacy_quest_defaults`/`_apply_legacy_reward_defaults`が統合前の`sync_strict.py`と同じ既定値（`type='daily'`/`target='all'`/`icon='📝'`/`chance=1.0`、報酬は`category='small'`/`cost_gold=0`/`icon_key='🎁'`/`target='all'`/`desc=''`）とレガシー別名（`exp_gain`/`gold_gain`/`icon_key`、報酬の`cost`/`icon`）を適用してからPydantic検証にかける。`strict=False`は従来どおり生のdictをそのまま`MasterQuest`/`MasterReward`へ渡す。
-* 根拠: `q_data = _apply_legacy_quest_defaults(q) if strict else q.copy()` (行番号: 146〜152)
-* 根拠: `ON CONFLICT(user_id) DO UPDATE SET\n                        name = excluded.name,\n                        job_class = excluded.job_class,\n                        role = COALESCE(excluded.role, quest_users.role)` (行番号: 213〜216)
-* 根拠: `if active_q_ids:\n                ph = ','.join(['?'] * len(active_q_ids))\n                cur.execute(f"DELETE FROM quest_master WHERE quest_id NOT IN ({ph})", active_q_ids)  # nosec B608\n            else:\n                logger.warning(\n                    "⚠️ quest_data.QUESTSが空のため、quest_masterへの全削除操作を"\n                    "スキップしました(意図しない全消去を防ぐための安全弁)。"\n                )` (行番号: 182〜201)
-* 根拠: `for stale_reward_id in stale_reward_ids:\n                if stale_reward_id in referenced_reward_ids:\n                    logger.warning(\n                        f"⚠️ reward_id={stale_reward_id} はマスタから削除されましたが、"\n                        "user_inventoryに参照が残っているため削除をスキップします。"\n                    )\n                    continue\n                cur.execute("DELETE FROM reward_master WHERE reward_id = ?", (stale_reward_id,))` (行番号: 253〜261)
+* 根拠: `q_data = _apply_legacy_quest_defaults(q) if strict else q.copy()` (行番号: 169)
+* 根拠: `ON CONFLICT(user_id) DO UPDATE SET\n                        name = excluded.name,\n                        job_class = excluded.job_class,\n                        role = COALESCE(excluded.role, quest_users.role)` (行番号: 203〜206)
+* 根拠: `if active_q_ids:\n                ph = ','.join(['?'] * len(active_q_ids))\n                cur.execute(f"DELETE FROM quest_master WHERE quest_id NOT IN ({ph})", active_q_ids)  # nosec B608\n            else:\n                logger.warning(\n                    "⚠️ quest_data.QUESTSが空のため、quest_masterへの全削除操作を"\n                    "スキップしました(意図しない全消去を防ぐための安全弁)。"\n                )` (行番号: 212〜235)
+* 根拠: `for stale_reward_id in stale_reward_ids:\n                if stale_reward_id in referenced_reward_ids:\n                    logger.warning(\n                        f"⚠️ reward_id={stale_reward_id} はマスタから削除されましたが、"\n                        "user_inventoryに参照が残っているため削除をスキップします。"\n                    )\n                    continue\n                cur.execute("DELETE FROM reward_master WHERE reward_id = ?", (stale_reward_id,))` (行番号: 293〜300)
 * **引数/リクエスト**: `strict: bool = False`（上記の3分岐を有効にする。手動CLI`sync_strict.py`のみが`True`を渡す）、`dry_run: bool = False`（DBを変更せず件数のみログに出す）
-* 根拠: (行番号: 103)
+* 根拠: (行番号: 120)
 * **戻り値/レスポンス**: `Dict[str, str]`。通常は`{"status": "synced", "message": "Master data updated."}`、`dry_run=True`のときは`_report_dry_run`が返す`{"status": "dry-run", "message": "No changes were made."}`
-* 根拠: (行番号: 268〜269), (行番号: 156〜157 / 抜粋: "return self._report_dry_run(valid_quests, valid_rewards, strict=strict)")
+* 根拠: (行番号: 155), (行番号: 145 / 抜粋: "return self._report_dry_run(valid_quests, valid_rewards, strict=strict)")
 * **副作用**: `quest_data`モジュールの`importlib.reload`（`load_master_module`経由）、DB更新/削除（`quest_users`, `quest_master`, `reward_master`）、DB参照（`user_inventory`の参照確認）、ログ出力。`dry_run=True`のときはDBへの変更を一切行わない
-* 根拠: (行番号: 141〜269)
+* 根拠: (行番号: 141〜155)
 * **エラーハンドリング**: `quest_data`が`None`(下位互換シム側のimport失敗時)の場合`ImportError`を送出しログ出力。Pydanticバリデーション失敗を含む例外全般を`except Exception as e:`で捕捉し`HTTPException(status_code=500, detail=f"Master Data Error: {str(e)}")`を送出する。
-* 根拠: `except Exception as e:` (行番号: 154〜156 / 抜粋: "raise HTTPException(status_code=500, detail=f\"Master Data Error: {str(e)}\")"), `raise ImportError("quest_data module missing")` (行番号: 44〜46)
+* 根拠: `except Exception as e:` (行番号: 181〜183 / 抜粋: "raise HTTPException(status_code=500, detail=f\"Master Data Error: {str(e)}\")"), `raise ImportError("quest_data module missing")` (行番号: 43)
 
 ### `GameSystem._report_dry_run`
 
 * **役割**: **（Issue #664 で追加）** `dry_run=True`のときにDBを変更せず、削除・更新される件数だけをログに出す。`get_db_cursor(commit=False)`を開き、`_count_rows_to_delete`のSELECTのみを実行する。クエスト側の削除見込み件数は`strict`の方針に従い、`strict=False`かつマスタが空の場合は(削除自体をスキップするため)0件として報告する。
-* 根拠: `def _report_dry_run(` (行番号: 289〜315)
+* 根拠: `def _report_dry_run(` (行番号: 313〜339)
 * **引数/リクエスト**: `valid_quests: List[Any]`, `valid_rewards: List[Any]`, `strict: bool`
 * 根拠: (行番号: 271〜273)
 * **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "dry-run", "message": "No changes were made."}`）
-* 根拠: (行番号: 315 / 抜粋: "return {\"status\": \"dry-run\", \"message\": \"No changes were made.\"}")
+* 根拠: (行番号: 339 / 抜粋: "return {\"status\": \"dry-run\", \"message\": \"No changes were made.\"}")
 * **副作用**: `get_db_cursor(commit=False)`によるDB参照(`SELECT COUNT(*)`)とログ出力のみ。コミットしないためDBへの変更は残らない
-* 根拠: (行番号: 281〜295)
+* 根拠: (行番号: 281〜319)
 * **エラーハンドリング**: なし(`get_db_cursor`の挙動に依存)
-* 根拠: (行番号: 271〜297、try-exceptなし)
+* 根拠: (行番号: 271〜321、try-exceptなし)
 
 ### `GameSystem.get_all_view_data`
 
 * **役割**: `family-quest`フロントエンドのメイン画面向けに、ユーザー一覧・クエスト一覧・報酬一覧・完了済みクエスト・最近のログ・承認待ち一覧を1つの辞書にまとめて返す。`quest_users`の取得結果は、SQLiteのデフォルト順序(主キーのアルファベット順)ではなく`quest_data.USERS`の宣言順に並べ替える(`canonical_order`)。各クエストには`quest_service._compute_boost_from_last_completed`によるボーナス(`bonus_gold`/`bonus_exp`)を付与し、この際に必要な「対象ユーザー×クエストの直近の非rejected完了日時」を、クエストごとに個別SELECTするのではなく`GROUP BY user_id, quest_id`の1クエリでまとめて取得してN+1クエリを避ける(`last_completed_map`)。`target_user`が実在ユーザーでない(`'all'`/`'siblings'`等)場合は、閲覧中のユーザー(`viewer_user_id`)または兄妹の代表ユーザーをボーナス算出の代表として使う。過去1ヶ月の`quest_history`(`status='approved'`)から、`quest_service.is_within_reset_period`で現在の周期内と判定されたものだけを`completedQuests`として集約する(`infinite`型は全件、それ以外はユーザーごとに最新1件のみ評価)。
-* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 317〜475)
-* 根拠: `if _quest_service_shim.quest_data:\n                canonical_order = {u['user_id']: i for i, u in enumerate(_quest_service_shim.quest_data.USERS)}\n                users.sort(key=lambda u: canonical_order.get(u['user_id'], len(canonical_order)))` (行番号: 313〜315)
+* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 341〜499)
+* 根拠: `if _quest_service_shim.quest_data:\n                canonical_order = {u['user_id']: i for i, u in enumerate(_quest_service_shim.quest_data.USERS)}\n                users.sort(key=lambda u: canonical_order.get(u['user_id'], len(canonical_order)))` (行番号: 337〜339)
 * 根拠: `last_completed_map: Dict[tuple, str] = {\n                (row['user_id'], row['quest_id']): row['last_completed_at']\n                for row in cur.execute("""\n                    SELECT user_id, quest_id, MAX(completed_at) AS last_completed_at\n                    FROM quest_history\n                    WHERE status != 'rejected'\n                    GROUP BY user_id, quest_id\n                """)\n            }` (行番号: 222〜230)
 * 根拠: `if q['target_user'] == 'all' or not q['target_user']:\n                    boost_user_id = viewer_user_id\n                elif q['target_user'] == 'siblings' and sibling_child_ids:\n                    boost_user_id = sibling_child_ids[0]\n                else:\n                    boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 236〜241)
-* 根拠: `if is_infinite:\n                    for c in recent_completed:\n                        if c['quest_id'] == q_id:\n                            if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):\n                                valid_completed.append(c)\n                else:\n                    users_processed = set()\n                    for c in recent_completed:\n                        ...` (行番号: 282〜298)
+* 根拠: `if is_infinite:\n                    for c in recent_completed:\n                        if c['quest_id'] == q_id:\n                            if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):\n                                valid_completed.append(c)\n                else:\n                    users_processed = set()\n                    for c in recent_completed:\n                        ...` (行番号: 282〜322)
 * **引数/リクエスト**: `viewer_user_id: Optional[str] = None`
 * 根拠: (行番号: 168)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`users`, `quests`, `rewards`, `completedQuests`, `logs`, `pendingQuests`）
-* 根拠: (行番号: 314〜318)
+* 根拠: (行番号: 338〜342)
 * **副作用**: DB参照（`quest_users`, `quest_master`, `reward_master`, `quest_history`）、`_fetch_recent_logs`の呼び出し
-* 根拠: (行番号: 174, 194, 251, 266〜269, 271〜273, 312)
+* 根拠: (行番号: 174, 194, 251, 266〜269, 271〜273, 336)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 168〜318)
+* 根拠: (行番号: 168〜342)
 
 ### `GameSystem._fetch_recent_logs`
 
 * **役割**: `quest_history`(`status='approved' AND quest_id != 0`、`id`降順、最大20件)と`reward_history`(`id`降順、最大20件)を取得しマージ、`ts`降順で先頭20件に切り詰めたうえで、`quest_users`から取得したユーザー名を付与し表示テキストと日付文字列を整形して返す。ユーザーが見つからない場合は`'誰か'`のプレースホルダを使う。
-* 根拠: `def _fetch_recent_logs(self, cur) -> List[dict]:` (行番号: 477〜495)
-* 根拠: `q_logs = cur.execute("""\n            SELECT id, user_id, quest_title as title, 'quest' as type, completed_at as ts\n            FROM quest_history WHERE status='approved' AND quest_id != 0 ORDER BY id DESC LIMIT 20\n        """).fetchall()` (行番号: 321〜324)
+* 根拠: `def _fetch_recent_logs(self, cur) -> List[dict]:` (行番号: 501〜519)
+* 根拠: `q_logs = cur.execute("""\n            SELECT id, user_id, quest_title as title, 'quest' as type, completed_at as ts\n            FROM quest_history WHERE status='approved' AND quest_id != 0 ORDER BY id DESC LIMIT 20\n        """).fetchall()` (行番号: 345〜348)
 * **引数/リクエスト**: `cur`（呼び出し元のトランザクション内で使うDBカーソル）
-* 根拠: (行番号: 320)
+* 根拠: (行番号: 344)
 * **戻り値/レスポンス**: `List[dict]`（各要素は`id`, `text`, `dateStr`, `timestamp`）
-* 根拠: (行番号: 337〜338)
+* 根拠: (行番号: 361〜362)
 * **副作用**: DB参照（`quest_history`, `reward_history`, `quest_users`）
-* 根拠: (行番号: 321, 325, 330)
+* 根拠: (行番号: 345, 349, 354)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 320〜338)
+* 根拠: (行番号: 344〜362)
 
 ### `game_system` / `quest_service` / `approval_service` / `shop_service` / `user_service` (モジュールレベル変数)
 
 * **役割**: `GameSystem`のシングルトンインスタンス`game_system`と、その内部に保持される`quest_service`/`approval_service`/`shop_service`/`user_service`をモジュールレベルの変数として公開する。下位互換シム(`services/quest_service.py`)がこれらをそのまま再エクスポートし、`routers/quest_router.py`がシム経由でimportして使用する。
-* 根拠: `game_system = GameSystem()\nquest_service = game_system.quest_service\nshop_service = game_system.shop_service\nuser_service = game_system.user_service` (行番号: 341〜344)
+* 根拠: `game_system = GameSystem()\nquest_service = game_system.quest_service\nshop_service = game_system.shop_service\nuser_service = game_system.user_service` (行番号: 365〜368)
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルの変数代入。`GameSystem()`のインスタンス化自体は`__init__`の副作用を参照）
-* 根拠: (行番号: 341)
+* 根拠: (行番号: 365)
 
 ## 5. 処理フロー図
 
@@ -300,17 +311,17 @@ graph TD
 ## 8. 保守上の注意点
 
 * **`quest_data`をモジュールグローバルとしてimportしない設計**: `load_master_module`/`get_all_view_data`はいずれも実行のたびに`from services import quest_service as _quest_service_shim`をローカルimportし、`_quest_service_shim.quest_data`経由で現在値を読む。これは、テストが下位互換シム側の`quest_data`属性を`monkeypatch`で差し替える前提を尊重するためのコメント付きの意図的な設計であり、通常の`import quest_data`に書き換えると差し替えが本ファイルの実行結果に反映されなくなる。
-* 根拠: `from services import quest_service as _quest_service_shim` (行番号: 39, 300)、docstring (行番号: 27〜36)
+* 根拠: `from services import quest_service as _quest_service_shim` (行番号: 39, 324)、docstring (行番号: 27〜36)
 * **`sync_master_data`のクエストマスタ全削除に対する安全弁は`strict=False`だけのもの**: `quest_data.QUESTS`が空の場合、`strict=False`(API経路)は`quest_master`への`DELETE`自体をスキップする(意図しない全消去防止 #242)が、`strict=True`(手動CLI)は全削除する。一方、報酬(`reward_master`)側は`strict`によらず`REWARDS`が空でも`DELETE`自体はスキップされず、`user_inventory`から参照が残っている行のみが個別に保護される非対称な実装になっている。
-* 根拠: `elif strict:` (行番号: 187〜201)、`else:\n                stale_rewards = cur.execute("SELECT reward_id FROM reward_master").fetchall()` (行番号: 225〜227)
+* 根拠: `elif strict:` (行番号: 219〜225)、`else:\n                stale_rewards = cur.execute("SELECT reward_id FROM reward_master").fetchall()` (行番号: 270〜271)
 * **（Issue #664）マスタ同期の実装をここ以外に増やさないこと**: 以前は手動CLI`sync_strict.py`にも同等の`DELETE ... NOT IN`+UPSERTがあり、列リストが食い違う事故が#100・#164・#165と3度起きた。新しい列の追加や削除方針の変更は本メソッド(+`services/quest/master_sync_sql.py`)だけで行う。`tests/test_sync_strict.py`の`TestMasterSyncSqlIsSharedWithGameSystem`が`sync_strict.py`側に同期の再実装が現れないことを、`TestStrictFlagPreservesLegacySyncStrictBehaviour`が`strict`の3分岐を固定している。
-* 根拠: docstring (行番号: 104〜126 / 抜粋: "Issue #664: 以前はこれと同じ「マスタ→DB同期」が手動CLIの `sync_strict.py` にも")
+* 根拠: docstring (行番号: 123 / 抜粋: "Issue #664: 以前はこれと同じ「マスタ→DB同期」が手動CLIの `sync_strict.py` にも")
 * **`strict=True`の欠損キー補完は後方互換のためだけに存在する**: `_apply_legacy_quest_defaults`/`_apply_legacy_reward_defaults`は、統合前の`sync_strict.py`が生dictを直接UPSERTしていたときの緩さを再現するためのもので、`quest_data.py`の実データはこれらのキーをすべて持っている(つまり通常は何も補われない)。ここを削ると、キーの一部を欠いたマスタでCLIを実行したときの結果が統合前と変わる。
 * 根拠: `def _apply_legacy_quest_defaults(q: Dict[str, Any]) -> Dict[str, Any]:` (行番号: 48〜64 / 抜粋: "統合にあたって検証は `MasterQuest` に一本化したが、**CLI の受理範囲は")
 * **`get_all_view_data`のユーザー順序はSQLiteのデフォルト順に依存しない**: `quest_data.USERS`の宣言順で明示的にソートし直しているため、DBの内部的な返却順が変わっても`family-quest`側の`users[currentUserIdx]`という配列インデックス対応が崩れないよう配慮されている。ただし`_quest_service_shim.quest_data`が`None`(import失敗時)の場合、このソート自体がスキップされDBのデフォルト順のまま返る。
-* 根拠: `if _quest_service_shim.quest_data:\n                canonical_order = ...` (行番号: 313〜315)
+* 根拠: `if _quest_service_shim.quest_data:\n                canonical_order = ...` (行番号: 337〜339)
 * **N+1クエリ対策はクエストのボーナス計算のみに適用**: `last_completed_map`によるまとめ取得は`_compute_boost_from_last_completed`のためのものであり、`completedQuests`集約処理(`recent_completed`のループ)は各クエスト×各履歴をPython側でループする実装のままである。
-* 根拠: (行番号: 350〜358, 405〜426)
+* 根拠: (行番号: 374〜382, 429〜450)
 
 ## 9. 不明事項一覧
 
