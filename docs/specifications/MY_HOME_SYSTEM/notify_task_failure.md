@@ -105,9 +105,9 @@
 * **戻り値/レスポンス**: `str`
 * 根拠: [戻り値] (行番号: 90 / 抜粋: "return \"\".join(lines[-LOG_TAIL_LINES:])[-LOG_TAIL_LIMIT:]")
 * **副作用**: ログファイルの読み取りのみ
-* 根拠: [ファイル読み取り] (行番号: 87〜88 / 抜粋: "with open(log_file, \"r\", encoding=\"utf-8\", errors=\"replace\") as f:")
+* 根拠: [ファイル読み取り] (行番号: 86〜87 / 抜粋: "with open(log_file, \"r\", encoding=\"utf-8\", errors=\"replace\") as f:")
 * **エラーハンドリング**: `OSError` を捕捉して理由を含む文字列を返す。デコード不能なバイトは `errors="replace"` で潰す
-* 根拠: [例外処理] (行番号: 89〜90 / 抜粋: "except OSError as e:")
+* 根拠: [例外処理] (行番号: 88〜89 / 抜粋: "except OSError as e:")
 
 ### `notify`
 

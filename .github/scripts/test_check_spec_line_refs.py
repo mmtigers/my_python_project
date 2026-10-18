@@ -182,12 +182,55 @@ def test_ignores_ambiguous_literal_snippet(fake_repo):
     assert findings == []
 
 
-def test_ignores_range_citation_with_literal_snippet(fake_repo):
-    """範囲引用に式・文の抜粋が付いたものは対象外(抜粋は範囲の先頭とは限らない)。"""
-    _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 998〜999 / 抜粋: "return \\"bye \\" + name")\n')
+def test_range_citation_with_literal_snippet_inside_range_is_accepted(fake_repo):
+    """範囲引用に単一行の抜粋が付いたものは、一意な抜粋の行が範囲の中にあれば通ること(Issue #950)。"""
+    # `return "bye " + name` は10行目にだけ現れる。範囲 9〜10 はそれを含む(先頭ではなく末尾)。
+    _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 9〜10 / 抜粋: "return \\"bye \\" + name")\n')
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert findings == []
+
+
+def test_range_citation_with_literal_snippet_outside_range_is_detected(fake_repo):
+    """一意な抜粋の行が引用範囲の外にあれば検出し、--fix では書き換えないこと(先頭とは限らないため)。"""
+    path = _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 998〜999 / 抜粋: "return \\"bye \\" + name")\n')
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert len(findings) == 1
+    assert findings[0].actual == 10
+    assert "引用範囲の外" in findings[0].reason
+    checker.scan(fix=True)
+    assert "行番号: 998〜999" in path.read_text(encoding="utf-8")
+
+
+def test_range_citation_snippet_one_line_before_range_is_detected(fake_repo):
+    """範囲が1行ずれて抜粋の行を含まなくなった(境界は含む側)場合も検出すること。"""
+    _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 11〜12 / 抜粋: "return \\"bye \\" + name")\n')
+    findings, _ = checker.scan(fix=False)
+    assert len(findings) == 1
+
+
+def test_range_citation_with_ambiguous_snippet_is_not_gated(fake_repo):
+    """範囲引用でも抜粋が一意でなければ範囲に含まれるか決められないので対象外のままにすること。"""
+    _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 998〜999 / 抜粋: "return \\"")\n')
     findings, checked = checker.scan(fix=False)
     assert checked == 0
     assert findings == []
+
+
+def test_range_citation_with_short_snippet_is_not_gated(fake_repo):
+    """8文字未満の短い抜粋は範囲引用でも対象外のままにすること。"""
+    _write_spec(fake_repo, '* 根拠: クラス (行番号: 998〜999 / 抜粋: "Greeter")\n')
+    findings, checked = checker.scan(fix=False)
+    assert checked == 0
+    assert findings == []
+
+
+def test_report_excludes_range_citations_gated_by_containment(fake_repo):
+    """範囲内検証でゲートに入った引用を、非ゲートとして二重に数えないこと。"""
+    _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 9〜10 / 抜粋: "return \\"bye \\" + name")\n')
+    _, _, total_checked = checker.report_non_definition_citations()
+    assert total_checked == 0
 
 
 def test_ignores_short_literal_snippet(fake_repo):
@@ -319,46 +362,51 @@ def test_fix_rewrites_multiline_range_citation(fake_repo):
 
 
 def test_ignores_multiline_range_wider_than_its_snippet(fake_repo):
-    """引用範囲の方が抜粋より広ければ対象外(抜粋は範囲内の見本にすぎない)。
+    """引用範囲の方が抜粋より広ければ位置を書き換えない(抜粋は範囲内の見本にすぎない)。
 
-    抜粋は6行目と10行目の2行だが、引用は 900〜910(11行)を指している。ここで
-    6〜10 へ書き換えると、著者が示した範囲の情報が失われる。
+    抜粋は6行目と10行目の2行だが、引用は 5〜15(11行)を指している。ここで
+    6〜10 へ書き換えると、著者が示した範囲の情報が失われる。範囲内検証(Issue #950)で
+    抜粋の先頭行が範囲に含まれることだけは確認されるが、--fix は何も変えない。
     """
-    _write_spec(
+    path = _write_spec(
         fake_repo,
-        r'* 根拠: 実装 (行番号: 900〜910 / 抜粋: "return \"hello \" + name\nreturn \"bye \" + name")'
+        r'* 根拠: 実装 (行番号: 5〜15 / 抜粋: "return \"hello \" + name\nreturn \"bye \" + name")'
         + "\n",
     )
-    findings, checked = checker.scan(fix=False)
-    assert checked == 0
+    findings, checked = checker.scan(fix=True)
+    assert checked == 1
     assert findings == []
+    assert "行番号: 5〜15" in path.read_text(encoding="utf-8")
 
 
 def test_ignores_multiline_range_when_the_end_is_not_unique(fake_repo):
-    """末尾行が一意でなければ終端を決められないので対象外。
+    """末尾行が一意でなければ終端を決められないので、位置の書き換えはしない。
 
-    `return "` は greet(6行目)と farewell(10行目)の両方に現れる。
+    `return "` は greet(6行目)と farewell(10行目)の両方に現れる。先頭行は一意なので
+    範囲内検証だけが働き、範囲の外を指していれば検出するが、--fix は書き換えない。
     """
-    _write_spec(
+    path = _write_spec(
         fake_repo,
         r'* 根拠: 実装 (行番号: 900〜901 / 抜粋: "return \"hello \" + name\nreturn \"")'
         + "\n",
     )
-    findings, checked = checker.scan(fix=False)
-    assert checked == 0
-    assert findings == []
+    findings, checked = checker.scan(fix=True)
+    assert checked == 1
+    assert len(findings) == 1 and "引用範囲の外" in findings[0].reason
+    assert "行番号: 900〜901" in path.read_text(encoding="utf-8")
 
 
 def test_ignores_range_citation_whose_end_precedes_its_start(fake_repo):
-    """末尾行が先頭行より前に来る抜粋は、対応が取れていないので対象外。"""
-    _write_spec(
+    """末尾行が先頭行より前に来る抜粋は、対応が取れていないので位置を書き換えない。"""
+    path = _write_spec(
         fake_repo,
-        r'* 根拠: 逆順 (行番号: 900〜904 / 抜粋: "return \"bye \" + name\nreturn \"hello \" + name")'
+        r'* 根拠: 逆順 (行番号: 8〜12 / 抜粋: "return \"bye \" + name\nreturn \"hello \" + name")'
         + "\n",
     )
-    findings, checked = checker.scan(fix=False)
-    assert checked == 0
+    findings, checked = checker.scan(fix=True)
+    assert checked == 1  # 先頭行(10行目)が範囲に含まれることだけを見る
     assert findings == []
+    assert "行番号: 8〜12" in path.read_text(encoding="utf-8")
 
 
 def test_handles_parallel_citations_elementwise(fake_repo):
@@ -633,14 +681,15 @@ def _triage(repo, body):
 
 def test_triage_range_citation_whose_snippet_is_inside_the_range_is_ok(fake_repo):
     """範囲引用の途中に抜粋がある引用は「引用範囲内に実在」(Issue #950。±1判定だと誤って未検出になる)。"""
-    total = _triage(fake_repo, '* 根拠: 戻り値 (行番号: 5〜7 / 抜粋: "return \\"hello \\" + name")\n')
+    # `return "` は6行目と10行目に現れて一意でないため、範囲内検証(Issue #950)のゲートに入らない。
+    total = _triage(fake_repo, '* 根拠: 戻り値 (行番号: 5〜7 / 抜粋: "return \\"")\n')
     assert total == {checker.TRIAGE_OK: 1}
 
 
-def test_triage_range_citation_whose_snippet_is_elsewhere_is_unique(fake_repo):
-    """抜粋が引用範囲の外の1行にだけ実在する範囲引用は「ずれている・位置確定」。"""
+def test_triage_range_citation_whose_unique_snippet_is_elsewhere_is_gated_not_triaged(fake_repo):
+    """抜粋が引用範囲の外の1行にだけ実在する範囲引用は、今はゲートが検出するので仕分けの対象外。"""
     total = _triage(fake_repo, '* 根拠: 戻り値 (行番号: 1〜2 / 抜粋: "return \\"bye \\" + name")\n')
-    assert total == {checker.TRIAGE_UNIQUE: 1}
+    assert total == {}
 
 
 def test_triage_ambiguous_snippet_outside_the_range_is_multi(fake_repo):

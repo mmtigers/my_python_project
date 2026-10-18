@@ -38,10 +38,13 @@ Issue #550 の分割後は存在しない行範囲を指すものまで残って
 次のものは引き続き対象外（誤検知を出さない側に倒す）。
 
 - 抜粋がソース内に見つからない／2箇所以上に現れる引用（どの行を指すか決められない）
-- 範囲引用（`行番号: 137〜237`）に**単一行**の抜粋が付いたもの。抜粋は範囲の先頭とは
+- 範囲引用（`行番号: 137〜237`）に**単一行**の抜粋が付いたものの**位置の追従**。抜粋は範囲の先頭とは
   限らない（モジュールdocstringの1行目、クラス本体の途中の1行など）ため、先頭行の
   ズレに合わせて終端もずらすと引用の幅そのものが壊れる。抜粋が複数行なら両端が
   決まるので、そちらは対象に含める
+  （ただし抜粋の先頭行がソース内で一意なら、その行が引用範囲の**中に**あることだけは
+  検証する — `_range_containment`、Issue #950。正しい引用は必ず含むので誤検知にならず、
+  範囲がずれて抜粋を含まなくなったことを検知できる。--fix では書き換えない）
 - 8文字未満の短い抜粋（`return` 等。偶然の一致が多い）
 - 同名の定義が複数あり、直前の `### `クラス名.メソッド名`` 見出しでも一意化できないもの
 - `行番号: A, B / 抜粋: "s1", "s2"` のように要素数が一致する並列引用は、位置対応で
@@ -423,6 +426,26 @@ def _literal_target(
     return (start, end)
 
 
+def _range_containment(snippet: str, cited: str, src_lines: List[str]) -> Optional[Tuple[int, int, int]]:
+    """範囲引用の抜粋が、引用した範囲の**中に**あるかを調べるための材料を返す(Issue #950)。
+
+    `_literal_target` が確定できない範囲引用(単一行の抜粋が付いたもの、範囲が抜粋より広いもの)も、
+    抜粋の先頭行がソース内で一意なら「その行は引用範囲 `開始〜終了` の中になければならない」。
+    抜粋が範囲の先頭とは限らないので位置の書き換え先は決まらない(--fix の対象外)が、
+    範囲が抜粋の行を含まなくなった＝ずれた、ことは確実に言える。正しい引用は必ず含むので誤検知にならない。
+    返り値は `(抜粋の行, 範囲の開始, 範囲の終了)`。範囲引用でない・先頭行が一意でないなら None。
+    **ゲートの判定と `--report` の除外は必ずこの関数を共有すること**(`_literal_target` と同じ理由)。
+    """
+    head = _literal_head(snippet)
+    if head is None or not re.search(r"[〜~-]", cited):
+        return None
+    bounds = [int(v) for v in re.findall(r"\d+", cited)]
+    if len(bounds) != 2:
+        return None
+    line = _unique_literal_line(head, src_lines)
+    return None if line is None else (line, bounds[0], bounds[1])
+
+
 def _definition_pairs(rest, before, snippets, back_snippets, items):
     """根拠ブロックの def/class 引用を (位置, 抜粋) で返し、その位置集合も返す。
 
@@ -604,6 +627,17 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
                         cited = items[pos]
                         target = _literal_target(snippet, cited, src_lines)
                         if target is None:
+                            contained = _range_containment(snippet, cited, src_lines)
+                            if contained is None:
+                                continue
+                            checked += 1
+                            line_no, lo, hi = contained
+                            if lo <= line_no <= hi:
+                                continue
+                            findings.append(Finding(
+                                spec, idx + 1, _literal_head(snippet) or "", cited, line_no,
+                                "抜粋の行が引用範囲の外にある(範囲がずれている)",
+                            ))
                             continue
                         start_line, end_line = target
                         checked += 1
@@ -773,7 +807,10 @@ def _iter_ungated_citations():
                     # scan() が厳密に検証するのは「単一行の引用 かつ 抜粋がソース内で
                     # 一意」のものだけ。ここの除外条件はそれと完全に一致させる
                     # (広く除外すると、ゲートにも非ゲートの集計にも現れない引用が生まれる)。
-                    if gated and _literal_target(snippet, items[pos], src_lines) is not None:
+                    if gated and (
+                        _literal_target(snippet, items[pos], src_lines) is not None
+                        or _range_containment(snippet, items[pos], src_lines) is not None
+                    ):
                         continue
                     yield name, src_lines, items[pos], head
 

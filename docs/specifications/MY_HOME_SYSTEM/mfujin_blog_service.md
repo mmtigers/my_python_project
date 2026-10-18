@@ -32,7 +32,7 @@
 | `bs4.BeautifulSoup` | 外部 | HTML解析 | 根拠: [インポート宣言] (行番号: 24 / 抜粋: "from bs4 import BeautifulSoup") |
 | `bs4.element.Tag` | 外部 | `_is_manga_page_image`の引数型ヒント | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "from bs4.element import Tag") |
 | `core.logger.setup_logging` | 外部 | ロガー初期化 | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "from core.logger import setup_logging") |
-| `linebot.v3.messaging`(`FlexContainer`,`FlexMessage`,`ImageMessage`,`Message`,`TextMessage`) | 外部 | LINE Messaging API v3のメッセージオブジェクト | 根拠: [インポート宣言] (行番号: 28〜34 / 抜粋: "from linebot.v3.messaging import (\n    FlexContainer,\n    FlexMessage,\n    ImageMessage,\n    Message,\n    TextMessage,\n)") |
+| `linebot.v3.messaging`(`FlexContainer`,`FlexMessage`,`ImageMessage`,`Message`,`TextMessage`) | 外部 | LINE Messaging API v3のメッセージオブジェクト | 根拠: [インポート宣言] (行番号: 27〜33 / 抜粋: "from linebot.v3.messaging import (\n    FlexContainer,\n    FlexMessage,\n    ImageMessage,\n    Message,\n    TextMessage,\n)") |
 | `requests.adapters.HTTPAdapter` | 外部 | リトライ機構をセッションにマウント | 根拠: [インポート宣言] (行番号: 34 / 抜粋: "from requests.adapters import HTTPAdapter") |
 | `urllib3.util.retry.Retry` | 外部 | リトライポリシー定義 | 根拠: [インポート宣言] (行番号: 35 / 抜粋: "from urllib3.util.retry import Retry") |
 
@@ -118,7 +118,7 @@
 ### `build_session`
 
 * **役割**: リトライ(合計3回、backoff_factor=1.0、対象ステータス500/502/503/504、対象メソッドGET/HEAD)・ブラウザ風User-Agentを設定した`requests.Session`を生成する。DDD/newface_monitor.pyの既存パターン(`requests.Session`+`urllib3.Retry`)に揃えている。
-* 根拠: [関数定義] (行番号: 86〜110 / 抜粋: "def build_session() -> requests.Session:")、[Retry設定] (行番号: 93〜98 / 抜粋: "retries = Retry(\n        total=3,\n        backoff_factor=1.0,\n        status_forcelist=[500, 502, 503, 504],\n        allowed_methods=[\"GET\", \"HEAD\"],\n    )")
+* 根拠: [関数定義] (行番号: 86〜110 / 抜粋: "def build_session() -> requests.Session:")、[Retry設定] (行番号: 92〜97 / 抜粋: "retries = Retry(\n        total=3,\n        backoff_factor=1.0,\n        status_forcelist=[500, 502, 503, 504],\n        allowed_methods=[\"GET\", \"HEAD\"],\n    )")
 
 
 * **引数/リクエスト**: なし

@@ -43,7 +43,7 @@
 | `config` | 内部モジュール | LINEのユーザーID取得など設定情報の参照 | `import config` (行番号: 18 / 抜粋: "import config") |
 | `setup_logging` | 内部モジュール | ロガーの初期化 | `from core.logger import setup_logging` (行番号: 19 / 抜粋: "from core.logger import setup_logging") |
 | `send_push` | 内部モジュール | Discordへの通知メッセージ送信 | `from services.notification_service import send_push` (行番号: 20 / 抜粋: "from services.notification_service import send_push") |
-| `monitors.smart_timelapse_generator` の各要素 | 内部モジュール | 動き検知、イベント構築、クリップ生成、結合、Discordへのアップロードなどコア処理の実行 | `from monitors.smart_timelapse_generator import ...` (行番号: 24〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
+| `monitors.smart_timelapse_generator` の各要素 | 内部モジュール | 動き検知、イベント構築、クリップ生成、結合、Discordへのアップロードなどコア処理の実行 | `from monitors.smart_timelapse_generator import ...` (行番号: 23〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
 
 ### ブラックボックスとなる外部要素
 
@@ -54,7 +54,7 @@
 | `config` | モジュール内部で定義されている変数や初期化処理の内容が提供されていないため | `getattr(config, 'NVR_RECORD_DIR', ...)` (行番号: 203 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...)") |
 | `setup_logging` | ログ出力のフォーマット、出力先（ファイル/標準出力など）の仕様が提供されていないため | `logger = setup_logging(__name__)` (行番号: 37 / 抜粋: "logger = setup_logging(**name**)") |
 | `send_push` | 関数内部の処理、引数（`target`, `channel`など）に対する正確な挙動、エラーハンドリングの有無が提供されていないため | `send_push(...)` (行番号: 53 / 抜粋: "def _send_report(text: str) -> None:") |
-| `smart_timelapse_generator` の全インポート要素 | 各クラス(`MotionDetector`, `VideoBuilder`等)のメソッド、プロパティの仕様、各関数の詳細な処理内容、厳密な戻り値・引数の型定義が提供されていないため | `from monitors.smart_timelapse_generator import ...` (行番号: 24〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
+| `smart_timelapse_generator` の全インポート要素 | 各クラス(`MotionDetector`, `VideoBuilder`等)のメソッド、プロパティの仕様、各関数の詳細な処理内容、厳密な戻り値・引数の型定義が提供されていないため | `from monitors.smart_timelapse_generator import ...` (行番号: 23〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -286,7 +286,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `monitors/smart_timelapse_generator.py` | コアロジックとなる動き検知、クリップ切り出し、結合などのアルゴリズムや、隠蔽メソッド（`_build_clip`等）の正確な副作用と戻り値を把握するため。 | `from monitors.smart_timelapse_generator import ...` (行番号: 24〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
+| 高 | `monitors/smart_timelapse_generator.py` | コアロジックとなる動き検知、クリップ切り出し、結合などのアルゴリズムや、隠蔽メソッド（`_build_clip`等）の正確な副作用と戻り値を把握するため。 | `from monitors.smart_timelapse_generator import ...` (行番号: 23〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
 | 中 | `services/notification_service.py` | エラー時や処理完了時に呼ばれる `send_push` の引数（`target="discord"`等）がどのように処理され、実際にどのようなメッセージが飛ぶのかを確認するため。 | `from services.notification_service import send_push` (行番号: 20 / 抜粋: "from services.notification_service import send_push") |
 | 低 | `config.py` | `LINE_USER_ID` 以外にシステム全体の動作に影響を与える環境変数や設定値が存在するか確認するため。 | `import config` (行番号: 18 / 抜粋: "import config") |
 
