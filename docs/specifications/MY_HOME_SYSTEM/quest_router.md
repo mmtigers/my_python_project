@@ -77,7 +77,7 @@
 
 
 * **副作用**: 不明（外部関数 `game_system.sync_master_data_as_admin()` に依存。認可通過後に `sync_master_data()` と同じ同期が走る）
-* 根拠: メソッド呼び出し (行番号: 38 / 抜粋: "return game_system.sync_master_data_as_admin(action.admin_id)")
+* 根拠: メソッド呼び出し (参照: sync_master_data / 抜粋: "return game_system.sync_master_data_as_admin(action.admin_id)")
 
 
 * **エラーハンドリング**: ルーター自身には無い。`admin_id` の欠落・長さ違反は Pydantic の検証（FastAPIでは422）、`admin_id` が `role_adult` でなければサービス層（`locks._require_adult`）が403を送出する。
@@ -119,7 +119,7 @@
 
 
 * **引数/リクエスト**: `QuestAction` (フィールドとして `user_id`, `quest_id` を持つ)
-* 根拠: 引数定義 (行番号: 49-50 / 抜粋: "action: QuestAction")
+* 根拠: 引数定義 (参照: complete_quest / 抜粋: "action: QuestAction")
 
 
 * **戻り値/レスポンス**: `CompleteResponse`
@@ -142,7 +142,7 @@
 
 
 * **引数/リクエスト**: `ApproveAction` (フィールドとして `approver_id`, `history_id` を持つ)
-* 根拠: 引数定義 (行番号: 53-54 / 抜粋: "action: ApproveAction")
+* 根拠: 引数定義 (参照: approve_quest / 抜粋: "action: ApproveAction")
 
 
 * **戻り値/レスポンス**: `CompleteResponse`
@@ -165,7 +165,7 @@
 
 
 * **引数/リクエスト**: `ApproveAction` (フィールドとして `approver_id`, `history_id` を持つ)
-* 根拠: 引数定義 (行番号: 57-58 / 抜粋: "action: ApproveAction")
+* 根拠: 引数定義 (参照: reject_quest / 抜粋: "action: ApproveAction")
 
 
 * **戻り値/レスポンス**: `CancelResponse`
@@ -188,7 +188,7 @@
 
 
 * **引数/リクエスト**: `HistoryAction` (フィールドとして `user_id`, `history_id` を持つ)
-* 根拠: 引数定義 (行番号: 61-62 / 抜粋: "action: HistoryAction")
+* 根拠: 引数定義 (参照: cancel_quest / 抜粋: "action: HistoryAction")
 
 
 * **戻り値/レスポンス**: `CancelResponse`
@@ -211,7 +211,7 @@
 
 
 * **引数/リクエスト**: `RewardAction` (フィールドとして `user_id`, `reward_id` を持つ)
-* 根拠: 引数定義 (行番号: 65-66 / 抜粋: "action: RewardAction")
+* 根拠: 引数定義 (参照: purchase_reward / 抜粋: "action: RewardAction")
 
 
 * **戻り値/レスポンス**: `PurchaseResponse`
@@ -265,7 +265,7 @@
 
 
 * **副作用**: 不明（外部関数 `game_system.sync_master_data_as_admin()` に依存）
-* 根拠: メソッド呼び出し (行番号: 79 / 抜粋: "return game_system.sync_master_data_as_admin(action.admin_id)")
+* 根拠: メソッド呼び出し (参照: seed_data_endpoint / 抜粋: "return game_system.sync_master_data_as_admin(action.admin_id)")
 
 
 * **エラーハンドリング**: ルーター自身には無い（`sync_master_data` と同じく 422 / 403）。
@@ -280,7 +280,7 @@
 
 
 * **引数/リクエスト**: `UpdateUserAction` (フィールドとして `user_id`, `avatar_url` を持つ)
-* 根拠: 引数定義 (行番号: 77-78 / 抜粋: "action: UpdateUserAction")
+* 根拠: 引数定義 (参照: update_user_avatar / 抜粋: "action: UpdateUserAction")
 
 
 * **戻り値/レスポンス**: 不明（外部関数の戻り値）

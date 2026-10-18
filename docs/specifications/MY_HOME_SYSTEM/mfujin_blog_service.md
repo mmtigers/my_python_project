@@ -242,7 +242,7 @@
 
 
 * **戻り値/レスポンス**: `ArticleContent`
-* 根拠: (行番号: 176〜182 / 抜粋: "return ArticleContent(\n        url=url,\n        title=title,\n        published_at=published_at,\n        category=category,\n        image_urls=image_urls,\n    )")
+* 根拠: (参照: parse_article_content / 抜粋: "return ArticleContent(\n        url=url,\n        title=title,\n        published_at=published_at,\n        category=category,\n        image_urls=image_urls,\n    )")
 
 
 * **副作用**: なし(HTML解析のみ)

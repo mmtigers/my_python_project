@@ -776,6 +776,59 @@ def _resolve_symbol(symbol: str, qualified: Dict, flat: Dict) -> Optional[Tuple[
     return _resolve(symbol, None, qualified, flat)
 
 
+# 変換時に見出しからシンボルを読む。`### `name`` に加え、`### 関数 `name`` のような
+# 種別つきの見出しも読む(scan() 側の _HEADING_RE は変えない: そちらは def/class 引用の一意化に使う)。
+_CONVERT_HEADING_RE = re.compile(r"^###\s+(?:(?:関数|メソッド|クラス)\s+)?`?([A-Za-z_][\w.]*)")
+
+
+def _symbol_spans(source: str) -> List[Tuple[str, int, int]]:
+    """シンボル参照に書ける (シンボル, 開始行, 終了行) の一覧。
+
+    トップレベルの関数・クラスと、クラス直下のメソッド(`Class.method`)。どれも
+    `_resolve_symbol` で同じ範囲へ一意に解決できるものだけを返す(書いたシンボルが
+    scan_symbol_references で「一意に決まらない」とならないように)。
+    """
+    tree = ast.parse(source)
+    qualified, flat = _definitions(source)
+    spans: List[Tuple[str, int, int]] = []
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        names = [(node.name, node)]
+        if isinstance(node, ast.ClassDef):
+            names += [
+                ("%s.%s" % (node.name, child.name), child)
+                for child in node.body
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+            ]
+        for name, target in names:
+            span = (target.lineno, target.end_lineno)
+            if _resolve_symbol(name, qualified, flat) == span:
+                spans.append((name, span[0], span[1]))
+    return spans
+
+
+def _enclosing_symbol(head: str, src_lines: List[str], spans: List[Tuple[str, int, int]]) -> Optional[str]:
+    """抜粋の先頭行を含むシンボルを返す。出現が全て同じ1つのシンボルの中にあるときだけ。
+
+    出現ごとに「それを含む最も内側のシンボル」を求め、全出現で一致したらそれを返す。
+    モジュールレベル(どのシンボルにも含まれない)の出現が1つでもあれば None。
+    """
+    found: Optional[str] = None
+    hits = [i + 1 for i, line in enumerate(src_lines) if head in line]
+    if not hits:
+        return None
+    for lineno in hits:
+        inside = [(end - start, name) for name, start, end in spans if start <= lineno <= end]
+        if not inside:
+            return None
+        name = min(inside)[1]
+        if found is not None and name != found:
+            return None
+        found = name
+    return found
+
+
 def _symbol_blocks(line: str):
     """1行から (ブロックの開始, 終了, シンボル, 抜粋リスト) を順に返す。"""
     blocks = list(_SYMBOL_BLOCK_RE.finditer(line))
@@ -830,23 +883,35 @@ def convert_to_symbol_references(specs: List[Path], write: bool = True) -> Tuple
     ソースで一意に決まり、(4) その本体の中に抜粋の先頭行がある、ものだけ。
     どれかを満たさない引用は触らない(位置が確かめられないものを、確かめたことにしない)。
     ゲート済みの引用(def/class・一意な単一行リテラル)も触らない。
+
+    (3) の見出しが無い・シンボルとして解決できない場合に限り、抜粋の先頭行のソース内の出現が
+    **すべて同じ1つのシンボルの中にある**なら、そのシンボルを使う(`_enclosing_symbol`)。
+    見出しのシンボルが解決でき、その中に抜粋が無いもの(別の関数を引いている)は従来どおり触らない
+    (著者の意図した場所と抜粋の場所が食い違っており、どちらが正しいか機械では決められないため)。
     """
     index = _source_index()
     converted = skipped = 0
     for spec in specs:
+        converted_before = converted
         candidates = index.get(spec.stem)
         if not candidates or len(candidates) != 1:
             continue
-        src_lines = candidates[0].read_text(encoding="utf-8").splitlines()
-        qualified, flat = _definitions("\n".join(src_lines))
+        source_text = candidates[0].read_text(encoding="utf-8")
+        src_lines = source_text.splitlines()
+        qualified, flat = _definitions(source_text)
         if qualified is None:
             continue
+        spans = _symbol_spans(source_text)
         heading_symbol: Optional[str] = None
+        original = spec.read_text(encoding="utf-8")
         out_lines: List[str] = []
-        for line in spec.read_text(encoding="utf-8").splitlines():
-            heading = _HEADING_RE.match(line)
-            if heading:
-                heading_symbol = heading.group(1)
+        for line in original.splitlines():
+            if re.match(r"#{1,3} ", line):
+                # シンボルを読めない見出し(`### インポート一覧`・`## 補足` 等)では、前の見出しの
+                # シンボルを引き継がない(別の節の引用を、前の節の関数へ紐付けてしまうため)。
+                # `#### ` はシンボルの節の中の小見出しなので、引き継ぐ。
+                heading = _CONVERT_HEADING_RE.match(line)
+                heading_symbol = heading.group(1) if heading else None
             blocks = list(_BLOCK_RE.finditer(line))
             edits: List[Tuple[int, int, str]] = []
             for b_i, block in enumerate(blocks):
@@ -870,16 +935,23 @@ def convert_to_symbol_references(specs: List[Path], write: bool = True) -> Tuple
                 if any(head in l for l in src_lines[max(0, start - 2): max(start, end)]):
                     continue  # 引用した場所に実在する(ずれていない)
                 span = _resolve_symbol(heading_symbol, qualified, flat) if heading_symbol else None
-                if span is None or not any(head in l for l in src_lines[span[0] - 1: span[1]]):
+                if span is not None:
+                    symbol = heading_symbol
+                    if not any(head in l for l in src_lines[span[0] - 1: span[1]]):
+                        symbol = None
+                else:
+                    symbol = _enclosing_symbol(head, src_lines, spans)
+                if symbol is None:
                     skipped += 1
                     continue
-                edits.append((block.start(), block.end(), "参照: %s" % heading_symbol))
+                edits.append((block.start(), block.end(), "参照: %s" % symbol))
             for a, b, text in reversed(edits):
                 line = line[:a] + text + line[b:]
                 converted += 1
             out_lines.append(line)
-        if write:
-            text = "\n".join(out_lines) + ("\n" if spec.read_text(encoding="utf-8").endswith("\n") else "")
+        # 変換が無ければ書き戻さない(CRLF の仕様書の改行を変えないため)
+        if write and converted > converted_before:
+            text = "\n".join(out_lines) + ("\n" if original.endswith("\n") else "")
             spec.write_text(text, encoding="utf-8")
     return converted, skipped
 

@@ -109,7 +109,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[send_inactive_notification]` (行番号: 57 / 抜粋: ") -> None:")
+* 根拠: `[send_inactive_notification]` (参照: send_inactive_notification / 抜粋: ") -> None:")
 
 
 * **副作用**: `asyncio.sleep` による待機、`send_push` による外部API呼び出し、グローバル変数 `IS_ACTIVE` の更新、`MOTION_TASKS` からの要素削除。
@@ -170,7 +170,7 @@
 ### `process_meter_data`
 
 * **役割**: 温湿度計のデータをDBに保存する。
-* 根拠: `[process_meter_data]` (行番号: 142 / 抜粋: "await save_log_async(")
+* 根拠: `[process_meter_data]` (参照: process_meter_data / 抜粋: "await save_log_async(")
 
 
 * **引数/リクエスト**: `device_id: str`, `device_name: str`, `temp: float`, `humidity: float`
@@ -178,7 +178,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[process_meter_data]` (行番号: 135 / 抜粋: "-> None:")
+* 根拠: `[process_meter_data]` (参照: process_meter_data / 抜粋: "-> None:")
 
 
 * **副作用**: `save_log_async` を介した外部DBへの書き込み。
@@ -209,7 +209,7 @@
 
 
 * **エラーハンドリング**: DBからの前回値取得時に発生する全ての `Exception` をキャッチし、ログに記録した上で前回値を `0.0` として処理を続行する。**（Issue #740 / AUDIT-011 で追加）** 保存側も `save_log_async` の戻り値を `save_ok` で受け、`False` ならデバイス名・ワット数を含む `logger.error` を出す。ただし `process_meter_data` と異なり **early return はせず、閾値クロスの通知判定まで進む**（判定に使うのは取得済みの `prev_wattage` と引数の `wattage` だけで保存結果に依存せず、DB の一時的なロックで「電気の付けっぱなし通知」まで落とすほうが実害が大きいため）。
-* 根拠: `[process_power_data]` (行番号: 275〜278 / 抜粋: "if not save_ok:")
+* 根拠: `[process_power_data]` (参照: process_power_data / 抜粋: "if not save_ok:")
 
 
 

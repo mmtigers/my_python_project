@@ -746,3 +746,60 @@ def test_convert_leaves_citation_that_is_already_correct(fake_repo):
     spec = _write_spec(fake_repo, body)
     assert checker.convert_to_symbol_references([spec]) == (0, 0)
     assert spec.read_text(encoding="utf-8") == body
+
+
+def test_convert_uses_enclosing_symbol_when_heading_is_not_a_symbol(fake_repo):
+    """見出しがシンボルでない節(`### インポート一覧` 等)でも、抜粋の出現が1つのシンボルの中に限られるなら変換する。"""
+    spec = _write_spec(
+        fake_repo,
+        "### 処理の流れ\n\n* 根拠: 戻り値 (行番号: 98〜99 / 抜粋: \"return \\\"hello \\\" + name\")\n",
+    )
+    assert checker.convert_to_symbol_references([spec]) == (1, 0)
+    assert '(参照: Greeter.greet / 抜粋: "return' in spec.read_text(encoding="utf-8")
+    assert checker.scan_symbol_references()[0] == []
+
+
+def test_convert_does_not_inherit_symbol_from_previous_heading(fake_repo):
+    """シンボルを読めない見出しの後では、前の見出しのシンボル(`farewell`)を使わない。"""
+    spec = _write_spec(
+        fake_repo,
+        "### `farewell`\n\n### 処理の流れ\n\n* 根拠: 戻り値 (行番号: 98〜99 / 抜粋: \"return \\\"hello \\\" + name\")\n",
+    )
+    assert checker.convert_to_symbol_references([spec]) == (1, 0)
+    assert "参照: Greeter.greet" in spec.read_text(encoding="utf-8")
+
+
+def test_convert_reads_heading_with_kind_prefix(fake_repo):
+    spec = _write_spec(
+        fake_repo,
+        "### 関数 `farewell`\n\n* 根拠: 戻り値 (行番号: 98〜99 / 抜粋: \"return \\\"bye \\\" + name\")\n",
+    )
+    assert checker.convert_to_symbol_references([spec]) == (1, 0)
+    assert "参照: farewell" in spec.read_text(encoding="utf-8")
+
+
+def test_convert_leaves_snippet_found_in_several_symbols(fake_repo):
+    """抜粋が複数のシンボルに現れる(どれを指すか決められない)なら触らない。"""
+    body = '### 処理の流れ\n\n* 根拠: 連結 (行番号: 98〜99 / 抜粋: "\\" + name")\n'
+    spec = _write_spec(fake_repo, body)
+    assert checker.convert_to_symbol_references([spec]) == (0, 1)
+    assert spec.read_text(encoding="utf-8") == body
+
+
+def test_convert_does_not_rewrite_file_without_conversions(fake_repo):
+    """変換が0件なら書き戻さない(CRLF の改行を変えない)。"""
+    spec = _write_spec(fake_repo, "")
+    spec.write_bytes("### `farewell`\r\n\r\n* 根拠: x (行番号: 9〜10 / 抜粋: \"return \\\"bye \\\" + name\")\r\n".encode("utf-8"))
+    before = spec.read_bytes()
+    assert checker.convert_to_symbol_references([spec]) == (0, 0)
+    assert spec.read_bytes() == before
+
+
+def test_convert_does_not_inherit_symbol_across_h2_heading(fake_repo):
+    """`## ` 見出しをはさんだ後でも、前の `### ` 見出しのシンボルを引き継がない。"""
+    spec = _write_spec(
+        fake_repo,
+        "### `farewell`\n\n## 補足\n\n* 根拠: 戻り値 (行番号: 98〜99 / 抜粋: \"return \\\"hello \\\" + name\")\n",
+    )
+    assert checker.convert_to_symbol_references([spec]) == (1, 0)
+    assert "参照: Greeter.greet" in spec.read_text(encoding="utf-8")

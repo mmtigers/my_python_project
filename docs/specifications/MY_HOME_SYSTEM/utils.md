@@ -185,7 +185,7 @@
 
 
 * **副作用**: `acquire(key)`はキーに対応する`_Entry`が無ければ新規作成して辞書へ登録し、`ref_count`をインクリメントしてから`entry.lock`を実際に獲得(`with entry.lock:`)して`yield`する。ブロックを抜けると`finally`で`ref_count`をデクリメントし、`0`になり、かつ辞書中のエントリが自分自身のままである場合(`self._entries.get(key) is entry`)にのみそのエントリを`del`で削除する。エントリの追加・カウント操作・削除の判定はすべて`self._guard`で保護される。
-* 根拠: [acquireコンテキストマネージャ] (行番号: 52〜67 / 抜粋: "with self._guard:\n            entry = self._entries.get(key)\n            if entry is None:\n                entry = self._Entry()\n                self._entries[key] = entry\n            entry.ref_count += 1\n        try:\n            with entry.lock:\n                yield\n        finally:\n            with self._guard:\n                entry.ref_count -= 1\n                if entry.ref_count == 0 and self._entries.get(key) is entry:\n                    del self._entries[key]")
+* 根拠: [acquireコンテキストマネージャ] (参照: RefCountedLockRegistry / 抜粋: "with self._guard:\n            entry = self._entries.get(key)\n            if entry is None:\n                entry = self._Entry()\n                self._entries[key] = entry\n            entry.ref_count += 1\n        try:\n            with entry.lock:\n                yield\n        finally:\n            with self._guard:\n                entry.ref_count -= 1\n                if entry.ref_count == 0 and self._entries.get(key) is entry:\n                    del self._entries[key]")
 
 
 * **エラーハンドリング**: 明示的な例外捕捉はない。`acquire(key)`のブロック内で例外が発生しても、`finally`節により`ref_count`のデクリメントと(条件を満たす場合の)エントリ削除は必ず実行され、例外自体はそのまま呼び出し元へ伝播する。`keys()`は現在エントリが存在するキーの一覧を`_guard`保護下で返し(テスト・デバッグ用)、`__contains__(key)`も同様に`_guard`保護下で`key in self._entries`を返す。**（Issue #661 で追加）** `__len__()`は`_guard`保護下でエントリ数を返し、`clear()`は全エントリを破棄する(いずれもテスト・デバッグ用。`clear()`は取得中のロックがあっても辞書から消えるため本番コードからの呼び出しは想定していない)。
@@ -207,7 +207,7 @@
 
 
 * **戻り値/レスポンス**: `Callable`。対象の関数をラップしたデコレータ関数。
-* 根拠: [with_exponential_backoff] (行番号: 25 / 抜粋: ") -> Callable:")
+* 根拠: [with_exponential_backoff] (参照: with_exponential_backoff / 抜粋: ") -> Callable:")
 
 
 * **副作用**: 失敗回数に応じて `logger.warning` または `logger.error` によりログが出力され、`time.sleep` でスレッドが一時停止する。
@@ -232,7 +232,7 @@
 * `base_delay` (`float`, キーワード専用): 初回リトライの待機秒数。デフォルトは1.0。
 * `max_delay` (`float`, キーワード専用): 待機秒数の上限。デフォルトは`float("inf")`(上限なし)。
 * `on_retry` (`Optional[Callable[[int, float, BaseException], None]]`, キーワード専用): 各リトライ前に呼ばれるコールバック(attempt, delay, exception)。呼び出し元固有のログ出力に使う。デフォルトは`None`。
-* 根拠: [引数定義] (行番号: 56〜63 / 抜粋: "fn: Callable[[], Any],\n    *,\n    max_retries: int,\n    retryable_exceptions: Tuple[Type[BaseException], ...],")
+* 根拠: [引数定義] (参照: retry_with_backoff / 抜粋: "fn: Callable[[], Any],\n    *,\n    max_retries: int,\n    retryable_exceptions: Tuple[Type[BaseException], ...],")
 
 
 * **戻り値/レスポンス**: `Any`。`fn()`の戻り値をそのまま返す。
@@ -240,11 +240,11 @@
 
 
 * **副作用**: リトライ時に`on_retry`コールバックを呼び出し、`time.sleep`でスレッドを一時停止する。ログ出力自体は行わず(呼び出し元が`on_retry`内で行う設計)、この関数自身はロガーを持たない。
-* 根拠: [リトライループ] (行番号: 100〜105 / 抜粋: "for attempt in range(max_retries + 1):\n        try:\n            return fn()\n        except retryable_exceptions as e:\n            if attempt >= max_retries:\n                raise")
+* 根拠: [リトライループ] (参照: retry_with_backoff / 抜粋: "for attempt in range(max_retries + 1):\n        try:\n            return fn()\n        except retryable_exceptions as e:\n            if attempt >= max_retries:\n                raise")
 
 
 * **エラーハンドリング**: `retryable_exceptions`に該当する例外のみを捕捉し、`max_retries`回のリトライを使い切った場合は最後に発生した例外をそのまま再送出する(`raise`で元の例外を維持)。`retryable_exceptions`に含まれない例外は即座に(リトライせず)呼び出し元へ伝播する。
-* 根拠: [例外捕捉と再送出] (行番号: 103〜105 / 抜粋: "except retryable_exceptions as e:\n            if attempt >= max_retries:\n                raise")
+* 根拠: [例外捕捉と再送出] (参照: retry_with_backoff / 抜粋: "except retryable_exceptions as e:\n            if attempt >= max_retries:\n                raise")
 
 
 
@@ -263,7 +263,7 @@
 
 
 * **戻り値/レスポンス**: `bool`。指定回数内にアクセス可能となった場合は `True`、不可の場合は `False`。
-* 根拠: [wait_for_storage_warmup] (行番号: 61 / 抜粋: ") -> bool:")
+* 根拠: [wait_for_storage_warmup] (参照: wait_for_storage_warmup / 抜粋: ") -> bool:")
 
 
 * **副作用**: チェックプロセス中および失敗時に `logger.info`, `logger.debug`, `logger.error` でログが出力される。また `time.sleep` によりスレッドが一時停止する。
@@ -400,8 +400,8 @@ graph TD
 | 高 | `utils.py` をインポートしている各モジュール（メインの処理ファイル） | これらの関数がシステム内のどこで、どのような目的・頻度で呼び出されているか特定するため。 | 根拠: [ファイル全体] (行番号: 1〜96 / 抜粋: 提供されたコードは汎用ユーティリティであり単独では動作しないため) |
 | 高 | データベースアクセスや外部API呼び出しを実装しているファイル | `with_exponential_backoff` デコレータがどの関数に適用され、どのような例外が発生しうるのかを把握するため。 | 根拠: [with_exponential_backoff] (行番号: 147 / 抜粋: "except Exception as e:") |
 | 中 | ファイルストレージ・NASへのアクセス処理を行うファイル | `wait_for_storage_warmup` 関数がどのパスに対して実行され、復帰遅延が発生しやすい環境がどこかを確認するため。 | 根拠: [wait_for_storage_warmup] (行番号: 217〜257 / 抜粋: "def wait_for_storage_warmup(ta...") |
-| 高 | `services/quest_service.py` | Issue #435で`RefCountedLockRegistry`に置き換えられた3箇所の旧ロック辞書実装の詳細、および置き換え後の実際の利用箇所（キーの構成、`acquire`の呼び出し方）を確認するため。 | 根拠: [RefCountedLockRegistryクラスdocstring] (行番号: 27〜30 / 抜粋: "quest_service.py の完了/残高/購入ロックは、キーの組み合わせ\n(ユーザーID×クエストID等)が増えるたびに threading.Lock エントリが\n無制限に蓄積していた。") |
-| 中 | `services/ai_service.py` | Issue #583関連: `line_service.py`の`log_food_record`に渡す`category`引数（AIが判定する朝食/昼食/夕食等のラベル）がどこでどう生成されているかを確認し、`get_meal_time_category_from_now`が返す時間帯（記録時刻基準）とAI側の`category`ラベル（内容基準）がどの程度乖離しうるかを把握するため。 | 根拠: [get_meal_time_category_from_now docstring] (行番号: 26〜29 / 抜粋: "呼び出し元が受け取る\n\"category\"引数(AIが渡す朝食/昼食/夕食等、または食事アンケートの麺類等の\n食品ジャンル)は用途が呼び出し元ごとに異なり食事の時間帯を必ずしも表さないため") |
+| 高 | `services/quest_service.py` | Issue #435で`RefCountedLockRegistry`に置き換えられた3箇所の旧ロック辞書実装の詳細、および置き換え後の実際の利用箇所（キーの構成、`acquire`の呼び出し方）を確認するため。 | 根拠: [RefCountedLockRegistryクラスdocstring] (参照: RefCountedLockRegistry / 抜粋: "quest_service.py の完了/残高/購入ロックは、キーの組み合わせ\n(ユーザーID×クエストID等)が増えるたびに threading.Lock エントリが\n無制限に蓄積していた。") |
+| 中 | `services/ai_service.py` | Issue #583関連: `line_service.py`の`log_food_record`に渡す`category`引数（AIが判定する朝食/昼食/夕食等のラベル）がどこでどう生成されているかを確認し、`get_meal_time_category_from_now`が返す時間帯（記録時刻基準）とAI側の`category`ラベル（内容基準）がどの程度乖離しうるかを把握するため。 | 根拠: [get_meal_time_category_from_now docstring] (参照: get_meal_time_category_from_now / 抜粋: "呼び出し元が受け取る\n\"category\"引数(AIが渡す朝食/昼食/夕食等、または食事アンケートの麺類等の\n食品ジャンル)は用途が呼び出し元ごとに異なり食事の時間帯を必ずしも表さないため") |
 
 ## 8. 保守上の注意点
 

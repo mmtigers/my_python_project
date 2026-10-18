@@ -62,11 +62,11 @@
 
 
 * **副作用**: なし
-* 根拠: 関数内部の処理 (行番号: 24 / 抜粋: "now = datetime.datetime.now(py")
+* 根拠: 関数内部の処理 (参照: get_start_date / 抜粋: "now = datetime.datetime.now(py")
 
 
 * **エラーハンドリング**: 該当しない `period_type` が渡された場合は例外を発生させず `None` を返す。
-* 根拠: `get_start_date` 末尾 (行番号: 38 / 抜粋: "return None")
+* 根拠: `get_start_date` 末尾 (参照: get_start_date / 抜粋: "return None")
 
 
 
@@ -231,7 +231,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | 使用されている各種テーブル名や定数値（`SQLITE_TABLE_POWER_USAGE` など）を特定するため。 | 根拠: `config.SQLITE_TABLE_FOOD` (行番号: 63 / 抜粋: "config.SQLITE_TABLE_FOOD") |
+| 高 | `config.py` | 使用されている各種テーブル名や定数値（`SQLITE_TABLE_POWER_USAGE` など）を特定するため。 | 根拠: `config.SQLITE_TABLE_FOOD` (参照: get_analysis_data / 抜粋: "config.SQLITE_TABLE_FOOD") |
 | 高 | `common.py` | DB接続先やクエリ結果を扱うカーソルの仕様、およびプッシュ通知の実際の送信先・処理内容を把握するため。 | 根拠: `core.database.get_db_cursor`, `services.notification_service.send_push` (行番号: 59, 278 / 抜粋: "get_db_cursor()", "services.notification_service.send_push([{"type": ") |
 | 中 | （データベーススキーマ定義ファイル） | `menu_category`、`action`、`wattage`、`condition` カラムのデータ型や格納形式、制約を確認するため。 | 根拠: DBクエリ実行部 (行番号: 62, 133 / 抜粋: "SELECT menu_category FROM", "SELECT AVG(wattage)") |
 

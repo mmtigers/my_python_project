@@ -112,7 +112,7 @@
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `args: Dict[str, Any]`
-* 根拠: 関数シグネチャ (行番号: 99 / 抜粋: "user_id: str, user_name: str")
+* 根拠: 関数シグネチャ (参照: tool_record_child_health / 抜粋: "user_id: str, user_name: str")
 
 
 * **戻り値/レスポンス**: `str`。成功時`f"記録完了: {msg_obj.text}"`、保存失敗時`f"記録失敗: {msg_obj.text}"`、引数欠落時`"記録失敗: child_name と condition の両方が必要です。"`。
@@ -135,7 +135,7 @@
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `args: Dict[str, Any]`
-* 根拠: 関数シグネチャ (行番号: 129 / 抜粋: "user_id: str, user_name: str")
+* 根拠: 関数シグネチャ (参照: tool_record_food / 抜粋: "user_id: str, user_name: str")
 
 
 * **戻り値/レスポンス**: `str`。成功時`f"記録完了: {msg_obj.text}"`、保存失敗時`f"記録失敗: {msg_obj.text}"`、引数欠落時`"記録失敗: item(食べたメニュー名) が必要です。"`。
@@ -200,7 +200,7 @@
 ### `_extract_referenced_tables` (関数)
 
 * **役割**: SQL文字列中で `FROM` / `JOIN` が参照するテーブル名をすべて抽出する簡易パーサ。単純な「FROM/JOIN直後の1識別子」だけでなく、`FROM a, b` のような暗黙CROSS JOIN（カンマ結合）の2つ目以降のテーブルや、`FROM (SELECT ... FROM x) AS y` のようなサブクエリ内の`FROM`/`JOIN`（`re.finditer`がSQL全文を走査するため自然に検出される）も対象にする（H-6での修正）。**（Issue #224で修正）** カンマ結合の各テーブル名の直後で`_skip_optional_alias`によりエイリアスを読み飛ばしてからカンマ判定を行うようになり、`FROM power_usage c, quest_users s`のようにエイリアス付きの1つ目のテーブルに続く2つ目のテーブルも検出できるようになった。**（B3で強化）** 呼び出し元`tool_search_db`が`_strip_sql_comments`でコメントを除去した後のSQLを渡すようになったため、本関数自体は変更されていないが、`FROM/**/tablename`のようなコメント難読化によるテーブル名検出漏れ（許可テーブル判定のバイパス）は呼び出し側の前処理で塞がれるようになった。
-* 根拠: 関数Docstring (行番号: 186〜196 / 抜粋: "`FROM a, b` のような暗黙CROSS JOIN(カンマ結合)の2つ目以降のテーブル")、エイリアス読み飛ばし (行番号: 213, 219 / 抜粋: "pos = _skip_optional_alias(sql, m.end())")
+* 根拠: 関数Docstring (参照: _extract_referenced_tables / 抜粋: "`FROM a, b` のような暗黙CROSS JOIN(カンマ結合)の2つ目以降のテーブル")、エイリアス読み飛ばし (行番号: 213, 219 / 抜粋: "pos = _skip_optional_alias(sql, m.end())")
 
 
 * **引数/リクエスト**: `sql: str`
@@ -216,14 +216,14 @@
 
 
 * **エラーハンドリング**: なし（正規表現マッチングのみ。マッチしない場合は空リストを返す）。`(` トークンにマッチした場合（サブクエリの開始）は `continue` でスキップし、テーブル名として追加しない。
-* 根拠: `if token == "(":` (行番号: 205〜207 / 抜粋: "サブクエリの開始。中身のFROM/JOINはこのループが引き続き検出する。")
+* 根拠: `if token == "(":` (参照: _extract_referenced_tables / 抜粋: "サブクエリの開始。中身のFROM/JOINはこのループが引き続き検出する。")
 
 
 
 ### `_QUOTED_IDENTIFIER_CHARS` (変数、Issue #357で追加)
 
 * **役割**: `tool_search_db`が実行前に拒否する文字のタプル `('"', '`', '[')`。`_extract_referenced_tables`の正規表現は`FROM`/`JOIN`直後の裸の識別子（`[A-Za-z_][A-Za-z0-9_]*`）または`(`しかテーブル参照として認識しないため、`"quest_users"`（ダブルクォート）・`[quest_users]`（角括弧）・`` `quest_users` ``（バッククォート）・`"main".quest_users`（スキーマ修飾）・`FROM"quest_users"`（空白なし）のいずれも参照テーブルとして検出されず、許可テーブルを1つ含めれば`referenced_tables`が非空かつ`disallowed`が空となりUNION SELECTやスカラーサブクエリで許可外テーブルを読めていた。正規表現パーサでの網羅は困難なため、これらの文字を含むSQLはテーブル抽出より前に即拒否する（暫定・多層防御の一層目。構造的な防御は`_search_db_authorizer`）。
-* 根拠: `_QUOTED_IDENTIFIER_CHARS = ('"', '`', '[')` (行番号: 230)、`tool_search_db`での使用 (行番号: 318〜320 / 抜粋: "if any(ch in sql for ch in _QUOTED_IDENTIFIER_CHARS):")
+* 根拠: `_QUOTED_IDENTIFIER_CHARS = ('"', '`', '[')` (行番号: 230)、`tool_search_db`での使用 (参照: tool_search_db / 抜粋: "if any(ch in sql for ch in _QUOTED_IDENTIFIER_CHARS):")
 
 ### `_AI_SQL_TIMEOUT_SEC` / `_AI_SQL_PROGRESS_INSTRUCTIONS` / `_AI_SQL_MAX_ROWS` (変数、Issue #750 / AUDIT-021 で追加)
 
@@ -273,7 +273,7 @@
 
 
 * **副作用**: `core.database.get_db_cursor()`によるDB接続の確立・クローズ、接続への`set_authorizer`設定、**（Issue #750 で追加）**接続への`set_progress_handler`設定、SQLの実行（認可コールバックにより読み取り以外は拒否され、progress handler により実行時間が打ち切られる）。
-* 根拠: [認可と progress handler の設定] (行番号: 337〜342 / 抜粋: "cursor.connection.set_progress_handler(")
+* 根拠: [認可と progress handler の設定] (参照: _execute_restricted_read_query / 抜粋: "cursor.connection.set_progress_handler(")
 
 
 * **エラーハンドリング**: `except Exception as e:`で全例外（認可拒否による`sqlite3.DatabaseError`「access to ... is prohibited」「not authorized」、**（Issue #750）**実行時間超過による`sqlite3.OperationalError("interrupted")`、構文エラー、接続失敗等）を捕捉し`"検索エラー: ..."`文字列として返す（送出しない）。
@@ -282,15 +282,15 @@
 ### `tool_search_db` (関数)
 
 * **役割**: 引数で渡されたSQLクエリが `SELECT` で始まり、かつ参照テーブルが `ALLOWED_SEARCH_TABLES` に含まれることを確認したうえで読み取り専用のDB検索を行い、結果を文字列で返す。**（Issue #357で修正）** SELECT判定の直後・テーブル抽出の前に`_QUOTED_IDENTIFIER_CHARS`（`"` `` ` `` `[`）のいずれかを含むSQLを警告ログ付きで即拒否するようになった（引用符付き識別子は`_extract_referenced_tables`が検出できず許可テーブル判定を素通りしていたため）。加えて実行先を`core.database.execute_read_query`から`_execute_restricted_read_query`（`set_authorizer`により許可テーブル以外の読み取り・ATTACH・PRAGMA・危険関数をSQLiteエンジン側で構造的に拒否する）へ変更した。**（B3で修正）** SQLクエリを受け取った直後、SELECT判定やテーブル抽出より前に`_strip_sql_comments`を通し、ブロックコメント(`/* */`)・行コメント(`--`)を空白に置換したうえで以降の判定・実行を行うようになった。以前は`FROM/**/tablename`のようにキーワードと識別子の間にSQLコメントを挟むことで`_extract_referenced_tables`の抽出をすり抜け、UNION SELECTと組み合わせて`ALLOWED_SEARCH_TABLES`外のテーブルを読み取れることが実証されていた。**（Issue #180で修正）** `core.database.execute_read_query`（実体は`core/database.py`の`execute_read_query`）は例外発生時も送出せず内部で捕捉し、"検索エラー: ..."という非空文字列として返す設計になっている。以前はこの戻り値の実際の型・意味を誤認しており、`if not rows:`（`rows`は常に非空文字列のため恒偽でデッドコード）と`except Exception`（`execute_read_query`自体は例外を送出しないため到達不能）の両方が実質機能しておらず、DB実行時エラーの文字列がそのまま正常な検索結果としてログにも残らずAIへ渡っていた。`execute_read_query`の内部エラープレフィックス（`"検索エラー:"`）を判定し、検出時は警告ログを出力したうえでAIへエラーであることが分かる形（`"DB検索エラー: ..."`）で返すよう修正した。
-* 根拠: `async def tool_search_db` (行番号: 375 / 抜粋: "async def tool_search_db")、コメント除去 (行番号: 391 / 抜粋: "sql = _strip_sql_comments(sql)")、引用符付き識別子の拒否 (行番号: 318〜320 / 抜粋: "if any(ch in sql for ch in _QUOTED_IDENTIFIER_CHARS):")、実行先 (行番号: 416 / 抜粋: "result = await asyncio.to_thread(_execute_restricted_read_query, sql)")
+* 根拠: `async def tool_search_db` (行番号: 375 / 抜粋: "async def tool_search_db")、コメント除去 (行番号: 391 / 抜粋: "sql = _strip_sql_comments(sql)")、引用符付き識別子の拒否 (参照: tool_search_db / 抜粋: "if any(ch in sql for ch in _QUOTED_IDENTIFIER_CHARS):")、実行先 (行番号: 416 / 抜粋: "result = await asyncio.to_thread(_execute_restricted_read_query, sql)")
 
 
 * **引数/リクエスト**: `args: Dict[str, Any]`
-* 根拠: 関数シグネチャ (行番号: 293 / 抜粋: "args: Dict[str, Any]")
+* 根拠: 関数シグネチャ (参照: tool_search_db / 抜粋: "args: Dict[str, Any]")
 
 
 * **戻り値/レスポンス**: `str`。正常時は`_execute_restricted_read_query`の戻り値文字列（該当データなしメッセージまたはJSON形式の検索結果文字列、2000文字でカット）をそのまま返す。同関数がエラーを返した場合（`"検索エラー:"`プレフィックスで検出）は`"DB検索エラー: ..."`という別形式のエラー文字列に変換して返す。引用符付き識別子を含む場合は`"エラー: 引用符付きの識別子（\" ` [）は使用できません。"`を返す。
-* 根拠: `return result[:2000]` (行番号: 431 / 抜粋: "return result[:2000]")、エラー変換 (行番号: 344〜346 / 抜粋: "if result.startswith(\"検索エラー:\"):")、引用符拒否メッセージ (行番号: 320)
+* 根拠: `return result[:2000]` (行番号: 431 / 抜粋: "return result[:2000]")、エラー変換 (参照: tool_search_db / 抜粋: "if result.startswith(\"検索エラー:\"):")、引用符拒否メッセージ (行番号: 320)
 
 
 * **副作用**: `_execute_restricted_read_query` の呼び出し（DB読み取り）。引用符付き識別子の検出、許可外テーブルへのアクセス試行、および`_execute_restricted_read_query`がエラー文字列を返した場合を`logger.warning`で記録。
@@ -317,15 +317,15 @@
 
 
 * **引数/リクエスト**: `retry_state`
-* 根拠: 関数シグネチャ (行番号: 299 / 抜粋: "retry_state")
+* 根拠: 関数シグネチャ (参照: _log_retry_attempt / 抜粋: "retry_state")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: return文なし (行番号: 302〜306 / 抜粋: "logger.warning(")
+* 根拠: return文なし (参照: _log_retry_attempt / 抜粋: "logger.warning(")
 
 
 * **副作用**: `logger.warning` によるログ書き込み
-* 根拠: `logger.warning(...)` (行番号: 302〜306 / 抜粋: "logger.warning(")
+* 根拠: `logger.warning(...)` (参照: _log_retry_attempt / 抜粋: "logger.warning(")
 
 
 * **エラーハンドリング**: なし
@@ -453,7 +453,7 @@
 ### `analyze_text_and_execute` (関数)
 
 * **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。**（Issue #374で修正）** 1回目の応答取得後は`MAX_TOOL_ROUNDS`回を上限とするループになった: 各ラウンドで`_extract_function_calls`により全パートから`function_call`を収集し、無ければ`_response_text_or_none`でテキストを返す（テキストも無い場合、ツール実行済みなら`_tool_results_fallback`、未実行なら空応答エラー）。あれば全件を`_dispatch_tool`で実行し、`function_response`をまとめて1回で送信して次の応答を得る。以前は1回のツール実行後に`final_res.text`を無条件に読んでいたため、「智矢が熱、涼花も熱」のように2件目の`function_call`が返ると`response.text`が`ValueError`を送出→汎用`except`→「処理中にエラー」となり、1件目は保存済みなのにユーザーが失敗と誤解して再送→重複登録（#232と同種）という経路が残っていた。ループ上限到達時も`_tool_results_fallback`で実行結果を返す。**（Issue #232で修正）** 1回目のGemini呼び出しはクォータ超過とそれ以外のAPIエラーをそれぞれ専用メッセージで処理するのに対し、ツール実行後の2回目呼び出しは以前クォータ超過用のフォールバックしか持たず、それ以外のAPIエラーは関数末尾の汎用`except Exception`（「処理中にエラーが発生しました」）まで伝播していた。この時点で`tool_record_child_health`/`tool_record_food`は既にDB書き込みを完了しているため、ユーザーには保存が失敗したかのように見え、冪等性チェックの無い記録処理への重複登録を誘発しうる不具合があった。2回目呼び出しにも同等のハンドラを追加し、クォータ超過と同様に`tool_result`（実行結果）へ注記を添えて返すようにした。**（Issue #520で変更）** `google-genai`は例外型を`APIError`に一本化したため、両方の呼び出し点とも`except genai_errors.APIError`で受けたうえで`_is_quota_error(e)`によりクォータ超過かどうかを分岐する形になった。
-* 根拠: `async def analyze_text_and_execute` (行番号: 627 / 抜粋: "async def analyze_text_and_execute")、ループ (行番号: 582〜639 / 抜粋: "for _round in range(MAX_TOOL_ROUNDS):")
+* 根拠: `async def analyze_text_and_execute` (行番号: 627 / 抜粋: "async def analyze_text_and_execute")、ループ (参照: analyze_text_and_execute / 抜粋: "for _round in range(MAX_TOOL_ROUNDS):")
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `text: str`
@@ -483,7 +483,7 @@
 * **（Issue #374で追加）** `MAX_TOOL_ROUNDS`回ループしてもテキスト応答に至らない場合は「ツール呼び出し回数が上限に達した」注記付きで実行結果を返却。
 * 未知のツール名指定時はエラーメッセージを結果として扱う（`_dispatch_tool`）。
 * その他予期せぬ例外発生時はエラーログ出力と汎用エラーメッセージを返却。
-* 根拠: 1回目呼び出しの分岐 (行番号: 594〜595 / 抜粋: "except genai_errors.APIError as e:", "if _is_quota_error(e):")、ループ内の結果送信の分岐 (行番号: 646〜647 / 抜粋: "except genai_errors.APIError as e:", "if _is_quota_error(e):")、空応答・テキスト無しのフォールバック (行番号: 586〜596, 633〜635)、上限到達 (行番号: 637〜639)、末尾の汎用ハンドラ (行番号: 641 / 抜粋: "except Exception as e:")
+* 根拠: 1回目呼び出しの分岐 (行番号: 594〜595 / 抜粋: "except genai_errors.APIError as e:", "if _is_quota_error(e):")、ループ内の結果送信の分岐 (行番号: 646〜647 / 抜粋: "except genai_errors.APIError as e:", "if _is_quota_error(e):")、空応答・テキスト無しのフォールバック (行番号: 586〜596, 633〜635)、上限到達 (行番号: 637〜639)、末尾の汎用ハンドラ (参照: analyze_text_and_execute / 抜粋: "except Exception as e:")
 
 
 
@@ -651,7 +651,7 @@ graph TD
 
 * **[Issue #520] SDK移行の前提**: 本ファイルは `google-generativeai`（非推奨）から後継の `google-genai` へ移行済み。移行の動機は機能ではなく依存関係にある。旧SDKは `google-ai-generativelanguage==0.6.15` を厳密固定しており、それが `protobuf<6` を要求するため、`protobuf` / `proto-plus` / `googleapis-common-protos` / `google-api-core` / `grpcio-status` が軒並み更新できない状態になっていた。移行により `protobuf` は 5.29.6 から 6.33.6 へ前進した。ただし `streamlit` が `protobuf<7` を要求するため、protobuf 7系へはまだ上げられない点に留意。
 * **[Issue #520] クライアントはモジュールレベルの状態**: 旧SDKの `genai.configure(api_key=...)` はモジュール全体に効く設定だったが、`google-genai` は `client = genai.Client(api_key=...)` というインスタンスを持つ。`GEMINI_API_KEY` 未設定時は `client` が `None` になり `analyze_text_and_execute` は早期 `return None` する (行番号: 640 / 抜粋: "if not MODEL_NAME or not config.GEMINI_API_KEY or client is None:")。テストで本関数を通す場合は `MODEL_NAME` だけでなく `client` も差し替える必要がある。
-* **[Issue #520] ツールスキーマは無変更**: `tools_schema` の dict 形式（`function_declarations` を含む）は `GenerateContentConfig(tools=...)` にそのまま受け付けられるため、スキーマ定義は移行前後で変更していない。自動関数呼び出しの無効化は `start_chat(enable_automatic_function_calling=False)` から `AutomaticFunctionCallingConfig(disable=True)` へ移った (行番号: 580〜589 / 抜粋: "chat_manual = client.aio.chats.create(")。
+* **[Issue #520] ツールスキーマは無変更**: `tools_schema` の dict 形式（`function_declarations` を含む）は `GenerateContentConfig(tools=...)` にそのまま受け付けられるため、スキーマ定義は移行前後で変更していない。自動関数呼び出しの無効化は `start_chat(enable_automatic_function_calling=False)` から `AutomaticFunctionCallingConfig(disable=True)` へ移った (参照: analyze_text_and_execute / 抜粋: "chat_manual = client.aio.chats.create(")。
 
 ## 9. 不明事項一覧
 

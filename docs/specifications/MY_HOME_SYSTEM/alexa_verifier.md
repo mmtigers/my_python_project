@@ -77,7 +77,7 @@
 ### `_validate_cert_chain_url`
 
 * **役割**: `SignatureCertChainUrl`ヘッダの値がAmazon純正のURL形式（`https://s3.amazonaws.com/echo.api/...`、ポート443）であることを検証する内部ヘルパー関数。scheme・hostname（大文字小文字を無視）・pathプレフィックス・portの4項目をそれぞれ`CERT_CHAIN_URL_*`定数と比較する。**（Issue #173で修正）** pathプレフィックスの判定は、以前は生の`parsed.path`に対する`startswith`のみだったため、`https://s3.amazonaws.com/echo.api/../evil-bucket/cert.pem`のような`".."`を含むパスがこのチェックを素通りしていた(Amazon公式の検証手順は「URLパスを正規化した後に`/echo.api/`で始まること」を要求しており、この点で公式手順から乖離していた)。現在は`posixpath.normpath`で`parsed.path`を正規化してから`startswith`判定を行う。**（Issue #223で修正）** `urlparse`が返す`parsed.path`はパーセントデコードされない生文字列のため、`https://s3.amazonaws.com/echo.api/%2e%2e/evil-bucket/cert.pem`のようなパーセントエンコード済みの`".."`は`normpath`でも検知できず素通りしていた。一方、後段の`_fetch_leaf_certificate`が同じURL文字列を`requests.get()`に渡すと`requests`が送信前に`%2e%2e`を`".."`へデコードするため、検証結果と実際の取得先が食い違っていた。現在は`normpath`へ渡す前に`unquote`で一度パーセントデコードしてから判定する。
-* 根拠: (行番号: 78〜102 / 抜粋: "def _validate_cert_chain_url(url: str) -> None:\n    parsed = urlparse(url)")、正規化 (行番号: 69〜70 / 抜粋: "normalized_path = posixpath.normpath(unquote(parsed.path))\n    if not normalized_path.startswith(CERT_CHAIN_URL_PATH_PREFIX):")
+* 根拠: (行番号: 78〜102 / 抜粋: "def _validate_cert_chain_url(url: str) -> None:\n    parsed = urlparse(url)")、正規化 (参照: _validate_cert_chain_url / 抜粋: "normalized_path = posixpath.normpath(unquote(parsed.path))\n    if not normalized_path.startswith(CERT_CHAIN_URL_PATH_PREFIX):")
 * **（Issue #385 で追加）** クエリ文字列またはフラグメントを含むURLは `AlexaVerificationError` で拒否する。Amazonの証明書URLにクエリが付くことはなく、許すとキャッシュキーの無限増殖(`?x=1`, `?x=2`, …)と取得先の揺れの原因になるため。
 * 根拠: `if parsed.query or parsed.fragment:` (行番号: 93〜94)
 
@@ -91,11 +91,11 @@
 
 
 * **副作用**: なし（`urlparse`によるURL解析、`unquote`によるパーセントデコード、`posixpath.normpath`によるパス正規化のみ）
-* 根拠: (行番号: 60 / 抜粋: "parsed = urlparse(url)")、(行番号: 69 / 抜粋: "normalized_path = posixpath.normpath(unquote(parsed.path))")
+* 根拠: (参照: _validate_cert_chain_url / 抜粋: "parsed = urlparse(url)")、(参照: _validate_cert_chain_url / 抜粋: "normalized_path = posixpath.normpath(unquote(parsed.path))")
 
 
 * **エラーハンドリング**: scheme/hostname/pathプレフィックス（正規化後）/portのいずれかが期待値と異なる場合、それぞれ`AlexaVerificationError`を送出する。
-* 根拠: (行番号: 61〜71 / 抜粋: "if parsed.scheme != CERT_CHAIN_URL_SCHEME:\n        raise AlexaVerificationError(f\"Invalid SignatureCertChainUrl scheme: {parsed.scheme!r}\")")
+* 根拠: (参照: _validate_cert_chain_url / 抜粋: "if parsed.scheme != CERT_CHAIN_URL_SCHEME:\n        raise AlexaVerificationError(f\"Invalid SignatureCertChainUrl scheme: {parsed.scheme!r}\")")
 
 
 ### `_cert_cache_key`（Issue #385 で追加）
@@ -132,7 +132,7 @@
 
 
 * **エラーハンドリング**: `requests.get`または`resp.raise_for_status()`が`requests.exceptions.RequestException`（`Timeout`/`ConnectionError`/`HTTPError`等）を送出した場合、これを捕捉し`AlexaVerificationError`へ変換して送出する（Issue #179で修正。以前は`requests`例外がそのまま伝播していた）。証明書チェーンのパース結果が空リストの場合も`AlexaVerificationError`を送出する。
-* 根拠: (行番号: 88〜92 / 抜粋: "except requests.exceptions.RequestException as exc:\n        raise AlexaVerificationError(f\"Failed to fetch certificate chain: {exc}\") from exc"), (行番号: 95〜96 / 抜粋: "if not certs:\n        raise AlexaVerificationError(\"Certificate chain response is empty\")")
+* 根拠: (参照: _fetch_leaf_certificate / 抜粋: "except requests.exceptions.RequestException as exc:\n        raise AlexaVerificationError(f\"Failed to fetch certificate chain: {exc}\") from exc"), (参照: _fetch_leaf_certificate / 抜粋: "if not certs:\n        raise AlexaVerificationError(\"Certificate chain response is empty\")")
 
 ### `verify_signature`
 
@@ -176,7 +176,7 @@
 
 
 * **副作用**: なし（`datetime.now(timezone.utc)`による現在時刻取得のみ、外部I/Oなし）
-* 根拠: (行番号: 153 / 抜粋: "now = datetime.now(timezone.utc)")
+* 根拠: (参照: verify_timestamp / 抜粋: "now = datetime.now(timezone.utc)")
 
 
 * **エラーハンドリング**: `fromisoformat`のパース失敗時（`ValueError`/`AttributeError`）は`AlexaVerificationError`を送出（`from exc`で連鎖）。パース成功してもタイムゾーン情報が無い場合（Issue #110）は`AlexaVerificationError`を送出。許容範囲を超えた場合も`AlexaVerificationError`を送出する。
@@ -290,7 +290,7 @@ graph TD
 * **ルートCAまでの証明書チェーン検証を行っていない**: モジュールDocstringに明記の通り、証明書チェーンの取得自体がHTTPS（通常のCA検証あり）経由かつAmazon管理下のURLパスに固定されるという前提のもとで、ルートCAまでのフルパス検証(full path validation)は意図的に省略されている。この前提（`_validate_cert_chain_url`によるURL形式チェック）が破られた場合の防御は、このURL形式チェック自体に一元的に依存する。**（Issue #173で強化）** 以前はこのURL形式チェック自体に、正規化前の生パスへの`startswith`判定という抜け穴があり（`".."`によるパストラバーサルURLが通過しうる）、「URLがAmazon管理下のパスに固定される」という前提を崩しうる状態だった。`posixpath.normpath`による正規化後判定への変更でこの抜け穴は塞がれたが、この関数（URL形式チェック）に防御が一元的に依存する設計自体は変わっていない。**（Issue #223で再強化）** #173の修正後も、`urlparse`が返す`parsed.path`はパーセントデコードされない生文字列のままであり、`%2e%2e`のようなパーセントエンコード済みの`".."`は`normpath`による正規化でも検知できず素通りしていた。一方`requests`は送信前にこれを実際に`".."`へデコードするため、検証時のパスと実際に取得されるパスが食い違っていた。`normpath`へ渡す前に`unquote`で一度デコードすることで、`requests`が実際に送信するパスと検証対象のパスを一致させた。
 * 根拠: [モジュールDocstring] (行番号: 23〜25 / 抜粋: "なお、証明書チェーンの取得自体はHTTPS(s3.amazonaws.com、通常のCA検証あり)経由で\n行われ、かつURLがAmazon管理下のパスに固定されるため")
 * **`_fetch_leaf_certificate`のHTTP取得失敗を`AlexaVerificationError`へ変換（Issue #179で修正）**: 以前は`resp.raise_for_status()`が送出する`requests`例外（`requests.exceptions.HTTPError`等）がそのまま呼び出し元へ伝播し、呼び出し元ルーターの`except AlexaVerificationError`を素通りしてFastAPIのグローバル例外ハンドラに届き、Amazon側の証明書チェーンURLが一時的に応答不能になっただけで意図しない500が返っていた（Issue #110で`verify_timestamp`側の同種の問題が修正された際、この`_fetch_leaf_certificate`側の経路はスコープ外として未修正のまま残っていた）。`requests.get`/`resp.raise_for_status()`を`try/except requests.exceptions.RequestException`で囲み、捕捉した例外を`AlexaVerificationError`へ変換するよう修正した。
-* 根拠: (行番号: 88〜92 / 抜粋: "except requests.exceptions.RequestException as exc:\n        raise AlexaVerificationError(f\"Failed to fetch certificate chain: {exc}\") from exc")
+* 根拠: (参照: _fetch_leaf_certificate / 抜粋: "except requests.exceptions.RequestException as exc:\n        raise AlexaVerificationError(f\"Failed to fetch certificate chain: {exc}\") from exc")
 * **タイムスタンプのタイムゾーン欠落ガード（Issue #110で追加）**: `verify_timestamp`は、`datetime.fromisoformat`がタイムゾーン情報のないISO文字列もパース成功として受理してしまう挙動に対し、パース後に`tzinfo is None`を明示的にチェックして`AlexaVerificationError`を送出するガードを持つ。このガードが無かった旧実装では、後続の`now(tz付き) - ts(tz無し)`比較が`TypeError`を送出し、呼び出し元が`AlexaVerificationError`のみを捕捉する設計のため、本来返すべき400ではなく500が返っていた（実害は署名検証を通過した後にしか到達しないため極小）。
 * 根拠: (行番号: 144〜151)
 

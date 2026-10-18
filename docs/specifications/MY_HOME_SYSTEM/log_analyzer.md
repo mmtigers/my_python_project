@@ -82,7 +82,7 @@
 
 
 * **副作用**: `self.days_back`, `self.log_dir`, `self.report_data`, `self.now`, `self.start_date`, `self.start_date_str` の状態を変更する。
-* 根拠: `__init__`内の代入処理 (行番号: 40-47 / 抜粋: "self.days_back = days_back")
+* 根拠: `__init__`内の代入処理 (参照: __init__ / 抜粋: "self.days_back = days_back")
 
 
 * **エラーハンドリング**: なし
@@ -109,7 +109,7 @@
 
 
 * **エラーハンドリング**: `OSError`, `PermissionError` をキャッチし、`False` を返す。
-* 根拠: `except`ブロック (行番号: 59-60 / 抜粋: "except (OSError, PermissionError):")
+* 根拠: `except`ブロック (参照: _is_recent_file / 抜粋: "except (OSError, PermissionError):")
 
 
 
@@ -185,7 +185,7 @@
 
 
 * **エラーハンドリング**: 関数全体の処理を`try-except Exception`で囲み、エラー発生時は`logger.error`で記録して処理を継続する。
-* 根拠: `except`ブロック (行番号: 132-133 / 抜粋: "except Exception as e:")
+* 根拠: `except`ブロック (参照: _analyze_file / 抜粋: "except Exception as e:")
 
 
 
@@ -208,7 +208,7 @@
 
 
 * **エラーハンドリング**: なし（個別のファイル解析エラーは`_analyze_file`内でハンドリングされる）
-* 根拠: `run_analysis`内部処理 (行番号: 147-150 / 抜粋: "for filepath in target_files:")
+* 根拠: `run_analysis`内部処理 (参照: run_analysis / 抜粋: "for filepath in target_files:")
 
 
 

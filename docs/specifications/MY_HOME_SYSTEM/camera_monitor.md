@@ -56,7 +56,7 @@
 | --- | --- | --- |
 | `config` モジュールの詳細 | `CAMERAS`, `ASSETS_DIR`, `MOTION_COOLDOWN_SEC`, `LINE_USER_ID`, `NVR_RECORD_DIR` 等の構造や定義値が本ファイルに存在しないため。 | 根拠: `config.CAMERAS` (行番号: 942 / 抜粋: "for cam in config.CAMERAS") |
 | `save_log_generic` の実装・スキーマ | 関数の内部ロジック、および保存先DBの種類・テーブルスキーマが不明なため。 | 根拠: `save_log_generic("device_records"...` (行番号: 552 / 抜粋: "save_log_generic("device_records") |
-| `send_push` の実装 | プッシュ通知の送信手段（LINE等）や実際の処理内容が不明なため。 | 根拠: `send_push([{"type": "text"...` (行番号: 830 / 抜粋: "send_push(") |
+| `send_push` の実装 | プッシュ通知の送信手段（LINE等）や実際の処理内容が不明なため。 | 根拠: `send_push([{"type": "text"...` (参照: _suspend_after_fatal_error / 抜粋: "send_push(") |
 | NVR（NAS）のディレクトリ構造 | 外部ストレージ上の動画ファイルの配置ルールが環境依存であるため。 | 根拠: `cam_conf.get("nas_folder")` (行番号: 349 / 抜粋: "nas_folder_name = cam_conf.get(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -134,7 +134,7 @@
 
 * **役割**: SIGINTやSIGTERMなどのプロセス終了シグナルを受信した際に、アクティブなPullPointサブスクリプションを解除して安全に終了する。
 * **（Issue #439 で修正）** `active_pullpoints`の走査は以前`for svc in list(active_pullpoints):`と直接コピーしていたが、`monitor_single_camera`（他スレッド）が同時にリストを変更しうるため、`_pullpoints_lock`保護下でスナップショット(`pullpoints_snapshot`)を取得してからロックを解放し、そのスナップショットを走査するよう変更された。
-* 根拠: `cleanup_handler` (行番号: 226〜242 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")、[ロック保護下のスナップショット取得] (行番号: 99〜100 / 抜粋: "with _pullpoints_lock:\n        pullpoints_snapshot = list(active_pullpoints)")
+* 根拠: `cleanup_handler` (行番号: 226〜242 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")、[ロック保護下のスナップショット取得] (参照: cleanup_handler / 抜粋: "with _pullpoints_lock:\n        pullpoints_snapshot = list(active_pullpoints)")
 
 
 * **引数/リクエスト**: `signum: int` (シグナル番号), `frame: Any` (実行フレーム)
@@ -142,7 +142,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `cleanup_handler` (行番号: 94 / 抜粋: "-> None:")
+* 根拠: `cleanup_handler` (参照: cleanup_handler / 抜粋: "-> None:")
 
 
 * **副作用**: `_pullpoints_lock`保護下での`active_pullpoints`のスナップショット取得、ONVIFのUnsubscribeリクエスト送信、プロセス終了(`os._exit(0)`)。
@@ -150,7 +150,7 @@
 
 
 * **エラーハンドリング**: Unsubscribe時の例外(`Exception`)は無視(`pass`)される。
-* 根拠: `except Exception` (行番号: 107〜108 / 抜粋: "except Exception:\n            pass")
+* 根拠: `except Exception` (参照: cleanup_handler / 抜粋: "except Exception:\n            pass")
 
 
 
@@ -165,7 +165,7 @@
 
 
 * **戻り値/レスポンス**: `bool` (到達可能ならTrue)
-* 根拠: `is_host_reachable` (行番号: 89 / 抜粋: "-> bool:")
+* 根拠: `is_host_reachable` (参照: is_host_reachable / 抜粋: "-> bool:")
 
 
 * **副作用**: 外部コマンド（ping）の実行。
@@ -173,7 +173,7 @@
 
 
 * **エラーハンドリング**: 実行時のあらゆる例外（タイムアウト含む）を包括的な `except Exception` で捕捉してFalseを返す。
-* 根拠: `except` (行番号: 103 / 抜粋: "except Exception as e:")
+* 根拠: `except` (参照: is_host_reachable / 抜粋: "except Exception as e:")
 
 
 
@@ -202,7 +202,7 @@
 
 
 * **エラーハンドリング**: 接続エラー時は例外をキャッチし、エラー文字列をログ用メッセージに追記する。
-* 根拠: `except Exception` (行番号: 134 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception` (参照: perform_emergency_diagnosis / 抜粋: "except Exception as e:")
 
 
 
@@ -219,7 +219,7 @@
 
 
 * **戻り値/レスポンス**: `bool` (時刻ズレが5分以内の場合、またはチェック失敗時はFail-SoftのためTrue、ズレが大きい場合はFalse)
-* 根拠: `check_camera_time` (行番号: 139 / 抜粋: "-> bool:")
+* 根拠: `check_camera_time` (参照: check_camera_time / 抜粋: "-> bool:")
 
 
 * **副作用**: `devicemgmt.GetSystemDateAndTime()` によるカメラへのAPIリクエスト。
@@ -227,7 +227,7 @@
 
 
 * **エラーハンドリング**: XML/Dateパースエラーなどの例外が発生した場合はエラーログを出力し、True（Fail-Soft）を返す。
-* 根拠: `except Exception` (行番号: 161 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception` (参照: check_camera_time / 抜粋: "except Exception as e:")
 
 
 
@@ -269,7 +269,7 @@
 
 
 * **エラーハンドリング**: FFmpegのタイムアウトや実行エラー(`CalledProcessError`, `Exception`)をキャッチし、`NVR_SNAPSHOT_ATTEMPTS` の要素数(既定3回)まで Exponential Backoff によるリトライを行う(各試行の対象ファイルとシーク位置は上記 Issue #703 の項を参照)。加えて、リトライループ全体を外側の`try`/`finally`で包み、成功・タイムアウト・リトライ失敗・予期しない例外のいずれの終了経路でも`output_tmp`に残った一時ファイルを`os.remove`で確実に削除する（削除自体が失敗した場合の`OSError`は無視する）。以前は成功時のみ`os.remove`が呼ばれておりタイムアウト等の異常終了時は一時ディレクトリに`snapshot_*.jpg`の残骸が蓄積し続けていたが、この`finally`ブロックにより解消されている。
-* 根拠: `except subprocess.TimeoutExpired` (行番号: 404 / 抜粋: "except subprocess.TimeoutExpired:")、`finally` (行番号: 248 / 抜粋: "finally:")、`os.remove(output_tmp)` (行番号: 433 / 抜粋: "os.remove(output_tmp)")、`except OSError` (行番号: 255 / 抜粋: "except OSError:")
+* 根拠: `except subprocess.TimeoutExpired` (行番号: 404 / 抜粋: "except subprocess.TimeoutExpired:")、`finally` (参照: capture_snapshot_from_nvr / 抜粋: "finally:")、`os.remove(output_tmp)` (行番号: 433 / 抜粋: "os.remove(output_tmp)")、`except OSError` (参照: capture_snapshot_from_nvr / 抜粋: "except OSError:")
 
 
 * **（#411 S-L10で修正）** リトライ間のExponential Backoff (`time.sleep(2 ** attempt)`) は以前、最終試行(3回目)の失敗後にも実行されており、結果が確定した(呼出元を待たせるだけの)状態のまま最大8秒の無駄な待機が発生していた。次のリトライが残っている場合のみsleepするよう変更した。
@@ -296,7 +296,7 @@
 
 
 * **エラーハンドリング**: ファイル保存時の例外をキャッチし、ログ出力してNoneを返す。
-* 根拠: `except Exception as e` (行番号: 274 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (参照: save_image_from_stream / 抜粋: "except Exception as e:")
 
 
 
@@ -311,15 +311,15 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `force_close_session` (行番号: 278 / 抜粋: "-> None:")
+* 根拠: `force_close_session` (参照: force_close_session / 抜粋: "-> None:")
 
 
 * **副作用**: HTTPセッション(`requests.Session`)の解放。
-* 根拠: `session.close()` (行番号: 290 / 抜粋: "service_obj.zeep_client.tran")
+* 根拠: `session.close()` (参照: force_close_session / 抜粋: "service_obj.zeep_client.tran")
 
 
 * **エラーハンドリング**: 全ての例外をキャッチし、警告ログ（debugレベル）を出力。
-* 根拠: `except Exception` (行番号: 300 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception` (参照: force_close_session / 抜粋: "except Exception as e:")
 
 
 
@@ -334,7 +334,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `process_camera_event` (行番号: 303 / 抜粋: "-> None:")
+* 根拠: `process_camera_event` (参照: process_camera_event / 抜粋: "-> None:")
 
 
 * **副作用**: DB保存(`save_log_generic`)、画像取得・保存(`save_image_from_stream`)、グローバル変数 `last_motion_detected` の更新。
@@ -343,7 +343,7 @@
 
 
 * **エラーハンドリング**: パースエラー等の例外をキャッチして警告ログを出力し、`finally` ブロックで `del msg` を実行しリソースを解放する。
-* 根拠: `except Exception as e` (行番号: 368 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (参照: process_camera_event / 抜粋: "except Exception as e:")
 
 
 
@@ -397,7 +397,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `main` (行番号: 626 / 抜粋: "-> None:")
+* 根拠: `main` (参照: main / 抜粋: "-> None:")
 
 
 * **副作用**: 複数スレッドの起動。
@@ -528,9 +528,9 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | `CAMERAS`（IP、ポート、認証情報等）、`MOTION_COOLDOWN_SEC`、`NVR_RECORD_DIR`等の重要な環境変数が定義されており、監視対象や動作閾値の全容を把握するため。 | 根拠: `config.CAMERAS` (行番号: 622 / 抜粋: "config.CAMERAS"), `config.MOTION_COOLDOWN_SEC` (行番号: 133 / 抜粋: "getattr(config, 'MOTION_COOLD") |
+| 高 | `config.py` | `CAMERAS`（IP、ポート、認証情報等）、`MOTION_COOLDOWN_SEC`、`NVR_RECORD_DIR`等の重要な環境変数が定義されており、監視対象や動作閾値の全容を把握するため。 | 根拠: `config.CAMERAS` (参照: main / 抜粋: "config.CAMERAS"), `config.MOTION_COOLDOWN_SEC` (行番号: 133 / 抜粋: "getattr(config, 'MOTION_COOLD") |
 | 中 | `core/database.py` | `save_log_generic` 関数の引数（`columns`, `values`）は判明しているが、実際にどのデータベース（SQLite/MySQL等）にどのようなスキーマで書き込まれるか確認するため。 | 根拠: `save_log_generic("device_records"` (行番号: 552 / 抜粋: "save_log_generic("device_record") |
-| 中 | `services/notification_service.py` | 障害発生時のアラート仕様（送信先プラットフォームが引数の `discord` か `LINE_USER_ID` かなど）の動作を特定するため。 | 根拠: `send_push` (行番号: 830 / 抜粋: "send_push(") |
+| 中 | `services/notification_service.py` | 障害発生時のアラート仕様（送信先プラットフォームが引数の `discord` か `LINE_USER_ID` かなど）の動作を特定するため。 | 根拠: `send_push` (参照: _suspend_after_fatal_error / 抜粋: "send_push(") |
 
 ## 8. 保守上の注意点
 

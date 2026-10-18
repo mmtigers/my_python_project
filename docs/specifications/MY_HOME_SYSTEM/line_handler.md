@@ -20,7 +20,7 @@
 * LINE Bot API（v3）からのWebhookイベント（テキストメッセージ受信、ポストバック受信）を解析し、適切な処理（子供の体調記録、AI解析、line_logicへのポストバック委譲）へ振り分けるディスパッチャとしての責務を担う。実際のWebhook HTTPエンドポイント自体は本ファイルには存在せず、`routers/webhook_router.py` の `callback_line()` が担う。**（Issue #376で全面改修）** 以前は`callback_line()`がSDKの`WebhookHandler.handle(body, signature)`を呼び出し、署名検証・パース・ディスパッチをHTTPレスポンス送信前に一括完走させていたが、AI呼び出し等の遅延がreply token失効リスクに直結していたため、現在は`callback_line()`側で`line_handler.parser.parse()`により署名検証とパースのみを行って即座に応答し、本ファイルの`dispatch_events_async()`が実処理のエントリポイントとして`BackgroundTasks`経由で呼ばれる構成に変わった。**（Issue #664で変更）** そのエントリポイントは当初、同期関数`dispatch_events()`で、内側の`handle_message`が着信メッセージ1件ごとに`asyncio.run(_process_message_async(...))`で新しいイベントループを生成・破棄していた。現在はコルーチン`dispatch_events_async()`を`BackgroundTasks`へ渡すため、Starletteがスレッドプールではなくサーバー本体のイベントループ上で`await`し、メッセージ処理はサーバーと同一のループで実行される。同期版`dispatch_events()`/`handle_message()`は、SDK登録と実行中ループを持たない呼び出し元のための薄いラッパーとして残っている。`line_handler.add(...)`によるSDKへのハンドラー登録（`handle_message`/`handle_postback`）自体は後方互換のため維持しているが、実際の呼び出し経路は`dispatch_events()`内の`isinstance`分岐であり、SDKの自動ディスパッチ機構は使われていない。
 * 根拠: `line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)`, `line_handler.add(PostbackEvent)(handle_postback)` (行番号: 337-338 / 抜粋: "line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)")、`dispatch_events`定義 (行番号: 538-545 / 抜粋: "def dispatch_events(events: list[Any]) -> None:")
 * **（#358で撤去）** 以前`_process_message_async`にあった、LINE経由のFamily Questコマンド（`msg_text`が「ステータス」「クエスト」に一致、または「承認」「却下」で始まる場合の`line_service.get_user_status_message`/`get_active_quests_message`/`process_approval_command`呼び出し）、および`handle_postback`にあった`approve:`/`reject:` postbackをコマンド文字列へ変換して`_process_message_async`へ渡す分岐は、LINEの`event.source.user_id`とFamily Questの`quest_users.user_id`のマッピングが存在せず本番では機能しないデッドコードだったため撤去された（オーナー判断、Issue #358）。クエストの確認・完了報告・承認は現在family-quest フロントエンドのみで行う。
-* 根拠: `_process_message_async`内の撤去コメント (行番号: 278-281 / 抜粋: "以前ここにあった LINE 経由の Family Quest コマンド")、`handle_postback`内の撤去コメント (行番号: 338-340 / 抜粋: "以前ここにあった approve:/reject: postback の処理")
+* 根拠: `_process_message_async`内の撤去コメント (参照: _process_message_async / 抜粋: "以前ここにあった LINE 経由の Family Quest コマンド")、`handle_postback`内の撤去コメント (参照: handle_postback / 抜粋: "以前ここにあった approve:/reject: postback の処理")
 
 ## 3. 外部依存関係
 
@@ -49,7 +49,7 @@
 | `config.LINE_CHANNEL_ACCESS_TOKEN` / `config.LINE_CHANNEL_SECRET` | 値の取得元や環境変数の仕様が不明 | 該当要素の使用 (行番号: 32, 34, 36 / 抜粋: "if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:") |
 | `config.FAMILY_SETTINGS["members"]` | データ構造やリストに含まれる要素の型・内容が不明 | 該当要素の使用 (行番号: 245 / 抜粋: "for member in config.FAMILY_SETTINGS[\"members\"]:") |
 | `line_service.log_child_health` / `line_service.split_text_into_line_messages` | 引数に対する具体的な処理内容および戻り値の型・形式が不明。**（#358で縮小）** 以前ブラックボックス視していた`get_user_status_message`/`get_active_quests_message`/`process_approval_command`は削除済みのため対象外。 | 該当要素の呼び出し (行番号: 280, 294 / 抜粋: "responses.append(await line_service.log_child_health(user_id, user_name, child, cond))") |
-| `ai_service.analyze_text_and_execute` | AI解析の具体的なロジック、副作用、戻り値の仕様が不明 | 該当要素の呼び出し (行番号: 288-289 / 抜粋: "ai_resp_text = await asyncio.wait_for(") |
+| `ai_service.analyze_text_and_execute` | AI解析の具体的なロジック、副作用、戻り値の仕様が不明 | 該当要素の呼び出し (参照: _process_message_async / 抜粋: "ai_resp_text = await asyncio.wait_for(") |
 | `line_logic.handle_postback` | 委譲先の具体的な処理内容および副作用が不明。**（#358で明確化）** 承認/却下 postback を本ファイル側で先取りする分岐が撤去されたため、現在は認可済みユーザーの`PostbackEvent`がすべて無条件でここへ委譲される。**（Issue #572で変更なし）** 委譲前に`user_id is None`ガードが追加されたが、ガードを通過した場合の委譲先自体は変わらない。**（Issue #623で変更なし）** 委譲前に`_is_authorized_line_user(user_id)`ガードが追加されたが、これも同様にガードを通過した場合の委譲先自体は変わらない。 | 該当要素の呼び出し (行番号: 448 / 抜粋: "line_logic.handle_postback(event, line_bot_api)") |
 | `routers/webhook_router.py` の `callback_line` | 本ファイル外の実装であり、Webhook HTTPエントリーポイントとしての署名検証・ディスパッチの具体的な呼び出し経路は本ファイル内の記述からは確認できない | ファイル内に対応するルーター定義が存在しない（本ファイルはSDKのイベントハンドラー登録のみを行う） |
 
@@ -84,7 +84,7 @@
 ### `_is_authorized_line_user` (関数、Issue #620で追加)
 
 * **役割**: 送信元LINEユーザー(`user_id`)が`config.AUTHORIZED_LINE_USER_IDS`(認可済み家族のLINEユーザーIDのallowlist、カンマ区切り環境変数)に含まれるかを判定する。LINE公式アカウントは友だち追加すれば誰でもメッセージを送信できるため、体調・食事記録の書き込みとAI経由のDB検索をこのallowlistで制限する目的で`_process_message_async`の冒頭から呼ばれる。allowlist自体が未設定(空リスト)の場合は後方互換として常に`True`を返す(検証なし)。**（Issue #648）** `config.SWITCHBOT_WEBHOOK_TOKEN`は未設定時に503で拒否するフェイルクローズへ変更されたため、両者の未設定時の挙動はもはや同じではない(こちらはフェイルオープンのまま)。
-* 根拠: `def _is_authorized_line_user(user_id: str) -> bool:` (行番号: 140-152)、後方互換の早期return (行番号: 142-143 / 抜粋: "if not config.AUTHORIZED_LINE_USER_IDS:\n        return True")
+* 根拠: `def _is_authorized_line_user(user_id: str) -> bool:` (行番号: 140-152)、後方互換の早期return (参照: _is_authorized_line_user / 抜粋: "if not config.AUTHORIZED_LINE_USER_IDS:\n        return True")
 
 
 * **引数/リクエスト**: `user_id: str`
@@ -111,7 +111,7 @@
 * 根拠: [get_profile 呼び出し] (行番号: 165 / 抜粋: "profile = line_bot_api.get_profile(user_id, _request_timeout=config.LINE_API_REQUEST_TIMEOUT)")、[定数定義] (`MY_HOME_SYSTEM/config.py` 行番号: 219 / 抜粋: "LINE_API_REQUEST_TIMEOUT: tuple = (5.0, 15.0)")
 
 * **役割**: LINEユーザーの表示名を取得する。`_profile_cache`（TTL=3600秒）にキャッシュがあればAPI呼び出しをせずそれを返し、なければ`line_bot_api.get_profile`を呼び出してキャッシュに格納する。メッセージ受信のたびに外部APIを呼んでいた従来の実装から変更され、API呼び出し頻度を抑制する。**（Issue #410で修正）** キャッシュ書き込み後に`_evict_oldest_profile_cache_entries`を呼び、`_profile_cache`が上限を超えないようにする。
-* 根拠: `def _get_display_name(user_id: str) -> str:` (行番号: 155-173 / 抜粋: "def _get_display_name(user_id: str) -> str:")、エビクション呼び出し (行番号: 141 / 抜粋: "_evict_oldest_profile_cache_entries()")
+* 根拠: `def _get_display_name(user_id: str) -> str:` (行番号: 155-173 / 抜粋: "def _get_display_name(user_id: str) -> str:")、エビクション呼び出し (参照: _get_display_name / 抜粋: "_evict_oldest_profile_cache_entries()")
 
 
 * **引数/リクエスト**: `user_id`: `str`型
@@ -163,7 +163,7 @@
 * 根拠: (行番号: 163, 178 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
 
 * **役割**: `line_bot_api.reply_message` を用いてユーザーにメッセージを返信するラッパー関数。単一のメッセージオブジェクトが渡された場合はリストに変換して送信する。`line_bot_api` が初期化されていない場合は何もせず終了する。**（Issue #376で修正）** 返信が失敗（reply tokenの期限切れ等）し、かつ`user_id`が渡されている場合は`line_bot_api.push_message`（`PushMessageRequest`）へフォールバックして同じメッセージを届ける（以前はログのみで無応答だった）。
-* 根拠: `def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] = None):` (行番号: 177-212 / 抜粋: "def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] = None):")、push フォールバック (行番号: 168-179 / 抜粋: "line_bot_api.push_message(")
+* 根拠: `def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] = None):` (行番号: 177-212 / 抜粋: "def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] = None):")、push フォールバック (参照: reply_message / 抜粋: "line_bot_api.push_message(")
 
 
 * **引数/リクエスト**:
@@ -189,7 +189,7 @@
 ### `handle_message_async` / `handle_message`
 
 * **役割**: **（Issue #664で分割）** 本体は非同期関数 `handle_message_async` で、`TextMessageContent` の `MessageEvent` を受け取り、`_get_display_name`（TTLキャッシュ付き）で送信者の表示名を取得した上で `_process_message_async` を `await` する。`_get_display_name` は LINE の Profile API を叩く同期HTTP（`config.LINE_API_REQUEST_TIMEOUT` = 接続5秒/読み取り15秒）のため、イベントループを塞がないよう `asyncio.to_thread` 経由で呼ぶ。同名の同期関数 `handle_message` は `asyncio.run(handle_message_async(event))` を呼ぶだけの薄いラッパーで、LINE SDK の `WebhookHandler.add(...)` への登録と、実行中のイベントループを持たない呼び出し元（既存テスト等）のために残している（実行中のループ上からは `asyncio.run` が `RuntimeError` になるため呼べない）。分割前は同期の `handle_message` が本体で、末尾で `asyncio.run(_process_message_async(...))` を呼んでおり、**着信メッセージ1件ごとに新しいイベントループを生成しては破棄**していた（`services/ai_service` の Gemini クライアント `client.aio.chats` のようにモジュールレベルで1度だけ生成される非同期クライアントは内部の接続プールを生成時のループへ紐づけるため、この構成は本質的に不安定だった。`ai_service.SimpleRateLimiter` が `asyncio.Lock` を使えず `threading.Lock` にしているのも同じ理由である旨がコメントに残っている）。**（Issue #376 / L-L1で修正）** 先頭で`_is_redelivery`が真なら警告ログを出してスキップする。また関数全体を`try/except Exception`で包み、SDKの`WebhookHandler.handle`ループが1件目の例外で中断して同一Webhook内の後続イベントが処理されない（のに200が返る）問題をイベント単位で隔離する。**（L-L6 #410で修正）** `event.source.user_id`がグループでの発言時にLINEの仕様上`None`になりうるケースを考慮していなかった（`_get_display_name(None)`は`get_profile(None)`の例外を握り潰し`"Unknown"`を返すだけなので、以前はこの状態に気づかないまま処理が続行し、`user_id=NULL`のまま体調・食事等の記録がDB保存されていた）。`user_id`が`None`の場合は警告ログを出して処理をスキップするようにした。**（Issue #761 / AUDIT-032 で補強）** この`None`ガードは`event.source`が存在する前提で`event.source.user_id`を直接読んでいたため、`event.source`自体が`None`のイベント種別では`AttributeError`になりガードまで到達しなかった。現在は`getattr`で`source`→`user_id`の順に辿り、どちらが`None`でも同じスキップ経路へ倒す（`handle_postback`側も同様）。**（Issue #620で追加）** `user_id is None`ガードの直後・`_get_display_name`の呼び出しより前に`_is_authorized_line_user(user_id)`による認可ガードを置き、未認可ユーザーのメッセージは表示名取得（LINE Profile APIの外部呼び出し）にも受信本文のINFOログ出力にも到達しないようにした（当初は`_process_message_async`側のガードのみだったため、未認可ユーザー1メッセージにつき外部API呼び出しが1回発生し、上限つきの`_profile_cache`が第三者の`user_id`で埋まって家族のエントリを押し出し得た）。`_process_message_async`側のガードは多重防御として残している。
-* 根拠: `async def handle_message_async(event: MessageEvent):` (行番号: 266 / 抜粋: "async def handle_message_async(event: MessageEvent):")、同期ラッパー `def handle_message(event: MessageEvent):` (行番号: 330 / 抜粋: "def handle_message(event: MessageEvent):")、**（Issue #664で変更）** 表示名取得の別スレッド化 (抜粋: "user_name = await asyncio.to_thread(_get_display_name, user_id)")、`_process_message_async` の直接await (抜粋: "await _process_message_async(user_id, user_name, msg_text, reply_token)")、再配信スキップ、`user_id`のNoneガード (行番号: 271-273 / 抜粋: "if user_id is None:")、**（Issue #620で追加）** 認可ガード (行番号: 281-284 / 抜粋: "if not _is_authorized_line_user(user_id):\n            logger.warning(f\"⚠️ 未認可のLINEユーザーからのメッセージを拒否しました (user_id={user_id})\")\n            return")、表示名取得 (行番号: 289 / 抜粋: "user_name = _get_display_name(user_id)")、例外隔離 (行番号: 296-297 / 抜粋: "logger.error(f\"handle_message Error: {e}\", exc_info=True)")
+* 根拠: `async def handle_message_async(event: MessageEvent):` (行番号: 266 / 抜粋: "async def handle_message_async(event: MessageEvent):")、同期ラッパー `def handle_message(event: MessageEvent):` (行番号: 330 / 抜粋: "def handle_message(event: MessageEvent):")、**（Issue #664で変更）** 表示名取得の別スレッド化 (抜粋: "user_name = await asyncio.to_thread(_get_display_name, user_id)")、`_process_message_async` の直接await (抜粋: "await _process_message_async(user_id, user_name, msg_text, reply_token)")、再配信スキップ、`user_id`のNoneガード (参照: handle_message_async / 抜粋: "if user_id is None:")、**（Issue #620で追加）** 認可ガード (参照: handle_message_async / 抜粋: "if not _is_authorized_line_user(user_id):\n            logger.warning(f\"⚠️ 未認可のLINEユーザーからのメッセージを拒否しました (user_id={user_id})\")\n            return")、表示名取得 (行番号: 289 / 抜粋: "user_name = _get_display_name(user_id)")、例外隔離 (参照: handle_message_async / 抜粋: "logger.error(f\"handle_message Error: {e}\", exc_info=True)")
 
 
 * **引数/リクエスト**:
@@ -260,7 +260,7 @@
 ### `_process_message_async`
 
 * **役割**: 受信したテキストメッセージを処理する非同期ロジック。「子供記録」または「体調」というキーワードを含む場合は体調記録の分岐へ、それ以外（または体調記録の分岐で対象メンバーが1人も見つからなかった場合）はAI解析（`ai_service.analyze_text_and_execute`）へフォールバックする。**（#358で撤去）** 以前ここにあった「ステータス」「クエスト」への完全一致、および「承認」「却下」で始まる文字列に対する分岐（`line_service.get_user_status_message`/`get_active_quests_message`/`process_approval_command`の呼び出し）は、LINE IDと`quest_users.user_id`のマッピングが存在せず本番で機能しないデッドコードだったため削除された（オーナー判断、Issue #358）。**（Issue #375で修正）** 体調記録の分岐は`_extract_health_targets`でメッセージ中の全メンバーと各人の体調（否定表現を優先判定）を取得し、全員分`line_service.log_child_health`を呼んだうえで、返信メッセージを1回の`reply_message`にまとめて（最大5件）送信する。メンバー名が1つも含まれない場合はAI解析へフォールバックする。**（Issue #620で修正）** 体調・食事記録の分岐とAI解析フォールバックの両方に入る前に`_is_authorized_line_user(user_id)`で認可チェックを行い、`config.AUTHORIZED_LINE_USER_IDS`に含まれない`user_id`からのメッセージは、どちらの処理にも進ませず警告ログを出して早期returnする(誰が認可対象かを教える返信はしない)。
-* 根拠: `async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):` (行番号: 358 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")、撤去コメント (行番号: 268-271 / 抜粋: "以前ここにあった LINE 経由の Family Quest コマンド")、認可ガード (行番号: 298-303 / 抜粋: "if not _is_authorized_line_user(user_id):\n        logger.warning(...)\n        return")、体調分岐 (行番号: 305-315 / 抜粋: "targets = _extract_health_targets(msg_text)")、AIフォールバック (行番号: 317-336 / 抜粋: "# 2. AI Analysis (Fallback)")
+* 根拠: `async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):` (行番号: 358 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")、撤去コメント (参照: _process_message_async / 抜粋: "以前ここにあった LINE 経由の Family Quest コマンド")、認可ガード (参照: _process_message_async / 抜粋: "if not _is_authorized_line_user(user_id):\n        logger.warning(...)\n        return")、体調分岐 (参照: _process_message_async / 抜粋: "targets = _extract_health_targets(msg_text)")、AIフォールバック (参照: _process_message_async / 抜粋: "# 2. AI Analysis (Fallback)")
 
 
 * **引数/リクエスト**:
@@ -276,18 +276,18 @@
 
 
 * **副作用**: `line_service.log_child_health`/`line_service.split_text_into_line_messages`、`ai_service.analyze_text_and_execute` への処理委譲に伴う副作用、および `reply_message` によるメッセージ送信。**（Issue #376で修正）** すべての`reply_message`呼び出しに`user_id=`を渡し、返信失敗時のpushフォールバックを可能にしている。AI経路は`asyncio.wait_for(..., timeout=AI_REPLY_TIMEOUT_SEC)`で総時間を制限する。**（Issue #620で追加）** 未認可ユーザーの場合は`logger.warning`の出力のみで、以降のいずれの副作用も発生しない。
-* 根拠: サービス呼び出し (行番号: 312, 314, 320-326 / 抜粋: "ai_resp_text = await asyncio.wait_for(")、認可ガードの`logger.warning` (行番号: 302 / 抜粋: "logger.warning(f\"⚠️ 未認可のLINEユーザーからのメッセージを拒否しました")
+* 根拠: サービス呼び出し (行番号: 312, 314, 320-326 / 抜粋: "ai_resp_text = await asyncio.wait_for(")、認可ガードの`logger.warning` (参照: _process_message_async / 抜粋: "logger.warning(f\"⚠️ 未認可のLINEユーザーからのメッセージを拒否しました")
 
 
 * **エラーハンドリング**: **（Issue #620で追加）** 最初に`_is_authorized_line_user(user_id)`が`False`を返す場合、警告ログのみでそれ以降のいずれの処理にも進まず早期returnする。AI処理 (`ai_service.analyze_text_and_execute`) が`AI_REPLY_TIMEOUT_SEC`秒以内に終わらない場合（`asyncio.TimeoutError`）はエラーログを出力し「⏳ 処理に時間がかかりすぎたため中断しました。記録が反映されているか確認のうえ…」を返信する（Issue #376。打ち切り時点でスレッド上のDB書き込みが完了している可能性があるため、確認を促す文言にしている）。その他の例外はエラーログを出力し、固定のエラーメッセージ("😓 すみません、うまく処理できませんでした。")をユーザーに返信する。体調記録の分岐（1.）にはtry-exceptがない（呼び出し元`handle_message`のイベント単位隔離で握られる）。
-* 根拠: 認可ガード (行番号: 301-303 / 抜粋: "if not _is_authorized_line_user(user_id):")、`except asyncio.TimeoutError:` (行番号: 327-333)、`except Exception as e: logger.error(...)` (行番号: 334-336 / 抜粋: "except Exception as e:")
+* 根拠: 認可ガード (参照: _process_message_async / 抜粋: "if not _is_authorized_line_user(user_id):")、`except asyncio.TimeoutError:` (行番号: 327-333)、`except Exception as e: logger.error(...)` (参照: _process_message_async / 抜粋: "except Exception as e:")
 
 
 
 ### `handle_postback`
 
 * **役割**: `PostbackEvent` (ボタン押下など) を受け取るハンドラー。`line_logic.handle_postback` へ処理を丸投げする。**（#358で撤去）** 以前ここにあった、`data`文字列が`"approve:"`/`"reject:"`で始まる場合にコマンド文字列へ変換して`_process_message_async`を呼び出す分岐は、それを生成する送信元（対応するpostbackアクションの発行元）がリポジトリ内に一切存在しないデッドコードだったため撤去された（オーナー判断、Issue #358）。これにより、本関数を通過する`PostbackEvent`はすべて`line_logic.handle_postback`へ委譲される。**（Issue #376 / L-L1で修正）** 先頭で`_is_redelivery`が真ならスキップし、関数全体を`try/except Exception`で包んでイベント単位で例外を隔離する。**（Issue #572で修正）** `handle_message`にはIssue #410（L-L6）で`event.source.user_id is None`（グループでのプロフィール未共有等）時の早期returnガードが追加されていたが、本関数には同等のガードが無く非対称だった。`user_id = event.source.user_id`で読み取った直後、`data_str`/`reply_token`の取得や`line_logic.handle_postback`への委譲より前に、`user_id`が`None`なら警告ログを出して処理をスキップするガードを追加し、この非対称性を解消した。**（Issue #623で修正）** `_process_message_async`にはIssue #620で`_is_authorized_line_user(user_id)`によるallowlistガードが既に導入されていたが、本関数（Postback経路）には同等のガードが無く、`_process_message_async`と同様の非対称性が残っていた。`user_id is None`ガードの直後、`data_str`/`reply_token`の取得や`line_logic.handle_postback`への委譲より前に、`_is_authorized_line_user(user_id)`が`False`を返す場合は警告ログのみを出して早期returnするガードを追加し、この非対称性を解消した（誰が認可対象かを教えることになる返信はしない点、allowlist未設定時は後方互換で誰でも許可される点も`_process_message_async`と同じ）。
-* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 408 / 抜粋: "def handle_postback(event: PostbackEvent):")、再配信スキップ (行番号: 342-344)、`user_id`のNoneガード (行番号: 346-353 / 抜粋: "if user_id is None:")、**（Issue #623で追加）** 認可ガード (行番号: 355-362 / 抜粋: "if not _is_authorized_line_user(user_id):\n            logger.warning(f\"⚠️ 未認可のLINEユーザーからのPostbackを拒否しました (user_id={user_id})\")\n            return")、撤去コメント (行番号: 369-371 / 抜粋: "以前ここにあった approve:/reject: postback の処理")、委譲 (行番号: 448 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")、例外隔離 (行番号: 382-383)
+* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 408 / 抜粋: "def handle_postback(event: PostbackEvent):")、再配信スキップ (行番号: 342-344)、`user_id`のNoneガード (参照: handle_postback / 抜粋: "if user_id is None:")、**（Issue #623で追加）** 認可ガード (参照: handle_postback / 抜粋: "if not _is_authorized_line_user(user_id):\n            logger.warning(f\"⚠️ 未認可のLINEユーザーからのPostbackを拒否しました (user_id={user_id})\")\n            return")、撤去コメント (参照: handle_postback / 抜粋: "以前ここにあった approve:/reject: postback の処理")、委譲 (行番号: 448 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")、例外隔離 (行番号: 382-383)
 
 
 * **引数/リクエスト**:
@@ -308,7 +308,7 @@
 * **（L-L1で追加）** 上記以外（`event`属性アクセス等）も外側の`except Exception`で捕捉し`exc_info=True`で記録する。
 * **（Issue #572で追加）** `user_id`が`None`の場合は`data_str`/`reply_token`の取得も`line_logic.handle_postback`への委譲も行わず、警告ログを出して早期returnする（`handle_message`のIssue #410ガードと同じスタイル）。
 * **（Issue #623で追加）** `_is_authorized_line_user(user_id)`が`False`の場合も同様に、`data_str`/`reply_token`の取得・`line_logic.handle_postback`への委譲を行わず警告ログのみで早期returnする（`_process_message_async`のIssue #620ガードと同じスタイル）。
-* 根拠: `except Exception as e: logger.error(f"Logic Delegation Error: {e}")` (行番号: 378-379)、`except Exception as e: logger.error(f"handle_postback Error: {e}", exc_info=True)` (行番号: 382-383)、`user_id`のNoneガード (行番号: 351-353 / 抜粋: "if user_id is None:")、**（Issue #623で追加）** 認可ガード (行番号: 360-362 / 抜粋: "if not _is_authorized_line_user(user_id):")
+* 根拠: `except Exception as e: logger.error(f"Logic Delegation Error: {e}")` (行番号: 378-379)、`except Exception as e: logger.error(f"handle_postback Error: {e}", exc_info=True)` (行番号: 382-383)、`user_id`のNoneガード (参照: handle_postback / 抜粋: "if user_id is None:")、**（Issue #623で追加）** 認可ガード (参照: handle_postback / 抜粋: "if not _is_authorized_line_user(user_id):")
 
 
 

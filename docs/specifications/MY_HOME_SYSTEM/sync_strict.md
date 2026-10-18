@@ -97,7 +97,7 @@
 * **引数/リクエスト**: `master_quest_ids: list`, `master_reward_ids: list`, `allow_empty_master: bool`, `assume_yes: bool`, `input_func=input`(テスト用の差し替え可能な入力関数)
 * 根拠: (行番号: 61〜65)
 * **戻り値/レスポンス**: `None`(中止すべき場合は`SyncAborted`を送出して戻らない)
-* 根拠: (行番号: 65 / 抜粋: ") -> None:")
+* 根拠: (参照: confirm_or_abort / 抜粋: ") -> None:")
 * **副作用**: `logger.error`/`logger.info`によるログ出力、`input_func`の呼び出し(標準入力からの読み取りが既定)
 * 根拠: (行番号: 75〜79, 85〜87, 90)
 * **エラーハンドリング**: 空マスタガードまたはユーザー拒否の場合に`SyncAborted`を送出する。それ以外の例外は捕捉しない
@@ -107,11 +107,11 @@
 
 * **役割**: **（Issue #664 で縮小）** CLIの実行本体。開始ログを出力し、`dry_run=False`の場合のみ`load_master_module()`でマスタを取得して`confirm_or_abort`に通したうえで、`game_system.sync_master_data(strict=strict, dry_run=dry_run)`を1回呼ぶ（`strict`の既定値は`True`）。統合前はここで`get_db_cursor(commit=not dry_run)`を開き`sync_quests`/`sync_rewards`を順に実行していたが、その処理はすべて`game_system.py`側へ移った。マスタの取得に`load_master_module()`を使うのは、**安全ガードが数えるマスタと実際に同期されるマスタを同じ読み込み口に揃える**ためである(別々に読むと「ガードは通ったが別のデータで全削除された」が起こりうる)。
 * 根拠: `def run_sync(` (行番号: 111〜135)
-* 根拠: コメント (行番号: 96〜98 / 抜粋: "安全ガードは「これから同期されるマスタ」を数える必要があるため、")
+* 根拠: コメント (参照: run_sync / 抜粋: "安全ガードは「これから同期されるマスタ」を数える必要があるため、")
 * **引数/リクエスト**: `dry_run: bool = False`, `assume_yes: bool = False`, `allow_empty_master: bool = False`, `input_func=input`, **（Issue #700 で追加）**`strict: bool = True`(そのまま`sync_master_data`へ渡す。既定の`True`は従来どおりの手動CLIの挙動で、`--if-stale`だけが`False`を渡す)
 * 根拠: (行番号: 111〜113)
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 93 / 抜粋: ") -> None:")
+* 根拠: (参照: run_sync / 抜粋: ") -> None:")
 * **副作用**: 開始ログの出力、`dry_run=False`時の`load_master_module()`呼び出しと`confirm_or_abort`呼び出し、`game_system.sync_master_data`の呼び出し(DBへの変更はこの先で起きる)
 * 根拠: (行番号: 94, 99〜107)
 * **エラーハンドリング**: 本関数自体は例外を捕捉しない。`confirm_or_abort`からの`SyncAborted`、`load_master_module()`の`ImportError`、`sync_master_data`からの`HTTPException`・DB例外はいずれも呼び出し元(`main`)にそのまま伝播する
@@ -150,7 +150,7 @@
 * **戻り値/レスポンス**: なし(異常時は`sys.exit(1)`でプロセス終了)
 * 根拠: (行番号: 110〜125)
 * **副作用**: `run_sync`の呼び出し、エラー時のログ出力・`traceback.print_exc()`・プロセス終了
-* 根拠: (行番号: 120〜124 / 抜粋: "logger.error(f\"❌ Sync failed: {e}\")")
+* 根拠: (参照: main / 抜粋: "logger.error(f\"❌ Sync failed: {e}\")")
 * **エラーハンドリング**: `SyncAborted`を捕捉して`sys.exit(1)`(ログなし、`confirm_or_abort`側で既に出力済みのため)。それ以外の`Exception`はログ・トレース出力後に`sys.exit(1)`
 * 根拠: (行番号: 118〜124)
 
@@ -247,7 +247,7 @@ graph TD
 * **（Issue #664）同期ロジックをここに書き戻さないこと**: UPSERTの列リストが食い違う事故が#100・#164・#165と3度起きたのは、同じ同期が2箇所に別実装で存在したためである。新しい列の追加・削除方針の変更は`services/quest/game_system.py`と`services/quest/master_sync_sql.py`の側で行う。回帰テスト`tests/test_sync_strict.py::TestMasterSyncSqlIsSharedWithGameSystem::test_the_cli_no_longer_has_its_own_sync_implementation`が、本ファイルに独自のSQL実行・`sync_quests`/`sync_rewards`が復活していないことを検査する。
 * 根拠: モジュールdocstring (行番号: 3〜16 / 抜粋: "UPSERT の列リストが食い違う事故が #100")
 * **安全ガードとマスタの読み込み口は一致させること**: `run_sync`は`load_master_module()`で取得したマスタの件数を`confirm_or_abort`に渡し、続けて`sync_master_data`が同じ読み込み口から読む。ここを別々の経路(例: `from quest_data import QUESTS`のモジュールレベルimport)に戻すと、ガードが見たマスタと実際に書かれるマスタがずれうる。
-* 根拠: コメント (行番号: 96〜98 / 抜粋: "別々に読むと、ガードが見たマスタと実際に書かれるマスタがずれうる。")
+* 根拠: コメント (参照: run_sync / 抜粋: "別々に読むと、ガードが見たマスタと実際に書かれるマスタがずれうる。")
 * **`--dry-run`は確認プロンプトを通らない**: `run_sync`は`dry_run=True`のとき`load_master_module()`も`confirm_or_abort`も呼ばずに`sync_master_data(strict=True, dry_run=True)`へ進む。DBを変更しないため問題にはならないが、「dry-runでは空マスタガードが働かない」という非対称は意図的なものである。
 * 根拠: (行番号: 96〜107 / 抜粋: "if not dry_run:")
 * **`confirm_or_abort`の対話プロンプトはCLI実行前提**: `input_func`のデフォルトは組み込み`input`であり、`unified_server.py`等のAPI経由で本モジュールの関数を直接呼び出すような使い方は想定されていない(現状そのような呼び出し元は本ファイルからは確認できない)。API経路が使うのは`strict=False`側である。

@@ -36,7 +36,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `migrations/*.sql`ファイルの内容 | 各マイグレーションファイル自体は本ファイルの解析範囲外であり、実際にどのようなDDL/DML(ALTER TABLE等)が実行されるかは提供されていないため。 | 根拠: `[sql読み込み・実行]` (行番号: 73〜78 / 抜粋: "with open(path, \"r\", encoding=\"utf-8\") as f:\n            sql = f.read()") |
+| `migrations/*.sql`ファイルの内容 | 各マイグレーションファイル自体は本ファイルの解析範囲外であり、実際にどのようなDDL/DML(ALTER TABLE等)が実行されるかは提供されていないため。 | 根拠: `[sql読み込み・実行]` (参照: apply_pending_migrations / 抜粋: "with open(path, \"r\", encoding=\"utf-8\") as f:\n            sql = f.read()") |
 | `conn`(呼び出し元から渡される`sqlite3.Connection`) | 接続オブジェクトがどのDBファイルに対して開かれているか、どのようなisolation_level等の設定かは呼び出し元の実装に依存し、本ファイルからは不明であるため。 | 根拠: `[apply_pending_migrations引数]` (行番号: 97 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -44,7 +44,7 @@
 ### `_ensure_tracking_table`
 
 * **役割**: マイグレーション適用履歴を記録する`schema_migrations`テーブルが存在しない場合に作成する。
-* 根拠: `[_ensure_tracking_table]` (行番号: 32〜39 / 抜粋: "CREATE TABLE IF NOT EXISTS schema_migrations (\n            version TEXT PRIMARY KEY,\n            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP\n        )")
+* 根拠: `[_ensure_tracking_table]` (参照: _ensure_tracking_table / 抜粋: "CREATE TABLE IF NOT EXISTS schema_migrations (\n            version TEXT PRIMARY KEY,\n            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP\n        )")
 
 
 * **引数/リクエスト**: `conn` (`sqlite3.Connection`。テーブル作成対象のDB接続)
@@ -52,11 +52,11 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[戻り値の型アノテーション]` (行番号: 32 / 抜粋: "-> None:")
+* 根拠: `[戻り値の型アノテーション]` (参照: _ensure_tracking_table / 抜粋: "-> None:")
 
 
 * **副作用**: `CREATE TABLE IF NOT EXISTS`の実行および`conn.commit()`によるコミット。
-* 根拠: `[conn.execute, conn.commit]` (行番号: 33〜39 / 抜粋: "conn.commit()")
+* 根拠: `[conn.execute, conn.commit]` (参照: _ensure_tracking_table / 抜粋: "conn.commit()")
 
 
 * **エラーハンドリング**: なし(例外捕捉は行われていない)
@@ -66,7 +66,7 @@
 ### `_applied_versions`
 
 * **役割**: `schema_migrations`テーブルから適用済みバージョン(ファイル名)の集合を取得する。
-* 根拠: `[_applied_versions]` (行番号: 42〜44 / 抜粋: "rows = conn.execute(\"SELECT version FROM schema_migrations\").fetchall()\n    return {row[0] for row in rows}")
+* 根拠: `[_applied_versions]` (参照: _applied_versions / 抜粋: "rows = conn.execute(\"SELECT version FROM schema_migrations\").fetchall()\n    return {row[0] for row in rows}")
 
 
 * **引数/リクエスト**: `conn` (`sqlite3.Connection`。問い合わせ対象のDB接続)
@@ -88,7 +88,7 @@
 ### `_discover_migration_files`
 
 * **役割**: `MIGRATIONS_DIR`配下の`.sql`拡張子ファイルをファイル名昇順でリストアップする。ディレクトリが存在しない場合は空リストを返す。
-* 根拠: `[_discover_migration_files]` (行番号: 47〜50 / 抜粋: "return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(\".sql\"))")
+* 根拠: `[_discover_migration_files]` (参照: _discover_migration_files / 抜粋: "return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(\".sql\"))")
 
 
 * **引数/リクエスト**: なし
@@ -136,7 +136,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[戻り値の型アノテーション]` (行番号: 66 / 抜粋: "-> None:")
+* 根拠: `[戻り値の型アノテーション]` (参照: apply_pending_migrations / 抜粋: "-> None:")
 
 
 * **副作用**: `_ensure_tracking_table`によるテーブル作成、`_split_statements`によるSQL分割、`conn.execute`によるステートメント単位のSQL実行(DDL/DML)、`schema_migrations`テーブルへのINSERT、`conn.commit()`によるコミット、`.sql`ファイル読み込み(`open`)、ログ出力(`logger.info`/`logger.warning`/`logger.error`)、ファイル単位で回復不能な`OperationalError`発生時の`conn.rollback()`。
@@ -214,7 +214,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `migrations/0001_add_quest_users_role.sql`ほか`migrations/`配下の各`.sql`ファイル | 実際に適用されるDDL/DML内容を確認し、`apply_pending_migrations`が処理する対象の実体を把握するため。 | 根拠: `[sql読み込み]` (行番号: 91〜93 / 抜粋: "path = os.path.join(MIGRATIONS_DIR, filename)\n        with open(path, \"r\", encoding=\"utf-8\") as f:") |
+| 高 | `migrations/0001_add_quest_users_role.sql`ほか`migrations/`配下の各`.sql`ファイル | 実際に適用されるDDL/DML内容を確認し、`apply_pending_migrations`が処理する対象の実体を把握するため。 | 根拠: `[sql読み込み]` (参照: apply_pending_migrations / 抜粋: "path = os.path.join(MIGRATIONS_DIR, filename)\n        with open(path, \"r\", encoding=\"utf-8\") as f:") |
 | 高 | `unified_server.py` | `apply_pending_migrations`の実際の呼び出しタイミング(起動シーケンス上の位置)と渡される`conn`の生成元を確認するため。 | 根拠: `[モジュールdocstring, MIGRATIONS_DIR]` (行番号: 1〜15 / 抜粋: "本モジュールは migrations/ 配下の *.sql ファイルをファイル名の昇順で適用し") |
 | 中 | `services/quest_service.py` | モジュールdocstringで言及されている、従来の場当たり的なスキーマ変更処理(`sync_master_data()`)との関係を確認するため(Issue #330 で完全退役済み)。 | 根拠: `[モジュールdocstring]` (行番号: 5〜8, 12〜15 / 抜粋: "quest_service.py 側にあった上記の実行時チェックは Issue #330 で完全に退役済み") |
 

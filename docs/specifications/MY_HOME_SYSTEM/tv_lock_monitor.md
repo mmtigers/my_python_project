@@ -73,7 +73,7 @@
 
 * **エラーハンドリング**:
 * コマンド送信時やファイル書き込み時に発生する汎用例外（`Exception`）をキャッチし、エラーログを出力する。
-* 根拠: `try-except`ブロック (行番号: 42-54 / 抜粋: "except Exception as e:")
+* 根拠: `try-except`ブロック (参照: main / 抜粋: "except Exception as e:")
 
 
 
