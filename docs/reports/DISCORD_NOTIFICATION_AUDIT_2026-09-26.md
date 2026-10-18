@@ -1,5 +1,7 @@
 # Discord通知システム 現状把握レポート (2026-09-26)
 
+> **最終棚卸し**: 2026-10-18(Issue #960)。6章「気づいた改善余地」1〜5の「対応済み」の記述と、7章の各項目の状態は、2026-10-18 時点の現行コードと一致することを確認した(`services/backup_service.py`・`post_boot_health_check.py` の `channel="error"`+`skip_discord`、`monitors/smart_timelapse_generator.py` の手動実行専用コメント、`.env.example` の `WATCHDOG_NOTIFY_WEBHOOK_URL` コメント、`DDD/newface_monitor.py`・`DDD/batch_download_discord.py` の非対称性コメント、`config.py` の `NotifySettings` コメント)。`notify_mode` を読むコードが無い状態も変わっていない(6章5番のとおり、ユーザー判断で実装を見送ったまま)。実機の `.env`・`crontab -l`・Discord 側の状態(6.1・6.2)は再確認していない。
+
 ## 0. 目的とスコープ
 
 このリポジトリ全体（`MY_HOME_SYSTEM/`・`DDD/`・`.github/`・`deploy/`・`family-quest/`）を対象に、
