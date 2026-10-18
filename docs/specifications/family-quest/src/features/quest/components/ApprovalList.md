@@ -68,7 +68,7 @@
 * 根拠: (行番号: 19〜23)
 
 * **戻り値/レスポンス**: JSX要素（ドラッグ可能な`motion.div`）
-* 根拠: (行番号: 38〜48 / 抜粋: "return (\n        <motion.div\n            style={{ x, background }}\n            drag={draggable ? 'x' : false}")
+* 根拠: (参照: SwipeableRow / 抜粋: "return (\n        <motion.div\n            style={{ x, background }}\n            drag={draggable ? 'x' : false}")
 
 * **副作用**: なし（`onSwipeApprove`/`onSwipeReject`は親から渡されたコールバックを呼ぶのみ）
 * **エラーハンドリング**: `onSwipeApprove`/`onSwipeReject`のいずれも渡されていない場合、`draggable`が偽になり`drag`は無効化される。

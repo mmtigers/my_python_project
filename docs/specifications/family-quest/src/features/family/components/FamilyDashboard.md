@@ -151,7 +151,7 @@
 
 
 * **戻り値/レスポンス**: JSX.Element
-* 根拠: (行番号: 173〜175 / 抜粋: "return (\n        <div\n            onClickCapture={onInteract}")
+* 根拠: (参照: FamilyPanel / 抜粋: "return (\n        <div\n            onClickCapture={onInteract}")
 
 
 * **副作用**: `tab`ローカルステート（`'quest' | 'shop' | 'inventory'`、初期値`'quest'`）の更新。`onInteract`の呼び出しによる親（`FamilyDashboard`）側の`activeUserId`更新。**（すごろく機能で追加）** `useRoutineData(user.user_id, onLevelUp, onError)`の呼び出しによる`GET /api/routine/today`の15秒間隔ポーリング（`user.user_id`ごとに独立したReact Queryの`queryKey`を持つため、4パネル分が個別に発火する）。チェックポイント通過ボーナスでレベルアップした場合は`onLevelUp`コールバック内で`play('levelUp')`と`showToast`によるLEVEL UP演出を行う。**（さらに別のコードレビューで発覚した重複を追加修正）** 完了報告失敗時のエラー通知（`showToast`＋`play('cancel')`）は`onError`コールバックとして`useRoutineData`へ渡され、`completeStep`内部の`catch`節から直接呼ばれる。**（大人用フロー分離で追加）** 第4引数`onStepReward`も渡すようになり、大人用フロー(パパ・ママ用のすごろく)でデイリークエストから移設されたステップを完了した際に`play('clear')`＋「クリア！ / {user.name}は {gold} G を手に入れた！」のトーストを出す(横画面は4人分のパネルが並ぶため、`App.tsx`側と異なり誰が獲得したかを文面に含める)。以前は本ファイル自前の`handleRoutineStepComplete`が`completeRoutineStep`の戻り値を見て同じ処理をしていたが（`App.tsx`にも一字一句同じ関数が重複していたため）、`useRoutineData.ts`の`onError`引数へ集約され、本ファイルからは削除された。

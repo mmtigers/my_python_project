@@ -198,7 +198,7 @@
 * 根拠: (行番号: 153〜190)
 
 * **エラーハンドリング**: `!res.success`の場合、`resolveErrorText(res, "失敗しました")`をエラーメッセージとして`messageData`にセットし（`onRetry`に同じ引数で`runQuestAction`を再実行するコールバックを含む）、`cancel`音を再生する。
-* 根拠: (行番号: 232〜237 / 抜粋: "setMessageData({\n      title: \"エラー\",\n      text: resolveErrorText(res, \"失敗しました\"),\n      onRetry: () => runQuestAction(user, mode, target),\n    });\n    play('cancel');")
+* 根拠: (参照: App / 抜粋: "setMessageData({\n      title: \"エラー\",\n      text: resolveErrorText(res, \"失敗しました\"),\n      onRetry: () => runQuestAction(user, mode, target),\n    });\n    play('cancel');")
 
 ### `handleQuestClick` (App内の関数)
 
@@ -245,7 +245,7 @@
 * **役割**: クエスト承認処理を実行する。記録名義は`getRepresentativeParent(users)`で「親」に固定する（要件5）。先頭で`history.id`が`approvingHistoryIdsRef.current`（`Set<ID>`）に既に含まれていれば即座に`return`し、同一履歴への多重送信（連打・スワイプ承認とボタン承認のほぼ同時操作。**（Issue #391/F-L8）** 一括承認中に対象idが先に集合へ入っている場合の個別タップも同様にここで無視される）を静かに無視する（エラー表示は出さない、Issue #119）。ガードを通過すると`history.id`を`approvingHistoryIdsRef.current`に追加し`syncApprovingHistoryIds()`でstateへ反映、`try`ブロックで`approveQuest`を呼び出し、`finally`で必ず`approvingHistoryIdsRef.current`から取り除き再度`syncApprovingHistoryIds()`する。成功時、`res.earnedMedals`と`res.partnerEarnedMedals`（兄妹連携クエストのカスケード承認時のみ相方分が入る、Issue #238）を合算した数が1以上であれば`medal`音とメダル獲得トーストを表示する。失敗時はエラーメッセージ（`onRetry`で同じ引数で自身を再実行するコールバック付き）を表示する。
 * 根拠: (行番号: 324〜363 / 抜粋: "// 承認ハンドラ: 記録名義は「親」で固定する(要件5)\n  const handleApprove = async (history: QuestHistory) => {")
 * 根拠: Issue #119/#391の多重送信ガード (行番号: 349〜357 / 抜粋: "// #119: 同一履歴への多重送信は静かに無視する(2回目のタップ・スワイプは\n    // 1回分として扱い、エラー表示を出さない)。\n    // #391(F-L8): 一括承認中は対象の全idが先に集合へ入るため、一括承認中の個別タップも\n    // ここで同様に無視される(以前は一括承認と競合して400のエラーモーダルになっていた)。\n    if (history.id != null) {\n      if (approvingHistoryIdsRef.current.has(history.id)) return;\n      approvingHistoryIdsRef.current.add(history.id);\n      syncApprovingHistoryIds();\n    }")
-* 根拠: `finally`によるガード解除 (行番号: 380〜385 / 抜粋: "} finally {\n      if (history.id != null) {\n        approvingHistoryIdsRef.current.delete(history.id);\n        syncApprovingHistoryIds();\n      }\n    }")
+* 根拠: `finally`によるガード解除 (参照: App / 抜粋: "} finally {\n      if (history.id != null) {\n        approvingHistoryIdsRef.current.delete(history.id);\n        syncApprovingHistoryIds();\n      }\n    }")
 * 根拠: メダル獲得演出 (行番号: 367〜371 / 抜粋: "const totalEarnedMedals = (res.earnedMedals ?? 0) + (res.partnerEarnedMedals ?? 0);\n        if (totalEarnedMedals > 0) {\n          play('medal');\n          showToast({ title: \"ちいさなメダル獲得！\", text: `ちいさなメダルを ${totalEarnedMedals} 枚手に入れた！`, icon: \"🏅\" });\n        }")
 
 * **引数/リクエスト**: `history: QuestHistory`
@@ -261,7 +261,7 @@
 * 根拠: Issue #119の連打ガード (行番号: 390〜394 / 抜粋: "// #119: 一括承認ボタンの連打で、1回目のループが終わる前に2回目が\n    // 同じ履歴を並行して承認しようとし400になるのを防ぐ。\n    if (isApprovingAllRef.current) return;\n    isApprovingAllRef.current = true;\n    setIsApprovingAll(true);")
 * 根拠: Issue #391/F-L8の対象絞り込みと事前クレーム (行番号: 372〜390 / 抜粋: "// #391(F-L8): 個別承認が送信中の履歴は一括の対象から外し(応答待ちの行を二重に\n    // 承認して400にしない)、残りの全idを先に approvingHistoryIdsRef へ入れて、\n    // 一括処理中の個別タップを handleApprove 側で無視させる。", "const targets = [...pendingQuestsRef.current].filter(h =>\n        h.id == null || !approvingHistoryIdsRef.current.has(h.id)\n      );\n      if (targets.length === 0) return;\n      for (const h of targets) {\n        if (h.id != null) {\n          approvingHistoryIdsRef.current.add(h.id);\n          claimedIds.push(h.id);\n        }\n      }\n      syncApprovingHistoryIds();")
 * 根拠: カスケード承認のスキップと合算 (行番号: 393〜408 / 抜粋: "// 兄妹連携クエストは片方を承認するとサーバー側で相方の行も自動承認される。\n      // 相方のidをここに記録し、後続ループで個別に承認APIを叩いて400にならないようにする。\n      const cascadedIds = new Set<ID>();\n      for (const history of targets) {\n        if (history.id != null && cascadedIds.has(history.id)) {\n          successCount++;\n          continue;\n        }", "totalEarnedMedals += (res.earnedMedals ?? 0) + (res.partnerEarnedMedals ?? 0);\n          if (history.linked_history_id != null) {\n            cascadedIds.add(history.linked_history_id);\n          }")
-* 根拠: `finally`によるガード解除 (行番号: 451〜456 / 抜粋: "} finally {\n      for (const id of claimedIds) approvingHistoryIdsRef.current.delete(id);\n      syncApprovingHistoryIds();\n      isApprovingAllRef.current = false;\n      setIsApprovingAll(false);\n    }")
+* 根拠: `finally`によるガード解除 (参照: App / 抜粋: "} finally {\n      for (const id of claimedIds) approvingHistoryIdsRef.current.delete(id);\n      syncApprovingHistoryIds();\n      isApprovingAllRef.current = false;\n      setIsApprovingAll(false);\n    }")
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `Promise<void>`

@@ -72,7 +72,7 @@
 
 
 * **戻り値/レスポンス**: JSX要素。`isLoading`（`useQuery`の初回ロード中フラグ）が`true`の間は「読み込み中...」のみを表示する`<div>`を返し、それ以外はヘッダー（見出しと設定ボタン）・（`fetchError`が真の場合のみ）エラーバナー・タブ切り替えボタン・（`activeTab`に応じた）`LiveView`または`RecordView`・`CameraSettingsModal`を含む全画面レイアウトの`<div>`を返す。
-* 根拠: [早期return] (行番号: 53 / 抜粋: "if (isLoading) return <div className=\"min-h-screen bg-gray-900 text-white flex items-center justify-center p-8\">読み込み中...</div>;")、[通常return] (行番号: 53〜113 / 抜粋: "return (\n        // 独立した全画面レイアウト\n        <div className=\"min-h-screen bg-gray-900 text-gray-100 p-4 md:p-8 font-sans\">")
+* 根拠: [早期return] (行番号: 53 / 抜粋: "if (isLoading) return <div className=\"min-h-screen bg-gray-900 text-white flex items-center justify-center p-8\">読み込み中...</div>;")、[通常return] (参照: CameraDashboard / 抜粋: "return (\n        // 独立した全画面レイアウト\n        <div className=\"min-h-screen bg-gray-900 text-gray-100 p-4 md:p-8 font-sans\">")
 
 
 * **副作用**: データ取得は`useQuery`が管理する（マウント時の初回フェッチ、キャッシュ、`refetch`）。`useEffect`（依存配列`[]`、マウント時1回）では`document.title`を「ホーム監視カメラ」へ変更し、クリーンアップ関数でアンマウント時に「Family Quest」へ戻すのみとなった（データ取得の副作用は`useEffect`から分離された）。設定ボタン（`aria-label="カメラ設定"`）のクリックで`setSettingsOpen(true)`し、`CameraSettingsModal`をマウント（`isOpen`で表示制御）する。エラーバナー内の「再試行」ボタンのクリックで`refetch()`を実行する（**Issue #121で追加、Issue #326で`refetch`に置換**）。

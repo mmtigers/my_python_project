@@ -73,7 +73,7 @@
 
 
 * **戻り値/レスポンス**: `QuestLockState` オブジェクト（`isLocked`, `isDone`, `isPending`, `isInfinite`, `myCompletions`, `pendingEntry`, `completedEntry`）
-* 根拠: [return文] (行番号: 80〜88 / 抜粋: "return {\n        isLocked,\n        isDone,\n        isPending,\n        isInfinite,\n        myCompletions,\n        pendingEntry,\n        completedEntry: myCompletions[myCompletions.length - 1],\n    };")
+* 根拠: [return文] (参照: getQuestLockState / 抜粋: "return {\n        isLocked,\n        isDone,\n        isPending,\n        isInfinite,\n        myCompletions,\n        pendingEntry,\n        completedEntry: myCompletions[myCompletions.length - 1],\n    };")
 
 
 * **副作用**: なし（純粋関数）
@@ -109,7 +109,7 @@
 
 
 * **戻り値/レスポンス**: クエストステータスを含むオブジェクト (`isDone`, `isPending`, `isInfinite`, `isRandom`, `isTimeLimited`, `isLimited`, `isLocked`, `displayTitle`, `variant`)
-* 根拠: `return` (行番号: 130〜140 / 抜粋: "return {\n            isDone,\n            isPending,\n            isInfinite,\n            isRandom,\n            isTimeLimited,\n            isLimited,\n            isLocked,\n            displayTitle,\n            variant\n        };")
+* 根拠: `return` (参照: useQuestStatus / 抜粋: "return {\n            isDone,\n            isPending,\n            isInfinite,\n            isRandom,\n            isTimeLimited,\n            isLimited,\n            isLocked,\n            displayTitle,\n            variant\n        };")
 
 
 * **副作用**: なし（`useMemo`による算出結果のメモ化のみ）

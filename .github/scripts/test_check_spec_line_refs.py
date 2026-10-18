@@ -1077,7 +1077,6 @@ def test_convert_include_valid_leaves_gated_citations_alone(fake_repo):
     assert path.read_text(encoding="utf-8") == single + ranged
 
 
-
 # --- 見出しに複数のクラスが並ぶとき(Issue #950) ---------------------------------
 
 
@@ -1123,3 +1122,75 @@ def test_def_citation_not_resolved_when_heading_classes_both_define_it(fake_repo
         '### `First` / `Second`\n\n* 根拠: 判定 (行番号: 99 / 抜粋: "def filter(self, record):")\n',
     )
     assert checker.scan(fix=False) == ([], 0)
+
+
+_TS_SOURCE = """\
+import { z } from 'zod';
+
+// 上限
+export const RETRY_LIMIT = 3;
+
+export function buildUrl(id: string) {
+    const base = '/api';
+    return `${base}/cameras/${id}`;
+}
+
+/** 名前の重複 */
+type Dup = string;
+const Dup = 1;
+
+export const useThing = () => {
+    const value = compute();
+    return `${value}`;
+};
+"""
+
+
+def test_ts_symbol_spans_cover_top_level_declarations():
+    """TS のトップレベル宣言が、次の行頭の文の直前までを範囲として返ること(Issue #950)。"""
+    spans = {name: (start, end) for name, start, end in checker._ts_symbol_spans(_TS_SOURCE)}
+    assert spans["RETRY_LIMIT"] == (4, 4)
+    assert spans["buildUrl"] == (6, 9)  # 末尾の空行は含めず、閉じの `}` までを含む
+    assert spans["useThing"] == (15, 18)
+    assert "Dup" not in spans  # 型と値の同名は、どちらを指すか決められないので返さない
+
+
+def _write_ts_spec(repo, body):
+    (repo / "family-quest" / "src" / "lib" / "sample.ts").write_text(_TS_SOURCE, encoding="utf-8")
+    path = repo / "docs" / "specifications" / "family-quest" / "src" / "lib" / "sample.md"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_ts_symbol_reference_is_verified(fake_repo_other_languages):
+    """TS の `参照: シンボル` も、抜粋がそのシンボルの本体にあるかを検証すること。"""
+    _write_ts_spec(fake_repo_other_languages, '* 根拠: 参照: buildUrl / 抜粋: "return `${base}/cameras/${id}`;")\n')
+    problems, checked = checker.scan_symbol_references()
+    assert problems == [] and checked == 1
+
+
+def test_ts_symbol_reference_detects_snippet_outside_the_symbol(fake_repo_other_languages):
+    _write_ts_spec(fake_repo_other_languages, '* 根拠: 参照: useThing / 抜粋: "return `${base}/cameras/${id}`;")\n')
+    problems, _ = checker.scan_symbol_references()
+    assert len(problems) == 1 and "見つからない" in problems[0]
+
+
+def test_ts_convert_include_valid_rewrites_line_citation(fake_repo_other_languages):
+    """TS でも、範囲内の出現が1シンボルに収まる非ゲート引用を参照書式へ移せること。"""
+    # `return `$` は buildUrl(8行目)と useThing(17行目)の2箇所に現れてゲート外になる。引用範囲 8 には前者だけ。
+    path = _write_ts_spec(
+        fake_repo_other_languages, '* 根拠: 戻り値 (行番号: 8 / 抜粋: "return `$")\n'
+    )
+    assert checker.convert_to_symbol_references([path], include_valid=True) == (1, 0)
+    assert "参照: buildUrl" in path.read_text(encoding="utf-8")
+    problems, checked = checker.scan_symbol_references()
+    assert problems == [] and checked == 1
+
+
+def test_ts_spec_does_not_use_same_named_python_symbol_table(fake_repo_other_languages):
+    """family-quest の仕様書は、同名の Python ソースがあっても TS のシンボル表で解決すること。"""
+    (fake_repo_other_languages / "MY_HOME_SYSTEM" / "sample.py").write_text("def buildUrl():\n    return 1\n", encoding="utf-8")
+    _write_ts_spec(fake_repo_other_languages, '* 根拠: 参照: buildUrl / 抜粋: "return `${base}/cameras/${id}`;")\n')
+    problems, checked = checker.scan_symbol_references()
+    assert problems == [] and checked == 1
+
