@@ -189,29 +189,17 @@ def _write_done_record(rec: str, done_filename: str, sum_info: SummaryInfo) -> N
         json.dump(asdict(sum_info), f, indent=2, ensure_ascii=False)
 
 
-def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_time_str: str = None, end_time_str: str = None) -> None:
-    t_start = time.perf_counter()
+def _select_target_files(camera_name: str, target_date, start_time_str, end_time_str):
+    """対象日(と時間帯)の録画チャンクを時系列順に選び、(ファイル一覧, 開始時刻, 終了時刻) を返す。
 
-    if not check_dependencies():
-        _send_report("⚠️ 日次タイムラプス生成エラー\nFFmpeg等がインストールされていません。")
-        return
-
-    # ターゲット日付の決定（指定がなければ昨日の日付）
-    resolved = _resolve_target_date(target_date_str)
-    if resolved is None:
-        return
-    target_date, target_date_str = resolved
-
-    time_range_log = f" (時間指定: {start_time_str or '開始'} ～ {end_time_str or '終了'})" if start_time_str or end_time_str else ""
-    logger.info(f"==========【日次タイムラプスバッチ開始】==========")
-    logger.info(f"カメラ: {camera_name}, 対象日: {target_date_str}{time_range_log}")
-
+    録画ディレクトリが無い・時刻の書式が不正・対象ファイルが無い場合はログを出して None を返す。
+    """
     # NASのNVR録画ディレクトリパス (config.NVR_RECORD_DIR を基準に解決し、環境ごとの上書きに追従する)
     nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', "/mnt/nas/home_system/nvr_recordings")
     nvr_dir = os.path.join(nvr_base_dir, camera_name)
     if not os.path.exists(nvr_dir):
         logger.error(f"カメラディレクトリが見つかりません: {nvr_dir}")
-        return
+        return None
 
     # YYYYMMDD形式でファイルを検索し、時系列にソート
     date_prefix = target_date.strftime('%Y%m%d')
@@ -230,12 +218,36 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
             end_time = parse_time(end_time_str) if end_time_str else None
         except ValueError as ve:
             logger.error(str(ve))
-            return
+            return None
         target_files = _filter_files_by_time_range(target_files, target_date, start_time, end_time)
 
     if not target_files:
         logger.info(f"対象期間の録画ファイルが存在しません。処理を終了します。")
+        return None
+    return target_files, start_time, end_time
+
+
+def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_time_str: str = None, end_time_str: str = None) -> None:
+    t_start = time.perf_counter()
+
+    if not check_dependencies():
+        _send_report("⚠️ 日次タイムラプス生成エラー\nFFmpeg等がインストールされていません。")
         return
+
+    # ターゲット日付の決定（指定がなければ昨日の日付）
+    resolved = _resolve_target_date(target_date_str)
+    if resolved is None:
+        return
+    target_date, target_date_str = resolved
+
+    time_range_log = f" (時間指定: {start_time_str or '開始'} ～ {end_time_str or '終了'})" if start_time_str or end_time_str else ""
+    logger.info(f"==========【日次タイムラプスバッチ開始】==========")
+    logger.info(f"カメラ: {camera_name}, 対象日: {target_date_str}{time_range_log}")
+
+    selected = _select_target_files(camera_name, target_date, start_time_str, end_time_str)
+    if selected is None:
+        return
+    target_files, start_time, end_time = selected
 
     logger.info(f"対象チャンクファイル数: {len(target_files)} 件")
 
