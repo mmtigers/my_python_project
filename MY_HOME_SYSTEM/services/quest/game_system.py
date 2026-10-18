@@ -139,6 +139,26 @@ class GameSystem:
                 (`get_db_cursor(commit=False)` のため SELECT しか実行しない)。
         """
         logger.info("🔄 Starting Master Data Sync...")
+        valid_users, valid_quests, valid_rewards = self._load_validated_master(strict)
+
+        if dry_run:
+            return self._report_dry_run(valid_quests, valid_rewards, strict=strict)
+
+        # 3テーブルの同期は1つのトランザクション(同じ cur)で行う。途中で失敗すれば
+        # get_db_cursor がまとめてロールバックする(Issue #954 の分割前と同じ)。
+        with get_db_cursor(commit=True) as cur:
+            self._upsert_master_users(cur, valid_users)
+            self._sync_quest_master(cur, valid_quests, strict)
+            self._sync_reward_master(cur, valid_rewards)
+
+        logger.info("✅ Master data sync completed.")
+        return {"status": "synced", "message": "Master data updated."}
+
+    def _load_validated_master(self, strict: bool) -> tuple[list[Any], list[Any], list[Any]]:
+        """quest_data.py を読み込み、Pydantic で検証した (users, quests, rewards) を返す。
+
+        検証に失敗した場合は HTTPException(500) を送出する(DBには一切触れない)。
+        """
         try:
             quest_data = load_master_module()
             # strict(手動CLI)は quest_users を対象にしない。検証も走らせないことで、
@@ -157,134 +177,138 @@ class GameSystem:
                 MasterReward(**(_apply_legacy_reward_defaults(r) if strict else r))
                 for r in quest_data.REWARDS
             ]
+            return valid_users, valid_quests, valid_rewards
         except Exception as e:
             logger.error(f"❌ Master Data Validation failed: {e}")
             raise HTTPException(status_code=500, detail=f"Master Data Error: {str(e)}")
 
-        if dry_run:
-            return self._report_dry_run(valid_quests, valid_rewards, strict=strict)
+    def _upsert_master_users(self, cur: Any, valid_users: list[Any]) -> None:
+        """quest_users へマスタのユーザーを UPSERT する。
 
-        with get_db_cursor(commit=True) as cur:
-            # Issue #330: 以前ここにあった「SELECTを試して失敗したらALTER TABLE」式の
-            # レガシー実行時マイグレーション(role/reset_period/descriptionカラムの追加)は
-            # 完全退役した。スキーマは migrations/ 配下(0000ベースライン+0001以降)が
-            # 唯一の定義元であり、unified_serverのlifespanとinit_db()の双方が起動時に
-            # apply_pending_migrations() を適用するため、本メソッド到達時点で
-            # これらのカラムは必ず存在する。
-            # strict のとき valid_users は空リスト(上記参照)なので、このループは回らない。
-            for u in valid_users:
-                role_val = getattr(u, 'role', None)
-                cur.execute("""
-                    INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, avatar, role, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(user_id) DO UPDATE SET
-                        name = excluded.name,
-                        job_class = excluded.job_class,
-                        role = COALESCE(excluded.role, quest_users.role)
-                """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, role_val, get_now_iso()))
+        衝突時に更新するのは name/job_class/role だけで、残高(gold/exp/level)は
+        新規行の初期値としてのみ書く。既存ユーザーの残高は変更しない。
+        """
+        # Issue #330: 以前ここにあった「SELECTを試して失敗したらALTER TABLE」式の
+        # レガシー実行時マイグレーション(role/reset_period/descriptionカラムの追加)は
+        # 完全退役した。スキーマは migrations/ 配下(0000ベースライン+0001以降)が
+        # 唯一の定義元であり、unified_serverのlifespanとinit_db()の双方が起動時に
+        # apply_pending_migrations() を適用するため、本メソッド到達時点で
+        # これらのカラムは必ず存在する。
+        # strict のとき valid_users は空リスト(_load_validated_master 参照)なので、このループは回らない。
+        for u in valid_users:
+            role_val = getattr(u, 'role', None)
+            cur.execute("""
+                INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, avatar, role, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    name = excluded.name,
+                    job_class = excluded.job_class,
+                    role = COALESCE(excluded.role, quest_users.role)
+            """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, role_val, get_now_iso()))
 
-            active_q_ids = [q.id for q in valid_quests]
-            if active_q_ids:
-                ph = ','.join(['?'] * len(active_q_ids))
-                # f-stringで組み立てているのは "?" プレースホルダの個数のみで、値自体は
-                # 第2引数でパラメータ化して渡している(bandit B608はこの安全なパターンを
-                # 文字列連結によるSQLインジェクションと区別できず誤検知する)。
-                cur.execute(f"DELETE FROM quest_master WHERE quest_id NOT IN ({ph})", active_q_ids)  # nosec B608
-                logger.info(f"Deleted obsolete quests: {cur.rowcount} rows")
-            elif strict:
-                # Issue #664: 手動CLI(sync_strict.py)は「quest_data.py を唯一の正として
-                # 完全同期する」ことが目的で、マスタが空なら全削除が正しい結果になる。
-                # 事故を防ぐ役割は削除のスキップではなく、CLI 側の安全ガード
-                # (--allow-empty-master が無ければ拒否 + 確認プロンプト)が担う。
-                cur.execute("DELETE FROM quest_master")
-                logger.info("Deleted ALL quests (Master is empty)")
-            else:
-                # #242: quest_data.QUESTSが空(コーディングミス等)になった瞬間、
-                # 以前は無条件でDELETE FROM quest_masterを実行し全クエストマスタが
-                # 消えていた。reward_master側の「参照が残っている行は削除をスキップする」
-                # 安全弁と同様、意図しない全消去を防ぐため削除自体をスキップする。
-                # (このAPI経路には CLI のような確認プロンプトが無いため。)
-                logger.warning(
-                    "⚠️ quest_data.QUESTSが空のため、quest_masterへの全削除操作を"
-                    "スキップしました(意図しない全消去を防ぐための安全弁)。"
+    def _sync_quest_master(self, cur: Any, valid_quests: list[Any], strict: bool) -> None:
+        """quest_master からマスタに無いクエストを削除し、残りを UPSERT する。"""
+        active_q_ids = [q.id for q in valid_quests]
+        if active_q_ids:
+            ph = ','.join(['?'] * len(active_q_ids))
+            # f-stringで組み立てているのは "?" プレースホルダの個数のみで、値自体は
+            # 第2引数でパラメータ化して渡している(bandit B608はこの安全なパターンを
+            # 文字列連結によるSQLインジェクションと区別できず誤検知する)。
+            cur.execute(f"DELETE FROM quest_master WHERE quest_id NOT IN ({ph})", active_q_ids)  # nosec B608
+            logger.info(f"Deleted obsolete quests: {cur.rowcount} rows")
+        elif strict:
+            # Issue #664: 手動CLI(sync_strict.py)は「quest_data.py を唯一の正として
+            # 完全同期する」ことが目的で、マスタが空なら全削除が正しい結果になる。
+            # 事故を防ぐ役割は削除のスキップではなく、CLI 側の安全ガード
+            # (--allow-empty-master が無ければ拒否 + 確認プロンプト)が担う。
+            cur.execute("DELETE FROM quest_master")
+            logger.info("Deleted ALL quests (Master is empty)")
+        else:
+            # #242: quest_data.QUESTSが空(コーディングミス等)になった瞬間、
+            # 以前は無条件でDELETE FROM quest_masterを実行し全クエストマスタが
+            # 消えていた。reward_master側の「参照が残っている行は削除をスキップする」
+            # 安全弁と同様、意図しない全消去を防ぐため削除自体をスキップする。
+            # (このAPI経路には CLI のような確認プロンプトが無いため。)
+            logger.warning(
+                "⚠️ quest_data.QUESTSが空のため、quest_masterへの全削除操作を"
+                "スキップしました(意図しない全消去を防ぐための安全弁)。"
+            )
+
+        # Issue #664: UPSERT の SQL と値の並びは services/quest/master_sync_sql.py に
+        # 一本化した(sync_strict.py と列リストが食い違う事故が #100/#164/#165 と
+        # 3度起きたため)。同期の方針(空マスタ時の安全弁等)だけがここに残る。
+        for q in valid_quests:
+            cur.execute(QUEST_UPSERT_SQL, quest_upsert_params(
+                quest_id=q.id,
+                title=q.title,
+                description=q.desc,
+                quest_type=q.type,
+                target_user=q.target,
+                exp_gain=q.exp,
+                gold_gain=q.gold,
+                icon_key=q.icon,
+                day_of_week=q.days,
+                start_date=q.start_date,
+                end_date=q.end_date,
+                occurrence_chance=q.chance,
+                start_time=q.start_time,
+                end_time=q.end_time,
+                pre_requisite_quest_id=q.pre_requisite_quest_id,
+                reset_period=q.reset_period,
+                required=q.required,
+            ))
+
+    def _sync_reward_master(self, cur: Any, valid_rewards: list[Any]) -> None:
+        """reward_master からマスタに無い報酬を削除し(所持者がいる報酬は残す)、残りを UPSERT する。"""
+        active_r_ids = [r.id for r in valid_rewards]
+        if active_r_ids:
+            ph = ','.join(['?'] * len(active_r_ids))
+            # 上のDELETEと同じ理由でbanditのB608誤検知を抑制する(値はパラメータ化済み)。
+            stale_rewards = cur.execute(
+                f"SELECT reward_id FROM reward_master WHERE reward_id NOT IN ({ph})", active_r_ids  # nosec B608
+            ).fetchall()
+        else:
+            stale_rewards = cur.execute("SELECT reward_id FROM reward_master").fetchall()
+
+        # user_inventory は reward_master(reward_id) へのFK(PRAGMA foreign_keys=ON)を持つため、
+        # 所持者がいる(所有中/申請中/使用済問わずuser_inventoryに行が残る)報酬を削除すると
+        # IntegrityErrorでsync_master_data全体が失敗する。参照が残っている報酬は削除をスキップし、
+        # 警告ログのみ出す(マスタからは消えているが所持データは保持される)。
+        # 品質(#409 N+1対策): 以前はstale_rewards1件ごとに個別SELECTを発行していた。
+        # 対象のreward_id群についてuser_inventory側の参照有無を1クエリでまとめて
+        # 取得し、以降はPython側の集合演算で判定する。
+        stale_reward_ids = [row['reward_id'] for row in stale_rewards]
+        if stale_reward_ids:
+            ph_stale = ','.join(['?'] * len(stale_reward_ids))
+            # 同上、値はパラメータ化済みでbanditのB608誤検知を抑制する。
+            referenced_reward_ids = {
+                row['reward_id'] for row in cur.execute(
+                    f"SELECT DISTINCT reward_id FROM user_inventory WHERE reward_id IN ({ph_stale})",  # nosec B608
+                    stale_reward_ids,
                 )
+            }
+        else:
+            referenced_reward_ids = set()
 
-            # Issue #664: UPSERT の SQL と値の並びは services/quest/master_sync_sql.py に
-            # 一本化した(sync_strict.py と列リストが食い違う事故が #100/#164/#165 と
-            # 3度起きたため)。同期の方針(空マスタ時の安全弁等)だけがここに残る。
-            for q in valid_quests:
-                cur.execute(QUEST_UPSERT_SQL, quest_upsert_params(
-                    quest_id=q.id,
-                    title=q.title,
-                    description=q.desc,
-                    quest_type=q.type,
-                    target_user=q.target,
-                    exp_gain=q.exp,
-                    gold_gain=q.gold,
-                    icon_key=q.icon,
-                    day_of_week=q.days,
-                    start_date=q.start_date,
-                    end_date=q.end_date,
-                    occurrence_chance=q.chance,
-                    start_time=q.start_time,
-                    end_time=q.end_time,
-                    pre_requisite_quest_id=q.pre_requisite_quest_id,
-                    reset_period=q.reset_period,
-                    required=q.required,
-                ))
+        for stale_reward_id in stale_reward_ids:
+            if stale_reward_id in referenced_reward_ids:
+                logger.warning(
+                    f"⚠️ reward_id={stale_reward_id} はマスタから削除されましたが、"
+                    "user_inventoryに参照が残っているため削除をスキップします。"
+                )
+                continue
+            cur.execute("DELETE FROM reward_master WHERE reward_id = ?", (stale_reward_id,))
 
-            active_r_ids = [r.id for r in valid_rewards]
-            if active_r_ids:
-                ph = ','.join(['?'] * len(active_r_ids))
-                # 上のDELETEと同じ理由でbanditのB608誤検知を抑制する(値はパラメータ化済み)。
-                stale_rewards = cur.execute(
-                    f"SELECT reward_id FROM reward_master WHERE reward_id NOT IN ({ph})", active_r_ids  # nosec B608
-                ).fetchall()
-            else:
-                stale_rewards = cur.execute("SELECT reward_id FROM reward_master").fetchall()
-
-            # user_inventory は reward_master(reward_id) へのFK(PRAGMA foreign_keys=ON)を持つため、
-            # 所持者がいる(所有中/申請中/使用済問わずuser_inventoryに行が残る)報酬を削除すると
-            # IntegrityErrorでsync_master_data全体が失敗する。参照が残っている報酬は削除をスキップし、
-            # 警告ログのみ出す(マスタからは消えているが所持データは保持される)。
-            # 品質(#409 N+1対策): 以前はstale_rewards1件ごとに個別SELECTを発行していた。
-            # 対象のreward_id群についてuser_inventory側の参照有無を1クエリでまとめて
-            # 取得し、以降はPython側の集合演算で判定する。
-            stale_reward_ids = [row['reward_id'] for row in stale_rewards]
-            if stale_reward_ids:
-                ph_stale = ','.join(['?'] * len(stale_reward_ids))
-                # 同上、値はパラメータ化済みでbanditのB608誤検知を抑制する。
-                referenced_reward_ids = {
-                    row['reward_id'] for row in cur.execute(
-                        f"SELECT DISTINCT reward_id FROM user_inventory WHERE reward_id IN ({ph_stale})",  # nosec B608
-                        stale_reward_ids,
-                    )
-                }
-            else:
-                referenced_reward_ids = set()
-
-            for stale_reward_id in stale_reward_ids:
-                if stale_reward_id in referenced_reward_ids:
-                    logger.warning(
-                        f"⚠️ reward_id={stale_reward_id} はマスタから削除されましたが、"
-                        "user_inventoryに参照が残っているため削除をスキップします。"
-                    )
-                    continue
-                cur.execute("DELETE FROM reward_master WHERE reward_id = ?", (stale_reward_id,))
-
-            for r in valid_rewards:
-                cur.execute(REWARD_UPSERT_SQL, reward_upsert_params(
-                    reward_id=r.id,
-                    title=r.title,
-                    category=r.category,
-                    cost_gold=r.cost_gold,
-                    icon_key=r.icon_key,
-                    description=r.desc,
-                    target=r.target,
-                ))
-
-        logger.info("✅ Master data sync completed.")
-        return {"status": "synced", "message": "Master data updated."}
+        for r in valid_rewards:
+            cur.execute(REWARD_UPSERT_SQL, reward_upsert_params(
+                reward_id=r.id,
+                title=r.title,
+                category=r.category,
+                cost_gold=r.cost_gold,
+                icon_key=r.icon_key,
+                description=r.desc,
+                target=r.target,
+            ))
 
     def _report_dry_run(
         self, valid_quests: list[Any], valid_rewards: list[Any], strict: bool
