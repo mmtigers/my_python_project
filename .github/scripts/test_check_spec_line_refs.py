@@ -1076,3 +1076,50 @@ def test_convert_include_valid_leaves_gated_citations_alone(fake_repo):
     assert checker.convert_to_symbol_references([path], include_valid=True) == (0, 0)
     assert path.read_text(encoding="utf-8") == single + ranged
 
+
+
+# --- 見出しに複数のクラスが並ぶとき(Issue #950) ---------------------------------
+
+
+def _write_two_class_source(repo):
+    src = repo / "MY_HOME_SYSTEM" / "sample.py"
+    src.write_text(
+        textwrap.dedent(
+            '''\
+            class First:
+                def filter(self, record):
+                    return True
+
+
+            class Second:
+                def filter(self, record):
+                    return False
+            '''
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_def_citation_resolved_by_second_class_in_heading(fake_repo):
+    """`### `First` / `Second`` の見出しの下で、同名メソッドは「そのメソッドを持つクラスが1つに決まる」ときだけ解決する。
+
+    以前は見出しの先頭のクラスしか見ず、2つ目のクラスのメソッドへの引用は一意化できないため検証から外れていた。
+    """
+    _write_two_class_source(fake_repo)
+    _write_spec(
+        fake_repo,
+        '### `Other` / `Second`\n\n* 根拠: 判定 (行番号: 1-3 / 抜粋: "def filter(self, record):")\n',
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert len(findings) == 1 and findings[0].actual == 7
+
+
+def test_def_citation_not_resolved_when_heading_classes_both_define_it(fake_repo):
+    """見出しの複数のクラスがどちらも同名メソッドを持つなら、どちらか決められないので検証しない。"""
+    _write_two_class_source(fake_repo)
+    _write_spec(
+        fake_repo,
+        '### `First` / `Second`\n\n* 根拠: 判定 (行番号: 99 / 抜粋: "def filter(self, record):")\n',
+    )
+    assert checker.scan(fix=False) == ([], 0)

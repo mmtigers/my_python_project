@@ -75,7 +75,7 @@ import collections
 import re
 import sys
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 # Issue #722: 「廃止notice」の判定は check_spec_drift.py が持つものを**共有する**。
 # 同じ判定を2箇所に複製すると RETIRED_NOTICE_PREFIX の書式を変えたときに片方だけ
@@ -96,6 +96,9 @@ _BLOCK_RE = re.compile(
 _ITEM_RE = re.compile(r"\d+(?:[〜~-]\d+)?")
 _SNIPPET_HEAD_RE = re.compile(r'抜粋: "(?:async )?(?:def|class) (\w+)')
 _HEADING_RE = re.compile(r"^### `?([A-Za-z_][\w.]*)")
+# 見出しに並ぶ全てのシンボル(`### `a` / `B``)。同名メソッドを持つクラスが並ぶ見出しで、
+# どのクラスのメソッドかを決める候補にする(Issue #950)。
+_HEADING_SYMBOLS_RE = re.compile(r"`([A-Za-z_][\w.]*)`")
 # 書式B(`def foo(...)` (行番号: 28))の抜粋。行番号ブロックの**手前**にある
 # バッククォート引用を拾う(Issue #679)。
 _BACKTICK_SNIPPET_RE = re.compile(r"`([^`]+)`")
@@ -477,15 +480,21 @@ def _definition_pairs(rest, before, snippets, back_snippets, items):
     return [(0, defs[-1])], {0}
 
 
-def _resolve(symbol: str, klass: Optional[str], qualified: Dict, flat: Dict) -> Optional[Tuple[int, int]]:
+def _resolve(
+    symbol: str, klass: Union[None, str, Sequence[str]], qualified: Dict, flat: Dict
+) -> Optional[Tuple[int, int]]:
+    """名前から定義の範囲を引く。同名が複数あるときは `klass`(直前の見出しのクラス。複数でも可)で一意化する。"""
     candidates = flat.get(symbol)
     if not candidates:
         return None
     if len(candidates) == 1:
         return candidates[0]
-    if klass and (klass, symbol) in qualified:
-        return qualified[(klass, symbol)]
-    return None
+    if klass is None:
+        return None
+    klasses = [klass] if isinstance(klass, str) else list(klass)
+    # 見出しに複数のクラスが並ぶときは、その名前のメソッドを持つクラスがちょうど1つのときだけ決められる
+    hits = {qualified[(k, symbol)] for k in klasses if (k, symbol) in qualified}
+    return hits.pop() if len(hits) == 1 else None
 
 
 def _spec_expects_python_source(spec: Path) -> bool:
@@ -553,13 +562,15 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
         src_lines = source_text.splitlines()
 
         lines = spec.read_text(encoding="utf-8").splitlines(keepends=True)
-        klass: Optional[str] = None
+        klass: Optional[List[str]] = None
         changed = False
 
         for idx, line in enumerate(lines):
             heading = _HEADING_RE.match(line)
             if heading:
-                klass = heading.group(1).split(".")[0]
+                klass = [
+                    name.split(".")[0] for name in _HEADING_SYMBOLS_RE.findall(line)
+                ] or [heading.group(1).split(".")[0]]
 
             blocks = list(_BLOCK_RE.finditer(line))
             if not blocks:
