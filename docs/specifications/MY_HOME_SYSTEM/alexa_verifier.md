@@ -77,7 +77,7 @@
 ### `_validate_cert_chain_url`
 
 * **役割**: `SignatureCertChainUrl`ヘッダの値がAmazon純正のURL形式（`https://s3.amazonaws.com/echo.api/...`、ポート443）であることを検証する内部ヘルパー関数。scheme・hostname（大文字小文字を無視）・pathプレフィックス・portの4項目をそれぞれ`CERT_CHAIN_URL_*`定数と比較する。**（Issue #173で修正）** pathプレフィックスの判定は、以前は生の`parsed.path`に対する`startswith`のみだったため、`https://s3.amazonaws.com/echo.api/../evil-bucket/cert.pem`のような`".."`を含むパスがこのチェックを素通りしていた(Amazon公式の検証手順は「URLパスを正規化した後に`/echo.api/`で始まること」を要求しており、この点で公式手順から乖離していた)。現在は`posixpath.normpath`で`parsed.path`を正規化してから`startswith`判定を行う。**（Issue #223で修正）** `urlparse`が返す`parsed.path`はパーセントデコードされない生文字列のため、`https://s3.amazonaws.com/echo.api/%2e%2e/evil-bucket/cert.pem`のようなパーセントエンコード済みの`".."`は`normpath`でも検知できず素通りしていた。一方、後段の`_fetch_leaf_certificate`が同じURL文字列を`requests.get()`に渡すと`requests`が送信前に`%2e%2e`を`".."`へデコードするため、検証結果と実際の取得先が食い違っていた。現在は`normpath`へ渡す前に`unquote`で一度パーセントデコードしてから判定する。
-* 根拠: (行番号: 78〜102 / 抜粋: "def _validate_cert_chain_url(url: str) -> None:\n    parsed = urlparse(url)")、正規化 (行番号: 69〜70 / 抜粋: "normalized_path = posixpath.normpath(unquote(parsed.path))\n    if not normalized_path.startswith(CERT_CHAIN_URL_PATH_PREFIX):")
+* 根拠: (行番号: 78〜102 / 抜粋: "def _validate_cert_chain_url(url: str) -> None:\n    parsed = urlparse(url)")、正規化 (参照: _validate_cert_chain_url / 抜粋: "normalized_path = posixpath.normpath(unquote(parsed.path))\n    if not normalized_path.startswith(CERT_CHAIN_URL_PATH_PREFIX):")
 * **（Issue #385 で追加）** クエリ文字列またはフラグメントを含むURLは `AlexaVerificationError` で拒否する。Amazonの証明書URLにクエリが付くことはなく、許すとキャッシュキーの無限増殖(`?x=1`, `?x=2`, …)と取得先の揺れの原因になるため。
 * 根拠: `if parsed.query or parsed.fragment:` (行番号: 93〜94)
 
@@ -91,11 +91,11 @@
 
 
 * **副作用**: なし（`urlparse`によるURL解析、`unquote`によるパーセントデコード、`posixpath.normpath`によるパス正規化のみ）
-* 根拠: (行番号: 60 / 抜粋: "parsed = urlparse(url)")、(行番号: 69 / 抜粋: "normalized_path = posixpath.normpath(unquote(parsed.path))")
+* 根拠: (参照: _validate_cert_chain_url / 抜粋: "parsed = urlparse(url)")、(参照: _validate_cert_chain_url / 抜粋: "normalized_path = posixpath.normpath(unquote(parsed.path))")
 
 
 * **エラーハンドリング**: scheme/hostname/pathプレフィックス（正規化後）/portのいずれかが期待値と異なる場合、それぞれ`AlexaVerificationError`を送出する。
-* 根拠: (行番号: 61〜71 / 抜粋: "if parsed.scheme != CERT_CHAIN_URL_SCHEME:\n        raise AlexaVerificationError(f\"Invalid SignatureCertChainUrl scheme: {parsed.scheme!r}\")")
+* 根拠: (参照: _validate_cert_chain_url / 抜粋: "if parsed.scheme != CERT_CHAIN_URL_SCHEME:\n        raise AlexaVerificationError(f\"Invalid SignatureCertChainUrl scheme: {parsed.scheme!r}\")")
 
 
 ### `_cert_cache_key`（Issue #385 で追加）
@@ -132,7 +132,7 @@
 
 
 * **エラーハンドリング**: `requests.get`または`resp.raise_for_status()`が`requests.exceptions.RequestException`（`Timeout`/`ConnectionError`/`HTTPError`等）を送出した場合、これを捕捉し`AlexaVerificationError`へ変換して送出する（Issue #179で修正。以前は`requests`例外がそのまま伝播していた）。証明書チェーンのパース結果が空リストの場合も`AlexaVerificationError`を送出する。
-* 根拠: (行番号: 88〜92 / 抜粋: "except requests.exceptions.RequestException as exc:\n        raise AlexaVerificationError(f\"Failed to fetch certificate chain: {exc}\") from exc"), (行番号: 95〜96 / 抜粋: "if not certs:\n        raise AlexaVerificationError(\"Certificate chain response is empty\")")
+* 根拠: (参照: _fetch_leaf_certificate / 抜粋: "except requests.exceptions.RequestException as exc:\n        raise AlexaVerificationError(f\"Failed to fetch certificate chain: {exc}\") from exc"), (参照: _fetch_leaf_certificate / 抜粋: "if not certs:\n        raise AlexaVerificationError(\"Certificate chain response is empty\")")
 
 ### `verify_signature`
 
@@ -176,7 +176,7 @@
 
 
 * **副作用**: なし（`datetime.now(timezone.utc)`による現在時刻取得のみ、外部I/Oなし）
-* 根拠: (行番号: 153 / 抜粋: "now = datetime.now(timezone.utc)")
+* 根拠: (参照: verify_timestamp / 抜粋: "now = datetime.now(timezone.utc)")
 
 
 * **エラーハンドリング**: `fromisoformat`のパース失敗時（`ValueError`/`AttributeError`）は`AlexaVerificationError`を送出（`from exc`で連鎖）。パース成功してもタイムゾーン情報が無い場合（Issue #110）は`AlexaVerificationError`を送出。許容範囲を超えた場合も`AlexaVerificationError`を送出する。

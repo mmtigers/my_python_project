@@ -122,7 +122,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 
 * **役割**: 「アレクサ、ファミクエを開いて」で発火する`LaunchRequest`を処理する中心的なハンドラ。`_build_family_datasource()`でデータを組み立て、承認待ち件数があれば読み上げ文にその件数を付加する。APL対応デバイスでは`RenderDocumentDirective`でメイン画面をレンダリングし、非対応デバイスでは家族ごとのレベル・ゴールドを読み上げ文に追加する(フォールバック)。
 * **（Issue #452 で修正）** APL非対応デバイス向けの読み上げフォールバックでは、以前は家族の人数分の詳細文をそのまま`speech`へ無条件に連結していた。現在は先に`"".join(...)`で全員分の詳細文(`details`)を組み立ててから、`len(speech) + len(details)`が`_ALEXA_SPEECH_SAFE_LIMIT`(7500)を超えるかどうかを判定し、超える場合は個別詳細の列挙をやめて`"{人数}人分のデータがあります。詳細は画面でご確認ください。"`という短い要約文に切り替える。超えない場合は従来どおり`details`をそのまま追記する。
-* 根拠: [フォールバック分岐(#452)] (行番号: 121-131 / 抜粋: "details = \"\".join(\n                f\"{u['name']}さんはレベル{u['level']}、{u['gold']}ゴールドです。\"\n                for u in family_data[\"users\"]\n            )\n            if len(speech) + len(details) > _ALEXA_SPEECH_SAFE_LIMIT:\n                # #452: 上限に近づく場合は個別詳細を諦め、件数のみの要約に切り替える\n                speech += f\"{len(family_data['users'])}人分のデータがあります。詳細は画面でご確認ください。\"\n            else:\n                speech += details")
+* 根拠: [フォールバック分岐(#452)] (参照: LaunchRequestHandler / 抜粋: "details = \"\".join(\n                f\"{u['name']}さんはレベル{u['level']}、{u['gold']}ゴールドです。\"\n                for u in family_data[\"users\"]\n            )\n            if len(speech) + len(details) > _ALEXA_SPEECH_SAFE_LIMIT:\n                # #452: 上限に近づく場合は個別詳細を諦め、件数のみの要約に切り替える\n                speech += f\"{len(family_data['users'])}人分のデータがあります。詳細は画面でご確認ください。\"\n            else:\n                speech += details")
 
 
 * **引数/リクエスト**: `can_handle(handler_input: HandlerInput) -> bool`、`handle(handler_input: HandlerInput) -> Response`

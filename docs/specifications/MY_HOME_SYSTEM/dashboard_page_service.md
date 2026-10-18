@@ -334,7 +334,7 @@
 ### `_render_snapshot_gallery`
 
 * **役割**: `_list_snapshot_files`の結果を最大`_SNAPSHOT_GALLERY_LIMIT`(8)件に絞り、各画像を`<a class="snapshot-item" target="_blank">`で包んだグリッド(`snapshot-grid`)を組み立てる。ファイルが1件も無い場合は「写真なし」の注記を返す。**(不具合修正)** 以前は`<img>`を並べるだけで、タップしても元画像を拡大表示できなかった。各画像を元ファイルへのリンクにし、新しいタブで開けるようにした。あわせて`_snapshot_timestamp`でファイル名から撮影日時を解析し、`.snapshot-caption`として画像の下に表示するようにした(以前は撮影日時がどこにも出ていなかった)。日時を解析できないファイル名(古い形式)ではキャプションを出さず、画像自体は表示する。
-* 根拠: [関数定義] (行番号: 892〜916 / 抜粋: "def _render_snapshot_gallery(snapshot_url_prefix: str) -> str:")、[リンク化] (行番号: 391〜395 / 抜粋: '<a class="snapshot-item" href="{url}" target="_blank" rel="noopener">')、[キャプション] (行番号: 385〜390 / 抜粋: "moment = _snapshot_timestamp(name)")
+* 根拠: [関数定義] (行番号: 892〜916 / 抜粋: "def _render_snapshot_gallery(snapshot_url_prefix: str) -> str:")、[リンク化] (行番号: 391〜395 / 抜粋: '<a class="snapshot-item" href="{url}" target="_blank" rel="noopener">')、[キャプション] (参照: _render_snapshot_gallery / 抜粋: "moment = _snapshot_timestamp(name)")
 
 
 * **引数/リクエスト**: `snapshot_url_prefix: str`(画像を配信するURLプレフィックス)

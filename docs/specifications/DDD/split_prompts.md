@@ -20,7 +20,7 @@
 * 中核となる正規表現`PROMPT_PATTERN`で入力ファイル全体から「番号」「タイトル」「Prompt内容」の3要素を一括抽出し、各項目ごとに`{ゼロ埋め番号}_{サニタイズ済みタイトル}.md`という名前のファイルへ書き出す関数`split_prompts`を提供する。
 * 根拠: [PROMPT_PATTERN定義とsplit_prompts関数] (行番号: 27〜34, 44〜123 / 抜粋: "PROMPT_PATTERN = re.compile(r'(\\d+)\\.\\s+([^\\n]+)\\n+Prompt:[ \\t]*(.*)')")
 * ゼロ埋め幅（`pad_width`）は固定2桁ではなく、実際に出現する番号文字列の最大長から動的に決定される。これは、項目数ではなく番号の桁数を基準にすることで、100番以降で文字列ソート順と数値順が食い違う不具合を避けるための設計である。
-* 根拠: [pad_width計算のコメント] (行番号: 57〜61 / 抜粋: "固定2桁だと100番以降で "01" < "100" < "1000" < "23" の\n    # ように文字列ソートが数値順と食い違う不具合が発生するため、項目「数」ではなく\n    # 実際に出現する番号「文字列」の最大長を基準にする。")
+* 根拠: [pad_width計算のコメント] (参照: split_prompts / 抜粋: "固定2桁だと100番以降で "01" < "100" < "1000" < "23" の\n    # ように文字列ソートが数値順と食い違う不具合が発生するため、項目「数」ではなく\n    # 実際に出現する番号「文字列」の最大長を基準にする。")
 * `main`関数はコマンドライン引数（入力ファイル・出力ディレクトリ、いずれもデフォルト値あり）を解析し、入力ファイルの存在確認後に`split_prompts`を呼び出すエントリーポイントである。
 * 根拠: [main関数] (行番号: 126〜144 / 抜粋: "def main() -> None:\n    parser = argparse.ArgumentParser(description="Split a numbered prompt list Markdown file into individual files.")")
 * **（Issue #468で追加）** `PROMPT_PATTERN`は「番号. タイトル」の直後に単一行の「Prompt: 内容」が続く形式にのみ一致するため、直後にPromptが続かない・複数行にまたがる等の理由でフォーマット外になった項目は以前は無警告でスキップされていた。新設のモジュールレベル正規表現`_ITEM_START_PATTERN`（「番号. 」で始まる行だけを緩く検出する、`PROMPT_PATTERN`より広く一致するパターン）で「番号. 」形式に見える行をすべて洗い出し、`PROMPT_PATTERN`ではヒットしなかった番号を`split_prompts`が警告ログで報告するようになった。
@@ -89,7 +89,7 @@
 
 
 * **引数/リクエスト**: なし（`sys.argv`経由でコマンドライン引数を`argparse`が解析）。位置引数`input_file`は**（D-L13で修正）** 必須（以前は特定の個人用途を前提とした固定ファイル名`"一ノ瀬蓮_プロンプト1000選.md"`がデフォルト値になっており、汎用スクリプトとして他環境で実行した際に紛らわしい/意図しないデフォルト依存を招きうる問題があった。省略時は`argparse`が使用方法を表示して終了する）。`output_dir`（デフォルト`"split_results"`）は引き続き省略可能。
-* 根拠: [argparse定義] (行番号: 102〜110 / 抜粋: "parser.add_argument(\n        "input_file",\n        help="Input Markdown file (「番号. タイトル」「Prompt: 内容」形式)"\n    )")
+* 根拠: [argparse定義] (参照: main / 抜粋: "parser.add_argument(\n        "input_file",\n        help="Input Markdown file (「番号. タイトル」「Prompt: 内容」形式)"\n    )")
 
 
 * **戻り値/レスポンス**: `None`
@@ -101,7 +101,7 @@
 
 
 * **エラーハンドリング**: 入力ファイルが存在しない場合はエラーログを出力し`sys.exit(1)`でプロセスを終了する。それ以外の例外処理はない。
-* 根拠: [ガード節] (行番号: 98〜100 / 抜粋: "if not input_path.exists():")
+* 根拠: [ガード節] (参照: main / 抜粋: "if not input_path.exists():")
 
 
 ## 5. 処理フロー図
@@ -191,7 +191,7 @@ graph TD
 * **`pad_width`計算の前提**: ゼロ埋め幅は実際に出現する番号「文字列」の最大長（最小2桁）を基準に動的決定される設計だが、`matches`が空の場合はこの計算自体が実行されない（`HasMatches`分岐で早期`return`されるため空リストに対する`max()`のエラーは発生しない）。
 * 根拠: [pad_width計算] (行番号: 87 / 抜粋: "pad_width = max(2, max(len(num_str) for num_str, _, _ in matches))")
 * **（D-L13で修正）CLIデフォルト値の環境依存性は解消済み**: 以前は`input_file`のデフォルト値が`"一ノ瀬蓮_プロンプト1000選.md"`という特定の用途・環境を前提とした固定値になっており、汎用スクリプトとして他環境で実行した際に紛らわしかった。`input_file`を必須引数に変更し、省略時は`argparse`が使用方法を表示して終了するようにした。
-* 根拠: [argparse定義] (行番号: 102〜105 / 抜粋: "parser.add_argument(\n        "input_file",\n        help="Input Markdown file (「番号. タイトル」「Prompt: 内容」形式)"\n    )")
+* 根拠: [argparse定義] (参照: main / 抜粋: "parser.add_argument(\n        "input_file",\n        help="Input Markdown file (「番号. タイトル」「Prompt: 内容」形式)"\n    )")
 
 ## 9. 不明事項一覧
 

@@ -97,7 +97,7 @@
 ### `update_line_webhook`
 
 * **役割**: LINE Messaging APIを利用してWebhookエンドポイントの現在設定を取得し、変更が必要な場合のみ新しいURLに更新する。
-* 根拠: [関数定義およびDocstring] (行番号: 68〜69 / 抜粋: "LINE BotのWebhook URLを更新")
+* 根拠: [関数定義およびDocstring] (参照: update_line_webhook / 抜粋: "LINE BotのWebhook URLを更新")
 
 
 * **引数/リクエスト**: `base_url` (型: 不明 / 環境変数から取得されたベースURLの文字列)
@@ -145,7 +145,7 @@
 
 
 * **エラーハンドリング**: `WEBHOOK_BASE_URL` が取得できない場合、エラーログを出力して `sys.exit(1)` でプロセスを終了させる。`update_switchbot_webhook`が例外を送出することはない(関数内で`Exception`を捕捉し`False`/`None`を返す設計のため)。
-* 根拠: [ifブロック] (行番号: 125〜127 / 抜粋: "if not base_url:")
+* 根拠: [ifブロック] (参照: fix_all_webhooks / 抜粋: "if not base_url:")
 
 
 

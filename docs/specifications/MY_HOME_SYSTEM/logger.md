@@ -18,7 +18,7 @@
 ## 2. ファイルの概要
 
 システム全体のログ出力設定を管轄するモジュール。コンソールへの標準出力、ログファイル(`home_system.log`)への書き込み、およびエラー発生時（ERRORレベル以上のログ）にスタックトレースを含めてDiscordのWebhookへ自動通知する機能を提供する。ログファイルのローテーション自体は本ファイルでは行わず、`WatchedFileHandler`（書き込み専用）を用いて外部の`logrotate`にローテーション処理を一元化する設計になっている（`home_system.log`が`unified_server`・`monitors`・cronスクリプト等の複数プロセスから同時に開かれるため、各プロセスが独自にファイルをrenameする方式のハンドラではローテーションが壊れることを避けるための設計、191〜195行目のコメント参照）。Discord通知（`DiscordErrorHandler.emit`）は、Webhook送信中に呼び出し元のスレッドをブロックしないよう、バックグラウンドスレッド上で行われる。`setup_logging`とは別に、同名の呼び出しパターン(`from core.logger import get_logger`)を期待する呼び出し元向けの単純なエイリアス関数`get_logger`も提供する。**（2026-09-06 品質監査で修正）** `setup_logging`は同名ロガーの再セットアップ時に既存ハンドラを`removeHandler`したうえで`close()`するようになり（以前は`handlers.clear()`のみでファイルディスクリプタがリークしていた）、`_send_webhook`の失敗ログはWebhook URLのトークン部分を`_redact_webhook_url`でマスクし、`exc_info`を付けずに例外種別とマスク済みメッセージのみを出力するようになった。
-* 根拠: `[get_logger]` (行番号: 333〜335 / 抜粋: "def get_logger(name: str) -> logging.Logger:")、`[setup_loggingのハンドラclose]` (行番号: 169〜174 / 抜粋: "for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()")、`[_redact_webhook_url]` (行番号: 137〜139 / 抜粋: "def _redact_webhook_url(text: str) -> str:")
+* 根拠: `[get_logger]` (行番号: 333〜335 / 抜粋: "def get_logger(name: str) -> logging.Logger:")、`[setup_loggingのハンドラclose]` (参照: setup_logging / 抜粋: "for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()")、`[_redact_webhook_url]` (行番号: 137〜139 / 抜粋: "def _redact_webhook_url(text: str) -> str:")
 
 ## 3. 外部依存関係
 
@@ -80,7 +80,7 @@
 * 根拠: `[emit]` (行番号: 166〜251 / 抜粋: "def emit(self, record):")、[opt-out 判定] (行番号: 172 / 抜粋: 'if record.levelno >= logging.ERROR and not getattr(record, "skip_discord", False):")
 * **（Issue #361 で修正）** (1) スタックトレースは `record.exc_info` がある場合のみ付ける（以前は exc_info の無い ERROR でも `format_stack()` を常に付け、本文が約900字を超えると Discord の2000字制限で 400 になり通知が無言で消えていた）。(2) 本文は `DISCORD_CONTENT_LIMIT`（1900）−200 字で切り詰め、トレースは残り容量の範囲で末尾を付け、最終的な content は `_truncate_discord_content` で 1900 字以内に収める。(3) 送信スレッドは `_register_sender` で追跡し、生存数が `DISCORD_MAX_INFLIGHT_SENDERS`（16）以上なら送信をスキップする。
 * **（Issue #759 / AUDIT-030 で追加）** Webhook URL の解決後・本文の組み立て前に `_claim_notification_slot(_dedup_key(record), time.monotonic())` で重複排除を行い、同一内容が `DISCORD_DEDUP_WINDOW_SEC`（600秒）以内に再度来た場合は送信しない。抑制していた件数は次にウィンドウを跨いで送る通知の本文末尾に「（同じエラーが直近10分で N 件抑制されました）」として添える。`DISCORD_MAX_INFLIGHT_SENDERS` は「同時実行数」の制限であって**レートの制限ではなく**、各送信が高速に完了すれば1分間に数百通送れてしまうため、この重複排除が実質的な唯一のレート制御になっている。判定を URL 解決の**後**に行うのは、Webhook 未設定で送らなかった分を「送信済み」として記録しないため。
-* 根拠: `if record.exc_info:` (行番号: 192〜193)、`body_limit = DISCORD_CONTENT_LIMIT - 200` (行番号: 197〜199)、[重複排除の判定] (行番号: 182〜186 / 抜粋: "should_send, suppressed_count = _claim_notification_slot(")、[抑制件数の付記] (行番号: 207〜212 / 抜粋: "if suppressed_count > 0:")、`if _inflight_count() >= DISCORD_MAX_INFLIGHT_SENDERS:` (行番号: 228〜229)
+* 根拠: `if record.exc_info:` (行番号: 192〜193)、`body_limit = DISCORD_CONTENT_LIMIT - 200` (行番号: 197〜199)、[重複排除の判定] (参照: DiscordErrorHandler.emit / 抜粋: "should_send, suppressed_count = _claim_notification_slot(")、[抑制件数の付記] (参照: DiscordErrorHandler.emit / 抜粋: "if suppressed_count > 0:")、`if _inflight_count() >= DISCORD_MAX_INFLIGHT_SENDERS:` (行番号: 228〜229)
 
 
 * **引数/リクエスト**: `record` (型: 明示なし、暗黙的に`logging.LogRecord`。判定およびフォーマット対象のログレコード)
@@ -88,15 +88,15 @@
 
 
 * **戻り値/レスポンス**: なし (URLが存在しない場合は早期 `return`)
-* 根拠: `[return]` (行番号: 25〜26 / 抜粋: "if not url:\n                    return")
+* 根拠: `[return]` (参照: DiscordErrorHandler.emit / 抜粋: "if not url:\n                    return")
 
 
 * **副作用**: 条件を満たす場合、`threading.Thread(target=self._send_webhook, ...)`を`daemon=True`で起動する（実際のDiscord Webhookへの外部API通信は`_send_webhook`側で行われる）。
-* 根拠: `[threading.Thread起動とコメント]` (行番号: 44〜50 / 抜粋: "# M-5-5: emit()はログ出力のたびにリクエスト処理スレッド上で呼ばれるため、\n                # ここで同期的にrequests.postすると、Discord側が遅い/落ちている場合に\n                # そのスレッドをtimeout秒(最大5秒)ブロックしてしまう。バックグラウンド\n                # スレッドで送信し、emit()自体は即座に返すようにする。\n                threading.Thread(\n                    target=self._send_webhook, args=(url, payload), daemon=True\n                ).start()")
+* 根拠: `[threading.Thread起動とコメント]` (参照: DiscordErrorHandler.emit / 抜粋: "# M-5-5: emit()はログ出力のたびにリクエスト処理スレッド上で呼ばれるため、\n                # ここで同期的にrequests.postすると、Discord側が遅い/落ちている場合に\n                # そのスレッドをtimeout秒(最大5秒)ブロックしてしまう。バックグラウンド\n                # スレッドで送信し、emit()自体は即座に返すようにする。\n                threading.Thread(\n                    target=self._send_webhook, args=(url, payload), daemon=True\n                ).start()")
 
 
 * **エラーハンドリング**: `try`ブロック全体（ペイロード組み立て・スレッド起動）で発生した全ての例外(`Exception`)をキャッチし、`logging.Handler`標準の`self.handleError(record)`に委譲する（`sys.stderr`へ直接書き出すのみでlogging機構を再度通らないため、無限ループにはならない）。
-* 根拠: `[except Exception]` (行番号: 51〜54 / 抜粋: "except Exception:\n                # logging.Handler標準のhandleError()を使う。sys.stderrへ直接書き出すのみで\n                # 再度loggingを経由しないため、ここで失敗を握りつぶしても無限ループにはならない。\n                self.handleError(record)")
+* 根拠: `[except Exception]` (参照: DiscordErrorHandler.emit / 抜粋: "except Exception:\n                # logging.Handler標準のhandleError()を使う。sys.stderrへ直接書き出すのみで\n                # 再度loggingを経由しないため、ここで失敗を握りつぶしても無限ループにはならない。\n                self.handleError(record)")
 
 
 
@@ -129,7 +129,7 @@
 * 根拠: `[_send_webhook]` (行番号: 143〜157 / 抜粋: "@staticmethod\n    def _send_webhook(url, payload):\n        try:\n            requests.post(url, json=payload, timeout=5)\n        except Exception as e:")
 * **（Issue #436 で修正）** 以前は送信失敗時に`except Exception: pass`で完全に握りつぶしており、Webhook URL失効やネットワーク障害でDiscord通知システム自体が壊れていても一切気づけなかった。専用の`_webhook_failure_logger`へ警告ログを出力するよう変更された。
 * **（2026-09-06 品質監査で修正）** Issue #436時点の警告ログは生のWebhook URL（トークンを含む）を`%s`で出力し、さらに`exc_info=True`のトレースバック（`requests`の例外メッセージ経由で生URLを含む）を付けていた。現在はURLを`_redact_webhook_url`でマスク（`/api/webhooks/<ID>/<redacted>`の形に置換）し、`exc_info`は付けず、`"Discord webhook送信に失敗しました: %s (%s: %s)"`に「マスク済みURL・例外クラス名(`type(e).__name__`)・マスク済み例外メッセージ(`_redact_webhook_url(e)`)」の3要素のみを渡す。
-* 根拠: `[except節]` (行番号: 147〜157 / 抜粋: "except Exception as e:\n            ...\n            # URL にはWebhookトークンが含まれるため、ID部分だけ残してマスクして出力する。\n            # exc_info(トレースバック)は requests の例外メッセージ経由で生URLを含むため付けず、\n            _webhook_failure_logger.warning(\n                \"Discord webhook送信に失敗しました: %s (%s: %s)\",\n                _redact_webhook_url(url), type(e).__name__, _redact_webhook_url(e),\n            )")
+* 根拠: `[except節]` (参照: DiscordErrorHandler._send_webhook / 抜粋: "except Exception as e:\n            ...\n            # URL にはWebhookトークンが含まれるため、ID部分だけ残してマスクして出力する。\n            # exc_info(トレースバック)は requests の例外メッセージ経由で生URLを含むため付けず、\n            _webhook_failure_logger.warning(\n                \"Discord webhook送信に失敗しました: %s (%s: %s)\",\n                _redact_webhook_url(url), type(e).__name__, _redact_webhook_url(e),\n            )")
 
 
 * **引数/リクエスト**: `url` (型: 明示なし。送信先のDiscord Webhook URL)、`payload` (型: 明示なし、`emit`が組み立てた`dict`。送信するJSONペイロード)
@@ -141,11 +141,11 @@
 
 
 * **副作用**: `requests.post`によるDiscord Webhookへの外部API通信（タイムアウト5秒）。失敗時は`_webhook_failure_logger`への警告ログ出力（**（2026-09-06 品質監査で修正）** URLはトークン部分をマスク済み、スタックトレースは含まない）。
-* 根拠: `[requests.post]` (行番号: 146 / 抜粋: "requests.post(url, json=payload, timeout=5)")、`[warning呼び出し]` (行番号: 154〜157 / 抜粋: "_webhook_failure_logger.warning(\n                \"Discord webhook送信に失敗しました: %s (%s: %s)\",\n                _redact_webhook_url(url), type(e).__name__, _redact_webhook_url(e),\n            )")
+* 根拠: `[requests.post]` (行番号: 146 / 抜粋: "requests.post(url, json=payload, timeout=5)")、`[warning呼び出し]` (参照: DiscordErrorHandler._send_webhook / 抜粋: "_webhook_failure_logger.warning(\n                \"Discord webhook送信に失敗しました: %s (%s: %s)\",\n                _redact_webhook_url(url), type(e).__name__, _redact_webhook_url(e),\n            )")
 
 
 * **エラーハンドリング**: `requests.post`実行中に発生した全ての例外(`Exception`)を`as e`で捕捉し、`_webhook_failure_logger.warning(...)`でマスク済みURL・例外クラス名・マスク済み例外メッセージを含む警告ログを出力する（**（2026-09-06 品質監査で修正）** `exc_info`は付けない）。以前は`pass`で完全に握りつぶし一切のログを残さなかったが、Issue #436でこの可視化が追加された（ただし呼び出し元である`emit`側にこの失敗は伝播しない点は変わらない）。
-* 根拠: `[except Exception]` (行番号: 147〜157 / 抜粋: "except Exception as e:\n            ...\n            _webhook_failure_logger.warning(\n                \"Discord webhook送信に失敗しました: %s (%s: %s)\",\n                _redact_webhook_url(url), type(e).__name__, _redact_webhook_url(e),\n            )")
+* 根拠: `[except Exception]` (参照: DiscordErrorHandler._send_webhook / 抜粋: "except Exception as e:\n            ...\n            _webhook_failure_logger.warning(\n                \"Discord webhook送信に失敗しました: %s (%s: %s)\",\n                _redact_webhook_url(url), type(e).__name__, _redact_webhook_url(e),\n            )")
 
 
 
@@ -199,7 +199,7 @@
 * **役割**: 指定された名前でロガーを初期化し、既存のハンドラを外した後、コンソール出力、ファイル出力、Discord通知の3種のハンドラを登録して返す。ロガーの`propagate`を`False`に設定し、rootロガーへの伝播を行わない。
 * 根拠: `[setup_logging]` (行番号: 271〜330 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:\n    \"\"\"ロガーのセットアップ\"\"\"\n    logger = logging.getLogger(name)\n    logger.propagate = False")
 * **（2026-09-06 品質監査で修正）** 同名ロガーの再セットアップ時は、`list(logger.handlers)`のコピーを走査して各ハンドラを`logger.removeHandler()`で外したうえで`close()`する（`close()`の例外は`except Exception: pass`で無視）。以前は`if logger.handlers: logger.handlers.clear()`のみだったため、`WatchedFileHandler`が開いていた`home_system.log`のファイルディスクリプタが閉じられずに残り、関数内で`get_logger()`を呼ぶ経路（コメントによれば`DDD/newface_monitor.py`の`storage_warmup`等）では呼び出しのたびにfdがリークしていた（pytestの`ResourceWarning`でも検出）。
-* 根拠: `[既存ハンドラのremove+close]` (行番号: 164〜174 / 抜粋: "# 同名ロガーの再セットアップ時は、既存ハンドラを close() してから外す。\n    # 以前は handlers.clear() だけだったため、WatchedFileHandler が開いていた\n    # home_system.log のファイルディスクリプタが閉じられずに残り、\n    ...\n    for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()\n        except Exception:\n            pass")
+* 根拠: `[既存ハンドラのremove+close]` (参照: setup_logging / 抜粋: "# 同名ロガーの再セットアップ時は、既存ハンドラを close() してから外す。\n    # 以前は handlers.clear() だけだったため、WatchedFileHandler が開いていた\n    # home_system.log のファイルディスクリプタが閉じられずに残り、\n    ...\n    for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()\n        except Exception:\n            pass")
 * **（Issue #384 で修正）** ファイル出力先は `config.LOG_DIR`（書き込み失敗時のフォールバック解決済み）を使う。以前は `config.BASE_DIR/logs` 固定だったため、`LOG_DIR` が `temp_fallback/logs` に落ちた場合に `health_watch`/`log_analyzer` が読む場所と実際の出力先が食い違っていた。
 * 根拠: `log_dir = getattr(config, "LOG_DIR", None) or os.path.join(config.BASE_DIR, "logs")` (行番号: 188)
 * **（Issue #665 で修正）** ロガーのレベルは`config.LOG_LEVEL`（環境変数`LOG_LEVEL`、既定`"INFO"`）を大文字化して`logging`モジュールの同名定数に解決する。定数が存在しない・整数でない不正値のときは`logging.INFO`にフォールバックする。以前は`logging.INFO`固定で、実機で DEBUG ログを出す手段が無かった。
@@ -217,7 +217,7 @@
 
 
 * **副作用**: 同名ロガーに登録済みだった既存ハンドラの除去と`close()`（**（2026-09-06 品質監査で修正）** 以前開かれていたログファイルのfdが解放される）、`os.makedirs`によるローカルファイルシステムのディレクトリ作成（存在しない場合）、およびログファイル（`home_system.log`）への書き込み用`WatchedFileHandler`の生成。ファイル自体のローテーションは行わず、外部の`logrotate`（`deploy/logrotate/home_system` → `/etc/logrotate.d/home_system`）に委譲する設計であることがコメントに明記されている。
-* 根拠: `[既存ハンドラのremove+close]` (行番号: 169〜174)、`[os.makedirsとWatchedFileHandlerのコメント]` (行番号: 188〜196 / 抜粋: "log_dir = getattr(config, \"LOG_DIR\", None) or os.path.join(config.BASE_DIR, \"logs\")\n    os.makedirs(log_dir, exist_ok=True)\n    log_file = os.path.join(log_dir, \"home_system.log\")\n    # home_system.log は unified_server / monitors / cronスクリプト等の複数プロセスが\n    # 同時に開くため、各プロセスが独自にrenameするTimedRotatingFileHandlerでは\n    # ローテーションが壊れる(旧backupへ書き込み続ける)。書き込み専用の\n    # WatchedFileHandlerにし、ローテーションはlogrotate側\n    # (deploy/logrotate/home_system → /etc/logrotate.d/home_system)に一元化する。")
+* 根拠: `[既存ハンドラのremove+close]` (行番号: 169〜174)、`[os.makedirsとWatchedFileHandlerのコメント]` (参照: setup_logging / 抜粋: "log_dir = getattr(config, \"LOG_DIR\", None) or os.path.join(config.BASE_DIR, \"logs\")\n    os.makedirs(log_dir, exist_ok=True)\n    log_file = os.path.join(log_dir, \"home_system.log\")\n    # home_system.log は unified_server / monitors / cronスクリプト等の複数プロセスが\n    # 同時に開くため、各プロセスが独自にrenameするTimedRotatingFileHandlerでは\n    # ローテーションが壊れる(旧backupへ書き込み続ける)。書き込み専用の\n    # WatchedFileHandlerにし、ローテーションはlogrotate側\n    # (deploy/logrotate/home_system → /etc/logrotate.d/home_system)に一元化する。")
 
 
 * **エラーハンドリング**: 既存ハンドラの`close()`で発生した`Exception`のみ`pass`で無視する（**（2026-09-06 品質監査で修正）**）。それ以外に明示的な例外捕捉はない。

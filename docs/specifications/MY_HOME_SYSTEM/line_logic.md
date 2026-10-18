@@ -171,7 +171,7 @@
 * **（Issue #571で修正）** アイコン選択は以前 `icon = "✅" if "元気" in status else "⚠️"` という部分文字列マッチのみだった。`handlers/line_handler.py` の `_detect_condition_keyword()`（Issue #375で追加）は「元気ない」「元気がない」「元気なし」「元気じゃない」「元気ではない」等の否定表現をすべて固定文字列 `CONDITION_NOT_GENKI = "元気なし"` に正規化してDBへ保存するが、この`"元気なし"`自体が`"元気"`を部分文字列として含むため、否定表現（体調不良）が記録された場合でも`"元気" in status`が真になり、誤って✅（元気）アイコンが選択され意味が反転して表示されていた。否定表現（`"元気なし"`）を先に判定し、それに該当しない場合のみ肯定表現（`"元気"`）を判定するよう修正した。
 * 根拠: `def get_daily_health_summary():` (行番号: 129-170 / 抜粋: "def get_daily_health_summary():")
 * 根拠: `icon = "⚠️" if "元気なし" in status else ("✅" if "元気" in status else "⚠️")` (行番号: 162 / 抜粋: "icon = "⚠️" if "元気なし" in status else ("✅" if "元気" in status else "⚠️")")
-* 根拠: `# #571: 部分文字列マッチ("元気" in status)だと、Issue #375で否定表現用に\n                    # 正規化される固定文字列(handlers/line_handler.py の\n                    # CONDITION_NOT_GENKI = "元気なし")も"元気"を含むため誤って\n                    # ✅(元気)と判定していた(「元気ない」等の否定入力が意味の反転した\n                    # 表示になっていた)。否定表現を先に判定する。` (行番号: 159-163 / 抜粋: "# #571: 部分文字列マッチ")
+* 根拠: `# #571: 部分文字列マッチ("元気" in status)だと、Issue #375で否定表現用に\n                    # 正規化される固定文字列(handlers/line_handler.py の\n                    # CONDITION_NOT_GENKI = "元気なし")も"元気"を含むため誤って\n                    # ✅(元気)と判定していた(「元気ない」等の否定入力が意味の反転した\n                    # 表示になっていた)。否定表現を先に判定する。` (参照: get_daily_health_summary / 抜粋: "# #571: 部分文字列マッチ")
 
 
 * **引数/リクエスト**: なし

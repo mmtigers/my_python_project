@@ -77,7 +77,7 @@
 
 
 * **引数/リクエスト (フィールド)**: `id` (int), `title` (str), `desc` (Optional[str], 初期値: None), `type` (str), `target` (str, 初期値: 'all'), `exp` (int), `gold` (int), `icon` (str), `days` (Optional[str], 初期値: None), `start_date` (Optional[str], 初期値: None), `end_date` (Optional[str], 初期値: None), `chance` (Optional[float], 初期値: 1.0), `start_time` (Optional[str], 初期値: None), `end_time` (Optional[str], 初期値: None), `pre_requisite_quest_id` (Optional[int], 初期値: None), `reset_period` (Optional[Literal['daily','weekly','monthly']], 初期値: 'daily'), `required` (bool, 初期値: True)
-* 根拠: フィールド定義 (行番号: 20〜35 / 抜粋: "target: str = 'all'" など)
+* 根拠: フィールド定義 (参照: MasterQuest / 抜粋: "target: str = 'all'" など)
 * 根拠: `required: bool = True` (行番号: 54)
 
 
@@ -131,7 +131,7 @@
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str), `quest_id` (int)
-* 根拠: フィールド定義 (行番号: 51〜52 / 抜粋: "quest_id: int" など)
+* 根拠: フィールド定義 (参照: QuestAction / 抜粋: "quest_id: int" など)
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -154,7 +154,7 @@
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str), `reward_id` (int)
-* 根拠: フィールド定義 (行番号: 55〜56 / 抜粋: "reward_id: int" など)
+* 根拠: フィールド定義 (参照: RewardAction / 抜粋: "reward_id: int" など)
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -200,7 +200,7 @@
 
 
 * **引数/リクエスト (フィールド)**: `approver_id` (str), `history_id` (int)
-* 根拠: フィールド定義 (行番号: 63〜64 / 抜粋: "approver_id: str" など)
+* 根拠: フィールド定義 (参照: ApproveAction / 抜粋: "approver_id: str" など)
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -246,7 +246,7 @@
 
 
 * **引数/リクエスト (フィールド)**: `admin_id` (str, `Field(min_length=1, max_length=64)`)
-* 根拠: フィールド定義 (行番号: 105 / 抜粋: "admin_id: str = Field(min_length=1, max_length=64)")
+* 根拠: フィールド定義 (参照: SyncMasterAction / 抜粋: "admin_id: str = Field(min_length=1, max_length=64)")
 
 
 * **戻り値/レスポンス**: 該当なし（レスポンスは `SyncResponse`）
@@ -258,7 +258,7 @@
 
 
 * **エラーハンドリング**: `admin_id` が空文字または65文字以上なら Pydantic が `ValidationError` を送出する（FastAPIでは422）。`role_adult` かどうかの判定はサービス層(`GameSystem.sync_master_data_as_admin` → `locks._require_adult`)の責務で、満たさない場合は403。
-* 根拠: フィールド定義 (行番号: 105 / 抜粋: "admin_id: str = Field(min_length=1, max_length=64)")
+* 根拠: フィールド定義 (参照: SyncMasterAction / 抜粋: "admin_id: str = Field(min_length=1, max_length=64)")
 
 
 
@@ -315,7 +315,7 @@
 
 
 * **引数/リクエスト (フィールド)**: `status` (str), `message` (str)
-* 根拠: フィールド定義 (行番号: 75〜76 / 抜粋: "status: str" など)
+* 根拠: フィールド定義 (参照: SyncResponse / 抜粋: "status: str" など)
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -338,7 +338,7 @@
 
 
 * **引数/リクエスト (フィールド)**: `status` (str), `leveledUp` (bool), `newLevel` (int), `earnedGold` (int), `earnedExp` (int), `earnedMedals` (int, 初期値: 0), `message` (Optional[str], 初期値: None)、**(Issue #238で追加)** `partnerUserId` (Optional[str], 初期値: None), `partnerLeveledUp` (bool, 初期値: False), `partnerNewLevel` (Optional[int], 初期値: None), `partnerEarnedMedals` (int, 初期値: 0)。追加された4フィールドは、兄妹連携クエストのカスケード承認(`quest_service.QuestService._process_approve_quest_locked`)時のみ相方(自分でタップしなかった方の子ども)の情報で埋まり、それ以外(通常の完了報告・単独クエストの承認)では常に既定値のままとなる。
-* 根拠: フィールド定義 (行番号: 82〜95 / 抜粋: "message: Optional[str] = None" など)
+* 根拠: フィールド定義 (参照: CompleteResponse / 抜粋: "message: Optional[str] = None" など)
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -361,7 +361,7 @@
 
 
 * **引数/リクエスト (フィールド)**: `status` (str)
-* 根拠: フィールド定義 (行番号: 88 / 抜粋: "status: str")
+* 根拠: フィールド定義 (参照: CancelResponse / 抜粋: "status: str")
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -407,7 +407,7 @@
 
 
 * **引数/リクエスト (フィールド)**: `status` (str), `newGold` (int)
-* 根拠: フィールド定義 (行番号: 91〜92 / 抜粋: "newGold: int" など)
+* 根拠: フィールド定義 (参照: PurchaseResponse / 抜粋: "newGold: int" など)
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -437,7 +437,7 @@
 
 
 * **引数/リクエスト (フィールド)**: `status` (str), `message` (str)
-* 根拠: フィールド定義 (行番号: 106〜107 / 抜粋: "message: str" など)
+* 根拠: フィールド定義 (参照: UseItemResponse / 抜粋: "message: str" など)
 
 
 * **戻り値/レスポンス**: 該当なし

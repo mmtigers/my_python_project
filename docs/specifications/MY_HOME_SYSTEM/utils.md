@@ -185,7 +185,7 @@
 
 
 * **副作用**: `acquire(key)`はキーに対応する`_Entry`が無ければ新規作成して辞書へ登録し、`ref_count`をインクリメントしてから`entry.lock`を実際に獲得(`with entry.lock:`)して`yield`する。ブロックを抜けると`finally`で`ref_count`をデクリメントし、`0`になり、かつ辞書中のエントリが自分自身のままである場合(`self._entries.get(key) is entry`)にのみそのエントリを`del`で削除する。エントリの追加・カウント操作・削除の判定はすべて`self._guard`で保護される。
-* 根拠: [acquireコンテキストマネージャ] (行番号: 52〜67 / 抜粋: "with self._guard:\n            entry = self._entries.get(key)\n            if entry is None:\n                entry = self._Entry()\n                self._entries[key] = entry\n            entry.ref_count += 1\n        try:\n            with entry.lock:\n                yield\n        finally:\n            with self._guard:\n                entry.ref_count -= 1\n                if entry.ref_count == 0 and self._entries.get(key) is entry:\n                    del self._entries[key]")
+* 根拠: [acquireコンテキストマネージャ] (参照: RefCountedLockRegistry / 抜粋: "with self._guard:\n            entry = self._entries.get(key)\n            if entry is None:\n                entry = self._Entry()\n                self._entries[key] = entry\n            entry.ref_count += 1\n        try:\n            with entry.lock:\n                yield\n        finally:\n            with self._guard:\n                entry.ref_count -= 1\n                if entry.ref_count == 0 and self._entries.get(key) is entry:\n                    del self._entries[key]")
 
 
 * **エラーハンドリング**: 明示的な例外捕捉はない。`acquire(key)`のブロック内で例外が発生しても、`finally`節により`ref_count`のデクリメントと(条件を満たす場合の)エントリ削除は必ず実行され、例外自体はそのまま呼び出し元へ伝播する。`keys()`は現在エントリが存在するキーの一覧を`_guard`保護下で返し(テスト・デバッグ用)、`__contains__(key)`も同様に`_guard`保護下で`key in self._entries`を返す。**（Issue #661 で追加）** `__len__()`は`_guard`保護下でエントリ数を返し、`clear()`は全エントリを破棄する(いずれもテスト・デバッグ用。`clear()`は取得中のロックがあっても辞書から消えるため本番コードからの呼び出しは想定していない)。
@@ -207,7 +207,7 @@
 
 
 * **戻り値/レスポンス**: `Callable`。対象の関数をラップしたデコレータ関数。
-* 根拠: [with_exponential_backoff] (行番号: 25 / 抜粋: ") -> Callable:")
+* 根拠: [with_exponential_backoff] (参照: with_exponential_backoff / 抜粋: ") -> Callable:")
 
 
 * **副作用**: 失敗回数に応じて `logger.warning` または `logger.error` によりログが出力され、`time.sleep` でスレッドが一時停止する。
@@ -232,7 +232,7 @@
 * `base_delay` (`float`, キーワード専用): 初回リトライの待機秒数。デフォルトは1.0。
 * `max_delay` (`float`, キーワード専用): 待機秒数の上限。デフォルトは`float("inf")`(上限なし)。
 * `on_retry` (`Optional[Callable[[int, float, BaseException], None]]`, キーワード専用): 各リトライ前に呼ばれるコールバック(attempt, delay, exception)。呼び出し元固有のログ出力に使う。デフォルトは`None`。
-* 根拠: [引数定義] (行番号: 56〜63 / 抜粋: "fn: Callable[[], Any],\n    *,\n    max_retries: int,\n    retryable_exceptions: Tuple[Type[BaseException], ...],")
+* 根拠: [引数定義] (参照: retry_with_backoff / 抜粋: "fn: Callable[[], Any],\n    *,\n    max_retries: int,\n    retryable_exceptions: Tuple[Type[BaseException], ...],")
 
 
 * **戻り値/レスポンス**: `Any`。`fn()`の戻り値をそのまま返す。
@@ -240,11 +240,11 @@
 
 
 * **副作用**: リトライ時に`on_retry`コールバックを呼び出し、`time.sleep`でスレッドを一時停止する。ログ出力自体は行わず(呼び出し元が`on_retry`内で行う設計)、この関数自身はロガーを持たない。
-* 根拠: [リトライループ] (行番号: 100〜105 / 抜粋: "for attempt in range(max_retries + 1):\n        try:\n            return fn()\n        except retryable_exceptions as e:\n            if attempt >= max_retries:\n                raise")
+* 根拠: [リトライループ] (参照: retry_with_backoff / 抜粋: "for attempt in range(max_retries + 1):\n        try:\n            return fn()\n        except retryable_exceptions as e:\n            if attempt >= max_retries:\n                raise")
 
 
 * **エラーハンドリング**: `retryable_exceptions`に該当する例外のみを捕捉し、`max_retries`回のリトライを使い切った場合は最後に発生した例外をそのまま再送出する(`raise`で元の例外を維持)。`retryable_exceptions`に含まれない例外は即座に(リトライせず)呼び出し元へ伝播する。
-* 根拠: [例外捕捉と再送出] (行番号: 103〜105 / 抜粋: "except retryable_exceptions as e:\n            if attempt >= max_retries:\n                raise")
+* 根拠: [例外捕捉と再送出] (参照: retry_with_backoff / 抜粋: "except retryable_exceptions as e:\n            if attempt >= max_retries:\n                raise")
 
 
 
@@ -263,7 +263,7 @@
 
 
 * **戻り値/レスポンス**: `bool`。指定回数内にアクセス可能となった場合は `True`、不可の場合は `False`。
-* 根拠: [wait_for_storage_warmup] (行番号: 61 / 抜粋: ") -> bool:")
+* 根拠: [wait_for_storage_warmup] (参照: wait_for_storage_warmup / 抜粋: ") -> bool:")
 
 
 * **副作用**: チェックプロセス中および失敗時に `logger.info`, `logger.debug`, `logger.error` でログが出力される。また `time.sleep` によりスレッドが一時停止する。

@@ -70,7 +70,7 @@
 
 
 * **エラーハンドリング**: 実行時に例外が発生した場合は、エラーとして文字列 `"error"` を返す。
-* 根拠: `except Exception:` (行番号: 55〜56 / 抜粋: "except Exception:\n        return "error"")
+* 根拠: `except Exception:` (参照: get_service_status / 抜粋: "except Exception:\n        return "error"")
 
 
 
@@ -87,7 +87,7 @@
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: `-> bool:` (行番号: 58 / 抜粋: "-> bool:")
+* 根拠: `-> bool:` (参照: is_process_alive / 抜粋: "-> bool:")
 
 
 * **副作用**: OSコマンド（`pgrep`）の実行。
@@ -95,7 +95,7 @@
 
 
 * **エラーハンドリング**: 実行時に例外が発生した場合は `False` を返す。
-* 根拠: `except Exception:` (行番号: 76〜77 / 抜粋: "except Exception:\n        return False")
+* 根拠: `except Exception:` (参照: is_process_alive / 抜粋: "except Exception:\n        return False")
 
 
 
@@ -118,7 +118,7 @@
 
 
 * **エラーハンドリング**: 読み取りに失敗した場合は例外を握りつぶし、固定文字列`"unknown"`を返す。
-* 根拠: `except Exception:` (行番号: 83〜84 / 抜粋: "except Exception:\n        return "unknown"")
+* 根拠: `except Exception:` (参照: _get_boot_id / 抜粋: "except Exception:\n        return "unknown"")
 
 
 
@@ -126,7 +126,7 @@
 
 * **役割**: `check_throttling_status`が検出したスロットリング履歴ビット（`history_issues`）のうち、現在のブートでまだ通知していない未通知ビットが含まれるかを判定する。`THROTTLE_STATE_FILE`に保存された「前回のブートID + 通知済みビット（16進数）」を読み込み、ブートIDが一致すれば通知済みビットとの差分を取る。未通知ビットが1つでもあれば状態ファイルを更新して`True`を返し、既に全ビット通知済みであれば`False`を返す。ブートIDが変わっていた場合や状態ファイルが存在しない・壊れている場合は`notified_bits`を`0`として扱う（＝全ビット未通知扱い）。
 * **（Issue #661 の注記）** 他の監視スクリプトの状態ファイルの読み書きは`core/state_file.py`(`read_text`/`write_text_atomic`等)へ集約したが、`_is_new_history`だけは意図的に独自実装のまま残している。`state_file`の読み書きはそれぞれ独立にロックを取る2つの操作であり、間に他プロセスが割り込みうる。ここで必要なのは「読んで、判定して、書く」までを1つのロック区間に収めるcompare-and-set（下の#449がまさにそれを入れた箇所）であり、機械的に置き換えると#449の競合(lost update)が再発する。
-* 根拠: [注記コメント] (行番号: 100-106 / 抜粋: "Issue #661: 他の監視スクリプトの状態ファイルは core/state_file.py に集約したが、")
+* 根拠: [注記コメント] (参照: _is_new_history / 抜粋: "Issue #661: 他の監視スクリプトの状態ファイルは core/state_file.py に集約したが、")
 
 * **（Issue #449 で修正）** 以前は`THROTTLE_STATE_FILE.read_text()`と`.write_text()`をそれぞれ独立した`try/except`で個別に呼び出しており、このスクリプトが（通常は逐次実行される前提だが）複数プロセスで同時実行された場合、読み取りから書き込みまでの間に他プロセスが割り込むと状態が上書き競合（lost update）する可能性があった。現在は状態ファイルを`r+`モードで一度だけ開き、読み取りから書き込みまでの区間全体を`fcntl.flock`による排他ロック（`fcntl.LOCK_EX`）で1つの不可分な区間にし、`finally`節で確実にロックを解放する。戻り値・挙動自体（判定ロジック）は変更されておらず、プロセス境界をまたいだアトミック性のみが追加された。
 * 根拠: `_is_new_history` (行番号: 100〜149 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")、[flockによる排他区間] (行番号: 124〜146 / 抜粋: "THROTTLE_STATE_FILE.touch(exist_ok=True)\n        with open(THROTTLE_STATE_FILE, "r+", encoding="utf-8") as f:\n            fcntl.flock(f.fileno(), fcntl.LOCK_EX)\n            try:\n                ...\n            finally:\n                fcntl.flock(f.fileno(), fcntl.LOCK_UN)")
@@ -137,11 +137,11 @@
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: `-> bool:` (行番号: 86 / 抜粋: "-> bool:")
+* 根拠: `-> bool:` (参照: _is_new_history / 抜粋: "-> bool:")
 
 
 * **副作用**: `THROTTLE_STATE_FILE.touch(exist_ok=True)`によるファイル作成（未存在時）、`r+`モードでのオープンと`fcntl.flock`による排他ロック取得・解放、ファイル内容の読み取りおよび（未通知ビット検出時の）`seek(0)`+`write`+`truncate`による書き換え。内部で`_get_boot_id()`を呼び出す。
-* 根拠: `boot_id = _get_boot_id()` (行番号: 99 / 抜粋: "boot_id = _get_boot_id()")、`THROTTLE_STATE_FILE.touch(exist_ok=True)` (行番号: 103)、`fcntl.flock(f.fileno(), fcntl.LOCK_EX)` (行番号: 105)、`f.read().split()` (行番号: 108)、`f.seek(0); f.write(...); f.truncate()` (行番号: 118〜120)
+* 根拠: `boot_id = _get_boot_id()` (参照: _is_new_history / 抜粋: "boot_id = _get_boot_id()")、`THROTTLE_STATE_FILE.touch(exist_ok=True)` (行番号: 103)、`fcntl.flock(f.fileno(), fcntl.LOCK_EX)` (行番号: 105)、`f.read().split()` (行番号: 108)、`f.seek(0); f.write(...); f.truncate()` (行番号: 118〜120)
 
 
 * **エラーハンドリング**: 状態ファイルの内容パースに失敗した場合（未存在・壊れたフォーマット等）は内側の`try/except Exception`で例外を握りつぶし`notified_bits = 0`のまま処理を続行する。書き込み時の`OSError`も内側で捕捉し`logger.debug`でログのみ出力する（戻り値は`True`のまま維持され、判定結果自体には影響しない）。`THROTTLE_STATE_FILE.touch`や`open`自体が失敗した場合（ディレクトリ権限エラー等）は外側の`except OSError as e:`が捕捉し、`logger.debug`でログ出力した上で`history_issues != 0`をフォールバック値として返す（**Issue #449で新設**: 以前はファイルアクセス自体の失敗に対する専用のフォールバック処理がなく、`read_text`/`write_text`それぞれの`try/except Exception`が個別に失敗を吸収していた）。
@@ -168,7 +168,7 @@
 
 
 * **エラーハンドリング**: コマンドが見つからない場合は `FileNotFoundError` をキャッチしてデバッグログを出力しスキップする。その他の例外はキャッチするが、無限ループ（監視ループからの繰り返し呼び出し）を防ぐため、意図的にエラートレースではなく例外メッセージのみをWARNINGレベルでログ出力する。
-* 根拠: `except FileNotFoundError:` (行番号: 145〜146 / 抜粋: "except FileNotFoundError:\n        logger.debug("vcgencmd not found, skipping throttling check.")") および `except Exception as e: # 万が一の予期せぬエラーも、無限ループを防ぐためにWARNINGに落とす` (行番号: 230〜232 / 抜粋: "except Exception as e:\n        # 万が一の予期せぬエラーも、無限ループを防ぐためにWARNINGに落とす\n        logger.warning(f"Throttling Check failed (Non-critical): {e}")")
+* 根拠: `except FileNotFoundError:` (参照: check_throttling_status / 抜粋: "except FileNotFoundError:\n        logger.debug("vcgencmd not found, skipping throttling check.")") および `except Exception as e: # 万が一の予期せぬエラーも、無限ループを防ぐためにWARNINGに落とす` (行番号: 230〜232 / 抜粋: "except Exception as e:\n        # 万が一の予期せぬエラーも、無限ループを防ぐためにWARNINGに落とす\n        logger.warning(f"Throttling Check failed (Non-critical): {e}")")
 
 
 
@@ -183,7 +183,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 151 / 抜粋: "-> None:")
+* 根拠: `-> None:` (参照: check_health / 抜粋: "-> None:")
 
 
 * **副作用**: `get_service_status`と`is_process_alive`の呼び出し、ロックファイルの作成/更新/削除（`touch`, `unlink`）、`send_push`による通知送信（復旧・停止・リマインダーの3パターン）、ログ出力。
@@ -192,7 +192,7 @@
 
 
 * **エラーハンドリング**: 全体で `Exception` をキャッチし、例外発生時はエラートレースをログに出力する。
-* 根拠: `except Exception:` (行番号: 190〜192 / 抜粋: "except Exception:\n        err = ...")
+* 根拠: `except Exception:` (参照: check_health / 抜粋: "except Exception:\n        err = ...")
 
 
 

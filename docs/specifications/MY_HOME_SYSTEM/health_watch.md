@@ -114,7 +114,7 @@
 
 
 * **エラーハンドリング**: ファイルI/Oの失敗は`state_file.read_text`側が捕捉して警告ログを出し`None`を返す。本関数は加えて`fromisoformat`の`ValueError`を捕捉し、いずれの場合も既定の遡り時刻を返す。
-* 根拠: [例外処理] (行番号: 95-96 / 抜粋: "except ValueError:")
+* 根拠: [例外処理] (参照: _read_marker / 抜粋: "except ValueError:")
 
 
 
@@ -160,7 +160,7 @@
 
 
 * **エラーハンドリング**: 関数内には無し（`subprocess.run`は`check=False`。例外は`run_checks`側で捕捉される）。
-* 根拠: [引数指定] (行番号: 74 / 抜粋: "capture_output=True, text=True, check=False,")
+* 根拠: [引数指定] (参照: check_service_active / 抜粋: "capture_output=True, text=True, check=False,")
 
 
 
@@ -183,7 +183,7 @@
 
 
 * **エラーハンドリング**: `requests.exceptions.RequestException`のみ捕捉し、異常メッセージとして返す（**例外のまま送出しないのは意図的**。`run_checks`は例外を`internal_errors`扱いにして通知本文へ載せないため、サーバー停止という最重要の異常が通知されなくなる）。
-* 根拠: [例外処理] (行番号: 307〜308 / 抜粋: "except requests.exceptions.RequestException as e:")
+* 根拠: [例外処理] (参照: check_api_responsive / 抜粋: "except requests.exceptions.RequestException as e:")
 
 
 
@@ -208,14 +208,14 @@
 
 
 * **エラーハンドリング**: 関数内には無し（例外は`run_checks`側で捕捉される）。
-* 根拠: [引数指定] (行番号: 90 / 抜粋: "capture_output=True, text=True, check=False,")
+* 根拠: [引数指定] (参照: check_journal_errors / 抜粋: "capture_output=True, text=True, check=False,")
 
 
 
 ### `check_app_logs`
 
 * **（2026-09-06 品質監査で修正）** `logs/*.log` の走査で `health_watch.log` に加えて `claude_investigate.log`(層2フック `_run_investigation_hook` の出力先)もファイル名で除外する。以前は「`health_watch` を含む行の除外」しか無く、フックの調査結果本文に常在する `ERROR`/`Traceback` 等の語が翌回のチェックで新規エラーとして数えられ、再発報→フック再起動→さらに出力、という自己増殖ループになり得た(本仕様書・runbook では除外済みと記載されていたが未実装だった)。
-* 根拠: (行番号: 120〜126 / 抜粋: "if os.path.basename(filepath) in (\"health_watch.log\", \"claude_investigate.log\"):\n            continue")
+* 根拠: (参照: check_app_logs / 抜粋: "if os.path.basename(filepath) in (\"health_watch.log\", \"claude_investigate.log\"):\n            continue")
 
 * **役割**: `config.LOG_DIR`配下の`*.log`から前回マーカー以降のエラー行を検出する。キーワード・除外パターン・タイムスタンプ解析は`LogAnalyzer`を流用し、週次の`log_analyzer.py`と判定基準を揃える。エラー(errors > 0)のみを異常とみなし、WARNINGは対象外。
 * 根拠: [関数定義] (行番号: 254〜294 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
@@ -230,7 +230,7 @@
 
 
 * **副作用**: `LogAnalyzer._analyze_file`によるログファイル読み取り。自己発火防止のため、(1)インスタンスの`IGNORE_PATTERNS`に"health_watch"を追加し、(2)`health_watch.log`自体は走査対象から除外する。(3) Issue #339層2調査で発覚した誤検知バグの修正として、`LogAnalyzer._is_recent_file`によるmtime足切りを週次の`run_analysis`と同様に適用し、`pip_install.log`のように行に一切タイムスタンプが無く`_analyze_file`側のフィルタが効かないファイルが、中身の更新有無に関わらず毎回無条件に「新規エラー」として再カウントされる状態を防ぐ。
-* 根拠: [自己発火対策] (行番号: 118, 120〜121 / 抜粋: 'analyzer.IGNORE_PATTERNS = analyzer.IGNORE_PATTERNS + ["health_watch"]', 'if os.path.basename(filepath) == "health_watch.log":')、[mtime足切り] (行番号: 123〜131 / 抜粋: "if not analyzer._is_recent_file(filepath):")
+* 根拠: [自己発火対策] (行番号: 118, 120〜121 / 抜粋: 'analyzer.IGNORE_PATTERNS = analyzer.IGNORE_PATTERNS + ["health_watch"]', 'if os.path.basename(filepath) == "health_watch.log":')、[mtime足切り] (参照: check_app_logs / 抜粋: "if not analyzer._is_recent_file(filepath):")
 
 
 * **エラーハンドリング**: 関数内には無し（例外は`run_checks`側で捕捉される。なお`_analyze_file`自体はファイル単位で例外を握りつぶす実装であることは[log_analyzer.md](./log_analyzer.md)参照）。
@@ -249,7 +249,7 @@
 
 
 * **戻り値/レスポンス**: `Optional[str]`。使用率が`DISK_THRESHOLD_PERCENT`以上なら使用率を含むメッセージ、未満なら`None`。
-* 根拠: [戻り値] (行番号: 136〜138 / 抜粋: "if percent >= DISK_THRESHOLD_PERCENT:")
+* 根拠: [戻り値] (参照: check_disk_usage / 抜粋: "if percent >= DISK_THRESHOLD_PERCENT:")
 
 
 * **副作用**: なし（読み取りのみ）
@@ -272,7 +272,7 @@
 
 
 * **戻り値/レスポンス**: `Optional[str]`。使用率が`MEMORY_THRESHOLD_PERCENT`以上ならメッセージ、未満なら`None`。
-* 根拠: [戻り値] (行番号: 151〜153 / 抜粋: "if percent >= MEMORY_THRESHOLD_PERCENT:")
+* 根拠: [戻り値] (参照: check_memory_usage / 抜粋: "if percent >= MEMORY_THRESHOLD_PERCENT:")
 
 
 * **副作用**: 外部コマンド`free`の実行。
@@ -287,7 +287,7 @@
 ### `check_nas_mount`
 
 * **役割**: `config.NAS_MOUNT_POINT`がマウントポイントであるかを`os.path.ismount`で確認する。
-* 根拠: [関数定義] (行番号: 156〜160 / 抜粋: "if not os.path.ismount(config.NAS_MOUNT_POINT):")
+* 根拠: [関数定義] (参照: check_nas_mount / 抜粋: "if not os.path.ismount(config.NAS_MOUNT_POINT):")
 
 
 * **引数/リクエスト**: なし
@@ -507,11 +507,11 @@
 
 
 * **副作用**: DBの読み取りのみ(`get_ro_connection`による`mode=ro`接続で、SQLite側が書き込みを拒否する)。
-* 根拠: [DB読み取り] (行番号: 359〜361 / 抜粋: "with get_ro_connection() as conn:")
+* 根拠: [DB読み取り] (参照: check_quest_master_drift / 抜粋: "with get_ro_connection() as conn:")
 
 
 * **エラーハンドリング**: `sqlite3.OperationalError`(DBファイル・テーブルの不在、一時的なロック)は警告ログのみでスキップし`None`を返す — 毎時cronで走るため、DB不在の環境で恒久的に失敗し続けるのを避ける方針がdocstringに明記されている。それ以外の例外は`run_checks`側で内部エラーとして捕捉される。
-* 根拠: [例外処理] (行番号: 362〜364 / 抜粋: "except sqlite3.OperationalError as e:")
+* 根拠: [例外処理] (参照: check_quest_master_drift / 抜粋: "except sqlite3.OperationalError as e:")
 
 
 
@@ -610,11 +610,11 @@
 
 
 * **副作用**: 通知する判定の場合、状態ファイル(`NOTIFY_STATE_FILE`)へフィンガープリントと通知時刻(JSON)を書き込む。**（Issue #661で修正）** 読み書きはいずれも`core/state_file.py`(`read_json`/`write_json_atomic`)へ委譲し、書き込みは原子的な差し替えになった。
-* 根拠: [state_fileへの委譲] (行番号: 326-328 / 抜粋: "state_file.write_json_atomic(\n        NOTIFY_STATE_FILE, {\"fingerprint\": fingerprint, \"last_notified\": now.isoformat()}\n    )")
+* 根拠: [state_fileへの委譲] (参照: _should_notify / 抜粋: "state_file.write_json_atomic(\n        NOTIFY_STATE_FILE, {\"fingerprint\": fingerprint, \"last_notified\": now.isoformat()}\n    )")
 
 
 * **エラーハンドリング**: 状態ファイルが読めない・壊れている場合は`state_file.read_json`が`None`を返し、`last_notified`のパースに失敗した場合は`KeyError`/`TypeError`/`ValueError`を捕捉する。いずれも通知する側(True)に倒す（異常の通知を取りこぼすより重複通知の方が安全側）。
-* 根拠: [例外処理] (行番号: 324-325 / 抜粋: "except (KeyError, TypeError, ValueError):")
+* 根拠: [例外処理] (参照: _should_notify / 抜粋: "except (KeyError, TypeError, ValueError):")
 
 
 
@@ -637,7 +637,7 @@
 
 
 * **エラーハンドリング**: `requests.exceptions.RequestException`を捕捉し、`logger.warning`のみで例外を外へ伝播させない(ping自体の失敗を`run_checks`の異常検知・通知フロー・終了コードに混ぜ込まないため)。
-* 根拠: [例外処理] (行番号: 769〜770 / 抜粋: "except requests.exceptions.RequestException as e:\n        logger.warning(f\"⚠️ デッドマンスイッチへのハートビート送信に失敗しました: {e}\")")
+* 根拠: [例外処理] (参照: _ping_deadman_switch / 抜粋: "except requests.exceptions.RequestException as e:\n        logger.warning(f\"⚠️ デッドマンスイッチへのハートビート送信に失敗しました: {e}\")")
 
 
 
@@ -684,7 +684,7 @@
 
 
 * **エラーハンドリング**: 各チェックの例外は個別に捕捉してエラーログに記録し、`internal_errors`へ追加して残りのチェックを続行する（異常通知自体には含めない。run_task.shがERROR行を記録し週次のlog_analyzerが拾う想定がコメントに記載）。通知送信失敗時はエラーログを出力し終了コード1にする。**（Issue #775で追加）** `_ping_deadman_switch`自体の送信失敗はその内部でWARNINGログに握り潰され、`run_checks`側の終了コードには影響しない。
-* 根拠: [例外処理] (行番号: 846〜851 / 抜粋: "except Exception as e:")、[送信失敗処理] (行番号: 865〜867 / 抜粋: 'logger.error("異常通知の送信に失敗しました")')
+* 根拠: [例外処理] (参照: run_checks / 抜粋: "except Exception as e:")、[送信失敗処理] (行番号: 865〜867 / 抜粋: 'logger.error("異常通知の送信に失敗しました")')
 
 
 

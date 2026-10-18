@@ -53,7 +53,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 戻り値の型ヒント (行番号: 12 / 抜粋: "-> None:")
+* 根拠: 戻り値の型ヒント (参照: play / 抜粋: "-> None:")
 
 
 * **副作用**: 外部プロセスの起動による音声再生（`subprocess.Popen`）と、その終了を回収するデーモンスレッド（`threading.Thread(target=proc.wait)`。Issue #654: 呼び出し元の uvicorn は SIGCHLD を処理しないため、wait しないと再生プロセスが `<defunct>` として蓄積していた）、システムログへの書き込み。
@@ -61,7 +61,7 @@
 
 
 * **エラーハンドリング**: OSレベルのエラー(`OSError`)およびその他の予期せぬエラー(`Exception`)をキャッチし、ログに記録（システムを停止させないFail-Soft構成）。
-* 根拠: `try-except` ブロック (行番号: 58-63 / 抜粋: "except OSError as e:")
+* 根拠: `try-except` ブロック (参照: play / 抜粋: "except OSError as e:")
 
 
 
@@ -76,7 +76,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 戻り値の型ヒント (行番号: 66 / 抜粋: "-> None:")
+* 根拠: 戻り値の型ヒント (参照: check_and_restore_sounds / 抜粋: "-> None:")
 
 
 * **副作用**: ディレクトリの新規作成（`os.makedirs`）、ファイルのコピー・上書き（`shutil.copy2`）、システムログへの書き込み。

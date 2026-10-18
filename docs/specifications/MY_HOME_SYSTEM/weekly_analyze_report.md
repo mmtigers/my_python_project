@@ -62,11 +62,11 @@
 
 
 * **副作用**: なし
-* 根拠: 関数内部の処理 (行番号: 24 / 抜粋: "now = datetime.datetime.now(py")
+* 根拠: 関数内部の処理 (参照: get_start_date / 抜粋: "now = datetime.datetime.now(py")
 
 
 * **エラーハンドリング**: 該当しない `period_type` が渡された場合は例外を発生させず `None` を返す。
-* 根拠: `get_start_date` 末尾 (行番号: 38 / 抜粋: "return None")
+* 根拠: `get_start_date` 末尾 (参照: get_start_date / 抜粋: "return None")
 
 
 

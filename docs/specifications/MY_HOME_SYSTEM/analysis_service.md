@@ -104,11 +104,11 @@
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (変換後のデータフレーム)
-* 根拠: `-> pd.DataFrame` (行番号: 77 / 抜粋: "-> pd.DataFrame:")
+* 根拠: `-> pd.DataFrame` (参照: process_dataframe / 抜粋: "-> pd.DataFrame:")
 
 
 * **副作用**: なし
-* 根拠: `df = df.copy()` でコピーを作成し副作用を回避 (行番号: 80 / 抜粋: "df = df.copy()")
+* 根拠: `df = df.copy()` でコピーを作成し副作用を回避 (参照: process_dataframe / 抜粋: "df = df.copy()")
 
 
 * **エラーハンドリング**: **（Issue #410 L-L3で修正、#456でベクトル化）** 内部で呼び出す`_vectorized_parse_timestamps_to_jst`が不正な値を`pd.NaT`へ丸めるため、1行の不正なタイムスタンプで全行が失われることはない。
@@ -127,15 +127,15 @@
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (マッピング適用後のデータフレーム)
-* 根拠: `-> pd.DataFrame` (行番号: 69 / 抜粋: "-> pd.DataFrame:")
+* 根拠: `-> pd.DataFrame` (参照: apply_friendly_names / 抜粋: "-> pd.DataFrame:")
 
 
 * **副作用**: なし
-* 根拠: `df = df.copy()` でコピーを作成 (行番号: 74 / 抜粋: "df = df.copy()")
+* 根拠: `df = df.copy()` でコピーを作成 (参照: apply_friendly_names / 抜粋: "df = df.copy()")
 
 
 * **エラーハンドリング**: DBの最新デバイス名からのマッピング上書き時に例外をキャッチしログを出力。
-* 根拠: `try ... except Exception as e:` (行番号: 98 / 抜粋: "except Exception as e:")
+* 根拠: `try ... except Exception as e:` (参照: apply_friendly_names / 抜粋: "except Exception as e:")
 
 
 
@@ -150,15 +150,15 @@
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (取得したデータのデータフレーム)
-* 根拠: `-> pd.DataFrame:` (行番号: 117 / 抜粋: "-> pd.DataFrame:")
+* 根拠: `-> pd.DataFrame:` (参照: load_data_from_db / 抜粋: "-> pd.DataFrame:")
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `get_ro_db_connection()` (行番号: 121 / 抜粋: "conn = get_ro_db_connection()")
+* 根拠: `get_ro_db_connection()` (参照: load_data_from_db / 抜粋: "conn = get_ro_db_connection()")
 
 
 * **エラーハンドリング**: 例外をキャッチしてエラーログを出力し、空のDataFrameを返す。`finally`でDB接続を確実に閉じる。
-* 根拠: `except Exception as e:` および `finally:` (行番号: 134〜139 / 抜粋: "finally:")
+* 根拠: `except Exception as e:` および `finally:` (参照: load_data_from_db / 抜粋: "finally:")
 
 
 
@@ -233,7 +233,7 @@
 ### `load_generic_data`
 
 * **役割**: 指定したテーブルから汎用的に最新のデータを取得する。
-* 根拠: `load_generic_data` (行番号: 164 / 抜粋: "query = f"SELECT * FROM {table_name}")
+* 根拠: `load_generic_data` (参照: load_generic_data / 抜粋: "query = f"SELECT * FROM {table_name}")
 
 
 * **引数/リクエスト**: `table_name` (`str`): テーブル名。`limit` (`int`, デフォルト `500`): 取得件数。
@@ -241,7 +241,7 @@
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (取得したデータのデータフレーム)
-* 根拠: `-> pd.DataFrame:` (行番号: 162 / 抜粋: "-> pd.DataFrame:")
+* 根拠: `-> pd.DataFrame:` (参照: load_generic_data / 抜粋: "-> pd.DataFrame:")
 
 
 * **副作用**: データベースの読み取り操作。
@@ -359,7 +359,7 @@
 ### `load_weather_history`
 
 * **役割**: 指定された日数分、指定された場所（デフォルトは伊丹）の天気履歴を取得する。**（Issue #410 L-L2で修正）** 遡り開始日(`start_date`)の算出に使う「現在時刻」を、以前のnaive`datetime.now()`（サーバーのローカルタイムゾーンに依存し、`get_today_date_str()`等が前提とするJSTと日付境界がズレうる）から、JST明示の`datetime.now(pytz.timezone("Asia/Tokyo"))`へ変更した。
-* 根拠: `load_weather_history` (行番号: 291〜308 / 抜粋: "FROM weather_history")、JST明示化 (行番号: 557 / 抜粋: "start_date = (datetime.now(pytz.timezone(\"Asia/Tokyo\")) - timedelta(days=days)).strftime(\"%Y-%m-%d\")")
+* 根拠: `load_weather_history` (参照: load_weather_history / 抜粋: "FROM weather_history")、JST明示化 (行番号: 557 / 抜粋: "start_date = (datetime.now(pytz.timezone(\"Asia/Tokyo\")) - timedelta(days=days)).strftime(\"%Y-%m-%d\")")
 
 
 * **引数/リクエスト**: `days` (`int`, デフォルト `40`): 遡る日数。`location` (`str`, デフォルト `"伊丹"`): 取得対象の場所。
@@ -367,7 +367,7 @@
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (天気履歴のデータフレーム)
-* 根拠: `-> pd.DataFrame:` (行番号: 291 / 抜粋: "-> pd.DataFrame:")
+* 根拠: `-> pd.DataFrame:` (参照: load_weather_history / 抜粋: "-> pd.DataFrame:")
 
 
 * **副作用**: データベースの読み取り操作。
@@ -375,7 +375,7 @@
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し空のデータフレームを返す。`finally`で接続を閉じる。
-* 根拠: `except Exception as e:` (行番号: 306〜308 / 抜粋: "return pd.DataFrame()")
+* 根拠: `except Exception as e:` (参照: load_weather_history / 抜粋: "return pd.DataFrame()")
 
 
 
@@ -390,7 +390,7 @@
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (マージされた統計データのデータフレーム)
-* 根拠: `-> pd.DataFrame:` (行番号: 279 / 抜粋: "-> pd.DataFrame:")
+* 根拠: `-> pd.DataFrame:` (参照: load_yearly_temperature_stats / 抜粋: "-> pd.DataFrame:")
 
 
 * **副作用**: データベースの読み取り操作。
@@ -398,7 +398,7 @@
 
 
 * **エラーハンドリング**: 各クエリ実行ごとに `try-except` で回避処理。全体の例外発生時はエラーログを出力し空のデータフレームを返す。`finally`で接続を閉じる。**（保守性 #410で修正）** 個別クエリの回避処理は以前bareの`except:`だったが、`except Exception:`へ変更した（`KeyboardInterrupt`/`SystemExit`等の`BaseException`まで握り潰さないようにする一般的なプラクティスに合わせた。挙動そのものは変わらない）。
-* 根拠: `try: df_new = pd.read_sql_query(q_new, conn) except Exception: pass` 等 (行番号: 344〜350 / 抜粋: "except Exception: pass")
+* 根拠: `try: df_new = pd.read_sql_query(q_new, conn) except Exception: pass` 等 (参照: load_yearly_temperature_stats / 抜粋: "except Exception: pass")
 
 
 
@@ -429,7 +429,7 @@
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (GB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
-* 根拠: `-> Optional[Dict[str, float]]:` (行番号: 405 / 抜粋: "-> Optional[Dict[str, float]]:")
+* 根拠: `-> Optional[Dict[str, float]]:` (参照: get_disk_usage / 抜粋: "-> Optional[Dict[str, float]]:")
 
 
 * **副作用**: OSファイルシステムのディスク容量読み取り。
@@ -437,7 +437,7 @@
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `None` を返す。
-* 根拠: `except Exception as e:` (行番号: 415 / 抜粋: "return None")
+* 根拠: `except Exception as e:` (参照: get_disk_usage / 抜粋: "return None")
 
 
 
@@ -452,7 +452,7 @@
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (MB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
-* 根拠: `-> Optional[Dict[str, float]]:` (行番号: 419 / 抜粋: "-> Optional[Dict[str, float]]:")
+* 根拠: `-> Optional[Dict[str, float]]:` (参照: get_memory_usage / 抜粋: "-> Optional[Dict[str, float]]:")
 
 
 * **副作用**: OSコマンド（`free`）の実行。
@@ -460,7 +460,7 @@
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `None` を返す。
-* 根拠: `except Exception as e:` (行番号: 436 / 抜粋: "return None")
+* 根拠: `except Exception as e:` (参照: get_memory_usage / 抜粋: "return None")
 
 
 
