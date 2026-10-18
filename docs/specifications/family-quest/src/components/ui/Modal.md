@@ -131,8 +131,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `useEffect`内で`window`に対する`keydown`イベントの登録と解除を行っている。依存配列に`onClose`が含まれているため、呼び出し元で`onClose`関数の参照が頻繁に変わる場合、イベントリスナーの再登録が繰り返される。
-* 根拠: [useEffect] (行番号: 24〜30 / 抜粋: "}, [isOpen, onClose]);")
+* `useEffect`内で`window`に対する`keydown`イベントの登録と解除を行っている。依存配列に`onClose`(と`preventClose`)が含まれているため、呼び出し元で`onClose`関数の参照が頻繁に変わる場合、イベントリスナーの再登録が繰り返される。
+* 根拠: [useEffect] (行番号: 36 / 抜粋: "}, [isOpen, preventClose, onClose]);")
 
 
 * `isOpen`が`false`の際は早期リターンされ、DOMツリーから完全に削除される。フェードアウトなどのアニメーションを持たせたい場合は別のアプローチが必要な実装となっている。

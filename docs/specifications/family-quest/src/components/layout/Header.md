@@ -29,7 +29,7 @@
 * ユーザーアバターの表示可否判定には`isSameOriginAvatarPath(user.avatar)`（`lib/utils.ts`からインポート）を用いる。以前の`user.avatar && user.avatar.startsWith('/')`という判定は、プロトコル相対URL（`"//evil.example/x"`）もマッチしてしまい、外部ホストの画像に差し替えられる可能性があるバグ（M-9-5）だったため、`"//"`で始まるものを明示的に除外する共通ヘルパーに置き換えられた。
 * 根拠: `isSameOriginAvatarPath`のインポートと使用 (4, 111行目 / 抜粋: "import { isSameOriginAvatarPath } from '../../lib/utils';", "{isSameOriginAvatarPath(user.avatar) ? (")
 * **[修正済み] トグル系ボタンへの`aria-pressed`付与（Issue #412 F-L5）**: ホームボタン（`showBackToMain`）・ユーザー切替ボタン・記録ボタンはいずれも「選択中/非選択」という状態を持つトグルだが、以前は視覚的なスタイル（`scale`/枠線色等）でしか状態を表現しておらず、スクリーンリーダー利用者には選択状態が伝わらなかった。各ボタンに`aria-pressed`（それぞれ`viewMode === 'user'`/`isActive`/`viewMode === 'familyLog'`）と`aria-label`（見た目のテキストと同じ内容だが、アイコン+バッジのレイアウトのため明示）を追加した。
-* 根拠: (行番号: 78〜79, 108〜109, 155〜156 / 抜粋: "aria-pressed={viewMode === 'user'}", "aria-pressed={isActive}", "aria-pressed={viewMode === 'familyLog'}")
+* 根拠: (行番号: 112, 142, 189 / 抜粋: "aria-pressed={viewMode === 'user'}", "aria-pressed={isActive}", "aria-pressed={viewMode === 'familyLog'}")
 
 
 ## 3. 外部依存関係
@@ -177,7 +177,7 @@ graph TD
 * `showUserSwitcher`/`showLogSwitcher`/`showBackToMain`はいずれもオプショナル（`?: boolean;`）である。`showUserSwitcher`/`showLogSwitcher`は**（#479で修正）** 分割代入時のデフォルト引数`= true`により未指定時は`true`（表示する、従来どおりの挙動）となる。一方`showBackToMain`にはデフォルト引数が無く、`&&`による真偽判定（81行目）のため未指定時は`undefined`＝falsy、すなわち「ホームボタンを表示しない」扱いになる（この非対称自体は本Issueの対象外で変わっていない）。**[修正済み]** 以前の`hideUserSwitcher`/`hideLogSwitcher`（デフォルト引数なし、`!hide*`による否定判定）と実際の挙動（省略時=表示）は同じだったが、prop名だけからは「省略時にどちらの状態になるか」が読み取れなかった。show*系への改名とデフォルト引数の明示により、prop名と省略時の意味が一致するようになった。
 * 根拠: (行番号: 28, 32, 37, 51〜52, 109, 136, 181, 186行目 / 抜粋: "showUserSwitcher?: boolean;", "showLogSwitcher?: boolean;", "showBackToMain?: boolean;", "showUserSwitcher = true,\n    showLogSwitcher = true,", "{showBackToMain && (", "{showUserSwitcher && users.map((user, idx) => {", "{(showUserSwitcher || showBackToMain) && showLogSwitcher && (", "{showLogSwitcher && ("
 * ホームボタンの選択状態表示（強調スタイル）は`viewMode === 'user'`かどうかで切り替わり、`viewMode === 'familyLog'`の間はホームボタンが非選択スタイルになる。以前はスタイルが常に「選択中」固定だったため、記録画面に遷移してもホームボタンだけフォーカスされたままに見えていたバグの修正である。
-* 根拠: (行番号: 65〜69, 73〜74行目 / 抜粋: "// ★バグ修正: 以前はスタイルが常に「選択中」固定だったため、記録画面に\n                    // 遷移したあともホームボタンだけフォーカスされたままに見えていた。\n                    // 他のボタン同様、viewMode に応じて選択中/非選択を切り替える", "className={`relative transition-all duration-300 flex flex-col items-center group p-1 ${viewMode === 'user' ? 'scale-110 -translate-y-1 z-10' : 'scale-95 opacity-60 hover:opacity-100 hover:scale-100'\n                            }`}")
+* 根拠: (行番号: 106〜108, 114〜115行目 / 抜粋: "★バグ修正: 以前はスタイルが常に「選択中」固定だったため、記録画面に\n                    遷移したあともホームボタンだけフォーカスされたままに見えていた。\n                    他のボタン同様、viewMode に応じて選択中/非選択を切り替える */}", "className={`relative transition-all duration-300 flex flex-col items-center group p-1 ${viewMode === 'user' ? 'scale-110 -translate-y-1 z-10' : 'scale-95 opacity-60 hover:opacity-100 hover:scale-100'\n                            }`}")
 * かつて存在した`onAdminOpen`（隠しボタンによる管理画面起動）、`onPartySwitch`/`onTrendsSwitch`（パーティ・週間ランキング画面切替）に対応するProps・UI要素は本ファイルには存在しない。
 
 ## 9. 不明事項一覧

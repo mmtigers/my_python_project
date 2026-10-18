@@ -32,7 +32,7 @@
 * ヘッダーの歯車アイコンボタンから`CameraSettingsModal`を開き、`allCameras`（無効化されたカメラも含む全件）と、カメラの有効/無効切り替え成功時に呼ばれる`onToggled`コールバックとして`refetch`をawaitするラッパー関数を渡すことで、モーダル側の操作後に一覧を再取得する。
 * 根拠: `CameraSettingsModal`の呼び出し (行番号: 106〜111 / 抜粋: "<CameraSettingsModal\n                isOpen={settingsOpen}\n                onClose={() => setSettingsOpen(false)}\n                cameras={allCameras}\n                onToggled={async () => { await refetch(); }}\n            />")
 * **Issue #121で修正**: 設定取得が失敗した場合、以前は`console.error`のみでユーザーへの通知が一切なく、ライブタブが「無言で」空のグリッドを表示していた。`CameraDashboard`は`main.tsx`で`ToastProvider`配下ではなく独立してマウントされる（`/camera`はFamily Quest本体と同時に使われない専用ビューア）ため、他画面のような`useToast()`は使えない。代わりに取得失敗時は画面上部に再試行ボタン付きのエラーバナーを表示する。React Query化後は、エラー源が`useQuery`の`error`戻り値になった（`fetchError`は`error ? extractErrorDetail(error) : null`の派生値）。
-* 根拠: `fetchError`派生値と表示バナー (行番号: 49, 72〜82 / 抜粋: "const fetchError = error ? extractErrorDetail(error) : null;", "{fetchError && (\n                    <div className=\"mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-red-700 bg-red-950/40 px-4 py-3 text-sm text-red-300\">")
+* 根拠: `fetchError`派生値と表示バナー (行番号: 51, 72〜82 / 抜粋: "const fetchError = error ? extractErrorDetail(error, 'カメラ設定の取得に失敗しました') : null;", "{fetchError && (\n                    <div className=\"mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-red-700 bg-red-950/40 px-4 py-3 text-sm text-red-300\">")
 
 ## 3. 外部依存関係
 
@@ -53,9 +53,9 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `apiClient`の内部実装 | ベースURL、認証、共通エラー処理などの詳細仕様が本ファイルからは読み取れないため。 | 根拠: [`apiClient.get`] (行番号: 38 / 抜粋: "const data = await apiClient.get<CameraConfig[]>('/api/cameras/settings');") |
+| `apiClient`の内部実装 | ベースURL、認証、共通エラー処理などの詳細仕様が本ファイルからは読み取れないため。 | 根拠: [`apiClient.get`] (行番号: 39 / 抜粋: "const raw = await apiClient.get<unknown>('/api/cameras/settings');") |
 | `useQuery`のキャッシュ・リトライ挙動 | `staleTime`/`retry`等のオプションを本ファイルでは指定しておらず、`QueryClient`のデフォルト設定(コメント上は「staleTime 60秒・retry 1」)に従うが、その実体は`queryClient.ts`側にあり本ファイルからは確認できないため。 | 根拠: [`useQuery`呼び出しとコメント] (行番号: 26〜27, 35〜41 / 抜粋: "// キャッシュ方針はqueryClient.tsのデフォルト(staleTime 60秒・retry 1)に従う。") |
-| `/api/cameras/settings` エンドポイント | カメラ設定一覧を返すバックエンドの実装・レスポンス仕様の詳細が本ファイルには含まれないため。 | 根拠: [`apiClient.get<CameraConfig[]>('/api/cameras/settings')`] (行番号: 38 / 抜粋: "const data = await apiClient.get<CameraConfig[]>('/api/cameras/settings');") |
+| `/api/cameras/settings` エンドポイント | カメラ設定一覧を返すバックエンドの実装・レスポンス仕様の詳細が本ファイルには含まれないため。 | 根拠: [`apiClient.get<CameraConfig[]>('/api/cameras/settings')`] (行番号: 39 / 抜粋: "const raw = await apiClient.get<unknown>('/api/cameras/settings');") |
 | `Camera`・`Settings`アイコン（`lucide-react`）の内部実装 | アイコンのSVG実体やライブラリのバージョンが本ファイルからは確認できないため。 | 根拠: [`<Camera size={28} className="text-blue-500" />`, `<Settings size={22} />`] (行番号: 60, 68 / 抜粋: "<Camera size={28} className=\"text-blue-500\" />") |
 | `LiveView`・`RecordView`・`CameraSettingsModal`の内部実装 | 本ファイルからは`cameras`（または`allCameras`）とコールバックのプロパティを渡して呼び出している箇所のみが確認でき、それぞれの内部ロジックは別ファイルにあるため。 | 根拠: [`<LiveView cameras={cameras} />`, `<RecordView cameras={cameras} />`, `<CameraSettingsModal .../>`] (行番号: 100, 102, 106〜111 / 抜粋: "<LiveView cameras={cameras} />") |
 
@@ -80,7 +80,7 @@
 
 
 * **エラーハンドリング**: `queryFn`内の`apiClient.get`が失敗した場合のリトライ・エラー保持は`useQuery`（`QueryClient`のデフォルト設定）に委譲されている。`error`が真の場合、派生値`fetchError`（`extractErrorDetail(error)`）が`{fetchError && (...)}`の条件付きレンダリングでヘッダー直下にエラーバナー（メッセージ＋再試行ボタン）として表示される（**Issue #121で追加**）。初回フェッチ失敗後は`isLoading`が偽になるため（React Queryはエラー確定でローディングを終える）、エラーバナー付きの通常レイアウトが表示される。キャッシュ済みデータがある状態での再フェッチ失敗時は、`data`（`allCameras`）が保持されたままエラーバナーが併記される。
-* 根拠: [`fetchError`派生値] (行番号: 49 / 抜粋: "const fetchError = error ? extractErrorDetail(error) : null;")、[エラーバナー] (行番号: 72〜82 / 抜粋: "{fetchError && (")、[キャッシュ保持コメント] (行番号: 28〜29 / 抜粋: "// 取得失敗時もキャッシュ済みデータは保持されるため、Issue #121のエラーバナー\n    // (再試行つき)と既存表示の共存という従来挙動は変わらない。")
+* 根拠: [`fetchError`派生値] (行番号: 51 / 抜粋: "const fetchError = error ? extractErrorDetail(error, 'カメラ設定の取得に失敗しました') : null;")、[エラーバナー] (行番号: 72〜82 / 抜粋: "{fetchError && (")、[キャッシュ保持コメント] (行番号: 28〜29 / 抜粋: "// 取得失敗時もキャッシュ済みデータは保持されるため、Issue #121のエラーバナー\n    // (再試行つき)と既存表示の共存という従来挙動は変わらない。")
 
 ### `useQuery(['cameraSettings'])` (カメラ設定クエリ、**Issue #326で導入**)
 
@@ -90,25 +90,25 @@
 * **引数/リクエスト**: `queryKey: ['cameraSettings']`、`queryFn`（引数なしのasync関数）。`staleTime`/`refetchInterval`等は指定せず、`QueryClient`のデフォルトに従う（カメラ設定は設定モーダル経由でしか変わらないためポーリング不要、というコメントが付されている）。
 * 根拠: (行番号: 26〜27, 36〜40 / 抜粋: "// カメラ設定は設定モーダル経由でしか変わらないためポーリングは不要で、", "queryKey: ['cameraSettings'],\n        queryFn: async () => {")
 
-* **戻り値/レスポンス**: `queryFn`は`CameraConfig[]`（`[...data]`でコピーし`(a, b) => a.order - b.order`でソート済み）を返す。`useQuery`の戻り値からは`data`(`allCameras`)・`isLoading`・`error`・`refetch`の4つを分割代入で使用する。
-* 根拠: (行番号: 31〜34, 38〜39 / 抜粋: "const data = await apiClient.get<CameraConfig[]>('/api/cameras/settings');\n            return [...data].sort((a, b) => a.order - b.order);")
+* **戻り値/レスポンス**: `queryFn`は`CameraConfig[]`（**#659**: 取得境界でZodスキーマ`cameraSettingsResponseSchema`により形状を検証したうえで、`[...data]`でコピーし`(a, b) => a.order - b.order`でソート済み）を返す。`useQuery`の戻り値からは`data`(`allCameras`)・`isLoading`・`error`・`refetch`の4つを分割代入で使用する。
+* 根拠: (行番号: 39〜41 / 抜粋: "const raw = await apiClient.get<unknown>('/api/cameras/settings');\n            const data = cameraSettingsResponseSchema.parse(raw) as CameraConfig[];\n            return [...data].sort((a, b) => a.order - b.order);")
 
-* **副作用**: `apiClient.get<CameraConfig[]>('/api/cameras/settings')`によるHTTP GETリクエスト（実行タイミング・キャッシュはReact Queryが管理）。
-* 根拠: (行番号: 38 / 抜粋: "const data = await apiClient.get<CameraConfig[]>('/api/cameras/settings');")
+* **副作用**: `apiClient.get<unknown>('/api/cameras/settings')`によるHTTP GETリクエスト（実行タイミング・キャッシュはReact Queryが管理）。
+* 根拠: (行番号: 39 / 抜粋: "const raw = await apiClient.get<unknown>('/api/cameras/settings');")
 
-* **エラーハンドリング**: `queryFn`自身はtry/catchを持たず、例外はそのまま`useQuery`の`error`に格納される。エラー表示への変換は`CameraDashboard`本体の`fetchError`派生値（`extractErrorDetail`）が担う。
-* 根拠: (行番号: 37〜40, 49 / 抜粋: "queryFn: async () => {\n            const data = await apiClient.get<CameraConfig[]>('/api/cameras/settings');", "const fetchError = error ? extractErrorDetail(error) : null;")
+* **エラーハンドリング**: `queryFn`自身はtry/catchを持たず、例外(HTTPエラーに加え、#659 のスキーマ検証に失敗したときの`ZodError`)はそのまま`useQuery`の`error`に格納される。エラー表示への変換は`CameraDashboard`本体の`fetchError`派生値（`extractErrorDetail`）が担う。
+* 根拠: (行番号: 37〜40, 51 / 抜粋: "queryFn: async () => {\n            // #659: 取得境界で形状を検証する(gameData / purchase / inventory と同じ方針)。\n            const raw = await apiClient.get<unknown>('/api/cameras/settings');\n            const data = cameraSettingsResponseSchema.parse(raw) as CameraConfig[];", "const fetchError = error ? extractErrorDetail(error, 'カメラ設定の取得に失敗しました') : null;")
 
 ### `extractErrorDetail` (`@/lib/errorDetail`からのインポート、Issue #121で追加、Issue #412 品質で`InventoryList.tsx`と重複していたため`lib/errorDetail.ts`へ移動)
 
-* **役割**: `apiClient`側でスローされた`Error`から、バックエンドが返す`{"detail": "..."}`のメッセージ内容（`Error.message`）を取り出す。`error`が`Error`インスタンスかつ`message`が真値の場合のみそれを使い、それ以外は固定文言`'カメラ設定の取得に失敗しました'`にフォールバックする。React Query化後は`useQuery`の`error`戻り値から`fetchError`派生値を作る際に呼ばれる。`InventoryList.tsx`等の同名ヘルパーと同じパターン。
-* 根拠: (行番号: 10〜17, 49 / 抜粋: "// ★バグ修正(Issue #121): apiClient側でスローされるErrorのmessageには、バックエンドが\n// 返す{\"detail\": \"...\"}の内容が入っている(apiClient.ts参照)。", "const extractErrorDetail = (error: unknown): string => {\n    return error instanceof Error && error.message ? error.message : 'カメラ設定の取得に失敗しました';\n};")
+* **役割**: `apiClient`側でスローされた`Error`から、バックエンドが返す`{"detail": "..."}`のメッセージ内容（`Error.message`）を取り出す。`error`が`Error`インスタンスかつ`message`が真値の場合のみそれを使い、それ以外は第2引数の固定文言`'カメラ設定の取得に失敗しました'`にフォールバックする(移動後は文言を呼び出し側から渡す)。React Query化後は`useQuery`の`error`戻り値から`fetchError`派生値を作る際に呼ばれる。`InventoryList.tsx`等の同名ヘルパーと同じパターン。
+* 根拠: [import] (行番号: 17 / 抜粋: "import { extractErrorDetail } from '@/lib/errorDetail';")、[呼び出し] (行番号: 51 / 抜粋: "const fetchError = error ? extractErrorDetail(error, 'カメラ設定の取得に失敗しました') : null;")、[実体] (`lib/errorDetail.ts` 行番号: 17〜20 / 抜粋: "export function extractErrorDetail(error: unknown, fallback?: string): string | undefined {")
 
 * **引数/リクエスト**: `error: unknown`
 * **戻り値/レスポンス**: `string`
 * **副作用**: なし
 * **エラーハンドリング**: なし（自身がエラー内容を安全な文字列に変換するためのヘルパー）
-* 根拠: (行番号: 15〜17 / 抜粋: "const extractErrorDetail = (error: unknown): string => {\n    return error instanceof Error && error.message ? error.message : 'カメラ設定の取得に失敗しました';\n};")
+* 根拠: (`lib/errorDetail.ts` 行番号: 17〜20 / 抜粋: "if (error instanceof Error && error.message) return error.message;\n    return fallback;")
 
 ### `cameras` (`useMemo`)
 
@@ -227,7 +227,7 @@ graph TD
 | 高 | `family-quest/src/features/camera/components/CameraSettingsModal.tsx` | 設定モーダルが`allCameras`をどう表示し、有効/無効切り替えをどのAPIで永続化しているかを確認するため。 | 根拠: [`<CameraSettingsModal .../>`] (行番号: 106〜111 / 抜粋: "<CameraSettingsModal\n                isOpen={settingsOpen}") |
 | 高 | `family-quest/src/features/camera/components/LiveView.tsx` | 「ライブ映像」タブ選択時に描画される内容の詳細仕様を確認するため。 | 根拠: [`<LiveView cameras={cameras} />`] (行番号: 102 / 抜粋: "<LiveView cameras={cameras} />") |
 | 高 | `family-quest/src/features/camera/components/RecordView.tsx` | 「録画再生」タブ選択時に描画される内容の詳細仕様を確認するため。 | 根拠: [`<RecordView cameras={cameras} />`] (行番号: 104 / 抜粋: "<RecordView cameras={cameras} />") |
-| 中 | `family-quest/src/lib/apiClient.ts` | `/api/cameras/settings`呼び出しの認証・共通エラー処理仕様を確認するため。 | 根拠: [`apiClient.get`] (行番号: 38 / 抜粋: "const data = await apiClient.get<CameraConfig[]>('/api/cameras/settings');") |
+| 中 | `family-quest/src/lib/apiClient.ts` | `/api/cameras/settings`呼び出しの認証・共通エラー処理仕様を確認するため。 | 根拠: [`apiClient.get`] (行番号: 39 / 抜粋: "const raw = await apiClient.get<unknown>('/api/cameras/settings');") |
 | 中 | バックエンドの`/api/cameras/settings`エンドポイント実装 | カメラ設定（`enabled`, `order`等）がどのように永続化・管理されているかを確認するため。 | 根拠: [`apiClient.get<CameraConfig[]>('/api/cameras/settings')`] (行番号: 38) |
 | 低 | 本コンポーネントのルーティング／マウント元ファイル | `CameraDashboard`が「独立した全画面レイアウト」とコメントされており、アプリ全体のどのルートからマウントされるかを確認するため。 | 根拠: [コメント] (行番号: 56 / 抜粋: "// 独立した全画面レイアウト") |
 

@@ -99,7 +99,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: [manual_restart] (行番号: 52 / 抜粋: "def manual_restart() -> Dict[str, Any]:")
+* 根拠: [manual_restart] (行番号: 52 / 抜粋: "def manual_restart() -> dict[str, Any]:")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` 型。成功時は `status`, `message` を含む辞書を返す。失敗時は`HTTPException(500)`で、`detail`は`restart_home_system`が返したメッセージそのもの。

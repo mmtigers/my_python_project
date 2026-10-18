@@ -49,12 +49,12 @@
 ### `AUTO_RELOAD_GUARD_MS` / `AUTO_RELOAD_GUARD_KEY` / `readLastAutoReloadAt` / `writeLastAutoReloadAt`
 
 * **役割**: 自動再読み込みの無限ループ防止。`sessionStorage`のキー`familyQuest.chunkErrorReloadedAt`に直近の自動再読み込み時刻を記録し、30秒以内の再発生では自動再読み込みを行わない。読み書きは`try/catch`で防御し、失敗時は「ガード無し(0)」/「記録しない」として続行する。
-* 根拠: (行番号: 43〜66 / 抜粋: "const AUTO_RELOAD_GUARD_MS = 30 * 1000;\nconst AUTO_RELOAD_GUARD_KEY = 'familyQuest.chunkErrorReloadedAt';")
+* 根拠: (行番号: 40〜41 / 抜粋: "const AUTO_RELOAD_GUARD_MS = 30 * 1000;\nconst AUTO_RELOAD_GUARD_KEY = 'familyQuest.chunkErrorReloadedAt';")
 
 ### `ChunkErrorBoundary` (クラスコンポーネント、default export)
 
 * **役割**: `getDerivedStateFromError`で捕捉したエラーをstateに保持し、`componentDidCatch`で`console.error`出力後、チャンク読込失敗なら(ガード時間外であれば)`sessionStorage`に時刻を記録して`handleReload`を呼ぶ。`render`は`error`が無ければ`children`をそのまま返し、あれば`role="alert"`の全画面オーバーレイにメッセージ(チャンク失敗時は「画面の更新が必要です」、それ以外は「画面の表示に失敗しました」と`error.message`)と「再読み込み」ボタンを表示する。
-* 根拠: (行番号: 70〜125 / 抜粋: "class ChunkErrorBoundary extends React.Component<ChunkErrorBoundaryProps, ChunkErrorBoundaryState> {")
+* 根拠: (行番号: 68 / 抜粋: "class ChunkErrorBoundary extends React.Component<ChunkErrorBoundaryProps, ChunkErrorBoundaryState> {")
 * **引数/リクエスト**: `ChunkErrorBoundaryProps`
 * **戻り値/レスポンス**: `children`またはフォールバックのJSX
 * **副作用**: `console.error`、`sessionStorage`への書き込み、`reload`(既定は`window.location.reload()`)の呼び出し

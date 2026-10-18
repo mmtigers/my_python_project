@@ -48,7 +48,7 @@
 ### `ID`
 
 * **役割**: IDを表す汎用的な型の定義。**（Issue #412 品質で修正）** 以前は`number | string`だったが、`quest_id`/`reward_id`/`history_id`等の実カラムはすべてSQLiteの`INTEGER PRIMARY KEY`でありサーバーは常に`number`を返すため、`number`のみに絞った（`tsc -b`が通ることを確認済み）。`gameDataSchema.ts`のZod検証層（実際のワイヤーデータに対する独立した防御）は`z.union([z.number(), z.string()])`のまま変更していない。
-* 根拠: [該当要素] (行番号: 5〜9 / 抜粋: "export type ID = number;")
+* 根拠: [該当要素] (行番号: 10 / 抜粋: "export type ID = number;")
 
 
 * **引数/リクエスト**: 該当なし
@@ -93,7 +93,7 @@
 
 * **役割**: クエスト履歴のデータ構造の定義。**（Issue #291で修正）** `quest_history.id`が実カラムであり、以前併存していた`history_id`はAPIから一度も送られてこない幽霊フィールドだったと判明したため削除された。**（Issue #390で修正）** `status`はサーバーが生成する`'pending' | 'approved' | 'rejected'`の3値のみ（`'completed'`は生成されない値だったため削除）、`date?: string`は送出されない幽霊フィールドのため削除、`quest_title`/`gold_earned`/`exp_earned`はNULL可カラムのため`null`を許容する。
 * 根拠: [該当要素] (行番号: 63〜77 / 抜粋: "// #390: status の 'completed' はサーバーが生成しない値、date は送出されない\n// 幽霊フィールドだったため削除。gold_earned / exp_earned は NULL 可カラム。\nexport interface QuestHistory {", "status: 'pending' | 'approved' | 'rejected';")
-* 根拠: [フィールド名統一のコメント] (行番号: 59〜61 / 抜粋: "// ★フィールド名の統一(Issue #291): quest_history.id が実カラムであり、\n// history_id はAPIから一度も送られてこない幽霊フィールドだったため削除した。")
+* 根拠: [フィールド名統一のコメント] (行番号: 81〜82 / 抜粋: "// ★フィールド名の統一(Issue #291): quest_history.id が実カラムであり、\n// history_id はAPIから一度も送られてこない幽霊フィールドだったため削除した。")
 
 
 * **引数/リクエスト**: 該当なし
@@ -104,8 +104,8 @@
 ### `Reward`
 
 * **役割**: 報酬アイテムのデータ構造の定義。**（Issue #291で修正）** 以前は`id`/`cost`/`icon`/`desc`が`reward_id`/`cost_gold`/`icon_key`/`description`の別名としてバックエンドが付与していたものとして型に含まれていたが、これらが幽霊フィールドだったと判明し、二重化を廃止してDBの実カラム名のみに一本化された（`cost_gold`は`cost`が任意だったのに対し必須プロパティになっている）。
-* 根拠: [該当要素] (行番号: 77〜89 / 抜粋: "export interface Reward {")
-* 根拠: [フィールド名統一のコメント] (行番号: 77〜80 / 抜粋: "// ★フィールド名の統一(Issue #291): id/cost/icon/desc は reward_id/cost_gold/\n// icon_key/description の別名としてバックエンドが付与していたものだが、\n// 二重化を廃止しDBの実カラム名に一本化した。")
+* 根拠: [該当要素] (行番号: 102 / 抜粋: "export interface Reward {")
+* 根拠: [フィールド名統一のコメント] (行番号: 99〜101 / 抜粋: "// ★フィールド名の統一(Issue #291): id/cost/icon/desc は reward_id/cost_gold/\n// icon_key/description の別名としてバックエンドが付与していたものだが、\n// 二重化を廃止しDBの実カラム名に一本化した。")
 
 
 * **引数/リクエスト**: 該当なし
@@ -127,7 +127,7 @@
 ### `YoutubeCooldownAnnouncement` (猶予期間機能で追加)
 
 * **役割**: YouTubeの視聴制限の猶予期間中(バックエンドが実際の使用制限をまだ強制していない期間)に、`InventoryList.tsx`が「この日から変わるよ」という予告バナーを表示するための情報のデータ構造の定義。施行済み、または対象のごほうび券(`config.YOUTUBE_REWARD_IDS`)が設定されていない場合は該当フィールドが`null`になるため、この型が実際に使われるのは猶予期間中のみ。**（日次上限機能で変更）** クールダウンと日次上限がそれぞれ別の施行日を持つようになったため、この型は`youtube_cooldown_announcement`と`youtube_daily_limit_announcement`の2フィールドで共用される。
-* 根拠: [該当要素] (行番号: 132〜135 / 抜粋: "export interface YoutubeCooldownAnnouncement {\n    starts_on: string; // ISO日付(YYYY-MM-DD)\n    days_remaining: number;\n}")
+* 根拠: [該当要素] (行番号: 136〜139 / 抜粋: "export interface YoutubeCooldownAnnouncement {\n    starts_on: string; // ISO日付(YYYY-MM-DD)\n    days_remaining: number;\n}")
 
 
 * **引数/リクエスト**: 該当なし
@@ -155,7 +155,7 @@
 ### `CompletedSignal`
 
 * **役割**: クエスト完了APIが実際に成功した時点で`App.tsx`が`QuestList`/`QuestItem`へ「完了音・無限クエストのクールダウンを発火せよ」と通知するためのシグナルの型。`id`（対象クエストの`quest_id`）、`userId`（完了した本人の`user_id`）、`nonce`（同一クエストの連続完了でも`useEffect`が再発火するよう毎回変わる値）を持つ。**（Issue #363で追加）** 以前は`App.tsx`/`QuestList.tsx`/`FamilyDashboard.tsx`の3箇所に`{ id: ID; nonce: number }`というインライン型が重複しており`userId`を持たなかったため、横画面4人パネルで兄が完了した無限クエストのクールダウンが妹・パパ・ママのパネルにも掛かっていた（サーバー側のクールダウンは(user, quest)単位）。
-* 根拠: [該当要素] (行番号: 103〜113 / 抜粋: "export interface CompletedSignal {\n    id: ID;\n    userId: string;\n    nonce: number;\n}")
+* 根拠: [該当要素] (行番号: 191〜195 / 抜粋: "export interface CompletedSignal {\n    id: ID;\n    userId: string;\n    nonce: number;\n}")
 
 
 * **引数/リクエスト**: 該当なし
@@ -166,7 +166,7 @@
 ### `QuestResult`
 
 * **役割**: APIレスポンス用のクエスト完了結果のデータ構造の定義。`earnedMedals`はクエスト完了時に獲得したメダル枚数を表す。**（Issue #238で追加）** `partnerUserId`/`partnerLeveledUp`/`partnerNewLevel`/`partnerEarnedMedals`は、兄妹連携クエストのカスケード承認時のみ相方（自分でタップしなかった方の子ども）の情報が入るオプショナルフィールドで、連携クエストでない場合は`undefined`のまま。
-* 根拠: [該当要素] (行番号: 106〜120 / 抜粋: "export interface QuestResult {")、パートナーフィールド追加 (行番号: 114〜119 / 抜粋: "// 兄妹連携クエストのカスケード承認時のみ、相方(自分でタップしなかった方の\n    // 子ども)のレベルアップ/メダル獲得情報が入る。連携クエストでない場合は無し。")
+* 根拠: [該当要素] (行番号: 198 / 抜粋: "export interface QuestResult {")、パートナーフィールド追加 (行番号: 206〜207 / 抜粋: "// 兄妹連携クエストのカスケード承認時のみ、相方(自分でタップしなかった方の\n    // 子ども)のレベルアップ/メダル獲得情報が入る。連携クエストでない場合は無し。")
 
 
 * **引数/リクエスト**: 該当なし

@@ -163,7 +163,7 @@
 ### `ApprovalService._revert_and_delete_history`
 
 * **役割**: `quest_history`1行を取り消す。`approved`であれば付与済みの経験値・ゴールドをロールバックしてから削除する。`pending`/`rejected`は報酬がまだ付与されていないため、残高には触れず単純に削除する。付与済みゴールドを既に消費している(現在の残高 < 付与額)場合は取り消し自体を拒否し、キャンセルが常に「付与の完全な巻き戻し」になることを保証する。いずれの経路でも、削除する行の内容を`_record_cancellation_audit`で`quest_cancellation_audit`へ写してから削除する（Issue #762）。
-* 根拠: [定義] (行番号: 293〜345 / 抜粋: "def _revert_and_delete_history(self, cur, hist, user) -> None:")
+* 根拠: [定義] (行番号: 293〜345 / 抜粋: "def _revert_and_delete_history(")
 * 根拠: `if hist['status'] != 'approved':\n            cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))\n            return` (行番号: 256〜258)
 * 根拠: `gold_earned = hist['gold_earned'] or 0\n        current_gold = user['gold'] or 0\n        if current_gold < gold_earned:\n            raise HTTPException(\n                status_code=400,\n                detail="獲得したゴールドを既に使用しているため、このクエストは取り消せません",\n            )` (行番号: 265〜271)
 * **引数/リクエスト**: `cur`, `hist`, `user`, `cancelled_by: Optional[str] = None`（省略時は`hist['user_id']`を取消要求者とみなす）, `cascaded: bool = False`

@@ -48,7 +48,7 @@
 
 
 * **戻り値/レスポンス**: JSX.Element (描画するためのReact要素)
-* 根拠: `return` (行番号: 13〜31 / 抜粋: "return ( <Modal isOpen={true}...")
+* 根拠: `return` (行番号: 16〜17 / 抜粋: "return (\n        <Modal")
 
 
 * **副作用**: なし

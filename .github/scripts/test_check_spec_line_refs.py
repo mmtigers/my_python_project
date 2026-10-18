@@ -966,3 +966,14 @@ def test_convert_shell_citation_to_symbol_reference(fake_repo):
     assert checker.convert_to_symbol_references([spec]) == (1, 0)
     assert "参照: check_mount" in spec.read_text(encoding="utf-8")
     assert checker.scan_symbol_references()[0] == []
+
+
+def test_excerpt_ends_before_bold_note(fake_repo):
+    """抜粋の `")` の直後に `**（Issue #NNN）**` の注記が続く場合も、そこで抜粋を閉じる。"""
+    _write_spec(
+        fake_repo,
+        '* 根拠: [戻り値] (行番号: 99 / 抜粋: "return \\"bye \\" + name")、**（Issue #1で変更）** 補足 (行番号: 9)\n',
+    )
+    findings, checked = checker.scan(fix=False)
+    assert checked == 1
+    assert len(findings) == 1 and findings[0].actual == 10

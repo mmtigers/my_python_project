@@ -28,13 +28,13 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `useMemo` | React Hook | `useQuestStatus` の算出結果をメモ化し、パフォーマンスを最適化するため。 | `import { useMemo } from 'react';` (行番号: 1 / 抜粋: "import { useMemo } from 'react';") |
-| `User`, `Quest`, `QuestHistory` | 型定義 | `UseQuestStatusProps` および `getQuestLockState` の引数・戻り値の型を定義するため。 | `import { User, Quest, QuestHistory } from '@/types';` (行番号: 2 / 抜粋: "import { User, Quest, QuestHistory } from '@/types';") |
+| `ID`, `User`, `Quest`, `QuestHistory` | 型定義 | `ID`は`getQuestProcessingKey`の引数型。`UseQuestStatusProps` および `getQuestLockState` の引数・戻り値の型を定義するため。 | `import { ID, User, Quest, QuestHistory } from '@/types';` (行番号: 2 / 抜粋: "import { ID, User, Quest, QuestHistory } from '@/types';") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `@/types` (外部モジュール) | `User`、`Quest`、`QuestHistory` の完全なスキーマ定義が本ファイル内に存在しないため、コード内でアクセスされているプロパティ（`quest_id`, `id`, `type`, `quest_type`, `status`, `pre_requisite_quest_id`, `_isInfinite` など）以外の全体像は判断不可。 | 根拠: [import文] (行番号: 2 / 抜粋: "import { User, Quest, QuestHistory } from '@/types';") |
+| `@/types` (外部モジュール) | `User`、`Quest`、`QuestHistory` の完全なスキーマ定義が本ファイル内に存在しないため、コード内でアクセスされているプロパティ（`quest_id`, `id`, `type`, `quest_type`, `status`, `pre_requisite_quest_id`, `_isInfinite` など）以外の全体像は判断不可。 | 根拠: [import文] (行番号: 2 / 抜粋: "import { ID, User, Quest, QuestHistory } from '@/types';") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -50,7 +50,7 @@
 ### `UseQuestStatusProps`
 
 * **役割**: `useQuestStatus` フックが受け取る引数の型定義。
-* 根拠: [インターフェース定義] (行番号: 4〜9 / 抜粋: "interface UseQuestStatusProps {")
+* 根拠: [インターフェース定義] (行番号: 11 / 抜粋: "interface UseQuestStatusProps {")
 
 
 
@@ -69,11 +69,11 @@
 
 
 * **引数/リクエスト**: `quest: Quest, currentUser: User, completedQuests: QuestHistory[], pendingQuests: QuestHistory[]`
-* 根拠: [引数定義] (行番号: 32〜36 / 抜粋: "quest: Quest, currentUser: User, completedQuests: QuestHistory[], pendingQuests: QuestHistory[]")
+* 根拠: [引数定義] (行番号: 39〜42 / 抜粋: "quest: Quest,\n    currentUser: User,\n    completedQuests: QuestHistory[],\n    pendingQuests: QuestHistory[]")
 
 
 * **戻り値/レスポンス**: `QuestLockState` オブジェクト（`isLocked`, `isDone`, `isPending`, `isInfinite`, `myCompletions`, `pendingEntry`, `completedEntry`）
-* 根拠: [return文] (行番号: 73〜82 / 抜粋: "return { isLocked, isDone, isPending, isInfinite, myCompletions, pendingEntry, completedEntry: myCompletions[myCompletions.length - 1], };")
+* 根拠: [return文] (行番号: 80〜88 / 抜粋: "return {\n        isLocked,\n        isDone,\n        isPending,\n        isInfinite,\n        myCompletions,\n        pendingEntry,\n        completedEntry: myCompletions[myCompletions.length - 1],\n    };")
 
 
 * **副作用**: なし（純粋関数）
@@ -81,7 +81,7 @@
 
 
 * **エラーハンドリング**: なし。前提クエストID(`pre_requisite_quest_id`)が未設定の場合は`isPreReqCleared`を`true`として扱うフォールバックのみ存在する。
-* 根拠: (行番号: 47〜51 / 抜粋: "const isPreReqCleared = !preReqId || completedQuests.some(cq =>")
+* 根拠: (行番号: 55 / 抜粋: "const isPreReqCleared = !preReqId || completedQuests.some(cq =>")
 
 
 
@@ -105,11 +105,11 @@
 
 
 * **引数/リクエスト**: `UseQuestStatusProps` (オブジェクト: `quest`, `currentUser`, `completedQuests`, `pendingQuests` を含む)
-* 根拠: `UseQuestStatusProps` (行番号: 4〜9 / 抜粋: "interface UseQuestStatusProps {")
+* 根拠: `UseQuestStatusProps` (行番号: 11 / 抜粋: "interface UseQuestStatusProps {")
 
 
 * **戻り値/レスポンス**: クエストステータスを含むオブジェクト (`isDone`, `isPending`, `isInfinite`, `isRandom`, `isTimeLimited`, `isLimited`, `isLocked`, `displayTitle`, `variant`)
-* 根拠: `return` (行番号: 110〜120 / 抜粋: "return { isDone, isPending, isInfinite, isRandom, isTimeLimited, isLimited, isLocked, displayTitle, variant };")
+* 根拠: `return` (行番号: 130〜140 / 抜粋: "return {\n            isDone,\n            isPending,\n            isInfinite,\n            isRandom,\n            isTimeLimited,\n            isLimited,\n            isLocked,\n            displayTitle,\n            variant\n        };")
 
 
 * **副作用**: なし（`useMemo`による算出結果のメモ化のみ）
@@ -196,8 +196,8 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `@/types` の定義ファイル | 本ファイルが参照する `quest_id` / `quest_type` / `_isInfinite` を含む `Quest` 型の正確なスキーマを把握するため（`id`/`type`はIssue #291で幽霊フィールドと判明し型定義から削除済み）。 | 根拠: (行番号: 37, 40 / 抜粋: "const qId = quest.quest_id;") |
-| 高 | `../components/QuestList.tsx` | `getQuestLockState`をソート比較関数から直接呼び出しており、`useQuestStatus`との呼び出し方の違いや、両者の間で判定結果に齟齬がないかを確認するため。 | 根拠: [共通化コメント] (行番号: 11〜13 / 抜粋: "// 以前は useQuestStatus (このファイル)・QuestList.tsx のソート比較関数・App.tsx の") |
-| 中 | `App.tsx` | コメントによれば、クリックハンドラでも同様のロック/完了/申請中判定ロジックが使われていた（または使われている）とされるため、現在の実装との整合性を確認するため。 | 根拠: [共通化コメント] (行番号: 12〜13 / 抜粋: "クリックハンドラの3箇所にほぼ同じロジックが重複して実装されていた。") |
+| 高 | `../components/QuestList.tsx` | `getQuestLockState`をソート比較関数から直接呼び出しており、`useQuestStatus`との呼び出し方の違いや、両者の間で判定結果に齟齬がないかを確認するため。 | 根拠: [共通化コメント] (行番号: 19 / 抜粋: "// 以前は useQuestStatus (このファイル)・QuestList.tsx のソート比較関数・App.tsx の") |
+| 中 | `App.tsx` | コメントによれば、クリックハンドラでも同様のロック/完了/申請中判定ロジックが使われていた（または使われている）とされるため、現在の実装との整合性を確認するため。 | 根拠: [共通化コメント] (行番号: 20 / 抜粋: "クリックハンドラの3箇所にほぼ同じロジックが重複して実装されていた。") |
 | 中 | 本Hook/関数を呼び出している親コンポーネントまたは状態管理ファイル | `completedQuests` に「今日」の承認済みデータのみが渡される前提となっているため、その絞り込みが正しく実行されているか確認する必要がある。 | 根拠: (行番号: 54 / 抜粋: "// completedQuests には「今日」の承認済みデータのみが入っている前提 (GameSystem仕様)") |
 
 ## 8. 保守上の注意点
@@ -205,7 +205,7 @@ graph TD
 * **型・APIレスポンスのフォールバックは解消済み（Issue #291）**: 以前は`quest.quest_id || quest.id`、および`quest.type === 'infinite' || quest.quest_type === 'infinite' || !!quest._isInfinite`といったフォールバック処理が存在したが、`quest.id`/`quest.type`はバックエンドAPIから一度も送られてこない幽霊フィールドであったと判明し、`Quest`型定義自体から削除された。現在は`qId = quest.quest_id`、`isInfinite = quest.quest_type === 'infinite' || !!quest._isInfinite`という単純な参照になっている。
 * 根拠: (行番号: 44, 47 / 抜粋: "const qId = quest.quest_id;", "const isInfinite = quest.quest_type === 'infinite' || !!quest._isInfinite;")
 * **qId算出順序の食い違いは解消済み（Issue #291）**: コメントによれば、共通化直後の3実装では`qId`の算出順序に食い違いがあった（`useQuestStatus`は`quest.quest_id || quest.id`、`QuestList.tsx`/`App.tsx`は`quest.id || quest.quest_id`）。`quest.id`自体が幽霊フィールドと判明したことで、この順序の食い違いという問題自体が意味を失い、全箇所が単に`quest.quest_id`のみを参照する形に統一されて解消した。
-* 根拠: [コメント] (行番号: 16〜19 / 抜粋: "// #291: 元の3実装には qId の算出順序に食い違いがあった")
+* 根拠: [コメント] (行番号: 23 / 抜粋: "// #291: 元の3実装には qId の算出順序に食い違いがあった")
 * **外部からの入力前提**: 前提クエストの判定ロジックは「`completedQuests` に『今日』の承認済みデータのみが入っている」というコメント上の仕様に強く依存している。呼び出し元で履歴データの絞り込み条件が変わると、意図せずロック状態が解除・維持されるバグに繋がる。
 * 根拠: [コメント] (行番号: 54 / 抜粋: "// completedQuests には「今日」の承認済みデータのみが入っている前提 (GameSystem仕様)")
 * `getQuestLockState`が共通化された結果、この関数のロジックを変更すると`useQuestStatus`を使う画面と`QuestList.tsx`のソート処理の両方に影響する。片方だけを見て変更すると、もう片方で意図しない挙動差が生まれる可能性がある。

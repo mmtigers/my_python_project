@@ -29,7 +29,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `React`, `useState`, `useRef`, `useCallback` | ライブラリ (`react`) | コンポーネント定義、状態管理、DOM/コールバック参照の保持 | 根拠: [`import React, { useState, useRef, useCallback } from 'react';`] (行番号: 1 / 抜粋: "import React, { useState, useRef, useCallback } from 'react';") |
+| `React`, `useState`, `useRef`, `useMemo` | ライブラリ (`react`) | コンポーネント定義、状態管理、DOM/コールバック参照の保持 | 根拠: [`import React, { useState, useRef, useMemo } from 'react';`] (行番号: 1 / 抜粋: "import React, { useState, useRef, useMemo } from 'react';") |
 | `HlsPlayer` | 内部コンポーネント (`../../../components/ui/HlsPlayer`) | 録画映像（HLSストリーム）の実際の再生を担当するコンポーネント | 根拠: [`import HlsPlayer from '../../../components/ui/HlsPlayer';`] (行番号: 2 / 抜粋: "import HlsPlayer from '../../../components/ui/HlsPlayer';") |
 | `CameraConfig` | 型定義 (`../types`) | カメラ設定情報（id, name, order, enabled）の型アノテーション | 根拠: [`import { CameraConfig } from '../types';`] (行番号: 3 / 抜粋: "import { CameraConfig } from '../types';") |
 | `apiClient` | 内部モジュール (`@/lib/apiClient`) | カメラごとの録画オフセット情報取得のためのHTTP通信 | 根拠: [`import { apiClient } from '@/lib/apiClient';`] (行番号: 4 / 抜粋: "import { apiClient } from '@/lib/apiClient';") |
@@ -40,7 +40,7 @@
 | --- | --- | --- |
 | `apiClient`の内部実装 | ベースURL、認証、共通エラー処理などの詳細仕様が本ファイルからは読み取れないため。 | 根拠: [`apiClient.get`] (行番号: 62 / 抜粋: "const data = await apiClient.get<{ offset_seconds: number }>(`/api/cameras/record/${camera.id}/${dateStr}/info`);") |
 | `/api/cameras/record/{id}/{date}/info` エンドポイント | 指定日のカメラ録画ファイルの開始オフセット秒（`offset_seconds`）を返す仕様の詳細（ファイル分割ルール等）が本ファイルからは不明なため。 | 根拠: [`offset_seconds`] (行番号: 48, 50 / 抜粋: "offsets[camera.id] = Math.max(0, totalSeconds - data.offset_seconds);") |
-| `HlsPlayer`の内部実装 | 本ファイルからは`streamUrl`, `autoPlay`, `muted`, `startPosition`, `onVideoRef`プロパティを渡して呼び出している箇所のみが確認でき、内部の再生・エラー処理仕様は別ファイルにあるため。 | 根拠: [`<HlsPlayer ... />`] (行番号: 123〜129 / 抜粋: "<HlsPlayer\n                                    streamUrl={`/api/cameras/record/${camera.id}/${playUrlSuffix}`}") |
+| `HlsPlayer`の内部実装 | 本ファイルからは`streamUrl`, `autoPlay`, `muted`, `startPosition`, `onVideoRef`プロパティを渡して呼び出している箇所のみが確認でき、内部の再生・エラー処理仕様は別ファイルにあるため。 | 根拠: [`<HlsPlayer ... />`] (行番号: 146〜147 / 抜粋: "<HlsPlayer\n                                    streamUrl={`/api/cameras/record/${camera.id}/${playUrlSuffix}`}") |
 | `/api/cameras/record/{id}/{date}/record_{date}.m3u8` エンドポイント | 録画再生用HLSマニフェストを返すバックエンドの実装が本ファイルには含まれないため。 | 根拠: [URL組み立て] (行番号: 59, 124 / 抜粋: "setPlayUrlSuffix(`${dateStr}/record_${dateStr}.m3u8`);") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -60,18 +60,18 @@
 * 根拠: [return文] (行番号: 70〜138 / 抜粋: "return (\n        <div className=\"w-full\">")
 
 
-* **副作用**: `handlePlay`実行時にカメラ台数分の`apiClient.get`呼び出し（逐次`for`ループ、`await`直列実行）を行う。`handleGlobalPlay`/`handleGlobalPause`/`handleGlobalRateChange`は`videoRefs.current`に保持された各`<video>`要素へ直接`play()`/`pause()`/`playbackRate`設定を行うDOM操作。
-* 根拠: [`for (const camera of cameras)`] (行番号: 46〜55 / 抜粋: "for (const camera of cameras) {")、[`handleGlobalPlay`等] (行番号: 62〜68 / 抜粋: "const handleGlobalPlay = () => Object.values(videoRefs.current).forEach(v => v?.play());")
+* **副作用**: `handlePlay`実行時にカメラ台数分の`apiClient.get`呼び出し（**Issue #392**: `Promise.all`による並列実行）を行う。`handleGlobalPlay`/`handleGlobalPause`/`handleGlobalRateChange`は`videoRefs.current`に保持された各`<video>`要素へ直接`play()`/`pause()`/`playbackRate`設定を行うDOM操作。
+* 根拠: [`Promise.all(cameras.map(...))`] (行番号: 60 / 抜粋: "const entries = await Promise.all(cameras.map(async (camera) => {")、[`handleGlobalPlay`等] (行番号: 80 / 抜粋: "const handleGlobalPlay = () => Object.values(videoRefs.current).forEach(v => v?.play());")
 
 
 * **エラーハンドリング**: `handlePlay`内で`targetDate`または`targetTime`が未入力の場合、`setValidationError("日付と時刻を指定してください")`でインラインエラーを表示し処理を中断する。カメラごとのオフセット取得（`apiClient.get`）が失敗した場合は`catch`ブロックで`console.error("Failed to fetch offset", err)`を出力し、当該カメラのオフセットを`totalSeconds`（時刻指定の総秒数そのもの）にフォールバックする。
-* 根拠: [必須入力チェック] (行番号: 33〜37 / 抜粋: "if (!targetDate || !targetTime) {")、[`catch`] (行番号: 51〜54 / 抜粋: "} catch (err) {\n                console.error(\"Failed to fetch offset\", err);\n                offsets[camera.id] = totalSeconds;\n            }")
+* 根拠: [必須入力チェック] (行番号: 44 / 抜粋: "if (!targetDate || !targetTime) {")、[`catch`] (行番号: 65〜67 / 抜粋: "} catch (err) {\n                    console.error(\"Failed to fetch offset\", err);\n                    return [camera.id, totalSeconds] as const;")
 
 
 ### `handlePlay` (RecordView内ローカル関数)
 
 * **役割**: 入力された日付・時刻をもとに、各カメラの録画オフセットをAPIから取得してシーク秒数を算出し、再生用のURLサフィックスとオフセット一覧をstateにセットする。**（Issue #392 / F-L4で修正）** 冒頭で`isPreparing`（準備中フラグ）による多重実行ガードを追加し、取得中は「再生開始」ボタンを「準備中...」表示＋`disabled`にする。カメラごとのオフセット取得は`for...of`内の逐次`await`から`Promise.all(cameras.map(...))`による並列取得に変更し、待機時間がカメラ台数に比例しないようにした（個々の失敗時に`totalSeconds`へフォールバックする挙動は維持）。
-* 根拠: [`handlePlay`] (行番号: 32〜67 / 抜粋: "const handlePlay = async () => {\n        if (isPreparing) return;")、[並列化] (行番号: 44〜58 / 抜粋: "const entries = await Promise.all(cameras.map(async (camera) => {")
+* 根拠: [`handlePlay`] (行番号: 32〜67 / 抜粋: "const handlePlay = async () => {\n        if (isPreparing) return;")、[並列化] (行番号: 60 / 抜粋: "const entries = await Promise.all(cameras.map(async (camera) => {")
 
 
 * **引数/リクエスト**: なし（クロージャ経由で`targetDate`, `targetTime`, `cameras`を参照）
@@ -87,29 +87,29 @@
 
 
 * **エラーハンドリング**: 未入力時は`setValidationError`でエラー表示し中断。個々のAPI呼び出し失敗時は`console.error`でログ出力し、当該カメラのオフセットを`totalSeconds`にフォールバックして処理を継続する（全体は中断しない）。
-* 根拠: [`catch (err)`] (行番号: 51〜54 / 抜粋: "} catch (err) {\n                console.error(\"Failed to fetch offset\", err);\n                offsets[camera.id] = totalSeconds;\n            }")
+* 根拠: [`catch (err)`] (行番号: 65〜67 / 抜粋: "} catch (err) {\n                    console.error(\"Failed to fetch offset\", err);\n                    return [camera.id, totalSeconds] as const;")
 
 
-### `getVideoRefSetter` (RecordView内ローカル関数)
+### `videoRefSetters` (RecordView内の`useMemo`。以前の`getVideoRefSetter`を置き換え)
 
-* **役割**: カメラIDごとに安定した（レンダー間で同一参照を保つ）`onVideoRef`コールバック関数を返す。`videoRefSetters.current`にキャッシュがあればそれを返し、なければ新規生成してキャッシュする。
-* 根拠: [`getVideoRefSetter`] (行番号: 23〜30 / 抜粋: "const getVideoRefSetter = useCallback((cameraId: string) => {")
-
-
-* **引数/リクエスト**: `cameraId: string`
-* 根拠: [引数定義] (行番号: 23 / 抜粋: "const getVideoRefSetter = useCallback((cameraId: string) => {")
+* **役割**: カメラIDごとに安定した（レンダー間で同一参照を保つ）`onVideoRef`コールバック関数の辞書を返す。**（変更）** 以前は`useCallback`の`getVideoRefSetter(cameraId)`が描画中に`ref`のキャッシュ(`videoRefSetters.current`)へ遅延生成して書き込んでいたが、`eslint-plugin-react-hooks` 7 の refs ルールが「描画中の ref への書き込み」を禁じるため、カメラIDの並び(`cameraIdsKey`)をキーに`useMemo`でまとめて生成する方式にした。`cameras`配列そのものを依存にしないのは、親の再描画で配列が作り直されるたびに関数が変わり、`HlsPlayer`側でHLS.jsのセットアップがやり直されるのを避けるため。
+* 根拠: [`videoRefSetters`] (行番号: 31〜39 / 抜粋: "const cameraIdsKey = cameras.map((camera) => camera.id).join('\\n');\n    const videoRefSetters = useMemo(() => {")、[コメント] (行番号: 26〜27 / 抜粋: "// 以前は ref のキャッシュ(videoRefSetters.current)に描画中に書き込んで遅延生成していたが、\n    // eslint-plugin-react-hooks 7 の refs ルールが「描画中の ref への書き込み」を禁じる。")
 
 
-* **戻り値/レスポンス**: `(el: HTMLVideoElement | null) => void` （`videoRefs.current[cameraId]`に要素を格納する関数）
-* 根拠: [return文] (行番号: 29 / 抜粋: "return videoRefSetters.current[cameraId];")
+* **引数/リクエスト**: なし（`cameraIdsKey`(カメラIDを改行で連結した文字列)を依存に再計算する）
+* 根拠: [依存配列] (行番号: 40 / 抜粋: "}, [cameraIdsKey]);")
 
 
-* **副作用**: 初回呼び出し時に`videoRefSetters.current[cameraId]`へ新規関数をセットする（キャッシュ生成）。返された関数自体が呼ばれると`videoRefs.current[cameraId]`へDOM要素を格納する副作用を持つ。
-* 根拠: [キャッシュ生成] (行番号: 24〜28 / 抜粋: "if (!videoRefSetters.current[cameraId]) {\n            videoRefSetters.current[cameraId] = (el: HTMLVideoElement | null) => {\n                videoRefs.current[cameraId] = el;\n            };\n        }")
+* **戻り値/レスポンス**: `{ [cameraId: string]: (el: HTMLVideoElement | null) => void }`（各関数は`videoRefs.current[cameraId]`に要素を格納する）。`HlsPlayer`へは`onVideoRef={videoRefSetters[camera.id]}`として渡す
+* 根拠: [setter の生成] (行番号: 34〜37 / 抜粋: "for (const cameraId of cameraIdsKey.split('\\n')) {\n            setters[cameraId] = (el: HTMLVideoElement | null) => {\n                videoRefs.current[cameraId] = el;\n            };")、[受け渡し] (行番号: 151 / 抜粋: "onVideoRef={videoRefSetters[camera.id]}")
+
+
+* **副作用**: 生成自体には副作用は無い。返された関数が呼ばれると`videoRefs.current[cameraId]`へDOM要素を格納する。
+* 根拠: (行番号: 36 / 抜粋: "videoRefs.current[cameraId] = el;")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当するtry-catchや条件分岐によるエラー処理が存在しない (行番号: 23〜30)
+* 根拠: 該当するtry-catchや条件分岐によるエラー処理が存在しない (行番号: 31〜39)
 
 
 ### `handleGlobalPlay` (RecordView内ローカル関数)
@@ -147,7 +147,7 @@
 ### `handleGlobalRateChange` (RecordView内ローカル関数)
 
 * **役割**: 引数で指定された再生速度（`rate`）を、`videoRefs.current`に保持されている全カメラの`<video>`要素の`playbackRate`へ一括設定する。
-* 根拠: [`handleGlobalRateChange`] (行番号: 64〜68 / 抜粋: "const handleGlobalRateChange = (rate: number) => {")
+* 根拠: [`handleGlobalRateChange`] (行番号: 82 / 抜粋: "const handleGlobalRateChange = (rate: number) => {")
 
 
 * **引数/リクエスト**: `rate: number`
@@ -156,7 +156,7 @@
 
 * **戻り値/レスポンス**: `void`
 * **副作用**: 各`<video>`要素の`playbackRate`プロパティへの代入（DOM操作）。
-* 根拠: [`v.playbackRate = rate`] (行番号: 65〜67 / 抜粋: "Object.values(videoRefs.current).forEach(v => {\n            if (v) v.playbackRate = rate;\n        });")
+* 根拠: [`v.playbackRate = rate`] (行番号: 83〜85 / 抜粋: "Object.values(videoRefs.current).forEach(v => {\n            if (v) v.playbackRate = rate;\n        });")
 
 
 * **エラーハンドリング**: なし
@@ -204,11 +204,11 @@ graph TD
         Refs["videoRefs / videoRefSetters / timeInputRef (useRef)"]
         HandlePlay["handlePlay"]
         GlobalHandlers["handleGlobalPlay / handleGlobalPause / handleGlobalRateChange"]
-        GetVideoRefSetter["getVideoRefSetter (useCallback)"]
+        GetVideoRefSetter["videoRefSetters (useMemo)"]
     end
 
     subgraph "外部ライブラリ"
-        React["react (useState/useRef/useCallback)"]
+        React["react (useState/useRef/useMemo)"]
     end
 
     subgraph "内部モジュール"
@@ -250,13 +250,13 @@ graph TD
 * **[修正済み] オフセット取得の並列化と多重実行ガード（Issue #392 / F-L4）**: 以前は`handlePlay`内のカメラごとのオフセット取得が`for...of`ループ内で`await`されており、カメラ台数分のAPIリクエストが逐次実行されるため、再生開始までの待機時間がカメラ数に比例して増大していた。また処理中の再クリックで同じ取得が並行して走りうる状態だった。修正後は`Promise.all`による並列取得に変更し、`isPreparing`フラグで多重実行を防いだうえ、ボタンを「準備中...」表示にして進行中であることを見せる。
 * 根拠: (行番号: 22〜24, 32〜67, 96〜103)
 * 個別カメラのオフセット取得に失敗した場合、そのカメラのみ`totalSeconds`（オフセット未考慮の総秒数）にフォールバックされるが、ユーザーへ「一部のカメラでオフセット取得に失敗した」旨の通知は行われない（`console.error`のみ）。
-* 根拠: [`catch (err)`] (行番号: 51〜54 / 抜粋: "} catch (err) {\n                console.error(\"Failed to fetch offset\", err);")
+* 根拠: [`catch (err)`] (行番号: 65〜66 / 抜粋: "} catch (err) {\n                console.error(\"Failed to fetch offset\", err);")
 * `handleGlobalPlay`は各`<video>`要素の`play()`のPromise reject（自動再生ポリシー等によるエラー）を捕捉していない。ブラウザ環境によっては未処理のPromise rejectionが発生し得る。
 * 根拠: [`v?.play()`] (行番号: 80 / 抜粋: "Object.values(videoRefs.current).forEach(v => v?.play());")
-* `getVideoRefSetter`によるコールバックキャッシュは`cameras`配列が変化（カメラの追加・削除）した場合も`videoRefSetters.current`および`videoRefs.current`から古いエントリが除去されない設計であり、コンポーネントのライフサイクル全体でメモリ上に残り続ける。
+* `videoRefSetters`は`cameraIdsKey`(カメラIDの並び)が変わるたびに作り直されるが、`videoRefs.current`からは古いカメラのエントリが除去されない設計であり、カメラの追加・削除があってもコンポーネントのライフサイクル全体でメモリ上に残り続ける。
 * 根拠: [`videoRefSetters.current[cameraId] = ...`] (行番号: 24〜28)
 * 時刻入力（`<input type="time">`）に値が入力されると`blur()`でフォーカスを強制的に外す実装になっており、キーボード操作でのシーケンシャルな入力（Tabキー移動等）のユーザビリティに影響する可能性がある。
-* 根拠: [`timeInputRef.current?.blur();`] (行番号: 88〜91 / 抜粋: "if (e.target.value) {\n                                timeInputRef.current?.blur();\n                            }")
+* 根拠: [`timeInputRef.current?.blur();`] (行番号: 107〜109 / 抜粋: "if (e.target.value) {\n                                timeInputRef.current?.blur();\n                            }")
 
 ## 9. 不明事項一覧
 
