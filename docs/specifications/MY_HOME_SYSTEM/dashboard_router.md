@@ -198,7 +198,7 @@
 
 
 * **引数/リクエスト**: **(新機能)** クエリ`device`(`device_id`、任意)で高砂・伊丹のセンサーログをその機器だけに絞る(`render_watch_page(selected_device=...)`に渡す。一覧に無い値は無視される。防犯ログは対象外)。クエリ`date`(`YYYY-MM-DD`、任意)。**(新機能)** 指定があれば`dashboard_page_service.parse_log_date`で解釈し、その日のログだけを表示する。この場合は共通キャッシュ(直近`MOBILE_SENSOR_ROW_LIMIT`件)ではなく`home_status_service.get_sensor_data_for_day`でDBから指定日の全件を取る。形式が不正な値は無視して通常表示になる。
-* 根拠: [関数定義] (行番号: 190 / 抜粋: "def dashboard_watch(date: str | None = None, device: str | None = None) -> HTMLResponse:")、[日付の解釈] (行番号: 204 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
+* 根拠: [関数定義] (行番号: 190 / 抜粋: "def dashboard_watch(")、[日付の解釈] (行番号: 204 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(見守りページ全体のHTML)

@@ -227,10 +227,10 @@ def _source_index(suffixes: Tuple[str, ...] = (".py",)) -> Dict[str, List[Path]]
 _SYMBOL_BLOCK_RE = re.compile(r"参照: ([A-Za-z_][\w.]*) / 抜粋: ")
 
 
-# 引用の閉じ括弧の直後に次の引用(`` `x` `` や `[種別]`)が続く箇所。`(行番号: 1 / 抜粋: "a"), `b` (行番号: 2)` の
+# 引用の閉じ括弧の直後に次の引用(`` `x` `` や `[種別]`、`**（Issue #NNN）**` の注記)が続く箇所。`(行番号: 1 / 抜粋: "a"), `b` (行番号: 2)` の
 # ように1行に引用が並ぶとき、手前の抜粋をここで閉じる(Issue #950: 閉じないと後ろの引用の文字まで抜粋に取り込み、
 # 「ソースに見つからない」扱いになっていた)。
-_CITATION_END_RE = re.compile(r'"\)(?=(?:、|, ?|，)\s*[`\[])')
+_CITATION_END_RE = re.compile(r'"\)(?=(?:、|, ?|，)\s*(?:[`\[]|\*\*))')
 
 
 def _block_stop(line: str, block, blocks, index: int) -> int:

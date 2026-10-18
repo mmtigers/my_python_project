@@ -674,7 +674,7 @@
 
 * **役割(UI改善)**: 以前の描画は「縦軸0-100%固定」「点を時刻でなく件数で等間隔」で、使用率が数%しか動かないNASでは水平線にしか見えなかった。現在は(1)縦軸を実測の最小〜最大に余白を足した範囲(最低`_NAS_CHART_MIN_SPAN`=4%幅。0%/100%に張り付くときは反対側へ広げる)にして%の軸ラベルを付け、(2)横軸を時刻で配置して始点・終点の日付を付け、(3)点数が`_NAS_CHART_MAX_POINTS`(150)を超えるときは期間を等間隔の時間枠に分け各枠の最後の1行だけ描く(`_downsample_by_time`)、(4)グラフの上に「空き容量・現在の使用率」と増加ペース・満杯までの目安(`compute_nas_forecast`/`_format_nas_forecast`)を文字で出し、(5)`days`/`sys_path`を渡すと表示期間(7/30/90日。`NAS_HISTORY_DAYS_CHOICES`、既定30)の切替リンク(`?nas_days=`。JS不要)を付ける。`compute_nas_forecast`は期間内の`used_gb`を時刻に対する最小二乗の直線で近似した傾きを増加ペース(GB/日)とし、増加中で空きがあるときだけ`空き ÷ ペース`を満杯までの日数とする(期間が2日未満・`used_gb`/`free_gb`列が無い・有効な点が2未満なら予測しない)。録画の自動削除で使用量が増減するため直線の目安であることを画面にも書く。`render_sys_page`には`nas_days`(既定30)を追加した。
 * **以下は旧仕様(新設時)の記述**: **（不具合修正で新設）** `analysis_service.load_nas_history`の`percent`列を、インラインSVGの折れ線グラフ(`.nas-chart`)で表示する。以前はNASカードをタップしても容量履歴を見る手段が無かった。使用率は0〜100%固定でスケールし(実測範囲での拡大縮小はしない)、0/50/100%の位置に補助線(`.nas-chart-grid`)を引く。グラフだけでは正確な値を読み取れないため、`<details>`で折りたたんだ詳細テーブル(直近10件、`_render_simple_table`を再利用)も併設する。データが無い、または2点未満の場合は「表示できるデータがありません」を返す(折れ線を引くには最低2点必要)。
-* 根拠: `_NAS_CHART_WIDTH = 300` (行番号: 737)、`_NAS_CHART_HEIGHT = 90` (行番号: 738)、`_NAS_CHART_PAD = 8` (行番号: 739)、`def _render_nas_history_chart(df: pd.DataFrame) -> str:` (行番号: 2043〜2122 / 抜粋: "def _render_nas_history_chart(df: pd.DataFrame) -> str:")
+* 根拠: `_NAS_CHART_WIDTH = 300` (行番号: 737)、`_NAS_CHART_HEIGHT = 90` (行番号: 738)、`_NAS_CHART_PAD = 8` (行番号: 739)、`def _render_nas_history_chart(df: pd.DataFrame) -> str:` (行番号: 2043〜2122 / 抜粋: "def _render_nas_history_chart(")
 
 
 * **引数/リクエスト**: `df: pd.DataFrame`(`timestamp`/`percent`/`free_gb`等の列を持つ、`load_nas_history`と同じ形)

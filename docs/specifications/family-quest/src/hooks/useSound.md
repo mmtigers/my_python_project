@@ -34,7 +34,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `Audio` (HTMLAudioElement) | ブラウザのWeb APIであり、ファイル内には実装がないため | 根拠: `new Audio(path)` (行番号: 27〜27 / 抜粋: "audioCache[key] = new Audio(pat") |
+| `Audio` (HTMLAudioElement) | ブラウザのWeb APIであり、ファイル内には実装がないため | 根拠: `new Audio(path)` (行番号: 31 / 抜粋: "audioCache[key] = new Audio(pat") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -48,7 +48,7 @@
 ### `audioCache`
 
 * **役割**: `SOUNDS` のキーごとに生成された `HTMLAudioElement` のインスタンスを保持し、再利用するためのキャッシュオブジェクト。
-* 根拠: `audioCache` (行番号: 18〜18 / 抜粋: "const audioCache: Partial<Recor")
+* 根拠: `audioCache` (行番号: 22 / 抜粋: "const audioCache: Partial<Recor")
 
 
 
@@ -59,25 +59,25 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `useSound = ()` (行番号: 20〜20 / 抜粋: "export const useSound = () => {")
+* 根拠: `useSound = ()` (行番号: 24 / 抜粋: "export const useSound = () => {")
 
 
 * **戻り値/レスポンス**: `{ play: (key: SoundKey) => void }` (音声を再生する関数を含むオブジェクト)
-* 根拠: `return { play }` (行番号: 48〜48 / 抜粋: "return { play };")
+* 根拠: `return { play }` (行番号: 52 / 抜粋: "return { play };")
 
 
 * **副作用**:
 * フックの外部で定義された変数 `audioCache` に対して、Audioインスタンスの追加・変更を行う。
-* 根拠: `audioCache[key] = new Audio(path)` (行番号: 27〜27 / 抜粋: "audioCache[key] = new Audio(pat")
+* 根拠: `audioCache[key] = new Audio(path)` (行番号: 31 / 抜粋: "audioCache[key] = new Audio(pat")
 * ブラウザのAudio APIによる音声再生（オーディオデバイスへの出力）を行う。
-* 根拠: `audio.play()` (行番号: 38〜38 / 抜粋: "audio.play().catch(e => {")
+* 根拠: `audio.play()` (行番号: 42 / 抜粋: "audio.play().catch(e => {")
 
 
 * **エラーハンドリング**:
 * `audio.play()` が返すPromiseのrejectionをキャッチし、`console.warn` で出力する。
-* 根拠: `catch(e => { console.warn... })` (行番号: 38〜41 / 抜粋: "console.warn('Sound play failed")
+* 根拠: `catch(e => { console.warn... })` (行番号: 44 / 抜粋: "console.warn('Sound play failed")
 * `play` 関数内の全体を `try...catch` で囲み、エラー発生時は `console.error` で出力する。
-* 根拠: `catch (error) { console.error... }` (行番号: 43〜45 / 抜粋: "console.error('Audio setup erro")
+* 根拠: `catch (error) { console.error... }` (行番号: 48 / 抜粋: "console.error('Audio setup erro")
 
 
 
@@ -142,21 +142,21 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `useSound` を利用しているUIコンポーネント（ファイル名不明） | このフックがどのタイミング（ボタンクリック、イベント発火など）で呼び出され、実際に音声ファイルが期待通りにロード・再生されているかを確認するため。 | 根拠: `export const useSound` (行番号: 20〜20 / 抜粋: "export const useSound = () => {") |
-| 中 | 静的ファイルディレクトリ（例: `public/quest/` など） | `SOUNDS` オブジェクトに定義されている `.mp3` ファイルが実際に正しいパスに配置されているかを検証するため。 | 根拠: `/quest/submit.mp3` などのパス指定 (行番号: 5〜12 / 抜粋: "submit: '/quest/submit.mp3',") |
+| 高 | `useSound` を利用しているUIコンポーネント（ファイル名不明） | このフックがどのタイミング（ボタンクリック、イベント発火など）で呼び出され、実際に音声ファイルが期待通りにロード・再生されているかを確認するため。 | 根拠: `export const useSound` (行番号: 24 / 抜粋: "export const useSound = () => {") |
+| 中 | 静的ファイルディレクトリ（例: `public/quest/` など） | `SOUNDS` オブジェクトに定義されている `.mp3` ファイルが実際に正しいパスに配置されているかを検証するため。 | 根拠: `soundUrl('submit.mp3')` などのパス指定(**#660**: 以前は`/quest/...`を直書きしていたが、`import.meta.env.BASE_URL`から組み立てるようにした) (行番号: 9 / 抜粋: "submit: soundUrl('submit.mp3'),       // 申請・決定音") |
 
 ## 8. 保守上の注意点
 
 * **グローバル変数の状態保持**: `audioCache` はモジュールスコープ（フックの外部）に定義されているため、アプリケーション全体で単一のキャッシュインスタンスを共有する。フックのアンマウント時にキャッシュが破棄されないため、メモリ上に Audio オブジェクトが残り続ける仕様となっている。
-* 根拠: `const audioCache` (行番号: 18〜18 / 抜粋: "const audioCache: Partial<Recor")
+* 根拠: `const audioCache` (行番号: 22 / 抜粋: "const audioCache: Partial<Recor")
 
 
 * **ハードコードされた音量**: `tap` 時の音量 `0.5` がコード内にハードコードされている。他の音量の調整が必要になった場合、ここを直接修正する必要がある。
-* 根拠: `if (key === 'tap') audio.volume = 0.5;` (行番号: 35〜35 / 抜粋: "if (key === 'tap') audio.volume")
+* 根拠: `if (key === 'tap') audio.volume = 0.5;` (行番号: 39 / 抜粋: "if (key === 'tap') audio.volume")
 
 
 * **自動再生ポリシーの考慮**: ブラウザの自動再生ポリシー（Autoplay Policy）により、ユーザーの操作（クリックやタップ）に直接紐付かない再生はブロックされる可能性があり、その場合は警告ログが出力されるのみで音は鳴らない。
-* 根拠: `audio.play().catch(...)` (行番号: 38〜41 / 抜粋: "audio.play().catch(e => {")
+* 根拠: `audio.play().catch(...)` (行番号: 42 / 抜粋: "audio.play().catch(e => {")
 
 
 

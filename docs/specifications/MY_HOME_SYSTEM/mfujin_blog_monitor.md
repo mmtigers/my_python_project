@@ -49,7 +49,7 @@
 ### `_get_existing_status`
 
 * **役割**: `mfujin_blog_notifications`テーブルから、指定した`article_url`の既存レコードの`status`を取得する。レコードが無ければ`None`を返す。
-* 根拠: [関数定義] (行番号: 31〜38 / 抜粋: "def _get_existing_status(article_url: str) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 31〜38 / 抜粋: "def _get_existing_status(article_url: str) -> str | None:")
 
 
 * **引数/リクエスト**: `article_url: str`

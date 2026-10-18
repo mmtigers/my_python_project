@@ -78,10 +78,10 @@
 * 根拠: `return ( <Modal...` (行番号: 84〜163 / 抜粋: "return (\n        <Modal isOpen={true} onClose={onClose} title=\"アバター変更\">")、条件分岐 (139〜159行目)
 
 * **副作用**: API経由での画像データの送信（`apiClient.postForm`）とユーザーレコードの更新（`apiClient.post`）。成功・失敗いずれもモーダル内のインラインUI（`errorMessage`/`uploadDone`）で通知する（ブラウザ標準の`alert`は使用しない）。
-* 根拠: (行番号: 65〜66, 87 / 抜粋: "const { url } = await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);\n            await apiClient.post('/api/quest/user/update', { user_id: user.user_id, avatar_url: url });", "setErrorMessage(error instanceof Error ? error.message : \"アップロードに失敗しました\");")
+* 根拠: (行番号: 77〜79, 87 / 抜粋: "const { url } = await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);\n            uploadedUrl = url;\n            await apiClient.post('/api/quest/user/update', { user_id: user.user_id, avatar_url: url });", "setErrorMessage(error instanceof Error ? error.message : \"アップロードに失敗しました\");")
 
 * **エラーハンドリング**: APIリクエスト時の例外をキャッチし、コンソールにエラーを出力し、`errorMessage`状態にセットしてインライン表示する。
-* 根拠: `catch (error) { ... }` (行番号: 72〜74 / 抜粋: "console.error('Upload failed:', error);\n            setErrorMessage(error instanceof Error ? error.message : \"アップロードに失敗しました\");")
+* 根拠: `catch (error) { ... }` (行番号: 86〜87 / 抜粋: "console.error('Upload failed:', error);\n            setErrorMessage(error instanceof Error ? error.message : \"アップロードに失敗しました\");")
 
 ### `handleFileChange` (内部関数)
 
@@ -120,7 +120,7 @@
 ### `triggerSelect` (内部関数)
 
 * **役割**: 非表示のファイル入力用 `input` 要素に対し、プログラムからクリックイベントを発火させる。
-* 根拠: `const triggerSelect = () =>` (行番号: 80〜82 / 抜粋: "const triggerSelect = () => {\n        fileInputRef.current?.click();\n    };")
+* 根拠: `const triggerSelect = () =>` (行番号: 106〜108 / 抜粋: "const triggerSelect = () => {\n        fileInputRef.current?.click();\n    };")
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: なし (void)

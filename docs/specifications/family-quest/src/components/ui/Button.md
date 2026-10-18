@@ -52,7 +52,7 @@ Framer Motionを利用したアニメーション付きのボタンコンポー�
 
 
 * **戻り値/レスポンス**: `React.ReactNode`（`motion.button` コンポーネント）
-* 根拠: `return ( <motion.button...` (行番号: 53〜68 / 抜粋: "return ( <motion.button")
+* 根拠: `return ( <motion.button...` (行番号: 53〜54 / 抜粋: "return (\n            <motion.button")
 
 
 * **副作用**: `useSound` の呼び出しによる初期化。

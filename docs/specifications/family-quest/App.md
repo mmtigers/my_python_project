@@ -60,7 +60,7 @@
 * 根拠: `useCurrentUser`のコメント (行番号: 155〜157 / 抜粋: "// #393: usersが実データに揃ったら保存済みuser_idを解決し、以後のcurrentUserIdxの\n  // 変化(ユーザー切替)を都度localStorageへ保存する(#552でuseCurrentUserへ抽出)。\n  useCurrentUser(users, currentUserIdx, setCurrentUserIdx);")
 * 根拠: `useConfirmDialog`の分割代入 (行番号: 54〜58 / 抜粋: "const {\n    confirmMode, confirmTarget, confirmUser, rejectReason, setRejectReason,\n    isConfirming, setIsConfirming, isConfirmingRef,\n    openConfirm, closeConfirm,\n  } = useConfirmDialog();")
 * **（すごろく機能で追加）** `currentUser`確定後、`useRoutineData(currentUser.user_id, onLevelUp, onError)`を呼び出す。第2引数の`onLevelUp`は`handleLevelUp({ user: currentUser.name, level: info.newLevel, job: currentUser.job_class || '無職' })`を呼ぶコールバックで、チェックポイント通過ボーナスでレベルアップした際にクエスト完了時と同じLEVEL UPトーストを出すために**（コードレビューで発覚した欠落を修正して追加）**された。**（さらに別のコードレビューで発覚した重複を追加修正）** 第3引数`onError`は完了報告失敗時に`showToast`＋`play('cancel')`でエラーを通知するコールバックで、以前は`completeRoutineStep`の戻り値(`{success, detail}`)を見て同じ処理をする`handleRoutineStepComplete`という関数を本ファイルが自前で定義していたが（`FamilyDashboard.tsx`にも一字一句同じ関数が重複していた）、`useRoutineData`自体の`onError`引数へロジックを集約し、本ファイルからは`handleRoutineStepComplete`自体が削除された。**（大人用フロー分離で追加）** 第4引数`onStepReward`は、大人用フロー(パパ・ママ用のすごろく)でデイリークエストから移設されたステップを完了した際の即時報酬を通知するコールバックで、`play('clear')`と「クリア！ / {gold} G と {exp} EXP を手に入れた！」のトーストを出す(コメントによれば「元のデイリークエストを完了したときと同じ手応えになるよう」の演出)。`flows`（`am`/`pm`2系統のフロー状態）は`lib/routineDataSchema`の`selectRoutineFlow`（**コードレビューで発覚した重複を解消するために導入**。以前は`isRoutineFlowBlocking`/`isRoutineFlowFreeTime`を使った同じ4分岐の三項演算子が本ファイルと`FamilyDashboard.tsx`に重複していた）に渡され、`activeRoutineKey`（誘導中のフローキー、`am`優先）と`freeTimeRoutineKey`（`activeRoutineKey`が無い場合のみ判定される自由時間中のフローキー）が算出される。縦画面の`quest`タブ描画（後述の「レンダリング分岐」参照）で、`QuestList`の代わりに`RoutineFlow`を表示するか、`QuestList`の上に`RoutineFreeTimeBanner`を重ねて表示するかの分岐に使われる。
-* 根拠: `useRoutineData`呼び出しと`selectRoutineFlow` (行番号: 118〜131 / 抜粋: "// 「きょうのすごろく」: 平日朝/夕方の生活導線UI。誘導中(自由時間・未開始・完了後\n  // 以外)はクエスト選択画面より優先して表示し、迷わず1本道で進めるようにする。\n  // #(コードレビューで発覚): 完了報告失敗時のエラートースト表示(旧handleRoutineStepComplete)\n  // がFamilyDashboard.tsx側と一字一句重複していたため、useRoutineData自体のonErrorへ集約した。\n  // runQuestActionInner(通常クエスト)と同様にエラーをトーストで示す。\n  const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(\n    currentUser.user_id,\n    (info) => handleLevelUp({ user: currentUser.name, level: info.newLevel, job: currentUser.job_class || '無職' }),\n    (detail) => {\n      showToast({ title: 'エラー', text: detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });\n      play('cancel');\n    },\n    // 大人用フローに寄せたステップ(ママの「夕食を作る」等)の即時報酬は、\n    // 元のデイリークエストを完了したときと同じ手応えになるよう演出する。\n    (reward) => {\n      play('clear');\n      showToast({ title: 'クリア！', text: `${reward.gold} G と ${reward.exp} EXP を手に入れた！`, icon: '💰' });\n    }\n  );\n  const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);")
+* 根拠: `useRoutineData`呼び出しと`selectRoutineFlow` (行番号: 134〜153 / 抜粋: "// 「きょうのすごろく」: 平日朝/夕方の生活導線UI。誘導中(自由時間・未開始・完了後\n  // 以外)はクエスト選択画面より優先して表示し、迷わず1本道で進めるようにする。\n  // #(コードレビューで発覚): 完了報告失敗時のエラートースト表示(旧handleRoutineStepComplete)\n  // がFamilyDashboard.tsx側と一字一句重複していたため、useRoutineData自体のonErrorへ集約した。\n  // runQuestActionInner(通常クエスト)と同様にエラーをトーストで示す。\n  const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(\n    currentUser.user_id,\n    (info) => handleLevelUp({ user: currentUser.name, level: info.newLevel, job: currentUser.job_class || '無職' }),\n    (detail) => {\n      showToast({ title: 'エラー', text: detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });\n      play('cancel');\n    },\n    // 大人用フローに寄せたステップ(ママの「夕食を作る」等)の即時報酬は、\n    // 元のデイリークエストを完了したときと同じ手応えになるよう演出する。\n    (reward) => {\n      play('clear');\n      showToast({ title: 'クリア！', text: `${reward.gold} G と ${reward.exp} EXP を手に入れた！`, icon: '💰' });\n    }\n  );\n  const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);")
 
 ## 3. 外部依存関係
 
@@ -144,8 +144,8 @@
 * 根拠: state/ref宣言全体 (行番号: 46〜48, 51〜55, 64〜70, 77〜79, 88, 91, 94〜95, 122〜125)
 * 根拠: `useConfirmDialog`分割代入 (行番号: 61〜66 / 抜粋: "// モーダル状態 (完了・購入・却下。取消は長押しでのみ発火するため確認を挟まない)\n  const {\n    confirmMode, confirmTarget, confirmUser, rejectReason, setRejectReason,\n    isConfirming, setIsConfirming, isConfirmingRef,\n    openConfirm, closeConfirm,\n  } = useConfirmDialog();")
 * 根拠: Issue #119連打ガードとその見た目ミラー (行番号: 60〜77 / 抜粋: "// #119: 承認待ちカードは「スワイプ承認」と「承認ボタン」が併存し、確認モーダルを\n  // 挟まず即座にAPIを叩くため、#101のisConfirmingRefと同じ連打対策が無かった。", "const {\n    ref: approvingHistoryIdsRef,\n    keys: approvingHistoryIds,\n    sync: syncApprovingHistoryIds,\n  } = useBusyKeys<ID>();")
-* 根拠: Issue #391の`processingQuestKeys` (行番号: 75〜82 / 抜粋: "// #391: クエスト完了/取消APIが送信中の (user_id, quest_id) の集合。以前は確認モーダルを\n  // 閉じてから await runQuestAction していたため、応答が返るまでカードは未完了のまま\n  // 再タップでき、2回目の確認モーダルが1回目の完了後も開いたまま残って「はい」を押すと\n  // 400「本日は完了済み」/429 のエラーモーダルになっていた。")
-* 根拠: `completedSignal`のコメント (行番号: 84〜91 / 抜粋: "// #102: クエスト完了の効果音・無限クエストの連打防止クールダウンは、以前は\n  // QuestList側でタップ即時(=確認モーダルを開く前)に発火していたため、確認モーダルで\n  // 「キャンセル」しても完了音が鳴り、無限クエストは60秒間タップ不能になっていた。\n  // 実際に完了APIが成功した時点でのみ発火させるため、対象クエストのidと発火のたびに\n  // 変わるnonceをApp側からQuestList/QuestItemへ通知する。\n  // #363: 横画面の4人パネルでは同じsignalが全員のQuestItemに届くため、「誰の完了か」\n  // (userId)も載せ、QuestItem側で自分のパネルの完了だけに反応させる。")
+* 根拠: Issue #391の`processingQuestKeys` (行番号: 85〜88 / 抜粋: "// #391: クエスト完了/取消APIが送信中の (user_id, quest_id) の集合。以前は確認モーダルを\n  // 閉じてから await runQuestAction していたため、応答が返るまでカードは未完了のまま\n  // 再タップでき、2回目の確認モーダルが1回目の完了後も開いたまま残って「はい」を押すと\n  // 400「本日は完了済み」/429 のエラーモーダルになっていた。")
+* 根拠: `completedSignal`のコメント (行番号: 96〜102 / 抜粋: "// #102: クエスト完了の効果音・無限クエストの連打防止クールダウンは、以前は\n  // QuestList側でタップ即時(=確認モーダルを開く前)に発火していたため、確認モーダルで\n  // 「キャンセル」しても完了音が鳴り、無限クエストは60秒間タップ不能になっていた。\n  // 実際に完了APIが成功した時点でのみ発火させるため、対象クエストのidと発火のたびに\n  // 変わるnonceをApp側からQuestList/QuestItemへ通知する。\n  // #363: 横画面の4人パネルでは同じsignalが全員のQuestItemに届くため、「誰の完了か」\n  // (userId)も載せ、QuestItem側で自分のパネルの完了だけに反応させる。")
 * 根拠: `pendingQuestsRef`同期 (行番号: 166〜172 / 抜粋: "// ★バグ修正(M-6-2): handleApproveAllのonRetryが承認失敗時点の古いpendingQuests\n  // クロージャを掴んだままになり、再試行すると既に承認済みの項目まで再承認しようとして\n  // 400エラーになり続けていた。refで常に最新のpendingQuestsを参照できるようにする。\n  const pendingQuestsRef = useRef(pendingQuests);\n  useEffect(() => {\n    pendingQuestsRef.current = pendingQuests;\n  }, [pendingQuests]);")
 
 * **エラーハンドリング**: `useGameData`から取得した各更新関数(`completeQuest`等)のレスポンスが`!res.success`の場合、`resolveErrorText`により`res.detail`または`res.reason`に対応するメッセージ（なければ既定文言）を`messageData`にセットし、`cancel`音を鳴らす。
@@ -154,7 +154,7 @@
 ### `handleLevelUp` (App内の関数)
 
 * **役割**: `useGameData`にコールバックとして渡され、レベルアップ発生時に`levelUp`効果音を再生し、トーストでレベルアップを通知する。以前はブロッキングモーダルで演出していたが、連続完了時のテンポを損なうためトースト表示に変更された（角度⑤）。
-* 根拠: (行番号: 100〜105 / 抜粋: "// 角度⑤: レベルアップ/メダル獲得などの「成功の演出」は、作業を止めるブロッキングモーダルから\n  // 自動で消えるトーストへ変更(連続してクエストを完了する際にテンポが悪かったため)。\n  const handleLevelUp = (info: LevelUpInfo) => {\n    play('levelUp');\n    showToast({ title: 'LEVEL UP!', text: `${info.user}は Lv.${info.level} になった！`, icon: '⚡' });\n  };")
+* 根拠: (行番号: 116〜121 / 抜粋: "// 角度⑤: レベルアップ/メダル獲得などの「成功の演出」は、作業を止めるブロッキングモーダルから\n  // 自動で消えるトーストへ変更(連続してクエストを完了する際にテンポが悪かったため)。\n  const handleLevelUp = (info: LevelUpInfo) => {\n    play('levelUp');\n    showToast({ title: 'LEVEL UP!', text: `${info.user}は Lv.${info.level} になった！`, icon: '⚡' });\n  };")
 
 * **引数/リクエスト**: `info: LevelUpInfo`
 * **戻り値/レスポンス**: なし (void)
@@ -164,7 +164,7 @@
 ### `handleUserChange` (App内の関数)
 
 * **役割**: 現在のユーザー(`currentUserIdx`)を切り替え、`viewMode`を`'main'`に戻し、タップ音を鳴らす。
-* 根拠: (行番号: 152〜157 / 抜粋: "const handleUserChange = (idx: number) => {\n    setCurrentUserIdx(idx);\n    // ★修正③: ユーザーアイコンを押したら必ずメイン画面(User View)に戻す\n    setViewMode('main');\n    play('tap');\n  };")
+* 根拠: (行番号: 175〜180 / 抜粋: "const handleUserChange = (idx: number) => {\n    setCurrentUserIdx(idx);\n    // ★修正③: ユーザーアイコンを押したら必ずメイン画面(User View)に戻す\n    setViewMode('main');\n    play('tap');\n  };")
 
 * **引数/リクエスト**: `idx: number`
 * **戻り値/レスポンス**: なし (void)
@@ -174,7 +174,7 @@
 ### `runQuestAction` (App内の関数)
 
 * **役割**: クエストの完了/取消を実際に実行する`runQuestActionInner`を、多重送信防止のガードで包む薄いラッパー。**（Issue #391）** `getQuestProcessingKey(user.user_id, target.quest_id)`で求めたキーが`processingQuestKeysRef.current`に既に含まれていれば即座に`return`し、同一ユーザー・同一クエストへの完了/取消の二重送信を防ぐ。ガードを通過すると当該キーを`processingQuestKeysRef.current`に追加し`syncProcessingQuestKeys()`でstateへ反映したうえで`runQuestActionInner`を`await`し、`finally`で必ずキーを取り除いて再度`syncProcessingQuestKeys()`する。
-* 根拠: (行番号: 161〜174 / 抜粋: "const runQuestAction = async (user: User, mode: 'complete' | 'cancel', target: Quest | QuestHistory) => {\n    // #391: 同一ユーザー・同一クエストの完了/取消が送信中なら二重送信しない\n    // (再試行(onRetry)から再入する場合は finally で解除済みなので通る)。\n    const processingKey = getQuestProcessingKey(user.user_id, target.quest_id);\n    if (processingQuestKeysRef.current.has(processingKey)) return;\n    processingQuestKeysRef.current.add(processingKey);\n    syncProcessingQuestKeys();\n    try {\n      await runQuestActionInner(user, mode, target);\n    } finally {\n      processingQuestKeysRef.current.delete(processingKey);\n      syncProcessingQuestKeys();\n    }\n  };")
+* 根拠: (行番号: 184〜197 / 抜粋: "const runQuestAction = async (user: User, mode: 'complete' | 'cancel', target: Quest | QuestHistory) => {\n    // #391: 同一ユーザー・同一クエストの完了/取消が送信中なら二重送信しない\n    // (再試行(onRetry)から再入する場合は finally で解除済みなので通る)。\n    const processingKey = getQuestProcessingKey(user.user_id, target.quest_id);\n    if (processingQuestKeysRef.current.has(processingKey)) return;\n    processingQuestKeysRef.current.add(processingKey);\n    syncProcessingQuestKeys();\n    try {\n      await runQuestActionInner(user, mode, target);\n    } finally {\n      processingQuestKeysRef.current.delete(processingKey);\n      syncProcessingQuestKeys();\n    }\n  };")
 
 * **引数/リクエスト**: `user: User`, `mode: 'complete' | 'cancel'`, `target: Quest | QuestHistory`
 * **戻り値/レスポンス**: `Promise<void>`
@@ -186,7 +186,7 @@
 * **役割**: クエストの完了/取消の実行本体。完了は`ConfirmModal`（`confirmMode === 'complete'`）での確認後に`executeConfirm`から、取消は`QuestList`側の長押し操作をきっかけに`handleQuestClick`からワンタップで呼び出される（いずれも`runQuestAction`経由）。`mode`に応じて`completeQuest`または`cancelQuest`を呼び出し、成功時かつ`mode === 'complete'`の場合、完了APIが実際に成功したこの時点で完了音を再生（`completedQuest.quest_type === 'daily'`または`completedQuest._isInfinite`なら`clear`、それ以外は`submit`）し、対象クエストの`quest_id`・完了した本人の`user.user_id`・発火のたびに変わる`nonce`(`Date.now()`)を`completedSignal`にセットする。子ども（`role_child`）の完了報告は親の承認待ち（`status: 'pending'`）になるのが常だが、それでも「提出」自体は完了しているため、鳴動・クールダウン対象から`pending`は除外しない。`res.status === 'pending'`なら申請完了トースト、`(res.earnedMedals ?? 0) > 0`ならメダル獲得演出（`medal`音＋トースト）を表示する。
 * 根拠: (行番号: 176〜215 / 抜粋: "const runQuestActionInner = async (user: User, mode: 'complete' | 'cancel', target: Quest | QuestHistory) => {")
 * 根拠: 完了音・`completedSignal`更新 (行番号: 182〜196 / 抜粋: "if (mode === 'complete') {\n        const completedQuest = target as Quest;\n        // #102: 完了音・無限クエストのクールダウンは、確認モーダルでの「はい」タップ\n        // 時点ではなく、実際に完了APIが成功したこの時点で発火させる(以前はQuestList側で\n        // タップ即時に鳴らしていたため、モーダルを「キャンセル」しても完了音が鳴り、\n        // 無限クエストはクールダウンに入ってしまっていた)。", "play(completedQuest.quest_type === 'daily' || completedQuest._isInfinite ? 'clear' : 'submit');\n        const idForSignal = completedQuest.quest_id;\n        if (idForSignal !== undefined) {\n          setCompletedSignal({ id: idForSignal, userId: user.user_id, nonce: Date.now() });\n        }")
-* 根拠: 申請完了/メダル演出 (行番号: 197〜204 / 抜粋: "if (res.status === 'pending') {\n          showToast({ title: \"申請完了\", text: res.message || \"親の承認待ちになりました\", icon: '📨' });\n        } else if ((res.earnedMedals ?? 0) > 0) {")
+* 根拠: 申請完了/メダル演出 (行番号: 220〜222 / 抜粋: "if (res.status === 'pending') {\n          showToast({ title: \"申請完了\", text: res.message || \"親の承認待ちになりました\", icon: '📨' });\n        } else if ((res.earnedMedals ?? 0) > 0) {")
 
 * **引数/リクエスト**: `user: User`, `mode: 'complete' | 'cancel'`, `target: Quest | QuestHistory`
 * 根拠: (行番号: 152)
@@ -198,7 +198,7 @@
 * 根拠: (行番号: 153〜190)
 
 * **エラーハンドリング**: `!res.success`の場合、`resolveErrorText(res, "失敗しました")`をエラーメッセージとして`messageData`にセットし（`onRetry`に同じ引数で`runQuestAction`を再実行するコールバックを含む）、`cancel`音を再生する。
-* 根拠: (行番号: 209〜214 / 抜粋: "setMessageData({\n      title: \"エラー\",\n      text: resolveErrorText(res, \"失敗しました\"),\n      onRetry: () => runQuestAction(user, mode, target),\n    });\n    play('cancel');")
+* 根拠: (行番号: 232〜237 / 抜粋: "setMessageData({\n      title: \"エラー\",\n      text: resolveErrorText(res, \"失敗しました\"),\n      onRetry: () => runQuestAction(user, mode, target),\n    });\n    play('cancel');")
 
 ### `handleQuestClick` (App内の関数)
 
@@ -216,7 +216,7 @@
 ### `handleBuyReward` (App内の関数)
 
 * **役割**: 報酬購入確認モーダルを開く。`useConfirmDialog`の`openConfirm('purchase', r, user)`を呼び出す。
-* 根拠: (行番号: 257〜260 / 抜粋: "const handleBuyReward = (user: User, r: Reward) => {\n    openConfirm('purchase', r, user);\n    play('select');\n  };")
+* 根拠: (行番号: 280〜283 / 抜粋: "const handleBuyReward = (user: User, r: Reward) => {\n    openConfirm('purchase', r, user);\n    play('select');\n  };")
 
 * **引数/リクエスト**: `user: User`, `r: Reward`
 * **戻り値/レスポンス**: なし (void)
@@ -227,10 +227,10 @@
 * **役割**: `confirmMode`（`'complete'`/`'purchase'`/`'reject'`）に応じた処理を実行する。先頭で`isConfirmingRef.current`（`useConfirmDialog`が保持するref）が`true`なら即座に`return`し、確認ボタンの連打による二重実行を防ぐ（Issue #101）。ガードを通過すると`isConfirmingRef.current`/`isConfirming`(state)の両方を`true`にし、`try`ブロックで本処理を行い、`finally`で必ず両方を`false`に戻す。`confirmMode === 'complete'`の場合は`closeConfirm()`で確認モーダルの状態を先にクリアしたうえで`runQuestAction(actingUser, 'complete', target)`に処理を委譲する。`'purchase'`の場合、`actingUser`（`confirmUser`。モーダルを開いた時点のスナップショットで、`useGameData`の背景ポーリングによるゴールド残高更新に追従しない）ではなく、`users`（最新の`gameData`由来の配列）から同一`user_id`の最新オブジェクトを`freshActingUser`として引き直し（Issue #245）、これを`buyReward`へ渡す。`'reject'`の場合は`getRepresentativeParent(users)`を記録名義として`rejectQuest`を実行する。成功時、購入は`showToast`＋`clear`音、却下は`cancel`音を再生したうえで`closeConfirm()`を呼ぶ。
 * 根拠: (行番号: 263〜322 / 抜粋: "const executeConfirm = async () => {")
 * 根拠: 連打ガード (行番号: 287〜293 / 抜粋: "if (!confirmMode || !confirmTarget) return;\n    // #101: 「はい」の連打で、1回目のレスポンス前に2回目の実行が発火するのを防ぐ。\n    // (サーバー側にもスパムチェック/ロックを追加済みだが、フロント側でも連打そのものを\n    // 抑止し、連打の2回目がエラートーストになるのを防ぐ)\n    if (isConfirmingRef.current) return;\n    isConfirmingRef.current = true;\n    setIsConfirming(true);")
-* 根拠: `try`/`finally`によるガード解除 (行番号: 248, 294〜297 / 抜粋: "try {", "} finally {\n      isConfirmingRef.current = false;\n      setIsConfirming(false);\n    }")
-* 根拠: `complete`モードの委譲 (行番号: 275〜282 / 抜粋: "if (confirmMode === 'complete') {\n        // 完了処理そのもの(メダル演出・エラー表示含む)はrunQuestActionに委ねる。\n        // モーダルは先に閉じ、成功/失敗の通知はトースト/エラーモーダル側で行う。\n        const target = confirmTarget as Quest;\n        closeConfirm();\n        await runQuestAction(actingUser, 'complete', target);\n        return;\n      }")
+* 根拠: `try`/`finally`によるガード解除 (行番号: 248, 341〜344 / 抜粋: "try {", "} finally {\n      isConfirmingRef.current = false;\n      setIsConfirming(false);\n    }")
+* 根拠: `complete`モードの委譲 (行番号: 298〜305 / 抜粋: "if (confirmMode === 'complete') {\n        // 完了処理そのもの(メダル演出・エラー表示含む)はrunQuestActionに委ねる。\n        // モーダルは先に閉じ、成功/失敗の通知はトースト/エラーモーダル側で行う。\n        const target = confirmTarget as Quest;\n        closeConfirm();\n        await runQuestAction(actingUser, 'complete', target);\n        return;\n      }")
 * 根拠: `freshActingUser`の引き直し (行番号: 287〜294 / 抜粋: "// #245: actingUser(confirmUser)はモーダルを開いた時点のスナップショットであり、\n        // 背景ポーリング(useGameDataの10秒間隔)によるゴールド残高の更新に追従しない。", "const freshActingUser = users.find(u => u.user_id === actingUser.user_id) || actingUser;\n        res = await buyReward(freshActingUser, confirmTarget as Reward);")
-* 根拠: `reject`モード (行番号: 300〜306 / 抜粋: "} else if (confirmMode === 'reject') {\n        // 却下の記録名義は「親」で固定する(要件5)\n        res = await rejectQuest(getRepresentativeParent(users), confirmTarget as QuestHistory, rejectReason || undefined);")
+* 根拠: `reject`モード (行番号: 323〜325 / 抜粋: "} else if (confirmMode === 'reject') {\n        // 却下の記録名義は「親」で固定する(要件5)\n        res = await rejectQuest(getRepresentativeParent(users), confirmTarget as QuestHistory, rejectReason || undefined);")
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `Promise<void>`
@@ -238,15 +238,15 @@
 * 根拠: (行番号: 244〜246, 251〜258, 262〜282, 293, 294〜297)
 
 * **エラーハンドリング**: `'purchase'`/`'reject'`の場合、`!res.success`のとき`confirmMode === 'reject'`かどうかでフォールバック文言（「却下に失敗しました」/「失敗しました」）を切り替えつつ`resolveErrorText(res, fallback)`を`messageData`にセットし`cancel`音を再生して`return`する（確認モーダルの状態はクリアされず開いたまま残る。角度⑨: エラーを閉じたあと状態を失わずに「はい」で再試行できるようにするため）。`'complete'`のエラー処理は`runQuestActionInner`側に委譲される。いずれの分岐でも`finally`により連打ガードは必ず解除される。
-* 根拠: (行番号: 308〜315 / 抜粋: "if (!res.success) {\n        const fallback = confirmMode === 'reject' ? \"却下に失敗しました\" : \"失敗しました\";\n        setMessageData({ title: \"エラー\", text: resolveErrorText(res, fallback) });\n        play('cancel');\n        // ★角度⑨: 確認モーダルは閉じずに残し、エラーを閉じたあとにもう一度「はい」で\n        // 再試行できるようにする(状態[購入対象/却下理由]を失わないため)\n        return;\n      }")
+* 根拠: (行番号: 331〜338 / 抜粋: "if (!res.success) {\n        const fallback = confirmMode === 'reject' ? \"却下に失敗しました\" : \"失敗しました\";\n        setMessageData({ title: \"エラー\", text: resolveErrorText(res, fallback) });\n        play('cancel');\n        // ★角度⑨: 確認モーダルは閉じずに残し、エラーを閉じたあとにもう一度「はい」で\n        // 再試行できるようにする(状態[購入対象/却下理由]を失わないため)\n        return;\n      }")
 
 ### `handleApprove` (App内の関数)
 
 * **役割**: クエスト承認処理を実行する。記録名義は`getRepresentativeParent(users)`で「親」に固定する（要件5）。先頭で`history.id`が`approvingHistoryIdsRef.current`（`Set<ID>`）に既に含まれていれば即座に`return`し、同一履歴への多重送信（連打・スワイプ承認とボタン承認のほぼ同時操作。**（Issue #391/F-L8）** 一括承認中に対象idが先に集合へ入っている場合の個別タップも同様にここで無視される）を静かに無視する（エラー表示は出さない、Issue #119）。ガードを通過すると`history.id`を`approvingHistoryIdsRef.current`に追加し`syncApprovingHistoryIds()`でstateへ反映、`try`ブロックで`approveQuest`を呼び出し、`finally`で必ず`approvingHistoryIdsRef.current`から取り除き再度`syncApprovingHistoryIds()`する。成功時、`res.earnedMedals`と`res.partnerEarnedMedals`（兄妹連携クエストのカスケード承認時のみ相方分が入る、Issue #238）を合算した数が1以上であれば`medal`音とメダル獲得トーストを表示する。失敗時はエラーメッセージ（`onRetry`で同じ引数で自身を再実行するコールバック付き）を表示する。
 * 根拠: (行番号: 324〜363 / 抜粋: "// 承認ハンドラ: 記録名義は「親」で固定する(要件5)\n  const handleApprove = async (history: QuestHistory) => {")
-* 根拠: Issue #119/#391の多重送信ガード (行番号: 326〜334 / 抜粋: "// #119: 同一履歴への多重送信は静かに無視する(2回目のタップ・スワイプは\n    // 1回分として扱い、エラー表示を出さない)。\n    // #391(F-L8): 一括承認中は対象の全idが先に集合へ入るため、一括承認中の個別タップも\n    // ここで同様に無視される(以前は一括承認と競合して400のエラーモーダルになっていた)。\n    if (history.id != null) {\n      if (approvingHistoryIdsRef.current.has(history.id)) return;\n      approvingHistoryIdsRef.current.add(history.id);\n      syncApprovingHistoryIds();\n    }")
-* 根拠: `finally`によるガード解除 (行番号: 357〜362 / 抜粋: "} finally {\n      if (history.id != null) {\n        approvingHistoryIdsRef.current.delete(history.id);\n        syncApprovingHistoryIds();\n      }\n    }")
-* 根拠: メダル獲得演出 (行番号: 344〜353 / 抜粋: "const totalEarnedMedals = (res.earnedMedals ?? 0) + (res.partnerEarnedMedals ?? 0);\n        if (totalEarnedMedals > 0) {\n          play('medal');\n          showToast({ title: \"ちいさなメダル獲得！\", text: `ちいさなメダルを ${totalEarnedMedals} 枚手に入れた！`, icon: \"🏅\" });\n        }")
+* 根拠: Issue #119/#391の多重送信ガード (行番号: 349〜357 / 抜粋: "// #119: 同一履歴への多重送信は静かに無視する(2回目のタップ・スワイプは\n    // 1回分として扱い、エラー表示を出さない)。\n    // #391(F-L8): 一括承認中は対象の全idが先に集合へ入るため、一括承認中の個別タップも\n    // ここで同様に無視される(以前は一括承認と競合して400のエラーモーダルになっていた)。\n    if (history.id != null) {\n      if (approvingHistoryIdsRef.current.has(history.id)) return;\n      approvingHistoryIdsRef.current.add(history.id);\n      syncApprovingHistoryIds();\n    }")
+* 根拠: `finally`によるガード解除 (行番号: 380〜385 / 抜粋: "} finally {\n      if (history.id != null) {\n        approvingHistoryIdsRef.current.delete(history.id);\n        syncApprovingHistoryIds();\n      }\n    }")
+* 根拠: メダル獲得演出 (行番号: 367〜371 / 抜粋: "const totalEarnedMedals = (res.earnedMedals ?? 0) + (res.partnerEarnedMedals ?? 0);\n        if (totalEarnedMedals > 0) {\n          play('medal');\n          showToast({ title: \"ちいさなメダル獲得！\", text: `ちいさなメダルを ${totalEarnedMedals} 枚手に入れた！`, icon: \"🏅\" });\n        }")
 
 * **引数/リクエスト**: `history: QuestHistory`
 * **戻り値/レスポンス**: `Promise<void>`
@@ -261,7 +261,7 @@
 * 根拠: Issue #119の連打ガード (行番号: 390〜394 / 抜粋: "// #119: 一括承認ボタンの連打で、1回目のループが終わる前に2回目が\n    // 同じ履歴を並行して承認しようとし400になるのを防ぐ。\n    if (isApprovingAllRef.current) return;\n    isApprovingAllRef.current = true;\n    setIsApprovingAll(true);")
 * 根拠: Issue #391/F-L8の対象絞り込みと事前クレーム (行番号: 372〜390 / 抜粋: "// #391(F-L8): 個別承認が送信中の履歴は一括の対象から外し(応答待ちの行を二重に\n    // 承認して400にしない)、残りの全idを先に approvingHistoryIdsRef へ入れて、\n    // 一括処理中の個別タップを handleApprove 側で無視させる。", "const targets = [...pendingQuestsRef.current].filter(h =>\n        h.id == null || !approvingHistoryIdsRef.current.has(h.id)\n      );\n      if (targets.length === 0) return;\n      for (const h of targets) {\n        if (h.id != null) {\n          approvingHistoryIdsRef.current.add(h.id);\n          claimedIds.push(h.id);\n        }\n      }\n      syncApprovingHistoryIds();")
 * 根拠: カスケード承認のスキップと合算 (行番号: 393〜408 / 抜粋: "// 兄妹連携クエストは片方を承認するとサーバー側で相方の行も自動承認される。\n      // 相方のidをここに記録し、後続ループで個別に承認APIを叩いて400にならないようにする。\n      const cascadedIds = new Set<ID>();\n      for (const history of targets) {\n        if (history.id != null && cascadedIds.has(history.id)) {\n          successCount++;\n          continue;\n        }", "totalEarnedMedals += (res.earnedMedals ?? 0) + (res.partnerEarnedMedals ?? 0);\n          if (history.linked_history_id != null) {\n            cascadedIds.add(history.linked_history_id);\n          }")
-* 根拠: `finally`によるガード解除 (行番号: 428〜433 / 抜粋: "} finally {\n      for (const id of claimedIds) approvingHistoryIdsRef.current.delete(id);\n      syncApprovingHistoryIds();\n      isApprovingAllRef.current = false;\n      setIsApprovingAll(false);\n    }")
+* 根拠: `finally`によるガード解除 (行番号: 451〜456 / 抜粋: "} finally {\n      for (const id of claimedIds) approvingHistoryIdsRef.current.delete(id);\n      syncApprovingHistoryIds();\n      isApprovingAllRef.current = false;\n      setIsApprovingAll(false);\n    }")
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `Promise<void>`
@@ -274,7 +274,7 @@
 ### `handleReject` (App内の関数)
 
 * **役割**: 却下確認モーダルを開くための状態設定。`useConfirmDialog`の`openConfirm('reject', history)`を呼ぶ（`confirmUser`は`getRepresentativeParent`で親を確定するため第3引数を省略する）。
-* 根拠: (行番号: 436〜440 / 抜粋: "const handleReject = (history: QuestHistory) => {\n    // reject は getRepresentativeParent で親を確定するため confirmUser は不要\n    openConfirm('reject', history);\n    play('select');\n  };")
+* 根拠: (行番号: 459〜463 / 抜粋: "const handleReject = (history: QuestHistory) => {\n    // reject は getRepresentativeParent で親を確定するため confirmUser は不要\n    openConfirm('reject', history);\n    play('select');\n  };")
 
 * **引数/リクエスト**: `history: QuestHistory`
 * **戻り値/レスポンス**: なし (void)
@@ -283,7 +283,7 @@
 ### `getHeaderViewMode` (App内の関数)
 
 * **役割**: `Header`コンポーネントに渡すためのビューモード文字列を判定する。`viewMode === 'familyLog'`なら`'familyLog'`、それ以外は`'user'`を返す。
-* 根拠: (行番号: 442〜445 / 抜粋: "const getHeaderViewMode = () => {\n    if (viewMode === 'familyLog') return 'familyLog';\n    return 'user';\n  };")
+* 根拠: (行番号: 465〜468 / 抜粋: "const getHeaderViewMode = () => {\n    if (viewMode === 'familyLog') return 'familyLog';\n    return 'user';\n  };")
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: 文字列 `'familyLog' | 'user'`
@@ -292,7 +292,7 @@
 ### `handleBottomNavChange` (App内の関数)
 
 * **役割**: 縦画面用フッターナビ`BottomNav`のタブ変更を受け取り、`tap`音を再生した上で、`'familyLog'`タブなら`viewMode`を`'familyLog'`に、それ以外なら`viewMode`を`'main'`に戻しつつ`activeTab`を更新する（角度⑦: 縦画面はフッターナビに一本化）。
-* 根拠: (行番号: 447〜456 / 抜粋: "// 角度⑦: 縦画面はフッターナビ(クエスト/ごほうび/記録)に一本化する\n  const handleBottomNavChange = (tab: BottomNavTab) => {\n    play('tap');\n    if (tab === 'familyLog') {\n      setViewMode('familyLog');\n    } else {\n      setViewMode('main');\n      setActiveTab(tab);\n    }\n  };")
+* 根拠: (行番号: 470〜479 / 抜粋: "// 角度⑦: 縦画面はフッターナビ(クエスト/ごほうび/記録)に一本化する\n  const handleBottomNavChange = (tab: BottomNavTab) => {\n    play('tap');\n    if (tab === 'familyLog') {\n      setViewMode('familyLog');\n    } else {\n      setViewMode('main');\n      setActiveTab(tab);\n    }\n  };")
 
 * **引数/リクエスト**: `tab: BottomNavTab`
 * **戻り値/レスポンス**: なし (void)
@@ -305,15 +305,15 @@
 * 根拠: `FamilyLog`への`initialUserId`の受け渡し (行番号: 668 / 抜粋: "<FamilyLog chronicle={chronicle} users={users} initialUserId={currentUser.user_id} />")
 * 根拠: データ取得失敗バナー (行番号: 508〜510 / 抜粋: "{gameDataError && (\n        <div\n          role=\"alert\"")
 * **（Issue #659）** 返り値全体が`QuestActivityProvider`で包まれており、`completedSignal`/`processingQuestKeys`/`busyHistoryIds={approvingHistoryIds}`はここで一度だけ渡される。コメントによれば、以前は`App → FamilyDashboard → FamilyPanel → QuestList`と素通しのpropsで運んでいたが「中継する2つは値を使わないので Context へ移した」。App直下で描画する`QuestList`/`ApprovalList`は1段なのでpropsのまま渡しており、その理由は「表示専用コンポーネントの単体テストを Provider 無しで書ける状態を保つため」と説明されている。
-* 根拠: `QuestActivityProvider`による包み込み (行番号: 476〜482, 726 / 抜粋: "    <QuestActivityProvider", "    </QuestActivityProvider>")
+* 根拠: `QuestActivityProvider`による包み込み (行番号: 492, 726 / 抜粋: "    <QuestActivityProvider", "    </QuestActivityProvider>")
 * 根拠: `FamilyDashboard`への受け渡し (行番号: 563 / 抜粋: "<FamilyDashboard")
-* 根拠: `ConfirmModal`への呼び出し (行番号: 638〜645 / 抜粋: "<ConfirmModal\n        mode={confirmMode}\n        target={confirmTarget}\n        rejectReason={rejectReason}\n        onSelectRejectReason={setRejectReason}\n        onConfirm={executeConfirm}\n        onCancel={() => { closeConfirm(); play('cancel'); }}\n        isConfirming={isConfirming}\n      />")
-* 根拠: スワイプ操作 (行番号: 567〜576 / 抜粋: "{/* 角度⑯: 左右スワイプでもクエスト/ごほうびタブを切り替えられるようにする */}\n            <motion.div\n              className=\"min-h-[300px] animate-fade-in\"\n              onPanEnd={(_e, info) => {\n                const order: Array<'quest' | 'shop' | 'inventory'> = ['quest', 'shop', 'inventory'];")
+* 根拠: `ConfirmModal`への呼び出し (行番号: 680〜688 / 抜粋: "<ConfirmModal\n        mode={confirmMode}\n        target={confirmTarget}\n        rejectReason={rejectReason}\n        onSelectRejectReason={setRejectReason}\n        onConfirm={executeConfirm}\n        onCancel={() => { closeConfirm(); play('cancel'); }}\n        isConfirming={isConfirming}\n      />")
+* 根拠: スワイプ操作 (行番号: 608〜612 / 抜粋: "{/* 角度⑯: 左右スワイプでもクエスト/ごほうびタブを切り替えられるようにする */}\n            <motion.div\n              className=\"min-h-[300px] animate-fade-in\"\n              onPanEnd={(_e, info) => {\n                const order: Array<'quest' | 'shop' | 'inventory'> = ['quest', 'shop', 'inventory'];")
 * **（すごろく機能で追加）** 根拠: `quest`タブの`RoutineFlow`/`RoutineFreeTimeBanner`分岐 (行番号: 577〜593 / 抜粋: "{activeTab === 'quest' && activeRoutineKey && routineFlows && (\n                <RoutineFlow\n                  flowKey={activeRoutineKey}\n                  flow={routineFlows[activeRoutineKey]}\n                  onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}\n                  isCompleting={isCompletingRoutine}\n                />\n              )}", "{activeTab === 'quest' && !activeRoutineKey && (\n                <>\n                  {freeTimeRoutineKey && routineFlows && (\n                    <div className=\"mb-3\">\n                      <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />\n                    </div>\n                  )}\n                  <QuestList")
 
 * **副作用**: `avatarUser`が設定されている場合、`Suspense`配下で遅延ロードされた`AvatarUploader`の`onUploadComplete`から`refreshData()`と`showToast`による成功通知が行われる。`settingsOpen`が真の場合、同じく`Suspense`配下で遅延ロードされた`SettingsModal`が表示される。`changelogOpen`が真の場合も同様に、`Suspense`配下で遅延ロードされた`ChangelogModal`が表示される（ヘッダー右上のボタン`onChangelogClick`で開き、`onClose`で閉じる）。この`Suspense`は`ChunkErrorBoundary`で包まれており（Issue #362）、SW更新後に旧チャンクが404になって`lazy()`がthrowしても、Appツリー全体がアンマウントされて白画面になることはなく、バウンダリが自動で再読み込みする。**（すごろく機能で追加）** `useRoutineData(currentUser.user_id, onLevelUp, onError)`によるポーリング通信（15秒間隔、詳細は`useRoutineData.md`参照）も本コンポーネントの副作用に加わる。完了報告の成否は`onError`（**追加修正**、`useRoutineData`側に集約。以前は本ファイル自前の`handleRoutineStepComplete`が`showToast`/`play('cancel')`で通知していた）が`showToast`/`play('cancel')`で通知し、チェックポイント通過ボーナスでのレベルアップは`onLevelUp`経由で既存の`handleLevelUp`(`play('levelUp')`＋LEVEL UPトースト)を呼ぶ。**（大人用フロー分離で追加）** 大人用フローのステップ個別報酬は`onStepReward`経由で`play('clear')`＋「クリア！」トーストを出す。
 * 根拠: `ChunkErrorBoundary`によるラップ (行番号: 702〜703 / 抜粋: "<ChunkErrorBoundary>\n      <Suspense fallback={null}>")
-* 根拠: (行番号: 661〜674 / 抜粋: "<Suspense fallback={null}>\n        {avatarUser && (\n          <AvatarUploader\n            user={avatarUser}\n            onClose={() => setAvatarUser(null)}\n            onUploadComplete={() => {\n              refreshData();\n              showToast({ title: \"変更完了\", text: \"アバターを変更しました！\", icon: '🖼️' });\n            }}\n          />\n        )}\n\n        {settingsOpen && (\n          <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} users={users} />\n        )}\n      </Suspense>")
+* 根拠: (行番号: 703〜713 / 抜粋: "<Suspense fallback={null}>\n        {avatarUser && (\n          <AvatarUploader\n            user={avatarUser}\n            onClose={() => setAvatarUser(null)}\n            onUploadComplete={() => {\n              refreshData();\n              showToast({ title: \"変更完了\", text: \"アバターを変更しました！\", icon: '🖼️' });\n            }}\n          />\n        )}")
 
 ### 追加・変更（2026-10-10: 記録への券使用表示・テレビおやすみ/アップデートの画面上部表示）
 

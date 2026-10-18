@@ -25,7 +25,7 @@
 `GameSystem.get_all_view_data`（`/api/quest/data`）のレスポンスに限り、`useGameData.ts`の取得境界でZodによるランタイム検証を行うためのスキーマ定義ファイル。バックエンド(MY_HOME_SYSTEM)のAPIレスポンス形状とフロントエンドの型定義(`src/types/index.ts`)が乖離していても、OpenAPI→TS生成パイプラインが存在しないためビルド時には検知できず、フィールド名二重化のような不整合の温床になっていたこと（Issue #291）を受けて追加された。バックエンドが実際に返しているフィールド名と型をここに明示し、ここに定義されていないフィールドをコンポーネント側で参照した場合、TypeScript上は型チェックを通過しても実行時には常に`undefined`になる「幽霊フィールド」であることが`.parse()`失敗によってすぐ分かるようにするのが目的。`users`/`quests`/`rewards`/`completedQuests`/`pendingQuests`の5つの配列フィールドからなる`gameDataResponseSchema`を提供する。**（#412 API契約で修正）** 以前は`logs`(`adventureLogSchema`)も検証対象に含めていたが、`gameData.logs`(`AdventureLog`型)はどのコンポーネントからも参照されておらず、`useGameData.ts`側の対応する型・フィールドごと削除されたため、本ファイルでも検証対象から外した。**（Issue #444で追加）** `gameDataResponseSchema`はもはや本ファイルの唯一のエクスポートではなく、`models/quest.py`の`PurchaseResponse`（`status`/`newGold`）に対応する`purchaseResponseSchema`も新たにエクスポートされている。`useGameData.ts`の`buyRewardMutation`がこれを使い、購入APIのレスポンスもランタイム検証するようになった（以前は`useGameData.ts`側で`as unknown as PurchaseResponse`と無検証キャストしていた）。
 * 根拠: ファイル冒頭コメント (行番号: 1〜14 / 抜粋: "// #291: バックエンド(MY_HOME_SYSTEM)のAPIレスポンス形状とフロントエンドの型定義\n// (src/types/index.ts)が乖離していても、OpenAPI→TS生成パイプラインが無いため\n// ビルド時には検知できなかった(フィールド名二重化のような不整合の温床になっていた)。\n// GameSystem.get_all_view_data (/api/quest/data) のレスポンスに限り、useGameData.ts\n// の取得境界でZodによるランタイム検証を行い、バックエンドが実際に返している\n// フィールド名と型をここに明示する。ここに無いフィールドをコンポーネント側で\n// 参照しても、たとえTypeScript上は通っても実行時には常にundefinedになる\n// (\"幽霊フィールド\")ことがすぐ分かるようにするのが目的。")
 * 根拠: `.strict()`を使わない方針のコメント (行番号: 12〜14 / 抜粋: "// 既知でないフィールドは(zodのデフォルト挙動により)無視して構わない。将来\n// バックエンドが新しいフィールドを追加した場合にparseが失敗しないよう、\n// 意図的に .strict() は使わない。")
-* 根拠: `export const gameDataResponseSchema` (行番号: 80〜90 / 抜粋: "// #412(API契約): logs(AdventureLog)はどのコンポーネントからも参照されておらず、\nexport const gameDataResponseSchema = z.object({\n    users: z.array(userSchema),\n    quests: z.array(questSchema),\n    rewards: z.array(rewardSchema),\n    completedQuests: z.array(questHistorySchema),\n    pendingQuests: z.array(questHistorySchema),\n});")
+* 根拠: `export const gameDataResponseSchema` (行番号: 100〜110 / 抜粋: "// #412(API契約): logs(AdventureLog)はどのコンポーネントからも参照されておらず、\n// useGameData.ts側のGameDataResponse/AdventureLog型も削除したため、ここでも\n// 検証対象から外す(冒頭のコメントの通り、未知のフィールドはstripされるだけで\n// parse自体は失敗しない)。\nexport const gameDataResponseSchema = z.object({\n    users: z.array(userSchema),\n    quests: z.array(questSchema),\n    rewards: z.array(rewardSchema),\n    completedQuests: z.array(questHistorySchema),\n    pendingQuests: z.array(questHistorySchema),\n});")
 
 ## 3. 外部依存関係
 
@@ -71,7 +71,7 @@
 ### `rewardSchema` (モジュールレベル定数、非export)
 
 * **役割**: `gameData.rewards`配列の1要素（`reward_master`テーブルの行）を検証するZodスキーマ。`reward_id`/`title`/`cost_gold`は必須、`description`/`category`/`icon_key`/`target`は`.nullable().optional()`。
-* 根拠: [定数定義] (行番号: 56〜64 / 抜粋: "const rewardSchema = z.object({\n    reward_id: z.number(),\n    title: z.string(),\n    description: z.string().nullable().optional(),\n    category: z.string().nullable().optional(),\n    cost_gold: z.number(),\n    icon_key: z.string().nullable().optional(),\n    target: z.string().nullable().optional(),\n});")
+* 根拠: [定数定義] (行番号: 76〜84 / 抜粋: "const rewardSchema = z.object({\n    reward_id: z.number(),\n    title: z.string(),\n    description: z.string().nullable().optional(),\n    category: z.string().nullable().optional(),\n    cost_gold: z.number(),\n    icon_key: z.string().nullable().optional(),\n    target: z.string().nullable().optional(),\n});")
 
 * **引数/リクエスト**: 該当なし
 * **戻り値/レスポンス**: 該当なし
@@ -91,7 +91,7 @@
 ### `gameDataResponseSchema` (export定数)
 
 * **役割**: 本ファイルの唯一のエクスポート。`/api/quest/data`（`GameSystem.get_all_view_data`）のレスポンス全体を検証するトップレベルのZodスキーマ。`users`/`quests`/`rewards`/`completedQuests`/`pendingQuests`の5配列フィールドをそれぞれ対応するサブスキーマの`z.array()`として持つ。オブジェクト全体・各サブスキーマともに`.strict()`は使われておらず、未知の追加フィールドはZodのデフォルト挙動により無視され、`.parse()`失敗の原因にはならない。**（#412 API契約で修正）** 以前は`logs: z.array(adventureLogSchema)`も含んでいたが、`adventureLogSchema`ごと削除された（`gameData.logs`はどのコンポーネントからも参照されていなかったため）。
-* 根拠: [定数定義] (行番号: 80〜90 / 抜粋: "export const gameDataResponseSchema = z.object({\n    users: z.array(userSchema),\n    quests: z.array(questSchema),\n    rewards: z.array(rewardSchema),\n    completedQuests: z.array(questHistorySchema),\n    pendingQuests: z.array(questHistorySchema),\n});")
+* 根拠: [定数定義] (行番号: 104〜110 / 抜粋: "export const gameDataResponseSchema = z.object({\n    users: z.array(userSchema),\n    quests: z.array(questSchema),\n    rewards: z.array(rewardSchema),\n    completedQuests: z.array(questHistorySchema),\n    pendingQuests: z.array(questHistorySchema),\n});")
 * 根拠: `.strict()`を使わない方針 (行番号: 12〜14 / 抜粋: "// 既知でないフィールドは(zodのデフォルト挙動により)無視して構わない。将来\n// バックエンドが新しいフィールドを追加した場合にparseが失敗しないよう、\n// 意図的に .strict() は使わない。")
 
 * **引数/リクエスト**: 該当なし（スキーマオブジェクト自体はデータを受け取らない。実際の検証は呼び出し元`useGameData.ts`が`gameDataResponseSchema.parse(raw)`として呼び出す）
@@ -102,7 +102,7 @@
 ### `purchaseResponseSchema` (export定数、Issue #444で追加)
 
 * **役割**: `MY_HOME_SYSTEM`の`models/quest.py`が定義する`PurchaseResponse`（`/api/quest/reward/purchase`のレスポンス）に対応するZodスキーマ。`status: z.string()`と`newGold: z.number()`の2フィールドをいずれも必須として持つ。`useGameData.ts`の`buyRewardMutation`が`apiClient.post`から返る生レスポンスをこのスキーマで`.parse()`し、検証済みの`PurchaseResponse`として返す。以前はこのレスポンスに対するランタイム検証層が存在せず、呼び出し側（`useGameData.ts`の`buyReward`ラッパー）が`mutateAsync`の戻り値を`as unknown as PurchaseResponse`と無検証にキャストしていたため、バックエンドのレスポンス形状が変わっても実行時まで気づけない盲点になっていた。
-* 根拠: [定数定義] (行番号: 96〜103 / 抜粋: "// #444: models/quest.py の PurchaseResponse に対応。以前はbuyRewardMutationの\n// 戻り値を `as unknown as PurchaseResponse` で無検証キャストしており、gameDataと\n// 異なりこの検証層を経由していなかった(バックエンドのレスポンス形状が変わっても\n// 実行時まで気づけない盲点)。\nexport const purchaseResponseSchema = z.object({\n    status: z.string(),\n    newGold: z.number(),\n});")
+* 根拠: [定数定義] (行番号: 112〜119 / 抜粋: "// #444: models/quest.py の PurchaseResponse に対応。以前はbuyRewardMutationの\n// 戻り値を `as unknown as PurchaseResponse` で無検証キャストしており、gameDataと\n// 異なりこの検証層を経由していなかった(バックエンドのレスポンス形状が変わっても\n// 実行時まで気づけない盲点)。\nexport const purchaseResponseSchema = z.object({\n    status: z.string(),\n    newGold: z.number(),\n});")
 
 * **引数/リクエスト**: 該当なし（スキーマオブジェクト自体はデータを受け取らない。実際の検証は呼び出し元`useGameData.ts`の`buyRewardMutation`の`mutationFn`が`purchaseResponseSchema.parse(raw)`として呼び出す）
 * **戻り値/レスポンス**: 該当なし
@@ -217,7 +217,7 @@ graph TD
 * 根拠: (行番号: 16〜28 / 抜粋: "// そのため、ここのスキーマにフィールドを足す/削る変更をしたときは、\n// バックエンドの同テストも合わせて更新すること(パーサは\n// `const xxxSchema = z.object({ ... })` のトップレベルのキー名だけを見る)。")
 * 根拠: (行番号: 12〜14 / 抜粋: "// 既知でないフィールドは(zodのデフォルト挙動により)無視して構わない。将来\n// バックエンドが新しいフィールドを追加した場合にparseが失敗しないよう、\n// 意図的に .strict() は使わない。")
 * **[修正済み] `userSchema`が`nextLevelExp`を検証対象に含んでいなかった問題（Issue #470）**: `MY_HOME_SYSTEM/services/quest_service.py`の`GameSystem.get_all_view_data`は、`users`の各要素に`u['nextLevelExp'] = game_logic.GameLogic.calculate_next_level_exp(u['level'])`という形で`nextLevelExp`フィールドを以前から常に付与していたが、`userSchema`にはこのフィールドの定義が無く、`.strict()`を使わない設計のため`.parse()`自体は成功しつつも、パース後のオブジェクトからはこのフィールドが無音でstripされていた（バックエンドが実際に返しているフィールドがランタイム検証をすり抜けて消費側に届かない、この設計の既知の穴の一例）。現在は`userSchema`に`nextLevelExp: z.number().optional()`が追加され、`.parse()`後もこのフィールドが保持されるようになった（`types/index.ts`の`User.nextLevelExp?: number`とも対になる変更）。
-* 根拠: (行番号: 17〜37 / 抜粋: "// #470: get_all_view_dataが実際に付与しているフィールドだが、.strict()を\n    // 使わないためこれまでスキーマに含まれておらず、parse後は無音で消えていた\n    // (バックエンドの新フィールド追加を検知できないこの設計の既知の穴の一例)。\n    nextLevelExp: z.number().optional(),")、`MY_HOME_SYSTEM/services/quest_service.py`側の`nextLevelExp`付与箇所（直接ソース確認、行番号は`quest_service.md`の相互参照情報を参照）
+* 根拠: (行番号: 48〜51 / 抜粋: "// #470: get_all_view_dataが実際に付与しているフィールドだが、.strict()を\n    // 使わないためこれまでスキーマに含まれておらず、parse後は無音で消えていた\n    // (バックエンドの新フィールド追加を検知できないこの設計の既知の穴の一例)。\n    nextLevelExp: z.number().optional(),")、`MY_HOME_SYSTEM/services/quest_service.py`側の`nextLevelExp`付与箇所（直接ソース確認、行番号は`quest_service.md`の相互参照情報を参照）
 * **`questSchema`の`bonus_gold`/`bonus_exp`は任意扱いだが実際は常に付与される**: `GameSystem.get_all_view_data`は`filtered_quests`の全要素に対し、`target_user`の値にかかわらず必ず`q['bonus_gold']`/`q['bonus_exp']`のいずれかの分岐で数値（`0`を含む）を設定しており、値が存在しないケースはない。`questSchema`側は`.optional()`としているため、`.parse()`自体はこの点で失敗することはないが、スキーマ上は「無くてもよい」フィールドとして緩く定義されている。
 * 根拠: (行番号: 60 / 抜粋: "bonus_gold: z.number().optional(),")、`quest_service.md`の`GameSystem.get_all_view_data`解析内容（`if q['target_user'] and q['target_user'] != 'all': ... else: q['bonus_gold'] = 0`等、いずれの分岐でも設定される）
 * **モジュールレベル定数はすべて非export**: `gameDataResponseSchema`以外の4つのサブスキーマ（`userSchema`/`questSchema`/`rewardSchema`/`questHistorySchema`）は`export`されておらず、本ファイル外から個別に参照することはできない。他のコンポーネントが「クエスト単体だけを検証したい」といった用途で再利用したい場合は、まずこれらを`export`する変更が必要になる。

@@ -118,8 +118,10 @@
 
 項が複数ある並列引用(`行番号: A, B / 抜粋: "a", "b"`)のうち引用位置に抜粋が無かったもの(Python・シェルで約60件)も、
 抜粋の実際の位置へ直しました(同じ関数の中で一般的な文が何度も出てくるもの(`return None` 等)はシンボル参照へ移した)。
-これで Python・シェルの仕様書では `--triage` の「ずれている」「ソースに見つからない」は0件です。残っているのは
-TypeScript 側(約260件)です。
+続いて TypeScript 側(約260件)も、抜粋の実際の位置へ直しました(抜粋が一意なものは行番号ゲートに入る形にし、ソースが
+変わっていたもの(`lib/errorDetail.ts`・`lib/questTargeting.ts` への集約、Zod による取得境界の検証(#659)、
+`getVideoRefSetter`→`videoRefSetters`、ポーリング間隔の15秒化(#660)、共有クエスト判定の削除(#530)など)は記述も
+現行のソースに合わせた)。2026-10-18 時点で、`--triage` の「ずれている」「ソースに見つからない」は全仕様書で0件です。
 
 `<親dir>_<stem>.md` の曖昧性解消規約(例: `views/dashboard/common.py` → `dashboard_common.md`)も
 解決します(Issue #655 以前は解決できず、`dashboard_common.md`・`quest_*.md` など10件が無言で

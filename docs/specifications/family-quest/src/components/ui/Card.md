@@ -59,7 +59,7 @@
 
 
 * **戻り値/レスポンス**: JSX.Element (`div`要素)。
-* 根拠: `return` (行番号: 45-49 / 抜粋: "return ( <div className...")
+* 根拠: `return` (行番号: 59〜60 / 抜粋: "return (\n        <div")
 
 
 * **副作用**: なし。
@@ -134,7 +134,7 @@ graph TD
 ## 8. 保守上の注意点
 
 * `onClick`プロパティの有無によって、UIのインタラクティブな見た目（`cursor-pointer`等）が自動的に切り替わる仕様となっている。
-* 根拠: `const interactiveStyle` (行番号: 43 / 抜粋: "props.onClick ? \"cursor-pointer active:scale-[0.98] select-none\" : \"\";")
+* 根拠: `const interactiveStyle` (行番号: 43 / 抜粋: "const interactiveStyle = onClick ? \"cursor-pointer active:scale-[0.98] select-none\" : \"\";")
 
 
 * 外部から渡される`className`は、内部で定義されたクラス群の末尾に結合されるため、スタイル（Tailwind CSSのクラス等）の競合や上書きが発生する可能性がある。

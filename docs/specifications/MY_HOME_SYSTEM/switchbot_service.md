@@ -149,7 +149,7 @@
 ### `get_tv_power_watts` / `turn_off_tv_gracefully`（テレビを先にリモコンで消してからプラグを切る機能で追加）
 
 * **役割**: `get_tv_power_watts`は`config.TV_PLUG_DEVICE_ID`のプラグ(Plug Mini)のステータスから現在の消費電力(W)を返す(`weight`・`power`・`watt`の順に探す。`monitors/switchbot_power_monitor.py`と同じ候補)。取得できなければ`None`。`turn_off_tv_gracefully`は、Nature Remoでテレビを操作できる設定(`nature_remo_service.is_tv_remote_configured`)があり消費電力が`TV_POWER_ON_THRESHOLD_WATTS`以上(=テレビがついている)のときだけ、5秒待って消費電力を取り直し(`_tv_still_on_after_recheck`。Nature Remoの電源信号はトグルなので、直前に手で消した・電力値が遅れていただけのテレビへ送るとつけてしまうため)、まだ閾値以上のときだけ`nature_remo_service.send_tv_power`でテレビの電源信号を送り、消費電力が下がるまで5秒おきに確認する(最大`TV_GRACEFUL_OFF_WAIT_SECONDS`秒)。そのうえで必ずプラグへ`turnOff`を送り、その結果を返す。リモコン未設定・消費電力が取得できない・再確認で下がっていた/取得できなかった・リモコンの送信失敗・待っても下がらない場合も、ロックが目的なのでプラグは切る(リモコン未設定時は消費電力の取得自体を行わない)。
-* 根拠: `get_tv_power_watts` (行番号: 131 / 抜粋: "def get_tv_power_watts() -> float | None:")、`turn_off_tv_gracefully` (行番号: 156 / 抜粋: "def turn_off_tv_gracefully(sleep=time.sleep) -> Optional[Dict[str, Any]]:")
+* 根拠: `get_tv_power_watts` (行番号: 131 / 抜粋: "def get_tv_power_watts() -> float | None:")、`turn_off_tv_gracefully` (行番号: 156 / 抜粋: "def turn_off_tv_gracefully(sleep=time.sleep) -> dict[str, Any] | None:")
 
 ### `get_tv_block_state`（2026-10-09 追加）
 
@@ -159,7 +159,7 @@
 ### `is_tv_blocked_now`（休日のテレビ時間帯で追加）
 
 * **役割**: 休日（土日・国民の祝日・家の休み）かつ`TV_OFFDAY_BLOCKED_HOURS`（12:00〜14:00、20:00以降）に当たるかを返す。平日は常にFalse。`trigger_tv_unlock`が冒頭でこれを見て、禁止時間帯なら何もせず（親への失敗通知も出さず）戻る。
-* 根拠: `is_tv_blocked_now` (行番号: 209 / 抜粋: "def is_tv_blocked_now(now: Optional[datetime.datetime] = None) -> bool:")
+* 根拠: `is_tv_blocked_now` (行番号: 209 / 抜粋: "def is_tv_blocked_now(now: datetime.datetime | None = None) -> bool:")
 
 ### `trigger_tv_unlock`（毎朝ミッション統合で追加）
 

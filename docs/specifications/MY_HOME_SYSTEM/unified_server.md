@@ -108,11 +108,11 @@
 
 
 * **引数/リクエスト**: `record: logging.LogRecord`
-* 根拠: `def filter(self, record: logging.LogRecord) -> bool:` (行番号: 44 / 抜粋: "def filter(self, record: logging.LogRecord) -> bool:")
+* 根拠: `def filter(self, record: logging.LogRecord) -> bool:` (行番号: 117 / 抜粋: "def filter(self, record: logging.LogRecord) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool` (True: ログ出力、False: ログ抑制)
-* 根拠: `-> bool:` (行番号: 44 / 抜粋: "def filter(self, record: logging.LogRecord) -> bool:")
+* 根拠: `-> bool:` (行番号: 117 / 抜粋: "def filter(self, record: logging.LogRecord) -> bool:")
 
 
 * **副作用**: なし

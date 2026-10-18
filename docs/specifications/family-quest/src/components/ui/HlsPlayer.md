@@ -29,13 +29,13 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `React`, `useEffect`, `useRef`, `useState` | ライブラリ (`react`) | コンポーネント定義、副作用処理、DOM参照、状態管理 | 根拠: [`import React, { useEffect, useRef, useState } from 'react';`] (行番号: 1 / 抜粋: "import React, { useEffect, useRef, useState } from 'react';") |
-| `Hls` | ライブラリ (`hls.js`) | HLSストリームのデコード・再生制御（MSEベース） | 根拠: [`import Hls from 'hls.js';`] (行番号: 2 / 抜粋: "import Hls from 'hls.js';") |
+| `Hls` | ライブラリ (`hls.js` の light ビルド `hls.js/light`。使う API はいずれも light ビルドに含まれる) | HLSストリームのデコード・再生制御（MSEベース） | 根拠: [`import Hls from 'hls.js/light';`] (行番号: 6 / 抜粋: "import Hls from 'hls.js/light';") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `hls.js` (`Hls`クラス) | 本ファイルからは`Hls.isSupported()`、`new Hls(config)`、`loadSource`、`attachMedia`、`on(Hls.Events.ERROR, ...)`、`on(Hls.Events.MANIFEST_PARSED, ...)`、`recoverMediaError`、`destroy`等のAPI呼び出しのみが確認でき、内部のセグメント取得・バッファリング・エラー分類などの実装詳細は読み取れない。`package.json`より バージョンは`^1.5.17`であることが確認できる。 | 根拠: [`Hls.isSupported()`] (行番号: 51 / 抜粋: "if (Hls.isSupported()) {") |
+| `hls.js` (`Hls`クラス) | 本ファイルからは`Hls.isSupported()`、`new Hls(config)`、`loadSource`、`attachMedia`、`on(Hls.Events.ERROR, ...)`、`on(Hls.Events.MANIFEST_PARSED, ...)`、`recoverMediaError`、`destroy`等のAPI呼び出しのみが確認でき、内部のセグメント取得・バッファリング・エラー分類などの実装詳細は読み取れない。`package.json`より バージョンは`^1.5.17`であることが確認できる。 | 根拠: [`Hls.isSupported()`] (行番号: 102 / 抜粋: "if (Hls.isSupported()) {") |
 | ブラウザのネイティブHLS再生機構（`video.canPlayType('application/vnd.apple.mpegurl')`） | Safari等が持つネイティブHLS再生の内部実装はブラウザ依存であり、本ファイルからは把握できない。 | 根拠: [`canPlayType`] (行番号: 144 / 抜粋: "} else if (video.canPlayType('application/vnd.apple.mpegurl')) {") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -53,11 +53,11 @@
   * `controls?: boolean` （デフォルト`false`）ブラウザ標準の再生コントロールバー表示可否
   * `startPosition?: number` 再生開始位置（秒）
   * `onVideoRef?: (element: HTMLVideoElement | null) => void` マウント時に`<video>`のDOM要素を呼び出し元へ渡すコールバック
-* 根拠: [`HlsPlayerProps`] (行番号: 4〜11 / 抜粋: "interface HlsPlayerProps {")、[デフォルト値] (行番号: 13〜20 / 抜粋: "streamUrl,\n    muted = true,\n    autoPlay = true,\n    controls = false,\n    startPosition,\n    onVideoRef")
+* 根拠: [`HlsPlayerProps`] (行番号: 4〜11 / 抜粋: "interface HlsPlayerProps {")、[デフォルト値] (行番号: 28〜33 / 抜粋: "streamUrl,\n    muted = true,\n    autoPlay = true,\n    controls = false,\n    startPosition,\n    onVideoRef")
 
 
 * **戻り値/レスポンス**: JSX要素。`<video>`要素と、`streamError`が`true`の場合に重ねて表示されるエラーオーバーレイ`<div>`を含む`<div>`。
-* 根拠: [return文] (行番号: 101〜115 / 抜粋: "return (\n        <div className=\"relative w-full h-full\">")
+* 根拠: [return文] (行番号: 176〜177 / 抜粋: "return (\n        <div className=\"relative w-full h-full\">")
 
 
 * **副作用**:
@@ -162,7 +162,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `family-quest/src/features/camera/components/LiveView.tsx`, `RecordView.tsx` | `HlsPlayer`の呼び出し元であり、`streamUrl`・`startPosition`・`onVideoRef`等がどう組み立てられ、実際のストリームURLとして渡されるかを確認する必要がある。 | 根拠: [`HlsPlayerProps`] (行番号: 4〜11 / 抜粋: "interface HlsPlayerProps {") |
-| 中 | `hls.js` ライブラリ本体（`node_modules/hls.js`） | `Hls`クラスの内部実装（エラー分類の詳細、`recoverMediaError`の具体的な回復挙動、`MANIFEST_PARSED`以外のイベント種別など）を確認するため。`package.json`記載のバージョンは`^1.5.17`。 | 根拠: [`Hls.isSupported()`] (行番号: 51 / 抜粋: "if (Hls.isSupported()) {") |
+| 中 | `hls.js` ライブラリ本体（`node_modules/hls.js`） | `Hls`クラスの内部実装（エラー分類の詳細、`recoverMediaError`の具体的な回復挙動、`MANIFEST_PARSED`以外のイベント種別など）を確認するため。`package.json`記載のバージョンは`^1.5.17`。 | 根拠: [`Hls.isSupported()`] (行番号: 102 / 抜粋: "if (Hls.isSupported()) {") |
 | 低 | バックエンドの`/api/cameras/live/{id}/stream.m3u8`・`/api/cameras/record/...`エンドポイント実装 | `streamUrl`として渡されるHLSマニフェストの生成方式（セグメント長、有効期限等）を確認するため。 | 根拠: [呼び出し元での`streamUrl`組み立て] 本ファイル単体では確認できない |
 
 ## 8. 保守上の注意点

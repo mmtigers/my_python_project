@@ -260,11 +260,11 @@
 ### `DiscordNotifier.send`
 
 * **役割**: Discord Webhook経由で通知メッセージを送信する静的メソッド。**（2026-09 チャンネル再設計で変更）** 以前はエラー通知フラグ`is_error`に応じて送信先チャンネル(`error`/`notify`)の2値だけを切り替えていたが、明示的な`channel`引数を新設した3値ルーティングになった: `channel`が渡されればそれを最優先し、省略時は`is_error`に応じて`'error'`(#alerts、重大障害)または`'ddd'`(#ddd_download、日常のダウンロード完了通知)を選ぶ。呼び出し元は「軽微なエラー」(権限/ディレクトリ/ディスクフル/NASマウント/連続失敗)を`channel="report"`(#operations、運用者向け)で明示し、ボット検知等の重大障害のみ従来通り`is_error=True`(#alerts)のままにしている。**（本PRで追加）** 送信前に`_discord_circuit_breaker`が開いていないか確認し、開いていれば送信自体を試みずスキップする。
-* 根拠: [DiscordNotifier.send] (行番号: 429〜452 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
+* 根拠: [DiscordNotifier.send] (行番号: 429〜452 / 抜粋: "def send(text: str, is_error: bool = False, channel: str | None = None) -> None:")
 
 
 * **引数/リクエスト**: `text: str` (通知内容), `is_error: bool = False` (エラー通知フラグ、`channel`省略時のみ使う), `channel: str | None = None` (**2026-09 チャンネル再設計で追加**。`"error"`/`"report"`/`"ddd"`を明示指定できる)
-* 根拠: [引数定義] (行番号: 429 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
+* 根拠: [引数定義] (行番号: 429 / 抜粋: "def send(text: str, is_error: bool = False, channel: str | None = None) -> None:")
 
 
 * **戻り値/レスポンス**: `None`

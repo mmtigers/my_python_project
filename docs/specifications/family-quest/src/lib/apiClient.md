@@ -30,7 +30,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `InventoryResponse` | 型(Type/Interface) | `fetchInventory`の戻り値の型指定として使用（**YouTubeごほうび券クールダウン機能で変更**: 以前は`InventoryItem`を直接importし戻り値も`Promise<InventoryItem[]>`だったが、`{items, youtube_cooldown_remaining_seconds}`を返す`InventoryResponse`に変更） | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryResponse } from \"../types\";") |
+| `InventoryResponse`, `TvBlockState` | 型(Type/Interface) | `fetchInventory`・`fetchTvBlock`の戻り値の型指定として使用（**#659**: 取得境界で`./gameDataSchema`の`inventoryResponseSchema`・`tvBlockStateSchema`により形状を検証してから返す。**YouTubeごほうび券クールダウン機能で変更**: 以前は`InventoryItem`を直接importし戻り値も`Promise<InventoryItem[]>`だったが、`{items, youtube_cooldown_remaining_seconds}`を返す`InventoryResponse`に変更） | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryResponse, TvBlockState } from \"../types\";") |
 
 ### ブラックボックスとなる外部要素
 
@@ -118,7 +118,7 @@
 ### `ApiClient.postForm`
 
 * **役割**: `multipart/form-data` 形式でのファイルアップロード等に使用するPOSTメソッド。`Content-Type` ヘッダを明示的に指定せず、ブラウザに `boundary` 付きヘッダーを自動生成させる（手動指定すると `boundary` が欠落しリクエストが壊れるため、とコメントで明記されている）。
-* 根拠: [`postForm`メソッド定義] (行番号: 53〜61 / 抜粋: "async postForm<T>(endpoint: string, formData: FormData): Promise<T> {")
+* 根拠: [`postForm`メソッド定義] (行番号: 83 / 抜粋: "async postForm<T>(endpoint: string, formData: FormData): Promise<T> {")
 
 
 * **引数/リクエスト**: `endpoint: string`, `formData: FormData`
@@ -130,11 +130,11 @@
 
 
 * **副作用**: `_request` 呼び出しによるAPI通信（`FormData`をそのままbodyに渡す）
-* 根拠: [`postForm`内部] (行番号: 57〜60 / 抜粋: "return this._request<T>(endpoint, {\n            method: 'POST',\n            body: formData,")
+* 根拠: [`postForm`内部] (行番号: 84〜86 / 抜粋: "return this._request<T>(endpoint, {\n            method: 'POST',\n            body: formData,")
 
 
 * **エラーハンドリング**: `_request` 内のエラーハンドリングに依存
-* 根拠: [`postForm`内部] (行番号: 57〜60 / 抜粋: "return this._request<T>(endpoint, {")
+* 根拠: [`postForm`内部] (行番号: 84 / 抜粋: "return this._request<T>(endpoint, {")
 
 
 
@@ -143,10 +143,10 @@
 * **役割**: 実際に `fetch` を使用してHTTPリクエストを行う共通処理。エンドポイントの先頭スラッシュを正規化してURLを構築し、通信成功時はJSONをパースして返す。失敗時はエラーレスポンスを解析し例外をスローする。**（Issue #412 F-L3で修正）** 3点を改善した。(1) HTTPエラー応答の `detail` が配列（FastAPIの422バリデーションエラー形式 `[{loc, msg, type}, ...]`）の場合、新設の `extractDetailMessage` が各要素の `msg` を抽出して結合するようになった（以前は文字列以外なら一律 `API Error: 422` になっていた）。(2) `response.status === 204`、または本文が空文字列の成功応答では `JSON.parse` を呼ばずに `undefined` を返すようになった（以前は `response.json()` が `"Unexpected end of JSON input"` を送出していた）。(3) `catch` 節で、`fetch` 自体の失敗（オフライン・DNS失敗・CORS等による `TypeError`）または不正なJSON応答（`SyntaxError`）は、生のブラウザ文言（`"Failed to fetch"` 等）ではなく「通信エラーが発生しました。ネットワーク接続をご確認のうえ、再度お試しください。」に変換して再スローする（自前で `throw new Error(errorMessage)` したHTTPエラーはこの変換の対象外で、そのまま透過する）。
 * 根拠: [_requestメソッド定義] (行番号: 96〜122 / 抜粋: "private async _request<T>(endpoint: string, options: RequestOptions): Promise<T> {")
 * 根拠: `extractDetailMessage`(422配列detailの結合) (行番号: 32〜46 / 抜粋: "function extractDetailMessage(detail: unknown): string | undefined {")
-* 根拠: 204/空ボディの回避 (行番号: 105〜111 / 抜粋: "if (response.status === 204) return undefined as T;
+* 根拠: 204/空ボディの回避 (行番号: 119 / 抜粋: "if (response.status === 204) return undefined as T;
             const text = await response.text();
             return (text ? JSON.parse(text) : undefined) as T;")
-* 根拠: TypeError/SyntaxErrorの文言変換 (行番号: 118〜120 / 抜粋: "if (error instanceof TypeError || error instanceof SyntaxError) {
+* 根拠: TypeError/SyntaxErrorの文言変換 (行番号: 128 / 抜粋: "if (error instanceof TypeError || error instanceof SyntaxError) {
                 throw new Error('通信エラーが発生しました。ネットワーク接続をご確認のうえ、再度お試しください。');")
 
 
@@ -155,7 +155,7 @@
 
 
 * **戻り値/レスポンス**: `Promise<T>` （204/空ボディの場合は `undefined`、それ以外はパースされたJSONレスポンス）
-* 根拠: [_requestメソッド定義] (行番号: 108〜111 / 抜粋: "if (response.status === 204) return undefined as T;
+* 根拠: [_requestメソッド定義] (行番号: 119 / 抜粋: "if (response.status === 204) return undefined as T;
             const text = await response.text();
             return (text ? JSON.parse(text) : undefined) as T;")
 
@@ -175,7 +175,7 @@
 ### インベントリ関連メソッド (`fetchInventory`, `useItem`)
 
 * **役割**: `ApiClient` クラスに組み込まれた、インベントリAPIの呼び出し専用メソッド群。`fetchInventory` は指定ユーザーの所持アイテム一覧とYouTubeごほうび券クールダウン残り秒数を取得し、`useItem` は指定アイテムの使用をバックエンドへ要求する。承認待ち状態を経由せず、呼び出し即座に使用リクエストを送信する。**（YouTubeごほうび券クールダウン機能で変更）** `fetchInventory`は以前`InventoryItem[]`を直接返す設計だったが、バックエンド(`GET /api/quest/inventory/{user_id}`)のレスポンス形状が`{items, youtube_cooldown_remaining_seconds}`という辞書に変更されたのに合わせ、`InventoryResponse`をそのまま返すよう変更された（配列を取り出す処理はこのメソッドでは行わず、呼び出し元の`InventoryList.tsx`が`data?.items`で取り出す）。
-* 根拠: [Inventory Methods セクション] (行番号: 125〜133 / 抜粋: "// --- Inventory Methods ---")
+* 根拠: [Inventory Methods セクション] (行番号: 136 / 抜粋: "// --- Inventory Methods ---")
 
 
 * **引数/リクエスト**: メソッドに応じたパラメータ (`fetchInventory`: `userId: string`。`useItem`: `userId: string`, `inventoryId: number`)
@@ -187,11 +187,11 @@
 
 
 * **副作用**: `get`/`post`（ひいては`_request`）を介したネットワーク通信。`fetchInventory`は`GET /api/quest/inventory/{userId}`、`useItem`は`POST /api/quest/inventory/use`を呼び出す。
-* 根拠: [各メソッドの実装] (行番号: 131〜132 / 抜粋: "return this.post<ApiResponse>('/api/quest/inventory/use', { user_id: userId, inventory_id: inventoryId });")
+* 根拠: [各メソッドの実装] (行番号: 150 / 抜粋: "return this.post<ApiResponse>('/api/quest/inventory/use', { user_id: userId, inventory_id: inventoryId });")
 
 
 * **エラーハンドリング**: `_request` の実装に依存
-* 根拠: [各メソッドの実装] (行番号: 127 / 抜粋: "return this.get<InventoryResponse>(`/api/quest/inventory/${userId}`);")
+* 根拠: [各メソッドの実装] (行番号: 139〜140 / 抜粋: "const raw = await this.get<unknown>(`/api/quest/inventory/${userId}`);\n        return inventoryResponseSchema.parse(raw) as InventoryResponse;")
 
 
 
@@ -293,7 +293,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `../types.ts` (または `../types/index.ts` 等) | `ApiResponse` 以外の戻り値型 (`InventoryResponse`とその`items: InventoryItem[]`) の正確な構造を把握し、API利用側で利用できるプロパティを確定するため。 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryResponse } from \"../types\";") |
+| 高 | `../types.ts` (または `../types/index.ts` 等) | `ApiResponse` 以外の戻り値型 (`InventoryResponse`とその`items: InventoryItem[]`) の正確な構造を把握し、API利用側で利用できるプロパティを確定するため。 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryResponse, TvBlockState } from \"../types\";") |
 | 中 | `.env` ファイル | `VITE_API_URL` に設定される具体的なバックエンドのホスト情報を特定し、ルーティング全容を把握するため。 | 根拠: [getBaseUrl関数] (行番号: 9 / 抜粋: "if (import.meta.env.VITE_API_URL) {") |
 | 中 | バックエンドルーティングファイル (例: FastAPIの `main.py` やルーター設定) | `/api/quest/inventory/*` などのエンドポイントが実際にどのようなビジネスロジックを実行しているか把握するため。 | 根拠: [各API呼び出し先エンドポイント] (行番号: 150 / 抜粋: "'/api/quest/inventory/use'") |
 
