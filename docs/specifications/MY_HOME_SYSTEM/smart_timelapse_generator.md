@@ -435,18 +435,30 @@
 * **役割**: 動画から指定したROI（関心領域）内の動きを検知し、モーション記録のリストを生成する。
 
 
-* 根拠: 背景差分と輪郭抽出処理 (行番号: 279 / 抜粋: "fgmask = self.fgbg.apply(roi_f...")
+* 根拠: 背景差分と輪郭抽出処理 (行番号: 367 / 抜粋: "fgmask = self.fgbg.apply(roi_frame)")
 
 * **（Issue #782 で追加）** `detect` が起動する `ffmpeg` に `-threads FFMPEG_THREADS`(既定2、`config.TIMELAPSE_FFMPEG_THREADS` で上書き可)を付けてデコードのスレッド数を制限する。`-vf fps=1` で解析するのは毎秒1フレームだが**入力は全フレームがデコードされる**ため負荷が高く、上限が無いと Pi 5 の4コアをほぼ使い切って(実測: 1プロセスで約245% CPU、load average 4.66)CPU温度がソフト温度上限(80°C)に達しスロットリングしていた。`nice -n 15` と `ionice` は既に付いているが、これらは優先度を下げるだけで他に走るものが無ければ全コアを使うため発熱は止まらない。日次のバッチで即時性の要求が無いため、実行時間が延びることを許容して上限を設けている。同じ上限は `Summarizer` の `libx264` 再エンコードにも適用する。
-* 根拠: [変数宣言] (行番号: 62 / 抜粋: "FFMPEG_THREADS = getattr(config, 'TIMELAPSE_FFMPEG_THREADS', 2)")、[解析コマンド] (行番号: 303 / 抜粋: "'-threads', str(FFMPEG_THREADS),")
+* 根拠: [変数宣言] (行番号: 62 / 抜粋: "FFMPEG_THREADS = getattr(config, 'TIMELAPSE_FFMPEG_THREADS', 2)")、[解析コマンド] (行番号: 291 / 抜粋: "'-threads', str(FFMPEG_THREADS),")
 
 
 
+
+**（Issue #954 で分割）** `detect` は120行あったため、挙動を変えずに次の5つへ切り出した。`detect` に残るのは「コマンド組み立て → `Popen` → stderr ドレイン開始 → フレーム読み取りループ → 終了コード確認」と、`except`/`finally` の骨組みだけである。分割前に、未カバーだった経路(動き記録と `motion.csv`、非ゼロ終了時の `CalledProcessError`、`Popen` 失敗の再送出、終了待ちタイムアウト時の `kill`)を `tests/test_smart_timelapse_generator.py` の `TestMotionDetectorDetectBehavior` で固定した。
+
+| 関数 | 役割 | 根拠 |
+| --- | --- | --- |
+| `_build_detect_cmd`(モジュール関数) | 解析用 ffmpeg コマンド(`nice`、`-threads`、`fps`/`scale`、グレースケール生フレームを stdout へ)。`ionice` があれば前に付ける | `def _build_detect_cmd(input_path: str) -> List[str]:` (行番号: 285) |
+| `_start_stderr_drain`(モジュール関数) | stderr を別スレッドで読み続けて `stderr_chunks` に溜める(パイプ満杯によるデッドロック防止)。close 後の読み取りエラーは無視する | `def _start_stderr_drain(stderr_pipe: Any, stderr_chunks: List[bytes]) -> threading.Thread:` (行番号: 302) |
+| `_close_ffmpeg_process`(モジュール関数) | `finally` の後始末。stdout を閉じ、終了を5秒待ち、終わらなければ `kill`、ドレインスレッドを待ってから stderr を閉じる(順序は分割前と同じ) | `def _close_ffmpeg_process(process: Any, stderr_thread: threading.Thread) -> None:` (行番号: 326) |
+| `_write_motion_csv`(モジュール関数) | 動き記録を `work_dir/motion.csv` に書き出す | `def _write_motion_csv(work_dir: str, records: List[MotionRecord]) -> None:` (行番号: 344) |
+| `MotionDetector._largest_motion` | 1フレームを背景差分・モルフォロジー処理にかけ、ROI 内の最大輪郭の面積が `MIN_AREA_THRESHOLD` を超えれば `(面積, 輪郭数)` を返す | `def _largest_motion(self, raw_frame: bytes) -> Optional[Tuple[float, int]]:` (行番号: 363) |
+
+* 根拠: `stderr_thread = _start_stderr_drain(process.stderr, stderr_chunks)` (行番号: 406)
 
 * **引数/リクエスト**: コンストラクタ引数なし。`detect`メソッド: `input_path` (str), `work_dir` (str), `duration_sec` (float)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 294 / 抜粋: "def detect(self, input_path: s...")
+* 根拠: メソッドシグネチャ (行番号: 379 / 抜粋: "def detect(self, input_path: s...")
 
 
 
@@ -454,7 +466,7 @@
 * **戻り値/レスポンス**: `List[MotionRecord]`。
 
 
-* 根拠: メソッドシグネチャ (行番号: 294 / 抜粋: "-> List[MotionRecord]:")
+* 根拠: メソッドシグネチャ (行番号: 379 / 抜粋: "-> List[MotionRecord]:")
 
 
 
@@ -462,17 +474,17 @@
 * **副作用**: `ffmpeg`プロセスを実行して標準出力を読み取り、作業ディレクトリに`motion.csv`ファイルを生成する。
 
 
-* 根拠: `subprocess.Popen`および`csv.writer` (行番号: 261, 319-324 / 抜粋: "with open(motion_csv, "w", new...")
+* 根拠: `subprocess.Popen`および`csv.writer` (行番号: 387, 347 / 抜粋: "with open(motion_csv, "w", newline="", encoding="utf-8") as f:")
 
 
 
 
 * **エラーハンドリング**: `ffmpeg`のプロセス起動失敗、読み取り時の例外、非ゼロ終了時のエラー出力をスローする。終了時はプロセスを安全にkillする。**（Issue #761 / AUDIT-032 で追加）** `Popen`の直後に`assert process.stdout is not None and process.stderr is not None`を置いている。`stdout=subprocess.PIPE` / `stderr=subprocess.PIPE`を指定しているため`None`にはならないが、以降の`process.stdout.read` / `process.stderr.read`（stderr は別スレッドの`_drain_stderr`でドレインする。読まないとパイプバッファ満杯で`ffmpeg`がブロックしデッドロックするため）の前提を実行可能な形で表明する。**（Issue #743 / AUDIT-014 で追加）** ただし、この `assert` による絞り込みは**ネストした関数 `_drain_stderr` の中までは伝播しない**（クロージャが捕捉するのは `process` 自体であり、呼び出されるまでに `process.stderr` が差し替わる可能性を型チェッカは排除できないため）。そのためドレイン用のパイプを `stderr_pipe = process.stderr` としてローカル変数へ束縛し直し、`_drain_stderr` はそちらを読む。これは `pyrightconfig.json` で `reportOptionalMemberAccess` を `error` にするための変更で、実行時の挙動は変わらない。
 
-* 根拠: `stderr_pipe = process.stderr` (行番号: 340 / 抜粋: "stderr_pipe = process.stderr"), `chunk = stderr_pipe.read(4096)` (行番号: 345 / 抜粋: "chunk = stderr_pipe.read(4096)")
+* 根拠: `def _start_stderr_drain(stderr_pipe: Any, stderr_chunks: List[bytes]) -> threading.Thread:` (行番号: 302), `chunk = stderr_pipe.read(4096)` (行番号: 313 / 抜粋: "chunk = stderr_pipe.read(4096)")（Issue #954 以降、stderr は `_start_stderr_drain` の引数として渡すため、以前の `stderr_pipe = process.stderr` によるローカル変数への束縛し直しは不要になった）
 
 
-* 根拠: `except Exception as e:` および `finally:` (行番号: 303-305, 306-317 / 抜粋: "raise subprocess.CalledProcess...")
+* 根拠: `except Exception as e:` および `finally:` (行番号: 428, 434 / 抜粋: "raise subprocess.CalledProcessError(process.returncode, cmd, stderr=err_msg)")
 
 
 
@@ -491,7 +503,7 @@
 * **引数/リクエスト**: `build`メソッド: `motion_records` (List[MotionRecord]), `work_dir` (str)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 419 / 抜粋: "def build(self, motion_records...")
+* 根拠: メソッドシグネチャ (行番号: 443 / 抜粋: "def build(self, motion_records...")
 
 
 
@@ -499,7 +511,7 @@
 * **戻り値/レスポンス**: `List[EventRecord]`。
 
 
-* 根拠: メソッドシグネチャ (行番号: 419 / 抜粋: "-> List[EventRecord]:")
+* 根拠: メソッドシグネチャ (行番号: 443 / 抜粋: "-> List[EventRecord]:")
 
 
 
@@ -534,7 +546,7 @@
 * **引数/リクエスト**: `build`メソッド: `input_path` (str), `events` (List[EventRecord]), `output_path` (str), `temp_dir` (str), `video_start_dt` (datetime.datetime)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 492 / 抜粋: "def build(self, input_path: st...")
+* 根拠: メソッドシグネチャ (行番号: 516 / 抜粋: "def build(self, input_path: st...")
 
 
 
@@ -578,7 +590,7 @@
 * **引数/リクエスト**: `split_and_send`メソッド: `summary` (SummaryInfo), `base_filename` (str)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 600 / 抜粋: "def split_and_send(self, summa...")
+* 根拠: メソッドシグネチャ (行番号: 624 / 抜粋: "def split_and_send(self, summa...")
 
 
 
@@ -606,7 +618,7 @@
 * **戻り値/レスポンス**: `None`
 * **副作用**: 添付付きのHTTP POST。`post_webhook`は429/5xxを限定回数リトライするため、レート制限時に同じ動画が再アップロードされうる(リトライ前のファイル位置の巻き戻しは`core.discord._rewind_files`が担う)。ここで独自のリトライを重ねてはならない。
 * **エラーハンドリング**: ファイルを開けない等、送信に入る前の失敗のみ`except Exception`で捕捉して`Discord送信中に例外発生`をERRORに残す(送信中の失敗は`post_webhook`がwarningにして`False`を返す)。
-* 根拠: `_send_to_discord` (行番号: 654 / 抜粋: "def _send_to_discord(self, webhook_url: str, message: str, file_path: str) -> None:")
+* 根拠: `_send_to_discord` (行番号: 678 / 抜粋: "def _send_to_discord(self, webhook_url: str, message: str, file_path: str) -> None:")
 
 #### `Uploader._send_completion_notice`
 
@@ -614,7 +626,7 @@
 * **引数/リクエスト**: `webhook_url` (str), `count` (int)
 * **戻り値/レスポンス**: `None`
 * **エラーハンドリング**: `post_webhook`は例外を送出せず`False`を返す契約なので、戻り値を見て`⚠️ 完了通知の送信に失敗しました(処理自体は成功しています)`をWARNINGに残す。Issue #661以前は`except Exception: pass`で完全に黙殺しており、完了通知が届かない原因が一切残らなかった。通知は本処理ではないため、失敗しても処理は続行する。
-* 根拠: `_send_completion_notice` (行番号: 684 / 抜粋: "def _send_completion_notice(self, webhook_url: str, count: int):")
+* 根拠: `_send_completion_notice` (行番号: 708 / 抜粋: "def _send_completion_notice(self, webhook_url: str, count: int):")
 
 * **エラーハンドリング**: 動画分割プロセスの失敗やWebhook送信時の例外をキャッチし、ログにエラーを出力する。分割ファイルの削除自体が失敗した場合(`OSError`)も個別に捕捉してログ出力するのみで処理を継続する。
 
@@ -638,7 +650,7 @@
 * **引数/リクエスト**: `input_video` (str)。
 
 
-* 根拠: 関数シグネチャ (行番号: 698 / 抜粋: "def run_smart_timelapse_job(in...")
+* 根拠: 関数シグネチャ (行番号: 722 / 抜粋: "def run_smart_timelapse_job(in...")
 
 
 

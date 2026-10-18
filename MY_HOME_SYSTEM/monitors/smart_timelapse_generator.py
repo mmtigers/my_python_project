@@ -282,6 +282,75 @@ def log_cpu_usage():
     if psutil is not None:
         logger.info(f"現在のCPU使用率: {psutil.cpu_percent()}%")
 
+def _build_detect_cmd(input_path: str) -> List[str]:
+    """動画を解析用の解像度・fpsのグレースケール生フレームとして stdout へ流す ffmpeg コマンド。"""
+    cmd = [
+        'nice', '-n', '15',
+        'ffmpeg', '-v', 'error', '-nostdin',
+        # Issue #782: デコードのスレッド数を絞って CPU の使い切りを防ぐ
+        '-threads', str(FFMPEG_THREADS),
+        '-i', input_path,
+        '-vf', f'fps={FPS_ANALYZE},scale={WIDTH}:{HEIGHT}',
+        '-f', 'image2pipe', '-pix_fmt', 'gray', '-vcodec', 'rawvideo', '-'
+    ]
+    if shutil.which('ionice'):
+        cmd = ['ionice', '-c', '2', '-n', '7'] + cmd
+    
+    return cmd
+
+
+def _start_stderr_drain(stderr_pipe: Any, stderr_chunks: List[bytes]) -> threading.Thread:
+    """ffmpeg の stderr を別スレッドで読み続け、stderr_chunks へ溜めるスレッドを開始して返す。
+
+    stdoutのフレーム読み取りループ中にstderrを読まないと、ffmpegがstderrへ
+    大量出力した際にパイプバッファ(通常64KB)が満杯になりffmpeg側がブロックし、
+    結果としてstdout側も進まなくなりデッドロックする。stderrは別スレッドで
+    並行してドレインしておく。
+    """
+    def _drain_stderr() -> None:
+        try:
+            while True:
+                chunk = stderr_pipe.read(4096)
+                if not chunk:
+                    break
+                stderr_chunks.append(chunk)
+        except (ValueError, OSError):
+            # 呼び出し元でstderrがcloseされた後の読み取りは無視する
+            pass
+
+    stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+    stderr_thread.start()
+    return stderr_thread
+
+
+def _close_ffmpeg_process(process: Any, stderr_thread: threading.Thread) -> None:
+    """stdout を閉じ、ffmpeg の終了を待ち(終わらなければ kill)、stderr のドレインを待ってから閉じる。"""
+    if process.stdout:
+        process.stdout.close()
+    try:
+        if process.poll() is None:
+            process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        logger.error("FFmpegプロセスの終了がタイムアウトしました。強制終了します。")
+        process.kill()
+        process.wait()
+    # プロセス終了後にstderrがEOFするのを待ってからcloseする
+    # (逆順にするとドレインスレッドがclosed fileを読んでクラッシュする)
+    stderr_thread.join(timeout=5)
+    if process.stderr:
+        process.stderr.close()
+
+
+def _write_motion_csv(work_dir: str, records: List[MotionRecord]) -> None:
+    """動き記録を work_dir/motion.csv に書き出す(後段の確認用)。"""
+    motion_csv = os.path.join(work_dir, "motion.csv")
+    with open(motion_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["time", "largest_area", "contour_count"])
+        for rec in records:
+            writer.writerow([sec_to_time(rec.time_sec), rec.largest_area, rec.contour_count])
+
+
 # ==========================================
 # モジュール 1: MotionDetector
 # ==========================================
@@ -291,23 +360,29 @@ class MotionDetector:
         self.fgbg = cv2.createBackgroundSubtractorMOG2(history=BG_HISTORY, varThreshold=BG_VAR_THRESH, detectShadows=False)
         self.kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (MORPH_KERNEL_SIZE, MORPH_KERNEL_SIZE))
 
+    def _largest_motion(self, raw_frame: bytes) -> Optional[Tuple[float, int]]:
+        """1フレームを背景差分にかけ、ROI 内の最大輪郭の面積が閾値を超えれば (面積, 輪郭数) を返す。"""
+        frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((HEIGHT, WIDTH))
+        roi_frame = frame[ROI_Y:ROI_Y+ROI_H, ROI_X:ROI_X+ROI_W]
+        fgmask = self.fgbg.apply(roi_frame)
+        fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_OPEN, self.kernel)
+        fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_CLOSE, self.kernel)
+
+        contours, _ = cv2.findContours(fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            largest_contour = max(contours, key=cv2.contourArea)
+            largest_area = cv2.contourArea(largest_contour)
+            if largest_area > MIN_AREA_THRESHOLD:
+                return largest_area, len(contours)
+        return None
+
     def detect(self, input_path: str, work_dir: str, duration_sec: float) -> List[MotionRecord]:
         logger.info(f"[1/4] 動き検知を開始します: {input_path}")
         os.makedirs(work_dir, exist_ok=True)
         log_cpu_usage()
-        
-        cmd = [
-            'nice', '-n', '15',
-            'ffmpeg', '-v', 'error', '-nostdin',
-            # Issue #782: デコードのスレッド数を絞って CPU の使い切りを防ぐ
-            '-threads', str(FFMPEG_THREADS),
-            '-i', input_path,
-            '-vf', f'fps={FPS_ANALYZE},scale={WIDTH}:{HEIGHT}',
-            '-f', 'image2pipe', '-pix_fmt', 'gray', '-vcodec', 'rawvideo', '-'
-        ]
-        if shutil.which('ionice'):
-            cmd = ['ionice', '-c', '2', '-n', '7'] + cmd
-        
+
+        cmd = _build_detect_cmd(input_path)
+
         try:
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except Exception as e:
@@ -326,32 +401,9 @@ class MotionDetector:
         frame_size = WIDTH * HEIGHT
         total_expected_frames = int(duration_sec * FPS_ANALYZE) if duration_sec else 0
 
-        # stdoutのフレーム読み取りループ中にstderrを読まないと、ffmpegがstderrへ
-        # 大量出力した際にパイプバッファ(通常64KB)が満杯になりffmpeg側がブロックし、
-        # 結果としてstdout側も進まなくなりデッドロックする。stderrは別スレッドで
-        # 並行してドレインしておく。
+        # stderr は別スレッドで並行してドレインする(デッドロック防止。詳細は _start_stderr_drain)。
         stderr_chunks: List[bytes] = []
-
-        # Issue #743 (AUDIT-014): 上の assert による絞り込み(None でないこと)は
-        # ネストした関数の中までは伝播しない(クロージャが捕捉するのは process であり、
-        # 呼び出されるまでに process.stderr が差し替わる可能性を型チェッカは排除できない)。
-        # ローカル変数へ束縛し直すことで、reportOptionalMemberAccess を実害のある
-        # 箇所だけに絞る。
-        stderr_pipe = process.stderr
-
-        def _drain_stderr() -> None:
-            try:
-                while True:
-                    chunk = stderr_pipe.read(4096)
-                    if not chunk:
-                        break
-                    stderr_chunks.append(chunk)
-            except (ValueError, OSError):
-                # 呼び出し元でstderrがcloseされた後の読み取りは無視する
-                pass
-
-        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
-        stderr_thread.start()
+        stderr_thread = _start_stderr_drain(process.stderr, stderr_chunks)
 
         try:
             while True:
@@ -359,18 +411,9 @@ class MotionDetector:
                 if len(raw_frame) != frame_size:
                     break
 
-                frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((HEIGHT, WIDTH))
-                roi_frame = frame[ROI_Y:ROI_Y+ROI_H, ROI_X:ROI_X+ROI_W]
-                fgmask = self.fgbg.apply(roi_frame)
-                fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_OPEN, self.kernel)
-                fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_CLOSE, self.kernel)
-
-                contours, _ = cv2.findContours(fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                if contours:
-                    largest_contour = max(contours, key=cv2.contourArea)
-                    largest_area = cv2.contourArea(largest_contour)
-                    if largest_area > MIN_AREA_THRESHOLD:
-                        records.append(MotionRecord(current_sec, largest_area, len(contours)))
+                motion = self._largest_motion(raw_frame)
+                if motion is not None:
+                    records.append(MotionRecord(current_sec, motion[0], motion[1]))
 
                 current_sec += 1
                 if total_expected_frames > 0 and current_sec % max(1, int(total_expected_frames / 10)) == 0:
@@ -388,28 +431,9 @@ class MotionDetector:
             logger.exception(f"フレーム解析中に例外が発生しました: {e}")
             raise
         finally:
-            if process.stdout:
-                process.stdout.close()
-            try:
-                if process.poll() is None:
-                    process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                logger.error("FFmpegプロセスの終了がタイムアウトしました。強制終了します。")
-                process.kill()
-                process.wait()
-            # プロセス終了後にstderrがEOFするのを待ってからcloseする
-            # (逆順にするとドレインスレッドがclosed fileを読んでクラッシュする)
-            stderr_thread.join(timeout=5)
-            if process.stderr:
-                process.stderr.close()
+            _close_ffmpeg_process(process, stderr_thread)
 
-        motion_csv = os.path.join(work_dir, "motion.csv")
-        with open(motion_csv, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["time", "largest_area", "contour_count"])
-            for rec in records:
-                writer.writerow([sec_to_time(rec.time_sec), rec.largest_area, rec.contour_count])
-
+        _write_motion_csv(work_dir, records)
         return records
 
 # ==========================================
