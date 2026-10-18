@@ -130,11 +130,11 @@
 
 
 * **副作用**: `_request` 呼び出しによるAPI通信（`FormData`をそのままbodyに渡す）
-* 根拠: [`postForm`内部] (行番号: 84〜86 / 抜粋: "return this._request<T>(endpoint, {\n            method: 'POST',\n            body: formData,")
+* 根拠: [`postForm`内部] (参照: ApiClient / 抜粋: "return this._request<T>(endpoint, {\n            method: 'POST',\n            body: formData,")
 
 
 * **エラーハンドリング**: `_request` 内のエラーハンドリングに依存
-* 根拠: [`postForm`内部] (行番号: 84 / 抜粋: "return this._request<T>(endpoint, {")
+* 根拠: [`postForm`内部] (参照: ApiClient / 抜粋: "return this._request<T>(endpoint, {")
 
 
 

@@ -117,7 +117,7 @@
 
 
 * **戻り値/レスポンス**: 該当なし（`Record<ThemeColorKey, string>`型の変数）
-* 根拠: `export const THEME_BORDER_CLASSES: Record<ThemeColorKey, string> = {` (行番号: 23 / 抜粋: "Record<ThemeColorKey, string>")
+* 根拠: `export const THEME_BORDER_CLASSES: Record<ThemeColorKey, string> = {` (参照: THEME_BORDER_CLASSES / 抜粋: "Record<ThemeColorKey, string>")
 
 
 * **副作用**: なし
@@ -140,7 +140,7 @@
 
 
 * **戻り値/レスポンス**: 該当なし（`Record<ThemeColorKey, string>`型の変数）
-* 根拠: `export const THEME_RING_CLASSES: Record<ThemeColorKey, string> = {` (行番号: 32 / 抜粋: "Record<ThemeColorKey, string>")
+* 根拠: `export const THEME_RING_CLASSES: Record<ThemeColorKey, string> = {` (参照: THEME_RING_CLASSES / 抜粋: "Record<ThemeColorKey, string>")
 
 
 * **副作用**: なし
@@ -232,7 +232,7 @@
 
 
 * **戻り値/レスポンス**: 該当なし（型定義のため関数ではない）。内包する各関数の戻り値型はいずれも`void`と定義されている。
-* 根拠: `setDensity: (density: Density) => void;` (行番号: 59 / 抜粋: "=> void;")
+* 根拠: `setDensity: (density: Density) => void;` (参照: SettingsContextValue / 抜粋: "=> void;")
 
 
 * **副作用**: なし

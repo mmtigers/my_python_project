@@ -81,7 +81,7 @@
 * 根拠: (行番号: 34〜45 / 抜粋: "const Header: React.FC<HeaderProps> = ({\n    users,\n    currentUserIdx,\n    viewMode,\n    onUserSwitch,\n    onLogSwitch,\n    onSettingsClick,\n    showUserSwitcher = true,\n    showLogSwitcher = true,\n    showBackToMain,\n    onBackToMain,\n}) => {")
 
 * **戻り値/レスポンス**: JSX要素 (`<header>` タグをルートとするReact要素)
-* 根拠: `return ( <header className="bg-gradient-to-b...` (行番号: 46〜190 / 抜粋: "return (\n        <header className=\"bg-gradient-to-b from-gray-900 to-black")
+* 根拠: `return ( <header className="bg-gradient-to-b...` (参照: Header / 抜粋: "return (\n        <header className=\"bg-gradient-to-b from-gray-900 to-black")
 
 * **副作用**: なし
 * 根拠: コンポーネント内に `useEffect` 等のフックや、外部状態を直接変更する処理が存在しない。 (行番号: 34〜191)
