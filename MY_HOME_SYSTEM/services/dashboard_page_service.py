@@ -1645,6 +1645,85 @@ def _render_hour_detail(
     )
 
 
+def _watch_sensor_logs(
+    df_sensor: pd.DataFrame, selected_device: str | None
+) -> tuple[pd.DataFrame, pd.DataFrame, list[tuple[str, str]], str | None]:
+    """高砂・伊丹のセンサーログ(状態変化行→機器→開閉の統合)と機器の選択肢を返す。
+
+    戻り値は `(高砂, 伊丹, 機器の選択肢, 有効な selected_device)`。
+
+    **(UI改善)** 高砂・伊丹のセンサーログは`sensor_state_change_log`で、開閉/動体
+    センサーの「状態が変わった行」だけに絞る(温湿度計・電力プラグの5分おきの記録は
+    ここには出さない。値の確認は各カード/システムページ側にある)。
+
+    **(UI改善)** 開閉センサーの「open」の直後(60秒以内)に「close」が来た組は、
+    `merge_open_close_events`で「開 → 閉（N秒）」の1行にまとめる。
+
+    **(新機能)** `selected_device`(`device_id`)を指定すると、高砂・伊丹のセンサーログをその機器だけに絞る
+    (防犯ログは対象外)。選択肢にない値は無視し、`None`(全機器)に読み替える。
+    """
+    if not df_sensor.empty and "location" in df_sensor.columns:
+        changes_takasago = sensor_state_change_log(df_sensor[df_sensor["location"] == "高砂"])
+        changes_itami = sensor_state_change_log(df_sensor[df_sensor["location"] == "伊丹"])
+    else:
+        changes_takasago = changes_itami = df_sensor.iloc[0:0]
+    # 機器の選択肢は絞り込む前の全機器から作る(選んだ機器だけが残って選び直せなくなるのを防ぐ)。
+    device_options = _sensor_device_options(changes_takasago, changes_itami)
+    if selected_device not in dict(device_options):
+        selected_device = None  # 一覧に無い値(古いブックマーク等)は無視して全機器を表示する
+    df_takasago = merge_open_close_events(_filter_by_device(changes_takasago, selected_device))
+    df_itami = merge_open_close_events(_filter_by_device(changes_itami, selected_device))
+    return df_takasago, df_itami, device_options, selected_device
+
+
+def _watch_heat_frames(
+    df_heatmap: pd.DataFrame | None,
+    selected_device: str | None,
+    df_camera_motion: pd.DataFrame,
+    df_takasago: pd.DataFrame,
+    df_itami: pd.DataFrame,
+) -> dict[str, pd.DataFrame]:
+    """活動ヒートマップの集計元を、`HEATMAP_SOURCES` の種別ごとに返す。
+
+    **(新機能)** 高砂・伊丹の活動ヒートマップは表示日(`selected_date`、無ければ今日)の全件で集計する。
+    日付未指定時の`df_sensor`は直近N件のキャッシュで今日の早い時間帯が欠けうるため、呼び出し側が
+    今日分の全件を`df_heatmap`で渡す(省略時は`df_sensor`を使う)。
+    """
+    # ヒートマップは表と同じ絞り込み(状態変化行→機器→開閉の統合)を、表示日の全件に対して行う。
+    # `df_heatmap`が無ければ表と同じ`df_sensor`を使う。
+    if df_heatmap is None:
+        return {"security": df_camera_motion, "takasago": df_takasago, "itami": df_itami}
+    return activity_source_frames(df_heatmap, selected_device)
+
+
+def _watch_hour_detail_html(
+    heat_frames: dict[str, pd.DataFrame],
+    day: date,
+    *,
+    hour: int | None,
+    hour_src: str | None,
+    hour_device: str | None,
+    dashboard_path: str,
+) -> str:
+    """ヒートマップのマスをタップしたときに、フィルタの下に出す「その時間のログ」。
+
+    ヒートマップの件数のあるマスはリンクで、タップすると`hour`(0〜23)・`hour_src`
+    (`HEATMAP_SOURCES`)・`hour_device`(機器の識別子。省略時はその種別の全機器)で、
+    その時間のログ(`_render_hour_detail`)を出す。`hour`と`hour_src`のどちらかが無効なら
+    空文字を返す。
+    """
+    if hour is None or hour_src not in HEATMAP_SOURCES:
+        return ""
+    return _render_hour_detail(
+        heat_frames[hour_src],
+        src=hour_src,
+        day=day,
+        hour=hour,
+        device=hour_device,
+        dashboard_path=dashboard_path,
+    )
+
+
 def render_watch_page(
     df_sensor: pd.DataFrame,
     *,
@@ -1676,27 +1755,14 @@ def render_watch_page(
     `_render_collapsible_log_table`で先頭5件だけを常時表示し、残りは`<details>`で
     折りたたむ。
 
-    **(UI改善)** 高砂・伊丹のセンサーログは`sensor_state_change_log`で、開閉/動体
-    センサーの「状態が変わった行」だけに絞る(温湿度計・電力プラグの5分おきの記録は
-    ここには出さない。値の確認は各カード/システムページ側にある)。
-
-    **(UI改善)** 開閉センサーの「open」の直後(60秒以内)に「close」が来た組は、
-    `merge_open_close_events`で「開 → 閉（N秒）」の1行にまとめる。
+    高砂・伊丹のセンサーログの絞り込みは`_watch_sensor_logs`、ヒートマップの集計元は
+    `_watch_heat_frames`を参照(Issue #954 で分割)。
 
     **(新機能)** `timelapses`(`timelapse_service.list_timelapses`の結果。新しい順)を渡すと、最近の写真の下に
     「🎞️ タイムラプス」を出す(`show_all_timelapses`で先頭10件の上限を外す)。省略時は動画なしの案内になる。
 
-    **(新機能)** `selected_device`(`device_id`)を指定すると、高砂・伊丹のセンサーログをその機器だけに絞る
-    (防犯ログは対象外)。選択肢にない値は無視する。
-
-    **(新機能)** 高砂・伊丹の活動ヒートマップは表示日(`selected_date`、無ければ今日)の全件で集計する。
-    日付未指定時の`df_sensor`は直近N件のキャッシュで今日の早い時間帯が欠けうるため、呼び出し側が
-    今日分の全件を`df_heatmap`で渡す(省略時は`df_sensor`を使う)。
-
-    **(新機能)** 防犯ログにもカメラ別の活動ヒートマップを置く。ヒートマップの件数のあるマスは
-    リンクで、タップすると`hour`(0〜23)・`hour_src`(`HEATMAP_SOURCES`)・`hour_device`
-    (機器の識別子。省略時はその種別の全機器)で、その時間のログ(`_render_hour_detail`)を
-    フィルタの下に出す。`hour`と`hour_src`のどちらかが無効なら出さない。
+    **(新機能)** 防犯ログにもカメラ別の活動ヒートマップを置く。件数のあるマスをタップした
+    ときの時間帯詳細は`_watch_hour_detail_html`を参照。
 
     **(新機能)** `selected_date`を指定すると3つのログをその日(JST)に絞り、件数の上限
     (通常50件)を外して指定日の全件を表示する(先頭5件の常時表示+折りたたみは同じ)。
@@ -1709,40 +1775,18 @@ def render_watch_page(
         if cam.get("enabled", True)
     ]
     df_camera_motion = home_status_service.camera_motion_log(df_sensor)
-    if not df_sensor.empty and "location" in df_sensor.columns:
-        changes_takasago = sensor_state_change_log(df_sensor[df_sensor["location"] == "高砂"])
-        changes_itami = sensor_state_change_log(df_sensor[df_sensor["location"] == "伊丹"])
-    else:
-        changes_takasago = changes_itami = df_sensor.iloc[0:0]
-    # 機器の選択肢は絞り込む前の全機器から作る(選んだ機器だけが残って選び直せなくなるのを防ぐ)。
-    device_options = _sensor_device_options(changes_takasago, changes_itami)
-    if selected_device not in dict(device_options):
-        selected_device = None  # 一覧に無い値(古いブックマーク等)は無視して全機器を表示する
-    df_takasago = merge_open_close_events(_filter_by_device(changes_takasago, selected_device))
-    df_itami = merge_open_close_events(_filter_by_device(changes_itami, selected_device))
+    df_takasago, df_itami, device_options, selected_device = _watch_sensor_logs(df_sensor, selected_device)
 
     heatmap_now = home_status_service.get_now_jst()
     heatmap_day = selected_date or heatmap_now.date()
-    # ヒートマップは表と同じ絞り込み(状態変化行→機器→開閉の統合)を、表示日の全件に対して行う。
-    # `df_heatmap`が無ければ表と同じ`df_sensor`を使う。
-    if df_heatmap is None:
-        heat_frames = {"security": df_camera_motion, "takasago": df_takasago, "itami": df_itami}
-    else:
-        heat_frames = activity_source_frames(df_heatmap, selected_device)
+    heat_frames = _watch_heat_frames(df_heatmap, selected_device, df_camera_motion, df_takasago, df_itami)
 
     def _cell_link(src: str) -> Callable[[str | None, int], str]:
         return lambda device, h: _hour_detail_href(dashboard_path, heatmap_day, h, src, device)
 
-    hour_detail_html = ""
-    if hour is not None and hour_src in HEATMAP_SOURCES:
-        hour_detail_html = _render_hour_detail(
-            heat_frames[hour_src],
-            src=hour_src,
-            day=heatmap_day,
-            hour=hour,
-            device=hour_device,
-            dashboard_path=dashboard_path,
-        )
+    hour_detail_html = _watch_hour_detail_html(
+        heat_frames, heatmap_day, hour=hour, hour_src=hour_src, hour_device=hour_device, dashboard_path=dashboard_path
+    )
 
     def _log_table(df: pd.DataFrame, columns: dict[str, str]) -> str:
         # 日付指定時は上限を外して全件(`limit`は`df.iloc[visible:limit]`の上端)。
@@ -1762,22 +1806,23 @@ def render_watch_page(
         f"{_render_timelapse_section(timelapses or [], dashboard_path=dashboard_path, camera_names={c['id']: c['name'] for c in cameras}, show_all=show_all_timelapses)}"
         f"{_render_log_date_filter(dashboard_path, selected_date, device_options, selected_device)}"
         f"{hour_detail_html}"
-        '<div id="security-log">'
-        "<h2>🛡️ 防犯ログ</h2>"
-        f'{_render_activity_heatmap(heat_frames["security"], heatmap_day, heatmap_now, link=_cell_link("security"))}'
-        f'{_log_table(df_camera_motion, {"timestamp": "検知時刻", "friendly_name": "カメラ"})}'
-        "</div>"
-        '<div id="takasago-log">'
-        "<h2>👵 高砂実家のセンサーログ</h2>"
-        f'{_render_activity_heatmap(heat_frames["takasago"], heatmap_day, heatmap_now, link=_cell_link("takasago"))}'
-        f'{_log_table(df_takasago, {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"})}'
-        "</div>"
-        '<div id="itami-log">'
-        "<h2>🏠 伊丹(自宅)のセンサーログ</h2>"
-        f'{_render_activity_heatmap(heat_frames["itami"], heatmap_day, heatmap_now, link=_cell_link("itami"))}'
-        f'{_log_table(df_itami, {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"})}'
-        "</div>"
     )
+    log_sections = (
+        ("security-log", "🛡️ 防犯ログ", "security", df_camera_motion,
+         {"timestamp": "検知時刻", "friendly_name": "カメラ"}),
+        ("takasago-log", "👵 高砂実家のセンサーログ", "takasago", df_takasago,
+         {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"}),
+        ("itami-log", "🏠 伊丹(自宅)のセンサーログ", "itami", df_itami,
+         {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"}),
+    )
+    for section_id, title, src, df_log, columns in log_sections:
+        body += (
+            f'<div id="{section_id}">'
+            f"<h2>{title}</h2>"
+            f"{_render_activity_heatmap(heat_frames[src], heatmap_day, heatmap_now, link=_cell_link(src))}"
+            f"{_log_table(df_log, columns)}"
+            "</div>"
+        )
     return _page_shell("見守り - おうちの様子", body, extra_head=_CAMERA_SCRIPT, dashboard_path=dashboard_path, current="watch")
 
 

@@ -23,10 +23,9 @@ SwitchBotに関連するWebhookペイロードおよびAPI経由のデバイス�
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `BaseModel` | クラス | データモデルの基底クラス | 根拠: `from pydantic import BaseModel` (行番号: 2 / 抜粋: "from pydantic import BaseModel") |
-| `Optional` | 型 | Null（None）許容型の定義 | 根拠: `from typing import Optional, Dict, Any` (行番号: 3 / 抜粋: "import Optional, Dict, Any") |
-| `Dict` | 型 | 辞書型の定義 | 根拠: `from typing import Optional, Dict, Any` (行番号: 3 / 抜粋: "Optional, Dict, Any") |
-| `Any` | 型 | 任意の型の定義 | 根拠: `from typing import Optional, Dict, Any` (行番号: 3 / 抜粋: "Optional, Dict, Any") |
+| `BaseModel` | クラス | データモデルの基底クラス | 根拠: `from pydantic import BaseModel, ConfigDict, Field` (行番号: 2 / 抜粋: "from pydantic import BaseModel") |
+| `ConfigDict` / `Field` | クラス/関数 | `DeviceStatusBody` の `extra="allow"` 指定と、`body` の既定値(空の `DeviceStatusBody`)の定義 | 根拠: `from pydantic import BaseModel, ConfigDict, Field` (行番号: 2 / 抜粋: "ConfigDict, Field") |
+| `Optional` / `Union` | 型 | Null（None）許容型・複数型許容の定義 | 根拠: `from typing import Optional, Union` (行番号: 3 / 抜粋: "import Optional, Union") |
 
 ### ブラックボックスとなる外部要素
 
@@ -80,26 +79,32 @@ SwitchBotに関連するWebhookペイロードおよびAPI経由のデバイス�
 
 
 
+### `DeviceStatusBody`
+
+* **役割**: `GET /v1.1/devices/{id}/status` の `body` を表すPydanticモデル（Issue #960 / H-4）。システム内で実際に読んでいるフィールド（`weight`・`power`・`watt`・`temperature`・`humidity`・`powerState`）だけを定義し、それ以外のキーは `extra="allow"` で捨てずに通す。
+* **型について**: 同じ名前でも機種によって型が違う（Plug Mini の `power` は数値のことも `"on"` のこともある）うえ、呼び出し側（`get_tv_power_watts`・`fetch_device_status_sync`）が個別に `float()` で変換して不正値を読み飛ばしているため、数値・文字列のどちらも受け付ける緩い型にしてある。厳密にすると、1フィールドの形が違うだけでステータス全体が取れなくなる。
+* **呼び出し側との約束**: 呼び出し側は `"temperature" in data` のようにキーの有無で分岐する。そのため `get_device_status` は `model_dump(exclude_unset=True)` で返し、レスポンスに無かったフィールドを `None` で補わない。
+
 ### `DeviceStatusResponse`
 
-* **役割**: API経由で取得したデバイス状態のデータ構造を定義するPydanticモデル。
-* 根拠: `class DeviceStatusResponse(BaseModel):` (行番号: 35-39 / 抜粋: '"""API経由で取得したデバイス状態（GET /v1.1/')
+* **役割**: API経由で取得したデバイス状態のデータ構造を定義するPydanticモデル。`body` は `DeviceStatusBody`（失敗レスポンスで body が無い場合は空）。
+* 根拠: `class DeviceStatusResponse(BaseModel):` (行番号: 60-65 / 抜粋: '"""API経由で取得したデバイス状態（GET /v1.1/')
 
 
 * **引数/リクエスト**: 該当なし
-* 根拠: データモデルの定義であり関数ではないため (行番号: 35 / 抜粋: "class DeviceStatusResponse(Bas")
+* 根拠: データモデルの定義であり関数ではないため (行番号: 60 / 抜粋: "class DeviceStatusResponse(Bas")
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデルの定義であり関数ではないため (行番号: 35 / 抜粋: "class DeviceStatusResponse(Bas")
+* 根拠: データモデルの定義であり関数ではないため (行番号: 60 / 抜粋: "class DeviceStatusResponse(Bas")
 
 
 * **副作用**: なし
-* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 35-39 / 抜粋: "class DeviceStatusResponse(Bas")
+* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 60-65 / 抜粋: "class DeviceStatusResponse(Bas")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理が存在しないため (行番号: 35-39 / 抜粋: "class DeviceStatusResponse(Bas")
+* 根拠: クラス内に例外処理が存在しないため (行番号: 60-65 / 抜粋: "class DeviceStatusResponse(Bas")
 
 
 
@@ -152,11 +157,11 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | Webhookのエンドポイント/ルーター定義ファイル | `SwitchBotWebhookBody` をリクエストボディとして受け取って処理する具体的なフローを把握するため。 | 根拠: `class SwitchBotWebhookBody` のドキュメント文字列 (行番号: 28 / 抜粋: '"""SwitchBot Webhookのエントリポイント"""') |
-| 高 | APIクライアント/外部通信ファイル | `GET /v1.1/devices/{id}/status` に対してリクエストを行い、`DeviceStatusResponse` を処理するコードを特定するため。 | 根拠: `class DeviceStatusResponse` のドキュメント文字列 (行番号: 35 / 抜粋: '"""API経由で取得したデバイス状態（GET /v1.1/') |
+| 高 | APIクライアント/外部通信ファイル | `GET /v1.1/devices/{id}/status` に対してリクエストを行い、`DeviceStatusResponse` を処理するコードを特定するため。 | 根拠: `class DeviceStatusResponse` のドキュメント文字列 (行番号: 60 / 抜粋: '"""API経由で取得したデバイス状態（GET /v1.1/') |
 
 ## 8. 保守上の注意点
 
-* **型定義の曖昧さ**: `DeviceStatusResponse` の `body` プロパティは `Any` を含んで定義されており、デバイスによって中身が大きく変わるため、利用側で動的な型判定やキーの存在チェック（安全なアクセス）が必要になる構造となっている。
+* **型定義の緩さ**: `DeviceStatusResponse.body` は `DeviceStatusBody`（読んでいるフィールドだけを定義し、未知のキーは通す）で、型も機種差を吸収するため緩い。デバイスによって中身が大きく変わるため、利用側ではキーの存在チェックと個別の型変換が引き続き必要（Issue #960 / H-4 で `Dict[str, Any]` から変更）。
 * **`detectionState`と`openState`の混同に注意**: `SwitchBotContext`は両フィールドを別々に持つが、名前が似ているため混同しやすい。`detectionState`はWoContact/WoPresence共通で内蔵PIRのモーション検知結果("DETECTED"/"NOT_DETECTED")を表し、`openState`はWoContact固有の実際の開閉状態("open"/"close"/"timeOutNotClose")を表す。利用側(`webhook_router.py`)がこの2つを取り違えると、実機からのWebhookでは開閉検知の通知が正しく発火しない(Issue #251)。
 * 根拠: `detectionState: Optional[str] = None` (行番号: 13 / 抜粋: "detectionState: Optional[str] = None"), `openState: Optional[str] = None` (行番号: 19 / 抜粋: "openState: Optional[str] = None")
 

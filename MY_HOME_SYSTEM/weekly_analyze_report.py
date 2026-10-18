@@ -47,6 +47,103 @@ def get_start_date(period_type: str) -> Optional[datetime.datetime]:
     
     return None
 
+def _count_meals(cursor: Any, start_str: str) -> tuple[Dict[str, int], int]:
+    """食事記録をカテゴリ(自炊/外食/その他)ごとに数え、(カテゴリ別件数, 総件数) を返す。"""
+    # Note: config.SQLITE_TABLE_FOOD は基本設計書3.2には明記がないが、既存互換のため維持
+    sql_food = f"""
+        SELECT menu_category 
+        FROM {config.SQLITE_TABLE_FOOD} 
+        WHERE timestamp >= ?
+    """
+    cursor.execute(sql_food, (start_str,))
+    rows = cursor.fetchall()
+    
+    food_counts = {"自炊": 0, "外食": 0, "その他": 0}
+    total_meals = 0
+    
+    for row in rows:
+        record = row["menu_category"]
+        if record.startswith("自炊"):
+            food_counts["自炊"] += 1
+        elif record.startswith("外食"):
+            food_counts["外食"] += 1
+        elif record.startswith("その他"):
+            food_counts["その他"] += 1
+        total_meals += 1
+    
+    return food_counts, total_meals
+
+
+def _count_parking_motion(cursor: Any, start_str: str) -> int:
+    """駐車場カメラの動体検知回数(車の利用の目安)を返す。"""
+    # #829: car_records(action='LEAVE'/'ARRIVE')は、書き込み経路が
+    # リポジトリのどこにも存在せず(過去に外部連携があったかは不明)、
+    # 常に0件だった。駐車場カメラ(device_records, device_type='ONVIF_CAMERA',
+    # device_id=PARKING_CAMERA_ID)の動体検知回数に置き換える。人の往来も拾うため
+    # 「車が出入りした回数」そのものではないが、駐車場での動きの目安にはなる。
+    # ダッシュボードの不具合修正(駐車場カードが表示名の完全一致に依存していて
+    # 壊れていた)に合わせ、こちらも表示名(device_name)ではなくidで照合する
+    # (表示名はdevices.jsonで運用者が自由に変えられ、変えるたびに一致しなくなる)。
+    sql_car = """
+        SELECT COUNT(*)
+        FROM device_records
+        WHERE device_type = 'ONVIF_CAMERA' AND movement_state = 'ON'
+          AND device_id = ? AND timestamp >= ?
+    """
+    cursor.execute(sql_car, (home_status_service.PARKING_CAMERA_ID, start_str))
+    row_car = cursor.fetchone()
+    return row_car[0] if row_car else 0
+
+
+def _estimate_elec_bill(cursor: Any, start_str: str, start_dt: datetime.datetime, now: datetime.datetime) -> int:
+    """スマートメーターの平均電力と実経過時間から、期間の電気代(円)を概算する。"""
+    # 修正: 設計書 3.2 に基づき power_usage テーブルと wattage カラムを使用 
+    # 注意: config.SQLITE_TABLE_POWER_USAGE が未定義の場合は config.py への追加が必要
+    table_power = getattr(config, "SQLITE_TABLE_POWER_USAGE", "power_usage")
+
+    # #170: power_usageにはスマートメーター(全体消費)と各プラグ(個別家電)が
+    # 同居しており、プラグの消費電力はスマートメーターの計測値に既に含まれる
+    # 部分集合である。デバイスを絞らずAVG(wattage)を取るとプラグのアイドル値が
+    # スマートメーター値を希釈してしまうため、スマートメーターの行のみに絞る。
+    # #829: services/analysis_service.pyと同じ理由で、device_category
+    # (migrations/0020以降に書き込まれた行が持つ)を優先し、無い古い行だけ
+    # device_nameの"Remo"判定にフォールバックする。
+    sql_power = f"""
+        SELECT AVG(wattage)
+        FROM {table_power}
+        WHERE timestamp >= ?
+          AND (
+            device_category = 'smart_meter'
+            OR (device_category IS NULL AND device_name LIKE '%Remo%')
+          )
+    """
+    cursor.execute(sql_power, (start_str,))
+    row_pow = cursor.fetchone()
+    avg_watts = row_pow[0] if row_pow and row_pow[0] else 0
+    
+    if avg_watts:
+        elapsed_hours = (now - start_dt).total_seconds() / 3600
+        if elapsed_hours < 0:
+            elapsed_hours = 0
+        
+        kwh = (avg_watts * elapsed_hours) / 1000
+        bill = int(kwh * config.ELEC_PRICE_PER_KWH)
+        return bill
+    return 0
+
+
+def _count_sick_records(cursor: Any, start_str: str) -> int:
+    """体調記録のうち「元気」以外の件数を返す。"""
+    sql_health = f"""
+        SELECT COUNT(*) 
+        FROM {config.SQLITE_TABLE_CHILD}
+        WHERE timestamp >= ? AND condition NOT LIKE '%元気%'
+    """
+    cursor.execute(sql_health, (start_str,))
+    row_health = cursor.fetchone()
+    return row_health[0] if row_health else 0
+
+
 def get_analysis_data(start_dt: datetime.datetime) -> Optional[Dict[str, Any]]:
     """指定された開始日時から現在までのデータをDBから集計する。
 
@@ -73,95 +170,13 @@ def get_analysis_data(start_dt: datetime.datetime) -> Optional[Dict[str, Any]]:
             data: Dict[str, Any] = {}
 
             # 1. 食事の傾向
-            # Note: config.SQLITE_TABLE_FOOD は基本設計書3.2には明記がないが、既存互換のため維持
-            sql_food = f"""
-                SELECT menu_category 
-                FROM {config.SQLITE_TABLE_FOOD} 
-                WHERE timestamp >= ?
-            """
-            cursor.execute(sql_food, (start_str,))
-            rows = cursor.fetchall()
-            
-            food_counts = {"自炊": 0, "外食": 0, "その他": 0}
-            total_meals = 0
-            
-            for row in rows:
-                record = row["menu_category"]
-                if record.startswith("自炊"):
-                    food_counts["自炊"] += 1
-                elif record.startswith("外食"):
-                    food_counts["外食"] += 1
-                elif record.startswith("その他"):
-                    food_counts["その他"] += 1
-                total_meals += 1
-            
-            data["food_counts"] = food_counts
-            data["total_meals"] = total_meals
-            
+            data["food_counts"], data["total_meals"] = _count_meals(cursor, start_str)
             # 2. 車の利用(駐車場カメラの動体検知回数で代替)
-            # #829: car_records(action='LEAVE'/'ARRIVE')は、書き込み経路が
-            # リポジトリのどこにも存在せず(過去に外部連携があったかは不明)、
-            # 常に0件だった。駐車場カメラ(device_records, device_type='ONVIF_CAMERA',
-            # device_id=PARKING_CAMERA_ID)の動体検知回数に置き換える。人の往来も拾うため
-            # 「車が出入りした回数」そのものではないが、駐車場での動きの目安にはなる。
-            # ダッシュボードの不具合修正(駐車場カードが表示名の完全一致に依存していて
-            # 壊れていた)に合わせ、こちらも表示名(device_name)ではなくidで照合する
-            # (表示名はdevices.jsonで運用者が自由に変えられ、変えるたびに一致しなくなる)。
-            sql_car = """
-                SELECT COUNT(*)
-                FROM device_records
-                WHERE device_type = 'ONVIF_CAMERA' AND movement_state = 'ON'
-                  AND device_id = ? AND timestamp >= ?
-            """
-            cursor.execute(sql_car, (home_status_service.PARKING_CAMERA_ID, start_str))
-            row_car = cursor.fetchone()
-            data["car_count"] = row_car[0] if row_car else 0
-
+            data["car_count"] = _count_parking_motion(cursor, start_str)
             # 3. 電気代 (実経過時間ベース)
-            # 修正: 設計書 3.2 に基づき power_usage テーブルと wattage カラムを使用 
-            # 注意: config.SQLITE_TABLE_POWER_USAGE が未定義の場合は config.py への追加が必要
-            table_power = getattr(config, "SQLITE_TABLE_POWER_USAGE", "power_usage")
-
-            # #170: power_usageにはスマートメーター(全体消費)と各プラグ(個別家電)が
-            # 同居しており、プラグの消費電力はスマートメーターの計測値に既に含まれる
-            # 部分集合である。デバイスを絞らずAVG(wattage)を取るとプラグのアイドル値が
-            # スマートメーター値を希釈してしまうため、スマートメーターの行のみに絞る。
-            # #829: services/analysis_service.pyと同じ理由で、device_category
-            # (migrations/0020以降に書き込まれた行が持つ)を優先し、無い古い行だけ
-            # device_nameの"Remo"判定にフォールバックする。
-            sql_power = f"""
-                SELECT AVG(wattage)
-                FROM {table_power}
-                WHERE timestamp >= ?
-                  AND (
-                    device_category = 'smart_meter'
-                    OR (device_category IS NULL AND device_name LIKE '%Remo%')
-                  )
-            """
-            cursor.execute(sql_power, (start_str,))
-            row_pow = cursor.fetchone()
-            avg_watts = row_pow[0] if row_pow and row_pow[0] else 0
-            
-            if avg_watts:
-                elapsed_hours = (now - start_dt).total_seconds() / 3600
-                if elapsed_hours < 0:
-                    elapsed_hours = 0
-                
-                kwh = (avg_watts * elapsed_hours) / 1000
-                bill = int(kwh * config.ELEC_PRICE_PER_KWH)
-                data["elec_bill"] = bill
-            else:
-                data["elec_bill"] = 0
-
+            data["elec_bill"] = _estimate_elec_bill(cursor, start_str, start_dt, now)
             # 4. 家族の体調
-            sql_health = f"""
-                SELECT COUNT(*) 
-                FROM {config.SQLITE_TABLE_CHILD}
-                WHERE timestamp >= ? AND condition NOT LIKE '%元気%'
-            """
-            cursor.execute(sql_health, (start_str,))
-            row_health = cursor.fetchone()
-            data["sick_count"] = row_health[0] if row_health else 0
+            data["sick_count"] = _count_sick_records(cursor, start_str)
 
             return data
 

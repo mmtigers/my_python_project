@@ -58,7 +58,9 @@ def request_switchbot_api(url: str, headers: Dict[str, str], max_retries: int = 
         attempts["n"] += 1
         response = requests.get(url, headers=headers, timeout=10.0)
         response.raise_for_status()
-        return DeviceStatusResponse(**response.json()).model_dump()
+        # exclude_unset: 呼び出し側は `"temperature" in data` のようにキーの有無で分岐するため、
+        # レスポンスに無かったフィールドを None で補わず、従来の dict と同じ形で返す。
+        return DeviceStatusResponse(**response.json()).model_dump(exclude_unset=True)
 
     def _warn_connection_issue(error: BaseException) -> None:
         # ERRORではなくWARNINGとし、Tracebackは出さない

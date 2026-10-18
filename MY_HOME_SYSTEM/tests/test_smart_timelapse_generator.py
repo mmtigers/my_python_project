@@ -122,6 +122,95 @@ class TestMotionDetectorStderrDeadlock:
         assert "error" not in result, f"detect()が例外で終了した: {result.get('error')}"
 
 
+
+class TestMotionDetectorDetectBehavior:
+    """Issue #954: `MotionDetector.detect` を分割する前に、未カバーだった経路
+    (動き記録と motion.csv、ffmpeg の異常終了、起動失敗、終了待ちのタイムアウト)を固定する。"""
+
+    FRAME_SIZE = stg.WIDTH * stg.HEIGHT
+
+    def _patch_popen_with_child(self, monkeypatch, frames_script: str, exit_code: int = 0, stderr_text: str = ""):
+        script = "\n".join([
+            "import sys",
+            f"W, H = {stg.WIDTH}, {stg.HEIGHT}",
+            frames_script,
+            f"sys.stderr.write({stderr_text!r})",
+            "sys.stderr.flush()",
+            f"sys.exit({exit_code})",
+        ])
+        real_popen = subprocess.Popen
+
+        def fake_popen(cmd, stdout=None, stderr=None, **kwargs):
+            return real_popen([sys.executable, "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        monkeypatch.setattr(stg.subprocess, "Popen", fake_popen)
+
+    def test_moving_block_is_recorded_and_written_to_motion_csv(self, monkeypatch, tmp_path):
+        # 黒いフレームを数枚流したあと、白い矩形が毎秒右へ動くフレームを流す
+        frames = textwrap.dedent("""
+            def frame(x):
+                rows = []
+                for y in range(H):
+                    row = bytearray(W)
+                    if x is not None and 40 <= y < 120:
+                        row[x:x + 60] = b'\\xff' * 60
+                    rows.append(bytes(row))
+                return b''.join(rows)
+            for _ in range(5):
+                sys.stdout.buffer.write(frame(None))
+            for x in (20, 100, 180):
+                sys.stdout.buffer.write(frame(x))
+            sys.stdout.buffer.flush()
+        """)
+        self._patch_popen_with_child(monkeypatch, frames)
+
+        records = stg.MotionDetector().detect("dummy.mp4", str(tmp_path), duration_sec=8)
+
+        # 0秒目は背景モデルの学習前なので OpenCV の版によって検知されうる。判定は1秒目以降で行う。
+        times = [r.time_sec for r in records if r.time_sec >= 1]
+        assert times == [5, 6, 7]
+        assert all(r.largest_area > stg.MIN_AREA_THRESHOLD for r in records)
+        lines = (tmp_path / "motion.csv").read_text(encoding="utf-8").splitlines()
+        assert lines[0] == "time,largest_area,contour_count"
+        assert lines[1:] == [
+            f"{stg.sec_to_time(r.time_sec)},{r.largest_area},{r.contour_count}" for r in records
+        ]
+
+    def test_nonzero_exit_raises_called_process_error_with_stderr(self, monkeypatch, tmp_path):
+        self._patch_popen_with_child(monkeypatch, "pass", exit_code=3, stderr_text="boom from ffmpeg")
+
+        with pytest.raises(subprocess.CalledProcessError) as exc_info:
+            stg.MotionDetector().detect("dummy.mp4", str(tmp_path), duration_sec=0)
+
+        assert exc_info.value.returncode == 3
+        assert "boom from ffmpeg" in exc_info.value.stderr
+        assert not (tmp_path / "motion.csv").exists()
+
+    def test_popen_failure_is_reraised(self, monkeypatch, tmp_path):
+        def fail(*a, **k):
+            raise OSError("no ffmpeg")
+
+        monkeypatch.setattr(stg.subprocess, "Popen", fail)
+        with pytest.raises(OSError, match="no ffmpeg"):
+            stg.MotionDetector().detect("dummy.mp4", str(tmp_path), duration_sec=0)
+
+    def test_process_that_does_not_exit_after_close_is_killed(self, monkeypatch, tmp_path):
+        process = MagicMock()
+        process.stdout.read.return_value = b""
+        process.stderr.read.return_value = b""
+        process.returncode = 0
+        process.poll.return_value = None
+        # 1回目(timeout=60)は正常終了、finally の wait(timeout=5) はタイムアウト、kill 後の wait は戻る
+        process.wait.side_effect = [None, subprocess.TimeoutExpired("ffmpeg", 5), None]
+        monkeypatch.setattr(stg.subprocess, "Popen", lambda *a, **k: process)
+
+        records = stg.MotionDetector().detect("dummy.mp4", str(tmp_path), duration_sec=0)
+
+        assert records == []
+        process.kill.assert_called_once()
+        process.stdout.close.assert_called_once()
+        process.stderr.close.assert_called_once()
+
 class TestSendPushUsesKeywordArguments:
     """Issue #167の回帰テスト: _run_smart_timelapse_job_locked内の2箇所の
     send_push呼び出しが send_push(user_id, messages, "discord", "report"/"error")

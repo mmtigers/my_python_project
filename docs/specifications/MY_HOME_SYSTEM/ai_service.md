@@ -453,19 +453,31 @@
 ### `analyze_text_and_execute` (関数)
 
 * **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。**（Issue #374で修正）** 1回目の応答取得後は`MAX_TOOL_ROUNDS`回を上限とするループになった: 各ラウンドで`_extract_function_calls`により全パートから`function_call`を収集し、無ければ`_response_text_or_none`でテキストを返す（テキストも無い場合、ツール実行済みなら`_tool_results_fallback`、未実行なら空応答エラー）。あれば全件を`_dispatch_tool`で実行し、`function_response`をまとめて1回で送信して次の応答を得る。以前は1回のツール実行後に`final_res.text`を無条件に読んでいたため、「智矢が熱、涼花も熱」のように2件目の`function_call`が返ると`response.text`が`ValueError`を送出→汎用`except`→「処理中にエラー」となり、1件目は保存済みなのにユーザーが失敗と誤解して再送→重複登録（#232と同種）という経路が残っていた。ループ上限到達時も`_tool_results_fallback`で実行結果を返す。**（Issue #232で修正）** 1回目のGemini呼び出しはクォータ超過とそれ以外のAPIエラーをそれぞれ専用メッセージで処理するのに対し、ツール実行後の2回目呼び出しは以前クォータ超過用のフォールバックしか持たず、それ以外のAPIエラーは関数末尾の汎用`except Exception`（「処理中にエラーが発生しました」）まで伝播していた。この時点で`tool_record_child_health`/`tool_record_food`は既にDB書き込みを完了しているため、ユーザーには保存が失敗したかのように見え、冪等性チェックの無い記録処理への重複登録を誘発しうる不具合があった。2回目呼び出しにも同等のハンドラを追加し、クォータ超過と同様に`tool_result`（実行結果）へ注記を添えて返すようにした。**（Issue #520で変更）** `google-genai`は例外型を`APIError`に一本化したため、両方の呼び出し点とも`except genai_errors.APIError`で受けたうえで`_is_quota_error(e)`によりクォータ超過かどうかを分岐する形になった。
-* 根拠: `async def analyze_text_and_execute` (行番号: 627 / 抜粋: "async def analyze_text_and_execute")、ループ (参照: analyze_text_and_execute / 抜粋: "for _round in range(MAX_TOOL_ROUNDS):")
+* 根拠: `async def analyze_text_and_execute` (行番号: 755 / 抜粋: "async def analyze_text_and_execute")、ループ (参照: _run_tool_rounds / 抜粋: "for _round in range(MAX_TOOL_ROUNDS):")
 
+
+**（Issue #954 で分割）** 本関数は143行あったため、挙動を変えずに次の5つの非公開関数へ切り出した。本体に残るのは「設定・レート制限の確認 → プロンプト組み立てとチャット作成 → 1回目の呼び出し → `_run_tool_rounds`」の流れと、末尾の汎用`except Exception`だけである。切り出した関数で起きた例外は、分割前と同じくこの汎用ハンドラまで伝播する。
+
+| 関数 | 役割 | 根拠 |
+| --- | --- | --- |
+| `_build_system_prompt` | 執事「セバスチャン」としての指示と現在時刻(`get_now_iso()`)・ユーザー名を含むシステムプロンプトを返す。文字列の中身は分割前と同一 | `def _build_system_prompt(user_name: str) -> str:` (行番号: 627) |
+| `_create_manual_chat` | 自動関数呼び出しを無効にしたチャットセッションを作る。呼び出し元が `client is None` を確認済みのクライアントを引数で受け取る(pyright の None 絞り込みを保つため) | `def _create_manual_chat(gemini_client: genai.Client) -> Any:` (行番号: 647) |
+| `_initial_api_error_message` | 1回目の呼び出しが再試行し尽くしても失敗したときの文面。クォータ超過・一時的失敗(#804)は`FALLBACK_MESSAGE`、それ以外は「予期せぬエラー」 | `def _initial_api_error_message(e: "genai_errors.APIError") -> str:` (行番号: 665) |
+| `_execute_function_calls` | 1応答に含まれる`function_call`を全件`_dispatch_tool`で実行し、結果を`tool_results`に追記して`function_response`のリストを返す | `async def _execute_function_calls(` (行番号: 680) |
+| `_run_tool_rounds` | `MAX_TOOL_ROUNDS`回を上限とするツール実行ループ(#374)。ループ内の2回目以降の呼び出しの失敗時フォールバック(#232)と上限到達時のフォールバックもここ | `async def _run_tool_rounds(chat_manual: Any, response: Any, user_id: str, user_name: str) -> str:` (行番号: 699) |
+
+* 根拠: `return await _run_tool_rounds(chat_manual, response, user_id, user_name)` (行番号: 791)
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `text: str`
-* 根拠: 関数シグネチャ (行番号: 627 / 抜粋: "user_id: str, user_name: str, text: str")
+* 根拠: 関数シグネチャ (行番号: 755)
 
 
 * **戻り値/レスポンス**: `Optional[str]`
-* 根拠: 関数シグネチャおよび `return final_text` / `return None` / `return _tool_results_fallback(...)` (行番号: 517, 589, 593, 621, 631, 635, 639 / 抜粋: "-> Optional[str]:")
+* 根拠: 関数シグネチャおよび `return final_text` / `return None` / `return _tool_results_fallback(...)` (行番号: 715, 719, 735, 744, 748, 752, 769)
 
 
 * **副作用**: API通信（初回1回 + ツール実行ラウンドごとに1回、最大`MAX_TOOL_ROUNDS`回）、RateLimiterのカウント更新、および選択されたツールによる副作用（DB/外部サービス操作）
-* 根拠: `await rate_limiter.allow_request()` / `await _call_gemini_api_with_retry` / `_dispatch_tool` (行番号: 534, 563, 606, 617 / 抜粋: "response = await _call_gemini_api_with_retry(chat_manual, function_responses)")
+* 根拠: `await rate_limiter.allow_request()` / `await _call_gemini_api_with_retry` / `_dispatch_tool` (行番号: 730 / 抜粋: "response = await _call_gemini_api_with_retry(chat_manual, function_responses)")、(行番号: 772 / 抜粋: "if not await rate_limiter.allow_request():")
 
 
 * **エラーハンドリング**:
@@ -650,8 +662,8 @@ graph TD
 * `datetime` モジュールがインポートされていない（旧版の記述を訂正。`json`はIssue #357で使用されるようになった）。
 
 * **[Issue #520] SDK移行の前提**: 本ファイルは `google-generativeai`（非推奨）から後継の `google-genai` へ移行済み。移行の動機は機能ではなく依存関係にある。旧SDKは `google-ai-generativelanguage==0.6.15` を厳密固定しており、それが `protobuf<6` を要求するため、`protobuf` / `proto-plus` / `googleapis-common-protos` / `google-api-core` / `grpcio-status` が軒並み更新できない状態になっていた。移行により `protobuf` は 5.29.6 から 6.33.6 へ前進した。ただし `streamlit` が `protobuf<7` を要求するため、protobuf 7系へはまだ上げられない点に留意。
-* **[Issue #520] クライアントはモジュールレベルの状態**: 旧SDKの `genai.configure(api_key=...)` はモジュール全体に効く設定だったが、`google-genai` は `client = genai.Client(api_key=...)` というインスタンスを持つ。`GEMINI_API_KEY` 未設定時は `client` が `None` になり `analyze_text_and_execute` は早期 `return None` する (行番号: 640 / 抜粋: "if not MODEL_NAME or not config.GEMINI_API_KEY or client is None:")。テストで本関数を通す場合は `MODEL_NAME` だけでなく `client` も差し替える必要がある。
-* **[Issue #520] ツールスキーマは無変更**: `tools_schema` の dict 形式（`function_declarations` を含む）は `GenerateContentConfig(tools=...)` にそのまま受け付けられるため、スキーマ定義は移行前後で変更していない。自動関数呼び出しの無効化は `start_chat(enable_automatic_function_calling=False)` から `AutomaticFunctionCallingConfig(disable=True)` へ移った (参照: analyze_text_and_execute / 抜粋: "chat_manual = client.aio.chats.create(")。
+* **[Issue #520] クライアントはモジュールレベルの状態**: 旧SDKの `genai.configure(api_key=...)` はモジュール全体に効く設定だったが、`google-genai` は `client = genai.Client(api_key=...)` というインスタンスを持つ。`GEMINI_API_KEY` 未設定時は `client` が `None` になり `analyze_text_and_execute` は早期 `return None` する (行番号: 768 / 抜粋: "if not MODEL_NAME or not config.GEMINI_API_KEY or client is None:")。テストで本関数を通す場合は `MODEL_NAME` だけでなく `client` も差し替える必要がある。
+* **[Issue #520] ツールスキーマは無変更**: `tools_schema` の dict 形式（`function_declarations` を含む）は `GenerateContentConfig(tools=...)` にそのまま受け付けられるため、スキーマ定義は移行前後で変更していない。自動関数呼び出しの無効化は `start_chat(enable_automatic_function_calling=False)` から `AutomaticFunctionCallingConfig(disable=True)` へ移った (参照: _create_manual_chat / 抜粋: "return gemini_client.aio.chats.create(")。
 
 ## 9. 不明事項一覧
 

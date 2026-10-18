@@ -659,3 +659,45 @@ class TestCalculateDailyCostSeries:
 
     def test_default_is_fourteen_days(self, isolated_db):
         assert len(analysis_service.calculate_daily_cost_series()) == 14
+
+
+class TestSqlValuesAreBound:
+    """#991 (M-5-4)回帰防止: 値(件数・日付・地名)はSQLへ文字列連結せず`?`にバインドする。
+    テーブル名は`?`にできないため、`load_generic_data`は`config.SQLITE_TABLE_*`の許可リストで照合する。"""
+
+    def test_load_generic_data_rejects_table_names_outside_the_allowlist(self, isolated_db):
+        for bad in ("sqlite_master", "nas_records; DROP TABLE nas_records", "x' OR '1'='1"):
+            try:
+                analysis_service.load_generic_data(bad)
+            except ValueError:
+                continue
+            raise AssertionError(f"許可リスト外のテーブル名が通った: {bad!r}")
+
+    def test_load_generic_data_reads_an_allowed_table_with_bound_limit(self, isolated_db):
+        with get_db_cursor(commit=True) as cur:
+            for i in range(3):
+                cur.execute(
+                    f"INSERT INTO {config.SQLITE_TABLE_NAS} (timestamp, percent) VALUES (?, ?)",
+                    (f"2026-01-0{i + 1}T00:00:00+09:00", float(i)),
+                )
+        df = analysis_service.load_generic_data(config.SQLITE_TABLE_NAS, limit=2)
+        assert len(df) == 2
+
+    def test_weather_history_treats_a_quote_in_location_as_data(self, isolated_db):
+        """地名にクォートや`OR`を含めても、条件が崩れて他地点の行が返ることはない。"""
+        today = datetime.now(pytz.timezone("Asia/Tokyo")).strftime("%Y-%m-%d")
+        with get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO weather_history (date, location, min_temp, max_temp) VALUES (?, '伊丹', 1, 2)",
+                (today,),
+            )
+        assert len(analysis_service.load_weather_history(days=1, location="伊丹")) == 1
+        assert analysis_service.load_weather_history(days=1, location="x' OR '1'='1").empty
+
+    def test_yearly_temperature_stats_treats_a_quote_in_location_as_data(self, isolated_db):
+        with get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO weather_history (date, location, min_temp, max_temp) VALUES ('2026-01-05', '伊丹', 1, 2)"
+            )
+        assert len(analysis_service.load_yearly_temperature_stats(2026, location="伊丹")) == 1
+        assert analysis_service.load_yearly_temperature_stats(2026, location="x' OR '1'='1").empty
