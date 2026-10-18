@@ -70,7 +70,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 ### `sync_fallback_to_nas`
 
 * **役割**: ローカルのフォールバックディレクトリ内に存在するファイル・ディレクトリを、NASのターゲットディレクトリへコピーし、コピー成功後にローカル側の元データを削除する。
-* 根拠: `sync_fallback_to_nas` (行番号: 47〜72 / 抜粋: "shutil.copy2(item, target_path)")
+* 根拠: `sync_fallback_to_nas` (参照: sync_fallback_to_nas / 抜粋: "shutil.copy2(item, target_path)")
 
 
 * **引数/リクエスト**: `local_dir: Path` (ローカルのフォールバックパス), `nas_dir: Path` (NASのターゲットパス)
@@ -86,14 +86,14 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 
 
 * **エラーハンドリング**: `Exception`をキャッチし、エラーログ(`exc_info=True`)を出力する。
-* 根拠: `sync_fallback_to_nas`例外処理 (行番号: 71〜72 / 抜粋: "except Exception as e:")
+* 根拠: `sync_fallback_to_nas`例外処理 (参照: sync_fallback_to_nas / 抜粋: "except Exception as e:")
 
 
 
 ### `is_mounted_and_writable`
 
 * **役割**: 指定されたパスがマウントポイントであるかを確認し、ターゲットディレクトリの作成を試みた上で、書き込みおよび実行権限があるかを検証する。
-* 根拠: `is_mounted_and_writable` (行番号: 74〜85 / 抜粋: "return os.access(target_dir, os.W_OK | os.X_OK)")
+* 根拠: `is_mounted_and_writable` (参照: is_mounted_and_writable / 抜粋: "return os.access(target_dir, os.W_OK | os.X_OK)")
 
 
 * **引数/リクエスト**: `target_dir: Path` (アクセス確認対象のディレクトリ), `mount_point: str` (マウントポイント)
@@ -109,7 +109,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 
 
 * **エラーハンドリング**: ディレクトリ作成やアクセス確認時の`OSError`をキャッチし、Falseを返す。
-* 根拠: `is_mounted_and_writable`例外処理 (行番号: 84〜85 / 抜粋: "except OSError:")
+* 根拠: `is_mounted_and_writable`例外処理 (参照: is_mounted_and_writable / 抜粋: "except OSError:")
 
 
 

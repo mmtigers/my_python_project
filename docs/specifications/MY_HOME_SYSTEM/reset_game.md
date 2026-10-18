@@ -132,7 +132,7 @@
 
 
 * **戻り値/レスポンス**: `dict`（`{"label": ..., "db_id": ...}`）または `None`（候補が0件の場合）。`q` 入力時は関数内で `sys.exit(0)` するため戻り値は返らない。
-* 根拠: `return display_candidates[idx]` (行番号: 164 / 抜粋: "return display_candidates[idx]"), `return None` (行番号: 145 / 抜粋: "return None")
+* 根拠: `return display_candidates[idx]` (行番号: 164 / 抜粋: "return display_candidates[idx]"), `return None` (参照: select_user_interactive / 抜粋: "return None")
 
 
 * **副作用**: 標準出力への選択肢一覧表示、`input()` によるユーザー入力の待受、`q` 入力時の即時プロセス終了。
@@ -140,7 +140,7 @@
 
 
 * **エラーハンドリング**: 表示候補が0件の場合はメッセージを出力し `None` を返す。入力が `q`（大文字小文字問わず）の場合はキャンセルメッセージを出力し `sys.exit(0)`。数字以外または範囲外の入力に対しては無限ループで再入力を促す（明示的な例外捕捉はなし）。
-* 根拠: `if not display_candidates:` (行番号: 143〜145 / 抜粋: "return None"), `while True:` (行番号: 154 / 抜粋: "while True:")
+* 根拠: `if not display_candidates:` (参照: select_user_interactive / 抜粋: "return None"), `while True:` (行番号: 154 / 抜粋: "while True:")
 
 
 
@@ -209,7 +209,7 @@
 
 
 * **エラーハンドリング**: `fetch_users` の結果が空の場合はエラーログとメッセージを出力し `sys.exit(1)`。`select_user_interactive` の戻り値が `None`（Falsy）の場合は `sys.exit(0)`。確認入力が `"y"` 以外の場合はキャンセルログ・メッセージを出力し `sys.exit(0)`。それ以外の場合のみ `reset_user_data` を呼び出す。
-* 根拠: `if not users_info:` (行番号: 243〜246 / 抜粋: "sys.exit(1)"), `if confirm != 'y':` (行番号: 257〜260 / 抜粋: "sys.exit(0)")
+* 根拠: `if not users_info:` (参照: main / 抜粋: "sys.exit(1)"), `if confirm != 'y':` (参照: main / 抜粋: "sys.exit(0)")
 
 
 

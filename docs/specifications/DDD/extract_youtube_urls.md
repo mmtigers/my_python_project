@@ -29,7 +29,7 @@
 * `yt_dlp`を用いて対象URL（チャンネル・プレイリスト・単一動画）から動画URLを抽出する`YouTubeExtractor`、抽出結果をテキストファイルへ保存する`FileManager`、およびコマンドライン引数を解析してこれらを統括する`UrlExtractorApp`の3クラスで構成される。
 * 根拠: [各クラス定義] (行番号: 136〜309, 308〜309, 402〜403 / 抜粋: "class YouTubeExtractor:\n    """YouTubeからURL情報を抽出するクラス。"""")
 * チャンネルURLが指定された場合は`/videos`と`/playlists`の両方を自動探索し、通常動画一覧に加えて各プレイリストも個別に抽出する。
-* 根拠: [extract_iterメソッド] (行番号: 236〜245 / 抜粋: "チャンネルURLの場合は `/videos` と `/playlists` を自動探索する。")
+* 根拠: [extract_iterメソッド] (参照: YouTubeExtractor.extract_iter / 抜粋: "チャンネルURLの場合は `/videos` と `/playlists` を自動探索する。")
 * **[削除済み] Issue #413 (D-L11)**: 以前は`--cron`引数指定時にSQLite DB（`home_system.db`）の`youtube_subscriptions`テーブルに登録されたアクティブなチャンネルURLを順次巡回する`SubscriptionManager`による自動サブスクリプションモード（レート制限対策のジッター付き待機・連続失敗時のサーキットブレーカーを含む）が存在したが、`youtube_subscriptions`テーブルへINSERT/UPDATEするコードがリポジトリ内のどこにも存在せず、`--cron`もどのcrontab/スケジューラにも未登録という、事実上一度も機能しえなかったデッドコードだったため、オーナー承認の上で`SubscriptionManager`クラス本体・`--cron`引数・関連の`AppConfig`定数（`SUBSCRIPTION_FILE`, `SUBSCRIPTION_SLEEP_RANGE`, `CONSECUTIVE_FAILURE_THRESHOLD`）・専用テスト一式を削除した（実装削除、機能追加なし）。詳細は8章を参照。
 * 根拠: [削除通知コメント] (行番号: 384〜392 / 抜粋: "# #413 (D-L11): 以前ここにあった SubscriptionManager クラス(定期巡回/サブスク\n# リプション機能。youtube_subscriptions テーブルをSQLite DBで管理し、--cron\n# 実行時に登録済みチャンネルを順次抽出していた)は削除した。youtube_subscriptions\n# テーブルへのINSERT/UPDATEを行うコードがリポジトリ内のどこにも存在せず(仕様書の\n# 旧版でも同じ結論)、crontabにも未登録の、事実上のデッド機能だったため\n# (オーナー判断: --cronは削除)。また同機能が使うDBパス\n# (/mnt/nas/home_system/youtube_extractor/home_system.db)は、MY_HOME_SYSTEM\n# 本体の home_system.db とは別ファイルであるにもかかわらず同名という紛らわしい\n# 設計でもあった。")
 * **(Issue #243バグ修正)** `FileManager.save`は以前、呼び出しのたびに常に`AppConfig.get_output_base_dir()`を内部で呼び出していた。1チャンネル/1URLから複数の`ExtractionResult`が得られる場合（`extract_iter`がプレイリストごとに複数回`yield`する等）、`save()`が結果件数分だけ`get_output_base_dir()`を再評価してしまい、NAS瞬断時の再マウント試行・障害通知が保存件数分だけ多重発生しうる不具合があった。現在は`save()`が`base_dir`引数（省略可能、`Optional[Path] = None`）を受け取り、呼び出し元が既に取得済みの値を渡せるようになった。`UrlExtractorApp.run()`は1回だけ取得した値を`save()`へ渡して使い回す。
@@ -115,11 +115,11 @@
 
 
 * **戻り値/レスポンス**: `Path`（利用可能なディレクトリパス）
-* 根拠: [Docstringと戻り値] (行番号: 100〜103 / 抜粋: "Returns:\n            Path: 利用可能なディレクトリパス\n        """\n        return get_managed_target_directory(")
+* 根拠: [Docstringと戻り値] (参照: AppConfig.get_output_base_dir / 抜粋: "Returns:\n            Path: 利用可能なディレクトリパス\n        """\n        return get_managed_target_directory(")
 
 
 * **副作用**: `get_managed_target_directory`（インポート成功時は`core.nas_utils`、失敗時はフォールバック実装）の呼び出し。
-* 根拠: [呼び出し] (行番号: 103〜107 / 抜粋: "return get_managed_target_directory(\n            nas_dir_str=cls.NAS_DIR_STR,\n            fallback_dir_str=cls.LOCAL_DIR_STR,\n            mount_point=cls.MOUNT_POINT\n        )")
+* 根拠: [呼び出し] (参照: AppConfig.get_output_base_dir / 抜粋: "return get_managed_target_directory(\n            nas_dir_str=cls.NAS_DIR_STR,\n            fallback_dir_str=cls.LOCAL_DIR_STR,\n            mount_point=cls.MOUNT_POINT\n        )")
 
 
 * **エラーハンドリング**: なし（本メソッド自体には例外処理なし。委譲先の実装に依存）
@@ -132,7 +132,7 @@
 
 
 * **引数/リクエスト**: `title: str`, `urls: List[str]`, `source_url: str`, `channel_name: str = "unknown_channel"`, `is_playlist: bool = False`
-* 根拠: [フィールド定義] (行番号: 121〜125 / 抜粋: "title: str\n    urls: List[str]\n    source_url: str\n    channel_name: str = "unknown_channel"\n    is_playlist: bool = False")
+* 根拠: [フィールド定義] (参照: ExtractionResult / 抜粋: "title: str\n    urls: List[str]\n    source_url: str\n    channel_name: str = "unknown_channel"\n    is_playlist: bool = False")
 
 
 * **戻り値/レスポンス**: 該当なし（データクラスのフィールド定義自体）
@@ -213,7 +213,7 @@
 
 
 * **エラーハンドリング**: `yt_dlp`実行時の例外を`except Exception`で捕捉し、スタックトレース付き(`exc_info=True`)でエラーログを出力して`None`を返す。抽出結果のURLが0件の場合も`None`を返す。
-* 根拠: [try-exceptブロック] (行番号: 220〜223 / 抜粋: "except Exception:\n            # Error Handling: スタックトレースを含めてログ出力\n            logger.error(f"❌ 抽出失敗 ({target_url})", exc_info=True)\n            return None")
+* 根拠: [try-exceptブロック] (参照: YouTubeExtractor._extract_single_list / 抜粋: "except Exception:\n            # Error Handling: スタックトレースを含めてログ出力\n            logger.error(f"❌ 抽出失敗 ({target_url})", exc_info=True)\n            return None")
 
 
 ### `YouTubeExtractor.extract_iter`
@@ -235,7 +235,7 @@
 
 
 * **エラーハンドリング**: プレイリスト一覧取得時（`/playlists`）の例外を`except Exception`で捕捉し、スタックトレース付きでエラーログを出力した上で`last_extract_internal_failures`を1加算する（処理は中断されるがメソッド自体は正常終了）。個々の`_extract_single_list`呼び出しの失敗（`None`が返る場合）は`yield`をスキップし、プレイリスト取得（`pl_url`が存在する場合）に限り`last_extract_internal_failures`を1加算する。
-* 根拠: [try-exceptブロックと失敗カウント] (行番号: 297〜299 / 抜粋: "except Exception:\n                logger.error("❌ プレイリスト一覧の取得に失敗しました", exc_info=True)\n                self.last_extract_internal_failures += 1")
+* 根拠: [try-exceptブロックと失敗カウント] (参照: YouTubeExtractor.extract_iter / 抜粋: "except Exception:\n                logger.error("❌ プレイリスト一覧の取得に失敗しました", exc_info=True)\n                self.last_extract_internal_failures += 1")
 
 
 ### `FileManager._sanitize_filename`（退役済み）
@@ -244,13 +244,13 @@
   委譲するだけの薄いラッパーであったため撤去され、現在は22行目の`from file_utils import sanitize_filename as _shared_sanitize_filename`で
   取り込んだモジュールレベルのエイリアスを、`FileManager.save`が348〜349行目で直接呼び出す形に変わっている
   （`max_length=100`は呼び出し側で指定する）。`FileManager`(310〜378行目)が持つメソッドは`save`(314〜378行目)のみである。
-* 根拠: [importエイリアス] (行番号: 22 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename")、[呼び出し箇所] (行番号: 348〜349 / 抜粋: "safe_channel = _shared_sanitize_filename(result.channel_name, max_length=100)")
+* 根拠: [importエイリアス] (行番号: 22 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename")、[呼び出し箇所] (参照: FileManager.save / 抜粋: "safe_channel = _shared_sanitize_filename(result.channel_name, max_length=100)")
 
 
 ### `FileManager.save`（D-L10で変更）
 
 * **役割**: `ExtractionResult`の抽出結果（チャンネル名・タイトルをサニタイズしたファイル名）をテキストファイルへ1行1URL形式で保存するインスタンスメソッド。**（Issue #243で修正）** 保存先ディレクトリは、引数`base_dir`が渡されればそれをそのまま使い、省略された場合のみ`AppConfig.get_output_base_dir()`を遅延評価で呼び出す。以前は`base_dir`引数が存在せず常に本メソッド内で`get_output_base_dir()`を呼んでいたため、1回の巡回/1URLから複数の`ExtractionResult`が保存される場合に、NASマウント確認・自己修復・障害通知を伴う重い処理が保存件数分だけ再評価されていた不具合の修正である。**（Issue #175で修正）** ファイル名は`{safe_channel}_{safe_title}.txt`という形式で2つのサニタイズ済み文字列を連結するため、以前のように各コンポーネントを`_sanitize_filename`の既定値（200バイト）のまま切り詰めると、連結後のファイル名が最大`200+1+200+4=405`バイトとなりext4等の255バイト制限を確実に超過し`ENAMETOOLONG`で保存が失敗しうる不具合があった。現在はチャンネル名・タイトルの双方に`max_length=100`（バイト）を明示的に指定し、連結後も255バイト以内（`100+1+100+4=205`バイト、安全マージンあり）に収まるようにしている。**（D-L10で修正）** ファイル書き込みは以前`output_path.open("w", ...)`による直接上書きだったため、NAS瞬断等で書き込み中にプロセスが中断すると、同名ファイルが既に存在するケース（チャンネル名/タイトルの重複）で中身が空/一部だけの壊れたファイルが残ってしまいうった。`newface_monitor.py`/`batch_download_discord.py`の他の永続化と同じ「`.tmp`へ書き込み→`replace`」のアトミックパターンに揃えた。
-* 根拠: [メソッド定義とDocstring] (行番号: 318〜382 / 抜粋: "def save(self, result: ExtractionResult, base_dir: Optional[Path] = None) -> bool:\n        """抽出結果をテキストファイルに保存する。")、バイト数配分 (行番号: 355〜359 / 抜粋: "#175: 各コンポーネントを既定のmax_length(200バイト)のまま連結すると")、[D-L10: tmp+replaceのコメント] (行番号: 369〜375 / 抜粋: "# D-L10: 以前はoutput_path.open("w", ...)で直接上書きしていたため、\n        # 書き込み中(NAS瞬断等)にプロセスが中断すると" / "tmp_path = output_path.with_suffix(output_path.suffix + '.tmp')")
+* 根拠: [メソッド定義とDocstring] (行番号: 318〜382 / 抜粋: "def save(self, result: ExtractionResult, base_dir: Optional[Path] = None) -> bool:\n        """抽出結果をテキストファイルに保存する。")、バイト数配分 (参照: FileManager.save / 抜粋: "#175: 各コンポーネントを既定のmax_length(200バイト)のまま連結すると")、[D-L10: tmp+replaceのコメント] (参照: FileManager.save / 抜粋: "# D-L10: 以前はoutput_path.open("w", ...)で直接上書きしていたため、\n        # 書き込み中(NAS瞬断等)にプロセスが中断すると" / "tmp_path = output_path.with_suffix(output_path.suffix + '.tmp')")
 
 
 * **引数/リクエスト**: `result: ExtractionResult`（保存対象の抽出データ）, `base_dir: Optional[Path] = None`（**Issue #243で追加**。保存先のベースディレクトリ。省略時は`AppConfig.get_output_base_dir()`を内部で呼び出して取得する）。**（Issue #413 D-L11で修正済み）** Docstringが以前言及していた呼び出し元`process_subscriptions()`（`SubscriptionManager`）は削除済みであり、現在のDocstringは`UrlExtractorApp.run()`のみを参照する。
@@ -421,7 +421,7 @@ graph TD
 * 根拠: [正規表現定義] (行番号: 172 / 抜粋: "return bool(re.search(r"youtube\\.com/(@[\\w\\-\\.]+|channel/[\\w\\-]+|c/[\\w\\-]+|user/[\\w\\-]+)$", clean_url))")
 
 * **（Issue #535 で修正）** 設定されるだけで一度も読まれなかった `ExtractionResult.is_playlist` フィールド(および `extract_iter` 内の代入)と、`file_utils.sanitize_filename` をそのまま呼ぶだけだった `FileManager._sanitize_filename` を削除した。`FileManager.save` は共有関数 `_shared_sanitize_filename` を直接呼ぶ。`last_extract_internal_failures` は本番コードでは読まれないが、内部失敗件数の回帰テスト(`test_extract_youtube_urls_rate_limit.py`)が参照する観測用属性として残している。
-* 根拠: (行番号: 344〜345 / 抜粋: "safe_channel = _shared_sanitize_filename(result.channel_name, max_length=100)")、`extract_youtube_urls.py` 全体に `is_playlist` / `def _sanitize_filename` が無いこと
+* 根拠: (参照: FileManager.save / 抜粋: "safe_channel = _shared_sanitize_filename(result.channel_name, max_length=100)")、`extract_youtube_urls.py` 全体に `is_playlist` / `def _sanitize_filename` が無いこと
 
 ## 9. 不明事項一覧
 

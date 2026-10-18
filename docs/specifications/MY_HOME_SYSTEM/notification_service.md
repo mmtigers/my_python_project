@@ -172,7 +172,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 
 * **エラーハンドリング**: 各送信関数の戻り値を確認し、失敗時はログ出力を行い `success` フラグをFalseにする。LINE送信が必要な場合に`user_id`も`config.LINE_USER_ID`も解決できなければエラーログを出力して`success`をFalseにする(LINE送信自体は試みない)。LINE失敗時はDiscordへフォールバック送信を実行する。
-* 根拠: [条件分岐] (行番号: 146〜161 / 抜粋: "resolved_user_id = user_id or getattr(config, \"LINE_USER_ID\", None)\n        if not resolved_user_id:\n            logger.error(...)")
+* 根拠: [条件分岐] (参照: send_push / 抜粋: "resolved_user_id = user_id or getattr(config, \"LINE_USER_ID\", None)\n        if not resolved_user_id:\n            logger.error(...)")
 
 
 

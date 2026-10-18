@@ -81,7 +81,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: (行番号: 41 / 抜粋: "-> None:")
+* 根拠: (参照: _record / 抜粋: "-> None:")
 
 
 * **副作用**: `mfujin_blog_notifications`テーブルへのINSERT/UPDATE(`get_db_cursor(commit=True)`経由)。

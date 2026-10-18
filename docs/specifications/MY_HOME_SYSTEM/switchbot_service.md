@@ -107,7 +107,7 @@
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` (APIレスポンスのJSONパース結果)
-* 根拠: `post_switchbot_api` (行番号: 51 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: `post_switchbot_api` (参照: post_switchbot_api / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: 外部APIへのデータ送信（デバイスの操作など）
@@ -115,7 +115,7 @@
 
 
 * **エラーハンドリング**: HTTPエラーステータスが返却された場合、`response.raise_for_status()` により例外を送出。
-* 根拠: `raise_for_status` (行番号: 54 / 抜粋: "response.raise_for_status()")
+* 根拠: `raise_for_status` (参照: post_switchbot_api / 抜粋: "response.raise_for_status()")
 
 
 
@@ -134,7 +134,7 @@
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` (送信結果のレスポンス、失敗時はNone)
-* 根拠: `send_device_command` (行番号: 58 / 抜粋: "-> Optional[Dict[str, Any]]:")
+* 根拠: `send_device_command` (参照: send_device_command / 抜粋: "-> Optional[Dict[str, Any]]:")
 
 
 * **副作用**: APIへのPOSTリクエスト呼び出し、失敗時のエラーログ出力
@@ -142,7 +142,7 @@
 
 
 * **エラーハンドリング**: 実行中の任意の例外（`Exception`）をキャッチし、エラーログを出力して `None` を返す。
-* 根拠: `except Exception as e` (行番号: 74〜76 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (参照: send_device_command / 抜粋: "except Exception as e:")
 
 
 
@@ -164,7 +164,7 @@
 ### `trigger_tv_unlock`（毎朝ミッション統合で追加）
 
 * **役割**: TVプラグ（`config.TV_PLUG_DEVICE_ID`）の電源をONにする処理を、デーモンスレッド上で非同期・Fail-Softに実行する共有ヘルパー。元は`services/quest/quest_service.py`の`QuestService._trigger_tv_unlock`（クエスト承認時のTVロック解除専用）だったが、`services/routine_service.py`（朝の準備チェックリスト全項目達成時）でも同じ処理が必要になったため本ファイルへ切り出され、両呼び出し元から共有される。呼び出し元は事前に`config.TV_PLUG_DEVICE_ID`が設定されているかを確認する必要があり、本関数自体はその設定有無をガードしない（切り出し前の`QuestService._trigger_tv_unlock`の挙動をそのまま踏襲）。
-* 根拠: `trigger_tv_unlock` (行番号: 261〜296 / 抜粋: "def trigger_tv_unlock(context: str) -> None:")、切り出し元に関する説明 (行番号: 97〜100 / 抜粋: "quest_service(クエスト承認時のTVロック解除)・routine_service(朝の準備\n    チェックリスト全項目達成時)など、複数の呼び出し元から共有される処理。")
+* 根拠: `trigger_tv_unlock` (行番号: 261〜296 / 抜粋: "def trigger_tv_unlock(context: str) -> None:")、切り出し元に関する説明 (参照: trigger_tv_unlock / 抜粋: "quest_service(クエスト承認時のTVロック解除)・routine_service(朝の準備\n    チェックリスト全項目達成時)など、複数の呼び出し元から共有される処理。")
 
 
 * **引数/リクエスト**: `context`: `str`（ログ出力にのみ使う識別用の文字列。例: `"quest_id=101"`、`"朝の準備チェックリスト全項目達成"`）
@@ -172,15 +172,15 @@
 
 
 * **戻り値/レスポンス**: `None`（結果はログ出力とFail-Soft通知のみで呼び出し元へは返さない。TV電源ONの成否を呼び出し元が同期的に知る手段はない）
-* 根拠: `trigger_tv_unlock` (行番号: 94 / 抜粋: "-> None:")
+* 根拠: `trigger_tv_unlock` (参照: trigger_tv_unlock / 抜粋: "-> None:")
 
 
 * **副作用**: `daemon=True`の`threading.Thread`を起動し、その中で`send_device_command(config.TV_PLUG_DEVICE_ID, "turnOn")`を呼び出す。成功時は情報ログのみ。失敗時（`send_device_command`が`None`または`statusCode`が100以外を返した場合、または例外発生時）はエラーログを出力し、さらに`config.LINE_PARENTS_GROUP_ID`が設定されていれば`notification_service.send_push`で親グループへLINE通知を送る。呼び出し元スレッド（APIルーティング処理）はこのスレッド起動をブロックしない。
-* 根拠: `unlock_task` 定義とスレッド起動 (行番号: 276〜292 / 抜粋: "def unlock_task():\n        logger.info(f\"📺 Initiating TV Unlock (Turn ON) for {context}\")"), スレッド起動 (行番号: 295〜296 / 抜粋: "t = threading.Thread(target=unlock_task, daemon=True)\n    t.start()"), Fail-Soft通知 (行番号: 116〜121 / 抜粋: "if config.LINE_PARENTS_GROUP_ID:\n                msg = \"⚠️ テレビの電源ON（自動ロック解除）に失敗しました。お手数ですが、SwitchBotアプリ等から手動でつけてあげてください。\"\n                notification_service.send_push(")
+* 根拠: `unlock_task` 定義とスレッド起動 (行番号: 276〜292 / 抜粋: "def unlock_task():\n        logger.info(f\"📺 Initiating TV Unlock (Turn ON) for {context}\")"), スレッド起動 (行番号: 295〜296 / 抜粋: "t = threading.Thread(target=unlock_task, daemon=True)\n    t.start()"), Fail-Soft通知 (参照: trigger_tv_unlock / 抜粋: "if config.LINE_PARENTS_GROUP_ID:\n                msg = \"⚠️ テレビの電源ON（自動ロック解除）に失敗しました。お手数ですが、SwitchBotアプリ等から手動でつけてあげてください。\"\n                notification_service.send_push(")
 
 
 * **エラーハンドリング**: `unlock_task`内で`send_device_command`の戻り値が偽値または`statusCode != 100`の場合は`Exception`を送出して直後の`except Exception as e:`で捕捉し、任意の例外（`send_device_command`自体が投げうる例外も含む）をエラーログ出力とFail-Soft通知（LINE Push失敗時の例外は捕捉しない）で処理する。デーモンスレッド内で例外が伝播してもプロセス全体やAPIルーティングには影響しない。
-* 根拠: `raise Exception` (行番号: 283 / 抜粋: "raise Exception(f\"API returned error: {res}\")")、`except Exception as e` (行番号: 113〜114 / 抜粋: "except Exception as e:\n            logger.error(f\"❌ TV Unlock failed: {e}\")")
+* 根拠: `raise Exception` (行番号: 283 / 抜粋: "raise Exception(f\"API returned error: {res}\")")、`except Exception as e` (参照: trigger_tv_unlock / 抜粋: "except Exception as e:\n            logger.error(f\"❌ TV Unlock failed: {e}\")")
 
 
 ### `create_switchbot_auth_headers`
@@ -202,7 +202,7 @@
 
 
 * **エラーハンドリング**: トークンまたはシークレットが設定されていない場合、警告を出力して空の辞書を返す。
-* 根拠: `if not token or not secret:` (行番号: 84〜86 / 抜粋: "if not token or not secret:")
+* 根拠: `if not token or not secret:` (参照: create_switchbot_auth_headers / 抜粋: "if not token or not secret:")
 
 
 
@@ -217,11 +217,11 @@
 
 
 * **戻り値/レスポンス**: `bool` (処理の成功・失敗)
-* 根拠: `fetch_device_name_cache` (行番号: 184 / 抜粋: "-> bool:")
+* 根拠: `fetch_device_name_cache` (参照: fetch_device_name_cache / 抜粋: "-> bool:")
 
 
 * **副作用**: `_device_cache_lock`保持下でのグローバル変数 `DEVICE_NAME_CACHE` の追加更新（マージ）。インフォメーションおよびエラーログ出力。APIへのGETリクエスト（ロック外）。
-* 根拠: `global DEVICE_NAME_CACHE` (行番号: 330 / 抜粋: "global DEVICE_NAME_CACHE")、[ロック保持下でのマージ] (行番号: 145〜147 / 抜粋: "with _device_cache_lock:\n                DEVICE_NAME_CACHE.update(new_names)")
+* 根拠: `global DEVICE_NAME_CACHE` (行番号: 330 / 抜粋: "global DEVICE_NAME_CACHE")、[ロック保持下でのマージ] (参照: fetch_device_name_cache / 抜粋: "with _device_cache_lock:\n                DEVICE_NAME_CACHE.update(new_names)")
 
 
 * **エラーハンドリング**:
@@ -229,7 +229,7 @@
 * APIレスポンスが `None` の場合（Fail-Soft時）は `False` を返す。
 * `statusCode` が100以外の場合はエラーログを出力し `False` を返す。
 * 任意の例外発生時はエラーログを出力し `False` を返す。
-* 根拠: `except Exception as e` (行番号: 154 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (参照: fetch_device_name_cache / 抜粋: "except Exception as e:")
 
 
 
@@ -239,11 +239,11 @@
 * 根拠: (行番号: 27〜28, 168〜174 / 抜粋: "retry_due = (\n            _last_fetch_attempt_at is None\n            or (now - _last_fetch_attempt_at) >= DEVICE_NAME_FETCH_RETRY_SEC\n        )")
 
 * **役割**: `DEVICE_NAME_CACHE` から指定されたデバイスIDに対応するデバイス名を取得する。**（Issue #439で修正）** 「キャッシュが空かつ未試行かをチェックしてから`_fetch_attempted`を立てる」処理と、最終的なキャッシュ読み取りは、いずれも`_device_cache_lock`保持下で行うよう修正された。以前はロード無しでこのチェックを行っており、Webhookリクエストが集中する起動直後に複数スレッドが同時に「キャッシュ空・未試行」と判定してしまい、`fetch_device_name_cache`（SwitchBotのデバイス一覧API呼び出し）が並行して複数回走りうる状態だった。ネットワークI/Oを伴う`fetch_device_name_cache()`自体の呼び出しは、`_device_cache_lock`を一度解放してから（ロックの外側で）行う。
-* 根拠: `get_device_name_by_id` (行番号: 369〜385 / 抜粋: "def get_device_name_by_id(device_id: str) -> Optional[str]:")、[ロック下でのcheck-and-set] (行番号: 161〜164 / 抜粋: "with _device_cache_lock:\n        should_fetch = not DEVICE_NAME_CACHE and not _fetch_attempted\n        if should_fetch:\n            _fetch_attempted = True")、[ロック外での遅延ロード呼び出し] (行番号: 165〜167 / 抜粋: "if should_fetch:\n        # APIリクエスト(ネットワークI/O)は_device_cache_lock保持中に行わない\n        fetch_device_name_cache()")、[ロック下での最終読み取り] (行番号: 168〜169 / 抜粋: "with _device_cache_lock:\n        return DEVICE_NAME_CACHE.get(device_id, None)")
+* 根拠: `get_device_name_by_id` (行番号: 369〜385 / 抜粋: "def get_device_name_by_id(device_id: str) -> Optional[str]:")、[ロック下でのcheck-and-set] (参照: get_device_name_by_id / 抜粋: "with _device_cache_lock:\n        should_fetch = not DEVICE_NAME_CACHE and not _fetch_attempted\n        if should_fetch:\n            _fetch_attempted = True")、[ロック外での遅延ロード呼び出し] (参照: get_device_name_by_id / 抜粋: "if should_fetch:\n        # APIリクエスト(ネットワークI/O)は_device_cache_lock保持中に行わない\n        fetch_device_name_cache()")、[ロック下での最終読み取り] (参照: get_device_name_by_id / 抜粋: "with _device_cache_lock:\n        return DEVICE_NAME_CACHE.get(device_id, None)")
 
 
 * **引数/リクエスト**: `device_id`: `str` (デバイスID)
-* 根拠: `get_device_name_by_id` (行番号: 158 / 抜粋: "device_id: str")
+* 根拠: `get_device_name_by_id` (参照: get_device_name_by_id / 抜粋: "device_id: str")
 
 
 * **戻り値/レスポンス**: `Optional[str]` (見つかった場合はデバイス名、存在しない場合はNone)
@@ -251,7 +251,7 @@
 
 
 * **副作用**: `_device_cache_lock`保持下での`DEVICE_NAME_CACHE`/`_fetch_attempted`の読み取り・書き込み、`DEVICE_NAME_CACHE` が空かつ未試行(`_fetch_attempted`が`False`)の場合、`fetch_device_name_cache()` を1回だけ呼び出して遅延ロードを試みる（**#411 S-L2で追加**: 以前は `fetch_device_name_cache` の呼出元がどこにも無く、`DEVICE_NAME_CACHE` は常に空のままだったため、`devices.json` に登録の無いセンサーからのWebhookは常に `Unknown_<mac>` 表示になっていた）。プロセス起動後の初回呼出し(＝最初のWebhook受信)時にのみ発火し、成否に関わらず以後は再試行しない。
-* 根拠: `get_device_name_by_id` (行番号: 161〜167 / 抜粋: "with _device_cache_lock:\n        should_fetch = not DEVICE_NAME_CACHE and not _fetch_attempted")
+* 根拠: `get_device_name_by_id` (参照: get_device_name_by_id / 抜粋: "with _device_cache_lock:\n        should_fetch = not DEVICE_NAME_CACHE and not _fetch_attempted")
 
 
 * **エラーハンドリング**: なし（辞書の `get` メソッドによりKeyErrorを回避）。遅延ロード自体が失敗しても`fetch_device_name_cache`内で例外は握り潰され`False`が返るのみで、本関数は`None`を返す。
@@ -266,11 +266,11 @@
 
 
 * **引数/リクエスト**: `device_id`: `str` (対象デバイスのID)
-* 根拠: `get_device_status` (行番号: 171 / 抜粋: "device_id: str")
+* 根拠: `get_device_status` (参照: get_device_status / 抜粋: "device_id: str")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` (取得したステータス辞書、失敗時はNone)
-* 根拠: `get_device_status` (行番号: 171 / 抜粋: "-> Optional[Dict[str, Any]]:")
+* 根拠: `get_device_status` (参照: get_device_status / 抜粋: "-> Optional[Dict[str, Any]]:")
 
 
 * **副作用**: APIへのGETリクエスト呼び出し、失敗時のエラーログ出力
@@ -278,7 +278,7 @@
 
 
 * **エラーハンドリング**: 実行中の任意の例外（`Exception`）をキャッチし、エラーログを出力して `None` を返す。
-* 根拠: `except Exception as e` (行番号: 182〜184 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (参照: get_device_status / 抜粋: "except Exception as e:")
 
 
 

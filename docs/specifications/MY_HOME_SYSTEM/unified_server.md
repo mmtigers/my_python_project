@@ -152,7 +152,7 @@
 
 
 * **エラーハンドリング**: NASパスプリウォーム失敗時の例外(`Exception`)は捕捉しエラーログ出力のうえ起動を継続する。**マイグレーション適用失敗時の例外(`Exception`)は、捕捉した上で`migration_ok = False`とし`logger.critical`（Discord通知経由）でCRITICALログを出力するのみで、起動そのものは継続する（`lifespan`は例外を再送出せず`yield`まで到達する）ものの、直後の`if migration_ok:`分岐によりcamera_monitor/schedulerの子プロセスも死活監視ループも起動されない**（Issue #383。以前は`logger.error`でエラーログを出すだけで握りつぶし、子プロセスの起動を含めてサービス継続していたが、この挙動は廃止されている）。子プロセスの起動失敗は`_spawn_child_process`内の`try/except Exception`で捕捉され`logger.error`を出して`None`を返す（Issue #360でcamera_monitor起動もscheduler同様に保護）。監視ループのcancel時の`CancelledError`は捕捉して握りつぶす。プロセス停止時のタイムアウト(`subprocess.TimeoutExpired`)も捕捉し、強制`kill()`へフォールバックする。
-* 根拠: `except Exception as e: logger.error(f"⚠️ NAS path prewarm failed...")` (行番号: 254-255 / 抜粋: "NAS path prewarm failed"), `except Exception as e: ... logger.critical(` (行番号: 268-274 / 抜粋: "🚨 Migration failed at startup"), `if migration_ok:` (行番号: 286 / 抜粋: "if migration_ok:"), `except (asyncio.CancelledError, Exception):` (行番号: 309 / 抜粋: "except (asyncio.CancelledError, Exception):"), `except subprocess.TimeoutExpired` (行番号: 305, 314 / 抜粋: "except subprocess.TimeoutExpired")
+* 根拠: `except Exception as e: logger.error(f"⚠️ NAS path prewarm failed...")` (参照: lifespan / 抜粋: "NAS path prewarm failed"), `except Exception as e: ... logger.critical(` (参照: lifespan / 抜粋: "🚨 Migration failed at startup"), `if migration_ok:` (行番号: 286 / 抜粋: "if migration_ok:"), `except (asyncio.CancelledError, Exception):` (行番号: 309 / 抜粋: "except (asyncio.CancelledError, Exception):"), `except subprocess.TimeoutExpired` (行番号: 305, 314 / 抜粋: "except subprocess.TimeoutExpired")
 
 
 
@@ -190,7 +190,7 @@
 
 
 * **戻り値/レスポンス**: `Response`（`call_next` の結果にヘッダーを追記したもの）
-* 根拠: `return response` (行番号: 393 / 抜粋: "return response")
+* 根拠: `return response` (参照: security_headers_middleware / 抜粋: "return response")
 
 
 * **副作用**: レスポンスヘッダーの追加のみ。ログ出力・I/Oは行わない。
@@ -212,7 +212,7 @@
 
 
 * **戻り値/レスポンス**: `Response` (後続の処理結果)
-* 根拠: `-> Response:` (行番号: 254 / 抜粋: "-> Response:")
+* 根拠: `-> Response:` (参照: ip_restriction_middleware / 抜粋: "-> Response:")
 
 
 * **副作用**: 外部ネットワークからのアクセス判定時(`logger.info`)のログ出力。
@@ -235,7 +235,7 @@
 
 
 * **戻り値/レスポンス**: `JSONResponse` (HTTP 500, `{"detail": "Internal Server Error"}`のみ)。例外の詳細文字列(`str(exc)`)はレスポンスボディに含めず、ログにのみ出力する。
-* 根拠: `return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})` (行番号: 327-330 / 抜粋: "content={"detail": "Internal Server Error"}")
+* 根拠: `return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})` (参照: global_exception_handler / 抜粋: "content={"detail": "Internal Server Error"}")
 
 
 * **副作用**: エラーログへのスタックトレース出力。
@@ -258,7 +258,7 @@
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
-* 根拠: `return FileResponse(target_fil` (行番号: 557 / 抜粋: "return FileResponse(target_file"), `return JSONResponse(status_code` (行番号: 374 / 抜粋: "return JSONResponse(status_code")
+* 根拠: `return FileResponse(target_fil` (行番号: 557 / 抜粋: "return FileResponse(target_file"), `return JSONResponse(status_code` (参照: serve_quest_spa / 抜粋: "return JSONResponse(status_code")
 
 
 * **副作用**: なし
@@ -266,7 +266,7 @@
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
-* 根拠: `if os.path.exists(index_path):` (行番号: 382-384 / 抜粋: "if os.path.exists(index_path):")
+* 根拠: `if os.path.exists(index_path):` (参照: serve_quest_spa / 抜粋: "if os.path.exists(index_path):")
 
 
 
@@ -281,7 +281,7 @@
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
-* 根拠: `return FileResponse(index_path)` (行番号: 395 / 抜粋: "return FileResponse(index_path)"), `return JSONResponse(status_code` (行番号: 396 / 抜粋: "return JSONResponse(status_code")
+* 根拠: `return FileResponse(index_path)` (参照: serve_quest_root / 抜粋: "return FileResponse(index_path)"), `return JSONResponse(status_code` (参照: serve_quest_root / 抜粋: "return JSONResponse(status_code")
 
 
 * **副作用**: なし
@@ -289,7 +289,7 @@
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
-* 根拠: `if os.path.exists(index_path):` (行番号: 394-396 / 抜粋: "if os.path.exists(index_path):")
+* 根拠: `if os.path.exists(index_path):` (参照: serve_quest_root / 抜粋: "if os.path.exists(index_path):")
 
 
 
@@ -304,7 +304,7 @@
 
 
 * **戻り値/レスポンス**: `dict` (status, system, timeキーを含む)
-* 根拠: `return { "status": "ok", ... }` (行番号: 405-409 / 抜粋: "return {")
+* 根拠: `return { "status": "ok", ... }` (参照: root / 抜粋: "return {")
 
 
 * **副作用**: なし

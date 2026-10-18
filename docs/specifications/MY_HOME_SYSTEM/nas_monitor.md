@@ -122,7 +122,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 43 / 抜粋: "-> None:")
+* 根拠: `-> None:` (参照: _save_state / 抜粋: "-> None:")
 
 
 * **副作用**: ローカルファイルへの書き込み。
@@ -148,11 +148,11 @@
 
 
 * **副作用**: 外部プロセス(`ping`コマンド)の実行。
-* 根拠: `subprocess.run(cmd, ...)` (行番号: 55〜59 / 抜粋: "res = subprocess.run(")
+* 根拠: `subprocess.run(cmd, ...)` (参照: check_ping / 抜粋: "res = subprocess.run(")
 
 
 * **エラーハンドリング**: `Exception`を捕捉し、エラーログ出力後`False`を返す。
-* 根拠: `except Exception as e:` (行番号: 61〜63 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` (参照: check_ping / 抜粋: "except Exception as e:")
 
 
 
@@ -182,7 +182,7 @@
 ### 関数 `check_write_permission`
 
 * **役割**: NASのマウント先(`self.mount_point`直下の`.write_test.<pid>.<ns>`、試行ごとに一意なファイル名)に対し、別プロセス(`sys.executable -c`)でopen/write/close/removeを実行して書き込み権限を確認する。CIFSマウントのストールで本体プロセスが巻き込まれてハングしないよう、サブプロセスをタイムアウト付きで待ち受ける。タイムアウト発生時は最大`self.write_check_retries`回(総試行回数)までExponential Backoff（`2 ** attempt`秒、0-indexed、上限なし）で再試行する。**Issue #292**で、リトライループの機構自体を共通ユーティリティ`core.utils.retry_with_backoff`(`config.py`の`verify_and_initialize_storage`と共用)に委譲するようリファクタリングされたが、`write_check_retries`が「総試行回数」を意味する既存の属性名との整合を保つため、`retry_with_backoff`へは`max_retries=self.write_check_retries - 1`(初回を含まない追加リトライ回数)を渡している。リトライ対象は`subprocess.TimeoutExpired`のみで、`CalledProcessError`/`OSError`は従来どおりリトライしない(挙動そのものは変更していない純粋なリファクタリング)。
-* 根拠: `def check_write_permission(self) -> bool:` (行番号: 127〜197 / 抜粋: "def check_write_permission(self) -> bool:")、`retry_with_backoff(...)`呼び出し (行番号: 142〜148 / 抜粋: "retry_with_backoff(\n                _attempt,\n                max_retries=self.write_check_retries - 1,\n                retryable_exceptions=(subprocess.TimeoutExpired,),")
+* 根拠: `def check_write_permission(self) -> bool:` (行番号: 127〜197 / 抜粋: "def check_write_permission(self) -> bool:")、`retry_with_backoff(...)`呼び出し (参照: check_write_permission / 抜粋: "retry_with_backoff(\n                _attempt,\n                max_retries=self.write_check_retries - 1,\n                retryable_exceptions=(subprocess.TimeoutExpired,),")
 
 
 * **引数/リクエスト**: なし
@@ -213,7 +213,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 157 / 抜粋: "-> None:")
+* 根拠: `-> None:` (参照: sync_fallback_data / 抜粋: "-> None:")
 
 
 * **副作用**: 外部プロセス(`rsync`コマンド)の実行、元ファイル(`fallback_dir/assets`配下のみ)の削除、外部APIによるプッシュ通知送信。
@@ -236,7 +236,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 211 / 抜粋: "-> None:")
+* 根拠: `-> None:` (参照: _cleanup_empty_dirs / 抜粋: "-> None:")
 
 
 * **副作用**: ディレクトリの削除（ファイルシステム操作）。失敗時（`ENOTEMPTY`以外）は`logger.warning`によるログ出力。
@@ -244,7 +244,7 @@
 
 
 * **エラーハンドリング**: **（Issue #450 で修正）** 以前は`OSError`を捕捉し`pass`することで、空でないディレクトリの削除失敗（想定内のENOTEMPTY）だけでなく、権限エラー等それ以外のOSErrorも種別を問わず一律で握りつぶしていた。現在は捕捉した`OSError`の`e.errno`を調べ、`errno.ENOTEMPTY`(ディレクトリが空でない、想定内のケース)のみ無視し、それ以外は`logger.warning(f"空ディレクトリの削除に失敗しました: {dir_path}: {e}")`でログに残す。
-* 根拠: `except OSError as e:` (行番号: 218 / 抜粋: "except OSError as e:\n                    # #450: 「ディレクトリが空でない」は無視してよい想定内のケースだが、\n                    # 権限エラー等それ以外のOSErrorは種別を問わず握りつぶしていたため\n                    # 気づけなかった。ENOTEMPTY以外はログに残す。\n                    if e.errno != errno.ENOTEMPTY:\n                        logger.warning(f\"空ディレクトリの削除に失敗しました: {dir_path}: {e}\")")
+* 根拠: `except OSError as e:` (参照: _cleanup_empty_dirs / 抜粋: "except OSError as e:\n                    # #450: 「ディレクトリが空でない」は無視してよい想定内のケースだが、\n                    # 権限エラー等それ以外のOSErrorは種別を問わず握りつぶしていたため\n                    # 気づけなかった。ENOTEMPTY以外はログに残す。\n                    if e.errno != errno.ENOTEMPTY:\n                        logger.warning(f\"空ディレクトリの削除に失敗しました: {dir_path}: {e}\")")
 
 
 
@@ -267,7 +267,7 @@
 
 
 * **エラーハンドリング**: `Exception`を捕捉し、エラーログ出力後`None`を返す。
-* 根拠: `except Exception as e:` (行番号: 139〜141 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` (参照: get_disk_usage / 抜粋: "except Exception as e:")
 
 
 
@@ -286,7 +286,7 @@
 
 
 * **副作用**: 保持期間を超えたファイルの削除（ファイルシステム操作）。
-* 根拠: `os.remove(path)` (行番号: 250 / 抜粋: "os.remove(path)")
+* 根拠: `os.remove(path)` (参照: cleanup_old_files / 抜粋: "os.remove(path)")
 
 
 * **エラーハンドリング**: ファイルの`mtime`/`size`取得や削除時に発生した`OSError`を個別に捕捉し、警告ログを出力してそのファイルをスキップする（処理全体は継続）。
@@ -297,7 +297,7 @@
 ### 関数 `run_retention_cleanup`
 
 * **（Issue #537 で修正）** 削除対象に「スナップショット(ローカル退避)」= `config.FALLBACK_ROOT/assets/snapshots`(`RECORDING_RETENTION_DAYS`、`.jpg`/`.jpeg`)を追加した。`camera_monitor` は起動時に NAS が落ちていると退避先に書き続け、`sync_fallback_data` は「異常→正常」遷移時にしか rsync しないため、それ以降の退避ファイルは誰にも掃除されず SD カードに蓄積していた。
-* 根拠: (行番号: 284〜286 / 抜粋: "(\"スナップショット(ローカル退避)\",\n             os.path.join(getattr(config, \"FALLBACK_ROOT\", \"\"), \"assets\", \"snapshots\"),")
+* 根拠: (参照: run_retention_cleanup / 抜粋: "(\"スナップショット(ローカル退避)\",\n             os.path.join(getattr(config, \"FALLBACK_ROOT\", \"\"), \"assets\", \"snapshots\"),")
 
 * **役割**: NVR録画・カメラスナップショット・タイムラプス動画・DBバックアップの4種類のディレクトリそれぞれについて、設定された保持日数を超えたファイルを`cleanup_old_files`経由で削除し、1件以上削除があった場合はまとめて通知を送信する。タイムラプス動画の削除対象パスは以前`config.ASSETS_DIR/timelapse`(NAS側)を指しており、実際の生成先(`monitors/smart_timelapse_generator.py`の`setup_directories`)であるローカルの`config.BASE_DIR/assets/timelapse`と食い違っていたため、誰も書かないNAS側ディレクトリを掃除し、誰も掃除しないローカルディレクトリにファイルが無限蓄積していた(Issue #171)。生成先と同じローカルパスに修正済み。DBバックアップ対象は以前拡張子`.db`のみに限定していたが、`DB_BACKUPS_DIR`は`services/backup_service.py`のDBダンプ(`.db`)と`_backup_config_files`によるDB以外の設定ファイルコピー(`config.py`/`.env`/`devices.json`。拡張子は`.py`/なし/`.json`)の両方の出力専用ディレクトリであるため、`.db`限定では設定ファイルのバックアップコピーが一切削除されず無限蓄積していた(Issue #191)。`DB_BACKUPS_DIR`はバックアップ専用ディレクトリであることを踏まえ、`extensions=None`(拡張子で絞り込まず全ファイル対象)に修正した。
 
@@ -306,7 +306,7 @@
 * **（Issue #359 で追加）** 削除対象に「録画VODキャッシュ」（`BASE_DIR/data/hls_streams/vod`、拡張子 `.ts`/`.m3u8`/`.txt`、保持日数 `config.HLS_VOD_RETENTION_DAYS`＝既定3日）を追加。`services/camera_service.py` の `generate_record_playlist` が生成するセグメントは1日分で数GB規模だが、以前はどこにも削除経路が無くローカル(SDカード)に無制限に蓄積していた。
 * 根拠: `("録画VODキャッシュ", os.path.join(getattr(config, "BASE_DIR", ""), "data", "hls_streams", "vod"), getattr(config, "HLS_VOD_RETENTION_DAYS", 3), (".ts", ".m3u8", ".txt"))` (行番号: 298〜300)
 * 根拠: `("タイムラプス動画", os.path.join(getattr(config, "BASE_DIR", ""), "assets", "timelapse"), ...)` (行番号: 266〜273)
-* 根拠: `("DBバックアップ", getattr(config, "DB_BACKUPS_DIR", None), ..., None)` とコメント (行番号: 274〜283 / 抜粋: "拡張子は .db に限らない")
+* 根拠: `("DBバックアップ", getattr(config, "DB_BACKUPS_DIR", None), ..., None)` とコメント (参照: run_retention_cleanup / 抜粋: "拡張子は .db に限らない")
 
 
 * **引数/リクエスト**: なし
@@ -314,7 +314,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 259 / 抜粋: "-> None:")
+* 根拠: `-> None:` (参照: run_retention_cleanup / 抜粋: "-> None:")
 
 
 * **副作用**: `cleanup_old_files`経由のファイル削除、`_run_db_row_retention` 経由の**SQLite の行の削除（`config.DB_ROW_RETENTION_ENABLED=true` のときのみ。既定はドライラン）**、および削除件数が1件以上あった場合の外部APIへのプッシュ通知送信。
@@ -322,7 +322,7 @@
 
 
 * **エラーハンドリング**: なし（対象ディレクトリが未設定(`falsy`)の場合は`continue`でその対象をスキップするのみ）。
-* 根拠: `if not directory: continue` (行番号: 288〜289 / 抜粋: "if not directory:\n continue")
+* 根拠: `if not directory: continue` (参照: run_retention_cleanup / 抜粋: "if not directory:\n continue")
 
 
 
@@ -355,7 +355,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 284 / 抜粋: "-> None:")
+* 根拠: `-> None:` (参照: save_to_db / 抜粋: "-> None:")
 
 
 * **副作用**: 外部ファイル(`core.database`)の関数呼び出しによるデータベース書き込み(`device_records`・`nas_records`の2テーブルへ、それぞれ独立した`save_log_generic`呼び出しで書き込む)。
@@ -385,7 +385,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 371 / 抜粋: "-> None:")
+* 根拠: `-> None:` (参照: run / 抜粋: "-> None:")
 
 
 * **副作用**: `save_to_db`呼び出し（毎回）、`send_push`呼び出し（異常検知時・容量不足時・定時レポート時）、`sync_fallback_data`呼び出し（復旧検知時）、`run_retention_cleanup`呼び出し（レポート時刻のみ、ファイル削除を伴う）、および`_save_state`によるステート保存。
@@ -495,8 +495,8 @@ flowchart TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `config.py` | NASのIP、マウントポイント、LINE ID、NVR録画/スナップショット/DBバックアップの各保持日数・ディレクトリなどの初期設定値全体を把握するため。 | 根拠: `getattr(config, "NAS_IP", ...)` (行番号: 26 / 抜粋: "getattr(config, "NAS_IP"...")、`getattr(config, "NVR_RECORD_DIR", ...)` (行番号: 173〜178) |
-| 中 | `services/notification_service.py` | `target="discord"`が内部でどのように処理・分岐されているか特定するため。 | 根拠: `send_push(...)` (行番号: 104〜108 / 抜粋: "target="discord", channel="report"") |
-| 中 | `core/database.py` | 引数で渡しているデータが実際にどのような型やテーブル構造で保存されているか確認するため。 | 根拠: `save_log_generic(...)` (行番号: 203〜214 / 抜粋: "save_log_generic(") |
+| 中 | `services/notification_service.py` | `target="discord"`が内部でどのように処理・分岐されているか特定するため。 | 根拠: `send_push(...)` (参照: run / 抜粋: "target="discord", channel="report"") |
+| 中 | `core/database.py` | 引数で渡しているデータが実際にどのような型やテーブル構造で保存されているか確認するため。 | 根拠: `save_log_generic(...)` (参照: NasMonitor.save_to_db / 抜粋: "save_log_generic(") |
 
 ## 8. 保守上の注意点
 

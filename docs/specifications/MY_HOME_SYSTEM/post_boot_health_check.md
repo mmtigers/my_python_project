@@ -199,7 +199,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 57〜63 / 抜粋: "self.results: List[CheckResult] = []")
+* 根拠: (参照: PostBootHealthCheck.__init__ / 抜粋: "self.results: List[CheckResult] = []")
 
 
 
@@ -245,7 +245,7 @@
 
 
 * **エラーハンドリング**: 任意の `Exception` を捕捉し `False` を返す。
-* 根拠: `except Exception:` (行番号: 77 / 抜粋: "except Exception:")
+* 根拠: `except Exception:` (参照: PostBootHealthCheck._check_http / 抜粋: "except Exception:")
 
 
 
@@ -268,7 +268,7 @@
 
 
 * **エラーハンドリング**: **（修正済み）** 以前は無条件の `except:`（bare except）だったが、`except Exception:` に修正され、`SystemExit`/`KeyboardInterrupt`/`GeneratorExit`（いずれも`BaseException`直下でPython3のbare exceptでも捕捉されてしまう）を誤って握りつぶさなくなった。通常の例外はすべて捕捉して `"不明"` を返す点は変わらない。
-* 根拠: `except Exception:` (行番号: 91 / 抜粋: "except Exception:")
+* 根拠: `except Exception:` (参照: PostBootHealthCheck._get_uptime / 抜粋: "except Exception:")
 
 
 
@@ -283,7 +283,7 @@
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ `CheckResult` を追加）
-* 根拠: `self.results.append(CheckResult(\n            "System Resource", final_status, f"CPU: {temp_msg} / Disk: {disk_msg}"\n        ))` (行番号: 132〜134 / 抜粋: "self.results.append(CheckResult(")
+* 根拠: `self.results.append(CheckResult(\n            "System Resource", final_status, f"CPU: {temp_msg} / Disk: {disk_msg}"\n        ))` (参照: PostBootHealthCheck.check_system_resources / 抜粋: "self.results.append(CheckResult(")
 
 
 * **副作用**: `vcgencmd` サブプロセス実行（`timeout=10`付き）、`shutil.disk_usage` によるディスク情報取得、`self.results` への追加。
@@ -298,7 +298,7 @@
 ### `PostBootHealthCheck.check_network_and_apis`
 
 * **役割**: `8.8.8.8` へのping疎通確認を行い、失敗時はネットワークエラーとして即座に結果を追加し処理を打ち切る。成功時はSwitchBot（`switchbot_service.create_switchbot_auth_headers()`による認証ヘッダー付き）とNatureRemo（`Authorization: Bearer`ヘッダー付き。**#411 品質で修正**: `config.NATURE_REMO_ACCESS_TOKEN`が未設定の場合、以前は`f"Bearer {config.NATURE_REMO_ACCESS_TOKEN}"`がそのまま`"Bearer None"`という実在しないトークンとして送信され、「未設定」ではなく「API NG」として誤報告していた。未設定時はNatureRemoのチェック自体を`api_targets`に含めずスキップする）のAPIへ、ステータスコード検証込みの`_check_http`で疎通確認し結果を追加する。
-* 根拠: `def check_network_and_apis(self):` (行番号: 145〜175 / 抜粋: "def check_network_and_apis(self):")、NatureRemoのスキップ判定 (行番号: 153〜158 / 抜粋: "if config.NATURE_REMO_ACCESS_TOKEN:")
+* 根拠: `def check_network_and_apis(self):` (行番号: 145〜175 / 抜粋: "def check_network_and_apis(self):")、NatureRemoのスキップ判定 (参照: PostBootHealthCheck.check_network_and_apis / 抜粋: "if config.NATURE_REMO_ACCESS_TOKEN:")
 
 
 * **引数/リクエスト**: `self` のみ
@@ -314,7 +314,7 @@
 
 
 * **エラーハンドリング**: **（修正済み）** ping失敗時（`except Exception:`。以前は無条件の bare `except:` だった）は `STATUS_ERR` を追加して即 `return`。個々のAPI呼び出しは `_check_http` 内部で例外・非2xx/3xxステータスの両方を判定し、失敗時は `api_ngs` リストに追加、全体としては処理を継続する。
-* 根拠: `except Exception:` (行番号: 141 / 抜粋: "except Exception:"), `if not self._check_http(url, headers=headers):` (行番号: 169 / 抜粋: "if not self._check_http(url, headers=headers):")
+* 根拠: `except Exception:` (参照: PostBootHealthCheck.check_network_and_apis / 抜粋: "except Exception:"), `if not self._check_http(url, headers=headers):` (行番号: 169 / 抜粋: "if not self._check_http(url, headers=headers):")
 
 
 
@@ -339,7 +339,7 @@
 
 
 * **エラーハンドリング**: DBファイル不在時は `STATUS_ERR` を追加して `return`。接続・クエリ実行中の任意の `Exception` を捕捉し `STATUS_ERR` とエラー内容を結果に追加する。
-* 根拠: `except Exception as e:` (行番号: 180 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` (参照: PostBootHealthCheck.check_database / 抜粋: "except Exception as e:")
 
 
 
@@ -385,7 +385,7 @@
 
 
 * **エラーハンドリング**: 明示的な例外捕捉はなし。`if target["critical"]:`の分岐で全リトライ失敗時のステータスを`STATUS_ERR`（`critical=True`）または`STATUS_WARN`（`critical=False`、現状到達しない）に振り分ける。
-* 根拠: `if target["critical"]:\n                status = STATUS_ERR\n                msg = "Failed"\n            else:\n                status = STATUS_WARN` (行番号: 219〜223 / 抜粋: "if target["critical"]:")
+* 根拠: `if target["critical"]:\n                status = STATUS_ERR\n                msg = "Failed"\n            else:\n                status = STATUS_WARN` (参照: PostBootHealthCheck._wait_for_service / 抜粋: "if target["critical"]:")
 
 
 
@@ -404,12 +404,12 @@
 
 
 * **副作用**: `os.path.ismount` によるマウント確認、テストファイルの書き込み・削除（NAS書き込みテスト）、`logger.error` 出力、`services.notification_service.send_push` によるDiscord即時通知（権限エラー時）、カメラへのポート疎通確認、`aplay -l`（`timeout=10`）/ `bluetoothctl info`（`stdin=subprocess.DEVNULL`, `timeout=15`）のサブプロセス実行、`self.results` への3件（NAS, Cameras, Speaker）の追加。
-* 根拠: `services.notification_service.send_push(\n                    messages=[...], target="discord",` (行番号: 249〜252 / 抜粋: "send_push(")
+* 根拠: `services.notification_service.send_push(\n                    messages=[...], target="discord",` (参照: PostBootHealthCheck.check_peripherals / 抜粋: "send_push(")
 * Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`引数が不要になったため、以前渡していた`user_id=getattr(config, "LINE_USER_ID", None)`は撤去された。
 
 
 * **エラーハンドリング**: NAS書き込みテストで `IOError`, `PermissionError` を捕捉し `STATUS_ERR` を設定・エラーログ出力・即時Discord通知を行う。カメラ設定が空の場合は `STATUS_WARN` とする。**（修正済み）** サウンドカード検出・Bluetooth接続確認処理は個別に `except Exception:` で保護されている（以前はいずれも無条件の bare `except:` だったが `except Exception:` に修正され、`SystemExit`/`KeyboardInterrupt`等を誤って捕捉しなくなった）。
-* 根拠: `except (IOError, PermissionError) as e:` (行番号: 244 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 275〜277 / 抜粋: "else:"), `except Exception: pass` (行番号: 323 / 抜粋: "except Exception: pass"), `except Exception:` (行番号: 315 / 抜粋: "except Exception:")
+* 根拠: `except (IOError, PermissionError) as e:` (行番号: 244 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 275〜277 / 抜粋: "else:"), `except Exception: pass` (行番号: 323 / 抜粋: "except Exception: pass"), `except Exception:` (参照: PostBootHealthCheck.check_peripherals / 抜粋: "except Exception:")
 
 
 
@@ -432,7 +432,7 @@
 
 
 * **エラーハンドリング**: ログファイル未存在時は `STATUS_WARN` を追加して `return`。`tail` コマンド実行失敗など全体の `Exception` を捕捉した場合は `logger.error` 出力に加え `STATUS_WARN` を結果に追加して `return`（行の走査自体を行わない）。各行の日時パース失敗（`ValueError`）はその行をスキップする。
-* 根拠: `except Exception as e:\n            logger.error(f"Log check failed: {e}")\n            self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))\n            return` (行番号: 328〜331 / 抜粋: "self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))"), `except ValueError:` (行番号: 378 / 抜粋: "except ValueError:")
+* 根拠: `except Exception as e:\n            logger.error(f"Log check failed: {e}")\n            self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))\n            return` (参照: PostBootHealthCheck.check_recent_logs / 抜粋: "self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))"), `except ValueError:` (行番号: 378 / 抜粋: "except ValueError:")
 
 
 
@@ -475,7 +475,7 @@
 
 
 * **副作用**: `logger.info` によるログ出力、各チェックメソッドの実行、`self._send_report()` の呼び出し。**（Issue #799 で追加）** `self.check_security_posture()` が `self.check_recent_logs()` と `self._send_report()` の間に入る。**（Issue #801 で追加）** その直後に `self.check_ai_model()` が入る。
-* 根拠: `self.check_network_and_apis()` 〜 `self._send_report()` (行番号: 413〜421 / 抜粋: "self.check_security_posture()")
+* 根拠: `self.check_network_and_apis()` 〜 `self._send_report()` (参照: PostBootHealthCheck.run / 抜粋: "self.check_security_posture()")
 
 
 * **エラーハンドリング**: なし（各チェックメソッド内部で個別に処理される前提）
@@ -498,7 +498,7 @@
 
 
 * **副作用**: `self._get_uptime()` の呼び出し、`logger.info` によるレポート全文のログ出力、`services.notification_service.send_push` によるDiscord通知送信。
-* 根拠: `services.notification_service.send_push(\n            messages=[{"type": "text", "text": f"{title}\n\n{body}"}],\n            target="discord",\n            channel="report"\n        )` (行番号: 400〜404 / 抜粋: "send_push(")
+* 根拠: `services.notification_service.send_push(\n            messages=[{"type": "text", "text": f"{title}\n\n{body}"}],\n            target="discord",\n            channel="report"\n        )` (参照: PostBootHealthCheck._send_report / 抜粋: "send_push(")
 
 
 * **エラーハンドリング**: なし

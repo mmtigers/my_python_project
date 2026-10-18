@@ -97,7 +97,7 @@
 ### `update_line_webhook`
 
 * **役割**: LINE Messaging APIを利用してWebhookエンドポイントの現在設定を取得し、変更が必要な場合のみ新しいURLに更新する。
-* 根拠: [関数定義およびDocstring] (行番号: 68〜69 / 抜粋: "LINE BotのWebhook URLを更新")
+* 根拠: [関数定義およびDocstring] (参照: update_line_webhook / 抜粋: "LINE BotのWebhook URLを更新")
 
 
 * **引数/リクエスト**: `base_url` (型: 不明 / 環境変数から取得されたベースURLの文字列)
@@ -145,7 +145,7 @@
 
 
 * **エラーハンドリング**: `WEBHOOK_BASE_URL` が取得できない場合、エラーログを出力して `sys.exit(1)` でプロセスを終了させる。`update_switchbot_webhook`が例外を送出することはない(関数内で`Exception`を捕捉し`False`/`None`を返す設計のため)。
-* 根拠: [ifブロック] (行番号: 125〜127 / 抜粋: "if not base_url:")
+* 根拠: [ifブロック] (参照: fix_all_webhooks / 抜粋: "if not base_url:")
 
 
 
@@ -222,8 +222,8 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `common.py` | ロギングの設定内容や、更新完了時の通知（Discordへの送信仕様など）の具体的な挙動を把握するため。 | `import common` (行番号: 18 / 抜粋: "logger = setup_logging...") |
-| 高 | `services/switchbot_service.py` | SwitchBot API通信に必須となる認証ヘッダーの生成仕様（暗号化やトークン仕様）を確認するため。 | `from services import switchbot_service as sb_tool` (行番号: 20 / 抜粋: "sb_tool.create_switchbot_auth_headers()") |
-| 中 | `config.py` | LINE関連のトークンやユーザーIDがどのように管理・取得されているか（環境変数かファイルか）を特定するため。 | `import config` (行番号: 19 / 抜粋: "config.LINE_CHANNEL_ACCESS_TOKEN") |
+| 高 | `services/switchbot_service.py` | SwitchBot API通信に必須となる認証ヘッダーの生成仕様（暗号化やトークン仕様）を確認するため。 | `from services import switchbot_service as sb_tool` (参照: update_switchbot_webhook / 抜粋: "sb_tool.create_switchbot_auth_headers()") |
+| 中 | `config.py` | LINE関連のトークンやユーザーIDがどのように管理・取得されているか（環境変数かファイルか）を特定するため。 | `import config` (参照: update_line_webhook / 抜粋: "config.LINE_CHANNEL_ACCESS_TOKEN") |
 
 ## 8. 保守上の注意点
 
