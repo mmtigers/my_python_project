@@ -421,7 +421,7 @@ graph TD
 * 根拠: [正規表現定義] (行番号: 172 / 抜粋: "return bool(re.search(r"youtube\\.com/(@[\\w\\-\\.]+|channel/[\\w\\-]+|c/[\\w\\-]+|user/[\\w\\-]+)$", clean_url))")
 
 * **（Issue #535 で修正）** 設定されるだけで一度も読まれなかった `ExtractionResult.is_playlist` フィールド(および `extract_iter` 内の代入)と、`file_utils.sanitize_filename` をそのまま呼ぶだけだった `FileManager._sanitize_filename` を削除した。`FileManager.save` は共有関数 `_shared_sanitize_filename` を直接呼ぶ。`last_extract_internal_failures` は本番コードでは読まれないが、内部失敗件数の回帰テスト(`test_extract_youtube_urls_rate_limit.py`)が参照する観測用属性として残している。
-* 根拠: (行番号: 344〜345 / 抜粋: "safe_channel = _shared_sanitize_filename(result.channel_name, max_length=100)")、`extract_youtube_urls.py` 全体に `is_playlist` / `def _sanitize_filename` が無いこと
+* 根拠: (参照: FileManager.save / 抜粋: "safe_channel = _shared_sanitize_filename(result.channel_name, max_length=100)")、`extract_youtube_urls.py` 全体に `is_playlist` / `def _sanitize_filename` が無いこと
 
 ## 9. 不明事項一覧
 

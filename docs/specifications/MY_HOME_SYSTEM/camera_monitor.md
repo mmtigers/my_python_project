@@ -530,7 +530,7 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `config.py` | `CAMERAS`（IP、ポート、認証情報等）、`MOTION_COOLDOWN_SEC`、`NVR_RECORD_DIR`等の重要な環境変数が定義されており、監視対象や動作閾値の全容を把握するため。 | 根拠: `config.CAMERAS` (参照: main / 抜粋: "config.CAMERAS"), `config.MOTION_COOLDOWN_SEC` (行番号: 133 / 抜粋: "getattr(config, 'MOTION_COOLD") |
 | 中 | `core/database.py` | `save_log_generic` 関数の引数（`columns`, `values`）は判明しているが、実際にどのデータベース（SQLite/MySQL等）にどのようなスキーマで書き込まれるか確認するため。 | 根拠: `save_log_generic("device_records"` (行番号: 552 / 抜粋: "save_log_generic("device_record") |
-| 中 | `services/notification_service.py` | 障害発生時のアラート仕様（送信先プラットフォームが引数の `discord` か `LINE_USER_ID` かなど）の動作を特定するため。 | 根拠: `send_push` (行番号: 830 / 抜粋: "send_push(") |
+| 中 | `services/notification_service.py` | 障害発生時のアラート仕様（送信先プラットフォームが引数の `discord` か `LINE_USER_ID` かなど）の動作を特定するため。 | 根拠: `send_push` (参照: _suspend_after_fatal_error / 抜粋: "send_push(") |
 
 ## 8. 保守上の注意点
 

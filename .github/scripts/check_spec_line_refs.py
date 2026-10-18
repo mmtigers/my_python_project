@@ -906,9 +906,10 @@ def convert_to_symbol_references(specs: List[Path], write: bool = True) -> Tuple
         original = spec.read_text(encoding="utf-8")
         out_lines: List[str] = []
         for line in original.splitlines():
-            if line.startswith("### "):
-                # シンボルを読めない見出し(`### インポート一覧` 等)では、前の見出しのシンボルを
-                # 引き継がない(別の節の引用を、前の節の関数へ紐付けてしまうため)。
+            if re.match(r"#{1,3} ", line):
+                # シンボルを読めない見出し(`### インポート一覧`・`## 補足` 等)では、前の見出しの
+                # シンボルを引き継がない(別の節の引用を、前の節の関数へ紐付けてしまうため)。
+                # `#### ` はシンボルの節の中の小見出しなので、引き継ぐ。
                 heading = _CONVERT_HEADING_RE.match(line)
                 heading_symbol = heading.group(1) if heading else None
             blocks = list(_BLOCK_RE.finditer(line))

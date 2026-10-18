@@ -496,7 +496,7 @@ flowchart TD
 | --- | --- | --- | --- |
 | 高 | `config.py` | NASのIP、マウントポイント、LINE ID、NVR録画/スナップショット/DBバックアップの各保持日数・ディレクトリなどの初期設定値全体を把握するため。 | 根拠: `getattr(config, "NAS_IP", ...)` (行番号: 26 / 抜粋: "getattr(config, "NAS_IP"...")、`getattr(config, "NVR_RECORD_DIR", ...)` (行番号: 173〜178) |
 | 中 | `services/notification_service.py` | `target="discord"`が内部でどのように処理・分岐されているか特定するため。 | 根拠: `send_push(...)` (参照: run / 抜粋: "target="discord", channel="report"") |
-| 中 | `core/database.py` | 引数で渡しているデータが実際にどのような型やテーブル構造で保存されているか確認するため。 | 根拠: `save_log_generic(...)` (行番号: 203〜214 / 抜粋: "save_log_generic(") |
+| 中 | `core/database.py` | 引数で渡しているデータが実際にどのような型やテーブル構造で保存されているか確認するため。 | 根拠: `save_log_generic(...)` (参照: NasMonitor.save_to_db / 抜粋: "save_log_generic(") |
 
 ## 8. 保守上の注意点
 

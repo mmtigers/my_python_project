@@ -793,3 +793,13 @@ def test_convert_does_not_rewrite_file_without_conversions(fake_repo):
     before = spec.read_bytes()
     assert checker.convert_to_symbol_references([spec]) == (0, 0)
     assert spec.read_bytes() == before
+
+
+def test_convert_does_not_inherit_symbol_across_h2_heading(fake_repo):
+    """`## ` 見出しをはさんだ後でも、前の `### ` 見出しのシンボルを引き継がない。"""
+    spec = _write_spec(
+        fake_repo,
+        "### `farewell`\n\n## 補足\n\n* 根拠: 戻り値 (行番号: 98〜99 / 抜粋: \"return \\\"hello \\\" + name\")\n",
+    )
+    assert checker.convert_to_symbol_references([spec]) == (1, 0)
+    assert "参照: Greeter.greet" in spec.read_text(encoding="utf-8")

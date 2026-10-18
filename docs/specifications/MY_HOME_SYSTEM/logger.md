@@ -358,7 +358,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `config.py` | `BASE_DIR`や`DISCORD_WEBHOOK_ERROR`など、システム構成の基幹となる設定値の具体的な内容を確認するため。 | 根拠: `[config.BASE_DIR, config.DISCORD_WEBHOOK_ERROR]` (行番号: 24, 78, 92 / 抜粋: "config.BASE_DIR") |
-| 中 | `deploy/logrotate/home_system` | `WatchedFileHandler`が書き込み専用で、実際のログローテーション設定（保持期間・サイズ上限等）がこの外部設定ファイルに委譲されているため、具体的なローテーション条件を確認するには本ファイルの解析が必要。 | 根拠: `[WatchedFileHandler導入コメント]` (行番号: 81〜85 / 抜粋: "# WatchedFileHandlerにし、ローテーションはlogrotate側\n    # (deploy/logrotate/home_system → /etc/logrotate.d/home_system)に一元化する。") |
+| 中 | `deploy/logrotate/home_system` | `WatchedFileHandler`が書き込み専用で、実際のログローテーション設定（保持期間・サイズ上限等）がこの外部設定ファイルに委譲されているため、具体的なローテーション条件を確認するには本ファイルの解析が必要。 | 根拠: `[WatchedFileHandler導入コメント]` (参照: setup_logging / 抜粋: "# WatchedFileHandlerにし、ローテーションはlogrotate側\n    # (deploy/logrotate/home_system → /etc/logrotate.d/home_system)に一元化する。") |
 
 ## 8. 保守上の注意点
 
