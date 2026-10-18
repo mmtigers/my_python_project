@@ -330,18 +330,8 @@ def _nvr_search_patterns(nas_folder: str, now: dt_class) -> list:
     return patterns
 
 
-def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> Optional[bytes]:
-    """
-    NAS(NVR)に常時録画されている最新の動画ファイル(.mp4)から、
-    FFmpegを使用して該当時刻のフレームを切り出す（カメラ本体のRTSP負荷ゼロ）
-    """
-    import subprocess
-    import glob
-    import time
-    
-    if target_time is None:
-        target_time = dt_class.now()
-
+def _resolve_nvr_folder(cam_conf: dict) -> Optional[str]:
+    """カメラの NVR 録画フォルダの絶対パスを返す。存在しなければ ERROR を記録して None。"""
     # nas_folder は NVR録画ベースディレクトリ配下の「フォルダ名」であり、絶対パスではない
     # (camera_service.py の get_rtsp_url等と同じ解決ロジックに合わせる)
     # #405: config.NVR_RECORD_DIR は常に定義されるため、環境変数への直接フォールバックは持たない
@@ -352,17 +342,67 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
         # 設計書準拠: 介入が必要なエラー(NASマウント外れ等)は ERROR
         logger.error(f"❌ [{cam_conf['name']}] NAS folder not found or unmounted: {nas_folder}")
         return None
+    return nas_folder
 
-    # 最新のmp4ファイルを取得
-    # #411 S-L10: 以前は "**/*.mp4" で全期間(NVRの保存期間分、数十日)を毎回CIFS越しに
-    # 再帰globしていたため動体検知のたびに高コストなI/Oが発生していた。録画ファイル名は
-    # camera_service.py と同じ "{YYYYMMDD}_*.mp4" 形式なので、当日分だけに絞って検索する。
-    def _list_mp4_files() -> list[str]:
-        # 新しい順。Issue #703: リトライの間に録画ファイルが切り替わりうるため試行ごとに取り直す。
-        return sorted(
-            (f for pattern in _nvr_search_patterns(nas_folder, dt_class.now()) for f in glob.glob(pattern)),
-            key=os.path.getmtime, reverse=True,
-        )
+
+def _list_nvr_mp4_files(nas_folder: str) -> list[str]:
+    """NVR 録画フォルダの当日分の mp4 を新しい順に返す。
+
+    #411 S-L10: 以前は "**/*.mp4" で全期間(NVRの保存期間分、数十日)を毎回CIFS越しに
+    再帰globしていたため動体検知のたびに高コストなI/Oが発生していた。録画ファイル名は
+    camera_service.py と同じ "{YYYYMMDD}_*.mp4" 形式なので、当日分だけに絞って検索する。
+    """
+    import glob
+
+    # 新しい順。Issue #703: リトライの間に録画ファイルが切り替わりうるため試行ごとに取り直す。
+    return sorted(
+        (f for pattern in _nvr_search_patterns(nas_folder, dt_class.now()) for f in glob.glob(pattern)),
+        key=os.path.getmtime, reverse=True,
+    )
+
+
+def _build_nvr_snapshot_cmd(src: str, seconds_before_eof: int, output_tmp: str) -> list[str]:
+    """録画ファイル末尾の数秒手前のフレームを1枚抽出する ffmpeg コマンド。"""
+    return [
+        "ffmpeg", "-y",
+        "-sseof", f"-{seconds_before_eof}",
+        "-i", src,
+        "-vframes", "1",
+        "-q:v", "2",    # 高画質
+        output_tmp
+    ]
+
+
+def _ffmpeg_stderr_last_line(e: "subprocess.CalledProcessError") -> str:
+    """ffmpeg の stderr の最終行(原因が書かれる行)を返す。stderr が空なら "no stderr"。"""
+    stderr_lines = (e.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+    detail = stderr_lines[-1] if stderr_lines else "no stderr"
+    return detail
+
+
+def _remove_quietly(path: str) -> None:
+    """一時ファイルを削除する。既に無い・削除できない場合は何もしない。"""
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> Optional[bytes]:
+    """
+    NAS(NVR)に常時録画されている最新の動画ファイル(.mp4)から、
+    FFmpegを使用して該当時刻のフレームを切り出す（カメラ本体のRTSP負荷ゼロ）
+    """
+    import subprocess
+    import time
+
+    if target_time is None:
+        target_time = dt_class.now()
+
+    nas_folder = _resolve_nvr_folder(cam_conf)
+    if nas_folder is None:
+        return None
 
     # 録画ファイルが無い場合の判定は各試行の中で行う(#707 レビュー: 以前はここでも一覧を
     # 取得しており、正常系でも初回に CIFS 越しの glob が2回走っていた。#411 S-L10 が
@@ -376,7 +416,8 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
     max_retries = len(NVR_SNAPSHOT_ATTEMPTS)
     try:
         for attempt, (file_index, seconds_before_eof) in enumerate(NVR_SNAPSHOT_ATTEMPTS, start=1):
-            mp4_files = _list_mp4_files()
+            # Issue #703: リトライの間に録画ファイルが切り替わりうるため試行ごとに取り直す。
+            mp4_files = _list_nvr_mp4_files(nas_folder)
             if not mp4_files:
                 logger.warning(f"⚠️ [{cam_conf['name']}] No NVR video files found in {nas_folder}.")
                 return None
@@ -385,14 +426,7 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
             try:
                 # 録画ファイル末尾の数秒手前のフレームを抽出（動体検知直後の映像）。
                 # 末尾の不完全なフラグメントを避けるため末尾ちょうどは読まない(Issue #703)。
-                cmd = [
-                    "ffmpeg", "-y",
-                    "-sseof", f"-{seconds_before_eof}",
-                    "-i", src,
-                    "-vframes", "1",
-                    "-q:v", "2",    # 高画質
-                    output_tmp
-                ]
+                cmd = _build_nvr_snapshot_cmd(src, seconds_before_eof, output_tmp)
 
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10, check=True)
 
@@ -406,8 +440,7 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
             except subprocess.CalledProcessError as e:
                 # Issue #703: 以前は stderr を捨てていたため "exit status 69" しか分からず、
                 # 原因(末尾フラグメントが不完全)の特定に実機での再現が必要だった。
-                stderr_lines = (e.stderr or b"").decode("utf-8", "replace").strip().splitlines()
-                detail = stderr_lines[-1] if stderr_lines else "no stderr"
+                detail = _ffmpeg_stderr_last_line(e)
                 logger.warning(
                     f"⚠️ [{cam_conf['name']}] FFmpeg extraction failed "
                     f"(rc={e.returncode}, src={os.path.basename(src)}, sseof=-{seconds_before_eof}): "
@@ -428,11 +461,7 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
         # Low: タイムアウトや異常終了でffmpegが output_tmp に部分書き込みしたファイルを
         # 残したまま関数を抜けると、/tmp に snapshot_*.jpg の残骸が蓄積し続けていた。
         # 成功時に読み取った後の削除も含め、どの終了経路でも確実にクリーンアップする。
-        try:
-            if os.path.exists(output_tmp):
-                os.remove(output_tmp)
-        except OSError:
-            pass
+        _remove_quietly(output_tmp)
 
 
 def save_image_from_stream(cam_name: str, event_type: str = "motion") -> Optional[str]:
