@@ -17,6 +17,7 @@
 - スマートフォンのホーム画面に追加するためのマニフェストとアイコン
 - ホームページの自動更新用に、カードのブロックだけを返す `{DASHBOARD_BASE_PATH}/status`
 - 見守りページのカメラスナップショット画像
+- ページ共通のCSS・各ページのJS(`static/dashboard/`。許可リスト方式、#949)
 """
 import json
 
@@ -292,6 +293,16 @@ def dashboard_updates(app: str | None = None) -> HTMLResponse:
             history["entries"], history["sources"], dashboard_path=f"{_BASE_PATH}/", selected_app=app,
         )
     )
+
+
+@router.get(f"{_BASE_PATH}/static/{{filename}}", include_in_schema=False)
+def dashboard_static(filename: str) -> FileResponse:
+    """ページ共通のCSS・JSを返す。URLの`?v=`(更新時刻)で版を切り替えるので、古い版を握らせないよう毎回再検証させる。"""
+    asset = dashboard_page_service.resolve_static_asset(filename)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="static asset not found")
+    path, media_type = asset
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-cache"})
 
 
 @router.get(f"{_BASE_PATH}/snapshot/{{filename}}", include_in_schema=False)

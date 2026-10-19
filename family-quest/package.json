@@ -10,6 +10,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "lint:dashboard": "cd .. && family-quest/node_modules/.bin/eslint -c eslint.dashboard.config.cjs MY_HOME_SYSTEM/static/dashboard/",
     "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"

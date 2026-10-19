@@ -29,461 +29,41 @@ from services import home_status_service, system_info_service, timelapse_service
 
 # === ページ共通のシェル ===
 
-_PAGE_BASE_CSS = """
-    /* === デザイントークン(色は「役割」で定義し、各ルールはここを参照する) ===
-       ok=正常 / warn=注意 / bad=異常 / accent=操作できるもの・情報(青) / muted=補助文字。
-       ダークモードはこの変数だけを差し替える。 */
-    :root {
-        color-scheme: light dark;
-        --bg: #f3f5f9; --surface: #ffffff; --surface-2: #eef1f6; --border: #dfe4ec;
-        --text: #1a2230; --muted: #5b6678; --faint: #8893a5;
-        --accent: #2457d6; --accent-soft: #e8eefc; --accent-bd: #c5d3f5; --on-accent: #ffffff;
-        --ok: #17713a; --ok-bg: #e6f5ec; --ok-bd: #b9e0c7;
-        --warn: #8a5600; --warn-bg: #fff3d6; --warn-bd: #efd78e;
-        --hm-0: #e4e7ec; --hm-1: #f9c9c5; --hm-2: #ee7b73; --hm-3: #c0261c;
-        --bad: #b3261e; --bad-bg: #fdebea; --bad-bd: #f2bdb9;
-        --neutral: #5b6678; --neutral-bg: #f1f3f7; --neutral-bd: #dfe4ec;
-        --bar-alt: #d9730d;
-        --cl-0: #4f7fe0; --cl-1: #a9c6f5; --cl-2: #f1e6a6; --cl-3: #f0a35e; --cl-4: #d1432f;
-        --radius: 14px; --radius-sm: 10px;
-        --shadow: 0 1px 2px rgba(20,30,50,0.06), 0 2px 8px rgba(20,30,50,0.04);
-        --tap: rgba(36,87,214,0.12);
-    }
-    @media (prefers-color-scheme: dark) {
-        :root {
-            --bg: #0e1319; --surface: #171e28; --surface-2: #202938; --border: #2a3545;
-            --text: #e6ebf2; --muted: #9aa7b8; --faint: #6f7d90;
-            --accent: #8ab4ff; --accent-soft: #1a2a48; --accent-bd: #2d4577; --on-accent: #0e1319;
-            --ok: #7fd39a; --ok-bg: #112a1c; --ok-bd: #22533a;
-            --warn: #f2c066; --warn-bg: #30250d; --warn-bd: #574314;
-            --hm-0: #2a3340; --hm-1: #6b3532; --hm-2: #b5473f; --hm-3: #ff6b60;
-            --bad: #ff9d96; --bad-bg: #351614; --bad-bd: #692a26;
-            --neutral: #9aa7b8; --neutral-bg: #1c2431; --neutral-bd: #2a3545;
-            --bar-alt: #f2a54a;
-            --cl-0: #4c7bd8; --cl-1: #2f4f86; --cl-2: #4d4a2c; --cl-3: #a4642a; --cl-4: #e05a45;
-            --shadow: 0 1px 2px rgba(0,0,0,0.4);
-            --tap: rgba(138,180,255,0.16);
-        }
-    }
-    * { box-sizing: border-box; }
-    body {
-        margin: 0 auto;
-        max-width: 1080px;
-        padding: 16px 16px calc(88px + env(safe-area-inset-bottom));
-        background: var(--bg);
-        color: var(--text);
-        font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
-        line-height: 1.5;
-        -webkit-text-size-adjust: 100%;
-    }
-    h1 { font-size: 1.4rem; font-weight: 800; letter-spacing: 0.01em; margin: 4px 0 2px; }
-    h2 {
-        font-size: 0.95rem; font-weight: 700; margin: 24px 0 10px; color: var(--text);
-    }
-    .meta { font-size: 0.8rem; color: var(--muted); margin: 0 0 14px; }
+# ページ共通のCSS・各ページのJSは`static/dashboard/`の外部ファイル(#949)。Pythonの文字列に埋め込むと
+# ESLint等の対象外で、二重エスケープの取り違えが本番で構文エラーになるまで気付けなかったため。
+# `{DASHBOARD_BASE_PATH}/static/<ファイル名>`で`routers/dashboard_router.py`が配信する。
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "dashboard")
+# 配信を許可するファイル(許可リスト方式。それ以外は404)。
+STATIC_ASSET_FILES: dict[str, str] = {
+    "dashboard.css": "text/css; charset=utf-8",
+    "camera.js": "text/javascript; charset=utf-8",
+    "git_status.js": "text/javascript; charset=utf-8",
+    "maintenance.js": "text/javascript; charset=utf-8",
+}
 
-    .alerts {
-        margin: 0 0 10px; padding: 10px 12px; border-radius: var(--radius-sm);
-        font-size: 0.85rem; line-height: 1.5;
-    }
-    .alerts-warn { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-bd); }
-    .alerts-ok { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-bd); }
-    .alerts a { color: inherit; font-weight: bold; display: inline-flex; align-items: center; min-height: 44px; }
 
-    /* 自動更新が失敗したときの見た目(取れなかったら古い表示を消さずに薄く残す)。 */
-    #status.stale { opacity: 0.55; }
-    #status.stale::after {
-        content: "⚠️ 更新できていません(表示は最後に取得できた内容です)";
-        display: block; margin-top: 8px; font-size: 0.8rem; color: var(--bad);
-    }
+def resolve_static_asset(filename: str) -> tuple[str, str] | None:
+    """許可リストにある静的ファイル名なら(実パス, Content-Type)を返す。無ければNone。"""
+    media_type = STATIC_ASSET_FILES.get(filename)
+    if media_type is None:
+        return None
+    path = os.path.join(_STATIC_DIR, filename)
+    return (path, media_type) if os.path.isfile(path) else None
 
-    /* 操作できる要素(リンク・ボタン)は共通で「青の面+枠+太字」に揃え、
-       表示だけの要素(カード・箱)は白地+細い枠で区別する。 */
-    nav.top-nav { margin: 0 0 16px; }
-    nav.top-nav a, a.back-link {
-        display: inline-flex; align-items: center; min-height: 44px;
-        padding: 0 16px; border-radius: 999px; border: 1px solid var(--accent-bd);
-        background: var(--accent-soft); color: var(--accent); font-weight: bold;
-        text-decoration: none; font-size: 0.9rem;
-        -webkit-tap-highlight-color: var(--tap);
-    }
-    nav.top-nav a:hover, a.back-link:hover { border-color: var(--accent); }
-    a:focus-visible, button:focus-visible, summary:focus-visible, select:focus-visible, input:focus-visible {
-        outline: 2px solid var(--accent); outline-offset: 2px;
-    }
 
-    /* ホーム画面のナビカードと外部リンクカード。「タップで移動する」ことが分かるよう
-       右端に矢印(›)を添える。 */
-    .link-grid {
-        display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-        gap: 10px; margin: 8px 0 4px;
-    }
-    a.nav-card {
-        position: relative; display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
-        gap: 2px; padding: 14px 32px 14px 16px; min-height: 76px; border-radius: var(--radius);
-        text-decoration: none; font-weight: bold; font-size: 1rem;
-        background: var(--surface); color: var(--text); border: 1px solid var(--border);
-        box-shadow: var(--shadow); -webkit-tap-highlight-color: var(--tap);
-        transition: border-color 0.15s, background-color 0.15s;
-    }
-    a.nav-card::after {
-        content: "›"; position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
-        font-size: 1.5rem; font-weight: normal; color: var(--accent);
-    }
-    a.nav-card:hover { border-color: var(--accent); background: var(--accent-soft); }
-    a.nav-card:active { transform: scale(0.98); }
-    a.nav-card .nav-card-sub { font-size: 0.75rem; font-weight: normal; color: var(--muted); }
-    /* 外部リンク(ファミクエ等)。稼働状況は色+文字(.link-state)の両方で示す。
-       既定(状態不明)は警告色と被らない青系。 */
-    a.external-card {
-        display: flex; align-items: center; justify-content: space-between;
-        gap: 8px; padding: 14px 16px; min-height: 52px; border-radius: var(--radius);
-        text-decoration: none; font-weight: bold; font-size: 0.95rem;
-        background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-bd);
-        -webkit-tap-highlight-color: var(--tap);
-    }
-    a.external-card:hover { border-color: var(--accent); }
-    a.external-card.external-up { background: var(--ok-bg); color: var(--ok); border-color: var(--ok-bd); }
-    a.external-card.external-down { background: var(--bad-bg); color: var(--bad); border-color: var(--bad-bd); }
-    .link-state { font-size: 0.75rem; font-weight: normal; margin-left: 4px; }
+def _static_url(filename: str) -> str:
+    """静的ファイルのURL。更新時刻をクエリに付け、ファイルを変えたら端末のキャッシュが即座に切り替わるようにする。"""
+    try:
+        version = int(os.path.getmtime(os.path.join(_STATIC_DIR, filename)))
+    except OSError:
+        version = 0
+    return f"{config.DASHBOARD_BASE_PATH}/static/{filename}?v={version}"
 
-    /* 見守りページの「1日の活動ヒートマップ」(行=機器、列=0〜23時の1時間マス)。
-       回数が多いほど濃い赤。色だけに頼らず、各マスに title/aria-label で回数を持たせる。 */
-    .heatmap { margin: 4px 0 16px; padding: 10px 12px; background: var(--surface);
-        border: 1px solid var(--border); border-radius: var(--radius-sm); }
-    .heatmap-row { margin-bottom: 8px; }
-    .heatmap-name { font-size: 0.75rem; color: var(--muted); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .heatmap-cells { display: grid; grid-template-columns: repeat(24, 1fr); gap: 1px; }
-    /* 1マスの高さは44px(タップ対象の最小サイズ)。幅は390pxで約14pxと狭いので、隣のマスを
-       押してしまっても詳細側の「前の時間/次の時間」で直せる。 */
-    .heatmap-cell { display: block; height: 44px; background: var(--hm-0); border-radius: 2px; }
-    a.heatmap-cell { -webkit-tap-highlight-color: var(--tap); }
-    a.heatmap-cell:active { opacity: 0.6; }
-    .heatmap-cell.hm-1 { background: var(--hm-1); }
-    .heatmap-cell.hm-2 { background: var(--hm-2); }
-    .heatmap-cell.hm-3 { background: var(--hm-3); }
-    .heatmap-cell.hm-future { background: transparent; border: 1px dashed var(--border); box-sizing: border-box; }
-    .heatmap-axis-ticks { position: relative; height: 1em; font-size: 0.65rem; color: var(--faint); }
-    .heatmap-axis-ticks span { position: absolute; transform: translateX(-50%); }
-    .heatmap-hint { margin: 6px 0 0; font-size: 0.7rem; color: var(--faint); }
-    /* 時間帯の詳細ログ(ヒートマップのマスをタップした先)。前後の時間へ移るリンクを添える。 */
-    .hour-nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 10px; }
-    .hour-nav a {
-        display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: var(--radius-sm);
-        border: 1px solid var(--border); background: var(--surface); color: var(--accent);
-        font-weight: bold; font-size: 0.85rem; text-decoration: none;
-    }
-    .heatmap-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; font-size: 0.7rem; color: var(--muted); }
-    .heatmap-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 3px; }
 
-    /* ホームの温湿度ヒートマップ(行=日付、列=0〜23時。値は1時間の平均)。閲覧用でタップしない。
-       値の段階は色+凡例+各マスのtitleで示し、記録なしは枠線だけにして0と区別する。 */
-    .climate { margin: 4px 0 16px; padding: 10px 12px; background: var(--surface);
-        border: 1px solid var(--border); border-radius: var(--radius-sm); }
-    .climate-switch { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
-    .climate-switch a {
-        display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 999px;
-        border: 1px solid var(--border); background: var(--surface); color: var(--text);
-        font-size: 0.85rem; text-decoration: none; -webkit-tap-highlight-color: var(--tap);
-    }
-    .climate-switch a[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: bold; }
-    .climate-row { display: flex; align-items: center; gap: 6px; }
-    .climate-day { flex: none; width: 5.2em; font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
-    .climate-cells { flex: 1; display: grid; grid-template-columns: repeat(24, 1fr); gap: 1px; min-width: 0; }
-    .climate-cell { height: 13px; border-radius: 2px; background: var(--hm-0); }
-    .climate-cell.cl-0 { background: var(--cl-0); }
-    .climate-cell.cl-1 { background: var(--cl-1); }
-    .climate-cell.cl-2 { background: var(--cl-2); }
-    .climate-cell.cl-3 { background: var(--cl-3); }
-    .climate-cell.cl-4 { background: var(--cl-4); }
-    .climate-cell.hm-1 { background: var(--hm-1); }
-    .climate-cell.hm-2 { background: var(--hm-2); }
-    .climate-cell.hm-3 { background: var(--hm-3); }
-    .climate-cell.cl-none { background: transparent; border: 1px dashed var(--border); box-sizing: border-box; }
-    .climate-axis { margin-left: calc(5.2em + 6px); }
+def _script_tag(filename: str) -> str:
+    return f'<script src="{_static_url(filename)}"></script>'
 
-    /* 見守りページの簡易テーブル(防犯ログ・実家センサーログ)。 */
-    table.simple-table {
-        width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.85rem; margin-bottom: 16px;
-        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
-        overflow: hidden;
-    }
-    table.simple-table th, table.simple-table td {
-        text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
-    }
-    table.simple-table tr:last-child td { border-bottom: none; }
-    table.simple-table th {
-        color: var(--muted); font-weight: bold; font-size: 0.75rem; background: var(--surface-2);
-    }
-    /* システムページのバックアップ完了/失敗トースト(画面下部に数秒だけ出る) */
-    .dashboard-toast {
-        position: fixed; left: 16px; right: 16px; bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 1000;
-        max-width: 480px; margin: 0 auto;
-        padding: 14px 16px; border-radius: var(--radius); font-weight: bold; font-size: 0.95rem;
-        color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,0.3); transition: opacity 0.5s;
-    }
-    .dashboard-toast.ok { background: #1f7a3d; }
-    .dashboard-toast.ng { background: #b3261e; }
-    .dashboard-toast.hide { opacity: 0; }
-    .empty-note {
-        color: var(--muted); font-size: 0.85rem; margin: 4px 0 16px; padding: 12px;
-        border: 1px dashed var(--border); border-radius: var(--radius-sm);
-    }
 
-    /* カメラのスナップショットギャラリー(`.snapshot-item`が`<a target="_blank">`)。 */
-    .snapshot-grid {
-        display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-        gap: 8px; margin-bottom: 16px;
-    }
-    a.snapshot-item {
-        display: block; text-decoration: none; color: inherit;
-        -webkit-tap-highlight-color: var(--tap);
-    }
-    .snapshot-item img {
-        width: 100%; border-radius: var(--radius-sm); display: block; background: var(--surface-2);
-        border: 1px solid var(--border);
-    }
-    .snapshot-caption {
-        display: block; margin-top: 4px; font-size: 0.7rem; color: var(--muted); text-align: center;
-    }
-
-    /* くらしページの電気代詳細(日別推移の簡易バーグラフ) */
-    .cost-history {
-        margin-bottom: 16px; padding: 8px 14px; background: var(--surface);
-        border: 1px solid var(--border); border-radius: var(--radius);
-    }
-    .cost-row {
-        display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 0.85rem;
-    }
-    .cost-date { flex: none; width: 3.4em; color: var(--muted); }
-    .cost-bar-track {
-        flex: 1; height: 10px; border-radius: 5px; background: var(--surface-2); overflow: hidden;
-    }
-    .cost-bar { height: 100%; border-radius: 5px; background: var(--accent); }
-    .cost-value { flex: none; width: 4.6em; text-align: right; font-weight: bold; }
-
-    /* システムページ等の各セクションを視覚的にグループ化する箱 */
-    .info-box {
-        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-        padding: 14px; margin-bottom: 16px; box-shadow: var(--shadow);
-    }
-    .info-box > h2:first-child { margin-top: 0; }
-
-    /* システムページの機能ごとの鮮度一覧 */
-    .freshness-row {
-        display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
-        padding: 10px 4px; border-bottom: 1px solid var(--border); font-size: 0.9rem;
-    }
-    .freshness-row:last-child { border-bottom: none; }
-    .freshness-label { font-weight: bold; }
-    .freshness-value { font-size: 0.85rem; }
-    .freshness-red { color: var(--bad); font-weight: bold; }
-    .freshness-ok { color: var(--ok); }
-    .freshness-info { color: var(--muted); }
-
-    /* NASの容量推移。使用率0-100%固定でスケールする折れ線。 */
-    .nas-chart { width: 100%; max-width: 420px; height: auto; display: block; }
-    .nas-chart-grid { stroke: var(--border); stroke-width: 1; }
-    .nas-chart-label { font-size: 8px; fill: var(--muted); }
-    /* 電気ページ(月ごとの推移・日別・気温・テレビ。グラフはインラインSVG) */
-    .bar-chart { width: 100%; max-width: 480px; height: auto; display: block; margin: 8px 0; }
-    .bar-axis { stroke: var(--faint); stroke-width: 1; }
-    .bar { fill: var(--accent); }
-    .bar-alt { fill: var(--bar-alt); }
-    .bar-faded { fill: var(--accent-bd); }
-    .bar-label { font-size: 8px; fill: var(--muted); }
-    .legend-box { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
-    .legend-box.bar { background: var(--accent); }
-    .legend-box.bar-alt { background: var(--bar-alt); }
-    .power-lead { font-size: 1.05rem; margin: 6px 0; }
-    .power-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 10px 0; }
-    .power-stat {
-        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
-        padding: 10px 12px; box-shadow: var(--shadow);
-    }
-    .power-stat-value { font-weight: bold; font-size: 1.1rem; word-break: break-word; }
-    .band-days th, .band-days td { text-align: center; font-size: 0.7rem; padding: 2px; }
-    /* アップデートページ(全アプリの更新履歴) */
-    .release-filter { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
-    .release-filter a {
-        display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 22px;
-        border: 1px solid var(--accent-bd); background: var(--accent-soft); color: var(--accent);
-        text-decoration: none; font-size: 0.9rem;
-    }
-    .release-filter a.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: bold; }
-    .release-card {
-        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-        padding: 12px 14px; margin: 10px 0; box-shadow: var(--shadow);
-    }
-    .release-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 0.85rem; }
-    .release-badge { padding: 2px 10px; border-radius: 10px; background: #2457d6; color: #fff; font-weight: bold; }
-    .release-badge-quest { background: #7b2cbf; }
-    .release-badge-asa { background: #c2570c; }
-    .release-badge-yoru { background: #34408f; }
-    .release-title { font-weight: bold; margin: 6px 0 2px; word-break: break-word; }
-    .release-card p, .release-card ul { margin: 4px 0; word-break: break-word; }
-    .release-card ul { padding-left: 1.2em; }
-    .release-warn { color: var(--warn); font-size: 0.9rem; }
-    /* 画面下に固定するフッターナビ(全ページ共通)。現在地は面+太字+aria-currentで示し、色だけに頼らない。
-       下端はiOSのホームインジケーター分(safe-area)を空ける。 */
-    nav.bottom-nav {
-        position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
-        background: var(--surface); border-top: 1px solid var(--border);
-        padding-bottom: env(safe-area-inset-bottom);
-    }
-    nav.bottom-nav ul { list-style: none; display: flex; gap: 2px; max-width: 1080px; margin: 0 auto; padding: 6px 6px; }
-    nav.bottom-nav li { flex: 1 1 0; min-width: 0; }
-    nav.bottom-nav a {
-        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-        min-height: 48px; padding: 4px 2px; border-radius: 14px; color: var(--muted);
-        font-size: 10.5px; text-decoration: none; white-space: nowrap;
-        -webkit-tap-highlight-color: var(--tap);
-    }
-    nav.bottom-nav a .bn-icon { font-size: 1.15rem; line-height: 1; }
-    nav.bottom-nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: bold; }
-    @media print { nav.bottom-nav { display: none; } }
-
-    /* システムページ: 起動履歴のカードとGitの状態 */
-    .status-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
-    .badge {
-        display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: 999px;
-        font-size: 0.8rem; font-weight: bold; border: 1px solid var(--neutral-bd);
-        background: var(--neutral-bg); color: var(--neutral);
-    }
-    .badge-ok { background: var(--ok-bg); color: var(--ok); border-color: var(--ok-bd); }
-    .badge-warn { background: var(--warn-bg); color: var(--warn); border-color: var(--warn-bd); }
-    .badge-info { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-bd); }
-    .boot-list { list-style: none; margin: 0; padding: 0; }
-    .boot-card {
-        padding: 10px 12px; margin: 0 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
-        background: var(--surface-2); word-break: break-word;
-    }
-    .boot-card.is-latest { border-color: var(--accent-bd); background: var(--accent-soft); }
-    .boot-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 4px; }
-    .boot-time { font-weight: bold; font-size: 0.95rem; }
-    .boot-commit { font-size: 0.85rem; }
-    .boot-branch { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
-    .git-trio { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 0 0 10px; }
-    .git-card { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); word-break: break-word; }
-    .git-card-label { font-size: 0.75rem; color: var(--muted); margin: 0 0 2px; }
-    .git-card-main { font-size: 0.9rem; margin: 0; }
-    .git-card-sub { font-size: 0.75rem; color: var(--muted); margin: 2px 0 0; }
-    .git-status-line { margin: 4px 0; word-break: break-word; }
-    .git-status-warn { color: var(--warn); }
-    .git-commit-list { list-style: none; padding: 0; margin: 8px 0 0; }
-    .git-commit-list li { padding: 8px 0; border-top: 1px solid var(--border); word-break: break-word; }
-    .git-commit-sha { font-family: ui-monospace, Menlo, Consolas, monospace; }
-    .git-commit-badge { font-size: 0.8rem; margin-left: 6px; white-space: nowrap; display: inline-block; }
-    .nas-period a.nas-period-link {
-        display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 999px; background: var(--accent-soft); color: var(--accent);
-        border: 1px solid var(--accent-bd); text-decoration: none;
-    }
-    .nas-period .nas-period-current {
-        display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: bold;
-    }
-    .nas-chart-line { stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-    details > summary {
-        cursor: pointer; min-height: 44px; display: flex; align-items: center;
-        font-size: 0.85rem; color: var(--accent); font-weight: bold; -webkit-tap-highlight-color: var(--tap);
-    }
-
-    .maintenance-box {
-        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-        padding: 14px; margin-bottom: 16px; box-shadow: var(--shadow);
-    }
-    .maintenance-box button {
-        min-height: 44px; border-radius: var(--radius-sm); border: none; font-weight: bold;
-        padding: 0 18px; margin-top: 8px; cursor: pointer; font-size: 0.9rem;
-    }
-    button.danger { background: var(--bad); color: #fff; }
-    button.danger:disabled { background: var(--surface-2); color: var(--faint); cursor: not-allowed; }
-    button.primary { background: var(--accent); color: var(--on-accent); }
-    .maintenance-result { font-size: 0.85rem; margin-top: 8px; white-space: pre-wrap; }
-
-    /* 見守りページのタイムラプス一覧。カードを開くとその場で再生できる(JS不要。動画は開くまで読み込まない)。 */
-    .tl-card {
-        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-        margin: 0 0 8px; box-shadow: var(--shadow); overflow: hidden;
-    }
-    .tl-card > summary { padding: 8px 12px 8px 8px; gap: 10px; min-height: 64px; list-style: none; color: var(--text); }
-    .tl-card > summary::-webkit-details-marker { display: none; }
-    .tl-card > summary::after { content: "▸"; margin-left: auto; color: var(--accent); font-size: 1.2rem; transition: transform 0.15s; }
-    .tl-card[open] > summary::after { transform: rotate(90deg); }
-    #timelapse-section { margin-bottom: 16px; }
-    .tl-thumb {
-        flex: none; width: 96px; height: 54px; object-fit: cover; border-radius: 8px; background: var(--surface-2);
-        border: 1px solid var(--border);
-    }
-    .tl-thumb-none { display: inline-flex; align-items: center; justify-content: center; font-size: 1.4rem; }
-    .tl-meta { display: flex; flex-direction: column; min-width: 0; }
-    .tl-title { font-weight: bold; font-size: 0.95rem; }
-    .tl-sub { font-size: 0.75rem; font-weight: normal; color: var(--muted); }
-    .tl-body { padding: 0 8px 10px; }
-    .tl-body video { width: 100%; max-height: 70vh; background: #000; border-radius: var(--radius-sm); display: block; }
-    .tl-body a.tl-save { display: inline-flex; align-items: center; min-height: 44px; font-size: 0.85rem; color: var(--accent); }
-    .tl-more { margin: 4px 0 12px; }
-    .tl-more a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; color: var(--accent); font-weight: bold; text-decoration: none; }
-
-    /* 見守りページのログの日付フィルタ */
-    .log-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 8px; }
-    .log-filter input[type="date"], .log-filter select {
-        min-height: 44px; max-width: 100%; padding: 0 12px; border-radius: var(--radius-sm);
-        border: 1px solid var(--border); font-size: 1rem; background: var(--surface); color: var(--text);
-    }
-    .log-filter button, a.log-filter-clear {
-        min-height: 44px; padding: 0 18px; border-radius: var(--radius-sm); font-weight: bold; font-size: 0.9rem;
-        display: inline-flex; align-items: center; box-sizing: border-box; cursor: pointer;
-    }
-    .log-filter button { border: none; background: var(--accent); color: var(--on-accent); }
-    a.log-filter-clear { border: 1px solid var(--accent-bd); background: var(--accent-soft); color: var(--accent); text-decoration: none; }
-
-    /* 見守りページのカメラ映像(全台を同時表示) */
-    .camera-grid {
-        display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
-        gap: 14px; margin-bottom: 16px;
-    }
-    .camera-name { font-weight: bold; font-size: 0.9rem; margin-bottom: 6px; }
-    .camera-tile-requested .camera-name { color: var(--accent); }
-    .camera-video-box {
-        width: 100%; aspect-ratio: 16 / 9; background: #000;
-        border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border);
-    }
-    .camera-video-box video { width: 100%; height: 100%; object-fit: contain; }
-
-    /* サブページ上部: 「ホームへ戻る」と、兄弟ページへの切替タブ(ホームへ戻らず直接移動できる)。
-       現在のページは aria-current で示し、色だけに頼らず太字+塗りで区別する。 */
-    .page-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; }
-    .page-head > p { margin: 0; }
-    nav.page-tabs { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; }
-    nav.page-tabs a {
-        display: inline-flex; align-items: center; justify-content: center; flex: 1 1 auto;
-        min-height: 44px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border);
-        background: var(--surface); color: var(--text); font-size: 0.85rem; text-decoration: none;
-        white-space: nowrap; -webkit-tap-highlight-color: var(--tap);
-    }
-    nav.page-tabs a:hover { border-color: var(--accent); }
-    nav.page-tabs a[aria-current="page"] {
-        background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: bold;
-    }
-    /* 狭い画面では2x2に揃える(4つ目だけ次の行に余る並びを避ける)。 */
-    @media (max-width: 519px) { nav.page-tabs { display: grid; grid-template-columns: 1fr 1fr; width: 100%; } }
-    @media (min-width: 720px) { nav.page-tabs a { flex: 0 1 auto; padding: 0 16px; } }
-
-    /* システムページ: 広い画面では情報の箱を2列に並べて一覧性を上げる(狭い画面は1列のまま)。 */
-    .box-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 16px; align-items: start; }
-    @media (min-width: 900px) { .box-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    .maintenance-group { margin-bottom: 16px; }
-    .maintenance-box h3 { font-size: 0.95rem; margin: 0 0 6px; }
-    .maintenance-box p { margin: 6px 0; font-size: 0.9rem; }
-    .maintenance-box.is-danger { border-color: var(--bad-bd); }
-    /* 確認チェックは、ラベルごとタップできる44px以上の行にする(誤操作防止の確認なので押し損ねにくく)。 */
-    label.confirm-row {
-        display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 0;
-        font-size: 0.9rem; cursor: pointer;
-    }
-    label.confirm-row input { width: 22px; height: 22px; flex: none; margin: 0; }
-    @media (max-width: 519px) { .maintenance-box button { width: 100%; } }
-"""
 
 
 _FOOTER_ITEMS: tuple[tuple[str, str, str], ...] = (
@@ -526,7 +106,8 @@ def _page_shell(
         '<meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'
         f"<title>{html.escape(title)}</title>"
-        f"<style>{_PAGE_BASE_CSS}{home_status_service.STATUS_CARD_CSS}</style>"
+        f'<link rel="stylesheet" href="{_static_url("dashboard.css")}">'
+        f"<style>{home_status_service.STATUS_CARD_CSS}</style>"
         f"{extra_head}"
         "</head><body>"
         f"{body_html}"
@@ -1081,7 +662,7 @@ def merge_open_close_events(df: pd.DataFrame) -> pd.DataFrame:
 def _render_camera_selector(cameras: list[dict[str, Any]]) -> str:
     """有効なカメラ全台のライブ映像を、初期表示から同時に並べる(切替ボタン方式は廃止)。
 
-    各タイルは名前ラベル付きの`<video data-camera-id>`で、`_CAMERA_SCRIPT`が読み込み時に
+    各タイルは名前ラベル付きの`<video data-camera-id>`で、`static/dashboard/camera.js`が読み込み時に
     全タイルのHLSを開始する。ライブ配信のffmpegはカメラごとに独立している。"""
     if not cameras:
         return '<p class="empty-note">カメラが登録されていません</p>'
@@ -1097,50 +678,11 @@ def _render_camera_selector(cameras: list[dict[str, Any]]) -> str:
     return f'<div class="camera-grid">{tiles}</div>'
 
 
-_CAMERA_SCRIPT = """
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
-<script>
-(function () {
-    function startStream(video) {
-        var url = "/api/cameras/live/" + encodeURIComponent(video.dataset.cameraId) + "/stream.m3u8";
-        if (window.Hls && window.Hls.isSupported()) {
-            var hls = new window.Hls();
-            hls.loadSource(url);
-            hls.attachMedia(video);
-            hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
-                video.play().catch(function () {});
-            });
-        } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-            video.src = url;
-            video.addEventListener("loadedmetadata", function () {
-                video.play().catch(function () {});
-            });
-        }
-    }
+def _camera_script() -> str:
+    """hls.js(CDN)のあとに`camera.js`を読む。実行順序は従来のインライン版と同じ。"""
+    return '<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>' + _script_tag("camera.js")
 
-    document.addEventListener("DOMContentLoaded", function () {
-        var videos = document.querySelectorAll(".camera-video");
-        if (!videos.length) { return; }
 
-        // ホームページの「🚗 駐車場」カードは(?camera=<id>)でこのページを開く。
-        // 全台を同時に表示するので、指定されたカメラのタイルを先頭に移して目立たせる。
-        var requested = null;
-        try { requested = new URLSearchParams(window.location.search).get("camera"); } catch (e) {}
-        Array.prototype.forEach.call(videos, function (video) {
-            if (requested && video.dataset.cameraId === requested) {
-                var tile = video.closest(".camera-tile");
-                if (tile && tile.parentNode) {
-                    tile.classList.add("camera-tile-requested");
-                    tile.parentNode.insertBefore(tile, tile.parentNode.firstChild);
-                }
-            }
-        });
-        // 先頭へ移したあとの並びで全台のストリームを開始する。
-        document.querySelectorAll(".camera-video").forEach(startStream);
-    });
-})();
-</script>
-"""
 
 
 def parse_log_date(value: str | None) -> date | None:
@@ -1823,7 +1365,7 @@ def render_watch_page(
             f"{_log_table(df_log, columns)}"
             "</div>"
         )
-    return _page_shell("見守り - おうちの様子", body, extra_head=_CAMERA_SCRIPT, dashboard_path=dashboard_path, current="watch")
+    return _page_shell("見守り - おうちの様子", body, extra_head=_camera_script(), dashboard_path=dashboard_path, current="watch")
 
 
 # === くらしページ ===
@@ -2252,7 +1794,7 @@ def _render_boot_history_box(boots: list[dict[str, Any]]) -> str:
 
 
 def _render_git_status_box() -> str:
-    """Gitの状態の枠。中身はページ表示後に`_GIT_STATUS_SCRIPT`が`/api/system/git/status`から埋める
+    """Gitの状態の枠。中身はページ表示後に`static/dashboard/git_status.js`が`/api/system/git/status`から埋める
     (`git fetch`を含み遅いので、ページ本体では待たない)。"""
     return (
         '<div class="info-box" id="git-status"><h2>🔀 Gitの状態</h2>'
@@ -2260,91 +1802,6 @@ def _render_git_status_box() -> str:
     )
 
 
-_GIT_STATUS_SCRIPT = """
-<script>
-(function () {
-    function el(tag, text, cls) {
-        var node = document.createElement(tag);
-        if (cls) { node.className = cls; }
-        node.textContent = text;
-        return node;
-    }
-    function fmtBoot(iso) {
-        return iso ? iso.slice(5, 10).replace("-", "/") + " " + iso.slice(11, 16) : "";
-    }
-    function commitText(c) { return c.sha + " " + c.subject + (c.date ? " (" + c.date + ")" : ""); }
-
-    function badge(text, cls) { return el("span", text, "badge " + cls); }
-    function card(label, c, sub) {
-        var node = document.createElement("div");
-        node.className = "git-card";
-        node.appendChild(el("p", label, "git-card-label"));
-        node.appendChild(el("p", c, "git-card-main"));
-        if (sub) { node.appendChild(el("p", sub, "git-card-sub")); }
-        return node;
-    }
-
-    function render(d) {
-        var box = document.getElementById("gitStatusBody");
-        if (!box) { return; }
-        box.textContent = "";
-        if (!d.ok) { box.appendChild(el("p", d.error || "取得できませんでした", "git-status-line git-status-warn")); return; }
-
-        // 上部の状態バッジ(重要度の高い順)
-        var badges = document.createElement("div");
-        badges.className = "status-badges";
-        if (d.pending_restart) { badges.appendChild(badge("⚠️ 未再起動", "badge-warn")); }
-        if (d.dirty === true) { badges.appendChild(badge("⚠️ 未コミットの変更 " + d.dirty_count + "件", "badge-warn")); }
-        else if (d.dirty === false) { badges.appendChild(badge("✅ 変更なし", "badge-ok")); }
-        if (d.behind > 0) { badges.appendChild(badge("⬇️ 未取り込み " + d.behind + "件", "badge-warn")); }
-        else if (d.behind === 0) { badges.appendChild(badge("✅ 最新", "badge-ok")); }
-        if (d.ahead > 0) { badges.appendChild(badge("手元だけ " + d.ahead + "件", "badge-info")); }
-        if (badges.childNodes.length) { box.appendChild(badges); }
-
-        // 3段(起動中 / 手元 / GitHub)
-        var trio = document.createElement("div");
-        trio.className = "git-trio";
-        if (d.running) {
-            trio.appendChild(card("▶ 起動中のコード", d.running.sha + " " + d.running.subject, "起動 " + fmtBoot(d.running.booted_at)));
-        } else {
-            trio.appendChild(card("▶ 起動中のコード", "記録なし", "この機能の導入後の最初の起動から分かります"));
-        }
-        trio.appendChild(card("📁 手元(実機)の最新", commitText(d.head), d.branch ? "ブランチ " + d.branch : ""));
-        if (d.remote) { trio.appendChild(card("☁️ GitHubの最新", commitText(d.remote), "")); }
-        box.appendChild(trio);
-
-        if (d.pending_restart) {
-            box.appendChild(el("p", "取り込み済みですが、まだ再起動されていません(起動中のコードは古いままです)", "git-status-line git-status-warn"));
-        }
-        if (d.error) { box.appendChild(el("p", d.error, "git-status-line git-status-warn")); }
-        if (d.recent && d.recent.length) {
-            box.appendChild(el("p", "最近のコミット", "meta"));
-            var list = document.createElement("ul");
-            list.className = "git-commit-list";
-            d.recent.forEach(function (c) {
-                var li = document.createElement("li");
-                li.appendChild(el("span", c.running ? "▶ 起動中" : (c.pulled ? "✅ 取り込み済み" : "⬇️ 未取り込み"), "git-commit-badge"));
-                li.appendChild(document.createTextNode(" "));
-                li.appendChild(el("span", c.sha, "git-commit-sha"));
-                li.appendChild(document.createTextNode(" " + c.subject + (c.date ? " (" + c.date + ")" : "")));
-                list.appendChild(li);
-            });
-            box.appendChild(list);
-        }
-    }
-
-    document.addEventListener("DOMContentLoaded", function () {
-        fetch("/api/system/git/status", { credentials: "same-origin" })
-            .then(function (res) { return res.json(); })
-            .then(render)
-            .catch(function () {
-                var box = document.getElementById("gitStatusBody");
-                if (box) { box.textContent = "Gitの状態を取得できませんでした"; }
-            });
-    });
-})();
-</script>
-"""
 
 
 def render_sys_page(
@@ -2432,171 +1889,8 @@ def render_sys_page(
         "</div>"
     )
     return _page_shell(
-        "システム - おうちの様子", body, extra_head=_MAINTENANCE_SCRIPT + _GIT_STATUS_SCRIPT,
+        "システム - おうちの様子", body, extra_head=_script_tag("maintenance.js") + _script_tag("git_status.js"),
         dashboard_path=dashboard_path, current="sys",
     )
 
 
-_MAINTENANCE_SCRIPT = """
-<script>
-function dashboardPost(url, resultId, busyText) {
-    var box = document.getElementById(resultId);
-    box.textContent = busyText;
-    fetch(url, { method: "POST", credentials: "same-origin" })
-        .then(function (res) {
-            return res.json().then(function (data) { return { ok: res.ok, data: data }; });
-        })
-        .then(function (result) {
-            box.textContent = result.ok
-                ? (result.data.message || "完了しました")
-                : "失敗しました: " + (result.data.detail || "");
-        })
-        .catch(function (e) {
-            box.textContent = "通信エラー: " + e;
-        });
-}
-function dashboardRestart() { dashboardPost("/api/system/restart", "restartResult", "再起動コマンドを送信しています..."); }
-
-var backupPollTimer = null;
-function dashboardToast(text, ok) {
-    var el = document.createElement("div");
-    el.className = "dashboard-toast " + (ok ? "ok" : "ng");
-    el.setAttribute("role", "alert");
-    el.textContent = text;
-    document.body.appendChild(el);
-    setTimeout(function () { el.classList.add("hide"); }, 5000);
-    setTimeout(function () { if (el.parentNode) { el.parentNode.removeChild(el); } }, 5600);
-}
-function backupFormatTime(iso) {
-    var m = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/.exec(iso || "");
-    return m ? (m[2] + "/" + m[3] + " " + m[4] + ":" + m[5]) : "";
-}
-function backupSetBusy(busy) {
-    var btn = document.getElementById("backupBtn");
-    btn.disabled = busy;
-    btn.textContent = busy ? "⏳ バックアップ中..." : "📦 今すぐバックアップ";
-}
-function backupShowLatest(info) {
-    var box = document.getElementById("backupLatest");
-    if (!info) { box.textContent = "最新のバックアップ: 見つかりません"; return; }
-    box.textContent = "最新のバックアップ: " + backupFormatTime(info.created_at) + " (" + info.size_mb + "MB)";
-}
-function backupFetchStatus() {
-    return fetch("/api/system/backup/status", { credentials: "same-origin" })
-        .then(function (res) { if (!res.ok) { throw new Error("HTTP " + res.status); } return res.json(); });
-}
-function backupPoll(runId) {
-    backupFetchStatus().then(function (st) {
-        backupShowLatest(st.latest_backup);
-        if (st.running) { backupPollTimer = setTimeout(function () { backupPoll(runId); }, 2000); return; }
-        backupSetBusy(false);
-        var box = document.getElementById("backupResult");
-        var last = st.last_result;
-        if (last && (runId === null || last.run_id === runId)) {
-            var ok = last.success;
-            var text = ok ? "✅ バックアップが完了しました (" + last.size_mb + "MB)" : "❌ バックアップに失敗しました: " + last.message;
-            box.textContent = text;
-            dashboardToast(text, ok);
-        } else {
-            box.textContent = "";
-        }
-    }).catch(function (e) {
-        // 一時的な通信エラーでは諦めず、少し待って再確認する(結果はサーバー側に残る)。
-        backupPollTimer = setTimeout(function () { backupPoll(runId); }, 4000);
-    });
-}
-function dashboardBackup() {
-    var box = document.getElementById("backupResult");
-    backupSetBusy(true);
-    box.textContent = "バックアップを開始しています...";
-    fetch("/api/system/backup", { method: "POST", credentials: "same-origin" })
-        .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
-        .then(function (r) {
-            if (!r.ok) { throw new Error(r.data.detail || "開始できませんでした"); }
-            box.textContent = "バックアップ中です。完了までお待ちください...";
-            backupPoll(r.data.run_id);
-        })
-        .catch(function (e) {
-            backupSetBusy(false);
-            box.textContent = "❌ " + e.message;
-            dashboardToast("❌ バックアップを開始できませんでした: " + e.message, false);
-        });
-}
-var deployFailCount = 0;
-function deploySetBusy(busy) {
-    var btn = document.getElementById("deployBtn");
-    var chk = document.getElementById("deployConfirm");
-    if (busy) {
-        btn.disabled = true;
-        btn.textContent = "⏳ 更新中...";
-    } else {
-        btn.textContent = "⬇️ 最新に更新して再起動";
-        btn.disabled = !chk.checked;
-    }
-}
-function deployPoll(runId) {
-    var box = document.getElementById("deployResult");
-    fetch("/api/system/deploy/status", { credentials: "same-origin" })
-        .then(function (res) { if (!res.ok) { throw new Error("HTTP " + res.status); } return res.json(); })
-        .then(function (st) {
-            deployFailCount = 0;
-            if (st.running) {
-                box.textContent = "更新中です。完了までお待ちください...";
-                setTimeout(function () { deployPoll(runId); }, 3000);
-                return;
-            }
-            deploySetBusy(false);
-            var last = st.last_result;
-            if (last && (runId === null || last.run_id === runId)) {
-                var text = (last.success ? "✅ " : "❌ ") + last.message;
-                box.textContent = last.success ? text + " ページを再読み込みすると新しい画面になります。" : text;
-                dashboardToast(text, last.success);
-            } else {
-                box.textContent = "";
-            }
-        })
-        .catch(function () {
-            // 再起動中はサーバーが応答しない。諦めず待つ(結果は状態ファイルに残る)。
-            deployFailCount += 1;
-            if (deployFailCount > 200) {
-                deploySetBusy(false);
-                box.textContent = "❌ サーバーが長時間応答しません。実機の状態を確認してください。";
-                return;
-            }
-            box.textContent = "サーバーを再起動しています。しばらくお待ちください...";
-            setTimeout(function () { deployPoll(runId); }, 4000);
-        });
-}
-function dashboardDeploy() {
-    var box = document.getElementById("deployResult");
-    deploySetBusy(true);
-    box.textContent = "更新を開始しています...";
-    fetch("/api/system/deploy", { method: "POST", credentials: "same-origin" })
-        .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
-        .then(function (r) {
-            if (!r.ok) { throw new Error(r.data.detail || "開始できませんでした"); }
-            box.textContent = "更新中です。完了までお待ちください...";
-            deployPoll(r.data.run_id);
-        })
-        .catch(function (e) {
-            deploySetBusy(false);
-            box.textContent = "❌ " + e.message;
-            dashboardToast("❌ 更新を開始できませんでした: " + e.message, false);
-        });
-}
-document.addEventListener("DOMContentLoaded", function () {
-    // 更新の実行中にページを開き直した場合は、結果を待つ表示に戻す。
-    fetch("/api/system/deploy/status", { credentials: "same-origin" })
-        .then(function (res) { return res.ok ? res.json() : null; })
-        .then(function (st) { if (st && st.running) { deploySetBusy(true); deployPoll(null); } })
-        .catch(function () {});
-    // ページを開いた時点で実行中なら、スピナー表示に戻して結果を待つ。
-    backupFetchStatus().then(function (st) {
-        backupShowLatest(st.latest_backup);
-        if (st.running) { backupSetBusy(true); backupPoll(null); }
-    }).catch(function () {
-        document.getElementById("backupLatest").textContent = "最新のバックアップ: 取得できませんでした";
-    });
-});
-</script>
-"""

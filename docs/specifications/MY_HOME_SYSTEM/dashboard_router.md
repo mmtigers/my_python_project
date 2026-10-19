@@ -27,10 +27,10 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `json` | 標準 | マニフェストのJSONエンコード | 根拠: [インポート宣言] (行番号: 21 / 抜粋: "import json") |
-| `fastapi.APIRouter` / `HTTPException` / `Response` | 外部 | ルーター定義、404送出、レスポンス組み立て | 根拠: [インポート宣言] (行番号: 24 / 抜粋: "from fastapi import APIRouter, HTTPException, Response") |
-| `fastapi.responses.FileResponse` / `HTMLResponse` / `RedirectResponse` | 外部 | 画像ファイル配信・HTML返却・リダイレクト | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse") |
-| `config` | 外部 | `DASHBOARD_BASE_PATH`/`ASA_NOTE_URL`の取得 | 根拠: [インポート宣言] (行番号: 27 / 抜粋: "import config") |
+| `json` | 標準 | マニフェストのJSONエンコード | 根拠: [インポート宣言] (行番号: 22 / 抜粋: "import json") |
+| `fastapi.APIRouter` / `HTTPException` / `Response` | 外部 | ルーター定義、404送出、レスポンス組み立て | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "from fastapi import APIRouter, HTTPException, Response") |
+| `fastapi.responses.FileResponse` / `HTMLResponse` / `RedirectResponse` | 外部 | 画像ファイル配信・HTML返却・リダイレクト | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse") |
+| `config` | 外部 | `DASHBOARD_BASE_PATH`/`ASA_NOTE_URL`の取得 | 根拠: [インポート宣言] (行番号: 28 / 抜粋: "import config") |
 | `services.dashboard_page_service` | 外部 | 各ページのHTML組み立て | 根拠: [インポート宣言] (行番号: 28〜32 / 抜粋: "from services import (") |
 | `services.dashboard_pwa_service` | 外部 | マニフェスト・アイコンの生成 | 根拠: [インポート宣言] (行番号: 27) |
 | `services.home_status_service` | 外部 | カードの取得・キャッシュ、`QUEST_APP_PATH`/`MOBILE_PAGE_REFRESH_SEC`/`get_now_jst` | 根拠: [インポート宣言] (行番号: 27) |
@@ -198,7 +198,7 @@
 
 
 * **引数/リクエスト**: **(新機能)** クエリ`device`(`device_id`、任意)で高砂・伊丹のセンサーログをその機器だけに絞る(`render_watch_page(selected_device=...)`に渡す。一覧に無い値は無視される。防犯ログは対象外)。クエリ`date`(`YYYY-MM-DD`、任意)。**(新機能)** 指定があれば`dashboard_page_service.parse_log_date`で解釈し、その日のログだけを表示する。この場合は共通キャッシュ(直近`MOBILE_SENSOR_ROW_LIMIT`件)ではなく`home_status_service.get_sensor_data_for_day`でDBから指定日の全件を取る。形式が不正な値は無視して通常表示になる。
-* 根拠: [関数定義] (行番号: 190 / 抜粋: "def dashboard_watch(")、[日付の解釈] (行番号: 204 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
+* 根拠: [関数定義] (行番号: 191 / 抜粋: "def dashboard_watch(")、[日付の解釈] (行番号: 205 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(見守りページ全体のHTML)
@@ -241,13 +241,13 @@
 
 * **役割**: **(新機能)** ⚡電気ページ。`power_analysis_service.build_power_report(days)`の結果を`power_page_service.render_power_page`で描く(月ごとの推移・日別の電気代・気温との関係・テレビの使い方)。分析は10分キャッシュされる。`async def`にしない(DB取得とpandasの計算が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`days`(30/60/90。それ以外の値・数値でない値は既定の30。`str | None`で受けて自前で変換するので422にならない)。日別・気温・テレビの対象期間を切り替える。
-* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 268)
+* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 269)
 
 ### `GET {DASHBOARD_BASE_PATH}/updates` (`dashboard_updates`)
 
 * **役割**: **(新機能)** アップデートページを返す。`release_history_service.get_release_history()`でダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を集め、`dashboard_page_service.render_updates_page`に渡す。あさノート・よるノートは外部から取得する(タイムアウト・キャッシュ付き。失敗しても残りのアプリは表示する)。`async def`にしない(外部取得が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`app`(`dashboard`/`quest`/`asa`/`yoru`、任意)で1アプリに絞る。未知の値は無視して全件。
-* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 283)
+* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 284)
 
 ### `GET {DASHBOARD_BASE_PATH}/sys` (`dashboard_sys`)
 
@@ -273,6 +273,13 @@
 * 根拠: [関数本体] (行番号: 152〜165)
 
 
+
+### `GET {DASHBOARD_BASE_PATH}/static/{filename}` (`dashboard_static`)
+
+* **役割**: **(#949)** ページ共通のCSS・各ページのJS(`MY_HOME_SYSTEM/static/dashboard/`の`dashboard.css`・`camera.js`・`git_status.js`・`maintenance.js`)を返す。許可リスト(`dashboard_page_service.resolve_static_asset`)にある名前だけ配信し、それ以外(パストラバーサルを含む)は404。URLの`?v=`(更新時刻)で版が切り替わり、`Cache-Control: no-cache`で毎回再検証させる。
+* **引数/リクエスト**: パス`filename`
+* **戻り値/レスポンス**: `FileResponse`(Content-Typeはファイル種別ごと)/ 404
+* 根拠: `MY_HOME_SYSTEM/routers/dashboard_router.py`の`dashboard_static`
 
 ### `GET {DASHBOARD_BASE_PATH}/snapshot/{filename}` (`dashboard_snapshot`)
 

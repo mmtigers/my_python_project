@@ -13,6 +13,7 @@
 import os
 import sys
 from datetime import date, datetime
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -66,6 +67,11 @@ def _client() -> TestClient:
     app = FastAPI()
     app.include_router(dashboard_router.router)
     return TestClient(app)
+
+
+def _dashboard_css() -> str:
+    """共通CSS(`static/dashboard/dashboard.css`。#949で外部ファイル化)の本文。"""
+    return (Path(dashboard_page_service._STATIC_DIR) / "dashboard.css").read_text(encoding="utf-8")
 
 
 def _stub_loaders(**overrides):
@@ -354,8 +360,11 @@ class TestSubPages:
         res = self._get("sys")
         assert 'id="deployBtn" disabled' in res.text
         assert 'id="deployConfirm"' in res.text
-        assert "/api/system/deploy" in res.text
-        assert "/api/system/deploy/status" in res.text
+        # API呼び出しは外部JS(#949)にある。ページはそれを参照し、JS側にエンドポイントがある。
+        assert "maintenance.js" in res.text
+        js = (Path(dashboard_page_service._STATIC_DIR) / "maintenance.js").read_text(encoding="utf-8")
+        assert "/api/system/deploy" in js
+        assert "/api/system/deploy/status" in js
 
 
 class TestStatusCacheOnTheServerSide:
@@ -502,7 +511,8 @@ class TestMobilePageHtmlSafety:
             refresh_sec=60,
         )
 
-        assert "min-height: 44px" in page
+        assert "dashboard.css" in page  # 共通CSSは外部ファイル(#949)
+        assert "min-height: 44px" in _dashboard_css()
 
 
 class TestCardsLinkToTheirDetail:
@@ -628,8 +638,10 @@ class TestDarkMode:
     def test_the_page_follows_the_device_setting(self):
         page = self._page()
 
-        assert "prefers-color-scheme: dark" in page
-        assert "color-scheme: light dark" in page
+        assert "dashboard.css" in page
+        css = _dashboard_css()
+        assert "prefers-color-scheme: dark" in css
+        assert "color-scheme: light dark" in css
 
 
 class TestPartialRefresh:
@@ -689,7 +701,7 @@ class TestPartialRefresh:
         )
 
         assert 'classList.add("stale")' in page
-        assert "#status.stale" in page
+        assert "#status.stale" in _dashboard_css()
 
     def test_repeated_fragment_requests_do_not_read_the_db_again(self):
         """断片の取得経路もページ本体と同じTTLキャッシュを通ること。"""
