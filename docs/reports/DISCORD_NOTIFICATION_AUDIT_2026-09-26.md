@@ -80,7 +80,7 @@ flowchart TD
 | `DISCORD_WEBHOOK_ERROR` | `channel="error"` の宛先。`core/logger.DiscordErrorHandler`（=アプリ全体の`logger.error`）の既定送信先でもある | エラー警告マン | `1448293091093250139` | `1445677808029274214` | 実質「エラー・障害専用」チャンネル |
 | `DISCORD_WEBHOOK_REPORT` | `channel="report"` の宛先 | 毎日伝えるマン | `1448290479258075254` | 同上 | 実質「定期レポート・情報共有」チャンネル |
 | `DISCORD_WEBHOOK_NOTIFY` | `channel="notify"`（既定値）の宛先 | 通知するマン | `1448293164623466507` | 同上 | 実質「見守り・防犯・日常イベント」チャンネル |
-| `DISCORD_WEBHOOK_URL` | レガシー。`DISCORD_WEBHOOK_NOTIFY`未設定時のフォールバック用として書かれているが、**実機では`DISCORD_WEBHOOK_NOTIFY`と別の値が設定されている**ため実際にはフォールバックは発生していない。`monitors/smart_timelapse_generator.Uploader`が動画添付送信で直接参照する専用経路でもある | Spidey Bot(Discordのデフォルト初期名のまま) | `1445678504317550643` | 同上 | **重要な訂正**: 初版では「NOTIFYと実質同一先」と記載していたが、実機確認により**4つとも全て別々のchannel_id**であることが判明した。動画ダイジェスト(N020)は独立した第4のチャンネルに届いている |
+| `DISCORD_WEBHOOK_URL` | レガシー。`DISCORD_WEBHOOK_NOTIFY`未設定時のフォールバック用として書かれているが、**実機では`DISCORD_WEBHOOK_NOTIFY`と別の値が設定されている**ため実際にはフォールバックは発生していない。`monitors/smart_timelapse_generator.Uploader`が動画添付送信で直接参照する専用経路でもある | Spidey Bot(Discordのデフォルト初期名のまま) | `1561703901676445746`(2026-10-19再作成。2026-09-26時点は旧 `1445678504317550643`、現在は無効) | 同上 | **重要な訂正**: 初版では「NOTIFYと実質同一先」と記載していたが、実機確認により**4つとも全て別々のchannel_id**であることが判明した。動画ダイジェスト(N020)は独立した第4のチャンネルに届いている |
 | `WATCHDOG_NOTIFY_WEBHOOK_URL` | `health_watch.py`層2（自動調査）フックの調査結果通知専用 | (`DISCORD_WEBHOOK_ERROR`と値が同一のため上記と同じ) | `1448293091093250139`(ERRORと同一) | 同上 | ハッシュ比較で`DISCORD_WEBHOOK_ERROR`と完全一致すると確認済み。独立チャンネルではない |
 
 4つのWebhookは全て**同一のDiscordサーバー(Guild)**内の、互いに異なる4つのチャンネルに届く（Guild自体は1つのみで分散していない）。
@@ -193,7 +193,7 @@ Family Quest（子供のクエスト管理）関連の通知は、LINE（親グ�
 | `DISCORD_WEBHOOK_ERROR`(+`WATCHDOG_NOTIFY_WEBHOOK_URL`) | エラー警告マン | `1448293091093250139` | N001, N002, N008, N009, N012, N013, N015〜N017, N019, N021, N022, N025, N026, N029, N032(※後述), N036〜N039, N040〜N043 | アプリ全体の`logger.error`(N001経由が大半)＋各`send_push(channel="error")`明示呼び出し＋層2自動調査結果(N038) | 随時〜毎時 | **最も通知量が多いチャンネル**。エラーログの自動転送(N001)と個別の障害通知、さらに`WATCHDOG_NOTIFY_WEBHOOK_URL`経由の調査結果が全て同じ場所に集まる。dedup(600秒)はプロセス内のみ有効 |
 | `DISCORD_WEBHOOK_REPORT` | 毎日伝えるマン | `1448290479258075254` | N003, N005, N006, N010, N011, N014, N018, N023, N024, N027, N028 | 定期レポート系(週次ログ分析・週次電気代・起動後チェック・NAS稼働・バックアップ失敗) | 日次〜週次中心 | 名前は"report"だが、N023(バックアップ失敗)のように内容的には障害でもchannelは`report`になっているものがある(要注意点、後述4.1) |
 | `DISCORD_WEBHOOK_NOTIFY` | 通知するマン | `1448293164623466507` | N004, N007, N030〜N035, N044〜N047 | 見守り・防犯・家電イベント・週間レポート・DDDの成功通知(動画保存完了・新規キャスト検知・日次サマリ・サイト疎通不能アラート) | 随時(イベント駆動)〜週1 | 家庭内IoTイベント(動き・ドア・電力)がリアルタイムで最も飛ぶチャンネル。新規キャスト検知(N045、embed画像付き)等の「コンテンツ」寄りの通知もここに集まる |
-| `DISCORD_WEBHOOK_URL` | Spidey Bot(初期値のまま) | `1445678504317550643` | N020 | `monitors/smart_timelapse_generator.Uploader`(カメラのダイジェスト動画本体+完了通知) | 日次(cron)+動き検知イベント発生時 | **今回の実機確認で判明した独立チャンネル**。初版では「NOTIFYと同一先」と誤って推測していたが、実際は動画配信専用の別チャンネル。Webhook表示名が初期値のままなのも「他の3つと違って手を加えていない/古いまま使われている」ことを示唆する |
+| `DISCORD_WEBHOOK_URL` | Spidey Bot(初期値のまま) | `1561703901676445746`(2026-10-19再作成。2026-09-26時点は旧 `1445678504317550643`、現在は無効) | N020 | `monitors/smart_timelapse_generator.Uploader`(カメラのダイジェスト動画本体+完了通知) | 日次(cron)+動き検知イベント発生時 | **今回の実機確認で判明した独立チャンネル**。初版では「NOTIFYと同一先」と誤って推測していたが、実際は動画配信専用の別チャンネル。Webhook表示名が初期値のままなのも「他の3つと違って手を加えていない/古いまま使われている」ことを示唆する |
 
 ### 4.1 ドキュメント記載と実装の食い違い・注意点
 
@@ -256,6 +256,23 @@ Family Quest（子供のクエスト管理）関連の通知は、LINE（親グ�
 - `notify_settings.power_threshold_watts`: 3台に設定済み(N033の対象。おそらくPlug Mini 3台に対応)。
 - `notify_settings.notify_mode`: **18台全てが`"LOG_ONLY"`**。ただし**この値を実際に読んで分岐しているコードはリポジトリ全体に1件も存在しない**(`config.py`のPydanticモデルにデフォルト値として定義されているのみで、`sensor_service.py`・`switchbot_power_monitor.py`のどちらも`notify_mode`を参照していない)。つまり`devices.json`側で`LOG_ONLY`に設定しても、動きの検知やドア開閉、電力閾値クロスの通知(N030〜N033)は**現状の実装では抑制されず、常にDiscordへ送信される**。「ログのみにしたい」という意図で`LOG_ONLY`を設定していた場合、その意図はコードに反映されていない可能性がある(6章の改善提案に追記)。
 
+### 6.3 実機での再確認(2026-10-19、Issue #997)
+
+6.1・6.2は2026-09-26時点の記録として保持する。以下は2026-10-19に実機(`raspberrypi`)上で読み取りのみで再確認した結果(設定変更・再起動・テスト通知なし。値は非公開、ハッシュは先頭12桁のみ)。
+
+| 項目 | 結果 | 2026-09-26との比較 |
+| --- | --- | --- |
+| `crontab -l` と `deploy/cron/crontab` | 確認済み: 差分なし | 変化なし |
+| Webhook 5変数の設定・相互関係 | 確認済み: 4つとも設定済みで互いに異なる。`WATCHDOG_NOTIFY_WEBHOOK_URL`は`DISCORD_WEBHOOK_ERROR`と同一 | 変化なし |
+| Webhookの有効性(Discord API読み取りGET) | **差異あり**: ERROR/REPORT/NOTIFY/WATCHDOG は HTTP 200 で、Channel ID・表示名とも4章の表と一致。**`DISCORD_WEBHOOK_URL`(`1445678504317550643`宛て・N020)は HTTP 404** | 9/26は応答あり。現在は無効(削除または再発行の可能性)。原因は未特定 | → **2026-10-19追記: 新チャンネルにWebhookを再作成して`.env`を更新し、Discord API読み取りGETで有効(`channel_id`=`1561703901676445746`、表示名`Spidey Bot`)を確認。解消。** 次回のcron実行後の実投稿は未確認
+| `HEALTH_WATCH_INVESTIGATE_HOOK` | 確認済み: `scripts/claude_investigate.sh`の絶対パスで、実在し実行権限あり | 変化なし |
+| `HEALTH_WATCH_DEADMAN_PING_URL` | 確認済み: 設定済み(到達性は未確認) | 変化なし |
+| DDDからのimport | 確認済み: `MY_HOME_SYSTEM/.venv`(`run_task.sh`が使う`.venv`。`DDD/`配下に専用`.venv`は無い)で`from core.logger import get_logger`・`from services.notification_service import _send_discord_webhook`とも成功 | 変化なし |
+| `devices.json`の`notify_mode` | 差異あり(表現のみ): `monitor_devices`18台のうち明示的な`LOG_ONLY`は3台、残り15台は未指定(`config.py`の既定値が`LOG_ONLY`なので実効値は18台とも`LOG_ONLY`)。カメラ3台は`notify_settings`なし。`devices.json`の更新日時は10/14 | 9/26は「全18台に設定」。実効値は同じ。意図が今も正しいかはユーザー判断で、未確認 |
+| Discord側のチャンネル名・ミュート設定 | **未確認**(Botを持たずAPIで取得できない。クライアント側設定のため) | ― |
+
+`DISCORD_WEBHOOK_URL`のN020(カメラのダイジェスト動画)がいつから失敗しているかは未特定。`daily_timelapse_job.log`に404/Unknown Webhookの記録は見つからなかった。ログの確認は限定的で、アップロード失敗の有無は断定できない。
+
 ---
 
 ## 7. 不明・要確認事項の一覧(2026-09-26 追加調査後の最新状態)
@@ -270,7 +287,8 @@ Family Quest（子供のクエスト管理）関連の通知は、LINE（親グ�
 | DDDが実機の`.venv`で`core`パッケージをimportできるか | **解消**: 実機で確認済み。全DDDスクリプトが正規経路(フォールバックではない)で動いている |
 | 各WebhookのChannel ID・Guild ID・Webhook表示名 | **解消**(2026-09-26)。Discord公式APIへの読み取り専用問い合わせ(トークン・URL自体は非公開のまま)で確認し、1.1・4章に反映した。4つの環境変数は同一Guild内の**4つの異なるチャンネル**に対応し(初版の「NOTIFYと同一先」という推測は誤りだったと判明)、`WATCHDOG_NOTIFY_WEBHOOK_URL`は`DISCORD_WEBHOOK_ERROR`と同一チャンネルであることも確定した |
 | `devices.json`の`notify_settings`の実際の内容 | **解消**(2026-09-26、匿名化サマリで確認。6.2参照)。カメラ3台・SwitchBotデバイス18台(内訳は6.2)。`target`は全台未指定(既定discord)、`power_threshold_watts`設定済みは3台。**副次的な発見**: 全18台に設定されている`notify_mode: "LOG_ONLY"`を実際に読むコードが無く、事実上無効な設定項目だった(改善提案6章5番に追記) |
-| Discordチャンネルの表示名(`#〇〇`のような実際のチャンネル名) | **未解消**。Incoming Webhook APIから取得できるのは`channel_id`(数値ID)までで、チャンネル自体の表示名を取得するにはチャンネル読み取り権限を持つBotトークンが必要。本システムはBotを一切持たない設計のため、この情報だけはユーザー自身がDiscordアプリで確認するほうが早い(Channel IDは4章の表に記載済みなので、Discordアプリの検索や設定画面でIDから該当チャンネルを特定できる) |
+| 実機の現状(2026-10-19再確認、6.3参照) | `DISCORD_WEBHOOK_URL`は確認時に**HTTP 404**だったが、同日中にWebhookを再作成し有効を確認(解消。実投稿は未確認)。他のWebhook・crontab・層2/3・DDD import は9/26と一致。`notify_mode`は明示3台+既定15台(実効値は同じ) |
+| Discordチャンネルの表示名(`#〇〇`のような実際のチャンネル名)とミュート設定 | **未解消**(2026-10-19時点も未確認)。Incoming Webhook APIから取得できるのは`channel_id`(数値ID)までで、チャンネル自体の表示名を取得するにはチャンネル読み取り権限を持つBotトークンが必要。本システムはBotを一切持たない設計のため、この情報だけはユーザー自身がDiscordアプリで確認するほうが早い(Channel IDは4章の表に記載済みなので、Discordアプリの検索や設定画面でIDから該当チャンネルを特定できる) |
 
 ---
 
