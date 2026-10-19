@@ -97,7 +97,7 @@
 
 ### `STATUS_CARD_CSS` (モジュールレベル定数)
 
-* **役割**: カード1枚分のCSS（`.status-grid` / `.status-card` / `.theme-*`）。ホームページと各サブページ(`services/dashboard_page_service.py`)が共有する。グリッドは `repeat(auto-fit, minmax(160px, 1fr))` で、スマホ幅では2列・PCでは4〜6列に自動で折り返す。**(UI刷新)** 色は `dashboard_page_service._PAGE_BASE_CSS` のデザイントークン(CSS変数)を参照し、`.theme-*` は背景色に加えて左端の太い帯でも状態を示す(ダークモードは変数側で切替)。
+* **役割**: カード1枚分のCSS（`.status-grid` / `.status-card` / `.theme-*`）。ホームページと各サブページ(`services/dashboard_page_service.py`)が共有する。グリッドは `repeat(auto-fit, minmax(160px, 1fr))` で、スマホ幅では2列・PCでは4〜6列に自動で折り返す。**(UI刷新)** 色は `MY_HOME_SYSTEM/static/dashboard/dashboard.css` のデザイントークン(CSS変数)を参照し、`.theme-*` は背景色に加えて左端の太い帯でも状態を示す(ダークモードは変数側で切替)。
 * 根拠: `STATUS_CARD_CSS = """` (行番号: 80 / 抜粋: "STATUS_CARD_CSS = \"\"\"")
 
 

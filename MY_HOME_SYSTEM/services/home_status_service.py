@@ -80,7 +80,7 @@ MOBILE_SENSOR_ROW_LIMIT = 3000
 STATUS_CARD_CSS = """
     /* --- ステータスカード ---
        CSS Grid で「入るだけ並べて自動で折り返す」(スマホ幅では2列、PCでは4〜6列)。
-       色は `_PAGE_BASE_CSS` のデザイントークンを参照する(ダークモードも変数側で切替)。
+       色は `static/dashboard/dashboard.css` のデザイントークンを参照する(ダークモードも変数側で切替)。
        状態は背景色だけでなく、左端の太い帯・文字中の絵文字(⚠️/⚪等)でも判別できる。 */
     .status-grid {
         display: grid;

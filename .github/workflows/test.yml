@@ -458,6 +458,12 @@ jobs:
         # CIでは未実行だった。現状0エラーのため追加コストなしでゲート化する。
         run: npm run lint
 
+      - name: Lint dashboard JS (eslint)
+        # Issue #949: ダッシュボードのJSは MY_HOME_SYSTEM/static/dashboard/ の外部ファイル。
+        # ESLintはここ(CI)だけで走らせ、実機の起動・デプロイにnpmは要求しない。
+        # 依存はfamily-questのnode_modulesを借りる(追加なし)。
+        run: npm run lint:dashboard
+
       - name: Build (tsc -b && vite build)
         # H-11: 以前はfamily-quest側にCIが一切無く、H-8のようなフロントエンドの
         # フィルタ不具合やTSの型エラーがマージまで検出できなかった。

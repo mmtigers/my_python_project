@@ -21,6 +21,7 @@ on:
     paths:
       - 'MY_HOME_SYSTEM/routers/dashboard_router.py'
       - 'MY_HOME_SYSTEM/services/dashboard_page_service.py'
+      - 'MY_HOME_SYSTEM/static/dashboard/**'
       - 'MY_HOME_SYSTEM/services/dashboard_pwa_service.py'
       - 'MY_HOME_SYSTEM/services/home_status_service.py'
       - 'MY_HOME_SYSTEM/tests/test_dashboard_mobile_e2e.py'

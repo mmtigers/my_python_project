@@ -5,6 +5,7 @@ NAS(config.ASSETS_DIR)には一切触れず、tmp_pathへ差し替える。
 """
 import os
 import sys
+from pathlib import Path
 from datetime import date, datetime, timedelta
 
 import pandas as pd
@@ -677,12 +678,13 @@ class TestSysPageBootAndGit:
         """git fetch は遅いので、ページ本体では呼ばず専用APIから非同期に取る。"""
         html = self._render([])
         assert 'id="git-status"' in html and 'id="gitStatusBody"' in html
-        assert "/api/system/git/status" in html
         assert "確認中" in html
+        assert "git_status.js" in html  # 取得処理は外部JS(#949)
+        assert "/api/system/git/status" in (Path(dashboard_page_service._STATIC_DIR) / "git_status.js").read_text(encoding="utf-8")
 
     def test_git_script_renders_with_textcontent_not_innerhtml(self):
         """コミット件名は外部由来の文字列。DOMへは textContent で入れる(XSS対策)。"""
-        script = dashboard_page_service._GIT_STATUS_SCRIPT
+        script = (Path(dashboard_page_service._STATIC_DIR) / "git_status.js").read_text(encoding="utf-8")
         assert "innerHTML" not in script and "textContent" in script
 
 
