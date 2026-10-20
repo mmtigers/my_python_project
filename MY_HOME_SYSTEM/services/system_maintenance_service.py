@@ -7,11 +7,12 @@ POSTエンドポイントから呼べるサービス関数として独立させ�
 (sudo systemctl restart, timeout付き)は変更していない。
 
 「最新に更新して再起動」(`trigger_deploy_async`): スマホのダッシュボードから実機の
-`git pull --ff-only` を実行し、新しいコミットが入ったときだけ再起動する。
+`git fetch --prune origin` の後 `git merge --ff-only origin/master` を実行し、新しいコミットが入ったときだけ再起動する。
+  現在のブランチの追跡先には依存しない。master 以外を向いている実機は、原因を示して失敗させる(自動 checkout はしない)。
 - 取り込みに失敗した場合(手元の変更・fast-forwardできない履歴・ネットワーク断・
   認証失敗等)は**再起動せず**、失敗理由を結果として返す。
 - 新しいコミットが無ければ再起動しない(再起動だけしたいときは既存の再起動ボタン)。
-- `git pull` は post-merge フック(family-quest の再ビルドとクエストマスタ同期)を
+- `git merge` は post-merge フック(family-quest の再ビルドとクエストマスタ同期)を
   含むため数分かかりうる。バックアップと同じく、起動したことを即座に返して
   バックグラウンドスレッドで実行し、画面は `get_deploy_state` をポーリングする。
 - 再起動でこのプロセス自身が入れ替わるため、結果は状態ファイルへ保存する。
@@ -44,10 +45,12 @@ RESTART_TIMEOUT_SEC: int = 120
 
 # リポジトリルート(MY_HOME_SYSTEM の1つ上。health_watch.REPO_ROOT と同じ求め方)。
 REPO_ROOT: str = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-# `git pull` は post-merge フックの family-quest 再ビルド(npm ci + vite build)を
+# `git merge`(fast-forward) は post-merge フックの family-quest 再ビルド(npm ci + vite build)を
 # 含むためラズパイでは数分かかる。home_system.service の TimeoutStartSec と同じ桁に揃える。
 GIT_PULL_TIMEOUT_SEC: int = 900
 GIT_QUICK_TIMEOUT_SEC: int = 30
+# 実機が追うブランチ。upstream 設定には依存せず、これを明示的に取り込む
+DEPLOY_BRANCH: str = "master"
 # 失敗時に画面へ載せる git の出力(末尾)の最大文字数
 GIT_OUTPUT_TAIL_CHARS: int = 300
 # 実行状態の保存先(再起動をまたいで結果を引き継ぐため)
@@ -62,7 +65,7 @@ _PROCESS_STARTED_AT: float = time.time()
 _deploy_lock = threading.Lock()
 _deploy_running: bool = False
 
-PHASE_RUNNING = "running"        # git pull 実行中
+PHASE_RUNNING = "running"        # git 取り込み実行中
 PHASE_RESTARTING = "restarting"  # 再起動を要求済み(このプロセスは間もなく入れ替わる)
 PHASE_DONE = "done"              # 終了(success で成否)
 
@@ -129,8 +132,36 @@ def _finish(run_id: int, success: bool, message: str, before: str = "", after: s
         })
 
 
+def _fetch_and_fast_forward() -> str:
+    """origin/DEPLOY_BRANCH を fetch --prune して fast-forward で取り込む。失敗理由(日本語の要約+git出力)を返す。成功なら空文字。
+
+    現在のブランチの追跡先(upstream)には依存しない。実機が作業用ブランチを向いたまま
+    リモートブランチが削除された場合(`git pull` の "no such ref was fetched")でも原因を示せる。
+    ブランチの自動 checkout はしない(作業中のブランチ・手元の変更を壊さないため)。
+    """
+    fetch = _git("fetch", "--prune", "origin", timeout=GIT_PULL_TIMEOUT_SEC)
+    if fetch.returncode != 0:
+        return f"GitHubから最新を取得できませんでした(ネットワーク・認証を確認してください)。\n{_tail(fetch.stderr) or _tail(fetch.stdout)}"
+
+    branch = _git("rev-parse", "--abbrev-ref", "HEAD", timeout=GIT_QUICK_TIMEOUT_SEC).stdout.strip()
+    if branch != DEPLOY_BRANCH:
+        label = "ブランチを指していません(detached HEAD)" if branch in ("", "HEAD") else f"'{branch}' ブランチを向いています"
+        gone = ""
+        if branch not in ("", "HEAD"):
+            remote = _git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}", timeout=GIT_QUICK_TIMEOUT_SEC)
+            if remote.returncode != 0:
+                gone = f"追跡先のリモートブランチ(origin/{branch})はGitHubから削除されています。"
+        return (f"実機のリポジトリが {DEPLOY_BRANCH} ではなく{label}。{gone}"
+                f"実機で `git checkout {DEPLOY_BRANCH}` してから、もう一度実行してください。")
+
+    merge = _git("merge", "--ff-only", f"origin/{DEPLOY_BRANCH}", timeout=GIT_PULL_TIMEOUT_SEC)
+    if merge.returncode != 0:
+        return f"fast-forward で取り込めませんでした(手元の変更・履歴の食い違いを確認してください)。\n{_tail(merge.stderr) or _tail(merge.stdout)}"
+    return ""
+
+
 def _run_deploy(run_id: int) -> None:
-    """`git pull --ff-only` → (新しいコミットがあれば)再起動。失敗時は再起動しない。"""
+    """`git fetch --prune` + `git merge --ff-only origin/master` → (新しいコミットがあれば)再起動。失敗時は再起動しない。"""
     global _deploy_running
     before = after = ""
     try:
@@ -141,15 +172,14 @@ def _run_deploy(run_id: int) -> None:
         before = head.stdout.strip()
 
         try:
-            pull = _git("pull", "--ff-only", timeout=GIT_PULL_TIMEOUT_SEC)
+            merge_error = _fetch_and_fast_forward()
         except subprocess.TimeoutExpired:
-            logger.error(f"git pull が {GIT_PULL_TIMEOUT_SEC} 秒以内に完了しませんでした(再起動はしません)")
+            logger.error(f"git の取り込みが {GIT_PULL_TIMEOUT_SEC} 秒以内に完了しませんでした(再起動はしません)")
             _finish(run_id, False, f"取り込みが {GIT_PULL_TIMEOUT_SEC} 秒以内に終わりませんでした。再起動はしていません。", before)
             return
-        if pull.returncode != 0:
-            detail = _tail(pull.stderr) or _tail(pull.stdout)
-            logger.error(f"git pull --ff-only に失敗しました(再起動はしません): {detail}")
-            _finish(run_id, False, f"取り込みに失敗しました。再起動はしていません。\n{detail}", before)
+        if merge_error:
+            logger.error(f"最新の取り込みに失敗しました(再起動はしません): {merge_error}")
+            _finish(run_id, False, f"取り込みに失敗しました。再起動はしていません。\n{merge_error}", before)
             return
 
         head = _git("rev-parse", "--short", "HEAD", timeout=GIT_QUICK_TIMEOUT_SEC)
