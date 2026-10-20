@@ -30,19 +30,31 @@ def _cp(returncode=0, stdout="", stderr=""):
 class FakeGit:
     """`_git(*args)` の差し替え。pull の前後で HEAD を切り替える。"""
 
-    def __init__(self, before="aaa1111", after="bbb2222", pull=None, head_error=False):
+    def __init__(self, before="aaa1111", after="bbb2222", pull=None, head_error=False,
+                 branch="master", fetch=None, remote_branch_exists=True):
         self.heads = [before, after]
-        self.pull_result = pull if pull is not None else _cp(0, "Updating")
+        self.pull_result = pull if pull is not None else _cp(0, "Updating")  # merge の結果
+        self.fetch_result = fetch if fetch is not None else _cp(0)
+        self.branch = branch
+        self.remote_branch_exists = remote_branch_exists
         self.head_error = head_error
         self.calls = []
 
     def __call__(self, *args, timeout):
         self.calls.append(args)
+        if args[0] == "rev-parse" and "--abbrev-ref" in args:
+            return _cp(0, self.branch + "\n")
+        if args[0] == "rev-parse" and "--verify" in args:
+            return _cp(0 if self.remote_branch_exists else 1)
         if args[0] == "rev-parse":
             if self.head_error:
                 return _cp(128, "", "fatal: not a git repository")
             return _cp(0, self.heads.pop(0) + "\n")
-        if args[0] == "pull":
+        if args[0] == "fetch":
+            if isinstance(self.fetch_result, BaseException):
+                raise self.fetch_result
+            return self.fetch_result
+        if args[0] == "merge":
             if isinstance(self.pull_result, BaseException):
                 raise self.pull_result
             if self.pull_result.returncode == 0:
@@ -81,7 +93,9 @@ class TestRunDeploy:
         with pytest.raises(_ProcessKilled):
             svc._run_deploy(1)
 
-        assert ("pull", "--ff-only") in git.calls
+        assert ("fetch", "--prune", "origin") in git.calls
+        assert ("merge", "--ff-only", "origin/master") in git.calls
+        assert not any(c[0] == "pull" for c in git.calls)
         assert len(restarts) == 1
         assert len(pushes) == 1, "実行の記録をDiscordへ残す"
         state = svc._read_deploy_state()
@@ -113,6 +127,46 @@ class TestRunDeploy:
         assert st["last_result"]["success"] is False
         assert "再起動はしていません" in st["last_result"]["message"]
         assert "fast-forward" in st["last_result"]["message"]
+        assert st["last_result"]["message"].splitlines()[1].startswith("fast-forward で取り込めませんでした")
+
+    def test_deleted_work_branch_reports_cause_in_japanese_first(self, env, monkeypatch):
+        """実機が削除済みの作業ブランチを向いたままでも、原因を日本語で示し再起動しない。"""
+        restarts, _ = env
+        git = FakeGit(branch="docs/discord-audit-recheck-997", remote_branch_exists=False)
+        monkeypatch.setattr(svc, "_git", git)
+        svc._deploy_running = True
+        svc._run_deploy(1)
+        st = svc.get_deploy_state()
+        assert restarts == []
+        msg = st["last_result"]["message"]
+        assert st["last_result"]["success"] is False
+        assert "docs/discord-audit-recheck-997" in msg and "削除されています" in msg
+        assert "git checkout master" in msg
+        assert not any(c[0] == "merge" for c in git.calls), "master 以外では取り込まない"
+
+    def test_non_master_branch_with_live_remote_is_not_deleted_message(self, env, monkeypatch):
+        restarts, _ = env
+        monkeypatch.setattr(svc, "_git", FakeGit(branch="feature-x"))
+        svc._deploy_running = True
+        svc._run_deploy(1)
+        msg = svc.get_deploy_state()["last_result"]["message"]
+        assert restarts == [] and "feature-x" in msg and "削除されています" not in msg
+
+    def test_detached_head_is_rejected(self, env, monkeypatch):
+        restarts, _ = env
+        monkeypatch.setattr(svc, "_git", FakeGit(branch="HEAD"))
+        svc._deploy_running = True
+        svc._run_deploy(1)
+        assert restarts == []
+        assert "detached HEAD" in svc.get_deploy_state()["last_result"]["message"]
+
+    def test_fetch_failure_does_not_restart(self, env, monkeypatch):
+        restarts, _ = env
+        monkeypatch.setattr(svc, "_git", FakeGit(fetch=_cp(128, "", "fatal: unable to access")))
+        svc._deploy_running = True
+        svc._run_deploy(1)
+        msg = svc.get_deploy_state()["last_result"]["message"]
+        assert restarts == [] and "取得できませんでした" in msg and "unable to access" in msg
 
     def test_pull_timeout_does_not_restart(self, env, monkeypatch):
         restarts, _ = env
@@ -286,7 +340,7 @@ class TestRouter:
         assert res.json()["status"] == "running"
 
     def test_deploy_accepts_no_parameters_from_the_caller(self, api_client, monkeypatch):
-        """ブランチ・コマンドを呼び出し側から受け取らない(固定の `git pull --ff-only` のみ)。"""
+        """ブランチ・コマンドを呼び出し側から受け取らない(固定の fetch + merge --ff-only のみ)。"""
         seen = []
         monkeypatch.setattr(system_router.system_maintenance_service, "trigger_deploy_async",
                             lambda *a, **k: seen.append((a, k)) or True)
