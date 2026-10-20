@@ -68,6 +68,7 @@ from core.database import get_ro_connection
 from core.logger import setup_logging
 from core.utils import get_now_jst
 from services.notification_service import send_push
+from services.system_maintenance_service import DEPLOY_BRANCH
 from monitors.log_analyzer import LogAnalyzer
 
 logger = setup_logging("health_watch")
@@ -699,18 +700,32 @@ def check_repo_behind_upstream() -> str | None:
     再起動も要るため、無人で実行してよい操作ではない(ランブックの
     「自動 systemctl restart は行わない」と同じ思想)。
 
-    ネットワーク不通・upstream 未設定・git が無い等では「異常」ではなく
+    実機が DEPLOY_BRANCH(master)以外を向いているときは、遅れの判定ではなくその旨を返す。
+    比較先は追跡先(`@{u}`)ではなく `origin/<DEPLOY_BRANCH>` で、更新ボタンと同じ。
+
+    ネットワーク不通・git が無い等では「異常」ではなく
     「今回は判定できない」としてスキップする。毎時cronで走るため、外へ出られない
     環境で恒久的に鳴り続けるのを避ける(`check_quest_master_drift` と同じ方針)。
     """
-    upstream = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-    if upstream.returncode != 0 or not upstream.stdout.strip():
-        logger.warning("⚠️ upstream が設定されていないためチェックアウトの鮮度チェックをスキップします")
+    # 「最新に更新して再起動」は DEPLOY_BRANCH しか取り込まない。作業用ブランチ等を向いたままだと
+    # ボタンが失敗し、かつ以降の遅れ判定も意味を成さないため、ネットワークに依らず先に知らせる。
+    # (追跡先の有無には依存しない。リモートブランチが削除されていても同じ原因を指せる)
+    head_ref = _git("rev-parse", "--abbrev-ref", "HEAD")
+    if head_ref.returncode != 0 or not head_ref.stdout.strip():
+        logger.warning("⚠️ 現在のブランチを取得できないためチェックアウトの鮮度チェックをスキップします")
         return None
-    ref = upstream.stdout.strip()
+    branch = head_ref.stdout.strip()
+    if branch != DEPLOY_BRANCH:
+        label = "ブランチを指していません(detached HEAD)" if branch == "HEAD" else f"'{branch}' ブランチを向いています"
+        return (
+            f"実機のリポジトリが {DEPLOY_BRANCH} ではなく {label}。"
+            "ダッシュボードの「最新に更新して再起動」は取り込めず、マージ済みの修正が実機に届きません。\n"
+            f"  → 手元の変更を確認し(`git status`)、`git checkout {DEPLOY_BRANCH}` で戻してください"
+        )
+    ref = f"origin/{DEPLOY_BRANCH}"
 
     try:
-        fetched = _git("fetch", "--quiet", timeout=GIT_FETCH_TIMEOUT_SEC)
+        fetched = _git("fetch", "--quiet", "--prune", "origin", timeout=GIT_FETCH_TIMEOUT_SEC)
     except subprocess.TimeoutExpired:
         logger.warning("⚠️ git fetch がタイムアウトしたためチェックアウトの鮮度チェックをスキップします")
         return None

@@ -238,6 +238,21 @@ class TestGitStatus:
         assert "追跡先" in st["error"]
         assert not any(c[0] == "fetch" for c in fake.calls)
 
+    def test_on_master_has_no_branch_warning(self, env, monkeypatch):
+        _use_git(monkeypatch, _status_git())
+        assert svc.get_git_status()["branch_warning"] is None
+
+    def test_work_branch_warns_even_without_upstream(self, env, monkeypatch):
+        """作業用ブランチを向いていれば、追跡先が消えて比較できなくても原因を示す。"""
+        git = _status_git(upstream=False)
+        git.responses["rev-parse --abbrev-ref HEAD"] = "docs/discord-audit-recheck-997"
+        fake = _use_git(monkeypatch, git)
+        fake.fail.add("rev-parse --abbrev-ref @{u}")
+        st = svc.get_git_status()
+        assert st["ok"] is True
+        assert "docs/discord-audit-recheck-997" in st["branch_warning"]
+        assert "git checkout master" in st["branch_warning"]
+
     def test_not_a_repository_is_ok_false(self, env, monkeypatch):
         _use_git(monkeypatch, FakeGit(fail=("rev-parse",)))
         st = svc.get_git_status()

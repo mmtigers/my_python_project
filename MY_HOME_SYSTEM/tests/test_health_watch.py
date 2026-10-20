@@ -828,7 +828,7 @@ class TestCheckRepoBehindUpstream:
     def test_reports_when_behind(self, monkeypatch):
         """遅れているときは件数・コミット・復旧手順を含むメッセージを返す。"""
         monkeypatch.setattr(health_watch, "_git", self._fake_git({
-            "rev-parse": self._ok("origin/master\n"),
+            "rev-parse": self._ok("master\n"),
             "fetch": self._ok(),
             "rev-list": self._ok("5\n"),
             "log": self._ok("aaaaaaa 修正A\nbbbbbbb 修正B\nccccccc 修正C\n"),
@@ -843,21 +843,36 @@ class TestCheckRepoBehindUpstream:
 
     def test_returns_none_when_up_to_date(self, monkeypatch):
         monkeypatch.setattr(health_watch, "_git", self._fake_git({
-            "rev-parse": self._ok("origin/master\n"),
+            "rev-parse": self._ok("master\n"),
             "fetch": self._ok(),
             "rev-list": self._ok("0\n"),
         }))
         assert health_watch.check_repo_behind_upstream() is None
 
-    def test_skipped_when_no_upstream(self, monkeypatch):
-        """upstream 未設定(detached HEAD 等)では異常にしない。"""
+    def test_skipped_when_branch_unknown(self, monkeypatch):
+        """現在のブランチを取れないとき(git の異常等)は異常にしない。"""
         monkeypatch.setattr(health_watch, "_git", self._fake_git({"rev-parse": self._ng()}))
         assert health_watch.check_repo_behind_upstream() is None
+
+    def test_reports_when_on_work_branch_without_touching_network(self, monkeypatch):
+        """master 以外(作業用ブランチ)を向いていれば、追跡先の有無・ネットワークに依らず通知する。"""
+        monkeypatch.setattr(health_watch, "_git", self._fake_git({
+            "rev-parse": self._ok("docs/discord-audit-recheck-997\n"),
+        }))  # fetch 等が呼ばれると KeyError になる
+        msg = health_watch.check_repo_behind_upstream()
+        assert msg is not None
+        assert "master ではなく 'docs/discord-audit-recheck-997'" in msg
+        assert "git checkout master" in msg
+
+    def test_reports_when_detached_head(self, monkeypatch):
+        monkeypatch.setattr(health_watch, "_git", self._fake_git({"rev-parse": self._ok("HEAD\n")}))
+        msg = health_watch.check_repo_behind_upstream()
+        assert msg is not None and "detached HEAD" in msg
 
     def test_skipped_when_fetch_fails(self, monkeypatch):
         """ネットワーク不通では異常にしない(毎時cronで鳴り続けるのを避ける)。"""
         monkeypatch.setattr(health_watch, "_git", self._fake_git({
-            "rev-parse": self._ok("origin/master\n"),
+            "rev-parse": self._ok("master\n"),
             "fetch": self._ng("Could not resolve host: github.com"),
         }))
         assert health_watch.check_repo_behind_upstream() is None
@@ -865,14 +880,14 @@ class TestCheckRepoBehindUpstream:
     def test_skipped_when_fetch_times_out(self, monkeypatch):
         """fetch のタイムアウトは例外を投げずスキップする。"""
         monkeypatch.setattr(health_watch, "_git", self._fake_git({
-            "rev-parse": self._ok("origin/master\n"),
+            "rev-parse": self._ok("master\n"),
             "fetch": subprocess.TimeoutExpired(cmd="git fetch", timeout=20),
         }))
         assert health_watch.check_repo_behind_upstream() is None
 
     def test_skipped_when_count_is_not_a_number(self, monkeypatch):
         monkeypatch.setattr(health_watch, "_git", self._fake_git({
-            "rev-parse": self._ok("origin/master\n"),
+            "rev-parse": self._ok("master\n"),
             "fetch": self._ok(),
             "rev-list": self._ok("not-a-number\n"),
         }))

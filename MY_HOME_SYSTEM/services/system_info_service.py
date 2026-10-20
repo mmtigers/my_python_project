@@ -156,7 +156,7 @@ def _compute_git_status() -> dict[str, Any]:
         "ok": False, "error": "", "fetch_ok": None, "branch": None, "upstream": None,
         "head": None, "remote": None, "running": None,
         "behind": None, "ahead": None, "pending_restart": None, "recent": [],
-        "dirty": None, "dirty_count": None,
+        "dirty": None, "dirty_count": None, "branch_warning": None,
     }
     head_sha = _git("rev-parse", "--short", "HEAD")
     if head_sha is None:
@@ -169,6 +169,14 @@ def _compute_git_status() -> dict[str, Any]:
     status["head"] = head_log[0] if head_log else {"sha": head_sha, "date": "", "subject": ""}
     status["branch"] = _git("rev-parse", "--abbrev-ref", "HEAD")
     status["ok"] = True
+    from services.system_maintenance_service import DEPLOY_BRANCH  # 遅延import(_git と同じ理由)
+
+    # 「最新に更新して再起動」は DEPLOY_BRANCH しか取り込めない。それ以外を向いていると失敗するので先に知らせる。
+    if status["branch"] and status["branch"] != DEPLOY_BRANCH:
+        status["branch_warning"] = (
+            f"{DEPLOY_BRANCH} ではなく {status['branch']} を向いています。"
+            f"「最新に更新して再起動」は取り込めません(実機で `git checkout {DEPLOY_BRANCH}` が必要です)"
+        )
 
     # 作業ツリーの未コミットの変更(追跡中のファイルのみ。件数だけ返し、ファイル名や差分は返さない)。
     # `git pull --ff-only` が手元の変更で失敗する原因になるため、有無を見えるようにする。取れなければ None のまま。

@@ -29,6 +29,7 @@
         // 上部の状態バッジ(重要度の高い順)
         var badges = document.createElement("div");
         badges.className = "status-badges";
+        if (d.branch_warning) { badges.appendChild(badge("⚠️ master 以外", "badge-warn")); }
         if (d.pending_restart) { badges.appendChild(badge("⚠️ 未再起動", "badge-warn")); }
         if (d.dirty === true) { badges.appendChild(badge("⚠️ 未コミットの変更 " + d.dirty_count + "件", "badge-warn")); }
         else if (d.dirty === false) { badges.appendChild(badge("✅ 変更なし", "badge-ok")); }
@@ -49,6 +50,7 @@
         if (d.remote) { trio.appendChild(card("☁️ GitHubの最新", commitText(d.remote), "")); }
         box.appendChild(trio);
 
+        if (d.branch_warning) { box.appendChild(el("p", d.branch_warning, "git-status-line git-status-warn")); }
         if (d.pending_restart) {
             box.appendChild(el("p", "取り込み済みですが、まだ再起動されていません(起動中のコードは古いままです)", "git-status-line git-status-warn"));
         }
