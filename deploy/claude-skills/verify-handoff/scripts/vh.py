@@ -77,14 +77,20 @@ def detect(root: Path):
             for n in ("lint", "typecheck", "test", "build"):
                 if n in scripts:
                     checks.append({"name": f"{rel}:{n}", "cwd": rel, "cmd": f"npm run {n}"})
-        if (d / "ruff.toml").exists() or (d / ".ruff.toml").exists():
-            checks.append({"name": f"{rel}:lint", "cwd": rel, "cmd": "ruff check ."})
-        if (d / "pytest.ini").exists() or (d / "tests").is_dir() and d != root:
-            checks.append({"name": f"{rel}:test", "cwd": rel, "cmd": "python -m pytest -q"})
+        pyproj = (d / "pyproject.toml").read_text(errors="ignore") if (d / "pyproject.toml").exists() else ""
+        cfgtxt = pyproj + "".join((d / f).read_text(errors="ignore") for f in ("tox.ini", "setup.cfg") if (d / f).exists())
+        if (d / "ruff.toml").exists() or (d / ".ruff.toml").exists() or "[tool.ruff" in pyproj:
+            checks.append({"name": f"{rel}:lint", "cmd": "ruff check .", "cwd": rel})
+        if "[tool.mypy" in pyproj or (d / "mypy.ini").exists():
+            checks.append({"name": f"{rel}:typecheck", "cmd": "mypy .", "cwd": rel})
+        has_tests = (d / "tests").is_dir() and any((d / "tests").glob("test_*.py"))
+        if (d / "pytest.ini").exists() or "pytest" in cfgtxt or has_tests:
+            checks.append({"name": f"{rel}:test", "cmd": "python -m pytest -q", "cwd": rel})
         if (d / "Makefile").exists() and d == root:
             mk = (d / "Makefile").read_text(errors="ignore")
+            have = {c["name"].split(":")[-1] for c in checks if c["cwd"] == rel}  # package.json/pytest で既に拾った種別は重複させない
             for n in ("lint", "test", "build"):
-                if f"\n{n}:" in "\n" + mk:
+                if f"\n{n}:" in "\n" + mk and n not in have:
                     checks.append({"name": f"make:{n}", "cwd": rel, "cmd": f"make {n}"})
     seen, out = set(), []
     for c in checks:  # (cwd,cmd)重複除去
@@ -171,7 +177,7 @@ def handoff(root: Path, results, unresolved, nxt, out):
         L.append("未実行")
     L += ["", "## 未解決事項"] + ([f"- {u}" for u in unresolved] or ["- なし"])
     L += ["", "## 次の作業"] + ([f"- {n}" for n in nxt] or ["- なし"])
-    fname = branch.replace("/", "__") if branch != "detached" else "detached-" + git(root, "rev-parse", "--short", "HEAD")
+    fname = branch.replace("/", "__") if branch != "detached" else "detached-" + (git(root, "rev-parse", "--short", "HEAD") or "nogit")
     dest = Path(out) if out else root / ".claude" / "handoff" / f"{fname}.md"
     ignore_handoff(root)
     dest.parent.mkdir(parents=True, exist_ok=True)

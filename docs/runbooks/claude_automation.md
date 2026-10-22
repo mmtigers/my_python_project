@@ -50,3 +50,13 @@ CIのPython版は3.11、ここは3.13のため、結果は「3.13での合格」
 survey.sh の `-name` 未クォートと日本語パスの引用符化、install.sh が差分ありでも exit 0 / FORCE 時の非原子的置換、
 handoff 出力が作業ツリーを汚す(`.git/info/exclude` へ自動登録)。
 未対応: `env` 判定が文字列一致のため自分のimportミスも `env` になりうる(SKILL.md に注意書きのみ)。
+
+## 改善サイクル2(別観点: 異なるスタック・環境での検証、2026-10-22)
+
+観点: 自動検出の汎用性、Python 3.11/3.12 での動作、git管理外ディレクトリ。
+- `vh.py` は 3.11 / 3.12 / 3.13 で構文・`detect` が動作することを確認。
+- 修正: ルートに `pyproject.toml` や `tests/` を持つ標準的なPythonリポジトリで、検証コマンドが**1件も検出されなかった**(`pytest.ini` が無いと対象外だった)。`pyproject.toml`(`[tool.pytest`/`[tool.ruff`/`[tool.mypy`)・`tox.ini`・`setup.cfg`・`tests/test_*.py` から検出するよう変更し、使い捨てリポジトリで `ruff` と `pytest` が実行・合格することを確認。
+- 修正: package.json と Makefile に同名の `test`/`lint` がある場合に二重実行していた(package.json 側を優先して重複を排除)。
+- 修正: git管理外ディレクトリでの引き継ぎメモ名が `detached-.md` になっていた(`detached-nogit.md`)。
+- 確認のみ(変更なし): git管理外では `survey.sh` は「gitリポジトリではありません」で終了コード1、`vh.py run` は検証0件で終了コード1。
+未検証: Node/Go/Rust など Python 以外のみのリポジトリでの `run` の実行(`detect` は package.json のみ確認)、`issue-fix` の通し実行(Issue #1011 は調査から修正まで進めたが、手順の自動化ではなく手作業での実施)。
