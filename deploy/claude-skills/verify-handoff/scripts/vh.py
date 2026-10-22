@@ -13,7 +13,7 @@
 """
 from __future__ import annotations
 
-import argparse, json, os, shlex, subprocess, sys, time
+import argparse, json, os, re, shlex, subprocess, sys, time
 from datetime import datetime
 from pathlib import Path
 
@@ -101,6 +101,30 @@ def detect(root: Path):
     return out, "autodetect"
 
 
+def classify_failure(text, root: Path, cwd="."):
+    """失敗出力を "env"(依存・コマンド未導入=環境起因。失敗扱いは維持)か "fail" に分類する。
+
+    ModuleNotFoundError は、不足モジュールがリポジトリ内に存在する名前(自分のコードの import ミス)なら fail。
+    外部パッケージ名だけが不足しているときに env とする。"""
+    mods = re.findall(r"No module named '?([\w.]+)'?", text)  # `python -m pytest` 未導入は引用符なしで出る
+    if mods:
+        base = root / cwd
+
+        def is_local(top):
+            for d in (base, root, base / "src", root / "src"):
+                if (d / f"{top}.py").exists():
+                    return True
+                pkg = d / top  # 同名のただのディレクトリ(docs/ build/ 等)は自コードとみなさない
+                if pkg.is_dir() and ((pkg / "__init__.py").exists() or any(pkg.glob("*.py"))):
+                    return True
+            return False
+
+        return "fail" if any(is_local(m.split(".")[0]) for m in mods) else "env"
+    if any(m in text for m in ("ModuleNotFoundError", "command not found", ": not found", "No such file or directory: 'npm'")):
+        return "env"
+    return "fail"
+
+
 def run(root: Path, only, timeout, out):
     checks, src = detect(root)
     results = []
@@ -119,9 +143,8 @@ def run(root: Path, only, timeout, out):
                                capture_output=True, text=True, timeout=c.get("timeout", timeout))
             text = p.stdout + p.stderr
             status, code, tail = ("pass" if p.returncode == 0 else "fail"), p.returncode, text[-1500:]
-            # 依存/コマンド未導入はコード不具合ではなく環境起因: 区別して報告(失敗扱いは維持)
-            if status == "fail" and any(m in text for m in ("ModuleNotFoundError", "command not found", ": not found", "No such file or directory: 'npm'")):
-                status = "env"
+            if status == "fail":
+                status = classify_failure(text, root, c.get("cwd", "."))
         except OSError as e:  # cwd が無い等。1件の異常で全体を落とさない
             status, code, tail = "error", None, str(e)
         except subprocess.TimeoutExpired as e:
