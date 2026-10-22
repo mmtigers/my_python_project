@@ -1,0 +1,17 @@
+{
+  "_comment": "~/.claude/skills/verify-handoff が読むこのリポジトリ固有の検証定義。CI(.github/workflows/test.yml)のブロッキング項目に対応。実行は MY_HOME_SYSTEM 用の venv を有効化した状態で行う。",
+  "checks": [
+    {"name": "backend-ruff-blocking", "cwd": "MY_HOME_SYSTEM", "cmd": "ruff check . --select F821,F822,F823,E9 --target-version py311"},
+    {"name": "ddd-ruff-blocking", "cwd": "DDD", "cmd": "ruff check . --select F821,F822,F823,E9 --target-version py311"},
+    {"name": "backend-pyright", "cwd": "MY_HOME_SYSTEM", "cmd": "pyright .", "timeout": 600},
+    {"name": "ci-scripts-pytest", "cwd": ".", "cmd": "python -m pytest .github/scripts/ -q"},
+    {"name": "backend-pytest", "cwd": "MY_HOME_SYSTEM", "cmd": "python -m pytest tests/ -q -x", "timeout": 1500,
+     "env": {"SQLITE_DB_PATH": ":memory:", "NAS_MOUNT_POINT": "./tmp_nas", "NOTIFICATION_TARGET": "none"}},
+    {"name": "ddd-pytest", "cwd": "DDD", "cmd": "python -m pytest -q", "timeout": 900,
+     "env": {"SQLITE_DB_PATH": ":memory:", "NAS_MOUNT_POINT": "./tmp_nas", "NOTIFICATION_TARGET": "none"}},
+    {"name": "frontend-install", "cwd": "family-quest", "cmd": "test -d node_modules || npm ci", "timeout": 900},
+    {"name": "frontend-lint", "cwd": "family-quest", "cmd": "npm run lint"},
+    {"name": "frontend-test", "cwd": "family-quest", "cmd": "npm test", "timeout": 600},
+    {"name": "frontend-build", "cwd": "family-quest", "cmd": "npm run build", "timeout": 600}
+  ]
+}
