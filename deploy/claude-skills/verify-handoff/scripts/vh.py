@@ -75,7 +75,7 @@ def detect(root: Path):
             except ValueError:
                 scripts = {}
             for n in ("lint", "typecheck", "test", "build"):
-                if n in scripts:
+                if isinstance(scripts.get(n), str) and "no test specified" not in scripts[n]:  # npm init の初期プレースホルダーは除外
                     checks.append({"name": f"{rel}:{n}", "cwd": rel, "cmd": f"npm run {n}"})
         pyproj = (d / "pyproject.toml").read_text(errors="ignore") if (d / "pyproject.toml").exists() else ""
         cfgtxt = pyproj + "".join((d / f).read_text(errors="ignore") for f in ("tox.ini", "setup.cfg") if (d / f).exists())
@@ -175,7 +175,16 @@ def handoff(root: Path, results, unresolved, nxt, out):
         L += [f"- {'✅' if r['status']=='pass' else '❌'} `{r['name']}` {r['status']} {r['seconds']}s" for r in rep["results"]]
     else:
         L.append("未実行")
-    L += ["", "## 未解決事項"] + ([f"- {u}" for u in unresolved] or ["- なし"])
+    auto = [f"[自動] 検証 `{r['name']}` が {r['status']}" for r in (rep or {}).get("results", [])
+            if r["status"] != "pass" and not r.get("optional")]
+    if rep is None:
+        auto.append("[自動] 検証が未実行")
+    else:
+        if missing:
+            auto.append(f"[自動] 未実行の検証: {', '.join(missing)}")
+        if stale:
+            auto.append("[自動] 検証後にHEAD/作業ツリー/verify.jsonが変わっている(再実行が必要)")
+    L += ["", "## 未解決事項"] + ([f"- {u}" for u in auto + unresolved] or ["- なし"])
     L += ["", "## 次の作業"] + ([f"- {n}" for n in nxt] or ["- なし"])
     fname = branch.replace("/", "__") if branch != "detached" else "detached-" + (git(root, "rev-parse", "--short", "HEAD") or "nogit")
     dest = Path(out) if out else root / ".claude" / "handoff" / f"{fname}.md"

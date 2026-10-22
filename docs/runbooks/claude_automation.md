@@ -60,3 +60,11 @@ handoff 出力が作業ツリーを汚す(`.git/info/exclude` へ自動登録)�
 - 修正: git管理外ディレクトリでの引き継ぎメモ名が `detached-.md` になっていた(`detached-nogit.md`)。
 - 確認のみ(変更なし): git管理外では `survey.sh` は「gitリポジトリではありません」で終了コード1、`vh.py run` は検証0件で終了コード1。
 未検証: Node/Go/Rust など Python 以外のみのリポジトリでの `run` の実行(`detect` は package.json のみ確認)、`issue-fix` の通し実行(Issue #1011 は調査から修正まで進めたが、手順の自動化ではなく手作業での実施)。
+
+## 改善サイクル3(別観点: 非Python構成・引き継ぎメモの正確性、2026-10-22)
+
+観点: Node専用リポジトリでの `run`、失敗時の引き継ぎメモの内容。
+- 修正: `npm init` 既定の `"test": "echo \"Error: no test specified\" && exit 1"` を本物のテストとして検出し、常に fail としていた(検出から除外)。
+- 修正: 検証が fail でも引き継ぎメモの「未解決事項」が「なし」になっていた。非passの検証(`optional` を除く)と「検証が未実行」を `[自動]` 付きで自動記載するようにした。
+- 確認: Node専用の使い捨てリポジトリで lint / build の実行・合格、test 失敗時の終了コード1とメモへの反映を Python 3.11 で確認。
+未検証: Go/Rust 等の検出(未対応。`verify.json` を手書きする想定)、`issue-fix` を最初から最後まで通した実行。
