@@ -41,3 +41,12 @@ Claude Code 内では「リポジトリを調査して」「Issue #N を対応�
 
 初回の全検証: backend ruff・DDD ruff・pyright・`.github/scripts` pytest・backend pytest(135s)・frontend install/lint/test/build は pass、DDD pytest は `yt_dlp` 未導入で失敗(環境起因)→ `DDD/requirements.txt` 導入後 pass(22s)。
 CIのPython版は3.11、ここは3.13のため、結果は「3.13での合格」でありCI同等ではない。自動化導入前後の作業時間の比較データは無い(改善とは断定しない)。
+
+## 改善サイクル1(独立レビュー → 修正、2026-10-22)
+
+独立レビュー(サブエージェント)の指摘のうち、再現できた次の問題を修正し、同じ再現手順で解消を確認した:
+部分実行が古いpassを再利用して誤報告する(状態指紋=HEAD+未コミット差分+verify.jsonで判定するよう変更)、
+チェック1件の例外(cwd不正・キー欠落)で全体が落ちる(`error` として記録して続行)、
+survey.sh の `-name` 未クォートと日本語パスの引用符化、install.sh が差分ありでも exit 0 / FORCE 時の非原子的置換、
+handoff 出力が作業ツリーを汚す(`.git/info/exclude` へ自動登録)。
+未対応: `env` 判定が文字列一致のため自分のimportミスも `env` になりうる(SKILL.md に注意書きのみ)。
