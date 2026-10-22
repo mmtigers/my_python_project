@@ -84,7 +84,7 @@ def detect(root: Path):
         if "[tool.mypy" in pyproj or (d / "mypy.ini").exists():
             checks.append({"name": f"{rel}:typecheck", "cmd": "mypy .", "cwd": rel})
         has_tests = (d / "tests").is_dir() and any((d / "tests").glob("test_*.py"))
-        if (d / "pytest.ini").exists() or "pytest" in cfgtxt or has_tests:
+        if (d / "pytest.ini").exists() or any(m in cfgtxt for m in ("[tool.pytest", "[tool:pytest]", "[pytest]")) or has_tests:
             checks.append({"name": f"{rel}:test", "cmd": "python -m pytest -q", "cwd": rel})
         if (d / "Makefile").exists() and d == root:
             mk = (d / "Makefile").read_text(errors="ignore")
