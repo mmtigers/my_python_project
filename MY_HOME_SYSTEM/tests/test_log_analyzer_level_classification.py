@@ -48,6 +48,9 @@ def test_warning_lines_mentioning_error_words_are_warnings(analyzer, line):
     "2026-09-19 12:00:00 [INFO] quest_service: Deleted obsolete quests (no Error)",
     "2026-09-19 12:00:00 [DEBUG] camera: 🔬 [RAW EVENTS] ... Exception ...",
     "INFO:     127.0.0.1:0 - \"GET /api/quest/data HTTP/1.1\" 200 OK",  # uvicorn(レベル表記の無い書式)
+    # Issue #1011: config.py の stdout 書式('[LEVEL] name: msg')。本文のパスに ERROR と綴りが含まれるだけ
+    "[INFO] config: saved /mnt/nas/ERROR_report.json",
+    "[DEBUG] camera: reading /tmp/Traceback_dump.txt",
 ])
 def test_info_and_debug_lines_are_not_counted(analyzer, line):
     assert analyzer._classify_line(line) is None
@@ -58,6 +61,9 @@ def test_info_and_debug_lines_are_not_counted(analyzer, line):
     "2026-09-18 05:00:03 [CRITICAL] unified_server: crash loop detected",
     # logging の既定書式(ライブラリが basicConfig のまま出す行)
     "ERROR:zeep.xsd.types.simple:Error during xml -> python translation",
+    # config.py の stdout 書式('[LEVEL] name: msg')でも実際のエラーはエラー(Issue #1011)
+    "[ERROR] config: failed to write settings",
+    "[CRITICAL] config: database unreachable",
 ])
 def test_error_and_critical_levels_are_errors(analyzer, line):
     assert analyzer._classify_line(line) == "error"
@@ -87,3 +93,8 @@ def test_analyze_file_counts_by_level(analyzer, tmp_path):
 
     assert analyzer.report_data["home_system.log"]["errors"] == 2  # ERROR行 + トレースバック行
     assert analyzer.report_data["home_system.log"]["warnings"] == 2
+
+
+def test_bracket_level_without_timestamp_warning_is_warning(analyzer):
+    # Issue #1011: '[WARNING] name: ...' は本文の語句に依存せず警告
+    assert analyzer._classify_line("[WARNING] config: retry after Exception in worker") == "warning"
