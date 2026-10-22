@@ -59,7 +59,7 @@ handoff 出力が作業ツリーを汚す(`.git/info/exclude` へ自動登録)�
 - 修正: package.json と Makefile に同名の `test`/`lint` がある場合に二重実行していた(package.json 側を優先して重複を排除)。
 - 修正: git管理外ディレクトリでの引き継ぎメモ名が `detached-.md` になっていた(`detached-nogit.md`)。
 - 確認のみ(変更なし): git管理外では `survey.sh` は「gitリポジトリではありません」で終了コード1、`vh.py run` は検証0件で終了コード1。
-未検証: Node/Go/Rust など Python 以外のみのリポジトリでの `run` の実行(`detect` は package.json のみ確認)、`issue-fix` の通し実行(Issue #1011 は調査から修正まで進めたが、手順の自動化ではなく手作業での実施)。
+未検証: Node/Go/Rust など Python 以外のみのリポジトリでの `run` の実行(`detect` は package.json のみ確認)。(`issue-fix` の通し実行は後日 #1017 で実施済み。下の節を参照。Issue #1011 は手作業での対応だった。)
 
 ## 改善サイクル3(別観点: 非Python構成・引き継ぎメモの正確性、2026-10-22)
 
@@ -72,7 +72,7 @@ handoff 出力が作業ツリーを汚す(`.git/info/exclude` へ自動登録)�
 ## `issue-fix` の通し実行(#1017、対象: #1022、2026-10-22)
 
 `issue-fix` の手順0〜7を、実Issue #1022(`vh.py` の `env` 判定が自コードの import ミスも環境起因にする)で最初から最後まで通した。
-- 手順の結果: 0(作業ツリー確認・master から作り直し)→ 1(Issue取得)→ 2(`vh.py:123` の文字列一致が原因と特定、`mypkg.typo` で実際に `env` になることを再現)→ 3(失敗するテスト 9 件 → 修正 → 通過)→ 4(`.github/scripts` 219 件通過)→ 5(`/code-review`: 5 件中 4 件を有効と判断して修正、1 件は見送り)→ 7(PR)。
+- 手順の結果: 0(作業ツリー確認・master から作り直し)→ 1(Issue取得)→ 2(`vh.py` の失敗分類(当時は `run` 内の文字列一致。現在は `classify_failure`)が原因と特定、`mypkg.typo` で実際に `env` になることを再現)→ 3(失敗するテスト 9 件 → 修正 → 通過)→ 4(`.github/scripts` 219 件通過)→ 5(`/code-review`: 5 件中 4 件を有効と判断して修正、1 件は見送り)→ 7(PR)。
 - 手動介入: 1 回(対象 Issue の選択。コード修正に使える open Issue が他に無かったため)。
 - 見つかった手順の穴(SKILL.md に反映済み): 対象 Issue が無いときの扱い、「関数が無くて落ちるだけのテスト」は再現にならない、テスト置き場の無いコードの置き場(`.github/scripts` に置くと CI で実行される)。
 - 見送った指摘: 「ローカルの import 失敗が 1 行でもあれば全体を fail にする」ルールは、実際の pytest 出力で二次エラーが出る経路が現実的でないため変更しない。
