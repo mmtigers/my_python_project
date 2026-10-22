@@ -28,9 +28,13 @@ class LogAnalyzer:
     # (トレースバック継続行・syslog・uvicorn 等)のフォールバックとしてだけ使う。
     #   1. core/logger の書式: '2026-09-19 10:05:02 [WARNING] camera: ...'
     #   2. logging の既定書式(ライブラリが basicConfig のまま出す行): 'ERROR:zeep.xsd...:...'
+    #   3. config.py の stdout ハンドラ書式(日時なし。journal 経由で現れる): '[INFO] name: ...'
+    #      Issue #1011: これが無いとキーワードのフォールバックに落ち、本文のファイル名に
+    #      "ERROR" と綴りが含まれるだけの INFO 行がエラー扱いになっていた。
     LEVEL_PATTERNS: tuple[re.Pattern[str], ...] = (
         re.compile(r'^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\s\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]'),
         re.compile(r'^(DEBUG|INFO|WARNING|ERROR|CRITICAL):'),
+        re.compile(r'^\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]\s'),
     )
     ERROR_LEVELS: tuple[str, ...] = ("ERROR", "CRITICAL")
     
