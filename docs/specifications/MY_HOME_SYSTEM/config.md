@@ -493,3 +493,6 @@ flowchart TD
 
 * **（ログのダウンロードで追加）** 「20. ログのダウンロード設定」に`LOG_DOWNLOAD_MAX_MB`（`int`、環境変数`LOG_DOWNLOAD_MAX_MB`、既定10）を追加した。`services/log_download_service.py`が1ファイルあたりの返却サイズ上限（超過時は末尾側のみ返す）として参照する。
   根拠: [定数定義] (行番号: 1053 / 抜粋: "LOG_DOWNLOAD_MAX_MB: int = _get_int_env(\"LOG_DOWNLOAD_MAX_MB\", 10)")
+
+* **（ログのまとめてダウンロードで追加）** 「20. ログのダウンロード設定」に`LOG_DOWNLOAD_MAX_TOTAL_MB`（`int`、環境変数`LOG_DOWNLOAD_MAX_TOTAL_MB`、既定30）を追加した。複数選択でまとめてダウンロードするときの合計サイズ上限で、見積もりが超える選択は`GET /dashboard/sys/logs`が413で拒否する。
+  根拠: [定数定義] (行番号: 1056 / 抜粋: "LOG_DOWNLOAD_MAX_TOTAL_MB: int = _get_int_env(\"LOG_DOWNLOAD_MAX_TOTAL_MB\", 30)")

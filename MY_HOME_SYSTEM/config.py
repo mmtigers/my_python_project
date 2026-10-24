@@ -1051,3 +1051,6 @@ MFUJIN_BLOG_IMAGE_MAX_SIZE_MB: int = _get_int_env("MFUJIN_BLOG_IMAGE_MAX_SIZE_MB
 # (services/log_download_service.py)。1ファイルあたりの返却サイズ上限で、超えた場合は
 # 末尾側だけを返す。
 LOG_DOWNLOAD_MAX_MB: int = _get_int_env("LOG_DOWNLOAD_MAX_MB", 10)
+# 複数選択でまとめてダウンロードするときの合計サイズ上限。超える選択は 413 で拒否する
+# (Raspberry Piのメモリ上で連結するため、無制限にしない)。
+LOG_DOWNLOAD_MAX_TOTAL_MB: int = _get_int_env("LOG_DOWNLOAD_MAX_TOTAL_MB", 30)
