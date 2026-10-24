@@ -98,6 +98,67 @@ class TestFireInvestigateHook:
         assert fake_logger.error.called
 
 
+class TestInvestigateHookDedup:
+    """Issue #1030: 同一の異常シグネチャでは、再通知(6時間ごと)のたびに調査フックを
+    再起動しない。2026-10-23 に同一原因で 05:10 / 11:10 の2回起動していた。"""
+
+    def _setup(self, tmp_path, monkeypatch):
+        hook = tmp_path / "hook.sh"
+        hook.write_text("#!/bin/sh\ncat > /dev/null\n", encoding="utf-8")
+        hook.chmod(hook.stat().st_mode | stat.S_IXUSR)
+        monkeypatch.setattr(config, "HEALTH_WATCH_INVESTIGATE_HOOK", str(hook), raising=False)
+        monkeypatch.setattr(config, "LOG_DIR", str(tmp_path), raising=False)
+
+    def _fire(self, anomalies, now):
+        fake_proc = MagicMock(pid=1)
+        with patch.object(health_watch.subprocess, "Popen", return_value=fake_proc) as popen:
+            health_watch._fire_investigate_hook(anomalies, now)
+        return popen
+
+    def test_same_signature_within_cooldown_is_not_relaunched(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch)
+        t0 = datetime.datetime(2026, 10, 23, 5, 10)
+        first = self._fire(["アプリログにエラーがあります:\nnewface.log: 15件 (例: 2026-10-23 05:00:01 boom)"], t0)
+        # 6時間後(再通知のタイミング)。件数と時刻だけが違う同じ異常
+        second = self._fire(
+            ["アプリログにエラーがあります:\nnewface.log: 21件 (例: 2026-10-23 11:00:02 boom)"],
+            t0 + datetime.timedelta(hours=6),
+        )
+        assert first.call_count == 1
+        assert second.call_count == 0
+
+    def test_relaunched_after_cooldown(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch)
+        t0 = datetime.datetime(2026, 10, 23, 5, 10)
+        self._fire(["異常A"], t0)
+        later = self._fire(
+            ["異常A"],
+            t0 + datetime.timedelta(seconds=health_watch.INVESTIGATE_COOLDOWN_SEC + 1),
+        )
+        assert later.call_count == 1
+
+    def test_different_signature_is_launched(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch)
+        t0 = datetime.datetime(2026, 10, 23, 5, 10)
+        self._fire(["異常A"], t0)
+        other = self._fire(["異常B"], t0 + datetime.timedelta(hours=1))
+        assert other.call_count == 1
+
+    def test_launch_failure_is_not_recorded_so_next_run_retries(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch)
+        t0 = datetime.datetime(2026, 10, 23, 5, 10)
+        with patch.object(health_watch.subprocess, "Popen", side_effect=OSError("spawn failed")):
+            health_watch._fire_investigate_hook(["異常A"], t0)
+        retry = self._fire(["異常A"], t0 + datetime.timedelta(minutes=5))
+        assert retry.call_count == 1
+
+    def test_corrupt_state_file_falls_back_to_launching(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch)
+        (tmp_path / health_watch.INVESTIGATE_STATE_FILENAME).write_text("{broken", encoding="utf-8")
+        popen = self._fire(["異常A"], datetime.datetime(2026, 10, 23, 5, 10))
+        assert popen.call_count == 1
+
+
 class TestCheckAppLogs:
     """check_app_logs のIssue #339層2調査で発覚した誤検知バグの回帰テスト。
 

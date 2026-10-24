@@ -50,6 +50,7 @@ import fcntl
 import glob
 import hashlib
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -83,6 +84,12 @@ MARKER_FILE: str = os.path.join(config.LOG_DIR, ".claude_watch_marker")
 NOTIFY_STATE_FILE: str = os.path.join(config.LOG_DIR, ".claude_watch_notify_state")
 # 同一の異常セットが継続している場合の再通知間隔(server_watchdogの6時間リマインダーと同思想)
 RENOTIFY_INTERVAL_SEC: int = 6 * 3600
+# 層2(自動調査)フックを同一の異常シグネチャで再起動しない期間の状態ファイル名(Issue #1030)。
+# LOG_DIR は実行時に解決する(テストが config.LOG_DIR を差し替えるため定数にしない)。
+INVESTIGATE_STATE_FILENAME: str = ".claude_watch_investigate_state"
+# 調査済みの異常シグネチャでフックを再起動しない期間。RENOTIFY_INTERVAL_SEC(6時間)ごとの
+# 再通知に連動して、同じ原因の調査が1日に何度も走るのを防ぐ。
+INVESTIGATE_COOLDOWN_SEC: int = 24 * 3600
 # マーカーが無い初回実行時に遡る時間
 DEFAULT_LOOKBACK_SEC: int = 3600
 # 通知に載せるログ抜粋の最大文字数
@@ -883,6 +890,49 @@ def _ping_deadman_switch(ok: bool) -> None:
         logger.warning(f"⚠️ デッドマンスイッチへのハートビート送信に失敗しました: {e}")
 
 
+def _investigate_signature(anomalies: List[str]) -> str:
+    """異常サマリの正規化ハッシュ(Issue #1030)。
+
+    数字の連なり(件数・時刻・使用率・PID等)は実行のたびに変わるため `N` に畳み、
+    空白も圧縮してからソートしてハッシュする。検知項目と代表メッセージの文面が
+    同じなら、件数や時刻が違っても同一の異常として扱う。
+    """
+    normalized = sorted(re.sub(r"\s+", " ", re.sub(r"\d+", "N", a)).strip() for a in anomalies)
+    return hashlib.sha256("\n".join(normalized).encode("utf-8")).hexdigest()
+
+
+def _investigated_recently(signature: str, now: datetime.datetime, state_path: str) -> bool:
+    """同一シグネチャで INVESTIGATE_COOLDOWN_SEC 以内に調査フックを起動済みか。
+
+    状態ファイルが壊れている/読めない場合は「未調査」とみなして起動する側に倒す
+    (調査の取りこぼしより重複起動の方が安全。_should_notify と同じ方針)。
+    """
+    state = state_file.read_json(state_path)
+    if not isinstance(state, dict):
+        return False
+    try:
+        last = datetime.datetime.fromisoformat(state[signature])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return (now - last).total_seconds() < INVESTIGATE_COOLDOWN_SEC
+
+
+def _record_investigated(signature: str, now: datetime.datetime, state_path: str) -> None:
+    """調査フックを起動したシグネチャを記録する。期限切れのエントリはここで掃除する。"""
+    state = state_file.read_json(state_path)
+    kept = {}
+    if isinstance(state, dict):
+        for sig, ts in state.items():
+            try:
+                age = (now - datetime.datetime.fromisoformat(ts)).total_seconds()
+            except (TypeError, ValueError):
+                continue
+            if age < INVESTIGATE_COOLDOWN_SEC:
+                kept[sig] = ts
+    kept[signature] = now.isoformat()
+    state_file.write_json_atomic(state_path, kept)
+
+
 def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:
     """層2(自動調査)フックを発火する(Issue #339)。
 
@@ -894,12 +944,23 @@ def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None
     フックスクリプト側が持つ。本関数は _should_notify と同じ抑制の内側で
     呼ばれるため、同一異常セット継続中の再発火も通知と同じ6時間間隔に収まる。
     フックの起動失敗は層1の検知・通知を巻き込まない(ログのみ)。
+
+    Issue #1030: 再通知は6時間ごとに起きるため、同一原因が続く間は通知のたびに
+    フックが再起動し、同じ結論の調査が1日に何度も走っていた。異常サマリの正規化
+    シグネチャ単位で INVESTIGATE_COOLDOWN_SEC 以内に起動済みなら再起動しない
+    (通知は従来どおり送る)。起動に成功したときだけ記録するので、起動失敗は次回再試行される。
     """
     hook = getattr(config, "HEALTH_WATCH_INVESTIGATE_HOOK", None)
     if not hook:
         return
     if not (os.path.isfile(hook) and os.access(hook, os.X_OK)):
         logger.error(f"調査フックが存在しないか実行権限がありません: {hook}")
+        return
+
+    signature = _investigate_signature(anomalies)
+    state_path = os.path.join(config.LOG_DIR, INVESTIGATE_STATE_FILENAME)
+    if _investigated_recently(signature, now, state_path):
+        logger.info("同一の異常シグネチャで調査済みのため調査フックの再起動を抑止しました")
         return
 
     summary = (
@@ -927,6 +988,12 @@ def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None
         logger.info(f"調査フックを起動しました (pid={proc.pid}): {hook}")
     except Exception as e:
         logger.error(f"調査フックの起動に失敗しました: {e}")
+        return
+    try:
+        _record_investigated(signature, now, state_path)
+    except Exception as e:
+        # 記録できなくても起動済みなので層1は巻き込まない(次回は重複起動しうるだけ)
+        logger.error(f"調査フックの起動記録に失敗しました: {e}")
 
 
 def run_checks() -> int:

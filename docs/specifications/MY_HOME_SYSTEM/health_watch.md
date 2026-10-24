@@ -38,22 +38,22 @@
 | `difflib` | 標準 | 構成ファイル差分の要約(`unified_diff`) | 根拠: [インポート宣言] (行番号: 48 / 抜粋: "import difflib") |
 | `glob` | 標準 | `logs/*.log`・`deploy/systemd/*.service`等のパターンマッチング | 根拠: [インポート宣言] (行番号: 50 / 抜粋: "import glob") |
 | `hashlib` | 標準 | 異常セットのフィンガープリント生成 | 根拠: [インポート宣言] (行番号: 51 / 抜粋: "import hashlib") |
-| `core.state_file`（Issue #661 で `json` の直接importを置き換え） | ローカルモジュール | マーカーファイル・再通知抑制状態ファイルの原子的な読み書き(`read_text`/`write_text_atomic`/`read_json`/`write_json_atomic`) | 根拠: [インポート宣言] (行番号: 66 / 抜粋: "from core import state_file") |
+| `core.state_file`（Issue #661 で `json` の直接importを置き換え） | ローカルモジュール | マーカーファイル・再通知抑制状態ファイルの原子的な読み書き(`read_text`/`write_text_atomic`/`read_json`/`write_json_atomic`) | 根拠: [インポート宣言] (行番号: 67 / 抜粋: "from core import state_file") |
 | `os` | 標準 | パス操作・マウント確認 | 根拠: [インポート宣言] (行番号: 52 / 抜粋: "import os") |
-| `shutil` | 標準 | ディスク使用量取得 | 根拠: [インポート宣言] (行番号: 53 / 抜粋: "import shutil") |
-| `sqlite3` | 標準 | **（Issue #700 で追加）** チェック9でDB/テーブル不在・一時的なロックを`OperationalError`として識別する | 根拠: [インポート宣言] (行番号: 54 / 抜粋: "import sqlite3") |
-| `subprocess` | 標準 | `systemctl`/`journalctl`/`free`の実行 | 根拠: [インポート宣言] (行番号: 55 / 抜粋: "import subprocess") |
-| `sys` | 標準 | パス追加・終了コード返却 | 根拠: [インポート宣言] (行番号: 56 / 抜粋: "import sys") |
-| `requests` | 外部 | **（Issue #735 で追加）** チェック2のHTTPプローブ | 根拠: [インポート宣言] (行番号: 60 / 抜粋: "import requests") |
-| `typing` | 標準 | 型ヒント(`List`, `Optional`, `Tuple`) | 根拠: [インポート宣言] (行番号: 57 / 抜粋: "from typing import List, Optional, Tuple") |
-| `config` | 自作 | `LOG_DIR`, `NAS_MOUNT_POINT`の取得 | 根拠: [インポート宣言] (行番号: 64 / 抜粋: "import config") |
-| `core.logger` | 自作 | ロガーのセットアップ | 根拠: [インポート宣言] (行番号: 68 / 抜粋: "from core.logger import setup_logging") |
-| `services.notification_service` | 自作 | 異常通知の送信 | 根拠: [インポート宣言] (行番号: 70 / 抜粋: "from services.notification_service import send_push") |
-| `monitors.log_analyzer` | 自作 | ログ走査ロジックの流用 | 根拠: [インポート宣言] (行番号: 72 / 抜粋: "from monitors.log_analyzer import LogAnalyzer") |
-| `quest_data` | 自作 | **（Issue #700 で追加）** チェック9の比較元`QUESTS` | 根拠: [インポート宣言] (行番号: 65 / 抜粋: "import quest_data") |
-| `core.database.get_ro_connection` | 自作 | **（Issue #700 で追加）** チェック9の読み取り専用DB接続 | 根拠: [インポート宣言] (行番号: 67 / 抜粋: "from core.database import get_ro_connection") |
+| `shutil` | 標準 | ディスク使用量取得 | 根拠: [インポート宣言] (行番号: 54 / 抜粋: "import shutil") |
+| `sqlite3` | 標準 | **（Issue #700 で追加）** チェック9でDB/テーブル不在・一時的なロックを`OperationalError`として識別する | 根拠: [インポート宣言] (行番号: 55 / 抜粋: "import sqlite3") |
+| `subprocess` | 標準 | `systemctl`/`journalctl`/`free`の実行 | 根拠: [インポート宣言] (行番号: 56 / 抜粋: "import subprocess") |
+| `sys` | 標準 | パス追加・終了コード返却 | 根拠: [インポート宣言] (行番号: 57 / 抜粋: "import sys") |
+| `requests` | 外部 | **（Issue #735 で追加）** チェック2のHTTPプローブ | 根拠: [インポート宣言] (行番号: 61 / 抜粋: "import requests") |
+| `typing` | 標準 | 型ヒント(`List`, `Optional`, `Tuple`) | 根拠: [インポート宣言] (行番号: 58 / 抜粋: "from typing import List, Optional, Tuple") |
+| `config` | 自作 | `LOG_DIR`, `NAS_MOUNT_POINT`の取得 | 根拠: [インポート宣言] (行番号: 65 / 抜粋: "import config") |
+| `core.logger` | 自作 | ロガーのセットアップ | 根拠: [インポート宣言] (行番号: 69 / 抜粋: "from core.logger import setup_logging") |
+| `services.notification_service` | 自作 | 異常通知の送信 | 根拠: [インポート宣言] (行番号: 71 / 抜粋: "from services.notification_service import send_push") |
+| `monitors.log_analyzer` | 自作 | ログ走査ロジックの流用 | 根拠: [インポート宣言] (行番号: 73 / 抜粋: "from monitors.log_analyzer import LogAnalyzer") |
+| `quest_data` | 自作 | **（Issue #700 で追加）** チェック9の比較元`QUESTS` | 根拠: [インポート宣言] (行番号: 66 / 抜粋: "import quest_data") |
+| `core.database.get_ro_connection` | 自作 | **（Issue #700 で追加）** チェック9の読み取り専用DB接続 | 根拠: [インポート宣言] (行番号: 68 / 抜粋: "from core.database import get_ro_connection") |
 
-なお、インポートに先立ち親ディレクトリを`sys.path`へ追加している（根拠: [パス操作] (行番号: 62 / 抜粋: "sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))")）。
+なお、インポートに先立ち親ディレクトリを`sys.path`へ追加している（根拠: [パス操作] (行番号: 63 / 抜粋: "sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))")）。
 
 ### ブラックボックスとなる外部要素
 
@@ -98,19 +98,19 @@
 ### `_read_marker`
 
 * **役割**: マーカーファイルから前回チェック完了時刻(ISO8601)を読み取る。**（Issue #661で修正）** ファイルの読み取り自体は`core/state_file.py`の`read_text`へ委譲し、返ってきた文字列を`datetime.fromisoformat`でパースする形に整理した。
-* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 146 / 抜粋: "def _read_marker() -> datetime.datetime:")
+* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 153 / 抜粋: "def _read_marker() -> datetime.datetime:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 146 / 抜粋: "def _read_marker() -> datetime.datetime:")
+* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 153 / 抜粋: "def _read_marker() -> datetime.datetime:")
 
 
 * **戻り値/レスポンス**: `datetime.datetime`。ファイルが無い/空/ISO8601としてパースできない場合は現在時刻から`DEFAULT_LOOKBACK_SEC`(3600秒)遡った時刻。
-* 根拠: [フォールバック] (行番号: 159 / 抜粋: "return datetime.datetime.now() - datetime.timedelta(seconds=DEFAULT_LOOKBACK_SEC)")
+* 根拠: [フォールバック] (行番号: 166 / 抜粋: "return datetime.datetime.now() - datetime.timedelta(seconds=DEFAULT_LOOKBACK_SEC)")
 
 
 * **副作用**: マーカーファイルの読み取り（`state_file.read_text`経由）。
-* 根拠: [state_fileへの委譲] (行番号: 153 / 抜粋: "raw = state_file.read_text(MARKER_FILE)")
+* 根拠: [state_fileへの委譲] (行番号: 160 / 抜粋: "raw = state_file.read_text(MARKER_FILE)")
 
 
 * **エラーハンドリング**: ファイルI/Oの失敗は`state_file.read_text`側が捕捉して警告ログを出し`None`を返す。本関数は加えて`fromisoformat`の`ValueError`を捕捉し、いずれの場合も既定の遡り時刻を返す。
@@ -121,30 +121,30 @@
 ### `_write_marker`
 
 * **役割**: チェック開始時刻をISO8601文字列でマーカーファイルへ書き込む。**（Issue #661で修正）** 書き込みは`core/state_file.py`の`write_text_atomic`へ委譲し、一時ファイル + `fsync` + `os.replace`による原子的な差し替えになった（途中で電源断・クラッシュしても不完全な内容が残らない）。
-* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 162 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 169 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `dt: datetime.datetime`
-* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 162 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 169 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 162 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 169 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **副作用**: マーカーファイルの原子的な差し替え（`state_file.write_text_atomic`経由）。
-* 根拠: [state_fileへの委譲] (行番号: 163 / 抜粋: "state_file.write_text_atomic(MARKER_FILE, dt.isoformat())")
+* 根拠: [state_fileへの委譲] (行番号: 170 / 抜粋: "state_file.write_text_atomic(MARKER_FILE, dt.isoformat())")
 
 
 * **エラーハンドリング**: 例外は`state_file.write_text_atomic`側が捕捉して警告ログを出し`False`を返すため、本関数からは送出されない（**Issue #661 での変更点**: 以前は書き込みの失敗がそのまま呼び出し元へ伝播していた）。
-* 根拠: [state_fileへの委譲] (行番号: 163 / 抜粋: "state_file.write_text_atomic(MARKER_FILE, dt.isoformat())")
+* 根拠: [state_fileへの委譲] (行番号: 170 / 抜粋: "state_file.write_text_atomic(MARKER_FILE, dt.isoformat())")
 
 
 
 ### `check_service_active`
 
 * **役割**: `systemctl is-active`で`home_system.service`の稼働状態を確認する。
-* 根拠: [関数定義] (行番号: 173〜182 / 抜粋: "def check_service_active() -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 180〜189 / 抜粋: "def check_service_active() -> Optional[str]:")
 
 
 * **引数/リクエスト**: なし
@@ -167,11 +167,11 @@
 ### `check_api_responsive` (**チェック2: HTTPプローブ、Issue #735 / AUDIT-005 で追加**)
 
 * **役割**: `unified_server`に実際にHTTPリクエストを送り、「プロセスは生きているが機能していない」状態を検知する。`GET /health`（readiness。マイグレーション失敗時は503を返す）と`GET /api/quest/data`（DBまで到達する経路。`/health`はDBを触らないため別に確認する）の2本を順に叩き、いずれかが200以外なら異常とする。
-* 根拠: [関数定義] (行番号: 329〜359 / 抜粋: "def check_api_responsive() -> Optional[str]:")、[プローブ定義] (行番号: 301〜304 / 抜粋: '("/health", config.HEALTH_WATCH_PROBE_TIMEOUT_SEC),')
+* 根拠: [関数定義] (行番号: 336〜366 / 抜粋: "def check_api_responsive() -> Optional[str]:")、[プローブ定義] (行番号: 301〜304 / 抜粋: '("/health", config.HEALTH_WATCH_PROBE_TIMEOUT_SEC),')
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 329 / 抜粋: "def check_api_responsive() -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 336 / 抜粋: "def check_api_responsive() -> Optional[str]:")
 
 
 * **戻り値/レスポンス**: `Optional[str]`。2本とも200なら`None`。200以外なら「どのパスが何を返したか」＋レスポンス本文の先頭200文字（改行を空白に置換）を含む異常メッセージ。接続不能・タイムアウト等の`requests.exceptions.RequestException`は例外を送出せず、例外クラス名を含む異常メッセージとして返す。
@@ -179,7 +179,7 @@
 
 
 * **副作用**: 外部へのHTTPリクエスト（既定では`http://127.0.0.1:8000`。ループバックのため実質ローカルのみ）。
-* 根拠: [HTTP呼び出し] (行番号: 352 / 抜粋: "res = requests.get(f\"{base}{path}\", timeout=timeout)")
+* 根拠: [HTTP呼び出し] (行番号: 359 / 抜粋: "res = requests.get(f\"{base}{path}\", timeout=timeout)")
 
 
 * **エラーハンドリング**: `requests.exceptions.RequestException`のみ捕捉し、異常メッセージとして返す（**例外のまま送出しないのは意図的**。`run_checks`は例外を`internal_errors`扱いにして通知本文へ載せないため、サーバー停止という最重要の異常が通知されなくなる）。
@@ -192,7 +192,7 @@
 * **役割**: `journalctl -u home_system.service` で前回マーカー以降のエラーを確認する。見るのは (1) systemd 自身が `err..emerg` で記録したもの(ユニットの異常終了等)と、(2) サービスの標準出力・標準エラー経由の行のうちエラーと判定されるもの(`_journal_stdio_errors`)の2種類。
 * **（2026-09-19 修正）標準出力・標準エラー経由のエラーを見るようにした**: journald はサービスの標準出力・標準エラーの行を priority **info** で記録するため、従来の `-p err..emerg` だけでは一切拾えていなかった。`home_system.service` を `Type=simple`(Issue #646)へ移行して以降、未捕捉例外のトレースバックや basicConfig のままのライブラリログ(`ERROR:zeep...` 等)は journal にしか残らない(以前は `start_all.sh` が `logs/server_boot.log` へリダイレクトしており、`check_app_logs` のキーワード判定で拾えていた。移行後 `server_boot.log` は更新されない)。実機の journal で、移行後に `Traceback` と `ERROR:zeep...` が info で8行残っていたのに、修正前の本チェックは0行だったことを確認している。`_journal_stdio_errors` は `journalctl -o cat -n 2000` の各行を `LogAnalyzer._classify_line` で判定し、`core.logger` の書式(`YYYY-MM-DD HH:MM:SS [LEVEL] ...`)の行は `logs/*.log` 側で `check_app_logs` が見るため二重計上しないよう除外する。`LogAnalyzer.IGNORE_PATTERNS` も適用する。
 * 根拠: [関数定義] `def _journal_stdio_errors(since_str: str) -> list[str]:`、[core.logger 書式の除外] `core_logger_line = LogAnalyzer.LEVEL_PATTERNS[0]`(回帰テスト: `tests/test_health_watch.py` の `TestJournalStdioErrors`)
-* 根拠: [関数定義] (行番号: 185〜227 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 192〜234 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`--since`に"%Y-%m-%d %H:%M:%S"形式で渡す）
@@ -218,11 +218,11 @@
 * 根拠: (参照: check_app_logs / 抜粋: "if os.path.basename(filepath) in (\"health_watch.log\", \"claude_investigate.log\"):\n            continue")
 
 * **役割**: `config.LOG_DIR`配下の`*.log`から前回マーカー以降のエラー行を検出する。キーワード・除外パターン・タイムスタンプ解析は`LogAnalyzer`を流用し、週次の`log_analyzer.py`と判定基準を揃える。エラー(errors > 0)のみを異常とみなし、WARNINGは対象外。
-* 根拠: [関数定義] (行番号: 255〜295 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 262〜302 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`analyzer.start_date`へ直接代入し「前回マーカー以降」のみを走査対象にする）
-* 根拠: [属性代入] (行番号: 263 / 抜粋: "analyzer.start_date = since")
+* 根拠: [属性代入] (行番号: 270 / 抜粋: "analyzer.start_date = since")
 
 
 * **戻り値/レスポンス**: `Optional[str]`。エラーのあるファイルがあれば最大5ファイル分のファイル名・件数・最終エラー抜粋(最大120文字)を列挙したメッセージ、無ければ`None`。
@@ -310,11 +310,11 @@
 ### `_latest_recording_time` (**チェック10で追加**)
 
 * **役割**: 録画フォルダ内の当日・前日分の`{YYYYMMDD}_*.mp4`を列挙し、ファイル名の新しい順に先頭15文字を`%Y%m%d_%H%M%S`として解釈できた最初のものの時刻(最新セグメントの開始時刻)を返す。CIFS越しに保持期間分を毎回列挙しないよう当日と前日(日付の変わり目用)に絞る。
-* 根拠: `def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:` (行番号: 381)
+* 根拠: `def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:` (行番号: 388)
 
 
 * **引数/リクエスト**: `folder`(録画フォルダの絶対パス)、`now`(基準時刻。当日・前日の日付算出に使う)
-* 根拠: `def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:` (行番号: 381)
+* 根拠: `def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:` (行番号: 388)
 
 
 * **戻り値/レスポンス**: `datetime.datetime | None`(JSTのaware datetime。`JST = ZoneInfo("Asia/Tokyo")`を付与)。該当ファイルが無い、または全ファイル名が解釈できなければ`None`。
@@ -334,11 +334,11 @@
 
 * **（Issue #894/#890 で追加）フラッピング検知**: 直近`RECORDING_FLAP_WINDOW_SEC`(120分)のセグメントが`RECORDING_FLAP_MIN_SEGMENTS`(16本)以上なら「接続が断続的に切れている」として報告する。正常時は120分で12本。2026-10-02のparkingは短いセグメントが大量に作られ続けたため、最新ファイルの古さだけの判定では約13.5時間発報しなかった。時刻の取得は内部ヘルパー`_recording_times`(当日・前日のファイル名時刻を新しい順に返す)に切り出し、`_latest_recording_time`はその先頭を返す。
 * **役割**: `config.CAMERAS`の有効なカメラごとに、`config.NVR_RECORD_DIR`配下の録画フォルダ(`nas_folder`、無ければ`name`)の最新セグメント開始時刻を`_latest_recording_time`で求め、当日・前日のファイルが無いか、`RECORDING_STALE_SEC`(30分)より古ければ異常として列挙する。録画自体は`nvr-*.service`(systemd)のffmpegが600秒ごとに新しいファイルを作る前提で、カメラに繋がらない間の再試行ループや無応答のまま固まった状態を「新しいセグメントが作られていない」ことで検知する。更新時刻(mtime)ではなくファイル名の時刻を使うのは、このNAS(CIFS)では書き込み中のファイルのmtimeが作成時刻のまま進まないため。
-* 根拠: `def check_recording_stalled() -> str | None:` (行番号: 387)
+* 根拠: `def check_recording_stalled() -> str | None:` (行番号: 394)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_recording_stalled() -> str | None:` (行番号: 387)
+* 根拠: `def check_recording_stalled() -> str | None:` (行番号: 394)
 
 
 * **戻り値/レスポンス**: `str | None`。基準時刻は`core.utils.get_now_jst()`(実行環境のTZに依存しない)。停止の疑いがあるカメラがあれば`"常時録画が止まっている可能性があります:"`に続けてカメラごとの1行(`{name}({folder}): 最新の録画が MM/DD HH:MM 開始(N分前)`、またはファイル無し)を並べたメッセージ、無ければ`None`。
@@ -472,15 +472,15 @@
 ### `_format_quest_ids` (**Issue #700で追加**)
 
 * **役割**: `quest_id`の一覧を通知用の文字列に整形する。先頭`QUEST_ID_LIST_LIMIT`(8)件までをカンマ区切りで並べ、それを超える分は`" ほかN件"`に畳む。
-* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 518〜523)
+* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 525〜530)
 
 
 * **引数/リクエスト**: `quest_ids: list[int]`
-* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 518)
+* 根拠: `def _format_quest_ids(quest_ids: list[int]) -> str:` (行番号: 525)
 
 
 * **戻り値/レスポンス**: `str`
-* 根拠: [戻り値] (行番号: 523 / 抜粋: "return shown")
+* 根拠: [戻り値] (行番号: 530 / 抜粋: "return shown")
 
 
 * **副作用**: なし(純粋関数)
@@ -495,11 +495,11 @@
 ### `check_quest_master_drift` (**チェック9: マスタデータのドリフト検知、Issue #700で追加**)
 
 * **役割**: `quest_data.QUESTS`の`id`集合と、DBの`quest_master.quest_id`集合を比較し、(1)DBにだけある＝退役済みなのに残っているクエスト、(2)コードにだけある＝DBに未登録のクエスト、の双方を異常メッセージとして返す。どちらも無ければ`None`。メッセージ末尾には`sync_strict.py --dry-run`で影響を確認してから同期する旨の指針を付ける。`quest_data.QUESTS`が空の場合は「全件が退役済み」という誤報を避け、マスタ定義の読み込み失敗の可能性として別メッセージを返す。docstringには、**検知のみで自動修正はしない**（同期は`sync_strict.py --if-stale`の責務であり、毎時cronのヘルスチェックから破壊的操作を走らせない）こと、および比較対象を`quest_master`の`quest_id`集合に絞る理由（`reward_master`は`user_inventory`から参照が残る報酬を削除しない正しい挙動があり恒久的な誤検知になる、`routine_data.py`は対応するマスタテーブルを持たない）が明記されている。
-* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 526〜584)
+* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 533〜591)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 526)
+* 根拠: `def check_quest_master_drift() -> str | None:` (行番号: 533)
 
 
 * **戻り値/レスポンス**: `str | None`(異常メッセージ、正常なら`None`)
@@ -520,65 +520,65 @@
 * **役割**: 参照整合性を検査する `(ラベル, SQL)` の組。**2層に分かれているのが本質**で、一方は「起きてはならない不整合」、もう一方は「通常運用の設計どおりに生じる不整合」である。前者だけを通知する。
   * `_ORPHAN_CHECKS_STRICT`（6件）: 親が `quest_users`（`quest_history.user_id` / `reward_history.user_id` / `user_inventory.user_id` / `routine_progress.user_id` / `routine_step_events.user_id`）と自己参照の `quest_history.linked_history_id`。実行コードに `DELETE FROM quest_users` が存在しないため、ここの孤児は手動SQL・将来のスクリプトの事故しかありえない。
   * `_ORPHAN_CHECKS_EXPECTED`（2件）: 親が `quest_master` / `reward_master`（`quest_history.quest_id` / `reward_history.reward_id`）。`GameSystem.sync_master_data` の `DELETE ... WHERE quest_id NOT IN (...)` はクエストを退役させると**設計どおりマスタ行を消して履歴行を残す**（#700 で退役6件を実際に削除している）ため、孤児は想定内。毎時cronで「異常」として報告すると恒久的な誤検知になる。`check_quest_master_drift` が `reward_master` を比較対象から外したのと同じ判断。
-* 根拠: `_ORPHAN_CHECKS_STRICT: tuple[tuple[str, str], ...] = (` (行番号: 609 / 抜粋: "_ORPHAN_CHECKS_STRICT: tuple[tuple[str, str], ...] = (")
+* 根拠: `_ORPHAN_CHECKS_STRICT: tuple[tuple[str, str], ...] = (` (行番号: 616 / 抜粋: "_ORPHAN_CHECKS_STRICT: tuple[tuple[str, str], ...] = (")
 
 `quest_id = 0` は `inventory_service` のアイテム使用ログでマスタを参照しない疑似IDのため、`_ORPHAN_CHECKS_EXPECTED` の SQL が `h.quest_id != 0` で除外している。
 
 ### `check_orphaned_rows` (**チェック11: 参照整合性の検知、Issue #747で追加**)
 
 * **役割**: `_ORPHAN_CHECKS_STRICT` に1件でも孤児があれば異常メッセージを返し、無ければ `None`。`_ORPHAN_CHECKS_EXPECTED` の件数は**通知せず `logger.info` に残すだけ**にする（FK を張れるか＝Issue #747 のステップ3へ進めるかの判断材料になるため、通知しないが記録は必ず残す）。`PRAGMA foreign_keys=ON` を設定しているのに外部キー宣言が `user_inventory.reward_id` の1つしかなく、「本来DBが防げる不整合」への防御がサービス層の個別の None チェックとして散在している（監査の根本原因 RC-5）。SQLite で FK を追加するにはテーブル再作成が必要なため、まず孤児の実数を測るのが本チェックの役割である。**検知のみで自動修正はしない**（孤児行の削除は不可逆で、子行を消すべきか親を復活させるべきかは中身を見ないと決められない）。
-* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 643 / 抜粋: "def check_orphaned_rows(")
+* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 650 / 抜粋: "def check_orphaned_rows(")
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 643)
+* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 650)
 
 * **戻り値/レスポンス**: `str | None`（`_ORPHAN_CHECKS_STRICT` に孤児があれば異常メッセージ、無ければ `None`）
-* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 643)
+* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 650)
 
 * **副作用**: DBの読み取りのみ（`get_ro_connection` による `mode=ro` 接続）。加えて `_ORPHAN_CHECKS_EXPECTED` の件数を `logger.info` へ出力する。
-* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 643)
+* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 650)
 
 * **エラーハンドリング**: `sqlite3.OperationalError`（DBファイル・テーブルの不在、一時的なロック）は警告ログのみでスキップし `None` を返す（`check_quest_master_drift` と同じ方針。毎時cronで走るため、DB不在の環境で恒久的に失敗し続けるのを避ける）。それ以外の例外は `run_checks` 側で内部エラーとして捕捉される。
-* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 643)
+* 根拠: `def check_orphaned_rows() -> str | None:` (行番号: 650)
 
 ### `_git`
 
 * **役割**: リポジトリルート(`REPO_ROOT`)に対して `git` サブコマンドを実行する小さなヘルパ。`check_repo_behind_upstream` からのみ使う。タイムアウトは既定で `SUBPROCESS_TIMEOUT_SEC`、`fetch` のみ呼び出し側が `GIT_FETCH_TIMEOUT_SEC` を渡す。
-* 根拠: `def _git(*args: str, timeout: int = SUBPROCESS_TIMEOUT_SEC) -> subprocess.CompletedProcess:` (行番号: 687)
+* 根拠: `def _git(*args: str, timeout: int = SUBPROCESS_TIMEOUT_SEC) -> subprocess.CompletedProcess:` (行番号: 694)
 
 * **引数/リクエスト**: `*args: str`(gitサブコマンドと引数)、`timeout: int`
-* 根拠: `def _git(*args: str, timeout: int = SUBPROCESS_TIMEOUT_SEC) -> subprocess.CompletedProcess:` (行番号: 687)
+* 根拠: `def _git(*args: str, timeout: int = SUBPROCESS_TIMEOUT_SEC) -> subprocess.CompletedProcess:` (行番号: 694)
 
 * **戻り値/レスポンス**: `subprocess.CompletedProcess`(`check=False` のため異常終了でも例外にしない)
-* 根拠: `def _git(*args: str, timeout: int = SUBPROCESS_TIMEOUT_SEC) -> subprocess.CompletedProcess:` (行番号: 687)
+* 根拠: `def _git(*args: str, timeout: int = SUBPROCESS_TIMEOUT_SEC) -> subprocess.CompletedProcess:` (行番号: 694)
 
 * **副作用**: `git` の実行（`fetch` はネットワークへ出る）。
-* 根拠: `def _git(*args: str, timeout: int = SUBPROCESS_TIMEOUT_SEC) -> subprocess.CompletedProcess:` (行番号: 687)
+* 根拠: `def _git(*args: str, timeout: int = SUBPROCESS_TIMEOUT_SEC) -> subprocess.CompletedProcess:` (行番号: 694)
 
 * **エラーハンドリング**: `check=False` のため戻り値の `returncode` を呼び出し側が判定する。タイムアウト時は `subprocess.TimeoutExpired` がそのまま送出され、呼び出し側が捕捉する。
-* 根拠: `def _git(*args: str, timeout: int = SUBPROCESS_TIMEOUT_SEC) -> subprocess.CompletedProcess:` (行番号: 687)
+* 根拠: `def _git(*args: str, timeout: int = SUBPROCESS_TIMEOUT_SEC) -> subprocess.CompletedProcess:` (行番号: 694)
 
 ### `check_repo_behind_upstream` (**チェック12: 実機チェックアウトの遅れ検知、Issue #783で追加**)
 
 * **役割**: まず現在のブランチを見て、`DEPLOY_BRANCH`(`master`)以外・detached HEAD ならネットワークに触れず「実機が master を向いていない(ダッシュボードの更新ボタンが取り込めない)」旨と `git checkout master` の復旧手順を異常として返す(2026-10-20、実機が削除済みの作業ブランチを向いたままボタンが失敗した事故への対応。追跡先の有無には依存しない)。master のときは `git fetch --prune origin` した上で `HEAD..origin/master`(追跡先 `@{u}` ではなく更新ボタンと同じ比較先)のコミット数を数え、1以上なら「実機のコードがマージ済みの内容より古い」として異常メッセージを返す。2026-09-20 に実機が `origin/master` より5コミット遅れ、マージ済みの録画停止検知(#716)が動かずマイグレーション `0013` も未適用のまま放置されていたことへの対応。既存のどの仕組みもこれを見ていなかった（`deploy.sh --if-stale` は「HEAD に対する `dist` の鮮度」しか見ずHEAD自体が古いと最新と判定する、チェック8は crontab/systemd/logrotate が対象でコードの世代は見ない、`start_all.sh --prepare` は `.venv`/`dist` の鮮度のみ）。**検知のみで自動 pull はしない**（実機の `git pull` は post-merge フックからフロントの再ビルドとマスタ同期を走らせ、反映には `home_system.service` の再起動も要るため、無人で実行してよい操作ではない）。
-* 根拠: `def check_repo_behind_upstream() -> str | None:` (行番号: 695)
+* 根拠: `def check_repo_behind_upstream() -> str | None:` (行番号: 702)
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_repo_behind_upstream() -> str | None:` (行番号: 695)
+* 根拠: `def check_repo_behind_upstream() -> str | None:` (行番号: 702)
 
 * **戻り値/レスポンス**: `str | None`（master 以外を向いていればその旨と復旧手順、遅れていれば「N コミット遅れています」＋直近コミット（`DIFF_LINES_LIMIT` 件まで、超過分は「ほかN件」に畳む）＋復旧手順を含むメッセージ、最新または判定不能なら `None`）
-* 根拠: `def check_repo_behind_upstream() -> str | None:` (行番号: 695)
+* 根拠: `def check_repo_behind_upstream() -> str | None:` (行番号: 702)
 
 * **副作用**: `git fetch` によるネットワークアクセスと、リモート追跡ブランチの更新。ワーキングツリー・HEAD は変更しない。
 * 根拠: [fetchの実行] (行番号: 678 / 抜粋: 'fetched = _git("fetch", "--quiet", "--prune", "origin", timeout=GIT_FETCH_TIMEOUT_SEC)')
 
 * **エラーハンドリング**: 現在のブランチを取得できない場合、`git fetch` の失敗（ネットワーク不通）、`fetch` のタイムアウト（`subprocess.TimeoutExpired`）、`rev-list` の失敗、コミット数が整数として解釈できない場合は、いずれも「異常」ではなく警告ログのみ残して `None` を返す。毎時cronで走るため、外へ出られない環境で恒久的に鳴り続けるのを避ける（`check_quest_master_drift` と同じ方針）。
-* 根拠: `def check_repo_behind_upstream() -> str | None:` (行番号: 695)
+* 根拠: `def check_repo_behind_upstream() -> str | None:` (行番号: 702)
 
 ### `_service_process_start_time` (**チェック13の補助**)
 
 * **役割**: `home_system.service` のメインプロセスの起動時刻を返す。`systemctl show -p ActiveEnterTimestamp` はタイムゾーン略称付きでパースが環境依存になるため、`systemctl show -p MainPID --value` で PID を取り、`ps -o etimes=`（経過秒）から現在時刻を基準に逆算する。
-* 根拠: `def _service_process_start_time(now: datetime.datetime) -> datetime.datetime | None:` (行番号: 764)
+* 根拠: `def _service_process_start_time(now: datetime.datetime) -> datetime.datetime | None:` (行番号: 771)
 
 * **引数/リクエスト**: `now: datetime.datetime`（逆算の基準時刻）
 * **戻り値/レスポンス**: `datetime.datetime | None`（`MainPID` が取れない・0・非数、`ps` の出力が整数でない場合は `None`）
@@ -588,7 +588,7 @@
 ### `check_service_running_stale_code` (**チェック13: 稼働コードの鮮度=再起動漏れ検知で追加**)
 
 * **役割**: 稼働中のサーバープロセスの起動時刻より後に更新された、リポジトリ管理下のランタイム `MY_HOME_SYSTEM/**/*.py`（`tests/` 除く）があれば「古いコードで稼働中」として異常メッセージを返す。`git pull` は post-merge フックでフロントの再ビルドとマスタ同期しか行わず、Python のサーバープロセスは再起動されないため、DB のマスタだけ新しく実行コードが古い状態が起きる。2026-10-08、#905 のマージ後に再起動されないまま、旧コードが `reset_period='offday_run'` を未知の値として毎日表示し、「土日の宿題」が木曜にも出た事故への対応（チェック12は「チェックアウトが upstream より遅れていないか」を見るだけで、pull 済みなのにプロセスが古い状態は見ていなかった）。判定はファイルの mtime が起動時刻＋`STALE_CODE_GRACE_SEC` を超えているか。**検知のみで自動再起動はしない**（ランブックのガードレール。pull 直後は post-merge フックが再起動コマンドを案内する）。
-* 根拠: `def check_service_running_stale_code() -> str | None:` (行番号: 787)
+* 根拠: `def check_service_running_stale_code() -> str | None:` (行番号: 794)
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `str | None`（古ければ起動時刻・更新されたファイル（`STALE_CODE_FILE_LIMIT` 件まで、超過分は「ほかN件」）・`sudo systemctl restart home_system.service` を含むメッセージ、最新または判定不能なら `None`）
@@ -606,7 +606,7 @@
 
 
 * **戻り値/レスポンス**: `bool`（通知すべきならTrue、抑制ならFalse）
-* 根拠: [戻り値] (行番号: 850, 857 / 抜粋: "return False", "return True")
+* 根拠: [戻り値] (行番号: 850, 864 / 抜粋: "return False", "return True")
 
 
 * **副作用**: 通知する判定の場合、状態ファイル(`NOTIFY_STATE_FILE`)へフィンガープリントと通知時刻(JSON)を書き込む。**（Issue #661で修正）** 読み書きはいずれも`core/state_file.py`(`read_json`/`write_json_atomic`)へ委譲し、書き込みは原子的な差し替えになった。
@@ -621,19 +621,19 @@
 ### `_ping_deadman_switch` (**チェック外・層3、Issue #775で追加**)
 
 * **役割**: 外部デッドマンスイッチ(healthchecks.io等)へハートビートを送る。`config.HEALTH_WATCH_DEADMAN_PING_URL`が未設定(空文字)なら即return(既定・完全no-op)。設定済みなら、引数`ok`が`True`ならURLへそのまま、`False`ならURL末尾に`/fail`を付けてGETリクエストを送る(healthchecks.ioの規約に沿った形式)。
-* 根拠: `def _ping_deadman_switch(ok: bool) -> None:` (行番号: 860 / 抜粋: "def _ping_deadman_switch(ok: bool) -> None:")
+* 根拠: `def _ping_deadman_switch(ok: bool) -> None:` (行番号: 867 / 抜粋: "def _ping_deadman_switch(ok: bool) -> None:")
 
 
 * **引数/リクエスト**: `ok: bool`。`run_checks`からは`internal_errors`(チェック関数自体が例外を送出したか)の有無で呼び分けられ、anomalies(検知した異常メッセージ)の有無では変わらない。
-* 根拠: `def _ping_deadman_switch(ok: bool) -> None:` (行番号: 860)、[呼び出し] (行番号: 996 / 抜粋: "_ping_deadman_switch(ok=not internal_errors)")
+* 根拠: `def _ping_deadman_switch(ok: bool) -> None:` (行番号: 867)、[呼び出し] (行番号: 1063 / 抜粋: "_ping_deadman_switch(ok=not internal_errors)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `def _ping_deadman_switch(ok: bool) -> None:` (行番号: 860)
+* 根拠: `def _ping_deadman_switch(ok: bool) -> None:` (行番号: 867)
 
 
 * **副作用**: 外部へのHTTPリクエスト(`config.HEALTH_WATCH_DEADMAN_PING_URL`宛、タイムアウト`config.HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC`)。失敗時はロガーへの警告記録。
-* 根拠: [HTTP呼び出し] (行番号: 881 / 抜粋: "requests.get(target, timeout=config.HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC)")
+* 根拠: [HTTP呼び出し] (行番号: 888 / 抜粋: "requests.get(target, timeout=config.HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC)")
 
 
 * **エラーハンドリング**: `requests.exceptions.RequestException`を捕捉し、`logger.warning`のみで例外を外へ伝播させない(ping自体の失敗を`run_checks`の異常検知・通知フロー・終了コードに混ぜ込まないため)。
@@ -644,7 +644,8 @@
 ### `_fire_investigate_hook` (**Issue #339で追加**)
 
 * **役割**: 層2(自動調査)フックの発火。`config.HEALTH_WATCH_INVESTIGATE_HOOK`が未設定なら即return(既定・完全no-op)。設定済みならパスの存在と実行権限を確認し、異常サマリ(検知時刻+各異常の箇条書き)を標準入力で渡してフックスクリプトをfire-and-forgetのサブプロセスとして起動する(完了を待たない。毎時cronの層1を長時間ブロックしないため)。`run_checks`内の`_should_notify`通過後にのみ呼ばれるため、同一異常セット継続中の再発火は通知と同じ6時間間隔に収まる。
-* 根拠: [関数定義] (行番号: 886〜929 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
+* **（Issue #1030で追加）重複起動の抑止**: 再通知は6時間ごとに起きるため、同一原因が続く間は通知のたびにフックが再起動し、同じ結論の調査が1日に何度も走っていた（2026-10-23の05:10と11:10）。異常サマリの正規化シグネチャ（`_investigate_signature`: 数字の連なりを`N`に畳み空白を圧縮してソートしたハッシュ。件数・時刻が違っても同一扱い）を`config.LOG_DIR/.claude_watch_investigate_state`（`INVESTIGATE_STATE_FILENAME`）に記録し、`INVESTIGATE_COOLDOWN_SEC`（24時間）以内に起動済みのシグネチャではフックを再起動しない（通知自体は従来どおり送る）。記録はフック起動に成功したときだけ行い（失敗は次回再試行）、期限切れエントリは記録時に掃除する。状態ファイルが壊れている・読めない場合は`_should_notify`と同じく起動する側に倒す。調査結果（「起票不要」等）の記録は非同期のフックスクリプト側の責務で、本変更の対象外。
+* 根拠: [関数定義] (行番号: 936〜996 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `anomalies: List[str]`（各チェックの異常メッセージ）、`now: datetime.datetime`（検知時刻）
@@ -661,14 +662,14 @@
 
 
 * **エラーハンドリング**: フックパスが存在しない/実行権限がない場合はエラーログのみで起動しない。起動時の例外（`Popen`失敗等）も捕捉してエラーログのみとし、層1本体（検知・通知・マーカー更新）を巻き込まない。
-* 根拠: [ガード/例外処理] (行番号: 901, 913〜914 / 抜粋: "if not (os.path.isfile(hook) and os.access(hook, os.X_OK)):", "except Exception as e:\n        logger.error(f\"調査フックの起動に失敗しました: {e}\")")
+* 根拠: [ガード/例外処理] (行番号: 956, 913〜914 / 抜粋: "if not (os.path.isfile(hook) and os.access(hook, os.X_OK)):", "except Exception as e:\n        logger.error(f\"調査フックの起動に失敗しました: {e}\")")
 
 
 
 ### `run_checks`
 
 * **役割**: 13個のチェック関数(`service`/`api`（Issue #735で追加）/`journal`/`app_logs`/`disk`/`memory`/`nas`/`recording`（常時録画停止検知で追加）/`deploy_config`/`quest_master`/`orphaned_rows`（Issue #747）/`repo_behind`（Issue #783）/`stale_code`（再起動漏れの検知）)を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知し、通知抑制を通過した場合は層2フック(`_fire_investigate_hook`)も発火し、マーカーを更新し、**（Issue #775で追加）** 層3の外部デッドマンスイッチへハートビートを送って(`_ping_deadman_switch`)プロセスの終了コードを返すエントリーポイント。
-* 根拠: [関数定義] (行番号: 932 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 825〜838 / 抜粋: '("api", check_api_responsive),', '("recording", check_recording_stalled),', '("quest_master", check_quest_master_drift),', '("orphaned_rows", check_orphaned_rows),', '("repo_behind", check_repo_behind_upstream),')、[フック発火] (行番号: 982〜983 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")、[ハートビート送信] (行番号: 994〜996 / 抜粋: "# 層3(Issue #775): 完走したことを外部デッドマンスイッチへ知らせる。\n    # anomaliesの有無は問わない(それは既にDiscord通知が担う別の信号)。\n    _ping_deadman_switch(ok=not internal_errors)")
+* 根拠: [関数定義] (行番号: 999 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 825〜838 / 抜粋: '("api", check_api_responsive),', '("recording", check_recording_stalled),', '("quest_master", check_quest_master_drift),', '("orphaned_rows", check_orphaned_rows),', '("repo_behind", check_repo_behind_upstream),')、[フック発火] (行番号: 1049〜1050 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")、[ハートビート送信] (行番号: 1061〜1063 / 抜粋: "# 層3(Issue #775): 完走したことを外部デッドマンスイッチへ知らせる。\n    # anomaliesの有無は問わない(それは既にDiscord通知が担う別の信号)。\n    _ping_deadman_switch(ok=not internal_errors)")
 
 
 * **引数/リクエスト**: なし
@@ -691,7 +692,7 @@
 ### `__main__` ブロック
 
 * **役割**: スクリプト直接実行時に`main`を呼び、その戻り値を終了コードとしてプロセスを終了する。**(Issue #651)** `main`は`flock(LOCK_NB)`で多重起動を防いでから`run_checks`を実行し、ロックが取れない(前回がまだ実行中)ときは警告ログを出して`0`を返す。
-* 根拠: [エントリーポイント] (行番号: 1019〜1020 / 抜粋: "if __name__ == \"__main__\":\n    sys.exit(main())")、[多重起動防止] (参照: main / 抜粋: "fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)")
+* 根拠: [エントリーポイント] (行番号: 1086〜1087 / 抜粋: "if __name__ == \"__main__\":\n    sys.exit(main())")、[多重起動防止] (参照: main / 抜粋: "fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)")
 
 
 * **引数/リクエスト**: なし
@@ -853,7 +854,7 @@ graph TD
 | 高 | `monitors/log_analyzer.py` | 流用している`LogAnalyzer`のキーワード・除外パターン・タイムスタンプ解析仕様が本スクリプトの検知精度を決めるため。 | 根拠: `LogAnalyzer`のインポートと流用 (行番号: 36, 109〜118) |
 | 中 | `services/notification_service.py` | 異常通知の実際の送信経路（Discord errorチャンネル）を確認するため。 | 根拠: `send_push`の呼び出し (行番号: 225) |
 | 中 | `monitors/server_watchdog.py` | 同種のサービス監視との棲み分け（プロセスツリーの違い）を確認するため。 | 根拠: モジュールdocstringの記述 (行番号: 5〜7) |
-| 中 | `sync_strict.py` | **（Issue #700 で追加）** チェック9が検知した乖離を解消する側。`--if-stale`がデプロイ経路から自動実行される。 | 根拠: メッセージ内の案内 (行番号: 583 / 抜粋: "→ MY_HOME_SYSTEM で `python sync_strict.py --dry-run` で影響を確認のうえ同期してください") |
+| 中 | `sync_strict.py` | **（Issue #700 で追加）** チェック9が検知した乖離を解消する側。`--if-stale`がデプロイ経路から自動実行される。 | 根拠: メッセージ内の案内 (行番号: 590 / 抜粋: "→ MY_HOME_SYSTEM で `python sync_strict.py --dry-run` で影響を確認のうえ同期してください") |
 
 ## 8. 保守上の注意点
 
