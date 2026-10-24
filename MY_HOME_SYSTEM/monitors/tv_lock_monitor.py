@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/monitors/tv_lock_monitor.py
+import datetime
 import sys
 import os
 
@@ -18,6 +19,11 @@ logger = setup_logging("monitor.tv_lock")
 
 # 重複実行を防ぐため、実行状態を記録するファイル(深夜2時のロック用)
 LAST_RUN_FILE = os.path.join(config.FALLBACK_ROOT, "last_tv_lock.txt")
+# スロットでテレビのプラグを切った時刻(JSTの壁時計・tzなしisoformat)。再カットの猶予判定に使う。
+LAST_CUT_FILE = os.path.join(config.FALLBACK_ROOT, "last_tv_cut_at.txt")
+# スロットで切った直後は、プラグの消費電力が遅れて古い値のまま残り「まだオン」と誤判定して
+# 2回目のリモコン信号(トグル)を送ってしまうため、この秒数は禁止時間帯の再カットをしない。
+RECUT_GRACE_SECONDS = 300
 # 休日スロット用の記録ファイルは時刻ごとに分ける("last_tv_lock_1200.txt" 等)。
 HOLIDAY_RUN_FILE_TEMPLATE = os.path.join(config.FALLBACK_ROOT, "last_tv_lock_{hhmm}.txt")
 
@@ -87,6 +93,8 @@ def main():
 
                 # 実行完了の記録を保存
                 state_file.write_text_atomic(run_file, today_str)
+                if command == "turnOff":
+                    state_file.write_text_atomic(LAST_CUT_FILE, now.replace(tzinfo=None).isoformat())
             else:
                 logger.error(f"❌ [TV Lock] API Error: {res}")
         except Exception as e:
@@ -94,6 +102,19 @@ def main():
 
     if not slot_executed:
         _cut_if_turned_on_while_blocked(now)
+
+
+def _cut_recently(now) -> bool:
+    """スロットでプラグを切ってから RECUT_GRACE_SECONDS 以内ならTrue(記録が無い・壊れていればFalse)。"""
+    raw = state_file.read_text(LAST_CUT_FILE)
+    if not raw:
+        return False
+    try:
+        cut_at = datetime.datetime.fromisoformat(raw.strip())
+    except ValueError:
+        return False
+    elapsed = (now.replace(tzinfo=None) - cut_at).total_seconds()
+    return 0 <= elapsed < RECUT_GRACE_SECONDS
 
 
 def _cut_if_turned_on_while_blocked(now) -> None:
@@ -107,6 +128,9 @@ def _cut_if_turned_on_while_blocked(now) -> None:
         return
     # 13:59のturnOnスロットの直後に、解除したばかりのテレビを再度切らない
     if now.hour == 13 and now.minute >= 59:
+        return
+    # スロットで切った直後は電力値が古いままのことがある(誤判定でトグルを重ねない)
+    if _cut_recently(now):
         return
     watts = switchbot_service.get_tv_power_watts()
     if watts is None or watts < config.TV_POWER_ON_THRESHOLD_WATTS:
