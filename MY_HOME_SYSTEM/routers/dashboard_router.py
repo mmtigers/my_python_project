@@ -276,7 +276,11 @@ def dashboard_download_log(name: str) -> Response:
     log_file = log_download_service.resolve_log_file(name)
     if log_file is None:
         raise HTTPException(status_code=404, detail="log file not found")
-    text, _ = log_download_service.read_log_for_download(log_file)
+    try:
+        text, _ = log_download_service.read_log_for_download(log_file)
+    except OSError:
+        # 一覧の取得後にlogrotate等でファイルが消えた場合
+        raise HTTPException(status_code=404, detail="log file not found")
     filename = log_download_service.download_filename(log_file, home_status_service.get_now_jst())
     return Response(
         content=text,

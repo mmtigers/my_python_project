@@ -241,13 +241,13 @@
 
 * **役割**: **(新機能)** ⚡電気ページ。`power_analysis_service.build_power_report(days)`の結果を`power_page_service.render_power_page`で描く(月ごとの推移・日別の電気代・気温との関係・テレビの使い方)。分析は10分キャッシュされる。`async def`にしない(DB取得とpandasの計算が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`days`(30/60/90。それ以外の値・数値でない値は既定の30。`str | None`で受けて自前で変換するので422にならない)。日別・気温・テレビの対象期間を切り替える。
-* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 289)
+* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 293)
 
 ### `GET {DASHBOARD_BASE_PATH}/updates` (`dashboard_updates`)
 
 * **役割**: **(新機能)** アップデートページを返す。`release_history_service.get_release_history()`でダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を集め、`dashboard_page_service.render_updates_page`に渡す。あさノート・よるノートは外部から取得する(タイムアウト・キャッシュ付き。失敗しても残りのアプリは表示する)。`async def`にしない(外部取得が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`app`(`dashboard`/`quest`/`asa`/`yoru`、任意)で1アプリに絞る。未知の値は無視して全件。
-* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 304)
+* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 308)
 
 ### `GET {DASHBOARD_BASE_PATH}/sys` (`dashboard_sys`)
 
@@ -285,7 +285,7 @@
 * **引数/リクエスト**: パスパラメータ`name: str`
 * **戻り値/レスポンス**: 200で添付ファイル(`Response`)、一覧に無い名前は404(`HTTPException`)
 * **副作用**: ログファイルの読み取りのみ
-* **エラーハンドリング**: 未知の名前は404。ファイルの読み取り中のOSエラーは握りつぶさず500になる(列挙後にファイルが消えた場合など)
+* **エラーハンドリング**: 未知の名前は404。一覧の取得後にファイルが消えた場合など、読み取り中の`OSError`も404にする
 
 ### `GET {DASHBOARD_BASE_PATH}/static/{filename}` (`dashboard_static`)
 

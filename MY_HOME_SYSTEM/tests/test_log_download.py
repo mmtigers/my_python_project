@@ -114,3 +114,16 @@ def test_sys_page_with_no_logs(api_client, log_dir):
     r = api_client.get(f"{config.DASHBOARD_BASE_PATH}/sys")
     assert r.status_code == 200
     assert "ダウンロードできるログはありません" in r.text
+
+
+def test_download_endpoint_404_when_file_disappears_after_listing(api_client, log_dir, monkeypatch):
+    path = log_dir / "home_system.log"
+    path.write_text("x", encoding="utf-8")
+    real_read = lds.read_log_for_download
+
+    def read_after_delete(log_file):
+        path.unlink()
+        return real_read(log_file)
+
+    monkeypatch.setattr(lds, "read_log_for_download", read_after_delete)
+    assert api_client.get(f"{config.DASHBOARD_BASE_PATH}/sys/logs/home_system.log").status_code == 404
