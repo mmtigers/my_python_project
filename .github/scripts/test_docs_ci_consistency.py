@@ -24,6 +24,7 @@ DDD のつもりで MY_HOME_SYSTEM の値(82)を書いても検知できなか�
 
 CI では test.yml の lint ジョブから `pytest .github/scripts/` で実行される。
 """
+import json
 import re
 from pathlib import Path
 
@@ -156,3 +157,39 @@ def test_at_least_one_doc_mentions_threshold():
     """このテストが空振り(転記箇所ゼロ)になっていないことの自己検証。"""
     found = any(_COV_RE.search(p.read_text(encoding="utf-8")) for p in _doc_files())
     assert found, "閾値を転記しているドキュメントが見つかりません(DOC_GLOBS を見直してください)"
+
+
+# --- .claude/verify.json (ローカル検証) との整合(Issue #1018) ---
+# verify.json は CI のブロッキング項目の写しで、カバレッジの床と pyright の固定版は
+# test.yml と同じ値を持つ。人手の転記なので、ずれると「ローカルは通るのに CI が落ちる」
+# (または逆)が起きる。ドキュメントと同じく機械的に固定する。
+VERIFY_JSON = REPO_ROOT / ".claude" / "verify.json"
+_PYRIGHT_RE = re.compile(r"pyright@(\d+(?:\.\d+)*)")
+
+
+def _verify_json_checks() -> list[dict]:
+    return json.loads(VERIFY_JSON.read_text(encoding="utf-8"))["checks"]
+
+
+def test_verify_json_coverage_thresholds_match_workflow():
+    expected = _workflow_thresholds()
+    actual: dict[str, set[int]] = {}
+    for check in _verify_json_checks():
+        for value in _COV_RE.findall(check.get("cmd", "")):
+            actual.setdefault(_normalize_workdir(check.get("cwd", ".")), set()).add(int(value))
+    assert {d: sorted(v) for d, v in actual.items()} == {d: [v] for d, v in expected.items()}, (
+        f".claude/verify.json のカバレッジ閾値 {actual} が test.yml の {expected} と一致しません。"
+        "閾値を変える PR では verify.json も同じ PR で更新してください。"
+    )
+
+
+def test_verify_json_pyright_version_matches_workflow():
+    in_workflow = set(_PYRIGHT_RE.findall(WORKFLOW.read_text(encoding="utf-8")))
+    in_verify = {
+        v for check in _verify_json_checks() for v in _PYRIGHT_RE.findall(check.get("cmd", ""))
+    }
+    assert in_workflow, "test.yml に固定版の pyright(pyright@X.Y.Z)が見つかりません"
+    assert in_verify == in_workflow, (
+        f".claude/verify.json の pyright の版 {sorted(in_verify)} が test.yml の "
+        f"{sorted(in_workflow)} と一致しません(CI と同じ版でないと結果が食い違います)。"
+    )
