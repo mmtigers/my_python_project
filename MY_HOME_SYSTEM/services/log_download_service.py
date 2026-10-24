@@ -33,10 +33,13 @@ _LOG_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+\.log(\.1)?$")
 
 _MASK = "<redacted>"
 # `token=xxx` / `"password": "xxx"` / `Authorization: xxx` のように、キー名の直後の値を伏せる。
+# `LINE_CHANNEL_ACCESS_TOKEN=xxx` のように `_` 区切りの接頭辞が付くキー名も対象(`\b` は `_` を単語文字と
+# みなして成立しないため、直前が英数字でないことだけを条件にする)。
 _KEYED_SECRET_RE = re.compile(
     r"""(?ix)
-    (?P<key>\b(?:access[_-]?token|refresh[_-]?token|token|secret|password|passwd|api[_-]?key|apikey|
-                authorization|signature|sign)\b["']?\s*[=:]\s*["']?)
+    (?P<key>(?<![A-Za-z0-9])
+            (?:[A-Za-z0-9_-]*(?:token|secret|password|passwd|api[_-]?key|apikey|authorization|signature)|sign)
+            ["']?\s*[=:]\s*["']?)
     (?P<val>(?:Bearer\s+)?[^\s"'&,;}\]]+)
     """
 )

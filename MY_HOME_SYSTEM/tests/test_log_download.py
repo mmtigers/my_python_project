@@ -54,10 +54,14 @@ def test_redact_secrets():
         "Authorization: Bearer abcdefghijklmnop\n"
         "rtsp://admin:pa55w0rd@192.168.0.10:554/stream\n"
         "https://discord.com/api/webhooks/123456/TOKENTOKEN failed\n"
+        "LINE_CHANNEL_ACCESS_TOKEN=LINETOK123\n"
+        'cfg {"channel_secret": "CHSEC456", "client_secret": "CLSEC789"}\n'
+        "csrf_token: CSRF000\n"
         "ordinary line with no secret\n"
     )
     out = lds.redact_secrets(text)
-    for leaked in ("abc123SECRET", "hunter2", "KEY999", "abcdefghijklmnop", "pa55w0rd", "TOKENTOKEN"):
+    for leaked in ("abc123SECRET", "hunter2", "KEY999", "abcdefghijklmnop", "pa55w0rd", "TOKENTOKEN",
+                   "LINETOK123", "CHSEC456", "CLSEC789", "CSRF000"):
         assert leaked not in out
     assert "ordinary line with no secret" in out
     assert "192.168.0.10" in out  # IPは伏せない(仕様)

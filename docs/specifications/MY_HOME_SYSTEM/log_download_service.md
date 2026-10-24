@@ -37,8 +37,8 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.LOG_DIR` | 実際のパス(`BASE_DIR/logs`、または書き込み不可時のフォールバック先)は`config.py`側の解決次第 | 根拠: [変数参照] (行番号: 83 / 抜粋: "os.listdir(config.LOG_DIR)") |
-| DDDのログ置き場 | `config.BASE_DIR`の親の`DDD/logs`と決め打ちしており、実機の配置で実在するかは本ファイルからは分からない | 根拠: [関数定義] (行番号: 65〜66 / 抜粋: "def _ddd_log_dir() -> str:") |
+| `config.LOG_DIR` | 実際のパス(`BASE_DIR/logs`、または書き込み不可時のフォールバック先)は`config.py`側の解決次第 | 根拠: [変数参照] (行番号: 86 / 抜粋: "os.listdir(config.LOG_DIR)") |
+| DDDのログ置き場 | `config.BASE_DIR`の親の`DDD/logs`と決め打ちしており、実機の配置で実在するかは本ファイルからは分からない | 根拠: [関数定義] (行番号: 68〜69 / 抜粋: "def _ddd_log_dir() -> str:") |
 
 ## 4. 主要要素の定義(関数 / エンドポイント / コンポーネント)
 
@@ -50,7 +50,7 @@
 ### `redact_secrets`
 
 * **役割**: 既知の形式の機密情報を`<redacted>`に置き換えた文字列を返す。順に(1)Discord Webhook URLのトークン部、(2)`scheme://user:pass@`の認証情報(RTSP URL等)、(3)`token`/`secret`/`password`/`api_key`/`authorization`/`signature`等のキー名の直後の値、(4)`Bearer`トークンを伏せる。氏名・IPアドレス等は伏せない。
-* 根拠: [関数定義] (行番号: 56〜62 / 抜粋: "def redact_secrets(text: str) -> str:")
+* 根拠: [関数定義] (行番号: 59〜65 / 抜粋: "def redact_secrets(text: str) -> str:")
 
 * **引数/リクエスト**: `text: str`
 * **戻り値/レスポンス**: マスク済みの`str`
@@ -60,7 +60,7 @@
 ### `list_log_files`
 
 * **役割**: ダウンロードできるログの一覧を更新が新しい順で返す。候補は`_candidates`(`LOG_DIR`直下で`^[A-Za-z0-9._-]+\.log(\.1)?$`に合致する名前と、`DDD__`接頭辞付きのDDDログ)で、シンボリックリンクと通常ファイル以外は`_stat_regular_file`で除外する。
-* 根拠: [関数定義] (行番号: 96〜105 / 抜粋: "def list_log_files() -> list[LogFile]:")
+* 根拠: [関数定義] (行番号: 99〜108 / 抜粋: "def list_log_files() -> list[LogFile]:")
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `list[LogFile]`
@@ -70,7 +70,7 @@
 ### `resolve_log_file`
 
 * **役割**: 公開名から`list_log_files`の一覧内のファイルを返す。一覧に無い名前(`../`や`/`を含む文字列を含む)は`None`。パスを組み立てて開くことはしない。
-* 根拠: [関数定義] (行番号: 108〜113 / 抜粋: "def resolve_log_file(name: str) -> LogFile | None:")
+* 根拠: [関数定義] (行番号: 111〜116 / 抜粋: "def resolve_log_file(name: str) -> LogFile | None:")
 
 * **引数/リクエスト**: `name: str`
 * **戻り値/レスポンス**: `LogFile | None`
@@ -80,7 +80,7 @@
 ### `read_log_for_download`
 
 * **役割**: ログを読み、マスク済みの本文を返す。ファイルが`config.LOG_DOWNLOAD_MAX_MB`を超える場合は末尾側のみを読み、欠けた先頭行を捨て、先頭に切り詰めた旨の注記行を付ける。UTF-8でデコードできない部分は置換文字にする。
-* 根拠: [関数定義] (行番号: 116〜136 / 抜粋: "def read_log_for_download(log_file: LogFile) -> tuple[str, bool]:")
+* 根拠: [関数定義] (行番号: 119〜139 / 抜粋: "def read_log_for_download(log_file: LogFile) -> tuple[str, bool]:")
 
 * **引数/リクエスト**: `log_file: LogFile`
 * **戻り値/レスポンス**: `(マスク済み本文, 切り詰めたか)`
@@ -90,7 +90,7 @@
 ### `download_filename`
 
 * **役割**: スマホで開きやすいよう末尾を`.txt`にし、取得日時を付けた保存名(`<name>.<YYYYmmdd-HHMM>.txt`)を返す。
-* 根拠: [関数定義] (行番号: 139〜141 / 抜粋: "def download_filename(log_file: LogFile, now: datetime) -> str:")
+* 根拠: [関数定義] (行番号: 142〜144 / 抜粋: "def download_filename(log_file: LogFile, now: datetime) -> str:")
 
 * **引数/リクエスト**: `log_file: LogFile`, `now: datetime`
 * **戻り値/レスポンス**: `str`
