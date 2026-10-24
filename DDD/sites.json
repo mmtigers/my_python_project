@@ -54,18 +54,6 @@
     "_comment": "レイアウト調整用の空divが混在するため、リンクを持つ要素のみに絞る\nサムネイルが<img src>ではなく<a>のインラインCSS背景画像で指定されている\n詳細URLが './profile.html?sid=83' 形式のため 'sid'パラメータをIDとして使う"
   },
   {
-    "site_id": "restpia",
-    "name": "Restpia レストピア",
-    "target_url": "https://restpia-es.com/therapist.html",
-    "selector_container": "div.staff-box:has(a)",
-    "selector_name": "ul.box-inner li",
-    "selector_link": "div.staff-image01 a",
-    "selector_image": "div.staff-image01 a",
-    "id_query_param": "sid",
-    "image_from_style": true,
-    "_comment": "レイアウト調整用の空divが混在するため、リンクを持つ要素のみに絞る\nbox-inner内の最初のliが名前（class指定がないため先頭要素で取得）"
-  },
-  {
     "site_id": "anju_spa",
     "name": "Anju spa（アンジュスパ）",
     "target_url": "https://anjuspa.com/cast/",
@@ -182,16 +170,6 @@
     "selector_link": "a.therapist_meta",
     "selector_image": "p.therapist_img img",
     "_comment": "Mrs.Merci SPA / Restpiaと同一テンプレート系列"
-  },
-  {
-    "site_id": "mrs_luxe",
-    "name": "Mrs.Luxe（ミセスリュクス）",
-    "target_url": "https://luxe-mrs.com/lady.php",
-    "selector_container": "ul.ladyList li",
-    "selector_name": "h2.ladyName",
-    "selector_link": "a[href*=\"lady_num=\"]",
-    "selector_image": "span.thumb img",
-    "id_query_param": "lady_num"
   },
   {
     "site_id": "mrs_onlyone",
@@ -751,17 +729,6 @@
     "selector_image": "img",
     "name_first_text_only": true,
     "_comment": "新規パターン。ページ上部の「PICK UP」プレビューと「THERAPIST LIST」\n本編セクションに同じキャストが重複掲載されるため、本編セクションの\nみに絞る。name要素内には年齢が兄弟の<span>として同居するため\nname_first_text_only=Trueを使用"
-  },
-  {
-    "site_id": "yurikago",
-    "name": "ゆりかご京都",
-    "target_url": "https://yurikago-kyoto.com/therapist/",
-    "selector_container": "li.therapistbox",
-    "selector_name": "p.therapist_name",
-    "selector_link": "a",
-    "selector_image": "img",
-    "name_first_text_only": true,
-    "_comment": "新規パターン。WordPress製。name要素内には入店日等の付加情報の後に\n年齢が兄弟の<span>として同居するため name_first_text_only=True"
   },
   {
     "site_id": "bimajo",
