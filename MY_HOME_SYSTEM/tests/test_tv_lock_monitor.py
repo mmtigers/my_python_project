@@ -19,8 +19,16 @@ from unittest.mock import patch
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import pytest
+
 import config
 from monitors import tv_lock_monitor
+
+
+@pytest.fixture(autouse=True)
+def _isolated_last_cut_file(tmp_path, monkeypatch):
+    """スロット実行で書く「切った時刻」の記録を、実機の状態ファイルではなく一時ディレクトリへ向ける。"""
+    monkeypatch.setattr(tv_lock_monitor, "LAST_CUT_FILE", str(tmp_path / "last_tv_cut_at.txt"))
 
 
 class TestTvLockMonitor:
@@ -282,6 +290,22 @@ class TestRecutWhileBlocked:
     def test_no_extra_cut_in_the_run_that_executes_the_slot(self, monkeypatch, tmp_path):
         cut = self._run(monkeypatch, self.SATURDAY.replace(hour=12, minute=2), 80.0, tmp_path)
         assert cut.call_count == 1  # スロットのオフ1回のみ(見張りは重ねない)
+
+    def test_does_not_recut_right_after_the_slot_cut_the_plug(self, monkeypatch, tmp_path):
+        """12:00のスロットで切った2分後は、電力値が古くて高くても再カットしない(トグルの二重送信防止)。"""
+        self._run(monkeypatch, self.SATURDAY.replace(hour=12, minute=0, second=12), 106.7, tmp_path)
+        cut = self._run(monkeypatch, self.SATURDAY.replace(hour=12, minute=2, second=11), 27.5, tmp_path)
+        assert cut.call_count == 0
+
+    def test_recuts_after_the_grace_period(self, monkeypatch, tmp_path):
+        self._run(monkeypatch, self.SATURDAY.replace(hour=12, minute=0, second=12), 106.7, tmp_path)
+        cut = self._run(monkeypatch, self.SATURDAY.replace(hour=12, minute=6, second=0), 80.0, tmp_path)
+        assert cut.call_count == 1
+
+    def test_corrupt_cut_record_does_not_block_recut(self, monkeypatch, tmp_path):
+        (tmp_path / "last_tv_cut_at.txt").write_text("not-a-time")
+        cut = self._run(monkeypatch, self.SATURDAY.replace(hour=12, minute=30), 80.0, tmp_path)
+        assert cut.call_count == 1
 
     def test_cuts_after_slot_already_done_within_slot_window(self, monkeypatch, tmp_path):
         (tmp_path / "run_1200.txt").write_text("2026-09-05")
