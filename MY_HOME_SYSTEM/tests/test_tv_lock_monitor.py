@@ -155,7 +155,7 @@ class TestTvLockMonitor:
 
 
 class TestHolidaySlots:
-    """休日(土日祝)は12:00にオフ・13:59にオン・20:00にオフ(平日は何もしない)。"""
+    """休日(土日祝)は12:00にオフ・13:59にオン・20:00にオフ(平日は20:00のプラグOFFのみ)。"""
 
     SATURDAY = datetime(2026, 9, 19, tzinfo=timezone(timedelta(hours=9)))
     FRIDAY = datetime(2026, 9, 18, tzinfo=timezone(timedelta(hours=9)))
@@ -199,9 +199,13 @@ class TestHolidaySlots:
         mock_cmd = self._run(tmp_path, monkeypatch, self.FRIDAY.replace(hour=12, minute=2))
         mock_cmd.assert_not_called()
 
-    def test_does_nothing_at_20_on_a_weekday(self, tmp_path, monkeypatch):
-        mock_cmd = self._run(tmp_path, monkeypatch, self.FRIDAY.replace(hour=20, minute=2))
-        mock_cmd.assert_not_called()
+    def test_turns_off_plug_only_at_20_on_a_weekday(self, tmp_path, monkeypatch):
+        """平日20時はリモコン(turn_off_tv_gracefully)を経由せず、プラグOFFだけを送る。"""
+        sw = tv_lock_monitor.switchbot_service
+        with patch.object(sw, "turn_off_tv_gracefully") as mock_graceful:
+            mock_cmd = self._run(tmp_path, monkeypatch, self.FRIDAY.replace(hour=20, minute=2))
+        mock_cmd.assert_called_once_with("tv-plug-1", "turnOff")
+        mock_graceful.assert_not_called()
 
     def test_each_slot_runs_once_per_day(self, tmp_path, monkeypatch):
         now = self.SATURDAY.replace(hour=12, minute=1)
