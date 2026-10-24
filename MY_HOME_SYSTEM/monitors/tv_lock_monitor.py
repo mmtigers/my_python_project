@@ -23,7 +23,7 @@ HOLIDAY_RUN_FILE_TEMPLATE = os.path.join(config.FALLBACK_ROOT, "last_tv_lock_{hh
 
 # (時, 分, 操作, 休日のみか)。各スロットは「その時刻から5分以内」に1日1回だけ実行する。
 # 休日(土日・祝日・家の休み)は、12:00にオフ、13:59にオン(14:00ちょうどにテレビを
-# 使える状態に戻す)、20:00にオフ。12:00〜14:00と20:00以降の「オンできない」側は
+# 使える状態に戻す)、20:00にオフ(20:00は平日も実行する)。12:00〜14:00と20:00以降の「オンできない」側は
 # switchbot_service.is_tv_blocked_now がアプリ経由の自動ONを止めることで担保する。
 # 本スクリプトは scheduler_boot.py が60秒間隔で起動する(300秒間隔だった頃は起動位相に
 # よって14:04などに遅れていた)。
@@ -31,8 +31,12 @@ _SLOTS = (
     (2, 0, "turnOff", False),
     (12, 0, "turnOff", True),
     (13, 59, "turnOn", True),
-    (20, 0, "turnOff", True),
+    (20, 0, "turnOff", False),
 )
+# 平日に動くスロットのうち、リモコン信号(トグル)を送らずプラグのOFFだけにするもの。
+# 平日20時は消費電力によるテレビの状態判定が外れると、トグル信号で消えているテレビを
+# つけてしまうおそれがあるため、赤外線は送らない。休日の20時は従来どおりリモコンで消してから切る。
+_PLUG_ONLY_ON_WEEKDAY = {(20, 0)}
 
 
 def _run_file_for(hour: int, minute: int) -> str:
@@ -70,7 +74,10 @@ def main():
         logger.info(f"📺 [TV Lock] Executing scheduled TV plug command {command} at {hour:02d}:{minute:02d}.")
         slot_executed = True
         try:
-            if command == "turnOff":
+            if command == "turnOff" and (hour, minute) in _PLUG_ONLY_ON_WEEKDAY and not is_offday(now):
+                # 平日の20時: リモコン信号は送らず、プラグのOFFだけ行う
+                res = switchbot_service.send_device_command(config.TV_PLUG_DEVICE_ID, command)
+            elif command == "turnOff":
                 # テレビがついていれば、先にリモコンで消してからプラグを切る
                 res = switchbot_service.turn_off_tv_gracefully()
             else:
