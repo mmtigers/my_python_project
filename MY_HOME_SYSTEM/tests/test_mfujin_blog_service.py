@@ -8,9 +8,10 @@ services/mfujin_blog_service.py のパーサ/判定/メッセージ組み立て�
 fixture中のタイトル・alt文字列はすべてテスト用のダミー値であり、実際のブログ記事の
 文言ではない。
 """
+import pytest
 import services.mfujin_blog_service as blog
 from bs4 import BeautifulSoup
-from linebot.v3.messaging import FlexMessage, ImageMessage, TextMessage
+from linebot.v3.messaging import FlexMessage
 
 TOP_PAGE_HTML = """
 <html><body>
@@ -195,38 +196,38 @@ def test_is_excluded_category_matches_known_pr_category(monkeypatch):
     assert blog.is_excluded_category(None) is False
 
 
-def test_build_line_messages_uses_text_and_images_within_limit():
-    article = blog.ArticleContent(
+def _article(n_images):
+    return blog.ArticleContent(
         url="https://mfujin.test/archives/dummy.html",
         title="ダミー記事タイトル",
         published_at="2026-09-28T07:01:00+09:00",
         category="日常のひとこま",
-        image_urls=["https://cdn.mfujin.test/imgs/page1.jpg", "https://cdn.mfujin.test/imgs/page2.jpg"],
+        image_urls=[f"https://cdn.mfujin.test/imgs/page{i}.jpg" for i in range(n_images)],
     )
-    messages = blog.build_line_messages(article)
-
-    assert len(messages) == 3  # タイトル1通 + 画像2通 (5通上限以内)
-    assert isinstance(messages[0], TextMessage)
-    assert "ダミー記事タイトル" in messages[0].text
-    assert "https://mfujin.test/archives/dummy.html" in messages[0].text
-    assert isinstance(messages[1], ImageMessage)
-    assert messages[1].original_content_url == "https://cdn.mfujin.test/imgs/page1.jpg"
 
 
-def test_build_line_messages_switches_to_flex_carousel_when_over_limit():
-    # タイトル1通 + 画像5枚 = 6通 > 5通上限 のため carousel に切り替わる
-    image_urls = [f"https://cdn.mfujin.test/imgs/page{i}.jpg" for i in range(5)]
-    article = blog.ArticleContent(
-        url="https://mfujin.test/archives/dummy.html",
-        title="ダミー記事タイトル",
-        published_at="2026-09-28T07:01:00+09:00",
-        category="日常のひとこま",
-        image_urls=image_urls,
-    )
-    messages = blog.build_line_messages(article)
+@pytest.mark.parametrize("n_images", [1, 2, 4, 5, 11])
+def test_build_line_messages_is_single_flex_carousel(n_images):
+    # 枚数によらず Flex carousel 1通(先頭=タイトルバブル + 画像バブル)
+    messages = blog.build_line_messages(_article(n_images))
 
     assert len(messages) == 1
     assert isinstance(messages[0], FlexMessage)
+    assert "ダミー記事タイトル" in messages[0].alt_text
+    bubbles = messages[0].contents.contents
+    assert len(bubbles) == 1 + n_images
+    assert bubbles[0].footer.contents[0].action.uri == "https://mfujin.test/archives/dummy.html"
+    assert bubbles[1].hero.url == "https://cdn.mfujin.test/imgs/page0.jpg"
+
+
+def test_build_line_messages_truncates_over_carousel_limit(caplog):
+    # バブル上限12個: タイトル1 + 画像11。12枚目以降は切り捨てる
+    messages = blog.build_line_messages(_article(15))
+
+    assert len(messages) == 1
+    bubbles = messages[0].contents.contents
+    assert len(bubbles) == 12
+    assert bubbles[-1].hero.url == "https://cdn.mfujin.test/imgs/page10.jpg"
 
 
 class _FakeHeadResponse:

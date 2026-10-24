@@ -27,18 +27,13 @@ from core.logger import setup_logging
 from linebot.v3.messaging import (
     FlexContainer,
     FlexMessage,
-    ImageMessage,
     Message,
-    TextMessage,
 )
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 logger = setup_logging("service.mfujin_blog")
 
-# LINE Messaging APIの制約(services/line_service.pyのLINE_MAX_MESSAGES_PER_REPLYと同じ、
-# 1回のpush/replyで送れるメッセージ数の上限)。
-_LINE_MAX_MESSAGES_PER_PUSH = 5
 # Flex Message 1通のcarouselに含められるバブル数の上限(LINE公式仕様)。
 _FLEX_CAROUSEL_MAX_BUBBLES = 12
 
@@ -247,21 +242,9 @@ def validate_image_urls(session: requests.Session, image_urls: list[str]) -> lis
 def build_line_messages(article: ArticleContent) -> list[Message]:
     """記事内容からLINE Messaging APIへ送るメッセージ列を組み立てる。
 
-    タイトル(1通)+画像枚数が LINE の1回のpushで送れる上限(5通)に収まる場合は、
-    テキスト1通+ImageMessage(枚数分)というシンプルな構成にする(スマホでネイティブに
-    フルスクリーン表示できるImageMessageを優先)。収まらない場合のみ、Flex Message の
-    carousel(1通の中に複数バブルを収められる)へ切り替える。
+    画像枚数によらず、Flex Message の carousel 1通に統一する(先頭バブルがタイトルと
+    元記事リンク、2枚目以降が漫画ページ。画像ごとに別メッセージが連続送信されない)。
     """
-    title_text = f"【えむふじん 最新話】\n\n{article.title}\n\n元記事:\n{article.url}"
-
-    if 1 + len(article.image_urls) <= _LINE_MAX_MESSAGES_PER_PUSH:
-        messages: list[Message] = [TextMessage(text=title_text)]
-        for image_url in article.image_urls:
-            messages.append(
-                ImageMessage(originalContentUrl=image_url, previewImageUrl=image_url)
-            )
-        return messages
-
     bubbles = [
         {
             "type": "bubble",
