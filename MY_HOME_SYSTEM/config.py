@@ -1043,3 +1043,11 @@ MFUJIN_BLOG_MIN_IMAGE_COUNT: int = _get_int_env("MFUJIN_BLOG_MIN_IMAGE_COUNT", 1
 MFUJIN_BLOG_REQUEST_TIMEOUT_SEC: int = _get_int_env("MFUJIN_BLOG_REQUEST_TIMEOUT_SEC", 20)
 # 画像1枚あたりの検証(HEADリクエスト)で許容する上限サイズ。超過分は送信対象から除外する。
 MFUJIN_BLOG_IMAGE_MAX_SIZE_MB: int = _get_int_env("MFUJIN_BLOG_IMAGE_MAX_SIZE_MB", 10)
+
+# ==========================================
+# 20. ログのダウンロード設定
+# ==========================================
+# ダッシュボードのシステムページから logs/*.log をスマホへダウンロードするための設定
+# (services/log_download_service.py)。1ファイルあたりの返却サイズ上限で、超えた場合は
+# 末尾側だけを返す。
+LOG_DOWNLOAD_MAX_MB: int = _get_int_env("LOG_DOWNLOAD_MAX_MB", 10)

@@ -30,6 +30,7 @@ from services import (
     dashboard_page_service,
     dashboard_pwa_service,
     home_status_service,
+    log_download_service,
     power_analysis_service,
     power_page_service,
     release_history_service,
@@ -261,7 +262,26 @@ def dashboard_sys(nas_days: str | None = None) -> HTMLResponse:
             dashboard_path=f"{_BASE_PATH}/",
             nas_days=nas_days,
             boot_history=system_info_service.get_boot_history(),
+            log_files=log_download_service.list_log_files(),
         )
+    )
+
+
+@router.get(f"{_BASE_PATH}/sys/logs/{{name}}", include_in_schema=False)
+def dashboard_download_log(name: str) -> Response:
+    """システムページの一覧にあるログを1ファイル、機密情報を伏せてダウンロードさせる。
+
+    名前は一覧との完全一致でしか解決しない(パス・`..` は一覧に無いので404)。
+    """
+    log_file = log_download_service.resolve_log_file(name)
+    if log_file is None:
+        raise HTTPException(status_code=404, detail="log file not found")
+    text, _ = log_download_service.read_log_for_download(log_file)
+    filename = log_download_service.download_filename(log_file, home_status_service.get_now_jst())
+    return Response(
+        content=text,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"},
     )
 
 
