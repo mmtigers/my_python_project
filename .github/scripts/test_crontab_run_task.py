@@ -44,7 +44,8 @@ def test_no_cron_entry_discards_all_output():
 
 def test_newface_monitor_runs_hourly_in_ddd_with_ddd_logs():
     (line,) = _entries_for("newface_monitor.py")
-    assert line.strip().startswith("0 * * * *"), f"1時間毎の実行のはずです: {line}"
+    # Issue #1035: 毎時0分の定時処理(tv_lock の定時スロット・電力監視等)と重ねないよう7分にずらした
+    assert line.strip().startswith("7 * * * *"), f"毎時7分の1時間毎の実行のはずです: {line}"
     assert "RUN_TASK_CWD=/home/masahiro/develop/DDD" in line
     # ログ先は従来どおり DDD/logs(logrotate の対象パス)
     assert "RUN_TASK_LOG_DIR=/home/masahiro/develop/DDD/logs" in line

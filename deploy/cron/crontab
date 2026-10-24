@@ -1,7 +1,7 @@
 # ラズパイ一次ヘルスチェック (毎時10分。Issue #339 層1・#484/#492)
 # home_system.serviceおよびそのプロセスツリー配下の監視(server_watchdog.py等)が
 # 丸ごと停止した場合でも、cron駆動でサービスから独立したこのチェックだけは動き続ける。
-# 毎時0分に走るnewface_monitor等の負荷と重ねないよう10分にずらしている。
+# 毎時0分に走るジョブ等の負荷と重ねないよう10分にずらしている(newface_monitor も #1035 で7分にずらした)。
 10 * * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/health_watch.py
 
 # 週間ログ分析 (日曜 08:50)
@@ -37,11 +37,13 @@
 15 15 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/daily_timelapse_job.py entrance --date $(date +\%Y-\%m-\%d) --start 13:00 --end 15:00
 
 # newface monitor per 1hour
+# Issue #1035: 毎時0分には tv_lock_monitor の定時スロットや switchbot_power_monitor 等が重なるため、
+# 毎時7分にずらしている(health_watch の10分より前に終わる約45秒の処理)。
 # Issue #947: run_task.sh 経由にして、Python が起動する前の失敗(ImportError・.venv破損)も
 # 通知されるようにした。作業ディレクトリとログ先は DDD のまま(RUN_TASK_CWD / RUN_TASK_LOG_DIR)。
 # DDD/logs は gitignore 対象だが、Issue #587 の mkdir -p は run_task.sh が毎回行う。
 # ログは従来どおり DDD/logs/newface_monitor.log(logrotate の対象パスもそのまま)。
-0 * * * * RUN_TASK_CWD=/home/masahiro/develop/DDD RUN_TASK_LOG_DIR=/home/masahiro/develop/DDD/logs /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh newface_monitor.py
+7 * * * * RUN_TASK_CWD=/home/masahiro/develop/DDD RUN_TASK_LOG_DIR=/home/masahiro/develop/DDD/logs /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh newface_monitor.py
 
 # えむふじんブログ(https://mfujin.blog.jp/)の最新漫画をLINEへ通知(個人用)。
 # 朝7時頃の更新想定に対し余裕を見て12:00に本実行し、更新が遅れた日の取りこぼし救済として
