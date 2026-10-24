@@ -12,6 +12,23 @@ description: プロジェクトに存在するLint・型チェック・テスト
 2. 無ければ package.json scripts / ruff.toml / pytest.ini / Makefile から推定(`vh.py detect` で確認)。推定は保守的なので、重要なリポジトリでは verify.json を作ること。
 3. CLAUDE.md にCI相当の手順があれば、それを verify.json に写す(CIのブロッキング項目を優先)。
 
+### 自動検出の対象外の言語(Go / Rust など): verify.json を手書きする
+自動検出は Python(ruff / mypy / pytest)・Node(package.json の lint / typecheck / test / build)・Makefile のみ。`go.mod` や `Cargo.toml` だけのリポジトリでは検証が 0 件になる(`vh.py run` は終了コード1)ので、`<repo>/.claude/verify.json` を作る。軽い順に並べる。
+
+```json
+{"checks": [
+  {"name": "go-vet",  "cmd": "go vet ./..."},
+  {"name": "go-test", "cmd": "go test ./...", "timeout": 900}
+]}
+```
+```json
+{"checks": [
+  {"name": "cargo-clippy", "cmd": "cargo clippy --all-targets -- -D warnings"},
+  {"name": "cargo-test",   "cmd": "cargo test", "timeout": 1200}
+]}
+```
+サブディレクトリなら `cwd`、実行しなくてよい補助チェックなら `"optional": true` を付ける。ツール未導入は `env` と記録される。
+
 ## 手順
 1. 事前確認: `git status -sb`。依存が未導入なら導入手順をCLAUDE.mdから確認(導入は仮想環境内で。グローバルを汚さない)。
 2. `vh.py detect` で実行内容を確認 → `vh.py run`(`--only NAME...` で部分実行)。軽い順(lint→型→テスト→ビルド)に実行し、失敗しても残りを続けて結果を揃える。
