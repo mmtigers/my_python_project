@@ -1,6 +1,11 @@
 requests>=2.34.2
 beautifulsoup4>=4.15.0
-yt-dlp>=2026.8.19
+# Issue #1038: yt-dlp は YouTube 等の仕様変更で抽出が壊れやすく、実機が約66日前の版
+# (2026.08.19)のまま放置されていた。下限指定(>=)だと「最新版も許容範囲内」なので Dependabot
+# が更新PRを起票せず、陳腐化に気づけなかった。exact pin にして Dependabot の週次PRで更新する
+# (minor/patch は dependabot-auto-merge が CI 成功後に自動マージ)。反映は start_all.sh の
+# 依存鮮度チェック(requirements のハッシュ変化 → pip install)が、サービス再起動時に行う。
+yt-dlp==2026.10.21
 # missav等、CloudflareのボットチャレンジがかかったCDN(surrit.com等)からm3u8を
 # 取得する際、yt-dlpのgenericエクストラクタでブラウザ偽装(impersonate)を行うために
 # 必要(未インストールだと"Impersonate target ... is not available"で明示的に失敗する)
