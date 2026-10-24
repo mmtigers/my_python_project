@@ -26,6 +26,8 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
       (マージ済みの修正が実機で動いていない状態の検知。Issue #783)
   13. 稼働中のサーバープロセスが、起動後に更新されたコードを読み込めていないか
       (`git pull` 後の再起動漏れの検知)
+  14. 実機の Python 版が `.python-version`(CI の版)とずれていないか
+      (CI が通らない版の挙動差を見逃さないための検知。Issue #1033)
 
 異常があれば notification_service 経由でDiscordのerrorチャンネルへ要約を通知する。
 自動復旧(systemctl restart等)は行わない(ランブックのガードレール参照)。
@@ -39,7 +41,7 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
 本スクリプトの実行完了ごとに外部デッドマンスイッチ(healthchecks.io等)へ
 ハートビートを送る(_ping_deadman_switch)。電源断・SDカード故障・ネットワーク断・
 systemdごと巻き込むハングでcron自体が動かなくなると、通知を出す主体そのものが
-止まるため上記チェック1〜12のDiscord通知では検知できない。外部サービス側で
+止まるため上記チェック1〜14のDiscord通知では検知できない。外部サービス側で
 ハートビートの途絶を検知させることでこの穴を塞ぐ(通知経路はDiscordに依存しない)。
 未設定なら従来どおり送信しない。
 """
@@ -148,6 +150,54 @@ GIT_FETCH_TIMEOUT_SEC: int = 20
 STALE_CODE_GRACE_SEC: int = 60
 # チェック13: 通知に載せる「起動後に更新されたファイル」の最大件数
 STALE_CODE_FILE_LIMIT: int = 3
+
+
+# === Python 版の不一致検知 (チェック14) ===
+# Issue #1033: 実機の .venv が Python 3.13 だったのに、.python-version と CI は 3.11 だった。
+# CI は 3.11 でしか通らないため、3.13 固有の挙動差(削除された非推奨API・依存wheelの差)を
+# 検知できず、ログを掘って初めて気づいた。run_task.sh は MY_HOME_SYSTEM/.venv の python で
+# 本スクリプトを起動するため、実行中の sys.version_info が実機サーバーの版と一致する。
+PYTHON_VERSION_FILE: str = os.path.join(REPO_ROOT, "MY_HOME_SYSTEM", ".python-version")
+
+
+def _read_expected_python_version() -> Optional[tuple[int, int]]:
+    """`.python-version` の先頭2要素(major, minor)を返す。無い・解析できない場合は None。"""
+    try:
+        with open(PYTHON_VERSION_FILE, encoding="utf-8") as f:
+            raw = f.read().strip()
+    except OSError:
+        return None
+    m = re.match(r"^(\d+)\.(\d+)", raw)
+    if not m:
+        logger.warning(f"⚠️ {PYTHON_VERSION_FILE} の内容を解析できません: {raw[:40]!r}")
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def check_python_version_drift(running: Optional[tuple[int, int]] = None) -> Optional[str]:
+    """実行中の Python の major.minor が `.python-version` と一致しているかを確認する。
+
+    **検知のみ**(チェック12・13と同じ。ランブックのガードレール)。どちらに揃えるか
+    (実機の .venv を作り直す / `.python-version`・CI・CLAUDE.md を実態に合わせる)は
+    運用判断なので、通知文に両方の選択肢を載せる。`.python-version` が無い・解析できない
+    場合は「判定できない」としてスキップする。patch 版の違いは見ない。
+
+    Args:
+        running: テスト用の上書き。省略時は実行中の `sys.version_info` を使う。
+    """
+    expected = _read_expected_python_version()
+    if expected is None:
+        return None
+    if running is None:
+        running = (sys.version_info.major, sys.version_info.minor)
+    if running == expected:
+        return None
+    return (
+        f"実機の Python が {running[0]}.{running[1]} で、.python-version/CI の "
+        f"{expected[0]}.{expected[1]} と一致しません(CIが通らない版の挙動差を検知できません):\n"
+        f"  → 実機の .venv を {expected[0]}.{expected[1]} で作り直す、または .python-version・"
+        f"test.yml・CLAUDE.md を {running[0]}.{running[1]} に揃える"
+    )
 
 
 def _read_marker() -> datetime.datetime:
@@ -1016,6 +1066,7 @@ def run_checks() -> int:
         ("orphaned_rows", check_orphaned_rows),
         ("repo_behind", check_repo_behind_upstream),
         ("stale_code", check_service_running_stale_code),
+        ("python_version", check_python_version_drift),
     ]
 
     anomalies: List[str] = []

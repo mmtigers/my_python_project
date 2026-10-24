@@ -834,7 +834,7 @@ class TestCheckRecordingStalled:
             "check_service_active", "check_disk_usage", "check_memory_usage",
             "check_nas_mount", "check_deploy_config_drift", "check_quest_master_drift",
             "check_api_responsive", "check_orphaned_rows", "check_repo_behind_upstream",
-            "check_service_running_stale_code",
+            "check_service_running_stale_code", "check_python_version_drift",
         ):
             monkeypatch.setattr(health_watch, name, lambda: None)
         monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)
@@ -960,7 +960,7 @@ class TestCheckRepoBehindUpstream:
             "check_service_active", "check_disk_usage", "check_memory_usage",
             "check_nas_mount", "check_deploy_config_drift", "check_quest_master_drift",
             "check_api_responsive", "check_recording_stalled", "check_orphaned_rows",
-            "check_service_running_stale_code",
+            "check_service_running_stale_code", "check_python_version_drift",
         ):
             monkeypatch.setattr(health_watch, name, lambda: None)
         monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)
@@ -1178,3 +1178,65 @@ class TestCheckServiceRunningStaleCode:
         health_watch.run_checks()
 
         assert keys_seen == ["stale_code"]
+
+
+class TestCheckPythonVersionDrift:
+    """チェック14 (Issue #1033): 実機の Python 版が .python-version(=CIの版)とずれていないか。
+
+    実機の .venv が 3.13 だったのに .python-version / CI は 3.11 で、CI が通らない版の
+    挙動差を見逃していた。"""
+
+    def _version_file(self, tmp_path, monkeypatch, text):
+        path = tmp_path / ".python-version"
+        if text is not None:
+            path.write_text(text, encoding="utf-8")
+        monkeypatch.setattr(health_watch, "PYTHON_VERSION_FILE", str(path))
+
+    def test_none_when_versions_match(self, tmp_path, monkeypatch):
+        self._version_file(tmp_path, monkeypatch, "3.11\n")
+        assert health_watch.check_python_version_drift(running=(3, 11)) is None
+
+    def test_patch_version_in_file_is_ignored(self, tmp_path, monkeypatch):
+        self._version_file(tmp_path, monkeypatch, "3.11.9\n")
+        assert health_watch.check_python_version_drift(running=(3, 11)) is None
+
+    def test_reports_mismatch_with_both_remedies(self, tmp_path, monkeypatch):
+        self._version_file(tmp_path, monkeypatch, "3.11\n")
+        msg = health_watch.check_python_version_drift(running=(3, 13))
+        assert msg is not None
+        assert "3.13" in msg and "3.11" in msg
+        # どちらに揃えるかは運用判断なので、両方の選択肢を案内する
+        assert "作り直す" in msg and "揃える" in msg
+
+    @pytest.mark.parametrize("text", [None, "", "not-a-version\n"])
+    def test_skipped_when_file_missing_or_unparseable(self, tmp_path, monkeypatch, text):
+        self._version_file(tmp_path, monkeypatch, text)
+        assert health_watch.check_python_version_drift(running=(3, 13)) is None
+
+    def test_defaults_to_the_running_interpreter(self, tmp_path, monkeypatch):
+        v = health_watch.sys.version_info
+        self._version_file(tmp_path, monkeypatch, f"{v.major}.{v.minor}\n")
+        assert health_watch.check_python_version_drift() is None
+
+    def test_repo_python_version_file_is_parseable(self):
+        """リポジトリの .python-version が実在し、本チェックが解析できる形であること。"""
+        assert os.path.isfile(health_watch.PYTHON_VERSION_FILE)
+        assert health_watch._read_expected_python_version() is not None
+
+    def test_registered_as_a_health_check(self, monkeypatch):
+        _stub_every_check(monkeypatch)
+        monkeypatch.setattr(health_watch, "check_python_version_drift", lambda: "版がずれています")
+        monkeypatch.setattr(
+            health_watch, "_read_marker",
+            lambda: datetime.datetime.fromisoformat("2026-10-24T09:00:00"),
+        )
+        monkeypatch.setattr(health_watch, "_write_marker", lambda dt: None)
+        keys_seen = []
+        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now: keys_seen.extend(keys) or True)
+        monkeypatch.setattr(health_watch, "_fire_investigate_hook", lambda anomalies, now: None)
+        monkeypatch.setattr(health_watch, "_ping_deadman_switch", lambda ok: None)
+        monkeypatch.setattr(health_watch, "send_push", lambda messages, target=None, channel=None: True)
+
+        health_watch.run_checks()
+
+        assert keys_seen == ["python_version"]
