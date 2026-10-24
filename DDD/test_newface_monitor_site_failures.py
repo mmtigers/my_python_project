@@ -570,6 +570,38 @@ class TestDisappearedSiteReturning200:
         assert result.failed is True
         assert dm.load_site_failures()[site.site_id]["count"] == 1
 
+    def test_check_site_logs_redirect_as_warning_below_threshold(
+        self, data_dir, dm, caplog, propagating_logger
+    ):
+        """#1029: 別ドメイン転送(閉鎖疑い)は閾値未満でもERRORにせずWARNINGで記録し、
+        health_watchの誤発報を防ぐ。連続失敗の計上は従来どおり行われること。"""
+        site = _make_site()
+        monitor = MagicMock()
+        monitor.fetch_current_casts.side_effect = module.SiteUnavailableError("redirected")
+
+        with caplog.at_level(logging.WARNING, logger="newface_monitor"):
+            result = module._check_site(monitor, _mock_notifier(), site, dm)
+
+        assert result.failed is True
+        assert dm.load_site_failures()[site.site_id]["count"] == 1
+        assert caplog.records
+        assert all(record.levelno < logging.ERROR for record in caplog.records)
+
+    def test_check_site_still_logs_network_error_as_error_below_threshold(
+        self, data_dir, dm, caplog, propagating_logger
+    ):
+        """#1029: 通常の通信障害(requests例外)は従来どおり閾値未満ではERROR。"""
+        import requests
+
+        site = _make_site()
+        monitor = MagicMock()
+        monitor.fetch_current_casts.side_effect = requests.ConnectionError("down")
+
+        with caplog.at_level(logging.WARNING, logger="newface_monitor"):
+            module._check_site(monitor, _mock_notifier(), site, dm)
+
+        assert any(record.levelno == logging.ERROR for record in caplog.records)
+
     def test_check_site_records_failure_on_empty_result_as_warning(
         self, data_dir, dm, caplog, propagating_logger
     ):

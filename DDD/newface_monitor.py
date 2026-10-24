@@ -2238,7 +2238,12 @@ def _check_site(
     try:
         current_casts = monitor.fetch_current_casts(site)
     except (requests.RequestException, SiteUnavailableError) as e:
-        pending = _handle_site_network_failure(site, e, data_manager)
+        # #1029: 別ドメインへの転送(SiteUnavailableError)は一時的な通信障害より強い
+        # 閉鎖・移転のシグナルなので、閾値到達前でもERRORにせずWARNINGで記録する
+        # (ERRORのままだと閾値までの約24時間、health_watchが毎時発報し続ける)。
+        # 連続失敗の計上と閉鎖疑いアラートの判定は従来どおり閾値で行う。
+        level = logging.WARNING if isinstance(e, SiteUnavailableError) else logging.ERROR
+        pending = _handle_site_network_failure(site, e, data_manager, log_level=level)
         return SiteCheckResult(failed=True, pending_alert_count=pending)
 
     if not current_casts:
