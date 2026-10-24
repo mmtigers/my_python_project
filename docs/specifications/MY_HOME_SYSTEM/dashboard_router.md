@@ -198,7 +198,7 @@
 
 
 * **引数/リクエスト**: **(新機能)** クエリ`device`(`device_id`、任意)で高砂・伊丹のセンサーログをその機器だけに絞る(`render_watch_page(selected_device=...)`に渡す。一覧に無い値は無視される。防犯ログは対象外)。クエリ`date`(`YYYY-MM-DD`、任意)。**(新機能)** 指定があれば`dashboard_page_service.parse_log_date`で解釈し、その日のログだけを表示する。この場合は共通キャッシュ(直近`MOBILE_SENSOR_ROW_LIMIT`件)ではなく`home_status_service.get_sensor_data_for_day`でDBから指定日の全件を取る。形式が不正な値は無視して通常表示になる。
-* 根拠: [関数定義] (行番号: 191 / 抜粋: "def dashboard_watch(")、[日付の解釈] (行番号: 205 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
+* 根拠: [関数定義] (行番号: 192 / 抜粋: "def dashboard_watch(")、[日付の解釈] (行番号: 206 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(見守りページ全体のHTML)
@@ -241,15 +241,18 @@
 
 * **役割**: **(新機能)** ⚡電気ページ。`power_analysis_service.build_power_report(days)`の結果を`power_page_service.render_power_page`で描く(月ごとの推移・日別の電気代・気温との関係・テレビの使い方)。分析は10分キャッシュされる。`async def`にしない(DB取得とpandasの計算が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`days`(30/60/90。それ以外の値・数値でない値は既定の30。`str | None`で受けて自前で変換するので422にならない)。日別・気温・テレビの対象期間を切り替える。
-* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 269)
+* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 293)
 
 ### `GET {DASHBOARD_BASE_PATH}/updates` (`dashboard_updates`)
 
 * **役割**: **(新機能)** アップデートページを返す。`release_history_service.get_release_history()`でダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を集め、`dashboard_page_service.render_updates_page`に渡す。あさノート・よるノートは外部から取得する(タイムアウト・キャッシュ付き。失敗しても残りのアプリは表示する)。`async def`にしない(外部取得が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`app`(`dashboard`/`quest`/`asa`/`yoru`、任意)で1アプリに絞る。未知の値は無視して全件。
-* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 284)
+* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 308)
 
 ### `GET {DASHBOARD_BASE_PATH}/sys` (`dashboard_sys`)
+
+* **(新機能)** `render_sys_page`に`log_files=log_download_service.list_log_files()`を渡し、ログのダウンロード欄を表示する。
+* 根拠: (行番号: 265 / 抜粋: "log_files=log_download_service.list_log_files(),")
 
 * **(新機能・起動履歴)** `system_info_service.get_boot_history()`の結果を`render_sys_page(boot_history=...)`に渡し、システムページに「サーバーの起動履歴」を出す。Gitの状態は含めない(ページ表示後にJSが`GET /api/system/git/status`から取得する)。
 
@@ -273,6 +276,16 @@
 * 根拠: [関数本体] (行番号: 152〜165)
 
 
+
+### `GET {DASHBOARD_BASE_PATH}/sys/logs/{name}` (`dashboard_download_log`)
+
+* **役割**: システムページの「ログのダウンロード」一覧にあるログを1ファイル、機密情報を伏せてダウンロードさせる(スマホに保存してClaude Codeへ渡し調査する用途)。`name`は`log_download_service.resolve_log_file`が列挙した一覧との完全一致でしか解決せず、一覧に無い名前(パス・`..`を含む)は404。本文は`read_log_for_download`のマスク済みテキストで、`Content-Disposition: attachment`(保存名は`download_filename`の`<name>.<YYYYmmdd-HHMM>.txt`)・`Cache-Control: no-store`・`text/plain; charset=utf-8`で返す。認証は設けず、既存のダッシュボードと同じネットワーク制御(LAN/Tailscale限定のFW、外部はCloudflare Access)に委ねる。
+* 根拠: [関数定義] (行番号: 271〜285 / 抜粋: "def dashboard_download_log(name: str) -> Response:")
+
+* **引数/リクエスト**: パスパラメータ`name: str`
+* **戻り値/レスポンス**: 200で添付ファイル(`Response`)、一覧に無い名前は404(`HTTPException`)
+* **副作用**: ログファイルの読み取りのみ
+* **エラーハンドリング**: 未知の名前は404。一覧の取得後にファイルが消えた場合など、読み取り中の`OSError`も404にする
 
 ### `GET {DASHBOARD_BASE_PATH}/static/{filename}` (`dashboard_static`)
 

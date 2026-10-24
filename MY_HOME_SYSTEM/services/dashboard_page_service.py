@@ -1804,6 +1804,26 @@ def _render_git_status_box() -> str:
 
 
 
+def _render_log_download_box(log_files: list[Any], *, sys_path: str) -> str:
+    """📄 ログのダウンロード。タップで1ファイルずつ保存できる(機密情報は伏せて返る)。"""
+    if not log_files:
+        items = '<p class="meta">ダウンロードできるログはありません。</p>'
+    else:
+        rows = "".join(
+            f'<li><a href="{html.escape(sys_path)}/logs/{html.escape(f.name)}" download>{html.escape(f.name)}</a>'
+            f'<span class="meta"> {f.size / 1024:.0f}KB・{f.mtime.strftime("%m/%d %H:%M")}</span></li>'
+            for f in log_files
+        )
+        items = f"<ul>{rows}</ul>"
+    return (
+        '<div class="info-box" id="log-download">'
+        "<h2>📄 ログのダウンロード</h2>"
+        '<p class="meta">タップで保存します。トークン等は伏せて返しますが、氏名やIPアドレスは伏せません。</p>'
+        f"{items}"
+        "</div>"
+    )
+
+
 def render_sys_page(
     df_sensor: pd.DataFrame,
     nas_data: pd.Series | None,
@@ -1815,6 +1835,7 @@ def render_sys_page(
     dashboard_path: str,
     nas_days: int = NAS_HISTORY_DEFAULT_DAYS,
     boot_history: list[dict[str, Any]] | None = None,
+    log_files: list[Any] | None = None,
 ) -> str:
     """🔧 システム: 全体サマリー・各機能の最終更新時刻・NASの容量推移・メンテナンス操作。
 
@@ -1849,6 +1870,7 @@ def render_sys_page(
         "<h2>🗄️ NASの容量推移</h2>"
         f"{_render_nas_history_chart(nas_history, days=nas_days, sys_path=dashboard_path.rstrip('/') + '/sys')}"
         "</div>"
+        f"{_render_log_download_box(log_files or [], sys_path=dashboard_path.rstrip('/') + '/sys')}"
         "</div>"
         "<h2>🛠️ メンテナンス</h2>"
         '<div class="maintenance-group">'

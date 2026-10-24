@@ -490,3 +490,6 @@ flowchart TD
 * [x] 不明事項を漏れなく列挙した （完了）
 
 * **（先にリモコンで消す機能で追加）** 「10. TVロック機能設定」に`TV_NATURE_REMO_LOCATION`（テレビがあるNature Remoの拠点。`itami`か`takasago`で、対応するアクセストークンを使う）・`TV_REMO_SIGNAL_ID`（電源の信号ID）・`TV_REMO_APPLIANCE_ID`（種類が「TV」の家電ID。信号IDが優先）・`TV_POWER_ON_THRESHOLD_WATTS`（テレビがついているとみなす消費電力、既定10W）・`TV_GRACEFUL_OFF_WAIT_SECONDS`（リモコンで消してから消費電力が下がるのを待つ最大秒数、既定45）を追加。Nature Remoの3項目のどれかが未設定なら、この機能は使わずプラグだけ切る。`.env.example`にも同じ項目を追記。
+
+* **（ログのダウンロードで追加）** 「20. ログのダウンロード設定」に`LOG_DOWNLOAD_MAX_MB`（`int`、環境変数`LOG_DOWNLOAD_MAX_MB`、既定10）を追加した。`services/log_download_service.py`が1ファイルあたりの返却サイズ上限（超過時は末尾側のみ返す）として参照する。
+  根拠: [定数定義] (行番号: 1053 / 抜粋: "LOG_DOWNLOAD_MAX_MB: int = _get_int_env(\"LOG_DOWNLOAD_MAX_MB\", 10)")
