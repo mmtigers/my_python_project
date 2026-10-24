@@ -68,7 +68,7 @@
 10 * * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/health_watch.py
 ```
 
-毎時10分にしているのは、毎時0分に走る既存ジョブ（newface_monitor等)や時報系の負荷と重ねないため。
+毎時10分にしているのは、毎時0分に走る既存ジョブ（tv_lock_monitor の定時スロット等)や時報系の負荷と重ねないため（newface_monitor も Issue #1035 で毎時7分にずらした）。
 
 ### 層3(a): 外部デッドマンスイッチ（healthchecks.io等のアカウント作成が必要。Issue #775）
 
