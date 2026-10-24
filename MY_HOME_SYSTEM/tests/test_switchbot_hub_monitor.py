@@ -194,3 +194,100 @@ class TestWiring:
         base = {"id": "x", "type": "Hub Mini", "location": "l", "name": "n"}
         assert config.DeviceConfig(**base).ip is None
         assert config.DeviceConfig(**base, ip="192.168.1.20").ip == "192.168.1.20"
+
+
+class TestUnmonitoredHubLogOnce:
+    """Issue #1037: ip 未設定の対象外ハブのINFOを、5分ごとの実行のたびに出さない
+    (home_system.log の INFO の約27%を占めていた)。本スクリプトは実行のたびに別プロセス
+    になるため、「出力済み」は状態ファイルで覚える。"""
+
+    @pytest.fixture
+    def env(self, tmp_path, monkeypatch):
+        import json
+
+        state_path = tmp_path / "state.json"
+        monkeypatch.setattr(hub, "_STATE_FILE", str(state_path))
+        monkeypatch.setattr(hub, "PING_RETRY_INTERVAL_SEC", 0)
+        monkeypatch.setattr(config, "LINE_PARENTS_GROUP_ID", "Cgroup")
+        monkeypatch.setattr(hub, "send_push", MagicMock(return_value=True))
+        monkeypatch.setattr(hub, "ping_host", AsyncMock(return_value={"status": "OK"}))
+        fake_logger = MagicMock()
+        monkeypatch.setattr(hub, "logger", fake_logger)
+
+        def set_devices(devices):
+            monkeypatch.setattr(config, "MONITOR_DEVICES", devices)
+
+        def state():
+            return json.loads(state_path.read_text(encoding="utf-8"))
+
+        return fake_logger, set_devices, state
+
+    @staticmethod
+    def _skip_logs(fake_logger):
+        return [c for c in fake_logger.info.call_args_list if "対象外" in str(c)]
+
+    async def test_unmonitored_hub_is_logged_only_on_first_run(self, env):
+        fake_logger, set_devices, _ = env
+        set_devices([
+            {"id": "HUB1", "type": "Hub Mini", "name": "ハブミニ E4", "ip": "192.168.1.20"},
+            {"id": "HUB2", "type": "Hub Mini", "name": "高砂のハブミニ"},
+        ])
+
+        for _ in range(5):
+            await hub.main()
+
+        assert len(self._skip_logs(fake_logger)) == 1
+        assert "高砂のハブミニ" in str(self._skip_logs(fake_logger)[0])
+        # 監視中のハブが1台でもあれば WARNING は出さない
+        fake_logger.warning.assert_not_called()
+
+    async def test_warns_once_when_no_hub_is_monitored_at_all(self, env):
+        fake_logger, set_devices, state = env
+        set_devices([
+            {"id": "HUB1", "type": "Hub Mini", "name": "ハブミニ E4"},
+            {"id": "HUB2", "type": "Hub Mini", "name": "高砂のハブミニ"},
+        ])
+
+        for _ in range(3):
+            await hub.main()
+
+        assert len(self._skip_logs(fake_logger)) == 2
+        warnings = [c for c in fake_logger.warning.call_args_list if "1台もありません" in str(c)]
+        assert len(warnings) == 1
+        # 次回の実行でも出さないよう、出力済みのIDが状態ファイルに残っている
+        assert state()[hub._UNMONITORED_KEY] == ["HUB1", "HUB2"]
+
+    async def test_newly_unmonitored_hub_is_logged_and_logged_state_follows_config(self, env):
+        fake_logger, set_devices, state = env
+        base = {"id": "HUB1", "type": "Hub Mini", "name": "ハブミニ E4", "ip": "192.168.1.20"}
+        set_devices([base, {"id": "HUB2", "type": "Hub Mini", "name": "高砂のハブミニ"}])
+        await hub.main()
+        assert len(self._skip_logs(fake_logger)) == 1
+
+        # 新しく ip 未設定のハブが増えたら、その分だけ出る
+        set_devices([base, {"id": "HUB2", "type": "Hub Mini", "name": "高砂のハブミニ"},
+                     {"id": "HUB3", "type": "Hub 2", "name": "新しいハブ"}])
+        await hub.main()
+        assert len(self._skip_logs(fake_logger)) == 2
+        assert "新しいハブ" in str(self._skip_logs(fake_logger)[-1])
+
+        # ip を設定して監視対象になったら、予約キーから外れ、ハブの状態は保たれる
+        set_devices([{**base}, {"id": "HUB2", "type": "Hub Mini", "name": "高砂のハブミニ",
+                                "ip": "192.168.1.21"},
+                     {"id": "HUB3", "type": "Hub 2", "name": "新しいハブ", "ip": "192.168.1.22"}])
+        await hub.main()
+        saved = state()
+        assert hub._UNMONITORED_KEY not in saved
+        assert {"HUB1", "HUB2", "HUB3"} <= set(saved)
+
+    async def test_unmonitored_key_does_not_break_hub_state_cleanup(self, env):
+        _, set_devices, state = env
+        set_devices([
+            {"id": "HUB1", "type": "Hub Mini", "name": "ハブミニ E4", "ip": "192.168.1.20"},
+            {"id": "HUB2", "type": "Hub Mini", "name": "高砂のハブミニ"},
+        ])
+        await hub.main()
+        await hub.main()
+        saved = state()
+        assert saved[hub._UNMONITORED_KEY] == ["HUB2"]
+        assert saved["HUB1"]["failures"] == 0

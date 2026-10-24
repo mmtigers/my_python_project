@@ -47,7 +47,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| 実機の`devices.json`の`ip`の値 | gitignore対象で、リポジトリからは見えない。`devices.json.example`にはプレースホルダのみ。 | [対象抽出] (行番号: 107-128 / 抜粋: "def select_hubs(") |
+| 実機の`devices.json`の`ip`の値 | gitignore対象で、リポジトリからは見えない。`devices.json.example`にはプレースホルダのみ。 | [対象抽出] (行番号: 111-130 / 抜粋: "def select_hubs(") |
 | ハブがWi-FiのAP省電力等でICMPに応答しない可能性 | 機種・環境依存で、コードからは判断できない。誤検知は3回リトライ+3回連続失敗で緩和している。 | [定数宣言] (行番号: 46 / 抜粋: "PING_ATTEMPTS: int = 3") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -62,32 +62,37 @@
 * **役割**: 前回状態と今回のping結果から、新しい状態と通知イベント(`down`/`reminder`/`recovered`/`None`)を返す純関数。
 * **状態**: `failures`(連続失敗回数)・`alerting`(異常通知済みか)・`last_notified`(最終通知UNIX時刻)。
 * **副作用**: なし。前回状態が欠落・空でも安全に初期値で扱う。
-* 根拠: [関数定義] (行番号: 57-86 / 抜粋: "def evaluate_state(")
+* 根拠: [関数定義] (行番号: 61-90 / 抜粋: "def evaluate_state(")
 
 ### `build_message`
 
 * **役割**: イベントごとの家族向け文面(`server_watchdog`の文体)を組み立てる。拠点名とハブ名を含める。
-* 根拠: [関数定義] (行番号: 89-104 / 抜粋: "def build_message(")
+* 根拠: [関数定義] (行番号: 93-108 / 抜粋: "def build_message(")
 
 ### `select_hubs`
 
-* **役割**: 監視対象のハブを抽出する。`type`に`"Hub"`を含み、`ip`が設定されたもののみ。`ip`が無ければinfoログを出して対象外、IPアドレスとして不正なら`error`ログを出してスキップする(`ping`コマンドのオプション注入を防ぐ)。
-* 根拠: [関数定義] (行番号: 107-128 / 抜粋: "def select_hubs(")
+* **役割**: 監視対象のハブを抽出する。`type`に`"Hub"`を含み、`ip`が設定されたもののみ。`ip`が無ければ対象外(**Issue #1037で変更**: ログは出さない。以前は5分ごとの実行のたびにinfoを出し、`home_system.log`のINFOの約27%を占めていた。ログは`main`が`_log_unmonitored_once`で出す)、IPアドレスとして不正なら`error`ログを出してスキップする(`ping`コマンドのオプション注入を防ぐ)。
+* 根拠: [関数定義] (行番号: 111-130 / 抜粋: "def select_hubs(")
+
+### `find_unmonitored_hubs` / `_log_unmonitored_once`（Issue #1037で追加）
+
+* **役割**: `find_unmonitored_hubs`は`type`に`"Hub"`を含むが`ip`が未設定の（死活監視の対象外になっている）ハブを返す。`_log_unmonitored_once`は、そのうち**新しく対象外になったものだけ**をinfoログに出す。本スクリプトは5分ごとに新しいプロセスとして起動されるためプロセス内の変数では出力済みを覚えられず、出力済みのハブIDを状態ファイルの予約キー`_UNMONITORED_KEY`(`"_unmonitored"`)に保存する。監視中のハブが1台も無いまま新たに対象外が見つかったときは、ハブが止まっても検知されないことに気づけるようwarningを1回だけ出す。`ip`を設定して監視対象になったハブはこのキーから外れる（後で再び`ip`を外せば改めてログに出る）。状態を更新したときTrueを返し、呼び出し側(`main`)が保存する。
+* 根拠: [関数定義] (参照: _log_unmonitored_once / 抜粋: "def _log_unmonitored_once(")
 
 ### `is_reachable`
 
 * **役割**: 最大`PING_ATTEMPTS`回、`PING_RETRY_INTERVAL_SEC`間隔でpingし、1回でも応答があればTrue。
-* 根拠: [関数定義] (行番号: 131-139 / 抜粋: "async def is_reachable(")
+* 根拠: [関数定義] (行番号: 181-189 / 抜粋: "async def is_reachable(")
 
 ### `_notify`
 
 * **役割**: `config.LINE_PARENTS_GROUP_ID`宛にLINEで送る。未設定ならwarningを出してFalseを返す。
-* 根拠: [関数定義] (行番号: 142-152 / 抜粋: "def _notify(")
+* 根拠: [関数定義] (行番号: 192-202 / 抜粋: "def _notify(")
 
 ### `main`
 
-* **役割**: 対象ハブを複数並列にpingし、`evaluate_state`で判定、イベントがあれば通知して状態を保存する。**通知に失敗した場合は「通知済み」にせず**(`alerting`/`last_notified`を前回値に戻す)、次回の実行で再試行する。監視対象から外れたハブの状態は保存時に削除する。
-* 根拠: [関数定義] (行番号: 155-191 / 抜粋: "async def main(")
+* **役割**: 対象ハブを複数並列にpingし、`evaluate_state`で判定、イベントがあれば通知して状態を保存する。**通知に失敗した場合は「通知済み」にせず**(`alerting`/`last_notified`を前回値に戻す)、次回の実行で再試行する。監視対象から外れたハブの状態は保存時に削除する（予約キー`_unmonitored`は残す）。**（Issue #1037で変更）** 対象ハブが0件でも状態ファイルを読み、`_log_unmonitored_once`で対象外ハブのログ出力済みIDを更新する（変化があったときだけ保存する）。
+* 根拠: [関数定義] (行番号: 205-249 / 抜粋: "async def main(")
 
 ## 5. 処理フロー図
 
