@@ -49,6 +49,10 @@ FAILURE_THRESHOLD: int = 3          # 連続失敗がこの回数に達したら
 REMINDER_INTERVAL_SEC: int = 6 * 3600   # server_watchdog のリマインダーと同じ間隔
 _STATE_FILE: str = os.path.join(config.BASE_DIR, "switchbot_hub_monitor_state.json")
 
+# 状態ファイル内で「ip 未設定の対象外ハブのうち、既にログへ出したもの」のIDを持つ予約キー
+# (Issue #1037)。ハブ別の状態は hub id をキーにするため、衝突しないよう先頭を `_` にする。
+_UNMONITORED_KEY: str = "_unmonitored"
+
 EVENT_DOWN = "down"
 EVENT_REMINDER = "reminder"
 EVENT_RECOVERED = "recovered"
@@ -113,10 +117,8 @@ def select_hubs(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         ip = device.get("ip")
         if not ip:
-            logger.info(
-                f"ハブ「{device.get('name')}」は ip 未設定のため死活監視の対象外です"
-                "(devices.json に ip を追加すると監視されます)"
-            )
+            # ip 未設定のハブは対象外。ログは main の _log_unmonitored_once が出す
+            # (5分ごとに別プロセスで起動するため、ここで毎回出すと同じ行が延々と並ぶ。#1037)
             continue
         try:
             # ping の引数にそのまま渡すため、IPアドレス以外(オプション文字列等)は弾く
@@ -126,6 +128,54 @@ def select_hubs(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         hubs.append(device)
     return hubs
+
+
+def find_unmonitored_hubs(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """type に "Hub" を含むが ip が未設定で、死活監視の対象外になっているハブを返す。"""
+    return [
+        d for d in devices
+        if HUB_TYPE_KEYWORD in str(d.get("type") or "") and not d.get("ip")
+    ]
+
+
+def _log_unmonitored_once(
+    unmonitored: list[dict[str, Any]], monitored_count: int, states: dict[str, Any]
+) -> bool:
+    """ip 未設定の対象外ハブを、新しく対象外になったものだけログに出す(Issue #1037)。
+
+    本スクリプトは5分ごとに新しいプロセスとして起動されるため、プロセス内の変数では
+    「出力済み」を覚えられない。以前は毎回INFOを出して home_system.log の約27%を占めていた。
+    出力済みのIDは状態ファイル(`states[_UNMONITORED_KEY]`)に残し、新規分だけ出す。
+    監視中のハブが1台も無いまま新たに対象外が見つかったときは、止まっても検知されない
+    ことに気づけるよう WARNING を1回だけ出す。
+
+    Returns:
+        状態(`states[_UNMONITORED_KEY]`)を更新した場合 True(呼び出し側が保存する)。
+    """
+    prev = states.get(_UNMONITORED_KEY)
+    prev_ids = [str(i) for i in prev] if isinstance(prev, list) else []
+    current = {str(d.get("id")): d for d in unmonitored}
+
+    new_ids = sorted(set(current) - set(prev_ids))
+    for hub_id in new_ids:
+        logger.info(
+            f"ハブ「{current[hub_id].get('name')}」は ip 未設定のため死活監視の対象外です"
+            "(devices.json に ip を追加すると監視されます)"
+        )
+    if new_ids and monitored_count == 0:
+        logger.warning(
+            "死活監視中のハブが1台もありません(type=Hub のすべてが ip 未設定)。"
+            "ハブが止まっても検知されません"
+        )
+
+    current_ids = sorted(current)
+    if current_ids == sorted(prev_ids):
+        return False
+    if current_ids:
+        states[_UNMONITORED_KEY] = current_ids
+    else:
+        states.pop(_UNMONITORED_KEY, None)
+    return True
 
 
 async def is_reachable(ip: str) -> bool:
@@ -153,14 +203,22 @@ def _notify(event: str, name: str, location: str) -> bool:
 
 
 async def main() -> None:
-    hubs = select_hubs(getattr(config, "MONITOR_DEVICES", []))
-    if not hubs:
-        logger.debug("死活監視の対象ハブがありません(type=Hub かつ ip 設定済みのもの)")
-        return
+    devices = getattr(config, "MONITOR_DEVICES", [])
+    hubs = select_hubs(devices)
 
     states = state_file.read_json(_STATE_FILE, default={})
     if not isinstance(states, dict):
         states = {}
+
+    unmonitored_changed = _log_unmonitored_once(
+        find_unmonitored_hubs(devices), len(hubs), states
+    )
+    if not hubs:
+        logger.debug("死活監視の対象ハブがありません(type=Hub かつ ip 設定済みのもの)")
+        if unmonitored_changed:
+            # 出力済みのIDを覚えておかないと、次回また同じログを出してしまう
+            state_file.write_json_atomic(_STATE_FILE, states)
+        return
 
     # ハブごとの ping は互いに独立なので並列に行う(全滅待ちの間に他のハブを待たせない)
     results = await asyncio.gather(*(is_reachable(str(h["ip"])) for h in hubs))
@@ -186,7 +244,7 @@ async def main() -> None:
         states[did] = new_state
 
     # 監視対象から外れたハブの状態は残さない
-    active_ids = {str(h["id"]) for h in hubs}
+    active_ids = {str(h["id"]) for h in hubs} | {_UNMONITORED_KEY}
     states = {k: v for k, v in states.items() if k in active_ids}
     state_file.write_json_atomic(_STATE_FILE, states)
 
