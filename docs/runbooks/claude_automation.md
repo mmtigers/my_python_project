@@ -32,6 +32,7 @@ Claude Code 内では「リポジトリを調査して」「Issue #N を対応�
 
 ## 復旧・制約
 
+- Go / Rust など自動検出の対象外の言語は、`verify.json` を手書きする(例は `verify-handoff/SKILL.md`)。2026-10-24 に、使い捨てリポジトリで `go vet` / `go test`(go 1.24)と `cargo clippy` / `cargo test` の例が `vh.py run` で合格・テスト失敗時に終了コード1になることを確認した。自動検出(`go.mod` / `Cargo.toml`)は、必要なリポジトリへ横展開する時点で追加する(Issue #1019)。
 - Skillが無い → `deploy/claude-skills/install.sh`。壊れた `verify.json` はエラーで即停止する(黙って推定に切り替えない)。
 - `frontend-install` は `node_modules` が無いときだけ `npm ci` を実行する(ネットワークが必要)。
 - CIにあって `verify.json` に含めていない項目と、その理由は次の「`verify.json` の方針」を参照。
