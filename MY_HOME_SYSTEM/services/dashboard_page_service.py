@@ -1804,22 +1804,39 @@ def _render_git_status_box() -> str:
 
 
 
-def _render_log_download_box(log_files: list[Any], *, sys_path: str) -> str:
-    """📄 ログのダウンロード。タップで1ファイルずつ保存できる(機密情報は伏せて返る)。"""
-    if not log_files:
-        items = '<p class="meta">ダウンロードできるログはありません。</p>'
+def _render_log_download_box(log_groups: list[Any], *, sys_path: str) -> str:
+    """📄 ログのダウンロード。チェックで選んだログをまとめて1つのテキストとして保存できる。
+
+    `x.log` と、logrotateで退避された `x.log.1` は1つのチェックボックスにまとめる(古い順に連結される)。
+    機密情報は伏せて返る。
+    """
+    if not log_groups:
+        body = '<p class="meta">ダウンロードできるログはありません。</p>'
     else:
-        rows = "".join(
-            f'<li><a href="{html.escape(sys_path)}/logs/{html.escape(f.name)}" download>{html.escape(f.name)}</a>'
-            f'<span class="meta"> {f.size / 1024:.0f}KB・{f.mtime.strftime("%m/%d %H:%M")}</span></li>'
-            for f in log_files
+        rows = []
+        for g in log_groups:
+            detail = " / ".join(
+                f'{"1つ前" if f.name.endswith(".log.1") else "最新"} {f.size / 1024:.0f}KB・{f.mtime.strftime("%m/%d %H:%M")}'
+                for f in g.files
+            )
+            rows.append(
+                '<li><label class="log-row">'
+                f'<input type="checkbox" name="group" value="{html.escape(g.key)}">'
+                f'<span>{html.escape(g.key)}<span class="meta"> {html.escape(detail)}</span></span>'
+                "</label></li>"
+            )
+        body = (
+            f'<form method="get" action="{html.escape(sys_path)}/logs">'
+            f'<ul class="log-list">{"".join(rows)}</ul>'
+            '<button type="submit" class="primary log-submit">選択したログをダウンロード</button>'
+            "</form>"
         )
-        items = f"<ul>{rows}</ul>"
     return (
         '<div class="info-box" id="log-download">'
         "<h2>📄 ログのダウンロード</h2>"
-        '<p class="meta">タップで保存します。トークン等は伏せて返しますが、氏名やIPアドレスは伏せません。</p>'
-        f"{items}"
+        '<p class="meta">チェックしたログを1つのテキストにまとめて保存します。トークン等は伏せて返しますが、'
+        "氏名やIPアドレスは伏せません。</p>"
+        f"{body}"
         "</div>"
     )
 
@@ -1835,7 +1852,7 @@ def render_sys_page(
     dashboard_path: str,
     nas_days: int = NAS_HISTORY_DEFAULT_DAYS,
     boot_history: list[dict[str, Any]] | None = None,
-    log_files: list[Any] | None = None,
+    log_groups: list[Any] | None = None,
 ) -> str:
     """🔧 システム: 全体サマリー・各機能の最終更新時刻・NASの容量推移・メンテナンス操作。
 
@@ -1870,7 +1887,7 @@ def render_sys_page(
         "<h2>🗄️ NASの容量推移</h2>"
         f"{_render_nas_history_chart(nas_history, days=nas_days, sys_path=dashboard_path.rstrip('/') + '/sys')}"
         "</div>"
-        f"{_render_log_download_box(log_files or [], sys_path=dashboard_path.rstrip('/') + '/sys')}"
+        f"{_render_log_download_box(log_groups or [], sys_path=dashboard_path.rstrip('/') + '/sys')}"
         "</div>"
         "<h2>🛠️ メンテナンス</h2>"
         '<div class="maintenance-group">'

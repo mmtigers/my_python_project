@@ -363,6 +363,13 @@
         min-height: 44px; border-radius: var(--radius-sm); border: none; font-weight: bold;
         padding: 0 18px; margin-top: 8px; cursor: pointer; font-size: 0.9rem;
     }
+    .log-list { list-style: none; padding: 0; margin: 8px 0; }
+    .log-row { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
+    .log-row input[type="checkbox"] { width: 22px; height: 22px; flex: none; }
+    .log-submit {
+        min-height: 44px; border-radius: var(--radius-sm); border: none; font-weight: bold;
+        padding: 0 18px; cursor: pointer; font-size: 0.9rem;
+    }
     button.danger { background: var(--bad); color: #fff; }
     button.danger:disabled { background: var(--surface-2); color: var(--faint); cursor: not-allowed; }
     button.primary { background: var(--accent); color: var(--on-accent); }

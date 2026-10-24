@@ -10,7 +10,10 @@
   DDDの `newface_monitor.log` だけ。リクエストの名前は、ここで列挙した一覧との**完全一致**で
   しか解決しない(パスは受け取らない。`..` や `/` を含む名前は一覧に存在しないので必ず拒否される)。
 - シンボリックリンクと通常ファイル以外は対象にしない。
-- 返却サイズは `config.LOG_DOWNLOAD_MAX_MB` が上限。超えたら末尾側だけを返し、先頭に注記する。
+- 返却サイズは `config.LOG_DOWNLOAD_MAX_MB`(1ファイル)と `config.LOG_DOWNLOAD_MAX_TOTAL_MB`(複数選択の合計)が
+  上限。1ファイルが超えたら末尾側だけを返し先頭に注記する。合計が超える選択は呼び出し側が拒否する。
+- logrotateで退避された `x.log.1` は本体 `x.log` と同じグループ(`LogGroup`)にまとめ、複数選択では
+  古い順(`x.log.1` → `x.log`)に1つのテキストへ連結する。
 - 返却前に既知の形式の機密情報(Webhook URL・token/secret/password等の値・Bearerトークン・
   URL埋め込みの認証情報)をマスクする。**既知の形式だけ**なので、氏名・IPアドレス等は伏せない。
 """
@@ -34,10 +37,11 @@ _LOG_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+\.log(\.1)?$")
 _MASK = "<redacted>"
 # `token=xxx` / `"password": "xxx"` / `Authorization: xxx` のように、キー名の直後の値を伏せる。
 # `LINE_CHANNEL_ACCESS_TOKEN=xxx` のように `_` 区切りの接頭辞が付くキー名も対象(`\b` は `_` を単語文字と
-# みなして成立しないため、直前が英数字でないことだけを条件にする)。
+# みなして成立しないため、直前が英数字・`_`・`-` でないことだけを条件にする)。開始位置を単語の先頭に
+# 限るのは、長い英数字列(base64等)の途中から毎回マッチを試して処理時間が二乗になるのを避けるため。
 _KEYED_SECRET_RE = re.compile(
     r"""(?ix)
-    (?P<key>(?<![A-Za-z0-9])
+    (?P<key>(?<![A-Za-z0-9_-])
             (?:[A-Za-z0-9_-]*(?:token|secret|password|passwd|api[_-]?key|apikey|authorization|signature)|sign)
             ["']?\s*[=:]\s*["']?)
     (?P<val>(?:Bearer\s+)?[^\s"'&,;}\]]+)
@@ -45,7 +49,7 @@ _KEYED_SECRET_RE = re.compile(
 )
 _BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}")
 # scheme://user:pass@host の user:pass 部分(RTSP URL等)
-_URL_CREDENTIALS_RE = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@")
+_URL_CREDENTIALS_RE = re.compile(r"(?<![A-Za-z0-9+.-])(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@")
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,17 @@ def redact_secrets(text: str) -> str:
     text = _KEYED_SECRET_RE.sub(lambda m: f"{m.group('key')}{_MASK}", text)
     text = _BEARER_RE.sub(f"Bearer {_MASK}", text)
     return text
+
+
+@dataclass(frozen=True)
+class LogGroup:
+    """同じログのローテーション分(`x.log` と `x.log.1`)。`files` は古い順。"""
+    key: str
+    files: tuple[LogFile, ...]
+
+
+def _group_key(name: str) -> str:
+    return name[:-2] if name.endswith(".log.1") else name
 
 
 def _ddd_log_dir() -> str:
@@ -108,14 +123,6 @@ def list_log_files() -> list[LogFile]:
     return files
 
 
-def resolve_log_file(name: str) -> LogFile | None:
-    """公開名から一覧内のファイルを返す。一覧に無い名前(パス文字列を含む)は None。"""
-    for f in list_log_files():
-        if f.name == name:
-            return f
-    return None
-
-
 def read_log_for_download(log_file: LogFile) -> tuple[str, bool]:
     """(マスク済みの本文, 末尾だけに切り詰めたか) を返す。"""
     max_bytes = max(config.LOG_DOWNLOAD_MAX_MB, 1) * 1024 * 1024
@@ -139,6 +146,61 @@ def read_log_for_download(log_file: LogFile) -> tuple[str, bool]:
     return text, truncated
 
 
-def download_filename(log_file: LogFile, now: datetime) -> str:
+def list_log_groups() -> list[LogGroup]:
+    """一覧をローテーション分ごとにまとめる(グループは更新が新しい順、グループ内は古い順)。"""
+    grouped: dict[str, list[LogFile]] = {}
+    for f in list_log_files():
+        grouped.setdefault(_group_key(f.name), []).append(f)
+    return [
+        LogGroup(key=key, files=tuple(sorted(files, key=lambda f: f.name.endswith(".log.1"), reverse=True)))
+        for key, files in grouped.items()
+    ]
+
+
+def resolve_log_groups(keys: list[str]) -> list[LogGroup] | None:
+    """グループ名の列を一覧内のグループへ解決する(重複は除く)。1つでも一覧に無ければ None。"""
+    available = {g.key: g for g in list_log_groups()}
+    resolved: list[LogGroup] = []
+    for key in dict.fromkeys(keys):
+        group = available.get(key)
+        if group is None:
+            return None
+        resolved.append(group)
+    return resolved
+
+
+def estimated_download_bytes(groups: list[LogGroup]) -> int:
+    """返却サイズの見積もり(1ファイルあたりの上限を考慮した合計バイト数)。"""
+    per_file = max(config.LOG_DOWNLOAD_MAX_MB, 1) * 1024 * 1024
+    return sum(min(f.size, per_file) for g in groups for f in g.files)
+
+
+def max_total_bytes() -> int:
+    return max(config.LOG_DOWNLOAD_MAX_TOTAL_MB, 1) * 1024 * 1024
+
+
+def read_groups_for_download(groups: list[LogGroup]) -> str:
+    """選択したグループのマスク済み本文を返す。
+
+    ファイルが1つだけなら本文そのまま、複数なら `===== 名前 =====` の見出しを付けて連結する。
+    """
+    files = [f for g in groups for f in g.files]
+    if len(files) == 1:
+        return read_log_for_download(files[0])[0]
+    parts: list[str] = []
+    for f in files:
+        body, _ = read_log_for_download(f)
+        if body and not body.endswith("\n"):
+            body += "\n"
+        parts.append(
+            f"===== {f.name} ({f.size} bytes, 更新 {f.mtime.strftime('%Y-%m-%d %H:%M:%S')}) =====\n{body}"
+        )
+    return "\n".join(parts)
+
+
+def download_filename(groups: list[LogGroup], now: datetime) -> str:
     """スマホで開きやすいよう末尾を .txt にし、取得日時を付けた保存名。"""
-    return f"{log_file.name}.{now.strftime('%Y%m%d-%H%M')}.txt"
+    stamp = now.strftime("%Y%m%d-%H%M")
+    if len(groups) == 1:
+        return f"{groups[0].key}.{stamp}.txt"
+    return f"logs_{len(groups)}items.{stamp}.txt"

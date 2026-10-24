@@ -713,15 +713,15 @@
 
 ### `render_sys_page`
 
-* **(新機能)** 引数`log_files`(`list[Any] | None`、`services/log_download_service.LogFile`の列)を追加し、NASの容量推移の次に「📄 ログのダウンロード」の枠(`_render_log_download_box`、`id="log-download"`)を置く。`log_files`が空・省略のときは「ダウンロードできるログはありません」と表示する。各行は`{dashboard_path}/sys/logs/{name}`へのリンク(`download`属性付き)と、サイズ(KB)・更新時刻(`%m/%d %H:%M`)を出す。名前はHTMLエスケープする。注意書きとして、トークン等は伏せるが氏名やIPアドレスは伏せないことを画面にも明記する。
-* 根拠: [関数定義] (行番号: 1807〜1827 / 抜粋: "def _render_log_download_box(log_files: list[Any], *, sys_path: str) -> str:")、[呼び出し] (行番号: 1873 / 抜粋: "f\"{_render_log_download_box(log_files or [], sys_path=dashboard_path.rstrip('/') + '/sys')}\"")
+* **(新機能)** 引数`log_groups`(`list[Any] | None`、`services/log_download_service.LogGroup`の列)を追加し、NASの容量推移の次に「📄 ログのダウンロード」の枠(`_render_log_download_box`、`id="log-download"`)を置く。`log_groups`が空・省略のときは「ダウンロードできるログはありません」と表示する。それ以外は`GET {dashboard_path}/sys/logs`へ送るフォーム(`method="get"`)で、グループ(`x.log`と退避分`x.log.1`を1つにまとめたもの)ごとに`name="group"`のチェックボックスを1つ置き、各行にファイルごとのサイズ(KB)・更新時刻(最新/1つ前)を出す。名前はHTMLエスケープする。注意書きとして、トークン等は伏せるが氏名やIPアドレスは伏せないことを画面にも明記する。チェックボックスと送信ボタンの高さは44px以上(`dashboard.css`の`.log-row`/`.log-submit`)。
+* 根拠: [関数定義] (行番号: 1807〜1827 / 抜粋: "def _render_log_download_box(log_groups: list[Any], *, sys_path: str) -> str:")、[呼び出し] (行番号: 1890 / 抜粋: "f\"{_render_log_download_box(log_groups or [], sys_path=dashboard_path.rstrip('/') + '/sys')}\"")
 
 * **(UI改善)** 情報の箱の並びを「いまの状態 → 履歴 → 操作」に変えた。`.box-grid`の中は、Gitの状態→起動履歴→各機能の最終更新→NASの容量推移の順で、その下にメンテナンス操作が続く。ボタン・チェックボックスのid、呼び出すAPIは変更していない。`_page_shell`には`dashboard_path`と`current="sys"`を渡し、フッターを付ける。
 
 * **(新機能)** 引数`boot_history`(`list[dict] | None`)を追加し、NAS容量グラフとメンテナンス操作の間に、起動履歴とGitの状態の枠を置く。`_NAV_CARDS`にはホームのナビカード「📜アップデート」(`/updates`)も追加した。
 
 * **役割**: 🔧システムページ全体を組み立てる。全体サマリー(`_render_overall_summary`)・各機能の最終更新一覧(`_render_freshness_rows`)・NASの容量推移(`_render_nas_history_chart`)・保存容量の使用率(`disk`があれば)・メンテナンス操作(サービス再起動の確認チェックボックス付きボタン、今すぐバックアップボタン)を並べる。**(不具合修正)** `nas_history`引数を追加し、`id="nas-history"`の`.info-box`セクションとしてNASの容量推移グラフを表示するようにした(「🗄️ NAS」カードの`anchor`のタップ先)。あわせて「各機能の最終更新」・NAS推移の各セクションを`.info-box`で視覚的にグループ化し、システムページを見やすくした。**(UI改善)** 情報の箱は`.box-grid`で包み、900px以上では2列に並べる。メンテナンスは「📦 バックアップ」(安全な日常操作)を先頭に、再起動を伴う2操作(最新に更新して再起動・システム再起動)を共通の注意文の下に`.is-danger`の箱として並べ、各箱に見出しを付けた。確認チェックは44px以上の`label.confirm-row`にした。ボタン・チェックボックスのid、呼び出すAPIは変更していない。**(UI改善)** バックアップ欄に「最新のバックアップ: 日時(サイズ)」(`id="backupLatest"`)を追加し、実行中のボタン無効化+スピナー表示・完了/失敗のトースト(`.dashboard-toast`)を出す。最新時刻はNAS列挙が必要なためページ描画には含めず、JSが`GET /api/system/backup/status`で非同期に取得する。
-* 根拠: [関数定義] (行番号: 1827〜1916 / 抜粋: "def render_sys_page(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    nas_history: pd.DataFrame,\n    memory: dict[str, float] | None,\n    disk: dict[str, float] | None,\n    now: datetime,\n    *,\n    dashboard_path: str,\n) -> str:")
+* 根拠: [関数定義] (行番号: 1844〜1933 / 抜粋: "def render_sys_page(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    nas_history: pd.DataFrame,\n    memory: dict[str, float] | None,\n    disk: dict[str, float] | None,\n    now: datetime,\n    *,\n    dashboard_path: str,\n) -> str:")
 
 
 * **引数/リクエスト**: `df_sensor: pd.DataFrame`, `nas_data: pd.Series | None`, `nas_history: pd.DataFrame`, `memory: dict[str, float] | None`, `disk: dict[str, float] | None`, `now: datetime`、キーワード専用で `dashboard_path: str`

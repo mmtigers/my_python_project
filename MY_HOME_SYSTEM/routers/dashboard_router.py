@@ -22,7 +22,7 @@
 import json
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 import config
@@ -262,26 +262,34 @@ def dashboard_sys(nas_days: str | None = None) -> HTMLResponse:
             dashboard_path=f"{_BASE_PATH}/",
             nas_days=nas_days,
             boot_history=system_info_service.get_boot_history(),
-            log_files=log_download_service.list_log_files(),
+            log_groups=log_download_service.list_log_groups(),
         )
     )
 
 
-@router.get(f"{_BASE_PATH}/sys/logs/{{name}}", include_in_schema=False)
-def dashboard_download_log(name: str) -> Response:
-    """システムページの一覧にあるログを1ファイル、機密情報を伏せてダウンロードさせる。
+@router.get(f"{_BASE_PATH}/sys/logs", include_in_schema=False)
+def dashboard_download_logs(group: list[str] = Query(default=[])) -> Response:
+    """システムページで選んだログ(複数可)を、機密情報を伏せて1つのテキストにしてダウンロードさせる。
 
-    名前は一覧との完全一致でしか解決しない(パス・`..` は一覧に無いので404)。
+    `group` は一覧のチェックボックスの値(ローテーション分をまとめた名前)で、一覧との完全一致でしか
+    解決しない(パス・`..` は一覧に無いので404)。未選択は400、合計サイズが上限を超える選択は413。
     """
-    log_file = log_download_service.resolve_log_file(name)
-    if log_file is None:
+    if not group:
+        raise HTTPException(status_code=400, detail="ダウンロードするログを選択してください")
+    groups = log_download_service.resolve_log_groups(group)
+    if groups is None:
         raise HTTPException(status_code=404, detail="log file not found")
+    if log_download_service.estimated_download_bytes(groups) > log_download_service.max_total_bytes():
+        raise HTTPException(
+            status_code=413,
+            detail=f"選択したログが大きすぎます(合計の上限 {config.LOG_DOWNLOAD_MAX_TOTAL_MB}MB)。選択を減らしてください",
+        )
     try:
-        text, _ = log_download_service.read_log_for_download(log_file)
+        text = log_download_service.read_groups_for_download(groups)
     except OSError:
         # 一覧の取得後にlogrotate等でファイルが消えた場合
         raise HTTPException(status_code=404, detail="log file not found")
-    filename = log_download_service.download_filename(log_file, home_status_service.get_now_jst())
+    filename = log_download_service.download_filename(groups, home_status_service.get_now_jst())
     return Response(
         content=text,
         media_type="text/plain; charset=utf-8",
