@@ -6,6 +6,12 @@
                                         検証を順に実行し、結果をJSON+要約で記録
   vh.py handoff [--root DIR] [--results FILE] [--unresolved TXT ...] [--next TXT ...] [--out FILE]
                                         git状態+直近の検証結果から引き継ぎMarkdownを生成
+  vh.py note    KIND [--text TXT] [--root DIR]
+                                        手動介入(question=質問 / approval=承認待ち / redo=やり直し)を履歴へ1件記録
+  vh.py history [--root DIR] [--by day|week|all] [--since-days N] [--json]
+                                        検証と手動介入の履歴(.claude/handoff/history.jsonl)を期間ごとに集計
+
+`run` は実行のたびに履歴(追記専用の JSON Lines。git管理外)へ1行追記する。履歴の書き込みに失敗しても検証は止めない。
 
 プロジェクト固有の定義は <root>/.claude/verify.json が優先される:
   {"checks":[{"name":"lint","cwd":"sub","cmd":"ruff check .","env":{"K":"V"},"timeout":300,"optional":false}]}
@@ -125,6 +131,101 @@ def classify_failure(text, root: Path, cwd="."):
     return "fail"
 
 
+HISTORY_NAME = "history.jsonl"
+INTERVENTION_KINDS = ("question", "approval", "redo")
+
+
+def history_path(root: Path) -> Path:
+    return root / ".claude" / "handoff" / HISTORY_NAME
+
+
+def append_history(root: Path, record: dict) -> None:
+    """履歴へ1行追記する(追記専用)。失敗しても呼び出し元(検証)を止めない。"""
+    try:
+        dest = history_path(root)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        ignore_handoff(root)
+        with dest.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError as e:
+        print(f"[warn] 履歴を書き込めませんでした: {e}", file=sys.stderr)
+
+
+def load_history(root: Path) -> list:
+    """履歴を読む。壊れた行(書き込み中の中断など)は読み飛ばす。"""
+    path = history_path(root)
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict) and rec.get("at"):
+            out.append(rec)
+    return out
+
+
+def _period(at: str, by: str) -> str:
+    d = datetime.fromisoformat(at)
+    if by == "day":
+        return d.strftime("%Y-%m-%d")
+    if by == "week":
+        y, w, _ = d.isocalendar()
+        return f"{y}-W{w:02d}"
+    return "all"
+
+
+def summarize(records: list, by: str = "all", since_days=None, now=None) -> dict:
+    """履歴を期間(day/week/all)ごとに集計する。
+
+    runs: 検証の実行回数(部分実行を含む) / full_runs: 全チェックを実行した回数 / failed_runs: optional 以外が非passだった回数
+    checks[name]: 実行回数・pass率・平均/最大秒数 / interventions[kind]: 手動介入の回数
+    """
+    if since_days is not None:
+        cutoff = (now or datetime.now().astimezone()).timestamp() - since_days * 86400
+        records = [r for r in records if datetime.fromisoformat(r["at"]).timestamp() >= cutoff]
+    periods: dict = {}
+    for r in records:
+        b = periods.setdefault(_period(r["at"], by), {"runs": 0, "full_runs": 0, "failed_runs": 0,
+                                                      "total_seconds": 0.0, "checks": {}, "interventions": {}})
+        if r.get("type") == "intervention":
+            b["interventions"][r.get("kind", "?")] = b["interventions"].get(r.get("kind", "?"), 0) + 1
+            continue
+        if r.get("type") != "run":
+            continue
+        b["runs"] += 1
+        b["total_seconds"] = round(b["total_seconds"] + float(r.get("total_seconds", 0)), 1)
+        if not r.get("partial"):
+            b["full_runs"] += 1
+        if any(c["status"] != "pass" and not c.get("optional") for c in r.get("checks", [])):
+            b["failed_runs"] += 1
+        for c in r.get("checks", []):
+            k = b["checks"].setdefault(c["name"], {"runs": 0, "pass": 0, "seconds": []})
+            k["runs"] += 1
+            k["pass"] += c["status"] == "pass"
+            k["seconds"].append(float(c.get("seconds", 0)))
+    for b in periods.values():
+        for k in b["checks"].values():
+            secs = k.pop("seconds")
+            k["pass_rate"] = round(k["pass"] / k["runs"], 3)
+            k["avg_seconds"] = round(sum(secs) / len(secs), 1)
+            k["max_seconds"] = round(max(secs), 1)
+    return dict(sorted(periods.items()))
+
+
+def print_summary(summary: dict) -> None:
+    if not summary:
+        print("履歴がありません(`vh.py run` で記録されます)")
+        return
+    for name, b in summary.items():
+        iv = ", ".join(f"{k}={v}" for k, v in sorted(b["interventions"].items())) or "なし"
+        print(f"== {name}: 実行 {b['runs']} 回(全チェック {b['full_runs']} 回 / 失敗あり {b['failed_runs']} 回 / 計 {b['total_seconds']}s)  手動介入: {iv}")
+        for cn, k in b["checks"].items():
+            print(f"   {cn:28} {k['runs']:>3}回  pass率 {k['pass_rate']*100:>5.1f}%  平均 {k['avg_seconds']}s  最大 {k['max_seconds']}s")
+
+
 def run(root: Path, only, timeout, out):
     checks, src = detect(root)
     results = []
@@ -159,6 +260,14 @@ def run(root: Path, only, timeout, out):
     dest = Path(out) if out else root / ".claude" / "handoff" / "last_verify.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
     ignore_handoff(root)
+    # 履歴には今回実行した分だけを記録する(下の部分実行マージ前の results)。
+    # 実行したチェックが0件(--only の名前違い等)は検証ではないので記録しない(集計を汚さない)。
+    if results:
+        append_history(root, {
+            "type": "run", "at": rep["at"], "head": rep["head"], "branch": git(root, "branch", "--show-current") or "detached",
+            "dirty": bool(git(root, "status", "--porcelain")), "partial": rep["partial"], "only": sorted(only) if only else None,
+            "total_seconds": round(sum(r["seconds"] for r in results), 1),
+            "checks": [{"name": r["name"], "status": r["status"], "seconds": r["seconds"], "optional": r["optional"]} for r in results]})
     if only and dest.exists():  # 部分実行は「同一HEAD+同一作業ツリー状態」の既存結果へだけ名前単位でマージ
         try:
             old = json.loads(dest.read_text(encoding="utf-8"))
@@ -220,6 +329,9 @@ def handoff(root: Path, results, unresolved, nxt, out):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest="cmd", required=True)
+    sn = sp.add_parser("note"); sn.add_argument("kind", choices=INTERVENTION_KINDS); sn.add_argument("--text", default=""); sn.add_argument("--root")
+    sh = sp.add_parser("history"); sh.add_argument("--root"); sh.add_argument("--by", choices=("day", "week", "all"), default="all")
+    sh.add_argument("--since-days", type=int); sh.add_argument("--json", action="store_true")
     for n in ("detect", "run", "handoff"):
         s = sp.add_parser(n); s.add_argument("--root"); s.add_argument("--out")
         if n == "run":
@@ -231,6 +343,17 @@ def main():
         c, src = detect(root); print(json.dumps({"source": src, "checks": c}, ensure_ascii=False, indent=1))
     elif a.cmd == "run":
         sys.exit(run(root, a.only, a.timeout, a.out))
+    elif a.cmd == "note":
+        append_history(root, {"type": "intervention", "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                              "kind": a.kind, "text": a.text, "head": git(root, "rev-parse", "--short", "HEAD"),
+                              "branch": git(root, "branch", "--show-current") or "detached"})
+        print(f"記録しました: {a.kind}")
+    elif a.cmd == "history":
+        summary = summarize(load_history(root), a.by, a.since_days)
+        if a.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=1))
+        else:
+            print_summary(summary)
     else:
         handoff(root, a.results, a.unresolved, a.next, a.out)
 
