@@ -10,6 +10,7 @@ import os
 import sys
 import threading
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -435,6 +436,42 @@ class TestLocalOverlaysAreBackedUp:
         assert success is True
         backups = os.listdir(os.path.join(config.NAS_PROJECT_ROOT, "db_backups"))
         assert len(backups) == 1
+
+
+class TestMissingOptionalBackupFilesLogLevel:
+    """Issue #1036: 任意オーバーレイ(family_members.local.json 等)の不在は正常なので
+    WARNINGにしない。必須ファイルの不在は従来どおりWARNING。"""
+
+    def test_optional_overlays_are_declared_optional(self):
+        assert set(config.BACKUP_OPTIONAL_FILES) == {
+            "family_members.local.json", "quest_users.local.json",
+        }
+        # 任意扱いにするのはバックアップ対象に含まれるものだけ
+        assert set(config.BACKUP_OPTIONAL_FILES) <= set(config.BACKUP_FILES)
+
+    def test_missing_optional_overlays_do_not_warn(self, monkeypatch):
+        fake_logger = MagicMock()
+        monkeypatch.setattr(backup_service, "logger", fake_logger)
+
+        success, _msg, _size = backup_service.perform_backup()
+
+        assert success is True
+        # 必須の config.py / devices.json はこのテスト環境に無いのでWARNINGになる。
+        # ここで見るのは任意オーバーレイが WARNING に含まれないことだけ。
+        assert not [c for c in fake_logger.warning.call_args_list if ".local.json" in str(c)]
+        assert any(".local.json" in str(c) for c in fake_logger.info.call_args_list)
+
+    def test_missing_required_file_still_warns(self, monkeypatch):
+        monkeypatch.setattr(
+            config, "BACKUP_FILES", [config.SQLITE_DB_PATH, "missing_required.json"]
+        )
+        fake_logger = MagicMock()
+        monkeypatch.setattr(backup_service, "logger", fake_logger)
+
+        success, _msg, _size = backup_service.perform_backup()
+
+        assert success is True
+        assert any("missing_required.json" in str(c) for c in fake_logger.warning.call_args_list)
 
 
 class TestMainExitCode:
