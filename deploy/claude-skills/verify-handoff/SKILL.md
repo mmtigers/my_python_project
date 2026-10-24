@@ -36,6 +36,11 @@ description: プロジェクトに存在するLint・型チェック・テスト
 4. `vh.py handoff --unresolved "..." --next "..."` で `.claude/handoff/<branch>.md` を生成。検証後にHEAD・未コミット差分・verify.json のいずれかが変わると警告が出るので再実行する。`--only` の部分実行は、状態が同じ場合だけ既存結果へマージされ、それ以外は「部分実行・未実行チェック」と明記される。
 5. 出力先 `.claude/handoff/` は初回書き込み時に `.git/info/exclude` へ自動登録される(作業ツリーを汚さない)。クラウド等で環境が消える場合は、内容をPR本文/コミット/ユーザーへの報告に転記する。
 
+## 履歴(効果測定用)
+`vh.py run` は実行のたびに `.claude/handoff/history.jsonl`(追記専用・git管理外)へ、日時・HEAD・ブランチ・各チェックの結果と秒数を1行追記する(出力本文は入れない)。実行したチェックが0件の run は記録しない。
+- 手動介入があったら `vh.py note question|approval|redo [--text "..."]` で1件記録する(question=質問 / approval=承認待ち / redo=やり直し)。記録は任意で、Claude が自分で記録する必要はない。
+- 集計: `vh.py history [--by day|week|all] [--since-days N] [--json]`(実行回数・チェック別のpass率と平均/最大秒数・手動介入の回数)。
+
 ## 報告
 各チェックの pass/fail/時間、変更ファイル、失敗の根本原因、未検証項目、次の作業。実行していない検証を成功と書かない。
 
