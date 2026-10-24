@@ -268,7 +268,11 @@ def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)
             continue
         src_path = entry if os.path.isabs(entry) else os.path.join(config.BASE_DIR, entry)
         if not os.path.exists(src_path):
-            logger.warning(f"⚠️ バックアップ対象ファイルが見つかりません: {src_path}")
+            if entry in getattr(config, "BACKUP_OPTIONAL_FILES", []):
+                # Issue #1036: 任意オーバーレイの不在は正常(毎日WARNINGにしない)
+                logger.info(f"任意のバックアップ対象ファイルは存在しないためスキップします: {src_path}")
+            else:
+                logger.warning(f"⚠️ バックアップ対象ファイルが見つかりません: {src_path}")
             continue
         src_path_obj = Path(src_path)
         dest_path = nas_backup_dir / f"{src_path_obj.stem}_{timestamp}{src_path_obj.suffix}"

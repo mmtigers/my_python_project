@@ -385,6 +385,14 @@ BACKUP_FILES: List[str] = [
     "family_members.local.json",
     "quest_users.local.json",
 ]
+# Issue #1036: BACKUP_FILES のうち「無くても起動できる任意オーバーレイ」(config.py /
+# quest_data.py が存在すればマージするだけ)。実機に無いのは正常で、不在を毎日WARNINGにすると
+# log_analyzer の Warnings 基準線を押し上げて本物の警告を埋もれさせるため、
+# バックアップ側は不在時にINFOで済ませる。必須ファイル(config.py 等)の不在は従来どおりWARNING。
+BACKUP_OPTIONAL_FILES: List[str] = [
+    "family_members.local.json",
+    "quest_users.local.json",
+]
 
 # デフォルトアセット
 DEFAULT_SOUND_SOURCE: str = os.path.join(BASE_DIR, "defaults", "sounds")
