@@ -1,5 +1,17 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash deploy/claude-skills/install.sh --check --only-drift 2>&1 | grep -v '^up-to-date' || true",
+            "timeout": 10,
+            "statusMessage": "共通Skillsの同期を確認中..."
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write",

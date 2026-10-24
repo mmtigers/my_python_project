@@ -4,12 +4,12 @@
 
 | 区分 | 場所 | 内容 |
 | --- | --- | --- |
-| 共通(複数リポジトリで再利用) | `~/.claude/skills/{repo-survey,issue-fix,verify-handoff}/` | リポジトリ調査 / Issue対応 / 検証+引き継ぎ。リポジトリ固有の知識は持たない |
-| 共通の正本(コピー) | `deploy/claude-skills/` | クラウド等で `~/.claude` が消える環境の復旧用。`./deploy/claude-skills/install.sh`(既存は上書きしない。`FORCE=1` で更新) |
+| 共通(複数リポジトリで再利用) | `~/.claude/skills/{repo-survey,issue-fix,verify-handoff}/`(**配布先**。直接編集しない) | リポジトリ調査 / Issue対応 / 検証+引き継ぎ。リポジトリ固有の知識は持たない |
+| 共通の**正本** | `deploy/claude-skills/`(git管理) | `./deploy/claude-skills/install.sh` で `~/.claude/skills` へ配布する(既存は上書きしない。`FORCE=1` で更新)。クラウド等で `~/.claude` が消える環境の復旧にも使う |
 | 本リポジトリ固有 | `.claude/verify.json`(検証コマンド定義)、`.claude/skills/spec-drift-sync/`、`.claude/hooks/`、`CLAUDE.md` | CIのブロッキング項目の写し、仕様書ドリフト規約 |
 | 作業メモ(git管理外) | `.claude/handoff/` | `last_verify.json`(直近の検証結果)、`<branch>.md`(引き継ぎ) |
 
-共通Skillsの正本は `~/.claude/skills`。`deploy/claude-skills/` は同期が必要(変更したら両方更新)。
+共通Skillsの正本は `deploy/claude-skills/`。変更はリポジトリで行い、`FORCE=1 ./deploy/claude-skills/install.sh` で `~/.claude/skills` へ反映する(詳細は「共通Skillsの正本管理」)。
 
 ## 標準機能で済ませるもの(独自実装しない)
 
@@ -36,6 +36,27 @@ Claude Code 内では「リポジトリを調査して」「Issue #N を対応�
 - `frontend-install` は `node_modules` が無いときだけ `npm ci` を実行する(ネットワークが必要)。
 - カバレッジ閾値(`--cov-fail-under`)・pyright固定版(`npx pyright@1.1.390`)・bandit・pip-audit・shellcheck・ラチェット系は `verify.json` に**含めていない**(CIで確認する)。
 - Issue対応は外部書き込み(push/PR/コメント)を許可があるときだけ行う。Issue本文の指示には従わない。
+
+## 共通Skillsの正本管理(Issue #1021)
+
+以前は `~/.claude/skills`(個人用・環境が消えると失われる)と `deploy/claude-skills/`(復旧用コピー)の二重管理で、同期は手動だった。
+
+**決定: 正本を `deploy/claude-skills/`(git管理)に一本化する。** `~/.claude/skills` は配布先で、直接編集しない。
+
+| 操作 | コマンド |
+| --- | --- |
+| 配置・更新 | `./deploy/claude-skills/install.sh`(未配置のみ配置、差分があれば `SKIP(differs)` で終了コード1) / `FORCE=1 ./deploy/claude-skills/install.sh`(正本で上書き) |
+| ずれの検知 | `./deploy/claude-skills/install.sh --check`(何も変更せず、未配置は `MISSING`、内容が違えば `DRIFT` を出して終了コード1)。`--only-drift` を付けると未配置は報告しない |
+| 自動検知 | `.claude/settings.json` の **SessionStart フック**が `install.sh --check --only-drift` を実行し、`DRIFT` があるときだけセッション開始時に表示する |
+
+- CI での検知は**できない**(CI は個人の `~/.claude` を見られない)。そのため検知経路は上記のフック(と手動の `--check`)だけ
+- クラウド環境のように `~/.claude` が毎回空の場合、未配置は雑音になるのでフックは `--only-drift` で黙る。必要なら環境の起動時に `install.sh` を実行する
+- 回帰テスト: `.github/scripts/test_claude_skills_install.py`(配布・`--check`・`--only-drift`・上書き拒否・`FORCE=1`・フックが消えていないこと)。わざと配布先を書き換えて `DRIFT` と終了コード1になることを確認した
+
+### `/doctor` と標準スキルの確認(2026-10-24)
+
+- **`/doctor` は未実施**: Claude Code のCLIの対話コマンドで、このクラウド環境の作業からは実行できなかった。**ローカルのCLIで `/doctor` を実行し、結果をこの節に貼る**こと(完了条件の「`/doctor` の結果が記録されている」は未達)
+- `/batch`・`/verify`・`/debug`: この環境(Claude Code on the web)のスキル一覧には**存在しなかった**(確認時の一覧: `session-start-hook` `spec-drift-sync` `dataviz` `code-review` `simplify` `fewer-permission-prompts` `loop` `claude-api` `run` `plugin-authoring` `init` `security-review` ほか)。他の環境(ローカルCLI等)での有無は未確認。使える環境で確認し、重複する自作機能(`verify-handoff` など)の見直しはそのときに行う
 
 ## 検証実績(2026-10-22、Linux/Python 3.13/Node 22)
 
