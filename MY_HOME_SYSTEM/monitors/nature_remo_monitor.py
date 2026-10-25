@@ -11,6 +11,7 @@ from typing import Optional, List, Dict, Any, Tuple
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
+from core.heartbeat import log_daily_heartbeat
 from core.logger import setup_logging
 from services import sensor_service
 
@@ -166,6 +167,8 @@ async def main() -> None:
             await process_location(loc, token)
 
     logger.debug("🏁 --- Monitor Completed ---")
+    # 正常時は DEBUG しか出ないため、生存確認として1日1回だけ INFO を出す(Issue #1042)
+    log_daily_heartbeat("nature_remo_monitor", logger)
 
 if __name__ == "__main__":
     try:

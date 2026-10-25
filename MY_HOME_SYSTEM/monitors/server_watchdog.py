@@ -12,6 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
 from core import state_file
+from core.heartbeat import log_daily_heartbeat
 from core.logger import setup_logging
 from services.notification_service import send_push
 
@@ -312,3 +313,5 @@ if __name__ == "__main__":
     check_cpu_temperature()
     # ソフトウェアの健全性確認（プロセス死活監視）
     check_health()
+    # 正常時は無音のため、生存確認として1日1回だけ INFO を出す(Issue #1042)
+    log_daily_heartbeat("server_watchdog", logger)

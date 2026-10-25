@@ -12,6 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # 自作モジュール
 import config
 from core import state_file
+from core.heartbeat import log_daily_heartbeat
 from core.logger import setup_logging
 from core.database import save_log_generic
 from core.utils import get_now_iso, retry_with_backoff, get_now_jst
@@ -527,3 +528,5 @@ class NasMonitor:
 if __name__ == "__main__":
     monitor = NasMonitor()
     monitor.run()
+    # 正常時は無音(レポートは Discord のみ)のため、生存確認として1日1回だけ INFO を出す(Issue #1042)
+    log_daily_heartbeat("nas_monitor", logger)
