@@ -679,15 +679,17 @@ TV_PLUG_DEVICE_ID: Optional[str] = os.getenv("TV_PLUG_DEVICE_ID")
 # 電源の信号ID(TV_REMO_SIGNAL_ID)または家電の種類が「TV」の家電ID(TV_REMO_APPLIANCE_ID)を
 # 指定する。どれかが未設定なら、この機能は使わず従来どおりプラグだけを切る。
 # テレビがついているかは、プラグ(Plug Mini)が測る消費電力で判断する。
-# TV_POWER_ON_THRESHOLD_WATTS 以上ならオン状態とみなす(待機電力は通常1W未満)。
+# TV_POWER_ON_THRESHOLD_WATTS 以上ならオン状態とみなす。KJ-55X9500G は画面を消した待機状態でも
+# 20〜30W台(実測: 20.3〜30.8W)を使い、点灯中は100W超(実測: 106.7〜184W)なので、既定は両者の
+# 中間の60W。待機電力が1W未満のテレビなら、小さい値に下げてもよい。
 TV_NATURE_REMO_LOCATION: str = (os.getenv("TV_NATURE_REMO_LOCATION") or "").strip().lower()
 TV_REMO_SIGNAL_ID: str | None = (os.getenv("TV_REMO_SIGNAL_ID") or "").strip() or None
 TV_REMO_APPLIANCE_ID: str | None = (os.getenv("TV_REMO_APPLIANCE_ID") or "").strip() or None
 try:
-    TV_POWER_ON_THRESHOLD_WATTS: float = float(os.getenv("TV_POWER_ON_THRESHOLD_WATTS") or "10")
+    TV_POWER_ON_THRESHOLD_WATTS: float = float(os.getenv("TV_POWER_ON_THRESHOLD_WATTS") or "60")
 except ValueError:
-    logger.warning("⚠️ 環境変数 TV_POWER_ON_THRESHOLD_WATTS は数値として解釈できません。デフォルト値 10 を使用します。")
-    TV_POWER_ON_THRESHOLD_WATTS = 10.0
+    logger.warning("⚠️ 環境変数 TV_POWER_ON_THRESHOLD_WATTS は数値として解釈できません。デフォルト値 60 を使用します。")
+    TV_POWER_ON_THRESHOLD_WATTS = 60.0
 # リモコンで消してから、消費電力が下がるのを待つ最大秒数(超えてもプラグは切る)。
 TV_GRACEFUL_OFF_WAIT_SECONDS: int = _get_int_env("TV_GRACEFUL_OFF_WAIT_SECONDS", 45)
 
