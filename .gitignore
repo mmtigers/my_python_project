@@ -134,5 +134,8 @@ temp_backups/
 MY_HOME_SYSTEM/dashboard_deploy_state.json
 MY_HOME_SYSTEM/dashboard_restart_marker.json
 
+# MY_HOME_SYSTEM: SwitchBotハブ監視(switchbot_hub_monitor)が実行時に書く状態ファイル(Issue #1046)
+MY_HOME_SYSTEM/switchbot_hub_monitor_state.json
+
 # Claude Code 引き継ぎメモ/検証結果(セッション間の作業メモ。共有が必要なら git add -f)
 .claude/handoff/
