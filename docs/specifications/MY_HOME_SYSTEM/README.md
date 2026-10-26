@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全117件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全118件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -33,6 +33,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [camera_monitor.md](./camera_monitor.md) | ネットワークカメラの稼働監視およびスナップショット取得。 |
 | [tv_lock_monitor.md](./tv_lock_monitor.md) | TVの稼働時間を監視し、規定時間を超えた場合のロック制御を行う。 |
 | [connect_speaker.md](./connect_speaker.md) | スマートスピーカー等への音声出力・通知連携。 |
+| [collect_ops_logs.md](./collect_ops_logs.md) | 実機の運用ログ調査用に、nvr-*・cloudflared・journalctl・カーネルログ・crontab 差分・生存ログを読み取り専用で出力する収集スクリプト(Issue #1042)。 |
 | [camera_service.md](./camera_service.md) | ONVIF対応カメラのRTSP URL取得、ffmpegによるライブHLS配信・録画VODプレイリスト生成を担うサービス層。 |
 | [network_logger.md](./network_logger.md) | カメラのIPアドレスに対しICMP PingとRTSPポートへのTCP接続試行を定期実行し、レイテンシとステータスをCSVに記録する。 |
 | [sound_manager.md](./sound_manager.md) | イベントキーに基づく音声ファイルの非同期再生、および音声ファイル欠損時のデフォルトディレクトリからの復旧を行う。 |
