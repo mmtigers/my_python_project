@@ -57,6 +57,16 @@
 
 `scheduler_boot.py` 配下の監視群（`server_watchdog.py`・`memory_monitor.py`・`nas_monitor.py`）は `home_system.service` と同じプロセスツリーで動くため、**サービスごと落ちると監視も一緒に停止する**。層1（cron駆動・サービス独立）はこの穴を塞ぐ位置づけであり、平常時は既存監視と重複検知しない（サービスがactiveなら層1のserviceチェックは沈黙する）。ログ走査のキーワード・除外パターンは週次の `log_analyzer.py` と共通（`LogAnalyzer` クラスを流用）。
 
+## 手動のログ収集(`tools/collect_ops_logs.sh`)
+
+`logs/*.log` だけでは見えない情報(`nvr-*.service`・`cloudflared`・`home_system.service` の journalctl、カーネルの OOM、実機の crontab とリポジトリの差分、生存ログ)を、読み取り専用でまとめて出す(Issue #1042)。Webhook URL・RTSP の認証情報・token 系の値はマスクされるが、共有前に目視で確認すること。
+
+```bash
+cd /home/masahiro/develop/MY_HOME_SYSTEM
+tools/collect_ops_logs.sh > ~/ops_logs.txt        # 直近24時間
+tools/collect_ops_logs.sh "-6h"                    # 期間を変える(journalctl の --since 形式)
+```
+
 ## セットアップ
 
 ### 層1: cron登録（デプロイ後に1回）
