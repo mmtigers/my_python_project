@@ -98,6 +98,11 @@ class InventoryService:
         # フロントエンド(InventoryList.tsx)がタップ前にロック表示できるよう、実際の
         # 使用可否判定(_use_item_locked)と同じ判定(_is_user_in_youtube_free_time)から渡す。
         is_in_free_time = _is_user_in_youtube_free_time(user_id)
+        # お昼寝中はフロント側で「自由時間になったら」ではなく終了時刻を案内できるよう、
+        # 終了時刻("HH:MM")を渡す(お昼寝中でなければNone)。
+        nap_block_ends_at = (
+            config.YOUTUBE_NAP_BLOCK_END.strftime("%H:%M") if _is_within_youtube_nap_block() else None
+        )
 
         with get_db_cursor() as cur:
             sql = """
@@ -185,6 +190,7 @@ class InventoryService:
             "youtube_daily_limit_announcement": youtube_daily_limit_announcement,
             "youtube_extension": youtube_extension,
             "is_in_free_time": is_in_free_time,
+            "nap_block_ends_at": nap_block_ends_at,
         }
 
     def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:

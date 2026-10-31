@@ -80,6 +80,8 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
 
     // YouTube等の時間消費型ごほうびは自由時間中のみ使える(要件確認済み、2026-09-23)。
     const isInFreeTime = data?.is_in_free_time ?? true;
+    // お昼寝の時間帯は自由時間中でも使えない。理由を取り違えないよう文言を分ける。
+    const napBlockEndsAt = data?.nap_block_ends_at ?? null;
 
     // 休日のテレビ禁止時間帯(12:00〜14:00 / 20:00以降)。平日・ロック無し環境はnull。
     // 禁止開始までの秒数はサーバー値(ポーリングで再同期)を起点にローカルで減らす。
@@ -303,7 +305,9 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
                     ? `きょうのぶんはおしまい。プリントを1枚やると${extension.minutes_per_quest}分ふえるよ`
                     : 'きょうのYouTubeはおしまい。また明日つかおうね';
                 const lockedReason = isOutsideFreeTime
-                    ? '自由時間になったら見られるよ'
+                    ? (napBlockEndsAt
+                        ? `いまはおひるねの時間。${napBlockEndsAt}からつかえるよ`
+                        : '自由時間になったら見られるよ')
                     : isTvBlockedForItem
                     ? (tvBlock?.blocked_until
                         ? `いまはテレビおやすみ。${tvBlock.blocked_until}からつかえるよ`

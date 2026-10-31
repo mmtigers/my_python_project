@@ -107,6 +107,24 @@ def test_get_user_inventory_reports_is_in_free_time_flag(isolated_db, monkeypatc
     assert service.get_user_inventory("son")["is_in_free_time"] is True
 
 
+@freeze_time("2026-10-31 05:30:00")  # = JST 2026-10-31(土) 14:30(お昼寝の時間帯の中)
+def test_get_user_inventory_reports_nap_block_end_during_nap(isolated_db, monkeypatch):
+    _seed_owned_youtube_ticket()
+    service = qs_module.InventoryService()
+    # 自由時間中でも、お昼寝中はロックされ、終了時刻が返る。
+    monkeypatch.setattr(routine_service, "is_user_currently_in_free_time", lambda *a, **k: True)
+    result = service.get_user_inventory("son")
+    assert result["is_in_free_time"] is False
+    assert result["nap_block_ends_at"] == "15:00"
+
+
+@freeze_time("2026-10-31 07:00:00")  # = JST 16:00(お昼寝の外)
+def test_get_user_inventory_nap_block_end_is_none_outside_nap(isolated_db, monkeypatch):
+    _seed_owned_youtube_ticket()
+    monkeypatch.setattr(routine_service, "is_user_currently_in_free_time", lambda *a, **k: True)
+    assert qs_module.InventoryService().get_user_inventory("son")["nap_block_ends_at"] is None
+
+
 def test_non_youtube_reward_is_not_gated_by_free_time(isolated_db, monkeypatch):
     """自由時間限定はYouTube等の時間消費型のみが対象(要件確認済み)。それ以外の
     ごほうび(例: おやつ)は自由時間外でも使える。"""
