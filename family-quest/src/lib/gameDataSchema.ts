@@ -186,6 +186,8 @@ export const inventoryResponseSchema = z.object({
     youtube_extension: youtubeExtensionSchema.nullable(),
     // YouTube等の時間消費型ごほうびは自由時間中のみ使える(要件確認済み、2026-09-23)。
     is_in_free_time: z.boolean(),
+    // お昼寝の時間帯のときだけ終了時刻("HH:MM")。それ以外はnull。
+    nap_block_ends_at: z.string().nullable(),
     // 休日のテレビ禁止時間帯の予告・券ロック用。平日・ロック無し環境はnull。
     tv_block: tvBlockStateSchema.nullish(),
 });
