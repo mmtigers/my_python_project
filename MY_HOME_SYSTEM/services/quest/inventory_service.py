@@ -5,6 +5,7 @@ from typing import Any, Dict, Tuple
 
 from fastapi import HTTPException
 
+from core.jp_holidays import is_offday
 from core.utils import get_now_iso
 from core.database import get_db_cursor
 import config
@@ -31,9 +32,13 @@ def _is_within_youtube_nap_block(now: datetime.datetime | None = None) -> bool:
 
     涼花・智矢とも共通で、自由時間ゲート・自宅保育の適用除外(下記)とは別軸で
     常に適用する制限のため、フローの状態を一切見ない単純な壁時計判定にしている。
+    ただし休日(土日・祝日・家の休み。core.jp_holidays.is_offday)は適用しない
+    (要件確認済み、2026-10-31: 休日の昼はお昼寝に限らず自由に過ごすため)。
     """
     if now is None:
         now = datetime.datetime.now(JST)
+    if is_offday(now):
+        return False
     t = now.time()
     return config.YOUTUBE_NAP_BLOCK_START <= t < config.YOUTUBE_NAP_BLOCK_END
 
