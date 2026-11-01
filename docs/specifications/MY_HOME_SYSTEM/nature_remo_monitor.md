@@ -38,56 +38,57 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.NATURE_REMO_ACCESS_TOKEN` | 環境変数または定数の実値が別ファイルに定義されているため不明。 | `[main]` (行番号: 161 / 抜粋: "("伊丹", config.NATURE_REMO_ACCE") |
-| `config.NATURE_REMO_ACCESS_TOKEN_TAKASAGO` | 環境変数または定数の実値が別ファイルに定義されているため不明。 | `[main]` (行番号: 162 / 抜粋: "("高砂", config.NATURE_REMO_ACCE") |
+| `config.NATURE_REMO_ACCESS_TOKEN` | 環境変数または定数の実値が別ファイルに定義されているため不明。 | `[main]` (行番号: 176 / 抜粋: "("伊丹", config.NATURE_REMO_ACCE") |
+| `config.NATURE_REMO_ACCESS_TOKEN_TAKASAGO` | 環境変数または定数の実値が別ファイルに定義されているため不明。 | `[main]` (行番号: 177 / 抜粋: "("高砂", config.NATURE_REMO_ACCE") |
 | `core.logger.setup_logging` | ログの出力先（標準出力、ファイルなど）およびフォーマットの実装が不明。 | `[トップレベル]` (行番号: 19 / 抜粋: "logger = setup_logging("nature") |
-| `sensor_service.process_power_data` | 電力データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 125 / 抜粋: "await sensor_service.process_p") |
-| `sensor_service.process_meter_data` | 温湿度データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 149 / 抜粋: "await sensor_service.process_m") |
-| `Nature Remo API` | `api.nature.global` の正確なレスポンススキーマの全容（コード上でアクセスしているキー以外）が不明。 | `[fetch_data_sync]` (行番号: 60 / 抜粋: "url_app = \"https://api.nature.global/1/appliances\"") |
+| `sensor_service.process_power_data` | 電力データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 140 / 抜粋: "await sensor_service.process_p") |
+| `sensor_service.process_meter_data` | 温湿度データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 164 / 抜粋: "await sensor_service.process_m") |
+| `Nature Remo API` | `api.nature.global` の正確なレスポンススキーマの全容（コード上でアクセスしているキー以外）が不明。 | `[fetch_data_sync]` (行番号: 66 / 抜粋: "url_app = \"https://api.nature.global/1/appliances\"") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `create_session`
 
 * **役割**: 最大3回のリトライロジック（対象ステータス: 500, 502, 503, 504）を組み込んだ HTTP `GET` 用の `requests.Session` を作成する。
-* 根拠: `[create_session]` (行番号: 23〜34 / 抜粋: "def create_session() -> reques")
+* 根拠: `[create_session]` (行番号: 29〜40 / 抜粋: "def create_session() -> reques")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[create_session]` (行番号: 23 / 抜粋: "def create_session() -> reques")
+* 根拠: `[create_session]` (行番号: 29 / 抜粋: "def create_session() -> reques")
 
 
 * **戻り値/レスポンス**: `requests.Session` (リトライ設定がマウントされたセッションオブジェクト)
-* 根拠: `[create_session]` (行番号: 23〜34 / 抜粋: "return session")
+* 根拠: `[create_session]` (行番号: 29〜40 / 抜粋: "return session")
 
 
 * **副作用**: なし
-* 根拠: `[create_session]` (行番号: 22〜33 / 抜粋: "session.mount("https://", adap")
+* 根拠: `[create_session]` (行番号: 28〜39 / 抜粋: "session.mount("https://", adap")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[create_session]` (行番号: 23〜34 / 抜粋: "def create_session() -> reques")
+* 根拠: `[create_session]` (行番号: 29〜40 / 抜粋: "def create_session() -> reques")
 
 
 
 ### `fetch_data_sync`
 
 * **役割**: Nature Remo APIに対して同期的にHTTP GETリクエストを行い、`appliances` と `devices` のデータを取得する。
-* 根拠: `[fetch_data_sync]` (行番号: 36〜75 / 抜粋: "def fetch_data_sync(location: ")
+* 根拠: `[fetch_data_sync]` (行番号: 42〜90 / 抜粋: "def fetch_data_sync(location: ")
 
 
 * **引数/リクエスト**: `location: str` (拠点名), `token: str` (APIアクセストークン)
-* 根拠: `[fetch_data_sync]` (行番号: 36 / 抜粋: "def fetch_data_sync(location: ")
+* 根拠: `[fetch_data_sync]` (行番号: 42 / 抜粋: "def fetch_data_sync(location: ")
 
 
 * **戻り値/レスポンス**: `Dict[str, List[Dict[str, Any]]]` (取得結果を格納した辞書。トークンが空の場合は空辞書を返す)
-* 根拠: `[fetch_data_sync]` (行番号: 36〜75 / 抜粋: "return result")
+* 根拠: `[fetch_data_sync]` (行番号: 48〜90 / 抜粋: "return result")
 
 
 * **副作用**: 外部API (`https://api.nature.global`) へのネットワーク通信。
 * 根拠: `[fetch_data_sync]` (行番号: 59〜68 / 抜粋: "res_app = session.get(url_app,")
 
 
+* **一過性の通信エラーは連続時のみ ERROR**: `requests.ConnectionError`/`Timeout` は拠点ごとの連続回数(`_transient_failures`)を数え、`TRANSIENT_ERROR_ERROR_THRESHOLD`(3)回未満は WARNING、到達したら ERROR にする(成功でリセット)。1回の瞬断の ERROR が health_watch の `app_logs` 検知→層2調査を起動していたため(2026-10-31 10:04)。HTTPエラー等その他の例外は従来どおり即 ERROR。
 * **エラーハンドリング**: 通信エラーなどすべての例外を `Exception` としてキャッチし、ロガーにエラー内容を出力して、取得できた範囲のデータを返す。
 * 根拠: `[fetch_data_sync]` (参照: fetch_data_sync / 抜粋: "except Exception as e:")
 
@@ -96,15 +97,15 @@
 ### `process_location`
 
 * **役割**: 拠点とトークンを受け取り、別スレッドでAPI通信を実行。取得したデータからスマートメーターの電力値 (`EPC: 231`) とセンサーの温湿度を抽出し、外部サービスへ非同期で委譲する。**（Issue #235で修正）** 電力値のパースは以前`val_str.isdigit()`で数字文字列かどうかを判定していたが、`str.isdigit()`は符号付き文字列(例: `"-120"`)に対して`False`を返すPython仕様のため、太陽光発電等による逆潮流(売電)時の負の瞬時電力値が警告も無く無条件に破棄されていた。`float(val_str)`への直接パースを`try/except`で試み、失敗時のみ警告ログを出す方式に変更した。**（Issue #829で修正）** `sensor_service.process_power_data`呼び出しに`device_category="smart_meter"`を明示的に渡すようになった。以前は下流(`analysis_service.py`)が`device_name`に`"Remo"`という文字列が含まれるかだけで住宅全体のスマートメーターかどうかを推測していたが、`device_name`はここで`f"{location}_{app.get('nickname', 'SmartMeter')}"`のようにNature RemoアプリのニックネームからDynamicに組み立てられる表示用の自由文字列であり、ニックネームが`"Remo"`を含まない環境では電気代集計が恒常的に0円になる不具合があった。この関数はスマートメーター(`EL_SMART_METER`)であることを既に知っているため、書き込み時点で種別を明示するようにした。
-* 根拠: `[process_location]` (行番号: 79〜153 / 抜粋: "async def process_location(loc")、電力値パース処理 (参照: process_location / 抜粋: "try:\n                        power_val = float(val_str)\n                    except (TypeError, ValueError):")、`device_category`の明示 (行番号: 124〜126 / 抜粋: "await sensor_service.process_power_data(\n                    dev_id, dev_name, power_val, {}, device_category=\"smart_meter\"\n                )")
+* 根拠: `[process_location]` (行番号: 94〜168 / 抜粋: "async def process_location(loc")、電力値パース処理 (参照: process_location / 抜粋: "try:\n                        power_val = float(val_str)\n                    except (TypeError, ValueError):")、`device_category`の明示 (行番号: 138〜140 / 抜粋: "await sensor_service.process_power_data(\n                    dev_id, dev_name, power_val, {}, device_category=\"smart_meter\"\n                )")
 
 
 * **引数/リクエスト**: `location: str` (拠点名), `token: str` (APIトークン)
-* 根拠: `[process_location]` (行番号: 79 / 抜粋: "async def process_location(loc")
+* 根拠: `[process_location]` (行番号: 94 / 抜粋: "async def process_location(loc")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[process_location]` (行番号: 79 / 抜粋: "async def process_location(loc")
+* 根拠: `[process_location]` (行番号: 94 / 抜粋: "async def process_location(loc")
 
 
 * **副作用**: 外部サービス (`sensor_service.process_power_data`(`device_category="smart_meter"`付き), `sensor_service.process_meter_data`) の非同期呼び出し、ログへの出力。電力値のパースに失敗した場合(`None`や数値に変換できない文字列)は`logger.warning`で警告ログを出力する(Issue #235で追加)。
@@ -112,53 +113,53 @@
 
 
 * **エラーハンドリング**: 電力値(`EPC: 231`)のパース失敗(`TypeError`/`ValueError`)はその場で`try/except`により捕捉し警告ログを出力、`power_val`は`None`のまま次の家電へ処理を継続する(Issue #235で追加。修正前はこのケースを`str.isdigit()`で無警告に判定していた)。それ以外の例外は上位に伝播するが、通信エラーは `fetch_data_sync` 内部で処理されるため辞書操作時のキーエラー等以外は発生しにくい。
-* 根拠: `[process_location]` (行番号: 108〜111 / 抜粋: "except (TypeError, ValueError):")
+* 根拠: `[process_location]` (行番号: 122〜125 / 抜粋: "except (TypeError, ValueError):")
 
 
 
 ### `main`
 
 * **役割**: 伊丹と高砂の2つの拠点情報・トークンを定義し、トークンが存在する拠点についてのみ `process_location` を順次実行する。
-* 根拠: `[main]` (行番号: 156〜171 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 171〜186 / 抜粋: "async def main() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[main]` (行番号: 156 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 171 / 抜粋: "async def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[main]` (行番号: 156 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 171 / 抜粋: "async def main() -> None:")
 
 
 * **副作用**: `process_location` の呼び出し。
-* 根拠: `[main]` (行番号: 167 / 抜粋: "await process_location(loc, to")
+* 根拠: `[main]` (行番号: 182 / 抜粋: "await process_location(loc, to")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[main]` (行番号: 156〜171 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 171〜186 / 抜粋: "async def main() -> None:")
 
 
 
 ### `__main__` (エントリーポイント)
 
 * **役割**: スクリプトが直接実行された際、イベントループを起動して `main()` 関数を実行する。
-* 根拠: `[__main__]` (行番号: 173 / 抜粋: "if __name__ == "__main__":")
+* 根拠: `[__main__]` (行番号: 188 / 抜粋: "if __name__ == "__main__":")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[__main__]` (行番号: 173 / 抜粋: "if __name__ == "__main__":")
+* 根拠: `[__main__]` (行番号: 188 / 抜粋: "if __name__ == "__main__":")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `[__main__]` (行番号: 175 / 抜粋: "asyncio.run(main())")
+* 根拠: `[__main__]` (行番号: 190 / 抜粋: "asyncio.run(main())")
 
 
 * **副作用**: 非同期イベントループの開始。
-* 根拠: `[__main__]` (行番号: 175 / 抜粋: "asyncio.run(main())")
+* 根拠: `[__main__]` (行番号: 190 / 抜粋: "asyncio.run(main())")
 
 
 * **エラーハンドリング**: `KeyboardInterrupt` をキャッチして INFO ログを出力。その他の予期せぬ例外 (`Exception`) をキャッチし、CRITICAL ログを出力する。
-* 根拠: `[__main__]` (行番号: 176 / 抜粋: "except KeyboardInterrupt:")
+* 根拠: `[__main__]` (行番号: 191 / 抜粋: "except KeyboardInterrupt:")
 
 
 

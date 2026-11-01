@@ -161,6 +161,28 @@ class TestFetchDataSync:
         assert result == {"appliances": [{"id": "a"}], "devices": []}
         mock_logger.error.assert_called_once()
 
+    def test_transient_error_is_warning_until_consecutive_threshold(self, monkeypatch):
+        """1回の接続エラーは WARNING。連続して閾値に達したら ERROR、成功でカウントはリセット。"""
+        monkeypatch.setattr(nrm, "_transient_failures", {})
+        mock_logger = MagicMock()
+        monkeypatch.setattr(nrm, "logger", mock_logger)
+        n = nrm.TRANSIENT_ERROR_ERROR_THRESHOLD
+        for _ in range(n - 1):
+            monkeypatch.setattr(nrm, "create_session", lambda: _FakeSession([requests.ConnectTimeout("t")]))
+            nrm.fetch_data_sync("伊丹", "tok")
+        mock_logger.error.assert_not_called()
+        assert mock_logger.warning.call_count == n - 1
+
+        monkeypatch.setattr(nrm, "create_session", lambda: _FakeSession([requests.ConnectTimeout("t")]))
+        nrm.fetch_data_sync("伊丹", "tok")
+        mock_logger.error.assert_called_once()
+
+        monkeypatch.setattr(
+            nrm, "create_session", lambda: _FakeSession([_FakeResponse([]), _FakeResponse([])])
+        )
+        nrm.fetch_data_sync("伊丹", "tok")
+        assert "伊丹" not in nrm._transient_failures
+
     def test_connection_error_returns_empty_lists(self, monkeypatch):
         session = _FakeSession([requests.ConnectionError("dns failure")])
         monkeypatch.setattr(nrm, "create_session", lambda: session)

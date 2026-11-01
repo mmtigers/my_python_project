@@ -18,6 +18,12 @@ from services import sensor_service
 # ロガー設定
 logger = setup_logging("nature_remo")
 
+# 一過性の通信エラー(接続タイムアウト・DNS失敗等)が拠点ごとに連続した回数。
+# 1回の瞬断で ERROR を出すと health_watch の app_logs 検知→層2(自動調査)が起動してしまうため、
+# この回数に達するまでは WARNING に留める(HTTPエラー等の非一過性は常に ERROR)。
+TRANSIENT_ERROR_ERROR_THRESHOLD: int = 3
+_transient_failures: Dict[str, int] = {}
+
 # --- API Client Setup ---
 
 def create_session() -> requests.Session:
@@ -67,9 +73,18 @@ def fetch_data_sync(location: str, token: str) -> Dict[str, List[Dict[str, Any]]
         res_dev = session.get(url_dev, headers=headers, timeout=10)
         res_dev.raise_for_status()
         result["devices"] = res_dev.json()
-        
+        _transient_failures.pop(location, None)
+
+    except (requests.ConnectionError, requests.Timeout) as e:
+        # 一過性の通信エラーは連続した場合だけ ERROR にする(閾値の説明は定数のコメント参照)
+        count = _transient_failures.get(location, 0) + 1
+        _transient_failures[location] = count
+        if count >= TRANSIENT_ERROR_ERROR_THRESHOLD:
+            logger.error("API Error at %s (%d回連続): %s", location, count, e)
+        else:
+            logger.warning("API connection issue at %s (%d回連続): %s", location, count, e)
     except Exception as e:
-        # 通信エラー等は介入が必要な可能性があるため ERROR/WARNING で出力
+        # 通信エラー以外(認証エラー等)は介入が必要な可能性があるため ERROR で出力
         logger.error("API Error at %s: %s", location, e)
     
     return result
