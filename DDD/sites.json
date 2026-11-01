@@ -783,13 +783,13 @@
   {
     "site_id": "flowerspa_kyoto",
     "name": "Mrs.FlowerSpa京都・滋賀",
-    "target_url": "https://flowerspa-kyoto.com/girllist",
+    "target_url": "https://mrs-fruitsspa-kyoto.com/girllist",
     "selector_container": "div.therapist_list > div",
     "selector_name": "h3.therapist_name",
     "selector_link": "a.therapist_meta",
     "selector_image": "p.therapist_img img",
     "name_first_text_only": true,
-    "_comment": "新規パターン。コンテナはclass指定のない裸の<div>のため親要素\n経由で絞り込む。詳細ページへのリンクはカード先頭の中身が空の\n<a class=\"therapist_meta\">がオーバーレイとして機能する"
+    "_comment": "新規パターン。コンテナはclass指定のない裸の<div>のため親要素\n経由で絞り込む。詳細ページへのリンクはカード先頭の中身が空の\n<a class=\"therapist_meta\">がオーバーレイとして機能する\n2026-11-01: flowerspa-kyoto.com/girllist が mrs-fruitsspa-kyoto.com/girllist へ\nリダイレクトされるようになったため target_url を新ドメインへ更新した\n（セレクタは旧サイトのまま。新サイトで通るかは実機の初回巡回ログで要確認）"
   },
   {
     "site_id": "mulala",
