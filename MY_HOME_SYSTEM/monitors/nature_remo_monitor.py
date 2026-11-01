@@ -11,6 +11,7 @@ from typing import Optional, List, Dict, Any, Tuple
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
+from core import state_file
 from core.heartbeat import log_daily_heartbeat
 from core.logger import setup_logging
 from services import sensor_service
@@ -21,8 +22,30 @@ logger = setup_logging("nature_remo")
 # 一過性の通信エラー(接続タイムアウト・DNS失敗等)が拠点ごとに連続した回数。
 # 1回の瞬断で ERROR を出すと health_watch の app_logs 検知→層2(自動調査)が起動してしまうため、
 # この回数に達するまでは WARNING に留める(HTTPエラー等の非一過性は常に ERROR)。
+# 本スクリプトはスケジューラが実行のたびに別プロセスとして起動する(5分間隔)ため、
+# カウンターはメモリではなく状態ファイル(core/state_file.py)に持つ。
 TRANSIENT_ERROR_ERROR_THRESHOLD: int = 3
-_transient_failures: Dict[str, int] = {}
+_STATE_FILE: str = os.path.join(config.BASE_DIR, "nature_remo_monitor_state.json")
+
+
+def _record_transient_failure(location: str) -> int:
+    """拠点の連続失敗回数を1増やして永続化し、増やした後の回数を返す。"""
+    states = state_file.read_json(_STATE_FILE, default={})
+    if not isinstance(states, dict):
+        states = {}
+    count = int(states.get(location, 0) or 0) + 1
+    states[location] = count
+    state_file.write_json_atomic(_STATE_FILE, states)
+    return count
+
+
+def _reset_transient_failures(location: str) -> None:
+    """成功したら拠点の連続失敗回数を消す(カウンターがある場合のみ書き込む)。"""
+    states = state_file.read_json(_STATE_FILE, default={})
+    if isinstance(states, dict) and location in states:
+        states.pop(location)
+        state_file.write_json_atomic(_STATE_FILE, states)
+
 
 # --- API Client Setup ---
 
@@ -73,12 +96,11 @@ def fetch_data_sync(location: str, token: str) -> Dict[str, List[Dict[str, Any]]
         res_dev = session.get(url_dev, headers=headers, timeout=10)
         res_dev.raise_for_status()
         result["devices"] = res_dev.json()
-        _transient_failures.pop(location, None)
+        _reset_transient_failures(location)
 
     except (requests.ConnectionError, requests.Timeout) as e:
         # 一過性の通信エラーは連続した場合だけ ERROR にする(閾値の説明は定数のコメント参照)
-        count = _transient_failures.get(location, 0) + 1
-        _transient_failures[location] = count
+        count = _record_transient_failure(location)
         if count >= TRANSIENT_ERROR_ERROR_THRESHOLD:
             logger.error("API Error at %s (%d回連続): %s", location, count, e)
         else:
