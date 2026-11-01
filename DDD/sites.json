@@ -182,16 +182,6 @@
     "_comment": "Mrs.Merci SPA / Restpia / Mrs.AUBE SPAと同一テンプレート系列"
   },
   {
-    "site_id": "tropical_spa",
-    "name": "トロピカルSPA",
-    "target_url": "https://tropical-osaka.com/news.php",
-    "selector_container": "ul.newsList li",
-    "selector_name": "h2.title",
-    "selector_link": "a",
-    "selector_image": "span.thumb img",
-    "_comment": "Bellicaと同一テンプレート系列。新人情報一覧が個別プロフィール\nページへのリンクを持たないブログ形式のため、リンクは常に\n見つからない（detail_urlは一覧ページURLへ、cast_idは名前ベース\nへフォールバックする）"
-  },
-  {
     "site_id": "tenjoubito_premium",
     "name": "天上人PREMIUM",
     "target_url": "https://www.tenjoubitopr.com/staff/",

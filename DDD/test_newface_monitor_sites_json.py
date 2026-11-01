@@ -42,15 +42,16 @@ def _by_id(site_id: str) -> SiteConfig:
 class TestSitesJsonLoadsIdentically:
     """(a) sites.json から読み込んだ内容が、外出し前の既知サイトと一致すること。"""
 
-    def test_site_count_is_76(self):
+    def test_site_count_is_75(self):
         # Issue #413 起票時点の既知サイト数(79件)から、閉鎖が確認された3サイト
-        # (restpia / mrs_luxe / yurikago。Issue #1031)を除いた件数であること。
-        assert len(MonitorConfig.SITES) == 76
+        # (restpia / mrs_luxe / yurikago。Issue #1031)と、69時間以上 401 が続いた
+        # tropical_spa(2026-11-01)を除いた件数であること。
+        assert len(MonitorConfig.SITES) == 75
 
     def test_closed_sites_are_removed(self):
         # Issue #1031: 閉鎖が確認されたサイトが sites.json に戻っていないこと。
         ids = {s.site_id for s in MonitorConfig.SITES}
-        assert not ids & {"restpia", "mrs_luxe", "yurikago"}
+        assert not ids & {"restpia", "mrs_luxe", "yurikago", "tropical_spa"}
 
     def test_petitpetit_dream_matches_known_values(self):
         # data_filename を明示指定している後方互換サイト(既存運用データ対応)。
