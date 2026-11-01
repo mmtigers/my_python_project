@@ -31,17 +31,6 @@
     "_comment": "div.photo 内にSNSアイコンへのリンク/画像も混在しているため、\nプロフィールページへのリンクをhrefで明示的に絞り込む\n詳細URLが './profile.php?id=931' のようにクエリパラメータで\nキャストを識別する形式のため、'id'パラメータの値をIDとして使う"
   },
   {
-    "site_id": "itadaki",
-    "name": "ITADAKI（イタダキ）",
-    "target_url": "https://www.itadaki-top.com/staff/",
-    "selector_container": "div#companion ul li",
-    "selector_name": "div.txt a",
-    "selector_link": "div.txt a",
-    "selector_image": "div.img img",
-    "image_attr": "data-original",
-    "_comment": "画像がlazyload実装のため、実URLは src ではなく data-original に入っている"
-  },
-  {
     "site_id": "cecile",
     "name": "Cecile セシル",
     "target_url": "https://cecile.men-este.com/therapist.html",
