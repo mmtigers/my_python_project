@@ -872,6 +872,9 @@ class TestCheckRepoBehindUpstream:
         """サブコマンド名 -> CompletedProcess を返す _git の代用を作る。"""
         def _run(*args, timeout=None):
             key = args[0]
+            if key == "diff" and "diff" not in responses:
+                # 差分を取れない場合は安全側(通知する)に倒す仕様なので、未指定は失敗扱いにする
+                return subprocess.CompletedProcess(args=["git"], returncode=1, stdout="", stderr="")
             result = responses[key]
             if isinstance(result, Exception):
                 raise result
@@ -901,6 +904,26 @@ class TestCheckRepoBehindUpstream:
         # 表示上限(DIFF_LINES_LIMIT)を超えた分は畳んで件数だけ示す
         assert "ほか2件" in msg
         assert "systemctl restart home_system.service" in msg
+
+    def test_ignored_when_only_ci_and_docs_changed(self, monkeypatch):
+        """遅れたコミットが .github/ と docs/ だけなら実機に影響しないので異常にしない。"""
+        monkeypatch.setattr(health_watch, "_git", self._fake_git({
+            "rev-parse": self._ok("master\n"),
+            "fetch": self._ok(),
+            "rev-list": self._ok("1\n"),
+            "diff": self._ok(".github/workflows/test.yml\ndocs/specifications/x.md\n"),
+        }))
+        assert health_watch.check_repo_behind_upstream() is None
+
+    def test_reported_when_runtime_file_also_changed(self, monkeypatch):
+        monkeypatch.setattr(health_watch, "_git", self._fake_git({
+            "rev-parse": self._ok("master\n"),
+            "fetch": self._ok(),
+            "rev-list": self._ok("2\n"),
+            "diff": self._ok(".github/workflows/test.yml\nMY_HOME_SYSTEM/config.py\n"),
+            "log": self._ok("aaaaaaa 修正A\n"),
+        }))
+        assert health_watch.check_repo_behind_upstream() is not None
 
     def test_returns_none_when_up_to_date(self, monkeypatch):
         monkeypatch.setattr(health_watch, "_git", self._fake_git({
@@ -1129,6 +1152,28 @@ class TestCheckServiceRunningStaleCode:
         self._repo(tmp_path, monkeypatch, {n: later for n in names})
         self._started(monkeypatch, self.START)
         assert "ほか2件" in health_watch.check_service_running_stale_code()
+
+    def test_skipped_while_dashboard_deploy_in_progress(self, tmp_path, monkeypatch):
+        """更新(取り込み→再起動)の最中は、取り込み済み・未再起動の一瞬を異常にしない(2026-10-31 15:10)。"""
+        later = datetime.datetime(2026, 10, 6, 12, 0, tzinfo=health_watch.JST)
+        self._repo(tmp_path, monkeypatch, {"MY_HOME_SYSTEM/config.py": later})
+        self._started(monkeypatch, self.START)
+        state = tmp_path / "deploy_state.json"
+        state.write_text('{"phase": "running"}', encoding="utf-8")
+        monkeypatch.setattr(health_watch, "DEPLOY_STATE_FILE", str(state))
+        assert health_watch.check_service_running_stale_code() is None
+
+    def test_stale_deploy_state_does_not_suppress_detection(self, tmp_path, monkeypatch):
+        """中断で取り残された古い「実行中」状態では、検知を止めない。"""
+        later = datetime.datetime(2026, 10, 6, 12, 0, tzinfo=health_watch.JST)
+        self._repo(tmp_path, monkeypatch, {"MY_HOME_SYSTEM/config.py": later})
+        self._started(monkeypatch, self.START)
+        state = tmp_path / "deploy_state.json"
+        state.write_text('{"phase": "restarting"}', encoding="utf-8")
+        old = datetime.datetime.now().timestamp() - health_watch.DEPLOY_IN_PROGRESS_MAX_AGE_SEC - 10
+        os.utime(state, (old, old))
+        monkeypatch.setattr(health_watch, "DEPLOY_STATE_FILE", str(state))
+        assert health_watch.check_service_running_stale_code() is not None
 
     def test_skipped_when_process_start_unknown(self, monkeypatch):
         """サービスが止まっている等で起動時刻が取れない場合は異常にしない(inactive はチェック1の担当)。"""
