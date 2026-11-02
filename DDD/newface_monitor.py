@@ -427,6 +427,11 @@ class MonitorConfig:
     # サイトが毎時ERRORを出し続けて一次ヘルスチェックが発報し続けた事象の
     # 再発防止。詳細は _handle_site_network_failure を参照)。
     CONSECUTIVE_FAILURE_ALERT_THRESHOLD: int = 24
+    # Issue #1073: 閉鎖アラート送信済みのサイトは、失敗のたび(毎時)にWARNINGを出すと、
+    # sites.json から外すまで止まらずログのノイズになる(tropical_spa だけで2日に36件)。
+    # この回数ごと(1時間おきのcronで約1日=24回)にだけWARNINGを出し、それ以外はDEBUGへ
+    # 落とす。「まだ失敗が続いている」ことは無音にせず、1日1回のWARNINGで残す。
+    ALERTED_FAILURE_LOG_INTERVAL: int = 24
     # #395: 同一実行内で失敗したサイト数が総数に占める割合がこの値を超える場合、
     # 個々のサイトの閉鎖ではなく自局側(Pi側の回線断・DNS障害等)の障害とみなし、
     # 閉鎖疑いアラートの一斉送信を抑止する(79サイト分のアラートが同時に飛ぶのを防ぐ)。
@@ -2119,7 +2124,12 @@ def _handle_site_network_failure(
         f"({count} consecutive failures): {exc}"
     )
     if alerted:
-        logger.warning(f"{message} (closure alert already sent)")
+        # Issue #1073: アラート送信済みの失敗は ALERTED_FAILURE_LOG_INTERVAL 回に1回だけ
+        # WARNINGで残し(失敗継続の気づき)、それ以外はDEBUGへ降格してノイズを減らす
+        if count % MonitorConfig.ALERTED_FAILURE_LOG_INTERVAL == 0:
+            logger.warning(f"{message} (closure alert already sent; still failing)")
+        else:
+            logger.debug(f"{message} (closure alert already sent)")
     elif threshold_reached:
         logger.warning(f"{message} (closure alert threshold reached; alert pending)")
     else:
