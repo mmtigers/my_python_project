@@ -107,7 +107,7 @@ opentelemetry-api==1.45.0
     # via fastapi
 pandas==3.0.6
     # via -r requirements.in
-pillow==12.3.0
+pillow==13.0.0
     # via -r requirements.in
 platformdirs==4.5.0
     # via zeep
