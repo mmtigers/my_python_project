@@ -31,17 +31,6 @@
     "_comment": "div.photo 内にSNSアイコンへのリンク/画像も混在しているため、\nプロフィールページへのリンクをhrefで明示的に絞り込む\n詳細URLが './profile.php?id=931' のようにクエリパラメータで\nキャストを識別する形式のため、'id'パラメータの値をIDとして使う"
   },
   {
-    "site_id": "itadaki",
-    "name": "ITADAKI（イタダキ）",
-    "target_url": "https://www.itadaki-top.com/staff/",
-    "selector_container": "div#companion ul li",
-    "selector_name": "div.txt a",
-    "selector_link": "div.txt a",
-    "selector_image": "div.img img",
-    "image_attr": "data-original",
-    "_comment": "画像がlazyload実装のため、実URLは src ではなく data-original に入っている"
-  },
-  {
     "site_id": "cecile",
     "name": "Cecile セシル",
     "target_url": "https://cecile.men-este.com/therapist.html",
@@ -180,16 +169,6 @@
     "selector_link": "a.therapist_meta",
     "selector_image": "p.therapist_img img",
     "_comment": "Mrs.Merci SPA / Restpia / Mrs.AUBE SPAと同一テンプレート系列"
-  },
-  {
-    "site_id": "tropical_spa",
-    "name": "トロピカルSPA",
-    "target_url": "https://tropical-osaka.com/news.php",
-    "selector_container": "ul.newsList li",
-    "selector_name": "h2.title",
-    "selector_link": "a",
-    "selector_image": "span.thumb img",
-    "_comment": "Bellicaと同一テンプレート系列。新人情報一覧が個別プロフィール\nページへのリンクを持たないブログ形式のため、リンクは常に\n見つからない（detail_urlは一覧ページURLへ、cast_idは名前ベース\nへフォールバックする）"
   },
   {
     "site_id": "tenjoubito_premium",
@@ -793,13 +772,13 @@
   {
     "site_id": "flowerspa_kyoto",
     "name": "Mrs.FlowerSpa京都・滋賀",
-    "target_url": "https://flowerspa-kyoto.com/girllist",
+    "target_url": "https://mrs-fruitsspa-kyoto.com/girllist",
     "selector_container": "div.therapist_list > div",
     "selector_name": "h3.therapist_name",
     "selector_link": "a.therapist_meta",
     "selector_image": "p.therapist_img img",
     "name_first_text_only": true,
-    "_comment": "新規パターン。コンテナはclass指定のない裸の<div>のため親要素\n経由で絞り込む。詳細ページへのリンクはカード先頭の中身が空の\n<a class=\"therapist_meta\">がオーバーレイとして機能する"
+    "_comment": "新規パターン。コンテナはclass指定のない裸の<div>のため親要素\n経由で絞り込む。詳細ページへのリンクはカード先頭の中身が空の\n<a class=\"therapist_meta\">がオーバーレイとして機能する\n2026-11-01: flowerspa-kyoto.com/girllist が mrs-fruitsspa-kyoto.com/girllist へ\nリダイレクトされるようになったため target_url を新ドメインへ更新した\n（セレクタは旧サイトのまま。新サイトで通るかは実機の初回巡回ログで要確認）"
   },
   {
     "site_id": "mulala",

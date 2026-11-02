@@ -71,7 +71,9 @@ from core.database import get_ro_connection
 from core.logger import setup_logging
 from core.utils import get_now_jst
 from services.notification_service import send_push
-from services.system_maintenance_service import DEPLOY_BRANCH
+from services.system_maintenance_service import (
+    DEPLOY_BRANCH, DEPLOY_STATE_FILE, PHASE_RESTARTING, PHASE_RUNNING,
+)
 from monitors.log_analyzer import LogAnalyzer
 
 logger = setup_logging("health_watch")
@@ -148,6 +150,13 @@ GIT_FETCH_TIMEOUT_SEC: int = 20
 # チェック13: 稼働中プロセスの起動時刻よりこの秒数を超えて新しいソースがあれば「古いコードで稼働中」とみなす。
 # 起動直前の編集・ps の秒未満の丸めで誤検知しないための余裕。
 STALE_CODE_GRACE_SEC: int = 60
+# repo_behind で「実機の実行コードに影響しない」とみなすパスの接頭辞。遅れたコミットの変更が
+# これらだけなら、Dependabot の auto-merge(.github/workflows の更新)のたびに通知と層2調査が
+# 走るのを避けるため異常にしない。
+# 更新実行中とみなす状態ファイルの鮮度。これより古い「実行中」は中断の取り残しとして無視する
+# (取り残しで stale_code の検知が永久に止まらないようにする)。
+DEPLOY_IN_PROGRESS_MAX_AGE_SEC: int = 600
+REPO_BEHIND_IGNORABLE_PREFIXES: Tuple[str, ...] = (".github/", "docs/")
 # チェック13: 通知に載せる「起動後に更新されたファイル」の最大件数
 STALE_CODE_FILE_LIMIT: int = 3
 
@@ -805,6 +814,17 @@ def check_repo_behind_upstream() -> str | None:
     if behind <= 0:
         return None
 
+    # 遅れたコミットが CI 設定・ドキュメントだけなら実機の挙動に影響しないので異常にしない。
+    # 差分を取得できないときは安全側(通知する)に倒す。
+    changed = _git("diff", "--name-only", f"HEAD...{ref}")
+    if changed.returncode == 0:
+        paths = [p for p in changed.stdout.splitlines() if p.strip()]
+        if paths and all(p.startswith(REPO_BEHIND_IGNORABLE_PREFIXES) for p in paths):
+            logger.info(
+                f"{ref} より {behind} コミット遅れていますが、変更は CI 設定・ドキュメントのみのため異常にしません"
+            )
+            return None
+
     subjects = _git("log", "--oneline", "--no-decorate", f"-{DIFF_LINES_LIMIT}", f"HEAD..{ref}")
     lines = [f"  - {line}" for line in subjects.stdout.strip().splitlines()]
     if behind > len(lines):
@@ -841,6 +861,23 @@ def _service_process_start_time(now: datetime.datetime) -> datetime.datetime | N
         return None
 
 
+def _deploy_in_progress() -> bool:
+    """ダッシュボードの「最新に更新して再起動」が実行中(取り込み中・再起動待ち)か。
+
+    health_watch は unified_server と別プロセスなので `get_deploy_state()`(プロセス内フラグを
+    見て状態ファイルを書き換える)は使わず、状態ファイルを読むだけにする。読めない・壊れている
+    ときは「実行中ではない」として通常どおり判定する。
+    """
+    state = state_file.read_json(DEPLOY_STATE_FILE, default=None)
+    if not (isinstance(state, dict) and state.get("phase") in (PHASE_RUNNING, PHASE_RESTARTING)):
+        return False
+    try:
+        age = datetime.datetime.now().timestamp() - os.stat(DEPLOY_STATE_FILE).st_mtime
+    except OSError:
+        return False
+    return age < DEPLOY_IN_PROGRESS_MAX_AGE_SEC
+
+
 def check_service_running_stale_code() -> str | None:
     """稼働中の home_system.service が、起動後に更新されたコードを読み込めていないかを確認する。
 
@@ -855,6 +892,12 @@ def check_service_running_stale_code() -> str | None:
     サービスが active でない・プロセス時刻や git が取れない場合は「判定できない」として
     スキップする(inactive はチェック1が通知する)。
     """
+    # ダッシュボードの更新(git 取り込み→再起動)の最中は、取り込み済みで未再起動の状態が
+    # 必ず一瞬できる(2026-10-31 15:10 に誤検知)。再起動すれば解消するので判定しない。
+    if _deploy_in_progress():
+        logger.info("ダッシュボードの更新を実行中のため稼働コードの鮮度チェックをスキップします")
+        return None
+
     now = datetime.datetime.now(JST)
     started = _service_process_start_time(now)
     if started is None:

@@ -5,6 +5,7 @@ from typing import Any, Dict, Tuple
 
 from fastapi import HTTPException
 
+from core.jp_holidays import is_offday
 from core.utils import get_now_iso
 from core.database import get_db_cursor
 import config
@@ -31,9 +32,13 @@ def _is_within_youtube_nap_block(now: datetime.datetime | None = None) -> bool:
 
     涼花・智矢とも共通で、自由時間ゲート・自宅保育の適用除外(下記)とは別軸で
     常に適用する制限のため、フローの状態を一切見ない単純な壁時計判定にしている。
+    ただし休日(土日・祝日・家の休み。core.jp_holidays.is_offday)は適用しない
+    (要件確認済み、2026-10-31: 休日の昼はお昼寝に限らず自由に過ごすため)。
     """
     if now is None:
         now = datetime.datetime.now(JST)
+    if is_offday(now):
+        return False
     t = now.time()
     return config.YOUTUBE_NAP_BLOCK_START <= t < config.YOUTUBE_NAP_BLOCK_END
 
@@ -98,6 +103,11 @@ class InventoryService:
         # フロントエンド(InventoryList.tsx)がタップ前にロック表示できるよう、実際の
         # 使用可否判定(_use_item_locked)と同じ判定(_is_user_in_youtube_free_time)から渡す。
         is_in_free_time = _is_user_in_youtube_free_time(user_id)
+        # お昼寝中はフロント側で「自由時間になったら」ではなく終了時刻を案内できるよう、
+        # 終了時刻("HH:MM")を渡す(お昼寝中でなければNone)。
+        nap_block_ends_at = (
+            config.YOUTUBE_NAP_BLOCK_END.strftime("%H:%M") if _is_within_youtube_nap_block() else None
+        )
 
         with get_db_cursor() as cur:
             sql = """
@@ -185,6 +195,7 @@ class InventoryService:
             "youtube_daily_limit_announcement": youtube_daily_limit_announcement,
             "youtube_extension": youtube_extension,
             "is_in_free_time": is_in_free_time,
+            "nap_block_ends_at": nap_block_ends_at,
         }
 
     def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:

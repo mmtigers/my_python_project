@@ -60,6 +60,7 @@ function inventoryResponse(overrides: Partial<InventoryResponse> = {}): Inventor
             can_extend_now: false,
         },
         is_in_free_time: true,
+        nap_block_ends_at: null,
         ...overrides,
     };
 }

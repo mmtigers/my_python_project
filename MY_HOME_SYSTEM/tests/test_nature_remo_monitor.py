@@ -6,6 +6,7 @@ Issue #235の回帰テスト: 瞬時電力計測値(EPC=231)のパースに str.
 太陽光発電等による逆潮流(売電)時の負の文字列値("-120"等)が str.isdigit()==False となり、
 power_val が None のまま無警告でそのポーリング周期のデータが丸ごと破棄されていた不具合。
 """
+import json
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock
@@ -15,6 +16,12 @@ import pytest
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from monitors import nature_remo_monitor as nrm
+
+
+@pytest.fixture(autouse=True)
+def _isolated_state_file(tmp_path, monkeypatch):
+    """連続失敗カウンターの状態ファイルを実ファイル(BASE_DIR)から切り離す。"""
+    monkeypatch.setattr(nrm, "_STATE_FILE", str(tmp_path / "nature_remo_monitor_state.json"))
 
 
 def _make_appliance(val_str):
@@ -160,6 +167,27 @@ class TestFetchDataSync:
 
         assert result == {"appliances": [{"id": "a"}], "devices": []}
         mock_logger.error.assert_called_once()
+
+    def test_transient_error_is_warning_until_consecutive_threshold(self, monkeypatch, tmp_path):
+        """1回の接続エラーは WARNING。連続して閾値に達したら ERROR、成功でカウントはリセット。"""
+        mock_logger = MagicMock()
+        monkeypatch.setattr(nrm, "logger", mock_logger)
+        n = nrm.TRANSIENT_ERROR_ERROR_THRESHOLD
+        for _ in range(n - 1):
+            monkeypatch.setattr(nrm, "create_session", lambda: _FakeSession([requests.ConnectTimeout("t")]))
+            nrm.fetch_data_sync("伊丹", "tok")
+        mock_logger.error.assert_not_called()
+        assert mock_logger.warning.call_count == n - 1
+
+        monkeypatch.setattr(nrm, "create_session", lambda: _FakeSession([requests.ConnectTimeout("t")]))
+        nrm.fetch_data_sync("伊丹", "tok")
+        mock_logger.error.assert_called_once()
+
+        monkeypatch.setattr(
+            nrm, "create_session", lambda: _FakeSession([_FakeResponse([]), _FakeResponse([])])
+        )
+        nrm.fetch_data_sync("伊丹", "tok")
+        assert "伊丹" not in json.loads((tmp_path / "nature_remo_monitor_state.json").read_text())
 
     def test_connection_error_returns_empty_lists(self, monkeypatch):
         session = _FakeSession([requests.ConnectionError("dns failure")])
