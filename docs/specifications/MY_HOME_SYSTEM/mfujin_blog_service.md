@@ -210,7 +210,7 @@
 ### `_is_manga_page_image`
 
 * **役割**: 与えられた`img`タグが「本編の漫画ページ画像」かどうかを判定する。`src`が空、または`.gif`で終わる場合はFalse(ヘッダー/フッターの固定バナー除外)。`height`属性があり`400`未満の場合もFalse(副次チェック)。
-* 根拠: [関数定義] (行番号: 142〜153 / 抜粋: "def _is_manga_page_image(img: Tag) -> bool:")
+* 根拠: [関数定義] (行番号: 143〜154 / 抜粋: "def _is_manga_page_image(img: Tag) -> bool:")
 
 
 * **引数/リクエスト**: `img: Tag`(BeautifulSoupの`<img>`要素)
@@ -233,7 +233,7 @@
 ### `parse_article_content`
 
 * **役割**: 記事ページのHTMLから、タイトル(`SELECTORS.article_title_link`)、投稿日時(`SELECTORS.published_time`の`datetime`属性)、カテゴリ(`SELECTORS.category`)、本編漫画画像URL一覧(`SELECTORS.body_container`配下の`SELECTORS.manga_image_candidate`のうち`_is_manga_page_image`がTrueのものだけ、DOM出現順を維持、`urljoin`で絶対URL化)を抽出し`ArticleContent`として返す。
-* 根拠: [関数定義] (行番号: 156〜193 / 抜粋: "def parse_article_content(soup: BeautifulSoup, url: str) -> ArticleContent:")
+* 根拠: [関数定義] (行番号: 157〜194 / 抜粋: "def parse_article_content(soup: BeautifulSoup, url: str) -> ArticleContent:")
 
 
 * **引数/リクエスト**: `soup: BeautifulSoup`, `url: str`(記事の絶対URL。相対画像パスの解決基準になる)
@@ -256,7 +256,7 @@
 ### `fetch_article_content`
 
 * **役割**: 記事URLへGETリクエストを送り、`raise_for_status()`の後`_decode_utf8`でデコードしたHTMLを`parse_article_content`で解析する。
-* 根拠: [関数定義] (行番号: 196〜199 / 抜粋: "def fetch_article_content(session: requests.Session, url: str) -> ArticleContent:")
+* 根拠: [関数定義] (行番号: 197〜200 / 抜粋: "def fetch_article_content(session: requests.Session, url: str) -> ArticleContent:")
 
 
 * **引数/リクエスト**: `session: requests.Session`, `url: str`
@@ -279,7 +279,7 @@
 ### `is_excluded_category`
 
 * **役割**: カテゴリ文字列が`config.MFUJIN_BLOG_EXCLUDED_CATEGORIES`(完全一致のリスト)に含まれるかを判定する。
-* 根拠: [関数定義] (行番号: 202〜210 / 抜粋: "def is_excluded_category(category: str | None) -> bool:")
+* 根拠: [関数定義] (行番号: 203〜211 / 抜粋: "def is_excluded_category(category: str | None) -> bool:")
 
 
 * **引数/リクエスト**: `category: str | None`
@@ -287,7 +287,7 @@
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: (行番号: 209, 210 / 抜粋: "return False", "return category in config.MFUJIN_BLOG_EXCLUDED_CATEGORIES")
+* 根拠: (行番号: 209, 211 / 抜粋: "return False", "return category in config.MFUJIN_BLOG_EXCLUDED_CATEGORIES")
 
 
 * **副作用**: なし
@@ -302,7 +302,7 @@
 ### `validate_image_urls`
 
 * **役割**: 抽出済み画像URL一覧の各URLへHEADリクエストを送り、ステータスコード(400以上は除外)・`Content-Length`ヘッダ(`config.MFUJIN_BLOG_IMAGE_MAX_SIZE_MB`換算のバイト数を超えたら除外)を検証し、通過したURLのみのリストを返す。
-* 根拠: [関数定義] (行番号: 213〜239 / 抜粋: "def validate_image_urls(session: requests.Session, image_urls: list[str]) -> list[str]:")
+* 根拠: [関数定義] (行番号: 214〜240 / 抜粋: "def validate_image_urls(session: requests.Session, image_urls: list[str]) -> list[str]:")
 
 
 * **引数/リクエスト**: `session: requests.Session`, `image_urls: list[str]`
@@ -310,7 +310,7 @@
 
 
 * **戻り値/レスポンス**: `list[str]`(検証を通過したURLのみ)
-* 根拠: (行番号: 239 / 抜粋: "return validated")
+* 根拠: (行番号: 240 / 抜粋: "return validated")
 
 
 * **副作用**: 各画像URLへの外部HTTP HEADリクエスト(タイムアウト`config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC`、リダイレクト追従あり)。ステータス400以上・サイズ超過・例外発生時はWARNINGログを出力する。
@@ -325,7 +325,7 @@
 ### `build_line_messages`
 
 * **役割**: `ArticleContent`からLINE Messaging APIへ送るメッセージ列(`list[Message]`)を組み立てる。画像枚数によらず常に、タイトル+元記事リンクボタンのバブルを先頭に、画像を`hero`画像とするバブルを`_FLEX_CAROUSEL_MAX_BUBBLES`(12)-1枚まで追加した`FlexMessage`(carousel)1通を返す(画像ごとに別メッセージが連続送信されないようにするため。上限超過分は先頭から切り詰め、WARNINGログを出力)。
-* 根拠: [関数定義] (行番号: 242〜296 / 抜粋: "def build_line_messages(article: ArticleContent) -> list[Message]:")
+* 根拠: [関数定義] (行番号: 243〜297 / 抜粋: "def build_line_messages(article: ArticleContent) -> list[Message]:")
 
 
 * **引数/リクエスト**: `article: ArticleContent`
@@ -442,3 +442,8 @@ graph TD
 * [x] 完了: 根拠漏れが0件である
 * [x] 完了: Mermaid構文にエラーの原因となる記号(エスケープ漏れ)がない
 * [x] 完了: 不明事項を漏れなく列挙した
+
+
+## 追記: 複数サイト対応
+
+`fetch_latest_article_summary(session, top_url=None)`は`top_url`省略時に従来の`config.MFUJIN_BLOG_TOP_URL`を使い、`build_line_messages(article, label="えむふじん")`は通知カードの見出し・altTextに表示名を使う。追加サイト(howawand/yashiroazuki)も同じ`SELECTORS`を共用する。
