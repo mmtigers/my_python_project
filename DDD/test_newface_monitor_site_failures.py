@@ -386,11 +386,46 @@ class TestHandleSiteNetworkFailure:
 
         # 準備段階(閾値到達前)のERRORログを検証対象から除外する
         caplog.clear()
-        with caplog.at_level(logging.WARNING, logger="newface_monitor"):
+        with caplog.at_level(logging.DEBUG, logger="newface_monitor"):
             self._fail_once(notifier, site, dm)
 
         assert all(record.levelno < logging.ERROR for record in caplog.records)
-        assert any("closure alert already sent" in record.message for record in caplog.records)
+        # #1073: 送信済みの失敗は(間引き周期に当たらない回は)DEBUGへ降格する
+        assert any(
+            record.levelno == logging.DEBUG and "closure alert already sent" in record.message
+            for record in caplog.records
+        )
+
+    def test_alerted_failures_log_warning_only_once_per_interval(
+        self, data_dir, dm, caplog, propagating_logger
+    ):
+        """#1073: アラート送信済みサイトのWARNINGは ALERTED_FAILURE_LOG_INTERVAL 回に1回だけ。
+        それ以外はDEBUGへ降格し、失敗継続は間引き周期のWARNINGで気づける(無音にしない)。"""
+        site = _make_site()
+        notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
+        notifier.notify_site_failure_alert.return_value = True
+        interval = MonitorConfig.ALERTED_FAILURE_LOG_INTERVAL
+        threshold = MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD
+
+        for _ in range(threshold):
+            self._fail_once(notifier, site, dm)
+
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG, logger="newface_monitor"):
+            # 閾値(=アラート送信回)の次の回から、2周期ぶん失敗させる
+            for _ in range(interval * 2):
+                self._fail_once(notifier, site, dm)
+
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        debugs = [
+            r for r in caplog.records
+            if r.levelno == logging.DEBUG and "closure alert already sent" in r.message
+        ]
+        # 閾値+1 〜 閾値+2*interval の範囲に、interval の倍数の回が2回含まれる
+        assert len(warnings) == 2
+        assert all("still failing" in r.message for r in warnings)
+        assert len(debugs) == interval * 2 - 2
 
     def test_threshold_failure_itself_is_demoted_when_alert_succeeds(
         self, data_dir, dm, caplog, propagating_logger

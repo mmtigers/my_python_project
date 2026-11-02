@@ -94,6 +94,19 @@ INVESTIGATE_STATE_FILENAME: str = ".claude_watch_investigate_state"
 # 調査済みの異常シグネチャでフックを再起動しない期間。RENOTIFY_INTERVAL_SEC(6時間)ごとの
 # 再通知に連動して、同じ原因の調査が1日に何度も走るのを防ぐ。
 INVESTIGATE_COOLDOWN_SEC: int = 24 * 3600
+# 層2(自動調査)の対象外にする異常キー(Issue #1074)。通知は従来どおり出すが、原因が自明で
+# 調査しても結論が出ない「遅れ・ドリフト」の類は、層2(claude -p、1回あたり上限 $2)を起動しない。
+# 2026-10-31〜11-01 に層2が3回起動したが、いずれも実機の遅れ(repo_behind)・更新との競合
+# (stale_code)・一過性の1件(app_logs)で、調査しても対処は決まっていた。
+#   - repo_behind    : 実機が origin/master より遅れている → git pull で解消する
+#   - stale_code     : 稼働中のサーバーが古いコード → 再起動で解消する
+#   - deploy_config  : 実機の crontab/systemd/logrotate が deploy/ と食い違う → 反映で解消する
+#   - python_version : 実機の Python が .python-version とずれる → 環境の作り直しで解消する
+# それ以外(service・api・journal・app_logs・disk・memory・nas・recording・quest_master・
+# orphaned_rows)は原因が自明でないため、従来どおり層2の対象にする。
+INVESTIGATE_NOTIFY_ONLY_KEYS: frozenset = frozenset(
+    {"repo_behind", "stale_code", "deploy_config", "python_version"}
+)
 # マーカーが無い初回実行時に遡る時間
 DEFAULT_LOOKBACK_SEC: int = 3600
 # 通知に載せるログ抜粋の最大文字数
@@ -1140,8 +1153,19 @@ def run_checks() -> int:
             if not send_push([{"type": "text", "text": msg}], target="discord", channel="error"):
                 logger.error("異常通知の送信に失敗しました")
                 exit_code = 1
-            # 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)
-            _fire_investigate_hook(anomalies, now)
+            # 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)。
+            # ただし Issue #1074: 遅れ・ドリフト類(INVESTIGATE_NOTIFY_ONLY_KEYS)は通知だけで、
+            # 層2の対象は残りの異常だけにする。混在する場合は調査側へ渡す異常も絞る。
+            investigable = [
+                a for a, k in zip(anomalies, anomaly_keys)
+                if k not in INVESTIGATE_NOTIFY_ONLY_KEYS
+            ]
+            if investigable:
+                _fire_investigate_hook(investigable, now)
+            else:
+                logger.info(
+                    f"異常がすべて層2の対象外(遅れ・ドリフト)のため調査フックは起動しません: {anomaly_keys}"
+                )
         else:
             logger.info("同一の異常が継続中のため再通知を抑制しました")
     else:

@@ -224,6 +224,40 @@ class TestRunChecksHookGating:
         health_watch.run_checks()
         assert fire.call_count == 1  # 同一異常の継続 → 通知抑制と同様に発火しない
 
+    def test_hook_not_fired_when_only_notify_only_anomalies(self, tmp_path, monkeypatch):
+        """#1074: 遅れ・ドリフト類(repo_behind 等)だけなら通知は出すが層2は起動しない。"""
+        self._patch_checks(monkeypatch, tmp_path, anomaly=False)
+        monkeypatch.setattr(health_watch, "check_repo_behind_upstream", lambda: "実機のコードが 1 コミット遅れています")
+        fire = MagicMock()
+        monkeypatch.setattr(health_watch, "_fire_investigate_hook", fire)
+
+        health_watch.run_checks()
+
+        health_watch.send_push.assert_called_once()  # 通知は従来どおり
+        fire.assert_not_called()
+
+    def test_hook_receives_only_investigable_anomalies_when_mixed(self, tmp_path, monkeypatch):
+        """#1074: 対象外と対象が混在する場合は、調査側へ渡すのは対象の異常だけ(通知は全部載る)。"""
+        self._patch_checks(monkeypatch, tmp_path, anomaly=True)  # service は対象
+        monkeypatch.setattr(health_watch, "check_repo_behind_upstream", lambda: "実機のコードが 1 コミット遅れています")
+        fire = MagicMock()
+        monkeypatch.setattr(health_watch, "_fire_investigate_hook", fire)
+
+        health_watch.run_checks()
+
+        fire.assert_called_once()
+        passed = fire.call_args.args[0]
+        assert passed == ["home_system.service が active ではありません"]
+        pushed = health_watch.send_push.call_args.args[0][0]["text"]
+        assert "遅れています" in pushed and "active ではありません" in pushed
+
+    def test_every_notify_only_key_is_a_real_check_key(self):
+        """#1074: キー名の typo で「対象外にしたつもりが起動する」を防ぐ。run_checks の checks に実在すること。"""
+        import inspect
+        source = inspect.getsource(health_watch.run_checks)
+        for key in health_watch.INVESTIGATE_NOTIFY_ONLY_KEYS:
+            assert f'("{key}",' in source, key
+
     def test_hook_does_not_fire_without_anomaly(self, tmp_path, monkeypatch):
         self._patch_checks(monkeypatch, tmp_path, anomaly=False)
         fire = MagicMock()
