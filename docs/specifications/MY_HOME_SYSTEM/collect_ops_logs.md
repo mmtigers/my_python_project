@@ -25,7 +25,7 @@
 * 生存ログ(heartbeat、ローテーション済みを含む)と、`data/heartbeat/*.txt` の日付
 * `health_watch.log` の末尾
 
-第1引数に `journalctl --since` へ渡せる形式(例: `"-6h"`、`today`。既定は `-24h`)を取る。何も変更・再起動せず、`journalctl` や `crontab` が無い環境でも項目ごとに「無い環境」と出して最後まで走る。
+第1引数に `journalctl --since` へ渡せる形式(例: `"-6h"`、`today`。既定は `-24h`)を取る。何も変更・再起動せず、`systemctl` / `journalctl` / `crontab` が無い環境でも、該当の節に「(… が無い環境)」と出して最後まで走る(各コマンドは `command -v` で存在を確認してから呼ぶ)。`health_watch.log` が無いときは「(ログなし)」と出す(`tail | mask || echo` ではパイプラインの終了コードが `mask` のものになりフォールバックが動かないため、`[ -f ]` の `if/else` で判定する)。
 
 Webhook URL(Discord)、`rtsp://user:pass@`、`token` / `password` / `secret` / `api_key` 系の値は `mask` 関数でマスクして出す。ただしマスクは既知の形だけが対象なので、共有前に目視で確認すること。
 
@@ -42,4 +42,5 @@ Webhook URL(Discord)、`rtsp://user:pass@`、`token` / `password` / `secret` / `
 
 * 読み取り専用であること。`systemctl restart` などの変更系コマンドを足さないこと。
 * マスクの対象を増やすときは、`mask` 関数の `sed` 式に足す。新しい種類の認証情報を出力に含める項目を足したら、必ずここも更新する。
+* 外部コマンドの有無は `command -v` で確認し、無い場合の `else` を必ず付ける(パイプラインの `|| echo` は最後のコマンドの終了コードで判定されるため、フォールバックにならない)。
 * 実機のサービス名(`nvr-*`、`cloudflared`、`home_system.service`)を変えたら、このスクリプトの対象も合わせる。
