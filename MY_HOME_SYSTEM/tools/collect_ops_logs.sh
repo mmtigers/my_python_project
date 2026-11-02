@@ -96,4 +96,8 @@ done
 
 # 7. health_watch の直近
 section "health_watch.log の末尾"
-tail -n 12 "$LOG_DIR/health_watch.log" 2>/dev/null | mask || echo "(ログなし)"
+if [ -f "$LOG_DIR/health_watch.log" ]; then
+    tail -n 12 "$LOG_DIR/health_watch.log" | mask
+else
+    echo "(ログなし)"
+fi
