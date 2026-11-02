@@ -21,6 +21,8 @@
     16. ダッシュボード公開設定
     17. 祝日・休日判定設定
     18. えむふじんブログ監視・LINE通知設定
+    20. ログのダウンロード設定
+    21. GitHub Actions ワークフローの時刻起動設定
 """
 import os
 import time
@@ -1064,3 +1066,19 @@ LOG_DOWNLOAD_MAX_MB: int = _get_int_env("LOG_DOWNLOAD_MAX_MB", 10)
 # 複数選択でまとめてダウンロードするときの合計サイズ上限。超える選択は 413 で拒否する
 # (Raspberry Piのメモリ上で連結するため、無制限にしない)。
 LOG_DOWNLOAD_MAX_TOTAL_MB: int = _get_int_env("LOG_DOWNLOAD_MAX_TOTAL_MB", 30)
+
+# ==========================================
+# 21. GitHub Actions ワークフローの時刻起動設定
+# ==========================================
+# GitHub Actions の schedule(cron)は混雑時に数時間遅れることがある(実測で2〜3時間)。
+# 時刻どおりに動かしたいワークフローを、ラズパイの cron から workflow_dispatch で起動する
+# (tools/github_workflow_dispatch.py)。起動先のリポジトリ・ワークフローは個人環境値なので
+# .env にだけ置き、このリポジトリには書かない。
+# トークンは Fine-grained token で、対象リポジトリの Actions: Read and write のみを付ける。
+GITHUB_DISPATCH_TOKEN: Optional[str] = os.getenv("GITHUB_DISPATCH_TOKEN")
+# "owner/repo" 形式
+GITHUB_DISPATCH_REPO: str = os.getenv("GITHUB_DISPATCH_REPO", "").strip()
+# ワークフローのファイル名(例: "post.yml")
+GITHUB_DISPATCH_WORKFLOW: str = os.getenv("GITHUB_DISPATCH_WORKFLOW", "").strip()
+GITHUB_DISPATCH_REF: str = os.getenv("GITHUB_DISPATCH_REF", "main").strip() or "main"
+GITHUB_DISPATCH_TIMEOUT_SEC: int = _get_int_env("GITHUB_DISPATCH_TIMEOUT_SEC", 20)

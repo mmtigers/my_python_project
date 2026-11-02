@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全117件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全118件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -101,6 +101,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [scripts_firewall_apply.md](./scripts_firewall_apply.md) | アプリポート(8000)への接続元を loopback・直結サブネット・Tailscale に限定する iptables ルールを適用する(2026-09-19 新設。`home_firewall.service` から起動時に実行)。 |
 | [switchbot_webhook_fix.md](./switchbot_webhook_fix.md) | 環境変数のベースURLを用いて、SwitchBotおよびLINE BotのWebhookエンドポイントを自動的に更新・修復する。 |
 | [notify_task_failure.md](./notify_task_failure.md) | `run_task.sh` 経由の cron タスクが失敗したことを Discord へ通知する CLI(2026-09-20 新設、Issue #751)。タスクごとのクールダウン状態ファイルで通知の洪水を防ぐ。 |
+| [github_workflow_dispatch.md](./github_workflow_dispatch.md) | GitHub Actions のワークフローを cron から `workflow_dispatch` で時刻どおりに起動する CLI(2026-11-02 新設)。GitHub の schedule が混雑で数時間遅れるため。起動先は `.env` の `GITHUB_DISPATCH_*`。 |
 | [switchbot_webhook_service.md](./switchbot_webhook_service.md) | SwitchBot Webhook の共有シークレット検証とセンサーイベント抽出(Issue #954 でルーターから分離)。 |
 | [rclone_sync_docs.md](./rclone_sync_docs.md) | `docs/` を Google Drive へ rclone で同期する cron 用シェル(終了コードを返し失敗を通知させる。Issue #947)。 |
 | [check_switchbot_hub_api.md](./check_switchbot_hub_api.md) | SwitchBotハブの稼働時/停止時で SwitchBot API の応答に差が出るかを実機で確かめる読み取り専用の確認用 CLI(Issue #881)。 |

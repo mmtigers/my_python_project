@@ -52,6 +52,14 @@
 0 12 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/mfujin_blog_monitor.py
 0 15 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/mfujin_blog_monitor.py
 
+# GitHub Actions のワークフローを時刻どおりに起動する(個人用)。GitHub の schedule は混雑時に
+# 数時間遅れるため、ラズパイの cron から workflow_dispatch で起動する。起動先のリポジトリ・
+# ワークフローは .env(GITHUB_DISPATCH_*)にあり、ここには書かない。slot は起動先が
+# 時間帯ごとの結果を区別するための値(起動先側で同じ日の同じ slot は1回だけ処理する)。
+31 7 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh tools/github_workflow_dispatch.py --input dry_run=false --input slot=morning
+17 12 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh tools/github_workflow_dispatch.py --input dry_run=false --input slot=noon
+13 21 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh tools/github_workflow_dispatch.py --input dry_run=false --input slot=night
+
 # Bluetoothスピーカー(Anker SoundCore 2)のキープアライブ — 2026-09-19 判断: 登録しない
 #
 # 経緯: #585 で「スクリプトがあるのに実行契機が皆無」の解消として
