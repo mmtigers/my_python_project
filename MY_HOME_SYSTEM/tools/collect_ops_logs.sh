@@ -47,7 +47,11 @@ section "collect_ops_logs: $(date '+%Y-%m-%d %H:%M:%S %z') since=$SINCE host=$(h
 # 1. nvr-*.service(常時録画: NAS 書き込み失敗・ffmpeg の再起動)
 for cam in entrance garden parking; do
     section "systemctl status nvr-$cam.service"
-    systemctl status "nvr-$cam.service" --no-pager 2>&1 | head -n 12 | mask
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl status "nvr-$cam.service" --no-pager 2>&1 | head -n 12 | mask
+    else
+        echo "(systemctl が無い環境)"
+    fi
     journal "journalctl nvr-$cam.service(警告以上と再起動)" -u "nvr-$cam.service" -p warning
 done
 
@@ -60,6 +64,8 @@ section "home_system.service の起動履歴(Started/Stopped/Main process exited
 if command -v journalctl >/dev/null 2>&1; then
     journalctl -u home_system.service --since "$SINCE" --no-pager 2>&1 \
         | grep -E "Started |Stopped |Main process exited|Failed with result|Scheduled restart" | tail -n 30 | mask
+else
+    echo "(journalctl が無い環境)"
 fi
 
 # 4. カーネルの OOM・電圧低下(プロセスが黙って落ちた理由)
@@ -67,6 +73,8 @@ section "カーネルログ(OOM killer・電圧低下・NASマウントのエラ
 if command -v journalctl >/dev/null 2>&1; then
     journalctl -k --since "$SINCE" --no-pager 2>&1 \
         | grep -iE "out of memory|oom-kill|killed process|under-voltage|cifs|i/o error" | tail -n 30 | mask
+else
+    echo "(journalctl が無い環境)"
 fi
 
 # 5. crontab(実機とリポジトリの差分)
