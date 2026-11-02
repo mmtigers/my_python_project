@@ -169,6 +169,12 @@ if [ "$ANOMALY_SUMMARY_LEN" -gt "$SUMMARY_MAX_CHARS" ]; then
 ...(${SUMMARY_MAX_CHARS}字を超えたため以下省略)"
 fi
 
+# 異常サマリ内に区切りマーカーそのもの("===ANOMALY_SUMMARY_BEGIN/END===")が混入していると、
+# プロンプト内で本物の区切りと区別できず、以降を「指示」として読ませる経路になりうる。
+# 先頭の "=" を全角へ置換してマーカーとして成立しないようにする(多層防御の1枚。
+# 切り詰めの後に行うため、切り詰めで生じた断片も含めて確実に無効化される)。
+ANOMALY_SUMMARY="${ANOMALY_SUMMARY//===ANOMALY_SUMMARY_/＝＝＝ANOMALY_SUMMARY_}"
+
 # --- 起票モードの上限 (Issue #339) ---
 if [ "$DRY_RUN" != "1" ] && auto_issue_cap_reached; then
   echo "[$(date)] 本日の自動起票が上限(${MAX_ISSUES_PER_DAY}件)に達したか件数を確認できないため、今回はドライランで調査します。"
