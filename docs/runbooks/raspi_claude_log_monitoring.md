@@ -136,6 +136,8 @@ health_watch.py自体が動かなくなった場合に、外部サービス側�
 - `monitors/health_watch.py` の `_fire_investigate_hook()`: 異常検知かつ通知抑制(`_should_notify`)を通過したときのみ、`config.HEALTH_WATCH_INVESTIGATE_HOOK` のスクリプトを異常サマリ(標準入力)つきでfire-and-forget起動する。未設定なら完全no-op。フックの出力は `logs/claude_investigate.log` に追記される（`check_app_logs` はこのファイル名を明示的に除外する。2026-09-06 品質監査: 以前は除外が未実装だった）。
 - `scripts/claude_investigate.sh`: 調査専用スクリプト。flockによる多重起動防止、`timeout`(既定900秒)+`--max-budget-usd`(既定2.00ドル)、`--allowedTools` の機械的制限、`CLAUDE_INVESTIGATE_DRY_RUN=1` でのドライラン(gh起票なし)に対応。環境変数は `.env.example` の「ラズパイ監視 層2」セクション参照。
 
+- **層2の対象外の異常（Issue #1074）**: `INVESTIGATE_NOTIFY_ONLY_KEYS`（`repo_behind`・`stale_code`・`deploy_config`・`python_version`）は、原因が自明で `git pull`・再起動・設定の反映・環境の作り直しで解消する「遅れ・ドリフト」の類なので、**通知だけ**で層2を起動しない（コストの無駄と、結論の出ない調査を避けるため）。ほかの異常と同時に出た場合は、調査側へ渡すのは対象の異常だけ。通知本文は全部の異常を載せる。対象を変えるときは `health_watch.py` のこの定数だけを直す。
+
 有効化手順（ラズパイ側。下の「準備」完了後）:
 
 1. ~~`claude -p --help` で `--permission-mode` / `--allowedTools` / `--max-turns` / `--output-format` の実フラグ名を確認~~ **完了(Issue #339, 2026-09-07)**: ラズパイ実機の Claude Code CLI v2.1.263 で確認済み。`--permission-mode`/`--allowedTools`/`--disallowedTools`/`--output-format`は想定どおりだったが、`--max-turns`はこのバージョンに存在せず、`claude_investigate.sh`側を`--max-budget-usd`(ドル建て上限)に修正済み。CLIが更新された場合は再確認すること。
@@ -169,6 +171,16 @@ IP・ホスト名・URL・認証情報)を書かない、`auto-investigation` �
 2. ヘッドレス実行用の認証: ブラウザのある別マシンで `claude setup-token` を実行して長期トークンを発行し、ラズパイ側の環境変数 `CLAUDE_CODE_OAUTH_TOKEN` に設定（`.env` 等gitignore対象の場所。**リポジトリには絶対にコミットしない**）。
 3. `gh` CLIをIssue/PR作成の最小権限トークンで認証。
 4. コスト面: `claude -p` はステートレスで異常検知時のみ呼ばれるため平常時コストはゼロ。呼び出しコストは `--output-format json` のレスポンスから取得してログに記録することを検討する。
+
+### トラブルシューティング: 層2が `401 OAuth access token has been revoked` で失敗する
+
+`logs/claude_investigate.log`（日次でローテーションされるので `.1`・`.gz` も見る）に `claude -p の実行に失敗しました (exit=1 ...): Failed to authenticate. API Error: 401 OAuth access token has been revoked.` が出る場合は、実機の `CLAUDE_CODE_OAUTH_TOKEN` が失効している（2026-11-01 に確認）。層2は失敗しても層1の通知には影響しないが、調査も起票もされない。
+
+1. ブラウザのある別マシンで `claude setup-token` を実行して長期トークンを再発行する
+2. 実機の `MY_HOME_SYSTEM/.env` の `CLAUDE_CODE_OAUTH_TOKEN` を新しい値に更新する（値をチャット・Issue・リポジトリに貼らない）
+3. 次の異常検知（または手動実行）で、`claude_investigate.log` に `調査完了 (exit=0)` が出ることを確認する
+
+GitHub Actions の `Claude PR review` も同種のトークン（リポジトリのシークレット）を使うので、同時期に失効していないか確認する（Issue #1072）。
 
 ## 将来拡張（不採用だが記録として残す）
 
