@@ -10,7 +10,7 @@ import { Bell, Check, Clock, Coins, LucideIcon } from 'lucide-react';
 import {
     Droplet, UtensilsCrossed, Shirt, Sparkles, Star,
     Waves, Cookie, Pencil, BedDouble, Bath, ShowerHead, Backpack,
-    CookingPot, Briefcase, Sofa,
+    CookingPot, Briefcase, Sofa, FileText,
 } from 'lucide-react';
 import { RoutineFlowState, RoutineStep } from '@/lib/routineDataSchema';
 
@@ -38,6 +38,8 @@ const ICONS: Record<string, LucideIcon> = {
     // パパの土日ステップ(キッチンリセットは上の'kitchen'を共用し、リビングはSofa)。
     living: Sofa,
     work: Briefcase,
+    // 休日の朝だけ出る「朝のプリント1枚」(子ども用am。routine_data.py参照)。
+    print: FileText,
 };
 
 const THEME = {
