@@ -1037,6 +1037,19 @@ EXTRA_HOLIDAY_DATES: frozenset = frozenset(_extra_holiday_dates)
 # services/mfujin_blog_service.py に集約する。
 MFUJIN_BLOG_ENABLED: bool = os.getenv("MFUJIN_BLOG_ENABLED", "true").strip().lower() != "false"
 MFUJIN_BLOG_TOP_URL: str = os.getenv("MFUJIN_BLOG_TOP_URL", "https://mfujin.blog.jp/").strip()
+# 同じ livedoor blog(blog.jp)系のテンプレートで、えむふじんと同様に巡回・通知する追加サイト。
+# "表示名=URL" のカンマ区切り(表示名は通知カード・エラー通知に出る)。空文字で追加なし。
+_mfujin_extra_sites_str: str = os.getenv(
+    "MFUJIN_BLOG_EXTRA_SITES",
+    "howawand=https://howawand.blog.jp/,yashiroazuki=https://yashiroazuki.blog.jp/",
+)
+MFUJIN_BLOG_EXTRA_SITES: list[tuple[str, str]] = [
+    (label.strip(), url.strip())
+    for label, _, url in (item.partition("=") for item in _mfujin_extra_sites_str.split(","))
+    if label.strip() and url.strip()
+]
+# 巡回対象の全サイト [(表示名, トップURL), ...]。先頭が従来のえむふじん。
+MFUJIN_BLOG_SITES: list[tuple[str, str]] = [("えむふじん", MFUJIN_BLOG_TOP_URL), *MFUJIN_BLOG_EXTRA_SITES]
 # 通知先を既存の LINE_USER_ID と分けたい場合のみ設定する(未設定なら LINE_USER_ID を使う)。
 MFUJIN_BLOG_LINE_USER_ID: str = os.getenv("MFUJIN_BLOG_LINE_USER_ID", "").strip() or LINE_USER_ID
 # 「漫画記事」とみなさない除外カテゴリ(カンマ区切り、完全一致)。2026-09にサイドバーの

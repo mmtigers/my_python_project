@@ -18,7 +18,7 @@
 
 ## 2. ファイルの概要
 
-「コミックエッセイ えむふじんがあらわれた」(https://mfujin.blog.jp/)の最新記事を巡回し、漫画記事と判定できた場合のみ本文中の漫画画像をLINEへ通知する個人用バッチのエントリーポイント。cronから1日数回(12:00頃の本実行・15:00頃の取りこぼし救済再実行)起動される想定で、`mfujin_blog_notifications`テーブル(`article_url`のUNIQUE制約)により同一記事の重複送信を防止する。HTML解析自体は`services/mfujin_blog_service.py`に委譲し、本ファイルはオーケストレーション(重複チェック→取得→除外カテゴリ判定→画像枚数判定→画像検証→LINE送信→DB記録)とDiscordへの運用エラー通知を担う。
+「コミックエッセイ えむふじんがあらわれた」(https://mfujin.blog.jp/)の最新記事を巡回し、漫画記事と判定できた場合のみ本文中の漫画画像をLINEへ通知する個人用バッチのエントリーポイント。cronから1日数回(12:00頃の本実行・15:00頃の取りこぼし救済再実行)起動される想定で、`mfujin_blog_notifications`テーブル(`article_url`のUNIQUE制約)により同一記事の重複送信を防止する。`config.MFUJIN_BLOG_SITES`(えむふじん＋`MFUJIN_BLOG_EXTRA_SITES`の追加ブログ howawand.blog.jp / yashiroazuki.blog.jp)を`_run_site`でサイトごとに独立処理し、1サイトの失敗が他サイトの通知を止めない(エラー通知は`[表示名]`付き)。HTML解析自体は`services/mfujin_blog_service.py`に委譲し、本ファイルはオーケストレーション(重複チェック→取得→除外カテゴリ判定→画像枚数判定→画像検証→LINE送信→DB記録)とDiscordへの運用エラー通知を担う。
 
 ## 3. 外部依存関係
 
@@ -26,15 +26,15 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `dataclasses` | 標準 | `dataclasses.replace`で検証済み画像URLに差し替えた`ArticleContent`を作る | 根拠: [インポート宣言] (行番号: 14 / 抜粋: "import dataclasses") |
-| `sys` | 標準 | プロジェクトルートを`sys.path`へ追加 | 根拠: [インポート宣言] (行番号: 15 / 抜粋: "import sys") |
-| `pathlib.Path` | 標準 | 自ファイルの親の親(プロジェクトルート)を解決 | 根拠: [インポート宣言] (行番号: 16 / 抜粋: "from pathlib import Path") |
-| `config` | 外部 | `MFUJIN_BLOG_*`設定値・`SQLITE_TABLE_MFUJIN_NOTIFICATIONS` | 根拠: [インポート宣言] (行番号: 20 / 抜粋: "import config") |
-| `core.database.get_db_cursor` | 外部 | SQLite接続(WAL・ロックリトライ込み) | 根拠: [インポート宣言] (行番号: 22 / 抜粋: "from core.database import get_db_cursor") |
-| `core.logger.setup_logging` | 外部 | ロガー初期化 | 根拠: [インポート宣言] (行番号: 23 / 抜粋: "from core.logger import setup_logging") |
-| `core.utils.get_now_iso` | 外部 | 現在時刻(JST、ISO形式)取得 | 根拠: [インポート宣言] (行番号: 24 / 抜粋: "from core.utils import get_now_iso") |
-| `services.mfujin_blog_service`(`blog`としてimport) | 外部 | サイト取得・解析・メッセージ組み立て | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "from services import mfujin_blog_service as blog") |
-| `services.notification_service.send_push` | 外部 | LINE/Discordへの実送信 | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "from services.notification_service import send_push") |
+| `dataclasses` | 標準 | `dataclasses.replace`で検証済み画像URLに差し替えた`ArticleContent`を作る | 根拠: [インポート宣言] (行番号: 15 / 抜粋: "import dataclasses") |
+| `sys` | 標準 | プロジェクトルートを`sys.path`へ追加 | 根拠: [インポート宣言] (行番号: 16 / 抜粋: "import sys") |
+| `pathlib.Path` | 標準 | 自ファイルの親の親(プロジェクトルート)を解決 | 根拠: [インポート宣言] (行番号: 17 / 抜粋: "from pathlib import Path") |
+| `config` | 外部 | `MFUJIN_BLOG_*`設定値・`SQLITE_TABLE_MFUJIN_NOTIFICATIONS` | 根拠: [インポート宣言] (行番号: 21 / 抜粋: "import config") |
+| `core.database.get_db_cursor` | 外部 | SQLite接続(WAL・ロックリトライ込み) | 根拠: [インポート宣言] (行番号: 23 / 抜粋: "from core.database import get_db_cursor") |
+| `core.logger.setup_logging` | 外部 | ロガー初期化 | 根拠: [インポート宣言] (行番号: 24 / 抜粋: "from core.logger import setup_logging") |
+| `core.utils.get_now_iso` | 外部 | 現在時刻(JST、ISO形式)取得 | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "from core.utils import get_now_iso") |
+| `services.mfujin_blog_service`(`blog`としてimport) | 外部 | サイト取得・解析・メッセージ組み立て | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "from services import mfujin_blog_service as blog") |
+| `services.notification_service.send_push` | 外部 | LINE/Discordへの実送信 | 根拠: [インポート宣言] (行番号: 27 / 抜粋: "from services.notification_service import send_push") |
 
 ### ブラックボックスとなる外部要素
 
@@ -49,7 +49,7 @@
 ### `_get_existing_status`
 
 * **役割**: `mfujin_blog_notifications`テーブルから、指定した`article_url`の既存レコードの`status`を取得する。レコードが無ければ`None`を返す。
-* 根拠: [関数定義] (行番号: 31〜38 / 抜粋: "def _get_existing_status(article_url: str) -> str | None:")
+* 根拠: [関数定義] (行番号: 32〜39 / 抜粋: "def _get_existing_status(article_url: str) -> str | None:")
 
 
 * **引数/リクエスト**: `article_url: str`
@@ -72,7 +72,7 @@
 ### `_record`
 
 * **役割**: `mfujin_blog_notifications`テーブルへ、記事の処理結果(`status`: sent/failed/skipped_category/skipped_no_images等)を`INSERT ... ON CONFLICT(article_url) DO UPDATE`でupsertする。`sent=True`のときのみ`sent_at`に現在時刻を設定し、それ以外は`NULL`のままにする(成功していないのに送信済みとして記録しないため)。
-* 根拠: [関数定義] (行番号: 41〜77 / 抜粋: "def _record(...)")、[upsert SQL] (行番号: 53〜66)、[sent_at分岐] (行番号: 72 / 抜粋: "now if sent else None,")
+* 根拠: [関数定義] (行番号: 42〜78 / 抜粋: "def _record(...)")、[upsert SQL] (行番号: 53〜66)、[sent_at分岐] (行番号: 73 / 抜粋: "now if sent else None,")
 
 
 * **引数/リクエスト**: `article_url: str`, `title: str`, `published_at: Optional[str]`, `status: str`, `image_count: int`, キーワード専用の`error_detail: Optional[str] = None`, `sent: bool = False`
@@ -118,7 +118,7 @@
 ### `run`
 
 * **役割**: 本バッチの唯一のエントリーポイント。(1)`config.MFUJIN_BLOG_ENABLED`が偽なら即終了、(2)`blog.build_session`でセッション作成、(3)`blog.fetch_latest_article_summary`で最新記事を取得(失敗時は運用エラー通知して終了)、(4)`_get_existing_status`で重複チェック(既存かつ`status != "failed"`なら何もせず終了)、(5)`blog.fetch_article_content`で記事本文取得(失敗時は運用エラー通知して終了)、(6)`blog.is_excluded_category`で除外カテゴリなら`status="skipped_category"`でDB記録して終了(運用エラー通知はしない)、(7)画像枚数が`config.MFUJIN_BLOG_MIN_IMAGE_COUNT`未満なら運用エラー通知+`status="skipped_no_images"`でDB記録して終了、(8)`blog.validate_image_urls`で画像検証し全滅なら運用エラー通知+`status="skipped_no_images"`で終了、(9)`blog.build_line_messages`でメッセージ組み立て、(10)`send_push(target="line")`で送信し、失敗なら`status="failed"`で記録、成功なら`status="sent"`かつ`sent_at`付きで記録する。
-* 根拠: [関数定義] (行番号: 91〜150 / 抜粋: "def run() -> None:")、各ステップ (行番号: 92〜94, 96, 98〜102, 104〜107, 109〜113, 115〜118, 120〜126, 128〜132, 134〜135, 137〜147, 149〜150)
+* 根拠: [関数定義] (行番号: 92〜103 / 抜粋: "def run() -> None:")、各ステップ (行番号: 92〜94, 96, 98〜102, 104〜107, 109〜113, 115〜118, 120〜126, 128〜132, 134〜135, 137〜147, 149〜150)
 
 
 * **引数/リクエスト**: なし
@@ -141,7 +141,7 @@
 ### モジュールレベル処理(`sys.path.append`)
 
 * **役割**: 本ファイルの親の親ディレクトリ(`MY_HOME_SYSTEM/`)を`sys.path`へ追加し、`config`等のトップレベルモジュールをcron実行時にも解決できるようにする。
-* 根拠: [モジュールレベル文] (行番号: 18 / 抜粋: "sys.path.append(str(Path(__file__).resolve().parent.parent))")
+* 根拠: [モジュールレベル文] (行番号: 19 / 抜粋: "sys.path.append(str(Path(__file__).resolve().parent.parent))")
 
 
 * **引数/リクエスト**: 該当なし

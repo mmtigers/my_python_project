@@ -133,8 +133,9 @@ def _decode_utf8(content: bytes) -> str:
     return content.decode("utf-8", errors="replace")
 
 
-def fetch_latest_article_summary(session: requests.Session) -> ArticleSummary:
-    resp = session.get(config.MFUJIN_BLOG_TOP_URL, timeout=config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC)
+def fetch_latest_article_summary(session: requests.Session, top_url: str | None = None) -> ArticleSummary:
+    """トップページから最新記事を取得する。top_url省略時は従来のえむふじん(config.MFUJIN_BLOG_TOP_URL)。"""
+    resp = session.get(top_url or config.MFUJIN_BLOG_TOP_URL, timeout=config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC)
     resp.raise_for_status()
     return parse_latest_article_summary(BeautifulSoup(_decode_utf8(resp.content), "html.parser"))
 
@@ -239,7 +240,7 @@ def validate_image_urls(session: requests.Session, image_urls: list[str]) -> lis
     return validated
 
 
-def build_line_messages(article: ArticleContent) -> list[Message]:
+def build_line_messages(article: ArticleContent, label: str = "えむふじん") -> list[Message]:
     """記事内容からLINE Messaging APIへ送るメッセージ列を組み立てる。
 
     画像枚数によらず、Flex Message の carousel 1通に統一する(先頭バブルがタイトルと
@@ -254,7 +255,7 @@ def build_line_messages(article: ArticleContent) -> list[Message]:
                 "layout": "vertical",
                 "spacing": "md",
                 "contents": [
-                    {"type": "text", "text": "えむふじん 最新話", "weight": "bold", "size": "sm", "color": "#888888"},
+                    {"type": "text", "text": f"{label} 最新話", "weight": "bold", "size": "sm", "color": "#888888"},
                     {"type": "text", "text": article.title, "wrap": True, "weight": "bold", "size": "lg"},
                 ],
             },
@@ -293,4 +294,4 @@ def build_line_messages(article: ArticleContent) -> list[Message]:
             }
         )
     carousel = FlexContainer.from_dict({"type": "carousel", "contents": bubbles})
-    return [FlexMessage(altText=f"えむふじん最新話: {article.title}", contents=carousel)]
+    return [FlexMessage(altText=f"{label}最新話: {article.title}", contents=carousel)]

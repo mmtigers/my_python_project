@@ -1,6 +1,7 @@
 # MY_HOME_SYSTEM/monitors/mfujin_blog_monitor.py
 """
-「コミックエッセイ えむふじんがあらわれた」(https://mfujin.blog.jp/)の最新記事を巡回し、
+「コミックエッセイ えむふじんがあらわれた」(https://mfujin.blog.jp/)および同系の追加ブログ
+(config.MFUJIN_BLOG_EXTRA_SITES: howawand.blog.jp / yashiroazuki.blog.jp)の最新記事を巡回し、
 漫画記事と判定できた場合のみ本文中の漫画画像をLINEへ通知する個人用バッチ。
 
 cronから1日数回(12:00頃の本実行・取りこぼし救済の15:00頃再実行)起動する想定
@@ -94,11 +95,19 @@ def run() -> None:
         return
 
     session = blog.build_session()
+    # 1サイトの失敗(構造変化・通信エラー等)で他サイトの通知を止めないよう、サイトごとに独立して処理する
+    for label, top_url in config.MFUJIN_BLOG_SITES:
+        try:
+            _run_site(session, label, top_url)
+        except Exception as e:  # noqa: BLE001 - 想定外の例外も他サイトに波及させない
+            _notify_operational_error(f"[{label}] 想定外のエラー: {e}")
 
+
+def _run_site(session: requests.Session, label: str, top_url: str) -> None:
     try:
-        summary = blog.fetch_latest_article_summary(session)
+        summary = blog.fetch_latest_article_summary(session, top_url)
     except (requests.RequestException, blog.MfujinBlogError) as e:
-        _notify_operational_error(f"最新記事一覧の取得に失敗しました: {e}")
+        _notify_operational_error(f"[{label}] 最新記事一覧の取得に失敗しました: {e}")
         return
 
     existing_status = _get_existing_status(summary.url)
@@ -109,7 +118,7 @@ def run() -> None:
     try:
         article = blog.fetch_article_content(session, summary.url)
     except (requests.RequestException, blog.MfujinBlogError) as e:
-        _notify_operational_error(f"記事本文の取得に失敗しました (url={summary.url}): {e}")
+        _notify_operational_error(f"[{label}] 記事本文の取得に失敗しました (url={summary.url}): {e}")
         return
 
     if blog.is_excluded_category(article.category):
@@ -119,7 +128,7 @@ def run() -> None:
 
     if len(article.image_urls) < config.MFUJIN_BLOG_MIN_IMAGE_COUNT:
         _notify_operational_error(
-            f"本編の漫画画像が{len(article.image_urls)}枚でした(閾値{config.MFUJIN_BLOG_MIN_IMAGE_COUNT}枚未満)。"
+            f"[{label}] 本編の漫画画像が{len(article.image_urls)}枚でした(閾値{config.MFUJIN_BLOG_MIN_IMAGE_COUNT}枚未満)。"
             f"HTML構造が変わった可能性があります (url={article.url}, category={article.category})"
         )
         _record(article.url, article.title, article.published_at, "skipped_no_images", len(article.image_urls))
@@ -127,11 +136,11 @@ def run() -> None:
 
     validated_images = blog.validate_image_urls(session, article.image_urls)
     if not validated_images:
-        _notify_operational_error(f"抽出した画像がすべて検証に失敗しました (url={article.url})")
+        _notify_operational_error(f"[{label}] 抽出した画像がすべて検証に失敗しました (url={article.url})")
         _record(article.url, article.title, article.published_at, "skipped_no_images", 0)
         return
 
-    messages = blog.build_line_messages(dataclasses.replace(article, image_urls=validated_images))
+    messages = blog.build_line_messages(dataclasses.replace(article, image_urls=validated_images), label)
     ok = send_push(messages=messages, target="line", user_id=config.MFUJIN_BLOG_LINE_USER_ID)
 
     if not ok:
