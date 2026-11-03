@@ -46,6 +46,20 @@ describe('RoutineFlow', () => {
         expect(onCompleteStep).toHaveBeenCalledWith('wash');
     });
 
+    it('hides a step the server marked hidden (weekday-skipped holiday-only item)', () => {
+        const flow: RoutineActiveFlow = {
+            ...amFlow,
+            steps: [
+                ...amFlow.steps.slice(0, 3),
+                { key: 'print', label: '朝のプリント1枚', icon_key: 'print', is_checkpoint: false, is_checklist: true, hidden: true, status: 'done', gold: 0, exp: 0 },
+                amFlow.steps[3],
+            ],
+        };
+        render(<RoutineFlow flowKey="am" flow={flow} onCompleteStep={vi.fn()} />);
+        expect(screen.queryByText('朝のプリント1枚')).not.toBeInTheDocument();
+        expect(screen.getByText('朝ごはん')).toBeInTheDocument();
+    });
+
     it('shows the live departure-bonus preview alongside the checklist', () => {
         render(<RoutineFlow flowKey="am" flow={amFlow} onCompleteStep={vi.fn()} />);
         expect(screen.getByText('出発ボーナス 50 / 150')).toBeInTheDocument();
