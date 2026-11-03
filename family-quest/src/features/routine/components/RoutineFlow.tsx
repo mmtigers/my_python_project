@@ -128,23 +128,25 @@ const RoutineFlow: React.FC<RoutineFlowProps> = ({ flowKey, flow, onCompleteStep
     // 上の並び順が異なるため、単純に「チェックリスト→残りの一本道」の順で並べると
     // pmでは表示順が生活動線と逆転してしまう。そのためflow.steps全体を1回だけ走査し、
     // チェックリストに差し掛かった位置でブロックを1つだけ差し込む形で組み立てる。
-    const checklistSteps = flow.steps.filter((step) => step.is_checklist);
-    const pathSteps = flow.steps.filter((step) => !step.is_checklist);
+    // 今日は出さないステップ(平日の朝のプリント等。hidden)は、以降の組み立てから外す。
+    const visibleSteps = flow.steps.filter((step) => !step.hidden);
+    const checklistSteps = visibleSteps.filter((step) => step.is_checklist);
+    const pathSteps = visibleSteps.filter((step) => !step.is_checklist);
     const lastPathKey = pathSteps.length > 0 ? pathSteps[pathSteps.length - 1].key : null;
     // 出発ボーナス(preview_bonus_gold)はチェックポイントより前のステップの達成率で
     // 決まる(routine_service._eligible_done_ratio)。チェックリストがチェックポイントの
     // 「後」にある場合(例: pmの寝る準備4項目)は、その時点でボーナスは既に確定済みで
     // チェックしても金額は変わらないため、ボーナス表示自体を出さない(要件確認済みの
     // 範囲外だが、出しっぱなしだと「チェックすると増える」ように誤解させてしまうため)。
-    const checkpointIndex = flow.steps.findIndex((step) => step.is_checkpoint);
-    const checklistStartIndex = flow.steps.findIndex((step) => step.is_checklist);
+    const checkpointIndex = visibleSteps.findIndex((step) => step.is_checkpoint);
+    const checklistStartIndex = visibleSteps.findIndex((step) => step.is_checklist);
     const checklistAffectsBonus = checkpointIndex === -1 || checklistStartIndex < checkpointIndex;
 
     // チェックリストのブロックは、最初のチェックリスト項目の位置に1回だけ差し込む。
     // (以前は外側の `let checklistRendered` を reduce の中で書き換えていたが、
     //  eslint-plugin-react-hooks 7 の immutability ルールが「描画後の再代入」として禁じる。
     //  位置は checklistStartIndex で既に分かっているので、それと比べれば足りる)
-    const rows = flow.steps.reduce<React.ReactNode[]>((acc, step, index) => {
+    const rows = visibleSteps.reduce<React.ReactNode[]>((acc, step, index) => {
         if (step.is_checklist) {
             if (index === checklistStartIndex) {
                 acc.push(

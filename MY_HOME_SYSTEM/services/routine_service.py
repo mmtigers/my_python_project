@@ -675,6 +675,10 @@ class RoutineService:
                 "icon_key": step['icon_key'],
                 "is_checkpoint": bool(step['checkpoint_time']),
                 "is_checklist": step['checklist'],
+                # 今日は出さないステップ(平日にweekday_skipでスキップされたもの。例: 休日だけ
+                # の「朝のプリント1枚」)。stepsの並びとcurrent_step_indexの対応を崩さない
+                # ため配列からは外さず、フロント側が描画時に隠す。
+                "hidden": is_weekday_skip(step) and step['key'] in (progress.get('skipped_keys') or set()),
                 "status": progress['steps_status'].get(step['key'], 'locked'),
                 # 大人用フローに寄せたデイリークエスト相当のステップ個別報酬
                 # (子ども用フローのステップは常に0)。画面に「+50 G」として出す。

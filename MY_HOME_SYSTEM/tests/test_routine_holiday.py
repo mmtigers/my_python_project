@@ -86,6 +86,10 @@ class TestHolidayMorningDeadline:
         p = {s['key']: s for s in plain['flows']['am']['steps']}
         assert h['print']['status'] == 'current' and h['print']['is_checklist'] is True
         assert p['print']['status'] == 'done'
+        # 平日は画面に出さない(hidden)。休日は出す。他の項目は平日でも隠さない
+        assert p['print']['hidden'] is True
+        assert h['print']['hidden'] is False
+        assert p['meal']['hidden'] is False
 
     def test_citizens_holiday_is_treated_the_same(self, isolated_db):
         """国民の休日(2026-09-22)も休日として扱う。"""

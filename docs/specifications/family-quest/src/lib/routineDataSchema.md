@@ -19,8 +19,8 @@
 
 `GET /api/routine/today`（コメントによれば`services/routine_service.py`の`RoutineService.get_today_state`が生成すると推測されるレスポンス）に対するランタイム検証用のZodスキーマ群を定義するファイル。朝(`am`)/夕方(`pm`)の2系統の「すごろく」フロー（`routineFlowSchema`。未開始を表す`notStartedFlowSchema`と、進行中を表す`startedFlowSchema`の判別可能な union）と、その中の1ステップを表す`routineStepSchema`を定義し、トップレベルの`routineTodayResponseSchema`としてまとめてエクスポートする。**（コードレビューで発覚した欠落を修正）** `startedFlowSchema`には`leveled_up`/`new_level`フィールドが追加され、`POST /api/routine/complete`のレスポンス検証用に`startedFlowSchema`をそのまま指す`routineActiveFlowSchema`もエクスポートするようになった(以前は完了報告のレスポンスがランタイム検証を一切通っていなかった)。**（朝の準備チェックリスト化で追加）** `routineStepSchema`に`is_checklist: z.boolean()`(順不同でチェック/チェック解除できる項目かどうか)が、`startedFlowSchema`に`preview_bonus_gold: z.number()`/`bonus_full_gold: z.number()`(チェックリストを1つチェックするたびに増える出発ボーナスの見込みgold額、および満額)が追加された。**（大人用フロー分離で追加）** `routineStepSchema`に`gold: z.number()`/`exp: z.number()`(ステップ個別の即時報酬。バックエンドの大人用フローで、デイリークエストからすごろくへ寄せたステップのみ非0になり、子ども用フローのステップは常に0)が、`startedFlowSchema`に`granted_gold: z.number()`/`granted_exp: z.number()`(そのレスポンスで実際に付与された額。`leveled_up`と同様、付与を行った`POST /api/routine/complete`の1回のみ非0で、`GET /api/routine/today`では常に0)が追加された。加えて、あるフローが「画面を占有すべき状態（誘導中）」かどうかを判定する`isRoutineFlowBlocking`と、「自由時間中」かどうかを判定する`isRoutineFlowFreeTime`という2つの型ガード関数、および両者を「amをpmより優先する」という共通の優先順位でまとめて呼び出すヘルパー`selectRoutineFlow`(と、その入出力型`RoutineFlowsMap`/`SelectedRoutineFlow`)をエクスポートする。`selectRoutineFlow`は元々`App.tsx`と`FamilyDashboard.tsx`に重複していた同じ4分岐の三項演算子ロジックをコードレビューで指摘され、本ファイルへ集約したもの。`gameDataSchema.ts`と同じく、バックエンドが将来追加しうる未知のフィールドで`.parse()`が失敗しないよう`.strict()`は使わない方針を採る。
 * 根拠: ファイル冒頭コメント (行番号: 1〜5 / 抜粋: "// family-quest/src/lib/routineDataSchema.ts\n//\n// GET /api/routine/today (services/routine_service.py RoutineService.get_today_state)の\n// レスポンスに対するランタイム検証。gameDataSchema.ts と同じ方針(未知フィールドは\n// 無視するため .strict() は使わない)。")
-* 根拠: `leveled_up`/`new_level`フィールドと`routineActiveFlowSchema` (行番号: 36〜38, 55 / 抜粋: "// チェックポイント通過ボーナスでレベルアップした「その1回のレスポンス」でのみtrue。\n    leveled_up: z.boolean(),\n    new_level: z.number().nullable(),", "export const routineActiveFlowSchema = startedFlowSchema;")
-* 根拠: `is_checklist`/`preview_bonus_gold`/`bonus_full_gold`フィールド (行番号: 13〜14, 32〜35 / 抜粋: "// 順不同でチェック/チェック解除できる項目(例: 朝の準備5項目)かどうか。\n    is_checklist: z.boolean(),", "// チェックリストを1つチェックするたびに増える、出発ボーナスの見込みgold額。\n    // チェックポイント通過前はライブプレビュー、通過後はbonus_goldと同じ値になる。\n    preview_bonus_gold: z.number(),\n    bonus_full_gold: z.number(),")
+* 根拠: `leveled_up`/`new_level`フィールドと`routineActiveFlowSchema` (行番号: 39〜41, 58 / 抜粋: "// チェックポイント通過ボーナスでレベルアップした「その1回のレスポンス」でのみtrue。\n    leveled_up: z.boolean(),\n    new_level: z.number().nullable(),", "export const routineActiveFlowSchema = startedFlowSchema;")
+* 根拠: `is_checklist`/`preview_bonus_gold`/`bonus_full_gold`フィールド (行番号: 13〜14, 35〜38 / 抜粋: "// 順不同でチェック/チェック解除できる項目(例: 朝の準備5項目)かどうか。\n    is_checklist: z.boolean(),", "// チェックリストを1つチェックするたびに増える、出発ボーナスの見込みgold額。\n    // チェックポイント通過前はライブプレビュー、通過後はbonus_goldと同じ値になる。\n    preview_bonus_gold: z.number(),\n    bonus_full_gold: z.number(),")
 * 根拠: `export const routineTodayResponseSchema` (行番号: 57〜63 / 抜粋: "export const routineTodayResponseSchema = z.object({\n    date: z.string(),\n    flows: z.object({\n        am: routineFlowSchema,\n        pm: routineFlowSchema,\n    }),\n});")
 * 根拠: 2つの型ガード関数と`selectRoutineFlow`のエクスポート (行番号: 72〜110 / 抜粋: "export const isRoutineFlowBlocking = (flow: RoutineFlowState | undefined): flow is RoutineActiveFlow =>\n    !!flow && flow.started && !flow.is_complete && !flow.in_free_time;", "export const selectRoutineFlow = (flows: RoutineFlowsMap | undefined): SelectedRoutineFlow => {")
 
@@ -65,7 +65,7 @@
 ### `routineActiveFlowSchema` (export定数)
 
 * **役割**: **（コードレビューで発覚した欠落を修正して新規追加）** `POST /api/routine/complete`のレスポンス(`RoutineService._serialize_flow`の戻り値で常に`started: true`の形)を検証するためのスキーマ。実体は`startedFlowSchema`をそのまま指すエイリアス。以前は`useRoutineData.ts`の`completeStepMutation`がこのレスポンスを一切検証せず`unknown`のまま扱っていたため、本ファイルにこのエイリアスを追加して`useRoutineData.ts`側で`.parse()`できるようにした。
-* 根拠: [定数定義] (行番号: 53〜55 / 抜粋: "// POST /api/routine/complete のレスポンス(RoutineService._serialize_flowの戻り値、\n// 常にstarted=trueの形)の検証に使う。useRoutineData.tsのcompleteStepMutationが利用する。\nexport const routineActiveFlowSchema = startedFlowSchema;")
+* 根拠: [定数定義] (行番号: 56〜58 / 抜粋: "// POST /api/routine/complete のレスポンス(RoutineService._serialize_flowの戻り値、\n// 常にstarted=trueの形)の検証に使う。useRoutineData.tsのcompleteStepMutationが利用する。\nexport const routineActiveFlowSchema = startedFlowSchema;")
 
 * **引数/リクエスト**: 該当なし
 * **戻り値/レスポンス**: 該当なし
@@ -85,7 +85,7 @@
 ### `RoutineStep` / `RoutineFlowState` / `RoutineActiveFlow` / `RoutineTodayResponse` (export型定義)
 
 * **役割**: 上記の各Zodスキーマから`z.infer`/`Extract`で導出されるTypeScript型。`RoutineStep`は`routineStepSchema`の推論型、`RoutineFlowState`は`routineFlowSchema`（union）の推論型、`RoutineActiveFlow`は`RoutineFlowState`から`{ started: true }`側のみを`Extract`で絞り込んだ型（`startedFlowSchema`側と同義）、`RoutineTodayResponse`は`routineTodayResponseSchema`の推論型。
-* 根拠: [型定義] (行番号: 65〜68 / 抜粋: "export type RoutineStep = z.infer<typeof routineStepSchema>;\nexport type RoutineFlowState = z.infer<typeof routineFlowSchema>;\nexport type RoutineActiveFlow = Extract<RoutineFlowState, { started: true }>;\nexport type RoutineTodayResponse = z.infer<typeof routineTodayResponseSchema>;")
+* 根拠: [型定義] (行番号: 68〜71 / 抜粋: "export type RoutineStep = z.infer<typeof routineStepSchema>;\nexport type RoutineFlowState = z.infer<typeof routineFlowSchema>;\nexport type RoutineActiveFlow = Extract<RoutineFlowState, { started: true }>;\nexport type RoutineTodayResponse = z.infer<typeof routineTodayResponseSchema>;")
 
 * **引数/リクエスト**: 該当なし（型定義であり関数ではない）
 * **戻り値/レスポンス**: 該当なし
@@ -95,22 +95,22 @@
 ### `isRoutineFlowBlocking` (export関数、型ガード)
 
 * **役割**: 渡された`flow`が「画面を占有して誘導すべき状態（すごろくがブロッキング中）」かどうかを判定する型ガード関数。`flow`が存在し(`!!flow`)、`flow.started`が真、かつ`flow.is_complete`が偽、かつ`flow.in_free_time`が偽の場合にのみ`true`を返す。戻り値の型注釈`flow is RoutineActiveFlow`により、呼び出し元でこの関数が`true`を返した分岐では`flow`が`RoutineActiveFlow`（`started: true`側）として型が絞り込まれる。自由時間中・未開始・完了後のいずれの状態でも`false`を返し、これらは通常のクエスト選択画面（`QuestList`）に画面を譲る設計であるとコメントされている。
-* 根拠: [関数定義] (行番号: 70〜73 / 抜粋: "// すごろくが「画面を占有すべき状態」(誘導中)かどうか。自由時間中・未開始・\n// 完了後は通常のクエスト選択画面に譲る。\nexport const isRoutineFlowBlocking = (flow: RoutineFlowState | undefined): flow is RoutineActiveFlow =>\n    !!flow && flow.started && !flow.is_complete && !flow.in_free_time;")
+* 根拠: [関数定義] (行番号: 73〜76 / 抜粋: "// すごろくが「画面を占有すべき状態」(誘導中)かどうか。自由時間中・未開始・\n// 完了後は通常のクエスト選択画面に譲る。\nexport const isRoutineFlowBlocking = (flow: RoutineFlowState | undefined): flow is RoutineActiveFlow =>\n    !!flow && flow.started && !flow.is_complete && !flow.in_free_time;")
 
 * **引数/リクエスト**: `flow: RoutineFlowState | undefined`
-* 根拠: (行番号: 72 / 抜粋: "export const isRoutineFlowBlocking = (flow: RoutineFlowState | undefined): flow is RoutineActiveFlow =>")
+* 根拠: (行番号: 75 / 抜粋: "export const isRoutineFlowBlocking = (flow: RoutineFlowState | undefined): flow is RoutineActiveFlow =>")
 
 * **戻り値/レスポンス**: `boolean`（型ガードとして`flow is RoutineActiveFlow`）
 * 根拠: (参照: isRoutineFlowBlocking / 抜粋: "): flow is RoutineActiveFlow =>")
 
 * **副作用**: なし
 * **エラーハンドリング**: なし（`flow`が`undefined`の場合も`!!flow`により例外を投げず`false`を返す）
-* 根拠: (行番号: 73 / 抜粋: "!!flow && flow.started && !flow.is_complete && !flow.in_free_time;")
+* 根拠: (行番号: 76 / 抜粋: "!!flow && flow.started && !flow.is_complete && !flow.in_free_time;")
 
 ### `isRoutineFlowFreeTime` (export関数、型ガード)
 
 * **役割**: 渡された`flow`が「自由時間中」かどうかを判定する型ガード関数。`flow`が存在し、`flow.started`が真、かつ`flow.in_free_time`が真の場合にのみ`true`を返す（`is_complete`は判定条件に含まれないため、完了後かつ`in_free_time`が真のままのデータが渡された場合でも`true`になりうる。9章参照）。`isRoutineFlowBlocking`と同様、戻り値の型注釈により`RoutineActiveFlow`への型の絞り込みを提供する。
-* 根拠: [関数定義] (行番号: 75〜76 / 抜粋: "export const isRoutineFlowFreeTime = (flow: RoutineFlowState | undefined): flow is RoutineActiveFlow =>\n    !!flow && flow.started && flow.in_free_time;")
+* 根拠: [関数定義] (行番号: 78〜79 / 抜粋: "export const isRoutineFlowFreeTime = (flow: RoutineFlowState | undefined): flow is RoutineActiveFlow =>\n    !!flow && flow.started && flow.in_free_time;")
 
 * **引数/リクエスト**: `flow: RoutineFlowState | undefined`
 * **戻り値/レスポンス**: `boolean`（型ガードとして`flow is RoutineActiveFlow`）
@@ -137,7 +137,7 @@
 * 根拠: (行番号: 81)
 
 * **戻り値/レスポンス**: `SelectedRoutineFlow`(`{activeKey, freeTimeKey}`)
-* 根拠: (行番号: 91, 107 / 抜粋: "if (!flows) return { activeKey: null, freeTimeKey: null };", "return { activeKey, freeTimeKey };")
+* 根拠: (行番号: 94, 110 / 抜粋: "if (!flows) return { activeKey: null, freeTimeKey: null };", "return { activeKey, freeTimeKey };")
 
 * **副作用**: なし
 * **エラーハンドリング**: なし（`flows`が`undefined`でも例外を投げず早期returnする）
@@ -244,17 +244,18 @@ graph TD
 * **`.strict()`を意図的に使わない設計**: `gameDataSchema.ts`と同じ方針で、本ファイルの全スキーマは`.strict()`を付与していない。バックエンドが将来フィールドを追加しても`.parse()`は失敗しないが、逆に「バックエンドが新フィールドを追加したのにスキーマ側の更新を忘れた」場合も検知されない（`gameDataSchema.md`の8章に記載された既知のトレードオフと同一）。
 * 根拠: [ファイル冒頭コメント] (行番号: 4〜5 / 抜粋: "// レスポンスに対するランタイム検証。gameDataSchema.ts と同じ方針(未知フィールドは\n// 無視するため .strict() は使わない)。")
 * **`isRoutineFlowFreeTime`は`is_complete`を考慮しない**: `isRoutineFlowBlocking`が`!flow.is_complete`を条件に含むのに対し、`isRoutineFlowFreeTime`は`flow.started && flow.in_free_time`のみを条件とし`is_complete`を見ていない。バックエンドが理論上`is_complete: true`かつ`in_free_time: true`という組み合わせを返した場合、`isRoutineFlowBlocking`は`false`（誘導しない）を返すが`isRoutineFlowFreeTime`は`true`を返し、`App.tsx`/`FamilyDashboard.tsx`側では完了後にもかかわらず`RoutineFreeTimeBanner`が表示されうる。実際にこの組み合わせがバックエンドから返されるかどうかは本ファイルからは不明（9章参照）。
-* 根拠: (行番号: 73, 76 / 抜粋: "!!flow && flow.started && !flow.is_complete && !flow.in_free_time;", "!!flow && flow.started && flow.in_free_time;")
+* 根拠: (行番号: 76, 79 / 抜粋: "!!flow && flow.started && !flow.is_complete && !flow.in_free_time;", "!!flow && flow.started && flow.in_free_time;")
 * **`routineFlowSchema`のunion判別は`started`リテラルに依存する**: `startedFlowSchema`と`notStartedFlowSchema`はいずれも`started`フィールドをそれぞれ`z.literal(true)`/`z.literal(false)`として持ち、`zod`はこのリテラル値をもとにどちらの形式として検証するかを判別する。将来`started`を`boolean`型の別フィールドに置き換える等の変更をする場合、この判別ロジックが壊れないよう注意が必要。
-* 根拠: (行番号: 24, 47 / 抜粋: "started: z.literal(true),", "started: z.literal(false),")
+* 根拠: (行番号: 27, 50 / 抜粋: "started: z.literal(true),", "started: z.literal(false),")
 * **（コードレビューで発覚した重複を解消）** `selectRoutineFlow`は`App.tsx`/`FamilyDashboard.tsx`にあった重複ロジックの単一の正とする実装であり、両ファイルはこれ以降`isRoutineFlowBlocking`/`isRoutineFlowFreeTime`を直接importしなくなった(直接呼び出す場合は本ファイル内の`selectRoutineFlow`経由のみになる)。優先順位ルール自体を変える場合、修正箇所はこの関数1箇所で済む。
 * **`leveled_up`/`new_level`は「その1回のレスポンスのみ」の一時的な値**: `startedFlowSchema`の`leveled_up`/`new_level`はDBに永続化されるフィールドではなく、バックエンド側の`RoutineService._apply_forced_transition`がチェックポイントを通過した「その呼び出し」でのみ値を持つ設計と推測される(詳細はバックエンド側、9章参照)。フロント側のポーリング(`useRoutineData.ts`)は、レスポンスを受け取った瞬間にのみ`leveled_up`を見てLEVEL UP演出を出す必要があり、状態として保持し続けてはいけない。
 * **（朝の準備チェックリスト化で新規追加）** `preview_bonus_gold`もDBに永続化されない値と推測される点は`leveled_up`/`new_level`と似ているが、性質は異なる: `leveled_up`は「チェックポイント通過の瞬間だけ`true`になる一度きりの通知」なのに対し、`preview_bonus_gold`はコメントによれば「チェックポイント通過前はライブプレビュー、通過後は`bonus_gold`と同じ値になる」— つまり毎回のレスポンスで常に意味のある値を持ち、通過の前後を通じて0から増加し続ける表示用の値である(バックエンド側の実装は本ファイルの解析対象外のため推測、9章参照)。
-* 根拠: (行番号: 32〜35 / 抜粋: "// チェックリストを1つチェックするたびに増える、出発ボーナスの見込みgold額。\n    // チェックポイント通過前はライブプレビュー、通過後はbonus_goldと同じ値になる。\n    preview_bonus_gold: z.number(),\n    bonus_full_gold: z.number(),")
+* 根拠: (行番号: 35〜38 / 抜粋: "// チェックリストを1つチェックするたびに増える、出発ボーナスの見込みgold額。\n    // チェックポイント通過前はライブプレビュー、通過後はbonus_goldと同じ値になる。\n    preview_bonus_gold: z.number(),\n    bonus_full_gold: z.number(),")
 * **（朝の準備チェックリスト化で新規追加）** `is_checklist`は`is_checkpoint`と同様に各ステップの「種別フラグ」だが、`is_checkpoint`が「このステップは時刻ベースで自動的に強制通過する」という単一の意味を持つのに対し、`is_checklist`が実際にどういうUI/インタラクションの違いを意味するか(例えばチェック解除が可能かどうか)は本ファイル(スキーマ定義のみ)からは分からず、消費側の`RoutineFlow.tsx`のレンダリングロジックに依存する(`RoutineFlow.md`参照)。
 * 根拠: (行番号: 12〜14 / 抜粋: "is_checkpoint: z.boolean(),\n    // 順不同でチェック/チェック解除できる項目(例: 朝の準備5項目)かどうか。\n    is_checklist: z.boolean(),")
+* **（平日の朝のプリント非表示で追加）** `routineStepSchema`に`hidden: z.boolean().optional()`を追加した。サーバーが今日は出さないと判断したステップ(平日に`weekday_skip`でスキップされた休日専用ステップ。例: 朝のプリント1枚)を示す。配列からは外れない(`current_step_index`との対応を保つため)ので、描画側(`RoutineFlow.tsx`)が`hidden`を除いて組み立てる。旧サーバー応答に備えoptional。
 * **（大人用フロー分離で新規追加）** `routineStepSchema`の`gold`/`exp`と`startedFlowSchema`の`granted_gold`/`granted_exp`は意味が異なる: 前者は「そのステップを完了すると(いくら)もらえるか」という定義上の額で毎レスポンスに含まれる表示用の値、後者は「このレスポンスで実際に付与された額」で、付与を行った`POST /api/routine/complete`の1回のみ非0になる`leveled_up`と同じ性質の一度きりの通知である。`useRoutineData.ts`はこの違いを前提に、後者が非0のときだけトースト表示と`gameData`キャッシュの無効化を行う(`useRoutineData.md`参照)。
-* 根拠: (行番号: 16〜20, 39〜42 / 抜粋: "// ステップ個別の即時報酬。大人用フロー(routine_data.py DAD/MOM_ROUTINE_FLOWS)で、\n    // 生活動線そのものだったデイリークエストをすごろくへ寄せた分の gold/exp が入る。\n    // 子ども用フローのステップは常に0(報酬はチェックポイント通過ボーナスのみ)。\n    gold: z.number(),\n    exp: z.number(),", "// leveled_upと同様、ステップ個別報酬を付与した「その1回のレスポンス」でのみ非0。\n    // GET /today は付与を行わないため常に0になる。\n    granted_gold: z.number(),\n    granted_exp: z.number(),")
+* 根拠: (行番号: 16〜20, 42〜45 / 抜粋: "// ステップ個別の即時報酬。大人用フロー(routine_data.py DAD/MOM_ROUTINE_FLOWS)で、\n    // 生活動線そのものだったデイリークエストをすごろくへ寄せた分の gold/exp が入る。\n    // 子ども用フローのステップは常に0(報酬はチェックポイント通過ボーナスのみ)。\n    gold: z.number(),\n    exp: z.number(),", "// leveled_upと同様、ステップ個別報酬を付与した「その1回のレスポンス」でのみ非0。\n    // GET /today は付与を行わないため常に0になる。\n    granted_gold: z.number(),\n    granted_exp: z.number(),")
 * **（大人用フロー分離で新規追加）** `routineTodayResponseSchema`の`flows`は`am`/`pm`の2キーを必須とする形のままであり、バックエンドがユーザーごとに異なるフロー定義(子ども用/大人用)を返すようになっても、フロントエンドのスキーマ側に変更は不要だった。逆に言えば、本スキーマは「どのユーザーのどのフローか」を区別せず、ステップの`key`や`label`の中身にも一切制約を置いていないため、ユーザーによってステップ構成が変わることはこの型定義からは読み取れない(9章参照)。
 
 ## 9. 不明事項一覧

@@ -12,6 +12,9 @@ const routineStepSchema = z.object({
     is_checkpoint: z.boolean(),
     // 順不同でチェック/チェック解除できる項目(例: 朝の準備5項目)かどうか。
     is_checklist: z.boolean(),
+    // 今日は表示しないステップ(平日にスキップされた休日専用ステップ。例: 朝のプリント1枚)。
+    // 配列からは外れず(current_step_indexとの対応のため)、描画側が隠す。旧サーバー応答に備えoptional。
+    hidden: z.boolean().optional(),
     status: z.enum(['locked', 'current', 'done', 'remind']),
     // ステップ個別の即時報酬。大人用フロー(routine_data.py DAD/MOM_ROUTINE_FLOWS)で、
     // 生活動線そのものだったデイリークエストをすごろくへ寄せた分の gold/exp が入る。
