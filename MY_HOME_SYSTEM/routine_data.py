@@ -268,10 +268,26 @@ ADULT_DEFAULT_ROUTINE_FLOWS = _build_adult_flows([
     {'key': 'snack', 'label': 'ひと休み', 'icon_key': 'snack', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
 ])
 
+# 智矢(son)用。子ども用フロー(ROUTINE_FLOWS)との違いは、pmの帰宅後の一本道だけ:
+# 「手洗い・うがい → おやつ休憩 → 宿題」を「手洗い・うがい → 給食袋や体操服、親への
+# 連絡物を出す → 宿題」に変えた(要件)。学校の持ち物の話なので休日はスキップする
+# (手洗い・おやつと同じ。休日の宿題は従来どおり繰り越し判定に従う)。涼花は対象外で、
+# 従来どおり ROUTINE_FLOWS(おやつ休憩あり)のまま。amは子ども用と同一のものを共用する。
+_SON_PM_STEPS: List[RoutineStep] = [
+    {'key': 'unpack', 'label': '給食袋・体操服・連絡物を出す', 'icon_key': 'unpack', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False}
+    if step['key'] == 'snack' else step
+    for step in ROUTINE_FLOWS['pm']['steps']
+]
+SON_ROUTINE_FLOWS: dict[str, RoutineFlow] = {
+    'am': ROUTINE_FLOWS['am'],
+    'pm': {**ROUTINE_FLOWS['pm'], 'steps': _SON_PM_STEPS},
+}
+
 # user_id → その人のフローセット。ここに無いユーザーは role で解決する(get_flow_set)。
 ROUTINE_FLOW_SETS: dict[str, dict[str, RoutineFlow]] = {
     'dad': DAD_ROUTINE_FLOWS,
     'mom': MOM_ROUTINE_FLOWS,
+    'son': SON_ROUTINE_FLOWS,
 }
 
 ROLE_ADULT = 'role_adult'

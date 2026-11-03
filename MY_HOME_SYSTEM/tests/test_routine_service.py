@@ -366,7 +366,7 @@ class TestEveningFreeTimeTvUnlock:
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
         _seed_user(user_id='son', role='role_child')
 
-        for key in ('handwash', 'snack'):
+        for key in ('handwash', 'unpack'):
             routine_service.complete_step('son', 'pm', key, now=_at(14, 0))
         mock_trigger.assert_not_called()  # 宿題がまだなので発火しない
 
@@ -380,7 +380,7 @@ class TestEveningFreeTimeTvUnlock:
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
         _seed_user(user_id='son', role='role_child')
 
-        for key in ('handwash', 'snack', 'homework'):
+        for key in ('handwash', 'unpack', 'homework'):
             routine_service.complete_step('son', 'pm', key, now=_at(14, 0))
         mock_trigger.assert_not_called()
 
@@ -420,7 +420,7 @@ class TestEveningFreeTimeTvUnlock:
         _seed_user(user_id='son', role='role_child')
 
         routine_service.complete_step('son', 'pm', 'handwash', now=_at(14, 0))
-        routine_service.complete_step('son', 'pm', 'snack', now=_at(14, 0))
+        routine_service.complete_step('son', 'pm', 'unpack', now=_at(14, 0))
         # 宿題・明日の準備は完了させないまま締切(18:00)を過ぎる
         state = _state_after_deadlines('son', now=_at(18, 1))
         pm = state['flows']['pm']
@@ -435,7 +435,7 @@ class TestEveningFreeTimeTvUnlock:
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
         _seed_user(user_id='son', role='role_child')
 
-        for key in ('handwash', 'snack', 'homework'):
+        for key in ('handwash', 'unpack', 'homework'):
             routine_service.complete_step('son', 'pm', key, now=_at(14, 0))
         assert mock_trigger.call_count == 1  # 'homework'完了で自由時間開始トリガーが発火
 
@@ -1738,7 +1738,7 @@ class TestCatchUpAfterDeadline:
 
         _state_after_deadlines('son', now=_at(17, 31))  # 締切通過
         routine_service.complete_step('son', 'pm', 'handwash', now=_at(18, 0))
-        routine_service.complete_step('son', 'pm', 'snack', now=_at(18, 5))
+        routine_service.complete_step('son', 'pm', 'unpack', now=_at(18, 5))
         mock_trigger.assert_not_called()  # 宿題が残っているうちは解錠しない
 
         state = routine_service.complete_step('son', 'pm', 'homework', now=_at(18, 10))
@@ -1823,7 +1823,7 @@ class TestCatchUpAfterDeadline:
         with pytest.raises(HTTPException):
             routine_service.complete_step('son', 'pm', 'free', now=_at(18, 0))
 
-        for key in ('handwash', 'snack', 'homework'):
+        for key in ('handwash', 'unpack', 'homework'):
             state = routine_service.complete_step('son', 'pm', key, now=_at(18, 5))
         assert {x['key']: x['status'] for x in state['steps']}['free'] == 'done'
         mock_trigger.assert_called_once_with("夕方の一本道を締切後に完了(追いつき)")
@@ -1944,3 +1944,22 @@ class TestTvUnlockFiresOnlyAfterCommit:
 
         assert result is not None
         assert "_tv_unlock_reason" not in json.dumps(result, ensure_ascii=False, default=str)
+
+
+class TestSonPmFlow:
+    """智矢(son)の午後は「手洗い→給食袋・体操服・連絡物を出す→宿題」。
+    涼花(daughter)は従来どおり「手洗い→おやつ休憩→宿題」のまま。"""
+
+    def test_son_pm_path_replaces_snack_with_unpack(self, isolated_db):
+        _seed_user(user_id='son', role='role_child')
+        _seed_user(user_id='daughter', role='role_child')
+        son = routine_service.get_today_state('son', now=_at(14, 0))['flows']['pm']
+        daughter = routine_service.get_today_state('daughter', now=_at(14, 0))['flows']['pm']
+        assert [s['key'] for s in son['steps']][:4] == ['handwash', 'unpack', 'homework', 'free']
+        assert [s['key'] for s in daughter['steps']][:4] == ['handwash', 'snack', 'homework', 'free']
+
+    def test_son_unpack_is_skipped_on_offdays(self, isolated_db):
+        _seed_user(user_id='son', role='role_child')
+        sat = routine_service.get_today_state('son', now=_saturday_at(14, 0))['flows']['pm']
+        statuses = {s['key']: s['status'] for s in sat['steps']}
+        assert statuses['handwash'] == 'done' and statuses['unpack'] == 'done'
