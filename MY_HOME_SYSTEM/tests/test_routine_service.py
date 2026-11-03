@@ -174,9 +174,10 @@ class TestStepCompletion:
         _seed_user()
         for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             state = routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
-        assert state['current_step_index'] == 5  # 'free'(チェックポイント)が現在地
+        # 平日は休日専用の'print'(index5)がスキップ済みなので、'free'はindex6
+        assert state['current_step_index'] == 6  # 'free'(チェックポイント)が現在地
         assert state['in_free_time'] is True
-        assert state['steps'][5]['status'] == 'current'
+        assert state['steps'][6]['status'] == 'current'
 
     def test_unchecking_after_all_done_reverts_to_checklist_phase(self, isolated_db):
         """5項目全てチェックして自由時間に入った後、1つ取り消すとチェックリスト
@@ -187,7 +188,7 @@ class TestStepCompletion:
         state = routine_service.complete_step('daughter', 'am', 'toilet', now=_at(6, 1))
         assert state['current_step_index'] == 0
         assert state['in_free_time'] is False
-        assert state['steps'][5]['status'] == 'locked'  # 'free'
+        assert state['steps'][6]['status'] == 'locked'  # 'free'
 
     def test_unknown_step_key_returns_404(self, isolated_db):
         from fastapi import HTTPException
@@ -458,9 +459,9 @@ class TestCheckpointBonus:
         assert am['bonus_exp'] == 30
         # （画面非表示化で変更）amは'free'がフロー最後のステップのため、チェックポイント
         # 通過(=len(steps)に到達)が即is_complete=Trueになり、画面が表示されなくなる。
-        assert am['current_step_index'] == 6
+        assert am['current_step_index'] == 7
         assert am['is_complete'] is True
-        assert am['steps'][5]['status'] == 'done'  # 'free' も通過済みとして完了扱い
+        assert am['steps'][6]['status'] == 'done'  # 'free' も通過済みとして完了扱い
 
         with get_db_cursor() as cur:
             row = cur.execute("SELECT gold, exp FROM quest_users WHERE user_id='daughter'").fetchone()
@@ -585,8 +586,9 @@ class TestCheckpointBonus:
         # チェックリストが1/5しか終わっていないまま7:50を過ぎる
         state = _state_after_deadlines('daughter', now=_at(8, 0))
         am = state['flows']['am']
-        assert am['current_step_index'] == 6
+        assert am['current_step_index'] == 7
         assert am['is_complete'] is True
+        # 平日は休日専用の'print'が母数から除外されるため、従来どおり1/5
         assert am['bonus_gold'] == round(150 * (1 / 5))
 
 
@@ -606,7 +608,7 @@ class TestWeekendCheckpointOverride:
     def test_am_not_forced_past_at_800_on_saturday(self, isolated_db):
         """平日なら7:50超えで強制通過する8:00でも、土日は12:00まではまだ猶予がある。"""
         _seed_user(gold=0, exp=0)
-        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet', 'print'):
             routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
         state = routine_service.get_today_state('daughter', now=_saturday_at(8, 0))
         am = state['flows']['am']
@@ -615,7 +617,7 @@ class TestWeekendCheckpointOverride:
 
     def test_am_forced_past_at_1201_on_saturday(self, isolated_db):
         _seed_user(gold=0, exp=0)
-        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet', 'print'):
             routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
         state = _state_after_deadlines('daughter', now=_saturday_at(12, 1))
         am = state['flows']['am']
@@ -644,7 +646,7 @@ class TestWeekendCheckpointOverride:
         """休日のYouTubeは朝の準備後〜12:00と14:00〜18:00だけ(18:00〜20:00は見られない)。"""
         _seed_user()
         _finish_friday_pm()
-        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet', 'print'):
             routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
         assert routine_service.is_user_currently_in_free_time('daughter', now=_saturday_at(10, 0)) is True
         _state_after_deadlines('daughter', now=_saturday_at(12, 1))
@@ -926,7 +928,7 @@ class TestGetTodayStateIsSideEffectFree:
                 "WHERE user_id='daughter' AND flow_key='am'"
             ).fetchone()
         assert row['bonus_gold'] == 0
-        assert row['current_step_index'] == 5  # 'free'(チェックポイント)のまま
+        assert row['current_step_index'] == 6  # 'free'(チェックポイント)のまま
 
     def test_get_does_not_update_the_progress_row(self, isolated_db):
         """既存行がある場合も updated_at ごと一切変更されないこと。"""
@@ -1159,7 +1161,7 @@ class TestStepEventRecording:
         _seed_user()
         routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 12))
 
-        events = _step_events(flow_key='am')
+        events = _step_events(flow_key='am', source='user')
         assert len(events) == 1
         ev = events[0]
         assert ev['step_key'] == 'wash'
@@ -1177,7 +1179,7 @@ class TestStepEventRecording:
         routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 12))
         routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 15))
 
-        events = _step_events(flow_key='am')
+        events = _step_events(flow_key='am', source='user')
         assert [(e['from_status'], e['to_status'], e['occurred_at']) for e in events] == [
             ('current', 'done', _at(6, 12).isoformat()),
             ('done', 'current', _at(6, 15).isoformat()),
@@ -1191,7 +1193,7 @@ class TestStepEventRecording:
 
         done_times = {
             e['step_key']: e['occurred_at']
-            for e in _step_events(flow_key='am') if e['to_status'] == 'done'
+            for e in _step_events(flow_key='am', source='user') if e['to_status'] == 'done'
         }
         assert done_times == {
             'meal': _at(6, 30).isoformat(),
@@ -1308,7 +1310,7 @@ class TestStepEventRecording:
         routine_service.complete_step('daughter', 'am', 'teeth', now=_at(6, 50))
         routine_service.complete_step('daughter', 'pm', 'handwash', now=_at(14, 2))
 
-        assert {e['step_key'] for e in _step_events(flow_key='am')} == {'teeth'}
+        assert {e['step_key'] for e in _step_events(flow_key='am', source='user')} == {'teeth'}
         assert {e['step_key'] for e in _step_events(flow_key='pm')} == {'handwash', 'snack'}
 
 
@@ -1376,7 +1378,8 @@ class TestAdultFlows:
         _seed_user(user_id='son', role='role_child')
         dad = routine_service.get_today_state('dad', now=_at(6, 0))['flows']['am']
         son = routine_service.get_today_state('son', now=_at(6, 0))['flows']['am']
-        assert [s['key'] for s in dad['steps']] == [s['key'] for s in son['steps']]
+        # 休日専用の「朝のプリント1枚」(print)は子ども用だけの項目なので除いて比べる
+        assert [s['key'] for s in dad['steps']] == [s['key'] for s in son['steps'] if s['key'] != 'print']
 
     def test_unknown_adult_falls_back_to_generic_adult_flow(self, isolated_db):
         """dad/mom以外のrole_adultユーザーも、子ども用フローには落ちない。"""

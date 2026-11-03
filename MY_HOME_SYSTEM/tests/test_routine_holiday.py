@@ -60,7 +60,7 @@ class TestHolidayMorningDeadline:
     def test_not_forced_past_at_800_on_a_holiday(self, isolated_db):
         """平日なら7:50超えで強制通過する8:00でも、祝日は自由時間のまま。"""
         _seed_user(gold=0, exp=0)
-        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet', 'print'):
             routine_service.complete_step('daughter', 'am', key, now=_at(HOLIDAY_MONDAY, 6, 0))
         state = routine_service.process_deadlines(now=_at(HOLIDAY_MONDAY, 8, 0))
         assert state['transitions'] == 0
@@ -70,12 +70,22 @@ class TestHolidayMorningDeadline:
 
     def test_forced_past_at_1201_on_a_holiday(self, isolated_db):
         _seed_user(gold=0, exp=0)
-        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet', 'print'):
             routine_service.complete_step('daughter', 'am', key, now=_at(HOLIDAY_MONDAY, 6, 0))
         routine_service.process_deadlines(now=_at(HOLIDAY_MONDAY, 12, 1))
         state = routine_service.get_today_state('daughter', now=_at(HOLIDAY_MONDAY, 12, 1))
         assert state['flows']['am']['in_free_time'] is False
         assert state['flows']['am']['bonus_gold'] == 150
+
+    def test_morning_print_is_only_on_offdays(self, isolated_db):
+        """「朝のプリント1枚」は休日の朝だけ未完了で出て、平日はスキップ(done)扱い。"""
+        _seed_user()
+        holiday = routine_service.get_today_state('daughter', now=_at(HOLIDAY_MONDAY, 6, 0))
+        plain = routine_service.get_today_state('daughter', now=_at(PLAIN_MONDAY, 6, 0))
+        h = {s['key']: s for s in holiday['flows']['am']['steps']}
+        p = {s['key']: s for s in plain['flows']['am']['steps']}
+        assert h['print']['status'] == 'current' and h['print']['is_checklist'] is True
+        assert p['print']['status'] == 'done'
 
     def test_citizens_holiday_is_treated_the_same(self, isolated_db):
         """国民の休日(2026-09-22)も休日として扱う。"""

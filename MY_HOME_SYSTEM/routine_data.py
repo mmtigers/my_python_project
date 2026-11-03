@@ -103,6 +103,11 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
             {'key': 'wash', 'label': '顔を洗う', 'icon_key': 'wash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             {'key': 'teeth', 'label': '歯磨き', 'icon_key': 'teeth', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             {'key': 'toilet', 'label': 'トイレ', 'icon_key': 'toilet', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+            # 休日(土日・祝日・家の休み)の朝だけ出る「朝のプリント1枚」(要件)。
+            # 平日はweekday_skipで'done'扱い(按分の母数からも除外される)になるだけで、
+            # 報酬も平日の按分も変わらない。休日は朝の準備が5項目→6項目になり、
+            # 満額150Gold/30EXPを6等分して按分する。子ども用フロー限定(大人用には出さない)。
+            {'key': 'print', 'label': '朝のプリント1枚', 'icon_key': 'print', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True, 'weekday_skip': True},
             # 土日は学校が無いため、出発(チェックポイント通過)の締切を12:00に後ろ倒しする。
             # （画面非表示化で変更）以前はこの後に単なる「出発」表示用ステップ(leave、
             # タップ操作以外の意味を持たない)が続いていたが、削除した。'free'がこの
