@@ -10,7 +10,7 @@ import { Bell, Check, Clock, Coins, LucideIcon } from 'lucide-react';
 import {
     Droplet, UtensilsCrossed, Shirt, Sparkles, Star,
     Waves, Cookie, Pencil, BedDouble, Bath, ShowerHead, Backpack,
-    CookingPot, Briefcase, Sofa, FileText,
+    CookingPot, Briefcase, Sofa, FileText, PackageOpen,
 } from 'lucide-react';
 import { RoutineFlowState, RoutineStep } from '@/lib/routineDataSchema';
 
@@ -40,6 +40,8 @@ const ICONS: Record<string, LucideIcon> = {
     work: Briefcase,
     // 休日の朝だけ出る「朝のプリント1枚」(子ども用am。routine_data.py参照)。
     print: FileText,
+    // 智矢の午後の「給食袋・体操服・連絡物を出す」(routine_data.py SON_ROUTINE_FLOWS)。
+    unpack: PackageOpen,
 };
 
 const THEME = {
