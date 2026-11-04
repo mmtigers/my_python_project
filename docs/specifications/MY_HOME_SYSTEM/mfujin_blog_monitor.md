@@ -26,15 +26,15 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `dataclasses` | 標準 | `dataclasses.replace`で検証済み画像URLに差し替えた`ArticleContent`を作る | 根拠: [インポート宣言] (行番号: 15 / 抜粋: "import dataclasses") |
-| `sys` | 標準 | プロジェクトルートを`sys.path`へ追加 | 根拠: [インポート宣言] (行番号: 16 / 抜粋: "import sys") |
-| `pathlib.Path` | 標準 | 自ファイルの親の親(プロジェクトルート)を解決 | 根拠: [インポート宣言] (行番号: 17 / 抜粋: "from pathlib import Path") |
-| `config` | 外部 | `MFUJIN_BLOG_*`設定値・`SQLITE_TABLE_MFUJIN_NOTIFICATIONS` | 根拠: [インポート宣言] (行番号: 21 / 抜粋: "import config") |
-| `core.database.get_db_cursor` | 外部 | SQLite接続(WAL・ロックリトライ込み) | 根拠: [インポート宣言] (行番号: 23 / 抜粋: "from core.database import get_db_cursor") |
-| `core.logger.setup_logging` | 外部 | ロガー初期化 | 根拠: [インポート宣言] (行番号: 24 / 抜粋: "from core.logger import setup_logging") |
-| `core.utils.get_now_iso` | 外部 | 現在時刻(JST、ISO形式)取得 | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "from core.utils import get_now_iso") |
-| `services.mfujin_blog_service`(`blog`としてimport) | 外部 | サイト取得・解析・メッセージ組み立て | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "from services import mfujin_blog_service as blog") |
-| `services.notification_service.send_push` | 外部 | LINE/Discordへの実送信 | 根拠: [インポート宣言] (行番号: 27 / 抜粋: "from services.notification_service import send_push") |
+| `dataclasses` | 標準 | `dataclasses.replace`で検証済み画像URLに差し替えた`ArticleContent`を作る | 根拠: [インポート宣言] (行番号: 17 / 抜粋: "import dataclasses") |
+| `sys` | 標準 | プロジェクトルートを`sys.path`へ追加 | 根拠: [インポート宣言] (行番号: 18 / 抜粋: "import sys") |
+| `pathlib.Path` | 標準 | 自ファイルの親の親(プロジェクトルート)を解決 | 根拠: [インポート宣言] (行番号: 19 / 抜粋: "from pathlib import Path") |
+| `config` | 外部 | `MFUJIN_BLOG_*`設定値・`SQLITE_TABLE_MFUJIN_NOTIFICATIONS` | 根拠: [インポート宣言] (行番号: 23 / 抜粋: "import config") |
+| `core.database.get_db_cursor` | 外部 | SQLite接続(WAL・ロックリトライ込み) | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "from core.database import get_db_cursor") |
+| `core.logger.setup_logging` | 外部 | ロガー初期化 | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "from core.logger import setup_logging") |
+| `core.utils.get_now_iso` | 外部 | 現在時刻(JST、ISO形式)取得 | 根拠: [インポート宣言] (行番号: 27 / 抜粋: "from core.utils import get_now_iso") |
+| `services.mfujin_blog_service`(`blog`としてimport) | 外部 | サイト取得・解析・メッセージ組み立て | 根拠: [インポート宣言] (行番号: 28 / 抜粋: "from services import mfujin_blog_service as blog") |
+| `services.notification_service.send_push` | 外部 | LINE/Discordへの実送信 | 根拠: [インポート宣言] (行番号: 29 / 抜粋: "from services.notification_service import send_push") |
 
 ### ブラックボックスとなる外部要素
 
@@ -48,16 +48,16 @@
 
 ### `_get_existing_status`
 
-* **役割**: `mfujin_blog_notifications`テーブルから、指定した`article_url`の既存レコードの`status`を取得する。レコードが無ければ`None`を返す。
-* 根拠: [関数定義] (行番号: 32〜39 / 抜粋: "def _get_existing_status(article_url: str) -> str | None:")
+* **役割**: `mfujin_blog_notifications`テーブルから、指定した`article_url`の既存レコードの`(status, attempt_count)`を取得する。レコードが無ければ`None`を返す。
+* 根拠: [関数定義] (行番号: 34〜42 / 抜粋: "def _get_existing_status(article_url: str) -> tuple[str, int] | None:")
 
 
 * **引数/リクエスト**: `article_url: str`
 * 根拠: (行番号: 31)
 
 
-* **戻り値/レスポンス**: `Optional[str]`(`status`の値、または`None`)
-* 根拠: (行番号: 38 / 抜粋: 'return row["status"] if row else None')
+* **戻り値/レスポンス**: `tuple[str, int] | None`(`status`とLINE送信の試行回数`attempt_count`、または`None`)
+* 根拠: (行番号: 42 / 抜粋: 'return (row["status"], row["attempt_count"]) if row else None')
 
 
 * **副作用**: `mfujin_blog_notifications`テーブルへの読み取り専用SELECT(`get_db_cursor`経由、commitなし)。
@@ -71,11 +71,11 @@
 
 ### `_record`
 
-* **役割**: `mfujin_blog_notifications`テーブルへ、記事の処理結果(`status`: sent/failed/skipped_category/skipped_no_images等)を`INSERT ... ON CONFLICT(article_url) DO UPDATE`でupsertする。`sent=True`のときのみ`sent_at`に現在時刻を設定し、それ以外は`NULL`のままにする(成功していないのに送信済みとして記録しないため)。
-* 根拠: [関数定義] (行番号: 42〜78 / 抜粋: "def _record(...)")、[upsert SQL] (行番号: 53〜66)、[sent_at分岐] (行番号: 73 / 抜粋: "now if sent else None,")
+* **役割**: `mfujin_blog_notifications`テーブルへ、記事の処理結果(`status`: sent/failed/failed_permanent/skipped_category/skipped_no_images等)と送信の試行回数`attempt_count`を`INSERT ... ON CONFLICT(article_url) DO UPDATE`でupsertする。`sent=True`のときのみ`sent_at`に現在時刻を設定し、それ以外は`NULL`のままにする(成功していないのに送信済みとして記録しないため)。
+* 根拠: [関数定義] (行番号: 45〜85 / 抜粋: "def _record(...)")、[upsert SQL] (行番号: 53〜66)、[sent_at分岐] (行番号: 79 / 抜粋: "now if sent else None,")
 
 
-* **引数/リクエスト**: `article_url: str`, `title: str`, `published_at: Optional[str]`, `status: str`, `image_count: int`, キーワード専用の`error_detail: Optional[str] = None`, `sent: bool = False`
+* **引数/リクエスト**: `article_url: str`, `title: str`, `published_at: Optional[str]`, `status: str`, `image_count: int`, キーワード専用の`error_detail: Optional[str] = None`, `sent: bool = False`, `attempt_count: int = 0`(LINE送信の試行回数。送信しないスキップ系の記録では既定の0)
 * 根拠: (行番号: 41〜50)
 
 
@@ -115,10 +115,33 @@
 
 
 
+### `_notify_operational_warning`
+
+* **役割**: 送信自体は続けられるが、サイト構造の変化が疑われる異常(記事ページからタイトルが取れない等)を通知する。`_notify_operational_error`と同じくDiscordのエラーチャンネル(`channel="error"`)へ送るが、ログはWARNINGで残し、本文の見出しは「えむふじん監視警告」になる(Issue #1087)。
+* 根拠: [関数定義] (行番号: 99 / 抜粋: "def _notify_operational_warning(message: str) -> None:")
+
+
+* **引数/リクエスト**: `message: str`
+* 根拠: (行番号: 99)
+
+
+* **戻り値/レスポンス**: `None`
+* 根拠: (行番号: 99)
+
+
+* **副作用**: `logger.warning`呼び出し、および`send_push(target="discord", channel="error")`によるDiscord Webhookへの送信。
+* 根拠: (行番号: 99〜107)
+
+
+* **エラーハンドリング**: なし(`send_push`の戻り値は確認しない)。
+* 根拠: (行番号: 99〜107)
+
+
+
 ### `run`
 
-* **役割**: 本バッチの唯一のエントリーポイント。(1)`config.MFUJIN_BLOG_ENABLED`が偽なら即終了、(2)`blog.build_session`でセッション作成、(3)`blog.fetch_latest_article_summary`で最新記事を取得(失敗時は運用エラー通知して終了)、(4)`_get_existing_status`で重複チェック(既存かつ`status != "failed"`なら何もせず終了)、(5)`blog.fetch_article_content`で記事本文取得(失敗時は運用エラー通知して終了)、(6)`blog.is_excluded_category`で除外カテゴリなら`status="skipped_category"`でDB記録して終了(運用エラー通知はしない)、(7)画像枚数が`config.MFUJIN_BLOG_MIN_IMAGE_COUNT`未満なら運用エラー通知+`status="skipped_no_images"`でDB記録して終了、(8)`blog.validate_image_urls`で画像検証し全滅なら運用エラー通知+`status="skipped_no_images"`で終了、(9)`blog.build_line_messages`でメッセージ組み立て、(10)`send_push(target="line")`で送信し、失敗なら`status="failed"`で記録、成功なら`status="sent"`かつ`sent_at`付きで記録する。
-* 根拠: [関数定義] (行番号: 92〜103 / 抜粋: "def run() -> None:")、各ステップ (行番号: 92〜94, 96, 98〜102, 104〜107, 109〜113, 115〜118, 120〜126, 128〜132, 134〜135, 137〜147, 149〜150)
+* **役割**: 本バッチの唯一のエントリーポイント。(1)`config.MFUJIN_BLOG_ENABLED`が偽なら即終了、(2)`blog.build_session`でセッション作成、(3)`blog.fetch_latest_article_summary`で最新記事を取得(失敗時は運用エラー通知して終了)、(4)`_get_existing_status`で重複チェック(既存かつ`status != "failed"`なら何もせず終了)、(5)`blog.fetch_article_content`で記事本文取得(失敗時は運用エラー通知して終了)。記事タイトルが空なら`_notify_operational_warning`で警告し、一覧ページで取れたタイトル(`summary.title`)が空でなければそれに差し替える(どちらも空なら`build_line_messages`側の代替表示で送る)、(6)`blog.is_excluded_category`で除外カテゴリなら`status="skipped_category"`でDB記録して終了(運用エラー通知はしない)、(7)画像枚数が`config.MFUJIN_BLOG_MIN_IMAGE_COUNT`未満なら運用エラー通知+`status="skipped_no_images"`でDB記録して終了、(8)`blog.validate_image_urls`で画像検証し全滅なら運用エラー通知+`status="skipped_no_images"`で終了、(9)`blog.build_line_messages`でメッセージ組み立て、(10)`send_push(target="line")`で送信し、試行回数(既存レコードの`attempt_count`+1)とともに記録する。失敗かつ試行回数が`config.MFUJIN_BLOG_MAX_SEND_ATTEMPTS`未満なら`status="failed"`(次回再送)、上限に達したら`status="failed_permanent"`で記録し`_notify_operational_error`で再送停止を1回だけ通知する(以後は(4)の重複チェックでスキップされる。Issue #1087)。成功なら`status="sent"`かつ`sent_at`付きで記録する。
+* 根拠: [関数定義] (行番号: 110〜121 / 抜粋: "def run() -> None:")、各ステップ (行番号: 92〜94, 96, 98〜102, 104〜107, 109〜113, 115〜118, 120〜126, 128〜132, 134〜135, 137〜147, 149〜150)
 
 
 * **引数/リクエスト**: なし
@@ -133,15 +156,15 @@
 * 根拠: (行番号: 96〜150全体)
 
 
-* **エラーハンドリング**: 最新記事一覧取得(行番号98〜102)・記事本文取得(行番号109〜113)はいずれも`except Exception as e`で捕捉し、`_notify_operational_error`を呼んで早期リターンする(例外を上位に伝播させない)。LINE送信失敗(`send_push`が`False`を返す場合、行番号137〜147)は`status="failed"`でDB記録しERRORログを出す(次回実行時に再送されるよう`sent_at`は設定しない)。
-* 根拠: (行番号: 98〜102, 109〜113, 137〜147)
+* **エラーハンドリング**: 最新記事一覧取得(行番号98〜102)・記事本文取得(行番号109〜113)はいずれも`except Exception as e`で捕捉し、`_notify_operational_error`を呼んで早期リターンする(例外を上位に伝播させない)。LINE送信失敗(`send_push`が`False`を返す場合)は試行回数が上限未満なら`status="failed"`でDB記録しERRORログを出す(次回実行時に再送されるよう`sent_at`は設定しない)。上限に達したら`status="failed_permanent"`で記録して再送をやめる(LINE APIの400のように再試行しても直らない失敗で、巡回のたびにERROR・Discordフォールバック通知を繰り返さないため)。
+* 根拠: (行番号: 98〜102, 109〜113, 137〜147)、(行番号: 143 / 抜粋: "if not article.title:")、(行番号: 174 / 抜粋: "attempts = previous_attempts + 1")、(行番号: 177 / 抜粋: "if attempts >= config.MFUJIN_BLOG_MAX_SEND_ATTEMPTS:")
 
 
 
 ### モジュールレベル処理(`sys.path.append`)
 
 * **役割**: 本ファイルの親の親ディレクトリ(`MY_HOME_SYSTEM/`)を`sys.path`へ追加し、`config`等のトップレベルモジュールをcron実行時にも解決できるようにする。
-* 根拠: [モジュールレベル文] (行番号: 19 / 抜粋: "sys.path.append(str(Path(__file__).resolve().parent.parent))")
+* 根拠: [モジュールレベル文] (行番号: 21 / 抜粋: "sys.path.append(str(Path(__file__).resolve().parent.parent))")
 
 
 * **引数/リクエスト**: 該当なし
@@ -197,7 +220,9 @@ flowchart TD
     ExistingCheck -- "既存かつstatus != failed" --> LogSkip["logger.info('スキップ')"] --> End3([End])
     ExistingCheck -- "未処理 or failed" --> FetchContent["blog.fetch_article_content(session, url)"]
     FetchContent -- 例外 --> NotifyErr2["_notify_operational_error(...)"] --> End4([End])
-    FetchContent -- OK --> CategoryCheck{"blog.is_excluded_category(category)?"}
+    FetchContent -- OK --> TitleCheck{"article.title が空?"}
+    TitleCheck -- Yes --> WarnTitle["_notify_operational_warning(...) / summary.titleで代替"] --> CategoryCheck
+    TitleCheck -- No --> CategoryCheck{"blog.is_excluded_category(category)?"}
     CategoryCheck -- Yes --> RecordSkippedCategory["_record(status=skipped_category)"] --> End5([End])
     CategoryCheck -- No --> ImageCountCheck{"len(image_urls) < MIN_IMAGE_COUNT?"}
     ImageCountCheck -- Yes --> NotifyErr3["_notify_operational_error(...)"] --> RecordSkippedImages1["_record(status=skipped_no_images)"] --> End6([End])
@@ -205,7 +230,9 @@ flowchart TD
     Validate -- "全滅" --> NotifyErr4["_notify_operational_error(...)"] --> RecordSkippedImages2["_record(status=skipped_no_images)"] --> End7([End])
     Validate -- "1枚以上" --> BuildMessages["blog.build_line_messages(article)"]
     BuildMessages --> SendPush["send_push(target=line)"]
-    SendPush -- False --> RecordFailed["_record(status=failed)"] --> End8([End])
+    SendPush -- False --> AttemptCheck{"attempts >= MAX_SEND_ATTEMPTS?"}
+    AttemptCheck -- No --> RecordFailed["_record(status=failed, attempt_count)"] --> End8([End])
+    AttemptCheck -- Yes --> RecordPermanent["_record(status=failed_permanent) / _notify_operational_error(...)"] --> End10([End])
     SendPush -- True --> RecordSent["_record(status=sent, sent=True)"] --> End9([End])
 ```
 
@@ -262,14 +289,15 @@ graph TD
 
 * `_get_existing_status`/`_record`のSQL文はテーブル名を`config.SQLITE_TABLE_MFUJIN_NOTIFICATIONS`からf-stringで埋め込んでいる(`# nosec B608`コメント付き)。このパターンは`services/db_retention_service.py`・`services/quest/game_system.py`等、同リポジトリの既存コードでも使われている確立された慣習であり、値はユーザー入力ではなく固定の設定定数である。
 * `run`は「除外カテゴリ判定(正常なスキップ、運用エラー通知なし)」と「画像0枚判定(異常の疑い、運用エラー通知あり)」を明確に区別している。除外カテゴリの判定は`blog.is_excluded_category`を先に呼んでから画像枚数判定を行う順序に依存しており、順序を入れ替えると本来正常なはずのPR記事等でも誤って運用エラー通知が飛ぶようになる。
-* `existing_status != "failed"`の場合のみ再処理する設計のため、`status`列に`sent`/`skipped_category`/`skipped_no_images`/`failed`以外の値が入ると、その値が`"failed"`と一致しない限り(実質的に常に)再処理されなくなる。新しい`status`値を追加する場合はこの判定条件も見直すこと。
+* `existing_status != "failed"`の場合のみ再処理する設計のため、`status`列に`sent`/`skipped_category`/`skipped_no_images`/`failed`以外の値が入ると(`failed_permanent`はこの性質を利用して再送を止めている)、その値が`"failed"`と一致しない限り(実質的に常に)再処理されなくなる。新しい`status`値を追加する場合はこの判定条件も見直すこと。
+* `failed_permanent`になった記事は自動では二度と送られない。原因(タイトル取得・宛先・トークン等)を直したあとで送り直したい場合は、その記事の行を`status='failed'`・`attempt_count=0`に戻す(または行を削除する)必要がある。なお巡回はトップページの最新記事1件だけを見るため、最新でなくなった`failed`の記事はそもそも再送されない。
 * `send_push(target="line", user_id=config.MFUJIN_BLOG_LINE_USER_ID)`は`channel`引数を指定していないため既定値`"notify"`が使われる(Discord向けの引数だがLINE送信では未使用)。
 
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| `mfujin_blog_notifications`テーブルの正式な列定義・制約 | 本ファイルはSQL文中でしか列名を参照しておらず、マイグレーションファイル自体は未確認 | `migrations/0021_add_mfujin_blog_notifications.sql` |
+| `mfujin_blog_notifications`テーブルの正式な列定義・制約 | 本ファイルはSQL文中でしか列名を参照しておらず、マイグレーションファイル自体は未確認 | `migrations/0021_add_mfujin_blog_notifications.sql`、`migrations/0024_add_mfujin_blog_attempt_count.sql` |
 | `run_task.sh`側の失敗時挙動(通知等) | `run()`内で捕捉されない例外(想定外のバグ等)がどう扱われるかは呼び出し元のcronラッパー次第 | `run_task.sh` |
 
 ## 10. 自己検証結果

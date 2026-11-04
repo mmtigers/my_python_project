@@ -497,13 +497,16 @@ flowchart TD
 * **（先にリモコンで消す機能で追加）** 「10. TVロック機能設定」に`TV_NATURE_REMO_LOCATION`（テレビがあるNature Remoの拠点。`itami`か`takasago`で、対応するアクセストークンを使う）・`TV_REMO_SIGNAL_ID`（電源の信号ID）・`TV_REMO_APPLIANCE_ID`（種類が「TV」の家電ID。信号IDが優先）・`TV_POWER_ON_THRESHOLD_WATTS`（テレビがついているとみなす消費電力、既定60W。下の「待機電力に合わせた既定値の見直し」参照）・`TV_GRACEFUL_OFF_WAIT_SECONDS`（リモコンで消してから消費電力が下がるのを待つ最大秒数、既定45）を追加。Nature Remoの3項目のどれかが未設定なら、この機能は使わずプラグだけ切る。`.env.example`にも同じ項目を追記。
 * **（待機電力に合わせた既定値の見直し）** `TV_POWER_ON_THRESHOLD_WATTS`の既定を10Wから60Wに変更し、`.env.example`・コメントも合わせた。KJ-55X9500Gは画面を消した待機状態でも20〜30W台（実測20.3〜30.8W）を使い、点灯中は100W超（実測106.7〜184W）のため、10Wだと待機を「ついている」と誤判定し、`turn_off_tv_gracefully`のリモコン信号（トグル）が待機のテレビをつけてしまっていた（2026-10-25 12:00に29.3Wを「オン」と判定）。この値は電気の分析画面の「点灯」判定（`tv_analysis`の`threshold_watts`）にも使われるため、待機が点灯時間に数えられなくなる。待機が1W未満のテレビでは環境変数で下げてよい。
 
+* **（ブログ通知の再送上限で追加。Issue #1087）** 「18. えむふじんブログ監視・LINE通知設定」に`MFUJIN_BLOG_MAX_SEND_ATTEMPTS`（`int`、環境変数`MFUJIN_BLOG_MAX_SEND_ATTEMPTS`、既定3）を追加した。`monitors/mfujin_blog_monitor.py`が、LINE送信に失敗した記事を再送する回数の上限として参照し、達しても送れなければ`status='failed_permanent'`にして再送をやめる。`.env.example`にも同じ項目を追記。
+  根拠: [定数定義] (行番号: 1084 / 抜粋: "MFUJIN_BLOG_MAX_SEND_ATTEMPTS: int = _get_int_env(\"MFUJIN_BLOG_MAX_SEND_ATTEMPTS\", 3)")
+
 * **（ログのダウンロードで追加）** 「20. ログのダウンロード設定」に`LOG_DOWNLOAD_MAX_MB`（`int`、環境変数`LOG_DOWNLOAD_MAX_MB`、既定10）を追加した。`services/log_download_service.py`が1ファイルあたりの返却サイズ上限（超過時は末尾側のみ返す）として参照する。
-  根拠: [定数定義] (行番号: 1087 / 抜粋: "LOG_DOWNLOAD_MAX_MB: int = _get_int_env(\"LOG_DOWNLOAD_MAX_MB\", 10)")
+  根拠: [定数定義] (行番号: 1092 / 抜粋: "LOG_DOWNLOAD_MAX_MB: int = _get_int_env(\"LOG_DOWNLOAD_MAX_MB\", 10)")
 
 * **（ログのまとめてダウンロードで追加）** 「20. ログのダウンロード設定」に`LOG_DOWNLOAD_MAX_TOTAL_MB`（`int`、環境変数`LOG_DOWNLOAD_MAX_TOTAL_MB`、既定30）を追加した。複数選択でまとめてダウンロードするときの合計サイズ上限で、見積もりが超える選択は`GET /dashboard/sys/logs`が413で拒否する。
-  根拠: [定数定義] (行番号: 1090 / 抜粋: "LOG_DOWNLOAD_MAX_TOTAL_MB: int = _get_int_env(\"LOG_DOWNLOAD_MAX_TOTAL_MB\", 30)")
+  根拠: [定数定義] (行番号: 1095 / 抜粋: "LOG_DOWNLOAD_MAX_TOTAL_MB: int = _get_int_env(\"LOG_DOWNLOAD_MAX_TOTAL_MB\", 30)")
 
 * **（GitHub Actions ワークフローの時刻起動で追加）** 「21. GitHub Actions ワークフローの時刻起動設定」を追加した。`tools/github_workflow_dispatch.py`（[github_workflow_dispatch.md](./github_workflow_dispatch.md)）が参照する。`GITHUB_DISPATCH_TOKEN`（`Optional[str]`、環境変数`GITHUB_DISPATCH_TOKEN`）・`GITHUB_DISPATCH_REPO`（`str`、`owner/repo`形式、既定空文字）・`GITHUB_DISPATCH_WORKFLOW`（`str`、ワークフローのファイル名、既定空文字）・`GITHUB_DISPATCH_REF`（`str`、既定`"main"`。空文字も`"main"`に戻す）・`GITHUB_DISPATCH_TIMEOUT_SEC`（`int`、既定20）。起動先のリポジトリ・ワークフローは個人環境値として`.env`にのみ置き、リポジトリには書かない方針。`.env.example`にも同じ項目を追記。
-  根拠: [定数定義] (行番号: 1100 / 抜粋: "GITHUB_DISPATCH_TOKEN: Optional[str] = os.getenv(\"GITHUB_DISPATCH_TOKEN\")")
-  根拠: [定数定義] (行番号: 1105 / 抜粋: "GITHUB_DISPATCH_REF: str = os.getenv(\"GITHUB_DISPATCH_REF\", \"main\").strip() or \"main\"")
-  根拠: [定数定義] (行番号: 1106 / 抜粋: "GITHUB_DISPATCH_TIMEOUT_SEC: int = _get_int_env(\"GITHUB_DISPATCH_TIMEOUT_SEC\", 20)")
+  根拠: [定数定義] (行番号: 1105 / 抜粋: "GITHUB_DISPATCH_TOKEN: Optional[str] = os.getenv(\"GITHUB_DISPATCH_TOKEN\")")
+  根拠: [定数定義] (行番号: 1110 / 抜粋: "GITHUB_DISPATCH_REF: str = os.getenv(\"GITHUB_DISPATCH_REF\", \"main\").strip() or \"main\"")
+  根拠: [定数定義] (行番号: 1111 / 抜粋: "GITHUB_DISPATCH_TIMEOUT_SEC: int = _get_int_env(\"GITHUB_DISPATCH_TIMEOUT_SEC\", 20)")

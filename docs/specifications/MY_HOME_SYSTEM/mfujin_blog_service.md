@@ -25,16 +25,16 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `dataclasses` | 標準 | `Selectors`/`ArticleSummary`/`ArticleContent`のデータクラス定義 | 根拠: [インポート宣言] (行番号: 19 / 抜粋: "import dataclasses") |
-| `urllib.parse.urljoin` | 標準 | 相対パスの画像URLを記事URL基準で絶対URL化 | 根拠: [インポート宣言] (行番号: 20 / 抜粋: "from urllib.parse import urljoin") |
-| `config` | 外部 | `MFUJIN_BLOG_*`設定値の取得 | 根拠: [インポート宣言] (行番号: 22 / 抜粋: "import config") |
-| `requests` | 外部 | HTTPセッション・GET/HEADリクエスト | 根拠: [インポート宣言] (行番号: 23 / 抜粋: "import requests") |
-| `bs4.BeautifulSoup` | 外部 | HTML解析 | 根拠: [インポート宣言] (行番号: 24 / 抜粋: "from bs4 import BeautifulSoup") |
-| `bs4.element.Tag` | 外部 | `_is_manga_page_image`の引数型ヒント | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "from bs4.element import Tag") |
-| `core.logger.setup_logging` | 外部 | ロガー初期化 | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "from core.logger import setup_logging") |
+| `dataclasses` | 標準 | `Selectors`/`ArticleSummary`/`ArticleContent`のデータクラス定義 | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "import dataclasses") |
+| `urllib.parse.urljoin` | 標準 | 相対パスの画像URLを記事URL基準で絶対URL化 | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "from urllib.parse import urljoin") |
+| `config` | 外部 | `MFUJIN_BLOG_*`設定値の取得 | 根拠: [インポート宣言] (行番号: 28 / 抜粋: "import config") |
+| `requests` | 外部 | HTTPセッション・GET/HEADリクエスト | 根拠: [インポート宣言] (行番号: 29 / 抜粋: "import requests") |
+| `bs4.BeautifulSoup` | 外部 | HTML解析 | 根拠: [インポート宣言] (行番号: 30 / 抜粋: "from bs4 import BeautifulSoup") |
+| `bs4.element.Tag` | 外部 | `_is_manga_page_image`の引数型ヒント | 根拠: [インポート宣言] (行番号: 31 / 抜粋: "from bs4.element import Tag") |
+| `core.logger.setup_logging` | 外部 | ロガー初期化 | 根拠: [インポート宣言] (行番号: 32 / 抜粋: "from core.logger import setup_logging") |
 | `linebot.v3.messaging`(`FlexContainer`,`FlexMessage`,`Message`) | 外部 | LINE Messaging API v3のメッセージオブジェクト | 根拠: [インポート宣言] (行番号: 27〜33 / 抜粋: "from linebot.v3.messaging import (\n    FlexContainer,\n    FlexMessage,\n    Message,\n)") |
-| `requests.adapters.HTTPAdapter` | 外部 | リトライ機構をセッションにマウント | 根拠: [インポート宣言] (行番号: 32 / 抜粋: "from requests.adapters import HTTPAdapter") |
-| `urllib3.util.retry.Retry` | 外部 | リトライポリシー定義 | 根拠: [インポート宣言] (行番号: 33 / 抜粋: "from urllib3.util.retry import Retry") |
+| `requests.adapters.HTTPAdapter` | 外部 | リトライ機構をセッションにマウント | 根拠: [インポート宣言] (行番号: 38 / 抜粋: "from requests.adapters import HTTPAdapter") |
+| `urllib3.util.retry.Retry` | 外部 | リトライポリシー定義 | 根拠: [インポート宣言] (行番号: 39 / 抜粋: "from urllib3.util.retry import Retry") |
 
 ### ブラックボックスとなる外部要素
 
@@ -71,8 +71,8 @@
 
 ### `Selectors` / `SELECTORS`
 
-* **役割**: サイトのHTML構造とCSSセレクタの対応をまとめたfrozenデータクラス。`article_title_link`(記事タイトル+リンク)、`body_container`(本文コンテナ)、`manga_image_candidate`(本編漫画画像の候補)、`category`(カテゴリ)、`published_time`(投稿日時)の5セレクタを保持する。モジュールロード時に`SELECTORS`としてインスタンス化される。
-* 根拠: [クラス定義] (行番号: 58〜66 / 抜粋: '@dataclasses.dataclass(frozen=True)\nclass Selectors:')、[インスタンス化] (行番号: 63 / 抜粋: "SELECTORS = Selectors()")
+* **役割**: サイトのHTML構造とCSSセレクタの対応をまとめたfrozenデータクラス。`article_title_link`(記事タイトル+リンク)、`article_title`(記事タイトルの`h1`自体。`<a>`を持たないテーマ用)、`og_title`(`meta[property='og:title']`)、`body_container`(本文コンテナ)、`manga_image_candidate`(本編漫画画像の候補)、`category`(カテゴリ)、`published_time`(投稿日時)の7セレクタを保持する。モジュールロード時に`SELECTORS`としてインスタンス化される。
+* 根拠: [クラス定義] (行番号: 58〜66 / 抜粋: '@dataclasses.dataclass(frozen=True)\nclass Selectors:')、[インスタンス化] (行番号: 78 / 抜粋: "SELECTORS = Selectors()")
 
 
 * **引数/リクエスト**: 各フィールドは既定値を持つ文字列(CSSセレクタ)
@@ -118,7 +118,7 @@
 ### `build_session`
 
 * **役割**: リトライ(合計3回、backoff_factor=1.0、対象ステータス500/502/503/504、対象メソッドGET/HEAD)・ブラウザ風User-Agentを設定した`requests.Session`を生成する。DDD/newface_monitor.pyの既存パターン(`requests.Session`+`urllib3.Retry`)に揃えている。
-* 根拠: [関数定義] (行番号: 81〜105 / 抜粋: "def build_session() -> requests.Session:")、[Retry設定] (行番号: 87〜92 / 抜粋: "retries = Retry(\n        total=3,\n        backoff_factor=1.0,\n        status_forcelist=[500, 502, 503, 504],\n        allowed_methods=[\"GET\", \"HEAD\"],\n    )")
+* 根拠: [関数定義] (行番号: 96〜120 / 抜粋: "def build_session() -> requests.Session:")、[Retry設定] (行番号: 102〜107 / 抜粋: "retries = Retry(\n        total=3,\n        backoff_factor=1.0,\n        status_forcelist=[500, 502, 503, 504],\n        allowed_methods=[\"GET\", \"HEAD\"],\n    )")
 
 
 * **引数/リクエスト**: なし
@@ -126,7 +126,7 @@
 
 
 * **戻り値/レスポンス**: `requests.Session`(リトライアダプタとUser-Agentヘッダ設定済み)
-* 根拠: (行番号: 105 / 抜粋: "return session")
+* 根拠: (行番号: 120 / 抜粋: "return session")
 
 
 * **副作用**: なし(セッションオブジェクトの生成のみ。実際のHTTP通信は行わない)
@@ -141,7 +141,7 @@
 ### `parse_latest_article_summary`
 
 * **役割**: トップページのHTML(`BeautifulSoup`オブジェクト)から、`SELECTORS.article_title_link`セレクタで最初に一致した要素(一覧の先頭=最新記事)のURL・タイトルを取得する。
-* 根拠: [関数定義] (行番号: 108〜116 / 抜粋: "def parse_latest_article_summary(soup: BeautifulSoup) -> ArticleSummary:")
+* 根拠: [関数定義] (行番号: 123〜131 / 抜粋: "def parse_latest_article_summary(soup: BeautifulSoup) -> ArticleSummary:")
 
 
 * **引数/リクエスト**: `soup: BeautifulSoup`
@@ -149,7 +149,7 @@
 
 
 * **戻り値/レスポンス**: `ArticleSummary`
-* 根拠: (行番号: 116 / 抜粋: "return ArticleSummary(url=link[\"href\"].strip(), title=link.get_text(strip=True))")
+* 根拠: (行番号: 131 / 抜粋: "return ArticleSummary(url=link[\"href\"].strip(), title=link.get_text(strip=True))")
 
 
 * **副作用**: なし
@@ -187,7 +187,7 @@
 ### `fetch_latest_article_summary`
 
 * **役割**: `config.MFUJIN_BLOG_TOP_URL`へGETリクエストを送り、`raise_for_status()`でHTTPエラーを検知した後、`_decode_utf8`でデコードしたHTMLを`parse_latest_article_summary`で解析する。
-* 根拠: [関数定義] (行番号: 136〜139 / 抜粋: "def fetch_latest_article_summary(session: requests.Session) -> ArticleSummary:")
+* 根拠: [関数定義] (行番号: 151〜155 / 抜粋: "def fetch_latest_article_summary(session: requests.Session) -> ArticleSummary:")
 
 
 * **引数/リクエスト**: `session: requests.Session`
@@ -210,7 +210,7 @@
 ### `_is_manga_page_image`
 
 * **役割**: 与えられた`img`タグが「本編の漫画ページ画像」かどうかを判定する。`src`が空、または`.gif`で終わる場合はFalse(ヘッダー/フッターの固定バナー除外)。`height`属性があり`400`未満の場合もFalse(副次チェック)。
-* 根拠: [関数定義] (行番号: 143〜154 / 抜粋: "def _is_manga_page_image(img: Tag) -> bool:")
+* 根拠: [関数定義] (行番号: 158〜169 / 抜粋: "def _is_manga_page_image(img: Tag) -> bool:")
 
 
 * **引数/リクエスト**: `img: Tag`(BeautifulSoupの`<img>`要素)
@@ -230,10 +230,56 @@
 
 
 
+### `_strip_livedoor_suffix`
+
+* **役割**: og:title / `<title>`の「タイトル : ブログ名 Powered by ライブドアブログ」から、末尾の` : ブログ名 Powered by ライブドアブログ`を取り除いてタイトルだけを返す。末尾が`_LIVEDOOR_TITLE_SUFFIX`(`"Powered by ライブドアブログ"`)でない、または区切り`" : "`を含まない場合は前後の空白を除いた文字列をそのまま返す(タイトル自体に`" : "`が含まれていても、接尾辞が無ければ切らない)。
+* 根拠: [関数定義] (行番号: 172 / 抜粋: "def _strip_livedoor_suffix(text: str) -> str:")、(行番号: 51 / 抜粋: '_LIVEDOOR_TITLE_SUFFIX = "Powered by ライブドアブログ"')
+
+
+* **引数/リクエスト**: `text: str`
+* 根拠: (行番号: 172)
+
+
+* **戻り値/レスポンス**: `str`(`text.rsplit(" : ", 1)[0]`を`strip()`したもの、または`text.strip()`)
+* 根拠: (参照: _strip_livedoor_suffix / 抜粋: "return text.rsplit(_TITLE_SEPARATOR, 1)[0].strip()")
+
+
+* **副作用**: なし
+* 根拠: (行番号: 172〜177)
+
+
+* **エラーハンドリング**: なし(例外送出箇所なし)
+* 根拠: (行番号: 172〜177)
+
+
+
+### `parse_article_title`
+
+* **役割**: 記事ページのタイトルを、テーマ差を吸収するフォールバック付きで取得する。`SELECTORS.article_title_link`(`h1.article-title a`)→`SELECTORS.article_title`(`h1.article-title`)→`SELECTORS.og_title`の`content`属性→`<title>`の順に試し、最初に空でない値を返す(og:title/`<title>`は`_strip_livedoor_suffix`で接尾辞を除く)。yashiroazuki.blog.jpの記事ページは`h1.article-title`の中に`<a>`が無く、従来の`h1.article-title a`だけではタイトルが空になりLINE APIに400で拒否されていた(Issue #1087)ことがモジュールdocstringに記録されている。
+* 根拠: [関数定義] (行番号: 180 / 抜粋: "def parse_article_title(soup: BeautifulSoup) -> str:")、(行番号: 186 / 抜粋: "for selector in (SELECTORS.article_title_link, SELECTORS.article_title):")、(行番号: 193 / 抜粋: "og = soup.select_one(SELECTORS.og_title)")、(行番号: 199 / 抜粋: "if soup.title is not None:")
+
+
+* **引数/リクエスト**: `soup: BeautifulSoup`(記事ページ)
+* 根拠: (行番号: 180)
+
+
+* **戻り値/レスポンス**: `str`。どの候補からも取れなければ空文字列(呼び出し元で警告・代替表示する)
+* 根拠: (参照: parse_article_title / 抜粋: "どれからも取れなければ空文字を返す")
+
+
+* **副作用**: なし(HTML解析のみ)
+* 根拠: (行番号: 180〜203)
+
+
+* **エラーハンドリング**: なし。要素が無い・空の場合は次の候補へ進む
+* 根拠: (行番号: 186〜203)
+
+
+
 ### `parse_article_content`
 
-* **役割**: 記事ページのHTMLから、タイトル(`SELECTORS.article_title_link`)、投稿日時(`SELECTORS.published_time`の`datetime`属性)、カテゴリ(`SELECTORS.category`)、本編漫画画像URL一覧(`SELECTORS.body_container`配下の`SELECTORS.manga_image_candidate`のうち`_is_manga_page_image`がTrueのものだけ、DOM出現順を維持、`urljoin`で絶対URL化)を抽出し`ArticleContent`として返す。
-* 根拠: [関数定義] (行番号: 157〜194 / 抜粋: "def parse_article_content(soup: BeautifulSoup, url: str) -> ArticleContent:")
+* **役割**: 記事ページのHTMLから、タイトル(`parse_article_title`のフォールバック付き取得)、投稿日時(`SELECTORS.published_time`の`datetime`属性)、カテゴリ(`SELECTORS.category`)、本編漫画画像URL一覧(`SELECTORS.body_container`配下の`SELECTORS.manga_image_candidate`のうち`_is_manga_page_image`がTrueのものだけ、DOM出現順を維持、`urljoin`で絶対URL化)を抽出し`ArticleContent`として返す。
+* 根拠: [関数定義] (行番号: 206〜242 / 抜粋: "def parse_article_content(soup: BeautifulSoup, url: str) -> ArticleContent:")
 
 
 * **引数/リクエスト**: `soup: BeautifulSoup`, `url: str`(記事の絶対URL。相対画像パスの解決基準になる)
@@ -248,7 +294,7 @@
 * 根拠: (行番号: 145〜182)
 
 
-* **エラーハンドリング**: `SELECTORS.body_container`に一致する要素が無い場合は`MfujinBlogError`を送出する。タイトル/投稿日時/カテゴリの各要素が無い場合はそれぞれ空文字列/`None`/`None`にフォールバックし、例外は送出しない(画像0枚の異常判定は呼び出し元に委ねる設計であることがdocstringに明記されている)。
+* **エラーハンドリング**: `SELECTORS.body_container`に一致する要素が無い場合は`MfujinBlogError`を送出する。タイトルが取れない場合は空文字列(`parse_article_title`の戻り値)、投稿日時/カテゴリの各要素が無い場合は`None`/`None`にフォールバックし、例外は送出しない(画像0枚の異常判定は呼び出し元に委ねる設計であることがdocstringに明記されている)。
 * 根拠: (行番号: 161〜166 / 抜粋: 'if body is None:\n        raise MfujinBlogError(...)')、(行番号: 152〜153, 155〜156, 158〜159)、(参照: parse_article_content / 抜粋: "画像が0枚になること自体はここではエラーにしない...")
 
 
@@ -256,7 +302,7 @@
 ### `fetch_article_content`
 
 * **役割**: 記事URLへGETリクエストを送り、`raise_for_status()`の後`_decode_utf8`でデコードしたHTMLを`parse_article_content`で解析する。
-* 根拠: [関数定義] (行番号: 197〜200 / 抜粋: "def fetch_article_content(session: requests.Session, url: str) -> ArticleContent:")
+* 根拠: [関数定義] (行番号: 245〜248 / 抜粋: "def fetch_article_content(session: requests.Session, url: str) -> ArticleContent:")
 
 
 * **引数/リクエスト**: `session: requests.Session`, `url: str`
@@ -279,7 +325,7 @@
 ### `is_excluded_category`
 
 * **役割**: カテゴリ文字列が`config.MFUJIN_BLOG_EXCLUDED_CATEGORIES`(完全一致のリスト)に含まれるかを判定する。
-* 根拠: [関数定義] (行番号: 203〜211 / 抜粋: "def is_excluded_category(category: str | None) -> bool:")
+* 根拠: [関数定義] (行番号: 251〜259 / 抜粋: "def is_excluded_category(category: str | None) -> bool:")
 
 
 * **引数/リクエスト**: `category: str | None`
@@ -287,7 +333,7 @@
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: (行番号: 209, 211 / 抜粋: "return False", "return category in config.MFUJIN_BLOG_EXCLUDED_CATEGORIES")
+* 根拠: (行番号: 209, 259 / 抜粋: "return False", "return category in config.MFUJIN_BLOG_EXCLUDED_CATEGORIES")
 
 
 * **副作用**: なし
@@ -302,7 +348,7 @@
 ### `validate_image_urls`
 
 * **役割**: 抽出済み画像URL一覧の各URLへHEADリクエストを送り、ステータスコード(400以上は除外)・`Content-Length`ヘッダ(`config.MFUJIN_BLOG_IMAGE_MAX_SIZE_MB`換算のバイト数を超えたら除外)を検証し、通過したURLのみのリストを返す。
-* 根拠: [関数定義] (行番号: 214〜240 / 抜粋: "def validate_image_urls(session: requests.Session, image_urls: list[str]) -> list[str]:")
+* 根拠: [関数定義] (行番号: 262〜288 / 抜粋: "def validate_image_urls(session: requests.Session, image_urls: list[str]) -> list[str]:")
 
 
 * **引数/リクエスト**: `session: requests.Session`, `image_urls: list[str]`
@@ -310,7 +356,7 @@
 
 
 * **戻り値/レスポンス**: `list[str]`(検証を通過したURLのみ)
-* 根拠: (行番号: 240 / 抜粋: "return validated")
+* 根拠: (行番号: 288 / 抜粋: "return validated")
 
 
 * **副作用**: 各画像URLへの外部HTTP HEADリクエスト(タイムアウト`config.MFUJIN_BLOG_REQUEST_TIMEOUT_SEC`、リダイレクト追従あり)。ステータス400以上・サイズ超過・例外発生時はWARNINGログを出力する。
@@ -324,8 +370,8 @@
 
 ### `build_line_messages`
 
-* **役割**: `ArticleContent`からLINE Messaging APIへ送るメッセージ列(`list[Message]`)を組み立てる。画像枚数によらず常に、タイトル+元記事リンクボタンのバブルを先頭に、画像を`hero`画像とするバブルを`_FLEX_CAROUSEL_MAX_BUBBLES`(12)-1枚まで追加した`FlexMessage`(carousel)1通を返す(画像ごとに別メッセージが連続送信されないようにするため。上限超過分は先頭から切り詰め、WARNINGログを出力)。
-* 根拠: [関数定義] (行番号: 243〜297 / 抜粋: "def build_line_messages(article: ArticleContent) -> list[Message]:")
+* **役割**: `ArticleContent`からLINE Messaging APIへ送るメッセージ列(`list[Message]`)を組み立てる。画像枚数によらず常に、タイトル+元記事リンクボタンのバブルを先頭に(タイトルが空・空白のみの場合は`TITLE_PLACEHOLDER`(`"(タイトル取得失敗)"`)で代替し、WARNINGログを出す。LINE APIは空の`text`を400で拒否するため。Issue #1087)、画像を`hero`画像とするバブルを`_FLEX_CAROUSEL_MAX_BUBBLES`(12)-1枚まで追加した`FlexMessage`(carousel)1通を返す(画像ごとに別メッセージが連続送信されないようにするため。上限超過分は先頭から切り詰め、WARNINGログを出力)。
+* 根拠: [関数定義] (行番号: 291〜351 / 抜粋: "def build_line_messages(article: ArticleContent) -> list[Message]:")
 
 
 * **引数/リクエスト**: `article: ArticleContent`
@@ -336,7 +382,8 @@
 * 根拠: (行番号: 263, 313)
 
 
-* **副作用**: 画像枚数がFlex Carouselの上限を超える場合にWARNINGログを出力する。
+* **副作用**: タイトルが空の場合、および画像枚数がFlex Carouselの上限を超える場合にWARNINGログを出力する。
+* 根拠: (行番号: 300 / 抜粋: "if not title:")、(行番号: 302 / 抜粋: "title = TITLE_PLACEHOLDER")、(行番号: 54 / 抜粋: 'TITLE_PLACEHOLDER = "(タイトル取得失敗)"')
 * 根拠: (行番号: 293〜297)
 
 
@@ -356,12 +403,13 @@ flowchart TD
     FetchSummary -- "セレクタ不一致" --> RaiseSummaryErr["MfujinBlogError送出"]
     FetchSummary -- OK --> FetchContent["fetch_article_content(session, url)"]
     FetchContent -- "body_container不在" --> RaiseBodyErr["MfujinBlogError送出"]
-    FetchContent -- OK --> CategoryCheck["is_excluded_category(category)"]
+    FetchContent -- OK --> TitleFallback["parse_article_title: h1 a → h1 → og:title → title"]
+    TitleFallback --> CategoryCheck["is_excluded_category(category)"]
     CategoryCheck -- Yes --> SkipCategory["(呼び出し元がスキップ判断)"]
     CategoryCheck -- No --> ImageCountCheck["呼び出し元がimage_urls枚数を判定"]
     ImageCountCheck -- "0枚等" --> AnomalySkip["(呼び出し元が異常検知)"]
     ImageCountCheck -- "1枚以上" --> Validate["validate_image_urls(session, image_urls)"]
-    Validate --> BuildMessages["build_line_messages(article)"]
+    Validate --> BuildMessages["build_line_messages(article): 空タイトルはTITLE_PLACEHOLDERで代替"]
     BuildMessages --> End([呼び出し元がsend_pushへ渡す])
 ```
 
@@ -422,7 +470,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `Selectors`データクラスの5フィールド(`article_title_link`/`body_container`/`manga_image_candidate`/`category`/`published_time`)がサイト側HTML構造との唯一の接点である。サイト側テンプレートが変わった場合はここだけを直せばよい設計だが、逆に言えばここが古いままだと`parse_latest_article_summary`/`parse_article_content`がいずれも`MfujinBlogError`を送出し続ける。
+* `Selectors`データクラスの7フィールド(`article_title_link`/`article_title`/`og_title`/`body_container`/`manga_image_candidate`/`category`/`published_time`)がサイト側HTML構造との唯一の接点である。サイト側テンプレートが変わった場合はここだけを直せばよい設計だが、逆に言えばここが古いままだと`parse_latest_article_summary`/`parse_article_content`がいずれも`MfujinBlogError`を送出し続ける。
+* 記事タイトルは同じlivedoor blogでもテーマによって`h1.article-title`の中身が違う(えむふじん・howawandは`<a>`あり、yashiroazukiは`<a>`なし。2026-11-04に実記事で確認)。`parse_article_title`のフォールバックの最後の2段(og:title/`<title>`)は「タイトル : ブログ名 Powered by ライブドアブログ」の書式に依存し、この接尾辞が無い場合は切り詰めない。テストは`tests/fixtures/mfujin_blog/`の3サイト分の最小HTMLで固定している。
 * `_is_manga_page_image`の判定(`.gif`拡張子除外+`height`が400px未満なら除外)は、2026-09時点で実際に確認した2記事のHTML構造に基づく経験則であり、将来サイト側の配信形式(画像フォーマットやサイズ)が変わった場合は誤判定(除外過多/漏れ)の可能性がある。
 * `validate_image_urls`はHEADリクエストが使えない/失敗するサイトでは検証をほぼ素通りさせる設計(過度に厳格にして正常画像まで除外しないため)。画像サイズの上限超過を確実に検知したい場合、`Content-Length`ヘッダを返さないサーバーには効果がない。
 

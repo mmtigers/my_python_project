@@ -7,6 +7,8 @@ monitors/mfujin_blog_monitor.py のオーケストレーション(重複送信�
 services.notification_service.send_push をmonkeypatchして検証する。DBは
 tests/conftest.py の isolated_db フィクスチャ(テストごとの一時SQLiteファイル)を使う。
 """
+import dataclasses
+
 import config
 import pytest
 import monitors.mfujin_blog_monitor as target
@@ -239,3 +241,102 @@ def test_default_sites_include_added_blogs():
     urls = [u for _, u in config.MFUJIN_BLOG_EXTRA_SITES]
     assert "https://howawand.blog.jp/" in urls
     assert "https://yashiroazuki.blog.jp/" in urls
+
+
+# --- Issue #1087: 再送回数の上限・タイトルが取れない記事 ---
+
+
+def _patch_site(monkeypatch, article, *, summary_title=None):
+    monkeypatch.setattr(blog, "build_session", lambda: object())
+    monkeypatch.setattr(
+        blog,
+        "fetch_latest_article_summary",
+        lambda session, *a: blog.ArticleSummary(
+            url=article.url, title=article.title if summary_title is None else summary_title
+        ),
+    )
+    monkeypatch.setattr(blog, "fetch_article_content", lambda session, url: article)
+    monkeypatch.setattr(blog, "validate_image_urls", lambda session, urls: urls)
+
+
+def test_run_counts_attempts_and_stops_resending_at_limit(isolated_db, monkeypatch):
+    # 400 のように再試行しても直らない失敗: 上限回数で failed_permanent にし、以後は再送しない
+    monkeypatch.setattr(config, "MFUJIN_BLOG_MAX_SEND_ATTEMPTS", 3)
+    article = _make_article()
+    _patch_site(monkeypatch, article)
+    send_calls = []
+    monkeypatch.setattr(target, "send_push", lambda **kwargs: send_calls.append(kwargs) and False)
+    error_calls = []
+    monkeypatch.setattr(target, "_notify_operational_error", lambda msg: error_calls.append(msg))
+
+    target.run()
+    target.run()
+    row = _fetch_row(article.url)
+    assert (row["status"], row["attempt_count"]) == ("failed", 2)
+    assert error_calls == []  # 上限に達するまでは停止の通知を出さない
+
+    target.run()
+    row = _fetch_row(article.url)
+    assert (row["status"], row["attempt_count"]) == ("failed_permanent", 3)
+    assert len(error_calls) == 1
+    assert "再送を停止" in error_calls[0]
+
+    target.run()  # 以後の巡回では送信も通知もしない
+    assert len(send_calls) == 3
+    assert len(error_calls) == 1
+
+
+def test_run_records_attempt_count_on_success_after_failure(isolated_db, monkeypatch):
+    article = _make_article()
+    _patch_site(monkeypatch, article)
+    results = iter([False, True])
+    monkeypatch.setattr(target, "send_push", lambda **kwargs: next(results))
+
+    target.run()
+    target.run()
+
+    row = _fetch_row(article.url)
+    assert (row["status"], row["attempt_count"]) == ("sent", 2)
+
+
+def test_run_uses_summary_title_and_warns_when_article_title_missing(isolated_db, monkeypatch):
+    article = dataclasses.replace(_make_article(), title="")
+    _patch_site(monkeypatch, article, summary_title="一覧ページのタイトル")
+    sent_calls = []
+    monkeypatch.setattr(target, "send_push", lambda **kwargs: sent_calls.append(kwargs) or True)
+    warning_calls = []
+    monkeypatch.setattr(target, "_notify_operational_warning", lambda msg: warning_calls.append(msg))
+
+    target.run()
+
+    assert len(warning_calls) == 1
+    assert "タイトルを取得できませんでした" in warning_calls[0]
+    flex = sent_calls[0]["messages"][0]
+    assert flex.contents.contents[0].body.contents[1].text == "一覧ページのタイトル"
+    row = _fetch_row(article.url)
+    assert (row["status"], row["article_title"]) == ("sent", "一覧ページのタイトル")
+
+
+def test_run_sends_placeholder_when_no_title_anywhere(isolated_db, monkeypatch):
+    article = dataclasses.replace(_make_article(), title="")
+    _patch_site(monkeypatch, article, summary_title="")
+    sent_calls = []
+    monkeypatch.setattr(target, "send_push", lambda **kwargs: sent_calls.append(kwargs) or True)
+    monkeypatch.setattr(target, "_notify_operational_warning", lambda msg: None)
+
+    target.run()
+
+    flex = sent_calls[0]["messages"][0]
+    assert flex.contents.contents[0].body.contents[1].text == blog.TITLE_PLACEHOLDER
+
+
+def test_notify_operational_warning_logs_warning_and_pushes_discord(monkeypatch, caplog):
+    calls = []
+    monkeypatch.setattr(target, "send_push", lambda **kwargs: calls.append(kwargs) or True)
+
+    with caplog.at_level("WARNING"):
+        target._notify_operational_warning("テスト警告")
+
+    assert calls[0]["target"] == "discord"
+    assert calls[0]["channel"] == "error"
+    assert any(r.levelname == "WARNING" and "テスト警告" in r.getMessage() for r in caplog.records)
