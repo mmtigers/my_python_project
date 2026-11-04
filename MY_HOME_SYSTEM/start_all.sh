@@ -176,9 +176,16 @@ fi
 # .venv を作り直す・新しいホストへ移る と DDD のバッチが無音で失敗する状態だった
 # (失敗は run_task.sh のログに残るだけで通知されない。Issue #751 も参照)。
 # 単一 venv を共有しているという実態をここで明示する。
+#
+# Issue #1090: 以前は REQ_FILES に DDD/requirements.txt も並べ、同じ venv へ順に
+# pip install していた。ところが DDD の curl_cffi が要求する certifi/cffi の下限が
+# lock の版より新しく、install のたびにダウングレード→再アップグレードの往復が起き、
+# 実機の版が lock・CI と食い違っていた。DDD の直接依存は requirements.in に統合し、
+# この venv の依存は1つの lock(requirements.txt)だけで決まるようにした。
+# 配列のまま残しているのは、ハッシュ計算・install ループの形を変えないため。
 echo "--- Check Python dependencies freshness ---"
 REQ_HASH_FILE=".venv/.requirements-sha256"
-REQ_FILES=("requirements.txt" "$DEVELOP_ROOT/DDD/requirements.txt")
+REQ_FILES=("requirements.txt")
 existing_reqs=()
 for req in "${REQ_FILES[@]}"; do
   [ -f "$req" ] && existing_reqs+=("$req")

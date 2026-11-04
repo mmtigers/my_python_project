@@ -26,7 +26,7 @@ cp devices.json.example devices.json   # カメラ・SwitchBotデバイス等を
 .venv/bin/pip-compile --strip-extras --no-emit-index-url --output-file requirements-dev.txt requirements-dev.in
 ```
 
-`DDD/`は本ディレクトリの`.venv`を共用する(`DDD/requirements.txt`は別途`pip install`する)。
+`DDD/`は本ディレクトリの`.venv`を共用する。DDDの直接依存(`yt-dlp`・`curl_cffi`)も`requirements.in`に含めてあり、`requirements.txt`を入れればDDDも動く(Issue #1090。以前の`DDD/requirements.txt`は廃止)。
 
 ## 起動
 

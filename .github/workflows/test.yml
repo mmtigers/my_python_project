@@ -197,9 +197,10 @@ jobs:
           cache-dependency-path: |
             MY_HOME_SYSTEM/requirements.txt
             MY_HOME_SYSTEM/requirements-dev.txt
-            DDD/requirements.txt
 
       - name: Install dependencies
+        # Issue #1090: DDD の実行時依存(yt-dlp・curl_cffi)も requirements.txt(lock)に含まれる。
+        # 実機と同じく1つの lock だけを入れ、DDD のテストもこの環境で実行する。
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -274,14 +275,11 @@ jobs:
           python3 ../.github/scripts/check_coverage_ratchet.py --label backend \
             --current coverage.xml --baseline "${baseline:-coverage-baseline/missing.xml}"
 
-      - name: Install DDD dependencies
-        # lint/bandit(H-11)はDDDにも対象拡大済みだが、pytestだけCIから未実行だった。
-        # DDD/conftest.py(#103/#137)がDiscord/LINE Webhook系の環境変数をマスクする
-        # ため、logger.error/critical経由で本番Webhookへ誤通知する心配はない。
-        working-directory: ./DDD
-        run: pip install -r requirements.txt
-
       - name: Run DDD tests with coverage
+        # DDD/conftest.py(#103/#137)がDiscord/LINE Webhook系の環境変数をマスクするため、
+        # logger.error/critical経由で本番Webhookへ誤通知する心配はない。依存は上の
+        # Install dependencies で入れた lock に含まれる(Issue #1090)。
+        #
         # Issue #493: DDDは全体の約3分半かかるという前提でPR差分ベースの条件付き
         # スキップ(約37行のbashとpathspec維持)を行っていたが、実測は15秒程度
         # (当時はCI全体でも約2分)であり、そもそも短縮の必要性が薄かった。この機構は

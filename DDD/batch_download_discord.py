@@ -931,7 +931,7 @@ class ScrapingStrategy(DownloadStrategy):
         except ImportError:
             logger.error(
                 "⚠️ curl_cffiが見つかりません。missavのCloudflare対策CDNからのm3u8取得には"
-                "必須です。'pip install -r DDD/requirements.txt' でインストールしてください。"
+                "必須です。'pip install -r MY_HOME_SYSTEM/requirements.txt' でインストールしてください。"
             )
             return None
 

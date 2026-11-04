@@ -51,3 +51,19 @@ Pillow
 # (Issue参照)、今回のブログ監視機能で再度必要になった。
 beautifulsoup4
 lxml
+
+# --- DDD(バッチ処理) ---
+# Issue #1090: 実機では DDD のスクリプトも MY_HOME_SYSTEM/.venv の python で動く(deploy/cron/crontab →
+# run_task.sh。DDD は core.* / services.* も import するため、この venv の依存がそもそも必要)。
+# 以前は DDD/requirements.txt を同じ venv へ後から別途 pip install しており、curl_cffi が要求する
+# certifi/cffi の下限が lock の版より新しくなって、起動のたびにダウングレード→再アップグレードが
+# 起き、実機の版が lock・CI と食い違っていた。DDD の直接依存もここに置き、1つの lock で解決する。
+# (requests・beautifulsoup4 は上で宣言済み。DDD も使う)
+# yt-dlp は exact pin にする(Issue #1038): YouTube 等の仕様変更で抽出が壊れやすく、下限指定だと
+# Dependabot が更新PRを起票せず陳腐化に気づけなかった。Dependabot の週次PRで更新する。
+yt-dlp==2026.10.26
+# missav等、CloudflareのボットチャレンジがかかったCDN(surrit.com等)からm3u8を取得する際の
+# ブラウザ偽装(impersonate)に必要(未インストールだと"Impersonate target ... is not available"で失敗する)
+# 下限は実機で動作確認済みの版。付けないと pip-compile が既存の certifi/cffi の pin を優先して
+# 古い curl_cffi(0.16 系)を選ぶ。
+curl_cffi>=0.17.0

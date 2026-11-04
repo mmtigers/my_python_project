@@ -151,27 +151,28 @@ class TestStartAllShPythonDependencyFreshnessCheck:
         script = _read_script()
         assert '"$PYTHON_EXEC" -m pip install -r "$req"' in script
 
-    def test_freshness_check_covers_ddd_requirements_too(self):
-        """Issue #736 (AUDIT-006): deploy/cron/crontab は DDD のスクリプトも
-        MY_HOME_SYSTEM/.venv の python で実行するため、DDD/requirements.txt も
-        この単一 venv へ入れること。以前は MY_HOME_SYSTEM 側だけを見ており、
-        yt-dlp / curl_cffi は「誰かが手で入れた」痕跡としてしか .venv に存在せず、
-        venv を作り直すと DDD のバッチが無音で失敗する状態だった。"""
+    def test_freshness_check_installs_only_the_single_lock(self):
+        """Issue #736 (AUDIT-006) / #1090: deploy/cron/crontab は DDD のスクリプトも
+        MY_HOME_SYSTEM/.venv の python で実行する。#736 では DDD/requirements.txt も
+        この venv へ追加 install していたが、DDD 側の制約(curl_cffi → certifi/cffi の下限)が
+        lock と矛盾して起動のたびに往復インストールが起きた(#1090)。DDD の依存は
+        requirements.in に統合したので、install するのは lock 1つだけであること。"""
         script = _read_script()
         m = re.search(r"REQ_FILES=\(([^)]*)\)", script)
         assert m, "REQ_FILES の定義が見つかりません"
-        req_files = m.group(1)
-        assert '"requirements.txt"' in req_files
-        assert '"$DEVELOP_ROOT/DDD/requirements.txt"' in req_files
+        assert m.group(1).strip() == '"requirements.txt"'
 
-    def test_ddd_runtime_deps_are_declared_in_ddd_requirements(self):
-        """鮮度チェックの対象ファイル側に、MY_HOME_SYSTEM 側に無い DDD の実行時依存が
-        宣言されていること(この2つが揃って初めて venv の再現性が成立する)。"""
-        ddd_req = os.path.join(os.path.dirname(__file__), "..", "..", "DDD", "requirements.txt")
-        with open(ddd_req, "r", encoding="utf-8") as f:
-            content = f.read()
-        assert "yt-dlp" in content
-        assert "curl_cffi" in content
+    def test_ddd_runtime_deps_are_declared_in_the_single_lock(self):
+        """DDD の実行時依存が、鮮度チェックの対象である lock(と元の requirements.in)に
+        含まれていること(この2つが揃って初めて venv の再現性が成立する)。
+        DDD/requirements.txt が復活すると再び同じ venv へ矛盾する制約が入るので、無いことも固定する。"""
+        base = os.path.join(os.path.dirname(__file__), "..")
+        for name in ("requirements.in", "requirements.txt"):
+            with open(os.path.join(base, name), "r", encoding="utf-8") as f:
+                content = f.read().lower().replace("_", "-")
+            assert "yt-dlp" in content, name
+            assert "curl-cffi" in content, name
+        assert not os.path.exists(os.path.join(base, "..", "DDD", "requirements.txt"))
 
     def test_hash_is_recorded_only_when_every_requirements_file_installs(self):
         """片方だけ成功した状態を「追従済み」として記録しないこと
