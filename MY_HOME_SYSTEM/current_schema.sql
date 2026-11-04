@@ -415,7 +415,7 @@ CREATE TABLE mfujin_blog_notifications (
     status TEXT NOT NULL,
     image_count INTEGER NOT NULL DEFAULT 0,
     error_detail TEXT
-);
+, attempt_count INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE ui_tap_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id TEXT NOT NULL UNIQUE,   

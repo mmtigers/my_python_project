@@ -1,0 +1,11 @@
+-- mfujin_blog_notifications に LINE送信の試行回数を追加する(Issue #1087)。
+--
+-- 背景: LINE送信に失敗した記事は status='failed' で記録され、次回の巡回で再送される。
+-- しかしリクエスト不正(LINE API 400。#1087 では空のタイトルが原因)のように再試行しても
+-- 直らない失敗は、巡回のたびに再送→再失敗→ERRORログ・Discordフォールバック通知を繰り返していた。
+-- monitors/mfujin_blog_monitor.py は送信のたびにこの列を1増やし、
+-- config.MFUJIN_BLOG_MAX_SEND_ATTEMPTS に達しても送れなければ status='failed_permanent' にして再送をやめる。
+--
+-- status: sent / failed / failed_permanent / skipped_category / skipped_no_images
+-- 既存の行は 0 から数え始める(過去の失敗回数は記録が無いため数えない)。
+ALTER TABLE mfujin_blog_notifications ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0;

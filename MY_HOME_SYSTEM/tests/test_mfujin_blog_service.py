@@ -8,6 +8,8 @@ services/mfujin_blog_service.py のパーサ/判定/メッセージ組み立て�
 fixture中のタイトル・alt文字列はすべてテスト用のダミー値であり、実際のブログ記事の
 文言ではない。
 """
+from pathlib import Path
+
 import pytest
 import services.mfujin_blog_service as blog
 from bs4 import BeautifulSoup
@@ -266,3 +268,63 @@ def test_validate_image_urls_excludes_oversized_and_failed(monkeypatch):
     result = blog.validate_image_urls(session, [ok_url, too_big_url, broken_url])
 
     assert result == [ok_url]
+
+
+# --- Issue #1087: 記事タイトルのフォールバック・空タイトルの保険 ---
+# tests/fixtures/mfujin_blog/ は3サイトの実記事ページ(2026-11-04取得)から構造だけを残した
+# 最小HTML(タイトル等はダミー値)。yashiroazuki は記事ページの h1.article-title に <a> が無い。
+_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "mfujin_blog"
+
+
+@pytest.mark.parametrize("site", ["mfujin", "howawand", "yashiroazuki"])
+def test_parse_article_content_title_is_not_empty_for_each_site(site):
+    html = (_FIXTURE_DIR / f"{site}_article.html").read_text(encoding="utf-8")
+
+    article = blog.parse_article_content(BeautifulSoup(html, "html.parser"), f"https://{site}.test/archives/x.html")
+
+    assert article.title == f"ダミー記事タイトル（{site}）"
+    assert len(article.image_urls) == 1
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        # h1 の中に <a> が無い(yashiroazuki の記事ページ)
+        ('<article class="article"><h1 class="article-title">\n  見出しだけ\n</h1></article>', "見出しだけ"),
+        # h1 が無い → og:title(livedoorの接尾辞を除く)
+        (
+            '<head><meta property="og:title" content="OGのタイトル : ブログ名 Powered by ライブドアブログ"></head>',
+            "OGのタイトル",
+        ),
+        # og:title も無い → <title>
+        ("<head><title>TITLEのタイトル : ブログ名 Powered by ライブドアブログ</title></head>", "TITLEのタイトル"),
+        # 接尾辞が無ければ " : " を含んでいても切らない
+        ("<head><title>前編 : 後編</title></head>", "前編 : 後編"),
+        # h1 が空なら次の候補へ進む
+        ('<article class="article"><h1 class="article-title"><a href="#"> </a></h1></article><title>代替</title>', "代替"),
+        # どれも無ければ空文字
+        ("<html><body><p>本文だけ</p></body></html>", ""),
+    ],
+)
+def test_parse_article_title_fallback_chain(html, expected):
+    assert blog.parse_article_title(BeautifulSoup(html, "html.parser")) == expected
+
+
+@pytest.mark.parametrize("empty_title", ["", "   "])
+def test_build_line_messages_never_sends_empty_title_text(empty_title, caplog):
+    article = blog.ArticleContent(
+        url="https://mfujin.test/archives/dummy.html",
+        title=empty_title,
+        published_at=None,
+        category=None,
+        image_urls=["https://cdn.mfujin.test/imgs/page1.jpg"],
+    )
+
+    messages = blog.build_line_messages(article)
+
+    title_bubble = messages[0].contents.contents[0]
+    texts = [c.text for c in title_bubble.body.contents]
+    assert all(t.strip() for t in texts)  # LINE API は空の text を 400 で拒否する
+    assert texts[1] == blog.TITLE_PLACEHOLDER
+    assert messages[0].alt_text.endswith(blog.TITLE_PLACEHOLDER)
+    assert "タイトルが空" in caplog.text

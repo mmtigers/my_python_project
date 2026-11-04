@@ -1077,6 +1077,11 @@ MFUJIN_BLOG_MIN_IMAGE_COUNT: int = _get_int_env("MFUJIN_BLOG_MIN_IMAGE_COUNT", 1
 MFUJIN_BLOG_REQUEST_TIMEOUT_SEC: int = _get_int_env("MFUJIN_BLOG_REQUEST_TIMEOUT_SEC", 20)
 # 画像1枚あたりの検証(HEADリクエスト)で許容する上限サイズ。超過分は送信対象から除外する。
 MFUJIN_BLOG_IMAGE_MAX_SIZE_MB: int = _get_int_env("MFUJIN_BLOG_IMAGE_MAX_SIZE_MB", 10)
+# LINE送信の試行回数の上限。失敗(status='failed')した記事は次回の巡回で再送するが、
+# この回数に達しても送れなかった記事は status='failed_permanent' にして再送をやめる
+# (リクエスト不正の400のように再試行しても直らない失敗で、巡回のたびにERROR・Discord
+# 通知を繰り返さないため。Issue #1087)。巡回は1日2回なので既定3回=約1.5日。
+MFUJIN_BLOG_MAX_SEND_ATTEMPTS: int = _get_int_env("MFUJIN_BLOG_MAX_SEND_ATTEMPTS", 3)
 
 # ==========================================
 # 20. ログのダウンロード設定

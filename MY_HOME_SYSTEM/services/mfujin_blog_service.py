@@ -15,6 +15,12 @@
   `pict` クラスを使うが `.gif` で配信されており、本編は `.jpg` で配信されている)。
 - カテゴリは `dd.article-category1`。サイドバーに `PR記事` 等の非漫画カテゴリが実在する。
 - 投稿日時は `time[itemprop="datePublished"]` の `datetime` 属性(ISO8601)。
+
+2026-11に yashiroazuki.blog.jp を追加した際、同じ livedoor blog でも記事ページの
+`h1.article-title` の中に `<a>` が無いテーマがあり(トップページの一覧には `<a>` がある)、
+タイトルが空のままLINEへ送られて 400 で拒否された(Issue #1087)。記事タイトルは
+`h1.article-title a` → `h1.article-title` → `meta[property="og:title"]` → `<title>` の順に
+フォールバックして取得する。
 """
 import dataclasses
 from urllib.parse import urljoin
@@ -40,6 +46,13 @@ _FLEX_CAROUSEL_MAX_BUBBLES = 12
 # ヘッダー/フッターの固定バナーも img.pict を使うが .gif 形式で配信されている
 # (2026-09、実記事2件で確認済み)。本編の漫画ページは .jpg で配信されている。
 _EXCLUDED_IMAGE_EXTENSIONS = (".gif",)
+# og:title / <title> の末尾に付く「 : ブログ名 Powered by ライブドアブログ」(2026-11、
+# えむふじん・howawand・yashiroazuki の3サイトで確認)。この接尾辞があるときだけ取り除く。
+_LIVEDOOR_TITLE_SUFFIX = "Powered by ライブドアブログ"
+_TITLE_SEPARATOR = " : "
+# タイトルが取れなかった記事をLINEへ送るときの代替表示(空文字はLINE APIが400で拒否する)。
+TITLE_PLACEHOLDER = "(タイトル取得失敗)"
+
 # 副次チェック: 固定バナーの高さは240〜260px程度、本編漫画ページは900px以上で
 # 配信されている(2026-09確認)。height属性が無い画像は判定材料が無いため除外しない。
 _MIN_MANGA_IMAGE_HEIGHT_PX = 400
@@ -54,6 +67,8 @@ class Selectors:
     """HTML構造とCSSセレクタの対応。サイト側テンプレートが変わったらここだけを直す。"""
 
     article_title_link: str = "article.article h1.article-title a"
+    article_title: str = "article.article h1.article-title"
+    og_title: str = "meta[property='og:title']"
     body_container: str = "div.article-body-inner"
     manga_image_candidate: str = "img.pict"
     category: str = "dd.article-category1"
@@ -154,6 +169,40 @@ def _is_manga_page_image(img: Tag) -> bool:
     return True
 
 
+def _strip_livedoor_suffix(text: str) -> str:
+    """og:title / <title> の「タイトル : ブログ名 Powered by ライブドアブログ」からタイトルだけを取り出す。"""
+    text = text.strip()
+    if not text.endswith(_LIVEDOOR_TITLE_SUFFIX) or _TITLE_SEPARATOR not in text:
+        return text
+    return text.rsplit(_TITLE_SEPARATOR, 1)[0].strip()
+
+
+def parse_article_title(soup: BeautifulSoup) -> str:
+    """記事ページのタイトルを、テーマ差を吸収するフォールバック付きで取得する。
+
+    `h1.article-title a` → `h1.article-title` → `meta[property="og:title"]` → `<title>` の順に試し、
+    最初に空でない値を返す。どれからも取れなければ空文字を返す(呼び出し元で警告・代替表示する)。
+    """
+    for selector in (SELECTORS.article_title_link, SELECTORS.article_title):
+        el = soup.select_one(selector)
+        if el is not None:
+            text = el.get_text(strip=True)
+            if text:
+                return text
+
+    og = soup.select_one(SELECTORS.og_title)
+    if og is not None:
+        text = _strip_livedoor_suffix(str(og.get("content") or ""))
+        if text:
+            return text
+
+    if soup.title is not None:
+        text = _strip_livedoor_suffix(soup.title.get_text())
+        if text:
+            return text
+    return ""
+
+
 def parse_article_content(soup: BeautifulSoup, url: str) -> ArticleContent:
     """記事ページのHTMLからタイトル・投稿日時・カテゴリ・本編漫画画像URLを取得する。
 
@@ -161,8 +210,7 @@ def parse_article_content(soup: BeautifulSoup, url: str) -> ArticleContent:
     画像が0枚になること自体はここではエラーにしない(除外カテゴリ由来の可能性があるため、
     「除外カテゴリでないのに0枚」の異常判定は呼び出し元(monitor)に委ねる)。
     """
-    title_link = soup.select_one(SELECTORS.article_title_link)
-    title = title_link.get_text(strip=True) if title_link else ""
+    title = parse_article_title(soup)
 
     time_el = soup.select_one(SELECTORS.published_time)
     published_at = time_el.get("datetime") if time_el else None
@@ -245,7 +293,13 @@ def build_line_messages(article: ArticleContent, label: str = "えむふじん")
 
     画像枚数によらず、Flex Message の carousel 1通に統一する(先頭バブルがタイトルと
     元記事リンク、2枚目以降が漫画ページ。画像ごとに別メッセージが連続送信されない)。
+    タイトルが空の場合は TITLE_PLACEHOLDER で代替する(LINE APIは空の text を 400 で拒否するため。
+    Issue #1087)。
     """
+    title = article.title.strip()
+    if not title:
+        logger.warning(f"⚠️ 記事タイトルが空のため「{TITLE_PLACEHOLDER}」で代替して送信します: {article.url}")
+        title = TITLE_PLACEHOLDER
     bubbles = [
         {
             "type": "bubble",
@@ -256,7 +310,7 @@ def build_line_messages(article: ArticleContent, label: str = "えむふじん")
                 "spacing": "md",
                 "contents": [
                     {"type": "text", "text": f"{label} 最新話", "weight": "bold", "size": "sm", "color": "#888888"},
-                    {"type": "text", "text": article.title, "wrap": True, "weight": "bold", "size": "lg"},
+                    {"type": "text", "text": title, "wrap": True, "weight": "bold", "size": "lg"},
                 ],
             },
             "footer": {
@@ -294,4 +348,4 @@ def build_line_messages(article: ArticleContent, label: str = "えむふじん")
             }
         )
     carousel = FlexContainer.from_dict({"type": "carousel", "contents": bubbles})
-    return [FlexMessage(altText=f"{label}最新話: {article.title}", contents=carousel)]
+    return [FlexMessage(altText=f"{label}最新話: {title}", contents=carousel)]
