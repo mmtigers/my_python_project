@@ -57,7 +57,7 @@ def attempt_remount(mount_point: str) -> bool:
         logger.error(f"❌ 再マウントがタイムアウトしました(30秒): {mount_point}")
         return False
     except Exception as e:
-        logger.error(f"❌ 再マウント実行中の例外エラー: {e}")
+        logger.error(f"❌ 再マウント実行中の例外エラー: {type(e).__name__}: {e}")
         return False
 
 def sync_fallback_to_nas(local_dir: Path, nas_dir: Path) -> None:
@@ -90,7 +90,7 @@ def sync_fallback_to_nas(local_dir: Path, nas_dir: Path) -> None:
                 
         logger.info("✅ データのNAS同期が完了しました。SSOTが復元されました。")
     except Exception as e:
-        logger.error(f"❌ データのNAS同期中にエラーが発生しました: {e}", exc_info=True)
+        logger.error(f"❌ データのNAS同期中にエラーが発生しました: {type(e).__name__}: {e}", exc_info=True)
 
 def is_mounted_and_writable(target_dir: Path, mount_point: str) -> bool:
     """マウント状態を確認し、ターゲットディレクトリへのアクセス権を検証する。"""
