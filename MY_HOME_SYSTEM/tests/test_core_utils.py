@@ -11,6 +11,7 @@ core/utils.py (指数バックオフ・ストレージ復帰待機) のテスト
 test_core_utils.py に改名した。
 """
 import datetime
+import logging
 import os
 import sys
 
@@ -62,6 +63,10 @@ class TestWithExponentialBackoff:
 
     def test_alert_threshold_switches_log_level_to_error(self, monkeypatch, caplog):
         monkeypatch.setattr(utils.time, "sleep", lambda s: None)
+        # Issue #1089: core.utils のロガーは core.logger 経由(propagate=False)になり
+        # caplog では拾えないため、伝播する素のロガーに差し替えてレベルだけを検証する。
+        capture_logger = logging.getLogger("test_core_utils.capture")
+        monkeypatch.setattr(utils, "_get_logger", lambda: capture_logger)
         call_count = {"n": 0}
 
         @utils.with_exponential_backoff(base_delay=1, max_delay=10, alert_threshold=2)
@@ -71,7 +76,7 @@ class TestWithExponentialBackoff:
                 raise RuntimeError("fail")
             return "ok"
 
-        with caplog.at_level("WARNING", logger="core"):
+        with caplog.at_level("WARNING", logger="test_core_utils.capture"):
             flaky()
 
         levels = [r.levelname for r in caplog.records]

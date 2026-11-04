@@ -10,6 +10,7 @@
 ## 関連ドキュメント
 
 * [config.md](./config.md) - `config.SQLITE_DB_PATH`(DBファイルパス設定値)の提供元
+* [logger.md](./logger.md) - **（Issue #1089で追加）** モジュールロガーの取得元(`core.logger.get_logger`)。`home_system.log` へのファイル出力・ERROR の Discord 通知はこちらが付けるハンドラによる
 * [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
 * [init_unified_db.md](./init_unified_db.md) - `core.database.get_db_cursor(commit=True)`経由で本ファイルの接続処理(WALモード・外部キー制約有効化を含む)を利用してテーブル初期化を行う呼び出し元
 * [webhook_router.md](./webhook_router.md) - `core.database.save_log_async`を直接インポートして利用する呼び出し元
@@ -20,9 +21,9 @@
 
 * SQLiteデータベースへの接続、クエリ実行、データの書き込みを管理するユーティリティ機能を提供する。
 * 接続のリトライ機構（接続確立時のみ、ロック時の待機）、WALモードおよび外部キー制約(`PRAGMA foreign_keys`)の有効化、読み取り専用モードでの安全なデータ検索、および同期・非同期に対応した汎用的なデータ挿入（INSERT）機能を実装している。**（Issue #231で追加）** 単一行の`save_log_generic`/`save_log_async`に加え、複数行を単一トランザクションでまとめて保存する`save_logs_batch_generic`/`save_logs_batch_async`を提供する。複数行を独立にINSERTすると、途中の1件が失敗しても既に成功した分がコミット済みのまま残り、失敗通知を受けたユーザーの再試行で重複保存を招くケース(`handlers/line_logic.py`の`all_genki`)があったため、真のall-or-nothingを実現する手段として追加された。
-* 根拠: `get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async` 関数の定義 (行番号: 20-96 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ", "読み取り専用モードで安全にSELECTを実行する", "汎用データ保存関数")、`save_logs_batch_generic`/`save_logs_batch_async` (行番号: 129-155 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:")
+* 根拠: `get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async` 関数の定義 (行番号: 20-96 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ", "読み取り専用モードで安全にSELECTを実行する", "汎用データ保存関数")、`save_logs_batch_generic`/`save_logs_batch_async` (行番号: 133-159 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:")
 * **（B3で追加、Issue #409 Q-L9で`save_logs_batch_generic`にも同一の検証を追加）** `save_log_generic`はSQL文字列へ直接展開せざるを得ない`table`/`columns_list`（プレースホルダ化不可）について、実行前にモジュールレベル正規表現`_SQL_IDENTIFIER_RE`によるSQLite識別子ホワイトリスト検証（英数字・アンダースコアのみ、数字始まり不可）を行うようになった。現状の全呼び出し元はリテラル固定値かconfig定数のみのため実害はないが、将来動的な値が渡された場合のSQLインジェクションに対する構造的な防御として追加された。`save_logs_batch_generic`も同じ文字列展開方式でSQLを組み立てるため、Issue #409（Q-L9）で同一の`_SQL_IDENTIFIER_RE`検証が追加されており、現在は両関数とも同じチェックを経由する（詳細は8節を参照）。
-* 根拠: `_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")` (行番号: 18 / 抜粋: "_SQL_IDENTIFIER_RE = re.compile(r\"^[A-Za-z_][A-Za-z0-9_]*$\")")、`if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):` (参照: save_log_generic / 抜粋: "logger.error(f\"データ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")、`save_logs_batch_generic`側の同じ検証 (参照: save_logs_batch_generic / 抜粋: "logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
+* 根拠: `_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")` (行番号: 22 / 抜粋: "_SQL_IDENTIFIER_RE = re.compile(r\"^[A-Za-z_][A-Za-z0-9_]*$\")")、`if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):` (参照: save_log_generic / 抜粋: "logger.error(f\"データ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")、`save_logs_batch_generic`側の同じ検証 (参照: save_logs_batch_generic / 抜粋: "logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
 
 
 
@@ -36,57 +37,57 @@
 | `sqlite3` | 標準ライブラリ | SQLiteデータベースへの接続・操作 | `import sqlite3` (行番号: 2 / 抜粋: "import sqlite3") |
 | `time` | 標準ライブラリ | DBロック時のリトライ待機処理 | `import time` (行番号: 3 / 抜粋: "import time") |
 | `json` | 標準ライブラリ | 検索結果のJSON文字列化 | `import json` (行番号: 4 / 抜粋: "import json") |
-| `logging` | 標準ライブラリ | エラーや警告のロギング出力 | `import logging` (行番号: 5 / 抜粋: "import logging") |
-| `asyncio` | 標準ライブラリ | 非同期処理の実行ループ取得 | `import asyncio` (行番号: 6 / 抜粋: "import asyncio") |
-| `List` | 標準ライブラリ | 型ヒント | `from typing import List` (行番号: 7 / 抜粋: "from typing import List") |
-| `contextmanager` | 標準ライブラリ | 関数をコンテキストマネージャ化する | `from contextlib import contextmanager` (行番号: 8 / 抜粋: "from contextlib import contextmanager") |
-| `config` | 外部モジュール | データベースファイルパスの設定取得 | `import config` (行番号: 9 / 抜粋: "import config") |
+| `asyncio` | 標準ライブラリ | 非同期処理の実行ループ取得 | `import asyncio` (行番号: 5 / 抜粋: "import asyncio") |
+| `List` | 標準ライブラリ | 型ヒント | `from typing import List` (行番号: 6 / 抜粋: "from typing import List") |
+| `contextmanager` | 標準ライブラリ | 関数をコンテキストマネージャ化する | `from contextlib import contextmanager` (行番号: 7 / 抜粋: "from contextlib import contextmanager") |
+| `config` | 外部モジュール | データベースファイルパスの設定取得 | `import config` (行番号: 8 / 抜粋: "import config") |
+| `core.logger.get_logger` | 内部モジュール | **（Issue #1089で追加。以前は標準の`logging.getLogger`）** ファイル/Discord ハンドラ付きのモジュールロガーの取得 | `from core.logger import get_logger` (行番号: 9 / 抜粋: "from core.logger import get_logger") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.SQLITE_DB_PATH` | `config` モジュールの実装が提供されておらず、実際のファイルパスや環境変数の定義が不明。 | `config.SQLITE_DB_PATH` (行番号: 29 / 抜粋: "sqlite3.connect(config.SQLITE_DB_PATH") |
+| `config.SQLITE_DB_PATH` | `config` モジュールの実装が提供されておらず、実際のファイルパスや環境変数の定義が不明。 | `config.SQLITE_DB_PATH` (行番号: 33 / 抜粋: "sqlite3.connect(config.SQLITE_DB_PATH") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `logger`
 
-* **役割**: `core.database` という名前のロガーインスタンスを生成・保持する。
-* 根拠: `logger = logging.getLogger("core.database")` (行番号: 11 / 抜粋: "logger = logging.getLogger("core.database")")
+* **役割**: `core.logger.get_logger("core.database")`(=`setup_logging`)で、`home_system.log` へのファイル出力・コンソール出力・ERROR以上の Discord 通知ハンドラを持つ `core.database` ロガーを取得・保持する(`propagate=False`)。**（Issue #1089で変更）** 以前は素の `logging.getLogger("core.database")` で、これらのハンドラにつながっておらず、保存失敗の詳細が Python の lastResort(stderr)にしか出なかった。子プロセス(`scheduler_boot.run_script`)では正常終了時に stderr が捨てられるため、2026-11-02 のセンサー保存失敗では SQLite のエラー内容がどこにも残らなかった。`config`・`core.logger` はいずれも本モジュールを import しないため、import 時の循環は起きない。
+* 根拠: `logger = get_logger("core.database")` (行番号: 15 / 抜粋: "logger = get_logger(\"core.database\")")
 
 
 
 ### `_SQL_IDENTIFIER_RE`（モジュールレベル変数、B3で追加）
 
 * **役割**: `save_log_generic`が`table`/`columns_list`をSQL文字列へ直接展開する前に、SQLite識別子として妥当な文字種（英数字・アンダースコアのみ、数字始まり不可）のみを許可するホワイトリスト検証用の正規表現。`table`/`columns_list`はプレースホルダ化できずSQL文へ直接展開せざるを得ない構造であり、現状の全呼び出し元はリテラル固定値かconfig定数のみで実害はないが、将来ユーザー入力等の動的な値が渡された場合のSQLインジェクションを防ぐ構造的な防御として追加された。
-* 根拠: `_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")` (行番号: 13-18 / 抜粋: "# save_log_generic の table/カラム名はプレースホルダ化できず、SQL文字列へ直接\n# 展開せざるを得ない。...\n_SQL_IDENTIFIER_RE = re.compile(r\"^[A-Za-z_][A-Za-z0-9_]*$\")")
+* 根拠: `_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")` (行番号: 17-22 / 抜粋: "# save_log_generic の table/カラム名はプレースホルダ化できず、SQL文字列へ直接\n# 展開せざるを得ない。...\n_SQL_IDENTIFIER_RE = re.compile(r\"^[A-Za-z_][A-Za-z0-9_]*$\")")
 
 
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルのコンパイル済み正規表現）
-* 根拠: (行番号: 18 / 抜粋: "_SQL_IDENTIFIER_RE = re.compile(r\"^[A-Za-z_][A-Za-z0-9_]*$\")")
+* 根拠: (行番号: 22 / 抜粋: "_SQL_IDENTIFIER_RE = re.compile(r\"^[A-Za-z_][A-Za-z0-9_]*$\")")
 
 
 
 ### `get_db_cursor`
 
 * **役割**: リトライ機能（最大5回、DB接続の確立時のみ、"locked"エラー時に1秒間隔で再試行）を備えたデータベース接続を提供するコンテキストマネージャ。WALモードおよび外部キー制約(`PRAGMA foreign_keys=ON`)を有効化し、接続確立後は `with` 文本体に対して必ず1回だけカーソルを `yield` する（H-1で書き直し。従来は`for`ループの中で`yield`しており、with本体実行中にDBロック等の例外が発生すると`raise e`後に再度ループ・`yield`しようとして`RuntimeError("generator didn't stop after throw()")`に、接続リトライが尽きた場合も`RuntimeError("generator didn't yield")`に化けて、呼び出し元(`save_log_generic`等)が想定しない例外で処理ごと落ちる不具合があった）。
-* 根拠: `def get_db_cursor(commit: bool = False):` (行番号: 21-53 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ。yieldは必ず1回だけ行う)")
+* 根拠: `def get_db_cursor(commit: bool = False):` (行番号: 25-63 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ。yieldは必ず1回だけ行う)")
 
 
 * **引数/リクエスト**: `commit` (bool, デフォルト `False`): コンテキスト終了時にコミットを実行するかどうか。
-* 根拠: `def get_db_cursor(commit: bool = False):` (行番号: 21 / 抜粋: "def get_db_cursor(commit: bool = False):")
+* 根拠: `def get_db_cursor(commit: bool = False):` (行番号: 25 / 抜粋: "def get_db_cursor(commit: bool = False):")
 
 
 * **戻り値/レスポンス**: `sqlite3.Cursor` (yieldにより返却)
-* 根拠: `yield conn.cursor()` (行番号: 52 / 抜粋: "yield conn.cursor()")
+* 根拠: `yield conn.cursor()` (行番号: 56 / 抜粋: "yield conn.cursor()")
 
 
 * **副作用**: DB接続の確立、`PRAGMA journal_mode=WAL;` および `PRAGMA foreign_keys=ON;` の実行、指定時のコミット、with本体で例外発生時のロールバック、`finally`での必ずの接続クローズ。
 * 根拠: `conn.execute("PRAGMA journal_mode=WAL;")`, `conn.execute("PRAGMA foreign_keys=ON;")`, `if commit: conn.commit()`, `conn.rollback()`, `conn.close()` (行番号: 31, 32, 47-48, 50, 53 / 抜粋: "conn.execute("PRAGMA foreign_keys=ON;")")
 
 
-* **エラーハンドリング**: 接続確立時に発生した `sqlite3.OperationalError` のうち、メッセージに"locked"を含みリトライ残回数がある場合のみ最大5回まで再試行する。それ以外（ロック以外の`OperationalError`、またはリトライ上限到達時）はエラーログを出力し、その例外をそのまま再送出する（接続は必ず閉じてから）。接続確立後、`with`文本体の実行中に例外が発生した場合はリトライを行わず、ロールバックしてから例外を再送出する。いずれの場合も呼び出し元には元の例外がそのまま伝播し、以前のような`RuntimeError`への化けは発生しない。**（Issue #761 / AUDIT-032 で追加）** リトライループの直後に`assert conn is not None`を置いている。ループは必ず`break`か`raise`で抜けるため`conn`が`None`になることは無いが、pyrightはその制御フローを追えず`conn.cursor()`/`commit`/`rollback`/`close`の4箇所を`reportOptionalMemberAccess`として挙げていた。不変条件を実行可能な形で明示し、誤検知の解消と可読性を兼ねている。
+* **エラーハンドリング**: 接続確立時に発生した `sqlite3.OperationalError` のうち、メッセージに"locked"を含みリトライ残回数がある場合のみ最大5回まで再試行する。それ以外（ロック以外の`OperationalError`、またはリトライ上限到達時）はエラーログ(`❌ DB接続エラー: {例外の型名}: {メッセージ}`。型名は Issue #1089 で追加)を出力し、その例外をそのまま再送出する（接続は必ず閉じてから）。接続確立後、`with`文本体の実行中に例外が発生した場合はリトライを行わず、ロールバックしてから例外を再送出する。いずれの場合も呼び出し元には元の例外がそのまま伝播し、以前のような`RuntimeError`への化けは発生しない。**（Issue #761 / AUDIT-032 で追加）** リトライループの直後に`assert conn is not None`を置いている。ループは必ず`break`か`raise`で抜けるため`conn`が`None`になることは無いが、pyrightはその制御フローを追えず`conn.cursor()`/`commit`/`rollback`/`close`の4箇所を`reportOptionalMemberAccess`として挙げていた。不変条件を実行可能な形で明示し、誤検知の解消と可読性を兼ねている。
 * 根拠: `except sqlite3.OperationalError as e:` (行番号: 34-43 / 抜粋: "if "locked" in str(e) and attempt < max_retries - 1:"), `except Exception: conn.rollback(); raise` (参照: get_db_cursor / 抜粋: "conn.rollback()")
 
 
@@ -94,11 +95,11 @@
 ### `RO_CONNECT_TIMEOUT_SEC` / `get_ro_connection`（Issue #661 で追加、`db_path` 引数は残件対応で追加）
 
 * **役割**: 読み取り専用(`file:...?mode=ro`)のSQLite接続を開き、`finally`で必ず`close()`するコンテキストマネージャ。`row_factory`は`sqlite3.Row`を設定済みで、書き込みはSQLite側が拒否する。Issue #661 以前は読み取り専用接続の`timeout`が5秒/10秒/30秒と経路ごとにばらついており、毎日04:00のバックアップや保持期間削除と重なると5秒では`"database is locked"`でLINE応答やダッシュボードの読み取りが失敗しえた。`RO_CONNECT_TIMEOUT_SEC = 30.0`(`get_db_cursor`と同じ値)を既定として、読み取り専用接続の入り口をここへ一本化する。`db_path`は接続先のDBファイルで、省略時は`config.SQLITE_DB_PATH`。`post_boot_health_check.py`のように config の相対パスを自前で絶対パスへ解決してから接続する呼び出し元のために用意しており、接続の開き方自体は1箇所に保ったままパスだけを差し替えられる。
-* 根拠: `def get_ro_connection(timeout: float = RO_CONNECT_TIMEOUT_SEC, db_path: Optional[str] = None):` (行番号: 69 / 抜粋: "def get_ro_connection(timeout: float = RO_CONNECT_TIMEOUT_SEC, db_path: Optional[str] = None):")
+* 根拠: `def get_ro_connection(timeout: float = RO_CONNECT_TIMEOUT_SEC, db_path: Optional[str] = None):` (行番号: 73 / 抜粋: "def get_ro_connection(timeout: float = RO_CONNECT_TIMEOUT_SEC, db_path: Optional[str] = None):")
 
 
 * **引数/リクエスト**: `timeout` (float, 既定 `RO_CONNECT_TIMEOUT_SEC` = 30.0): ロック待ちの上限秒数。`db_path` (Optional[str], 既定 `None`): 接続先DBファイル。`None`なら`config.SQLITE_DB_PATH`。
-* 根拠: `target = db_path if db_path is not None else config.SQLITE_DB_PATH` (行番号: 81 / 抜粋: "target = db_path if db_path is not None else config.SQLITE_DB_PATH")
+* 根拠: `target = db_path if db_path is not None else config.SQLITE_DB_PATH` (行番号: 85 / 抜粋: "target = db_path if db_path is not None else config.SQLITE_DB_PATH")
 
 
 * **戻り値/レスポンス**: `sqlite3.Connection`（`with`ブロックへ`yield`される）。
@@ -116,22 +117,22 @@
 ### `execute_read_query`
 
 * **役割**: 読み取り専用モード (`?mode=ro`) で指定されたSELECTクエリを実行し、結果をJSON形式の文字列で返す。データが存在しない場合は専用のメッセージを返す。**（Issue #178で修正）** 以前は`conn.close()`が正常経路にしか無かったため、`cursor.execute()`が例外を送出する（不正なSQL等）たびに接続がクローズされずGC任せで残り、長期稼働プロセスでのfd/接続リークを招いていた。**（Issue #661で修正）** 接続の確立とクローズは`get_ro_connection()`へ委譲する形に整理され、この関数内で`sqlite3.connect`を直接呼ぶことはなくなった。あわせて`timeout`が既定の5秒から30秒になっている。
-* 根拠: `def execute_read_query(query: str, params: tuple = ()) -> str:` (行番号: 90 / 抜粋: "def execute_read_query(query: str, params: tuple = ()) -> str:")、`with get_ro_connection() as conn:` (行番号: 98 / 抜粋: "with get_ro_connection() as conn:")
+* 根拠: `def execute_read_query(query: str, params: tuple = ()) -> str:` (行番号: 94 / 抜粋: "def execute_read_query(query: str, params: tuple = ()) -> str:")、`with get_ro_connection() as conn:` (行番号: 102 / 抜粋: "with get_ro_connection() as conn:")
 
 
 * **引数/リクエスト**:
 * `query` (str): 実行するSQLクエリ文字列。
 * `params` (tuple, デフォルト `()`): SQLクエリにバインドするパラメータ。
-* 根拠: `def execute_read_query(query: str, params: tuple = ()) -> str:` (行番号: 90 / 抜粋: "def execute_read_query(query: str, params: tuple = ()) -> str:")
+* 根拠: `def execute_read_query(query: str, params: tuple = ()) -> str:` (行番号: 94 / 抜粋: "def execute_read_query(query: str, params: tuple = ()) -> str:")
 
 
 * **戻り値/レスポンス**: `str`: JSON形式の検索結果文字列、該当データなしメッセージ、またはエラーメッセージ。
-* 根拠: `if not rows: return "該当するデータはありませんでした。"` (行番号: 103 / 抜粋: "return "該当するデータはありませんでした。"")
-* 根拠: `return json.dumps(...)` (行番号: 104 / 抜粋: "return json.dumps([dict(r) for r in rows]")
+* 根拠: `if not rows: return "該当するデータはありませんでした。"` (行番号: 107 / 抜粋: "return "該当するデータはありませんでした。"")
+* 根拠: `return json.dumps(...)` (行番号: 108 / 抜粋: "return json.dumps([dict(r) for r in rows]")
 
 
 * **副作用**: データベースからのデータ読み取り。接続の後始末は`get_ro_connection`の`finally`が担うため、正常終了・例外終了のいずれの経路でも必ずクローズされる。
-* 根拠: `cursor.execute(query, params)` (行番号: 100 / 抜粋: "cursor.execute(query, params)")
+* 根拠: `cursor.execute(query, params)` (行番号: 104 / 抜粋: "cursor.execute(query, params)")
 
 
 * **エラーハンドリング**: 例外 (`Exception`) をキャッチし、例外を送出せずにエラーメッセージの文字列として返す。
@@ -142,14 +143,14 @@
 ### `save_log_generic`
 
 * **役割**: 指定されたテーブル、カラム、値を用いてINSERTクエリを動的に構築し、`get_db_cursor`経由でデータを保存する。H-1の`get_db_cursor`書き直しに伴い、返るカーソルが常に有効になったため、以前存在した`if cur:`チェックは削除された。`get_db_cursor`自体が送出する例外（接続確立失敗・with本体内のDBエラー等）も含めて関数全体を`try/except`で捕捉する構成に整理されている。**（B3で追加）** SQL文への文字列展開前に`table`/`columns_list`を`_SQL_IDENTIFIER_RE`でホワイトリスト検証し、いずれかがSQLite識別子として不正な場合はINSERT自体を実行せず、エラーログを出力して早期`return False`する。
-* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 108-122 / 抜粋: "汎用データ保存関数")、識別子検証 (参照: save_log_generic / 抜粋: "if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):\n        logger.error(f\"データ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
+* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 112-126 / 抜粋: "汎用データ保存関数")、識別子検証 (参照: save_log_generic / 抜粋: "if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):\n        logger.error(f\"データ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
 
 
 * **引数/リクエスト**:
 * `table` (str): 保存対象のテーブル名。
 * `columns_list` (List[str]): 保存対象のカラム名のリスト。
 * `values_list` (tuple): 保存する値のタプル。
-* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 108 / 抜粋: "table: str, columns_list: List[str]")
+* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 112 / 抜粋: "table: str, columns_list: List[str]")
 
 
 * **戻り値/レスポンス**: `bool`: 保存成功時は `True`、`table`/`columns_list`の識別子検証失敗時、または保存失敗時は `False`。
@@ -158,10 +159,10 @@
 
 
 * **副作用**: DBへのINSERT実行（データ書き込み）。ただし識別子検証に失敗した場合はDBアクセス自体を行わない。
-* 根拠: `cur.execute(sql, values_list)` (行番号: 118 / 抜粋: "cur.execute(sql, values_list)")
+* 根拠: `cur.execute(sql, values_list)` (行番号: 122 / 抜粋: "cur.execute(sql, values_list)")
 
 
-* **エラーハンドリング**: まず`table`/`columns_list`を`_SQL_IDENTIFIER_RE`で検証し、不正な場合はDBアクセス前にエラーログを出力して`False`を返す（B3）。検証を通過した後は`get_db_cursor`のwith文全体を囲む`try/except Exception`で、接続エラー・SQL実行エラー・`get_db_cursor`が再送出する例外のいずれもキャッチし、ロガーにエラーを出力して `False` を返す。
+* **エラーハンドリング**: まず`table`/`columns_list`を`_SQL_IDENTIFIER_RE`で検証し、不正な場合はDBアクセス前にエラーログを出力して`False`を返す（B3）。検証を通過した後は`get_db_cursor`のwith文全体を囲む`try/except Exception`で、接続エラー・SQL実行エラー・`get_db_cursor`が再送出する例外のいずれもキャッチし、ロガーに`データ保存失敗 ({table}): {例外の型名}: {メッセージ}`を出力して `False` を返す。**（Issue #1089で追加）** 例外の型名を含めるので、`OperationalError: database is locked`(ロック競合)と`OperationalError: disk I/O error`(SDカード劣化の前兆)等をログだけで区別できる。
 * 根拠: `if not _SQL_IDENTIFIER_RE.match(table) or not all(...): logger.error(...); return False` (参照: save_log_generic / 抜粋: "不正なtable/カラム名")、`except Exception as e: logger.error(...); return False` (参照: save_log_generic / 抜粋: "except Exception as e:")
 
 
@@ -169,11 +170,11 @@
 ### `save_log_async`
 
 * **役割**: `save_log_generic` を非同期で実行するためのラッパー関数。
-* 根拠: `async def save_log_async(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 124-127 / 抜粋: "save_log_generic の非同期ラッパー")
+* 根拠: `async def save_log_async(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 128-131 / 抜粋: "save_log_generic の非同期ラッパー")
 
 
 * **引数/リクエスト**: `table` (str), `columns_list` (List[str]), `values_list` (tuple) （`save_log_generic` と同等）
-* 根拠: `async def save_log_async(...)` (行番号: 124 / 抜粋: "table: str, columns_list: List[str]")
+* 根拠: `async def save_log_async(...)` (行番号: 128 / 抜粋: "table: str, columns_list: List[str]")
 
 
 * **戻り値/レスポンス**: `bool`: `save_log_generic` の実行結果（識別子検証失敗時の`False`を含む）。
@@ -182,7 +183,7 @@
 
 
 * **副作用**: 非同期スレッドプールでの `save_log_generic` の実行。
-* 根拠: `loop.run_in_executor(None, save_log_generic, ...)` (行番号: 127 / 抜粋: "loop.run_in_executor(None, save_log_generic")
+* 根拠: `loop.run_in_executor(None, save_log_generic, ...)` (行番号: 131 / 抜粋: "loop.run_in_executor(None, save_log_generic")
 
 
 * **エラーハンドリング**: なし（内部で呼び出す `save_log_generic` のエラーハンドリングに依存）。
@@ -193,7 +194,7 @@
 ### `save_logs_batch_generic`（Issue #231で追加）
 
 * **役割**: 複数行をまとめて単一トランザクションで保存する汎用関数。**（Issue #231で追加）** `save_log_generic`を複数回呼び出す実装(`handlers/line_logic.py`の`all_genki`等)では、各呼び出しがそれぞれ独立に`commit`されるため、複数行のうち途中の1件が失敗しても、既に成功した分はコミット済みのまま残ってしまう不具合があった。呼び出し元は「1件でも失敗すれば全体を失敗扱いとする」と案内しユーザーに再試行を促す設計だったが、実際には成功済み分が残ったままのため、再試行すると重複して保存されていた。本関数は単一の`get_db_cursor(commit=True)`ブロック内で全件INSERTすることで、1件でも失敗すれば例外が`get_db_cursor`側の`rollback`へ伝播し全件ロールバックされる、真のall-or-nothingを実現する。**`save_log_generic`と同様、Issue #409（Q-L9）でB3の`_SQL_IDENTIFIER_RE`による`table`/`columns_list`の識別子検証が追加されている**（詳細は次項および8節を参照）。
-* 根拠: [関数定義とDocstring] (行番号: 129-155 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:\n    """複数行をまとめて単一トランザクションで保存する汎用関数。")
+* 根拠: [関数定義とDocstring] (行番号: 133-159 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:\n    """複数行をまとめて単一トランザクションで保存する汎用関数。")
 * **（Issue #409 Q-L9 で修正）** `save_log_generic` と同じ `_SQL_IDENTIFIER_RE` によるテーブル名・カラム名の検証を追加。現在は両関数とも同一の識別子ホワイトリスト検証を経由する。
 * 根拠: `if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):` (参照: save_logs_batch_generic / 抜粋: "logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
 
@@ -202,7 +203,7 @@
 * `table` (str): 保存対象のテーブル名。
 * `columns_list` (List[str]): 保存対象のカラム名のリスト（全行共通）。
 * `values_list` (List[tuple]): 保存する各行の値のタプルのリスト。
-* 根拠: (行番号: 129 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:")
+* 根拠: (行番号: 133 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`: 全件の保存に成功した場合は`True`、いずれか1件でも失敗した場合は`False`（この場合、全件がロールバックされテーブルには一切残らない）。
@@ -213,15 +214,15 @@
 * 根拠: (行番号: 115-120 / 抜粋: "with get_db_cursor(commit=True) as cur:\n            placeholders = ", ".join(["?"] * len(columns_list))\n            columns = ", ".join(columns_list)\n            sql = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"\n            for values in values_list:\n                cur.execute(sql, values)")
 
 
-* **エラーハンドリング**: まず`table`/`columns_list`を`_SQL_IDENTIFIER_RE`で検証し（Issue #409 Q-L9、`save_log_generic`と同一のチェック）、不正な場合はDBアクセス前にエラーログを出力して`False`を返す。検証を通過した後は`get_db_cursor`のwith文全体を囲む`try/except Exception`で、いずれかの行のINSERT失敗・接続エラー・`get_db_cursor`が再送出する例外のいずれもキャッチし、ロガーにエラーを出力して`False`を返す。この際、同一トランザクション内で既に実行済みだった他の行のINSERTも`get_db_cursor`の`except`節による`conn.rollback()`で取り消される。
-* 根拠: `if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):` (参照: save_logs_batch_generic / 抜粋: "logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")、`except Exception as e:` (参照: save_logs_batch_generic / 抜粋: "except Exception as e:\n        logger.error(f"バッチデータ保存失敗 ({table}): {e}")\n        return False")
+* **エラーハンドリング**: まず`table`/`columns_list`を`_SQL_IDENTIFIER_RE`で検証し（Issue #409 Q-L9、`save_log_generic`と同一のチェック）、不正な場合はDBアクセス前にエラーログを出力して`False`を返す。検証を通過した後は`get_db_cursor`のwith文全体を囲む`try/except Exception`で、いずれかの行のINSERT失敗・接続エラー・`get_db_cursor`が再送出する例外のいずれもキャッチし、ロガーに`バッチデータ保存失敗 ({table}): {例外の型名}: {メッセージ}`(型名は Issue #1089 で追加)を出力して`False`を返す。この際、同一トランザクション内で既に実行済みだった他の行のINSERTも`get_db_cursor`の`except`節による`conn.rollback()`で取り消される。
+* 根拠: `if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):` (参照: save_logs_batch_generic / 抜粋: "logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")、`except Exception as e:` (参照: save_logs_batch_generic / 抜粋: "except Exception as e:\n        logger.error(f"バッチデータ保存失敗 ({table}): {type(e).__name__}: {e}")\n        return False")
 
 
 
 ### `save_logs_batch_async`（Issue #231で追加）
 
 * **役割**: `save_logs_batch_generic` を非同期で実行するためのラッパー関数。
-* 根拠: (行番号: 157-160 / 抜粋: "async def save_logs_batch_async(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:\n    """save_logs_batch_generic の非同期ラッパー"""")
+* 根拠: (行番号: 161-164 / 抜粋: "async def save_logs_batch_async(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:\n    """save_logs_batch_generic の非同期ラッパー"""")
 
 
 * **引数/リクエスト**: `table` (str), `columns_list` (List[str]), `values_list` (List[tuple]) （`save_logs_batch_generic` と同等）
@@ -229,11 +230,11 @@
 
 
 * **戻り値/レスポンス**: `bool`: `save_logs_batch_generic` の実行結果。
-* 根拠: (行番号: 160 / 抜粋: "return await loop.run_in_executor(None, save_logs_batch_generic, table, columns_list, values_list)")
+* 根拠: (行番号: 164 / 抜粋: "return await loop.run_in_executor(None, save_logs_batch_generic, table, columns_list, values_list)")
 
 
 * **副作用**: 非同期スレッドプールでの `save_logs_batch_generic` の実行。
-* 根拠: (行番号: 160 / 抜粋: "loop.run_in_executor(None, save_logs_batch_generic")
+* 根拠: (行番号: 164 / 抜粋: "loop.run_in_executor(None, save_logs_batch_generic")
 
 
 * **エラーハンドリング**: なし（内部で呼び出す `save_logs_batch_generic` のエラーハンドリングに依存）。
@@ -290,7 +291,7 @@ graph TD
     subgraph 外部モジュール
         config["config (不明)"]
         sqlite3["sqlite3"]
-        logging["logging"]
+        core_logger["core.logger"]
         asyncio["asyncio"]
         json["json"]
         time["time"]
@@ -322,7 +323,7 @@ graph TD
     save_logs_batch_async --> asyncio
     save_logs_batch_async --> save_logs_batch_generic
 
-    logger --> logging
+    logger -->|get_logger(#1089)| core_logger
 
 ```
 
@@ -340,6 +341,9 @@ graph TD
 * **`save_log_generic`と`save_logs_batch_generic`はSQL文字列展開時の識別子検証が同一（Issue #409 Q-L9で非対称を解消済み）**: いずれも `values_list` に対してプレースホルダー（`?`）を用いているが、`table` と `columns_list` は文字列展開でSQL文に直接埋め込まれている点は共通である。**（B3で追加）** `save_log_generic`はSQL組み立て前に`_SQL_IDENTIFIER_RE`によるSQLite識別子ホワイトリスト検証を行うようになり、`table`/`columns_list`に不正な文字種が含まれる場合はINSERTを実行せず`False`を返すようになった。当初`save_logs_batch_generic`（Issue #231で追加）はこの検証を経由しない非対称な状態だったが、**（Issue #409 Q-L9で修正）** 同じ`_SQL_IDENTIFIER_RE`による検証が追加され、現在は両関数とも同一のチェックを行う。現状の全呼び出し元はいずれもリテラル固定値かconfig定数のみのため実害はないが、この検証は将来いずれかの関数に動的な値が渡された場合のSQLインジェクションに対する構造的な防御として両関数に共通して機能する。
 * 根拠: `save_log_generic`の検証 (参照: save_log_generic / 抜粋: "if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):")、`save_logs_batch_generic`の検証 (行番号: 111-113 / 抜粋: "if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):\n        logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
 * `get_db_cursor` は接続確立時に`sqlite3.OperationalError`以外の例外（例: PRAGMA実行時のエラー）が発生した場合、`except sqlite3.OperationalError`節では捕捉されずリトライされないまま例外がそのまま送出される（`conn`は開いたままクローズされない）。この経路は本ファイル内に専用の例外処理を持たない。
+
+* **（Issue #1089）ロガーは `core.logger` 経由で、ERROR は Discord にも届く**: `save_log_generic` 等の保存失敗・`get_db_cursor` の接続エラーは、`home_system.log` に加えて `DiscordErrorHandler` 経由で Discord にも通知される(同一内容は `core/logger.py` の10分クールダウンで抑制)。呼び出し元(`sensor_service` 等)も自前で ERROR を出すため、1回の失敗で内容の異なる2行が出る。本モジュールのロガーを素の `logging.getLogger` に戻すと詳細が再び消えるので戻さないこと(`tests/test_core_logger_wiring.py` が固定)。
+* 根拠: `logger = get_logger("core.database")` (行番号: 15 / 抜粋: "logger = get_logger(\"core.database\")")
 
 ## 9. 不明事項一覧
 

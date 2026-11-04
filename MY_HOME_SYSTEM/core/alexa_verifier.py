@@ -26,7 +26,6 @@ https://developer.amazon.com/en-US/docs/alexa/custom-skills/host-a-custom-skill-
 """
 import time
 import base64
-import logging
 import posixpath
 from datetime import datetime, timezone
 from typing import Dict, Tuple
@@ -38,7 +37,10 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.exceptions import InvalidSignature
 
-logger = logging.getLogger("core.alexa_verifier")
+from core.logger import get_logger
+
+# Issue #1089: 素の logging.getLogger だと home_system.log に出ないため core.logger 経由にする。
+logger = get_logger("core.alexa_verifier")
 
 CERT_CHAIN_URL_SCHEME = "https"
 CERT_CHAIN_URL_HOSTNAME = "s3.amazonaws.com"

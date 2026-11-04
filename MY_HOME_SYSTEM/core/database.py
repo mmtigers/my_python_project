@@ -2,13 +2,17 @@ import re
 import sqlite3
 import time
 import json
-import logging
 import asyncio
 from typing import List, Optional
 from contextlib import contextmanager
 import config
+from core.logger import get_logger
 
-logger = logging.getLogger("core.database")
+# Issue #1089: 以前は素の logging.getLogger("core.database") で、setup_logging() の
+# ファイル/Discord ハンドラにつながっておらず、保存失敗の詳細(locked / disk I/O error
+# 等)が lastResort の stderr にしか出なかった(子プロセスでは正常終了時に捨てられる)。
+# config も core.logger も core.database を import しないため、循環は起きない。
+logger = get_logger("core.database")
 
 # save_log_generic の table/カラム名はプレースホルダ化できず、SQL文字列へ直接
 # 展開せざるを得ない。現状の呼び出し元は全てリテラル固定値かconfig定数のみだが、
@@ -39,7 +43,7 @@ def get_db_cursor(commit: bool = False):
                 logger.warning(f"⚠️ DB is locked. Retrying connection... ({attempt+1}/{max_retries})")
                 time.sleep(retry_delay)
                 continue
-            logger.error(f"❌ DB接続エラー: {e}")
+            logger.error(f"❌ DB接続エラー: {type(e).__name__}: {e}")
             raise
 
     # Issue #761 (AUDIT-032): 上のループは必ず break か raise で抜けるため conn は
@@ -118,7 +122,7 @@ def save_log_generic(table: str, columns_list: List[str], values_list: tuple) ->
             cur.execute(sql, values_list)
         return True
     except Exception as e:
-        logger.error(f"データ保存失敗 ({table}): {e}")
+        logger.error(f"データ保存失敗 ({table}): {type(e).__name__}: {e}")
         return False
 
 async def save_log_async(table: str, columns_list: List[str], values_list: tuple) -> bool:
@@ -151,7 +155,7 @@ def save_logs_batch_generic(table: str, columns_list: List[str], values_list: Li
                 cur.execute(sql, values)
         return True
     except Exception as e:
-        logger.error(f"バッチデータ保存失敗 ({table}): {e}")
+        logger.error(f"バッチデータ保存失敗 ({table}): {type(e).__name__}: {e}")
         return False
 
 async def save_logs_batch_async(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:

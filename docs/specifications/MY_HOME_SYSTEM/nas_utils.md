@@ -205,6 +205,9 @@ graph TD
 * `is_mounted_and_writable` において、`target_dir.mkdir(parents=True, exist_ok=True)` が実行されるため、マウントポイントが書き込み不可であっても権限エラーが出ない限りディレクトリは生成される。
 * グローバルスコープで `try...except ImportError` を用いて、`config` 等が存在しない場合にモック関数を定義している。これによりテスト等で単独実行は可能だが、本番環境で一部モジュールが読み込めなかった場合にエラーとならず沈黙して動作する可能性がある。
 
+* **（Issue #1089）例外ログに型名を含める**: `attempt_remount` の `再マウント実行中の例外エラー` と `sync_fallback_to_nas` の `データのNAS同期中にエラーが発生しました` は、`{例外の型名}: {メッセージ}` の形で出力する(`PermissionError` と `OSError` 等をログだけで区別できるようにするため)。なお本ファイルのロガーは通常経路で既に `core.logger.get_logger` 経由(上記「相互参照による補足情報」参照)であり、Issue #1089 で対象になった他の core モジュールと違って配線の変更は無い。
+* 根拠: (参照: attempt_remount / 抜粋: "logger.error(f\"❌ 再マウント実行中の例外エラー: {type(e).__name__}: {e}\")")
+
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |

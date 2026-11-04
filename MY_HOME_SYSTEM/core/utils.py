@@ -9,7 +9,28 @@ import os
 from pathlib import Path
 from typing import Callable, Any, Dict, Optional, Tuple, Type, Union
 
-logger = logging.getLogger("core")
+# Issue #1089: 以前は素の logging.getLogger("core") で home_system.log に出なかった。
+# ただし config.py が import 時に core.utils を import する(retry_with_backoff)ため、
+# ここで core.logger(import 時に config を読む)を import すると循環になる。そこで
+# 最初にログを出す時点で遅延取得する。config の import 中に呼ばれる
+# retry_with_backoff 自身はログを出さないので、通常はこの時点で config は読み込み済み。
+# 名前を "core" にしないのは、setup_logging() が付けるハンドラ(Discord含む)が
+# "core.discord" 等の子ロガーにまで伝播し、Webhook 失敗ログが Discord 送信へ
+# 再帰しうるため。
+_logger: Optional[logging.Logger] = None
+
+
+def _get_logger() -> logging.Logger:
+    global _logger
+    if _logger is None:
+        try:
+            from core.logger import get_logger
+            _logger = get_logger("core.utils")
+        except Exception:
+            # config が読めない環境(単体での利用等)では素のロガーに落とす。キャッシュしない。
+            return logging.getLogger("core.utils")
+    return _logger
+
 
 def get_now_iso() -> str:
     return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()
@@ -149,9 +170,9 @@ def with_exponential_backoff(
                     delay: int = min(max_delay, base_delay * (2 ** (attempt - 1)))
                     
                     if attempt >= alert_threshold:
-                        logger.error(f"❌ [{func.__name__}] 深刻なエラー継続中（{attempt}回目）: {e}")
+                        _get_logger().error(f"❌ [{func.__name__}] 深刻なエラー継続中（{attempt}回目）: {type(e).__name__}: {e}")
                     else:
-                        logger.warning(f"⚠️ [{func.__name__}] 実行エラー（{attempt}回目）。{delay}秒後にリトライ... 詳細: {e}")
+                        _get_logger().warning(f"⚠️ [{func.__name__}] 実行エラー（{attempt}回目）。{delay}秒後にリトライ... 詳細: {type(e).__name__}: {e}")
                     
                     time.sleep(delay)
         return wrapper
@@ -241,17 +262,17 @@ def wait_for_storage_warmup(
         # パスの存在とアクセス権限（読み書き）をチェック
         if check_target.exists() and os.access(check_target, os.R_OK | os.W_OK):
             if attempt > 0:
-                logger.info(f"💡 [Storage Warmup] ストレージが応答しました（{attempt}回のリトライで復帰）: {check_target}")
+                _get_logger().info(f"💡 [Storage Warmup] ストレージが応答しました（{attempt}回のリトライで復帰）: {check_target}")
             return True
             
         if attempt < max_retries:
             # Exponential Backoff の計算
             delay = min(max_delay, base_delay * (2 ** attempt))
-            logger.debug(
+            _get_logger().debug(
                 f"⏳ [Storage Warmup] アクセス待機中（{attempt + 1}/{max_retries}回目）。"
                 f"{delay}秒待機... 対象: {check_target}"
             )
             time.sleep(delay)
         
-    logger.error(f"❌ [Storage Warmup] {max_retries}回リトライしましたが、ストレージにアクセスできません: {check_target}")
+    _get_logger().error(f"❌ [Storage Warmup] {max_retries}回リトライしましたが、ストレージにアクセスできません: {check_target}")
     return False
