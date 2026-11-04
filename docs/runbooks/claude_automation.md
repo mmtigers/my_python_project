@@ -19,7 +19,7 @@
 ## 使い方
 
 ```bash
-# 検証(前提: MY_HOME_SYSTEM/requirements*.txt と DDD/requirements.txt を入れた venv を有効化)
+# 検証(前提: MY_HOME_SYSTEM/requirements*.txt を入れた venv を有効化。DDD の依存も requirements.txt に含まれる)
 python3 ~/.claude/skills/verify-handoff/scripts/vh.py detect                 # 実行内容の確認
 python3 ~/.claude/skills/verify-handoff/scripts/vh.py run                    # 全検証(約3.5分)
 python3 ~/.claude/skills/verify-handoff/scripts/vh.py run --only backend-pytest   # 部分実行(結果は同一HEADなら既存結果へマージ)
@@ -65,7 +65,7 @@ CIとこの環境(3.13)の版差を避けたいときは `uv` で 3.11 の venv 
 ```bash
 uv venv --python 3.11 /tmp/venv311            # 3.11 が無ければ uv が取得する
 uv pip install --python /tmp/venv311/bin/python \
-  -r MY_HOME_SYSTEM/requirements.txt -r MY_HOME_SYSTEM/requirements-dev.txt -r DDD/requirements.txt
+  -r MY_HOME_SYSTEM/requirements.txt -r MY_HOME_SYSTEM/requirements-dev.txt
 PATH=/tmp/venv311/bin:$PATH python3 ~/.claude/skills/verify-handoff/scripts/vh.py run
 ```
 

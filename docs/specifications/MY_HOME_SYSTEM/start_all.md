@@ -20,7 +20,7 @@
 
 ## 2. ファイルの概要
 
-* システム全体において、`MY_HOME_SYSTEM`のクリーンアップ、初期設定、および関連するプロセス群の起動を統括するスクリプト。環境変数の設定、`CLEANUP_TARGETS`配列に列挙された既存プロセス群への段階的な終了処理（優しい停止→最大5秒待機→対象ごとの強制終了フォールバック）、NASのマウント確認（自動マウントのトリガーとExponential Backoffによるリトライ）、Python依存関係の鮮度チェック（`requirements.txt`と`DDD/requirements.txt`を連結したSHA256ハッシュ比較による冪等`pip install`、Issue #483 / #736）、gitフックの登録（リポジトリ管理の`deploy/git-hooks/`を`core.hooksPath`として冪等に設定）、family-questフロントエンドの鮮度チェック（`deploy.sh --if-stale`による冪等リビルド）、Webhookの修正スクリプト実行、そしてコアサーバーのバックグラウンド起動を担っている。引数`--prepare`を付けると前処理(Phase 0〜3)だけを実行してサーバー本体は起動しない(Issue #646。実機の`deploy/systemd/home_system.service`は`ExecStartPre`でこのモードを呼び、`unified_server.py`本体は`Type=simple`+`Restart=on-failure`の`ExecStart`としてsystemdがフォアグラウンド起動する)。**（Issue #829で変更）** ダッシュボードは以前`home_dashboard.service`という別ユニット(Streamlit)が起動していたが、Streamlit版廃止に伴いそのユニット自体が削除され、`unified_server.py`自身が`routers/dashboard_router.py`配下でHTMLを返すようになったため、本スクリプトにもsystemd unitにもダッシュボード専用の起動処理は存在しなくなった。
+* システム全体において、`MY_HOME_SYSTEM`のクリーンアップ、初期設定、および関連するプロセス群の起動を統括するスクリプト。環境変数の設定、`CLEANUP_TARGETS`配列に列挙された既存プロセス群への段階的な終了処理（優しい停止→最大5秒待機→対象ごとの強制終了フォールバック）、NASのマウント確認（自動マウントのトリガーとExponential Backoffによるリトライ）、Python依存関係の鮮度チェック（lockである`requirements.txt`のSHA256ハッシュ比較による冪等`pip install`、Issue #483 / #736 / #1090）、gitフックの登録（リポジトリ管理の`deploy/git-hooks/`を`core.hooksPath`として冪等に設定）、family-questフロントエンドの鮮度チェック（`deploy.sh --if-stale`による冪等リビルド）、Webhookの修正スクリプト実行、そしてコアサーバーのバックグラウンド起動を担っている。引数`--prepare`を付けると前処理(Phase 0〜3)だけを実行してサーバー本体は起動しない(Issue #646。実機の`deploy/systemd/home_system.service`は`ExecStartPre`でこのモードを呼び、`unified_server.py`本体は`Type=simple`+`Restart=on-failure`の`ExecStart`としてsystemdがフォアグラウンド起動する)。**（Issue #829で変更）** ダッシュボードは以前`home_dashboard.service`という別ユニット(Streamlit)が起動していたが、Streamlit版廃止に伴いそのユニット自体が削除され、`unified_server.py`自身が`routers/dashboard_router.py`配下でHTMLを返すようになったため、本スクリプトにもsystemd unitにもダッシュボード専用の起動処理は存在しなくなった。
 * 根拠: スクリプト全体 (行番号: 4〜151 / 抜粋: "MY_HOME_SYSTEM 起動スクリプト")
 
 ## 3. 外部依存関係
@@ -38,8 +38,8 @@
 | `switchbot_webhook_fix.py` | スクリプト内で実行されているが、処理内容の実装が提供されていないため | `switchbot_webhook_fix.py` (行番号: 261 / 抜粋: "$PYTHON_EXEC switchbot_webhook_fix.py") |
 | `unified_server.py` | スクリプト内で実行および停止対象となっているが、実装内容が不明なため | `unified_server.py` (行番号: 277 / 抜粋: "$PYTHON_EXEC unified_server.py") |
 | `/mnt/nas` | マウント状況の確認先となっているが、システム上の具体的なNAS構成が不明なため | `MOUNT_POINT` (行番号: 137 / 抜粋: "MOUNT_POINT="/mnt/nas"") |
-| `family-quest/deploy.sh` | Phase 2で`--if-stale`引数付きで実行されるが、冪等判定・ビルドの実装内容は本ファイル外のため | `bash "$QUEST_DIR/deploy.sh" --if-stale` (行番号: 240 / 抜粋: "bash "$QUEST_DIR/deploy.sh" --if-stale") |
-| `sync_strict.py` | **（Issue #700 で追加）** Phase 2.5で`--if-stale`付きで実行されるが、鮮度判定・同期の実装内容は本ファイル外のため | `$PYTHON_EXEC sync_strict.py --if-stale` (行番号: 255 / 抜粋: "$PYTHON_EXEC sync_strict.py --if-stale > logs/quest_master_sync.log 2>&1") |
+| `family-quest/deploy.sh` | Phase 2で`--if-stale`引数付きで実行されるが、冪等判定・ビルドの実装内容は本ファイル外のため | `bash "$QUEST_DIR/deploy.sh" --if-stale` (行番号: 247 / 抜粋: "bash "$QUEST_DIR/deploy.sh" --if-stale") |
+| `sync_strict.py` | **（Issue #700 で追加）** Phase 2.5で`--if-stale`付きで実行されるが、鮮度判定・同期の実装内容は本ファイル外のため | `$PYTHON_EXEC sync_strict.py --if-stale` (行番号: 262 / 抜粋: "$PYTHON_EXEC sync_strict.py --if-stale > logs/quest_master_sync.log 2>&1") |
 | 停止対象の各スクリプト群 | `camera_monitor.py`, `scheduler_boot.py`など`CLEANUP_TARGETS`配列に列挙されたプロセス停止対象の実装内容が不明なため | `CLEANUP_TARGETS`配列定義 (行番号: 97 / 抜粋: "CLEANUP_TARGETS=(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -125,8 +125,8 @@
 
 ### [要素名4：Phase 1.5: Python依存関係の鮮度チェック]
 
-* **役割**: `REQ_FILES`配列（`requirements.txt` と `$DEVELOP_ROOT/DDD/requirements.txt`）のうち実在するものを連結したSHA256ハッシュを算出し、`.venv/.requirements-sha256`に記録済みのハッシュと比較する。一致しなければ依存定義が変更されたと判断し、各ファイルについて`$PYTHON_EXEC -m pip install -r "$req"`を順に実行して`.venv`を追従させ、**すべて成功した場合のみ**新しいハッシュを記録する。family-questの`deploy.sh --if-stale`と同じ冪等チェックの思想をバックエンドの依存関係にも適用したもの（Issue #483: `requirements.txt`変更後に`.venv`が追従しないと`ImportError`で起動失敗しうる問題への対応）。**（Issue #736 / AUDIT-006 で対象拡張）** `deploy/cron/crontab`はDDDのスクリプトも`MY_HOME_SYSTEM/.venv`のpythonで実行する（`run_task.sh`が`"${PROJECT_ROOT}/.venv/bin/python3"`を使い、`newface_monitor.py`の行は`.../MY_HOME_SYSTEM/.venv/bin/python`を明示している）のに、以前はMY_HOME_SYSTEM側の`requirements.txt`しか見ていなかった。そのためDDD固有の実行時依存（`yt-dlp` / `curl_cffi`）は「過去に手で`pip install`した」痕跡としてしか`.venv`に存在せず、`.venv`を作り直す・新しいホストへ移ると無音で失敗する状態だった。単一venvを共有しているという実態をこの配列で明示している。
-* 根拠: Phase 1.5ブロック (行番号: 138〜185 / 抜粋: "# --- Phase 1.5: Python依存関係の鮮度チェック ---")、[対象ファイル定義] (行番号: 181 / 抜粋: "REQ_FILES=(\"requirements.txt\" \"$DEVELOP_ROOT/DDD/requirements.txt\")")
+* **役割**: `REQ_FILES`配列（現在は`requirements.txt`のみ）のうち実在するものを連結したSHA256ハッシュを算出し、`.venv/.requirements-sha256`に記録済みのハッシュと比較する。一致しなければ依存定義が変更されたと判断し、各ファイルについて`$PYTHON_EXEC -m pip install -r "$req"`を順に実行して`.venv`を追従させ、**すべて成功した場合のみ**新しいハッシュを記録する。family-questの`deploy.sh --if-stale`と同じ冪等チェックの思想をバックエンドの依存関係にも適用したもの（Issue #483: `requirements.txt`変更後に`.venv`が追従しないと`ImportError`で起動失敗しうる問題への対応）。**（Issue #736 / AUDIT-006 で対象拡張）** `deploy/cron/crontab`はDDDのスクリプトも`MY_HOME_SYSTEM/.venv`のpythonで実行する（`run_task.sh`が`"${PROJECT_ROOT}/.venv/bin/python3"`を使い、`newface_monitor.py`の行は`.../MY_HOME_SYSTEM/.venv/bin/python`を明示している）のに、以前はMY_HOME_SYSTEM側の`requirements.txt`しか見ていなかった。そのためDDD固有の実行時依存（`yt-dlp` / `curl_cffi`）は「過去に手で`pip install`した」痕跡としてしか`.venv`に存在せず、`.venv`を作り直す・新しいホストへ移ると無音で失敗する状態だった。単一venvを共有しているという実態をこの配列で明示している。**（Issue #1090 で変更）** #736では配列に`DDD/requirements.txt`も並べて同じvenvへ順に`pip install`していたが、DDDの`curl_cffi`が要求する`certifi`/`cffi`の下限がlockの版より新しく、installのたびにダウングレード→再アップグレードの往復が起き、実機の版がlock・CIと食い違っていた。DDDの直接依存（`yt-dlp`・`curl_cffi`）を`requirements.in`に統合して`DDD/requirements.txt`を廃止し、このvenvの依存は1つのlockだけで決まるようにした。配列の形（連結ハッシュ・installループ）はそのまま残している。
+* 根拠: Phase 1.5ブロック (行番号: 138〜185 / 抜粋: "# --- Phase 1.5: Python依存関係の鮮度チェック ---")、[対象ファイル定義] (行番号: 188 / 抜粋: "REQ_FILES=(\"requirements.txt\")")
 
 
 * **引数/リクエスト**: なし
@@ -149,7 +149,7 @@
 ### [要素名4.5：Phase 1.6: git フックの登録 (core.hooksPath)]
 
 * **役割**: リポジトリ管理のgitフックディレクトリ`$DEVELOP_ROOT/deploy/git-hooks`(post-mergeフック: `git pull`後に`family-quest/deploy.sh --if-stale`を自動実行)を、`git config core.hooksPath`でリポジトリに登録する。コメントに、以前は`.git/hooks/post-merge`へのローカル設置でgit管理外だったためclone後に手で再設置が必要だった経緯と、`core.hooksPath`を設定すると`.git/hooks/`配下のフックは実行されなくなる注意が明記されている。
-* 根拠: Phase 1.6ブロック (行番号: 211 / 抜粋: "# --- Phase 1.6: git フックの登録 (core.hooksPath) ---")
+* 根拠: Phase 1.6ブロック (行番号: 218 / 抜粋: "# --- Phase 1.6: git フックの登録 (core.hooksPath) ---")
 
 
 * **引数/リクエスト**: なし
@@ -165,14 +165,14 @@
 
 
 * **エラーハンドリング**: ディレクトリ不在・gitリポジトリでない・`git config`失敗のいずれも警告を標準エラー出力へ表示するのみでスクリプトは続行する(フック登録の失敗でサーバー起動を止めない)。
-* 根拠: else分岐 (行番号: 229 / 抜粋: "Skipping hook registration.")
+* 根拠: else分岐 (行番号: 236 / 抜粋: "Skipping hook registration.")
 
 
 
 ### [要素名5：Phase 2: family-quest フロントエンド鮮度チェック]
 
 * **役割**: サーバー起動前に`family-quest/deploy.sh --if-stale`を実行し、配信用ビルド成果物`dist/`が現在のチェックアウト(HEAD)の`family-quest`ツリーからビルドされたものかを冪等チェックさせ、古ければ再ビルドさせる。コメントに、`git pull`以外の経路(`git reset --hard`等)での更新では`post-merge`フックが発火せず、`dist/`が旧世代のままサーバーだけ新コードで起動してAPIスキーマ不整合を起こした障害(2026-09-01)の再発防止である旨が明記されている。
-* 根拠: Phase 2ブロック (行番号: 232 / 抜粋: "# --- Phase 2: family-quest フロントエンドの鮮度チェック ---")
+* 根拠: Phase 2ブロック (行番号: 239 / 抜粋: "# --- Phase 2: family-quest フロントエンドの鮮度チェック ---")
 
 
 * **引数/リクエスト**: なし
@@ -184,7 +184,7 @@
 
 
 * **副作用**: `family-quest/deploy.sh --if-stale`の実行（`dist/`が古い場合はnpm install/buildによる`dist/`の再生成が発生する）。その標準出力・標準エラー出力の`logs/quest_deploy.log`への書き込み。標準出力へのログ表示。
-* 根拠: 実行・リダイレクト処理 (行番号: 240 / 抜粋: "bash "$QUEST_DIR/deploy.sh" --if-stale > logs/quest_deploy.log 2>&1")
+* 根拠: 実行・リダイレクト処理 (行番号: 247 / 抜粋: "bash "$QUEST_DIR/deploy.sh" --if-stale > logs/quest_deploy.log 2>&1")
 
 
 * **エラーハンドリング**: `deploy.sh`が失敗しても警告を表示するのみでスクリプトは続行する（既存の`dist/`を配信し続ける方がサーバー未起動よりマシという設計判断がコメントに明記されている）。
@@ -195,7 +195,7 @@
 ### [要素名5.5：Phase 2.5: クエストマスタの鮮度チェック（Issue #700で追加）]
 
 * **役割**: サーバー起動前に`sync_strict.py --if-stale`を実行し、`quest_data.py`/`routine_data.py`に差分があるときだけ`quest_master`/`reward_master`をDBへ同期させる。コメントに、マスタ同期が`POST /api/quest/sync_master`か`sync_strict.py`を手で叩いたときにしか走らず実機DBが古いまま残っていたこと(2026-09-19に退役済みクエスト6件が残り、移設先のすごろくステップ報酬と二重取得になっていた障害)、`post-merge`フックからも同じコマンドを呼ぶが`git reset --hard`等の経路の回収としてサーバー起動前にも必ず通すこと(family-questのdist鮮度チェックと同じ思想)、`--if-stale`のため破壊的操作が毎起動では走らないことが明記されている。
-* 根拠: Phase 2.5ブロック (行番号: 244 / 抜粋: "# --- Phase 2.5: クエストマスタ(quest_master/reward_master)の鮮度チェック ---")
+* 根拠: Phase 2.5ブロック (行番号: 251 / 抜粋: "# --- Phase 2.5: クエストマスタ(quest_master/reward_master)の鮮度チェック ---")
 
 
 * **引数/リクエスト**: なし
@@ -207,11 +207,11 @@
 
 
 * **副作用**: `$PYTHON_EXEC sync_strict.py --if-stale`の実行（差分がある場合のみDBの`quest_master`/`reward_master`が更新される）。その標準出力・標準エラー出力の`logs/quest_master_sync.log`への書き込み。標準出力へのログ表示。
-* 根拠: 実行・リダイレクト処理 (行番号: 255 / 抜粋: "$PYTHON_EXEC sync_strict.py --if-stale > logs/quest_master_sync.log 2>&1")
+* 根拠: 実行・リダイレクト処理 (行番号: 262 / 抜粋: "$PYTHON_EXEC sync_strict.py --if-stale > logs/quest_master_sync.log 2>&1")
 
 
 * **エラーハンドリング**: 同期が失敗しても警告を表示するのみでスクリプトは続行する（旧マスタで動かす方が起動失敗よりマシという、Phase 1.5/2と同じ設計判断がコメントに明記されている）。
-* 根拠: if分岐と設計コメント (行番号: 253 / 抜粋: "# (旧マスタで動かす方が停止よりマシ。Phase 1.5/2 と同じ判断)")
+* 根拠: if分岐と設計コメント (行番号: 260 / 抜粋: "# (旧マスタで動かす方が停止よりマシ。Phase 1.5/2 と同じ判断)")
 
 
 
@@ -252,7 +252,7 @@
 * **上書き**: 環境変数 `ALLOW_MANUAL_START` がちょうど `1` のときだけ、警告（起動後のプロセスは systemd 管理外になり自動再起動されない旨）を出して続行する。`true` / `yes` / `0` / 空文字は上書きとみなさない
 * **配置の制約**: 掃除（Phase 0）より後ろに置くと、拒否した時点で既にプロセスを止めている。`cd "$PROJECT_DIR"` より前に置いているのは、`cd` の失敗（CI 等）とガードによる拒否を取り違えないため。`tests/test_start_all_manual_start_guard.py` がこの配置を検査する
 * **テスト**: スクリプトを `# --- end 手動起動ガード ---` の行で切り出して末尾に `echo GUARD_PASSED` を足したものを、`systemctl` のスタブだけを置いた PATH で実行する。本物のガードのコードを検証しつつ、ガードを通過してもその先（掃除・NAS待ち・サーバー起動）は一切実行されないため、実機上で走らせても安全
-* 根拠: `PREPARE_ONLY=false` / `if [ "${1:-}" = "--prepare" ]; then` (行番号: 23 / 抜粋: "PREPARE_ONLY=true")、掃除対象の絞り込み (行番号: 66〜78)、`exit 0` (行番号: 267 / 抜粋: "Preparation finished (--prepare)")
+* 根拠: `PREPARE_ONLY=false` / `if [ "${1:-}" = "--prepare" ]; then` (行番号: 23 / 抜粋: "PREPARE_ONLY=true")、掃除対象の絞り込み (行番号: 66〜78)、`exit 0` (行番号: 274 / 抜粋: "Preparation finished (--prepare)")
 
 
 * **引数/リクエスト**: `$1`（`--prepare`のみ解釈。それ以外・省略時は従来動作）
@@ -290,7 +290,7 @@ flowchart TD
     WaitLoop -- "5秒経過でも残存" --> PkillHard["残存する対象ごとにpkill -9で強制終了"]
     PkillHard --> CheckNAS[NASマウントポイント確認]
     CheckNAS --> MountLoop{最大5回・自動マウントトリガー+Exponential Backoffでリトライ}
-    MountLoop --> ReqHashCheck{"requirements.txt + DDD/requirements.txt の連結SHA256が<br/>.venv/.requirements-sha256と一致するか?"}
+    MountLoop --> ReqHashCheck{"requirements.txt のSHA256が<br/>.venv/.requirements-sha256と一致するか?"}
     ReqHashCheck -- 一致 --> HooksCheck
     ReqHashCheck -- 不一致 --> PipInstall["各 requirements について pip install<br/>(全て成功したときのみハッシュ更新)"]
     PipInstall -- "成功/失敗いずれでも続行" --> HooksCheck{core.hooksPath が deploy/git-hooks を指しているか?}
@@ -356,7 +356,7 @@ graph TD
 * **[修正済み] プロセスの起動監視漏れ (Issue #646)**: 以前は`unified_server.py`を`nohup`でバックグラウンド起動するだけで、即座にクラッシュしていないかの死活監視・エラー検知のロジックが存在しなかった。現在、実機経路では`deploy/systemd/home_system.service`(`Type=simple`+`Restart=on-failure`)が`unified_server.py`をフォアグラウンドで管理し、本スクリプトは`--prepare`で前処理のみ行う。引数なしの手動経路では従来どおり死活監視は無い。**（Issue #829で変更）** 以前は`home_dashboard.service`が`dashboard.py`(Streamlit)を同様にフォアグラウンドで管理していたが、Streamlit版廃止に伴い当該ユニット自体が削除された。
 * **[修正済み] pkill対象名の実体不一致**: 以前は`CLEANUP_TARGETS`に相当する停止対象が`scheduler.py`という実在しないプロセス名で個別に`pkill`されており、実体`scheduler_boot.py`にマッチしないため再起動のたびに旧schedulerプロセスが生き残り、`unified_server.py`起動時に新しいschedulerプロセスと重複起動する不具合があった。存在しない`bluetooth_monitor.py`への`pkill`も無害だが無意味であった。現在は実ファイル名を用いた`CLEANUP_TARGETS`配列に置き換えられ、この2点は解消されている。
 * **[修正済み] NASマウント確認が待たずに次フェーズへ進んでいた**: 以前のPhase 1は`mountpoint -q`を1回チェックするのみで、未マウントでも警告を表示するだけで即座にPhase 3(Webhook修正)・Phase 4(サーバー起動)へ進んでいた。起動直後はautofsのアイドルアンマウント後の自動マウント完了まで数秒かかることがあり、これは`config.py`の`verify_and_initialize_storage`（Exponential Backoffで自己修復）が扱う遅延と同種の事象であるにもかかわらず、本スクリプト側にはリトライが一切なかった。現在はパスアクセスによる自動マウントのトリガーと、最大5回・Exponential Backoff（1s/2s/4s/8s/16s）のリトライへ変更されている（74〜99行目）。ただしリトライを尽くしても未マウントの場合は依然として警告のみで後続フェーズへ進む点（アプリ側のバックオフ・フォールバックに委ねる設計）は変わらない。
-* **[修正済み] requirements.txt変更時に.venvが追従しない問題(Issue #483)**: 以前は本スクリプトにPython依存関係を更新する経路が一切なく、`requirements.txt`を変更するPRをマージして実機で`git pull`しても`.venv`は古いままだった。新規パッケージをimportするコードが含まれていれば`unified_server.py`が`ImportError`で起動失敗し、2026-09-01のfamily-quest dist不整合障害と同型の穴がバックエンド側に残っていた。現在はPhase 1.5で`requirements.txt`と`DDD/requirements.txt`を連結したSHA256ハッシュを`.venv/.requirements-sha256`と比較し、不一致なら各ファイルについて`pip install`を実行してハッシュを更新するようになっている（138〜193行目）。**（Issue #736 / AUDIT-006）** DDD側を対象に含めたのは、cronがDDDのスクリプトも`MY_HOME_SYSTEM/.venv`のpythonで実行しているのに`yt-dlp`/`curl_cffi`がどのインストール経路にも含まれておらず、`.venv`を作り直すとDDDのバッチが無音で失敗する状態だったため。**副作用としてPhase 1.5の所要時間が延びる**（`yt-dlp`は更新頻度が高い）ので、`home_system.service`の`TimeoutStartSec`（Issue #731で900秒を明示）と併せて見ること。`requirements.txt`変更後の初回起動はpipインストール分だけ遅くなる点、およびネットワーク断時は`pip install`が失敗し既存の`.venv`のまま起動を続行する点に留意。
+* **[修正済み] requirements.txt変更時に.venvが追従しない問題(Issue #483)**: 以前は本スクリプトにPython依存関係を更新する経路が一切なく、`requirements.txt`を変更するPRをマージして実機で`git pull`しても`.venv`は古いままだった。新規パッケージをimportするコードが含まれていれば`unified_server.py`が`ImportError`で起動失敗し、2026-09-01のfamily-quest dist不整合障害と同型の穴がバックエンド側に残っていた。現在はPhase 1.5で`requirements.txt`のSHA256ハッシュを`.venv/.requirements-sha256`と比較し、不一致なら各ファイルについて`pip install`を実行してハッシュを更新するようになっている（138〜193行目）。**（Issue #736 / AUDIT-006）** DDD側を対象に含めたのは、cronがDDDのスクリプトも`MY_HOME_SYSTEM/.venv`のpythonで実行しているのに`yt-dlp`/`curl_cffi`がどのインストール経路にも含まれておらず、`.venv`を作り直すとDDDのバッチが無音で失敗する状態だったため（Issue #1090 以降、DDDの依存は`requirements.txt`に統合され、別ファイルとしては扱わない）。**副作用としてPhase 1.5の所要時間が延びる**（`yt-dlp`は更新頻度が高い）ので、`home_system.service`の`TimeoutStartSec`（Issue #731で900秒を明示）と併せて見ること。`requirements.txt`変更後の初回起動はpipインストール分だけ遅くなる点、およびネットワーク断時は`pip install`が失敗し既存の`.venv`のまま起動を続行する点に留意。
 
 * **（2026-09-06 品質監査で修正）** `CLEANUP_TARGETS` の監視スクリプト用パターンを `"python.*monitors/[a-z_]*\.py"` から `scheduler_boot.py` の `TASKS` が起動するものに限定した(当初は6本。現在は`switchbot_power_monitor|nature_remo_monitor|switchbot_hub_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor|routine_deadline_job|weather_monitor`の9本)。以前のパターンは systemd の `network_logger.service` や cron 起動の `health_watch.py`/`daily_timelapse_job.py`(ffmpeg を伴い長時間走る)/`log_analyzer.py` まで巻き添えで SIGTERM していた。`TASKS` を変更したらここも更新すること(`tests/test_start_all_sh.py` が両者の整合を検証する)。
 * 根拠: (行番号: 101 / 抜粋: "\"python.*monitors/(switchbot_power_monitor|nature_remo_monitor|switchbot_hub_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor|routine_deadline_job|weather_monitor)\\.py\"")

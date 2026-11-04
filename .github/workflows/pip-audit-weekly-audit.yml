@@ -1,7 +1,8 @@
 name: pip-audit Weekly Audit
 
-# MY_HOME_SYSTEM/requirements.txt・requirements-dev.txt・DDD/requirements.txt を
-# 対象に、既知CVEの検知結果を週次でIssueとして報告する(Issue #400 で dev/DDD を追加)。test.yml の Security Scan ジョブの pip-audit ステップはPRの差分と
+# MY_HOME_SYSTEM/requirements.txt・requirements-dev.txt を対象に、既知CVEの検知結果を
+# 週次でIssueとして報告する(Issue #400 で dev/DDD を追加。Issue #1090 で DDD の依存は
+# requirements.txt に統合した)。test.yml の Security Scan ジョブの pip-audit ステップはPRの差分と
 # 無関係な新規CVE公開でも赤くなり得るため非ブロッキングにしている(Issue #324)。
 # その代わりに、仕様書ドリフト(spec-drift-weekly-audit.yml)と同じ型の定期監査
 # Issueで放置を防ぐ。
@@ -36,7 +37,6 @@ jobs:
           cache-dependency-path: |
             MY_HOME_SYSTEM/requirements.txt
             MY_HOME_SYSTEM/requirements-dev.txt
-            DDD/requirements.txt
 
       - name: Install dependencies
         # Issue #400: pip-audit 自体も requirements-dev.txt と同じバージョンに固定する
@@ -58,13 +58,12 @@ jobs:
         # 次のステップはファイルの中身ではなくこの2値で clean/vuln/failure を判定する。
         # ファイルが無い場合はアーティファクト用に固定文言のファイルを作っておく。
         #
-        # MY_HOME_SYSTEM と DDD は別々の .venv で動く独立した環境であり、同じパッケージを
-        # 異なるバージョン制約で固定している(例: beautifulsoup4 は MY_HOME_SYSTEM が
-        # ==4.14.3、DDD が >=4.15.0)。pip-audit に3ファイルを一度に -r 指定すると単一の
-        # 仮想環境で全制約を同時に解決しようとして ResolutionImpossible で exit 1
-        # (レポート未生成)になり、実際には脆弱性が無くても毎週「チェック自体が失敗」の
-        # Issue が起票され続ける。実機と同じ単位(MY_HOME_SYSTEM の2ファイル / DDD の
-        # 1ファイル)で個別に監査し、結果を1つのレポートに結合する。
+        # 実機では MY_HOME_SYSTEM と DDD が MY_HOME_SYSTEM/.venv を共用しており、その依存は
+        # requirements.txt(lock)1つで決まる(Issue #1090。以前は「別々の .venv の独立環境」として
+        # DDD/requirements.txt を個別に監査していたが、実態と合わず、実機で実際に入っている版の
+        # 組み合わせを監査できていなかった)。dev 側は -c requirements.txt で同じ版に揃うため、
+        # 2ファイルを1回の pip-audit で監査する。run_audit の形(表示名ごとに結果を結合し、
+        # exit code を集約する)は、監査単位を増やすときのために残している。
         run: |
           overall_code=0
           report_written=false
@@ -99,7 +98,6 @@ jobs:
             fi
           }
           run_audit MY_HOME_SYSTEM -r requirements.txt -r requirements-dev.txt
-          run_audit DDD -r ../DDD/requirements.txt
           echo "exit_code=${overall_code}" >> "$GITHUB_OUTPUT"
           echo "report_written=${report_written}" >> "$GITHUB_OUTPUT"
           if [ "$report_written" != "true" ]; then
@@ -113,7 +111,7 @@ jobs:
           script: |
             const fs = require("fs");
             const title = "📋 pip-audit 定期監査";
-            const header = "## pip-audit 定期監査（MY_HOME_SYSTEM/requirements.txt, requirements-dev.txt, DDD/requirements.txt）\n\n";
+            const header = "## pip-audit 定期監査（MY_HOME_SYSTEM/requirements.txt, requirements-dev.txt。DDD の依存も含む）\n\n";
             // Issue #366: 判定はレポートファイルの有無/中身ではなく、前ステップが記録した
             // exit code と「pip-auditがレポートを書いたか」で行う(0件時はファイルが生成されないため)。
             const exitCode = "${{ steps.audit.outputs.exit_code }}";

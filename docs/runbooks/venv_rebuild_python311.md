@@ -22,8 +22,7 @@ cd /home/masahiro/develop/MY_HOME_SYSTEM
 sudo systemctl stop home_system.service
 mv .venv .venv.py313.bak
 uv venv --seed --python 3.11 .venv
-uv pip install --python .venv/bin/python -r requirements.txt
-uv pip install --python .venv/bin/python -r ../DDD/requirements.txt
+uv pip install --python .venv/bin/python -r requirements.txt   # DDD の依存も含む(Issue #1090)
 sudo systemctl start home_system.service
 ```
 
