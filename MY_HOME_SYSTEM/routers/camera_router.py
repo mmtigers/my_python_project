@@ -114,7 +114,13 @@ def get_record_file(camera_id: str, target_date: str, filename: str):
     if filename.endswith(".m3u8"):
         cam_conf = _require_camera(camera_id)
 
-        playlist_path = camera_service.generate_record_playlist(cam_conf, target_date)
+        # Issue #1088: VOD生成は全カメラで同時1本・空き容量の事前確認つき。順番待ち・
+        # 混雑・容量不足で今は生成できないときは、「録画が無い」(404)と区別して 503 を返す。
+        try:
+            playlist_path = camera_service.generate_record_playlist(cam_conf, target_date)
+        except camera_service.VodGenerationUnavailable as e:
+            headers = {"Retry-After": str(e.retry_after)} if e.retry_after else None
+            raise HTTPException(status_code=503, detail=e.message, headers=headers)
         if not playlist_path:
             raise HTTPException(status_code=404, detail="Recordings not found for the specified date")
 

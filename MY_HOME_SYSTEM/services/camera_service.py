@@ -1,13 +1,15 @@
+import collections
 import contextlib
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
 import urllib.parse
 import glob
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 # #661: WSDL 探索は core/onvif_utils.py に一本化(以前は本ファイルと camera_monitor/camera_service に同一実装が重複)
 from core.onvif_utils import find_wsdl_path
 from core.logger import setup_logging
@@ -40,6 +42,15 @@ MAX_PLAUSIBLE_SEGMENT_GAP_SECONDS = 43200  # ファイル間の時間差の異�
 PLAYLIST_WAIT_MAX_ATTEMPTS = 10  # 生成中プレイリスト待機の最大試行回数
 PLAYLIST_WAIT_POLL_INTERVAL_SEC = 0.5  # 生成中プレイリスト待機のポーリング間隔(秒)
 
+# Issue #1088: 過去日の録画再生で3台分のVOD生成(-c:v copy で丸1日分)が同時に走り、
+# SQLiteと同じSDカードへ約47分で約70GBを書き込んで、センサー保存失敗・database is locked・
+# API無応答を誘発した。以下で「全カメラで同時1本」「空き容量の事前確認」「I/O優先度の
+# 引き下げ」「終了のログ出力」を行う。
+VOD_OUTPUT_SIZE_FACTOR = 1.1  # 想定出力量 = 元MP4の合計サイズ × この係数(HLS(.ts)化のオーバーヘッド分)
+VOD_QUEUE_MAX = 6  # VOD生成の順番待ちの最大件数(カメラ3台×2日分程度。超えた要求は断る)
+VOD_QUEUED_RETRY_AFTER_SEC = 60  # 順番待ち・混雑で断ったときに返す Retry-After(秒)
+VOD_STDERR_TAIL_LINES = 20  # ffmpeg終了時にログへ出すstderr末尾の行数
+
 # 不具合修正: ffmpegのRTSP入力にはioタイムアウトが既定で設定されておらず、
 # TCP接続は張れるが応答が返らない種類のネットワーク不調(実機で駐車場カメラの
 # ネットワーク瞬断後に確認)に遭遇すると、ffmpegプロセスはエラーも出さず
@@ -65,6 +76,8 @@ HLS_LIVE_KILL_WAIT_SECONDS = 5  # 停滞したffmpegをkillした後の終了待
 _active_processes: Dict[str, subprocess.Popen] = {}
 _live_started_at: dict[str, float] = {}  # cam_id -> ライブffmpegの起動時刻(monotonicではなくtime.time())
 _active_vod_processes: Dict[str, subprocess.Popen] = {} # VOD排他制御用の辞書を追加
+# Issue #1088: VOD生成の順番待ち(process_key -> (cam_conf, target_date))。挿入順=実行順。
+_vod_queue: "collections.OrderedDict[str, Tuple[Dict[str, Any], str]]" = collections.OrderedDict()
 _rtsp_cache: Dict[str, str] = {}
 
 # #439: 上記3辞書はFastAPIの同期エンドポイント(スレッドプール実行)から複数スレッドで
@@ -92,6 +105,23 @@ _state_lock = threading.Lock()
 # (同レジストリの docstring 自身がこの実装を参照元として挙げている)。
 # 重複を解消し、レジストリ側に一本化する。挙動は変わらない。
 _vod_generation_locks = RefCountedLockRegistry()
+
+# Issue #1088: 全カメラ・全日付を通じてVOD生成のffmpegを同時1本に制限するためのロック。
+# 「実行中のVOD生成があるか」の判定→起動・登録/順番待ちへの追加、および生成終了時の
+# 「次の順番待ちを起動」を、このロックの下で不可分に行う(判定と起動の隙間に2本目が
+# 起動されないように)。生成そのもの(数十分)の間は保持しない。
+# ロック順序は _vod_generation_lock(process_key) → _vod_scheduler_lock → _state_lock。
+_vod_scheduler_lock = threading.RLock()
+
+
+class VodGenerationUnavailable(Exception):
+    """録画VODの生成を今は始められない(順番待ち・混雑・空き容量不足)ことを表す(Issue #1088)。
+    ルーターはこれを 503 に変換する。retry_after は再試行までの目安秒数(不明なら None)。"""
+
+    def __init__(self, message: str, retry_after: Optional[int] = None):
+        super().__init__(message)
+        self.message = message
+        self.retry_after = retry_after
 
 
 @contextlib.contextmanager
@@ -124,6 +154,10 @@ def stop_all_processes(timeout: float = 5.0) -> int:
     再生が破損していた。停止できたプロセス数を返す。
     """
     stopped = 0
+    # Issue #1088: 先に順番待ちを空にし、停止したVOD生成の終了を契機に次の生成が
+    # 起動されないようにする。
+    with _vod_scheduler_lock:
+        _vod_queue.clear()
     for registry in (_active_processes, _active_vod_processes):
         with _state_lock:
             items = list(registry.items())
@@ -463,10 +497,25 @@ def _write_ffconcat_file(concat_file_path: str, mp4_files: List[str]) -> None:
 
 
 def _build_vod_ffmpeg_cmd(concat_file_path: str, playlist_path: str) -> List[str]:
-    """ffconcat のリストを再エンコードせずに HLS(VOD)へ多重化する ffmpeg コマンド。"""
-    return [
+    """ffconcat のリストを再エンコードせずに HLS(VOD)へ多重化する ffmpeg コマンド。
+
+    Issue #1088: SQLite と同じSDカードへ大量に書き込むため、I/O優先度を idle クラス
+    (`ionice -c3`)に下げる(ionice が無い環境では付けない。smart_timelapse_generator と
+    同じ判定)。また `-readrate`(config.HLS_VOD_READRATE、0以下で無効)で入力の読み込み
+    速度=書き込み帯域に上限をかける。stderr は終了時にログへ末尾を出すため、量を
+    warning 以上に絞る。プレイリストのパスは最後の引数に置く(呼び出し側のテストが前提)。
+    """
+    cmd: List[str] = []
+    if shutil.which("ionice"):
+        cmd += ["ionice", "-c3"]
+    cmd += [
         "nice", "-n", str(FFMPEG_NICE_LEVEL),
-        "ffmpeg", "-y",
+        "ffmpeg", "-hide_banner", "-nostdin", "-nostats", "-loglevel", "warning", "-y",
+    ]
+    readrate = config.HLS_VOD_READRATE
+    if readrate > 0:
+        cmd += ["-readrate", f"{readrate:g}"]
+    cmd += [
         "-f", "concat",
         "-safe", "0",
         "-i", concat_file_path,
@@ -477,10 +526,11 @@ def _build_vod_ffmpeg_cmd(concat_file_path: str, playlist_path: str) -> List[str
         "-hls_playlist_type", "vod",
         playlist_path
     ]
+    return cmd
 
 
-def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str, process_key: str) -> Optional[str]:
-    cam_id = cam_conf['id']
+def _find_record_mp4_files(cam_conf: Dict[str, Any], target_date: str) -> Optional[List[str]]:
+    """指定日の10分分割mp4ファイル一覧(昇順)を返す。保存先や録画が無ければ警告して None。"""
     nas_folder_name = cam_conf.get("nas_folder", cam_conf["name"])
 
     # NVRの保存ディレクトリ。#405: 以前は getattr(config, ..., os.getenv("NVR_RECORD_DIR", ...)) で
@@ -493,55 +543,242 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
         logger.warning(f"⚠️ [{cam_conf['name']}] 録画保存先が存在しません: {search_dir}")
         return None
 
-    # 指定日の10分分割mp4ファイル一覧を取得
     search_pattern = os.path.join(search_dir, f"{target_date}_*.mp4")
     mp4_files = sorted(glob.glob(search_pattern))
 
     if not mp4_files:
         logger.warning(f"⚠️ [{cam_conf['name']}] {target_date} の録画ファイルが存在しません")
         return None
+    return mp4_files
 
-    cam_dir = init_output_dir(HLS_VOD_DIR, cam_id)
+
+_BYTES_PER_GB = 1024 ** 3
+
+
+def _total_size_bytes(paths: List[str]) -> int:
+    total = 0
+    for path in paths:
+        try:
+            total += os.path.getsize(path)
+        except OSError:
+            pass
+    return total
+
+
+def _check_vod_disk_space(cam_dir: str, mp4_files: List[str]) -> Tuple[int, int]:
+    """VOD生成の前に出力先の空き容量を確認する(Issue #1088)。
+
+    `-c:v copy` の再多重化なので出力量は元MP4の合計とほぼ同じになる。
+    「空き容量 − 想定出力量」が config.HLS_VOD_MIN_FREE_GB を下回るなら
+    VodGenerationUnavailable を送出する。空き容量を確認できないときも安全側に倒して断る。
+    問題なければ (空き容量, 想定出力量) をバイトで返す。
+    """
+    estimated = int(_total_size_bytes(mp4_files) * VOD_OUTPUT_SIZE_FACTOR)
+    try:
+        free = shutil.disk_usage(cam_dir).free
+    except OSError as e:
+        raise VodGenerationUnavailable(f"録画プレイリストの出力先の空き容量を確認できません: {e}")
+    min_free = config.HLS_VOD_MIN_FREE_GB * _BYTES_PER_GB
+    if free - estimated < min_free:
+        raise VodGenerationUnavailable(
+            "空き容量が不足しているため録画プレイリストを生成しません "
+            f"(空き {free / _BYTES_PER_GB:.1f}GB − 想定出力 {estimated / _BYTES_PER_GB:.1f}GB"
+            f" < 下限 {config.HLS_VOD_MIN_FREE_GB:g}GB)"
+        )
+    return free, estimated
+
+
+def _running_vod_keys() -> List[str]:
+    """ffmpegが実行中(poll()がNone)のVOD生成の process_key 一覧。"""
+    with _state_lock:
+        return [key for key, proc in _active_vod_processes.items() if proc.poll() is None]
+
+
+def _vod_output_bytes(cam_dir: str, target_date: str) -> int:
+    """生成済みのVOD出力(プレイリストと .ts セグメント)の合計サイズ。"""
+    return _total_size_bytes(glob.glob(os.path.join(cam_dir, f"record_{target_date}*")))
+
+
+def _log_vod_process_exit(cam_name: str, target_date: str, returncode: Any, elapsed: float,
+                          output_bytes: int, stderr_tail: List[str]) -> None:
+    """VOD生成ffmpegの終了(終了コード・所要時間・出力サイズ・stderr末尾)をログに出す(Issue #1088)。
+    以前は stdout/stderr を DEVNULL に捨てていて、生成が終わったことすらログから分からなかった。"""
+    summary = (
+        f"(終了コード {returncode}、所要 {elapsed:.0f}秒、"
+        f"出力 {output_bytes / _BYTES_PER_GB:.2f}GB)"
+    )
+    tail = ("\nffmpeg stderr 末尾:\n" + "\n".join(stderr_tail)) if stderr_tail else ""
+    if returncode == 0:
+        logger.info(f"✅ [{cam_name}] {target_date} の録画プレイリスト生成が完了しました {summary}{tail}")
+    else:
+        logger.warning(f"❌ [{cam_name}] {target_date} の録画プレイリスト生成が異常終了しました {summary}{tail}")
+
+
+def _watch_vod_process(process: subprocess.Popen, cam_name: str, target_date: str, process_key: str,
+                       cam_dir: str, started_at: float) -> None:
+    """VOD生成ffmpegの終了を待ってログに出し、順番待ちの次の生成を起動する(監視スレッド本体)。
+
+    stderr はパイプが詰まってffmpegが止まらないよう終了まで読み続け、末尾だけを残す。
+    """
+    tail: "collections.deque[str]" = collections.deque(maxlen=VOD_STDERR_TAIL_LINES)
+    returncode: Any = None
+    try:
+        stream = getattr(process, "stderr", None)
+        if stream is not None:
+            for raw in stream:
+                line = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+                line = line.rstrip()
+                if line:
+                    tail.append(line)
+            try:
+                stream.close()
+            except Exception:
+                pass
+        returncode = process.wait()
+    except Exception as e:
+        logger.warning(f"⚠️ 録画プレイリスト生成の終了待ちに失敗しました ({process_key}): {e}")
+        returncode = getattr(process, "returncode", None)
+    finally:
+        try:
+            _log_vod_process_exit(cam_name, target_date, returncode, time.monotonic() - started_at,
+                                  _vod_output_bytes(cam_dir, target_date), list(tail))
+        finally:
+            _on_vod_process_exit(process_key, process)
+
+
+def _start_vod_watcher(process: subprocess.Popen, cam_conf: Dict[str, Any], target_date: str,
+                       process_key: str, cam_dir: str, started_at: float) -> None:
+    threading.Thread(
+        target=_watch_vod_process,
+        args=(process, cam_conf["name"], target_date, process_key, cam_dir, started_at),
+        name=f"vod-watch-{process_key}",
+        daemon=True,
+    ).start()
+
+
+def _launch_vod_generation_locked(cam_conf: Dict[str, Any], target_date: str, process_key: str,
+                                  mp4_files: List[str]) -> None:
+    """空き容量を確認してVOD生成のffmpegを起動・登録し、監視スレッドを付ける。
+    _vod_scheduler_lock を保持した状態で呼ぶこと。容量不足なら VodGenerationUnavailable。"""
+    cam_dir = init_output_dir(HLS_VOD_DIR, cam_conf["id"])
+    free, estimated = _check_vod_disk_space(cam_dir, mp4_files)
+    _vod_queue.pop(process_key, None)
+
     concat_file_path = os.path.join(cam_dir, f"concat_{target_date}.txt")
+    playlist_path = os.path.join(cam_dir, f"record_{target_date}.m3u8")
+    _write_ffconcat_file(concat_file_path, mp4_files)
+
+    logger.info(
+        f"🎞️ [{cam_conf['name']}] {target_date} の録画プレイリスト生成中... "
+        f"(元動画 {len(mp4_files)}本、想定出力 {estimated / _BYTES_PER_GB:.1f}GB、"
+        f"空き {free / _BYTES_PER_GB:.1f}GB)"
+    )
+
+    cmd = _build_vod_ffmpeg_cmd(concat_file_path, playlist_path)
+
+    # subprocess.run (ブロック) ではなく Popen (非同期) で起動し、プロセスを登録する。
+    # 終了の検知・ログ出力・次の順番待ちの起動は監視スレッドが行う(Issue #1088)。
+    started_at = time.monotonic()
+    process = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    with _state_lock:
+        _active_vod_processes[process_key] = process
+    _start_vod_watcher(process, cam_conf, target_date, process_key, cam_dir, started_at)
+
+
+def _enqueue_vod_job_locked(cam_conf: Dict[str, Any], target_date: str, process_key: str,
+                            running_keys: List[str]) -> None:
+    """VOD生成を順番待ちに入れ、VodGenerationUnavailable を送出する(戻らない)。
+    _vod_scheduler_lock を保持した状態で呼ぶこと。"""
+    if process_key not in _vod_queue:
+        if len(_vod_queue) >= VOD_QUEUE_MAX:
+            raise VodGenerationUnavailable(
+                f"録画プレイリストの生成待ちが混雑しています(待ち {len(_vod_queue)}件)。しばらくしてから再試行してください",
+                retry_after=VOD_QUEUED_RETRY_AFTER_SEC,
+            )
+        _vod_queue[process_key] = (cam_conf, target_date)
+        logger.info(
+            f"⏳ [{cam_conf['name']}] {target_date} の録画プレイリスト生成を順番待ちに入れました "
+            f"(実行中: {', '.join(running_keys)}、待ち {len(_vod_queue)}件)"
+        )
+    position = list(_vod_queue).index(process_key) + 1
+    raise VodGenerationUnavailable(
+        f"他の録画プレイリストを生成中のため順番待ちです({position}番目)。しばらくしてから再試行してください",
+        retry_after=VOD_QUEUED_RETRY_AFTER_SEC,
+    )
+
+
+def _dispatch_next_vod_job_locked() -> None:
+    """実行中のVOD生成が無ければ、順番待ちの先頭から起動できるものを1件起動する。
+    _vod_scheduler_lock を保持した状態で呼ぶこと。"""
+    while _vod_queue:
+        if _running_vod_keys():
+            return
+        process_key, (cam_conf, target_date) = _vod_queue.popitem(last=False)
+        try:
+            mp4_files = _find_record_mp4_files(cam_conf, target_date)
+            if not mp4_files:
+                continue
+            _launch_vod_generation_locked(cam_conf, target_date, process_key, mp4_files)
+            return
+        except VodGenerationUnavailable as e:
+            logger.warning(f"⚠️ 順番待ちの録画プレイリスト生成を取りやめました ({process_key}): {e.message}")
+        except Exception as e:
+            logger.error(f"❌ 順番待ちの録画プレイリスト生成の起動に失敗しました ({process_key}): {e}")
+
+
+def _on_vod_process_exit(process_key: str, process: subprocess.Popen) -> None:
+    """VOD生成ffmpegの終了時に登録を外し、順番待ちの次の生成を起動する。"""
+    with _vod_scheduler_lock:
+        with _state_lock:
+            if _active_vod_processes.get(process_key) is process:
+                _active_vod_processes.pop(process_key, None)
+        _dispatch_next_vod_job_locked()
+
+
+def _wait_for_playlist(playlist_path: str) -> Optional[str]:
+    """フロントエンドが404にならないよう、プレイリストファイルが生成されるまで少し待機する。"""
+    for _ in range(PLAYLIST_WAIT_MAX_ATTEMPTS):
+        if os.path.exists(playlist_path):
+            return playlist_path
+        time.sleep(PLAYLIST_WAIT_POLL_INTERVAL_SEC)
+    return playlist_path if os.path.exists(playlist_path) else None
+
+
+def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str, process_key: str) -> Optional[str]:
+    mp4_files = _find_record_mp4_files(cam_conf, target_date)
+    if not mp4_files:
+        return None
+
+    cam_dir = init_output_dir(HLS_VOD_DIR, cam_conf["id"])
     playlist_path = os.path.join(cam_dir, f"record_{target_date}.m3u8")
 
     # 完了済みプロセスを剪定してから登録状況を確認する(無限蓄積の防止)
     _prune_finished_vod_processes()
 
-    # 1. 排他制御: 既に同じカメラ・日付の変換プロセスが実行中の場合は処理をスキップ
-    with _state_lock:
-        existing_vod_process = _active_vod_processes.get(process_key)
-    if existing_vod_process is not None and existing_vod_process.poll() is None:
+    # Issue #1088: 「実行中か」の判定から起動・順番待ちへの追加までを全カメラ共通の
+    # ロックの下で行い、VOD生成のffmpegが同時に2本以上走らないようにする。
+    with _vod_scheduler_lock:
+        running_keys = _running_vod_keys()
+        already_running = process_key in running_keys
+        if not already_running:
+            cached = _reusable_record_playlist(cam_conf, target_date, playlist_path)
+            if cached is not None:
+                return cached
+            if running_keys:
+                # 他のカメラ・日付を生成中: 順番待ちに入れて 503 で返す(戻らない)
+                _enqueue_vod_job_locked(cam_conf, target_date, process_key, running_keys)
+            try:
+                _launch_vod_generation_locked(cam_conf, target_date, process_key, mp4_files)
+            except VodGenerationUnavailable as e:
+                logger.warning(f"💾 [{cam_conf['name']}] {target_date}: {e.message}")
+                raise
+
+    if already_running:
+        # 1. 排他制御: 既に同じカメラ・日付の変換プロセスが実行中なら、新たに起動せず
+        #    フロントエンドが500エラー（FileResponseのクラッシュ）にならないよう生成を待機する
         logger.info(f"⏳ [{cam_conf['name']}] {target_date} の録画プレイリスト生成は既に実行中です。")
-        # フロントエンドが500エラー（FileResponseのクラッシュ）にならないよう、生成を待機する
-        for _ in range(PLAYLIST_WAIT_MAX_ATTEMPTS):
-            if os.path.exists(playlist_path):
-                return playlist_path
-            time.sleep(PLAYLIST_WAIT_POLL_INTERVAL_SEC)
-        return None
-
-    cached = _reusable_record_playlist(cam_conf, target_date, playlist_path)
-    if cached is not None:
-        return cached
-
-    _write_ffconcat_file(concat_file_path, mp4_files)
-
-    logger.info(f"🎞️ [{cam_conf['name']}] {target_date} の録画プレイリスト生成中...")
-
-    cmd = _build_vod_ffmpeg_cmd(concat_file_path, playlist_path)
-
-    # 3. subprocess.run (ブロック) から Popen (非同期) に変更し、プロセスを登録する
-    process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    with _state_lock:
-        _active_vod_processes[process_key] = process
-
-    # 4. フロントエンドが404にならないよう、プレイリストファイルが生成されるまで少し待機する
-    for _ in range(10):
-        if os.path.exists(playlist_path):
-            break
-        time.sleep(0.5)
-    
-    return playlist_path if os.path.exists(playlist_path) else None
+    # ロックの外で待つ(待機中に他カメラの要求を止めない)
+    return _wait_for_playlist(playlist_path)
 
 
 def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:

@@ -219,22 +219,23 @@
 * 根拠: [各分岐でのレスポンス返却] (行番号: 121, 132 / 抜粋: "return FileResponse(playlist_path, media_type="application/vnd.apple.mpegurl")")
 
 
-* **副作用**: `.m3u8`分岐では `camera_service.generate_record_playlist` の呼び出し（プレイリスト・セグメント生成を誘発しうる）。`.ts`分岐では `_resolve_segment_path` によるパス検証と `camera_service.HLS_VOD_DIR` の参照。
-* 根拠: [各分岐の処理] (行番号: 117, 128 / 抜粋: "playlist_path = camera_service.generate_record_playlist(cam_conf, target_date)")
+* **副作用**: `.m3u8`分岐では `camera_service.generate_record_playlist` の呼び出し（プレイリスト・セグメント生成を誘発しうる。Issue #1088 以降、他のVOD生成が実行中ならサービス側の順番待ちに入る）。`.ts`分岐では `_resolve_segment_path` によるパス検証と `camera_service.HLS_VOD_DIR` の参照。
+* 根拠: `playlist_path = camera_service.generate_record_playlist(cam_conf, target_date)` (行番号: 120)
 
 
-* **エラーハンドリング**: カメラID未検出時404（各分岐で`_require_camera`が個別に判定）。`.m3u8`分岐でプレイリスト生成失敗時404。`.ts`分岐でセグメントファイル不在時404。上記いずれの拡張子でもない場合は400。
+* **エラーハンドリング**: カメラID未検出時404（各分岐で`_require_camera`が個別に判定）。`.m3u8`分岐でプレイリスト生成失敗時404。`.ts`分岐でセグメントファイル不在時404。上記いずれの拡張子でもない場合は400。**（Issue #1088で追加）** `.m3u8`分岐で`camera_service.VodGenerationUnavailable`(他のVOD生成が実行中で順番待ち・順番待ちが混雑・空き容量不足)が送出された場合は、「録画が無い」404と区別して`HTTPException(503, detail=e.message)`を送出し、`e.retry_after`があれば`Retry-After`ヘッダーに載せる。
+* 根拠: `except camera_service.VodGenerationUnavailable as e:` (行番号: 121)、`raise HTTPException(status_code=503, detail=e.message, headers=headers)` (行番号: 123)
 * 根拠: [各エラー分岐] (行番号: 115, 118〜119, 125, 129〜130, 134〜135 / 抜粋: "else:\n        raise HTTPException(status_code=400, detail="Unsupported file extension")")
 
 
 ### `get_live_segment` (`GET /live/{camera_id}/{segment_file}`)
 
 * **役割**: ライブHLSの `.ts` セグメントファイルを、拡張子チェックとパストラバーサル検証を経て配信する。Issue #172の修正（コミット時点）により、`.ts`以外の拡張子は400で拒否するようになった。修正前は拡張子を一切検証していなかったため、`_resolve_segment_path`のパストラバーサル対策のみでは防げない形で、同一ディレクトリ内に配置される`ffmpeg.log`（RTSP認証情報を含みうる。`camera_service.md`参照）等の任意ファイルがそのまま配信され得た。**（Issue #551で修正）** カメラ設定のルックアップは`_require_camera(camera_id)`呼び出しに置き換わった（存在確認のみが目的のため戻り値は受け取らない）。
-* 根拠: [エンドポイント定義とDocstring] (行番号: 138〜152 / 抜粋: "def get_live_segment(camera_id: str, segment_file: str):\n    """ライブのHLSセグメント（.tsファイル）を配信"""")、[拡張子チェック] (行番号: 143〜144 / 抜粋: "if not segment_file.endswith(\".ts\"):\n        raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")、[カメラ確認] (参照: get_live_segment / 抜粋: "_require_camera(camera_id)")
+* 根拠: [エンドポイント定義とDocstring] (行番号: 144〜158 / 抜粋: "def get_live_segment(camera_id: str, segment_file: str):\n    """ライブのHLSセグメント（.tsファイル）を配信"""")、[拡張子チェック] (行番号: 149〜150 / 抜粋: "if not segment_file.endswith(\".ts\"):\n        raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")、[カメラ確認] (参照: get_live_segment / 抜粋: "_require_camera(camera_id)")
 
 
 * **引数/リクエスト**: `camera_id: str`, `segment_file: str`（いずれもパスパラメータ）
-* 根拠: [引数定義] (行番号: 137〜138 / 抜粋: "@router.get("/live/{camera_id}/{segment_file}")\ndef get_live_segment(camera_id: str, segment_file: str):")
+* 根拠: [引数定義] (行番号: 143〜144 / 抜粋: "@router.get("/live/{camera_id}/{segment_file}")\ndef get_live_segment(camera_id: str, segment_file: str):")
 
 
 * **戻り値/レスポンス**: `FileResponse`（media_type="video/MP2T"）
@@ -242,11 +243,11 @@
 
 
 * **副作用**: `_resolve_segment_path` によるパス検証、`camera_service.HLS_LIVE_DIR` の参照。
-* 根拠: [パス解決] (行番号: 148 / 抜粋: "segment_path = _resolve_segment_path(camera_service.HLS_LIVE_DIR, camera_id, segment_file)")
+* 根拠: [パス解決] (行番号: 154 / 抜粋: "segment_path = _resolve_segment_path(camera_service.HLS_LIVE_DIR, camera_id, segment_file)")
 
 
 * **エラーハンドリング**: `segment_file`が`.ts`で終わらない場合400（カメラID検証より前に判定）、カメラID未検出時404（`_require_camera`内）、セグメントファイル不在時404（`_resolve_segment_path`内で範囲外パスの場合も400が送出されうる）。
-* 根拠: [エラー分岐] (行番号: 143〜144, 146, 149〜150 / 抜粋: "if not segment_file.endswith(\".ts\"):\n        raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")
+* 根拠: [エラー分岐] (行番号: 149〜150, 152, 155〜156 / 抜粋: "if not segment_file.endswith(\".ts\"):\n        raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")
 
 
 ## 5. 処理フロー図
@@ -262,6 +263,7 @@ flowchart TD
     CamFound1 -- No --> Err404a["HTTPException 404: Camera not found"]
     CamFound1 -- Yes --> GenPlaylist["外部：camera_service.generate_record_playlist()"]
     GenPlaylist --> PlaylistOk{"プレイリストパスが取得できたか?"}
+    GenPlaylist -- "VodGenerationUnavailable (Issue #1088)" --> Err503["HTTPException 503<br>(順番待ち・混雑・容量不足, Retry-After)"]
     PlaylistOk -- No --> Err404b["HTTPException 404: Recordings not found"]
     PlaylistOk -- Yes --> RespM3u8["FileResponse (application/vnd.apple.mpegurl)"]
 

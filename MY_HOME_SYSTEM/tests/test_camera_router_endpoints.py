@@ -133,6 +133,18 @@ def test_get_record_file_playlist_not_found_returns_404(api_client, one_camera, 
     assert res.status_code == 404
 
 
+# Issue #1088: 順番待ち・空き容量不足で今は生成できないときは、「録画が無い」(404)と区別して 503
+@pytest.mark.parametrize("retry_after, expected_header", [(60, "60"), (None, None)])
+def test_get_record_file_playlist_unavailable_returns_503(api_client, one_camera, monkeypatch, retry_after, expected_header):
+    def _raise(cam_conf, date):
+        raise camera_router.camera_service.VodGenerationUnavailable("順番待ちです", retry_after=retry_after)
+    monkeypatch.setattr(camera_router.camera_service, "generate_record_playlist", _raise)
+    res = api_client.get("/api/cameras/record/cam1/20260101/record_20260101.m3u8")
+    assert res.status_code == 503
+    assert res.json()["detail"] == "順番待ちです"
+    assert res.headers.get("retry-after") == expected_header
+
+
 # #386: target_date は glob パターン/ファイル名に埋め込まれるため YYYYMMDD 以外は 400 で拒否する
 @pytest.mark.parametrize("bad_date", ["*", "2026-01-01", "2026010", "20260101x", "[0-9]*"])
 def test_record_endpoints_reject_non_yyyymmdd_target_date(api_client, one_camera, monkeypatch, bad_date):
