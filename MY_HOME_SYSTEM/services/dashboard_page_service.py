@@ -264,8 +264,8 @@ def _render_status_section(
     extra_html: str = "",
     climate_html: str = "",
 ) -> str:
-    # 温湿度ヒートマップは「見守り」グループの直下に置く
-    extras = {"watch": climate_html} if climate_html else None
+    # 温湿度ヒートマップは「🌡️ 室温」グループ(拠点別の温湿度カード)の直下に置く
+    extras = {"climate": climate_html} if climate_html else None
     grid_html = home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path, group_extras=extras)
     return (
         f'<div id="{STATUS_SECTION_ID}">'
@@ -803,7 +803,10 @@ def _heatmap_level(count: int) -> int:
 
 # === ホームの温湿度ヒートマップ(過去30日) ===
 
-CLIMATE_LOCATIONS = ("伊丹", "高砂")
+# 拠点の定義(拠点名・`?hm_loc=`のキー・並び順)は `home_status_service.CLIMATE_SITES` が唯一の定義元。
+CLIMATE_LOCATIONS = home_status_service.CLIMATE_LOCATIONS
+_CLIMATE_LOCATION_KEYS = home_status_service.CLIMATE_LOCATION_KEYS
+_CLIMATE_KEY_LOCATIONS = {key: name for name, key in _CLIMATE_LOCATION_KEYS.items()}
 CLIMATE_METRICS = ("temp", "hum", "act")
 CLIMATE_DEFAULT_LOCATION = "伊丹"
 CLIMATE_DEFAULT_METRIC = "temp"
@@ -821,8 +824,8 @@ _WEEKDAYS = "月火水木金土日"
 
 
 def parse_climate_location(value: str | None) -> str:
-    """`?hm_loc=`の値。`itami`/`takasago`以外は既定(伊丹)。"""
-    return {"itami": "伊丹", "takasago": "高砂"}.get(value or "", CLIMATE_DEFAULT_LOCATION)
+    """`?hm_loc=`の値(`itami`/`takasago`/`nagaokakyo`。`CLIMATE_SITES`のキー)。それ以外は既定(伊丹)。"""
+    return _CLIMATE_KEY_LOCATIONS.get(value or "", CLIMATE_DEFAULT_LOCATION)
 
 
 def parse_climate_metric(value: str | None) -> str:
@@ -854,13 +857,8 @@ def activity_hourly_grids(df: pd.DataFrame) -> dict[str, dict[str, list[int]]]:
 
 
 def _climate_location(device_id: Any, device_name: Any) -> str | None:
-    """機器の拠点。`devices.json`の`location`を優先し、無ければ機器名の先頭(`伊丹_`/`高砂_`。
-    Nature Remoの保存名)で判定する。どちらでも分からなければ None(ヒートマップに含めない)。"""
-    for dev in config.MONITOR_DEVICES:
-        if dev.get("id") == device_id and dev.get("location") in CLIMATE_LOCATIONS:
-            return dev["location"]
-    name = str(device_name or "")
-    return next((loc for loc in CLIMATE_LOCATIONS if name.startswith(loc)), None)
+    """機器の拠点(None はヒートマップに含めない)。判定はカードと同じ `home_status_service.climate_location`。"""
+    return home_status_service.climate_location(device_id, device_name)
 
 
 def _climate_level(value: float, metric: str) -> int:
@@ -894,10 +892,8 @@ def _climate_switch(
     """指標(温度/湿度/動き)と、その対象(温度・湿度=拠点、動き=防犯/高砂/伊丹)の切り替えリンク(JS不要)。
     選んだ組み合わせは`?hm_loc=&hm_metric=[&hm_src=]`で持つ(`hm_src`は既定の防犯のとき省く)。"""
     base = dashboard_path.rstrip("/") + "/"
-    loc_key = {"伊丹": "itami", "高砂": "takasago"}
-
     def link(label: str, loc: str, met: str, src: str, current: bool) -> str:
-        query = {"hm_loc": loc_key[loc], "hm_metric": met}
+        query = {"hm_loc": _CLIMATE_LOCATION_KEYS[loc], "hm_metric": met}
         if src != CLIMATE_DEFAULT_SOURCE:
             query["hm_src"] = src
         attr = ' aria-current="true"' if current else ""

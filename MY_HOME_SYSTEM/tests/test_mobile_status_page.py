@@ -31,7 +31,7 @@ NOW = datetime.fromisoformat("2026-09-19T12:00:00+09:00")
 
 # サマリーに並ぶカードの枚数。`home_status_service.build_status_cards` の
 # 戻り値と対になっているので、カードを増減させるときは一緒に直す。
-EXPECTED_CARD_COUNT = 7
+EXPECTED_CARD_COUNT = 10
 
 
 @pytest.fixture(autouse=True)
@@ -538,7 +538,8 @@ class TestCardsLinkToTheirDetail:
         for href in hrefs:
             assert href.startswith("/dashboard/")
             page_key = href.split("#", 1)[0].split("?", 1)[0].rsplit("/", 1)[1]
-            assert page_key in ("watch", "life", "sys")
+            # ""=ホーム自身(温湿度カードは同じページのヒートマップへ飛ぶ)
+            assert page_key in ("", "watch", "life", "sys")
 
     def test_cards_point_at_the_page_that_actually_shows_them(self):
         """リンク先が「そのカードの詳細が載っているページ」であること。"""

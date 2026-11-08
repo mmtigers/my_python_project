@@ -30,6 +30,13 @@
       "name": "ハブミニ",
       "ip": "192.168.1.YYY",
       "notify_settings": {}
+    },
+    {
+      "id": "SWITCHBOT_HUB2_DEVICE_ID",
+      "type": "Hub 2",
+      "location": "長岡京",
+      "name": "長岡京_ハブ2",
+      "notify_settings": {}
     }
   ]
 }
