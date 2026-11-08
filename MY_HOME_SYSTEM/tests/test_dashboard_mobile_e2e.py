@@ -201,8 +201,9 @@ class TestHomePageLayout:
             # アンカーでページ内の別セクションへ飛ぶため、末尾はタブ名そのものとは
             # 限らない(例: "/dashboard/watch#takasago-log")。アンカー/クエリを
             # 落としたうえでタブ名末尾かどうかを見る。
+            # 「🌡️ 室温」のカードはホーム自身(末尾が "/")のヒートマップへ飛ぶ。
             path = (href or "").split("#", 1)[0].split("?", 1)[0]
-            assert href and any(path.endswith(f"/{p}") for p in ("watch", "life", "sys")), (
+            assert href and (path.endswith("/") or any(path.endswith(f"/{p}") for p in ("watch", "life", "sys"))), (
                 f"{i}枚目のリンク先が想定外: {href!r}"
             )
 

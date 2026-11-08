@@ -314,7 +314,7 @@ class TestBuildStatusCards:
             NOW, df_sensor, None, {"percent": 50}, 4321,
         )
 
-        assert len(cards) == 7
+        assert len(cards) == 10
         titles = [c.title for c in cards]
         assert titles[0] == "👵 高砂 (実家)"
         assert "💰 今月の電気代" in titles

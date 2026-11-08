@@ -101,7 +101,7 @@ def dashboard_home(
 ) -> Response:
     """ホームページ: ステータスカード + 見守り/くらし/システムへの導線 + 外部リンク。
 
-    `?hm_loc=itami|takasago&hm_metric=temp|hum|act&hm_src=security|takasago|itami`は過去30日ヒートマップの
+    `?hm_loc=itami|takasago|nagaokakyo&hm_metric=temp|hum|act&hm_src=security|takasago|itami`は過去30日ヒートマップの
     拠点・指標・動きの対象(不正な値は既定)。
 
     `tab` はStreamlit版で使っていたクエリパラメータ(`/dashboard?tab=watch`)。

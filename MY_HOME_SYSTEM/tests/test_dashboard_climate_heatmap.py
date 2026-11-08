@@ -194,9 +194,13 @@ def _home(path="/dashboard/", climate=None, activity=None):
 
 
 class TestHomeIntegration:
-    def test_heatmap_sits_right_below_the_watch_group_and_above_life(self):
+    def test_heatmap_sits_right_below_the_climate_group_and_above_life(self):
+        """ヒートマップは拠点別の温湿度カード(「🌡️ 室温」)の直下。カード→その推移が隣り合う。"""
         text = _home().text
-        assert text.index("👀 見守り") < text.index('id="climate-heatmap"') < text.index("💡 くらし")
+        assert (
+            text.index("👀 見守り") < text.index("🌡️ 室温")
+            < text.index('id="climate-heatmap"') < text.index("💡 くらし")
+        )
 
     def test_selection_in_query_is_applied_to_page_and_fragment(self):
         page = _home("/dashboard/?hm_loc=takasago&hm_metric=hum").text

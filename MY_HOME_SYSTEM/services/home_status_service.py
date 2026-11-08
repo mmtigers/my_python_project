@@ -189,12 +189,59 @@ QUEST_APP_PATH = "/quest"
 # #829: ファミクエ(承認待ち件数)のカードは廃止した。ダッシュボード内にファミクエの
 # 状態表示を残さず、外部リンクカードのみにするという方針変更のため
 # (詳細は routers/dashboard_router.py の新しいページ構成を参照)。
+#
+# 「🌡️ 室温」は拠点別の温湿度カード(伊丹・高砂・長岡京)。見守りの次に置き、
+# 直下に過去30日の温湿度ヒートマップを差し込む(カード→その推移が隣り合う)。
 CARD_GROUPS: tuple[tuple[str, str], ...] = (
     ("watch", "👀 見守り"),
+    ("climate", "🌡️ 室温"),
     ("life", "💡 くらし"),
     ("sys", "🔧 システム"),
 )
 CARD_GROUP_LABELS: dict[str, str] = dict(CARD_GROUPS)
+
+
+# === 温湿度を表示する拠点 ===
+# (拠点名, `?hm_loc=` のキー, カードの見出し)。並び順もこの順(カード・ヒートマップの切り替えとも)。
+# 以前は拠点名・URLキーの対応が `dashboard_page_service` の3か所(`CLIMATE_LOCATIONS`・
+# `parse_climate_location`・`_climate_switch`)に散らばっており、1か所だけ足すと
+# 切り替えリンクの組み立てが KeyError でホームごと500になる構造だった。ここを唯一の定義元にする。
+# 拠点名は `devices.json` の `location` と、Nature Remo の保存名の先頭(`伊丹_…`)に一致させる。
+# ここに置くのは、カード(このモジュール)とヒートマップ(`dashboard_page_service`)の両方が使い、
+# `dashboard_page_service` は循環importになるためこのモジュールを import 元にできないから。
+# カードの見出しは見守りの「🏠 伊丹 (自宅)」「👵 高砂 (実家)」と同じにしない(同じ見出しが2枚並ぶと
+# どちらが温湿度か分からない)。「〜の室温」で揃え、長岡京(単身赴任先)は🧳で示す。
+CLIMATE_SITES: tuple[tuple[str, str, str], ...] = (
+    ("伊丹", "itami", "🏠 伊丹の室温"),
+    ("高砂", "takasago", "👵 高砂の室温"),
+    ("長岡京", "nagaokakyo", "🧳 長岡京の室温"),
+)
+CLIMATE_LOCATIONS: tuple[str, ...] = tuple(name for name, _, _ in CLIMATE_SITES)
+CLIMATE_LOCATION_KEYS: dict[str, str] = {name: key for name, key, _ in CLIMATE_SITES}
+
+# 温湿度の記録は5分ごと(scheduler_boot の位相ずれで最大5分遅れる)。これを超えたら
+# 「更新が止まっています」として灰色にする。システムページの「⚡ 電気・環境の見守り」と同じ閾値。
+CLIMATE_STALE_MIN = 30
+# これより古い値は出さない(「データなし」)。
+CLIMATE_MAX_AGE_MIN = 24 * 60
+# 温度の色分け。ヒートマップの5段階(15/20/25/30℃)の両端に合わせる。
+CLIMATE_COLD_C = 15.0
+CLIMATE_HOT_C = 30.0
+# これ未満の湿度は補足に「乾燥」と添える。
+CLIMATE_DRY_PCT = 30.0
+
+
+def climate_location(device_id: Any, device_name: Any) -> str | None:
+    """温湿度の記録がどの拠点のものか。`devices.json`の`location`を優先し、無ければ機器名の先頭
+    (`伊丹_`/`高砂_`。Nature Remoの保存名)で判定する。どちらでも分からなければ None。
+
+    Nature Remo 由来の行は device_id が devices.json に無く、`load_sensor_data` の `location` 列は
+    「その他」になるため、カード・ヒートマップとも `location` 列ではなくここで判定する。"""
+    for dev in config.MONITOR_DEVICES:
+        if dev.get("id") == device_id and dev.get("location") in CLIMATE_LOCATIONS:
+            return dev["location"]
+    name = str(device_name or "")
+    return next((loc for loc in CLIMATE_LOCATIONS if name.startswith(loc)), None)
 
 
 class StatusCard(NamedTuple):
@@ -289,7 +336,9 @@ def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:
         return card.href
     if card.tab is None:
         return None
-    href = f"{dashboard_path.rstrip('/')}/{card.tab}"
+    # ホームはサブページではなくダッシュボードのルート(`/dashboard/`)。`anchor`でページ内へ飛ばす
+    # (温湿度カード → 同じホームのヒートマップ)。
+    href = f"{dashboard_path.rstrip('/')}/" + ("" if card.tab == "home" else card.tab)
     if card.anchor:
         href += card.anchor
     return href
@@ -327,7 +376,7 @@ def render_status_grid_html(
     (軽量ページ専用。理由は `render_status_card_html` の docstring を参照)。
 
     `group_extras` は `{グループのキー: HTML}`。そのグループのカードの直後に差し込む
-    (ホームの「見守り」の直下に温湿度ヒートマップを置くため)。
+    (ホームの「🌡️ 室温」の直下に温湿度ヒートマップを置くため)。
 
     `show_group_titles=False` はグループ見出しを出さない(ページ自身の見出しが
     グループ名と同じで、同じ見出しが2つ並んでしまうサブページ用。表示だけの違い)。
@@ -671,6 +720,104 @@ def describe_nas(nas_data: pd.Series | None) -> str | None:
     return f"空き {int(free_gb):,}GB"
 
 
+def _climate_rows(df_sensor: pd.DataFrame, location: str) -> pd.DataFrame:
+    """拠点の温湿度の記録(新しい順)。判定(`get_climate_status`)と補足(`describe_climate`)が共有する。
+
+    材料はカードの他の判定と同じ `df_sensor`(`load_sensor_data` の新しい順の結合結果。
+    `switchbot_meter_logs` の行は `temperature_celsius`/`humidity_percent` を持つ)。専用の
+    クエリ・キャッシュは持たない。件数上限(`MOBILE_SENSOR_ROW_LIMIT`)の外に出るほど古い
+    記録は「データなし」になるが、その頃には `CLIMATE_MAX_AGE_MIN` も超えている想定。
+    同じ拠点に複数の機器があるときは、どれでも一番新しい記録を使う。
+    """
+    required = {"timestamp", "device_id", "device_name", "temperature_celsius"}
+    if df_sensor.empty or not required.issubset(df_sensor.columns):
+        return df_sensor.iloc[0:0]
+    df = df_sensor[df_sensor["temperature_celsius"].notna()]
+    if df.empty:
+        return df
+    # 拠点の判定は機器ごとに1回だけ(5分おきの記録で同じ機器の行が大量に並ぶため)
+    pairs = df[["device_id", "device_name"]].drop_duplicates()
+    locations = {
+        (i, n): climate_location(i, n) for i, n in zip(pairs["device_id"], pairs["device_name"])
+    }
+    keep = [locations[(i, n)] == location for i, n in zip(df["device_id"], df["device_name"])]
+    return df[keep].sort_values("timestamp", ascending=False)
+
+
+def _climate_latest(df_sensor: pd.DataFrame, location: str, now: datetime) -> tuple[pd.Series, float] | None:
+    """拠点の最新の記録と、その経過分数。`CLIMATE_MAX_AGE_MIN` より古い・無いときは None。"""
+    rows = _climate_rows(df_sensor, location)
+    if rows.empty:
+        return None
+    latest = rows.iloc[0]
+    age_min = (now - latest["timestamp"]).total_seconds() / 60
+    if age_min > CLIMATE_MAX_AGE_MIN:
+        return None
+    return latest, age_min
+
+
+def _valid_humidity(value: Any) -> float | None:
+    """湿度。取れなかったときは0.0%で保存される(`switchbot_power_monitor`・`nature_remo_monitor`)ため、
+    0以下は欠損とみなす(`analysis_service.load_hourly_climate` と同じ規則)。"""
+    if value is None or pd.isna(value) or float(value) <= 0:
+        return None
+    return float(value)
+
+
+def get_climate_status(df_sensor: pd.DataFrame, location: str, now: datetime) -> tuple[str, str]:
+    """拠点の今の温度・湿度(例: `19.3℃ / 43%`)と色。
+
+    - 記録が無い・`CLIMATE_MAX_AGE_MIN`(24時間)より古い → `⚪ データなし`(灰色)
+    - `CLIMATE_STALE_MIN`(30分)より古い → 値は出すが灰色(補足で「更新が止まっています」)
+    - それ以外は温度で色分け: 30℃以上=赤、15℃未満=青、その間=緑
+    - 湿度が欠損(0以下)なら `--%`(前の記録の湿度は混ぜない。何分前の値かがずれるため)
+    """
+    found = _climate_latest(df_sensor, location, now)
+    if found is None:
+        return "⚪ データなし", "theme-gray"
+    latest, age_min = found
+    temp = float(latest["temperature_celsius"])
+    humidity = _valid_humidity(latest.get("humidity_percent"))
+    value = f"{temp:.1f}℃ / " + ("--%" if humidity is None else f"{humidity:.0f}%")
+    if age_min > CLIMATE_STALE_MIN:
+        return value, "theme-gray"
+    if temp >= CLIMATE_HOT_C:
+        return value, "theme-red"
+    if temp < CLIMATE_COLD_C:
+        return value, "theme-blue"
+    return value, "theme-green"
+
+
+def describe_climate(df_sensor: pd.DataFrame, location: str, now: datetime) -> str | None:
+    """何分前の値か。古いときは「更新が止まっています」、乾燥しているときは「乾燥」を添える。"""
+    found = _climate_latest(df_sensor, location, now)
+    if found is None:
+        return None
+    latest, age_min = found
+    at = format_relative_time(latest["timestamp"], now)
+    if age_min > CLIMATE_STALE_MIN:
+        return f"{at}の値(更新が止まっています)"
+    humidity = _valid_humidity(latest.get("humidity_percent"))
+    if humidity is not None and humidity < CLIMATE_DRY_PCT:
+        return f"{at}・乾燥"
+    return at
+
+
+def build_climate_cards(df_sensor: pd.DataFrame, now: datetime) -> list[StatusCard]:
+    """拠点別の温湿度カード(`CLIMATE_SITES` の順)。タップするとホームのヒートマップでその拠点を開く。"""
+    return [
+        StatusCard(
+            title,
+            *get_climate_status(df_sensor, name, now),
+            tab="home",
+            group="climate",
+            sub=describe_climate(df_sensor, name, now),
+            anchor=f"?hm_loc={key}&hm_metric=temp#climate-heatmap",
+        )
+        for name, key, title in CLIMATE_SITES
+    ]
+
+
 def build_status_cards(
     now: datetime,
     df_sensor: pd.DataFrame,
@@ -683,7 +830,7 @@ def build_status_cards(
     """渡された材料から、並べる順にカードを組み立てる(取得は行わない)。
 
     並び順は「スマホで上から見たい順」= 利用頻度で決めてある(`CARD_GROUPS`)。
-    見守り(実家・自宅・駐車場・カメラ)→ くらし → システムの順で、
+    見守り(実家・自宅・駐車場・カメラ)→ 室温(伊丹・高砂・長岡京)→ くらし → システムの順で、
     毎回は見ないシステム系が最後に来る。順番を変えるとどの位置に何があるかの
     記憶が無効になるので、変えるときは(#829でStreamlit側は廃止済みのため)
     ここが唯一の定義元であることを保ったまま変えること。
@@ -714,6 +861,7 @@ def build_status_cards(
                    anchor=f"?camera={PARKING_CAMERA_ID}#camera-section"),
         StatusCard("🎥 カメラ", camera_val, camera_theme, tab="watch", group="watch",
                    sub=describe_camera(df_sensor, now), anchor="#camera-section"),
+        *build_climate_cards(df_sensor, now),
         StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue", tab="life", group="life",
                    sub=describe_cost(monthly_cost, last_month_cost)),
         StatusCard("🖥️ サーバー", server_val, server_theme, tab="sys", group="sys",

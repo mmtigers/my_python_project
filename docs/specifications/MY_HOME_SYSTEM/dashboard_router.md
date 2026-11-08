@@ -141,7 +141,7 @@
 
 * **(新機能)** クエリパラメータ`hm_src`(`security`/`takasago`/`itami`。動きの対象)を追加し、`hm_metric`に`act`(動き)を加えた。不正な値は既定(防犯・温度)。`_home_climate_html`は選んでいる指標の分だけ読む(動きを選んだときだけ`home_status_service.get_hourly_activity`、温度・湿度のときは`get_hourly_climate`)。`/status`も同じ引数を受け取る。
 
-* **(新機能)** クエリパラメータ`hm_loc`(`itami`/`takasago`)・`hm_metric`(`temp`/`hum`)を追加した。ホームの「過去30日の温度/湿度」ヒートマップの拠点・指標で、不正な値は既定(伊丹・温度)にする。`_home_climate_html`が10分キャッシュの集計(`home_status_service.get_hourly_climate`)から作り、`climate_html`として渡す。
+* **(新機能)** クエリパラメータ`hm_loc`(`itami`/`takasago`。**(新機能)** 長岡京の`nagaokakyo`を追加。値は`home_status_service.CLIMATE_SITES`のキー)・`hm_metric`(`temp`/`hum`)を追加した。ホームの「過去30日の温度/湿度」ヒートマップの拠点・指標で、不正な値は既定(伊丹・温度)にする。`_home_climate_html`が10分キャッシュの集計(`home_status_service.get_hourly_climate`)から作り、`climate_html`として渡す。
 
 * **役割**: ホームページ(ステータスカード＋見守り/くらし/システムへの導線＋外部リンク)を返す。クエリパラメータ`tab`(Streamlit版の`?tab=watch`等)が指定されていれば、`_LEGACY_TAB_REDIRECTS`を使って対応する新しいページへ302リダイレクトする(未知の値は`_BASE_PATH`=ホームへ)。 **(新機能)** ホームの「📊 今日の動き」(防犯・高砂・伊丹の3行ヒートマップ)を`_home_heatmap_html()`で作って`heatmap_html`として渡す。元データは`home_status_service.get_sensor_data_today()`(60秒キャッシュ)。
 * 根拠: [ルート定義] (行番号: 84〜110 / 抜粋: '@router.get(_BASE_PATH, include_in_schema=False)\n@router.get(f"{_BASE_PATH}/", include_in_schema=False)\ndef dashboard_home(tab: str | None = None, hm_loc: str | None = None, hm_metric: str | None = None) -> Response:')
