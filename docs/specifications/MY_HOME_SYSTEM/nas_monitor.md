@@ -41,7 +41,7 @@
 | `setup_logging` | 自作モジュール | ロガーの初期化と取得 | 根拠: `setup_logging` (行番号: 16 / 抜粋: "from core.logger import setup...") |
 | `save_log_generic` | 自作モジュール | データベースへのログ保存 | 根拠: `save_log_generic` (行番号: 17 / 抜粋: "from core.database import sav...") |
 | `get_now_iso`, `retry_with_backoff`（Issue #292） | 自作モジュール | 現在時刻のISOフォーマット取得、NAS I/O向けExponential Backoffリトライ | 根拠: `get_now_iso`, `retry_with_backoff` (行番号: 18 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst") |
-| `get_now_jst`（Issue #592で追加） | 自作モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「8時以降」判定はJSTの8時を意図していたため、ホストがJST以外の設定だと意図しない実時刻で判定されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_iso, retry_with_backoff, get_now_jst` (行番号: 18 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst")、`now = get_now_jst()` (行番号: 477〜479 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()") |
+| `get_now_jst`（Issue #592で追加） | 自作モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「8時以降」判定はJSTの8時を意図していたため、ホストがJST以外の設定だと意図しない実時刻で判定されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_iso, retry_with_backoff, get_now_jst` (行番号: 18 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst")、`now = get_now_jst()` (行番号: 478〜480 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()") |
 | `send_push` | 自作モジュール | プッシュ通知の送信 | 根拠: `send_push` (行番号: 20 / 抜粋: "from services.notification...") |
 
 ### ブラックボックスとなる外部要素
@@ -303,7 +303,8 @@
   **Issue #733 (AUDIT-003)**: ここまでの削除対象はすべて「ファイル」で、SQLite の「行」を消す経路はリポジトリ内に1つも存在しなかった。同じ1日1回のタイミングで `_run_db_row_retention` を呼び、`services/db_retention_service.py` による行の保持期間削除も行う。既定(`config.DB_ROW_RETENTION_ENABLED=false`)はドライランで、削除予定件数を数えて通知に載せるだけで1行も消さない。
 * 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 305〜369 / 抜粋: "def run_retention_cleanup(sel...")
 * **（Issue #359 で追加）** 削除対象に「録画VODキャッシュ」（`BASE_DIR/data/hls_streams/vod`、拡張子 `.ts`/`.m3u8`/`.txt`、保持日数 `config.HLS_VOD_RETENTION_DAYS`＝既定3日）を追加。`services/camera_service.py` の `generate_record_playlist` が生成するセグメントは1日分で数GB規模だが、以前はどこにも削除経路が無くローカル(SDカード)に無制限に蓄積していた。
-* 根拠: `("録画VODキャッシュ", os.path.join(getattr(config, "BASE_DIR", ""), "data", "hls_streams", "vod"), getattr(config, "HLS_VOD_RETENTION_DAYS", 3), (".ts", ".m3u8", ".txt"))` (行番号: 298〜300)
+* **（Issue #1091 で変更）** 録画VODの生成処理（ffmpeg による HLS(.ts) 化）は廃止され、このディレクトリに置かれるのは `services/record_playlist_service.py` の録画索引（`index_<日付>.json`）だけになった。削除対象の拡張子に `.json` を加え、旧方式の残り（`.ts`/`.m3u8`/`.txt`）と索引を同じ保持期間で削除する（索引は消えても次の閲覧時に作り直される）。
+* 根拠: `getattr(config, "HLS_VOD_RETENTION_DAYS", 3), (".ts", ".m3u8", ".txt", ".json")),`
 * 根拠: `("タイムラプス動画", os.path.join(getattr(config, "BASE_DIR", ""), "assets", "timelapse"), ...)` (行番号: 266〜273)
 * 根拠: `("DBバックアップ", getattr(config, "DB_BACKUPS_DIR", None), ..., None)` とコメント (参照: run_retention_cleanup / 抜粋: "拡張子は .db に限らない")
 
@@ -328,29 +329,29 @@
 ### 関数 `_run_db_row_retention` (Issue #733 で追加)
 
 * **役割**: `services/db_retention_service.run_db_retention()` を呼び、通知に載せる行を `format_summary_lines()` で組み立てて返す。`run_retention_cleanup` の末尾から呼ばれ、ファイル削除の集計行と同じ箇条書きに連結される。
-* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 371 / 抜粋: "def _run_db_row_retention(")
+* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 372 / 抜粋: "def _run_db_row_retention(")
 
 * **引数/リクエスト**: なし
-* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 371)
+* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 372)
 
 * **戻り値/レスポンス**: `list[str]`（通知に追記する行。ドライランで削除予定が0件なら空リスト＝通知に何も足さない）
-* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 371)
+* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 372)
 
 * **副作用**: `config.DB_ROW_RETENTION_ENABLED` が `True` かつ直近のバックアップが確認できた場合のみ、SQLite の行を削除する（不可逆）。既定は `False` で1行も削除しない。
-* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 371)
+* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 372)
 
 * **エラーハンドリング**: `sqlite3.Error` と `OSError` を捕捉して `logger.error` を出し空リストを返す。捕捉をこの2種に絞っているのは、この経路で現実に起きるのが「DB のロック・破損」と「バックアップ先(NAS)が見えない」だからで、それ以外の例外はバグとして呼び出し元へ伝播させる。DB 側の失敗でファイル削除の集計通知まで道連れにしないための構造。
-* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 371)
+* 根拠: `def _run_db_row_retention(self) -> list[str]:` (行番号: 372)
 
 ### 関数 `save_to_db`
 
 * **役割**: NASの監視結果（Ping、マウント状態）とディスク使用率をデータベースに保存する。`config.SQLITE_TABLE_SENSOR`(=`device_records`)への書き込みに加えて、`config.SQLITE_TABLE_NAS`(=`nas_records`)へも書き込む(Issue #168)。以前は`device_records`にしか書き込んでおらず、ダッシュボードのNASステータスカード(`views/dashboard/summary.py`の`get_nas_status_simple`)・NAS状態パネル(`views/dashboard/log_tab.py`)が読む`analysis_service.load_nas_status`は`nas_records`テーブルを対象にしているため、これらの表示が常に「データなし」のままだった。`nas_records`側のスキーマ(`status_ping`/`status_mount`列は文字列`'OK'`/`'NG'`)に合わせ、bool引数`ping_ok`/`mount_ok`をそれぞれ`"OK"`/`"NG"`の文字列へ変換して書き込む。`usage`が`None`(NAS到達不能時)の場合、`total_gb`/`used_gb`/`free_gb`列には`None`を書き込む(`percent`列は`device_records`向けと同じく`usage`が`None`のとき`0`を使う既存のロジックをそのまま流用する)。
-* 根拠: `def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:` (行番号: 388〜425 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: `def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:` (行番号: 389〜426 / 抜粋: "def save_to_db(self, ping_...")
 * 根拠: `save_log_generic(\n            getattr(config, "SQLITE_TABLE_NAS", "nas_records"),\n            ["timestamp", "device_name", "ip_address", "status_ping", "status_mount",\n             "total_gb", "used_gb", "free_gb", "percent"],\n            (\n                get_now_iso(),\n                self.device_name,\n                self.ip,\n                "OK" if ping_ok else "NG",\n                "OK" if mount_ok else "NG",\n                usage['total_gb'] if usage else None,\n                usage['used_gb'] if usage else None,\n                usage['free_gb'] if usage else None,\n                percent\n            )\n        )` (行番号: 306〜321)
 
 
 * **引数/リクエスト**: `ping_ok: bool`, `mount_ok: bool`, `usage: Optional[Dict[str, float]]`
-* 根拠: 定義部 (行番号: 388 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: 定義部 (行番号: 389 / 抜粋: "def save_to_db(self, ping_...")
 
 
 * **戻り値/レスポンス**: `None`
@@ -362,25 +363,25 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内の処理全体 (行番号: 388〜425 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: 関数内の処理全体 (行番号: 389〜426 / 抜粋: "def save_to_db(self, ping_...")
 
 
 
 ### 関数 `run`
 
 * **（2026-09-06 品質監査で修正）** 日次レポート(`is_report_time`)の判定を `now.hour == 8` の一致から「`now.hour >= 8` かつ状態ファイルの `last_report_date` が今日でない」に変更し、送信後に `last_report_date` を `_save_state` で保存する(Issue #388 で保持期間削除側に施したのと同じ修正。scheduler の実行間隔のずれで 7:5x → 9:0x になった日はレポートが丸ごと飛んでいた)。`today_str` の算出は両判定より前に移動した。
-* 根拠: (行番号: 484, 521〜522 / 抜粋: "is_report_time = now.hour >= 8 and previous_state.get(\"last_report_date\") != today_str", "if is_report_time:\n            previous_state[\"last_report_date\"] = today_str")
+* 根拠: (行番号: 485, 522〜523 / 抜粋: "is_report_time = now.hour >= 8 and previous_state.get(\"last_report_date\") != today_str", "if is_report_time:\n            previous_state[\"last_report_date\"] = today_str")
 * **（Issue #592で修正）** 上記「8時以降」判定に使う現在時刻(`now`)の取得方法自体を、ホストOSのタイムゾーン設定に依存するnaiveな`datetime.now()`から`core.utils.get_now_jst()`（Issue #592で追加、"Asia/Tokyo"のaware `datetime`を返す）に置き換えた。「8時以降」判定はJSTの8時を意図しているため、ホストがJST以外の設定だと本来と異なる実時刻で日次レポート・保持期間クリーンアップの両方が判定されてしまう問題があった（Issue #382/#293と同じ不具合クラス）。この変更に伴い`from datetime import datetime`のimportは不要になり削除された。回帰テストの`TestNasMonitorDailyReportOncePerDay`クラスは、`freeze_time(...)`の引数をJST時刻の文字列からUTC相当の文字列に変更した（freezegunは素の文字列をUTCとして解釈するため。例: `freeze_time("2026-09-06 09:05:00")`は元々JST 9:05のつもりだったが実際にはUTC 9:05=JST 18:05と解釈されており、修正前から気づかれずにいたテスト側のバグだった。修正後は`freeze_time("2026-09-06 00:05:00")  # JST 09:05`のようにUTC時刻を明示する）。
-* 根拠: `now = get_now_jst()` (行番号: 477〜479 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()")
+* 根拠: `now = get_now_jst()` (行番号: 478〜480 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()")
 
 * **役割**: Ping、マウント、書き込み権限の確認を順に実行し、状態変化（正常⇔異常）の判定と保存、DBへの記録を必ず行う。異常継続中はここで処理を終了し、正常時はさらに保持期間超過ファイルの自動削除（レポート時刻のみ）と、状況（容量不足・定時）に応じた通知を統括する。
-* 根拠: `def run(self) -> None:` (行番号: 427〜526 / 抜粋: "def run(self) -> None:")
+* 根拠: `def run(self) -> None:` (行番号: 428〜527 / 抜粋: "def run(self) -> None:")
 * **（Issue #388 で修正）** 保持期間クリーンアップの「1日1回」判定を `now.hour == 8` から「`now.hour >= 8` かつ状態ファイルの `last_cleanup_date` が今日でない」に変更し、実行後に `last_cleanup_date` を保存する。scheduler の実行間隔は毎回 3600〜3610s と少しずつ後ろにずれるため、7:59 台の次が 9:00 台になる日は 8 時台の実行が無く、その日の削除がまるごとスキップされていた。あわせて健全性遷移時の `_save_state` は `previous_state` を丸ごと保存し、`last_cleanup_date` を消さないようにした。
 * 根拠: `today_str = now.strftime("%Y-%m-%d")` (行番号: 417〜418)、`previous_state["is_healthy"] = False` (行番号: 383〜389)、`previous_state["is_healthy"] = True` (行番号: 392〜397)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def run(self) -> None:` (行番号: 427 / 抜粋: "def run(self) -> None:")
+* 根拠: `def run(self) -> None:` (行番号: 428 / 抜粋: "def run(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`

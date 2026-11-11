@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全119件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全120件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -17,7 +17,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [release_history_service.md](./release_history_service.md) | 「アップデート」ページ用に、ダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を集めて1本にまとめるサービス(外部アプリはタイムアウト・キャッシュ付きで取得)。 |
 | [system_maintenance_service.md](./system_maintenance_service.md) | システムページ(かんたん表示)の「サービス再起動」(`sudo systemctl restart home_system`)と「最新に更新して再起動」(`git pull --ff-only`→新しいコミットがあるときだけ再起動)を担うサービス（Issue #829で`log_tab.py`から分離）。 |
 | [webhook_router.md](./webhook_router.md) | 外部システム（LINE Bot・SwitchBot等）からのWebhookリクエストを受け取り、適切なハンドラ・サービスへルーティングする。 |
-| [camera_router.md](./camera_router.md) | カメラのライブ配信（HLS）・録画セグメントの一覧取得や配信APIを提供する（`camera_service.py`に処理を委譲）。 |
+| [camera_router.md](./camera_router.md) | カメラのライブ配信（HLS）・録画プレイリストと録画MP4の配信APIを提供する（`camera_service.py`・`record_playlist_service.py`に処理を委譲）。 |
 | [dashboard_router.md](./dashboard_router.md) | ダッシュボード(かんたん表示)を`config.DASHBOARD_BASE_PATH`（既定`/dashboard`）配下でHTMLとして直接配信するルーター（ホーム/見守り/くらし/システムの4ページ）。Issue #829でStreamlit版の詳細表示・逆プロキシ構成を廃止した。 |
 | [dashboard_page_service.md](./dashboard_page_service.md) | ダッシュボード(かんたん表示)のホーム/見守り/くらし/システム各ページのHTML組み立てを担うモジュール（Issue #829で新設）。 |
 | [dashboard_pwa_service.md](./dashboard_pwa_service.md) | ダッシュボードをスマートフォンのホーム画面に追加するためのPWAマニフェスト・アイコン生成（Issue #829で`dashboard_proxy_service.py`から分離）。 |
@@ -34,7 +34,8 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [tv_lock_monitor.md](./tv_lock_monitor.md) | TVの稼働時間を監視し、規定時間を超えた場合のロック制御を行う。 |
 | [connect_speaker.md](./connect_speaker.md) | スマートスピーカー等への音声出力・通知連携。 |
 | [collect_ops_logs.md](./collect_ops_logs.md) | 実機の運用ログ調査用に、nvr-*・cloudflared・journalctl・カーネルログ・crontab 差分・生存ログを読み取り専用で出力する収集スクリプト(Issue #1042)。 |
-| [camera_service.md](./camera_service.md) | ONVIF対応カメラのRTSP URL取得、ffmpegによるライブHLS配信・録画VODプレイリスト生成を担うサービス層。 |
+| [camera_service.md](./camera_service.md) | ONVIF対応カメラのRTSP URL取得、ffmpegによるライブHLS配信を担うサービス層(録画VOD生成は Issue #1091 で廃止)。 |
+| [record_playlist_service.md](./record_playlist_service.md) | NAS 上の録画 MP4(fragmented)のボックスだけを読み、バイト範囲で直接参照する録画VODの HLS プレイリストと時刻の対応表を組み立てる(Issue #1091。SD へは索引 JSON だけを書く)。 |
 | [network_logger.md](./network_logger.md) | カメラのIPアドレスに対しICMP PingとRTSPポートへのTCP接続試行を定期実行し、レイテンシとステータスをCSVに記録する。 |
 | [sound_manager.md](./sound_manager.md) | イベントキーに基づく音声ファイルの非同期再生、および音声ファイル欠損時のデフォルトディレクトリからの復旧を行う。 |
 | [switchbot.md](./switchbot.md) | SwitchBot関連のWebhookペイロード・API状態レスポンスのデータ構造を定義するPydanticモデル群。 |

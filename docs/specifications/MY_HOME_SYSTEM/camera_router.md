@@ -9,18 +9,19 @@
 
 ## 関連ドキュメント
 
-- [camera_service.md](./camera_service.md) — 呼び出し先（委譲先）。`start_hls_stream`, `get_record_start_offset`, `generate_record_playlist`, `set_camera_enabled`, `HLS_LIVE_DIR`, `HLS_VOD_DIR`に加え、**（Issue #551で追加）** `get_camera_config_or_none`を提供する。
+- [camera_service.md](./camera_service.md) — 呼び出し先（委譲先）。`start_hls_stream`, `get_record_start_offset`, `set_camera_enabled`, `HLS_LIVE_DIR`に加え、**（Issue #551で追加）** `get_camera_config_or_none`を提供する。
+- [record_playlist_service.md](./record_playlist_service.md) — **（Issue #1091で追加）** 録画VODのプレイリスト・時刻の対応表の組み立てと、配信してよい録画 MP4 の判定。
 - [config.md](./config.md) — `CAMERAS`設定を提供する。
 - [CameraDashboard.md](../family-quest/src/features/camera/components/CameraDashboard.md) — フロントエンド側の対応コンポーネント（`/settings`エンドポイントの利用元と推測される）。
 - [LiveView.md](../family-quest/src/features/camera/components/LiveView.md) — フロントエンド側の対応コンポーネント（ライブ配信エンドポイントの利用元と推測される）。
 - [RecordView.md](../family-quest/src/features/camera/components/RecordView.md) — フロントエンド側の対応コンポーネント（録画配信エンドポイントの利用元と推測される）。
 - [index.md](../family-quest/src/features/camera/types/index.md) — `get_camera_settings`が返す`id`/`name`/`order`/`enabled`に対応する`CameraConfig`型定義。
-- [HlsPlayer.md](../family-quest/src/components/ui/HlsPlayer.md) — `.m3u8`/`.ts`エンドポイントが配信するHLSストリームを実際に再生するプレイヤーコンポーネント。
+- [HlsPlayer.md](../family-quest/src/components/ui/HlsPlayer.md) — `.m3u8`/`.ts`(ライブ)・`.m3u8`/`.mp4`(録画)エンドポイントが配信するHLSストリームを実際に再生するプレイヤーコンポーネント。
 
 ## 2. ファイルの概要
 
 * FastAPIの `APIRouter` を用いて、カメラのライブ配信・録画再生に関するHTTPエンドポイントを定義するルーターモジュールである。
-* カメラ設定一覧の取得(`/settings`)、カメラ有効/無効の切り替え(`PUT /settings/{camera_id}`)、ライブHLSプレイリストの取得(`/live/{camera_id}/stream.m3u8`)、ライブHLSセグメントの配信(`/live/{camera_id}/{segment_file}`)、録画情報の取得(`/record/{camera_id}/{target_date}/info`)、録画プレイリスト/セグメントの配信(`/record/{camera_id}/{target_date}/{filename}`)の6つのエンドポイントを提供する。
+* カメラ設定一覧の取得(`/settings`)、カメラ有効/無効の切り替え(`PUT /settings/{camera_id}`)、ライブHLSプレイリストの取得(`/live/{camera_id}/stream.m3u8`)、ライブHLSセグメントの配信(`/live/{camera_id}/{segment_file}`)、録画情報の取得(`/record/{camera_id}/{target_date}/info`)、録画プレイリスト/録画MP4の配信(`/record/{camera_id}/{target_date}/{filename}`)の6つのエンドポイントを提供する。
 * 実際のストリーム生成・録画処理は `services.camera_service` モジュールに委譲し、本ファイルはHTTPリクエストの受付・パラメータ検証・レスポンス形式への変換（パストラバーサル対策を含む）を担う。
 * コミット`95d3e55`（E-3: camera enable/disable persistence）により、`GET /settings`が返す`enabled`は常に`True`固定だった状態から、`config.CAMERAS`側の`enabled`キー（`devices.json`から読み込み、無ければ`True`）を反映するよう修正され、`PUT /settings/{camera_id}`エンドポイントと`CameraSettingsUpdate`リクエストモデルが新規追加された。これにより`camera_service.set_camera_enabled`経由で`devices.json`へ有効/無効設定を永続化できるようになった。
 * **（Issue #551で追加）** `get_live_stream`・`get_record_info`・`get_record_file`（`.m3u8`/`.ts`両分岐）・`get_live_segment`の5箇所に、それぞれ独立に`next((c for c in config.CAMERAS if c["id"] == camera_id), None)` + `HTTPException(404)`という同一のカメラ設定ルックアップが重複していた。これを`services.camera_service.get_camera_config_or_none(camera_id)`（新規追加）を呼び出すだけの新設ヘルパー`_require_camera(camera_id) -> Dict[str, Any]`（見つからなければ本ファイル側で404を送出）へ一元化した。5箇所のうち`get_live_stream`と`get_record_info`は戻り値の`cam_conf`をその後の処理でも使うため変数に受け、`get_record_file`の`.ts`分岐と`get_live_segment`は存在確認のみが目的だったため戻り値を受け取らずに呼び出すだけの形にしている。
@@ -46,7 +47,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `camera_service` | 本タスクの指示により、本ファイル執筆時点では `camera_service.py` を読み込まずブラックボックスとして扱う。`start_hls_stream`, `get_record_start_offset`, `generate_record_playlist`, `set_camera_enabled`, `get_camera_config_or_none`, `HLS_VOD_DIR`, `HLS_LIVE_DIR` の内部実装・戻り値の詳細仕様は不明（**Issue #551で追加**の`get_camera_config_or_none`は戻り値が`config.CAMERAS`から検索した辞書または`None`であることは呼び出し側`_require_camera`の使い方から明らかだが、内部実装自体は本ファイルからは不明）。**（Issue #457対応）** `start_hls_stream`の呼び出しは`get_live_stream`が`async def`化されたことに伴い`await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)`という形に変わった（呼び出し先の関数自体のシグネチャ・戻り値は変わらない）。 | 根拠: [import文と呼び出し箇所] (行番号: 9, 22, 61, 73, 106, 117, 128, 148 / 抜粋: "from services import camera_service", "await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)", "cam_conf = camera_service.get_camera_config_or_none(camera_id)") |
+| `camera_service` | 本タスクの指示により、本ファイル執筆時点では `camera_service.py` を読み込まずブラックボックスとして扱う。`start_hls_stream`, `get_record_start_offset`, `set_camera_enabled`, `get_camera_config_or_none`, `HLS_LIVE_DIR` の内部実装・戻り値の詳細仕様は不明（**Issue #551で追加**の`get_camera_config_or_none`は戻り値が`config.CAMERAS`から検索した辞書または`None`であることは呼び出し側`_require_camera`の使い方から明らかだが、内部実装自体は本ファイルからは不明）。**（Issue #457対応）** `start_hls_stream`の呼び出しは`get_live_stream`が`async def`化されたことに伴い`await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)`という形に変わった（呼び出し先の関数自体のシグネチャ・戻り値は変わらない）。 | 根拠: [import文と呼び出し箇所] (行番号: 9, 22, 61, 73, 106, 117, 128, 148 / 抜粋: "from services import camera_service", "await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)", "cam_conf = camera_service.get_camera_config_or_none(camera_id)") |
 | `config` | `config.CAMERAS` の構造（各カメラ辞書のキー、読み込み元ファイル等）が本ファイルからは不明。 | 根拠: [config.CAMERASの参照] (参照: get_camera_settings / 抜粋: "config.CAMERAS") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -181,103 +182,59 @@
 
 ### `get_record_info` (`GET /record/{camera_id}/{target_date}/info`)
 
-* **役割**: 指定カメラ・指定日の録画ファイルのメタデータとして、開始オフセット秒数を `camera_service.get_record_start_offset` から取得し返す。**（Issue #551で修正）** カメラ設定のルックアップは`_require_camera(camera_id)`呼び出しに置き換わった。
-* 根拠: [エンドポイント定義とDocstring] (行番号: 101〜107 / 抜粋: "def get_record_info(camera_id: str, target_date: str):\n    """指定日の録画ファイルのメタデータ（最初のファイルのオフセット秒数）を返す"""\n    _validate_target_date(target_date)\n    cam_conf = _require_camera(camera_id)")
-* **（Issue #386 で追加）** `target_date` は `_validate_target_date` で `^\d{8}$`（YYYYMMDD）に一致することを検証し、不一致なら `HTTPException(400)`。`target_date` は camera_service 側で glob パターンと concat ファイル名に埋め込まれるため、未検証だと `*` で全期間の録画を1本に結合する数時間の ffmpeg ジョブを外部から起動できた。
-* 根拠: `_TARGET_DATE_RE = re.compile(r"^\d{8}$")` (行番号: 92)、`def _validate_target_date(target_date: str) -> None:` (行番号: 95〜97)、呼び出し (行番号: 103, 112)
+* **役割**: 指定カメラ・指定日の録画のメタデータを返す。最初の録画ファイルの開始時刻(`camera_service.get_record_start_offset`)に加え、**（Issue #1091で追加）** 録画ファイルごとの「開始時刻(0時からの秒数)・プレイリスト上の位置・長さ」の対応表(`record_playlist_service.get_record_timeline`)を返す。録画が欠けている時間帯はプレイリスト上で詰まるため、フロントエンド(`RecordView`)は指定時刻をこの表で再生位置へ変換する。カメラ設定のルックアップは`_require_camera(camera_id)`(Issue #551)。
+* 根拠: `def get_record_info(camera_id: str, target_date: str):`、`files = record_playlist_service.get_record_timeline(cam_conf, target_date)`
+* **（Issue #386 で追加）** `target_date` は `_validate_target_date` で `^\d{8}$`（YYYYMMDD）に一致することを検証し、不一致なら `HTTPException(400)`。`target_date` はサービス側で glob パターンに埋め込まれるため、未検証だと `*` 等で意図しない範囲の録画を対象にできた。
+* 根拠: `_TARGET_DATE_RE = re.compile(r"^\d{8}$")`、`def _validate_target_date(target_date: str) -> None:`
 
 
 * **引数/リクエスト**: `camera_id: str`, `target_date: str`（いずれもパスパラメータ）
-* 根拠: [引数定義] (行番号: 100〜101 / 抜粋: "@router.get("/record/{camera_id}/{target_date}/info")\ndef get_record_info(camera_id: str, target_date: str):")
-
-
-* **戻り値/レスポンス**: `{"offset_seconds": offset}` 形式の辞書（`offset`は`int`）
-* 根拠: [レスポンス構築] (行番号: 107 / 抜粋: "return {"offset_seconds": offset}")
-
-
-* **副作用**: `camera_service.get_record_start_offset` の呼び出し
-* 根拠: [呼び出し] (行番号: 106 / 抜粋: "offset = camera_service.get_record_start_offset(cam_conf, target_date)")
-
-
-* **エラーハンドリング**: カメラID未検出時に404の `HTTPException` を送出（`_require_camera`内で送出）。
+* **戻り値/レスポンス**: `{"offset_seconds": int, "files": [{"start_seconds", "position", "duration"}, ...]}`。再生できる録画が無ければ `files` は空配列。
+* 根拠: `return {"offset_seconds": offset, "files": files}`
+* **副作用**: `camera_service.get_record_start_offset` と `record_playlist_service.get_record_timeline` の呼び出し(後者は NAS 上の録画 MP4 のボックスを読み、索引 JSON を作成・更新しうる)
+* **エラーハンドリング**: カメラID未検出時に404（`_require_camera`内で送出）、`target_date`不正時に400。
 * 根拠: [呼び出し] (参照: get_record_info / 抜粋: "cam_conf = _require_camera(camera_id)")
 
 
 ### `get_record_file` (`GET /record/{camera_id}/{target_date}/{filename}`)
 
-* **役割**: リクエストされたファイル名の拡張子により処理を分岐する。`.m3u8`の場合は録画プレイリストを生成・返却し、`.ts`の場合は録画セグメントファイルを配信、それ以外の拡張子は400エラーとする。**（Issue #551で修正）** 両分岐のカメラ設定ルックアップは`_require_camera(camera_id)`呼び出しに置き換わった。`.m3u8`分岐は戻り値`cam_conf`を`generate_record_playlist`に渡すため変数で受けるが、`.ts`分岐は存在確認のみが目的のため戻り値を受け取らずに呼び出すだけになっている。
-* 根拠: [エンドポイント定義とDocstring] (行番号: 110〜135 / 抜粋: "def get_record_file(camera_id: str, target_date: str, filename: str):\n    """録画VODのプレイリスト（.m3u8）またはセグメント（.ts）を配信"""")、[両分岐の呼び出し] (行番号: 115, 125 / 抜粋: "cam_conf = _require_camera(camera_id)", "_require_camera(camera_id)")
-* **（Issue #386 で追加）** `target_date` は `_validate_target_date` で `^\d{8}$`（YYYYMMDD）に一致することを検証し、不一致なら `HTTPException(400)`。`target_date` は camera_service 側で glob パターンと concat ファイル名に埋め込まれるため、未検証だと `*` で全期間の録画を1本に結合する数時間の ffmpeg ジョブを外部から起動できた。
-* 根拠: `_TARGET_DATE_RE = re.compile(r"^\d{8}$")` (行番号: 92)、`def _validate_target_date(target_date: str) -> None:` (行番号: 95〜97)、呼び出し (行番号: 103, 112)
+* **役割**: リクエストされたファイル名の拡張子により処理を分岐する。**（Issue #1091で変更）** `.m3u8`の場合は `record_playlist_service.get_record_playlist` が NAS 上の録画 MP4 を直接参照して組み立てたプレイリスト本文を返し、`.mp4`の場合は NAS 上の録画 MP4 を `FileResponse` で配信する(Range リクエストには 206 で必要な範囲だけを返す)。以前の `.ts` 分岐(ffmpeg が SD カードへ書き出した HLS セグメントの配信)は廃止し、それ以外の拡張子と同じく400になる。カメラ設定のルックアップは拡張子の判定より前に1回だけ行う(`_require_camera`)。
+* 根拠: `def get_record_file(camera_id: str, target_date: str, filename: str):`、`playlist = record_playlist_service.get_record_playlist(cam_conf, target_date)`、`path = record_playlist_service.resolve_record_file(cam_conf, target_date, filename)`
+* **（Issue #386 で追加）** `target_date` は `_validate_target_date` で検証し、不一致なら `HTTPException(400)`。
 
 
 * **引数/リクエスト**: `camera_id: str`, `target_date: str`, `filename: str`（いずれもパスパラメータ）
-* 根拠: [引数定義] (行番号: 109〜110 / 抜粋: "@router.get("/record/{camera_id}/{target_date}/{filename}")\ndef get_record_file(camera_id: str, target_date: str, filename: str):")
-
-
-* **戻り値/レスポンス**: `.m3u8`要求時は `FileResponse`（media_type="application/vnd.apple.mpegurl"）、`.ts`要求時は `FileResponse`（media_type="video/MP2T"）。
-* 根拠: [各分岐でのレスポンス返却] (行番号: 121, 132 / 抜粋: "return FileResponse(playlist_path, media_type="application/vnd.apple.mpegurl")")
-
-
-* **副作用**: `.m3u8`分岐では `camera_service.generate_record_playlist` の呼び出し（プレイリスト・セグメント生成を誘発しうる。Issue #1088 以降、他のVOD生成が実行中ならサービス側の順番待ちに入る）。`.ts`分岐では `_resolve_segment_path` によるパス検証と `camera_service.HLS_VOD_DIR` の参照。
-* 根拠: `playlist_path = camera_service.generate_record_playlist(cam_conf, target_date)` (行番号: 120)
-
-
-* **エラーハンドリング**: カメラID未検出時404（各分岐で`_require_camera`が個別に判定）。`.m3u8`分岐でプレイリスト生成失敗時404。`.ts`分岐でセグメントファイル不在時404。上記いずれの拡張子でもない場合は400。**（Issue #1088で追加）** `.m3u8`分岐で`camera_service.VodGenerationUnavailable`(他のVOD生成が実行中で順番待ち・順番待ちが混雑・空き容量不足)が送出された場合は、「録画が無い」404と区別して`HTTPException(503, detail=e.message)`を送出し、`e.retry_after`があれば`Retry-After`ヘッダーに載せる。
-* 根拠: `except camera_service.VodGenerationUnavailable as e:` (行番号: 121)、`raise HTTPException(status_code=503, detail=e.message, headers=headers)` (行番号: 123)
-* 根拠: [各エラー分岐] (行番号: 115, 118〜119, 125, 129〜130, 134〜135 / 抜粋: "else:\n        raise HTTPException(status_code=400, detail="Unsupported file extension")")
-
-
-### `get_live_segment` (`GET /live/{camera_id}/{segment_file}`)
-
-* **役割**: ライブHLSの `.ts` セグメントファイルを、拡張子チェックとパストラバーサル検証を経て配信する。Issue #172の修正（コミット時点）により、`.ts`以外の拡張子は400で拒否するようになった。修正前は拡張子を一切検証していなかったため、`_resolve_segment_path`のパストラバーサル対策のみでは防げない形で、同一ディレクトリ内に配置される`ffmpeg.log`（RTSP認証情報を含みうる。`camera_service.md`参照）等の任意ファイルがそのまま配信され得た。**（Issue #551で修正）** カメラ設定のルックアップは`_require_camera(camera_id)`呼び出しに置き換わった（存在確認のみが目的のため戻り値は受け取らない）。
-* 根拠: [エンドポイント定義とDocstring] (行番号: 144〜158 / 抜粋: "def get_live_segment(camera_id: str, segment_file: str):\n    """ライブのHLSセグメント（.tsファイル）を配信"""")、[拡張子チェック] (行番号: 149〜150 / 抜粋: "if not segment_file.endswith(\".ts\"):\n        raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")、[カメラ確認] (参照: get_live_segment / 抜粋: "_require_camera(camera_id)")
-
-
-* **引数/リクエスト**: `camera_id: str`, `segment_file: str`（いずれもパスパラメータ）
-* 根拠: [引数定義] (行番号: 143〜144 / 抜粋: "@router.get("/live/{camera_id}/{segment_file}")\ndef get_live_segment(camera_id: str, segment_file: str):")
-
-
-* **戻り値/レスポンス**: `FileResponse`（media_type="video/MP2T"）
-* 根拠: [レスポンス返却] (参照: get_live_segment / 抜粋: "return FileResponse(segment_path, media_type="video/MP2T")")
-
-
-* **副作用**: `_resolve_segment_path` によるパス検証、`camera_service.HLS_LIVE_DIR` の参照。
-* 根拠: [パス解決] (行番号: 154 / 抜粋: "segment_path = _resolve_segment_path(camera_service.HLS_LIVE_DIR, camera_id, segment_file)")
-
-
-* **エラーハンドリング**: `segment_file`が`.ts`で終わらない場合400（カメラID検証より前に判定）、カメラID未検出時404（`_require_camera`内）、セグメントファイル不在時404（`_resolve_segment_path`内で範囲外パスの場合も400が送出されうる）。
-* 根拠: [エラー分岐] (行番号: 149〜150, 152, 155〜156 / 抜粋: "if not segment_file.endswith(\".ts\"):\n        raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")
+* **戻り値/レスポンス**: `.m3u8`要求時は `Response`（media_type="application/vnd.apple.mpegurl"、`Cache-Control: no-cache`。当日分は録画が増えるため）、`.mp4`要求時は `FileResponse`（media_type="video/mp4"）。
+* 根拠: `return FileResponse(path, media_type="video/mp4")`
+* **副作用**: `.m3u8`分岐では NAS 上の録画 MP4 のボックス読み取りと索引 JSON の作成・更新(`record_playlist_service`)。`.mp4`分岐では NAS 上のファイルの読み取り。SD カードへ動画データを書くことは無い。
+* **エラーハンドリング**: `target_date`不正時400、カメラID未検出時404。`.m3u8`分岐で再生できる録画が無ければ404(`Recordings not found for the specified date`)。`.mp4`分岐で、ファイル名が録画の命名規則(`<target_date>_HHMMSS.mp4`)と合わない・録画ディレクトリの外を指す・存在しない場合は404(`Recording not found`。判定は `record_playlist_service.resolve_record_file`)。上記いずれの拡張子でもない場合は400。
+* 根拠: [拡張子外の分岐] (参照: get_record_file / 抜粋: "raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")
 
 
 ## 5. 処理フロー図
 
-録画ファイル配信のエンドポイント `get_record_file` を例に、拡張子による分岐ロジックを示します。**（Issue #551で改訂）** カメラ設定の検索は`_require_camera`ヘルパーへ一元化された。
+録画ファイル配信のエンドポイント `get_record_file` を例に、拡張子による分岐ロジックを示します。**（Issue #1091で改訂）** `.ts` 分岐を廃止し、`.mp4` 分岐を追加した。
 
 ```mermaid
 flowchart TD
-    Start["Start: GET /record/{camera_id}/{target_date}/{filename}"] --> ExtCheck{"filenameの拡張子判定"}
+    Start["Start: GET /record/{camera_id}/{target_date}/{filename}"] --> DateCheck{"target_date が YYYYMMDD か?"}
+    DateCheck -- No --> Err400d["HTTPException 400"]
+    DateCheck -- Yes --> ReqCam["_require_camera(camera_id)"]
+    ReqCam --> CamFound{"カメラ設定が見つかったか?"}
+    CamFound -- No --> Err404a["HTTPException 404: Camera not found"]
+    CamFound -- Yes --> ExtCheck{"filenameの拡張子判定"}
 
-    ExtCheck -- ".m3u8" --> ReqCam1["_require_camera(camera_id)"]
-    ReqCam1 --> CamFound1{"カメラ設定が見つかったか?"}
-    CamFound1 -- No --> Err404a["HTTPException 404: Camera not found"]
-    CamFound1 -- Yes --> GenPlaylist["外部：camera_service.generate_record_playlist()"]
-    GenPlaylist --> PlaylistOk{"プレイリストパスが取得できたか?"}
-    GenPlaylist -- "VodGenerationUnavailable (Issue #1088)" --> Err503["HTTPException 503<br>(順番待ち・混雑・容量不足, Retry-After)"]
+    ExtCheck -- ".m3u8" --> GenPlaylist["外部：record_playlist_service.get_record_playlist()"]
+    GenPlaylist --> PlaylistOk{"プレイリスト本文が得られたか?"}
     PlaylistOk -- No --> Err404b["HTTPException 404: Recordings not found"]
-    PlaylistOk -- Yes --> RespM3u8["FileResponse (application/vnd.apple.mpegurl)"]
+    PlaylistOk -- Yes --> RespM3u8["Response (application/vnd.apple.mpegurl, no-cache)"]
 
-    ExtCheck -- ".ts" --> ReqCam2["_require_camera(camera_id)"]
-    ReqCam2 --> CamFound2{"カメラ設定が見つかったか?"}
-    CamFound2 -- No --> Err404c["HTTPException 404: Camera not found"]
-    CamFound2 -- Yes --> ResolvePath["_resolve_segment_path()でパス検証"]
-    ResolvePath --> PathValid{"パスがbase_dir範囲内か?"}
-    PathValid -- No --> Err400["HTTPException 400: Invalid path"]
-    PathValid -- Yes --> FileExists{"セグメントファイルが存在するか?"}
-    FileExists -- No --> Err404d["HTTPException 404: Segment not found"]
-    FileExists -- Yes --> RespTs["FileResponse (video/MP2T)"]
+    ExtCheck -- ".mp4" --> Resolve["外部：record_playlist_service.resolve_record_file()"]
+    Resolve --> PathOk{"録画ディレクトリ内の<br>命名規則に合うファイルか?"}
+    PathOk -- No --> Err404c["HTTPException 404: Recording not found"]
+    PathOk -- Yes --> RespMp4["FileResponse (video/mp4, Range対応)"]
 
-    ExtCheck -- "その他" --> Err400b["HTTPException 400: Unsupported file extension"]
+    ExtCheck -- "その他(.ts を含む)" --> Err400b["HTTPException 400: Unsupported file extension"]
 ```
 
 ## 6. 依存関係図
@@ -305,6 +262,8 @@ graph TD
         asyncio_mod["asyncio"]
         config["config (CAMERAS)"]
         camera_service["services.camera_service (ブラックボックス)"]
+        record_playlist_service["services.record_playlist_service (Issue #1091)"]
+        fastapi_response["fastapi.responses.Response"]
     end
 
     router --> fastapi
@@ -319,9 +278,10 @@ graph TD
     get_live_stream --> fastapi_responses
     get_record_info --> require_camera
     get_record_info --> camera_service
+    get_record_info --> record_playlist_service
     get_record_file --> require_camera
-    get_record_file --> camera_service
-    get_record_file --> resolve_segment_path
+    get_record_file --> record_playlist_service
+    get_record_file --> fastapi_response
     get_record_file --> fastapi_responses
     get_live_segment --> require_camera
     get_live_segment --> camera_service
@@ -334,7 +294,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `services/camera_service.py` | `start_hls_stream`, `get_record_start_offset`, `generate_record_playlist`, `set_camera_enabled`, `get_camera_config_or_none`, `HLS_VOD_DIR`, `HLS_LIVE_DIR` の実装がすべてブラックボックスであり、本ルーターが依存するストリーム生成・録画処理・設定永続化・カメラ設定ルックアップロジックの実態を把握する必要があるため。 | 根拠: [import文] (行番号: 9 / 抜粋: "from services import camera_service") |
+| 高 | `services/camera_service.py` | `start_hls_stream`, `get_record_start_offset`, `set_camera_enabled`, `get_camera_config_or_none`, `HLS_LIVE_DIR` の実装がすべてブラックボックスであり、本ルーターが依存するストリーム生成・録画処理・設定永続化・カメラ設定ルックアップロジックの実態を把握する必要があるため。 | 根拠: [import文] (行番号: 9 / 抜粋: "from services import camera_service") |
 | 中 | `config.py` | `config.CAMERAS` のデータ構造（各カメラ辞書に含まれるキーの全容）と読み込み元が不明であるため。 | 根拠: [config.CAMERASの参照] (行番号: 49 / 抜粋: "for idx, cam in enumerate(config.CAMERAS):") |
 
 ## 8. 保守上の注意点
@@ -344,22 +304,22 @@ graph TD
 * **[修正済み・Issue #457] 同期的な待機処理によるブロッキングを解消**: 以前は `get_live_stream` が同期`def`エンドポイントとして実装され、`camera_service.start_hls_stream`（ffmpeg起動を含むブロッキング処理）を直接呼び出したうえで最大5秒間 `time.sleep(0.5)` によるポーリングでブロックしており、デフォルトのスレッドプール実行下ではリクエストごとにワーカースレッドを占有し続け、同時アクセス集中時に他リクエストの遅延要因になっていた。現在は`async def`化され、`start_hls_stream`の呼び出しは`asyncio.to_thread`でスレッドプールへオフロードし、待機ループも`await asyncio.sleep(0.5)`に変更してイベントループを他リクエスト処理に譲るようになった。
 * **（コミット`95d3e55`, E-3で解消）`enabled`フラグの固定値**: 修正前は `get_camera_settings` の `enabled` が常に `True`固定で、`config.CAMERAS` 側で無効化されたカメラの状態を反映する仕組みがなかった。現在は `cam.get("enabled", True)` により実際の値を反映し、`PUT /settings/{camera_id}`（`update_camera_settings`）で `camera_service.set_camera_enabled` 経由の永続化（`devices.json`書き込み）が可能になっている。
 * **例外処理の欠如**: `get_camera_settings` では `config.CAMERAS` の各要素に `id`/`name` キーが存在しない場合の `KeyError` に対する処理がない（`enabled`キーのみ`.get`で防御的にアクセスしている）。`update_camera_settings` も `camera_service.set_camera_enabled` 呼び出し自体に対する `try-except` は持たず、`False`戻り値（対象カメラ不在）のみをHTTP 404として扱う（`_require_camera`は使わない独自実装のまま、Issue #551の対象外）。
-* **パストラバーサル対策の一元化**: `.ts` セグメント配信は `_resolve_segment_path` により防御されているが、`.m3u8` の場合は `camera_service.generate_record_playlist` / `start_hls_stream` の戻り値パスをそのまま `FileResponse` に渡しており、パス検証の責務が `camera_service` 側にあるかは本ファイルからは確認できない。
+* **パストラバーサル対策の所在**: ライブの `.ts` セグメント配信は `_resolve_segment_path` により防御される。録画の `.mp4` 配信は `record_playlist_service.resolve_record_file`(命名規則・日付の一致・realpath による録画ディレクトリ内の確認)が防御する。録画プレイリストはファイルではなく本文を返すため、パスを扱わない。
 * **（Issue #172で解消）拡張子チェックの非対称性**: `get_record_file` は`.m3u8`/`.ts`以外を400で拒否していたが、`get_live_segment` は修正前は拡張子を一切検証しておらず、`_resolve_segment_path`のパストラバーサル対策だけでは防げない形で同一カメラディレクトリ内の`ffmpeg.log`（`camera_service.py`が`chmod 600`で保護しているファイル。RTSP認証情報を含みうる）等が配信され得た。現在は`get_record_file`と同様に`.ts`以外を400で拒否する。
 
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| `camera_service` の各関数の内部実装 | `start_hls_stream`, `get_record_start_offset`, `generate_record_playlist`, `set_camera_enabled`, `get_camera_config_or_none` の処理内容、`HLS_VOD_DIR`/`HLS_LIVE_DIR` の実際の値が本ファイルからは不明。 | `services/camera_service.py` |
+| `camera_service` の各関数の内部実装 | `start_hls_stream`, `get_record_start_offset`, `set_camera_enabled`, `get_camera_config_or_none` の処理内容、`HLS_LIVE_DIR` の実際の値が本ファイルからは不明。 | `services/camera_service.py` |
 | `config.CAMERAS` のデータ構造 | 各カメラ辞書のキー一覧や設定ファイルの読み込み元が不明。 | `config.py` |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `camera_service` の各関数の内部実装 | `camera_service.md`の解析によれば、`start_hls_stream`はffmpegプロセスをカメラID単位で起動しHLSライブ配信用プレイリストパス（`str`、RTSP URL取得失敗時は空文字列）を返し、`get_record_start_offset`は指定日最初の録画ファイル名から算出した0時からの経過秒数（`int`、失敗時は`0`）を返し、`generate_record_playlist`は10分単位に分割されたmp4群を`ffconcat`で結合したVOD用HLSプレイリストパス（`Optional[str]`、保存先ディレクトリ不在時や対象ファイルなし時は`None`）を返すと推測される。ただし`HLS_LIVE_DIR`/`HLS_VOD_DIR`の実際のパス値自体は`camera_service.md`側でも本文中に明記が確認できず、依然として不明。 | camera_service.md |
-| `camera_service` の各関数の内部実装（`HLS_LIVE_DIR`/`HLS_VOD_DIR`の実値） | `services/camera_service.py`を直接確認した。23行目で`BASE_DIR = os.path.dirname(os.path.dirname(__file__))`（`services/`の親、すなわち`MY_HOME_SYSTEM/`）と定義され、24〜25行目で`HLS_LIVE_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "live")`、`HLS_VOD_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "vod")`という固定のローカルディレクトリパス（`MY_HOME_SYSTEM/data/hls_streams/live`および`MY_HOME_SYSTEM/data/hls_streams/vod`）であることを確認した。ライブHLS配信の実処理は238行目で`init_output_dir(HLS_LIVE_DIR, cam_id)`、`generate_record_playlist`は350行目で`init_output_dir(HLS_VOD_DIR, cam_id)`をそれぞれ呼び出しており、camera_service.md側の推測が実際のパス値でも裏付けられることを確認した。**（Issue #439で`start_hls_stream`は`_live_stream_lock`を取得する薄いラッパーに変更され、上記の実処理自体は新設の`_start_hls_stream_locked`関数（237〜289行目）に分離されている。）** `set_camera_enabled(camera_id, enabled) -> bool`(451〜478行目)は、`config.DEVICES_JSON_PATH`が存在しなければ`False`を返し(454〜455行目)、存在すれば`devices.json`を読み込んで対象カメラを`id`で検索、見つからなければ`False`を返す(460〜463行目)。見つかった場合は`target["enabled"] = enabled`で更新した上で、一時ファイル(`{DEVICES_JSON_PATH}.tmp`)へ書き込んでから`os.replace`でアトミックに本ファイルへ反映し(466〜471行目。書き込み途中のクラッシュでdevices.json自体が壊れることを防ぐ設計)、さらに`config.CAMERAS`（インメモリ）内の対応する辞書の`enabled`も直接更新する(473〜476行目)ことを確認した。**（Issue #551で追加）** `get_camera_config_or_none(camera_id) -> Optional[Dict[str, Any]]`は`config.CAMERAS`から`camera_id`に一致する辞書を`next()`で検索して返す（見つからなければ`None`）だけの単純な関数であり、例外は送出しない。 | 直接ソース確認: `MY_HOME_SYSTEM/services/camera_service.py:23-25, 237-289, 350, 451-478` |
+| `camera_service` の各関数の内部実装 | `camera_service.md`の解析によれば、`start_hls_stream`はffmpegプロセスをカメラID単位で起動しHLSライブ配信用プレイリストパス（`str`、RTSP URL取得失敗時は空文字列）を返し、`get_record_start_offset`は指定日最初の録画ファイル名から算出した0時からの経過秒数（`int`、失敗時は`0`）を返すと推測される(以前あった録画VOD生成`generate_record_playlist`は Issue #1091 で削除され、録画プレイリストは`record_playlist_service`が組み立てる)。ただし`HLS_LIVE_DIR`/`HLS_VOD_DIR`の実際のパス値自体は`camera_service.md`側でも本文中に明記が確認できず、依然として不明。 | camera_service.md |
+| `camera_service` の各関数の内部実装（`HLS_LIVE_DIR`/`HLS_VOD_DIR`の実値） | `services/camera_service.py`を直接確認した。23行目で`BASE_DIR = os.path.dirname(os.path.dirname(__file__))`（`services/`の親、すなわち`MY_HOME_SYSTEM/`）と定義され、24〜25行目で`HLS_LIVE_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "live")`、`HLS_VOD_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "vod")`という固定のローカルディレクトリパス（`MY_HOME_SYSTEM/data/hls_streams/live`および`MY_HOME_SYSTEM/data/hls_streams/vod`）であることを確認した。ライブHLS配信の実処理は238行目で`init_output_dir(HLS_LIVE_DIR, cam_id)`を呼び出しており(当時の`generate_record_playlist`は`init_output_dir(HLS_VOD_DIR, cam_id)`を呼んでいたが、Issue #1091 で`HLS_VOD_DIR`ごと削除)、camera_service.md側の推測が実際のパス値でも裏付けられることを確認した。**（Issue #439で`start_hls_stream`は`_live_stream_lock`を取得する薄いラッパーに変更され、上記の実処理自体は新設の`_start_hls_stream_locked`関数（237〜289行目）に分離されている。）** `set_camera_enabled(camera_id, enabled) -> bool`(451〜478行目)は、`config.DEVICES_JSON_PATH`が存在しなければ`False`を返し(454〜455行目)、存在すれば`devices.json`を読み込んで対象カメラを`id`で検索、見つからなければ`False`を返す(460〜463行目)。見つかった場合は`target["enabled"] = enabled`で更新した上で、一時ファイル(`{DEVICES_JSON_PATH}.tmp`)へ書き込んでから`os.replace`でアトミックに本ファイルへ反映し(466〜471行目。書き込み途中のクラッシュでdevices.json自体が壊れることを防ぐ設計)、さらに`config.CAMERAS`（インメモリ）内の対応する辞書の`enabled`も直接更新する(473〜476行目)ことを確認した。**（Issue #551で追加）** `get_camera_config_or_none(camera_id) -> Optional[Dict[str, Any]]`は`config.CAMERAS`から`camera_id`に一致する辞書を`next()`で検索して返す（見つからなければ`None`）だけの単純な関数であり、例外は送出しない。 | 直接ソース確認: `MY_HOME_SYSTEM/services/camera_service.py:23-25, 237-289, 350, 451-478` |
 | `config.CAMERAS` のデータ構造 | `config.py`を直接確認した。`CAMERAS: List[Dict[str, Any]] = []`(297行目)は、`devices.json`（リポジトリ内に実体なし、`.gitignore`の`*.json`規則により追跡対象外）が存在すれば300〜305行目で`CAMERAS = [CameraConfig(**c).model_dump(by_alias=True) for c in _devices_data["cameras"]]`として読み込まれる。`CameraConfig`(Pydanticモデル、144〜154行目)のキー一覧は`id: str, name: str, nas_folder: Optional[str], location: str, ip: str, port: int(既定2020), user: Optional[str], password: Optional[str](エイリアス"pass"), rtsp_url: Optional[str], enabled: bool(既定True。コミット`95d3e55`で追加)`である。本ファイル(`camera_router.py`)自身も49〜55行目で`for idx, cam in enumerate(config.CAMERAS): {"id": cam["id"], "name": cam["name"], "enabled": cam.get("enabled", True)}`のように`id`/`name`キーへ実際にアクセスし`enabled`は`.get`で防御的に取得しており、**（Issue #551で追加）** 他5エンドポイントは`_require_camera`経由で`services.camera_service.get_camera_config_or_none`が同様の`next((c for c in config.CAMERAS if c["id"] == camera_id), None)`検索を行い、その結果の`cam_conf`辞書を`camera_service`の各関数へそのまま渡していることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:144-154, 297, 300-305`, `MY_HOME_SYSTEM/routers/camera_router.py:49-55`, `MY_HOME_SYSTEM/services/camera_service.py`(`get_camera_config_or_none`) |
 
 ## 10. 自己検証結果
