@@ -547,6 +547,11 @@ HLS_VOD_MIN_FREE_GB: float = _get_float_env("HLS_VOD_MIN_FREE_GB", 30.0)
 # 生成中のプレイリストからそのまま再生できるため、再生速度(最大4倍速)より十分大きくしておく。
 # 0 以下で無効(制限なし。ffmpeg 5.0 未満で `-readrate` が使えない場合など)。
 HLS_VOD_READRATE: float = _get_float_env("HLS_VOD_READRATE", 10.0)
+# Issue #1088: 録画VODキャッシュ(BASE_DIR/data/hls_streams/vod)全体の容量上限(GB)。
+# 生成の前に「既存キャッシュ + 想定出力」がこれを超えるなら、更新の古い日付のキャッシュから消す。
+# 保持日数(HLS_VOD_RETENTION_DAYS)だけでは、3日以内に数日分を閲覧すると1日約70GB×数日で
+# ルートFSを使い切りうるため、合計量にも上限を設ける。0 以下で無効。
+HLS_VOD_CACHE_MAX_GB: float = _get_float_env("HLS_VOD_CACHE_MAX_GB", 80.0)
 # DBバックアップの保持日数
 DB_BACKUP_RETENTION_DAYS: int = _get_int_env("DB_BACKUP_RETENTION_DAYS", 30)
 # 2026-09-19: DBバックアップのオフサイト複製先(rclone のリモートパス。例: "gdrive:お家開発/db_backup_latest")。
