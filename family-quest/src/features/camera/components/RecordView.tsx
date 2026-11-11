@@ -2,6 +2,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import HlsPlayer from '../../../components/ui/HlsPlayer';
 import { CameraConfig } from '../types';
 import { apiClient } from '@/lib/apiClient';
+import { RecordInfo, recordPositionForTime } from '../recordTimeline';
 
 interface RecordViewProps {
     cameras: CameraConfig[];
@@ -54,14 +55,14 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
         const totalSeconds = hours * 3600 + minutes * 60;
 
         try {
-            // 各カメラごとにAPIからオフセットを取得し、正確なシーク位置を計算する。
+            // 各カメラごとにAPIから録画の時刻とプレイリスト上の位置の対応表を取得し、シーク位置を計算する。
+            // Issue #1091: 録画が欠けている時間帯はプレイリスト上で詰まるため、対応表で変換する。
             // #392(F-L4): 以前はカメラ数分を直列に await していたため待ち時間がカメラ数に
             // 比例していた。互いに独立した取得なので並列に投げる。
             const entries = await Promise.all(cameras.map(async (camera) => {
                 try {
-                    const data = await apiClient.get<{ offset_seconds: number }>(`/api/cameras/record/${camera.id}/${dateStr}/info`);
-                    // (指定時刻の総秒数) - (その日の最初のファイルの開始秒数)
-                    return [camera.id, Math.max(0, totalSeconds - data.offset_seconds)] as const;
+                    const data = await apiClient.get<RecordInfo>(`/api/cameras/record/${camera.id}/${dateStr}/info`);
+                    return [camera.id, recordPositionForTime(data, totalSeconds)] as const;
                 } catch (err) {
                     console.error("Failed to fetch offset", err);
                     return [camera.id, totalSeconds] as const;
@@ -70,7 +71,7 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
             const offsets: { [key: string]: number } = Object.fromEntries(entries);
 
             setStartOffsets(offsets);
-            // バックエンドが生成するファイル名 (record_YYYYMMDD.m3u8) と一致させる
+            // バックエンドのプレイリストのURL (record_YYYYMMDD.m3u8)
             setPlayUrlSuffix(`${dateStr}/record_${dateStr}.m3u8`);
         } finally {
             setIsPreparing(false);

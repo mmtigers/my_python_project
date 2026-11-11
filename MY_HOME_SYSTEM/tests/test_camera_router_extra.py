@@ -45,7 +45,7 @@ class TestUnsupportedExtension:
     def test_unsupported_extension_returns_400(self, monkeypatch):
         monkeypatch.setattr(config, "CAMERAS", [{"id": "cam1", "name": "Cam1"}])
         with pytest.raises(HTTPException) as exc_info:
-            get_record_file("cam1", "2026-01-01", "video.mp4")
+            get_record_file("cam1", "20260101", "video.avi")
         assert exc_info.value.status_code == 400
 
 

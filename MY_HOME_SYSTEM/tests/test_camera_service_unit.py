@@ -3,7 +3,7 @@
 services/camera_service.py 本体(モック無し)のユニットテスト。
 
 M-3: 既存 test_camera_router*.py は camera_service を全てmonkeypatchしており、
-start_hls_stream/generate_record_playlist等の実装(RTSP URLマスク・ffmpeg起動・
+start_hls_stream等の実装(RTSP URLマスク・ffmpeg起動・
 ファイルハンドル管理・排他制御・devices.json書込)は未実行だった。
 本ファイルは実装そのものを検証する(ffmpeg自体はモックする)。
 """
@@ -25,24 +25,14 @@ from services import camera_service
 @pytest.fixture(autouse=True)
 def _reset_module_state(monkeypatch):
     """モジュールグローバルの辞書がテスト間で干渉しないようにする"""
-    # Issue #1088: VOD生成前の空き容量チェックが実行環境の実ディスク(CIランナーは
-    # 空きが30GBを切ることがある)に左右されないよう、既定では下限を0にする。
-    # 容量チェックそのものは TestVodDiskSpaceGuard が disk_usage を差し替えて検証する。
-    monkeypatch.setattr(config, "HLS_VOD_MIN_FREE_GB", 0.0)
-    # 同じくVODキャッシュの容量上限も既定では無効にする(TestVodCacheSizeLimit が検証する)。
-    monkeypatch.setattr(config, "HLS_VOD_CACHE_MAX_GB", 0.0)
     camera_service._active_processes.clear()
     camera_service._live_started_at.clear()
-    camera_service._active_vod_processes.clear()
-    camera_service._vod_queue.clear()
-    camera_service._vod_generation_locks.clear()
+    camera_service._live_stream_locks.clear()
     camera_service._rtsp_cache.clear()
     yield
     camera_service._active_processes.clear()
     camera_service._live_started_at.clear()
-    camera_service._active_vod_processes.clear()
-    camera_service._vod_queue.clear()
-    camera_service._vod_generation_locks.clear()
+    camera_service._live_stream_locks.clear()
     camera_service._rtsp_cache.clear()
 
 
@@ -75,44 +65,27 @@ class TestMaskRtspUrlForLog:
         assert isinstance(result, str)
 
 
-class TestPruneFinishedVodProcesses:
-    def test_removes_only_finished_processes(self):
-        running = MagicMock()
-        running.poll.return_value = None
-        finished = MagicMock()
-        finished.poll.return_value = 0
-
-        camera_service._active_vod_processes["cam1_20260101"] = running
-        camera_service._active_vod_processes["cam1_20260102"] = finished
-
-        camera_service._prune_finished_vod_processes()
-
-        assert "cam1_20260101" in camera_service._active_vod_processes
-        assert "cam1_20260102" not in camera_service._active_vod_processes
-
-
-class TestVodGenerationLockPruning:
-    """#247: _vod_generation_locksは以前、cam_id×target_dateのキーを一度登録すると
-    二度と削除されず、_active_vod_processesに対応するような剪定処理も存在しなかった
-    ため無限に蓄積し続けていた。参照カウント方式(Issue #661 で
-    core.utils.RefCountedLockRegistry へ統合)により、使用後は自動的に
-    エントリが削除されることを検証する。"""
+class TestLiveStreamLockPruning:
+    """#247: キー単位ロック(以前は録画VOD生成の _vod_generation_locks、Issue #1091 で
+    VOD生成を廃止したため、同じ仕組みのライブ配信用 _live_stream_locks で検証する)は、
+    参照カウント方式(Issue #661 で core.utils.RefCountedLockRegistry へ統合)により、
+    使用後は自動的にエントリが削除されることを検証する。"""
 
     def test_entry_is_removed_after_use(self):
-        with camera_service._vod_generation_lock("cam1_20260101"):
-            assert "cam1_20260101" in camera_service._vod_generation_locks
+        with camera_service._live_stream_lock("cam1_20260101"):
+            assert "cam1_20260101" in camera_service._live_stream_locks
 
-        assert "cam1_20260101" not in camera_service._vod_generation_locks, (
+        assert "cam1_20260101" not in camera_service._live_stream_locks, (
             "使用後はエントリが辞書から削除され、無限蓄積しないこと"
         )
 
     def test_multiple_keys_each_removed_independently(self):
-        with camera_service._vod_generation_lock("cam1_20260101"):
+        with camera_service._live_stream_lock("cam1_20260101"):
             pass
-        with camera_service._vod_generation_lock("cam2_20260102"):
+        with camera_service._live_stream_lock("cam2_20260102"):
             pass
 
-        assert camera_service._vod_generation_locks.keys() == []
+        assert camera_service._live_stream_locks.keys() == []
 
     def test_entry_not_removed_while_another_thread_is_waiting(self):
         """使用中(参照カウント>0)のエントリは、他スレッドが利用中の間は
@@ -124,14 +97,14 @@ class TestVodGenerationLockPruning:
         second_thread_done = threading.Event()
 
         def hold_first():
-            with camera_service._vod_generation_lock(key):
+            with camera_service._live_stream_lock(key):
                 first_holder_ready.set()
                 release_first_holder.wait(timeout=5)
 
         def wait_second():
             first_holder_ready.wait(timeout=5)
             # この時点でfirst_holderがロックを保持中。ここでref_countが2になるはず。
-            with camera_service._vod_generation_lock(key):
+            with camera_service._live_stream_lock(key):
                 pass
             second_thread_done.set()
 
@@ -146,7 +119,7 @@ class TestVodGenerationLockPruning:
         # この間、エントリは(t1のref_countにより)辞書に残り続けているべき。
         import time as _time
         _time.sleep(0.2)
-        assert key in camera_service._vod_generation_locks, (
+        assert key in camera_service._live_stream_locks, (
             "他スレッドが同一キーを取得待ちの間はエントリを削除してはならない"
         )
 
@@ -155,7 +128,7 @@ class TestVodGenerationLockPruning:
         assert second_thread_done.wait(timeout=5)
         t2.join(timeout=5)
 
-        assert key not in camera_service._vod_generation_locks, (
+        assert key not in camera_service._live_stream_locks, (
             "全ての利用者が使い終わったらエントリは削除されるべき"
         )
 
@@ -170,7 +143,7 @@ class TestVodGenerationLockPruning:
 
         def critical_section():
             nonlocal concurrent_count, max_concurrent
-            with camera_service._vod_generation_lock(key):
+            with camera_service._live_stream_lock(key):
                 with lock_for_counter:
                     concurrent_count += 1
                     max_concurrent = max(max_concurrent, concurrent_count)
@@ -186,7 +159,7 @@ class TestVodGenerationLockPruning:
             t.join(timeout=5)
 
         assert max_concurrent == 1, "同一process_keyに対する排他制御が破られている"
-        assert camera_service._vod_generation_locks.keys() == []
+        assert camera_service._live_stream_locks.keys() == []
 
 
 class TestSetCameraEnabledAtomicWrite:
@@ -342,202 +315,6 @@ class TestStartHlsStreamRemovesStaleOutputs:
         assert camera_service._active_processes["cam1"] is new_proc
 
 
-class TestGenerateRecordPlaylistConcurrency:
-    def test_concurrent_calls_for_same_key_spawn_ffmpeg_only_once(self, tmp_path, monkeypatch):
-        """M-3-4回帰防止: 同一cam_id・日付への同時リクエストでffmpegが
-        二重起動しないこと(check-then-act競合のレース修正)。"""
-        nvr_dir = tmp_path / "nvr"
-        cam_nvr_dir = nvr_dir / "TestCam"
-        cam_nvr_dir.mkdir(parents=True)
-        (cam_nvr_dir / "20260101_100000.mp4").write_bytes(b"x")
-
-        monkeypatch.setattr(config, "NVR_RECORD_DIR", str(nvr_dir), raising=False)
-        monkeypatch.setattr(camera_service, "HLS_VOD_DIR", str(tmp_path / "vod"))
-
-        popen_call_count = {"n": 0}
-        lock_for_playlist = threading.Lock()
-
-        def _fake_popen(cmd, **kwargs):
-            with lock_for_playlist:
-                popen_call_count["n"] += 1
-                # プレイリストファイルの生成を模倣(#562: 実際のffmpegが`-hls_playlist_type vod`で
-                # 正常完走時に書き込む#EXT-X-ENDLISTも含める。無いと2回目の呼び出しが
-                # _playlist_is_completeにより「不完全」と判定され、意図せず再生成されてしまう)
-                playlist_path = cmd[-1]
-                with open(playlist_path, "w") as f:
-                    f.write("#EXTM3U\n#EXT-X-ENDLIST\n")
-            proc = MagicMock()
-            proc.poll.return_value = 0  # 即完了扱い
-            return proc
-
-        cam_conf = {"id": "cam1", "name": "TestCam"}
-
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_fake_popen):
-            results = [None, None]
-
-            def _call(idx):
-                results[idx] = camera_service.generate_record_playlist(cam_conf, "20260101")
-
-            t1 = threading.Thread(target=_call, args=(0,))
-            t2 = threading.Thread(target=_call, args=(1,))
-            t1.start()
-            t2.start()
-            t1.join()
-            t2.join()
-
-        assert popen_call_count["n"] == 1
-        assert all(r is not None for r in results)
-
-
-class TestGenerateRecordPlaylistPastDateCacheCompleteness:
-    """#562回帰防止: 過去日付キャッシュは#EXT-X-ENDLISTの有無で完全性を確認してから
-    返すこと。シャットダウン時のterminate等で生成途中のまま終わったプレイリストを
-    完成品として恒久的に返し続けない。"""
-
-    def _setup(self, tmp_path, monkeypatch):
-        nvr_dir = tmp_path / "nvr"
-        cam_nvr_dir = nvr_dir / "TestCam"
-        cam_nvr_dir.mkdir(parents=True)
-        (cam_nvr_dir / "20260101_100000.mp4").write_bytes(b"x")
-
-        monkeypatch.setattr(config, "NVR_RECORD_DIR", str(nvr_dir), raising=False)
-        vod_dir = tmp_path / "vod"
-        monkeypatch.setattr(camera_service, "HLS_VOD_DIR", str(vod_dir))
-        return vod_dir
-
-    def test_incomplete_past_playlist_is_not_served_from_cache(self, tmp_path, monkeypatch):
-        vod_dir = self._setup(tmp_path, monkeypatch)
-        cam_dir = vod_dir / "cam1"
-        cam_dir.mkdir(parents=True)
-        playlist_path = cam_dir / "record_20260101.m3u8"
-        # ENDLISTを持たない = ffmpegがterminate等で生成途中のまま終わった状態を模倣
-        playlist_path.write_text("#EXTM3U\n#EXT-X-VERSION:3\n")
-
-        popen_call_count = {"n": 0}
-
-        def _fake_popen(cmd, **kwargs):
-            popen_call_count["n"] += 1
-            with open(cmd[-1], "w") as f:
-                f.write("#EXTM3U\n#EXT-X-ENDLIST\n")
-            proc = MagicMock()
-            proc.poll.return_value = 0
-            return proc
-
-        cam_conf = {"id": "cam1", "name": "TestCam"}
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_fake_popen):
-            result = camera_service.generate_record_playlist(cam_conf, "20260101")
-
-        assert result == str(playlist_path)
-        assert popen_call_count["n"] == 1, "不完全なキャッシュはそのまま返さず再生成すること"
-
-    def test_complete_past_playlist_is_served_from_cache(self, tmp_path, monkeypatch):
-        vod_dir = self._setup(tmp_path, monkeypatch)
-        cam_dir = vod_dir / "cam1"
-        cam_dir.mkdir(parents=True)
-        playlist_path = cam_dir / "record_20260101.m3u8"
-        playlist_path.write_text("#EXTM3U\n#EXT-X-ENDLIST\n")
-
-        cam_conf = {"id": "cam1", "name": "TestCam"}
-        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
-            result = camera_service.generate_record_playlist(cam_conf, "20260101")
-
-        assert result == str(playlist_path)
-        mock_popen.assert_not_called()
-
-
-
-class TestGenerateRecordPlaylistBasics:
-    """Issue #954: `_generate_record_playlist_locked` を分割する前に、未カバーだった
-    早期リターン・実行中の待機・ffconcat の duration 計算の挙動を固定する。"""
-
-    def _setup(self, tmp_path, monkeypatch, filenames):
-        nvr_dir = tmp_path / "nvr"
-        cam_nvr_dir = nvr_dir / "TestCam"
-        cam_nvr_dir.mkdir(parents=True)
-        for name in filenames:
-            (cam_nvr_dir / name).write_bytes(b"x")
-        monkeypatch.setattr(config, "NVR_RECORD_DIR", str(nvr_dir), raising=False)
-        vod_dir = tmp_path / "vod"
-        monkeypatch.setattr(camera_service, "HLS_VOD_DIR", str(vod_dir))
-        return cam_nvr_dir, vod_dir
-
-    @staticmethod
-    def _fake_popen(cmd, **kwargs):
-        with open(cmd[-1], "w") as f:
-            f.write("#EXTM3U\n#EXT-X-ENDLIST\n")
-        proc = MagicMock()
-        proc.poll.return_value = 0
-        return proc
-
-    def test_missing_record_dir_returns_none(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(config, "NVR_RECORD_DIR", str(tmp_path / "nowhere"), raising=False)
-        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
-            assert camera_service.generate_record_playlist({"id": "cam1", "name": "TestCam"}, "20260101") is None
-        mock_popen.assert_not_called()
-
-    def test_no_recordings_for_date_returns_none(self, tmp_path, monkeypatch):
-        self._setup(tmp_path, monkeypatch, ["20260102_100000.mp4"])
-        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
-            assert camera_service.generate_record_playlist({"id": "cam1", "name": "TestCam"}, "20260101") is None
-        mock_popen.assert_not_called()
-
-    def test_concat_durations_follow_real_gaps_and_fall_back_for_implausible_ones(self, tmp_path, monkeypatch):
-        cam_nvr_dir, vod_dir = self._setup(
-            tmp_path, monkeypatch,
-            # 10:00→10:05 は5分の実時間差。10:05→23:30 は上限を超えるため既定値。末尾も既定値。
-            ["20260101_100000.mp4", "20260101_100500.mp4", "20260101_233000.mp4"],
-        )
-        assert 13 * 3600 > camera_service.MAX_PLAUSIBLE_SEGMENT_GAP_SECONDS
-        with patch.object(camera_service.subprocess, "Popen", side_effect=self._fake_popen) as mock_popen:
-            result = camera_service.generate_record_playlist({"id": "cam1", "name": "TestCam"}, "20260101")
-
-        assert result == str(vod_dir / "cam1" / "record_20260101.m3u8")
-        concat = (vod_dir / "cam1" / "concat_20260101.txt").read_text(encoding="utf-8")
-        default = camera_service.DEFAULT_SEGMENT_DURATION_SECONDS
-        assert concat == (
-            "ffconcat version 1.0\n"
-            f"file '{cam_nvr_dir / '20260101_100000.mp4'}'\n"
-            "duration 300.0\n"
-            f"file '{cam_nvr_dir / '20260101_100500.mp4'}'\n"
-            f"duration {default}\n"
-            f"file '{cam_nvr_dir / '20260101_233000.mp4'}'\n"
-            f"duration {default}\n"
-        )
-        cmd = mock_popen.call_args.args[0]
-        nice_at = cmd.index("nice")  # Issue #1088: ionice が使える環境では先頭に `ionice -c3` が付く
-        assert cmd[nice_at:nice_at + 3] == ["nice", "-n", str(camera_service.FFMPEG_NICE_LEVEL)]
-        assert cmd[cmd.index("-i") + 1] == str(vod_dir / "cam1" / "concat_20260101.txt")
-
-    def test_waits_for_running_generation_instead_of_spawning_again(self, tmp_path, monkeypatch):
-        _, vod_dir = self._setup(tmp_path, monkeypatch, ["20260101_100000.mp4"])
-        running = MagicMock()
-        running.poll.return_value = None
-        camera_service._active_vod_processes["cam1_20260101"] = running
-        playlist = vod_dir / "cam1" / "record_20260101.m3u8"
-        playlist.parent.mkdir(parents=True)
-        playlist.write_text("#EXTM3U\n")
-
-        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
-            result = camera_service.generate_record_playlist({"id": "cam1", "name": "TestCam"}, "20260101")
-
-        assert result == str(playlist)
-        mock_popen.assert_not_called()
-
-    def test_running_generation_without_playlist_gives_up_after_waiting(self, tmp_path, monkeypatch):
-        self._setup(tmp_path, monkeypatch, ["20260101_100000.mp4"])
-        running = MagicMock()
-        running.poll.return_value = None
-        camera_service._active_vod_processes["cam1_20260101"] = running
-        sleeps = []
-        monkeypatch.setattr(camera_service.time, "sleep", sleeps.append)
-
-        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
-            result = camera_service.generate_record_playlist({"id": "cam1", "name": "TestCam"}, "20260101")
-
-        assert result is None
-        assert len(sleeps) == camera_service.PLAYLIST_WAIT_MAX_ATTEMPTS
-        mock_popen.assert_not_called()
-
 class TestStartHlsStreamRestartsStalledFfmpeg:
     """#882: プロセスは生きているのにプレイリストが更新されないffmpeg(ハング)は再起動する。"""
 
@@ -589,525 +366,3 @@ class TestStartHlsStreamRestartsStalledFfmpeg:
             camera_service.start_hls_stream({"id": "cam1", "name": "TestCam"})
         hung.kill.assert_not_called()
         mock_popen.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# Issue #1088: 過去日の録画再生で3台分のVOD生成が同時に走り、SDカードへ約70GBを
-# 書き込んでDB保存失敗・API無応答を誘発した件の短期対策
-# (空き容量チェック・全カメラで同時1本・ionice/readrate・終了ログ)
-# ---------------------------------------------------------------------------
-
-_GB = 1024 ** 3
-
-
-def _setup_recordings(tmp_path, monkeypatch, cams=("cam1",), date="20260101", size=1000):
-    """cam_id ごとに NVR 録画(mp4 1本、size バイト)を用意し、VOD 出力先を tmp_path に向ける。"""
-    nvr_dir = tmp_path / "nvr"
-    for cam_id in cams:
-        d = nvr_dir / cam_id
-        d.mkdir(parents=True)
-        (d / f"{date}_100000.mp4").write_bytes(b"x" * size)
-    monkeypatch.setattr(config, "NVR_RECORD_DIR", str(nvr_dir), raising=False)
-    vod_dir = tmp_path / "vod"
-    monkeypatch.setattr(camera_service, "HLS_VOD_DIR", str(vod_dir))
-    return vod_dir
-
-
-def _cam(cam_id):
-    return {"id": cam_id, "name": cam_id}
-
-
-def _running_popen_factory(calls):
-    """実行中のまま終わらない ffmpeg を模倣する Popen。起動時にプレイリストを書く。"""
-    def _popen(cmd, **kwargs):
-        with open(cmd[-1], "w") as f:
-            f.write("#EXTM3U\n")
-        proc = MagicMock()
-        proc.poll.return_value = None
-        calls.append((cmd, kwargs, proc))
-        return proc
-    return _popen
-
-
-class TestVodDiskSpaceGuard:
-    """空き容量が「想定出力量 + 下限」に満たなければ生成を断ること。"""
-
-    def _disk(self, monkeypatch, free_bytes):
-        usage = MagicMock(free=free_bytes)
-        monkeypatch.setattr(camera_service.shutil, "disk_usage", lambda path: usage)
-
-    def test_refuses_when_free_space_minus_estimate_is_below_threshold(self, tmp_path, monkeypatch):
-        _setup_recordings(tmp_path, monkeypatch, size=1000)
-        monkeypatch.setattr(config, "HLS_VOD_MIN_FREE_GB", 30.0)
-        # 想定出力 = 1000 × 1.1 = 1100 バイト。空きは下限+1050 なので、元サイズ(1000)は
-        # 収まるが係数込みの想定出力は収まらない → 断る
-        self._disk(monkeypatch, 30 * _GB + 1050)
-        mock_logger = MagicMock()
-        monkeypatch.setattr(camera_service, "logger", mock_logger)
-
-        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
-            with pytest.raises(camera_service.VodGenerationUnavailable) as exc:
-                camera_service.generate_record_playlist(_cam("cam1"), "20260101")
-
-        mock_popen.assert_not_called()
-        assert "空き容量が不足" in exc.value.message
-        assert exc.value.retry_after is None
-        warned = " ".join(str(c.args[0]) for c in mock_logger.warning.call_args_list)
-        assert "空き容量が不足" in warned and "下限 30GB" in warned
-        assert not (tmp_path / "vod" / "cam1" / "concat_20260101.txt").exists(), "断ったのに concat を書いている"
-
-    def test_generates_when_enough_free_space(self, tmp_path, monkeypatch):
-        vod_dir = _setup_recordings(tmp_path, monkeypatch, size=1000)
-        monkeypatch.setattr(config, "HLS_VOD_MIN_FREE_GB", 30.0)
-        self._disk(monkeypatch, 30 * _GB + 2000)
-        monkeypatch.setattr(camera_service, "_start_vod_watcher", lambda *a, **k: None)
-        calls = []
-
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_running_popen_factory(calls)):
-            result = camera_service.generate_record_playlist(_cam("cam1"), "20260101")
-
-        assert result == str(vod_dir / "cam1" / "record_20260101.m3u8")
-        assert len(calls) == 1
-
-    def test_refuses_when_free_space_cannot_be_read(self, tmp_path, monkeypatch):
-        _setup_recordings(tmp_path, monkeypatch)
-
-        def _boom(path):
-            raise OSError("stat failed")
-        monkeypatch.setattr(camera_service.shutil, "disk_usage", _boom)
-
-        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
-            with pytest.raises(camera_service.VodGenerationUnavailable):
-                camera_service.generate_record_playlist(_cam("cam1"), "20260101")
-        mock_popen.assert_not_called()
-
-    def test_complete_past_cache_is_served_even_when_disk_is_full(self, tmp_path, monkeypatch):
-        """生成済みの完全なキャッシュを返すだけなら書き込みは発生しないので、容量不足でも断らない。"""
-        vod_dir = _setup_recordings(tmp_path, monkeypatch)
-        monkeypatch.setattr(config, "HLS_VOD_MIN_FREE_GB", 30.0)
-        self._disk(monkeypatch, 0)
-        playlist = vod_dir / "cam1" / "record_20260101.m3u8"
-        playlist.parent.mkdir(parents=True)
-        playlist.write_text("#EXTM3U\n#EXT-X-ENDLIST\n")
-
-        assert camera_service.generate_record_playlist(_cam("cam1"), "20260101") == str(playlist)
-
-
-class TestVodSingleGenerationSlot:
-    """VOD生成のffmpegは全カメラ・全日付で同時1本。他は順番待ちに入り、終了時に順に起動される。"""
-
-    @pytest.fixture(autouse=True)
-    def _no_watcher(self, monkeypatch):
-        # 監視スレッドは TestVodProcessExitLogging で直接検証する。ここでは終了の契機を
-        # テストから明示的に起こすため起動しない。
-        monkeypatch.setattr(camera_service, "_start_vod_watcher", lambda *a, **k: None)
-
-    def test_three_cameras_at_once_spawn_only_one_ffmpeg(self, tmp_path, monkeypatch):
-        cams = ("cam1", "cam2", "cam3")
-        _setup_recordings(tmp_path, monkeypatch, cams=cams)
-        calls = []
-        outcomes = {}
-        barrier = threading.Barrier(len(cams))
-
-        def _call(cam_id):
-            barrier.wait()
-            try:
-                outcomes[cam_id] = camera_service.generate_record_playlist(_cam(cam_id), "20260101")
-            except camera_service.VodGenerationUnavailable as e:
-                outcomes[cam_id] = e
-
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_running_popen_factory(calls)):
-            threads = [threading.Thread(target=_call, args=(c,)) for c in cams]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
-
-        assert len(calls) == 1, "VOD生成のffmpegが同時に2本以上起動された"
-        started = [c for c, o in outcomes.items() if isinstance(o, str)]
-        queued = [c for c, o in outcomes.items() if isinstance(o, camera_service.VodGenerationUnavailable)]
-        assert len(started) == 1 and len(queued) == 2
-        assert all(outcomes[c].retry_after == camera_service.VOD_QUEUED_RETRY_AFTER_SEC for c in queued)
-        assert sorted(camera_service._vod_queue) == sorted(f"{c}_20260101" for c in queued)
-
-    def test_repeated_request_while_queued_keeps_single_entry_and_reports_position(self, tmp_path, monkeypatch):
-        _setup_recordings(tmp_path, monkeypatch, cams=("cam1", "cam2", "cam3"))
-        calls = []
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_running_popen_factory(calls)):
-            camera_service.generate_record_playlist(_cam("cam1"), "20260101")
-            for cam_id in ("cam2", "cam3", "cam3"):
-                with pytest.raises(camera_service.VodGenerationUnavailable) as exc:
-                    camera_service.generate_record_playlist(_cam(cam_id), "20260101")
-
-        assert len(calls) == 1
-        assert list(camera_service._vod_queue) == ["cam2_20260101", "cam3_20260101"]
-        assert "2番目" in exc.value.message
-
-    def test_queue_is_bounded(self, tmp_path, monkeypatch):
-        _setup_recordings(tmp_path, monkeypatch, cams=("cam1", "cam2"))
-        monkeypatch.setattr(camera_service, "VOD_QUEUE_MAX", 1)
-        calls = []
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_running_popen_factory(calls)):
-            camera_service.generate_record_playlist(_cam("cam1"), "20260101")
-            with pytest.raises(camera_service.VodGenerationUnavailable):
-                camera_service.generate_record_playlist(_cam("cam2"), "20260101")  # 順番待ち1件目
-            (tmp_path / "nvr" / "cam1" / "20260102_100000.mp4").write_bytes(b"x")
-            with pytest.raises(camera_service.VodGenerationUnavailable) as exc:
-                camera_service.generate_record_playlist(_cam("cam1"), "20260102")  # 上限超過
-        assert "混雑" in exc.value.message
-        assert list(camera_service._vod_queue) == ["cam2_20260101"]
-
-    def test_next_queued_job_starts_in_fifo_order_when_running_one_exits(self, tmp_path, monkeypatch):
-        _setup_recordings(tmp_path, monkeypatch, cams=("cam1", "cam2", "cam3"))
-        calls = []
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_running_popen_factory(calls)):
-            camera_service.generate_record_playlist(_cam("cam1"), "20260101")
-            for cam_id in ("cam2", "cam3"):
-                with pytest.raises(camera_service.VodGenerationUnavailable):
-                    camera_service.generate_record_playlist(_cam(cam_id), "20260101")
-
-            first = calls[0][2]
-            first.poll.return_value = 0
-            camera_service._on_vod_process_exit("cam1_20260101", first)
-            assert len(calls) == 2 and "cam2" in calls[1][0][-1], "先に並んだ cam2 から起動すること"
-            assert "cam1_20260101" not in camera_service._active_vod_processes
-            assert list(camera_service._vod_queue) == ["cam3_20260101"]
-
-            # 実行中の cam2 があるうちは、cam3 の要求が来ても起動しない
-            with pytest.raises(camera_service.VodGenerationUnavailable):
-                camera_service.generate_record_playlist(_cam("cam3"), "20260101")
-            assert len(calls) == 2
-
-            second = calls[1][2]
-            second.poll.return_value = 0
-            camera_service._on_vod_process_exit("cam2_20260101", second)
-            assert len(calls) == 3 and "cam3" in calls[2][0][-1]
-            assert not camera_service._vod_queue
-
-    def test_queued_job_is_dropped_if_disk_became_full_and_next_one_tried(self, tmp_path, monkeypatch):
-        _setup_recordings(tmp_path, monkeypatch, cams=("cam1", "cam2", "cam3"))
-        calls = []
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_running_popen_factory(calls)):
-            camera_service.generate_record_playlist(_cam("cam1"), "20260101")
-            for cam_id in ("cam2", "cam3"):
-                with pytest.raises(camera_service.VodGenerationUnavailable):
-                    camera_service.generate_record_playlist(_cam(cam_id), "20260101")
-
-            real_check = camera_service._check_vod_disk_space
-
-            def _check(cam_dir, mp4_files):
-                if cam_dir.endswith("cam2"):
-                    raise camera_service.VodGenerationUnavailable("空き容量が不足しているため")
-                return real_check(cam_dir, mp4_files)
-            monkeypatch.setattr(camera_service, "_check_vod_disk_space", _check)
-
-            first = calls[0][2]
-            first.poll.return_value = 0
-            camera_service._on_vod_process_exit("cam1_20260101", first)
-
-        assert len(calls) == 2 and "cam3" in calls[1][0][-1]
-        assert not camera_service._vod_queue
-
-    def test_stop_all_processes_clears_queue(self, tmp_path, monkeypatch):
-        _setup_recordings(tmp_path, monkeypatch, cams=("cam1", "cam2"))
-        calls = []
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_running_popen_factory(calls)):
-            camera_service.generate_record_playlist(_cam("cam1"), "20260101")
-            with pytest.raises(camera_service.VodGenerationUnavailable):
-                camera_service.generate_record_playlist(_cam("cam2"), "20260101")
-            camera_service.stop_all_processes(timeout=0)
-        assert not camera_service._vod_queue
-        calls[0][2].terminate.assert_called_once()
-
-
-class TestVodFfmpegCommand:
-    """ffmpeg に ionice -c3 と -readrate が付き、stderr を捨てずに受け取ること。"""
-
-    def test_ionice_idle_class_is_prefixed_when_available(self, monkeypatch):
-        monkeypatch.setattr(camera_service.shutil, "which", lambda name: "/usr/bin/ionice")
-        cmd = camera_service._build_vod_ffmpeg_cmd("/c.txt", "/p.m3u8")
-        assert cmd[:5] == ["ionice", "-c3", "nice", "-n", str(camera_service.FFMPEG_NICE_LEVEL)]
-        assert cmd[-1] == "/p.m3u8"
-
-    def test_ionice_is_omitted_when_unavailable(self, monkeypatch):
-        monkeypatch.setattr(camera_service.shutil, "which", lambda name: None)
-        cmd = camera_service._build_vod_ffmpeg_cmd("/c.txt", "/p.m3u8")
-        assert cmd[0] == "nice" and "ionice" not in cmd
-
-    def test_readrate_is_an_input_option_from_config(self, monkeypatch):
-        monkeypatch.setattr(config, "HLS_VOD_READRATE", 10.0)
-        cmd = camera_service._build_vod_ffmpeg_cmd("/c.txt", "/p.m3u8")
-        assert cmd[cmd.index("-readrate") + 1] == "10"
-        assert cmd.index("-readrate") < cmd.index("-i"), "-readrate は入力オプションとして -i より前に置く"
-
-    def test_readrate_zero_disables_it(self, monkeypatch):
-        monkeypatch.setattr(config, "HLS_VOD_READRATE", 0.0)
-        assert "-readrate" not in camera_service._build_vod_ffmpeg_cmd("/c.txt", "/p.m3u8")
-
-    def test_ffmpeg_stderr_is_captured_not_discarded(self, tmp_path, monkeypatch):
-        _setup_recordings(tmp_path, monkeypatch)
-        monkeypatch.setattr(camera_service, "_start_vod_watcher", lambda *a, **k: None)
-        calls = []
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_running_popen_factory(calls)):
-            camera_service.generate_record_playlist(_cam("cam1"), "20260101")
-        assert calls[0][1]["stderr"] is camera_service.subprocess.PIPE
-
-
-class TestVodProcessExitLogging:
-    """ffmpeg の終了コード・所要時間・出力サイズ・stderr 末尾がログに出ること。"""
-
-    def _run(self, tmp_path, monkeypatch, returncode, stderr_lines):
-        from freezegun import freeze_time
-
-        cam_dir = tmp_path / "vod" / "cam1"
-        cam_dir.mkdir(parents=True)
-        (cam_dir / "record_20260101.m3u8").write_bytes(b"m" * 100)
-        (cam_dir / "record_202601010.ts").write_bytes(b"t" * 2 * 1024 ** 2)
-        (cam_dir / "record_202601011.ts").write_bytes(b"t" * 3 * 1024 ** 2)
-        (cam_dir / "concat_20260101.txt").write_bytes(b"c" * 10 ** 6)  # 出力サイズには数えない
-        mock_logger = MagicMock()
-        monkeypatch.setattr(camera_service, "logger", mock_logger)
-        monkeypatch.setattr(camera_service, "_BYTES_PER_GB", 1024 ** 2)  # MB 単位で表示させて値を検証する
-        exits = []
-        monkeypatch.setattr(camera_service, "_on_vod_process_exit", lambda key, proc: exits.append((key, proc)))
-
-        with freeze_time("2026-11-02 19:46:05", tz_offset=9) as frozen:
-            started_at = camera_service.time.monotonic()
-            proc = MagicMock()
-            proc.stderr = iter(stderr_lines)
-
-            def _wait():
-                frozen.tick(2820)  # 47分かかった体
-                return returncode
-            proc.wait.side_effect = _wait
-            camera_service._watch_vod_process(proc, "玄関カメラ", "20260101", "cam1_20260101", str(cam_dir), started_at)
-        return mock_logger, exits, proc
-
-    def test_success_is_logged_with_exit_code_duration_and_size(self, tmp_path, monkeypatch):
-        mock_logger, exits, proc = self._run(tmp_path, monkeypatch, 0, [])
-        msg = mock_logger.info.call_args.args[0]
-        assert "[玄関カメラ] 20260101 の録画プレイリスト生成が完了" in msg
-        assert "終了コード 0" in msg and "所要 2820秒" in msg
-        assert "出力 5.00GB" in msg  # .ts 2MB + 3MB + m3u8 100B(_BYTES_PER_GB を MB に差し替え済み)
-        mock_logger.warning.assert_not_called()
-        assert exits == [("cam1_20260101", proc)], "終了時に次の順番待ちの起動処理を呼ぶこと"
-
-    def test_failure_is_logged_as_warning_with_stderr_tail(self, tmp_path, monkeypatch):
-        # 空行は数えない・デコードできないバイトは置換する
-        lines = [f"line {i}\n".encode() for i in range(30)] + [b"\n", b"bad \xff byte\n"]
-        mock_logger, exits, _ = self._run(tmp_path, monkeypatch, 1, lines)
-        msg = mock_logger.warning.call_args.args[0]
-        assert "異常終了" in msg and "終了コード 1" in msg and "所要 2820秒" in msg
-        tail = msg.split("ffmpeg stderr 末尾:\n", 1)[1].splitlines()
-        assert len(tail) == camera_service.VOD_STDERR_TAIL_LINES
-        assert tail[0] == "line 11" and tail[-1] == "bad � byte"
-        assert len(exits) == 1
-
-    def test_slot_is_released_even_if_waiting_fails(self, tmp_path, monkeypatch):
-        cam_dir = tmp_path / "vod" / "cam1"
-        cam_dir.mkdir(parents=True)
-        monkeypatch.setattr(camera_service, "logger", MagicMock())
-        exits = []
-        monkeypatch.setattr(camera_service, "_on_vod_process_exit", lambda key, proc: exits.append(key))
-        proc = MagicMock()
-        proc.stderr = None
-        proc.wait.side_effect = RuntimeError("boom")
-        camera_service._watch_vod_process(proc, "cam1", "20260101", "cam1_20260101", str(cam_dir), time.monotonic())
-        assert exits == ["cam1_20260101"]
-
-    def test_real_watcher_thread_releases_slot_and_starts_next(self, tmp_path, monkeypatch):
-        """監視スレッドを実際に動かし、1本目の終了で順番待ちの2本目が自動起動されること。"""
-        _setup_recordings(tmp_path, monkeypatch, cams=("cam1", "cam2"))
-        monkeypatch.setattr(camera_service, "logger", MagicMock())
-        release = threading.Event()
-        calls = []
-
-        def _popen(cmd, **kwargs):
-            with open(cmd[-1], "w") as f:
-                f.write("#EXTM3U\n")
-            proc = MagicMock()
-            proc.stderr = iter([])
-            state = {"rc": None}
-
-            def _wait():
-                release.wait(5)
-                state["rc"] = 0
-                return 0
-            proc.wait.side_effect = _wait
-            proc.poll.side_effect = lambda: state["rc"]
-            calls.append(proc)
-            return proc
-
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_popen):
-            camera_service.generate_record_playlist(_cam("cam1"), "20260101")
-            with pytest.raises(camera_service.VodGenerationUnavailable):
-                camera_service.generate_record_playlist(_cam("cam2"), "20260101")
-            assert len(calls) == 1
-            release.set()
-            deadline = time.time() + 5
-            while len(calls) < 2 and time.time() < deadline:
-                time.sleep(0.01)
-            assert len(calls) == 2
-
-
-class TestVodCacheSizeLimit:
-    """Issue #1088: VODキャッシュ全体に容量上限を設け、超えるなら古い日付から消す。"""
-
-    @pytest.fixture(autouse=True)
-    def _no_watcher(self, monkeypatch):
-        monkeypatch.setattr(camera_service, "_start_vod_watcher", lambda *a, **k: None)
-
-    @staticmethod
-    def _limit_bytes(monkeypatch, limit_bytes):
-        monkeypatch.setattr(config, "HLS_VOD_CACHE_MAX_GB", limit_bytes / _GB)
-
-    @staticmethod
-    def _cache(vod_dir, cam_id, date, size, mtime):
-        """カメラ×日付のキャッシュ(プレイリスト・セグメント2本・concat)を作る。合計 size バイト。"""
-        d = vod_dir / cam_id
-        d.mkdir(parents=True, exist_ok=True)
-        files = [
-            (d / f"record_{date}.m3u8", b"#EXTM3U\n#EXT-X-ENDLIST\n"),
-            (d / f"concat_{date}.txt", b"ffconcat version 1.0\n"),
-        ]
-        rest = size - sum(len(b) for _, b in files)
-        files += [(d / f"record_{date}0.ts", b"x" * (rest // 2)),
-                  (d / f"record_{date}1.ts", b"x" * (rest - rest // 2))]
-        for path, data in files:
-            path.write_bytes(data)
-            os.utime(path, (mtime, mtime))
-        return [path for path, _ in files]
-
-    def test_evicts_oldest_caches_until_new_output_fits(self, tmp_path, monkeypatch):
-        vod_dir = _setup_recordings(tmp_path, monkeypatch, cams=("cam1",), date="20260105", size=1000)
-        oldest = self._cache(vod_dir, "cam2", "20260101", 1000, mtime=1_000)
-        middle = self._cache(vod_dir, "cam3", "20260102", 1000, mtime=2_000)
-        newest = self._cache(vod_dir, "cam2", "20260103", 1000, mtime=3_000)
-        # 既存 3000 + 想定出力 1100 = 4100。上限 2200 なら古い2件を消して 1000 + 1100 に収める
-        self._limit_bytes(monkeypatch, 2200)
-        calls = []
-
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_running_popen_factory(calls)):
-            result = camera_service.generate_record_playlist(_cam("cam1"), "20260105")
-
-        assert result == str(vod_dir / "cam1" / "record_20260105.m3u8")
-        assert len(calls) == 1
-        assert not any(p.exists() for p in oldest + middle)
-        assert all(p.exists() for p in newest)
-
-    def test_stops_evicting_as_soon_as_it_fits(self, tmp_path, monkeypatch):
-        vod_dir = _setup_recordings(tmp_path, monkeypatch, date="20260105", size=1000)
-        oldest = self._cache(vod_dir, "cam2", "20260101", 1000, mtime=1_000)
-        newer = self._cache(vod_dir, "cam2", "20260102", 1000, mtime=2_000)
-        self._limit_bytes(monkeypatch, 2100)  # 1000 + 1100 にちょうど収まる
-
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_running_popen_factory([])):
-            camera_service.generate_record_playlist(_cam("cam1"), "20260105")
-
-        assert not any(p.exists() for p in oldest)
-        assert all(p.exists() for p in newer)
-
-    def test_no_eviction_when_within_limit(self, tmp_path, monkeypatch):
-        vod_dir = _setup_recordings(tmp_path, monkeypatch, date="20260105", size=1000)
-        cached = self._cache(vod_dir, "cam2", "20260101", 1000, mtime=1_000)
-        self._limit_bytes(monkeypatch, 10_000)
-
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_running_popen_factory([])):
-            camera_service.generate_record_playlist(_cam("cam1"), "20260105")
-
-        assert all(p.exists() for p in cached)
-
-    def test_target_and_running_generation_are_neither_counted_as_victims_nor_deleted(self, tmp_path, monkeypatch):
-        vod_dir = _setup_recordings(tmp_path, monkeypatch, date="20260105", size=1000)
-        # 今回の日付の古い(不完全な)出力: 上書きされるので数えず、消さない
-        target_old = self._cache(vod_dir, "cam1", "20260105", 5000, mtime=500)
-        (vod_dir / "cam1" / "record_20260105.m3u8").write_text("#EXTM3U\n")  # 不完全
-        running = self._cache(vod_dir, "cam2", "20260101", 1000, mtime=1_000)
-        victim = self._cache(vod_dir, "cam3", "20260102", 1000, mtime=2_000)
-        # 実行中の生成は「数えるが消さない」。キューを経由せず、上限判定だけを直接確かめる
-        proc = MagicMock()
-        proc.poll.return_value = None
-        camera_service._active_vod_processes["cam2_20260101"] = proc
-        self._limit_bytes(monkeypatch, 2100)
-
-        camera_service._enforce_vod_cache_limit("cam1_20260105", 1100)
-
-        assert all(p.exists() for p in running)
-        assert not any(p.exists() for p in victim)
-        assert all(p.exists() for p in target_old[1:])
-
-    def test_refuses_without_deleting_when_it_cannot_fit(self, tmp_path, monkeypatch):
-        vod_dir = _setup_recordings(tmp_path, monkeypatch, date="20260105", size=1000)
-        running = self._cache(vod_dir, "cam2", "20260101", 2000, mtime=1_000)
-        evictable = self._cache(vod_dir, "cam3", "20260102", 1000, mtime=2_000)
-        proc = MagicMock()
-        proc.poll.return_value = None
-        camera_service._active_vod_processes["cam2_20260101"] = proc
-        self._limit_bytes(monkeypatch, 2500)  # 生成中の 2000 + 1100 は、cam3 を消しても収まらない
-
-        with pytest.raises(camera_service.VodGenerationUnavailable) as exc:
-            camera_service._enforce_vod_cache_limit("cam1_20260105", 1100)
-
-        assert "上限に収まらない" in exc.value.message
-        assert all(p.exists() for p in running + evictable), "収まらないのに消している"
-
-    def test_refuses_when_estimate_alone_exceeds_limit(self, tmp_path, monkeypatch):
-        vod_dir = _setup_recordings(tmp_path, monkeypatch, date="20260105", size=1000)
-        cached = self._cache(vod_dir, "cam2", "20260101", 1000, mtime=1_000)
-        self._limit_bytes(monkeypatch, 1000)  # 想定出力 1100 > 上限
-        mock_logger = MagicMock()
-        monkeypatch.setattr(camera_service, "logger", mock_logger)
-
-        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
-            with pytest.raises(camera_service.VodGenerationUnavailable) as exc:
-                camera_service.generate_record_playlist(_cam("cam1"), "20260105")
-
-        mock_popen.assert_not_called()
-        assert "上限を超える" in exc.value.message
-        assert all(p.exists() for p in cached)
-        assert not (vod_dir / "cam1" / "concat_20260105.txt").exists()
-        warned = " ".join(str(c.args[0]) for c in mock_logger.warning.call_args_list)
-        assert "上限" in warned
-
-    def test_zero_or_negative_limit_disables_it(self, tmp_path, monkeypatch):
-        vod_dir = _setup_recordings(tmp_path, monkeypatch, date="20260105", size=1000)
-        cached = self._cache(vod_dir, "cam2", "20260101", 10_000, mtime=1_000)
-        for value in (0.0, -1.0):
-            monkeypatch.setattr(config, "HLS_VOD_CACHE_MAX_GB", value)
-            camera_service._enforce_vod_cache_limit("cam1_20260105", 10 * _GB)
-        assert all(p.exists() for p in cached)
-
-    def test_unrelated_files_are_ignored(self, tmp_path, monkeypatch):
-        vod_dir = _setup_recordings(tmp_path, monkeypatch, date="20260105", size=1000)
-        other = vod_dir / "cam2" / "ffmpeg.log"
-        other.parent.mkdir(parents=True)
-        other.write_bytes(b"x" * 5000)
-        self._limit_bytes(monkeypatch, 2000)
-
-        camera_service._enforce_vod_cache_limit("cam1_20260105", 1100)
-
-        assert other.exists()
-        assert camera_service._vod_cache_entries() == {}
-
-    def test_queued_job_dropped_when_it_no_longer_fits_and_next_one_starts(self, tmp_path, monkeypatch):
-        """順番待ちからの起動も上限の確認を通り、収まらなければ捨てて次へ進む。"""
-        vod_dir = _setup_recordings(tmp_path, monkeypatch, cams=("cam1", "cam2", "cam3"),
-                                    date="20260105", size=1000)
-        (tmp_path / "nvr" / "cam2" / "20260105_110000.mp4").write_bytes(b"x" * 5000)  # cam2 は想定 6600
-        self._limit_bytes(monkeypatch, 3000)
-        calls = []
-
-        with patch.object(camera_service.subprocess, "Popen", side_effect=_running_popen_factory(calls)):
-            camera_service.generate_record_playlist(_cam("cam1"), "20260105")
-            for cam_id in ("cam2", "cam3"):
-                with pytest.raises(camera_service.VodGenerationUnavailable):
-                    camera_service.generate_record_playlist(_cam(cam_id), "20260105")
-            first_proc = calls[0][2]
-            first_proc.poll.return_value = 0
-            camera_service._on_vod_process_exit("cam1_20260105", first_proc)
-
-        assert [c[0][-1] for c in calls] == [
-            str(vod_dir / "cam1" / "record_20260105.m3u8"),
-            str(vod_dir / "cam3" / "record_20260105.m3u8"),
-        ]
-        assert not camera_service._vod_queue

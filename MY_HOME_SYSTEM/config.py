@@ -536,22 +536,12 @@ TIMELAPSE_MAX_FILE_SIZE_MB: int = 22
 # ==========================================
 # NVR録画・カメラスナップショットの保持日数（これを超えたファイルはnas_monitor.pyが自動削除）
 RECORDING_RETENTION_DAYS: int = _get_int_env("RECORDING_RETENTION_DAYS", 30)
-# #359: 録画VODのHLSセグメントキャッシュ(BASE_DIR/data/hls_streams/vod)の保持日数
+# #359: 録画VODのキャッシュ(BASE_DIR/data/hls_streams/vod)の保持日数。
+# Issue #1091 以降、ここに置くのは録画索引(index_<日付>.json、1台1日あたり数十〜数百KB)だけで、
+# 旧方式(ffmpeg による HLS(.ts) 化)の残りもこの保持期間で消える。
+# (Issue #1088 で入れた HLS_VOD_MIN_FREE_GB / HLS_VOD_READRATE / HLS_VOD_CACHE_MAX_GB は、
+#  SD カードへ大量に書き込む生成処理そのものを廃止したため削除した)
 HLS_VOD_RETENTION_DAYS: int = _get_int_env("HLS_VOD_RETENTION_DAYS", 3)
-# Issue #1088: 録画VOD生成の前に確認する、ローカル(SDカード)の空き容量の下限(GB)。
-# 「空き容量 − 想定出力量(元MP4の合計サイズ×係数)」がこれを下回るなら生成を断る。
-# 1日分で約70GB書き込んだ実績があり、SQLite・ログと同じFSを使い切らないための保護。
-HLS_VOD_MIN_FREE_GB: float = _get_float_env("HLS_VOD_MIN_FREE_GB", 30.0)
-# Issue #1088: 録画VOD生成の ffmpeg が入力を読む速さの上限(実時間の何倍速か。`-readrate`)。
-# 書き込み帯域をこの倍率×録画ビットレートに抑え、SDカードのI/Oを飽和させない。
-# 生成中のプレイリストからそのまま再生できるため、再生速度(最大4倍速)より十分大きくしておく。
-# 0 以下で無効(制限なし。ffmpeg 5.0 未満で `-readrate` が使えない場合など)。
-HLS_VOD_READRATE: float = _get_float_env("HLS_VOD_READRATE", 10.0)
-# Issue #1088: 録画VODキャッシュ(BASE_DIR/data/hls_streams/vod)全体の容量上限(GB)。
-# 生成の前に「既存キャッシュ + 想定出力」がこれを超えるなら、更新の古い日付のキャッシュから消す。
-# 保持日数(HLS_VOD_RETENTION_DAYS)だけでは、3日以内に数日分を閲覧すると1日約70GB×数日で
-# ルートFSを使い切りうるため、合計量にも上限を設ける。0 以下で無効。
-HLS_VOD_CACHE_MAX_GB: float = _get_float_env("HLS_VOD_CACHE_MAX_GB", 80.0)
 # DBバックアップの保持日数
 DB_BACKUP_RETENTION_DAYS: int = _get_int_env("DB_BACKUP_RETENTION_DAYS", 30)
 # 2026-09-19: DBバックアップのオフサイト複製先(rclone のリモートパス。例: "gdrive:お家開発/db_backup_latest")。
