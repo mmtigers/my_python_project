@@ -2,6 +2,7 @@ import collections
 import contextlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -565,6 +566,11 @@ def _total_size_bytes(paths: List[str]) -> int:
     return total
 
 
+def _estimated_vod_output_bytes(mp4_files: List[str]) -> int:
+    """VOD生成の想定出力量。`-c:v copy` の再多重化なので元MP4の合計 × 係数とする。"""
+    return int(_total_size_bytes(mp4_files) * VOD_OUTPUT_SIZE_FACTOR)
+
+
 def _check_vod_disk_space(cam_dir: str, mp4_files: List[str]) -> Tuple[int, int]:
     """VOD生成の前に出力先の空き容量を確認する(Issue #1088)。
 
@@ -573,7 +579,7 @@ def _check_vod_disk_space(cam_dir: str, mp4_files: List[str]) -> Tuple[int, int]
     VodGenerationUnavailable を送出する。空き容量を確認できないときも安全側に倒して断る。
     問題なければ (空き容量, 想定出力量) をバイトで返す。
     """
-    estimated = int(_total_size_bytes(mp4_files) * VOD_OUTPUT_SIZE_FACTOR)
+    estimated = _estimated_vod_output_bytes(mp4_files)
     try:
         free = shutil.disk_usage(cam_dir).free
     except OSError as e:
@@ -586,6 +592,101 @@ def _check_vod_disk_space(cam_dir: str, mp4_files: List[str]) -> Tuple[int, int]
             f" < 下限 {config.HLS_VOD_MIN_FREE_GB:g}GB)"
         )
     return free, estimated
+
+
+# Issue #1088: VODキャッシュの1エントリ(カメラ×日付)を構成するファイル名。
+# record_<日付>.m3u8 / record_<日付>N.ts(ffmpegのHLS出力)と concat_<日付>.txt。
+_VOD_CACHE_FILE_RE = re.compile(r"^(?:record_|concat_)(\d{8})")
+
+
+def _vod_cache_entries() -> Dict[str, Tuple[int, float, List[str]]]:
+    """VODキャッシュを process_key(`<cam_id>_<日付>`)単位に集計する。
+    値は (合計バイト, 最も新しい更新時刻, ファイルパス一覧)。読めないファイルは数えない。"""
+    entries: Dict[str, Tuple[int, float, List[str]]] = {}
+    try:
+        cam_ids = os.listdir(HLS_VOD_DIR)
+    except OSError:
+        return entries
+    for cam_id in cam_ids:
+        cam_dir = os.path.join(HLS_VOD_DIR, cam_id)
+        if not os.path.isdir(cam_dir):
+            continue
+        try:
+            names = os.listdir(cam_dir)
+        except OSError:
+            continue
+        for name in names:
+            m = _VOD_CACHE_FILE_RE.match(name)
+            if not m:
+                continue
+            path = os.path.join(cam_dir, name)
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue
+            key = f"{cam_id}_{m.group(1)}"
+            size, mtime, paths = entries.get(key, (0, 0.0, []))
+            paths.append(path)
+            entries[key] = (size + st.st_size, max(mtime, st.st_mtime), paths)
+    return entries
+
+
+def _enforce_vod_cache_limit(process_key: str, estimated: int) -> None:
+    """VODキャッシュ全体を config.HLS_VOD_CACHE_MAX_GB 以下に保つ(Issue #1088)。
+
+    「既存キャッシュの合計 + 今回の想定出力」が上限を超えるなら、更新時刻の古い
+    カメラ×日付のキャッシュから削除する。実行中の生成と、今回生成する process_key
+    自身(同名ファイルで上書きされる)は数えず、消さない。今回の想定出力だけで上限を
+    超える、または消せるものを全部消しても収まらないなら、何も消さずに
+    VodGenerationUnavailable を送出する。上限が0以下なら何もしない。
+    _vod_scheduler_lock を保持した状態で呼ぶこと。
+    """
+    max_gb = config.HLS_VOD_CACHE_MAX_GB
+    if max_gb <= 0:
+        return
+    limit = round(max_gb * _BYTES_PER_GB)
+    if estimated > limit:
+        raise VodGenerationUnavailable(
+            "録画プレイリストの想定出力がVODキャッシュの上限を超えるため生成しません "
+            f"(想定出力 {estimated / _BYTES_PER_GB:.1f}GB > 上限 {max_gb:g}GB)"
+        )
+    protected = set(_running_vod_keys()) | {process_key}
+    entries = {k: v for k, v in _vod_cache_entries().items() if k != process_key}
+    used = sum(size for size, _, _ in entries.values())
+    if used + estimated <= limit:
+        return
+
+    evictable = sorted(
+        ((k, v) for k, v in entries.items() if k not in protected),
+        key=lambda kv: kv[1][1],
+    )
+    victims: List[Tuple[str, int, List[str]]] = []
+    remaining = used
+    for key, (size, _mtime, paths) in evictable:
+        if remaining + estimated <= limit:
+            break
+        victims.append((key, size, paths))
+        remaining -= size
+    if remaining + estimated > limit:
+        raise VodGenerationUnavailable(
+            "VODキャッシュの上限に収まらないため録画プレイリストを生成しません "
+            f"(使用中 {used / _BYTES_PER_GB:.1f}GB(うち生成中で消せない分 "
+            f"{remaining / _BYTES_PER_GB:.1f}GB) + 想定出力 {estimated / _BYTES_PER_GB:.1f}GB"
+            f" > 上限 {max_gb:g}GB)"
+        )
+
+    for key, size, paths in victims:
+        for path in paths:
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                logger.warning(f"⚠️ VODキャッシュの削除に失敗しました ({path}): {e}")
+        logger.info(
+            f"🧹 VODキャッシュの上限 {max_gb:g}GB に収めるため {key} のキャッシュ"
+            f"({size / _BYTES_PER_GB:.2f}GB)を削除しました"
+        )
 
 
 def _running_vod_keys() -> List[str]:
@@ -658,9 +759,11 @@ def _start_vod_watcher(process: subprocess.Popen, cam_conf: Dict[str, Any], targ
 
 def _launch_vod_generation_locked(cam_conf: Dict[str, Any], target_date: str, process_key: str,
                                   mp4_files: List[str]) -> None:
-    """空き容量を確認してVOD生成のffmpegを起動・登録し、監視スレッドを付ける。
-    _vod_scheduler_lock を保持した状態で呼ぶこと。容量不足なら VodGenerationUnavailable。"""
+    """VODキャッシュの上限・空き容量を確認してVOD生成のffmpegを起動・登録し、監視スレッドを付ける。
+    _vod_scheduler_lock を保持した状態で呼ぶこと。上限超過・容量不足なら VodGenerationUnavailable。"""
     cam_dir = init_output_dir(HLS_VOD_DIR, cam_conf["id"])
+    # キャッシュの上限を先に確認する(古いキャッシュを消せば空き容量チェックにも効く)
+    _enforce_vod_cache_limit(process_key, _estimated_vod_output_bytes(mp4_files))
     free, estimated = _check_vod_disk_space(cam_dir, mp4_files)
     _vod_queue.pop(process_key, None)
 
