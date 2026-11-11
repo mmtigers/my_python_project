@@ -1,7 +1,7 @@
 import asyncio
 import os
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
@@ -113,13 +113,17 @@ def get_record_info(camera_id: str, target_date: str):
     files = record_playlist_service.get_record_timeline(cam_conf, target_date)
     return {"offset_seconds": offset, "files": files}
 
+_RECORD_PART_RE = re.compile(r"^(\d{1,12})-(\d{1,12})$")
+
+
 @router.get("/record/{camera_id}/{target_date}/{filename}")
-def get_record_file(camera_id: str, target_date: str, filename: str):
-    """録画VODのプレイリスト（.m3u8）または NAS 上の録画 MP4（.mp4）を配信する。
+def get_record_file(camera_id: str, target_date: str, filename: str, part: Optional[str] = None):
+    """録画VODのプレイリスト（.m3u8）または NAS 上の録画 MP4 の一部（.mp4?part=開始-長さ）を配信する。
 
     Issue #1091: 以前は ffmpeg で丸1日分を HLS(.ts) 化して SD カードへ書き出していたが、
-    NAS 上の fragmented MP4 をバイト範囲で直接参照するプレイリストに変えた。MP4 は
-    FileResponse が Range リクエスト(206)に応じて必要な範囲だけを返す。
+    NAS 上の fragmented MP4 を直接参照するプレイリストに変えた。MP4 はプレイリストが示す
+    範囲(初期化セグメントかセグメント1つ)だけを返し、ブラウザ(MSE)が受け付けるよう
+    moof の見出しを書き換える(record_playlist_service.read_record_part)。
     """
     _validate_target_date(target_date)
     cam_conf = _require_camera(camera_id)
@@ -133,10 +137,16 @@ def get_record_file(camera_id: str, target_date: str, filename: str):
                         headers={"Cache-Control": "no-cache"})
 
     elif filename.endswith(".mp4"):
-        path = record_playlist_service.resolve_record_file(cam_conf, target_date, filename)
-        if path is None:
+        m = _RECORD_PART_RE.match(part or "")
+        if m is None:
+            raise HTTPException(status_code=400, detail="part=<offset>-<length> is required")
+        data = record_playlist_service.read_record_part(
+            cam_conf, target_date, filename, int(m.group(1)), int(m.group(2)))
+        if data is None:
             raise HTTPException(status_code=404, detail="Recording not found")
-        return FileResponse(path, media_type="video/mp4")
+        # 範囲は索引のセグメントそのもので、書き終わった部分は変わらない
+        return Response(content=data, media_type="video/mp4",
+                        headers={"Cache-Control": "private, max-age=86400"})
 
     else:
         raise HTTPException(status_code=400, detail="Unsupported file extension")

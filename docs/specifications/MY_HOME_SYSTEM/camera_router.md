@@ -198,16 +198,16 @@
 
 ### `get_record_file` (`GET /record/{camera_id}/{target_date}/{filename}`)
 
-* **役割**: リクエストされたファイル名の拡張子により処理を分岐する。**（Issue #1091で変更）** `.m3u8`の場合は `record_playlist_service.get_record_playlist` が NAS 上の録画 MP4 を直接参照して組み立てたプレイリスト本文を返し、`.mp4`の場合は NAS 上の録画 MP4 を `FileResponse` で配信する(Range リクエストには 206 で必要な範囲だけを返す)。以前の `.ts` 分岐(ffmpeg が SD カードへ書き出した HLS セグメントの配信)は廃止し、それ以外の拡張子と同じく400になる。カメラ設定のルックアップは拡張子の判定より前に1回だけ行う(`_require_camera`)。
-* 根拠: `def get_record_file(camera_id: str, target_date: str, filename: str):`、`playlist = record_playlist_service.get_record_playlist(cam_conf, target_date)`、`path = record_playlist_service.resolve_record_file(cam_conf, target_date, filename)`
+* **役割**: リクエストされたファイル名の拡張子により処理を分岐する。**（Issue #1091で変更）** `.m3u8`の場合は `record_playlist_service.get_record_playlist` が NAS 上の録画 MP4 を直接参照して組み立てたプレイリスト本文を返し、`.mp4`の場合はクエリ `part=<開始>-<長さ>` で示された範囲(プレイリストが参照する初期化セグメントかセグメント1つ)だけを `record_playlist_service.read_record_part` で読み、ブラウザの MSE が受け付けるよう moof の見出しを書き換えた bytes を返す。以前の `.ts` 分岐(ffmpeg が SD カードへ書き出した HLS セグメントの配信)は廃止し、それ以外の拡張子と同じく400になる。カメラ設定のルックアップは拡張子の判定より前に1回だけ行う(`_require_camera`)。
+* 根拠: `def get_record_file(camera_id: str, target_date: str, filename: str):`、`playlist = record_playlist_service.get_record_playlist(cam_conf, target_date)`、`data = record_playlist_service.read_record_part(`
 * **（Issue #386 で追加）** `target_date` は `_validate_target_date` で検証し、不一致なら `HTTPException(400)`。
 
 
-* **引数/リクエスト**: `camera_id: str`, `target_date: str`, `filename: str`（いずれもパスパラメータ）
-* **戻り値/レスポンス**: `.m3u8`要求時は `Response`（media_type="application/vnd.apple.mpegurl"、`Cache-Control: no-cache`。当日分は録画が増えるため）、`.mp4`要求時は `FileResponse`（media_type="video/mp4"）。
-* 根拠: `return FileResponse(path, media_type="video/mp4")`
+* **引数/リクエスト**: `camera_id: str`, `target_date: str`, `filename: str`（いずれもパスパラメータ）、`part: Optional[str]`（クエリ。`.mp4` のときは `^\d{1,12}-\d{1,12}$` が必須）
+* 根拠: `_RECORD_PART_RE = re.compile(r"^(\d{1,12})-(\d{1,12})$")`
+* **戻り値/レスポンス**: `.m3u8`要求時は `Response`（media_type="application/vnd.apple.mpegurl"、`Cache-Control: no-cache`。当日分は録画が増えるため）、`.mp4`要求時は `Response`（media_type="video/mp4"、`Cache-Control: private, max-age=86400`。範囲は索引のセグメントそのもので、書き終わった部分は変わらないため）。
 * **副作用**: `.m3u8`分岐では NAS 上の録画 MP4 のボックス読み取りと索引 JSON の作成・更新(`record_playlist_service`)。`.mp4`分岐では NAS 上のファイルの読み取り。SD カードへ動画データを書くことは無い。
-* **エラーハンドリング**: `target_date`不正時400、カメラID未検出時404。`.m3u8`分岐で再生できる録画が無ければ404(`Recordings not found for the specified date`)。`.mp4`分岐で、ファイル名が録画の命名規則(`<target_date>_HHMMSS.mp4`)と合わない・録画ディレクトリの外を指す・存在しない場合は404(`Recording not found`。判定は `record_playlist_service.resolve_record_file`)。上記いずれの拡張子でもない場合は400。
+* **エラーハンドリング**: `target_date`不正時400、カメラID未検出時404。`.m3u8`分岐で再生できる録画が無ければ404(`Recordings not found for the specified date`)。`.mp4`分岐で `part` が無い・形式が違う場合は400。ファイル名が録画の命名規則(`<target_date>_HHMMSS.mp4`)と合わない・録画ディレクトリの外を指す・存在しない・範囲が索引のどれとも一致しない場合は404(`Recording not found`。判定は `record_playlist_service.read_record_part`)。上記いずれの拡張子でもない場合は400。
 * 根拠: [拡張子外の分岐] (参照: get_record_file / 抜粋: "raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")
 
 
@@ -229,10 +229,12 @@ flowchart TD
     PlaylistOk -- No --> Err404b["HTTPException 404: Recordings not found"]
     PlaylistOk -- Yes --> RespM3u8["Response (application/vnd.apple.mpegurl, no-cache)"]
 
-    ExtCheck -- ".mp4" --> Resolve["外部：record_playlist_service.resolve_record_file()"]
-    Resolve --> PathOk{"録画ディレクトリ内の<br>命名規則に合うファイルか?"}
-    PathOk -- No --> Err404c["HTTPException 404: Recording not found"]
-    PathOk -- Yes --> RespMp4["FileResponse (video/mp4, Range対応)"]
+    ExtCheck -- ".mp4" --> PartCheck{"part=開始-長さ があるか?"}
+    PartCheck -- No --> Err400p["HTTPException 400"]
+    PartCheck -- Yes --> ReadPart["外部：record_playlist_service.read_record_part()<br>(範囲の検証 + moof の書き換え)"]
+    ReadPart --> PartOk{"bytes が得られたか?"}
+    PartOk -- No --> Err404c["HTTPException 404: Recording not found"]
+    PartOk -- Yes --> RespMp4["Response (video/mp4)"]
 
     ExtCheck -- "その他(.ts を含む)" --> Err400b["HTTPException 400: Unsupported file extension"]
 ```
@@ -304,7 +306,7 @@ graph TD
 * **[修正済み・Issue #457] 同期的な待機処理によるブロッキングを解消**: 以前は `get_live_stream` が同期`def`エンドポイントとして実装され、`camera_service.start_hls_stream`（ffmpeg起動を含むブロッキング処理）を直接呼び出したうえで最大5秒間 `time.sleep(0.5)` によるポーリングでブロックしており、デフォルトのスレッドプール実行下ではリクエストごとにワーカースレッドを占有し続け、同時アクセス集中時に他リクエストの遅延要因になっていた。現在は`async def`化され、`start_hls_stream`の呼び出しは`asyncio.to_thread`でスレッドプールへオフロードし、待機ループも`await asyncio.sleep(0.5)`に変更してイベントループを他リクエスト処理に譲るようになった。
 * **（コミット`95d3e55`, E-3で解消）`enabled`フラグの固定値**: 修正前は `get_camera_settings` の `enabled` が常に `True`固定で、`config.CAMERAS` 側で無効化されたカメラの状態を反映する仕組みがなかった。現在は `cam.get("enabled", True)` により実際の値を反映し、`PUT /settings/{camera_id}`（`update_camera_settings`）で `camera_service.set_camera_enabled` 経由の永続化（`devices.json`書き込み）が可能になっている。
 * **例外処理の欠如**: `get_camera_settings` では `config.CAMERAS` の各要素に `id`/`name` キーが存在しない場合の `KeyError` に対する処理がない（`enabled`キーのみ`.get`で防御的にアクセスしている）。`update_camera_settings` も `camera_service.set_camera_enabled` 呼び出し自体に対する `try-except` は持たず、`False`戻り値（対象カメラ不在）のみをHTTP 404として扱う（`_require_camera`は使わない独自実装のまま、Issue #551の対象外）。
-* **パストラバーサル対策の所在**: ライブの `.ts` セグメント配信は `_resolve_segment_path` により防御される。録画の `.mp4` 配信は `record_playlist_service.resolve_record_file`(命名規則・日付の一致・realpath による録画ディレクトリ内の確認)が防御する。録画プレイリストはファイルではなく本文を返すため、パスを扱わない。
+* **パストラバーサル対策の所在**: ライブの `.ts` セグメント配信は `_resolve_segment_path` により防御される。録画の `.mp4` 配信は `record_playlist_service.read_record_part`(命名規則・日付の一致・realpath による録画ディレクトリ内の確認に加え、範囲が索引のセグメントと完全に一致すること)が防御する。録画プレイリストはファイルではなく本文を返すため、パスを扱わない。
 * **（Issue #172で解消）拡張子チェックの非対称性**: `get_record_file` は`.m3u8`/`.ts`以外を400で拒否していたが、`get_live_segment` は修正前は拡張子を一切検証しておらず、`_resolve_segment_path`のパストラバーサル対策だけでは防げない形で同一カメラディレクトリ内の`ffmpeg.log`（`camera_service.py`が`chmod 600`で保護しているファイル。RTSP認証情報を含みうる）等が配信され得た。現在は`get_record_file`と同様に`.ts`以外を400で拒否する。
 
 ## 9. 不明事項一覧

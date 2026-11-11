@@ -77,6 +77,21 @@ def _fragment(durations=None, count=0, tfhd_default=None, payload=b"\xab" * 32) 
     return moof + _box(b"mdat", payload)
 
 
+def _abs_fragment(moof_abs: int, video=b"\x11" * 40, audio=b"\x22" * 24) -> bytes:
+    """ffmpeg の既定と同じく、tfhd に絶対位置(base-data-offset = moof の位置)を持つ moof+mdat。
+    映像(ID=1, 15サンプル×6000)と音声(ID=2)の traf を持ち、mdat には映像→音声の順にデータを置く。"""
+    def build(data_off_v: int, data_off_a: int) -> bytes:
+        tf_v = _full(b"tfhd", 0, 0x000039, struct.pack(">IQIII", 1, moof_abs, 6000, 10, 0))
+        tr_v = _full(b"trun", 0, 0x000001, struct.pack(">Ii", 15, data_off_v))
+        tf_a = _full(b"tfhd", 0, 0x000039, struct.pack(">IQIII", 2, moof_abs, 1024, 10, 0))
+        tr_a = _full(b"trun", 0, 0x000001, struct.pack(">Ii", 2, data_off_a))
+        return _box(b"moof", _full(b"mfhd", 0, 0, struct.pack(">I", 1))
+                    + _box(b"traf", tf_v + tr_v) + _box(b"traf", tf_a + tr_a))
+    moof_len = len(build(0, 0))
+    moof = build(moof_len + 8, moof_len + 8 + len(video))
+    return moof + _box(b"mdat", video + audio)
+
+
 def _one_second_fragment() -> bytes:
     """90kHz で 1 秒分(15fps × 6000)の映像フラグメント。"""
     return _fragment(durations=[6000] * 15)
@@ -178,6 +193,18 @@ def test_real_ffmpeg_output_with_nvr_options(tmp_path):
     end = last[0] + last[1]
     # 正常に閉じたファイルは末尾に mfra(ランダムアクセス用の索引)が付くだけ
     assert end == len(data) or data[end + 4:end + 8] == b"mfra"
+    # ffmpeg の既定は tfhd に絶対位置を持つ。書き換え後は moof 起点になり、trun が mdat の中を指す
+    for offset, length, _ in idx["segments"]:
+        out = rps.rewrite_fragments(data[offset:offset + length], offset)
+        p = 0
+        while p < len(out):
+            size, box_type = struct.unpack_from(">I4s", out, p)
+            if box_type == b"moof":
+                mdat_size = struct.unpack_from(">I", out, p + size)[0]
+                for flags, off in _tfhd_flags_and_truns(out[p:p + size]):
+                    assert not flags & 0x01 and flags & 0x020000
+                    assert size + 8 <= off < size + mdat_size
+            p += size
 
 
 # ---------------------------------------------------------------------------
@@ -284,18 +311,18 @@ class TestPlaylist:
         assert "#EXT-X-TARGETDURATION:4" in lines
         assert lines[-1] == "#EXT-X-ENDLIST"
         init = len(_init())
-        assert f'#EXT-X-MAP:URI="20260101_100000.mp4",BYTERANGE="{init}@0"' in lines
-        assert f'#EXT-X-MAP:URI="20260101_101000.mp4",BYTERANGE="{init}@0"' in lines
+        assert f'#EXT-X-MAP:URI="20260101_100000.mp4?part=0-{init}"' in lines
+        assert f'#EXT-X-MAP:URI="20260101_101000.mp4?part=0-{init}"' in lines
         # ファイルの切れ目(タイムスタンプが0に戻る)にだけ DISCONTINUITY
         assert lines.count("#EXT-X-DISCONTINUITY") == 1
-        assert lines.index("#EXT-X-DISCONTINUITY") < lines.index('#EXT-X-MAP:URI="20260101_101000.mp4",BYTERANGE="%d@0"' % init)
-        # 1本目: 4秒 + 1秒
+        assert lines.index("#EXT-X-DISCONTINUITY") < lines.index(f'#EXT-X-MAP:URI="20260101_101000.mp4?part=0-{init}"')
+        # 1本目: 4秒 + 1秒。セグメントは ?part=<開始>-<長さ> で参照する
         frag = len(_one_second_fragment())
-        assert f"#EXT-X-BYTERANGE:{4 * frag}@{init}" in lines
-        assert f"#EXT-X-BYTERANGE:{frag}@{init + 4 * frag}" in lines
+        assert f"20260101_100000.mp4?part={init}-{4 * frag}" in lines
+        assert f"20260101_100000.mp4?part={init + 4 * frag}-{frag}" in lines
         assert init + 5 * frag == len(a)
         assert lines.count("#EXTINF:4.000,") == 1
-        assert lines.count("20260101_100000.mp4") == 2
+        assert not any(line.startswith("#EXT-X-BYTERANGE") for line in lines)
 
     def test_no_playable_recordings_returns_none(self, recordings):
         (recordings / "20260101_100000.mp4").write_bytes(_init(fragmented=False))
@@ -337,3 +364,97 @@ class TestResolveRecordFile:
         secret.write_bytes(b"x")
         os.symlink(secret, recordings / "20260101_100000.mp4")
         assert rps.resolve_record_file(CAM, "20260101", "20260101_100000.mp4") is None
+
+
+# ---------------------------------------------------------------------------
+# read_record_part / rewrite_fragments: MSE が受け付ける形への moof の書き換え
+# ---------------------------------------------------------------------------
+
+def _tfhd_flags_and_truns(moof: bytes):
+    """moof 内の各 traf について (tfhd のフラグ, trun の data_offset) を返す。"""
+    out = []
+    for t, body, end in rps._iter_boxes(moof, 8, len(moof)):
+        if t != b"traf":
+            continue
+        tf = rps._find_box(moof, body, end, b"tfhd")
+        tr = rps._find_box(moof, body, end, b"trun")
+        flags = int.from_bytes(moof[tf[0] + 1:tf[0] + 4], "big")
+        out.append((flags, struct.unpack_from(">i", moof, tr[0] + 8)[0]))
+    return out
+
+
+class TestRewriteFragments:
+    def test_base_data_offset_is_replaced_by_default_base_is_moof(self):
+        init = _init()
+        pos = len(init)
+        frags = []
+        for _ in range(2):
+            f = _abs_fragment(pos)
+            frags.append(f)
+            pos += len(f)
+        chunk = b"".join(frags)
+
+        out = rps.rewrite_fragments(chunk, len(init))
+
+        # moof ごとに traf 2つ × 8 バイト縮む
+        assert len(out) == len(chunk) - 2 * 16
+        p = 0
+        for _ in range(2):
+            size = struct.unpack_from(">I", out, p)[0]
+            moof = out[p:p + size]
+            truns = _tfhd_flags_and_truns(moof)
+            for flags, _off in truns:
+                assert not flags & 0x01, "base-data-offset が残っている"
+                assert flags & 0x020000, "default-base-is-moof になっていない"
+            # data_offset(moof 起点)が同じデータを指している
+            (_, off_v), (_, off_a) = truns
+            assert out[p + off_v:p + off_v + 40] == b"\x11" * 40
+            assert out[p + off_a:p + off_a + 24] == b"\x22" * 24
+            mdat_size = struct.unpack_from(">I", out, p + size)[0]
+            p += size + mdat_size
+        assert p == len(out)
+
+    def test_fragments_without_absolute_offset_are_returned_unchanged(self):
+        chunk = _one_second_fragment() + _one_second_fragment()
+        assert rps.rewrite_fragments(chunk, 1234) == chunk
+
+    def test_range_not_on_box_boundary_is_rejected(self):
+        chunk = _abs_fragment(100)
+        with pytest.raises(rps.UnsupportedRecording):
+            rps.rewrite_fragments(chunk[:-5], 100)
+
+
+class TestReadRecordPart:
+    def _write_abs_mp4(self, path, n=6):
+        data = _init()
+        for _ in range(n):
+            data += _abs_fragment(len(data))
+        path.write_bytes(data)
+        return data
+
+    def test_init_and_segments_listed_in_the_playlist_can_be_read(self, recordings):
+        data = self._write_abs_mp4(recordings / "20260101_100000.mp4")
+        playlist = rps.get_record_playlist(CAM, "20260101")
+        parts = [line.split("?part=")[1].rstrip('"') for line in playlist.splitlines() if "?part=" in line]
+        init = len(_init())
+        assert parts[0] == f"0-{init}"
+
+        assert rps.read_record_part(CAM, "20260101", "20260101_100000.mp4", 0, init) == data[:init]
+        total = 0
+        for part in parts[1:]:
+            offset, length = map(int, part.split("-"))
+            out = rps.read_record_part(CAM, "20260101", "20260101_100000.mp4", offset, length)
+            assert out is not None
+            assert all(not flags & 0x01 for flags, _ in _tfhd_flags_and_truns(out[:struct.unpack_from(">I", out)[0]]))
+            total += length
+        assert init + total == len(data)
+
+    @pytest.mark.parametrize("offset, length", [(0, 10), (1, 50), (10**9, 100)])
+    def test_ranges_not_in_the_index_are_refused(self, recordings, offset, length):
+        self._write_abs_mp4(recordings / "20260101_100000.mp4")
+        assert rps.read_record_part(CAM, "20260101", "20260101_100000.mp4", offset, length) is None
+
+    def test_unknown_or_unsupported_file_is_refused(self, recordings):
+        (recordings / "20260101_090000.mp4").write_bytes(_init(fragmented=False) + _box(b"mdat", b"\0"))
+        assert rps.read_record_part(CAM, "20260101", "20260101_090000.mp4", 0, len(_init(fragmented=False))) is None
+        assert rps.read_record_part(CAM, "20260101", "20260101_110000.mp4", 0, 10) is None

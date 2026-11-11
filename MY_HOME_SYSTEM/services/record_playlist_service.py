@@ -9,11 +9,18 @@ NVR(`deploy/systemd/nvr-*.service`)は `movflags=+frag_keyframe+empty_moov` で�
 である。そこで MP4 のボックス構造だけを読み、
 
 - 各ファイル先頭の ftyp+moov を `#EXT-X-MAP` の初期化セグメント(バイト範囲)とし、
-- moof+mdat の組(フラグメント)を約 `SEGMENT_TARGET_SECONDS` 秒ずつまとめて `#EXT-X-BYTERANGE` で並べ、
+- moof+mdat の組(フラグメント)を約 `SEGMENT_TARGET_SECONDS` 秒ずつまとめて1セグメントとし、
 - ファイルの切れ目(`-reset_timestamps 1` でタイムスタンプが0に戻る)に `#EXT-X-DISCONTINUITY` を入れる
 
-HLS プレイリストを返す。映像データ自体はブラウザが NAS 上の MP4 から Range リクエストで
-直接読む(`routers/camera_router.py`)ため、SD カードへ書くのは小さな索引 JSON だけになる。
+HLS プレイリストを返す。セグメントは `<ファイル名>?part=<開始>-<長さ>` で参照し、
+`read_record_part` が NAS 上の MP4 から該当範囲だけを読んで返す(`routers/camera_router.py`)。
+SD カードへ書くのは小さな索引 JSON だけになる。
+
+ffmpeg(NVR)の既定の fragmented MP4 は `tfhd` にファイル先頭からの絶対位置
+(base-data-offset)を持つが、ブラウザの MSE(hls.js)はこれを受け付けない。そのため
+返すときに `rewrite_fragments` で base-data-offset を外して default-base-is-moof
+(moof 起点)に書き換え、`trun` の data_offset をずらす。書き換えるのは数十バイトの見出しだけで、
+映像データ(mdat)はそのまま返す。絶対位置を持たないフラグメントは書き換えない。
 
 ボックスの読み取り結果(セグメントのバイト範囲と長さ)は、ファイルのサイズと更新時刻を
 キーにした索引 JSON として `INDEX_DIR/<cam_id>/index_<日付>.json` にキャッシュする。
@@ -47,6 +54,10 @@ _BOX_HEADER = struct.Struct(">I4s")
 _MAX_INIT_BOX_BYTES = 16 * 1024 * 1024  # moov を丸ごと読む上限(通常は数KB)
 _MAX_MOOF_BYTES = 4 * 1024 * 1024  # moof を丸ごと読む上限(通常は1KB前後)
 
+_TFHD_BASE_DATA_OFFSET = 0x000001
+_TFHD_DEFAULT_BASE_IS_MOOF = 0x020000
+_TRUN_DATA_OFFSET = 0x000001
+
 # 同一カメラ・日付の索引更新(読み取り→JSON書き込み)を直列化する
 _index_locks = RefCountedLockRegistry()
 
@@ -73,6 +84,12 @@ class RecordFile:
 
 def _iter_boxes(data: bytes, start: int = 0, end: Optional[int] = None) -> Iterator[Tuple[bytes, int, int]]:
     """メモリ上の data[start:end] に並ぶボックスを (type, 本体の開始位置, ボックスの終端) で返す。"""
+    for box_type, _box_start, body, box_end in _iter_box_spans(data, start, end):
+        yield box_type, body, box_end
+
+
+def _iter_box_spans(data: bytes, start: int = 0, end: Optional[int] = None) -> Iterator[Tuple[bytes, int, int, int]]:
+    """`_iter_boxes` と同じだが、ボックスの開始位置も含めて (type, 開始, 本体の開始, 終端) で返す。"""
     pos = start
     end = len(data) if end is None else end
     while pos + 8 <= end:
@@ -87,7 +104,7 @@ def _iter_boxes(data: bytes, start: int = 0, end: Optional[int] = None) -> Itera
             size = end - pos
         if size < header or pos + size > end:
             return
-        yield box_type, pos + header, pos + size
+        yield box_type, pos, pos + header, pos + size
         pos += size
 
 
@@ -397,8 +414,9 @@ def get_record_files(cam_conf: Dict[str, Any], target_date: str) -> Optional[Lis
 def build_playlist(files: List[RecordFile]) -> str:
     """録画ファイル一覧から HLS(VOD) プレイリストを組み立てる。
 
-    セグメントの URI はファイル名だけ(プレイリストと同じ
-    `/api/cameras/record/<cam>/<日付>/` からの相対)にする。
+    セグメントの URI は `<ファイル名>?part=<開始>-<長さ>`(プレイリストと同じ
+    `/api/cameras/record/<cam>/<日付>/` からの相対)にする。範囲は索引のセグメントそのもので、
+    `read_record_part` はこれと完全に一致する範囲だけを返す。
     """
     max_duration = max((seg[2] for f in files for seg in f.segments), default=SEGMENT_TARGET_SECONDS)
     lines = [
@@ -412,11 +430,10 @@ def build_playlist(files: List[RecordFile]) -> str:
     for i, f in enumerate(files):
         if i > 0:
             lines.append("#EXT-X-DISCONTINUITY")
-        lines.append(f'#EXT-X-MAP:URI="{f.name}",BYTERANGE="{f.init_size}@0"')
+        lines.append(f'#EXT-X-MAP:URI="{f.name}?part=0-{f.init_size}"')
         for offset, length, duration in f.segments:
             lines.append(f"#EXTINF:{duration:.3f},")
-            lines.append(f"#EXT-X-BYTERANGE:{length}@{offset}")
-            lines.append(f.name)
+            lines.append(f"{f.name}?part={offset}-{length}")
     lines.append("#EXT-X-ENDLIST")
     return "\n".join(lines) + "\n"
 
@@ -458,3 +475,111 @@ def resolve_record_file(cam_conf: Dict[str, Any], target_date: str, filename: st
     if os.path.commonpath([base, candidate]) != base or not os.path.isfile(candidate):
         return None
     return candidate
+
+
+# ---------------------------------------------------------------------------
+# セグメントの読み出しと moof の書き換え
+# ---------------------------------------------------------------------------
+
+def _rewrite_moof(moof: bytes, moof_abs: int) -> bytes:
+    """moof 内の tfhd から base-data-offset を外して default-base-is-moof にし、
+    trun の data_offset を「moof 先頭からの位置」に直す。絶対位置を持たなければそのまま返す。
+
+    書き換えで moof は (base-data-offset を持つ traf の数 × 8) バイト縮み、直後の mdat も
+    同じだけ前へずれるので、data_offset は「元の絶対位置 − moof の位置 − 縮んだ量」になる。
+    """
+    children = [(t, moof[box_start:end]) for t, box_start, _body, end in _iter_box_spans(moof, 8, len(moof))]
+    with_base = 0
+    for t, raw in children:
+        if t != b"traf":
+            continue
+        tfhd = _find_box(raw, 8, len(raw), b"tfhd")
+        if tfhd and int.from_bytes(raw[tfhd[0] + 1:tfhd[0] + 4], "big") & _TFHD_BASE_DATA_OFFSET:
+            with_base += 1
+    if with_base == 0:
+        return moof
+    shrink = 8 * with_base
+
+    out: List[bytes] = []
+    for t, raw in children:
+        if t != b"traf":
+            out.append(raw)
+            continue
+        base: Optional[int] = None
+        parts: List[bytes] = []
+        for ct, cstart, _cbody, cend in _iter_box_spans(raw, 8, len(raw)):
+            child = bytearray(raw[cstart:cend])
+            if ct == b"tfhd":
+                flags = int.from_bytes(child[9:12], "big")
+                if flags & _TFHD_BASE_DATA_OFFSET:
+                    base = struct.unpack_from(">Q", child, 16)[0]
+                    child = child[:16] + child[24:]
+                    flags = (flags & ~_TFHD_BASE_DATA_OFFSET) | _TFHD_DEFAULT_BASE_IS_MOOF
+                    child[9:12] = flags.to_bytes(3, "big")
+                    struct.pack_into(">I", child, 0, len(child))
+            elif ct == b"trun" and base is not None:
+                flags = int.from_bytes(child[9:12], "big")
+                if not flags & _TRUN_DATA_OFFSET:
+                    # data_offset が無いと、データ位置を moof 起点で表し直せない
+                    raise UnsupportedRecording("base-data-offset を持つ trun に data_offset がありません")
+                offset = struct.unpack_from(">i", child, 16)[0]
+                struct.pack_into(">i", child, 16, base + offset - moof_abs - shrink)
+            parts.append(bytes(child))
+        body = b"".join(parts)
+        out.append(struct.pack(">I4s", 8 + len(body), b"traf") + body)
+    body = b"".join(out)
+    return struct.pack(">I4s", 8 + len(body), b"moof") + body
+
+
+def rewrite_fragments(chunk: bytes, abs_offset: int) -> bytes:
+    """ファイル上の abs_offset から読んだ chunk(moof+mdat の並び)の各 moof を `_rewrite_moof` で直す。"""
+    out: List[bytes] = []
+    pos = 0
+    for t, start, _body, end in _iter_box_spans(chunk):
+        if t == b"moof":
+            out.append(_rewrite_moof(chunk[start:end], abs_offset + start))
+        else:
+            out.append(chunk[start:end])
+        pos = end
+    if pos != len(chunk):
+        raise UnsupportedRecording("セグメントの範囲がボックスの境界と一致しません")
+    return b"".join(out)
+
+
+def read_record_part(cam_conf: Dict[str, Any], target_date: str, filename: str,
+                     offset: int, length: int) -> Optional[bytes]:
+    """プレイリストが参照する範囲(初期化セグメントかセグメント1つ)を NAS の MP4 から読んで返す。
+
+    範囲は索引にあるものと完全に一致する場合だけ受け付ける(任意の範囲を読ませない)。
+    セグメントは `rewrite_fragments` で MSE が受け付ける形に直す。該当しなければ None。
+    """
+    path = resolve_record_file(cam_conf, target_date, filename)
+    if path is None:
+        return None
+    cam_id = cam_conf["id"]
+    with _index_locks.acquire((cam_id, target_date)):
+        files = _load_index(_index_path(cam_id, target_date))
+        cached = files.get(filename)
+        try:
+            entry, reread = _file_index(path, cached, cam_conf["name"])
+        except OSError as e:
+            logger.warning(f"⚠️ [{cam_conf['name']}] {filename} を参照できません: {e}")
+            return None
+        if reread:
+            files[filename] = entry
+            _save_index(_index_path(cam_id, target_date), files)
+    if entry.get("unsupported"):
+        return None
+    is_init = offset == 0 and length == entry.get("init_size")
+    if not is_init and not any(int(o) == offset and int(n) == length for o, n, _d in entry.get("segments") or []):
+        return None
+    try:
+        with open(path, "rb") as f:
+            f.seek(offset)
+            data = f.read(length)
+        if len(data) != length:
+            return None
+        return data if is_init else rewrite_fragments(data, offset)
+    except (OSError, struct.error, UnsupportedRecording) as e:
+        logger.warning(f"⚠️ [{cam_conf['name']}] {filename} の {offset}-{length} を返せません: {e}")
+        return None

@@ -136,43 +136,46 @@ def test_get_record_file_playlist_not_found_returns_404(api_client, one_camera, 
     assert res.status_code == 404
 
 
-# Issue #1091: 録画 MP4 は NAS から Range リクエストで必要な範囲だけ配信する
-@pytest.fixture
-def nvr_recording(monkeypatch, tmp_path, one_camera):
+# Issue #1091: 録画 MP4 はプレイリストが示す範囲(?part=開始-長さ)だけを返す
+def test_get_record_mp4_part_returns_service_bytes(api_client, one_camera, monkeypatch):
+    calls = []
+
+    def _read(cam_conf, date, filename, offset, length):
+        calls.append((cam_conf["id"], date, filename, offset, length))
+        return b"segment-bytes"
+    monkeypatch.setattr(camera_router.record_playlist_service, "read_record_part", _read)
+    res = api_client.get("/api/cameras/record/cam1/20260101/20260101_100000.mp4?part=1203-62102")
+    assert res.status_code == 200
+    assert res.content == b"segment-bytes"
+    assert res.headers["content-type"] == "video/mp4"
+    assert calls == [("cam1", "20260101", "20260101_100000.mp4", 1203, 62102)]
+
+
+@pytest.mark.parametrize("query", ["", "?part=", "?part=abc", "?part=1-", "?part=-5", "?part=1-2-3"])
+def test_get_record_mp4_without_valid_part_is_400(api_client, one_camera, monkeypatch, query):
+    monkeypatch.setattr(camera_router.record_playlist_service, "read_record_part",
+                        lambda *a: pytest.fail("サービスまで到達している"))
+    res = api_client.get(f"/api/cameras/record/cam1/20260101/20260101_100000.mp4{query}")
+    assert res.status_code == 400
+
+
+def test_get_record_mp4_unknown_part_is_404(api_client, one_camera, monkeypatch):
+    monkeypatch.setattr(camera_router.record_playlist_service, "read_record_part", lambda *a: None)
+    res = api_client.get("/api/cameras/record/cam1/20260101/20260101_100000.mp4?part=0-10")
+    assert res.status_code == 404
+
+
+def test_get_record_mp4_end_to_end_with_real_service(api_client, one_camera, monkeypatch, tmp_path):
+    """実際の record_playlist_service を通し、ファイル名の検証が効くことを確かめる。"""
+    from services import record_playlist_service as rps
     nvr = tmp_path / "nvr"
-    cam_dir = nvr / one_camera["name"]
-    cam_dir.mkdir(parents=True)
-    mp4 = cam_dir / "20260101_100000.mp4"
-    mp4.write_bytes(bytes(range(256)) * 4)
+    (nvr / one_camera["name"]).mkdir(parents=True)
     (tmp_path / "secret.mp4").write_bytes(b"secret")
     monkeypatch.setattr(config, "NVR_RECORD_DIR", str(nvr))
-    return mp4
-
-
-def test_get_record_mp4_supports_range_requests(api_client, nvr_recording):
-    res = api_client.get("/api/cameras/record/cam1/20260101/20260101_100000.mp4", headers={"Range": "bytes=10-19"})
-    assert res.status_code == 206
-    assert res.content == nvr_recording.read_bytes()[10:20]
-    assert res.headers["content-type"] == "video/mp4"
-
-
-def test_get_record_mp4_whole_file(api_client, nvr_recording):
-    res = api_client.get("/api/cameras/record/cam1/20260101/20260101_100000.mp4")
-    assert res.status_code == 200
-    assert res.content == nvr_recording.read_bytes()
-
-
-@pytest.mark.parametrize("filename", [
-    "20260102_100000.mp4",  # 日付がパスの target_date と違う
-    "20260101_100001.mp4",  # 存在しない
-    "20260101_250000.mp4",  # 時刻として不正
-    "..%2Fsecret.mp4",  # 録画ディレクトリの外
-    "20260101_100000.mp4.mp4",
-    "ffmpeg.log",
-])
-def test_get_record_mp4_rejects_other_files(api_client, nvr_recording, filename):
-    res = api_client.get(f"/api/cameras/record/cam1/20260101/{filename}")
-    assert res.status_code in (400, 404)
+    monkeypatch.setattr(rps, "INDEX_DIR", str(tmp_path / "index"))
+    for name in ["..%2Fsecret.mp4", "20260102_100000.mp4", "20260101_250000.mp4", "20260101_100000.mp4"]:
+        res = api_client.get(f"/api/cameras/record/cam1/20260101/{name}?part=0-6")
+        assert res.status_code in (400, 404), name
 
 
 def test_get_record_ts_is_no_longer_served(api_client, one_camera):

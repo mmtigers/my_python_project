@@ -9,7 +9,7 @@
 
 ## 関連ドキュメント
 
-- [camera_router.md](./camera_router.md) — 呼び出し元。`GET /record/{camera_id}/{target_date}/info`(`get_record_timeline`)と`GET /record/{camera_id}/{target_date}/{filename}`(`.m3u8` → `get_record_playlist`、`.mp4` → `resolve_record_file`)から呼ばれる。
+- [camera_router.md](./camera_router.md) — 呼び出し元。`GET /record/{camera_id}/{target_date}/info`(`get_record_timeline`)と`GET /record/{camera_id}/{target_date}/{filename}`(`.m3u8` → `get_record_playlist`、`.mp4?part=` → `read_record_part`)から呼ばれる。
 - [camera_service.md](./camera_service.md) — 以前ここに相当する録画VOD生成(ffmpeg による HLS(.ts) 化)があった。Issue #1091 で本ファイルに置き換えた。
 - [config.md](./config.md) — `NVR_RECORD_DIR`(NAS 上の録画の保存先)を提供する。
 - [nas_monitor.md](./nas_monitor.md) — 本ファイルが書く索引 JSON(`INDEX_DIR`配下の`.json`)を保持期間(`HLS_VOD_RETENTION_DAYS`)で削除する。
@@ -20,10 +20,11 @@
 
 * 録画VODの HLS プレイリストを、NAS 上の NVR 録画 MP4 を直接参照する形で組み立てるサービス層モジュール (Issue #1091)。以前は過去日を再生するたびに ffmpeg で丸1日分を HLS(.ts) へ再多重化し、SQLite と同じ SD カードへ元の MP4 とほぼ同じ量を書き込んでいた(Issue #1088 の障害の原因)。
 * 根拠: [モジュール docstring] (行番号: 1〜4 / 抜粋: "\"\"\"録画VODのプレイリスト(HLS)を、NAS 上の録画 MP4 を直接参照する形で組み立てる (Issue #1091)。")
-* NVR は fragmented MP4 で録画しているため、MP4 のボックス構造(ftyp/moov/moof/mdat)だけを読み、各ファイル先頭の ftyp+moov を `#EXT-X-MAP` の初期化セグメント、moof+mdat の組(フラグメント)を約 `SEGMENT_TARGET_SECONDS` 秒ずつまとめたものを `#EXT-X-BYTERANGE` のセグメントとして並べる。ファイルの切れ目には `#EXT-X-DISCONTINUITY` を入れる。映像データ(mdat の中身)は読まない。
-* 根拠: [モジュール docstring] (行番号: 10〜12 / 抜粋: "- 各ファイル先頭の ftyp+moov を `#EXT-X-MAP` の初期化セグメント(バイト範囲)とし、")
+* NVR は fragmented MP4 で録画しているため、MP4 のボックス構造(ftyp/moov/moof/mdat)だけを読み、各ファイル先頭の ftyp+moov を `#EXT-X-MAP` の初期化セグメント、moof+mdat の組(フラグメント)を約 `SEGMENT_TARGET_SECONDS` 秒ずつまとめたものをセグメントとして並べる。どちらも `<ファイル名>?part=<開始>-<長さ>` で参照する。ファイルの切れ目には `#EXT-X-DISCONTINUITY` を入れる。
+* セグメントの配信時(`read_record_part`)は、ffmpeg の既定で `tfhd` に入っている絶対位置(base-data-offset)をブラウザの MSE(hls.js)が受け付けないため、`rewrite_fragments` で default-base-is-moof(moof 起点)に書き換えて返す。書き換えるのは見出しだけで、映像データはそのまま返す。
+* 根拠: [モジュール docstring] (行番号: 18〜20 / 抜粋: "ffmpeg(NVR)の既定の fragmented MP4 は `tfhd` にファイル先頭からの絶対位置")
 * ボックスの読み取り結果は、ファイルのサイズと更新時刻(ns)をキーにした索引 JSON として `INDEX_DIR/<cam_id>/index_<日付>.json` にキャッシュし、変化したファイルだけを読み直す。SD カードへ書くのはこの索引だけである。
-* 根拠: [モジュール docstring] (行番号: 17〜20 / 抜粋: "ボックスの読み取り結果(セグメントのバイト範囲と長さ)は、ファイルのサイズと更新時刻を")
+* 根拠: [モジュール docstring] (行番号: 25〜28 / 抜粋: "ボックスの読み取り結果(セグメントのバイト範囲と長さ)は、ファイルのサイズと更新時刻を")
 
 ## 3. 外部依存関係
 
@@ -31,17 +32,17 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `glob` | 標準ライブラリ | 指定日の録画 mp4 の列挙 | 根拠: [import文] (行番号: 23 / 抜粋: "import glob") |
-| `json` | 標準ライブラリ | 索引 JSON の読み書き | 根拠: [import文] (行番号: 24 / 抜粋: "import json") |
-| `math` | 標準ライブラリ | `#EXT-X-TARGETDURATION` の切り上げ(`math.ceil`) | 根拠: [import文] (行番号: 25 / 抜粋: "import math") |
-| `os` | 標準ライブラリ | パス操作・`stat`・`realpath`・`os.replace` | 根拠: [import文] (行番号: 26 / 抜粋: "import os") |
-| `struct` | 標準ライブラリ | MP4 ボックスのヘッダ・フィールドの解析 | 根拠: [import文] (行番号: 27 / 抜粋: "import struct") |
-| `tempfile` | 標準ライブラリ | 索引 JSON を書く一時ファイル(`mkstemp`) | 根拠: [import文] (行番号: 28 / 抜粋: "import tempfile") |
-| `dataclasses.dataclass`, `field` | 標準ライブラリ | `RecordFile` の定義 | 根拠: [import文] (行番号: 29 / 抜粋: "from dataclasses import dataclass, field") |
-| `typing` 各種 | 標準ライブラリ | 型ヒント | 根拠: [import文] (行番号: 30 / 抜粋: "from typing import Any, BinaryIO, Dict, Iterator, List, Optional, Tuple") |
-| `config` | 内部モジュール | `config.NVR_RECORD_DIR` | 根拠: [import文] (行番号: 32 / 抜粋: "import config") |
-| `core.logger.setup_logging` | 内部モジュール | ロガー生成 | 根拠: [import文] (行番号: 33 / 抜粋: "from core.logger import setup_logging") |
-| `core.utils.RefCountedLockRegistry` | 内部モジュール | カメラ×日付単位の索引更新ロック `_index_locks` | 根拠: [import文] (行番号: 34 / 抜粋: "from core.utils import RefCountedLockRegistry") |
+| `glob` | 標準ライブラリ | 指定日の録画 mp4 の列挙 | 根拠: [import文] (行番号: 30 / 抜粋: "import glob") |
+| `json` | 標準ライブラリ | 索引 JSON の読み書き | 根拠: [import文] (行番号: 31 / 抜粋: "import json") |
+| `math` | 標準ライブラリ | `#EXT-X-TARGETDURATION` の切り上げ(`math.ceil`) | 根拠: [import文] (行番号: 32 / 抜粋: "import math") |
+| `os` | 標準ライブラリ | パス操作・`stat`・`realpath`・`os.replace` | 根拠: [import文] (行番号: 33 / 抜粋: "import os") |
+| `struct` | 標準ライブラリ | MP4 ボックスのヘッダ・フィールドの解析 | 根拠: [import文] (行番号: 34 / 抜粋: "import struct") |
+| `tempfile` | 標準ライブラリ | 索引 JSON を書く一時ファイル(`mkstemp`) | 根拠: [import文] (行番号: 35 / 抜粋: "import tempfile") |
+| `dataclasses.dataclass`, `field` | 標準ライブラリ | `RecordFile` の定義 | 根拠: [import文] (行番号: 36 / 抜粋: "from dataclasses import dataclass, field") |
+| `typing` 各種 | 標準ライブラリ | 型ヒント | 根拠: [import文] (行番号: 37 / 抜粋: "from typing import Any, BinaryIO, Dict, Iterator, List, Optional, Tuple") |
+| `config` | 内部モジュール | `config.NVR_RECORD_DIR` | 根拠: [import文] (行番号: 39 / 抜粋: "import config") |
+| `core.logger.setup_logging` | 内部モジュール | ロガー生成 | 根拠: [import文] (行番号: 40 / 抜粋: "from core.logger import setup_logging") |
+| `core.utils.RefCountedLockRegistry` | 内部モジュール | カメラ×日付単位の索引更新ロック `_index_locks` | 根拠: [import文] (行番号: 41 / 抜粋: "from core.utils import RefCountedLockRegistry") |
 
 ### ブラックボックスとなる外部要素
 
@@ -64,7 +65,7 @@
 ### `UnsupportedRecording` / `RecordFile`
 
 * **役割**: `UnsupportedRecording` は fragmented MP4 として解釈できない録画を表す例外。`RecordFile` はプレイリストに載せる録画1本分(`name`・`start_seconds`(0時からの秒数)・`position`(プレイリスト上の開始秒)・`duration`・`init_size`・`segments`(`(offset, length, 秒)` の一覧))。
-* 根拠: `class UnsupportedRecording(Exception):` (行番号: 54)、`class RecordFile:` (行番号: 59)
+* 根拠: `class UnsupportedRecording(Exception):` (行番号: 65)、`class RecordFile:` (行番号: 70)
 * **引数/リクエスト**: 該当なし
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: なし
@@ -73,7 +74,7 @@
 ### `_iter_boxes` / `_find_box`
 
 * **役割**: メモリ上のバイト列に並ぶボックスを `(type, 本体の開始位置, 終端)` で列挙する／指定の型を最初に1つ探す。`size == 1`(64bit サイズ)と `size == 0`(末尾まで)に対応し、範囲からはみ出すボックスで止まる。
-* 根拠: `def _iter_boxes(data: bytes, start: int = 0, end: Optional[int] = None) -> Iterator[Tuple[bytes, int, int]]:` (行番号: 74)、`def _find_box(data: bytes, start: int, end: int, box_type: bytes) -> Optional[Tuple[int, int]]:` (行番号: 94)
+* 根拠: `def _iter_boxes(data: bytes, start: int = 0, end: Optional[int] = None) -> Iterator[Tuple[bytes, int, int]]:` (行番号: 85)、`def _find_box(data: bytes, start: int, end: int, box_type: bytes) -> Optional[Tuple[int, int]]:` (行番号: 111)
 * **引数/リクエスト**: `data`、`start`、`end`(、`box_type`)
 * **戻り値/レスポンス**: ジェネレータ／`(本体の開始, 終端)` または `None`
 * **副作用**: なし
@@ -82,7 +83,7 @@
 ### `_parse_moov`
 
 * **役割**: moov から映像トラック(`hdlr` が `vide`)の `track_ID`(tkhd)と `timescale`(mdhd。version 0/1 両対応)を求め、`mvex/trex` からそのトラックの `default_sample_duration` を取る。
-* 根拠: `def _parse_moov(moov: bytes) -> Tuple[int, int, int]:` (行番号: 101)
+* 根拠: `def _parse_moov(moov: bytes) -> Tuple[int, int, int]:` (行番号: 118)
 * **引数/リクエスト**: `moov: bytes`(moov の本体)
 * **戻り値/レスポンス**: `(track_id, timescale, trex の既定サンプル長)`
 * **副作用**: なし
@@ -92,7 +93,7 @@
 ### `_moof_video_ticks`
 
 * **役割**: moof 内の映像トラックの traf について、trun のサンプル長の合計(timescale 単位)を返す。サンプルごとの長さ(trun フラグ 0x100)が無ければ、tfhd の既定長(フラグ 0x08)、それも無ければ trex の既定長 × サンプル数を使う。音声トラックの traf は数えない。
-* 根拠: `def _moof_video_ticks(moof: bytes, track_id: int, trex_default_duration: int) -> int:` (行番号: 140)
+* 根拠: `def _moof_video_ticks(moof: bytes, track_id: int, trex_default_duration: int) -> int:` (行番号: 157)
 * **引数/リクエスト**: `moof`(本体)、`track_id`、`trex_default_duration`
 * **戻り値/レスポンス**: `int`
 * **副作用**: なし
@@ -101,7 +102,7 @@
 ### `_read_box_header`
 
 * **役割**: ファイル上の位置 `pos` にあるボックスの `(type, ヘッダ長, ボックス長)` を返す。ボックスがファイル末尾を越える(書き込み途中)なら `None`。
-* 根拠: `def _read_box_header(f: BinaryIO, pos: int, file_size: int) -> Optional[Tuple[bytes, int, int]]:` (行番号: 177)
+* 根拠: `def _read_box_header(f: BinaryIO, pos: int, file_size: int) -> Optional[Tuple[bytes, int, int]]:` (行番号: 194)
 * **引数/リクエスト**: ファイルオブジェクト、位置、ファイルサイズ
 * **戻り値/レスポンス**: タプルまたは `None`
 * **副作用**: ファイルの seek/read(最大16バイト)
@@ -110,7 +111,7 @@
 ### `_group_fragments`
 
 * **役割**: 連続するフラグメントを、合計が `SEGMENT_TARGET_SECONDS` 以上になるまでまとめて1セグメントにする。最後の端数も(長さが正なら)1セグメントにする。
-* 根拠: `def _group_fragments(fragments: List[Tuple[int, int, float]]) -> List[Tuple[int, int, float]]:` (行番号: 199)
+* 根拠: `def _group_fragments(fragments: List[Tuple[int, int, float]]) -> List[Tuple[int, int, float]]:` (行番号: 216)
 * **引数/リクエスト**: `(offset, length, 秒)` の一覧
 * **戻り値/レスポンス**: まとめた `(offset, length, 秒)` の一覧
 * **副作用**: なし
@@ -119,7 +120,7 @@
 ### `index_mp4`
 
 * **役割**: fragmented MP4 1本のボックスを先頭から順に読み、初期化セグメント長(moov の終端)とセグメント一覧を返す。moof の直後の mdat までを1フラグメントとし、書き込み途中の末尾フラグメント(ボックスが末尾を越える、moof の後に mdat がまだ無い)は含めない。
-* 根拠: `def index_mp4(path: str) -> Dict[str, Any]:` (行番号: 219)
+* 根拠: `def index_mp4(path: str) -> Dict[str, Any]:` (行番号: 236)
 * **引数/リクエスト**: `path: str`
 * **戻り値/レスポンス**: `{"init_size": int, "segments": [[offset, length, 秒], ...]}`
 * **副作用**: ファイルの読み取り(ボックスヘッダ・moov・moof のみ)
@@ -129,7 +130,7 @@
 ### `record_dir` / `find_record_mp4_files` / `_start_seconds_from_name`
 
 * **役割**: カメラの録画ディレクトリ(`config.NVR_RECORD_DIR/<nas_folder または name>`)、指定日の `YYYYMMDD_*.mp4` 一覧(昇順。ディレクトリや録画が無ければ警告して `None`)、ファイル名の `HHMMSS` から0時からの秒数(不正なら `None`)。
-* 根拠: `def record_dir(cam_conf: Dict[str, Any]) -> str:` (行番号: 266)、`def find_record_mp4_files(cam_conf: Dict[str, Any], target_date: str) -> Optional[List[str]]:` (行番号: 271)、`def _start_seconds_from_name(name: str) -> Optional[int]:` (行番号: 284)
+* 根拠: `def record_dir(cam_conf: Dict[str, Any]) -> str:` (行番号: 283)、`def find_record_mp4_files(cam_conf: Dict[str, Any], target_date: str) -> Optional[List[str]]:` (行番号: 288)、`def _start_seconds_from_name(name: str) -> Optional[int]:` (行番号: 301)
 * **引数/リクエスト**: `cam_conf`(、`target_date`、`name`)
 * **戻り値/レスポンス**: 上記のとおり
 * **副作用**: `find_record_mp4_files` はディレクトリの存在確認と glob、警告ログ
@@ -138,7 +139,7 @@
 ### `_index_path` / `_load_index` / `_save_index` / `_file_index`
 
 * **役割**: 索引 JSON のパス、読み込み(壊れている・形式が違えば空として扱う)、`tempfile.mkstemp` + `os.replace` による書き込み、1ファイル分の索引(サイズと `st_mtime_ns` が同じならキャッシュを使い、違えば `index_mp4` で読み直す)。
-* 根拠: `def _load_index(path: str) -> Dict[str, Any]:` (行番号: 303)、`def _save_index(path: str, files: Dict[str, Any]) -> None:` (行番号: 314)、`def _file_index(path: str, cached: Optional[Dict[str, Any]], cam_name: str) -> Tuple[Dict[str, Any], bool]:` (行番号: 333)
+* 根拠: `def _load_index(path: str) -> Dict[str, Any]:` (行番号: 320)、`def _save_index(path: str, files: Dict[str, Any]) -> None:` (行番号: 331)、`def _file_index(path: str, cached: Optional[Dict[str, Any]], cam_name: str) -> Tuple[Dict[str, Any], bool]:` (行番号: 350)
 * **引数/リクエスト**: 上記のとおり
 * **戻り値/レスポンス**: `_file_index` は `(索引, 読み直したか)`
 * **副作用**: 索引ファイルの読み書き、警告ログ
@@ -147,7 +148,7 @@
 ### `get_record_files`
 
 * **役割**: 指定日の再生できる録画を、プレイリスト上の位置(前のファイルの長さの累積)つきで返す。カメラ×日付単位のロック(`_index_locks`)の下で索引を読み、変化したファイルだけ読み直し、消えたファイルがあるか読み直しがあったときだけ保存する。`unsupported`・時刻を読めない・セグメントが無いファイルは外す。
-* 根拠: `def get_record_files(cam_conf: Dict[str, Any], target_date: str) -> Optional[List[RecordFile]]:` (行番号: 352)
+* 根拠: `def get_record_files(cam_conf: Dict[str, Any], target_date: str) -> Optional[List[RecordFile]]:` (行番号: 369)
 * **引数/リクエスト**: `cam_conf`、`target_date`(YYYYMMDD。ルーターで検証済み)
 * **戻り値/レスポンス**: `List[RecordFile]`、1本も無ければ `None`
 * **副作用**: NAS 上の録画の stat・ボックス読み取り、索引 JSON の書き込み
@@ -155,8 +156,8 @@
 
 ### `build_playlist` / `get_record_playlist`
 
-* **役割**: `#EXT-X-VERSION:7`・`#EXT-X-PLAYLIST-TYPE:VOD`・`#EXT-X-INDEPENDENT-SEGMENTS` のプレイリストを組み立てる。ファイルごとに(2本目以降は `#EXT-X-DISCONTINUITY` の後に)`#EXT-X-MAP:URI="<ファイル名>",BYTERANGE="<init_size>@0"` を置き、各セグメントを `#EXTINF` + `#EXT-X-BYTERANGE:<length>@<offset>` + ファイル名で並べ、末尾に `#EXT-X-ENDLIST` を付ける。URI はファイル名だけ(プレイリストと同じディレクトリからの相対)。当日分も呼び出し時点で書き終わったフラグメントまでを載せて `ENDLIST` を付ける。
-* 根拠: `def build_playlist(files: List[RecordFile]) -> str:` (行番号: 397)、`def get_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:` (行番号: 424)
+* **役割**: `#EXT-X-VERSION:7`・`#EXT-X-PLAYLIST-TYPE:VOD`・`#EXT-X-INDEPENDENT-SEGMENTS` のプレイリストを組み立てる。ファイルごとに(2本目以降は `#EXT-X-DISCONTINUITY` の後に)`#EXT-X-MAP:URI="<ファイル名>?part=0-<init_size>"` を置き、各セグメントを `#EXTINF` + `<ファイル名>?part=<offset>-<length>` で並べ、末尾に `#EXT-X-ENDLIST` を付ける。URI はプレイリストと同じディレクトリからの相対。当日分も呼び出し時点で書き終わったフラグメントまでを載せて `ENDLIST` を付ける。
+* 根拠: `def build_playlist(files: List[RecordFile]) -> str:` (行番号: 414)、`def get_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:` (行番号: 441)
 * **引数/リクエスト**: `files` ／ `cam_conf`, `target_date`
 * **戻り値/レスポンス**: プレイリスト本文 ／ 録画が無ければ `None`
 * **副作用**: `get_record_files` と同じ
@@ -165,7 +166,7 @@
 ### `get_record_timeline`
 
 * **役割**: 録画ファイルごとの `{"start_seconds", "position", "duration"}`(位置と長さは小数3桁に丸める)。フロントエンドが指定時刻を再生位置に変換するために使う。
-* 根拠: `def get_record_timeline(cam_conf: Dict[str, Any], target_date: str) -> List[Dict[str, float]]:` (行番号: 436)
+* 根拠: `def get_record_timeline(cam_conf: Dict[str, Any], target_date: str) -> List[Dict[str, float]]:` (行番号: 453)
 * **引数/リクエスト**: `cam_conf`, `target_date`
 * **戻り値/レスポンス**: リスト(録画が無ければ空)
 * **副作用**: `get_record_files` と同じ
@@ -174,11 +175,29 @@
 ### `resolve_record_file`
 
 * **役割**: 配信してよい録画 MP4 の絶対パスを返す。ファイル名が `<target_date>_HHMMSS.mp4`(長さも一致、時刻として正しい)であり、`realpath` が録画ディレクトリの中にあり、通常ファイルとして存在する場合だけ返す。
-* 根拠: `def resolve_record_file(cam_conf: Dict[str, Any], target_date: str, filename: str) -> Optional[str]:` (行番号: 449)
+* 根拠: `def resolve_record_file(cam_conf: Dict[str, Any], target_date: str, filename: str) -> Optional[str]:` (行番号: 466)
 * **引数/リクエスト**: `cam_conf`, `target_date`, `filename`
 * **戻り値/レスポンス**: パスまたは `None`
 * **副作用**: `realpath`・`isfile`
 * **エラーハンドリング**: 条件を満たさなければ `None`(ルーターが404にする)
+
+### `_rewrite_moof` / `rewrite_fragments`
+
+* **役割**: `rewrite_fragments` は、ファイル上の `abs_offset` から読んだ moof+mdat の並びの各 moof を `_rewrite_moof` で書き換える。`_rewrite_moof` は、tfhd に base-data-offset(フラグ 0x000001)を持つ traf について、その8バイトを取り除いてフラグを default-base-is-moof(0x020000)に替え、続く trun の data_offset を「元の絶対位置 − moof の位置 − moof が縮んだ量(base-data-offset を持つ traf の数 × 8)」に直す。traf・moof のサイズも詰め直す。base-data-offset を持たない moof はそのまま返す(NVR の出力が将来 default-base-is-moof になっても動く)。
+* 根拠: `def _rewrite_moof(moof: bytes, moof_abs: int) -> bytes:` (行番号: 484)、`def rewrite_fragments(chunk: bytes, abs_offset: int) -> bytes:` (行番号: 534)
+* **引数/リクエスト**: `chunk: bytes`, `abs_offset: int`(chunk のファイル上の位置)
+* **戻り値/レスポンス**: 書き換えた bytes(mdat はそのまま)
+* **副作用**: なし
+* **エラーハンドリング**: chunk の末尾がボックスの境界と一致しない、または base-data-offset を持つ traf の trun に data_offset が無い場合は `UnsupportedRecording`。
+
+### `read_record_part`
+
+* **役割**: プレイリストが参照する範囲を NAS の MP4 から読んで返す。ファイル名は `resolve_record_file` で検証し、範囲は索引の初期化セグメント(`0-<init_size>`)かセグメント1つと完全に一致する場合だけ受け付ける(任意の範囲を読ませない)。初期化セグメントはそのまま、セグメントは `rewrite_fragments` で書き換えて返す。索引が古ければ(サイズ・更新時刻が違えば)その場で読み直して保存する。
+* 根拠: `def read_record_part(cam_conf: Dict[str, Any], target_date: str, filename: str,` (行番号: 549)
+* **引数/リクエスト**: `cam_conf`, `target_date`, `filename`, `offset`, `length`
+* **戻り値/レスポンス**: `bytes`、該当しなければ `None`(ルーターが404にする)
+* **副作用**: NAS 上のファイルの読み取り(指定範囲のみ)、索引 JSON の更新
+* **エラーハンドリング**: `stat` 失敗・読み取り失敗・書き換え失敗(`OSError`・`struct.error`・`UnsupportedRecording`)は警告ログを出して `None`。
 
 ## 5. 処理フロー図
 
@@ -221,6 +240,8 @@ graph TD
         load_index["_load_index()"]
         find_files["find_record_mp4_files()"]
         resolve["resolve_record_file()"]
+        read_part["read_record_part()"]
+        rewrite["rewrite_fragments() / _rewrite_moof()"]
     end
     subgraph "外部依存"
         config["config.NVR_RECORD_DIR"]
@@ -243,6 +264,10 @@ graph TD
     index_mp4 --> nas
     find_files --> config
     resolve --> config
+    read_part --> resolve
+    read_part --> file_index
+    read_part --> rewrite
+    read_part --> nas
     load_index --> sd
     save_index --> sd
 ```
@@ -251,16 +276,16 @@ graph TD
 
 | 優先度 | ファイル名 | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `routers/camera_router.py` | プレイリスト・MP4 がどの URL でどう配信されるか(Range 対応・404 の条件)を確認するため | 根拠: `def get_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:` (行番号: 424) |
+| 高 | `routers/camera_router.py` | プレイリスト・MP4 の一部がどの URL でどう配信されるか(`part` の検証・404 の条件)を確認するため | 根拠: `def get_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:` (行番号: 424) |
 | 高 | `deploy/systemd/nvr-*.service` | 録画 MP4 の形式(`movflags`)が本ファイルの前提を満たすかを確認するため | 根拠: `raise UnsupportedRecording("fragmented MP4 ではありません(mvex がありません)")` (行番号: 128) |
-| 中 | `family-quest/src/features/camera/recordTimeline.ts` | `get_record_timeline` の結果の使われ方 | 根拠: `def get_record_timeline(cam_conf: Dict[str, Any], target_date: str) -> List[Dict[str, float]]:` (行番号: 436) |
+| 中 | `family-quest/src/features/camera/recordTimeline.ts` | `get_record_timeline` の結果の使われ方 | 根拠: `def get_record_timeline(cam_conf: Dict[str, Any], target_date: str) -> List[Dict[str, float]]:` (行番号: 453) |
 | 中 | `tests/test_record_playlist_service.py` | ボックスの組み立て方と期待する挙動(書き込み途中のフラグメント、索引の再利用)がテストに書かれている | 根拠: [テストファイル。本ファイル単体からは不明] |
 
 ## 8. 保守上の注意点
 
 * **SD に動画データを書かない**: 本ファイルが SD に書くのは索引 JSON だけである。ffmpeg による再多重化やセグメントの書き出しを足すと Issue #1088 の障害(SD への数十GBの書き込みで `database is locked`・API 無応答)が再発する。
 * **NVR の録画形式への依存**: fragmented MP4(moov に `mvex`、以降 moof+mdat)であることが前提。録画の `movflags` を変えるときは本ファイルとテストを確認すること。
-* **未解決(Issue #1091)**: NVR(ffmpeg の既定)の `tfhd` は `base-data-offset`(ファイル先頭からの絶対位置)を持っており、ブラウザの MSE(hls.js)はこれを受け付けない。現在の「プレイリストのバイト範囲で MP4 をそのまま返す」配信では、Chromium + hls.js で再生できないことを確認している。配信時に moof を書き換える方式を検証済みで、採否を確認中。
+* **moof の書き換えが必要な理由**: NVR(ffmpeg の既定)の `tfhd` は base-data-offset(ファイル先頭からの絶対位置)を持ち、ブラウザの MSE(hls.js)はこれを受け付けない(MP4 を Range でそのまま渡すと Chromium で再生できないことを確認した)。そのため `read_record_part` が moof を書き換えて返す。NVR の ffmpeg に `+default_base_moof` を足せば書き換えは不要になるが、それ以前の録画には引き続き書き換えが要る。書き換えは絶対位置を持つ moof にだけ行うので、両方が混在しても動く。
 * **当日分のプレイリスト**: 呼び出し時点のスナップショットに `#EXT-X-ENDLIST` を付けて返す。それ以降の録画は再読み込みで取り直す。
 * **並行性**: 索引の読み書きはプロセス内のロック(`_index_locks`)で直列化しており、CLAUDE.md の単一プロセス前提に依存する。ファイル自体は tmp + `os.replace` で原子的に置き換える。
 * 根拠: `with _index_locks.acquire((cam_id, target_date)):` (行番号: 360)
