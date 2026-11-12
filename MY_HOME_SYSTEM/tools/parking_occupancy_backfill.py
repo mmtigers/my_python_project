@@ -162,8 +162,9 @@ def process_recordings(
 ) -> int:
     """録画を順に解析して observations.csv へ追記する。書いた行数を返す。
 
-    1本ごとに flush するので、途中で止めてもそこまでの結果は残り、次回は続きから進む。
-    フレームが1枚も取れなかった録画は記録しない(次回もう一度試す)。
+    録画1本分の行は、その録画を最後まで読めてからまとめて書く。途中で止めた・ffmpeg が
+    失敗した録画の行は1行も残さない(途中までの行が残ると、次回は処理済みとみなされて
+    残りの時間帯が二度と解析されない)。書かなかった録画は次回もう一度試す。
     """
     is_new = not os.path.exists(observations_path)
     written = 0
@@ -176,12 +177,18 @@ def process_recordings(
             if start is None:
                 continue
             file_name = os.path.basename(path)
-            for obs, frame in occupancy.analyze_recording(path, start, interval_seconds):
-                writer.writerow(_observation_row(obs, file_name))
-                written += 1
-                if frame_saver is not None:
-                    frame_saver.offer(obs, frame)
+            rows: List[Dict[str, object]] = []
+            try:
+                for obs, frame in occupancy.analyze_recording(path, start, interval_seconds):
+                    rows.append(_observation_row(obs, file_name))
+                    if frame_saver is not None:
+                        frame_saver.offer(obs, frame)
+            except occupancy.FrameExtractionError as e:
+                print(f"録画を最後まで読めなかったので次回に回します: {e}", file=sys.stderr)
+                continue
+            writer.writerows(rows)
             f.flush()
+            written += len(rows)
     return written
 
 

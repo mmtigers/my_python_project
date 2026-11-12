@@ -168,11 +168,10 @@ class _FakeStdout:
         self.closed = True
 
 
-def _fake_popen(monkeypatch, frames, returncode=0, wait_side_effect=None):
+def _fake_popen(monkeypatch, frames, returncode=0):
     """ffmpeg を起動せず、与えたフレームを stdout から流す偽プロセスに差し替える。"""
     process = MagicMock()
     process.stdout = _FakeStdout(b"".join(f.tobytes() for f in frames))
-    process.wait.side_effect = wait_side_effect
     process.wait.return_value = returncode
     process.poll.return_value = returncode
     popen = MagicMock(return_value=process)
@@ -200,20 +199,25 @@ class TestExtractFrames:
         monkeypatch.setattr(occupancy.shutil, "which", lambda name: None)
         assert occupancy.build_frame_command("a.mp4", 60)[0] == "nice"
 
-    def test_ffmpeg_が失敗しても読めた分は返して警告を残す(self, monkeypatch):
+    def test_ffmpeg_が失敗したら読めた分を返した後で例外にする(self, monkeypatch):
         _fake_popen(monkeypatch, [_frame(False, False)], returncode=1)
-        warning = MagicMock()
-        monkeypatch.setattr(occupancy.logger, "warning", warning)
 
-        assert len(list(occupancy.extract_frames("/rec/broken.mp4", 60))) == 1
-        assert "/rec/broken.mp4" in warning.call_args.args[0]
+        frames = occupancy.extract_frames("/rec/broken.mp4", 60)
+        assert next(frames).shape == (H, W, 3)
+        with pytest.raises(occupancy.FrameExtractionError, match="/rec/broken.mp4"):
+            next(frames)
 
-    def test_ffmpeg_が終わらなければ強制終了する(self, monkeypatch):
-        timeout = occupancy.subprocess.TimeoutExpired("ffmpeg", 1)
-        _, process = _fake_popen(monkeypatch, [], wait_side_effect=[timeout, 0])
+    def test_時間切れで_ffmpeg_を強制終了する見張りを掛け終われば外す(self, monkeypatch):
+        _, process = _fake_popen(monkeypatch, [_frame(False, False)])
+        timer = MagicMock()
+        monkeypatch.setattr(occupancy.threading, "Timer", timer)
 
-        assert list(occupancy.extract_frames("/rec/a.mp4", 60)) == []
-        process.kill.assert_called_once()
+        list(occupancy.extract_frames("/rec/a.mp4", 60))
+
+        # 読み取りが固まっても抜けられるよう、読み始める前から kill の予約が入っている
+        timer.assert_called_once_with(occupancy.FFMPEG_TIMEOUT_SECONDS, process.kill)
+        timer.return_value.start.assert_called_once()
+        timer.return_value.cancel.assert_called_once()
 
     def test_途中で読むのをやめたら_ffmpeg_を残さない(self, monkeypatch):
         _, process = _fake_popen(monkeypatch, [_frame(False, False), _frame(False, False)])

@@ -47,6 +47,8 @@ def fake_analyze(monkeypatch):
         name = os.path.basename(path)
         calls.append(name)
         for index, state in enumerate(states.get(name, [])):
+            if isinstance(state, BaseException):
+                raise state
             timestamp = start + datetime.timedelta(seconds=index * interval_seconds)
             yield occupancy.Observation(timestamp, state, FEATURES), np.zeros((72, 128, 3), np.uint8)
 
@@ -126,6 +128,40 @@ class TestRun:
         backfill.run(str(rec), str(out), 1, 60, 3, save_frames=False)
 
         assert calls == ["20261112_080000.mp4"] * 2
+
+    def test_最後まで読めなかった録画は1行も書かず次回もう一度試す(self, tmp_path, fake_analyze, capsys):
+        states, calls = fake_analyze
+        rec, out = tmp_path / "rec", tmp_path / "out"
+        rec.mkdir()
+        _touch(rec / "20261112_080000.mp4")
+        _touch(rec / "20261112_081000.mp4")
+        states["20261112_080000.mp4"] = [P, P, occupancy.FrameExtractionError("NAS が応答しない")]
+        states["20261112_081000.mp4"] = [A, A, A]
+
+        assert backfill.run(str(rec), str(out), 1, 60, 3, save_frames=False) == 0
+        rows = _read_csv(out / backfill.OBSERVATIONS_FILE)
+        assert {row["file"] for row in rows} == {"20261112_081000.mp4"}
+        assert "次回に回します" in capsys.readouterr().err
+
+        states["20261112_080000.mp4"] = [P, P, P]
+        backfill.run(str(rec), str(out), 1, 60, 3, save_frames=False)
+        assert calls == ["20261112_080000.mp4", "20261112_081000.mp4", "20261112_080000.mp4"]
+        assert len(_read_csv(out / backfill.OBSERVATIONS_FILE)) == 6
+
+    def test_途中で中断した録画の行は残さない(self, tmp_path, fake_analyze):
+        states, _ = fake_analyze
+        rec, out = tmp_path / "rec", tmp_path / "out"
+        rec.mkdir()
+        _touch(rec / "20261112_080000.mp4")
+        _touch(rec / "20261112_081000.mp4")
+        states["20261112_080000.mp4"] = [P, P, P]
+        states["20261112_081000.mp4"] = [A, KeyboardInterrupt()]
+
+        with pytest.raises(KeyboardInterrupt):
+            backfill.run(str(rec), str(out), 1, 60, 3, save_frames=False)
+
+        rows = _read_csv(out / backfill.OBSERVATIONS_FILE)
+        assert {row["file"] for row in rows} == {"20261112_080000.mp4"}
 
     def test_判定が変わった時と不明の時だけ画像を残し上限を守る(self, tmp_path, fake_analyze):
         states, _ = fake_analyze

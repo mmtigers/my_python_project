@@ -24,15 +24,12 @@ import datetime
 import shutil
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass
 from typing import Iterable, Iterator, List, NamedTuple, Optional
 
 import cv2
 import numpy as np
-
-from core.logger import setup_logging
-
-logger = setup_logging("parking_occupancy")
 
 # === 解析に使うフレームの大きさ ===
 # エッジ密度は解像度で値が変わるため、必ずこの大きさに揃えてから特徴量を計算する。
@@ -84,6 +81,10 @@ DEFAULT_MAX_GAP = datetime.timedelta(minutes=30)
 FFMPEG_NICE_LEVEL = 15
 FFMPEG_THREADS = 2             # Issue #782 と同じ理由で、デコードのスレッド数を絞る
 FFMPEG_TIMEOUT_SECONDS = 300   # 1ファイル(10分の録画)の処理に許す時間
+
+
+class FrameExtractionError(RuntimeError):
+    """録画を最後まで読めなかった(ffmpeg の失敗、または時間切れ)。"""
 
 
 @dataclass(frozen=True)
@@ -213,8 +214,9 @@ def build_frame_command(path: str, interval_seconds: int) -> List[str]:
 def extract_frames(path: str, interval_seconds: int) -> Iterator[np.ndarray]:
     """録画ファイルから `interval_seconds` ごとのフレームを順に返す。
 
-    ffmpeg が失敗した場合は、それまでに読めたフレームを返したうえで警告を残す
-    (書き込み途中で壊れた録画が1本あっても、全体の解析は止めない)。
+    ffmpeg が失敗した・時間内に終わらなかった場合は、それまでに読めたフレームを返した後で
+    `FrameExtractionError` を送出する。呼び出し側は、この例外が出た録画を「最後まで
+    読めていない」ものとして扱える。
     """
     frame_size = ANALYZE_WIDTH * ANALYZE_HEIGHT * 3
     cmd = build_frame_command(path, interval_seconds)
@@ -223,22 +225,24 @@ def extract_frames(path: str, interval_seconds: int) -> Iterator[np.ndarray]:
     with tempfile.TemporaryFile() as stderr_file:
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr_file)
         assert process.stdout is not None, "Popen に stdout=PIPE を指定している"
+        # NAS が固まって ffmpeg が出力を止めると、下の read が無期限に待ってしまう。
+        # 時間切れで kill すれば read は EOF で抜ける。
+        watchdog = threading.Timer(FFMPEG_TIMEOUT_SECONDS, process.kill)
+        watchdog.daemon = True
+        watchdog.start()
         try:
             while True:
                 raw = process.stdout.read(frame_size)
                 if len(raw) != frame_size:
                     break
                 yield np.frombuffer(raw, dtype=np.uint8).reshape((ANALYZE_HEIGHT, ANALYZE_WIDTH, 3))
-            try:
-                returncode = process.wait(timeout=FFMPEG_TIMEOUT_SECONDS)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                returncode = process.wait()
+            returncode = process.wait()
             if returncode != 0:
                 stderr_file.seek(0)
                 tail = stderr_file.read()[-500:].decode("utf-8", errors="ignore").strip()
-                logger.warning(f"⚠️ フレームの取り出しに失敗しました: {path} (returncode={returncode}) {tail}")
+                raise FrameExtractionError(f"{path} (returncode={returncode}) {tail}".strip())
         finally:
+            watchdog.cancel()
             process.stdout.close()
             if process.poll() is None:
                 # 呼び出し側が途中で読むのをやめた場合。ffmpeg を残さない。
