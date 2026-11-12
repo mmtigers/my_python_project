@@ -109,6 +109,8 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [check_switchbot_hub_api.md](./check_switchbot_hub_api.md) | SwitchBotハブの稼働時/停止時で SwitchBot API の応答に差が出るかを実機で確かめる読み取り専用の確認用 CLI(Issue #881)。 |
 | [db_retention_service.md](./db_retention_service.md) | SQLite の**行**の保持期間削除(2026-09-20 新設、Issue #733)。従来の保持期間削除はすべて「ファイル」が対象で、DB の行を消す経路が無かった。既定はドライランで1行も削除せず、削除予定件数を報告するだけ。有効時も直近のバックアップを確認してからバッチ分割して削除する。 |
 | [db_retention.md](./db_retention.md) | 上記を実機で確認・実行するための CLI(2026-09-20 新設、Issue #733)。引数なしで現状と削除予定のレポート、`--apply` で削除、`--vacuum` でファイル縮小。 |
+| [parking_occupancy_service.md](./parking_occupancy_service.md) | 駐車場カメラの映像から自家用車の在否を判定し、外出(出庫→入庫)の区間と日ごとの集計にまとめるサービス(Phase 0: 実現性検討。DB・ダッシュボードには未接続)。石畳のエッジ密度と床の外れ画素の割合をしきい値で判定し、2つが一致した時だけ在/不在とする。 |
+| [parking_occupancy_backfill.md](./parking_occupancy_backfill.md) | 上記を使い、NAS 上の NVR 録画を遡って解析して CSV(観測・外出・日次集計)に書き出す CLI。処理済みの録画は飛ばして続きから進む。 |
 | [ui_log_router.md](./ui_log_router.md) | 画面タップログ(UX改善用の操作ログ)を受け付ける`POST /api/ui-log/events`のルーター。薄いルーターで実処理は`ui_event_service`に委譲する。 |
 | [ui_log.md](./ui_log.md) | 画面タップログのリクエスト/レスポンスのPydanticモデル(`UiTapEvent`/`UiTapBatch`/`UiTapBatchResponse`)。 |
 | [ui_event_service.md](./ui_event_service.md) | 画面タップのバッチを`ui_tap_events`へ`INSERT OR IGNORE`で追記するサービス(冪等・時刻範囲チェック)。 |
