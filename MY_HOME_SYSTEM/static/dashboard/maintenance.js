@@ -1,20 +1,47 @@
-function dashboardPost(url, resultId, busyText) {
-    var box = document.getElementById(resultId);
-    box.textContent = busyText;
-    fetch(url, { method: "POST", credentials: "same-origin" })
-        .then(function (res) {
-            return res.json().then(function (data) { return { ok: res.ok, data: data }; });
-        })
-        .then(function (result) {
-            box.textContent = result.ok
-                ? (result.data.message || "完了しました")
-                : "失敗しました: " + (result.data.detail || "");
-        })
-        .catch(function (e) {
-            box.textContent = "通信エラー: " + e;
+// 再起動は、送信して終わりにせず「止まった → 戻ってきた」まで見届けて結果を出す。
+// 一度も止まらないまま時間が過ぎた場合は、完了とは言わず確認を促す。
+var RESTART_POLL_MS = 4000;
+var RESTART_MAX_POLLS = 75; // 約5分
+function restartPoll(box, sawDown, count) {
+    fetch("/api/system/deploy/status", { credentials: "same-origin", cache: "no-store" })
+        .then(function (res) { if (!res.ok) { throw new Error("HTTP " + res.status); } return true; })
+        .catch(function () { return false; })
+        .then(function (up) {
+            if (up && sawDown) {
+                box.textContent = "✅ 再起動が完了しました。ページを再読み込みすると新しい画面になります。";
+                dashboardToast("✅ 再起動が完了しました", true);
+                return;
+            }
+            if (count >= RESTART_MAX_POLLS) {
+                box.textContent = sawDown
+                    ? "❌ サーバーが長時間応答しません。実機の状態を確認してください。"
+                    : "再起動を確認できませんでした。しばらくしてからページを再読み込みしてください。";
+                return;
+            }
+            box.textContent = (sawDown || !up)
+                ? "サーバーを再起動しています。しばらくお待ちください..."
+                : "再起動を待っています...";
+            setTimeout(function () { restartPoll(box, sawDown || !up, count + 1); }, RESTART_POLL_MS);
         });
 }
-function dashboardRestart() { dashboardPost("/api/system/restart", "restartResult", "再起動コマンドを送信しています..."); }
+function dashboardRestart() {
+    var box = document.getElementById("restartResult");
+    var btn = document.getElementById("restartBtn");
+    btn.disabled = true;
+    box.textContent = "再起動コマンドを送信しています...";
+    fetch("/api/system/restart", { method: "POST", credentials: "same-origin" })
+        .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+        .then(function (r) {
+            if (!r.ok) { throw new Error(r.data.detail || "開始できませんでした"); }
+            box.textContent = r.data.message || "再起動を開始しました";
+            setTimeout(function () { restartPoll(box, false, 0); }, RESTART_POLL_MS);
+        })
+        .catch(function (e) {
+            // 送信直後にサーバーが落ちて応答を受け取れないこともある(その場合も戻りを待つ)。
+            box.textContent = "サーバーを再起動しています。しばらくお待ちください...";
+            setTimeout(function () { restartPoll(box, true, 0); }, RESTART_POLL_MS);
+        });
+}
 
 var backupPollTimer = null;
 function dashboardToast(text, ok) {

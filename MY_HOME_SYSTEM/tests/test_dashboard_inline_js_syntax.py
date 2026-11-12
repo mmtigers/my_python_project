@@ -19,7 +19,8 @@ import pytest
 from services import dashboard_page_service as dps
 
 _STATIC = Path(dps._STATIC_DIR)
-_JS_FILES = sorted(n for n in dps.STATIC_ASSET_FILES if n.endswith(".js"))
+# 同梱した外部ライブラリ(*.min.js)は自作コードの検査(<script>の混入等)の対象外にする。
+_JS_FILES = sorted(n for n in dps.STATIC_ASSET_FILES if n.endswith(".js") and not n.endswith(".min.js"))
 
 
 def test_static_dir_matches_allowlist():
@@ -59,8 +60,10 @@ def test_shell_links_stylesheet_before_status_card_css():
 
 def test_camera_script_order_hls_then_camera_js():
     srcs = _srcs(dps._camera_script())
-    assert srcs[0].startswith("https://cdn.jsdelivr.net/npm/hls.js@1/")
+    # hls.js はCDNではなく同梱のファイルを読む(インターネットが切れてもLAN内でライブを見られるように)
+    assert srcs[0].startswith("/dashboard/static/hls.light.min.js?v=")
     assert srcs[1].startswith("/dashboard/static/camera.js?v=")
+    assert not any(src.startswith("http") for src in srcs)
 
 
 def test_sys_page_script_order_maintenance_then_git():
@@ -69,7 +72,42 @@ def test_sys_page_script_order_maintenance_then_git():
         "t", "x", extra_head=dps._script_tag("maintenance.js") + dps._script_tag("git_status.js")
     )
     srcs = _srcs(html)
-    assert [s.split("?")[0].rsplit("/", 1)[1] for s in srcs] == ["maintenance.js", "git_status.js"]
+    # 先頭は全ページ共通の app.js(テーマ切替・Service Worker登録)
+    assert [s.split("?")[0].rsplit("/", 1)[1] for s in srcs] == ["app.js", "maintenance.js", "git_status.js"]
+
+
+def test_vendored_hls_is_excluded_from_our_own_js_checks_but_is_served():
+    assert dps.resolve_static_asset("hls.light.min.js") is not None
+    assert (_STATIC / "hls.LICENSE.txt").is_file(), "同梱した hls.js のライセンス文が無い"
+
+
+def _dark_tokens(block: str) -> dict[str, str]:
+    return dict(re.findall(r"(--[a-z0-9-]+):\s*([^;]+);", block))
+
+
+def test_dark_theme_tokens_match_between_auto_and_manual():
+    """暗い配色のトークンは「OSに従う(メディアクエリ)」と「手動(data-theme=dark)」の2か所にある。
+    片方だけ直すと、手動で暗くした端末だけ色が違う、という気づきにくい食い違いになる。"""
+    css = (_STATIC / "dashboard.css").read_text(encoding="utf-8")
+    auto = css[css.index(':root:not([data-theme="light"]) {'):]
+    auto = auto[: auto.index("}")]
+    manual = css[css.index(':root[data-theme="dark"] {'):]
+    manual = manual[: manual.index("}")]
+    assert _dark_tokens(auto), "暗い配色のトークンを取り出せていません"
+    assert _dark_tokens(auto) == _dark_tokens(manual)
+
+
+def test_shell_applies_saved_theme_before_stylesheet_and_has_toggle():
+    html = dps._page_shell("t", "<p>x</p>")
+    assert html.index("dashTheme") < html.index('<link rel="stylesheet"'), "保存済みテーマの適用が描画より後になっている"
+    assert 'id="themeToggle"' in html
+
+
+def test_service_worker_only_handles_navigations():
+    """オフライン画面用のService Workerは、ページの読み込み以外(API・映像・画像)に関与しない。"""
+    sw = (_STATIC / "sw.js").read_text(encoding="utf-8")
+    assert 'event.request.mode !== "navigate"' in sw
+    assert "caches." not in sw, "ページやデータをキャッシュしない(古い家の状態を見せない)"
 
 
 def test_resolve_static_asset_rejects_unknown_and_traversal():

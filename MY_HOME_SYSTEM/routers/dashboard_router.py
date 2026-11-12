@@ -18,8 +18,10 @@
 - ホームページの自動更新用に、カードのブロックだけを返す `{DASHBOARD_BASE_PATH}/status`
 - 見守りページのカメラスナップショット画像
 - ページ共通のCSS・各ページのJS(`static/dashboard/`。許可リスト方式、#949)
+- オフライン画面用のService Worker(`{DASHBOARD_BASE_PATH}/sw.js`。スコープをベースパス配下にするため`static/`の外で返す)
 """
 import json
+from urllib.parse import urlencode
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -80,6 +82,18 @@ def dashboard_icon(size: int) -> Response:
     )
 
 
+@router.get(f"{_BASE_PATH}/sw.js", include_in_schema=False)
+def dashboard_service_worker() -> FileResponse:
+    """オフライン画面用のService Worker。スコープを`{DASHBOARD_BASE_PATH}/`にするため、`static/`配下ではなく
+    ベースパス直下のURLで返す(Service Workerは自分のURLより上の階層を制御できない)。
+    中身を変えたらすぐ切り替わるよう、毎回再検証させる。"""
+    return FileResponse(
+        dashboard_page_service.SERVICE_WORKER_PATH,
+        media_type="text/javascript; charset=utf-8",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get(f"{_BASE_PATH}/m", include_in_schema=False)
 def legacy_mobile_path_redirect() -> RedirectResponse:
     """旧「かんたん表示」(`/dashboard/m`)のURLを新しいホームページへ301で送る。
@@ -99,40 +113,55 @@ def legacy_mobile_path_redirect() -> RedirectResponse:
 def dashboard_home(
     tab: str | None = None, hm_loc: str | None = None, hm_metric: str | None = None, hm_src: str | None = None,
 ) -> Response:
-    """ホームページ: ステータスカード + 見守り/くらし/システムへの導線 + 外部リンク。
-
-    `?hm_loc=itami|takasago|nagaokakyo&hm_metric=temp|hum|act&hm_src=security|takasago|itami`は過去30日ヒートマップの
-    拠点・指標・動きの対象(不正な値は既定)。
+    """ホームページ: いまの状態(サマリー)+ ステータスカード + カメラの写真 + 今日の動き + 外部リンク。
 
     `tab` はStreamlit版で使っていたクエリパラメータ(`/dashboard?tab=watch`)。
     スマートフォンのホーム画面にこの形のURLを追加している可能性があるため、
     値があれば対応する新しいページへ302で送る。
+
+    `hm_loc`/`hm_metric`/`hm_src` は過去30日ヒートマップの選択。ヒートマップは「くらし」ページへ
+    移したので、これらが付いた古いURL(ブックマーク等)は同じ選択のままそちらへ302で送る。
     """
     if tab is not None:
         target = _LEGACY_TAB_REDIRECTS.get(tab, _BASE_PATH)
         return RedirectResponse(url=target, status_code=302)
+    legacy = {k: v for k, v in (("hm_loc", hm_loc), ("hm_metric", hm_metric), ("hm_src", hm_src)) if v}
+    if legacy:
+        return RedirectResponse(url=f"{_BASE_PATH}/life?{urlencode(legacy)}#climate-heatmap", status_code=302)
 
     cards, fetched_at = home_status_service.collect_status_cards()
-    link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)
-    heatmap_html = _home_heatmap_html()
-    climate_html = _home_climate_html(hm_loc, hm_metric, hm_src)
     return HTMLResponse(
         dashboard_page_service.render_home_page(
             cards,
             fetched_at,
-            dashboard_path=f"{_BASE_PATH}/",
             status_path=_STATUS_PATH,
-            quest_path=_QUEST_APP_PATH,
-            asa_note_url=config.ASA_NOTE_URL,
-            yoru_note_url=config.YORU_NOTE_URL,
-            refresh_sec=home_status_service.MOBILE_PAGE_REFRESH_SEC,
             manifest_path=f"{_BASE_PATH}/app.webmanifest",
             icon_path=f"{_BASE_PATH}/icon-180.png",
-            link_health=link_health,
-            heatmap_html=heatmap_html,
-            climate_html=climate_html,
+            **_home_status_parts(cards),
         )
     )
+
+
+def _home_status_parts(cards) -> dict:
+    """ホームページ本体と自動更新フラグメントが共有する材料(同じ並び・同じ内容にするため1か所で作る)。"""
+    dashboard_path = f"{_BASE_PATH}/"
+    alerts = home_status_service.build_home_alerts(
+        cards, dashboard_path=dashboard_path, health=home_status_service.read_health_result()
+    )
+    return {
+        "dashboard_path": dashboard_path,
+        "refresh_sec": home_status_service.MOBILE_PAGE_REFRESH_SEC,
+        "quest_path": _QUEST_APP_PATH,
+        "asa_note_url": config.ASA_NOTE_URL,
+        "yoru_note_url": config.YORU_NOTE_URL,
+        "link_health": home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL),
+        "heatmap_html": _home_heatmap_html(),
+        "alerts_html": home_status_service.render_home_alerts_html(alerts),
+        "weather_html": home_status_service.render_today_weather_html(home_status_service.get_today_weather()),
+        "stills_html": dashboard_page_service.render_camera_stills(
+            dashboard_path=dashboard_path, snapshot_url_prefix=f"{_BASE_PATH}/snapshot"
+        ),
+    }
 
 
 def _home_heatmap_html() -> str:
@@ -144,8 +173,8 @@ def _home_heatmap_html() -> str:
     )
 
 
-def _home_climate_html(hm_loc: str | None, hm_metric: str | None, hm_src: str | None = None) -> str:
-    """ホームの「過去30日の温度/湿度/動き」。どれも10分キャッシュの集計から作る。
+def _climate_heatmap_html(hm_loc: str | None, hm_metric: str | None, hm_src: str | None = None) -> str:
+    """「くらし」ページの「過去30日の温度/湿度/動き」。どれも10分キャッシュの集計から作る。
     選んでいる指標の分だけを読む(動きを選んでいないときは動きの集計に触れない)。"""
     metric = dashboard_page_service.parse_climate_metric(hm_metric)
     is_activity = metric == "act"
@@ -164,24 +193,11 @@ def _home_climate_html(hm_loc: str | None, hm_metric: str | None, hm_src: str | 
 
 
 @router.get(_STATUS_PATH, include_in_schema=False)
-def dashboard_status_fragment(
-    hm_loc: str | None = None, hm_metric: str | None = None, hm_src: str | None = None,
-) -> HTMLResponse:
-    """ホームページの自動更新用(カードのブロックだけを返す)。"""
+def dashboard_status_fragment() -> HTMLResponse:
+    """ホームページの自動更新用(サマリー・カード・カメラの写真・今日の動き・外部リンクのブロックだけを返す)。"""
     cards, fetched_at = home_status_service.collect_status_cards()
-    link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)
     return HTMLResponse(
-        dashboard_page_service.render_home_status_section(
-            cards, fetched_at,
-            dashboard_path=f"{_BASE_PATH}/",
-            refresh_sec=home_status_service.MOBILE_PAGE_REFRESH_SEC,
-            quest_path=_QUEST_APP_PATH,
-            asa_note_url=config.ASA_NOTE_URL,
-            yoru_note_url=config.YORU_NOTE_URL,
-            link_health=link_health,
-            heatmap_html=_home_heatmap_html(),
-            climate_html=_home_climate_html(hm_loc, hm_metric, hm_src),
-        )
+        dashboard_page_service.render_home_status_section(cards, fetched_at, **_home_status_parts(cards))
     )
 
 
@@ -229,12 +245,15 @@ def dashboard_watch(
 
 
 @router.get(f"{_BASE_PATH}/life", include_in_schema=False)
-def dashboard_life() -> HTMLResponse:
+def dashboard_life(hm_loc: str | None = None, hm_metric: str | None = None, hm_src: str | None = None) -> HTMLResponse:
+    """くらしページ。`?hm_loc=itami|takasago|nagaokakyo&hm_metric=temp|hum|act&hm_src=security|takasago|itami`は
+    過去30日ヒートマップの拠点・指標・動きの対象(不正な値は既定)。"""
     cards, _ = home_status_service.collect_status_cards()
     materials = home_status_service.get_cached_materials()
     return HTMLResponse(
         dashboard_page_service.render_life_page(
-            cards, dashboard_path=f"{_BASE_PATH}/", daily_cost_rows=materials.daily_cost_rows
+            cards, dashboard_path=f"{_BASE_PATH}/", daily_cost_rows=materials.daily_cost_rows,
+            climate_html=_climate_heatmap_html(hm_loc, hm_metric, hm_src),
         )
     )
 
@@ -263,6 +282,7 @@ def dashboard_sys(nas_days: str | None = None) -> HTMLResponse:
             nas_days=nas_days,
             boot_history=system_info_service.get_boot_history(),
             log_groups=log_download_service.list_log_groups(),
+            health=home_status_service.read_health_result(now),
         )
     )
 

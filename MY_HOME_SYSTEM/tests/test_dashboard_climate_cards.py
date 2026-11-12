@@ -149,9 +149,9 @@ class TestClimateCards:
         cards = [card for card in self._cards() if card.group == "climate"]
         hrefs = [home_status_service.card_detail_href(card, "/dashboard/") for card in cards]
         assert hrefs == [
-            "/dashboard/?hm_loc=itami&hm_metric=temp#climate-heatmap",
-            "/dashboard/?hm_loc=takasago&hm_metric=temp#climate-heatmap",
-            "/dashboard/?hm_loc=nagaokakyo&hm_metric=temp#climate-heatmap",
+            "/dashboard/life?hm_loc=itami&hm_metric=temp#climate-heatmap",
+            "/dashboard/life?hm_loc=takasago&hm_metric=temp#climate-heatmap",
+            "/dashboard/life?hm_loc=nagaokakyo&hm_metric=temp#climate-heatmap",
         ]
 
     def test_values_come_from_the_sensor_frame(self):
@@ -178,7 +178,7 @@ class TestHeatmapWithThreeLocations:
         html = dashboard_page_service.render_home_climate_heatmap(
             self.DF, NOW, dashboard_path="/dashboard/", location="長岡京")
         for key in ("itami", "takasago", "nagaokakyo"):
-            assert f'href="/dashboard/?hm_loc={key}&amp;hm_metric=temp#climate-heatmap"' in html
+            assert f'href="/dashboard/life?hm_loc={key}&amp;hm_metric=temp#climate-heatmap"' in html
         assert "長岡京・1時間ごとの平均" in html
         assert 'title="11/8 9時台: 19.3℃"' in html
 

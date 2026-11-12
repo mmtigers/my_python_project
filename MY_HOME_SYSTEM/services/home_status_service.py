@@ -20,6 +20,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from typing import Any, NamedTuple
 
@@ -27,10 +28,11 @@ import config
 import pandas as pd
 import pytz
 import requests
+from core import state_file
 from core.database import get_ro_connection
 from core.utils import get_now_jst
 
-from services import analysis_service
+from services import analysis_service, recording_status_service
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +124,7 @@ STATUS_CARD_CSS = """
         transform: scale(0.98);
     }
     .status-title {
-        font-size: 0.78rem; color: var(--muted); margin-bottom: 4px; font-weight: bold;
+        font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; font-weight: bold;
     }
     .status-value {
         font-size: 1.1rem; font-weight: bold; line-height: 1.3; white-space: normal;
@@ -130,7 +132,7 @@ STATUS_CARD_CSS = """
     }
     /* 値の下の補足(前回値・前日比・最終検知時刻)。主役は値なので小さく薄く置く。 */
     .status-sub {
-        font-size: 0.72rem; font-weight: normal; line-height: 1.3; margin-top: 4px;
+        font-size: 0.8rem; font-weight: normal; line-height: 1.35; margin-top: 4px;
         color: var(--muted); white-space: normal; word-break: break-word;
     }
     .theme-green { background-color: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-bd); border-left: 5px solid var(--ok); }
@@ -495,7 +497,9 @@ def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
             val = "🟢 活動中 (今)"
             theme = "theme-green"
         elif diff_m < 60:
-            val = f"🟢 活動中 ({int(diff_m)}分前)"
+            # 何分前かは補足(最終検知 HH:MM)に出る。値はスマホ幅で1行に収まる長さにする
+            # (「活動中 (16分前)」は2行に折れ、隣のカードと高さが揃わなかった)。
+            val = "🟢 活動中"
             theme = "theme-green"
         else:
             val = f"🟡 静か ({int(diff_m/60)}h前)"
@@ -506,15 +510,22 @@ def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
         if not df_contact.empty:
             diff_c = (now - df_contact.iloc[0]["timestamp"]).total_seconds() / 60
             if diff_c < 60:
-                val = f"🟢 活動中 ({int(diff_c)}分前)"
+                val = "🟢 活動中"
                 theme = "theme-green"
     return val, theme
 
 
+# サーバーのメモリ使用率がこれ以上なら「メモリ不足」(赤)。
+SERVER_MEMORY_ALERT_PERCENT = 80
+
+
 def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:
+    """サーバーが正常か。値は家族にも伝わる言葉(正常/メモリ不足)にし、使用率の数字は補足(`describe_server`)に出す。"""
     if memory:
-        return f"💻 RAM: {int(memory['percent'])}%", "theme-green" if memory["percent"] < 80 else "theme-red"
-    return "⚪ 取得失敗", "theme-gray"
+        if memory["percent"] < SERVER_MEMORY_ALERT_PERCENT:
+            return "🟢 正常", "theme-green"
+        return "🔴 メモリ不足", "theme-red"
+    return "⚪ 取得できません", "theme-gray"
 
 
 def get_nas_status_simple(nas_data: pd.Series | None) -> tuple[str, str]:
@@ -522,11 +533,11 @@ def get_nas_status_simple(nas_data: pd.Series | None) -> tuple[str, str]:
         return "⚪ データなし", "theme-gray"
     try:
         if nas_data["status_ping"] == "OK":
-            return "🗄️ NAS: 稼働中", "theme-green"
+            return "🟢 稼働中", "theme-green"
         else:
-            return "⚠️ NAS: 応答なし", "theme-red"
+            return "🔴 応答なし", "theme-red"
     except KeyError:
-        return "⚠️ NAS: データ異常", "theme-yellow"
+        return "🟡 データ異常", "theme-yellow"
 
 
 # カメラの動体検知が `device_records` に入るときの `device_type`
@@ -566,25 +577,43 @@ def _camera_motion(df_sensor: pd.DataFrame) -> pd.DataFrame:
     ].sort_values("timestamp", ascending=False)
 
 
-def get_camera_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:
-    """カメラが最後に動きを捉えたのはいつか。
+def get_camera_status(
+    df_sensor: pd.DataFrame, now: datetime, recording: list[dict[str, Any]] | None = None
+) -> tuple[str, str]:
+    """カメラが録画できているか(分かるとき)。分からないときは、最後に動きを捉えたのはいつか。
 
-    **色は常に情報色(青)かグレーにする**。家族が出入りすれば毎日検知するため、
-    赤・黄にすると「気になること」の要約行が毎回埋まって意味を失う。
-    「誰かが来たかどうか」は人が見て判断する情報として出すだけにとどめる。
+    `recording` は `recording_status_service.camera_recording_states()` の結果(カメラごとの
+    `{"name", "state"}`。`state` は `ok`/`stalled`/`missing`)。渡されたときは録画の状態を値にする:
+    1台でも止まっていれば赤(どのカメラか)、全台録画できていれば緑。カメラの故障・接続断は
+    動体検知の有無からは分からない(「24時間 検知なし」は静かな日と区別できない)ため、
+    録画ファイルの新しさを正とする。
+
+    `recording` が None(NAS未マウントで判定できない・取得失敗)のときは従来どおり最後の動体検知を出す。
+    **このときの色は常に情報色(青)かグレーにする**。家族が出入りすれば毎日検知するため、
+    赤・黄にするとホームの「確認が必要です」が毎回埋まって意味を失う。
     """
+    if recording:
+        stopped = [r for r in recording if r.get("state") != "ok"]
+        if len(stopped) == 1:
+            return f"🔴 {stopped[0]['name']} 録画停止", "theme-red"
+        if stopped:
+            return f"🔴 {len(stopped)}台 録画停止", "theme-red"
+        if len(recording) == 1:
+            return "🟢 録画中", "theme-green"
+        return f"🟢 {len(recording)}台とも録画中", "theme-green"
+
     df_cam = _camera_motion(df_sensor)
     if df_cam.empty:
         return "⚪ データなし", "theme-gray"
 
     diff_m = (now - df_cam.iloc[0]["timestamp"]).total_seconds() / 60
     if diff_m < 10:
-        return "🎥 いま動きあり", "theme-blue"
+        return "いま動きあり", "theme-blue"
     if diff_m < 60:
-        return f"🎥 {int(diff_m)}分前に検知", "theme-blue"
+        return f"{int(diff_m)}分前に検知", "theme-blue"
     if diff_m < 24 * 60:
-        return f"🎥 {int(diff_m / 60)}時間前に検知", "theme-blue"
-    return "🎥 24時間 検知なし", "theme-gray"
+        return f"{int(diff_m / 60)}時間前に検知", "theme-blue"
+    return "24時間 検知なし", "theme-gray"
 
 
 def _parking_camera_motion(df_sensor: pd.DataFrame) -> pd.DataFrame:
@@ -606,12 +635,12 @@ def get_parking_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str
 
     diff_m = (now - df_park.iloc[0]["timestamp"]).total_seconds() / 60
     if diff_m < 10:
-        return "🚗 いま動きあり", "theme-blue"
+        return "いま動きあり", "theme-blue"
     if diff_m < 60:
-        return f"🚗 {int(diff_m)}分前に検知", "theme-blue"
+        return f"{int(diff_m)}分前に検知", "theme-blue"
     if diff_m < 24 * 60:
-        return f"🚗 {int(diff_m / 60)}時間前に検知", "theme-blue"
-    return "🚗 24時間 検知なし", "theme-gray"
+        return f"{int(diff_m / 60)}時間前に検知", "theme-blue"
+    return "24時間 検知なし", "theme-gray"
 
 
 # === 補足表示(カードの値の下に小さく出す) ===
@@ -681,31 +710,55 @@ def camera_motion_log(df_sensor: pd.DataFrame) -> pd.DataFrame:
     return _camera_motion(df_sensor)
 
 
-def describe_camera(df_sensor: pd.DataFrame, now: datetime) -> str | None:
-    """どのカメラが捉えたのか。値の「5分前に検知」だけでは場所が分からない。"""
+def describe_camera(
+    df_sensor: pd.DataFrame, now: datetime, recording: list[dict[str, Any]] | None = None
+) -> str | None:
+    """どのカメラが捉えたのか。値の「5分前に検知」だけでは場所が分からない。
+
+    `recording`(`get_camera_status` と同じ)で止まっているカメラがあるときは、いつから止まっているか
+    (最新の録画の開始時刻)を優先して出す。全台録画中のときは「最終検知 …」として動体検知を添える。
+    """
+    if recording:
+        stopped = [r for r in recording if r.get("state") != "ok"]
+        if stopped:
+            latest = stopped[0].get("latest")
+            at = _format_moment(latest.replace(tzinfo=None) if latest is not None else None, now.replace(tzinfo=None))
+            return "今日・昨日の録画がありません" if at is None else f"最新の録画 {at}"
     df_cam = _camera_motion(df_sensor)
     at = _format_moment(_latest_timestamp(df_cam), now)
     if at is None:
         return None
+    prefix = "最終検知 " if recording else ""
     if "friendly_name" not in df_cam.columns:
-        return at
+        return f"{prefix}{at}"
     name = df_cam.iloc[0]["friendly_name"]
-    return at if pd.isna(name) else f"{name} {at}"
+    return f"{prefix}{at}" if pd.isna(name) else f"{prefix}{name} {at}"
 
 
-def describe_cost(monthly_cost: int, last_month_cost: int | None) -> str | None:
+def get_cost_status(monthly_cost: int | None) -> tuple[str, str]:
+    """今月の電気代。取得に失敗したとき(None)は「0 円」と区別できるよう灰色の「取得できません」にする。"""
+    if monthly_cost is None:
+        return "⚪ 取得できません", "theme-gray"
+    return f"{monthly_cost:,} 円", "theme-blue"
+
+
+def describe_cost(monthly_cost: int | None, last_month_cost: int | None) -> str | None:
     """先月の同じ時点と比べる。比較対象が無い(初月・取得失敗)ときは出さない。"""
-    if not last_month_cost:
+    if monthly_cost is None or not last_month_cost:
         return None
     diff = monthly_cost - last_month_cost
     sign = "+" if diff > 0 else ""
     return f"先月同日 {last_month_cost:,}円 ({sign}{diff:,})"
 
 
-def describe_server(disk: dict[str, float] | None) -> str | None:
-    if not disk or "percent" not in disk:
-        return None
-    return f"ディスク {int(disk['percent'])}%"
+def describe_server(disk: dict[str, float] | None, memory: dict[str, float] | None = None) -> str | None:
+    """メモリ・ディスクの使用率(取れたものだけ)。値は「正常/メモリ不足」なので数字はここに出す。"""
+    parts = []
+    if memory and "percent" in memory:
+        parts.append(f"メモリ {int(memory['percent'])}%")
+    if disk and "percent" in disk:
+        parts.append(f"ディスク {int(disk['percent'])}%")
+    return "・".join(parts) or None
 
 
 def describe_nas(nas_data: pd.Series | None) -> str | None:
@@ -804,12 +857,12 @@ def describe_climate(df_sensor: pd.DataFrame, location: str, now: datetime) -> s
 
 
 def build_climate_cards(df_sensor: pd.DataFrame, now: datetime) -> list[StatusCard]:
-    """拠点別の温湿度カード(`CLIMATE_SITES` の順)。タップするとホームのヒートマップでその拠点を開く。"""
+    """拠点別の温湿度カード(`CLIMATE_SITES` の順)。タップすると「くらし」ページのヒートマップでその拠点を開く。"""
     return [
         StatusCard(
             title,
             *get_climate_status(df_sensor, name, now),
-            tab="home",
+            tab="life",
             group="climate",
             sub=describe_climate(df_sensor, name, now),
             anchor=f"?hm_loc={key}&hm_metric=temp#climate-heatmap",
@@ -823,9 +876,10 @@ def build_status_cards(
     df_sensor: pd.DataFrame,
     nas_data: pd.Series | None,
     memory: dict[str, float] | None,
-    monthly_cost: int,
+    monthly_cost: int | None,
     last_month_cost: int | None = None,
     disk: dict[str, float] | None = None,
+    recording: list[dict[str, Any]] | None = None,
 ) -> list[StatusCard]:
     """渡された材料から、並べる順にカードを組み立てる(取得は行わない)。
 
@@ -837,11 +891,16 @@ def build_status_cards(
 
     `last_month_cost`・`disk` は補足表示(`sub`)にだけ使う。渡さなければ補足が
     出ないだけで、カードの値と色は変わらない。
+
+    `monthly_cost` が None(取得失敗)なら電気代カードは灰色の「取得できません」になる。
+    `recording`(カメラごとの録画の状態)を渡すと「🎥 カメラ」カードが録画の状態を示す
+    (`get_camera_status` を参照。None なら従来どおり最後の動体検知)。
     """
     taka_val, taka_theme = get_takasago_status(df_sensor, now)
     itami_val, itami_theme = get_itami_status(df_sensor, now)
     parking_val, parking_theme = get_parking_status(df_sensor, now)
-    camera_val, camera_theme = get_camera_status(df_sensor, now)
+    camera_val, camera_theme = get_camera_status(df_sensor, now, recording)
+    cost_val, cost_theme = get_cost_status(monthly_cost)
     server_val, server_theme = get_server_status(memory)
     nas_val, nas_theme = get_nas_status_simple(nas_data)
 
@@ -860,12 +919,12 @@ def build_status_cards(
                    sub=describe_parking(df_sensor, now),
                    anchor=f"?camera={PARKING_CAMERA_ID}#camera-section"),
         StatusCard("🎥 カメラ", camera_val, camera_theme, tab="watch", group="watch",
-                   sub=describe_camera(df_sensor, now), anchor="#camera-section"),
+                   sub=describe_camera(df_sensor, now, recording), anchor="#camera-section"),
         *build_climate_cards(df_sensor, now),
-        StatusCard("💰 今月の電気代", f"⚡ {monthly_cost:,} 円", "theme-blue", tab="life", group="life",
+        StatusCard("💰 今月の電気代", cost_val, cost_theme, tab="life", group="life",
                    sub=describe_cost(monthly_cost, last_month_cost)),
         StatusCard("🖥️ サーバー", server_val, server_theme, tab="sys", group="sys",
-                   sub=describe_server(disk)),
+                   sub=describe_server(disk, memory)),
         StatusCard("🗄️ NAS", nas_val, nas_theme, tab="sys", group="sys",
                    sub=describe_nas(nas_data), anchor="#nas-history"),
     ]
@@ -925,7 +984,7 @@ class DashboardMaterials(NamedTuple):
     nas_history: pd.DataFrame
     memory: dict[str, float] | None
     disk: dict[str, float] | None
-    monthly_cost: int
+    monthly_cost: int | None
     last_month_cost: int | None
     daily_cost_rows: list[tuple[Any, int]]
 
@@ -953,7 +1012,8 @@ def get_cached_materials() -> DashboardMaterials:
         nas_history=nas_history if nas_history is not None else empty,
         memory=memory,
         disk=disk,
-        monthly_cost=monthly_cost or 0,
+        # 取得失敗(None)は 0 円に丸めない(カードが「取得できません」と出し分ける)
+        monthly_cost=monthly_cost,
         daily_cost_rows=daily_cost_rows or [],
         last_month_cost=last_month_cost,
     )
@@ -1077,6 +1137,202 @@ def get_hourly_activity(build: Callable[[pd.DataFrame], dict]) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+# === NAS上のファイルを読む取得(時間制限付き) ===
+# 録画の状態・カメラの写真はNAS上のファイル一覧から作る。NAS(CIFS)は不調時に応答が返らないまま
+# 待たされることがあり、そのまま呼ぶとホームの表示ごと固まる。別スレッドで実行して
+# `NAS_READ_TIMEOUT_SEC` で打ち切り、間に合わなければ「分からない」(None)として扱う。
+# ワーカー数を絞ってあるのは、固まった読み取りが溜まり続けてスレッドを食い潰さないため
+# (埋まっている間の新しい要求は待ち行列で時間切れになり、同じく None になる)。
+NAS_READ_TIMEOUT_SEC = 3.0
+NAS_READ_CACHE_TTL_SEC = 120
+_nas_read_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="dash-nas-read")
+
+
+def cached_with_timeout(
+    key: str, loader: Callable[[], Any], *, ttl: float = NAS_READ_CACHE_TTL_SEC, timeout: float = NAS_READ_TIMEOUT_SEC
+) -> Any:
+    """`loader` を別スレッドで実行し、`timeout` 秒以内に終わらなければ None(失敗はキャッシュしない)。"""
+    return _cached(key, lambda: _nas_read_pool.submit(loader).result(timeout=timeout), ttl=ttl)
+
+
+def get_camera_recording_states() -> list[dict[str, Any]] | None:
+    """カメラごとの録画の状態(`recording_status_service.camera_recording_states`)。
+    NAS未マウント・時間切れ・取得失敗は None(カードは最後の動体検知の表示に戻る)。"""
+    return cached_with_timeout("recording_states", recording_status_service.camera_recording_states)
+
+
+# === ホーム最上部の「いまの状態」 ===
+
+class HomeAlert(NamedTuple):
+    """ホームのサマリーに出す1件。`href` はその詳細が載っている場所(無ければ None)。"""
+    text: str
+    href: str | None = None
+
+
+def build_home_alerts(
+    cards, *, dashboard_path: str, health: dict[str, Any] | None = None
+) -> list[HomeAlert]:
+    """「確認が必要なこと」の一覧を作る。空なら「すべて正常」。
+
+    - 赤のカード(`theme-red`)を、カードの並び順のまま1件ずつ出す。黄・灰・青は出さない
+      (黄は「しばらく動きがない」程度で留守のたびに付き、毎回埋まるとサマリーが意味を失うため)。
+    - `health`(`read_health_result()` の結果)に、家の状態に関わる異常(`HEALTH_HOME_KEYS`)が
+      あれば1件にまとめて出す。更新の遅れ・構成の差分など管理者向けの項目はホームには出さない
+      (システムページには全件出る)。
+    """
+    alerts = [
+        HomeAlert(f"{_strip_leading_emoji(card.title)}: {_strip_leading_emoji(card.value)}", card_detail_href(card, dashboard_path))
+        for card in cards
+        if card.theme == "theme-red" and not card.value_is_html
+    ]
+    if health and not health.get("stale"):
+        labels = [a["label"] for a in health.get("anomalies", []) if a.get("key") in HEALTH_HOME_KEYS]
+        if labels:
+            alerts.append(HomeAlert(
+                "定期チェック: " + "・".join(labels), f"{dashboard_path.rstrip('/')}/sys#health-check"
+            ))
+    return alerts
+
+
+def _strip_leading_emoji(text: str) -> str:
+    """先頭の絵文字・記号(🟢/🔴/👵 等)と空白を落とす。サマリーは文字だけで読めるようにするため。"""
+    i = 0
+    while i < len(text) and not (text[i].isalnum() or text[i] in "(（「"):
+        i += 1
+    return text[i:] or text
+
+
+def render_home_alerts_html(alerts: list[HomeAlert]) -> str:
+    """ホーム最上部のサマリー。異常なしは緑の1行、ありは件数と各項目(タップで詳細へ)。"""
+    if not alerts:
+        return '<p class="alerts alerts-ok home-summary">✅ すべて正常です</p>'
+    items = "".join(
+        "<li>" + (
+            f'<a href="{html.escape(a.href)}">{html.escape(a.text)}</a>' if a.href else html.escape(a.text)
+        ) + "</li>"
+        for a in alerts
+    )
+    return (
+        '<div class="alerts alerts-bad home-summary" role="status">'
+        f"<strong>⚠️ {len(alerts)}件、確認が必要です</strong><ul>{items}</ul></div>"
+    )
+
+
+# === 定期チェック(health_watch)の結果 ===
+# `monitors/health_watch.py`(毎時cron)が検知結果をこのファイルへ書く。以前は結果がDiscordにしか
+# 出ず、Discordを見ない家族には「録画が止まっている」「保存装置が外れている」が伝わらなかった。
+HEALTH_RESULT_FILENAME = ".health_watch_last_result"
+# 毎時実行なので、これより古ければ「チェック自体が止まっている」とみなす(分)。
+HEALTH_RESULT_STALE_MIN = 150
+# チェック名 → 画面に出す短い名前。
+HEALTH_CHECK_LABELS: dict[str, str] = {
+    "service": "サーバーの停止",
+    "api": "サーバーの応答",
+    "journal": "システムログのエラー",
+    "app_logs": "アプリのログのエラー",
+    "disk": "ディスクの空き",
+    "memory": "メモリ不足",
+    "nas": "保存装置(NAS)の接続",
+    "recording": "カメラの録画",
+    "deploy_config": "実機の設定の差分",
+    "quest_master": "クエスト定義の差分",
+    "orphaned_rows": "データの不整合",
+    "repo_behind": "更新の取り込み遅れ",
+    "stale_code": "再起動待ちの更新",
+    "python_version": "Pythonの版の差",
+}
+# ホームのサマリーに出す(家の状態に関わる)チェック。それ以外は管理者向けでシステムページだけに出す。
+HEALTH_HOME_KEYS: frozenset[str] = frozenset({"service", "api", "disk", "memory", "nas", "recording"})
+
+
+def _as_jst(value: datetime) -> datetime:
+    """aware ならJSTへ変換し、naive ならJSTの時刻とみなす。"""
+    return _JST.localize(value) if value.tzinfo is None else value.astimezone(_JST)
+
+
+def health_result_path() -> str:
+    return os.path.join(config.LOG_DIR, HEALTH_RESULT_FILENAME)
+
+
+def read_health_result(now: datetime | None = None) -> dict[str, Any] | None:
+    """定期チェックの最新結果を読む。まだ記録が無い・壊れているときは None。
+
+    戻り値: `{"checked_at": datetime, "stale": bool, "anomalies": [{"key","label","text"}],
+    "history": [{"at": datetime, "labels": [str]}]}`。`stale` はチェック自体が
+    `HEALTH_RESULT_STALE_MIN` 分以上動いていないこと。
+    """
+    try:
+        raw = state_file.read_json(health_result_path())
+    except Exception as e:  # noqa: BLE001 (LOG_DIR の解決失敗等でページを落とさない)
+        logger.warning(f"定期チェックの結果を読めませんでした: {e}")
+        return None
+    if not isinstance(raw, dict):
+        return None
+    try:
+        checked_at = _as_jst(datetime.fromisoformat(raw["checked_at"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    now_jst = _as_jst(now or get_now_jst())
+    anomalies = [
+        {"key": str(a.get("key", "")), "label": HEALTH_CHECK_LABELS.get(str(a.get("key", "")), str(a.get("key", ""))),
+         "text": str(a.get("text", ""))}
+        for a in raw.get("anomalies", []) if isinstance(a, dict)
+    ]
+    history = []
+    for h in raw.get("history", []):
+        try:
+            at = _as_jst(datetime.fromisoformat(h["at"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        history.append({"at": at, "labels": [HEALTH_CHECK_LABELS.get(str(k), str(k)) for k in h.get("keys", [])]})
+    return {
+        "checked_at": checked_at,
+        "stale": (now_jst - checked_at).total_seconds() / 60 > HEALTH_RESULT_STALE_MIN,
+        "anomalies": anomalies,
+        "history": history,
+    }
+
+
+# === 今日の天気(ホームの1行) ===
+
+def get_today_weather() -> dict[str, Any] | None:
+    """今日(JST)の天気と最高/最低気温。`weather_history`(`monitors/weather_monitor.py` が毎日書く)から読む。
+    記録が無い・取得失敗は None(ホームはその行を出さない)。10分キャッシュ。"""
+    today = get_now_jst().date().isoformat()
+
+    def _load() -> dict[str, Any] | None:
+        with get_ro_connection() as conn:
+            row = conn.execute(
+                "SELECT weather_desc, max_temp, min_temp FROM weather_history WHERE date = ? AND location = ?",
+                (today, config.WEATHER_LOCATION_NAME),
+            ).fetchone()
+        if row is None or (row[1] is None and row[2] is None):
+            return None
+        return {"desc": row[0], "max_temp": row[1], "min_temp": row[2]}
+
+    # 固定キー(日付入りにすると日ごとに溜まる)。日付をまたいだ直後の最大10分は前日の値が残りうる。
+    return _cached("weather_today", _load, ttl=CLIMATE_CACHE_TTL_SEC)
+
+
+def render_today_weather_html(weather: dict[str, Any] | None) -> str:
+    """「今日の天気: 晴れ・最高 18℃ / 最低 9℃」。記録が無ければ空文字。"""
+    if not weather:
+        return ""
+    parts = []
+    if weather.get("desc"):
+        parts.append(str(weather["desc"]))
+    temps = []
+    if weather.get("max_temp") is not None:
+        temps.append(f"最高 {float(weather['max_temp']):.0f}℃")
+    if weather.get("min_temp") is not None:
+        temps.append(f"最低 {float(weather['min_temp']):.0f}℃")
+    if temps:
+        parts.append(" / ".join(temps))
+    if not parts:
+        return ""
+    return f'<p class="today-weather">今日の天気: {html.escape("・".join(parts))}</p>'
+
+
 def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:
     """材料を集めてカードを組み立て、(カード, 取得時刻)を返す。ホームページ用。"""
     now = now or get_now_jst()
@@ -1090,6 +1346,7 @@ def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard],
         materials.monthly_cost,
         last_month_cost=materials.last_month_cost,
         disk=materials.disk,
+        recording=get_camera_recording_states(),
     )
     return cards, now
 

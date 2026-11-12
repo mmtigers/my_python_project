@@ -56,7 +56,17 @@ FFMPEG_RTSP_TIMEOUT_USEC = 15_000_000  # ライブRTSP入力のI/Oタイムア�
 HLS_LIVE_STALL_SECONDS = 30
 HLS_LIVE_KILL_WAIT_SECONDS = 5  # 停滞したffmpegをkillした後の終了待ち(秒)
 
+# 視聴が途絶えたライブ配信を止めるまでの秒数。以前は一度始めたライブ用ffmpegを止める経路が
+# 「停滞検知」と「サーバー終了時」しか無く、ページを閉じてもカメラへのRTSP接続とHLSの書き込みが
+# サーバーの再起動まで続いていた。プレイヤーは2秒ごとにプレイリスト・セグメントを取りに来るので、
+# この秒数のあいだ誰も取りに来なければ視聴者はいないとみなす。
+HLS_LIVE_IDLE_SECONDS = 60
+HLS_LIVE_IDLE_CHECK_SECONDS = 15  # 視聴の途絶えを確認する間隔(秒)
+
 _active_processes: Dict[str, subprocess.Popen] = {}
+_live_last_access: dict[str, float] = {}  # cam_id -> 最後にプレイリスト/セグメントが要求された時刻(time.time())
+_idle_reaper_tick = threading.Event()  # 見回りの待ち時間用(セットしない。wait のタイムアウトだけ使う)
+_idle_reaper: threading.Thread | None = None  # 視聴の途絶えたライブを止める見回りスレッド(配信中だけ動く)
 _live_started_at: dict[str, float] = {}  # cam_id -> ライブffmpegの起動時刻(monotonicではなくtime.time())
 _rtsp_cache: Dict[str, str] = {}
 
@@ -106,6 +116,7 @@ def stop_all_processes(timeout: float = 5.0) -> int:
                 registry.pop(key, None)
                 if registry is _active_processes:
                     _live_started_at.pop(key, None)
+                    _live_last_access.pop(key, None)
     if stopped:
         logger.info(f"🛑 ffmpeg プロセスを {stopped} 件停止しました")
     return stopped
@@ -177,8 +188,83 @@ def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:
         logger.error(f"❌ [{cam_conf['name']}] ONVIF経由のRTSP URL取得に失敗: {e}")
         raise
 
+def touch_live(cam_id: str) -> None:
+    """ライブ配信が視聴されていることを記録する(プレイリスト・セグメントの要求のたびに呼ぶ)。"""
+    with _state_lock:
+        _live_last_access[cam_id] = time.time()
+
+
+def stop_idle_live_streams(now: float | None = None) -> int:
+    """`HLS_LIVE_IDLE_SECONDS` 以上だれも見ていないライブ配信のffmpegを止める。止めた数を返す。
+
+    起動との競合(止めている最中に同じカメラの再生が始まる)を避けるため、カメラ単位の起動ロックの
+    内側で「まだ途絶えているか」を確かめ直してから止める。既に終了しているプロセスは管理情報だけ消す。
+    """
+    now = time.time() if now is None else now
+    with _state_lock:
+        cam_ids = list(_active_processes)
+    stopped = 0
+    for cam_id in cam_ids:
+        with _live_stream_lock(cam_id):
+            with _state_lock:
+                proc = _active_processes.get(cam_id)
+                last = _live_last_access.get(cam_id, _live_started_at.get(cam_id))
+            if proc is None:
+                continue
+            alive = proc.poll() is None
+            if alive and last is not None and now - last < HLS_LIVE_IDLE_SECONDS:
+                continue
+            if alive:
+                try:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=HLS_LIVE_KILL_WAIT_SECONDS)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    stopped += 1
+                    logger.info(f"🛑 [{cam_id}] 視聴が途絶えたためライブHLS配信を停止しました")
+                except OSError as e:
+                    logger.warning(f"⚠️ ライブHLS配信の停止に失敗 ({cam_id}): {e}")
+                    continue
+            with _state_lock:
+                if _active_processes.get(cam_id) is proc:
+                    _active_processes.pop(cam_id, None)
+                    _live_started_at.pop(cam_id, None)
+                    _live_last_access.pop(cam_id, None)
+    return stopped
+
+
+def _idle_reaper_loop() -> None:
+    """配信中のライブがある間だけ回り、視聴の途絶えたものを止める。配信が無くなったら終わる。"""
+    global _idle_reaper
+    while True:
+        # time.sleep ではなく Event.wait で待つ(テストが time.sleep を差し替えても空回りしない)
+        _idle_reaper_tick.wait(HLS_LIVE_IDLE_CHECK_SECONDS)
+        try:
+            stop_idle_live_streams()
+        except Exception as e:  # noqa: BLE001 (見回りを止めない)
+            logger.warning(f"⚠️ ライブHLS配信の見回りでエラー: {e}")
+        with _state_lock:
+            if not _active_processes:
+                _idle_reaper = None
+                return
+
+
+def _ensure_idle_reaper() -> None:
+    """見回りスレッドが動いていなければ起動する(ライブ配信を始めたときに呼ぶ)。"""
+    global _idle_reaper
+    with _state_lock:
+        if _idle_reaper is not None and _idle_reaper.is_alive():
+            return
+        _idle_reaper = threading.Thread(target=_idle_reaper_loop, name="hls-live-idle-reaper", daemon=True)
+        _idle_reaper.start()
+
+
 def start_hls_stream(cam_conf: Dict[str, Any]) -> str:
+    """ライブHLS配信を(まだなら)始めてプレイリストのパスを返す。呼ばれるたびに「視聴中」として記録する
+    (プレイヤーはプレイリストを数秒おきに取り直すので、視聴が続く限り `stop_idle_live_streams` に止められない)。"""
     cam_id = cam_conf['id']
+    touch_live(cam_id)
     # #439: 同一cam_idへの同時リクエストで「実行中でないチェック→ffmpeg起動・登録」が
     # 競合しないよう、cam_id単位でこの一連の処理全体を排他する。
     with _live_stream_lock(cam_id):
@@ -293,6 +379,7 @@ def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:
     with _state_lock:
         _active_processes[cam_id] = process
         _live_started_at[cam_id] = time.time()
+    _ensure_idle_reaper()
     return playlist_path
 
 def get_record_start_offset(cam_conf: Dict[str, Any], target_date: str) -> int:

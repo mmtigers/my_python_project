@@ -17,7 +17,7 @@
 ## 2. ファイルの概要
 
 「家のいまの状況」を表すステータスカードについて、**判定ロジック・カードのHTML組み立て・カードのCSS・時刻の相対表記**を1箇所に集めたモジュール。Streamlitをimportしないため`unified_server.py`(FastAPI)側から使える。Issue #829でStreamlit版ダッシュボード(`dashboard.py`ほか)を廃止し、`routers/dashboard_router.py`配下のページ(この`unified_server`自身がHTMLを返す)だけになったが、「Streamlitに依存しないダッシュボードの正のロジック置き場」という役割自体は変わっていない。判定関数(`get_takasago_status`等)はいずれも副作用を持たない純粋関数で、DataFrameや取得済みの値を受け取って`(表示文字列, テーマ名)`を返す。取得はサーバー側の`get_cached_materials`/`collect_status_cards`が担う。ダッシュボードのページ定義(`DASHBOARD_TABS`)・カードの並びとグループ(`CARD_GROUPS`)・family-questへのパス(`QUEST_APP_PATH`)・値の下の補足を組み立てる`describe_*`群も持つ。**(不具合修正)** 以前あった「気になること」要約行(`summarize_alerts`/`render_alerts_html`/`ALERT_THEMES`)は要望により削除された。
-根拠: `def build_status_cards(` (行番号: 821 / 抜粋: "def build_status_cards(")、`from services import analysis_service` (行番号: 33 / 抜粋: "from services import analysis_service")、`def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 365)、`DASHBOARD_TABS: tuple[tuple[str, str], ...] = (` (行番号: 173)、`CARD_GROUPS: tuple[tuple[str, str], ...] = (` (行番号: 194)、`QUEST_APP_PATH = "/quest"` (行番号: 184)、`def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 644)
+根拠: `def build_status_cards(` (行番号: 874 / 抜粋: "def build_status_cards(")、`from services import analysis_service` (行番号: 35 / 抜粋: "from services import analysis_service")、`def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 365)、`DASHBOARD_TABS: tuple[tuple[str, str], ...] = (` (行番号: 173)、`CARD_GROUPS: tuple[tuple[str, str], ...] = (` (行番号: 194)、`QUEST_APP_PATH = "/quest"` (行番号: 184)、`def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 673)
 
 ## 3. 外部依存関係
 
@@ -27,19 +27,19 @@
 | --- | --- | --- | --- |
 | `html` | 標準ライブラリ | カードのタイトル・値、ページ内のパス類のHTMLエスケープ | `import html` (行番号: 17 / 抜粋: "import html") |
 | `os` | 標準ライブラリ | **(新機能)** ファミクエの`index.html`の存在確認(`os.path.isfile`) | `import os` (行番号: 19 / 抜粋: "import os") |
-| `requests` | 外部ライブラリ | **(新機能)** あさノート(外部サービス)の稼働チェック(`requests.get`) | `import requests` (行番号: 29 / 抜粋: "import requests") |
-| `core.database.get_ro_connection` | 内部モジュール | **(新機能)** ファミクエの稼働チェックでDBの読み取りができるかの確認 | `from core.database import get_ro_connection` (行番号: 30 / 抜粋: "from core.database import get_ro_connection") |
-| `config` | 内部モジュール | **(新機能)** `QUEST_DIST_DIR`(ファミクエのビルド成果物のパス) | `import config` (行番号: 26 / 抜粋: "import config") |
+| `requests` | 外部ライブラリ | **(新機能)** あさノート(外部サービス)の稼働チェック(`requests.get`) | `import requests` (行番号: 30 / 抜粋: "import requests") |
+| `core.database.get_ro_connection` | 内部モジュール | **(新機能)** ファミクエの稼働チェックでDBの読み取りができるかの確認 | `from core.database import get_ro_connection` (行番号: 32 / 抜粋: "from core.database import get_ro_connection") |
+| `config` | 内部モジュール | **(新機能)** `QUEST_DIST_DIR`(ファミクエのビルド成果物のパス) | `import config` (行番号: 27 / 抜粋: "import config") |
 | `logging` | 標準ライブラリ | 取得失敗時の警告ログ | `import logging` (行番号: 18 / 抜粋: "import logging") |
 | `threading` | 標準ライブラリ | 自前キャッシュの排他（`threading.Lock`） | `import threading` (行番号: 20 / 抜粋: "import threading") |
 | `time` | 標準ライブラリ | キャッシュのTTL判定（`time.monotonic()`） | `import time` (行番号: 21 / 抜粋: "import time") |
 | `collections.abc.Callable` | 標準ライブラリ | `_cached` の引数の型注釈 | `from collections.abc import Callable` (行番号: 22 / 抜粋: "from collections.abc import Callable") |
-| `datetime.date`, `datetime.datetime`, `datetime.timedelta` | 標準ライブラリ | 時刻比較（経過分数） | `from datetime import date, datetime, timedelta` (行番号: 23 / 抜粋: "from datetime import date, datetime, timedelta") |
-| `typing.Any` / `NamedTuple` | 標準ライブラリ | 型注釈、`StatusCard`/`DashboardMaterials` の定義 | `from typing import Any, NamedTuple` (行番号: 24 / 抜粋: "from typing import Any, NamedTuple") |
-| `pandas` | 外部ライブラリ | DataFrame/Series の判定処理 | `import pandas as pd` (行番号: 27 / 抜粋: "import pandas as pd") |
-| `pytz` | 外部ライブラリ | `format_relative_time`の naive タイムスタンプJST化(`_JST`) | `import pytz` (行番号: 28 / 抜粋: "import pytz") |
-| `core.utils.get_now_jst` | 内部モジュール | 現在時刻（JST固定）の取得 | `from core.utils import get_now_jst` (行番号: 31 / 抜粋: "from core.utils import get_now_jst") |
-| `services.analysis_service` | 内部モジュール | センサー・NAS・メモリ・電気代の取得(防犯ログは`security_logs`テーブルへの書き込みが存在しないため、不具合修正で`df_sensor`由来のカメラ動体検知(`camera_motion_log`)に切り替え、`analysis_service`からの直接取得は無くなった) | `from services import analysis_service` (行番号: 33 / 抜粋: "from services import analysis_service") |
+| `datetime.date`, `datetime.datetime`, `datetime.timedelta` | 標準ライブラリ | 時刻比較（経過分数） | `from datetime import date, datetime, timedelta` (行番号: 24 / 抜粋: "from datetime import date, datetime, timedelta") |
+| `typing.Any` / `NamedTuple` | 標準ライブラリ | 型注釈、`StatusCard`/`DashboardMaterials` の定義 | `from typing import Any, NamedTuple` (行番号: 25 / 抜粋: "from typing import Any, NamedTuple") |
+| `pandas` | 外部ライブラリ | DataFrame/Series の判定処理 | `import pandas as pd` (行番号: 28 / 抜粋: "import pandas as pd") |
+| `pytz` | 外部ライブラリ | `format_relative_time`の naive タイムスタンプJST化(`_JST`) | `import pytz` (行番号: 29 / 抜粋: "import pytz") |
+| `core.utils.get_now_jst` | 内部モジュール | 現在時刻（JST固定）の取得 | `from core.utils import get_now_jst` (行番号: 33 / 抜粋: "from core.utils import get_now_jst") |
+| `services.analysis_service` | 内部モジュール | センサー・NAS・メモリ・電気代の取得(防犯ログは`security_logs`テーブルへの書き込みが存在しないため、不具合修正で`df_sensor`由来のカメラ動体検知(`camera_motion_log`)に切り替え、`analysis_service`からの直接取得は無くなった) | `from services import analysis_service` (行番号: 35 / 抜粋: "from services import analysis_service") |
 
 ### ブラックボックスとなる外部要素
 
@@ -52,7 +52,7 @@
 ### `_JST` / `format_short_timestamp` / `format_relative_time`
 
 * **役割**: `_JST`はJSTのタイムゾーンオブジェクト。`format_short_timestamp`は時刻を「09/21 03:04」形式にする(読めない値は空文字)。`format_relative_time`は「3分前」のような相対表記にし、1週間以上前・未来の時刻は`format_short_timestamp`にフォールバックする。naive(tzinfo無し)な値はDB由来としてJSTでlocalizeする(`core.utils`のJST固定方針と同じ)。
-* 根拠: [変数宣言] (行番号: 33 / 抜粋: '_JST = pytz.timezone("Asia/Tokyo")')、[関数定義] (行番号: 40, 48 / 抜粋: "def format_short_timestamp(value) -> str:", "def format_relative_time(value, now: datetime | None = None) -> str:")
+* 根拠: [変数宣言] (行番号: 33 / 抜粋: '_JST = pytz.timezone("Asia/Tokyo")')、[関数定義] (行番号: 42, 50 / 抜粋: "def format_short_timestamp(value) -> str:", "def format_relative_time(value, now: datetime | None = None) -> str:")
 
 
 * **引数/リクエスト**: `format_short_timestamp(value)`、`format_relative_time(value, now: datetime | None = None)`
@@ -98,7 +98,7 @@
 ### `STATUS_CARD_CSS` (モジュールレベル定数)
 
 * **役割**: カード1枚分のCSS（`.status-grid` / `.status-card` / `.theme-*`）。ホームページと各サブページ(`services/dashboard_page_service.py`)が共有する。グリッドは `repeat(auto-fit, minmax(160px, 1fr))` で、スマホ幅では2列・PCでは4〜6列に自動で折り返す。**(UI刷新)** 色は `MY_HOME_SYSTEM/static/dashboard/dashboard.css` のデザイントークン(CSS変数)を参照し、`.theme-*` は背景色に加えて左端の太い帯でも状態を示す(ダークモードは変数側で切替)。
-* 根拠: `STATUS_CARD_CSS = """` (行番号: 80 / 抜粋: "STATUS_CARD_CSS = \"\"\"")
+* 根拠: `STATUS_CARD_CSS = """` (行番号: 82 / 抜粋: "STATUS_CARD_CSS = \"\"\"")
 
 
 * **引数/リクエスト**: なし（定数）
@@ -151,7 +151,7 @@
 
 * **役割**: **(新機能)** 温湿度を表示する拠点の唯一の定義元。`CLIMATE_SITES`は`(拠点名, ?hm_loc= のキー, カードの見出し)`のタプルで、伊丹(`itami`)・高砂(`takasago`)・長岡京(`nagaokakyo`。単身赴任先)の順。並び順はカードとヒートマップの切り替えで共通。`CLIMATE_LOCATIONS`(拠点名のタプル)と`CLIMATE_LOCATION_KEYS`(拠点名→キー)はここから作る。以前は拠点名とキーの対応が`dashboard_page_service`の3か所(`CLIMATE_LOCATIONS`・`parse_climate_location`・`_climate_switch`)に散らばり、1か所だけ足すと切り替えリンクの組み立てが`KeyError`でホームごと500になる構造だったため、ここへ集約した。`dashboard_page_service`は循環importになるため、こちらに置いて向こうから参照させる。カードの見出しは見守りの「🏠 伊丹 (自宅)」等と重ならないよう「〜の室温」で揃える。
 * `climate_location(device_id, device_name)`: 温湿度の記録がどの拠点のものか。`devices.json`の`location`が`CLIMATE_LOCATIONS`に入っていればそれ、無ければ機器名の先頭(`伊丹_`/`高砂_`。Nature Remoの保存名)で判定し、どちらでも分からなければ`None`。Nature Remo由来の行はdevice_idが`devices.json`に無く`load_sensor_data`の`location`列が「その他」になるため、カード・ヒートマップとも`location`列ではなくこれで判定する(旧`dashboard_page_service._climate_location`を移したもの)。
-* 根拠: `CLIMATE_SITES: tuple[tuple[str, str, str], ...] = (` (行番号: 213)、`def climate_location(device_id: Any, device_name: Any) -> str | None:` (行番号: 234)
+* 根拠: `CLIMATE_SITES: tuple[tuple[str, str, str], ...] = (` (行番号: 213)、`def climate_location(device_id: Any, device_name: Any) -> str | None:` (行番号: 236)
 
 
 ### 温湿度カード(`get_climate_status` / `describe_climate` / `build_climate_cards`)
@@ -160,7 +160,7 @@
 * `get_climate_status(df_sensor, location, now)`: `"19.3℃ / 43%"`(温度は小数1桁、湿度は整数)と色を返す。記録が無い・`CLIMATE_MAX_AGE_MIN`(24時間)より古い → `⚪ データなし`(灰色)。`CLIMATE_STALE_MIN`(30分。システムページの「⚡ 電気・環境の見守り」と同じ閾値)より古い → 値は出すが灰色。それ以外は温度で色分け(`CLIMATE_HOT_C`=30℃以上は赤、`CLIMATE_COLD_C`=15℃未満は青、その間は緑。ヒートマップの5段階の両端)。湿度0以下は取れなかったときの代用値とみなして`--%`(前の記録の湿度は混ぜない)。
 * `describe_climate(df_sensor, location, now)`: 補足。何分前の値か(`format_relative_time`)。30分を超えたら「◯分前の値(更新が止まっています)」、湿度が`CLIMATE_DRY_PCT`(30%)未満なら「◯分前・乾燥」。記録が無ければ`None`。
 * `build_climate_cards(df_sensor, now)`: `CLIMATE_SITES`の順に3枚。`tab="home"`・`anchor="?hm_loc=<キー>&hm_metric=temp#climate-heatmap"`で、タップするとホームのヒートマップでその拠点を開く。
-* 根拠: `def get_climate_status(df_sensor: pd.DataFrame, location: str, now: datetime) -> tuple[str, str]:` (行番号: 767)、`def describe_climate(df_sensor: pd.DataFrame, location: str, now: datetime) -> str | None:` (行番号: 791)、`def build_climate_cards(df_sensor: pd.DataFrame, now: datetime) -> list[StatusCard]:` (行番号: 806)
+* 根拠: `def get_climate_status(df_sensor: pd.DataFrame, location: str, now: datetime) -> tuple[str, str]:` (行番号: 820)、`def describe_climate(df_sensor: pd.DataFrame, location: str, now: datetime) -> str | None:` (行番号: 844)、`def build_climate_cards(df_sensor: pd.DataFrame, now: datetime) -> list[StatusCard]:` (行番号: 859)
 
 
 * **引数/リクエスト**: なし（定数）
@@ -183,7 +183,7 @@
 ### `StatusCard` (NamedTuple)
 
 * **役割**: 1枚のカードを表す。`title`, `value`, `theme`, `value_is_html`（既定 `False`）, `tab`（既定 `None`）, `sub`（既定 `None`）, `href`（既定 `None`）, `group`（既定 `None`）, `anchor`（既定 `None`）を持つ。`tab`はそのカードの詳細が載っているページのキー(`DASHBOARD_TABS`)で、`card_detail_href`がこれを`/watch`等のURLに変換する。`href`は詳細がダッシュボードの外にあるカードのための直接リンク先で、`tab`より優先される。**(不具合修正で追加)** `anchor`は`tab`のURLの末尾にそのまま付け足す文字列(例: `#takasago-log`、`?camera=xxx#camera-section`)。同じ`tab`を持つ複数のカードがあるとき、タップしたカードの内容が実際に載っているページ内の場所まで連れて行くために使う(以前は見守りグループの4枚が全部`tab="watch"`だけを持ち、どれをタップしても同じURL=ページ先頭のカメラ映像にしか飛べなかった)。
-* 根拠: `class StatusCard(NamedTuple):` (行番号: 247)
+* 根拠: `class StatusCard(NamedTuple):` (行番号: 249)
 
 
 * **引数/リクエスト**: `title` (str), `value` (str), `theme` (str), `value_is_html` (bool, 既定 False), `tab` (str | None, 既定 None), `sub` (str | None, 既定 None), `href` (str | None, 既定 None), `group` (str | None, 既定 None), `anchor` (str | None, 既定 None)
@@ -206,7 +206,7 @@
 ### `render_status_card_html`
 
 * **役割**: カード1枚のHTML文字列を返す。`title` は常にHTMLエスケープし、`value` も既定でエスケープする（Issue #378）。`value_is_html=True` のときだけ `value` のエスケープをスキップする。`href` を渡すと外枠が `<a>` になりカード全体がリンクになる。`sub` を渡すと値の下に `.status-sub` の行を足す（常にエスケープする）。改行・インデントを含まない1行の文字列を返す。
-* 根拠: `def render_status_card_html(` (行番号: 277〜321)
+* 根拠: `def render_status_card_html(` (行番号: 279〜323)
 
 
 * **引数/リクエスト**: `title` (str), `value` (str), `theme` (str), キーワード専用 `value_is_html` (bool, 既定 False), `href` (str | None, 既定 None), `sub` (str | None, 既定 None)
@@ -229,7 +229,7 @@
 ### `card_detail_href`
 
 * **役割**: カードの詳細ページへのURLを返す。`card.href`があればそれを、無ければ`{dashboard_path}/{tab}`(例: `/dashboard/watch`)を返す。`tab`も`href`も無いカードは`None`。**(不具合修正)** `card.anchor`があれば、そのURLの末尾にそのまま付け足す(例: `/dashboard/watch#takasago-log`)。同じ`tab`の複数カードをページ内の異なる場所へ振り分けるための仕組み。**(新機能)** `tab="home"`はサブページではなくダッシュボードのルート(`/dashboard/`)を指す(温湿度カードが`anchor`で同じホームのヒートマップへ飛ぶため)。
-* 根拠: `def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:` (行番号: 324〜344)
+* 根拠: `def card_detail_href(card: StatusCard, dashboard_path: str) -> str | None:` (行番号: 326〜346)
 
 
 * **引数/リクエスト**: `card` (`StatusCard`), `dashboard_path` (str)
@@ -245,11 +245,13 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: [関数本体] (行番号: 337 / 抜粋: "if card.tab is None:")
+* 根拠: [関数本体] (行番号: 339 / 抜粋: "if card.tab is None:")
 
 
 
 ### （削除済み）`ALERT_THEMES` / `summarize_alerts` / `render_alerts_html`
+
+* **(2026-11-12 追記)** ホーム最上部のサマリーは、UX改善レビューを受けて形を変えて再導入した(下の「ホーム最上部の『いまの状態』」を参照)。以前との違いは、**赤(異常)だけ**を数え、黄色は数えないこと(黄色まで並べると留守のたびに埋まり、要約行が意味を失っていた)。
 
 * **（不具合修正で削除）** 以前は「いま気にすべきカード」を赤（`theme-red`）→ 黄（`theme-yellow`）の順に拾い、ホームページ先頭に「⚠️ 気になること: ...」/「✅ 気になることはありません」の要約行として出していた。カード自体が赤・黄の色で状態を示しており要約行は不要という要望により、この3つのシンボルは本ファイルから完全に削除された(`services/dashboard_page_service.py`の呼び出し箇所も削除)。
 * 根拠: 削除は差分（`git diff`）で確認。現在の`services/home_status_service.py`には`ALERT_THEMES`/`summarize_alerts`/`render_alerts_html`のいずれの定義も存在しない(`card_detail_href`の直後は`group_cards`の定義)。
@@ -259,7 +261,7 @@
 ### `group_cards`
 
 * **役割**: カードを `group` ごとの塊に分ける（並び順は変えない）。隣り合う同じグループをまとめる。`group` を持たないカードは見出し `None` の塊になる。
-* 根拠: `def group_cards(cards) -> list[tuple[str | None, list[StatusCard]]]:` (行番号: 347〜360)
+* 根拠: `def group_cards(cards) -> list[tuple[str | None, list[StatusCard]]]:` (行番号: 349〜362)
 
 
 * **引数/リクエスト**: `cards` (`StatusCard` のイテラブル)
@@ -267,7 +269,7 @@
 
 
 * **戻り値/レスポンス**: `[(グループキー | None, カードのリスト), ...]`
-* 根拠: [戻り値] (行番号: 360 / 抜粋: "return grouped")
+* 根拠: [戻り値] (行番号: 362 / 抜粋: "return grouped")
 
 
 * **副作用**: なし
@@ -275,7 +277,7 @@
 
 
 * **エラーハンドリング**: なし（空のイテラブルは空のリストになる）
-* 根拠: [初期化] (行番号: 354 / 抜粋: "grouped: list[tuple[str | None, list[StatusCard]]] = []")
+* 根拠: [初期化] (行番号: 356 / 抜粋: "grouped: list[tuple[str | None, list[StatusCard]]] = []")
 
 
 
@@ -284,7 +286,7 @@
 * **(新機能)** 引数`group_extras`(`{グループのキー: HTML}`)を追加した。そのグループのカードの直後にHTMLを差し込む(ホームの「見守り」の直下に温湿度ヒートマップを置くため。**(新機能)** 拠点別の温湿度カードの追加に伴い、差し込み先は「🌡️ 室温」グループの直下に変わった)。
 
 * **役割**: 複数のカードを `.status-grid` のブロックにまとめたHTMLを返す。`group` を持つカードには見出し(`<h2 class="group-title">`)が付き、1枚だけのグループには`.status-grid-solo`が付く。`dashboard_path`を渡すと、行き先を持つカードがその行き先へのリンク(`<a>`)になる。`show_group_titles=False`でグループ見出しを出さない(ページ見出しと重複するサブページ用。既定True)。
-* 根拠: `def render_status_grid_html(` (行番号: 363)
+* 根拠: `def render_status_grid_html(` (行番号: 365)
 
 
 * **引数/リクエスト**: `cards`, キーワード専用 `dashboard_path` (str | None, 既定 None), `show_group_titles` (bool, 既定 True)
@@ -306,6 +308,15 @@
 
 ### 判定関数（`get_takasago_status` / `get_itami_status` / `get_camera_status` / `get_parking_status` / `get_server_status` / `get_nas_status_simple`）
 
+* **(2026-11-12 UX改善)** 値の文言を変えた。下の記述のうち旧文言は現在のコードには当てはまらない。
+    * `get_itami_status`: 10〜59分前は「🟢 活動中」(以前は「🟢 活動中 (N分前)」。スマホ幅で2行に折れていたため、何分前かは補足の「最終検知 HH:MM」に任せる)。
+    * `get_server_status`: `memory["percent"]`が`SERVER_MEMORY_ALERT_PERCENT`(80)未満なら「🟢 正常」、以上なら「🔴 メモリ不足」、取得失敗は「⚪ 取得できません」(以前は「💻 RAM: N%」/「⚪ 取得失敗」)。
+    * `get_nas_status_simple`: 「🟢 稼働中」/「🔴 応答なし」/「🟡 データ異常」(以前は「🗄️ NAS: …」「⚠️ NAS: …」)。
+    * `get_parking_status`: 値から「🚗」を除いた(タイトルと二重になるため)。
+    * `get_camera_status(df_sensor, now, recording=None)`: `recording`(`get_camera_recording_states()`の結果)があるときは録画の状態を値にする。止まっているカメラが1台なら「🔴 {カメラ名} 録画停止」、複数なら「🔴 N台 録画停止」(いずれも`theme-red`)、全台録画中なら「🟢 N台とも録画中」(1台だけなら「🟢 録画中」。`theme-green`)。`recording`が`None`のときは従来どおり最後の動体検知(値から「🎥」を除いた。色は青か灰)。
+    * `get_cost_status(monthly_cost)`(新設): `None`(取得失敗)なら「⚪ 取得できません」(`theme-gray`)、それ以外は「N 円」(`theme-blue`)。以前は取得失敗を0に丸めて「⚡ 0 円」と表示していた。
+* 根拠: [関数定義] (行番号: 522 / 抜粋: "def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:")、[関数定義] (行番号: 580 / 抜粋: "def get_camera_status(")、[関数定義] (行番号: 738 / 抜粋: "def get_cost_status(monthly_cost: int | None) -> tuple[str, str]:")
+
 * **役割**: それぞれ1枚のカードの `(表示文字列, テーマ名)` を返す純粋関数。
   * `get_takasago_status`: 高砂（実家）の `contact_state` が `open`/`detected` の最新行からの経過時間で、1時間未満=緑「元気」、3時間未満=黄「静か」、それ以上=赤「N時間 動きなし」。
   * `get_itami_status`: 伊丹（自宅）の人感（`device_type` に `Motion` を含むか `Webhook`）かつ検知の最新行から段階的に判定。該当が無ければ開閉センサーで60分未満のみ「活動中」とする。
@@ -315,11 +326,11 @@
   * `get_nas_status_simple`: `status_ping` が `OK` なら緑、それ以外は赤。`None` はグレー、キー欠落は黄「データ異常」。
 * **(不具合修正で削除)** `get_rice_status`(炊飯器カードの判定)は、炊飯器の表示自体が不要という要望により`_rice_cooking_rows`/`RICE_COOKER_ON_WATTS`とともに削除された。
 * 判定に使う行の抽出は、補足表示（`describe_*`）と共有する private 関数（`_takasago_activity` / `_itami_motion` / `_itami_contact` / `_camera_motion` / `_parking_camera_motion`）に切り出してある。
-* 根拠: `def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 426)、`def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 485)、`def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:` (行番号: 514)、`def get_nas_status_simple(nas_data: pd.Series | None) -> tuple[str, str]:` (行番号: 520)、`def get_camera_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 569)、`def get_parking_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 598)、`PARKING_CAMERA_ID = "VIGI_C540_Parking"` (行番号: 491)
+* 根拠: `def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 428)、`def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 487)、`def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:` (行番号: 522)、`def get_nas_status_simple(nas_data: pd.Series | None) -> tuple[str, str]:` (行番号: 531)、`def get_camera_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 580)、`def get_parking_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 627)、`PARKING_CAMERA_ID = "VIGI_C540_Parking"` (行番号: 491)
 
 
 * **引数/リクエスト**: DataFrame（センサー）、`now`（`datetime`）、取得済みの辞書（メモリ使用率）、`pd.Series | None`（NAS）
-* 根拠: `def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:` (行番号: 514)
+* 根拠: `def get_server_status(memory: dict[str, float] | None) -> tuple[str, str]:` (行番号: 522)
 
 
 * **戻り値/レスポンス**: `(表示文字列, テーマ名)` のタプル。テーマ名は `theme-green` / `theme-yellow` / `theme-red` / `theme-blue` / `theme-gray` のいずれか。
@@ -337,8 +348,10 @@
 
 ### `build_status_cards`
 
+* **(2026-11-12 UX改善)** `monthly_cost`の型は`int | None`(Noneは取得失敗)。引数`recording: list[dict[str, Any]] | None = None`を追加し、`get_camera_status`/`describe_camera`へ渡す。室温カード(`build_climate_cards`)のリンク先は`tab="life"`になった(過去30日ヒートマップを「くらし」ページへ移したため)。
+
 * **役割**: 渡された材料から、画面に並べる順で10枚の `StatusCard` を組み立てる（取得は行わない）。並び順は`CARD_GROUPS`と同じ順(見守り→室温→くらし→システム)。**(新機能)** 見守りの4枚の後に、拠点別の温湿度カード3枚(`build_climate_cards`。伊丹・高砂・長岡京)を挟んだため7枚から10枚になった。既存のカードの相対的な順番は変えていない。**(#829)** 以前は9枚(ファミクエの「📝承認待ち」カードを含む)だったが、ダッシュボード内にファミクエの状態表示を残さず外部リンクのみにする方針変更により、そのカードを削除して8枚になった。同時に、`df_car`/`pending_quests`引数も廃止された(車カードは`df_sensor`から駐車場カメラの動きを見るように変更、ファミクエカード自体が無くなったため)。**(不具合修正)** 炊飯器表示が不要という要望により「🍚 炊飯器」カードを削除し7枚になった。あわせて、見守りグループの4枚(高砂・伊丹・駐車場・カメラ)は以前すべて`tab="watch"`のみで`anchor`を持たなかったため、どのカードをタップしても同じURL(見守りページ先頭=カメラ映像)にしか飛べなかった不具合を修正し、それぞれ`anchor`(`#takasago-log`/`#itami-log`/`?camera={PARKING_CAMERA_ID}#camera-section`/`#camera-section`)で見守りページ内の異なる場所に振り分けるようにした。**(不具合修正)** 「🗄️ NAS」カードにも`anchor="#nas-history"`を追加した。以前はNASカードをタップしてもシステムページの先頭に飛ぶだけで、容量履歴を見る手段が無かったため。
-* 根拠: `def build_status_cards(` (行番号: 821〜871)
+* 根拠: `def build_status_cards(` (行番号: 874〜930)
 
 
 * **引数/リクエスト**: `now`, `df_sensor`, `nas_data`, `memory`, `monthly_cost`、および補足表示にだけ使う省略可能な `last_month_cost` (int | None, 既定 None), `disk` (dict | None, 既定 None)
@@ -365,7 +378,7 @@
 * **(新機能)** `_cached`に任意の`ttl`(秒。省略時は`STATUS_CACHE_TTL_SEC`)を追加した。温湿度ヒートマップの集計(`get_hourly_climate`。`CLIMATE_CACHE_TTL_SEC`=600秒、対象は`CLIMATE_DAYS`=30日)が、ホームの自動更新(60秒)より長く保持するために使う。
 
 * **役割**: `unified_server`には`st.cache_data`が無いため、同じTTL（60秒）の小さなメモを自前で持つ。`_cached(key, loader)`はTTL内なら前回値を返し、`loader`が例外を送出した場合は例外を伝播させず`None`を返す。**失敗はキャッシュしない**。`clear_status_cache()`はTTLを待たずに捨てる。
-* 根拠: `def _cached(key: str, loader: Callable[[], Any]) -> Any:` (行番号: 883〜903)、`def clear_status_cache() -> None:` (行番号: 906〜909)
+* 根拠: `def _cached(key: str, loader: Callable[[], Any]) -> Any:` (行番号: 942〜962)、`def clear_status_cache() -> None:` (行番号: 965〜968)
 
 
 * **引数/リクエスト**: `key` (str), `loader` (引数なしの呼び出し可能オブジェクト)
@@ -410,8 +423,10 @@
 
 ### `DashboardMaterials` (NamedTuple) / `get_cached_materials`
 
+* **(2026-11-12 UX改善)** `monthly_cost`は`int | None`。取得失敗(None)を0に丸めなくなった。
+
 * **役割**: **(#829で新設)** ホーム・見守り・くらし・システムの各ページが共有する材料(`df_sensor`/`nas_data`/`nas_history`/`memory`/`disk`/`monthly_cost`/`last_month_cost`/`daily_cost_rows`)をまとめた型と、それを`_cached`経由でTTLキャッシュしつつ集める関数。同じリクエストで複数ページぶんの材料を集めてもDB・スクレイピングの回数は増えない(`_cached`のキーはページに関わらず共通)。**(不具合修正で削除)** 以前は`df_security_log`(`security_logs`テーブルから`load_generic_data`で取得)も持っていたが、このテーブルへ書き込むコードがリポジトリ内のどこにも存在せず常に空だった(防犯ログが恒常的に「表示できるデータがありません」になる不具合の原因)。見守りページの防犯ログは`df_sensor`から`camera_motion_log`で抽出したカメラの動体検知を使うよう切り替えたため、この材料自体が不要になり削除された。**(不具合修正で追加)** NASカードのタップ先(容量履歴グラフ)用に`nas_history`(`analysis_service.load_nas_history`)、電気代カードのタップ先(日別推移)用に`daily_cost_rows`(`analysis_service.calculate_daily_cost_series`)をそれぞれ追加した。
-* 根拠: `class DashboardMaterials(NamedTuple):` (行番号: 916〜930)、`def get_cached_materials() -> DashboardMaterials:` (行番号: 933〜959)
+* 根拠: `class DashboardMaterials(NamedTuple):` (行番号: 975〜989)、`def get_cached_materials() -> DashboardMaterials:` (行番号: 992〜1019)
 
 
 * **引数/リクエスト**: `get_cached_materials()`は引数なし
@@ -434,7 +449,7 @@
 ### `ASA_NOTE_HEALTH_TIMEOUT_SEC` / `check_quest_app_health` / `check_asa_note_health` / `collect_link_health`
 
 * **役割**: **(新機能)** ホームの外部リンク(ファミクエ・あさノート)の稼働状況を判定する。`check_quest_app_health`は`config.QUEST_DIST_DIR/index.html`が存在し、かつ`quest_users`を読み取り専用接続(`get_ro_connection`)で読めるとき True(`/quest`が404になる状態と、DB異常で`/api/quest/data`が500になる状態の両方を異常とする。ファミクエは`unified_server`自身が配信するため自分自身へのHTTPは使わない)。`check_asa_note_health`は外部URLへ`requests.get`(`stream=True`で本文は読まない、タイムアウト`ASA_NOTE_HEALTH_TIMEOUT_SEC`=3秒)を送り、最終ステータスが200〜399なら True(接続失敗・タイムアウト・4xx/5xxは False)。`collect_link_health(asa_note_url, yoru_note_url=None)`は両者を`_cached`(TTL60秒)経由で呼び`{"quest": bool, "asa_note": bool}`を返す。**(新機能)** `yoru_note_url`を渡すとよるノートも同じ`check_asa_note_health`で判定し`"yoru_note"`キーを追加する。
-* 根拠: `ASA_NOTE_HEALTH_TIMEOUT_SEC = 3` (行番号: 805)、`def check_quest_app_health() -> bool:` (行番号: 968)、`def check_asa_note_health(url: str) -> bool:` (行番号: 989)、`def collect_link_health(asa_note_url: str) -> dict[str, bool]:` (行番号: 1000)
+* 根拠: `ASA_NOTE_HEALTH_TIMEOUT_SEC = 3` (行番号: 805)、`def check_quest_app_health() -> bool:` (行番号: 1028)、`def check_asa_note_health(url: str) -> bool:` (行番号: 1049)、`def collect_link_health(asa_note_url: str) -> dict[str, bool]:` (行番号: 1060)
 * **引数/リクエスト**: `check_asa_note_health(url: str)`、`collect_link_health(asa_note_url: str)`。他は引数なし。
 * **戻り値/レスポンス**: `bool`(`collect_link_health`は`dict[str, bool]`。`_cached`が`None`を返した場合は異常(False)として扱う)
 * **副作用**: DBの読み取り、ファイルの存在確認、あさノートへのHTTP GET。書き込みは行わない。
@@ -444,7 +459,7 @@
 ### `get_nas_history`
 
 * **役割**: **(新機能)** システムページのNAS容量グラフ用に、直近`days`日の履歴を`analysis_service.load_nas_history(days=days)`から返す。期間ごとのキー(`nas_history:{days}`)の`_cached`(TTL付き)経由。期間は呼び出し側(`dashboard_router`)が7/30/90に絞るのでキーは3種類に収まる。
-* 根拠: `def get_nas_history(days: int) -> pd.DataFrame:` (行番号: 1013)
+* 根拠: `def get_nas_history(days: int) -> pd.DataFrame:` (行番号: 1073)
 * **引数/リクエスト**: `days: int`
 * **戻り値/レスポンス**: `pd.DataFrame`(取得失敗時は空)
 * **副作用**: DBの読み取りのみ(TTLキャッシュ)。
@@ -457,7 +472,7 @@
 ### `get_sensor_data_for_day`
 
 * **役割**: **(新機能)** 見守りページのログの日付フィルタ用に、指定日(JST)のセンサーデータを全件返す。`get_cached_materials()`の`df_sensor`は直近`MOBILE_SENSOR_ROW_LIMIT`件までで、それより古い日は含まれないため、日付指定時だけ`analysis_service.load_sensor_data(day=day)`でDBから範囲取得する。日付ごとにキーが増えて`_cache`が肥大しないよう、このデータはキャッシュしない。
-* 根拠: `def get_sensor_data_for_day(day: date) -> pd.DataFrame:` (行番号: 1021)
+* 根拠: `def get_sensor_data_for_day(day: date) -> pd.DataFrame:` (行番号: 1081)
 * **引数/リクエスト**: `day` (`date`)
 * **戻り値/レスポンス**: `pd.DataFrame`(失敗時は空)
 * **副作用**: DBの読み取りのみ。
@@ -465,10 +480,60 @@
 * 根拠: `return analysis_service.load_sensor_data(day=day)` (行番号: 806)
 
 
+### NAS上のファイルを読む取得(`NAS_READ_TIMEOUT_SEC` / `cached_with_timeout` / `get_camera_recording_states`)
+
+* **役割**: **(2026-11-12 新設)** 録画の状態・カメラの写真はNAS上のファイル一覧から作る。NASが応答しないまま待たされるとホームごと固まるため、`cached_with_timeout`は`loader`を専用のスレッドプール(`_nas_read_pool`、ワーカー2)で実行し、`timeout`(既定`NAS_READ_TIMEOUT_SEC`=3秒)で打ち切る。間に合わなければ`None`(失敗はキャッシュしない)。成功した値は`ttl`(既定`NAS_READ_CACHE_TTL_SEC`=120秒)の間キャッシュする。`get_camera_recording_states`は`recording_status_service.camera_recording_states`をこれで包んだもの。
+* 根拠: [関数定義] (行番号: 1151 / 抜粋: "def cached_with_timeout(")、[関数定義] (行番号: 1158 / 抜粋: "def get_camera_recording_states() -> list[dict[str, Any]] | None:")
+
+
+* **引数/リクエスト**: `key: str`、`loader: Callable[[], Any]`、`ttl: float`、`timeout: float`(後ろ2つはキーワード専用)
+* **戻り値/レスポンス**: `loader`の戻り値、または`None`(時間切れ・例外)
+* **副作用**: 別スレッドでの`loader`実行、モジュールレベルのキャッシュの更新
+* **エラーハンドリング**: 時間切れ・例外は`_cached`が捕捉して警告ログにし、`None`を返す。
+
+
+### ホーム最上部の「いまの状態」(`HomeAlert` / `build_home_alerts` / `_strip_leading_emoji` / `render_home_alerts_html`)
+
+* **役割**: **(2026-11-12 新設)** ホームを開いてすぐ「大丈夫か」が分かるよう、確認が必要なことを1か所にまとめる。`build_home_alerts`は (1) `theme-red`のカードをカードの並び順のまま1件ずつ(文言は「タイトル: 値」から先頭の絵文字を除いたもの。リンク先は`card_detail_href`)、(2) `health`(`read_health_result()`の結果)が古くなく、`HEALTH_HOME_KEYS`(service/api/disk/memory/nas/recording)に含まれる異常があれば「定期チェック: …」を1件(リンク先は`{dashboard_path}/sys#health-check`)、を返す。黄・灰・青のカード、管理者向けの異常(更新の遅れ・構成の差分等)は数えない。`render_home_alerts_html`は空なら「✅ すべて正常です」、あれば「⚠️ N件、確認が必要です」と各項目のリスト(文言・URLは`html.escape`)。
+* 根拠: [関数定義] (行番号: 1172 / 抜粋: "def build_home_alerts(")、[関数定義] (行番号: 1205 / 抜粋: "def render_home_alerts_html(alerts: list[HomeAlert]) -> str:")、[関数定義] (行番号: 1197 / 抜粋: "def _strip_leading_emoji(text: str) -> str:")
+
+
+* **引数/リクエスト**: `cards`、`dashboard_path: str`、`health: dict[str, Any] | None = None`(後ろ2つはキーワード専用)
+* **戻り値/レスポンス**: `list[HomeAlert]` / `str`(HTML)
+* **副作用**: なし
+* **エラーハンドリング**: なし
+
+
+### 定期チェックの結果(`HEALTH_RESULT_FILENAME` / `HEALTH_CHECK_LABELS` / `HEALTH_HOME_KEYS` / `health_result_path` / `read_health_result` / `_as_jst`)
+
+* **役割**: **(2026-11-12 新設)** `monitors/health_watch.py`(毎時)が`{config.LOG_DIR}/.health_watch_last_result`へ書いた検知結果を読む。戻り値は`{"checked_at": datetime, "stale": bool, "anomalies": [{"key", "label", "text"}], "history": [{"at": datetime, "labels": [str]}]}`。`label`はチェック名を`HEALTH_CHECK_LABELS`で画面用の短い名前にしたもの(表に無いチェック名はそのまま)。`stale`は最後のチェックから`HEALTH_RESULT_STALE_MIN`(150分)以上経っていること。時刻は`_as_jst`でJSTのawareに揃える(naiveはJSTとみなす)。
+* 根拠: [関数定義] (行番号: 1257 / 抜粋: "def read_health_result(now: datetime | None = None) -> dict[str, Any] | None:")、[関数定義] (行番号: 1253 / 抜粋: "def health_result_path() -> str:")、[関数定義] (行番号: 1248 / 抜粋: "def _as_jst(value: datetime) -> datetime:")
+
+
+* **引数/リクエスト**: `now: datetime | None = None`
+* **戻り値/レスポンス**: `dict[str, Any] | None`(ファイルが無い・JSONでない・`checked_at`を読めないときは`None`)
+* **副作用**: 状態ファイルの読み取り
+* **エラーハンドリング**: 読み取り時の例外は警告ログにして`None`。`history`の壊れた要素は読み飛ばす。
+
+
+### 今日の天気(`get_today_weather` / `render_today_weather_html`)
+
+* **役割**: **(2026-11-12 新設)** `weather_history`テーブルから今日(JST)・`config.WEATHER_LOCATION_NAME`の行を読み、`{"desc", "max_temp", "min_temp"}`を返す(行が無い・最高/最低とも欠損なら`None`)。`CLIMATE_CACHE_TTL_SEC`(10分)キャッシュ、キーは固定の`weather_today`。`render_today_weather_html`は「今日の天気: 晴れ・最高 18℃ / 最低 9℃」の1行を返す(材料が無ければ空文字)。
+* 根拠: [関数定義] (行番号: 1298 / 抜粋: "def get_today_weather() -> dict[str, Any] | None:")、[関数定義] (行番号: 1317 / 抜粋: "def render_today_weather_html(weather: dict[str, Any] | None) -> str:")
+
+
+* **引数/リクエスト**: なし / `weather: dict[str, Any] | None`
+* **戻り値/レスポンス**: `dict[str, Any] | None` / `str`(HTML)
+* **副作用**: DBの読み取り(`get_ro_connection`)
+* **エラーハンドリング**: DB読み取りの例外は`_cached`が捕捉して`None`。
+
+
 ### `collect_status_cards`
 
+* **(2026-11-12 UX改善)** `build_status_cards`に`recording=get_camera_recording_states()`を渡す。
+
 * **役割**: `get_cached_materials`で材料を集め、`build_status_cards`に渡して`(カード一覧, 取得時刻)`を返す。ホームページ用。
-* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 1080〜1094)
+* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 1336〜1351)
 
 
 * **引数/リクエスト**: `now` (`datetime | None`。省略時は `core.utils.get_now_jst()`)
@@ -490,6 +555,8 @@
 
 ### 補足表示（`describe_takasago` / `describe_itami` / `describe_parking` / `describe_camera` / `describe_cost` / `describe_server` / `describe_nas`）
 
+* **(2026-11-12 UX改善)** `describe_camera(df_sensor, now, recording=None)`: 止まっているカメラがあれば「最新の録画 HH:MM」(録画ファイルが無ければ「今日・昨日の録画がありません」)、全台録画中なら「最終検知 {カメラ名} HH:MM」。`describe_server(disk, memory=None)`: 「メモリ N%・ディスク N%」(取れたものだけ)。`describe_cost`: `monthly_cost`が`None`なら`None`。
+
 * **役割**: カードの値の下に小さく出す1行（`StatusCard.sub`）を組み立てる。
   * `describe_takasago` / `describe_itami`: `最終検知 09:40`。
   * `describe_parking`: **(#829で`describe_car`から置き換え)** 駐車場カメラの最終検知時刻(`最終検知 08:15`)。以前の`describe_car`(`08:15 に出発`/`に帰宅`)は`car_records`が常に空だったため意味を成さず、`get_parking_status`と同じ理由で廃止された。抽出元の`_parking_camera_motion`は不具合修正で`device_id`照合に変更されたが、`describe_parking`自体のロジックは変わっていない。
@@ -498,7 +565,7 @@
   * `describe_server`: `ディスク 55%`。`describe_nas`: `空き 1,234GB`。
   * 時刻の書式は `_format_moment` が決める。
 * **(#829で削除)** `describe_quest`(ファミクエの承認待ちの補足)は、ファミクエのカード自体が廃止されたため削除された。**(不具合修正で削除)** `describe_rice`(炊飯器の前回稼働時刻の補足)は、`get_rice_status`と同時に炊飯器カード自体が削除されたため削除された。
-* 根拠: `def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 644)、`def describe_itami(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 649)、`def describe_parking(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 658)、`def describe_camera(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 684)、`def describe_cost(monthly_cost: int, last_month_cost: int | None) -> str | None:` (行番号: 696)、`def _format_moment(moment, now: datetime) -> str | None:` (行番号: 624)
+* 根拠: `def describe_takasago(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 673)、`def describe_itami(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 678)、`def describe_parking(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 687)、`def describe_camera(df_sensor: pd.DataFrame, now: datetime) -> str | None:` (行番号: 713)、`def describe_cost(monthly_cost: int, last_month_cost: int | None) -> str | None:` (行番号: 745)、`def _format_moment(moment, now: datetime) -> str | None:` (行番号: 653)
 
 
 * **引数/リクエスト**: 判定関数と同じ材料（DataFrame・取得済みの辞書・`now`）
@@ -514,14 +581,14 @@
 
 
 * **エラーハンドリング**: 空DataFrame・列の欠落・`NaT`はいずれも `None` を返す。
-* 根拠: `def _latest_timestamp(df: pd.DataFrame):` (行番号: 637)
+* 根拠: `def _latest_timestamp(df: pd.DataFrame):` (行番号: 666)
 
 
 
 ### `latest_parking_motion_at`
 
 * **役割**: **(#829で新設)** 駐車場カメラが最後に動きを捉えた時刻を返す(無ければ`None`)。システムページ(`services/dashboard_page_service.py`)の鮮度一覧が、カード判定(`get_parking_status`/`describe_parking`)と同じ抽出(`_parking_camera_motion`)を使うための公開ラッパー。
-* 根拠: `def latest_parking_motion_at(df_sensor: pd.DataFrame):` (行番号: 663〜669)
+* 根拠: `def latest_parking_motion_at(df_sensor: pd.DataFrame):` (行番号: 692〜698)
 
 
 * **引数/リクエスト**: `df_sensor: pd.DataFrame`
@@ -544,7 +611,7 @@
 ### `camera_motion_log`
 
 * **役割**: **(不具合修正で新設)** 見守りページの防犯ログに出す、カメラが動きを捉えた行(新しい順)を返す。以前は`security_logs`テーブル(`analysis_service.load_generic_data("security_logs", ...)`)を読んでいたが、このテーブルへ書き込むコードがリポジトリ内のどこにも存在せず(`monitors/camera_monitor.py`が動体検知を記録するのは`device_records`のみ)、防犯ログは常に「表示できるデータがありません」のままだった。カード側の判定(`get_camera_status`)と同じ抽出(`_camera_motion`)を公開する薄いラッパーで、`df_sensor`(既に`analysis_service.load_sensor_data`側で`apply_friendly_names`済み)から抽出するため`friendly_name`/`location`を追加で付与し直す必要が無い。
-* 根拠: `def camera_motion_log(df_sensor: pd.DataFrame) -> pd.DataFrame:` (行番号: 672〜681)
+* 根拠: `def camera_motion_log(df_sensor: pd.DataFrame) -> pd.DataFrame:` (行番号: 701〜710)
 
 
 * **引数/リクエスト**: `df_sensor: pd.DataFrame`
@@ -654,7 +721,7 @@ graph TD
 * 根拠: `from services import analysis_service` (行番号: 29)
 
 * **判定をページ組み立て側（`dashboard_page_service.py`）へ戻さないこと**: 戻すとページごとに同じカードの内容が食い違いうる。
-* 根拠: `def build_status_cards(` (行番号: 821)
+* 根拠: `def build_status_cards(` (行番号: 874)
 
 * **取得失敗をキャッシュしないこと**: `_cached` は失敗時に `None` を返すだけでキャッシュに入れない。入れてしまうと、復旧してもTTLの60秒間は壊れた表示のままになる。
 * 根拠: `except Exception as e:  # noqa: BLE001 (1枚のカードの取得失敗でページ全体を落とさない)` (行番号: 725)
@@ -663,19 +730,19 @@ graph TD
 * 根拠: [`render_status_card_html`本体] (行番号: 253付近のエスケープ分岐)
 
 * **判定と補足表示で同じ行の抽出を使うこと**: `describe_*` が判定（`get_*_status`）と別の条件で行を絞ると、「カードの色は緑なのに最終検知の時刻だけ新しい」という食い違いが起きる。抽出は `_takasago_activity` / `_itami_motion` / `_itami_contact` / `_parking_camera_motion` に集約してある。
-* 根拠: `def _takasago_activity(df_sensor: pd.DataFrame) -> pd.DataFrame:` (行番号: 413)
+* 根拠: `def _takasago_activity(df_sensor: pd.DataFrame) -> pd.DataFrame:` (行番号: 415)
 
 * **カードの並びを「異常が上」に並べ替えないこと**: どの位置に何があるかで覚えている画面で順番が入れ替わると、かえって読み違える。**(不具合修正)** 以前は気になることを`summarize_alerts`の要約行で先頭に出す方式にしていたが、この要約行自体が削除された(要望により)ため、現在はカード自体の色(赤・黄)だけで異常を示す。
-* 根拠: `def group_cards(cards) -> list[tuple[str | None, list[StatusCard]]]:` (行番号: 347)、削除は差分（`git diff`）で確認: 現在の`services/home_status_service.py`に`summarize_alerts`の定義は存在しない。
+* 根拠: `def group_cards(cards) -> list[tuple[str | None, list[StatusCard]]]:` (行番号: 349)、削除は差分（`git diff`）で確認: 現在の`services/home_status_service.py`に`summarize_alerts`の定義は存在しない。
 
 * **駐車場カメラの動体検知(`get_parking_status`)は在宅/外出中を断定しない**: 人の往来も拾うため、常に情報色(青)かグレーにする設計になっている。
-* 根拠: `def get_parking_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 598)
+* 根拠: `def get_parking_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str]:` (行番号: 627)
 
 * **駐車場カメラの特定は表示名(`name`)ではなく`id`で行うこと**: `name`(`config.CAMERAS`の`name`/`devices.json`)は運用者が自由に変更できる文字列で、変更するたびに`friendly_name`との完全一致が壊れ「⚪ データなし」に静かに戻ってしまう(過去に実際に起きた不具合)。`id`は変更されにくいため`PARKING_CAMERA_ID`で照合する。同じ理由から`weekly_analyze_report.py`の駐車場動体検知カウントも`device_id`照合にしてある。
-* 根拠: `PARKING_CAMERA_ID = "VIGI_C540_Parking"` (行番号: 491)、`def _parking_camera_motion(df_sensor: pd.DataFrame) -> pd.DataFrame:` (行番号: 590)
+* 根拠: `PARKING_CAMERA_ID = "VIGI_C540_Parking"` (行番号: 491)、`def _parking_camera_motion(df_sensor: pd.DataFrame) -> pd.DataFrame:` (行番号: 619)
 
 * **`security_logs`テーブルを直接読む処理を復活させないこと**: このテーブルへ書き込むコードはリポジトリ内のどこにも存在しない(`monitors/camera_monitor.py`が動体検知を記録するのは`device_records`のみ)。以前このモジュールは`analysis_service.load_generic_data("security_logs", ...)`で読んでおり、防犯ログが常に空になる不具合の原因だった。防犯ログの正のデータは`camera_motion_log`(`df_sensor`からの動体検知抽出)であり、書き込み先の無い`security_logs`を読む経路を新たに足さないこと。
-* 根拠: `def camera_motion_log(df_sensor: pd.DataFrame) -> pd.DataFrame:` (行番号: 672)
+* 根拠: `def camera_motion_log(df_sensor: pd.DataFrame) -> pd.DataFrame:` (行番号: 701)
 
 ## 9. 不明事項一覧
 

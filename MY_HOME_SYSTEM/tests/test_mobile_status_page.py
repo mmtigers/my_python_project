@@ -148,8 +148,8 @@ class TestDashboardHomePage:
 
         assert res.status_code == 200
         assert res.text.count('class="status-card') == EXPECTED_CARD_COUNT
-        # 取れなかったものは値を偽らずに「取得失敗」と出す
-        assert "取得失敗" in res.text
+        # 取れなかったものは値を偽らずに「取得できません」と出す
+        assert "取得できません" in res.text
 
 
 class TestHomeScreenInstall:
@@ -243,11 +243,12 @@ class TestSubPages:
                 p.stop()
 
     @pytest.mark.parametrize("path", ["watch", "life", "sys", "updates"])
-    def test_each_page_has_a_back_to_home_link(self, path):
+    def test_each_page_can_go_home_from_the_bottom_nav(self, path):
+        """ホームへの導線は下部ナビ(全ページ共通)。ページ上部の「ホームへ戻る」は重複のため廃止した。"""
         res = self._get(path)
         assert res.status_code == 200
-        assert f'href="{config.DASHBOARD_BASE_PATH}/"' in res.text
-        assert "ホームへ戻る" in res.text
+        nav = res.text[res.text.index('<nav class="bottom-nav"'):]
+        assert f'href="{config.DASHBOARD_BASE_PATH}/"' in nav and "ホーム" in nav
 
     def test_watch_page_shows_camera_selector_gallery_and_logs(self):
         res = self._get("watch")
@@ -305,16 +306,9 @@ class TestSubPages:
         assert res.status_code == 200
         assert 'name="device"' not in res.text or "すべての機器" in res.text
 
-    def test_home_has_an_updates_nav_card(self):
-        patches = _stub_loaders()
-        for p in patches:
-            p.start()
-        try:
-            with _client() as client:
-                res = client.get(f"{config.DASHBOARD_BASE_PATH}/")
-        finally:
-            for p in patches:
-                p.stop()
+    def test_updates_page_is_reached_from_the_system_page(self):
+        """「アップデート」は下部ナビ・ホームには常設せず、システムページ(管理者向け)から開く。"""
+        res = self._get("sys")
         assert f'href="{config.DASHBOARD_BASE_PATH}/updates"' in res.text
         assert "アップデート" in res.text
 
@@ -350,7 +344,7 @@ class TestSubPages:
                               "tv": {"configured": False, "has_data": False}}):
             res = self._get(f"power{query}")
         assert res.status_code == 200 and seen == [expected_days]
-        assert "⚡ 電気" in res.text and "ホームへ戻る" in res.text
+        assert "⚡ 電気" in res.text and "くらしへ戻る" in res.text
 
     def test_sys_page_restart_button_is_disabled_until_confirmed(self):
         res = self._get("sys")
@@ -812,7 +806,10 @@ class TestSupportingValues:
         )
 
         assert len(cards) == EXPECTED_CARD_COUNT
-        assert all(card.sub is None for card in cards)
+        # サーバーだけは、値を「正常」にした代わりにメモリ使用率を補足へ出す
+        assert all(card.sub is None for card in cards if card.title != "🖥️ サーバー")
+        (server,) = [card for card in cards if card.title == "🖥️ サーバー"]
+        assert (server.value, server.sub) == ("🟢 正常", "メモリ 42%")
 
     def test_the_page_shows_them_too(self):
         patches = _stub_loaders()

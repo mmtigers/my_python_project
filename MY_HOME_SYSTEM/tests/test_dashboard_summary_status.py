@@ -97,7 +97,7 @@ class TestGetItamiStatus:
         df = _sensor_df([_row(device_type="Webhook", contact_state="detected",
                               timestamp=NOW - timedelta(minutes=30))])
         val, theme = home_status_service.get_itami_status(df, NOW)
-        assert val == "🟢 活動中 (30分前)"
+        assert val == "🟢 活動中"  # 何分前かは補足(最終検知)に出す
         assert theme == "theme-green"
 
     def test_motion_over_one_hour_ago_is_quiet(self):
@@ -108,7 +108,7 @@ class TestGetItamiStatus:
     def test_falls_back_to_contact_sensor_when_no_motion(self):
         df = _sensor_df([_row(device_type="Contact Sensor", contact_state="open",
                               timestamp=NOW - timedelta(minutes=20))])
-        assert home_status_service.get_itami_status(df, NOW) == ("🟢 活動中 (20分前)", "theme-green")
+        assert home_status_service.get_itami_status(df, NOW) == ("🟢 活動中", "theme-green")
 
     def test_stale_contact_sensor_stays_no_data(self):
         df = _sensor_df([_row(device_type="Contact Sensor", contact_state="open",
@@ -153,20 +153,20 @@ class TestGetCameraStatus:
 
     def test_just_now_is_reported_as_moving(self):
         val, theme = home_status_service.get_camera_status(self._df([self._row(3)]), NOW)
-        assert val == "🎥 いま動きあり"
+        assert val == "いま動きあり"
         assert theme == "theme-blue"
 
     def test_within_an_hour_shows_minutes(self):
         val, _ = home_status_service.get_camera_status(self._df([self._row(25)]), NOW)
-        assert val == "🎥 25分前に検知"
+        assert val == "25分前に検知"
 
     def test_within_a_day_shows_hours(self):
         val, _ = home_status_service.get_camera_status(self._df([self._row(200)]), NOW)
-        assert val == "🎥 3時間前に検知"
+        assert val == "3時間前に検知"
 
     def test_older_than_a_day_is_gray(self):
         val, theme = home_status_service.get_camera_status(self._df([self._row(60 * 30)]), NOW)
-        assert val == "🎥 24時間 検知なし"
+        assert val == "24時間 検知なし"
         assert theme == "theme-gray"
 
     def test_detection_never_raises_an_alert(self):
@@ -235,13 +235,13 @@ class TestCardGroups:
 
 class TestGetServerStatus:
     def test_low_memory_is_green(self):
-        assert home_status_service.get_server_status({"percent": 42.7}) == ("💻 RAM: 42%", "theme-green")
+        assert home_status_service.get_server_status({"percent": 42.7}) == ("🟢 正常", "theme-green")
 
     def test_high_memory_is_red(self):
-        assert home_status_service.get_server_status({"percent": 91.0}) == ("💻 RAM: 91%", "theme-red")
+        assert home_status_service.get_server_status({"percent": 91.0}) == ("🔴 メモリ不足", "theme-red")
 
     def test_unavailable_memory_is_gray(self):
-        assert home_status_service.get_server_status(None) == ("⚪ 取得失敗", "theme-gray")
+        assert home_status_service.get_server_status(None) == ("⚪ 取得できません", "theme-gray")
 
 
 class TestGetNasStatusSimple:
@@ -249,13 +249,13 @@ class TestGetNasStatusSimple:
         assert home_status_service.get_nas_status_simple(None) == ("⚪ データなし", "theme-gray")
 
     def test_ping_ok_is_green(self):
-        assert home_status_service.get_nas_status_simple(pd.Series({"status_ping": "OK"})) == ("🗄️ NAS: 稼働中", "theme-green")
+        assert home_status_service.get_nas_status_simple(pd.Series({"status_ping": "OK"})) == ("🟢 稼働中", "theme-green")
 
     def test_ping_ng_is_red(self):
-        assert home_status_service.get_nas_status_simple(pd.Series({"status_ping": "NG"})) == ("⚠️ NAS: 応答なし", "theme-red")
+        assert home_status_service.get_nas_status_simple(pd.Series({"status_ping": "NG"})) == ("🔴 応答なし", "theme-red")
 
     def test_missing_key_is_reported_as_broken_data(self):
-        assert home_status_service.get_nas_status_simple(pd.Series({"other": 1})) == ("⚠️ NAS: データ異常", "theme-yellow")
+        assert home_status_service.get_nas_status_simple(pd.Series({"other": 1})) == ("🟡 データ異常", "theme-yellow")
 
 
 class TestGetParkingStatus:
@@ -293,7 +293,7 @@ class TestGetParkingStatus:
 
     def test_just_now_is_reported_as_moving(self):
         val, theme = home_status_service.get_parking_status(self._df([self._row(3)]), NOW)
-        assert val == "🚗 いま動きあり"
+        assert val == "いま動きあり"
         assert theme == "theme-blue"
 
     def test_detection_never_raises_an_alert(self):
@@ -319,7 +319,7 @@ class TestBuildStatusCards:
         assert titles[0] == "👵 高砂 (実家)"
         assert "💰 今月の電気代" in titles
         # 電気代は3桁区切りで整形される
-        assert any(c.value == "⚡ 4,321 円" for c in cards)
+        assert any(c.value == "4,321 円" for c in cards)
         # 退役したカード(駐輪場・JR運行情報・ファミクエ・炊飯器)が復活していないこと
         assert not any("駐輪場" in t or "JR" in t or "承認待ち" in t or "炊飯器" in t for t in titles)
 

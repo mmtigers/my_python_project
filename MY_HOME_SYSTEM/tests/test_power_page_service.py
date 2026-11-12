@@ -94,7 +94,8 @@ class TestSvgBars:
 class TestPage:
     def test_has_back_link_period_links_and_price_note(self):
         html = _render()
-        assert "ホームへ戻る" in html and "⚡ 電気" in html
+        # 下部ナビに無いページなので、親の「くらし」へ戻るリンクを上部に置く
+        assert 'class="back-link" href="/dashboard/life"' in html and "くらしへ戻る" in html and "⚡ 電気" in html
         assert "31円/kWh" in html and "概算" in html
         assert 'href="/dashboard/power?days=60"' in html and 'href="/dashboard/power?days=90"' in html
         assert '<span class="nas-period-current">30日</span>' in html and "13か月分" in html
