@@ -454,6 +454,31 @@ class TestReadRecordPart:
         self._write_abs_mp4(recordings / "20260101_100000.mp4")
         assert rps.read_record_part(CAM, "20260101", "20260101_100000.mp4", offset, length) is None
 
+    def test_trailing_segment_of_a_growing_file_stays_readable_after_it_grows(self, recordings):
+        """書き込み中のファイル: プレイリスト取得後にフラグメントが増え、末尾セグメントが伸びても、
+        取得済みプレイリストの範囲(伸びる前の末尾)を返せること。"""
+        path = recordings / "20260101_100000.mp4"
+        data = self._write_abs_mp4(path, n=6)  # 4秒 + 2秒(端数)
+        playlist = rps.get_record_playlist(CAM, "20260101")
+        last = [line for line in playlist.splitlines() if "?part=" in line][-1]
+        offset, length = map(int, last.split("?part=")[1].split("-"))
+        assert offset + length == len(data)
+
+        for _ in range(3):  # 録画が進んで末尾セグメントが 2秒 → 4秒 + 1秒 になる
+            data += _abs_fragment(len(data))
+        path.write_bytes(data)
+
+        out = rps.read_record_part(CAM, "20260101", "20260101_100000.mp4", offset, length)
+        assert out is not None
+        assert len(out) == length - 2 * 16  # 2フラグメント分の moof が縮むだけ
+
+    def test_range_ending_inside_a_box_is_refused(self, recordings):
+        self._write_abs_mp4(recordings / "20260101_100000.mp4")
+        playlist = rps.get_record_playlist(CAM, "20260101")
+        first = [line for line in playlist.splitlines() if "?part=" in line][1]
+        offset, length = map(int, first.split("?part=")[1].split("-"))
+        assert rps.read_record_part(CAM, "20260101", "20260101_100000.mp4", offset, length - 3) is None
+
     def test_unknown_or_unsupported_file_is_refused(self, recordings):
         (recordings / "20260101_090000.mp4").write_bytes(_init(fragmented=False) + _box(b"mdat", b"\0"))
         assert rps.read_record_part(CAM, "20260101", "20260101_090000.mp4", 0, len(_init(fragmented=False))) is None

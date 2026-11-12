@@ -550,7 +550,9 @@ def read_record_part(cam_conf: Dict[str, Any], target_date: str, filename: str,
                      offset: int, length: int) -> Optional[bytes]:
     """プレイリストが参照する範囲(初期化セグメントかセグメント1つ)を NAS の MP4 から読んで返す。
 
-    範囲は索引にあるものと完全に一致する場合だけ受け付ける(任意の範囲を読ませない)。
+    範囲は、索引の初期化セグメントと完全に一致するか、索引のセグメントと開始が一致して
+    その中に収まる(書き込み中のファイルで末尾セグメントが伸びた場合)ものだけを受け付ける
+    (任意の範囲を読ませない)。
     セグメントは `rewrite_fragments` で MSE が受け付ける形に直す。該当しなければ None。
     """
     path = resolve_record_file(cam_conf, target_date, filename)
@@ -571,7 +573,12 @@ def read_record_part(cam_conf: Dict[str, Any], target_date: str, filename: str,
     if entry.get("unsupported"):
         return None
     is_init = offset == 0 and length == entry.get("init_size")
-    if not is_init and not any(int(o) == offset and int(n) == length for o, n, _d in entry.get("segments") or []):
+    # セグメントは「開始が索引のセグメントの開始と一致し、終わりがそのセグメント内」なら受け付ける。
+    # 書き込み中のファイルでは、末尾の(SEGMENT_TARGET_SECONDS に満たない)セグメントが
+    # フラグメントの追加で伸びるため、少し前に取得したプレイリストの範囲は索引より短くなる。
+    # 終わりがボックスの境界でなければ rewrite_fragments が UnsupportedRecording で断る。
+    if not is_init and not any(int(o) == offset and 0 < length <= int(n)
+                               for o, n, _d in entry.get("segments") or []):
         return None
     try:
         with open(path, "rb") as f:
