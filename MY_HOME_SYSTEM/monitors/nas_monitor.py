@@ -334,14 +334,15 @@ class NasMonitor:
             # 拡張子で絞り込まず全ファイルを対象にする。
             ("DBバックアップ", getattr(config, "DB_BACKUPS_DIR", None),
              getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), None),
-            # #359: 録画VOD用のHLSセグメント(services/camera_service.py の
-            # generate_record_playlist が BASE_DIR/data/hls_streams/vod/<cam>/ に生成する
-            # .ts/.m3u8/concat_*.txt)は1日分で数GB規模だが、どこにも削除経路が無く
-            # ローカル(SDカード)に無制限に蓄積していた。過去日の閲覧結果はキャッシュとして
-            # 数日残せば十分なので短い保持期間で削除する。
+            # #359: 録画VOD用のキャッシュ(BASE_DIR/data/hls_streams/vod/<cam>/)。
+            # 以前は services/camera_service.py が ffmpeg で .ts/.m3u8/concat_*.txt
+            # (1日分で数GB〜数十GB)をここへ生成しており、どこにも削除経路が無かった。
+            # Issue #1091 で生成処理は廃止し、今は services/record_playlist_service.py の
+            # 録画索引(index_<日付>.json、小さい)だけが置かれる。旧方式の残りと索引を
+            # 短い保持期間で削除する(索引は消えても次の閲覧時に作り直される)。
             ("録画VODキャッシュ",
              os.path.join(getattr(config, "BASE_DIR", ""), "data", "hls_streams", "vod"),
-             getattr(config, "HLS_VOD_RETENTION_DAYS", 3), (".ts", ".m3u8", ".txt")),
+             getattr(config, "HLS_VOD_RETENTION_DAYS", 3), (".ts", ".m3u8", ".txt", ".json")),
         ]
 
         summary_lines = []

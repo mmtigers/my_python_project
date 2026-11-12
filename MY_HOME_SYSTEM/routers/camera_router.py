@@ -1,12 +1,12 @@
 import asyncio
 import os
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 import config
-from services import camera_service
+from services import camera_service, record_playlist_service
 
 router = APIRouter()
 
@@ -99,43 +99,54 @@ def _validate_target_date(target_date: str) -> None:
 
 @router.get("/record/{camera_id}/{target_date}/info")
 def get_record_info(camera_id: str, target_date: str):
-    """指定日の録画ファイルのメタデータ（最初のファイルのオフセット秒数）を返す"""
+    """指定日の録画のメタデータを返す。
+
+    - offset_seconds: 最初のファイルの開始時刻(0時からの秒数)
+    - files: 録画ファイルごとの開始時刻(0時からの秒数)・プレイリスト上の位置・長さ(秒)。
+      Issue #1091: 録画が欠けている時間帯はプレイリスト上で詰まるため、フロントエンドは
+      「指定時刻 → 再生位置」をこの対応表で変換する。
+    """
     _validate_target_date(target_date)
     cam_conf = _require_camera(camera_id)
 
     offset = camera_service.get_record_start_offset(cam_conf, target_date)
-    return {"offset_seconds": offset}
+    files = record_playlist_service.get_record_timeline(cam_conf, target_date)
+    return {"offset_seconds": offset, "files": files}
+
+_RECORD_PART_RE = re.compile(r"^(\d{1,12})-(\d{1,12})$")
+
 
 @router.get("/record/{camera_id}/{target_date}/{filename}")
-def get_record_file(camera_id: str, target_date: str, filename: str):
-    """録画VODのプレイリスト（.m3u8）またはセグメント（.ts）を配信"""
+def get_record_file(camera_id: str, target_date: str, filename: str, part: Optional[str] = None):
+    """録画VODのプレイリスト（.m3u8）または NAS 上の録画 MP4 の一部（.mp4?part=開始-長さ）を配信する。
+
+    Issue #1091: 以前は ffmpeg で丸1日分を HLS(.ts) 化して SD カードへ書き出していたが、
+    NAS 上の fragmented MP4 を直接参照するプレイリストに変えた。MP4 はプレイリストが示す
+    範囲(初期化セグメントかセグメント1つ)だけを返し、ブラウザ(MSE)が受け付けるよう
+    moof の見出しを書き換える(record_playlist_service.read_record_part)。
+    """
     _validate_target_date(target_date)
-    # .m3u8 プレイリストの要求の場合
+    cam_conf = _require_camera(camera_id)
+
     if filename.endswith(".m3u8"):
-        cam_conf = _require_camera(camera_id)
-
-        # Issue #1088: VOD生成は全カメラで同時1本・空き容量の事前確認つき。順番待ち・
-        # 混雑・容量不足で今は生成できないときは、「録画が無い」(404)と区別して 503 を返す。
-        try:
-            playlist_path = camera_service.generate_record_playlist(cam_conf, target_date)
-        except camera_service.VodGenerationUnavailable as e:
-            headers = {"Retry-After": str(e.retry_after)} if e.retry_after else None
-            raise HTTPException(status_code=503, detail=e.message, headers=headers)
-        if not playlist_path:
+        playlist = record_playlist_service.get_record_playlist(cam_conf, target_date)
+        if not playlist:
             raise HTTPException(status_code=404, detail="Recordings not found for the specified date")
+        # 当日分は録画が増えるため、ブラウザにキャッシュさせない
+        return Response(content=playlist, media_type="application/vnd.apple.mpegurl",
+                        headers={"Cache-Control": "no-cache"})
 
-        return FileResponse(playlist_path, media_type="application/vnd.apple.mpegurl")
-
-    # .ts セグメントの要求の場合
-    elif filename.endswith(".ts"):
-        _require_camera(camera_id)
-
-        # NASの元動画に日付フォルダは無いため、生成されたtsファイルも camera_id 直下のパスで解決する
-        segment_path = _resolve_segment_path(camera_service.HLS_VOD_DIR, camera_id, filename)
-        if not os.path.exists(segment_path):
-            raise HTTPException(status_code=404, detail="Segment not found")
-
-        return FileResponse(segment_path, media_type="video/MP2T")
+    elif filename.endswith(".mp4"):
+        m = _RECORD_PART_RE.match(part or "")
+        if m is None:
+            raise HTTPException(status_code=400, detail="part=<offset>-<length> is required")
+        data = record_playlist_service.read_record_part(
+            cam_conf, target_date, filename, int(m.group(1)), int(m.group(2)))
+        if data is None:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        # 範囲は索引のセグメントそのもので、書き終わった部分は変わらない
+        return Response(content=data, media_type="video/mp4",
+                        headers={"Cache-Control": "private, max-age=86400"})
 
     else:
         raise HTTPException(status_code=400, detail="Unsupported file extension")

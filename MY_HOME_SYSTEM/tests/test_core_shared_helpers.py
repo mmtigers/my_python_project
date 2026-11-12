@@ -351,7 +351,6 @@ class TestRefCountedLockRegistryConsolidation:
         from core.utils import RefCountedLockRegistry
         from services import camera_service
 
-        assert isinstance(camera_service._vod_generation_locks, RefCountedLockRegistry)
         assert isinstance(camera_service._live_stream_locks, RefCountedLockRegistry)
         assert not hasattr(camera_service, "_RefCountedLock")
 

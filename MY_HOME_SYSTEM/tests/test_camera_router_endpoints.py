@@ -105,11 +105,13 @@ def test_get_live_stream_times_out_if_playlist_never_appears(api_client, one_cam
     assert res.status_code == 503
 
 
-def test_get_record_info_returns_offset(api_client, one_camera, monkeypatch):
+def test_get_record_info_returns_offset_and_timeline(api_client, one_camera, monkeypatch):
     monkeypatch.setattr(camera_router.camera_service, "get_record_start_offset", lambda cam_conf, date: 42)
+    timeline = [{"start_seconds": 42, "position": 0.0, "duration": 600.0}]
+    monkeypatch.setattr(camera_router.record_playlist_service, "get_record_timeline", lambda cam_conf, date: timeline)
     res = api_client.get("/api/cameras/record/cam1/20260101/info")
     assert res.status_code == 200
-    assert res.json()["offset_seconds"] == 42
+    assert res.json() == {"offset_seconds": 42, "files": timeline}
 
 
 def test_get_record_info_unknown_camera_returns_404(api_client, one_camera):
@@ -117,32 +119,68 @@ def test_get_record_info_unknown_camera_returns_404(api_client, one_camera):
     assert res.status_code == 404
 
 
-def test_get_record_file_playlist_success(api_client, one_camera, tmp_path, monkeypatch):
-    playlist = tmp_path / "record.m3u8"
-    playlist.write_text("#EXTM3U\n")
+def test_get_record_file_playlist_success(api_client, one_camera, monkeypatch):
     monkeypatch.setattr(
-        camera_router.camera_service, "generate_record_playlist", lambda cam_conf, date: str(playlist)
+        camera_router.record_playlist_service, "get_record_playlist", lambda cam_conf, date: "#EXTM3U\n"
     )
-    res = api_client.get("/api/cameras/record/cam1/20260101/record.m3u8")
+    res = api_client.get("/api/cameras/record/cam1/20260101/record_20260101.m3u8")
     assert res.status_code == 200
+    assert res.text == "#EXTM3U\n"
+    assert res.headers["content-type"].startswith("application/vnd.apple.mpegurl")
+    assert res.headers["cache-control"] == "no-cache"
 
 
 def test_get_record_file_playlist_not_found_returns_404(api_client, one_camera, monkeypatch):
-    monkeypatch.setattr(camera_router.camera_service, "generate_record_playlist", lambda cam_conf, date: None)
+    monkeypatch.setattr(camera_router.record_playlist_service, "get_record_playlist", lambda cam_conf, date: None)
     res = api_client.get("/api/cameras/record/cam1/20260101/record.m3u8")
     assert res.status_code == 404
 
 
-# Issue #1088: 順番待ち・空き容量不足で今は生成できないときは、「録画が無い」(404)と区別して 503
-@pytest.mark.parametrize("retry_after, expected_header", [(60, "60"), (None, None)])
-def test_get_record_file_playlist_unavailable_returns_503(api_client, one_camera, monkeypatch, retry_after, expected_header):
-    def _raise(cam_conf, date):
-        raise camera_router.camera_service.VodGenerationUnavailable("順番待ちです", retry_after=retry_after)
-    monkeypatch.setattr(camera_router.camera_service, "generate_record_playlist", _raise)
-    res = api_client.get("/api/cameras/record/cam1/20260101/record_20260101.m3u8")
-    assert res.status_code == 503
-    assert res.json()["detail"] == "順番待ちです"
-    assert res.headers.get("retry-after") == expected_header
+# Issue #1091: 録画 MP4 はプレイリストが示す範囲(?part=開始-長さ)だけを返す
+def test_get_record_mp4_part_returns_service_bytes(api_client, one_camera, monkeypatch):
+    calls = []
+
+    def _read(cam_conf, date, filename, offset, length):
+        calls.append((cam_conf["id"], date, filename, offset, length))
+        return b"segment-bytes"
+    monkeypatch.setattr(camera_router.record_playlist_service, "read_record_part", _read)
+    res = api_client.get("/api/cameras/record/cam1/20260101/20260101_100000.mp4?part=1203-62102")
+    assert res.status_code == 200
+    assert res.content == b"segment-bytes"
+    assert res.headers["content-type"] == "video/mp4"
+    assert calls == [("cam1", "20260101", "20260101_100000.mp4", 1203, 62102)]
+
+
+@pytest.mark.parametrize("query", ["", "?part=", "?part=abc", "?part=1-", "?part=-5", "?part=1-2-3"])
+def test_get_record_mp4_without_valid_part_is_400(api_client, one_camera, monkeypatch, query):
+    monkeypatch.setattr(camera_router.record_playlist_service, "read_record_part",
+                        lambda *a: pytest.fail("サービスまで到達している"))
+    res = api_client.get(f"/api/cameras/record/cam1/20260101/20260101_100000.mp4{query}")
+    assert res.status_code == 400
+
+
+def test_get_record_mp4_unknown_part_is_404(api_client, one_camera, monkeypatch):
+    monkeypatch.setattr(camera_router.record_playlist_service, "read_record_part", lambda *a: None)
+    res = api_client.get("/api/cameras/record/cam1/20260101/20260101_100000.mp4?part=0-10")
+    assert res.status_code == 404
+
+
+def test_get_record_mp4_end_to_end_with_real_service(api_client, one_camera, monkeypatch, tmp_path):
+    """実際の record_playlist_service を通し、ファイル名の検証が効くことを確かめる。"""
+    from services import record_playlist_service as rps
+    nvr = tmp_path / "nvr"
+    (nvr / one_camera["name"]).mkdir(parents=True)
+    (tmp_path / "secret.mp4").write_bytes(b"secret")
+    monkeypatch.setattr(config, "NVR_RECORD_DIR", str(nvr))
+    monkeypatch.setattr(rps, "INDEX_DIR", str(tmp_path / "index"))
+    for name in ["..%2Fsecret.mp4", "20260102_100000.mp4", "20260101_250000.mp4", "20260101_100000.mp4"]:
+        res = api_client.get(f"/api/cameras/record/cam1/20260101/{name}?part=0-6")
+        assert res.status_code in (400, 404), name
+
+
+def test_get_record_ts_is_no_longer_served(api_client, one_camera):
+    res = api_client.get("/api/cameras/record/cam1/20260101/record_20260101000.ts")
+    assert res.status_code == 400
 
 
 # #386: target_date は glob パターン/ファイル名に埋め込まれるため YYYYMMDD 以外は 400 で拒否する
@@ -150,11 +188,12 @@ def test_get_record_file_playlist_unavailable_returns_503(api_client, one_camera
 def test_record_endpoints_reject_non_yyyymmdd_target_date(api_client, one_camera, monkeypatch, bad_date):
     called = []
     monkeypatch.setattr(camera_router.camera_service, "get_record_start_offset", lambda cam_conf, date: called.append(date) or 0)
-    monkeypatch.setattr(camera_router.camera_service, "generate_record_playlist", lambda cam_conf, date: called.append(date) or None)
+    monkeypatch.setattr(camera_router.record_playlist_service, "get_record_playlist", lambda cam_conf, date: called.append(date) or None)
+    monkeypatch.setattr(camera_router.record_playlist_service, "get_record_timeline", lambda cam_conf, date: called.append(date) or [])
 
     res_info = api_client.get(f"/api/cameras/record/cam1/{bad_date}/info")
     res_pl = api_client.get(f"/api/cameras/record/cam1/{bad_date}/record.m3u8")
 
     assert res_info.status_code == 400
     assert res_pl.status_code == 400
-    assert called == [], "不正な target_date が camera_service まで到達している"
+    assert called == [], "不正な target_date がサービス層まで到達している"

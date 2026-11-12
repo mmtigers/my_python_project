@@ -1,6 +1,6 @@
 # family-quest 仕様書一覧
 
-タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された74件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
+タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された75件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
 
 対応するソースファイル自体が削除済みの仕様書は、末尾の「廃止済み仕様書一覧」に記録のみ残しています(Issue #402 で仕様書ファイル自体は削除済み。新規の実装・参照の対象ではありません)。
 
@@ -57,6 +57,12 @@
 | [CameraSettingsModal.md](./src/features/camera/components/CameraSettingsModal.md) | カメラ単位の有効/無効を切り替えるモーダル。`PUT /api/cameras/settings/{camera_id}`で永続化し、成功時に`onToggled`経由で`CameraDashboard`側の一覧を再取得させる。 |
 | [LiveView.md](./src/features/camera/components/LiveView.md) | 複数の監視カメラのライブ映像を一覧表示するコンポーネント。サムネイルのグリッド表示と、1台を大きく表示するシングルビューを切り替えられる。 |
 | [RecordView.md](./src/features/camera/components/RecordView.md) | 指定した日付・時刻の録画映像を複数カメラ分同期して再生する画面。同期再生・一時停止・再生速度の一括変更に対応する。 |
+
+## src/features/camera
+
+| 仕様書 | 概要 |
+| --- | --- |
+| [recordTimeline.md](./src/features/camera/recordTimeline.md) | 録画の指定時刻を、録画が欠けた時間帯が詰まったプレイリスト上の再生位置に変換する(Issue #1091)。 |
 
 ## src/features/camera/types
 

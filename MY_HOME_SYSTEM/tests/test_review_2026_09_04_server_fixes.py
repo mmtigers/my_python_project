@@ -2,7 +2,7 @@
 """
 2026-09-04 全体コードレビュー(Issue #355 配下)のサーバー/監視系修正の回帰テスト。
 
-- #359 録画VODキャッシュの保持期間削除・当日プレイリストの再利用
+- #359 録画VODキャッシュの保持期間削除(当日プレイリストの再利用は Issue #1091 で生成処理ごと廃止)
 - #388 保持期間クリーンアップの「1日1回」判定を状態ファイル基準に
 - #381 log_analyzer のトレースバック継続行が start_date フィルタを素通りしていた問題
 - #382 camera_monitor.check_camera_time の JST 前提(aware UTC 比較に変更)
@@ -31,7 +31,6 @@ import config
 from core import discord as core_discord
 from core import alexa_verifier as av
 from core import logger as core_logger
-from core.utils import get_now_jst
 from monitors import log_analyzer as la_module
 from monitors.nas_monitor import NasMonitor
 from services import camera_service, notification_service, sensor_service
@@ -52,12 +51,17 @@ class TestVodRetentionAndDailyCleanup:
         os.utime(old_seg, (old_t, old_t))
         fresh_seg = vod_dir / "record_20260904_000.ts"
         fresh_seg.write_bytes(b"x")
+        # Issue #1091: 今の録画VODキャッシュは録画索引(index_<日付>.json)
+        old_index = vod_dir / "index_20260101.json"
+        old_index.write_text("{}")
+        os.utime(old_index, (old_t, old_t))
 
         monitor = NasMonitor()
         with patch("monitors.nas_monitor.send_push", lambda *a, **k: True):
             monitor.run_retention_cleanup()
 
         assert not old_seg.exists(), "保持期間超過のVODセグメントが削除されていない"
+        assert not old_index.exists(), "保持期間超過の録画索引が削除されていない"
         assert fresh_seg.exists()
 
     def test_cleanup_runs_once_per_day_regardless_of_exact_hour(self, tmp_path, monkeypatch):
@@ -356,15 +360,13 @@ class _FakeProc:
         self.killed = True
 
 
-def test_stop_all_processes_terminates_live_and_vod_ffmpeg(monkeypatch):
-    live, vod, done = _FakeProc(), _FakeProc(), _FakeProc(alive=False)
-    monkeypatch.setattr(camera_service, "_active_processes", {"cam1": live})
-    monkeypatch.setattr(camera_service, "_active_vod_processes", {"cam1_20260101": vod, "cam2_20260101": done})
+def test_stop_all_processes_terminates_live_ffmpeg(monkeypatch):
+    live, done = _FakeProc(), _FakeProc(alive=False)
+    monkeypatch.setattr(camera_service, "_active_processes", {"cam1": live, "cam2": done})
 
-    assert camera_service.stop_all_processes() == 2
-    assert live.terminated and vod.terminated and not done.terminated
+    assert camera_service.stop_all_processes() == 1
+    assert live.terminated and not done.terminated
     assert camera_service._active_processes == {}
-    assert camera_service._active_vod_processes == {}
 
 
 def test_lifespan_shutdown_stops_ffmpeg(isolated_db, monkeypatch):
@@ -378,31 +380,6 @@ def test_lifespan_shutdown_stops_ffmpeg(isolated_db, monkeypatch):
     with TestClient(unified_server.app):
         pass
     assert calls == [1]
-
-
-def test_today_playlist_is_reused_within_grace_period(tmp_path, monkeypatch):
-    monkeypatch.setattr(camera_service, "HLS_VOD_DIR", str(tmp_path / "vod"))
-    monkeypatch.setattr(config, "NVR_RECORD_DIR", str(tmp_path / "nvr"))
-    # Issue #592: camera_service.generate_record_playlistの内部判定はcore.utils.
-    # get_now_jst()でJST基準の「今日」を求めるようになったため、テスト側も
-    # 同じ基準で「今日」を用意する(CI実行環境のOSタイムゾーンに関わらず一致させる)。
-    today = get_now_jst().strftime("%Y%m%d")
-    nvr = tmp_path / "nvr" / "cam1"
-    nvr.mkdir(parents=True)
-    (nvr / f"{today}_000000.mp4").write_bytes(b"x")
-    cam_dir = tmp_path / "vod" / "cam1"
-    cam_dir.mkdir(parents=True)
-    playlist = cam_dir / f"record_{today}.m3u8"
-    playlist.write_text("#EXTM3U\n")
-
-    popen_calls = []
-    monkeypatch.setattr(camera_service.subprocess, "Popen", lambda *a, **k: popen_calls.append(1) or _FakeProc(alive=False))
-    cam_conf = {"id": "cam1", "name": "cam1", "nas_folder": "cam1"}
-
-    result = camera_service.generate_record_playlist(cam_conf, today)
-
-    assert result == str(playlist)
-    assert popen_calls == [], "生成直後の当日プレイリストが再生成されている"
 
 
 # ---------------------------------------------------------------------------
