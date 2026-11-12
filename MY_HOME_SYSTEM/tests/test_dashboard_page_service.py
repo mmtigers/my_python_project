@@ -689,12 +689,14 @@ class TestSysPageBootAndGit:
 
 
 class TestBottomNavAndBootCards:
-    """フッターナビ(5項目・現在地)と、起動履歴のカード表示。"""
+    """フッターナビ(4項目・現在地)と、起動履歴のカード表示。"""
 
-    def test_footer_has_five_items_and_marks_current(self):
+    def test_footer_has_four_items_and_marks_current(self):
         html = dashboard_page_service._render_bottom_nav("/dashboard/", "life")
-        for label in ("ホーム", "見守り", "くらし", "システム", "アップデート"):
+        for label in ("ホーム", "見守り", "くらし", "システム"):
             assert label in html
+        # 「アップデート」は毎日見るものではないので常設しない(システムページから開く)
+        assert "アップデート" not in html and html.count("<li>") == 4
         assert html.count('aria-current="page"') == 1
         assert 'href="/dashboard/life" aria-current="page"' in html
         assert 'href="/dashboard/"' in html
@@ -790,23 +792,29 @@ class TestRenderUpdatesPage:
         assert "さらに5件を表示" in html
         assert html.count('class="release-card"') == n
 
-    def test_has_a_back_link_to_home(self):
-        assert "ホームへ戻る" in self._render([])
-
-
-class TestPageTabs:
-    """サブページ上部の兄弟ページ切替タブ(ホームへ戻らず直接移動できる)。"""
-
-    def test_tabs_link_to_every_sibling_page_and_mark_the_current_one(self):
-        html = dashboard_page_service._back_to_home_link("/dashboard/", "sys")
-        for key in ("watch", "life", "sys", "updates"):
-            assert f'href="/dashboard/{key}"' in html
-        assert html.count('aria-current="page"') == 1
+    def test_has_a_back_link_to_the_system_page(self):
+        html = self._render([])
+        assert 'class="back-link" href="/dashboard/sys"' in html and "システムへ戻る" in html
+        # 下部ナビでは親の「システム」を現在地にする
         assert 'href="/dashboard/sys" aria-current="page"' in html
-        assert "ホームへ戻る" in html
 
-    def test_no_tab_is_current_when_the_page_has_no_tab(self):
-        assert "aria-current" not in dashboard_page_service._back_to_home_link("/dashboard/")
+
+class TestPageNavigation:
+    """ページ間の移動は下部ナビに一本化した(以前はサブページ上部に「ホームへ戻る」とページ切替タブが
+    あり、下部ナビ・ホームの「メニュー」と同じ行き先が重複して各ページの先頭を占有していた)。"""
+
+    def test_top_level_pages_have_no_duplicate_navigation_at_the_top(self):
+        pages = (
+            dashboard_page_service.render_life_page([], dashboard_path="/dashboard/"),
+            dashboard_page_service.render_watch_page(pd.DataFrame(), dashboard_path="/dashboard/", snapshot_url_prefix="/s"),
+        )
+        for html in pages:
+            assert "ホームへ戻る" not in html and "page-tabs" not in html and 'class="back-link"' not in html
+            assert 'class="bottom-nav"' in html
+
+    def test_back_link_points_to_the_parent_page(self):
+        html = dashboard_page_service._back_link("/dashboard/", "life", "くらし")
+        assert 'href="/dashboard/life"' in html and "← くらしへ戻る" in html
 
     def test_life_page_does_not_repeat_its_title_as_a_group_heading(self):
         html = dashboard_page_service.render_life_page([], dashboard_path="/dashboard/")

@@ -162,6 +162,9 @@ def get_live_segment(camera_id: str, segment_file: str):
 
     _require_camera(camera_id)
 
+    # 視聴中であることを記録する(途絶えるとライブ用ffmpegは自動で止まる)
+    camera_service.touch_live(camera_id)
+
     segment_path = _resolve_segment_path(camera_service.HLS_LIVE_DIR, camera_id, segment_file)
     if not os.path.exists(segment_path):
         raise HTTPException(status_code=404, detail="Segment not found")

@@ -140,8 +140,8 @@ class TestRender:
 
     def test_switch_links_keep_selection_and_anchor(self):
         html = self._render(location="高砂", metric="hum")
-        assert 'href="/dashboard/?hm_loc=itami&amp;hm_metric=hum#climate-heatmap"' in html
-        assert 'href="/dashboard/?hm_loc=takasago&amp;hm_metric=temp#climate-heatmap"' in html
+        assert 'href="/dashboard/life?hm_loc=itami&amp;hm_metric=hum#climate-heatmap"' in html
+        assert 'href="/dashboard/life?hm_loc=takasago&amp;hm_metric=temp#climate-heatmap"' in html
         assert html.count('aria-current="true"') == 2
 
     def test_location_without_data_falls_back_to_one_with_data(self):
@@ -193,30 +193,44 @@ def _home(path="/dashboard/", climate=None, activity=None):
             p.stop()
 
 
-class TestHomeIntegration:
-    def test_heatmap_sits_right_below_the_climate_group_and_above_life(self):
-        """ヒートマップは拠点別の温湿度カード(「🌡️ 室温」)の直下。カード→その推移が隣り合う。"""
-        text = _home().text
-        assert (
-            text.index("👀 見守り") < text.index("🌡️ 室温")
-            < text.index('id="climate-heatmap"') < text.index("💡 くらし")
-        )
+LIFE = f"{config.DASHBOARD_BASE_PATH}/life"
 
-    def test_selection_in_query_is_applied_to_page_and_fragment(self):
-        page = _home("/dashboard/?hm_loc=takasago&hm_metric=hum").text
-        fragment = _home(f"{config.DASHBOARD_BASE_PATH}/status?hm_loc=takasago&hm_metric=hum").text
-        for text in (page, fragment):
-            assert "高砂・1時間ごとの平均" in text and "湿度の推移" in text
+
+class TestLifePageIntegration:
+    """過去30日ヒートマップは「くらし」ページにある(以前はホームの中段にあり、約1画面ぶん
+    今日の動き・リンクを押し下げていた)。"""
+
+    def test_heatmap_is_on_the_life_page_below_the_climate_cards(self):
+        text = _home(LIFE).text
+        assert text.index("🌡️ 室温") < text.index('id="climate-heatmap"')
+
+    def test_home_no_longer_has_the_heatmap(self):
+        text = _home().text
+        assert 'id="climate-heatmap"' not in text and "過去30日" not in text
+        fragment = _home(f"{config.DASHBOARD_BASE_PATH}/status").text
+        assert 'id="climate-heatmap"' not in fragment
+
+    def test_selection_in_query_is_applied(self):
+        text = _home(f"{LIFE}?hm_loc=takasago&hm_metric=hum").text
+        assert "高砂・1時間ごとの平均" in text and "湿度の推移" in text
+
+    def test_old_home_url_with_selection_redirects_to_the_life_page(self):
+        """ヒートマップがホームにあった頃のURL(ブックマーク等)は、同じ選択のまま「くらし」へ送る。"""
+        from fastapi import FastAPI as _FastAPI
+
+        app = _FastAPI()
+        app.include_router(dashboard_router.router)
+        with TestClient(app) as client:
+            res = client.get("/dashboard/?hm_loc=takasago&hm_metric=hum", follow_redirects=False)
+        assert res.status_code == 302
+        assert res.headers["location"] == "/dashboard/life?hm_loc=takasago&hm_metric=hum#climate-heatmap"
 
     def test_invalid_selection_falls_back_to_default(self):
-        text = _home("/dashboard/?hm_loc=%3Cscript%3E&hm_metric=zzz").text
-        assert "伊丹・1時間ごとの平均" in text and "温度の推移" in text and "<script>" not in text.split("climate")[1][:400]
-
-    def test_auto_refresh_carries_the_query_string(self):
-        assert "window.location.search" in _home().text
+        text = _home(f"{LIFE}?hm_loc=%3Cscript%3E&hm_metric=zzz").text
+        assert "伊丹・1時間ごとの平均" in text and "温度の推移" in text and "<script>" not in text.split("climate-heatmap")[1][:400]
 
     def test_page_still_opens_when_climate_query_fails(self):
-        res = _home(climate=pd.DataFrame())
+        res = _home(LIFE, climate=pd.DataFrame())
         assert res.status_code == 200 and "記録がまだありません" in res.text
 
 
@@ -317,9 +331,9 @@ class TestActivityRender:
 
     def test_switch_links(self):
         html = self._render(source="takasago")
-        assert 'href="/dashboard/?hm_loc=itami&amp;hm_metric=act&amp;hm_src=takasago#climate-heatmap"' in html
-        assert 'href="/dashboard/?hm_loc=itami&amp;hm_metric=act#climate-heatmap"' in html          # 防犯(既定)は hm_src を省く
-        assert 'href="/dashboard/?hm_loc=itami&amp;hm_metric=temp&amp;hm_src=takasago#climate-heatmap"' in html
+        assert 'href="/dashboard/life?hm_loc=itami&amp;hm_metric=act&amp;hm_src=takasago#climate-heatmap"' in html
+        assert 'href="/dashboard/life?hm_loc=itami&amp;hm_metric=act#climate-heatmap"' in html          # 防犯(既定)は hm_src を省く
+        assert 'href="/dashboard/life?hm_loc=itami&amp;hm_metric=temp&amp;hm_src=takasago#climate-heatmap"' in html
         assert html.count('aria-current="true"') == 2
         for label in ("🌡️ 温度", "💧 湿度", "🏃 動き", "🛡️ 防犯", "👵 高砂(実家)", "🏠 伊丹(自宅)"):
             assert label in html
@@ -334,7 +348,7 @@ class TestActivityHome:
         return _events([("2026-10-16T09:01:00+09:00", "cam", CAMERA, "その他", None, "ON")])
 
     def test_activity_view_is_applied_to_page_and_fragment(self):
-        for path in ("/dashboard/?hm_metric=act&hm_src=itami", f"{config.DASHBOARD_BASE_PATH}/status?hm_metric=act&hm_src=itami"):
+        for path in (f"{LIFE}?hm_metric=act&hm_src=itami",):
             text = _home(path, activity=self._events_df()).text
             assert "動きの推移(過去30日)" in text and "🏠 伊丹(自宅)・1時間ごとの回数" in text
 

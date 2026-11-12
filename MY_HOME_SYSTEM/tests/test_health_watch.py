@@ -35,6 +35,12 @@ def _stub_every_check(monkeypatch):
             monkeypatch.setattr(health_watch, name, lambda *args, **kwargs: None)
 
 
+
+@pytest.fixture(autouse=True)
+def _isolate_result_state_file(monkeypatch, tmp_path):
+    """`run_checks` はダッシュボード表示用の結果ファイルを書く。実際の LOG_DIR を汚さないよう一時ファイルへ向ける。"""
+    monkeypatch.setattr(health_watch, "_result_state_path", lambda: str(tmp_path / ".health_watch_last_result"))
+
 class TestFireInvestigateHook:
     def test_noop_when_hook_unset(self, monkeypatch):
         """既定(未設定)では何も起動しない = 従来挙動と完全に同一であること。"""

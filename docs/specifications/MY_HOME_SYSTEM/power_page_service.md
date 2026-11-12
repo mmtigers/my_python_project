@@ -35,3 +35,5 @@
 * `svg_bars(values, labels, *, titles, faded, aria, value_labels)`: 棒グラフ(1系列。0を基準に最大値でスケール、全部0でも描ける)。`faded`の棒は薄く、棒が14本以下のときだけ値のラベルを付ける。
 * `svg_grouped_bars(series, labels, *, label_every, titles, aria)`: 2系列を並べた棒グラフ(系列1は`bar-alt`)。同じ目盛りでスケールし、ラベルは`label_every`個おき。
 * `render_power_page(report, *, dashboard_path, now=None)`: ページ全体。
+
+**(2026-11-12 UX改善)** ページ上部のリンクは`page._back_link(dashboard_path, 'life', 'くらし')`(「← くらしへ戻る」)になった(以前は`page._back_to_home_link`による「ホームへ戻る」とページ切替タブ)。電気ページは下部ナビに無いので、親の「くらし」へ戻るリンクだけを持つ。

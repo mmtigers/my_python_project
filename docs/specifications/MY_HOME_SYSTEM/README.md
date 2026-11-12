@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全122件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全123件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -11,6 +11,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [system_info_service.md](./system_info_service.md) | システムページの「サーバーの起動履歴」(`server_boot_events`への起動時の追記と読み出し)と「Gitの状態」(起動中のコード・手元の最新・GitHubの最新の3段の比較)を担うサービス。 |
 | [power_analysis_service.md](./power_analysis_service.md) | 電気代・電力の分析(月ごとの推移・日別・気温帯別・テレビの点灯時間と視聴の回数)。記録の欠落を記録率で示し、各枠は独立して失敗を隔離する。 |
 | [power_page_service.md](./power_page_service.md) | ⚡電気ページ(`/dashboard/power`)のHTML組み立て。グラフはインラインSVG。 |
+| [recording_status_service.md](./recording_status_service.md) | カメラごとの常時録画(NVR)が続いているかを、NAS上の録画ファイルの新しさから判定する。`health_watch`(毎時の録画停止チェック)とダッシュボードの「🎥 カメラ」カードが共有する。 |
 | [timelapse_service.md](./timelapse_service.md) | 見守りページの「🎞️ タイムラプス」用に、生成済みの動画を読み取り専用で列挙する。 |
 | [weather_history_service.md](./weather_history_service.md) | 日次の気温をOpen-Meteoから取得して`weather_history`へ書き込むサービス(直近の更新と過去分のバックフィル)。 |
 | [weather_monitor.md](./weather_monitor.md) | 気温の取得を6時間ごとに実行する監視スクリプト(`--backfill-days`で過去分を取り込む)。 |

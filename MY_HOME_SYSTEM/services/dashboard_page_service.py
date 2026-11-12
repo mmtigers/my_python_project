@@ -36,10 +36,21 @@ _STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 # 配信を許可するファイル(許可リスト方式。それ以外は404)。
 STATIC_ASSET_FILES: dict[str, str] = {
     "dashboard.css": "text/css; charset=utf-8",
+    "app.js": "text/javascript; charset=utf-8",
     "camera.js": "text/javascript; charset=utf-8",
+    # hls.js(ライブ映像の再生)。以前はCDNから読んでおり、インターネットが切れるとLAN内でも
+    # iOS以外ではライブを見られなかった。版を固定して同梱する(`static/dashboard/README.md`)。
+    "hls.light.min.js": "text/javascript; charset=utf-8",
+    "hls.LICENSE.txt": "text/plain; charset=utf-8",
+    "sw.js": "text/javascript; charset=utf-8",
+    "README.md": "text/markdown; charset=utf-8",
     "git_status.js": "text/javascript; charset=utf-8",
     "maintenance.js": "text/javascript; charset=utf-8",
 }
+
+
+# オフライン画面用のService Worker。`{DASHBOARD_BASE_PATH}/sw.js` で配信する(`dashboard_router`)。
+SERVICE_WORKER_PATH = os.path.join(_STATIC_DIR, "sw.js")
 
 
 def resolve_static_asset(filename: str) -> tuple[str, str] | None:
@@ -66,12 +77,14 @@ def _script_tag(filename: str) -> str:
 
 
 
+# 画面下のナビ。ページ間の移動はここだけに集約する(以前はサブページ上部の「ホームへ戻る」・
+# ページ切替タブ・ホーム下部の「メニュー」カードが同じ行き先で重複し、各ページの先頭を占有していた)。
+# 「アップデート」は毎日見るものではないため常設せず、システムページからの導線にした。
 _FOOTER_ITEMS: tuple[tuple[str, str, str], ...] = (
     ("", "🏠", "ホーム"),
     ("watch", "👀", "見守り"),
     ("life", "💡", "くらし"),
     ("sys", "🔧", "システム"),
-    ("updates", "📜", "アップデート"),
 )
 
 
@@ -90,6 +103,16 @@ def _render_bottom_nav(dashboard_path: str, current: str | None) -> str:
     return f'<nav class="bottom-nav" aria-label="メインメニュー"><ul>{"".join(items)}</ul></nav>'
 
 
+# 保存済みの表示テーマ(明るい/暗い)を、最初の描画より前に `<html data-theme>` へ反映する。
+# 外部JS(`app.js`)の読み込みを待つと、暗い設定の端末で一瞬白く光るため、ここだけはインラインで書く。
+_THEME_BOOT_SCRIPT = (
+    "<script>(function () { try {"
+    ' var t = window.localStorage.getItem("dashTheme");'
+    ' if (t === "light" || t === "dark") { document.documentElement.setAttribute("data-theme", t); }'
+    " } catch (e) {} })();</script>"
+)
+
+
 def _page_shell(
     title: str,
     body_html: str,
@@ -98,7 +121,11 @@ def _page_shell(
     dashboard_path: str | None = None,
     current: str | None = None,
 ) -> str:
-    """`dashboard_path`を渡すと、画面下にフッターナビを付ける(`current`が現在地)。"""
+    """`dashboard_path`を渡すと、画面下にフッターナビを付ける(`current`が現在地)。
+
+    全ページ共通で、右上に表示テーマの切替ボタン(自動→暗い→明るい。端末ごとに保存)を置き、
+    `app.js`(テーマ切替・オフライン画面用のService Worker登録)を読み込む。
+    """
     footer = _render_bottom_nav(dashboard_path, current) if dashboard_path is not None else ""
     return (
         "<!DOCTYPE html>"
@@ -106,44 +133,28 @@ def _page_shell(
         '<meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'
         f"<title>{html.escape(title)}</title>"
+        f"{_THEME_BOOT_SCRIPT}"
         f'<link rel="stylesheet" href="{_static_url("dashboard.css")}">'
         f"<style>{home_status_service.STATUS_CARD_CSS}</style>"
+        f'<script src="{_static_url("app.js")}" data-base="{html.escape(config.DASHBOARD_BASE_PATH)}" defer></script>'
         f"{extra_head}"
         "</head><body>"
+        '<button type="button" class="theme-toggle" id="themeToggle" aria-label="表示の明るさを切り替える">'
+        '表示: <span class="theme-toggle-label" id="themeToggleLabel">自動</span></button>'
         f"{body_html}"
         f"{footer}"
         "</body></html>"
     )
 
 
-def _back_to_home_link(dashboard_path: str, current: str | None = None) -> str:
-    """サブページ上部の「ホームへ戻る」と、兄弟ページ(`_NAV_CARDS`)への切替タブ。
-    `current`(ページのキー)を渡すとそのタブを現在地として示す。"""
-    base = html.escape(dashboard_path.rstrip("/"))
-    # f-stringの式の中にバックスラッシュを書けるのはPython 3.12以降(実機・CIは3.11)なので、式の外で作る。
-    current_attr = ' aria-current="page"'
-    tabs = "".join(
-        f'<a href="{base}/{key}"{current_attr if key == current else ""}>{html.escape(label)}</a>'
-        for key, label, _ in _NAV_CARDS
-    )
-    return (
-        '<div class="page-head">'
-        f'<p><a class="back-link" href="{html.escape(dashboard_path)}">← ホームへ戻る</a></p>'
-        f'<nav class="page-tabs" aria-label="ページの切り替え">{tabs}</nav>'
-        "</div>"
-    )
+def _back_link(dashboard_path: str, key: str, label: str) -> str:
+    """下部ナビに無いページ(電気・アップデート)の上部に置く、親ページへ戻るリンク。
+    下部ナビにあるページ(見守り・くらし・システム)には置かない(ナビと重複するため)。"""
+    href = html.escape(f"{dashboard_path.rstrip('/')}/{key}")
+    return f'<div class="page-head"><a class="back-link" href="{href}">← {html.escape(label)}へ戻る</a></div>'
 
 
 # === ホームページ ===
-
-# 見守り/くらし/システム/アップデートの各ページへの導線。見守り〜システムはカードの詳細タブ(`tab`)と同じキーを使う。
-_NAV_CARDS: tuple[tuple[str, str, str], ...] = (
-    ("watch", "👀 見守り", "カメラ・実家の様子"),
-    ("life", "💡 くらし", "電気"),
-    ("sys", "🔧 システム", "各機能の状態"),
-    ("updates", "📜 アップデート", "各アプリの更新履歴"),
-)
-
 
 def _render_external_link(href: str, label: str, healthy: bool | None) -> str:
     """外部リンクカード1枚。`healthy`が True なら緑・「稼働中」、False なら赤・「停止中」、
@@ -198,37 +209,27 @@ def render_home_page(
     link_health: dict[str, bool] | None = None,
     yoru_note_url: str | None = None,
     heatmap_html: str = "",
-    climate_html: str = "",
+    alerts_html: str = "",
+    weather_html: str = "",
+    stills_html: str = "",
 ) -> str:
-    """ホームページ: ステータスカード + 外部リンク + 今日の動き(ヒートマップ) + 各ページへのナビ。
+    """ホームページ。上から「いまの状態(サマリー)→ 今日の天気 → 見守りカード → カメラの写真 →
+    今日の動き → 室温・くらし・システムのカード → よく使うリンク」の順に並べる。
 
-    **(新機能)** `climate_html`(`render_home_climate_heatmap`の出力。過去30日の温度/湿度)を、
-    ステータスカードの「見守り」グループの直下に置く。
+    並びは「開いてすぐ知りたい順」。以前はカードの途中に過去30日の温湿度ヒートマップ(約1画面)が
+    入り、今日の動き・リンクが3画面目まで押し出されていた。30日ヒートマップは毎日見るものでは
+    ないため「くらし」ページへ移した(`render_life_page`)。ページ間の移動は下部ナビに集約し、
+    ホーム下部の「メニュー」カードは廃止した。
 
-    **(新機能)** `heatmap_html`(`render_home_activity_heatmaps`の出力)を、外部リンクの下に置く。
-    自動更新の範囲(`STATUS_SECTION_ID`)の内側なので、カードと同じ周期で色も更新される。
-
-    外部リンク(ファミクエ・あさノート)は、以前はナビカードのさらに下、ページ最下部に
-    警告表示(`.alerts-warn`)と紛らわしい配色で置かれており、「位置が分かりにくい」
-    「色で気づきにくい」の両方の原因になっていた。ステータスカードのすぐ下・
-    ナビカードより前に上げ、警告色と被らない配色(`.external-card`)にすることで
-    両方を解消する。
-
-    **(新機能)** `link_health`を渡すと、外部リンクを稼働状況で色分けする(緑=稼働中・
-    赤=停止中)。リンクは自動更新の対象(`STATUS_SECTION_ID`の内側)に入れてあり、
-    色もカードと同じ周期で更新される。
+    `alerts_html`(`home_status_service.render_home_alerts_html`)・`weather_html`・`stills_html`
+    (`render_camera_stills`)・`heatmap_html`(`render_home_activity_heatmaps`)・外部リンクは
+    すべて自動更新の範囲(`STATUS_SECTION_ID`)の内側にあり、カードと同じ周期で更新される。
+    `link_health`を渡すと外部リンクに稼働状況(稼働中/停止中)を添える。
     """
-    nav_html = "".join(
-        f'<a class="nav-card" href="{dashboard_path.rstrip("/")}/{key}">'
-        f"{html.escape(label)}<span class=\"nav-card-sub\">{html.escape(sub)}</span></a>"
-        for key, label, sub in _NAV_CARDS
-    )
-    links_html = _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url) + heatmap_html
+    links_html = _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url)
     body = (
         "<h1>🏠 おうちの様子</h1>"
-        f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html, climate_html=climate_html)}'
-        '<h2>メニュー</h2>'
-        f'<div class="link-grid">{nav_html}</div>'
+        f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html, watch_extra_html=stills_html + heatmap_html, alerts_html=alerts_html, weather_html=weather_html)}'
     )
     extra_head = _status_refresh_script(status_path, refresh_sec)
     if manifest_path is not None and icon_path is not None:
@@ -262,15 +263,19 @@ def _render_status_section(
     dashboard_path: str,
     refresh_sec: int,
     extra_html: str = "",
-    climate_html: str = "",
+    watch_extra_html: str = "",
+    alerts_html: str = "",
+    weather_html: str = "",
 ) -> str:
-    # 温湿度ヒートマップは「🌡️ 室温」グループ(拠点別の温湿度カード)の直下に置く
-    extras = {"climate": climate_html} if climate_html else None
+    # カメラの写真・今日の動きは「👀 見守り」グループ(実家・自宅・駐車場・カメラのカード)の直下に置く
+    extras = {"watch": watch_extra_html} if watch_extra_html else None
     grid_html = home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path, group_extras=extras)
     return (
         f'<div id="{STATUS_SECTION_ID}">'
         f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
         f"・{int(refresh_sec)}秒ごとに自動更新</p>"
+        f"{alerts_html}"
+        f"{weather_html}"
         f"{grid_html}"
         f"{extra_html}"
         "</div>"
@@ -288,12 +293,13 @@ def render_home_status_section(
     link_health: dict[str, bool] | None = None,
     yoru_note_url: str | None = None,
     heatmap_html: str = "",
-    climate_html: str = "",
+    alerts_html: str = "",
+    weather_html: str = "",
+    stills_html: str = "",
 ) -> str:
-    """ホームページの自動更新用フラグメント(カードと、外部リンクのブロック、今日の動き)。
+    """ホームページの自動更新用フラグメント(サマリー・天気・カード・カメラの写真・今日の動き・外部リンク)。
 
-    `heatmap_html`はホームページ本体と同じ位置(外部リンクの下)に入れる。
-
+    ホームページ本体(`render_home_page`)と同じ並び・同じ材料で組み立てる。
     `quest_path`/`asa_note_url`を渡したときだけ外部リンクを含める(ホームページ本体が
     リンクを自動更新の範囲の中に持つため、差し替え後もリンクが消えないようにする)。
     """
@@ -301,10 +307,11 @@ def render_home_status_section(
         _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url)
         if quest_path is not None and asa_note_url is not None
         else ""
-    ) + heatmap_html
+    )
     return _render_status_section(
         cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec,
-        extra_html=links_html, climate_html=climate_html,
+        extra_html=links_html, watch_extra_html=stills_html + heatmap_html,
+        alerts_html=alerts_html, weather_html=weather_html,
     )
 
 
@@ -313,8 +320,7 @@ def _status_refresh_script(status_path: str, refresh_sec: int) -> str:
     return (
         "<script>"
         "(function () {"
-        # 温湿度ヒートマップの選択(?hm_loc=&hm_metric=)を自動更新でも引き継ぐ
-        f"var url = {json.dumps(status_path)} + window.location.search;"
+        f"var url = {json.dumps(status_path)};"
         f"var intervalMs = {int(refresh_sec) * 1000};"
         "var inFlight = false;"
         "function apply(html) {"
@@ -421,8 +427,12 @@ _SNAPSHOT_GLOB_LIMIT = 20
 _SNAPSHOT_GALLERY_LIMIT = 8
 
 
-def _list_snapshot_files() -> list[str]:
-    """NAS上のスナップショット画像のファイル名一覧(新しい順)。
+def _snapshot_names_newest_first() -> list[str]:
+    """NAS上のスナップショット画像のファイル名一覧(撮影日時の新しい順)。
+
+    ファイル名は`{カメラ名}_{種別}_{YYYYMMDD_HHMMSS}.jpg`なので、名前順に並べると
+    カメラ名の順になってしまう(以前はそうなっており、「最近の写真」が名前順で最後のカメラの
+    写真だけになっていた)。末尾の撮影日時で並べる(日時を読めないものは最後)。
 
     `config.ASSETS_DIR` はNAS上のパスで、遅延解決(モジュール__getattr__)のため
     アクセス時にNAS障害へ触れうる。ページ全体を落とさないよう例外を握りつぶす
@@ -430,10 +440,76 @@ def _list_snapshot_files() -> list[str]:
     """
     try:
         img_dir = os.path.join(config.ASSETS_DIR, "snapshots")
-        paths = sorted(glob.glob(os.path.join(img_dir, "*.jpg")), reverse=True)
-        return [os.path.basename(p) for p in paths[:_SNAPSHOT_GLOB_LIMIT]]
+        names = [os.path.basename(p) for p in glob.glob(os.path.join(img_dir, "*.jpg"))]
     except OSError:
         return []
+    return sorted(names, key=lambda n: (_snapshot_timestamp(n) or datetime.min, n), reverse=True)
+
+
+def _list_snapshot_files() -> list[str]:
+    """「最近の写真」に使う、新しい順の先頭`_SNAPSHOT_GLOB_LIMIT`件。"""
+    return _snapshot_names_newest_first()[:_SNAPSHOT_GLOB_LIMIT]
+
+
+def latest_snapshot_by_camera(cameras: list[dict[str, Any]]) -> dict[str, str]:
+    """カメラごとの一番新しいスナップショットのファイル名(`{カメラid: ファイル名}`。無いカメラは含めない)。
+
+    スナップショットは動きを検知したときに撮られる(`monitors/camera_monitor.py`)ので、
+    「今の映像」ではなく「最後に動きを検知したときの写真」。ホームの写真タイルと、
+    見守りページのライブ映像の再生前の表示(poster)に使う。
+    NAS上の一覧を読むため、時間制限・キャッシュ付き(`home_status_service.cached_with_timeout`)。
+    取得できなければ空の辞書。
+    """
+    names = home_status_service.cached_with_timeout("snapshot_names", _snapshot_names_newest_first) or []
+    latest: dict[str, str] = {}
+    for cam in cameras:
+        prefix = f"{cam['name']}_"
+        found = next((n for n in names if n.startswith(prefix)), None)
+        if found is not None:
+            latest[cam["id"]] = found
+    return latest
+
+
+def _enabled_cameras() -> list[dict[str, Any]]:
+    return [{"id": cam["id"], "name": cam["name"]} for cam in config.CAMERAS if cam.get("enabled", True)]
+
+
+def render_camera_stills(*, dashboard_path: str, snapshot_url_prefix: str) -> str:
+    """ホームの「カメラの写真」: 各カメラの最後の検知時の写真を横に並べる。タップでそのカメラのライブへ。
+
+    ライブ映像はホームでは流さない(開くだけでカメラへの接続が始まり、通信量と負荷が増えるため)。
+    カメラが1台も無ければ空文字。写真の無いカメラは枠だけ出す(タップでライブへは行ける)。
+    """
+    cameras = _enabled_cameras()
+    if not cameras:
+        return ""
+    latest = latest_snapshot_by_camera(cameras)
+    watch = f"{dashboard_path.rstrip('/')}/watch"
+    tiles = []
+    for cam in cameras:
+        href = html.escape(f"{watch}?{urlencode({'camera': cam['id']})}#camera-section")
+        name = latest.get(cam["id"])
+        if name is None:
+            picture = '<span class="cam-still-img cam-still-none">写真なし</span>'
+            caption = ""
+        else:
+            url = f"{html.escape(snapshot_url_prefix)}/{html.escape(quote(name))}"
+            picture = f'<img class="cam-still-img" src="{url}" alt="" loading="lazy">'
+            moment = _snapshot_timestamp(name)
+            caption = (
+                f'<span class="cam-still-time">{html.escape(home_status_service.format_short_timestamp(moment))}</span>'
+                if moment is not None else ""
+            )
+        tiles.append(
+            f'<a class="cam-still" href="{href}">{picture}'
+            f'<span class="cam-still-name">{html.escape(cam["name"])}</span>{caption}</a>'
+        )
+    return (
+        '<div class="cam-stills-wrap">'
+        '<p class="meta cam-stills-note">最後に動きを検知したときの写真です。タップするとライブ映像を開きます。</p>'
+        f'<div class="cam-stills">{"".join(tiles)}</div>'
+        "</div>"
+    )
 
 
 def resolve_snapshot_path(filename: str) -> str | None:
@@ -497,8 +573,31 @@ def _render_snapshot_gallery(snapshot_url_prefix: str) -> str:
     return f'<div class="snapshot-grid">{"".join(items)}</div>'
 
 
+# センサーが記録する状態の値 → 画面に出す言葉。以前は `open`/`close`/`detected` がそのまま表に出て、
+# まとめた行の「開 → 閉（N秒）」だけが日本語で混在していた。表にない値はそのまま出す。
+_STATE_LABELS: dict[str, str] = {
+    "open": "開いた",
+    "close": "閉じた",
+    "closed": "閉じた",
+    "timeoutnotclose": "開けっぱなし",
+    "detected": "動きを検知",
+    "not_detected": "検知なし",
+    "on": "動きを検知",
+    "off": "検知なし",
+}
+_STATE_COLUMNS = ("contact_state", "movement_state")
+
+
+def state_label(value: Any) -> str:
+    """`contact_state`/`movement_state` の値を表示用の言葉にする(欠損は空文字、未知の値はそのまま)。"""
+    if value is None or pd.isna(value):
+        return ""
+    text = str(value)
+    return _STATE_LABELS.get(text.strip().lower(), text)
+
+
 def _render_simple_table(df: pd.DataFrame, columns: dict[str, str], *, limit: int = 50) -> str:
-    """スマホ向けの簡易テーブル(列を絞り、時刻は相対表記にする)。"""
+    """スマホ向けの簡易テーブル(列を絞り、時刻は相対表記に、センサーの状態は日本語にする)。"""
     available = {src: label for src, label in columns.items() if src in df.columns}
     if df.empty or not available:
         return '<p class="empty-note">表示できるデータがありません</p>'
@@ -514,6 +613,8 @@ def _render_simple_table(df: pd.DataFrame, columns: dict[str, str], *, limit: in
                 text = home_status_service.format_relative_time(value)
                 if text and home_status_service.format_short_timestamp(value):
                     text = f"{home_status_service.format_short_timestamp(value)} ({text})"
+            elif src in _STATE_COLUMNS:
+                text = state_label(value)
             else:
                 text = "" if pd.isna(value) else str(value)
             cells.append(f"<td>{html.escape(text)}</td>")
@@ -659,28 +760,64 @@ def merge_open_close_events(df: pd.DataFrame) -> pd.DataFrame:
     return merged[~pair_end].sort_values("timestamp", ascending=False, kind="stable")
 
 
-def _render_camera_selector(cameras: list[dict[str, Any]]) -> str:
-    """有効なカメラ全台のライブ映像を、初期表示から同時に並べる(切替ボタン方式は廃止)。
+_RECORDING_BADGES = {
+    "ok": ("rec-ok", "● 録画中"),
+    "stalled": ("rec-bad", "✕ 録画停止"),
+    "missing": ("rec-bad", "✕ 録画なし"),
+}
 
-    各タイルは名前ラベル付きの`<video data-camera-id>`で、`static/dashboard/camera.js`が読み込み時に
-    全タイルのHLSを開始する。ライブ配信のffmpegはカメラごとに独立している。"""
+
+def _render_camera_selector(
+    cameras: list[dict[str, Any]],
+    *,
+    posters: dict[str, str] | None = None,
+    snapshot_url_prefix: str = "",
+    recording: list[dict[str, Any]] | None = None,
+) -> str:
+    """カメラのタイル一覧。**ライブ映像はタップしたカメラだけ**再生する。
+
+    以前はページを開いた時点で全台のライブ(HLS)を同時に始めていた。ログを見たいだけのときも
+    全台分のffmpegとカメラへの接続が立ち上がり、外出先では通信量も増える。再生前は最後の検知時の
+    写真(`posters`=`latest_snapshot_by_camera`)を見せ、「▶ ライブを見る」で1台ずつ始める
+    (`static/dashboard/camera.js`。別のカメラを始めると前のカメラは止まる)。
+
+    接続できないときは「接続できません」と「もう一度試す」を出す(以前は黒い枠で読み込み中の
+    表示が回り続けるだけだった)。`recording`(カメラごとの録画の状態)があれば名前の横に出す。
+    """
     if not cameras:
         return '<p class="empty-note">カメラが登録されていません</p>'
-    tiles = "".join(
-        '<div class="camera-tile">'
-        f'<div class="camera-name">{html.escape(cam["name"])}</div>'
-        '<div class="camera-video-box">'
-        f'<video class="camera-video" data-camera-id="{html.escape(cam["id"])}" '
-        'muted autoplay playsinline controls></video>'
-        "</div></div>"
-        for cam in cameras
-    )
-    return f'<div class="camera-grid">{tiles}</div>'
+    posters = posters or {}
+    states = {r["id"]: r["state"] for r in (recording or [])}
+    tiles = []
+    for cam in cameras:
+        poster_name = posters.get(cam["id"])
+        poster = (
+            f' poster="{html.escape(snapshot_url_prefix)}/{html.escape(quote(poster_name))}"' if poster_name else ""
+        )
+        badge = ""
+        if cam["id"] in states:
+            css, text = _RECORDING_BADGES.get(states[cam["id"]], ("", ""))
+            badge = f'<span class="rec-badge {css}">{text}</span>' if text else ""
+        cam_id = html.escape(cam["id"])
+        tiles.append(
+            f'<div class="camera-tile" data-state="idle" data-camera-id="{cam_id}">'
+            f'<div class="camera-name">{html.escape(cam["name"])}{badge}</div>'
+            '<div class="camera-video-box">'
+            f'<video class="camera-video" data-camera-id="{cam_id}" muted playsinline preload="none"{poster}></video>'
+            '<button type="button" class="camera-overlay camera-play">▶ ライブを見る</button>'
+            '<div class="camera-overlay camera-loading" role="status">接続しています…</div>'
+            '<div class="camera-overlay camera-error" role="alert">'
+            '<p class="camera-error-text">接続できません</p>'
+            '<button type="button" class="camera-retry">もう一度試す</button>'
+            "</div>"
+            "</div></div>"
+        )
+    return f'<div class="camera-grid">{"".join(tiles)}</div>'
 
 
 def _camera_script() -> str:
-    """hls.js(CDN)のあとに`camera.js`を読む。実行順序は従来のインライン版と同じ。"""
-    return '<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>' + _script_tag("camera.js")
+    """同梱のhls.jsのあとに`camera.js`を読む。"""
+    return _script_tag("hls.light.min.js") + _script_tag("camera.js")
 
 
 
@@ -891,7 +1028,8 @@ def _climate_switch(
 ) -> str:
     """指標(温度/湿度/動き)と、その対象(温度・湿度=拠点、動き=防犯/高砂/伊丹)の切り替えリンク(JS不要)。
     選んだ組み合わせは`?hm_loc=&hm_metric=[&hm_src=]`で持つ(`hm_src`は既定の防犯のとき省く)。"""
-    base = dashboard_path.rstrip("/") + "/"
+    # ヒートマップは「くらし」ページにある(以前はホーム)
+    base = dashboard_path.rstrip("/") + "/life"
     def link(label: str, loc: str, met: str, src: str, current: bool) -> str:
         query = {"hm_loc": _CLIMATE_LOCATION_KEYS[loc], "hm_metric": met}
         if src != CLIMATE_DEFAULT_SOURCE:
@@ -921,7 +1059,8 @@ def render_home_climate_heatmap(
     activity: dict[str, dict[str, list[int]]] | None = None,
     source: str = CLIMATE_DEFAULT_SOURCE,
 ) -> str:
-    """ホームの「過去30日の温度/湿度/動き」ヒートマップ。行=日付(新しい日が上)、列=0〜23時。
+    """「くらし」ページの「過去30日の温度/湿度/動き」ヒートマップ。行=日付(新しい日が上)、列=0〜23時。
+    (関数名に`home`が残っているのは、以前はホームにあったため。毎日見るものではないので移した)
 
     温度・湿度は1時間の平均(`df`=`load_hourly_climate`の結果。記録のない時間は枠線だけ)、
     動きは1時間の回数(`activity`=`activity_hourly_grids`の結果。「📊 今日の動き」と同じ4段階の赤。
@@ -1276,7 +1415,7 @@ def render_watch_page(
     timelapses: list[timelapse_service.Timelapse] | None = None,
     show_all_timelapses: bool = False,
 ) -> str:
-    """👀 見守り: カメラのライブ選択・スナップショット・防犯ログ・実家/自宅センサーログ。
+    """👀 見守り: カメラのライブ(タップしたカメラだけ再生)・スナップショット・防犯ログ・実家/自宅センサーログ。
 
     見守りグループの4枚のステータスカード(高砂・伊丹・駐車場・カメラ)は
     すべてこのページの `tab="watch"` を指すため、`home_status_service.build_status_cards`
@@ -1307,11 +1446,7 @@ def render_watch_page(
     `df_sensor`は呼び出し側(`dashboard_router`)が日付指定時に指定日の全件を渡す
     前提で、ここでは日付による再フィルタはしない。
     """
-    cameras = [
-        {"id": cam["id"], "name": cam["name"]}
-        for cam in config.CAMERAS
-        if cam.get("enabled", True)
-    ]
+    cameras = _enabled_cameras()
     df_camera_motion = home_status_service.camera_motion_log(df_sensor)
     df_takasago, df_itami, device_options, selected_device = _watch_sensor_logs(df_sensor, selected_device)
 
@@ -1333,11 +1468,10 @@ def render_watch_page(
         return _render_collapsible_log_table(df, columns, limit=max(len(df), _LOG_TABLE_VISIBLE_ROWS))
 
     body = (
-        f"{_back_to_home_link(dashboard_path, 'watch')}"
         "<h1>👀 見守り</h1>"
         '<div id="camera-section">'
         "<h2>🎥 カメラの映像</h2>"
-        f"{_render_camera_selector(cameras)}"
+        f"{_render_camera_selector(cameras, posters=latest_snapshot_by_camera(cameras), snapshot_url_prefix=snapshot_url_prefix, recording=home_status_service.get_camera_recording_states())}"
         "</div>"
         "<h2>🖼️ 最近の写真</h2>"
         f"{_render_snapshot_gallery(snapshot_url_prefix)}"
@@ -1391,15 +1525,32 @@ def _render_daily_cost_history(rows: list[tuple[Any, int]]) -> str:
     return f'<div class="cost-history">{"".join(items)}</div>'
 
 
-def render_life_page(cards, *, dashboard_path: str, daily_cost_rows: list[tuple[Any, int]] | None = None) -> str:
-    """💡 くらし: 電気のカードを大きく見せ、日別の電気代推移を詳細として表示する。
+def render_life_page(
+    cards,
+    *,
+    dashboard_path: str,
+    daily_cost_rows: list[tuple[Any, int]] | None = None,
+    climate_html: str = "",
+) -> str:
+    """💡 くらし: 電気のカードと日別の電気代、室温のカードと過去30日の推移(ヒートマップ)。
 
     **(不具合修正)** `daily_cost_rows`(`analysis_service.calculate_daily_cost_series`)を
     追加し、電気代カードをタップしても意味のある詳細が無かった不具合を修正した。
+
+    `climate_html`(`render_home_climate_heatmap`の出力)は以前ホームの中段にあり、約1画面ぶん
+    今日の動き・リンクを押し下げていた。ホームの室温カードのタップ先としてここへ移した
+    (見出しのid `climate-heatmap` がカードのリンク先)。室温カードはここにも再掲する。
     """
     life_cards = [card for card in cards if card.group == "life"]
+    climate_cards = [card for card in cards if card.group == "climate"]
+    climate_block = ""
+    if climate_cards or climate_html:
+        climate_block = (
+            "<h2>🌡️ 室温</h2>"
+            f"{home_status_service.render_status_grid_html(climate_cards, dashboard_path=dashboard_path, show_group_titles=False)}"
+            f"{climate_html}"
+        )
     body = (
-        f"{_back_to_home_link(dashboard_path, 'life')}"
         "<h1>💡 くらし</h1>"
         f"{home_status_service.render_status_grid_html(life_cards, show_group_titles=False)}"
         '<p class="empty-note">今月の電気代はスマートメーターの記録からの概算です。</p>'
@@ -1407,6 +1558,7 @@ def render_life_page(cards, *, dashboard_path: str, daily_cost_rows: list[tuple[
         '⚡ 電気のくわしい分析<span class="nav-card-sub">月ごとの推移・気温との関係・テレビ</span></a></div>'
         "<h2>📊 日別の電気代(概算)</h2>"
         f"{_render_daily_cost_history(daily_cost_rows or [])}"
+        f"{climate_block}"
     )
     return _page_shell("くらし - おうちの様子", body, dashboard_path=dashboard_path, current="life")
 
@@ -1486,8 +1638,53 @@ def _render_freshness_rows(rows: list[dict[str, Any]]) -> str:
     return items
 
 
-def _render_overall_summary(rows: list[dict[str, Any]]) -> str:
-    red_count = sum(1 for row in rows if row["state"] == "red")
+def _health_red_count(health: dict[str, Any] | None) -> int:
+    """定期チェックのうち「確認が必要」に数える件数(チェック自体が止まっていれば1件)。"""
+    if not health:
+        return 0
+    return 1 if health["stale"] else len(health["anomalies"])
+
+
+def _render_health_check_box(health: dict[str, Any] | None) -> str:
+    """🩺 定期チェック: `monitors/health_watch.py`(毎時)の最新結果と、異常の組が変わった履歴。
+
+    以前は結果がDiscordにしか出ず、ダッシュボードからは「録画が止まっている」「保存装置が
+    外れている」等が分からなかった。`health`は`home_status_service.read_health_result()`の戻り値。
+    """
+    if health is None:
+        body = '<p class="empty-note">まだ記録がありません(毎時の定期チェックが動くと表示されます)</p>'
+    else:
+        checked = home_status_service.format_short_timestamp(health["checked_at"])
+        if health["stale"]:
+            body = (
+                '<p class="alerts alerts-bad">⚠️ 定期チェックが止まっています'
+                f"(最後のチェック: {html.escape(checked)})</p>"
+            )
+        elif not health["anomalies"]:
+            body = f'<p class="alerts alerts-ok">✅ 異常は見つかっていません</p><p class="meta">最後のチェック: {html.escape(checked)}</p>'
+        else:
+            items = "".join(
+                f'<li><strong>{html.escape(a["label"])}</strong>'
+                f'<div class="health-text">{html.escape(a["text"])}</div></li>'
+                for a in health["anomalies"]
+            )
+            body = (
+                f'<p class="alerts alerts-bad">⚠️ {len(health["anomalies"])}件の異常を検知しています</p>'
+                f'<ul class="health-list">{items}</ul>'
+                f'<p class="meta">最後のチェック: {html.escape(checked)}</p>'
+            )
+        if health["history"]:
+            rows = "".join(
+                f'<li><span class="health-at">{html.escape(home_status_service.format_short_timestamp(h["at"]))}</span> '
+                f'{html.escape("・".join(h["labels"]) if h["labels"] else "異常なしに戻りました")}</li>'
+                for h in health["history"]
+            )
+            body += f'<details><summary>これまでの記録({len(health["history"])}件)</summary><ul class="health-history">{rows}</ul></details>'
+    return f'<div class="info-box" id="health-check"><h2>🩺 定期チェック(1時間ごと)</h2>{body}</div>'
+
+
+def _render_overall_summary(rows: list[dict[str, Any]], extra_red: int = 0) -> str:
+    red_count = sum(1 for row in rows if row["state"] == "red") + extra_red
     if red_count == 0:
         return '<p class="alerts alerts-ok">✅ すべて正常です</p>'
     return f'<p class="alerts alerts-warn">⚠️ {red_count}件、確認が必要です</p>'
@@ -1733,14 +1930,14 @@ def render_updates_page(
         )
         cards = head + more
     body = (
-        f"{_back_to_home_link(dashboard_path, 'updates')}"
+        f"{_back_link(dashboard_path, 'sys', 'システム')}"
         "<h1>📜 アップデート</h1>"
         '<p class="meta">ダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を、新しい順にまとめています。</p>'
         f'<div class="release-filter">{"".join(chips)}</div>'
         f"{warnings}"
         f"{cards}"
     )
-    return _page_shell("アップデート - おうちの様子", body, dashboard_path=dashboard_path, current="updates")
+    return _page_shell("アップデート - おうちの様子", body, dashboard_path=dashboard_path, current="sys")
 
 
 def _format_boot_time(value: Any) -> str:
@@ -1849,12 +2046,17 @@ def render_sys_page(
     nas_days: int = NAS_HISTORY_DEFAULT_DAYS,
     boot_history: list[dict[str, Any]] | None = None,
     log_groups: list[Any] | None = None,
+    health: dict[str, Any] | None = None,
 ) -> str:
-    """🔧 システム: 全体サマリー・各機能の最終更新時刻・NASの容量推移・メンテナンス操作。
+    """🔧 システム: 全体サマリー・各機能の最終更新時刻・定期チェック・NASの容量推移・メンテナンス操作。
 
-    **(不具合修正)** 各セクションを`.info-box`で視覚的にグループ化してシステムページを
-    見やすくした。NASカード(`id="nas-history"`)のタップ先として、NASの容量推移
-    グラフ(`nas_history`)を追加した。
+    並びは「家族が見るもの → 管理者だけが使うもの」。各機能の状態・定期チェック・NAS・バックアップを
+    先に出し、Git・起動履歴・ログのダウンロード・更新/再起動・アップデート履歴への導線は
+    「管理者向け」の折りたたみ(`<details id="admin-section">`)にまとめる。再起動系のボタンが
+    最初から見えていると誤って触りやすいため。`#git-status` 等へ直接飛んだときは `app.js` が開く。
+
+    `health`(`home_status_service.read_health_result()`)は毎時の定期チェックの結果。異常(またはチェック
+    自体の停止)は冒頭の「確認が必要です」の件数にも数える。
 
     **(UI改善)** 「今すぐバックアップ」は、実行中のスピナー表示・完了/失敗のトースト・
     最新のバックアップ時刻の表示を持つ(`GET /api/system/backup/status`をJSから参照)。
@@ -1862,32 +2064,27 @@ def render_sys_page(
     (NASが遅くてもシステムページ自体は開ける)。
     """
     rows = build_freshness_rows(df_sensor, nas_data, memory, now)
+    base = html.escape(dashboard_path.rstrip("/"))
 
     disk_line = ""
     if disk and "percent" in disk:
         disk_line = f'<p class="meta">保存容量の使用率: {int(disk["percent"])}%</p>'
 
     body = (
-        f"{_back_to_home_link(dashboard_path, 'sys')}"
         "<h1>🔧 システム</h1>"
-        f"{_render_overall_summary(rows)}"
+        f"{_render_overall_summary(rows, _health_red_count(health))}"
         '<div class="box-grid">'
-        f"{_render_git_status_box()}"
-        f"{_render_boot_history_box(boot_history or [])}"
         '<div class="info-box">'
         "<h2>各機能の最終更新</h2>"
         f"{_render_freshness_rows(rows)}"
         f"{disk_line}"
         "</div>"
+        f"{_render_health_check_box(health)}"
         '<div class="info-box" id="nas-history">'
         "<h2>🗄️ NASの容量推移</h2>"
         f"{_render_nas_history_chart(nas_history, days=nas_days, sys_path=dashboard_path.rstrip('/') + '/sys')}"
         "</div>"
-        f"{_render_log_download_box(log_groups or [], sys_path=dashboard_path.rstrip('/') + '/sys')}"
-        "</div>"
-        "<h2>🛠️ メンテナンス</h2>"
-        '<div class="maintenance-group">'
-        # 日常的に使える安全な操作(バックアップ)を先に、影響の大きい再起動系を後ろにまとめる。
+        # 日常的に使える安全な操作(バックアップ)はここ。影響の大きい再起動系は下の「管理者向け」にまとめる。
         '<div class="maintenance-box">'
         "<h3>📦 バックアップ</h3>"
         "<p>データベースを今すぐバックアップします。</p>"
@@ -1896,6 +2093,18 @@ def render_sys_page(
         "📦 今すぐバックアップ</button>"
         '<div id="backupResult" class="maintenance-result" role="status" aria-live="polite"></div>'
         "</div>"
+        "</div>"
+        '<details class="admin-section" id="admin-section">'
+        "<summary>🛠️ 管理者向け(更新・再起動・ログ)</summary>"
+        f'<div class="link-grid"><a class="nav-card" href="{base}/updates">'
+        '📜 アップデート<span class="nav-card-sub">各アプリの更新履歴</span></a></div>'
+        '<div class="box-grid">'
+        f"{_render_git_status_box()}"
+        f"{_render_boot_history_box(boot_history or [])}"
+        f"{_render_log_download_box(log_groups or [], sys_path=dashboard_path.rstrip('/') + '/sys')}"
+        "</div>"
+        "<h2>🛠️ メンテナンス</h2>"
+        '<div class="maintenance-group">'
         '<p class="alerts alerts-warn">⚠️ 次の2つは再起動を伴います。再起動中はダッシュボードやIoT機器の操作が'
         "一時的に使えなくなり、数分かかることがあります。</p>"
         '<div class="box-grid">'
@@ -1918,14 +2127,13 @@ def render_sys_page(
         "再起動することを理解しました</label>"
         '<button type="button" class="danger" id="restartBtn" disabled onclick="dashboardRestart()">'
         "🔄 システム再起動</button>"
-        '<div id="restartResult" class="maintenance-result"></div>'
+        '<div id="restartResult" class="maintenance-result" role="status" aria-live="polite"></div>'
         "</div>"
         "</div>"
         "</div>"
+        "</details>"
     )
     return _page_shell(
         "システム - おうちの様子", body, extra_head=_script_tag("maintenance.js") + _script_tag("git_status.js"),
         dashboard_path=dashboard_path, current="sys",
     )
-
-
