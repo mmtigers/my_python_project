@@ -780,6 +780,8 @@ def _render_camera_selector(
     全台分のffmpegとカメラへの接続が立ち上がり、外出先では通信量も増える。再生前は最後の検知時の
     写真(`posters`=`latest_snapshot_by_camera`)を見せ、「▶ ライブを見る」で1台ずつ始める
     (`static/dashboard/camera.js`。別のカメラを始めると前のカメラは止まる)。
+    カメラが2台以上あるときは、一覧の上に「▶ 全部まとめて見る」ボタンを置く。押すと全台を同時に再生し、
+    ボタンは「■ すべて止める」に変わる。
 
     接続できないときは「接続できません」と「もう一度試す」を出す(以前は黒い枠で読み込み中の
     表示が回り続けるだけだった)。`recording`(カメラごとの録画の状態)があれば名前の横に出す。
@@ -812,7 +814,14 @@ def _render_camera_selector(
             "</div>"
             "</div></div>"
         )
-    return f'<div class="camera-grid">{"".join(tiles)}</div>'
+    # 2台以上あるときだけ「全部まとめて見る」を出す(押したときだけ全台を同時に再生する。ラベルの
+    # 切り替え・停止は camera.js)。ふだんは1台ずつにしているのは、開くだけ・1台見たいだけのときに
+    # 全台分のカメラ接続を立ち上げないため。
+    all_button = (
+        '<button type="button" class="camera-all" id="cameraAllBtn" aria-pressed="false">▶ 全部まとめて見る</button>'
+        if len(cameras) >= 2 else ""
+    )
+    return f'{all_button}<div class="camera-grid">{"".join(tiles)}</div>'
 
 
 def _camera_script() -> str:

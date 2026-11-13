@@ -359,6 +359,22 @@ class TestCameraTiles:
     def test_no_cameras(self):
         assert "カメラが登録されていません" in dashboard_page_service._render_camera_selector([])
 
+    def test_watch_all_button_is_offered_only_with_several_cameras(self):
+        """ふだんは1台ずつ。全台を同時に見たいときだけ「全部まとめて見る」で始められる。"""
+        html = self._html()
+        assert html.count('id="cameraAllBtn"') == 1 and "▶ 全部まとめて見る" in html
+        assert html.index('id="cameraAllBtn"') < html.index('class="camera-grid"')
+        assert "autoplay" not in html  # ボタンを押すまでは全台とも始めない
+        single = dashboard_page_service._render_camera_selector(CAMERAS[:1])
+        assert "cameraAllBtn" not in single
+
+    def test_script_keeps_one_at_a_time_unless_watch_all_is_on(self):
+        script = (Path(dashboard_page_service._STATIC_DIR) / "camera.js").read_text(encoding="utf-8")
+        assert "if (!allMode)" in script, "1台ずつのときに、ほかのカメラを止める処理が無い"
+        assert "function startAll()" in script and "function stopAll()" in script
+        # 画面を離れたら全台止める(サーバー側は視聴が途絶えるとカメラへの接続を閉じる)
+        assert "if (document.hidden) { stopAll(); }" in script
+
 
 class TestSnapshots:
     NAMES = [
