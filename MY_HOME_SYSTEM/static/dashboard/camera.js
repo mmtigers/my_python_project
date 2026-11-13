@@ -7,6 +7,7 @@
     var START_TIMEOUT_MS = 20000;
     // 全台同時再生中か(「全部まとめて見る」で true、「すべて止める」・画面を離れたときに false)。
     var allMode = false;
+    var startingAll = false;
     var tiles = [];
     var allButton = null;
 
@@ -31,10 +32,22 @@
         }
     }
 
+    // 動いているカメラが1台も無くなったら、全台同時再生を終わりにする。
+    // 全台が接続に失敗したあとボタンが「すべて止める」のまま残り、そこから1台ずつ始めても
+    // 前のカメラが止まらない、という状態を防ぐ。
+    function leaveAllModeIfNothingRuns() {
+        // 全台の再生を順に始めている最中は判定しない(1台目が即座に失敗しても、残りを同時再生として始める)。
+        if (allMode && !startingAll && !tiles.some(isRunning)) {
+            allMode = false;
+            updateAllButton();
+        }
+    }
+
     function stop(tile) {
         release(tile);
         tile.dataset.state = "idle";
         tile.querySelector("video").controls = false;
+        leaveAllModeIfNothingRuns();
     }
 
     function stopAll() {
@@ -45,8 +58,11 @@
 
     function startAll() {
         allMode = true;
+        startingAll = true;
         tiles.forEach(function (tile) { if (!isRunning(tile)) { start(tile); } });
+        startingAll = false;
         updateAllButton();
+        leaveAllModeIfNothingRuns();
     }
 
     function fail(tile, message) {
@@ -55,6 +71,7 @@
         tile.dataset.state = "error";
         var text = tile.querySelector(".camera-error-text");
         if (text) { text.textContent = message || "接続できません"; }
+        leaveAllModeIfNothingRuns();
     }
 
     function start(tile) {
