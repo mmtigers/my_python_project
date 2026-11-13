@@ -442,7 +442,7 @@
 
 ### `static/dashboard/camera.js`(旧`_CAMERA_SCRIPT`)
 
-* **(2026-11-13 追加)** 「全部まとめて見る」(`#cameraAllBtn`)を押すと`startAll`が`allMode`を真にして全タイルの再生を始め、ボタンの表示を「■ すべて止める」(`aria-pressed="true"`)に変える。もう一度押す・画面を離れる(`visibilitychange`)と`stopAll`が全タイルを止めて`allMode`を偽に戻す。`start`がほかのカメラを止めるのは`allMode`が偽のとき(1台ずつ見ているとき)だけ。
+* **(2026-11-13 追加)** 「全部まとめて見る」(`#cameraAllBtn`)を押すと`startAll`が`allMode`を真にして全タイルの再生を始め、ボタンの表示を「■ すべて止める」(`aria-pressed="true"`)に変える。もう一度押す・画面を離れる(`visibilitychange`)と`stopAll`が全タイルを止めて`allMode`を偽に戻す。`start`がほかのカメラを止めるのは`allMode`が偽のとき(1台ずつ見ているとき)だけ。全台が接続に失敗する等で再生中・接続中のカメラが1台も無くなったときも、`leaveAllModeIfNothingRuns`が`allMode`を偽に戻してボタンの表示を戻す。
 
 * **(2026-11-12 UX改善で作り替え)** 同時に再生するのは1台(別のカメラを始めると前のカメラは`hls.destroy()`で止める)。再生開始から`START_TIMEOUT_MS`(20秒)以内に`playing`にならない・hls.jsが致命的エラー(`data.fatal`)を出す・ネイティブHLSで`error`が出る、のいずれかで`data-state="error"`にする。`visibilitychange`で画面を離れたら止める(サーバー側は視聴が途絶えるとffmpegを止める=`camera_service.stop_idle_live_streams`)。`?camera=<id>`で開いたときは、そのタイルを先頭へ移して自動で再生を始める。
 

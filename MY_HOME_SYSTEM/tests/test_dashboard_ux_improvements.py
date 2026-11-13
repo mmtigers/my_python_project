@@ -374,6 +374,9 @@ class TestCameraTiles:
         assert "function startAll()" in script and "function stopAll()" in script
         # 画面を離れたら全台止める(サーバー側は視聴が途絶えるとカメラへの接続を閉じる)
         assert "if (document.hidden) { stopAll(); }" in script
+        # 全台が接続に失敗する等で動いているカメラが無くなったら、全台同時再生を終わりにする
+        # (ボタンが「すべて止める」のまま残り、1台ずつ始めても前のカメラが止まらないのを防ぐ)
+        assert script.count("leaveAllModeIfNothingRuns();") == 3  # stop・fail・startAll の末尾
 
 
 class TestSnapshots:
