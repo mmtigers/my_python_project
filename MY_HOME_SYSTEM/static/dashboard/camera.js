@@ -1,10 +1,24 @@
-// 見守りページのライブ映像。タップしたカメラだけ再生する(同時に再生するのは1台)。
+// 見守りページのライブ映像。ふだんはタップしたカメラだけ再生する(同時に再生するのは1台)。
+// 「全部まとめて見る」を押したときだけ全台を同時に再生し、もう一度押す(「すべて止める」)と全台止まる。
 // 状態は各タイル(.camera-tile)の data-state に持ち、表示の切り替えはCSSが行う:
 //   idle(再生前。「▶ ライブを見る」)/ loading(接続中)/ playing(再生中)/ error(接続できません)
 (function () {
     // この時間内に再生が始まらなければ「接続できません」にする(サーバー側はffmpegの起動を最大5秒待つ)。
     var START_TIMEOUT_MS = 20000;
-    var active = null;
+    // 全台同時再生中か(「全部まとめて見る」で true、「すべて止める」・画面を離れたときに false)。
+    var allMode = false;
+    var tiles = [];
+    var allButton = null;
+
+    function isRunning(tile) {
+        return tile.dataset.state === "loading" || tile.dataset.state === "playing";
+    }
+
+    function updateAllButton() {
+        if (!allButton) { return; }
+        allButton.textContent = allMode ? "■ すべて止める" : "▶ 全部まとめて見る";
+        allButton.setAttribute("aria-pressed", allMode ? "true" : "false");
+    }
 
     function release(tile) {
         if (tile._timer) { clearTimeout(tile._timer); tile._timer = null; }
@@ -21,7 +35,18 @@
         release(tile);
         tile.dataset.state = "idle";
         tile.querySelector("video").controls = false;
-        if (active === tile) { active = null; }
+    }
+
+    function stopAll() {
+        allMode = false;
+        tiles.forEach(function (tile) { if (tile.dataset.state !== "idle") { stop(tile); } });
+        updateAllButton();
+    }
+
+    function startAll() {
+        allMode = true;
+        tiles.forEach(function (tile) { if (!isRunning(tile)) { start(tile); } });
+        updateAllButton();
     }
 
     function fail(tile, message) {
@@ -30,13 +55,14 @@
         tile.dataset.state = "error";
         var text = tile.querySelector(".camera-error-text");
         if (text) { text.textContent = message || "接続できません"; }
-        if (active === tile) { active = null; }
     }
 
     function start(tile) {
-        if (active && active !== tile) { stop(active); }
+        // 1台ずつ見ているときは、ほかのカメラを止めてから始める(全台同時再生中は止めない)。
+        if (!allMode) {
+            tiles.forEach(function (other) { if (other !== tile && other.dataset.state !== "idle") { stop(other); } });
+        }
         release(tile);
-        active = tile;
         tile.dataset.state = "loading";
         var video = tile.querySelector("video");
         var url = "/api/cameras/live/" + encodeURIComponent(tile.dataset.cameraId) + "/stream.m3u8";
@@ -66,10 +92,18 @@
     }
 
     document.addEventListener("DOMContentLoaded", function () {
-        var tiles = document.querySelectorAll(".camera-tile");
+        tiles = Array.prototype.slice.call(document.querySelectorAll(".camera-tile"));
         if (!tiles.length) { return; }
 
-        Array.prototype.forEach.call(tiles, function (tile) {
+        allButton = document.getElementById("cameraAllBtn");
+        if (allButton) {
+            allButton.addEventListener("click", function () {
+                if (allMode) { stopAll(); } else { startAll(); }
+            });
+            updateAllButton();
+        }
+
+        tiles.forEach(function (tile) {
             var video = tile.querySelector("video");
             video.addEventListener("playing", function () {
                 if (tile.dataset.state !== "loading") { return; }
@@ -88,7 +122,7 @@
 
         // 画面を離れたら止める(サーバー側は視聴が途絶えるとカメラへの接続を閉じる)。
         document.addEventListener("visibilitychange", function () {
-            if (document.hidden && active) { stop(active); }
+            if (document.hidden) { stopAll(); }
         });
 
         // ホームのカメラの写真・「🚗 駐車場」カードは(?camera=<id>)でこのページを開く。
@@ -96,7 +130,7 @@
         var requested = null;
         try { requested = new URLSearchParams(window.location.search).get("camera"); } catch (e) {}
         if (!requested) { return; }
-        Array.prototype.forEach.call(tiles, function (tile) {
+        tiles.forEach(function (tile) {
             if (tile.dataset.cameraId !== requested || !tile.parentNode) { return; }
             tile.classList.add("camera-tile-requested");
             tile.parentNode.insertBefore(tile, tile.parentNode.firstChild);
