@@ -20,7 +20,7 @@
 - [line_logic.md](./line_logic.md) — Issue #583で追加された`get_meal_time_category_from_now`の利用元（`handle_postback`の`food_record_direct`アクションが`food_records.meal_time_category`の算出に使用）
 - [tv_lock_monitor.md](./tv_lock_monitor.md) — Issue #592で追加された`get_now_jst`の利用元（深夜2時判定のJST基準化）
 - [nas_monitor.md](./nas_monitor.md) — Issue #592で追加された`get_now_jst`の利用元（8時判定のJST基準化）
-- [camera_service.md](./camera_service.md) — Issue #592で追加された`get_now_jst`の利用元（`generate_record_playlist`内部の当日判定のJST基準化）
+- [camera_service.md](./camera_service.md) — **（利用終了）** Issue #592で追加された`get_now_jst`の利用元（`generate_record_playlist`内部の当日判定のJST基準化）の1つだったが、Issue #1091 で録画VOD生成ごと削除され、`camera_service.py`は`get_now_jst`を使わなくなった
 - [train_service.md](./train_service.md) — **（廃止）** Issue #592で追加された`get_now_jst`の利用元の1つだったが、2026-09-21にモジュールごと退役した
 
 ## 2. ファイルの概要
