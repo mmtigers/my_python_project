@@ -23,7 +23,7 @@
 ## 2. ファイルの概要
 
 `quest_users`テーブルを中心とした、家族の統計情報(`get_family_chronicle`)・冒険ログ(`_fetch_full_adventure_logs`)の集約、ユーザーデータのリセット(`reset_user_data`/`_reset_user_data_locked`)、ユーザーのアバター画像の更新・アップロード・削除(`update_avatar`/`_delete_orphaned_avatar`/`save_avatar_image`/`delete_unlinked_avatar`)を担う`UserService`クラス1つを定義するファイル。アバター関連の各メソッドはいずれも`config.UPLOAD_DIR`配下のアップロード済み画像ファイルを扱うための、パストラバーサル対策とファイル参照確認を伴う処理である。**（Issue #551で追加）** 従来`routers/quest_router.py`の`upload_image`エンドポイントに直書きされていた画像アップロードの検証・保存ロジック（拡張子ホワイトリスト・マジックバイト検証・チャンク単位のストリーミング書き込み・サイズ上限チェックと失敗時のクリーンアップ）一式が、非同期メソッド`save_avatar_image`としてこのファイルへ移設された。これに伴い、検証失敗を表す2つのドメイン例外クラス`InvalidImageError`/`ImageTooLargeError`（いずれも`ValueError`のサブクラス）と、マジックバイト判定を行うモジュールレベル関数`_validate_image_header`、許可拡張子の集合`_ALLOWED_AVATAR_EXTENSIONS`もあわせて本ファイルへ追加されている。**（Issue #547で追加）** `reset_game.py`の対話的リセット処理をAPI化した`reset_user_data`（薄いロック取得ラッパー）と、実処理を行う`_reset_user_data_locked`が追加された。いずれも`quest_users`/`quest_history`/`user_inventory`の残高・履歴を書き換える他の全経路（完了・承認・取消・購入）と同じ`_get_user_balance_lock`の中で実行することで、別プロセスで動く`reset_game.py`との競合を防ぐ設計になっている。
-根拠: `class UserService:` (行番号: 44)、`def get_family_chronicle(self) -> Dict[str, Any]:` (行番号: 45)、`def reset_user_data(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:` (行番号: 105)、`def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 165)、`async def save_avatar_image(self, file: UploadFile) -> str:` (行番号: 212)、モジュールdocstring相当のコメント (行番号: 13-17 / 抜粋: "# Issue #551: routers/quest_router.py の upload_image に直書きされていた\n# 画像保存ロジック(拡張子/マジックバイト検証・サイズ上限付き保存)をこちらへ移した。")
+根拠: `class UserService:` (行番号: 53)、`def get_family_chronicle(self) -> Dict[str, Any]:` (行番号: 54)、`def reset_user_data(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:` (行番号: 130)、`def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 190)、`async def save_avatar_image(self, file: UploadFile) -> str:` (行番号: 237)、モジュールdocstring相当のコメント (行番号: 22-26 / 抜粋: "# Issue #551: routers/quest_router.py の upload_image に直書きされていた\n# 画像保存ロジック(拡張子/マジックバイト検証・サイズ上限付き保存)をこちらへ移した。")
 
 ## 3. 外部依存関係
 
@@ -37,8 +37,8 @@
 | `aiofiles` | 外部ライブラリ | **（Issue #551で追加）** `save_avatar_image`が画像ファイルを1MBチャンク単位で非同期ストリーミング書き込みするために使用(`aiofiles.open`) | `import aiofiles` (行番号: 6) |
 | `fastapi.HTTPException` | 外部ライブラリ | エラーレスポンス生成(`update_avatar`のユーザー未検出時) | `from fastapi import HTTPException, UploadFile` (行番号: 7) |
 | `fastapi.UploadFile` | 外部ライブラリ/型 | **（Issue #551で追加）** `save_avatar_image`の引数`file`の型注釈 | `from fastapi import HTTPException, UploadFile` (行番号: 7) |
-| `core.utils.get_now_iso` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.utils import get_now_iso` (行番号: 9 / 抜粋: "from core.utils import get_now_iso") |
-| `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 10 / 抜粋: "from core.database import get_db_cursor") |
+| `core.utils.get_now_iso` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.utils import get_now_iso` (行番号: 10 / 抜粋: "from core.utils import get_now_iso") |
+| `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 11 / 抜粋: "from core.database import get_db_cursor") |
 | `config` | 内部モジュール | `UPLOAD_DIR`の参照、**（Issue #551で追加）** `UPLOAD_MAX_FILE_SIZE_MB`の参照 | `import config` (行番号: 10) |
 | `services.quest.locks.logger` | 内部モジュール | ログ出力 | `from services.quest.locks import _get_user_balance_lock, _require_adult, logger` (行番号: 12) |
 | `services.quest.locks._require_adult` | 内部モジュール | **（Issue #739で変更。以前は`ROLE_ADULT`定数をimportして判定をインラインに書いていた）** `_reset_user_data_locked`が`admin_id`の`quest_users.role`が管理者ロールかどうかを判定するために呼ぶ共通ヘルパー。同じ判定を`GameSystem.sync_master_data_as_admin`も使う | `from services.quest.locks import _get_user_balance_lock, _require_adult, logger` (行番号: 12) |
@@ -70,7 +70,7 @@
 ### `InvalidImageError`（例外クラス、Issue #551で追加）
 
 * **役割**: `ValueError`のサブクラス。アップロードされたファイルが画像として不正（ファイル名なし・拡張子不許可・マジックバイト不一致）な場合に`save_avatar_image`が送出するドメイン例外。呼び出し元(`routers/quest_router.py`の`upload_image`)はこれを捕捉してHTTP 400へマッピングする。
-* 根拠: `class InvalidImageError(ValueError):\n    """アップロードされたファイルが画像として不正(拡張子不許可・マジックバイト不一致等)。\n    ルーターはこれを400にマッピングする。"""` (行番号: 22-24)
+* 根拠: `class InvalidImageError(ValueError):\n    """アップロードされたファイルが画像として不正(拡張子不許可・マジックバイト不一致等)。\n    ルーターはこれを400にマッピングする。"""` (行番号: 31-33)
 * **引数/リクエスト**: `ValueError`と同じ（メッセージ文字列）
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: なし
@@ -80,7 +80,7 @@
 ### `ImageTooLargeError`（例外クラス、Issue #551で追加）
 
 * **役割**: `ValueError`のサブクラス。アップロードされたファイルが`config.UPLOAD_MAX_FILE_SIZE_MB`を超過している場合に`save_avatar_image`が送出するドメイン例外。呼び出し元はこれを捕捉してHTTP 413へマッピングする。
-* 根拠: `class ImageTooLargeError(ValueError):\n    """アップロードされたファイルがconfig.UPLOAD_MAX_FILE_SIZE_MBを超過している。\n    ルーターはこれを413にマッピングする。"""` (行番号: 27-29)
+* 根拠: `class ImageTooLargeError(ValueError):\n    """アップロードされたファイルがconfig.UPLOAD_MAX_FILE_SIZE_MBを超過している。\n    ルーターはこれを413にマッピングする。"""` (行番号: 36-38)
 * **引数/リクエスト**: `ValueError`と同じ（メッセージ文字列）
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: なし
@@ -90,7 +90,7 @@
 ### `_validate_image_header`（モジュールレベル関数、Issue #551で追加）
 
 * **役割**: ファイル先頭のバイト列（マジックナンバー）から画像フォーマットを判定するヘルパー関数。JPEG(`\xff\xd8\xff`)、PNG(`\x89PNG\r\n\x1a\n`)、GIF(`GIF87a`/`GIF89a`)、WEBP(`RIFF`ヘッダかつオフセット8-12が`WEBP`)のいずれかに一致すれば`True`を返す。**（Issue #551前は`routers/quest_router.py`にモジュール関数`validate_image_header`として存在していたものが、本ファイルへ移設されアンダースコア接頭辞付きの非公開関数`_validate_image_header`に改名された。**
-* 根拠: `def _validate_image_header(header: bytes) -> bool:\n    if header.startswith(b'\xff\xd8\xff'):\n        return True\n    if header.startswith(b'\x89PNG\r\n\x1a\n'):\n        return True\n    if header.startswith(b'GIF87a') or header.startswith(b'GIF89a'):\n        return True\n    if header.startswith(b'RIFF') and header[8:12] == b'WEBP':\n        return True\n    return False` (行番号: 32-41)
+* 根拠: `def _validate_image_header(header: bytes) -> bool:\n    if header.startswith(b'\xff\xd8\xff'):\n        return True\n    if header.startswith(b'\x89PNG\r\n\x1a\n'):\n        return True\n    if header.startswith(b'GIF87a') or header.startswith(b'GIF89a'):\n        return True\n    if header.startswith(b'RIFF') and header[8:12] == b'WEBP':\n        return True\n    return False` (行番号: 41-50)
 * **引数/リクエスト**: `header: bytes`
 * 根拠: (行番号: 31)
 * **戻り値/レスポンス**: `bool`（画像フォーマットに一致すれば`True`、それ以外は`False`）
@@ -103,8 +103,8 @@
 ### `UserService.get_family_chronicle`
 
 * **役割**: `quest_users`の合計レベル・合計ゴールド、`quest_history`の総件数(`status = 'approved' AND quest_id != 0`。承認待ち行と`InventoryService.use_item`がquest_id=0で挿入する「アイテム使用」行を除外)から家族のランク(4段階のしきい値、"駆け出しの家族"〜"伝説のギルド")を判定し、`_fetch_full_adventure_logs`で取得した冒険ログとともに返す。
-* 根拠: `def get_family_chronicle(self) -> Dict[str, Any]:` (行番号: 45〜71)
-* 根拠: `res = cur.execute("SELECT COUNT(*) as count FROM quest_history WHERE status = 'approved' AND quest_id != 0").fetchone()` (行番号: 53)、コメント (行番号: 49〜52 / 抜粋: "Q-L5(#409): 承認待ち(pending)行と、use_item が quest_id=0 で挿入する\n            # 「アイテム使用」行は達成クエスト数に含めない。")
+* 根拠: `def get_family_chronicle(self) -> Dict[str, Any]:` (行番号: 54〜80)
+* 根拠: `res = cur.execute("SELECT COUNT(*) as count FROM quest_history WHERE status = 'approved' AND quest_id != 0").fetchone()` (行番号: 53)、コメント (行番号: 58〜61 / 抜粋: "Q-L5(#409): 承認待ち(pending)行と、use_item が quest_id=0 で挿入する\n            # 「アイテム使用」行は達成クエスト数に含めない。")
 * **引数/リクエスト**: なし（`self`のみ）
 * 根拠: (行番号: 44)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`stats: {totalLevel, totalGold, totalQuests, partyRank}` と `chronicle`）
@@ -117,7 +117,7 @@
 ### `UserService._fetch_full_adventure_logs`
 
 * **役割**: `quest_history`(`status='approved' AND quest_id != 0`、`completed_at`降順、最大100件)と`reward_history`(`redeemed_at`降順、最大100件)を取得しマージ、`ts`降順で先頭100件に切り詰めたうえで、`quest_users`から取得した各ユーザーの名前・アバターを付与し、種別ごとの表示テキスト(`"{name}は {title} を達成した！"`等)と日付文字列(`T`区切りまたは半角スペース区切りの先頭部分)を整形して返す。ユーザーが`quest_users`に見つからない場合は`{"name": "旅人", "avatar": "👤"}`のプレースホルダを使う。
-* 根拠: `def _fetch_full_adventure_logs(self, cur) -> List[dict]:` (行番号: 73〜96)
+* 根拠: `def _fetch_full_adventure_logs(self, cur) -> List[dict]:` (行番号: 82〜128)
 * 根拠: `q_rows = cur.execute("SELECT 'quest' as type, ... FROM quest_history WHERE status='approved' AND quest_id != 0 ORDER BY completed_at DESC LIMIT 100").fetchall()` (行番号: 74)
 * **引数/リクエスト**: `cur`（呼び出し元のトランザクション内で使うDBカーソル）
 * 根拠: (行番号: 72)
@@ -132,7 +132,7 @@
 
 * **役割**: `reset_game.py`が別プロセスから直接DBを書き換えていたユーザーデータのリセット処理をAPI化したもの。対象ユーザー単位の排他ロック(`_get_user_balance_lock`)を取得したうえで`_reset_user_data_locked`に処理を委譲する薄いラッパー。`reset_game.py`は`unified_server`とは別プロセス(別のPythonインタプリタ)で動くため、同じモジュールをimportしてもこのロックオブジェクトをプロセス間で共有できないという制約があり、`reset_game.py`側もこのメソッド(サーバーAPI経由)を呼ぶ限りにおいて、完了・承認・取消・購入の他の全経路と同じロックの下で直列化される。
 * **並行制御の正（Issue #755 / AUDIT-026 で明記）**: `BEGIN IMMEDIATE` は**リポジトリ内の実行コードに現存しない**。#544 で `reset_game.py` 側に置いたものは #547 でリセットをAPI経由へ移した際に撤去済みで、`core/database.py` の接続も `isolation_level` 未指定（暗黙の deferred `BEGIN`）である。したがって `quest_users`（`gold`/`exp`/`level`/`medal_count`）への read-modify-write の排他は、**`unified_server` プロセス内の `threading.Lock`（`services/quest/locks.py` の `_get_user_balance_lock`）だけ**で成立している。**`unified_server` 以外のプロセス（cron スクリプト・スケジューラのタスク等）から `quest_users` を直接書き換えてはならない**（lost update になる）。別プロセスからの更新が必要な場合は `reset_game.py` と同じく HTTP API を経由すること。この不変条件は `tests/test_balance_lock_cross_path_concurrency.py::TestConcurrencyControlDocumentationMatchesCode` が固定している。
-* 根拠: `def reset_user_data(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:` (行番号: 105〜131 / 抜粋: "Issue #547: reset_game.py の対話的リセットをAPI化したもの。")、`with _get_user_balance_lock(target_user_id):\n            return self._reset_user_data_locked(admin_id, target_user_id)` (行番号: 111〜112)
+* 根拠: `def reset_user_data(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:` (行番号: 130〜156 / 抜粋: "Issue #547: reset_game.py の対話的リセットをAPI化したもの。")、`with _get_user_balance_lock(target_user_id):\n            return self._reset_user_data_locked(admin_id, target_user_id)` (行番号: 111〜112)
 * **引数/リクエスト**: `admin_id: str`（リセットを実行する管理者のuser_id）, `target_user_id: str`（リセット対象のuser_id）
 * 根拠: (行番号: 97)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`_reset_user_data_locked`の戻り値をそのまま返す）
@@ -145,7 +145,7 @@
 ### `UserService._reset_user_data_locked`（Issue #547で追加）
 
 * **役割**: `reset_user_data`のロック取得後に実行される実処理。`core.database.get_db_cursor(commit=True)`の単一トランザクション内で、まず`_require_adult`（**Issue #739で`services/quest/locks.py`へ切り出した共通ヘルパー**。以前はこのメソッド内にインラインで書かれていた）で`admin_id`に対応する`quest_users.role`が`ROLE_ADULT`であることを検証し、一致しなければ403を送出、次に`target_user_id`が`quest_users`に存在しなければ404を送出する。両チェックを通過した場合のみ、対象ユーザーの`quest_users`(`level`, `exp`, `gold`, `medal_count`)を初期値(1, 0, 0, 0)にUPDATEし、`quest_history`・`user_inventory`の対象ユーザー行をすべてDELETEする(#544由来。`reward_history`(購入ログ)は残高に影響しない監査用の記録として削除対象外)。削除件数をログ出力したうえで、削除件数を含む辞書を返す。
-* 根拠: `def _reset_user_data_locked(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:` (行番号: 133〜163)、`cur.execute(\n                "UPDATE quest_users SET level = 1, exp = 0, gold = 0, medal_count = 0 WHERE user_id = ?",\n                (target_user_id,),\n            )` (行番号: 127〜130)、`cur.execute("DELETE FROM quest_history WHERE user_id = ?", (target_user_id,))` (行番号: 131)、`cur.execute("DELETE FROM user_inventory WHERE user_id = ?", (target_user_id,))` (行番号: 133)
+* 根拠: `def _reset_user_data_locked(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:` (行番号: 158〜188)、`cur.execute(\n                "UPDATE quest_users SET level = 1, exp = 0, gold = 0, medal_count = 0 WHERE user_id = ?",\n                (target_user_id,),\n            )` (行番号: 127〜130)、`cur.execute("DELETE FROM quest_history WHERE user_id = ?", (target_user_id,))` (行番号: 131)、`cur.execute("DELETE FROM user_inventory WHERE user_id = ?", (target_user_id,))` (行番号: 133)
 * **引数/リクエスト**: `admin_id: str`, `target_user_id: str`
 * 根拠: (行番号: 114)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`{"status": "reset", "deletedHistoryCount": <int>, "deletedInventoryCount": <int>}`）
@@ -158,7 +158,7 @@
 ### `UserService.update_avatar`
 
 * **役割**: 対象ユーザーの存在を確認したうえで`quest_users.avatar`を更新する。更新前の`avatar`列の値を`old_avatar`として保持し、`get_db_cursor(commit=True)`のトランザクション内で、旧アバターを他ユーザーが参照していないか(`SELECT 1 FROM quest_users WHERE avatar = ? AND user_id != ?`)を確認する。トランザクションを抜けた後、他ユーザーからの参照が無い場合のみ`_delete_orphaned_avatar`を呼び出して旧アバターファイルの削除を試みる。
-* 根拠: `def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 165〜188)
+* 根拠: `def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 190〜213)
 * 根拠: `still_referenced = cur.execute(\n                "SELECT 1 FROM quest_users WHERE avatar = ? AND user_id != ? LIMIT 1",\n                (old_avatar, user_id),\n            ).fetchone() is not None` (行番号: 161〜164)、`if not still_referenced:\n            self._delete_orphaned_avatar(old_avatar, avatar_url)` (行番号: 168〜169)
 * **引数/リクエスト**: `user_id: str`, `avatar_url: str`
 * 根拠: (行番号: 147)
@@ -172,7 +172,7 @@
 ### `UserService._delete_orphaned_avatar`
 
 * **役割**: アバター差し替え後にディスクへ残り続ける旧アバターファイルの削除を試みる。`old_avatar`が空/`None`、新旧URLが同一、または`/uploads/`配下のパスでない(絵文字などアップロードファイル以外の値)場合はいずれも早期`return`で何もしない。パストラバーサル対策として、`old_avatar`から`os.path.basename`でファイル名部分のみを取り出し`config.UPLOAD_DIR`と結合したうえで、結合結果の親ディレクトリが正規化済み`config.UPLOAD_DIR`と一致することを確認してから削除する。
-* 根拠: `def _delete_orphaned_avatar(self, old_avatar: Optional[str], new_avatar: str) -> None:` (行番号: 190〜210)
+* 根拠: `def _delete_orphaned_avatar(self, old_avatar: Optional[str], new_avatar: str) -> None:` (行番号: 215〜235)
 * 根拠: `if not old_avatar or old_avatar == new_avatar:\n            return\n        if not old_avatar.startswith("/uploads/"):\n            return` (行番号: 177〜180)、`if os.path.dirname(file_path) != os.path.normpath(config.UPLOAD_DIR):\n            return` (行番号: 184〜185)
 * **引数/リクエスト**: `old_avatar: Optional[str]`（更新前のavatar列の値）, `new_avatar: str`（更新後のavatar URL）
 * 根拠: (行番号: 172)
@@ -186,7 +186,7 @@
 ### `UserService.save_avatar_image`（非同期メソッド、Issue #551で追加）
 
 * **役割**: **（Issue #551）** 以前`routers/quest_router.py`の`upload_image`エンドポイントに直書きされていた画像アップロード処理を丸ごと移設したもの。アップロードされたファイルをファイル名の有無・拡張子・マジックバイトで画像として検証したうえで、UUID採番したファイル名で`config.UPLOAD_DIR`配下へ非同期ストリーミング書き込みし、`config.UPLOAD_MAX_FILE_SIZE_MB`を超えた場合は書きかけのファイルを削除して`ImageTooLargeError`を送出する。戻り値は保存先を指す相対URL（例: `"/uploads/xxxx.png"`）。呼び出し元(`routers/quest_router.py`の`upload_image`)がこれら例外をHTTPExceptionへ変換する。
-* 根拠: `async def save_avatar_image(self, file: UploadFile) -> str:` (行番号: 212)、docstring (参照: UserService.save_avatar_image / 抜粋: "アップロードされたファイルを拡張子・マジックバイトで画像として検証し、\n        UUID採番したファイル名で config.UPLOAD_DIR 配下へ保存する。")
+* 根拠: `async def save_avatar_image(self, file: UploadFile) -> str:` (行番号: 237)、docstring (参照: UserService.save_avatar_image / 抜粋: "アップロードされたファイルを拡張子・マジックバイトで画像として検証し、\n        UUID採番したファイル名で config.UPLOAD_DIR 配下へ保存する。")
 * 検証順序: (1) `file.filename`が空なら`InvalidImageError`(行番号: 205〜206)、(2) 拡張子が`_ALLOWED_AVATAR_EXTENSIONS`外なら`InvalidImageError`(行番号: 207〜209)、(3) 先頭12バイトを読み`_validate_image_header`の判定結果が`False`なら`InvalidImageError`(行番号: 211〜214)。
 * 根拠: `if not file.filename:\n            raise InvalidImageError("ファイル名がありません")` (行番号: 205〜206)、`file_ext = os.path.splitext(file.filename)[1].lower()\n        if file_ext not in _ALLOWED_AVATAR_EXTENSIONS:\n            raise InvalidImageError("許可されていないファイル形式です(拡張子)")` (行番号: 207〜209)、`header = await file.read(12)\n        if not _validate_image_header(header):\n            logger.warning(f"Invalid file header detected. Ext: {file_ext}")\n            raise InvalidImageError("ファイルの内容が画像として認識できません")` (行番号: 211〜214)
 * 保存処理: 検証通過後`file.seek(0)`でシーク位置を戻し(行番号216)、`uuid.uuid4()`でファイル名採番(行番号217)、`aiofiles.open`で1MBチャンクずつ非同期書き込みしながら累計サイズ`total_bytes`を追跡する(行番号220〜233)。累計が`max_bytes`(`config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024`)を超えた場合は書き込みを打ち切り`too_large`フラグを立て(行番号230〜232)、ループを抜けた後に書きかけファイルを`os.remove`で削除して`ImageTooLargeError`を送出する(行番号235〜240)。
@@ -203,7 +203,7 @@
 ### `UserService.delete_unlinked_avatar`
 
 * **役割**: `AvatarUploader.tsx`側の2段階アップロードフロー（1. 画像アップロード→2. `/user/update`でのユーザーへの紐付け）のうち2段階目が失敗した際のロールバック用。`filename`から`os.path.basename`でファイル名部分のみを取り出し`config.UPLOAD_DIR`と結合し、結合結果の親ディレクトリが正規化済み`UPLOAD_DIR`と一致することを確認してパストラバーサルを防ぐ。加えて`quest_users`テーブルに当該ファイルを`avatar`として参照する行が1件でも存在すれば削除しない（安全策）。
-* 根拠: `def delete_unlinked_avatar(self, filename: str) -> bool:` (行番号: 274〜310)、docstring (参照: UserService.delete_unlinked_avatar / 抜粋: "#442: AvatarUploader.tsxの2段階アップロード...")
+* 根拠: `def delete_unlinked_avatar(self, filename: str) -> bool:` (行番号: 299〜335)、docstring (参照: UserService.delete_unlinked_avatar / 抜粋: "#442: AvatarUploader.tsxの2段階アップロード...")
 * **引数/リクエスト**: `filename: str`（削除対象のアップロード済みファイル名。ディレクトリ部分は`os.path.basename`で無視される）
 * 根拠: (行番号: 256, 271)
 * **戻り値/レスポンス**: `bool`（実際に削除できた場合のみ`True`。参照中・パス不正・ファイル未存在・削除失敗時は`False`）
@@ -216,10 +216,21 @@
 ### 追加・変更（2026-10-10: 記録への券使用表示・テレビおやすみ/アップデートの画面上部表示）
 
 * `_fetch_full_adventure_logs` が、`quest_id = 0` の「アイテム使用」行を `type="item"` として追加で取得するようになった（`i_rows`。ゴールド・経験値は0固定、最新100件）。クエスト達成・ごほうび購入と合わせて時刻の降順で最新100件に絞る。
-* 根拠: `i_rows = cur.execute(` (行番号: 79 / 抜粋: "i_rows = cur.execute(")
+* 根拠: `i_rows = cur.execute(` (行番号: 88 / 抜粋: "i_rows = cur.execute(")
 
 * `type="item"` の表示文は「{ユーザー名}は {券名} をつかった！」。券名は保存済みタイトルから `ITEM_USE_TITLE_PREFIX` を `removeprefix` して取り出す。`total_quests`（達成クエスト数）は従来どおり `quest_id != 0` のため、券の使用は含めない。
-* 根拠: `text = f"{u['name']}は {item_title} をつかった！"` (行番号: 95 / 抜粋: "text = f"{u['name']}は {item_title} をつかった！"")
+* 根拠: `text = f"{u['name']}は {item_title} をつかった！"` (行番号: 112 / 抜粋: "text = f"{u['name']}は {item_title} をつかった！"")
+
+### 追加・変更（2026-11-16: すごろくの達成を冒険の記録に表示）
+
+* `_fetch_full_adventure_logs` が、`routine_service.get_chronicle_entries` から直近 `CHRONICLE_ROUTINE_DAYS`(14)日分のすごろく達成(区間ごとのまとめ行)を取得し、`type="routine"` としてクエスト達成・ごほうび購入・券使用とまとめて時刻の降順に並べる。総件数の上限は `CHRONICLE_MAX_ENTRIES`(200、以前は100固定)。
+* 根拠: `routine_rows = [` (行番号: 91 / 抜粋: "routine_rows = [")、`)[:CHRONICLE_MAX_ENTRIES]` (行番号: 98 / 抜粋: ")[:CHRONICLE_MAX_ENTRIES]")、`CHRONICLE_ROUTINE_DAYS = 14` (行番号: 18)、`CHRONICLE_MAX_ENTRIES = 200` (行番号: 21)
+
+* `type="routine"` の表示文は「{ユーザー名}は {区間名} を {できた数}/{対象数} できた！」。できた項目名を「・」で連結した `detail` キーを追加で返し、`dateStr` は `routine_progress.progress_date`(JSTのすごろくの日付)を使う。`detail` は `type="routine"` の要素にのみ付く。
+* 根拠: `elif ev['type'] == 'routine':` (行番号: 113 / 抜粋: "elif ev['type'] == 'routine':")、`entry["detail"] = "・".join(ev['done_labels'])` (行番号: 124 / 抜粋: "entry[\"detail\"] = \"・\".join(ev['done_labels'])")、`entry["dateStr"] = ev['date']` (行番号: 126 / 抜粋: "entry[\"dateStr\"] = ev['date']")
+
+* 依存追加: `from services.routine_service import routine_service`。
+* 根拠: `from services.routine_service import routine_service` (行番号: 14 / 抜粋: "from services.routine_service import routine_service")
 
 ## 5. 処理フロー図
 

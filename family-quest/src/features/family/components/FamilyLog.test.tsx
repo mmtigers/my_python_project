@@ -104,6 +104,23 @@ describe('FamilyLog', () => {
         expect(screen.queryByText(/G$/)).not.toBeInTheDocument();
     });
 
+    it('すごろくのまとめ行(type=routine)は、できた項目と印・獲得ゴールドを出す', () => {
+        render(
+            <FamilyLog
+                chronicle={[log({
+                    userId: 'dad', type: 'routine', gold: 150,
+                    text: 'とうさんは 朝のじゅんび を 5/5 できた！',
+                    detail: '朝ごはん・着替える・顔を洗う・歯磨き・トイレ',
+                })]}
+                users={users}
+            />,
+        );
+        expect(screen.getByText('とうさんは 朝のじゅんび を 5/5 できた！')).toBeInTheDocument();
+        expect(screen.getByText('朝ごはん・着替える・顔を洗う・歯磨き・トイレ')).toBeInTheDocument();
+        expect(screen.getByText('✅ すごろく')).toBeInTheDocument();
+        expect(screen.getByText('+150 G')).toBeInTheDocument();
+    });
+
     it('ゴールドが0の記録には増減を表示しない', () => {
         render(<FamilyLog chronicle={[log({ userId: 'dad', text: '記録', gold: 0 })]} users={users} />);
         expect(screen.queryByText(/G$/)).not.toBeInTheDocument();

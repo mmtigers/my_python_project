@@ -132,6 +132,7 @@ const chronicleItemSchema = z.object({
     text: z.string().optional(),
     gold: z.number().optional(),
     exp: z.number().optional(),
+    detail: z.string().optional(),
 });
 
 export const chronicleResponseSchema = z.object({
