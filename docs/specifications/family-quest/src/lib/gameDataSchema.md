@@ -124,7 +124,12 @@
 ### 追加・変更（2026-10-10: 記録への券使用表示・テレビおやすみ/アップデートの画面上部表示）
 
 * `tvBlockStateSchema` を `export` に変更した。`apiClient.fetchTvBlock` が、ごほうび画面の `tv_block` と同じ形状検証を共有するため。
-* 根拠: `export const tvBlockStateSchema =` (行番号: 169 / 抜粋: "export const tvBlockStateSchema =")
+* 根拠: `export const tvBlockStateSchema =` (行番号: 170 / 抜粋: "export const tvBlockStateSchema =")
+
+### 追加・変更（2026-11-16: すごろくの達成を冒険の記録に表示）
+
+* `chronicleItemSchema` に `detail: z.string().optional()` を追加(バックエンドが `type='routine'` の要素にのみ返す `detail` キーに対応)。
+* 根拠: `detail: z.string().optional(),` (行番号: 135 / 抜粋: "detail: z.string().optional(),")
 
 ## 5. 処理フロー図
 

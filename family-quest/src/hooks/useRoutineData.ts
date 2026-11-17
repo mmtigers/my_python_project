@@ -80,6 +80,9 @@ export const useRoutineData = (
         },
         onSuccess: (res) => {
             queryClient.invalidateQueries({ queryKey: ['routineToday', userId] });
+            // すごろくの達成は冒険の記録(区間ごとのまとめ行)にも載るため、
+            // チェック直後に記録画面へ反映されるよう年代記のキャッシュも無効化する。
+            queryClient.invalidateQueries({ queryKey: ['chronicle'] });
             // ステップ個別報酬はquest_users.gold/expを直接動かすため、ステータス
             // カード(useGameData)側のキャッシュも無効化しないと所持ゴールドの表示が
             // 次のリフェッチまで古いままになる。

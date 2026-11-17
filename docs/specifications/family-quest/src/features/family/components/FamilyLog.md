@@ -25,13 +25,13 @@
 
 **（改善で追加）** 名前タブのタップに加えて、`framer-motion`の`motion.div`/`onPanEnd`を使った左右スワイプでも選択中のユーザーを切り替えられるようになった。これはメイン画面（`App.tsx`のユーザー切替・クエスト/ごほうび/もちものタブ切替）と同じ実装パターン（`info.offset.x`の符号と閾値`60`での判定）であり、`users`配列の先頭/末尾では折り返さない。**（レビュー指摘を受けて修正）** `motion.div`自体はブレークポイントに関わらず常時レンダリングされる（`hidden sm:block`が適用されるのは中の各ユーザー用`<div>`のみ）ため、当初は`sm`以上（全員並列表示）でもグリッド上のマウスドラッグ（ログ本文のテキスト選択等）で`onPanEnd`が発火し、無意味な`setSelectedUserId`が呼ばれてしまっていた。これを避けるため、`handleSwipe`の先頭で`window.matchMedia('(min-width: 640px)').matches`を判定し、`sm`以上（640px以上）では即座に返して何もしないよう修正された。
 
-* 根拠: コンポーネント直前のコメント (行番号: 105〜107 / 抜粋: "// ★改善: スマホ幅(sm未満)では上記の並列表示が1カラムに潰れ、目的の人の記録を見るのに\n// 大量スクロールが必要という指摘を受け、スマホ幅限定で「名前タブで1人だけ表示」に変更した\n// (sm以上のタブレット/PC幅は従来通り全員並列表示のまま)。")
-* 根拠: スワイプ機能追加のコメント (行番号: 109〜111 / 抜粋: "// ★改善: 名前タブのタップに加え、メイン画面(App.tsx)のユーザー切替・タブ切替と同様の\n// 左右スワイプでも1人表示を切り替えられるようにした。末尾/先頭では折り返さない(他画面の\n// スワイプ切替と同じ挙動に揃える)。")
-* 根拠: `FamilyLog`関数定義およびフィルタリング (行番号: 112, 167 / 抜粋: "const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users, initialUserId }) => {", "entries={chronicle.filter(item => item.userId === user.user_id)}")
-* 根拠: `selectedUserId`の初期化 (行番号: 113〜115 / 抜粋: "const [selectedUserId, setSelectedUserId] = useState(\n        () => initialUserId ?? users[0]?.user_id\n    );")
-* 根拠: `selectedIndex`/`handleSwipe`によるスワイプ判定とスマホ幅限定のガード (行番号: 112〜124 / 抜粋: "const selectedIndex = users.findIndex(user => user.user_id === selectedUserId);\n    const handleSwipe = (offsetX: number) => {\n        // sm以上(640px、Tailwindのsmブレークポイントと同じ)では全員並列表示に戻るため、\n        // グリッド上のマウスドラッグ(ログ本文のテキスト選択等)でユーザーが誤って切り替わらないよう、\n        // スマホ幅でのみスワイプ判定を行う(App.tsxのlayoutMode==='portrait'限定のスワイプと同じ考え方)。\n        if (typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches) return;\n        if (selectedIndex === -1) return;")
-* 根拠: スマホ幅専用タブ (行番号: 133〜147 / 抜粋: "{/* スマホ幅専用の名前タブ。sm以上は全員並列表示になるため不要で隠す。 */}\n            <div className=\"flex gap-1.5 sm:hidden\">")
-* 根拠: `motion.div`によるスワイプ検知と1カラムごとの表示/非表示切り替え (行番号: 149〜164 / 抜粋: "<motion.div\n                className=\"grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3\"\n                onPanEnd={(_e, info) => handleSwipe(info.offset.x)}\n            >")
+* 根拠: コンポーネント直前のコメント (行番号: 116〜118 / 抜粋: "// ★改善: スマホ幅(sm未満)では上記の並列表示が1カラムに潰れ、目的の人の記録を見るのに\n// 大量スクロールが必要という指摘を受け、スマホ幅限定で「名前タブで1人だけ表示」に変更した\n// (sm以上のタブレット/PC幅は従来通り全員並列表示のまま)。")
+* 根拠: スワイプ機能追加のコメント (行番号: 120〜122 / 抜粋: "// ★改善: 名前タブのタップに加え、メイン画面(App.tsx)のユーザー切替・タブ切替と同様の\n// 左右スワイプでも1人表示を切り替えられるようにした。末尾/先頭では折り返さない(他画面の\n// スワイプ切替と同じ挙動に揃える)。")
+* 根拠: `FamilyLog`関数定義およびフィルタリング (行番号: 123, 178 / 抜粋: "const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users, initialUserId }) => {", "entries={chronicle.filter(item => item.userId === user.user_id)}")
+* 根拠: `selectedUserId`の初期化 (行番号: 124〜126 / 抜粋: "const [selectedUserId, setSelectedUserId] = useState(\n        () => initialUserId ?? users[0]?.user_id\n    );")
+* 根拠: `selectedIndex`/`handleSwipe`によるスワイプ判定とスマホ幅限定のガード (行番号: 123〜135 / 抜粋: "const selectedIndex = users.findIndex(user => user.user_id === selectedUserId);\n    const handleSwipe = (offsetX: number) => {\n        // sm以上(640px、Tailwindのsmブレークポイントと同じ)では全員並列表示に戻るため、\n        // グリッド上のマウスドラッグ(ログ本文のテキスト選択等)でユーザーが誤って切り替わらないよう、\n        // スマホ幅でのみスワイプ判定を行う(App.tsxのlayoutMode==='portrait'限定のスワイプと同じ考え方)。\n        if (typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches) return;\n        if (selectedIndex === -1) return;")
+* 根拠: スマホ幅専用タブ (行番号: 144〜158 / 抜粋: "{/* スマホ幅専用の名前タブ。sm以上は全員並列表示になるため不要で隠す。 */}\n            <div className=\"flex gap-1.5 sm:hidden\">")
+* 根拠: `motion.div`によるスワイプ検知と1カラムごとの表示/非表示切り替え (行番号: 160〜175 / 抜粋: "<motion.div\n                className=\"grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3\"\n                onPanEnd={(_e, info) => handleSwipe(info.offset.x)}\n            >")
 * 根拠: `UserLogColumn`のグループ化処理 (行番号: 28〜33 / 抜粋: "const groupedChronicle = entries.reduce((groups: Record<string, ChronicleItem[]>, item: ChronicleItem) => {")
 
 ## 3. 外部依存関係
@@ -81,7 +81,7 @@
 * **未対応（バックエンド変更が必要）: `use_item`の記録行が「クエスト達成」として混入する**: `chronicle`（本コンポーネントが描画するデータ）は`GameSystem._fetch_full_adventure_logs`（`quest_service.py`）が`quest_history WHERE status='approved'`から`'quest' as type`で一律に生成しており、`use_item()`が記録する行（`quest_id=0`、`quest_title = "アイテム使用: {商品名}"`）もこのSQLの対象から除外されず`type: 'quest'`として届く。`_fetch_full_adventure_logs`は`quest_id`自体をSELECTしていないため、フロントエンド側には`quest_id=0`かどうかを判定する手段がなく、`text`は「{name}は {quest_title} を達成した！」に組み立てられ、実際には「アイテム使用: アイス を達成した！」のような不自然な表示になる。是正するにはバックエンド側で`_fetch_full_adventure_logs`のクエリから`quest_id=0`の行を除外する、または`type`をSELECTに含めて`'item_use'`等で区別できるようにする変更が必要。
 * 根拠: グループ化 (行番号: 25〜30 / 抜粋: "const groupedChronicle = entries.reduce((groups: Record<string, ChronicleItem[]>, item: ChronicleItem) => {\n        const date = item.dateStr || '----/--/--';\n        if (!groups[date]) groups[date] = [];\n        groups[date].push(item);\n        return groups;\n    }, {});")
 * 根拠: 空表示 (行番号: 49〜51 / 抜粋: "{entries.length === 0 && (\n                <div className=\"text-center text-gray-500 text-xs py-4\">まだ記録がありません</div>\n            )}")
-* 根拠: `key`・ログ本文と獲得/消費ゴールド (行番号: 62, 65, 69, 78, 88 / 抜粋: "<div key={`${log.timestamp}-${i}`} className=\"bg-blue-950/30 p-1.5 rounded border border-blue-900/50\">", "{formatTime(log.timestamp)}", "{log.text}", "{(log.gold || 0) > 0 && (", "{log.type === 'reward' ? '-' : '+'}{log.gold} G")
+* 根拠: `key`・ログ本文と獲得/消費ゴールド (行番号: 62, 65, 69, 89, 99 / 抜粋: "<div key={`${log.timestamp}-${i}`} className=\"bg-blue-950/30 p-1.5 rounded border border-blue-900/50\">", "{formatTime(log.timestamp)}", "{log.text}", "{(log.gold || 0) > 0 && (", "{log.type === 'reward' ? '-' : '+'}{log.gold} G")
 
 
 * **引数/リクエスト**: `{ user: User; entries: ChronicleItem[] }`
@@ -106,19 +106,19 @@
 
 * **役割**: `chronicle`が未取得（falsy）の間はローディングメッセージを返す。取得済みの場合は見出し（`History`アイコン＋「冒険の記録」）に続けて、スマホ幅（`sm`未満）専用の名前タブ行を描画し、`users`を`map`してグリッド内に各`UserLogColumn`を並べる。各`UserLogColumn`は`chronicle`を`item.userId === user.user_id`でフィルタリングした結果を受け取る。**（改善で追加）** コンポーネント内に`selectedUserId`という`useState`（初期値は`initialUserId ?? users[0]?.user_id`、以後はマウント時点の値で固定でPropsの変化には追従しない）を持ち、グリッド内の各ユーザー用`<div>`は`user.user_id === selectedUserId`なら`block`、そうでなければ`hidden sm:block`のクラスを付与される。これにより`sm`未満の画面幅では選択中の1人の`UserLogColumn`だけが表示され、`sm`以上では常に全員が表示される（`hidden`が`sm:block`で上書きされるため）。名前タブの各ボタンは`onClick`で`setSelectedUserId(user.user_id)`を呼び、選択中のボタンには`bg-purple-600 text-white`、非選択のボタンには`bg-gray-800 text-gray-400`のクラスが付く。この名前タブ自体は`sm:hidden`で、`sm`以上の画面幅では表示されない。**（改善で追加）** グリッドを描画する`<div>`は`motion.div`に置き換えられ、`onPanEnd={(_e, info) => handleSwipe(info.offset.x)}`が付与されている。`handleSwipe`は先頭で`window.matchMedia('(min-width: 640px)').matches`を判定し、`sm`以上（640px以上）なら即座に返して何もしない（**修正**: `motion.div`自体は`sm`以上でも常時レンダリングされるため、この判定がないとマウスドラッグで意図せず`setSelectedUserId`が呼ばれてしまう）。`sm`未満の場合のみ、`users`配列内の`selectedUserId`の位置(`selectedIndex`、`findIndex`で算出)を基準に、`offsetX < -60`かつ末尾でなければ次のユーザーへ、`offsetX > 60`かつ先頭でなければ前のユーザーへ`setSelectedUserId`する（`selectedIndex === -1`の場合は何もしない）。これにより名前タブのタップに加え、`sm`未満でのみグリッド領域を左右にスワイプして選択中のユーザーを切り替えられる。
 * 根拠: (行番号: 105〜167 / 抜粋: "const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users, initialUserId }) => {")
-* 根拠: ローディング分岐 (行番号: 117 / 抜粋: "if (!chronicle) return <div className=\"text-center py-10\">冒険の記録を読み込んでいます...</div>;")
-* 根拠: `selectedUserId`の状態管理 (行番号: 113〜115 / 抜粋: "const [selectedUserId, setSelectedUserId] = useState(\n        () => initialUserId ?? users[0]?.user_id\n    );")
-* 根拠: `selectedIndex`/`handleSwipe`(スマホ幅限定のガードとスワイプ判定) (行番号: 112〜124 / 抜粋: "const selectedIndex = users.findIndex(user => user.user_id === selectedUserId);\n    const handleSwipe = (offsetX: number) => {\n        // sm以上(640px、Tailwindのsmブレークポイントと同じ)では全員並列表示に戻るため、\n        // グリッド上のマウスドラッグ(ログ本文のテキスト選択等)でユーザーが誤って切り替わらないよう、\n        // スマホ幅でのみスワイプ判定を行う(App.tsxのlayoutMode==='portrait'限定のスワイプと同じ考え方)。\n        if (typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches) return;\n        if (selectedIndex === -1) return;\n        if (offsetX < -60 && selectedIndex < users.length - 1) {\n            setSelectedUserId(users[selectedIndex + 1].user_id);\n        } else if (offsetX > 60 && selectedIndex > 0) {\n            setSelectedUserId(users[selectedIndex - 1].user_id);\n        }\n    };")
-* 根拠: 名前タブの描画とクリックハンドラ (行番号: 133〜147 / 抜粋: "<div className=\"flex gap-1.5 sm:hidden\">\n                {users.map(user => (\n                    <button\n                        key={user.user_id}\n                        onClick={() => setSelectedUserId(user.user_id)}\n                        className={`flex-1 min-h-[36px] px-1 rounded-lg text-xs font-bold truncate transition-colors ${user.user_id === selectedUserId\n                            ? 'bg-purple-600 text-white shadow-md'\n                            : 'bg-gray-800 text-gray-400'\n                            }`}\n                    >\n                        {user.name}\n                    </button>\n                ))}\n            </div>")
-* 根拠: `motion.div`によるスワイプ検知、ユーザーごとのフィルタリングと表示/非表示切り替え (行番号: 156〜171 / 抜粋: "<motion.div\n                className=\"grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3\"\n                onPanEnd={(_e, info) => handleSwipe(info.offset.x)}\n            >\n                {users.map(user => (\n                    <div\n                        key={user.user_id}\n                        className={user.user_id === selectedUserId ? 'block' : 'hidden sm:block'}\n                    >\n                        <UserLogColumn\n                            user={user}\n                            entries={chronicle.filter(item => item.userId === user.user_id)}\n                        />\n                    </div>\n                ))}\n            </motion.div>")
+* 根拠: ローディング分岐 (行番号: 128 / 抜粋: "if (!chronicle) return <div className=\"text-center py-10\">冒険の記録を読み込んでいます...</div>;")
+* 根拠: `selectedUserId`の状態管理 (行番号: 124〜126 / 抜粋: "const [selectedUserId, setSelectedUserId] = useState(\n        () => initialUserId ?? users[0]?.user_id\n    );")
+* 根拠: `selectedIndex`/`handleSwipe`(スマホ幅限定のガードとスワイプ判定) (行番号: 123〜135 / 抜粋: "const selectedIndex = users.findIndex(user => user.user_id === selectedUserId);\n    const handleSwipe = (offsetX: number) => {\n        // sm以上(640px、Tailwindのsmブレークポイントと同じ)では全員並列表示に戻るため、\n        // グリッド上のマウスドラッグ(ログ本文のテキスト選択等)でユーザーが誤って切り替わらないよう、\n        // スマホ幅でのみスワイプ判定を行う(App.tsxのlayoutMode==='portrait'限定のスワイプと同じ考え方)。\n        if (typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches) return;\n        if (selectedIndex === -1) return;\n        if (offsetX < -60 && selectedIndex < users.length - 1) {\n            setSelectedUserId(users[selectedIndex + 1].user_id);\n        } else if (offsetX > 60 && selectedIndex > 0) {\n            setSelectedUserId(users[selectedIndex - 1].user_id);\n        }\n    };")
+* 根拠: 名前タブの描画とクリックハンドラ (行番号: 144〜158 / 抜粋: "<div className=\"flex gap-1.5 sm:hidden\">\n                {users.map(user => (\n                    <button\n                        key={user.user_id}\n                        onClick={() => setSelectedUserId(user.user_id)}\n                        className={`flex-1 min-h-[36px] px-1 rounded-lg text-xs font-bold truncate transition-colors ${user.user_id === selectedUserId\n                            ? 'bg-purple-600 text-white shadow-md'\n                            : 'bg-gray-800 text-gray-400'\n                            }`}\n                    >\n                        {user.name}\n                    </button>\n                ))}\n            </div>")
+* 根拠: `motion.div`によるスワイプ検知、ユーザーごとのフィルタリングと表示/非表示切り替え (行番号: 167〜182 / 抜粋: "<motion.div\n                className=\"grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3\"\n                onPanEnd={(_e, info) => handleSwipe(info.offset.x)}\n            >\n                {users.map(user => (\n                    <div\n                        key={user.user_id}\n                        className={user.user_id === selectedUserId ? 'block' : 'hidden sm:block'}\n                    >\n                        <UserLogColumn\n                            user={user}\n                            entries={chronicle.filter(item => item.userId === user.user_id)}\n                        />\n                    </div>\n                ))}\n            </motion.div>")
 
 
 * **引数/リクエスト**: `FamilyLogProps` (`chronicle`: `ChronicleItem[]`, `users`: `User[]`, `initialUserId?`: `string`)
-* 根拠: (行番号: 112 / 抜粋: "const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users, initialUserId }) => {")
+* 根拠: (行番号: 123 / 抜粋: "const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users, initialUserId }) => {")
 
 
 * **戻り値/レスポンス**: JSX.Element
-* 根拠: (行番号: 117, 126〜166 / 抜粋: "if (!chronicle) return <div", "return (\n        <div className=\"space-y-3 animate-in fade-in duration-500 pb-6\">")
+* 根拠: (行番号: 128, 126〜166 / 抜粋: "if (!chronicle) return <div", "return (\n        <div className=\"space-y-3 animate-in fade-in duration-500 pb-6\">")
 
 
 * **副作用**: なし（`selectedUserId`の更新は`useState`のセッターによるローカル状態変更のみで、`useEffect`等の外部作用はない。スワイプの`onPanEnd`ハンドラも同じく`setSelectedUserId`を呼ぶだけで、外部への副作用はない）
@@ -126,14 +126,19 @@
 
 
 * **エラーハンドリング**: `chronicle`が falsy な場合、読み込み中のメッセージを返して早期リターンする。`users`が空配列の場合は`initialUserId`未指定時に`selectedUserId`が`undefined`になりうるが、その場合`selectedIndex`は`-1`になり`handleSwipe`は（`sm`未満であれば）早期リターンして何もしない（スワイプによるクラッシュはしないが、専用のエラー表示等は本ファイルにはない）。
-* 根拠: (行番号: 117 / 抜粋: "if (!chronicle) return <div className=\"text-center py-10\">冒険の記録を読み込んでいます...</div>;"), (行番号: 114 / 抜粋: "() => initialUserId ?? users[0]?.user_id")
+* 根拠: (行番号: 128 / 抜粋: "if (!chronicle) return <div className=\"text-center py-10\">冒険の記録を読み込んでいます...</div>;"), (行番号: 125 / 抜粋: "() => initialUserId ?? users[0]?.user_id")
 
 
 
 ### 追加・変更（2026-10-10: 記録への券使用表示・テレビおやすみ/アップデートの画面上部表示）
 
 * 記録の `type === 'item'`（ごほうび券を使った記録）には「🎫 つかった」の印を付ける。この種別はゴールド・経験値が0のため増減は表示されない。
-* 根拠: `{log.type === 'item' && (` (行番号: 73 / 抜粋: "{log.type === 'item' && (")
+* 根拠: `{log.type === 'item' && (` (行番号: 84 / 抜粋: "{log.type === 'item' && (")
+
+### 追加・変更（2026-11-16: すごろくの達成を冒険の記録に表示）
+
+* `log.type === 'routine'`(すごろくの区間まとめ行。バックエンド `UserService._fetch_full_adventure_logs` が返す)の記録には、本文の下に `log.detail`(できた項目名の「・」区切り)を小さく添え、「✅ すごろく」の印を付ける。ゴールドの増減表示は従来どおり `log.gold > 0` のとき「+N G」。
+* 根拠: `{log.type === 'routine' && log.detail && (` (行番号: 72 / 抜粋: "{log.type === 'routine' && log.detail && (")
 
 ## 5. 処理フロー図
 
@@ -220,23 +225,23 @@ graph TD
 
 
 * 以前存在した「家族の総力（パーティランク・総レベルなど）」の集計表示（`FamilyStats`関連のUI）は、コメントにより意図的に廃止されたことが明記されている。復活させる場合は`stats`相当のPropsを再度受け取る必要がある。
-* 根拠: (行番号: 102〜103 / 抜粋: "// 4人並びパネル)と同様に、最初から全員分を並べて表示する。家族の総力(パーティランク・\n// 総レベルなど)の集計表示は不要とのことなので廃止した。")
+* 根拠: (行番号: 113〜114 / 抜粋: "// 4人並びパネル)と同様に、最初から全員分を並べて表示する。家族の総力(パーティランク・\n// 総レベルなど)の集計表示は不要とのことなので廃止した。")
 
 
 * **（改善）スマホ幅の名前タブ・1人表示の設計**: `selectedUserId`は`useState`の初期値としてのみ`initialUserId`（省略時は`users[0]?.user_id`）を評価するため、コンポーネントのマウント後に親から渡される`initialUserId`や`users`の中身（並び順・要素）が変わっても`selectedUserId`は自動的には追従しない。呼び出し元（`App.tsx`）は`viewMode === 'familyLog'`のときだけ本コンポーネントを描画しているため、画面遷移のたびにマウントし直され実質的に最新の`initialUserId`が反映される、という前提に依存した設計になっている。この前提が崩れる呼び出し方（本コンポーネントを常時マウントしたまま`initialUserId`だけを変更するような使い方）をする場合は、`selectedUserId`を`initialUserId`の変化に追従させる`useEffect`が別途必要になる。
-* 根拠: (行番号: 113〜115 / 抜粋: "const [selectedUserId, setSelectedUserId] = useState(\n        () => initialUserId ?? users[0]?.user_id\n    );")
+* 根拠: (行番号: 124〜126 / 抜粋: "const [selectedUserId, setSelectedUserId] = useState(\n        () => initialUserId ?? users[0]?.user_id\n    );")
 
 
 * **（改善）スワイプ切替の閾値・端の挙動**: `handleSwipe`の左右判定閾値`60`(px)は、`App.tsx`のメイン画面（ユーザー切替・クエスト/ごほうび/もちものタブ切替）のスワイプ実装にあるのと同じマジックナンバーであり、本ファイルはその値の妥当性の根拠（実機での調整結果か等）を持たない。`users`配列の先頭/末尾では折り返さない点も`App.tsx`の既存スワイプと挙動を揃えたものだが、これは`users`の並び順（サーバー側で確定済み）がそのままスワイプの左右順序になることを意味し、`users`の並び順が変わればスワイプの体感順序も変わる。
-* 根拠: (行番号: 112〜124 / 抜粋: "const selectedIndex = users.findIndex(user => user.user_id === selectedUserId);\n    const handleSwipe = (offsetX: number) => {\n        // sm以上(640px、Tailwindのsmブレークポイントと同じ)では全員並列表示に戻るため、\n        if (typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches) return;\n        if (selectedIndex === -1) return;\n        if (offsetX < -60 && selectedIndex < users.length - 1) {")
+* 根拠: (行番号: 123〜135 / 抜粋: "const selectedIndex = users.findIndex(user => user.user_id === selectedUserId);\n    const handleSwipe = (offsetX: number) => {\n        // sm以上(640px、Tailwindのsmブレークポイントと同じ)では全員並列表示に戻るため、\n        if (typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches) return;\n        if (selectedIndex === -1) return;\n        if (offsetX < -60 && selectedIndex < users.length - 1) {")
 
 
 * **（レビュー指摘を受けて修正）`motion.div`のスコープと`sm`幅ガードの整合性**: `motion.div`（グリッド全体を包むラッパー）自体は`sm`以上でも常時レンダリング・マウント（`onPanEnd`も常に有効）されており、`hidden sm:block`は内側の各ユーザー用`<div>`にのみ適用される。当初この非対称性に気づかず、`sm`以上でもグリッド上のマウスドラッグ（テキスト選択等）で`onPanEnd`が発火し無意味な`setSelectedUserId`が呼ばれる問題があった（レビューで指摘）。`handleSwipe`冒頭の`window.matchMedia('(min-width: 640px)')`判定で対処したが、これはTailwindの`sm`ブレークポイント(640px)をJS側にハードコードした値であり、Tailwindの設定（`tailwind.config`等、本ファイルからは不明）でこの値自体が変更された場合は追従できず食い違う。また`matchMedia`はSSR等`window`が存在しない環境を`typeof window !== 'undefined'`で回避しているが、Viteによるクライアントサイドのみのビルドである本プロジェクトの前提では通常到達しない分岐である。
-* 根拠: (行番号: 149〜156 / 抜粋: "<motion.div\n                className=\"grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3\"\n                onPanEnd={(_e, info) => handleSwipe(info.offset.x)}\n            >\n                {users.map(user => (\n                    <div\n                        key={user.user_id}\n                        className={user.user_id === selectedUserId ? 'block' : 'hidden sm:block'}\n                    >"), (行番号: 124 / 抜粋: "if (typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches) return;")
+* 根拠: (行番号: 160〜167 / 抜粋: "<motion.div\n                className=\"grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3\"\n                onPanEnd={(_e, info) => handleSwipe(info.offset.x)}\n            >\n                {users.map(user => (\n                    <div\n                        key={user.user_id}\n                        className={user.user_id === selectedUserId ? 'block' : 'hidden sm:block'}\n                    >"), (行番号: 135 / 抜粋: "if (typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches) return;")
 
 
 * **[修正済み] ゴールドバッジの符号・色分け（M-6-4）**: `log.type === 'reward'`（報酬購入によるゴールド消費）の場合は赤色で`-N G`、それ以外（クエスト達成等によるゴールド獲得）は黄色で`+N G`と表示するようになった。以前は`type`を見ずに一律`+N G`（獲得）表示していたため、報酬購入によるゴールド減少が誤って「獲得」のように見えていた。
-* 根拠: (行番号: 79〜81, 88 / 抜粋: "// M-6-4バグ修正: 報酬購入(type='reward')はゴールドを消費した記録のため\n                                        // \"-N G\"、クエスト達成(type='quest')は獲得のため\"+N G\"と表示する。\n                                        // 以前は購入も一律\"+N G\"(獲得)表示になっていた。", "{log.type === 'reward' ? '-' : '+'}{log.gold} G")
+* 根拠: (行番号: 90〜92, 99 / 抜粋: "// M-6-4バグ修正: 報酬購入(type='reward')はゴールドを消費した記録のため\n                                        // \"-N G\"、クエスト達成(type='quest')は獲得のため\"+N G\"と表示する。\n                                        // 以前は購入も一律\"+N G\"(獲得)表示になっていた。", "{log.type === 'reward' ? '-' : '+'}{log.gold} G")
 
 
 ## 9. 不明事項一覧

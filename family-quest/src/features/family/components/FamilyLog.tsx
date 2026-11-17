@@ -68,7 +68,18 @@ const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ use
                                 <div className="text-[11px] text-white leading-snug">
                                     {log.text}
                                 </div>
+                                {/* すごろく(朝のじゅんび等)のまとめ行は、できた項目を小さく添える */}
+                                {log.type === 'routine' && log.detail && (
+                                    <div className="text-[10px] text-gray-300 leading-snug mt-0.5">
+                                        {log.detail}
+                                    </div>
+                                )}
                                 <div className="flex gap-1.5 mt-0.5">
+                                    {log.type === 'routine' && (
+                                        <span className="text-[9px] font-bold px-1 rounded text-emerald-300 bg-emerald-900/30">
+                                            ✅ すごろく
+                                        </span>
+                                    )}
                                     {/* アイテム(ごほうび券)を使った記録。ゴールド・経験値は動かないので印だけ付ける */}
                                     {log.type === 'item' && (
                                         <span className="text-[9px] font-bold px-1 rounded text-sky-300 bg-sky-900/30">
