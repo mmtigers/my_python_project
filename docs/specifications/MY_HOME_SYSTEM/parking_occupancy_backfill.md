@@ -25,7 +25,7 @@
 
 出力先は既定で NAS の `home_system/parking_occupancy/`（SD カードには書かない）。`observations.csv` は追記していき、`trips.csv` と `daily_summary.csv` は毎回作り直す。処理済みの録画は `observations.csv` の `file` 列で分かるので、もう一度実行すると続きから進む。
 
-* 根拠: `def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm_count: int,` (行番号: 240 / 抜粋: "def run(")
+* 根拠: `def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm_count: int,` (行番号: 246 / 抜粋: "def run(")
 
 ## 3. 外部依存関係
 
@@ -50,150 +50,150 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| NAS 上の録画ファイル | `nvr-parking.service` が書く。本数・サイズ・欠落は実行環境に依存する | 根拠: `def find_recordings(record_dir: str, days: int, today: datetime.date, now: float) -> List[str]:` (行番号: 90) |
-| `devices.json` の駐車場カメラの定義 | gitignore 対象で、リポジトリには無い | 根拠: `def resolve_record_dir() -> Optional[str]:` (行番号: 73) |
+| NAS 上の録画ファイル | `nvr-parking.service` が書く。本数・サイズ・欠落は実行環境に依存する | 根拠: `def find_recordings(record_dir: str, days: int, today: datetime.date, now: float) -> List[str]:` (行番号: 96) |
+| `devices.json` の駐車場カメラの定義 | gitignore 対象で、リポジトリには無い | 根拠: `def resolve_record_dir() -> Optional[str]:` (行番号: 79) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `resolve_record_dir`
 
 * **役割**: `home_status_service.PARKING_CAMERA_ID` のカメラ設定を引き、その録画ディレクトリを返す。
-* 根拠: `def resolve_record_dir() -> Optional[str]:` (行番号: 73 / 抜粋: "def resolve_record_dir(")
+* 根拠: `def resolve_record_dir() -> Optional[str]:` (行番号: 79 / 抜粋: "def resolve_record_dir(")
 
 * **引数/リクエスト**: なし
-* 根拠: `def resolve_record_dir() -> Optional[str]:` (行番号: 73)
+* 根拠: `def resolve_record_dir() -> Optional[str]:` (行番号: 79)
 
 * **戻り値/レスポンス**: 録画ディレクトリのパス。devices.json に駐車場カメラが無ければ `None`
-* 根拠: `def resolve_record_dir() -> Optional[str]:` (行番号: 73)
+* 根拠: `def resolve_record_dir() -> Optional[str]:` (行番号: 79)
 
 * **副作用**: なし
-* 根拠: `def resolve_record_dir() -> Optional[str]:` (行番号: 73)
+* 根拠: `def resolve_record_dir() -> Optional[str]:` (行番号: 79)
 
 * **エラーハンドリング**: なし
-* 根拠: `def resolve_record_dir() -> Optional[str]:` (行番号: 73)
+* 根拠: `def resolve_record_dir() -> Optional[str]:` (行番号: 79)
 
 ### `recording_start` / `find_recordings`
 
 * **役割**: `recording_start` は録画ファイル名（`%Y%m%d_%H%M%S.mp4`）から開始時刻を読む。`find_recordings` は今日を含む直近 `days` 日分の録画を古い順に返す。名前から時刻を読めないものと、更新時刻が `IN_PROGRESS_SECONDS`（120秒）以内の**書き込み中の録画**は除く（途中までしか読めないのに処理済みと記録すると、残りの時間帯が二度と解析されないため）。
-* 根拠: `def recording_start(path: str) -> Optional[datetime.datetime]:` (行番号: 81 / 抜粋: "def recording_start(")
-* 根拠: `def find_recordings(record_dir: str, days: int, today: datetime.date, now: float) -> List[str]:` (行番号: 90 / 抜粋: "def find_recordings(")
+* 根拠: `def recording_start(path: str) -> Optional[datetime.datetime]:` (行番号: 87 / 抜粋: "def recording_start(")
+* 根拠: `def find_recordings(record_dir: str, days: int, today: datetime.date, now: float) -> List[str]:` (行番号: 96 / 抜粋: "def find_recordings(")
 
 * **引数/リクエスト**: `record_dir`、`days`、`today`、`now`（エポック秒）
-* 根拠: `def find_recordings(record_dir: str, days: int, today: datetime.date, now: float) -> List[str]:` (行番号: 90)
+* 根拠: `def find_recordings(record_dir: str, days: int, today: datetime.date, now: float) -> List[str]:` (行番号: 96)
 
 * **戻り値/レスポンス**: 録画ファイルのパスのリスト
-* 根拠: `def find_recordings(record_dir: str, days: int, today: datetime.date, now: float) -> List[str]:` (行番号: 90)
+* 根拠: `def find_recordings(record_dir: str, days: int, today: datetime.date, now: float) -> List[str]:` (行番号: 96)
 
 * **副作用**: なし（ディレクトリの列挙と更新時刻の取得のみ）
-* 根拠: `def find_recordings(record_dir: str, days: int, today: datetime.date, now: float) -> List[str]:` (行番号: 90)
+* 根拠: `def find_recordings(record_dir: str, days: int, today: datetime.date, now: float) -> List[str]:` (行番号: 96)
 
 * **エラーハンドリング**: 時刻を読めないファイル名は `ValueError` を捕捉して `None` とし、対象から外す
-* 根拠: `def recording_start(path: str) -> Optional[datetime.datetime]:` (行番号: 81)
+* 根拠: `def recording_start(path: str) -> Optional[datetime.datetime]:` (行番号: 87)
 
 ### `load_processed_files` / `load_observations`
 
 * **役割**: `observations.csv` を読む。前者は既に載っている録画ファイル名の集合（再実行時に飛ばすため）、後者は時刻と判定だけの観測のリスト（外出の集計を、今回追記した分だけでなく全期間でやり直すため）を返す。
-* 根拠: `def load_processed_files(observations_path: str) -> Set[str]:` (行番号: 102 / 抜粋: "def load_processed_files(")
-* 根拠: `def load_observations(observations_path: str) -> List[occupancy.Observation]:` (行番号: 110 / 抜粋: "def load_observations(")
+* 根拠: `def load_processed_files(observations_path: str) -> Set[str]:` (行番号: 108 / 抜粋: "def load_processed_files(")
+* 根拠: `def load_observations(observations_path: str) -> List[occupancy.Observation]:` (行番号: 116 / 抜粋: "def load_observations(")
 
 * **引数/リクエスト**: `observations_path`
-* 根拠: `def load_processed_files(observations_path: str) -> Set[str]:` (行番号: 102)
+* 根拠: `def load_processed_files(observations_path: str) -> Set[str]:` (行番号: 108)
 
 * **戻り値/レスポンス**: ファイル名の集合 / `Observation` のリスト。ファイルが無ければ空
-* 根拠: `def load_observations(observations_path: str) -> List[occupancy.Observation]:` (行番号: 110)
+* 根拠: `def load_observations(observations_path: str) -> List[occupancy.Observation]:` (行番号: 116)
 
 * **副作用**: なし
-* 根拠: `def load_processed_files(observations_path: str) -> Set[str]:` (行番号: 102)
+* 根拠: `def load_processed_files(observations_path: str) -> Set[str]:` (行番号: 108)
 
 * **エラーハンドリング**: なし
-* 根拠: `def load_processed_files(observations_path: str) -> Set[str]:` (行番号: 102)
+* 根拠: `def load_processed_files(observations_path: str) -> Set[str]:` (行番号: 108)
 
 ### `FrameSaver`
 
 * **役割**: 判定が直前のフレームと変わったフレームと、不明だったフレームを、目で確かめる用に 640×360 の JPEG で残す。ファイル名は `<時刻>_<判定>.jpg`。`max_frames` 枚に達したらそれ以上は残さない。
-* 根拠: `class FrameSaver:` (行番号: 140 / 抜粋: "class FrameSaver:")
+* 根拠: `class FrameSaver:` (行番号: 146 / 抜粋: "class FrameSaver:")
 
 * **引数/リクエスト**: `frames_dir`、`max_frames`。`offer(obs, frame)` にフレームを順に渡す
-* 根拠: `class FrameSaver:` (行番号: 140)
+* 根拠: `class FrameSaver:` (行番号: 146)
 
 * **戻り値/レスポンス**: なし
-* 根拠: `class FrameSaver:` (行番号: 140)
+* 根拠: `class FrameSaver:` (行番号: 146)
 
 * **副作用**: `frames_dir` を作り、JPEG を書く
-* 根拠: `class FrameSaver:` (行番号: 140)
+* 根拠: `class FrameSaver:` (行番号: 146)
 
 * **エラーハンドリング**: なし
-* 根拠: `class FrameSaver:` (行番号: 140)
+* 根拠: `class FrameSaver:` (行番号: 146)
 
 ### `process_recordings`
 
 * **役割**: 録画を順に `occupancy.analyze_recording` にかけ、1フレーム1行で `observations.csv` へ追記する。**録画1本分の行は、その録画を最後まで読めてからまとめて書く。** 途中で止めた・ffmpeg が失敗した録画の行は1行も残さない（途中までの行が残ると、次回は処理済みとみなされて残りの時間帯が二度と解析されないため）。書かなかった録画と、フレームが1枚も取れなかった録画は、次回もう一度試される。
-* 根拠: `def process_recordings(` (行番号: 159 / 抜粋: "def process_recordings(")
+* 根拠: `def process_recordings(` (行番号: 165 / 抜粋: "def process_recordings(")
 
 * **引数/リクエスト**: `paths`、`observations_path`、`interval_seconds`、`frame_saver`（省略可）
-* 根拠: `def process_recordings(` (行番号: 159)
+* 根拠: `def process_recordings(` (行番号: 165)
 
 * **戻り値/レスポンス**: 書いた行数
-* 根拠: `def process_recordings(` (行番号: 159)
+* 根拠: `def process_recordings(` (行番号: 165)
 
 * **副作用**: `observations.csv` への追記（無ければヘッダー付きで作る）
-* 根拠: `def process_recordings(` (行番号: 159)
+* 根拠: `def process_recordings(` (行番号: 165)
 
 * **エラーハンドリング**: `occupancy.FrameExtractionError`（ffmpeg の失敗・時間切れ）を捕捉し、その録画の行を捨てて標準エラーへ理由を出し、次の録画へ進む。Ctrl-C などで中断された場合も、読みかけの録画の行は書かれない
-* 根拠: `def process_recordings(` (行番号: 159)
+* 根拠: `def process_recordings(` (行番号: 165)
 
 ### `write_trips` / `write_daily_summary` / `print_report`
 
 * **役割**: 外出の一覧を `trips.csv`（出庫・入庫の時刻、分、不確かかどうか）、日ごとの集計を `daily_summary.csv`（日付、回数、合計分）に書き、同じ内容を標準出力にも表示する。表示には観測の総数と、判定できなかった件数・割合も含める。
-* 根拠: `def write_trips(path: str, trips: Iterable[occupancy.Trip]) -> None:` (行番号: 199 / 抜粋: "def write_trips(")
-* 根拠: `def write_daily_summary(path: str, summaries: Iterable[occupancy.DailySummary]) -> None:` (行番号: 211 / 抜粋: "def write_daily_summary(")
-* 根拠: `def print_report(observations: List[occupancy.Observation], trips: List[occupancy.Trip],` (行番号: 219 / 抜粋: "def print_report(")
+* 根拠: `def write_trips(path: str, trips: Iterable[occupancy.Trip]) -> None:` (行番号: 205 / 抜粋: "def write_trips(")
+* 根拠: `def write_daily_summary(path: str, summaries: Iterable[occupancy.DailySummary]) -> None:` (行番号: 217 / 抜粋: "def write_daily_summary(")
+* 根拠: `def print_report(observations: List[occupancy.Observation], trips: List[occupancy.Trip],` (行番号: 225 / 抜粋: "def print_report(")
 
 * **引数/リクエスト**: 出力先のパスと、`Trip` / `DailySummary` のリスト
-* 根拠: `def write_trips(path: str, trips: Iterable[occupancy.Trip]) -> None:` (行番号: 199)
+* 根拠: `def write_trips(path: str, trips: Iterable[occupancy.Trip]) -> None:` (行番号: 205)
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `def write_trips(path: str, trips: Iterable[occupancy.Trip]) -> None:` (行番号: 199)
+* 根拠: `def write_trips(path: str, trips: Iterable[occupancy.Trip]) -> None:` (行番号: 205)
 
 * **副作用**: CSV の上書き、標準出力への印字
-* 根拠: `def write_daily_summary(path: str, summaries: Iterable[occupancy.DailySummary]) -> None:` (行番号: 211)
+* 根拠: `def write_daily_summary(path: str, summaries: Iterable[occupancy.DailySummary]) -> None:` (行番号: 217)
 
 * **エラーハンドリング**: なし
-* 根拠: `def write_trips(path: str, trips: Iterable[occupancy.Trip]) -> None:` (行番号: 199)
+* 根拠: `def write_trips(path: str, trips: Iterable[occupancy.Trip]) -> None:` (行番号: 205)
 
 ### `run`
 
 * **役割**: 全体の実行。録画ディレクトリの存在を確かめ、出力先を作り、ロックを取ってから、未処理の録画を解析して追記し、`observations.csv` の全行から外出を集計し直して CSV と標準出力に出す。
-* 根拠: `def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm_count: int,` (行番号: 240 / 抜粋: "def run(")
+* 根拠: `def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm_count: int,` (行番号: 246 / 抜粋: "def run(")
 
 * **引数/リクエスト**: `record_dir`、`out_dir`、`days`、`interval_seconds`、`confirm_count`、`save_frames`、`max_saved_frames`（既定 500）
-* 根拠: `def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm_count: int,` (行番号: 240)
+* 根拠: `def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm_count: int,` (行番号: 246)
 
 * **戻り値/レスポンス**: 終了コード（録画ディレクトリが無い・別の解析が実行中なら `1`、それ以外 `0`）
-* 根拠: `def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm_count: int,` (行番号: 240)
+* 根拠: `def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm_count: int,` (行番号: 246)
 
 * **副作用**: 出力先ディレクトリの作成、ロックファイル（`.backfill.lock`）の作成、3つの CSV と確認用フレームの書き込み
-* 根拠: `def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm_count: int,` (行番号: 240)
+* 根拠: `def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm_count: int,` (行番号: 246)
 
 * **エラーハンドリング**: 録画ディレクトリが無ければ出力先を作る前に標準エラーへ理由を出して `1`。`fcntl.flock` が取れなければ（`BlockingIOError`）何もせず `1`
-* 根拠: `def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm_count: int,` (行番号: 240)
+* 根拠: `def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm_count: int,` (行番号: 246)
 
 ### `main`
 
 * **役割**: 引数（`--days` 既定 7、`--interval` 既定 60、`--confirm` 既定 3、`--out`、`--record-dir`、`--save-frames`）を解析して `run` を呼ぶ。`--record-dir` が無ければ devices.json の駐車場カメラから録画先を決め、`--out` が無ければ NAS の `parking_occupancy` に出す。
-* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 277 / 抜粋: "def main(")
+* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 283 / 抜粋: "def main(")
 
 * **引数/リクエスト**: `argv`（省略時は `sys.argv[1:]`）
-* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 277)
+* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 283)
 
 * **戻り値/レスポンス**: 終了コード
-* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 277)
+* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 283)
 
 * **副作用**: `run` に従う
-* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 277)
+* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 283)
 
 * **エラーハンドリング**: `--days` / `--interval` / `--confirm` が 1 未満なら `parser.error`。駐車場カメラが devices.json に無く `--record-dir` も無ければ、標準エラーへ案内を出して `1`
-* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 277)
+* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 283)
 
 ## 5. 処理フロー図
 
