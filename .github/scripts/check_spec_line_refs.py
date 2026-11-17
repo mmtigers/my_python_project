@@ -1374,8 +1374,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     for finding in findings:
         print("  - " + finding.describe())
     print()
-    print("`python3 .github/scripts/check_spec_line_refs.py --fix` で行番号を実位置へ揃えられます。")
-    print("「定義がソースに存在しない」ものは改名・削除が原因のため、仕様書の記述自体を直してください。")
+    # 案内は種別ごとに分ける(Issue #1114)。以前は一律に「--fix で揃えられます」と
+    # 出していたため、範囲引用のずれのように --fix で直らないものまで直せるように
+    # 読めてしまい、実行しても直らない理由が分からなかった。
+    fixable = sum(1 for f in findings if f.reason in ("定義位置がずれている", "抜粋の位置がずれている"))
+    range_shifted = sum(1 for f in findings if f.reason == "抜粋の行が引用範囲の外にある(範囲がずれている)")
+    missing = sum(1 for f in findings if f.reason == "この名前の定義がソースに存在しない(改名/削除された可能性)")
+    if fixable:
+        print("`python3 .github/scripts/check_spec_line_refs.py --fix` で行番号を実位置へ揃えられます(%d件)。" % fixable)
+    if range_shifted:
+        print("範囲引用のずれ(%d件)は --fix では直せません。抜粋の実位置に合わせて、引用範囲を手で直してください。" % range_shifted)
+    if missing:
+        print("「定義がソースに存在しない」もの(%d件)は改名・削除が原因のため、仕様書の記述自体を直してください。" % missing)
     return 1
 
 
