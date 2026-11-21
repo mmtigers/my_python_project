@@ -67,6 +67,12 @@ def default_out_dir() -> str:
 
 
 def _today() -> datetime.date:
+    # あえてホストのローカル日付を使う（CLAUDE.md の JST 固定ヘルパーは使わない）。
+    # 録画ファイル名は nvr-parking.service の ffmpeg が -strftime 1 で付けており、
+    # JST 固定ではなくホストのローカル時刻で決まる。本関数はそのファイル名と
+    # 突き合わせる日付（{day:%Y%m%d}_*.mp4 の glob）にしか使わないため、
+    # 同じホストの時計で数えるほうが必ずファイル名と一致する。
+    # JST 固定に変えると、ホストが UTC の場合にかえって日付境界でずれる。
     return datetime.date.today()
 
 
