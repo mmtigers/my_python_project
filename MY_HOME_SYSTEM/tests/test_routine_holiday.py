@@ -91,6 +91,18 @@ class TestHolidayMorningDeadline:
         assert h['print']['hidden'] is False
         assert p['meal']['hidden'] is False
 
+    def test_morning_print_label_differs_only_for_son(self, isolated_db):
+        """智矢だけ休日の朝のプリントが「朝のプリント1枚で100点をとる」。涼花は従来の表示名のまま。"""
+        _seed_user('son')
+        _seed_user('daughter')
+        son = routine_service.get_today_state('son', now=_at(HOLIDAY_MONDAY, 6, 0))
+        daughter = routine_service.get_today_state('daughter', now=_at(HOLIDAY_MONDAY, 6, 0))
+        s = {st['key']: st for st in son['flows']['am']['steps']}
+        d = {st['key']: st for st in daughter['flows']['am']['steps']}
+        assert s['print']['label'] == '朝のプリント1枚で100点をとる'
+        assert s['print']['status'] == 'current' and s['print']['hidden'] is False
+        assert d['print']['label'] == '朝のプリント1枚'
+
     def test_citizens_holiday_is_treated_the_same(self, isolated_db):
         """国民の休日(2026-09-22)も休日として扱う。"""
         _seed_user()
