@@ -58,6 +58,11 @@ class RoutineStep(_RoutineStepBase, total=False):
     gold: int
     exp: int
     weekday_skip: bool
+    # 平日の曜日(0=月〜4=金)ごとにチェックポイント締切だけを上書きする('HH:MM')。
+    # 休日(is_offday)はweekend_checkpoint_timeが優先され、この上書きは見ない。
+    # 例: 智矢は金曜に療育(あこーでぃおん)へ行き17:30過ぎに帰るため、金曜だけ
+    # 夕方の自由時間の締切を19:00にする(要件確認済み、2026-11-21)。
+    weekday_checkpoint_overrides: dict[int, str]
 
 
 class RoutineFlow(TypedDict):
@@ -280,9 +285,18 @@ _SON_AM_STEPS: List[RoutineStep] = [
     {**step, 'label': '朝のプリント1枚で100点をとる'} if step['key'] == 'print' else step
     for step in ROUTINE_FLOWS['am']['steps']
 ]
+# 智矢は金曜に療育(あこーでぃおん)へ行き、締切の17:30を過ぎてから帰宅する。
+# 平日と同じ17:30のままだと帰宅時点で寝る準備へ強制遷移済みで、自由時間(=YouTube券・
+# TV解錠)に一度も入れないため、金曜(平日の場合)だけ締切を19:00にする(要件確認済み、
+# 2026-11-21)。宿題などを終えてから自由時間に入る流れは他の平日と同じ。
+SON_ACCORDION_WEEKDAY = 4  # 金曜
+SON_ACCORDION_CHECKPOINT_TIME = '19:00'
 _SON_PM_STEPS: List[RoutineStep] = [
     {'key': 'unpack', 'label': '給食袋・体操服・連絡物を出す', 'icon_key': 'unpack', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False}
-    if step['key'] == 'snack' else step
+    if step['key'] == 'snack'
+    else {**step, 'weekday_checkpoint_overrides': {SON_ACCORDION_WEEKDAY: SON_ACCORDION_CHECKPOINT_TIME}}
+    if step['key'] == 'free'
+    else step
     for step in ROUTINE_FLOWS['pm']['steps']
 ]
 SON_ROUTINE_FLOWS: dict[str, RoutineFlow] = {
@@ -350,7 +364,15 @@ def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> 
 
     休日(土日・国民の祝日・家の休み)はweekend_checkpoint_timeを使い、その上書きが
     無ければ平日のcheckpoint_timeをそのまま使う(例: 朝の出発締切は平日7:50・休日12:00)。
+    平日は曜日ごとの上書き(weekday_checkpoint_overrides。例: 智矢の金曜は19:00)が
+    あればそれを使う。
     """
-    if is_offday(now) and step['weekend_checkpoint_time']:
-        return step['weekend_checkpoint_time']
+    if is_offday(now):
+        if step['weekend_checkpoint_time']:
+            return step['weekend_checkpoint_time']
+        return step['checkpoint_time']
+    if step['checkpoint_time']:
+        override = step.get('weekday_checkpoint_overrides', {}).get(now.weekday())
+        if override:
+            return override
     return step['checkpoint_time']
