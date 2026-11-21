@@ -781,6 +781,12 @@ class RoutineService:
 
         gold は実際に付与された額(区間内のステップ個別報酬 + 前半区間なら出発ボーナス)。
         読み取り専用で、DBは一切変更しない。
+
+        ステップ構成(分母・区間の境界)はその日の steps_status のキーで決め、現在の
+        routine_data の定義は表示名と報酬の参照にだけ使う(Issue #1113)。定義から
+        消えたステップはキー名をそのまま表示名にし、報酬は分からないため 0 として扱う。
+        チェックポイント自身のキーが定義から消えた日は区間を分けられないため、
+        全体を前半区間として1行にまとめる。
         """
         users = {
             row['user_id']: row['role']
@@ -801,13 +807,24 @@ class RoutineService:
                 continue
             statuses = json.loads(row['steps_status'])
             skipped = set(json.loads(row['skipped_keys']))
-            checkpoint_idx = get_checkpoint_index(flow)
+            # Issue #1113: 過去日を現在の定義で評価すると、routine_data.py の変更で
+            # 変更前の日の記録が変わる。steps_status は行の作成時にその日の全ステップを
+            # 定義順で持つ(_empty_statuses。JSONでも順序は保たれる)ので、その日の
+            # ステップ構成はこちらを正とし、現在の定義は表示名・報酬の参照にだけ使う。
+            defined = {s['key']: s for s in flow['steps']}
+            day_steps = [
+                defined.get(key) or {'key': key, 'label': key, 'checkpoint_time': None}
+                for key in statuses
+            ]
+            checkpoint_idx = next(
+                (i for i, s in enumerate(day_steps) if s['checkpoint_time']), None
+            )
             if checkpoint_idx is None:
-                segments = [('before', flow['steps'])]
+                segments = [('before', day_steps)]
             else:
                 segments = [
-                    ('before', flow['steps'][:checkpoint_idx]),
-                    ('after', flow['steps'][checkpoint_idx + 1:]),
+                    ('before', day_steps[:checkpoint_idx]),
+                    ('after', day_steps[checkpoint_idx + 1:]),
                 ]
 
             done_times: Dict[str, str] = {}

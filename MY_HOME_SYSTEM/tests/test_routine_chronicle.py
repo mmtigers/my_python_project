@@ -137,3 +137,44 @@ class TestRoutineInChronicle:
             chronicle = UserService().get_family_chronicle()["chronicle"]
 
         assert [ev["type"] for ev in chronicle] == ['quest', 'routine']
+
+
+class TestRoutineChronicleUsesThatDaysSteps:
+    """Issue #1113: routine_data.py の定義を変えても、変更前の日の記録が変わらない。"""
+
+    def _patch_flow_set(self, monkeypatch, edit):
+        import services.routine_service as rs
+        original = rs.get_flow_set
+
+        def patched(user_id, role):
+            flows = dict(original(user_id, role))
+            flows['am'] = {**flows['am'], 'steps': edit(list(flows['am']['steps']))}
+            return flows
+
+        monkeypatch.setattr(rs, 'get_flow_set', patched)
+
+    def test_removed_step_is_still_counted_with_its_key(self, isolated_db, monkeypatch):
+        _seed_user()
+        routine_service.complete_step('daughter', 'am', 'meal', now=_at(6, 30))
+        routine_service.complete_step('daughter', 'am', 'teeth', now=_at(6, 45))
+        # 記録したあとで「歯磨き」を定義から消す
+        self._patch_flow_set(monkeypatch, lambda steps: [s for s in steps if s['key'] != 'teeth'])
+
+        ev = _routine_entries(_at(7, 0))[0]
+
+        assert ev["text"] == 'すずかは 朝のじゅんび を 2/5 できた！'
+        assert ev["detail"] == '朝ごはん・teeth'
+
+    def test_added_step_is_not_in_denominator(self, isolated_db, monkeypatch):
+        _seed_user()
+        routine_service.complete_step('daughter', 'am', 'meal', now=_at(6, 30))
+        new_step = {
+            'key': 'added_later', 'label': 'あとから足した', 'checkpoint_time': None,
+            'checklist': True,
+        }
+        self._patch_flow_set(monkeypatch, lambda steps: [new_step] + steps)
+
+        ev = _routine_entries(_at(7, 0))[0]
+
+        assert ev["text"] == 'すずかは 朝のじゅんび を 1/5 できた！'
+        assert ev["detail"] == '朝ごはん'
