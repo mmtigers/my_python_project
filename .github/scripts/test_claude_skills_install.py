@@ -72,4 +72,7 @@ def test_session_start_hook_runs_the_drift_check():
     """同期漏れの検知がフックから消えていないこと(CI は ~/.claude を見られないため、この経路が唯一の自動検知)。"""
     settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
     commands = [h["command"] for g in settings["hooks"]["SessionStart"] for h in g["hooks"]]
-    assert any("install.sh --check --only-drift" in c for c in commands)
+    # #1120 でパスが "$CLAUDE_PROJECT_DIR/..." 形式（引用符付き）になり、従来の
+    # 部分文字列 "install.sh --check --only-drift" では一致しなくなった。
+    # 引用符や前置パスで表記が変わっても検知できるよう、名前と引数を分けて確認する。
+    assert any("install.sh" in c and "--check --only-drift" in c for c in commands)
