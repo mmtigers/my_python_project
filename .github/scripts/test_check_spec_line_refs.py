@@ -203,6 +203,61 @@ def test_range_citation_with_literal_snippet_outside_range_is_detected(fake_repo
     assert "行番号: 998〜999" in path.read_text(encoding="utf-8")
 
 
+def _patch_base_source(monkeypatch, base_text):
+    """ベース(--base)時点のソースを、git を使わずに差し替える。"""
+    monkeypatch.setattr(
+        checker, "_base_source_lines", lambda source, base, cache: base_text.splitlines()
+    )
+
+
+# ベースでは farewell が3行前にあった(以降、現在のソースへ3行挿入された)想定
+_BASE_SAMPLE = (
+    '"""モジュールdocstring。"""\n'
+    "\n"
+    "\n"
+    "def farewell(name):\n"
+    '    return "bye " + name\n'
+)
+
+
+def test_fix_with_base_shifts_range_keeping_offset(fake_repo, monkeypatch):
+    """--base を付けると、ベースでの「範囲の先頭からのオフセット」を保って範囲を平行移動すること(Issue #1114)。"""
+    # ベースでは抜粋(5行目)が範囲 4〜5 の末尾にあった。現在は10行目なので 9〜10 へ追従する。
+    path = _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 4〜5 / 抜粋: "return \\"bye \\" + name")\n')
+    _patch_base_source(monkeypatch, _BASE_SAMPLE)
+    findings, _ = checker.scan(fix=False, base="BASE")
+    assert [(f.actual, f.actual_end, f.reason) for f in findings] == [(9, 10, checker.RANGE_SHIFTED_BASE)]
+    checker.scan(fix=True, base="BASE")
+    assert "行番号: 9〜10" in path.read_text(encoding="utf-8")
+    assert checker.scan(fix=False)[0] == []
+
+
+def test_fix_with_base_leaves_range_already_wrong_at_base(fake_repo, monkeypatch):
+    """ベースでも抜粋が範囲外だった(元から誤っていた)引用は、推測で書き換えないこと。"""
+    path = _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 998〜999 / 抜粋: "return \\"bye \\" + name")\n')
+    _patch_base_source(monkeypatch, _BASE_SAMPLE)
+    findings, _ = checker.scan(fix=True, base="BASE")
+    assert [f.reason for f in findings] == [checker.RANGE_SHIFTED]
+    assert "行番号: 998〜999" in path.read_text(encoding="utf-8")
+
+
+def test_base_source_lines_reads_file_at_revision(tmp_path, monkeypatch):
+    """`_base_source_lines` が git show でベース時点の内容を返し、無いファイルは None にすること。"""
+    import subprocess
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    src = tmp_path / "a.py"
+    src.write_text("old\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "c"],
+        cwd=tmp_path, check=True,
+    )
+    src.write_text("new\n", encoding="utf-8")
+    monkeypatch.setattr(checker, "REPO_ROOT", tmp_path)
+    assert checker._base_source_lines(src, "HEAD", {}) == ["old"]
+    assert checker._base_source_lines(tmp_path / "missing.py", "HEAD", {}) is None
+
+
 def test_range_citation_snippet_one_line_before_range_is_detected(fake_repo):
     """範囲が1行ずれて抜粋の行を含まなくなった(境界は含む側)場合も検出すること。"""
     _write_spec(fake_repo, '* 根拠: 戻り値 (行番号: 11〜12 / 抜粋: "return \\"bye \\" + name")\n')
