@@ -942,6 +942,13 @@ def _total_hourly_counts(df: pd.DataFrame, day: date) -> list[int]:
     return [sum(c[h] for c in per_device.values()) for h in range(24)]
 
 
+# ヒートマップ(0〜23時の24列)の上に出す時刻の目盛り(0/6/12/18/24時)。「今日の動き」・温湿度の
+# 30日の推移・拠点を並べる表示で共通。
+_HOUR_AXIS_TICKS = (
+    "".join(f'<span style="left:{h / 24 * 100:.2f}%">{h}</span>' for h in (0, 6, 12, 18)) + '<span style="left:100%">24</span>'
+)
+
+
 def _heatmap_level(count: int) -> int:
     """件数 → 色段階(0=なし、1=薄い赤、2=中間、3=濃い赤)。"""
     return sum(count >= t for t in _HEATMAP_LEVEL_THRESHOLDS)
@@ -1200,7 +1207,6 @@ def render_home_climate_heatmap(
                 cells.append(_climate_cell(day, hour, value, metric, now, unit))
         label = f"{day.month}/{day.day}({_WEEKDAYS[day.weekday()]})"
         rows.append(f'<div class="climate-row"><span class="climate-day">{label}</span><div class="climate-cells">{"".join(cells)}</div></div>')
-    ticks = "".join(f'<span style="left:{h / 24 * 100:.2f}%">{h}</span>' for h in (0, 6, 12, 18)) + '<span style="left:100%">24</span>'
     if is_activity:
         legend = "".join(
             f'<span><i style="background:var(--hm-{lvl})"></i>{html.escape(text)}</span>'
@@ -1215,16 +1221,11 @@ def render_home_climate_heatmap(
         f"{heading}"
         f'<div class="climate">{switch}'
         f'<div class="meta">{html.escape(subtitle)}</div>'
-        f'<div class="climate-axis heatmap-axis-ticks">{ticks}</div>'
+        f'<div class="climate-axis heatmap-axis-ticks">{_HOUR_AXIS_TICKS}</div>'
         f'{"".join(rows)}'
         f'<div class="heatmap-legend">{legend}</div>'
         "</div>"
     )
-
-
-_CLIMATE_AXIS_TICKS = (
-    "".join(f'<span style="left:{h / 24 * 100:.2f}%">{h}</span>' for h in (0, 6, 12, 18)) + '<span style="left:100%">24</span>'
-)
 
 
 def _climate_legend(metric: str) -> str:
@@ -1275,7 +1276,7 @@ def _render_climate_day_compare(
         f"{heading}"
         f'<div class="climate">{switch}'
         f'<div class="meta">{html.escape("拠点ごとの1時間の平均(5分おきの記録から)。前後の日は上のボタンで移動")}</div>'
-        f'<div class="climate-axis heatmap-axis-ticks">{_CLIMATE_AXIS_TICKS}</div>'
+        f'<div class="climate-axis heatmap-axis-ticks">{_HOUR_AXIS_TICKS}</div>'
         f'{"".join(rows)}'
         f'<div class="heatmap-legend">{_climate_legend(metric)}</div>'
         "</div>"
@@ -1347,9 +1348,6 @@ def _render_heatmap_rows(
             f'<div class="heatmap-row"><div class="heatmap-name" title="{html.escape(name)}">'
             f'{html.escape(name)}</div><div class="heatmap-cells">{"".join(cells)}</div></div>'
         )
-    ticks = "".join(
-        f'<span style="left:{h / 24 * 100:.2f}%">{h}</span>' for h in (0, 6, 12, 18)
-    ) + '<span style="left:100%">24</span>'
     legend = "".join(
         f'<span><i style="background:var(--hm-{lvl})"></i>{html.escape(label)}</span>'
         for lvl, label in enumerate(_HEATMAP_LEVEL_LABELS)
@@ -1358,7 +1356,7 @@ def _render_heatmap_rows(
     return (
         f'<div class="heatmap"><div class="meta">{day.strftime("%Y/%m/%d")} の動き(1時間ごとの回数)</div>'
         f'{"".join(row_html)}'
-        f'<div class="heatmap-axis-ticks">{ticks}</div>'
+        f'<div class="heatmap-axis-ticks">{_HOUR_AXIS_TICKS}</div>'
         f'<div class="heatmap-legend">{legend}</div>{hint_html}</div>'
     )
 
