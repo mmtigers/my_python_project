@@ -970,7 +970,7 @@ _WEEKDAYS = "月火水木金土日"
 
 
 def parse_climate_location(value: str | None) -> str:
-    """`?hm_loc=`の値(`itami`/`takasago`/`nagaokakyo`。`CLIMATE_SITES`のキー)。それ以外は既定(伊丹)。"""
+    """`?hm_loc=`の値(`itami`/`itami_bedroom`/`takasago`/`nagaokakyo`。`CLIMATE_SITES`のキー)。それ以外は既定(伊丹)。"""
     return _CLIMATE_KEY_LOCATIONS.get(value or "", CLIMATE_DEFAULT_LOCATION)
 
 

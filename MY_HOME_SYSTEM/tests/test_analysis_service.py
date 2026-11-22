@@ -443,6 +443,32 @@ class TestWeatherFunctionsFailSoftOnSchemaMismatch:
         assert result.iloc[0]["out_max"] == 15.0
         assert result.iloc[0]["out_min"] == 5.0
 
+    def test_load_yearly_temperature_stats_excludes_room_meters(self, isolated_db, monkeypatch):
+        """部屋(room)付きの温湿度計(伊丹の寝室)は拠点の室温の最高・最低に混ぜない。"""
+        monkeypatch.setattr(config, "MONITOR_DEVICES", [
+            {"id": "meter-living", "type": "Meter", "location": "伊丹", "name": "リビング"},
+            {"id": "meter-bedroom", "type": "Meter", "location": "伊丹", "room": "寝室", "name": "寝室"},
+        ])
+        conn = sqlite3.connect(isolated_db)
+        try:
+            conn.executemany(
+                "INSERT INTO switchbot_meter_logs (device_id, device_name, temperature, humidity, timestamp) "
+                "VALUES (?, ?, ?, ?, ?)",
+                [
+                    ("meter-living", "リビング", 22.0, 50.0, "2026-03-15T09:00:00+09:00"),
+                    ("meter-living", "リビング", 18.0, 50.0, "2026-03-15T21:00:00+09:00"),
+                    ("meter-bedroom", "寝室", 12.0, 60.0, "2026-03-15T05:00:00+09:00"),
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = analysis_service.load_yearly_temperature_stats(2026, location="伊丹")
+
+        assert len(result) == 1
+        assert (result.iloc[0]["in_max"], result.iloc[0]["in_min"]) == (22.0, 18.0)
+
 
 class TestSystemStats:
     def test_get_disk_usage_returns_percent_between_0_and_100(self):

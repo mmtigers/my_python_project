@@ -1,5 +1,5 @@
 # MY_HOME_SYSTEM/tests/test_dashboard_climate_cards.py
-"""ホームの「🌡️ 室温」グループ(拠点別の温湿度カード: 伊丹・高砂・長岡京)のテスト。
+"""ホームの「🌡️ 室温」グループ(拠点別の温湿度カード: 伊丹・伊丹の寝室・高砂・長岡京)のテスト。
 
 判定(`get_climate_status`)・補足(`describe_climate`)・拠点の判定(`climate_location`)・
 カードの並びとリンク先、拠点の定義(`CLIMATE_SITES`)とヒートマップの切り替えの整合を確認する。
@@ -19,6 +19,7 @@ from services import dashboard_page_service, home_status_service
 
 NOW = datetime.fromisoformat("2026-11-08T12:00:00+09:00")
 NAGAOKAKYO_ID = "HUB2_NAGAOKAKYO"  # テスト用のダミーID
+BEDROOM_ID = "METER_ITAMI_BEDROOM"  # テスト用のダミーID(伊丹の寝室の温湿度計)
 
 
 def _row(minutes_ago, temp, hum, *, device_id="remo-a", name="伊丹_Remo"):
@@ -41,12 +42,20 @@ def _devices(monkeypatch):
     # 長岡京のハブ2は devices.json の location で拠点が決まる(機器名の先頭には頼らない)
     monkeypatch.setattr(config, "MONITOR_DEVICES", [
         {"id": NAGAOKAKYO_ID, "type": "Hub 2", "location": "長岡京", "name": "ハブ2"},
+        # 伊丹の寝室: location は拠点名のまま、room で部屋を分ける
+        {"id": BEDROOM_ID, "type": "Meter", "location": "伊丹", "room": "寝室", "name": "伊丹_寝室の温湿度計"},
     ])
 
 
 class TestClimateSites:
-    def test_sites_are_itami_takasago_nagaokakyo_in_order(self):
-        assert home_status_service.CLIMATE_LOCATIONS == ("伊丹", "高砂", "長岡京")
+    def test_sites_are_itami_bedroom_takasago_nagaokakyo_in_order(self):
+        assert home_status_service.CLIMATE_LOCATIONS == ("伊丹", "伊丹(寝室)", "高砂", "長岡京")
+
+    def test_room_sites_follow_the_naming_rule(self):
+        """部屋の行は `climate_site_name` の名前と一致していないと、どの機器も割り当たらない。"""
+        assert home_status_service.climate_site_name("伊丹", "寝室") in home_status_service.CLIMATE_LOCATIONS
+        assert home_status_service.climate_site_name("伊丹") == "伊丹"
+        assert home_status_service.climate_site_name("伊丹", " ") == "伊丹"
 
     def test_keys_and_titles_are_unique(self):
         keys = [key for _, key, _ in home_status_service.CLIMATE_SITES]
@@ -69,6 +78,20 @@ class TestClimateLocation:
 
     def test_unknown_device_is_none(self):
         assert home_status_service.climate_location("unknown", "温湿度計") is None
+
+    def test_room_device_goes_to_the_room_site(self):
+        assert home_status_service.climate_location(BEDROOM_ID, "伊丹_寝室の温湿度計") == "伊丹(寝室)"
+
+    def test_room_without_a_site_is_hidden_not_mixed_into_the_location(self, monkeypatch):
+        """CLIMATE_SITES に無い部屋は拠点(伊丹)にも混ぜない。名前が「伊丹_」で始まっていても同じ。"""
+        monkeypatch.setattr(config, "MONITOR_DEVICES", [
+            {"id": "meter-kids", "type": "Meter", "location": "伊丹", "room": "子ども部屋", "name": "伊丹_子ども部屋"},
+        ])
+        assert home_status_service.climate_location("meter-kids", "伊丹_子ども部屋") is None
+
+    def test_name_prefix_never_selects_a_room_site(self):
+        """機器名の先頭で決まるのは拠点だけ。部屋は devices.json の room でしか決めない。"""
+        assert home_status_service.climate_location("unknown", "伊丹(寝室)_Remo") == "伊丹"
 
 
 class TestGetClimateStatus:
@@ -124,6 +147,13 @@ class TestGetClimateStatus:
                  _row(2, 24.0, 52.0, device_id="meter-x", name="伊丹_温湿度計"))
         assert home_status_service.get_climate_status(df, "伊丹", NOW)[0] == "24.0℃ / 52%"
 
+    def test_bedroom_does_not_replace_the_itami_value(self):
+        """寝室の記録の方が新しくても、伊丹のカードは伊丹(Remo)の値のまま。寝室は寝室のカードに出る。"""
+        df = _df(_row(5, 21.0, 45.0, device_id="remo-a", name="伊丹_Remo"),
+                 _row(1, 17.5, 55.0, device_id=BEDROOM_ID, name="伊丹_寝室の温湿度計"))
+        assert home_status_service.get_climate_status(df, "伊丹", NOW)[0] == "21.0℃ / 45%"
+        assert home_status_service.get_climate_status(df, "伊丹(寝室)", NOW)[0] == "17.5℃ / 55%"
+
     def test_rows_without_temperature_are_ignored(self):
         """電力・開閉の行(temperature_celsius が NaN)はカードの材料にしない。"""
         power = _row(1, float("nan"), float("nan"))
@@ -135,11 +165,11 @@ class TestClimateCards:
     def _cards(self, df=None):
         return home_status_service.build_status_cards(NOW, pd.DataFrame() if df is None else df, None, None, 0)
 
-    def test_three_cards_sit_between_watch_and_life(self):
+    def test_four_cards_sit_between_watch_and_life(self):
         titles = [card.title for card in self._cards()]
         start = titles.index("🎥 カメラ") + 1
-        assert titles[start:start + 3] == ["🏠 伊丹の室温", "👵 高砂の室温", "🧳 長岡京の室温"]
-        assert titles[start + 3] == "💰 今月の電気代"
+        assert titles[start:start + 4] == ["🏠 伊丹の室温", "🛏️ 伊丹の寝室", "👵 高砂の室温", "🧳 長岡京の室温"]
+        assert titles[start + 4] == "💰 今月の電気代"
 
     def test_titles_are_unique(self):
         titles = [card.title for card in self._cards()]
@@ -150,6 +180,7 @@ class TestClimateCards:
         hrefs = [home_status_service.card_detail_href(card, "/dashboard/") for card in cards]
         assert hrefs == [
             "/dashboard/life?hm_loc=itami&hm_metric=temp#climate-heatmap",
+            "/dashboard/life?hm_loc=itami_bedroom&hm_metric=temp#climate-heatmap",
             "/dashboard/life?hm_loc=takasago&hm_metric=temp#climate-heatmap",
             "/dashboard/life?hm_loc=nagaokakyo&hm_metric=temp#climate-heatmap",
         ]
@@ -184,3 +215,29 @@ class TestHeatmapWithThreeLocations:
 
     def test_nagaokakyo_query_selects_it(self):
         assert dashboard_page_service.parse_climate_location("nagaokakyo") == "長岡京"
+
+
+class TestHeatmapWithBedroom:
+    """伊丹の寝室はヒートマップでも伊丹と別の拠点になり、伊丹の平均に混ざらない。"""
+    DF = pd.DataFrame(
+        [
+            ("2026-11-08", 9, "remo-a", "伊丹_Remo", 22.0, 50.0, 6),
+            ("2026-11-08", 9, BEDROOM_ID, "伊丹_寝室の温湿度計", 16.0, 60.0, 6),
+        ],
+        columns=["date", "hour", "device_id", "device_name", "temp_avg", "hum_avg", "n"],
+    )
+
+    def test_itami_grid_excludes_the_bedroom(self):
+        assert dashboard_page_service.climate_hourly_grid(self.DF, "伊丹", "temp")["2026-11-08"][9] == 22.0
+
+    def test_bedroom_grid_has_only_the_bedroom(self):
+        assert dashboard_page_service.climate_hourly_grid(self.DF, "伊丹(寝室)", "temp")["2026-11-08"][9] == 16.0
+
+    def test_switch_links_to_the_bedroom(self):
+        html = dashboard_page_service.render_home_climate_heatmap(
+            self.DF, NOW, dashboard_path="/dashboard/", location="伊丹(寝室)")
+        assert 'href="/dashboard/life?hm_loc=itami_bedroom&amp;hm_metric=temp#climate-heatmap"' in html
+        assert 'title="11/8 9時台: 16.0℃"' in html
+
+    def test_bedroom_query_selects_it(self):
+        assert dashboard_page_service.parse_climate_location("itami_bedroom") == "伊丹(寝室)"
