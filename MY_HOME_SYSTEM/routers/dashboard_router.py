@@ -173,14 +173,19 @@ def _home_heatmap_html() -> str:
     )
 
 
-def _climate_heatmap_html(hm_loc: str | None, hm_metric: str | None, hm_src: str | None = None) -> str:
+def _climate_heatmap_html(
+    hm_loc: str | None, hm_metric: str | None, hm_src: str | None = None,
+    hm_view: str | None = None, hm_date: str | None = None,
+) -> str:
     """「くらし」ページの「過去30日の温度/湿度/動き」。どれも10分キャッシュの集計から作る。
-    選んでいる指標の分だけを読む(動きを選んでいないときは動きの集計に触れない)。"""
+    選んでいる指標の分だけを読む(動きを選んでいないときは動きの集計に触れない)。
+    `hm_view=day` は1日分を拠点ごとに並べる表示で、`hm_date` がその日(過去30日の範囲外・不正なら今日)。"""
     metric = dashboard_page_service.parse_climate_metric(hm_metric)
     is_activity = metric == "act"
+    now = home_status_service.get_now_jst()
     return dashboard_page_service.render_home_climate_heatmap(
         pd.DataFrame() if is_activity else home_status_service.get_hourly_climate(),
-        home_status_service.get_now_jst(),
+        now,
         dashboard_path=f"{_BASE_PATH}/",
         location=dashboard_page_service.parse_climate_location(hm_loc),
         metric=metric,
@@ -189,6 +194,8 @@ def _climate_heatmap_html(hm_loc: str | None, hm_metric: str | None, hm_src: str
             home_status_service.get_hourly_activity(dashboard_page_service.activity_hourly_grids) if is_activity else None
         ),
         source=dashboard_page_service.parse_climate_source(hm_src),
+        view=dashboard_page_service.parse_climate_view(hm_view),
+        day=dashboard_page_service.parse_climate_date(hm_date, now.date(), home_status_service.CLIMATE_DAYS),
     )
 
 
@@ -245,15 +252,19 @@ def dashboard_watch(
 
 
 @router.get(f"{_BASE_PATH}/life", include_in_schema=False)
-def dashboard_life(hm_loc: str | None = None, hm_metric: str | None = None, hm_src: str | None = None) -> HTMLResponse:
+def dashboard_life(
+    hm_loc: str | None = None, hm_metric: str | None = None, hm_src: str | None = None,
+    hm_view: str | None = None, hm_date: str | None = None,
+) -> HTMLResponse:
     """くらしページ。`?hm_loc=itami|takasago|nagaokakyo&hm_metric=temp|hum|act&hm_src=security|takasago|itami`は
-    過去30日ヒートマップの拠点・指標・動きの対象(不正な値は既定)。"""
+    過去30日ヒートマップの拠点・指標・動きの対象、`hm_view=days|day&hm_date=YYYY-MM-DD`は表示
+    (30日の推移/その日を拠点で並べる)と並べる日(不正な値は既定)。"""
     cards, _ = home_status_service.collect_status_cards()
     materials = home_status_service.get_cached_materials()
     return HTMLResponse(
         dashboard_page_service.render_life_page(
             cards, dashboard_path=f"{_BASE_PATH}/", daily_cost_rows=materials.daily_cost_rows,
-            climate_html=_climate_heatmap_html(hm_loc, hm_metric, hm_src),
+            climate_html=_climate_heatmap_html(hm_loc, hm_metric, hm_src, hm_view, hm_date),
         )
     )
 
