@@ -42,7 +42,7 @@
 | `config` | ファイル内に定義がないため、`SQLITE_DB_PATH`や`MONITOR_DEVICES`などの具体的な値や構造が不明。 | `config.SQLITE_DB_PATH` (行番号: 44 / 抜粋: "config.SQLITE_DB_PATH") |
 | `core.logger.setup_logging` | ファイル内に実装がないため、ログの出力先やフォーマットが不明。 | `setup_logging("analysis_service")` (行番号: 18 / 抜粋: "setup_logging("analysis_service")") |
 | データベースの各種テーブル | スキーマ定義が提供されていないため、カラムの型や制約、インデックスの有無が不明。 | `SELECT * FROM {table_name}` (行番号: 155, 164, 349 / 抜粋: "SELECT * FROM {table_name}") |
-| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 696 / 抜粋: "home_system.service") |
+| `home_system.service` | OSのSystemdサービス。具体的な動作や内容が不明。 | `journalctl -u home_system.service` (行番号: 701 / 抜粋: "home_system.service") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -380,8 +380,8 @@
 
 ### `load_yearly_temperature_stats`
 
-* **役割**: 指定年の天気履歴（外気温）と室内センサーログ（室温）の日次最小・最大統計を取得し、マージして返す。
-* 根拠: `load_yearly_temperature_stats` (行番号: 640 / 抜粋: "df_merged = pd.merge(df_weather, df_sensor, on="date"")
+* **役割**: 指定年の天気履歴（外気温）と室内センサーログ（室温）の日次最小・最大統計を取得し、マージして返す。室温の対象は`config.MONITOR_DEVICES`のうち`location`が一致し、かつ`room`（部屋名）を持たない機器。**(新機能)** 部屋付きの温湿度計（伊丹の寝室など）は、ダッシュボードの室温カードと同じく拠点の室温に混ぜない（混ぜると最高・最低が部屋の違いで広がる）。
+* 根拠: `load_yearly_temperature_stats` (行番号: 645 / 抜粋: "df_merged = pd.merge(df_weather, df_sensor, on="date"")
 
 
 * **引数/リクエスト**: `year` (`int`): 対象年。`location` (`str`, デフォルト `"伊丹"`): 対象場所。
@@ -420,11 +420,11 @@
 ### `get_disk_usage`
 
 * **役割**: ルートディレクトリ（`/`）のディスク使用量（全体、使用済、空き、使用率）を取得する。
-* 根拠: `get_disk_usage` (行番号: 656 / 抜粋: "total, used, free = shutil.disk_usage("/")")
+* 根拠: `get_disk_usage` (行番号: 661 / 抜粋: "total, used, free = shutil.disk_usage("/")")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 653 / 抜粋: "def get_disk_usage()")
+* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 658 / 抜粋: "def get_disk_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (GB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -432,7 +432,7 @@
 
 
 * **副作用**: OSファイルシステムのディスク容量読み取り。
-* 根拠: `shutil.disk_usage("/")` (行番号: 656 / 抜粋: "shutil.disk_usage("/")")
+* 根拠: `shutil.disk_usage("/")` (行番号: 661 / 抜粋: "shutil.disk_usage("/")")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `None` を返す。
@@ -447,7 +447,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 672 / 抜粋: "def get_memory_usage()")
+* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 677 / 抜粋: "def get_memory_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (MB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -470,7 +470,7 @@
 
 
 * **引数/リクエスト**: `lines` (`int`, デフォルト `50`): 行数。`priority` (`Optional[str]`): ログの優先度。`target_date` (`Optional[date]`): 対象日付。
-* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 693 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
+* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 698 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
 
 
 * **戻り値/レスポンス**: `str` (取得したログの文字列。失敗時はエラーメッセージの文字列)
@@ -478,11 +478,11 @@
 
 
 * **副作用**: OSコマンド（`journalctl`）の実行。
-* 根拠: `subprocess.run` (行番号: 706 / 抜粋: "subprocess.run(cmd")
+* 根拠: `subprocess.run` (行番号: 711 / 抜粋: "subprocess.run(cmd")
 
 
 * **エラーハンドリング**: 例外発生時はエラーメッセージを文字列として返す。
-* 根拠: `except Exception as e:` (行番号: 709 / 抜粋: "return f"ログ取得エラー: {e}"")
+* 根拠: `except Exception as e:` (行番号: 714 / 抜粋: "return f"ログ取得エラー: {e}"")
 
 
 

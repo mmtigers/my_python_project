@@ -598,7 +598,12 @@ def load_yearly_temperature_stats(year: int, location: str = "伊丹") -> pd.Dat
         """
         df_weather = pd.read_sql_query(q_weather, conn, params=(location, start_date, end_date))
         
-        itami_ids = [d["id"] for d in config.MONITOR_DEVICES if d.get("location") == location]
+        # 部屋(`room`)付きの温湿度計(例: 伊丹の寝室)は拠点の室温に混ぜない(ダッシュボードの
+        # 室温カードと同じ扱い。混ぜると最高・最低が部屋の違いで広がる)
+        itami_ids = [
+            d["id"] for d in config.MONITOR_DEVICES
+            if d.get("location") == location and not d.get("room")
+        ]
         if not itami_ids:
             return df_weather
             

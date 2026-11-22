@@ -192,7 +192,7 @@ QUEST_APP_PATH = "/quest"
 # 状態表示を残さず、外部リンクカードのみにするという方針変更のため
 # (詳細は routers/dashboard_router.py の新しいページ構成を参照)。
 #
-# 「🌡️ 室温」は拠点別の温湿度カード(伊丹・高砂・長岡京)。見守りの次に置き、
+# 「🌡️ 室温」は拠点別の温湿度カード(伊丹・伊丹の寝室・高砂・長岡京)。見守りの次に置き、
 # 直下に過去30日の温湿度ヒートマップを差し込む(カード→その推移が隣り合う)。
 CARD_GROUPS: tuple[tuple[str, str], ...] = (
     ("watch", "👀 見守り"),
@@ -213,8 +213,14 @@ CARD_GROUP_LABELS: dict[str, str] = dict(CARD_GROUPS)
 # `dashboard_page_service` は循環importになるためこのモジュールを import 元にできないから。
 # カードの見出しは見守りの「🏠 伊丹 (自宅)」「👵 高砂 (実家)」と同じにしない(同じ見出しが2枚並ぶと
 # どちらが温湿度か分からない)。「〜の室温」で揃え、長岡京(単身赴任先)は🧳で示す。
+#
+# 同じ拠点の別の部屋は「拠点名(部屋名)」を1つの拠点として扱う(`climate_site_name`)。
+# 以前は拠点ごとに1枚で、同じ拠点に温湿度計が2台あると、カードは「どれか一番新しい記録」が
+# 5分ごとに入れ替わり、ヒートマップは2部屋の平均になっていた。部屋の温湿度計は devices.json で
+# `location` を拠点名のまま `room` を付けて登録し、ここに「拠点名(部屋名)」の行を足す。
 CLIMATE_SITES: tuple[tuple[str, str, str], ...] = (
     ("伊丹", "itami", "🏠 伊丹の室温"),
+    ("伊丹(寝室)", "itami_bedroom", "🛏️ 伊丹の寝室"),
     ("高砂", "takasago", "👵 高砂の室温"),
     ("長岡京", "nagaokakyo", "🧳 長岡京の室温"),
 )
@@ -233,17 +239,33 @@ CLIMATE_HOT_C = 30.0
 CLIMATE_DRY_PCT = 30.0
 
 
+def climate_site_name(location: Any, room: Any = None) -> str:
+    """温湿度の表示単位の名前。部屋(`room`)が無ければ拠点名のまま、あれば「拠点名(部屋名)」。"""
+    room_name = str(room or "").strip()
+    return f"{location}({room_name})" if room_name else str(location)
+
+
 def climate_location(device_id: Any, device_name: Any) -> str | None:
     """温湿度の記録がどの拠点のものか。`devices.json`の`location`を優先し、無ければ機器名の先頭
     (`伊丹_`/`高砂_`。Nature Remoの保存名)で判定する。どちらでも分からなければ None。
 
     Nature Remo 由来の行は device_id が devices.json に無く、`load_sensor_data` の `location` 列は
-    「その他」になるため、カード・ヒートマップとも `location` 列ではなくここで判定する。"""
+    「その他」になるため、カード・ヒートマップとも `location` 列ではなくここで判定する。
+
+    devices.json で `room` が付いた機器は「拠点名(部屋名)」(`climate_site_name`)になる。
+    その名前が `CLIMATE_SITES` に無いときは None(どこにも出さない)にし、拠点の値へは混ぜない
+    (混ぜると拠点のカードの値が部屋の間で入れ替わる)。"""
     for dev in config.MONITOR_DEVICES:
-        if dev.get("id") == device_id and dev.get("location") in CLIMATE_LOCATIONS:
+        if dev.get("id") != device_id:
+            continue
+        if dev.get("room"):
+            site = climate_site_name(dev.get("location"), dev.get("room"))
+            return site if site in CLIMATE_LOCATIONS else None
+        if dev.get("location") in CLIMATE_LOCATIONS:
             return dev["location"]
+    # 機器名の先頭で分かるのは拠点だけ(部屋は devices.json の `room` でしか決めない)
     name = str(device_name or "")
-    return next((loc for loc in CLIMATE_LOCATIONS if name.startswith(loc)), None)
+    return next((loc for loc in CLIMATE_LOCATIONS if "(" not in loc and name.startswith(loc)), None)
 
 
 class StatusCard(NamedTuple):
@@ -780,7 +802,8 @@ def _climate_rows(df_sensor: pd.DataFrame, location: str) -> pd.DataFrame:
     `switchbot_meter_logs` の行は `temperature_celsius`/`humidity_percent` を持つ)。専用の
     クエリ・キャッシュは持たない。件数上限(`MOBILE_SENSOR_ROW_LIMIT`)の外に出るほど古い
     記録は「データなし」になるが、その頃には `CLIMATE_MAX_AGE_MIN` も超えている想定。
-    同じ拠点に複数の機器があるときは、どれでも一番新しい記録を使う。
+    同じ拠点に複数の機器があるときは、どれでも一番新しい記録を使う(別の部屋の機器は
+    devices.json の `room` で別の拠点になるので、ここには来ない)。
     """
     required = {"timestamp", "device_id", "device_name", "temperature_celsius"}
     if df_sensor.empty or not required.issubset(df_sensor.columns):
@@ -884,7 +907,7 @@ def build_status_cards(
     """渡された材料から、並べる順にカードを組み立てる(取得は行わない)。
 
     並び順は「スマホで上から見たい順」= 利用頻度で決めてある(`CARD_GROUPS`)。
-    見守り(実家・自宅・駐車場・カメラ)→ 室温(伊丹・高砂・長岡京)→ くらし → システムの順で、
+    見守り(実家・自宅・駐車場・カメラ)→ 室温(伊丹・伊丹の寝室・高砂・長岡京)→ くらし → システムの順で、
     毎回は見ないシステム系が最後に来る。順番を変えるとどの位置に何があるかの
     記憶が無効になるので、変えるときは(#829でStreamlit側は廃止済みのため)
     ここが唯一の定義元であることを保ったまま変えること。

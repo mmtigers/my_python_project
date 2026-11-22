@@ -219,6 +219,11 @@ class DeviceConfig(BaseModel):
     # ここでは形式を検証しない: 不正値で ValidationError にすると devices.json 全体
     # (カメラ・全デバイス)の読み込みが失敗するため、監視スクリプト側で個別に弾く。
     ip: str | None = None
+    # 同じ拠点に温湿度計が複数あるときの部屋名(例: "寝室")。付けると、ダッシュボードの室温カード・
+    # ヒートマップでは「拠点名(部屋名)」として拠点とは別に扱う(services/home_status_service.py の
+    # CLIMATE_SITES に同じ名前の行が必要。無ければ表示しない)。`location` は拠点名のままにする
+    # (ハブ監視など拠点単位の処理はこれまでどおり `location` で動く)。
+    room: str | None = None
     notify_settings: NotifySettings = Field(default_factory=NotifySettings)
 
 # ==========================================

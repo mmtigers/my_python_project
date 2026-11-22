@@ -31,7 +31,7 @@ NOW = datetime.fromisoformat("2026-09-19T12:00:00+09:00")
 
 # サマリーに並ぶカードの枚数。`home_status_service.build_status_cards` の
 # 戻り値と対になっているので、カードを増減させるときは一緒に直す。
-EXPECTED_CARD_COUNT = 10
+EXPECTED_CARD_COUNT = 11
 
 
 @pytest.fixture(autouse=True)
