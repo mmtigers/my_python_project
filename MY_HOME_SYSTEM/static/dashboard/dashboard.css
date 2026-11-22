@@ -13,6 +13,10 @@
         --neutral: #5b6678; --neutral-bg: #f1f3f7; --neutral-bd: #dfe4ec;
         --bar-alt: #d9730d;
         --cl-0: #4f7fe0; --cl-1: #a9c6f5; --cl-2: #f1e6a6; --cl-3: #f0a35e; --cl-4: #d1432f;
+        /* 温度ヒートマップの8段階(5℃刻み)。20℃を境に、寒い側は青・暑い側は赤で、20℃から離れるほど濃い。
+           各側の段階は明るさが単調に変わり、20℃寄りの一番淡い色でも背景との対比 2:1 以上(配色の検証スクリプトで確認)。 */
+        --ct-0: #1d438a; --ct-1: #3568c0; --ct-2: #5f90da; --ct-3: #93b5e8;
+        --ct-4: #eea47a; --ct-5: #e47e47; --ct-6: #cf542b; --ct-7: #a11f18;
         --radius: 14px; --radius-sm: 10px;
         --shadow: 0 1px 2px rgba(20,30,50,0.06), 0 2px 8px rgba(20,30,50,0.04);
         --tap: rgba(36,87,214,0.12);
@@ -33,6 +37,10 @@
             --neutral: #9aa7b8; --neutral-bg: #1c2431; --neutral-bd: #2a3545;
             --bar-alt: #f2a54a;
             --cl-0: #4c7bd8; --cl-1: #2f4f86; --cl-2: #4d4a2c; --cl-3: #a4642a; --cl-4: #e05a45;
+            /* ダークも明るい表示と同じ見え方(20℃寄りが淡く、離れるほど濃い)にそろえる。表示を切り替えても
+               同じ日が同じ印象に見えるように。一番濃い色でも暗い背景との対比 3:1 以上 */
+            --ct-0: #3b6fd6; --ct-1: #5d8ee6; --ct-2: #86abee; --ct-3: #b5cdf3;
+            --ct-4: #f3c3a5; --ct-5: #ec9a68; --ct-6: #e2703f; --ct-7: #c9452c;
             --shadow: 0 1px 2px rgba(0,0,0,0.4);
             --tap: rgba(138,180,255,0.16);
         }
@@ -48,6 +56,8 @@
         --neutral: #9aa7b8; --neutral-bg: #1c2431; --neutral-bd: #2a3545;
         --bar-alt: #f2a54a;
         --cl-0: #4c7bd8; --cl-1: #2f4f86; --cl-2: #4d4a2c; --cl-3: #a4642a; --cl-4: #e05a45;
+        --ct-0: #3b6fd6; --ct-1: #5d8ee6; --ct-2: #86abee; --ct-3: #b5cdf3;
+        --ct-4: #f3c3a5; --ct-5: #ec9a68; --ct-6: #e2703f; --ct-7: #c9452c;
         --shadow: 0 1px 2px rgba(0,0,0,0.4);
         --tap: rgba(138,180,255,0.16);
     }
@@ -223,6 +233,14 @@
     .climate-cell.cl-2 { background: var(--cl-2); }
     .climate-cell.cl-3 { background: var(--cl-3); }
     .climate-cell.cl-4 { background: var(--cl-4); }
+    .climate-cell.ct-0 { background: var(--ct-0); }
+    .climate-cell.ct-1 { background: var(--ct-1); }
+    .climate-cell.ct-2 { background: var(--ct-2); }
+    .climate-cell.ct-3 { background: var(--ct-3); }
+    .climate-cell.ct-4 { background: var(--ct-4); }
+    .climate-cell.ct-5 { background: var(--ct-5); }
+    .climate-cell.ct-6 { background: var(--ct-6); }
+    .climate-cell.ct-7 { background: var(--ct-7); }
     .climate-cell.hm-1 { background: var(--hm-1); }
     .climate-cell.hm-2 { background: var(--hm-2); }
     .climate-cell.hm-3 { background: var(--hm-3); }

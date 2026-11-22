@@ -957,15 +957,25 @@ CLIMATE_METRICS = ("temp", "hum", "act")
 CLIMATE_DEFAULT_LOCATION = "伊丹"
 CLIMATE_DEFAULT_METRIC = "temp"
 CLIMATE_DEFAULT_SOURCE = "security"
+# 表示の切り替え(`?hm_view=`)。days=1つの拠点の過去30日(行=日付)、day=1日分を拠点ごとに並べる(行=拠点)。
+CLIMATE_VIEWS = ("days", "day")
+CLIMATE_DEFAULT_VIEW = "days"
+_CLIMATE_VIEW_LABELS = {"days": "📅 30日の推移", "day": "🏘️ 拠点を並べる"}
 _CLIMATE_METRIC_LABELS = {"temp": "🌡️ 温度", "hum": "💧 湿度", "act": "🏃 動き"}
 _CLIMATE_METRIC_COLUMNS = {"temp": "temp_avg", "hum": "hum_avg"}
 _CLIMATE_METRIC_UNITS = {"temp": "℃", "hum": "%"}
-# 5段階の境界(各値未満の段階 → 最後だけ以上)。温度=15/20/25/30℃、湿度=30/40/60/70%。
-_CLIMATE_THRESHOLDS = {"temp": (15.0, 20.0, 25.0, 30.0), "hum": (30.0, 40.0, 60.0, 70.0)}
+# 段階の境界(各値未満の段階 → 最後だけ以上)。
+# 温度は5℃刻みの8段階(5/10/15/20/25/30/35℃)。以前は15/20/25/30℃の5段階で、冬の寝室のような
+# 10℃前後の部屋も「〜15℃」の1色にまとまって寒さの違いが分からなかった。色は20℃を境に、
+# 寒い側=青(寒いほど濃い)・暑い側=赤(暑いほど濃い)のグラデーション(`--ct-0`〜`--ct-7`)。
+# 湿度=30/40/60/70%の5段階(`--cl-0`〜`--cl-4`)。
+_CLIMATE_THRESHOLDS = {"temp": (5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0), "hum": (30.0, 40.0, 60.0, 70.0)}
 _CLIMATE_LEGENDS = {
-    "temp": ("〜15℃", "15〜20℃", "20〜25℃", "25〜30℃", "30℃〜"),
+    "temp": ("〜5℃", "5〜10℃", "10〜15℃", "15〜20℃", "20〜25℃", "25〜30℃", "30〜35℃", "35℃〜"),
     "hum": ("〜30%", "30〜40%", "40〜60%", "60〜70%", "70%〜"),
 }
+# マスの色のCSSクラス・変数の接頭辞(温度と湿度で段階の数が違うため別にする)
+_CLIMATE_CLASS_PREFIX = {"temp": "ct", "hum": "cl"}
 _WEEKDAYS = "月火水木金土日"
 
 
@@ -977,6 +987,20 @@ def parse_climate_location(value: str | None) -> str:
 def parse_climate_metric(value: str | None) -> str:
     """`?hm_metric=`の値。`temp`/`hum`/`act`以外は既定(温度)。"""
     return value if value in CLIMATE_METRICS else CLIMATE_DEFAULT_METRIC
+
+
+def parse_climate_view(value: str | None) -> str:
+    """`?hm_view=`の値。`days`(30日の推移)/`day`(拠点を並べる)以外は既定(30日の推移)。"""
+    return value if value in CLIMATE_VIEWS else CLIMATE_DEFAULT_VIEW
+
+
+def parse_climate_date(value: str | None, today: date, days: int = 30) -> date:
+    """`?hm_date=`(拠点を並べる日。YYYY-MM-DD)。不正な値・過去`days`日の範囲外は今日。"""
+    try:
+        day = date.fromisoformat(value) if value else today
+    except ValueError:
+        return today
+    return day if today - timedelta(days=days - 1) <= day <= today else today
 
 
 def parse_climate_source(value: str | None) -> str:
@@ -1008,8 +1032,18 @@ def _climate_location(device_id: Any, device_name: Any) -> str | None:
 
 
 def _climate_level(value: float, metric: str) -> int:
-    """値 → 色段階(0〜4)。"""
+    """値 → 色段階(温度=0〜7、湿度=0〜4)。"""
     return sum(value >= t for t in _CLIMATE_THRESHOLDS[metric])
+
+
+def _climate_class(value: float, metric: str) -> str:
+    """値 → マスのCSSクラス(温度=`ct-0`〜`ct-7`、湿度=`cl-0`〜`cl-4`)。"""
+    return f"{_CLIMATE_CLASS_PREFIX[metric]}-{_climate_level(value, metric)}"
+
+
+def _climate_site_label(location: str) -> str:
+    """拠点を並べる表示の行の見出し。部屋は「伊丹(寝室)」→「伊丹 寝室」(行の見出しの幅に収める)。"""
+    return location.replace("(", " ").replace(")", "")
 
 
 def climate_hourly_grid(df: pd.DataFrame, location: str, metric: str) -> dict[str, list[float | None]]:
@@ -1033,28 +1067,74 @@ def climate_hourly_grid(df: pd.DataFrame, location: str, metric: str) -> dict[st
 
 
 def _climate_switch(
-    dashboard_path: str, *, location: str, metric: str, source: str, locations: list[str]
+    dashboard_path: str,
+    *,
+    location: str,
+    metric: str,
+    source: str,
+    locations: list[str],
+    view: str = CLIMATE_DEFAULT_VIEW,
+    day: date | None = None,
+    today: date | None = None,
+    days: int = 30,
 ) -> str:
     """指標(温度/湿度/動き)と、その対象(温度・湿度=拠点、動き=防犯/高砂/伊丹)の切り替えリンク(JS不要)。
-    選んだ組み合わせは`?hm_loc=&hm_metric=[&hm_src=]`で持つ(`hm_src`は既定の防犯のとき省く)。"""
+    選んだ組み合わせは`?hm_loc=&hm_metric=[&hm_src=][&hm_view=day&hm_date=]`で持つ
+    (`hm_src`は既定の防犯のとき、`hm_view`/`hm_date`は30日の推移のとき省く)。
+
+    温度・湿度では表示(30日の推移/拠点を並べる)の切り替えも出す。拠点を並べる表示では、
+    拠点の切り替えの代わりに前後の日への移動(過去`days`日の範囲内)を出す。"""
     # ヒートマップは「くらし」ページにある(以前はホーム)
     base = dashboard_path.rstrip("/") + "/life"
-    def link(label: str, loc: str, met: str, src: str, current: bool) -> str:
+    def link(
+        label: str, loc: str, met: str, src: str, current: bool,
+        vw: str = CLIMATE_DEFAULT_VIEW, dt: date | None = None,
+    ) -> str:
         query = {"hm_loc": _CLIMATE_LOCATION_KEYS[loc], "hm_metric": met}
         if src != CLIMATE_DEFAULT_SOURCE:
             query["hm_src"] = src
+        if vw != CLIMATE_DEFAULT_VIEW:
+            query["hm_view"] = vw
+            if dt is not None and dt != today:
+                query["hm_date"] = dt.isoformat()
         attr = ' aria-current="true"' if current else ""
         return f'<a href="{html.escape(base)}?{html.escape(urlencode(query))}#climate-heatmap"{attr}>{html.escape(label)}</a>'
 
     if metric == "act":
+        view = CLIMATE_DEFAULT_VIEW
         targets = [link(_HEATMAP_SOURCE_LABELS[s], location, metric, s, s == source) for s in HEATMAP_SOURCES]
+    elif view == "day" and day is not None and today is not None:
+        targets = []
+        prev_day, next_day = day - timedelta(days=1), day + timedelta(days=1)
+        if prev_day >= today - timedelta(days=days - 1):
+            targets.append(link(f"‹ {prev_day.month}/{prev_day.day}", location, metric, source, False, view, prev_day))
+        targets.append(link(
+            f"{day.month}/{day.day}({_WEEKDAYS[day.weekday()]})", location, metric, source, True, view, day))
+        if next_day <= today:
+            targets.append(link(f"{next_day.month}/{next_day.day} ›", location, metric, source, False, view, next_day))
     else:
         targets = [link(loc, loc, metric, source, loc == location) for loc in locations]
-    metrics = [link(_CLIMATE_METRIC_LABELS[m], location, m, source, m == metric) for m in CLIMATE_METRICS]
+    metrics = [link(_CLIMATE_METRIC_LABELS[m], location, m, source, m == metric, view, day) for m in CLIMATE_METRICS]
+    views = ""
+    if metric != "act":
+        views = '<div class="climate-switch">' + "".join(
+            link(_CLIMATE_VIEW_LABELS[v], location, metric, source, v == view, v, day) for v in CLIMATE_VIEWS
+        ) + "</div>"
     return (
         f'<div class="climate-switch">{"".join(metrics)}</div>'
+        f"{views}"
         f'<div class="climate-switch">{"".join(targets)}</div>'
     )
+
+
+def _climate_cell(day: date, hour: int, value: float | None, metric: str, now: datetime, unit: str) -> str:
+    """温度・湿度のマス1つ。まだ来ていない時間・記録なしは枠線だけ。"""
+    tip = f"{day.month}/{day.day} {hour}時台"
+    if day == now.date() and hour > now.hour:
+        return f'<div class="climate-cell cl-none" title="{tip}: まだ先です"></div>'
+    if value is None:
+        return f'<div class="climate-cell cl-none" title="{tip}: 記録なし"></div>'
+    return f'<div class="climate-cell {_climate_class(value, metric)}" title="{tip}: {value:.1f}{unit}"></div>'
 
 
 def render_home_climate_heatmap(
@@ -1067,8 +1147,13 @@ def render_home_climate_heatmap(
     days: int = 30,
     activity: dict[str, dict[str, list[int]]] | None = None,
     source: str = CLIMATE_DEFAULT_SOURCE,
+    view: str = CLIMATE_DEFAULT_VIEW,
+    day: date | None = None,
 ) -> str:
     """「くらし」ページの「過去30日の温度/湿度/動き」ヒートマップ。行=日付(新しい日が上)、列=0〜23時。
+
+    温度・湿度で`view="day"`のときは、`day`(無ければ今日)の1日分を拠点ごとに1行ずつ並べる
+    (行=記録のある拠点、`CLIMATE_SITES`の順)。同じ時間の拠点どうしを縦に見比べるための表示。
     (関数名に`home`が残っているのは、以前はホームにあったため。毎日見るものではないので移した)
 
     温度・湿度は1時間の平均(`df`=`load_hourly_climate`の結果。記録のない時間は枠線だけ)、
@@ -1085,6 +1170,11 @@ def render_home_climate_heatmap(
         return heading + '<p class="empty-note">温度・湿度の記録がまだありません</p>'
     if not is_activity and location not in present:
         location = present[0]
+    if not is_activity and view == "day":
+        return _render_climate_day_compare(
+            df, now, dashboard_path=dashboard_path, location=location, metric=metric,
+            days=days, source=source, present=present, day=day or now.date(),
+        )
     grid = (
         (activity or {}).get(source, {}) if is_activity else climate_hourly_grid(df, location, metric)
     )
@@ -1098,7 +1188,7 @@ def render_home_climate_heatmap(
         for hour in range(24):
             future = day == today and hour > now.hour
             value = values[hour] if values is not None else None
-            if future:
+            if is_activity and future:
                 cells.append(f'<div class="climate-cell cl-none" title="{day.month}/{day.day} {hour}時台: まだ先です"></div>')
             elif is_activity:
                 count = int(value or 0)
@@ -1106,13 +1196,8 @@ def render_home_climate_heatmap(
                 cells.append(
                     f'<div class="climate-cell hm-{_heatmap_level(count)}" title="{day.month}/{day.day} {hour}時台: {note}"></div>'
                 )
-            elif value is None:
-                cells.append(f'<div class="climate-cell cl-none" title="{day.month}/{day.day} {hour}時台: 記録なし"></div>')
             else:
-                cells.append(
-                    f'<div class="climate-cell cl-{_climate_level(value, metric)}" '
-                    f'title="{day.month}/{day.day} {hour}時台: {value:.1f}{unit}"></div>'
-                )
+                cells.append(_climate_cell(day, hour, value, metric, now, unit))
         label = f"{day.month}/{day.day}({_WEEKDAYS[day.weekday()]})"
         rows.append(f'<div class="climate-row"><span class="climate-day">{label}</span><div class="climate-cells">{"".join(cells)}</div></div>')
     ticks = "".join(f'<span style="left:{h / 24 * 100:.2f}%">{h}</span>' for h in (0, 6, 12, 18)) + '<span style="left:100%">24</span>'
@@ -1123,10 +1208,7 @@ def render_home_climate_heatmap(
         )
         subtitle = f"{_HEATMAP_SOURCE_LABELS[source]}・1時間ごとの回数(「今日の動き」と同じ数え方)"
     else:
-        legend = "".join(
-            f'<span><i style="background:var(--cl-{i})"></i>{html.escape(text)}</span>'
-            for i, text in enumerate(_CLIMATE_LEGENDS[metric])
-        ) + '<span><i style="border:1px dashed var(--border)"></i>記録なし</span>'
+        legend = _climate_legend(metric)
         subtitle = f"{location}・1時間ごとの平均(5分おきの記録から)"
     switch = _climate_switch(dashboard_path, location=location, metric=metric, source=source, locations=present)
     return (
@@ -1136,6 +1218,66 @@ def render_home_climate_heatmap(
         f'<div class="climate-axis heatmap-axis-ticks">{ticks}</div>'
         f'{"".join(rows)}'
         f'<div class="heatmap-legend">{legend}</div>'
+        "</div>"
+    )
+
+
+_CLIMATE_AXIS_TICKS = (
+    "".join(f'<span style="left:{h / 24 * 100:.2f}%">{h}</span>' for h in (0, 6, 12, 18)) + '<span style="left:100%">24</span>'
+)
+
+
+def _climate_legend(metric: str) -> str:
+    """温度・湿度の凡例(段階ごとの色と範囲+記録なし)。"""
+    prefix = _CLIMATE_CLASS_PREFIX[metric]
+    return "".join(
+        f'<span><i style="background:var(--{prefix}-{i})"></i>{html.escape(text)}</span>'
+        for i, text in enumerate(_CLIMATE_LEGENDS[metric])
+    ) + '<span><i style="border:1px dashed var(--border)"></i>記録なし</span>'
+
+
+def _render_climate_day_compare(
+    df: pd.DataFrame,
+    now: datetime,
+    *,
+    dashboard_path: str,
+    location: str,
+    metric: str,
+    days: int,
+    source: str,
+    present: list[str],
+    day: date,
+) -> str:
+    """「拠点を並べる」表示: `day`の1日分を、記録のある拠点ごとに1行ずつ(行=拠点、列=0〜23時)。
+    その日に記録が無い拠点も行は出し、マスを「記録なし」にする(拠点の並びが日によって変わらないように)。"""
+    unit = _CLIMATE_METRIC_UNITS[metric]
+    key = day.isoformat()
+    rows = []
+    for loc in present:
+        values = climate_hourly_grid(df, loc, metric).get(key)
+        cells = "".join(
+            _climate_cell(day, hour, values[hour] if values is not None else None, metric, now, unit)
+            for hour in range(24)
+        )
+        rows.append(
+            f'<div class="climate-row"><span class="climate-day">{html.escape(_climate_site_label(loc))}</span>'
+            f'<div class="climate-cells">{cells}</div></div>'
+        )
+    heading = (
+        f'<h2 id="climate-heatmap">{_CLIMATE_METRIC_LABELS[metric]}を拠点で比べる'
+        f"({day.month}/{day.day} {_WEEKDAYS[day.weekday()]})</h2>"
+    )
+    switch = _climate_switch(
+        dashboard_path, location=location, metric=metric, source=source, locations=present,
+        view="day", day=day, today=now.date(), days=days,
+    )
+    return (
+        f"{heading}"
+        f'<div class="climate">{switch}'
+        f'<div class="meta">{html.escape("拠点ごとの1時間の平均(5分おきの記録から)。前後の日は上のボタンで移動")}</div>'
+        f'<div class="climate-axis heatmap-axis-ticks">{_CLIMATE_AXIS_TICKS}</div>'
+        f'{"".join(rows)}'
+        f'<div class="heatmap-legend">{_climate_legend(metric)}</div>'
         "</div>"
     )
 
