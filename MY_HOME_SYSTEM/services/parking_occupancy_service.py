@@ -4,7 +4,7 @@
 Phase 0(実現性検討)の実装で、DB にもダッシュボードにもまだつながっていない。
 `tools/parking_occupancy_backfill.py` が NAS 上の NVR 録画を遡って読み、ここの関数で
 特徴量と在否を求めて CSV に書き出す。しきい値は昼・夜 × 車あり・なしのスクリーンショット
-4枚から決めた暫定値で、実機の録画で集めた特徴量を見て調整する前提。
+4枚から決め、実機の録画7日分(2026-11-17〜23、約9,600観測)で見直した(#1115)。
 
 判定の考え方(物体検出や学習モデルは使わない):
 
@@ -12,8 +12,8 @@ Phase 0(実現性検討)の実装で、DB にもダッシュボードにもま�
 * 車がない時だけ見える2つの領域(ROI)を見る。
     * 石畳: 目地のエッジが多い。昼も夜(IR)もエッジ密度がほぼ同じ値になる。
       車があるとルーフで隠れてエッジが減る。
-    * 床(コンクリート): 明るさがほぼ一様。車があると窓・ライト・ボディの明暗が入り、
-      中央値から大きく外れる画素が増える。
+    * 床(コンクリート): 明るい。車があるとリアガラスやボディで暗くなる。
+      平均の明るさで見る(車なし 106〜165 / 車あり 36〜78。夜の IR でも床は明るく写る)。
 * 2つの判定が一致した時だけ在/不在とし、食い違えば「不明」にする。
 * 1フレームの判定は乗り降りの人などで揺れるので、連続 N 回同じ結果になってから
   状態の変化として確定する(`build_events`)。
@@ -51,13 +51,16 @@ FLAGSTONE_ROI = Roi(0.52, 0.36, 0.78, 0.47)
 # 左の自転車置き場・奥の道路・右上の日時表示にはかからないように置いている。
 FLOOR_ROI = Roi(0.55, 0.60, 0.85, 0.79)
 
-# === 判定のしきい値(暫定。スクリーンショット4枚の実測から) ===
-# 石畳のエッジ密度: 車なし 0.22(昼・夜とも) / 車あり 0.09(昼)・0.02(夜)
+# === 判定のしきい値 ===
+# 石畳のエッジ密度: 車なし 0.20〜0.25(昼・夜とも) / 車あり 0.04〜0.13(昼)・0.01〜0.05(夜)
 FLAGSTONE_EDGE_ABSENT_MIN = 0.17   # これ以上なら「車なし」
 FLAGSTONE_EDGE_PRESENT_MAX = 0.13  # これ以下なら「車あり」
-# 床の外れ画素の割合: 車なし 0.01〜0.02 / 車あり 0.16(昼)・0.33(夜)
-FLOOR_OUTLIER_ABSENT_MAX = 0.06    # これ以下なら「車なし」
-FLOOR_OUTLIER_PRESENT_MIN = 0.10   # これ以上なら「車あり」
+# 床の平均の明るさ: 車なし 106〜165 / 車あり 36〜78
+FLOOR_MEAN_ABSENT_MIN = 100.0      # これ以上なら「車なし」
+FLOOR_MEAN_PRESENT_MAX = 85.0      # これ以下なら「車あり」
+# 床の外れ画素の割合(判定には使わず、記録だけする)。当初はこれで判定していたが、
+# 車を左・奥に寄せて停めると床の ROI が一様な暗いリアガラスで埋まって「車なし」に、
+# 夜の玄関灯で柱の影が床に落ちると「車あり」に誤判定した(#1115)。
 FLOOR_OUTLIER_DELTA = 40           # 中央値からこれより離れた画素を「外れ」と数える
 # 彩度の平均: IR(モノクロ)の夜は 4〜7 / カラーの昼は 25〜55
 IR_SATURATION_MAX = 12.0
@@ -85,6 +88,20 @@ FFMPEG_TIMEOUT_SECONDS = 300   # 1ファイル(10分の録画)の処理に許す
 
 class FrameExtractionError(RuntimeError):
     """録画を最後まで読めなかった(ffmpeg の失敗、または時間切れ)。"""
+
+    def __init__(self, message: str, returncode: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.returncode = returncode
+
+    @property
+    def unreadable(self) -> bool:
+        """ffmpeg 自身が読めないと答えた(何度読み直しても同じ)なら True。
+
+        時間切れで kill した場合(シグナルで終わるので負の値)は NAS が一時的に固まった
+        だけかもしれないので False にする。録画が細切れになった日には、映像が1コマも
+        入っていない録画ができる(ffmpeg は 234 などの正の値で終わる)。
+        """
+        return self.returncode is not None and self.returncode > 0
 
 
 @dataclass(frozen=True)
@@ -157,8 +174,7 @@ def compute_features(frame_bgr: np.ndarray) -> ParkingFeatures:
     flagstone = _crop(gray, FLAGSTONE_ROI)
     floor = _crop(gray, FLOOR_ROI)
 
-    # 明るさそのものではなく「中央値からどれだけ外れた画素があるか」を見る。
-    # 夜(IR)は床全体が暗く写るので、明るさのしきい値だと昼と夜で別の値が要る。
+    # 判定には使わない(FLOOR_OUTLIER_DELTA のコメント参照)。しきい値を見直す材料として記録する。
     floor_median = float(np.median(floor))
     floor_outlier = float((np.abs(floor.astype(np.int16) - floor_median) > FLOOR_OUTLIER_DELTA).mean())
 
@@ -188,7 +204,7 @@ def classify(features: ParkingFeatures) -> str:
     flagstone_vote = _vote(
         features.flagstone_edge, True, FLAGSTONE_EDGE_PRESENT_MAX, FLAGSTONE_EDGE_ABSENT_MIN)
     floor_vote = _vote(
-        features.floor_outlier, False, FLOOR_OUTLIER_ABSENT_MAX, FLOOR_OUTLIER_PRESENT_MIN)
+        features.floor_mean, True, FLOOR_MEAN_PRESENT_MAX, FLOOR_MEAN_ABSENT_MIN)
     if flagstone_vote == floor_vote:
         return flagstone_vote
     return STATE_UNKNOWN
@@ -240,7 +256,7 @@ def extract_frames(path: str, interval_seconds: int) -> Iterator[np.ndarray]:
             if returncode != 0:
                 stderr_file.seek(0)
                 tail = stderr_file.read()[-500:].decode("utf-8", errors="ignore").strip()
-                raise FrameExtractionError(f"{path} (returncode={returncode}) {tail}".strip())
+                raise FrameExtractionError(f"{path} (returncode={returncode}) {tail}".strip(), returncode)
         finally:
             watchdog.cancel()
             process.stdout.close()

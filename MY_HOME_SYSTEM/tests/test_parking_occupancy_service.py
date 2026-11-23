@@ -24,8 +24,11 @@ def _region(roi):
     return slice(int(roi.y0 * H), int(roi.y1 * H)), slice(int(roi.x0 * W), int(roi.x1 * W))
 
 
-def _frame(car: bool, night: bool, flagstone_hidden=None, floor_blocked=None) -> np.ndarray:
-    """合成フレーム。`flagstone_hidden`/`floor_blocked` で2つの領域を別々に切り替えられる。"""
+def _frame(car: bool, night: bool, flagstone_hidden=None, floor_blocked=None, floor_shadow=False) -> np.ndarray:
+    """合成フレーム。`flagstone_hidden`/`floor_blocked` で2つの領域を別々に切り替えられる。
+
+    `floor_shadow` は、日没後の玄関灯で柱の影が床に斜めに落ちた状態(車はない)。
+    """
     flagstone_hidden = car if flagstone_hidden is None else flagstone_hidden
     floor_blocked = car if floor_blocked is None else floor_blocked
     base = 110 if night else 160
@@ -40,11 +43,16 @@ def _frame(car: bool, night: bool, flagstone_hidden=None, floor_blocked=None) ->
         patch[::6, :] = 20
         patch[:, ::6] = 20
     ys, xs = _region(occupancy.FLOOR_ROI)
+    patch = frame[ys, xs]
     if floor_blocked:
-        # 車体: 床の領域の半分弱が暗い窓、一部が明るい反射
-        patch = frame[ys, xs]
-        patch[:, : patch.shape[1] // 3] = 15
-        patch[:10, :] = 250
+        # 車体: 床の領域がほぼ一様な暗いリアガラスで埋まり、上端に少し反射が入る
+        patch[:] = 30
+        patch[:6, :] = 200
+    elif floor_shadow:
+        # 柱の影: 床の領域の3割ほどが暗い斜めの帯になる
+        for i in range(patch.shape[0]):
+            start = i * patch.shape[1] // patch.shape[0]
+            patch[i, start:start + patch.shape[1] // 3] = 40
     return frame
 
 
@@ -63,6 +71,21 @@ class TestClassify:
         features = occupancy.compute_features(_frame(car, night))
         assert occupancy.classify(features) == expected
         assert features.is_ir is night
+
+    def test_床が一様な暗いガラスで埋まっても車ありと判定する(self):
+        # #1115: 車を左・奥に寄せて停めると、床の領域がリアガラスだけで埋まる。
+        # 以前の「外れ画素の割合」ではこれを何もない床と区別できなかった。
+        for night in (False, True):
+            features = occupancy.compute_features(_frame(True, night))
+            assert features.floor_outlier < 0.06  # 以前の判定なら「車なし」になる値
+            assert occupancy.classify(features) == P
+
+    def test_床に柱の影が落ちても車なしと判定する(self):
+        # #1115: 日没後に玄関灯で柱の影が床に斜めに落ちると、以前は「車あり」に誤判定した
+        # (実機ではこの時間帯はまだ IR に切り替わっておらず、カラーのまま)。
+        features = occupancy.compute_features(_frame(False, False, floor_shadow=True))
+        assert features.floor_outlier > 0.2  # 以前の判定なら「車あり」になる値
+        assert occupancy.classify(features) == A
 
     def test_2つの判定が食い違えば不明にする(self):
         # 石畳は見えているのに床には何かある(人が立っている等)
@@ -200,12 +223,23 @@ class TestExtractFrames:
         assert occupancy.build_frame_command("a.mp4", 60)[0] == "nice"
 
     def test_ffmpeg_が失敗したら読めた分を返した後で例外にする(self, monkeypatch):
-        _fake_popen(monkeypatch, [_frame(False, False)], returncode=1)
+        _fake_popen(monkeypatch, [_frame(False, False)], returncode=234)
 
         frames = occupancy.extract_frames("/rec/broken.mp4", 60)
         assert next(frames).shape == (H, W, 3)
-        with pytest.raises(occupancy.FrameExtractionError, match="/rec/broken.mp4"):
+        with pytest.raises(occupancy.FrameExtractionError, match="/rec/broken.mp4") as raised:
             next(frames)
+        # ffmpeg 自身が読めないと答えた(正の終了コード)ので、読み直しても無駄
+        assert raised.value.returncode == 234
+        assert raised.value.unreadable is True
+
+    def test_時間切れで強制終了した場合は読み直す余地を残す(self, monkeypatch):
+        _fake_popen(monkeypatch, [], returncode=-9)  # kill で終わると負の終了コード
+
+        with pytest.raises(occupancy.FrameExtractionError) as raised:
+            list(occupancy.extract_frames("/rec/a.mp4", 60))
+        assert raised.value.unreadable is False
+        assert occupancy.FrameExtractionError("x").unreadable is False
 
     def test_時間切れで_ffmpeg_を強制終了する見張りを掛け終われば外す(self, monkeypatch):
         _, process = _fake_popen(monkeypatch, [_frame(False, False)])
