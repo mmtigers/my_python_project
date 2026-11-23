@@ -12,6 +12,7 @@
 """
 import os
 import sys
+import time
 from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -909,6 +910,25 @@ class TestExternalLinkHealth:
         html = dashboard_page_service._render_external_links("/quest", "https://x.example/", None)
         assert "external-up" not in html and "external-down" not in html
         assert "稼働中" not in html and "停止中" not in html
+
+    def test_slow_check_does_not_hold_the_home_page(self, monkeypatch):
+        """外部サイトの応答待ちでホームの最初の描画を遅らせない(起動画面が長く出ていた原因)。
+        間に合わないリンクは「停止中」ではなく状態表示なしで出し、ページが数秒後に取り直す。"""
+        monkeypatch.setattr(home_status_service, "HOME_RENDER_BUDGET_SEC", 0.1)
+        monkeypatch.setattr(
+            home_status_service, "check_asa_note_health", lambda url: time.sleep(1.0) or "yorunote" not in url
+        )
+        started = time.monotonic()
+        res = self._home("/")
+        assert time.monotonic() - started < 0.9
+        body = res.text.split("</style>", 1)[1]
+        asa = body.split("あさノート", 1)[0].rsplit("<a ", 1)[1]
+        assert "external-up" not in asa and "external-down" not in asa
+        assert 'data-pending="1"' in res.text
+
+        time.sleep(1.2)  # 裏での確認が終わったあとの取り直し
+        res = self._home("/status")
+        assert "external-down" in res.text and 'data-pending="1"' not in res.text
 
     def test_health_is_cached_between_requests(self, monkeypatch):
         calls = []

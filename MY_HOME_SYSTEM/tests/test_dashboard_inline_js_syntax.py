@@ -140,3 +140,11 @@ def test_pages_reference_existing_assets(api_client, page, names):
         m = re.search(rf'(?:href|src)="(/dashboard/static/{re.escape(n)}\?v=\d+)"', html)
         assert m, f"{page} が {n} を参照していません"
         assert api_client.get(m.group(1)).status_code == 200
+
+
+def test_service_worker_uses_navigation_preload():
+    """SWが止まっている状態から開くと、SWの起動を待ってからページを取りに行くため起動画面が長引く。
+    Navigation Preload で SW の起動とページの取得を並行させる。"""
+    sw = (_STATIC / "sw.js").read_text(encoding="utf-8")
+    assert "navigationPreload.enable()" in sw
+    assert "event.preloadResponse" in sw

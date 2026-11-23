@@ -222,6 +222,78 @@ class TestNasReadsDoNotBlockThePage:
         assert home_status_service.cached_with_timeout("fast-test", loader) == "v"
         assert len(calls) == 1
 
+    def test_hung_read_is_not_waited_for_again(self):
+        """以前は時間切れをキャッシュしなかったため、NASが固まっている間はホームを開くたびに
+        毎回 `timeout` 秒ずつ待たされていた。2回目以降は最初の読み取りの続きを待つだけにする。"""
+        calls = []
+        loader = lambda: calls.append(1) or time.sleep(1.0) or "late"  # noqa: E731
+        assert home_status_service.cached_with_timeout("hung-test", loader, timeout=0.2) is None
+        started = time.monotonic()
+        assert home_status_service.cached_with_timeout("hung-test", loader, timeout=0.2) is None
+        assert time.monotonic() - started < 0.1
+        assert len(calls) == 1
+
+
+class TestRenderWithinBudget:
+    """ホームの組み立て(`render_within_budget`)。以前は材料を1つずつ順番に取っていたため、
+    キャッシュが切れていると外部サイト・NASの待ちが足し算になり、ホーム画面のアイコンから
+    開いたときの起動画面が10秒以上続くことがあった。"""
+
+    def test_loaders_run_concurrently(self):
+        def build():
+            return [home_status_service._cached(f"par-{i}", lambda i=i: time.sleep(0.3) or i) for i in range(3)]
+
+        started = time.monotonic()
+        values, pending = home_status_service.render_within_budget(build, budget_sec=1.0)
+        assert values == [0, 1, 2] and pending is False
+        assert time.monotonic() - started < 0.8  # 順番なら0.9秒以上
+
+    def test_slow_optional_material_does_not_hold_the_page(self):
+        def build():
+            return (
+                home_status_service._cached("db", lambda: "fresh"),
+                home_status_service._cached("external", lambda: time.sleep(1.0) or True, optional=True),
+                home_status_service.cached_with_timeout("nas", lambda: time.sleep(1.0) or ["x"]),
+            )
+
+        started = time.monotonic()
+        values, pending = home_status_service.render_within_budget(build, budget_sec=0.2)
+        assert time.monotonic() - started < 0.6
+        assert values == ("fresh", None, None) and pending is True
+
+    def test_db_material_is_always_waited_for(self):
+        """DB由来の材料は古い値・空のまま出さない(家の状態を誤って見せない)。"""
+        values, _ = home_status_service.render_within_budget(
+            lambda: home_status_service._cached("db-slow", lambda: time.sleep(0.4) or "fresh"), budget_sec=0.05
+        )
+        assert values == "fresh"
+
+    def test_recent_value_is_used_while_refreshing(self, monkeypatch):
+        home_status_service._cache["ext"] = (time.monotonic() - 120, "old")
+        values, pending = home_status_service.render_within_budget(
+            lambda: home_status_service._cached("ext", lambda: time.sleep(1.0) or "new", optional=True),
+            budget_sec=0.1,
+        )
+        assert values == "old" and pending is True
+
+    def test_too_old_value_is_not_used(self):
+        home_status_service._cache["ext-old"] = (
+            time.monotonic() - home_status_service.STALE_SERVE_MAX_SEC - 1, "very old"
+        )
+        values, _ = home_status_service.render_within_budget(
+            lambda: home_status_service._cached("ext-old", lambda: time.sleep(1.0) or "new", optional=True),
+            budget_sec=0.1,
+        )
+        assert values is None
+
+    def test_cleared_cache_is_not_refilled_by_an_old_refresh(self):
+        home_status_service.render_within_budget(
+            lambda: home_status_service._cached("late", lambda: time.sleep(0.3) or "v", optional=True), budget_sec=0.0
+        )
+        home_status_service.clear_status_cache()
+        time.sleep(0.5)
+        assert "late" not in home_status_service._cache
+
 
 # === 定期チェック(health_watch)の結果 ===
 

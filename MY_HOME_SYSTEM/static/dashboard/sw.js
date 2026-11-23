@@ -2,6 +2,7 @@
 // ページの読み込み(ナビゲーション)でサーバーに繋がらなかったとき、ブラウザのエラー画面の代わりに
 // 「接続できません」の案内を返す。ページやデータはキャッシュしない(古い家の状態を見せないため)。
 // ナビゲーション以外(CSS・JS・画像・API・映像)には一切関与しない。
+// ページの取得は Navigation Preload(activate で有効化)の結果を優先して使う。
 var OFFLINE_HTML = [
     "<!DOCTYPE html>",
     '<html lang="ja"><head><meta charset="utf-8">',
@@ -34,13 +35,22 @@ self.addEventListener("install", function () {
 });
 
 self.addEventListener("activate", function (event) {
-    event.waitUntil(self.clients.claim());
+    // Navigation Preload: Service Worker が止まっている状態からページを開くと、以前は
+    // 「SWの起動を待つ → それからサーバーへ取りに行く」の順になり、ホーム画面のアイコンから
+    // 開いたときの起動画面がその分長く出ていた。有効にすると、SWの起動と並行してブラウザが
+    // ページの取得を始め、SWはその結果(event.preloadResponse)をそのまま使う。
+    var enablePreload = self.registration.navigationPreload
+        ? self.registration.navigationPreload.enable().catch(function () {})
+        : Promise.resolve();
+    event.waitUntil(Promise.all([enablePreload, self.clients.claim()]));
 });
 
 self.addEventListener("fetch", function (event) {
     if (event.request.mode !== "navigate") { return; }
     event.respondWith(
-        fetch(event.request).catch(function () {
+        Promise.resolve(event.preloadResponse).then(function (preloaded) {
+            return preloaded || fetch(event.request);
+        }).catch(function () {
             return new Response(OFFLINE_HTML, {
                 status: 503,
                 headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },

@@ -212,6 +212,7 @@ def render_home_page(
     alerts_html: str = "",
     weather_html: str = "",
     stills_html: str = "",
+    pending: bool = False,
 ) -> str:
     """ホームページ。上から「いまの状態(サマリー)→ 今日の天気 → 見守りカード → カメラの写真 →
     今日の動き → 室温・くらし・システムのカード → よく使うリンク」の順に並べる。
@@ -225,11 +226,12 @@ def render_home_page(
     (`render_camera_stills`)・`heatmap_html`(`render_home_activity_heatmaps`)・外部リンクは
     すべて自動更新の範囲(`STATUS_SECTION_ID`)の内側にあり、カードと同じ周期で更新される。
     `link_health`を渡すと外部リンクに稼働状況(稼働中/停止中)を添える。
+    `pending`(取得が間に合わなかった材料がある)なら、自動更新が周期を待たずに数秒後に取り直す。
     """
     links_html = _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url)
     body = (
         "<h1>🏠 おうちの様子</h1>"
-        f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html, watch_extra_html=stills_html + heatmap_html, alerts_html=alerts_html, weather_html=weather_html)}'
+        f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html, watch_extra_html=stills_html + heatmap_html, alerts_html=alerts_html, weather_html=weather_html, pending=pending)}'
     )
     extra_head = _status_refresh_script(status_path, refresh_sec)
     if manifest_path is not None and icon_path is not None:
@@ -254,6 +256,11 @@ def _home_screen_install_head(manifest_path: str, icon_path: str) -> str:
 
 # 自動更新で差し替える範囲のid(ホームページ専用。旧・軽量ページの STATUS_SECTION_ID と同じ名前)。
 STATUS_SECTION_ID = home_status_service.STATUS_SECTION_ID
+# 取得が間に合わなかった材料(外部リンクの稼働チェック・NASの一覧)がある印。
+# 自動更新のスクリプトがこれを見て、周期(60秒)を待たずに数秒後に取り直す。
+_PENDING_ATTR = ' data-pending="1"'
+# 取り直しの間隔(ミリ秒)。まだ間に合っていなければ次の間隔で再度取り直し、尽きたら通常の周期に戻る。
+_PENDING_RETRY_DELAYS_MS = (1500, 4000, 10000)
 
 
 def _render_status_section(
@@ -266,12 +273,13 @@ def _render_status_section(
     watch_extra_html: str = "",
     alerts_html: str = "",
     weather_html: str = "",
+    pending: bool = False,
 ) -> str:
     # カメラの写真・今日の動きは「👀 見守り」グループ(実家・自宅・駐車場・カメラのカード)の直下に置く
     extras = {"watch": watch_extra_html} if watch_extra_html else None
     grid_html = home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path, group_extras=extras)
     return (
-        f'<div id="{STATUS_SECTION_ID}">'
+        f'<div id="{STATUS_SECTION_ID}"{_PENDING_ATTR if pending else ""}>'
         f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
         f"・{int(refresh_sec)}秒ごとに自動更新</p>"
         f"{alerts_html}"
@@ -296,6 +304,7 @@ def render_home_status_section(
     alerts_html: str = "",
     weather_html: str = "",
     stills_html: str = "",
+    pending: bool = False,
 ) -> str:
     """ホームページの自動更新用フラグメント(サマリー・天気・カード・カメラの写真・今日の動き・外部リンク)。
 
@@ -311,7 +320,7 @@ def render_home_status_section(
     return _render_status_section(
         cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec,
         extra_html=links_html, watch_extra_html=stills_html + heatmap_html,
-        alerts_html=alerts_html, weather_html=weather_html,
+        alerts_html=alerts_html, weather_html=weather_html, pending=pending,
     )
 
 
@@ -323,10 +332,24 @@ def _status_refresh_script(status_path: str, refresh_sec: int) -> str:
         f"var url = {json.dumps(status_path)};"
         f"var intervalMs = {int(refresh_sec) * 1000};"
         "var inFlight = false;"
+        f"var retryDelays = {json.dumps(list(_PENDING_RETRY_DELAYS_MS))};"
+        "var retryIndex = 0;"
+        "var retryTimer = null;"
+        # 取得が間に合わなかった材料があれば(data-pending)、周期を待たずに少し後で取り直す
+        "function schedulePendingRetry() {"
+        f'var section = document.getElementById("{STATUS_SECTION_ID}");'
+        "if (retryTimer || !section || !section.hasAttribute(\"data-pending\")) {"
+        "if (section && !section.hasAttribute(\"data-pending\")) { retryIndex = 0; }"
+        "return;"
+        "}"
+        "if (retryIndex >= retryDelays.length) { return; }"
+        "retryTimer = setTimeout(function () { retryTimer = null; update(); }, retryDelays[retryIndex++]);"
+        "}"
         "function apply(html) {"
         f'var section = document.getElementById("{STATUS_SECTION_ID}");'
         "if (!section) { return; }"
         "section.outerHTML = html;"
+        "schedulePendingRetry();"
         "}"
         "function update() {"
         "if (inFlight || document.hidden) { return; }"
@@ -344,6 +367,9 @@ def _status_refresh_script(status_path: str, refresh_sec: int) -> str:
         ".then(function () { inFlight = false; });"
         "}"
         "setInterval(update, intervalMs);"
+        'if (document.readyState === "loading") {'
+        'document.addEventListener("DOMContentLoaded", schedulePendingRetry);'
+        "} else { schedulePendingRetry(); }"
         'document.addEventListener("visibilitychange", function () {'
         "if (!document.hidden) { update(); }"
         "});"
