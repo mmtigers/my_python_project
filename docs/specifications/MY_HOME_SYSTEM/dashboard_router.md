@@ -152,7 +152,7 @@
 ### `GET {DASHBOARD_BASE_PATH}` / `GET {DASHBOARD_BASE_PATH}/` (`dashboard_home`)
 
 * **(2026-11-12 UX改善)** ホームの材料(サマリー・天気・カメラの写真・今日の動き・外部リンクの稼働状況)は`_home_status_parts(cards)`が1か所で作り、ページ本体(`render_home_page`)と自動更新フラグメント(`render_home_status_section`)の両方へ同じ辞書を渡す。`hm_loc`/`hm_metric`/`hm_src`が付いたURL(ヒートマップがホームにあった頃のブックマーク等)は、同じクエリのまま`{DASHBOARD_BASE_PATH}/life?...#climate-heatmap`へ302で送る。下の記述のうち、ホームでヒートマップを描画する部分・`dashboard_home`内で`collect_link_health`を直接呼ぶ部分は現在のコードには当てはまらない(`_home_status_parts`へ移動)。
-* 根拠: [関数定義] (行番号: 145 / 抜粋: "def _home_status_parts(cards) -> dict:")
+* 根拠: [関数定義] (行番号: 153 / 抜粋: "def _home_status_parts(cards) -> dict:")
 
 * **(新機能)** クエリパラメータ`hm_src`(`security`/`takasago`/`itami`。動きの対象)を追加し、`hm_metric`に`act`(動き)を加えた。不正な値は既定(防犯・温度)。`_home_climate_html`は選んでいる指標の分だけ読む(動きを選んだときだけ`home_status_service.get_hourly_activity`、温度・湿度のときは`get_hourly_climate`)。`/status`も同じ引数を受け取る。
 
@@ -171,7 +171,8 @@
 
 
 * **副作用**: `home_status_service.collect_status_cards()`経由でDBの読み取り(TTLキャッシュ付き)。**(新機能)** `home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)`でファミクエ・あさノート・よるノートの稼働チェック(DB読み取り・あさノートへのHTTP GET。TTL60秒のキャッシュ付き)を行い、結果を`render_home_page`の`link_health`に渡して外部リンクを色分けする。
-* 根拠: [関数呼び出し] (参照: dashboard_home / 抜粋: "cards, fetched_at = home_status_service.collect_status_cards()")、[稼働チェック] (参照: _home_status_parts / 抜粋: "\"link_health\": home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL),")
+* **(2026-11-23)** 材料は`home_status_service.render_within_budget(_collect_home_status)`で集める(取得を同時に進め、外部サイト・NASの待ちで最初の描画=PWAの起動画面を長引かせない)。間に合わなかった材料があれば`pending`を`render_home_page`に渡し、ページ側が数秒後に取り直す。`_collect_home_status()`は`collect_status_cards()`と`_home_status_parts(cards)`をまとめて返す関数で、ホーム本体と`/status`が共有する。
+* 根拠: [関数呼び出し] (参照: dashboard_home / 抜粋: "(cards, fetched_at, parts), pending = home_status_service.render_within_budget(_collect_home_status)")、`def _collect_home_status():` (行番号: 146)、[稼働チェック] (参照: _home_status_parts / 抜粋: "\"link_health\": home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL),")
 
 
 * **エラーハンドリング**: `tab`が`_LEGACY_TAB_REDIRECTS`に無い値の場合は`.get(tab, _BASE_PATH)`によりホームへフォールバックする(例外は送出しない)。
@@ -180,6 +181,9 @@
 
 
 ### `GET {DASHBOARD_BASE_PATH}/status` (`dashboard_status_fragment`)
+
+* **(2026-11-23)** ホーム本体と同じく`render_within_budget(_collect_home_status)`で材料を集め、`pending`を`render_home_status_section`に渡す。
+* 根拠: [関数呼び出し] (行番号: 213 / 抜粋: "    (cards, fetched_at, parts), pending = home_status_service.render_within_budget(_collect_home_status)")
 
 * **(2026-11-12 UX改善)** クエリパラメータ(`hm_loc`等)は受け取らなくなった。`render_home_status_section(cards, fetched_at, **_home_status_parts(cards))`を返す。
 
@@ -215,7 +219,7 @@
 
 
 * **引数/リクエスト**: **(新機能)** クエリ`device`(`device_id`、任意)で高砂・伊丹のセンサーログをその機器だけに絞る(`render_watch_page(selected_device=...)`に渡す。一覧に無い値は無視される。防犯ログは対象外)。クエリ`date`(`YYYY-MM-DD`、任意)。**(新機能)** 指定があれば`dashboard_page_service.parse_log_date`で解釈し、その日のログだけを表示する。この場合は共通キャッシュ(直近`MOBILE_SENSOR_ROW_LIMIT`件)ではなく`home_status_service.get_sensor_data_for_day`でDBから指定日の全件を取る。形式が不正な値は無視して通常表示になる。
-* 根拠: [関数定義] (行番号: 215 / 抜粋: "def dashboard_watch(")、[日付の解釈] (行番号: 229 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
+* 根拠: [関数定義] (行番号: 223 / 抜粋: "def dashboard_watch(")、[日付の解釈] (行番号: 237 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(見守りページ全体のHTML)
@@ -235,7 +239,7 @@
 
 * **(新機能)** クエリ`hm_view`(`days`=30日の推移/`day`=拠点を並べる)・`hm_date`(並べる日)も受け取り、`dashboard_page_service.parse_climate_view`/`parse_climate_date`(過去`CLIMATE_DAYS`日の範囲外・不正な値は今日)で解釈して`render_home_climate_heatmap`の`view`/`day`に渡す。
 * **(2026-11-12 UX改善)** クエリ`hm_loc`/`hm_metric`/`hm_src`を受け取り、`_climate_heatmap_html`(旧`_home_climate_html`)の出力を`render_life_page`の`climate_html`に渡す(過去30日ヒートマップをホームから移した)。
-* 根拠: [関数定義] (行番号: 176 / 抜粋: "def _climate_heatmap_html(")
+* 根拠: [関数定義] (行番号: 184 / 抜粋: "def _climate_heatmap_html(")
 
 * **役割**: 💡くらしページを返す。`collect_status_cards()`のカードのうち`life`グループだけを`dashboard_page_service.render_life_page`で描画する。**(不具合修正)** `get_cached_materials()`も呼び、`materials.daily_cost_rows`(日別の電気代推移)を渡すようにした。電気代カードをタップしても意味のある詳細が無かった不具合の修正。
 * 根拠: [ルート定義] (行番号: 141〜149 / 抜粋: '@router.get(f"{_BASE_PATH}/life", include_in_schema=False)\ndef dashboard_life() -> HTMLResponse:')
@@ -262,20 +266,20 @@
 
 * **役割**: **(新機能)** ⚡電気ページ。`power_analysis_service.build_power_report(days)`の結果を`power_page_service.render_power_page`で描く(月ごとの推移・日別の電気代・気温との関係・テレビの使い方)。分析は10分キャッシュされる。`async def`にしない(DB取得とpandasの計算が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`days`(30/60/90。それ以外の値・数値でない値は既定の30。`str | None`で受けて自前で変換するので422にならない)。日別・気温・テレビの対象期間を切り替える。
-* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 332)
+* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 340)
 
 ### `GET {DASHBOARD_BASE_PATH}/updates` (`dashboard_updates`)
 
 * **役割**: **(新機能)** アップデートページを返す。`release_history_service.get_release_history()`でダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を集め、`dashboard_page_service.render_updates_page`に渡す。あさノート・よるノートは外部から取得する(タイムアウト・キャッシュ付き。失敗しても残りのアプリは表示する)。`async def`にしない(外部取得が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`app`(`dashboard`/`quest`/`asa`/`yoru`、任意)で1アプリに絞る。未知の値は無視して全件。
-* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 347)
+* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 355)
 
 ### `GET {DASHBOARD_BASE_PATH}/sys` (`dashboard_sys`)
 
 * **(2026-11-12 UX改善)** `home_status_service.read_health_result(now)`(毎時の定期チェックの結果)を`render_sys_page`の`health`に渡す。
 
 * **(新機能)** `render_sys_page`に`log_groups=log_download_service.list_log_groups()`を渡し、ログのダウンロード欄(ローテーション分をまとめたチェックボックス)を表示する。
-* 根拠: (行番号: 295 / 抜粋: "log_groups=log_download_service.list_log_groups(),")
+* 根拠: (行番号: 303 / 抜粋: "log_groups=log_download_service.list_log_groups(),")
 
 * **(新機能・起動履歴)** `system_info_service.get_boot_history()`の結果を`render_sys_page(boot_history=...)`に渡し、システムページに「サーバーの起動履歴」を出す。Gitの状態は含めない(ページ表示後にJSが`GET /api/system/git/status`から取得する)。
 
@@ -303,7 +307,7 @@
 ### `GET {DASHBOARD_BASE_PATH}/sys/logs` (`dashboard_download_logs`)
 
 * **役割**: システムページの「ログのダウンロード」でチェックしたログ(複数可)を、機密情報を伏せて1つのテキストにしてダウンロードさせる。`group`クエリ(複数指定可)は一覧のチェックボックスの値(ローテーション分をまとめたグループ名)で、`log_download_service.resolve_log_groups`が列挙した一覧との完全一致でしか解決しない(パス・`..`・`.log.1`の名前は一覧に無いので404)。選択した内容の見積もり合計が`config.LOG_DOWNLOAD_MAX_TOTAL_MB`を超える場合は413。本文は`read_groups_for_download`のマスク済みテキストで、`Content-Disposition: attachment`(保存名は`download_filename`)・`Cache-Control: no-store`・`text/plain; charset=utf-8`で返す。認証は設けず、既存のダッシュボードと同じネットワーク制御(LAN/Tailscale限定のFW、外部はCloudflare Access)に委ねる。
-* 根拠: [関数定義] (行番号: 302〜328 / 抜粋: "def dashboard_download_logs(group: list[str] = Query(default=[])) -> Response:")
+* 根拠: [関数定義] (行番号: 310〜336 / 抜粋: "def dashboard_download_logs(group: list[str] = Query(default=[])) -> Response:")
 
 * **引数/リクエスト**: クエリパラメータ`group: list[str]`(ページのフォームがチェックされた分だけ送る)
 * **戻り値/レスポンス**: 200で添付ファイル(`Response`)。未選択は400、一覧に無い名前は404、合計サイズ超過は413(いずれも`HTTPException`)
