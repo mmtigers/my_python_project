@@ -27,6 +27,8 @@ export interface ChronicleItem {
     text?: string;
     gold?: number;
     exp?: number;
+    // type='routine'(すごろくの区間まとめ)のときだけ付く、できた項目の一覧(例: "朝ごはん・歯磨き")
+    detail?: string;
 }
 
 export interface LevelUpInfo {

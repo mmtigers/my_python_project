@@ -160,6 +160,9 @@
 
 ### `get_live_stream` (`GET /live/{camera_id}/stream.m3u8`)
 
+* **(2026-11-12 UX改善)** セグメント配信(`get_live_segment`、`GET /live/{camera_id}/{segment_file}`)は、カメラの存在確認のあと`camera_service.touch_live(camera_id)`を呼んで「視聴中」として記録する(視聴が60秒途絶えるとライブ用ffmpegは自動で止まる。`camera_service.stop_idle_live_streams`)。プレイリスト側は`start_hls_stream`の中で同じ記録が行われる。
+* 根拠: [関数定義] (行番号: 155 / 抜粋: "def get_live_segment(camera_id: str, segment_file: str):")
+
 * **役割**: 指定カメラIDのライブHLSストリーム生成を `camera_service.start_hls_stream` に依頼し、プレイリストファイル(.m3u8)が生成されるまで最大5秒待機したうえでファイルレスポンスを返す。**（Issue #551で修正）** カメラ設定のルックアップは`_require_camera(camera_id)`呼び出しに置き換わった（挙動は変わらず、404送出のタイミング・条件は従来と同一）。**（Issue #457で修正）** 以前は同期`def`エンドポイントとして実装され、`camera_service.start_hls_stream`（ffmpeg起動等のブロッキング処理を含む）を直接呼び出し、待機ループも`time.sleep(0.5)`（同期）で実装されていたため、その間サーバーの共有スレッドプールのワーカースレッドを占有し続け、同時アクセス集中時に他リクエストの遅延要因になっていた。現在は`async def`エンドポイントに変更され、`start_hls_stream`の呼び出しは`asyncio.to_thread`でスレッドプールへオフロードし、待機ループも`await asyncio.sleep(0.5)`に変更してイベントループを他リクエストへ譲るようになった。
 * 根拠: [エンドポイント定義とDocstring] (行番号: 67〜87 / 抜粋: "async def get_live_stream(camera_id: str):\n    """ライブHLSプレイリスト（.m3u8）の取得"""\n    cam_conf = _require_camera(camera_id)")、[オフロード呼び出し] (行番号: 71〜73 / 抜粋: "# #457: start_hls_stream はffmpeg起動等のブロッキング処理を含むため、\n    # イベントループを止めないようスレッドプールへオフロードする。\n    playlist_path = await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)")
 

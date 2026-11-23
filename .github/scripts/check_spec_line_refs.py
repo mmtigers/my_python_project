@@ -44,7 +44,9 @@ Issue #550 の分割後は存在しない行範囲を指すものまで残って
   決まるので、そちらは対象に含める
   （ただし抜粋の先頭行がソース内で一意なら、その行が引用範囲の**中に**あることだけは
   検証する — `_range_containment`、Issue #950。正しい引用は必ず含むので誤検知にならず、
-  範囲がずれて抜粋を含まなくなったことを検知できる。--fix では書き換えない）
+  範囲がずれて抜粋を含まなくなったことを検知できる。--fix だけでは書き換えないが、
+  `--fix --base <rev>` を付けると、ベースのソースで抜粋が範囲の何行目にあったかを
+  保ったまま範囲を平行移動する — `_base_range_shift`、Issue #1114）
 - 8文字未満の短い抜粋（`return` 等。偶然の一致が多い）
 - 同名の定義が複数あり、直前の `### `クラス名.メソッド名`` 見出しでも一意化できないもの
 - `行番号: A, B / 抜粋: "s1", "s2"` のように要素数が一致する並列引用は、位置対応で
@@ -60,6 +62,8 @@ scan_symbol_references が検証する。こちらは Python に加えてシェ�
 
     python3 .github/scripts/check_spec_line_refs.py            # 検証(不一致があれば exit 1)
     python3 .github/scripts/check_spec_line_refs.py --fix      # 一致するよう行番号を書き換える
+    python3 .github/scripts/check_spec_line_refs.py --fix --base "$(git merge-base origin/master HEAD)"
+                                                               # 範囲引用のずれも、ベースとの差分で追従する
 
 CI では test.yml の lint ジョブから `pytest .github/scripts/` 経由で
 `test_check_spec_line_refs.py` が呼び出す。失敗した場合は `--fix` を実行し、
@@ -73,6 +77,8 @@ import argparse
 import ast
 import collections
 import re
+# 固定引数の git show だけを呼ぶ(_base_source_lines)
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
@@ -513,12 +519,66 @@ def _spec_expects_python_source(spec: Path) -> bool:
     return spec.stem not in shell_index
 
 
-def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) -> Tuple[List[Finding], int]:
+RANGE_SHIFTED = "抜粋の行が引用範囲の外にある(範囲がずれている)"
+RANGE_SHIFTED_BASE = "抜粋の行が引用範囲の外にある(範囲がずれている。--base との差分で追従できる)"
+
+
+def _base_source_lines(source: Path, base: str, cache: Dict[Path, Optional[List[str]]]) -> Optional[List[str]]:
+    """`base` 時点の `source` の行を返す。git で取れなければ(新規ファイル等) None。"""
+    if source not in cache:
+        rel = source.relative_to(REPO_ROOT).as_posix()
+        try:
+            # 引数は固定の git コマンドとリポジトリ内パスだけ
+            out = subprocess.run(  # nosec B603 B607
+                ["git", "show", "%s:%s" % (base, rel)],
+                cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+            ).stdout
+            cache[source] = out.splitlines()
+        except (OSError, subprocess.CalledProcessError):
+            cache[source] = None
+    return cache[source]
+
+
+def _base_range_shift(
+    snippet: str, cited: str, line_no: int, base_lines: Optional[List[str]]
+) -> Optional[Tuple[int, int]]:
+    """範囲がずれた引用の、追従先の範囲 `(開始, 終了)` を返す(Issue #1114)。
+
+    `_range_containment` が「ずれた」と判定した引用は、抜粋が範囲の先頭とは限らない
+    ため現在のソースだけでは書き換え先が決まらない。ベースのソースで抜粋が範囲内の
+    何行目(範囲の先頭からのオフセット)にあったかが分かれば、それを保ったまま
+    範囲を平行移動できる。ベースでも抜粋が一意で、かつ範囲内にあった(＝ベースでは
+    正しい引用だった)ときだけ返し、それ以外は推測せず None(手で直す)にする。
+    """
+    if base_lines is None:
+        return None
+    head = _literal_head(snippet)
+    bounds = [int(v) for v in re.findall(r"\d+", cited)]
+    if head is None or len(bounds) != 2:
+        return None
+    lo, hi = bounds
+    base_line = _unique_literal_line(head, base_lines)
+    if base_line is None or not lo <= base_line <= hi:
+        return None
+    new_lo = line_no - (base_line - lo)
+    if new_lo < 1:
+        return None
+    return new_lo, new_lo + (hi - lo)
+
+
+def scan(
+    fix: bool = False,
+    skipped: Optional[List[Tuple[Path, str]]] = None,
+    base: Optional[str] = None,
+) -> Tuple[List[Finding], int]:
     """全仕様書を走査する。戻り値は (不一致の一覧, 検証できた引用の総数)。
 
     `skipped` を渡すと、対応ソースを一意に決められず検証できなかった仕様書を
     (パス, 理由) で追記する(Issue #655: 以前はこれを無言で捨てていた)。
+    `base`(git のリビジョン)を渡すと、範囲引用のずれもベースとの差分から
+    追従先を求めて書き換え対象にする(`_base_range_shift`、Issue #1114)。
     """
+    base_cache: Dict[Path, Optional[List[str]]] = {}
     index = _source_index()
     findings: List[Finding] = []
     checked = 0
@@ -650,10 +710,24 @@ def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) ->
                             line_no, lo, hi = contained
                             if lo <= line_no <= hi:
                                 continue
+                            shifted = None
+                            if base is not None:
+                                shifted = _base_range_shift(
+                                    snippet, cited, line_no, _base_source_lines(source, base, base_cache)
+                                )
+                            if shifted is None:
+                                findings.append(Finding(
+                                    spec, idx + 1, _literal_head(snippet) or "", cited, line_no,
+                                    RANGE_SHIFTED,
+                                ))
+                                continue
+                            sep = re.search(r"[〜~-]", cited)
                             findings.append(Finding(
-                                spec, idx + 1, _literal_head(snippet) or "", cited, line_no,
-                                "抜粋の行が引用範囲の外にある(範囲がずれている)",
+                                spec, idx + 1, _literal_head(snippet) or "", cited, shifted[0],
+                                RANGE_SHIFTED_BASE, shifted[1],
                             ))
+                            new_items[pos] = "%d%s%d" % (shifted[0], sep.group(0), shifted[1])
+                            touched = True
                             continue
                         start_line, end_line = target
                         checked += 1
@@ -1289,6 +1363,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         type=Path,
         help="指定した仕様書の「ずれている行番号引用」を、見出しのシンボルが確かめられるものに限り `参照: シンボル` へ書き換える(Issue #950)",
     )
+    parser.add_argument(
+        "--base",
+        metavar="REV",
+        help="範囲引用のずれを、このリビジョン(例: merge-base)での抜粋の位置との差分から追従させる。--fix と併用(Issue #1114)",
+    )
     args = parser.parse_args(argv)
 
     if args.to_symbol_refs:
@@ -1324,11 +1403,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     skipped: List[Tuple[Path, str]] = []
-    findings, checked = scan(fix=args.fix, skipped=skipped)
+    findings, checked = scan(fix=args.fix, skipped=skipped, base=args.base)
     if args.fix:
         # 書き換え後に残るのは「定義そのものが見つからない」＝手で直すしかないもの
         skipped = []
-        findings, checked = scan(fix=False, skipped=skipped)
+        findings, checked = scan(fix=False, skipped=skipped, base=args.base)
 
     for spec, reason in skipped:
         print("⚠️ 検証をスキップ: %s (%s)" % (spec.relative_to(REPO_ROOT), reason))
@@ -1374,8 +1453,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     for finding in findings:
         print("  - " + finding.describe())
     print()
-    print("`python3 .github/scripts/check_spec_line_refs.py --fix` で行番号を実位置へ揃えられます。")
-    print("「定義がソースに存在しない」ものは改名・削除が原因のため、仕様書の記述自体を直してください。")
+    # 案内は種別ごとに分ける(Issue #1114)。以前は一律に「--fix で揃えられます」と
+    # 出していたため、範囲引用のずれのように --fix で直らないものまで直せるように
+    # 読めてしまい、実行しても直らない理由が分からなかった。
+    fixable = sum(1 for f in findings if f.reason in ("定義位置がずれている", "抜粋の位置がずれている"))
+    base_fixable = sum(1 for f in findings if f.reason == RANGE_SHIFTED_BASE)
+    range_shifted = sum(1 for f in findings if f.reason == RANGE_SHIFTED)
+    missing = sum(1 for f in findings if f.reason == "この名前の定義がソースに存在しない(改名/削除された可能性)")
+    if fixable:
+        print("`python3 .github/scripts/check_spec_line_refs.py --fix` で行番号を実位置へ揃えられます(%d件)。" % fixable)
+    if base_fixable:
+        print("範囲引用のずれ(%d件)は `--fix --base %s` で追従できます。" % (base_fixable, args.base))
+    if range_shifted:
+        if args.base:
+            print("範囲引用のずれ(%d件)は --base %s でも追従先を決められません(ベースでも抜粋が範囲外/一意でない等)。"
+                  "抜粋の実位置に合わせて、引用範囲を手で直してください。" % (range_shifted, args.base))
+        else:
+            print("範囲引用のずれ(%d件)は --fix だけでは直せません。"
+                  '`--fix --base "$(git merge-base origin/master HEAD)"` で、ベースとの差分から追従できる場合があります'
+                  "(できないものは引用範囲を手で直してください)。" % range_shifted)
+    if missing:
+        print("「定義がソースに存在しない」もの(%d件)は改名・削除が原因のため、仕様書の記述自体を直してください。" % missing)
     return 1
 
 

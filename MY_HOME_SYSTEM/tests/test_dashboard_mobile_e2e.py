@@ -220,23 +220,41 @@ class TestHomePageLayout:
         )
         assert len(set(tops)) < len(tops), f"すべて別の段に並んでいる(1列になっている): {tops}"
 
-    def test_there_is_no_alert_summary_line(self, home_page):
-        """不具合修正の回帰テスト: 「気になること」要約行は要望により削除された。
-        カード自体の色(赤・黄)で判断できるため、要約行を復活させないこと。"""
-        assert home_page.locator("p.alerts").count() == 0
+    def test_summary_line_is_the_first_thing_and_says_all_normal(self, home_page):
+        """ホーム最上部に「いまの状態」の1行を置く(UX改善レビューで再導入)。
+
+        以前の「気になること」要約行は要望により削除された(黄色の「静か」等まで並び、毎回埋まって
+        意味を失っていたため)。再導入にあたり、数えるのは赤(異常)のカードと定期チェックの異常だけに
+        絞ってある。データの無い状態(このテストの空DB)では灰色のカードしか無いので「すべて正常」になる
+        = 灰色・黄色で要約行が埋まらないことの確認を兼ねる。"""
+        summary = home_page.locator(".home-summary")
+        assert summary.count() == 1
+        assert "すべて正常です" in summary.inner_text()
+        first_card_top = home_page.locator("a.status-card").first.bounding_box()["y"]
+        assert summary.bounding_box()["y"] < first_card_top
 
     def test_the_cards_are_html_not_raw_tags(self, home_page):
         """#807 と同じ失敗(生のタグ文字列が画面に出る)をしていないこと。"""
         body_text = home_page.inner_text("body")
         assert "<div" not in body_text and "status-card" not in body_text
 
-    def test_nav_cards_link_to_the_four_pages(self, home_page):
-        """項目1: 見守り/くらし/システム/アップデートへのナビカードがあること。"""
-        nav = home_page.locator("a.nav-card")
+    def test_bottom_nav_links_to_the_four_pages(self, home_page):
+        """ページ間の移動は下部ナビに一本化した(ホーム下部の「メニュー」カードは重複のため廃止)。"""
+        assert home_page.locator("a.nav-card").count() == 0
+        nav = home_page.locator("nav.bottom-nav a")
         assert nav.count() == 4
         for i in range(nav.count()):
             box = nav.nth(i).bounding_box()
             assert box is not None and box["height"] >= 44
+
+    def test_theme_toggle_is_tappable_and_does_not_cover_the_title(self, home_page):
+        toggle = home_page.locator("#themeToggle").bounding_box()
+        title = home_page.locator("h1").first
+        assert toggle["height"] >= 44
+        text_right = title.evaluate(
+            "el => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().right; }"
+        )
+        assert text_right <= toggle["x"], "見出しの文字がテーマ切替ボタンの下に潜っている"
 
     def test_tap_targets_are_large_enough(self, home_page):
         heights = home_page.eval_on_selector_all(
@@ -288,7 +306,8 @@ class TestHomePageDarkMode:
 
 
 class TestSubPagesLayout:
-    """項目1: 各サブページに「ホームへ戻る」ボタンがあり、横はみ出しが無いこと。"""
+    """各サブページからホームへ戻れ(下部ナビ)、横はみ出しが無いこと。
+    下部ナビに無いページ(電気・アップデート)は、上部に親ページへ戻るリンクを持つ。"""
 
     @pytest.mark.parametrize("path,heading", [("watch", "見守り"), ("life", "くらし"), ("sys", "システム"), ("updates", "アップデート"), ("power", "電気")])
     def test_subpage_has_a_back_link_and_no_sideways_scroll(self, browser, dashboard_server, artifact_dir, path, heading):
@@ -297,7 +316,8 @@ class TestSubPagesLayout:
         page = context.new_page()
         try:
             page.goto(f"{base_url}{base_path}/{path}", wait_until="networkidle", timeout=60_000)
-            assert page.locator("a.back-link", has_text="ホームへ戻る").count() == 1
+            assert page.locator(f'nav.bottom-nav a[href="{base_path}/"]').count() == 1
+            assert page.locator("a.back-link").count() == (1 if path in ("updates", "power") else 0)
 
             overflow = page.evaluate(
                 "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"

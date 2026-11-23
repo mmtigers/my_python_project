@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash deploy/claude-skills/install.sh --check --only-drift 2>&1 | grep -v '^up-to-date' || true",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/deploy/claude-skills/install.sh\" --check --only-drift 2>&1 | grep -v '^up-to-date' || true",
             "timeout": 10,
             "statusMessage": "共通Skillsの同期を確認中..."
           }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/spec_drift_reminder.py record 2>/dev/null || true",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/spec_drift_reminder.py\" record || true",
             "timeout": 15,
             "statusMessage": "仕様書ドリフト追跡を更新中..."
           }
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/spec_drift_reminder.py report 2>/dev/null || true",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/spec_drift_reminder.py\" report || true",
             "timeout": 15,
             "statusMessage": "仕様書ドリフトを確認中..."
           }

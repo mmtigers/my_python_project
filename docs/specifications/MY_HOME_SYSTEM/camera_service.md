@@ -72,18 +72,18 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `ONVIFCamera` (onvifライブラリ) | `create_media_service`, `GetProfiles`, `create_type`, `GetStreamUri` 等のメソッドの内部実装・通信プロトコル詳細は本ファイルからは不明。 | 根拠: [ONVIFCameraの利用箇所] (行番号: 154 / 抜粋: "mycam = ONVIFCamera(cam_conf['ip'], cam_conf.get('port', 80), cam_conf['user'], cam_conf.get('pass', ''), wsdl_dir=wsdl_path)") |
+| `ONVIFCamera` (onvifライブラリ) | `create_media_service`, `GetProfiles`, `create_type`, `GetStreamUri` 等のメソッドの内部実装・通信プロトコル詳細は本ファイルからは不明。 | 根拠: [ONVIFCameraの利用箇所] (行番号: 165 / 抜粋: "mycam = ONVIFCamera(cam_conf['ip'], cam_conf.get('port', 80), cam_conf['user'], cam_conf.get('pass', ''), wsdl_dir=wsdl_path)") |
 | `config` | `config.NVR_RECORD_DIR`の値、`config.DEVICES_JSON_PATH`が指す実際のファイルパス、`config.CAMERAS`の実データがどのように設定されているか（環境変数、設定ファイル等）が本ファイルからは不明。 | 根拠: [config参照] (参照: get_record_start_offset / 抜粋: "nvr_base_dir = config.NVR_RECORD_DIR") |
 | `setup_logging` | 生成されるロガーの出力先・フォーマット・ログレベルの詳細が不明。 | 根拠: [ロガー生成] (行番号: 22 / 抜粋: "logger = setup_logging(\"camera_service\")") |
 | `ffmpeg` / `nice` (外部コマンド) | `subprocess.Popen`で起動される外部コマンドの内部動作・エラー時の終了コード仕様は本ファイルの管理対象外。 | 根拠: [Popen呼び出し] (行番号: 265, 451 / 抜粋: "\"nice\", \"-n\", str(FFMPEG_NICE_LEVEL),")（Issue #451でnice値をハードコード文字列から`FFMPEG_NICE_LEVEL`定数へ変更） |
-| `devices.json` (外部ファイル) | `set_camera_enabled`が読み書きする対象であり、既存カメラエントリの正確なJSON構造・件数は本ファイルからは不明。 | 根拠: [devices.json読み書き] (行番号: 331 / 抜粋: "if not os.path.exists(config.DEVICES_JSON_PATH):") |
+| `devices.json` (外部ファイル) | `set_camera_enabled`が読み書きする対象であり、既存カメラエントリの正確なJSON構造・件数は本ファイルからは不明。 | 根拠: [devices.json読み書き] (行番号: 418 / 抜粋: "if not os.path.exists(config.DEVICES_JSON_PATH):") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `_state_lock`（Issue #439で追加）
 
 * **役割**: `_active_processes`（ライブ配信プロセス）・`_rtsp_cache`（RTSP URLキャッシュ）のモジュールレベル辞書を保護するグローバルロック（以前は VOD プロセスの `_active_vod_processes` も保護していたが、Issue #1091 で VOD 生成ごと撤去）。FastAPIの同期エンドポイント（スレッドプール実行）から複数スレッドで同時に読み書きされうるため、個々のdict操作自体はGILにより原子的でも「チェックしてから更新する」までの一連の操作は原子的でなかったことへの対応として追加された。
-* 根拠: [変数定義とコメント] (行番号: 67 / 抜粋: "# 読み書きの一連の操作をこのLockで保護する。\n_state_lock = threading.Lock()")
+* 根拠: [変数定義とコメント] (行番号: 77 / 抜粋: "# 読み書きの一連の操作をこのLockで保護する。\n_state_lock = threading.Lock()")
 
 
 * **引数/リクエスト**: 該当なし
@@ -108,11 +108,11 @@
 ### `_mask_rtsp_url_for_log`
 
 * **役割**: RTSP URLに含まれる認証情報(user:pass)をログ出力用にマスクする。`urlparse`でnetloc部分のみを`***@host`（パスワードなし）または`***:***@host`（パスワードあり）に置換して再構築する。ユーザー名・パスワードのいずれも含まれないURLはそのまま返す。
-* 根拠: [関数定義とDocstring] (行番号: 115〜119 / 抜粋: "'***'を挿入して破壊する(Pythonの仕様)ため、urlparseでnetloc部分のみ")
+* 根拠: [関数定義とDocstring] (行番号: 125〜129 / 抜粋: "'***'を挿入して破壊する(Pythonの仕様)ため、urlparseでnetloc部分のみ")
 
 
 * **引数/リクエスト**: `url: str`
-* 根拠: [引数定義] (行番号: 114 / 抜粋: "def _mask_rtsp_url_for_log(url: str) -> str:")
+* 根拠: [引数定義] (行番号: 125 / 抜粋: "def _mask_rtsp_url_for_log(url: str) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（マスク済みURL。パース処理中に例外が発生した場合は固定文字列`"***"`）
@@ -129,19 +129,19 @@
 ### `init_output_dir`
 
 * **役割**: `base_dir/camera_id` のディレクトリを作成（既存の場合はそのまま）し、そのパスを返す。
-* 根拠: [関数定義] (行番号: 131〜134 / 抜粋: "def init_output_dir(base_dir: str, camera_id: str) -> str:")
+* 根拠: [関数定義] (行番号: 142〜145 / 抜粋: "def init_output_dir(base_dir: str, camera_id: str) -> str:")
 
 
 * **引数/リクエスト**: `base_dir: str`, `camera_id: str`
-* 根拠: [引数定義] (行番号: 131 / 抜粋: "def init_output_dir(base_dir: str, camera_id: str) -> str:")
+* 根拠: [引数定義] (行番号: 142 / 抜粋: "def init_output_dir(base_dir: str, camera_id: str) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（作成済みディレクトリの絶対/相対パス）
-* 根拠: [戻り値] (行番号: 134 / 抜粋: "return cam_dir")
+* 根拠: [戻り値] (行番号: 145 / 抜粋: "return cam_dir")
 
 
 * **副作用**: ディレクトリ作成(`os.makedirs`, `exist_ok=True`)。
-* 根拠: [makedirs呼び出し] (行番号: 133 / 抜粋: "os.makedirs(cam_dir, exist_ok=True)")
+* 根拠: [makedirs呼び出し] (行番号: 144 / 抜粋: "os.makedirs(cam_dir, exist_ok=True)")
 
 
 * **エラーハンドリング**: なし（`os.makedirs`が権限エラー等で例外を送出した場合、呼び出し元に伝播する）
@@ -156,11 +156,11 @@
 ### `get_rtsp_url`
 
 * **役割**: カメラのRTSP URLを取得する。キャッシュ(`_rtsp_cache`)、設定内の直接指定(`rtsp_url`)、ONVIF経由の動的取得の順に解決を試み、ONVIF取得時は認証情報をURLエンコードして埋め込んだURIを構築する。**（Issue #439で修正）** `_rtsp_cache`への読み書きはいずれも`_state_lock`を保持した状態で行うよう修正された。ただし低速なONVIFネットワーク通信自体（`ONVIFCamera`接続からストリームURI取得まで）は`_state_lock`を保持したままでは行わず、通信完了後にロックを取得してキャッシュへ書き込む設計になっている（ロック保持中に外部通信でブロックし他スレッドを長時間待たせないため）。
-* 根拠: [関数定義] (行番号: 137〜178 / 抜粋: "def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:")、[キャッシュ読み取り] (参照: get_rtsp_url / 抜粋: "with _state_lock:\n        cached = _rtsp_cache.get(cam_id)\n    if cached:\n        return cached")、[ONVIF通信外でのキャッシュ書込] (参照: get_rtsp_url / 抜粋: "with _state_lock:\n            _rtsp_cache[cam_id] = auth_uri\n        return auth_uri")
+* 根拠: [関数定義] (行番号: 148〜189 / 抜粋: "def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:")、[キャッシュ読み取り] (参照: get_rtsp_url / 抜粋: "with _state_lock:\n        cached = _rtsp_cache.get(cam_id)\n    if cached:\n        return cached")、[ONVIF通信外でのキャッシュ書込] (参照: get_rtsp_url / 抜粋: "with _state_lock:\n            _rtsp_cache[cam_id] = auth_uri\n        return auth_uri")
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`（カメラ設定辞書。`id`, `ip`, `user`, `pass`, `port`, `rtsp_url`等のキーを想定）
-* 根拠: [引数定義] (行番号: 137 / 抜粋: "def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:")
+* 根拠: [引数定義] (行番号: 148 / 抜粋: "def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（RTSP URL文字列。キャッシュヒット時・直接指定時はそのまま、ONVIF取得時は認証情報埋め込み済みURI）
@@ -177,16 +177,18 @@
 
 ### `start_hls_stream`（Issue #439で薄いラッパーに分割）
 
+* **(2026-11-12 UX改善)** 呼ばれるたびに`touch_live(cam_id)`で「視聴中」として記録する(プレイヤーはプレイリストを数秒おきに取り直すため、視聴が続く限り下記の自動停止に掛からない)。`_start_hls_stream_locked`はffmpegを起動・登録した直後に`_ensure_idle_reaper()`を呼ぶ。
+
 * **役割**: 指定カメラのライブHLSストリーミング起動を、`cam_id`単位の`_live_stream_lock`で排他制御しつつ、実際の処理を担う内部関数`_start_hls_stream_locked`へ委譲する薄いラッパー。**（Issue #439で修正）** 以前は本関数自体が「実行中チェック→ffmpeg起動・登録」の全ロジックを直接持っており、同一`cam_id`への同時リクエストで両方が「実行中でない」と判定しffmpegを二重起動しうる check-then-act 競合があった。現在はロック取得と実処理を分離している。
-* 根拠: [関数定義] (行番号: 180〜185 / 抜粋: "def start_hls_stream(cam_conf: Dict[str, Any]) -> str:\n    cam_id = cam_conf['id']\n    # #439: 同一cam_idへの同時リクエストで「実行中でないチェック→ffmpeg起動・登録」が\n    # 競合しないよう、cam_id単位でこの一連の処理全体を排他する。\n    with _live_stream_lock(cam_id):\n        return _start_hls_stream_locked(cam_conf, cam_id)")
+* 根拠: [関数定義] (行番号: 263〜271 / 抜粋: "def start_hls_stream(cam_conf: Dict[str, Any]) -> str:\n    cam_id = cam_conf['id']\n    # #439: 同一cam_idへの同時リクエストで「実行中でないチェック→ffmpeg起動・登録」が\n    # 競合しないよう、cam_id単位でこの一連の処理全体を排他する。\n    with _live_stream_lock(cam_id):\n        return _start_hls_stream_locked(cam_conf, cam_id)")
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`
-* 根拠: [引数定義] (行番号: 180 / 抜粋: "def start_hls_stream(cam_conf: Dict[str, Any]) -> str:")
+* 根拠: [引数定義] (行番号: 263 / 抜粋: "def start_hls_stream(cam_conf: Dict[str, Any]) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（`_start_hls_stream_locked`の戻り値をそのまま返す）
-* 根拠: [戻り値] (行番号: 185 / 抜粋: "return _start_hls_stream_locked(cam_conf, cam_id)")
+* 根拠: [戻り値] (行番号: 271 / 抜粋: "return _start_hls_stream_locked(cam_conf, cam_id)")
 
 
 * **副作用**: `cam_id`の抽出、`_live_stream_lock(cam_id)`によるロックの取得・解放（`with`文）。
@@ -205,34 +207,34 @@
 ### `_remove_stale_live_outputs`（Issue #882で新設）
 
 * **役割**: ライブHLSの出力ディレクトリから、前回のffmpegが残した`stream.m3u8`・セグメント(`*.ts`)・書きかけの`*.m3u8.tmp`を削除する。ffmpegは`-hls_flags delete_segments`でも終了時に最後のプレイリストと直近のセグメントをディスクに残す(正常終了なら`#EXT-X-ENDLIST`付きになりVOD扱いで再生される)。新しいffmpegを起動してもプレイリストが書き換わるのは最初のセグメントを書き終えた後のため、それまでの間に`routers/camera_router.py`の`get_live_stream`(プレイリストが存在すれば即返す待機ループ)が古いプレイリストを返し、前回終了時点(例: 前日22時)の映像がライブとして再生されていた。`_start_hls_stream_locked`がffmpegを新規起動する直前にこれを呼ぶことで、ルーターが返すのは新しいffmpegが書いたプレイリストだけになる。`ffmpeg.log`は対象外(直後に`open(..., "w")`で作り直される)。
-* 根拠: [関数定義] (行番号: 188 / 抜粋: "def _remove_stale_live_outputs(cam_dir: str) -> None:")
+* 根拠: [関数定義] (行番号: 274 / 抜粋: "def _remove_stale_live_outputs(cam_dir: str) -> None:")
 
 
 * **引数/リクエスト**: `cam_dir: str`（`init_output_dir(HLS_LIVE_DIR, cam_id)`が返すカメラ別ディレクトリ）
-* 根拠: [引数定義] (行番号: 188 / 抜粋: "def _remove_stale_live_outputs(cam_dir: str) -> None:")
+* 根拠: [引数定義] (行番号: 274 / 抜粋: "def _remove_stale_live_outputs(cam_dir: str) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [関数定義] (行番号: 188 / 抜粋: "def _remove_stale_live_outputs(cam_dir: str) -> None:")
+* 根拠: [関数定義] (行番号: 274 / 抜粋: "def _remove_stale_live_outputs(cam_dir: str) -> None:")
 
 
 * **副作用**: `cam_dir`直下の`stream.m3u8`・`*.ts`・`*.m3u8.tmp`の削除。
-* 根拠: [削除対象の判定] (行番号: 203 / 抜粋: "if name == \"stream.m3u8\" or name.endswith((\".ts\", \".m3u8.tmp\")):")
+* 根拠: [削除対象の判定] (行番号: 289 / 抜粋: "if name == \"stream.m3u8\" or name.endswith((\".ts\", \".m3u8.tmp\")):")
 
 
 * **エラーハンドリング**: ディレクトリの列挙に失敗した場合(`OSError`)は何もせず戻る。個々のファイル削除で`FileNotFoundError`は無視し、それ以外の`OSError`は警告ログを出して残りの削除を続ける(古いファイルの削除失敗で配信の起動そのものを止めない)。
-* 根拠: [例外処理] (行番号: 206-209 / 抜粋: "except FileNotFoundError:\n                pass\n            except OSError as e:\n                logger.warning(f\"⚠️ 古いライブHLSファイルの削除に失敗: {name}: {e}\")")
+* 根拠: [例外処理] (行番号: 292-295 / 抜粋: "except FileNotFoundError:\n                pass\n            except OSError as e:\n                logger.warning(f\"⚠️ 古いライブHLSファイルの削除に失敗: {name}: {e}\")")
 
 
 ### `_start_hls_stream_locked`（Issue #439で`start_hls_stream`から分離）
 
 * **役割**: 指定カメラのライブHLSストリーミングをffmpegプロセスとして起動する実処理。既に同一カメラIDのプロセスが実行中であれば新規起動せず既存のプレイリストパスを返す。ffmpegログファイルは`chmod 0o600`（所有者のみ読み書き可）で作成し、起動バナー経由の認証情報露出を防ぐため`-hide_banner`/`-loglevel error`オプションを付与する。呼び出し元`start_hls_stream`が取得した`cam_id`単位のロック内で実行されることを前提とする。**（不具合修正）** RTSP入力(`-i`)の直前に`-timeout`(`FFMPEG_RTSP_TIMEOUT_USEC`)を追加した。**（Issue #882で修正）** ffmpegを新規起動する(既存プロセスが無い、または終了済みの)場合は、起動前に`_remove_stale_live_outputs`で前回の`stream.m3u8`・`*.ts`を削除する。既存プロセスが実行中の場合はその出力を消さずにプレイリストパスを返す。
-* 根拠: [古い出力の削除呼び出し] (行番号: 256 / 抜粋: "_remove_stale_live_outputs(cam_dir)")
-* 根拠: [関数定義] (行番号: 227〜296 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")、`"-timeout", str(FFMPEG_RTSP_TIMEOUT_USEC),` (行番号: 277)
+* 根拠: [古い出力の削除呼び出し] (行番号: 342 / 抜粋: "_remove_stale_live_outputs(cam_dir)")
+* 根拠: [関数定義] (行番号: 313〜383 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")、`"-timeout", str(FFMPEG_RTSP_TIMEOUT_USEC),` (行番号: 277)
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`, `cam_id: str`
-* 根拠: [引数定義] (行番号: 227 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")
+* 根拠: [引数定義] (行番号: 313 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（プレイリストファイルのパス。RTSP URL取得に失敗した場合は空文字列`""`）
@@ -247,6 +249,21 @@
 * 根拠: [try-exceptブロックとfinally] (行番号: 257〜260, 296〜302 / 抜粋: "try:\n        rtsp_url = get_rtsp_url(cam_conf)\n    except Exception:\n        return \"\"")
 
 
+### ライブ配信の自動停止(`HLS_LIVE_IDLE_SECONDS` / `touch_live` / `stop_idle_live_streams` / `_idle_reaper_loop` / `_ensure_idle_reaper`)
+
+* **役割**: **(2026-11-12 新設)** 視聴が途絶えたライブ用ffmpegを止める。以前は一度始めたライブ用ffmpegを止める経路が「停滞検知(`_is_live_stalled`)」と「サーバー終了時(`stop_all_processes`)」しか無く、ページを閉じてもカメラへのRTSP接続とHLSの書き込みがサーバーの再起動まで続いていた。
+    * `touch_live(cam_id)`: `_live_last_access[cam_id]`に現在時刻(`time.time()`)を記録する。プレイリスト要求(`start_hls_stream`)とセグメント要求(`routers/camera_router.get_live_segment`)から呼ばれる。
+    * `stop_idle_live_streams(now=None)`: 最後の要求から`HLS_LIVE_IDLE_SECONDS`(60秒)以上経ったカメラのffmpegを`terminate()`(`HLS_LIVE_KILL_WAIT_SECONDS`待って終わらなければ`kill()`)し、管理用の辞書(`_active_processes`/`_live_started_at`/`_live_last_access`)から消す。止めた数を返す。既に終了しているプロセスは数えずに辞書からだけ消す。カメラ単位の起動ロック(`_live_stream_lock`)の内側で判定するため、停止と起動は競合しない。
+    * `_idle_reaper_loop` / `_ensure_idle_reaper`: 配信中のライブがある間だけ動くデーモンスレッド。`HLS_LIVE_IDLE_CHECK_SECONDS`(15秒)ごとに`stop_idle_live_streams`を呼び、`_active_processes`が空になったら終了する。待ちは`threading.Event.wait`(テストが`time.sleep`を差し替えても空回りしない)。
+* 根拠: [関数定義] (行番号: 191 / 抜粋: "def touch_live(cam_id: str) -> None:")、[関数定義] (行番号: 197 / 抜粋: "def stop_idle_live_streams(now: float | None = None) -> int:")、[関数定義] (行番号: 237 / 抜粋: "def _idle_reaper_loop() -> None:")、[関数定義] (行番号: 253 / 抜粋: "def _ensure_idle_reaper() -> None:")
+
+
+* **引数/リクエスト**: `cam_id: str` / `now: float | None = None`
+* **戻り値/レスポンス**: `None` / `int`(止めたプロセス数)
+* **副作用**: ffmpeg子プロセスの終了、モジュールレベルの辞書の更新、デーモンスレッドの起動
+* **エラーハンドリング**: `terminate`の`OSError`は警告ログにして次のカメラへ進む。見回りループ内の例外は警告ログにして継続する。
+
+
 ### `get_record_start_offset`
 
 * **役割**: 指定日付の最初の録画mp4ファイル名から時刻部分を抽出し、0時0分0秒からの経過秒数を算出して返す。
@@ -256,7 +273,7 @@
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`, `target_date: str`
-* 根拠: [引数定義] (行番号: 298 / 抜粋: "def get_record_start_offset(cam_conf: Dict[str, Any], target_date: str) -> int:")
+* 根拠: [引数定義] (行番号: 385 / 抜粋: "def get_record_start_offset(cam_conf: Dict[str, Any], target_date: str) -> int:")
 
 
 * **戻り値/レスポンス**: `int`（0時からの経過秒数）。該当ファイルが存在しない場合、または解析に失敗した場合は`0`。
@@ -290,15 +307,15 @@
 ### `get_camera_config_or_none`（Issue #551で新規追加）
 
 * **役割**: `config.CAMERAS`（`devices.json`からロードされたカメラ定義一覧）から`camera_id`に一致する設定辞書を検索して返す。見つからない場合は`None`を返す（例外は送出しない）。ルーター側の`camera_router.py`に5箇所重複していた`next((c for c in config.CAMERAS if c["id"] == camera_id), None)` + `HTTPException(404)`のうち、検索部分だけを本関数へ切り出し、404送出自体はルーター側の新設ヘルパー`_require_camera`が担うように責務分割した。
-* 根拠: [関数定義とDocstring] (行番号: 320〜325 / 抜粋: "def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:\n    \"\"\"config.CAMERAS(devices.jsonからロードされたカメラ定義一覧)からcamera_idに\n    一致する設定を返す。見つからない場合はNoneを返す(#551: camera_router側に\n    重複していた同一のlookup+404送出を、ルーターの`_require_camera`ヘルパーへ\n    一元化するために切り出した)。\"\"\"")
+* 根拠: [関数定義とDocstring] (行番号: 407〜412 / 抜粋: "def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:\n    \"\"\"config.CAMERAS(devices.jsonからロードされたカメラ定義一覧)からcamera_idに\n    一致する設定を返す。見つからない場合はNoneを返す(#551: camera_router側に\n    重複していた同一のlookup+404送出を、ルーターの`_require_camera`ヘルパーへ\n    一元化するために切り出した)。\"\"\"")
 
 
 * **引数/リクエスト**: `camera_id: str`
-* 根拠: [引数定義] (行番号: 320 / 抜粋: "def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:")
+* 根拠: [引数定義] (行番号: 407 / 抜粋: "def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]`（見つかったカメラ設定の辞書、または`None`）
-* 根拠: [戻り値] (行番号: 325 / 抜粋: "return next((c for c in config.CAMERAS if c[\"id\"] == camera_id), None)")
+* 根拠: [戻り値] (行番号: 412 / 抜粋: "return next((c for c in config.CAMERAS if c[\"id\"] == camera_id), None)")
 
 
 * **副作用**: なし（`config.CAMERAS`の参照のみ）
@@ -316,7 +333,7 @@
 
 
 * **引数/リクエスト**: `camera_id: str`, `enabled: bool`
-* 根拠: [引数定義] (行番号: 328 / 抜粋: "def set_camera_enabled(camera_id: str, enabled: bool) -> bool:")
+* 根拠: [引数定義] (行番号: 415 / 抜粋: "def set_camera_enabled(camera_id: str, enabled: bool) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（成功時`True`、`devices.json`不在または該当カメラ未検出時は`False`）

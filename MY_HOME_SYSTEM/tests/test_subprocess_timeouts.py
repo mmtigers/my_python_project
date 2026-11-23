@@ -169,6 +169,7 @@ class TestTimeoutDoesNotEscape:
         monkeypatch.setattr(health_watch, "logger", fake_logger)
         monkeypatch.setattr(health_watch, "_read_marker", lambda: datetime.datetime.now(), raising=False)
         monkeypatch.setattr(health_watch, "_write_marker", lambda *a, **k: None, raising=False)
+        monkeypatch.setattr(health_watch, "_write_result_state", lambda *a, **k: None, raising=False)
         monkeypatch.setattr(health_watch, "_notify", MagicMock(), raising=False)
 
         def _timing_out_check():

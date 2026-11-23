@@ -32,6 +32,14 @@
       "notify_settings": {}
     },
     {
+      "id": "SWITCHBOT_METER_DEVICE_ID",
+      "type": "Meter",
+      "location": "伊丹",
+      "room": "寝室",
+      "name": "伊丹_寝室の温湿度計",
+      "notify_settings": {}
+    },
+    {
       "id": "SWITCHBOT_HUB2_DEVICE_ID",
       "type": "Hub 2",
       "location": "長岡京",

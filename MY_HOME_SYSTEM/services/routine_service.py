@@ -756,6 +756,113 @@ class RoutineService:
 
         return {"date": date_str, "flows": flows_out}
 
+    # 冒険の記録(UserService._fetch_full_adventure_logs)に載せる区間の表示名。
+    # フローはチェックポイント(自由時間)を境に前半/後半へ分ける。am は前半のみ、
+    # pm は「帰ってから自由時間まで」と「寝る準備〜就寝」の2区間になる。
+    # 1日に何十件も並んでクエスト達成の記録を埋もれさせないよう、ステップ単位ではなく
+    # 区間単位に1行へまとめる。
+    _CHRONICLE_SEGMENT_LABELS: Dict[Tuple[str, str], str] = {
+        ('am', 'before'): '朝のじゅんび',
+        ('pm', 'before'): '帰ってからのじゅんび',
+        ('pm', 'after'): '寝るまえのじゅんび',
+    }
+
+    def get_chronicle_entries(self, cur, since_date: str) -> List[Dict[str, Any]]:
+        """`since_date`(YYYY-MM-DD)以降のすごろく達成を、冒険の記録用の行として返す。
+
+        その日の**最終状態**(routine_progress.steps_status)で 'done' のステップだけを
+        数える。チェックリストはチェックを外せるため、外したステップは出さない。
+        スキップ(skipped_keys)で最初から done 扱いのステップと、チェックポイント
+        (自由時間)自身は数えない(何もしていないのに「できた」と出さないため)。
+
+        時刻は、その区間で本人がチェックした最後の時刻(routine_step_events の
+        source='user' / to_status='done')。0011 適用前の行など記録が無ければ
+        routine_progress.updated_at で代用する。
+
+        gold は実際に付与された額(区間内のステップ個別報酬 + 前半区間なら出発ボーナス)。
+        読み取り専用で、DBは一切変更しない。
+
+        ステップ構成(分母・区間の境界)はその日の steps_status のキーで決め、現在の
+        routine_data の定義は表示名と報酬の参照にだけ使う(Issue #1113)。定義から
+        消えたステップはキー名をそのまま表示名にし、報酬は分からないため 0 として扱う。
+        チェックポイント自身のキーが定義から消えた日は区間を分けられないため、
+        全体を前半区間として1行にまとめる。
+        """
+        users = {
+            row['user_id']: row['role']
+            for row in cur.execute("SELECT user_id, role FROM quest_users").fetchall()
+        }
+        rows = cur.execute(
+            "SELECT * FROM routine_progress WHERE progress_date >= ? ORDER BY progress_date DESC",
+            (since_date,),
+        ).fetchall()
+
+        entries: List[Dict[str, Any]] = []
+        for row in rows:
+            user_id = row['user_id']
+            if user_id not in users:
+                continue
+            flow = get_flow_set(user_id, users[user_id]).get(row['flow_key'])
+            if flow is None:
+                continue
+            statuses = json.loads(row['steps_status'])
+            skipped = set(json.loads(row['skipped_keys']))
+            # Issue #1113: 過去日を現在の定義で評価すると、routine_data.py の変更で
+            # 変更前の日の記録が変わる。steps_status は行の作成時にその日の全ステップを
+            # 定義順で持つ(_empty_statuses。JSONでも順序は保たれる)ので、その日の
+            # ステップ構成はこちらを正とし、現在の定義は表示名・報酬の参照にだけ使う。
+            defined = {s['key']: s for s in flow['steps']}
+            day_steps = [
+                defined.get(key) or {'key': key, 'label': key, 'checkpoint_time': None}
+                for key in statuses
+            ]
+            checkpoint_idx = next(
+                (i for i, s in enumerate(day_steps) if s['checkpoint_time']), None
+            )
+            if checkpoint_idx is None:
+                segments = [('before', day_steps)]
+            else:
+                segments = [
+                    ('before', day_steps[:checkpoint_idx]),
+                    ('after', day_steps[checkpoint_idx + 1:]),
+                ]
+
+            done_times: Dict[str, str] = {}
+            for ev in cur.execute(
+                "SELECT step_key, MAX(occurred_at) AS ts FROM routine_step_events "
+                "WHERE user_id=? AND flow_key=? AND progress_date=? "
+                "AND source='user' AND to_status='done' GROUP BY step_key",
+                (user_id, row['flow_key'], row['progress_date']),
+            ).fetchall():
+                done_times[ev['step_key']] = ev['ts']
+
+            for segment, steps in segments:
+                targets = [s for s in steps if s['key'] not in skipped]
+                done = [s for s in targets if statuses.get(s['key']) == 'done']
+                if not done:
+                    continue
+                gold = sum(get_step_reward(s)[0] for s in done)
+                exp = sum(get_step_reward(s)[1] for s in done)
+                if segment == 'before':
+                    gold += row['bonus_gold']
+                    exp += row['bonus_exp']
+                times = [done_times[s['key']] for s in done if s['key'] in done_times]
+                label = self._CHRONICLE_SEGMENT_LABELS.get(
+                    (row['flow_key'], segment), flow['title']
+                )
+                entries.append({
+                    'user_id': user_id,
+                    'title': label,
+                    'done_count': len(done),
+                    'total_count': len(targets),
+                    'done_labels': [s['label'] for s in done],
+                    'gold': gold,
+                    'exp': exp,
+                    'ts': max(times) if times else row['updated_at'],
+                    'date': row['progress_date'],
+                })
+        return entries
+
     def is_user_currently_in_free_time(self, user_id: str, now: Optional[datetime.datetime] = None) -> bool:
         """指定ユーザーが今まさに自由時間中かどうかを返す(要件確認済み、2026-09-23:
 

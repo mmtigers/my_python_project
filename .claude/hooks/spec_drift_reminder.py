@@ -124,7 +124,13 @@ def report(payload: dict, repo_root: Path) -> None:
         "",
     ]
     for src, candidates in new_pending:
-        target = candidates[0] if candidates else "(対応する仕様書パスを規約から特定してください)"
+        if candidates:
+            # 候補が複数あるときは、実在するものを優先して全候補を出す
+            # （1つ目だけ出すと、規約どおりのファイルと違う候補が目立って紛らわしい）
+            existing = [c for c in candidates if (repo_root / c).exists()]
+            target = " / ".join(existing if existing else candidates)
+        else:
+            target = "(対応する仕様書パスを規約から特定してください)"
         lines.append(f"- {src} → {target}")
     reason = "\n".join(lines)
 

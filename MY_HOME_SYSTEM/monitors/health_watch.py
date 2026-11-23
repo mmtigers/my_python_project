@@ -70,6 +70,7 @@ from core import state_file
 from core.database import get_ro_connection
 from core.logger import setup_logging
 from core.utils import get_now_jst
+from services import recording_status_service
 from services.notification_service import send_push
 from services.system_maintenance_service import (
     DEPLOY_BRANCH, DEPLOY_STATE_FILE, PHASE_RESTARTING, PHASE_RUNNING,
@@ -441,20 +442,10 @@ def check_api_responsive() -> Optional[str]:
 def _recording_times(folder: str, now: datetime.datetime) -> list[datetime.datetime]:
     """録画フォルダの当日・前日のセグメント開始時刻(ファイル名から、JST)を新しい順に返す。
 
-    CIFS 越しに保持期間(30日)分を毎回列挙しないよう、当日と前日(日付の変わり目用)に絞る。
-    ファイル名は ffmpeg の -strftime によるローカル時刻(実機のTZはAsia/Tokyo)。
+    実装は `services/recording_status_service.py` にある(ダッシュボードの「🎥 カメラ」カードが
+    同じ読み方で録画の状態を出すため、片方だけ直して食い違うのを防ぐ)。
     """
-    names: list[str] = []
-    for day in (now, now - datetime.timedelta(days=1)):
-        pattern = os.path.join(folder, f"{day.strftime('%Y%m%d')}_*.mp4")
-        names.extend(os.path.basename(p) for p in glob.glob(pattern))
-    times: list[datetime.datetime] = []
-    for name in sorted(names, reverse=True):
-        try:
-            times.append(datetime.datetime.strptime(name[:15], "%Y%m%d_%H%M%S").replace(tzinfo=JST))
-        except ValueError:
-            continue
-    return times
+    return recording_status_service.recording_times(folder, now)
 
 
 def _latest_recording_time(folder: str, now: datetime.datetime) -> datetime.datetime | None:
@@ -970,6 +961,48 @@ def _should_notify(anomaly_keys: List[str], now: datetime.datetime) -> bool:
     return True
 
 
+# ダッシュボード(システムページ・ホームのサマリー)に出すための最新結果。Discordを見ない家族にも
+# 「録画が止まっている」等が伝わるようにする。読む側は `services/home_status_service.read_health_result`。
+# ファイル名は読む側と共有する。LOG_DIR は実行時に解決する(テストが config.LOG_DIR を差し替えるため)。
+RESULT_STATE_FILENAME: str = ".health_watch_last_result"
+# 画面に出す1件あたりの文字数の上限(ログ行を含む長い本文をそのまま保存しない)。
+RESULT_TEXT_MAX_CHARS: int = 300
+# 履歴(異常の組が変わった時点)を残す件数。
+RESULT_HISTORY_MAX: int = 20
+
+
+def _result_state_path() -> str:
+    return os.path.join(config.LOG_DIR, RESULT_STATE_FILENAME)
+
+
+def _write_result_state(anomaly_keys: List[str], anomalies: List[str]) -> None:
+    """今回の検知結果を状態ファイルへ書く(ダッシュボード表示用)。失敗しても検知・通知は巻き込まない。
+
+    `history` には、異常の組(チェック名の集合)が前回から変わったときだけ1件足す
+    (同じ異常が続いている間、毎時同じ行が並ばないようにする。解消したときは空の組が1件入る)。
+    時刻はホストのTZ設定に依らないよう JST の aware な ISO 形式で書く(読む側が経過時間を計算するため)。
+    """
+    try:
+        now = get_now_jst()
+        path = _result_state_path()
+        previous = state_file.read_json(path)
+        history = previous.get("history", []) if isinstance(previous, dict) else []
+        if not isinstance(history, list):
+            history = []
+        last_keys = sorted(history[0].get("keys", [])) if history and isinstance(history[0], dict) else []
+        if sorted(anomaly_keys) != last_keys:
+            history.insert(0, {"at": now.isoformat(), "keys": sorted(anomaly_keys)})
+        state_file.write_json_atomic(path, {
+            "checked_at": now.isoformat(),
+            "anomalies": [
+                {"key": key, "text": text[:RESULT_TEXT_MAX_CHARS]} for key, text in zip(anomaly_keys, anomalies)
+            ],
+            "history": history[:RESULT_HISTORY_MAX],
+        })
+    except Exception as e:
+        logger.warning(f"⚠️ チェック結果の状態ファイルを書けませんでした: {e}")
+
+
 def _ping_deadman_switch(ok: bool) -> None:
     """層3(Issue #775): 外部デッドマンスイッチへハートビートを送る。
 
@@ -1140,6 +1173,8 @@ def run_checks() -> int:
         if result:
             anomalies.append(result)
             anomaly_keys.append(key)
+
+    _write_result_state(anomaly_keys, anomalies)
 
     exit_code = 0
     if anomalies:

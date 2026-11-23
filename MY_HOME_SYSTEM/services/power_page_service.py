@@ -249,7 +249,7 @@ def render_power_page(report: dict[str, Any], *, dashboard_path: str, now: datet
     today = generated.date() if generated is not None else get_now_jst().date()
     base = f"{dashboard_path.rstrip('/')}/power"
     body = (
-        f"{page._back_to_home_link(dashboard_path, 'life')}"
+        f"{page._back_link(dashboard_path, 'life', 'くらし')}"
         "<h1>⚡ 電気</h1>"
         f'<p class="meta">スマートメーターの記録からの概算です(単価 {report["unit_price"]:g}円/kWh の固定。'
         "契約プランや燃料費調整は考慮していません)。</p>"

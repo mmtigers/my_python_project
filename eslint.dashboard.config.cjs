@@ -10,6 +10,8 @@ const globals = req('globals')
 const { defineConfig } = req('eslint/config')
 
 module.exports = defineConfig([
+  // 同梱した外部ライブラリ(hls.js)は自作コードではないので対象外。
+  { ignores: ['MY_HOME_SYSTEM/static/dashboard/*.min.js'] },
   {
     files: ['MY_HOME_SYSTEM/static/dashboard/*.js'],
     extends: [js.configs.recommended],
@@ -25,5 +27,10 @@ module.exports = defineConfig([
       // HTMLの`onclick="dashboardRestart()"`等から呼ぶ関数は、そのファイル内では未使用に見える。
       'no-unused-vars': ['error', { vars: 'local', args: 'none', caughtErrors: 'none' }],
     },
+  },
+  {
+    // Service Worker(`self`・`clients` 等はブラウザのページとは別のグローバル)。
+    files: ['MY_HOME_SYSTEM/static/dashboard/sw.js'],
+    languageOptions: { globals: { ...globals.serviceworker } },
   },
 ])

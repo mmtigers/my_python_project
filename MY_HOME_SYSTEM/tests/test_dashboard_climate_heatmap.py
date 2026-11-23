@@ -94,7 +94,10 @@ class TestGridAndLocation:
         assert dashboard_page_service.climate_hourly_grid(pd.DataFrame({"x": [1]}), "伊丹", "temp") == {}
 
     @pytest.mark.parametrize("metric,value,level", [
-        ("temp", 14.9, 0), ("temp", 15.0, 1), ("temp", 24.9, 2), ("temp", 25.0, 3), ("temp", 30.0, 4),
+        # 温度は5℃刻みの8段階(5/10/15/20/25/30/35℃)
+        ("temp", -3.0, 0), ("temp", 4.9, 0), ("temp", 5.0, 1), ("temp", 9.9, 1), ("temp", 10.0, 2),
+        ("temp", 14.9, 2), ("temp", 15.0, 3), ("temp", 19.9, 3), ("temp", 20.0, 4), ("temp", 24.9, 4),
+        ("temp", 25.0, 5), ("temp", 30.0, 6), ("temp", 34.9, 6), ("temp", 35.0, 7), ("temp", 40.0, 7),
         ("hum", 29.9, 0), ("hum", 40.0, 2), ("hum", 69.9, 3), ("hum", 70.0, 4),
     ])
     def test_levels(self, metric, value, level):
@@ -126,8 +129,8 @@ class TestRender:
 
     def test_cell_values_levels_and_empty_and_future(self):
         html = self._render()
-        assert 'cl-2" title="10/16 9時台: 24.3℃"' in html
-        assert 'cl-4" title="10/15 23時台: 31.0℃"' in html
+        assert 'ct-4" title="10/16 9時台: 24.3℃"' in html
+        assert 'ct-6" title="10/15 23時台: 31.0℃"' in html
         assert "10/16 9時台: 記録なし" not in html
         assert "10/16 8時台: 記録なし" in html          # 記録のない時間は枠線だけ
         assert "10/16 13時台: まだ先です" in html         # 今(12時台)より先
@@ -140,9 +143,9 @@ class TestRender:
 
     def test_switch_links_keep_selection_and_anchor(self):
         html = self._render(location="高砂", metric="hum")
-        assert 'href="/dashboard/?hm_loc=itami&amp;hm_metric=hum#climate-heatmap"' in html
-        assert 'href="/dashboard/?hm_loc=takasago&amp;hm_metric=temp#climate-heatmap"' in html
-        assert html.count('aria-current="true"') == 2
+        assert 'href="/dashboard/life?hm_loc=itami&amp;hm_metric=hum#climate-heatmap"' in html
+        assert 'href="/dashboard/life?hm_loc=takasago&amp;hm_metric=temp#climate-heatmap"' in html
+        assert html.count('aria-current="true"') == 3   # 指標・表示(30日の推移)・拠点
 
     def test_location_without_data_falls_back_to_one_with_data(self):
         df = _df([("2026-10-16", 9, "b", "高砂_Remo", 12.0, 30.0, 6)])
@@ -156,8 +159,85 @@ class TestRender:
 
     def test_legend_lists_all_levels(self):
         html = self._render()
-        for text in ("〜15℃", "15〜20℃", "20〜25℃", "25〜30℃", "30℃〜", "記録なし"):
+        for text in ("〜5℃", "5〜10℃", "10〜15℃", "15〜20℃", "20〜25℃", "25〜30℃", "30〜35℃", "35℃〜", "記録なし"):
             assert text in html
+        for i in range(8):
+            assert f"var(--ct-{i})" in html
+
+    def test_humidity_keeps_its_own_five_levels(self):
+        html = self._render(metric="hum")
+        assert all(f"var(--cl-{i})" in html for i in range(5)) and "var(--ct-" not in html
+
+
+class TestDayCompare:
+    """「拠点を並べる」表示(行=拠点、列=0〜23時)。同じ日の拠点どうしを見比べる。"""
+    DF = _df([
+        ("2026-10-16", 9, "a", "伊丹_Remo", 24.3, 45.0, 6),
+        ("2026-10-16", 9, "b", "高砂_Remo", 12.0, 30.0, 6),
+        ("2026-10-15", 9, "b", "高砂_Remo", 8.0, 30.0, 6),
+    ])
+
+    def _render(self, **kw):
+        return dashboard_page_service.render_home_climate_heatmap(
+            self.DF, NOW, dashboard_path="/dashboard/", view="day", **kw)
+
+    def test_one_row_per_location_with_data_in_site_order(self):
+        html = self._render()
+        assert html.count('class="climate-row"') == 2
+        assert html.count('class="climate-cell ') == 2 * 24
+        assert html.index('climate-day">伊丹<') < html.index('climate-day">高砂<')
+        assert "を拠点で比べる(10/16 金)" in html
+
+    def test_cells_come_from_each_location_on_that_day(self):
+        html = self._render()
+        assert 'ct-4" title="10/16 9時台: 24.3℃"' in html
+        assert 'ct-2" title="10/16 9時台: 12.0℃"' in html
+        assert "10/16 13時台: まだ先です" in html
+
+    def test_location_without_data_that_day_keeps_its_row(self):
+        html = self._render(day=date(2026, 10, 15))
+        assert html.count('class="climate-row"') == 2
+        assert 'ct-1" title="10/15 9時台: 8.0℃"' in html
+        assert html.count("10/15 9時台: 記録なし") == 1   # 伊丹はその日の記録が無い
+
+    def test_room_site_label_fits_the_row_heading(self):
+        assert dashboard_page_service._climate_site_label("伊丹(寝室)") == "伊丹 寝室"
+
+    def test_date_navigation_stays_within_the_range(self):
+        html = self._render()   # 今日(10/16): 次の日へは進めない
+        assert "hm_view=day&amp;hm_date=2026-10-15#climate-heatmap" in html
+        assert "10/17 ›" not in html
+        html = self._render(day=date(2026, 10, 15))
+        assert 'hm_view=day#climate-heatmap"' in html       # 今日へ戻るリンクは日付を省く
+        oldest = self._render(day=date(2026, 9, 17))         # 30日前の端: 前の日へは戻れない
+        assert "‹ 9/16" not in oldest and "9/18 ›" in oldest
+
+    def test_view_switch_and_metric_keep_the_view_and_day(self):
+        html = self._render(day=date(2026, 10, 15), metric="hum")
+        assert 'href="/dashboard/life?hm_loc=itami&amp;hm_metric=temp&amp;hm_view=day&amp;hm_date=2026-10-15#climate-heatmap"' in html
+        assert 'href="/dashboard/life?hm_loc=itami&amp;hm_metric=hum#climate-heatmap"' in html   # 30日の推移へ
+        assert html.count('aria-current="true"') == 3   # 指標・表示・日付
+
+    def test_activity_ignores_the_day_view(self):
+        html = dashboard_page_service.render_home_climate_heatmap(
+            self.DF, NOW, dashboard_path="/dashboard/", metric="act", activity={}, view="day")
+        assert "拠点で比べる" not in html and "拠点を並べる" not in html
+
+    def test_no_data_shows_placeholder(self):
+        html = dashboard_page_service.render_home_climate_heatmap(
+            pd.DataFrame(), NOW, dashboard_path="/dashboard/", view="day")
+        assert "記録がまだありません" in html
+
+    @pytest.mark.parametrize("value,expected", [
+        (None, date(2026, 10, 16)), ("2026-10-10", date(2026, 10, 10)), ("2026-09-17", date(2026, 9, 17)),
+        ("2026-09-16", date(2026, 10, 16)), ("2026-10-17", date(2026, 10, 16)), ("<x>", date(2026, 10, 16)),
+    ])
+    def test_parse_date_falls_back_to_today(self, value, expected):
+        assert dashboard_page_service.parse_climate_date(value, date(2026, 10, 16), 30) == expected
+
+    def test_parse_view(self):
+        assert dashboard_page_service.parse_climate_view("day") == "day"
+        assert dashboard_page_service.parse_climate_view("nope") == "days"
 
 
 # --- ホームへの差し込み ---
@@ -193,30 +273,48 @@ def _home(path="/dashboard/", climate=None, activity=None):
             p.stop()
 
 
-class TestHomeIntegration:
-    def test_heatmap_sits_right_below_the_climate_group_and_above_life(self):
-        """ヒートマップは拠点別の温湿度カード(「🌡️ 室温」)の直下。カード→その推移が隣り合う。"""
-        text = _home().text
-        assert (
-            text.index("👀 見守り") < text.index("🌡️ 室温")
-            < text.index('id="climate-heatmap"') < text.index("💡 くらし")
-        )
+LIFE = f"{config.DASHBOARD_BASE_PATH}/life"
 
-    def test_selection_in_query_is_applied_to_page_and_fragment(self):
-        page = _home("/dashboard/?hm_loc=takasago&hm_metric=hum").text
-        fragment = _home(f"{config.DASHBOARD_BASE_PATH}/status?hm_loc=takasago&hm_metric=hum").text
-        for text in (page, fragment):
-            assert "高砂・1時間ごとの平均" in text and "湿度の推移" in text
+
+class TestLifePageIntegration:
+    """過去30日ヒートマップは「くらし」ページにある(以前はホームの中段にあり、約1画面ぶん
+    今日の動き・リンクを押し下げていた)。"""
+
+    def test_heatmap_is_on_the_life_page_below_the_climate_cards(self):
+        text = _home(LIFE).text
+        assert text.index("🌡️ 室温") < text.index('id="climate-heatmap"')
+
+    def test_home_no_longer_has_the_heatmap(self):
+        text = _home().text
+        assert 'id="climate-heatmap"' not in text and "過去30日" not in text
+        fragment = _home(f"{config.DASHBOARD_BASE_PATH}/status").text
+        assert 'id="climate-heatmap"' not in fragment
+
+    def test_selection_in_query_is_applied(self):
+        text = _home(f"{LIFE}?hm_loc=takasago&hm_metric=hum").text
+        assert "高砂・1時間ごとの平均" in text and "湿度の推移" in text
+
+    def test_old_home_url_with_selection_redirects_to_the_life_page(self):
+        """ヒートマップがホームにあった頃のURL(ブックマーク等)は、同じ選択のまま「くらし」へ送る。"""
+        from fastapi import FastAPI as _FastAPI
+
+        app = _FastAPI()
+        app.include_router(dashboard_router.router)
+        with TestClient(app) as client:
+            res = client.get("/dashboard/?hm_loc=takasago&hm_metric=hum", follow_redirects=False)
+        assert res.status_code == 302
+        assert res.headers["location"] == "/dashboard/life?hm_loc=takasago&hm_metric=hum#climate-heatmap"
 
     def test_invalid_selection_falls_back_to_default(self):
-        text = _home("/dashboard/?hm_loc=%3Cscript%3E&hm_metric=zzz").text
-        assert "伊丹・1時間ごとの平均" in text and "温度の推移" in text and "<script>" not in text.split("climate")[1][:400]
+        text = _home(f"{LIFE}?hm_loc=%3Cscript%3E&hm_metric=zzz").text
+        assert "伊丹・1時間ごとの平均" in text and "温度の推移" in text and "<script>" not in text.split("climate-heatmap")[1][:400]
 
-    def test_auto_refresh_carries_the_query_string(self):
-        assert "window.location.search" in _home().text
+    def test_day_view_in_query_is_applied(self):
+        text = _home(f"{LIFE}?hm_metric=temp&hm_view=day&hm_date=not-a-date").text
+        assert "温度を拠点で比べる" in text and "🏘️ 拠点を並べる" in text
 
     def test_page_still_opens_when_climate_query_fails(self):
-        res = _home(climate=pd.DataFrame())
+        res = _home(LIFE, climate=pd.DataFrame())
         assert res.status_code == 200 and "記録がまだありません" in res.text
 
 
@@ -317,9 +415,9 @@ class TestActivityRender:
 
     def test_switch_links(self):
         html = self._render(source="takasago")
-        assert 'href="/dashboard/?hm_loc=itami&amp;hm_metric=act&amp;hm_src=takasago#climate-heatmap"' in html
-        assert 'href="/dashboard/?hm_loc=itami&amp;hm_metric=act#climate-heatmap"' in html          # 防犯(既定)は hm_src を省く
-        assert 'href="/dashboard/?hm_loc=itami&amp;hm_metric=temp&amp;hm_src=takasago#climate-heatmap"' in html
+        assert 'href="/dashboard/life?hm_loc=itami&amp;hm_metric=act&amp;hm_src=takasago#climate-heatmap"' in html
+        assert 'href="/dashboard/life?hm_loc=itami&amp;hm_metric=act#climate-heatmap"' in html          # 防犯(既定)は hm_src を省く
+        assert 'href="/dashboard/life?hm_loc=itami&amp;hm_metric=temp&amp;hm_src=takasago#climate-heatmap"' in html
         assert html.count('aria-current="true"') == 2
         for label in ("🌡️ 温度", "💧 湿度", "🏃 動き", "🛡️ 防犯", "👵 高砂(実家)", "🏠 伊丹(自宅)"):
             assert label in html
@@ -334,7 +432,7 @@ class TestActivityHome:
         return _events([("2026-10-16T09:01:00+09:00", "cam", CAMERA, "その他", None, "ON")])
 
     def test_activity_view_is_applied_to_page_and_fragment(self):
-        for path in ("/dashboard/?hm_metric=act&hm_src=itami", f"{config.DASHBOARD_BASE_PATH}/status?hm_metric=act&hm_src=itami"):
+        for path in (f"{LIFE}?hm_metric=act&hm_src=itami",):
             text = _home(path, activity=self._events_df()).text
             assert "動きの推移(過去30日)" in text and "🏠 伊丹(自宅)・1時間ごとの回数" in text
 

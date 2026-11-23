@@ -1,4 +1,5 @@
 """services/quest_service.py から分割(Issue #550)。"""
+import datetime
 import os
 import uuid
 from typing import Any, Dict, List, Optional
@@ -6,10 +7,18 @@ from typing import Any, Dict, List, Optional
 import aiofiles
 from fastapi import HTTPException, UploadFile
 
-from core.utils import get_now_iso
+from core.utils import get_now_iso, get_now_jst
 from core.database import get_db_cursor
 import config
 from services.quest.locks import ITEM_USE_TITLE_PREFIX, _get_user_balance_lock, _require_adult, logger
+from services.routine_service import routine_service
+
+# 冒険の記録に載せるすごろく(デイリールーティン)達成の遡り日数。1人1日最大3行
+# (朝/帰宅後/寝る前)なので、家族4人×14日でも168行に収まる。
+CHRONICLE_ROUTINE_DAYS = 14
+# 冒険の記録の総件数上限。すごろくの行を足した分、クエスト達成等が押し出されないよう
+# 以前の100件から引き上げた。
+CHRONICLE_MAX_ENTRIES = 200
 
 # Issue #551: routers/quest_router.py の upload_image に直書きされていた
 # 画像保存ロジック(拡張子/マジックバイト検証・サイズ上限付き保存)をこちらへ移した。
@@ -78,7 +87,15 @@ class UserService:
 
         i_rows = cur.execute("SELECT 'item' as type, user_id, quest_title as title, 0 as gold, 0 as exp, completed_at as ts FROM quest_history WHERE status='approved' AND quest_id = 0 ORDER BY completed_at DESC LIMIT 100").fetchall()
 
-        all_events = sorted(q_rows + r_rows + i_rows, key=lambda x: x['ts'], reverse=True)[:100]
+        since = (get_now_jst() - datetime.timedelta(days=CHRONICLE_ROUTINE_DAYS - 1)).strftime('%Y-%m-%d')
+        routine_rows = [
+            {**ev, 'type': 'routine'} for ev in routine_service.get_chronicle_entries(cur, since)
+        ]
+
+        all_events = sorted(
+            [dict(r) for r in q_rows + r_rows + i_rows] + routine_rows,
+            key=lambda x: x['ts'], reverse=True,
+        )[:CHRONICLE_MAX_ENTRIES]
         user_info = {row['user_id']: {"name": row['name'], "avatar": row['avatar']} for row in cur.execute("SELECT user_id, name, avatar FROM quest_users")}
 
         formatted = []
@@ -93,13 +110,21 @@ class UserService:
                 # use_item は quest_title を「アイテム使用: <券名>」で保存する。記録には券名だけを出す
                 item_title = ev['title'].removeprefix(ITEM_USE_TITLE_PREFIX)
                 text = f"{u['name']}は {item_title} をつかった！"
+            elif ev['type'] == 'routine':
+                # すごろくの区間(朝のじゅんび等)を1行にまとめた記録。やった項目は detail に出す
+                text = f"{u['name']}は {ev['title']} を {ev['done_count']}/{ev['total_count']} できた！"
 
-            formatted.append({
+            entry = {
                 "type": ev['type'], "userId": ev['user_id'], "userName": u['name'], "userAvatar": u['avatar'],
                 "title": ev['title'], "text": text, "gold": ev['gold'], "exp": ev['exp'],
                 "timestamp": ev['ts'],
                 "dateStr": ev['ts'].split('T')[0] if 'T' in ev['ts'] else ev['ts'].split(' ')[0]
-            })
+            }
+            if ev['type'] == 'routine':
+                entry["detail"] = "・".join(ev['done_labels'])
+                # 区間の日付は「すごろくの1日」(JSTの progress_date)を正とする
+                entry["dateStr"] = ev['date']
+            formatted.append(entry)
         return formatted
 
     def reset_user_data(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:
