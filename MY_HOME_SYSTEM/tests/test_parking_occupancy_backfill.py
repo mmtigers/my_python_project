@@ -22,7 +22,12 @@ from tools import parking_occupancy_backfill as backfill
 
 TODAY = datetime.date(2026, 11, 12)
 P, A, U = occupancy.STATE_PRESENT, occupancy.STATE_ABSENT, occupancy.STATE_UNKNOWN
-FEATURES = occupancy.ParkingFeatures(False, 30.0, 0.2, 8000.0, 160.0, 15.0, 0.02, 0.01)
+# 集計は observations.csv の特徴量から判定し直すので、判定ごとにそれらしい特徴量を書く。
+FEATURES = {
+    P: occupancy.ParkingFeatures(False, 30.0, 0.05, 800.0, 40.0, 20.0, 0.04, 0.03),
+    A: occupancy.ParkingFeatures(False, 30.0, 0.22, 8000.0, 160.0, 15.0, 0.02, 0.01),
+    U: occupancy.ParkingFeatures(False, 30.0, 0.15, 4000.0, 160.0, 15.0, 0.02, 0.01),
+}
 
 
 def _touch(path):
@@ -58,7 +63,7 @@ def fake_analyze(monkeypatch):
             if isinstance(state, BaseException):
                 raise state
             timestamp = start + datetime.timedelta(seconds=index * interval_seconds)
-            yield occupancy.Observation(timestamp, state, FEATURES), np.zeros((72, 128, 3), np.uint8)
+            yield occupancy.Observation(timestamp, state, FEATURES[state]), np.zeros((72, 128, 3), np.uint8)
 
     monkeypatch.setattr(occupancy, "analyze_recording", analyze)
     monkeypatch.setattr(backfill, "_today", lambda: TODAY)
@@ -116,7 +121,7 @@ class TestRun:
         rows = _read_csv(out / backfill.OBSERVATIONS_FILE)
         assert len(rows) == 20
         assert rows[0]["timestamp"] == "2026-11-12 08:00:00" and rows[0]["file"] == "20261112_080000.mp4"
-        assert rows[0]["flagstone_edge"] == "0.2000"
+        assert rows[0]["flagstone_edge"] == "0.0500" and rows[0]["floor_mean"] == "40.0"
         assert _read_csv(out / backfill.TRIPS_FILE) == [{
             "departed_at": "2026-11-12 08:03:00", "returned_at": "2026-11-12 08:13:00",
             "duration_minutes": "10", "uncertain": "0"}]
@@ -155,6 +160,39 @@ class TestRun:
         backfill.run(str(rec), str(out), 1, 60, 3, save_frames=False)
 
         assert calls == ["20261112_080000.mp4"] * 2
+
+    def test_映像の入っていない録画は記録して次回からは飛ばす(self, tmp_path, fake_analyze, capsys):
+        states, calls = fake_analyze
+        rec, out = tmp_path / "rec", tmp_path / "out"
+        _make_rec(rec)
+        _touch(rec / "20261112_080000.mp4")
+        _touch(rec / "20261112_081000.mp4")
+        states["20261112_080000.mp4"] = [occupancy.FrameExtractionError("映像が無い", returncode=234)]
+        states["20261112_081000.mp4"] = [A, A, A]
+
+        backfill.run(str(rec), str(out), 1, 60, 3, save_frames=False)
+        assert (out / backfill.UNREADABLE_FILE).read_text(encoding="utf-8") == "20261112_080000.mp4\n"
+        assert "次回からは飛ばします" in capsys.readouterr().err
+
+        backfill.run(str(rec), str(out), 1, 60, 3, save_frames=False)
+        assert calls == ["20261112_080000.mp4", "20261112_081000.mp4"]  # 2回目は読まない
+
+    def test_集計は今のしきい値で判定し直す(self, tmp_path, fake_analyze, monkeypatch):
+        states, _ = fake_analyze
+        rec, out = tmp_path / "rec", tmp_path / "out"
+        _make_rec(rec)
+        _touch(rec / "20261112_080000.mp4")
+        # 解析した時点では「判定できず」だったが、特徴量は車なしを示している
+        states["20261112_080000.mp4"] = [P, P, P, A, A, A]
+        backfill.run(str(rec), str(out), 1, 60, 3, save_frames=False)
+        assert len(_read_csv(out / backfill.TRIPS_FILE)) == 1
+
+        # しきい値を変えると、録画を読み直さずに集計が変わる(石畳だけで「あり」と言えなくなる)
+        monkeypatch.setattr(occupancy, "FLAGSTONE_EDGE_PRESENT_MAX", 0.01)
+        backfill.run(str(rec), str(out), 1, 60, 3, save_frames=False)
+        assert _read_csv(out / backfill.TRIPS_FILE) == []
+        # state 列は解析した時点の記録のまま
+        assert [row["state"] for row in _read_csv(out / backfill.OBSERVATIONS_FILE)] == [P, P, P, A, A, A]
 
     def test_最後まで読めなかった録画は1行も書かず次回もう一度試す(self, tmp_path, fake_analyze, capsys):
         states, calls = fake_analyze

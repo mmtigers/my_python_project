@@ -2,8 +2,8 @@
 # MY_HOME_SYSTEM/tools/parking_occupancy_backfill.py
 """駐車場カメラの NVR 録画を遡って読み、自家用車の在否と外出の区間を CSV に書き出す CLI。
 
-Phase 0(実現性検討)用。判定のしきい値は暫定値なので、ここで集めた特徴量(observations.csv)を
-見て `services/parking_occupancy_service.py` の値を決め直す。DB には何も書かない。
+Phase 0〜1(実現性検討・しきい値の確定)用。ここで集めた特徴量(observations.csv)を見て
+`services/parking_occupancy_service.py` のしきい値を決める。DB には何も書かない。
 
 使い方(実機の MY_HOME_SYSTEM/ で):
 
@@ -14,11 +14,14 @@ Phase 0(実現性検討)用。判定のしきい値は暫定値なので、こ�
 出力先(既定は NAS の `home_system/parking_occupancy/`。SD カードには書かない):
 
     observations.csv   1フレームごとの時刻・判定・特徴量(追記していく)
+    unreadable.txt     映像が入っておらず読めなかった録画の一覧(次回からは読み直さない)
     trips.csv          外出1回ごとの出庫・入庫の時刻と時間(毎回作り直す)
     daily_summary.csv  日ごとの外出回数と合計時間(毎回作り直す)
     frames/            --save-frames を付けた時だけ。判定が変わった・不明だったフレームの JPEG
 
 処理済みの録画は observations.csv の `file` 列で分かるので、もう一度実行すると続きから進む。
+外出の集計は、observations.csv の特徴量から**今のしきい値で判定し直して**行う(`state` 列は
+解析した時点の判定の記録)。しきい値を変えても録画を読み直す必要はない。
 録画1本(10分)ごとにファイル全体を NAS から読むため、30日分は数時間かかる。
 """
 from __future__ import annotations
@@ -49,6 +52,7 @@ OBSERVATIONS_FILE = "observations.csv"
 TRIPS_FILE = "trips.csv"
 DAILY_SUMMARY_FILE = "daily_summary.csv"
 FRAMES_DIR = "frames"
+UNREADABLE_FILE = "unreadable.txt"
 LOCK_FILE = ".backfill.lock"
 
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -124,16 +128,43 @@ def load_processed_files(observations_path: str) -> Set[str]:
         return {row["file"] for row in csv.DictReader(f)}
 
 
+def _features_from_row(row: Dict[str, str]) -> occupancy.ParkingFeatures:
+    return occupancy.ParkingFeatures(
+        is_ir=row["is_ir"] == "1",
+        saturation=float(row["saturation"]),
+        flagstone_edge=float(row["flagstone_edge"]),
+        flagstone_lap_var=float(row["flagstone_lap_var"]),
+        floor_mean=float(row["floor_mean"]),
+        floor_std=float(row["floor_std"]),
+        floor_edge=float(row["floor_edge"]),
+        floor_outlier=float(row["floor_outlier"]),
+    )
+
+
 def load_observations(observations_path: str) -> List[occupancy.Observation]:
-    """observations.csv の全行を、時刻と判定だけの観測として読む。"""
+    """observations.csv の全行を読み、特徴量から今のしきい値で判定し直した観測を返す。
+
+    `state` 列は解析した時点のしきい値による判定なので使わない。こうしておけば、
+    しきい値を見直しても録画を読み直さずに集計をやり直せる(#1115)。
+    """
     if not os.path.exists(observations_path):
         return []
+    observations: List[occupancy.Observation] = []
     with open(observations_path, newline="", encoding="utf-8") as f:
-        return [
-            occupancy.Observation(
-                datetime.datetime.strptime(row["timestamp"], TIMESTAMP_FORMAT), row["state"])
-            for row in csv.DictReader(f)
-        ]
+        for row in csv.DictReader(f):
+            features = _features_from_row(row)
+            observations.append(occupancy.Observation(
+                datetime.datetime.strptime(row["timestamp"], TIMESTAMP_FORMAT),
+                occupancy.classify(features), features))
+    return observations
+
+
+def load_unreadable_files(unreadable_path: str) -> Set[str]:
+    """unreadable.txt に載っている(映像が入っておらず読めなかった)録画ファイル名の集合。"""
+    if not os.path.exists(unreadable_path):
+        return set()
+    with open(unreadable_path, encoding="utf-8") as f:
+        return {line.strip() for line in f if line.strip()}
 
 
 def _observation_row(obs: occupancy.Observation, file_name: str) -> Dict[str, object]:
@@ -175,13 +206,17 @@ class FrameSaver:
 
 def process_recordings(
     paths: Iterable[str], observations_path: str, interval_seconds: int,
-    frame_saver: Optional[FrameSaver] = None,
+    frame_saver: Optional[FrameSaver] = None, unreadable_path: Optional[str] = None,
 ) -> int:
     """録画を順に解析して observations.csv へ追記する。書いた行数を返す。
 
     録画1本分の行は、その録画を最後まで読めてからまとめて書く。途中で止めた・ffmpeg が
     失敗した録画の行は1行も残さない(途中までの行が残ると、次回は処理済みとみなされて
     残りの時間帯が二度と解析されない)。書かなかった録画は次回もう一度試す。
+
+    ただし ffmpeg 自身が読めないと答えた録画(映像が1コマも入っていない等)は、何度
+    読み直しても同じなので `unreadable_path` に記録し、次回からは飛ばす。時間切れは
+    NAS が一時的に固まっただけかもしれないので記録しない。
     """
     is_new = not os.path.exists(observations_path)
     written = 0
@@ -201,7 +236,12 @@ def process_recordings(
                     if frame_saver is not None:
                         frame_saver.offer(obs, frame)
             except occupancy.FrameExtractionError as e:
-                print(f"録画を最後まで読めなかったので次回に回します: {e}", file=sys.stderr)
+                if e.unreadable and unreadable_path is not None:
+                    with open(unreadable_path, "a", encoding="utf-8") as unreadable:
+                        unreadable.write(file_name + "\n")
+                    print(f"録画を読めなかったので、次回からは飛ばします: {e}", file=sys.stderr)
+                else:
+                    print(f"録画を最後まで読めなかったので次回に回します: {e}", file=sys.stderr)
                 continue
             writer.writerows(rows)
             f.flush()
@@ -270,14 +310,15 @@ def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm
             return 1
 
         observations_path = os.path.join(out_dir, OBSERVATIONS_FILE)
-        processed = load_processed_files(observations_path)
+        unreadable_path = os.path.join(out_dir, UNREADABLE_FILE)
+        processed = load_processed_files(observations_path) | load_unreadable_files(unreadable_path)
         recordings = find_recordings(record_dir, days, _today())
         pending = [path for path in recordings if os.path.basename(path) not in processed]
         print(f"録画 {len(recordings)}本のうち、未処理の {len(pending)}本を解析します"
               f" ({interval_seconds}秒ごとに1フレーム)")
 
         saver = FrameSaver(os.path.join(out_dir, FRAMES_DIR), max_saved_frames) if save_frames else None
-        written = process_recordings(pending, observations_path, interval_seconds, saver)
+        written = process_recordings(pending, observations_path, interval_seconds, saver, unreadable_path)
         print(f"{written:,}件の観測を追記しました: {observations_path}")
         print()
 
