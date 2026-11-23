@@ -14,13 +14,16 @@
 だけになったが、「Streamlitに依存しないダッシュボードの正のロジック置き場」という
 このモジュールの役割自体は変わらないため、そのまま維持する。
 """
+import contextvars
 import html
 import logging
 import os
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from concurrent.futures import wait as wait_futures
 from datetime import date, datetime, timedelta
 from typing import Any, NamedTuple
 
@@ -961,18 +964,154 @@ def build_status_cards(
 _cache_lock = threading.Lock()
 _cache: dict[str, tuple[float, Any]] = {}
 
+# --- 裏での取得(ホームの表示を待たせないため) ---
+# ホームはスマートフォンのホーム画面から開かれることが多く、開いてから最初の描画までの間は
+# 起動画面(マニフェストのアイコン+背景色)が出続ける。以前は材料(DB・外部リンクの稼働チェック・
+# NASの一覧)を1つずつ順番に取っており、キャッシュが切れた状態(=しばらく開いていなかったとき)では
+# 外部サイトやNASの待ちが足し算になって、起動画面が10秒以上続くことがあった。
+# そこで、ホームの組み立ては `render_within_budget()` で次の2段にする:
+#   1. 必要な材料の取得をすべて裏で同時に始める(このとき組み立て結果は捨てる)
+#   2. 最大 `HOME_RENDER_BUDGET_SEC` 秒だけ待ってから、そろった材料で組み立てる
+# DB由来の材料(`optional=False`)は2段目で必ず取り終わるまで待つ(古い家の状態を見せないため)。
+# 待たないのは外部サイト・NASのように応答が保証されない材料(`optional=True`・`cached_with_timeout`)
+# だけで、間に合わなければ直近の値(`STALE_SERVE_MAX_SEC` 以内のもの)か None を使い、
+# ページ側が数秒後に取り直す(`RenderBudget.pending`)。
+# 同じキーの取得は同時に1本しか走らせない(single-flight)。固まった取得が溜まってスレッドを
+# 食い潰すことも、要求のたびに同じ待ちを繰り返すことも無くす。
+HOME_RENDER_BUDGET_SEC = 1.0
+STALE_SERVE_MAX_SEC = 15 * 60
+_refresh_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="dash-refresh")
+# key -> (Future, 開始時刻(monotonic), 識別子)。識別子は clear_status_cache() 後に
+# 古い取得の結果を書き戻さないためのもの。
+_inflight: dict[str, tuple[Future, float, object]] = {}
 
-def _cached(key: str, loader: Callable[[], Any], ttl: float | None = None) -> Any:
+
+class RenderBudget:
+    """`render_within_budget()` の1回分の状態。`prefetch` 中は取得を始めるだけで待たない。"""
+
+    def __init__(self, deadline: float, *, prefetch: bool):
+        self.deadline = deadline
+        self.prefetch = prefetch
+        self.futures: set[Future] = set()
+        # 間に合わず古い値(または None)で組み立てた材料があったか。ページはこれを見て早めに取り直す。
+        self.pending = False
+
+
+_render_budget: contextvars.ContextVar[RenderBudget | None] = contextvars.ContextVar(
+    "dashboard_render_budget", default=None
+)
+
+
+def _fresh_or_stale(key: str, ttl: float) -> tuple[bool, tuple[float, Any] | None]:
+    """(TTL内か, キャッシュの (時刻, 値) か None)。"""
+    with _cache_lock:
+        cached = _cache.get(key)
+    return (cached is not None and time.monotonic() - cached[0] < ttl), cached
+
+
+def _start_refresh(key: str, loader: Callable[[], Any], pool: ThreadPoolExecutor) -> tuple[Future, float]:
+    """`loader` を `pool` で裏で実行する(同じキーが実行中ならそれを返す)。
+
+    Future の結果は `(成功したか, 値)`。成功時だけキャッシュへ書く(失敗はキャッシュしない。`_cached` と同じ)。
+    """
+    with _cache_lock:
+        running = _inflight.get(key)
+        if running is not None:
+            return running[0], running[1]
+        token = object()
+
+        def job() -> tuple[bool, Any]:
+            ok, value = False, None
+            try:
+                value = loader()
+                ok = True
+            except Exception as e:  # noqa: BLE001 (1枚のカードの取得失敗でページ全体を落とさない)
+                logger.warning(f"{key} の取得に失敗しました: {e}")
+            with _cache_lock:
+                current = _inflight.get(key)
+                if current is not None and current[2] is token:
+                    del _inflight[key]
+                    if ok:
+                        _cache[key] = (time.monotonic(), value)
+            return ok, value
+
+        started = time.monotonic()
+        # job の後片付けは _cache_lock を取るので、ここで登録し終えるまで書き戻しは起きない
+        future = pool.submit(job)
+        _inflight[key] = (future, started, token)
+        return future, started
+
+
+def _result_or_none(future: Future) -> Any:
+    ok, value = future.result()
+    return value if ok else None
+
+
+def _resolve_in_budget(
+    budget: RenderBudget, future: Future, cached: tuple[float, Any] | None, *, optional: bool
+) -> Any:
+    """`render_within_budget()` の中での値の決め方(`_cached`・`cached_with_timeout` 共通)。"""
+    budget.futures.add(future)
+    if budget.prefetch:
+        return cached[1] if cached is not None else None
+    if not optional:
+        return _result_or_none(future)  # DB由来の材料は必ず待つ
+    try:
+        future.result(timeout=max(0.0, budget.deadline - time.monotonic()))
+    except FutureTimeoutError:
+        pass
+    if future.done():
+        return _result_or_none(future)
+    budget.pending = True
+    if cached is not None and time.monotonic() - cached[0] < STALE_SERVE_MAX_SEC:
+        return cached[1]
+    return None
+
+
+def render_within_budget(build: Callable[[], Any], budget_sec: float | None = None) -> tuple[Any, bool]:
+    """`build`(材料を集めて組み立てる関数)を、取得を同時に進めたうえで実行する。
+
+    戻り値は `(build の結果, 取り直しが必要か)`。`budget_sec` の省略時は `HOME_RENDER_BUDGET_SEC`。
+    仕組みは `HOME_RENDER_BUDGET_SEC` の上のコメントを参照。
+    `build` は材料が None(取得中)でも組み立てられること(取得失敗時と同じ扱いで既に成り立っている)。
+    """
+    deadline = time.monotonic() + (HOME_RENDER_BUDGET_SEC if budget_sec is None else budget_sec)
+    prefetch = RenderBudget(deadline, prefetch=True)
+    token = _render_budget.set(prefetch)
+    try:
+        build()
+    finally:
+        _render_budget.reset(token)
+    if prefetch.futures:
+        wait_futures(prefetch.futures, timeout=max(0.0, deadline - time.monotonic()))
+
+    budget = RenderBudget(deadline, prefetch=False)
+    token = _render_budget.set(budget)
+    try:
+        result = build()
+    finally:
+        _render_budget.reset(token)
+    return result, budget.pending
+
+
+def _cached(key: str, loader: Callable[[], Any], ttl: float | None = None, *, optional: bool = False) -> Any:
     """`ttl`(省略時は`STATUS_CACHE_TTL_SEC`)の間は前回の値を返す。
 
     取得に失敗した場合は例外を伝播させず None を返す(1枚のカードの取得失敗で
     ページ全体を落とさない)。失敗はキャッシュしないので、次の要求で再試行する。
+
+    `render_within_budget()` の中では取得を裏で行う。`optional=True`(外部サイトのように
+    応答が保証されない材料)は時間内に終わらなければ待たない。
     """
-    now = time.monotonic()
-    with _cache_lock:
-        cached = _cache.get(key)
-        if cached is not None and now - cached[0] < (STATUS_CACHE_TTL_SEC if ttl is None else ttl):
-            return cached[1]
+    ttl = STATUS_CACHE_TTL_SEC if ttl is None else ttl
+    fresh, cached = _fresh_or_stale(key, ttl)
+    if fresh and cached is not None:
+        return cached[1]
+
+    budget = _render_budget.get()
+    if budget is not None:
+        future, _ = _start_refresh(key, loader, _refresh_pool)
+        return _resolve_in_budget(budget, future, cached, optional=optional)
 
     try:
         value = loader()
@@ -989,6 +1128,8 @@ def clear_status_cache() -> None:
     """TTLを待たずにキャッシュを捨てる(テスト・明示的な再取得用)。"""
     with _cache_lock:
         _cache.clear()
+        # 実行中の取得は止められないが、結果を書き戻させない(識別子が外れるため)
+        _inflight.clear()
 
 
 # くらしページの電気代詳細(日別推移)で遡る日数。
@@ -1080,17 +1221,31 @@ def check_asa_note_health(url: str) -> bool:
         return False
 
 
-def collect_link_health(asa_note_url: str, yoru_note_url: str | None = None) -> dict[str, bool]:
+def collect_link_health(asa_note_url: str, yoru_note_url: str | None = None) -> dict[str, bool | None]:
     """ホームの外部リンクの稼働状況(`{"quest": bool, "asa_note": bool}`。`yoru_note_url`を
     渡したときだけ `"yoru_note"` も入る)。`STATUS_CACHE_TTL_SEC`のTTLキャッシュ付き。
+    `render_within_budget()`の中で確認が間に合わなかったものは None(未判定)。
     よるノートもあさノートと同じ外部(Vercel)サービスなので同じチェック関数を使う。"""
-    quest = _cached("link_health_quest", check_quest_app_health)
-    asa_note = _cached(f"link_health_asa_note:{asa_note_url}", lambda: check_asa_note_health(asa_note_url))
-    health = {"quest": bool(quest), "asa_note": bool(asa_note)}
+    quest = _cached("link_health_quest", check_quest_app_health, optional=True)
+    asa_note = _cached(
+        f"link_health_asa_note:{asa_note_url}", lambda: check_asa_note_health(asa_note_url), optional=True
+    )
+    health = {"quest": _health_flag(quest), "asa_note": _health_flag(asa_note)}
     if yoru_note_url:
-        yoru_note = _cached(f"link_health_yoru_note:{yoru_note_url}", lambda: check_asa_note_health(yoru_note_url))
-        health["yoru_note"] = bool(yoru_note)
+        yoru_note = _cached(
+            f"link_health_yoru_note:{yoru_note_url}", lambda: check_asa_note_health(yoru_note_url), optional=True
+        )
+        health["yoru_note"] = _health_flag(yoru_note)
     return health
+
+
+def _health_flag(value: Any) -> bool | None:
+    """チェック結果を表示用に。None(`render_within_budget()`の中でまだ確認中)は None のまま返し、
+    リンクを「停止中」ではなく状態表示なしで出す(確認が終わればページの取り直しで色が付く)。
+    `render_within_budget()`の外では従来どおり None(取得失敗)も False(停止中)として扱う。"""
+    if value is None and _render_budget.get() is not None:
+        return None
+    return bool(value)
 
 
 def get_nas_history(days: int) -> pd.DataFrame:
@@ -1164,8 +1319,8 @@ def get_hourly_activity(build: Callable[[pd.DataFrame], dict]) -> dict:
 # 録画の状態・カメラの写真はNAS上のファイル一覧から作る。NAS(CIFS)は不調時に応答が返らないまま
 # 待たされることがあり、そのまま呼ぶとホームの表示ごと固まる。別スレッドで実行して
 # `NAS_READ_TIMEOUT_SEC` で打ち切り、間に合わなければ「分からない」(None)として扱う。
-# ワーカー数を絞ってあるのは、固まった読み取りが溜まり続けてスレッドを食い潰さないため
-# (埋まっている間の新しい要求は待ち行列で時間切れになり、同じく None になる)。
+# 同じキーの読み取りは同時に1本だけ(`_start_refresh`)なので、固まった読み取りがキーの数より
+# 増えることはない。ワーカー数を絞ってあるのは、それでもスレッドを食い潰さないための保険。
 NAS_READ_TIMEOUT_SEC = 3.0
 NAS_READ_CACHE_TTL_SEC = 120
 _nas_read_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="dash-nas-read")
@@ -1174,8 +1329,25 @@ _nas_read_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="dash-nas-
 def cached_with_timeout(
     key: str, loader: Callable[[], Any], *, ttl: float = NAS_READ_CACHE_TTL_SEC, timeout: float = NAS_READ_TIMEOUT_SEC
 ) -> Any:
-    """`loader` を別スレッドで実行し、`timeout` 秒以内に終わらなければ None(失敗はキャッシュしない)。"""
-    return _cached(key, lambda: _nas_read_pool.submit(loader).result(timeout=timeout), ttl=ttl)
+    """`loader` を別スレッドで実行し、`timeout` 秒以内に終わらなければ None(失敗はキャッシュしない)。
+
+    同じキーの読み取りは同時に1本だけ走らせ、2回目以降の要求は**最初の読み取りの開始から** `timeout`
+    秒までしか待たない。以前は時間切れをキャッシュしなかったため、NASが固まっている間は要求のたびに
+    `timeout` 秒ずつ待たされ、ホームを開くたびに表示が遅れていた。
+    `render_within_budget()` の中では `optional=True` の材料として扱う(時間内に終わらなければ待たない)。
+    """
+    fresh, cached = _fresh_or_stale(key, ttl)
+    if fresh and cached is not None:
+        return cached[1]
+    future, started = _start_refresh(key, loader, _nas_read_pool)
+    budget = _render_budget.get()
+    if budget is not None:
+        return _resolve_in_budget(budget, future, cached, optional=True)
+    try:
+        future.result(timeout=max(0.0, started + timeout - time.monotonic()))
+    except FutureTimeoutError:
+        return None
+    return _result_or_none(future)
 
 
 def get_camera_recording_states() -> list[dict[str, Any]] | None:

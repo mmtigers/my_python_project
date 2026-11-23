@@ -129,7 +129,7 @@ def dashboard_home(
     if legacy:
         return RedirectResponse(url=f"{_BASE_PATH}/life?{urlencode(legacy)}#climate-heatmap", status_code=302)
 
-    cards, fetched_at = home_status_service.collect_status_cards()
+    (cards, fetched_at, parts), pending = home_status_service.render_within_budget(_collect_home_status)
     return HTMLResponse(
         dashboard_page_service.render_home_page(
             cards,
@@ -137,9 +137,17 @@ def dashboard_home(
             status_path=_STATUS_PATH,
             manifest_path=f"{_BASE_PATH}/app.webmanifest",
             icon_path=f"{_BASE_PATH}/icon-180.png",
-            **_home_status_parts(cards),
+            pending=pending,
+            **parts,
         )
     )
+
+
+def _collect_home_status():
+    """ホームページ本体と自動更新フラグメントの材料。`home_status_service.render_within_budget` に渡し、
+    材料の取得を同時に進める(外部サイト・NASの待ちで最初の描画を遅らせないため)。"""
+    cards, fetched_at = home_status_service.collect_status_cards()
+    return cards, fetched_at, _home_status_parts(cards)
 
 
 def _home_status_parts(cards) -> dict:
@@ -202,9 +210,9 @@ def _climate_heatmap_html(
 @router.get(_STATUS_PATH, include_in_schema=False)
 def dashboard_status_fragment() -> HTMLResponse:
     """ホームページの自動更新用(サマリー・カード・カメラの写真・今日の動き・外部リンクのブロックだけを返す)。"""
-    cards, fetched_at = home_status_service.collect_status_cards()
+    (cards, fetched_at, parts), pending = home_status_service.render_within_budget(_collect_home_status)
     return HTMLResponse(
-        dashboard_page_service.render_home_status_section(cards, fetched_at, **_home_status_parts(cards))
+        dashboard_page_service.render_home_status_section(cards, fetched_at, pending=pending, **parts)
     )
 
 
