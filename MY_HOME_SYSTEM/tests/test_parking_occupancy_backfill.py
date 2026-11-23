@@ -78,7 +78,7 @@ class TestFindRecordings:
         assert old not in found
 
     def test_書き込み中かどうかは更新時刻ではなくファイル名の並びで決める(self, tmp_path):
-        # NAS 上の更新時刻は Pi の時計より約10分遅れて見える。書き込み中の録画の
+        # NAS(CIFS)上では書き込み中のファイルの更新時刻が進まない。書き込み中の録画の
         # 更新時刻が古くても、いちばん新しい録画なら除く。
         done = _touch(tmp_path / "20261112_212023.mp4")
         writing = _touch(tmp_path / "20261112_213023.mp4")
