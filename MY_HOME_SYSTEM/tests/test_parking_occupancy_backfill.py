@@ -25,11 +25,19 @@ P, A, U = occupancy.STATE_PRESENT, occupancy.STATE_ABSENT, occupancy.STATE_UNKNO
 FEATURES = occupancy.ParkingFeatures(False, 30.0, 0.2, 8000.0, 160.0, 15.0, 0.02, 0.01)
 
 
-def _touch(path, age_seconds=3600):
+def _touch(path):
     path.write_bytes(b"")
-    stamp = time.time() - age_seconds
-    os.utime(path, (stamp, stamp))
     return str(path)
+
+
+# 録画ディレクトリでいちばん新しい録画は書き込み中として解析しない。各テストの録画が
+# 解析対象になるよう、それより新しい「書き込み中」の録画を置いておく。
+WRITING = "20261112_235000.mp4"
+
+
+def _make_rec(rec):
+    rec.mkdir()
+    _touch(rec / WRITING)
 
 
 def _read_csv(path):
@@ -62,12 +70,31 @@ class TestFindRecordings:
         old = _touch(tmp_path / "20261110_230000.mp4")
         yesterday = _touch(tmp_path / "20261111_120000.mp4")
         today = _touch(tmp_path / "20261112_000000.mp4")
-        _touch(tmp_path / "20261112_001000.mp4", age_seconds=5)  # 書き込み中
+        _touch(tmp_path / "20261112_001000.mp4")  # いちばん新しい = 書き込み中
         _touch(tmp_path / "20261112_broken.mp4")
 
-        found = backfill.find_recordings(str(tmp_path), 2, TODAY, time.time())
+        found = backfill.find_recordings(str(tmp_path), 2, TODAY)
         assert found == [yesterday, today]
         assert old not in found
+
+    def test_書き込み中かどうかは更新時刻ではなくファイル名の並びで決める(self, tmp_path):
+        # NAS(CIFS)上では書き込み中のファイルの更新時刻が進まない。書き込み中の録画の
+        # 更新時刻が古くても、いちばん新しい録画なら除く。
+        done = _touch(tmp_path / "20261112_212023.mp4")
+        writing = _touch(tmp_path / "20261112_213023.mp4")
+        stamp = time.time() - 3600
+        os.utime(writing, (stamp, stamp))
+
+        assert backfill.find_recordings(str(tmp_path), 1, TODAY) == [done]
+
+    def test_期間外の日にいちばん新しい録画があっても期間内の録画は除かない(self, tmp_path):
+        yesterday = _touch(tmp_path / "20261111_120000.mp4")
+        _touch(tmp_path / "20261113_000000.mp4")  # 期間(TODAY まで)の外にある最新の録画
+
+        assert backfill.find_recordings(str(tmp_path), 2, TODAY) == [yesterday]
+
+    def test_録画が無ければ空を返す(self, tmp_path):
+        assert backfill.find_recordings(str(tmp_path), 7, TODAY) == []
 
     def test_ファイル名から開始時刻を読む(self):
         assert backfill.recording_start("/rec/20261112_093000.mp4") == datetime.datetime(2026, 11, 12, 9, 30)
@@ -78,7 +105,7 @@ class TestRun:
     def test_解析して_CSV_を書き出し外出を集計する(self, tmp_path, fake_analyze, capsys):
         states, _ = fake_analyze
         rec, out = tmp_path / "rec", tmp_path / "out"
-        rec.mkdir()
+        _make_rec(rec)
         _touch(rec / "20261112_080000.mp4")
         _touch(rec / "20261112_081000.mp4")
         states["20261112_080000.mp4"] = [P, P, P, A, A, A, A, A, A, A]
@@ -103,7 +130,7 @@ class TestRun:
     def test_もう一度実行すると処理済みの録画は飛ばして続きから進む(self, tmp_path, fake_analyze):
         states, calls = fake_analyze
         rec, out = tmp_path / "rec", tmp_path / "out"
-        rec.mkdir()
+        _make_rec(rec)
         _touch(rec / "20261112_080000.mp4")
         states["20261112_080000.mp4"] = [P, P, P]
         backfill.run(str(rec), str(out), 1, 60, 3, save_frames=False)
@@ -121,7 +148,7 @@ class TestRun:
     def test_フレームが取れなかった録画は記録せず次回もう一度試す(self, tmp_path, fake_analyze):
         _, calls = fake_analyze
         rec, out = tmp_path / "rec", tmp_path / "out"
-        rec.mkdir()
+        _make_rec(rec)
         _touch(rec / "20261112_080000.mp4")
 
         backfill.run(str(rec), str(out), 1, 60, 3, save_frames=False)
@@ -132,7 +159,7 @@ class TestRun:
     def test_最後まで読めなかった録画は1行も書かず次回もう一度試す(self, tmp_path, fake_analyze, capsys):
         states, calls = fake_analyze
         rec, out = tmp_path / "rec", tmp_path / "out"
-        rec.mkdir()
+        _make_rec(rec)
         _touch(rec / "20261112_080000.mp4")
         _touch(rec / "20261112_081000.mp4")
         states["20261112_080000.mp4"] = [P, P, occupancy.FrameExtractionError("NAS が応答しない")]
@@ -151,7 +178,7 @@ class TestRun:
     def test_途中で中断した録画の行は残さない(self, tmp_path, fake_analyze):
         states, _ = fake_analyze
         rec, out = tmp_path / "rec", tmp_path / "out"
-        rec.mkdir()
+        _make_rec(rec)
         _touch(rec / "20261112_080000.mp4")
         _touch(rec / "20261112_081000.mp4")
         states["20261112_080000.mp4"] = [P, P, P]
@@ -166,7 +193,7 @@ class TestRun:
     def test_判定が変わった時と不明の時だけ画像を残し上限を守る(self, tmp_path, fake_analyze):
         states, _ = fake_analyze
         rec, out = tmp_path / "rec", tmp_path / "out"
-        rec.mkdir()
+        _make_rec(rec)
         _touch(rec / "20261112_080000.mp4")
         states["20261112_080000.mp4"] = [P, P, A, A, U, P]
 
@@ -187,7 +214,7 @@ class TestRun:
     def test_別の解析が実行中なら何もしない(self, tmp_path, fake_analyze, capsys):
         _, calls = fake_analyze
         rec, out = tmp_path / "rec", tmp_path / "out"
-        rec.mkdir()
+        _make_rec(rec)
         out.mkdir()
         _touch(rec / "20261112_080000.mp4")
 

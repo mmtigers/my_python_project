@@ -30,7 +30,6 @@ import fcntl
 import glob
 import os
 import sys
-import time
 from typing import Dict, Iterable, List, Optional, Set
 
 import cv2
@@ -44,9 +43,6 @@ from services import parking_occupancy_service as occupancy
 DEFAULT_DAYS = 7
 DEFAULT_INTERVAL_SECONDS = 60
 DEFAULT_MAX_SAVED_FRAMES = 500
-# 書き込み中の録画(更新時刻が新しいもの)は次回に回す。途中までしか読めないのに
-# 「処理済み」と記録すると、残りの時間帯が二度と解析されない。
-IN_PROGRESS_SECONDS = 120
 SAVED_FRAME_SIZE = (640, 360)
 
 OBSERVATIONS_FILE = "observations.csv"
@@ -93,15 +89,30 @@ def recording_start(path: str) -> Optional[datetime.datetime]:
         return None
 
 
-def find_recordings(record_dir: str, days: int, today: datetime.date, now: float) -> List[str]:
-    """直近 `days` 日分(今日を含む)の録画を古い順に返す。書き込み中のものは除く。"""
+def find_recordings(record_dir: str, days: int, today: datetime.date) -> List[str]:
+    """直近 `days` 日分(今日を含む)の録画を古い順に返す。書き込み中のものは除く。
+
+    ディレクトリ内でいちばん新しい録画は、まだ書き込み中とみなして除く(次の録画が
+    できた時点で書き終わっている)。途中までしか読めないのに「処理済み」と記録すると、
+    残りの時間帯が二度と解析されない。
+
+    以前はファイルの更新時刻で判定していたが、この NAS(CIFS)では書き込み中のファイルの
+    更新時刻が書き込みに合わせて進まず(monitors/health_watch.py のチェック10と同じ事情)、
+    書き込み中の録画も「書き終わった」と誤判定していた。ファイル名とその並びだけで
+    決めれば、更新時刻にも時計のずれにも左右されない。
+    """
+    names = sorted(
+        name for name in os.listdir(record_dir)
+        if name.endswith(".mp4") and recording_start(name) is not None
+    )
+    writing = names[-1] if names else None
     paths: List[str] = []
     for offset in range(days - 1, -1, -1):
         day = today - datetime.timedelta(days=offset)
         paths.extend(sorted(glob.glob(os.path.join(record_dir, f"{day:%Y%m%d}_*.mp4"))))
     return [
         path for path in paths
-        if recording_start(path) is not None and now - os.path.getmtime(path) >= IN_PROGRESS_SECONDS
+        if recording_start(path) is not None and os.path.basename(path) != writing
     ]
 
 
@@ -260,7 +271,7 @@ def run(record_dir: str, out_dir: str, days: int, interval_seconds: int, confirm
 
         observations_path = os.path.join(out_dir, OBSERVATIONS_FILE)
         processed = load_processed_files(observations_path)
-        recordings = find_recordings(record_dir, days, _today(), time.time())
+        recordings = find_recordings(record_dir, days, _today())
         pending = [path for path in recordings if os.path.basename(path) not in processed]
         print(f"録画 {len(recordings)}本のうち、未処理の {len(pending)}本を解析します"
               f" ({interval_seconds}秒ごとに1フレーム)")
