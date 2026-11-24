@@ -42,6 +42,8 @@ TASKS: List[Task] = [
     # SwitchBotハブ(devices.json で ip を設定したもの)の ping 死活監視。連続失敗でLINE通知。
     {"script": "monitors/switchbot_hub_monitor.py",   "interval": 300,  "last_run": 0, "args": []},
     {"script": "monitors/server_watchdog.py",         "interval": 600,  "last_run": 0, "args": []},
+    # #1116: 駐車場カメラの録画(10分ごとに1本)を解析して、自家用車の在否の特徴量を DB に保存する。
+    {"script": "monitors/parking_occupancy_monitor.py", "interval": 600, "last_run": 0, "args": []},
 
     # 頻度: 高 (60秒) — 休日のテレビ解除を14:00ちょうど(13:59スロット)に効かせるため。
     # 300秒間隔だと起動位相次第でスロットの実行が最大5分遅れる(実例: 14:04)。

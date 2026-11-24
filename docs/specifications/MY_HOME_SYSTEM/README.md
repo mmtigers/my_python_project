@@ -112,6 +112,8 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [db_retention.md](./db_retention.md) | 上記を実機で確認・実行するための CLI(2026-09-20 新設、Issue #733)。引数なしで現状と削除予定のレポート、`--apply` で削除、`--vacuum` でファイル縮小。 |
 | [parking_occupancy_service.md](./parking_occupancy_service.md) | 駐車場カメラの映像から自家用車の在否を判定し、外出(出庫→入庫)の区間と日ごとの集計にまとめるサービス(Phase 0: 実現性検討。DB・ダッシュボードには未接続)。石畳のエッジ密度と床の外れ画素の割合をしきい値で判定し、2つが一致した時だけ在/不在とする。 |
 | [parking_occupancy_backfill.md](./parking_occupancy_backfill.md) | 上記を使い、NAS 上の NVR 録画を遡って解析して CSV(観測・外出・日次集計)に書き出す CLI。処理済みの録画は飛ばして続きから進む。 |
+| [parking_record_service.md](./parking_record_service.md) | 駐車場の在否判定の結果(1フレームごとの特徴量)を DB に保存・読み出すサービス(#1116)。在否は保存せず、読み出すたびに今のしきい値で判定し直す。 |
+| [parking_occupancy_monitor.md](./parking_occupancy_monitor.md) | 駐車場カメラの録画を10分ごとに解析して、在否の特徴量を DB に保存する監視スクリプト(#1116)。`--import-csv` で Phase 0〜1 の CSV を取り込める。 |
 | [ui_log_router.md](./ui_log_router.md) | 画面タップログ(UX改善用の操作ログ)を受け付ける`POST /api/ui-log/events`のルーター。薄いルーターで実処理は`ui_event_service`に委譲する。 |
 | [ui_log.md](./ui_log.md) | 画面タップログのリクエスト/レスポンスのPydanticモデル(`UiTapEvent`/`UiTapBatch`/`UiTapBatchResponse`)。 |
 | [ui_event_service.md](./ui_event_service.md) | 画面タップのバッチを`ui_tap_events`へ`INSERT OR IGNORE`で追記するサービス(冪等・時刻範囲チェック)。 |

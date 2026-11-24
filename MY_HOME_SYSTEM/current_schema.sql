@@ -446,3 +446,27 @@ CREATE TABLE server_boot_events (
 );
 CREATE INDEX idx_server_boot_events_booted_at
     ON server_boot_events(booted_at);
+CREATE TABLE parking_recordings (
+    file TEXT PRIMARY KEY,                 
+    started_at TEXT NOT NULL,              
+    status TEXT NOT NULL,
+    observation_count INTEGER NOT NULL DEFAULT 0,
+    processed_at TEXT NOT NULL             
+);
+CREATE INDEX idx_parking_recordings_started_at
+    ON parking_recordings(started_at);
+CREATE TABLE parking_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    file TEXT NOT NULL,                    
+    is_ir INTEGER NOT NULL,                
+    saturation REAL NOT NULL,
+    flagstone_edge REAL NOT NULL,
+    flagstone_lap_var REAL NOT NULL,
+    floor_mean REAL NOT NULL,
+    floor_std REAL NOT NULL,
+    floor_edge REAL NOT NULL,
+    floor_outlier REAL NOT NULL
+);
+CREATE INDEX idx_parking_observations_observed_at
+    ON parking_observations(observed_at);
