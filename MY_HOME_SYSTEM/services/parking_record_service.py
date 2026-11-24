@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import datetime
+from dataclasses import dataclass
 from typing import Iterable, List, Optional, Set
 
 from core.database import get_db_cursor
@@ -105,6 +106,30 @@ def load_observations(
         observations.append(occupancy.Observation(
             datetime.datetime.strptime(row[0], TIMESTAMP_FORMAT), occupancy.classify(features), features))
     return observations
+
+
+@dataclass(frozen=True)
+class CarSummary:
+    """ダッシュボードの「🚗 駐車場」カード用のまとめ。"""
+    state: str                                  # parking_occupancy_service.STATE_*
+    since: Optional[datetime.datetime]          # その状態になった時刻(読んだ範囲より前からなら None)
+    last_observed_at: Optional[datetime.datetime]
+    trips_today: int                            # 今日出発した外出の回数
+
+
+# カード用に読む範囲。外出中の「何時から」を出すには、出発が範囲に入っている必要がある。
+CAR_SUMMARY_WINDOW = datetime.timedelta(days=2)
+
+
+def get_car_summary(now: datetime.datetime) -> Optional[CarSummary]:
+    """直近 `CAR_SUMMARY_WINDOW` の観測から、いまの在否と今日の外出回数を求める。観測が無ければ None。"""
+    observations = load_observations(now - CAR_SUMMARY_WINDOW)
+    if not observations:
+        return None
+    current = occupancy.current_state(observations)
+    trips = occupancy.build_trips(occupancy.build_events(observations))
+    trips_today = sum(1 for trip in trips if trip.departed_at.date() == now.date())
+    return CarSummary(current.state, current.since, current.last_observed_at, trips_today)
 
 
 def get_trips(

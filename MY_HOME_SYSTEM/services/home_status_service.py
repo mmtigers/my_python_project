@@ -35,7 +35,8 @@ from core import state_file
 from core.database import get_ro_connection
 from core.utils import get_now_jst
 
-from services import analysis_service, recording_status_service
+from services import analysis_service, parking_record_service, recording_status_service
+from services import parking_occupancy_service as parking_occupancy
 
 logger = logging.getLogger(__name__)
 
@@ -668,6 +669,54 @@ def get_parking_status(df_sensor: pd.DataFrame, now: datetime) -> tuple[str, str
     return "24時間 検知なし", "theme-gray"
 
 
+# #1117: 駐車場カメラの録画から判定した自家用車の在否(`parking_record_service.get_car_summary`)。
+# 判定は10分ごとに書き終わった録画を解析して積み上がる(`monitors/parking_occupancy_monitor.py`)
+# ので、最新の判定は録画の長さ(10分)+解析の間隔(10分)ぶん遅れる。それより十分古ければ
+# 判定が止まっている(NAS・録画・定期実行のどれかが止まった)とみなす。
+CAR_STATE_STALE_MINUTES = 45
+
+
+def _car_is_stale(car: "parking_record_service.CarSummary", now: datetime) -> bool:
+    last = car.last_observed_at
+    return last is None or (now.replace(tzinfo=None) - last).total_seconds() / 60 > CAR_STATE_STALE_MINUTES
+
+
+def get_car_status(car: "parking_record_service.CarSummary | None", now: datetime) -> tuple[str, str] | None:
+    """車があるか(駐車中/外出中)。判定のデータが無ければ None(呼び出し元は動体検知の表示に戻す)。
+
+    駐車中・外出中はどちらもふだんの状態なので、赤・黄にはしない(ホームの「確認が必要です」に
+    数えない)。判定が止まっている・判定できないときはグレー。
+    """
+    if car is None:
+        return None
+    if _car_is_stale(car, now):
+        return "⚪ 判定が止まっています", "theme-gray"
+    if car.state == parking_occupancy.STATE_PRESENT:
+        return "🅿️ 駐車中", "theme-green"
+    if car.state == parking_occupancy.STATE_ABSENT:
+        return "🚙 外出中", "theme-blue"
+    return "⚪ 判定できません", "theme-gray"
+
+
+def describe_car(car: "parking_record_service.CarSummary | None", now: datetime) -> str | None:
+    """いつからその状態か(帰宅・出発の時刻)と、今日の外出回数。判定が止まっていれば最後の判定の時刻。"""
+    if car is None:
+        return None
+    naive_now = now.replace(tzinfo=None)
+    if _car_is_stale(car, now):
+        at = _format_moment(car.last_observed_at, naive_now)
+        return None if at is None else f"最終判定 {at}"
+    parts = []
+    at = _format_moment(car.since, naive_now)
+    if at is not None and car.state == parking_occupancy.STATE_PRESENT:
+        parts.append(f"{at} に帰宅")
+    elif at is not None and car.state == parking_occupancy.STATE_ABSENT:
+        parts.append(f"{at} に出発")
+    if car.trips_today:
+        parts.append(f"今日 {car.trips_today}回外出")
+    return "・".join(parts) or None
+
+
 # === 補足表示(カードの値の下に小さく出す) ===
 # 「いまの値」だけでは高いのか低いのか・普段どおりなのかが判断できないカードに、
 # 比べる相手(前回いつ・先月の同じ時点・最終検知時刻)を添える。
@@ -906,6 +955,7 @@ def build_status_cards(
     last_month_cost: int | None = None,
     disk: dict[str, float] | None = None,
     recording: list[dict[str, Any]] | None = None,
+    car: "parking_record_service.CarSummary | None" = None,
 ) -> list[StatusCard]:
     """渡された材料から、並べる順にカードを組み立てる(取得は行わない)。
 
@@ -921,10 +971,16 @@ def build_status_cards(
     `monthly_cost` が None(取得失敗)なら電気代カードは灰色の「取得できません」になる。
     `recording`(カメラごとの録画の状態)を渡すと「🎥 カメラ」カードが録画の状態を示す
     (`get_camera_status` を参照。None なら従来どおり最後の動体検知)。
+    `car`(駐車場の在否判定。#1117)を渡すと「🚗 駐車場」カードが駐車中/外出中を示す
+    (`get_car_status` を参照。None なら従来どおり駐車場カメラの最後の動体検知)。
     """
     taka_val, taka_theme = get_takasago_status(df_sensor, now)
     itami_val, itami_theme = get_itami_status(df_sensor, now)
-    parking_val, parking_theme = get_parking_status(df_sensor, now)
+    car_status = get_car_status(car, now)
+    if car_status is not None:
+        (parking_val, parking_theme), parking_sub = car_status, describe_car(car, now)
+    else:
+        (parking_val, parking_theme), parking_sub = get_parking_status(df_sensor, now), describe_parking(df_sensor, now)
     camera_val, camera_theme = get_camera_status(df_sensor, now, recording)
     cost_val, cost_theme = get_cost_status(monthly_cost)
     server_val, server_theme = get_server_status(memory)
@@ -942,7 +998,7 @@ def build_status_cards(
         StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme, tab="watch", group="watch",
                    sub=describe_itami(df_sensor, now), anchor="#itami-log"),
         StatusCard("🚗 駐車場", parking_val, parking_theme, tab="watch", group="watch",
-                   sub=describe_parking(df_sensor, now),
+                   sub=parking_sub,
                    anchor=f"?camera={PARKING_CAMERA_ID}#camera-section"),
         StatusCard("🎥 カメラ", camera_val, camera_theme, tab="watch", group="watch",
                    sub=describe_camera(df_sensor, now, recording), anchor="#camera-section"),
@@ -1356,6 +1412,14 @@ def get_camera_recording_states() -> list[dict[str, Any]] | None:
     return cached_with_timeout("recording_states", recording_status_service.camera_recording_states)
 
 
+def get_car_summary() -> "parking_record_service.CarSummary | None":
+    """駐車場の在否判定のまとめ(#1117)。判定のデータが無い・取得失敗は None(カードは動体検知の表示に戻る)。
+
+    録画ファイル名と同じホストのローカル時刻で読む(`parking_record_service` の時刻の扱いに合わせる)。
+    """
+    return _cached("car_summary", lambda: parking_record_service.get_car_summary(datetime.now()))
+
+
 # === ホーム最上部の「いまの状態」 ===
 
 class HomeAlert(NamedTuple):
@@ -1542,6 +1606,7 @@ def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard],
         last_month_cost=materials.last_month_cost,
         disk=materials.disk,
         recording=get_camera_recording_states(),
+        car=get_car_summary(),
     )
     return cards, now
 

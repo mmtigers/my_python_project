@@ -31,7 +31,6 @@ import threading
 from dataclasses import dataclass
 from typing import Iterable, Iterator, List, NamedTuple, Optional
 
-import cv2
 import numpy as np
 
 # === 解析に使うフレームの大きさ ===
@@ -167,11 +166,18 @@ def _crop(image: np.ndarray, roi: Roi) -> np.ndarray:
 
 
 def _edge_density(gray: np.ndarray) -> float:
+    import cv2  # 遅延 import(compute_features を参照)
+
     return float(cv2.Canny(gray, CANNY_LOW, CANNY_HIGH).mean() / 255)
 
 
 def compute_features(frame_bgr: np.ndarray) -> ParkingFeatures:
     """BGR のフレームから特徴量を計算する。大きさが違えば解析用の大きさに揃える。"""
+    # OpenCV は解析する時だけ読み込む。ダッシュボード(unified_server)は判定と外出の集計
+    # (classify / build_events / current_state)だけを使うので、サーバー本体に OpenCV を
+    # 読み込ませない(Pi のメモリを数十MB余計に使うため。#1117)。
+    import cv2
+
     if frame_bgr.shape[:2] != (ANALYZE_HEIGHT, ANALYZE_WIDTH):
         frame_bgr = cv2.resize(frame_bgr, (ANALYZE_WIDTH, ANALYZE_HEIGHT), interpolation=cv2.INTER_AREA)
 
@@ -329,6 +335,43 @@ def build_events(
         run = []
 
     return events
+
+
+@dataclass(frozen=True)
+class CurrentState:
+    """いまの在否。`since` はその状態になった時刻で、観測の範囲より前からなら None。"""
+    state: str
+    since: Optional[datetime.datetime]
+    last_observed_at: Optional[datetime.datetime]
+
+
+def current_state(
+    observations: Iterable[Observation], confirm_count: int = DEFAULT_CONFIRM_COUNT,
+) -> CurrentState:
+    """観測の並びから、いま確定している在否と、その状態になった時刻を求める。
+
+    確定の仕方は `build_events` と同じ(不明は読み飛ばし、同じ判定が `confirm_count` 回
+    続いたら確定)。まだ一度も確定していなければ `state` は不明。`last_observed_at` は
+    不明を含めた最後の観測の時刻で、判定が止まっていないかを見るのに使う。
+    """
+    observations = sorted(observations, key=lambda o: o.timestamp)
+    last_observed_at = observations[-1].timestamp if observations else None
+    events = build_events(observations, confirm_count=confirm_count)
+    if events:
+        last = events[-1]
+        state = STATE_PRESENT if last.kind == EVENT_ARRIVE else STATE_ABSENT
+        return CurrentState(state, last.at, last_observed_at)
+    # 変化が一度も無い: 最初に確定した状態のまま(いつからかは観測の範囲より前なので分からない)
+    run: List[Observation] = []
+    for obs in observations:
+        if obs.state == STATE_UNKNOWN:
+            continue
+        if run and run[-1].state != obs.state:
+            run = []
+        run.append(obs)
+        if len(run) >= confirm_count:
+            return CurrentState(obs.state, None, last_observed_at)
+    return CurrentState(STATE_UNKNOWN, None, last_observed_at)
 
 
 def build_trips(events: Iterable[ParkingEvent]) -> List[Trip]:
