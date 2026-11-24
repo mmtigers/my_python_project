@@ -70,10 +70,11 @@ class TestStartAllShCleanupTargets:
             "scheduler_boot.py",
             # Issue #738 (AUDIT-008): routine_deadline_job.py を TASKS に追加したため停止対象にも追加
             # 気温の取得(weather_monitor.py)を TASKS に追加したため停止対象にも追加
+            # #1116: 駐車場の在否判定(parking_occupancy_monitor.py)を TASKS に追加したため停止対象にも追加
             (
                 "python.*monitors/(switchbot_power_monitor|nature_remo_monitor|switchbot_hub_monitor"
                 "|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor|routine_deadline_job"
-                "|weather_monitor)\\.py"
+                "|weather_monitor|parking_occupancy_monitor)\\.py"
             ),
             "ffmpeg.*hls_streams",
         }

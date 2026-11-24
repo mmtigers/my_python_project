@@ -81,6 +81,10 @@ RETENTION_TARGETS: tuple[RetentionTarget, ...] = (
     RetentionTarget("nas_records", "timestamp", "DB_ROW_RETENTION_SENSOR_DAYS", "NAS監視ログ"),
     RetentionTarget("bicycle_parking_records", "timestamp", "DB_ROW_RETENTION_SENSOR_DAYS", "駐輪場記録"),
     RetentionTarget("security_logs", "timestamp", "DB_ROW_RETENTION_SENSOR_DAYS", "防犯ログ"),
+    # #1116: 駐車場の在否判定。観測は1日約1,440行。録画の記録も同じ期間で消す
+    # (録画そのものは RECORDING_RETENTION_DAYS で先に消えるので、読み直されることはない)。
+    RetentionTarget("parking_observations", "observed_at", "DB_ROW_RETENTION_SENSOR_DAYS", "駐車場の在否"),
+    RetentionTarget("parking_recordings", "started_at", "DB_ROW_RETENTION_SENSOR_DAYS", "駐車場の解析済み録画"),
     RetentionTarget("routine_step_events", "occurred_at", "DB_ROW_RETENTION_EVENT_DAYS", "ルーティン遷移"),
     RetentionTarget("ui_tap_events", "occurred_at", "DB_ROW_RETENTION_EVENT_DAYS", "画面タップログ"),
     RetentionTarget("server_boot_events", "booted_at", "DB_ROW_RETENTION_EVENT_DAYS", "サーバー起動履歴"),
