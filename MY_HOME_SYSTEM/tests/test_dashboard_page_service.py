@@ -209,7 +209,7 @@ class TestRenderWatchPage:
     def test_renders_without_error_when_data_is_empty(self, monkeypatch):
         monkeypatch.setattr(config, "CAMERAS", [{"id": "entrance", "name": "玄関", "enabled": True}])
         html = dashboard_page_service.render_watch_page(
-            pd.DataFrame(),
+            [],
             dashboard_path="/dashboard",
             snapshot_url_prefix="/dashboard/snapshot",
         )
@@ -226,17 +226,37 @@ class TestRenderWatchPage:
             ],
         )
         html = dashboard_page_service.render_watch_page(
-            pd.DataFrame(),
+            [],
             dashboard_path="/dashboard",
             snapshot_url_prefix="/dashboard/snapshot",
         )
         assert "玄関" in html
         assert "庭" not in html
 
-    def test_sensor_rows_are_split_into_takasago_and_itami_sections(self, monkeypatch):
+    def test_overview_shows_the_watch_cards_and_links_to_the_details(self, monkeypatch):
+        """一覧は見守りの4枚のカード(各詳細画面へのリンク)・カメラの写真・今日の動きで、ログは載せない
+        (スマホで下までスクロールしなくても済むように、ログは詳細画面へ移した)。"""
+        from services import home_status_service
+
+        monkeypatch.setattr(config, "CAMERAS", [{"id": "entrance", "name": "玄関", "enabled": True}])
+        cards = home_status_service.build_status_cards(_jst(2026, 1, 1, 12), pd.DataFrame(), None, None, None)
+        html = dashboard_page_service.render_watch_page(
+            cards, dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot",
+            df_today=pd.DataFrame(), now=_jst(2026, 1, 1, 12),
+        )
+        for href in ("/dashboard/watch/takasago", "/dashboard/watch/itami", "/dashboard/watch/live",
+                     "/dashboard/watch/security"):
+            assert f'href="{href}' in html, href
+        assert "/dashboard/watch/live?camera=entrance" in html  # 写真のタップでそのカメラのライブへ
+        assert "📊 今日の動き" in html
+        assert 'id="takasago-log"' not in html and "simple-table" not in html
+        # カードは見守りの4枚だけ(室温・電気代・システムは出さない)
+        assert html.count('class="status-card') == 4
+
+    def test_sensor_rows_are_split_into_takasago_and_itami_details(self, monkeypatch):
         """不具合修正: 以前は伊丹のセンサーログがどこにも表示されず、高砂だけの
-        表だった。今は高砂/伊丹それぞれ専用のセクション(`#takasago-log`/
-        `#itami-log`)に分けて表示し、見守りカードのタップ先として使う。"""
+        表だった。今は高砂/伊丹それぞれ専用の詳細画面(`/watch/takasago`・`/watch/itami`)に
+        分けて表示し、見守りカードのタップ先として使う。"""
         monkeypatch.setattr(config, "CAMERAS", [])
         df_sensor = pd.DataFrame({
             "location": ["高砂", "伊丹"],
@@ -244,19 +264,13 @@ class TestRenderWatchPage:
             "friendly_name": ["センサーA", "センサーB"],
             "contact_state": ["OPEN", "CLOSE"],
         })
-        html = dashboard_page_service.render_watch_page(
-            df_sensor,
-            dashboard_path="/dashboard",
-            snapshot_url_prefix="/dashboard/snapshot",
-        )
+        takasago = dashboard_page_service.render_watch_detail_page("takasago", df_sensor, dashboard_path="/dashboard")
+        itami = dashboard_page_service.render_watch_detail_page("itami", df_sensor, dashboard_path="/dashboard")
 
-        takasago_section = html.split('id="takasago-log"', 1)[1].split('id="itami-log"', 1)[0]
-        itami_section = html.split('id="itami-log"', 1)[1]
-
-        assert "センサーA" in takasago_section
-        assert "センサーB" not in takasago_section
-        assert "センサーB" in itami_section
-        assert "センサーA" not in itami_section
+        assert 'id="takasago-log"' in takasago and 'id="itami-log"' in itami
+        assert "センサーA" in takasago and "センサーB" not in takasago
+        assert "センサーB" in itami and "センサーA" not in itami
+        assert "← 見守りへ戻る" in takasago
 
     def test_security_log_shows_camera_motion_detections(self, monkeypatch):
         """不具合修正: 防犯ログは以前`security_logs`テーブル(書き込むコードが無く
@@ -269,15 +283,29 @@ class TestRenderWatchPage:
             "timestamp": [pd.Timestamp("2026-01-01 10:00:00")],
             "friendly_name": ["駐車場カメラ"],
         })
-        html = dashboard_page_service.render_watch_page(
-            df_sensor,
-            dashboard_path="/dashboard",
-            snapshot_url_prefix="/dashboard/snapshot",
-        )
+        html = dashboard_page_service.render_watch_detail_page("security", df_sensor, dashboard_path="/dashboard")
 
-        security_section = html.split("防犯ログ", 1)[1].split("高砂実家のセンサーログ", 1)[0]
+        security_section = html.split('id="security-log"', 1)[1]
+        assert "防犯ログ" in html
         assert "駐車場カメラ" in security_section
         assert "表示できるデータがありません" not in security_section
+
+    def test_unknown_source_falls_back_to_security(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        html = dashboard_page_service.render_watch_detail_page("bogus", pd.DataFrame(), dashboard_path="/dashboard")
+        assert 'id="security-log"' in html
+
+
+class TestRenderWatchLivePage:
+    def test_has_camera_tiles_photos_and_timelapse_and_marks_camera_in_nav(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [{"id": "entrance", "name": "玄関", "enabled": True}])
+        html = dashboard_page_service.render_watch_live_page(
+            dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot"
+        )
+        assert 'id="camera-section"' in html and 'class="camera-video"' in html
+        assert "🖼️ 最近の写真" in html and 'id="timelapse-section"' in html
+        assert "camera.js" in html
+        assert 'href="/dashboard/watch/live" aria-current="page"' in html
 
 
 class TestWatchPageLogDateFilter:
@@ -291,10 +319,10 @@ class TestWatchPageLogDateFilter:
         })
 
     def _render(self, df, selected_date=None):
-        return dashboard_page_service.render_watch_page(
+        return dashboard_page_service.render_watch_detail_page(
+            "takasago",
             df,
             dashboard_path="/dashboard/",
-            snapshot_url_prefix="/dashboard/snapshot",
             selected_date=selected_date,
         )
 
@@ -302,14 +330,14 @@ class TestWatchPageLogDateFilter:
         monkeypatch.setattr(config, "CAMERAS", [])
         html = self._render(pd.DataFrame())
         assert 'type="date"' in html
-        assert 'action="/dashboard/watch#log-filter"' in html
+        assert 'action="/dashboard/watch/takasago#log-filter"' in html
         assert 'class="log-filter-clear"' not in html
 
     def test_selected_date_is_prefilled_and_clear_link_shown(self, monkeypatch):
         monkeypatch.setattr(config, "CAMERAS", [])
         html = self._render(pd.DataFrame(), date(2026, 10, 1))
         assert 'value="2026-10-01"' in html
-        assert 'href="/dashboard/watch#log-filter"' in html
+        assert 'href="/dashboard/watch/takasago#log-filter"' in html
         assert "2026/10/01 のログを全件表示" in html
 
     def test_without_selection_logs_are_capped_at_50_rows(self, monkeypatch):
@@ -426,19 +454,25 @@ class TestRenderLifePage:
         assert "電気" in html
         assert "駐車場" not in html
 
-    def test_includes_daily_cost_history_when_provided(self):
-        """不具合修正: 電気代カードのタップ先に、日別推移という意味のある詳細を出す。"""
-        rows = [(date(2026, 9, 15), 300), (date(2026, 9, 14), 150)]
-        html = dashboard_page_service.render_life_page(
-            [], dashboard_path="/dashboard", daily_cost_rows=rows
-        )
-        assert "日別の電気代" in html
-        assert "300円" in html
-        assert "150円" in html
+    def test_cost_card_links_to_the_power_page_and_daily_list_is_gone(self):
+        """今月の電気代カードはタップで「⚡ 電気」ページ(今月のまとめ)を開く。日別の電気代(30日)は
+        優先度が低いのでくらしページからは外し、電気ページへ移した。"""
+        from services import home_status_service
 
-    def test_omitting_daily_cost_rows_shows_the_empty_placeholder(self):
-        html = dashboard_page_service.render_life_page([], dashboard_path="/dashboard")
-        assert "表示できるデータがありません" in html
+        cards = home_status_service.build_status_cards(_jst(2026, 9, 15, 12), pd.DataFrame(), None, None, 1234)
+        html = dashboard_page_service.render_life_page(cards, dashboard_path="/dashboard/")
+        assert 'href="/dashboard/power"' in html
+        assert "1,234 円" in html
+        assert "日別の電気代" not in html and "cost-history" not in html
+
+    def test_cards_come_before_the_heatmap(self):
+        from services import home_status_service
+
+        cards = home_status_service.build_status_cards(_jst(2026, 9, 15, 12), pd.DataFrame(), None, None, 0)
+        html = dashboard_page_service.render_life_page(
+            cards, dashboard_path="/dashboard/", climate_html='<div id="climate-heatmap"></div>'
+        )
+        assert html.index("今月の電気代") < html.index("🏠 伊丹の室温") < html.index('id="climate-heatmap"')
 
 
 class TestRenderDailyCostHistory:
@@ -463,6 +497,19 @@ class TestRenderDailyCostHistory:
         )
         assert "width:100%" in html
         assert "width:50%" in html
+
+    def test_today_is_matched_by_date_when_given(self):
+        html = dashboard_page_service._render_daily_cost_history(
+            [(date(2026, 9, 15), 300), (date(2026, 9, 14), 150)], date(2026, 9, 14)
+        )
+        assert "09/15" in html and "今日" in html
+
+    def test_amount_and_date_do_not_wrap(self):
+        """スマホで4桁以上の金額の「円」だけが次の行に落ちてレイアウトが崩れていた。"""
+        css = open(dashboard_page_service.resolve_static_asset("dashboard.css")[0], encoding="utf-8").read()
+        rule = css.split(".cost-value {", 1)[1].split("}", 1)[0]
+        assert "white-space: nowrap" in rule and "min-width" in rule
+        assert "white-space: nowrap" in css.split(".cost-date {", 1)[1].split("}", 1)[0]
 
     def test_zero_cost_day_still_shows_a_visible_sliver(self):
         """幅0%だとバー自体が見えなくなり「データが無い」ように見えてしまうため、
@@ -591,7 +638,7 @@ class TestNasChartImprovements:
 
 
 class TestSensorDeviceFilter:
-    """見守りページのセンサーログを機器ごとに絞る(?device=)。"""
+    """見守りの詳細画面(高砂・伊丹)のセンサーログを機器ごとに絞る(?device=)。"""
 
     @staticmethod
     def _df():
@@ -604,24 +651,28 @@ class TestSensorDeviceFilter:
             })
         return pd.DataFrame(rows)
 
-    def _render(self, device=None, monkeypatch=None):
-        return dashboard_page_service.render_watch_page(
-            self._df(), dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot",
-            selected_device=device,
+    def _render(self, device=None, src="itami"):
+        return dashboard_page_service.render_watch_detail_page(
+            src, self._df(), dashboard_path="/dashboard/", selected_device=device,
         )
 
-    def test_select_lists_all_devices(self, monkeypatch):
+    def test_select_lists_the_devices_of_that_place_only(self, monkeypatch):
         monkeypatch.setattr(config, "CAMERAS", [])
         html = self._render()
         assert 'name="device"' in html
-        for name in ("伊丹のリビング", "伊丹の書斎", "高砂の玄関"):
+        for name in ("伊丹のリビング", "伊丹の書斎"):
             assert f">{name}</option>" in html
+        assert ">高砂の玄関</option>" not in html
         assert "すべての機器" in html
+
+    def test_security_page_has_no_device_select(self, monkeypatch):
+        monkeypatch.setattr(config, "CAMERAS", [])
+        assert 'name="device"' not in self._render(src="security")
 
     def test_selected_device_limits_the_sensor_logs(self, monkeypatch):
         monkeypatch.setattr(config, "CAMERAS", [])
         html = self._render("A")
-        log_part = html.split('id="takasago-log"', 1)[1]
+        log_part = html.split('id="itami-log"', 1)[1]
         assert "伊丹のリビング" in log_part
         assert "伊丹の書斎" not in log_part and "高砂の玄関" not in log_part
         assert '<option value="A" selected>' in html
@@ -629,30 +680,31 @@ class TestSensorDeviceFilter:
 
     def test_unknown_device_is_ignored(self, monkeypatch):
         monkeypatch.setattr(config, "CAMERAS", [])
-        html = self._render("ZZZ")
-        log_part = html.split('id="takasago-log"', 1)[1]
-        assert "伊丹のリビング" in log_part and "高砂の玄関" in log_part
+        html = self._render("C")  # 高砂の機器は伊丹の画面では選べない
+        log_part = html.split('id="itami-log"', 1)[1]
+        assert "伊丹のリビング" in log_part and "伊丹の書斎" in log_part
         assert 'class="log-filter-clear"' not in html
 
     def test_options_come_from_unfiltered_devices(self, monkeypatch):
         """絞り込み後も、他の機器へ選び直せること。"""
         monkeypatch.setattr(config, "CAMERAS", [])
         html = self._render("A")
-        assert ">高砂の玄関</option>" in html
+        assert ">伊丹の書斎</option>" in html
 
 
 class TestSysPageBootAndGit:
-    """システムページの「起動履歴」と「Gitの状態」。"""
+    """システムの詳細画面の「起動履歴」(🖥️ サーバー)と「Gitの状態」(🛠️ 管理者向け)。"""
 
     @staticmethod
-    def _render(boots=None):
-        return dashboard_page_service.render_sys_page(
-            pd.DataFrame(), None, pd.DataFrame(), {"percent": 1.0}, {"percent": 1.0},
-            _jst(2026, 10, 10, 12, 0), dashboard_path="/dashboard/", boot_history=boots,
+    def _render(boots=None, section=None):
+        # 起動履歴だけを見るテストはサーバー、Gitの状態は管理者向けの画面
+        return dashboard_page_service.render_sys_detail_page(
+            section or ("server" if boots else "admin"), dashboard_path="/dashboard/",
+            memory={"percent": 1.0}, disk={"percent": 1.0}, boot_history=boots,
         )
 
     def test_empty_history_shows_a_placeholder(self):
-        html = self._render([])
+        html = self._render([], section="server")
         assert 'id="boot-history"' in html and "起動の記録はまだありません" in html
 
     def test_history_rows_show_time_commit_and_reason_label(self):
@@ -689,17 +741,25 @@ class TestSysPageBootAndGit:
 
 
 class TestBottomNavAndBootCards:
-    """フッターナビ(4項目・現在地)と、起動履歴のカード表示。"""
+    """フッターナビ(5項目・ホームが真ん中・現在地)と、起動履歴のカード表示。"""
 
-    def test_footer_has_four_items_and_marks_current(self):
+    def test_footer_has_five_items_with_home_in_the_middle(self):
         html = dashboard_page_service._render_bottom_nav("/dashboard/", "life")
-        for label in ("ホーム", "見守り", "くらし", "システム"):
-            assert label in html
+        labels = ["見守り", "くらし", "ホーム", "システム", "カメラ"]
+        positions = [html.index(f"<span>{label}</span>") for label in labels]
+        assert positions == sorted(positions)  # 見守り・くらし・ホーム・システム・カメラの順
         # 「アップデート」は毎日見るものではないので常設しない(システムページから開く)
-        assert "アップデート" not in html and html.count("<li>") == 4
+        assert "アップデート" not in html and html.count("<li") == 5
+        # 真ん中のホームだけ目立たせる印が付く
+        assert html.count('class="bn-home"') == 1
+        assert '<li class="bn-home"><a href="/dashboard/"' in html
         assert html.count('aria-current="page"') == 1
         assert 'href="/dashboard/life" aria-current="page"' in html
-        assert 'href="/dashboard/"' in html
+        assert 'href="/dashboard/watch/live"' in html
+
+    def test_camera_is_current_on_the_camera_key(self):
+        html = dashboard_page_service._render_bottom_nav("/dashboard/", "camera")
+        assert 'href="/dashboard/watch/live" aria-current="page"' in html
 
     def test_home_is_current_on_the_home_key(self):
         html = dashboard_page_service._render_bottom_nav("/dashboard/", "home")
@@ -710,7 +770,7 @@ class TestBottomNavAndBootCards:
         assert 'class="bottom-nav"' in dashboard_page_service._page_shell("t", "x", dashboard_path="/dashboard/", current="sys")
 
     def test_boot_history_is_cards_and_first_is_latest(self):
-        html = TestSysPageBootAndGit._render([
+        html = TestSysPageBootAndGit._render(section="server", boots=[
             {"booted_at": "2026-10-09T21:05:00+09:00", "commit_sha": "abc1234",
              "commit_subject": "s", "branch": "master", "pid": 1, "reason": "update"},
             {"booted_at": "2026-10-08T03:00:00+09:00", "commit_sha": None,
@@ -720,9 +780,10 @@ class TestBottomNavAndBootCards:
         assert html.count("最新の起動") == 1 and html.count("boot-card") >= 2
         assert "ブランチ: master" in html
 
-    def test_git_box_comes_before_maintenance_and_history(self):
-        html = TestSysPageBootAndGit._render([])
-        assert html.index('id="git-status"') < html.index('id="boot-history"') < html.index("メンテナンス")
+    def test_git_box_comes_before_maintenance_and_history_is_on_the_server_page(self):
+        html = TestSysPageBootAndGit._render([], section="admin")
+        assert html.index('id="git-status"') < html.index('id="log-download"') < html.index("メンテナンス")
+        assert 'id="boot-history"' not in html
 
 
 class TestRenderUpdatesPage:
@@ -942,10 +1003,8 @@ class TestWatchPageMergesOpenClose:
             "friendly_name": ["玄関ドア", "玄関ドア"],
             "contact_state": ["close", "open"],
         })
-        html = dashboard_page_service.render_watch_page(
-            df_sensor, dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot"
-        )
-        takasago = html.split('id="takasago-log"', 1)[1].split('id="itami-log"', 1)[0]
+        html = dashboard_page_service.render_watch_detail_page("takasago", df_sensor, dashboard_path="/dashboard/")
+        takasago = html.split('id="takasago-log"', 1)[1].split("📋 ログ", 1)[1]
         assert takasago.count("玄関ドア") == 1
         assert "開 → 閉（12秒）" in takasago
 
@@ -1049,9 +1108,7 @@ class TestSensorStateChangeLog:
             "contact_state": [None, "open"],
             "movement_state": [None, None],
         })
-        html = dashboard_page_service.render_watch_page(
-            df, dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot"
-        )
+        html = dashboard_page_service.render_watch_detail_page("takasago", df, dashboard_path="/dashboard/")
         assert "玄関ドア" in html
         assert "洗面所温湿度計" not in html
 
@@ -1119,13 +1176,13 @@ class TestActivityHeatmap:
             "friendly_name": ["廊下の人感"],
             "contact_state": ["detected"],
         })
-        html = dashboard_page_service.render_watch_page(
-            df_sensor, dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot",
-            selected_date=date(2026, 10, 2),
+        takasago = dashboard_page_service.render_watch_detail_page(
+            "takasago", df_sensor, dashboard_path="/dashboard/", selected_date=date(2026, 10, 2),
         )
-        takasago = html.split('id="takasago-log"', 1)[1].split('id="itami-log"', 1)[0]
         assert 'class="heatmap"' in takasago and "7時台: 1回" in takasago
-        itami = html.split('id="itami-log"', 1)[1]
+        itami = dashboard_page_service.render_watch_detail_page(
+            "itami", df_sensor, dashboard_path="/dashboard/", selected_date=date(2026, 10, 2),
+        )
         assert "この日の動きの記録はありません" in itami
 
     def test_watch_page_heatmap_uses_df_heatmap_when_given(self, monkeypatch):
@@ -1141,11 +1198,9 @@ class TestActivityHeatmap:
             "contact_state": ["detected", "not_detected", "detected"],
             "timestamp": [_jst(2026, 10, 2, 1, 0), _jst(2026, 10, 2, 2, 0), _jst(2026, 10, 2, 11, 0)],
         })
-        html = dashboard_page_service.render_watch_page(
-            df_sensor, dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot",
-            df_heatmap=df_heatmap,
+        takasago = dashboard_page_service.render_watch_detail_page(
+            "takasago", df_sensor, dashboard_path="/dashboard/", df_heatmap=df_heatmap,
         )
-        takasago = html.split('id="takasago-log"', 1)[1].split('id="itami-log"', 1)[0]
         assert "1時台: 1回" in takasago and "11時台: 1回" in takasago
 
 
@@ -1175,10 +1230,9 @@ class TestHeatmapTapToHourDetail:
             dashboard_page_service.home_status_service, "get_now_jst", lambda: _jst(2026, 10, 2, 12, 0)
         )
 
-    def _watch(self, **kwargs):
-        return dashboard_page_service.render_watch_page(
-            self._sensor_df(), dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot",
-            selected_date=self.DAY, **kwargs,
+    def _watch(self, src="security", **kwargs):
+        return dashboard_page_service.render_watch_detail_page(
+            src, self._sensor_df(), dashboard_path="/dashboard/", selected_date=self.DAY, **kwargs,
         )
 
     def test_parsers_reject_invalid_values(self):
@@ -1190,38 +1244,41 @@ class TestHeatmapTapToHourDetail:
 
     def test_watch_page_has_security_heatmap_and_links_only_for_active_cells(self):
         html = self._watch()
-        security = html.split('id="security-log"', 1)[1].split('id="takasago-log"', 1)[0]
+        security = html.split('id="security-log"', 1)[1]
         assert 'class="heatmap"' in security
         assert "9時台: 1回" in security
         # 件数のあるマスだけがリンク。動きなしのマスはリンクにしない
-        assert 'href="/dashboard/watch?date=2026-10-02&amp;hour=9&amp;src=security&amp;hdev=cam1#hour-log"' in security
+        assert 'href="/dashboard/watch/security?date=2026-10-02&amp;hour=9&amp;hdev=cam1#hour-log"' in security
         assert security.count("<a class=\"heatmap-cell") == 1
 
     def test_hour_detail_lists_only_that_hour_for_that_source(self):
-        html = self._watch(hour=7, hour_src="takasago")
-        detail = html.split('id="hour-log"', 1)[1].split('id="security-log"', 1)[0]
+        html = self._watch("takasago", hour=7)
+        detail = html.split('id="hour-log"', 1)[1].split('id="takasago-log"', 1)[0]
         assert "10/02 7時台のログ" in detail
         assert "廊下の人感" in detail and "玄関ドア" not in detail
         assert "2件" in detail  # detected が2回(not_detected は除外済み)
         assert "前の時間" in detail and "次の時間" in detail and "閉じる" in detail
 
     def test_hour_detail_can_filter_by_device(self):
-        html = self._watch(hour=9, hour_src="itami", hour_device="door")
-        detail = html.split('id="hour-log"', 1)[1].split('id="security-log"', 1)[0]
+        html = self._watch("itami", hour=9, hour_device="door")
+        detail = html.split('id="hour-log"', 1)[1].split('id="itami-log"', 1)[0]
         assert "玄関ドア" in detail and "駐車場カメラ" not in detail
 
     def test_hour_detail_edges_have_no_out_of_range_neighbors(self):
-        html = self._watch(hour=0, hour_src="security")
+        html = self._watch("security", hour=0)
         detail = html.split('id="hour-log"', 1)[1].split('id="security-log"', 1)[0]
         assert "前の時間" not in detail and "次の時間" in detail
         assert "この時間のログはありません" in detail
 
-    def test_no_detail_without_both_hour_and_source(self):
-        assert 'id="hour-log"' not in self._watch(hour=7)
-        assert 'id="hour-log"' not in self._watch(hour_src="takasago")
+    def test_no_detail_without_hour(self):
+        assert 'id="hour-log"' not in self._watch("takasago")
         assert 'id="hour-log"' not in self._watch()
 
-    def test_home_heatmaps_aggregate_three_rows_and_link_to_watch(self):
+    def test_hour_detail_close_link_returns_to_the_same_detail_page(self):
+        html = self._watch("takasago", hour=7)
+        assert 'href="/dashboard/watch/takasago?date=2026-10-02#takasago-log">閉じる' in html
+
+    def test_today_heatmaps_aggregate_three_rows_and_link_to_the_details(self):
         html = dashboard_page_service.render_home_activity_heatmaps(
             self._sensor_df(), _jst(2026, 10, 2, 12, 0), dashboard_path="/dashboard/"
         )
@@ -1229,7 +1286,7 @@ class TestHeatmapTapToHourDetail:
         for label in ("防犯", "高砂", "伊丹"):
             assert label in html
         assert html.count('class="heatmap-row"') == 3
-        assert 'href="/dashboard/watch?date=2026-10-02&amp;hour=7&amp;src=takasago#hour-log"' in html
+        assert 'href="/dashboard/watch/takasago?date=2026-10-02&amp;hour=7#hour-log"' in html
 
     def test_home_heatmaps_render_even_with_no_data(self):
         html = dashboard_page_service.render_home_activity_heatmaps(

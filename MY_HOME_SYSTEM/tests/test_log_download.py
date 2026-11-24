@@ -183,10 +183,11 @@ def test_download_404_when_file_disappears_after_listing(api_client, log_dir, mo
 
 
 def test_sys_page_lists_one_checkbox_per_group(api_client, log_dir):
+    # ログのダウンロードはシステムの「🛠️ 管理者向け」の詳細画面にある
     (log_dir / "home_system.log").write_text("x", encoding="utf-8")
     (log_dir / "home_system.log.1").write_text("y", encoding="utf-8")
     (log_dir / "health_check.log").write_text("z", encoding="utf-8")
-    r = api_client.get(f"{config.DASHBOARD_BASE_PATH}/sys")
+    r = api_client.get(f"{config.DASHBOARD_BASE_PATH}/sys/admin")
     assert r.status_code == 200
     assert 'id="log-download"' in r.text
     assert f'action="{config.DASHBOARD_BASE_PATH}/sys/logs"' in r.text
@@ -196,6 +197,6 @@ def test_sys_page_lists_one_checkbox_per_group(api_client, log_dir):
 
 
 def test_sys_page_with_no_logs(api_client, log_dir):
-    r = api_client.get(f"{config.DASHBOARD_BASE_PATH}/sys")
+    r = api_client.get(f"{config.DASHBOARD_BASE_PATH}/sys/admin")
     assert r.status_code == 200
     assert "ダウンロードできるログはありません" in r.text

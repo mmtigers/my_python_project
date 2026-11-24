@@ -243,14 +243,65 @@ def _tv_section(report: dict[str, Any]) -> str:
     return f'<div class="power-stats">{stats}</div>{chart}{legend}{table}{note}'
 
 
-def render_power_page(report: dict[str, Any], *, dashboard_path: str, now: datetime | None = None) -> str:
-    """⚡ 電気ページ全体。`report`は`power_analysis_service.build_power_report`の戻り値。"""
+def _this_month_section(
+    monthly_cost: int | None,
+    last_month_cost: int | None,
+    daily_cost_rows: list[tuple[date, int]] | None,
+    today: date,
+) -> str:
+    """🧾 今月のまとめ: 今月の電気代(今日まで)・先月の同じ時点との比較・今月の日別の推移。
+
+    くらしページ(とホームにあった頃)の「💰 今月の電気代」カードと同じ数字(`analysis_service`の
+    `calculate_monthly_cost_cumulative`/`calculate_last_month_cost_same_point`)を使い、カードを
+    タップした先で食い違わないようにする。日別は `calculate_daily_cost_series` のうち今月の日だけ。
+    """
+    if monthly_cost is None:
+        return '<p class="empty-note">今月の電気代を取得できませんでした</p>'
+    stats = [_stat("今月(今日まで)", _yen(monthly_cost))]
+    if last_month_cost:
+        diff = monthly_cost - last_month_cost
+        sign = "+" if diff > 0 else ""
+        stats.append(_stat("先月の同じ日まで", _yen(last_month_cost)))
+        stats.append(_stat("先月との差", f"{sign}{diff:,}円({_diff_percent(monthly_cost, last_month_cost) or '差なし'})"))
+    else:
+        stats.append(_stat("先月の同じ日まで", "記録なし"))
+    month_rows = [(d, yen) for d, yen in (daily_cost_rows or []) if d.year == today.year and d.month == today.month]
+    # 日別は見ても使い道が分かりにくい(優先度は低い)ため、折りたたんでおく。
+    daily = (
+        f"<details><summary>今月の日別を見る({len(month_rows)}日)</summary>"
+        f"{page._render_daily_cost_history(month_rows, today)}</details>"
+        if month_rows
+        else ""
+    )
+    return (
+        f'<div class="power-stats">{"".join(stats)}</div>'
+        '<p class="meta">今日の分は途中経過です。</p>'
+        f"{daily}"
+    )
+
+
+def render_power_page(
+    report: dict[str, Any],
+    *,
+    dashboard_path: str,
+    now: datetime | None = None,
+    monthly_cost: int | None = None,
+    last_month_cost: int | None = None,
+    daily_cost_rows: list[tuple[date, int]] | None = None,
+) -> str:
+    """⚡ 電気ページ全体。`report`は`power_analysis_service.build_power_report`の戻り値。
+
+    くらしページの「💰 今月の電気代」カードのタップ先。先頭に「🧾 今月のまとめ」(`_this_month_section`)を
+    置き、その下に月ごとの推移・日別・気温との関係・テレビの使い方を続ける。
+    """
     generated = report.get("generated_at") or now
     today = generated.date() if generated is not None else get_now_jst().date()
     base = f"{dashboard_path.rstrip('/')}/power"
     body = (
         f"{page._back_link(dashboard_path, 'life', 'くらし')}"
         "<h1>⚡ 電気</h1>"
+        '<div class="info-box" id="this-month"><h2>🧾 今月のまとめ</h2>'
+        f"{_this_month_section(monthly_cost, last_month_cost, daily_cost_rows, today)}</div>"
         f'<p class="meta">スマートメーターの記録からの概算です(単価 {report["unit_price"]:g}円/kWh の固定。'
         "契約プランや燃料費調整は考慮していません)。</p>"
         f"{_period_links(base, report['days'])}"

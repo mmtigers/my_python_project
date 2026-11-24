@@ -131,8 +131,9 @@ def test_router_static_404_for_unlisted(api_client):
 
 
 @pytest.mark.parametrize("page,names", [
-    ("/dashboard/watch", ["dashboard.css", "camera.js"]),
-    ("/dashboard/sys", ["dashboard.css", "maintenance.js", "git_status.js"]),
+    ("/dashboard/watch/live", ["dashboard.css", "camera.js"]),
+    ("/dashboard/sys/admin", ["dashboard.css", "maintenance.js", "git_status.js"]),
+    ("/dashboard/sys/backup", ["dashboard.css", "maintenance.js"]),
 ])
 def test_pages_reference_existing_assets(api_client, page, names):
     html = api_client.get(page).text

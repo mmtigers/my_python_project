@@ -82,7 +82,7 @@ class TestHomeSummary:
         ], "history": []}
         alerts = home_status_service.build_home_alerts([], dashboard_path="/dashboard/", health=health)
         assert [a.text for a in alerts] == ["定期チェック: カメラの録画"]
-        assert alerts[0].href == "/dashboard/sys#health-check"
+        assert alerts[0].href == "/dashboard/sys/health"
 
     def test_only_admin_anomalies_keep_the_home_normal(self):
         health = {"stale": False, "anomalies": [{"key": "deploy_config", "label": "実機の設定の差分", "text": "y"}],
@@ -368,10 +368,12 @@ class TestHealthResult:
     def test_sys_summary_counts_health_anomalies(self):
         health = {"checked_at": NOW, "stale": False, "history": [],
                   "anomalies": [{"key": "nas", "label": "x", "text": "y"}, {"key": "disk", "label": "x", "text": "y"}]}
-        html = dashboard_page_service.render_sys_page(
-            pd.DataFrame(), None, pd.DataFrame(), {"percent": 10}, None, NOW, dashboard_path="/dashboard/", health=health)
+        rows = dashboard_page_service.build_freshness_rows(pd.DataFrame(), None, {"percent": 10}, NOW)
+        sys_cards = dashboard_page_service.build_sys_cards([], rows, health=health, link_health=None)
+        html = dashboard_page_service.render_sys_page(sys_cards, rows, dashboard_path="/dashboard/", health=health)
         # 鮮度の行(電気・NAS がデータなし=2件)+ 定期チェック2件
         assert "4件、確認が必要です" in html
+        assert "🔴 2件の異常" in html  # 定期チェックのカード
 
 
 # === 見守りログの言葉 ===
@@ -490,8 +492,8 @@ class TestSnapshots:
         html = dashboard_page_service.render_camera_stills(
             dashboard_path="/dashboard/", snapshot_url_prefix="/dashboard/snapshot")
         assert html.count('class="cam-still"') == 2
-        assert 'href="/dashboard/watch?camera=cam_entrance#camera-section"' in html
-        assert "11/12 20:01" in html and "<video" not in html  # ホームではライブを流さない
+        assert 'href="/dashboard/watch/live?camera=cam_entrance"' in html
+        assert "11/12 20:01" in html and "<video" not in html  # 見守りの一覧ではライブを流さない
 
     def test_camera_without_photo_still_links_to_live(self, monkeypatch, tmp_path):
         monkeypatch.setattr(config, "ASSETS_DIR", str(tmp_path), raising=False)
@@ -602,7 +604,6 @@ def _stub_loaders():
 def _get(path, **kw):
     patches = _stub_loaders() + [
         patch.object(home_status_service, "collect_link_health", return_value={"quest": True, "asa_note": True}),
-        patch.object(home_status_service, "get_today_weather", return_value=kw.get("weather")),
         patch.object(home_status_service, "read_health_result", return_value=kw.get("health")),
     ]
     for p in patches:
@@ -618,72 +619,126 @@ def _get(path, **kw):
 
 
 class TestHomeLayout:
-    def test_order_is_summary_then_watch_then_today_then_the_rest(self):
-        """以前は 見守り → 室温 → 過去30日ヒートマップ(約1画面)→ … → 今日の動き の順で、
-        今日の動きが3画面目にあった。"""
+    def test_order_is_summary_then_watch_then_climate_then_services(self):
+        """スマホで1画面に「見守り4枚・室温4枚・システムとサービス」が収まる並び。以前は 見守り → カメラの写真 →
+        今日の動き → 室温 → くらし → システム → よく使うリンク で、全部見るには3画面ほどスクロールが必要だった。"""
         text = _get("").text
         order = [text.index(marker) for marker in (
-            'class="alerts alerts-ok home-summary"', "👀 見守り", "📊 今日の動き", "🌡️ 室温", "💡 くらし",
-            "🔧 システム</h2>", "よく使うリンク",
+            'class="alerts alerts-ok home-summary"', "👀 見守り", "🌡️ 室温", "🖥️ システム・サービス",
         )]
         assert order == sorted(order)
+        for title in ("🖥️ サーバー", "🗄️ NAS", "🎥 録画", "⚔️ ファミクエ", "📝 あさノート"):
+            assert title in text.split("🖥️ システム・サービス", 1)[1], title
 
-    def test_home_has_no_duplicate_menu(self):
+    def test_weather_time_and_refresh_note_are_gone(self):
+        """要望で外したもの: 今日の天気・取得時刻と「60秒ごとに自動更新」の表示。自動更新そのものは続ける。"""
         text = _get("").text
-        assert "<h2>メニュー</h2>" not in text and 'class="nav-card"' not in text
+        assert "今日の天気" not in text and "秒ごとに自動更新" not in text and "時点" not in text
+        assert "setInterval(update" in text  # 自動更新のスクリプトは残る
+
+    def test_photos_today_heatmap_cost_and_link_list_moved_out_of_home(self):
+        text = _get("").text
+        for marker in ("cam-stills", "📊 今日の動き", "💰 今月の電気代", "よく使うリンク", "<h2>メニュー</h2>", 'class="nav-card"'):
+            assert marker not in text, marker
 
     def test_fragment_matches_the_page_section(self):
         """自動更新のたびに並びや内容が変わらないこと(ページ本体とフラグメントは同じ材料から作る)。"""
         page = _get("").text
         fragment = _get("status").text
-        assert fragment.startswith('<div id="status">')
-        for marker in ("home-summary", "📊 今日の動き", "よく使うリンク", "👀 見守り"):
-            assert marker in fragment and marker in page
+        assert fragment.startswith('<div id="status" class="home-status"')
+        section = page.split('<div id="status"', 1)[1]
+        # 取得時刻(data-fetched-at)以外は同じ
+        import re
+        strip = lambda t: re.sub(r'data-fetched-at="[^"]*"', "", t)  # noqa: E731
+        assert strip(section).startswith(strip(fragment.split('<div id="status"', 1)[1]))
 
-    def test_weather_line_is_shown_when_recorded(self):
-        text = _get("", weather={"desc": "晴れ", "max_temp": 18.4, "min_temp": 9.2}).text
-        assert "今日の天気: 晴れ・最高 18℃ / 最低 9℃" in text
-        assert "今日の天気" not in _get("").text
+    def test_app_tiles_open_in_a_new_tab_and_show_their_state(self):
+        text = _get("").text
+        tile = text.split("⚔️ ファミクエ", 1)[0].rsplit("<a ", 1)[1]
+        assert 'target="_blank" rel="noopener"' in tile and "theme-green" in tile
+        assert "🟢 稼働中" in text.split("⚔️ ファミクエ", 1)[1][:200]
 
     def test_health_anomaly_reaches_the_home_summary(self):
         health = {"checked_at": NOW, "stale": False, "history": [],
                   "anomalies": [{"key": "recording", "label": "カメラの録画", "text": "x"}]}
         text = _get("", health=health).text
         assert "1件、確認が必要です" in text and "定期チェック: カメラの録画" in text
+        assert 'href="/dashboard/sys/health"' in text
 
 
-class TestWeatherLine:
-    def test_partial_data(self):
-        render = home_status_service.render_today_weather_html
-        assert render(None) == ""
-        assert render({"desc": None, "max_temp": None, "min_temp": None}) == ""
-        assert "最高 20℃" in render({"desc": None, "max_temp": 20.2, "min_temp": None})
+class TestServiceTiles:
+    def _tiles(self, link_health=None, recording=None, yoru=None):
+        cards = home_status_service.build_status_cards(NOW, pd.DataFrame(), None, {"percent": 10}, None)
+        return home_status_service.build_service_cards(
+            cards, link_health=link_health, recording=recording,
+            quest_path="/quest/", asa_note_url="https://asa.example", yoru_note_url=yoru,
+        )
 
-    def test_reads_today_row(self, isolated_db):
-        from core.database import get_db_cursor
-        from core.utils import get_now_jst
-        today = get_now_jst().date().isoformat()
-        with get_db_cursor(commit=True) as cur:
-            cur.execute(
-                "INSERT INTO weather_history (date, location, min_temp, max_temp, weather_desc) VALUES (?, ?, ?, ?, ?)",
-                (today, config.WEATHER_LOCATION_NAME, 9.0, 18.0, "くもり"),
-            )
-        assert home_status_service.get_today_weather() == {"desc": "くもり", "max_temp": 18.0, "min_temp": 9.0}
+    def test_order_and_destinations(self):
+        tiles = self._tiles({"quest": True, "asa_note": False, "yoru_note": None}, yoru="https://yoru.example")
+        assert [t.title for t in tiles] == ["🖥️ サーバー", "🗄️ NAS", "🎥 録画", "⚔️ ファミクエ", "📝 あさノート", "🌙 よるノート"]
+        assert all(t.group == "service" for t in tiles)
+        hrefs = [home_status_service.card_detail_href(t, "/dashboard/") for t in tiles]
+        assert hrefs[:3] == ["/dashboard/sys/server", "/dashboard/sys/nas", "/dashboard/watch/live"]
+        assert hrefs[3:] == ["/quest/", "https://asa.example", "https://yoru.example"]
+        assert [t.new_tab for t in tiles] == [False, False, False, True, True, True]
+        assert [t.theme for t in tiles[3:]] == ["theme-green", "theme-red", "theme-gray"]
 
-    def test_no_row_is_none(self, isolated_db):
-        assert home_status_service.get_today_weather() is None
+    def test_server_tile_uses_the_same_judgement_as_the_server_card(self):
+        server = self._tiles()[0]
+        assert (server.value, server.theme) == home_status_service.get_server_status({"percent": 10})
+
+    def test_yoru_note_is_left_out_without_its_url(self):
+        assert "🌙 よるノート" not in [t.title for t in self._tiles()]
+
+    @pytest.mark.parametrize("recording,expected", [
+        (None, ("⚪ 不明", "theme-gray")),
+        ([{"id": "a", "name": "A", "state": "ok"}, {"id": "b", "name": "B", "state": "ok"}], ("🟢 録画中", "theme-green")),
+        ([{"id": "a", "name": "A", "state": "ok"}, {"id": "b", "name": "B", "state": "stalled"}], ("🔴 1台停止", "theme-red")),
+    ])
+    def test_recording_tile(self, recording, expected):
+        assert home_status_service.get_recording_tile_status(recording) == expected
+
+    def test_tiles_hide_the_sub_line(self):
+        html = home_status_service.render_status_grid_html(
+            self._tiles(), dashboard_path="/dashboard/", variants={"service": "tiles"})
+        assert 'class="status-grid status-grid-tiles"' in html and "status-sub" not in html
 
 
 class TestSysPageLayout:
-    def test_admin_operations_are_folded_and_family_items_come_first(self):
-        """以前は Git の状態・起動履歴が先頭にあり、再起動ボタンも最初から見えていた。"""
+    def test_overview_is_cards_that_open_detail_pages(self):
+        """以前は各機能の最終更新・定期チェック・NASのグラフ・バックアップ・管理者向けの折りたたみが縦に並び、
+        スマホでは下までスクロールしないと全体が分からなかった。今はカードだけで、中身は詳細画面にある。"""
         text = _get("sys").text
-        admin = text.index('<details class="admin-section" id="admin-section">')
-        assert text.index("各機能の最終更新") < text.index('id="health-check"') < admin
-        assert text.index("今すぐバックアップ") < admin  # 安全な操作は折りたたみの外
-        for marker in ('id="git-status"', 'id="boot-history"', 'id="log-download"', 'id="restartBtn"', 'id="deployBtn"'):
-            assert text.index(marker) > admin, f"{marker} が折りたたみの外にある"
-        assert "<details open" not in text[admin:admin + 80]
+        for section, _title in dashboard_page_service.SYS_SECTIONS:
+            assert f'href="/dashboard/sys/{section}"' in text, section
+        for marker in ('id="git-status"', 'id="restartBtn"', 'id="deployBtn"', 'id="backupBtn"', "<svg"):
+            assert marker not in text, marker
+        assert "maintenance.js" not in text
+
+    def test_every_detail_page_opens_with_a_back_link_and_its_card(self):
+        for section, title in dashboard_page_service.SYS_SECTIONS:
+            res = _get(f"sys/{section}")
+            assert res.status_code == 200, section
+            assert "← システムへ戻る" in res.text and f"<h1>{title}</h1>" in res.text, section
+            assert res.text.count('class="status-card') == 1, section
+
+    def test_admin_page_keeps_the_dangerous_buttons_disabled_and_backup_is_separate(self):
+        admin = _get("sys/admin").text
+        for marker in ('id="git-status"', 'id="log-download"', 'id="restartBtn" disabled', 'id="deployBtn" disabled'):
+            assert marker in admin, marker
+        assert 'id="backupBtn"' not in admin
+        backup = _get("sys/backup").text
+        assert 'id="backupBtn"' in backup and 'id="deployBtn"' not in backup
+
+    def test_unknown_section_and_old_nas_days_url_redirect(self):
+        assert _get("sys/nope").headers["location"] == "/dashboard/sys"
+        assert _get("sys?nas_days=7").headers["location"] == "/dashboard/sys/nas?nas_days=7"
+
+    def test_maintenance_script_only_touches_buttons_that_are_on_the_page(self):
+        script = (Path(dashboard_page_service._STATIC_DIR) / "maintenance.js").read_text(encoding="utf-8")
+        boot = script.split('document.addEventListener("DOMContentLoaded"', 1)[1]
+        assert 'getElementById("deployBtn")' in boot and 'getElementById("backupBtn")' in boot
 
 
 class TestOfflineAndTheme:
@@ -694,6 +749,6 @@ class TestOfflineAndTheme:
         assert res.headers["cache-control"] == "no-cache" and "navigate" in res.text
 
     def test_every_page_loads_app_js_and_has_the_theme_toggle(self):
-        for path in ("", "watch", "life", "sys", "updates"):
+        for path in ("", "watch", "watch/live", "watch/takasago", "life", "sys", "sys/nas", "updates", "power"):
             text = _get(path).text
             assert "/static/app.js?v=" in text and 'id="themeToggle"' in text, path

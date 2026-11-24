@@ -67,7 +67,8 @@
     body {
         margin: 0 auto;
         max-width: 1080px;
-        padding: 16px 16px calc(88px + env(safe-area-inset-bottom));
+        /* 下は固定の下部ナビ(真ん中のホームボタンがナビの上へ浮き出る分も含む)に最後の行が隠れない高さ */
+        padding: 16px 16px calc(104px + env(safe-area-inset-bottom));
         background: var(--bg);
         color: var(--text);
         font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
@@ -92,7 +93,6 @@
     .home-summary ul { list-style: none; margin: 6px 0 0; padding: 0; font-weight: normal; }
     .home-summary li a, .home-summary li { font-size: 0.9rem; }
     .home-summary li a::after { content: " ›"; }
-    .today-weather { margin: 0 0 6px; font-size: 0.9rem; color: var(--muted); }
 
     /* 表示テーマの切替(全ページ右上)。固定せずページ先頭に置き、スクロールすると一緒に流れる。 */
     body { position: relative; }
@@ -300,12 +300,14 @@
     .cost-row {
         display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 0.85rem;
     }
-    .cost-date { flex: none; width: 3.4em; color: var(--muted); }
+    /* 日付・金額は折り返さない。以前は金額欄が固定幅(4.6em)で、4桁以上(「1,234円」)になると
+       「円」だけが次の行に落ちてスマホでレイアウトが崩れていた。金額欄は中身の幅に合わせて広がる。 */
+    .cost-date { flex: none; width: 3.4em; color: var(--muted); white-space: nowrap; }
     .cost-bar-track {
         flex: 1; height: 10px; border-radius: 5px; background: var(--surface-2); overflow: hidden;
     }
     .cost-bar { height: 100%; border-radius: 5px; background: var(--accent); }
-    .cost-value { flex: none; width: 4.6em; text-align: right; font-weight: bold; }
+    .cost-value { flex: none; min-width: 4.6em; text-align: right; font-weight: bold; white-space: nowrap; }
 
     /* システムページ等の各セクションを視覚的にグループ化する箱 */
     .info-box {
@@ -386,6 +388,15 @@
     }
     nav.bottom-nav a .bn-icon { font-size: 1.15rem; line-height: 1; }
     nav.bottom-nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: bold; }
+    /* 真ん中のホームボタン。丸く大きくし、ナビの上へ少し浮かせて目立たせる(押せる範囲は他と同じく48px以上)。 */
+    nav.bottom-nav li.bn-home a { margin-top: -24px; padding-top: 0; color: var(--accent); font-weight: bold; }
+    nav.bottom-nav li.bn-home a .bn-icon {
+        display: flex; align-items: center; justify-content: center; width: 56px; height: 56px;
+        border-radius: 50%; background: var(--accent); font-size: 1.6rem;
+        border: 4px solid var(--surface); box-shadow: 0 4px 12px rgba(20,40,90,0.28);
+    }
+    nav.bottom-nav li.bn-home a[aria-current="page"] { background: transparent; }
+    nav.bottom-nav li.bn-home a[aria-current="page"] .bn-icon { box-shadow: 0 0 0 3px var(--accent-bd), 0 4px 12px rgba(20,40,90,0.28); }
     @media print { nav.bottom-nav { display: none; } }
 
     /* システムページ: 起動履歴のカードとGitの状態 */

@@ -140,7 +140,7 @@ class TestRender:
     def test_only_ten_shown_with_link_to_show_all(self):
         html = self._render(_items(12))
         assert html.count('class="tl-card"') == 10
-        assert 'href="/dashboard/watch?tl_all=1#timelapse-section"' in html and "さらに2件を表示" in html
+        assert 'href="/dashboard/watch/live?tl_all=1#timelapse-section"' in html and "さらに2件を表示" in html
 
     def test_show_all(self):
         html = self._render(_items(12), show_all=True)
@@ -177,18 +177,21 @@ class TestWatchPageIntegration:
             for p in patches:
                 p.stop()
 
-    def test_section_sits_between_photos_and_logs(self, tl_dir):
+    def test_section_sits_on_the_camera_page_after_photos(self, tl_dir):
+        # タイムラプスはカメラのページ(下部ナビの「カメラ」)の、最近の写真の下にある
         _make(tl_dir, "entrance_2026-10-16_0730-0900_summary.mp4")
-        text = self._get(f"{config.DASHBOARD_BASE_PATH}/watch").text
-        assert text.index("🖼️ 最近の写真") < text.index('id="timelapse-section"') < text.index('id="security-log"')
+        text = self._get(f"{config.DASHBOARD_BASE_PATH}/watch/live").text
+        assert text.index("🖼️ 最近の写真") < text.index('id="timelapse-section"')
         assert "10/16(金) 朝 07:30〜09:00" in text
 
     def test_no_files_still_opens(self, tl_dir):
-        res = self._get(f"{config.DASHBOARD_BASE_PATH}/watch")
+        res = self._get(f"{config.DASHBOARD_BASE_PATH}/watch/live")
         assert res.status_code == 200 and "タイムラプスはまだありません" in res.text
 
     def test_tl_all_query(self, tl_dir):
         for d in range(1, 13):
             _make(tl_dir, f"entrance_2026-10-{d:02d}_summary.mp4")
-        assert self._get(f"{config.DASHBOARD_BASE_PATH}/watch").text.count('class="tl-card"') == 10
+        assert self._get(f"{config.DASHBOARD_BASE_PATH}/watch/live").text.count('class="tl-card"') == 10
+        assert self._get(f"{config.DASHBOARD_BASE_PATH}/watch/live?tl_all=1").text.count('class="tl-card"') == 12
+        # 見守りページにあった頃の `?tl_all=1` はカメラのページへ送る(TestClient はリダイレクトを辿る)
         assert self._get(f"{config.DASHBOARD_BASE_PATH}/watch?tl_all=1").text.count('class="tl-card"') == 12
