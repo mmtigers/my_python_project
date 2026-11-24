@@ -29,7 +29,7 @@
 | `core.logger.setup_logging` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.logger import setup_logging` (行番号: 2 / 抜粋: "from core.logger import setup_logging") |
 | `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 3 / 抜粋: "from core.database import get_db_cursor") |
 | `services.notification_service.send_push` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from services.notification_service import send_push` (行番号: 4 / 抜粋: "from services.notification_service import send_push") |
-| `services.home_status_service` | ローカルモジュール | **（Issue #829 で追加）** 車利用集計を駐車場カメラの動体検知に置き換えるにあたり、駐車場カメラを特定する定数を取得するために追加。**（不具合修正）** 定数名は`PARKING_CAMERA_NAME`(表示名)から`PARKING_CAMERA_ID`(id)に変わった。 | 根拠: `from services import home_status_service` (行番号: 5 / 抜粋: "from services import home_status_service") |
+| `services.parking_record_service` / `services.parking_occupancy_service` | ローカルモジュール | **（#1118 で変更）** 車利用の集計に、駐車場カメラの録画から判定した在否(`load_observations`)と、外出の区間へのまとめ方(`build_events` / `build_trips`)を使う。以前(#829)は `services.home_status_service` から駐車場カメラの id を取って動体検知の回数を数えていたが、その import は削除した | 根拠: `from services import parking_occupancy_service, parking_record_service` (行番号: 5 / 抜粋: "from services import parking_occupancy_service, parking_record_service") |
 | `datetime` | 標準ライブラリ | 日付や時間の取得、計算 | 根拠: `import datetime` (行番号: 7 / 抜粋: "import datetime") |
 | `pytz` | 外部ライブラリ | タイムゾーン（"Asia/Tokyo"）の指定 | 根拠: `import pytz` (行番号: 9 / 抜粋: "import pytz") |
 | `sys` | 標準ライブラリ | コマンドライン引数（`sys.argv`）の取得 | 根拠: `import sys` (行番号: 10 / 抜粋: "import sys") |
@@ -41,8 +41,8 @@
 | --- | --- | --- |
 | `config` 内の各種定数 | `SQLITE_TABLE_FOOD`, `SQLITE_TABLE_CHILD`, `LINE_USER_ID`, `SQLITE_TABLE_POWER_USAGE`（未定義時のフォールバックあり）などの具体的な値や型が不明 | 根拠: `config.SQLITE_TABLE_FOOD` (行番号: 55 / 抜粋: "FROM {config.SQLITE_TABLE_FOOD") |
 | `core.logger.setup_logging` | 戻り値の正確な型や内部でのログ設定の詳細が不明 | 根拠: `logger = core.logger.setup_logging("weekly_report")` (行番号: 14 / 抜粋: "logger = setup_logging") |
-| `core.database.get_db_cursor` | 接続先DBの種類（SQLite等）や取得されるカーソルオブジェクトの振る舞い（辞書型アクセスが可能かどうか）が不明 | 根拠: `with core.database.get_db_cursor() as cursor:` (行番号: 156 / 抜粋: "with get_db_cursor() as") |
-| `services.notification_service.send_push` | 引数 `target="discord"` の挙動、送信先の実態、戻り値が `True`/`False` になる条件が不明 | 根拠: `services.notification_service.send_push([...], target="discord")` (行番号: 319 / 抜粋: "if send_push([{"type"...") |
+| `core.database.get_db_cursor` | 接続先DBの種類（SQLite等）や取得されるカーソルオブジェクトの振る舞い（辞書型アクセスが可能かどうか）が不明 | 根拠: `with core.database.get_db_cursor() as cursor:` (行番号: 192 / 抜粋: "with get_db_cursor() as") |
+| `services.notification_service.send_push` | 引数 `target="discord"` の挙動、送信先の実態、戻り値が `True`/`False` になる条件が不明 | 根拠: `services.notification_service.send_push([...], target="discord")` (行番号: 355 / 抜粋: "if send_push([{"type"...") |
 | データベースのスキーマ | 各テーブルの正確なカラム定義やデータ型が不明 | 根拠: `SELECT menu_category FROM ...` (行番号: 54 / 抜粋: "SELECT menu_category") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -72,8 +72,9 @@
 
 ### `get_analysis_data`
 
-* **役割**: 指定された開始日時から現在までの食事、駐車場の動き、電気代、体調のデータをDBから集計する。**（Issue #170で修正）** 電気代算出(`sql_power`)は以前`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)を無差別に`AVG(wattage)`していたため、プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)のアイドル値がスマートメーターの平均消費電力を希釈していた。`services/analysis_service.py`の`load_sensor_data`と同じ分類基準(`device_name`に`"Remo"`を含む)でスマートメーターの行のみに絞るよう修正した。 **（Issue #663で修正）** 電気代の単価は、以前このファイルにモジュール定数`DEFAULT_ELEC_PRICE_PER_KWH = 31`として直書きされていた(コメント自身が「本来はconfig.pyまたは.envから読み込むべき値」と記述)。`config.py`のセクション15`ELEC_PRICE_PER_KWH`(環境変数`ELEC_PRICE_PER_KWH`、既定31)へ移し、`config.ELEC_PRICE_PER_KWH`を参照する形にした。既定値は従来と同じため計算結果は変わらない。 **（Issue #829で修正）** 車利用の集計(`sql_car`)は以前`car_records`テーブル(`action = 'LEAVE'`)を参照していたが、`car_records`への書き込み経路がリポジトリ内に存在せず常に0件だった(ダッシュボード側の車在場判定バグと同根)。`device_records`テーブルから`device_type = 'ONVIF_CAMERA' AND movement_state = 'ON'`かつ駐車場カメラを特定する条件の件数を集計する形に置き換えた。人の往来も拾うため厳密な車の出入り回数ではないが、駐車場での動きの目安として`data["car_count"]`に格納する(呼び出し元`generate_text_section`の表示文言も「🚗 車利用」→「🚗 駐車場の動き」に変更)。同Issueで、電気代算出(`sql_power`)のスマートメーター判定も、`migrations/0020`以降に書き込まれる`device_category = 'smart_meter'`列を優先し、それが`NULL`の古い行だけ従来の`device_name LIKE '%Remo%'`判定にフォールバックする形に変更した(`services/analysis_service.py`の`_classify_power_device_type`と同じ考え方)。**（不具合修正）** 駐車場カメラを特定する条件は、以前`device_name = '駐車場'`(定数は`home_status_service.PARKING_CAMERA_NAME`、表示名の完全一致)だったが、実際にdevices.jsonへ登録されている表示名は「駐車場カメラ」で一致せず、この集計は常に0件になっていた(ダッシュボードの「🚗 駐車場」カードが同じ定数で「⚪ データなし」になっていた不具合と同根)。表示名は運用者が自由に変更できる値のため、変更されにくい`device_id = ?`(定数は`home_status_service.PARKING_CAMERA_ID`)による照合に変更した。
-* 根拠: `get_analysis_data` 定義部 (行番号: 147〜186 / 抜粋: "def get_analysis_data(start_dt")、駐車場カメラの動体検知件数クエリ (行番号: 87〜93 / 抜粋: "sql_car = \"\"\"\n                SELECT COUNT(*)\n                FROM device_records\n                WHERE device_type = 'ONVIF_CAMERA' AND movement_state = 'ON'\n                  AND device_id = ? AND timestamp >= ?\n            \"\"\"\n            cursor.execute(sql_car, (home_status_service.PARKING_CAMERA_ID, start_str))")、電気代クエリのデバイス絞り込み(参照: _estimate_elec_bill / 抜粋: "WHERE timestamp >= ?\n                  AND (\n                    device_category = 'smart_meter'\n                    OR (device_category IS NULL AND device_name LIKE '%Remo%')\n                  )")
+* **役割**: 指定された開始日時から現在までの食事、車の利用、電気代、体調のデータをDBから集計する。**（Issue #170で修正）** 電気代算出(`sql_power`)は以前`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)を無差別に`AVG(wattage)`していたため、プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)のアイドル値がスマートメーターの平均消費電力を希釈していた。`services/analysis_service.py`の`load_sensor_data`と同じ分類基準(`device_name`に`"Remo"`を含む)でスマートメーターの行のみに絞るよう修正した。 **（Issue #663で修正）** 電気代の単価は、以前このファイルにモジュール定数`DEFAULT_ELEC_PRICE_PER_KWH = 31`として直書きされていた(コメント自身が「本来はconfig.pyまたは.envから読み込むべき値」と記述)。`config.py`のセクション15`ELEC_PRICE_PER_KWH`(環境変数`ELEC_PRICE_PER_KWH`、既定31)へ移し、`config.ELEC_PRICE_PER_KWH`を参照する形にした。既定値は従来と同じため計算結果は変わらない。 **（Issue #829で修正）** 車利用の集計(`sql_car`)は以前`car_records`テーブル(`action = 'LEAVE'`)を参照していたが、`car_records`への書き込み経路がリポジトリ内に存在せず常に0件だった(ダッシュボード側の車在場判定バグと同根)。`device_records`テーブルから`device_type = 'ONVIF_CAMERA' AND movement_state = 'ON'`かつ駐車場カメラを特定する条件の件数を集計する形に置き換えた。人の往来も拾うため厳密な車の出入り回数ではないが、駐車場での動きの目安として`data["car_count"]`に格納する(呼び出し元`generate_text_section`の表示文言も「🚗 車利用」→「🚗 駐車場の動き」に変更)。同Issueで、電気代算出(`sql_power`)のスマートメーター判定も、`migrations/0020`以降に書き込まれる`device_category = 'smart_meter'`列を優先し、それが`NULL`の古い行だけ従来の`device_name LIKE '%Remo%'`判定にフォールバックする形に変更した(`services/analysis_service.py`の`_classify_power_device_type`と同じ考え方)。**（不具合修正）** 駐車場カメラを特定する条件は、以前`device_name = '駐車場'`(定数は`home_status_service.PARKING_CAMERA_NAME`、表示名の完全一致)だったが、実際にdevices.jsonへ登録されている表示名は「駐車場カメラ」で一致せず、この集計は常に0件になっていた(ダッシュボードの「🚗 駐車場」カードが同じ定数で「⚪ データなし」になっていた不具合と同根)。表示名は運用者が自由に変更できる値のため、変更されにくい`device_id = ?`(定数は`home_status_service.PARKING_CAMERA_ID`)による照合に変更した。
+* **（#1118 で変更）** 車利用は `_summarize_car_usage` で、駐車場カメラの録画から判定した外出（#1116 で DB に保存）を数える。以前の「駐車場カメラの動体検知の回数」は人の往来も数え、車の利用回数になっていなかった。結果は `data["car_usage"]`（`{"trips", "minutes", "uncertain"}` または None）に入る。
+* 根拠: 車の利用の集計 (行番号: 211 / 抜粋: "data[\"car_usage\"] = _summarize_car_usage(start_dt, now)")、電気代クエリのデバイス絞り込み(参照: _estimate_elec_bill / 抜粋: "WHERE timestamp >= ?\n                  AND (\n                    device_category = 'smart_meter'\n                    OR (device_category IS NULL AND device_name LIKE '%Remo%')\n                  )")
 
 
 **（Issue #954 で分割）** 本関数は122行あったため、挙動を変えずに4つの集計を非公開関数へ切り出した。本体に残るのは、1つの`get_db_cursor()`と`try`の中でこれらを順に呼んで辞書を組み立てる流れだけで、各関数の例外は分割前と同じく本体の`except Exception`で捕捉される(結果のキーの順序・SQLの実行順も同じ)。
@@ -81,9 +82,10 @@
 | 関数 | 役割 | 根拠 |
 | --- | --- | --- |
 | `_count_meals` | 食事記録を「自炊」「外食」「その他」の前方一致で数え、`(カテゴリ別件数, 総件数)`を返す | `def _count_meals(cursor: Any, start_str: str) -> tuple[Dict[str, int], int]:` (行番号: 50) |
-| `_count_parking_motion` | 駐車場カメラ(`PARKING_CAMERA_ID`)の動体検知回数(#829) | `def _count_parking_motion(cursor: Any, start_str: str) -> int:` (行番号: 77) |
-| `_estimate_elec_bill` | スマートメーター行(#170/#829)の平均電力×実経過時間×`config.ELEC_PRICE_PER_KWH`で電気代を概算する。平均が無ければ0 | `def _estimate_elec_bill(cursor: Any, start_str: str, start_dt: datetime.datetime, now: datetime.datetime) -> int:` (行番号: 98) |
-| `_count_sick_records` | 体調記録のうち`condition`に「元気」を含まない件数 | `def _count_sick_records(cursor: Any, start_str: str) -> int:` (行番号: 135) |
+| `_summarize_car_usage` | **（#1118 で新設。`_count_parking_motion` を置き換え）** 期間内に出発した外出の回数・戻ってきた外出の合計時間(分)・時刻が不確かな外出の回数を返す。期間の始まりの在否を確定させるため `CAR_USAGE_LOOKBACK`(6時間)前から読み、出発が期間の始まりより前の外出は数えない。まだ戻っていない外出は回数にだけ数える。期間内に観測が無い・取得に失敗した場合は None(失敗してもほかの項目のレポートは送る) | `def _summarize_car_usage(start_dt: datetime.datetime, now: datetime.datetime) -> Optional[Dict[str, int]]:` (行番号: 82) |
+| `format_car_usage` / `_format_minutes` | **（#1118 で新設）** 「🚗 車利用」の行の値。`3回・計3時間20分`、時刻が不確かな外出があれば ` (うち時刻が不確か1回)` を添える。外出が無ければ `なし`、None なら `データなし` | `def format_car_usage(car: Optional[Dict[str, int]]) -> str:` (行番号: 122) |
+| `_estimate_elec_bill` | スマートメーター行(#170/#829)の平均電力×実経過時間×`config.ELEC_PRICE_PER_KWH`で電気代を概算する。平均が無ければ0 | `def _estimate_elec_bill(cursor: Any, start_str: str, start_dt: datetime.datetime, now: datetime.datetime) -> int:` (行番号: 134) |
+| `_count_sick_records` | 体調記録のうち`condition`に「元気」を含まない件数 | `def _count_sick_records(cursor: Any, start_str: str) -> int:` (行番号: 171) |
 
 * 根拠: `data["elec_bill"] = _estimate_elec_bill(cursor, start_str, start_dt, now)` (行番号: 177)
 
@@ -92,7 +94,7 @@
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` - 集計結果の辞書。DB接続失敗時や例外発生時は `None`。
-* 根拠: `get_analysis_data` 戻り値ヒント (行番号: 147 / 抜粋: "-> Optional[Dict[str, Any]]:")
+* 根拠: `get_analysis_data` 戻り値ヒント (行番号: 183 / 抜粋: "-> Optional[Dict[str, Any]]:")
 
 
 * **副作用**: `core.database.get_db_cursor()` を用いてDBに対して `SELECT` クエリを実行する。
@@ -106,12 +108,12 @@
 
 ### `generate_text_section`
 
-* **役割**: 集計データからレポート用のテキストセクション（詳細モードまたは簡易モード）を生成する。
-* 根拠: `generate_text_section` 定義部 (行番号: 188〜220 / 抜粋: "def generate_text_section(peri")
+* **役割**: 集計データからレポート用のテキストセクション（詳細モードまたは簡易モード）を生成する。 **（#1118 で変更）** 詳細モードの車の行を「🚗 駐車場の動き: N回」から「🚗 車利用: N回・計X時間」(`format_car_usage`)に戻した。
+* 根拠: `generate_text_section` 定義部 (行番号: 224〜256 / 抜粋: "def generate_text_section(peri")
 
 
 * **引数/リクエスト**: `period_name: str`, `data: Dict[str, Any]`, `is_simple: bool = False`
-* 根拠: `generate_text_section` 引数部 (行番号: 188 / 抜粋: "period_name: str, data: Dict[s")
+* 根拠: `generate_text_section` 引数部 (行番号: 224 / 抜粋: "period_name: str, data: Dict[s")
 
 
 * **戻り値/レスポンス**: `str` - 整形されたテキスト文字列。
@@ -119,7 +121,7 @@
 
 
 * **副作用**: なし
-* 根拠: 関数内部の処理 (行番号: 202 / 抜粋: "total = data["total_meals"]")
+* 根拠: 関数内部の処理 (行番号: 238 / 抜粋: "total = data["total_meals"]")
 
 
 * **エラーハンドリング**: `data` が空（Falsy）の場合は即座に空文字 `""` を返す。
@@ -130,7 +132,7 @@
 ### `is_month_end_report`
 
 * **役割**: 実行時点から7日後の月が現在の月と異なるかを判定し、月末レポート対象日であるかをチェックする。
-* 根拠: `is_month_end_report` 定義部 (行番号: 222〜230 / 抜粋: "def is_month_end_report() -> b")
+* 根拠: `is_month_end_report` 定義部 (行番号: 258〜266 / 抜粋: "def is_month_end_report() -> b")
 
 
 * **引数/リクエスト**: なし
@@ -138,22 +140,22 @@
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: `is_month_end_report` 戻り値ヒント (行番号: 222 / 抜粋: "-> bool:")
+* 根拠: `is_month_end_report` 戻り値ヒント (行番号: 258 / 抜粋: "-> bool:")
 
 
 * **副作用**: なし
-* 根拠: 関数内部の処理 (行番号: 230 / 抜粋: "return now.month != next_week.")
+* 根拠: 関数内部の処理 (行番号: 266 / 抜粋: "return now.month != next_week.")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内部の処理 (行番号: 230 / 抜粋: "return now.month != next_week.")
+* 根拠: 関数内部の処理 (行番号: 266 / 抜粋: "return now.month != next_week.")
 
 
 
 ### `run_report`
 
 * **役割**: 週間レポート生成のメイン処理。実行条件の判定、データ集計の呼び出し、メッセージの構築、外部へのプッシュ通知を行う。
-* 根拠: `run_report` 定義部 (行番号: 232〜325 / 抜粋: "def run_report() -> None:")
+* 根拠: `run_report` 定義部 (行番号: 268〜361 / 抜粋: "def run_report() -> None:")
 
 
 * **引数/リクエスト**: なし
@@ -161,7 +163,7 @@
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `run_report` 戻り値ヒント (行番号: 232 / 抜粋: "-> None:")
+* 根拠: `run_report` 戻り値ヒント (行番号: 268 / 抜粋: "-> None:")
 
 
 * **副作用**:
@@ -169,11 +171,11 @@
 * ロガーによる状態のログ出力（INFO, ERROR, DEBUG）。
 * `services.notification_service.send_push` を呼び出し外部システムへ通知を送信。**（2026-09 チャンネル再設計で変更）** 以前は`channel`引数を省略しており既定値`"notify"`(生活者向けチャンネル)へ送られていたが、週次の定期レポートという性質から`channel="report"`(運用者向けチャンネル)を明示指定するよう変更された。
 * 送信成功時、モジュール定数`LAST_RUN_FILE`(`config.FALLBACK_ROOT`配下)へ実行日(`YYYY-MM-DD`)を書き込む(Issue #234で追加。`--force`実行時は書き込まない)。**（Issue #661で修正）** このフラグファイルの読み書きは`core/state_file.py`の`read_text`/`write_text_atomic`へ委譲し、書き込みは一時ファイル + `fsync` + `os.replace`による原子的な差し替えになった(親ディレクトリの作成も`state_file`側が行うため、呼び出し側の`os.makedirs`は不要になっている)。読み取り失敗時は`None`が返り「未送信」として扱われる(重複送信より送信欠落の方が困るため)。
-* 根拠: 各種処理部 (行番号: 237, 256, 319 / 抜粋: "is_force = len(sys.argv) > 1 a", "logger.info(\"📊 週間レポート生成プロセ", "if send_push([{\"type\": \"text\", \"text\": full_msg}], target=\"discord\", channel=\"report\"):")、実行済みフラグ書き込み (参照: run_report / 抜粋: "if not is_force:\n            state_file.write_text_atomic(LAST_RUN_FILE, today_str)")
+* 根拠: 各種処理部 (行番号: 273, 292, 355 / 抜粋: "is_force = len(sys.argv) > 1 a", "logger.info(\"📊 週間レポート生成プロセ", "if send_push([{\"type\": \"text\", \"text\": full_msg}], target=\"discord\", channel=\"report\"):")、実行済みフラグ書き込み (参照: run_report / 抜粋: "if not is_force:\n            state_file.write_text_atomic(LAST_RUN_FILE, today_str)")
 
 
 * **エラーハンドリング**: 日付計算失敗時（`start_week` 等が `None`）、および週間データ取得失敗時（`stats_week` が `None`）はエラーログを出力し、処理を中断（`return`）する。`--force`が指定されていない場合、`LAST_RUN_FILE`に本日日付が既に記録されていれば、月曜8時台であっても処理を中断する(Issue #234で追加。外部cronの多重起動による重複送信を防止)。
-* 根拠: エラーチェック部 (行番号: 265, 272 / 抜粋: "if not start_week or not start", "if not stats_week:")、実行済みフラグチェック (参照: run_report / 抜粋: "if not is_force and state_file.read_text(LAST_RUN_FILE) == today_str:")
+* 根拠: エラーチェック部 (行番号: 301, 308 / 抜粋: "if not start_week or not start", "if not stats_week:")、実行済みフラグチェック (参照: run_report / 抜粋: "if not is_force and state_file.read_text(LAST_RUN_FILE) == today_str:")
 
 
 
@@ -243,8 +245,8 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `config.py` | 使用されている各種テーブル名や定数値（`SQLITE_TABLE_POWER_USAGE` など）を特定するため。 | 根拠: `config.SQLITE_TABLE_FOOD` (参照: _count_meals / 抜粋: "config.SQLITE_TABLE_FOOD") |
-| 高 | `core/database.py`・`services/notification_service.py` | DB接続先やクエリ結果を扱うカーソルの仕様、およびプッシュ通知の実際の送信先・処理内容を把握するため。 | 根拠: `core.database.get_db_cursor`, `services.notification_service.send_push` (行番号: 156, 319 / 抜粋: "with get_db_cursor() as cursor:", "if send_push([{\"type\": \"text\", \"text\": full_msg}]") |
-| 中 | （データベーススキーマ定義ファイル） | `menu_category`、`action`、`wattage`、`condition` カラムのデータ型や格納形式、制約を確認するため。 | 根拠: DBクエリ実行部 (行番号: 54, 112 / 抜粋: "SELECT menu_category", "SELECT AVG(wattage)") |
+| 高 | `core/database.py`・`services/notification_service.py` | DB接続先やクエリ結果を扱うカーソルの仕様、およびプッシュ通知の実際の送信先・処理内容を把握するため。 | 根拠: `core.database.get_db_cursor`, `services.notification_service.send_push` (行番号: 192, 355 / 抜粋: "with get_db_cursor() as cursor:", "if send_push([{\"type\": \"text\", \"text\": full_msg}]") |
+| 中 | （データベーススキーマ定義ファイル） | `menu_category`、`action`、`wattage`、`condition` カラムのデータ型や格納形式、制約を確認するため。 | 根拠: DBクエリ実行部 (行番号: 54, 148 / 抜粋: "SELECT menu_category", "SELECT AVG(wattage)") |
 
 ## 8. 保守上の注意点
 
