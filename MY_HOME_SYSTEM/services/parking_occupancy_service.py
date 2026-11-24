@@ -14,7 +14,10 @@ Phase 0(実現性検討)の実装で、DB にもダッシュボードにもま�
       車があるとルーフで隠れてエッジが減る。
     * 床(コンクリート): 明るい。車があるとリアガラスやボディで暗くなる。
       平均の明るさで見る(車なし 106〜165 / 車あり 36〜78。夜の IR でも床は明るく写る)。
-* 2つの判定が一致した時だけ在/不在とし、食い違えば「不明」にする。
+* 石畳の判定を優先し、石畳がどちらとも言えない値の時だけ床で決める。
+  実機の7日分では、石畳は昼夜とも車あり・なしがはっきり分かれた(あり ≤ 0.12、
+  なし ≥ 0.20)。床は、車を停める位置(手前・奥・左右)や、日差し・玄関灯の影で
+  明るさが変わり、それだけで誤判定することがあった(#1115)。
 * 1フレームの判定は乗り降りの人などで揺れるので、連続 N 回同じ結果になってから
   状態の変化として確定する(`build_events`)。
 """
@@ -52,10 +55,13 @@ FLAGSTONE_ROI = Roi(0.52, 0.36, 0.78, 0.47)
 FLOOR_ROI = Roi(0.55, 0.60, 0.85, 0.79)
 
 # === 判定のしきい値 ===
-# 石畳のエッジ密度: 車なし 0.20〜0.25(昼・夜とも) / 車あり 0.04〜0.13(昼)・0.01〜0.05(夜)
+# 石畳のエッジ密度(実機7日分の5〜95%): 車なし 0.20〜0.25(昼) / 車あり 0.035〜0.12(昼)・0.011〜0.040(夜)
+# 日没後で暗くなると、車がなくても 0.17 前後まで下がることがある(その時は床で決まる)。
 FLAGSTONE_EDGE_ABSENT_MIN = 0.17   # これ以上なら「車なし」
-FLAGSTONE_EDGE_PRESENT_MAX = 0.13  # これ以下なら「車あり」
-# 床の平均の明るさ: 車なし 106〜165 / 車あり 36〜78
+FLAGSTONE_EDGE_PRESENT_MAX = 0.15  # これ以下なら「車あり」
+# 床の平均の明るさ: 車なし 106〜167 / 車あり 33〜82。石畳がどちらとも言えない時だけ使う。
+# 車を奥に停めると夜でも床が見えて 107 前後、晴れた昼に影が落ちると車がなくても
+# 77〜92 になるため、これ単独では決めない。
 FLOOR_MEAN_ABSENT_MIN = 100.0      # これ以上なら「車なし」
 FLOOR_MEAN_PRESENT_MAX = 85.0      # これ以下なら「車あり」
 # 床の外れ画素の割合(判定には使わず、記録だけする)。当初はこれで判定していたが、
@@ -200,14 +206,17 @@ def _vote(value: float, present_when_low: bool, low: float, high: float) -> str:
 
 
 def classify(features: ParkingFeatures) -> str:
-    """石畳と床の2つの判定が一致した時だけ在/不在を返す。それ以外は不明。"""
+    """石畳で在否を決める。石畳がどちらとも言えない値の時だけ床で決め、床もどちらとも
+    言えなければ不明を返す。
+
+    以前は「2つが一致した時だけ」在否を返していたが、実機の7日分では「判定できず」の
+    ほとんど(1013件中 約960件)が、石畳は正しいのに床が車の位置や影で外れたものだった(#1115)。
+    """
     flagstone_vote = _vote(
         features.flagstone_edge, True, FLAGSTONE_EDGE_PRESENT_MAX, FLAGSTONE_EDGE_ABSENT_MIN)
-    floor_vote = _vote(
-        features.floor_mean, True, FLOOR_MEAN_PRESENT_MAX, FLOOR_MEAN_ABSENT_MIN)
-    if flagstone_vote == floor_vote:
+    if flagstone_vote != STATE_UNKNOWN:
         return flagstone_vote
-    return STATE_UNKNOWN
+    return _vote(features.floor_mean, True, FLOOR_MEAN_PRESENT_MAX, FLOOR_MEAN_ABSENT_MIN)
 
 
 def build_frame_command(path: str, interval_seconds: int) -> List[str]:

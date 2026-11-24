@@ -87,19 +87,29 @@ class TestClassify:
         assert features.floor_outlier > 0.2  # 以前の判定なら「車あり」になる値
         assert occupancy.classify(features) == A
 
-    def test_2つの判定が食い違えば不明にする(self):
-        # 石畳は見えているのに床には何かある(人が立っている等)
+    def test_石畳と床が食い違えば石畳を優先する(self):
+        # #1115: 車を奥に停めて床が見えている(実機では夜通し続いた)。石畳は隠れているので「あり」
+        features = occupancy.compute_features(_frame(True, True, floor_blocked=False))
+        assert features.floor_mean >= occupancy.FLOOR_MEAN_ABSENT_MIN
+        assert occupancy.classify(features) == P
+        # 車はないが、晴れた昼に影や人で床が暗くなった。石畳は見えているので「なし」
         features = occupancy.compute_features(_frame(False, False, floor_blocked=True))
-        assert occupancy.classify(features) == U
-        # 石畳は隠れているのに床は見えている
-        features = occupancy.compute_features(_frame(False, False, flagstone_hidden=True))
-        assert occupancy.classify(features) == U
+        assert features.floor_mean <= occupancy.FLOOR_MEAN_PRESENT_MAX
+        assert occupancy.classify(features) == A
 
-    def test_しきい値の間の値は不明にする(self):
-        features = occupancy.compute_features(_frame(True, False))
+    def test_石畳がどちらとも言えない時は床で決める(self):
+        base = occupancy.compute_features(_frame(True, False))
         middle = (occupancy.FLAGSTONE_EDGE_PRESENT_MAX + occupancy.FLAGSTONE_EDGE_ABSENT_MIN) / 2
-        ambiguous = occupancy.ParkingFeatures(**{**features.__dict__, "flagstone_edge": middle})
-        assert occupancy.classify(ambiguous) == U
+
+        def with_(floor_mean):
+            return occupancy.ParkingFeatures(
+                **{**base.__dict__, "flagstone_edge": middle, "floor_mean": floor_mean})
+
+        # 日没後で石畳が暗くなった(実機 0.166)が、床は明るい → なし
+        assert occupancy.classify(with_(137.0)) == A
+        assert occupancy.classify(with_(40.0)) == P
+        # 床もどちらとも言えなければ不明
+        assert occupancy.classify(with_(92.0)) == U
 
     def test_大きさの違うフレームは解析用の大きさに揃えてから計算する(self):
         import cv2

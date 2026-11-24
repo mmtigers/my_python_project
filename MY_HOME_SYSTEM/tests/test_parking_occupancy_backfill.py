@@ -26,7 +26,7 @@ P, A, U = occupancy.STATE_PRESENT, occupancy.STATE_ABSENT, occupancy.STATE_UNKNO
 FEATURES = {
     P: occupancy.ParkingFeatures(False, 30.0, 0.05, 800.0, 40.0, 20.0, 0.04, 0.03),
     A: occupancy.ParkingFeatures(False, 30.0, 0.22, 8000.0, 160.0, 15.0, 0.02, 0.01),
-    U: occupancy.ParkingFeatures(False, 30.0, 0.15, 4000.0, 160.0, 15.0, 0.02, 0.01),
+    U: occupancy.ParkingFeatures(False, 30.0, 0.16, 4000.0, 92.0, 15.0, 0.02, 0.01),
 }
 
 
@@ -187,8 +187,9 @@ class TestRun:
         backfill.run(str(rec), str(out), 1, 60, 3, save_frames=False)
         assert len(_read_csv(out / backfill.TRIPS_FILE)) == 1
 
-        # しきい値を変えると、録画を読み直さずに集計が変わる(石畳だけで「あり」と言えなくなる)
+        # しきい値を変えると、録画を読み直さずに集計が変わる(石畳でも床でも「あり」と言えなくなる)
         monkeypatch.setattr(occupancy, "FLAGSTONE_EDGE_PRESENT_MAX", 0.01)
+        monkeypatch.setattr(occupancy, "FLOOR_MEAN_PRESENT_MAX", 10.0)
         backfill.run(str(rec), str(out), 1, 60, 3, save_frames=False)
         assert _read_csv(out / backfill.TRIPS_FILE) == []
         # state 列は解析した時点の記録のまま
