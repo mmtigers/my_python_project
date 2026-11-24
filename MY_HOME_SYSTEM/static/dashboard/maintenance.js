@@ -171,11 +171,16 @@ function dashboardDeploy() {
         });
 }
 document.addEventListener("DOMContentLoaded", function () {
-    // 更新の実行中にページを開き直した場合は、結果を待つ表示に戻す。
-    fetch("/api/system/deploy/status", { credentials: "same-origin" })
-        .then(function (res) { return res.ok ? res.json() : null; })
-        .then(function (st) { if (st && st.running) { deploySetBusy(true); deployPoll(null); } })
-        .catch(function () {});
+    // バックアップ(システムの「📦 バックアップ」画面)と更新・再起動(「🛠️ 管理者向け」画面)は
+    // 別の画面にあるので、その画面にあるボタンの分だけ状態を取りに行く。
+    if (document.getElementById("deployBtn")) {
+        // 更新の実行中にページを開き直した場合は、結果を待つ表示に戻す。
+        fetch("/api/system/deploy/status", { credentials: "same-origin" })
+            .then(function (res) { return res.ok ? res.json() : null; })
+            .then(function (st) { if (st && st.running) { deploySetBusy(true); deployPoll(null); } })
+            .catch(function () {});
+    }
+    if (!document.getElementById("backupBtn")) { return; }
     // ページを開いた時点で実行中なら、スピナー表示に戻して結果を待つ。
     backupFetchStatus().then(function (st) {
         backupShowLatest(st.latest_backup);

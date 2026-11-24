@@ -125,7 +125,7 @@ class TestBuildStatusCards:
         card = _parking_card(home_status_service.build_status_cards(NOW, pd.DataFrame(), None, None, None, car=car))
         assert (card.value, card.theme, card.sub) == ("🚙 外出中", "theme-blue", "09:30 に出発・今日 1回外出")
         # 詳細(駐車場カメラの映像)へのリンク先は変わらない
-        assert card.anchor == f"?camera={home_status_service.PARKING_CAMERA_ID}#camera-section"
+        assert card.anchor == f"/live?camera={home_status_service.PARKING_CAMERA_ID}"
 
     def test_判定が無ければ従来どおり動体検知を出す(self):
         card = _parking_card(home_status_service.build_status_cards(NOW, pd.DataFrame(), None, None, None))

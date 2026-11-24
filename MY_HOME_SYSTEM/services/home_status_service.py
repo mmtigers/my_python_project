@@ -145,6 +145,30 @@ STATUS_CARD_CSS = """
     .theme-blue { background-color: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-bd); border-left: 5px solid var(--accent); }
     .theme-gray { background-color: var(--neutral-bg); color: var(--neutral); border: 1px solid var(--neutral-bd); border-left: 5px solid var(--faint); }
 
+    /* 小さめのカード(`render_status_grid_html` の `variants`)。スマホでホーム・各ページの1画面目に
+       必要なカードを収めるためのもので、色・帯・絵文字による状態の示し方は通常のカードと同じ。
+       compact=背を低く / mini=さらに小さく / tiles=3列のタイル(補足は出さない)。
+       見出し・補足は1行に収め、はみ出す分は「…」にする(行数が増えて背が伸びないように)。 */
+    .status-grid-compact, .status-grid-mini { gap: 8px; }
+    .status-grid-compact .status-card { min-height: 72px; padding: 8px 10px 8px 12px; }
+    .status-grid-mini .status-card { min-height: 56px; padding: 6px 10px 6px 12px; }
+    .status-grid-compact .status-title, .status-grid-mini .status-title, .status-grid-tiles .status-title,
+    .status-grid-compact .status-sub, .status-grid-mini .status-sub {
+        max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .status-grid-compact .status-title { margin-bottom: 2px; }
+    .status-grid-compact .status-value { font-size: 1rem; }
+    .status-grid-compact .status-sub { font-size: 0.72rem; margin-top: 2px; }
+    .status-grid-mini .status-title { font-size: 0.72rem; margin-bottom: 1px; }
+    .status-grid-mini .status-value { font-size: 0.95rem; }
+    .status-grid-mini .status-sub { font-size: 0.68rem; margin-top: 1px; }
+    .status-grid-tiles { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 6px; }
+    .status-grid-tiles .status-card { min-height: 52px; padding: 6px 6px 6px 9px; border-left-width: 4px; }
+    .status-grid-tiles .status-title { font-size: 0.7rem; margin-bottom: 1px; }
+    .status-grid-tiles .status-value { font-size: 0.82rem; white-space: nowrap; }
+    /* ホームは見出しの上下を詰める(1画面に収めるため) */
+    .home-status .group-title { margin: 12px 0 6px; }
+
     /* カードのグループ見出し。カード自体より小さく薄くして「並びの区切り」として見せる。 */
     .group-title {
         font-size: 0.8rem;
@@ -203,6 +227,9 @@ CARD_GROUPS: tuple[tuple[str, str], ...] = (
     ("climate", "🌡️ 室温"),
     ("life", "💡 くらし"),
     ("sys", "🔧 システム"),
+    # ホームの「システム・サービス」タイル(`build_service_cards`)。サーバー・NAS・録画・外部アプリの稼働を
+    # 1か所で一目で見るためのもので、上の `sys` のカード(システムページ用)とは別に組み立てる。
+    ("service", "🖥️ システム・サービス"),
 )
 CARD_GROUP_LABELS: dict[str, str] = dict(CARD_GROUPS)
 
@@ -286,8 +313,8 @@ class StatusCard(NamedTuple):
     のための、直接のリンク先。指定すると `tab` より優先される。
     `group`: カードが属する見出し(`CARD_GROUPS` のキー)。よく見るものから順に
     並べたうえで、どこからどこまでが同じ用途かを見出しで示すために使う。
-    `anchor`: `tab` のURLの末尾にそのまま付け足す文字列(例: `#takasago-log`、
-    `?camera=xxx#camera-section`)。同じタブに複数のカードが属するとき、
+    `anchor`: `tab` のURLの末尾にそのまま付け足す文字列(例: `/takasago`、
+    `/live?camera=xxx`)。同じタブに複数のカードが属するとき、
     どのカードをタップしても同じページの先頭に飛ぶだけになってしまうのを防ぎ、
     タップしたカードの内容が実際に載っているページ内の場所まで連れて行く。
     """
@@ -300,6 +327,7 @@ class StatusCard(NamedTuple):
     href: str | None = None
     group: str | None = None
     anchor: str | None = None
+    new_tab: bool = False
 
 
 def render_status_card_html(
@@ -310,6 +338,7 @@ def render_status_card_html(
     value_is_html: bool = False,
     href: str | None = None,
     sub: str | None = None,
+    new_tab: bool = False,
 ) -> str:
     """
     ステータスカードのHTMLを生成。
@@ -326,6 +355,9 @@ def render_status_card_html(
     渡していなかった(リンクを踏むとページ全体が再読み込みになり、同じ移動を
     `dashboard.py` の「詳しく見る」ボタンが担っていたため)。現在は
     `unified_server` が返すページだけが呼び出し元で、ホームのカードが使う。
+
+    `new_tab` は別アプリ(ファミクエ・あさノート等)へのリンク用。ダッシュボードを閉じないよう
+    新しいタブで開く(`rel=noopener` で `window.opener` を渡さない)。
     """
     safe_title = html.escape(title)
     safe_value = value if value_is_html else html.escape(value)
@@ -337,7 +369,8 @@ def render_status_card_html(
         open_tag = f'<div class="status-card {theme}">'
         close_tag = "</div>"
     else:
-        open_tag = f'<a class="status-card {theme}" href="{html.escape(href)}">'
+        target = ' target="_blank" rel="noopener"' if new_tab else ""
+        open_tag = f'<a class="status-card {theme}" href="{html.escape(href)}"{target}>'
         close_tag = "</a>"
     sub_html = "" if not sub else f'<div class="status-sub">{html.escape(sub)}</div>'
     return (
@@ -394,6 +427,7 @@ def render_status_grid_html(
     dashboard_path: str | None = None,
     show_group_titles: bool = True,
     group_extras: dict[str, str] | None = None,
+    variants: dict[str, str] | None = None,
 ) -> str:
     """カードを自動折り返しのグリッドにまとめたHTMLを返す。
 
@@ -408,6 +442,10 @@ def render_status_grid_html(
 
     `show_group_titles=False` はグループ見出しを出さない(ページ自身の見出しが
     グループ名と同じで、同じ見出しが2つ並んでしまうサブページ用。表示だけの違い)。
+
+    `variants` は `{グループのキー: 見た目の種類}`。グリッドに `status-grid-<種類>` のクラスを付ける
+    (`compact`=2列で背を低く / `mini`=2列でさらに小さく / `tiles`=3列の小さなタイルで補足を出さない)。
+    スマホでホーム・各ページの1画面目に必要なカードを収めるためのもの(色・判定は変えない)。
     """
     blocks = []
     for group_key, group_cards_ in group_cards(cards):
@@ -417,6 +455,9 @@ def render_status_grid_html(
         # 1枚だけのグループは、カードが行いっぱいに伸びないよう目印を付ける
         # (理由は `.status-grid-solo` のCSSコメントを参照)。
         solo = " status-grid-solo" if len(group_cards_) == 1 else ""
+        variant = (variants or {}).get(group_key or "")
+        if variant:
+            solo += f" status-grid-{variant}"
         cards_html = "".join(
             render_status_card_html(
                 card.title,
@@ -424,7 +465,8 @@ def render_status_grid_html(
                 card.theme,
                 value_is_html=card.value_is_html,
                 href=None if dashboard_path is None else card_detail_href(card, dashboard_path),
-                sub=card.sub,
+                sub=None if variant == "tiles" else card.sub,
+                new_tab=card.new_tab,
             )
             for card in group_cards_
         )
@@ -986,31 +1028,90 @@ def build_status_cards(
     server_val, server_theme = get_server_status(memory)
     nas_val, nas_theme = get_nas_status_simple(nas_data)
 
-    # `tab` は「このカードの詳細が載っているタブ」。軽量ページはこれを使って
-    # カード自体をリンクにする(異常に気づいてから詳細を開くまでを1タップにする)。
-    # 見守りグループの4枚はすべて `tab="watch"` の同じページを指すため、`anchor` で
-    # ページ内のどの場所(セクション)に連れて行くかを分ける(#829後の見直し。
-    # 以前は`anchor`が無く、4枚のどれを押しても同じページ先頭=カメラ映像に
-    # 飛ぶだけで、実質どのカードも同じ場所にしか行けなかった)。
+    # `tab` は「このカードの詳細が載っているページ」。カード自体をリンクにする
+    # (異常に気づいてから詳細を開くまでを1タップにする)。`anchor` はそのページの下の
+    # 詳細画面(`/watch/takasago` 等)を指す。以前は同じページ内の見出し(`#takasago-log`)へ
+    # 飛ばしていたが、見守り・システムのページを「カード → タップで詳細画面」の構成に変え、
+    # スマホで下までスクロールしなくても済むようにした。
     return [
         StatusCard("👵 高砂 (実家)", taka_val, taka_theme, tab="watch", group="watch",
-                   sub=describe_takasago(df_sensor, now), anchor="#takasago-log"),
+                   sub=describe_takasago(df_sensor, now), anchor="/takasago"),
         StatusCard("🏠 伊丹 (自宅)", itami_val, itami_theme, tab="watch", group="watch",
-                   sub=describe_itami(df_sensor, now), anchor="#itami-log"),
+                   sub=describe_itami(df_sensor, now), anchor="/itami"),
         StatusCard("🚗 駐車場", parking_val, parking_theme, tab="watch", group="watch",
                    sub=parking_sub,
-                   anchor=f"?camera={PARKING_CAMERA_ID}#camera-section"),
+                   anchor=f"/live?camera={PARKING_CAMERA_ID}"),
         StatusCard("🎥 カメラ", camera_val, camera_theme, tab="watch", group="watch",
-                   sub=describe_camera(df_sensor, now, recording), anchor="#camera-section"),
+                   sub=describe_camera(df_sensor, now, recording), anchor="/live"),
         *build_climate_cards(df_sensor, now),
-        StatusCard("💰 今月の電気代", cost_val, cost_theme, tab="life", group="life",
+        # 電気代の詳細は「⚡ 電気」ページ(`/power`)。先頭に今月のまとめがある。
+        StatusCard("💰 今月の電気代", cost_val, cost_theme, tab="power", group="life",
                    sub=describe_cost(monthly_cost, last_month_cost)),
         StatusCard("🖥️ サーバー", server_val, server_theme, tab="sys", group="sys",
-                   sub=describe_server(disk, memory)),
+                   sub=describe_server(disk, memory), anchor="/server"),
         StatusCard("🗄️ NAS", nas_val, nas_theme, tab="sys", group="sys",
-                   sub=describe_nas(nas_data), anchor="#nas-history"),
+                   sub=describe_nas(nas_data), anchor="/nas"),
     ]
 
+
+
+def get_recording_tile_status(recording: list[dict[str, Any]] | None) -> tuple[str, str]:
+    """ホームの「🎥 録画」タイルの値と色。全台録画中=緑、1台でも止まっていれば赤、判定できなければ灰色。
+
+    `recording` は `get_camera_recording_states()` の結果(`get_camera_status` と同じもの)。
+    「🎥 カメラ」カードは録画が判定できないとき最後の動体検知に切り替わるが、このタイルは
+    稼働状況だけを示すので、判定できなければ「不明」にする。
+    """
+    if not recording:
+        return "⚪ 不明", "theme-gray"
+    stopped = [r for r in recording if r.get("state") != "ok"]
+    if stopped:
+        return f"🔴 {len(stopped)}台停止", "theme-red"
+    return "🟢 録画中", "theme-green"
+
+
+def get_app_tile_status(healthy: bool | None) -> tuple[str, str]:
+    """外部アプリ(ファミクエ・あさノート・よるノート)のタイルの値と色。None はまだ確認中(灰色)。"""
+    if healthy is None:
+        return "⚪ 確認中", "theme-gray"
+    if healthy:
+        return "🟢 稼働中", "theme-green"
+    return "🔴 停止中", "theme-red"
+
+
+def build_service_cards(
+    cards,
+    *,
+    link_health: dict[str, bool | None] | None,
+    recording: list[dict[str, Any]] | None,
+    quest_path: str,
+    asa_note_url: str,
+    yoru_note_url: str | None = None,
+) -> list[StatusCard]:
+    """ホームの「🖥️ システム・サービス」タイル(サーバー・NAS・録画・ファミクエ・あさノート・よるノート)。
+
+    スマホでホームを開いたとき、家の様子と一緒にシステムとアプリが動いているかを一目で分かるように
+    する(以前はサーバー・NASのカードがページの下の方、アプリは「よく使うリンク」として最後にあった)。
+    サーバー・NASは `build_status_cards` のカードと同じ判定を流用し(2か所で判定が食い違わないように)、
+    行き先はシステムページの詳細画面。録画は見守りのライブ映像(カメラごとに録画の状態が出る)。
+    アプリのタイルはそのアプリを新しいタブで開く。
+    """
+    by_title = {card.title: card for card in cards}
+    tiles: list[StatusCard] = []
+    for title in ("🖥️ サーバー", "🗄️ NAS"):
+        card = by_title.get(title)
+        if card is not None:
+            tiles.append(card._replace(group="service"))
+    rec_val, rec_theme = get_recording_tile_status(recording)
+    tiles.append(StatusCard("🎥 録画", rec_val, rec_theme, tab="watch", group="service", anchor="/live"))
+    health = link_health or {}
+    apps = [("⚔️ ファミクエ", quest_path, "quest"), ("📝 あさノート", asa_note_url, "asa_note")]
+    if yoru_note_url:
+        apps.append(("🌙 よるノート", yoru_note_url, "yoru_note"))
+    for title, url, key in apps:
+        val, theme = get_app_tile_status(health.get(key))
+        tiles.append(StatusCard(title, val, theme, href=url, group="service", new_tab=True))
+    return tiles
 
 # === 軽量ページ用の取得(TTLキャッシュ付き) ===
 # `unified_server` は Streamlit を使わないため(#829)、`@st.cache_data` の代わりに
@@ -1188,8 +1289,9 @@ def clear_status_cache() -> None:
         _inflight.clear()
 
 
-# くらしページの電気代詳細(日別推移)で遡る日数。
-DAILY_COST_HISTORY_DAYS = 14
+# 「⚡ 電気」ページの「今月のまとめ」の日別推移で遡る日数。今月の日を月末まで欠けずに出せるよう31日。
+# (以前はくらしページの日別一覧用で14日だった)
+DAILY_COST_HISTORY_DAYS = 31
 
 
 class DashboardMaterials(NamedTuple):
@@ -1448,7 +1550,7 @@ def build_home_alerts(
         labels = [a["label"] for a in health.get("anomalies", []) if a.get("key") in HEALTH_HOME_KEYS]
         if labels:
             alerts.append(HomeAlert(
-                "定期チェック: " + "・".join(labels), f"{dashboard_path.rstrip('/')}/sys#health-check"
+                "定期チェック: " + "・".join(labels), f"{dashboard_path.rstrip('/')}/sys/health"
             ))
     return alerts
 
@@ -1553,44 +1655,6 @@ def read_health_result(now: datetime | None = None) -> dict[str, Any] | None:
 
 
 # === 今日の天気(ホームの1行) ===
-
-def get_today_weather() -> dict[str, Any] | None:
-    """今日(JST)の天気と最高/最低気温。`weather_history`(`monitors/weather_monitor.py` が毎日書く)から読む。
-    記録が無い・取得失敗は None(ホームはその行を出さない)。10分キャッシュ。"""
-    today = get_now_jst().date().isoformat()
-
-    def _load() -> dict[str, Any] | None:
-        with get_ro_connection() as conn:
-            row = conn.execute(
-                "SELECT weather_desc, max_temp, min_temp FROM weather_history WHERE date = ? AND location = ?",
-                (today, config.WEATHER_LOCATION_NAME),
-            ).fetchone()
-        if row is None or (row[1] is None and row[2] is None):
-            return None
-        return {"desc": row[0], "max_temp": row[1], "min_temp": row[2]}
-
-    # 固定キー(日付入りにすると日ごとに溜まる)。日付をまたいだ直後の最大10分は前日の値が残りうる。
-    return _cached("weather_today", _load, ttl=CLIMATE_CACHE_TTL_SEC)
-
-
-def render_today_weather_html(weather: dict[str, Any] | None) -> str:
-    """「今日の天気: 晴れ・最高 18℃ / 最低 9℃」。記録が無ければ空文字。"""
-    if not weather:
-        return ""
-    parts = []
-    if weather.get("desc"):
-        parts.append(str(weather["desc"]))
-    temps = []
-    if weather.get("max_temp") is not None:
-        temps.append(f"最高 {float(weather['max_temp']):.0f}℃")
-    if weather.get("min_temp") is not None:
-        temps.append(f"最低 {float(weather['min_temp']):.0f}℃")
-    if temps:
-        parts.append(" / ".join(temps))
-    if not parts:
-        return ""
-    return f'<p class="today-weather">今日の天気: {html.escape("・".join(parts))}</p>'
-
 
 def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:
     """材料を集めてカードを組み立て、(カード, 取得時刻)を返す。ホームページ用。"""

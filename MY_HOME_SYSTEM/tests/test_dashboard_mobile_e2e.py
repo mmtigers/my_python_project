@@ -195,17 +195,15 @@ class TestHomePageLayout:
 
         assert rendered.count() > 0, "カードが1枚も描かれていない"
         assert cards.count() == rendered.count(), "リンクになっていないカードがある"
+        allowed = ("watch/takasago", "watch/itami", "watch/live", "life", "sys/server", "sys/nas")
         for i in range(cards.count()):
-            href = cards.nth(i).get_attribute("href")
-            # 見守りグループの複数枚は同じページを指しつつ `#takasago-log` 等の
-            # アンカーでページ内の別セクションへ飛ぶため、末尾はタブ名そのものとは
-            # 限らない(例: "/dashboard/watch#takasago-log")。アンカー/クエリを
-            # 落としたうえでタブ名末尾かどうかを見る。
-            # 「🌡️ 室温」のカードはホーム自身(末尾が "/")のヒートマップへ飛ぶ。
-            path = (href or "").split("#", 1)[0].split("?", 1)[0]
-            assert href and (path.endswith("/") or any(path.endswith(f"/{p}") for p in ("watch", "life", "sys"))), (
-                f"{i}枚目のリンク先が想定外: {href!r}"
-            )
+            href = cards.nth(i).get_attribute("href") or ""
+            # 見守りのカードは各詳細画面(`/watch/takasago` 等)、室温はくらしのヒートマップ、
+            # サーバー・NASはシステムの詳細画面。アプリのタイルは別アプリ(新しいタブ)。
+            if cards.nth(i).get_attribute("target") == "_blank":
+                continue
+            path = href.split("#", 1)[0].split("?", 1)[0]
+            assert any(path.endswith(f"/{p}") for p in allowed), f"{i}枚目のリンク先が想定外: {href!r}"
 
     def test_cards_are_large_enough_to_tap(self, home_page):
         cards = home_page.locator("a.status-card")
@@ -238,14 +236,31 @@ class TestHomePageLayout:
         body_text = home_page.inner_text("body")
         assert "<div" not in body_text and "status-card" not in body_text
 
-    def test_bottom_nav_links_to_the_four_pages(self, home_page):
-        """ページ間の移動は下部ナビに一本化した(ホーム下部の「メニュー」カードは重複のため廃止)。"""
+    def test_everything_fits_on_one_screen_above_the_bottom_nav(self, home_page):
+        """スマホで開いたとき、見守り・室温・システムとサービスのカードがスクロールせずに見えること
+        (要望: 一目でわかるように)。最後のカードの下端が、下部ナビ(と浮き出たホームボタン)より上にある。"""
+        last_bottom = home_page.eval_on_selector_all(
+            ".status-card", "els => Math.max(...els.map(el => el.getBoundingClientRect().bottom))"
+        )
+        nav_top = home_page.locator("nav.bottom-nav li.bn-home a").bounding_box()["y"]
+        assert last_bottom <= nav_top, f"カードの下端 {last_bottom}px が下部ナビ {nav_top}px にかかっている"
+
+    def test_bottom_nav_has_five_items_with_home_raised_in_the_middle(self, home_page):
+        """ページ間の移動は下部ナビに一本化した(ホーム下部の「メニュー」カードは重複のため廃止)。
+        ホームは5つの真ん中で、ほかより大きく、上へ浮き出している。"""
         assert home_page.locator("a.nav-card").count() == 0
         nav = home_page.locator("nav.bottom-nav a")
-        assert nav.count() == 4
-        for i in range(nav.count()):
-            box = nav.nth(i).bounding_box()
+        assert nav.count() == 5
+        boxes = [nav.nth(i).bounding_box() for i in range(nav.count())]
+        for box in boxes:
             assert box is not None and box["height"] >= 44
+        home = home_page.locator("nav.bottom-nav li.bn-home a").bounding_box()
+        assert home == boxes[2], "ホームが真ん中にない"
+        center = home["x"] + home["width"] / 2
+        assert abs(center - MOBILE_VIEWPORT["width"] / 2) < 4, f"ホームが画面の中央にない: {center}"
+        icon = home_page.locator("nav.bottom-nav li.bn-home .bn-icon").bounding_box()
+        other_icon = home_page.locator("nav.bottom-nav li:not(.bn-home) .bn-icon").first.bounding_box()
+        assert icon["height"] > other_icon["height"] * 1.5 and icon["y"] < other_icon["y"]
 
     def test_theme_toggle_is_tappable_and_does_not_cover_the_title(self, home_page):
         toggle = home_page.locator("#themeToggle").bounding_box()
@@ -307,9 +322,13 @@ class TestHomePageDarkMode:
 
 class TestSubPagesLayout:
     """各サブページからホームへ戻れ(下部ナビ)、横はみ出しが無いこと。
-    下部ナビに無いページ(電気・アップデート)は、上部に親ページへ戻るリンクを持つ。"""
+    下部ナビに無いページ(詳細画面・電気・アップデート)は、上部に親ページへ戻るリンクを持つ。"""
 
-    @pytest.mark.parametrize("path,heading", [("watch", "見守り"), ("life", "くらし"), ("sys", "システム"), ("updates", "アップデート"), ("power", "電気")])
+    @pytest.mark.parametrize("path,heading", [
+        ("watch", "見守り"), ("watch/live", "カメラ"), ("watch/takasago", "高砂"), ("watch/security", "防犯ログ"),
+        ("life", "くらし"), ("sys", "システム"), ("sys/nas", "NAS"), ("sys/admin", "管理者向け"),
+        ("updates", "アップデート"), ("power", "電気"),
+    ])
     def test_subpage_has_a_back_link_and_no_sideways_scroll(self, browser, dashboard_server, artifact_dir, path, heading):
         base_url, base_path = dashboard_server
         context = browser.new_context(viewport=MOBILE_VIEWPORT, device_scale_factor=3, is_mobile=True, has_touch=True)
@@ -317,12 +336,15 @@ class TestSubPagesLayout:
         try:
             page.goto(f"{base_url}{base_path}/{path}", wait_until="networkidle", timeout=60_000)
             assert page.locator(f'nav.bottom-nav a[href="{base_path}/"]').count() == 1
-            assert page.locator("a.back-link").count() == (1 if path in ("updates", "power") else 0)
+            # 下部ナビにあるページ(見守り・くらし・システム・カメラ)には戻るリンクを置かない
+            in_nav = path in ("watch", "watch/live", "life", "sys")
+            assert page.locator("a.back-link").count() == (0 if in_nav else 1)
+            assert heading in page.locator("h1").inner_text()
 
             overflow = page.evaluate(
                 "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
             )
             assert overflow <= 1, f"横方向に {overflow}px はみ出している"
-            page.screenshot(path=str(artifact_dir / f"{path}.png"), full_page=True)
+            page.screenshot(path=str(artifact_dir / f"{path.replace('/', '_')}.png"), full_page=True)
         finally:
             context.close()

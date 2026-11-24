@@ -80,24 +80,27 @@ def _script_tag(filename: str) -> str:
 # 画面下のナビ。ページ間の移動はここだけに集約する(以前はサブページ上部の「ホームへ戻る」・
 # ページ切替タブ・ホーム下部の「メニュー」カードが同じ行き先で重複し、各ページの先頭を占有していた)。
 # 「アップデート」は毎日見るものではないため常設せず、システムページからの導線にした。
-_FOOTER_ITEMS: tuple[tuple[str, str, str], ...] = (
-    ("", "🏠", "ホーム"),
-    ("watch", "👀", "見守り"),
-    ("life", "💡", "くらし"),
-    ("sys", "🔧", "システム"),
+# (ダッシュボード直下からのパス, アイコン, 表示名, 現在地のキー)。ホームは5つの真ん中に置き、
+# 丸く大きく浮かせて目立たせる(`.bn-home`)。「📷 カメラ」はいちばんよく開くライブ映像への近道。
+_FOOTER_ITEMS: tuple[tuple[str, str, str, str], ...] = (
+    ("watch", "👀", "見守り", "watch"),
+    ("life", "💡", "くらし", "life"),
+    ("", "🏠", "ホーム", "home"),
+    ("sys", "🔧", "システム", "sys"),
+    ("watch/live", "📷", "カメラ", "camera"),
 )
 
 
 def _render_bottom_nav(dashboard_path: str, current: str | None) -> str:
-    """画面下のフッターナビ。`current`はホームなら"home"、他は`_FOOTER_ITEMS`のキー。"""
+    """画面下のフッターナビ。`current`は`_FOOTER_ITEMS`の現在地のキー(ホームは"home")。"""
     base = dashboard_path.rstrip("/")
     items = []
-    for key, icon, label in _FOOTER_ITEMS:
-        href = html.escape(f"{base}/{key}" if key else f"{base}/")
-        is_current = (key or "home") == current
-        attr = ' aria-current="page"' if is_current else ""
+    for path, icon, label, key in _FOOTER_ITEMS:
+        href = html.escape(f"{base}/{path}" if path else f"{base}/")
+        attr = ' aria-current="page"' if key == current else ""
+        cls = ' class="bn-home"' if key == "home" else ""
         items.append(
-            f'<li><a href="{href}"{attr}><span class="bn-icon" aria-hidden="true">{icon}</span>'
+            f'<li{cls}><a href="{href}"{attr}><span class="bn-icon" aria-hidden="true">{icon}</span>'
             f"<span>{html.escape(label)}</span></a></li>"
         )
     return f'<nav class="bottom-nav" aria-label="メインメニュー"><ul>{"".join(items)}</ul></nav>'
@@ -148,8 +151,8 @@ def _page_shell(
 
 
 def _back_link(dashboard_path: str, key: str, label: str) -> str:
-    """下部ナビに無いページ(電気・アップデート)の上部に置く、親ページへ戻るリンク。
-    下部ナビにあるページ(見守り・くらし・システム)には置かない(ナビと重複するため)。"""
+    """下部ナビに無いページ(各ページの詳細画面・電気・アップデート)の上部に置く、親ページへ戻るリンク。
+    下部ナビにあるページ(見守り・くらし・システム・カメラ)には置かない(ナビと重複するため)。"""
     href = html.escape(f"{dashboard_path.rstrip('/')}/{key}")
     return f'<div class="page-head"><a class="back-link" href="{href}">← {html.escape(label)}へ戻る</a></div>'
 
@@ -178,7 +181,7 @@ def _render_external_links(
     link_health: dict[str, bool] | None,
     yoru_note_url: str | None = None,
 ) -> str:
-    """「よく使うリンク」(ファミクエ・あさノート・よるノート)。`link_health`は
+    """システムの「📱 アプリ」詳細画面のリンク(ファミクエ・あさノート・よるノート)。`link_health`は
     `home_status_service.collect_link_health`の戻り値(キー`quest`/`asa_note`/`yoru_note`)。
     よるノートは`yoru_note_url`を渡したときだけ載せる。どのリンクも新しいタブで開く。"""
     health = link_health or {}
@@ -186,7 +189,7 @@ def _render_external_links(
         _render_external_link(yoru_note_url, "🌙 よるノート", health.get("yoru_note")) if yoru_note_url else ""
     )
     return (
-        "<h2>よく使うリンク</h2>"
+        "<h2>アプリを開く</h2>"
         '<div class="link-grid">'
         f'{_render_external_link(quest_path, "⚔️ ファミクエ", health.get("quest"))}'
         f'{_render_external_link(asa_note_url, "📝 あさノート", health.get("asa_note"))}'
@@ -195,43 +198,45 @@ def _render_external_links(
     )
 
 
+# ホームのカードの見た目(`home_status_service.render_status_grid_html` の `variants`)。
+# スマホ(390x844)で、見守り4枚・室温4枚・システムとサービス6枚が下部ナビの上に収まる大きさにする。
+_HOME_GRID_VARIANTS = {"watch": "compact", "climate": "mini", "service": "tiles"}
+
+
+def _home_cards(cards, service_cards) -> list:
+    """ホームに並べるカード: 見守り → 室温 → システム・サービス。
+    電気代・システムページ用のカードはホームには出さない(くらし・システムの各ページにある)。"""
+    return [c for c in cards if c.group in ("watch", "climate")] + list(service_cards or [])
+
+
 def render_home_page(
     cards,
     fetched_at: datetime,
     *,
     dashboard_path: str,
     status_path: str,
-    quest_path: str,
-    asa_note_url: str,
     refresh_sec: int,
+    service_cards=None,
     manifest_path: str | None = None,
     icon_path: str | None = None,
-    link_health: dict[str, bool] | None = None,
-    yoru_note_url: str | None = None,
-    heatmap_html: str = "",
     alerts_html: str = "",
-    weather_html: str = "",
-    stills_html: str = "",
     pending: bool = False,
 ) -> str:
-    """ホームページ。上から「いまの状態(サマリー)→ 今日の天気 → 見守りカード → カメラの写真 →
-    今日の動き → 室温・くらし・システムのカード → よく使うリンク」の順に並べる。
+    """ホームページ。上から「いまの状態(サマリー)→ 見守り4枚 → 室温4枚 → システム・サービス」。
 
-    並びは「開いてすぐ知りたい順」。以前はカードの途中に過去30日の温湿度ヒートマップ(約1画面)が
-    入り、今日の動き・リンクが3画面目まで押し出されていた。30日ヒートマップは毎日見るものでは
-    ないため「くらし」ページへ移した(`render_life_page`)。ページ間の移動は下部ナビに集約し、
-    ホーム下部の「メニュー」カードは廃止した。
+    スマホで開いたとき、スクロールせずに1画面で家・実家・各拠点・システムとアプリの状態が
+    分かることを優先する。以前あった今日の天気・取得時刻と自動更新の表示は(見ても行動が変わらない
+    ため)外し、カメラの写真・今日の動きは見守りページへ、電気代はくらしページへ、外部アプリの
+    リンクは「システム・サービス」のタイル(稼働状況つき)へまとめた。
 
-    `alerts_html`(`home_status_service.render_home_alerts_html`)・`weather_html`・`stills_html`
-    (`render_camera_stills`)・`heatmap_html`(`render_home_activity_heatmaps`)・外部リンクは
-    すべて自動更新の範囲(`STATUS_SECTION_ID`)の内側にあり、カードと同じ周期で更新される。
-    `link_health`を渡すと外部リンクに稼働状況(稼働中/停止中)を添える。
+    `service_cards` は `home_status_service.build_service_cards` の結果。`alerts_html`
+    (`home_status_service.render_home_alerts_html`)とカードはすべて自動更新の範囲
+    (`STATUS_SECTION_ID`)の内側にあり、`refresh_sec` ごとに取り直す(表示はしない)。
     `pending`(取得が間に合わなかった材料がある)なら、自動更新が周期を待たずに数秒後に取り直す。
     """
-    links_html = _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url)
     body = (
         "<h1>🏠 おうちの様子</h1>"
-        f'{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec, extra_html=links_html, watch_extra_html=stills_html + heatmap_html, alerts_html=alerts_html, weather_html=weather_html, pending=pending)}'
+        f"{_render_status_section(cards, fetched_at, dashboard_path=dashboard_path, service_cards=service_cards, alerts_html=alerts_html, pending=pending)}"
     )
     extra_head = _status_refresh_script(status_path, refresh_sec)
     if manifest_path is not None and icon_path is not None:
@@ -268,24 +273,19 @@ def _render_status_section(
     fetched_at: datetime,
     *,
     dashboard_path: str,
-    refresh_sec: int,
-    extra_html: str = "",
-    watch_extra_html: str = "",
+    service_cards=None,
     alerts_html: str = "",
-    weather_html: str = "",
     pending: bool = False,
 ) -> str:
-    # カメラの写真・今日の動きは「👀 見守り」グループ(実家・自宅・駐車場・カメラのカード)の直下に置く
-    extras = {"watch": watch_extra_html} if watch_extra_html else None
-    grid_html = home_status_service.render_status_grid_html(cards, dashboard_path=dashboard_path, group_extras=extras)
+    # 取得時刻は画面には出さない(要望で外した)。不具合調査用に属性としてだけ残す。
+    grid_html = home_status_service.render_status_grid_html(
+        _home_cards(cards, service_cards), dashboard_path=dashboard_path, variants=_HOME_GRID_VARIANTS
+    )
     return (
-        f'<div id="{STATUS_SECTION_ID}"{_PENDING_ATTR if pending else ""}>'
-        f'<p class="meta">{fetched_at.strftime("%m/%d %H:%M:%S")} 時点'
-        f"・{int(refresh_sec)}秒ごとに自動更新</p>"
+        f'<div id="{STATUS_SECTION_ID}" class="home-status" data-fetched-at="{fetched_at.strftime("%Y-%m-%dT%H:%M:%S")}"'
+        f'{_PENDING_ATTR if pending else ""}>'
         f"{alerts_html}"
-        f"{weather_html}"
         f"{grid_html}"
-        f"{extra_html}"
         "</div>"
     )
 
@@ -295,32 +295,19 @@ def render_home_status_section(
     fetched_at: datetime,
     *,
     dashboard_path: str,
-    refresh_sec: int,
-    quest_path: str | None = None,
-    asa_note_url: str | None = None,
-    link_health: dict[str, bool] | None = None,
-    yoru_note_url: str | None = None,
-    heatmap_html: str = "",
+    service_cards=None,
     alerts_html: str = "",
-    weather_html: str = "",
-    stills_html: str = "",
     pending: bool = False,
+    **_unused: Any,
 ) -> str:
-    """ホームページの自動更新用フラグメント(サマリー・天気・カード・カメラの写真・今日の動き・外部リンク)。
+    """ホームページの自動更新用フラグメント(サマリー・カード)。
 
-    ホームページ本体(`render_home_page`)と同じ並び・同じ材料で組み立てる。
-    `quest_path`/`asa_note_url`を渡したときだけ外部リンクを含める(ホームページ本体が
-    リンクを自動更新の範囲の中に持つため、差し替え後もリンクが消えないようにする)。
+    ホームページ本体(`render_home_page`)と同じ並び・同じ材料で組み立てる。ルーターは本体と
+    フラグメントに同じ材料の辞書を渡すため、本体だけが使う値(`refresh_sec` 等)は受け流す。
     """
-    links_html = (
-        _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url)
-        if quest_path is not None and asa_note_url is not None
-        else ""
-    )
     return _render_status_section(
-        cards, fetched_at, dashboard_path=dashboard_path, refresh_sec=refresh_sec,
-        extra_html=links_html, watch_extra_html=stills_html + heatmap_html,
-        alerts_html=alerts_html, weather_html=weather_html, pending=pending,
+        cards, fetched_at, dashboard_path=dashboard_path, service_cards=service_cards,
+        alerts_html=alerts_html, pending=pending,
     )
 
 
@@ -427,14 +414,14 @@ def _render_timelapse_section(
     show_all: bool = False,
     url_prefix: str = timelapse_service.URL_PREFIX,
 ) -> str:
-    """見守りページの「🎞️ タイムラプス」。新しい順で、先頭10件だけ出し、残りは`?tl_all=1`で出す。
+    """カメラのページ(`/watch/live`)の「🎞️ タイムラプス」。新しい順で、先頭10件だけ出し、残りは`?tl_all=1`で出す。
     カードをタップするとその場で再生する(動画は開くまで読み込まない)。動画の無いときは案内だけ。"""
     heading = '<div id="timelapse-section"><h2>🎞️ タイムラプス</h2>'
     if not items:
         return heading + '<p class="empty-note">タイムラプスはまだありません(毎日、朝と午後の玄関の動きから自動で作られます)</p></div>'
     shown = items if show_all else items[:_TIMELAPSE_VISIBLE]
     cards = "".join(_render_timelapse_card(i, camera_names, url_prefix) for i in shown)
-    watch = f"{html.escape(dashboard_path.rstrip('/'))}/watch"
+    watch = f"{html.escape(dashboard_path.rstrip('/'))}/watch/live"
     more = ""
     if len(items) > _TIMELAPSE_VISIBLE:
         if show_all:
@@ -501,19 +488,21 @@ def _enabled_cameras() -> list[dict[str, Any]]:
 
 
 def render_camera_stills(*, dashboard_path: str, snapshot_url_prefix: str) -> str:
-    """ホームの「カメラの写真」: 各カメラの最後の検知時の写真を横に並べる。タップでそのカメラのライブへ。
+    """見守りページの「カメラ」: 各カメラの最後の検知時の写真を横に並べる。タップでそのカメラのライブへ
+    (`/watch/live?camera=<id>`。そのカメラだけ再生が始まる)。
 
-    ライブ映像はホームでは流さない(開くだけでカメラへの接続が始まり、通信量と負荷が増えるため)。
+    以前はホームにあったが、ホームを1画面に収めるため見守りページの1画面目へ移した。
+    ライブ映像はここでは流さない(開くだけでカメラへの接続が始まり、通信量と負荷が増えるため)。
     カメラが1台も無ければ空文字。写真の無いカメラは枠だけ出す(タップでライブへは行ける)。
     """
     cameras = _enabled_cameras()
     if not cameras:
         return ""
     latest = latest_snapshot_by_camera(cameras)
-    watch = f"{dashboard_path.rstrip('/')}/watch"
+    live = f"{dashboard_path.rstrip('/')}/watch/live"
     tiles = []
     for cam in cameras:
-        href = html.escape(f"{watch}?{urlencode({'camera': cam['id']})}#camera-section")
+        href = html.escape(f"{live}?{urlencode({'camera': cam['id']})}")
         name = latest.get(cam["id"])
         if name is None:
             picture = '<span class="cam-still-img cam-still-none">写真なし</span>'
@@ -896,14 +885,17 @@ def _render_log_date_filter(
     selected_date: date | None,
     device_options: list[tuple[str, str]] | None = None,
     selected_device: str | None = None,
+    *,
+    page: str = "watch",
 ) -> str:
     """防犯ログ・センサーログ共通の絞り込み(GETフォーム。JS不要)。
     送信後にログの位置へ戻れるよう、遷移先にフラグメント`#log-filter`を付ける。
 
     **(新機能)** 日付に加えて、センサーログを機器(`device_options`)で絞れる。
     日付と機器は組み合わせられ、どちらか一方だけでも絞り込める(防犯ログは日付だけに従う)。
+    `page` は送信先(ダッシュボード直下からのパス。見守りの詳細画面 `watch/takasago` 等)。
     """
-    watch_path = f"{html.escape(dashboard_path.rstrip('/'))}/watch"
+    watch_path = f"{html.escape(dashboard_path.rstrip('/'))}/{html.escape(page)}"
     value = selected_date.isoformat() if selected_date else ""
     device_name = dict(device_options or []).get(selected_device or "")
     active = selected_date is not None or device_name is not None
@@ -919,7 +911,7 @@ def _render_log_date_filter(
     if selected_date:
         parts.append(f'{selected_date.strftime("%Y/%m/%d")} のログを全件表示')
     if device_name:
-        parts.append(f"センサーログは「{html.escape(device_name)}」だけ表示")
+        parts.append(f"「{html.escape(device_name)}」だけ表示")
     note = (
         f'<p class="meta">{" ・ ".join(parts)}しています</p>'
         if parts
@@ -1335,11 +1327,11 @@ def parse_log_source(value: str | None) -> str | None:
 
 
 def _hour_detail_href(dashboard_path: str, day: date, hour: int, src: str, device: str | None = None) -> str:
-    """ヒートマップのマスの遷移先(見守りページの該当時間の詳細ログ)。JS不要のただのリンク。"""
-    query = {"date": day.isoformat(), "hour": str(hour), "src": src}
+    """ヒートマップのマスの遷移先(見守りの詳細画面 `/watch/<src>` の該当時間のログ)。JS不要のただのリンク。"""
+    query = {"date": day.isoformat(), "hour": str(hour)}
     if device:
         query["hdev"] = device
-    return f"{dashboard_path.rstrip('/')}/watch?{urlencode(query)}#hour-log"
+    return f"{dashboard_path.rstrip('/')}/watch/{src}?{urlencode(query)}#hour-log"
 
 
 def _render_heatmap_rows(
@@ -1436,10 +1428,10 @@ def activity_source_frames(df: pd.DataFrame, device: str | None = None) -> dict[
 
 
 def render_home_activity_heatmaps(df_today: pd.DataFrame, now: datetime, *, dashboard_path: str) -> str:
-    """ホームページの「📊 今日の動き」: 防犯・高砂・伊丹を機器を合算した1行ずつにまとめて並べる。
+    """見守りページの「📊 今日の動き」: 防犯・高砂・伊丹を機器を合算した1行ずつにまとめて並べる。
 
-    マスをタップすると、見守りページの該当時間の詳細ログ(`?date=今日&hour=&src=`)へ移る。
-    機器別の行は見守りページにある(ホームは一目で分かるよう3行に絞る)。
+    マスをタップすると、その詳細画面の該当時間のログ(`/watch/<src>?date=今日&hour=`)へ移る。
+    機器別の行は各詳細画面にある(一覧では一目で分かるよう3行に絞る)。以前はホームにあった。
     """
     day = now.date()
     frames = activity_source_frames(df_today)
@@ -1467,7 +1459,7 @@ def _render_hour_detail(
     件数はヒートマップのマスと同じ元データ(`activity_source_frames`)なので一致する。
     前後の時間・ヒートマップへ戻るリンクを添える(幅の狭いマスで隣を押した場合の訂正用)。
     """
-    watch = f"{dashboard_path.rstrip('/')}/watch"
+    detail = f"{dashboard_path.rstrip('/')}/watch/{src}"
     in_hour = pd.DataFrame()
     if not df.empty and "timestamp" in df.columns and pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
         mask = (df["timestamp"].dt.date == day) & (df["timestamp"].dt.hour == hour)
@@ -1480,7 +1472,7 @@ def _render_hour_detail(
             return ""
         return f'<a href="{html.escape(_hour_detail_href(dashboard_path, day, target_hour, src, device))}">{label}</a>'
 
-    close_href = f"{watch}?{urlencode({'date': day.isoformat()})}#{_HEATMAP_SOURCE_ANCHORS[src]}"
+    close_href = f"{detail}?{urlencode({'date': day.isoformat()})}#{_HEATMAP_SOURCE_ANCHORS[src]}"
     table = (
         _render_simple_table(in_hour, _HEATMAP_SOURCE_COLUMNS[src], limit=max(len(in_hour), 1))
         if not in_hour.empty
@@ -1497,198 +1489,182 @@ def _render_hour_detail(
     )
 
 
-def _watch_sensor_logs(
-    df_sensor: pd.DataFrame, selected_device: str | None
-) -> tuple[pd.DataFrame, pd.DataFrame, list[tuple[str, str]], str | None]:
-    """高砂・伊丹のセンサーログ(状態変化行→機器→開閉の統合)と機器の選択肢を返す。
-
-    戻り値は `(高砂, 伊丹, 機器の選択肢, 有効な selected_device)`。
-
-    **(UI改善)** 高砂・伊丹のセンサーログは`sensor_state_change_log`で、開閉/動体
-    センサーの「状態が変わった行」だけに絞る(温湿度計・電力プラグの5分おきの記録は
-    ここには出さない。値の確認は各カード/システムページ側にある)。
-
-    **(UI改善)** 開閉センサーの「open」の直後(60秒以内)に「close」が来た組は、
-    `merge_open_close_events`で「開 → 閉（N秒）」の1行にまとめる。
-
-    **(新機能)** `selected_device`(`device_id`)を指定すると、高砂・伊丹のセンサーログをその機器だけに絞る
-    (防犯ログは対象外)。選択肢にない値は無視し、`None`(全機器)に読み替える。
-    """
-    if not df_sensor.empty and "location" in df_sensor.columns:
-        changes_takasago = sensor_state_change_log(df_sensor[df_sensor["location"] == "高砂"])
-        changes_itami = sensor_state_change_log(df_sensor[df_sensor["location"] == "伊丹"])
-    else:
-        changes_takasago = changes_itami = df_sensor.iloc[0:0]
-    # 機器の選択肢は絞り込む前の全機器から作る(選んだ機器だけが残って選び直せなくなるのを防ぐ)。
-    device_options = _sensor_device_options(changes_takasago, changes_itami)
-    if selected_device not in dict(device_options):
-        selected_device = None  # 一覧に無い値(古いブックマーク等)は無視して全機器を表示する
-    df_takasago = merge_open_close_events(_filter_by_device(changes_takasago, selected_device))
-    df_itami = merge_open_close_events(_filter_by_device(changes_itami, selected_device))
-    return df_takasago, df_itami, device_options, selected_device
-
-
-def _watch_heat_frames(
-    df_heatmap: pd.DataFrame | None,
-    selected_device: str | None,
-    df_camera_motion: pd.DataFrame,
-    df_takasago: pd.DataFrame,
-    df_itami: pd.DataFrame,
-) -> dict[str, pd.DataFrame]:
-    """活動ヒートマップの集計元を、`HEATMAP_SOURCES` の種別ごとに返す。
-
-    **(新機能)** 高砂・伊丹の活動ヒートマップは表示日(`selected_date`、無ければ今日)の全件で集計する。
-    日付未指定時の`df_sensor`は直近N件のキャッシュで今日の早い時間帯が欠けうるため、呼び出し側が
-    今日分の全件を`df_heatmap`で渡す(省略時は`df_sensor`を使う)。
-    """
-    # ヒートマップは表と同じ絞り込み(状態変化行→機器→開閉の統合)を、表示日の全件に対して行う。
-    # `df_heatmap`が無ければ表と同じ`df_sensor`を使う。
-    if df_heatmap is None:
-        return {"security": df_camera_motion, "takasago": df_takasago, "itami": df_itami}
-    return activity_source_frames(df_heatmap, selected_device)
-
-
-def _watch_hour_detail_html(
-    heat_frames: dict[str, pd.DataFrame],
-    day: date,
-    *,
-    hour: int | None,
-    hour_src: str | None,
-    hour_device: str | None,
-    dashboard_path: str,
-) -> str:
-    """ヒートマップのマスをタップしたときに、フィルタの下に出す「その時間のログ」。
-
-    ヒートマップの件数のあるマスはリンクで、タップすると`hour`(0〜23)・`hour_src`
-    (`HEATMAP_SOURCES`)・`hour_device`(機器の識別子。省略時はその種別の全機器)で、
-    その時間のログ(`_render_hour_detail`)を出す。`hour`と`hour_src`のどちらかが無効なら
-    空文字を返す。
-    """
-    if hour is None or hour_src not in HEATMAP_SOURCES:
-        return ""
-    return _render_hour_detail(
-        heat_frames[hour_src],
-        src=hour_src,
-        day=day,
-        hour=hour,
-        device=hour_device,
-        dashboard_path=dashboard_path,
-    )
+# 見守りの詳細画面(`/watch/<src>`)の見出し・ログ表の上の説明。
+_WATCH_DETAIL_TITLES = {
+    "security": "🛡️ 防犯ログ(カメラの動き)",
+    "takasago": "👵 高砂(実家)",
+    "itami": "🏠 伊丹(自宅)",
+}
+_WATCH_DETAIL_LOCATIONS = {"takasago": "高砂", "itami": "伊丹"}
+# 見守りページのカードの見た目(ホームと同じ。`render_status_grid_html` の `variants`)。
+_WATCH_GRID_VARIANTS = {"watch": "compact"}
 
 
 def render_watch_page(
-    df_sensor: pd.DataFrame,
+    cards,
     *,
     dashboard_path: str,
     snapshot_url_prefix: str,
+    df_today: pd.DataFrame | None = None,
+    now: datetime | None = None,
+) -> str:
+    """👀 見守り(一覧): 見守りの4枚のカード → カメラの写真 → 今日の動き → 防犯ログ・タイムラプスへの入口。
+
+    スマホで下までスクロールしなくても全体が分かるよう、ホームと同じカードを先頭に置き、
+    ログ・ヒートマップの機器別の行・日付での絞り込みは、カードをタップした先の詳細画面
+    (`render_watch_detail_page`。`/watch/takasago`・`/watch/itami`・`/watch/security`)へ移した。
+    ライブ映像・最近の写真・タイムラプスはカメラのページ(`render_watch_live_page`。`/watch/live`)。
+
+    `cards` は `home_status_service.collect_status_cards` の結果(見守りのカードだけを使う)。
+    `df_today` は今日(JST)の全件(「今日の動き」用)。
+    """
+    base = dashboard_path.rstrip("/")
+    watch_cards = [c for c in cards if c.group == "watch"]
+    stills = render_camera_stills(dashboard_path=dashboard_path, snapshot_url_prefix=snapshot_url_prefix)
+    if not stills:
+        stills = '<p class="empty-note">カメラが登録されていません</p>'
+    now = now or home_status_service.get_now_jst()
+    body = (
+        "<h1>👀 見守り</h1>"
+        f"{home_status_service.render_status_grid_html(watch_cards, dashboard_path=dashboard_path, show_group_titles=False, variants=_WATCH_GRID_VARIANTS)}"
+        '<div id="camera-section"><h2>🎥 カメラ</h2>'
+        f"{stills}</div>"
+        f"{render_home_activity_heatmaps(df_today if df_today is not None else pd.DataFrame(), now, dashboard_path=dashboard_path)}"
+        '<div class="link-grid">'
+        f'<a class="nav-card" href="{html.escape(base)}/watch/security">🛡️ 防犯ログ'
+        '<span class="nav-card-sub">カメラが動きを検知した記録</span></a>'
+        f'<a class="nav-card" href="{html.escape(base)}/watch/live#timelapse-section">🎞️ 写真・タイムラプス'
+        '<span class="nav-card-sub">最近の写真と、朝・午後の玄関の早送り動画</span></a>'
+        "</div>"
+    )
+    return _page_shell("見守り - おうちの様子", body, dashboard_path=dashboard_path, current="watch")
+
+
+def render_watch_detail_page(
+    src: str,
+    df_sensor: pd.DataFrame,
+    *,
+    dashboard_path: str,
     selected_date: date | None = None,
     selected_device: str | None = None,
     df_heatmap: pd.DataFrame | None = None,
     hour: int | None = None,
-    hour_src: str | None = None,
     hour_device: str | None = None,
+    card=None,
+) -> str:
+    """見守りの詳細画面(`/watch/<src>`。`src` は `HEATMAP_SOURCES`)。カードをタップした先。
+
+    上から「そのカード → 日付・機器での絞り込み → (マスをタップしたときの)その時間のログ →
+    機器別の動き(1時間ごと)→ ログ」。防犯=カメラの動体検知(`home_status_service.camera_motion_log`)、
+    高砂・伊丹=その拠点の開閉/動体センサーの状態が変わった行(`sensor_state_change_log` →
+    機器で絞る → `merge_open_close_events`)。以前は見守りページ1枚にこの3つが縦に並んでいた。
+
+    ログ表は先頭5件だけ常時表示し、残りは折りたたむ(`_render_collapsible_log_table`)。
+    `selected_date` を指定するとその日(JST)に絞って全件を出す(`df_sensor` は呼び出し側が
+    指定日の全件を渡す前提)。`df_heatmap` は日付未指定のときの今日の全件(`df_sensor` は直近N件の
+    キャッシュで今日の早い時間帯が欠けうるため)。`selected_device` は高砂・伊丹だけに効き、
+    その拠点の選択肢に無い値は無視する。
+    """
+    if src not in HEATMAP_SOURCES:
+        src = "security"
+    location = _WATCH_DETAIL_LOCATIONS.get(src)
+    device_options: list[tuple[str, str]] | None = None
+    if location is None:
+        df_log = home_status_service.camera_motion_log(df_sensor)
+        selected_device = None
+    else:
+        if not df_sensor.empty and "location" in df_sensor.columns:
+            changes = sensor_state_change_log(df_sensor[df_sensor["location"] == location])
+        else:
+            changes = df_sensor.iloc[0:0]
+        # 選択肢は絞り込む前の全機器から作る(選んだ機器だけが残って選び直せなくなるのを防ぐ)
+        device_options = _sensor_device_options(changes)
+        if selected_device not in dict(device_options):
+            selected_device = None
+        df_log = merge_open_close_events(_filter_by_device(changes, selected_device))
+
+    now = home_status_service.get_now_jst()
+    day = selected_date or now.date()
+    heat_frame = df_log if df_heatmap is None else activity_source_frames(df_heatmap, selected_device)[src]
+    hour_html = ""
+    if hour is not None:
+        hour_html = _render_hour_detail(
+            heat_frame, src=src, day=day, hour=hour, device=hour_device, dashboard_path=dashboard_path
+        )
+
+    def _link(device: str | None, h: int) -> str:
+        return _hour_detail_href(dashboard_path, day, h, src, device)
+
+    limit = 50 if selected_date is None else max(len(df_log), _LOG_TABLE_VISIBLE_ROWS)
+    card_html = ""
+    if card is not None:
+        card_html = home_status_service.render_status_grid_html(
+            [card], show_group_titles=False, variants=_WATCH_GRID_VARIANTS
+        )
+    body = (
+        f"{_back_link(dashboard_path, 'watch', '見守り')}"
+        f"<h1>{html.escape(_WATCH_DETAIL_TITLES[src])}</h1>"
+        f"{card_html}"
+        f"{_render_log_date_filter(dashboard_path, selected_date, device_options, selected_device, page=f'watch/{src}')}"
+        f"{hour_html}"
+        f'<div id="{_HEATMAP_SOURCE_ANCHORS[src]}">'
+        "<h2>📊 動き(1時間ごと)</h2>"
+        f"{_render_activity_heatmap(heat_frame, day, now, link=_link)}"
+        "<h2>📋 ログ</h2>"
+        f"{_render_collapsible_log_table(df_log, _HEATMAP_SOURCE_COLUMNS[src], limit=limit)}"
+        "</div>"
+    )
+    title = _WATCH_DETAIL_TITLES[src].split(" ", 1)[-1]
+    return _page_shell(f"{title} - おうちの様子", body, dashboard_path=dashboard_path, current="watch")
+
+
+def render_watch_live_page(
+    *,
+    dashboard_path: str,
+    snapshot_url_prefix: str,
     timelapses: list[timelapse_service.Timelapse] | None = None,
     show_all_timelapses: bool = False,
 ) -> str:
-    """👀 見守り: カメラのライブ(タップしたカメラだけ再生)・スナップショット・防犯ログ・実家/自宅センサーログ。
+    """📷 カメラ(`/watch/live`。下部ナビの「カメラ」): ライブ映像(タップしたカメラだけ再生)・最近の写真・タイムラプス。
 
-    見守りグループの4枚のステータスカード(高砂・伊丹・駐車場・カメラ)は
-    すべてこのページの `tab="watch"` を指すため、`home_status_service.build_status_cards`
-    がカードごとに付ける `anchor` を使って、タップしたカードの内容が実際に載っている
-    セクションまで連れて行く。ここに置くid(`camera-section`/`takasago-log`/
-    `itami-log`)を変えるときはカード側の`anchor`も一緒に直すこと。
-
-    防犯ログは以前`security_logs`テーブルを読んでいたが、そこへ書き込むコードが
-    存在せず常に空だったため、カメラの動体検知(`home_status_service.camera_motion_log`。
-    `df_sensor`から抽出するため既に`apply_friendly_names`済み)を正のデータとして使う。
-
-    **(UI改善)** 3つのログ表(防犯ログ・高砂/伊丹センサーログ)は以前
-    `_render_simple_table`で最大50行を常に縦に並べており、スクロールが大変だった。
-    `_render_collapsible_log_table`で先頭5件だけを常時表示し、残りは`<details>`で
-    折りたたむ。
-
-    高砂・伊丹のセンサーログの絞り込みは`_watch_sensor_logs`、ヒートマップの集計元は
-    `_watch_heat_frames`を参照(Issue #954 で分割)。
-
-    **(新機能)** `timelapses`(`timelapse_service.list_timelapses`の結果。新しい順)を渡すと、最近の写真の下に
-    「🎞️ タイムラプス」を出す(`show_all_timelapses`で先頭10件の上限を外す)。省略時は動画なしの案内になる。
-
-    **(新機能)** 防犯ログにもカメラ別の活動ヒートマップを置く。件数のあるマスをタップした
-    ときの時間帯詳細は`_watch_hour_detail_html`を参照。
-
-    **(新機能)** `selected_date`を指定すると3つのログをその日(JST)に絞り、件数の上限
-    (通常50件)を外して指定日の全件を表示する(先頭5件の常時表示+折りたたみは同じ)。
-    `df_sensor`は呼び出し側(`dashboard_router`)が日付指定時に指定日の全件を渡す
-    前提で、ここでは日付による再フィルタはしない。
+    `?camera=<id>` で開くとそのカメラを先頭に移して再生を始める(`static/dashboard/camera.js`。
+    「🚗 駐車場」カード・見守りページのカメラの写真から来る)。各カメラの名前の横に録画の状態を出す。
+    `timelapses`(`timelapse_service.list_timelapses` の結果。新しい順)は先頭10件だけ出し、
+    `show_all_timelapses` で上限を外す。
     """
     cameras = _enabled_cameras()
-    df_camera_motion = home_status_service.camera_motion_log(df_sensor)
-    df_takasago, df_itami, device_options, selected_device = _watch_sensor_logs(df_sensor, selected_device)
-
-    heatmap_now = home_status_service.get_now_jst()
-    heatmap_day = selected_date or heatmap_now.date()
-    heat_frames = _watch_heat_frames(df_heatmap, selected_device, df_camera_motion, df_takasago, df_itami)
-
-    def _cell_link(src: str) -> Callable[[str | None, int], str]:
-        return lambda device, h: _hour_detail_href(dashboard_path, heatmap_day, h, src, device)
-
-    hour_detail_html = _watch_hour_detail_html(
-        heat_frames, heatmap_day, hour=hour, hour_src=hour_src, hour_device=hour_device, dashboard_path=dashboard_path
-    )
-
-    def _log_table(df: pd.DataFrame, columns: dict[str, str]) -> str:
-        # 日付指定時は上限を外して全件(`limit`は`df.iloc[visible:limit]`の上端)。
-        if selected_date is None:
-            return _render_collapsible_log_table(df, columns)
-        return _render_collapsible_log_table(df, columns, limit=max(len(df), _LOG_TABLE_VISIBLE_ROWS))
-
+    base = html.escape(dashboard_path.rstrip("/"))
     body = (
-        "<h1>👀 見守り</h1>"
+        "<h1>📷 カメラ</h1>"
         '<div id="camera-section">'
-        "<h2>🎥 カメラの映像</h2>"
         f"{_render_camera_selector(cameras, posters=latest_snapshot_by_camera(cameras), snapshot_url_prefix=snapshot_url_prefix, recording=home_status_service.get_camera_recording_states())}"
         "</div>"
         "<h2>🖼️ 最近の写真</h2>"
         f"{_render_snapshot_gallery(snapshot_url_prefix)}"
         f"{_render_timelapse_section(timelapses or [], dashboard_path=dashboard_path, camera_names={c['id']: c['name'] for c in cameras}, show_all=show_all_timelapses)}"
-        f"{_render_log_date_filter(dashboard_path, selected_date, device_options, selected_device)}"
-        f"{hour_detail_html}"
+        f'<div class="link-grid"><a class="nav-card" href="{base}/watch/security">🛡️ 防犯ログ'
+        '<span class="nav-card-sub">カメラが動きを検知した記録</span></a></div>'
     )
-    log_sections = (
-        ("security-log", "🛡️ 防犯ログ", "security", df_camera_motion,
-         {"timestamp": "検知時刻", "friendly_name": "カメラ"}),
-        ("takasago-log", "👵 高砂実家のセンサーログ", "takasago", df_takasago,
-         {"timestamp": "時刻", "friendly_name": "センサー", "contact_state": "状態"}),
-        ("itami-log", "🏠 伊丹(自宅)のセンサーログ", "itami", df_itami,
-         {"timestamp": "時刻", "friendly_name": "センサー", "movement_state": "動体", "contact_state": "開閉"}),
-    )
-    for section_id, title, src, df_log, columns in log_sections:
-        body += (
-            f'<div id="{section_id}">'
-            f"<h2>{title}</h2>"
-            f"{_render_activity_heatmap(heat_frames[src], heatmap_day, heatmap_now, link=_cell_link(src))}"
-            f"{_log_table(df_log, columns)}"
-            "</div>"
-        )
-    return _page_shell("見守り - おうちの様子", body, extra_head=_camera_script(), dashboard_path=dashboard_path, current="watch")
+    return _page_shell("カメラ - おうちの様子", body, extra_head=_camera_script(), dashboard_path=dashboard_path, current="camera")
 
 
 # === くらしページ ===
 
 
-def _render_daily_cost_history(rows: list[tuple[Any, int]]) -> str:
+def _render_daily_cost_history(rows: list[tuple[Any, int]], today: date | None = None) -> str:
     """日別の電気代(概算)を横棒グラフ付きの簡易リストで表示する(新しい順、先頭が今日)。
 
-    **(不具合修正で新設)** 以前は「今月の電気代」カードをタップしても同じカードを
-    もう一度表示するだけで詳細と呼べる情報が無かった。直近の日別推移を見せることで
-    タップする価値のある詳細にする。
+    「⚡ 電気」ページの「今月のまとめ」で、今月の日別の推移として使う(以前はくらしページに
+    30日分が並んでいたが、見ても使い道が分かりにくいとのことで優先度を下げて電気ページへ移した)。
+    金額・日付は折り返さない(スマホで「円」だけが次の行に落ちてレイアウトが崩れていた)。
     """
     if not rows:
         return '<p class="empty-note">表示できるデータがありません</p>'
     max_cost = max(cost for _, cost in rows) or 1
     items = []
     for i, (day, cost) in enumerate(rows):
-        label = "今日" if i == 0 else day.strftime("%m/%d")
+        is_today = day == today if today is not None else i == 0
+        label = "今日" if is_today else day.strftime("%m/%d")
         width_pct = max(2, round(cost / max_cost * 100))
         items.append(
             '<div class="cost-row">'
@@ -1700,21 +1676,22 @@ def _render_daily_cost_history(rows: list[tuple[Any, int]]) -> str:
     return f'<div class="cost-history">{"".join(items)}</div>'
 
 
+# くらしページのカードの見た目(`render_status_grid_html` の `variants`)。室温はホームと同じ小さめのカード。
+_LIFE_GRID_VARIANTS = {"life": "compact", "climate": "mini"}
+
+
 def render_life_page(
     cards,
     *,
     dashboard_path: str,
-    daily_cost_rows: list[tuple[Any, int]] | None = None,
     climate_html: str = "",
 ) -> str:
-    """💡 くらし: 電気のカードと日別の電気代、室温のカードと過去30日の推移(ヒートマップ)。
+    """💡 くらし: 今月の電気代のカード(タップで「⚡ 電気」ページ)・室温のカード・過去30日の推移(ヒートマップ)。
 
-    **(不具合修正)** `daily_cost_rows`(`analysis_service.calculate_daily_cost_series`)を
-    追加し、電気代カードをタップしても意味のある詳細が無かった不具合を修正した。
-
-    `climate_html`(`render_home_climate_heatmap`の出力)は以前ホームの中段にあり、約1画面ぶん
-    今日の動き・リンクを押し下げていた。ホームの室温カードのタップ先としてここへ移した
-    (見出しのid `climate-heatmap` がカードのリンク先)。室温カードはここにも再掲する。
+    スマホで開いてすぐ全体が分かるよう、カードを先頭にまとめて小さめにし、日別の電気代(30日)は
+    「⚡ 電気」ページの「今月のまとめ」へ移した(以前はここで約1画面を占め、室温・ヒートマップを
+    押し下げていた)。`climate_html`(`render_home_climate_heatmap`の出力)の見出しのid
+    `climate-heatmap` が室温カードのリンク先。
     """
     life_cards = [card for card in cards if card.group == "life"]
     climate_cards = [card for card in cards if card.group == "climate"]
@@ -1722,17 +1699,13 @@ def render_life_page(
     if climate_cards or climate_html:
         climate_block = (
             "<h2>🌡️ 室温</h2>"
-            f"{home_status_service.render_status_grid_html(climate_cards, dashboard_path=dashboard_path, show_group_titles=False)}"
+            f"{home_status_service.render_status_grid_html(climate_cards, dashboard_path=dashboard_path, show_group_titles=False, variants=_LIFE_GRID_VARIANTS)}"
             f"{climate_html}"
         )
     body = (
         "<h1>💡 くらし</h1>"
-        f"{home_status_service.render_status_grid_html(life_cards, show_group_titles=False)}"
-        '<p class="empty-note">今月の電気代はスマートメーターの記録からの概算です。</p>'
-        f'<div class="link-grid"><a class="nav-card" href="{html.escape(dashboard_path.rstrip("/"))}/power">'
-        '⚡ 電気のくわしい分析<span class="nav-card-sub">月ごとの推移・気温との関係・テレビ</span></a></div>'
-        "<h2>📊 日別の電気代(概算)</h2>"
-        f"{_render_daily_cost_history(daily_cost_rows or [])}"
+        f"{home_status_service.render_status_grid_html(life_cards, dashboard_path=dashboard_path, show_group_titles=False, variants=_LIFE_GRID_VARIANTS)}"
+        '<p class="meta">電気代はスマートメーターの記録からの概算です。カードをタップすると内訳を見られます。</p>'
         f"{climate_block}"
     )
     return _page_shell("くらし - おうちの様子", body, dashboard_path=dashboard_path, current="life")
@@ -2209,58 +2182,131 @@ def _render_log_download_box(log_groups: list[Any], *, sys_path: str) -> str:
     )
 
 
+# システムの詳細画面(`/sys/<キー>`)。(キー, 見出し)。並びは一覧のカードの順。
+SYS_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("server", "🖥️ サーバー"),
+    ("nas", "🗄️ NAS"),
+    ("health", "🩺 定期チェック"),
+    ("backup", "📦 バックアップ"),
+    ("data", "⚡ データの更新"),
+    ("apps", "📱 アプリ"),
+    ("admin", "🛠️ 管理者向け"),
+)
+SYS_SECTION_TITLES: dict[str, str] = dict(SYS_SECTIONS)
+_SYS_GRID_VARIANTS = {"sys": "compact"}
+
+
+def _health_card_status(health: dict[str, Any] | None) -> tuple[str, str, str | None]:
+    """「🩺 定期チェック」カードの(値, 色, 補足)。`health` は `read_health_result()` の戻り値。"""
+    if health is None:
+        return "⚪ 記録なし", "theme-gray", None
+    checked = f"最後のチェック: {home_status_service.format_short_timestamp(health['checked_at'])}"
+    if health["stale"]:
+        return "🔴 止まっています", "theme-red", checked
+    if health["anomalies"]:
+        return f"🔴 {len(health['anomalies'])}件の異常", "theme-red", checked
+    return "🟢 異常なし", "theme-green", checked
+
+
+def _data_card_status(rows: list[dict[str, Any]]) -> tuple[str, str, str | None]:
+    """「⚡ データの更新」カードの(値, 色, 補足)。`build_freshness_rows` のうちサーバー本体以外を見る
+    (サーバーは「🖥️ サーバー」カードが示す)。"""
+    data_rows = [r for r in rows if not r["label"].startswith("🖥️")]
+    red = [r for r in data_rows if r["state"] == "red"]
+    if red:
+        return f"🔴 {len(red)}件停止", "theme-red", "・".join(_strip_label_icon(r["label"]) for r in red)
+    return "🟢 正常", "theme-green", "電気・環境・NAS・駐車場カメラ"
+
+
+def _strip_label_icon(label: str) -> str:
+    return label.split(" ", 1)[-1]
+
+
+def _apps_card_status(link_health: dict[str, bool | None] | None) -> tuple[str, str, str | None]:
+    """「📱 アプリ」カードの(値, 色, 補足)。`collect_link_health` の結果を見る(None はまだ確認中)。"""
+    names = {"quest": "ファミクエ", "asa_note": "あさノート", "yoru_note": "よるノート"}
+    health = link_health or {}
+    down = [names.get(k, k) for k, v in health.items() if v is False]
+    if down:
+        return f"🔴 {len(down)}件停止", "theme-red", "・".join(down)
+    if not health or any(v is None for v in health.values()):
+        return "⚪ 確認中", "theme-gray", None
+    return "🟢 すべて稼働中", "theme-green", "・".join(names.get(k, k) for k in health)
+
+
+def build_sys_cards(
+    cards,
+    rows: list[dict[str, Any]],
+    *,
+    health: dict[str, Any] | None,
+    link_health: dict[str, bool | None] | None,
+) -> list:
+    """システムページの一覧に並べるカード(`SYS_SECTIONS` の順)。どれもタップでその詳細画面(`/sys/<キー>`)。
+
+    サーバー・NASは `home_status_service.build_status_cards` のカードをそのまま使う(ホームのタイルと
+    同じ判定・同じ値にするため)。`rows` は `build_freshness_rows` の結果。
+    """
+    card = home_status_service.StatusCard
+    by_title = {c.title: c for c in cards}
+    server = by_title.get("🖥️ サーバー") or card("🖥️ サーバー", "⚪ 取得できません", "theme-gray")
+    nas = by_title.get("🗄️ NAS") or card("🗄️ NAS", "⚪ データなし", "theme-gray")
+    health_val, health_theme, health_sub = _health_card_status(health)
+    data_val, data_theme, data_sub = _data_card_status(rows)
+    apps_val, apps_theme, apps_sub = _apps_card_status(link_health)
+    return [
+        server._replace(group="sys", tab="sys", anchor="/server"),
+        nas._replace(group="sys", tab="sys", anchor="/nas"),
+        card("🩺 定期チェック", health_val, health_theme, tab="sys", group="sys", sub=health_sub, anchor="/health"),
+        card("📦 バックアップ", "手動で実行", "theme-blue", tab="sys", group="sys",
+             sub="最新の確認もここから", anchor="/backup"),
+        card("⚡ データの更新", data_val, data_theme, tab="sys", group="sys", sub=data_sub, anchor="/data"),
+        card("📱 アプリ", apps_val, apps_theme, tab="sys", group="sys", sub=apps_sub, anchor="/apps"),
+        card("🛠️ 管理者向け", "更新・再起動", "theme-gray", tab="sys", group="sys",
+             sub="ログ・アップデート履歴", anchor="/admin"),
+    ]
+
+
 def render_sys_page(
-    df_sensor: pd.DataFrame,
-    nas_data: pd.Series | None,
-    nas_history: pd.DataFrame,
-    memory: dict[str, float] | None,
-    disk: dict[str, float] | None,
-    now: datetime,
+    sys_cards,
+    rows: list[dict[str, Any]],
     *,
     dashboard_path: str,
-    nas_days: int = NAS_HISTORY_DEFAULT_DAYS,
-    boot_history: list[dict[str, Any]] | None = None,
-    log_groups: list[Any] | None = None,
     health: dict[str, Any] | None = None,
 ) -> str:
-    """🔧 システム: 全体サマリー・各機能の最終更新時刻・定期チェック・NASの容量推移・メンテナンス操作。
+    """🔧 システム(一覧): 全体サマリーとカード(`build_sys_cards`)。カードをタップすると詳細画面を開く。
 
-    並びは「家族が見るもの → 管理者だけが使うもの」。各機能の状態・定期チェック・NAS・バックアップを
-    先に出し、Git・起動履歴・ログのダウンロード・更新/再起動・アップデート履歴への導線は
-    「管理者向け」の折りたたみ(`<details id="admin-section">`)にまとめる。再起動系のボタンが
-    最初から見えていると誤って触りやすいため。`#git-status` 等へ直接飛んだときは `app.js` が開く。
+    以前は各機能の最終更新・定期チェック・NASの容量推移・バックアップ・管理者向けの折りたたみが
+    1ページに縦に並び、スマホでは下までスクロールしないと全体が分からなかった。ホームと同じ
+    カードで状態を一目で示し、中身は `render_sys_detail_page` の詳細画面へ移した。
 
-    `health`(`home_status_service.read_health_result()`)は毎時の定期チェックの結果。異常(またはチェック
-    自体の停止)は冒頭の「確認が必要です」の件数にも数える。
-
-    **(UI改善)** 「今すぐバックアップ」は、実行中のスピナー表示・完了/失敗のトースト・
-    最新のバックアップ時刻の表示を持つ(`GET /api/system/backup/status`をJSから参照)。
-    最新時刻はNASのファイル列挙が必要なため、ページ描画には含めずJSで非同期に取得する
-    (NASが遅くてもシステムページ自体は開ける)。
+    冒頭の「確認が必要です」の件数は、各機能の最終更新(`rows`)の赤と定期チェックの異常(または
+    チェック自体の停止)の合計(以前と同じ数え方)。
     """
-    rows = build_freshness_rows(df_sensor, nas_data, memory, now)
-    base = html.escape(dashboard_path.rstrip("/"))
-
-    disk_line = ""
-    if disk and "percent" in disk:
-        disk_line = f'<p class="meta">保存容量の使用率: {int(disk["percent"])}%</p>'
-
     body = (
         "<h1>🔧 システム</h1>"
         f"{_render_overall_summary(rows, _health_red_count(health))}"
-        '<div class="box-grid">'
-        '<div class="info-box">'
-        "<h2>各機能の最終更新</h2>"
-        f"{_render_freshness_rows(rows)}"
-        f"{disk_line}"
-        "</div>"
-        f"{_render_health_check_box(health)}"
-        '<div class="info-box" id="nas-history">'
-        "<h2>🗄️ NASの容量推移</h2>"
-        f"{_render_nas_history_chart(nas_history, days=nas_days, sys_path=dashboard_path.rstrip('/') + '/sys')}"
-        "</div>"
-        # 日常的に使える安全な操作(バックアップ)はここ。影響の大きい再起動系は下の「管理者向け」にまとめる。
-        '<div class="maintenance-box">'
+        f"{home_status_service.render_status_grid_html(sys_cards, dashboard_path=dashboard_path, show_group_titles=False, variants=_SYS_GRID_VARIANTS)}"
+    )
+    return _page_shell("システム - おうちの様子", body, dashboard_path=dashboard_path, current="sys")
+
+
+def _render_server_info(memory: dict[str, float] | None, disk: dict[str, float] | None) -> str:
+    rows = [{
+        "label": "応答",
+        "text": "正常に応答しています" if memory else "応答を確認できませんでした",
+        "state": "ok" if memory else "red",
+    }]
+    if memory and "percent" in memory:
+        rows.append({"label": "メモリの使用率", "text": f"{int(memory['percent'])}%", "state": "info"})
+    if disk and "percent" in disk:
+        rows.append({"label": "保存容量の使用率", "text": f"{int(disk['percent'])}%", "state": "info"})
+    return f'<div class="info-box" id="server-info"><h2>いまの状態</h2>{_render_freshness_rows(rows)}</div>'
+
+
+def _render_backup_box() -> str:
+    # 日常的に使える安全な操作。影響の大きい再起動系は「管理者向け」の詳細画面にまとめる。
+    return (
+        '<div class="maintenance-box" id="backup">'
         "<h3>📦 バックアップ</h3>"
         "<p>データベースを今すぐバックアップします。</p>"
         '<p class="meta" id="backupLatest">最新のバックアップ: 確認中...</p>'
@@ -2268,17 +2314,20 @@ def render_sys_page(
         "📦 今すぐバックアップ</button>"
         '<div id="backupResult" class="maintenance-result" role="status" aria-live="polite"></div>'
         "</div>"
-        "</div>"
-        '<details class="admin-section" id="admin-section">'
-        "<summary>🛠️ 管理者向け(更新・再起動・ログ)</summary>"
+    )
+
+
+def _render_admin_section(dashboard_path: str, log_groups: list[Any]) -> str:
+    base = html.escape(dashboard_path.rstrip("/"))
+    sys_path = dashboard_path.rstrip("/") + "/sys"
+    return (
         f'<div class="link-grid"><a class="nav-card" href="{base}/updates">'
         '📜 アップデート<span class="nav-card-sub">各アプリの更新履歴</span></a></div>'
         '<div class="box-grid">'
         f"{_render_git_status_box()}"
-        f"{_render_boot_history_box(boot_history or [])}"
-        f"{_render_log_download_box(log_groups or [], sys_path=dashboard_path.rstrip('/') + '/sys')}"
+        f"{_render_log_download_box(log_groups, sys_path=sys_path)}"
         "</div>"
-        "<h2>🛠️ メンテナンス</h2>"
+        '<h2 id="maintenance">🛠️ メンテナンス</h2>'
         '<div class="maintenance-group">'
         '<p class="alerts alerts-warn">⚠️ 次の2つは再起動を伴います。再起動中はダッシュボードやIoT機器の操作が'
         "一時的に使えなくなり、数分かかることがあります。</p>"
@@ -2306,9 +2355,76 @@ def render_sys_page(
         "</div>"
         "</div>"
         "</div>"
-        "</details>"
+    )
+
+
+def render_sys_detail_page(
+    section: str,
+    *,
+    dashboard_path: str,
+    sys_cards=(),
+    rows: list[dict[str, Any]] | None = None,
+    memory: dict[str, float] | None = None,
+    disk: dict[str, float] | None = None,
+    nas_history: pd.DataFrame | None = None,
+    nas_days: int = NAS_HISTORY_DEFAULT_DAYS,
+    boot_history: list[dict[str, Any]] | None = None,
+    log_groups: list[Any] | None = None,
+    health: dict[str, Any] | None = None,
+    link_health: dict[str, bool | None] | None = None,
+    quest_path: str = "",
+    asa_note_url: str = "",
+    yoru_note_url: str | None = None,
+) -> str:
+    """システムの詳細画面(`/sys/<section>`。`section` は `SYS_SECTIONS` のキー)。一覧のカードをタップした先。
+
+    - server: いまの状態(応答・メモリ・保存容量)とサーバーの起動履歴
+    - nas: NASの容量推移(`?nas_days=7|30|90`)
+    - health: 定期チェック(`monitors/health_watch.py`。毎時)の結果と履歴
+    - backup: 今すぐバックアップ(`static/dashboard/maintenance.js`)
+    - data: 各機能の最終更新時刻(`build_freshness_rows`)
+    - apps: ファミクエ・あさノート・よるノートの稼働状況とリンク
+    - admin: アップデート履歴・Gitの状態・ログのダウンロード・更新/再起動(誤操作しにくいよう一覧からは1段奥)
+
+    画面の先頭には一覧と同じカードを置く(どの状態の詳細を見ているかが分かるように)。
+    """
+    if section not in SYS_SECTION_TITLES:
+        section = "server"
+    sys_path = dashboard_path.rstrip("/") + "/sys"
+    card = next((c for c in sys_cards if c.anchor == f"/{section}"), None)
+    card_html = (
+        home_status_service.render_status_grid_html([card], show_group_titles=False, variants=_SYS_GRID_VARIANTS)
+        if card is not None else ""
+    )
+    extra_head = ""
+    if section == "server":
+        content = _render_server_info(memory, disk) + _render_boot_history_box(boot_history or [])
+    elif section == "nas":
+        content = (
+            '<div class="info-box" id="nas-history"><h2>容量の推移</h2>'
+            f"{_render_nas_history_chart(nas_history if nas_history is not None else pd.DataFrame(), days=nas_days, sys_path=sys_path + '/nas')}"
+            "</div>"
+        )
+    elif section == "health":
+        content = _render_health_check_box(health)
+    elif section == "backup":
+        content = _render_backup_box()
+        extra_head = _script_tag("maintenance.js")
+    elif section == "data":
+        content = f'<div class="info-box" id="freshness"><h2>各機能の最終更新</h2>{_render_freshness_rows(rows or [])}</div>'
+    elif section == "apps":
+        content = _render_external_links(quest_path, asa_note_url, link_health, yoru_note_url)
+    else:  # admin
+        content = _render_admin_section(dashboard_path, log_groups or [])
+        extra_head = _script_tag("maintenance.js") + _script_tag("git_status.js")
+    title = SYS_SECTION_TITLES[section]
+    body = (
+        f"{_back_link(dashboard_path, 'sys', 'システム')}"
+        f"<h1>{html.escape(title)}</h1>"
+        f"{card_html}"
+        f"{content}"
     )
     return _page_shell(
-        "システム - おうちの様子", body, extra_head=_script_tag("maintenance.js") + _script_tag("git_status.js"),
+        f"{title.split(' ', 1)[-1]} - おうちの様子", body, extra_head=extra_head,
         dashboard_path=dashboard_path, current="sys",
     )

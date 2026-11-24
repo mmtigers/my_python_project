@@ -33,6 +33,9 @@ NOW = datetime.fromisoformat("2026-09-19T12:00:00+09:00")
 # サマリーに並ぶカードの枚数。`home_status_service.build_status_cards` の
 # 戻り値と対になっているので、カードを増減させるときは一緒に直す。
 EXPECTED_CARD_COUNT = 11
+# ホームに並ぶカードの枚数: 見守り4枚 + 室温4枚 + システム・サービスのタイル6枚
+# (サーバー・NAS・録画・ファミクエ・あさノート・よるノート)。電気代・システムページ用のカードは出さない。
+HOME_CARD_COUNT = 14
 
 
 @pytest.fixture(autouse=True)
@@ -112,7 +115,7 @@ class TestDashboardHomePage:
 
         assert res.status_code == 200
         assert res.headers["content-type"].startswith("text/html")
-        assert res.text.count('class="status-card') == EXPECTED_CARD_COUNT
+        assert res.text.count('class="status-card') == HOME_CARD_COUNT
         assert "status-grid" in res.text
 
     def test_page_refreshes_itself(self):
@@ -120,7 +123,7 @@ class TestDashboardHomePage:
         res = self._get()
         assert f'var intervalMs = {home_status_service.MOBILE_PAGE_REFRESH_SEC * 1000};' in res.text
 
-    def test_page_links_to_the_three_sub_pages_and_external_links(self):
+    def test_page_links_to_the_sub_pages_and_external_links(self):
         res = self._get()
         assert f'href="{config.DASHBOARD_BASE_PATH}/watch"' in res.text
         assert f'href="{config.DASHBOARD_BASE_PATH}/life"' in res.text
@@ -148,7 +151,7 @@ class TestDashboardHomePage:
                 p.stop()
 
         assert res.status_code == 200
-        assert res.text.count('class="status-card') == EXPECTED_CARD_COUNT
+        assert res.text.count('class="status-card') == HOME_CARD_COUNT
         # 取れなかったものは値を偽らずに「取得できません」と出す
         assert "取得できません" in res.text
 
@@ -230,7 +233,7 @@ class TestLegacyUrlRedirects:
 
 
 class TestSubPages:
-    """👀見守り・💡くらし・🔧システムの3ページ(項目1)。"""
+    """👀見守り・💡くらし・🔧システム・📷カメラのページと、見守り・システムの詳細画面。"""
 
     def _get(self, path, **overrides):
         patches = _stub_loaders(**overrides)
@@ -243,7 +246,7 @@ class TestSubPages:
             for p in patches:
                 p.stop()
 
-    @pytest.mark.parametrize("path", ["watch", "life", "sys", "updates"])
+    @pytest.mark.parametrize("path", ["watch", "watch/live", "watch/itami", "life", "sys", "sys/nas", "updates"])
     def test_each_page_can_go_home_from_the_bottom_nav(self, path):
         """ホームへの導線は下部ナビ(全ページ共通)。ページ上部の「ホームへ戻る」は重複のため廃止した。"""
         res = self._get(path)
@@ -251,36 +254,80 @@ class TestSubPages:
         nav = res.text[res.text.index('<nav class="bottom-nav"'):]
         assert f'href="{config.DASHBOARD_BASE_PATH}/"' in nav and "ホーム" in nav
 
-    def test_watch_page_shows_camera_selector_gallery_and_logs(self):
-        res = self._get("watch")
-        assert "カメラの映像" in res.text
-        assert "最近の写真" in res.text
-        assert "防犯ログ" in res.text
-        assert "高砂実家のセンサーログ" in res.text
+    def test_watch_pages_show_cameras_gallery_and_logs(self):
+        """見守りは一覧(カード・カメラの写真・今日の動き)・カメラ(ライブ・写真・タイムラプス)・
+        詳細画面(防犯/高砂/伊丹のログ)に分かれている。"""
+        overview = self._get("watch").text
+        assert "👀 見守り" in overview and "📊 今日の動き" in overview and "🛡️ 防犯ログ" in overview
+        live = self._get("watch/live").text
+        assert 'id="camera-section"' in live and "最近の写真" in live
+        assert "防犯ログ" in self._get("watch/security").text
+        assert "👵 高砂(実家)" in self._get("watch/takasago").text
+        assert "🏠 伊丹(自宅)" in self._get("watch/itami").text
+
+    def test_unknown_watch_detail_redirects_to_the_overview(self):
+        with patch.object(home_status_service, "get_sensor_data_today", return_value=pd.DataFrame()):
+            patches = _stub_loaders()
+            for p in patches:
+                p.start()
+            try:
+                with _client() as client:
+                    res = client.get(f"{config.DASHBOARD_BASE_PATH}/watch/nope", follow_redirects=False)
+            finally:
+                for p in patches:
+                    p.stop()
+        assert res.status_code == 302 and res.headers["location"] == f"{config.DASHBOARD_BASE_PATH}/watch"
+
+    def test_old_hour_detail_url_is_sent_to_the_detail_page(self):
+        """ヒートマップのマスの古いURL(`/watch?date=&hour=&src=`)は詳細画面の同じ時間へ送る。"""
+        patches = _stub_loaders()
+        for p in patches:
+            p.start()
+        try:
+            with _client() as client:
+                res = client.get(
+                    f"{config.DASHBOARD_BASE_PATH}/watch?date=2026-10-02&hour=7&src=takasago&hdev=pir",
+                    follow_redirects=False,
+                )
+        finally:
+            for p in patches:
+                p.stop()
+        assert res.status_code == 302
+        assert res.headers["location"] == (
+            f"{config.DASHBOARD_BASE_PATH}/watch/takasago?date=2026-10-02&hour=7&hdev=pir#hour-log"
+        )
 
     def test_life_page_shows_the_life_group_cards_only(self):
         res = self._get("life")
         assert "💰 今月の電気代" in res.text
         assert "👵 高砂 (実家)" not in res.text
 
-    def test_life_page_shows_daily_cost_detail(self):
+    def test_power_page_shows_this_month_summary_and_daily_cost(self):
         """不具合修正: 電気代カードをタップしても、以前は同じカードの再掲だけで
-        詳細と呼べる情報が無かった。日別の電気代推移が表示されること。"""
-        res = self._get("life")
-        assert "日別の電気代" in res.text
-        assert "cost-history" in res.text
-        assert "123円" in res.text
+        詳細と呼べる情報が無かった。カードのタップ先(「⚡ 電気」ページ)の先頭に今月のまとめ
+        (今月の累計・先月の同じ日までとの比較・今月の日別)が表示されること。"""
+        from services import power_analysis_service
+        report = {"days": 30, "unit_price": 31.0, "generated_at": datetime(2026, 9, 19, 12), "meter_has_data": False,
+                  "monthly": [], "comparison": None, "daily": [], "temp_bands": [],
+                  "weather": {"has_data": False, "latest_date": None, "location": "伊丹"},
+                  "tv": {"configured": False, "has_data": False}}
+        with patch.object(power_analysis_service, "build_power_report", return_value=report):
+            res = self._get("power")
+        text = res.text
+        assert text.index("🧾 今月のまとめ") < text.index("📈 月ごとの推移")
+        assert "¥1,234" in text and "¥1,000" in text and "+234円(+23%)" in text
+        assert "今月の日別を見る(1日)" in text and "cost-history" in text and "123円" in text
 
     def test_sys_page_shows_overall_summary_and_maintenance_actions(self):
         res = self._get("sys")
         assert "すべて正常" in res.text or "確認が必要です" in res.text
-        assert "システム再起動" in res.text
-        assert "今すぐバックアップ" in res.text
+        assert "システム再起動" in self._get("sys/admin").text
+        assert "今すぐバックアップ" in self._get("sys/backup").text
 
     def test_sys_page_shows_nas_capacity_history(self):
         """不具合修正: NASカードをタップしても容量の履歴を見る手段が無かった。"""
         res = self._get(
-            "sys",
+            "sys/nas",
             load_nas_history=pd.DataFrame({
                 "timestamp": [pd.Timestamp("2026-09-14"), pd.Timestamp("2026-09-15")],
                 "percent": [30.0, 42.0],
@@ -295,21 +342,26 @@ class TestSubPages:
         ("", 30), ("?nas_days=7", 7), ("?nas_days=90", 90), ("?nas_days=5", 30), ("?nas_days=abc", 30), ("?nas_days=", 30),
     ])
     def test_sys_page_nas_period_selects_the_history_range(self, query, expected_days):
-        """?nas_days=7|30|90で期間を切り替える。範囲外・数値でない値は既定の30日(422にしない)。"""
-        with patch.object(home_status_service, "get_nas_history", return_value=pd.DataFrame()) as mock_load:
-            res = self._get(f"sys{query}")
-        assert res.status_code == 200
-        mock_load.assert_called_once_with(expected_days)
-        assert "表示期間" in res.text
+        """?nas_days=7|30|90で期間を切り替える。範囲外・数値でない値は既定の30日(422にしない)。
+        一覧(`/sys?nas_days=`)の古いURLもNASの詳細画面へ同じ指定のまま送る。"""
+        for page in ("sys/nas", "sys"):
+            with patch.object(home_status_service, "get_nas_history", return_value=pd.DataFrame()) as mock_load:
+                res = self._get(f"{page}{query}")
+            if page == "sys" and not query:
+                assert mock_load.call_count == 0  # 一覧ではグラフを描かない
+                continue
+            assert res.status_code == 200
+            mock_load.assert_called_once_with(expected_days)
+            assert "表示期間" in res.text
 
     def test_watch_page_device_filter_param_is_accepted(self):
-        res = self._get("watch?device=no-such-device")
+        res = self._get("watch/takasago?device=no-such-device")
         assert res.status_code == 200
         assert 'name="device"' not in res.text or "すべての機器" in res.text
 
     def test_updates_page_is_reached_from_the_system_page(self):
-        """「アップデート」は下部ナビ・ホームには常設せず、システムページ(管理者向け)から開く。"""
-        res = self._get("sys")
+        """「アップデート」は下部ナビ・ホームには常設せず、システムの「🛠️ 管理者向け」から開く。"""
+        res = self._get("sys/admin")
         assert f'href="{config.DASHBOARD_BASE_PATH}/updates"' in res.text
         assert "アップデート" in res.text
 
@@ -326,9 +378,10 @@ class TestSubPages:
         assert res.status_code == 200
         assert "release-badge-dashboard" in res.text and "release-badge-quest" in res.text
 
-    def test_life_page_links_to_the_power_analysis_page(self):
+    def test_life_page_cost_card_links_to_the_power_page(self):
         res = self._get("life")
-        assert f'href="{config.DASHBOARD_BASE_PATH}/power"' in res.text and "電気のくわしい分析" in res.text
+        card = res.text.split("💰 今月の電気代", 1)[0].rsplit("<a ", 1)[1]
+        assert f'href="{config.DASHBOARD_BASE_PATH}/power"' in card
 
     @pytest.mark.parametrize("query,expected_days", [
         ("", 30), ("?days=60", 60), ("?days=90", 90), ("?days=7", 30), ("?days=abc", 30), ("?days=", 30),
@@ -348,11 +401,11 @@ class TestSubPages:
         assert "⚡ 電気" in res.text and "くらしへ戻る" in res.text
 
     def test_sys_page_restart_button_is_disabled_until_confirmed(self):
-        res = self._get("sys")
+        res = self._get("sys/admin")
         assert 'id="restartBtn" disabled' in res.text
 
     def test_sys_page_deploy_button_is_disabled_until_confirmed(self):
-        res = self._get("sys")
+        res = self._get("sys/admin")
         assert 'id="deployBtn" disabled' in res.text
         assert 'id="deployConfirm"' in res.text
         # API呼び出しは外部JS(#949)にある。ページはそれを参照し、JS側にエンドポイントがある。
@@ -379,8 +432,8 @@ class TestStatusCacheOnTheServerSide:
             for p in patches:
                 p.stop()
 
-        # 共通キャッシュ(直近N件)と、ホームの「今日の動き」用の今日の全件を各1回。2回目は増えない。
-        assert mock_load.call_count == 2
+        # 共通キャッシュ(直近N件)を1回。2回目は増えない。
+        assert mock_load.call_count == 1
 
     def test_sub_pages_share_the_same_cache_as_the_home_page(self):
         """見守り/くらし/システムページを開いても、DB読み取り回数が増えないこと。"""
@@ -416,13 +469,15 @@ class TestStatusCacheOnTheServerSide:
             with patch.object(home_status_service.analysis_service, "load_sensor_data",
                               return_value=pd.DataFrame()) as mock_load, \
                  _client() as client:
-                res = client.get(f"{config.DASHBOARD_BASE_PATH}/watch?date=2026-10-01")
+                res = client.get(f"{config.DASHBOARD_BASE_PATH}/watch/takasago?date=2026-10-01")
         finally:
             for p in patches:
                 p.stop()
 
         assert res.status_code == 200
-        mock_load.assert_called_once_with(day=date(2026, 10, 1))
+        # ログは指定日をDBから取る(画面先頭のカード用に、共通キャッシュも1回だけ読む)
+        mock_load.assert_any_call(day=date(2026, 10, 1))
+        assert [c for c in mock_load.call_args_list if "day" in c.kwargs] == [((), {"day": date(2026, 10, 1)})]
         assert 'value="2026-10-01"' in res.text
 
     def test_watch_page_with_invalid_date_falls_back_to_normal_view(self):
@@ -433,7 +488,7 @@ class TestStatusCacheOnTheServerSide:
             with patch.object(home_status_service.analysis_service, "load_sensor_data",
                               return_value=pd.DataFrame()) as mock_load, \
                  _client() as client:
-                res = client.get(f"{config.DASHBOARD_BASE_PATH}/watch?date=not-a-date")
+                res = client.get(f"{config.DASHBOARD_BASE_PATH}/watch/itami?date=not-a-date")
         finally:
             for p in patches:
                 p.stop()
@@ -474,11 +529,10 @@ class TestOneSourceOfTruth:
 class TestMobilePageHtmlSafety:
     def test_card_titles_and_values_are_escaped(self):
         """Issue #378 と同じ理由。DB・スクレイピング由来の文字列が混ざりうる。"""
-        cards = [home_status_service.StatusCard("<script>alert(1)</script>", "<img src=x>", "theme-gray")]
+        cards = [home_status_service.StatusCard("<script>alert(1)</script>", "<img src=x>", "theme-gray", group="watch")]
         page = dashboard_page_service.render_home_page(
             cards, NOW,
             dashboard_path="/dashboard/", status_path="/dashboard/status",
-            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
             refresh_sec=60,
         )
 
@@ -488,11 +542,10 @@ class TestMobilePageHtmlSafety:
     def test_intentional_html_is_kept_when_the_card_asks_for_it(self):
         """`value_is_html=True` を指定した呼び出し元だけがHTML断片を埋め込めること。"""
         cards = [home_status_service.StatusCard("🔧 テスト", "<b>3</b>台", "theme-green",
-                                                value_is_html=True)]
+                                                value_is_html=True, group="watch")]
         page = dashboard_page_service.render_home_page(
             cards, NOW,
             dashboard_path="/dashboard/", status_path="/dashboard/status",
-            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
             refresh_sec=60,
         )
 
@@ -502,7 +555,6 @@ class TestMobilePageHtmlSafety:
         page = dashboard_page_service.render_home_page(
             [], NOW,
             dashboard_path="/dashboard/", status_path="/dashboard/status",
-            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
             refresh_sec=60,
         )
 
@@ -532,9 +584,11 @@ class TestCardsLinkToTheirDetail:
         assert len(hrefs) == EXPECTED_CARD_COUNT, "すべてのカードがリンクになっていること"
         for href in hrefs:
             assert href.startswith("/dashboard/")
-            page_key = href.split("#", 1)[0].split("?", 1)[0].rsplit("/", 1)[1]
-            # ""=ホーム自身(温湿度カードは同じページのヒートマップへ飛ぶ)
-            assert page_key in ("", "watch", "life", "sys")
+            path = href.split("#", 1)[0].split("?", 1)[0]
+            # 各ページ(見守り・くらし・電気・システム)か、その下の詳細画面
+            assert path.removeprefix("/dashboard/") in (
+                "watch/takasago", "watch/itami", "watch/live", "life", "power", "sys/server", "sys/nas",
+            ), href
 
     def test_cards_point_at_the_page_that_actually_shows_them(self):
         """リンク先が「そのカードの詳細が載っているページ」であること。"""
@@ -543,7 +597,7 @@ class TestCardsLinkToTheirDetail:
 
         assert by_title["👵 高砂 (実家)"] == "watch"
         assert by_title["🎥 カメラ"] == "watch"
-        assert by_title["💰 今月の電気代"] == "life"
+        assert by_title["💰 今月の電気代"] == "power"  # タップで「⚡ 電気」ページ(今月のまとめ)
         assert by_title["🗄️ NAS"] == "sys"
 
     def test_watch_group_cards_link_to_different_places_on_the_page(self):
@@ -562,15 +616,15 @@ class TestCardsLinkToTheirDetail:
         for href in hrefs.values():
             assert href.startswith("/dashboard/watch")
 
-    def test_nas_card_links_to_the_history_section(self):
+    def test_nas_card_links_to_the_history_page(self):
         """不具合修正: NASカードをタップしても容量履歴を見る手段が無かったため、
-        システムページ内のNAS履歴セクションへ飛ぶ`anchor`を付けた。"""
+        容量履歴のあるシステムのNASの詳細画面へ飛ぶ`anchor`を付けた。"""
         cards, _ = self._collect()
         (nas_card,) = [card for card in cards if card.title == "🗄️ NAS"]
 
         href = home_status_service.card_detail_href(nas_card, "/dashboard/")
 
-        assert href == "/dashboard/sys#nas-history"
+        assert href == "/dashboard/sys/nas"
 
     def test_the_link_is_relative_to_the_viewing_origin(self):
         """固定URLを埋めるとLAN内のIPと公開ドメインのどちらかで繋がらなくなる。"""
@@ -608,7 +662,6 @@ class TestAlertSummaryRemoved:
         page = dashboard_page_service.render_home_page(
             [home_status_service.StatusCard("異常", "v", "theme-red")], NOW,
             dashboard_path="/dashboard/", status_path="/dashboard/status",
-            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
             refresh_sec=60,
         )
 
@@ -627,7 +680,6 @@ class TestDarkMode:
         return dashboard_page_service.render_home_page(
             [], NOW,
             dashboard_path="/dashboard/", status_path="/dashboard/status",
-            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
             refresh_sec=60,
         )
 
@@ -658,8 +710,8 @@ class TestPartialRefresh:
         res = self._get(f"{config.DASHBOARD_BASE_PATH}/status")
 
         assert res.status_code == 200
-        assert res.text.count('class="status-card') == EXPECTED_CARD_COUNT
-        assert res.text.startswith(f'<div id="{home_status_service.STATUS_SECTION_ID}">')
+        assert res.text.count('class="status-card') == HOME_CARD_COUNT
+        assert res.text.startswith(f'<div id="{home_status_service.STATUS_SECTION_ID}"')
         # 断片なので、ページ全体の要素は含まない
         assert "<html" not in res.text
         assert "<style" not in res.text
@@ -670,18 +722,19 @@ class TestPartialRefresh:
 
         assert res.text.count(f'id="{home_status_service.STATUS_SECTION_ID}"') == 1
 
-    def test_the_fragment_carries_the_fetch_time(self):
-        """時刻も一緒に差し替わらないと、値だけ新しく見出しが古くなる。"""
+    def test_the_fragment_carries_the_fetch_time_but_does_not_show_it(self):
+        """取得時刻・自動更新の間隔は要望で画面から外した(見ても行動が変わらない)。
+        不具合調査用に、差し替える範囲の属性としてだけ持つ。"""
         res = self._get(f"{config.DASHBOARD_BASE_PATH}/status")
 
-        assert "時点" in res.text
+        assert "data-fetched-at=" in res.text
+        assert "時点" not in res.text and "秒ごとに自動更新" not in res.text
 
     def test_the_script_sends_credentials(self):
         """Cloudflare Access の内側にあるため、Cookie を送らないと弾かれる。"""
         page = dashboard_page_service.render_home_page(
             [], NOW,
             dashboard_path="/dashboard/", status_path="/dashboard/status",
-            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
             refresh_sec=60,
         )
 
@@ -692,7 +745,6 @@ class TestPartialRefresh:
         page = dashboard_page_service.render_home_page(
             [], NOW,
             dashboard_path="/dashboard/", status_path="/dashboard/status",
-            quest_path="/quest", asa_note_url=config.ASA_NOTE_URL,
             refresh_sec=60,
         )
 
@@ -716,8 +768,9 @@ class TestPartialRefresh:
             for p in patches:
                 p.stop()
 
-        # 直近N件 + 今日の全件(ホームの「今日の動き」用)を各1回。断片を何度取っても増えない。
-        assert load.call_count == 2
+        # 直近N件を1回。断片を何度取っても増えない(「今日の動き」は見守りページへ移したので、
+        # ホームでは今日の全件を読まない)。
+        assert load.call_count == 1
 
 
 class TestSupportingValues:
@@ -818,14 +871,16 @@ class TestSupportingValues:
             p.start()
         try:
             with _client() as client:
-                page = client.get(f"{config.DASHBOARD_BASE_PATH}/").text
+                # 電気代はくらし、サーバーはシステムのカード(ホームのタイルは補足を出さない)
+                life = client.get(f"{config.DASHBOARD_BASE_PATH}/life").text
+                sys_page = client.get(f"{config.DASHBOARD_BASE_PATH}/sys").text
         finally:
             for p in patches:
                 p.stop()
 
-        assert 'class="status-sub"' in page
-        assert "先月同日 1,000円" in page
-        assert "ディスク 55%" in page
+        assert 'class="status-sub"' in life and 'class="status-sub"' in sys_page
+        assert "先月同日 1,000円" in life
+        assert "ディスク 55%" in sys_page
 
 
 class TestCardColoursSurviveLinking:
@@ -840,7 +895,8 @@ class TestCardColoursSurviveLinking:
 
 
 class TestExternalLinkHealth:
-    """ホームの「ファミクエ」「あさノート」ボタンの稼働状況による色分け(緑=稼働中・赤=停止中)。"""
+    """ホームの「システム・サービス」のアプリのタイル(ファミクエ・あさノート・よるノート)の稼働状況による
+    色分け(緑=稼働中・赤=停止中・灰=確認中)。以前はホームの最後の「よく使うリンク」だった。"""
 
     def _home(self, path=""):
         patches = _stub_loaders()
@@ -853,58 +909,67 @@ class TestExternalLinkHealth:
             for p in patches:
                 p.stop()
 
-    def test_healthy_links_are_green_with_label(self):
+    @staticmethod
+    def _tile(text, title):
+        """タイトルを含むタイル(`<a class="status-card ...">`)の開始タグ〜タイトルの直前。"""
+        return text.split("</style>", 1)[-1].split(title, 1)[0].rsplit("<a ", 1)[1]
+
+    def test_healthy_apps_are_green_with_label(self):
         res = self._home("/")
-        assert res.text.count("external-card external-up") == 3
-        assert "external-down" not in res.text.split("</style>", 1)[1]
-        assert "● 稼働中" in res.text
+        for title in ("⚔️ ファミクエ", "📝 あさノート", "🌙 よるノート"):
+            assert "theme-green" in self._tile(res.text, title), title
+        assert res.text.count("🟢 稼働中") == 3
 
     def test_down_app_is_red_and_other_stays_green(self, monkeypatch):
         monkeypatch.setattr(home_status_service, "check_asa_note_health", lambda url: False)
         res = self._home("/")
-        body = res.text.split("</style>", 1)[1]
-        asa = body.split("あさノート", 1)[0].rsplit("<a ", 1)[1]
-        quest = body.split("ファミクエ", 1)[0].rsplit("<a ", 1)[1]
-        assert "external-down" in asa
-        assert "external-up" in quest
-        assert "● 停止中" in res.text
+        assert "theme-red" in self._tile(res.text, "📝 あさノート")
+        assert "theme-green" in self._tile(res.text, "⚔️ ファミクエ")
+        assert "🔴 停止中" in res.text
 
-    def test_down_link_is_still_tappable(self, monkeypatch):
+    def test_down_app_is_still_tappable(self, monkeypatch):
         monkeypatch.setattr(home_status_service, "check_quest_app_health", lambda: False)
         res = self._home("/")
-        assert 'class="external-card external-down" href="/quest"' in res.text
+        tile = self._tile(res.text, "⚔️ ファミクエ")
+        assert 'class="status-card theme-red" href="/quest"' in tile
 
-    def test_external_links_open_in_a_new_tab(self):
-        """よく使うリンク(ファミクエ・あさノート・よるノート)は新しいタブで開く。"""
+    def test_app_tiles_open_in_a_new_tab_but_the_others_do_not(self):
         res = self._home("/")
-        section = res.text.split(f'id="{home_status_service.STATUS_SECTION_ID}"', 1)[1].split("メニュー", 1)[0]
-        anchors = [a for a in section.split("<a ")[1:] if "external-card" in a]
-        assert len(anchors) == 3
-        assert all('target="_blank"' in a and 'rel="noopener"' in a for a in anchors)
+        for title in ("⚔️ ファミクエ", "📝 あさノート", "🌙 よるノート"):
+            tile = self._tile(res.text, title)
+            assert 'target="_blank"' in tile and 'rel="noopener"' in tile, title
+        for title in ("🖥️ サーバー", "🗄️ NAS", "🎥 録画"):
+            assert 'target="_blank"' not in self._tile(res.text, title), title
 
     def test_note_urls_point_to_the_deployed_apps(self):
         assert config.ASA_NOTE_URL == "https://asa-note.vercel.app/"
         assert config.YORU_NOTE_URL == "https://yorunote-mm.vercel.app/"
 
-    def test_down_yoru_note_is_red_and_only_that_link(self, monkeypatch):
+    def test_down_yoru_note_is_red_and_only_that_tile(self, monkeypatch):
         monkeypatch.setattr(home_status_service, "check_asa_note_health", lambda url: "yorunote" not in url)
-        body = self._home("/").text.split("</style>", 1)[1]
-        yoru = body.split("よるノート", 1)[0].rsplit("<a ", 1)[1]
-        asa = body.split("あさノート", 1)[0].rsplit("<a ", 1)[1]
-        assert "external-down" in yoru and "external-up" in asa
+        text = self._home("/").text
+        assert "theme-red" in self._tile(text, "🌙 よるノート")
+        assert "theme-green" in self._tile(text, "📝 あさノート")
 
-    def test_status_fragment_keeps_links_so_color_refreshes(self, monkeypatch):
-        """自動更新はこのフラグメントで範囲ごと差し替わる。リンクが入っていないと更新で消える。"""
+    def test_status_fragment_keeps_the_tiles_so_color_refreshes(self, monkeypatch):
+        """自動更新はこのフラグメントで範囲ごと差し替わる。タイルが入っていないと更新で消える。"""
         monkeypatch.setattr(home_status_service, "check_asa_note_health", lambda url: False)
         res = self._home("/status")
-        assert "よく使うリンク" in res.text
-        assert "external-down" in res.text
+        assert "🖥️ システム・サービス" in res.text
+        assert "theme-red" in self._tile(res.text, "📝 あさノート")
         assert 'href="/quest"' in res.text
 
-    def test_links_are_inside_the_refreshed_section(self):
+    def test_tiles_are_inside_the_refreshed_section(self):
         res = self._home("/")
-        section = res.text.split(f'id="{home_status_service.STATUS_SECTION_ID}"', 1)[1].split("メニュー", 1)[0]
+        section = res.text.split(f'id="{home_status_service.STATUS_SECTION_ID}"', 1)[1]
         assert "ファミクエ" in section and "あさノート" in section
+
+    def test_apps_detail_page_lists_the_links_with_their_state(self, monkeypatch):
+        monkeypatch.setattr(home_status_service, "check_asa_note_health", lambda url: False)
+        res = self._home("/sys/apps")
+        assert res.text.count('class="external-card') == 3
+        assert 'class="external-card external-down" href="https://asa-note.vercel.app/"' in res.text
+        assert "🔴 2件停止" in res.text  # 一覧と同じカードを先頭に出す
 
     def test_render_without_health_keeps_plain_style(self):
         html = dashboard_page_service._render_external_links("/quest", "https://x.example/", None)
@@ -913,7 +978,7 @@ class TestExternalLinkHealth:
 
     def test_slow_check_does_not_hold_the_home_page(self, monkeypatch):
         """外部サイトの応答待ちでホームの最初の描画を遅らせない(起動画面が長く出ていた原因)。
-        間に合わないリンクは「停止中」ではなく状態表示なしで出し、ページが数秒後に取り直す。"""
+        間に合わないアプリは「停止中」ではなく「確認中」(灰色)で出し、ページが数秒後に取り直す。"""
         monkeypatch.setattr(home_status_service, "HOME_RENDER_BUDGET_SEC", 0.1)
         monkeypatch.setattr(
             home_status_service, "check_asa_note_health", lambda url: time.sleep(1.0) or "yorunote" not in url
@@ -921,14 +986,13 @@ class TestExternalLinkHealth:
         started = time.monotonic()
         res = self._home("/")
         assert time.monotonic() - started < 0.9
-        body = res.text.split("</style>", 1)[1]
-        asa = body.split("あさノート", 1)[0].rsplit("<a ", 1)[1]
-        assert "external-up" not in asa and "external-down" not in asa
+        assert "theme-gray" in self._tile(res.text, "📝 あさノート")
+        assert "⚪ 確認中" in res.text
         assert 'data-pending="1"' in res.text
 
         time.sleep(1.2)  # 裏での確認が終わったあとの取り直し
         res = self._home("/status")
-        assert "external-down" in res.text and 'data-pending="1"' not in res.text
+        assert "theme-red" in self._tile(res.text, "🌙 よるノート") and 'data-pending="1"' not in res.text
 
     def test_health_is_cached_between_requests(self, monkeypatch):
         calls = []

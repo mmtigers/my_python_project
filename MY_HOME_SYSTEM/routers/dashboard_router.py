@@ -5,8 +5,9 @@
 #829: 以前はStreamlit版の「詳細表示」(dashboard.py)と、それへのリバースプロキシ、
 そして「かんたん表示」(カードのみの単一ページ)が別々に存在した。詳細表示・
 表示モード切替UIを廃止し、かんたん表示を唯一のダッシュボードとする方針変更に伴い、
-この`unified_server`自身がホーム/見守り/くらし/システムの4ページをHTMLで直接返す
-構成に作り替えた(外部プロセスへの中継は無くなった)。
+この`unified_server`自身がホーム/見守り/くらし/システム/カメラのページをHTMLで直接返す
+構成に作り替えた(外部プロセスへの中継は無くなった)。見守り・システムは「一覧のカード →
+タップで詳細画面(`/watch/<src>`・`/sys/<section>`)」の2段構成。
 
 ページの組み立ては`services/dashboard_page_service.py`(Streamlit不使用)に委譲する
 (CLAUDE.md「ルーターは薄く」の方針)。カードの判定・材料の取得キャッシュは
@@ -113,7 +114,7 @@ def legacy_mobile_path_redirect() -> RedirectResponse:
 def dashboard_home(
     tab: str | None = None, hm_loc: str | None = None, hm_metric: str | None = None, hm_src: str | None = None,
 ) -> Response:
-    """ホームページ: いまの状態(サマリー)+ ステータスカード + カメラの写真 + 今日の動き + 外部リンク。
+    """ホームページ: いまの状態(サマリー)+ 見守り・室温のカード + システム・サービスのタイル。
 
     `tab` はStreamlit版で使っていたクエリパラメータ(`/dashboard?tab=watch`)。
     スマートフォンのホーム画面にこの形のURLを追加している可能性があるため、
@@ -156,29 +157,20 @@ def _home_status_parts(cards) -> dict:
     alerts = home_status_service.build_home_alerts(
         cards, dashboard_path=dashboard_path, health=home_status_service.read_health_result()
     )
+    service_cards = home_status_service.build_service_cards(
+        cards,
+        link_health=home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL),
+        recording=home_status_service.get_camera_recording_states(),
+        quest_path=_QUEST_APP_PATH,
+        asa_note_url=config.ASA_NOTE_URL,
+        yoru_note_url=config.YORU_NOTE_URL,
+    )
     return {
         "dashboard_path": dashboard_path,
         "refresh_sec": home_status_service.MOBILE_PAGE_REFRESH_SEC,
-        "quest_path": _QUEST_APP_PATH,
-        "asa_note_url": config.ASA_NOTE_URL,
-        "yoru_note_url": config.YORU_NOTE_URL,
-        "link_health": home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL),
-        "heatmap_html": _home_heatmap_html(),
+        "service_cards": service_cards,
         "alerts_html": home_status_service.render_home_alerts_html(alerts),
-        "weather_html": home_status_service.render_today_weather_html(home_status_service.get_today_weather()),
-        "stills_html": dashboard_page_service.render_camera_stills(
-            dashboard_path=dashboard_path, snapshot_url_prefix=f"{_BASE_PATH}/snapshot"
-        ),
     }
-
-
-def _home_heatmap_html() -> str:
-    """ホームの「📊 今日の動き」。今日(JST)の全件(60秒キャッシュ)から作る。"""
-    return dashboard_page_service.render_home_activity_heatmaps(
-        home_status_service.get_sensor_data_today(),
-        home_status_service.get_now_jst(),
-        dashboard_path=f"{_BASE_PATH}/",
-    )
 
 
 def _climate_heatmap_html(
@@ -209,7 +201,7 @@ def _climate_heatmap_html(
 
 @router.get(_STATUS_PATH, include_in_schema=False)
 def dashboard_status_fragment() -> HTMLResponse:
-    """ホームページの自動更新用(サマリー・カード・カメラの写真・今日の動き・外部リンクのブロックだけを返す)。"""
+    """ホームページの自動更新用(サマリー・カード・タイルのブロックだけを返す)。"""
     (cards, fetched_at, parts), pending = home_status_service.render_within_budget(_collect_home_status)
     return HTMLResponse(
         dashboard_page_service.render_home_status_section(cards, fetched_at, pending=pending, **parts)
@@ -227,13 +219,61 @@ def dashboard_watch(
     src: str | None = None,
     hdev: str | None = None,
     tl_all: str | None = None,
-) -> HTMLResponse:
-    """見守りページ。`?date=YYYY-MM-DD`でログ(防犯・センサー)をその日(JST)に絞る。
-    `?device=<device_id>`でセンサーログをその機器だけに絞る(組み合わせ可)。
-    `?hour=0〜23&src=security|takasago|itami[&hdev=<device_id>]`はヒートマップのマスをタップした先で、
-    その日のその時間のログを「時間帯の詳細」として出す(`date`未指定なら今日)。
-    `?tl_all=1`はタイムラプス一覧の先頭10件の上限を外す(最近の写真の下。動画は`/assets/timelapse/`の静的配信を使う)。
-    形式が不正な値は無視して通常表示にする(ブックマークの壊れたURLでも開けるように)。"""
+) -> Response:
+    """見守りページ(一覧): 見守りのカード・カメラの写真・今日の動き。
+
+    ログ・時間帯の詳細は詳細画面(`/watch/<src>`)、タイムラプスはカメラのページ(`/watch/live`)へ移した。
+    移す前のURL(ヒートマップのマスの `?date=&hour=&src=`・`?tl_all=1` 等。ブックマークや開いたままの
+    画面に残りうる)は、同じ内容の新しいページへ302で送る。`src` が無い `?date=`/`?device=` は防犯ログ
+    ではなく元々センサーログ向けの指定が主だったが、行き先を1つに決められないため一覧を表示する。
+    """
+    if dashboard_page_service.parse_log_source(src) is not None:
+        query = {k: v for k, v in (("date", date), ("device", device), ("hour", hour), ("hdev", hdev)) if v}
+        suffix = f"?{urlencode(query)}" if query else ""
+        return RedirectResponse(url=f"{_BASE_PATH}/watch/{src}{suffix}#hour-log" if hour else f"{_BASE_PATH}/watch/{src}{suffix}", status_code=302)
+    if tl_all is not None:
+        return RedirectResponse(url=f"{_BASE_PATH}/watch/live?{urlencode({'tl_all': tl_all})}#timelapse-section", status_code=302)
+    cards, _ = home_status_service.collect_status_cards()
+    return HTMLResponse(
+        dashboard_page_service.render_watch_page(
+            cards,
+            dashboard_path=f"{_BASE_PATH}/",
+            snapshot_url_prefix=f"{_BASE_PATH}/snapshot",
+            df_today=home_status_service.get_sensor_data_today(),
+        )
+    )
+
+
+@router.get(f"{_BASE_PATH}/watch/live", include_in_schema=False)
+def dashboard_watch_live(tl_all: str | None = None) -> HTMLResponse:
+    """カメラのページ(下部ナビの「カメラ」)。ライブ映像・最近の写真・タイムラプス。
+    `?camera=<id>` はブラウザ側(`camera.js`)が読み、そのカメラの再生を始める。
+    `?tl_all=1`はタイムラプス一覧の先頭10件の上限を外す(動画は`/assets/timelapse/`の静的配信を使う)。"""
+    return HTMLResponse(
+        dashboard_page_service.render_watch_live_page(
+            dashboard_path=f"{_BASE_PATH}/",
+            snapshot_url_prefix=f"{_BASE_PATH}/snapshot",
+            timelapses=timelapse_service.list_timelapses(),
+            show_all_timelapses=tl_all == "1",
+        )
+    )
+
+
+@router.get(f"{_BASE_PATH}/watch/{{src}}", include_in_schema=False)
+def dashboard_watch_detail(
+    src: str,
+    date: str | None = None,
+    device: str | None = None,
+    hour: str | None = None,
+    hdev: str | None = None,
+) -> Response:
+    """見守りの詳細画面(`src`=security|takasago|itami)。`?date=YYYY-MM-DD`でその日(JST)に絞る。
+    `?device=<device_id>`でセンサーログをその機器だけに絞る(高砂・伊丹のみ。組み合わせ可)。
+    `?hour=0〜23[&hdev=<device_id>]`はヒートマップのマスをタップした先で、その時間のログを出す
+    (`date`未指定なら今日)。形式が不正な値は無視して通常表示にする(壊れたURLでも開けるように)。
+    知らない`src`は見守りの一覧へ送る。"""
+    if dashboard_page_service.parse_log_source(src) is None:
+        return RedirectResponse(url=f"{_BASE_PATH}/watch", status_code=302)
     selected_date = dashboard_page_service.parse_log_date(date)
     if selected_date is not None:
         df_sensor = home_status_service.get_sensor_data_for_day(selected_date)
@@ -242,19 +282,21 @@ def dashboard_watch(
         df_sensor = home_status_service.get_cached_materials().df_sensor
         # キャッシュは直近N件のため、ヒートマップ用に今日(JST)の全件を別に取る
         df_heatmap = home_status_service.get_sensor_data_today()
+    card = None
+    if src in ("takasago", "itami"):
+        cards, _ = home_status_service.collect_status_cards()
+        card = next((c for c in cards if c.anchor == f"/{src}"), None)
     return HTMLResponse(
-        dashboard_page_service.render_watch_page(
+        dashboard_page_service.render_watch_detail_page(
+            src,
             df_sensor,
             dashboard_path=f"{_BASE_PATH}/",
-            snapshot_url_prefix=f"{_BASE_PATH}/snapshot",
             selected_date=selected_date,
             selected_device=device or None,
             df_heatmap=df_heatmap,
             hour=dashboard_page_service.parse_log_hour(hour),
-            hour_src=dashboard_page_service.parse_log_source(src),
             hour_device=hdev or None,
-            timelapses=timelapse_service.list_timelapses(),
-            show_all_timelapses=tl_all == "1",
+            card=card,
         )
     )
 
@@ -268,41 +310,35 @@ def dashboard_life(
     過去30日ヒートマップの拠点・指標・動きの対象、`hm_view=days|day&hm_date=YYYY-MM-DD`は表示
     (30日の推移/その日を拠点で並べる)と並べる日(不正な値は既定)。"""
     cards, _ = home_status_service.collect_status_cards()
-    materials = home_status_service.get_cached_materials()
     return HTMLResponse(
         dashboard_page_service.render_life_page(
-            cards, dashboard_path=f"{_BASE_PATH}/", daily_cost_rows=materials.daily_cost_rows,
+            cards, dashboard_path=f"{_BASE_PATH}/",
             climate_html=_climate_heatmap_html(hm_loc, hm_metric, hm_src, hm_view, hm_date),
         )
     )
 
 
-@router.get(f"{_BASE_PATH}/sys", include_in_schema=False)
-def dashboard_sys(nas_days: str | None = None) -> HTMLResponse:
-    """システムページ。`?nas_days=7|30|90`でNAS容量グラフの表示期間を切り替える
-    (それ以外の値・数値でない値は既定の30日。壊れたブックマークでも開けるようにする)。"""
-    try:
-        days = int(nas_days) if nas_days is not None else None
-    except ValueError:
-        days = None
-    nas_days = days if days in dashboard_page_service.NAS_HISTORY_DAYS_CHOICES else dashboard_page_service.NAS_HISTORY_DEFAULT_DAYS
+def _sys_materials():
+    """システムページ(一覧・詳細画面)が共通で使う材料: (材料, 現在時刻, カード, 最終更新の行, 定期チェック, リンクの稼働)。"""
     materials = home_status_service.get_cached_materials()
-    nas_history = home_status_service.get_nas_history(nas_days)
     now = home_status_service.get_now_jst()
+    cards, _ = home_status_service.collect_status_cards(now)
+    rows = dashboard_page_service.build_freshness_rows(materials.df_sensor, materials.nas_data, materials.memory, now)
+    health = home_status_service.read_health_result(now)
+    link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)
+    sys_cards = dashboard_page_service.build_sys_cards(cards, rows, health=health, link_health=link_health)
+    return materials, now, sys_cards, rows, health, link_health
+
+
+@router.get(f"{_BASE_PATH}/sys", include_in_schema=False)
+def dashboard_sys(nas_days: str | None = None) -> Response:
+    """システムページ(一覧)。カードをタップすると詳細画面(`/sys/<section>`)を開く。
+    `?nas_days=` はNASの容量推移が一覧にあった頃のURL。NASの詳細画面へ同じ指定のまま送る。"""
+    if nas_days is not None:
+        return RedirectResponse(url=f"{_BASE_PATH}/sys/nas?{urlencode({'nas_days': nas_days})}", status_code=302)
+    _, _, sys_cards, rows, health, _ = _sys_materials()
     return HTMLResponse(
-        dashboard_page_service.render_sys_page(
-            materials.df_sensor,
-            materials.nas_data,
-            nas_history,
-            materials.memory,
-            materials.disk,
-            now,
-            dashboard_path=f"{_BASE_PATH}/",
-            nas_days=nas_days,
-            boot_history=system_info_service.get_boot_history(),
-            log_groups=log_download_service.list_log_groups(),
-            health=home_status_service.read_health_result(now),
-        )
+        dashboard_page_service.render_sys_page(sys_cards, rows, dashboard_path=f"{_BASE_PATH}/", health=health)
     )
 
 
@@ -336,9 +372,50 @@ def dashboard_download_logs(group: list[str] = Query(default=[])) -> Response:
     )
 
 
+@router.get(f"{_BASE_PATH}/sys/{{section}}", include_in_schema=False)
+def dashboard_sys_detail(section: str, nas_days: str | None = None) -> Response:
+    """システムの詳細画面(`section` は `dashboard_page_service.SYS_SECTIONS` のキー。知らない値は一覧へ)。
+    `/sys/logs`(ログのダウンロード)は上で先に定義しているため、ここには来ない。
+    NASの画面だけ `?nas_days=7|30|90` で容量グラフの表示期間を切り替える
+    (それ以外の値・数値でない値は既定の30日。壊れたブックマークでも開けるようにする)。"""
+    if section not in dashboard_page_service.SYS_SECTION_TITLES:
+        return RedirectResponse(url=f"{_BASE_PATH}/sys", status_code=302)
+    materials, now, sys_cards, rows, health, link_health = _sys_materials()
+    kwargs: dict = {}
+    if section == "nas":
+        try:
+            days = int(nas_days) if nas_days is not None else None
+        except ValueError:
+            days = None
+        if days not in dashboard_page_service.NAS_HISTORY_DAYS_CHOICES:
+            days = dashboard_page_service.NAS_HISTORY_DEFAULT_DAYS
+        kwargs = {"nas_history": home_status_service.get_nas_history(days), "nas_days": days}
+    elif section == "server":
+        kwargs = {"boot_history": system_info_service.get_boot_history()}
+    elif section == "admin":
+        kwargs = {"log_groups": log_download_service.list_log_groups()}
+    return HTMLResponse(
+        dashboard_page_service.render_sys_detail_page(
+            section,
+            dashboard_path=f"{_BASE_PATH}/",
+            sys_cards=sys_cards,
+            rows=rows,
+            memory=materials.memory,
+            disk=materials.disk,
+            health=health,
+            link_health=link_health,
+            quest_path=_QUEST_APP_PATH,
+            asa_note_url=config.ASA_NOTE_URL,
+            yoru_note_url=config.YORU_NOTE_URL,
+            **kwargs,
+        )
+    )
+
+
 @router.get(f"{_BASE_PATH}/power", include_in_schema=False)
 def dashboard_power(days: str | None = None) -> HTMLResponse:
-    """電気ページ。月ごとの推移・日別の電気代・気温との関係・テレビの使い方を表示する。
+    """電気ページ(くらしの「今月の電気代」カードのタップ先)。今月のまとめ・月ごとの推移・日別の電気代・
+    気温との関係・テレビの使い方を表示する。
     `?days=30|60|90`で日別・気温・テレビの対象期間を切り替える(それ以外の値・数値でない値は30日。
     壊れたブックマークでも開けるようにする)。分析は10分キャッシュされる。
     `async def`にしない(DB取得とpandasの計算が同期のため、イベントループを止めない)。"""
@@ -348,7 +425,12 @@ def dashboard_power(days: str | None = None) -> HTMLResponse:
         selected = None
     selected = selected if selected in power_analysis_service.DAYS_CHOICES else power_analysis_service.DEFAULT_DAYS
     report = power_analysis_service.build_power_report(selected)
-    return HTMLResponse(power_page_service.render_power_page(report, dashboard_path=f"{_BASE_PATH}/"))
+    materials = home_status_service.get_cached_materials()
+    return HTMLResponse(power_page_service.render_power_page(
+        report, dashboard_path=f"{_BASE_PATH}/",
+        monthly_cost=materials.monthly_cost, last_month_cost=materials.last_month_cost,
+        daily_cost_rows=materials.daily_cost_rows,
+    ))
 
 
 @router.get(f"{_BASE_PATH}/updates", include_in_schema=False)

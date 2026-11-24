@@ -207,8 +207,12 @@ class TestCardGroups:
             seen.append(group)
 
     def test_headings_are_rendered_once_per_group(self):
-        html_out = home_status_service.render_status_grid_html(self._cards())
-        for label in home_status_service.CARD_GROUP_LABELS.values():
+        cards = self._cards()
+        html_out = home_status_service.render_status_grid_html(cards)
+        # 「🖥️ システム・サービス」(service)はホームのタイル専用で build_status_cards には無いので、
+        # カードに含まれるグループの見出しだけを見る
+        for key in {card.group for card in cards}:
+            label = home_status_service.CARD_GROUP_LABELS[key]
             assert html_out.count(f">{label}</h2>") == 1, label
 
     def test_a_lone_card_does_not_stretch_across_the_row(self):
