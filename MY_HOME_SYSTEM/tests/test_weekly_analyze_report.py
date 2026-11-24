@@ -69,11 +69,6 @@ class TestGetAnalysisData:
                 "('自炊: うどん', datetime('now'))"
             )
             cur.execute(
-                "INSERT INTO device_records (device_id, device_name, device_type, movement_state, timestamp) "
-                "VALUES (?, '駐車場カメラ', 'ONVIF_CAMERA', 'ON', datetime('now'))",
-                (report.home_status_service.PARKING_CAMERA_ID,),
-            )
-            cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, wattage, timestamp) VALUES "
                 "('d1', 500, datetime('now'))"
             )
@@ -88,7 +83,7 @@ class TestGetAnalysisData:
         assert result["total_meals"] == 3
         assert result["food_counts"]["自炊"] == 2
         assert result["food_counts"]["外食"] == 1
-        assert result["car_count"] == 1
+        assert result["car_usage"] is None  # 駐車場の在否判定のデータが無い
         assert result["sick_count"] == 1
         assert result["elec_bill"] >= 0
 
@@ -141,20 +136,20 @@ class TestGenerateTextSection:
     def test_detailed_mode_includes_all_sections(self):
         data = {
             "total_meals": 2, "food_counts": {"自炊": 1, "外食": 1, "その他": 0},
-            "elec_bill": 1500, "car_count": 3, "sick_count": 0,
+            "elec_bill": 1500, "car_usage": {"trips": 3, "minutes": 200, "uncertain": 0}, "sick_count": 0,
         }
         text = report.generate_text_section("先週のまとめ", data)
         assert "自炊率: 50%" in text
-        assert "3回" in text
+        assert "🚗 車利用: 3回・計3時間20分" in text
         assert "みんな元気でした" in text
 
     def test_zero_car_count_shows_none_message(self):
         data = {
             "total_meals": 1, "food_counts": {"自炊": 1, "外食": 0, "その他": 0},
-            "elec_bill": 0, "car_count": 0, "sick_count": 2,
+            "elec_bill": 0, "car_usage": {"trips": 0, "minutes": 0, "uncertain": 0}, "sick_count": 2,
         }
         text = report.generate_text_section("test", data)
-        assert "駐車場の動き: なし" in text
+        assert "車利用: なし" in text
         assert "不調が2回" in text
 
     def test_zero_total_meals_does_not_divide_by_zero(self):
@@ -276,3 +271,54 @@ class TestElecPricePerKwhComesFromConfig:
         assert at_31 is not None and at_62 is not None
         assert at_31["elec_bill"] > 0
         assert at_62["elec_bill"] == at_31["elec_bill"] * 2
+
+
+class TestCarUsage:
+    """#1118: 「🚗 車利用」を駐車場カメラの録画から判定した外出で数える。"""
+
+    @staticmethod
+    def _save(start, states):
+        from services import parking_occupancy_service as occupancy
+        from services import parking_record_service as records
+        features = {
+            occupancy.STATE_PRESENT: occupancy.ParkingFeatures(False, 30.0, 0.05, 800.0, 40.0, 20.0, 0.04, 0.03),
+            occupancy.STATE_ABSENT: occupancy.ParkingFeatures(False, 30.0, 0.22, 8000.0, 160.0, 15.0, 0.02, 0.01),
+        }
+        observations = [
+            occupancy.Observation(start + datetime.timedelta(minutes=i), s, features[s])
+            for i, s in enumerate(states)
+        ]
+        records.save_recording(start.strftime("%Y%m%d_%H%M%S.mp4"), start, observations, start)
+
+    def test_期間内に出発した外出の回数と合計時間を数える(self, isolated_db):
+        P, A = "present", "absent"
+        week_start = datetime.datetime(2026, 11, 16, 0, 0)
+        # 期間の直前に出発して期間内に戻った外出は数えない
+        self._save(datetime.datetime(2026, 11, 15, 23, 0), [P] * 3 + [A] * 63 + [P] * 3)
+        # 期間内: 75分の外出と、まだ戻っていない外出
+        self._save(datetime.datetime(2026, 11, 17, 9, 0), [P] * 3 + [A] * 75 + [P] * 3)
+        self._save(datetime.datetime(2026, 11, 22, 18, 0), [P] * 3 + [A] * 10)
+
+        now = JST.localize(datetime.datetime(2026, 11, 23, 8, 0))
+        car = report._summarize_car_usage(JST.localize(week_start), now)
+        assert car == {"trips": 2, "minutes": 75, "uncertain": 0}
+        assert report.format_car_usage(car) == "2回・計1時間15分"
+
+    def test_期間内に観測が無ければデータなし(self, isolated_db):
+        self._save(datetime.datetime(2026, 11, 1, 9, 0), ["present"] * 3)
+        start = JST.localize(datetime.datetime(2026, 11, 16, 0, 0))
+        now = JST.localize(datetime.datetime(2026, 11, 23, 8, 0))
+        assert report._summarize_car_usage(start, now) is None
+        assert report.format_car_usage(None) == "データなし"
+
+    def test_取得に失敗してもレポート全体は止めない(self, isolated_db, monkeypatch):
+        def boom(*args, **kwargs):
+            raise RuntimeError("DB が読めない")
+        monkeypatch.setattr(report.parking_record_service, "load_observations", boom)
+        start = datetime.datetime.now(JST) - datetime.timedelta(days=7)
+        result = report.get_analysis_data(start)
+        assert result is not None and result["car_usage"] is None
+
+    def test_時刻が不確かな外出があれば添える(self):
+        assert report.format_car_usage({"trips": 2, "minutes": 40, "uncertain": 1}) == "2回・計40分 (うち時刻が不確か1回)"
+        assert report.format_car_usage({"trips": 1, "minutes": 120, "uncertain": 0}) == "1回・計2時間"

@@ -11,6 +11,8 @@
 ## 関連ドキュメント
 
 * [parking_occupancy_service.md](./parking_occupancy_service.md) - 判定の本体。特徴量の型・しきい値・外出の区間へのまとめ方はすべてそちら
+* [home_status_service.md](./home_status_service.md) - **(#1117)** 「🚗 駐車場」カードが `get_car_summary` を読む
+* [weekly_analyze_report.md](./weekly_analyze_report.md) - **(#1118)** 週次レポートの「🚗 車利用」が `load_observations` を読む
 * [parking_occupancy_monitor.md](./parking_occupancy_monitor.md) - 本サービスへ書き込む唯一の経路（10分ごとの定期実行と、CSV の取り込み）
 * [database.md](./database.md) - `get_db_cursor` の定義元
 * [db_retention_service.md](./db_retention_service.md) - 本サービスのテーブルを保持期間削除の対象に登録している

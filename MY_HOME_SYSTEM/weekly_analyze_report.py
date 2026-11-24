@@ -2,7 +2,7 @@ import config
 from core.logger import setup_logging
 from core.database import get_db_cursor
 from services.notification_service import send_push
-from services import home_status_service
+from services import parking_occupancy_service, parking_record_service
 from core import state_file
 import datetime
 import os
@@ -74,25 +74,61 @@ def _count_meals(cursor: Any, start_str: str) -> tuple[Dict[str, int], int]:
     return food_counts, total_meals
 
 
-def _count_parking_motion(cursor: Any, start_str: str) -> int:
-    """駐車場カメラの動体検知回数(車の利用の目安)を返す。"""
-    # #829: car_records(action='LEAVE'/'ARRIVE')は、書き込み経路が
-    # リポジトリのどこにも存在せず(過去に外部連携があったかは不明)、
-    # 常に0件だった。駐車場カメラ(device_records, device_type='ONVIF_CAMERA',
-    # device_id=PARKING_CAMERA_ID)の動体検知回数に置き換える。人の往来も拾うため
-    # 「車が出入りした回数」そのものではないが、駐車場での動きの目安にはなる。
-    # ダッシュボードの不具合修正(駐車場カードが表示名の完全一致に依存していて
-    # 壊れていた)に合わせ、こちらも表示名(device_name)ではなくidで照合する
-    # (表示名はdevices.jsonで運用者が自由に変えられ、変えるたびに一致しなくなる)。
-    sql_car = """
-        SELECT COUNT(*)
-        FROM device_records
-        WHERE device_type = 'ONVIF_CAMERA' AND movement_state = 'ON'
-          AND device_id = ? AND timestamp >= ?
+# 期間の始まりの時点で車があったか・出ていたかを確定させるために、少し前から読む。
+# 在否は同じ判定が3回(3分)続いて確定するので、期間の始まり直後の出発を取りこぼさない。
+CAR_USAGE_LOOKBACK = datetime.timedelta(hours=6)
+
+
+def _summarize_car_usage(start_dt: datetime.datetime, now: datetime.datetime) -> Optional[Dict[str, int]]:
+    """期間内に出発した外出の回数と、戻ってきた外出の合計時間(分)を返す(#1118)。
+
+    駐車場カメラの録画から判定した在否(`parking_record_service`。#1116)を使う。
+    以前は駐車場カメラの動体検知の回数(#829)で代用していたが、人の往来も数えるため
+    車の利用回数にはなっていなかった。
+
+    * まだ戻っていない外出も回数には数え、時間には足さない
+    * 録画の欠落をまたいで時刻が不確かな外出も数え、その回数を `uncertain` に入れる
+    * 期間内に観測が1件も無ければ None(判定がまだ動いていない・止まっていた)。
+      取得に失敗した場合も None にして、ほかの項目のレポートは送る
+
+    時刻は録画ファイル名と同じホストのローカル時刻(タイムゾーンなし)で扱う。
     """
-    cursor.execute(sql_car, (home_status_service.PARKING_CAMERA_ID, start_str))
-    row_car = cursor.fetchone()
-    return row_car[0] if row_car else 0
+    start = start_dt.replace(tzinfo=None)
+    end = now.replace(tzinfo=None)
+    try:
+        observations = parking_record_service.load_observations(start - CAR_USAGE_LOOKBACK, end)
+        if not any(obs.timestamp >= start for obs in observations):
+            return None
+        trips = parking_occupancy_service.build_trips(parking_occupancy_service.build_events(observations))
+    except Exception as e:  # 車の集計の失敗で週次レポート全体を止めない
+        logger.warning(f"車の利用の集計に失敗しました: {e}", exc_info=True)
+        return None
+    trips = [trip for trip in trips if trip.departed_at >= start]
+    return {
+        "trips": len(trips),
+        "minutes": int(sum(trip.duration_minutes or 0 for trip in trips)),
+        "uncertain": sum(1 for trip in trips if trip.uncertain),
+    }
+
+
+def _format_minutes(minutes: int) -> str:
+    """`75` → `1時間15分`、`40` → `40分`、`120` → `2時間`。"""
+    hours, rest = divmod(minutes, 60)
+    if hours and rest:
+        return f"{hours}時間{rest}分"
+    return f"{hours}時間" if hours else f"{rest}分"
+
+
+def format_car_usage(car: Optional[Dict[str, int]]) -> str:
+    """週次レポートの「🚗 車利用」の行の値。"""
+    if car is None:
+        return "データなし"
+    if car["trips"] == 0:
+        return "なし"
+    text = f"{car['trips']}回・計{_format_minutes(car['minutes'])}"
+    if car["uncertain"]:
+        text += f" (うち時刻が不確か{car['uncertain']}回)"
+    return text
 
 
 def _estimate_elec_bill(cursor: Any, start_str: str, start_dt: datetime.datetime, now: datetime.datetime) -> int:
@@ -171,8 +207,8 @@ def get_analysis_data(start_dt: datetime.datetime) -> Optional[Dict[str, Any]]:
 
             # 1. 食事の傾向
             data["food_counts"], data["total_meals"] = _count_meals(cursor, start_str)
-            # 2. 車の利用(駐車場カメラの動体検知回数で代替)
-            data["car_count"] = _count_parking_motion(cursor, start_str)
+            # 2. 車の利用(駐車場カメラの録画から判定した外出。#1118)
+            data["car_usage"] = _summarize_car_usage(start_dt, now)
             # 3. 電気代 (実経過時間ベース)
             data["elec_bill"] = _estimate_elec_bill(cursor, start_str, start_dt, now)
             # 4. 家族の体調
@@ -208,12 +244,12 @@ def generate_text_section(period_name: str, data: Dict[str, Any], is_simple: boo
         return f"🍳 自炊率: {cook_rate}% / ⚡ 電気: 約{data['elec_bill']:,}円"
 
     # 詳細モード (週次)
-    car_msg = f"{data['car_count']}回" if data['car_count'] > 0 else "なし"
+    car_msg = format_car_usage(data.get("car_usage"))
     health_msg = "みんな元気でした✨" if data['sick_count'] == 0 else f"不調が{data['sick_count']}回ありました"
 
     text = f"【{period_name}】\n"
     text += f"🍳 自炊率: {cook_rate}% ({cook_count}/{total}回)\n"
-    text += f"🚗 駐車場の動き: {car_msg}\n"
+    text += f"🚗 車利用: {car_msg}\n"
     text += f"⚡ 電気代: 約{data['elec_bill']:,}円\n"
     text += f"🏥 健康: {health_msg}\n"
     
