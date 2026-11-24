@@ -76,10 +76,9 @@ def process_pending(record_dir: str, days: int, limit: Optional[int]) -> Dict[st
                 counts["retry"] += 1
                 logger.warning(f"🚗 録画を最後まで読めなかったので次回に回します: {e}")
             continue
-        if not observations:
-            # フレームが1枚も取れなかった(ffmpeg は成功)。記録せず次回もう一度試す。
-            counts["retry"] += 1
-            continue
+        # フレームが1枚も取れなかった(ffmpeg は成功。数秒で切れた録画など)場合も、観測0件として
+        # 記録する。何度読んでも同じで、記録しないと毎回キューの先頭に残り、1回に読む本数の
+        # 上限を食いつぶして新しい録画が読まれなくなる。
         counts["observations"] += records.save_recording(file_name, start, observations, _now())
         counts["saved"] += 1
     return counts
