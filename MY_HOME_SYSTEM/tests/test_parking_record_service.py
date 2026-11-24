@@ -165,13 +165,14 @@ class TestMonitor:
         _touch(rec_dir / "20261124_082000.mp4")
         states["20261124_080000.mp4"] = [occupancy.FrameExtractionError("映像が無い", returncode=234)]
         states["20261124_081000.mp4"] = [P, occupancy.FrameExtractionError("時間切れ", returncode=-9)]
-        states["20261124_082000.mp4"] = []  # フレームが1枚も取れなかった
+        states["20261124_082000.mp4"] = []  # フレームが1枚も取れなかった(ffmpeg は成功)
 
         monitor.main(["--record-dir", str(rec_dir)])
         monitor.main(["--record-dir", str(rec_dir)])
         assert calls.count("20261124_080000.mp4") == 1
         assert calls.count("20261124_081000.mp4") == 2
-        assert calls.count("20261124_082000.mp4") == 2
+        # フレームが取れなかった録画は観測0件として記録し、読み直さない(上限を食いつぶさないため)
+        assert calls.count("20261124_082000.mp4") == 1
         assert _count("parking_observations") == 0  # 途中まで読めた録画の観測も残さない
 
     def test_遡る日数より古い録画は読まない(self, isolated_db, rec_dir, fake_analyze):
