@@ -21,7 +21,7 @@
 
 
 * 実際のバックアップ処理は外部モジュールである `services.backup_service` に、サービス再起動処理は`services.system_maintenance_service`に委譲している。**（Issue #829）** 再起動処理は以前Streamlit版ダッシュボード(`views/dashboard/log_tab.py`)のスクリプト実行スレッド内に直書きされていたが、Streamlit版廃止に伴い通常のAPIエンドポイントとして本ルーターへ切り出された。**(不具合修正)** バックアップは以前`backup_service.perform_backup()`の完了をこのエンドポイントのレスポンスとして待たせていたが、`trigger_manual_backup_async()`でバックグラウンド実行に切り替え、開始した旨を即座に返すようにした。
-* 根拠: `backup_service.trigger_manual_backup_async()` (行番号: 27 / 抜粋: "backup_service.trigger_manual_backup_async()")、`system_maintenance_service.restart_home_system()` (行番号: 61 / 抜粋: "success, msg = system_maintenance_service.restart_home_system()")
+* 根拠: `backup_service.trigger_manual_backup_async()` (行番号: 27 / 抜粋: "backup_service.trigger_manual_backup_async()")、`system_maintenance_service.restart_home_system()` (行番号: 73 / 抜粋: "success, msg = system_maintenance_service.restart_home_system()")
 
 
 
@@ -45,7 +45,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `backup_service.trigger_manual_backup_async` | 実装内容が含まれていないため。バックグラウンドスレッドでの`perform_backup()`実行・完了時のDiscord通知の詳細は[backup_service.md](./backup_service.md)側にある。 | 根拠: [backup_service.trigger_manual_backup_async] (行番号: 27 / 抜粋: "backup_service.trigger_manual_backup_async()") |
-| `system_maintenance_service.restart_home_system` | 実装内容が含まれていないため。`sudo systemctl restart home_system`の実行結果・タイムアウト挙動は[system_maintenance_service.md](./system_maintenance_service.md)側にある。 | 根拠: [system_maintenance_service.restart_home_system] (行番号: 61 / 抜粋: "success, msg = system_maintenance_service.restart_home_system()") |
+| `system_maintenance_service.restart_home_system` | 実装内容が含まれていないため。`sudo systemctl restart home_system`の実行結果・タイムアウト挙動は[system_maintenance_service.md](./system_maintenance_service.md)側にある。 | 根拠: [system_maintenance_service.restart_home_system] (行番号: 73 / 抜粋: "success, msg = system_maintenance_service.restart_home_system()") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -87,31 +87,34 @@
 
 * **役割**: **(新機能)** システムページの「Gitの状態」が、ページ表示後にJSで取得する。`system_info_service.get_git_status()`の結果(起動中のコード・手元の最新・GitHubの最新の3段と最近のコミット)をそのまま返す。`git fetch`を含み遅いためページ本体には含めない。結果は5分キャッシュされる。`async def`にしない(gitの外部コマンドでイベントループを止めないため)。
 * **エラーハンドリング**: 失敗しても500にせず、200で`ok: false`と`error`を返す(画面に理由を出すため)。
-* 根拠: `def git_status() -> dict[str, Any]:` (行番号: 91)
+* 根拠: `def git_status() -> dict[str, Any]:` (行番号: 103)
 
 ### `manual_restart`
 
 > **(「最新に更新して再起動」の追加)** 下記2エンドポイントが加わった。`POST /api/system/deploy`(`manual_deploy`)は`git pull --ff-only`→再起動をバックグラウンドで起動し、起動した旨を即座に返す(実行中なら`status: "running"`)。引数は一切受け取らず、実行元IPをログに残す。`GET /api/system/deploy/status`(`deploy_status`)は`{running, run_id, last_result}`を返し、システムページがポーリングする。処理本体は[system_maintenance_service.md](./system_maintenance_service.md)。認可は無い(同ルーター共通の既知の妥協点)。
-> 根拠: [関数定義] (行番号: 68 / 抜粋: "def manual_deploy("), [関数定義] (行番号: 101 / 抜粋: "def deploy_status(")
+> 根拠: [関数定義] (行番号: 80 / 抜粋: "def manual_deploy("), [関数定義] (行番号: 113 / 抜粋: "def deploy_status(")
 
 * **役割**: **（Issue #829で追加）** `/restart` パスに対するPOSTリクエストを受け取り、`system_maintenance_service.restart_home_system()`(`sudo systemctl restart home_system`をタイムアウト付きで実行)を呼ぶ。システムページ(かんたん表示)の「サービス再起動」ボタンから呼ばれる。以前はStreamlit版ダッシュボードのスクリプト実行スレッド内で直接`subprocess.run`していたが、システムページのHTMLはこのサーバー自身が返すようになったため、通常のAPIエンドポイントとして切り出された。`manual_backup`と同じ理由で`async def`にしない。
 * 根拠: [manual_restart] (行番号: 30〜43 / 抜粋: '@router.post("/restart")\ndef manual_restart() -> Dict[str, Any]:')
 
 
-* **引数/リクエスト**: なし
-* 根拠: [manual_restart] (行番号: 52 / 抜粋: "def manual_restart() -> dict[str, Any]:")
+* **(Issue #1143で追加) 連続再起動の防止**: `system_maintenance_service.get_restart_block_reason(force=...)`が理由を返したら、再起動せず`HTTPException(409)`を返す。対象は「最新に更新して再起動」の実行中(`force`でも回避不可)と、このプロセスの起動から`RESTART_MIN_UPTIME_SEC`(120秒)以内(`?force=true`で回避可)。`detail`は`{"message": 理由, "can_force": forceを付ければ受け付けるか}`の辞書で、システムページ(`static/dashboard/maintenance.js`)は409を「サーバーが落ちた」とは扱わず理由を表示し、`can_force`なら「待たずに再起動」ボタンを出す。`manual_deploy`と同じく認可チェックが無いため、受け付け/拒否のどちらも実行元IPをログに残す。13分間に5回(起動の16秒後を含む)再起動され、そのたびにSchedulerの子タスク・見守りタイマー・カメラ購読が中断された事象の再発防止。
+* 根拠: `def manual_restart(request: Request, force: bool = False) -> dict[str, Any]:` (行番号: 52)
+
+* **引数/リクエスト**: クエリ`force`(bool、既定`False`)。起動直後の拒否だけを明示的に回避する。
+* 根拠: [manual_restart] (行番号: 52 / 抜粋: "def manual_restart(request: Request, force: bool = False) -> dict[str, Any]:")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` 型。成功時は `status`, `message` を含む辞書を返す。失敗時は`HTTPException(500)`で、`detail`は`restart_home_system`が返したメッセージそのもの。
-* 根拠: [戻り値] (行番号: 43 / 抜粋: 'return {"status": "success", "message": msg}')、[エラーハンドリング] (行番号: 62〜63 / 抜粋: "if not success:\n        raise HTTPException(status_code=500, detail=msg)")
+* 根拠: [戻り値] (行番号: 43 / 抜粋: 'return {"status": "success", "message": msg}')、[エラーハンドリング] (行番号: 74〜75 / 抜粋: "if not success:\n        raise HTTPException(status_code=500, detail=msg)")
 
 
 * **副作用**: 外部関数 `system_maintenance_service.restart_home_system()` を呼び出す(`sudo systemctl restart`の実行を含む)。
-* 根拠: [関数呼び出し] (行番号: 61 / 抜粋: "success, msg = system_maintenance_service.restart_home_system()")
+* 根拠: [関数呼び出し] (行番号: 73 / 抜粋: "success, msg = system_maintenance_service.restart_home_system()")
 
 
 * **エラーハンドリング**: `restart_home_system()` の戻り値 `success` が真でない場合、ステータスコード500の `HTTPException` を送出する（`detail`にはメッセージ`msg`をそのまま使う。`manual_backup`と異なり固定文言への差し替えは無い）。
-* 根拠: [if文と例外送出] (行番号: 62〜63 / 抜粋: "if not success:\n        raise HTTPException(status_code=500, detail=msg)")
+* 根拠: [if文と例外送出] (行番号: 74〜75 / 抜粋: "if not success:\n        raise HTTPException(status_code=500, detail=msg)")
 
 
 
@@ -124,7 +127,9 @@ flowchart TD
     Start([開始: POST /backup]) --> A["外部：backup_service.trigger_manual_backup_async() を呼ぶ (バックグラウンドスレッドを起動して即戻る)"]
     A --> End(["正常終了: {status: started, message: ...} を返却(常に200)"])
 
-    Start2([開始: POST /restart]) --> A2["外部：system_maintenance_service.restart_home_system() 実行 (ブラックボックス)"]
+    Start2([開始: POST /restart]) --> G2{"get_restart_block_reason(force) が理由を返すか？(更新中 / 起動120秒以内)"}
+    G2 -- Yes --> R2["WARNINGログ(実行元IP) → HTTPException(409, detail={message, can_force}) 送出"]
+    G2 -- No --> A2["INFOログ(実行元IP) → 外部：system_maintenance_service.restart_home_system() 実行 (ブラックボックス)"]
     A2 --> B2{"successは真か？"}
     B2 -- No --> C2["HTTPException(500, detail=msg) 送出"]
     C2 --> Error2([エラー終了])
@@ -164,7 +169,7 @@ graph TD
 ## 8. 保守上の注意点
 
 * `backup_service.trigger_manual_backup_async()`・`system_maintenance_service.restart_home_system()`はいずれも非同期関数 (`await`) ではなく同期関数として呼び出されている(`trigger_manual_backup_async()`自体はすぐ戻るが、内部でバックグラウンドスレッドを起動する)。
-* 根拠: [関数呼び出し] (行番号: 27, 61 / 抜粋: "backup_service.trigger_manual_backup_async()", "success, msg = system_maintenance_service.restart_home_system()")
+* 根拠: [関数呼び出し] (行番号: 27, 73 / 抜粋: "backup_service.trigger_manual_backup_async()", "success, msg = system_maintenance_service.restart_home_system()")
 
 
 * **(不具合修正)** `manual_backup`はバックグラウンド実行への変更により、このエンドポイントのレスポンスからはバックアップの成否を判定できない(常に`status="started"`)。成否は`backup_service`側(`perform_backup`内の例外処理・`trigger_manual_backup_async`の完了通知)に一本化されている([backup_service.md](./backup_service.md)参照)。`system_maintenance_service.restart_home_system()`側は自身の内部で`subprocess.TimeoutExpired`・`Exception`を捕捉して`(False, msg)`を返す設計になっており、`manual_restart`側でのtry-exceptは不要になっている（[system_maintenance_service.md](./system_maintenance_service.md)参照）。

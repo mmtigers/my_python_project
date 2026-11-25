@@ -65,9 +65,41 @@ _PROCESS_STARTED_AT: float = time.time()
 _deploy_lock = threading.Lock()
 _deploy_running: bool = False
 
+# #1143: 起動直後の再起動を拒否する猶予(秒)。13分間に5回再起動され、そのたびに
+# Scheduler の子タスク・見守りタイマー・カメラ購読が中断された(起動の16秒後に
+# 再起動された例もある)。`force` を付ければ明示的に回避できる。
+RESTART_MIN_UPTIME_SEC: int = 120
+
 PHASE_RUNNING = "running"        # git 取り込み実行中
 PHASE_RESTARTING = "restarting"  # 再起動を要求済み(このプロセスは間もなく入れ替わる)
 PHASE_DONE = "done"              # 終了(success で成否)
+
+
+def get_restart_block_reason(force: bool = False) -> str | None:
+    """手動の再起動(`POST /api/system/restart`)を今は受け付けない理由。受け付けるなら `None`。
+
+    #1143: 次の2つを拒否する。
+    - 「最新に更新して再起動」の実行中(取り込み・ビルドの途中で再起動すると、
+      そちらの結果が「中断」になり、post-merge フックのビルドも途中で止まる)。
+      `force` でも回避できない(更新側が完了後に自分で再起動する)。
+    - このプロセスの起動から `RESTART_MIN_UPTIME_SEC` 秒以内(連打・連続再起動の防止)。
+      `force=True` で明示的に回避できる。
+
+    更新自身が内部で呼ぶ `restart_home_system` には適用しない(ここはHTTP経由の手動操作だけ)。
+    """
+    with _deploy_lock:
+        deploy_running = _deploy_running
+    if deploy_running:
+        return "「最新に更新して再起動」を実行中です。完了すると自動で再起動します。"
+    uptime = time.time() - _PROCESS_STARTED_AT
+    if not force and uptime < RESTART_MIN_UPTIME_SEC:
+        wait = int(RESTART_MIN_UPTIME_SEC - uptime) + 1
+        return (
+            f"起動してから{int(uptime)}秒しか経っていません(再起動の連続を防ぐため"
+            f"{RESTART_MIN_UPTIME_SEC}秒間は受け付けません)。あと約{wait}秒待つか、"
+            "「待たずに再起動」を押してください。"
+        )
+    return None
 
 
 def restart_home_system() -> tuple[bool, str]:

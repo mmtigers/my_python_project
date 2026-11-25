@@ -49,7 +49,7 @@ def backup_status() -> dict[str, Any]:
 
 
 @router.post("/restart")
-def manual_restart() -> dict[str, Any]:
+def manual_restart(request: Request, force: bool = False) -> dict[str, Any]:
     """システムページ(かんたん表示)の「サービス再起動」ボタンから呼ばれる。
 
     #829: 以前はStreamlit版ダッシュボードのスクリプト実行スレッド内で直接
@@ -57,7 +57,19 @@ def manual_restart() -> dict[str, Any]:
     ようになったため、通常のAPIエンドポイントとして切り出した。
     `restart_home_system` は同期のブロッキング呼び出し(timeout付き)のため、
     manual_backup と同じ理由で `async def` にしない。
+
+    #1143: 「最新に更新して再起動」の実行中と、起動から120秒以内は 409 を返して
+    再起動しない(短時間の連続再起動で監視が中断していた)。起動直後の拒否だけは
+    `?force=true` で明示的に回避できる(`detail.can_force`)。deploy と同じく
+    認可チェックが無いため、実行元IPをログに残す。
     """
+    client = request.client.host if request.client else "unknown"
+    reason = system_maintenance_service.get_restart_block_reason(force=force)
+    if reason is not None:
+        can_force = not force and system_maintenance_service.get_restart_block_reason(force=True) is None
+        logger.warning(f"POST /api/system/restart from {client}: rejected (force={force}): {reason}")
+        raise HTTPException(status_code=409, detail={"message": reason, "can_force": can_force})
+    logger.info(f"POST /api/system/restart from {client}: restarting (force={force})")
     success, msg = system_maintenance_service.restart_home_system()
     if not success:
         raise HTTPException(status_code=500, detail=msg)
