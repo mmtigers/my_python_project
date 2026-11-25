@@ -744,7 +744,7 @@ def _connect_and_subscribe(
     """
     ONVIF接続からイベント購読までを行い、確保したリソースを `session` に詰める。
 
-    戻り値は更新後の `is_first_connect`(初回接続だけINFOでモデル名を出すため)。
+    戻り値は更新後の `is_first_connect`(購読まで成功した初回だけINFOでモデル名を出すため)。
     途中で失敗した場合は例外をそのまま送出し、解放は呼び出し元の `finally` に任せる。
     """
     cam_name: str = cam_conf['name']
@@ -773,11 +773,11 @@ def _connect_and_subscribe(
         raise ConnectionRefusedError(f"[{cam_name}] Time verification failed. Check camera clock.")
 
     device_info: Any = devicemgmt.GetDeviceInformation()
-    if is_first_connect:
-        logger.info(f"📡 [{cam_name}] Connected. Model: {device_info.Model}")
-        is_first_connect = False
-    else:
-        logger.debug(f"📡 [{cam_name}] Connected. Model: {device_info.Model} (Reconnected)")
+    # #1145: この時点ではまだ購読していない。「Connected」(INFO)と is_first_connect の更新は
+    # 購読まで成功した後(return の直前)に行う。以前はここで行っていたため、続く
+    # CreatePullPointSubscription() が例外を出すと更新した値が呼び出し元へ返らず、
+    # 購読に失敗し続ける間リトライのたびに「初回接続」扱いの INFO が出ていた。
+    logger.debug(f"[{cam_name}] Device OK. Model: {device_info.Model}")
 
     # 3. イベント購読
     session.events_service = session.mycam.create_events_service()
@@ -809,6 +809,12 @@ def _connect_and_subscribe(
 
     _add_pullpoint(pullpoint, cam_name)
     session.pullpoint = pullpoint
+
+    if is_first_connect:
+        logger.info(f"📡 [{cam_name}] Connected. Model: {device_info.Model}")
+        is_first_connect = False
+    else:
+        logger.debug(f"📡 [{cam_name}] Connected. Model: {device_info.Model} (Reconnected)")
     return is_first_connect
 
 

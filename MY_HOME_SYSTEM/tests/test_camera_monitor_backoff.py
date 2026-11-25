@@ -669,3 +669,85 @@ class _FakeZeepHolder:
 
     def __init__(self):
         self.zeep_client = _FakeZeepClient()
+
+
+class TestConnectedInfoLog:
+    """
+    Issue #1145: 「📡 Connected」の INFO は、購読まで成功した初回だけ出す。
+
+    以前は `GetDeviceInformation()` の直後に INFO を出して `is_first_connect=False` を
+    ローカル変数にだけ設定しており、その後の `CreatePullPointSubscription()` が例外を
+    出すと値が呼び出し元へ返らなかった。そのため購読に失敗し続けている間、リトライの
+    たびに「初回接続」扱いの INFO が出ていた(2026-11-24 の玄関カメラで5回連続)。
+    """
+
+    @staticmethod
+    def _connect_with_subscription_failures(monkeypatch, failures):
+        """デバイス情報の取得までは成功し、購読だけ `failures` 回失敗するカメラ。"""
+        monkeypatch.setattr(camera_monitor, "is_host_reachable", lambda ip: True)
+        monkeypatch.setattr(camera_monitor, "find_wsdl_path", lambda: "/tmp/wsdl")
+        monkeypatch.setattr(camera_monitor, "check_camera_time", lambda dm, name: True)
+        monkeypatch.setattr(camera_monitor, "force_close_session", lambda obj: None)
+        monkeypatch.setattr(camera_monitor, "ONVIFService", lambda **kwargs: _FakePullpointService())
+        monkeypatch.setattr(camera_monitor, "SESSION_LIFETIME", -1)
+        remaining = {"failures": failures}
+
+        class _FakeService:
+            def __init__(self):
+                self.zeep_client = _FakeZeepClient()
+
+            def GetDeviceInformation(self):
+                return type("Info", (), {"Model": "NC-9820"})()
+
+            def CreatePullPointSubscription(self):
+                if remaining["failures"] > 0:
+                    remaining["failures"] -= 1
+                    raise RuntimeError("Unknown error: Action Failed. The requested SOAP action failed.")
+                return _FakeRawPullpoint()
+
+        class _FakeCamera:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def create_devicemgmt_service(self):
+                return _FakeService()
+
+            def create_events_service(self):
+                return _FakeService()
+
+        monkeypatch.setattr(camera_monitor, "ONVIFCamera", _FakeCamera)
+
+    @staticmethod
+    def _capture_connected_info(monkeypatch):
+        messages = []
+        monkeypatch.setattr(
+            camera_monitor.logger, "info", lambda message, *a, **k: messages.append(str(message))
+        )
+        return lambda: [m for m in messages if "Connected" in m]
+
+    def test_no_connected_info_while_subscription_keeps_failing(self, monkeypatch):
+        self._connect_with_subscription_failures(monkeypatch, failures=99)
+        connected = self._capture_connected_info(monkeypatch)
+
+        # 1周につき sleep 2回(バックオフ + 解放待ち)。5回失敗させる
+        _run(monkeypatch, stop_after=10)
+
+        assert connected() == []
+
+    def test_connected_info_once_after_subscription_finally_succeeds(self, monkeypatch):
+        self._connect_with_subscription_failures(monkeypatch, failures=3)
+        connected = self._capture_connected_info(monkeypatch)
+
+        # 3回失敗(各2回 sleep) → 成功後はセッション寿命切れで再接続を繰り返す(各1回 sleep)
+        _run(monkeypatch, stop_after=6 + 4)
+
+        assert len(connected()) == 1
+        assert "NC-9820" in connected()[0]
+
+    def test_connected_info_only_once_across_normal_reconnects(self, monkeypatch):
+        self._connect_with_subscription_failures(monkeypatch, failures=0)
+        connected = self._capture_connected_info(monkeypatch)
+
+        _run(monkeypatch, stop_after=5)
+
+        assert len(connected()) == 1
