@@ -636,14 +636,28 @@ class _ReconnectBackoff:
     指数的に変わる(10 * 2**n)ため、更新規則ごとここへ閉じ込めている。
     """
 
-    MAX_BACKOFF_SEC: int = 3600          # 最大1時間の待機 (サスペンド)
+    # #1160: 以前は3600秒(最大1時間)だった。待機中(time.sleep)は到達性を見ないため、
+    # 85分を超える障害ではカメラが復旧してから監視が再開するまで最大60分かかっていた
+    # (NVRの録画は先に戻るため「動体通知・スナップショットだけが来ない」状態が見えない)。
+    # 再試行は ping + ONVIF 接続1回で軽いため、5分にする。
+    MAX_BACKOFF_SEC: int = 300
     TRANSIENT_WINDOW_SEC: int = 15       # これ以内に再発したら「連続」とみなす
     TRANSIENT_WARN_THRESHOLD: int = 3    # 連続何回でWARNINGへ格上げするか
+    PERSISTENT_ERROR_THRESHOLD: int = 5  # 連続何回目から「Persistent Error」とみなすか
+    # #1160: 継続障害の通知間隔は、再試行の間隔(MAX_BACKOFF_SEC)ではなく時間で決める。
+    # 以前は「12の倍数回目に send_push」「5回目以降は毎回 ERROR(=catch-all で Discord)」
+    # だったため、上限を下げると通知まで比例して増える。上限3600秒のときの定常の間隔
+    # (send_push は 12×3600秒ごと、ERROR は3600秒ごと)を時間で保つ。
+    PERSISTENT_RENOTIFY_SEC: int = 12 * 3600
+    PERSISTENT_ERROR_LOG_INTERVAL_SEC: int = 3600
 
     def __init__(self) -> None:
         self.consecutive_errors: int = 0
         self.transient_error_count: int = 0
         self.last_transient_error_time: float = 0
+        # この連続障害で最後に send_push / ERROR を出した時刻(time.monotonic)。None は未通知
+        self.last_persistent_push_at: Optional[float] = None
+        self.last_persistent_error_at: Optional[float] = None
 
     def record_failure(self) -> int:
         """失敗を1件数え、次に待つ秒数を返す。"""
@@ -659,9 +673,30 @@ class _ReconnectBackoff:
         self.last_transient_error_time = now
         return self.transient_error_count >= self.TRANSIENT_WARN_THRESHOLD
 
+    def persistent_alert_level(self, now: float) -> str:
+        """継続障害(PERSISTENT_ERROR_THRESHOLD 回目以降)をどう知らせるかを決め、時刻を記録する。
+
+        戻り値: "push"(ERROR + send_push)/ "error"(ERROR。catch-all で Discord へ)/
+        "warning"(ログのみ)/ "none"(まだ継続障害ではない)。この連続障害で最初の
+        継続障害は必ず "push"、以降は PERSISTENT_RENOTIFY_SEC ごとに "push"、
+        PERSISTENT_ERROR_LOG_INTERVAL_SEC ごとに "error"、それ以外は "warning"。
+        """
+        if self.consecutive_errors < self.PERSISTENT_ERROR_THRESHOLD:
+            return "none"
+        if self.last_persistent_push_at is None or now - self.last_persistent_push_at >= self.PERSISTENT_RENOTIFY_SEC:
+            self.last_persistent_push_at = now
+            self.last_persistent_error_at = now
+            return "push"
+        if self.last_persistent_error_at is None or now - self.last_persistent_error_at >= self.PERSISTENT_ERROR_LOG_INTERVAL_SEC:
+            self.last_persistent_error_at = now
+            return "error"
+        return "warning"
+
     def reset(self) -> None:
-        """接続成功時に呼ぶ。次の失敗は再び最小の待機から始まる。"""
+        """接続成功時に呼ぶ。次の失敗は再び最小の待機から始まり、継続障害の通知も初回から数え直す。"""
         self.consecutive_errors = 0
+        self.last_persistent_push_at = None
+        self.last_persistent_error_at = None
 
 
 class _CameraSession:
@@ -886,8 +921,9 @@ def _suspend_after_fatal_error(
 
     full_err_msg: str = f"{err_msg}{detailed_info}"
 
-    if backoff.consecutive_errors >= 5:
-        if backoff.consecutive_errors == 5 or backoff.consecutive_errors % 12 == 0:
+    alert_level: str = backoff.persistent_alert_level(time.monotonic())
+    if alert_level != "none":
+        if alert_level == "push":
             # チャンネル再設計(2026-09): 直後に同じ内容をsend_push(channel="report")で
             # 明示送信するため、ハンドラ経由(catch-all)の通知はopt-outして二重通知を避ける。
             logger.error(
@@ -907,15 +943,21 @@ def _suspend_after_fatal_error(
                 logger.info(f"📤 [{cam_name}] 管理者へ障害通知を送信しました。")
             except Exception as push_err:
                 logger.error(f"🚨 通知送信に失敗しました: {push_err}")
-        else:
-            # マイルストーン以外の回はsend_pushを送らないため、skip_discordを付けず
+        elif alert_level == "error":
+            # send_pushを送らない回は、skip_discordを付けず
             # catch-all(core.logger.DiscordErrorHandler)経由の通知に任せる。
             logger.error(
                 f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}"
             )
+        else:
+            # #1160: 通知間隔の内側の回はログだけ(WARNING は Discord へ送られない)
+            logger.warning(
+                f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}"
+            )
 
         if "Unknown error" in err_msg or "Unauthorized" in err_msg:
-            logger.error("💡 Hint: Check PASSWORD and CAMERA TIME settings.")
+            hint_log = logger.warning if alert_level == "warning" else logger.error
+            hint_log("💡 Hint: Check PASSWORD and CAMERA TIME settings.")
 
     if session.pullpoint:
         _discard_pullpoint(session.pullpoint)

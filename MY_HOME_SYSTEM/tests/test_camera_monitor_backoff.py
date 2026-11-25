@@ -59,9 +59,16 @@ class _SleepRecorder:
     def __init__(self, stop_after):
         self.calls = []
         self._stop_after = stop_after
+        # #1160: 継続障害の通知間隔は time.monotonic で決まるため、sleep した分だけ進む
+        # 偽の時計を持つ(実時間では数ミリ秒で回り切ってしまい、間隔を観測できない)。
+        self.now = 1000.0
+
+    def monotonic(self):
+        return self.now
 
     def __call__(self, seconds):
         self.calls.append(seconds)
+        self.now += seconds
         if len(self.calls) >= self._stop_after:
             raise _StopLoop()
 
@@ -91,6 +98,7 @@ def _run(monkeypatch, stop_after, cam_conf=None):
     """monitor_single_camera を stop_after 回目の sleep で打ち切って実行する。"""
     recorder = _SleepRecorder(stop_after)
     monkeypatch.setattr(camera_monitor.time, "sleep", recorder)
+    monkeypatch.setattr(camera_monitor.time, "monotonic", recorder.monotonic)
     with pytest.raises(_StopLoop):
         camera_monitor.monitor_single_camera(dict(cam_conf or CAM_CONF))
     return recorder.calls
@@ -103,17 +111,28 @@ class TestUnreachableHostBackoff:
         """10 * 2**consecutive_errors。1回目の失敗で 20 秒から始まり倍々になる。"""
         monkeypatch.setattr(camera_monitor, "is_host_reachable", lambda ip: False)
 
-        assert _run(monkeypatch, stop_after=5) == [20, 40, 80, 160, 320]
+        assert _run(monkeypatch, stop_after=4) == [20, 40, 80, 160]
 
-    def test_backoff_is_capped_at_one_hour(self, monkeypatch):
-        """max_backoff_time(3600秒)で頭打ちになり、それ以上は伸びない。"""
+    def test_backoff_is_capped_at_five_minutes(self, monkeypatch):
+        """
+        #1160: MAX_BACKOFF_SEC(300秒)で頭打ちになり、それ以上は伸びない。
+
+        以前は3600秒で、85分を超える障害ではカメラが復旧してから監視が再開するまで
+        最大60分かかっていた(待機中は到達性を見ないため)。
+        """
         monkeypatch.setattr(camera_monitor, "is_host_reachable", lambda ip: False)
 
         calls = _run(monkeypatch, stop_after=12)
 
-        # 10 * 2**9 = 5120 > 3600 なので9回目以降は 3600 に張り付く
-        assert calls[:8] == [20, 40, 80, 160, 320, 640, 1280, 2560]
-        assert calls[8:] == [3600, 3600, 3600, 3600]
+        # 10 * 2**5 = 320 > 300 なので5回目以降は 300 に張り付く
+        assert calls[:4] == [20, 40, 80, 160]
+        assert calls[4:] == [300] * 8
+        assert max(calls) == camera_monitor._ReconnectBackoff.MAX_BACKOFF_SEC == 300
+
+    def test_record_failure_never_exceeds_the_cap(self):
+        backoff = camera_monitor._ReconnectBackoff()
+        waits = [backoff.record_failure() for _ in range(100)]
+        assert max(waits) == backoff.MAX_BACKOFF_SEC
 
     def test_does_not_attempt_onvif_connection(self, monkeypatch):
         """到達不可と分かった時点で ONVIF 接続は試みない。"""
@@ -148,22 +167,32 @@ class TestFatalErrorBackoff:
 
         assert calls == [20, 3, 40, 3, 80, 3]
 
-    def test_notifies_admin_on_fifth_failure_then_every_twelfth(self, monkeypatch):
-        """連続5回目で初回通知。以降は12の倍数回(12, 24, ...)でのみ通知する。"""
+    def test_notifies_admin_on_fifth_failure_then_every_twelve_hours(self, monkeypatch):
+        """
+        連続5回目で初回通知。以降は PERSISTENT_RENOTIFY_SEC(12時間)ごとにだけ通知する。
+
+        #1160: 以前は「12の倍数回目」だった。バックオフの上限を3600→300秒に下げると、
+        回数ベースのままでは再通知が約12時間ごとから約1時間ごとに増えるため、時間で決める。
+        """
         self._always_fail(monkeypatch)
-        notified_at = []
+        notified = []
 
         def _record(messages, **kwargs):
-            # 本文の「連続N回失敗」から、何回目の失敗で通知したかを取り出す
+            # 本文の「連続N回失敗」から何回目の失敗か、偽の時計から何時に通知したかを取り出す
             text = messages[0]["text"]
-            notified_at.append(int(re.search(r"連続(\d+)回失敗", text).group(1)))
+            notified.append((int(re.search(r"連続(\d+)回失敗", text).group(1)), camera_monitor.time.monotonic()))
 
         monkeypatch.setattr(camera_monitor, "send_push", _record)
 
-        # 1周につき sleep は2回(バックオフ + 解放待ち)。24周ぶん回す。
-        _run(monkeypatch, stop_after=48)
+        # 1周につき sleep は2回(バックオフ300 + 解放待ち3)。約26時間ぶん回す。
+        _run(monkeypatch, stop_after=2 * 310)
 
-        assert notified_at == [5, 12, 24]
+        assert [n for n, _ in notified][0] == 5
+        assert len(notified) == 3
+        times = [t for _, t in notified]
+        renotify = camera_monitor._ReconnectBackoff.PERSISTENT_RENOTIFY_SEC
+        assert all(b - a >= renotify for a, b in zip(times, times[1:]))
+        assert all(b - a < renotify + 303 for a, b in zip(times, times[1:]))
 
     def test_persistent_error_log_starts_at_the_fifth_failure(self, monkeypatch):
         """
@@ -186,10 +215,13 @@ class TestFatalErrorBackoff:
     def test_skip_discord_only_set_on_milestone_failures(self, monkeypatch):
         """
         レビュー指摘の回帰テスト: 以前はskip_discordが5回目以降の全回に無条件で
-        付いており、send_pushを呼ばない非マイルストーン回(6回目等)はcatch-all
+        付いており、send_pushを呼ばない非マイルストーン回はcatch-all
         経由の通知もskip_discordで握りつぶされてDiscord通知が完全に消えていた。
-        skip_discordはsend_pushと同じ回(5回目・12の倍数回目)にだけ付き、それ以外
-        (6回目等)は付かない(=catch-all経由の通知に任せる)ことを固定する。
+        skip_discordはsend_pushと同じ回(5回目・12時間ごと)にだけ付き、それ以外の
+        ERROR(1時間ごと)は付かない(=catch-all経由の通知に任せる)ことを固定する。
+
+        #1160: その間の回は WARNING(Discordへ送られない)。以前は5回目以降の全回が
+        ERROR だったが、上限3600秒のときの「1時間に1回」を時間で保つ。
         """
         self._always_fail(monkeypatch)
         calls = []
@@ -198,9 +230,10 @@ class TestFatalErrorBackoff:
             "error",
             lambda message, *a, **k: calls.append((str(message), k)),
         )
+        warnings = _capture_warnings(monkeypatch)
 
-        # 1周につきsleep2回。12回目のsleepで6周(=連続6回失敗)に達する。
-        _run(monkeypatch, stop_after=12)
+        # 1周につきsleep2回(300 + 3)。5回目(push)から1時間以上回す(約17周)。
+        _run(monkeypatch, stop_after=2 * 18)
         persistent = [(m, k) for m, k in calls if "Persistent Error" in m]
         assert len(persistent) == 2
 
@@ -208,9 +241,25 @@ class TestFatalErrorBackoff:
         assert "(5 times)" in fifth_message
         assert fifth_kwargs.get("extra") == {"skip_discord": True}
 
-        sixth_message, sixth_kwargs = persistent[1]
-        assert "(6 times)" in sixth_message
-        assert "extra" not in sixth_kwargs
+        hourly_message, hourly_kwargs = persistent[1]
+        assert "(5 times)" not in hourly_message
+        assert "extra" not in hourly_kwargs
+
+        between = [m for m in warnings if "Persistent Error" in m]
+        assert "(6 times)" in between[0]
+
+    def test_new_failure_streak_notifies_again_at_the_fifth_failure(self):
+        """接続に成功すると通知の記録も消え、次の連続障害は再び5回目で通知する。"""
+        backoff = camera_monitor._ReconnectBackoff()
+        levels = []
+        for i in range(6):
+            backoff.record_failure()
+            levels.append(backoff.persistent_alert_level(now=100.0 + i))
+        assert levels == ["none"] * 4 + ["push", "warning"]
+        backoff.reset()
+        for i in range(5):
+            backoff.record_failure()
+        assert backoff.persistent_alert_level(now=200.0) == "push"
 
     def test_survives_notification_failure(self, monkeypatch):
         """通知送信自体が失敗しても監視ループは止まらない。"""
