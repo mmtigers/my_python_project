@@ -207,11 +207,23 @@ active_pullpoints: List[Any] = []
 # list.remove()がValueErrorを送出しうる(finally節内で発生すると後始末処理が
 # 中断する)ため、追加・削除・読み取りをこのLockで保護する。
 _pullpoints_lock = threading.Lock()
+# #1161: 終了時の解除結果をカメラ名付きでログに出すため、購読ごとのカメラ名を持つ
+# (キーは id(pullpoint)。active_pullpoints と同じ Lock で保護し、同時に追加・削除する)。
+_pullpoint_names: Dict[int, str] = {}
+
+# #1161: 終了時(cleanup_handler)の購読解除にかける合計の上限(秒)。親
+# (unified_server.py の lifespan 終了処理)は SIGTERM 後 `wait(timeout=5)` で待ち、
+# 超えたら SIGKILL する。以前は1台ずつ順番に解除しており(1台あたり最大
+# ONVIF_OPERATION_TIMEOUT_SEC=10秒)、1台でも応答しないと残りのカメラが解除されない
+# まま kill されていた。全台を並列に解除し、この秒数で打ち切って終了する
+# (打ち切った購読もカメラ側の TerminationTime で失効する)。
+CLEANUP_UNSUBSCRIBE_BUDGET_SEC: float = 3.0
 
 
-def _add_pullpoint(pullpoint: Any) -> None:
+def _add_pullpoint(pullpoint: Any, cam_name: str = "?") -> None:
     with _pullpoints_lock:
         active_pullpoints.append(pullpoint)
+        _pullpoint_names[id(pullpoint)] = cam_name
 
 
 def _discard_pullpoint(pullpoint: Any) -> None:
@@ -221,23 +233,49 @@ def _discard_pullpoint(pullpoint: Any) -> None:
             active_pullpoints.remove(pullpoint)
         except ValueError:
             pass
+        _pullpoint_names.pop(id(pullpoint), None)
+
+
+def _unsubscribe_for_shutdown(svc: Any, cam_name: str) -> None:
+    """終了時に1つの購読を解除し、結果をカメラ名付きで1行ログに出す(例外は外に出さない)。"""
+    try:
+        if hasattr(svc, 'Unsubscribe'):
+            svc.Unsubscribe()
+        elif hasattr(svc, 'service') and hasattr(svc.service, 'Unsubscribe'):
+            svc.service.Unsubscribe(_soapheaders=None)
+        else:
+            return
+        logger.info(f"🗑️ [{cam_name}] Unsubscribed on shutdown.")
+    except Exception as e:  # noqa: BLE001 (解除できなくても終了は続ける。購読は TerminationTime で失効する)
+        # #1161: 以前は `pass` で捨てており、解除できなかったことがログに残らなかった
+        logger.warning(f"⚠️ [{cam_name}] Unsubscribe on shutdown failed (expires by TerminationTime): {e}")
 
 
 def cleanup_handler(signum: int, frame: Any) -> None:
-    """プロセス終了時のクリーンアップ。"""
+    """プロセス終了時のクリーンアップ。
+
+    #1161: 全カメラの購読を並列に解除し、合計 CLEANUP_UNSUBSCRIBE_BUDGET_SEC 秒で
+    打ち切って終了する(親の kill 猶予5秒に収めるため)。各カメラの成否はログに出す。
+    """
     logger.info(f"🛑 Shutdown signal ({signum}) received. Cleaning up subscriptions...")
     # 他スレッド(monitor_single_camera)が同時に active_pullpoints を変更しうるため、
     # イテレーション中の RuntimeError(list changed size)を避けてコピーを走査する
     with _pullpoints_lock:
-        pullpoints_snapshot = list(active_pullpoints)
-    for svc in pullpoints_snapshot:
-        try:
-            if hasattr(svc, 'Unsubscribe'):
-                svc.Unsubscribe()
-            elif hasattr(svc, 'service') and hasattr(svc.service, 'Unsubscribe'):
-                svc.service.Unsubscribe(_soapheaders=None)
-        except Exception:
-            pass  # #953: 意図的。終了時の後始末で、解除できなくてもカメラ側の購読は TerminationTime で失効する
+        targets = [(svc, _pullpoint_names.get(id(svc), "?")) for svc in active_pullpoints]
+    workers = [
+        (threading.Thread(target=_unsubscribe_for_shutdown, args=(svc, name), daemon=True), name)
+        for svc, name in targets
+    ]
+    for worker, _ in workers:
+        worker.start()
+    deadline = time.monotonic() + CLEANUP_UNSUBSCRIBE_BUDGET_SEC
+    for worker, name in workers:
+        worker.join(max(0.0, deadline - time.monotonic()))
+        if worker.is_alive():
+            logger.warning(
+                f"⚠️ [{name}] Unsubscribe on shutdown did not finish within "
+                f"{CLEANUP_UNSUBSCRIBE_BUDGET_SEC}s (expires by TerminationTime)."
+            )
     logger.info("👋 Cleanup completed. Exiting.")
     os._exit(0)
 
@@ -734,7 +772,7 @@ def _connect_and_subscribe(
     pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
     pullpoint.zeep_client.transport.operation_timeout = ONVIF_OPERATION_TIMEOUT_SEC
 
-    _add_pullpoint(pullpoint)
+    _add_pullpoint(pullpoint, cam_name)
     session.pullpoint = pullpoint
     return is_first_connect
 
