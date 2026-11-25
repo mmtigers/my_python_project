@@ -24,14 +24,34 @@ function restartPoll(box, sawDown, count) {
             setTimeout(function () { restartPoll(box, sawDown || !up, count + 1); }, RESTART_POLL_MS);
         });
 }
-function dashboardRestart() {
+// #1143: 起動直後(120秒以内)や「最新に更新して再起動」の実行中は、サーバーが 409 で断る。
+// これは「サーバーが落ちた」ではないので、戻りを待たずに理由を出す。起動直後の拒否だけは
+// 「待たずに再起動」(force)で明示的に回避できる。
+function restartShowRejected(box, btn, detail) {
+    box.textContent = "⚠️ " + (detail.message || "今は再起動できません");
+    btn.disabled = !document.getElementById("restartConfirm").checked;
+    if (!detail.can_force) { return; }
+    var force = document.createElement("button");
+    force.type = "button";
+    force.className = "danger";
+    force.textContent = "待たずに再起動";
+    force.onclick = function () { dashboardRestart(true); };
+    box.appendChild(document.createElement("br"));
+    box.appendChild(force);
+}
+function dashboardRestart(force) {
     var box = document.getElementById("restartResult");
     var btn = document.getElementById("restartBtn");
     btn.disabled = true;
     box.textContent = "再起動コマンドを送信しています...";
-    fetch("/api/system/restart", { method: "POST", credentials: "same-origin" })
-        .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, data: d }; }); })
+    var url = force === true ? "/api/system/restart?force=true" : "/api/system/restart";
+    fetch(url, { method: "POST", credentials: "same-origin" })
+        .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, status: res.status, data: d }; }); })
         .then(function (r) {
+            if (r.status === 409 && r.data.detail && typeof r.data.detail === "object") {
+                restartShowRejected(box, btn, r.data.detail);
+                return;
+            }
             if (!r.ok) { throw new Error(r.data.detail || "開始できませんでした"); }
             box.textContent = r.data.message || "再起動を開始しました";
             setTimeout(function () { restartPoll(box, false, 0); }, RESTART_POLL_MS);

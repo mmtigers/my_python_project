@@ -18,11 +18,15 @@ backup_service.trigger_manual_backup_async / system_maintenance_service.restart_
 本テストはその機能テストのみを目的とし、認可欠如を許容するものではない
 (最終報告書の「残っているリスク」に明記する)。
 """
+import logging
 import os
+import subprocess
 import sys
+import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import pytest
 from routers import system_router
 
 
@@ -70,7 +74,15 @@ def test_git_status_failure_is_200_with_error(api_client, monkeypatch):
     assert res.status_code == 200 and res.json()["ok"] is False
 
 
-def test_restart_success_returns_200(api_client, monkeypatch):
+@pytest.fixture
+def _restart_allowed(monkeypatch):
+    """#1143: 起動から十分経っていて、更新も実行中でない状態(手動の再起動を受け付ける状態)。"""
+    svc = system_router.system_maintenance_service
+    monkeypatch.setattr(svc, "_PROCESS_STARTED_AT", time.time() - svc.RESTART_MIN_UPTIME_SEC - 60)
+    monkeypatch.setattr(svc, "_deploy_running", False)
+
+
+def test_restart_success_returns_200(api_client, monkeypatch, _restart_allowed):
     monkeypatch.setattr(
         system_router.system_maintenance_service,
         "restart_home_system",
@@ -83,7 +95,7 @@ def test_restart_success_returns_200(api_client, monkeypatch):
     assert body["message"] == "再起動コマンドを送信しました"
 
 
-def test_restart_failure_returns_500_with_message(api_client, monkeypatch):
+def test_restart_failure_returns_500_with_message(api_client, monkeypatch, _restart_allowed):
     monkeypatch.setattr(
         system_router.system_maintenance_service,
         "restart_home_system",
@@ -118,3 +130,60 @@ def test_backup_status_reports_state_and_latest_backup(api_client, monkeypatch):
     assert body["run_id"] == 3
     assert body["last_result"]["success"] is True
     assert body["latest_backup"]["created_at"] == "2026-10-02T04:00:00"
+
+
+class TestRestartGuard:
+    """#1143: 短時間の連続再起動・更新中の再起動を拒否する。
+
+    13分間に5回再起動され(起動の16秒後に再起動された例もある)、そのたびに
+    Scheduler の子タスク・見守りタイマー・カメラ購読が中断された。
+    systemctl は実行せず、`subprocess.run` が呼ばれないことで「再起動しなかった」を確かめる。
+    """
+
+    @pytest.fixture
+    def svc(self, monkeypatch, tmp_path):
+        svc = system_router.system_maintenance_service
+        monkeypatch.setattr(svc, "RESTART_MARKER_FILE", str(tmp_path / "restart_marker.json"))
+        monkeypatch.setattr(svc, "_deploy_running", False)
+        self.runs = []
+        monkeypatch.setattr(svc.subprocess, "run", lambda *a, **k: self.runs.append(a) or subprocess.CompletedProcess(a, 0))
+        return svc
+
+    def test_within_min_uptime_returns_409_without_restarting(self, api_client, monkeypatch, svc):
+        monkeypatch.setattr(svc, "_PROCESS_STARTED_AT", time.time() - 16)
+        res = api_client.post("/api/system/restart")
+        assert res.status_code == 409
+        detail = res.json()["detail"]
+        assert detail["can_force"] is True
+        assert "120秒" in detail["message"]
+        assert self.runs == []
+
+    def test_force_overrides_the_min_uptime(self, api_client, monkeypatch, svc):
+        monkeypatch.setattr(svc, "_PROCESS_STARTED_AT", time.time() - 16)
+        res = api_client.post("/api/system/restart?force=true")
+        assert res.status_code == 200
+        assert len(self.runs) == 1
+
+    def test_while_deploy_running_returns_409_even_with_force(self, api_client, monkeypatch, svc):
+        monkeypatch.setattr(svc, "_PROCESS_STARTED_AT", time.time() - 3600)
+        monkeypatch.setattr(svc, "_deploy_running", True)
+        for url in ("/api/system/restart", "/api/system/restart?force=true"):
+            res = api_client.post(url)
+            assert res.status_code == 409
+            assert res.json()["detail"]["can_force"] is False
+        assert self.runs == []
+
+    def test_normal_restart_is_200_and_logs_the_client_ip(self, api_client, monkeypatch, svc, caplog):
+        monkeypatch.setattr(svc, "_PROCESS_STARTED_AT", time.time() - 3600)
+        with caplog.at_level(logging.INFO):
+            res = api_client.post("/api/system/restart")
+        assert res.status_code == 200
+        assert len(self.runs) == 1
+        assert any("POST /api/system/restart from testclient" in r.getMessage() for r in caplog.records)
+
+    def test_deploy_internal_restart_is_not_guarded(self, monkeypatch, svc):
+        """更新が自分で呼ぶ再起動(起動直後・_deploy_running 中)は拒否しない。"""
+        monkeypatch.setattr(svc, "_PROCESS_STARTED_AT", time.time())
+        monkeypatch.setattr(svc, "_deploy_running", True)
+        assert svc.restart_home_system()[0] is True
+        assert len(self.runs) == 1
