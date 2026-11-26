@@ -936,13 +936,46 @@ def check_service_running_stale_code() -> str | None:
     )
 
 
-def _should_notify(anomaly_keys: List[str], now: datetime.datetime) -> bool:
+# Issue #1154: 再通知の抑制を「異常キーの組」だけで決めると、同じキーのまま中身が悪化した
+# 場合(録画の止まったカメラが1台→3台、ディスク使用率がさらに上がる)を最大6時間見逃す。
+# 中身が悪化しうるキーだけ、要約(_fingerprint_detail)をフィンガープリントに含める。
+# journal・app_logs(ログ抜粋で毎回変わる)や repo_behind(コミット件名で毎回変わる)は
+# 含めると抑制が実質無効になるため、従来どおりキーだけで判定する。
+FINGERPRINT_DETAIL_KEYS: frozenset = frozenset({"recording", "disk", "memory"})
+# ディスク・メモリの使用率をまとめる幅(%)。この幅をまたいで悪化したら再通知する
+FINGERPRINT_PERCENT_BAND: int = 5
+
+
+def _fingerprint_detail(key: str, text: str) -> str:
+    """フィンガープリントに含める異常の要約(Issue #1154)。対象外のキーは空文字。"""
+    if key not in FINGERPRINT_DETAIL_KEYS or not text:
+        return ""
+    if key in ("disk", "memory"):
+        match = re.search(r"(\d+(?:\.\d+)?)%", text)
+        if not match:
+            return ""
+        band = int(float(match.group(1)) // FINGERPRINT_PERCENT_BAND * FINGERPRINT_PERCENT_BAND)
+        return f"{band}%"
+    # recording: 対象カメラと症状(分割・ファイル無し・停止)の組。件数・時刻は畳む
+    return re.sub(r"\s+", " ", re.sub(r"\d+", "N", text)).strip()
+
+
+def _should_notify(
+    anomaly_keys: List[str], now: datetime.datetime, anomalies: Optional[List[str]] = None
+) -> bool:
     """同一の異常セットが継続している間の再通知を抑制する。
 
     異常のセット(チェック名の組)が前回通知時と同じなら RENOTIFY_INTERVAL_SEC
     が経過するまで再通知しない。セットが変化したら即座に通知する。
+    anomalies(anomaly_keys と同じ順の本文)を渡すと、FINGERPRINT_DETAIL_KEYS のキーは
+    要約もセットに含める(Issue #1154)。要約が無いキーは従来と同じ文字列になる。
     """
-    fingerprint = hashlib.sha256("|".join(sorted(anomaly_keys)).encode()).hexdigest()
+    texts: List[str] = list(anomalies or [])
+    parts: List[str] = []
+    for i, key in enumerate(anomaly_keys):
+        detail = _fingerprint_detail(key, texts[i] if i < len(texts) else "")
+        parts.append(f"{key}:{detail}" if detail else key)
+    fingerprint = hashlib.sha256("|".join(sorted(parts)).encode()).hexdigest()
     # Issue #661: 状態ファイルの読み書きは core/state_file.py に集約した。
     # 壊れている/読めない場合に「通知する」側へ倒す方針は従来どおり
     # (異常の通知を取りこぼすより、重複して通知する方が安全側)。
@@ -1178,8 +1211,13 @@ def run_checks() -> int:
 
     exit_code = 0
     if anomalies:
-        logger.warning(f"異常検知: {anomaly_keys}")
-        if _should_notify(anomaly_keys, now):
+        # Issue #1154: 遅れ・ドリフト類(INVESTIGATE_NOTIFY_ONLY_KEYS)だけのときは INFO にする
+        # (log_analyzer が数える WARNING を、原因が自明で対処の決まった異常で増やさない)
+        if all(k in INVESTIGATE_NOTIFY_ONLY_KEYS for k in anomaly_keys):
+            logger.info(f"異常検知(遅れ・ドリフトのみ): {anomaly_keys}")
+        else:
+            logger.warning(f"異常検知: {anomaly_keys}")
+        if _should_notify(anomaly_keys, now, anomalies):
             msg = (
                 f"🚨 **ラズパイ一次チェック異常** ({now.strftime('%m/%d %H:%M')})\n"
                 + "\n".join(f"・{a}" for a in anomalies)

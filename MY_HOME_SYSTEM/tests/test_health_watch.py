@@ -605,7 +605,7 @@ class TestQuestMasterDrift:
             lambda: datetime.datetime.fromisoformat("2026-09-19T09:00:00"),
         )
         monkeypatch.setattr(health_watch, "_write_marker", lambda dt: None)
-        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now: True)
+        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now, *a: True)
         monkeypatch.setattr(health_watch, "_fire_investigate_hook", lambda anomalies, now: None)
 
         sent = []
@@ -766,7 +766,7 @@ class TestCheckApiResponsive:
         )
         monkeypatch.setattr(health_watch, "MARKER_FILE", str(tmp_path / "marker"))
         monkeypatch.setattr(health_watch, "NOTIFY_STATE_FILE", str(tmp_path / "state"))
-        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now: True)
+        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now, *a: True)
         monkeypatch.setattr(health_watch, "_fire_investigate_hook", lambda anomalies, now: None)
 
         sent = []
@@ -886,7 +886,7 @@ class TestCheckRecordingStalled:
         )
         monkeypatch.setattr(health_watch, "_write_marker", lambda dt: None)
         keys_seen = []
-        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now: keys_seen.extend(keys) or True)
+        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now, *a: keys_seen.extend(keys) or True)
         monkeypatch.setattr(health_watch, "_fire_investigate_hook", lambda anomalies, now: None)
         sent = []
         monkeypatch.setattr(
@@ -1038,7 +1038,7 @@ class TestCheckRepoBehindUpstream:
         )
         monkeypatch.setattr(health_watch, "_write_marker", lambda dt: None)
         keys_seen = []
-        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now: keys_seen.extend(keys) or True)
+        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now, *a: keys_seen.extend(keys) or True)
         monkeypatch.setattr(health_watch, "_fire_investigate_hook", lambda anomalies, now: None)
         sent = []
         monkeypatch.setattr(
@@ -1255,7 +1255,7 @@ class TestCheckServiceRunningStaleCode:
         )
         monkeypatch.setattr(health_watch, "_write_marker", lambda dt: None)
         keys_seen = []
-        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now: keys_seen.extend(keys) or True)
+        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now, *a: keys_seen.extend(keys) or True)
         monkeypatch.setattr(health_watch, "_fire_investigate_hook", lambda anomalies, now: None)
         monkeypatch.setattr(health_watch, "_ping_deadman_switch", lambda ok: None)
         monkeypatch.setattr(health_watch, "send_push", lambda messages, target=None, channel=None: True)
@@ -1317,7 +1317,7 @@ class TestCheckPythonVersionDrift:
         )
         monkeypatch.setattr(health_watch, "_write_marker", lambda dt: None)
         keys_seen = []
-        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now: keys_seen.extend(keys) or True)
+        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now, *a: keys_seen.extend(keys) or True)
         monkeypatch.setattr(health_watch, "_fire_investigate_hook", lambda anomalies, now: None)
         monkeypatch.setattr(health_watch, "_ping_deadman_switch", lambda ok: None)
         monkeypatch.setattr(health_watch, "send_push", lambda messages, target=None, channel=None: True)
@@ -1325,3 +1325,78 @@ class TestCheckPythonVersionDrift:
         health_watch.run_checks()
 
         assert keys_seen == ["python_version"]
+
+
+class TestRenotifyFingerprintDetail:
+    """Issue #1154: 同じキーのまま中身が悪化したら、6時間を待たずに再通知する。"""
+
+    NOW = datetime.datetime(2026, 11, 24, 9, 10, 0)
+
+    @pytest.fixture(autouse=True)
+    def _state(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(health_watch, "NOTIFY_STATE_FILE", str(tmp_path / ".notify"))
+
+    def test_recording_with_more_cameras_renotifies(self):
+        one = "常時録画が止まっている可能性があります:\n駐車場(parking): 最新の録画が 11/24 08:00 開始(70分前)"
+        three = one + "\n玄関(entrance): 最新の録画が 11/24 08:00 開始(70分前)\n庭(garden): 今日・昨日の録画ファイルがありません"
+        assert health_watch._should_notify(["recording"], self.NOW, [one]) is True
+        assert health_watch._should_notify(["recording"], self.NOW, [three]) is True
+
+    def test_recording_only_time_changes_is_suppressed(self):
+        a = "常時録画が止まっている可能性があります:\n駐車場(parking): 最新の録画が 11/24 08:00 開始(70分前)"
+        b = "常時録画が止まっている可能性があります:\n駐車場(parking): 最新の録画が 11/24 08:00 開始(130分前)"
+        assert health_watch._should_notify(["recording"], self.NOW, [a]) is True
+        assert health_watch._should_notify(["recording"], self.NOW, [b]) is False
+
+    def test_disk_renotifies_only_when_crossing_a_band(self):
+        assert health_watch._should_notify(["disk"], self.NOW, ["ディスク使用率が 90.2% です (閾値 90%)"]) is True
+        assert health_watch._should_notify(["disk"], self.NOW, ["ディスク使用率が 93.9% です (閾値 90%)"]) is False
+        assert health_watch._should_notify(["disk"], self.NOW, ["ディスク使用率が 95.1% です (閾値 90%)"]) is True
+
+    def test_log_snippet_keys_ignore_text(self):
+        """app_logs・repo_behind 等は本文が毎回変わるため、従来どおりキーだけで判定する。"""
+        assert health_watch._should_notify(["app_logs", "repo_behind"], self.NOW, ["ERROR a", "3 コミット"]) is True
+        assert health_watch._should_notify(["app_logs", "repo_behind"], self.NOW, ["ERROR b", "4 コミット"]) is False
+
+    def test_fingerprint_without_details_matches_previous_format(self):
+        """要約の無いキーだけなら、以前と同じフィンガープリント(デプロイ直後に再通知しない)。"""
+        import hashlib
+        import json
+
+        health_watch._should_notify(["app_logs", "service"], self.NOW, ["x", "y"])
+        with open(health_watch.NOTIFY_STATE_FILE, encoding="utf-8") as f:
+            saved = json.load(f)["fingerprint"]
+        assert saved == hashlib.sha256("app_logs|service".encode()).hexdigest()
+
+
+class TestNotifyOnlyAnomaliesLogAtInfo:
+    """Issue #1154: 遅れ・ドリフト類だけの異常は WARNING ではなく INFO で記録する。"""
+
+    def _run(self, monkeypatch, keys):
+        checks_results = {k: f"{k} の異常" for k in keys}
+        levels = []
+        monkeypatch.setattr(health_watch.logger, "warning", lambda m, *a, **k: levels.append(("warning", str(m))))
+        monkeypatch.setattr(health_watch.logger, "info", lambda m, *a, **k: levels.append(("info", str(m))))
+        for name in (
+            "check_service_active", "check_api_responsive", "check_disk_usage", "check_memory_usage",
+            "check_nas_mount", "check_recording_stalled", "check_deploy_config_drift",
+            "check_quest_master_drift", "check_orphaned_rows", "check_repo_behind_upstream",
+            "check_service_running_stale_code", "check_python_version_drift",
+        ):
+            monkeypatch.setattr(health_watch, name, lambda *a, **k: None)
+        monkeypatch.setattr(health_watch, "check_journal_errors", lambda since: None)
+        monkeypatch.setattr(health_watch, "check_app_logs", lambda since: checks_results.get("app_logs"))
+        monkeypatch.setattr(health_watch, "check_repo_behind_upstream", lambda: checks_results.get("repo_behind"))
+        monkeypatch.setattr(health_watch, "_should_notify", lambda keys, now, *a: False)
+        monkeypatch.setattr(health_watch, "_write_result_state", lambda *a: None)
+        monkeypatch.setattr(health_watch, "_read_marker", lambda: datetime.datetime(2026, 11, 24, 8, 0))
+        monkeypatch.setattr(health_watch, "_write_marker", lambda dt: None)
+        monkeypatch.setattr(health_watch, "_ping_deadman_switch", lambda ok: None)
+        health_watch.run_checks()
+        return [(lv, m) for lv, m in levels if "異常検知" in m]
+
+    def test_only_repo_behind_is_info(self, monkeypatch):
+        assert [lv for lv, _ in self._run(monkeypatch, ["repo_behind"])] == ["info"]
+
+    def test_mixed_with_other_keys_stays_warning(self, monkeypatch):
+        assert [lv for lv, _ in self._run(monkeypatch, ["repo_behind", "app_logs"])] == ["warning"]
