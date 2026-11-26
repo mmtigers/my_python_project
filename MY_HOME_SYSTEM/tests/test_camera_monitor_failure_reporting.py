@@ -63,7 +63,7 @@ def env(monkeypatch):
     state = {"events": events, "pushes": [], "info": [], "warning": [], "error": [], "diagnosed": []}
     monkeypatch.setattr(camera_monitor, "is_camera_enabled", lambda cam_conf: True)
     monkeypatch.setattr(camera_monitor, "is_host_reachable", lambda ip: True)
-    monkeypatch.setattr(camera_monitor, "find_wsdl_path", lambda: "/tmp/wsdl")
+    monkeypatch.setattr(camera_monitor, "find_wsdl_path", lambda: "unused-wsdl-dir")
     monkeypatch.setattr(
         camera_monitor, "perform_emergency_diagnosis",
         lambda ip, ports=None: state["diagnosed"].append((ip, ports)) or {},
