@@ -49,7 +49,7 @@ CAM_CONF = {
 def _neutralize_environment(monkeypatch):
     """devices.json を見に行かせず、通知も診断も実際には飛ばさない。"""
     monkeypatch.setattr(camera_monitor, "is_camera_enabled", lambda cam_conf: True)
-    monkeypatch.setattr(camera_monitor, "perform_emergency_diagnosis", lambda ip: {})
+    monkeypatch.setattr(camera_monitor, "perform_emergency_diagnosis", lambda ip, ports=None: {})
     monkeypatch.setattr(camera_monitor, "send_push", lambda *a, **k: None)
 
 
@@ -279,7 +279,7 @@ class TestFatalErrorBackoff:
         self._always_fail(monkeypatch)
         diagnosed = []
         monkeypatch.setattr(
-            camera_monitor, "perform_emergency_diagnosis", lambda ip: diagnosed.append(ip) or {}
+            camera_monitor, "perform_emergency_diagnosis", lambda ip, ports=None: diagnosed.append(ip) or {}
         )
 
         _run(monkeypatch, stop_after=2)
@@ -292,7 +292,7 @@ class TestFatalErrorBackoff:
         reachable = iter([True, False])
         monkeypatch.setattr(camera_monitor, "is_host_reachable", lambda ip: next(reachable, False))
 
-        def _fail(ip):
+        def _fail(ip, ports=None):
             raise AssertionError("到達不可のホストへ緊急診断を実行した")
 
         monkeypatch.setattr(camera_monitor, "perform_emergency_diagnosis", _fail)
