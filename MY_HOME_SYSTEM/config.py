@@ -555,6 +555,9 @@ RECORDING_RETENTION_DAYS: int = _get_int_env("RECORDING_RETENTION_DAYS", 30)
 HLS_VOD_RETENTION_DAYS: int = _get_int_env("HLS_VOD_RETENTION_DAYS", 3)
 # DBバックアップの保持日数
 DB_BACKUP_RETENTION_DAYS: int = _get_int_env("DB_BACKUP_RETENTION_DAYS", 30)
+# Issue #1155: 保持日数に関係なく残す DB バックアップの世代数(種類ごと。0 で無効)。
+# バックアップが保持日数以上止まったまま気付かないと、NAS 上の全世代が消えるのを防ぐ安全弁。
+DB_BACKUP_KEEP_LATEST: int = _get_int_env("DB_BACKUP_KEEP_LATEST", 7)
 # 2026-09-19: DBバックアップのオフサイト複製先(rclone のリモートパス。例: "gdrive:お家開発/db_backup_latest")。
 # 以前はバックアップが NAS の db_backups/ にしか無く、NAS が故障すると DB 本体とバックアップを
 # 同時に失う構成だった。設定すると backup_service が NAS への転送成功後に、その世代を

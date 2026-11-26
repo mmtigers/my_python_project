@@ -161,7 +161,10 @@ class TestNasMonitorRetentionTargets(unittest.TestCase):
         old_env = self._make_file(os.path.join(db_backups_dir, ".env_20250101_000000"), age_days=40)
         new_db = self._make_file(os.path.join(db_backups_dir, "home_system_20260101_000000.db"), age_days=5)
 
+        # Issue #1155 の「最新N世代は残す」安全弁は種類ごとに1世代しかないこのテストでは
+        # 全部を残してしまうため無効にし、拡張子で取りこぼさないこと(#191)だけを見る。
         with patch.object(config, "DB_BACKUPS_DIR", db_backups_dir), \
+             patch.object(config, "DB_BACKUP_KEEP_LATEST", 0), \
              patch("monitors.nas_monitor.send_push"):
             self.monitor.run_retention_cleanup()
 
@@ -591,7 +594,7 @@ class TestFallbackSnapshotsAreCleanedUp:
         monkeypatch.setattr(config, "FALLBACK_ROOT", str(tmp_path / "fb"))
         monitor = NasMonitor()
         seen = []
-        monkeypatch.setattr(monitor, "cleanup_old_files", lambda d, days, ext: seen.append((d, ext)) or {"deleted_count": 0, "freed_gb": 0.0})
+        monkeypatch.setattr(monitor, "cleanup_old_files", lambda d, days, ext, **k: seen.append((d, ext)) or {"deleted_count": 0, "freed_gb": 0.0})
         monitor.run_retention_cleanup()
         assert (str(tmp_path / "fb" / "assets" / "snapshots"), (".jpg", ".jpeg")) in seen
 
@@ -625,3 +628,68 @@ class TestNasMonitorStateFileRobustness(unittest.TestCase):
                 self.assertEqual(
                     monitor._load_state(), {"is_healthy": False, "last_cleanup_date": "2026-09-16"}
                 )
+
+
+class TestDbBackupKeepsLatestGenerations:
+    """Issue #1155: DBバックアップは保持日数に関係なく、種類ごとに最新 N 世代を残す。"""
+
+    @staticmethod
+    def _make(directory, name, age_days):
+        path = os.path.join(directory, name)
+        with open(path, "w") as f:
+            f.write("x")
+        t = time.time() - age_days * 86400
+        os.utime(path, (t, t))
+        return path
+
+    def test_keeps_latest_n_even_when_all_are_older_than_retention(self, tmp_path):
+        monitor = NasMonitor()
+        d = str(tmp_path)
+        dbs = [self._make(d, f"home_system_202610{day:02d}_040000.db", 60 - day) for day in range(1, 11)]
+        cfgs = [self._make(d, f"config_202610{day:02d}_040000.py", 60 - day) for day in range(1, 11)]
+
+        result = monitor.cleanup_old_files(d, retention_days=30, extensions=None, keep_latest=3)
+
+        remaining = set(os.listdir(d))
+        # 種類ごとに新しい3世代だけが残る(DB と設定ファイルを別々に数える)
+        assert remaining == {os.path.basename(p) for p in dbs[-3:] + cfgs[-3:]}
+        assert result["deleted_count"] == 14
+
+    def test_normal_retention_is_unchanged_when_backups_are_fresh(self, tmp_path):
+        monitor = NasMonitor()
+        d = str(tmp_path)
+        old = [self._make(d, f"home_system_202609{day:02d}_040000.db", 40 + day) for day in range(1, 6)]
+        new = [self._make(d, f"home_system_202611{day:02d}_040000.db", day) for day in range(1, 11)]
+
+        monitor.cleanup_old_files(d, retention_days=30, extensions=None, keep_latest=7)
+
+        remaining = set(os.listdir(d))
+        assert remaining == {os.path.basename(p) for p in new}
+        assert not any(os.path.exists(p) for p in old)
+
+    def test_without_keep_latest_everything_old_is_deleted(self, tmp_path):
+        monitor = NasMonitor()
+        d = str(tmp_path)
+        for day in range(1, 4):
+            self._make(d, f"home_system_202610{day:02d}_040000.db", 40)
+        monitor.cleanup_old_files(d, retention_days=30, extensions=None)
+        assert os.listdir(d) == []
+
+    def test_generation_group(self):
+        assert NasMonitor._generation_group("home_system_20261124_040000.db") == "home_system.db"
+        assert NasMonitor._generation_group("config_20261124_040000.py") == "config.py"
+        assert NasMonitor._generation_group(".env_20261124_040000") == ".env"
+        assert NasMonitor._generation_group("random.txt") == ""
+
+    def test_run_retention_cleanup_passes_keep_latest_only_for_db_backups(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "DB_BACKUPS_DIR", str(tmp_path / "db_backups"))
+        monkeypatch.setattr(config, "DB_BACKUP_KEEP_LATEST", 7)
+        monitor = NasMonitor()
+        seen = {}
+        monkeypatch.setattr(
+            monitor, "cleanup_old_files",
+            lambda d, days, ext, **k: seen.__setitem__(d, k) or {"deleted_count": 0, "freed_gb": 0.0},
+        )
+        monitor.run_retention_cleanup()
+        assert seen[str(tmp_path / "db_backups")] == {"keep_latest": 7}
+        assert all(k == {} for d, k in seen.items() if d != str(tmp_path / "db_backups"))

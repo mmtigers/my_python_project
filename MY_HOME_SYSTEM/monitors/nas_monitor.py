@@ -1,5 +1,6 @@
 import errno
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -21,6 +22,9 @@ from services.notification_service import send_push
 
 # ロガー設定
 logger = setup_logging("nas_monitor")
+
+# Issue #1155: backup_service の出力名 `<stem>_<YYYYMMDD_HHMMSS><suffix>` から種類を取り出す
+_GENERATION_NAME_RE = re.compile(r"^(?P<stem>.+)_\d{8}_\d{6}(?P<suffix>(?:\.[^.]*)?)$")
 
 class NasMonitor:
     """NASの状態監視、ディスク使用量の確認、および障害復旧時の自動切り戻しを行うクラス"""
@@ -268,14 +272,54 @@ class NasMonitor:
             logger.error(f"Disk usage check error: {e}")
             return None
 
+    @staticmethod
+    def _generation_group(name: str) -> str:
+        """バックアップの世代をまとめるキー(Issue #1155)。
+
+        backup_service は `<stem>_<YYYYMMDD_HHMMSS><suffix>`(例: home_system_20261124_040000.db、
+        config_20261124_040000.py)で書き出すため、日時を除いた `<stem><suffix>` を種類とみなす。
+        この形でないファイルは1つの種類("")にまとめる。
+        """
+        match = _GENERATION_NAME_RE.match(name)
+        if not match:
+            return ""
+        return f"{match.group('stem')}{match.group('suffix')}"
+
+    def _protected_latest(self, directory: str, extensions: Optional[Tuple[str, ...]], keep_latest: int) -> set:
+        """種類ごとに mtime が新しい順に keep_latest 件のパスを返す(保持日数に関係なく残す)。"""
+        groups: Dict[str, list] = {}
+        for root, _dirs, files in os.walk(directory):
+            for name in files:
+                if extensions is not None and not name.lower().endswith(extensions):
+                    continue
+                path = os.path.join(root, name)
+                try:
+                    mtime = os.path.getmtime(path)
+                except OSError:
+                    continue
+                groups.setdefault(self._generation_group(name), []).append((mtime, path))
+        protected = set()
+        for entries in groups.values():
+            entries.sort(reverse=True)
+            protected.update(path for _mtime, path in entries[:keep_latest])
+        return protected
+
     def cleanup_old_files(
-        self, directory: str, retention_days: int, extensions: Optional[Tuple[str, ...]]
+        self,
+        directory: str,
+        retention_days: int,
+        extensions: Optional[Tuple[str, ...]],
+        keep_latest: int = 0,
     ) -> Dict[str, Any]:
         """指定ディレクトリ配下を再帰的に走査し、保持日数を超えたファイルを削除する。
 
         extensions が None の場合は拡張子で絞り込まず、ディレクトリ内の全ファイルを対象とする
         (ディレクトリ自体がバックアップ専用など、単一種類の成果物しか置かれないことが
         保証されている場合に使う。Issue #191)。
+
+        keep_latest > 0 なら、種類(`_generation_group`)ごとに新しい順に keep_latest 件を
+        保持日数に関係なく残す(Issue #1155: バックアップが保持日数以上止まったまま
+        気付かないと、全世代が消えるのを防ぐ安全弁)。
         """
         result: Dict[str, Any] = {"deleted_count": 0, "freed_gb": 0.0}
 
@@ -284,12 +328,15 @@ class NasMonitor:
 
         cutoff = time.time() - (retention_days * 86400)
         freed_bytes = 0
+        protected = self._protected_latest(directory, extensions, keep_latest) if keep_latest > 0 else set()
 
         for root, _dirs, files in os.walk(directory):
             for name in files:
                 if extensions is not None and not name.lower().endswith(extensions):
                     continue
                 path = os.path.join(root, name)
+                if path in protected:
+                    continue
                 try:
                     if os.path.getmtime(path) < cutoff:
                         size = os.path.getsize(path)
@@ -345,11 +392,20 @@ class NasMonitor:
              getattr(config, "HLS_VOD_RETENTION_DAYS", 3), (".ts", ".m3u8", ".txt", ".json")),
         ]
 
+        # Issue #1155: DBバックアップだけは、種類ごとに最新 N 世代を保持日数に関係なく残す
+        db_backups_dir = getattr(config, "DB_BACKUPS_DIR", None)
+        db_backup_keep_latest = getattr(config, "DB_BACKUP_KEEP_LATEST", 7)
+
         summary_lines = []
         for label, directory, retention_days, extensions in targets:
             if not directory:
                 continue
-            result = self.cleanup_old_files(directory, retention_days, extensions)
+            if directory == db_backups_dir and db_backup_keep_latest > 0:
+                result = self.cleanup_old_files(
+                    directory, retention_days, extensions, keep_latest=db_backup_keep_latest
+                )
+            else:
+                result = self.cleanup_old_files(directory, retention_days, extensions)
             if result["deleted_count"] > 0:
                 logger.info(
                     f"🗑️ Cleanup {label} ({directory}): "

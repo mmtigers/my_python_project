@@ -15,7 +15,8 @@
 | `family_members.local.json` / `quest_users.local.json` | — | 含まれない(`config.BACKUP_FILES` に無い。必要なら追加する) |
 
 保持期間は `DB_BACKUP_RETENTION_DAYS`(既定 30 日)で、`monitors/nas_monitor.py` の
-`run_retention_cleanup` が古いものを削除する。
+`run_retention_cleanup` が古いものを削除する。ただし種類(DB・各設定ファイル)ごとに最新 `DB_BACKUP_KEEP_LATEST`(既定 7)世代は、
+保持期間を過ぎても残す(バックアップが止まったまま気付かずに全世代が消えるのを防ぐ安全弁。Issue #1155)。
 
 **`.env` はリポジトリにも NAS にも無い。** 復元時に必要な値(SwitchBot / LINE / Discord / Gemini の
 トークン、`SWITCHBOT_WEBHOOK_TOKEN`、`ALEXA_SKILL_ID` 等。一覧は `MY_HOME_SYSTEM/.env.example`)は
