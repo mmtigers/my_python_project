@@ -200,6 +200,12 @@ class CameraConfig(BaseModel):
 
 class NotifySettings(BaseModel):
     power_threshold_watts: Optional[float] = None
+    # #1148: 電力の使用開始/終了通知のばたつき対策(任意。どちらも未設定なら従来どおり)。
+    # power_off_threshold_watts: OFF と判定する閾値(ヒステリシス。power_threshold_watts 以下)
+    # min_on_sec: ON がこの秒数以上続いたときだけ「使用開始」を通知する
+    # 判定は services/sensor_service.py の _evaluate_power_transition。
+    power_off_threshold_watts: Optional[float] = None
+    min_on_sec: Optional[float] = None
     # Discord通知システム調査(2026-09-26)で判明: この値を読んで通知の送信/抑制を
     # 分岐しているコードはリポジトリ内に存在しない(services/sensor_service.py・
     # monitors/switchbot_power_monitor.pyのどちらも参照していない)。devices.jsonで

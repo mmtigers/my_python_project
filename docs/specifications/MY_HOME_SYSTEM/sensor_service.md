@@ -43,7 +43,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config` 内の各定数 | `SQLITE_TABLE_SWITCHBOT_LOGS`、`SQLITE_TABLE_POWER_USAGE` の具体的な値や型が提供されていないため。 | `[config.SQLITE_TABLE_SWITCHBOT_LOGS]` (行番号: 225 / 抜粋: "config.SQLITE_TABLE_SWITCHBOT_LOGS,") |
-| `core.database.get_db_cursor` | DB接続の具体的な実装、扱うデータベースエンジン、コンテキストマネージャが返すカーソルオブジェクトの仕様が不明であるため。 | `[core.database.get_db_cursor]` (行番号: 262 / 抜粋: "with get_db_cursor() as") |
+| `core.database.get_db_cursor` | DB接続の具体的な実装、扱うデータベースエンジン、コンテキストマネージャが返すカーソルオブジェクトの仕様が不明であるため。 | `[core.database.get_db_cursor]` (行番号: 320 / 抜粋: "with get_db_cursor() as") |
 | `core.database.save_log_async` | テーブル名、カラムリスト、値を渡した際の内部でのクエリ生成ロジックやエラーハンドリングの挙動が不明であるため。 | `[save_log_async]` (参照: process_meter_data / 抜粋: "await save_log_async(") |
 | `services.notification_service.send_push` | メッセージ形式の仕様、引数として渡す `"discord"` や `"notify"` の処理分岐、外部API連携の実装が不明であるため。 | `[send_push]` (参照: send_inactive_notification / 抜粋: "send_push,") |
 
@@ -193,11 +193,13 @@
 ### `process_power_data`
 
 * **役割**: 電力データをDBに保存し、前回記録された値と閾値を比較して閾値を跨いだ場合（ON/OFF）に使用開始/終了の通知を送信する。**（Issue #829で追加）** `device_category`引数(既定`"plug"`)で書き込み時点の種別("smart_meter"住宅全体のスマートメーター/"plug"個別家電プラグ)を明示し、`power_usage`テーブルに保存する。以前は`analysis_service.py`側が`device_name`に`"Remo"`という文字列が含まれるかだけで下流的に推測しており、Nature Remoアプリのニックネーム設定次第で電気代集計が0円になる不具合の原因になっていた。
-* 根拠: `[process_power_data]` (行番号: 304 / 抜粋: "prev_wattage < threshold and w")、`device_category: str = "plug",` (行番号: 239)
+* 根拠: `[_evaluate_power_transition]` (参照: _evaluate_power_transition / 抜粋: "prev_wattage < threshold and w")、`device_category: str = "plug",` (参照: process_power_data)
+* **（Issue #1148 で追加）ばたつき対策**: 通知の判定は `_evaluate_power_transition` に切り出した。`notify_settings` に任意の `power_off_threshold_watts`(ヒステリシス: ON は `power_threshold_watts` 以上、OFF はこの値未満で判定し、その間では状態を変えない)か `min_on_sec`(ON がこの秒数以上続いたときに初めて「使用開始」を通知し、使用開始を通知していない ON の終了は「使用終了」も通知しない)を設定した機器だけ、モジュールグローバル `_POWER_STATE`(device_id → `on`/`since`/`notified`)で状態を持って判定する。どちらも未設定の機器は従来どおり前回値と今回値の閾値クロスだけで判定する。暖房便座のサーモスタットの ON/OFF(約47W)を5分ごとのポーリングで拾い、1台で1日約105件の通知が出ていたため。状態はメモリ上にあり、再起動後の最初の値では DB の前回値から復元する(前回値が ON なら使用開始は通知済みとみなし、再起動のたびに使用開始を重ねて通知しない)。
+* 根拠: `def _evaluate_power_transition(` (参照: _evaluate_power_transition)、`_POWER_STATE: Dict[str, Dict[str, Any]] = {}` (参照: _POWER_STATE)
 
 
 * **引数/リクエスト**: `device_id: str`, `device_name: str`, `wattage: float`, `notify_settings: Dict[str, Any]`, `device_category: str = "plug"`(キーワード可)
-* 根拠: `[process_power_data]` (行番号: 234〜240 / 抜粋: "async def process_power_data(\n    device_id: str,\n    device_name: str,\n    wattage: float,\n    notify_settings: Dict[str, Any],\n    device_category: str = \"plug\",\n) -> None:")
+* 根拠: `[process_power_data]` (行番号: 292〜387 / 抜粋: "async def process_power_data(\n    device_id: str,\n    device_name: str,\n    wattage: float,\n    notify_settings: Dict[str, Any],\n    device_category: str = \"plug\",\n) -> None:")
 
 
 * **戻り値/レスポンス**: `None`

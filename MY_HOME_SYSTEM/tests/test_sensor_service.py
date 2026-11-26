@@ -266,6 +266,62 @@ class TestProcessPowerData:
         mock_send.assert_not_called()
 
 
+class TestPowerTransitionHysteresis:
+    """Issue #1148: power_off_threshold_watts / min_on_sec による通知のばたつき対策。"""
+
+    @pytest.fixture(autouse=True)
+    def _clear_state(self):
+        sensor_service._POWER_STATE.clear()
+        yield
+        sensor_service._POWER_STATE.clear()
+
+    @staticmethod
+    def _feed(values, off_threshold=None, min_on_sec=None, threshold=10, interval=300):
+        """5分刻みで値を入れ、出た通知("on"/"off")の列を返す。前回値は直前の値。"""
+        results = []
+        prev = 0.0
+        for i, wattage in enumerate(values):
+            r = sensor_service._evaluate_power_transition(
+                "toilet", prev, wattage, threshold, off_threshold, min_on_sec, 1000.0 + i * interval
+            )
+            if r:
+                results.append(r)
+            prev = wattage
+        return results
+
+    def test_thermostat_cycling_is_suppressed_with_min_on_sec(self):
+        """47W→0→47W を5分刻みで繰り返しても、min_on_sec=600 なら通知は出ない。"""
+        assert self._feed([47, 0] * 10, min_on_sec=600) == []
+
+    def test_long_use_notifies_on_and_off_once(self):
+        assert self._feed([0, 47, 47, 47, 47, 0, 0], min_on_sec=600) == ["on", "off"]
+
+    def test_without_new_settings_behaves_as_before(self):
+        """未設定なら従来どおり、閾値をまたぐたびに通知する。"""
+        assert self._feed([47, 0] * 3) == ["on", "off"] * 3
+
+    def test_hysteresis_ignores_values_between_thresholds(self):
+        """ON は10W以上、OFF は2W未満。その間(5W)では状態を変えない。"""
+        assert self._feed([47, 5, 47, 5, 1], off_threshold=2) == ["on", "off"]
+
+    def test_off_threshold_above_on_threshold_is_clamped(self):
+        assert self._feed([47, 5, 47], off_threshold=50) == ["on", "off", "on"]
+
+    def test_restart_while_on_does_not_repeat_on_notification(self):
+        """再起動直後(状態なし)に前回値が ON なら、使用開始は通知済みとみなす。"""
+        r1 = sensor_service._evaluate_power_transition("t", 47, 47, 10, None, 600, 1000.0)
+        r2 = sensor_service._evaluate_power_transition("t", 47, 0, 10, None, 600, 1300.0)
+        assert (r1, r2) == (None, "off")
+
+    @pytest.mark.asyncio
+    async def test_process_power_data_reads_new_settings(self, isolated_db):
+        settings = {"power_threshold_watts": 10, "min_on_sec": 600}
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
+            await sensor_service.process_power_data("toilet", "1Fのトイレ", 47, settings)
+            await sensor_service.process_power_data("toilet", "1Fのトイレ", 0, settings)
+        mock_send.assert_not_called()
+
+
 @pytest.mark.asyncio
 class TestInactiveStateIsClearedBeforeSending:
     """Issue #534: 「止まりました」送信中に再検知が来ても再開通知が出るよう、

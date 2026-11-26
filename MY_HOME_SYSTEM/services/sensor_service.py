@@ -231,6 +231,64 @@ async def process_meter_data(device_id: str, device_name: str, temp: float, humi
         return
     logger.debug(f"🌡️ [Analog] Meter data saved: {device_name} (Temp: {temp}℃, Hum: {humidity}%)")
 
+# #1148: 電力の ON/OFF 判定の状態(device_id -> {"on", "since", "notified"})。
+# notify_settings に power_off_threshold_watts / min_on_sec のどちらかを設定した機器だけが使う
+# (未設定の機器は従来どおり DB の前回値との閾値クロスだけで判定し、ここに入らない)。
+# キーは devices.json に定義した機器IDだけなので、サイズは機器数で頭打ちになる。
+_POWER_STATE: Dict[str, Dict[str, Any]] = {}
+
+
+def _evaluate_power_transition(
+    device_id: str,
+    prev_wattage: float,
+    wattage: float,
+    threshold: float,
+    off_threshold: Optional[float],
+    min_on_sec: Optional[float],
+    now: float,
+) -> Optional[str]:
+    """使用開始("on")/使用終了("off")の通知を出すべきかを返す(該当なしは None)。
+
+    #1148: 暖房便座のサーモスタットのように、閾値付近で ON/OFF を繰り返す電力を
+    5分ごとのポーリングで拾うと、1台で1日約105件の通知になっていた。
+    - `off_threshold`(ヒステリシス): ON は `threshold` 以上、OFF は `off_threshold` 未満で
+      判定し、その間の値では状態を変えない。未設定なら `threshold` と同じ。
+    - `min_on_sec`: ON の状態がこの秒数以上続いたときに初めて「使用開始」を通知する。
+      「使用開始」を通知していない ON の終了は「使用終了」も通知しない。
+
+    どちらも未設定なら従来どおり、前回値と今回値が `threshold` をまたいだかだけで判定する。
+    状態はメモリ上にあり、再起動後の最初の値では DB の前回値から状態を復元する
+    (前回値が ON なら「使用開始は通知済み」とみなす。再起動のたびに使用開始を重ねて
+    通知しないため。その ON が通知前の短い使用だった場合だけ、使用終了が単独で出る)。
+    """
+    if off_threshold is None and not min_on_sec:
+        if prev_wattage < threshold and wattage >= threshold:
+            return "on"
+        if prev_wattage >= threshold and wattage < threshold:
+            return "off"
+        return None
+
+    off_thr: float = threshold if off_threshold is None else min(off_threshold, threshold)
+    state = _POWER_STATE.get(device_id)
+    if state is None:
+        was_on: bool = prev_wattage >= threshold
+        state = {"on": was_on, "since": now, "notified": was_on}
+        _POWER_STATE[device_id] = state
+
+    if not state["on"]:
+        if wattage >= threshold:
+            state.update(on=True, since=now, notified=False)
+    elif wattage < off_thr:
+        was_notified: bool = state["notified"]
+        state.update(on=False, since=now, notified=False)
+        return "off" if was_notified else None
+
+    if state["on"] and not state["notified"] and now - state["since"] >= (min_on_sec or 0):
+        state["notified"] = True
+        return "on"
+    return None
+
+
 async def process_power_data(
     device_id: str,
     device_name: str,
@@ -299,13 +357,23 @@ async def process_power_data(
 
     msg: Optional[str] = None
     target_platform: str = notify_settings.get("target", "discord")
-    
+
+    transition: Optional[str] = _evaluate_power_transition(
+        device_id,
+        prev_wattage,
+        wattage,
+        threshold,
+        notify_settings.get("power_off_threshold_watts"),
+        notify_settings.get("min_on_sec"),
+        time.time(),
+    )
+
     # OFF -> ON
-    if prev_wattage < threshold and wattage >= threshold:
+    if transition == "on":
         msg = f"💡【使用開始】\n{device_name} がONになりました ({wattage}W)"
-        
+
     # ON -> OFF
-    elif prev_wattage >= threshold and wattage < threshold:
+    elif transition == "off":
         msg = f"🌑【使用終了】\n{device_name} がOFFになりました"
 
     if msg:
