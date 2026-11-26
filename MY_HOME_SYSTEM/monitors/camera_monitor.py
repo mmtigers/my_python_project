@@ -878,7 +878,9 @@ def _pull_events_until_reconnect(cam_conf: Dict[str, Any], pullpoint: Any) -> No
 
         # --- 購読期限切れの前に張り直す(全カメラ。Issue #766) ---
         if current_time - last_subscribe_time > FORCE_RECONNECT_INTERVAL_SEC:
-            logger.info(f"🔄 [{cam_name}] 9 minutes passed. Reconnecting to avoid silent timeout...")
+            # Issue #1156: 9分ごとの定常の張り直し(#766)は3台で1日約430行の INFO になるため DEBUG。
+            # 失敗(WARNING)と障害からの復旧(INFO。#1146)は従来どおり出る。
+            logger.debug(f"🔄 [{cam_name}] 9 minutes passed. Reconnecting to avoid silent timeout...")
             return  # 安全に再接続（外側のループへ）
         # -----------------------------------------------------------
 
@@ -1009,7 +1011,7 @@ def _report_recovery(cam_name: str, backoff: _ReconnectBackoff) -> None:
     """障害からの復旧を INFO で出し、障害通知を送っていた場合は復旧も通知する(#1146)。
 
     以前は2回目以降の接続が DEBUG の「(Reconnected)」だけで、障害通知は届くのに
-    復旧は届かず、復旧時刻は後の「9 minutes passed」から逆算するしかなかった。
+    復旧は届かず、復旧時刻は後の「9 minutes passed」(当時は INFO)から逆算するしかなかった。
     `backoff.reset()` の前に呼ぶこと(リセットで失敗回数と通知の記録が消える)。
     """
     if backoff.consecutive_errors <= 0:

@@ -53,7 +53,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` モジュールの詳細 | `CAMERAS`, `ASSETS_DIR`, `MOTION_COOLDOWN_SEC`, `LINE_USER_ID`, `NVR_RECORD_DIR` 等の構造や定義値が本ファイルに存在しないため。 | 根拠: `config.CAMERAS` (行番号: 1174 / 抜粋: "for cam in config.CAMERAS") |
+| `config` モジュールの詳細 | `CAMERAS`, `ASSETS_DIR`, `MOTION_COOLDOWN_SEC`, `LINE_USER_ID`, `NVR_RECORD_DIR` 等の構造や定義値が本ファイルに存在しないため。 | 根拠: `config.CAMERAS` (行番号: 1176 / 抜粋: "for cam in config.CAMERAS") |
 | `save_log_generic` の実装・スキーマ | 関数の内部ロジック、および保存先DBの種類・テーブルスキーマが不明なため。 | 根拠: `save_log_generic("device_records"...` (行番号: 634 / 抜粋: "save_log_generic("device_records") |
 | `send_push` の実装 | プッシュ通知の送信手段（LINE等）や実際の処理内容が不明なため。 | 根拠: `send_push([{"type": "text"...` (参照: _report_persistent_error / 抜粋: "send_push(") |
 | NVR（NAS）のディレクトリ構造 | 外部ストレージ上の動画ファイルの配置ルールが環境依存であるため。 | 根拠: `cam_conf.get("nas_folder")` (行番号: 392 / 抜粋: "nas_folder_name = cam_conf.get(") |
@@ -374,16 +374,17 @@
 | `_suspend_after_fatal_error` | 致命的障害の待機・通知・緊急診断 |
 | `monitor_single_camera` | 外側ループの制御のみ |
 
-* 根拠: `_ReconnectBackoff` (行番号: 645 / 抜粋: "class _ReconnectBackoff:")、`_CameraSession` (行番号: 722 / 抜粋: "class _CameraSession:")、`monitor_single_camera` (行番号: 1093 / 抜粋: "def monitor_single_camera(")
+* 根拠: `_ReconnectBackoff` (行番号: 645 / 抜粋: "class _ReconnectBackoff:")、`_CameraSession` (行番号: 722 / 抜粋: "class _CameraSession:")、`monitor_single_camera` (行番号: 1095 / 抜粋: "def monitor_single_camera(")
 * **（Issue #1145 で修正）「📡 Connected」ログの時機**: `_connect_and_subscribe` は、初回接続だけモデル名付きの「📡 Connected」をINFOで出し、`is_first_connect`を`False`にして返す。以前はこれを`GetDeviceInformation()`の直後に行っていたため、続く`CreatePullPointSubscription()`が例外を出すと更新した値が呼び出し元へ返らず、購読に失敗し続ける間、リトライのたびに「初回接続」扱いのINFOが出ていた(2026-11-24の玄関カメラで5回連続)。現在はデバイス情報の取得直後はDEBUGの「Device OK」だけを出し、INFOとフラグの更新は購読まで成功した後(`return`の直前)に行う。
 * 根拠: `def _connect_and_subscribe(` (参照: _connect_and_subscribe)
 
 * **役割**: 単一のカメラに対する死活監視、ONVIF接続、イベント購読（PullPoint）ループ、例外時（ネットワーク断等）のExponential Backoffリトライ、セッション更新などを制御するメインループ。ポートは設定ファイル指定の1つのみを使用し、ローテーションは行わない。
 * **（Issue #652 で追加）** 外側ループの先頭で `is_camera_enabled(cam_conf)` を確認し、`devices.json` 上で無効化されていればONVIF接続にも到達性チェックにも進まず `DISABLED_POLL_INTERVAL_SEC`(30秒)ごとに再確認して待機する（無効化・再有効化の遷移時のみINFOログを1回出す）。`_pull_events_until_reconnect` でも `SESSION_LIFETIME` 判定の直後に同じ確認を行い、監視中に無効化された場合は `return` して `finally` の `Unsubscribe`・セッションクローズを通り、外側の待機へ移る。
-* 根拠: `monitor_single_camera` (行番号: 1093 / 抜粋: "def monitor_single_camera(")
+* 根拠: `monitor_single_camera` (行番号: 1095 / 抜粋: "def monitor_single_camera(")
 
 * **（Issue #766 で修正）** 購読期限が切れる前に自発的に張り直す処理(`FORCE_RECONNECT_INTERVAL_SEC` = 540秒)を、玄関カメラ専用の分岐から**全カメラ共通**へ変更した。`CreatePullPointSubscription()` が返す既定の `TerminationTime` は10分で、先回りの無い庭・駐車場(VIGI)は10分ごとに期限切れ → `PullMessages` が3回連続失敗 → WARNING を出して張り直す、を繰り返していた(1台あたり毎時6回。実機ログの失敗間隔 10分17秒〜10分24秒がこの10分と一致する)。期限切れから再購読までの数秒はイベントを取りこぼすため、1台あたり1日約144回その窓が開いていた。なお `RENEW_DURATION` は定義のみで `Renew` を呼ぶ箇所は無く、購読の延長ではなく張り直しで対応している。
 * 根拠: [変数宣言] (行番号: 103 / 抜粋: "FORCE_RECONNECT_INTERVAL_SEC: int = 540")、[再接続判定] (行番号: 880 / 抜粋: "if current_time - last_subscribe_time > FORCE_RECONNECT_INTERVAL_SEC:")
+* **（Issue #1156 で変更）** 9分ごとの定常の張り直しのログ(`9 minutes passed. Reconnecting...`)は INFO から DEBUG に下げた(3台で1日約430行の定常ノイズだったため)。失敗(WARNING)と障害からの復旧(INFO、Issue #1146)は従来どおり出る。
 
 * **（2026-09-06 品質監査で修正）** 玄関カメラ以外(駐車場・庭)の `PullMessages` 失敗時の扱いを変更した。以前は例外を DEBUG ログに落として `events = None` で継続するだけだったため、カメラ再起動等でサブスクリプションが消えると `SESSION_LIFETIME`(3600秒)が経過するまで最長1時間、動体検知が止まったまま(警告も出ない)だった。`_pull_events_until_reconnect` の冒頭に `consecutive_pull_failures = 0` を置き、`PullMessages` 成功時に 0 へ戻し、失敗が `PULL_FAILURE_RECONNECT_THRESHOLD`(3)回連続したら WARNING を出して `return` し、外側の再接続処理へ移行する(玄関カメラは従来どおり1回目で `return`)。
 * 根拠: `_pull_events_until_reconnect` (行番号: 846 / 抜粋: "def _pull_events_until_reconnect(")
@@ -393,7 +394,7 @@
 
 * **副作用**: ONVIF APIコール、例外発生時のプッシュ通知送信(`send_push`)、グローバル変数 `active_pullpoints` への参照追加/削除。
 * **（Issue #439 で修正）** `active_pullpoints`への追加は`_add_pullpoint(pullpoint)`、削除は`_discard_pullpoint(...)`という排他制御されたヘルパー関数経由に統一された。以前は接続成功時に`active_pullpoints.append(pullpoint)`を直接呼び、例外処理時とリソース解放時にはそれぞれ「存在確認してから削除」パターンを直接書いていた。分割後は、追加が `_connect_and_subscribe`、削除が `_CameraSession.release` にある(Issue #1162 以降、障害時も待機前に `release()` を呼ぶため、`_suspend_after_fatal_error` 側の削除は無くなった)。
-* 根拠: `_connect_and_subscribe` (行番号: 766 / 抜粋: "def _connect_and_subscribe(")、`_suspend_after_fatal_error` (行番号: 1054 / 抜粋: "def _suspend_after_fatal_error(")
+* 根拠: `_connect_and_subscribe` (行番号: 766 / 抜粋: "def _connect_and_subscribe(")、`_suspend_after_fatal_error` (行番号: 1056 / 抜粋: "def _suspend_after_fatal_error(")
 
 * **エラーハンドリング**: 一時的障害（`TRANSIENT_ERRORS` = `RemoteDisconnected`・`ProtocolError`・`BrokenPipeError`・`ConnectionResetError`・`requests.exceptions.ConnectionError`）と、致命的障害（その他例外。SOAP Fault の認証失敗・Action Failed 等）を分けて処理。
 * **（Issue #1152 で変更）通信断の分類と継続障害の通知**: `requests.exceptions.ConnectionError`(接続拒否・No route to host・`ConnectTimeout` を含む)を一時的障害へ移した。以前は "Connection/ONVIF Error"(致命的扱い)に入り、通信断とアプリ側の異常をログ上で区別できなかった。継続障害のログ・通知は `_report_persistent_error` に共通化し、致命的・一時的・L3到達不可(Ping 不達)の**全経路**で連続5回目以降に同じ規則で通知する(以前は致命的経路にしか無く、一時的経路・到達不可の障害は何時間続いても通知されなかった)。
@@ -404,7 +405,7 @@
 * 連続エラー回数の扱い:連続エラー回数に基づくExponential Backoff（最大`MAX_BACKOFF_SEC`=300秒。**Issue #1160** で3600秒から変更）、継続障害（連続5回目以降）の管理者への通知を行う。
 * **（Issue #1160 で変更）バックオフ上限と継続障害の通知間隔**: 待機中(`time.sleep`)は到達性を見ないため、上限3600秒では85分を超える障害の後、カメラが復旧してから監視が再開するまで最大60分かかっていた(NVRの録画は先に戻るため「動体通知・スナップショットだけが来ない」状態が見えない)。上限を300秒に下げ、復旧後おおむね5分以内に再開する。通知は再試行の間隔ではなく時間で決める(`_ReconnectBackoff.persistent_alert_level`): 以前は「5回目と12の倍数回目に`send_push`」「5回目以降は毎回`logger.error`(catch-allでDiscordへ)」の回数ベースだったため、上限を下げると通知まで比例して増える。連続障害の最初の継続障害(5回目)と、以後`PERSISTENT_RENOTIFY_SEC`(12時間)ごとに`send_push`、`PERSISTENT_ERROR_LOG_INTERVAL_SEC`(1時間)ごとにcatch-allへ流れる`logger.error`、その間の回は`logger.warning`(Discordへ送られない)とし、上限3600秒のときの定常の間隔を保つ。接続に成功すると(`reset`)通知の記録も消え、次の連続障害は再び5回目で通知する。
 * 根拠: `MAX_BACKOFF_SEC: int = 300` (参照: _ReconnectBackoff)、`def persistent_alert_level(self, now: float) -> str:` (参照: _ReconnectBackoff.persistent_alert_level)`_CameraSession.release()` は `ONVIFService` の構築前後どちらで失敗しても呼べるようになっており、構築に失敗した場合は直前に作った生のサブスクリプションを `Unsubscribe` する（カメラ側に購読を残さないため）。
-* 根拠: `_suspend_after_transient_error` (行番号: 1034 / 抜粋: "def _suspend_after_transient_error(")、`_suspend_after_fatal_error` (行番号: 1054 / 抜粋: "def _suspend_after_fatal_error(")
+* 根拠: `_suspend_after_transient_error` (行番号: 1036 / 抜粋: "def _suspend_after_transient_error(")、`_suspend_after_fatal_error` (行番号: 1056 / 抜粋: "def _suspend_after_fatal_error(")
 
 * **（不具合修正）** 上記のバックオフ・通知経路は、`_connect_and_subscribe`が確立する3つのONVIF(zeep/requests)クライアント(devicemgmt・events_service・pullpoint)のSOAP呼び出しが**例外を送出すること**に依存しているが、`zeep`/`requests`は既定でタイムアウトを持たない。実機で駐車場カメラが`network_logger.py`の"Ping:Unreachable"を記録した直後、`GetDeviceInformation()`等のSOAP呼び出しが応答の返らないTCP接続上で無期限にハングし、動体検知ログ・エラーログ・Discord通知のいずれも一切出ないまま4時間以上完全に沈黙する障害が発生した(バックオフ/通知の実装自体は正しいが、例外が発生しないため一度も呼ばれなかった)。`ONVIF_OPERATION_TIMEOUT_SEC`(既定10秒)を3クライアントすべての`zeep_client.transport.operation_timeout`に設定し、応答がこれを超えたら`requests.exceptions.Timeout`系の例外を送出させることで、既存の`except Exception`によるバックオフ経路に必ず載るようにした。`PullMessages`自体が指定するONVIFのサーバー側長ポーリング時間(`Timeout: 2秒`)より十分長い値にしてあり、通常の長ポーリング周期を誤ってタイムアウト扱いすることは無い。
 * 根拠: `ONVIF_OPERATION_TIMEOUT_SEC: int = 10` (行番号: 117)、`devicemgmt.zeep_client.transport.operation_timeout = ONVIF_OPERATION_TIMEOUT_SEC` (行番号: 668)、`session.events_service.zeep_client.transport.operation_timeout = ONVIF_OPERATION_TIMEOUT_SEC` (行番号: 683)、`pullpoint.zeep_client.transport.operation_timeout = ONVIF_OPERATION_TIMEOUT_SEC` (行番号: 706)
@@ -412,11 +413,11 @@
 ### `main`
 
 * **役割**: 登録された全てのカメラ設定（`config.CAMERAS`）に対して、`ThreadPoolExecutor` を用いて並行で `monitor_single_camera` を実行する。
-* 根拠: `main` (行番号: 1164〜1174 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 1166〜1176 / 抜粋: "async def main() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `main` (行番号: 1164 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 1166 / 抜粋: "async def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -424,11 +425,11 @@
 
 
 * **副作用**: 複数スレッドの起動。
-* 根拠: `ThreadPoolExecutor` (行番号: 1173 / 抜粋: "with ThreadPoolExecutor")
+* 根拠: `ThreadPoolExecutor` (行番号: 1175 / 抜粋: "with ThreadPoolExecutor")
 
 
 * **エラーハンドリング**: WSDLが見つからない場合はエラーログを出力して終了。
-* 根拠: `if not WSDL_DIR:` (行番号: 1165 / 抜粋: "if not WSDL_DIR: return logger")
+* 根拠: `if not WSDL_DIR:` (行番号: 1167 / 抜粋: "if not WSDL_DIR: return logger")
 
 
 * **（#411 S-L3で修正）** `config.CAMERAS` が空（`devices.json` 未配置等）の場合、以前は `ThreadPoolExecutor(max_workers=len(config.CAMERAS))` が `max_workers=0` となり `ValueError` を送出してプロセスが即座に落ちていた。カメラが1台も無い場合は警告ログを出して何もせず正常終了し、カメラが存在する場合も `max_workers` を `max(1, ...)` で下限保護する。
