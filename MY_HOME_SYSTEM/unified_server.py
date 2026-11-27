@@ -285,6 +285,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if migration_ok:
         # システムページの「起動履歴」用。失敗してもサーバーの起動は止めない(record_boot が握りつぶす)。
         system_info_service.record_boot()
+        # Issue #1153: 見守り(人感センサー)のタイマーを DB 上の最後の検知時刻から復元する
+        # (以前は再起動のたびに消えていた)。失敗しても起動は止めない(restore 側が握りつぶす)。
+        await sensor_service.restore_motion_timers()
 
     supervisor_task: Optional[asyncio.Task] = None
     if migration_ok:

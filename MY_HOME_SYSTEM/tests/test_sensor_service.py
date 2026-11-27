@@ -29,6 +29,9 @@ def _reset_sensor_state():
     sensor_service.EVENT_CACHE.clear()
     sensor_service.MOTION_TASKS.clear()
     sensor_service._mac_last_seen.clear()
+    sensor_service.POWER_STATE.clear()
+    sensor_service.CONTACT_OPENED_AT.clear()
+    sensor_service.LAST_MOTION_AT.clear()
     yield
     sensor_service.cancel_all_tasks()
     sensor_service.MOTION_TASKS.clear()
@@ -355,3 +358,173 @@ class TestCacheEviction:
         for t in list(sensor_service.MOTION_TASKS.values()):
             if isinstance(t, asyncio.Task):
                 t.cancel()
+
+
+class TestPowerHysteresis:
+    """Issue #1148: power_off_threshold_watts / min_on_sec による使用開始/終了通知の抑制。"""
+
+    T0 = 1_000_000.0
+
+    def _run(self, readings, **settings):
+        """(経過秒, W) の列を順に判定し、通知文の列を返す。前回値は直前の読み取り。"""
+        msgs = []
+        prev = 0.0
+        for t, w in readings:
+            msg = sensor_service._power_transition_with_hysteresis(
+                "toilet", "1Fのトイレ", w, prev,
+                settings.get("on", 30.0), settings.get("off", settings.get("on", 30.0)),
+                settings.get("min_on_sec", 0), now=self.T0 + t,
+            )
+            if msg:
+                msgs.append(msg)
+            prev = w
+        return msgs
+
+    def test_short_thermostat_cycles_are_ignored_with_min_on_sec(self):
+        # 47W → 0 → 47W … を5分刻みで(暖房便座のサーモスタット)
+        readings = [(i * 300, 47.0 if i % 2 == 0 else 0.0) for i in range(12)]
+        assert self._run(readings, min_on_sec=600) == []
+
+    def test_long_use_notifies_on_and_off_once(self):
+        readings = [(0, 0.0), (300, 47.0), (600, 47.0), (900, 47.0), (1200, 0.0), (1500, 0.0)]
+        msgs = self._run(readings, min_on_sec=600)
+        assert len(msgs) == 2
+        assert "使用開始" in msgs[0] and "使用終了" in msgs[1]
+
+    def test_hysteresis_keeps_on_between_thresholds(self):
+        readings = [(0, 0.0), (300, 100.0), (600, 20.0), (900, 35.0), (1200, 5.0)]
+        msgs = self._run(readings, on=30.0, off=10.0)
+        assert len(msgs) == 2  # 20W・35W では切り替わらない
+        assert "使用開始" in msgs[0] and "使用終了" in msgs[1]
+
+    def test_restart_mid_use_does_not_double_notify(self):
+        # 状態が無い(再起動直後)で、前回値が既に ON なら通知済みとみなす
+        msg = sensor_service._power_transition_with_hysteresis(
+            "dev", "炊飯器", 300.0, 300.0, 100.0, 100.0, 600, now=self.T0)
+        assert msg is None
+
+    async def test_unset_settings_keep_the_legacy_behaviour(self, isolated_db):
+        """devices.json の model_dump は未設定キーを None で持つ。その場合は従来どおり即時に通知する。"""
+        settings = {"power_threshold_watts": 30.0, "power_off_threshold_watts": None, "min_on_sec": None}
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
+            await sensor_service.process_power_data("toilet", "1Fのトイレ", 47.0, settings)
+        mock_send.assert_called_once()
+        assert sensor_service.POWER_STATE == {}
+
+    async def test_min_on_sec_suppresses_first_reading_via_process_power_data(self, isolated_db):
+        settings = {"power_threshold_watts": 30.0, "min_on_sec": 600}
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
+            await sensor_service.process_power_data("toilet", "1Fのトイレ", 47.0, settings)
+        mock_send.assert_not_called()
+
+    def test_notify_settings_model_keeps_the_new_keys(self):
+        """config.NotifySettings が新しいキーを落とさない(落とすと設定が効かない)。"""
+        dumped = config.NotifySettings(power_threshold_watts=30, power_off_threshold_watts=10, min_on_sec=600).model_dump()
+        assert dumped["power_off_threshold_watts"] == 10 and dumped["min_on_sec"] == 600
+
+
+class TestContactCloseLog:
+    """Issue #1172: close を経過秒付きで DEBUG に1行出す。通知の回数は変えない。"""
+
+    async def test_close_logs_open_duration_without_notification(self):
+        debug = []
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send, \
+             patch.object(sensor_service.logger, "debug", side_effect=lambda m, *a, **k: debug.append(m)):
+            await sensor_service.process_sensor_data("mac-c", "冷蔵庫", "伊丹", "WoContact", "open")
+            assert "mac-c" in sensor_service.CONTACT_OPENED_AT
+            sensor_service.CONTACT_OPENED_AT["mac-c"] -= 12  # 12秒前に開いたことにする
+            await sensor_service.process_sensor_data("mac-c", "冷蔵庫", "伊丹", "WoContact", "close")
+        assert mock_send.call_count == 1  # open の1回だけ
+        assert any("close, 開いていた時間 12秒" in m for m in debug)
+
+    async def test_close_without_prior_open(self):
+        debug = []
+        with patch.object(sensor_service.logger, "debug", side_effect=lambda m, *a, **k: debug.append(m)):
+            await sensor_service.process_sensor_data("mac-c", "冷蔵庫", "伊丹", "WoContact", "close")
+        assert any(m.endswith("(close)") for m in debug)
+
+
+class TestLongInactivity:
+    """Issue #1153: 日中に3時間動きが無ければ拠点ごとに1回通知、起動時はDBからタイマーを復元。"""
+
+    @staticmethod
+    def _jst(*args):
+        import datetime as _dt
+        return _dt.datetime(*args, tzinfo=sensor_service.get_now_jst().tzinfo)
+
+    @pytest.mark.parametrize(
+        "last, expected",
+        [
+            ((2026, 11, 27, 9, 0), (2026, 11, 27, 12, 0)),
+            ((2026, 11, 27, 6, 30), (2026, 11, 27, 10, 0)),   # 夜明け前は 7:00 から数える
+            ((2026, 11, 27, 20, 0), (2026, 11, 28, 10, 0)),   # 22時までに3時間経たない → 翌朝
+            ((2026, 11, 27, 23, 0), (2026, 11, 28, 10, 0)),
+            ((2026, 11, 27, 19, 0), (2026, 11, 27, 22, 0)),   # ちょうど22時は日中のうち
+        ],
+    )
+    def test_deadline_counts_only_daytime(self, last, expected):
+        assert sensor_service.long_inactive_deadline(self._jst(*last)) == self._jst(*expected)
+
+    async def test_notifies_once_when_deadline_passes(self, monkeypatch):
+        now = self._jst(2026, 11, 27, 12, 30)
+        monkeypatch.setattr(sensor_service, "get_now_jst", lambda: now)
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
+            sensor_service.schedule_long_inactive_check("高砂", self._jst(2026, 11, 27, 9, 0))
+            await asyncio.sleep(0.05)
+        mock_send.assert_called_once()
+        text = mock_send.call_args.kwargs["messages"][0]["text"]
+        assert "高砂" in text and "3時間以上" in text and "11/27 09:00" in text
+        assert "高砂" not in sensor_service.LONG_INACTIVE_TASKS
+
+    async def test_new_motion_cancels_the_pending_check(self, monkeypatch):
+        now = self._jst(2026, 11, 27, 10, 0)
+        monkeypatch.setattr(sensor_service, "get_now_jst", lambda: now)
+        monkeypatch.setattr(config, "MONITOR_DEVICES", [{"id": "mac-m", "type": "Motion Sensor", "location": "高砂"}])
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)):
+            sensor_service.schedule_long_inactive_check("高砂", self._jst(2026, 11, 27, 9, 0))
+            first = sensor_service.LONG_INACTIVE_TASKS["高砂"]
+            await sensor_service.process_sensor_data("mac-m", "人感", "高砂", "Motion Sensor", "detected")
+            await asyncio.sleep(0)
+        assert first.cancelled()
+        assert sensor_service.LONG_INACTIVE_TASKS["高砂"] is not first
+
+    async def test_unregistered_device_does_not_start_a_check(self, monkeypatch):
+        monkeypatch.setattr(config, "MONITOR_DEVICES", [])
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)):
+            await sensor_service.process_sensor_data("mac-x", "?", "場所不明", "Motion Sensor", "detected")
+        assert sensor_service.LONG_INACTIVE_TASKS == {}
+
+    async def test_restore_from_db(self, isolated_db, monkeypatch):
+        now = self._jst(2026, 11, 27, 10, 0)
+        monkeypatch.setattr(sensor_service, "get_now_jst", lambda: now)
+        monkeypatch.setattr(config, "MONITOR_DEVICES", [
+            {"id": "m-living", "type": "Motion Sensor", "location": "伊丹", "name": "リビング"},
+            {"id": "m-bed", "type": "Motion Sensor", "location": "伊丹", "name": "寝室"},
+            {"id": "m-taka", "type": "Motion Sensor", "location": "高砂", "name": "居間"},
+            {"id": "plug", "type": "Plug Mini (JP)", "location": "伊丹", "name": "プラグ"},
+        ])
+        with get_db_cursor(commit=True) as cur:
+            for mac, ts, state in [
+                ("m-living", "2026-11-27T09:55:00+09:00", "detected"),   # 5分前 → 15分タイマーを復元
+                ("m-bed", "2026-11-27T08:00:00+09:00", "detected"),      # 2時間前 → 15分タイマーは張らない
+                ("m-taka", "2026-11-27T07:30:00+09:00", "detected"),
+                ("m-taka", "2026-11-27T09:59:00+09:00", "not_detected"),  # detected 以外は数えない
+            ]:
+                cur.execute(
+                    "INSERT INTO device_records (timestamp, device_name, device_id, device_type, contact_state) "
+                    "VALUES (?, 'x', ?, 'Webhook', ?)", (ts, mac, state))
+
+        await sensor_service.restore_motion_timers()
+
+        assert set(sensor_service.MOTION_TASKS) == {"m-living"}
+        assert sensor_service.IS_ACTIVE.get("m-living") is True
+        assert set(sensor_service.LONG_INACTIVE_TASKS) == {"伊丹", "高砂"}
+        assert sensor_service.LAST_MOTION_AT["伊丹"] == self._jst(2026, 11, 27, 9, 55)
+        assert sensor_service.LAST_MOTION_AT["高砂"] == self._jst(2026, 11, 27, 7, 30)
+
+    async def test_restore_failure_does_not_raise(self, monkeypatch):
+        def _boom():
+            raise RuntimeError("db")
+        monkeypatch.setattr(sensor_service, "_load_last_motion_times", _boom)
+        await sensor_service.restore_motion_timers()
+        assert sensor_service.MOTION_TASKS == {}
