@@ -149,6 +149,14 @@ RECORDING_STALE_SEC: int = 30 * 60
 # 1本(120分で12〜13本)なので、直近120分のセグメント数がこれ以上なら異常とみなす。
 RECORDING_FLAP_WINDOW_SEC: int = 120 * 60
 RECORDING_FLAP_MIN_SEGMENTS: int = 16
+# Issue #1173: 分割を検知したとき、録画ユニット(nvr-<フォルダ名>.service)の journal から数える
+# ffmpeg/systemd の失敗の種類。(表示名, 意味, 照合する文字列)。どれが主かで、カメラ側の
+# RTSP の停止・経路の問題・カメラ側の配信終了のどれなのかが通知だけで分かる。
+RECORDING_FAILURE_PATTERNS: tuple = (
+    ("RTSP閉塞", "Connection refused", ("Connection refused",)),
+    ("経路断", "timed out / No route", ("Connection timed out", "No route to host")),
+    ("配信終了", "Deactivated successfully", ("Deactivated successfully",)),
+)
 # 録画ファイル名(ffmpeg -strftime のローカル時刻)の解釈に使うタイムゾーン
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -478,6 +486,7 @@ def check_recording_stalled() -> str | None:
             stalled.append(
                 f"{label}: 直近{RECORDING_FLAP_WINDOW_SEC // 60}分で録画が{recent}本に分割されています"
                 "(接続が断続的に切れている可能性)"
+                + _recording_unit_diagnosis(folder_name)
             )
         elif latest is None:
             stalled.append(f"{label}: 今日・昨日の録画ファイルがありません")
@@ -487,6 +496,45 @@ def check_recording_stalled() -> str | None:
     if stalled:
         return "常時録画が止まっている可能性があります:\n" + "\n".join(stalled)
     return None
+
+
+def _recording_unit_diagnosis(folder_name: str) -> str:
+    """録画ユニットの再起動回数と、直近の失敗の種類ごとの件数を1行にする(Issue #1173)。
+
+    以前は分割の通知を受けるたびに journalctl で `nvr-*.service` を手で確認していた
+    (#890 の自動調査コメントも毎回同じ作業をしていた)。取得に失敗しても通知そのものは
+    出す(空文字を返す)。RTSP の URL・認証情報は件数に畳むので通知に載らない(#893)。
+    """
+    unit = f"nvr-{folder_name}.service"
+    parts: List[str] = []
+    try:
+        res = subprocess.run(
+            ["systemctl", "show", "-p", "NRestarts", "--value", unit],
+            capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC,
+        )
+        restarts = res.stdout.strip()
+        if res.returncode == 0 and restarts.isdigit():
+            parts.append(f"再起動{restarts}回(累計)")
+    except Exception as e:  # noqa: BLE001 - 補足情報なので失敗しても通知は出す
+        logger.debug(f"NRestarts の取得に失敗しました ({unit}): {e}")
+    try:
+        res = subprocess.run(
+            ["journalctl", "-u", unit, "--since", f"-{RECORDING_FLAP_WINDOW_SEC // 60}min",
+             "--no-pager", "-o", "cat"],
+            capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC,
+        )
+        if res.returncode == 0:
+            counts = []
+            for name, meaning, needles in RECORDING_FAILURE_PATTERNS:
+                n = sum(1 for line in res.stdout.splitlines() if any(x in line for x in needles))
+                counts.append((n, name, meaning))
+            breakdown = "・".join(f"{name} {n}件" for n, name, _ in counts)
+            top = max(counts, key=lambda c: c[0])
+            main = f"主に{top[1]}({top[2]})" if top[0] > 0 else "失敗の記録なし"
+            parts.append(f"{main}: {breakdown}")
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"journal の取得に失敗しました ({unit}): {e}")
+    return f"\n    └ {unit}: " + " / ".join(parts) if parts else ""
 
 
 def _normalize_config_lines(text: str) -> List[str]:
@@ -936,13 +984,37 @@ def check_service_running_stale_code() -> str | None:
     )
 
 
-def _should_notify(anomaly_keys: List[str], now: datetime.datetime) -> bool:
-    """同一の異常セットが継続している間の再通知を抑制する。
+# Issue #1154: 再通知の抑制で、本文の要約をフィンガープリントに含めない異常キー。
+# ログの抜粋(実行のたびに文面が変わる)を本文に含むため、含めると毎時再通知になる。
+FINGERPRINT_KEY_ONLY_KEYS: frozenset = frozenset({"journal", "app_logs"})
 
-    異常のセット(チェック名の組)が前回通知時と同じなら RENOTIFY_INTERVAL_SEC
-    が経過するまで再通知しない。セットが変化したら即座に通知する。
+
+def _anomaly_summary(key: str, text: str) -> str:
+    """フィンガープリント用の異常の要約(Issue #1154)。
+
+    数字の連なり(件数・時刻・使用率)は `N` に畳むため、同じ異常の値の揺れでは変わらず、
+    対象の増減(録画が止まったカメラが1台→3台、止まったサービス名など)では変わる。
     """
-    fingerprint = hashlib.sha256("|".join(sorted(anomaly_keys)).encode()).hexdigest()
+    if key in FINGERPRINT_KEY_ONLY_KEYS:
+        return key
+    return key + ":" + re.sub(r"\s+", " ", re.sub(r"\d+", "N", text)).strip()
+
+
+def _should_notify(
+    anomaly_keys: List[str], now: datetime.datetime, anomalies: Optional[List[str]] = None
+) -> bool:
+    """同一の異常が継続している間の再通知を抑制する。
+
+    異常が前回通知時と同じなら RENOTIFY_INTERVAL_SEC が経過するまで再通知しない。
+    変化したら即座に通知する。Issue #1154: 以前はチェック名の組だけを比べていたため、
+    同じキーのまま中身が悪化した場合(録画の止まったカメラが増える等)を最大6時間
+    見逃しうった。`anomalies`(本文)を渡すと、キーごとの要約(`_anomaly_summary`)も比べる。
+    """
+    if anomalies is None:
+        items = sorted(anomaly_keys)
+    else:
+        items = sorted(_anomaly_summary(k, a) for k, a in zip(anomaly_keys, anomalies))
+    fingerprint = hashlib.sha256("|".join(items).encode()).hexdigest()
     # Issue #661: 状態ファイルの読み書きは core/state_file.py に集約した。
     # 壊れている/読めない場合に「通知する」側へ倒す方針は従来どおり
     # (異常の通知を取りこぼすより、重複して通知する方が安全側)。
@@ -1178,8 +1250,13 @@ def run_checks() -> int:
 
     exit_code = 0
     if anomalies:
-        logger.warning(f"異常検知: {anomaly_keys}")
-        if _should_notify(anomaly_keys, now):
+        # Issue #1154: 遅れ・ドリフト類(通知専用キー)だけのときは INFO にする
+        # (log_analyzer が数える WARNING を、原因が自明な定常の遅れで増やさない)
+        if all(k in INVESTIGATE_NOTIFY_ONLY_KEYS for k in anomaly_keys):
+            logger.info(f"異常検知(遅れ・ドリフトのみ): {anomaly_keys}")
+        else:
+            logger.warning(f"異常検知: {anomaly_keys}")
+        if _should_notify(anomaly_keys, now, anomalies):
             msg = (
                 f"🚨 **ラズパイ一次チェック異常** ({now.strftime('%m/%d %H:%M')})\n"
                 + "\n".join(f"・{a}" for a in anomalies)
