@@ -459,6 +459,7 @@
 
 
 * 根拠: メソッドシグネチャ (行番号: 379 / 抜粋: "def detect(self, input_path: s...")
+* **（Issue #1156 で変更）** フレーム読み取りループの「解析進捗: N%」(1本につき10行)は定常のノイズのため INFO から DEBUG に下げた(開始・完了は別途 INFO で出る)。
 
 
 
@@ -495,7 +496,7 @@
 * **役割**: 検出されたモーション記録間の時間差を評価し、しきい値（`GAP_THRESH`）以内のものを一つのイベントに結合する。また、イベントごとにスコアやメタデータを付与してCSVへ出力する。
 
 
-* 根拠: イベント結合ロジック (行番号: 453 / 抜粋: "if record.time_sec - last_reco...")
+* 根拠: イベント結合ロジック (行番号: 454 / 抜粋: "if record.time_sec - last_reco...")
 
 
 
@@ -503,7 +504,7 @@
 * **引数/リクエスト**: `build`メソッド: `motion_records` (List[MotionRecord]), `work_dir` (str)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 443 / 抜粋: "def build(self, motion_records...")
+* 根拠: メソッドシグネチャ (行番号: 444 / 抜粋: "def build(self, motion_records...")
 
 
 
@@ -511,7 +512,7 @@
 * **戻り値/レスポンス**: `List[EventRecord]`。
 
 
-* 根拠: メソッドシグネチャ (行番号: 443 / 抜粋: "-> List[EventRecord]:")
+* 根拠: メソッドシグネチャ (行番号: 444 / 抜粋: "-> List[EventRecord]:")
 
 
 
@@ -538,7 +539,7 @@
 * **役割**: 生成されたイベントリストに基づき、入力動画から該当する時間帯を切り出し（クリップ化）、それらを一つに結合してタイムラプス動画とサムネイル画像を生成する。
 
 
-* 根拠: 切り出し・結合処理の実行部 (行番号: 535 / 抜粋: "if not self._build_concat(clip...")
+* 根拠: 切り出し・結合処理の実行部 (行番号: 536 / 抜粋: "if not self._build_concat(clip...")
 
 
 
@@ -546,7 +547,7 @@
 * **引数/リクエスト**: `build`メソッド: `input_path` (str), `events` (List[EventRecord]), `output_path` (str), `temp_dir` (str), `video_start_dt` (datetime.datetime)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 516 / 抜粋: "def build(self, input_path: st...")
+* 根拠: メソッドシグネチャ (行番号: 517 / 抜粋: "def build(self, input_path: st...")
 
 
 
@@ -581,7 +582,7 @@
 * **役割**: 生成された動画ファイルのサイズを判定し、制限（`MAX_FILE_SIZE_BYTES`）を超える場合はFFmpegを用いて動画を分割した後、Discord Webhookに対して動画ファイルと完了通知を送信する。送信そのものは`core.discord.post_webhook`へ委譲する(Issue #661)。分割ファイル(`*_part_*.mp4`)は送信専用の一時生成物であり、送信の成否に関わらず`finally`節で削除する(Issue #171: 以前はこの削除が無く、元動画とは別にローカルディスクへ重複して残り続けていた)。元動画(`summary.output_path`)自体はここでは削除せず、`nas_monitor`の保持期間ベースのリテンションクリーンアップに委ねる。
 
 
-* 根拠: 分割ロジックと送信ロジック (行番号: 647 / 抜粋: "pc = math.ceil(summary.file_si...")
+* 根拠: 分割ロジックと送信ロジック (行番号: 648 / 抜粋: "pc = math.ceil(summary.file_si...")
 * 根拠: `split_files: List[Path] = []` および `finally:` ブロック (行番号: 584, 609〜618 / 抜粋: "for s_file in split_files:\n try:\n os.remove(s_file)")
 
 
@@ -590,7 +591,7 @@
 * **引数/リクエスト**: `split_and_send`メソッド: `summary` (SummaryInfo), `base_filename` (str)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 624 / 抜粋: "def split_and_send(self, summa...")
+* 根拠: メソッドシグネチャ (行番号: 625 / 抜粋: "def split_and_send(self, summa...")
 
 
 
@@ -618,7 +619,7 @@
 * **戻り値/レスポンス**: `None`
 * **副作用**: 添付付きのHTTP POST。`post_webhook`は429/5xxを限定回数リトライするため、レート制限時に同じ動画が再アップロードされうる(リトライ前のファイル位置の巻き戻しは`core.discord._rewind_files`が担う)。ここで独自のリトライを重ねてはならない。
 * **エラーハンドリング**: ファイルを開けない等、送信に入る前の失敗のみ`except Exception`で捕捉して`Discord送信中に例外発生`をERRORに残す(送信中の失敗は`post_webhook`がwarningにして`False`を返す)。
-* 根拠: `_send_to_discord` (行番号: 678 / 抜粋: "def _send_to_discord(self, webhook_url: str, message: str, file_path: str) -> None:")
+* 根拠: `_send_to_discord` (行番号: 679 / 抜粋: "def _send_to_discord(self, webhook_url: str, message: str, file_path: str) -> None:")
 
 #### `Uploader._send_completion_notice`
 
@@ -626,12 +627,12 @@
 * **引数/リクエスト**: `webhook_url` (str), `count` (int)
 * **戻り値/レスポンス**: `None`
 * **エラーハンドリング**: `post_webhook`は例外を送出せず`False`を返す契約なので、戻り値を見て`⚠️ 完了通知の送信に失敗しました(処理自体は成功しています)`をWARNINGに残す。Issue #661以前は`except Exception: pass`で完全に黙殺しており、完了通知が届かない原因が一切残らなかった。通知は本処理ではないため、失敗しても処理は続行する。
-* 根拠: `_send_completion_notice` (行番号: 708 / 抜粋: "def _send_completion_notice(self, webhook_url: str, count: int):")
+* 根拠: `_send_completion_notice` (行番号: 709 / 抜粋: "def _send_completion_notice(self, webhook_url: str, count: int):")
 
 * **エラーハンドリング**: 動画分割プロセスの失敗やWebhook送信時の例外をキャッチし、ログにエラーを出力する。分割ファイルの削除自体が失敗した場合(`OSError`)も個別に捕捉してログ出力するのみで処理を継続する。
 
 
-* 根拠: `except Exception as e: logger.error(f"分割送信エラー: {e}")` (行番号: 666 / 抜粋: "except Exception as e: logger....")、`except OSError as cleanup_err:` (行番号: 617〜618)
+* 根拠: `except Exception as e: logger.error(f"分割送信エラー: {e}")` (行番号: 667 / 抜粋: "except Exception as e: logger....")、`except OSError as cleanup_err:` (行番号: 617〜618)
 
 
 
@@ -642,7 +643,7 @@
 * **役割**: 全体の処理フローを統括するメイン関数。依存コマンドの確認からディレクトリ設定、動画解析、イベント生成、動画結合、結果ファイルの保存、Discordへのアップロードまでを順次呼び出す。
 
 
-* 根拠: 処理のオーケストレーション (行番号: 735 / 抜粋: "info = get_video_info(input_vi...")
+* 根拠: 処理のオーケストレーション (行番号: 736 / 抜粋: "info = get_video_info(input_vi...")
 
 
 
@@ -650,7 +651,7 @@
 * **引数/リクエスト**: `input_video` (str)。
 
 
-* 根拠: 関数シグネチャ (行番号: 722 / 抜粋: "def run_smart_timelapse_job(in...")
+* 根拠: 関数シグネチャ (行番号: 723 / 抜粋: "def run_smart_timelapse_job(in...")
 
 
 

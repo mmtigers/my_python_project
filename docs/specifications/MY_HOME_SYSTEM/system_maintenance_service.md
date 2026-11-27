@@ -20,7 +20,7 @@
 * **(「最新に更新して再起動」の追加で更新)** 同モジュールは、システムページの「最新に更新して再起動」ボタンの処理も担う。実機で`git fetch --prune origin`の後`git merge --ff-only origin/master`(`_fetch_and_fast_forward`)を実行し、現在のブランチの追跡先(upstream)には依存せず、**新しいコミットが入ったときだけ**`restart_home_system`で再起動する。実機が`master`以外(作業用ブランチ・detached HEAD)を向いている場合は、ブランチ名と「追跡先のリモートブランチが削除されている」旨を日本語で先頭に示して失敗させる(自動checkoutはしない)。取り込みに失敗した場合(手元の変更・fast-forwardできない履歴・ネットワーク断・認証失敗・タイムアウト)は**再起動せず**、失敗理由を結果として返す。新しいコミットが無いときも再起動しない(再起動だけしたいときは既存の再起動ボタン)。
 * `git merge`(fast-forward)はpost-merge フック(family-questの再ビルド・クエストマスタ同期)を含み数分かかりうるため、`trigger_deploy_async`がバックグラウンドスレッドで実行して即座に返し、画面は`get_deploy_state`をポーリングする(バックアップと同じ構成)。再起動でこのプロセス自身が入れ替わるため、結果は状態ファイル`DEPLOY_STATE_FILE`(`dashboard_deploy_state.json`)へ保存し、再起動後の新プロセスが「再起動を要求した時刻より後に起動した」ことを根拠に成功へ確定させる。
 * 実行できるのは固定の`git fetch --prune`+`git merge --ff-only origin/master`だけで、ブランチ・コマンド・引数を呼び出し側から受け取らない。認可チェックは`/api/system/*`共通で無いため(CLAUDE.md参照)、実行の都度Discordの`report`チャンネルへ記録を残す。
-* 根拠: [関数定義] (行番号: 195 / 抜粋: "def _run_deploy("), [関数定義] (行番号: 257 / 抜粋: "def trigger_deploy_async("), [関数定義] (行番号: 276 / 抜粋: "def get_deploy_state(")
+* 根拠: [関数定義] (行番号: 251 / 抜粋: "def _run_deploy("), [関数定義] (行番号: 313 / 抜粋: "def trigger_deploy_async("), [関数定義] (行番号: 332 / 抜粋: "def get_deploy_state(")
 
 * **(新機能)** `restart_home_system`は、再起動でこのプロセスが入れ替わる前に、要求した時刻を`RESTART_MARKER_FILE`(`dashboard_restart_marker.json`)へ書く(書けなくても再起動は続ける)。起動履歴のきっかけを「ダッシュボードからの再起動」と残すため、`system_info_service._determine_boot_reason`が起動時に読む。「最新に更新して再起動」の経路は従来の状態ファイル(`DEPLOY_STATE_FILE`)のほうで判定され、そちらが優先される。どちらの状態ファイルも実行時に生成されるため`.gitignore`に入れてある。
 * 根拠: `RESTART_MARKER_FILE: str = os.path.join(config.BASE_DIR, "dashboard_restart_marker.json")` (行番号: 58)
@@ -69,7 +69,7 @@
 ### `get_restart_block_reason`
 
 * **役割**: **(Issue #1143で追加)** 手動の再起動(`POST /api/system/restart`)を今は受け付けない理由を返す(受け付けるなら`None`)。拒否するのは、(1)「最新に更新して再起動」の実行中(`_deploy_running`。取り込み・post-mergeフックのビルド途中で止めないため、`force`でも回避不可)と、(2)このプロセスの起動(`_PROCESS_STARTED_AT`)から`RESTART_MIN_UPTIME_SEC`(120秒)以内(`force=True`で回避可)。更新自身が内部で呼ぶ`restart_home_system`には適用しない(ガードはHTTP経由の手動操作だけ)。
-* 根拠: `def get_restart_block_reason(force: bool = False) -> str | None:` (行番号: 78)、`RESTART_MIN_UPTIME_SEC: int = 120` (行番号: 71)
+* 根拠: `def get_restart_block_reason(force: bool = False) -> str | None:` (行番号: 132)、`RESTART_MIN_UPTIME_SEC: int = 120` (行番号: 71)
 
 
 * **引数/リクエスト**: `force`(bool) — 起動直後の拒否を回避するか。
@@ -80,11 +80,11 @@
 ### `restart_home_system`
 
 * **役割**: `home_system`(systemdサービス)を`sudo systemctl restart home_system`で再起動する。
-* 根拠: [関数定義] (行番号: 105〜125 / 抜粋: "def restart_home_system() -> tuple[bool, str]:")、[外部コマンド実行] (行番号: 22〜26 / 抜粋: 'subprocess.run(\n            ["sudo", "systemctl", "restart", "home_system"],\n            check=True,\n            timeout=RESTART_TIMEOUT_SEC,\n        )')
+* 根拠: [関数定義] (行番号: 159〜179 / 抜粋: "def restart_home_system() -> tuple[bool, str]:")、[外部コマンド実行] (行番号: 22〜26 / 抜粋: 'subprocess.run(\n            ["sudo", "systemctl", "restart", "home_system"],\n            check=True,\n            timeout=RESTART_TIMEOUT_SEC,\n        )')
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 105 / 抜粋: "def restart_home_system() -> tuple[bool, str]:")
+* 根拠: [関数定義] (行番号: 159 / 抜粋: "def restart_home_system() -> tuple[bool, str]:")
 
 
 * **戻り値/レスポンス**: `tuple[bool, str]`(成功したかどうかのフラグと、画面に出すメッセージ)。成功時は`(True, "再起動コマンドを送信しました")`。
@@ -143,6 +143,14 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `routers/system_router.py` | `restart_home_system`の実際の呼び出し元(`POST /api/system/restart`エンドポイント)を確認するため。 | 呼び出し元は本ファイル外にあり不明 |
 | 中 | `deploy/systemd/home_system.service` | 再起動対象の`home_system`サービスの実際の定義(ExecStart等)を確認するため。 | 根拠: [外部コマンド実行] (行番号: 23 / 抜粋: '"restart", "home_system"') |
+
+### `post_start_check` / `register_child_status_provider`（Issue #1158 で追加）
+
+* **役割**: 「最新に更新して再起動」の結果に、起動後チェックを付ける。以前は新しいプロセスが起動したことだけで成功と判定しており、カメラ監視の接続や Scheduler の起動は確かめていなかった(2026-11-24 22:51 の再起動後に玄関カメラの購読が約10分失敗したが、結果は成功のままだった)。
+* `get_deploy_state()` は、再起動を伴う更新をこのプロセスが成功と確定させた場合(状態の `confirmed_by` が `_PROCESS_STARTED_AT` と一致)だけ、`last_result["post_check"]` に `post_start_check()` の結果 `{"state": "pending"|"ok"|"ng", "text": …}` を付ける。呼ばれるたびに計算し直す(後から接続できれば ng → ok に変わる)。
+* `post_start_check()` は、起動から `POST_START_CHECK_DELAY_SEC`(60秒)未満なら「確認中」。それ以降は、登録された子プロセスの生存(`unified_server._child_alive_status`)と、`config.CAMERAS` の有効な全カメラがこのプロセスの起動後に購読まで成功したか(`camera_monitor` が書く `CAMERA_STATUS_FILE` = `.camera_monitor_status.json` の `connected_at`)を見て、「起動後チェック: OK」か「起動後チェック: 一部NG(玄関カメラが未接続・Schedulerが停止 など)」を返す。
+* 画面(`static/dashboard/maintenance.js`)は結果の後ろにこの文を付け、「確認中」の間は10秒ごとに再取得する。ng のときはトーストを失敗の色にする。自動ロールバックは影響が大きいため対象外。
+* 根拠: `def post_start_check(now: float | None = None) -> dict[str, Any]:` (参照: post_start_check)
 
 ## 8. 保守上の注意点
 

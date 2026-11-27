@@ -62,6 +62,60 @@ RESTART_MARKER_FILE: str = os.path.join(config.BASE_DIR, "dashboard_restart_mark
 
 # このプロセスの起動時刻。再起動を要求した時刻より後なら「再起動後の新プロセス」と判定する。
 _PROCESS_STARTED_AT: float = time.time()
+
+# === デプロイ後の起動後チェック(Issue #1158) ===
+# 以前は「新しいプロセスが起動した」ことだけでデプロイを成功と判定しており、カメラ監視の接続や
+# Scheduler の起動は確かめていなかった(2026-11-24 22:51 の再起動後に玄関カメラの購読が約10分
+# 失敗したが、結果は成功のままだった)。起動からこの秒数が経ったら、子プロセスの生存と、
+# 有効な全カメラがこのプロセスの起動後に購読まで成功したかを見る。それまでは「確認中」。
+POST_START_CHECK_DELAY_SEC: float = 60.0
+# camera_monitor が書く「カメラごとの最後の接続成功時刻」(monitors/camera_monitor.CAMERA_STATUS_FILE と同じ)
+CAMERA_STATUS_FILE: str = os.path.join(config.BASE_DIR, ".camera_monitor_status.json")
+# 子プロセスの生存を返す関数(unified_server の lifespan が登録する。循環 import を避けるため)
+_child_status_provider: Any = None
+
+
+def register_child_status_provider(provider: Any) -> None:
+    """`{子プロセス名: 生きているか}` を返す関数を登録する(unified_server が起動時に呼ぶ)。"""
+    global _child_status_provider
+    _child_status_provider = provider
+
+
+def post_start_check(now: float | None = None) -> dict[str, Any]:
+    """起動後チェックの結果 `{"state": "pending"|"ok"|"ng", "text": str}` を返す(Issue #1158)。
+
+    自動ロールバックはしない(影響が大きいため対象外。結果を画面に出すだけ)。
+    """
+    now = time.time() if now is None else now
+    if now - _PROCESS_STARTED_AT < POST_START_CHECK_DELAY_SEC:
+        return {"state": "pending", "text": "起動後チェック: 確認中です(起動から1分後に確認します)"}
+
+    problems: list[str] = []
+    try:
+        children = _child_status_provider() if _child_status_provider else {}
+    except Exception as e:  # noqa: BLE001
+        children = {}
+        problems.append(f"子プロセスの状態を取得できません({e})")
+    labels = {"camera_monitor": "カメラ監視", "scheduler": "Scheduler"}
+    for name, alive in sorted(children.items()):
+        if not alive:
+            problems.append(f"{labels.get(name, name)}が停止")
+
+    if children.get("camera_monitor", True):
+        data = state_file.read_json(CAMERA_STATUS_FILE, default=None)
+        connected = data.get("connected_at", {}) if isinstance(data, dict) else {}
+        if not isinstance(connected, dict):
+            connected = {}
+        for cam in getattr(config, "CAMERAS", []) or []:
+            if not cam.get("enabled", True):
+                continue
+            at = connected.get(cam["name"])
+            if not isinstance(at, (int, float)) or at < _PROCESS_STARTED_AT:
+                problems.append(f"{cam['name']}が未接続")
+
+    if problems:
+        return {"state": "ng", "text": "起動後チェック: 一部NG(" + "・".join(problems) + ")"}
+    return {"state": "ok", "text": "起動後チェック: OK"}
 _deploy_lock = threading.Lock()
 _deploy_running: bool = False
 
@@ -131,6 +185,8 @@ def _read_deploy_state() -> dict[str, Any]:
     state: dict[str, Any] = {
         "run_id": 0, "phase": PHASE_DONE, "success": None, "message": "",
         "from": "", "to": "", "restart_requested_at": 0.0, "finished_at": None,
+        # Issue #1158: 再起動を伴う更新を、どのプロセス(_PROCESS_STARTED_AT)が成功と確定させたか
+        "confirmed_by": 0.0,
     }
     if isinstance(saved, dict):
         state.update({k: saved[k] for k in state if k in saved})
@@ -289,6 +345,7 @@ def get_deploy_state() -> dict[str, Any]:
                 phase=PHASE_DONE, success=True,
                 message=f"更新して再起動しました({state['from']} → {state['to']})",
                 finished_at=get_now_jst().isoformat(timespec="seconds"),
+                confirmed_by=_PROCESS_STARTED_AT,
             )
             _write_deploy_state(state)
         elif phase in (PHASE_RUNNING, PHASE_RESTARTING) and not running_here:
@@ -300,11 +357,17 @@ def get_deploy_state() -> dict[str, Any]:
             _write_deploy_state(state)
 
     done = state["phase"] == PHASE_DONE
+    last_result: dict[str, Any] | None = None
+    if done and state["run_id"]:
+        last_result = {
+            "run_id": state["run_id"], "success": bool(state["success"]),
+            "message": state["message"], "finished_at": state["finished_at"],
+        }
+        # Issue #1158: このプロセスが確定させた「更新して再起動」だけ、起動後チェックを付ける
+        if state["success"] and float(state.get("confirmed_by") or 0.0) == _PROCESS_STARTED_AT:
+            last_result["post_check"] = post_start_check()
     return {
         "running": not done,
         "run_id": state["run_id"],
-        "last_result": {
-            "run_id": state["run_id"], "success": bool(state["success"]),
-            "message": state["message"], "finished_at": state["finished_at"],
-        } if done and state["run_id"] else None,
+        "last_result": last_result,
     }

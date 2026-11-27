@@ -52,8 +52,10 @@ CAM_CONF = {
 
 
 @pytest.fixture(autouse=True)
-def _neutralize_environment(monkeypatch):
+def _neutralize_environment(monkeypatch, tmp_path):
     """devices.json を見に行かせず、通知も診断も実際には飛ばさない。"""
+    # #1158: 接続成功時刻の記録をリポジトリ内に書かせない
+    monkeypatch.setattr(camera_monitor, "CAMERA_STATUS_FILE", str(tmp_path / "camera_status.json"))
     monkeypatch.setattr(camera_monitor, "is_camera_enabled", lambda cam_conf: True)
     monkeypatch.setattr(camera_monitor, "perform_emergency_diagnosis", lambda ip, *a, **k: {})
     monkeypatch.setattr(camera_monitor, "send_push", lambda *a, **k: None)

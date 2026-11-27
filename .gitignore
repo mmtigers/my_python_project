@@ -134,6 +134,9 @@ temp_backups/
 MY_HOME_SYSTEM/dashboard_deploy_state.json
 MY_HOME_SYSTEM/dashboard_restart_marker.json
 
+# MY_HOME_SYSTEM: camera_monitor が書くカメラごとの最後の接続成功時刻(デプロイ後の起動後チェック用。Issue #1158)
+MY_HOME_SYSTEM/.camera_monitor_status.json
+
 # MY_HOME_SYSTEM: SwitchBotハブ監視(switchbot_hub_monitor)が実行時に書く状態ファイル(Issue #1046)
 MY_HOME_SYSTEM/switchbot_hub_monitor_state.json
 MY_HOME_SYSTEM/nature_remo_monitor_state.json

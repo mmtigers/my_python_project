@@ -41,6 +41,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import config
 # #661: WSDL 探索は core/onvif_utils.py に一本化(以前は本ファイルと camera_monitor/camera_service に同一実装が重複)
 from core.onvif_utils import find_wsdl_path
+from core import state_file
 from core.logger import setup_logging
 from core.database import save_log_generic
 from services.notification_service import send_push
@@ -1048,6 +1049,27 @@ def _report_persistent_error(
         logger.warning(hint)
 
 
+# Issue #1158: カメラごとに最後に購読まで成功した時刻(epoch 秒)を残すファイル。
+# デプロイ後の起動後チェック(services/system_maintenance_service.post_start_check)が、
+# 再起動の後に全カメラが接続できたかを確かめるのに使う。
+CAMERA_STATUS_FILE: str = os.path.join(config.BASE_DIR, ".camera_monitor_status.json")
+_camera_status_lock = threading.Lock()
+
+
+def _record_connected(cam_name: str) -> None:
+    """購読まで成功した時刻を記録する(複数のカメラのスレッドから呼ばれる)。失敗しても監視は続ける。"""
+    try:
+        with _camera_status_lock:
+            data = state_file.read_json(CAMERA_STATUS_FILE, default=None)
+            connected = data.get("connected_at", {}) if isinstance(data, dict) else {}
+            if not isinstance(connected, dict):
+                connected = {}
+            connected[cam_name] = time.time()
+            state_file.write_json_atomic(CAMERA_STATUS_FILE, {"connected_at": connected})
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[{cam_name}] 接続時刻の記録に失敗しました: {e}")
+
+
 def _note_recovery(cam_name: str, backoff: _ReconnectBackoff) -> None:
     """
     障害からの復旧を知らせる(#1146)。`backoff.reset()` の前に呼ぶ。
@@ -1177,6 +1199,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             # #1146: 失敗が続いた後の成功なら復旧を知らせてから、エラーカウントをリセット
             _note_recovery(cam_name, backoff)
             backoff.reset()
+            _record_connected(cam_name)  # #1158: デプロイ後の起動後チェック用
 
             # 4. 監視ループ
             _pull_events_until_reconnect(cam_conf, session.pullpoint)

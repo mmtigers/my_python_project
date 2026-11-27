@@ -43,7 +43,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | NAS 上の録画ファイル | `nvr-parking.service` が書く | 根拠: `def process_pending(record_dir: str, days: int, limit: Optional[int]) -> Dict[str, int]:` (行番号: 50) |
-| `devices.json` の駐車場カメラの定義 | gitignore 対象 | 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 120) |
+| `devices.json` の駐車場カメラの定義 | gitignore 対象 | 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 130) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -61,42 +61,42 @@
 * **副作用**: ffmpeg の起動（`analyze_recording` 経由）、DB への書き込み
 * 根拠: `def process_pending(record_dir: str, days: int, limit: Optional[int]) -> Dict[str, int]:` (行番号: 50)
 
-* **エラーハンドリング**: `FrameExtractionError` のうち `unreadable`（ffmpeg 自身が読めないと答えた）は `records.mark_unreadable` で記録して次回から読まない。時間切れは記録せず次回もう一度読む。どちらも途中まで読めた観測は保存しない。ffmpeg は成功したがフレームが1枚も取れなかった録画（数秒で切れた録画など）は、観測0件として記録して読み直さない（何度読んでも同じで、記録しないと毎回キューの先頭に残り、1回に読む本数の上限を食いつぶして新しい録画が読まれなくなるため）
+* **エラーハンドリング**: `FrameExtractionError` のうち `unreadable`（ffmpeg 自身が読めないと答えた）は `records.mark_unreadable` で記録して次回から読まない。時間切れは記録せず次回もう一度読む。**（Issue #1184 で変更）** 時間切れが出たら、NAS が固まっている可能性が高い(残りも読めず1本につき最大300秒ずつ長引く)ため、その回の残りの録画は読まずに終える(残りの本数も `retry` に数える)。どちらも途中まで読めた観測は保存しない。ffmpeg は成功したがフレームが1枚も取れなかった録画（数秒で切れた録画など）は、観測0件として記録して読み直さない（何度読んでも同じで、記録しないと毎回キューの先頭に残り、1回に読む本数の上限を食いつぶして新しい録画が読まれなくなるため）
 * 根拠: `def process_pending(record_dir: str, days: int, limit: Optional[int]) -> Dict[str, int]:` (行番号: 50)
 
 ### `import_csv`
 
 * **役割**: Phase 0〜1 の CLI（`tools/parking_occupancy_backfill.py`）の出力ディレクトリから、`observations.csv` を録画ごとにまとめて `records.save_recording` に、`unreadable.txt` の録画を `records.mark_unreadable` に渡す。もう DB にある録画は飛ばされる。
-* 根拠: `def import_csv(out_dir: str) -> Dict[str, int]:` (行番号: 87 / 抜粋: "def import_csv(")
+* 根拠: `def import_csv(out_dir: str) -> Dict[str, int]:` (行番号: 97 / 抜粋: "def import_csv(")
 
 * **引数/リクエスト**: `out_dir`
-* 根拠: `def import_csv(out_dir: str) -> Dict[str, int]:` (行番号: 87)
+* 根拠: `def import_csv(out_dir: str) -> Dict[str, int]:` (行番号: 97)
 
 * **戻り値/レスポンス**: 件数の内訳（`saved` / `observations` / `unreadable`）
-* 根拠: `def import_csv(out_dir: str) -> Dict[str, int]:` (行番号: 87)
+* 根拠: `def import_csv(out_dir: str) -> Dict[str, int]:` (行番号: 97)
 
 * **副作用**: DB への書き込み
-* 根拠: `def import_csv(out_dir: str) -> Dict[str, int]:` (行番号: 87)
+* 根拠: `def import_csv(out_dir: str) -> Dict[str, int]:` (行番号: 97)
 
 * **エラーハンドリング**: ファイルが無ければ取り込む物が無いだけで、エラーにはしない。ファイル名から時刻を読めない録画は飛ばす
-* 根拠: `def import_csv(out_dir: str) -> Dict[str, int]:` (行番号: 87)
+* 根拠: `def import_csv(out_dir: str) -> Dict[str, int]:` (行番号: 97)
 
 ### `main`
 
 * **役割**: 引数（`--days` 既定2、`--no-limit`、`--import-csv DIR`、`--record-dir`）を解析する。`--import-csv` があれば取り込みだけを行う。それ以外は、駐車場カメラの録画ディレクトリを決めて `process_pending` を呼ぶ。
-* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 120 / 抜粋: "def main(")
+* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 130 / 抜粋: "def main(")
 
 * **引数/リクエスト**: `argv`
-* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 120)
+* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 130)
 
 * **戻り値/レスポンス**: 終了コード。通常は 0
-* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 120)
+* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 130)
 
 * **副作用**: 上記の関数に従う
-* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 120)
+* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 130)
 
 * **エラーハンドリング**: 駐車場カメラが devices.json に無い・録画ディレクトリが見えない場合は、何もせず 0 を返す（スケジューラのエラー通知を起こさない。NAS の停止は nas_monitor / health_watch が検知する）。`--days` が 1 未満なら `parser.error`
-* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 120)
+* 根拠: `def main(argv: Optional[List[str]] = None) -> int:` (行番号: 130)
 
 ## 5. 処理フロー図
 
@@ -145,7 +145,7 @@ graph TD
 
 * **`tools/` から関数を借りている**: 録画の列挙・ファイル名の解釈・CSV の形式は `tools/parking_occupancy_backfill.py` と同じものを使う（判定がずれないように）。CLI 側の関数名を変えたら、こちらも直すこと。
 * **初回は過去分を取り込む**: 定期実行は直近2日分しか遡らない。それより前の分は `--import-csv` か `--days N --no-limit` で手で取り込む。
-* **時間切れが続くと新しい録画が遅れる**: 時間切れの録画は記録しないので、次の実行でも先頭から読み直す。NAS が固まっている間は1本につき最大300秒かかる。NAS が戻れば解消する。
+* **時間切れの扱い（Issue #1184 で変更）**: 時間切れの録画は記録しないので、次の実行でも先頭から読み直す。以前は時間切れの後も残りの録画を読み続けたため、NAS が固まっている間は1回の実行が「本数 × 最大300秒」まで長引き、同じ録画が毎回上限を占め続けた。現在は時間切れが出た時点でその回を終えるので、1回あたり最大300秒で済む。NAS が戻れば次の回で時間切れだった録画から読み直す。時間切れの回数を記録して `unreadable` 扱いにする案は、NAS の一時停止で正常な録画を捨てるおそれがあるため採らなかった。
 * **CPU 負荷**: 1回に最大12本（Pi で2分弱）。ffmpeg は `nice`・スレッド数2で動く（`parking_occupancy_service.build_frame_command`）。
 * **単一プロセス前提に当たらない**: 書き込むのは `parking_*` テーブルだけで、`quest_users` には触れない。
 

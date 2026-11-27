@@ -31,7 +31,7 @@
 * FastAPIを用いたAPIサーバーのエントリーポイント（起動・設定スクリプト）である。
 * システムのルートディレクトリ解決、CORS設定、IPアドレスベースの検証（Cloudflare等リバースプロキシ対応）、ログ抑制フィルターの設定、各種ルーターの統合を行う。CORS許可オリジンは`config.CORS_ORIGINS`を直接参照する（M-8-2で、本ファイル側に別途あった重複ハードコードリストを削除し一本化した。以前は本ファイル側のリストのみが実際に使われ、`config.py`側の設定やその元になる`ALLOW_ALL_ORIGINS`環境変数を変更してもCORS設定に反映されない状態だった）。
 * **（画面タップログで追加）** `routers.ui_log_router`を`app.include_router(ui_log_router.router, prefix="/api/ui-log", tags=["ui-log"])`で`/api/ui-log`配下にマウントする(`POST /api/ui-log/events`)。同一オリジンの内部APIであり新しい外部Webhookではないため、`allowed_webhook_paths`への追記は不要。根拠: `app.include_router(ui_log_router.router, prefix="/api/ui-log", tags=["ui-log"])` (行番号: 503)
-* 根拠: [CORSミドルウェア設定] (行番号: 360 / 抜粋: "allow_origins=config.CORS_ORIGINS,")
+* 根拠: [CORSミドルウェア設定] (行番号: 372 / 抜粋: "allow_origins=config.CORS_ORIGINS,")
 * **（#411 S-L7で修正）** `allow_credentials`は`config.CORS_ORIGINS != ["*"]`で動的に決定する。以前は`ALLOW_ALL_ORIGINS=true`で`CORS_ORIGINS=["*"]`になっている場合でも`allow_credentials=True`に固定されており、StarletteのCORSMiddlewareはワイルドカード＋認証情報付きリクエストに対してリクエスト元Originをそのままエコーバックする(仕様上「*」は認証情報付きレスポンスヘッダとしては使えないため)。結果として、`ALLOW_ALL_ORIGINS=true`時は任意オリジンからCookie等の資格情報付きアクセスを実質許可してしまっていた。ワイルドカード指定時のみ`allow_credentials`をFalseにする。
 * 根拠: `allow_credentials=config.CORS_ORIGINS != ["*"]` (行番号: 248)
 * 静的ファイル（`/assets`, `/uploads`, SPA用ファイル）の配信ルーティングを行う。
@@ -40,7 +40,7 @@
 * **（Issue #829で改訂）** `config.DASHBOARD_ENABLED` が真のときだけ `routers/dashboard_router.py` をincludeする。以前はStreamlitダッシュボードを`config.DASHBOARD_INTERNAL_URL`(既定 `http://127.0.0.1:8501`)へリバースプロキシしていたが、Streamlit版は廃止され、`dashboard_router`自身がこのサーバー内でHTMLを直接組み立てて返す(外部プロセスへの中継は無い)。`config.DASHBOARD_BASE_PATH`（既定 `/dashboard`）配下へのマウントである点は変わらない。外部（スマートフォン等）からの到達はCloudflare Accessの保護下にある本サーバー経由へ一本化する構成も変わらず、コメントに **このパスを Cloudflare Access のバイパス対象に設定してはならない** と明記されている。
 * 根拠: [ダッシュボードのinclude] (行番号: 509〜511 / 抜粋: "if config.DASHBOARD_ENABLED:", "    app.include_router(dashboard_router.router, tags=[\"dashboard\"])")
 * **（Issue #829で削除）** 以前は`lifespan`の終了処理で、Streamlit中継用のhttpxコネクションプールを閉じる`dashboard_proxy_service.aclose()`を呼んでいたが、中継自体が無くなったためこの呼び出しも削除された。`dashboard_router`はDB接続等の永続リソースを自前で保持しないため、代替のクリーンアップ処理は無い。
-* 根拠: `app = FastAPI(...)` (行番号: 343 / 抜粋: "app = FastAPI("), `uvicorn.run(...)` (行番号: 628 / 抜粋: "uvicorn.run(app, host="0.0.0.0"")
+* 根拠: `app = FastAPI(...)` (行番号: 355 / 抜粋: "app = FastAPI("), `uvicorn.run(...)` (行番号: 655 / 抜粋: "uvicorn.run(app, host="0.0.0.0"")
 
 ## 3. 外部依存関係
 
@@ -62,7 +62,7 @@
 | `fastapi.staticfiles` | 外部パッケージ | 静的ファイル配信 | 根拠: `[StaticFiles]` (行番号: 15 / 抜粋: "from fastapi.staticfiles import") |
 | `fastapi.responses` | 外部パッケージ | JSON/ファイルレスポンス生成 | 根拠: `[JSONResponse, FileResponse]` (行番号: 16 / 抜粋: "from fastapi.responses import J") |
 | `fastapi.middleware.cors` | 外部パッケージ | CORS処理ミドルウェア | 根拠: `[CORSMiddleware]` (行番号: 17 / 抜粋: "from fastapi.middleware.cors im") |
-| `uvicorn` | 外部パッケージ | ASGIサーバーの起動（トップレベルではなく`_run_uvicorn_server`関数内でのローカルインポート） | 根拠: `[uvicorn]` (行番号: 625 / 抜粋: "import uvicorn") |
+| `uvicorn` | 外部パッケージ | ASGIサーバーの起動（トップレベルではなく`_run_uvicorn_server`関数内でのローカルインポート） | 根拠: `[uvicorn]` (行番号: 652 / 抜粋: "import uvicorn") |
 | `sqlite3` | 標準ライブラリ | 起動時マイグレーション適用のためのDB接続確立 | 根拠: `[sqlite3]` (行番号: 24 / 抜粋: "import sqlite3") |
 | `config` | ローカルモジュール | 設定値(`QUEST_DIST_DIR`, `SQLITE_DB_PATH`等)の取得 | 根拠: `[config]` (行番号: 26 / 抜粋: "import config") |
 | `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化処理 | 根拠: `[setup_logging]` (行番号: 27 / 抜粋: "from core.logger import setup_l") |
@@ -74,21 +74,21 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.QUEST_DIST_DIR` | 設定ファイル内の変数の有無・パス文字列が不明 | `getattr(config, "QUEST_DIST_DIR", None)` (行番号: 537 / 抜粋: "quest_dist_dir = getattr(config") |
+| `config.QUEST_DIST_DIR` | 設定ファイル内の変数の有無・パス文字列が不明 | `getattr(config, "QUEST_DIST_DIR", None)` (行番号: 564 / 抜粋: "quest_dist_dir = getattr(config") |
 | `setup_logging()` | ログ出力フォーマット等の詳細仕様が不明 | `logger = setup_logging("unifie")` (行番号: 40 / 抜粋: "logger = setup_logging("unifie") |
-| `sensor_service.cancel_all_tasks()` | キャンセルされる具体的なタスク内容が不明 | `sensor_service.cancel_all_tasks()` (行番号: 339 / 抜粋: "sensor_service.cancel_all_tasks") |
-| 各ルーター (`webhook`, `quest`, `system`, `camera`, `alexa`, `routine`, `ui_log`) | 各パス配下の具体的なルーティング定義が不明（`alexa_router`は対応する仕様書が現時点で未作成のため特に不明。`routine_router`は[routine_router.md](./routine_router.md)、`ui_log_router`は[ui_log_router.md](./ui_log_router.md)を参照） | `app.include_router(...)` (行番号: 501-506 / 抜粋: "app.include_router(webhook_router.router)") |
-| `dashboard_router` | **（Issue #829で改訂）** `config.DASHBOARD_BASE_PATH` 配下のルート定義・ページHTML組み立ての詳細が本ファイルからは不明（[dashboard_router.md](./dashboard_router.md) を参照。Streamlit版廃止に伴い、以前中継先だった`dashboard_proxy_service`への依存は無くなった） | `app.include_router(dashboard_router.router, tags=["dashboard"])` (行番号: 518 / 抜粋: "app.include_router(dashboard_router.router, tags=[\"dashboard\"])") |
+| `sensor_service.cancel_all_tasks()` | キャンセルされる具体的なタスク内容が不明 | `sensor_service.cancel_all_tasks()` (行番号: 351 / 抜粋: "sensor_service.cancel_all_tasks") |
+| 各ルーター (`webhook`, `quest`, `system`, `camera`, `alexa`, `routine`, `ui_log`) | 各パス配下の具体的なルーティング定義が不明（`alexa_router`は対応する仕様書が現時点で未作成のため特に不明。`routine_router`は[routine_router.md](./routine_router.md)、`ui_log_router`は[ui_log_router.md](./ui_log_router.md)を参照） | `app.include_router(...)` (行番号: 528-533 / 抜粋: "app.include_router(webhook_router.router)") |
+| `dashboard_router` | **（Issue #829で改訂）** `config.DASHBOARD_BASE_PATH` 配下のルート定義・ページHTML組み立ての詳細が本ファイルからは不明（[dashboard_router.md](./dashboard_router.md) を参照。Streamlit版廃止に伴い、以前中継先だった`dashboard_proxy_service`への依存は無くなった） | `app.include_router(dashboard_router.router, tags=["dashboard"])` (行番号: 545 / 抜粋: "app.include_router(dashboard_router.router, tags=[\"dashboard\"])") |
 | `monitors/camera_monitor.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, script_path])` (参照: _spawn_child_process / 抜粋: "proc = subprocess.Popen([sys.executable, script_path])") |
 | `scheduler_boot.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, script_path])` (参照: _spawn_child_process / 抜粋: "proc = subprocess.Popen([sys.executable, script_path])") |
-| `apply_pending_migrations()` | マイグレーション適用の具体的な内部処理は `core/migrations.py` にあるため不明 | `apply_pending_migrations(migration_conn)` (行番号: 274 / 抜粋: "apply_pending_migrations(migration_conn)") |
+| `apply_pending_migrations()` | マイグレーション適用の具体的な内部処理は `core/migrations.py` にあるため不明 | `apply_pending_migrations(migration_conn)` (行番号: 283 / 抜粋: "apply_pending_migrations(migration_conn)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `SilencePolicyFilter`
 
 * **（2026-09-06 品質監査で修正）** 直前に `_QUERY_SECRET_RE` / `redact_query_secrets(text)` / `SecretRedactionFilter` が追加された(次項)。`lifespan` は `uvicorn.access` ロガーに `SecretRedactionFilter` → `SilencePolicyFilter` の順で両方を登録する。
-* 根拠: (行番号: 244〜245 / 抜粋: "access_logger.addFilter(SecretRedactionFilter())\n    access_logger.addFilter(SilencePolicyFilter())")
+* 根拠: (行番号: 253〜254 / 抜粋: "access_logger.addFilter(SecretRedactionFilter())\n    access_logger.addFilter(SilencePolicyFilter())")
 
 ### `redact_query_secrets` / `SecretRedactionFilter` **（2026-09-06 品質監査で修正）**
 
@@ -131,21 +131,21 @@
 
 
 * **役割**: FastAPIの起動時(`yield`前)にアクセスログへのフィルター適用、`config.SWITCHBOT_WEBHOOK_TOKEN`が未設定の場合はSwitchBot Webhookの署名検証が無効化されている旨の警告ログ出力、NAS依存パスのプリウォーム(`config.prewarm_nas_paths()`。Issue #330 PR-Bでconfigのimport時NAS検証が遅延化されたため、サーバー起動時はここで明示的に解決する)、DBスキーママイグレーションの適用(`apply_pending_migrations`)、`CHILD_SCRIPTS`に列挙された監視子プロセス(camera_monitor / scheduler)を`_spawn_child_process`で起動し、その死活監視ループ`_supervise_child_processes`を`asyncio.create_task`で開始する。終了時(`yield`後)は監視ループを先に`cancel`してから(止めた子を再起動しないように)スケジューラー・カメラ監視の両サブプロセスを停止させ、ffmpegの停止とセンサータスクのキャンセル処理を実行する。
-* 根拠: `async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:` (行番号: 239-334 / 抜粋: "async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:")
+* 根拠: `async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:` (行番号: 248-353 / 抜粋: "async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:")
 * **（Issue #383 / #360 で修正）** 起動時マイグレーションは `sqlite3.connect(..., timeout=30.0)` で接続し、失敗時は `logger.critical`（Discord 通知）を出して `app.state.migration_ok = False` とし、camera_monitor / scheduler の子プロセスを起動しない（以前は既定 5 秒の timeout で失敗しやすく、失敗を握りつぶしてサービスを継続していた）。子プロセスの `Popen` は `_spawn_child_process` 内の try/except で保護され、一方の起動失敗がもう一方や `lifespan` 自体に影響しない。終了処理では scheduler / camera_monitor に加えて `camera_service.stop_all_processes()` でライブ配信・VOD 生成の ffmpeg も停止する（孤児化による HLS 二重書き込みの防止）。
 * 根拠: `migration_ok = True` (行番号: 262)、`sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)` (行番号: 264)、`logger.critical(` (行番号: 271-274)、`app.state.migration_ok = migration_ok` (行番号: 275)、`if migration_ok:` (行番号: 278)、`camera_service.stop_all_processes()` (行番号: 320)
 * **（Issue #646 で追加）** 子プロセスは起動後 `CHILD_MONITOR_INTERVAL_SEC`(30秒)ごとに `restart_dead_children` で死活確認され、予期せず終了していれば再起動される(詳細は次項)。以前は起動時に `Popen` するだけで、`scheduler_boot.py` が落ちると配下の6監視タスクが静かに止まり、検知は毎時cronの `health_watch.py`、復旧は人手だった。
 * 根拠: `_set_child_process(child_name, _spawn_child_process(child_name))` (行番号: 283)、`supervisor_task = asyncio.create_task(_supervise_child_processes())` (行番号: 286)、`supervisor_task.cancel()` (行番号: 294)
 * **（Issue #648 で変更）** `SWITCHBOT_WEBHOOK_TOKEN` 未設定時の起動警告は2通りになった。移行用オプトイン `ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK=true` が立っていれば「無検証で受け付けている」旨を、立っていなければ「`/webhook/switchbot` は全リクエストを 503 で拒否する」旨を警告する(拒否そのものは `routers/webhook_router.py` 側)。
-* 根拠: [SWITCHBOT_WEBHOOK_TOKEN未設定警告] (行番号: 246〜252 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:")
+* 根拠: [SWITCHBOT_WEBHOOK_TOKEN未設定警告] (行番号: 255〜261 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:")
 
 
 * **引数/リクエスト**: `app: FastAPI`
-* 根拠: `async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:` (行番号: 239 / 抜粋: "async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:")
+* 根拠: `async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:` (行番号: 248 / 抜粋: "async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:")
 
 
 * **戻り値/レスポンス**: `AsyncGenerator[None, None]`
-* 根拠: `-> AsyncGenerator[None, None]:` (行番号: 239 / 抜粋: "-> AsyncGenerator[None, None]:")
+* 根拠: `-> AsyncGenerator[None, None]:` (行番号: 248 / 抜粋: "-> AsyncGenerator[None, None]:")
 
 
 * **副作用**: Uvicornロガー設定の変更、`config.SWITCHBOT_WEBHOOK_TOKEN`未設定時の警告ログ出力、`sqlite3.connect`によるマイグレーション用DB接続の確立と`apply_pending_migrations`の実行、外部プロセス(`subprocess.Popen`)の実行と強制終了(`terminate`, `kill`)、asyncioタスク(`_supervise_child_processes`)の生成とキャンセル、グローバル変数(`camera_process`, `scheduler_process`)の書き換え(`_set_child_process`経由)。
@@ -153,14 +153,14 @@
 
 
 * **エラーハンドリング**: NASパスプリウォーム失敗時の例外(`Exception`)は捕捉しエラーログ出力のうえ起動を継続する。**マイグレーション適用失敗時の例外(`Exception`)は、捕捉した上で`migration_ok = False`とし`logger.critical`（Discord通知経由）でCRITICALログを出力するのみで、起動そのものは継続する（`lifespan`は例外を再送出せず`yield`まで到達する）ものの、直後の`if migration_ok:`分岐によりcamera_monitor/schedulerの子プロセスも死活監視ループも起動されない**（Issue #383。以前は`logger.error`でエラーログを出すだけで握りつぶし、子プロセスの起動を含めてサービス継続していたが、この挙動は廃止されている）。子プロセスの起動失敗は`_spawn_child_process`内の`try/except Exception`で捕捉され`logger.error`を出して`None`を返す（Issue #360でcamera_monitor起動もscheduler同様に保護）。監視ループのcancel時の`CancelledError`は捕捉して握りつぶす。プロセス停止時のタイムアウト(`subprocess.TimeoutExpired`)も捕捉し、強制`kill()`へフォールバックする。
-* 根拠: `except Exception as e: logger.error(f"⚠️ NAS path prewarm failed...")` (参照: lifespan / 抜粋: "NAS path prewarm failed"), `except Exception as e: ... logger.critical(` (参照: lifespan / 抜粋: "🚨 Migration failed at startup"), `if migration_ok:` (行番号: 286 / 抜粋: "if migration_ok:"), `except (asyncio.CancelledError, Exception):` (行番号: 312 / 抜粋: "except (asyncio.CancelledError, Exception):"), `except subprocess.TimeoutExpired` (行番号: 305, 314 / 抜粋: "except subprocess.TimeoutExpired")
+* 根拠: `except Exception as e: logger.error(f"⚠️ NAS path prewarm failed...")` (参照: lifespan / 抜粋: "NAS path prewarm failed"), `except Exception as e: ... logger.critical(` (参照: lifespan / 抜粋: "🚨 Migration failed at startup"), `if migration_ok:` (行番号: 286 / 抜粋: "if migration_ok:"), `except (asyncio.CancelledError, Exception):` (行番号: 324 / 抜粋: "except (asyncio.CancelledError, Exception):"), `except subprocess.TimeoutExpired` (行番号: 305, 314 / 抜粋: "except subprocess.TimeoutExpired")
 
 
 
 ### `restart_dead_children` / `_supervise_child_processes` / `_spawn_child_process`（Issue #646で追加）
 
 * **役割**: 監視子プロセス(`CHILD_SCRIPTS`: `camera_monitor` → `monitors/camera_monitor.py`、`scheduler` → `scheduler_boot.py`)の死活監視と自動再起動。`restart_dead_children(now)`は各子プロセスを`poll()`し、終了していれば`_spawn_child_process`で再起動して`_set_child_process`でグローバル変数を差し替え、再起動した子プロセス名の一覧を返す(テスト容易性のため同期関数)。直近1時間(`_CHILD_RESTART_WINDOW_SEC`)の再起動回数が`CHILD_RESTART_MAX_PER_HOUR`(5)に達した子プロセスはクラッシュループとみなして`_child_restart_disabled`に登録し、以後は再起動せず`logger.critical`(Discord通知)を1回だけ出す。起動時に`Popen`が失敗して`None`のままの子プロセスは監視対象外(起動失敗の無限リトライにしない)。`_supervise_child_processes`は`CHILD_MONITOR_INTERVAL_SEC`(30秒)ごとに`restart_dead_children`を呼ぶ無限ループで、`lifespan`がタスクとして起動・キャンセルする。
-* 根拠: `CHILD_SCRIPTS: Dict[str, str] = {` (行番号: 144 / 抜粋: "CHILD_SCRIPTS: Dict[str, str] = {")、`CHILD_MONITOR_INTERVAL_SEC: float = 30.0` (行番号: 146)、`CHILD_RESTART_MAX_PER_HOUR: int = 5` (行番号: 149)、`def _spawn_child_process(name: str) -> Optional[subprocess.Popen]:` (行番号: 172 / 抜粋: "def _spawn_child_process(name: str) -> Optional[subprocess.Popen]:")、`def restart_dead_children(now: Optional[float] = None) -> List[str]:` (行番号: 187 / 抜粋: "def restart_dead_children(now: Optional[float] = None) -> List[str]:")、`async def _supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC) -> None:` (行番号: 228 / 抜粋: "async def _supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC) -> None:")
+* 根拠: `CHILD_SCRIPTS: Dict[str, str] = {` (行番号: 144 / 抜粋: "CHILD_SCRIPTS: Dict[str, str] = {")、`CHILD_MONITOR_INTERVAL_SEC: float = 30.0` (行番号: 146)、`CHILD_RESTART_MAX_PER_HOUR: int = 5` (行番号: 149)、`def _spawn_child_process(name: str) -> Optional[subprocess.Popen]:` (行番号: 181 / 抜粋: "def _spawn_child_process(name: str) -> Optional[subprocess.Popen]:")、`def restart_dead_children(now: Optional[float] = None) -> List[str]:` (行番号: 196 / 抜粋: "def restart_dead_children(now: Optional[float] = None) -> List[str]:")、`async def _supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC) -> None:` (行番号: 237 / 抜粋: "async def _supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC) -> None:")
 
 
 * **引数/リクエスト**: `restart_dead_children(now: Optional[float] = None)`(`time.monotonic()`基準の現在時刻。省略時は実時刻)、`_spawn_child_process(name: str)`、`_supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC)`
@@ -180,14 +180,16 @@
 
 
 
+* **（Issue #1158 で追加）** `_child_alive_status()` は `{子プロセス名: 生きているか}`(`proc.poll() is None`)を返す。`lifespan` が子プロセスを起動した後に `system_maintenance_service.register_child_status_provider(_child_alive_status)` で登録し、デプロイ後の起動後チェック(`post_start_check`)が使う(サービスから `unified_server` を import すると循環し、`python unified_server.py` 起動では別モジュールとして二重に読み込まれるため、登録方式にした)。
+
 ### `security_headers_middleware` **（Issue #665で追加）**
 
 * **役割**: 全レスポンスに最小限のセキュリティヘッダーを付与するHTTPミドルウェア。`X-Content-Type-Options: nosniff`、`Referrer-Policy: strict-origin-when-cross-origin`、および `config.SECURITY_HEADER_X_FRAME_OPTIONS`（既定 `SAMEORIGIN`。空文字なら付与しない）を設定する。`config.SECURITY_HEADERS_ENABLED` が偽なら何も付与せずそのまま返す（エッジのCloudflare側で同じヘッダーを付与している構成で値が重複するのを避けるため）。既に同名ヘッダーが設定されているレスポンスは上書きしない。CSPは family-quest のビルド成果物との実測が必要なため意図的に付与しない。
-* 根拠: `async def security_headers_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 367-404 / 抜粋: "async def security_headers_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
+* 根拠: `async def security_headers_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 379-416 / 抜粋: "async def security_headers_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
 
 
 * **引数/リクエスト**: `request: Request`, `call_next: Callable[[Request], Awaitable[Response]]`
-* 根拠: `async def security_headers_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 367 / 抜粋: "async def security_headers_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
+* 根拠: `async def security_headers_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 379 / 抜粋: "async def security_headers_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
 
 
 * **戻り値/レスポンス**: `Response`（`call_next` の結果にヘッダーを追記したもの）
@@ -195,21 +197,22 @@
 
 
 * **副作用**: レスポンスヘッダーの追加のみ。ログ出力・I/Oは行わない。
-* 根拠: `response.headers[name] = value` (行番号: 402 / 抜粋: "response.headers[name] = value")
+* 根拠: `response.headers[name] = value` (行番号: 414 / 抜粋: "response.headers[name] = value")
 
 
 * **エラーハンドリング**: 独自の例外処理は持たない（`call_next` が送出した例外はそのまま `global_exception_handler` へ伝播する）。
-* 根拠: `response = await call_next(request)` (行番号: 388 / 抜粋: "response = await call_next(request)")
+* 根拠: `response = await call_next(request)` (行番号: 400 / 抜粋: "response = await call_next(request)")
 
 
 ### `ip_restriction_middleware`
 
 * **役割**: リクエスト元のIPを判定するHTTPミドルウェア。Webhookの例外パス(`allowed_webhook_paths` = `/webhook/switchbot`・`/callback/line`・`/webhook/alexa`の3件)はIP解決もログ出力も行わず即座に後続へ渡す。それ以外では`cf-connecting-ip`や`x-forwarded-for`を検証しローカル/プライベートIPかを判定するが、最終的にはアクセス遮断を行わず全リクエストを後続(`call_next`)へ渡す。**（Issue #182で修正）** 以前は非プライベートネットワークからのアクセスを`logger.debug`で記録していたが、`core/logger.py`の`setup_logging()`がロガーレベルをINFO固定にしており、DEBUGレベルへのオーバーライド手段が存在しないため、このログは常に抑制され「外部アクセスの記録」が事実上機能していなかった。本ミドルウェアのdocstring・CLAUDE.mdが明記する「非プライベートネットワークからのリクエストをログに記録する」という意図した挙動を実際に機能させるため、`logger.info`へ変更した。**（Issue #321・2026-09-03決定）** 非プライベートIPからのアクセスをブロックしない現在の挙動は、意図的な設計として正式に確定している。`Cf-Access-Jwt-Assertion`の署名/aud検証は一度PR #80で実装されたが2026-08-28の障害でrevertされ、再実装せずエッジのCloudflare Access（インフラ側）への委譲を正式設計とする案（案B）が採用された。この設計はオリジンへの直接到達がCloudflareのIPレンジ経由に限定されていること（ルーター/FW側の設定）を前提とする。
-* 根拠: `async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 407-493 / 抜粋: "async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
+* **（Issue #1156 で変更・2026-11-27 決定）外部アクセスの記録の範囲**: #182 で INFO にして全件記録していたが、閲覧のたびに利用者の IP(IPv4/IPv6)が積み上がり、定常の閲覧がログの大半を占めていた。状態を変える操作(`_READ_ONLY_METHODS` = GET/HEAD/OPTIONS 以外。デプロイ・再起動・バックアップ・クエストの操作など)だけを「… - IP: x, POST /path」の形で INFO に残し、閲覧は DEBUG(#182 のとおり実際には記録されない)にした。
+* 根拠: `async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 419-516 / 抜粋: "async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
 
 
 * **引数/リクエスト**: `request: Request`, `call_next: Callable[[Request], Awaitable[Response]]`
-* 根拠: `async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 407 / 抜粋: "async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
+* 根拠: `async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 419 / 抜粋: "async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
 
 
 * **戻り値/レスポンス**: `Response` (後続の処理結果)
@@ -228,11 +231,11 @@
 ### `global_exception_handler`
 
 * **役割**: アプリケーション全体で発生した未捕捉の例外をキャッチし、ログにスタックトレース付きで記録した上でステータスコード500の定型エラーレスポンスを返す。
-* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 496-501 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
+* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 523-528 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
 
 
 * **引数/リクエスト**: `request: Request`, `exc: Exception`
-* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 496 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
+* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 523 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
 
 
 * **戻り値/レスポンス**: `JSONResponse` (HTTP 500, `{"detail": "Internal Server Error"}`のみ)。例外の詳細文字列(`str(exc)`)はレスポンスボディに含めず、ログにのみ出力する。
@@ -240,30 +243,30 @@
 
 
 * **副作用**: エラーログへのスタックトレース出力。
-* 根拠: `logger.error(f"🔥 Global Exce` (行番号: 497 / 抜粋: "logger.error(f"🔥 Global Exce")
+* 根拠: `logger.error(f"🔥 Global Exce` (行番号: 524 / 抜粋: "logger.error(f"🔥 Global Exce")
 
 
 * **エラーハンドリング**: なし（本メソッド自体が最上位の例外ハンドラ）
-* 根拠: `@app.exception_handler(Exceptio` (行番号: 495 / 抜粋: "@app.exception_handler(Exceptio")
+* 根拠: `@app.exception_handler(Exceptio` (行番号: 522 / 抜粋: "@app.exception_handler(Exceptio")
 
 
 
 ### `serve_quest_spa` (エンドポイント: `GET /quest/{full_path:path}`, `GET /camera/{full_path:path}`)
 
 * **役割**: SPA(Single Page Application)向けのリクエストハンドラ。`/quest/*`と`/camera/*`の両方に同一ハンドラが登録されている。指定されたパスのファイルが存在する場合はそれを返し、存在しない場合はフォールバックとして`index.html`を返す。
-* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 551-566 / 抜粋: "async def serve_quest_spa(full_path: str):")、`@app.get("/quest/{full_path:path}")` / `@app.get("/camera/{full_path:path}")` (行番号: 367-368)
+* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 578-593 / 抜粋: "async def serve_quest_spa(full_path: str):")、`@app.get("/quest/{full_path:path}")` / `@app.get("/camera/{full_path:path}")` (行番号: 367-368)
 
 
 * **引数/リクエスト**: `full_path: str`
-* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 551 / 抜粋: "async def serve_quest_spa(full_path: str):")
+* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 578 / 抜粋: "async def serve_quest_spa(full_path: str):")
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
-* 根拠: `return FileResponse(target_fil` (行番号: 560 / 抜粋: "return FileResponse(target_file"), `return JSONResponse(status_code` (参照: serve_quest_spa / 抜粋: "return JSONResponse(status_code")
+* 根拠: `return FileResponse(target_fil` (行番号: 587 / 抜粋: "return FileResponse(target_file"), `return JSONResponse(status_code` (参照: serve_quest_spa / 抜粋: "return JSONResponse(status_code")
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 551-566 / 抜粋: "async def serve_quest_spa(full_path: str):")
+* 根拠: 該当関数内処理 (行番号: 578-593 / 抜粋: "async def serve_quest_spa(full_path: str):")
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
@@ -274,11 +277,11 @@
 ### `serve_quest_root` (エンドポイント: `GET /quest`, `GET /quest/`, `GET /camera`, `GET /camera/`)
 
 * **役割**: SPAルートパスへのアクセスに対し`index.html`を返す。`/quest`系と`/camera`系の計4パスに同一ハンドラが登録されている。
-* 根拠: `async def serve_quest_root():` (行番号: 574-578 / 抜粋: "async def serve_quest_root():")、`@app.get("/quest")` 等4つのデコレータ (行番号: 388-391)
+* 根拠: `async def serve_quest_root():` (行番号: 601-605 / 抜粋: "async def serve_quest_root():")、`@app.get("/quest")` 等4つのデコレータ (行番号: 388-391)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def serve_quest_root():` (行番号: 574 / 抜粋: "async def serve_quest_root():")
+* 根拠: `async def serve_quest_root():` (行番号: 601 / 抜粋: "async def serve_quest_root():")
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
@@ -286,7 +289,7 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 574-578 / 抜粋: "async def serve_quest_root():")
+* 根拠: 該当関数内処理 (行番号: 601-605 / 抜粋: "async def serve_quest_root():")
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
@@ -297,11 +300,11 @@
 ### `root` (エンドポイント: `GET /`)
 
 * **役割**: 稼働状態、システム名、現在時刻を返すルートAPI。
-* 根拠: `async def root():` (行番号: 586-591 / 抜粋: "async def root():")
+* 根拠: `async def root():` (行番号: 613-618 / 抜粋: "async def root():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def root():` (行番号: 586 / 抜粋: "async def root():")
+* 根拠: `async def root():` (行番号: 613 / 抜粋: "async def root():")
 
 
 * **戻り値/レスポンス**: `dict` (status, system, timeキーを含む)
@@ -309,22 +312,22 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 586-591 / 抜粋: "async def root():")
+* 根拠: 該当関数内処理 (行番号: 613-618 / 抜粋: "async def root():")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数内処理 (行番号: 586-591 / 抜粋: "async def root():")
+* 根拠: 該当関数内処理 (行番号: 613-618 / 抜粋: "async def root():")
 
 
 
 ### `health_check` (エンドポイント: `GET /health`)
 
 * **役割**: **（Issue #735 / AUDIT-005 で変更）** liveness ではなく **readiness** を返す。`lifespan`がスキーマ適用に失敗すると`app.state.migration_ok`が`False`になり、監視子プロセスを起動しないまま「プロセスは生存しているが全APIがスキーマ未適用のDBに当たって500」という状態になる。以前は無条件に`{"status": "healthy"}`を返していたため、systemd(`Type=simple`)も`server_watchdog`(`systemctl` + `pgrep`)も`health_watch`(`check_service_active`)もこの状態を「正常」と報告していた。現在は`migration_ok`が`False`のとき`503`を返し、外形監視から見分けられるようにしている。
-* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 594 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
+* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 621 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
 
 
 * **引数/リクエスト**: `request: Request`（`app.state`を参照するために受け取る。リクエストボディ・クエリは読まない）
-* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 594 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
+* 根拠: `async def health_check(request: Request) -> JSONResponse:` (行番号: 621 / 抜粋: "async def health_check(request: Request) -> JSONResponse:")
 
 
 * **戻り値/レスポンス**: `JSONResponse`。`migration_ok`が`False`なら`503` + `{"status": "unhealthy", "reason": "migration_failed"}`、それ以外は`200` + `{"status": "healthy"}`。`app.state.migration_ok`が存在しない場合（`lifespan`を通らないテスト経路等）は`getattr`の既定値`True`により`200`。
@@ -344,7 +347,7 @@
 ### `_run_uvicorn_server`（Issue #229で追加）
 
 * **役割**: 本番起動経路（`python unified_server.py`実行時の`if __name__ == "__main__":`）のエントリポイント。`uvicorn.run(app, host="0.0.0.0", port=8000)`を呼び出す。**（Issue #229で修正）** 以前はこの箇所で`uvicorn.config.LOGGING_CONFIG`を書き換え、`"uvicorn.access"`ロガー自体のレベルを`WARNING`に固定していた。uvicornのアクセスログは常に`logger.info()`（レベル20）で出力されるため、ロガーのレベルチェックの時点でログレコードが作られず、`lifespan()`内で登録される`SilencePolicyFilter`（GETの200/304ポーリングのみを選別して抑制し、POST・エラーは残す設計）が一度も呼び出されなかった。結果、POST等の状態変更リクエストやエラーレスポンスを含め、アクセスログが本番起動経路で一切残らない状態になっていた。現在はデフォルトの`log_config`（`uvicorn.access`はINFO）をそのまま使い、レコード生成自体は妨げず`SilencePolicyFilter`に選別を委ねる。本関数への切り出しは、以前は`if __name__ == "__main__":`直下にインラインで書かれ`import`されない限り実行されずテストが困難だった処理を、単体テストで`uvicorn.run`をモックして検証できるようにするため（このロジック自体はIssue #229の修正の一部）。
-* 根拠: [関数定義とコメント] (行番号: 613-628 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
+* 根拠: [関数定義とコメント] (行番号: 640-655 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
 
 
 * **引数/リクエスト**: なし
@@ -356,7 +359,7 @@
 
 
 * **副作用**: `uvicorn.run`の呼び出し（ASGIサーバーの起動。呼び出しはブロッキングでプロセスの生存期間中戻らない）
-* 根拠: (行番号: 628 / 抜粋: "uvicorn.run(app, host="0.0.0.0", port=8000)")
+* 根拠: (行番号: 655 / 抜粋: "uvicorn.run(app, host="0.0.0.0", port=8000)")
 
 
 * **エラーハンドリング**: なし
@@ -450,12 +453,12 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **（Issue #953）シャットダウン時の監視ループ停止の握りつぶし**: `lifespan`の終了処理で`supervisor_task`を`cancel()`した後の完了待ちの例外(`CancelledError`含む)は握りつぶす。監視ループを止めるだけのため意図的であることを行末コメントで明記した(コメントのみの変更で挙動は不変)。根拠: (行番号: 313 / 抜粋: "pass  # #953: 意図的。シャットダウン時に監視ループを止めるだけ(cancel の完了待ち)")
+* **（Issue #953）シャットダウン時の監視ループ停止の握りつぶし**: `lifespan`の終了処理で`supervisor_task`を`cancel()`した後の完了待ちの例外(`CancelledError`含む)は握りつぶす。監視ループを止めるだけのため意図的であることを行末コメントで明記した(コメントのみの変更で挙動は不変)。根拠: (行番号: 325 / 抜粋: "pass  # #953: 意図的。シャットダウン時に監視ループを止めるだけ(cancel の完了待ち)")
 * **（スマホ対応。Issue #829でStreamlit部分を訂正）** `/dashboard` は Cloudflare Access のバイパス対象にしてはならない**: `ip_restriction_middleware` の `allowed_webhook_paths`（`/webhook/switchbot`・`/callback/line`・`/webhook/alexa`）は「エッジ側でバイパス設定が必要なパス」の一覧だが、`config.DASHBOARD_BASE_PATH`（既定 `/dashboard`）はその逆で、**エッジの認証を必ず通す必要がある**。バイパスすると、認証機構を持たないダッシュボード（家族の健康記録・防犯ログの閲覧と再起動操作を備える。以前はStreamlit製だったが#829で廃止され、現在は`dashboard_router`自身がHTMLを返す。認証を持たない点は変わらない）が無認証で外部公開される。
-* 根拠: [ダッシュボードのinclude箇所のコメント] (行番号: 516 / 抜粋: "# ★このパスを Cloudflare Access のバイパス対象に設定してはならない。")
+* 根拠: [ダッシュボードのinclude箇所のコメント] (行番号: 543 / 抜粋: "# ★このパスを Cloudflare Access のバイパス対象に設定してはならない。")
 
 * **（スマホ対応。Issue #829でルート数の記述を訂正）** ダッシュボードのルートはOpenAPIスキーマに出ない**: `routers/dashboard_router.py` の全ルート(現在10個。ホーム/見守り/くらし/システムの4ページ・自動更新フラグメント・PWAマニフェスト・アイコン・スナップショット・旧URLリダイレクト用)はすべて `include_in_schema=False` である。`tests/test_unified_server_app.py` の `test_allowed_webhook_paths_matches_mounted_webhook_routes` はOpenAPIスキーマ上のパス一覧（`/webhook/`・`/callback/` 始まり）を突き合わせる実装なので、この検査には影響しない。
-* 根拠: [ダッシュボードのinclude] (行番号: 518 / 抜粋: "app.include_router(dashboard_router.router, tags=[\"dashboard\"])")
+* 根拠: [ダッシュボードのinclude] (行番号: 545 / 抜粋: "app.include_router(dashboard_router.router, tags=[\"dashboard\"])")
 
 * **（Issue #829で削除）** 以前はStreamlitの`_stcore/stream` WebSocket接続が`config.DASHBOARD_BASE_PATH`配下に存在し、`security_headers_middleware`/`ip_restriction_middleware`(いずれも`@app.middleware("http")`で登録)が適用されない点を注意点として記載していたが、Streamlit版廃止により`dashboard_router`にWebSocketルートは存在しなくなったため、この項目自体が本ファイルには当てはまらなくなった。
 

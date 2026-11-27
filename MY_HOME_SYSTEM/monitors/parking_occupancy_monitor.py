@@ -73,8 +73,18 @@ def process_pending(record_dir: str, days: int, limit: Optional[int]) -> Dict[st
                 counts["unreadable"] += 1
                 logger.info(f"🚗 読めない録画を記録しました(次回からは読みません): {e}")
             else:
+                # Issue #1184: 時間切れ(ffmpeg を kill した)は NAS が一時的に固まっただけかもしれないので
+                # 記録せず次回もう一度読む。ただし NAS が固まっているなら残りの録画も読めず、1本につき
+                # 最大 FFMPEG_TIMEOUT_SECONDS(300秒)ずつ実行が長引くうえ、毎回同じ録画が先頭に残って
+                # 上限を占め続けるため、この回の残りは読まずに終える。
                 counts["retry"] += 1
-                logger.warning(f"🚗 録画を最後まで読めなかったので次回に回します: {e}")
+                remaining = len(pending) - pending.index(path) - 1
+                counts["retry"] += remaining
+                logger.warning(
+                    f"🚗 録画を最後まで読めなかったので次回に回します: {e}"
+                    + (f"(NAS が固まっている可能性があるため、この回の残り{remaining}本も次回に回します)" if remaining else "")
+                )
+                break
             continue
         # フレームが1枚も取れなかった(ffmpeg は成功。数秒で切れた録画など)場合も、観測0件として
         # 記録する。何度読んでも同じで、記録しないと毎回キューの先頭に残り、1回に読む本数の

@@ -719,8 +719,12 @@ TV_GRACEFUL_OFF_WAIT_SECONDS: int = _get_int_env("TV_GRACEFUL_OFF_WAIT_SECONDS",
 # Alexa Developer Consoleでスキルを作成すると発行される "amzn1.ask.skill.xxxx" 形式のID。
 # 設定すると、routers/alexa_router.py 経由のリクエストの context.System.application.applicationId
 # がこの値と一致するかを ask-sdk-core が検証し、他人のスキルからのリクエストを拒否する。
-# 未設定でも動作するが(署名検証だけになる)、本番では設定を強く推奨。
+# Issue #1149: 未設定のときは /webhook/alexa を 503 で拒否する(フェイルクローズ)。署名検証だけでは、
+# Alexa が署名した要求であれば誰が作ったスキルからでも受け付けてしまい、家族のデータが外に出る
+# (このパスは allowed_webhook_paths で外部公開)。SWITCHBOT_WEBHOOK_TOKEN(#648)と同じく、
+# 明示的なオプトイン(ALEXA_ALLOW_ANY_SKILL=true)でのみ従来どおり skill ID を検証せずに受け付ける。
 ALEXA_SKILL_ID: Optional[str] = os.getenv("ALEXA_SKILL_ID")
+ALEXA_ALLOW_ANY_SKILL: bool = os.getenv("ALEXA_ALLOW_ANY_SKILL", "false").strip().lower() == "true"
 
 # ==========================================
 # 12. ラズパイ監視(health_watch)設定

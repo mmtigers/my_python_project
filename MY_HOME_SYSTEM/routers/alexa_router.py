@@ -12,9 +12,11 @@ Alexa Developer Console側のスキルエンドポイントに、このunified_s
     3. 生成された ResponseEnvelope をJSONとして返す
 """
 import asyncio
+from typing import Any, Optional
 
 from fastapi import APIRouter, Request, HTTPException
 
+import config
 from core.logger import setup_logging
 from core.alexa_verifier import verify_signature, verify_timestamp, AlexaVerificationError
 from handlers.alexa_handler import skill
@@ -23,8 +25,31 @@ logger = setup_logging("alexa_router")
 router = APIRouter()
 
 
+def _application_id(payload: Any) -> Optional[str]:
+    """要求の applicationId(context.System.application → session.application の順)。"""
+    if not isinstance(payload, dict):
+        return None
+    for path in (("context", "System", "application"), ("session", "application")):
+        node: Any = payload
+        for key in path:
+            node = node.get(key) if isinstance(node, dict) else None
+        if isinstance(node, dict) and node.get("applicationId"):
+            return str(node["applicationId"])
+    return None
+
+
+def _require_skill_configured() -> None:
+    """Issue #1149: ALEXA_SKILL_ID が未設定なら 503 で拒否する(明示的なオプトインを除く)。"""
+    if config.ALEXA_SKILL_ID or config.ALEXA_ALLOW_ANY_SKILL:
+        return
+    logger.warning("ALEXA_SKILL_ID が未設定のため /webhook/alexa を拒否しました(503)。")
+    raise HTTPException(status_code=503, detail="Alexa skill is not configured (ALEXA_SKILL_ID is unset)")
+
+
 @router.post("/webhook/alexa")
 async def alexa_webhook(request: Request):
+    # Issue #1149: 設定が無ければ、署名検証(証明書の取得を伴う)の前に拒否する
+    _require_skill_configured()
     raw_body = await request.body()
     signature = request.headers.get("Signature", "")
     cert_chain_url = request.headers.get("SignatureCertChainUrl", "")
@@ -51,6 +76,13 @@ async def alexa_webhook(request: Request):
     except AlexaVerificationError as e:
         logger.warning(f"Alexa request timestamp verification failed: {e}")
         raise HTTPException(status_code=400, detail="Timestamp verification failed")
+
+    # Issue #1149: 正しく署名されていても、別のスキルからの要求は拒否する。ask-sdk-core の
+    # skill_id 検証(handlers/alexa_handler.py)は起動時の設定しか見ず、不一致を例外(=500)で返すため、
+    # ここで先に 403 にする。
+    if config.ALEXA_SKILL_ID and _application_id(payload) != config.ALEXA_SKILL_ID:
+        logger.warning(f"Alexa request from an unexpected skill was rejected: {str(_application_id(payload))[:100]!r}")
+        raise HTTPException(status_code=403, detail="Unexpected skill")
 
     try:
         request_envelope = skill.serializer.deserialize(
