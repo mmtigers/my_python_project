@@ -72,3 +72,70 @@ def camera_recording_states(now: datetime.datetime | None = None) -> list[dict[s
             state = "ok"
         states.append({"id": cam["id"], "name": cam["name"], "state": state, "latest": latest})
     return states or None
+
+
+# === 録画の欠け(Issue #1169) ===
+# 録画の ffmpeg は SEGMENT_SEC(600秒)ごとに新しいファイルを作る。隣り合うセグメントの開始時刻の
+# 間隔が SEGMENT_SEC + GAP_TOLERANCE_SEC を超えたら、その差(間隔 − SEGMENT_SEC)を欠けとみなす。
+# ffmpeg の再起動(RestartSec=10s)で生じる短いセグメントは間隔が縮むだけなので欠けにならない。
+# 直前のセグメントが途中で終わっていた場合は実際の欠けより短く出る(ファイルの長さは読まないため、
+# 値は下限の目安)。30分以上の停止や細切れは health_watch のチェック10が別途通知する。
+SEGMENT_SEC: int = 600
+GAP_TOLERANCE_SEC: int = 60
+
+
+def recording_times_between(
+    folder: str, start: datetime.datetime, end: datetime.datetime
+) -> list[datetime.datetime]:
+    """録画フォルダの、start〜end のセグメント開始時刻を古い順に返す。
+
+    start より前の最後の1本も含める(期間の先頭の欠けを数えるため)。日付ごとに glob するので、
+    読むのは期間の日数ぶん(+前日)のファイル名だけ。
+    """
+    names: list[str] = []
+    day = (start - datetime.timedelta(days=1)).date()
+    while day <= end.date():
+        pattern = os.path.join(folder, f"{day.strftime('%Y%m%d')}_*.mp4")
+        names.extend(os.path.basename(p) for p in glob.glob(pattern))
+        day += datetime.timedelta(days=1)
+    times: list[datetime.datetime] = []
+    for name in sorted(set(names)):
+        try:
+            times.append(datetime.datetime.strptime(name[:15], "%Y%m%d_%H%M%S").replace(tzinfo=JST))
+        except ValueError:
+            continue
+    before = [t for t in times if t < start]
+    inside = [t for t in times if start <= t <= end]
+    return before[-1:] + inside
+
+
+def find_recording_gaps(times: list[datetime.datetime]) -> list[tuple[datetime.datetime, int]]:
+    """古い順のセグメント開始時刻から、欠け(欠けが始まったと見られる時刻, 欠けの秒数)を返す。"""
+    gaps: list[tuple[datetime.datetime, int]] = []
+    for prev, cur in zip(times, times[1:]):
+        interval = int((cur - prev).total_seconds())
+        if interval > SEGMENT_SEC + GAP_TOLERANCE_SEC:
+            gaps.append((prev + datetime.timedelta(seconds=SEGMENT_SEC), interval - SEGMENT_SEC))
+    return gaps
+
+
+def camera_recording_gaps(
+    start: datetime.datetime, end: datetime.datetime
+) -> list[dict[str, Any]] | None:
+    """有効なカメラごとの、start〜end の録画の欠けの件数と合計秒数。NAS未マウントなら None。
+
+    各要素は `{"name", "count", "total_sec"}`。週次レポートが「後から欠けの有無を確かめる記録」
+    として使う(数分の欠けは都度通知するとノイズになるので通知しない。Issue #1169)。
+    """
+    if not os.path.ismount(config.NAS_MOUNT_POINT):
+        return None
+    results: list[dict[str, Any]] = []
+    for cam in config.CAMERAS:
+        if not cam.get("enabled", True):
+            continue
+        folder_name = cam.get("nas_folder") or cam["name"]
+        gaps = find_recording_gaps(
+            recording_times_between(os.path.join(config.NVR_RECORD_DIR, folder_name), start, end)
+        )
+        results.append({"name": cam["name"], "count": len(gaps), "total_sec": sum(s for _, s in gaps)})
+    return results or None

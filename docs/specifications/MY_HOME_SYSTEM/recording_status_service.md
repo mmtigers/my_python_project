@@ -89,6 +89,14 @@
 
 * **エラーハンドリング**: なし(例外は呼び出し側へ伝播する。ダッシュボード側は `home_status_service.cached_with_timeout` が捕捉して `None` にする)
 
+### `recording_times_between` / `find_recording_gaps` / `camera_recording_gaps`（Issue #1169 で追加）
+
+* **役割**: 常時録画の短時間の欠け(数分)を「後から確かめられる記録」にする。以前は health_watch のチェック10(30分の停止・120分で16本以上の細切れ)にしか判定が無く、2026-11-25 の駐車場カメラの通信断(約2.5分・約1分。#1150)のような欠けはどこにも記録されず、NAS のファイル名か `journalctl -u nvr-parking` を手で読むしかなかった。都度の通知はノイズになるので行わず、週次レポート(`weekly_analyze_report.format_system_section`)がカメラごとの件数・合計時間を1行で出す。
+* `recording_times_between(folder, start, end)`: 期間の日数ぶん(+前日)だけ日付ごとに glob し、start〜end のセグメント開始時刻を古い順に返す。期間の先頭の欠けを数えるため、start より前の最後の1本も含める。
+* `find_recording_gaps(times)`: 隣り合う開始時刻の間隔が `SEGMENT_SEC`(600) + `GAP_TOLERANCE_SEC`(60) を超えた箇所を、(前のセグメントの開始 + 600秒, 間隔 − 600秒)として返す。ffmpeg の再起動(`RestartSec=10s`)で生じる短いセグメントは間隔が縮むだけなので欠けにならない。ファイルの長さは読まないため、直前のセグメントが途中で終わっていた場合は実際より短く出る(値は下限の目安)。
+* `camera_recording_gaps(start, end)`: 有効なカメラごとの `{"name", "count", "total_sec"}`。NAS 未マウントなら `None`。
+* 根拠: `def find_recording_gaps(times: list[datetime.datetime]) -> list[tuple[datetime.datetime, int]]:` (参照: find_recording_gaps)、`def camera_recording_gaps(` (参照: camera_recording_gaps)
+
 ## 5. 処理フロー図
 
 ```mermaid

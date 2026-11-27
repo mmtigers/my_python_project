@@ -21,7 +21,7 @@
 トークン、`SWITCHBOT_WEBHOOK_TOKEN`、`ALEXA_SKILL_ID` 等。一覧は `MY_HOME_SYSTEM/.env.example`)は
 パスワードマネージャ等リポジトリ外の秘匿情報として別途保管しておくこと。
 
-## 0. NAS ごと失われた場合(オフサイトの最新1世代から復元)
+## 0. NAS ごと失われた場合(オフサイトの最新世代・週次の世代から復元)
 
 2026-09-19 から、`.env` に `DB_BACKUP_OFFSITE_REMOTE`(例: `gdrive:お家開発/db_backup_latest`)を
 設定していれば、毎日 04:00 のバックアップ成功後に最新世代が `home_system_latest.db` として
@@ -61,7 +61,9 @@ rclone copyto "gdrive:お家開発/db_backup_latest/home_system_latest.db" /tmp/
 sqlite3 /tmp/home_system_latest.db "PRAGMA integrity_check;"   # ok と出ること
 ```
 
-オフサイトには**最新1世代しか無い**(過去の世代・`devices.json` は NAS 側にしか無い)。
+オフサイトには最新世代に加え、毎週日曜の世代が `home_system_weekly_YYYYMMDD.db` として直近4週ぶん残る
+(Issue #1163。latest が論理的に壊れていた場合は `rclone lsl "gdrive:お家開発/db_backup_latest"` で
+一覧を見て、壊れる前の週次ファイルを同じ手順で取得する)。それより古い世代・`devices.json` は NAS 側にしか無い。
 `devices.json` はカメラの接続情報を含むためオフサイトへは送っていない。
 
 ## 1. 復元前の確認
