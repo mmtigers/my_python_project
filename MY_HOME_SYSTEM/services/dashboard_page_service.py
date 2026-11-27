@@ -1731,8 +1731,14 @@ def build_freshness_rows(
     nas_data: pd.Series | None,
     memory: dict[str, float] | None,
     now: datetime,
+    car: Any = None,
 ) -> list[dict[str, Any]]:
     """システムページの「各機能の最終データ更新時刻」一覧を組み立てる。
+
+    #1182: `car`(`home_status_service.get_car_summary()`)があれば、10分ごとに更新される
+    駐車場の在否判定の最後の観測の時刻を出し、止まっていれば赤にする。止まっているかの判定は
+    ホームの「🚗 駐車場」カードと同じ `home_status_service.car_is_stale` を使う(判定をこちらに
+    書かない)。判定のデータが無い(None)ときは行を出さない。
 
     専門用語を避け、閾値を超えたものだけ赤くする(項目3)。カメラ(駐車場)は
     イベント駆動(動きがあった時だけ記録される)ため、`get_camera_status`と同じ理由で
@@ -1763,6 +1769,17 @@ def build_freshness_rows(
         except (KeyError, TypeError):
             nas_at = None
     _add("🗄️ 保存装置(NAS)", nas_at, 15)
+
+    if car is not None:
+        label = "🚗 駐車場の在否判定"
+        if car.last_observed_at is None:
+            rows.append({"label": label, "text": "データがありません", "state": "red"})
+        else:
+            at_text = home_status_service.format_relative_time(car.last_observed_at, now)
+            if home_status_service.car_is_stale(car, now):
+                rows.append({"label": label, "text": f"{at_text} (更新が止まっています)", "state": "red"})
+            else:
+                rows.append({"label": label, "text": at_text, "state": "ok"})
 
     parking_at = home_status_service.latest_parking_motion_at(df_sensor)
     _add("🚗 駐車場カメラ(参考)", parking_at, None)

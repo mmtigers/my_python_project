@@ -460,6 +460,29 @@ class TestStatusCacheOnTheServerSide:
         assert len(day_calls) == 1
         assert len(mock_load.call_args_list) == 2
 
+    def test_daily_cost_is_computed_only_on_the_power_page(self):
+        """Issue #1178: 日別の電気代(最大31回の集計)は電気ページを開いたときだけ取る。"""
+        patches = _stub_loaders()
+        for p in patches:
+            p.start()
+        try:
+            with patch.object(home_status_service.analysis_service, "calculate_daily_cost_series",
+                              return_value=[(date(2026, 9, 19), 123)]) as mock_daily, \
+                 patch("services.power_analysis_service.build_power_report", return_value=None), \
+                 patch("services.power_page_service.render_power_page", return_value="<html></html>") as mock_render, \
+                 _client() as client:
+                for path in ("/", "/watch", "/sys", "/life", "/status"):
+                    client.get(f"{config.DASHBOARD_BASE_PATH}{path}")
+                assert mock_daily.call_count == 0
+                client.get(f"{config.DASHBOARD_BASE_PATH}/power")
+                client.get(f"{config.DASHBOARD_BASE_PATH}/power")
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert mock_daily.call_count == 1  # 2回目は10分キャッシュから
+        assert mock_render.call_args.kwargs["daily_cost_rows"] == [(date(2026, 9, 19), 123)]
+
     def test_watch_page_with_date_loads_that_day_from_the_db(self):
         """`?date=`指定時は共通キャッシュ(直近3000件)ではなく、指定日をDBから取る。"""
         patches = _stub_loaders()

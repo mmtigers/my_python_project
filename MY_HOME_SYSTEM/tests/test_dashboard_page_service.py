@@ -426,6 +426,30 @@ class TestBuildFreshnessRows:
         assert nas_row["state"] == "red"
 
 
+    def test_parking_occupancy_row_ok_and_stale(self):
+        """#1182: 在否判定の最後の観測を出し、45分を超えたら赤(ホームのカードと同じ判定)。"""
+        from services.parking_record_service import CarSummary
+        now = _jst(2026, 11, 27, 12, 0, 0)
+        naive = now.replace(tzinfo=None)
+
+        fresh = CarSummary(state="present", since=None, last_observed_at=naive - timedelta(minutes=12), trips_today=0)
+        rows = dashboard_page_service.build_freshness_rows(pd.DataFrame(), None, {"percent": 1}, now, car=fresh)
+        row = next(r for r in rows if r["label"] == "🚗 駐車場の在否判定")
+        assert row["state"] == "ok" and "12分前" in row["text"]
+
+        stale = CarSummary(state="present", since=None, last_observed_at=naive - timedelta(minutes=50), trips_today=0)
+        rows = dashboard_page_service.build_freshness_rows(pd.DataFrame(), None, {"percent": 1}, now, car=stale)
+        row = next(r for r in rows if r["label"] == "🚗 駐車場の在否判定")
+        assert row["state"] == "red" and "止まっています" in row["text"]
+        # 動体検知の参考行は残す
+        assert any(r["label"] == "🚗 駐車場カメラ(参考)" for r in rows)
+
+    def test_no_parking_occupancy_row_without_data(self):
+        now = _jst(2026, 11, 27, 12, 0, 0)
+        rows = dashboard_page_service.build_freshness_rows(pd.DataFrame(), None, {"percent": 1}, now)
+        assert not any(r["label"] == "🚗 駐車場の在否判定" for r in rows)
+
+
 class TestRenderOverallSummary:
     def test_all_ok_shows_positive_message(self):
         html = dashboard_page_service._render_overall_summary(

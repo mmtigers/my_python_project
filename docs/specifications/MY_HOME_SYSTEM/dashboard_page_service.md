@@ -662,8 +662,9 @@
 
 ### `build_freshness_rows`
 
-* **役割**: システムページの「各機能の最終データ更新時刻」一覧(⚡電気・環境の見守り/🗄️保存装置(NAS)/🚗駐車場カメラ(参考)/🖥️サーバー本体)を組み立てる。内部の`_add`ヘルパーが、時刻が無ければ「データがありません」(閾値ありなら赤、無ければ情報表示)、閾値を超えていれば赤で「(更新が止まっています)」を付記、それ以外は閾値の有無に応じて`ok`/`info`状態にする。駐車場カメラはイベント駆動(動きがあった時だけ記録)のため閾値`None`で「更新が無い=異常」とはみなさない。サーバー本体は`memory`の有無だけで`ok`/`red`を決める。
-* 根拠: [関数定義] (行番号: 1729〜1776 / 抜粋: "def build_freshness_rows(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    memory: dict[str, float] | None,\n    now: datetime,\n) -> list[dict[str, Any]]:")、[閾値判定] (行番号: 1743〜1753 / 抜粋: "def _add(label: str, at: datetime | None, threshold_min: int | None):")
+* **（Issue #1182 で追加）在否判定の行**: キーワード引数 `car`(ルーターが `home_status_service.get_car_summary()` を渡す)があれば、「🚗 駐車場の在否判定」の行に最後の観測の時刻(`last_observed_at`)を相対表記で出し、`home_status_service.car_is_stale`(ホームの「🚗 駐車場」カードと同じ `CAR_STATE_STALE_MINUTES`=45分)が真なら赤の「(更新が止まっています)」、観測が無ければ赤の「データがありません」にする。判定はページ組み立て側に書かない。`car` が `None`(判定のデータが無い)なら行を出さない。動体検知の「🚗 駐車場カメラ(参考)」行は残している。
+* **役割**: システムページの「各機能の最終データ更新時刻」一覧(⚡電気・環境の見守り/🗄️保存装置(NAS)/🚗駐車場の在否判定(#1182)/🚗駐車場カメラ(参考)/🖥️サーバー本体)を組み立てる。内部の`_add`ヘルパーが、時刻が無ければ「データがありません」(閾値ありなら赤、無ければ情報表示)、閾値を超えていれば赤で「(更新が止まっています)」を付記、それ以外は閾値の有無に応じて`ok`/`info`状態にする。駐車場カメラはイベント駆動(動きがあった時だけ記録)のため閾値`None`で「更新が無い=異常」とはみなさない。サーバー本体は`memory`の有無だけで`ok`/`red`を決める。
+* 根拠: [関数定義] (行番号: 1729〜1776 / 抜粋: "def build_freshness_rows(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    memory: dict[str, float] | None,\n    now: datetime,\n) -> list[dict[str, Any]]:")、[閾値判定] (行番号: 1749〜1759 / 抜粋: "def _add(label: str, at: datetime | None, threshold_min: int | None):")
 
 
 * **引数/リクエスト**: `df_sensor: pd.DataFrame`, `nas_data: pd.Series | None`, `memory: dict[str, float] | None`, `now: datetime`
@@ -671,7 +672,7 @@
 
 
 * **戻り値/レスポンス**: `list[dict[str, Any]]`(各要素は`label`/`text`/`state`キーを持つ)
-* 根拠: [戻り値] (行番号: 1776 / 抜粋: "return rows")、[辞書組み立て] (行番号: 511, 516, 519, 536〜540)
+* 根拠: [戻り値] (行番号: 1793 / 抜粋: "return rows")、[辞書組み立て] (行番号: 511, 516, 519, 536〜540)
 
 
 * **副作用**: なし(渡された引数を読むのみ)
@@ -686,7 +687,7 @@
 ### `_render_freshness_rows`
 
 * **役割**: `build_freshness_rows`の戻り値を`<div class="freshness-row">`の並びに変換する。`state`(`red`/`ok`/`info`)に応じてCSSクラス(`freshness-red`/`freshness-ok`/`freshness-info`)を付ける。
-* 根拠: [関数定義] (行番号: 1779〜1786 / 抜粋: "def _render_freshness_rows(rows: list[dict[str, Any]]) -> str:")
+* 根拠: [関数定義] (行番号: 1796〜1803 / 抜粋: "def _render_freshness_rows(rows: list[dict[str, Any]]) -> str:")
 
 
 * **引数/リクエスト**: `rows: list[dict[str, Any]]`
@@ -709,10 +710,10 @@
 ### `_render_overall_summary`
 
 * **(2026-11-12 UX改善)** 第2引数`extra_red`(既定0)を追加。`render_sys_page`が`_health_red_count(health)`(定期チェックが止まっていれば1、そうでなければ異常の件数)を渡し、「○件、確認が必要です」に加算する。
-* 根拠: [関数定義] (行番号: 1834 / 抜粋: "def _render_overall_summary(rows: list[dict[str, Any]], extra_red: int = 0) -> str:")
+* 根拠: [関数定義] (行番号: 1851 / 抜粋: "def _render_overall_summary(rows: list[dict[str, Any]], extra_red: int = 0) -> str:")
 
 * **役割**: `build_freshness_rows`の戻り値のうち`state == "red"`の件数を数え、0件なら「✅ すべて正常です」、1件以上なら「⚠️ N件、確認が必要です」を返す(項目3の全体サマリー)。
-* 根拠: [関数定義] (行番号: 1834〜1838 / 抜粋: "def _render_overall_summary(rows: list[dict[str, Any]]) -> str:")
+* 根拠: [関数定義] (行番号: 1851〜1855 / 抜粋: "def _render_overall_summary(rows: list[dict[str, Any]]) -> str:")
 
 
 * **引数/リクエスト**: `rows: list[dict[str, Any]]`
@@ -736,7 +737,7 @@
 
 * **役割(UI改善)**: 以前の描画は「縦軸0-100%固定」「点を時刻でなく件数で等間隔」で、使用率が数%しか動かないNASでは水平線にしか見えなかった。現在は(1)縦軸を実測の最小〜最大に余白を足した範囲(最低`_NAS_CHART_MIN_SPAN`=4%幅。0%/100%に張り付くときは反対側へ広げる)にして%の軸ラベルを付け、(2)横軸を時刻で配置して始点・終点の日付を付け、(3)点数が`_NAS_CHART_MAX_POINTS`(150)を超えるときは期間を等間隔の時間枠に分け各枠の最後の1行だけ描く(`_downsample_by_time`)、(4)グラフの上に「空き容量・現在の使用率」と増加ペース・満杯までの目安(`compute_nas_forecast`/`_format_nas_forecast`)を文字で出し、(5)`days`/`sys_path`を渡すと表示期間(7/30/90日。`NAS_HISTORY_DAYS_CHOICES`、既定30)の切替リンク(`?nas_days=`。JS不要)を付ける。`compute_nas_forecast`は期間内の`used_gb`を時刻に対する最小二乗の直線で近似した傾きを増加ペース(GB/日)とし、増加中で空きがあるときだけ`空き ÷ ペース`を満杯までの日数とする(期間が2日未満・`used_gb`/`free_gb`列が無い・有効な点が2未満なら予測しない)。録画の自動削除で使用量が増減するため直線の目安であることを画面にも書く。`render_sys_page`には`nas_days`(既定30)を追加した。
 * **以下は旧仕様(新設時)の記述**: **（不具合修正で新設）** `analysis_service.load_nas_history`の`percent`列を、インラインSVGの折れ線グラフ(`.nas-chart`)で表示する。以前はNASカードをタップしても容量履歴を見る手段が無かった。使用率は0〜100%固定でスケールし(実測範囲での拡大縮小はしない)、0/50/100%の位置に補助線(`.nas-chart-grid`)を引く。グラフだけでは正確な値を読み取れないため、`<details>`で折りたたんだ詳細テーブル(直近10件、`_render_simple_table`を再利用)も併設する。データが無い、または2点未満の場合は「表示できるデータがありません」を返す(折れ線を引くには最低2点必要)。
-* 根拠: `_NAS_CHART_WIDTH = 300` (行番号: 737)、`_NAS_CHART_HEIGHT = 90` (行番号: 738)、`_NAS_CHART_PAD = 8` (行番号: 739)、`def _render_nas_history_chart(df: pd.DataFrame) -> str:` (行番号: 1926〜2005 / 抜粋: "def _render_nas_history_chart(")
+* 根拠: `_NAS_CHART_WIDTH = 300` (行番号: 737)、`_NAS_CHART_HEIGHT = 90` (行番号: 738)、`_NAS_CHART_PAD = 8` (行番号: 739)、`def _render_nas_history_chart(df: pd.DataFrame) -> str:` (行番号: 1943〜2022 / 抜粋: "def _render_nas_history_chart(")
 
 
 * **引数/リクエスト**: `df: pd.DataFrame`(`timestamp`/`percent`/`free_gb`等の列を持つ、`load_nas_history`と同じ形)
@@ -761,34 +762,34 @@
 * **(2026-11-12 UX改善)** ページ上部は`_back_link(dashboard_path, 'sys', 'システム')`(「← システムへ戻る」)、下部ナビの現在地は`sys`になった(アップデートは下部ナビから外れ、システムページの「管理者向け」から開く)。
 
 * **役割**: **(新機能)** 📜アップデートページ。`release_history_service.get_release_history`の`entries`/`sources`を受け取り、4アプリの更新履歴を新しい順に1本で表示する。アプリ名のバッジ(`release-badge-<app>`)・版数(あれば`v...`)・日付・タイトル・要約・詳細の箇条書きを持つカード(`_render_release_card`)。絞り込みのチップ(`?app=`。「すべて(件数)」と各アプリ(件数)。選択中は`active`)。取得に失敗したアプリは画面上部に注意(`release-warn`。古い内容があればそれを表示)。最初の`_RELEASES_VISIBLE`(20)件だけ展開し、残りは`<details>`で折りたたむ。**取得元は外部アプリ由来の文字列なので、すべて`html.escape`して出す**。
-* 根拠: `def render_updates_page(` (行番号: 2035)、`def _render_release_card(entry: dict[str, Any]) -> str:` (行番号: 2012)
+* 根拠: `def render_updates_page(` (行番号: 2052)、`def _render_release_card(entry: dict[str, Any]) -> str:` (行番号: 2029)
 * **引数/リクエスト**: `entries`, `sources`、キーワード専用で`dashboard_path`, `selected_app`(未知の値は無視して全件)。
 
 ### `_render_boot_history_box` / `_render_git_status_box` / `static/dashboard/git_status.js`(旧`_GIT_STATUS_SCRIPT`)
 
 * **役割**: システムページの「🔁サーバーの起動履歴」と「🔀Gitの状態」。**(UI改善)** 起動履歴は`system_info_service.get_boot_history`の結果を、1件1枚のカード(`.boot-card`。日時・きっかけのバッジ・コミットのハッシュと件名・ブランチ)で並べる。表は使わないので狭い画面でも横にはみ出さない。きっかけは色分けする(`_BOOT_REASON_BADGE_CLASS`: 更新=青、手動再起動=橙、不明=グレー)。先頭の1件は「最新の起動」のバッジと強調枠を付ける。記録が無いときはその旨のプレースホルダ。異常終了は記録されないことを注記する。Gitの状態の枠は中身が空(「確認中...」)で、外部JS`git_status.js`(#949で切り出し)が`DOMContentLoaded`後に`GET /api/system/git/status`を取得して描く。**(UI改善)** 上部に状態バッジ(⚠️未再起動/⚠️未コミットの変更N件・✅変更なし/⬇️未取り込みN件・✅最新/手元だけN件。`dirty`が`null`のときは変更の有無のバッジを出さない)、続いて起動中のコード・手元(実機)の最新・GitHubの最新の3枚のカード(`.git-card`)、最近のコミット(取り込み済み/未取り込み/起動中の印を行頭に置く)を描く。**コミット件名は外部由来の文字列なので、DOMへは`textContent`で入れる(`innerHTML`は使わない)**。
-* 根拠: `def _render_boot_history_box(boots: list[dict[str, Any]]) -> str:` (行番号: 2102)、`def _render_git_status_box() -> str:` (行番号: 2137)
+* 根拠: `def _render_boot_history_box(boots: list[dict[str, Any]]) -> str:` (行番号: 2119)、`def _render_git_status_box() -> str:` (行番号: 2154)
 
 ### `render_sys_page`
 
 * **(2026-11-24 改訂)** システムの一覧になった。`render_sys_page(sys_cards, rows, *, dashboard_path, health=None)`は「🔧 システム → `_render_overall_summary(rows, _health_red_count(health))` → カード(`compact`)」だけを返す(JSは読まない)。カードは`build_sys_cards(cards, rows, *, health, link_health)`が`SYS_SECTIONS`の順に作る: サーバー・NAS(`home_status_service.build_status_cards`のカードを流用)、🩺定期チェック(`_health_card_status`: 記録なし=灰/止まっている・異常あり=赤/異常なし=緑、補足は最後のチェック時刻)、📦バックアップ(青「手動で実行」)、⚡データの更新(`_data_card_status`: `rows`のうちサーバー本体以外に赤があれば赤「N件停止」)、📱アプリ(`_apps_card_status`: Falseがあれば赤、Noneを含めば灰「確認中」、全部Trueなら緑)、🛠️管理者向け(灰)。すべて`tab="sys"`・`anchor="/<キー>"`。
-* 根拠: `SYS_SECTIONS: tuple[tuple[str, str], ...] = (` (行番号: 2186)、[関数定義] (行番号: 2199 / 抜粋: "def _health_card_status(health: dict[str, Any] | None) -> tuple[str, str, str | None]:")、[関数定義] (行番号: 2211 / 抜粋: "def _data_card_status(rows: list[dict[str, Any]]) -> tuple[str, str, str | None]:")、[関数定義] (行番号: 2225 / 抜粋: "def _apps_card_status(link_health: dict[str, bool | None] | None) -> tuple[str, str, str | None]:")、[関数定義] (行番号: 2237 / 抜粋: "def build_sys_cards(")、[関数定義] (行番号: 2269 / 抜粋: "def render_sys_page(")
+* 根拠: `SYS_SECTIONS: tuple[tuple[str, str], ...] = (` (行番号: 2186)、[関数定義] (行番号: 2216 / 抜粋: "def _health_card_status(health: dict[str, Any] | None) -> tuple[str, str, str | None]:")、[関数定義] (行番号: 2228 / 抜粋: "def _data_card_status(rows: list[dict[str, Any]]) -> tuple[str, str, str | None]:")、[関数定義] (行番号: 2242 / 抜粋: "def _apps_card_status(link_health: dict[str, bool | None] | None) -> tuple[str, str, str | None]:")、[関数定義] (行番号: 2254 / 抜粋: "def build_sys_cards(")、[関数定義] (行番号: 2286 / 抜粋: "def render_sys_page(")
 * **`render_sys_detail_page(section, *, dashboard_path, sys_cards=(), rows=None, memory=None, disk=None, nas_history=None, nas_days=..., boot_history=None, log_groups=None, health=None, link_health=None, quest_path="", asa_note_url="", yoru_note_url=None)`**: システムの詳細画面。知らない`section`は`server`。「← システムへ戻る → 見出し → 一覧と同じカード(`anchor`が`/<section>`のもの)→ 中身」。中身は server=`_render_server_info`(応答・メモリ・保存容量)+`_render_boot_history_box`、nas=`_render_nas_history_chart`(期間リンクは`/sys/nas?nas_days=`)、health=`_render_health_check_box`、backup=`_render_backup_box`(+`maintenance.js`)、data=`_render_freshness_rows`、apps=`_render_external_links`、admin=`_render_admin_section`(アップデート・Gitの状態・ログのダウンロード・メンテナンス。+`maintenance.js`・`git_status.js`)。以前の`<details id="admin-section">`の折りたたみは、一覧から1段奥の画面になったため無くなった。下の記述は以前の1ページ構成のもの。
-* 根拠: [関数定義] (行番号: 2293 / 抜粋: "def _render_server_info(memory: dict[str, float] | None, disk: dict[str, float] | None) -> str:")、[関数定義] (行番号: 2306 / 抜粋: "def _render_backup_box() -> str:")、[関数定義] (行番号: 2320 / 抜粋: "def _render_admin_section(dashboard_path: str, log_groups: list[Any]) -> str:")、[関数定義] (行番号: 2361 / 抜粋: "def render_sys_detail_page(")
+* 根拠: [関数定義] (行番号: 2310 / 抜粋: "def _render_server_info(memory: dict[str, float] | None, disk: dict[str, float] | None) -> str:")、[関数定義] (行番号: 2323 / 抜粋: "def _render_backup_box() -> str:")、[関数定義] (行番号: 2337 / 抜粋: "def _render_admin_section(dashboard_path: str, log_groups: list[Any]) -> str:")、[関数定義] (行番号: 2378 / 抜粋: "def render_sys_detail_page(")
 
 * **(2026-11-12 UX改善)** 並びを「家族が見るもの → 管理者だけが使うもの」に変えた: サマリー → 各機能の最終更新 → 🩺 定期チェック(`_render_health_check_box`) → NASの容量推移 → バックアップ → `<details class="admin-section" id="admin-section">`(アップデートへのリンク・Gitの状態・起動履歴・ログのダウンロード・更新して再起動・システム再起動)。再起動系のボタンは折りたたみの中で、既定では見えない。`#git-status`等へ直接飛んだときは`app.js`が開く。引数`health`(`home_status_service.read_health_result()`の戻り値)を追加。
 * **`_render_health_check_box`**: `health`が`None`なら「まだ記録がありません」、`stale`なら「定期チェックが止まっています」、異常なしなら「異常は見つかっていません」、異常ありなら件数と各項目(表示名と本文。本文は`html.escape`)を出す。`history`があれば「これまでの記録」を`<details>`で出す(異常の組が空の行は「異常なしに戻りました」)。
-* 根拠: [関数定義] (行番号: 1796 / 抜粋: "def _render_health_check_box(health: dict[str, Any] | None) -> str:")、[関数定義] (行番号: 2269 / 抜粋: "def render_sys_page(")
+* 根拠: [関数定義] (行番号: 1813 / 抜粋: "def _render_health_check_box(health: dict[str, Any] | None) -> str:")、[関数定義] (行番号: 2286 / 抜粋: "def render_sys_page(")
 
 * **(新機能)** 引数`log_groups`(`list[Any] | None`、`services/log_download_service.LogGroup`の列)を追加し、NASの容量推移の次に「📄 ログのダウンロード」の枠(`_render_log_download_box`、`id="log-download"`)を置く。`log_groups`が空・省略のときは「ダウンロードできるログはありません」と表示する。それ以外は`GET {dashboard_path}/sys/logs`へ送るフォーム(`method="get"`)で、グループ(`x.log`と退避分`x.log.1`を1つにまとめたもの)ごとに`name="group"`のチェックボックスを1つ置き、各行にファイルごとのサイズ(KB)・更新時刻(最新/1つ前)を出す。名前はHTMLエスケープする。注意書きとして、トークン等は伏せるが氏名やIPアドレスは伏せないことを画面にも明記する。チェックボックスと送信ボタンの高さは44px以上(`dashboard.css`の`.log-row`/`.log-submit`)。
-* 根拠: [関数定義] (行番号: 2148〜2182 / 抜粋: "def _render_log_download_box(log_groups: list[Any], *, sys_path: str) -> str:")、[呼び出し] (行番号: 2279 / 抜粋: "f\"{_render_log_download_box(log_groups or [], sys_path=dashboard_path.rstrip('/') + '/sys')}\"")
+* 根拠: [関数定義] (行番号: 2165〜2199 / 抜粋: "def _render_log_download_box(log_groups: list[Any], *, sys_path: str) -> str:")、[呼び出し] (行番号: 2279 / 抜粋: "f\"{_render_log_download_box(log_groups or [], sys_path=dashboard_path.rstrip('/') + '/sys')}\"")
 
 * **(UI改善)** 情報の箱の並びを「いまの状態 → 履歴 → 操作」に変えた。`.box-grid`の中は、Gitの状態→起動履歴→各機能の最終更新→NASの容量推移の順で、その下にメンテナンス操作が続く。ボタン・チェックボックスのid、呼び出すAPIは変更していない。`_page_shell`には`dashboard_path`と`current="sys"`を渡し、フッターを付ける。
 
 * **(新機能)** 引数`boot_history`(`list[dict] | None`)を追加し、NAS容量グラフとメンテナンス操作の間に、起動履歴とGitの状態の枠を置く。`_NAV_CARDS`にはホームのナビカード「📜アップデート」(`/updates`)も追加した。
 
 * **役割**: 🔧システムページ全体を組み立てる。全体サマリー(`_render_overall_summary`)・各機能の最終更新一覧(`_render_freshness_rows`)・NASの容量推移(`_render_nas_history_chart`)・保存容量の使用率(`disk`があれば)・メンテナンス操作(サービス再起動の確認チェックボックス付きボタン、今すぐバックアップボタン)を並べる。**(不具合修正)** `nas_history`引数を追加し、`id="nas-history"`の`.info-box`セクションとしてNASの容量推移グラフを表示するようにした(「🗄️ NAS」カードの`anchor`のタップ先)。あわせて「各機能の最終更新」・NAS推移の各セクションを`.info-box`で視覚的にグループ化し、システムページを見やすくした。**(UI改善)** 情報の箱は`.box-grid`で包み、900px以上では2列に並べる。メンテナンスは「📦 バックアップ」(安全な日常操作)を先頭に、再起動を伴う2操作(最新に更新して再起動・システム再起動)を共通の注意文の下に`.is-danger`の箱として並べ、各箱に見出しを付けた。確認チェックは44px以上の`label.confirm-row`にした。ボタン・チェックボックスのid、呼び出すAPIは変更していない。**(UI改善)** バックアップ欄に「最新のバックアップ: 日時(サイズ)」(`id="backupLatest"`)を追加し、実行中のボタン無効化+スピナー表示・完了/失敗のトースト(`.dashboard-toast`)を出す。最新時刻はNAS列挙が必要なためページ描画には含めず、JSが`GET /api/system/backup/status`で非同期に取得する。
-* 根拠: [関数定義] (行番号: 2269〜2290 / 抜粋: "def render_sys_page(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    nas_history: pd.DataFrame,\n    memory: dict[str, float] | None,\n    disk: dict[str, float] | None,\n    now: datetime,\n    *,\n    dashboard_path: str,\n) -> str:")
+* 根拠: [関数定義] (行番号: 2286〜2307 / 抜粋: "def render_sys_page(\n    df_sensor: pd.DataFrame,\n    nas_data: pd.Series | None,\n    nas_history: pd.DataFrame,\n    memory: dict[str, float] | None,\n    disk: dict[str, float] | None,\n    now: datetime,\n    *,\n    dashboard_path: str,\n) -> str:")
 
 
 * **引数/リクエスト**: `df_sensor: pd.DataFrame`, `nas_data: pd.Series | None`, `nas_history: pd.DataFrame`, `memory: dict[str, float] | None`, `disk: dict[str, float] | None`, `now: datetime`、キーワード専用で `dashboard_path: str`
@@ -923,13 +924,15 @@ graph TD
 
 * **(2026-11-24)** 見守り・システムの詳細画面のパス(`/watch/<src>`・`/sys/<section>`)は、`home_status_service.build_status_cards`のカードの`anchor`・`build_sys_cards`・ルーターの照合(`parse_log_source`・`SYS_SECTION_TITLES`)の3か所で一致している必要がある。キーを足す・変えるときは3か所を同時に直す。
 
-* hls.jsは`https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js`からCDN読み込みしている。LAN限定・オフライン環境ではカメラのライブ映像が表示できない(インターネット接続を前提とする)。
+* **(Issue #1180 で記述を訂正)** hls.js は CDN ではなく、`MY_HOME_SYSTEM/static/dashboard/hls.light.min.js` を同梱して配信している(`STATIC_ASSET_FILES` に登録し、`_camera_script()` が `camera.js` と並べて `<script>` を出す)。インターネットに出られない環境でもカメラのライブ映像は表示できる。更新手順は `static/dashboard/README.md`。以前の版のこの項目は「CDN から読み込む」と書いていたが、同梱へ移した後も更新されていなかった。
+* 根拠: `def _camera_script() -> str:` (参照: _camera_script)、`STATIC_ASSET_FILES: dict[str, str] = {` (参照: STATIC_ASSET_FILES)
 * `_render_simple_table`は`timestamp`という列名を特別扱いして相対時刻表記に変換する。それ以外の列名では常に`str(value)`をそのまま表示するため、日時以外の列を意図的に整形したい場合はこの関数の対象外になる。
 * `resolve_snapshot_path`のパストラバーサル対策は`os.path.realpath`+`os.path.commonpath`によるもので、`camera_router.py`の`_resolve_segment_path`と同種の方式である。
 * `render_home_page`は`manifest_path`と`icon_path`が両方揃わないとホーム画面追加用の`<head>`断片を出さない(片方だけを渡しても効果が無い)。
 * **防犯ログに`security_logs`テーブルを直接読む処理を復活させないこと**: 書き込むコードがリポジトリ内のどこにも存在しない(詳細は[home_status_service.md](./home_status_service.md)の保守上の注意点を参照)。防犯ログの正のデータは`home_status_service.camera_motion_log(df_sensor)`である。
 * `_snapshot_timestamp`は`monitors/camera_monitor.py`の`save_image_from_stream`が付けるファイル名形式(`{カメラ名}_{種別}_{YYYYMMDD_HHMMSS}.jpg`)に依存している。この命名規則を変えると、以後撮影されるスナップショットのキャプションが出なくなる(既存の画像自体は壊れず、単にキャプション無しで表示される)。
-* `_render_nas_history_chart`は使用率を0〜100%固定でスケールする(実測範囲でのオートスケールはしない)。`nas_records`の`percent`列がこの前提から外れる値(負値や100超)を持つ場合、グラフ上は0/100にクランプされる。
+* **(Issue #1180 で記述を訂正)** `_render_nas_history_chart` の縦軸は、実測の最小〜最大に余白を足した範囲(最低 `_NAS_CHART_MIN_SPAN` = 4%幅。0%・100% の端に張り付いたときは反対側へ広げる)で、0〜100%固定ではない。画面にも「(縦軸は実測の範囲に合わせています)」と出る。描画時は値をその範囲にクランプする(`_y`)ため、範囲の計算を変えるときは外れ値が端に張り付いて見えなくならないか確認すること。以前の版のこの項目は「0〜100%固定でスケールする」と書いていた(4章の「旧仕様の記述」は履歴として残している)。
+* 根拠: `def _render_nas_history_chart(` (参照: _render_nas_history_chart)、`_NAS_CHART_MIN_SPAN = 4.0` (参照: _NAS_CHART_MIN_SPAN)
 * 見守りページのログ表示件数を変えるときは`_LOG_TABLE_VISIBLE_ROWS`(常時表示件数)と`_render_simple_table`の`limit`既定値(全体の上限、既定50)の両方を確認すること。前者だけ増やしても後者を超える分は`<details>`にも出てこない。
 
 ## 9. 不明事項一覧

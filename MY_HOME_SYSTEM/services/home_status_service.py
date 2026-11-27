@@ -719,8 +719,15 @@ CAR_STATE_STALE_MINUTES = 45
 
 
 def _car_is_stale(car: "parking_record_service.CarSummary", now: datetime) -> bool:
+    """在否判定が止まっているか(最後の観測が `CAR_STATE_STALE_MINUTES` より古い・観測が無い)。
+
+    ホームの「🚗 駐車場」カードと、システムページの「各機能の最終データ更新時刻」(#1182)が共有する。
+    """
     last = car.last_observed_at
     return last is None or (now.replace(tzinfo=None) - last).total_seconds() / 60 > CAR_STATE_STALE_MINUTES
+
+
+car_is_stale = _car_is_stale  # #1182: ページ組み立て側(dashboard_page_service)から呼ぶ公開名
 
 
 def get_car_status(car: "parking_record_service.CarSummary | None", now: datetime) -> tuple[str, str] | None:
@@ -1292,6 +1299,10 @@ def clear_status_cache() -> None:
 # 「⚡ 電気」ページの「今月のまとめ」の日別推移で遡る日数。今月の日を月末まで欠けずに出せるよう31日。
 # (以前はくらしページの日別一覧用で14日だった)
 DAILY_COST_HISTORY_DAYS = 31
+# Issue #1178: 日別の電気代(最大31回のスマートメーター集計)は電気ページでしか使わないため、
+# 共通の材料(`get_cached_materials`)から外し、電気ページを開いたときだけ取る。
+# 電気ページの分析(`power_analysis_service.REPORT_CACHE_TTL_SEC`)と同じ10分でよい。
+DAILY_COST_CACHE_TTL_SEC = 600.0
 
 
 class DashboardMaterials(NamedTuple):
@@ -1308,7 +1319,6 @@ class DashboardMaterials(NamedTuple):
     disk: dict[str, float] | None
     monthly_cost: int | None
     last_month_cost: int | None
-    daily_cost_rows: list[tuple[Any, int]]
 
 
 def get_cached_materials() -> DashboardMaterials:
@@ -1324,9 +1334,6 @@ def get_cached_materials() -> DashboardMaterials:
     monthly_cost = _cached("cost", analysis_service.calculate_monthly_cost_cumulative)
     last_month_cost = _cached("cost_last_month", analysis_service.calculate_last_month_cost_same_point)
     disk = _cached("disk", analysis_service.get_disk_usage)
-    daily_cost_rows = _cached(
-        "daily_cost_rows", lambda: analysis_service.calculate_daily_cost_series(DAILY_COST_HISTORY_DAYS)
-    )
 
     return DashboardMaterials(
         df_sensor=df_sensor if df_sensor is not None else empty,
@@ -1336,9 +1343,23 @@ def get_cached_materials() -> DashboardMaterials:
         disk=disk,
         # 取得失敗(None)は 0 円に丸めない(カードが「取得できません」と出し分ける)
         monthly_cost=monthly_cost,
-        daily_cost_rows=daily_cost_rows or [],
         last_month_cost=last_month_cost,
     )
+
+
+def get_daily_cost_rows() -> list[tuple[Any, int]]:
+    """電気ページの「今月のまとめ」の日別の電気代(`DAILY_COST_HISTORY_DAYS`日分)。
+
+    Issue #1178: 以前は `get_cached_materials()` が毎回集めており、キャッシュ(60秒)が切れるたびに、
+    使わないホーム・見守り・システムの各ページ(とホームの60秒ごとの自動更新)でも最大31回の
+    スマートメーター集計が走っていた。取得に失敗したら空のリスト。
+    """
+    rows = _cached(
+        "daily_cost_rows",
+        lambda: analysis_service.calculate_daily_cost_series(DAILY_COST_HISTORY_DAYS),
+        ttl=DAILY_COST_CACHE_TTL_SEC,
+    )
+    return rows or []
 
 
 # === ホームの外部リンク(ファミクエ・あさノート)の稼働チェック ===
