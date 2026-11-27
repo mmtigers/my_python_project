@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from http.client import RemoteDisconnected
 from urllib3.exceptions import ProtocolError
 from requests.auth import HTTPDigestAuth
+import requests.exceptions
 
 # ONVIF関連ライブラリ
 try:
@@ -303,11 +304,28 @@ def is_host_reachable(ip: str) -> bool:
 
 WSDL_DIR: Optional[str] = find_wsdl_path()
 
-def perform_emergency_diagnosis(ip: str) -> Dict[int, bool]:
-    """接続障害時にポートの状態を診断する。"""
+RTSP_PORT: int = 554
+
+
+def diagnosis_ports(cam_conf: Dict[str, Any]) -> List[int]:
+    """
+    緊急診断で調べるポート(#1151)。
+
+    以前は全カメラ共通で 80/2020 を調べており、ONVIF が80番の玄関カメラでは毎回
+    `Port 2020: CLOSED(111)` が出て誤判定のノイズになっていた。設定した ONVIF の
+    ポートと、録画(nvr-*.service)が使う RTSP の554番だけを調べる。
+    """
+    ports: List[int] = [int(cam_conf.get('port', 80))]
+    if RTSP_PORT not in ports:
+        ports.append(RTSP_PORT)
+    return ports
+
+
+def perform_emergency_diagnosis(ip: str, ports: Optional[List[int]] = None) -> Dict[int, bool]:
+    """接続障害時にポートの状態を診断する。`ports` 未指定なら ONVIF 既定の80番と554番。"""
     results: Dict[int, bool] = {}
     msg = f"🚑 [Diagnosis] Checking {ip}:\n"
-    for port in [80, 2020]:
+    for port in (ports or [80, RTSP_PORT]):
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2.0)
@@ -658,9 +676,13 @@ class _ReconnectBackoff:
         # この連続障害で最後に send_push / ERROR を出した時刻(time.monotonic)。None は未通知
         self.last_persistent_push_at: Optional[float] = None
         self.last_persistent_error_at: Optional[float] = None
+        # #1146: この連続障害の最初の失敗の時刻(time.monotonic)。復旧ログの「停止約N秒」に使う
+        self.first_failure_at: Optional[float] = None
 
     def record_failure(self) -> int:
         """失敗を1件数え、次に待つ秒数を返す。"""
+        if self.consecutive_errors == 0:
+            self.first_failure_at = time.monotonic()
         self.consecutive_errors += 1
         return min(10 * (2 ** self.consecutive_errors), self.MAX_BACKOFF_SEC)
 
@@ -697,6 +719,7 @@ class _ReconnectBackoff:
         self.consecutive_errors = 0
         self.last_persistent_push_at = None
         self.last_persistent_error_at = None
+        self.first_failure_at = None
 
 
 class _CameraSession:
@@ -715,7 +738,14 @@ class _CameraSession:
         self.pullpoint: Any = None
 
     def release(self, cam_name: str) -> None:
-        """確保したリソースを解放する(どの段階で失敗していても呼べる)。"""
+        """
+        確保したリソースを解放する(どの段階で失敗していても呼べる)。
+
+        #1162: 冪等。障害時は待機(sleep)の前に解放し、`finally` でもう一度呼ばれる。
+        解放したものは None に戻すので、2回目は何もしない(Unsubscribe を二重に送らない)。
+        """
+        if not (self.pullpoint or self.events_service or self.mycam):
+            return
         logger.debug(f"🧹 [{cam_name}] Starting resource cleanup...")
         if self.pullpoint:
             _discard_pullpoint(self.pullpoint)
@@ -735,6 +765,9 @@ class _CameraSession:
             force_close_session(self.mycam)
             logger.debug(f"🔌 [{cam_name}] Camera devicemgmt session closed.")
 
+        self.pullpoint = None
+        self.events_service = None
+        self.mycam = None
         logger.debug(f"✨ [{cam_name}] Resource cleanup completed.")
 
 
@@ -853,7 +886,8 @@ def _pull_events_until_reconnect(cam_conf: Dict[str, Any], pullpoint: Any) -> No
 
         # --- 購読期限切れの前に張り直す(全カメラ。Issue #766) ---
         if current_time - last_subscribe_time > FORCE_RECONNECT_INTERVAL_SEC:
-            logger.info(f"🔄 [{cam_name}] 9 minutes passed. Reconnecting to avoid silent timeout...")
+            # #1156: 定常動作(3台 × 1日約160回)なので DEBUG。失敗・復旧は別途 WARNING/INFO で出る
+            logger.debug(f"🔄 [{cam_name}] 9 minutes passed. Reconnecting to avoid silent timeout...")
             return  # 安全に再接続（外側のループへ）
         # -----------------------------------------------------------
 
@@ -895,8 +929,162 @@ def _pull_events_until_reconnect(cam_conf: Dict[str, Any], pullpoint: Any) -> No
                 process_camera_event(msg, cam_conf)
 
 
+# #1152: 一時的障害(通信断)として扱う例外。以前は RemoteDisconnected 等の4種類だけで、
+# 接続拒否・接続タイムアウト(requests.exceptions.ConnectionError / ConnectTimeout。
+# zeep は requests で通信する)は「Connection/ONVIF Error」(致命的扱い)に入っていた。
+# ConnectTimeout は requests.exceptions.ConnectionError の派生なので、これで両方を含む。
+# 組み込みの ConnectionRefusedError は含めない(check_camera_time の時刻ずれ検知が
+# 意図的に送出しており、これはカメラ設定の異常として致命的扱いのまま残す)。
+# ONVIF の SOAP Fault(認証失敗・Action Failed)も致命的扱いのまま。
+TRANSIENT_CONNECTION_ERRORS: tuple = (
+    RemoteDisconnected,
+    ProtocolError,
+    BrokenPipeError,
+    ConnectionResetError,
+    requests.exceptions.ConnectionError,
+)
+
+# #1175: SOAP Fault の detail(XML)をログに付けるときの最大文字数
+FAULT_DETAIL_MAX_CHARS: int = 500
+
+
+def _describe_error(error: Exception) -> str:
+    """
+    ログに付ける例外の詳細。
+
+    #1175: zeep の `Fault` は `detail`/`content` が空でも、`code`・`subcodes`
+    (例: `ter:Action`、`ter:MaxPullPoints` など ONVIF 定義のコード)に購読上限などの
+    理由が載ることがある。2026-11-24 の "Action Failed"(#1144)は `Detail`/`Content` が
+    空で原因を確定できなかったため、`Fault` の場合だけそれらを付ける。
+    `Fault` 以外の例外は従来どおり `detail`/`content` だけを付ける。
+    URL・認証情報は含めない(Fault の各属性はカメラが返した SOAP 本文の一部だけ)。
+    """
+    fault_cls = getattr(getattr(zeep, "exceptions", None), "Fault", None)
+    if isinstance(fault_cls, type) and isinstance(error, fault_cls):
+        parts: List[str] = []
+        code = getattr(error, "code", None)
+        if code:
+            parts.append(f"Code: {code}")
+        subcodes = getattr(error, "subcodes", None)
+        if subcodes:
+            parts.append("Subcodes: " + ", ".join(str(s) for s in subcodes))
+        detail = getattr(error, "detail", None)
+        if detail is not None:
+            try:
+                detail_text = etree.tostring(detail, encoding="unicode")
+            except Exception:
+                detail_text = str(detail)
+            parts.append(f"Detail: {detail_text[:FAULT_DETAIL_MAX_CHARS]}")
+        return "".join(f" | {p}" for p in parts)
+
+    detailed_info: str = ""
+    if hasattr(error, 'detail'):
+        detailed_info += f" | Detail: {error.detail}"
+    if hasattr(error, 'content'):
+        detailed_info += f" | Content: {str(error.content)[:200]}"
+    return detailed_info
+
+
+def _hint_for_error(err_msg: str) -> Optional[str]:
+    """
+    継続障害のログに添えるヒント(#1147)。該当しなければ None。
+
+    以前は "Unknown error" でも常に「パスワードとカメラの時刻を確認」を ERROR で出しており、
+    2026-11-24 の "Action Failed"(購読残存の疑い)で調査を誤誘導していた。
+    また ERROR のため health_watch の判定と自動調査の起動要因にもなっていた。
+    """
+    if "Unauthorized" in err_msg or "NotAuthorized" in err_msg:
+        return "💡 Hint: Check PASSWORD and CAMERA TIME settings."
+    if "Action Failed" in err_msg:
+        return (
+            "💡 Hint: カメラ側に前回の購読が残っている可能性があります"
+            "(TerminationTime の経過で自然に解消します)。"
+        )
+    return None
+
+
+def _report_persistent_error(
+    cam_name: str, backoff: _ReconnectBackoff, err_msg: str, full_err_msg: str
+) -> None:
+    """継続障害(連続 PERSISTENT_ERROR_THRESHOLD 回目以降)のログと管理者通知。"""
+    alert_level: str = backoff.persistent_alert_level(time.monotonic())
+    if alert_level == "none":
+        return
+    if alert_level == "push":
+        # チャンネル再設計(2026-09): 直後に同じ内容をsend_push(channel="report")で
+        # 明示送信するため、ハンドラ経由(catch-all)の通知はopt-outして二重通知を避ける。
+        logger.error(
+            f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}",
+            extra={"skip_discord": True},
+        )
+        try:
+            alert_msg: str = (
+                f"🚨 **カメラ監視アラート**\n[{cam_name}] の接続障害が継続しています"
+                f"（連続{backoff.consecutive_errors}回失敗）。\n詳細: {err_msg}"
+            )
+            send_push(
+                [{"type": "text", "text": alert_msg}],
+                target="discord",
+                channel="report"
+            )
+            logger.info(f"📤 [{cam_name}] 管理者へ障害通知を送信しました。")
+        except Exception as push_err:
+            logger.error(f"🚨 通知送信に失敗しました: {push_err}")
+    elif alert_level == "error":
+        # send_pushを送らない回は、skip_discordを付けず
+        # catch-all(core.logger.DiscordErrorHandler)経由の通知に任せる。
+        logger.error(
+            f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}"
+        )
+    else:
+        # #1160: 通知間隔の内側の回はログだけ(WARNING は Discord へ送られない)
+        logger.warning(
+            f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}"
+        )
+
+    hint = _hint_for_error(err_msg)
+    if hint:
+        # #1147: ヒントは推測なので WARNING(ERROR にすると health_watch・自動調査の起動要因になる)
+        logger.warning(hint)
+
+
+def _note_recovery(cam_name: str, backoff: _ReconnectBackoff) -> None:
+    """
+    障害からの復旧を知らせる(#1146)。`backoff.reset()` の前に呼ぶ。
+
+    以前は2回目以降の接続が DEBUG の「(Reconnected)」だけで、復旧した時刻はログから
+    逆算するしかなく、Persistent 通知を送った障害でも復旧は通知されなかった。
+    失敗が続いた後の成功は INFO を1行出し、Persistent 通知(send_push)を送っていた
+    障害のときだけ復旧も通知する(障害通知1件に対して1件だけ増える)。
+    """
+    if backoff.consecutive_errors <= 0:
+        return
+    downtime = ""
+    if backoff.first_failure_at is not None:
+        downtime = f"停止約{int(time.monotonic() - backoff.first_failure_at)}秒・"
+    message = f"✅ [{cam_name}] 復旧しました({downtime}失敗{backoff.consecutive_errors}回)"
+    logger.info(message)
+    if backoff.last_persistent_push_at is not None:
+        try:
+            send_push(
+                [{"type": "text", "text": f"✅ **カメラ監視**\n[{cam_name}] の接続が復旧しました"
+                                          f"（{downtime}失敗{backoff.consecutive_errors}回）。"}],
+                target="discord",
+                channel="report"
+            )
+        except Exception as push_err:
+            logger.error(f"🚨 復旧通知の送信に失敗しました: {push_err}")
+
+
 def _suspend_after_transient_error(cam_name: str, error: Exception, backoff: _ReconnectBackoff) -> None:
-    """一時的障害(通信断)向けのExponential Backoff。単発はdebug、連発のみWARNINGにする。"""
+    """
+    一時的障害(通信断)向けのExponential Backoff。単発はdebug、連発のみWARNINGにする。
+
+    #1152: 接続拒否などもこの経路に入るようにしたため、長く続いた場合(連続
+    PERSISTENT_ERROR_THRESHOLD 回目以降)は致命的障害と同じ継続障害の通知を出す
+    (以前はこの経路に通知が無く、移しただけでは #890 のような長時間の接続拒否が
+    Discord に届かなくなる)。
+    """
     wait_time: int = backoff.record_failure()
 
     if backoff.note_transient(time.time()):
@@ -906,6 +1094,8 @@ def _suspend_after_transient_error(cam_name: str, error: Exception, backoff: _Re
         )
     else:
         logger.debug(f"🔄 [{cam_name}] Connection lost (Intentional/Transient): {error}. Reconnecting in {wait_time}s...")
+
+    _report_persistent_error(cam_name, backoff, str(error), f"Transient Network Error: {error}")
 
     time.sleep(wait_time)
 
@@ -919,63 +1109,22 @@ def _suspend_after_fatal_error(
     wait_time_fatal: int = backoff.record_failure()
 
     err_msg: str = str(error)
-    detailed_info: str = ""
-    if hasattr(error, 'detail'):
-        detailed_info += f" | Detail: {error.detail}"
-    if hasattr(error, 'content'):
-        detailed_info += f" | Content: {str(error.content)[:200]}"
+    full_err_msg: str = f"{err_msg}{_describe_error(error)}"
 
-    full_err_msg: str = f"{err_msg}{detailed_info}"
+    _report_persistent_error(cam_name, backoff, err_msg, full_err_msg)
 
-    alert_level: str = backoff.persistent_alert_level(time.monotonic())
-    if alert_level != "none":
-        if alert_level == "push":
-            # チャンネル再設計(2026-09): 直後に同じ内容をsend_push(channel="report")で
-            # 明示送信するため、ハンドラ経由(catch-all)の通知はopt-outして二重通知を避ける。
-            logger.error(
-                f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}",
-                extra={"skip_discord": True},
-            )
-            try:
-                alert_msg: str = (
-                    f"🚨 **カメラ監視アラート**\n[{cam_name}] の接続障害が継続しています"
-                    f"（連続{backoff.consecutive_errors}回失敗）。\n詳細: {err_msg}"
-                )
-                send_push(
-                    [{"type": "text", "text": alert_msg}],
-                    target="discord",
-                    channel="report"
-                )
-                logger.info(f"📤 [{cam_name}] 管理者へ障害通知を送信しました。")
-            except Exception as push_err:
-                logger.error(f"🚨 通知送信に失敗しました: {push_err}")
-        elif alert_level == "error":
-            # send_pushを送らない回は、skip_discordを付けず
-            # catch-all(core.logger.DiscordErrorHandler)経由の通知に任せる。
-            logger.error(
-                f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}"
-            )
-        else:
-            # #1160: 通知間隔の内側の回はログだけ(WARNING は Discord へ送られない)
-            logger.warning(
-                f"❌ [{cam_name}] Persistent Error ({backoff.consecutive_errors} times): {full_err_msg}"
-            )
-
-        if "Unknown error" in err_msg or "Unauthorized" in err_msg:
-            hint_log = logger.warning if alert_level == "warning" else logger.error
-            hint_log("💡 Hint: Check PASSWORD and CAMERA TIME settings.")
-
+    # #1162 で解放は呼び出し元が先に行うようになったが、単体で呼ばれた場合の保険として残す
     if session.pullpoint:
         _discard_pullpoint(session.pullpoint)
 
     # ホストが生きている場合のみ緊急診断を実行
     if is_host_reachable(ip_address):
-        perform_emergency_diagnosis(ip_address)
+        perform_emergency_diagnosis(ip_address, ports=diagnosis_ports(cam_conf))
     else:
         logger.warning(f"⚠️ [{cam_name}] Host is unreachable. Skipping diagnosis.")
 
     logger.warning(
-        f"⚠️ [{cam_name}] 接続失敗 (Connection/ONVIF Error). "
+        f"⚠️ [{cam_name}] 接続失敗 (Connection/ONVIF Error: {full_err_msg}). "
         f"{backoff.consecutive_errors}回目の失敗。{wait_time_fatal}秒間監視をサスペンドします。"
     )
     time.sleep(wait_time_fatal)
@@ -1025,21 +1174,27 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
         try:
             # 2-3. カメラ接続とイベント購読
             is_first_connect = _connect_and_subscribe(cam_conf, session, is_first_connect)
-            # 接続成功時にエラーカウントをリセット
+            # #1146: 失敗が続いた後の成功なら復旧を知らせてから、エラーカウントをリセット
+            _note_recovery(cam_name, backoff)
             backoff.reset()
 
             # 4. 監視ループ
             _pull_events_until_reconnect(cam_conf, session.pullpoint)
 
-        except (RemoteDisconnected, ProtocolError, BrokenPipeError, ConnectionResetError) as e:
+        except TRANSIENT_CONNECTION_ERRORS as e:
+            # #1162: 待機(最大 MAX_BACKOFF_SEC)の前に購読とセッションを解放する。
+            # 以前は待機の後の finally で解放しており、その間カメラ側の購読の枠と
+            # requests のソケットを持ち続けていた(#1144 の購読残存とも関係)。
+            session.release(cam_name)
             _suspend_after_transient_error(cam_name, e, backoff)
             continue
 
         except Exception as e:
+            session.release(cam_name)  # #1162: 上と同じ理由で待機の前に解放する
             _suspend_after_fatal_error(cam_conf, e, backoff, session)
 
         finally:
-            # 【修正2】リソース解放処理の明示的な記録
+            # 【修正2】リソース解放処理の明示的な記録(障害時は解放済みなので何もしない)
             session.release(cam_name)
             # カメラ側のリソース解放（Unsubscribe等）が完了するまで待機する（Race condition防止）
             time.sleep(3)
