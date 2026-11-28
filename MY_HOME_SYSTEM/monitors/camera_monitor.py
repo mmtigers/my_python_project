@@ -104,7 +104,10 @@ SESSION_LIFETIME: int = 3600
 FORCE_RECONNECT_INTERVAL_SEC: int = 540
 # PullMessages がこの回数連続で失敗したら、SESSION_LIFETIME を待たずに再接続する
 PULL_FAILURE_RECONNECT_THRESHOLD: int = 3
-RENEW_DURATION: str = "PT600S"
+# Issue #1157: 以前ここに RENEW_DURATION("PT600S")があったが、どこからも参照されていなかった
+# (購読の延長 Renew は呼ばず、上の FORCE_RECONNECT_INTERVAL_SEC で張り直している)。
+# 玄関カメラ(NC-9820)は Renew 非対応で、VIGI の対応状況は未確認(#1174)のため、
+# Renew への置き換えはせず、未使用の定数を削除した。
 
 # 不具合修正: ONVIF(zeep/requests)のSOAP呼び出しにはライブラリ既定でタイムアウトが
 # 一切無い。TCP接続自体は張れるが応答が返らない種類のネットワーク不調(実機で
