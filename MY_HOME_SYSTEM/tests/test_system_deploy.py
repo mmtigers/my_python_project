@@ -354,3 +354,102 @@ class TestRouter:
                  "last_result": {"run_id": 2, "success": True, "message": "ok", "finished_at": "2026-10-02T10:00:00"}}
         monkeypatch.setattr(system_router.system_maintenance_service, "get_deploy_state", lambda: state)
         assert api_client.get("/api/system/deploy/status").json() == state
+
+
+class TestPostStartCheck:
+    """Issue #1158: 更新して再起動した後、子プロセスの生存と全カメラの接続を確かめて結果に載せる。"""
+
+    @pytest.fixture
+    def cams(self, tmp_path, monkeypatch):
+        import config
+        monkeypatch.setattr(svc, "CAMERA_STATUS_FILE", str(tmp_path / "cam.json"))
+        monkeypatch.setattr(config, "CAMERAS", [
+            {"name": "玄関カメラ"}, {"name": "庭カメラ"}, {"name": "旧カメラ", "enabled": False},
+        ])
+        monkeypatch.setattr(svc, "_child_status_provider", lambda: {"camera_monitor": True, "scheduler": True})
+        return tmp_path / "cam.json"
+
+    @staticmethod
+    def _write_connected(path, **times):
+        import json
+        path.write_text(json.dumps({"connected_at": times}), encoding="utf-8")
+
+    def test_pending_until_one_minute_after_start(self, env, cams):
+        assert svc.post_start_check(now=svc._PROCESS_STARTED_AT + 30)["state"] == "pending"
+
+    def test_ok_when_children_alive_and_all_cameras_connected_after_start(self, env, cams):
+        t = svc._PROCESS_STARTED_AT + 5
+        self._write_connected(cams, 玄関カメラ=t, 庭カメラ=t)
+        assert svc.post_start_check(now=svc._PROCESS_STARTED_AT + 61) == {"state": "ok", "text": "起動後チェック: OK"}
+
+    def test_ng_names_camera_not_connected_since_start(self, env, cams):
+        self._write_connected(cams, 玄関カメラ=svc._PROCESS_STARTED_AT - 100, 庭カメラ=svc._PROCESS_STARTED_AT + 5)
+        result = svc.post_start_check(now=svc._PROCESS_STARTED_AT + 61)
+        assert result["state"] == "ng"
+        assert "玄関カメラが未接続" in result["text"] and "庭カメラ" not in result["text"]
+        assert "旧カメラ" not in result["text"]  # 無効なカメラは数えない
+
+    def test_ng_when_scheduler_died(self, env, cams, monkeypatch):
+        t = svc._PROCESS_STARTED_AT + 5
+        self._write_connected(cams, 玄関カメラ=t, 庭カメラ=t)
+        monkeypatch.setattr(svc, "_child_status_provider", lambda: {"camera_monitor": True, "scheduler": False})
+        result = svc.post_start_check(now=svc._PROCESS_STARTED_AT + 61)
+        assert result["state"] == "ng" and "Schedulerが停止" in result["text"]
+
+    def test_attached_only_to_restart_confirmed_by_this_process(self, env, cams, monkeypatch):
+        monkeypatch.setattr(svc, "_git", FakeGit())
+
+        def restart_kills_us():
+            raise _ProcessKilled()
+        monkeypatch.setattr(svc, "restart_home_system", restart_kills_us)
+        svc._deploy_running = True
+        with pytest.raises(_ProcessKilled):
+            svc._run_deploy(1)
+
+        monkeypatch.setattr(svc, "_PROCESS_STARTED_AT", time.time() + 5)
+        monkeypatch.setattr(svc, "_deploy_running", False)
+        st = svc.get_deploy_state()
+        assert st["last_result"]["success"] is True
+        assert st["last_result"]["post_check"]["state"] == "pending"
+
+        # さらに後のプロセス(別の再起動)では、古い更新の結果に起動後チェックを付けない
+        monkeypatch.setattr(svc, "_PROCESS_STARTED_AT", time.time() + 100)
+        assert "post_check" not in svc.get_deploy_state()["last_result"]
+
+    def test_no_post_check_for_up_to_date_result(self, env, cams, monkeypatch):
+        monkeypatch.setattr(svc, "_git", FakeGit(before="aaa1111", after="aaa1111"))
+        svc._deploy_running = True
+        svc._run_deploy(1)
+        assert "post_check" not in svc.get_deploy_state()["last_result"]
+
+
+class TestCameraMonitorRecordsConnections:
+    def test_record_connected_keeps_other_cameras(self, tmp_path, monkeypatch):
+        from monitors import camera_monitor
+        path = tmp_path / "cam.json"
+        monkeypatch.setattr(camera_monitor, "CAMERA_STATUS_FILE", str(path))
+        camera_monitor._record_connected("玄関カメラ")
+        camera_monitor._record_connected("庭カメラ")
+        import json
+        data = json.loads(path.read_text(encoding="utf-8"))["connected_at"]
+        assert set(data) == {"玄関カメラ", "庭カメラ"}
+
+    def test_status_file_paths_match(self):
+        from monitors import camera_monitor
+        assert camera_monitor.CAMERA_STATUS_FILE == svc.CAMERA_STATUS_FILE
+
+
+class TestChildAliveStatus:
+    def test_reports_each_child(self, monkeypatch):
+        import unified_server
+
+        class _P:
+            def __init__(self, rc):
+                self.rc = rc
+
+            def poll(self):
+                return self.rc
+
+        monkeypatch.setattr(unified_server, "camera_process", _P(None))
+        monkeypatch.setattr(unified_server, "scheduler_process", _P(1))
+        assert unified_server._child_alive_status() == {"camera_monitor": True, "scheduler": False}

@@ -155,8 +155,16 @@ function deployPoll(runId) {
             var last = st.last_result;
             if (last && (runId === null || last.run_id === runId)) {
                 var text = (last.success ? "✅ " : "❌ ") + last.message;
-                box.textContent = last.success ? text + " ページを再読み込みすると新しい画面になります。" : text;
-                dashboardToast(text, last.success);
+                // Issue #1158: 再起動の後、カメラ監視・Scheduler が動き出したかの確認結果
+                var check = last.post_check;
+                var checkText = check ? " " + (check.state === "ng" ? "⚠️ " : "") + check.text : "";
+                box.textContent = (last.success ? text + " ページを再読み込みすると新しい画面になります。" : text) + checkText;
+                if (!check || check.state !== "pending") {
+                    dashboardToast(text + checkText, last.success && !(check && check.state === "ng"));
+                }
+                if (check && check.state === "pending") {
+                    setTimeout(function () { deployPoll(runId); }, 10000);
+                }
             } else {
                 box.textContent = "";
             }

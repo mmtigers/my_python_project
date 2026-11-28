@@ -150,31 +150,38 @@
 ### `_copy_latest_offsite`
 
 * **役割**（2026-09-19 新設）: NAS へ転送済みのバックアップを、rclone のリモート（`config.DB_BACKUP_OFFSITE_REMOTE`）へ**最新1世代**として複製する。リモート側は常に `home_system_latest.db` の1ファイルだけを上書きする（世代管理は NAS 側の `db_backups/` と `DB_BACKUP_RETENTION_DAYS`）。以前はバックアップが NAS にしか無く、NAS が故障すると DB 本体とバックアップを同時に失う構成だった。
-* 根拠: `_copy_latest_offsite` (行番号: 311-339 / 抜粋: "def _copy_latest_offsite(nas_backup_path: Path) -> bool:")
+* 根拠: `_copy_latest_offsite` (行番号: 319-349 / 抜粋: "def _copy_latest_offsite(nas_backup_path: Path) -> bool:")
 * **呼び出し条件**: `perform_backup` の NAS 転送と整合性確認が成功し、`_backup_config_files` を終えた後にだけ呼ばれる。NAS 転送に失敗した場合は呼ばれない。
 * **無効化**: `DB_BACKUP_OFFSITE_REMOTE` が空（既定）なら何もせず `False` を返す。
 * **送るもの**: DB のみ。`devices.json` 等の設定ファイルはカメラの接続情報を含みうるため送らない。
 * **エラーハンドリング**: rclone が見つからない・非0終了・タイムアウト（`OFFSITE_TIMEOUT_SEC` = 1800秒）のいずれも ERROR ログを残して `False` を返すだけで、`perform_backup` の戻り値（NAS バックアップの成否）には影響させない。ERROR ログは `health_watch.py` の `check_app_logs` が検知する。
 * **外部コマンド**: `rclone copyto <NASのバックアップ> <リモート>/home_system_latest.db --retries 3`（引数はリスト渡し）。
+* **（Issue #1163 で追加）週次の世代**: `get_now_jst().weekday()` が `OFFSITE_WEEKLY_WEEKDAY`(6=日曜)の日だけ、latest の複製に成功した後で `_copy_weekly_offsite` が同じファイルを `<リモート>/home_system_weekly_YYYYMMDD.db` へも複製し、続けて `rclone delete <リモート> --include "home_system_weekly_*.db" --min-age 25d --max-depth 1` で古い週次の世代を消す(週1回なので 0・7・14・21日前の4世代が残る。latest には触れない)。latest は毎日上書きされ、`integrity_check` は論理破損(誤ったマイグレーション・バグによる大量削除)を検出しないため、気づくのが翌日以降だと NAS と実機を同時に失ったときに破損前へ戻れなかった。容量は1世代約253MB(2026-11時点)で約1GB増える。失敗は latest と同じく `_offsite_failure`(ERROR・通知・終了コード2)。
+* 根拠: `def _copy_weekly_offsite(rclone: str, remote: str, nas_backup_path: Path) -> bool:` (参照: _copy_weekly_offsite)
+
+### `get_backup_size_trend`（Issue #1170 で追加）
+
+* **役割**: NAS 上の DB バックアップ(`home_system_<timestamp>.db`)のサイズを DB サイズの履歴として使い、最新のサイズ(`size_mb`)と `days` 日前からの増分(`diff_mb`)を返す。比べる相手は、最新のファイルの更新時刻から `days` 日(実行時刻の揺れとして6時間の余裕を足す)以上前のうち最新のもの。相手が無ければ `diff_mb` は `None`、バックアップが1つも無い・読めなければ `None`。以前は DB サイズが `backup_service.log` にしか残らず、増え方(2026-11時点で1日約2.7MB)を見る手段が手動の `tools/db_retention.py` しか無かった。週次レポート(`weekly_analyze_report.format_system_section`)が使う。
+* 根拠: `def get_backup_size_trend(days: int = 7) -> dict | None:` (参照: get_backup_size_trend)
 
 ### `if __name__ == "__main__":` ブロック
 
 * **役割**（Issue #753 / AUDIT-024 で変更）: `perform_backup()` を実行し、**その成功フラグを終了コードへ反映する**（成功なら 0、失敗なら 1）。以前は戻り値を捨てていたため、バックアップが失敗してもプロセスは常に exit 0 で終わり、cron/systemd の側からは成功と区別できなかった（Discord 通知は出るため実害は小さいが、通知経路が落ちていると完全に見えなくなる）。
 * **（Issue #891）** NAS保存が成功してもオフサイト複製(`_copy_latest_offsite`)が失敗した場合は、失敗を errorチャンネルへ通知し(`_offsite_failure`)、終了コードを2にする(1=バックアップ失敗、0=全成功)。
-* 根拠: `sys.exit(1 if not _ok else (2 if _offsite_failed else 0))` (行番号: 362 / 抜粋: "sys.exit(1 if not _ok else (2 if _offsite_failed else 0))")
+* 根拠: `sys.exit(1 if not _ok else (2 if _offsite_failed else 0))` (行番号: 436 / 抜粋: "sys.exit(1 if not _ok else (2 if _offsite_failed else 0))")
 
 ### `_notify_and_log_error`
 
 * **役割**: ERRORレベルの記録と管理者への即時通知を行う。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 342〜354 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 380〜392 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **引数/リクエスト**: `message: str` (エラー内容を示すメッセージ文字列)
-* 根拠: `def _notify_and_log_error(message: str)` (行番号: 342 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str)` (行番号: 380 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 342 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `-> None:` (行番号: 380 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **副作用**: ロガーへのエラー書き込み、外部API呼び出し（`send_push`）。
@@ -182,7 +189,7 @@
 
 
 * **エラーハンドリング**: なし（内部で例外捕捉は行われていない）。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 342〜354 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 380〜392 / 抜粋: "def _notify_and_log_error(...)")
 
 
 

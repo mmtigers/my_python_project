@@ -1,5 +1,6 @@
 import errno
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -18,6 +19,14 @@ from core.database import save_log_generic
 from core.utils import get_now_iso, retry_with_backoff, get_now_jst
 from services import db_retention_service
 from services.notification_service import send_push
+
+# Issue #1155: DBバックアップの保持期間削除で、種類ごとに年数に関係なく残す最新の世代数。
+# バックアップが DB_BACKUP_RETENTION_DAYS 以上止まったまま気づかないと、NAS 上の
+# バックアップが全部消えてしまうのを防ぐ安全弁。通常時(毎日1世代)は保持期間の方が長いので効かない。
+DB_BACKUP_KEEP_MIN_GENERATIONS: int = 7
+# バックアップのファイル名に入る日時(`home_system_20261124_040000.db` / `devices_20261124_040000.json`)。
+# これを除いた名前を「種類」とみなし、種類ごとに最新の世代を数える。
+_BACKUP_TIMESTAMP_RE = re.compile(r"_\d{8}_\d{6}")
 
 # ロガー設定
 logger = setup_logging("nas_monitor")
@@ -269,13 +278,18 @@ class NasMonitor:
             return None
 
     def cleanup_old_files(
-        self, directory: str, retention_days: int, extensions: Optional[Tuple[str, ...]]
+        self, directory: str, retention_days: int, extensions: Optional[Tuple[str, ...]],
+        keep_newest: int = 0,
     ) -> Dict[str, Any]:
         """指定ディレクトリ配下を再帰的に走査し、保持日数を超えたファイルを削除する。
 
         extensions が None の場合は拡張子で絞り込まず、ディレクトリ内の全ファイルを対象とする
         (ディレクトリ自体がバックアップ専用など、単一種類の成果物しか置かれないことが
         保証されている場合に使う。Issue #191)。
+
+        keep_newest > 0 なら、ファイル名から日時(`_YYYYMMDD_HHMMSS`)を除いた種類ごとに、
+        更新時刻の新しい順に keep_newest 件は保持日数に関係なく残す(Issue #1155。
+        バックアップが保持日数以上止まったまま気づかないと、全世代が消えるのを防ぐ安全弁)。
         """
         result: Dict[str, Any] = {"deleted_count": 0, "freed_gb": 0.0}
 
@@ -285,19 +299,40 @@ class NasMonitor:
         cutoff = time.time() - (retention_days * 86400)
         freed_bytes = 0
 
+        candidates: list[tuple[str, str]] = []
         for root, _dirs, files in os.walk(directory):
             for name in files:
                 if extensions is not None and not name.lower().endswith(extensions):
                     continue
+                candidates.append((root, name))
+
+        protected: set[str] = set()
+        if keep_newest > 0:
+            families: Dict[str, list[tuple[float, str]]] = {}
+            for root, name in candidates:
                 path = os.path.join(root, name)
                 try:
-                    if os.path.getmtime(path) < cutoff:
-                        size = os.path.getsize(path)
-                        os.remove(path)
-                        result["deleted_count"] += 1
-                        freed_bytes += size
-                except OSError as e:
-                    logger.warning(f"Cleanup skip (error): {path}: {e}")
+                    mtime = os.path.getmtime(path)
+                except OSError:
+                    continue
+                family = os.path.join(root, _BACKUP_TIMESTAMP_RE.sub("", name))
+                families.setdefault(family, []).append((mtime, path))
+            for items in families.values():
+                items.sort(reverse=True)
+                protected.update(path for _mtime, path in items[:keep_newest])
+
+        for root, name in candidates:
+            path = os.path.join(root, name)
+            if path in protected:
+                continue
+            try:
+                if os.path.getmtime(path) < cutoff:
+                    size = os.path.getsize(path)
+                    os.remove(path)
+                    result["deleted_count"] += 1
+                    freed_bytes += size
+            except OSError as e:
+                logger.warning(f"Cleanup skip (error): {path}: {e}")
 
         result["freed_gb"] = round(freed_bytes / (2**30), 2)
         return result
@@ -333,7 +368,7 @@ class NasMonitor:
             # バックアップ専用でバックアップ以外のファイルが置かれることはないため、
             # 拡張子で絞り込まず全ファイルを対象にする。
             ("DBバックアップ", getattr(config, "DB_BACKUPS_DIR", None),
-             getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), None),
+             getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), None, DB_BACKUP_KEEP_MIN_GENERATIONS),
             # #359: 録画VOD用のキャッシュ(BASE_DIR/data/hls_streams/vod/<cam>/)。
             # 以前は services/camera_service.py が ffmpeg で .ts/.m3u8/concat_*.txt
             # (1日分で数GB〜数十GB)をここへ生成しており、どこにも削除経路が無かった。
@@ -346,10 +381,11 @@ class NasMonitor:
         ]
 
         summary_lines = []
-        for label, directory, retention_days, extensions in targets:
+        for label, directory, retention_days, extensions, *rest in targets:
             if not directory:
                 continue
-            result = self.cleanup_old_files(directory, retention_days, extensions)
+            keep_newest = rest[0] if rest else 0
+            result = self.cleanup_old_files(directory, retention_days, extensions, keep_newest=keep_newest)
             if result["deleted_count"] > 0:
                 logger.info(
                     f"🗑️ Cleanup {label} ({directory}): "

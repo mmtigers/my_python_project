@@ -3,6 +3,7 @@ from core.logger import setup_logging
 from core.database import get_db_cursor
 from services.notification_service import send_push
 from services import parking_occupancy_service, parking_record_service
+from services import backup_service, recording_status_service
 from core import state_file
 import datetime
 import os
@@ -255,6 +256,44 @@ def generate_text_section(period_name: str, data: Dict[str, Any], is_simple: boo
     
     return text
 
+def _format_duration(seconds: int) -> str:
+    """欠けの合計を「N分」「N時間M分」にする(1分未満は切り上げて1分)。"""
+    minutes = max(1, (seconds + 59) // 60)
+    return _format_minutes(minutes)
+
+
+def format_system_section(start_dt: datetime.datetime, now: datetime.datetime) -> str:
+    """週次レポート末尾の「システム」の行(録画の欠け #1169・DBサイズ #1170)。
+
+    どちらも「後から確かめられる記録」が無かったもの(数分の録画の欠けは都度通知すると
+    ノイズになり、DB単体の増え方はどこも見ていなかった)。取得できない行は出さず、
+    レポートの送信は止めない。
+    """
+    lines: list[str] = []
+    try:
+        gaps = recording_status_service.camera_recording_gaps(start_dt, now)
+        if gaps:
+            parts = [
+                f"{g['name']} {g['count']}件・計{_format_duration(g['total_sec'])}" if g["count"]
+                else f"{g['name']} なし"
+                for g in gaps
+            ]
+            lines.append("🎥 録画の欠け: " + " / ".join(parts))
+    except Exception as e:
+        logger.warning(f"録画の欠けの集計に失敗しました: {e}")
+    try:
+        trend = backup_service.get_backup_size_trend(days=7)
+        if trend:
+            diff = trend["diff_mb"]
+            diff_text = f"(前週比 {diff:+.1f}MB)" if diff is not None else "(前週の記録なし)"
+            lines.append(f"💾 DBサイズ: {trend['size_mb']:.1f}MB {diff_text}")
+    except Exception as e:
+        logger.warning(f"DBサイズの集計に失敗しました: {e}")
+    if not lines:
+        return ""
+    return "------------------\n🛠️ システム\n" + "\n".join(lines) + "\n"
+
+
 def is_month_end_report() -> bool:
     """今日がその月の最後のレポート日(日曜日/月曜日)か判定する。
 
@@ -343,6 +382,8 @@ def run_report() -> None:
                 
                 msg_body += f"🍳 自炊回数: {total_cook}回！すごいです✨\n"
                 msg_body += f"⚡ 年間電気代: 約{total_bill:,}円\n"
+
+    msg_body += format_system_section(start_week, now)
 
     msg_footer = "\n今週も無理せず、楽しくいきましょうね✨"
 

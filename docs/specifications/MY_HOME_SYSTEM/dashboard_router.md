@@ -218,7 +218,7 @@
 
 ### `GET {DASHBOARD_BASE_PATH}/watch` (`dashboard_watch`)
 
-* **(2026-11-24 改訂)** 見守りの一覧(見守りの4枚のカード・カメラの写真・今日の動き・防犯ログ/タイムラプスへの入口)を返す。`collect_status_cards()`のカードと`get_sensor_data_today()`(今日の全件)を`render_watch_page(cards, ..., df_today=...)`に渡す。ログ・日付/機器での絞り込み・時間帯の詳細は詳細画面(`dashboard_watch_detail`)、ライブ映像・最近の写真・タイムラプスはカメラのページ(`dashboard_watch_live`)へ移した。引数は従来どおり受け取り、`src`が`HEATMAP_SOURCES`のいずれかなら`/watch/<src>`へ(`date`・`device`・`hour`・`hdev`を引き継ぎ、`hour`があれば`#hour-log`付き)、`tl_all`があれば`/watch/live?tl_all=...#timelapse-section`へ302で送る。それ以外の`date`/`device`は無視して一覧を出す(行き先を1つに決められないため)。戻り値は`Response`。下の記述(ログ・ヒートマップを一覧で描いていた頃のもの)は現在のコードには当てはまらない。
+* **(2026-11-24 改訂)** 見守りの一覧(見守りの4枚のカード・カメラの写真・今日の動き・防犯ログ/タイムラプスへの入口)を返す。`collect_status_cards()`のカードと`get_sensor_data_today()`(今日の全件)を`render_watch_page(cards, ..., df_today=...)`に渡す。ログ・日付/機器での絞り込み・時間帯の詳細は詳細画面(`dashboard_watch_detail`)、ライブ映像・最近の写真・タイムラプスはカメラのページ(`dashboard_watch_live`)へ移した。引数は従来どおり受け取り、`src`が`HEATMAP_SOURCES`のいずれかなら`/watch/<src>`へ(`date`・`device`・`hour`・`hdev`を引き継ぎ、`hour`があれば`#hour-log`付き。Issue #1179 で遷移先を変数に分けて組み立てるようにした。挙動は同じ)、`tl_all`があれば`/watch/live?tl_all=...#timelapse-section`へ302で送る。それ以外の`date`/`device`は無視して一覧を出す(行き先を1つに決められないため)。戻り値は`Response`。下の記述(ログ・ヒートマップを一覧で描いていた頃のもの)は現在のコードには当てはまらない。
 * 根拠: [関数定義] (行番号: 215 / 抜粋: "def dashboard_watch(")
 
 ### `GET {DASHBOARD_BASE_PATH}/watch/live` (`dashboard_watch_live`)
@@ -228,7 +228,7 @@
 * **戻り値/レスポンス**: `HTMLResponse`
 * **副作用**: NAS上のタイムラプス・スナップショットの一覧の読み取り(`render_watch_live_page`内)
 * **エラーハンドリング**: なし
-* 根拠: [関数定義] (行番号: 248 / 抜粋: "def dashboard_watch_live(tl_all: str | None = None) -> HTMLResponse:")
+* 根拠: [関数定義] (行番号: 251 / 抜粋: "def dashboard_watch_live(tl_all: str | None = None) -> HTMLResponse:")
 
 ### `GET {DASHBOARD_BASE_PATH}/watch/{src}` (`dashboard_watch_detail`)
 
@@ -237,7 +237,7 @@
 * **戻り値/レスポンス**: `HTMLResponse`(`render_watch_detail_page`)または`RedirectResponse`(302)
 * **副作用**: DBの読み取り(TTLキャッシュ付き。日付指定時は指定日をDBから)
 * **エラーハンドリング**: 不正な`date`・`hour`は無視して通常表示
-* 根拠: [関数定義] (行番号: 263 / 抜粋: "def dashboard_watch_detail(")
+* 根拠: [関数定義] (行番号: 266 / 抜粋: "def dashboard_watch_detail(")
 
 * **(新機能)** クエリパラメータ`tl_all`(`1`のときタイムラプス一覧の先頭10件の上限を外す)を追加し、`timelapse_service.list_timelapses()`の結果を`render_watch_page`へ渡す。
 
@@ -246,7 +246,7 @@
 
 
 * **引数/リクエスト**: **(新機能)** クエリ`device`(`device_id`、任意)で高砂・伊丹のセンサーログをその機器だけに絞る(`render_watch_page(selected_device=...)`に渡す。一覧に無い値は無視される。防犯ログは対象外)。クエリ`date`(`YYYY-MM-DD`、任意)。**(新機能)** 指定があれば`dashboard_page_service.parse_log_date`で解釈し、その日のログだけを表示する。この場合は共通キャッシュ(直近`MOBILE_SENSOR_ROW_LIMIT`件)ではなく`home_status_service.get_sensor_data_for_day`でDBから指定日の全件を取る。形式が不正な値は無視して通常表示になる。
-* 根拠: [関数定義] (行番号: 215 / 抜粋: "def dashboard_watch(")、[日付の解釈] (行番号: 277 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
+* 根拠: [関数定義] (行番号: 215 / 抜粋: "def dashboard_watch(")、[日付の解釈] (行番号: 280 / 抜粋: "selected_date = dashboard_page_service.parse_log_date(date)")
 
 
 * **戻り値/レスポンス**: `HTMLResponse`(見守りページ全体のHTML)
@@ -265,7 +265,7 @@
 ### `GET {DASHBOARD_BASE_PATH}/life` (`dashboard_life`)
 
 * **(2026-11-24 改訂)** `get_cached_materials()`を呼ばなくなり、`render_life_page`へ`daily_cost_rows`を渡さない(日別の電気代は電気ページの「今月のまとめ」へ移した)。下の「(不具合修正) `get_cached_materials()`も呼び…」は現在のコードには当てはまらない。
-* 根拠: [関数定義] (行番号: 305 / 抜粋: "def dashboard_life(")
+* 根拠: [関数定義] (行番号: 308 / 抜粋: "def dashboard_life(")
 
 * **(新機能)** クエリ`hm_view`(`days`=30日の推移/`day`=拠点を並べる)・`hm_date`(並べる日)も受け取り、`dashboard_page_service.parse_climate_view`/`parse_climate_date`(過去`CLIMATE_DAYS`日の範囲外・不正な値は今日)で解釈して`render_home_climate_heatmap`の`view`/`day`に渡す。
 * **(2026-11-12 UX改善)** クエリ`hm_loc`/`hm_metric`/`hm_src`を受け取り、`_climate_heatmap_html`(旧`_home_climate_html`)の出力を`render_life_page`の`climate_html`に渡す(過去30日ヒートマップをホームから移した)。
@@ -294,22 +294,22 @@
 
 ### `GET {DASHBOARD_BASE_PATH}/power` (`dashboard_power`)
 
-* **(2026-11-24 改訂)** くらしの「💰 今月の電気代」カードのタップ先。`get_cached_materials()`の`monthly_cost`・`last_month_cost`・`daily_cost_rows`も`render_power_page`へ渡し、先頭に「🧾 今月のまとめ」を出す(カードと同じ数字)。
+* **(2026-11-24 改訂)** くらしの「💰 今月の電気代」カードのタップ先。`get_cached_materials()`の`monthly_cost`・`last_month_cost`と、日別の電気代も`render_power_page`へ渡し、先頭に「🧾 今月のまとめ」を出す(カードと同じ数字)。**(Issue #1178 で変更)** 日別の電気代は共通の材料から外れ、このページを開いたときだけ `home_status_service.get_daily_cost_rows()`(10分キャッシュ)で取る。
 
 * **役割**: **(新機能)** ⚡電気ページ。`power_analysis_service.build_power_report(days)`の結果を`power_page_service.render_power_page`で描く(月ごとの推移・日別の電気代・気温との関係・テレビの使い方)。分析は10分キャッシュされる。`async def`にしない(DB取得とpandasの計算が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`days`(30/60/90。それ以外の値・数値でない値は既定の30。`str | None`で受けて自前で変換するので422にならない)。日別・気温・テレビの対象期間を切り替える。
-* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 416)
+* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 421)
 
 ### `GET {DASHBOARD_BASE_PATH}/updates` (`dashboard_updates`)
 
 * **役割**: **(新機能)** アップデートページを返す。`release_history_service.get_release_history()`でダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を集め、`dashboard_page_service.render_updates_page`に渡す。あさノート・よるノートは外部から取得する(タイムアウト・キャッシュ付き。失敗しても残りのアプリは表示する)。`async def`にしない(外部取得が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`app`(`dashboard`/`quest`/`asa`/`yoru`、任意)で1アプリに絞る。未知の値は無視して全件。
-* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 437)
+* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 442)
 
 ### `GET {DASHBOARD_BASE_PATH}/sys` (`dashboard_sys`)
 
-* **(2026-11-24 改訂)** システムの一覧(全体サマリー+カード)を返す。材料は`_sys_materials()`(`get_cached_materials()`・現在時刻・`collect_status_cards(now)`・`build_freshness_rows`・`read_health_result(now)`・`collect_link_health(...)`・`build_sys_cards(...)`をまとめて返す。詳細画面と共有)で集め、`render_sys_page(sys_cards, rows, dashboard_path=..., health=...)`に渡す。`nas_days`が付いていればNASの詳細画面(`/sys/nas?nas_days=...`)へ302で送る(NASの容量推移が一覧にあった頃のURL)。戻り値は`Response`。下の記述(NAS容量グラフ・起動履歴・ログ欄を一覧で描いていた頃のもの)は、現在は`dashboard_sys_detail`の各画面に当てはまる。
-* 根拠: [関数定義] (行番号: 321 / 抜粋: "def _sys_materials():")、[関数定義] (行番号: 334 / 抜粋: "def dashboard_sys(nas_days: str | None = None) -> Response:")
+* **(2026-11-24 改訂)** システムの一覧(全体サマリー+カード)を返す。材料は`_sys_materials()`(`get_cached_materials()`・現在時刻・`collect_status_cards(now)`・`build_freshness_rows`(Issue #1182 以降は在否判定の行のため `car=get_car_summary()` も渡す)・`read_health_result(now)`・`collect_link_health(...)`・`build_sys_cards(...)`をまとめて返す。詳細画面と共有)で集め、`render_sys_page(sys_cards, rows, dashboard_path=..., health=...)`に渡す。`nas_days`が付いていればNASの詳細画面(`/sys/nas?nas_days=...`)へ302で送る(NASの容量推移が一覧にあった頃のURL)。戻り値は`Response`。下の記述(NAS容量グラフ・起動履歴・ログ欄を一覧で描いていた頃のもの)は、現在は`dashboard_sys_detail`の各画面に当てはまる。
+* 根拠: [関数定義] (行番号: 324 / 抜粋: "def _sys_materials():")、[関数定義] (行番号: 339 / 抜粋: "def dashboard_sys(nas_days: str | None = None) -> Response:")
 
 * **(2026-11-12 UX改善)** `home_status_service.read_health_result(now)`(毎時の定期チェックの結果)を`render_sys_page`の`health`に渡す。
 
@@ -342,7 +342,7 @@
 ### `GET {DASHBOARD_BASE_PATH}/sys/logs` (`dashboard_download_logs`)
 
 * **役割**: システムページの「ログのダウンロード」でチェックしたログ(複数可)を、機密情報を伏せて1つのテキストにしてダウンロードさせる。`group`クエリ(複数指定可)は一覧のチェックボックスの値(ローテーション分をまとめたグループ名)で、`log_download_service.resolve_log_groups`が列挙した一覧との完全一致でしか解決しない(パス・`..`・`.log.1`の名前は一覧に無いので404)。選択した内容の見積もり合計が`config.LOG_DOWNLOAD_MAX_TOTAL_MB`を超える場合は413。本文は`read_groups_for_download`のマスク済みテキストで、`Content-Disposition: attachment`(保存名は`download_filename`)・`Cache-Control: no-store`・`text/plain; charset=utf-8`で返す。認証は設けず、既存のダッシュボードと同じネットワーク制御(LAN/Tailscale限定のFW、外部はCloudflare Access)に委ねる。
-* 根拠: [関数定義] (行番号: 346〜372 / 抜粋: "def dashboard_download_logs(group: list[str] = Query(default=[])) -> Response:")
+* 根拠: [関数定義] (行番号: 351〜377 / 抜粋: "def dashboard_download_logs(group: list[str] = Query(default=[])) -> Response:")
 
 * **引数/リクエスト**: クエリパラメータ`group: list[str]`(ページのフォームがチェックされた分だけ送る)
 * **戻り値/レスポンス**: 200で添付ファイル(`Response`)。未選択は400、一覧に無い名前は404、合計サイズ超過は413(いずれも`HTTPException`)
@@ -356,7 +356,7 @@
 * **戻り値/レスポンス**: `HTMLResponse`または`RedirectResponse`(302)
 * **副作用**: DBの読み取り(TTLキャッシュ付き)、外部リンクの稼働チェック(キャッシュ付き)、ログ一覧の列挙(admin)
 * **エラーハンドリング**: 不正な`nas_days`は既定の30日
-* 根拠: [関数定義] (行番号: 376 / 抜粋: "def dashboard_sys_detail(section: str, nas_days: str | None = None) -> Response:")
+* 根拠: [関数定義] (行番号: 381 / 抜粋: "def dashboard_sys_detail(section: str, nas_days: str | None = None) -> Response:")
 
 ### `GET {DASHBOARD_BASE_PATH}/static/{filename}` (`dashboard_static`)
 

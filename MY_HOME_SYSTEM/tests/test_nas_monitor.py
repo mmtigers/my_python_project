@@ -15,6 +15,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.database import get_db_cursor
 import config
 from monitors.nas_monitor import NasMonitor
+import monitors.nas_monitor as nas_monitor_module
 
 
 class TestNasMonitorCleanup(unittest.TestCase):
@@ -58,6 +59,38 @@ class TestNasMonitorCleanup(unittest.TestCase):
 
         self.assertEqual(result["deleted_count"], 0)
         self.assertTrue(os.path.exists(old_other))
+
+    def test_keep_newest_survives_even_when_all_are_old(self):
+        """Issue #1155: 全ファイルが保持期間より古くても、種類ごとの最新N件は残す。"""
+        dbs = [self._make_file(f"home_system_202610{d:02d}_040000.db", age_days=60 - d) for d in range(1, 11)]
+        cfgs = [self._make_file(f"devices_202610{d:02d}_040000.json", age_days=60 - d) for d in range(1, 11)]
+
+        result = self.monitor.cleanup_old_files(self.tmp_dir, retention_days=30, extensions=None, keep_newest=7)
+
+        self.assertEqual(result["deleted_count"], 6)  # 種類ごとに 10-7=3 件
+        self.assertEqual([os.path.exists(p) for p in dbs], [False] * 3 + [True] * 7)
+        self.assertEqual([os.path.exists(p) for p in cfgs], [False] * 3 + [True] * 7)
+
+    def test_keep_newest_does_not_change_normal_retention(self):
+        """通常時(新しい世代が7件以上ある)は、保持期間どおりに削除される。"""
+        old = [self._make_file(f"home_system_202609{d:02d}_040000.db", age_days=40 + d) for d in range(1, 4)]
+        new = [self._make_file(f"home_system_202611{d:02d}_040000.db", age_days=d) for d in range(1, 9)]
+
+        result = self.monitor.cleanup_old_files(self.tmp_dir, retention_days=30, extensions=None, keep_newest=7)
+
+        self.assertEqual(result["deleted_count"], 3)
+        self.assertFalse(any(os.path.exists(p) for p in old))
+        self.assertTrue(all(os.path.exists(p) for p in new))
+
+    def test_db_backups_target_keeps_newest_generations(self):
+        seen = []
+        with patch.object(config, "DB_BACKUPS_DIR", self.tmp_dir, create=True), \
+             patch.object(self.monitor, "cleanup_old_files",
+                          side_effect=lambda d, days, ext, keep_newest=0: seen.append((d, keep_newest))
+                          or {"deleted_count": 0, "freed_gb": 0.0}), \
+             patch.object(self.monitor, "_run_db_row_retention", return_value=[]):
+            self.monitor.run_retention_cleanup()
+        self.assertIn((self.tmp_dir, nas_monitor_module.DB_BACKUP_KEEP_MIN_GENERATIONS), seen)
 
 
 class TestNasMonitorStatePersistence(unittest.TestCase):
@@ -160,6 +193,11 @@ class TestNasMonitorRetentionTargets(unittest.TestCase):
         # 実際のコピー結果は拡張子なしのファイル名になる
         old_env = self._make_file(os.path.join(db_backups_dir, ".env_20250101_000000"), age_days=40)
         new_db = self._make_file(os.path.join(db_backups_dir, "home_system_20260101_000000.db"), age_days=5)
+        # Issue #1155: 種類ごとに最新 DB_BACKUP_KEEP_MIN_GENERATIONS 件は年数に関係なく残るため、
+        # 古い世代が削除対象になるよう、各種類に新しい世代を十分に置く(毎日バックアップが続いている通常時)。
+        for day in range(1, nas_monitor_module.DB_BACKUP_KEEP_MIN_GENERATIONS + 1):
+            for stem, suffix in (("home_system", ".db"), ("config", ".py"), ("devices", ".json"), (".env", "")):
+                self._make_file(os.path.join(db_backups_dir, f"{stem}_202611{day:02d}_000000{suffix}"), age_days=day)
 
         with patch.object(config, "DB_BACKUPS_DIR", db_backups_dir), \
              patch("monitors.nas_monitor.send_push"):
@@ -591,7 +629,7 @@ class TestFallbackSnapshotsAreCleanedUp:
         monkeypatch.setattr(config, "FALLBACK_ROOT", str(tmp_path / "fb"))
         monitor = NasMonitor()
         seen = []
-        monkeypatch.setattr(monitor, "cleanup_old_files", lambda d, days, ext: seen.append((d, ext)) or {"deleted_count": 0, "freed_gb": 0.0})
+        monkeypatch.setattr(monitor, "cleanup_old_files", lambda d, days, ext, keep_newest=0: seen.append((d, ext)) or {"deleted_count": 0, "freed_gb": 0.0})
         monitor.run_retention_cleanup()
         assert (str(tmp_path / "fb" / "assets" / "snapshots"), (".jpg", ".jpeg")) in seen
 

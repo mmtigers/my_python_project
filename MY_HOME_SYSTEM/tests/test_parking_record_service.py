@@ -160,20 +160,41 @@ class TestMonitor:
 
     def test_読めない録画は記録し時間切れは次回もう一度読む(self, isolated_db, rec_dir, fake_analyze):
         states, calls = fake_analyze
+        # Issue #1184 で時間切れの後ろの録画はその回に読まなくなったため、フレームが取れなかった
+        # 録画(この試験のもう1つの対象)は時間切れより前に置く
+        _touch(rec_dir / "20261124_075000.mp4")
         _touch(rec_dir / "20261124_080000.mp4")
         _touch(rec_dir / "20261124_081000.mp4")
-        _touch(rec_dir / "20261124_082000.mp4")
         states["20261124_080000.mp4"] = [occupancy.FrameExtractionError("映像が無い", returncode=234)]
         states["20261124_081000.mp4"] = [P, occupancy.FrameExtractionError("時間切れ", returncode=-9)]
-        states["20261124_082000.mp4"] = []  # フレームが1枚も取れなかった(ffmpeg は成功)
+        states["20261124_075000.mp4"] = []  # フレームが1枚も取れなかった(ffmpeg は成功)
 
         monitor.main(["--record-dir", str(rec_dir)])
         monitor.main(["--record-dir", str(rec_dir)])
         assert calls.count("20261124_080000.mp4") == 1
         assert calls.count("20261124_081000.mp4") == 2
         # フレームが取れなかった録画は観測0件として記録し、読み直さない(上限を食いつぶさないため)
-        assert calls.count("20261124_082000.mp4") == 1
+        assert calls.count("20261124_075000.mp4") == 1
         assert _count("parking_observations") == 0  # 途中まで読めた録画の観測も残さない
+
+    def test_時間切れが出たらその回の残りは読まずに次回へ回す(self, isolated_db, rec_dir, fake_analyze):
+        """Issue #1184: NAS が固まっているなら残りも読めないので、1回の実行を長引かせない。"""
+        states, calls = fake_analyze
+        for minute in range(4):
+            name = f"20261124_08{minute}000.mp4"
+            _touch(rec_dir / name)
+            states[name] = [P]
+        states["20261124_081000.mp4"] = [occupancy.FrameExtractionError("時間切れ", returncode=-9)]
+
+        counts = monitor.process_pending(str(rec_dir), monitor.LOOKBACK_DAYS, monitor.MAX_FILES_PER_RUN)
+        assert calls == ["20261124_080000.mp4", "20261124_081000.mp4"]
+        assert counts["saved"] == 1 and counts["retry"] == 3  # 時間切れ1本 + 読まなかった2本
+
+        # NAS が戻れば、次の回で時間切れだった録画から読み直す
+        states["20261124_081000.mp4"] = [P]
+        calls.clear()
+        monitor.process_pending(str(rec_dir), monitor.LOOKBACK_DAYS, monitor.MAX_FILES_PER_RUN)
+        assert calls == ["20261124_081000.mp4", "20261124_082000.mp4", "20261124_083000.mp4"]
 
     def test_遡る日数より古い録画は読まない(self, isolated_db, rec_dir, fake_analyze):
         _, calls = fake_analyze

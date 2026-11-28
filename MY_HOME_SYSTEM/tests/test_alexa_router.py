@@ -11,8 +11,11 @@ import os
 import sys
 from unittest.mock import patch
 
+import pytest
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import config
 from core.database import get_db_cursor
 from core.alexa_verifier import AlexaVerificationError
 
@@ -50,6 +53,13 @@ def _seed_one_user():
 
 
 HEADERS = {"Signature": "sig", "SignatureCertChainUrl": "https://s3.amazonaws.com/echo.api/cert.pem"}
+
+
+@pytest.fixture(autouse=True)
+def _configured_skill_id(monkeypatch):
+    """Issue #1149: ALEXA_SKILL_ID 未設定だと 503 で拒否されるため、テスト用のスキルIDを設定する。"""
+    monkeypatch.setattr(config, "ALEXA_SKILL_ID", "amzn1.ask.skill.test")
+    monkeypatch.setattr(config, "ALEXA_ALLOW_ANY_SKILL", False)
 
 
 def test_launch_request_returns_apl_directive(api_client):
@@ -152,3 +162,44 @@ def test_verify_signature_and_skill_invoke_are_offloaded_to_a_thread(api_client,
     assert skill.invoke in offloaded_funcs, (
         "skill.invoke がスレッドへ退避(asyncio.to_thread)されていない"
     )
+
+
+class TestSkillIdFailClosed:
+    """Issue #1149: skill ID が未設定なら 503、違うスキルからの要求は(署名が正しくても)403。"""
+
+    def _post(self, api_client, body):
+        with patch("routers.alexa_router.verify_signature", return_value=None) as sig, \
+             patch("routers.alexa_router.verify_timestamp", return_value=None):
+            res = api_client.post("/webhook/alexa", content=json.dumps(body).encode("utf-8"), headers=HEADERS)
+        return res, sig
+
+    def test_unset_skill_id_is_rejected_before_signature_check(self, api_client, monkeypatch):
+        monkeypatch.setattr(config, "ALEXA_SKILL_ID", None)
+        res, sig = self._post(api_client, _launch_request_body())
+        assert res.status_code == 503
+        sig.assert_not_called()
+
+    def test_explicit_opt_in_accepts_any_skill(self, api_client, monkeypatch):
+        _seed_one_user()
+        monkeypatch.setattr(config, "ALEXA_SKILL_ID", None)
+        monkeypatch.setattr(config, "ALEXA_ALLOW_ANY_SKILL", True)
+        res, _ = self._post(api_client, _launch_request_body())
+        assert res.status_code == 200
+
+    def test_other_skill_is_rejected_even_when_signed(self, api_client):
+        body = _launch_request_body()
+        body["context"]["System"]["application"]["applicationId"] = "amzn1.ask.skill.someone-else"
+        body["session"]["application"]["applicationId"] = "amzn1.ask.skill.someone-else"
+        res, _ = self._post(api_client, body)
+        assert res.status_code == 403
+
+    def test_matching_skill_is_accepted(self, api_client):
+        _seed_one_user()
+        res, _ = self._post(api_client, _launch_request_body())
+        assert res.status_code == 200
+
+    def test_application_id_falls_back_to_session(self):
+        from routers import alexa_router
+        assert alexa_router._application_id({"session": {"application": {"applicationId": "a"}}}) == "a"
+        assert alexa_router._application_id({}) is None
+        assert alexa_router._application_id(None) is None

@@ -21,7 +21,7 @@
 * リクエストごとに、(1) `core.alexa_verifier`でSignature/SignatureCertChainUrlヘッダとタイムスタンプを検証、(2) `handlers.alexa_handler.skill`(ask-sdk-core)にディスパッチ、(3) 生成されたResponseEnvelopeをJSONとして返す、という3段階の処理を行う。
 * 根拠: [モジュールDocstring] (行番号: 9-12 / 抜粋: "リクエストごとに:\n    1. core.alexa_verifier で Signature / SignatureCertChainUrl ヘッダとタイムスタンプを検証\n    2. handlers.alexa_handler.skill (ask-sdk-core) にディスパッチ\n    3. 生成された ResponseEnvelope をJSONとして返す")
 * **（Issue #230で修正）** `verify_signature`(証明書キャッシュミス時に`requests.get`で同期的にHTTP通信する)と`skill.invoke`(内部で`quest_service`のSQLite同期アクセスを含む)は、以前は`async def`のエンドポイント内で直接呼び出されており、unified_serverが`workers`指定なしの単一プロセス・単一イベントループ構成であるにもかかわらずブロッキングI/Oをスレッドへ退避していなかった。LINE(`webhook_router.py`)やDB非同期アクセス(`save_log_async`)は同種の配慮を既にしているのに対し、Alexa経路だけがこれを欠いていた。現在は両呼び出しとも`asyncio.to_thread`でラップされている。
-* 根拠: [verify_signatureのto_thread化] (行番号: 33-38 / 抜粋: "await asyncio.to_thread(verify_signature, raw_body, signature, cert_chain_url)")、[skill.invokeのto_thread化] (行番号: 60-64 / 抜粋: "response_envelope = await asyncio.to_thread(\n            skill.invoke, request_envelope=request_envelope, context=None\n        )")
+* 根拠: [verify_signatureのto_thread化] (行番号: 58-63 / 抜粋: "await asyncio.to_thread(verify_signature, raw_body, signature, cert_chain_url)")、[skill.invokeのto_thread化] (行番号: 92-96 / 抜粋: "response_envelope = await asyncio.to_thread(\n            skill.invoke, request_envelope=request_envelope, context=None\n        )")
 
 ## 3. 外部依存関係
 
@@ -30,17 +30,17 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `asyncio`（Issue #230で追加） | 標準ライブラリ | `verify_signature`/`skill.invoke`をスレッドへ退避する`asyncio.to_thread`の呼び出し | 根拠: [import文] (行番号: 14 / 抜粋: "import asyncio") |
-| `fastapi`(`APIRouter`, `Request`, `HTTPException`) | 外部パッケージ | ルーター定義、リクエストオブジェクト、HTTPエラーレスポンスの送出 | 根拠: [import文] (行番号: 16 / 抜粋: "from fastapi import APIRouter, Request, HTTPException") |
-| `core.logger.setup_logging` | 内部モジュール | ロガーの初期化 | 根拠: [import文] (行番号: 18 / 抜粋: "from core.logger import setup_logging") |
-| `core.alexa_verifier`(`verify_signature`, `verify_timestamp`, `AlexaVerificationError`) | 内部モジュール | 署名・証明書・タイムスタンプの検証、および検証失敗時に送出される例外の捕捉 | 根拠: [import文] (行番号: 19 / 抜粋: "from core.alexa_verifier import verify_signature, verify_timestamp, AlexaVerificationError") |
-| `handlers.alexa_handler.skill` | 内部モジュール | Alexaリクエストのデシリアライズ・ディスパッチ・レスポンスのシリアライズを行う`ask-sdk-core`の`CustomSkillBuilder`インスタンス | 根拠: [import文] (行番号: 20 / 抜粋: "from handlers.alexa_handler import skill") |
+| `fastapi`(`APIRouter`, `Request`, `HTTPException`) | 外部パッケージ | ルーター定義、リクエストオブジェクト、HTTPエラーレスポンスの送出 | 根拠: [import文] (行番号: 17 / 抜粋: "from fastapi import APIRouter, Request, HTTPException") |
+| `core.logger.setup_logging` | 内部モジュール | ロガーの初期化 | 根拠: [import文] (行番号: 20 / 抜粋: "from core.logger import setup_logging") |
+| `core.alexa_verifier`(`verify_signature`, `verify_timestamp`, `AlexaVerificationError`) | 内部モジュール | 署名・証明書・タイムスタンプの検証、および検証失敗時に送出される例外の捕捉 | 根拠: [import文] (行番号: 21 / 抜粋: "from core.alexa_verifier import verify_signature, verify_timestamp, AlexaVerificationError") |
+| `handlers.alexa_handler.skill` | 内部モジュール | Alexaリクエストのデシリアライズ・ディスパッチ・レスポンスのシリアライズを行う`ask-sdk-core`の`CustomSkillBuilder`インスタンス | 根拠: [import文] (行番号: 22 / 抜粋: "from handlers.alexa_handler import skill") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `skill`(`handlers.alexa_handler`の`CustomSkillBuilder`インスタンス)の`serializer`/`invoke`の内部実装 | `ask-sdk-core`ライブラリおよび`handlers/alexa_handler.py`(対応する仕様書は`docs/specifications/`配下に見つからなかった)の内部実装に依存し、本ファイルからは分からない。 | 根拠: [skill呼び出し箇所] (行番号: 56-64 / 抜粋: "request_envelope = skill.serializer.deserialize(...)", "response_envelope = await asyncio.to_thread(\n            skill.invoke, request_envelope=request_envelope, context=None\n        )") |
-| `verify_signature`/`verify_timestamp`が実際に検証する証明書チェーン取得先(Amazon S3)の応答内容・遅延特性 | `core/alexa_verifier.py`側の実装、およびAmazon側インフラに依存し、本ファイルからは分からない([alexa_verifier.md](./alexa_verifier.md)参照)。 | 根拠: [verify_signature呼び出し] (行番号: 38 / 抜粋: "await asyncio.to_thread(verify_signature, raw_body, signature, cert_chain_url)") |
+| `verify_signature`/`verify_timestamp`が実際に検証する証明書チェーン取得先(Amazon S3)の応答内容・遅延特性 | `core/alexa_verifier.py`側の実装、およびAmazon側インフラに依存し、本ファイルからは分からない([alexa_verifier.md](./alexa_verifier.md)参照)。 | 根拠: [verify_signature呼び出し] (行番号: 63 / 抜粋: "await asyncio.to_thread(verify_signature, raw_body, signature, cert_chain_url)") |
 | 本ルーターの`unified_server.py`側でのマウント方法(`app.include_router`のprefix/tags指定等) | `unified_server.py`本体を確認していないため、`/webhook/alexa`パス以外に付与される可能性のあるprefixや、`ip_restriction_middleware`の例外パス一覧に含まれるか等は本ファイルからは分からない。 | 根拠: 本ファイル自体には`app.include_router`呼び出しが存在しない (行番号: 全体) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -62,14 +62,14 @@
 ### `router`
 
 * **役割**: 本ファイルが定義する`/webhook/alexa`エンドポイントを登録するための`APIRouter`インスタンス。
-* 根拠: [変数宣言] (行番号: 23 / 抜粋: "router = APIRouter()")
+* 根拠: [変数宣言] (行番号: 25 / 抜粋: "router = APIRouter()")
 
 
 * **引数/リクエスト**: 該当なし
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: なし
 * **エラーハンドリング**: なし
-* 根拠: [変数宣言] (行番号: 23 / 抜粋: "router = APIRouter()")
+* 根拠: [変数宣言] (行番号: 25 / 抜粋: "router = APIRouter()")
 
 
 
@@ -80,15 +80,15 @@
 
 
 * **引数/リクエスト**: `request: Request`(FastAPIのリクエストオブジェクト。`Signature`/`SignatureCertChainUrl`ヘッダとJSONボディを内部で参照する)
-* 根拠: [関数定義] (行番号: 27 / 抜粋: "async def alexa_webhook(request: Request):")、[ヘッダ参照] (行番号: 29-30 / 抜粋: 'signature = request.headers.get("Signature", "")\n    cert_chain_url = request.headers.get("SignatureCertChainUrl", "")')
+* 根拠: [関数定義] (行番号: 50 / 抜粋: "async def alexa_webhook(request: Request):")、[ヘッダ参照] (行番号: 29-30 / 抜粋: 'signature = request.headers.get("Signature", "")\n    cert_chain_url = request.headers.get("SignatureCertChainUrl", "")')
 
 
 * **戻り値/レスポンス**: `skill.serializer.serialize(response_envelope)`の戻り値(FastAPIにより自動的にJSONへ変換される)。検証・処理失敗時は`HTTPException`(400または500)を送出する。
-* 根拠: [戻り値] (行番号: 65 / 抜粋: "return skill.serializer.serialize(response_envelope)")
+* 根拠: [戻り値] (行番号: 97 / 抜粋: "return skill.serializer.serialize(response_envelope)")
 
 
 * **副作用**: `asyncio.to_thread`経由での`verify_signature`呼び出し(証明書チェーンのHTTPS取得を伴いうる)、`asyncio.to_thread`経由での`skill.invoke`呼び出し(`quest_service`のSQLite同期アクセスを含みうる)、検証失敗・処理失敗時の警告/エラーログ出力。
-* 根拠: [verify_signature呼び出し] (行番号: 38 / 抜粋: "await asyncio.to_thread(verify_signature, raw_body, signature, cert_chain_url)")、[skill.invoke呼び出し] (行番号: 62-64 / 抜粋: "response_envelope = await asyncio.to_thread(\n            skill.invoke, request_envelope=request_envelope, context=None\n        )")、[ログ出力] (行番号: 40, 52, 67 / 抜粋: 'logger.warning(f"Alexa request signature verification failed: {e}")')
+* 根拠: [verify_signature呼び出し] (行番号: 63 / 抜粋: "await asyncio.to_thread(verify_signature, raw_body, signature, cert_chain_url)")、[skill.invoke呼び出し] (行番号: 94-96 / 抜粋: "response_envelope = await asyncio.to_thread(\n            skill.invoke, request_envelope=request_envelope, context=None\n        )")、[ログ出力] (行番号: 40, 52, 67 / 抜粋: 'logger.warning(f"Alexa request signature verification failed: {e}")')
 
 
 * **エラーハンドリング**: 署名検証失敗(`AlexaVerificationError`)時は警告ログを出力し`HTTPException(400, "Signature verification failed")`を送出する。リクエストボディのJSONパース失敗(任意の`Exception`)時は`HTTPException(400, "Invalid JSON body")`を送出する。タイムスタンプ検証失敗(`AlexaVerificationError`)時は警告ログを出力し`HTTPException(400, "Timestamp verification failed")`を送出する。デシリアライズ・ディスパッチ・シリアライズのいずれかで例外(任意の`Exception`)が発生した場合はスタックトレース付きでエラーログを出力し`HTTPException(500, "Skill invocation failed")`を送出する。
@@ -152,8 +152,15 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `handlers/alexa_handler.py` | `skill`オブジェクトの実体であり、`LaunchRequestHandler`が実際にどのようなSQLiteアクセス(`quest_service.game_system`経由)やAPL組み立てを行っているかを把握するため必読。対応する仕様書は現時点で未作成。 | 根拠: [import文] (行番号: 20 / 抜粋: "from handlers.alexa_handler import skill") |
+| 高 | `handlers/alexa_handler.py` | `skill`オブジェクトの実体であり、`LaunchRequestHandler`が実際にどのようなSQLiteアクセス(`quest_service.game_system`経由)やAPL組み立てを行っているかを把握するため必読。対応する仕様書は現時点で未作成。 | 根拠: [import文] (行番号: 22 / 抜粋: "from handlers.alexa_handler import skill") |
 | 中 | `unified_server.py` | 本ルーターが実際にどのprefixでマウントされ、`ip_restriction_middleware`の例外パス扱いになっているか(LINE/SwitchBotと同様の外部公開が必要なため)を確認するため。 | 根拠: 本ファイル自体にはマウント処理が存在しない |
+
+### `_require_skill_configured` / `_application_id`（Issue #1149 で追加）
+
+* **役割**: skill ID の検証をフェイルクローズにする。以前は `ALEXA_SKILL_ID` が未設定だと(起動時に WARNING が出るだけで)署名とタイムスタンプしか検証せず、Alexa が署名した要求であれば誰が作ったスキルからでも受け付けて家族クエストの集計を返していた(このパスは `allowed_webhook_paths` で外部公開)。
+* `alexa_webhook` は最初に `_require_skill_configured()` を呼び、`config.ALEXA_SKILL_ID` が未設定で `config.ALEXA_ALLOW_ANY_SKILL` も偽なら、署名検証(証明書の取得を伴う)の前に 503 を返す。`SWITCHBOT_WEBHOOK_TOKEN`(#648)と同じ「既定は拒否・明示的なオプトインでのみ従来動作」の方式。
+* 署名・タイムスタンプの検証の後、`_application_id(payload)`(`context.System.application.applicationId`、無ければ `session.application.applicationId`)が `ALEXA_SKILL_ID` と違えば 403 を返す。ask-sdk-core の `skill_id` 検証(`handlers/alexa_handler.py`)は起動時の設定しか見ず、不一致を例外(=500)で返すため、ルーター側で先に判定する。拒否のログには受け取った applicationId を100文字までに切って出す。
+* 根拠: `def _require_skill_configured() -> None:` (参照: _require_skill_configured)、`def _application_id(payload: Any) -> Optional[str]:` (参照: _application_id)
 
 ## 8. 保守上の注意点
 

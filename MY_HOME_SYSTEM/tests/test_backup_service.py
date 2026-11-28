@@ -238,10 +238,13 @@ class TestOffsiteCopy:
         assert calls == []
 
     def test_copies_the_new_nas_backup_as_latest(self, monkeypatch):
+        from freezegun import freeze_time
         monkeypatch.setattr(config, "DB_BACKUP_OFFSITE_REMOTE", "gdrive:backup/", raising=False)
         calls = self._fake_rclone(monkeypatch)
 
-        success, _msg, _size = backup_service.perform_backup()
+        # Issue #1163: 週次の世代を作る曜日(日曜)以外に固定する(水曜)
+        with freeze_time("2026-11-25 04:00:00+09:00"):
+            success, _msg, _size = backup_service.perform_backup()
 
         assert success is True
         assert len(calls) == 1
@@ -283,6 +286,50 @@ class TestOffsiteCopy:
 
         assert success is False
         assert calls == []
+
+    def test_weekly_copy_only_on_the_weekly_day(self, monkeypatch):
+        """Issue #1163: 日曜だけ日付つきの別名でも複製し、古い週次の世代を消す。"""
+        from freezegun import freeze_time
+        monkeypatch.setattr(config, "DB_BACKUP_OFFSITE_REMOTE", "gdrive:backup", raising=False)
+        calls = self._fake_rclone(monkeypatch)
+
+        with freeze_time("2026-11-29 04:00:00+09:00"):  # 日曜
+            assert backup_service._copy_latest_offsite(backup_service.Path("/nas/x.db")) is True
+
+        cmds = [c for c, _ in calls]
+        assert cmds[0][:4] == ["/usr/bin/rclone", "copyto", "/nas/x.db", "gdrive:backup/home_system_latest.db"]
+        assert cmds[1][:4] == ["/usr/bin/rclone", "copyto", "/nas/x.db", "gdrive:backup/home_system_weekly_20261129.db"]
+        assert cmds[2][:3] == ["/usr/bin/rclone", "delete", "gdrive:backup"]
+        delete = cmds[2]
+        assert delete[delete.index("--include") + 1] == "home_system_weekly_*.db"  # latest は消さない
+        assert delete[delete.index("--min-age") + 1] == backup_service.OFFSITE_WEEKLY_MIN_AGE
+        assert all(kw["timeout"] == backup_service.OFFSITE_TIMEOUT_SEC for _, kw in calls)
+
+    @pytest.mark.parametrize("day", ["2026-11-23", "2026-11-25", "2026-11-28"])
+    def test_no_weekly_copy_on_other_days(self, monkeypatch, day):
+        from freezegun import freeze_time
+        monkeypatch.setattr(config, "DB_BACKUP_OFFSITE_REMOTE", "gdrive:backup", raising=False)
+        calls = self._fake_rclone(monkeypatch)
+        with freeze_time(f"{day} 04:00:00+09:00"):
+            backup_service._copy_latest_offsite(backup_service.Path("/nas/x.db"))
+        assert len(calls) == 1
+
+    def test_weekly_failure_is_reported(self, monkeypatch):
+        from freezegun import freeze_time
+        monkeypatch.setattr(config, "DB_BACKUP_OFFSITE_REMOTE", "gdrive:backup", raising=False)
+        monkeypatch.setattr(backup_service.shutil, "which", lambda name: "/usr/bin/rclone")
+        monkeypatch.setattr(backup_service, "_offsite_failed", False)
+        monkeypatch.setattr(backup_service, "send_push", lambda **kwargs: None)
+
+        def fake_run(cmd, **kwargs):
+            if "home_system_weekly_" in " ".join(cmd):
+                raise backup_service.subprocess.CalledProcessError(1, cmd, stderr="quota\n")
+            return backup_service.subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(backup_service.subprocess, "run", fake_run)
+        with freeze_time("2026-11-29 04:00:00+09:00"):
+            assert backup_service._copy_latest_offsite(backup_service.Path("/nas/x.db")) is False
+        assert backup_service._offsite_failed is True
 
     def test_missing_rclone_is_logged(self, monkeypatch):
         monkeypatch.setattr(config, "DB_BACKUP_OFFSITE_REMOTE", "gdrive:backup", raising=False)

@@ -294,6 +294,14 @@ def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)
 # オフサイト複製(rclone)の上限時間。155MB 前後の DB を家庭用回線で送る想定で余裕を取る。
 OFFSITE_TIMEOUT_SEC: int = 1800
 OFFSITE_FILENAME: str = "home_system_latest.db"
+# Issue #1163: 週1回だけ日付つきの別名でもオフサイトへ複製し、論理破損(誤ったマイグレーション・
+# バグによる大量削除など。integrity_check は ok のまま翌日の latest を上書きする)の前へ戻れるようにする。
+# 曜日は get_now_jst().weekday()(月=0 … 日=6)。
+OFFSITE_WEEKLY_WEEKDAY: int = 6
+OFFSITE_WEEKLY_PREFIX: str = "home_system_weekly_"
+# この経過時間より古い週次ファイルをリモートから消す(rclone の --min-age)。
+# 週1回なので 0・7・14・21日前の4世代が残る(28日前のものは消える)。
+OFFSITE_WEEKLY_MIN_AGE: str = "25d"
 
 
 # 直近のオフサイト複製が「設定ありで失敗」したか(Issue #891)。__main__ が終了コードに反映する。
@@ -336,6 +344,36 @@ def _copy_latest_offsite(nas_backup_path: Path) -> bool:
         detail = (e.stderr or "").strip().splitlines()
         return _offsite_failure(f"rc={e.returncode}: {detail[-1][:200] if detail else 'no stderr'}")
     logger.info(f"✅ 最新のバックアップをオフサイトへ複製しました: {dest}")
+    if get_now_jst().weekday() == OFFSITE_WEEKLY_WEEKDAY:
+        return _copy_weekly_offsite(rclone, remote, nas_backup_path)
+    return True
+
+
+def _copy_weekly_offsite(rclone: str, remote: str, nas_backup_path: Path) -> bool:
+    """週次の世代をオフサイトへ複製し、古い週次の世代を消す(Issue #1163)。
+
+    latest は毎日上書きされるため、論理破損に気づくのが翌日以降だと戻れない。NAS と実機を
+    同時に失う場合(火災・落雷・盗難)にも、直近4週ぶんの世代が残るようにする。
+    消すのは `OFFSITE_WEEKLY_PREFIX` の名前のファイルだけ(latest には触れない)。
+    """
+    base = remote.rstrip('/')
+    dest = f"{base}/{OFFSITE_WEEKLY_PREFIX}{get_now_jst().strftime('%Y%m%d')}.db"
+    try:
+        subprocess.run(  # nosec B603 - 引数はリスト渡しで、値は設定値とバックアップの実パスのみ
+            [rclone, "copyto", str(nas_backup_path), dest, "--retries", "3"],
+            check=True, capture_output=True, text=True, timeout=OFFSITE_TIMEOUT_SEC,
+        )
+        subprocess.run(  # nosec B603
+            [rclone, "delete", base, "--include", f"{OFFSITE_WEEKLY_PREFIX}*.db",
+             "--min-age", OFFSITE_WEEKLY_MIN_AGE, "--max-depth", "1"],
+            check=True, capture_output=True, text=True, timeout=OFFSITE_TIMEOUT_SEC,
+        )
+    except subprocess.TimeoutExpired:
+        return _offsite_failure(f"週次の世代: タイムアウト({OFFSITE_TIMEOUT_SEC}秒)")
+    except subprocess.CalledProcessError as e:
+        detail = (e.stderr or "").strip().splitlines()
+        return _offsite_failure(f"週次の世代: rc={e.returncode}: {detail[-1][:200] if detail else 'no stderr'}")
+    logger.info(f"✅ 週次のバックアップをオフサイトへ複製しました: {dest}")
     return True
 
 
@@ -352,6 +390,42 @@ def _notify_and_log_error(message: str) -> None:
         target="discord",
         channel="error"
     )
+
+def get_backup_size_trend(days: int = 7) -> dict | None:
+    """NAS 上の DB バックアップのサイズから、DB サイズと `days` 日前からの増分を返す(Issue #1170)。
+
+    DB サイズの記録は backup_service.log にしか無かったため、毎日のバックアップファイル
+    (`home_system_<timestamp>.db`、NAS に30世代)自体を履歴として使う。最新のファイルと、
+    その `days` 日前に最も近い(それ以前で最新の)ファイルを比べる。比べる相手が無ければ
+    増分は None。バックアップが1つも無い・読めない場合は None。
+    """
+    nas_root = getattr(config, "NAS_PROJECT_ROOT", os.path.join(config.NAS_MOUNT_POINT, "home_system"))
+    backup_dir = os.path.join(nas_root, "db_backups")
+    try:
+        names = os.listdir(backup_dir)
+    except OSError:
+        return None
+    entries: list[tuple[float, int]] = []
+    for name in names:
+        if not (name.startswith("home_system_") and name.endswith(".db")):
+            continue
+        try:
+            st = os.stat(os.path.join(backup_dir, name))
+        except OSError:
+            continue
+        entries.append((st.st_mtime, st.st_size))
+    if not entries:
+        return None
+    entries.sort()
+    latest_mtime, latest_size = entries[-1]
+    threshold = latest_mtime - days * 86400 + 6 * 3600  # 実行時刻の揺れ(数時間)を許す
+    previous = [e for e in entries if e[0] <= threshold]
+    mb = 1024 * 1024
+    return {
+        "size_mb": round(latest_size / mb, 1),
+        "diff_mb": round((latest_size - previous[-1][1]) / mb, 1) if previous else None,
+    }
+
 
 if __name__ == "__main__":
     # Issue #753 (AUDIT-024): 以前は戻り値を捨てていたため、バックアップが失敗しても

@@ -417,7 +417,8 @@ class MotionDetector:
 
                 current_sec += 1
                 if total_expected_frames > 0 and current_sec % max(1, int(total_expected_frames / 10)) == 0:
-                    logger.info(f"解析進捗: {(current_sec / total_expected_frames) * 100:.0f}%")
+                    # Issue #1156: 定常の進捗(1本につき10行)はノイズなので DEBUG。開始・完了は別途 INFO で出る
+                    logger.debug(f"解析進捗: {(current_sec / total_expected_frames) * 100:.0f}%")
 
             process.wait(timeout=60)
             if process.returncode != 0:

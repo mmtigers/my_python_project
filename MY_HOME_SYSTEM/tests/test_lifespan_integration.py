@@ -87,6 +87,34 @@ class TestLifespanBootRecord:
             assert len(spawned) == 2
 
 
+class TestLifespanRestoresMotionTimers:
+    """Issue #1153: 起動時に見守りのタイマーを DB から復元する(マイグレーション成功時のみ)。"""
+
+    def test_restore_is_called_on_startup(self, lifespan_client_factory, monkeypatch):
+        from services import sensor_service
+        calls = []
+
+        async def _fake_restore():
+            calls.append(1)
+
+        monkeypatch.setattr(sensor_service, "restore_motion_timers", _fake_restore)
+        with lifespan_client_factory() as (_client, _spawned):
+            pass
+        assert calls == [1]
+
+    def test_restore_is_skipped_when_migration_fails(self, lifespan_client_factory, monkeypatch):
+        from services import sensor_service
+        calls = []
+
+        async def _fake_restore():
+            calls.append(1)
+
+        monkeypatch.setattr(sensor_service, "restore_motion_timers", _fake_restore)
+        with lifespan_client_factory(migration_error=RuntimeError("locked")) as (_client, _spawned):
+            pass
+        assert calls == []
+
+
 class TestLifespanShutdown:
     """シャットダウン側: 子プロセスと ffmpeg / タスク / httpx クライアントの後始末。"""
 

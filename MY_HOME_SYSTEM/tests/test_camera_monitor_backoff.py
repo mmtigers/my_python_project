@@ -23,11 +23,17 @@ import re
 import sys
 from http.client import RemoteDisconnected
 
+import requests.exceptions
+
 import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from monitors import camera_monitor
+
+
+# autouse フィクスチャで差し替える前の本物(#1151 のテストで使う)
+_REAL_EMERGENCY_DIAGNOSIS = camera_monitor.perform_emergency_diagnosis
 
 
 class _StopLoop(Exception):
@@ -46,10 +52,12 @@ CAM_CONF = {
 
 
 @pytest.fixture(autouse=True)
-def _neutralize_environment(monkeypatch):
+def _neutralize_environment(monkeypatch, tmp_path):
     """devices.json を見に行かせず、通知も診断も実際には飛ばさない。"""
+    # #1158: 接続成功時刻の記録をリポジトリ内に書かせない
+    monkeypatch.setattr(camera_monitor, "CAMERA_STATUS_FILE", str(tmp_path / "camera_status.json"))
     monkeypatch.setattr(camera_monitor, "is_camera_enabled", lambda cam_conf: True)
-    monkeypatch.setattr(camera_monitor, "perform_emergency_diagnosis", lambda ip: {})
+    monkeypatch.setattr(camera_monitor, "perform_emergency_diagnosis", lambda ip, *a, **k: {})
     monkeypatch.setattr(camera_monitor, "send_push", lambda *a, **k: None)
 
 
@@ -279,7 +287,7 @@ class TestFatalErrorBackoff:
         self._always_fail(monkeypatch)
         diagnosed = []
         monkeypatch.setattr(
-            camera_monitor, "perform_emergency_diagnosis", lambda ip: diagnosed.append(ip) or {}
+            camera_monitor, "perform_emergency_diagnosis", lambda ip, *a, **k: diagnosed.append(ip) or {}
         )
 
         _run(monkeypatch, stop_after=2)
@@ -292,7 +300,7 @@ class TestFatalErrorBackoff:
         reachable = iter([True, False])
         monkeypatch.setattr(camera_monitor, "is_host_reachable", lambda ip: next(reachable, False))
 
-        def _fail(ip):
+        def _fail(ip, *a, **k):
             raise AssertionError("到達不可のホストへ緊急診断を実行した")
 
         monkeypatch.setattr(camera_monitor, "perform_emergency_diagnosis", _fail)
@@ -751,3 +759,237 @@ class TestConnectedInfoLog:
         _run(monkeypatch, stop_after=5)
 
         assert len(connected()) == 1
+
+
+class TestEmergencyDiagnosisPorts:
+    """#1151: 緊急診断は設定した ONVIF のポートと RTSP の554番だけを調べる。"""
+
+    def test_uses_configured_port_and_rtsp(self):
+        assert camera_monitor.diagnosis_ports({"port": 2020}) == [2020, 554]
+        assert camera_monitor.diagnosis_ports({}) == [80, 554]
+        assert camera_monitor.diagnosis_ports({"port": 554}) == [554]
+
+    def test_probes_only_the_given_ports(self, monkeypatch):
+        probed = []
+
+        class _Sock:
+            def settimeout(self, t):
+                pass
+
+            def connect_ex(self, addr):
+                probed.append(addr[1])
+                return 111
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(camera_monitor.socket, "socket", lambda *a, **k: _Sock())
+        monkeypatch.setattr(camera_monitor.logger, "warning", lambda *a, **k: None)
+        result = _REAL_EMERGENCY_DIAGNOSIS("192.0.2.10", ports=[80, 554])
+        assert probed == [80, 554]
+        assert result == {80: False, 554: False}
+
+    def test_fatal_error_passes_configured_ports(self, monkeypatch):
+        TestFatalErrorBackoff._always_fail(monkeypatch)
+        seen = []
+        monkeypatch.setattr(
+            camera_monitor, "perform_emergency_diagnosis",
+            lambda ip, ports=None: seen.append(ports) or {},
+        )
+        _run(monkeypatch, stop_after=2, cam_conf={**CAM_CONF, "port": 2020})
+        assert seen == [[2020, 554]]
+
+
+class TestPersistentErrorHint:
+    """#1147: ヒントは例外メッセージ別に出し分け、WARNING で出す。"""
+
+    @pytest.mark.parametrize(
+        "message, expected",
+        [
+            ("Unauthorized", "PASSWORD"),
+            ("Sender not Authorized: NotAuthorized", "PASSWORD"),
+            ("Unknown error: Action Failed. The requested SOAP action failed.", "購読が残っている"),
+            ("Unknown error: something else", None),
+            ("Read timed out", None),
+        ],
+    )
+    def test_hint_by_message(self, message, expected):
+        hint = camera_monitor._hint_for_error(message)
+        if expected is None:
+            assert hint is None
+        else:
+            assert expected in hint
+
+    def test_hint_is_warning_never_error(self, monkeypatch):
+        TestFatalErrorBackoff._always_fail(
+            monkeypatch, exc=RuntimeError("Unknown error: Action Failed. The requested SOAP action failed.")
+        )
+        errors = _capture_errors(monkeypatch)
+        warnings = _capture_warnings(monkeypatch)
+        _run(monkeypatch, stop_after=10)  # 5回目(Persistent)まで
+        assert not any("Hint" in m for m in errors)
+        hints = [m for m in warnings if "Hint" in m]
+        assert len(hints) == 1
+        assert "PASSWORD" not in hints[0]
+
+
+class TestFaultDetailInLog:
+    """#1175: zeep の Fault は code・subcodes・detail をログに付ける。"""
+
+    def test_fault_includes_subcodes_and_detail(self):
+        from lxml import etree
+        from zeep.exceptions import Fault
+
+        detail = etree.fromstring("<Detail><Text>max pull points reached</Text></Detail>")
+        fault = Fault(
+            "Action Failed", code="env:Receiver", detail=detail,
+            subcodes=["ter:Action", "ter:MaxPullPoints"],
+        )
+        text = camera_monitor._describe_error(fault)
+        assert "Code: env:Receiver" in text
+        assert "Subcodes: ter:Action, ter:MaxPullPoints" in text
+        assert "max pull points reached" in text
+
+    def test_fault_detail_is_truncated(self):
+        from lxml import etree
+        from zeep.exceptions import Fault
+
+        detail = etree.fromstring("<D>" + "x" * 5000 + "</D>")
+        text = camera_monitor._describe_error(Fault("f", detail=detail))
+        assert len(text) < camera_monitor.FAULT_DETAIL_MAX_CHARS + 50
+
+    def test_non_fault_output_is_unchanged(self):
+        assert camera_monitor._describe_error(RuntimeError("x")) == ""
+
+        class _WithDetail(Exception):
+            detail = "d"
+            content = "c" * 300
+
+        assert camera_monitor._describe_error(_WithDetail()) == " | Detail: d | Content: " + "c" * 200
+
+    def test_fault_subcode_reaches_the_persistent_log(self, monkeypatch):
+        from zeep.exceptions import Fault
+
+        TestFatalErrorBackoff._always_fail(
+            monkeypatch, exc=Fault("Action Failed", subcodes=["ter:MaxPullPoints"])
+        )
+        errors = _capture_errors(monkeypatch)
+        _run(monkeypatch, stop_after=10)
+        assert any("ter:MaxPullPoints" in m for m in errors if "Persistent Error" in m)
+
+
+class TestReleaseBeforeSleep:
+    """#1162: 障害時は待機(sleep)の前に購読とセッションを解放し、解放は1回だけ。"""
+
+    def test_unsubscribe_and_close_happen_before_backoff_sleep(self, monkeypatch):
+        order = []
+
+        class _Raw(_FakeRawPullpoint):
+            def Unsubscribe(self):
+                order.append("unsubscribe")
+
+        TestCleanupOfIntermediatePullpoint._connect_until_onvif_service(monkeypatch, _Raw())
+        monkeypatch.setattr(
+            camera_monitor, "ONVIFService", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("x"))
+        )
+        monkeypatch.setattr(camera_monitor, "force_close_session", lambda obj: order.append("close"))
+
+        def _sleep(seconds):
+            order.append(f"sleep{seconds}")
+            if len([o for o in order if o.startswith("sleep")]) >= 2:
+                raise _StopLoop()
+
+        monkeypatch.setattr(camera_monitor.time, "sleep", _sleep)
+        with pytest.raises(_StopLoop):
+            camera_monitor.monitor_single_camera(dict(CAM_CONF))
+
+        assert order == ["unsubscribe", "close", "close", "close", "sleep20", "sleep3"]
+
+    def test_release_happens_once_on_normal_reconnect(self, monkeypatch):
+        service = _FakePullpointService()
+        _connect_successfully(monkeypatch, service)
+        monkeypatch.setattr(camera_monitor, "SESSION_LIFETIME", -1)
+
+        _run(monkeypatch, stop_after=1)
+
+        assert service.unsubscribed == 1
+
+    def test_release_is_idempotent(self, monkeypatch):
+        monkeypatch.setattr(camera_monitor, "force_close_session", lambda obj: None)
+        session = camera_monitor._CameraSession()
+        raw = _FakeRawPullpoint()
+        session.pullpoint = raw
+        session.release("cam")
+        session.release("cam")
+        assert raw.unsubscribed == 1
+
+
+class TestRecoveryNotice:
+    """#1146: 失敗が続いた後に接続できたら、復旧を INFO で出す(通知は障害通知を送ったときだけ)。"""
+
+    @staticmethod
+    def _run_with_capture(monkeypatch, connect_errors):
+        service = _FakePullpointService()
+        _connect_successfully(monkeypatch, service, connect_errors=connect_errors)
+        monkeypatch.setattr(camera_monitor, "SESSION_LIFETIME", -1)
+        infos, pushes = [], []
+        monkeypatch.setattr(camera_monitor.logger, "info", lambda m, *a, **k: infos.append(str(m)))
+        monkeypatch.setattr(camera_monitor, "send_push", lambda msgs, **k: pushes.append(msgs[0]["text"]))
+        # 失敗1回につき sleep 2回(バックオフ + 解放待ち)、成功後は解放待ち1回
+        _run(monkeypatch, stop_after=2 * connect_errors + 1)
+        return infos, pushes
+
+    def test_five_failures_then_success_logs_and_notifies_once(self, monkeypatch):
+        infos, pushes = self._run_with_capture(monkeypatch, connect_errors=5)
+        recovered = [m for m in infos if "復旧しました" in m]
+        assert len(recovered) == 1
+        assert "失敗5回" in recovered[0]
+        assert "停止約" in recovered[0]
+        assert len([p for p in pushes if "復旧" in p]) == 1
+        assert len([p for p in pushes if "継続しています" in p]) == 1
+
+    def test_two_failures_then_success_logs_only(self, monkeypatch):
+        infos, pushes = self._run_with_capture(monkeypatch, connect_errors=2)
+        assert len([m for m in infos if "復旧しました" in m]) == 1
+        assert pushes == []
+
+    def test_no_recovery_log_without_failures(self, monkeypatch):
+        infos, pushes = self._run_with_capture(monkeypatch, connect_errors=0)
+        assert not any("復旧しました" in m for m in infos)
+
+
+class TestConnectionErrorsAreTransient:
+    """#1152: 接続拒否・接続タイムアウトは一時的障害の経路。SOAP Fault 等は致命的のまま。"""
+
+    @pytest.mark.parametrize(
+        "exc, transient",
+        [
+            (RemoteDisconnected("x"), True),
+            (ConnectionResetError("x"), True),
+            (requests.exceptions.ConnectionError("refused"), True),
+            (requests.exceptions.ConnectTimeout("timeout"), True),
+            (RuntimeError("Unauthorized"), False),
+            (ConnectionRefusedError("Time verification failed"), False),
+            (requests.exceptions.ReadTimeout("read"), False),
+        ],
+    )
+    def test_routing_by_exception_type(self, monkeypatch, exc, transient):
+        TestFatalErrorBackoff._always_fail(monkeypatch, exc=exc)
+        diagnosed = []
+        monkeypatch.setattr(
+            camera_monitor, "perform_emergency_diagnosis", lambda ip, *a, **k: diagnosed.append(ip) or {}
+        )
+        _run(monkeypatch, stop_after=2)
+        # 緊急診断は致命的障害の経路にしか無い
+        assert (diagnosed == []) is transient
+
+    def test_persistent_connection_refused_still_notifies(self, monkeypatch):
+        """一時的障害の経路でも、連続5回目で継続障害の通知が1回出る(#890 のような長時間の拒否)。"""
+        TestFatalErrorBackoff._always_fail(
+            monkeypatch, exc=requests.exceptions.ConnectionError("Connection refused")
+        )
+        pushes = []
+        monkeypatch.setattr(camera_monitor, "send_push", lambda msgs, **k: pushes.append(msgs[0]["text"]))
+        _run(monkeypatch, stop_after=2 * 8)
+        assert len(pushes) == 1
+        assert "連続5回失敗" in pushes[0]

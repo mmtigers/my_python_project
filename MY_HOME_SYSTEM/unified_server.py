@@ -26,7 +26,7 @@ import sqlite3
 import config
 from core.logger import setup_logging
 from core.migrations import apply_pending_migrations
-from services import sensor_service, camera_service, system_info_service
+from services import sensor_service, camera_service, system_info_service, system_maintenance_service
 
 # Routers
 from routers import quest_router, webhook_router, system_router, camera_router, alexa_router, routine_router, ui_log_router
@@ -161,6 +161,15 @@ def _get_child_process(name: str) -> Optional[subprocess.Popen]:
     return camera_process if name == "camera_monitor" else scheduler_process
 
 
+def _child_alive_status() -> Dict[str, bool]:
+    """子プロセス名 -> 生きているか(Issue #1158 の起動後チェック用)。"""
+    status: Dict[str, bool] = {}
+    for name in CHILD_SCRIPTS:
+        proc = _get_child_process(name)
+        status[name] = proc is not None and proc.poll() is None
+    return status
+
+
 def _set_child_process(name: str, proc: Optional[subprocess.Popen]) -> None:
     global camera_process, scheduler_process
     if name == "camera_monitor":
@@ -285,6 +294,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if migration_ok:
         # システムページの「起動履歴」用。失敗してもサーバーの起動は止めない(record_boot が握りつぶす)。
         system_info_service.record_boot()
+        # Issue #1153: 見守り(人感センサー)のタイマーを DB 上の最後の検知時刻から復元する
+        # (以前は再起動のたびに消えていた)。失敗しても起動は止めない(restore 側が握りつぶす)。
+        await sensor_service.restore_motion_timers()
 
     supervisor_task: Optional[asyncio.Task] = None
     if migration_ok:
@@ -296,6 +308,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         # Issue #646: 起動後の死活監視。終了していれば再起動する(上限超過でクラッシュループ扱い)。
         supervisor_task = asyncio.create_task(_supervise_child_processes())
+
+        # Issue #1158: デプロイ後の起動後チェックが子プロセスの生存を見られるようにする
+        system_maintenance_service.register_child_status_provider(_child_alive_status)
 
     yield
 
@@ -486,8 +501,23 @@ async def ip_restriction_middleware(request: Request, call_next: Callable[[Reque
     # ログに記録する」ことを意図した挙動として明記しており、ポーリング等の定常ノイズを
     # 意図的にDEBUGへ降格するSilence Policy(#177のuvicornアクセスログ抑制とは別経路)
     # とは性質が異なるため、実際に記録されるようINFOレベルに変更する。
-    logger.info(f"Allowed external access via Cloudflare - IP: {client_ip}, Path: {request.url.path}")
+    #
+    # Issue #1156(2026-11-27 決定): 上記のとおり INFO で全件記録していたが、閲覧のたびに利用者の
+    # IP(IPv4/IPv6)が積み上がり、定常の閲覧(GET)がログの大半を占めていた。監査に要るのは
+    # 状態を変える操作(デプロイ・再起動・バックアップ・クエストの操作など、GET/HEAD/OPTIONS 以外)
+    # なので、それだけを INFO で残し、閲覧は DEBUG(#182 のとおり実際には記録されない)にする。
+    if request.method in _READ_ONLY_METHODS:
+        logger.debug(f"Allowed external access via Cloudflare - IP: {client_ip}, Path: {request.url.path}")
+    else:
+        logger.info(
+            f"Allowed external access via Cloudflare - IP: {client_ip}, "
+            f"{request.method} {request.url.path}"
+        )
     return await call_next(request)
+
+
+# Issue #1156: 外部アクセスのうち、INFO で記録しない(閲覧だけの)メソッド
+_READ_ONLY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

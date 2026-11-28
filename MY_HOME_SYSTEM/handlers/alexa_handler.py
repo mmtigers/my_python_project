@@ -232,8 +232,16 @@ class CatchAllExceptionHandler(AbstractExceptionHandler):
 sb = CustomSkillBuilder()
 if config.ALEXA_SKILL_ID:
     sb.skill_id = config.ALEXA_SKILL_ID
+elif config.ALEXA_ALLOW_ANY_SKILL:
+    logger.warning(
+        "⚠️ ALEXA_SKILL_ID is not set and ALEXA_ALLOW_ANY_SKILL=true — skill ID verification is DISABLED."
+    )
 else:
-    logger.warning("⚠️ ALEXA_SKILL_ID is not set — skill ID verification is DISABLED. Set the env var to enable it.")
+    # Issue #1149: 未設定なら routers/alexa_router.py が要求を 503 で拒否する(フェイルクローズ)
+    logger.warning(
+        "⚠️ ALEXA_SKILL_ID is not set — /webhook/alexa requests will be REJECTED (503). "
+        "Set ALEXA_SKILL_ID in .env (or ALEXA_ALLOW_ANY_SKILL=true to accept any skill)."
+    )
 
 sb.add_request_handler(LaunchRequestHandler())
 sb.add_request_handler(HelpIntentHandler())

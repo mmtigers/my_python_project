@@ -230,7 +230,10 @@ def dashboard_watch(
     if dashboard_page_service.parse_log_source(src) is not None:
         query = {k: v for k, v in (("date", date), ("device", device), ("hour", hour), ("hdev", hdev)) if v}
         suffix = f"?{urlencode(query)}" if query else ""
-        return RedirectResponse(url=f"{_BASE_PATH}/watch/{src}{suffix}#hour-log" if hour else f"{_BASE_PATH}/watch/{src}{suffix}", status_code=302)
+        target = f"{_BASE_PATH}/watch/{src}{suffix}"
+        if hour:
+            target += "#hour-log"
+        return RedirectResponse(url=target, status_code=302)
     if tl_all is not None:
         return RedirectResponse(url=f"{_BASE_PATH}/watch/live?{urlencode({'tl_all': tl_all})}#timelapse-section", status_code=302)
     cards, _ = home_status_service.collect_status_cards()
@@ -323,7 +326,9 @@ def _sys_materials():
     materials = home_status_service.get_cached_materials()
     now = home_status_service.get_now_jst()
     cards, _ = home_status_service.collect_status_cards(now)
-    rows = dashboard_page_service.build_freshness_rows(materials.df_sensor, materials.nas_data, materials.memory, now)
+    rows = dashboard_page_service.build_freshness_rows(
+        materials.df_sensor, materials.nas_data, materials.memory, now, car=home_status_service.get_car_summary()
+    )
     health = home_status_service.read_health_result(now)
     link_health = home_status_service.collect_link_health(config.ASA_NOTE_URL, config.YORU_NOTE_URL)
     sys_cards = dashboard_page_service.build_sys_cards(cards, rows, health=health, link_health=link_health)
@@ -429,7 +434,7 @@ def dashboard_power(days: str | None = None) -> HTMLResponse:
     return HTMLResponse(power_page_service.render_power_page(
         report, dashboard_path=f"{_BASE_PATH}/",
         monthly_cost=materials.monthly_cost, last_month_cost=materials.last_month_cost,
-        daily_cost_rows=materials.daily_cost_rows,
+        daily_cost_rows=home_status_service.get_daily_cost_rows(),
     ))
 
 

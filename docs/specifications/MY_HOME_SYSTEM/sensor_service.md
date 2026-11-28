@@ -29,20 +29,20 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `asyncio` | 標準ライブラリ | 非同期処理、タスク作成、スリープ処理用。 | `[import asyncio]` (行番号: 2 / 抜粋: "import asyncio") |
-| `time` | 標準ライブラリ | 現在時刻のタイムスタンプ取得用。 | `[import time]` (行番号: 3 / 抜粋: "import time") |
-| `Dict, Optional, List, Any` | 標準ライブラリ (`typing`) | 型アノテーション用。 | `[from typing]` (行番号: 4 / 抜粋: "from typing import Dict, Optio") |
-| `config` | 外部モジュール | 定数（LINE_USER_IDやDBテーブル名など）の参照用。 | `[import config]` (行番号: 6 / 抜粋: "import config") |
-| `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 7 / 抜粋: "from core.database import get_db_cursor") |
-| `setup_logging` | 外部モジュール (`core.logger`) | ロガーの初期化用。 | `[from core.logger]` (行番号: 8 / 抜粋: "from core.logger import setup_") |
-| `get_now_iso` | 外部モジュール (`core.utils`) | 現在時刻のISO形式文字列取得用。 | `[from core.utils]` (行番号: 9 / 抜粋: "from core.utils import get_now") |
-| `save_log_async` | 外部モジュール (`core.database`) | 非同期でのデータベース保存処理用。 | `[from core.database]` (行番号: 10 / 抜粋: "from core.database import save") |
-| `send_push` | 外部モジュール (`services.notification_service`) | プッシュ通知送信処理用。 | `[from services.notification...]` (行番号: 11 / 抜粋: "from services.notification_ser") |
+| `time` | 標準ライブラリ | 現在時刻のタイムスタンプ取得用。 | `[import time]` (行番号: 4 / 抜粋: "import time") |
+| `Dict, Optional, List, Any` | 標準ライブラリ (`typing`) | 型アノテーション用。 | `[from typing]` (行番号: 5 / 抜粋: "from typing import Dict, Optio") |
+| `config` | 外部モジュール | 定数（LINE_USER_IDやDBテーブル名など）の参照用。 | `[import config]` (行番号: 7 / 抜粋: "import config") |
+| `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 8 / 抜粋: "from core.database import get_db_cursor") |
+| `setup_logging` | 外部モジュール (`core.logger`) | ロガーの初期化用。 | `[from core.logger]` (行番号: 9 / 抜粋: "from core.logger import setup_") |
+| `get_now_iso` | 外部モジュール (`core.utils`) | 現在時刻のISO形式文字列取得用。 | `[from core.utils]` (行番号: 10 / 抜粋: "from core.utils import get_now") |
+| `save_log_async` | 外部モジュール (`core.database`) | 非同期でのデータベース保存処理用。 | `[from core.database]` (行番号: 11 / 抜粋: "from core.database import save") |
+| `send_push` | 外部モジュール (`services.notification_service`) | プッシュ通知送信処理用。 | `[from services.notification...]` (行番号: 12 / 抜粋: "from services.notification_ser") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` 内の各定数 | `SQLITE_TABLE_SWITCHBOT_LOGS`、`SQLITE_TABLE_POWER_USAGE` の具体的な値や型が提供されていないため。 | `[config.SQLITE_TABLE_SWITCHBOT_LOGS]` (行番号: 225 / 抜粋: "config.SQLITE_TABLE_SWITCHBOT_LOGS,") |
+| `config` 内の各定数 | `SQLITE_TABLE_SWITCHBOT_LOGS`、`SQLITE_TABLE_POWER_USAGE` の具体的な値や型が提供されていないため。 | `[config.SQLITE_TABLE_SWITCHBOT_LOGS]` (行番号: 396 / 抜粋: "config.SQLITE_TABLE_SWITCHBOT_LOGS,") |
 | `core.database.get_db_cursor` | DB接続の具体的な実装、扱うデータベースエンジン、コンテキストマネージャが返すカーソルオブジェクトの仕様が不明であるため。 | `[core.database.get_db_cursor]` (行番号: 262 / 抜粋: "with get_db_cursor() as") |
 | `core.database.save_log_async` | テーブル名、カラムリスト、値を渡した際の内部でのクエリ生成ロジックやエラーハンドリングの挙動が不明であるため。 | `[save_log_async]` (参照: process_meter_data / 抜粋: "await save_log_async(") |
 | `services.notification_service.send_push` | メッセージ形式の仕様、引数として渡す `"discord"` や `"notify"` の処理分岐、外部API連携の実装が不明であるため。 | `[send_push]` (参照: send_inactive_notification / 抜粋: "send_push,") |
@@ -52,7 +52,7 @@
 ### `_MAC_CACHE_MAX_SIZE` / `_mac_last_seen` / `_evict_stale_macs` / `_touch_mac`（Issue #621で追加）
 
 * **役割**: `EVENT_CACHE`/`IS_ACTIVE`/`LAST_NOTIFY_TIME`/`MOTION_TASKS`の4つはすべてSwitchBot Webhookの`context.deviceMac`（攻撃者が任意の値を送りつけて増やせるキー）をキーにしており、以前はエントリを削除する仕組みが無かったため無制限に成長し続けていた（プロセスは長時間稼働するため実質的なメモリリーク）。`_mac_last_seen`（mac→最終アクセス時刻の辞書）を4キャッシュ共通のLRU基準として新設し、`_MAC_CACHE_MAX_SIZE`（500）を超えたら`_evict_stale_macs`が最終アクセス時刻の古いMACから順に4キャッシュすべてからエントリを削除する。`_touch_mac(mac)`は最終アクセス時刻の更新とeviction呼び出しをまとめたヘルパーで、`is_duplicate_webhook`・`process_sensor_data`の冒頭から呼ばれる。`MOTION_TASKS`に未完了のタスクが残っている場合は、参照を失ったタスクが`MOTION_TIMEOUT`秒（15分）孤立して残留しないよう、辞書から削除する前に`cancel()`する。単一のFastAPI非同期エンドポイントから直接awaitされ他スレッドからの並行アクセスが無いため、`handlers/line_handler.py`の`_profile_cache`のような`threading.Lock`は使用していない。
-* 根拠: `_MAC_CACHE_MAX_SIZE = 500` / `_mac_last_seen: Dict[str, float] = {}` (行番号: 38-39)、`def _evict_stale_macs() -> None:` (行番号: 42-63)、`def _touch_mac(mac: str) -> None:` (行番号: 66-71)、タスクキャンセル (行番号: 58-59 / 抜粋: "if isinstance(task, asyncio.Task) and not task.done():\n            task.cancel()")
+* 根拠: `_MAC_CACHE_MAX_SIZE = 500` / `_mac_last_seen: Dict[str, float] = {}` (行番号: 38-39)、`def _evict_stale_macs() -> None:` (行番号: 64-86)、`def _touch_mac(mac: str) -> None:` (行番号: 89-94)、タスクキャンセル (行番号: 80-81 / 抜粋: "if isinstance(task, asyncio.Task) and not task.done():\n            task.cancel()")
 
 
 * **引数/リクエスト**: `_evict_stale_macs()`: なし。`_touch_mac(mac: str)`: `mac: str`
@@ -77,7 +77,7 @@
 
 
 * **引数/リクエスト**: `mac: str`, `state: str`, `event_timestamp: float`
-* 根拠: `[is_duplicate_webhook]` (行番号: 73 / 抜粋: "def is_duplicate_webhook(mac: ")
+* 根拠: `[is_duplicate_webhook]` (行番号: 96 / 抜粋: "def is_duplicate_webhook(mac: ")
 
 
 * **戻り値/レスポンス**: `bool`
@@ -89,7 +89,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[is_duplicate_webhook]` (行番号: 73 / 抜粋: "def is_duplicate_webhook(mac: ")
+* 根拠: `[is_duplicate_webhook]` (行番号: 96 / 抜粋: "def is_duplicate_webhook(mac: ")
 
 
 
@@ -99,13 +99,13 @@
 * 根拠: (参照: send_inactive_notification / 抜粋: "IS_ACTIVE[mac] = False\n    try:\n        await asyncio.to_thread(")
 
 * **役割**: 指定された時間待機後、動きが止まった旨の通知を送信し、タスク状態をクリアする。
-* 根拠: `[send_inactive_notification]` (行番号: 114 / 抜粋: "msg: str = f"💤【{location}・見守")
+* 根拠: `[send_inactive_notification]` (行番号: 137 / 抜粋: "msg: str = f"💤【{location}・見守")
 * **（Issue #387 で修正）** `finally` の後片付け（`IS_ACTIVE[mac]=False`・`MOTION_TASKS` からの削除）は、`MOTION_TASKS[mac]` に「自分とは別の、まだ完了していない `asyncio.Task`」が登録されている（＝通知送信中に次の検知が来て新しいタイマータスクに置き換えられた）場合はスキップする。以前は無条件に実行していたため新タスクの参照を消してしまい、直後の検知で二重通知、さらに参照を失った新タスクが cancel 不能のまま満了して誤った「止まりました」通知を出していた。
 * 根拠: `registered = MOTION_TASKS.get(mac)` (行番号: 87〜95)
 
 
 * **引数/リクエスト**: `mac: str`, `name: str`, `location: str`, `timeout: int`
-* 根拠: `[send_inactive_notification]` (行番号: 103 / 抜粋: "def send_inactive_notification")
+* 根拠: `[send_inactive_notification]` (行番号: 126 / 抜粋: "def send_inactive_notification")
 
 
 * **戻り値/レスポンス**: `None`
@@ -113,7 +113,7 @@
 
 
 * **副作用**: `asyncio.sleep` による待機、`send_push` による外部API呼び出し、グローバル変数 `IS_ACTIVE` の更新、`MOTION_TASKS` からの要素削除。
-* 根拠: `[send_inactive_notification]` (行番号: 135 / 抜粋: "del MOTION_TASKS[mac]")
+* 根拠: `[send_inactive_notification]` (行番号: 158 / 抜粋: "del MOTION_TASKS[mac]")
 
 
 * **エラーハンドリング**: `asyncio.CancelledError` をキャッチし、デバッグログを出力する。
@@ -124,11 +124,11 @@
 ### `process_sensor_data`
 
 * **役割**: モーションセンサーまたは開閉センサーの状態変化を検知し、必要に応じて通知送信や無反応検知タイマーのセット・キャンセルを行う。モーション判定は`dev_type`が`"Motion"`を部分一致で含む場合（デバイス一覧APIの語彙`"Motion Sensor"`向け）に加え、`dev_type`がSwitchBot公式Webhookの語彙`"WoPresence"`と完全一致する場合にも成立する（#94修正: 以前は`"Motion" in dev_type`のみだったため、公式Webhook形式(`context.deviceType="WoPresence"`)のモーションイベントがこの分岐に到達せず、見守り通知・無反応監視タイマーが一切発火しなかった）。**（Issue #621で修正）** 関数冒頭で`_touch_mac(mac)`を呼び、サイズ上限つきキャッシュのLRU基準を更新する。
-* 根拠: `[process_sensor_data]` (行番号: 167 / 抜粋: "if dev_type and (\"Motion\" in dev_type or dev_type == \"WoPresence\"):")、`_touch_mac`呼び出し (参照: process_sensor_data / 抜粋: "_touch_mac(mac)  # Issue #621: サイズ上限つきキャッシュのLRU基準を更新")
+* 根拠: `[process_sensor_data]` (行番号: 190 / 抜粋: "if dev_type and (\"Motion\" in dev_type or dev_type == \"WoPresence\"):")、`_touch_mac`呼び出し (参照: process_sensor_data / 抜粋: "_touch_mac(mac)  # Issue #621: サイズ上限つきキャッシュのLRU基準を更新")
 
 
 * **引数/リクエスト**: `mac: str`, `name: str`, `location: str`, `dev_type: str`, `state: str`
-* 根拠: `[process_sensor_data]` (行番号: 149 / 抜粋: "def process_sensor_data(mac: s")
+* 根拠: `[process_sensor_data]` (行番号: 172 / 抜粋: "def process_sensor_data(mac: s")
 
 
 * **戻り値/レスポンス**: `None`
@@ -140,22 +140,22 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[process_sensor_data]` (行番号: 149 / 抜粋: "def process_sensor_data(mac: s")
+* 根拠: `[process_sensor_data]` (行番号: 172 / 抜粋: "def process_sensor_data(mac: s")
 
 
 
 ### `cancel_all_tasks`
 
 * **役割**: 起動中のすべての見守りタイマータスクをキャンセルする。
-* 根拠: `[cancel_all_tasks]` (行番号: 204 / 抜粋: "for t in MOTION_TASKS.values()")
+* 根拠: `[cancel_all_tasks]` (行番号: 372 / 抜粋: "for t in MOTION_TASKS.values()")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[cancel_all_tasks]` (行番号: 202 / 抜粋: "def cancel_all_tasks() -> None")
+* 根拠: `[cancel_all_tasks]` (行番号: 370 / 抜粋: "def cancel_all_tasks() -> None")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[cancel_all_tasks]` (行番号: 202 / 抜粋: "def cancel_all_tasks() -> None")
+* 根拠: `[cancel_all_tasks]` (行番号: 370 / 抜粋: "def cancel_all_tasks() -> None")
 
 
 * **副作用**: グローバル変数 `MOTION_TASKS` に保持されている各タスクの `cancel()` 実行。
@@ -163,7 +163,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[cancel_all_tasks]` (行番号: 202 / 抜粋: "def cancel_all_tasks() -> None")
+* 根拠: `[cancel_all_tasks]` (行番号: 370 / 抜粋: "def cancel_all_tasks() -> None")
 
 
 
@@ -174,7 +174,7 @@
 
 
 * **引数/リクエスト**: `device_id: str`, `device_name: str`, `temp: float`, `humidity: float`
-* 根拠: `[process_meter_data]` (行番号: 212 / 抜粋: "def process_meter_data(device_")
+* 根拠: `[process_meter_data]` (行番号: 383 / 抜粋: "def process_meter_data(device_")
 
 
 * **戻り値/レスポンス**: `None`
@@ -193,11 +193,11 @@
 ### `process_power_data`
 
 * **役割**: 電力データをDBに保存し、前回記録された値と閾値を比較して閾値を跨いだ場合（ON/OFF）に使用開始/終了の通知を送信する。**（Issue #829で追加）** `device_category`引数(既定`"plug"`)で書き込み時点の種別("smart_meter"住宅全体のスマートメーター/"plug"個別家電プラグ)を明示し、`power_usage`テーブルに保存する。以前は`analysis_service.py`側が`device_name`に`"Remo"`という文字列が含まれるかだけで下流的に推測しており、Nature Remoアプリのニックネーム設定次第で電気代集計が0円になる不具合の原因になっていた。
-* 根拠: `[process_power_data]` (行番号: 304 / 抜粋: "prev_wattage < threshold and w")、`device_category: str = "plug",` (行番号: 239)
+* 根拠: `[process_power_data]` (行番号: 526 / 抜粋: "prev_wattage < threshold and w")、`device_category: str = "plug",` (行番号: 239)
 
 
 * **引数/リクエスト**: `device_id: str`, `device_name: str`, `wattage: float`, `notify_settings: Dict[str, Any]`, `device_category: str = "plug"`(キーワード可)
-* 根拠: `[process_power_data]` (行番号: 234〜240 / 抜粋: "async def process_power_data(\n    device_id: str,\n    device_name: str,\n    wattage: float,\n    notify_settings: Dict[str, Any],\n    device_category: str = \"plug\",\n) -> None:")
+* 根拠: `[process_power_data]` (行番号: 447〜541 / 抜粋: "async def process_power_data(\n    device_id: str,\n    device_name: str,\n    wattage: float,\n    notify_settings: Dict[str, Any],\n    device_category: str = \"plug\",\n) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -212,6 +212,25 @@
 * 根拠: `[process_power_data]` (参照: process_power_data / 抜粋: "if not save_ok:")
 
 
+
+### `_power_transition_with_hysteresis` / `POWER_STATE`（Issue #1148 で追加）
+
+* **役割**: 電力の使用開始/終了通知のヒステリシスと最短ON時間。1Fのトイレで、暖房便座のサーモスタットが入り切りする約47Wを5分ごとのポーリングで拾い、1日に約105件の通知が出ていた(`process_power_data` は前回値と今回値が単一の閾値 `power_threshold_watts` をまたいだかだけで判定していたため)。
+* **有効になる条件**: `notify_settings` に `power_off_threshold_watts` か `min_on_sec` があるときだけ。どちらも無ければ(`devices.json` の model_dump では `None`)従来どおり即時に判定する。`config.NotifySettings` に両キーを追加した(Pydantic のモデルは未知のキーを落とすため、追加しないと設定が効かない)。
+* **判定**: ON 中は `power_off_threshold_watts`(未設定なら `power_threshold_watts`)を下回るまで ON とみなす。ON が `min_on_sec` 以上続いた時点(5分ごとのポーリングなのでその分遅れる)で「使用開始」を1回だけ通知し、「使用終了」は使用開始を通知した場合だけ出す。短い ON は DEBUG ログのみ。状態は `POWER_STATE`(device_id ごと、メモリ上)に持ち、再起動で消えたら DB の前回値から初期化する(ON の途中なら通知済みとみなして二重通知しない)。
+* **推奨設定(暖房便座など)**: `"notify_settings": {"power_threshold_watts": 30, "min_on_sec": 600}`(10分以上続いたときだけ通知)。閾値付近で値が揺れる家電は `power_off_threshold_watts` を閾値より小さくする。設定次第で短い使用の通知を取りこぼす点に注意。
+* 根拠: `def _power_transition_with_hysteresis(` (参照: _power_transition_with_hysteresis)
+
+### `restore_motion_timers` / `long_inactive_deadline` / `schedule_long_inactive_check` / `send_long_inactive_notification`（Issue #1153 で追加）
+
+* **背景**: 無反応タイマー(`MOTION_TASKS`/`IS_ACTIVE`)はメモリ上にしかなく、再起動のたびに消えた(2026-11-24 は再起動8回)。また無反応の通知は最後の検知から15分後の1回だけで、見守りで本当に知りたい「数時間動きがない」を検知できなかった。
+* **起動時の復元**: `unified_server.lifespan`(マイグレーション成功時)が `restore_motion_timers()` を呼ぶ。`config.MONITOR_DEVICES` の人感センサー(`type` に "Motion" を含む/`WoPresence`)ごとに `device_records` の `contact_state='detected'` の最新時刻を読み、`MOTION_TIMEOUT` 以内なら「アクティブ」に戻して残り時間で15分のタイマーを張る(それより古ければ、停止中に過ぎたものとして張らない)。拠点ごとに最新の検知から長時間無反応の監視も張る。ただし `long_inactive_deadline(最後の検知)` がもう過ぎている拠点(停止中に過ぎた・電池切れ等で何日も検知が無い)は張らない(張ると即時に通知し、再起動のたびに深夜でも同じ通知が出るため。PR #1185 のレビュー指摘)。その拠点は次の検知から数え直す。失敗しても起動は止めない(WARNING のみ)。
+* **長時間の無反応**: 拠点(`location`)ごとに、日中(`LONG_INACTIVE_DAY_START_HOUR`=7〜`LONG_INACTIVE_DAY_END_HOUR`=22時、JST)の間に `LONG_INACTIVE_SEC`(3時間)動きが無ければ「⚠️【拠点・見守り】日中に3時間以上、動きがありません(最後の検知 …)」を `channel="notify"` へ1回送る。期限は `long_inactive_deadline`(夜間は数えない。20:00 が最後なら翌10:00、6:30 なら10:00)。拠点内のどれかのセンサーが検知すると数え直す(`process_sensor_data` → `schedule_long_inactive_check`)。拠点単位にしたのは、寝室のように日中は動きが無いのが普通のセンサーで毎日通知しないため。`devices.json` に登録されていない MAC では監視を張らない。既存の15分の通知は変えていない。
+* 根拠: `async def restore_motion_timers() -> None:` (参照: restore_motion_timers)、`def long_inactive_deadline(last_motion: datetime.datetime) -> datetime.datetime:` (参照: long_inactive_deadline)
+
+### 開閉センサーの close のログ（Issue #1172 で追加）
+
+* `process_sensor_data` は `state == "close"` のとき、直前の open(`CONTACT_OPENED_AT`、MAC ごと)からの経過秒を付けて「🚪 [Digital Event] Contact sensor state: 名前 (close, 開いていた時間 N秒)」を DEBUG で1行出す(ノイズ削減 #1156 の方針に揃えた)。以前は open だけがログに出ており、「開けて閉めてまた開けた」のか「重複して届いた」のかをログだけでは区別できなかった(データ自体は `device_records` にある)。通知の挙動は変えない。`CONTACT_OPENED_AT` は MAC キーなので `_evict_stale_macs` の削除対象に含めた。
 
 ## 5. 処理フロー図
 
@@ -290,9 +309,9 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | 通知先ユーザーIDや保存先DBテーブル名などの具体的な設定値・構造を把握するため。 | `[インポート]` (行番号: 6 / 抜粋: "import config") |
-| 中 | `core/database.py` | ログデータの具体的な保存形式、発行されるSQLクエリ、対応しているDBエンジンを特定するため。 | `[インポート]` (行番号: 10 / 抜粋: "from core.database import save") |
-| 中 | `services/notification_service.py` | 通知がどのように外部サービス（LINE, Discord等）へ送出されるかのロジックとエラー処理を確認するため。 | `[インポート]` (行番号: 11 / 抜粋: "from services.notification_ser") |
+| 高 | `config.py` | 通知先ユーザーIDや保存先DBテーブル名などの具体的な設定値・構造を把握するため。 | `[インポート]` (行番号: 7 / 抜粋: "import config") |
+| 中 | `core/database.py` | ログデータの具体的な保存形式、発行されるSQLクエリ、対応しているDBエンジンを特定するため。 | `[インポート]` (行番号: 11 / 抜粋: "from core.database import save") |
+| 中 | `services/notification_service.py` | 通知がどのように外部サービス（LINE, Discord等）へ送出されるかのロジックとエラー処理を確認するため。 | `[インポート]` (行番号: 12 / 抜粋: "from services.notification_ser") |
 
 ## 8. 保守上の注意点
 
