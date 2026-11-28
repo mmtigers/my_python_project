@@ -542,10 +542,10 @@
 ### ホーム最上部の「いまの状態」(`HomeAlert` / `build_home_alerts` / `_strip_leading_emoji` / `render_home_alerts_html`)
 
 * **(2026-11-24)** 定期チェックの異常の行き先を`{dashboard_path}/sys/health`(システムの「🩺 定期チェック」の詳細画面)にした(以前は`/sys#health-check`)。数え方は変わらない(赤のカード+`HEALTH_HOME_KEYS`の異常。ホームのアプリのタイルが赤でも数えない)。
-* 根拠: `def build_home_alerts(` (行番号: 1554)
+* 根拠: `def build_home_alerts(` (行番号: 1564)
 
 * **役割**: **(2026-11-12 新設)** ホームを開いてすぐ「大丈夫か」が分かるよう、確認が必要なことを1か所にまとめる。`build_home_alerts`は (1) `theme-red`のカードをカードの並び順のまま1件ずつ(文言は「タイトル: 値」から先頭の絵文字を除いたもの。リンク先は`card_detail_href`)、(2) `health`(`read_health_result()`の結果)が古くなく、`HEALTH_HOME_KEYS`(service/api/disk/memory/nas/recording)に含まれる異常があれば「定期チェック: …」を1件(リンク先は`{dashboard_path}/sys#health-check`)、を返す。黄・灰・青のカード、管理者向けの異常(更新の遅れ・構成の差分等)は数えない。`render_home_alerts_html`は空なら「✅ すべて正常です」、あれば「⚠️ N件、確認が必要です」と各項目のリスト(文言・URLは`html.escape`)。
-* 根拠: [関数定義] (行番号: 1554 / 抜粋: "def build_home_alerts(")、[関数定義] (行番号: 1587 / 抜粋: "def render_home_alerts_html(alerts: list[HomeAlert]) -> str:")、[関数定義] (行番号: 1579 / 抜粋: "def _strip_leading_emoji(text: str) -> str:")
+* 根拠: [関数定義] (行番号: 1564 / 抜粋: "def build_home_alerts(")、[関数定義] (行番号: 1597 / 抜粋: "def render_home_alerts_html(alerts: list[HomeAlert]) -> str:")、[関数定義] (行番号: 1589 / 抜粋: "def _strip_leading_emoji(text: str) -> str:")
 
 
 * **引数/リクエスト**: `cards`、`dashboard_path: str`、`health: dict[str, Any] | None = None`(後ろ2つはキーワード専用)
@@ -557,7 +557,7 @@
 ### 定期チェックの結果(`HEALTH_RESULT_FILENAME` / `HEALTH_CHECK_LABELS` / `HEALTH_HOME_KEYS` / `health_result_path` / `read_health_result` / `_as_jst`)
 
 * **役割**: **(2026-11-12 新設)** `monitors/health_watch.py`(毎時)が`{config.LOG_DIR}/.health_watch_last_result`へ書いた検知結果を読む。戻り値は`{"checked_at": datetime, "stale": bool, "anomalies": [{"key", "label", "text"}], "history": [{"at": datetime, "labels": [str]}]}`。`label`はチェック名を`HEALTH_CHECK_LABELS`で画面用の短い名前にしたもの(表に無いチェック名はそのまま)。`stale`は最後のチェックから`HEALTH_RESULT_STALE_MIN`(150分)以上経っていること。時刻は`_as_jst`でJSTのawareに揃える(naiveはJSTとみなす)。
-* 根拠: [関数定義] (行番号: 1639 / 抜粋: "def read_health_result(now: datetime | None = None) -> dict[str, Any] | None:")、[関数定義] (行番号: 1635 / 抜粋: "def health_result_path() -> str:")、[関数定義] (行番号: 1630 / 抜粋: "def _as_jst(value: datetime) -> datetime:")
+* 根拠: [関数定義] (行番号: 1649 / 抜粋: "def read_health_result(now: datetime | None = None) -> dict[str, Any] | None:")、[関数定義] (行番号: 1645 / 抜粋: "def health_result_path() -> str:")、[関数定義] (行番号: 1640 / 抜粋: "def _as_jst(value: datetime) -> datetime:")
 
 
 * **引数/リクエスト**: `now: datetime | None = None`
@@ -584,7 +584,7 @@
 * **(2026-11-12 UX改善)** `build_status_cards`に`recording=get_camera_recording_states()`を渡す。
 
 * **役割**: `get_cached_materials`で材料を集め、`build_status_cards`に渡して`(カード一覧, 取得時刻)`を返す。ホームページ用。
-* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 1680〜1696)
+* 根拠: `def collect_status_cards(now: datetime | None = None) -> tuple[list[StatusCard], datetime]:` (行番号: 1690〜1706)
 
 
 * **引数/リクエスト**: `now` (`datetime | None`。省略時は `core.utils.get_now_jst()`)
@@ -835,3 +835,7 @@ graph TD
 * [x] 完了: 不明事項を漏れなく列挙した
 
 完了
+
+## 追補: 車の利用の傾向（#1183）
+
+* **`get_car_usage_trends()`**: `parking_record_service.get_usage_trends(datetime.now())` を `_cached`（`CAR_USAGE_TRENDS_TTL_SEC`=600秒）で包む。8週間分の集計で数分では変わらないため `get_car_summary`（60秒）より長くキャッシュする。データが無い・取得失敗は `None` で、くらしページは節ごと出さない。

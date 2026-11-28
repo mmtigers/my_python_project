@@ -1680,11 +1680,45 @@ def _render_daily_cost_history(rows: list[tuple[Any, int]], today: date | None =
 _LIFE_GRID_VARIANTS = {"life": "compact", "climate": "mini"}
 
 
+def _format_minutes(minutes: float | None) -> str:
+    if minutes is None:
+        return "-"
+    total = int(round(minutes))
+    hours, mins = divmod(total, 60)
+    return f"{hours}時間{mins}分" if hours else f"{mins}分"
+
+
+def render_car_usage_trends(trends: Any) -> str:
+    """🚗 車の利用の傾向(#1183): 曜日ごと・出発の時間帯ごとの外出回数と平均の外出時間。
+
+    `trends` は `parking_occupancy_service.UsageTrends`。データが無い(None)・外出が0回なら節ごと出さない。
+    """
+    if trends is None or trends.total_trips == 0:
+        return ""
+
+    def table(header: str, buckets: list) -> str:
+        rows = "".join(
+            f"<tr><td>{html.escape(b.label)}</td><td>{b.trips}回</td><td>{_format_minutes(b.average_minutes)}</td></tr>"
+            for b in buckets
+        )
+        return (f'<table class="simple-table"><thead><tr><th>{html.escape(header)}</th><th>回数</th>'
+                f"<th>平均の外出</th></tr></thead><tbody>{rows}</tbody></table>")
+
+    return (
+        "<h2>🚗 車の利用の傾向</h2>"
+        f"{table('曜日', trends.by_weekday)}"
+        f"{table('出発の時間帯', trends.by_departure_band)}"
+        '<p class="meta">駐車場カメラの録画から判定した、直近8週間の外出です(合計 '
+        f"{trends.total_trips}回)。平均の外出は戻りが確認できた外出だけで求めています。</p>"
+    )
+
+
 def render_life_page(
     cards,
     *,
     dashboard_path: str,
     climate_html: str = "",
+    car_usage: Any = None,
 ) -> str:
     """💡 くらし: 今月の電気代のカード(タップで「⚡ 電気」ページ)・室温のカード・過去30日の推移(ヒートマップ)。
 
@@ -1707,6 +1741,7 @@ def render_life_page(
         f"{home_status_service.render_status_grid_html(life_cards, dashboard_path=dashboard_path, show_group_titles=False, variants=_LIFE_GRID_VARIANTS)}"
         '<p class="meta">電気代はスマートメーターの記録からの概算です。カードをタップすると内訳を見られます。</p>'
         f"{climate_block}"
+        f"{render_car_usage_trends(car_usage)}"
     )
     return _page_shell("くらし - おうちの様子", body, dashboard_path=dashboard_path, current="life")
 

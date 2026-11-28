@@ -143,3 +143,15 @@ def get_trips(
     """
     events = occupancy.build_events(load_observations(since, until), confirm_count=confirm_count)
     return occupancy.build_trips(events)
+
+
+# 傾向を見る期間。曜日ごとに数回ぶんのデータが入るよう8週間(#1183)。
+USAGE_TRENDS_WINDOW = datetime.timedelta(days=56)
+
+
+def get_usage_trends(now: datetime.datetime) -> Optional[occupancy.UsageTrends]:
+    """直近 `USAGE_TRENDS_WINDOW` の外出の曜日・時間帯の傾向。観測が無ければ None。"""
+    since = now - USAGE_TRENDS_WINDOW
+    if not load_observations(since, now):
+        return None
+    return occupancy.summarize_usage_trends(get_trips(since, now))

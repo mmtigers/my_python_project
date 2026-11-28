@@ -9,8 +9,14 @@ Requires=mnt-nas.mount
 User=masahiro
 Group=masahiro
 Restart=always
-# 異常終了時の再起動待機時間
+# 再起動の待機時間。最初は10秒で、連続して失敗する間は RestartSteps 回かけて
+# RestartMaxDelaySec(5分)まで指数的に延ばす(systemd 254 以降。実機は 257)。
+# カメラが復旧しない間に10秒ごとの再起動と細切れのMP4(正常は1日144本のところ
+# 334本の日があった)が続くのを防ぐ(Issue #1171)。一時的な切断(1回のEOF)からの
+# 復旧は最初の10秒のままで、ffmpeg が起動後しばらく動き続ければ間隔は元に戻る。
 RestartSec=10s
+RestartSteps=5
+RestartMaxDelaySec=5min
 
 # ログ出力設定 (journalctlで見れるように)
 StandardOutput=journal

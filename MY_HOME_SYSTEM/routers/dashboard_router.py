@@ -317,6 +317,7 @@ def dashboard_life(
         dashboard_page_service.render_life_page(
             cards, dashboard_path=f"{_BASE_PATH}/",
             climate_html=_climate_heatmap_html(hm_loc, hm_metric, hm_src, hm_view, hm_date),
+            car_usage=home_status_service.get_car_usage_trends(),
         )
     )
 
