@@ -402,3 +402,50 @@ def summarize_daily(trips: Iterable[Trip]) -> List[DailySummary]:
         counts[day] = counts.get(day, 0) + 1
         minutes[day] = minutes.get(day, 0.0) + (trip.duration_minutes or 0.0)
     return [DailySummary(day, counts[day], minutes[day]) for day in sorted(counts)]
+
+
+# 出発時刻を分ける時間帯(開始時, 終了時を含まない, 表示名)。24時間を欠けなく覆う。
+DEPARTURE_BANDS = (
+    (0, 6, "深夜〜早朝(0〜6時)"),
+    (6, 9, "朝(6〜9時)"),
+    (9, 12, "午前(9〜12時)"),
+    (12, 15, "昼(12〜15時)"),
+    (15, 18, "夕方(15〜18時)"),
+    (18, 21, "夜(18〜21時)"),
+    (21, 24, "遅い夜(21〜24時)"),
+)
+WEEKDAY_LABELS = ("月", "火", "水", "木", "金", "土", "日")
+
+
+@dataclass(frozen=True)
+class UsageBucket:
+    """曜日または時間帯ごとの集計。平均時間は戻りが確定した外出だけで求め、無ければ None。"""
+    label: str
+    trips: int
+    average_minutes: Optional[float]
+
+
+@dataclass(frozen=True)
+class UsageTrends:
+    """外出の曜日別・出発の時間帯別の傾向(#1183)。"""
+    total_trips: int
+    by_weekday: List[UsageBucket]       # 月〜日の7件(外出が無い曜日も0回で含める)
+    by_departure_band: List[UsageBucket]  # `DEPARTURE_BANDS` の順
+
+
+def _bucket(label: str, trips: List[Trip]) -> UsageBucket:
+    durations = [t.duration_minutes for t in trips if t.duration_minutes is not None]
+    average = sum(durations) / len(durations) if durations else None
+    return UsageBucket(label, len(trips), average)
+
+
+def summarize_usage_trends(trips: Iterable[Trip]) -> UsageTrends:
+    """外出を、出発した曜日と時間帯ごとに回数と平均の外出時間にまとめる。"""
+    trip_list = list(trips)
+    weekdays = [[t for t in trip_list if t.departed_at.weekday() == i] for i in range(7)]
+    bands = [[t for t in trip_list if start <= t.departed_at.hour < end] for start, end, _ in DEPARTURE_BANDS]
+    return UsageTrends(
+        total_trips=len(trip_list),
+        by_weekday=[_bucket(WEEKDAY_LABELS[i], weekdays[i]) for i in range(7)],
+        by_departure_band=[_bucket(label, bands[i]) for i, (_s, _e, label) in enumerate(DEPARTURE_BANDS)],
+    )

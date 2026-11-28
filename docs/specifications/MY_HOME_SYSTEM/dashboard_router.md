@@ -298,18 +298,18 @@
 
 * **役割**: **(新機能)** ⚡電気ページ。`power_analysis_service.build_power_report(days)`の結果を`power_page_service.render_power_page`で描く(月ごとの推移・日別の電気代・気温との関係・テレビの使い方)。分析は10分キャッシュされる。`async def`にしない(DB取得とpandasの計算が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`days`(30/60/90。それ以外の値・数値でない値は既定の30。`str | None`で受けて自前で変換するので422にならない)。日別・気温・テレビの対象期間を切り替える。
-* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 421)
+* 根拠: `def dashboard_power(days: str | None = None) -> HTMLResponse:` (行番号: 422)
 
 ### `GET {DASHBOARD_BASE_PATH}/updates` (`dashboard_updates`)
 
 * **役割**: **(新機能)** アップデートページを返す。`release_history_service.get_release_history()`でダッシュボード・ファミクエ・あさノート・よるノートの更新履歴を集め、`dashboard_page_service.render_updates_page`に渡す。あさノート・よるノートは外部から取得する(タイムアウト・キャッシュ付き。失敗しても残りのアプリは表示する)。`async def`にしない(外部取得が同期のため、イベントループを止めない)。
 * **引数/リクエスト**: クエリ`app`(`dashboard`/`quest`/`asa`/`yoru`、任意)で1アプリに絞る。未知の値は無視して全件。
-* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 442)
+* 根拠: `def dashboard_updates(app: str | None = None) -> HTMLResponse:` (行番号: 443)
 
 ### `GET {DASHBOARD_BASE_PATH}/sys` (`dashboard_sys`)
 
 * **(2026-11-24 改訂)** システムの一覧(全体サマリー+カード)を返す。材料は`_sys_materials()`(`get_cached_materials()`・現在時刻・`collect_status_cards(now)`・`build_freshness_rows`(Issue #1182 以降は在否判定の行のため `car=get_car_summary()` も渡す)・`read_health_result(now)`・`collect_link_health(...)`・`build_sys_cards(...)`をまとめて返す。詳細画面と共有)で集め、`render_sys_page(sys_cards, rows, dashboard_path=..., health=...)`に渡す。`nas_days`が付いていればNASの詳細画面(`/sys/nas?nas_days=...`)へ302で送る(NASの容量推移が一覧にあった頃のURL)。戻り値は`Response`。下の記述(NAS容量グラフ・起動履歴・ログ欄を一覧で描いていた頃のもの)は、現在は`dashboard_sys_detail`の各画面に当てはまる。
-* 根拠: [関数定義] (行番号: 324 / 抜粋: "def _sys_materials():")、[関数定義] (行番号: 339 / 抜粋: "def dashboard_sys(nas_days: str | None = None) -> Response:")
+* 根拠: [関数定義] (行番号: 325 / 抜粋: "def _sys_materials():")、[関数定義] (行番号: 340 / 抜粋: "def dashboard_sys(nas_days: str | None = None) -> Response:")
 
 * **(2026-11-12 UX改善)** `home_status_service.read_health_result(now)`(毎時の定期チェックの結果)を`render_sys_page`の`health`に渡す。
 
@@ -342,7 +342,7 @@
 ### `GET {DASHBOARD_BASE_PATH}/sys/logs` (`dashboard_download_logs`)
 
 * **役割**: システムページの「ログのダウンロード」でチェックしたログ(複数可)を、機密情報を伏せて1つのテキストにしてダウンロードさせる。`group`クエリ(複数指定可)は一覧のチェックボックスの値(ローテーション分をまとめたグループ名)で、`log_download_service.resolve_log_groups`が列挙した一覧との完全一致でしか解決しない(パス・`..`・`.log.1`の名前は一覧に無いので404)。選択した内容の見積もり合計が`config.LOG_DOWNLOAD_MAX_TOTAL_MB`を超える場合は413。本文は`read_groups_for_download`のマスク済みテキストで、`Content-Disposition: attachment`(保存名は`download_filename`)・`Cache-Control: no-store`・`text/plain; charset=utf-8`で返す。認証は設けず、既存のダッシュボードと同じネットワーク制御(LAN/Tailscale限定のFW、外部はCloudflare Access)に委ねる。
-* 根拠: [関数定義] (行番号: 351〜377 / 抜粋: "def dashboard_download_logs(group: list[str] = Query(default=[])) -> Response:")
+* 根拠: [関数定義] (行番号: 352〜378 / 抜粋: "def dashboard_download_logs(group: list[str] = Query(default=[])) -> Response:")
 
 * **引数/リクエスト**: クエリパラメータ`group: list[str]`(ページのフォームがチェックされた分だけ送る)
 * **戻り値/レスポンス**: 200で添付ファイル(`Response`)。未選択は400、一覧に無い名前は404、合計サイズ超過は413(いずれも`HTTPException`)
@@ -356,7 +356,7 @@
 * **戻り値/レスポンス**: `HTMLResponse`または`RedirectResponse`(302)
 * **副作用**: DBの読み取り(TTLキャッシュ付き)、外部リンクの稼働チェック(キャッシュ付き)、ログ一覧の列挙(admin)
 * **エラーハンドリング**: 不正な`nas_days`は既定の30日
-* 根拠: [関数定義] (行番号: 381 / 抜粋: "def dashboard_sys_detail(section: str, nas_days: str | None = None) -> Response:")
+* 根拠: [関数定義] (行番号: 382 / 抜粋: "def dashboard_sys_detail(section: str, nas_days: str | None = None) -> Response:")
 
 ### `GET {DASHBOARD_BASE_PATH}/static/{filename}` (`dashboard_static`)
 
@@ -479,3 +479,7 @@ graph TD
 * [x] 完了: 不明事項を漏れなく列挙した
 
 完了
+
+## 追補: くらしページの車の利用の傾向（#1183）
+
+* `dashboard_life` は `render_life_page(..., car_usage=home_status_service.get_car_usage_trends())` を渡す。

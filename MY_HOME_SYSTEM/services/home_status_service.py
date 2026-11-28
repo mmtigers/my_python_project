@@ -1543,6 +1543,16 @@ def get_car_summary() -> "parking_record_service.CarSummary | None":
     return _cached("car_summary", lambda: parking_record_service.get_car_summary(datetime.now()))
 
 
+# 傾向は8週間分の集計で、数分では変わらないので長めにキャッシュする(#1183)。
+CAR_USAGE_TRENDS_TTL_SEC = 600
+
+
+def get_car_usage_trends() -> "parking_occupancy.UsageTrends | None":
+    """車の利用の曜日・時間帯の傾向(#1183)。データが無い・取得失敗は None(くらしページは節を出さない)。"""
+    return _cached("car_usage_trends", lambda: parking_record_service.get_usage_trends(datetime.now()),
+                   ttl=CAR_USAGE_TRENDS_TTL_SEC)
+
+
 # === ホーム最上部の「いまの状態」 ===
 
 class HomeAlert(NamedTuple):

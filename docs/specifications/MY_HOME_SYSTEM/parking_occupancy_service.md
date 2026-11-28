@@ -286,3 +286,8 @@ graph TD
 | 雨の日・人が重なる場面での精度 | 見直しに使った7日分に、確かめられる場面が無かった | 該当する日の録画と、実際の出入り |
 | 実機（Raspberry Pi）での録画1本あたりの処理時間 | 7日分（1391本）で約7秒/本と計測した。録画が長くなる・解析間隔を縮めると変わる | 実機での計測 |
 | 録画のキーフレーム間隔 | カメラ側の設定に依存する。`interval_seconds` より長いとフレームが間引かれる | 実機の録画ファイル |
+
+## 追補: 外出の傾向の集計（#1183）
+
+* **`summarize_usage_trends(trips)`**: 外出を出発した曜日（月〜日の7件。外出の無い曜日も0回で含める）と時間帯（`DEPARTURE_BANDS` の7区分。開始時を含み終了時を含まない）に分け、それぞれ回数と平均の外出時間（分）を `UsageBucket` にして `UsageTrends` で返す。平均は戻りが確定した外出（`returned_at` が None でないもの）だけで求め、無ければ `None`。回数には戻り未確定の外出も数える。
+* 根拠: `def summarize_usage_trends(trips: Iterable[Trip]) -> UsageTrends:` (行番号: 442 / 抜粋: "def summarize_usage_trends(")
