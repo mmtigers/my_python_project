@@ -217,3 +217,4 @@ graph TD
 ## 追補: 傾向の読み出し（#1183）
 
 * **`get_usage_trends(now)`**: 直近 `USAGE_TRENDS_WINDOW`（56日=8週間）の外出を `get_trips` で求め、`parking_occupancy_service.summarize_usage_trends` で曜日別・時間帯別にまとめる。期間内に観測が1件も無ければ `None`。ダッシュボードの「くらし」ページの「🚗 車の利用の傾向」が使う。
+* **`get_hourly_away(now, days=30)`**: 直近 `days` 日の日付×時間の不在の分。観測を1日余分に1回だけ読み、外出の組み立て（`build_trips`）と記録の有無の両方に使う（期間の始まりにかかる外出を拾うため）。観測が無ければ `None`。「くらし」の「🚗 車」ヒートマップが使う。

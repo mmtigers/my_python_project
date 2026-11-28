@@ -290,4 +290,5 @@ graph TD
 ## 追補: 外出の傾向の集計（#1183）
 
 * **`summarize_usage_trends(trips)`**: 外出を出発した曜日（月〜日の7件。外出の無い曜日も0回で含める）と時間帯（`DEPARTURE_BANDS` の7区分。開始時を含み終了時を含まない）に分け、それぞれ回数と平均の外出時間（分）を `UsageBucket` にして `UsageTrends` で返す。平均は戻りが確定した外出（`returned_at` が None でないもの）だけで求め、無ければ `None`。回数には戻り未確定の外出も数える。
+* **`hourly_away_grid(trips, observations, since, now)`** / **`away_level(minutes)`**（「🚗 車」ヒートマップ）: 外出の出庫〜入庫（戻り未確定は `now` まで）を、重なった1時間ごとの不在の分に按分して `{日付: [0〜23時の分]}` を返す（日またぎ・時間またぎは分割、1マス上限60分）。「不明」でない観測のあった時間は不在0分の記録ありにし、観測も外出も無い時間は `None`（記録なし）。色段階は `AWAY_LEVEL_THRESHOLDS=(1, 20, 40)`（車あり / 〜20分 / 20〜40分 / 40分〜）。
 * 根拠: `def summarize_usage_trends(trips: Iterable[Trip]) -> UsageTrends:` (行番号: 442 / 抜粋: "def summarize_usage_trends(")

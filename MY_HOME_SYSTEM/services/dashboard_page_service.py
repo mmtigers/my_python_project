@@ -26,6 +26,7 @@ import config
 import pandas as pd
 
 from services import home_status_service, system_info_service, timelapse_service
+from services import parking_occupancy_service as parking_occupancy
 
 # === ページ共通のシェル ===
 
@@ -978,7 +979,7 @@ def _heatmap_level(count: int) -> int:
 CLIMATE_LOCATIONS = home_status_service.CLIMATE_LOCATIONS
 _CLIMATE_LOCATION_KEYS = home_status_service.CLIMATE_LOCATION_KEYS
 _CLIMATE_KEY_LOCATIONS = {key: name for name, key in _CLIMATE_LOCATION_KEYS.items()}
-CLIMATE_METRICS = ("temp", "hum", "act")
+CLIMATE_METRICS = ("temp", "hum", "act", "car")
 CLIMATE_DEFAULT_LOCATION = "伊丹"
 CLIMATE_DEFAULT_METRIC = "temp"
 CLIMATE_DEFAULT_SOURCE = "security"
@@ -986,7 +987,7 @@ CLIMATE_DEFAULT_SOURCE = "security"
 CLIMATE_VIEWS = ("days", "day")
 CLIMATE_DEFAULT_VIEW = "days"
 _CLIMATE_VIEW_LABELS = {"days": "📅 30日の推移", "day": "🏘️ 拠点を並べる"}
-_CLIMATE_METRIC_LABELS = {"temp": "🌡️ 温度", "hum": "💧 湿度", "act": "🏃 動き"}
+_CLIMATE_METRIC_LABELS = {"temp": "🌡️ 温度", "hum": "💧 湿度", "act": "🏃 動き", "car": "🚗 車"}
 _CLIMATE_METRIC_COLUMNS = {"temp": "temp_avg", "hum": "hum_avg"}
 _CLIMATE_METRIC_UNITS = {"temp": "℃", "hum": "%"}
 # 段階の境界(各値未満の段階 → 最後だけ以上)。
@@ -1010,7 +1011,7 @@ def parse_climate_location(value: str | None) -> str:
 
 
 def parse_climate_metric(value: str | None) -> str:
-    """`?hm_metric=`の値。`temp`/`hum`/`act`以外は既定(温度)。"""
+    """`?hm_metric=`の値。`temp`/`hum`/`act`/`car`以外は既定(温度)。"""
     return value if value in CLIMATE_METRICS else CLIMATE_DEFAULT_METRIC
 
 
@@ -1125,7 +1126,10 @@ def _climate_switch(
         attr = ' aria-current="true"' if current else ""
         return f'<a href="{html.escape(base)}?{html.escape(urlencode(query))}#climate-heatmap"{attr}>{html.escape(label)}</a>'
 
-    if metric == "act":
+    if metric == "car":
+        view = CLIMATE_DEFAULT_VIEW
+        targets = []  # 車は1台だけなので、対象の切り替えは無い
+    elif metric == "act":
         view = CLIMATE_DEFAULT_VIEW
         targets = [link(_HEATMAP_SOURCE_LABELS[s], location, metric, s, s == source) for s in HEATMAP_SOURCES]
     elif view == "day" and day is not None and today is not None:
@@ -1141,14 +1145,15 @@ def _climate_switch(
         targets = [link(loc, loc, metric, source, loc == location) for loc in locations]
     metrics = [link(_CLIMATE_METRIC_LABELS[m], location, m, source, m == metric, view, day) for m in CLIMATE_METRICS]
     views = ""
-    if metric != "act":
+    if metric not in ("act", "car"):
         views = '<div class="climate-switch">' + "".join(
             link(_CLIMATE_VIEW_LABELS[v], location, metric, source, v == view, v, day) for v in CLIMATE_VIEWS
         ) + "</div>"
+    target_row = f'<div class="climate-switch">{"".join(targets)}</div>' if targets else ""
     return (
         f'<div class="climate-switch">{"".join(metrics)}</div>'
         f"{views}"
-        f'<div class="climate-switch">{"".join(targets)}</div>'
+        f"{target_row}"
     )
 
 
@@ -1174,8 +1179,9 @@ def render_home_climate_heatmap(
     source: str = CLIMATE_DEFAULT_SOURCE,
     view: str = CLIMATE_DEFAULT_VIEW,
     day: date | None = None,
+    car_away: dict[str, list[float | None]] | None = None,
 ) -> str:
-    """「くらし」ページの「過去30日の温度/湿度/動き」ヒートマップ。行=日付(新しい日が上)、列=0〜23時。
+    """「くらし」ページの「過去30日の温度/湿度/動き/車」ヒートマップ。行=日付(新しい日が上)、列=0〜23時。
 
     温度・湿度で`view="day"`のときは、`day`(無ければ今日)の1日分を拠点ごとに1行ずつ並べる
     (行=記録のある拠点、`CLIMATE_SITES`の順)。同じ時間の拠点どうしを縦に見比べるための表示。
@@ -1186,6 +1192,9 @@ def render_home_climate_heatmap(
     動きなしは灰色の0回で、記録なしとは区別しない)。まだ来ていない時間は枠線だけ。
     マスはタップできない閲覧用。温度・湿度は記録のある拠点だけを切り替えに出す(1つも無ければ案内だけ)。
     """
+    if metric == "car":
+        return _render_car_away_heatmap(
+            now, car_away, dashboard_path=dashboard_path, location=location, source=source, days=days)
     is_activity = metric == "act"
     present: list[str] = []
     if not is_activity:
@@ -1239,6 +1248,57 @@ def render_home_climate_heatmap(
         f"{heading}"
         f'<div class="climate">{switch}'
         f'<div class="meta">{html.escape(subtitle)}</div>'
+        f'<div class="climate-axis heatmap-axis-ticks">{_HOUR_AXIS_TICKS}</div>'
+        f'{"".join(rows)}'
+        f'<div class="heatmap-legend">{legend}</div>'
+        "</div>"
+    )
+
+
+def _render_car_away_heatmap(
+    now: datetime,
+    car_away: dict[str, list[float | None]] | None,
+    *,
+    dashboard_path: str,
+    location: str,
+    source: str,
+    days: int,
+) -> str:
+    """「🚗 車」: 行=日付(新しい日が上)、列=0〜23時。色は1時間のうち車が駐車場に無かった分数(4段階の赤)。
+
+    `car_away` は `parking_record_service.get_hourly_away` の結果(日付 → 24時間の不在の分)。
+    記録のない時間(判定が不明・録画の欠け)と、まだ来ていない時間は、車があった(0分)と区別して枠線だけにする。
+    """
+    heading = f'<h2 id="climate-heatmap">{_CLIMATE_METRIC_LABELS["car"]}の不在時間(過去{days}日)</h2>'
+    switch = _climate_switch(dashboard_path, location=location, metric="car", source=source, locations=[])
+    if not car_away:
+        return heading + f'<div class="climate">{switch}<p class="empty-note">車の記録がまだありません</p></div>'
+    today = now.date()
+    rows = []
+    for offset in range(days):
+        d = today - timedelta(days=offset)
+        values = car_away.get(d.isoformat())
+        cells = []
+        for hour in range(24):
+            tip = f"{d.month}/{d.day} {hour}時台"
+            value = values[hour] if values is not None else None
+            if d == today and hour > now.hour:
+                cells.append(f'<div class="climate-cell cl-none" title="{tip}: まだ先です"></div>')
+            elif value is None:
+                cells.append(f'<div class="climate-cell cl-none" title="{tip}: 記録なし"></div>')
+            else:
+                note = f"不在{int(round(value))}分" if value >= 1 else "車あり"
+                cells.append(f'<div class="climate-cell hm-{parking_occupancy.away_level(value)}" title="{tip}: {note}"></div>')
+        label = f"{d.month}/{d.day}({_WEEKDAYS[d.weekday()]})"
+        rows.append(f'<div class="climate-row"><span class="climate-day">{label}</span><div class="climate-cells">{"".join(cells)}</div></div>')
+    legend = "".join(
+        f'<span><i style="background:var(--hm-{lvl})"></i>{html.escape(text)}</span>'
+        for lvl, text in enumerate(parking_occupancy.AWAY_LEVEL_LABELS)
+    ) + '<span><i style="border:1px dashed var(--border)"></i>記録なし</span>'
+    return (
+        f"{heading}"
+        f'<div class="climate">{switch}'
+        '<div class="meta">駐車場カメラの録画から判定・1時間のうち車が出ていた時間(短い外出は見えにくいことがあります)</div>'
         f'<div class="climate-axis heatmap-axis-ticks">{_HOUR_AXIS_TICKS}</div>'
         f'{"".join(rows)}'
         f'<div class="heatmap-legend">{legend}</div>'
