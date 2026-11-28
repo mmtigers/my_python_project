@@ -522,6 +522,27 @@ class TestLongInactivity:
         assert sensor_service.LAST_MOTION_AT["伊丹"] == self._jst(2026, 11, 27, 9, 55)
         assert sensor_service.LAST_MOTION_AT["高砂"] == self._jst(2026, 11, 27, 7, 30)
 
+    async def test_restore_skips_locations_whose_deadline_already_passed(self, isolated_db, monkeypatch):
+        """PR #1185 レビュー指摘: 期限が過ぎた拠点の監視を張ると、再起動のたびに即時に誤通知する。"""
+        now = self._jst(2026, 11, 28, 2, 0)  # 深夜の再起動
+        monkeypatch.setattr(sensor_service, "get_now_jst", lambda: now)
+        monkeypatch.setattr(config, "MONITOR_DEVICES", [
+            {"id": "m-old", "type": "Motion Sensor", "location": "高砂", "name": "居間"},   # 3日前が最後(電池切れ)
+            {"id": "m-eve", "type": "Motion Sensor", "location": "伊丹", "name": "リビング"},  # 前日20時 → 期限は当日10時
+        ])
+        with get_db_cursor(commit=True) as cur:
+            for mac, ts in [("m-old", "2026-11-25T09:00:00+09:00"), ("m-eve", "2026-11-27T20:00:00+09:00")]:
+                cur.execute(
+                    "INSERT INTO device_records (timestamp, device_name, device_id, device_type, contact_state) "
+                    "VALUES (?, 'x', ?, 'Webhook', 'detected')", (ts, mac))
+
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
+            await sensor_service.restore_motion_timers()
+            await asyncio.sleep(0.05)
+
+        mock_send.assert_not_called()
+        assert set(sensor_service.LONG_INACTIVE_TASKS) == {"伊丹"}
+
     async def test_restore_failure_does_not_raise(self, monkeypatch):
         def _boom():
             raise RuntimeError("db")

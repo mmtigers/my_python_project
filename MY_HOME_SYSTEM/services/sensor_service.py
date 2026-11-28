@@ -342,6 +342,7 @@ async def restore_motion_timers() -> None:
     now = get_now_jst()
     by_location: Dict[str, datetime.datetime] = {}
     restored = 0
+    watched = 0
     for device in config.MONITOR_DEVICES:
         mac = device.get("id")
         last = last_times.get(mac)
@@ -357,9 +358,13 @@ async def restore_motion_timers() -> None:
             MOTION_TASKS[mac] = asyncio.create_task(send_inactive_notification(mac, name, location, int(remaining)))
             restored += 1
     for location, last in by_location.items():
-        if location not in LONG_INACTIVE_TASKS:
+        # 期限がもう過ぎている(停止中に過ぎた・電池切れ等で何日も検知が無い)拠点は張らない。
+        # 張ると sleep(0) で即時に通知し、再起動のたびに(深夜でも)同じ通知が出る(PR #1185 のレビュー指摘)。
+        # その拠点は次に動きを検知した時点から、ふだんどおり数え直す。
+        if location not in LONG_INACTIVE_TASKS and long_inactive_deadline(last) > now:
             schedule_long_inactive_check(location, last)
-    logger.info(f"見守りタイマーを復元しました (15分タイマー {restored}件 / 長時間無反応の監視 {len(by_location)}拠点)")
+            watched += 1
+    logger.info(f"見守りタイマーを復元しました (15分タイマー {restored}件 / 長時間無反応の監視 {watched}拠点)")
 
 
 def cancel_all_tasks() -> None:

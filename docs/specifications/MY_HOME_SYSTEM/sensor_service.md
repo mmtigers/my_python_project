@@ -42,7 +42,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` 内の各定数 | `SQLITE_TABLE_SWITCHBOT_LOGS`、`SQLITE_TABLE_POWER_USAGE` の具体的な値や型が提供されていないため。 | `[config.SQLITE_TABLE_SWITCHBOT_LOGS]` (行番号: 391 / 抜粋: "config.SQLITE_TABLE_SWITCHBOT_LOGS,") |
+| `config` 内の各定数 | `SQLITE_TABLE_SWITCHBOT_LOGS`、`SQLITE_TABLE_POWER_USAGE` の具体的な値や型が提供されていないため。 | `[config.SQLITE_TABLE_SWITCHBOT_LOGS]` (行番号: 396 / 抜粋: "config.SQLITE_TABLE_SWITCHBOT_LOGS,") |
 | `core.database.get_db_cursor` | DB接続の具体的な実装、扱うデータベースエンジン、コンテキストマネージャが返すカーソルオブジェクトの仕様が不明であるため。 | `[core.database.get_db_cursor]` (行番号: 262 / 抜粋: "with get_db_cursor() as") |
 | `core.database.save_log_async` | テーブル名、カラムリスト、値を渡した際の内部でのクエリ生成ロジックやエラーハンドリングの挙動が不明であるため。 | `[save_log_async]` (参照: process_meter_data / 抜粋: "await save_log_async(") |
 | `services.notification_service.send_push` | メッセージ形式の仕様、引数として渡す `"discord"` や `"notify"` の処理分岐、外部API連携の実装が不明であるため。 | `[send_push]` (参照: send_inactive_notification / 抜粋: "send_push,") |
@@ -147,15 +147,15 @@
 ### `cancel_all_tasks`
 
 * **役割**: 起動中のすべての見守りタイマータスクをキャンセルする。
-* 根拠: `[cancel_all_tasks]` (行番号: 367 / 抜粋: "for t in MOTION_TASKS.values()")
+* 根拠: `[cancel_all_tasks]` (行番号: 372 / 抜粋: "for t in MOTION_TASKS.values()")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[cancel_all_tasks]` (行番号: 365 / 抜粋: "def cancel_all_tasks() -> None")
+* 根拠: `[cancel_all_tasks]` (行番号: 370 / 抜粋: "def cancel_all_tasks() -> None")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[cancel_all_tasks]` (行番号: 365 / 抜粋: "def cancel_all_tasks() -> None")
+* 根拠: `[cancel_all_tasks]` (行番号: 370 / 抜粋: "def cancel_all_tasks() -> None")
 
 
 * **副作用**: グローバル変数 `MOTION_TASKS` に保持されている各タスクの `cancel()` 実行。
@@ -163,7 +163,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[cancel_all_tasks]` (行番号: 365 / 抜粋: "def cancel_all_tasks() -> None")
+* 根拠: `[cancel_all_tasks]` (行番号: 370 / 抜粋: "def cancel_all_tasks() -> None")
 
 
 
@@ -174,7 +174,7 @@
 
 
 * **引数/リクエスト**: `device_id: str`, `device_name: str`, `temp: float`, `humidity: float`
-* 根拠: `[process_meter_data]` (行番号: 378 / 抜粋: "def process_meter_data(device_")
+* 根拠: `[process_meter_data]` (行番号: 383 / 抜粋: "def process_meter_data(device_")
 
 
 * **戻り値/レスポンス**: `None`
@@ -193,11 +193,11 @@
 ### `process_power_data`
 
 * **役割**: 電力データをDBに保存し、前回記録された値と閾値を比較して閾値を跨いだ場合（ON/OFF）に使用開始/終了の通知を送信する。**（Issue #829で追加）** `device_category`引数(既定`"plug"`)で書き込み時点の種別("smart_meter"住宅全体のスマートメーター/"plug"個別家電プラグ)を明示し、`power_usage`テーブルに保存する。以前は`analysis_service.py`側が`device_name`に`"Remo"`という文字列が含まれるかだけで下流的に推測しており、Nature Remoアプリのニックネーム設定次第で電気代集計が0円になる不具合の原因になっていた。
-* 根拠: `[process_power_data]` (行番号: 521 / 抜粋: "prev_wattage < threshold and w")、`device_category: str = "plug",` (行番号: 239)
+* 根拠: `[process_power_data]` (行番号: 526 / 抜粋: "prev_wattage < threshold and w")、`device_category: str = "plug",` (行番号: 239)
 
 
 * **引数/リクエスト**: `device_id: str`, `device_name: str`, `wattage: float`, `notify_settings: Dict[str, Any]`, `device_category: str = "plug"`(キーワード可)
-* 根拠: `[process_power_data]` (行番号: 442〜536 / 抜粋: "async def process_power_data(\n    device_id: str,\n    device_name: str,\n    wattage: float,\n    notify_settings: Dict[str, Any],\n    device_category: str = \"plug\",\n) -> None:")
+* 根拠: `[process_power_data]` (行番号: 447〜541 / 抜粋: "async def process_power_data(\n    device_id: str,\n    device_name: str,\n    wattage: float,\n    notify_settings: Dict[str, Any],\n    device_category: str = \"plug\",\n) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -224,7 +224,7 @@
 ### `restore_motion_timers` / `long_inactive_deadline` / `schedule_long_inactive_check` / `send_long_inactive_notification`（Issue #1153 で追加）
 
 * **背景**: 無反応タイマー(`MOTION_TASKS`/`IS_ACTIVE`)はメモリ上にしかなく、再起動のたびに消えた(2026-11-24 は再起動8回)。また無反応の通知は最後の検知から15分後の1回だけで、見守りで本当に知りたい「数時間動きがない」を検知できなかった。
-* **起動時の復元**: `unified_server.lifespan`(マイグレーション成功時)が `restore_motion_timers()` を呼ぶ。`config.MONITOR_DEVICES` の人感センサー(`type` に "Motion" を含む/`WoPresence`)ごとに `device_records` の `contact_state='detected'` の最新時刻を読み、`MOTION_TIMEOUT` 以内なら「アクティブ」に戻して残り時間で15分のタイマーを張る(それより古ければ、停止中に過ぎたものとして張らない)。拠点ごとに最新の検知から長時間無反応の監視も張る。失敗しても起動は止めない(WARNING のみ)。
+* **起動時の復元**: `unified_server.lifespan`(マイグレーション成功時)が `restore_motion_timers()` を呼ぶ。`config.MONITOR_DEVICES` の人感センサー(`type` に "Motion" を含む/`WoPresence`)ごとに `device_records` の `contact_state='detected'` の最新時刻を読み、`MOTION_TIMEOUT` 以内なら「アクティブ」に戻して残り時間で15分のタイマーを張る(それより古ければ、停止中に過ぎたものとして張らない)。拠点ごとに最新の検知から長時間無反応の監視も張る。ただし `long_inactive_deadline(最後の検知)` がもう過ぎている拠点(停止中に過ぎた・電池切れ等で何日も検知が無い)は張らない(張ると即時に通知し、再起動のたびに深夜でも同じ通知が出るため。PR #1185 のレビュー指摘)。その拠点は次の検知から数え直す。失敗しても起動は止めない(WARNING のみ)。
 * **長時間の無反応**: 拠点(`location`)ごとに、日中(`LONG_INACTIVE_DAY_START_HOUR`=7〜`LONG_INACTIVE_DAY_END_HOUR`=22時、JST)の間に `LONG_INACTIVE_SEC`(3時間)動きが無ければ「⚠️【拠点・見守り】日中に3時間以上、動きがありません(最後の検知 …)」を `channel="notify"` へ1回送る。期限は `long_inactive_deadline`(夜間は数えない。20:00 が最後なら翌10:00、6:30 なら10:00)。拠点内のどれかのセンサーが検知すると数え直す(`process_sensor_data` → `schedule_long_inactive_check`)。拠点単位にしたのは、寝室のように日中は動きが無いのが普通のセンサーで毎日通知しないため。`devices.json` に登録されていない MAC では監視を張らない。既存の15分の通知は変えていない。
 * 根拠: `async def restore_motion_timers() -> None:` (参照: restore_motion_timers)、`def long_inactive_deadline(last_motion: datetime.datetime) -> datetime.datetime:` (参照: long_inactive_deadline)
 
