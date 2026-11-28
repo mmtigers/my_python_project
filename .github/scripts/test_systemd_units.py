@@ -33,6 +33,7 @@ UNIT_ONLY_KEYS = ("StartLimitIntervalSec", "StartLimitBurst", "StartLimitAction"
 # 両方向を検査する。
 SERVICE_ONLY_KEYS = (
     "Type", "ExecStart", "ExecStartPre", "ExecStop", "Restart", "RestartSec",
+    "RestartSteps", "RestartMaxDelaySec",
     "TimeoutStartSec", "TimeoutStopSec", "KillMode", "RemainAfterExit",
     "WorkingDirectory", "User", "Group", "Environment", "EnvironmentFile",
     "StandardOutput", "StandardError",
@@ -283,3 +284,16 @@ def test_nvr_services_filter_rtsp_credentials_from_journal():
     for unit in units:
         text = unit.read_text(encoding="utf-8")
         assert "LogFilterPatterns=~rtsp://" in text, f"{unit.name} に RTSP 認証情報のログフィルタが無い"
+
+
+def test_nvr_services_back_off_restarts_while_camera_is_down():
+    """Issue #1171: カメラが応答しない間、固定10秒で再起動し続けると細切れのMP4が
+    増えるため、nvr-*.service は再起動間隔を指数的に延ばす設定を持つこと。
+    (どれか1本だけ外れる・[Unit] に誤配置される、を防ぐ)"""
+    units = sorted(SYSTEMD_DIR.glob("nvr-*.service"))
+    assert units, "nvr-*.service が見つからない"
+    for unit in units:
+        service = {k: v for _l, k, v in _entries(unit).get("Service", [])}
+        assert service.get("RestartSec") == "10s", f"{unit.name}: 最初の再起動間隔(RestartSec)が10秒でない"
+        assert int(service.get("RestartSteps", "0")) >= 1, f"{unit.name}: RestartSteps= が無い"
+        assert service.get("RestartMaxDelaySec") == "5min", f"{unit.name}: RestartMaxDelaySec= が5minでない"

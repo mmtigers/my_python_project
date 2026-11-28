@@ -107,6 +107,15 @@ NAS(`/mnt/nas/home_system/nvr_recordings/<カメラ>/`)へ **10分ごとの MP4*
 > 欠落していた(Issue #772。録画が無音で止まりうる状態だった)。本ディレクトリへ取り込み、
 > 認証情報は `/etc/nvr/<カメラ>.env`(600・root所有)へ切り出した。
 
+### 再起動のバックオフ(Issue #1171)
+
+`Restart=always` / `RestartSec=10s` に加えて `RestartSteps=5` / `RestartMaxDelaySec=5min` を指定し、
+カメラが応答しない間は再起動の間隔を 10秒 → 最大5分へ段階的に延ばす(systemd 254 以降。実機は 257)。
+以前は固定10秒だったため、カメラが落ちている間も10秒ごとに ffmpeg が起動し直され、そのたびに
+NAS へ短い MP4 が作られた(正常は1日144本のところ、2026-11-18・19 は334本・352本)。
+一時的な切断(EOF 1回)からの復旧は最初の10秒のままで、起動後しばらく動き続ければ間隔は戻る。
+反映は実機で `sudo cp` → `sudo systemctl daemon-reload` → `sudo systemctl restart nvr-*.service`。
+
 ### 認証情報ファイル(実機のみ・リポジトリには置かない)
 
 カメラごとに1ファイル。中身は RTSP の URL 1行だけ:
