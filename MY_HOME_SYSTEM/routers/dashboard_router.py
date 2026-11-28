@@ -184,7 +184,7 @@ def _climate_heatmap_html(
     is_activity = metric == "act"
     now = home_status_service.get_now_jst()
     return dashboard_page_service.render_home_climate_heatmap(
-        pd.DataFrame() if is_activity else home_status_service.get_hourly_climate(),
+        pd.DataFrame() if is_activity or metric == "car" else home_status_service.get_hourly_climate(),
         now,
         dashboard_path=f"{_BASE_PATH}/",
         location=dashboard_page_service.parse_climate_location(hm_loc),
@@ -196,6 +196,7 @@ def _climate_heatmap_html(
         source=dashboard_page_service.parse_climate_source(hm_src),
         view=dashboard_page_service.parse_climate_view(hm_view),
         day=dashboard_page_service.parse_climate_date(hm_date, now.date(), home_status_service.CLIMATE_DAYS),
+        car_away=home_status_service.get_hourly_car_away() if metric == "car" else None,
     )
 
 

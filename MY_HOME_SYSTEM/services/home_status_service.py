@@ -1553,6 +1553,14 @@ def get_car_usage_trends() -> "parking_occupancy.UsageTrends | None":
                    ttl=CAR_USAGE_TRENDS_TTL_SEC)
 
 
+def get_hourly_car_away() -> "dict | None":
+    """過去`CLIMATE_DAYS`日の車の不在ヒートマップの材料(日付×時間の不在の分。10分キャッシュ)。
+    データが無い・取得失敗は None(「くらし」のヒートマップは案内だけ出す)。"""
+    now = get_now_jst().replace(tzinfo=None)
+    return _cached(f"car_away:{now.date().isoformat()}", lambda: parking_record_service.get_hourly_away(now, CLIMATE_DAYS),
+                   ttl=CAR_USAGE_TRENDS_TTL_SEC)
+
+
 # === ホーム最上部の「いまの状態」 ===
 
 class HomeAlert(NamedTuple):

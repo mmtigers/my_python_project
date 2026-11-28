@@ -449,3 +449,55 @@ def summarize_usage_trends(trips: Iterable[Trip]) -> UsageTrends:
         by_weekday=[_bucket(WEEKDAY_LABELS[i], weekdays[i]) for i in range(7)],
         by_departure_band=[_bucket(label, bands[i]) for i, (_s, _e, label) in enumerate(DEPARTURE_BANDS)],
     )
+
+
+# 車の不在ヒートマップの色段階の下限(1時間のうち不在だった分)。0分は「車あり」。
+AWAY_LEVEL_THRESHOLDS = (1, 20, 40)
+AWAY_LEVEL_LABELS = ("車あり", "〜20分", "20〜40分", "40分〜")
+
+
+def away_level(minutes: float) -> int:
+    """1時間の不在の分 → 色段階(0=車あり、1〜3=不在が長いほど濃い)。"""
+    return sum(minutes >= t for t in AWAY_LEVEL_THRESHOLDS)
+
+
+def hourly_away_grid(
+    trips: Iterable[Trip],
+    observations: Iterable[Observation],
+    since: datetime.date,
+    now: datetime.datetime,
+) -> dict[str, List[Optional[float]]]:
+    """外出を、`{日付(YYYY-MM-DD): [0〜23時それぞれの不在の分(記録なしは None)]}` に按分する。
+
+    * 外出は出庫〜入庫(戻りが未確定なら `now`)の区間を、重なった1時間ごとの分数に分ける。
+      日またぎ・時間またぎは自然に分割され、1マスの上限は60分。
+    * 判定が「不明」でない観測のあった時間は、不在0分でも記録ありとする(車がいた)。
+      観測も外出も無い時間は None(「車がいた」と「記録がない」を区別するため)。
+    * `since` より前・`now` より後の時間は含めない。
+    """
+    grid: dict[str, List[Optional[float]]] = {}
+
+    def row(day: datetime.date) -> Optional[List[Optional[float]]]:
+        if day < since or day > now.date():
+            return None
+        return grid.setdefault(day.isoformat(), [None] * 24)
+
+    for obs in observations:
+        if obs.state == STATE_UNKNOWN or obs.timestamp > now:
+            continue
+        cells = row(obs.timestamp.date())
+        if cells is not None and cells[obs.timestamp.hour] is None:
+            cells[obs.timestamp.hour] = 0.0
+
+    for trip in trips:
+        end = trip.returned_at or now
+        cursor = trip.departed_at
+        while cursor < end:
+            hour_start = cursor.replace(minute=0, second=0, microsecond=0)
+            hour_end = hour_start + datetime.timedelta(hours=1)
+            piece = (min(end, hour_end) - cursor).total_seconds() / 60
+            cells = row(cursor.date())
+            if cells is not None:
+                cells[cursor.hour] = min(60.0, (cells[cursor.hour] or 0.0) + piece)
+            cursor = hour_end
+    return grid

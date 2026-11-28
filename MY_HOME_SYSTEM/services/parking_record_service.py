@@ -155,3 +155,18 @@ def get_usage_trends(now: datetime.datetime) -> Optional[occupancy.UsageTrends]:
     if not load_observations(since, now):
         return None
     return occupancy.summarize_usage_trends(get_trips(since, now))
+
+
+def get_hourly_away(now: datetime.datetime, days: int = 30) -> Optional[dict[str, List[Optional[float]]]]:
+    """直近 `days` 日(今日を含む)の、日付×時間ごとの不在の分。観測が無ければ None。
+
+    期間の始まりで既に外出中だった分は `build_trips` が捨てるため、1日余分に読んで
+    表示範囲の先頭にかかる外出を拾う。観測は1回だけ読み、外出の組み立てと記録の有無の両方に使う。
+    """
+    since_day = now.date() - datetime.timedelta(days=days - 1)
+    load_from = datetime.datetime.combine(since_day, datetime.time()) - datetime.timedelta(days=1)
+    observations = load_observations(load_from, now)
+    if not observations:
+        return None
+    trips = occupancy.build_trips(occupancy.build_events(observations))
+    return occupancy.hourly_away_grid(trips, observations, since_day, now)
