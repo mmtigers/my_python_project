@@ -1188,6 +1188,10 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 f"⚠️ [{cam_name}] 接続失敗 (No route to host). "
                 f"{backoff.consecutive_errors}回目の失敗。{backoff_time}秒間監視をサスペンドします。"
             )
+            # #1152 の横展開: Ping が届かない状態が続く経路でも、連続5回目以降は他の経路と
+            # 同じ規則で継続障害を通知する(以前はこの経路に通知が無く、カメラの電源断・
+            # Wi-Fi 断が続いても WARNING ログしか残らなかった)。
+            _report_persistent_error(cam_name, backoff, "No route to host (Ping 不達)", "No route to host (Ping 不達)")
             time.sleep(backoff_time)
             continue
 

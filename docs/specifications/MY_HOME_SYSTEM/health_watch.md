@@ -614,7 +614,7 @@
 ### `_should_notify`
 
 * **役割**: 異常のSHA-256フィンガープリントを前回通知時と比較し、同一の異常が`RENOTIFY_INTERVAL_SEC`(6時間)内に再検知された場合は通知を抑制する。通知する場合は状態ファイルを更新する。
-* **（Issue #1154 で変更）キーごとの要約**: 以前はチェック名の組だけを比べていたため、同じキーのまま中身が悪化した場合(録画の止まったカメラが1台→3台、など)を最大6時間見逃しえた。第3引数 `anomalies`(本文。`run_checks` が渡す)があれば、キーごとの要約(`_anomaly_summary`: 本文の数字の連なりを `N` に畳み空白を圧縮したもの)の組でフィンガープリントを作る。値の揺れ(使用率・件数・時刻)では変わらず、対象の増減では変わる。ログの抜粋を本文に含む `journal`/`app_logs`(`FINGERPRINT_KEY_ONLY_KEYS`)は実行のたびに文面が変わるため、従来どおりキー名だけを使う。`anomalies` を省略した呼び出しは従来どおりキーの組だけで比べる。反映直後は、記録済みのフィンガープリントと形式が違うため1回だけ再通知されうる。
+* **（Issue #1154 で変更）キーごとの要約**: 以前はチェック名の組だけを比べていたため、同じキーのまま中身が悪化した場合(録画の止まったカメラが1台→3台、など)を最大6時間見逃しえた。第3引数 `anomalies`(本文。`run_checks` が渡す)があれば、キーごとの要約(`_anomaly_summary`: 本文の数字の連なりを `N` に畳み空白を圧縮したもの)の組でフィンガープリントを作る。値の揺れ(使用率・件数・時刻)では変わらず、対象の増減では変わる。ログの抜粋を本文に含む `journal`/`app_logs`(`FINGERPRINT_KEY_ONLY_KEYS`)は実行のたびに文面が変わるため、従来どおりキー名だけを使う。`anomalies` を省略した呼び出しは従来どおりキーの組だけで比べる。**（#1168 から移植）** `disk`/`memory`(`FINGERPRINT_BAND_KEYS`)は使用率そのものが悪化の指標なので、要約に本文の最初の使用率の `USAGE_BAND_PERCENT`(5%)刻みの帯(`|band=90` 等)を加える。91%→94% では再通知せず、91%→96% のように帯が上がったら6時間を待たずに通知する。反映直後は、記録済みのフィンガープリントと形式が違うため1回だけ再通知されうる。
 * 根拠: `def _anomaly_summary(key: str, text: str) -> str:` (参照: _anomaly_summary)
 * 根拠: [関数定義] (行番号: 163〜182 / 抜粋: 'fingerprint = hashlib.sha256("|".join(sorted(anomaly_keys)).encode()).hexdigest()')
 
@@ -624,7 +624,7 @@
 
 
 * **戻り値/レスポンス**: `bool`（通知すべきならTrue、抑制ならFalse）
-* 根拠: [戻り値] (行番号: 850, 1033 / 抜粋: "return False", "return True")
+* 根拠: [戻り値] (行番号: 850, 1044 / 抜粋: "return False", "return True")
 
 
 * **副作用**: 通知する判定の場合、状態ファイル(`NOTIFY_STATE_FILE`)へフィンガープリントと通知時刻(JSON)を書き込む。**（Issue #661で修正）** 読み書きはいずれも`core/state_file.py`(`read_json`/`write_json_atomic`)へ委譲し、書き込みは原子的な差し替えになった。
@@ -639,7 +639,7 @@
 ### `RESULT_STATE_FILENAME` / `_result_state_path` / `_write_result_state` (**ダッシュボード表示用、2026-11-12 追加**)
 
 * **役割**: 今回の検知結果を`{config.LOG_DIR}/.health_watch_last_result`(JSON)へ書く。以前は結果がDiscordにしか出ず、ダッシュボードからは録画停止・NAS未マウント等が分からなかった。読む側は`services/home_status_service.read_health_result`(システムページの「🩺 定期チェック」と、ホームのサマリー)。内容は`checked_at`(JSTのaware ISO形式)、`anomalies`(`{"key", "text"}`の配列。`text`は`RESULT_TEXT_MAX_CHARS`=300文字で切る)、`history`(異常の組=チェック名の集合が前回から変わったときだけ先頭に1件足す。最大`RESULT_HISTORY_MAX`=20件。解消時は空の組が入る)。
-* 根拠: [関数定義] (行番号: 1050 / 抜粋: "def _write_result_state(anomaly_keys: List[str], anomalies: List[str]) -> None:")、[関数定義] (行番号: 1046 / 抜粋: "def _result_state_path() -> str:")
+* 根拠: [関数定義] (行番号: 1061 / 抜粋: "def _write_result_state(anomaly_keys: List[str], anomalies: List[str]) -> None:")、[関数定義] (行番号: 1057 / 抜粋: "def _result_state_path() -> str:")
 
 
 * **引数/リクエスト**: `anomaly_keys: List[str]`、`anomalies: List[str]`(同じ順)
@@ -651,19 +651,19 @@
 ### `_ping_deadman_switch` (**チェック外・層3、Issue #775で追加**)
 
 * **役割**: 外部デッドマンスイッチ(healthchecks.io等)へハートビートを送る。`config.HEALTH_WATCH_DEADMAN_PING_URL`が未設定(空文字)なら即return(既定・完全no-op)。設定済みなら、引数`ok`が`True`ならURLへそのまま、`False`ならURL末尾に`/fail`を付けてGETリクエストを送る(healthchecks.ioの規約に沿った形式)。
-* 根拠: `def _ping_deadman_switch(ok: bool) -> None:` (行番号: 1078 / 抜粋: "def _ping_deadman_switch(ok: bool) -> None:")
+* 根拠: `def _ping_deadman_switch(ok: bool) -> None:` (行番号: 1089 / 抜粋: "def _ping_deadman_switch(ok: bool) -> None:")
 
 
 * **引数/リクエスト**: `ok: bool`。`run_checks`からは`internal_errors`(チェック関数自体が例外を送出したか)の有無で呼び分けられ、anomalies(検知した異常メッセージ)の有無では変わらない。
-* 根拠: `def _ping_deadman_switch(ok: bool) -> None:` (行番号: 1078)、[呼び出し] (行番号: 1293 / 抜粋: "_ping_deadman_switch(ok=not internal_errors)")
+* 根拠: `def _ping_deadman_switch(ok: bool) -> None:` (行番号: 1089)、[呼び出し] (行番号: 1304 / 抜粋: "_ping_deadman_switch(ok=not internal_errors)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `def _ping_deadman_switch(ok: bool) -> None:` (行番号: 1078)
+* 根拠: `def _ping_deadman_switch(ok: bool) -> None:` (行番号: 1089)
 
 
 * **副作用**: 外部へのHTTPリクエスト(`config.HEALTH_WATCH_DEADMAN_PING_URL`宛、タイムアウト`config.HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC`)。失敗時はロガーへの警告記録。
-* 根拠: [HTTP呼び出し] (行番号: 1099 / 抜粋: "requests.get(target, timeout=config.HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC)")
+* 根拠: [HTTP呼び出し] (行番号: 1110 / 抜粋: "requests.get(target, timeout=config.HEALTH_WATCH_DEADMAN_PING_TIMEOUT_SEC)")
 
 
 * **エラーハンドリング**: `requests.exceptions.RequestException`を捕捉し、`logger.warning`のみで例外を外へ伝播させない(ping自体の失敗を`run_checks`の異常検知・通知フロー・終了コードに混ぜ込まないため)。
@@ -676,7 +676,7 @@
 * **役割**: 層2(自動調査)フックの発火。`config.HEALTH_WATCH_INVESTIGATE_HOOK`が未設定なら即return(既定・完全no-op)。設定済みならパスの存在と実行権限を確認し、異常サマリ(検知時刻+各異常の箇条書き)を標準入力で渡してフックスクリプトをfire-and-forgetのサブプロセスとして起動する(完了を待たない。毎時cronの層1を長時間ブロックしないため)。`run_checks`内の`_should_notify`通過後にのみ呼ばれるため、同一異常セット継続中の再発火は通知と同じ6時間間隔に収まる。
 * **（Issue #1030で追加）重複起動の抑止**: 再通知は6時間ごとに起きるため、同一原因が続く間は通知のたびにフックが再起動し、同じ結論の調査が1日に何度も走っていた（2026-10-23の05:10と11:10）。異常サマリの正規化シグネチャ（`_investigate_signature`: 数字の連なりを`N`に畳み空白を圧縮してソートしたハッシュ。件数・時刻が違っても同一扱い）を`config.LOG_DIR/.claude_watch_investigate_state`（`INVESTIGATE_STATE_FILENAME`）に記録し、`INVESTIGATE_COOLDOWN_SEC`（24時間）以内に起動済みのシグネチャではフックを再起動しない（通知自体は従来どおり送る）。記録はフック起動に成功したときだけ行い（失敗は次回再試行）、期限切れエントリは記録時に掃除する。状態ファイルが壊れている・読めない場合は`_should_notify`と同じく起動する側に倒す。調査結果（「起票不要」等）の記録は非同期のフックスクリプト側の責務で、本変更の対象外。
 * **（Issue #1074で追加）層2の起動条件（異常の種類で絞る）**: 通知を通過した異常のうち、`INVESTIGATE_NOTIFY_ONLY_KEYS`（`repo_behind`・`stale_code`・`deploy_config`・`python_version`。いずれも原因が自明で、`git pull`・再起動・設定の反映・環境の作り直しで解消する「遅れ・ドリフト」の類）は**通知だけ**で層2を起動しない。2026-10-31〜11-01 の3回の起動（`app_logs`・`stale_code`・`repo_behind`）は、いずれも原因が自明か実害のない異常で、調査しても結論が出ないのに `claude -p`（上限 $2）が走っていた。`run_checks` が `_fire_investigate_hook` へ渡すのは**対象の異常だけ**で（対象外と対象が混在する場合も、調査側の入力とシグネチャから対象外の分は除く）、全部が対象外なら起動せず INFO ログを残す。通知（Discord）の本文は従来どおり全部の異常を載せる。対象外にするキーは `run_checks` の `checks` に実在するキーでなければならず、`test_every_notify_only_key_is_a_real_check_key` が typo を検知する。どの異常を対象外にするかは運用判断なので、変えるときはこの定数だけを直す。
-* 根拠: [関数定義] (行番号: 1147〜1207 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
+* 根拠: [関数定義] (行番号: 1158〜1218 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `anomalies: List[str]`（各チェックの異常メッセージ）、`now: datetime.datetime`（検知時刻）
@@ -693,14 +693,14 @@
 
 
 * **エラーハンドリング**: フックパスが存在しない/実行権限がない場合はエラーログのみで起動しない。起動時の例外（`Popen`失敗等）も捕捉してエラーログのみとし、層1本体（検知・通知・マーカー更新）を巻き込まない。
-* 根拠: [ガード/例外処理] (行番号: 1167, 913〜914 / 抜粋: "if not (os.path.isfile(hook) and os.access(hook, os.X_OK)):", "except Exception as e:\n        logger.error(f\"調査フックの起動に失敗しました: {e}\")")
+* 根拠: [ガード/例外処理] (行番号: 1178, 913〜914 / 抜粋: "if not (os.path.isfile(hook) and os.access(hook, os.X_OK)):", "except Exception as e:\n        logger.error(f\"調査フックの起動に失敗しました: {e}\")")
 
 
 
 ### `run_checks`
 
 * **役割**: 14個のチェック関数(`service`/`api`（Issue #735で追加）/`journal`/`app_logs`/`disk`/`memory`/`nas`/`recording`（常時録画停止検知で追加）/`deploy_config`/`quest_master`/`orphaned_rows`（Issue #747）/`repo_behind`（Issue #783）/`stale_code`（再起動漏れの検知）/`python_version`（Issue #1033、Python版の不一致検知）)を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知し、通知抑制を通過した場合は層2フック(`_fire_investigate_hook`)も発火し、マーカーを更新し、**（Issue #775で追加）** 層3の外部デッドマンスイッチへハートビートを送って(`_ping_deadman_switch`)プロセスの終了コードを返すエントリーポイント。
-* 根拠: [関数定義] (行番号: 1210 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 825〜838 / 抜粋: '("api", check_api_responsive),', '("recording", check_recording_stalled),', '("quest_master", check_quest_master_drift),', '("orphaned_rows", check_orphaned_rows),', '("repo_behind", check_repo_behind_upstream),')、[フック発火] (行番号: 1156〜1167 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)。", "                _fire_investigate_hook(investigable, now)")、[ハートビート送信] (行番号: 1291〜1293 / 抜粋: "# 層3(Issue #775): 完走したことを外部デッドマンスイッチへ知らせる。\n    # anomaliesの有無は問わない(それは既にDiscord通知が担う別の信号)。\n    _ping_deadman_switch(ok=not internal_errors)")
+* 根拠: [関数定義] (行番号: 1221 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 825〜838 / 抜粋: '("api", check_api_responsive),', '("recording", check_recording_stalled),', '("quest_master", check_quest_master_drift),', '("orphaned_rows", check_orphaned_rows),', '("repo_behind", check_repo_behind_upstream),')、[フック発火] (行番号: 1156〜1167 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)。", "                _fire_investigate_hook(investigable, now)")、[ハートビート送信] (行番号: 1302〜1304 / 抜粋: "# 層3(Issue #775): 完走したことを外部デッドマンスイッチへ知らせる。\n    # anomaliesの有無は問わない(それは既にDiscord通知が担う別の信号)。\n    _ping_deadman_switch(ok=not internal_errors)")
 * **（Issue #1154 で変更）** 異常がすべて通知専用キー(`INVESTIGATE_NOTIFY_ONLY_KEYS`: 遅れ・ドリフト類)のときは「異常検知(遅れ・ドリフトのみ)」を INFO で出す(以前は常に WARNING で、`repo_behind` が続くと毎時 WARNING が積まれ log_analyzer の件数を増やしていた)。それ以外は従来どおり WARNING。`_should_notify` には本文(`anomalies`)も渡す。
 
 
@@ -724,7 +724,7 @@
 ### `__main__` ブロック
 
 * **役割**: スクリプト直接実行時に`main`を呼び、その戻り値を終了コードとしてプロセスを終了する。**(Issue #651)** `main`は`flock(LOCK_NB)`で多重起動を防いでから`run_checks`を実行し、ロックが取れない(前回がまだ実行中)ときは警告ログを出して`0`を返す。
-* 根拠: [エントリーポイント] (行番号: 1316〜1317 / 抜粋: "if __name__ == \"__main__\":\n    sys.exit(main())")、[多重起動防止] (参照: main / 抜粋: "fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)")
+* 根拠: [エントリーポイント] (行番号: 1327〜1328 / 抜粋: "if __name__ == \"__main__\":\n    sys.exit(main())")、[多重起動防止] (参照: main / 抜粋: "fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)")
 
 
 * **引数/リクエスト**: なし

@@ -20,7 +20,8 @@ from core.utils import get_now_iso, retry_with_backoff, get_now_jst
 from services import db_retention_service
 from services.notification_service import send_push
 
-# Issue #1155: DBバックアップの保持期間削除で、種類ごとに年数に関係なく残す最新の世代数。
+# Issue #1155: DBバックアップの保持期間削除で、種類ごとに年数に関係なく残す最新の世代数の既定値。
+# 実際の値は config.DB_BACKUP_KEEP_LATEST(環境変数で変更可、0 で無効)を実行時に読む。
 # バックアップが DB_BACKUP_RETENTION_DAYS 以上止まったまま気づかないと、NAS 上の
 # バックアップが全部消えてしまうのを防ぐ安全弁。通常時(毎日1世代)は保持期間の方が長いので効かない。
 DB_BACKUP_KEEP_MIN_GENERATIONS: int = 7
@@ -368,7 +369,8 @@ class NasMonitor:
             # バックアップ専用でバックアップ以外のファイルが置かれることはないため、
             # 拡張子で絞り込まず全ファイルを対象にする。
             ("DBバックアップ", getattr(config, "DB_BACKUPS_DIR", None),
-             getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), None, DB_BACKUP_KEEP_MIN_GENERATIONS),
+             getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), None,
+             getattr(config, "DB_BACKUP_KEEP_LATEST", DB_BACKUP_KEEP_MIN_GENERATIONS)),
             # #359: 録画VOD用のキャッシュ(BASE_DIR/data/hls_streams/vod/<cam>/)。
             # 以前は services/camera_service.py が ffmpeg で .ts/.m3u8/concat_*.txt
             # (1日分で数GB〜数十GB)をここへ生成しており、どこにも削除経路が無かった。
