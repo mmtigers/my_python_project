@@ -20,6 +20,7 @@ annotated-types==0.7.0
     # via pydantic
 anyio==4.14.2
     # via
+    #   fastapi
     #   google-genai
     #   httpx
     #   starlette
@@ -61,7 +62,7 @@ deprecated==1.3.1
     # via line-bot-sdk
 distro==1.9.0
     # via google-genai
-fastapi==0.143.2
+fastapi==0.165.0
     # via -r requirements.in
 frozenlist==1.8.0
     # via
@@ -89,7 +90,7 @@ idna==3.18
     #   yarl
 isodate==0.7.2
     # via zeep
-line-bot-sdk==3.26.0
+line-bot-sdk==3.27.0
     # via -r requirements.in
 lxml==6.1.3
     # via
@@ -106,11 +107,11 @@ numpy==2.4.6
     #   pandas
 onvif-zeep==0.2.12
     # via -r requirements.in
-opencv-python-headless==5.0.0.93
+opencv-python-headless==5.1.0.95
     # via -r requirements.in
 opentelemetry-api==1.45.0
     # via fastapi
-pandas==3.0.6
+pandas==3.1.1
     # via -r requirements.in
 pillow==13.0.0
     # via -r requirements.in
@@ -128,13 +129,13 @@ pyasn1-modules==0.4.2
     # via google-auth
 pycparser==3.0
     # via cffi
-pydantic==2.14.1
+pydantic==2.14.4
     # via
     #   -r requirements.in
     #   fastapi
     #   google-genai
     #   line-bot-sdk
-pydantic-core==2.50.1
+pydantic-core==2.50.5
     # via pydantic
 python-dateutil==2.9.0.post0
     # via
@@ -143,9 +144,9 @@ python-dateutil==2.9.0.post0
     #   pandas
 python-dotenv==1.2.4
     # via -r requirements.in
-python-multipart==0.0.32
+python-multipart==0.0.34
     # via -r requirements.in
-pytz==2026.5
+pytz==2026.6
     # via -r requirements.in
 requests==2.34.2
     # via
