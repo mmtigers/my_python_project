@@ -82,6 +82,20 @@ class TestNasMonitorCleanup(unittest.TestCase):
         self.assertFalse(any(os.path.exists(p) for p in old))
         self.assertTrue(all(os.path.exists(p) for p in new))
 
+    def test_keep_latest_comes_from_config_and_zero_disables(self):
+        """#1155: 残す世代数は config.DB_BACKUP_KEEP_LATEST(環境変数)で変えられ、0 なら安全弁なし。"""
+        seen = []
+        stub = (lambda d, days, ext, keep_newest=0: seen.append((d, keep_newest))
+                or {"deleted_count": 0, "freed_gb": 0.0})
+        for value in (3, 0):
+            seen.clear()
+            with patch.object(config, "DB_BACKUPS_DIR", self.tmp_dir, create=True), \
+                 patch.object(config, "DB_BACKUP_KEEP_LATEST", value, create=True), \
+                 patch.object(self.monitor, "cleanup_old_files", side_effect=stub), \
+                 patch.object(self.monitor, "_run_db_row_retention", return_value=[]):
+                self.monitor.run_retention_cleanup()
+            self.assertIn((self.tmp_dir, value), seen)
+
     def test_db_backups_target_keeps_newest_generations(self):
         seen = []
         with patch.object(config, "DB_BACKUPS_DIR", self.tmp_dir, create=True), \

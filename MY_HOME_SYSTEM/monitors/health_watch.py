@@ -987,6 +987,9 @@ def check_service_running_stale_code() -> str | None:
 # Issue #1154: 再通知の抑制で、本文の要約をフィンガープリントに含めない異常キー。
 # ログの抜粋(実行のたびに文面が変わる)を本文に含むため、含めると毎時再通知になる。
 FINGERPRINT_KEY_ONLY_KEYS: frozenset = frozenset({"journal", "app_logs"})
+# 使用率の帯(USAGE_BAND_PERCENT 刻み)をフィンガープリントに含める異常キー
+FINGERPRINT_BAND_KEYS: frozenset = frozenset({"disk", "memory"})
+USAGE_BAND_PERCENT: int = 5
 
 
 def _anomaly_summary(key: str, text: str) -> str:
@@ -997,7 +1000,15 @@ def _anomaly_summary(key: str, text: str) -> str:
     """
     if key in FINGERPRINT_KEY_ONLY_KEYS:
         return key
-    return key + ":" + re.sub(r"\s+", " ", re.sub(r"\d+", "N", text)).strip()
+    summary = key + ":" + re.sub(r"\s+", " ", re.sub(r"\d+", "N", text)).strip()
+    if key in FINGERPRINT_BAND_KEYS:
+        # ディスク・メモリは使用率そのものが悪化の指標なので、5%刻みの帯を含める
+        # (91%→93% では再通知せず、91%→96% のように帯が上がったら6時間を待たずに知らせる)
+        match = re.search(r"(\d+(?:\.\d+)?)%", text)
+        if match:
+            band = int(float(match.group(1)) // USAGE_BAND_PERCENT) * USAGE_BAND_PERCENT
+            summary += f"|band={band}"
+    return summary
 
 
 def _should_notify(

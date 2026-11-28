@@ -993,3 +993,33 @@ class TestConnectionErrorsAreTransient:
         _run(monkeypatch, stop_after=2 * 8)
         assert len(pushes) == 1
         assert "連続5回失敗" in pushes[0]
+
+
+class TestUnreachableHostNotifies:
+    """#1152 の横展開: Ping が届かない状態が続く経路でも、連続5回目で継続障害を通知する。"""
+
+    def test_fifth_unreachable_failure_notifies_once(self, monkeypatch):
+        monkeypatch.setattr(camera_monitor, "is_host_reachable", lambda ip: False)
+        pushes = []
+        monkeypatch.setattr(camera_monitor, "send_push", lambda msgs, **k: pushes.append(msgs[0]["text"]))
+
+        # この経路は1周につき sleep 1回(解放待ちの3秒は無い)
+        _run(monkeypatch, stop_after=8)
+
+        assert len(pushes) == 1
+        assert "連続5回失敗" in pushes[0] and "Ping 不達" in pushes[0]
+
+    def test_recovery_after_unreachable_streak_is_notified(self, monkeypatch):
+        """Ping 不達で障害通知を送った後に接続できたら、復旧も通知する(#1146 と同じ扱い)。"""
+        service = _FakePullpointService()
+        _connect_successfully(monkeypatch, service)
+        reachable = iter([False] * 5 + [True] * 10)
+        monkeypatch.setattr(camera_monitor, "is_host_reachable", lambda ip: next(reachable, True))
+        monkeypatch.setattr(camera_monitor, "SESSION_LIFETIME", -1)
+        pushes = []
+        monkeypatch.setattr(camera_monitor, "send_push", lambda msgs, **k: pushes.append(msgs[0]["text"]))
+
+        _run(monkeypatch, stop_after=6)  # 不達5回 + 成功後の解放待ち1回
+
+        assert any("継続しています" in p for p in pushes)
+        assert any("復旧" in p for p in pushes)

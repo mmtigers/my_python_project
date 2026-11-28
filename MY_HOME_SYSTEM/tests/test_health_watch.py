@@ -1440,3 +1440,24 @@ class TestNotifyFingerprintIncludesSummary:
 
         assert not any("異常検知" in str(m) for m in warnings)
         assert any("異常検知(遅れ・ドリフトのみ)" in str(m) for m in infos)
+
+
+class TestUsageBandInFingerprint:
+    """#1154: ディスク・メモリは使用率の5%刻みの帯が上がったら、6時間を待たずに再通知する。"""
+
+    @pytest.fixture(autouse=True)
+    def _state(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(health_watch, "NOTIFY_STATE_FILE", str(tmp_path / "state"))
+
+    NOW = datetime.datetime(2026, 11, 28, 9, 0, 0)
+
+    @pytest.mark.parametrize("key, label", [("disk", "ディスク"), ("memory", "メモリ")])
+    def test_band_increase_renotifies(self, key, label):
+        later = self.NOW + datetime.timedelta(hours=1)
+        assert health_watch._should_notify([key], self.NOW, [f"{label}使用率が 91.2% です (閾値 90%)"]) is True
+        assert health_watch._should_notify([key], later, [f"{label}使用率が 94.9% です (閾値 90%)"]) is False
+        assert health_watch._should_notify([key], later, [f"{label}使用率が 96.0% です (閾値 90%)"]) is True
+
+    def test_band_is_only_for_usage_keys(self):
+        assert "band=" not in health_watch._anomaly_summary("recording", "x 95% y")
+        assert health_watch._anomaly_summary("disk", "ディスク使用率が 97.5% です").endswith("|band=95")

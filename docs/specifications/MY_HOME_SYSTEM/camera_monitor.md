@@ -53,7 +53,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` モジュールの詳細 | `CAMERAS`, `ASSETS_DIR`, `MOTION_COOLDOWN_SEC`, `LINE_USER_ID`, `NVR_RECORD_DIR` 等の構造や定義値が本ファイルに存在しないため。 | 根拠: `config.CAMERAS` (行番号: 1235 / 抜粋: "for cam in config.CAMERAS") |
+| `config` モジュールの詳細 | `CAMERAS`, `ASSETS_DIR`, `MOTION_COOLDOWN_SEC`, `LINE_USER_ID`, `NVR_RECORD_DIR` 等の構造や定義値が本ファイルに存在しないため。 | 根拠: `config.CAMERAS` (行番号: 1239 / 抜粋: "for cam in config.CAMERAS") |
 | `save_log_generic` の実装・スキーマ | 関数の内部ロジック、および保存先DBの種類・テーブルスキーマが不明なため。 | 根拠: `save_log_generic("device_records"...` (行番号: 638 / 抜粋: "save_log_generic("device_records") |
 | `send_push` の実装 | プッシュ通知の送信手段（LINE等）や実際の処理内容が不明なため。 | 根拠: `send_push([{"type": "text"...` (参照: _report_persistent_error / 抜粋: "send_push(") |
 | NVR（NAS）のディレクトリ構造 | 外部ストレージ上の動画ファイルの配置ルールが環境依存であるため。 | 根拠: `cam_conf.get("nas_folder")` (行番号: 396 / 抜粋: "nas_folder_name = cam_conf.get(") |
@@ -403,6 +403,7 @@
 * 根拠: `def release(self, cam_name: str) -> None:` (参照: _CameraSession.release)
 * **（Issue #1152 で変更）一時的障害の範囲**: `TRANSIENT_CONNECTION_ERRORS` に `requests.exceptions.ConnectionError`(派生の `ConnectTimeout` を含む。接続拒否・接続タイムアウト)を加えた。以前はこれらが「Connection/ONVIF Error」(致命的扱い)に入り、通信断とアプリ異常をログ上で区別できなかった。組み込みの `ConnectionRefusedError`(`check_camera_time` の時刻ずれ検知が意図的に送出する)・ONVIF の SOAP Fault・`ReadTimeout` は致命的扱いのまま。以前の一時的障害の経路には通知が無く、移すだけでは #890 のような長時間の接続拒否が届かなくなるため、`_suspend_after_transient_error` も `_report_persistent_error` を呼び、連続5回目以降は致命的障害と同じ間隔で継続障害を通知する。
 * 根拠: `TRANSIENT_CONNECTION_ERRORS: tuple = (` (参照: TRANSIENT_CONNECTION_ERRORS)
+* **（#1152 の横展開・#1168 から移植）Ping 不達の経路の通知**: 外側ループの先頭で `is_host_reachable` が偽(Ping が届かない)のときも、`record_failure` の後に `_report_persistent_error(cam_name, backoff, "No route to host (Ping 不達)", …)` を呼び、連続5回目以降は他の経路と同じ間隔で継続障害を通知する。以前はこの経路に通知が無く、カメラの電源断・Wi-Fi 断が続いても WARNING ログしか残らなかった。接続できたときは `_note_recovery` が復旧も通知する。
 * **（Issue #1146 で追加）復旧の通知**: 接続(購読)に成功したとき、直前まで失敗が続いていれば `backoff.reset()` の前に `_note_recovery` が「✅ [カメラ名] 復旧しました(停止約N秒・失敗M回)」を INFO で出す(停止時間は `_ReconnectBackoff.first_failure_at` から求める)。継続障害の `send_push` を送っていた障害のときだけ、同じ `channel="report"` へ復旧も通知する。以前は2回目以降の接続が DEBUG の「(Reconnected)」だけで、復旧時刻はログから逆算するしかなかった。
 * 根拠: `def _note_recovery(cam_name: str, backoff: _ReconnectBackoff) -> None:` (参照: _note_recovery)
 * **（Issue #1158 で追加）接続成功時刻の記録**: 購読まで成功するたびに `_record_connected(cam_name)` が `CAMERA_STATUS_FILE`(`config.BASE_DIR/.camera_monitor_status.json`、`{"connected_at": {カメラ名: epoch秒}}`)を `core/state_file` で原子的に書き換える(カメラのスレッド間は `_camera_status_lock` で直列化。失敗しても監視は続ける)。デプロイ後の起動後チェック(`system_maintenance_service.post_start_check`)が、再起動の後に全カメラが接続できたかを確かめるのに使う。
@@ -424,11 +425,11 @@
 ### `main`
 
 * **役割**: 登録された全てのカメラ設定（`config.CAMERAS`）に対して、`ThreadPoolExecutor` を用いて並行で `monitor_single_camera` を実行する。
-* 根拠: `main` (行番号: 1225〜1235 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 1229〜1239 / 抜粋: "async def main() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `main` (行番号: 1225 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 1229 / 抜粋: "async def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -436,11 +437,11 @@
 
 
 * **副作用**: 複数スレッドの起動。
-* 根拠: `ThreadPoolExecutor` (行番号: 1234 / 抜粋: "with ThreadPoolExecutor")
+* 根拠: `ThreadPoolExecutor` (行番号: 1238 / 抜粋: "with ThreadPoolExecutor")
 
 
 * **エラーハンドリング**: WSDLが見つからない場合はエラーログを出力して終了。
-* 根拠: `if not WSDL_DIR:` (行番号: 1226 / 抜粋: "if not WSDL_DIR: return logger")
+* 根拠: `if not WSDL_DIR:` (行番号: 1230 / 抜粋: "if not WSDL_DIR: return logger")
 
 
 * **（#411 S-L3で修正）** `config.CAMERAS` が空（`devices.json` 未配置等）の場合、以前は `ThreadPoolExecutor(max_workers=len(config.CAMERAS))` が `max_workers=0` となり `ValueError` を送出してプロセスが即座に落ちていた。カメラが1台も無い場合は警告ログを出して何もせず正常終了し、カメラが存在する場合も `max_workers` を `max(1, ...)` で下限保護する。
